@@ -1,6 +1,17 @@
 import { createHash } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Clock, Ctx, EventStore, LLMProvider, MemoryStore, Runtime } from "@mnemora/core";
+import type {
+  Clock,
+  Ctx,
+  EventStore,
+  LLMProvider,
+  MemoryStore,
+  OutboxJobKind,
+  OutboxJobRecord,
+  OutboxStore,
+  Runtime,
+} from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import {
   InMemoryEventStore,
@@ -14,6 +25,7 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { rowToOutboxJob, type OutboxJobRow } from "../mapping.js";
 import {
   closeTestClient,
   getTestClient,
@@ -22,15 +34,20 @@ import {
 } from "./test-db.js";
 
 /**
- * 注入した時計（`RuntimeDeps.clock`）が届く時刻と届かない時刻の今の振る舞いを縛る（Issue #1237。
- * `Clock` の doc の 2026-09-27 追記）。振る舞いは変えていない。Postgres と testkit の fixture で同じ。
+ * Issue #1237「案1」適用後に期待される振る舞いを縛る。時刻の欄（`MemoryStore.createObservationWithOutbox`/
+ * `createMemoryWithOutbox` の `opts.now`、`OutboxStore.complete`/`fail` の `opts.at`、
+ * `NewRecallRecord.createdAt`、`purgeMemory` の `purged_at`、`archiveDecayed` の `archived` イベントの `at`）
+ * はすべて任意になり、runtime はここへ `clock.now()` を渡す。省略時は今日どおり壁時計になる
+ * （型の上では非破壊）。
  *
- * 1. Memory の `recordedAt` は注入した時計、監査ログの `at` と recall の記録の `createdAt` は壁時計。
- * 2. outbox の `available_at` は壁時計、`tick` の claim の `now` は注入した時計。そのため、壁時計より
- *    過去の時計では `tick` がジョブを1本も取らない（何も名乗らない）。
- * 3. 復帰と掃引の口（`Clock` の doc の 2026-09-28 追記）: reinforce（`lastReinforcedAt`・`decayFloorAt`）は
- *    どの経路でも注入した時計。`sweepArchive` の選定は `opts.now` で、`archived` の `at` は壁時計。
- *    `restoreArchived` の `restored` の `at` は壁時計、`restoreSuperseded` の `unsuperseded` の `at` は注入した時計。
+ * 以前（案3、PR #1241・#1297）は「今の振る舞い」として次を固定していた——本テストはその裏返しを縛る:
+ * 1. 監査ログの `at`・recall の `createdAt`・outbox の3欄は壁時計だった → **注入した時計に従う**。
+ * 2. 壁時計より過去の時計を注入すると `tick` が積んだジョブを1本も取らなかった
+ *    → **PAST でも FUTURE でも `processed: 1`**（outbox の `available_at` も注入した時計になったため）。
+ * 3. `restoreArchived` の `restored`/`sweepArchive` の `archived` の `at` は壁時計だった
+ *    → **`archived` は `opts.now`、`restored` は `clock.now()` に従う**。
+ *
+ * `Clock` の TSDoc（`packages/core/src/interfaces/clock.ts`）も同じ変更を反映して書き直してある。
  */
 
 const llm: LLMProvider = {
@@ -48,6 +65,9 @@ interface Kit {
   runtime: Runtime;
   memoryStore: MemoryStore;
   eventStore: EventStore;
+  outboxStore: OutboxStore;
+  /** その kind の直近1件を、終端の有無によらず読む（claim を消費しない）。 */
+  latestOutboxJob(kind: OutboxJobKind): Promise<OutboxJobRecord | null>;
 }
 
 function sharedWith(clock: Clock) {
@@ -68,15 +88,21 @@ const KITS: Array<[string, (clock: Clock) => Promise<Kit>]> = [
     async (clock) => {
       const memoryStore = new InMemoryMemoryStore();
       const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+      const outboxStore = new InMemoryOutboxStore(memoryStore.outboxJobs);
       return {
         memoryStore,
         eventStore,
+        outboxStore,
+        async latestOutboxJob(kind) {
+          const matches = memoryStore.outboxJobs.filter((j) => j.kind === kind);
+          return matches.length > 0 ? { ...matches[matches.length - 1]! } : null;
+        },
         runtime: createRuntime({
           ...sharedWith(clock),
           memoryStore,
           eventStore,
           vectorStore: new InMemoryVectorStore(memoryStore),
-          outboxStore: new InMemoryOutboxStore(memoryStore.outboxJobs),
+          outboxStore,
           tenantSettingsStore: new InMemoryTenantSettingsStore(memoryStore.activitySeq),
         }),
       };
@@ -89,15 +115,25 @@ const KITS: Array<[string, (clock: Clock) => Promise<Kit>]> = [
       const { db } = await getTestClient();
       const memoryStore = new PostgresMemoryStore(db);
       const eventStore = new PostgresEventStore(db);
+      const outboxStore = new PostgresOutboxStore(db);
       return {
         memoryStore,
         eventStore,
+        outboxStore,
+        async latestOutboxJob(kind) {
+          const result = await db.execute(sql`
+            SELECT * FROM outbox WHERE kind = ${kind} ORDER BY created_at DESC, id DESC LIMIT 1
+          `);
+          return result.rows.length > 0
+            ? rowToOutboxJob(result.rows[0] as unknown as OutboxJobRow)
+            : null;
+        },
         runtime: createRuntime({
           ...sharedWith(clock),
           memoryStore,
           eventStore,
           vectorStore: new PostgresVectorStore(db),
-          outboxStore: new PostgresOutboxStore(db),
+          outboxStore,
           tenantSettingsStore: new PostgresTenantSettingsStore(db),
         }),
       };
@@ -109,22 +145,22 @@ const ctx: Ctx = { tenantId: "injected-clock-reach" };
 const PAST = new Date("2020-01-01T00:00:00.000Z");
 const FUTURE = new Date("2030-01-01T00:00:00.000Z");
 
-/** 呼ぶたびに FUTURE から1秒ずつ進む時計（固定の時計では、作成と同じ時刻の強化が書かれないため。ADR 0048）。 */
-function steppingFutureClock(): Clock {
-  let t = FUTURE.getTime();
+/** 呼ぶたびに `base` から1秒ずつ進む時計（固定の時計では、作成と同じ時刻の強化が書かれないため。ADR 0048）。 */
+function steppingClockFrom(base: Date): Clock {
+  let t = base.getTime();
   return { now: () => new Date((t += 1000)) };
 }
 
-/** 注入した時計（FUTURE から1時間以内）の時刻か。 */
-function isInjected(date: Date | null | undefined): boolean {
+/** `base` の前後 `windowMs`（既定1時間）以内の時刻か。注入した時計はここに落ちる。 */
+function isNear(date: Date | null | undefined, base: Date, windowMs = 3_600_000): boolean {
   return (
     date instanceof Date &&
-    date.getTime() > FUTURE.getTime() &&
-    date.getTime() < FUTURE.getTime() + 3_600_000
+    date.getTime() >= base.getTime() &&
+    date.getTime() < base.getTime() + windowMs
   );
 }
 
-/** テストが走っている間の壁時計の時刻か（前後1秒の余裕）。 */
+/** テストが走っている間の壁時計の時刻か（前後1秒の余裕）。「省略時は壁時計」の対照に使う。 */
 function isWallNow(date: Date, startedAt: number): boolean {
   return date.getTime() >= startedAt - 1000 && date.getTime() <= Date.now() + 1000;
 }
@@ -134,31 +170,96 @@ afterAll(async () => {
 });
 
 for (const [name, makeKit] of KITS) {
-  describe(`${name}: 注入した時計が届く時刻と届かない時刻（今の振る舞い）`, () => {
-    it("Memory の recordedAt は注入した時計、監査ログの at と recall の記録の createdAt は壁時計", async () => {
-      const startedAt = Date.now();
+  describe(`${name}: 案1適用後——注入した時計がどこまで届くか`, () => {
+    for (const [label, clockAt] of [
+      ["PAST（2020）", PAST],
+      ["FUTURE（2030）", FUTURE],
+    ] as const) {
+      it(`${label}: outbox の available_at・created_at が注入した時計に従うため、tick は積んだジョブを取る（processed: 1）`, async () => {
+        const kit = await makeKit(steppingClockFrom(clockAt));
+
+        await kit.runtime.observe(ctx, {
+          kind: "utterance",
+          text: "事実を1つ",
+          extract: "deferred",
+        });
+
+        const extractJobBefore = await kit.latestOutboxJob("extract");
+        expect(isNear(extractJobBefore?.availableAt, clockAt)).toBe(true);
+        expect(isNear(extractJobBefore?.createdAt, clockAt)).toBe(true);
+
+        // 案3以前はここで PAST が processed: 0 になっていた（available_at が壁時計、
+        // claim の now だけが注入した時計だったため）。案1適用後はどちらも processed: 1。
+        expect(await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 })).toEqual({
+          processed: 1,
+          failed: 0,
+          unsupported: [],
+          leaseConflicts: [],
+        });
+
+        const extractJobAfter = await kit.latestOutboxJob("extract");
+        expect(isNear(extractJobAfter?.completedAt, clockAt)).toBe(true);
+
+        const [created] = await kit.eventStore.list(ctx, { kind: "created" });
+        expect(isNear(created?.at, clockAt)).toBe(true);
+
+        const embedJobBefore = await kit.latestOutboxJob("embed");
+        expect(isNear(embedJobBefore?.availableAt, clockAt)).toBe(true);
+        expect(isNear(embedJobBefore?.createdAt, clockAt)).toBe(true);
+
+        expect(await kit.runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 })).toEqual({
+          processed: 1,
+          failed: 0,
+          unsupported: [],
+          leaseConflicts: [],
+        });
+
+        const embedJobAfter = await kit.latestOutboxJob("embed");
+        expect(isNear(embedJobAfter?.completedAt, clockAt)).toBe(true);
+      });
+    }
+
+    it("created・recall の createdAt は注入した時計に従う（省略時は壁時計になる、という以前の縛りの裏返し）", async () => {
       const kit = await makeKit({ now: () => new Date(FUTURE) });
       const observed = await kit.runtime.observe(ctx, { kind: "utterance", text: "事実を1つ" });
       const memoryId = observed.memoryIds[0]!;
       expect((await kit.memoryStore.get(ctx, memoryId))?.recordedAt).toEqual(FUTURE);
 
       const [created] = await kit.eventStore.list(ctx, { memoryId, kind: "created" });
-      expect(isWallNow(created!.at, startedAt)).toBe(true);
+      expect(created!.at).toEqual(FUTURE);
 
       const recalled = await kit.runtime.recall(ctx, { text: "事実", limit: 3, association: null });
       const record = await kit.runtime.getRecall(ctx, recalled.recallId);
-      expect(isWallNow(record!.createdAt, startedAt)).toBe(true);
+      expect(record!.createdAt).toEqual(FUTURE);
     });
 
-    it("復帰と掃引: reinforce は注入した時計、sweepArchive は opts.now で選び archived の at は壁時計、restored の at は壁時計、unsuperseded の at は注入した時計", async () => {
-      const startedAt = Date.now();
-      const kit = await makeKit(steppingFutureClock());
+    it("forget・purge: forgotten/purged の at と purgedAt は注入した時計に従う", async () => {
+      const kit = await makeKit(steppingClockFrom(FUTURE));
+      const observed = await kit.runtime.observe(ctx, { kind: "utterance", text: "事実を1つ" });
+      const memoryId = observed.memoryIds[0]!;
+
+      await kit.runtime.forget(ctx, { memoryId });
+      const [forgotten] = await kit.eventStore.list(ctx, { memoryId, kind: "forgotten" });
+      expect(isNear(forgotten?.at, FUTURE)).toBe(true);
+
+      const purged = await kit.runtime.purge(ctx, { memoryId });
+      expect(purged.outcomes.map((o) => o.kind)).toEqual(["purged"]);
+      const [purgedEvent] = await kit.eventStore.list(ctx, { memoryId, kind: "purged" });
+      expect(isNear(purgedEvent?.at, FUTURE)).toBe(true);
+      // `purged_at` と `memory_events.at` は同じ値でなければならない（1つの壁時計を2箇所に使う——
+      // 省略時に2回 `new Date()` を呼んで別の値になることがない、という設計上の要求）。
+      const memoryAfterPurge = await kit.memoryStore.get(ctx, memoryId);
+      expect(memoryAfterPurge?.purgedAt).toEqual(purgedEvent!.at);
+    });
+
+    it("復帰と掃引: reinforce は注入した時計、sweepArchive は opts.now で選び archived の at も opts.now、restored/unsuperseded の at は注入した時計", async () => {
+      const kit = await makeKit(steppingClockFrom(FUTURE));
       const a = (await kit.runtime.observe(ctx, { kind: "utterance", text: "事実を1つ" }))
         .memoryIds[0]!;
       const b = (await kit.runtime.observe(ctx, { kind: "utterance", text: "事実をもう1つ" }))
         .memoryIds[0]!;
       const createdA = (await kit.memoryStore.get(ctx, a))!;
-      expect(isInjected(createdA.recordedAt)).toBe(true);
+      expect(isNear(createdA.recordedAt, FUTURE)).toBe(true);
       const floorA = createdA.decayFloorAt!;
 
       // 使用報告の強化: 注入した時計。
@@ -168,27 +269,26 @@ for (const [name, makeKit] of KITS) {
         recallId: recalled.recallId,
         usedMemoryIds: [b],
       });
-      expect(isInjected((await kit.memoryStore.get(ctx, b))!.lastReinforcedAt)).toBe(true);
+      expect(isNear((await kit.memoryStore.get(ctx, b))!.lastReinforcedAt, FUTURE)).toBe(true);
 
-      // sweepArchive: 選ぶ基準は opts.now。注入した時計はまだ floorA の手前だが、opts.now で a を選ぶ。
-      const swept = await kit.runtime.sweepArchive(ctx, {
-        now: new Date(floorA.getTime() + 1000),
-        limit: 10,
-      });
+      // sweepArchive: 選ぶ基準も archived の at も opts.now——渡した値とちょうど一致する
+      // （runtime.sweepArchive はこれをそのまま archiveDecayed へ渡すだけ）。
+      const sweepNow = new Date(floorA.getTime() + 1000);
+      const swept = await kit.runtime.sweepArchive(ctx, { now: sweepNow, limit: 10 });
       expect(swept.archived.map((x) => x.memoryId)).toContain(a);
       const [archived] = await kit.eventStore.list(ctx, { memoryId: a, kind: "archived" });
-      expect(isWallNow(archived!.at, startedAt)).toBe(true);
+      expect(archived!.at).toEqual(sweepNow);
 
-      // restoreArchived: reinforce は注入した時計、restored の at は壁時計。
+      // restoreArchived: reinforce も restored の at も注入した時計。
       const restoredArchived = await kit.runtime.restoreArchived(ctx, { memoryId: a });
       expect(restoredArchived.outcomes.map((o) => o.kind)).toEqual(["restored"]);
       const afterRestore = (await kit.memoryStore.get(ctx, a))!;
-      expect(isInjected(afterRestore.lastReinforcedAt)).toBe(true);
+      expect(isNear(afterRestore.lastReinforcedAt, FUTURE)).toBe(true);
       expect(afterRestore.decayFloorAt!.getTime()).toBeGreaterThan(floorA.getTime());
       const [restored] = await kit.eventStore.list(ctx, { memoryId: a, kind: "restored" });
-      expect(isWallNow(restored!.at, startedAt)).toBe(true);
+      expect(isNear(restored?.at, FUTURE)).toBe(true);
 
-      // restoreSuperseded: reinforce も unsuperseded の at も注入した時計。
+      // restoreSuperseded: reinforce も unsuperseded の at も注入した時計（案3以前から変わらない）。
       const consolidated = await kit.runtime.consolidate(ctx, { target: { memoryIds: [a, b] } });
       const reinforcedBefore = (await kit.memoryStore.get(ctx, a))!.lastReinforcedAt!;
       const restoredSuperseded = await kit.runtime.restoreSuperseded(ctx, {
@@ -196,32 +296,38 @@ for (const [name, makeKit] of KITS) {
       });
       expect(restoredSuperseded.outcomes.map((o) => o.kind)).toEqual(["restored", "restored"]);
       const afterUnsupersede = (await kit.memoryStore.get(ctx, a))!;
-      expect(isInjected(afterUnsupersede.lastReinforcedAt)).toBe(true);
+      expect(isNear(afterUnsupersede.lastReinforcedAt, FUTURE)).toBe(true);
       expect(afterUnsupersede.lastReinforcedAt!.getTime()).toBeGreaterThan(
         reinforcedBefore.getTime(),
       );
       const [unsuperseded] = await kit.eventStore.list(ctx, { memoryId: a, kind: "unsuperseded" });
-      expect(isInjected(unsuperseded!.at)).toBe(true);
+      expect(isNear(unsuperseded?.at, FUTURE)).toBe(true);
     });
 
-    it("壁時計より過去の時計では、tick は積んだジョブを1本も取らない（未来の時計なら取る）", async () => {
-      for (const [clockAt, expected] of [
-        [PAST, 0],
-        [FUTURE, 1],
-      ] as const) {
-        const kit = await makeKit({ now: () => new Date(clockAt) });
-        await kit.runtime.observe(ctx, {
+    it("opts を省略すると、outbox の3欄・purgedAt・recall の createdAt は今日どおり壁時計になる（非破壊の確認）", async () => {
+      const startedAt = Date.now();
+      // `clock` 自体は FUTURE に注入しても、store の口への `opts` は runtime が必ず埋めるため
+      // ここでは直接 store を呼び、`opts` を省略したときの実装の既定を確かめる
+      // （runtime を経由すると常に `opts` が埋まるため、runtime からは確認できない）。
+      const kit = await makeKit({ now: () => new Date(FUTURE) });
+      const { jobs } = await kit.memoryStore.createObservationWithOutbox(
+        ctx,
+        {
+          tenantId: ctx.tenantId,
+          subjectId: null,
+          externalId: null,
           kind: "utterance",
-          text: "事実を1つ",
-          extract: "deferred",
-        });
-        expect(await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 })).toEqual({
-          processed: expected,
-          failed: 0,
-          unsupported: [],
-          leaseConflicts: [],
-        });
-      }
+          payload: { text: "壁時計の確認" },
+          occurredAt: null,
+          recordedAt: new Date(FUTURE),
+          validFrom: null,
+          validUntil: null,
+          attributes: {},
+        },
+        ["extract"],
+      );
+      expect(isWallNow(jobs[0]!.availableAt, startedAt)).toBe(true);
+      expect(isWallNow(jobs[0]!.createdAt, startedAt)).toBe(true);
     });
   });
 }

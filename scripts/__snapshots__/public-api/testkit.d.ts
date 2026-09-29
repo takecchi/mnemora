@@ -126,14 +126,18 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     private enqueueOutboxJob;
-    createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[]): Promise<{
+    createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
+        now?: Date;
+    }): Promise<{
         observation: Observation;
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
     private createMemoryIdempotent;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
-    createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[]): Promise<{
+    createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
+        now?: Date;
+    }): Promise<{
         memory: Memory;
         created: boolean;
         jobs: OutboxJobRecord[];
@@ -162,7 +166,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         supersededByIndex: number;
         expectedStatus?: MemoryStatus;
         event: NewMemoryEvent;
-    }>): Promise<{
+    }>, opts?: {
+        now?: Date;
+    }): Promise<{
         created: Array<{
             memory: Memory;
             created: boolean;
@@ -189,7 +195,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     aggregateScope(ctx: Ctx, scope: RecallScope, opts?: AggregateScopeOptions): Promise<ScopeAggregate>;
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
-    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
+        now?: Date;
+    }): Promise<RequeueEmbedJobsResult>;
     archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory(ctx: Ctx, id: MemoryId, tombstone: {
         content: string;
@@ -278,8 +286,12 @@ export declare class InMemoryOutboxStore implements OutboxStore {
     private readonly jobs;
     constructor(jobs: OutboxJobRecord[]);
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
-    complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
-    fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void>;
+    complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
+        at?: Date;
+    }): Promise<void>;
+    fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
+        at?: Date;
+    }): Promise<void>;
 }
 
 // ===== dist/__fixtures__/in-memory-tenant-settings-store.d.ts =====
@@ -522,6 +534,7 @@ export interface OutboxStoreConformanceOptions {
     name: string;
     createStore: () => OutboxStore | Promise<OutboxStore>;
     seedJob: (ctx: Ctx, input: SeedOutboxJobInput) => Promise<OutboxJobRecord>;
+    peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
     supportsRealConcurrency?: boolean;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;

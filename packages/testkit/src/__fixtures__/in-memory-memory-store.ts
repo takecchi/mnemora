@@ -592,20 +592,22 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     kind: OutboxJobKind,
     payload: Record<string, unknown>,
+    // Issue #1237: 既定は壁時計——呼び出し側が時刻を明示的に渡さない限り、今日と同じ挙動のまま。
+    now: Date = new Date(),
   ): OutboxJobRecord {
     const job: OutboxJobRecord = {
       id: nextId("job"),
       tenantId: ctx.tenantId,
       kind,
       payload,
-      availableAt: new Date(),
+      availableAt: now,
       claimedAt: null,
       claimedBy: null,
       attempts: 0,
       completedAt: null,
       failedAt: null,
       lastError: null,
-      createdAt: new Date(),
+      createdAt: now,
     };
     this.outboxJobs.push(job);
     return job;
@@ -615,13 +617,17 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: observation, created } = this.createObservationIdempotent(ctx, input);
     if (!created) {
       return { observation: snapshot(observation), created: false, jobs: [] };
     }
+    // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
+    // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
+    const outboxNow = opts?.now ?? new Date();
     const jobs = jobKinds.map((kind) =>
-      this.enqueueOutboxJob(ctx, kind, { observationId: observation.id }),
+      this.enqueueOutboxJob(ctx, kind, { observationId: observation.id }, outboxNow),
     );
     return snapshot({ observation, created: true, jobs });
   }
@@ -743,6 +749,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: memory, created } = this.createMemoryIdempotent(
       ctx,
@@ -752,7 +759,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!created) {
       return { memory: snapshot(memory), created: false, jobs: [] };
     }
-    const jobs = jobKinds.map((kind) => this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }));
+    // Issue #1237: `createObservationWithOutbox` と同じ理由——省略時は1回だけ壁時計を読む。
+    const outboxNow = opts?.now ?? new Date();
+    const jobs = jobKinds.map((kind) =>
+      this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
+    );
     return { memory: snapshot(memory), created: true, jobs: snapshot(jobs) };
   }
 
@@ -973,11 +984,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
+    opts?: { now?: Date },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
+    // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
+    const outboxNow = opts?.now ?? new Date();
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
     for (const target of supersede) {
@@ -1036,7 +1050,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           continue;
         }
         const jobs = jobKinds.map((kind) =>
-          this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }),
+          this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
         );
         created.push({ memory, created: true, jobs });
       }
@@ -1669,7 +1683,12 @@ export class InMemoryMemoryStore implements MemoryStore {
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertRecallRecordStorable(record);
     const id = nextId("rcl");
-    this.recalls.set(id, { ...snapshot(record), tenantId: ctx.tenantId, createdAt: new Date() });
+    // Issue #1237: 省略時は壁時計。
+    this.recalls.set(id, {
+      ...snapshot(record),
+      tenantId: ctx.tenantId,
+      createdAt: record.createdAt ?? new Date(),
+    });
     if (record.advanceActivityClock === true) {
       const current = this.activitySeq.get(ctx.tenantId) ?? 0;
       this.activitySeq.set(ctx.tenantId, current + 1);
@@ -1734,7 +1753,11 @@ export class InMemoryMemoryStore implements MemoryStore {
    * **`NotIndexedReason` が `EmbeddingStatus` の部分集合であることを型で確かめる**
    * ためでもある（どちらかに値が増えてこの包含が崩れたら、ここが赤くなる）。
    */
-  async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+  async requeueEmbedJobs(
+    ctx: Ctx,
+    opts: RequeueEmbedJobsOptions,
+    writeOpts?: { now?: Date },
+  ): Promise<RequeueEmbedJobsResult> {
     // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
     // 自身が例外を投げる（実測: `LIMIT must not be negative` / `invalid input syntax for
@@ -1770,11 +1793,13 @@ export class InMemoryMemoryStore implements MemoryStore {
       )
       .slice(0, opts.limit);
 
+    // Issue #1237: 積み直す embed ジョブの時刻。省略時は1回だけ壁時計を読む。
+    const outboxNow = writeOpts?.now ?? new Date();
     const memoryIds: MemoryId[] = [];
     for (const memory of targets) {
       memory.embeddingStatus = "pending";
       memory.updatedAt = new Date();
-      this.enqueueOutboxJob(ctx, "embed", { memoryId: memory.id });
+      this.enqueueOutboxJob(ctx, "embed", { memoryId: memory.id }, outboxNow);
       memoryIds.push(memory.id);
     }
     return { requeued: memoryIds.length, memoryIds };
@@ -1878,6 +1903,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "archived",
+        // Issue #1237: `archived` の `at` は `opts.now`（`@mnemora/postgres` と同じ）。
+        at: opts.now,
         actor: { type: "system" },
         digestSnapshot,
         sizeBeforeBytes: null,
@@ -1918,11 +1945,14 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     assertStorableMemoryEvent(event);
     assertCloneableMemoryEvent(event);
+    // Issue #1237: `purgedAt` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
+    // 2回読んで別の値になることがないよう、ここで一度だけ決める（`@mnemora/postgres` と同じ規律）。
+    const at = event.at ?? new Date();
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
-    memory.purgedAt = new Date();
+    memory.purgedAt = at;
     memory.updatedAt = new Date();
-    const storedEvent = buildStoredMemoryEvent(ctx, event);
+    const storedEvent = buildStoredMemoryEvent(ctx, { ...event, at });
     this.events.push(storedEvent);
     return snapshot({ memory, event: storedEvent });
   }
