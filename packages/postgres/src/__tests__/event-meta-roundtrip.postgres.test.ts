@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, EventStore, MemoryStore, Runtime } from "@mnemora/core";
+import type { Ctx, EventStore, MemoryStore, NewMemoryEvent, Runtime } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import {
@@ -24,17 +24,25 @@ import {
 
 /**
  * 監査ログ（`memory_events`）の `meta`・`actor` に JSON で往復しない値や、`jsonb` が受け付けない文字を
- * 渡したときの振る舞いを縛る（Issue #1211。`MemoryEvent.meta` の doc の 2026-09-27 追記・2026-09-29 追記）。
+ * 渡したときの振る舞いを縛る（Issue #1211・Issue #1384。`MemoryEvent.meta` の doc の
+ * 2026-09-27 追記・2026-09-29 追記）。
  *
- * 1. `EventStore.append` の `meta` の `Date`・`NaN`・`Infinity`・`-0`・`undefined`・BigInt は、
- *    `@mnemora/postgres` では JSON として保存した値で返り（BigInt は例外）、testkit の fixture ではそのまま返る
- *    （振る舞いは変えていない——2026-09-29 の変更の対象外。#1211 の「採らない案」のうち、この差は残した）。
+ * 1. `EventStore.append` の `meta` の `Date`・`NaN`・`Infinity`・`-0`・`undefined` は、
+ *    `@mnemora/postgres` では JSON として保存した値で返り、testkit の fixture ではそのまま返る
+ *    （振る舞いは変えていない——#1211 の「採らない案」のうち、この差は残した）。
  * 2. `Runtime` の口の `reason`・`actor.id` に NUL（U+0000）か孤立サロゲート（上位・下位のどちらか単体）が入ると、
  *    **2026-09-29 から、Postgres と testkit の fixture の両方が拒む**（オーナーの回答 ask_human `3f3411c5` を受けて、
  *    以前は fixture だけが書き換えを通していたのを揃えた）。`forget` は `{ kind: "failed" }` を返し、Memory は
  *    `active` のまま、イベントは0件。`markContested` は例外を投げ、両方の Memory が `active` のまま、イベントは
  *    どちらも0件。サロゲートペア（絵文字）・結合文字・U+FFFD・空文字など、Postgres が受け入れる文字列は
  *    引き続きどちらの実装でも通る（過剰実装で無いことの確認）。
+ * 3. `actor`・`meta`（入れ子・配列の要素も）に BigInt が入ると、**2026-09-29 から、Postgres と
+ *    testkit の fixture の両方が同じ `TypeError`（`Do not know how to serialize a BigInt`）を、
+ *    状態を書き換える前に投げる**（Issue #1384。オーナーの回答 ask_human `3f3411c5` を受けて、
+ *    以前は fixture だけが BigInt をそのまま保持していたのを揃えた）。この検査は
+ *    `assertStorableMemoryEvent` の中の他のどの検査よりも先に働く——ただし `memoryId` の実在確認は
+ *    その関数の外（`InMemoryEventStore.append` 自身）にあるため、そこだけは揃っていない
+ *    （下の該当する it のコメント参照）。number・数字に見える文字列は引き続き通る（陽性対照）。
  */
 
 const shared = {
@@ -148,13 +156,6 @@ describe("EventStore.append: meta と actor の JSON で往復しない値（今
         meta: { d: D, nan: NaN, inf: Infinity, z: -0, u: undefined, nested: { d: D } },
       });
       const back = (await kit.eventStore.get(ctx, appended.id))!;
-      const bigint = kit.eventStore.append(ctx, {
-        tenantId: ctx.tenantId,
-        memoryId: memory.id,
-        kind: "updated",
-        actor: { type: "system" },
-        meta: { b: 10n },
-      });
       if (name === "Postgres") {
         for (const event of [appended, back]) {
           expect(event.meta).toStrictEqual({
@@ -167,7 +168,6 @@ describe("EventStore.append: meta と actor の JSON で往復しない値（今
           expect(Object.is(event.meta.z, 0)).toBe(true);
           expect(event.actor).toStrictEqual({ type: "system" });
         }
-        await expect(bigint).rejects.toThrow(/BigInt/);
       } else {
         for (const event of [appended, back]) {
           expect(event.meta.d).toBeInstanceOf(Date);
@@ -178,8 +178,149 @@ describe("EventStore.append: meta と actor の JSON で往復しない値（今
           expect("u" in event.meta).toBe(true);
           expect("id" in event.actor).toBe(true);
         }
-        await expect(bigint).resolves.toMatchObject({ meta: { b: 10n } });
       }
+    });
+  }
+});
+
+/**
+ * `meta`・`actor` の BigInt（今の振る舞い、Issue #1384）。
+ *
+ * **2026-09-29 まで**は、`@mnemora/postgres` が `TypeError`（`JSON.stringify` が BigInt を渡されて
+ * 投げるもの）で拒む一方、`@mnemora/testkit` の fixture は BigInt をそのまま保持していた
+ * （唯一揃っていない差として Issue #1211 が残していたもの）。**2026-09-29 から、両実装とも同じ
+ * `TypeError`・同じ文言（`Do not know how to serialize a BigInt`）で、状態を書き換える前に拒む。**
+ *
+ * ⚠ **この検査は他のどの検査よりも先に働く**——`@mnemora/postgres` の `EventStore.append` は
+ * `INSERT` の引数（`actor`・`meta` を含む）を全部 JS 側で評価してから、初めて DB へ問い合わせを
+ * 送る。`actor`/`meta` に BigInt があると、その JS 側の評価（`JSON.stringify`）が例外を投げ、
+ * 問い合わせ自体が一切送られない——`kind` が列挙に無くても・`memoryId` が実在しなくても・`at` が
+ * Invalid Date でも・NUL/孤立サロゲートがあっても、Postgres 自身がそれらを検査する機会が無いまま
+ * `TypeError` になる。下の「他の不正な入力と同時に BigInt」の各ケースがそれを縛る。
+ */
+describe("meta・actor の BigInt（今の振る舞い、Issue #1384）", () => {
+  for (const [name, makeKit] of KITS) {
+    it(`${name}: 最上位・入れ子・配列の要素、actor の中`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      const cases: Array<[string, Partial<NewMemoryEvent>]> = [
+        ["meta 最上位", { meta: { b: 10n } }],
+        ["meta 入れ子", { meta: { nested: { b: 10n } } }],
+        ["meta 配列の要素", { meta: { xs: [1, 10n] } }],
+        ["actor の中", { actor: { type: "system", extra: 10n } as never }],
+      ];
+      for (const [label, override] of cases) {
+        const memoryBefore = (await kit.memoryStore.get(ctx, memory.id))!;
+        const eventsBefore = await kit.eventStore.list(ctx, { memoryId: memory.id });
+        const appending = kit.eventStore.append(ctx, {
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "updated",
+          actor: { type: "system" },
+          meta: {},
+          ...override,
+        });
+        await expect(appending, label).rejects.toThrow(TypeError);
+        await expect(appending, label).rejects.toThrow(/Do not know how to serialize a BigInt/);
+        // 状態を書き換える前に拒む——イベントは1件も増えない（Postgres は行数、fixture は配列長で見る）。
+        expect(await kit.memoryStore.get(ctx, memory.id), label).toStrictEqual(memoryBefore);
+        expect(await kit.eventStore.list(ctx, { memoryId: memory.id }), label).toEqual(
+          eventsBefore,
+        );
+      }
+    });
+
+    it(`${name}: 他の不正な入力と同時に BigInt（assertStorableMemoryEvent の中の検査は BigInt が先に出る）`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      // ここに挙げるのは、`assertStorableMemoryEvent` の中で行う検査（kind・at・NUL）と
+      // BigInt の優先順位——どちらも同じ関数の中の分岐なので、両実装で揃う。
+      // `memoryId` の実在確認はこの関数の外（`InMemoryEventStore.append` 自身）で行うので、
+      // ここには含めない——下の別の it が、そこだけ揃っていないことを縛る。
+      const cases: Array<[string, Partial<NewMemoryEvent>]> = [
+        ["NUL を含む meta の文字列 + BigInt", { meta: { bad: "a\u0000b", big: 10n } }],
+        ["列挙に無い kind + BigInt", { kind: "not-a-real-kind" as never, meta: { big: 10n } }],
+        ["Invalid Date の at + BigInt", { at: new Date(NaN), meta: { big: 10n } }],
+      ];
+      for (const [label, override] of cases) {
+        const appending = kit.eventStore.append(ctx, {
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "updated",
+          actor: { type: "system" },
+          meta: {},
+          ...override,
+        });
+        await expect(appending, label).rejects.toThrow(TypeError);
+        await expect(appending, label).rejects.toThrow(/Do not know how to serialize a BigInt/);
+      }
+    });
+
+    /**
+     * ⚠ **揃っていない1点（Issue #1384 の PR 本文にも書く）**: `memoryId` が実在しない状態で
+     * BigInt も同時に渡すと、`@mnemora/postgres` は（`INSERT` の引数評価で BigInt が先に
+     * 例外になるため）`TypeError` になるが、`@mnemora/testkit` の `InMemoryEventStore.append` は
+     * 実在確認（ADR 0047 相当）を `assertStorableMemoryEvent` より**前に**行うので、
+     * 「memory not found」の `Error` が先に出る（`assertStorableMemoryEvent` の中の BigInt 検査まで
+     * 到達しない）。この実在確認は `assertStorableMemoryEvent` の外側（呼び出し元の
+     * `InMemoryEventStore.append` 自身）にあり、本 Issue の範囲（`assertStorableMemoryEvent` の
+     * 中の検査の優先順位）の外なので、揃えていない。
+     */
+    it(`${name}: 実在しない memoryId + BigInt（揃っていない——adapter で例外が違う）`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      const appending = kit.eventStore.append(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: "00000000-0000-0000-0000-000000000000",
+        kind: "updated",
+        actor: { type: "system" },
+        meta: { big: 10n },
+      });
+      if (name === "Postgres") {
+        await expect(appending).rejects.toThrow(TypeError);
+        await expect(appending).rejects.toThrow(/Do not know how to serialize a BigInt/);
+      } else {
+        await expect(appending).rejects.toThrow(/memory not found/);
+      }
+      // どちらの実装でも、対象の Memory・イベントは変わらない。
+      expect(await kit.eventStore.list(ctx, { memoryId: memory.id })).toEqual([]);
+    });
+
+    it(`${name}: number・数字に見える文字列は引き続き通る（陽性対照）`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      const appended = await kit.eventStore.append(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "updated",
+        actor: { type: "system" },
+        meta: { n: 123, s: "123n" },
+      });
+      expect(appended.meta.n).toBe(123);
+      expect(appended.meta.s).toBe("123n");
+    });
+
+    it(`${name}: updateStatusWithEvent（状態の書き換えとイベントを1回で書く口）`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      const updating = kit.memoryStore.updateStatusWithEvent(
+        ctx,
+        memory.id,
+        "forgotten",
+        { expectedStatus: "active" },
+        {
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "forgotten",
+          actor: { type: "system" },
+          meta: { big: 10n },
+        },
+      );
+      await expect(updating).rejects.toThrow(TypeError);
+      await expect(updating).rejects.toThrow(/Do not know how to serialize a BigInt/);
+      // status の更新（先に実行される側）も含めてロールバックされる——active のまま。
+      expect((await kit.memoryStore.get(ctx, memory.id))!.status).toBe("active");
+      expect(await kit.eventStore.list(ctx, { memoryId: memory.id })).toEqual([]);
     });
   }
 });

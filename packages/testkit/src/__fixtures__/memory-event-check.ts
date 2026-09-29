@@ -40,8 +40,8 @@ function hasNulOrLoneSurrogate(value: string): boolean {
 /**
  * `value`（`event.actor` か `event.meta`）の中に、NUL か孤立サロゲートを含む文字列（キー・値の
  * どちらも）が無いか。素の JS の値をそのまま辿る——`JSON.stringify` を経由しない（`meta` に
- * BigInt・関数・Symbol が混ざっていても、ここでは無視して先へ進む。BigInt は `JSON.stringify` が
- * 例外を投げるが、その扱いは本関数の対象外——{@link assertStorableMemoryEvent} の doc コメント参照）。
+ * 関数・Symbol が混ざっていても、ここでは無視して先へ進む。BigInt は {@link containsBigInt} が
+ * 別に、この関数より前に検査する——{@link assertStorableMemoryEvent} の doc コメント参照）。
  * プレーンな配列・オブジェクトだけを再帰する。
  */
 function containsNulOrLoneSurrogate(value: unknown): boolean {
@@ -60,8 +60,43 @@ function containsNulOrLoneSurrogate(value: unknown): boolean {
 }
 
 /**
+ * `value`（`event.actor` か `event.meta`）の中に BigInt の値が無いか（Issue #1384）。
+ *
+ * JS のプレーンオブジェクト・配列のキーは常に文字列（BigInt をキーにはできない）なので、
+ * 値だけを辿れば足りる——{@link containsNulOrLoneSurrogate} と違い、キー自体は検査しない。
+ * プレーンな配列・オブジェクトだけを再帰する（`containsNulOrLoneSurrogate` と同じ形）。
+ */
+function containsBigInt(value: unknown): boolean {
+  if (typeof value === "bigint") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.some((v) => containsBigInt(v));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).some((v) => containsBigInt(v));
+  }
+  return false;
+}
+
+/**
  * `memory_events` の1行として書けるイベントかを確かめる（Postgres が拒む入力を、同じ入力で拒む）。
  *
+ * - `actor`・`meta` に BigInt の値（入れ子・配列の要素も）があれば、**最初に**拒む（Issue #1384）。
+ *   `packages/postgres` は `event.actor`・`event.meta` を丸ごと `JSON.stringify(...)::jsonb` で
+ *   書く（`event-store.ts`・`memory-store.ts`）——`JSON.stringify` は BigInt を渡されると
+ *   `TypeError: Do not know how to serialize a BigInt` を投げる。この関数もそれと**同じ型
+ *   （`TypeError`）・同じ文言**で投げる。
+ *   ⚠ **この検査は他のどの検査よりも先に置く。**`packages/postgres` の `EventStore.append` は
+ *   `INSERT` 文の引数（`actor`・`meta` を含む）を**すべて JS 側で評価してから**初めて DB へ
+ *   問い合わせを送る——`actor`/`meta` の `JSON.stringify` が BigInt で例外を投げると、その時点で
+ *   問い合わせ自体が一切送られない。⟹ `kind` が列挙に無くても・`memoryId` が実在しなくても・
+ *   `at` が Invalid Date でも・`actor`/`meta` に NUL/孤立サロゲートがあっても、**BigInt が
+ *   どこかに在れば、それらの検査を Postgres 自身が行う機会が無いまま `TypeError` になる**
+ *   （【実測 2026-09-29】`kind` 不正・`at` Invalid Date・`memoryId` 実在しない、のそれぞれと
+ *   `meta` の BigInt を同時に渡し、すべて `TypeError: Do not know how to serialize a BigInt`
+ *   になることを確かめた。`memory_events_check`・`memory_events_kind_check`・外部キー・NUL の
+ *   拒否は、どれも BigInt が無い場合にだけ実際に働く）。
  * - `at`: Invalid Date（`.getTime()` が `NaN`）なら拒む（Issue #807）。省略（`undefined`）は
  *   「無い」であって Invalid Date ではないので検査しない。
  * - `kind`: `MemoryEventKind` に無い値なら拒む（Issue #1096）。`events_purged` で `memoryId` が null でなければ拒む
@@ -70,16 +105,17 @@ function containsNulOrLoneSurrogate(value: unknown): boolean {
  * - `actor`・`meta`: NUL（U+0000）か孤立サロゲートを含む文字列（キーも値も、入れ子の中も）が
  *   あれば拒む（Issue #1211）。Postgres は `JSON.stringify(actor)`/`JSON.stringify(meta)` を
  *   `::jsonb` に渡す時点で拒む——`Runtime` の口に渡す `reason`（`meta.reason`/`meta.note` に入る）と
- *   `actor.id` に届く。**BigInt・関数・Symbol はこの検査の対象外**——{@link containsNulOrLoneSurrogate}
- *   の doc コメントと `MemoryEvent.meta` の TSDoc（`@mnemora/core` の `event.ts`）の表のとおり、
- *   BigInt は fixture がそのまま保存する差として残し（Postgres は例外）、関数・Symbol は
- *   {@link assertCloneableMemoryEvent} が別に扱う。
+ *   `actor.id` に届く。**関数・Symbol はこの検査の対象外**——{@link assertCloneableMemoryEvent}
+ *   が別に扱う。
  *
  * `buildStoredMemoryEvent` が呼ぶほか、呼び手のイベントを受け取る `InMemoryMemoryStore` の口は、
  * **状態を書き換える前に**これを呼ぶ——Postgres は1トランザクションで巻き戻るので、拒んだときに
  * 何も書かない。それを写す。
  */
 export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
+  if (containsBigInt(event.actor) || containsBigInt(event.meta)) {
+    throw new TypeError(`Do not know how to serialize a BigInt`);
+  }
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
   }

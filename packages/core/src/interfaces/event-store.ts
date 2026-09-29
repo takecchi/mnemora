@@ -23,8 +23,9 @@ export interface EventStore {
    * id しか渡さない。`docs/memory-model.md` §5 の 2026-09-27 追記を参照。
    *
    * ⚠ **`event.meta`・`event.actor` の値の中身は検査しない。**JSON で往復しない値と、NUL・孤立サロゲートを
-   * 含む文字列の扱いは adapter によって違う——{@link MemoryEvent.meta} の doc の表を参照
-   * （[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）。
+   * 含む文字列の扱いは adapter によって違う（**BigInt は 2026-09-29 から両 adapter で揃った**——下記参照）
+   * ——{@link MemoryEvent.meta} の doc の表を参照（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、
+   * [Issue #1384](https://github.com/takecchi/mnemora/issues/1384)）。
    *
    * ⚠ 2026-09-28 追記（今の振る舞い。`@mnemora/postgres` と testkit の fixture へ同じ入力を当てて確かめた）:
    * **`event` の形もほとんど検査しない。**
@@ -35,8 +36,13 @@ export interface EventStore {
    *   `ctx.tenantId`）。
    * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・
    *   存在しない（または形式の壊れた）`memoryId`・`actor`/`meta` に含まれる NUL（U+0000）か孤立サロゲートの文字列
-   *   （2026-09-29、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）である
-   *   （例外の種類は adapter で違う）。
+   *   （2026-09-29、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）・
+   *   `actor`/`meta` に含まれる BigInt（2026-09-29、[Issue #1384](https://github.com/takecchi/mnemora/issues/1384)。
+   *   同じく両方とも adapter で同じ入力を拒む）である（例外の種類は adapter で違う）。
+   * - ⚠ **BigInt はこの一覧の他のどの拒否よりも先に働く**——`@mnemora/postgres` は `INSERT` の引数を
+   *   すべて JS 側で評価してから初めて問い合わせを送るため、`actor`/`meta` に BigInt があると、`kind`・
+   *   `memoryId`・`at`・NUL/孤立サロゲートの検査を Postgres 側が行う機会が無いまま `TypeError` になる
+   *   （{@link MemoryEvent.meta} の doc の該当箇所参照）。
    *
    * `MemoryStore` の `event` を受け取る口（`updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・
    * `markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）も、`event` について同じである
