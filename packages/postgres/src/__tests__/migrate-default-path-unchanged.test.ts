@@ -66,6 +66,20 @@ import { stripSqlComments } from "./sql-comments.js";
  * 剥がさない。
  */
 
+/**
+ * pgvector 能力検査（`PGVECTOR_CAPABILITY_QUERY`、Issue #1301 / ADR 0367）に対して返す、
+ * 「対応している」既定の1行。`runMigrations`（`extensionMode` 既定の `"create"`）は
+ * 適用の最後に必ずこの検査を1回発行する（`../migrate.ts` の doc 参照）——このファイルの
+ * 歯は「発行する SQL 列そのもの」を主題にしており、能力検査の合否は主題ではないため、
+ * 常に「対応している」行を返して通す。
+ */
+function respondToQuery(text: string): { rows: unknown[] } {
+  if (text.includes("pg_settings")) {
+    return { rows: [{ extversion: "0.8.0", vartype: "enum", enumvals: ["off", "relaxed_order"] }] };
+  }
+  return { rows: [] };
+}
+
 /** `runMigrations` が発行した SQL を記録するだけの偽の `Pool` と、その記録先の配列。 */
 function createFakePool(): { pool: Pool; log: string[] } {
   const log: string[] = [];
@@ -73,7 +87,7 @@ function createFakePool(): { pool: Pool; log: string[] } {
   const client = {
     query: async (text: string) => {
       log.push(`client.query: ${text}`);
-      return { rows: [] };
+      return respondToQuery(text);
     },
     release: () => {
       // 記録することは何も無い（呼ばれたことそのものは検査対象ではない）。
@@ -87,7 +101,7 @@ function createFakePool(): { pool: Pool; log: string[] } {
   const pool = {
     query: async (text: string) => {
       log.push(`pool.query: ${text}`);
-      return { rows: [] };
+      return respondToQuery(text);
     },
     connect: async () => client,
   };

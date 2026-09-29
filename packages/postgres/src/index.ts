@@ -10,6 +10,7 @@ export * from "./event-store.js";
 export * from "./outbox-store.js";
 export * from "./tenant-settings-store.js";
 export * from "./migrate.js";
+export * from "./pgvector-capability.js";
 export * from "./vector-space.js";
 export * from "./embedding-space-table.js";
 export * from "./content-hash.js";

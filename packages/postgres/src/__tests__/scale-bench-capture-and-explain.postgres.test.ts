@@ -56,6 +56,19 @@ describe("scale-bench: captureAndExplain は search() のクエリを本番と�
       await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, [1, i + 1, 0.5]);
     }
 
+    // Issue #1301 / ADR 0367: pgvector 能力検査は `vectorStore` インスタンスごとに
+    // `search()`/`searchMany()` の初回呼び出しでだけ1往復を追加する
+    // （`vector-store.ts` の `PgvectorCapabilityGate` の doc 参照）。この歯は
+    // 「捕まえた1本の SELECT の直前に BEGIN、直後に SET LOCAL が来る」という
+    // 順序そのものを固定したい——初回検査のクエリが同じ物理接続に紛れ込むと
+    // （pool が接続を使い回すかどうかは非決定的）`inTransaction[0]` が
+    // `begin` にならない場合がありうる。測定を始める前に空振りの `search()` を1回
+    // 打ち、検査を済ませておく。
+    await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0, 0, 0], {
+      limit: 1,
+      filter: { tenantId: TENANT },
+    });
+
     // 接続ごとに、発行された文を順に記録する。
     const statementsByClient = new Map<Client, string[]>();
     const originalQuery = Client.prototype.query;

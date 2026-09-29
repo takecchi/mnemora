@@ -13,6 +13,11 @@ import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space
 import { isUuidLike, toPgTimestamp } from "./mapping.js";
 import { maybeAnalyzeAfterUpsert } from "./embedding-statistics.js";
 import { activityFloorSeqAliveCondition } from "./activity-decay-sql.js";
+import {
+  PGVECTOR_CAPABILITY_QUERY,
+  type PgvectorCapabilityRow,
+  assertPgvectorCapabilityRow,
+} from "./pgvector-capability.js";
 
 /** `number[]` を pgvector のテキスト表現（`[1,2,3]`）に変換する。 */
 function toVectorLiteral(vector: number[]): string {
@@ -46,6 +51,36 @@ function parseVectorLiteral(literal: string): number[] {
 }
 
 /**
+ * `withRelaxedOrderScan` が使う、`PostgresVectorStore` インスタンスごとの pgvector 能力
+ * 検査キャッシュ（Issue #1301、ADR 0367）。`search()`/`searchMany()` の両方から共有される
+ * ——`PostgresVectorStore` のコンストラクタで1つ作り、両メソッドの `withRelaxedOrderScan`
+ * 呼び出しへ渡す。
+ *
+ * **成功だけを覚える。失敗は覚えない**（次の呼び出しでまた検査する）。理由:
+ * - 検査に対応している（`confirmed = true`）ことは、そのプロセスの寿命の間まず覆らない
+ *   ——pgvector を「ダウングレードする」運用は通常無い。覚えて往復を省く価値がある。
+ * - 検査に対応していない（現在エラーになっている）状態は、そもそも `search()`/
+ *   `searchMany()` が毎回失敗しているため、失敗を覚えて省略しても定常状態のコストは
+ *   下がらない——得るものが無いまま、DBA が `ALTER EXTENSION vector UPDATE;` を実行して
+ *   直した後もプロセス再起動まで検査が固定されたままになる自己修復の悪い面だけが残る。
+ *   ⟹ 失敗はキャッシュせず、直った瞬間に次の呼び出しが自然に成功へ倒れるようにする。
+ */
+class PgvectorCapabilityGate {
+  private confirmed = false;
+
+  async ensure(db: Db): Promise<void> {
+    if (this.confirmed) {
+      return;
+    }
+    // `sql.raw`: `PGVECTOR_CAPABILITY_QUERY` はパラメータを持たない固定文字列
+    // （`pgvector-capability.ts` の doc 参照）——プレースホルダ化する動的な値は無い。
+    const result = await db.execute(sql.raw(PGVECTOR_CAPABILITY_QUERY));
+    assertPgvectorCapabilityRow(result.rows[0] as unknown as PgvectorCapabilityRow | undefined);
+    this.confirmed = true;
+  }
+}
+
+/**
  * `search()`/`searchMany()` の両方が使う、ADR 0284 の `SET LOCAL` を発行してから
  * `run` を実行する共通ヘルパー。**`hnsw.iterative_scan` を `relaxed_order` に変える
  * その `SET LOCAL` 文は、このファイルの中で下の実装1箇所にしか書かない**——
@@ -61,11 +96,21 @@ function parseVectorLiteral(literal: string): number[] {
  *
  * `SET LOCAL` はトランザクション内でしか効かないため、`db.transaction()` で `BEGIN`
  * してから発行する（ADR 0284 決定1と同じ理由）。
+ *
+ * **Issue #1301 / ADR 0367**: 下の `SET LOCAL`（`hnsw.iterative_scan` を `relaxed_order` に
+ * 変える文）を発行する前に、`capabilityGate` で pgvector がその値を実際に解釈できることを確認する
+ * （`PgvectorCapabilityGate` の doc 参照）。0.8 未満では、この `SET LOCAL` は
+ * 「初回だけ通り2回目から ERROR」（0.6〜0.7 × PG15+）または「黙って効かない」
+ * （0.5.x・PG<15）——検査はこの `SET LOCAL` より**前**に行い、対応していなければ
+ * `PgvectorVersionUnsupportedError` を投げて `SET LOCAL` 自体を発行しない
+ * （`ann_truncated`/`ann_unreached` を静かに歪めるより、早く・分かりやすく落とす）。
  */
 async function withRelaxedOrderScan<T>(
   db: Db,
+  capabilityGate: PgvectorCapabilityGate,
   run: (tx: Parameters<Parameters<Db["transaction"]>[0]>[0]) => Promise<T>,
 ): Promise<T> {
+  await capabilityGate.ensure(db);
   return db.transaction(async (tx) => {
     await tx.execute(sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
     return run(tx);
@@ -295,6 +340,10 @@ function statsMissingCondition(table: string) {
  * （黙って何もしない、より安全な失敗の仕方）。
  */
 export class PostgresVectorStore implements VectorStore {
+  // Issue #1301 / ADR 0367: インスタンスごとに1つ。`search()`/`searchMany()` の両方の
+  // `withRelaxedOrderScan` 呼び出しで共有する（`PgvectorCapabilityGate` の doc 参照）。
+  private readonly pgvectorCapabilityGate = new PgvectorCapabilityGate();
+
   constructor(private readonly db: Db) {}
 
   async upsert(
@@ -391,7 +440,7 @@ export class PostgresVectorStore implements VectorStore {
     // が両枝を再び1本の順序（距離→`recorded_at` DESC→`memory_id`）へ並べ直し、
     // `LIMIT` をもう一度適用する——ゼロベクトルの行が実在の上位候補を押し出すことは
     // ない（`NaN` は常に最後尾）。往復は増やさない（1本の SQL 文のまま）。
-    const result = await withRelaxedOrderScan(this.db, (tx) =>
+    const result = await withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
       tx.execute(sql`
         SELECT combined.memory_id AS memory_id, combined.distance AS distance
         FROM (
@@ -544,7 +593,7 @@ export class PostgresVectorStore implements VectorStore {
       return sql`(${index}::int, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
 
-    const result = await withRelaxedOrderScan(this.db, (tx) =>
+    const result = await withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
       tx.execute(sql`
         SELECT q.query_idx AS query_idx, hit.memory_id AS memory_id, hit.distance AS distance
         FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_idx, qvec)
