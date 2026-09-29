@@ -39,8 +39,18 @@ const SRC_DIR = join(__dirname, "..");
 /** `embed(` を呼んでいる箇所すべて（コメント中の言及も拾うが、下で形も見るので害は無い）。 */
 const ANY_EMBED_CALL = /embeddingProvider\.embed\s*\(/g;
 
-/** `embeddingProvider.embed(ctx, [ 単一の式 ])` の形。配列リテラルに `,` が無いことを見る。 */
-const SINGLE_TEXT_EMBED_CALL = /embeddingProvider\.embed\s*\(\s*ctx\s*,\s*\[([^[\],]*)\]\s*\)/g;
+/**
+ * `embeddingProvider.embed(ctx, [ 単一の式 ])` の形。配列リテラルに `,` が無いことを見る。
+ *
+ * ⚠ **2026-09-29 追記（Issue #1200、ADR 0359）**: 第3引数 `opts?: AbortOptions`
+ * （`{ signal }` など）を任意で渡せるようになった。この歯が測りたいのは
+ * 「渡すテキストの件数」であって「引数の本数」ではないため、末尾の任意の第3引数は
+ * 許す（`[^)]*` で1行分だけ緩く受ける——`runAbortable(...)` のような複数行の
+ * 呼び出しラップはこの正規表現の対象外だが、その場合は `ANY_EMBED_CALL` 側で
+ * 件数が増えないため、この歯自体は引き続き機能する）。
+ */
+const SINGLE_TEXT_EMBED_CALL =
+  /embeddingProvider\.embed\s*\(\s*ctx\s*,\s*\[([^[\],]*)\](?:\s*,\s*[^)]*)?\s*\)/g;
 
 function readSourceFiles(): { file: string; source: string }[] {
   return readdirSync(SRC_DIR, { withFileTypes: true })

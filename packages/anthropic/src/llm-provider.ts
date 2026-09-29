@@ -1,5 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type {
+  AbortOptions,
+  Ctx,
+  LLMProvider,
+  LLMResponse,
+  PromptSpec,
+  StructuredRequest,
+} from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type {
   AnthropicContentBlock,
@@ -182,6 +189,12 @@ function assertNotRefusedOrTruncated(response: {
  *
  * 拒否・切り詰め・空応答は {@link AnthropicLLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
  * HTTP の失敗・認証の失敗などは、SDK の例外がそのまま伝わる。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * `complete`/`completeStructured` の第3引数 `opts?.signal` を、そのまま
+ * `messages.create` の request options（`{ signal }`）へ渡す。** `@mnemora/openai` と
+ * 同じ形——SDK が既定で対応する `AbortSignal` の仕組みに委ねているだけ。
  */
 export class AnthropicLLMProvider implements LLMProvider {
   private readonly client: AnthropicMessagesClient;
@@ -219,14 +232,17 @@ export class AnthropicLLMProvider implements LLMProvider {
    * {@link AnthropicLLMProviderError} を投げる。⚠ どちらでもなくテキストブロックが無いときは、例外にせず空文字を返す
    * （ADR 0072「引き受けた負債」2。`@mnemora/openai` も同じ形）。
    */
-  async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
+  async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
     const { system, messages } = toAnthropicRequest(req);
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      ...(system !== undefined ? { system } : {}),
-      messages,
-    });
+    const response = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        ...(system !== undefined ? { system } : {}),
+        messages,
+      },
+      { signal: opts?.signal },
+    );
     assertNotRefusedOrTruncated(response);
     // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
     // `@mnemora/openai` も同じ形であり、片方だけ throw にすると差し替えられなくなる。
@@ -252,7 +268,11 @@ export class AnthropicLLMProvider implements LLMProvider {
    * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
    * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
    */
-  async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
+  async completeStructured<T>(
+    _ctx: Ctx,
+    req: StructuredRequest<T>,
+    opts?: AbortOptions,
+  ): Promise<T> {
     let format: AnthropicJsonSchemaFormat;
     try {
       format = translateForAnthropicStructuredOutput(req.schema);
@@ -263,13 +283,16 @@ export class AnthropicLLMProvider implements LLMProvider {
       throw new AnthropicLLMProviderError({ kind: "schema_unsupported", cause });
     }
     const { system, messages } = toAnthropicRequest(req.prompt);
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      ...(system !== undefined ? { system } : {}),
-      messages,
-      output_config: { format },
-    });
+    const response = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: this.maxTokens,
+        ...(system !== undefined ? { system } : {}),
+        messages,
+        output_config: { format },
+      },
+      { signal: opts?.signal },
+    );
 
     // ⭐ **`content` を読む前に `stop_reason` を見る。**順序が本質である
     // ——後ろに置くと、拒否が `no_content` に化けて種類が潰れる。
