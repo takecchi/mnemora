@@ -384,6 +384,12 @@ PR #1393・Issue #1232）になった。**
 
 ### Fixed
 
+- **`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `OutboxStore.claimBatch` は、終端に達しないまま止まり続ける job（毎回ワーカーを止めてしまう job）が `limit` 本以上あると、リースが切れるたびに古い順の先頭で同じ job を取り続け、後ろの job に永久に届かなかった（先頭詰まり）**（[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、[ADR 0357](./docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)）——取る順（`available_at` の古い順）はそのままに、**取り直し**（claim 時点で `claimed_at` が既に非 NULL＝リースが切れた行を再び claim する場合）だけ `available_at` を `opts.now` へ書き直すようにした。初めての claim では `available_at` を変えない。止まり続ける job が何本あっても、後ろの job はいつか claim される（飢餓しない）。
+  - **取り直された job は、先頭で2回 claim されてから後ろへ回る**（1回目は初めての claim なので `available_at` を動かさず、2回目＝最初の取り直しで初めて `now` へ進む）——正直に書くとゼロ回で後ろへ回るわけではない。
+  - **`OutboxStore` を自作している第三者実装者への影響**: 契約 doc（`packages/core/src/interfaces/outbox-store.ts`）の記述が増えた。型（`ClaimOutboxJobsOptions`・`OutboxJobRecord`・`OutboxStore` のシグネチャ）は1バイトも変わっていない（`pnpm run api:check` で確認済み）ため独自実装のコンパイルは通り続けるが、この契約（取り直しで `available_at` を進める）を満たさない実装は、今後もこの先頭詰まりを起こしうる。
+  - **観測できる値の変化**: `claimBatch` が返す `OutboxJobRecord.availableAt` は、取り直された job では呼び出し時の `now` になる（以前は積んだときの値のまま不変だった）。
+  - 上限（`attempts` が N を超えたら `fail` にする等）で終端にする設計は入れていない（ADR 0032「これが覆るとしたら」が範囲外として残した論点のまま、Issue #1196 が挙げた「決めていないこと」のうち今回答えたのは「後回しにする」の1点だけ）。`TickResult` に「この tick で取り直した件数」を出す観測の追加は見送った——理由は ADR 0357「引き受けた負債」参照。
+  ⭕ 非破壊と数える（型は変わらず、例外の増減もない。変わるのは `available_at` の観測値と、リース切れの繰り返しに対する取る順の実質的な帰結だけである。**クローン miku の判断であり、オーナーの判断ではない**）。
 - **`Runtime`（`@mnemora/core`）は、`RuntimeDeps.clock` に注入した時計を、監査ログ（`memory_events.at`）・
   `purgedAt`・recall の記録の `createdAt`・outbox の `availableAt`/`createdAt`/`completedAt`/`failedAt`
   には渡していなかった**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
