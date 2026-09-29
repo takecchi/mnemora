@@ -11,7 +11,8 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.js";
+import type { getTestClient } from "./test-db.js";
+import { TEST_EMBEDDING_SPACE } from "./test-db.js";
 
 /**
  * `eraseTenant`（Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）

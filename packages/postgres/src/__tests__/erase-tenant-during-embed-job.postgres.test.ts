@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId, MemoryId } from "@mnemora/core";
+import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import { createRuntime, eraseTenant } from "@mnemora/core";
 import { DeterministicEmbeddingProvider, DeterministicLLMProvider } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";

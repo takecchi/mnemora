@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, MemoryId } from "@mnemora/core";
+import type { Ctx } from "@mnemora/core";
 import {
   ConsolidationLLMResultSchema,
   ExtractionResultSchema,
