@@ -193,8 +193,8 @@ npm i @mnemora/local-embedding @mnemora/core
   `.cache/`（例: `node_modules/@huggingface/transformers/.cache/`。pnpm なら
   `node_modules/.pnpm/@huggingface+transformers@<版>/node_modules/@huggingface/transformers/.cache/`）で、
   ホームの `~/.cache` の下ではない。⚠ `node_modules` を消す・入れ直すと一緒に消え、次の読み込みで取り直す。
-  置き場所を固定したいときは `cacheDir` を渡す（⚠ `cacheDir` を渡しても、読み込みの前の確認は既定の置き場所を見る。
-  オフラインで使うなら「[`cacheDir` を渡しても…](#-cachedir-を渡しても読み込みの前の確認は既定のキャッシュを見る)」の節）
+  置き場所を固定したいときは `cacheDir` を渡す（読み込みの前段の確認も `cacheDir` を見るようになった。
+  詳しくは「[`cacheDir` を渡すと、読み込みの前段の確認もそこを見る](#-cachedir-を渡すと読み込みの前段の確認もそこを見る)」の節）
 - ネイティブ依存として `onnxruntime-node` が入る（次節）
 
 ### 🔴 linux/x64 では、install が **CUDA EP を勝手に落とす**（要らないのに）
@@ -378,37 +378,69 @@ const provider = new LocalEmbeddingProvider({
 `config.json`・`tokenizer_config.json` を空にする、の4形で同じだった（Issue #1140）。歯は `src/__tests__/corrupt-cache-persists.test.ts`
 （途中で切れた `tokenizer.json` と onnx、ネットワークに出ない形）。
 
-### 🔴 `cacheDir` を渡しても、読み込みの前の確認は既定のキャッシュを見る
+### ⭐ `cacheDir` を渡すと、読み込みの前段の確認もそこを見る
 
-（[Issue #1239](https://github.com/takecchi/mnemora/issues/1239)・[Issue #1004](https://github.com/takecchi/mnemora/issues/1004)。今の振る舞いを書くだけで、コードで直すかは #1239 で決める）
+（直った。[Issue #1239](https://github.com/takecchi/mnemora/issues/1239)・[Issue #1004](https://github.com/takecchi/mnemora/issues/1004)。[ADR 0361](../../docs/decisions/0361-local-embedding-cache-dir-env-swap.md)）
 
 【実測 2026-09-27、`@huggingface/transformers@4.2.0`】`cacheDir` にモデルの4ファイル（`config.json`・`tokenizer.json`・
 `tokenizer_config.json`・`onnx/model_quantized.onnx`）が揃っていても、transformers.js の `pipeline()` は読み込みの前段の
 確認で `config.json`・`tokenizer_config.json` の有無を**既定のキャッシュ**（transformers.js の `env.cacheDir`。上の「前提」の
-置き場所）**だけで**確かめ、無ければ Hugging Face へ取りに行く。
+置き場所）**だけで**確かめ、`cache_dir` オプションを運ばない。⟹ 既定のキャッシュが空だと、`cacheDir` がどれだけ温かくても
+この前段の確認だけが Hugging Face へ出て、ネットワークが無ければ読み込みが失敗していた。
 
-| 既定のキャッシュの `<repo>/` に在るもの  | ネットワークへの要求                                                                                  |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 何も無い                                 | `config.json` を取りに出る。**ネットワークが無ければ、`cacheDir` が温まっていても読み込みは失敗する** |
-| `config.json` だけ                       | `tokenizer_config.json` を確かめに出る                                                                |
-| `config.json` と `tokenizer_config.json` | 0回                                                                                                   |
+**いまは、`createLocalEmbeddingPipeline`（既定の `createPipeline`）が `pipeline()` を呼んでいる間だけ、
+transformers.js の `env.cacheDir` を `cacheDir` と同じ場所へ一時的に向ける**（呼び出しが終わったら、成功でも失敗でも
+必ず元へ戻す）。前段の確認は `env.cacheDir` だけを見るので、これで `cacheDir` の中身がそのまま見える。⟹ **`cacheDir` に
+4ファイルが揃っていれば、既定のキャッシュが空でも、ネットワークへの要求は0回になる**（下の歯で実測・固定している）。
 
-⟹ **ネットワークの無いところで `cacheDir` を使うなら、既定のキャッシュも温めておくこと。**置くのは
-`cacheDir` の中の `<repo>/config.json`・`<repo>/tokenizer_config.json` の2つの写しで、置き場所は既定のキャッシュの
-`<repo>/` の下（例: `node_modules/@huggingface/transformers/.cache/sirasagi62/ruri-v3-30m-ONNX/`。pnpm なら上の
-「前提」の形）。
+- ⭐ **`cacheDir` を渡さない（既定のキャッシュそのものを温めた）使い方は、今までどおり変わらない**——`env.cacheDir` に
+  触るのは `spec.cacheDir` が指定されているときだけである。
+- ⚠ **`env` はプロセス全体で共有される大域であり、このパッケージだけのものではない。**差し替えは
+  `pipeline()` を呼んでいる間だけの一時的なものだが、その**間**は次の2つが `cacheDir` を見うる:
+  - **このパッケージを経由しない、同じプロセスの他の transformers.js の利用**（自分で `import("@huggingface/transformers")`
+    して `pipeline()` を直接呼ぶコードや、`@mnemora/local-embedding` 以外の別のライブラリ）。
+  - `createLocalEmbeddingPipeline` の**呼び出し自体は、プロセス内で1本に直列化してある**——`cacheDir` の違う2つの
+    `LocalEmbeddingProvider`（や `warmup()`/`embed()` の並行呼び出し）が同時に読み込もうとしても、
+    どちらかがもう片方の差し替えの最中の値を見ることは無い（後述）。**このパッケージを経由しない利用は、
+    この直列化の外に居る。**
+- ⭐ **`createLocalEmbeddingPipeline` を呼ぶ経路（＝このパッケージがモデルを読み込む唯一の経路）は、
+  プロセス内で1本の待ち行列に直列化してある。**`cacheDir` を差し替えていないだけの呼び出しも、
+  この待ち行列を通る——通さないと、差し替えている最中の値が漏れて見えてしまう。
+  【実測】2つの読み込み（片方は warm な `cacheDir`、もう片方は空の `cacheDir`）を待ち行列無しで並行させると、
+  **本来成功するはずの側**が `this.tokenizer is not a function` で落ちた。待ち行列を挟むと両方とも正しく決着する
+  （片方は成功、もう片方はそのディレクトリの中身どおりに失敗する）。**一方が失敗しても、待ち行列そのものは
+  詰まらない**——次の読み込みは待たされず進む。
+- ⚠ 確かめていないこと: `revision` を `main` 以外にしたとき（`cacheDir` の中の鍵が `<repo>/<revision>/<file>` になる。
+  下の節）。transformers.js の 4.2.0 以外の版。同じプロセス内の別のライブラリが `env.cacheDir` を読む・書く
+  タイミングと重なったときの網羅的な組み合わせ（直列化しているのはこのパッケージ自身の呼び出しどうしだけである）。
 
-- ⚠ 既定のキャッシュは `node_modules` の中に在るので、`node_modules` を消す・入れ直すと一緒に消える。入れ直した後に
-  もう一度置くこと。
-- `cacheDir` を渡さない（既定のキャッシュそのものを温めた）使い方では、この2つは最初の読み込みで既定のキャッシュに
-  入るので、この節の手当ては要らない（上の 2026-09-27 追記の「ネットワークを切っても読めた」はこの形の測定）。
-- このパッケージは `env` を書き換えない（`env` はプロセス全体で共有される大域である——下の「ネットワークに一切出ずに…」の節）。
-- ⛔ 確かめていないこと: `revision` を `main` 以外にしたとき（`cacheDir` の中の鍵が `<repo>/<revision>/<file>` になる）。
-  transformers.js の 4.2.0 以外の版。
+#### `revision` を `main` 以外にしたときの `cacheDir` の鍵
 
-この振る舞いは `src/__tests__/cache-dir-preflight-default-cache.test.ts` が縛っている（ネットワークに出ない形で、
-既定のキャッシュの3つの状態を当てる）。transformers.js の版上げで前段の確認が `cacheDir` を見るようになれば、その歯が
-赤くなる——そのときはこの節と歯を一緒に直すこと。
+transformers.js は `revision` が `"main"` のときだけキャッシュの鍵を `<repo>/<file>` にする。`main` 以外
+（枝名・tag・commit sha）を渡すと、鍵は **`<repo>/<revision>/<file>`** になる（`@huggingface/transformers` の
+`src/utils/hub.js` の `revision === 'main' ? ... : pathJoin(path_or_repo_id, revision, filename)` で確認済み）。
+
+⟹ **`revision` を渡す前に `revision` 無し（＝ `main` の鍵）で温めた `cacheDir` には当たらない。**`revision` を
+固定して使うなら、その `revision` を指定した状態で温める必要がある（`examples/chat` の CI ジョブは
+`cacheDir` と `revision` を両方固定しているので、これに当たる。`src/providers.ts` の
+`localEmbeddingPinnedRevision()` を見ること）。
+
+⛔ **ここは doc だけで、実装は変えていない**（この節の `env.cacheDir` の差し替えは、`cache_dir` オプションの
+ルートディレクトリを差し替えるだけであり、`<repo>/<revision>/<file>` という鍵の組み立て自体には関与しない
+——transformers.js 側の挙動として、そのまま動く）。
+
+この振る舞いは次の歯が縛っている:
+
+- `src/__tests__/cache-dir-preflight-default-cache.test.ts`（本物の transformers.js・偽のファイル。
+  `createLocalEmbeddingPipeline` 経由で読み込み、ネットワークへの要求が0回であることを縛る）。
+- `src/__tests__/cache-dir-env-swap-serialization.test.ts`（`@huggingface/transformers` を丸ごと mock。
+  `env.cacheDir` の差し替えと復元・直列化そのものを縛る——上の実測の再現も含む）。
+- `src/__tests__/live.cache-dir-offline-read.test.ts`（opt-in。本物のモデルを一度だけ温め、まっさらな別プロセス・
+  既定のキャッシュ空・ネットワーク無効の状態で `createLocalEmbeddingPipeline` から読み、256次元のベクトルが
+  ネットワーク0回で返ることを確かめる）。
+
+transformers.js の版上げで前段の確認が `cache_dir` を自分で運ぶようになれば、上の歯は0回のまま変わらず緑だが、
+この差し替え自体が不要になる（実害は無いが、意味の無い迂回になる）——ADR 0361 の「これが覆るとしたら」を見ること。
 
 ### 先に読み込ませたいときは `warmup()`
 
@@ -531,9 +563,13 @@ new LocalEmbeddingProvider({ cacheDir: "/var/lib/mnemora/models" });
 
 🔴 **`repo` に絶対パスは渡せない。**transformers.js はモデル id を
 `env.localModelPath` からの**相対**で解決するので、`repo` に渡すのは
-「そのディレクトリの下のフォルダ名」である。⟹ **`env` を触る必要があり、
-それは `createPipeline` を差す仕事になる**（このパッケージが `env` を
-勝手に書き換えないのは、`env` がプロセス全体で共有される大域だからである）。
+「そのディレクトリの下のフォルダ名」である。⟹ **`env.localModelPath`・`env.allowRemoteModels`
+を触る必要があり、それは `createPipeline` を差す仕事になる**——既定の `createPipeline`
+（上の「`cacheDir` を渡すと、読み込みの前段の確認もそこを見る」節）が触るのは
+`env.cacheDir` だけであり、`pipeline()` を呼んでいる間だけの一時的な差し替えである。
+`env.localModelPath`・`env.allowRemoteModels` にはどちらのケースでも触れない
+（`env` はプロセス全体で共有される大域なので、既定の `createPipeline` は
+必要な最小限（`cacheDir` だけ）しか触らない設計にしてある）。
 
 **この形が実際に動くことは確かめた**（2026-09-10T00:37Z にこの器で実行。
 以下は `LocalEmbeddingPipeline` が**必須 interface**になった後の形——
