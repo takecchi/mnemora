@@ -224,6 +224,15 @@ CI で再発し続けている**（Issue 本文・#1004）ことも、doc だけ
    になるため、`revision` を指定する前に `revision` 無しで温めた `cacheDir` には
    当たらない——この ADR の差し替えは `cache_dir` オプションのルートディレクトリを
    差し替えるだけで、鍵の組み立てには関与しないので、この相互作用はそのまま残る。
+   🔴 **さらに、`revision` を `main` 以外にすると、この ADR の直し方は届かない。**前段の確認は
+   `revision` も運ばず、`main` の鍵（`<repo>/config.json`）を探す。`<repo>/<revision>/` の下だけを
+   温めた `cacheDir` では当たらず、ネットワークへ出る。【実測 2026-09-29】`<repo>/<revision>/` に4ファイルを
+   揃えた `cacheDir` と固定の sha（`scripts/local-embedding-pinned-revision.json`）を
+   `createLocalEmbeddingPipeline` に渡すと、fetch を必ず失敗させた状態で `resolve/main/config.json` へ1回出て
+   失敗した。本 PR の CI の `examples/chat` ジョブの測るだけのステップも `ok=false requests=3`
+   （3回とも `resolve/main/config.json`）のままだった——同ジョブは `cacheDir` と `revision` を両方固定している。
+   ⟹ `revision` を固定した使い方をオフラインで読めるようにするのは、この ADR の射程の外である
+   （前段の確認に `main` の鍵を満たさせるには写しを置くしかなく、案2 と同じ理由で今回は採らない）。
 3. **同一 repo・異なる `cacheDir` の「両方とも成功する」組み合わせを、実モデルでは
    測っていない。**「測ったこと」2番4で確かめたのは「失敗の後に成功する」組み合わせ
    だけである。`get_file_metadata`/`get_config` の `memoizePromise` は**成功した結果を
@@ -285,7 +294,5 @@ CI で再発し続けている**（Issue 本文・#1004）ことも、doc だけ
 
 - 負債3（同一 repo・異なる `cacheDir` の「両方とも成功する」組み合わせ）を実モデルで。
 - 負債4（複数インスタンスをまたいだ直列化による速度低下）の定量。
-- `revision` を `main` 以外にした状態での、この差し替えの実際の動作（本物のモデルでの
-  検証は行っていない。README・本 ADR の記載はソースの読解に基づく）。
 - transformers.js の 4.2.0 以外の版での前段の確認の実装（版が上がれば「測ったこと」1番の
   詳細が変わりうる）。

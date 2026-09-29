@@ -409,8 +409,8 @@ transformers.js の `env.cacheDir` を `cacheDir` と同じ場所へ一時的に
   **本来成功するはずの側**が `this.tokenizer is not a function` で落ちた。待ち行列を挟むと両方とも正しく決着する
   （片方は成功、もう片方はそのディレクトリの中身どおりに失敗する）。**一方が失敗しても、待ち行列そのものは
   詰まらない**——次の読み込みは待たされず進む。
-- ⚠ 確かめていないこと: `revision` を `main` 以外にしたとき（`cacheDir` の中の鍵が `<repo>/<revision>/<file>` になる。
-  下の節）。transformers.js の 4.2.0 以外の版。同じプロセス内の別のライブラリが `env.cacheDir` を読む・書く
+- 🔴 **`revision` を `main` 以外にすると、この直し方は届かない**——`cacheDir` を温めていても、オフラインでは今も読めない（下の節）。
+- ⚠ 確かめていないこと: transformers.js の 4.2.0 以外の版。同じプロセス内の別のライブラリが `env.cacheDir` を読む・書く
   タイミングと重なったときの網羅的な組み合わせ（直列化しているのはこのパッケージ自身の呼び出しどうしだけである）。
 
 #### `revision` を `main` 以外にしたときの `cacheDir` の鍵
@@ -420,13 +420,21 @@ transformers.js は `revision` が `"main"` のときだけキャッシュの鍵
 `src/utils/hub.js` の `revision === 'main' ? ... : pathJoin(path_or_repo_id, revision, filename)` で確認済み）。
 
 ⟹ **`revision` を渡す前に `revision` 無し（＝ `main` の鍵）で温めた `cacheDir` には当たらない。**`revision` を
-固定して使うなら、その `revision` を指定した状態で温める必要がある（`examples/chat` の CI ジョブは
-`cacheDir` と `revision` を両方固定しているので、これに当たる。`src/providers.ts` の
-`localEmbeddingPinnedRevision()` を見ること）。
+固定して使うなら、その `revision` を指定した状態で温める必要がある。
 
-⛔ **ここは doc だけで、実装は変えていない**（この節の `env.cacheDir` の差し替えは、`cache_dir` オプションの
-ルートディレクトリを差し替えるだけであり、`<repo>/<revision>/<file>` という鍵の組み立て自体には関与しない
-——transformers.js 側の挙動として、そのまま動く）。
+🔴 **ただし、`revision` を指定して温めた `cacheDir` でも、オフラインでは今も読めない。**読み込みの前段の確認は
+`revision` も運ばないので、`<repo>/<revision>/<file>` ではなく `main` の鍵（`<repo>/config.json`）を探す。
+上の `env.cacheDir` の差し替えで探す場所は `cacheDir` になるが、そこに在るのは `<repo>/<revision>/` の下の
+ファイルだけなので当たらず、`resolve/main/config.json` を取りに出る。
+【実測 2026-09-29、`@huggingface/transformers@4.2.0`】`<repo>/<revision>/` の下に4ファイルを揃えた `cacheDir` と、
+`scripts/local-embedding-pinned-revision.json` の sha を渡して `createLocalEmbeddingPipeline` から読むと、
+fetch を必ず失敗させた状態で `resolve/main/config.json` へ1回出て失敗した。`examples/chat` の CI ジョブは
+`cacheDir` と `revision` を両方固定している（`src/providers.ts` の `localEmbeddingPinnedRevision()`）ので、
+この形に当たる——同ジョブの「温めたキャッシュだけで…（測るだけ）」のステップが `ok=false` のままなのはこのためである。
+
+⛔ **ここは doc だけで、実装は変えていない。**前段の確認に `main` の鍵を満たさせるには、既定のキャッシュか
+`cacheDir` の `<repo>/` の下へ写しを置く必要がある。これは transformers.js の内部の鍵の形に結びつく
+（[ADR 0361](../../docs/decisions/0361-local-embedding-cache-dir-env-swap.md) の案2 と同じ理由で、今回は採らない）。
 
 この振る舞いは次の歯が縛っている:
 
