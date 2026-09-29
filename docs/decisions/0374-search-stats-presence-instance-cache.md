@@ -253,6 +253,7 @@
     推論のとおり、`memories` 側は他ファイルの影響を受けない設計だが、この歯は
     「往復が0回か1回か」という際どい数を何度も検算するため、疑いの余地を
     構造的に消しておく価値がある）。
+  - **2026-09-29 追記（直列の群へ移した）**: `recall-roundtrip-count`・`search-many-primary-key-lookup`・`search-primary-key-lookup`・`search-stats-presence-result-equivalence`（いずれも `.postgres.test.ts`）を `SERIAL_TEST_FILES` へ移した——worker 専用 DB の `memories` に `ANALYZE` を明示的に打つので、上の推論（`StatsPresenceGate` の判定は変わらない）とは別に、同じ DB を後から使うファイル（統計の有無を前提にする `memories-statistics` や、プランの形を縛る歯）の見積もりを変えうるため。`search-stats-presence-scope` は専用の使い捨て DB で `ANALYZE` を打ち、他のファイルと DB を共有しないので、並列の群に残した。
 
 - **採らなかった案**:
 

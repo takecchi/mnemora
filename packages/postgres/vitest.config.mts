@@ -36,6 +36,12 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/extension-mode.postgres.test.ts",
   "src/__tests__/migrate-concurrency.test.ts",
   "src/__tests__/vector-space-concurrency.test.ts",
+  // worker 専用 DB の `memories` に `ANALYZE` を明示的に打ち、同じ DB を後から使う
+  // ファイルのプランの見積もりを変えうるもの（Issue #1415、ADR 0374）。
+  "src/__tests__/recall-roundtrip-count.postgres.test.ts",
+  "src/__tests__/search-many-primary-key-lookup.postgres.test.ts",
+  "src/__tests__/search-primary-key-lookup.postgres.test.ts",
+  "src/__tests__/search-stats-presence-result-equivalence.postgres.test.ts",
 ];
 
 const SHARED_SETUP_FILES = [
