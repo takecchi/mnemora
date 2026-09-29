@@ -17,10 +17,9 @@
      LIMIT n` に支える索引が無く、in-scope 件数ぶんの `Seq Scan` + top-N `Sort` を
      毎回行っている。**
 
-  マネージャーの前段の測定（`/tmp/mgr-6c225812-bench/results.md`）が、100万行・
-  `max_parallel_workers_per_gather=0`・同時1・非active比率0%・warm で全体
-  **2047ms**、うち①件数集計（`HashAggregate`）が**1359ms**、②`digestBand`
-  （`Seq Scan` + top-N `Sort`）が**646ms**であることを実測している。
+  100万行・`max_parallel_workers_per_gather=0`・同時1・非active比率0%・warm での
+  実測は、下の「測ったこと」に在る（前の担当の測定は、測り方が本 ADR の指定と違っていたため
+  使わず、全部測り直した）。
 
   本 ADR は、①と②に別々の手当てをする:
 
@@ -43,7 +42,9 @@
   ## 案A: `idx_memories_digest_band` 部分索引
 
   1. **`(tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC) WHERE status IN
-     ('active', 'contested')` の部分索引を足す**（`packages/postgres/migrations/0028_digest_band_index.sql`）。
+     ('active', 'contested')` の部分索引を足す**（`packages/postgres/migrations/0028_digest_band_index.sql`。番号が 0027 を飛ぶのは、
+     同じ時期に PR #1444 が `0027_erase_tenant_fk_indexes.sql` を持つため。`runMigrations` は
+     ファイル名の昇順で未適用のものを適用するだけで、番号の連続は要求しない）。
      - `status IN (...)` を索引の**列**ではなく**部分述語**にする——複数値の等値条件を
        列に含めると、B-tree は値ごとに別々の範囲になり `ORDER BY <expr> DESC, id DESC`
        の全順序を1本のスキャンでは提供できない（値ごとの結果をマージする必要があり、
@@ -63,9 +64,8 @@
   4. **`subjectId` 絞りには専用の複合索引を足さない。** ADR 0307 の実測で
      `subjectId` ありの呼び出しは既に軽い（10万行・中規模 subject で 6.9ms 台）——
      支配項はテナント全体の集計であって、subject 単位の digestBand ではない。
-     今回の実測（後述「測ったこと」）でも、`subjectId` 絞りの digestBand は
-     プランナが（対象行が少ないため）索引を使わず `Seq Scan` を選ぶことがあったが、
-     実行時間自体は 1ms 未満に収まっており、実害は無い。
+     `subjectId` 絞りの呼び出しは、今回の測り直しでは測っていない（下「確かめて
+     いないこと」）。
 
   ## 案C: `RecallQuery.scopeAggregate: "exact" | "skip"`
 
@@ -124,97 +124,137 @@
 
 - **測ったこと**:
 
-  ### 実測条件
+  ### 器・データ・手順（2026-09-30、このPRの担当が測り直した）
 
-  - PostgreSQL 17.11（native、`initdb`）、`max_parallel_workers_per_gather=0`
-    （接続オプションで固定）、同時実行数1、非active比率0%（全件 `active`）、warm。
-  - **案A は SQL 文を変えていない**ため、「前」を再現するのに main ブランチの
-    別ビルドは用意しなかった——**同じコード（このブランチの `PostgresMemoryStore`）
-    のまま、索引の有無だけを違えた2つの DB**
-    （`mnemora_agg_1000000_idx`＝このブランチの migrate をそのまま適用、
-    `mnemora_agg_1000000_noidx`＝ `idx_memories_digest_band` だけを `DROP INDEX` した
-    もの）を、同一プロセス内で `noidx → idx` の順に ABAB 交互実行した
-    （8ラウンド、各ラウンド warmup 1回 + measured 3回、n=24）。同じデータ・同じ
-    コード・同じ器で、変数を1つ（索引の有無）だけ動かした形——ADR 0307 の
-    「dist-old/dist-new を交互実行」と同じ考え方を、コード差分がゼロな分、より
-    単純化したものである。
+  - **器**: Intel Xeon Platinum 8581C（32 vCPU）・メモリ 251GB（他の作業者と共有の
+    Linux 器で、測定中も他のプロセスが動いていた——絶対値は器の負荷で動く）、
+    PostgreSQL 17.11（Debian 版、`initdb` で自分専用に立てたインスタンス、
+    `shared_buffers=2GB`・`work_mem=4MB`（既定）・ロケール `C.UTF-8`）。
+    **接続オプションで `max_parallel_workers_per_gather=0` に固定**（`SHOW` で 0 を
+    各点で確かめた）。同時実行数1（1接続）。
+  - **データ**: `memories` を全件 `status='active'`（非 active 比率0%）・単一テナント・
+    `subject_id` は `floor(power(random(),3) * (行数/100))` の skew・`occurred_at` は NULL・
+    `recorded_at` は過去365日の一様乱数。`setseed(0.20260930)`。行数は 100万 と 10万。
+  - **問い合わせ**: `PostgresMemoryStore.aggregateScope(ctx, {}, { digestBand: { limit: 50,
+    excludeMemoryIds: <8件> } })`（`recall()` が既定で出す形）。案C は同じ呼び出しに
+    `scopeAggregate: "skip"` を足したもの。
+  - **前と後**: 前 = `origin/main`（案A の前、`15c0c78`）を**別の worktree**
+    （`/tmp` 下）に作ってビルドしたもの。後 = このブランチ。**ソースは上書きして
+    いない**（2本のビルドを別々の場所に置いた）。
+  - **索引の切り替え**: 1つのデータ（行数ごとに1回だけ INSERT）を `agg_<行数>_noidx`
+    に作り、main の migration（0001〜0026）だけを適用した。`agg_<行数>_idx` は
+    `noidx` を `CREATE DATABASE ... TEMPLATE` で複製し、**このブランチの
+    `runMigrations` をそのまま当てて**作った（未適用の `0028_digest_band_index.sql`
+    だけが走り、`idx_memories_digest_band` ができる）。⟹ 2つの DB は行も統計
+    （`VACUUM ANALYZE` 済み）も同一で、違いは索引1本だけである。前は `noidx`、
+    後と skip は `idx` に接続し、**各点の冒頭で `pg_indexes` を見て、索引の有無が
+    期待どおりでなければ止まる**。前後の `exact` の返り値（`digests`・
+    `digestEligible`・`totalInScope` のハッシュ）が一致することも確かめた。
+  - **測り方**: 1点 = 別々の node プロセス（起動 → 1回目を捨てる／記録 → 続けて7回）。
+    **12往復**、往復ごとに前・後・skip を1点ずつ、実施順を往復ごとに入れ替えた
+    （偶数往復は 前→後→skip、奇数往復は skip→後→前）。p50/p95 は12往復の測定
+    84回（7回×12）をまとめた値。**往復ごとの差（後 − 前）は、往復ごとの p50（または
+    p95）どうしを引いたもの**で、その12個の中央値と揺れ（四分位範囲 IQR、最小〜最大）を出す。
+  - 生の数値・スクリプトは commit していない（測定用の使い捨て）。⚠ 再測定する人は
+    上の手順で作り直すこと。
 
-  ### 案A: 100万行・warm・parallel=0・conc=1（交互, n=24）
+  ### 100万行・warm・並列0・同時1（12往復、各点の測定84回）
 
-  |            |    p50 |    p95 |         min/max |
-  | ---------- | -----: | -----: | ---------------: |
-  | 前（索引なし） | 1652.6ms | 1889.4ms | 1428.4 / 2029.4 |
-  | 後（索引あり） | 1211.6ms | 1445.6ms | 1106.3 / 1510.1 |
+  | | p50 | p95 | min〜max |
+  | --- | ---: | ---: | ---: |
+  | 前（main・索引なし・exact） | 930.4ms | 1030.4ms | 690.1〜1075.8ms |
+  | 後（案A・索引あり・exact） | 627.7ms | 714.1ms | 458.1〜796.3ms |
+  | 案C（索引あり・`"skip"`） | 1.5ms | 2.0ms | 1.0〜2.6ms |
 
-  ⟹ **p50 で約27%減（約1.36倍速）。**
+  | 往復ごとの差 | 中央値 | IQR | 最小〜最大 | 正の往復 |
+  | --- | ---: | ---: | ---: | ---: |
+  | 後 − 前（p50） | −284.0ms | −308.0〜−250.3ms | −353.3〜−221.8ms | 0/12 |
+  | 後 − 前（p95） | −329.4ms | −343.1〜−260.6ms | −408.3〜−211.1ms | 0/12 |
+  | skip − 前（p50） | −934.8ms | −959.8〜−830.5ms | −1005.9〜−726.4ms | 0/12 |
+  | skip − 後（p50） | −644.6ms | −671.1〜−541.9ms | −681.3〜−504.6ms | 0/12 |
 
-  ### 案C: 100万行・warm・parallel=0・conc=1・`scopeAggregate: "skip"`（索引あり DB, n=24）
+  ⟹ 12往復のすべてで、後は前より小さかった。差の大きさは往復ごとに約220〜350ms と
+  揺れる（器が共有で、絶対値は測る時刻の負荷で動く）。
+  **「約○%速くなった」とは書かない**——差の中央値と幅がこの測定の結果である。
+  差の主因は、下の EXPLAIN が示す `digestBand` 側の `Seq Scan` + top-N `Sort` の消失である。
+  `"skip"` は件数集計そのものを発行しないので、差の大半は集計本体の分である
+  （後 − skip ≒ 626ms が、索引を足したあとにも残っている集計の費用）。
 
-  |                    |   p50 |  p95 |     min/max |
-  | ------------------ | ----: | ---: | ----------: |
-  | 後（索引あり・skip） | 1.2ms | 3.4ms | 0.8 / 12.0 |
+  ### 10万行・cold と warm-after・並列0・同時1（12往復）
 
-  ⟹ 「前（索引なし・exact）」比で**約1,377倍**、「後（索引あり・exact）」比で
-  **約1,010倍**——件数集計（支配項）を止めると、100万行でも1桁 ms に収まる
-  （digestBand だけを索引経由で引くコストのみが残る）。
+  「cold」は**その点の直前に `pg_ctl restart -m fast`（`shared_buffers` を空にする）
+  したあとの、新しい node プロセスの1回目**。「warm-after」は同じプロセスの2〜8回目
+  （各点7回、計84回）。
 
-  ### 案A: 10万行・cold/warm-after・parallel=0・conc=1（前後それぞれ2ラウンド）
+  | | cold p50 | cold p95 | cold min〜max | warm-after p50 | warm-after p95 |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | 前 | 103.3ms | 152.4ms | 91.8〜191.8ms | 73.4ms | 82.0ms |
+  | 後 | 72.7ms | 99.7ms | 65.7〜127.2ms | 46.4ms | 55.1ms |
+  | 案C（skip） | 6.6ms | 7.3ms | 5.6〜7.8ms | 1.2ms | 1.8ms |
 
-  「cold」の近似は前段と同じ——**root 権限が無く `/proc/sys/vm/drop_caches` へ
-  書けないため、OS ページキャッシュは落とせていない。「cold」は自分専用 Postgres
-  インスタンスの再起動のみ（`shared_buffers` を空にする）。** 1ラウンドにつき
-  cold 5回・warm-after 15回、`noidx`→`idx` の順に `pg_ctl restart` を挟んで
-  2ラウンド（cold n=10、warm-after n=30）。
+  cold の各値は n=12 で、p95 は粗い（12点のうち上から2番目付近）。
 
-  |            |    cache |   p50 |   p95 |        min/max |
-  | ---------- | -------- | ----: | ----: | --------------: |
-  | 前（索引なし） | cold        | 134.0ms | 195.6ms | 111.9 / 208.7 |
-  | 前（索引なし） | warm-after  | 110.8ms | 129.5ms |  99.1 / 142.0 |
-  | 後（索引あり） | cold        |  82.4ms | 140.9ms |  64.6 / 141.8 |
-  | 後（索引あり） | warm-after  |  77.6ms | 101.9ms |  66.1 / 109.0 |
+  | 往復ごとの差（後 − 前） | 中央値 | IQR | 最小〜最大 | 正の往復 |
+  | --- | ---: | ---: | ---: | ---: |
+  | cold（1点どうし） | −31.4ms | −36.0〜−25.1ms | −64.7〜−21.0ms | 0/12 |
+  | warm-after（p50） | −27.5ms | −29.6〜−23.1ms | −33.2〜−17.6ms | 0/12 |
 
-  ⟹ **10万行では、前・後とも 200ms を安定して超えなかった**（p95 の最大は前側
-  cold の195.6ms。個別サンプルでは前側 cold に208.7ms が1つあったが、n=10と
-  少ないためこのばらつきをそのまま受け取る）。**索引の効果は cold/warm-after
-  どちらでも一貫して見える**（cold: 134.0→82.4ms、warm-after: 110.8→77.6ms、
-  どちらも約25〜30%減）。
+  （skip − 前 は cold −96.6ms（IQR −102.3〜−91.9）、warm-after −72.2ms（IQR −73.9〜−70.6）。）
 
-  ### EXPLAIN（100万行、warm、parallel=0、digestBand込み、強制なし）
+  ⚠ **「cold」の近似の限界**: Postgres の再起動は `shared_buffers` を空にするだけで、
+  **OS のページキャッシュは残る**（root ではないので `drop_caches` は使えず、
+  測定中は同じ器で他の作業も動いていた）。だからここでの cold は、ディスクから読む
+  本物の cold ではなく「Postgres のバッファが空・OS のキャッシュは温かい」状態である。
+  ディスク I/O を含む真の cold は測っていない。
 
-  **前（索引なし）**: Execution Time **1676.730ms**
+  ### #355 を開け直す条件に当てる
+
+  [Issue #355](https://github.com/takecchi/mnemora/issues/355) は**開け直さない**（この
+  ADR は #355 の残件のうち、①索引で塞げる分（案A）と、②呼び出し側が選べる止め方
+  （案C）だけを入れる）。開け直す条件は「**10万行で 200ms を安定して超えたら**」である。
+  今回の10万行の値はこの条件に**当たらない**: 前（main）の最大が cold 191.8ms
+  （12点中の1点）、cold の p95 が 152.4ms、warm-after の p95 が 82.0ms で、
+  **200ms を超えた点は前でも後でも1つも無かった**。ただし前側の cold の最大は 200ms に
+  8ms 手前まで来ており、真の cold（OS キャッシュも空）と、器が遅いときは超えうる
+  ——それは今回は測っていない。
+
+  ### 索引の構築時間（参考。1回ずつの測定で、揺れは見ていない）
+
+  このブランチの `runMigrations` で `0028_digest_band_index.sql` だけが走った時間
+  （`_mnemora_migrations` への記録を含む）: 100万行で 1212ms（索引 56MB）、
+  10万行で 106ms（索引 5.8MB）。この間、`memories` への**書き込みは止まり、読み取りは
+  通る**（素の `CREATE INDEX` は `SHARE` ロックを取る——`ACCESS EXCLUSIVE` ではない）。
+
+  ### EXPLAIN（100万行、warm、並列0、`digestBand` の部分だけを取り出した問い合わせ）
+
+  `aggregateScope` の `digestBand` のサブクエリと同じ形の SQL（`tenant_id`・
+  `status IN ('active','contested')`・除外 id 1件・`ORDER BY COALESCE(occurred_at,
+  recorded_at) DESC, id DESC LIMIT 50`）を手で書き、`EXPLAIN (ANALYZE, BUFFERS)` を
+  3回ずつ打った（下は3回目。`aggregateScope` 全体の EXPLAIN ではない）。
+
+  **前（索引なし）**: Execution Time 349.5ms
 
   ```
-  Aggregate (actual time=1671.580..1671.584 rows=1 loops=1)
-    Buffers: shared hit=160 read=68806
-    InitPlan 1 (digests)
-      -> Limit -> Sort(top-N heapsort) -> Seq Scan on memories
-         (actual rows=1000000) -- actual 542.648ms, Buffers: shared hit=96 read=34387
-    -> HashAggregate (Group Key: subject_id, actual 1098.444..1107.797ms)
-       -> Seq Scan on memories (actual rows=1000000)
+  Limit (actual time=349.495..349.505 rows=50 loops=1)
+    ->  Sort (Sort Key: COALESCE(occurred_at, recorded_at) DESC, id DESC; top-N heapsort)
+          Buffers: shared hit=33340
+          ->  Seq Scan on memories (actual time=0.010..237.837 rows=1000000)
   ```
 
-  **後（索引あり）**: Execution Time **1305.641ms**
+  **後（索引あり）**: Execution Time 0.104ms
 
   ```
-  Aggregate (actual time=1304.528..1304.531 rows=1 loops=1)
-    Buffers: shared hit=135 read=34401
-    InitPlan 1 (digests)
-      -> Limit -> Index Scan using idx_memories_digest_band
-         (Index Cond: tenant_id = ..., actual rows=50) -- actual 0.121ms, Buffers: shared hit=53
-    -> HashAggregate (Group Key: subject_id, actual 1271.244..1281.348ms)
-       -> Seq Scan on memories (actual rows=1000000)
+  Limit (actual time=0.024..0.078 rows=50 loops=1)
+    ->  Index Scan using idx_memories_digest_band on memories (rows=50)
+          Index Cond: (tenant_id = 'bench-tenant')
+          Buffers: shared hit=53
   ```
 
-  ⟹ **digests 側は 542.6ms → 0.12ms（約4,500倍）、ディスク読み込みも消えた
-  （`read=34387` → 0）。** 全体の短縮幅（1676.7ms → 1305.6ms）は、ほぼこの
-  digests 側の削減と総バッファアクセスの減少（`read=68806` → `read=34401`）で
-  説明がつく。**本体の `HashAggregate`（支配項）は前後でほぼ同じ**
-  （1098〜1108ms → 1271〜1281ms、実行ごとの揺れの範囲）——**案A はここに効かない
-  設計であり、そのとおりの結果になっている。**
-
-  詳細な生データ・EXPLAIN 全文は `/tmp/mgr-6c225812-bench/results-stage2.md` および
-  同ディレクトリの `explain-1m-before-after.log`・`cold-warm-results.jsonl` に在る
-  （bench 用の使い捨て器なので commit しない）。
+  ⟹ `digestBand` 側は、100万行を舐める `Seq Scan` + top-N `Sort` から、50行だけを
+  読む `Index Scan` に変わった（ここは warm のバッファヒットのみの値）。
+  **集計本体（`GROUP BY subject_id`、支配項）は案A の対象外**で、`aggregateScope`
+  全体の後の p50 627.7ms はほぼそれである（この ADR は本体の内訳の EXPLAIN を
+  取り直していない）。
 
 - **等価性・構造の歯**:
 
@@ -262,8 +302,9 @@
 - **引き受けた負債**:
 
   1. **本体の `HashAggregate`（支配項）は今回も消えていない。** 1M行で
-     1098〜1281ms 掛かったままである——本 ADR が縮めたのは digestBand 側
-     （542.6ms→0.12ms）だけであり、`recall()` を条件なしで重くしている
+     案A のあとの p50 627.7ms のうち、`"skip"`（1.5ms）との差の約626ms が集計に
+     掛かったままである——本 ADR が縮めたのは digestBand 側
+     （EXPLAIN で 349.5ms→0.104ms）だけであり、`recall()` を条件なしで重くしている
      最大の要因は依然として残っている。この負債を消すには「採らなかった案」
      1・2（近似カウント・事前カウンタ表）のどちらかを、実際に測ったうえで
      採る判断が要る——それは本 ADR の範囲外である（案C の `"skip"` は
@@ -295,16 +336,20 @@
 
 - **確かめていないこと**:
 
-  - **300万行規模での案A・案Cの効果は測っていない**（前段のベンチは
-    300万行まで測っているが、本 ADR の前後測定は100万行・10万行に限る）。
+  - **300万行規模での案A・案Cの効果は測っていない**（本 ADR の前後測定は
+    100万行・10万行に限る）。
   - **並列実行（`max_parallel_workers_per_gather` > 0）を有効にした場合の
-    案A・案Cの効果は測っていない**——前段のベンチでは並列既定(2)が本体・
-    digestBand 側の両方に効くことが分かっているが、本 ADR の前後比較は
+    案A・案Cの効果は測っていない**——本 ADR の前後比較は
     `parallel=0` に固定した条件でのみ行った。
   - **同時実行下（複数コネクションが同時に呼ぶ場合）の案A・案Cの効果は
     測っていない**——単発呼び出しの交互実行のみ。
   - **真の cold cache（OS ページキャッシュも空）では測っていない**——
-    「Postgres 再起動のみ」という限定的な近似にとどまる。
+    「Postgres 再起動のみ」という限定的な近似にとどまる（「測ったこと」の限界の注）。
+  - **非 active の行（archived/superseded/forgotten）が混ざるデータでは測っていない**
+    （全件 active）。部分索引は非 active 行を持たないので索引は小さくなるが、
+    前後の差がどう変わるかは見ていない。
+  - **索引の構築時間は各規模1回ずつ**で、揺れを見ていない。
+  - **測定スクリプトは commit していない**（使い捨て）。「測ったこと」の手順から作り直す。
   - **`subjectId` 絞り・`decayFloorSeqUsesSubjectCounters`・taxonomy
     群カウントを伴う呼び出しの、案A・案C適用後のレイテンシは個別に測って
     いない**——等価性は歯で検査したが、benchmark の対象は基本条件

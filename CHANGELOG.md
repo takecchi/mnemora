@@ -80,14 +80,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **既定は省略時と同じ `"exact"`——1バイトも変わらない。** `"skip"` を渡すと `IndexBand.groups` は空・`totalInScope` は `0`・`countKind` は `'unknown'` になり、`omitted` の `filtered(archived/superseded/forgotten/period/expired/not_yet_valid/taxonomy/decayed)` は一切積まれなくなる——「スコープ内で何が落ちたか」の説明力を手放す代わりに集計の費用を払わない、という明示的な取引。
   - **目次帯（`digestBand`）は `"skip"` でも今日どおり出る**（集計とは独立した経路で、同じ PR の案A の索引が支える）。`digestEligible`（帯の外にあと何件あるか）だけは件数の一種なので、`digestBand` を指定した呼び出しに限り `{ count: 0, countKind: 'unknown' }` になる。
   - **`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、常に `countKind: 'exact'` を返し続ける契約**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故を繰り返さないための設計）。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。
-  - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm: `"exact"` p50 1211.6ms に対し `"skip"` は p50 1.2ms（約1,010倍）。詳細は ADR 0384「測ったこと」。
+  - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm（12往復、1点ごとに別プロセス）: 案A の索引ありの `"exact"` は p50 627.7ms、`"skip"` は p50 1.5ms。往復ごとの差（skip − exact）の中央値は −644.6ms（IQR −671.1〜−541.9ms、最小〜最大 −681.3〜−504.6ms、12往復すべて負）。10万行は cold（Postgres 再起動直後）・warm-after とも `"skip"` は p50 6.6ms・1.2ms。器・手順・限界は ADR 0384「測ったこと」。
   ⭕ 非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`@mnemora/postgres` の `aggregateScope` が、目次帯（`digestBand`）を組むときの内部の索引の使い方だけを変えた**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案A）——`ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` を支える部分索引 `idx_memories_digest_band`（新しい migration `0028_digest_band_index.sql`）を足した。**SQL 文・返り値の中身/順序/件数は1バイトも変えていない**——索引を追加しただけである。
-  - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm・digestBand込み: 全体 p50 1652.6ms → 1211.6ms（約27%減）。EXPLAIN では `digestBand` 側の `Seq Scan` + top-N `Sort`（542.6ms）が `Index Scan`（0.12ms）に置き換わったことを確認した——約4,500倍。テナント全体を `GROUP BY subject_id` で束ねる本体（支配項）は変わっていない。10万行では cold/warm-after とも約25〜30%減（詳細は ADR 0384「測ったこと」）。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る）。
+  - 【実測】`main`（案A の前）とこの枝を、同じデータ・同じ器で12往復、1点ごとに別プロセスで交互に測った（`max_parallel_workers_per_gather=0`・同時1・digestBand込み）。往復ごとの差（後 − 前）の中央値: 100万行 warm の p50 は −284.0ms（IQR −308.0〜−250.3ms、最小〜最大 −353.3〜−221.8ms、12往復すべて負。p50 の絶対値は前 930.4ms・後 627.7ms）。10万行は cold（Postgres 再起動直後の1回目）で −31.4ms（IQR −36.0〜−25.1ms）、warm-after の p50 で −27.5ms（IQR −29.6〜−23.1ms）。器は共有で、絶対値は測る時刻の負荷で動く。EXPLAIN では `digestBand` 側の `Seq Scan` + top-N `Sort`（349.5ms）が `Index Scan`（0.104ms）に置き換わった。テナント全体を `GROUP BY subject_id` で束ねる本体（支配項）は変わっていない。cold は OS のページキャッシュが残る近似で、真の cold は測っていない（詳細は ADR 0384「測ったこと」）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る。`ACCESS EXCLUSIVE` ではない）。100万行で構築を含む migration が約1.2秒（1回だけの測定）。
   ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
 
 ---

@@ -823,13 +823,13 @@ ADR 0307。
 
 > **⚠ 2026-09-30 追記（[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
 > 「1M行では測っていない」を埋めた。100万行・`max_parallel_workers_per_gather=0`・
-> 同時1・warm で全体 **1305.6ms**（本体の `HashAggregate` は 1271〜1281ms——「支配項は
-> 消えていない」は1M行でもそのまま成り立つ）。同じ ADR は、支配項ではなく
-> **`digestBand`（`Seq Scan` + top-N `Sort`）側**に部分索引を足し（案A）、
-> 542.6ms→0.12ms（約4,500倍）に縮めた。⛔ **上の「支配項は消えていない」は消さない**
+> 同時1・warm で全体 p50 **627.7ms**（案A の索引あり。索引なしは 930.4ms、12往復——
+> 「支配項は消えていない」は1M行でもそのまま成り立つ: `"skip"` は p50 1.5ms）。
+> 同じ ADR は、支配項ではなく **`digestBand`（`Seq Scan` + top-N `Sort`）側**に部分索引を足し（案A）、
+> その部分の EXPLAIN を 349.5ms→0.104ms に変えた。⛔ **上の「支配項は消えていない」は消さない**
 > ——1M行の実測でも同じ結論だからである。**支配項そのものを止める** opt-in
 > （`RecallQuery.scopeAggregate: "skip"`、案C）も同時に足した——`"skip"` なら
-> 100万行でも p50 1.2ms（詳細は ADR 0384「測ったこと」）。
+> 100万行でも p50 1.5ms（詳細は ADR 0384「測ったこと」）。
 
 ### `includeSubjectless` — subject X または主題なしを1回の recall で引く（Issue #608 項目③(b) / [ADR 0286](./decisions/0286-recall-include-subjectless.md)）
 
