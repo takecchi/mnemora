@@ -347,6 +347,15 @@ sync/deferred のどちらでも値が保持されることを構造的に保証
 理由: 複数の元 Memory が異なる区間を持つとき、どう引き継ぐか（最新を採る／区間の積を
 採る／和を採る）は別の判断であり、null のままが最も安全（何も落ちない）。
 
+> **2026-09-29 追記（クローン miku の委譲先）**: この射程外は
+> [ADR 0368](./0368-consolidate-reflect-validity-intersection.md) が埋めた——
+> `buildConsolidatedMemory`/`buildReflectedMemory` は材料の区間の**積**（`validFrom` は
+> 最大値、`validUntil` は最小値）を引き継ぐ。「null のままが最も安全」という上の理由は、
+> 期限切れ・未到来の記憶が統合元・材料に入りうる前提（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)
+> が指摘し、ADR 0089/ADR 0091 の 2026-09-29 追記が塞いだ）の下で成り立っていた判断であり、
+> その前提が変わった後は「積を採らない」方が別の害（期限切れの主張が期限の無い記憶として
+> 永久に recall へ戻り続ける）を残す。和・最新を採らなかった理由は ADR 0368「採らなかった案」。
+
 ### 2. 抽出（LLM）が `validFrom`/`validUntil` を埋めるかどうか
 
 **採らなかった案参照。** issue 本文・マネージャー決定4が明示的に射程外にしている。

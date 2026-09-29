@@ -165,7 +165,7 @@ describe("reflect・reextract の材料と引き継ぎ（今の振る舞い）",
         ]);
       });
 
-      it("reflect の { memoryIds } は、いまの時点で有効期間の外にある記憶を材料にしない（Issue #1188。2026-09-29 変更）。内省の Memory は今どおり有効期間を持たない", async () => {
+      it("reflect の { memoryIds } は、いまの時点で有効期間の外にある記憶を材料にしない（Issue #1188。2026-09-29 変更）。材料（current）が有効期間を持たなければ、内省の Memory も持たない（積、ADR 0368。非 null な積は consolidate-reflect-carryover.postgres.test.ts の専用の it が検査する）", async () => {
         const kit = await makeKit();
         const expiredValidUntil = new Date("2026-01-01T00:00:00.000Z");
         const expired = await add(kit, [1, 0, 0], {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Ctx } from "../ctx.js";
-import { intersectAttributes } from "./consolidate.js";
+import { intersectAttributes, intersectValidity } from "./consolidate.js";
 import { resolveDigest } from "../extraction.js";
 import { dropBlankTags } from "../llm-tags.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
@@ -135,6 +135,11 @@ export interface BuildReflectedMemoryParams {
  * - `tags`: LLM が返した `tags` があればそれを使い、無ければ eligible の `tags` の和集合。
  * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0312 決定4）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
+ * - `validFrom` / `validUntil`: eligible 全件の**区間の積**（`intersectValidity`、
+ *   `consolidate.ts`。Issue #1188 残り、ADR 0368）——`validFrom` は最大値、`validUntil`
+ *   は最小値。全部 `null` なら両方 `null`（今までの振る舞いのまま）。`consolidate` と
+ *   違い、`reflect` は材料を `superseded` にしない——材料が期限切れになっても、材料
+ *   自身の行はそのまま `active` で残り続ける（ADR 0368「代償」は `consolidate` 側だけの負債）。
  * - `halfLifeHours` / `decayFloorAt`: 呼び出し側（`runtime.reflect`）がテナント既定値から
  *   計算して渡す。`decayFloorAt` は `strength: 1` を前提に計算する（`consolidate` と同じ）。
  * - `strength`: **`1`（`MAX_STRENGTH`）に固定する。`consolidate` と同じ値・同じ書き方**
@@ -208,6 +213,8 @@ export function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMem
     // 「積集合」の判定も1箇所に置く）。
     attributes: intersectAttributes(eligible),
     occurredAt,
+    // Issue #1188 残り（ADR 0368）: 区間の積。`intersectValidity`（consolidate.ts）参照。
+    ...intersectValidity(eligible),
     recordedAt: now,
     lastReinforcedAt: null,
     strength: 1,

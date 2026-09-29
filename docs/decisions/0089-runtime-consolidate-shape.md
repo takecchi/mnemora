@@ -583,3 +583,7 @@ CAS の破れや部分的な失敗という稀なケースで読み違えうる�
 - **射程外**: `reflect` の材料の選び方（同じ形がある。Issue #1188 のコメント）。忘却の床（`decayFloorAt`）は `{ memoryIds }` では今どおり見ない。
 - **反映先**: `packages/core/src/runtime.ts` の `ConsolidateSourceOutcome`・`ConsolidateNothingReason`・`ConsolidateTarget` の doc。上の表の本文は書き換えていない（`docs/decisions/README.md` の、採用済み ADR の扱い）。
 - **歯**: `packages/core/src/__tests__/consolidate-validity-gate.test.ts`（Fake。境界とやりすぎの形を含む）、`packages/postgres/src/__tests__/consolidate-target-selection.postgres.test.ts`（Postgres と testkit の fixture。`{ memoryIds }`・`{ seedMemoryId }`・`{ query }` の各形）。
+
+## 2026-09-29 追記2（クローン miku の委譲先）: 上の「採らなかった案」（区間の積）を、[ADR 0368](./0368-consolidate-reflect-validity-intersection.md) で採る
+
+すぐ上の「採らなかった案」は、統合先に統合元の区間の積を付ける案を、「期限の無い記憶を期限のある記憶と統合すると、期限の無い側の中身まで期限とともに `recall()` から落ちる」ことを理由に退けていた。**Issue #1188 の残り（このコメントの直後、`reflect` 側は #1388 で片付いた後に開き直された点）として、その判断を覆した。** 統合した本文は材料すべての主張を含むので、どれか1つの期限が切れた時点で本文の一部が偽になる——「期限の無い側の中身まで期限とともに落ちる」ことは、この変更が引き受けた代償として明示的に記録した（ADR 0368「代償」）。理由・採らなかった案・引き受けた負債の詳細は ADR 0368 を見ること。
