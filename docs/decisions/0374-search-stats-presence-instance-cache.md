@@ -375,9 +375,10 @@ postgres-db-parallel` でまとめて実行し（2026-09-30 実測）、**61件�
 どの順で `memories` を ANALYZE 済みにしたか」という実行順に依存しうる——並列の群では
 worker DB を共有する複数ファイルの実行順は保証されない。
 
-**直列/並列の分類基準（この状態変化をどう扱うべきか）は、この追記では判断しない——
-オーナー判断待ちとして残す。**本追記は「本文の主張が成り立たない」ことの訂正に留め、
-`vitest.config.mts` の `SERIAL_TEST_FILES` は変更していない。
+**直列/並列の分類基準は、統計が無い状態を意図して作るファイルだけを直列にする、と
+決めた。クローン miku の判断（オーナーではない）。**基準の中身と材料は、すぐ下の追記
+「直列の群へ入れる基準を書き直す」に書いた。本追記は「本文の主張が成り立たない」ことの
+訂正に留め、`vitest.config.mts` の `SERIAL_TEST_FILES` は変更していない。
 
 ### この追記が確かめていないこと
 
@@ -393,3 +394,64 @@ worker DB を共有する複数ファイルの実行順は保証されない。
   記録している論点）との関係は、この追記では検証し直していない——今回の実測は
   `reltuples`/`pg_stats` という DB 側の状態だけを見ており、`StatsPresenceGate`
   インスタンスの `confirmed` Set の中身までは覗いていない。
+
+## 追記（2026-09-30）—— 直列の群へ入れる基準を書き直す
+
+クローン miku の委譲先が書いた（オーナーではない）。
+
+**統計が無い状態を意図して作るファイルだけを直列にする。クローン miku の判断
+（オーナーではない、2026-09-30）である。**直列/並列の分類基準を、ここで決める。
+**上の本文と「2026-09-29 追記（直列の群へ移した）」は書き換えていない。**
+
+**新しい基準**:
+
+- **直列の群に入れるのは、統計が*無い*状態（`memories`・埋め込み表の `reltuples` の
+  有無）を意図して作る、またはその有無の移り変わりそのものを確かめるファイルである。**
+  `StatsPresenceGate` が見るのは `reltuples` の有無であり、同じ worker DB を使う別の
+  ファイルの `resetTestDatabase()`（`TRUNCATE` で `reltuples` が -1 に戻る——上の追記）や
+  `ANALYZE` が、その前提を横から変えうるためである。いま直列の群にある
+  `recall-roundtrip-count`・`search-many-primary-key-lookup`・`search-primary-key-lookup`・
+  `search-stats-presence-result-equivalence`（いずれも `.postgres.test.ts`）はこれに当たる
+  （各ファイルが「統計が無い」表を作り、`ANALYZE` を挟んで確認済みへ移ることを確かめている）。
+  ⟹ **2026-09-29 追記の「`memories` に `ANALYZE` を明示的に打つので直列へ」という理由付けは、
+  この基準で置き換える。**4本の分類そのものは変わらない。
+- **並列の群でよいのは、統計を*使う* `EXPLAIN` の歯のうち、`resetTestDatabase()` の後に
+  自分のデータを入れ、列を絞らない `ANALYZE memories` を打ってから assert するものである。**
+  列を絞らない `ANALYZE` は全列の統計を置き換えるので、前に同じ worker DB を使った
+  ファイルが残した `pg_stats`（`TRUNCATE` 後も残る——上の追記）は、assert の時点では
+  残っていない。
+
+**この決定の材料（2026-09-30、レビューでの調査）**:
+
+- **構造**: `ANALYZE memories` を打ち、共有の worker DB（`getTestClient()`）を使い、並列の
+  群にいるファイル（`grep -lE 'ANALYZE (memories|"?memories)'` から、直列の群にあるものと
+  `CREATE DATABASE` で専用の DB を作るものを除いた18本）を読み、18本すべてが
+  「reset → 自分のデータ → 列を絞らない `ANALYZE memories` → `EXPLAIN` の assert」の順で
+  あることを確かめた。
+- **悪い形での実測**: worker DB の TEMPLATE の複製元に、60,000行をすべて1テナント・
+  1 subject・`status = 'forgotten'`・claim key の subject 固定で入れて `ANALYZE` し、
+  `tenant_id`・`subject_id`・`status`・`claim_key_subject` の `n_distinct` を1に偏らせた。
+  この統計を引き継いだ worker DB で `claim-key-index.postgres.test.ts`（6件、
+  `Seq Scan on memories` を含まないことの assert を含む）と `vector-search-subject.test.ts`
+  （3件、`idx_memories_by_subject` を選ぶことの assert を含む）を走らせ、**どちらも緑だった。**
+  残る16本は構造を読んだだけで、実測していない。
+- **費用の見積もり**: 18本を直列の群へ移すと、CI の postgres ジョブの `test:db` は、
+  UTF8 の脚で約 +60〜+175秒、SQL_ASCII の脚で約 +65〜+140秒（どちらも中心は**約1.5分**）
+  延びると見積もった。根拠は、成功した CI の1回分のファイルごとの所要時間（並列の群は
+  3 workers）と、手元で18本を1 worker で走らせた時間である。UTF8 の脚はいま最長の
+  ジョブなので、延びた分はほぼそのまま CI 全体の待ち時間に乗る。**見積もりは推測である**
+  （CI の実測は1回分だけ。並列の群への配分が均等だというのも仮定）。
+- ⟹ 揺れる経路は構造上閉じており、移すと費用だけが乗る。**18本は並列の群に残す。**
+  `vitest.config.mts` の `SERIAL_TEST_FILES` は変えていない（同じ PR でコメントだけ
+  新しい基準に合わせた）。
+
+**これが覆るとしたら**: 統計を使う歯のうち、`ANALYZE` を打たずに `EXPLAIN` するもの、
+列を絞った `ANALYZE memories (…)` しか打たないもの、あるいは reset をしないものが
+並列の群に入ったとき。そのファイルは、前のファイルが残した `pg_stats` の上で assert する
+ことになる。**この条件を機械で見張る歯は無い**（レビューの `grep` で確かめただけである）。
+
+### この追記が確かめていないこと
+
+- 18本のうち16本は、構造を読んだだけで、偏らせた統計の上での実測はしていない。
+- CI の見積もりは1回分の run からの推測であり、複数の run での平均は取っていない。
+- 18本の抽出は `grep` 1回の結果であり、網羅は示していない。
