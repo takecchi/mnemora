@@ -396,6 +396,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0372](./0372-conformance-suite-issue-1238-promises.md) | Issue #1238 の棚卸しのうち7件を conformance suite の `it` として足す | 採用 (2026-09) |
 | [0373](./0373-conformance-suite-issue-1412-promises.md) | Issue #1412（Issue #1238 棚卸しの続き）のうち A8・A10・A11・コメント1・2 を conformance suite の `it` として足す | 採用 (2026-09) |
 | [0374](./0374-search-stats-presence-instance-cache.md) | `search()`/`searchMany()` の統計あり・無し切り替えを、1本の SQL の中の One-Time Filter から、インスタンス単位の記憶（`StatsPresenceGate`）へ変える（Issue #1415） | 採用 (2026-09) |
+| [0375](./0375-purge-scope-widened.md) | `purge()` が消す範囲を広げる——`tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の digest 帯 | 採用 (2026-09) |
 | [0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md) | claim key の衝突検出は、同じ observation（＝同じ発話）から抽出された兄弟 Memory どうしを一致から除く（Issue #835 候補1） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
