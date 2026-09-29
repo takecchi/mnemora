@@ -1,4 +1,4 @@
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import type {
   CreateLocalEmbeddingPipeline,
   LocalEmbeddingDtype,
@@ -379,20 +379,35 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    *   pipeline の `maxInputTokens`・`countTokens` は読まない。差し替えた pipeline では、上限を守るのはその `embed` の責任である。
    * - 返ったベクトルの件数が `texts` と違う・次元が `space.dimensions` と違う・有限でない成分を含むときは、素の `Error`。
    *
+   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: `opts?.signal`
+   * を受け取るが、`@huggingface/transformers` のパイプライン呼び出し自体を中断する口を
+   * 持たないため、**推論の途中では止まらない**。** このクラスがすることは、モデルの
+   * 読み込みの前後・推論（`pipeline.embed`、下の分割の有無に関わらず）の前後で
+   * `signal.throwIfAborted()` 相当を確かめるだけであり、推論そのものは最後まで走る
+   * ——`signal` が途中で abort されても、推論が終わるまでは待ち、終わった時点で abort
+   * 済みなら、ベクトルを**返さずに**投げ直す（reject の値は `signal.reason`）。
+   * `packages/core` 側は runtime 自身が provider の Promise と abort を競わせる
+   * （`runAbortable`）ため、runtime 経由の呼び出しはこの提供元の対応と無関係に中断が
+   * 効く——この対応が意味を持つのは、この provider を `packages/core` を介さず直接呼ぶ
+   * 呼び出し側にとってである。
+   *
    * ⭐ **`texts.length` が `maxBatchSize`（既定 {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}）
    * 以下なら、今までどおり1回の `pipeline.embed()` で済ませる（ビット一致）。**超えたときだけ、
    * 先頭から `maxBatchSize` 件ずつに分けて順に（直列で）推論し、結果を順番どおりに連結する
    * （Issue #1141 / ADR 0358）。prefix の付与・上限トークン数の検査の順序は変わらない
    * ——分割するかどうかを決める前に、まず `texts` 全体に prefix を付ける。
    */
-  async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
+  async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
     // `packages/openai` と同じ早期 return。**空でモデルを起こさない。**
     // ⟹ ウォームアップは `warmup()` を使うこと。
     if (texts.length === 0) {
       return [];
     }
+    opts?.signal?.throwIfAborted();
 
     const pipeline = await this.#load();
+    opts?.signal?.throwIfAborted();
 
     // ⭐ **prefix が空でも、必ず新しい配列を作る**（`this.#prefix === "" ? texts : ...` と
     // 分岐して素通しにしない）。
@@ -413,6 +428,9 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       prefixed.length <= this.#maxBatchSize
         ? await pipeline.embed(prefixed)
         : await this.#embedInChunks(pipeline, prefixed);
+    // 推論は最後まで走らせた（分割していても、上の doc コメントの追記のとおり）。
+    // ここで abort 済みなら、出来上がったベクトルを返さずに投げ直す。
+    opts?.signal?.throwIfAborted();
 
     // ⭐ 件数の一致だけは確かめる。
     //

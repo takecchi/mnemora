@@ -1,3 +1,4 @@
+import { isAbort, runAbortable } from "./abort.js";
 import type { Clock } from "./interfaces/clock.js";
 import type { Ctx } from "./ctx.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
@@ -457,11 +458,20 @@ async function fetchMandatoryCompanions(
 /**
  * `Runtime.recall` の本体。`query` を {@link RecallQuerySchema} で検査し（合わなければ zod の `ZodError`）、段1〜6を走らせ、記録した結果を返す。
  * ⚠ `channels` に `"lexical"` を含むのに `deps.lexicalStore` が無ければ例外を投げる（`RecallRuntimeDeps.lexicalStore` の doc）。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: `signal` が
+ * abort された状態でクエリの埋め込み（`deps.embeddingProvider.embed`）を待っていると、
+ * この呼び出しは reject する。** その例外は `embedding_provider_unavailable` の omission へ
+ * 丸めない——中断と「埋め込み provider が使えなかった」を同じ顔にすると、呼び出し側が
+ * 区別できない。abort の時点で段6（記録、`MemoryStore.createRecall`）にはまだ届いていない
+ * ため、recall の記録も `activity_seq` の前進も起きない。
  */
 export async function runRecall(
   ctx: Ctx,
   query: RecallQuery,
   deps: RecallRuntimeDeps,
+  signal?: AbortSignal,
 ): Promise<RecallResult> {
   const validatedQuery = RecallQuerySchema.parse(query);
   const now = deps.clock.now();
@@ -944,7 +954,9 @@ export async function runRecall(
   if (wantsAnn && queryVector === undefined) {
     if (embeddableText) {
       try {
-        const [vector] = await deps.embeddingProvider.embed(ctx, [embeddableText]);
+        const [vector] = await runAbortable(signal, (raced) =>
+          deps.embeddingProvider.embed(ctx, [embeddableText], { signal: raced }),
+        );
         // provider がベクトルを返さなかった（`[]`、または配列でない要素）ときも、
         // 例外と同じく「provider が使えない」として名乗る（docs/recall.md「0 件ではなく
         // embedding_provider_unavailable として記録する」）。以前は `queryVector` が
@@ -954,7 +966,12 @@ export async function runRecall(
           throw new Error("embedding provider returned no vector for the query");
         }
         queryVector = vector;
-      } catch {
+      } catch (err) {
+        // 2026-09-29 追記（Issue #1200、ADR 0359）: abort による reject は
+        // `embedding_provider_unavailable` に丸めず、そのまま投げ直す。
+        if (isAbort(signal)) {
+          throw err;
+        }
         omitted.push({
           kind: "stage_skipped",
           stage: "candidate_generation",

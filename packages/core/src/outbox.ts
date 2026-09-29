@@ -46,6 +46,19 @@ export interface OutboxJobRecord {
    * 失敗したクエリの文と params をそのまま含むので、Memory の本文などの利用者のテキストが丸ごと入る。
    * 長さの上限も無く、本文の大きさに比例して大きくなる（1MB を超えた実測の例が Issue #1064 に在る）。
    * ⟹ この欄をログ・監視・外部へ流すときは、本文が載りうるものとして扱うこと。削る・上限を置くかは決まっていない。
+   *
+   * ⚠ **2026-09-29 追記（ADR 0363）**: 上の「削らずに載せる」「削る・上限を置くかは決まっていない」は、
+   * `@mnemora/postgres` で DB への書き込みが失敗した経路については、もう成り立たない。
+   * `tick()` の `describeJobFailure`（`runtime.ts`）は、drizzle が包んだエラー文の `params:` 以降
+   * （失敗したクエリに渡した値そのもの）を落とし、`(omitted by mnemora, N chars)` という印に
+   * 置き換える。さらに、戻り値全体の長さに上限（4096文字。根拠は `describeJobFailure` の doc
+   * コメント）を掛け、超えた分は切り詰めて末尾に印を付ける。
+   * **それでも本文が丸ごと載りうる経路は残っている**（ADR 0363「塞がらない経路」）:
+   * `@mnemora/openai` の拒否の文面（`OpenAILLMProviderError`、ADR 0075）や、pg の生エラーの
+   * 型変換失敗のメッセージ（`invalid input syntax for type ... : "<値>"`）は、`params:` という
+   * 目印を持たないため `omitDrizzleParams` では削れず、長さの上限だけで抑えている。
+   * ⟹ **この欄は、なお「本文の断片が載りうるもの」として扱うこと。**「本文が絶対に載らない」
+   * という約束にはなっていない。
    */
   lastError?: string | null;
   /** 積んだ時刻。 */

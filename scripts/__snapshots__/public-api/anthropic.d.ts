@@ -66,7 +66,7 @@ export interface AnthropicJsonSchemaFormat {
 export declare function translateForAnthropicStructuredOutput<T>(schema: z.ZodType<T>): AnthropicJsonSchemaFormat;
 
 // ===== dist/llm-provider.d.ts =====
-import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { AbortOptions, Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import type { AnthropicMessageParam, AnthropicMessagesClient } from "./client-types.js";
 export declare const DEFAULT_MAX_TOKENS = 16000;
 export interface AnthropicLLMProviderOptions {
@@ -85,6 +85,6 @@ export declare class AnthropicLLMProvider implements LLMProvider {
     private readonly model;
     private readonly maxTokens;
     constructor(options: AnthropicLLMProviderOptions);
-    complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-    completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+    complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+    completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }

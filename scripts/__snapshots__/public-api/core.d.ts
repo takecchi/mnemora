@@ -1,3 +1,11 @@
+// ===== dist/abort.d.ts =====
+export interface AbortOptions {
+    signal?: AbortSignal;
+}
+export declare function abortReason(signal: AbortSignal): unknown;
+export declare function isAbort(signal: AbortSignal | undefined): boolean;
+export declare function runAbortable<T>(signal: AbortSignal | undefined, run: (signal: AbortSignal | undefined) => Promise<T>): Promise<T>;
+
 // ===== dist/ann-truncation.d.ts =====
 import type { ScoringStrategy } from "./strategies/scoring.js";
 export type AnnTruncationVerdict = {
@@ -96,7 +104,7 @@ export interface DeriveClaimKeysResult {
     claimKeys: (ClaimKey | null)[];
     failure: ExtractionFailure | null;
 }
-export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[]): Promise<DeriveClaimKeysResult>;
+export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[], signal?: AbortSignal): Promise<DeriveClaimKeysResult>;
 export declare const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
 export interface ClaimKeyOptions {
     enabled: boolean;
@@ -395,7 +403,7 @@ export declare function sanitizeCandidateSubjectId(subjectId: string | null | un
     subjectId: string | null | undefined;
     rejected: boolean;
 };
-export declare function extractCandidates(llmProvider: LLMProvider, ctx: Ctx, observation: Observation, subjectCandidates?: readonly string[]): Promise<ExtractCandidatesResult>;
+export declare function extractCandidates(llmProvider: LLMProvider, ctx: Ctx, observation: Observation, subjectCandidates?: readonly string[], signal?: AbortSignal): Promise<ExtractCandidatesResult>;
 export interface BuildNewMemoryParams {
     ctx: Ctx;
     observation: Observation;
@@ -432,6 +440,7 @@ export type RecallId = string;
 
 // ===== dist/index.d.ts =====
 export * from "./ctx.js";
+export * from "./abort.js";
 export * from "./ids.js";
 export * from "./attributes.js";
 export * from "./provenance.js";
@@ -488,11 +497,12 @@ export interface Clock {
 }
 
 // ===== dist/interfaces/embedding-provider.d.ts =====
+import type { AbortOptions } from "../abort.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 export interface EmbeddingProvider {
     readonly space: EmbeddingSpaceId;
-    embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
+    embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 
 // ===== dist/interfaces/event-store.d.ts =====
@@ -537,6 +547,7 @@ export interface LexicalStore {
 
 // ===== dist/interfaces/llm-provider.d.ts =====
 import type { z } from "zod";
+import type { AbortOptions } from "../abort.js";
 import type { Ctx } from "../ctx.js";
 export interface PromptMessage {
     role: "system" | "user" | "assistant";
@@ -554,8 +565,8 @@ export interface StructuredRequest<T> {
     schema: z.ZodType<T>;
 }
 export interface LLMProvider {
-    complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+    complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }
 
 // ===== dist/interfaces/memory-store.d.ts =====
@@ -1681,7 +1692,7 @@ export type Unit = {
 };
 export declare function countKindForUnits(units: readonly Unit[], candidateCount: number): CountKind;
 export declare function unitAssemblyShortfall(units: readonly Unit[], candidateCount: number): number;
-export declare function runRecall(ctx: Ctx, query: RecallQuery, deps: RecallRuntimeDeps): Promise<RecallResult>;
+export declare function runRecall(ctx: Ctx, query: RecallQuery, deps: RecallRuntimeDeps, signal?: AbortSignal): Promise<RecallResult>;
 export {};
 
 // ===== dist/recall.d.ts =====
@@ -2706,6 +2717,7 @@ export interface RecallRecord {
 export declare const NOT_INDEXED_REASONS: readonly NotIndexedReason[];
 
 // ===== dist/runtime.d.ts =====
+import type { AbortOptions } from "./abort.js";
 import type { Clock } from "./interfaces/clock.js";
 import type { FindCorrectionCandidatesInput, FindCorrectionCandidatesResult } from "./correction-candidates.js";
 import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
@@ -2846,6 +2858,7 @@ export interface ConsolidateOptions {
     dryRun?: boolean;
     actor?: EventActor;
     reason?: string;
+    signal?: AbortSignal;
 }
 export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run";
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
@@ -2909,6 +2922,7 @@ export interface ReflectOptions {
     dryRun?: boolean;
     actor?: EventActor;
     reason?: string;
+    signal?: AbortSignal;
 }
 export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run";
 export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
@@ -2950,6 +2964,7 @@ export interface TickOptions {
     limit?: number;
     kinds?: OutboxJobKind[];
     claimedBy?: string;
+    signal?: AbortSignal;
 }
 export interface UnsupportedOutboxJob {
     jobId: string;
@@ -3215,12 +3230,12 @@ export interface ResolveOrphanedContestedResult {
     outcome: ResolveOrphanedContestedOutcome;
 }
 export interface Runtime {
-    observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult>;
+    observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
     tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
-    recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult>;
+    recall(ctx: Ctx, query: RecallQuery, opts?: AbortOptions): Promise<RecallResult>;
     getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
-    findCorrectionCandidates(ctx: Ctx, input: FindCorrectionCandidatesInput): Promise<FindCorrectionCandidatesResult>;
-    reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
+    findCorrectionCandidates(ctx: Ctx, input: FindCorrectionCandidatesInput, opts?: AbortOptions): Promise<FindCorrectionCandidatesResult>;
+    reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
     reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
     sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult>;
     restoreArchived(ctx: Ctx, target: RestoreArchivedTarget, opts?: RestoreArchivedOptions): Promise<RestoreArchivedResult>;

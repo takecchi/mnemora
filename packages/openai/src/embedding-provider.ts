@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type { OpenAIEmbeddingsClient } from "./client-types.js";
 
@@ -62,6 +62,11 @@ export interface OpenAIEmbeddingProviderOptions {
  *
  * 構築時: `client` を省き、キーが見つからなければ OpenAI の SDK が `OpenAIError`（`Missing credentials`）を投げる。
  * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * `embed` の第3引数 `opts?.signal` を、そのまま `embeddings.create` の request options
+ * （`{ signal }`）へ渡す。** SDK が既定で対応する `AbortSignal` の仕組みに委ねているだけ。
  */
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   /** `{ provider: "openai", model, dimensions }`。構築時に決まり、変わらない。 */
@@ -112,15 +117,18 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   // 未定義である（ADR 0305 の「上限超過をサーバの拒否に依存する」負債と同じ形）。
   // 本番経路（`packages/core` の `runtime.ts`/`recall-runtime.ts`）は常に `texts` を
   // 1件ずつ渡すため、この食い違いは踏まれていない。
-  async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
+  async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
     if (texts.length === 0) {
       return [];
     }
-    const response = await this.client.embeddings.create({
-      model: this.model,
-      input: texts,
-      dimensions: this.space.dimensions,
-    });
+    const response = await this.client.embeddings.create(
+      {
+        model: this.model,
+        input: texts,
+        dimensions: this.space.dimensions,
+      },
+      { signal: opts?.signal },
+    );
     // OpenAI は入力順を保つと文書化しているが、`index` で並べ直して前提を作らない
     // （原則の姿3寄り: 順序の保証を暗黙のものとして信頼しない）。
     return [...response.data].sort((a, b) => a.index - b.index).map((item) => item.embedding);

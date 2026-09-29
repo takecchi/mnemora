@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbort, runAbortable } from "./abort.js";
 import type { Ctx } from "./ctx.js";
 // ⚠ `type` 専用の import にすること（値の import にしない）。`extraction.ts` は
 // （`ExtractionContextSchema` 経由で）`observation.ts` を実行時に import しており、
@@ -188,6 +189,12 @@ function describeClaimKeyFailure(error: unknown): ExtractionFailure {
  *
  * `contents.length === 0`（候補が0件）なら**呼び出しを一切行わない**（ADR 0315 決定2
  * 「候補が0件なら+0回にできる」）。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: `signal` を
+ * 渡し、それが abort されたことによる例外は `DeriveClaimKeysResult.failure` へ丸めず、
+ * そのまま投げ直す。** `extractCandidates` と同じ理由——中断と「LLM 呼び出しが本当に
+ * 失敗した」を同じ顔にしない。
  */
 export async function deriveClaimKeys(
   llmProvider: LLMProvider,
@@ -195,15 +202,22 @@ export async function deriveClaimKeys(
   contents: readonly string[],
   knownPredicates?: readonly string[],
   knownSubjects?: readonly string[],
+  signal?: AbortSignal,
 ): Promise<DeriveClaimKeysResult> {
   if (contents.length === 0) {
     return EMPTY_RESULT;
   }
   try {
-    const result = await llmProvider.completeStructured(ctx, {
-      prompt: buildClaimKeyPrompt(contents, knownPredicates, knownSubjects),
-      schema: ClaimKeyBatchResultSchema,
-    });
+    const result = await runAbortable(signal, (raced) =>
+      llmProvider.completeStructured(
+        ctx,
+        {
+          prompt: buildClaimKeyPrompt(contents, knownPredicates, knownSubjects),
+          schema: ClaimKeyBatchResultSchema,
+        },
+        { signal: raced },
+      ),
+    );
     if (result.claims.length !== contents.length) {
       return {
         claimKeys: contents.map(() => null),
@@ -231,6 +245,9 @@ export async function deriveClaimKeys(
       failure: null,
     };
   } catch (error) {
+    if (isAbort(signal)) {
+      throw error;
+    }
     return {
       claimKeys: contents.map(() => null),
       failure: describeClaimKeyFailure(error),
