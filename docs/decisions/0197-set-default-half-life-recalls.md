@@ -294,3 +294,5 @@ Postgres を立てる」に従い、`cp` での退避・復元・`diff` 一致�
   1）。
 - `examples/chat` へ `setDefaultHalfLifeRecalls` を配線した場合の CLI の形（フラグ名等）。
   本 ADR の範囲外。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §2（段階3） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

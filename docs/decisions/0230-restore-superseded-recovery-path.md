@@ -611,3 +611,5 @@ OPEN な ISSUE のコメント投稿者名ではオーナーと担い手（エ�
 
 反映先: `packages/core/src/runtime.ts` の `Runtime.restoreSuperseded`・
 `RestoreSupersededTarget` の doc コメント、`docs/memory-model.md` §11 行15。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7.14 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

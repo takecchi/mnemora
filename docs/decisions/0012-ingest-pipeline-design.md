@@ -148,3 +148,5 @@
   `OPENAI_API_KEY` が無い環境（このリポジトリの開発・CI 環境）では検証できていない。
   `packages/openai/src/__tests__/live.openai.test.ts` は `OPENAI_API_KEY` がある場合
   だけ実行され、CI では常に skipped として表示される。PR 本文にこの制約を明記する。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §2（段階3） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

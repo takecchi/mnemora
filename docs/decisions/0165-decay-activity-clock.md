@@ -606,3 +606,5 @@
   `packages/postgres/src/__tests__/wall-to-activity-switch.postgres.test.ts`（2実装）である。
 
 （この追記はクローン miku の委譲先が書いた。判断はクローン miku のものであり、オーナーの判断ではない。）
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7（§7.4 ほか）は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

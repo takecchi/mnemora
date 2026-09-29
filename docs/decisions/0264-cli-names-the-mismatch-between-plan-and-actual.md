@@ -184,3 +184,5 @@ arm B（擬似LLM+本物の埋め込み）は、**意図して**予定と食い�
 
 ⚠ これはクローンの委譲で走っている担い手の検算であって、オーナー本人の決定ではない
 （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。Issue #636。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7.15 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

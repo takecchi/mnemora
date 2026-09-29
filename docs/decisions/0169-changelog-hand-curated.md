@@ -192,3 +192,5 @@ roadmap §7.3 の目的に対して不釣り合いに重い。GitHub の Release
   既に「確かめていない」と書いた点で、この ADR でも埋めていない）。
 - **確かめていない**: 手で書く CHANGELOG が実際にどれくらいの頻度で書き忘れられるか
   ——運用が始まっていないため、実測できない（「引き受けた負債」1番）。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7.3 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

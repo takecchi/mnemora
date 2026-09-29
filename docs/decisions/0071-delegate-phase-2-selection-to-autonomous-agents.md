@@ -152,3 +152,5 @@
   - **確かめていない**: alteroid がこの文書を読む経路に在るかどうか。
     `AGENTS.md` から指してはいるが、**alteroid が `AGENTS.md` を読むことは
     オーナーの申告であって、この作業者が確認したものではない。**
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §2（段階1〜7） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

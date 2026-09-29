@@ -184,3 +184,5 @@ provider の4層表のすぐ前（`example-chat`/`retrieval-quality` が `record
 - **このジョブ以外の required check（他5件）の `name:` が、同様に自分自身の
   中身と食い違っていないかは調べていない。**本 ADR は `example-chat` 1件に
   限定した調査である。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §2（段階7） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

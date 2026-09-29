@@ -274,3 +274,5 @@ tokenizer.json / tokenizer_config.json / config.json を含めた4ファイル�
     「測る前に歯を足すな」）は Issue #142 本文と ADR 0095 / 0099 / 0019 からの引用である。
   - **`LLMProvider` の suite が無いという指摘は、Issue #142 本文には無い。**
     本 ADR の調査で見つけたものである。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7.2 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。
