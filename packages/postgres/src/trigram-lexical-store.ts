@@ -393,14 +393,18 @@ async function probeTrigramLexicalSupportWithCause(
       WHERE e.extname = 'vector'
     `);
     const vectorSchemaRow = vectorSchemaResult.rows[0] as
-      | { ext_schema: string; cur_schema: string }
-      | undefined;
-    if (vectorSchemaRow !== undefined && vectorSchemaRow.ext_schema !== vectorSchemaRow.cur_schema) {
+      { ext_schema: string; cur_schema: string } | undefined;
+    if (
+      vectorSchemaRow !== undefined &&
+      vectorSchemaRow.ext_schema !== vectorSchemaRow.cur_schema
+    ) {
       // `assertSafeSchemaName` で検証してから、識別子として引用符付きで埋め込む
       // （`migrate.ts` の `CREATE EXTENSION ... WITH SCHEMA "${extensionSchema}"` と同じ作法）。
       assertSafeSchemaName(vectorSchemaRow.ext_schema);
       await db.execute(
-        sql.raw(`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA "${vectorSchemaRow.ext_schema}"`),
+        sql.raw(
+          `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA "${vectorSchemaRow.ext_schema}"`,
+        ),
       );
     } else {
       await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
@@ -429,8 +433,7 @@ async function probeTrigramLexicalSupportWithCause(
     WHERE e.extname = 'pg_trgm'
   `);
   const visibilityRow = visibilityResult.rows[0] as
-    | { ext_schema: string; visible: boolean }
-    | undefined;
+    { ext_schema: string; visible: boolean } | undefined;
   if (visibilityRow === undefined || !visibilityRow.visible) {
     return {
       ok: false,

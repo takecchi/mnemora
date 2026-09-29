@@ -73,8 +73,7 @@ function captureCreateExtensionSql(pool: Pool): { texts: string[]; restore: () =
   const texts: string[] = [];
   pool.query = ((...args: unknown[]) => {
     const first = args[0];
-    const text =
-      typeof first === "string" ? first : (first as { text?: string } | undefined)?.text;
+    const text = typeof first === "string" ? first : (first as { text?: string } | undefined)?.text;
     if (typeof text === "string" && /^\s*CREATE EXTENSION\b/i.test(text)) {
       texts.push(text.trim());
     }
@@ -94,9 +93,7 @@ async function isUtf8(pool: Pool): Promise<boolean> {
   return rows[0]!.server_encoding.toUpperCase() === "UTF8";
 }
 
-async function assertSearchWorks(
-  db: ReturnType<typeof createPostgresClient>["db"],
-): Promise<void> {
+async function assertSearchWorks(db: ReturnType<typeof createPostgresClient>["db"]): Promise<void> {
   const store = await PostgresTrigramLexicalStore.create(db);
   const ctx: Ctx = { tenantId: "trigram-probe-schema-tenant" };
   await expect(
@@ -175,8 +172,14 @@ describe("probeTrigramLexicalSupport と専用スキーマ（Issue #1256 修正�
       };
       try {
         const utf8 = await isUtf8(a.client.pool);
-        await runMigrations(a.client.pool, undefined, { schema: a.schema, extensionSchema: "ns_a" });
-        await runMigrations(b.client.pool, undefined, { schema: b.schema, extensionSchema: "ns_a" });
+        await runMigrations(a.client.pool, undefined, {
+          schema: a.schema,
+          extensionSchema: "ns_a",
+        });
+        await runMigrations(b.client.pool, undefined, {
+          schema: b.schema,
+          extensionSchema: "ns_a",
+        });
         if (!utf8) {
           expect(await probeTrigramLexicalSupport(a.client.db)).toMatchObject({
             ok: false,
