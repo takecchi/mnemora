@@ -131,3 +131,15 @@ ADR 0020 は、CI の使い捨てテスト DB の後始末（`DROP DATABASE ... 
   こちらは元々 `pg-pool` が単発クエリとして安全に扱う経路なので対象外——
   ただし、この判断は `pg-pool` の実装を読んで導いたものであり、同種の fault injection
   では実測していない。
+
+---
+
+**2026-09-29 追記**: [ADR 0354](./0354-pool-default-error-listener-warns-by-default.md) が、
+本 ADR が扱わなかった場所（`Pool` 自体の `error`。本 ADR の表の「`Pool` の `error` は
+pool 内部で idle client が壊れたことの通知であり、根本を直すべき信号」の行）に、
+`createPostgresClient` の既定の `error` リスナーを足した（[Issue #1213](https://github.com/takecchi/mnemora/issues/1213)）。
+本 ADR の決定・引き受けた負債・「これが覆るとしたら」は書き換えていない——ADR 0354 が
+扱うのは *checked-out* client ではなく *idle* client であり、本 ADR の対象そのものは
+変わらない。ADR 0354 は ADR 0339 と同じ判断（`pool.on('error', () => {})` という
+「黙って捨てる」形は採らない）を idle 接続の場所でも踏襲しており、両 ADR の区別は
+ADR 0354 の「ADR 0339・ADR 0020 との区別」節に書いてある。
