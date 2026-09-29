@@ -892,7 +892,9 @@ export interface AnalyzeMemoriesResult {
  * `SHARE UPDATE EXCLUSIVE` ロックを取る——このロックは通常の `SELECT`/`INSERT`/`UPDATE`/`DELETE` と
  * 競合しない（競合するのは他の `VACUUM`/`ANALYZE`・一部の DDL のみ）。また `ANALYZE` はテーブル全体を
  * 舐めず、`default_statistics_target` に基づく固定サイズのサンプル行だけを読む。
- * ⟹ 素の `CREATE INDEX`（`ACCESS EXCLUSIVE` を取り書き込みを止める——ADR 0062 (c)）とは性質が異なる。
+ * ⟹ 素の `CREATE INDEX`（`ShareLock` を取り書き込みだけを止める——ADR 0062 (c) の
+ * 2026-09-29追記が実測・訂正済み。本文はまだ `ACCESS EXCLUSIVE` と書いているが、それは
+ * 実測に基づかない記述だった）とは性質が異なる。
  *
  * 【実測 2026-09-28、[Issue #1253](https://github.com/takecchi/mnemora/issues/1253)】PostgreSQL 17 で、
  * `ANALYZE memories` が `memories` に取るロックは `ShareUpdateExclusiveLock` だった（文書どおり）。

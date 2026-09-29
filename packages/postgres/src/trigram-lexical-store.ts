@@ -536,8 +536,10 @@ const TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL = sql`
  *
  * **索引は含まない。**`CREATE INDEX` は {@link createOptionalTrigramIndex} という別の口に
  * 分けてある——`memories` は行数が大きくなりうるため（`docs/roadmap.md` §5）、索引の作成
- * （`ACCESS EXCLUSIVE` ロックを伴いうる）を関数のインストールと同じタイミングで強制しない
- * （`migrations/0008_memories_lexical_index.sql` が生成列を避けた理由と同じ配慮）。
+ * （`ShareLock` を取り書き込みだけを止めうる——素の `CREATE INDEX` が `ACCESS EXCLUSIVE`
+ * を取るという以前の記述は ADR 0062 (c) の2026-09-29追記で訂正済み）を関数のインストールと
+ * 同じタイミングで強制しない（`migrations/0008_memories_lexical_index.sql` が生成列を
+ * 避けた理由と同じ配慮）。
  */
 export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
   await db.execute(TRIGRAM_QUERY_NONASCII_FUNCTION_SQL);

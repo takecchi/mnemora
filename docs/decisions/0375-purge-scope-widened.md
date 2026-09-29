@@ -427,6 +427,95 @@ reextract」は、forget（および purge）した事実が、抽出器の版�
 
 ---
 
+## 追記（2026-09-30）: `purgeMemory` の待ち（決定6の費用）と #1428（決定7）の `FOR UPDATE` の相互作用
+
+クローン miku の委譲先が書いた（オーナーではない）。レビューで見つかった所見を受けて書く。
+
+**上の本文（決定1〜8）とすぐ上の「#1226（consolidate/reflect のレース）を PR2 で実装した」
+追記は、どちらも書き換えていない。**この追記が足すのは、その2つを組み合わせたときに
+初めて見える相互作用である。
+
+**組み合わせ**: `purgeMemory`（`packages/postgres/src/memory-store.ts`）は、同じ
+`db.transaction` の中で (1) `memories` の対象行を `UPDATE`（行ロックを取り、`COMMIT` まで
+保持——Postgres の行ロックの一般的な性質）、(2) `memory_events` への `INSERT`、
+(3) `memory_labels`/`labels` の書き換え（決定2）、(4) 対象テナントの `recalls` 全体を
+舐める `index_band` の書き換え（決定3・決定6が費用を実測済み——索引が無いため実質
+フルスキャン）を順に行い、最後に `COMMIT` する。一方 #1428（決定7、上の「#1226」追記）の
+`assertNotForgottenForUpdate` は、`consolidate`/`reflect` の書き込み直前に同じ `memories`
+行を `SELECT … FOR UPDATE` で見直す。**`purgeMemory` が (1) で取った行ロックは (4) の
+`recalls` 書き換えの間も保持され続けるため、`assertNotForgottenForUpdate` は `purgeMemory`
+が `COMMIT` するまで待たされる**——決定6が実測した `recalls` 書き換えの費用が、
+そのまま `assertNotForgottenForUpdate` の待ち時間に乗る形になる。
+
+**実測A（2026-09-30、レビュー時。PostgreSQL 17、使い捨ての DB。再現用のテストは
+commit していない）**: 対象テナントの `recalls` に `digestBand` 5エントリ（120字ずつ）を
+持つ行を10万件（`pg_total_relation_size` で約57MB——決定6の約180MBより小さい）投入し、
+`PostgresMemoryStore.purgeMemory` を1つの接続で始め、15ms後に別接続から同じ `memories` 行へ
+`SELECT … FOR UPDATE` を発行した。**purge 全体は約460ms、`FOR UPDATE` は約440ms
+（443ms）待たされ、purge の `COMMIT` とほぼ同時に返った。**決定6の実測（中央値 ≈ 285ms）と
+同じ桁であり、この相互作用の代表値としてはこちらを採る。
+
+**実測B（2026-09-30、この追記を書いた作業。PostgreSQL 17.11、使い捨ての DB。
+再現用のファイルは作らず、commit していない）**: 行の中身を変えて（物理サイズ約135MB）
+同じ10万行を投入し、`purgeMemory` が発行する4文（上の(1)〜(4)、`COMMIT` を含む）を
+1つのトランザクションとして `psql` で発行しつつ、別接続から
+`SELECT id, status FROM memories WHERE id = ANY(...) FOR UPDATE` を0.3秒後に発行した。
+⚠ **下の表の `UPDATE recalls` の 3,436.6ms は、決定6の中央値（≈ 285ms、約180MB）の
+約12倍であり、サイズの差では説明できない。**同じ器で別の作業が並行していたことによる
+負荷の可能性があるが、**原因は確かめていない**——この表は「待ちが `COMMIT` まで続く」
+形の確認としてだけ読み、待ち時間の大きさの基準には使わないこと:
+
+| 区間 | 実測B |
+|---|---|
+| `UPDATE memories`（(1)） | 5.6ms |
+| `INSERT memory_events`（(2)） | 1.6ms |
+| `UPDATE recalls`（(4)、決定6の費用） | **3,436.6ms** |
+| `COMMIT` | 21.6ms |
+| purge トランザクション全体（`BEGIN`〜`COMMIT`） | 約3.48秒 |
+| 別接続の `FOR UPDATE`（purge の `COMMIT` 前に発行） | **約3.21秒**待たされ、purge の `COMMIT` の約30ms後に返った |
+
+⟹ **実測A・Bのどちらでも、別接続の `FOR UPDATE` は `purgeMemory` の `COMMIT` と
+ほぼ同時（実測Bでは30ms後）に返った。**待っていた間、`assertNotForgottenForUpdate` 自身は何も壊れていない
+——`purgeMemory` が `COMMIT` した後に読み直すと対象行は `status = 'forgotten'` のまま
+であり（`purgeMemory` は `status` 列を更新しない——本文コード doc 参照）、
+`assertNotForgottenForUpdate` は正しく `forgotten` を検出して呼び出し元を
+`SourceMemoryForgottenError` で打ち切る（今回の実測でも `status` 列は `forgotten` の
+まま読めた。呼び出し元での `SourceMemoryForgottenError` 送出そのものは、この実測では
+生の SQL のみを打っており、アプリケーション層を経由していないため確認していない
+——下の「確かめていないこと」参照）。**正しさは壊れない**——決定6・#1226 の追記が
+それぞれ引き受けた設計のとおりである。
+
+**壊れうるのは正しさではなく待ち時間である**: 実測Aでの約440msという待ちは、
+`recalls` の対象テナントの行数・`digestBand` のエントリ数に比例して伸びうる
+（決定6が同じ理由で実測している——索引が無いフルスキャン）。`consolidate`/`reflect`
+の呼び出し元（runtime・その先の HTTP/ジョブの呼び出し元）が短い `statement_timeout`/
+呼び出しタイムアウトを設定していれば、`purgeMemory` の `recalls` 書き換えが長引くほど
+`assertNotForgottenForUpdate` 側がタイムアウトで先に切られる可能性がある——この
+可能性はこの追記も上の決定6・#1226 の追記も、これまで検討していなかった。
+
+**分類・対処（索引を張るか・timeout をどうするか等）はこの追記では判断しない**——
+決定6が既に「`index_band` へ GIN 索引を張る案は書き込み経路の別の負債を引き受ける」と
+検討・保留している範囲の延長にあり、あわせてオーナー判断待ちとして残す。
+
+### この追記が確かめていないこと
+
+- `assertNotForgottenForUpdate` が実際に `SourceMemoryForgottenError` を投げるところ
+  （アプリケーション層、`@mnemora/postgres` の `PostgresMemoryStore` 経由）は、この
+  追記では確かめていない——生の SQL で `FOR UPDATE` が同じだけ待たされ、待った後に
+  `status = 'forgotten'` が読めることまでしか確かめていない。
+- `consolidate`/`reflect` の呼び出し元（runtime・ジョブ）が実際にどれだけの
+  タイムアウトを設定しているか・このシナリオで実際にタイムアウトが trip するかは、
+  この追記では調べていない。
+- `recalls` が10万行を大きく超える規模（決定6の「確かめていないこと」と同じ範囲）
+  での待ち時間の伸び方は測っていない。
+- 実測は単一の使い捨て DB・単一のクライアント接続ペアで行った——実運用の
+  接続プール・複数の同時 `purge`/`consolidate`/`reflect` が重なる場面は測っていない。
+- 測定に使った再現手順（SQL・シェルスクリプト）はリポジトリにコミットしていない
+  （`/tmp` に置いて実行し、削除した）。同じ数字の再現性は、同じ手順を打ち直さない
+  限り保証しない——上の数字は「この測定での値」であり、恒久的な基準値ではない。
+
+---
+
 ## 追記（2026-09-30）: 決定5・「引き受けた負債」4・「これが覆るとしたら」は ADR 0382 で上書きした
 
 クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
