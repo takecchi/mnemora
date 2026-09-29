@@ -1585,19 +1585,28 @@ export const RecalledMemorySchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
- * `explain.stages` の段の名前。`scope` は段0、`candidate_generation` は段1、`rescore` は段2、`contradiction_resolution` は段3、`budget_truncation` は段4、`index_band` は段5、`record` は段6（docs/recall.md §2）。
+ * `explain.stages` の段の名前。`scope` は段0、`candidate_generation` は段1、`rescore` は段2、`contradiction_resolution` は段3、`association` は段3.5、`budget_truncation` は段4、`index_band` は段5、`record` は段6（docs/recall.md §2・§9）。
  *
- * ⚠ **段3.5（連想枠）に当たる名前は無く、`explain.stages` には記録されない**（今の振る舞い。
- * [Issue #865](https://github.com/takecchi/mnemora/issues/865)）。連想枠を走らせたかは
- * `usage.byTier.association` の有無に、返した記憶は `RecalledMemory.retrievedVia === "association"`
- * （と `associationOf`）に出る。飛ばしたときの `stage_skipped`・`maxCount` を超えた分の `over_limit` は、
- * `omitted` に `stage: "association"` で出る。この union に値を足すかは決まっていない。
+ * **`association`（[Issue #865](https://github.com/takecchi/mnemora/issues/865)、2026-09-29）**:
+ * この union への値の追加は破壊的変更に数えない（オーナー回答 ask_human d9364c91）。
+ * `association` の trace が `stages` に積まれるのは `query.association !== null`
+ * （既定 on、または明示の値）のときだけ——`null` で明示的に off にしたときは、
+ * 他のどの段の trace も足されない（`candidate_generation` の ANN/語彙チャンネルが、
+ * そもそも要求されていないときに trace を積まないのと同じ形。docs/recall.md §2「`explain.stages`
+ * の読み方」）。off にした run と on にした run で `stages` の並びが同じにならなくなった
+ * ——差分は `association` の trace の有無そのものである。
+ *
+ * `executed: false` になるのは `stage_skipped(association, ...)`（`vector_store_lacks_get_vectors`／
+ * `no_anchor`）と対になるときだけで、`rescore` と同じく「探したが0件だった」（`hits`/`selected` が
+ * 0 のまま `executed: true`）とは区別する。`maxCount` を超えた分の `over_limit` は、これまでどおり
+ * `omitted` に `stage: "association"` で出る。
  */
 export type RecallStageName =
   | "scope"
   | "candidate_generation"
   | "rescore"
   | "contradiction_resolution"
+  | "association"
   | "budget_truncation"
   | "index_band"
   | "record";
@@ -1612,6 +1621,12 @@ export interface StageTrace {
    * - `candidate_generation`: その経路（`detail.channel`）が走らなかった。必ず
    *   `stage_skipped(candidate_generation)` の `Omission` と対になる。
    * - `rescore`: 採点する候補が0件だった（段は飛ばしていない）。`stage_skipped` は名乗らない。
+   * - `association`（2026-09-29、Issue #865）: `stage_skipped(association, ...)`
+   *   （`vector_store_lacks_get_vectors`／`no_anchor`）と対になるときだけ `false`。
+   *   アンカーから実際に検索した結果 `detail.hits`/`detail.selected` が0件だったときは
+   *   `rescore` と同じく `true`（探したが0件、と探さなかったを区別する）。この段自体が
+   *   `stages` に現れるのは `query.association !== null` のときだけ——`null`（明示 off）
+   *   のときは trace そのものが無い。
    * - それ以外の段: 常に `true`。
    */
   executed: boolean;
@@ -1626,6 +1641,7 @@ export const StageTraceSchema = z.object({
     "candidate_generation",
     "rescore",
     "contradiction_resolution",
+    "association",
     "budget_truncation",
     "index_band",
     "record",

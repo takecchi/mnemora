@@ -23,7 +23,7 @@ type RecallResult = {
   omitted: Omission[]           // 返らなかったものの分類（§4）
   index: IndexBand              // 目次帯。被覆不変条件を担う（§5）
   usage: RecallUsage            // 焼かれた量の計測（§6）
-  explain: { stages: StageTrace[] } // どの段が走り、どの段が走らなかったか（§2）。段3.5（連想枠）は記録しない（§2、Issue #865）
+  explain: { stages: StageTrace[] } // どの段が走り、どの段が走らなかったか（§2）。段3.5（連想枠）も記録する（§2・§9、Issue #865。2026-09-29 追記）
 }
 ```
 
@@ -229,15 +229,16 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 | `scope` | ならない（常に `true`） | — |
 | `candidate_generation`（`detail.channel` ごとに1件） | その経路が走らなかったとき（クエリに埋め込む内容が無い、埋め込み provider が失敗した） | **名乗る**——`stage_skipped(candidate_generation, empty_query_content \| embedding_provider_unavailable)`。ANN と語彙の両方が走らなかったときも、`empty_query_content` は1件だけ |
 | `rescore` | **採点する候補が0件だったとき**（段は飛ばしていない） | 名乗らない（候補が無い理由は、前の段の `stage_skipped` か `index` で分かる） |
+| `association`（段3.5、[Issue #865](https://github.com/takecchi/mnemora/issues/865)、2026-09-29） | `stage_skipped(association, vector_store_lacks_get_vectors \| no_anchor)` と対になるときだけ | **名乗る**——`rescore` と同じ区別で、「探して0件だった」（`detail.hits`/`detail.selected` が0のまま `executed: true`）とは分ける |
 | `contradiction_resolution`・`budget_truncation`・`index_band`・`record` | ならない（常に `true`）。`budget_truncation` は予算が無くても `true` で、予算の有無は `detail.budgetApplied` に出る | — |
 
-段3.5（連想枠）は `explain.stages` に出ない（[Issue #865](https://github.com/takecchi/mnemora/issues/865)。`RecallStageName` に値を足す問いの待ち）。飛ばしたときの `stage_skipped(association, …)` は `omitted` に出る。
+**`association` の trace が `stages` に現れるのは `query.association !== null`（既定 on、または明示の値）のときだけである**——`null` で明示的に off にしたときは、この段の trace 自体を積まない（`candidate_generation` の ANN/語彙チャンネルが、そもそも要求されていないときに trace を積まないのと同じ形）。⟹ **off にした run と on にした run で `stages` の並びは同じにならない**——差分は `association` の trace の有無そのものである（2026-09-27 時点の旧記述は「同じになる」だったが、これは「段3.5 は記録しない」という当時の振る舞いに対する記述であり、Issue #865 のこの実装で成り立たなくなった）。`detail` は `{ anchors, hits, selected }`——`anchors` はアンカーに採った件数、`hits` は除外・`minSimilarity` を通過した連想候補の件数（過取得の窓を掛ける前）、`selected` は実際に席（`maxCount`）に着いた件数である。`RecallStageName` へのこの値の追加は破壊的変更に数えない（オーナー回答 ask_human d9364c91）。
 
 **`rescore` の `detail` と `omitted` の件数の関係**: `detail.scored`（採点した件数）・`passedThreshold`・`notComparable`・`withinLimit`（`limit` の内側）と、`omitted` の `below_threshold`・`score_not_comparable`・`over_limit(stage: 'rescore')` の件数は、**段3（必須の同伴取得）と段3.5（連想枠）で返った分を足すと合う**。段2で閾値や `limit` の外に出た候補が、後の段で返ったときは `omitted` に数えない（`memories` と `omitted` の排他、[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）ためである。例（実測）: `limit: 2`・閾値あり・5件で、`scored 5 / passedThreshold 3 / withinLimit 2`、`below_threshold` 2件、`over_limit` 0件——`limit` の外に出た1件は連想枠で返った。`index_band` の `detail.totalInScope` は `index.totalInScope` と同じ値である。
 
 **記録（`getRecall`）は返り値と一致する**: 段6は、返り値と同じ `omitted`・`explain`・`index`（記録では `indexBand`）・`usage` と、`memories` の内訳（`memoryId`・`score`・`retrievedVia`・`companionOf`・`associationOf`）を書く。`@mnemora/postgres` は jsonb に保存するので、読み戻した値のオブジェクトのキーの順は返り値と違うことがある（値は同じ）。
 
-以上は `packages/postgres/src/__tests__/recall-explain-accounting.postgres.test.ts` が、Postgres と testkit の InMemory の両方で縛っている（約束を足すものではない）。
+以上は `packages/postgres/src/__tests__/recall-explain-accounting.postgres.test.ts` が、Postgres と testkit の InMemory の両方で縛っている（約束を足すものではない）。`association` の trace 固有の振る舞い（off で trace が無い・`no_anchor`/`vector_store_lacks_get_vectors` で `executed: false`）は `packages/core/src/__tests__/recall-explain-stages-association.test.ts` が縛る。
 
 ---
 
