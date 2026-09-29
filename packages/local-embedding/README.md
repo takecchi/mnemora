@@ -409,34 +409,11 @@ transformers.js の `env.cacheDir` を `cacheDir` と同じ場所へ一時的に
   **本来成功するはずの側**が `this.tokenizer is not a function` で落ちた。待ち行列を挟むと両方とも正しく決着する
   （片方は成功、もう片方はそのディレクトリの中身どおりに失敗する）。**一方が失敗しても、待ち行列そのものは
   詰まらない**——次の読み込みは待たされず進む。
-- 🔴 **`revision` を `main` 以外にすると、この直し方は届かない**——`cacheDir` を温めていても、オフラインでは今も読めない（下の節）。
+- `revision` を `main` 以外にしたときは、キャッシュの根が `revision` ごとに分かれる（下の節。Issue #1403）。
 - ⚠ 確かめていないこと: transformers.js の 4.2.0 以外の版。同じプロセス内の別のライブラリが `env.cacheDir` を読む・書く
   タイミングと重なったときの網羅的な組み合わせ（直列化しているのはこのパッケージ自身の呼び出しどうしだけである）。
 
-#### `revision` を `main` 以外にしたときの `cacheDir` の鍵
-
-transformers.js は `revision` が `"main"` のときだけキャッシュの鍵を `<repo>/<file>` にする。`main` 以外
-（枝名・tag・commit sha）を渡すと、鍵は **`<repo>/<revision>/<file>`** になる（`@huggingface/transformers` の
-`src/utils/hub.js` の `revision === 'main' ? ... : pathJoin(path_or_repo_id, revision, filename)` で確認済み）。
-
-⟹ **`revision` を渡す前に `revision` 無し（＝ `main` の鍵）で温めた `cacheDir` には当たらない。**`revision` を
-固定して使うなら、その `revision` を指定した状態で温める必要がある。
-
-🔴 **ただし、`revision` を指定して温めた `cacheDir` でも、オフラインでは今も読めない。**読み込みの前段の確認は
-`revision` も運ばないので、`<repo>/<revision>/<file>` ではなく `main` の鍵（`<repo>/config.json`）を探す。
-上の `env.cacheDir` の差し替えで探す場所は `cacheDir` になるが、そこに在るのは `<repo>/<revision>/` の下の
-ファイルだけなので当たらず、`resolve/main/config.json` を取りに出る。
-【実測 2026-09-29、`@huggingface/transformers@4.2.0`】`<repo>/<revision>/` の下に4ファイルを揃えた `cacheDir` と、
-`scripts/local-embedding-pinned-revision.json` の sha を渡して `createLocalEmbeddingPipeline` から読むと、
-fetch を必ず失敗させた状態で `resolve/main/config.json` へ1回出て失敗した。`examples/chat` の CI ジョブは
-`cacheDir` と `revision` を両方固定している（`src/providers.ts` の `localEmbeddingPinnedRevision()`）ので、
-この形に当たる——同ジョブの「温めたキャッシュだけで…（測るだけ）」のステップが `ok=false` のままなのはこのためである。
-
-⛔ **ここは doc だけで、実装は変えていない。**前段の確認に `main` の鍵を満たさせるには、既定のキャッシュか
-`cacheDir` の `<repo>/` の下へ写しを置く必要がある。これは transformers.js の内部の鍵の形に結びつく
-（[ADR 0361](../../docs/decisions/0361-local-embedding-cache-dir-env-swap.md) の案2 と同じ理由で、今回は採らない）。
-
-この振る舞いは次の歯が縛っている:
+`env.cacheDir` の差し替えは、次の歯が縛っている:
 
 - `src/__tests__/cache-dir-preflight-default-cache.test.ts`（本物の transformers.js・偽のファイル。
   `createLocalEmbeddingPipeline` 経由で読み込み、ネットワークへの要求が0回であることを縛る）。
@@ -448,6 +425,51 @@ fetch を必ず失敗させた状態で `resolve/main/config.json` へ1回出て
 
 transformers.js の版上げで前段の確認が `cache_dir` を自分で運ぶようになれば、上の歯は0回のまま変わらず緑だが、
 この差し替え自体が不要になる（実害は無いが、意味の無い迂回になる）——ADR 0361 の「これが覆るとしたら」を見ること。
+
+#### `revision` を `main` 以外にしたときの置き場所
+
+（[Issue #1403](https://github.com/takecchi/mnemora/issues/1403)。[ADR 0365](../../docs/decisions/0365-local-embedding-revision-in-remote-path-template.md)）
+
+**`revision` を渡すと、キャッシュの根は `<根>/<encodeURIComponent(revision)>/` になる。**その下の置き方は
+`revision` 無しと同じ `<repo>/<file>` である。根は、`cacheDir` を渡していればそれ、渡していなければ
+transformers.js の既定のキャッシュ（上の「前提」の置き場所）で、`cacheDir` の有無で振る舞いは分かれない。
+
+| 渡したもの | ファイルの置き場所 |
+|---|---|
+| `revision` 無し | `<根>/<repo>/<file>` |
+| `revision: "<sha>"` | `<根>/<sha>/<repo>/<file>` |
+| `revision: "refs/pr/1"` | `<根>/refs%2Fpr%2F1/<repo>/<file>` |
+
+既定の `createPipeline` は、`revision` を transformers.js の `pipeline()` へ渡さず、`pipeline()` を呼んでいる間だけ
+次の2つを差し替える（成功でも失敗でも元へ戻す。上の `env.cacheDir` の差し替えと同じ待ち行列の中で行う）。
+
+- `env.remotePathTemplate` の `{revision}` を、`encodeURIComponent(revision)` に置き換える（利用者が変えた
+  template を土台にする）。
+- キャッシュの根（`cache_dir` と `env.cacheDir`）を、上の `<根>/<revision>/` にする。
+
+**なぜこうするか。**transformers.js（4.2.0。4.3.0 と、2026-09-23 時点の上流の `main` も同じ）の読み込みの前段の確認は、
+`cache_dir` だけでなく `revision` も運ばない。`revision` を `pipeline()` に渡すと、実際の読み込みは
+`<repo>/<revision>/<file>` を探すのに、前段の確認だけは `main` の鍵（`<repo>/config.json`）を探す。
+そのため、以前は `revision` を固定すると、温めてもオフラインでは読めなかった
+（【実測 2026-09-29】`resolve/main/config.json` へ出て失敗した。`examples/chat` の CI の「温めたキャッシュだけで…
+（測るだけ）」のステップも `ok=false` だった）。いまは前段の確認も実際の読み込みも、同じ根・同じ revision の URL を見る。
+ネットワークがあるときに前段の確認が `main` の `config.json` を見ることも、なくなった。
+
+根を `revision` ごとに分けるのは、`revision` 無しで温めた中身が、固定した `revision` の中身として黙って
+読まれないようにするためである（template に埋め込むと、transformers.js はキャッシュを `main` と同じ
+`<repo>/<file>` の鍵で引く）。
+
+- ⚠ **この版より前に `revision` を渡して温めたキャッシュ（`<根>/<repo>/<revision>/<file>`）は、もう使われない。**
+  ネットワークがあれば、新しい根へモデル一式（約42MB）を1回取り直す。**ネットワークの無い場所で使うなら、先に新しい根へ
+  温め直すこと**（`revision` を渡して一度読み込めばよい）。古い置き場所は自動では消さない。
+- ⚠ `env.remotePathTemplate` も、`env.cacheDir` と同じくプロセス全体で共有される大域である。このパッケージを
+  経由しない transformers.js の利用が、差し替えの最中に読み込むと、差し替え後の値を見うる（上の `env.cacheDir` と同じ限界）。
+- ⚠ `env` を読めない、根が無い（`cacheDir` を渡さず、既定のキャッシュも無い）、`env.remotePathTemplate` が
+  文字列でない、のどれかのときは、今までどおり `revision` を `pipeline()` へ渡す。
+
+この振る舞いは次の歯が縛っている: `src/__tests__/revision-offline-preflight.test.ts`（本物の transformers.js・
+偽のファイル）・`src/__tests__/revision-env-swap.test.ts`（`@huggingface/transformers` を丸ごと mock）・
+`src/__tests__/live.revision-offline-read.test.ts`（opt-in。本物のモデル）。
 
 ### 先に読み込ませたいときは `warmup()`
 
@@ -474,7 +496,7 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 | `cacheDir`       | 未指定（`@huggingface/transformers/.cache/`） | モデルの置き場所                                                                                                                                                  |
 | `numThreads`     | `4`                                           | onnxruntime の intra-op スレッド数                                                                                                                                |
 | `maxBatchSize`   | `128`                                         | `embed()` を1回の推論に渡す最大件数。超えた分は分けて呼ぶ（ビット一致するのはこの値以下。Issue #1141 / ADR 0358）                                                 |
-| `revision`       | 未指定（transformers.js の既定 `"main"`）     | Hugging Face の revision（枝名・tag・commit sha）。⚠ 渡したときの実挙動は本物のモデルで確かめていない。キャッシュ鍵・重みの指紋の照合との関係も未決（Issue #597） |
+| `revision`       | 未指定（transformers.js の既定 `"main"`）     | Hugging Face の revision（枝名・tag・commit sha）。渡すと、キャッシュの根が `<根>/<encodeURIComponent(revision)>/` に分かれる（「`revision` を `main` 以外にしたときの置き場所」の節。Issue #1403）。重みの指紋の照合との関係は Issue #597 |
 | `createPipeline` | transformers.js                               | モデルを読み込む関数（**テスト用の注入点**）                                                                                                                      |
 | `retry`          | `{ attempts: 3 }`                             | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141）                                                     |
 | `sleep`          | `setTimeout` を使う本物の待ち                 | リトライの待ち時間を実際に待つ関数（**テスト用の注入点**）                                                                                                        |
@@ -568,15 +590,21 @@ new LocalEmbeddingProvider({ cacheDir: "/var/lib/mnemora/models" });
 
 #### ネットワークに一切出ずに、手元のファイルだけで動かす
 
-🔴 **`repo` に絶対パスは渡せない。**transformers.js はモデル id を
-`env.localModelPath` からの**相対**で解決するので、`repo` に渡すのは
-「そのディレクトリの下のフォルダ名」である。⟹ **`env.localModelPath`・`env.allowRemoteModels`
-を触る必要があり、それは `createPipeline` を差す仕事になる**——既定の `createPipeline`
-（上の「`cacheDir` を渡すと、読み込みの前段の確認もそこを見る」節）が触るのは
-`env.cacheDir` だけであり、`pipeline()` を呼んでいる間だけの一時的な差し替えである。
-`env.localModelPath`・`env.allowRemoteModels` にはどちらのケースでも触れない
-（`env` はプロセス全体で共有される大域なので、既定の `createPipeline` は
-必要な最小限（`cacheDir` だけ）しか触らない設計にしてある）。
+⚠ **2026-09-29 訂正（Issue #1403 の調べで判明）**: この節はこれまで「🔴 **`repo` に絶対パスは渡せない**
+（transformers.js はモデル id を `env.localModelPath` からの相対で解決する）」と書いていたが、事実ではなかった。
+【実測 2026-09-29、`@huggingface/transformers@4.2.0`】モデルの4ファイルを置いたディレクトリの**絶対パス**を
+`repo` に渡し（`modelId` には別の id を渡す）、`env.fetch` を必ず失敗させて `LocalEmbeddingProvider` から
+`embed()` すると、ネットワークへの要求は0回で256次元のベクトルが返った。transformers.js は、Hugging Face の
+モデル id の形でない値を、ディレクトリのパスとしてそのまま読む（`utils/hub.js` の `buildResourcePaths`）。
+mnemora の側にも、絶対パスを拒む検査は無い。⟹ **手元のディレクトリだけで動かすなら、`repo` にその絶対パスを
+渡すのがいちばん短い。**この形なら `env` にも触らない。
+
+`env.localModelPath` を使う形（`repo` には、そのディレクトリの下のフォルダ名を渡す）も動く。ただし
+`env.localModelPath`・`env.allowRemoteModels` を触る必要があり、それは `createPipeline` を差す仕事になる。
+既定の `createPipeline` が触るのは、`pipeline()` を呼んでいる間だけの `env.cacheDir`（上の「`cacheDir` を渡すと、
+読み込みの前段の確認もそこを見る」節）と、`revision` を渡したときの `env.remotePathTemplate`（上の「`revision` を
+`main` 以外にしたときの置き場所」節）だけであり、`env.localModelPath`・`env.allowRemoteModels` には触れない
+（`env` はプロセス全体で共有される大域なので、既定の `createPipeline` は必要な最小限しか触らない設計にしてある）。
 
 **この形が実際に動くことは確かめた**（2026-09-10T00:37Z にこの器で実行。
 以下は `LocalEmbeddingPipeline` が**必須 interface**になった後の形——

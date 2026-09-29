@@ -385,5 +385,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0360](./0360-schema-unsupported-thrown-before-send.md) | `completeStructured` は、送れない zod の形を送る前に `kind: "schema_unsupported"` で落とす | 採用 (2026-09) |
 | [0361](./0361-local-embedding-cache-dir-env-swap.md) | `LocalEmbeddingProvider` の `cacheDir` を、読み込みの前段の確認にも反映させる（`env.cacheDir` の一時的な差し替え + 直列化。Issue #1239） | 採用 (2026-09) |
 | [0363](./0363-outbox-last-error-omit-params-and-cap-length.md) | `describeJobFailure`（outbox の `lastError`）は drizzle の `params:` を落とし、長さに上限を掛ける（Issue #1064） | 採用 (2026-09) |
+| [0364](./0364-lexical-tsvector-fallback-for-oversized-content.md) | `idx_memories_lexical` の式に、tsvector が1MBを超える本文だけ先頭150,000文字へ縮退するフォールバックを挟む | 採用 (2026-09) |
+| [0365](./0365-local-embedding-revision-in-remote-path-template.md) | `LocalEmbeddingProvider` に `revision` を渡したら、`env.remotePathTemplate` に埋め込み、キャッシュの根を revision ごとに分ける（Issue #1403） | 採用 (2026-09) |
+| [0366](./0366-trigram-extension-follows-vector-schema.md) | `probeTrigramLexicalSupport` は `pg_trgm` を、`vector` が入っているスキーマへ合わせる（引数は増やさない。Issue #1256） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

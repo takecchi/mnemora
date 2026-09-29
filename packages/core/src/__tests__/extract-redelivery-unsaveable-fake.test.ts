@@ -18,8 +18,8 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  *   `meta.droppedCandidates` に残り、`code` は（testkit の fixture と同じく）`null`。全件が落ちたら投げる。
  * - 逐次の再配達では、2回目は LLM を呼ばず何も書かない。
  *
- * ⚠ 語の多い 1MB 超の本文は当てない: Postgres は tsvector の上限で拒むが、Fake は testkit の fixture と
- * 同じく受け入れる（`Runtime.observe` の doc の「保存できる値の範囲は store で違う」）。
+ * ⚠ 語の多い 1MB 超の本文は当てない: 保存できない候補の例にならない。Fake も testkit の fixture も受け入れ、
+ * Postgres も migration 0025 以降は受け入れる（#1222・ADR 0364。それ以前は Postgres だけが tsvector の上限で拒んでいた）。
  * 並行の2本は `packages/postgres` の `tick-concurrent-extract.postgres.test.ts`。
  */
 

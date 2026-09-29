@@ -28,8 +28,8 @@ import {
  * - 保存できない候補だけを落とし、残りの候補は書く。`observe()` は投げない。落とした候補は、残った候補の
  *   `created` イベントの `meta.droppedCandidates` に残る（`observe()` の戻り値には出ない）。
  * - 全件が保存できなければ、今どおり最初の例外を投げ、何も書かない。
- * - 保存できる値の範囲は store で違う: 本文の NUL は2実装とも拒む。語の多い 1MB 超の本文は、Postgres が
- *   tsvector の上限で拒み、testkit の fixture は受け入れる。
+ * - 本文の NUL は2実装とも拒む。語の多い 1MB 超の本文は、2実装とも受け入れる（Postgres は migration 0025
+ *   以降、語彙の索引を先頭だけで作り直して書く。#1222・ADR 0364。それ以前は tsvector の上限で拒んでいた）。
  */
 
 let candidates: string[] = [];
@@ -101,7 +101,10 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
 ];
 
 const ctx: Ctx = { tenantId: "observe-unsaveable-candidate" };
-/** 語の多い 1MB 超の本文（Postgres の tsvector の上限を超える、#1222）。 */
+/**
+ * 語の多い 1MB 超の本文（素の `to_tsvector` では tsvector の上限を超える、#1222）。
+ * migration 0025 以降、Postgres も保存できる（ADR 0364）。
+ */
 const HUGE = Array.from({ length: 200_000 }, (_, i) => `w${i}`).join(" ");
 const NUL = "二件目\u0000";
 
@@ -162,26 +165,14 @@ for (const [name, makeKit] of KITS) {
       }
     });
 
-    it(
-      name === "Postgres"
-        ? "語の多い 1MB 超の本文: Postgres はその候補だけを落として残りを書く"
-        : "語の多い 1MB 超の本文: testkit の fixture は受け入れ、3件とも書く",
-      async () => {
-        const kit = await makeKit();
-        const got = await observeWith(kit, ["一件目の事実", HUGE, "三件目の事実"], "huge");
-        expect(got.threw).toBe(false);
-        if (name === "Postgres") {
-          expect(got.contents).toEqual(["一件目の事実", "三件目の事実"]);
-          const dropped = got.createdMetas[0]!.droppedCandidates as Array<Record<string, unknown>>;
-          expect(dropped.map((d) => d.index)).toEqual([1]);
-          // 落とした記録に本文を写さない（1MB を meta に載せない）。
-          expect(JSON.stringify(got.createdMetas).length).toBeLessThan(10_000);
-        } else {
-          expect(got.contents).toHaveLength(3);
-          expect(got.createdMetas.every((m) => !("droppedCandidates" in m))).toBe(true);
-        }
-      },
-    );
+    it("語の多い 1MB 超の本文: 2実装とも受け入れ、3件とも書く（本文は1文字も欠けない。#1222・ADR 0364）", async () => {
+      const kit = await makeKit();
+      const got = await observeWith(kit, ["一件目の事実", HUGE, "三件目の事実"], "huge");
+      expect(got.threw).toBe(false);
+      expect(got.contents).toHaveLength(3);
+      expect(got.contents).toContain(HUGE);
+      expect(got.createdMetas.every((m) => !("droppedCandidates" in m))).toBe(true);
+    });
 
     it("deferred の extract ジョブでも、保存できない候補だけを落として残りを書き、ジョブは完了する", async () => {
       const kit = await makeKit();

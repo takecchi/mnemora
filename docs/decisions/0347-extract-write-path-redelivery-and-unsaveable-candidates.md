@@ -143,3 +143,13 @@ fixture）で縛っていた。
   候補を書く直前にもう一度同じ確認を入れる（並行を塞ぐ側へ倒す）と、違う本文と LLM の失敗の2件が赤になった
   （同じ本文の1件は、どちらでも1件なので緑のまま）。
 - 当てていないこと: ②が先に LLM の中で止まり①が先に書く順、3本以上、testkit の fixture と core の Fake での並行。
+
+## 追記（2026-09-29）: 語の多い 1MB 超の本文は、Postgres でも保存できない候補ではなくなった
+
+[Issue #1222](https://github.com/takecchi/mnemora/issues/1222)・[ADR 0364](./0364-lexical-tsvector-fallback-for-oversized-content.md)
+の migration 0025 で、`idx_memories_lexical` の式に tsvector の上限へのフォールバックを挟んだ。以後、
+語の多い 1MB 超の本文は `@mnemora/postgres` でも書け、落とされない（testkit の fixture・core の Fake と揃った）。
+上の「文脈」と「追記（2026-09-28）」に在る「Postgres の tsvector の上限を超える本文」「Postgres は tsvector の
+上限で拒む」は、migration 0025 より前の振る舞いである。この ADR の決定（保存できない候補だけを落とし、残りを書く）は
+変わらない——本文の NUL などは今も落ちる。
+`packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts` の 1MB 超の歯は、2実装とも3件を書く主張に反転した。
