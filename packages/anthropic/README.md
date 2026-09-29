@@ -205,15 +205,14 @@ const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client })
 
 🔴 **2026-09-29 訂正（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](../../docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）: 上の「同じ版を入れること」はもう要らない。** `client` の型は `Pick<Anthropic, "messages">`（`@anthropic-ai/sdk` パッケージのクラスをそのまま切り出した型）から、`@mnemora/anthropic` 自前の構造型 `AnthropicMessagesClient`（`@anthropic-ai/sdk` パッケージの型を一切参照しない）へ変わった。**`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している版（`0.124.0`）と揃える必要が無い**——最新を入れても、`Anthropic` インスタンスはそのまま `client` に渡せる。移行の詳細は [CHANGELOG.md](../../CHANGELOG.md) の `[1.1.0]` 節を見ること。
 
-## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（今の振る舞い）
+## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（2026-09-29 に `kind` を足した——下の訂正を見ること）
 
 `AnthropicLLMProvider.completeStructured` は、送る前に SDK の `zodOutputFormat`（zod の `toJSONSchema` と SDK の
-`transformJSONSchema`）でスキーマを翻訳する。翻訳できない形は、**送る前に**素の `Error` を投げ、`messages.create` は呼ばれない
-（`AnthropicLLMProviderError` の `kind` には入らない）。
+`transformJSONSchema`）でスキーマを翻訳する。翻訳できない形は、**送る前に**落ち、`messages.create` は呼ばれない。
 
 【コードとテストで確かめた。Anthropic の実 API には当てていない】（歯: `src/__tests__/structured-output-zod-shapes.test.ts`）
 
-| zod の形 | 結果 |
+| zod の形 | 結果（当時＝2026-09-27。素の `Error` で、`kind` を持たなかった） |
 | --- | --- |
 | `z.tuple` | 送る前に `Error`「`JSON schema must have a type defined if anyOf/oneOf/allOf are not used`」 |
 | `z.date` | 送る前に `Error`「`Date cannot be represented in JSON Schema`」 |
@@ -226,8 +225,17 @@ const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client })
 になる——**空の object しか許さない形**である（`z.record(z.string(), z.string())` を翻訳して確かめた。Anthropic の実 API には当てていない）。
 ⟹ Anthropic が制約どおりに出力すれば、record の欄はいつも `{}` で返る。歯は `src/__tests__/structured-output-zod-shapes.test.ts`。
 
-文面は zod・SDK のもので、プロンプトの本文や API キーは含まない。`@mnemora/openai` は同じ形を送る前には落とさず、
-送った後に OpenAI が 400 で拒む（あちらの README に実測）。2つの provider の振る舞いをそろえるかは決めていない（#1148）。
+文面は zod・SDK のもので、プロンプトの本文や API キーは含まない。
+
+### 🔴 2026-09-29 訂正（[ADR 0360](../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）: `kind: "schema_unsupported"` を足した
+
+**上の「素の `Error`」「`kind` を持たない」はもう成り立たない。**`z.tuple`・`z.date`・`transform` が送る前の翻訳で投げた例外は、
+いまは `AnthropicLLMProviderError`（`kind: "schema_unsupported"`）に包んで投げ直す。**元の例外（上の表の文面）は
+`cause`（ES2022 の `Error.cause`）にそのまま載る**——文面そのものは変えていない。`messages.create` が呼ばれないことも変えていない。
+**`z.record` は今までどおり**——`schema_unsupported` にはせず、翻訳が通って送る（上の 2026-09-28 追記のとおり、送る形は
+「空の object」に降格する）。`@mnemora/openai` は同じ4形すべて（`z.record`・`z.tuple`・`z.date`・`transform`）を送る前に
+同じ `kind: "schema_unsupported"` で落とす（あちらの README）——**この点だけ2つの provider で振る舞いが割れる**（`z.record` を
+Anthropic 側だけ通す判断は、クローン miku が ADR 0360 で決めた。オーナーの判断ではない）。
 
 **core が渡す4つのスキーマは、送る前の変換を通る**【2026-09-27、偽の `client` で確かめた。**射程は送る前の変換まで**——
 Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない】（歯: `src/__tests__/core-schemas-send-shape.test.ts`）。

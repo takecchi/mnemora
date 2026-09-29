@@ -35,6 +35,15 @@
  * 丸ごと欠ける）を実際に返すかは確認していない。** 詳細・検討した案は
  * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記を
  * 参照。`llm-provider.ts` の `firstTextBlock` にも個別の doc コメントがある。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+ * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
+ * `kind: "schema_unsupported"` を足した。** `completeStructured` は、送る前の翻訳
+ * （`json-schema.ts` の `translateForAnthropicStructuredOutput`、SDK の `zodOutputFormat`）
+ * が投げた例外を、この `kind` に包んで `messages.create` を呼ぶ前に投げ直す。**元の例外は
+ * `cause`（ES2022 の `Error.cause`）に載る**。`z.tuple`・`z.date`・`transform` がこの経路に
+ * 当たる（`z.record` は今までどおり翻訳が通り、送る。README「`completeStructured` に渡せる
+ * zod の形」参照）。
  */
 
 /**
@@ -47,7 +56,10 @@ export type AnthropicLLMFailureKind =
   /** `stop_reason: "max_tokens"` / `"model_context_window_exceeded"`。応答が途中で切れた */
   | "truncated"
   /** 上記のどれでもないのに、テキストブロックが1つも無かった */
-  | "no_content";
+  | "no_content"
+  /** 送る前の翻訳（`translateForAnthropicStructuredOutput`、SDK の `zodOutputFormat`）が
+   * 例外を投げた。`messages.create` は呼ばれていない。元の例外は `cause` に載る（#1148）。 */
+  | "schema_unsupported";
 
 /** {@link AnthropicLLMProviderError} のコンストラクタに渡す値。 */
 export interface AnthropicLLMProviderErrorOptions {
@@ -61,6 +73,9 @@ export interface AnthropicLLMProviderErrorOptions {
   refusalCategory?: string | null;
   /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
   message?: string;
+  /** `kind: "schema_unsupported"` のとき、送る前の翻訳が投げた元の例外。
+   * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
+  cause?: unknown;
 }
 
 function defaultMessage(options: AnthropicLLMProviderErrorOptions): string {
@@ -80,6 +95,13 @@ function defaultMessage(options: AnthropicLLMProviderErrorOptions): string {
       );
     case "no_content":
       return "AnthropicLLMProvider: structured completion returned no content";
+    case "schema_unsupported":
+      return (
+        "AnthropicLLMProvider: the zod schema could not be translated to Anthropic's" +
+        " native structured output" +
+        (options.cause instanceof Error ? ` (${options.cause.message})` : "") +
+        " — messages.create was not called; see the `cause` for the original error"
+      );
   }
 }
 
@@ -97,7 +119,10 @@ export class AnthropicLLMProviderError extends Error {
   readonly refusalCategory: string | null;
 
   constructor(options: AnthropicLLMProviderErrorOptions) {
-    super(options.message ?? defaultMessage(options));
+    super(
+      options.message ?? defaultMessage(options),
+      options.cause !== undefined ? { cause: options.cause } : undefined,
+    );
     this.name = "AnthropicLLMProviderError";
     this.kind = options.kind;
     this.stopReason = options.stopReason ?? null;

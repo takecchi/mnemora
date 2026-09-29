@@ -45,6 +45,16 @@
  * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記
  * （主たる記録）を参照。`llm-provider.ts` の `assertNotRefusedOrTruncated` 呼び出し箇所、
  * `embedding-provider.ts` の `embed` にも個別の doc コメントがある。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+ * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
+ * `kind: "schema_unsupported"` を足した。** `completeStructured` が、送る前の翻訳
+ * （`structured-root.ts` の `toBaseJsonSchema`、zod の既定＝ throw）と、送る直前の検査
+ * （`openai` SDK 自身の `lib/transform` の `toStrictJsonSchema` を、実際に送る JSON Schema
+ * に通す。戻り値は使わず、送るのは今までどおり mnemora 自身の翻訳結果である）のどちらかで
+ * 投げた例外を、この `kind` に包んで `chat.completions.create` を呼ぶ前に投げ直す。**元の例外は
+ * `cause`（ES2022 の `Error.cause`）に載る**。`z.record`・`z.tuple`・`z.date`・`transform` が
+ * この経路に当たる（README「`completeStructured` に渡せる zod の形」参照）。
  */
 
 /**
@@ -59,7 +69,10 @@ export type OpenAILLMFailureKind =
   /** `finish_reason === "length"`。応答が max tokens で途中で切れた */
   | "truncated"
   /** 上記のどちらでもないのに、`content` が空/欠落だった */
-  | "no_content";
+  | "no_content"
+  /** 送る前の翻訳・検査（`toBaseJsonSchema`・`toStrictJsonSchema`）が例外を投げた。
+   * `chat.completions.create` は呼ばれていない。元の例外は `cause` に載る（#1148）。 */
+  | "schema_unsupported";
 
 /** {@link OpenAILLMProviderError} のコンストラクタに渡す値。 */
 export interface OpenAILLMProviderErrorOptions {
@@ -71,6 +84,9 @@ export interface OpenAILLMProviderErrorOptions {
   refusalMessage?: string | null;
   /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
   message?: string;
+  /** `kind: "schema_unsupported"` のとき、送る前の翻訳・検査が投げた元の例外。
+   * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
+  cause?: unknown;
 }
 
 function defaultMessage(options: OpenAILLMProviderErrorOptions): string {
@@ -91,6 +107,13 @@ function defaultMessage(options: OpenAILLMProviderErrorOptions): string {
       );
     case "no_content":
       return "OpenAILLMProvider: structured completion returned no content";
+    case "schema_unsupported":
+      return (
+        "OpenAILLMProvider: the zod schema could not be translated to OpenAI's strict" +
+        " Structured Output" +
+        (options.cause instanceof Error ? ` (${options.cause.message})` : "") +
+        " — chat.completions.create was not called; see the `cause` for the original error"
+      );
   }
 }
 
@@ -108,7 +131,10 @@ export class OpenAILLMProviderError extends Error {
   readonly refusalMessage: string | null;
 
   constructor(options: OpenAILLMProviderErrorOptions) {
-    super(options.message ?? defaultMessage(options));
+    super(
+      options.message ?? defaultMessage(options),
+      options.cause !== undefined ? { cause: options.cause } : undefined,
+    );
     this.name = "OpenAILLMProviderError";
     this.kind = options.kind;
     this.finishReason = options.finishReason ?? null;

@@ -2,14 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { Ctx } from "@mnemora/core";
 import { AnthropicLLMProvider } from "../llm-provider.js";
+import { AnthropicLLMProviderError } from "../errors.js";
 
 /**
- * 利用者が `completeStructured` に渡す zod の形のうち、どれが送る前に落ちるか（今の振る舞い、#1148）。
+ * 利用者が `completeStructured` に渡す zod の形のうち、どれが送る前に落ちるか
+ * （[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+ * [ADR 0360](../../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
  * README「`completeStructured` に渡せる zod の形」の歯。偽の client で、送ったかどうかだけを見る
  * （Anthropic の実 API には当てていない——送った後にベンダーが受けるかは確かめていない）。
  *
- * 送る前に落ちる形は、SDK の `zodOutputFormat`（zod の `toJSONSchema` と SDK の
- * `transformJSONSchema`）が素の `Error` を投げ、`messages.create` は呼ばれない。
+ * ⚠ **2026-09-29 追記: 振る舞いを変えた。**以前は送る前に落ちる形（`z.tuple`・`z.date`・
+ * `transform`）は SDK の `zodOutputFormat`（zod の `toJSONSchema` と SDK の
+ * `transformJSONSchema`）が投げる**素の** `Error` がそのまま伝わり、`kind` を持たなかった。
+ * **いまはその例外を `AnthropicLLMProviderError`（`kind: "schema_unsupported"`）に包み、
+ * 元の例外を `cause` に載せる。**`messages.create` は今までどおり呼ばれない。`z.record` は
+ * 今までどおり翻訳が通って送る（振る舞いは変えていない）。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -40,12 +47,19 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
       /Transforms cannot be represented in JSON Schema/,
     ],
   ] as const)(
-    "%s は送る前に素の Error を投げ、messages.create を呼ばない",
+    "%s は create を呼ばず、AnthropicLLMProviderError(kind: schema_unsupported) を cause 付きで投げる",
     async (_label, schema, message) => {
       const { create, provider } = providerWithSpy();
-      await expect(
-        provider.completeStructured(ctx, { prompt, schema: schema as z.ZodType<unknown> }),
-      ).rejects.toThrow(message);
+      let caught: unknown;
+      try {
+        await provider.completeStructured(ctx, { prompt, schema: schema as z.ZodType<unknown> });
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(AnthropicLLMProviderError);
+      expect((caught as AnthropicLLMProviderError).kind).toBe("schema_unsupported");
+      expect((caught as AnthropicLLMProviderError).cause).toBeInstanceOf(Error);
+      expect(String((caught as AnthropicLLMProviderError).cause)).toMatch(message);
       expect(create).not.toHaveBeenCalled();
     },
   );

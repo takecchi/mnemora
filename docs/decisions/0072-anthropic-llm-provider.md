@@ -470,3 +470,13 @@ doc コメント（`packages/openai/src/errors.ts`・`packages/anthropic/src/err
 追記は [ADR 0075](./0075-openai-refusal-and-truncation.md) にもある。
 
 ⚠ 2026-09-29 追記: `docs/roadmap.md` の §2（段階6） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。
+
+⚠ 2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+[ADR 0360](./0360-schema-unsupported-thrown-before-send.md)）: `completeStructured` が
+送る前の翻訳（`translateForAnthropicStructuredOutput`、SDK の `zodOutputFormat`）で例外を
+投げたとき、以前は素の `Error`（`kind` を持たない）がそのまま伝わっていた。**いまは
+`AnthropicLLMProviderError`（`kind: "schema_unsupported"`）に包んで投げ直す**——元の例外は
+`cause`（ES2022 の `Error.cause`）に載る。`z.tuple`・`z.date`・`transform` がこの経路に
+当たる（`z.record` は対象外——翻訳自体は失敗しないため今までどおり通る）。この追記は
+記録だけであり、詳細・検討した案・引き受けた負債・確かめていないことは ADR 0360 の本文を
+見ること（本 ADR の本文はそれ以外書き換えていない）。
