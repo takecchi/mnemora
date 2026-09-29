@@ -28,8 +28,8 @@ export const CountKindSchema = z.enum([
 export interface StageSkippedOmission {
   /** 常に `"stage_skipped"`（{@link Omission} の判別の鍵）。 */
   kind: "stage_skipped";
-  /** 実行しなかった段（`candidate_generation` は段1、`rescore` は段2、`index_band` は段5、`association` は段3.5）。 */
-  stage: "candidate_generation" | "rescore" | "index_band" | "association";
+  /** 実行しなかった段（`candidate_generation` は段1、`rescore` は段2、`index_band` は段5、`association` は段3.5、`relation` は段3）。 */
+  stage: "candidate_generation" | "rescore" | "index_band" | "association" | "relation";
   /**
    * **`"budget_exhausted"` は、この union に存在していたが、2026-09-16 に落とした**
    * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)
@@ -51,12 +51,22 @@ export interface StageSkippedOmission {
    * この omission は積まない（`docs/recall.md` の「無いの種類を潰さない」原則）——
    * `stage_skipped` は常に「実行しなかった」ことの札であり、「実行して収穫が無かった」
    * ことの札ではない。
+   *
+   * **`"relation_store_unavailable"` は段3（必須の同伴取得、Issue #207/#933 PR2、
+   * ADR 0292 決定3-b、ADR 0381）専用**（`stage: "relation"` のときだけ現れる）。
+   * `withinLimit` に `status === 'contested'` かつ `contestedWithId === null`（多者間の
+   * 群のメンバー）が1件以上あるのに、`deps.relationStore` が配線されていない——群の
+   * 残りのメンバーを辿る手段が無いので、その候補は今までどおり単独の `contested`
+   * として単位を組めず落ちる（`unit_assembly_dropped`）。**候補が無ければこの omission
+   * も積まない**（`no_anchor` と同じ「実行する理由が無かった」との区別、
+   * `stage_skipped` の doc 冒頭の原則）。
    */
   reason:
     | "embedding_provider_unavailable"
     | "empty_query_content"
     | "vector_store_lacks_get_vectors"
-    | "no_anchor";
+    | "no_anchor"
+    | "relation_store_unavailable";
 }
 
 /**
@@ -279,12 +289,19 @@ export interface BelowThresholdOmission {
  * - `"association"` — 段3.5。`RecallAssociationQuery.maxCount` を超えた分
  *   （`docs/recall.md` §9）。次の一手: `maxCount` を増やす。**`limit` を増やしても
  *   直らない**——連想枠の候補は段2の `limit` とは別の上限（`maxCount`）で切られる。
+ * - `"relation"`（Issue #207/#933 PR2、ADR 0292 決定3-a、ADR 0381）— 段3。多者間の
+ *   `contested` 群（`RelationStore.listRelated` で辿った同伴）が
+ *   {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ上限件数を超えた分
+ *   （`docs/recall.md` §2 段3・§8）。次の一手: 今日この上限は呼び出し側から調整できない
+ *   （`association` の `maxCount` のような専用のクエリ欄は無い）——群そのものを分割する
+ *   （`resolveContestedGroup` で一部を解消する）以外に減らす手立てが無いことも含めて
+ *   `docs/recall.md` に記録する。
  */
 export interface OverLimitOmission {
   /** 常に `"over_limit"`（{@link Omission} の判別の鍵）。 */
   kind: "over_limit";
-  /** どの段の上限で切られたか（上の doc: `rescore` は `limit`、`association` は `maxCount`）。 */
-  stage: "rescore" | "association";
+  /** どの段の上限で切られたか（上の doc: `rescore` は `limit`、`association` は `maxCount`、`relation` は段3の同伴取得の上限）。 */
+  stage: "rescore" | "association" | "relation";
   /** 上限を超えて落ちた候補の件数。 */
   count: number;
   /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
@@ -537,12 +554,13 @@ export type Omission =
 
 const StageSkippedOmissionSchema = z.object({
   kind: z.literal("stage_skipped"),
-  stage: z.enum(["candidate_generation", "rescore", "index_band", "association"]),
+  stage: z.enum(["candidate_generation", "rescore", "index_band", "association", "relation"]),
   reason: z.enum([
     "embedding_provider_unavailable",
     "empty_query_content",
     "vector_store_lacks_get_vectors",
     "no_anchor",
+    "relation_store_unavailable",
   ]),
 }) satisfies z.ZodType<StageSkippedOmission>;
 
@@ -573,7 +591,7 @@ const BelowThresholdOmissionSchema = z.object({
 
 const OverLimitOmissionSchema = z.object({
   kind: z.literal("over_limit"),
-  stage: z.enum(["rescore", "association"]),
+  stage: z.enum(["rescore", "association", "relation"]),
   count: z.number().int().nonnegative(),
   countKind: CountKindSchema,
 }) satisfies z.ZodType<OverLimitOmission>;

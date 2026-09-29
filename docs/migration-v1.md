@@ -1677,6 +1677,80 @@ PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決�
 2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380）、
 PR #1437・Issue #1425（ADR 0382）) になった。**
 
+## 🔴 破壊的変更（v1.1.0 → 次の版）—— **未リリース**
+
+この節は、`v1.1.0`（tag が指す `5eb6e9d`）より後に `main` へ入った変更を数える。まだ棚卸しはしておらず、
+下の項目は、着地に先立って変更を作った本人が足したものである。⛔ ここに件数を書かないこと
+（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+⚠ **項目の番号について**: 番号は `v1.0.2 → v1.1.0` の節から通しで振っている。項目29 は、
+上の節の項目30 の後ろの注記が「[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2 が使う予定の欠番」として
+取っておいた番号である。その変更（[PR #1442](https://github.com/takecchi/mnemora/pull/1442)）は
+`v1.1.0` に間に合わなかったので、この節で項目29 を使う——そのため、文書の上から読むと番号が
+30 → 29 と前後する。出荷済みの上の節は書き換えないので、上の節の項目29 は欠番のまま残る。
+
+### 29. `packages/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった。新しい interface `RelationStore` と、それを検査する新設の conformance suite も増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #207](https://github.com/takecchi/mnemora/issues/207)・
+[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、
+[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
+[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
+
+**何が変わったか**:
+
+- `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を
+  足した。`@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`
+  （`InMemoryRelationStore`）が実装する。`packages/testkit` に新設の conformance suite
+  `describeRelationStoreConformance`（9 it）ができた——`packages/testkit`
+  （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
+  （`conformance.postgres.test.ts`）の両方が当てている。
+- `@mnemora/core` の `MemoryStore` に、新しい任意メソッド `markContestedGroup?`/
+  `resolveContestedGroup?`（3件以上専用、`markContestedPair?`/`resolveContestedPair?` の
+  N者版）が増えた。`packages/testkit` の `describeMemoryStoreConformance` に、これを検査する
+  `it` と、新しい任意フラグ `MemoryStoreConformanceOptions.supportsMarkContestedGroup?`/
+  `supportsResolveContestedGroup?: boolean`（既存の3状態フラグと同じ形）が増えた——群の
+  一部だけを渡した `resolveContestedGroup?` を専用のエラー
+  （`ContestedGroupMembershipMismatchError`、新設）で拒む約束、有効期間の重なりの境目
+  （半開区間・マイクロ秒精度）の約束も検査する。
+- 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking`
+  を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる
+「conformance スイートの判定を厳しくする変更」に当たる——型検査は壊れないが、
+`supportsMarkContestedGroup: true`/`supportsResolveContestedGroup: true` を渡して
+これらの口を実装していない自前実装は、conformance suite を当てると新しく落ちる。
+項目23・24・27 と同じ判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を `packages/testkit` の conformance
+suite に対して走らせている利用者のうち、上の2つの任意フラグを `true` で渡しているが
+実装していない場合だけ。**`markContestedGroup?`/`resolveContestedGroup?` を実装しない・
+上の2つのフラグを渡さない利用者は影響を受けない**——後方互換。`RelationStore` を
+`Store` バンドルへ組み込むかどうかも任意（`RuntimeDeps.relationStore?`）——配線しなくても
+`recall()` は今日どおり動く。
+
+⚠ **非破壊の注記（オーナー回答 ask_human `d9364c91` の規律）**: `ContestedDetectionOutcome.
+result`（`@mnemora/core`）の判別可能 union に増えた `"contested_group"`、`Omission` の
+`over_limit`/`stage_skipped` の `stage` 列挙に増えた `"relation"` は、**この文書の定義では
+破壊的変更に数えない**——`RecallStageName` への `"association"` の追加（ADR 0151 追記）・
+`ConsolidateOutcome`/`ReflectOutcome` への `"aborted_source_forgotten"` の追加
+（CHANGELOG `[1.1.0]` 節 `### Breaking` の実例）と同じ「union に値を足す変更」である。
+網羅的な `switch`/`Record` でこれらの型を扱っている利用者は型検査が落ちうるが、それは
+union 拡張一般の影響であり、この文書が破壊的変更として数える基準（interface への必須
+メンバ追加・署名そのものの変更・conformance suite の要件強化）には当たらない。
+
+**どう直すか**: 自前の `MemoryStore` 実装に `markContestedGroup?`/`resolveContestedGroup?`
+を実装する場合は、conformance suite に `supportsMarkContestedGroup: true`/
+`supportsResolveContestedGroup: true` を渡す。実装しない場合は何もしなくてよい（省略時は
+「未検査」のまま、後方互換の振る舞いが保たれる）。`RelationStore` を自前実装する場合は
+`describeRelationStoreConformance` を当てる。
+
+**DB マイグレーション**: 新しい migration `0026_memory_relations.sql` が1本増える
+（`memory_relations` テーブルを新設するだけ）。利用者は `mnemora-postgres-migrate`
+（または `runMigrations`）を打つこと。
+
+⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は1件
+（PR #1442・Issue #207・#933 PR2（ADR 0381））である。**
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

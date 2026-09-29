@@ -681,3 +681,22 @@ Refs #207
 実装・migration・`markContestedGroup`/`resolveContestedGroup`・recall 段3拡張・
 `contested_group` variant・bulk 相当のメソッド）は、この追記の時点でも未実装のまま
 残っている。
+
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
+
+前の追記が挙げた「未実装のまま残っている」§9の項目のうち、`RelationStore` 実装・
+migration・`markContestedGroup`/`resolveContestedGroup`（store 側の口）は段階A・段階Bで
+実装した。段階Bでは追加で、これらを呼び出す `Runtime.markContestedGroup?`/
+`Runtime.resolveContestedGroup?`（読み側の適格性の分類）と、`detectClaimKeyContested` の
+`contested_group` 分岐（穴Aの吸収・合併を含むメンバーの組み立て）を実装した。
+
+**recall 段3拡張は、段階Bでも実装しなかった。** この PR の調査で、recall 段3拡張の
+「あるべき姿」に、[ADR 0292](./0292-relation-graph-table-depth-omitted-design.md)
+決定2・決定3（状態: 提案）が既に設計した「独立した opt-in の探索チャンネル」（連想枠に
+近い位置づけ）と、既存の必須の同伴取得（段3、`contradiction_resolution`）自体をN者の
+群にも対応させる拡張、という2つの読み方がありうることが分かった——どちらを実装すべきかは
+この PR の範囲では決めず、マネージャーへの報告で判断を仰いだ。詳細は ADR 0381 §5 を見る
+こと。

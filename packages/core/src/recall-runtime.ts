@@ -3,6 +3,7 @@ import type { Clock } from "./interfaces/clock.js";
 import type { Ctx } from "./ctx.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { MemoryStore } from "./interfaces/memory-store.js";
+import type { RelationStore } from "./interfaces/relation-store.js";
 import type { TokenCounter } from "./interfaces/token-counter.js";
 import type { VectorFilter, VectorStore, VectorHit } from "./interfaces/vector-store.js";
 import type { LexicalStore, LexicalHit } from "./interfaces/lexical-store.js";
@@ -88,6 +89,19 @@ export interface RecallRuntimeDeps {
   memoryStore: MemoryStore;
   /** ANN チャンネル（段1）と連想枠に使う。 */
   vectorStore: VectorStore;
+  /**
+   * Issue #207/#933 PR2（ADR 0292 決定1・決定2・決定3、ADR 0381、2026-09-30 のさらなる
+   * 直し）: 段3（必須の同伴取得）が、`contestedWithId` を持たない `contested`
+   * （多者間の群のメンバー）の仲間を辿るのに使う。
+   *
+   * **省略可能**（北極星の問い2——これを無効にしても mnemora は成立する）。省略すると、
+   * `contestedWithId` の無い `contested` 候補は今までどおり単独では unit を組めず、
+   * `unit_assembly_dropped` として落ちる（`omitted` に `stage_skipped { stage:
+   * "relation", reason: "relation_store_unavailable" }` を1件積む——ただしそのような
+   * 候補が実際にこの recall に現れたときだけ。`RuntimeDeps.relationStore` と同じ
+   * インスタンスを渡すことを想定している（`runtime.ts` の `recall` 関数がそのまま渡す）。
+   */
+  relationStore?: RelationStore;
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md): 忘却ゲート（段1・
    * 後置フィルタ）と段2の再スコアが、そのテナントの `decay_clock`・活動時計の「いま」
@@ -289,13 +303,73 @@ export function countKindForPartition(
   return partitioned === scoredCount ? "exact" : "unknown";
 }
 
-/** budget truncation の単位。同伴ペアは分割しない（docs/recall.md §8）ため、1つ以上の候補をまとめて持つ。 */
+/**
+ * budget truncation の単位。同伴ペア・群は分割しない（docs/recall.md §8）ため、1つ以上の
+ * 候補をまとめて持つ。
+ *
+ * ⚠ **2026-09-30 追記（Issue #207/#933 PR2、ADR 0292 決定2・3、ADR 0381）**: 多者間の
+ * `contested` 群（`RelationStore` 経由で辿る）は3件以上を持ちうる——「同伴ペアなら2件」
+ * だけではなくなった。
+ */
 export type Unit = {
-  /** この単位に入る候補（同伴ペアなら2件、ほかは1件）。切り詰めるときは単位ごと落とす。 */
+  /** この単位に入る候補（同伴ペアなら2件、群なら3件以上、ほかは1件）。切り詰めるときは単位ごと落とす。 */
   members: ScoredCandidate[];
-  /** 並び替え・切り詰めの基準スコア。ペアの場合は主(スコアで選ばれた側)のスコアを使う。 */
+  /** 並び替え・切り詰めの基準スコア。ペア・群の場合は最もスコアが高いメンバーのスコアを使う。 */
   rankScore: number;
 };
+
+/**
+ * Issue #207/#933 PR2（ADR 0292 決定2・3、ADR 0381、2026-09-30 のさらなる直し）: 段3の
+ * 単位組み立てが、多者間の `contested` 群のメンバーを1つの単位にまとめるための
+ * グラフ探索。`edges`（各 owner の `RelationStore.listRelated` の1段だけの結果から
+ * 集めた無向グラフ）を `startId` から辿り、**`byId`（この recall で実際に候補として
+ * 存在する集合——`withinLimit` ＋ 取得した同伴）に含まれる id だけ**を返す
+ * （`edges` には `byId` に無い id が混じることは無い——呼び出し側が候補を先に
+ * `getMany`/フィルタしてから `edges` を組む前提だが、念のため二重に絞る）。
+ *
+ * 返す配列には `startId` 自身も含む——長さが1なら「仲間が見つからなかった」、
+ * 2以上なら実際に群として組める。
+ */
+function collectGroupComponent(
+  startId: MemoryId,
+  edges: ReadonlyMap<MemoryId, ReadonlySet<MemoryId>>,
+  byId: ReadonlyMap<MemoryId, ScoredCandidate>,
+): MemoryId[] {
+  const visited = new Set<MemoryId>([startId]);
+  const queue: MemoryId[] = [startId];
+  const result: MemoryId[] = [];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (byId.has(current)) {
+      result.push(current);
+    }
+    for (const neighbor of edges.get(current) ?? []) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Issue #207/#933 PR2（ADR 0381 決定4）: 多者間の群の同伴を、残す10件を選ぶときと、
+ * 単位の中で見せるときの両方で使う並び。`validFrom` の新しい順、同じなら id の順。
+ * `validFrom` が無い記憶は「新しさの情報が無い」として最後尾（最も古い扱い）に送る。
+ */
+function compareByValidFromDescThenId(a: Memory, b: Memory): number {
+  const aTime =
+    a.validFrom === null || a.validFrom === undefined
+      ? Number.NEGATIVE_INFINITY
+      : a.validFrom.getTime();
+  const bTime =
+    b.validFrom === null || b.validFrom === undefined
+      ? Number.NEGATIVE_INFINITY
+      : b.validFrom.getTime();
+  if (aTime !== bTime) return bTime - aTime;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
 
 function unitChars(unit: Unit): number {
   return unit.members.reduce((sum, m) => sum + m.memory.digest.length, 0);
@@ -1403,10 +1477,176 @@ export async function runRecall(
     ensureSubjectSeqs,
   );
 
+  // -------------------------------------------------------------------
+  // 段3（続き）: 多者間の `contested` 群の同伴取得（Issue #207/#933 PR2、ADR 0292
+  // 決定2・3、ADR 0381。2026-09-30 のさらなる直し——オーナー側クローンの決定で、
+  // 1段だけではなく「関係の行でつながった全員」を幅優先で辿るようになった）。
+  // `contestedWithId` を持たない `contested`（3件以上の群のメンバー）は、上の
+  // `fetchMandatoryCompanions`（`contestedWithId` の直接参照だけを見る、2者専用の
+  // 規則）では拾えない——`resolveContestedGroup?` の CAS（fix2、§2、`WITH RECURSIVE`）
+  // が「群」を関係の行で連結した全員として扱うのに揃え、recall のこの経路も同じ
+  // 範囲を「群」と呼ぶ。
+  //
+  // - `deps.relationStore` が配線されていなければ、そのような候補が実際に在るときだけ
+  //   `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` を
+  //   積む（ADR 0292 決定3-b。`no_anchor` と同じ「実行する理由が無ければ積まない」
+  //   区別）。
+  // - 配線されていれば、`groupOwners`（`withinLimit` のうち `status === 'contested'`
+  //   かつ `contestedWithId === null`）を起点に、`RelationStore.listRelated` を
+  //   **幅優先**で辿る（群ごとに1回、下の「群ごとに」を参照）。訪れた id は二度と
+  //   `listRelated` を呼ばない（`visited`）。**`status !== 'contested'`（今の status の
+  //   門、decision10 で群を離れたメンバーを含む）な id は、そこで打ち切り——その id
+  //   からは辿らない**（辺は記録するが、そこから先は探索しない）。
+  // - **群ごとに**探索し、群ごとに切る（ADR 0381 決定4）。同じ群の owner が複数候補に
+  //   居ても、最初の owner からの探索がその群を丸ごと辿るので、2回目は探索しない。
+  // - **探索自体を止める安全弁**: 群ごとに、訪れた id の数（owner を含む）が `maxCount`
+  //   （既定10）の10倍を1件も超えないよう、1件たどるごとに確かめて BFS を打ち切る——
+  //   理由は下のコメント（`EXPLORATION_VISIT_LIMIT`）参照。
+  // - 見つかった候補（元々候補集合に無かったもの）は `survivesAttributesFilter` を
+  //   通してから、**群ごとに上限 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount 件**（連想枠と
+  //   同じ既定値を流用する、この回の決定。**この上限に owner 自身〔既に `withinLimit`
+  //   に居る候補〕は数えない**——`detail.companionsAdded` が「同伴として足した件数」
+  //   だけを数える既存の規約〔下の `stages.push` 参照〕と揃えた）まで、
+  //   **`validFrom` の新しい順→`id` の順**で残す（`validFrom` が無い候補は最も古い
+  //   扱いにする——`null` を「いつでも有効」ではなく「新しさの情報が無い」として
+  //   最後尾に送る）。切った分は、群ごとに1件の `over_limit { stage: "relation" }` に積む——
+  //   **探索が安全弁に達せず自然に尽きていれば `countKind: "exact"`**（索引つき
+  //   テーブルへの通常の `WHERE` 検索であり ANN のような近似が無い、`association` の
+  //   fanout 切り捨てと同じ理由、ADR 0292 決定3-a）、**安全弁で打ち切った場合は
+  //   `countKind: "lower_bound"`**（その先にまだ候補が在るかもしれないため）。
+  // -------------------------------------------------------------------
+  const groupOwners = withinLimit.filter(
+    (c) => c.memory.status === "contested" && (c.memory.contestedWithId ?? null) === null,
+  );
+  const relationEdges = new Map<MemoryId, Set<MemoryId>>();
+  const addRelationEdge = (a: MemoryId, b: MemoryId): void => {
+    if (!relationEdges.has(a)) relationEdges.set(a, new Set());
+    relationEdges.get(a)!.add(b);
+    if (!relationEdges.has(b)) relationEdges.set(b, new Set());
+    relationEdges.get(b)!.add(a);
+  };
+  const groupCompanions: ScoredCandidate[] = [];
+  if (groupOwners.length > 0) {
+    if (deps.relationStore === undefined) {
+      omitted.push({
+        kind: "stage_skipped",
+        stage: "relation",
+        reason: "relation_store_unavailable",
+      });
+    } else {
+      const relationStore = deps.relationStore;
+      const presentAfterPairs = new Set([...presentIds, ...companions.map((c) => c.memory.id)]);
+      // 訪れた id の上限（探索自体を止める安全弁）。BFS が大きな群で `listRelated` を
+      // 呼び続けないようにする——`maxCount` の10倍という値は、「上限より遥かに多く
+      // 辿れば、真の validFrom 最新 maxCount 件をほぼ確実に含む」という実務的な安全域
+      // であり、厳密な保証ではない。これを超える巨大な群は `countKind` を
+      // `"lower_bound"` に倒して「測っていない」と正直に言う（[ADR 0292](../../../docs/decisions/0292-relation-graph-table-depth-omitted-design.md)
+      // 決定2-a と同じ「測れない拡張を先取りしない」判断——今日は可変にしない）。
+      const EXPLORATION_VISIT_LIMIT = DEFAULT_RECALL_ASSOCIATION.maxCount * 10;
+      // どれかの群の探索で既に訪れた id。同じ群の owner が複数候補に居ても、2回目は
+      // 探索しない（最初の owner からの探索が、その群を丸ごと辿っている）。
+      const visitedAll = new Set<MemoryId>();
+      // 発見元（どの id から最初に辿り着いたか）。`companionOf` に使う——直接
+      // owner に繋がっていない（複数ホップ先の）companion でも、説明可能性の欄を
+      // 空にせず、実際に辿った経路上の1つ前の id を指す（ADR 0381 §7 負債3）。
+      const discoveredVia = new Map<MemoryId, MemoryId>();
+      // 上限（10件）と探索の安全弁（100件）は**群ごと**に効かせる（ADR 0381 決定4）。
+      // 全体を合わせた数で切ると、後から見つかった群が丸ごと落ちる——対立する記憶を
+      // 並べて出す約束が、群の見つかった順で破れる。群の数はこの recall の候補の件数で
+      // 上が決まるので、全体の件数も無限には増えない。
+      for (const owner of groupOwners) {
+        if (visitedAll.has(owner.memory.id)) continue;
+        visitedAll.add(owner.memory.id);
+        const groupVisited = new Set<MemoryId>([owner.memory.id]);
+        let frontier: MemoryId[] = [owner.memory.id];
+        const discoveredMemories: Memory[] = [];
+        let explorationTruncated = false;
+        while (frontier.length > 0 && !explorationTruncated) {
+          const nextIds: MemoryId[] = [];
+          for (const id of frontier) {
+            if (explorationTruncated) break;
+            const related = await relationStore.listRelated(ctx, id, "contradicts");
+            for (const r of related) {
+              addRelationEdge(id, r.memoryId);
+              if (groupVisited.has(r.memoryId) || visitedAll.has(r.memoryId)) continue;
+              // 1件たどるごとに安全弁を確かめる——訪れた数（owner を含む）が
+              // EXPLORATION_VISIT_LIMIT を1件も超えないようにする。
+              if (groupVisited.size >= EXPLORATION_VISIT_LIMIT) {
+                explorationTruncated = true;
+                break;
+              }
+              groupVisited.add(r.memoryId);
+              visitedAll.add(r.memoryId);
+              discoveredVia.set(r.memoryId, id);
+              nextIds.push(r.memoryId);
+            }
+          }
+          if (nextIds.length === 0) break;
+          const fetchedLevel = await deps.memoryStore.getMany(ctx, nextIds);
+          const nextFrontier: MemoryId[] = [];
+          for (const m of fetchedLevel) {
+            if (m.status !== "contested") {
+              // 今の status の門——群を離れたメンバー（decision10）は、ここで打ち切る。
+              // その先（このメンバー経由でしか辿れない相手）は探索しない。
+              continue;
+            }
+            nextFrontier.push(m.id);
+            if (!presentAfterPairs.has(m.id)) {
+              discoveredMemories.push(m);
+            }
+          }
+          frontier = nextFrontier;
+        }
+        if (discoveredMemories.length === 0) continue;
+        const eligible = discoveredMemories.filter((m) => survivesAttributesFilter(m));
+        // 決まったこと（この回のマネージャー指示）: validFrom の新しい順→id の順。
+        // validFrom が無い候補は「新しさの情報が無い」として最後尾（最も古い扱い）。
+        const sorted = [...eligible].sort(compareByValidFromDescThenId);
+        const capped = sorted.slice(0, DEFAULT_RECALL_ASSOCIATION.maxCount);
+        const overLimitRelationCount = sorted.length - capped.length;
+        if (overLimitRelationCount > 0) {
+          omitted.push({
+            kind: "over_limit",
+            stage: "relation",
+            count: overLimitRelationCount,
+            countKind: explorationTruncated ? "lower_bound" : "exact",
+          });
+        }
+        await ensureSubjectSeqs(capped);
+        for (const companionMemory of capped) {
+          // 発見元（`discoveredVia`）をそのまま `companionOf` に使う——owner 自身
+          // （群の起点、`withinLimit` に居た候補）のことも、複数ホップ先で他の
+          // companion 経由に辿り着いたこともある。どちらも「実際に辿った経路上の
+          // 1つ前の id」という同じ意味であり、区別しない（ADR 0381 §7 負債3）。
+          const companionOf = discoveredVia.get(companionMemory.id);
+          const score = defaultScoringStrategy({
+            now,
+            tags: companionMemory.tags,
+            queryTags,
+            occurredAt: companionMemory.occurredAt,
+            recordedAt: companionMemory.recordedAt,
+            lastReinforcedAt: companionMemory.lastReinforcedAt,
+            strength: companionMemory.strength,
+            halfLifeHours: companionMemory.halfLifeHours,
+            timeWeighting: validatedQuery.timeWeighting,
+            ...decayScoringExtras(companionMemory),
+          });
+          groupCompanions.push({
+            memory: companionMemory,
+            retrievedVia: "mandatory_companion",
+            companionOf,
+            score,
+          });
+        }
+      }
+    }
+  }
+  const allCompanions = [...companions, ...groupCompanions];
+
   stages.push({
     stage: "contradiction_resolution",
     executed: true,
-    detail: { companionsAdded: companions.length },
+    detail: { companionsAdded: allCompanions.length },
   });
 
   // -------------------------------------------------------------------
@@ -1414,15 +1654,16 @@ export async function runRecall(
   // 提示順で必ず隣接させる。ここで「単位（Unit）」を組み、budget 切り詰め（段4）は
   // 単位ごとに行う——ペアを分割しない（docs/recall.md §8）。
   // -------------------------------------------------------------------
-  const allCandidates = [...withinLimit, ...companions];
+  const allCandidates = [...withinLimit, ...allCompanions];
   const byId = new Map(allCandidates.map((c) => [c.memory.id, c]));
   const consumed = new Set<MemoryId>();
   const units: Unit[] = [];
   for (const candidate of withinLimit) {
     if (consumed.has(candidate.memory.id)) continue;
     consumed.add(candidate.memory.id);
-    const companionId = candidate.memory.contestedWithId;
-    const companion = companionId && !consumed.has(companionId) ? byId.get(companionId) : undefined;
+    const companionId = candidate.memory.contestedWithId ?? null;
+    const companion =
+      companionId !== null && !consumed.has(companionId) ? byId.get(companionId) : undefined;
     if (companion && companion.retrievedVia === "mandatory_companion") {
       consumed.add(companion.memory.id);
       units.push({ members: [candidate, companion], rankScore: candidate.score.total });
@@ -1433,15 +1674,41 @@ export async function runRecall(
         members: [candidate, companion],
         rankScore: Math.max(candidate.score.total, companion.score.total),
       });
+    } else if (candidate.memory.status === "contested" && companionId === null) {
+      // Issue #207/#933 PR2（ADR 0292 決定2・3、ADR 0381、2026-09-30 のさらなる直し）:
+      // `contestedWithId` を持たない contested——多者間の群のメンバー（またはそもそも
+      // 群では無い、対向を持たない壊れた contested）。`relationEdges`（上、`deps.
+      // relationStore` が配線されていれば埋まっている）を辿って、この recall の
+      // 候補集合に実在する仲間を集める。
+      const componentIds = collectGroupComponent(candidate.memory.id, relationEdges, byId);
+      if (componentIds.length > 1) {
+        // 見せる順（ADR 0381 決定4）: 起点の候補を先頭に置き、残りは残す10件を選んだ順と
+        // 同じ `validFrom` の新しい順→id の順に並べる。`collectGroupComponent` がたどる順は
+        // 関係の行の挿入順や store の返し方で変わりうるので、見せる順には使わない。
+        const [head, ...rest] = componentIds.map((id) => byId.get(id)!);
+        const members = [
+          head!,
+          ...rest.sort((x, y) => compareByValidFromDescThenId(x.memory, y.memory)),
+        ];
+        for (const member of members) {
+          consumed.add(member.memory.id);
+        }
+        units.push({
+          members,
+          rankScore: Math.max(...members.map((m) => m.score.total)),
+        });
+      }
+      // 仲間が1件も見つからなかった（`componentIds.length === 1`、自分だけ——
+      // `relationStore` 未配線、または配線されていても関係の行が無い場合を含む）ときは、
+      // 下の「対向が見つからない contested」と同じ扱いで単位を組まず consumed のまま
+      // 落とす（`unitAssemblyShortfall` が検出する）。
     } else if (candidate.memory.status === "contested") {
-      // 🔴 ADR 0136 / Issue #243: 対向が見つからない `contested`（典型は
-      // `contestedWithId=null`。`memory-store.ts:175` 付近の mandatory companion
-      // retrieval 契約——`contested` を単独で返してはならない）は、単位を組まず
-      // consumed のまま落とす。`units` に一切現れないため、下の
-      // `unitAssemblyShortfall` が「候補が単位を覆えていない」件数として自動的に
-      // 検出し、既存の `unit_assembly_dropped`（ADR 0043）を通じて黙らずに報告される
-      // ——争われている主張を、争われていない顔で単独で出すくらいなら、
-      // 何も出さない（docs/recall.md §8 と同じ判断）。
+      // 🔴 ADR 0136 / Issue #243: 対向が見つからない `contested`（`contestedWithId` は
+      // 在るが companion が見つからない/不適格）は、単位を組まず consumed のまま落とす。
+      // `units` に一切現れないため、下の `unitAssemblyShortfall` が「候補が単位を
+      // 覆えていない」件数として自動的に検出し、既存の `unit_assembly_dropped`
+      // （ADR 0043）を通じて黙らずに報告される——争われている主張を、争われていない顔で
+      // 単独で出すくらいなら、何も出さない（docs/recall.md §8 と同じ判断）。
     } else {
       units.push({ members: [candidate], rankScore: candidate.score.total });
     }
@@ -1580,10 +1847,11 @@ export async function runRecall(
         // 無関係だった（実測: この規模では Seq Scan / PK Index Scan のみが選ばれ、
         // HNSW 索引は一度も使われていない）。
         const anchorVectorById = new Map(anchorVectorList.map((v) => [v.memoryId, v]));
-        // 除外集合: 既に返る集合（withinLimit + companions）とアンカー自身。
+        // 除外集合: 既に返る集合（withinLimit + allCompanions、2者・多者間どちらの
+        // 段3の同伴取得も含む）とアンカー自身。
         const excludeIds = new Set<MemoryId>([
           ...withinLimit.map((c) => c.memory.id),
-          ...companions.map((c) => c.memory.id),
+          ...allCompanions.map((c) => c.memory.id),
           ...anchorIds,
         ]);
         // 複数アンカーから同じ記憶が浮上しても、associationOf は最初に当たった
@@ -2259,7 +2527,10 @@ export async function runRecall(
   // `over_limit(stage:"association")` に数えており、最後に落とした段は段3.5 である——追記4
   // （Issue #949）が `over_limit(stage:"rescore")` について入れた (c) と同じ処置。
   const returnedMemoryIds = new Set(finalMemories.map((m) => m.memoryId));
-  const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
+  // Issue #207/#933 PR2（ADR 0381、2026-09-30 のさらなる直し）: 多者間の群の同伴取得
+  // （`groupCompanions`）も、2者間の同伴取得（`companions`）と同じ「段3で候補集合に
+  // 戻った」扱いにする——`allCompanions` で合わせて数える。
+  const mandatoryCompanionIds = new Set(allCompanions.map((c) => c.memory.id));
   const associationUnitIds = new Set(
     associationUnits.flatMap((u) => u.members.map((m) => m.memory.id)),
   );

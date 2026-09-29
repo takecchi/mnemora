@@ -10,6 +10,7 @@
 // （CHANGELOG の告知だけで外部実装を赤にする）。
 
 export * from "./memory-store-conformance.js";
+export * from "./relation-store-conformance.js";
 export * from "./vector-store-conformance.js";
 export * from "./embedding-provider-conformance.js";
 export * from "./llm-provider-conformance.js";

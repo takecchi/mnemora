@@ -336,6 +336,14 @@ mnemora 独自の設計判断として書く。
 Memory は、recall の提示順を通じて**必ず隣接させる**。並び順のどこにも「新しい方だけが単独で
 出てくる」状態を作らない。
 
+⚠ **2026-09-30 追記（Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）**:
+機構2・機構3が想定していた「対向」は2者間の対だけだったが、多者間（3件以上）の
+`contested` 群（`memory_relations`）にも同じ機構を広げた——群は「対」ではなく「単位
+（Unit）」として隣接させる（3件以上が連続して提示される）。`RuntimeDeps.relationStore`
+が配線されていない場合、群のメンバーはこれまでどおり単独で返らず候補ごと落ちる
+（機構2を破るくらいなら出さない、という判断をそのまま踏襲する）。詳細は `docs/recall.md`
+§2 段3・§8。
+
 ### スキーマ上の帰結
 
 ```sql
@@ -517,6 +525,31 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
   **今は、一致の `status` を見てから分岐する**——`active` な1件だけが `markContested`
   の対象になり、`contested` な1件は（相手が2件以上のときと同じ形で）evidence だけを
   積む（`unresolved_conflict`）。詳細は ADR 0378 追記。
+
+  ⚠ **2026-09-30 追記（Issue #933 の PR2 段階B、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）:
+  「3件以上のグループを実際に `contested` として recall に載せる」を実装した。**
+  `runtime.observe()` に `claimKey: { enabled: true, detectContested: true }` を渡し、かつ
+  `RuntimeDeps.relationStore` が配線されている呼び出しに限り、一致が2件以上・または
+  ちょうど1件でも既に `contested` な場合に、evidence-only（`unresolved_conflict`）の代わりに
+  `Runtime.markContestedGroup`（新設の任意メソッド、`markContested` の N者版）を実際に呼んで
+  群として `memory_relations`（migration 0026）へ束ねる——群のメンバーは、既存の2者間の対の
+  相方（穴A）・既存の3件以上の群（合併）も含めて組み立てる。**`relationStore` を配線しない
+  呼び出しの挙動は1バイトも変わらない**（Issue #933 PR1〔ADR 0378〕の evidence-only の
+  挙動を期待する既存の歯を1つも書き換えていない理由。当初は専用の opt-in フラグ
+  `ClaimKeyOptions.formContestedGroups` を新設していたが、オーナー側クローンの判断で
+  廃止し、`relationStore` の配線そのものを条件にした——[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md) §4）。
+
+  ⚠ **同日のさらなる追記: `recall()` 側（機構3の必須の同伴取得、下記 §5・§8）もこの群に
+  対応した。** `contestedWithId` を持たない `contested`（3件以上の群のメンバー）は、
+  `RuntimeDeps.relationStore` が配線されていれば `RelationStore.listRelated` を
+  **幅優先で、関係の行でつながった全員に達するまで**辿って仲間を同伴取得する
+  （さらに同日の直しで「1段だけ」から変わった——`resolveContestedGroup?` の CAS
+  〔`WITH RECURSIVE`〕と同じ範囲を「群」として扱う。探索自体には安全弁がある、
+  `docs/recall.md` 参照）——2者間の対（`contestedWithId` の直接参照）の既存規則は
+  1バイトも変えていない。上限（`DEFAULT_RECALL_ASSOCIATION.maxCount`、既定10）・並び順
+  （`validFrom` の新しい順→`id` の順）・`relationStore` 未配線時の扱い（`stage_skipped
+  { stage: "relation" }`、候補が実際に無ければ積まない）の詳細は `docs/recall.md`
+  §2 段3・§8、ADR 0381 §5 を見ること。
 
 **`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
 （行6）までであり、`contested → active | superseded`（行7）は今日どおり
@@ -1564,7 +1597,7 @@ Phase 1 は**稼働中の空間を1つに限る**。2つ目の空間（例えば
 見つからなかった。空間ごとのテーブル分割で回避しているため mnemora の設計には影響しないが、
 確認できなかった事実として明記する。
 
-### `memory_relations`（Phase 2）
+### `memory_relations`（`migrations/0026_memory_relations.sql`）
 
 ```sql
 CREATE TABLE memory_relations (
@@ -1572,8 +1605,7 @@ CREATE TABLE memory_relations (
   tenant_id       text        NOT NULL,
   from_memory_id  uuid        NOT NULL REFERENCES memories(id),
   to_memory_id    uuid        NOT NULL REFERENCES memories(id),
-  kind            text        NOT NULL CHECK (kind IN
-                     ('contradicts','supersedes','consolidates_from','derived_from')),
+  kind            text        NOT NULL CHECK (kind IN ('contradicts')),
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, from_memory_id, to_memory_id, kind)
 );
@@ -1582,9 +1614,12 @@ CREATE INDEX idx_memory_relations_from ON memory_relations (tenant_id, from_memo
 CREATE INDEX idx_memory_relations_to   ON memory_relations (tenant_id, to_memory_id, kind);
 ```
 
-Phase 1 で `status` / `superseded_by_id` / `contested_with_id` が担っている一対一の関係を、
-Phase 2 では多対多に一般化する。`memories` 側の3列は Phase 2 移行後も残し、
-「最も重要な1件」のキャッシュ的な役割として使い続けてよい（索引で引く高速経路として）。
+3件以上が互いに `contested` になった群だけを、この表で持つ（`kind` は今は `'contradicts'` の
+1値だけ）。2者の対は今までどおり `contested_with_id` の列で持ち、この表には書かない。対に
+3件目が来たときは、対の列を空にしてこの表へ移す。行は有効期間が重なる組の間にだけ、1組につき
+向きを変えて2行張る（[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)
+決定1・[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md) 決定1・決定5・決定11）。
+2026-09-30 より前のこの節は、`kind` に4値を持つ Phase 2 の下書きだった——実物に合わせて書き直した。
 
 ### `memory_events`（Phase 1）
 

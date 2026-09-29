@@ -1,5 +1,6 @@
 import {
   computeEventRetentionCutoff,
+  ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
@@ -44,6 +45,7 @@ import type {
   RecallRecord,
   RecallScope,
   ReinforceOptions,
+  RelationKind,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
   ScopeAggregate,
@@ -64,6 +66,21 @@ import { nextId } from "./id.js";
  */
 function snapshot<T>(value: T): T {
   return structuredClone(value);
+}
+
+/**
+ * Issue #207/#933 PR2（ADR 0381）: `memory_relations` の1行相当。
+ * `InMemoryMemoryStore.relations`（`markContestedGroup`/`resolveContestedGroup` が
+ * 書く）と `InMemoryRelationStore`（`in-memory-relation-store.ts`、読み取る）が
+ * 共有する内部形。
+ */
+export interface StoredRelation {
+  id: string;
+  tenantId: string;
+  fromMemoryId: MemoryId;
+  toMemoryId: MemoryId;
+  kind: RelationKind;
+  createdAt: Date;
 }
 
 /**
@@ -511,6 +528,14 @@ export class InMemoryMemoryStore implements MemoryStore {
    * label の紐付けを外し、その分だけ `proposedCount` を減らす」ためにこの PR で新設した。
    */
   private readonly memoryLabels = new Map<string, Set<string>>();
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `memory_relations` 相当——`InMemoryRelationStore`
+   * と共有する（`events`/`outboxJobs` と同じ「同一プロセス内の参照共有」の形）。
+   * `markContestedGroup`/`resolveContestedGroup`（このファイル）が書き、
+   * `InMemoryRelationStore.listRelated` が読む。
+   */
+  readonly relations: StoredRelation[] = [];
 
   /**
    * `(tenantId, name)` を区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId` は不透明な
@@ -2178,6 +2203,228 @@ export class InMemoryMemoryStore implements MemoryStore {
       second: secondMemory,
       events: [firstEvent, secondEvent],
     });
+  }
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.markContestedGroup?` の実装（契約は
+   * interface 側の doc コメントにある）。**in-memory にトランザクションは無い**——
+   * `markContestedPair` と同じ「まだ何も書いていないうちに判定する」作法（全員の
+   * 存在確認・CAS 判定を先に済ませ、1件でも失敗したらこの時点で throw する）。
+   */
+  async markContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("markContestedGroup: members must have at least 3 entries");
+    }
+    const ids = members.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("markContestedGroup: member ids must be unique");
+    }
+
+    const memories = members.map((m) => {
+      const memory = this.rawGet(ctx, m.id);
+      if (!memory) {
+        throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${m.id}`);
+      }
+      return memory;
+    });
+    for (const memory of memories) {
+      const eligible =
+        memory.status === "active" ||
+        (memory.status === "contested" &&
+          (memory.contestedWithId === null ||
+            memory.contestedWithId === undefined ||
+            ids.includes(memory.contestedWithId)));
+      if (!eligible) {
+        throw new MemoryStatusConflictError(memory.id, "active", memory.status);
+      }
+    }
+    for (const m of members) {
+      assertStorableMemoryEvent(m.event);
+      assertCloneableMemoryEvent(m.event);
+    }
+
+    for (const memory of memories) {
+      memory.status = "contested";
+      memory.contestedWithId = null;
+      memory.updatedAt = new Date();
+    }
+
+    // ADR 0381 決定1: 有効期間が重なる組だけに関係の行を張る（ADR 0324 決定4との整合）。
+    const overlaps = (a: Memory, b: Memory): boolean =>
+      (a.validFrom === null ||
+        a.validFrom === undefined ||
+        b.validUntil === null ||
+        b.validUntil === undefined ||
+        a.validFrom < b.validUntil) &&
+      (b.validFrom === null ||
+        b.validFrom === undefined ||
+        a.validUntil === null ||
+        a.validUntil === undefined ||
+        b.validFrom < a.validUntil);
+    for (let i = 0; i < memories.length; i++) {
+      for (let j = i + 1; j < memories.length; j++) {
+        const a = memories[i]!;
+        const b = memories[j]!;
+        if (!overlaps(a, b)) continue;
+        this.linkRelationPair(ctx.tenantId, a.id, b.id, "contradicts");
+      }
+    }
+
+    const events = members.map((m) => {
+      const event = buildStoredMemoryEvent(ctx, m.event);
+      this.events.push(event);
+      return event;
+    });
+
+    return snapshot({ members: memories, events });
+  }
+
+  /** `markContestedGroup`/`resolveContestedGroup` が使う内部ヘルパー——双方向2行を冪等に足す。 */
+  private linkRelationPair(
+    tenantId: string,
+    fromId: MemoryId,
+    toId: MemoryId,
+    kind: RelationKind,
+  ): void {
+    const exists = (a: MemoryId, b: MemoryId) =>
+      this.relations.some(
+        (r) =>
+          r.tenantId === tenantId && r.fromMemoryId === a && r.toMemoryId === b && r.kind === kind,
+      );
+    const now = new Date();
+    if (!exists(fromId, toId)) {
+      this.relations.push({
+        id: nextId("rel"),
+        tenantId,
+        fromMemoryId: fromId,
+        toMemoryId: toId,
+        kind,
+        createdAt: now,
+      });
+    }
+    if (!exists(toId, fromId)) {
+      this.relations.push({
+        id: nextId("rel"),
+        tenantId,
+        fromMemoryId: toId,
+        toMemoryId: fromId,
+        kind,
+        createdAt: now,
+      });
+    }
+  }
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.resolveContestedGroup?` の実装
+   * （契約は interface 側の doc コメントにある）。`markContestedGroup` と対称——
+   * 決着の種類に関わらず、このメンバー全員を結んでいた関係の行を消す
+   * （ADR 0381 決定3、2者版 `resolveContestedPair` と同じ扱いに揃える）。
+   */
+  async resolveContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{
+      id: MemoryId;
+      status: "active" | "superseded";
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("resolveContestedGroup: members must have at least 3 entries");
+    }
+    const ids = members.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("resolveContestedGroup: member ids must be unique");
+    }
+
+    const memories = members.map((m) => {
+      const memory = this.rawGet(ctx, m.id);
+      if (!memory) {
+        throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${m.id}`);
+      }
+      return memory;
+    });
+    for (const memory of memories) {
+      if (memory.status !== "contested") {
+        throw new MemoryStatusConflictError(memory.id, "contested", memory.status);
+      }
+    }
+
+    // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` が、関係の行で
+    // つながった「今も contested な」群の全員と一致することを CAS で課す
+    // （`PostgresMemoryStore.resolveContestedGroup` と同じ形。決定10と矛盾しない
+    // ——forget 等で抜けたメンバーは `status` が `contested` でなくなっているので、
+    // この到達集合には入らない）。
+    {
+      const idSet = new Set(ids);
+      const visited = new Set<MemoryId>(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const r of this.relations) {
+          if (
+            r.tenantId === ctx.tenantId &&
+            r.fromMemoryId === current &&
+            r.kind === "contradicts" &&
+            !visited.has(r.toMemoryId)
+          ) {
+            visited.add(r.toMemoryId);
+            queue.push(r.toMemoryId);
+          }
+        }
+      }
+      const missing = [...visited].filter((id) => {
+        if (idSet.has(id)) return false;
+        const memory = this.rawGet(ctx, id);
+        return memory !== null && memory.status === "contested";
+      });
+      if (missing.length > 0) {
+        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
+        // 再利用をやめ、専用のエラーを投げる。
+        throw new ContestedGroupMembershipMismatchError(missing[0]!);
+      }
+    }
+
+    for (const m of members) {
+      assertStorableMemoryColumn("status", m.status);
+      assertStorableMemoryEvent(m.event);
+      assertCloneableMemoryEvent(m.event);
+    }
+
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i]!;
+      const memory = memories[i]!;
+      memory.status = m.status;
+      memory.contestedWithId = null;
+      if (m.supersededById !== undefined) {
+        memory.supersededById = m.supersededById;
+      }
+      memory.updatedAt = new Date();
+    }
+
+    const idSet = new Set(ids);
+    for (let i = this.relations.length - 1; i >= 0; i--) {
+      const r = this.relations[i]!;
+      if (
+        r.tenantId === ctx.tenantId &&
+        idSet.has(r.fromMemoryId) &&
+        idSet.has(r.toMemoryId) &&
+        r.kind === "contradicts"
+      ) {
+        this.relations.splice(i, 1);
+      }
+    }
+
+    const events = members.map((m) => {
+      const event = buildStoredMemoryEvent(ctx, m.event);
+      this.events.push(event);
+      return event;
+    });
+
+    return snapshot({ members: memories, events });
   }
 
   /**

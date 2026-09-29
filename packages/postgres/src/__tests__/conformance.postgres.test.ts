@@ -6,11 +6,13 @@ import {
   describeLexicalStoreConformance,
   describeMemoryStoreConformance,
   describeOutboxStoreConformance,
+  describeRelationStoreConformance,
   describeTenantSettingsStoreConformance,
   describeVectorStoreConformance,
 } from "@mnemora/testkit";
 import { buildNewMemoryFixture, buildProvenanceFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
+import { PostgresRelationStore } from "../relation-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresEventStore } from "../event-store.js";
@@ -114,6 +116,30 @@ describeMemoryStoreConformance({
   // Issue #1412 コメント1 / ADR 0373: PostgresMemoryStore は resolveOrphanedContested を
   // 実装している。
   supportsResolveOrphanedContested: true,
+  // Issue #207/#933 PR2 / ADR 0381: PostgresMemoryStore は markContestedGroup /
+  // resolveContestedGroup を実装している。
+  supportsMarkContestedGroup: true,
+  supportsResolveContestedGroup: true,
+  listRelationsForMemory: async (ctx: Ctx, memoryId: string) => {
+    const { db } = await getTestClient();
+    return new PostgresRelationStore(db).listRelated(ctx, memoryId);
+  },
+});
+
+// Issue #207/#933 PR2（ADR 0381）: `RelationStore` の Postgres 実装。
+describeRelationStoreConformance({
+  name: "postgres",
+  createStore: async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    return new PostgresRelationStore(db);
+  },
+  prepareMemoryId: async (ctx: Ctx) => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: ctx.tenantId }));
+    return memory.id;
+  },
 });
 
 describeEventStoreConformance({

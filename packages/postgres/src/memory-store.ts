@@ -6,6 +6,7 @@ import {
   defaultDecayStrategy,
 } from "@mnemora/core";
 import {
+  ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   EMBEDDING_STATUS_ROLLBACK,
   isContestedWithoutCompanion,
@@ -2868,6 +2869,307 @@ export class PostgresMemoryStore implements MemoryStore {
       const storedEvent = rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
 
       return { memory, event: storedEvent };
+    });
+  }
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.markContestedGroup?` の実装（契約は
+   * interface 側の doc コメントにある）。`memories`・`memory_relations`・
+   * `memory_events` を1トランザクションで書く——`memory_relations` への書き込みは
+   * `PostgresRelationStore` を経由せず、ここで直接 SQL を発行する
+   * （`createMemoryWithOutbox` が `outbox_jobs` へ直接書くのと同じ作法。
+   * `relation-store.ts` の doc コメント参照）。
+   */
+  async markContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("markContestedGroup: members must have at least 3 entries");
+    }
+    const normalized = members.map((m) => ({ ...m, id: normalizeUuidCase(m.id) }));
+    const ids = normalized.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("markContestedGroup: member ids must be unique");
+    }
+    for (const id of ids) {
+      if (!isUuidLike(id)) {
+        throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+      }
+    }
+
+    return this.db.transaction(async (tx) => {
+      // `ORDER BY id ASC FOR UPDATE`——`markContestedPair`/`resolveContestedPair` と
+      // 同じ理由（並行呼び出しどうしが常に同じ順でロックを取り、デッドロックを
+      // 構造的に避ける）を N 件へ一般化する。
+      const existing = await tx.execute(sql`
+        SELECT * FROM memories
+        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+        ORDER BY id ASC
+        FOR UPDATE
+      `);
+      const rowById = new Map(
+        existing.rows.map((row) => {
+          const memory = rowToMemory(row as unknown as MemoryRow);
+          return [memory.id, memory] as const;
+        }),
+      );
+
+      for (const id of ids) {
+        if (!rowById.has(id)) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+      }
+      // CAS（interface 側の doc コメントの3条件）。1件でも満たさなければ、
+      // 書き込みを一切行わずに投げる。
+      for (const id of ids) {
+        const memory = rowById.get(id)!;
+        const eligible =
+          memory.status === "active" ||
+          (memory.status === "contested" &&
+            (memory.contestedWithId === null ||
+              memory.contestedWithId === undefined ||
+              ids.includes(memory.contestedWithId)));
+        if (!eligible) {
+          throw new MemoryStatusConflictError(id, "active", memory.status);
+        }
+      }
+
+      const updatedById = new Map<MemoryId, Memory>();
+      for (const id of ids) {
+        const result = await tx.execute(sql`
+          UPDATE memories
+          SET status = 'contested', contested_with_id = NULL, updated_at = now()
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+            AND (
+              status = 'active'
+              OR (status = 'contested' AND (contested_with_id IS NULL OR contested_with_id = ANY(${sql.param(ids)}::uuid[])))
+            )
+          RETURNING *
+        `);
+        if (result.rows.length === 0) {
+          // FOR UPDATE で既にロックを保持しているため、通常はここへ来ない
+          // （`markContestedPair`/`resolveOrphanedContested` と同じ防御的な二重チェック）。
+          const current = await tx.execute(sql`
+            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+          `);
+          const observedStatus =
+            current.rows.length === 0
+              ? null
+              : (current.rows[0] as unknown as { status: MemoryStatus }).status;
+          if (observedStatus === null) {
+            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+          }
+          throw new MemoryStatusConflictError(id, "active", observedStatus);
+        }
+        updatedById.set(id, rowToMemory(result.rows[0] as unknown as MemoryRow));
+      }
+
+      // ADR 0381 決定1: 「完全グラフ」は「一致した全員を結ぶ」ではなく「その中で
+      // 実際に有効期間が重なる組を結ぶ」と読み替える（ADR 0324 決定4——重なりが
+      // 矛盾の必要条件——との整合）。重なりの判定は `findActiveByClaimKey`/
+      // `findContestedByClaimKey` と**文字どおり同じ SQL の半開区間の式**——JS 側に
+      // 同じ式を二重に持たない（2026-09-30 の直し、ADR 0381 追記）。`memories a` ×
+      // `memories b`（どちらも `members` の集合、`a.id <> b.id`）の自己結合1本で、
+      // 重なる**順序対**（a→b と b→a の両方）を一度に生成する——`WHERE` が対称なので、
+      // 一致する各無向対について2行（両方向）が自然に出る。穴A・合併で既に存在する行は
+      // `ON CONFLICT DO NOTHING` で冪等に無視する。
+      await tx.execute(sql`
+        INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
+        SELECT gen_random_uuid(), ${ctx.tenantId}, a.id, b.id, 'contradicts'
+        FROM memories a
+        JOIN memories b
+          ON b.tenant_id = a.tenant_id
+         AND b.id <> a.id
+         AND b.id = ANY(${sql.param(ids)}::uuid[])
+        WHERE a.tenant_id = ${ctx.tenantId}
+          AND a.id = ANY(${sql.param(ids)}::uuid[])
+          AND (
+            a.valid_from IS NULL OR b.valid_until IS NULL OR a.valid_from < b.valid_until
+          )
+          AND (
+            b.valid_from IS NULL OR a.valid_until IS NULL OR b.valid_from < a.valid_until
+          )
+        ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
+      `);
+
+      const events: MemoryEvent[] = [];
+      for (const m of normalized) {
+        const eventResult = await tx.execute(sql`
+          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+          VALUES (
+            gen_random_uuid(),
+            ${ctx.tenantId},
+            ${m.event.memoryId},
+            ${m.event.kind},
+            ${toPgTimestamp(m.event.at ?? new Date())},
+            ${JSON.stringify(m.event.actor)}::jsonb,
+            ${m.event.digestSnapshot ?? null},
+            ${m.event.sizeBeforeBytes ?? null},
+            ${JSON.stringify(m.event.meta)}::jsonb
+          )
+          RETURNING *
+        `);
+        events.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
+      }
+
+      return { members: ids.map((id) => updatedById.get(id)!), events };
+    });
+  }
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.resolveContestedGroup?` の実装
+   * （契約は interface 側の doc コメントにある）。`markContestedGroup` と対称——
+   * `memories`・`memory_relations`（削除）・`memory_events` を1トランザクションで書く。
+   */
+  async resolveContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{
+      id: MemoryId;
+      status: "active" | "superseded";
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("resolveContestedGroup: members must have at least 3 entries");
+    }
+    const normalized = members.map((m) => ({
+      ...m,
+      id: normalizeUuidCase(m.id),
+      ...(m.supersededById === undefined
+        ? {}
+        : { supersededById: normalizeUuidCase(m.supersededById) }),
+    }));
+    const ids = normalized.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("resolveContestedGroup: member ids must be unique");
+    }
+    for (const id of ids) {
+      if (!isUuidLike(id)) {
+        throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+      }
+    }
+
+    return this.db.transaction(async (tx) => {
+      const existing = await tx.execute(sql`
+        SELECT id, status FROM memories
+        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+        ORDER BY id ASC
+        FOR UPDATE
+      `);
+      const statusById = new Map(
+        existing.rows.map((row) => {
+          const r = row as unknown as { id: string; status: MemoryStatus };
+          return [r.id, r.status] as const;
+        }),
+      );
+      for (const id of ids) {
+        if (!statusById.has(id)) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+      }
+      for (const id of ids) {
+        if (statusById.get(id) !== "contested") {
+          throw new MemoryStatusConflictError(id, "contested", statusById.get(id)!);
+        }
+      }
+
+      // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: 渡された members が、
+      // 関係の行でつながった群の「今も contested な」全員と一致することを CAS で
+      // 課す——一部だけを渡した解消（部分解消）を拒む。`WITH RECURSIVE` で
+      // `members` から `memory_relations`（双方向2行が既に張られているので、
+      // `from_memory_id` の向きだけ辿れば足りる）を辿り、`status = 'contested'` の
+      // ものだけに絞った到達集合を求める——決定10（抜けたメンバーの行は残す）と
+      // 矛盾しない形: forget/supersede/purge/archive で抜けたメンバーは
+      // `status <> 'contested'` になっているので、この到達集合には入らない
+      // （行は残るが「今の群」には数えない）。
+      const reachable = await tx.execute(sql`
+        WITH RECURSIVE reachable(id) AS (
+          SELECT unnest(${sql.param(ids)}::uuid[])
+          UNION
+          SELECT r.to_memory_id
+          FROM memory_relations r
+          JOIN reachable rc ON r.from_memory_id = rc.id
+          WHERE r.tenant_id = ${ctx.tenantId} AND r.kind = 'contradicts'
+        )
+        SELECT DISTINCT m.id FROM memories m
+        JOIN reachable rc ON m.id = rc.id
+        WHERE m.tenant_id = ${ctx.tenantId} AND m.status = 'contested'
+      `);
+      const reachableIds = new Set(
+        reachable.rows.map((row) => (row as unknown as { id: string }).id),
+      );
+      const idSetForCheck = new Set(ids);
+      const missing = [...reachableIds].filter((id) => !idSetForCheck.has(id));
+      if (missing.length > 0) {
+        // 群の一部だけを渡した——足りない側（まだ contested のまま群に残っているのに
+        // 渡されなかったメンバー）を名指しして、何も書かずに専用のエラーとして扱う
+        // （2026-09-30 のさらなる直し、ADR 0381 §7 解消——
+        // MemoryStatusConflictError の再利用をやめた）。
+        throw new ContestedGroupMembershipMismatchError(missing[0] as MemoryId);
+      }
+
+      const updatedById = new Map<MemoryId, Memory>();
+      for (const m of normalized) {
+        const result = await tx.execute(sql`
+          UPDATE memories
+          SET status = ${m.status},
+              contested_with_id = NULL,
+              superseded_by_id = COALESCE(${m.supersededById ?? null}, superseded_by_id),
+              updated_at = now()
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${m.id} AND status = 'contested'
+          RETURNING *
+        `);
+        if (result.rows.length === 0) {
+          const current = await tx.execute(sql`
+            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${m.id} LIMIT 1
+          `);
+          const observedStatus =
+            current.rows.length === 0
+              ? null
+              : (current.rows[0] as unknown as { status: MemoryStatus }).status;
+          if (observedStatus === null) {
+            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${m.id}`);
+          }
+          throw new MemoryStatusConflictError(m.id, "contested", observedStatus);
+        }
+        updatedById.set(m.id, rowToMemory(result.rows[0] as unknown as MemoryRow));
+      }
+
+      // ADR 0381 決定3: `both_active`/`supersede` のどちらでも、このメンバー全員を
+      // 結んでいた関係の行を双方向とも削除する——2者版 `resolveContestedPair` が
+      // 決着の種類に関わらず常に `contested_with_id = NULL` へ戻すのと同じ扱いに
+      // 揃える。「一度解消したら再び争わせない」印は作らない。
+      await tx.execute(sql`
+        DELETE FROM memory_relations
+        WHERE tenant_id = ${ctx.tenantId}
+          AND from_memory_id = ANY(${sql.param(ids)}::uuid[])
+          AND to_memory_id = ANY(${sql.param(ids)}::uuid[])
+          AND kind = 'contradicts'
+      `);
+
+      const events: MemoryEvent[] = [];
+      for (const m of normalized) {
+        const eventResult = await tx.execute(sql`
+          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+          VALUES (
+            gen_random_uuid(),
+            ${ctx.tenantId},
+            ${m.event.memoryId},
+            ${m.event.kind},
+            ${toPgTimestamp(m.event.at ?? new Date())},
+            ${JSON.stringify(m.event.actor)}::jsonb,
+            ${m.event.digestSnapshot ?? null},
+            ${m.event.sizeBeforeBytes ?? null},
+            ${JSON.stringify(m.event.meta)}::jsonb
+          )
+          RETURNING *
+        `);
+        events.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
+      }
+
+      return { members: ids.map((id) => updatedById.get(id)!), events };
     });
   }
 
