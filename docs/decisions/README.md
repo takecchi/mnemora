@@ -381,5 +381,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0356](./0356-pool-default-error-listener-warns-by-default.md) | `createPostgresClient` の `pool` に既定の `error` リスナーを付け、名乗って続行する | 採用 (2026-09) |
 | [0357](./0357-outbox-reclaim-requeues-to-tail.md) | `OutboxStore.claimBatch` の取り直しは `available_at` を進め、先頭詰まりを解消する | 採用 (2026-09) |
 | [0358](./0358-local-embedding-provider-splits-large-batches.md) | `LocalEmbeddingProvider` は既定で128件を超えるバッチを分割する（Issue #1141） | 採用 (2026-09) |
+| [0359](./0359-abort-signal-for-provider-calls.md) | provider（LLM・埋め込み）の呼び出しに `AbortSignal` による中断を足す | 採用 (2026-09) |
+| [0360](./0360-schema-unsupported-thrown-before-send.md) | `completeStructured` は、送れない zod の形を送る前に `kind: "schema_unsupported"` で落とす | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

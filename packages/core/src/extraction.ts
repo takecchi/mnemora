@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbort, runAbortable } from "./abort.js";
 import type { ClaimKey } from "./claim-key.js";
 import type { Ctx } from "./ctx.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./strategies/decay.js";
@@ -493,18 +494,31 @@ function sanitizeExtractionCandidates(
  * `subjectCandidates`（Issue #608 項目②(b)）を渡すと、`buildExtractionPrompt` の文面に
  * 候補一覧と null の指示が足され、LLM の応答は `sanitizeExtractionCandidates` で検証
  * された後に返る。省略・空配列なら、プロンプトも検証も従来どおり（1バイトも変わらない）。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: `signal` を
+ * 渡し、それが abort されたことによる例外は、全文フォールバックへ倒さず、そのまま投げ直す。**
+ * 「中断した」と「LLM 呼び出しが本当に失敗した」を同じ顔にすると、呼び出し側が区別できない
+ * ——全文フォールバックの記憶は作られない・`usedWholeObservationFallback` にもならない。
  */
 export async function extractCandidates(
   llmProvider: LLMProvider,
   ctx: Ctx,
   observation: Observation,
   subjectCandidates?: readonly string[],
+  signal?: AbortSignal,
 ): Promise<ExtractCandidatesResult> {
   try {
-    const result = await llmProvider.completeStructured(ctx, {
-      prompt: buildExtractionPrompt(observation, subjectCandidates),
-      schema: ExtractionResultSchema,
-    });
+    const result = await runAbortable(signal, (raced) =>
+      llmProvider.completeStructured(
+        ctx,
+        {
+          prompt: buildExtractionPrompt(observation, subjectCandidates),
+          schema: ExtractionResultSchema,
+        },
+        { signal: raced },
+      ),
+    );
     for (const memory of result.memories) {
       assertLLMContentNotBlank(memory.content, "extract");
     }
@@ -516,6 +530,9 @@ export async function extractCandidates(
       rejectedSubjectIds: sanitized.rejectedSubjectIds,
     };
   } catch (error) {
+    if (isAbort(signal)) {
+      throw error;
+    }
     return {
       candidates: [fallbackWholeObservationCandidate(observation)],
       usedWholeObservationFallback: true,
