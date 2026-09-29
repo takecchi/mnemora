@@ -221,6 +221,42 @@ function buildLateralMemoryConditions(filter: VectorFilter) {
 }
 
 /**
+ * `searchMany` 専用（ADR 0362 追記・案2）。`<table>` を `pg_class.reltuples` で読み、
+ * 一度も `ANALYZE`/`VACUUM` されていなければ負の値（`-1`、PostgreSQL 14 以降の意味。
+ * [ADR 0062](../../../docs/decisions/0062-contested-with-id-fk-index.md) 実測参照）を返す
+ * ——「統計が無い」ことそのものを見る、新しい閾値を作らない判定。
+ *
+ * `to_regclass` は search_path 経由でテーブルを解決する（識別子として埋め込むのではなく、
+ * テキストのパラメータとして渡す——`sql.identifier` は使わない。`to_regclass` は文字列
+ * を引数に取る関数であり、識別子の位置ではない）。
+ *
+ * クエリベクトル・アンカーの添字を一度も参照しない定数の副問い合わせなので、
+ * Postgres はこれを「One-Time Filter」として（`LATERAL` の繰り返しに関係なく）
+ * 1回だけ評価する（ADR 0362 追記「実測」参照、`EXPLAIN` で確認済み）。
+ */
+function reltuplesOf(tableName: string) {
+  return sql`(SELECT reltuples FROM pg_class WHERE oid = to_regclass(${tableName}))`;
+}
+
+/**
+ * `memories`・埋め込み表の**どちらも** `ANALYZE`/`VACUUM` 済み（`reltuples >= 0`）
+ * であることを表す（ADR 0362 追記・案2）。真のときだけ、`search()` と同じ素の
+ * `JOIN`（`buildFilterConditions` の形）の枝を実行する。
+ */
+function statsPresentCondition(table: string) {
+  return sql`${reltuplesOf(table)} >= 0 AND ${reltuplesOf("memories")} >= 0`;
+}
+
+/**
+ * `statsPresentCondition` の否定（どちらか一方でも `reltuples < 0`）。真のときだけ、
+ * `memories` を主キーで引く候補D（`LATERAL` + `OFFSET 0`）の枝を実行する
+ * （ADR 0362 追記・案2）。
+ */
+function statsMissingCondition(table: string) {
+  return sql`${reltuplesOf(table)} < 0 OR ${reltuplesOf("memories")} < 0`;
+}
+
+/**
  * `VectorStore` の Postgres 実装（docs/architecture.md §5.2、pgvector）。
  *
  * 契約（docs/decisions/0003-memorystore-vs-vectorstore.md）: `MemoryStore` が真実の源であり、
@@ -402,21 +438,39 @@ export class PostgresVectorStore implements VectorStore {
    * 共有する（`buildLateralMemoryConditions` 経由）——クエリベクトルを
    * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
    *
-   * **⚠ ADR 0362（Issue #1181）: `memories` の JOIN の形だけは `search()` と違う。**
-   * `search()` は `JOIN memories m ON m.id = e.memory_id AND m.tenant_id =
-   * e.tenant_id` という素の JOIN を使うが、`searchMany` はここを
-   * `CROSS JOIN LATERAL (SELECT * FROM memories WHERE id = e.memory_id OFFSET 0) m`
-   * に変えている——**統計が無い小さいテナントで、`m` を主キー
-   * （`memories_pkey`）で引かせるため**（Issue #1181 本文・`buildLateralMemoryConditions`
-   * の doc コメント参照）。`OFFSET 0` は Postgres の伝統的な「最適化の柵」——
-   * この副問い合わせを外側へ引き上げず、`e` の行ごとに独立して評価させる。
-   * `id` は `memories` の一意な主キーなので、0行か1行を返す（`CROSS JOIN` は
-   * 0行なら該当する `e` の行を落とす——素の `INNER JOIN` と意味は変わらない）。
-   * テナント境界（`m.tenant_id = e.tenant_id`）は柵の**外**（`buildLateralMemoryConditions`
-   * が返す条件の中）に置く——柵の中に入れると `memories_pkey` 以外の索引
-   * （`tenant_id` を先頭に持つ索引）も候補になり得て、統計が無い場面で実際に
-   * そちらが選ばれ、Issue #1181 の欠陥に戻ってしまう（実測で確認済み。
-   * `buildLateralMemoryConditions` の doc コメント参照）。
+   * **⚠ ADR 0362（Issue #1181）: `memories` の引き方は、統計の有無で2つの形を
+   * 1本の SQL の中に並べ、実行時にどちらか一方だけを動かす。**
+   *
+   * - **統計がある**（`memories`・埋め込み表のどちらも `pg_class.reltuples >= 0`。
+   *   `statsPresentCondition` 参照）ときは、`search()` と同じ素の `JOIN memories m
+   *   ON m.id = e.memory_id AND m.tenant_id = e.tenant_id`（`buildFilterConditions`
+   *   の `WHERE`）をそのまま使う——**この枝は `search()` の枝と1バイトも違わない**
+   *   （プランも `Hash Join` 等、統計に基づいて今まで選ばれてきたものがそのまま
+   *   選ばれる。歯は `search-many-primary-key-lookup.postgres.test.ts`）。
+   * - **統計が無い**（どちらか一方でも `reltuples < 0`。「一度も `ANALYZE`/`VACUUM`
+   *   されていない」の意味、PostgreSQL 14 以降。[ADR 0062](../../../docs/decisions/0062-contested-with-id-fk-index.md)
+   *   実測参照）ときは、`CROSS JOIN LATERAL (SELECT * FROM memories WHERE id =
+   *   e.memory_id OFFSET 0) m` を使う——`memories` を主キー（`memories_pkey`）
+   *   で引かせる形（Issue #1181 本文・`buildLateralMemoryConditions` の doc
+   *   コメント参照）。`OFFSET 0` は Postgres の伝統的な「最適化の柵」——この
+   *   副問い合わせを外側へ引き上げず、`e` の行ごとに独立して評価させる。
+   *   テナント境界（`m.tenant_id = e.tenant_id`）は柵の**外**
+   *   （`buildLateralMemoryConditions` が返す条件の中）に置く——柵の中に入れると
+   *   `memories_pkey` 以外の索引も候補になり得て、Issue #1181 の欠陥に戻る
+   *   （実測で確認済み）。
+   *
+   * **どちらを動かすかは `pg_class.reltuples`（`statsPresentCondition`/
+   * `statsMissingCondition`、往復を増やさず1本の SQL 内で判定）で切り替える**
+   * ——新しい閾値・裁量値は作らない。`reltuples` の読み取り自体はクエリベクトル・
+   * アンカーの添字を参照しない定数の副問い合わせなので、Postgres は
+   * 「One-Time Filter」として（`LATERAL` の繰り返しに関係なく）1回だけ評価する
+   * （`EXPLAIN` で確認済み、ADR 0362 追記「実測」参照）。動かない側の枝は
+   * `(never executed)` になり、実行コストを払わない。
+   *
+   * **クエリの形だけでは直せなかった**（統計がある場面で `Hash Join` を失う代償が、
+   * 固い測り直しでは既定のアンカー数でも許容線（約2ms）を超えたため）——
+   * 「クエリの形だけで直す」という当初の依頼の範囲を、統計の有無を見る分岐で
+   * 外れている（依頼主が受け入れた。ADR 0362 追記参照）。
    *
    * **key は SQL に送らない**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）: `VALUES` には
    * 送るクエリの添字（`0..n-1`）を送り、戻った行を、そのクエリの key へ引き直す。以前は key を `text` の
@@ -439,11 +493,11 @@ export class PostgresVectorStore implements VectorStore {
    * `Index Scan using ...hnsw...` が選ばれ、アンカーの数だけ `loops=N` で
    * 繰り返される——`Seq Scan` に落ちない。
    *
-   * Issue #956（ADR 0343）: `LATERAL` の中身も `search()` と同じ2枝の `UNION ALL`
-   * （`vector_norm(e.embedding) > 0` の ORDER BY 押し下げ枝 + `= 0` の部分索引枝）に
-   * なっている——`search()` の doc コメント参照。**往復数は変えていない**——
-   * `UNION ALL`/再ソートは `LATERAL` サブクエリの中に収めてあり、`queries.length`
-   * が増えても発行する SQL 文は今日と同じ1本のまま
+   * Issue #956（ADR 0343）: `LATERAL` の中身は `vector_norm(e.embedding) > 0` の
+   * ORDER BY 押し下げ枝 + `= 0` の部分索引枝を持つ——これが統計あり・統計なしの
+   * 各枝それぞれに現れるので、`UNION ALL` は合計4枝になる（上のクラス doc 参照）。
+   * **往復数は変えていない**——`UNION ALL`/再ソートは `LATERAL` サブクエリの中に
+   * 収めてあり、`queries.length` が増えても発行する SQL 文は今日と同じ1本のまま
    * （`vector-store-search-many.postgres.test.ts` の「往復数が anchorCount に依存しない」
    * 歯を壊さないことを実測で確認済み）。
    */
@@ -471,11 +525,17 @@ export class PostgresVectorStore implements VectorStore {
 
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    // `search()` と違い、`e` 側と `m` 側は別の場所で合流する（クラス doc コメント、
-    // ADR 0362 参照）——`e` 側はここでの素の `WHERE`、`m` 側は LATERAL の外側の
-    // `WHERE`（`buildLateralMemoryConditions`、テナント境界を含む）。
+    // 統計ありの枝: `search()` と同じ素の `WHERE`（`buildFilterConditions`）。
+    const legacyWhereClause = buildFilterConditions(ctx, opts.filter);
+    // 統計なしの枝（候補D）: `e` 側と `m` 側は別の場所で合流する（クラス doc
+    // コメント、ADR 0362 参照）——`e` 側はここでの素の `WHERE`、`m` 側は LATERAL の
+    // 外側の `WHERE`（`buildLateralMemoryConditions`、テナント境界を含む）。
     const embeddingConditions = sql`e.tenant_id = ${opts.filter.tenantId} AND e.tenant_id = ${ctx.tenantId}`;
     const memoryConditions = buildLateralMemoryConditions(opts.filter);
+    // どちらの枝を動かすかは `pg_class.reltuples` で切り替える（往復を増やさない。
+    // クラス doc コメント参照）。
+    const statsPresent = statsPresentCondition(table);
+    const statsMissing = statsMissingCondition(table);
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
     // key ではなく添字を送る（上の doc コメント、Issue #1285）。
@@ -495,10 +555,31 @@ export class PostgresVectorStore implements VectorStore {
               SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
                      m.recorded_at AS recorded_at
               FROM ${sql.identifier(table)} e
+              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+              WHERE ${legacyWhereClause} AND vector_norm(e.embedding) > 0 AND (${statsPresent})
+              ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
+              LIMIT ${opts.limit}
+            )
+            UNION ALL
+            (
+              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
+                     m.recorded_at AS recorded_at
+              FROM ${sql.identifier(table)} e
+              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+              WHERE ${legacyWhereClause} AND vector_norm(e.embedding) = 0 AND (${statsPresent})
+              ORDER BY m.recorded_at DESC, e.memory_id
+              LIMIT ${opts.limit}
+            )
+            UNION ALL
+            (
+              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
+                     m.recorded_at AS recorded_at
+              FROM ${sql.identifier(table)} e
               CROSS JOIN LATERAL (
                 SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
               ) m
               WHERE ${embeddingConditions} AND vector_norm(e.embedding) > 0 AND ${memoryConditions}
+                AND (${statsMissing})
               ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
               LIMIT ${opts.limit}
             )
@@ -511,6 +592,7 @@ export class PostgresVectorStore implements VectorStore {
                 SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
               ) m
               WHERE ${embeddingConditions} AND vector_norm(e.embedding) = 0 AND ${memoryConditions}
+                AND (${statsMissing})
               ORDER BY m.recorded_at DESC, e.memory_id
               LIMIT ${opts.limit}
             )
