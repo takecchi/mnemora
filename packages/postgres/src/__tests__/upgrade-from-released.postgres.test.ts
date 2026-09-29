@@ -146,6 +146,15 @@ for (const fixture of FIXTURES) {
       expect(applied[1]).toEqual([]);
     });
 
+    it("idx_memories_lexical は 0025（Issue #1222・ADR 0364）の式に作り直されている", async () => {
+      const rows = await q<{ indexdef: string }>(
+        "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_memories_lexical'",
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.indexdef).toContain("mnemora_lexical_tsvector(content)");
+      expect(rows[0]!.indexdef).not.toContain("mnemora_lexical_normalize(content)");
+    });
+
     it("migration の前後で既存の記憶の行（状態・埋め込みの状態・関係・本文）が変わらない", async () => {
       expect(await snapshotRows()).toEqual(rowsBefore);
     });

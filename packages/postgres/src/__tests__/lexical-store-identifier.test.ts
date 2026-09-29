@@ -220,14 +220,17 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
   /**
    * 🔴 **この歯が守っているのは「実装が動いていること」である。**上の3本が
    * `PostgresLexicalStore.search`（配線ごと）で見ているのに対し、ここでは
-   * **索引式とクエリ式そのもの**を SQL で直接当てる——`migrations/0008` の
-   * `idx_memories_lexical` の左辺と、`migrations/0009`（ADR 0092）の
-   * `mnemora_lexical_query_or` の組である。
+   * **索引式とクエリ式そのもの**を SQL で直接当てる——`migrations/0025`（Issue #1222）の
+   * `idx_memories_lexical` の左辺（`mnemora_lexical_tsvector(content)`）と、
+   * `migrations/0009`（ADR 0092）の `mnemora_lexical_query_or` の組である。
    *
    * ⚠ 以前ここに在った歯は、クエリ側を `websearch_to_tsquery('simple',
    * mnemora_lexical_normalize($2))` と**手で書き写していた**——これは 0009 以前の式であり、
    * 本番経路はもう通らない。式を写すとずれる（`migrations/0008` の
-   * 「なぜ SQL 関数として切り出すか」と同じ理由）。
+   * 「なぜ SQL 関数として切り出すか」と同じ理由）。**同じ理由で、本文側も
+   * `mnemora_lexical_tsvector($1)` を関数として呼ぶ**（`to_tsvector('simple',
+   * mnemora_lexical_normalize($1))` と書き写さない）——0025 で索引式が変わった後も
+   * この歯だけが古い式を測り続けることを防ぐ。
    *
    * ⚠ **この歯は環境に依らない。**`server_encoding` が UTF8 でも SQL_ASCII でも
    * 同じ結論になることを実測してある（ADR 0103「測ったこと」）。
@@ -243,9 +246,9 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
     // （migrations/0008 の「plainto_tsquery は使わない」の実測と同じ本文）。
     const twoIdentifiers = "本日の連携: PROJ-1234 and TASK-5678 の両方を確認しました";
     const result = await pool.query(
-      `SELECT to_tsvector('simple', mnemora_lexical_normalize($1))
+      `SELECT mnemora_lexical_tsvector($1)
                 @@ mnemora_lexical_query_or($2) AS "hit",
-              to_tsvector('simple', mnemora_lexical_normalize($3))
+              mnemora_lexical_tsvector($3)
                 @@ mnemora_lexical_query_or($4) AS "falsePositive"`,
       [content, "PROJ-1234", twoIdentifiers, "PROJ-5678"],
     );

@@ -10,21 +10,29 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * 「対照」テストが `idx_memories_lexical` を作り直すための DDL。**マイグレーションファイル
- * から切り出して読む**——ここに DDL を書き写すと `migrations/0008_*.sql` を直したときに
+ * から切り出して読む**——ここに DDL を書き写すと `migrations/0025_*.sql` を直したときに
  * この復元だけ古い定義のまま静かにずれる（`outbox-claim-lease-index.test.ts` の
  * `MIGRATION_0002_SQL` と同じ理由）。
  *
- * migration 0008 は `CREATE FUNCTION`（非冪等。再実行すると `already exists` で失敗する）と
- * `CREATE INDEX` の2文を持つ——ファイル全体を流し直す（`MIGRATION_0002_SQL` の作法）と
- * 関数が既に存在してエラーになる（関数は「対照」テストでも落としていない）ため、
+ * `idx_memories_lexical` は `migrations/0008_*.sql` が最初に作るが、
+ * `migrations/0025_lexical_tsvector_fallback.sql`（Issue #1222）が `DROP INDEX` の後に
+ * 新しい式（`mnemora_lexical_tsvector(content)`）で作り直す——`resetTestDatabase()` が
+ * 全 migration を順に適用した後の実際の索引定義は 0025 のものである。**⟹ 0008 ではなく
+ * 0025 の `CREATE INDEX` 文を切り出す**（0008 の文をそのまま流すと、既に `DROP INDEX`
+ * 済みの古い式で索引を作ってしまい、以後 `PostgresLexicalStore.search` が実際に使う式
+ * （0025 の式）とずれた索引を「対照」が残すことになる）。
+ *
+ * migration 0025 は `CREATE FUNCTION`（非冪等）・`DO`（`ALTER FUNCTION`）・
+ * `DROP INDEX`・`CREATE INDEX` の4文を持つ——ファイル全体を流し直すと関数が既に
+ * 存在してエラーになる（関数は「対照」テストでも落としていない）ため、
  * ファイル末尾の `CREATE INDEX ...` 文だけを切り出す。
  */
-const MIGRATION_0008_SQL = readFileSync(
-  join(DEFAULT_MIGRATIONS_DIR, "0008_memories_lexical_index.sql"),
+const MIGRATION_0025_SQL = readFileSync(
+  join(DEFAULT_MIGRATIONS_DIR, "0025_lexical_tsvector_fallback.sql"),
   "utf8",
 );
-const CREATE_INDEX_SQL = MIGRATION_0008_SQL.slice(
-  MIGRATION_0008_SQL.indexOf("CREATE INDEX idx_memories_lexical"),
+const CREATE_INDEX_SQL = MIGRATION_0025_SQL.slice(
+  MIGRATION_0025_SQL.indexOf("CREATE INDEX idx_memories_lexical"),
 );
 
 /**
