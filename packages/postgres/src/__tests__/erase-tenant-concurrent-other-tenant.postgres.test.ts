@@ -98,6 +98,33 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
 
     // eraseTenant を待たずに走らせ、その最中に別テナントへの書き込み・読み取りを行う。
     const erasing = eraseTenant(ctxT, deps, { confirmTenantId: T, limit: 100_000 });
+    let eraseSettled = false;
+    void erasing.then(
+      () => (eraseSettled = true),
+      () => (eraseSettled = true),
+    );
+
+    // 消す側のトランザクションが `memories` に書き込みのロック（`AccessShareLock` より強いもの。
+    // 事前検査の SELECT が取る `AccessShareLock` と取り違えない）を持つまで待つ——ここを確かめずに
+    // 別テナントの書き込みを始めると、消去の前か後に走っただけで「待たされない」と
+    // 読めてしまう（変異試験で、`LOCK TABLE memories` を入れても緑のままだった）。
+    const eraseHoldsMemories = async (): Promise<boolean> => {
+      const { rows } = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_locks
+         WHERE relation = 'memories'::regclass AND locktype = 'relation'
+           AND granted AND pid <> pg_backend_pid()
+           AND mode <> 'AccessShareLock'`,
+      );
+      return rows[0]!.n > 0;
+    };
+    const deadline = Date.now() + 30_000;
+    while (!(await eraseHoldsMemories())) {
+      expect(eraseSettled, "消去が memories に触れる前に終わった").toBe(false);
+      expect(Date.now() < deadline, "消去が memories のロックを取るのを観測できなかった").toBe(
+        true,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
 
     // 別接続（短い statement_timeout 付き）——ブロックされていれば必ずこの中で
     // キャンセルされる。ブロックされていなければ、statement_timeout よりずっと早く終わる。
@@ -135,8 +162,16 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
         // ブロックされていれば、上に敷いた statement_timeout=5000 で必ずキャンセルされる
         // （タイムアウトすれば例外——`settlesWithin` は例外でも `true` を返すため、
         // 直後の `await write` で顕在化させる）。
-        expect(await settlesWithin(write, 5000)).toBe(true);
+        // 閾値は 1 秒——索引ありの1行 INSERT は数ミリ秒で終わる。消去側がテーブル単位の
+        // ロックで2秒止める変異（`LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE` + 2秒）で
+        // 赤になることを確かめてある。
+        expect(await settlesWithin(write, 1000), "別テナントへの INSERT が 1 秒以内に終わらない").toBe(
+          true,
+        );
         await write;
+        // 書き込みが終わった時点で、消去はまだ途中でなければならない（そうでなければ、
+        // 「消している最中」を測っていない）。
+        expect(eraseSettled, "INSERT が終わる前に消去が終わった——途中を測れていない").toBe(false);
 
         // 自分の接続が memories に対して取っているロックの mode を見る——
         // `RowExclusiveLock` のみで、テーブル単位の排他（`ShareLock`/`AccessExclusiveLock`）は
@@ -150,7 +185,9 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
         expect(lockRows.map((r) => r.mode)).toEqual(["RowExclusiveLock"]);
 
         const read = holder.query("SELECT count(*) FROM memories WHERE tenant_id = $1", [OTHER]);
-        expect(await settlesWithin(read, 5000)).toBe(true);
+        expect(await settlesWithin(read, 1000), "別テナントの SELECT が 1 秒以内に終わらない").toBe(
+          true,
+        );
         await read;
 
         await holder.query("COMMIT");
