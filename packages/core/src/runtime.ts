@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { abortReason, isAbort, runAbortable } from "./abort.js";
+import type { AbortOptions } from "./abort.js";
 import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
 import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "./correction-candidates.js";
@@ -219,8 +221,15 @@ export type TickSupportedJobKind = (typeof TICK_SUPPORTED_JOB_KINDS)[number];
  */
 export const UNSUPPORTED_KIND_ERROR_PREFIX = "runtime.tick: unsupported outbox job kind: ";
 
-/** `tick` が1件の outbox ジョブを処理する関数の形。 */
-type JobHandler = (ctx: Ctx, job: OutboxJobRecord) => Promise<void>;
+/**
+ * `tick` が1件の outbox ジョブを処理する関数の形。
+ *
+ * `signal`（Issue #1200、ADR 0359）は `tick(ctx, opts)` の `opts.signal` をそのまま渡す。
+ * provider を呼ぶハンドラ（`processExtractJob`・`processEmbedJob`・`processConsolidateJob`・
+ * `processReflectJob`）だけがこれを使う——`tick` 側の分岐（unsupported kind の `fail()`）は
+ * provider を呼ばないため、そもそも受け取らない。
+ */
+type JobHandler = (ctx: Ctx, job: OutboxJobRecord, signal?: AbortSignal) => Promise<void>;
 
 /** {@link createRuntime} に渡す依存。store・provider は利用者が用意する（`@mnemora/postgres`・`@mnemora/openai` など）。 */
 export interface RuntimeDeps {
@@ -782,6 +791,19 @@ export interface ConsolidateOptions {
    * 同じ形。`ForgetOptions.reason` とは違う）。
    */
   reason?: string;
+  /**
+   * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
+   * 中断の合図。内部で呼ぶ `recall()`（`{ seedMemoryId }`/`{ query }` 形のとき）と、
+   * LLM 呼び出し（`completeStructured`）の両方に効く。**既定の時間の上限にはならない**
+   * ——省略すれば今までどおり待ち続ける。
+   *
+   * abort されると、`consolidate()` は reject する（`signal.reason`。無ければ `AbortError`
+   * 相当）。**既存の `"llm_failed"` には倒さない**——中断と LLM の失敗を区別するため。
+   * LLM 呼び出しは、束ねる対象を1件も書く前に行う（上の手順5）ので、abort の時点では
+   * 何も書かれていない。
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -1018,6 +1040,13 @@ export interface ReflectOptions {
    * `'reflected'` であり、この欄では上書きしない（`ConsolidateOptions.reason` と同じ形）。
    */
   reason?: string;
+  /**
+   * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
+   * 中断の合図。`ConsolidateOptions.signal` と同じ形——内部で呼ぶ `recall()` と LLM 呼び出しの
+   * 両方に効く。abort されると `reflect()` は reject し、既存の `"llm_failed"` には倒さない。
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -1179,6 +1208,23 @@ export interface TickOptions {
    * ⚠ 空文字は省略と同じにはならず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
   claimedBy?: string;
+  /**
+   * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
+   * 中断の合図。**既定の時間の上限にはならない**——省略すれば今までどおり provider が
+   * 返るまで待ち続ける。
+   *
+   * `signal` を渡し、それが abort されると:
+   * - claim 済みで処理中・未着手のジョブは、**`fail()` しない**——claim されたまま残り、
+   *   リースが切れれば次の `tick` が取る。abort までに `complete()` まで記録できたジョブの
+   *   完了は残る。
+   * - `tick()` 自身は reject する（`signal.reason`。無ければ `AbortError` 相当）。
+   *   `TickResult` はこの中断のために新しい欄を持たない——`tick()` が reject した時点で
+   *   戻り値は無い。
+   * - `tick` がリースを超えたこと自体を名乗る口は、今回も追加していない
+   *   （上の「今の振る舞い」の追記のとおり）。
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -2096,8 +2142,28 @@ export interface Runtime {
    *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
    *   書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の
    *   doc、Issue #1075）。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
+   * 任意の第3引数 `opts?: AbortOptions` を足した。** `opts.signal` は、この Observation が
+   * `extract: 'sync'`（既定）で LLM を呼ぶ間だけ効く——**Observation と `extract` ジョブは、
+   * LLM を呼ぶ前に既に書かれている**（`createObservationWithOutbox`）。abort されると:
+   * - `observe()` は reject する（`signal.reason`。無ければ `AbortError` 相当）。
+   *   **上の「LLM の呼び出しの失敗は投げない。全文フォールバックへ倒す」には倒さない**
+   *   ——中断と LLM の失敗を同じ顔にしない。
+   * - 全文フォールバックの Memory は作られない。抽出候補も1件も書かれない。
+   * - `extract` ジョブは `complete()` されず、claim もされていないまま残る——後の `tick()`
+   *   がそのジョブを処理する（`processExtractJob`）。ただし、この observe 呼び出しにだけ渡した
+   *   `subjectCandidates`・`claimKey` は永続化されないため、後の `tick()` からの再抽出には
+   *   **届かない**（`runExtraction` の doc コメントの「`processExtractJob` は渡さない」と同じ理由）。
+   * - `claimKey.enabled: true` を渡していた場合、claim key の LLM 呼び出し
+   *   （`deriveClaimKeys`）は抽出の LLM 呼び出しの**後**・Memory の書き込みの**前**に行う
+   *   （`runExtraction` の実装順）。abort がどちらの呼び出し中に起きても、Memory の書き込みは
+   *   まだ始まっていない——重複や部分書き込みの余地は無い。
+   * `extract: 'deferred'` の経路・`kind: 'memory_usage'` の経路は LLM を呼ばないため、
+   * `opts.signal` を渡しても何も変わらない。
    */
-  observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult>;
+  observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
   /**
    * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。
    * `extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが
@@ -2135,8 +2201,17 @@ export interface Runtime {
    *
    * `consolidate` / `reflect` の `{ query }` 形と `findCorrectionCandidates` は内部で
    * `recall()` を呼ぶので、同じ例外がそのまま届く。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
+   * 任意の第3引数 `opts?: AbortOptions` を足した。** `opts.signal` はクエリの埋め込み
+   * （`EmbeddingProvider.embed`）を待つ間だけ効く。abort されると `recall()` は reject し
+   * （`signal.reason`。無ければ `AbortError` 相当）、`embedding_provider_unavailable` の
+   * omission には倒さない。段6（記録、`MemoryStore.createRecall`）はクエリの埋め込みより
+   * 後にしか走らないため、abort の時点では recall の記録も `activity_seq` の前進も
+   * 起きていない。
    */
-  recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult>;
+  recall(ctx: Ctx, query: RecallQuery, opts?: AbortOptions): Promise<RecallResult>;
   /**
    * [Issue #312](https://github.com/takecchi/mnemora/issues/312) /
    * [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
@@ -2231,10 +2306,17 @@ export interface Runtime {
    * 書き込みも `recall()` も試みる前に落とす）。そうでなければ
    * `recall(ctx, { text: input.text })` を1回呼び、`excludeMemoryIds` を `Set` にして
    * 除外し、`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切って返す。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
+   * 任意の第3引数 `opts?: AbortOptions` を足した。**内部で1回呼ぶ `recall()` へそのまま渡す
+   * だけであり、この口自身は中断を新しく判定しない——`recall()` の同日付追記のとおり、
+   * クエリの埋め込みを待つ間だけ効く。abort されると reject する。
    */
   findCorrectionCandidates(
     ctx: Ctx,
     input: FindCorrectionCandidatesInput,
+    opts?: AbortOptions,
   ): Promise<FindCorrectionCandidatesResult>;
   /**
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
@@ -2293,8 +2375,16 @@ export interface Runtime {
    * - ⚠ 2026-09-28 のこの変更の前は、退けたことを知らずにやり直していた（言い換えなら新しい `active` を作っていた）。
    * 歯: `packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`（2実装。退けた記憶の4形と、
    * やり直す側の4形——退けた記憶が無い・機構の superseded 2形・理由の読めない superseded）。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
+   * 任意の第3引数 `opts?: AbortOptions` を足した。** `opts.signal` は抽出の LLM 呼び出しを
+   * 待つ間だけ効く。abort されると `reextract()` は reject し（`signal.reason`。無ければ
+   * `AbortError` 相当）、`extraction: "llm_failed_whole_observation"` には倒さない。
+   * LLM 呼び出しは、supersede 対象を読む・書くよりも前に行う——abort の時点では何も
+   * 書かれていない。
    */
-  reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
+  reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
   /**
    * ADR 0079: 索引に載っていない Memory を**もう一度索引へ載せに行く**。
    *
@@ -3781,12 +3871,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * `deriveClaimKeys`（claim-key.ts）は一度も呼ばれない。抽出プロンプト（`extraction.ts`）
    * は一切変更しない——`extractCandidates` の呼び出しはこの関数の変更前と1バイトも
    * 変わっていない（ADR 0315 決定1・決定2）。
+   *
+   * `signal`（Issue #1200、ADR 0359）は `extractCandidates`・`deriveClaimKeys` の両方へ
+   * そのまま渡す。abort されたときの例外は、どちらの呼び出しも `createMemoriesFromCandidates`
+   * （書き込み）より前で投げるため、この関数の呼び出し側（`handleExtractableObservation`・
+   * `processExtractJob`）はまだ何も書いていない状態でその例外を受け取る。
    */
   async function runExtraction(
     ctx: Ctx,
     observation: Observation,
     subjectCandidates?: readonly string[],
     claimKeyOptions?: ClaimKeyOptions,
+    signal?: AbortSignal,
   ): Promise<{
     memoryIds: MemoryId[];
     outcome: ExtractionOutcome;
@@ -3800,7 +3896,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       usedWholeObservationFallback,
       failure,
       rejectedSubjectIds: rawRejectedSubjectIds,
-    } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates);
+    } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates, signal);
     // `ExtractCandidatesResult.rejectedSubjectIds` は型としては optional
     // （`docs/decisions/0178-public-api-surface-gate.md` 対応。extraction.ts の doc
     // コメント参照）だが、`extractCandidates` の両方の経路が必ず値を埋めるため、
@@ -3835,6 +3931,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         candidates.map((candidate) => candidate.content),
         knownPredicates,
         knownSubjects,
+        signal,
       );
       claimKeys = derived.claimKeys;
       claimKeyFailure = derived.failure;
@@ -3908,7 +4005,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return withdrawn;
   }
 
-  async function reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult> {
+  async function reextract(
+    ctx: Ctx,
+    observationId: ObservationId,
+    opts?: AbortOptions,
+  ): Promise<ReextractResult> {
     const observation = await deps.memoryStore.getObservation(ctx, observationId);
     if (!observation) {
       throw new Error(`runtime.reextract: observation not found: ${observationId}`);
@@ -3946,6 +4047,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       deps.llmProvider,
       ctx,
       observation,
+      undefined,
+      opts?.signal,
     );
 
     if (usedWholeObservationFallback) {
@@ -4248,6 +4351,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   async function handleExtractableObservation(
     ctx: Ctx,
     input: ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput,
+    signal?: AbortSignal,
   ): Promise<ObserveResult> {
     const kind = observeInputKindToObservationKind(input.kind);
     const payload = extractObservationPayload(input);
@@ -4303,7 +4407,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 同時に渡された組み合わせを先に弾いているため、ここに来る時点で
     // `extractMode === 'sync'` であることは保証済み。
     const { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection } =
-      await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey);
+      await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey, signal);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
       // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
@@ -4331,7 +4435,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  async function observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult> {
+  async function observe(
+    ctx: Ctx,
+    input: ObserveInput,
+    opts?: AbortOptions,
+  ): Promise<ObserveResult> {
     const parsed = ObserveInputSchema.parse(input);
     if (parsed.kind === "memory_usage") {
       return handleMemoryUsage(ctx, parsed);
@@ -4360,10 +4468,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           "pass extract: 'sync' (or omit extract), or drop claimKey",
       );
     }
-    return handleExtractableObservation(ctx, parsed);
+    return handleExtractableObservation(ctx, parsed, opts?.signal);
   }
 
-  async function processExtractJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+  async function processExtractJob(
+    ctx: Ctx,
+    job: OutboxJobRecord,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const observationId = job.payload.observationId;
     if (typeof observationId !== "string") {
       throw new Error("runtime.tick: extract job payload missing observationId");
@@ -4390,7 +4502,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (existing.length > 0) {
       return;
     }
-    await runExtraction(ctx, observation);
+    await runExtraction(ctx, observation, undefined, undefined, signal);
   }
 
   /**
@@ -4404,7 +4516,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return deps.embeddingInput ? deps.embeddingInput(memory) : memory.content;
   }
 
-  async function processEmbedJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+  async function processEmbedJob(
+    ctx: Ctx,
+    job: OutboxJobRecord,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const memoryId = job.payload.memoryId;
     if (typeof memoryId !== "string") {
       throw new Error("runtime.tick: embed job payload missing memoryId");
@@ -4414,13 +4530,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new Error(`runtime.tick: embed job references missing memory: ${memoryId}`);
     }
     try {
-      const [vector] = await deps.embeddingProvider.embed(ctx, [resolveEmbeddingInput(memory)]);
+      const [vector] = await runAbortable(signal, (raced) =>
+        deps.embeddingProvider.embed(ctx, [resolveEmbeddingInput(memory)], { signal: raced }),
+      );
       if (!vector) {
         throw new Error("runtime.tick: embedding provider returned no vector");
       }
       await deps.vectorStore.upsert(ctx, deps.embeddingProvider.space, memory.id, vector);
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {
+      // Issue #1200 / ADR 0359: abort による reject は、埋め込みの失敗と同じ顔にしない
+      // ——`embeddingStatus` を `'failed'` にせず、そのまま投げ直す（`tick()` がこれを
+      // 見て `fail()` を呼ばない——`tick` 本体の catch 節を参照）。
+      if (isAbort(signal)) {
+        throw err;
+      }
       // 索引の遅れ・失敗を黙って無かったことにしない（docs/architecture.md 原則の姿3）。
       // Issue #962: `failed` の書き込み自体が失敗しても、元の例外（なぜ埋め込めなかったか）を
       // 失わない——`cause` に残し、`tick()` が `lastError` に載せるメッセージにも両方を書く。
@@ -4544,14 +4668,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 避ける）は、`consolidate()` 本体の手順1を分岐ごとに割る変更になり、`{ memoryIds }`/
    * `{ query }` 分岐に触らずに済ませられる範囲を超えるため、今回は採らない。
    */
-  async function processConsolidateJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+  async function processConsolidateJob(
+    ctx: Ctx,
+    job: OutboxJobRecord,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const seedMemoryId = readSeedMemoryIdFromPayload(job);
     const seed = await deps.memoryStore.get(ctx, seedMemoryId);
     const scopedCtx: Ctx =
       seed !== null && typeof seed.subjectId === "string"
         ? { ...ctx, subjectId: seed.subjectId }
         : ctx;
-    const result = await consolidate(scopedCtx, { target: { seedMemoryId } });
+    // Issue #1200 / ADR 0359: abort されたら `consolidate()` 自体が reject する
+    // （`outcome: "llm_failed"` には倒さない）ため、`throwIfLlmFailed` には届かない
+    // ——その例外がそのまま `tick()` の catch 節まで伝わる。
+    const result = await consolidate(scopedCtx, { target: { seedMemoryId }, signal });
     throwIfLlmFailed("consolidate", result);
   }
 
@@ -4574,14 +4705,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （Issue #849 / ADR 0157 決定2 追記。`processConsolidateJob` と同じ理由——上の
    * `throwIfLlmFailed` の doc コメント参照）。
    */
-  async function processReflectJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+  async function processReflectJob(
+    ctx: Ctx,
+    job: OutboxJobRecord,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const seedMemoryId = readSeedMemoryIdFromPayload(job);
     const seed = await deps.memoryStore.get(ctx, seedMemoryId);
     const scopedCtx: Ctx =
       seed !== null && typeof seed.subjectId === "string"
         ? { ...ctx, subjectId: seed.subjectId }
         : ctx;
-    const result = await reflect(scopedCtx, { target: { seedMemoryId } });
+    // Issue #1200 / ADR 0359: `processConsolidateJob` と同じ理由——abort されたら
+    // `reflect()` 自体が reject する。
+    const result = await reflect(scopedCtx, { target: { seedMemoryId }, signal });
     throwIfLlmFailed("reflect", result);
   }
 
@@ -4641,6 +4778,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const jobHandlerLookup = new Map<string, JobHandler>(Object.entries(jobHandlers));
 
   async function tick(ctx: Ctx, opts: TickOptions): Promise<TickResult> {
+    // Issue #1200 / ADR 0359（クローン miku の判断）: `signal` を1変数に固定しておく——
+    // 下の分岐が何度も `opts.signal` を読み直さない（`opts` を再代入しないので値は動かない）。
+    const signal = opts.signal;
     const claimOpts: ClaimOutboxJobsOptions = {
       // 既定は「tick が処理できる kind だけ」——ここを広げると、処理できない kind を
       // 呼び出し側が頼んでもいないのに claim して終端で焼くことになる（ADR 0082）。
@@ -4657,6 +4797,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const unsupported: UnsupportedOutboxJob[] = [];
     const leaseConflicts: OutboxLeaseConflict[] = [];
     for (const job of jobs) {
+      // Issue #1200 / ADR 0359: abort されたら、claim 済みで未着手のこのジョブ以降には
+      // 手を付けない——`fail()` もしない。claim されたまま残り、リースが切れれば次の
+      // `tick` が取る。ループを抜けた後、下でこの `tick()` 自体を reject する。
+      if (signal?.aborted) {
+        break;
+      }
       const handler = jobHandlerLookup.get(job.kind);
       if (handler === undefined) {
         // 🔴 ADR 0082 / issue #105: 処理する分岐が無い kind。ここで2つのことを同時にやる。
@@ -4670,6 +4816,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 弾かれることもある——別のワーカーが、この worker が fail() を呼ぶより先に
         // このジョブを再 claim して終端まで進めていた場合。良性の競合なので
         // `leaseConflicts` に記録し、`unsupported`/`failed` には数えず次のジョブへ進む。
+        //
+        // ⚠ この分岐は provider を一切呼ばないため、abort の対象にしない
+        // （Issue #1200: 中断が効くのは provider を待っている間と呼ぶ前だけでよい）。
         try {
           await deps.outboxStore.fail(
             ctx,
@@ -4689,7 +4838,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         continue;
       }
       try {
-        await handler(ctx, job);
+        await handler(ctx, job, signal);
         // 🔴 ADR 0142: `complete` がリース競合で弾かれることがある——`handler` の
         // 処理自体には成功したが、その完了を記録しようとした時点で、既に別の
         // ワーカーがこのジョブを再 claim して終端まで進めていた場合。良性の競合
@@ -4699,6 +4848,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         await deps.outboxStore.complete(ctx, job.id, job.attempts);
         processed += 1;
       } catch (err) {
+        // Issue #1200 / ADR 0359: `handler` の中で provider 呼び出しが abort された
+        // 例外は、`OutboxLeaseConflictError` と同じく「良性」だが性質が違う——
+        // このジョブは処理を試みた結果失敗したのではなく、待つのをやめただけである。
+        // `fail()` しない・`failed` にも数えない。ここで claim したジョブは claim
+        // されたまま残る（リースが切れれば次の `tick` が取る）。
+        if (signal?.aborted) {
+          break;
+        }
         if (err instanceof OutboxLeaseConflictError) {
           leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "complete" });
           continue;
@@ -4723,22 +4880,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         failed += 1;
       }
     }
+    // Issue #1200 / ADR 0359: abort されていたら、`tick()` 自体を reject する
+    // （`TickResult` には新しい欄を作らない——戻り値そのものを返さない）。abort までに
+    // `complete()` まで記録できたジョブの完了は、上のループで既に store へ書かれている
+    // ため、ここで reject してもそれらは覆らない。
+    if (signal?.aborted) {
+      throw abortReason(signal);
+    }
     return { processed, failed, unsupported, leaseConflicts };
   }
 
   const tokenCounter = deps.tokenCounter ?? heuristicTokenCounter;
 
-  async function recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult> {
-    return runRecall(ctx, query, {
-      memoryStore: deps.memoryStore,
-      vectorStore: deps.vectorStore,
-      lexicalStore: deps.lexicalStore,
-      embeddingProvider: deps.embeddingProvider,
-      tenantSettingsStore: deps.tenantSettingsStore,
-      clock,
-      tokenCounter,
-      outputValidation: deps.outputValidation,
-    });
+  async function recall(
+    ctx: Ctx,
+    query: RecallQuery,
+    opts?: AbortOptions,
+  ): Promise<RecallResult> {
+    return runRecall(
+      ctx,
+      query,
+      {
+        memoryStore: deps.memoryStore,
+        vectorStore: deps.vectorStore,
+        lexicalStore: deps.lexicalStore,
+        embeddingProvider: deps.embeddingProvider,
+        tenantSettingsStore: deps.tenantSettingsStore,
+        clock,
+        tokenCounter,
+        outputValidation: deps.outputValidation,
+      },
+      opts?.signal,
+    );
   }
 
   /**
@@ -4758,6 +4931,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   async function findCorrectionCandidates(
     ctx: Ctx,
     input: FindCorrectionCandidatesInput,
+    opts?: AbortOptions,
   ): Promise<FindCorrectionCandidatesResult> {
     if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
       throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
@@ -4769,10 +4943,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // doc コメント参照）。ADR 0353（Issue #338）: `activityCounting` は
     // `input.activityCounting` をそのまま渡す（省略時は recall() 側の既定
     // "tenant" に落ちる）。
-    const recallResult = await recall(ctx, {
-      text: input.text,
-      activityCounting: input.activityCounting,
-    });
+    const recallResult = await recall(
+      ctx,
+      {
+        text: input.text,
+        activityCounting: input.activityCounting,
+      },
+      opts,
+    );
 
     const excludeSet = new Set(input.excludeMemoryIds ?? []);
     // recallRank は「recall() が返した並びでの、1始まりの順位」——除外の前に固定する。
@@ -5924,10 +6102,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 経路を通す（新しい「似ている」の判定を作らない）。
         // ADR 0353（Issue #338）: `target.activityCounting` をそのまま渡す
         // （省略時は recall() 側の既定 "tenant" に落ちる）。
-        const recallResult = await recall(ctx, {
-          text: seed.digest,
-          activityCounting: target.activityCounting,
-        });
+        // Issue #1200 / ADR 0359: `opts.signal` をそのまま渡す——abort されればこの
+        // `recall()` が reject し、その例外がそのまま `consolidate()` の呼び出し側へ届く。
+        const recallResult = await recall(
+          ctx,
+          {
+            text: seed.digest,
+            activityCounting: target.activityCounting,
+          },
+          { signal: opts.signal },
+        );
         const minAffinity = target.minAffinity ?? DEFAULT_CONSOLIDATE_MIN_AFFINITY;
         const neighborIds = recallResult.memories
           // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
@@ -5944,7 +6128,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     } else {
-      const recallResult = await recall(ctx, target.query);
+      const recallResult = await recall(ctx, target.query, { signal: opts.signal });
       const recalledIds = recallResult.memories.map((m) => m.memoryId);
       ids =
         target.maxCandidates === undefined
@@ -6086,12 +6270,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 5. LLM を1回呼ぶ。失敗したら1件も書かず、eligible だったものは not_attempted に落とす。
     let llmResult: ConsolidationLLMResult;
     try {
-      llmResult = await deps.llmProvider.completeStructured(ctx, {
-        prompt: buildConsolidationPrompt(eligibleMemories),
-        schema: ConsolidationLLMResultSchema,
-      });
+      llmResult = await runAbortable(opts.signal, (raced) =>
+        deps.llmProvider.completeStructured(
+          ctx,
+          {
+            prompt: buildConsolidationPrompt(eligibleMemories),
+            schema: ConsolidationLLMResultSchema,
+          },
+          { signal: raced },
+        ),
+      );
       assertLLMContentNotBlank(llmResult.content, "consolidate");
     } catch (error) {
+      // Issue #1200 / ADR 0359: abort による reject は `"llm_failed"` に丸めず、
+      // そのまま投げ直す——この時点ではまだ何も書いていない（下の手順6より前）。
+      if (isAbort(opts.signal)) {
+        throw error;
+      }
       return {
         // 書き込みを1件も試みていない（ADR 0100）。
         atomicity: "not_attempted" as const,
@@ -6310,10 +6505,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 経路を通す（新しい「似ている」の判定を作らない）。
         // ADR 0353（Issue #338）: `target.activityCounting` をそのまま渡す
         // （省略時は recall() 側の既定 "tenant" に落ちる）。
-        const recallResult = await recall(ctx, {
-          text: seed.digest,
-          activityCounting: target.activityCounting,
-        });
+        // Issue #1200 / ADR 0359: `opts.signal` をそのまま渡す（`consolidate` と同じ形）。
+        const recallResult = await recall(
+          ctx,
+          {
+            text: seed.digest,
+            activityCounting: target.activityCounting,
+          },
+          { signal: opts.signal },
+        );
         const minAffinity = target.minAffinity ?? DEFAULT_REFLECT_MIN_AFFINITY;
         const neighborIds = recallResult.memories
           // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
@@ -6330,7 +6530,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     } else {
-      const recallResult = await recall(ctx, target.query);
+      const recallResult = await recall(ctx, target.query, { signal: opts.signal });
       const recalledIds = recallResult.memories.map((m) => m.memoryId);
       ids =
         target.maxCandidates === undefined
@@ -6466,14 +6666,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 5. LLM を1回呼ぶ。失敗したら1件も書かない。
     let llmResult: ReflectionLLMResult;
     try {
-      llmResult = await deps.llmProvider.completeStructured(ctx, {
-        prompt: buildReflectionPrompt(eligibleMemories),
-        schema: ReflectionLLMResultSchema,
-      });
+      llmResult = await runAbortable(opts.signal, (raced) =>
+        deps.llmProvider.completeStructured(
+          ctx,
+          {
+            prompt: buildReflectionPrompt(eligibleMemories),
+            schema: ReflectionLLMResultSchema,
+          },
+          { signal: raced },
+        ),
+      );
       if (llmResult.outcome === "reflected") {
         assertLLMContentNotBlank(llmResult.content, "reflect");
       }
     } catch (error) {
+      // Issue #1200 / ADR 0359: abort による reject は `"llm_failed"` に丸めず、
+      // そのまま投げ直す——この時点ではまだ何も書いていない。
+      if (isAbort(opts.signal)) {
+        throw error;
+      }
       return {
         outcome: "llm_failed",
         nothingReason: null,

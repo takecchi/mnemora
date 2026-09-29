@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { AbortOptions } from "../abort.js";
 import type { Ctx } from "../ctx.js";
 
 /**
@@ -76,10 +77,27 @@ export interface StructuredRequest<T> {
  * 上の #884 の追記、`@mnemora/local-embedding` は推論のタイムアウトを持たない）。待っている間、
  * runtime は DB の接続を握らない（【実測 2026-09-27】`@mnemora/postgres` で `max: 1` の pool の横から
  * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
+ *
+ * ⚠ **2026-09-29 追記（クローン miku の判断。[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: 上の「中断の口も渡さない」は
+ * もう成り立たない。** `complete`/`completeStructured` は任意の第3引数 `opts?: AbortOptions` を受け取る。
+ * `opts.signal` を渡すと:
+ * - 呼ぶ前に既に abort 済みなら、runtime はこの呼び出しを行わずに reject する。
+ * - 呼んでいる間に abort されたら、runtime はこの Promise の解決を待たずに reject する
+ *   （`signal.reason`。無ければ `AbortError` 相当）——**provider がこの引数を無視しても**、
+ *   runtime 自身が provider の Promise と abort を競わせるため、呼んだ Runtime の口は返る。
+ * - **既定の時間の上限は今回も持たない。**`opts`/`opts.signal` を省略すれば、今までどおり
+ *   provider が返るまで待ち続ける——この追記は opt-in の選択肢を足しただけで、上の
+ *   「今の振る舞い」の記述を1バイトも動かさない。
+ * - `opts` を渡さない既存の実装（2引数の `complete`/`completeStructured`）は、そのまま
+ *   この interface に適合する（TypeScript の構造的部分型——第3引数が省略可能なため）。
+ *   `@mnemora/openai`・`@mnemora/anthropic` は `opts.signal` を SDK 呼び出しの request options
+ *   （`{ signal }`）へ渡す。`@mnemora/local-embedding`（`EmbeddingProvider`）は推論の前後で
+ *   `signal` を確かめるだけで、推論の途中では止まらない（`embedding-provider.ts` の追記）。
  */
 export interface LLMProvider {
-  /** `req` を送り、応答の本文を返す。失敗は例外で返す（上の契約。リトライは内蔵しない）。 */
-  complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-  /** `req.schema` に合う値を返させる。`req.schema` への適合を保証するのは provider である（上の #850 の追記）。失敗は例外で返す。 */
-  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+  /** `req` を送り、応答の本文を返す。失敗は例外で返す（上の契約。リトライは内蔵しない）。`opts.signal` は上の2026-09-29追記を参照。 */
+  complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+  /** `req.schema` に合う値を返させる。`req.schema` への適合を保証するのは provider である（上の #850 の追記）。失敗は例外で返す。`opts.signal` は上の2026-09-29追記を参照。 */
+  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }
