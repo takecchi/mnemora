@@ -678,3 +678,178 @@ predicate 一致 4/4・`contested` 成立 4/4（3回とも揺れ無し）は、[
 `negation-moved-city`・`schedule-change-deadline` の退行（`8c45801`）と、その後の
 ADR 0377 による回復に合わせて更新した**（PR #1424）。本 ADR 自身の本文・「測ったこと」の
 表・数字は、2026-09-25 時点の実測の記録としてそのまま残す——書き換えていない。
+
+## 追記（2026-09-30）: Issue #835 候補3——v4 文言を候補1（PR #1424、ADR 0377）後の main で再測定した
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+[Issue #835](https://github.com/takecchi/mnemora/issues/835) の残タスクのうち、マネージャーから
+「上の追記（2026-09-25）が試した v1〜v4 のうち **v4 だけ**を、候補1（`8c45801` の副作用を
+core 側で吸収した PR #1424、[ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)）
+が入った後の main で再測定する」という指示を受けて行った測定を記録する。**v4 の文言は
+core（`packages/core/src/claim-key.ts`）へは一切入れていない**——上の追記が「リポジトリには
+反映していない」と書いている試作コードの扱いをそのまま踏襲し、測定スクリプト側だけで
+差し替えた（下記「方法」参照）。
+
+### 方法
+
+- **対象・n・数えるものは、上の追記（2026-09-25）の「測ったこと」と同じ物差し**:
+  `answer-case-set.dev.ts`（6件）+ `.eval.ts`（8件）の全14ケース、`gpt-4o-mini`、
+  種カセットは `answer.order-legend.json` だけ。数えるのは訂正4件の `contested` 成立・
+  誤検出（14件のうち、訂正でないのに `contested` が成立したケース）。
+- **新しい測定スクリプト** `examples/chat/src/scripts/measure-835-candidate3-v4.ts`
+  （新規、`record-answer-claim-key.ts` と同じ配線——`createAnswerBenchRuntime` →
+  `runAnswerCase` → `CassetteRecorder`）を使い、条件は常に
+  `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }` に固定した。
+  **v4 の文言**は、`OpenAILLMProvider.prototype.completeStructured` を実行時に書き換える
+  monkey-patch（同スクリプト内、`installV4Patch`）で、claim key 派生の system プロンプト
+  （`" 既知の predicate 候補一覧: {list}。この一覧に当てはまる場合は必ずそのまま使い、…"` を
+  含むものだけ）を実 API へ送る直前に差し替えた——
+  [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+  「測ったこと」節が触れている `measure-claim-key-835-mgr-check.ts`（追跡外の確認スクリプト、
+  `OpenAILLMProvider.prototype.complete`/`completeStructured` を一時的に monkey-patch する
+  手法）と同型——**real 層（実 API へ送る直前）だけを書き換え、種・記録・検出の配線には
+  触れない**。既定の経路（`buildKnownPredicateInstruction`）・既存カセットの鍵は一切
+  変えていない。
+  - **v4 の文言そのものが本追記（2026-09-25）の引用と1文字も違わないこと**を、
+    ADR 本文の v4 引用ブロックを `{predicates}` の位置で機械的に2分割して比較する
+    自己検査で確かめた（【実測】、`buildV4Instruction("lived_in")` の出力と ADR 引用の
+    `{predicates}` を `"lived_in"` に置き換えた文字列が完全一致）。⚠ **原文の引用ブロックは
+    コロンの直後に空白を置かない書式**（`一覧（…）:{predicates}。`）だった——既定文言
+    （`buildKnownPredicateInstruction`、コロンの後に空白が入る）とは異なる。**逐語を優先し、
+    直さずそのまま使った。**
+- n=10（見積もり: 約10回・約450 chat 呼び出し・約$0.034）。反復ごとに別カセット
+  （`examples/chat/cassettes/answer.claim-key.candidate3-v4-{1..10}.json`、新規）に記録した。
+- **比較対照「今の文言」（v4 ではない、既定の store 語彙ヒント文言）**は、上の追記
+  （2026-09-25 本文「測ったこと」）で記録済みの `answer.claim-key.known-predicates-{1,2,3}.json`
+  （候補1が入る**前**の main、2026-09-25 記録）を、`MNEMORA_LLM=recorded`/
+  `MNEMORA_EMBEDDING=recorded` で読み直す**純粋な再生**（実 API 0回）で得た——新しい
+  スクリプト `examples/chat/src/scripts/replay-835-candidate3-known-predicates.ts`（新規）。
+  - 【実測】当初 `runAnswerCase`（回答生成込み）で全14ケースを再生しようとしたが、2件目
+    （`schedule-change-meeting-day`）の mnemora 回答プロンプトで
+    `RecordedLLMProvider: このプロンプトは記録に無い` の例外になった。claim key 派生・
+    抽出（`completeStructured`）は時刻に依存しないが、回答生成（`complete`）は
+    `recall()` の減衰（現在時刻に依存）を経由する——カセットを記録した日
+    （2026-09-25）と再生した日（2026-09-30、5日後）で「現在時刻」が違うため、
+    減衰の効き方が変わり、回答プロンプトに含まれる記憶の集合・順序が記録済みと食い違った
+    と考えられる（**推測。確かめていない**。候補1が原因である証拠は無い）。
+    ⟹ **この再生は `ingestConversation` まで（抽出・claim key 派生・書き込み・検出）に
+    留めた。** predicate 一致・`contested` 成立・誤検出は `memories` テーブルを直接読めば
+    分かる（上の追記・ADR 0377 と同じ実測手法）——`recall()`/回答生成を経由しないので、
+    減衰の時刻依存を踏まない。**⟹ 候補4（下記）とは異なり、この対照は回答の質までは
+    測っていない**（候補4がその役割を別条件で担う）。
+  - n=3（`known-predicates-{1,2,3}.json` の3ファイルすべて）。実 API 呼び出し0回・
+    費用$0（【実測】、`usageMeter` が構築されないこと自体が実 API を一度も呼んでいない
+    証拠——`replay-835-candidate3-known-predicates.ts` の出力に明記）。
+
+### 結果【実測 2026-09-30】
+
+**訂正4件の `contested` 成立（4/4 かどうか）**:
+
+| 条件 | n | 結果 |
+|---|---|---|
+| v4（候補1後、実 API） | 10 | 10回とも4/4（40/40） |
+| 今の文言（候補1後、記録の再生） | 3 | 3回とも4/4（12/12） |
+
+**`other-period-city-this-year`（ADR 0326 (d)、同一 observation の兄弟——候補1の対象）**:
+
+| 条件 | n | 誤検出（`contested` 成立） |
+|---|---|---|
+| v4 | 10 | 0/10 |
+| 今の文言 | 3 | 0/3 |
+
+**候補1後は、v4・今の文言のどちらでも一度も誤検出が成立しなかった**——候補1
+（同じ observation の兄弟を一致から除く）は文言に関わらず効いている。
+
+**`unknown-favorite-number`（U1、語彙ヒントの吸い寄せ——候補1の対象外）**:
+
+| 条件 | n | 誤検出（`contested` 成立） |
+|---|---|---|
+| v4 | 10 | 10/10 |
+| 今の文言 | 3 | 3/3 |
+
+**候補1後も、v4・今の文言のどちらでも毎回誤検出が成立した**——ADR 0377「効かないもの」の
+予想どおり、候補1は別 observation どうしの吸い寄せ（U1）には触れない。
+
+**誤検出ケース数/14（訂正4件を除く10ケースのうち、`contested` が成立したケース数。
+「今の文言」は `ingestConversation` までの再生なので同じ物差しで数えられる）**:
+
+| 条件 | run ごとの値 | 平均 | 範囲 |
+|---|---|---|---|
+| v4（n=10） | 2, 2, 1, 1, 1, 1, 3, 2, 1, 1 | 1.5 | 1〜3 |
+| 今の文言（n=3） | 3, 2, 2 | 2.33 | 2〜3 |
+
+**v4 の平均（1.5）は今の文言の平均（2.33）より低いが、n=3 と n=10 で標本数が違い、
+上の追記（2026-09-25）が before-on/v4 で確認した run 間の揺れ（2〜4/14 の範囲で重なる）
+を踏まえると、この差を「v4 が誤検出を減らす」の根拠にはしない。** 上の追記の
+「判定: 否定的結果」（v4 は事後選択であり、before-on の揺れの範囲を明確に超えて
+誤検出を減らせなかった）は、候補1後の本追記でも覆らない——**観測した数を報告するに
+留める**（マネージャー指示・`AGENTS.md`「確かめていないことは『確かめていない』と書く」）。
+
+**誤検出したケースの内訳**（run ごと、訂正4件を除く）:
+
+| 条件 | run | 誤検出したケース |
+|---|---|---|
+| v4 | 1 | `unknown-favorite-number`, `other-person-birthday` |
+| v4 | 2 | `unknown-favorite-number`, `other-person-birthday` |
+| v4 | 3 | `unknown-favorite-number` |
+| v4 | 4 | `unknown-favorite-number` |
+| v4 | 5 | `unknown-favorite-number` |
+| v4 | 6 | `unknown-favorite-number`（+ 下記「新しい観測」） |
+| v4 | 7 | `unknown-favorite-number`, `other-person-birthday`, `eval-misattribution-order-swapped` |
+| v4 | 8 | `unknown-favorite-number`, `other-person-birthday` |
+| v4 | 9 | `unknown-favorite-number` |
+| v4 | 10 | `unknown-favorite-number` |
+| 今の文言 | 1 | `unknown-favorite-number`, `other-person-birthday`, `other-person-favorite-food` |
+| 今の文言 | 2 | `unknown-favorite-number`, `eval-misattribution-order-swapped` |
+| 今の文言 | 3 | `unknown-favorite-number`, `eval-misattribution-order-swapped` |
+
+`other-person-birthday`（filler「最近のニュースについての意見は述べていない。」×
+「ペットの調子があまり良くないため、心配している。」）・`eval-misattribution-order-swapped`・
+`other-person-favorite-food` は、いずれも上の追記（2026-09-25）「負債1」が観測した
+「無関係な filler 発話どうしが同じ predicate に吸い寄せられる」機構と同型——v4・今の文言の
+両方で起きており、v4 が特に抑えているようには見えない。
+
+**新しい観測（v4 run6）: 訂正ケース自身の中で、訂正とは別に filler どうしが誤って
+`contested` になった**。`schedule-change-deadline`（訂正4件の1つ）で、訂正の成立
+（`report_deadline`、`matchCount:1`、正しく `contested`）とは別に、同じケースの filler
+2件（「週末は友達と出かける予定がある。」「新しい趣味を始めようと思っている」、**別々の
+observation**）が両方とも predicate `plans_weekend_activity` に吸い寄せられ、互いに
+`contested` になった。**訂正の成立自体（誤検出ケース数の表には数えていない）には影響
+しない**——`report_deadline` の対は正しく成立したままである。この事例は、負債1の機構
+（別 observation どうしの吸い寄せ）が「公式に追跡している2件（`unknown-favorite-number`・
+`other-period-city-this-year`）」に限らず、**store の語彙が蓄積したどのケースでも起こりうる**
+ことを示す1件の実例として記録する（n=1、一般化はしない）。
+
+### 費用【実測 2026-09-30】
+
+| 項目 | chat 呼び出し | 費用 |
+|---|---|---|
+| v4（n=10、本測定） | 508 | $0.039299 |
+| 今の文言（再生、n=3） | 0 | $0 |
+| （事前の文言差し替え確認、smoke 2回） | 4 | $0.000668 |
+| **合計** | **512** | **$0.039967**（見積もり $0.034 の約1.18倍。停止基準 $0.068 の約59%） |
+
+見積もりは実行前に立てた（マネージャー指示の見積もり「約10回・約450 chat 呼び出し・
+約$0.034」をそのまま使い、上の追記〔2026-09-25〕の「新案」run 1回あたりの実費
+（$0.0028）× 10 ≈ $0.028〜v4 の文言が長い分の増分を見込んで$0.034 とした）。実測は
+508 chat 呼び出し・$0.039299（v4 本体のみ）で、見積もりとほぼ一致し、停止基準
+（$0.068、見積もりの2倍）を超えなかった。
+
+### 確かめていないこと
+
+- ⛔ **「今の文言」の候補1後・実 API での回答生成込みの測定。** 上の「方法」節のとおり、
+  `runAnswerCase` による再生が減衰の時刻依存で例外になったため、`ingestConversation`
+  までに留めた。今の文言を実 API で録り直せば回答生成込みの対照が取れるが、本追記の
+  範囲（候補3の指示は「再生で足りるなら再生で」）では行っていない。
+- ⛔ **v4 の誤検出率（平均1.5、n=10）が「今の文言」（平均2.33、n=3）と統計的に有意に
+  違うか。** n の非対称・run 間の揺れの大きさから、本追記はこの問いに答えない。
+- ⛔ **`schedule-change-deadline` run6 の filler 誤対（新しい観測）が、他のケース・
+  他の run でも同じ頻度で起こるか。** n=1 の実例であり、頻度は測っていない。
+- ⛔ **v4 文言の「コロンの後に空白が無い」書式が、既定文言（空白が入る）と比べて
+  結果に影響したか。** 逐語を優先してそのまま使ったが、この書式差自体の効果は
+  切り分けていない。
+
+候補4（誤検出の `[矛盾候補:]` が回答の品質に効いているか）は
+[ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+の追記に記録する——本追記は候補3（v4 の再測定）だけを対象にした。

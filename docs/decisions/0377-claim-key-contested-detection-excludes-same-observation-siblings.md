@@ -337,3 +337,120 @@ ADR 0324 決定5・決定6 は「`findActiveByClaimKey` の一致件数で0/1/2+
 分岐していたものが、今は 1（`contested`、決定5）に分岐する**（上の「機序」節の症状(b)）。
 ADR 0324 決定5・決定6 が定めた**分岐そのもの**（0/1/2+の3方向とその扱い）は変えていない
 ——**何を「一致」として数えるか**が変わるだけである。
+
+## 追記（2026-09-30）: Issue #835 候補4——誤検出の `[矛盾候補:]` は回答の品質に効くか
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+[Issue #835](https://github.com/takecchi/mnemora/issues/835) の U3（「誤検出に付いた印が
+回答の質に与える影響。未測定」）を、実 API（gpt-4o-mini）で測った記録。**候補3（v4 文言の
+再測定）は [ADR 0329](./0329-claim-key-known-predicates-from-store.md) の追記〔2026-09-30〕
+に書いた——本追記は候補4だけを扱う。** 本追記が対象にする `[矛盾候補:]` は、
+[ADR 0335](./0335-recalled-memory-contested-with.md)（`RecalledMemory.contestedWith`）が
+`contested` の成立を回答プロンプトへ運ぶ経路である。
+
+### 設計
+
+同じ6ケース（訂正4件 `schedule-change-meeting-day`・`negation-moved-city`・
+`schedule-change-deadline`・`negation-moved-job` + 誤検出2件 `unknown-favorite-number`・
+`other-period-city-this-year`。上の「測ったこと」節の `TARGET_CASE_IDS` と同じ集合）を、
+同じ ingest の claim key 派生条件で2条件に分けて回答生成・judge まで通した:
+
+- **(A) `with-tag`**: `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`
+  （既定の文言のまま、v4 ではない）。誤検出の `[矛盾候補:]` が成立すれば回答プロンプトへ
+  届きうる。
+- **(B) `no-tag`**: `{ enabled: true, knownPredicatesFromStore: true }`
+  （`detectContested` を渡さない＝ADR 0324 決定1「渡されなければ off」）。
+  `detectClaimKeyContested` 自体が呼ばれないため、`contested`/`[矛盾候補:]` は構造的に
+  一度も出ない——(A) との差分が「印の有無」だけになるようにする対照。
+
+新しいスクリプト `examples/chat/src/scripts/measure-835-candidate4-answer-quality.ts`
+（新規、`runAnswerCase` を使う——回答生成・judge まで含む）で、両条件とも種カセットは
+`answer.order-legend.json` だけ。n=5（反復ごとに別カセット、
+`examples/chat/cassettes/answer.claim-key.candidate4-{with-tag,no-tag}-{1..5}.json`、新規）。
+
+**まず (A) で、誤検出の対が実際に recall されて `contestedWith` が回答プロンプトに
+載ったか**（`[矛盾候補:]` タグの出現回数）**をケースごとに確認した**（マネージャー指示）。
+
+### 結果【実測 2026-09-30】
+
+**(A) でタグが実際に回答プロンプトへ届いた回数（n=5 中）**:
+
+| ケース | 届いた回数 | 備考 |
+|---|---|---|
+| `schedule-change-meeting-day` | 5/5 | 訂正（真陽性） |
+| `negation-moved-city` | 5/5 | 訂正（真陽性） |
+| `schedule-change-deadline` | 5/5 | 訂正（真陽性） |
+| `negation-moved-job` | 5/5 | 訂正（真陽性） |
+| `unknown-favorite-number` | 5/5 | 誤検出（U1、対象そのもの） |
+| `other-period-city-this-year` | 1/5（run4のみ） | 誤検出対象。候補1後は大半の回で `contested` が成立しないため、残り4/5は「印が無い回」——下記のとおり**影響を測れていない回**として分ける |
+
+`other-period-city-this-year` の4/5（run1・2・3・5）は、タグが一度も回答プロンプトに
+載っていない——**この4回は「誤検出の印が回答の質に与える影響」を測れていない回として
+数える**（マネージャー指示）。届いた1/5（run4）だけが、この特定の誤検出ペアについて
+実際に効果を確認できる回である。
+
+**ケースごとの `verdict`（一次判定、pass/fail）——(A) with-tag と (B) no-tag の対比**:
+
+| ケース | 種別 | (A) with-tag（n=5） | (B) no-tag（n=5） | 差 |
+|---|---|---|---|---|
+| `schedule-change-meeting-day` | 訂正（真陽性） | fail 5/5（`"分かりません"`） | **pass 5/5**（`"水曜日です。"`） | **あり——5/5 対 5/5 で一貫して逆転** |
+| `negation-moved-city` | 訂正（真陽性） | pass 5/5 | pass 5/5 | 無し |
+| `schedule-change-deadline` | 訂正（真陽性） | fail 5/5（`"…20日です。"`、期待値は25日） | fail 5/5（同じ誤り） | 無し（両条件とも同じ理由で誤る） |
+| `negation-moved-job` | 訂正（真陽性） | pass 5/5 | pass 5/5 | 無し |
+| `unknown-favorite-number` | 誤検出（U1） | pass 5/5（`"分かりません"`、`must-abstain` に一致） | pass 5/5（同じ） | 無し——タグが誤検出に付いていても、期待どおりの棄権は崩れなかった |
+| `other-period-city-this-year` | 誤検出（対象。候補1後は大半 0） | pass 5/5（run4はタグ有りでも pass） | pass 5/5 | 無し（タグが届いた1回を含め、崩れなかった） |
+
+**唯一の一貫した差は `schedule-change-meeting-day`——訂正（真陽性）のケースで、
+タグが届くと5/5とも `"分かりません"`（fail）、タグが無いと5/5とも正しい `"水曜日です。"`
+（pass）になった。** この差は誤検出（U1）ではなく**真陽性**の訂正で観測された点に注意:
+「`[矛盾候補:]` が付くこと自体が、モデルを『対立があるので答えを控える』方向へ寄せている
+可能性がある」という観測であり、「誤検出の印が害になる」という当初の問い（U3）とは
+別の——タグの有無そのものが答えを変えうるという——観測である。誤検出の対象2ケース
+（`unknown-favorite-number`・`other-period-city-this-year`）では、この5回の範囲では
+verdict の崩れは観測されなかった。
+
+### 読み方——推測に踏み込まない
+
+- **n=5は小さい。** `schedule-change-meeting-day` の逆転は5/5対5/5で一貫しているが、
+  6ケース中1ケースだけの観測であり、他の訂正2件（`negation-moved-city`・
+  `negation-moved-job`）では同じ逆転が起きていない——**「タグが訂正の回答を悪化させる」
+  への一般化はしない。観測した数（1/4の訂正ケースで、5/5対5/5の逆転）だけを書く。**
+- **誤検出2件（U1 の当事者）では、この n の範囲で verdict の崩れを観測しなかった。**
+  「誤検出の印は無害」とは書かない——`other-period-city-this-year` はタグが届いた回が
+  1/5しかなく、**残り4/5は影響を測れていない回**であり、`unknown-favorite-number` も
+  n=5だけでは崩れなかったというだけである。
+- **`schedule-change-deadline` は両条件で同じ理由（タグとは無関係）で fail している
+  可能性が高い**（回答が両条件とも `"…20日です。"` で、25日への訂正を反映していない）
+  ——**タグの効果を切り分けられていない**。原因の特定（`recall()` がなぜ訂正後の
+  memory を提示しないか）は本追記の範囲外。
+
+### 費用【実測 2026-09-30】
+
+| 条件 | chat 呼び出し（n=5合計） | 費用（n=5合計） |
+|---|---|---|
+| (A) with-tag | 143 | $0.008740 |
+| (B) no-tag | 98 | $0.006290 |
+| **合計** | **241** | **$0.015030**（見積もり $0.01〜0.03 の範囲内。停止基準 $0.06 の約25%） |
+
+見積もりは実行前に立てた（マネージャー指示の見積もり $0.01〜0.03 をそのまま使った。
+6ケース・n=5・2条件という規模は、[ADR 0329](./0329-claim-key-known-predicates-from-store.md)
+追記〔2026-09-25〕の全14ケース1回あたりの実費（$0.0015〜0.0028）から比例的に見積もった）。
+実測は $0.015030 で、見積もり上限（$0.03）の半分程度に収まり、停止基準（$0.06）には
+遠く及ばなかった。
+
+### 確かめていないこと
+
+- ⛔ **`schedule-change-meeting-day` の逆転（タグ有りで fail・無しで pass）が、他の
+  訂正ケースでも n を増やせば同じ形で現れるか。** 本追記は6ケース・n=5に留めた。
+- ⛔ **`other-period-city-this-year` に実際にタグが届く回を増やした場合（n を増やす、
+  または誤検出が確実に成立する条件を作る）の verdict の分布。** 本追記は届いた1/5回
+  しか観測していない。
+- ⛔ **タグが答えを控える方向へ寄せる機構**（回答生成プロンプトの文言・モデルの挙動の
+  どちらに起因するか）。本追記は現象（verdict の逆転）を観測しただけで、原因の切り分けは
+  行っていない。
+- ⛔ **`schedule-change-deadline` が両条件で fail する原因**（タグとは無関係の可能性が
+  高いが、確かめていない）。
+- ⛔ **U4**（[Issue #835](https://github.com/takecchi/mnemora/issues/835) の未決点、
+  `[矛盾候補:]` に確度を持たせるか）は本追記の範囲外——設計判断であり、測定では
+  答えられない。
