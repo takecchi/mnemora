@@ -126,6 +126,8 @@ describeMemoryStoreConformance({
   // Issue #1412 コメント1 / ADR 0373: InMemoryMemoryStore は resolveOrphanedContested を
   // 実装している。
   supportsResolveOrphanedContested: true,
+  // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり
@@ -181,6 +183,8 @@ describeVectorStoreConformance({
   prepareEmbeddingSpace: () => {},
   // Issue #200 / ADR 0151: InMemoryVectorStore は getVectors を実装している。
   supportsGetVectors: true,
+  // Issue #1207 / ADR 0383: InMemoryVectorStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });
 
 // ADR 0084 / Issue #106: `InMemoryLexicalStore` は自前の Map を持たず、`memoryStore` の
@@ -304,6 +308,8 @@ describeOutboxStoreConformance({
     }
     return latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobId) ?? null;
   },
+  // Issue #1207 / ADR 0383: InMemoryOutboxStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });
 
 let latestTenantSettingsStore: InMemoryTenantSettingsStore | undefined;
@@ -397,4 +403,6 @@ describeTenantSettingsStoreConformance({
   // Issue #201 / ADR 0318: InMemoryTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
   // を実装している。
   supportsTaxonomyMode: true,
+  // Issue #1207 / ADR 0383: InMemoryTenantSettingsStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });

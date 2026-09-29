@@ -121,6 +121,21 @@ export interface TenantSettingsStoreConformanceOptions {
    * 判断ではない）。
    */
   supportsTaxonomyMode?: boolean;
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
+   * `TenantSettingsStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。
+   * **必須。**
+   *
+   * `supportsDecayClock`（このファイル）・`memory-store-conformance.ts` の
+   * `supportsArchiveDecayed`/`supportsPurgeMemory` 等と同じ判断——省略可にしないこと。
+   * `true` なら契約の歯（このテナントの `tenant_settings` 行を消す、他テナントは無傷の
+   * まま残る、高々1行なので `reachedLimit` は常に `false`、行が無くても `deleted: 0` で
+   * 例外にしない、`dryRun` で1行も変わらない）を実行する。`false` なら
+   * `expect(store.eraseTenant).toBeUndefined()` を積極的に assert する——`it.skip` には
+   * しない。
+   */
+  supportsEraseTenant: boolean;
 }
 
 /**
@@ -140,6 +155,7 @@ export function describeTenantSettingsStoreConformance(
     advanceActivitySeq,
     advanceSubjectActivitySeq,
     supportsTaxonomyMode,
+    supportsEraseTenant,
   } = options;
 
   describe(`TenantSettingsStore conformance (${name})`, () => {
@@ -483,6 +499,61 @@ export function describeTenantSettingsStoreConformance(
           expect(await store.getTaxonomyMode!(ctx)).toBe("strict");
         });
       }
+    }
+
+    // -----------------------------------------------------------------
+    // eraseTenant（Issue #1207 / ADR 0383: テナント消去、任意メソッド）
+    // -----------------------------------------------------------------
+    if (supportsEraseTenant) {
+      it("eraseTenant はテナントの tenant_settings 行を消し、他テナントは無傷のまま残す", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: `erase-tenant-a-${Math.random()}` };
+        const ctxB: Ctx = { tenantId: `erase-tenant-b-${Math.random()}` };
+        await store.setEventRetention(ctxA, { kind: "days", days: 30 });
+        await store.setEventRetention(ctxB, { kind: "days", days: 60 });
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000 });
+        expect(result.deleted).toBeGreaterThan(0);
+        expect(result.reachedLimit).toBe(false);
+
+        expect(await store.getEventRetention(ctxA)).toEqual({ kind: "unset" });
+        expect(await store.getEventRetention(ctxB)).toEqual({ kind: "days", days: 60 });
+      });
+
+      it("eraseTenant は tenant_settings が高々1行のため reachedLimit は常に false", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `erase-tenant-limit-${Math.random()}` };
+        await store.setEventRetention(ctx, { kind: "days", days: 30 });
+
+        const result = await store.eraseTenant!(ctx, { limit: 1 });
+        expect(result.deleted).toBe(1);
+        expect(result.reachedLimit).toBe(false);
+        expect(await store.getEventRetention(ctx)).toEqual({ kind: "unset" });
+      });
+
+      it("eraseTenant は行が無いテナントに対しても deleted: 0 を返し、例外にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `erase-tenant-none-${Math.random()}` };
+        const result = await store.eraseTenant!(ctx, { limit: 1000 });
+        expect(result.deleted).toBe(0);
+        expect(result.reachedLimit).toBe(false);
+      });
+
+      it("eraseTenant は dryRun: true のとき、削除件数を返すが実際には何も消さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `erase-tenant-dry-run-${Math.random()}` };
+        await store.setEventRetention(ctx, { kind: "days", days: 30 });
+
+        const result = await store.eraseTenant!(ctx, { limit: 1000, dryRun: true });
+        expect(result.deleted).toBe(1);
+
+        expect(await store.getEventRetention(ctx)).toEqual({ kind: "days", days: 30 });
+      });
+    } else {
+      it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.eraseTenant).toBeUndefined();
+      });
     }
   });
 }

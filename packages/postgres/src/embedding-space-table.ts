@@ -26,6 +26,18 @@ const HNSW_INDEX_PREFIX = "idx_memory_embeddings_hnsw_";
  * （`vector-store.ts` の `withRelaxedOrderScan` 呼び出し元の doc 参照）。
  */
 const ZERO_NORM_INDEX_PREFIX = "idx_memory_embeddings_zero_norm_";
+/**
+ * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): `(memory_id)`
+ * 単一列索引。`memory_embeddings_<space>` の主キーは `(tenant_id, memory_id)`——
+ * `tenant_id` 先頭の複合索引であり、`memory_id` だけで（`tenant_id` を条件に含まずに）
+ * 行を探す向きには使えない（ADR 0062 が `memories.contested_with_id` について
+ * 指摘したのと同じ形）。`memory_id uuid NOT NULL REFERENCES memories(id) ON DELETE
+ * CASCADE`（`vector-space.ts` の `registerEmbeddingSpace` の DDL）があるため、
+ * `memories` の行を1件削除するたびに Postgres はこの参照整合性を検査・CASCADE
+ * 削除する——この索引が無いと、その検査が空間テーブルの Seq Scan になる
+ * （`docs/decisions/0383-erase-tenant.md` の実測節参照）。
+ */
+const MEMORY_ID_INDEX_PREFIX = "idx_memory_embeddings_memory_id_";
 
 function sanitizeSlugPart(value: string): string {
   return value
@@ -89,6 +101,22 @@ export function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string
   const hash = createHash("sha256").update(suffix).digest("hex").slice(0, 8);
   const budget = MAX_IDENTIFIER_BYTES - ZERO_NORM_INDEX_PREFIX.length - hash.length - 1;
   return `${ZERO_NORM_INDEX_PREFIX}${suffix.slice(0, Math.max(budget, 0))}_${hash}`;
+}
+
+/**
+ * `(memory_id)` 単一列索引の名前（Issue #1207、ADR 0383）。テーブル名・他の索引名と
+ * 同じ導出規則（63バイト超で切り詰め＋ハッシュ）から機械的に決める。
+ */
+export function embeddingSpaceMemoryIdIndexName(space: EmbeddingSpaceId): string {
+  const table = embeddingSpaceTableName(space);
+  const suffix = table.slice(TABLE_PREFIX.length);
+  const fullName = `${MEMORY_ID_INDEX_PREFIX}${suffix}`;
+  if (Buffer.byteLength(fullName, "utf8") <= MAX_IDENTIFIER_BYTES) {
+    return fullName;
+  }
+  const hash = createHash("sha256").update(suffix).digest("hex").slice(0, 8);
+  const budget = MAX_IDENTIFIER_BYTES - MEMORY_ID_INDEX_PREFIX.length - hash.length - 1;
+  return `${MEMORY_ID_INDEX_PREFIX}${suffix.slice(0, Math.max(budget, 0))}_${hash}`;
 }
 
 /** 識別子として安全であることの防御的なチェック（SQL 注入対策の最後の砦）。 */

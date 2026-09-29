@@ -21,6 +21,8 @@ import type {
   ClaimKey,
   Ctx,
   EmbeddingStatus,
+  EraseTenantStoreOptions,
+  EraseTenantStoreResult,
   EventActor,
   LabelSummary,
   Memory,
@@ -2511,6 +2513,170 @@ export class InMemoryMemoryStore implements MemoryStore {
     };
     this.labels.set(key, registered);
     return snapshot(registered);
+  }
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+   * このテナントに属する行を、`memory_labels`・`recall_usages`・`memory_events` →
+   * `memories`（+ 冪等キー `extractionIndex`）→ `observations` → `recalls` → `labels` →
+   * `tenant_activity`・`tenant_subject_activity` の順で消す
+   * （`PostgresMemoryStore.eraseTenant` と同じ表の並び、`MemoryStore.eraseTenant` の
+   * doc コメント参照）。
+   *
+   * この in-memory 実装は `Map`/`Set` の上に成り立っており、外部キー制約も
+   * トランザクションの原子性も持たない——`blocked_by_foreign_reference`
+   * （他テナントの行がこのテナントの行を FK で参照している）は返さない
+   * （`packages/postgres` 固有の振る舞い。`postgres` の実装 doc 参照）。自己参照
+   * （`superseded_by_id`/`contested_with_id`）の事前 NULL 化も、`Map` からの削除が
+   * FK エラーを起こさないため不要——単純に対象の行を消すだけでよい。
+   *
+   * `reachedLimit` は `PostgresMemoryStore.eraseTenant` と同じ「保守的な近似」
+   * （ある表でちょうど budget 分だけ削除できた場合、それ以上残っているかを
+   * 追加で確認せず `true` を返す）。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
+    const limit = opts.limit;
+    const dryRun = opts.dryRun === true;
+    let remaining = limit;
+    let total = 0;
+    let reachedLimit = false;
+
+    // 汎用ヘルパー: `matches(key, value)` を満たすエントリを budget 個まで集め、
+    // `dryRun` でなければ Map/Set から取り除く。戻り値は削除した（またはプレビューで
+    // 数えた）件数。
+    const drainMap = <V>(map: Map<string, V>, tenantOf: (value: V) => string): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victims: string[] = [];
+      for (const [key, value] of map) {
+        if (victims.length >= budget) break;
+        if (tenantOf(value) === ctx.tenantId) {
+          victims.push(key);
+        }
+      }
+      if (!dryRun) {
+        for (const key of victims) {
+          map.delete(key);
+        }
+      }
+      return victims.length;
+    };
+    // `labels`/`memoryLabels` は key 自体が `JSON.stringify([tenantId, ...])`——
+    // value に `tenantId` を持たないので、key から読む。
+    const drainKeyedMap = <V>(map: Map<string, V>): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victims: string[] = [];
+      for (const key of map.keys()) {
+        if (victims.length >= budget) break;
+        const [tenantId] = JSON.parse(key) as [string, ...unknown[]];
+        if (tenantId === ctx.tenantId) {
+          victims.push(key);
+        }
+      }
+      if (!dryRun) {
+        for (const key of victims) {
+          map.delete(key);
+        }
+      }
+      return victims.length;
+    };
+    const drainSet = (set: Set<string>, belongsToTenant: (key: string) => boolean): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victims: string[] = [];
+      for (const key of set) {
+        if (victims.length >= budget) break;
+        if (belongsToTenant(key)) {
+          victims.push(key);
+        }
+      }
+      if (!dryRun) {
+        for (const key of victims) {
+          set.delete(key);
+        }
+      }
+      return victims.length;
+    };
+    const drainArray = <V>(array: V[], tenantOf: (value: V) => string): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victimIndexes: number[] = [];
+      for (let i = 0; i < array.length && victimIndexes.length < budget; i++) {
+        if (tenantOf(array[i]!) === ctx.tenantId) {
+          victimIndexes.push(i);
+        }
+      }
+      if (!dryRun) {
+        for (let i = victimIndexes.length - 1; i >= 0; i--) {
+          array.splice(victimIndexes[i]!, 1);
+        }
+      }
+      return victimIndexes.length;
+    };
+
+    const steps: Array<() => number> = [
+      // memory_labels
+      () => drainKeyedMap(this.memoryLabels),
+      // recall_usages（key: `${tenantId}:${recallId}:${memoryId}`）
+      () => drainSet(this.usages, (key) => key.startsWith(`${ctx.tenantId}:`)),
+      // memory_events
+      () => drainArray(this.events, (event) => event.tenantId),
+      // memories（+ 冪等キー extractionIndex の掃除。budget には数えない——見えない
+      // 内部索引であり、Postgres 側に対応する別テーブルが無いため）
+      () => {
+        const deleted = drainMap(this.memories, (memory) => memory.tenantId);
+        if (!dryRun) {
+          for (const key of [...this.extractionIndex.keys()]) {
+            const [tenantId] = JSON.parse(key) as [string, ...unknown[]];
+            if (tenantId === ctx.tenantId) {
+              this.extractionIndex.delete(key);
+            }
+          }
+        }
+        return deleted;
+      },
+      // observations
+      () => drainMap(this.observations, (observation) => observation.tenantId),
+      // recalls
+      () => drainMap(this.recalls, (recall) => recall.tenantId),
+      // labels
+      () => drainKeyedMap(this.labels),
+      // tenant_activity（高々1エントリ）
+      () => {
+        if (remaining <= 0) return 0;
+        if (!this.activitySeq.has(ctx.tenantId)) return 0;
+        if (!dryRun) this.activitySeq.delete(ctx.tenantId);
+        return 1;
+      },
+      // tenant_subject_activity（テナント1件＝そのテナントの subject 別カウンタ全部で1行、
+      // という単純化——`Map<tenantId, Map<subjectId, seq>>` の外側キー1つを1行として数える）
+      () => {
+        if (remaining <= 0) return 0;
+        if (!this.subjectActivitySeq.has(ctx.tenantId)) return 0;
+        if (!dryRun) this.subjectActivitySeq.delete(ctx.tenantId);
+        return 1;
+      },
+    ];
+
+    for (const step of steps) {
+      if (remaining <= 0) {
+        reachedLimit = true;
+        break;
+      }
+      const budgetBeforeStep = remaining;
+      const deleted = step();
+      total += deleted;
+      remaining -= deleted;
+      if (deleted === budgetBeforeStep && deleted > 0) {
+        // budget をちょうど使い切った——保守的に「まだ残っているかもしれない」とみなす
+        // （interface doc の近似。`PostgresMemoryStore.eraseTenant` と同じ判断）。
+        reachedLimit = true;
+        break;
+      }
+    }
+
+    return { kind: "executed", deleted: total, reachedLimit };
   }
 
   private extractionKey(

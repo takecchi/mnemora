@@ -4,6 +4,7 @@ import type { EmbeddingSpaceId } from "@mnemora/core";
 import {
   assertSafeIdentifier,
   embeddingSpaceIndexName,
+  embeddingSpaceMemoryIdIndexName,
   embeddingSpaceTableName,
   embeddingSpaceZeroNormIndexName,
 } from "./embedding-space-table.js";
@@ -319,9 +320,11 @@ export async function registerEmbeddingSpace(
   const table = embeddingSpaceTableName(space);
   const index = embeddingSpaceIndexName(space);
   const zeroNormIndex = embeddingSpaceZeroNormIndexName(space);
+  const memoryIdIndex = embeddingSpaceMemoryIdIndexName(space);
   assertSafeIdentifier(table);
   assertSafeIdentifier(index);
   assertSafeIdentifier(zeroNormIndex);
+  assertSafeIdentifier(memoryIdIndex);
 
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
   // Issue #779: `migrate.ts` の `runMigrations` と同じ形——`schema` 未指定かつ
@@ -411,6 +414,29 @@ export async function registerEmbeddingSpace(
       CREATE INDEX IF NOT EXISTS ${zeroNormIndex}
         ON ${qualify(schema, table)} (tenant_id, memory_id)
         WHERE ${qualify(extensionSchema, "vector_norm")}(embedding) = 0;
+    `);
+
+    // Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): `(memory_id)`
+    // 単一列索引。主キー `(tenant_id, memory_id)` は `tenant_id` 先頭の複合索引であり、
+    // `memory_id` 単独で（`tenant_id` を条件に含まずに）行を探す向きには使えない
+    // （`embedding-space-table.ts` の `MEMORY_ID_INDEX_PREFIX` の doc コメント参照）。
+    // `memory_id uuid NOT NULL REFERENCES memories(id) ON DELETE CASCADE`（上の
+    // `CREATE TABLE`）があるため、`memories` の行を1件削除するたびに Postgres は
+    // この参照整合性を検査・CASCADE 削除する——この索引が無いと Seq Scan になる
+    // （ADR 0383「実測」節）。
+    //
+    // ⚠ この索引を作る経路は2つある（`zeroNormIndex` と同じ形）。ここ（新しく空間を
+    // 作る・または `registerEmbeddingSpace` が再実行されたとき）と、
+    // `migrations/0027_erase_tenant_fk_indexes.sql`（migration 適用の時点で既に
+    // 存在する空間に、その場で作る）。索引名は `embeddingSpaceMemoryIdIndexName` の
+    // 同じ計算から1バイトも違わずに一致する（`embedding-space-table-enumeration-consistency.postgres.test.ts`
+    // が実測で固定している）ため、`IF NOT EXISTS` により後から呼ばれたほうは何もしない。
+    //
+    // `CONCURRENTLY` は使わない——`zeroNormIndex` と同じ理由（advisory lock による
+    // 直列化、pgvector 側の競合未検査）。実測した構築時間は ADR 0383「実測」節参照。
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS ${memoryIdIndex}
+        ON ${qualify(schema, table)} (memory_id);
     `);
   } finally {
     await releaseAdvisoryLock(lockClient, lockKey);

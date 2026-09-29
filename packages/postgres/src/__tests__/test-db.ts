@@ -65,6 +65,12 @@ const DOMAIN_TABLES = [
   // ADR 0165（Issue #305）: 活動カウンタ。忘れるとテスト間で activity_seq が汚染される
   // （`getActivitySeq`/`createRecall(advanceActivityClock: true)` の歯が偽陽性/偽陰性になる）。
   "tenant_activity",
+  // [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)（Issue #338）:
+  // `tenant_activity` と同じ理由で漏れていた（Issue #1207 / ADR 0383 の
+  // `erase-tenant-all-tenant-tables.postgres.test.ts` を書く過程で見つけた既存の欠落——
+  // `tenant_subject_activity` はこのリストに一度も入ったことが無く、テスト間で
+  // `S_x`（subject 単位カウンタ）が汚染されうる状態のままだった）。
+  "tenant_subject_activity",
   // Issue #201 / ADR 0318: taxonomy の語彙。`memory_labels` は `memories`/`labels` の
   // どちらへの FK も持つため `CASCADE` で連れて消えるはずだが、`labels` 自体は他の
   // どのテーブルからも参照されていないため明示的に挙げないと残り、テスト間で

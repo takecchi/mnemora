@@ -2021,7 +2021,132 @@ export interface MemoryStore {
    * （NUL を Postgres に揃えて拒むのは PR #1135）。
    */
   registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
+   * このテナントに属する行を**跡形なく**消す——`purgeMemory?` と違い、行そのものを
+   * 物理削除する（tombstone を書き残さない）。`eraseTenant`（同ファイルの独立関数、
+   * `packages/core/src/erase-tenant.ts`）が、この口を含む4つの port の任意メソッドを
+   * 束ねて1つの結果に落とす。**このメソッド単体は orchestrator ではない**——呼び出し順・
+   * 他 port との整合は `eraseTenant` 側の責務であり、このメソッドは「自分が持つ表から
+   * このテナントの行を消す」ことだけを行う。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`purgeMemory?`/`archiveDecayed?` と同じ理由、ADR 0100 決定1）。
+   * ADR 0050 が `getEventRetention`/`setEventRetention` を必須にした理由（「口が無い」と
+   * 「失敗した」が見分けられない）はここでは当たらない——{@link EraseTenantStoreResult}
+   * の `store_unsupported`（`eraseTenant`（独立関数）側で組み立てる）が port を名指しで
+   * 区別するため、任意メソッドのままでも「口が無い」を「失敗した」と取り違えない。
+   * 詳細は ADR 0383「検討した代替案」。
+   *
+   * **消す表**（Issue #1207 の実測が数え上げた、テナント消去で残っていた表）: `memories`・
+   * `observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・
+   * `memory_labels`・`tenant_activity`・`tenant_subject_activity`。**`DB には消去の記録を
+   * 何も残さない**——`memory_events` に `events_purged` 相当の行を積んだりしない
+   * （ADR 0115 決定4「`events_purged` は掃除の対象外」は保持期間の掃除だけの話であり、
+   * テナント消去はこの行自体も消す。ADR 0383 参照）。呼び出し側に返すのは戻り値だけである。
+   *
+   * 契約:
+   * - `opts.limit` 個を目安に、子→親の順（`memory_labels`・`recall_usages`・
+   *   `memory_events` → `memories` → `observations` → `recalls` → `labels` →
+   *   `tenant_activity`・`tenant_subject_activity`）で削除する。**1回の呼び出しで
+   *   全部消し切れるとは限らない**——`result.reachedLimit === true` なら、呼び出し側は
+   *   同じ `opts`（`limit` はそのまま）で呼び直すこと。**この口は何度呼んでも安全**
+   *   （既に空になった表は0件を返すだけで、エラーにはならない）。
+   * - 🔴 **同じテナント内の自己参照（`memories.superseded_by_id`/`contested_with_id`）は、
+   *   `memories` を削除する前に、このテナントの行**全体**について `NULL` へ書き換えてから
+   *   削除する。** `limit` で区切ったバッチをまたいで自己参照が残っていると
+   *   （例: バッチ1で削除する行を、まだ削除していないバッチ2の行が `superseded_by_id` で
+   *   指している）、`memories(id)` への FK（`migrations/0001_init.sql` の
+   *   `superseded_by_id uuid NULL REFERENCES memories(id)`/`contested_with_id uuid NULL
+   *   REFERENCES memories(id)`。どちらも `ON DELETE` 指定が無く既定の `NO ACTION`）が
+   *   違反になる。`superseded_by_id`/`contested_with_id` には
+   *   `provenance_kind`/`source_observation_id` のような他の列を道連れにする `CHECK` 制約が
+   *   無い（`migrations/0001_init.sql` 確認済み——`CHECK` が掛かっているのは
+   *   `digest_source`・`provenance_kind`・`(provenance_kind, source_observation_id)`・
+   *   `status`・`embedding_status` の5本で、`superseded_by_id`/`contested_with_id` を
+   *   含む `CHECK` は無い）ため、`NULL` へ書き換えて構わない——このテナントを丸ごと
+   *   消す以上、「何に置き換わったか」「どれと矛盾していたか」という参照先の情報を
+   *   残す意味も無い。
+   * - 🔴 **他テナントの行がこのテナントの行を `superseded_by_id`/`contested_with_id` で
+   *   参照している場合、`{ kind: "blocked_by_foreign_reference"; count }` を返し、
+   *   このメソッドが行う削除は一切コミットしない**（他テナントの行は一度も書き換えない）。
+   *   `count` は参照している他テナントの行数。**この検査・削除は1つのトランザクションの
+   *   中で行う**——検査で見つからなければ、その同じトランザクションでそのまま削除を進める。
+   *   ⚠ **`eraseTenant`（独立関数）の呼び出し全体で見ると、この `blocked_by_foreign_reference`
+   *   が返るより前に処理された他の port（`vectorStore`/`outboxStore`）の削除は、
+   *   それぞれ別のトランザクションで既にコミット済みである**——4つの port は同じ DB でも
+   *   別々の呼び出し（分散トランザクションではない）なので、`memoryStore` だけを
+   *   ロールバックしても他 port の削除は戻らない。次に同じ `opts` で呼び直せば、
+   *   `vectorStore`/`outboxStore` は既に空なので0件で通過し、`memoryStore` だけが
+   *   （参照が解消されない限り）再び同じ結果を返す——副作用が二重に起きることはない。
+   * - `opts.dryRun === true` のときは、削除もこの自己参照の書き換えも一切行わず、
+   *   削除していたら消えていたであろう件数だけを返す（`purgeExpiredEventsByRetention`
+   *   の `dryRun` と同じ意味）。
+   * - 戻り値の `deleted` は、この呼び出しで実際に削除した行数の合計（対象8表すべての
+   *   合計。`dryRun` のときはプレビューの合計）。
+   *
+   * ⚠ **`recalls` の保持方針は、この ADR では決めていない**（[ADR 0290](../../../../docs/decisions/0290-activity-seq-read-path-documented-not-implemented.md)
+   * が「`recalls` の保持方針」を先の話として残したまま——この口は「テナントを丸ごと
+   * 消す」操作の一部として `recalls` も含めて消すが、それは「生きているテナントの
+   * `recalls` を今後どう保持するか」という未決の問いには答えていない）。
+   */
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
 }
+
+/**
+ * {@link MemoryStore.eraseTenant}・`VectorStore.eraseTenant`・`OutboxStore.eraseTenant`・
+ * `TenantSettingsStore.eraseTenant` が共通して受け取る引数
+ * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
+ *
+ * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` の `opts`
+ * （`confirmTenantId`・`limit`・`dryRun`）のうち、`confirmTenantId` は port には渡さない
+ * （その検査は独立関数の側で書き込み前に行う——`Ctx` の `tenantId` を信じてよいことが
+ * port 側の前提になる）。
+ */
+export interface EraseTenantStoreOptions {
+  /**
+   * 1回の呼び出しで削除する目安の上限。**必須・既定値なし**
+   * （`PurgeExpiredEventsOptions.limit` と同じ理由——取り消せない削除の上限を
+   * `packages/core` が勝手に決めない）。
+   */
+  limit: number;
+  /** `true` なら削除を一切行わず、削除していたら消えていたであろう件数だけを返す。省略時は `false`。 */
+  dryRun?: boolean;
+}
+
+/**
+ * `VectorStore.eraseTenant`・`OutboxStore.eraseTenant`・`TenantSettingsStore.eraseTenant`
+ * の戻り値（Issue #1207、ADR 0383）。`MemoryStore.eraseTenant` は
+ * {@link EraseTenantStoreResult}（`blocked_by_foreign_reference` を含む）を使う——
+ * 他の3 port には自己参照 FK も、他テナントの行から参照される構造も無いため、
+ * この結果だけで足りる。
+ */
+export interface EraseTenantResult {
+  /** この呼び出しで実際に削除した行数（`dryRun` のときはプレビューの件数）。 */
+  deleted: number;
+  /**
+   * `true` なら、この store にまだ削除しきれていない行が残っている可能性がある
+   * （`opts.limit` で打ち切った）ことを示す。呼び出し側は同じ `opts` で呼び直すこと。
+   * ⚠ **`deleted === opts.limit` ちょうどで削除しきれていた場合も `true` を返すことがある**
+   * （保守的な近似——「本当にまだ残っているか」を確認する追加のクエリを毎回発行しない
+   * 実装上の判断。詳細は `@mnemora/postgres` の実装 doc）。呼び直しても安全（その場合は
+   * 次の呼び出しが0件で返るだけ）。
+   */
+  reachedLimit: boolean;
+}
+
+/**
+ * {@link MemoryStore.eraseTenant} の戻り値（Issue #1207、ADR 0383）。
+ * `{ kind: "executed", ... }` は {@link EraseTenantResult} と同じ形に `kind` を足しただけ。
+ */
+export type EraseTenantStoreResult =
+  | { kind: "executed"; deleted: number; reachedLimit: boolean }
+  | {
+      kind: "blocked_by_foreign_reference";
+      /** 他テナントの行のうち、このテナントの行を `superseded_by_id`/`contested_with_id` で参照している件数。 */
+      count: number;
+    };
 
 /**
  * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md): taxonomy

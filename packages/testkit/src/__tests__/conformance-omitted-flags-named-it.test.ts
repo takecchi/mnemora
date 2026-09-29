@@ -74,6 +74,8 @@ describeMemoryStoreConformance({
   supportsResolveContestedPair: true,
   supportsRestoreSupersededBy: true,
   supportsPreviewRestoreSupersededBy: true,
+  // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
   // ⭐ 任意の7つ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
   // supportsFindContestedByClaimKey / supportsListActiveClaimPredicates /
   // supportsResolveOrphanedContested / supportsAbortIfForgotten）は意図的に渡さない。
@@ -111,6 +113,8 @@ describeTenantSettingsStoreConformance({
   createStore: () => tenantStore,
   setDefaultHalfLifeHours: (ctx, hours) => tenantStore.setDefaultHalfLifeHours(ctx, hours),
   supportsDecayClock: false,
+  // Issue #1207 / ADR 0383: MinimalTenantSettingsStore は eraseTenant を実装していない。
+  supportsEraseTenant: false,
   // ⭐ supportsTaxonomyMode は意図的に渡さない。
 });
 

@@ -3,6 +3,8 @@ import {
   OutboxLeaseConflictError,
   type ClaimOutboxJobsOptions,
   type Ctx,
+  type EraseTenantResult,
+  type EraseTenantStoreOptions,
   type OutboxJobRecord,
   type OutboxStore,
 } from "@mnemora/core";
@@ -217,5 +219,35 @@ export class PostgresOutboxStore implements OutboxStore {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, row.attempts);
     }
     // attempts は一致している——相手側の終端列に弾かれた（Issue #826）。無言の no-op。
+  }
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+   * `OutboxStore.eraseTenant?` の実装。`outbox` には他のテーブルからの FK が無く、
+   * `outbox` 自身も他テーブルを参照しないので、`blocked_by_foreign_reference` 相当の
+   * 検査は不要（`MemoryStore.eraseTenant` とは違う点）。`opts.limit` を目安に、完了・
+   * 失敗・未処理を問わず削除する。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    if (opts.dryRun === true) {
+      const result = await this.db.execute(sql`
+        SELECT count(*)::int AS count FROM (
+          SELECT 1 FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
+        ) s
+      `);
+      const deleted = (result.rows[0] as unknown as { count: number }).count;
+      return { deleted, reachedLimit: deleted === opts.limit };
+    }
+    const result = await this.db.execute(sql`
+      WITH victims AS (
+        SELECT id FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
+      )
+      DELETE FROM outbox o
+      USING victims v
+      WHERE o.tenant_id = ${ctx.tenantId} AND o.id = v.id
+      RETURNING o.id
+    `);
+    const deleted = result.rows.length;
+    return { deleted, reachedLimit: deleted === opts.limit };
   }
 }

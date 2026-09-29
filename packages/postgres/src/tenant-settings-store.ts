@@ -13,6 +13,8 @@ import {
 import type {
   Ctx,
   DecayClock,
+  EraseTenantResult,
+  EraseTenantStoreOptions,
   EventRetention,
   EventRetentionSetting,
   TaxonomyMode,
@@ -241,5 +243,23 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       ON CONFLICT (tenant_id) DO UPDATE
         SET taxonomy_mode = EXCLUDED.taxonomy_mode, updated_at = now()
     `);
+  }
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+   * `TenantSettingsStore.eraseTenant?` の実装。`tenant_settings` は `tenant_id` が
+   * PK なので高々1行——`reachedLimit` は常に `false`（interface doc 参照）。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    if (opts.dryRun === true) {
+      const result = await this.db.execute(sql`
+        SELECT 1 FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
+      `);
+      return { deleted: result.rows.length, reachedLimit: false };
+    }
+    const result = await this.db.execute(sql`
+      DELETE FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} RETURNING tenant_id
+    `);
+    return { deleted: result.rows.length, reachedLimit: false };
   }
 }
