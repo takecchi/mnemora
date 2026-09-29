@@ -206,6 +206,27 @@ async function seedRoundtripCorpus(
  * 同じ場所で数えられる）。**このファイルの中だけに閉じた仕組みであり、
  * パッケージの公開 API には出さない。**
  */
+/**
+ * pgvector 能力検査（`PgvectorVersionUnsupportedError`、Issue #1301 / ADR 0367）は
+ * `PostgresVectorStore` インスタンスごとに、`search()`/`searchMany()` を最初に呼んだときに
+ * だけ1往復を追加で発生させ、以降はキャッシュされて追加の往復を生まない
+ * （`vector-store.ts` の `PgvectorCapabilityGate` の doc 参照）。
+ *
+ * この歯（歯1・歯2・歯4・歯5）が固定するのは「候補件数・basis件数・anchorCount を
+ * 変えても往復数が増えない」という**比較**であって、初回呼び出しに乗る検査ぶんの
+ * +1往復そのものではない——測定を始める前に、`countClientQueries` の外側で1回だけ
+ * 空振りの `search()` を打ち、検査を済ませておく。
+ */
+async function warmUpPgvectorCapabilityCheck(
+  vectorStore: PostgresVectorStore,
+  ctx: Ctx,
+): Promise<void> {
+  await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
+    limit: 1,
+    filter: { tenantId: ctx.tenantId },
+  });
+}
+
 async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
   let count = 0;
   const originalQuery = Client.prototype.query;
@@ -235,6 +256,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
   it("歯1: 連想枠 off — limit=1 と limit=50 で往復数が等しい（returned は実際に増える）", async () => {
     const ctx: Ctx = { tenantId: `tenant-rtc-ann-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
     await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
 
     let resultSmall: Awaited<ReturnType<typeof runtime.recall>> | undefined;
@@ -268,6 +290,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
   it("歯2: 既定（連想枠 on、anchorCount は既定のまま）— limit=5/20/50 で往復数が等しい（returned は実際に増える）", async () => {
     const ctx: Ctx = { tenantId: `tenant-rtc-assoc-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
     const { satellite } = await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
 
     const roundtripsByLimit = new Map<number, number>();
@@ -371,6 +394,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
   it("歯4（Issue #883・ADR 0342）: RecalledMemory.basisLost の解決は、inferred が無ければ+0往復、在れば basis の件数に関わらず+1往復のまま増えない", async () => {
     const ctx: Ctx = { tenantId: `tenant-rtc-basislost-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
 
     // `memories_check`（0001_init.sql 68行）: inferred は source_observation_id が
     // 必須（observations への FK）。まず本物の Observation を1件作る。
@@ -457,6 +481,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     // を返す（`anchorCount` が `withinLimit` の長さを超えて切り詰められる心配が無い）。
     const ctx: Ctx = { tenantId: `tenant-rtc-anchorcount-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
     await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
 
     const roundtripsByAnchorCount = new Map<number, number>();

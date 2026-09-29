@@ -13,6 +13,7 @@ import {
   releaseAdvisoryLockOnClient,
 } from "./advisory-lock.js";
 import { describeMigrationFailure } from "./migration-failure-message.js";
+import { assertPgvectorCapabilityViaQuery } from "./pgvector-capability.js";
 import { resolveCurrentSchema } from "./resolve-current-schema.js";
 import {
   DEFAULT_EXTENSION_SCHEMA,
@@ -671,6 +672,14 @@ export async function runMigrations(
   let extensionCheck: RunMigrationsResult["extensionCheck"];
   if (extensionMode === "verify") {
     await verifyRequiredExtensions(pool, extensionSchema);
+    // Issue #1301 / ADR 0367: 拡張の存在（上の verifyRequiredExtensions）だけでなく、
+    // pgvector が ADR 0284 の `hnsw.iterative_scan = relaxed_order` を実際に解釈できるか
+    // （能力ベースの検査、`pgvector-capability.ts` の doc 参照）も、ロック取得・
+    // マイグレーション適用より前に確認する。`verify` モードは `CREATE EXTENSION` を
+    // 発行しないだけで、`SELECT`（この検査）は打てる——`pool` は上の
+    // `verifyRequiredExtensions` と同じ接続プールで、`vector` 拡張は既に存在が
+    // 確認済みなので、この時点でクエリを発行してよい。
+    await assertPgvectorCapabilityViaQuery(pool);
     extensionCheck = { verified: REQUIRED_EXTENSIONS };
   }
 
@@ -804,6 +813,27 @@ export async function runMigrations(
           await (fileFailed ? releasing.catch(() => {}) : releasing);
         }
       }
+    }
+    // Issue #1301 / ADR 0367: `extensionMode: "create"`（既定）では、ここに来るまでに
+    // `vector` 拡張は必ず作られている——`schema` 指定時は上の `CREATE EXTENSION` ループ、
+    // 未指定時は `migrations/0001_init.sql` 本文の `CREATE EXTENSION IF NOT EXISTS
+    // vector;`（既に適用済みならそもそも何もしないが、拡張自体は過去の呼び出しで
+    // 既に存在する）のどちらか。⟹ 拡張の存在確認を待たず、毎回この位置で無条件に
+    // 能力検査する——`extensionMode: "verify"`（上、ロック取得前）と違って、
+    // `"create"` はここでしか「拡張は必ずある」という前提を安全に置けない
+    // （新規インストールでは、拡張そのものが `migrations/0001_init.sql` の適用によって
+    // 初めて作られるため）。
+    //
+    // ⚠ **「マイグレーションを何も適用しないうちに投げる」を、`"create"` モードの
+    // 新規インストールでは満たせない**（`docs/decisions/0367-....md` 決定4の限界）。
+    // `schema` を指定した呼び出しでは `CREATE EXTENSION` ループの直後まで早められるが、
+    // このコードは呼び出しごとに毎回検査する単一の経路をあえて選んだ——
+    // 「毎回必ず検査する」（pgvector を後からダウングレードされても次の起動で拾える）を、
+    // 「初回インストール時だけ最速で落ちる」より優先した（ADR 0367 決定4）。
+    // 既に全マイグレーション適用済みの定常状態（最も多い呼び出し）では、
+    // この検査より前に何も新しく適用されない——空振りの往復が1つ増えるだけである。
+    if (extensionMode === "create") {
+      await assertPgvectorCapabilityViaQuery(lockClient);
     }
     return { applied, lock: { waitedMs }, extensionCheck };
   } catch (err) {
