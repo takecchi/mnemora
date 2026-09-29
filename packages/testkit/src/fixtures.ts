@@ -102,8 +102,8 @@
 //
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
 // 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4713年より前の日時（#1041）、
-// 索引の行の上限を超える識別子（#1074）、1MB を超える本文（tsvector の上限、#1063）、
-// JSON で往復しない値（#1076）。
+// 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
+// 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。
 
 export { InMemoryMemoryStore } from "./__fixtures__/in-memory-memory-store.js";
 export { InMemoryVectorStore } from "./__fixtures__/in-memory-vector-store.js";

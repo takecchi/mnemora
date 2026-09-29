@@ -142,7 +142,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル10・索引24・関数5になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル11・索引24・関数6になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -161,6 +161,9 @@ describe("deriveMigrationObjects", () => {
     // `idx_memories_claim_key`（索引+1）を足した。23→24 も同様に反映であり、回帰ではない。
     // ADR 0352 / Issue #338: migrations/0024_tenant_subject_activity.sql が
     // `tenant_subject_activity`（テーブル+1）を足した。10→11 も同様に反映であり、回帰ではない。
+    // ADR 0364 / Issue #1222: migrations/0025_lexical_tsvector_fallback.sql が
+    // `mnemora_lexical_tsvector`（関数+1）を足し、`idx_memories_lexical` を作り直した（索引は数が変わらない）。
+    // 関数 5→6 も同様に反映であり、回帰ではない。
     expect(result.tables).toHaveLength(11);
     expect(result.indexes).toHaveLength(24);
     expect(result.functions).toEqual([
@@ -169,6 +172,7 @@ describe("deriveMigrationObjects", () => {
       "mnemora_lexical_query_or",
       "mnemora_lexical_query_terms",
       "mnemora_lexical_query_tsqueries",
+      "mnemora_lexical_tsvector",
     ]);
   });
 });
