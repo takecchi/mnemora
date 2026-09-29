@@ -470,6 +470,14 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
             detail: { scored: 1, passedThreshold: 1, notComparable: 0, withinLimit: 1 },
           },
           { stage: "contradiction_resolution", executed: true, detail: { companionsAdded: 0 } },
+          // association: Issue #865（2026-09-29）。連想枠は既定 on（ADR 0337）——アンカーは
+          // 1件在るが、他に候補が無いので hits/selected は0件のまま `executed: true`
+          // （探して0件、`rescore` と同じ区別。上の usage.byTier.association のコメント参照）。
+          {
+            stage: "association",
+            executed: true,
+            detail: { anchors: 1, hits: 0, selected: 0 },
+          },
           {
             stage: "budget_truncation",
             executed: true,

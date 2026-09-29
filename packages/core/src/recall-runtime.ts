@@ -1511,6 +1511,12 @@ export async function runRecall(
   // 数えた）候補の id。下の排他性の後処理が、段2の札（`over_limit(stage:"rescore")`・
   // `below_threshold`・`score_not_comparable`）から差し引くのに使う。
   const associationAssemblyDroppedIds = new Set<MemoryId>();
+  // Issue #865（2026-09-29）: `explain.stages` の段3.5 の trace。`stages.push` は下、この
+  // `if (associationQuery !== undefined)` ブロックを抜けたところで1回だけ行う——off
+  // （`associationQuery === undefined`）のときは push 自体をしない（`candidate_generation` の
+  // チャンネルがそもそも要求されていないときに trace を積まないのと同じ形。docs/recall.md §2）。
+  let associationExecuted = false;
+  const associationDetail = { anchors: 0, hits: 0, selected: 0 };
   if (associationQuery !== undefined) {
     if (deps.vectorStore.getVectors === undefined) {
       // 北極星の問い2（無効にしても成立するか）を型で担保する任意メソッドが無い。
@@ -1532,9 +1538,14 @@ export async function runRecall(
       // 使うと「クエリに当たっていない候補から、さらにクエリに当たっていない候補を
       // 連想する」という不透明な連鎖になる。
       const anchors = withinLimit.slice(0, anchorCount);
+      associationDetail.anchors = anchors.length;
       if (anchors.length === 0) {
         omitted.push({ kind: "stage_skipped", stage: "association", reason: "no_anchor" });
       } else {
+        // `rescore` と同じ約束——「探して0件だった」場合も含め、この段が実際に検索まで
+        // 進んだこと自体を `true` として名乗る（docs/recall.md §2「`explain.stages` の
+        // 読み方」の rescore 行と同じ区別）。
+        associationExecuted = true;
         const anchorIds = anchors.map((a) => a.memory.id);
         const anchorVectorList = await getVectors(ctx, deps.embeddingProvider.space, anchorIds);
         // `VectorStore.getVectors` は「返す順序は memoryIds の順序と一致している必要はない」
@@ -1680,6 +1691,7 @@ export async function runRecall(
         // `NaN`（ゼロベクトルの cosine 距離。ADR 0040）だけを最後尾へ送る
         // （Issue #938）——有限値どうしの大小・同点時の安定性は変えない。
         associationHits.sort((a, b) => compareDescendingNaNLast(a.similarity, b.similarity));
+        associationDetail.hits = associationHits.length;
         // 席を埋める前に、まず過取得する——段1の kPrime と同じ理由・同じ係数
         // （`overFetchFactor`、既に上のスコープに在る）で、新しい係数は定義しない。
         // `Math.max` で下限を `maxCount` に留めるのは、`overFetchFactor < 1` を
@@ -1805,6 +1817,7 @@ export async function runRecall(
         // だけを最後尾へ送る（Issue #938）——有限値どうしの大小・同点時の安定性は変えない。
         rankedCandidates.sort((a, b) => compareDescendingNaNLast(a.rankKey, b.rankKey));
         const selectedCandidates = rankedCandidates.slice(0, associationQuery.maxCount);
+        associationDetail.selected = selectedCandidates.length;
         // 席に着けなかった分を over_limit として名乗る（Issue #375 / ADR 0188）。
         // 段2の `passed.slice(limit)`（上、`stage: "rescore"`）と同じ形——`associationHits`
         // は既に忘却/validAt ゲート・除外集合・minSimilarity を通過した「連想枠の候補集合」
@@ -1990,6 +2003,9 @@ export async function runRecall(
         }
       }
     }
+    // Issue #865（2026-09-29）: この段が `stages` に現れるのは、ここまで来た時点で
+    // `associationQuery !== undefined`（off ではない）ことが確定しているときだけ。
+    stages.push({ stage: "association", executed: associationExecuted, detail: associationDetail });
   }
 
   // -------------------------------------------------------------------

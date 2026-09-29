@@ -672,3 +672,110 @@ forgotten で取得できない場合、いまは `contestedAlone` 自体が単�
   ——本追記が揃えた「段3の `limit` と同じ扱い」という前提が変わる。
 
 ⚠ 2026-09-29 追記: `docs/roadmap.md` の §1.1 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。
+
+## 追記（2026-09-29、Issue #865 ——段3.5の実行を `explain.stages` に記録する）
+
+### 何が起きていたか
+
+段3.5（連想枠）は `usage.byTier.association`・`retrievedVia === "association"`・
+`omitted` の `stage: "association"`（`stage_skipped`/`over_limit`）という「代わりの印」を
+持っていたが、`explain.stages`（`RecallStageName`/`StageTrace`）にはこの段に当たる名前が
+無く、走ったかどうかが記録されなかった。`packages/core/src/__tests__/
+recall-explain-stages-omit-association.test.ts`（PR #1346）がこの「記録しない」を
+今の振る舞いとして縛っており、`RecallStageName` に値を足すかどうかは未決のまま
+`docs/recall.md` §1・§2 に残されていた。
+
+### 前提確認（実装前に実測したこと）
+
+Fake（`packages/core` の runtime-fakes）・本物の Postgres の両方で、連想枠を実行した
+run の `result.explain.stages` を実際に読み、`"association"` という `stage` が1件も
+現れないこと、かつ `omitted`/`usage.byTier`/`retrievedVia` には印が出ることを確認した
+（使い捨てスクリプト、コミットしていない）。他の段（`scope`・`candidate_generation`・
+`rescore`・`contradiction_resolution`・`budget_truncation`・`index_band`・`record`）の
+trace は、`docs/recall.md` §2「`explain.stages` の読み方」の表のとおりで、実装
+（`recall-runtime.ts`）と1バイトも食い違っていなかった——Issue の前提（段3.5だけが
+記録されていない）と現物は一致しており、実装に進んだ。
+
+### 採った案
+
+他の段と同じ形——`stages.push({ stage, executed, detail })`——で段3.5の実行を記録する。
+`executed`/`detail` の意味は、`candidate_generation`（`stage_skipped` と対になる `false`）と
+`rescore`（「探して0件」は `executed: true` のまま、`stage_skipped` を名乗らない）の
+両方から引いた:
+
+- **off（`query.association === null`）**: trace 自体を積まない。`candidate_generation` の
+  ANN/語彙チャンネルが、そもそも要求されていない（`wantsAnn`/`wantsLexical` が偽）ときに
+  trace を1件も積まないのと同じ形——「問われていないことは『無い』ではない」
+  （docs/recall.md §9.2 手順1）を trace の有無にもそのまま適用した。
+- **`vector_store_lacks_get_vectors`／`no_anchor`（アンカー0件）**: `executed: false` の
+  trace を積み、既存の `omitted.stage_skipped(association, ...)` と対にする——
+  `candidate_generation` の「経路が走らなかった」扱いと同じ。
+- **アンカーは在ったが検索の結果が0件（`hits`/`selected` が0）**: `executed: true` のまま
+  ——`rescore` が「採点する候補が0件」でも `executed: true` を保つのと同じ区別
+  （「探して0件」と「探さなかった」を混同しない、原則3の trace への適用）。
+
+`detail` は `{ anchors, hits, selected }` の3欄——`anchors` はアンカーに採った件数
+（`withinLimit.slice(0, anchorCount)` の長さ）、`hits` は除外集合・`minSimilarity` を
+通過した連想候補の件数（過取得の窓 `rankFetchCount` を掛ける前）、`selected` は実際に
+席（`maxCount`）に着いた件数（`selectedCandidates.length`）。3つとも `recall-runtime.ts`
+が既に計算していた値の書き写しであり、新しい計算は増えていない。
+
+### `RecallStageName` への追加は破壊的変更に数えない
+
+union（`RecallStageName`）への値の追加は、既存の値・欄の意味を変えず、既存の
+呼び出し側コードを壊さないため、破壊的変更には数えない——オーナー回答
+（ask_human d9364c91）による。`StageTraceSchema`（zod）の `stage` enum にも同じ値を
+足し、型とスキーマの一致（`schema-type-equals-parity.test.ts`）を保った。
+
+### 採らなかった案
+
+- **`association` の trace を、off のときも `executed: false` で積む**——
+  `candidate_generation` がチャンネルを要求されていないときに trace を積まない先例と
+  食い違う。「問われていないことは『無い』ではない」という recall 全体の原則を、
+  trace の有無についてだけ緩めることになり、採らなかった。
+- **`detail` に `overLimit`（`omitted.over_limit(stage:"association")` の件数）や
+  `unitsAssembled` まで足す**——`rescore` の `detail` が `omitted` と独立に自己完結して
+  いる形に揃えるなら足す余地はあるが、`over_limit`/`unit_assembly_dropped` は既に
+  `omitted` 側にあり、trace 側に複製すると二重の出所になる（`docs/recall.md` §2
+  「段2で閾値や `limit` の外に出た候補が…」の排他性の議論と同種）。今回は最小の
+  3欄に留め、必要になったら足す。
+
+### 歯・変異試験
+
+`packages/core/src/__tests__/recall-explain-stages-association.test.ts`
+（旧 `recall-explain-stages-omit-association.test.ts` を新しい振る舞いに合わせて
+書き換え・改名）が、off で trace が無いこと・`no_anchor`／`vector_store_lacks_get_vectors`
+で `executed: false` になること・実行できたときの `detail` の値を縛る。
+`packages/postgres/src/__tests__/recall-explain-accounting.postgres.test.ts` にも
+Postgres 実測（`anchors: 2, hits: 1, selected: 1` 等）を足した。
+
+変異試験（Fake、`recall-runtime.ts` を一時的に書き換えて実測。`cp` で退避・復元、
+`git checkout` は使っていない）:
+
+1. **記録を消す変異**（`stages.push({ stage: "association", ... })` の呼び出しをコメント
+   アウト）——`recall-explain-stages-association.test.ts` の「executed:true」を確認する
+   歯が赤くなることを確認し、復元して緑に戻ることを確認した。
+2. **別の段の名前で記録する変異**（`stage: "association"` を `stage: "rescore"` に
+   書き換える）——同ファイルの `findStage(result, "association")` を使う歯が
+   （`undefined` になり）赤くなることを確認し、復元して緑に戻ることを確認した。
+3. **やりすぎの変異**（off／候補0件（no_anchor）／アンカーを持つ adapter が無い
+   （vector_store_lacks_get_vectors）のいずれでも、無条件に trace を push するよう
+   書き換える——`if (associationQuery !== undefined)` の外に `stages.push` を出し、
+   off のときにも `executed: false` の trace を積むようにした）——「off のときは trace が
+   無い」を確認する歯が赤くなることを確認し、復元して緑に戻ることを確認した。
+
+### 確かめていないこと
+
+- **`detail` に `overLimit`/`unitsAssembled` まで足すかどうかの、他ケースへの一般化**
+  ——上の「採らなかった案」で最小に留めた判断が、後で `rescore` 側の `detail` の
+  設計と揃えるべきという声が出た場合にどちらへ倒すかは決めていない。
+- **`examples/chat` の `compare`／`retrieval-quality` への影響**——`explain.stages` に
+  1件 trace が増えるだけで、返す `memories`/`omitted`/`usage` の値そのものは変えて
+  いないため影響が無いと判断しているが、実測はしていない。
+
+### これが覆るとしたら
+
+- **`detail` の3欄（`anchors`/`hits`/`selected`）だけでは「なぜ0件だったか」を
+  説明できない、という実例が出たとき**——`rescore` の `detail`（`scored`/
+  `passedThreshold`/`notComparable`/`withinLimit`）ほど詳細な内訳を持たせる判断に
+  倒れうる。

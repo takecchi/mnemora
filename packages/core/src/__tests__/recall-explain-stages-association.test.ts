@@ -5,15 +5,20 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { Memory, NewMemory } from "../memory.js";
 import type { RecallStageName } from "../recall.js";
 import { createRuntime } from "../runtime.js";
-import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createFakeRuntimeStores, withoutGetVectors } from "./runtime-fakes.js";
 
 /**
- * 段3.5（連想枠）は `explain.stages` に記録されない（今の振る舞い。`RecallStageName` の TSDoc と
- * `docs/recall.md` §1・§2、Issue #865）。連想枠を走らせたかは `usage.byTier.association` の有無に、返した記憶は
- * `retrievedVia === "association"`（と `associationOf`）に、飛ばしたときは `omitted` の `stage: "association"` に出る。
+ * 段3.5（連想枠）は `explain.stages` に記録される（Issue #865、2026-09-29。`RecallStageName`
+ * の TSDoc・`docs/recall.md` §1・§2・§9）。
  *
- * ⚠ 望ましい姿の主張ではない（`RecallStageName` に値を足すかは決まっていない）。足すときは、この歯ごと書き換えること。
- * 記録の組み立ては `recall-association.test.ts` と同じ（写した）。
+ * この歯は、以前（PR #1346）「記録しない」ことを縛っていた
+ * `recall-explain-stages-omit-association.test.ts` を、新しい振る舞いに合わせて置き換えたもの
+ * （ファイル名も改名した）。旧テストが確認していた「代わりの印」（`usage.byTier.association`・
+ * `retrievedVia`/`associationOf`・`omitted` の `stage: "association"`）は今も変わらず出る——
+ * ここが確認するのは、それに加えて `explain.stages` にも `stage: "association"` の trace が
+ * 積まれるようになったことである。
+ *
+ * `RecallStageName` への値の追加は破壊的変更に数えない（オーナー回答 ask_human d9364c91）。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -94,6 +99,7 @@ const STAGE_NAMES = [
   "candidate_generation",
   "rescore",
   "contradiction_resolution",
+  "association",
   "budget_truncation",
   "index_band",
   "record",
@@ -103,8 +109,15 @@ function stageNames(result: { explain: { stages: { stage: string }[] } }): strin
   return result.explain.stages.map((s) => s.stage);
 }
 
-describe("段3.5（連想枠）は explain.stages に記録されない（Issue #865、今の振る舞い）", () => {
-  it("連想で候補を拾った run でも stages に連想の段は無く、代わりの印（byTier・retrievedVia・associationOf）に出る", async () => {
+function findStage<T extends { explain: { stages: { stage: string }[] } }>(
+  result: T,
+  stage: string,
+) {
+  return result.explain.stages.find((s) => s.stage === stage);
+}
+
+describe("段3.5（連想枠）は explain.stages に記録される（Issue #865）", () => {
+  it("連想で候補を拾った run は、stages に association(executed:true) が出て、代わりの印も変わらず出る", async () => {
     const { runtime, stores } = buildRuntime();
     const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
       digest: "アンカー本文",
@@ -123,10 +136,20 @@ describe("段3.5（連想枠）は explain.stages に記録されない（Issue 
 
     const names = stageNames(result);
     expect(names.every((name) => (STAGE_NAMES as readonly string[]).includes(name))).toBe(true);
-    expect(names.some((name) => name.includes("association"))).toBe(false);
+
+    const assocStage = findStage(result, "association");
+    expect(assocStage).toEqual({
+      stage: "association",
+      executed: true,
+      detail: { anchors: 1, hits: 1, selected: 1 },
+    });
+    // 段の並びは段3(contradiction_resolution)の直後・段4(budget_truncation)の直前
+    // (docs/recall.md §2・§9、番号を3.5にしてあるのはこの位置を表すため)。
+    expect(names.indexOf("association")).toBe(names.indexOf("contradiction_resolution") + 1);
+    expect(names.indexOf("association")).toBe(names.indexOf("budget_truncation") - 1);
   });
 
-  it("stages の並びは、連想枠を走らせた run と明示的に off（association: null）にした run で同じ", async () => {
+  it("association: null（明示 off）にした run は、stages に association の trace が一切出ない（他の段の並びは同じ）", async () => {
     const on = buildRuntime();
     await createEmbeddedMemory(on.stores, [0.70710678, 0.70710678], { digest: "アンカー本文" });
     await createEmbeddedMemory(on.stores, [0, 1], { digest: "連想本文" });
@@ -142,10 +165,16 @@ describe("段3.5（連想枠）は explain.stages に記録されない（Issue 
 
     expect(withAssociation.memories.some((m) => m.retrievedVia === "association")).toBe(true);
     expect("association" in withoutAssociation.usage.byTier).toBe(false);
-    expect(stageNames(withAssociation)).toEqual(stageNames(withoutAssociation));
+
+    expect(stageNames(withoutAssociation).includes("association")).toBe(false);
+    // off の stages は、on の stages から association の trace を除いたものと一致する
+    // ——`null` で明示的に off にしたときは、他のどの段の並びも変わらない。
+    expect(stageNames(withoutAssociation)).toEqual(
+      stageNames(withAssociation).filter((name) => name !== "association"),
+    );
   });
 
-  it('連想枠を飛ばした run（アンカーが0件）は、stages ではなく omitted の stage: "association" に出る', async () => {
+  it("連想枠を飛ばした run（アンカーが0件）は、stages に association(executed:false) が出て omitted の stage_skipped(no_anchor) と対になる", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [0, 1]);
 
@@ -157,6 +186,28 @@ describe("段3.5（連想枠）は explain.stages に記録されない（Issue 
       reason: "no_anchor",
     });
     expect(result.usage.byTier.association).toBe(0);
-    expect(stageNames(result).some((name) => name.includes("association"))).toBe(false);
+    expect(findStage(result, "association")).toEqual({
+      stage: "association",
+      executed: false,
+      detail: { anchors: 0, hits: 0, selected: 0 },
+    });
+  });
+
+  it("VectorStore.getVectors を持たない adapter では、stages に association(executed:false) が出て omitted の stage_skipped(vector_store_lacks_get_vectors) と対になる", async () => {
+    const { runtime, stores } = buildRuntime((s) => withoutGetVectors(s.vectorStore));
+    await createEmbeddedMemory(stores, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+
+    expect(result.omitted).toContainEqual({
+      kind: "stage_skipped",
+      stage: "association",
+      reason: "vector_store_lacks_get_vectors",
+    });
+    expect(findStage(result, "association")).toEqual({
+      stage: "association",
+      executed: false,
+      detail: { anchors: 0, hits: 0, selected: 0 },
+    });
   });
 });
