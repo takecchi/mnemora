@@ -107,22 +107,31 @@ README.md（`packages/core`・`packages/postgres` ほかの「前提」）は
 - **`pnpm add --offline` が registry メタデータ不足で落ちること**は上の「前提を自分の手で
   確認した」に実測を書いた。
 
-### 陽性対照（変異試験。別 worktree で実施、元のファイルへは1バイトも commit していない）
+### 陽性対照（変異試験。別 worktree `/tmp/mgr-edb8390a-mut` で実施、元のファイルへは1バイトも commit していない）
 
-【実測、2026-09-30、`git worktree add` で作った別ツリー】変異前に緑であることを確認した上で、
-`packages/core/package.json` の `exports` の `"."` から `require`/`default` 条件を落とし、
-`import` 条件だけにする変異を入れた（`node_modules` の再構築は不要——`check-cjs-require-smoke.mjs`
-は毎回 `pnpm pack` で tarball を作り直すため、ソースの `package.json` の変更がそのまま tarball に
-反映される）。結果:
+【実測、2026-09-30、`git worktree add -b ci/cjs-require-esm-smoke-default-ci-mut` で作った別ツリー】
+変異前に `node scripts/check-cjs-require-smoke.mjs` が緑（exit 0）であることを確認した上で、
+`packages/core/package.json` の `exports` の `"."` から `default` 条件を落とし、`import` 条件だけに
+した（`node_modules` の再構築は不要——`check-cjs-require-smoke.mjs` は毎回 `pnpm pack` で tarball を
+作り直すため、ソースの `package.json` の変更がそのまま tarball に反映される）。結果（標準出力・
+標準エラーの逐語、exit 1）:
 
 ```
-✖ CommonJS で全入口を require（require(esm)、README の約束そのもの）（... 秒）
-@mnemora/core: ERR_REQUIRE_ESM: require() of ES Module .../node_modules/@mnemora/core/dist/index.js
-from .../smoke.cjs not supported. Instead change the require ... to a dynamic import() ...
+✔ pack（scripts/pack-publish-targets.mjs）（35.3 秒）
+✔ tarball を consumer の node_modules へ自分で展開する（npm install を使わない）（0.1 秒）
+✔ 外部の実行時依存を、この作業ツリーが既に解決済みの実体へ symlink する（registry に出ない）（0.0 秒）
+✖ CommonJS で全入口を require（require(esm)、README の約束そのもの）（1.3 秒）
+@mnemora/core: ERR_PACKAGE_PATH_NOT_EXPORTED: No "exports" main defined in
+/tmp/mnemora-cjs-smoke-consumer-ITMexj/node_modules/@mnemora/core/package.json
+
+✖ CommonJS require(esm) の確認に失敗した（入口 8 個、合計 36.7 秒）。
 ```
 
-（逐語は本 PR の説明に貼る。要点: `require` が exports の条件不一致で失敗し、このスクリプトが
-非0で終了することを確認した。）変異は commit していない。worktree は使用後に削除した。
+要点: `require`/`default` 条件が無いと、`require()` は `"."` の入口に一致する条件を見つけられず
+`ERR_PACKAGE_PATH_NOT_EXPORTED` で失敗する——これがこの検査の見ている約束そのものである。
+その後 `cp` で元の `package.json` へ戻し、同じコマンドが再び緑（exit 0）に戻ることも確認した
+（`git status --porcelain` が空であることも確認済み）。変異は commit していない。worktree・
+一時ブランチは使用後に削除した（`git worktree remove` / `git branch -D`）。
 
 ## 採らなかった案
 
