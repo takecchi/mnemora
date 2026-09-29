@@ -76,6 +76,10 @@ describeMemoryStoreConformance({
   },
   // Issue #134 / ADR 0100: PostgresMemoryStore は supersedeWithNewMemories を実装している。
   supportsSupersedeWithNewMemories: true,
+  // Issue #1226 / ADR 0375 決定7: PostgresMemoryStore は createMemoryWithOutbox/
+  // supersedeWithNewMemories の opts.abortIfForgotten（SELECT … FOR UPDATE による見直し）を
+  // 実装している。
+  supportsAbortIfForgotten: true,
   // Issue #210 / ADR 0115: PostgresMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
   listPurgedEvents: async (ctx: Ctx) => {
@@ -102,6 +106,8 @@ describeMemoryStoreConformance({
   supportsLabels: true,
   // Issue #372: PostgresMemoryStore は findActiveByClaimKey を実装している。
   supportsFindActiveByClaimKey: true,
+  // Issue #933 案2 / ADR 0378: PostgresMemoryStore は findContestedByClaimKey を実装している。
+  supportsFindContestedByClaimKey: true,
   // Issue #691続き / ADR 0329: PostgresMemoryStore は listActiveClaimPredicates を
   // 実装している。
   supportsListActiveClaimPredicates: true,

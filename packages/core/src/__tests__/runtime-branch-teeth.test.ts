@@ -203,7 +203,45 @@ describe("consolidate：統合元の書き込みが CAS で弾かれたら statu
   // `ConsolidateSourceOutcome` の doc の `"status_changed_concurrently"`（ADR 0030 の安全弁3）と
   // docs/memory-model.md の lifecycle 表・行12の追記（CAS の破れで superseded にならなかった
   // id もある）。`supersedeWithNewMemories` を持たない adapter の2段の経路で起きる。
-  it("LLM を呼んでいる間に統合元の1件が forget されると、その1件だけ status_changed_concurrently になる", async () => {
+  //
+  // ⚠ 2026-09-30 訂正（Issue #1226）: 元は濃厚状態の変化に `"forgotten"` を使っていたが、
+  // `forgotten` は Issue #1226 の修正で書き込みそのものを打ち切る特別扱いになった
+  // （下の別の describe 参照）——この歯が確かめたいのは「`forgotten`/`purged` 以外の
+  // 理由で CAS が破れたときは今日どおり部分成功する」ことなので、`"archived"` に差し替えた。
+  it("LLM を呼んでいる間に統合元の1件が archived されると、その1件だけ status_changed_concurrently になる", async () => {
+    const stores = createFakeRuntimeStores();
+    (
+      stores.memoryStore as { supersedeWithNewMemories?: MemoryStore["supersedeWithNewMemories"] }
+    ).supersedeWithNewMemories = undefined;
+    const late: { bId?: string } = {};
+    const { runtime } = buildRuntime({
+      stores,
+      llm: llmReturning({ content: "統合後" }, async () => {
+        await stores.memoryStore.updateStatus(ctx, late.bId!, "archived");
+      }),
+    });
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const c = await stores.memoryStore.createMemory(ctx, newMemory({ content: "C" }));
+    late.bId = b.id;
+
+    const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id, c.id] } });
+
+    expect(result.outcome).toBe("consolidated");
+    expect(result.sources).toEqual([
+      { memoryId: a.id, kind: "superseded", previousStatus: "active" },
+      { memoryId: b.id, kind: "status_changed_concurrently", observedStatus: "archived" },
+      { memoryId: c.id, kind: "superseded", previousStatus: "active" },
+    ]);
+  });
+});
+
+describe("consolidate：統合元の1件が forgotten になったら書き込みを一切打ち切る（Issue #1226）", () => {
+  // `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` の
+  // Postgres/testkit 版に対する、core の Fake（`supersedeWithNewMemories` を持たない
+  // `store_unsupported` 経路）での同じ確認。LLM 呼び出しの最中に forget が完了する
+  // （`await` を挟むので、runtime の「LLM が返った直後の読み直し」より前に commit される）。
+  it("LLM を呼んでいる間に統合元の1件が forget されると、統合先を作らず outcome: aborted_source_forgotten を返す", async () => {
     const stores = createFakeRuntimeStores();
     (
       stores.memoryStore as { supersedeWithNewMemories?: MemoryStore["supersedeWithNewMemories"] }
@@ -222,11 +260,15 @@ describe("consolidate：統合元の書き込みが CAS で弾かれたら statu
 
     const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id, c.id] } });
 
-    expect(result.outcome).toBe("consolidated");
+    expect(result.outcome).toBe("aborted_source_forgotten");
+    expect(result.consolidatedMemoryId).toBeNull();
     expect(result.sources).toEqual([
-      { memoryId: a.id, kind: "superseded", previousStatus: "active" },
-      { memoryId: b.id, kind: "status_changed_concurrently", observedStatus: "forgotten" },
-      { memoryId: c.id, kind: "superseded", previousStatus: "active" },
+      { memoryId: a.id, kind: "not_attempted" },
+      { memoryId: b.id, kind: "forgotten_before_write" },
+      { memoryId: c.id, kind: "not_attempted" },
     ]);
+    // A・C は superseded へ動いていない——書き込みが一切起きていない証拠。
+    expect((await stores.memoryStore.get(ctx, a.id))?.status).toBe("active");
+    expect((await stores.memoryStore.get(ctx, c.id))?.status).toBe("active");
   });
 });

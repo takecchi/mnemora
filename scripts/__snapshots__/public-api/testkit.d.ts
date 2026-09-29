@@ -256,6 +256,14 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         validFrom: Date | null;
         validUntil: Date | null;
     }): Promise<Memory[]>;
+    findContestedByClaimKey(ctx: Ctx, query: {
+        subjectId: string | null;
+        claimKey: ClaimKey;
+        excludeMemoryId: MemoryId;
+        contentHash: string;
+        validFrom: Date | null;
+        validUntil: Date | null;
+    }): Promise<Memory[]>;
     listActiveClaimPredicates(ctx: Ctx, query: {
         subjectId: string | null;
         limit: number;
@@ -510,6 +518,7 @@ export interface MemoryStoreConformanceOptions {
     listEventsForMemory: (ctx: Ctx, memoryId: MemoryId) => Promise<MemoryEvent[]> | MemoryEvent[];
     claimEmbedJobs: (ctx: Ctx, now: Date) => Promise<OutboxJobRecord[]> | OutboxJobRecord[];
     supportsSupersedeWithNewMemories: boolean;
+    supportsAbortIfForgotten?: boolean;
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
     supportsArchiveDecayed: boolean;
@@ -521,6 +530,7 @@ export interface MemoryStoreConformanceOptions {
     supportsOnlyMemoryIdsFilter?: boolean;
     supportsLabels?: boolean;
     supportsFindActiveByClaimKey?: boolean;
+    supportsFindContestedByClaimKey?: boolean;
     supportsListActiveClaimPredicates?: boolean;
     supportsResolveOrphanedContested?: boolean;
 }

@@ -286,3 +286,141 @@
     実測は10万行級に限る。
   - 本番相当のネットワーク越しの Postgres（自分専用インスタンス、ローカル
     ソケット接続での実測である）。
+
+---
+
+## 追記（2026-09-30）: #1226（consolidate/reflect のレース）を PR2 で実装した
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜8・検討した代替案・引き受けた負債・確かめたこと・確かめていないこと）は
+書き換えていない。**当時の記録として残す。決定7は「実装・実測は本 PR に含めない」と
+明記していた——その実装・実測をこの追記が記録する。
+
+**実装した方向**: 決定7が既に記録したとおり——`consolidate`/`reflect` は、LLM 呼び出しが
+返った直後・書き込みの直前に材料（`eligible`）を読み直し、1件でも `forgotten`
+（`forget()` のみ・`purge()` 済みのどちらも含む。`purge()` は `forgotten` でない
+Memory を拒むため、両者は同じ条件で判定できる）なら、**統合先・内省の Memory を一切
+作らずに打ち切る**（新しい `outcome: 'aborted_source_forgotten'`。`ConsolidateSourceOutcome`/
+`ReflectBasisOutcome` に新しい `kind: 'forgotten_before_write'` を足した）。
+
+**口の設計**: `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts` に
+`abortIfForgotten?: ReadonlyArray<MemoryId>` を新設した（両方とも既存の任意/必須メソッドへの
+新しいパラメータであり、型としては非破壊——union に値を足す変更・opts への省略可能な
+フィールド追加は「数え方の規律への追記（2026-09-28）」で非破壊と決まっている）。
+
+- **`@mnemora/postgres`**: `opts.abortIfForgotten` を渡されると、`news`/`supersede`
+  どちらの書き込みより前に、対象行を `SELECT … FOR UPDATE` で読み直す
+  （`assertNotForgottenForUpdate`、`memory-store.ts`）。1件でも `forgotten` なら
+  `SourceMemoryForgottenError` を投げ、トランザクション全体が rollback される
+  （`news` も `supersede` も一切コミットされない）——**decision 2 が要求した
+  「同一トランザクション内の `SELECT … FOR UPDATE`」「1件でも forgotten/purged なら
+  全体を書かない（all-or-nothing）」をそのまま実装した。**
+- **既存の「部分成功を許す」設計との関係**: `supersedeWithNewMemories` の `conflicted`
+  （CAS に弾かれた対象だけ飛ばして他は commit する）は変えていない——`forgotten` 以外の
+  理由（例: 別の呼び出しが先に `superseded`/`contested` へ動かした）で CAS が破れた場合は、
+  今どおり `conflicted` に積まれ、統合先は書かれる。`abortIfForgotten` の見直しは
+  `conflicted` の判定より**前**（トランザクションの先頭）に行われ、`forgotten` を見つけたら
+  `news` の INSERT すら実行しない——「部分成功」の対象外という新しい特別扱いを、
+  `forgotten`/`purged` という1つの理由だけに絞って足した形である。
+- **`@mnemora/testkit`/`@mnemora/core` の Fake**: `opts.abortIfForgotten` を実装しない
+  （渡しても無視される）。これらの adapter では、runtime 自身が LLM 呼び出しの直後に行う
+  「書く直前の読み直し」（`getMany`、`abortIfForgotten` とは別の、単なる再読）だけが保護になり、
+  **その読み直しと書き込みの間に小さな窓が残る**——decision 3 が「それ以外の経路は書く直前に
+  読み直すだけで窓が残る」と書いたとおりである。
+
+**陽性対照（decision の「実測は PR2 で行う」を満たす実測。2026-09-30 に consolidate・
+reflect 両方で実測——当初は consolidate だけだったが、CI の型検査が壊れた棚卸しの過程で
+reflect 側の陽性対照も同じ作法で足した）**: `packages/postgres/src/__tests__/consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`。runtime の「書く直前の読み直し」が終わった直後・書き込みメソッド（consolidate は `supersedeWithNewMemories`、reflect は `createMemoryWithOutbox`）の呼び出しそのものが実行される直前で障壁を置き（`purge-during-embed-job.postgres.test.ts` ＝ Issue #1035 と同じ「障壁で止めて、その間に割り込ませる」作法）、止めている間に forget → purge を完了させてから障壁を外す。
+
+| 対象 | 条件 | 結果 |
+|---|---|---|
+| `consolidate`（`supersedeWithNewMemories` の `SELECT … FOR UPDATE`） | 新実装（見直しあり） | **10/10 緑**（`outcome: 'aborted_source_forgotten'`、統合先は作られない） |
+| `consolidate`（同上） | `assertNotForgottenForUpdate` の呼び出しを1行コメントアウトして外した変異 | **10/10 赤**（`outcome: 'consolidated'`——見直しが無いと、runtime の書く直前の読み直しだけでは閉じない窓から、消した内容が統合先に残ることを再現） |
+| `reflect`（`createMemoryWithOutbox` の `SELECT … FOR UPDATE`） | 新実装（見直しあり） | **10/10 緑**（`outcome: 'aborted_source_forgotten'`、内省の Memory は作られない） |
+| `reflect`（同上） | `createMemoryWithOutbox` 側の `assertNotForgottenForUpdate` 呼び出しを1行コメントアウトして外した変異 | **10/10 赤**（`outcome: 'reflected'`——見直しが無いと、消した内容が内省の Memory に残ることを再現。この変異では `consolidate` 側の10本は影響を受けず green のまま——2つの書き込みメソッドの見直しが互いに独立していることも確認した） |
+
+変異試験は、それぞれ別の（`origin/main` から切った）使い捨て worktree に、本 PR の新実装
+一式を `cp` で持ち込んで green を確認した後、対象のメソッド（`supersedeWithNewMemories`/
+`createMemoryWithOutbox`）内の `assertNotForgottenForUpdate` の呼び出し1行だけを
+コメントアウトして赤を確認した（`cp` で復元すれば green に戻る。`diff` で元ファイルと
+一致することは確認していない——1行のコメントアウトなので目視で確認した）。
+
+**残る窓（decision 3 が「実測は PR2 で行う」とした部分）**: `@mnemora/testkit`/`@mnemora/core`
+の Fake（`opts.abortIfForgotten` を実装しない adapter）では、runtime の「書く直前の
+読み直し」と実際の書き込み呼び出しの間に、別々の非同期呼び出しであるがゆえの窓が残る
+——**この窓の大きさは実測していない**（JS の単一スレッド実行モデル上、この窓を突く
+には2つの `await` の継続の間に別のマイクロタスクが割り込む必要があり、`consolidate`/
+`reflect` の呼び出し1回の中でその割り込みを意図的に起こすテストは、この PR には
+含めていない）。`@mnemora/postgres` については、上の陽性対照が示すとおり、この窓は
+`SELECT … FOR UPDATE` により実質ゼロである。
+
+**破壊的変更として数えたもの**: `packages/testkit` の `MemoryStoreConformanceOptions` に
+任意フラグ `supportsAbortIfForgotten?: boolean` を足し、`true` を宣言した adapter に対して
+`opts.abortIfForgotten` の契約の歯（forgotten な id を含めると
+`SourceMemoryForgottenError` を投げ何も書かない、forgotten でなければ今日どおり書く）を
+実行するようにした——「数え方の規律への追記（2026-09-28）」規律2の「conformance
+スイートの判定を厳しくする変更は…数える」に当たる。`docs/migration-v1.md` 項目26に
+登録した。`opts.abortIfForgotten` 自体（新しい省略可能フィールド）・新しい outcome
+（`aborted_source_forgotten`）・新しい `kind`（`forgotten_before_write`）・新しい
+`SourceMemoryForgottenError` は、いずれも非破壊（追加のみ）——この判定自体は変えていない。
+
+**⚠ 2026-09-30 追記2（同日）: union に値を足す変更が「型検査で気づかれる」実例が
+本 PR 自身で起きた。** `examples/chat/src/consolidation-cost.ts` は
+`outcomes[result.outcome] += 1` という形で `ConsolidateOutcome` を index に使っており
+（`ConsolidationOutcomeCountsJson` という、`ConsolidateOutcome` の全値と1対1の欄を
+持つ型を経由）、`"aborted_source_forgotten"` を足したことで CI の typecheck が
+`TS7053`（index の型に無い値がある）で落ちた。**「union に値を足す変更は破壊的と
+数えない」という規律（`docs/migration-v1.md` の数え方の規律）はここでは変えていない**
+——数え方の規律は「破壊的変更として計上するかどうか」の話であり、「型検査に一切
+影響しないか」とは別である。**網羅的な `Record`/`switch` で `ConsolidateOutcome`/
+`ReflectOutcome`/`ConsolidateSourceOutcome`/`ReflectBasisOutcome` を扱っている
+利用者は、この手の追加でも型検査が落ちうる**——`docs/migration-v1.md` 項目26と
+CHANGELOG の同項目に、この実例を影響の一言として書いた（計上の判定は変えていない）。
+
+**確かめていないこと（この追記の範囲）**:
+
+- Fake の「書く直前の読み直し」だけで保護される場合の、窓の大きさの実測。
+- `reextract`（`supersedeWithNewMemories` の別の呼び出し元）には `abortIfForgotten` を
+  渡していない——reextract が作る新しい Memory は、供える記憶の本文からではなく
+  Observation を抽出した結果であり、供える記憶が forgotten になっても本文が漏れる
+  という Issue #1226 と同種の問題を起こさないため、この PR の範囲外とした（意図的な
+  除外であり、見落としではない）。
+
+**⚠ 2026-09-30 追記3（同日。この除外は受け入れられた。上の箇条書きは書き換えず、
+実測結果をここに足す）**: 除外の理由を一行で言うと——**reextract は元の Observation
+から抽出し直す操作で、forget された記憶の本文を材料にしないため**（`extractCandidates`
+に渡すのは `observation` であり、既存 Memory の `content` を読んで渡す経路は無い）。
+
+**実測（使い捨てのテスト、Fake・Postgres の両方。commit していない）**: `forget`（と
+`forget` → `purge`）した記憶を持つ Observation を、**同じ `extractorVersion`** で
+`reextract()` すると、`packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`
+（Issue #1079・#1149、既存の歯、今回あわせて再実行して確認）が縛るとおり——`listWithdrawnBySourceObservation`
+が forgotten（purge 済みかどうかは問わない。`purge()` は `forgotten` でない記憶を拒むため、
+両者は同じ条件で判定できる）を検出し、**LLM を呼ばず・何も書かずに `extraction: "skipped"`
+を返す**。forgotten の場合と purged の場合で結果に違いは無い（どちらも `status:
+"forgotten"` として同じ分岐に入る）。ここでは新しい active な記憶は一切書かれない。
+
+**別の runtime インスタンス（`extractorVersion` を上げたもの）で reextract すると、
+挙動が変わる**——これは Issue #873（2026-09-26 追記、`Runtime.reextract` の doc コメント）
+が既に記録している「`extractorVersion` は runtime インスタンスに固定され、
+`listBySourceObservation`/`listWithdrawnBySourceObservation` は同じ `extractorVersion`
+の記憶しか見ない」という性質の、forgotten/purged な記憶についての具体化である。使い捨ての
+テストで実測した: `v1` の runtime で観測・抽出した記憶を forget→purge した後、**`v2`**
+の runtime インスタンス（同じ `MemoryStore`・同じテナント・同じ Observation）で
+`reextract()` を呼ぶと、`v1` の forgotten な記憶は `listWithdrawnBySourceObservation`
+（`v2` の `extractorVersion` でしか見ない）に一切現れず、**LLM が呼ばれ、新しい
+`active` な Memory が `extractorVersion: "v2"` として作られる**（`outcome` 相当:
+`extraction: "ok"`、`memoryIds` に1件）。その本文は、確かめたとおり Observation を
+渡した抽出結果であり（材料はやはり Observation の payload/text）、`v1` の forgotten な
+記憶の `content` 列を読む経路は無い——ただし、同じ Observation（同じ元の発話）を
+材料にしている以上、実運用の LLM では「forget したはずの事実と意味的に同じ内容」が
+新しい `active` な記憶として書かれうる。Fake・Postgres の両方で同じ結果だった。
+
+**気になる点として報告する（判断はしない）**: 上の「別の `extractorVersion` での
+reextract」は、forget（および purge）した事実が、抽出器の版を上げるという運用操作
+だけで、本文としては別経路（`observation` 経由）からではあるが、意味的には同じ内容が
+`active` として書き直されうる、という形に見える。これが Issue #1226 の範囲
+（LLM 呼び出しの最中の forget/purge の割り込み）とは別の軸の問題であること、
+`extractorVersion` を上げる操作自体が Issue #873 で既に別の性質として記録済み
+であることから、本 PR ではこれ以上追わない。

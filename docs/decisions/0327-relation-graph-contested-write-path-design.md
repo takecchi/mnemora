@@ -652,3 +652,32 @@ ADR 0324 決定9 と同じ形）——既存の3 variant には触れない。AD
 ---
 
 Refs #207
+
+---
+
+## 追記（2026-09-30）: §9-6「オーナー確認が要る点（3つ）」は決定済み（ADR 0378）
+
+**⚠ この追記はクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+本文（設計のみ、状態: 提案）は書き換えていない。
+
+[ADR 0378](./0378-claim-key-contested-detection-covers-contested-matches.md) が、§9-6
+「🔴 オーナーへの確認が要る点（3つ）」に決定を与えた（【伝】オーナー側のクローンの決定、
+マネージャー経由）:
+
+- **決定2**（本 ADR §3.2）: **(ii) 別口新設**を採る（ADR 0378 決定1）。
+- **決定4**（本 ADR §5）: **(a) pairwise 完全グラフ**を採る（ADR 0378 決定2）。
+- **§4-c**（多者間グループの解決の意味論）: `ContestedResolution`（2者版、`{ kind:
+  "supersede"; winnerId }` | `{ kind: "both_active" }`）の意味を、そのまま N者へ広げる
+  （ADR 0378 決定3）——勝者1件を選べば勝者 `active`・残り全員 `superseded`、
+  `both_active` ならグループ全員が `active` に戻る。新しい決着の種類は増やさない。
+
+あわせて、本文が明示的に「本 ADR では決めていない」としていた点にも決定が加わった
+（ADR 0378 決定4「穴A」・決定6「recall 段3の fanout 上限＝10」）。
+
+**この設計はまだ実装されていない。**ADR 0378・Issue #933 の PR1 が実装したのは、
+この全体設計とは別の、より狭い範囲（`MemoryStore.findContestedByClaimKey?`、
+`RelationStore` を前提にしない evidence の経路）だけである——詳細は ADR 0378
+「PR1: 実装した内容」「PR2 に残したこと」を見ること。§9 の1〜6（`RelationStore`
+実装・migration・`markContestedGroup`/`resolveContestedGroup`・recall 段3拡張・
+`contested_group` variant・bulk 相当のメソッド）は、この追記の時点でも未実装のまま
+残っている。

@@ -36,6 +36,7 @@ import {
   MemoryStatusConflictError,
   PURGE_TOMBSTONE_CONTENT,
   PURGE_TOMBSTONE_DIGEST,
+  SourceMemoryForgottenError,
 } from "./interfaces/memory-store.js";
 import type {
   ArchiveDecayedOptions,
@@ -422,26 +423,37 @@ export interface ObserveResult {
 /**
  * Issue #372（(B) 第2段）: `detectClaimKeyContested` が Memory 1件について返す結果。
  * `matchCount` は「同じ tenant・同じ subjectId・同じ claim key・有効期間が重なる・
- * `contentHash` が違う、他の `active` Memory」の件数（この Memory 自身を除く）。
+ * `contentHash` が違う」他の Memory の件数（この Memory 自身を除く）——
+ * `MemoryStore.findActiveByClaimKey?`（`status = 'active'`）の一致と、
+ * `MemoryStore.findContestedByClaimKey?`（`status = 'contested'`。任意メソッド、
+ * Issue #933・ADR 0378）の一致を合わせたもの。`findContestedByClaimKey?` を実装していない
+ * adapter では、今まで通り `findActiveByClaimKey?` の一致（`active` のみ）だけになる。
  *
  * - `matchCount === 0` ⟹ `result.kind === "no_conflict"`。
- * - `matchCount === 1` ⟹ `result.kind === "contested"`。`Runtime.markContested` を
- *   実際に呼んだ結果を `markContested` に運ぶ（`ineligible`/`conflict` になることもある
- *   ——TOCTOU で相手の status が読んだ後に変わった場合等。この関数はその結果をそのまま
- *   運ぶだけで、再試行はしない）。
- * - `matchCount >= 2` ⟹ `result.kind === "unresolved_conflict"`。**`markContested` を
- *   呼ばない**——[#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、
- *   多対多）が無いと、1対1の `contestedWithId` では3件以上を表現できない
- *   （ADR 0185 決定5）。代わりに `memory_events` へ根拠を構造として残すだけに留める
- *   （`detectClaimKeyContested` の実装コメント参照）。**`superseded` へは
- *   一切進めない。**
+ * - `matchCount === 1` **かつその1件が `active`** ⟹ `result.kind === "contested"`。
+ *   `Runtime.markContested` を実際に呼んだ結果を `markContested` に運ぶ
+ *   （`ineligible`/`conflict` になることもある——TOCTOU で相手の status が読んだ後に
+ *   変わった場合等。この関数はその結果をそのまま運ぶだけで、再試行はしない）。
+ * - `matchCount >= 2`、**または `matchCount === 1` だがその1件が既に `contested`**
+ *   ⟹ `result.kind === "unresolved_conflict"`。**`markContested` を呼ばない**——
+ *   [#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、多対多）
+ *   が無いと、1対1の `contestedWithId` では3件以上を表現できない（ADR 0185 決定5）。
+ *   代わりに `memory_events` へ根拠を構造として残すだけに留める（`detectClaimKeyContested`
+ *   の実装コメント参照）。**`superseded` へは一切進めない。**⚠ **状態遷移そのものを
+ *   動かさない**——`findContestedByClaimKey?` の一致で既に `contested` な相手が
+ *   含まれていても、この関数はその相手の `status`/`contestedWithId` に一切触れない
+ *   （ADR 0378 決定2、PR1 の範囲）。⚠ **2026-09-30 の直し（ADR 0378 追記）**:
+ *   `matchCount === 1` でもこの分岐に入りうる（一致がちょうど1件で、その1件が既に
+ *   `contested` だった場合）——直す前は `markContested` へ進んで `ineligible` になり、
+ *   検出中の Memory は `active` のまま痕跡も残らなかった（例: 3件目の有効期間が、既に
+ *   対になった1件目・2件目のうち片方とだけ重なる場合）。
  */
 export interface ContestedDetectionOutcome {
   /** 検出の対象にした、新しく作った Memory の id。 */
   memoryId: MemoryId;
   /** その Memory の claim key。 */
   claimKey: ClaimKey;
-  /** 同じ鍵で矛盾しうる他の `active` Memory の件数（この Memory 自身を除く。上の doc）。 */
+  /** 同じ鍵で矛盾しうる他の Memory（`active` + `contested`）の件数（この Memory 自身を除く。上の doc）。 */
   matchCount: number;
   /** 何をしたか（`matchCount` ごとの分岐は上の doc）。 */
   result:
@@ -826,9 +838,21 @@ export interface ConsolidateOptions {
  * - `"llm_failed"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む。Issue #1065）。
  *   **1件も書いていない。**
  * - `"dry_run"` — 下見だけを行った。**1件も書いていない。**
+ * - `"aborted_source_forgotten"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前に
+ *   見直したら eligible の1件以上が `forgotten`（`forget()` のみ・`purge()` 済みのどちらも
+ *   含む）になっていたので、**何も書かずに打ち切った**（統合先は作らない。eligible の
+ *   どれ1つも `superseded` へ動かさない）。2026-09-30 追記（Issue #1226、ADR 0375 決定7、
+ *   クローン miku の判断）。{@link ConsolidateSourceOutcome} の `"forgotten_before_write"`
+ *   参照。破壊的変更とは数えない（union に値を足す変更は数えない。同日付の
+ *   「数え方の規律への追記（2026-09-28）」、`"expired"`/`"not_yet_valid"` の追加と同じ扱い）。
  */
 export type ConsolidateOutcome =
-  "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run";
+  | "consolidated"
+  | "nothing_to_consolidate"
+  | "not_examined"
+  | "llm_failed"
+  | "dry_run"
+  | "aborted_source_forgotten";
 
 /**
  * `ConsolidateOutcome: "nothing_to_consolidate"` の理由（Issue #103、ADR 0089）。
@@ -856,12 +880,15 @@ export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_
  * - `"failed"` — 競合以外の例外で書き込みが失敗した。**この時点で処理を打ち切る**
  *   （下の `"not_attempted"` 参照）。
  * - `"not_attempted"` — `status === 'active'`（eligible）だったが、この呼び出しでは
- *   `superseded` への書き込みを試みていない。**次の3つの場合に出る**（どれも書き込みを
+ *   `superseded` への書き込みを試みていない。**次の4つの場合に出る**（どれも書き込みを
  *   試みていないので、状態を変えずにそのまま再送してよい）:
  *   - それより前の要素が `"failed"` になり、そこで打ち切った（まだ見ていない）。
  *   - eligible が1件だけだった（`nothing_to_consolidate`/`single_eligible_source`）。その1件
  *     （重複して渡されていれば、その全部）がこの値になる。
  *   - LLM 呼び出しが失敗した（`llm_failed`）。eligible だった要素がすべてこの値になる。
+ *   - `outcome: 'aborted_source_forgotten'`（下）で、**この要素自身は forgotten ではなかった**
+ *     （他の eligible が forgotten だったために書き込みごと打ち切られた）。2026-09-30 追記
+ *     （Issue #1226）。
  *   ⚠ 2026-09-27 に、実装（`consolidate.test.ts` が固定している振る舞い）に合わせて書き直した。
  *   それまでの doc は1つ目の場合だけを書いていた（ADR 0089 の同日付の追記）。
  * - `"eligible"` — `dryRun: true` のときだけ出る。`status === 'active'` で、実際に統合される
@@ -890,6 +917,18 @@ export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_
  * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の数え方の規律）。
  *   同じ入力でも結果が変わる（統合されずに `nothing_to_consolidate` で返ることもある）。2026-09-29 にクローン miku
  *   （オーナーではない）が決めた（ADR 0089 の同日付の追記）。
+ *
+ * ⚠ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+ * ADR 0375 決定7、クローン miku の判断）: `"forgotten_before_write"` を足した。**LLM を待つ間に
+ * eligible の1件が `forget`（さらに `purge`）されると、**この要素の分類が `"status_not_active"`
+ * ではなく `"forgotten_before_write"` になり、この呼び出し全体が `outcome: 'aborted_source_forgotten'`
+ * で打ち切られる**（統合先を一切作らない）。`"status_not_active"` は手順2（LLM を呼ぶ**前**）の
+ * 初期分類、`"forgotten_before_write"` は手順7（LLM を呼んだ**後**、書き込みの直前）の見直しで
+ * 検出した分類——**同じ「forgotten」でも検出した時点が違うので、別の kind にした**（`ForgetOutcome`
+ * の語彙を再利用しなかった理由）。それ以前は、この競合が起きても `"status_changed_concurrently"`
+ * に分類され、統合先はその本文を入れた LLM の出力から作られ `active` で書かれていた（今の
+ * `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` が固定する）。
+ * 破壊的変更とは数えない（union に値を足す変更、上と同じ扱い）。
  */
 export type ConsolidateSourceOutcome =
   | { memoryId: MemoryId; kind: "superseded"; previousStatus: "active" }
@@ -900,7 +939,8 @@ export type ConsolidateSourceOutcome =
   | { memoryId: MemoryId; kind: "status_changed_concurrently"; observedStatus: MemoryStatus | null }
   | { memoryId: MemoryId; kind: "failed"; error: string }
   | { memoryId: MemoryId; kind: "not_attempted" }
-  | { memoryId: MemoryId; kind: "eligible" };
+  | { memoryId: MemoryId; kind: "eligible" }
+  | { memoryId: MemoryId; kind: "forgotten_before_write" };
 
 /**
  * `runtime.consolidate` の結果（Issue #103、ADR 0089）。
@@ -1069,9 +1109,20 @@ export interface ReflectOptions {
  * - `"llm_failed"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む。Issue #1065）。
  *   **1件も書いていない。**
  * - `"dry_run"` — 下見だけを行った。**1件も書いていない。**
+ * - `"aborted_source_forgotten"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前に
+ *   見直したら eligible の1件以上が `forgotten`（`forget()` のみ・`purge()` 済みのどちらも
+ *   含む）になっていたので、**何も書かずに打ち切った**（内省の Memory を作らない）。
+ *   2026-09-30 追記（Issue #1226、ADR 0375 決定7、クローン miku の判断）。
+ *   {@link ReflectBasisOutcome} の `"forgotten_before_write"` 参照。破壊的変更とは数えない
+ *   （union に値を足す変更は数えない。`ConsolidateOutcome` の同日付の追記と同じ扱い）。
  */
 export type ReflectOutcome =
-  "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run";
+  | "reflected"
+  | "nothing_to_reflect"
+  | "not_examined"
+  | "llm_failed"
+  | "dry_run"
+  | "aborted_source_forgotten";
 
 /**
  * `ReflectOutcome: "nothing_to_reflect"` の理由（Issue #104）。
@@ -1102,8 +1153,9 @@ export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
  *   `provenance.kind === 'reflected'`。自己増幅（reflect の産物を土台にまた reflect すること）を
  *   形の側で止める。
  * - `"eligible"` — 土台として採れる状態だったが、この呼び出しでは結局使われなかった
- *   （`dryRun: true` で下見しただけ／LLM 呼び出しが失敗した／LLM が「無い」と答えた、
- *   のいずれか）。
+ *   （`dryRun: true` で下見しただけ／LLM 呼び出しが失敗した／LLM が「無い」と答えた／
+ *   他の eligible が `"forgotten_before_write"` になり呼び出し全体が打ち切られた（この
+ *   要素自身は forgotten ではなかった。2026-09-30 追記、Issue #1226）、のいずれか）。
  *
  * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
  * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も材料にして
@@ -1125,6 +1177,18 @@ export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
  * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の
  *   数え方の規律、`consolidate` の同日付の変更と同じ扱い）。同じ入力でも結果が変わる（材料にならず
  *   `nothing_to_reflect` で返ることもある）。
+ *
+ * ⚠ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+ * ADR 0375 決定7、クローン miku の判断）: `"forgotten_before_write"` を足した。**LLM を待つ間に
+ * eligible の1件が `forget`（さらに `purge`）されると、**この要素の分類が `"used"` ではなく
+ * `"forgotten_before_write"` になり、この呼び出し全体が `outcome: 'aborted_source_forgotten'`
+ * で打ち切られる**（内省の Memory を一切作らない）。`"status_not_active"` は手順2（LLM を呼ぶ
+ * **前**）の初期分類、`"forgotten_before_write"` は手順7（LLM を呼んだ**後**、書き込みの直前）
+ * の見直しで検出した分類——`ConsolidateSourceOutcome` の同日付の追記と同じ区別。それ以前は、
+ * この競合が起きても内省の Memory はその本文を入れた LLM の出力から作られ `active` で
+ * 書かれ、`"used"` に分類されていた（今の
+ * `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` が固定する）。
+ * 破壊的変更とは数えない（union に値を足す変更、上と同じ扱い）。
  */
 export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "used" }
@@ -1133,7 +1197,8 @@ export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "expired"; validUntil: Date }
   | { memoryId: MemoryId; kind: "not_yet_valid"; validFrom: Date }
   | { memoryId: MemoryId; kind: "basis_is_reflected" }
-  | { memoryId: MemoryId; kind: "eligible" };
+  | { memoryId: MemoryId; kind: "eligible" }
+  | { memoryId: MemoryId; kind: "forgotten_before_write" };
 
 /**
  * `runtime.reflect` の結果（Issue #104）。
@@ -3140,6 +3205,27 @@ export interface Runtime {
    * 5. LLM を1回呼ぶ（`completeStructured`）。失敗したら `outcome: 'llm_failed'`・
    *    `llmFailure`・`llmCalls: 1`・書き込みゼロ（失敗を根拠に既存の記憶を置き換えない。
    *    `ReextractResult.supersededMemoryIds` の doc と同じ規律）。
+   *    ⭐ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+   *    ADR 0375 決定7、クローン miku の判断）: LLM が返った直後・統合先を作る前に、
+   *    eligible を `getMany` で読み直す。**1件でも `status === 'forgotten'`（`forget()` のみ・
+   *    `purge()` 済みのどちらも含む）なら、**統合先を一切作らずに打ち切る**
+   *    （`outcome: 'aborted_source_forgotten'`、`atomicity: 'not_attempted'`、`llmCalls: 1`。
+   *    forgotten だった要素は `sources` で `"forgotten_before_write"`、他の eligible は
+   *    `"not_attempted"`）。**この読み直しと次の書き込みの間には、まだ小さな窓が残る**
+   *    ——`atomicity: 'store_unsupported'` の経路（下の手順7）は、この読み直しだけが保護であり、
+   *    それ以上の見直しは無い。`atomicity: 'store_supported'` の経路（口が在る adapter）は、
+   *    この読み直しに加えて、手順7の `supersedeWithNewMemories` 呼び出し自体に
+   *    `opts.abortIfForgotten: eligibleIds` を渡し、**書き込みと同一トランザクションの中で
+   *    `SELECT … FOR UPDATE` によりもう一度見直す**（`@mnemora/postgres` の実装。
+   *    {@link SourceMemoryForgottenError} 参照）——ここで forgotten が見つかれば
+   *    {@link SourceMemoryForgottenError} を投げ、`news`（統合先）も `supersede`（統合元の更新）も
+   *    一切コミットされずに rollback する。runtime はこの例外を捕まえ、同じ
+   *    `outcome: 'aborted_source_forgotten'` として返す——呼び出し側からは、読み直しの直後に
+   *    打ち切られたのか・書き込みのトランザクション内で打ち切られたのかは区別できない
+   *    （どちらも「何も書かれていない」という点で同じであり、区別する意味が無い）。
+   *    `packages/testkit` の `InMemoryMemoryStore` と `packages/core` のテスト用
+   *    `FakeMemoryStore` は `opts.abortIfForgotten` を実装しないため、これらの adapter では
+   *    上の読み直しだけが保護になる（残る窓については `docs/memory-model.md` の該当箇所参照）。
    * 6. 統合先を1件作る（`createMemoryWithOutbox`。`buildConsolidatedMemory` 参照）。
    *    ⚠ **統合先は `embeddingStatus: 'pending'` で作られ、`embed` ジョブを積むだけ——
    *    `tick()` が回るまで ANN の候補に入らない。**統合元は同じ呼び出しの中で
@@ -3160,13 +3246,19 @@ export interface Runtime {
    *    「投げない」とした理由（部分的に起きたことを呼び出し側から見えなくしないため）は、
    *    1トランザクションでは部分的に起きたこと自体が無い（統合先の作成も supersede も全部
    *    巻き戻る）ため、この経路では別の手段で既に満たされている（ADR 0100 決定8）。
-   *    ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）:
-   *    LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、どちらの経路も書き込みの前に
-   *    見直さない。**その1件は `status_changed_concurrently` として飛ばされるだけで、統合先はその本文を入れた
-   *    LLM の出力から作られ、`active` で書かれる（`provenance.sources` にもその id が残る。#882）。
-   *    ⟹ `purge()` が `"purged"` を返した後に、消した本文から作った統合先が残りうる。
-   *    【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（`consolidate-reflect-forget-race.postgres.test.ts`）。
-   *    見直して打ち切るかどうかは決まっていない。
+   *    ⚠ **2026-09-30 訂正（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+   *    ADR 0375 決定7）: この段落は 2026-09-27 に「今の振る舞い」として書いたが、もう成り立たない。**
+   *    当時は、LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、どちらの経路も
+   *    書き込みの前に見直さなかった——その1件は `status_changed_concurrently` として飛ばされる
+   *    だけで、統合先はその本文を入れた LLM の出力から作られ、`active` で書かれていた
+   *    （`purge()` が `"purged"` を返した後でも）。**今は、手順5の直後の読み直し（上）が
+   *    この場合を検出し、`outcome: 'aborted_source_forgotten'` で打ち切る**——`forget`/`purge`
+   *    された要素が `status_changed_concurrently` に分類されて統合先が書かれることはもう無い。
+   *    【実測 2026-09-30】`@mnemora/postgres` と testkit の fixture で確認（歯は
+   *    `consolidate-reflect-forget-race.postgres.test.ts`）。**`status_changed_concurrently` 自体は
+   *    今日も存在する**——`forgotten`/`purged` 以外の理由（例: 別の呼び出しが同じ eligible を
+   *    先に `superseded`/`contested` へ動かした）で CAS が破れたときは、今どおり部分成功として扱う
+   *    （その1件だけ `status_changed_concurrently`、統合先は書かれる）。
    * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
    *
    * `memory_events.meta.reason` は `superseded` イベントに `'consolidated'` を積む
@@ -3238,15 +3330,38 @@ export interface Runtime {
    *    新しい記憶を作らない。`ReextractResult`/`ConsolidationResult` と同じ規律）。
    * 6. LLM が `outcome: 'nothing'` を返したら `nothing_to_reflect`/`llm_declined`、
    *    `llmCalls: 1`、書き込みゼロ。
+   *    ⭐ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+   *    ADR 0375 決定7、クローン miku の判断）: LLM が `'reflected'` を返した直後・新しい
+   *    Memory を組み立てる前に、eligible を `getMany` で読み直す。**1件でも
+   *    `status === 'forgotten'`（`forget()` のみ・`purge()` 済みのどちらも含む）なら、
+   *    **内省の Memory を一切作らずに打ち切る**（`outcome: 'aborted_source_forgotten'`、
+   *    `llmCalls: 1`。forgotten だった要素は `basis` で `"forgotten_before_write"`、他の
+   *    eligible は `"eligible"`）。この読み直しと次の手順7（書き込み）の間には小さな窓が
+   *    残る——`reflect` は `consolidate` の `atomicity: 'store_supported'` に相当する
+   *    「複数行を1トランザクションで」という仕組みを持たない（既存行を1つも動かさないため
+   *    `supersedeWithNewMemories` を使わない）が、手順7の `createMemoryWithOutbox` 自体に
+   *    `opts.abortIfForgotten: eligibleIds` を渡し、`@mnemora/postgres` はこの INSERT と
+   *    同一トランザクションの中で `SELECT … FOR UPDATE` によりもう一度見直す
+   *    （{@link SourceMemoryForgottenError} 参照）——ここで forgotten が見つかれば
+   *    {@link SourceMemoryForgottenError} を投げ、INSERT は一切コミットされずに rollback
+   *    する。runtime はこの例外を捕まえ、同じ `outcome: 'aborted_source_forgotten'` として
+   *    返す。`packages/testkit` の `InMemoryMemoryStore` と `packages/core` のテスト用
+   *    `FakeMemoryStore` は `opts.abortIfForgotten` を実装しないため、これらの adapter では
+   *    上の読み直しだけが保護になる（`consolidate` の同日付の追記と同じ形。残る窓については
+   *    `docs/memory-model.md` の該当箇所参照）。
    * 7. `buildReflectedMemory(...)` で新しい Memory を1件組み立て
    *    （`createMemoryWithOutbox(ctx, newMemory, ['embed'])`）。`provenance` は
    *    `{ kind: 'reflected', sources: <eligible の memoryId> }`——**`sources` は必ず埋める**
    *    （`ReflectedProvenance.sources` は型としては省略可のままだが、この実装が作る値は
    *    常に埋める。公開型の破壊的変更を避けるため型は変えていない）。
-   *    ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）:
-   *    LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、書き込みの前に見直さない。**
-   *    内省の Memory はその本文を入れた LLM の出力から作られ、`active` で書かれ、`sources` にもその id が残る
-   *    （`consolidate` の手順7の追記と同じ。Postgres と testkit の fixture で実測）。
+   *    ⚠ **2026-09-30 訂正（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）:
+   *    この段落は 2026-09-27 に「今の振る舞い」として書いたが、もう成り立たない。**
+   *    当時は、LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、
+   *    書き込みの前に見直さず、内省の Memory はその本文を入れた LLM の出力から作られ
+   *    `active` で書かれていた。**今は、手順6の直後の読み直し（上）がこの場合を検出し、
+   *    `outcome: 'aborted_source_forgotten'` で打ち切る。**【実測 2026-09-30】
+   *    `@mnemora/postgres` と testkit の fixture で確認（歯は
+   *    `consolidate-reflect-forget-race.postgres.test.ts`）。
    * 8. `created` イベントを1件積む。`meta.reason: 'reflected'`、`meta.sources: <eligible の
    *    id>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
    *    イベントと同じ形）。
@@ -3622,36 +3737,57 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   /**
    * Issue #372（(B) 第2段。ADR 0185 決定2・決定4、ADR 0320 の続き）: 新しく `active` に
    * なった Memory 1件について、同じ鍵の衝突を**列と索引だけで**（LLM を一度も呼ばずに）
-   * 見つけ、ちょうど1件なら `markContested` を呼ぶ。
+   * 見つけ、ちょうど1件、かつその1件が `active` なら `markContested` を呼ぶ
+   * （2026-09-30 の直し、ADR 0378 追記。下の手順3参照）。
    *
    * 手順:
    * 1. `memory.claimKey` が無ければ何もしない（`null` を返す——鍵が無ければ引くものが無い）。
    * 2. `deps.memoryStore.findActiveByClaimKey` が無ければ何もしない（任意メソッド。
    *    フォールバック経路は無い——`markContested` と同じ判断）。
-   * 2.5. **（ADR 0377、Issue #835 候補1）`matches` から、`memory.sourceObservationId` と
-   *    同じ `sourceObservationId` を持つものを、件数を数える前に除く。** `memory.
-   *    sourceObservationId` が `null` のときは何も除かない（`null` 同士を「同じ観測」と
-   *    見なさない——`null` は「分からない」であって「観測0番」ではない）。**この除外は
-   *    core 側だけで行う**——`MemoryStore.findActiveByClaimKey?` の interface・
-   *    Postgres 実装・testkit は変えない（下の doc コメント最後の段落、ADR 0377 参照）。
-   * 3. 残った一致件数で分岐する:
+   * 2.5. **（Issue #933 案2、ADR 0378）`deps.memoryStore.findContestedByClaimKey` が
+   *    実装されていれば、同じ query で追加に呼び、`status = 'contested'` の一致も集める。**
+   *    実装していない adapter では、この手順は何もせず（後方互換）、今まで通り
+   *    `findActiveByClaimKey` の一致（`active` のみ）だけを使う。
+   * 2.6. **（ADR 0377、Issue #835 候補1）合わせた一致（`active` + `contested`）から、
+   *    `memory.sourceObservationId` と同じ `sourceObservationId` を持つものを、件数を
+   *    数える前に除く。** `memory.sourceObservationId` が `null` のときは何も除かない
+   *    （`null` 同士を「同じ観測」と見なさない——`null` は「分からない」であって
+   *    「観測0番」ではない）。**この除外は core 側だけで行う**——`MemoryStore.
+   *    findActiveByClaimKey?`/`findContestedByClaimKey?` の interface・Postgres 実装・
+   *    testkit は変えない（下の doc コメント最後の段落、ADR 0377・ADR 0378 参照）。
+   * 3. 残った一致件数と、その `status` で分岐する（ADR 0324 決定5・決定6 が定めた
+   *    分岐そのものは変えていない——手順2.5・下記2026-09-30の直しが変えるのは
+   *    「何を一致として数えるか」「`markContested` へ進めてよい一致かどうか」だけである）:
    *    - **0件**: 何もしない（`{ kind: "no_conflict" }`）。
-   *    - **ちょうど1件**: `markContested(ctx, memory.id, other.id, { reason: <構造化JSON> })`
-   *      を呼ぶ。判定の根拠（鍵・重なった有効期間・両側の `contentHash`・id）を
-   *      `memory_events.meta.note` に構造として載せる（問い3）。`markContested` 自身が
-   *      `ineligible`/`conflict` を返すことがある（TOCTOU、または相手が既に別件で
-   *      `contested`/`active` 以外になっていた場合）——**この関数はその結果をそのまま
-   *      運ぶだけで、追加の再試行やフォールバックはしない**（ADR 0134 が確立した
-   *      「開く前に落とす」「上限の無い再試行ループを作らない」規律をそのまま継承する）。
-   *    - **2件以上**: [#207](https://github.com/takecchi/mnemora/issues/207)
-   *      （`memory_relations`、多対多）が無いと1対1の `contestedWithId` では表現できない
-   *      （ADR 0185 決定5）。**`markContested` を一切呼ばない**——状態は一切動かさず、
-   *      根拠（鍵・関係する各 `id`/`contentHash`/有効期間・件数）を `memory_events` へ
-   *      1件、構造として残すだけに留める（`kind: "updated"`、
-   *      `meta.reason: "claim_key_conflict_unresolved"`——`"contested"` と紛れないよう
-   *      別のタグを使う。`MemoryEventKind` という公開 union には値を足さない——`meta` は
-   *      もともと自由形式である）。これにより「同じ鍵に3件以上が並んだ」件数を
-   *      `memory_events` から数えられる。
+   *    - **ちょうど1件、かつその1件が `active`**: `markContested(ctx, memory.id,
+   *      other.id, { reason: <構造化JSON> })` を呼ぶ。判定の根拠（鍵・重なった有効期間・
+   *      両側の `contentHash`・id）を `memory_events.meta.note` に構造として載せる
+   *      （問い3）。`markContested` 自身が `ineligible`/`conflict` を返すことがある
+   *      （TOCTOU で、読んでから呼ぶまでの間に相手が別件で `contested`/`active` 以外に
+   *      なっていた場合）——**この関数はその結果をそのまま運ぶだけで、追加の再試行や
+   *      フォールバックはしない**（ADR 0134 が確立した「開く前に落とす」「上限の無い
+   *      再試行ループを作らない」規律をそのまま継承する）。
+   *    - **それ以外（2件以上、または、ちょうど1件だがその1件が既に `contested`）**:
+   *      [#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、
+   *      多対多）が無いと1対1の `contestedWithId` では表現できない（ADR 0185 決定5）。
+   *      **`markContested` を一切呼ばない**——状態は一切動かさず、根拠（鍵・関係する各
+   *      `id`/`contentHash`/有効期間・`status`・件数）を `memory_events` へ1件、構造
+   *      として残すだけに留める（`kind: "updated"`、`meta.reason:
+   *      "claim_key_conflict_unresolved"`——`"contested"` と紛れないよう別のタグを使う。
+   *      `MemoryEventKind` という公開 union には値を足さない——`meta` はもともと自由
+   *      形式である）。これにより「同じ鍵に3件以上が並んだ」件数を `memory_events` から
+   *      数えられる（Issue #933 が直る前は、この分岐は `findContestedByClaimKey?` が
+   *      無い限り実質到達不能だった——3件目以降は必ず `no_conflict` に落ちていた。
+   *      ADR 0378 参照）。
+   *
+   *      ⚠ **2026-09-30 の直し（ADR 0378 追記、Issue #933 PR1 の穴埋め）**:
+   *      「ちょうど1件だがその1件が既に `contested`」は、直す前は `markContested` へ
+   *      進み、相手が既に `contested`（＝`active` でない）なので CAS が `ineligible` を
+   *      返し、検出中の Memory は `active` のまま・`memory_events` にも痕跡が残らなかった
+   *      （例: 3件目の有効期間が、既に対になった1件目・2件目のうち片方とだけ重なる場合）。
+   *      **今は、一致の `status` を見てから分岐する**——`active` な1件だけが
+   *      `markContested` の対象になり、`contested` な1件は（2件以上のときと同じ形で）
+   *      evidence だけを積む。
    *
    * ⛔ **この関数のどこにも `superseded` への言及が無い。**`contested` までで止める
    * （ADR 0185 決定4・北極星 問い4「AI の推論と、ユーザーが言った事実を区別する」——
@@ -3661,14 +3797,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * ⚠ **ADR 0377（Issue #835 候補1）**: ADR 0347（PR #1318）が抽出の書き込みを
    * 「全件書く → 全件について `created`/検出」の2ループへ分けたことで、同じ observation
    * （＝同じ発話）から抽出された兄弟候補どうしが、互いの検出時点で既に `active` になって
-   * いた。`matches`（`findActiveByClaimKey` の返り値）は `sourceObservationId` を持つ
-   * `Memory[]` である——手順2.5 はそこから「検出中の memory と同じ observation」の行を
-   * 除いてから件数を数える。**`findActiveByClaimKey?` の契約（interface の doc コメント）
-   * 自体は変えていない**——この口は今までどおり「同じ鍵・重なる有効期間・違う内容の
-   * `active` Memory」を返す。除外は、この関数（呼び出し側）が返り値を使う際に行う。
-   * store 側（Postgres 実装・testkit）へ押し下げなかった理由と、その限界（`findActiveByClaimKey?`
-   * の contract に `LIMIT` の規定が無いため、この除外を core 側で行っても正しさは保てるが、
-   * interface 自体は adapter が独自に `LIMIT` を付けることを禁じていない）は ADR 0377 を見ること。
+   * いた。`rawMatches`（`findActiveByClaimKey`/`findContestedByClaimKey` の返り値を
+   * 合わせたもの）は `sourceObservationId` を持つ `Memory[]` である——手順2.6 はそこから
+   * 「検出中の memory と同じ observation」の行を除いてから件数を数える。**両口の契約
+   * （interface の doc コメント）自体は変えていない**——除外は、この関数（呼び出し側）が
+   * 返り値を使う際に行う。store 側（Postgres 実装・testkit）へ押し下げなかった理由と、
+   * その限界（両口の contract に `LIMIT` の規定が無いため、この除外を core 側で行っても
+   * 正しさは保てるが、interface 自体は adapter が独自に `LIMIT` を付けることを禁じて
+   * いない）は ADR 0377 を見ること。
+   *
+   * ⚠ **ADR 0378（Issue #933 案2、PR1 の範囲）**: `findContestedByClaimKey?` を足したのは
+   * このPR（PR1）の範囲であり、**`RelationStore`・多者間グループを実際に `contested` として
+   * 束ねる書き込み（`markContestedGroup` 相当、ADR 0327）は範囲外**——「2件以上」の分岐は
+   * 今まで通り `markContested` を呼ばず evidence を積むだけである。すでに `contested` な
+   * 対（例: 1件目・2件目）は、3件目・4件目が届いても**壊れない**——この関数は一致の
+   * `status`/`contestedWithId` を一切書き換えない。
    */
   async function detectClaimKeyContested(
     ctx: Ctx,
@@ -3682,14 +3825,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (findActiveByClaimKey === undefined) {
       return null;
     }
-    const rawMatches = await findActiveByClaimKey.call(deps.memoryStore, ctx, {
+    const query = {
       subjectId: memory.subjectId ?? null,
       claimKey,
       excludeMemoryId: memory.id,
       contentHash: memory.contentHash,
       validFrom: memory.validFrom ?? null,
       validUntil: memory.validUntil ?? null,
-    });
+    };
+    const rawActiveMatches = await findActiveByClaimKey.call(deps.memoryStore, ctx, query);
+    // Issue #933 案2（ADR 0378）: `findContestedByClaimKey?` を実装している store でだけ、
+    // 既に `contested` になった相手も一致に数える。実装していない adapter では
+    // `undefined` のままなので、今まで通り `active` の一致だけになる（後方互換）。
+    const findContestedByClaimKey = deps.memoryStore.findContestedByClaimKey;
+    const rawContestedMatches =
+      findContestedByClaimKey === undefined
+        ? []
+        : await findContestedByClaimKey.call(deps.memoryStore, ctx, query);
+    const rawMatches = [...rawActiveMatches, ...rawContestedMatches];
     // ADR 0377（Issue #835 候補1）: 同じ observation（＝同じ発話）から抽出された兄弟
     // どうしを、互いへの誤検出の相手にしない。`memory.sourceObservationId` が `null`
     // のときは何も除かない（`null` 同士を「同じ観測」と見なさない）。
@@ -3703,14 +3856,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { memoryId: memory.id, claimKey, matchCount: 0, result: { kind: "no_conflict" } };
     }
 
+    // ADR 0378: `status` も evidence に含める——一致のどれが `active` 由来・どれが
+    // `findContestedByClaimKey` 由来（既に `contested`）かを、監査ログから読めるようにする
+    // （北極星 問い3）。
     const describeSide = (m: Memory) => ({
       id: m.id,
+      status: m.status,
       contentHash: m.contentHash,
       validFrom: m.validFrom ?? null,
       validUntil: m.validUntil ?? null,
     });
 
-    if (matches.length === 1) {
+    // 2026-09-30 の直し（ADR 0378 追記、Issue #933 PR1 の穴埋め）: `markContested` へ
+    // 進めてよいのは、一致がちょうど1件で、かつその1件がまだ `active` のときだけ。
+    // `findContestedByClaimKey` 由来で一致がちょうど1件になっても、その1件は既に
+    // `contested`（＝`active` でない）なので、直す前は `markContested` を呼んで
+    // `ineligible` になり、検出中の Memory は `active` のまま痕跡も残らなかった。
+    if (matches.length === 1 && matches[0]!.status === "active") {
       const other = matches[0]!;
       // 問い3: 根拠を構造として `meta.note`（`MarkContestedOptions.reason`）へ載せる。
       const note = JSON.stringify({
@@ -3729,7 +3891,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // matches.length >= 2: #207 が無いと1対1で表せない（ADR 0185 決定5）。
+    // それ以外（matches.length >= 2、または matches.length === 1 だがその1件が既に
+    // `contested`）: #207 が無いと1対1で表せない（ADR 0185 決定5）。
     // markContested を呼ばず、根拠だけを memory_events に残す。
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
@@ -6463,6 +6626,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
+    // Issue #1226 / ADR 0375 決定7（クローン miku の判断）: LLM が返った直後・統合先を
+    // 作る前に、eligible を読み直す。1件でも forgotten（`forget()` のみ・`purge()` 済みの
+    // どちらも含む）なら、統合先を一切作らずに打ち切る（interface の doc コメント、
+    // `consolidate` の JSDoc 手順5の追記参照）。
+    const recheckedBeforeConsolidateWrite = await deps.memoryStore.getMany(ctx, eligibleIds);
+    const recheckedByIdBeforeConsolidateWrite = new Map<MemoryId, Memory>();
+    for (const memory of recheckedBeforeConsolidateWrite) {
+      recheckedByIdBeforeConsolidateWrite.set(lookupKey(memory.id), memory);
+    }
+    const forgottenBeforeConsolidateWrite = new Set(
+      eligibleIds.filter(
+        (id) => recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status === "forgotten",
+      ),
+    );
+    if (forgottenBeforeConsolidateWrite.size > 0) {
+      return {
+        // 書き込みを1件も試みていない（ADR 0100 と同じ扱い——このトランザクション自体を
+        // 開いていない）。
+        atomicity: "not_attempted" as const,
+        outcome: "aborted_source_forgotten",
+        nothingReason: null,
+        consolidatedMemoryId: null,
+        sources: mapSources((id) =>
+          forgottenBeforeConsolidateWrite.has(id)
+            ? { memoryId: id, kind: "forgotten_before_write" }
+            : { memoryId: id, kind: "not_attempted" },
+        ),
+        llmCalls: 1,
+        llmFailure: null,
+      };
+    }
+
     // 6. 統合先を作る。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -6531,18 +6726,45 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // ------------------------------------------------------------------
     const supersedeWithNewMemories = deps.memoryStore.supersedeWithNewMemories;
     if (supersedeWithNewMemories !== undefined) {
-      const result = await supersedeWithNewMemories.call(
-        deps.memoryStore,
-        ctx,
-        [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
-        eligibleIds.map((id) => ({
-          id,
-          supersededByIndex: 0,
-          expectedStatus: "active" as MemoryStatus,
-          event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
-        })),
-        { now },
-      );
+      // Issue #1226 / ADR 0375 決定7: 上の読み直しに続く、書き込みそのものの中での見直し。
+      // `@mnemora/postgres` はこれを INSERT/UPDATE と同一トランザクションの `SELECT …
+      // FOR UPDATE` として実装する（`abortIfForgotten` の doc コメント参照）——上の
+      // 読み直しと、この呼び出しの間に開いた小さな窓を、adapter が対応していれば閉じる。
+      let result: Awaited<ReturnType<typeof supersedeWithNewMemories>>;
+      try {
+        result = await supersedeWithNewMemories.call(
+          deps.memoryStore,
+          ctx,
+          [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
+          eligibleIds.map((id) => ({
+            id,
+            supersededByIndex: 0,
+            expectedStatus: "active" as MemoryStatus,
+            event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
+          })),
+          { now, abortIfForgotten: eligibleIds },
+        );
+      } catch (error) {
+        if (error instanceof SourceMemoryForgottenError) {
+          const forgottenLate = new Set(error.forgottenIds);
+          return {
+            // `news`/`supersede` どちらも rollback された——書き込みを試みていないのと
+            // 呼び出し側からは区別が付かない（`consolidate` の JSDoc 手順5の追記参照）。
+            atomicity: "not_attempted" as const,
+            outcome: "aborted_source_forgotten",
+            nothingReason: null,
+            consolidatedMemoryId: null,
+            sources: mapSources((id) =>
+              forgottenLate.has(id)
+                ? { memoryId: id, kind: "forgotten_before_write" }
+                : { memoryId: id, kind: "not_attempted" },
+            ),
+            llmCalls: 1,
+            llmFailure: null,
+          };
+        }
+        throw error;
+      }
 
       const consolidated = result.created[0]!;
       if (consolidated.created) {
@@ -6576,12 +6798,40 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     // 口が無い adapter——今日どおりの2段（作成 → supersede ループ）。
-    const { memory: consolidatedMemory, created } = await deps.memoryStore.createMemoryWithOutbox(
-      ctx,
-      newMemory,
-      ["embed"],
-      { now },
-    );
+    // Issue #1226: `abortIfForgotten` を渡す——この adapter が実装していれば
+    // （`@mnemora/postgres` は常に `supersedeWithNewMemories` も実装するため、実際に
+    // ここへ来るのは third-party adapter だけである）、上の読み直しに続く見直しになる。
+    // 実装していなければ無視されるだけで、今日どおり（上の読み直しだけが保護）。
+    let consolidatedMemory: Memory;
+    let created: boolean;
+    try {
+      const createResult = await deps.memoryStore.createMemoryWithOutbox(
+        ctx,
+        newMemory,
+        ["embed"],
+        { now, abortIfForgotten: eligibleIds },
+      );
+      consolidatedMemory = createResult.memory;
+      created = createResult.created;
+    } catch (error) {
+      if (error instanceof SourceMemoryForgottenError) {
+        const forgottenLate = new Set(error.forgottenIds);
+        return {
+          atomicity: "not_attempted" as const,
+          outcome: "aborted_source_forgotten",
+          nothingReason: null,
+          consolidatedMemoryId: null,
+          sources: mapSources((id) =>
+            forgottenLate.has(id)
+              ? { memoryId: id, kind: "forgotten_before_write" }
+              : { memoryId: id, kind: "not_attempted" },
+          ),
+          llmCalls: 1,
+          llmFailure: null,
+        };
+      }
+      throw error;
+    }
     if (created) {
       await deps.eventStore.append(ctx, {
         ...buildCreatedEvent(),
@@ -6875,6 +7125,35 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
+    // Issue #1226 / ADR 0375 決定7（クローン miku の判断）: LLM が `'reflected'` を返した
+    // 直後・内省の Memory を組み立てる前に、eligible を読み直す。1件でも forgotten
+    // （`forget()` のみ・`purge()` 済みのどちらも含む）なら、内省の Memory を一切作らずに
+    // 打ち切る（interface の doc コメント、`reflect` の JSDoc 手順6の追記参照）。
+    const recheckedBeforeReflectWrite = await deps.memoryStore.getMany(ctx, eligibleIds);
+    const recheckedByIdBeforeReflectWrite = new Map<MemoryId, Memory>();
+    for (const memory of recheckedBeforeReflectWrite) {
+      recheckedByIdBeforeReflectWrite.set(lookupKey(memory.id), memory);
+    }
+    const forgottenBeforeReflectWrite = new Set(
+      eligibleIds.filter(
+        (id) => recheckedByIdBeforeReflectWrite.get(lookupKey(id))?.status === "forgotten",
+      ),
+    );
+    if (forgottenBeforeReflectWrite.size > 0) {
+      return {
+        outcome: "aborted_source_forgotten",
+        nothingReason: null,
+        reflectedMemoryId: null,
+        basis: mapBasis((id) =>
+          forgottenBeforeReflectWrite.has(id)
+            ? { memoryId: id, kind: "forgotten_before_write" }
+            : { memoryId: id, kind: "eligible" },
+        ),
+        llmCalls: 1,
+        llmFailure: null,
+      };
+    }
+
     // 7. 新しい Memory を1件作る（既存の行へは一切書き込まない——決定4）。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -6890,12 +7169,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       now,
       ...activityClockInputs,
     });
-    const { memory: reflectedMemory, created } = await deps.memoryStore.createMemoryWithOutbox(
-      ctx,
-      newMemory,
-      ["embed"],
-      { now },
-    );
+    // Issue #1226: 上の読み直しに続く、書き込みそのものの中での見直し。`@mnemora/postgres`
+    // はこれを INSERT と同一トランザクションの `SELECT … FOR UPDATE` として実装する
+    // （`abortIfForgotten` の doc コメント参照）。
+    let reflectedMemory: Memory;
+    let created: boolean;
+    try {
+      const createResult = await deps.memoryStore.createMemoryWithOutbox(
+        ctx,
+        newMemory,
+        ["embed"],
+        { now, abortIfForgotten: eligibleIds },
+      );
+      reflectedMemory = createResult.memory;
+      created = createResult.created;
+    } catch (error) {
+      if (error instanceof SourceMemoryForgottenError) {
+        const forgottenLate = new Set(error.forgottenIds);
+        return {
+          outcome: "aborted_source_forgotten",
+          nothingReason: null,
+          reflectedMemoryId: null,
+          basis: mapBasis((id) =>
+            forgottenLate.has(id)
+              ? { memoryId: id, kind: "forgotten_before_write" }
+              : { memoryId: id, kind: "eligible" },
+          ),
+          llmCalls: 1,
+          llmFailure: null,
+        };
+      }
+      throw error;
+    }
     if (created) {
       // 8. `created` イベントを1件積む。`reflect` はこれ以外のイベントを一切積まない
       // （既存の行の status を動かさないため、`superseded`/`forgotten` の類は存在しない）。

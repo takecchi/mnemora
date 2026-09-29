@@ -85,6 +85,9 @@ describeMemoryStoreConformance({
   },
   // Issue #134 / ADR 0100: InMemoryMemoryStore は supersedeWithNewMemories を実装している。
   supportsSupersedeWithNewMemories: true,
+  // Issue #1226 / ADR 0375 決定7: InMemoryMemoryStore は opts.abortIfForgotten を実装
+  // しない（渡しても無視される。`SourceMemoryForgottenError` の doc コメント参照）。
+  supportsAbortIfForgotten: false,
   // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
   listPurgedEvents: (ctx) => {
@@ -115,6 +118,8 @@ describeMemoryStoreConformance({
   supportsLabels: true,
   // Issue #372: InMemoryMemoryStore は findActiveByClaimKey を実装している。
   supportsFindActiveByClaimKey: true,
+  // Issue #933 案2 / ADR 0378: InMemoryMemoryStore は findContestedByClaimKey を実装している。
+  supportsFindContestedByClaimKey: true,
   // Issue #691続き / ADR 0329: InMemoryMemoryStore は listActiveClaimPredicates を
   // 実装している。
   supportsListActiveClaimPredicates: true,

@@ -46,6 +46,47 @@ export class MemoryStatusConflictError extends Error {
 }
 
 /**
+ * Issue #1226（ADR 0375 決定7、クローン miku の判断）: `createMemoryWithOutbox`/
+ * `supersedeWithNewMemories` の `opts.abortIfForgotten` に渡した id のうち、書き込みの
+ * 直前に見直したら1件でも `status === "forgotten"`（`forget()` のみ・`forget()` の後
+ * `purge()` のどちらも含む——`purge()` は `forgotten` でない Memory を拒むため、
+ * `purgedAt` が付いた行は必ず `forgotten` でもある）だったときに投げる。
+ *
+ * `runtime.consolidate`/`runtime.reflect` が、LLM を待つ間に統合元・内省の材料が
+ * `forget`/`purge` されても、その本文から作った新しい Memory を `active` で書いて
+ * しまう競合（Issue #1226 本文）を閉じるための道具。**投げられた時点で、この呼び出しは
+ * 一切何も書いていない**——`news`（新しい Memory）も `supersede`（既存行の更新）も
+ * どちらも rollback される（`opts.abortIfForgotten` を渡さなかった呼び出しでは、この
+ * 例外は絶対に投げられない——今日どおりの振る舞いのまま）。
+ *
+ * `forgottenIds` は「見直した時点で forgotten だった id」の一覧——`abortIfForgotten` の
+ * 部分集合であり、渡した順序を保つ保証は無い。
+ *
+ * 🔴 **`@mnemora/postgres` は、この見直しを書き込みと同一トランザクションの中で
+ * `SELECT … FOR UPDATE` として行う**（ADR 0375 決定7・[Issue #1035](https://github.com/takecchi/mnemora/issues/1035)
+ * と同じ形）——見直しと書き込みの間に窓が無い。**`packages/testkit` の
+ * `InMemoryMemoryStore` と `packages/core` のテスト用 `FakeMemoryStore` は、
+ * `opts.abortIfForgotten` を受け取らない（実装しない）**——呼び出し側
+ * （`runtime.consolidate`/`runtime.reflect`）が LLM 呼び出しの直後・書き込みの直前に
+ * 行う `getMany` の見直しだけが、これらの adapter の保護になる。この2つの見直しの
+ * 間には小さな窓が残る（`Runtime.consolidate`/`Runtime.reflect` の doc コメント、
+ * `docs/memory-model.md` の該当箇所を参照）。
+ */
+export class SourceMemoryForgottenError extends Error {
+  constructor(
+    readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories",
+    readonly forgottenIds: MemoryId[],
+  ) {
+    super(
+      `MemoryStore.${method}: aborted — ${forgottenIds.length} of the memories listed in ` +
+        `opts.abortIfForgotten were forgotten (forgottenIds: ${forgottenIds.join(", ")}). ` +
+        "Nothing was written (news and supersede both rolled back).",
+    );
+    this.name = "SourceMemoryForgottenError";
+  }
+}
+
+/**
  * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * （Issue #243 続き、ADR 0136 決定3の設計メモを実装した）: `status: 'contested'` を
  * **対向（`contestedWithId`）無しで**書き込もうとしたときに、`updateStatus` /
@@ -468,12 +509,29 @@ export interface MemoryStore {
    * `createObservationWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、積む outbox 行の
    * `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に
    * `clock.now()` を渡す。
+   *
+   * ⭐ **2026-09-29 追記（Issue #1226 / ADR 0375 決定7、クローン miku の判断）: `opts.abortIfForgotten`
+   * を足した。**`runtime.reflect` が、材料にした Memory を LLM 呼び出しの間に `forget`（さらに
+   * `purge`）されても、その本文から作った内省の Memory を書いてしまう競合を閉じるための欄。
+   * 非空の配列を渡すと、**書き込み（この INSERT）の直前に、その id の現在の `status` を見直し、
+   * 1件でも `"forgotten"` だったら何も書かずに {@link SourceMemoryForgottenError} を投げる**——
+   * `input` の INSERT も outbox ジョブの積み込みも一切起きない。空配列・省略時は今日どおり
+   * （見直しを一切行わない）。
+   *
+   * 🔴 **`@mnemora/postgres` はこの見直しを、INSERT と同一トランザクションの中で
+   * `SELECT … FOR UPDATE` として行う**（{@link SourceMemoryForgottenError} の doc コメント参照。
+   * 見直しと書き込みの間に窓が無い）。**`packages/testkit` の `InMemoryMemoryStore` と
+   * `packages/core` のテスト用 `FakeMemoryStore` はこの欄を実装しない**——渡しても無視され、
+   * 例外は投げられない。これらの adapter を使う呼び出し側は、`runtime.reflect` 自身が
+   * LLM 呼び出しの直後・この呼び出しの直前に行う `getMany` の見直し（残る窓あり）だけで
+   * 保護される。第三者の adapter がこの欄を実装するかどうかは任意——実装しなくても
+   * 型は壊れない（無視されるだけ）。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
@@ -1012,6 +1070,26 @@ export interface MemoryStore {
    * `createMemoryWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、`news` に積む outbox 行の
    * `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に
    * `clock.now()` を渡す。
+   *
+   * ⭐ **2026-09-29 追記（Issue #1226 / ADR 0375 決定7、クローン miku の判断）: `opts.abortIfForgotten`
+   * を足した。**`runtime.consolidate` が、統合元にした Memory を LLM 呼び出しの間に
+   * `forget`（さらに `purge`）されても、その本文から作った統合先を `active` で書いてしまう
+   * 競合を閉じるための欄——`createMemoryWithOutbox` の同日付の追記と**同じ意味論**。非空の
+   * 配列を渡すと、**`news`/`supersede` どちらの書き込みより前に**、その id の現在の
+   * `status` を見直し、1件でも `"forgotten"` だったら何も書かずに
+   * {@link SourceMemoryForgottenError} を投げる（`news` の作成も `supersede` の CAS も
+   * 一切起きない——**この見直しは既存の `conflicted`（CAS に弾かれた対象だけ飛ばして
+   * 他は commit する部分成功）より優先する**。`abortIfForgotten` に挙げた id が
+   * `supersede[].id` の部分集合である必要はない——`{ memoryIds }` で束ねた対象のうち
+   * eligible だった全 id を渡すのが呼び出し側の使い方だが、この口自体は `supersede` との
+   * 関係を検査しない）。空配列・省略時は今日どおり（見直しを一切行わない、`conflicted` の
+   * 部分成功のみ）。
+   *
+   * 🔴 **`@mnemora/postgres` はこの見直しを、`news`/`supersede` の書き込みと同一トランザクションの
+   * 中で `SELECT … FOR UPDATE` として行う**（{@link SourceMemoryForgottenError} の doc コメント
+   * 参照。見直しと書き込みの間に窓が無い）。**`packages/testkit` の `InMemoryMemoryStore` と
+   * `packages/core` のテスト用 `FakeMemoryStore` はこの欄を実装しない**——渡しても無視され、
+   * 例外は投げられない（`createMemoryWithOutbox` の同日付の追記と同じ理由・同じ限界）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -1022,7 +1100,7 @@ export interface MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
@@ -1561,6 +1639,68 @@ export interface MemoryStore {
    * 見ること。
    */
   findActiveByClaimKey?(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]>;
+  /**
+   * Issue #933（案2、`docs/decisions/0378-*.md`。ADR 0324 決定5・決定6・#207・ADR 0327 の
+   * 続き）: `findActiveByClaimKey?` と**同じ絞り込み**を、`status = 'active'` の代わりに
+   * `status = 'contested'` の行に対して行う、読み取り専用の口。
+   *
+   * ## なぜこの口が要るか
+   *
+   * `findActiveByClaimKey?` は `status = 'active'` の行しか見ない。ところが
+   * `detectClaimKeyContested`（`Runtime`）が同じ鍵の主張を1件ずつ検出するたびに、
+   * 一致した2件はどちらも `markContested` で `active` から `contested` へ移る——
+   * その結果、同じ鍵に3件目が届いたときには、1件目・2件目はもう `active` ではないため
+   * `findActiveByClaimKey?` の一致から**構造的に**消えている（#933）。この口は、その
+   * 「もう `active` ではないが、同じ鍵で争われている」相手を見つけるためにある。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`findActiveByClaimKey?`/`markContestedPair?` と同じ理由）。
+   * **フォールバック経路は無い**——この口が無い adapter に対しては、`Runtime` 側の検出は
+   * 今まで通り `findActiveByClaimKey?` の一致（`active` のみ）だけで判定する。**後方互換**
+   * ——この口を実装していない既存の adapter の振る舞いは1バイトも変わらない。
+   *
+   * 契約は `findActiveByClaimKey?` と同一で、`status` の絞り込みだけが異なる:
+   *
+   * - **`subjectId` は NULL 同士も一致として扱う**（`IS NOT DISTINCT FROM`）。
+   * - **`query.claimKey.subject`/`.predicate` は正規化済みの文字列として、そのまま
+   *   等値比較する。**
+   * - **`status = 'contested'` の行だけを返す。**`active`/`superseded`/`archived`/
+   *   `forgotten` は対象外——`findActiveByClaimKey?` が `active` 以外を対象外にするのと
+   *   対称。
+   * - **`query.excludeMemoryId` に一致する行は返さない。**
+   * - **`query.contentHash` と一致する行は返さない。**
+   * - **有効期間が重ならない行は返さない**（半開区間 `[validFrom, validUntil)`、`NULL` は
+   *   `-∞`/`+∞`。`findActiveByClaimKey?` と同じ判定式）。
+   * - **返す順序は規定しない。**
+   * - **LLM を一度も呼ばない。**
+   *
+   * ⚠ **（ADR 0377 と同じ前提）この口自体は `sourceObservationId` で絞らない。**
+   * 呼び出し側（`Runtime.detectClaimKeyContested`）が、`findActiveByClaimKey?` の返り値と
+   * この口の返り値を合わせた上で、同じ `sourceObservationId` を持つ兄弟を件数を数える前に
+   * 除く（ADR 0377 の除外を、combined な一致に対しても同じ形でかける。ADR 0378）。
+   *
+   * ⚠ **この口の一致は `markContested` の対にはしない。**`detectClaimKeyContested` は、
+   * 合わせた一致（`findActiveByClaimKey?` + この口）が2件以上のとき、または、
+   * ちょうど1件でもその1件がこの口由来（＝既に `contested`）のときは `markContested` を
+   * 呼ばず、状態を一切動かさずに `memory_events` へ evidence（`meta.reason:
+   * 'claim_key_conflict_unresolved'`）を積むだけに留める（ADR 0324 決定6 の経路、
+   * ADR 0378 決定2・決定7-d）。`markContested` の対になれるのは、合わせた一致がちょうど
+   * 1件で、かつその1件が `findActiveByClaimKey?` 由来（＝`active`）のときだけである。
+   * **多者間グループを実際に `contested` として束ねる書き込み（ADR 0327 が設計した
+   * `markContestedGroup` 相当）は、この口の範囲外**——`RelationStore`（ADR 0327・
+   * ADR 0292、まだ実装されていない）が要る（ADR 0378 の「PR2 へ残すもの」）。
+   */
+  findContestedByClaimKey?(
     ctx: Ctx,
     query: {
       subjectId: string | null;

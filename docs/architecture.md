@@ -430,7 +430,7 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date }
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -489,7 +489,7 @@ interface MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date }
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
@@ -532,6 +532,17 @@ interface MemoryStore {
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent }
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   findActiveByClaimKey?(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    }
+  ): Promise<Memory[]>;
+  findContestedByClaimKey?(
     ctx: Ctx,
     query: {
       subjectId: string | null;

@@ -283,13 +283,16 @@ export const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
  *   呼ぶ。`knownPredicates` を省略・空配列にすると語彙ヒント無しで呼ぶ。
  * - **`{ enabled: false }`**: 明示的に無効。省略と同じ挙動だが、呼び出し側が
  *   「このテナント/フローでは意図的に無効にしている」ことをコードで表せる。
- * - **`{ enabled: true, detectContested: true }`**（Issue #372、(B) 第2段）:
+ * - **`{ enabled: true, detectContested: true }`**（Issue #372、(B) 第2段。Issue #933
+ *   案2・ADR 0378 で `status = 'contested'` の一致も数えるよう広がった）:
  *   鍵が付いた Memory を作った直後、**列と索引だけで**（LLM を一度も呼ばずに）
  *   同じ tenant・同じ subjectId・同じ claim key・有効期間が重なる・`contentHash` が違う
- *   他の `active` Memory を探し、ちょうど1件なら `Runtime.markContested` を呼ぶ
- *   （`superseded` へは進めない）。**`enabled: false`（または省略）と組み合わせても
- *   何も起きない**——鍵が無いので検出のしようがない（`runtime.ts` の
- *   `detectClaimKeyContested` 参照）。
+ *   他の `active`/`contested` Memory を探し、ちょうど1件、かつその1件が `active` なら
+ *   `Runtime.markContested` を呼ぶ（`superseded` へは進めない）。その1件が既に
+ *   `contested` だった場合・一致が2件以上の場合は `markContested` を呼ばず、状態を
+ *   動かさずに evidence だけを積む（2026-09-30 の直し、ADR 0378 追記）。
+ *   **`enabled: false`（または省略）と組み合わせても何も起きない**——鍵が無いので
+ *   検出のしようがない（`runtime.ts` の `detectClaimKeyContested` 参照）。
  * - **`{ enabled: true, knownPredicatesFromStore: true }`**（Issue #691続き、ADR 0326
  *   「採らなかった案B」の実装、ADR 0329）: `deriveClaimKeys` を呼ぶ**前**に、
  *   `MemoryStore.listActiveClaimPredicates?`（任意メソッド）で「同じ tenant・同じ

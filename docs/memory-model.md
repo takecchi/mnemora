@@ -467,6 +467,33 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
   `contested` にならない（1つの発話内の言い直しが2件に分かれる場合を除き、失うものは無い。
   詳細は ADR 0377）。**この追記が扱う経路（1件ずつ届く場合）は、直っていない。**
 
+  ⚠ **2026-09-30 追記（Issue #933 の PR1。[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)）:
+  上の2つの追記（2026-09-28・2026-09-29）が「直っていない」としていた、1件ずつ届く経路の
+  症状は直った。**新しい任意メソッド `MemoryStore.findContestedByClaimKey?`
+  （`findActiveByClaimKey?` と同じ絞り込みで `status = 'active'` の代わりに
+  `status = 'contested'` を見る）を実装している store では、検出が `findActiveByClaimKey?`
+  の一致に `findContestedByClaimKey?` の一致を合わせて数える——ADR 0377 の兄弟除外も、
+  合わせた一致に同じ形でかける。⟹ 3件目は「1件目・2件目（どちらも `contested`）を合わせて
+  一致2件」で「2件以上」の分岐（決定6）に入り、`claim_key_conflict_unresolved` の
+  イベントが積まれる。4件目は「3件目（`active`）+ 1件目・2件目（`contested`）」で一致3件
+  ⟹ 同じ分岐。1件目・2件目の対は、3件目・4件目が届いても壊れない。
+  **`findContestedByClaimKey?` を実装していない adapter では、今まで通り**
+  （後方互換）。**ただし「3件以上のグループを実際に `contested` として recall に載せる」
+  ようにはなっていない**——決定6が引き受けていた負債（状態を動かさない）はそのまま
+  残る。多者間グループを表（`memory_relations`）へ束ねる書き込み経路は、
+  [ADR 0327](./decisions/0327-relation-graph-contested-write-path-design.md) の設計に
+  ADR 0378 が決定を与えたが、実装はまだ無い（Issue #933 の PR2）。詳細は ADR 0378。
+
+  ⚠ **同日追記（穴埋め）: 下の「相手がちょうど1件 ⟹ `markContested` を呼ぶ」は、
+  `findContestedByClaimKey?` を実装している store では不正確になった。**一致が
+  ちょうど1件でも、その1件が既に `contested`（＝`findContestedByClaimKey?` 由来）
+  だと、直した直後の版では `markContested` へ進んで CAS が `ineligible` を返し
+  （相手が `active` でないため）、検出中の Memory は `active` のまま・痕跡も残らなかった
+  ——3件目の有効期間が、既に対になった1件目・2件目のうち片方とだけ重なる場合に起きる。
+  **今は、一致の `status` を見てから分岐する**——`active` な1件だけが `markContested`
+  の対象になり、`contested` な1件は（相手が2件以上のときと同じ形で）evidence だけを
+  積む（`unresolved_conflict`）。詳細は ADR 0378 追記。
+
 **`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
 （行6）までであり、`contested → active | superseded`（行7）は今日どおり
 `resolveContested` の明示呼び出しのみ。
@@ -1072,9 +1099,13 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md)）: 上の段落は、もう今の振る舞いではない。** `purge()` の射程を広げた。いま `purge()` が書き換えるのは `memories` の `content`・`digest`・`purged_at` に加えて **`tags`（`[]` へ）・`attributes`（`{}` へ）・claimKey の2列（`NULL` へ）**であり、あわせて **その Memory の `memory_labels` の紐付けをすべて外し、`status: 'proposed'` の `labels.proposedCount` を外した本数だけ減らし**、**このテナントの `recalls.index_band` の digest 帯（`digestBand`）からその `memoryId` のエントリを見つけて `digest` をトゥームストーンへ書き換える**。上の段落が「残る」と書いていたもののうち、`tags`・`attributes`・claimKey・`labels`/`memory_labels`・`index_band` の digest 帯はこれで消える側になった——`content_hash`・別の空間の埋め込み行・元の Observation の `payload`・`memory_events.digest_snapshot`・`recalls.query` は、引き続き残る（ADR 0375「(b) 残る」表）。どこまで消すかは、この範囲について**決まった**（Issue #994・#995 は解消。#1207 の残りは下の表を見ること）。
 
-**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）**: `consolidate`/`reflect` が LLM を待っている間に、その元の記憶を `forget`・`purge` しても、統合先・内省の Memory はその本文を入れた LLM の出力から作られ、`active` で書かれる（`purge()` が `"purged"` を返した後でも）。書き込みの前に元の状態を見直す仕組みは無い（`embed` ジョブの同じ形は [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) で直した）。`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ。見直して打ち切るかどうかは決まっていない。
+**⚠ 2026-09-30 訂正（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7・2026-09-30 追記、クローン miku の判断）**: 直前の2026-09-27 の段落（`consolidate`/`reflect` が forget/purge を見直さずに書く、という記述）は、もう成り立たない。**今は、`consolidate`/`reflect` は LLM が返った直後・書き込みの直前に材料（統合元・内省の材料）を読み直し、1件でも `forgotten`（`forget()` のみ・`purge()` 済みのどちらも含む）なら、統合先・内省の Memory を一切作らずに打ち切る**（`outcome: 'aborted_source_forgotten'`）。
 
-**⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7）**: 上の「見直して打ち切るかどうかは決まっていない」は、**方向は決まった**——forget でも purge でも打ち切る。`@mnemora/postgres` の `store_supported` 経路（`purgeMemory?` を持つ adapter）は同一トランザクション内で材料行を `SELECT … FOR UPDATE` で見直してから書き、それ以外の経路は書く直前に読み直すだけで小さな窓が残る。**実装・実測は別 PR（PR2）で行う**——この版はまだ上の段落どおり（見直しの仕組みが無い）のままである。
+- `@mnemora/postgres` の `supersedeWithNewMemories`/`createMemoryWithOutbox` は、`opts.abortIfForgotten` を渡されると、書き込みと**同一トランザクションの中**で `SELECT … FOR UPDATE` によりもう一度見直す（`embed` ジョブの同種のレースを閉じた [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) と同じ「書く前に見直す」形。あちらは「書いた後に読み直して消す」形だった）——runtime の読み直し（この段落冒頭）とこの見直しの間の窓を閉じる。実際に窓が閉じることは、書き込みの入口（読み直しの直後・書き込み直前）で止め、その間に forget/purge を割り込ませる変異試験で `consolidate`（`supersedeWithNewMemories`）・`reflect`（`createMemoryWithOutbox`）の両方で確かめた——新実装はどちらも10/10緑、対応する `SELECT … FOR UPDATE` の見直しを外すとどちらも10/10赤（`packages/postgres/src/__tests__/consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`）。
+- `@mnemora/testkit` の `InMemoryMemoryStore` と `@mnemora/core` の テスト用 `FakeMemoryStore` は `opts.abortIfForgotten` を実装しない（`MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts.abortIfForgotten` の doc コメント参照）——これらの adapter では、runtime 自身の読み直しだけが保護になり、**読み直しと書き込みの間に小さな窓が残る**（実測: `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` の8ケースは、この窓では捕まえられない別のレース——LLM 呼び出しの間に forget/purge が完了する形——を検査しており、その形では全adapterで確実に打ち切られる。書き込みの直前の一瞬だけを狙う、より狭いレースの陽性対照は上の変異試験を参照）。
+- 第三者の `MemoryStore` 実装で `supersedeWithNewMemories?`/`createMemoryWithOutbox` を自前で持つものは、`opts.abortIfForgotten` を実装しなくても型は壊れない（無視されるだけ）——実装するかどうかは任意（`packages/testkit` の conformance suite `supportsAbortIfForgotten?` で検査できる）。
+
+**⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7）**: 上の「見直して打ち切るかどうかは決まっていない」は、**方向は決まった**——forget でも purge でも打ち切る。`@mnemora/postgres` の `store_supported` 経路（`purgeMemory?` を持つ adapter）は同一トランザクション内で材料行を `SELECT … FOR UPDATE` で見直してから書き、それ以外の経路は書く直前に読み直すだけで小さな窓が残る。**実装・実測は本 PR（PR2、Issue #1226）で行った**——上の2026-09-30 訂正を参照。
 
 **⚠ 2026-09-27 追記（[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、今の振る舞いを書くだけ）: 1つのテナントを消去した後に、表ごとに何が残るか。**
 テナント単位で消去する口は無い。ここでは「そのテナントの全記憶を `forget` → `purge` し、`setEventRetention({ kind: "days", days: 1 })` の後に
@@ -1762,7 +1793,9 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   の追記）。
 - 行6には、`Runtime.markContested` の直接の呼び出しのほかに、`observe()` の claim key の検出（`claimKey: { enabled:
   true, detectContested: true }`、既定 off。§5 の 2026-09 追記・[ADR 0324](./decisions/0324-claim-key-contested-detection.md)）
-  からも入る。相手がちょうど1件なら `markContested` と同じイベント（`meta.note` に根拠の JSON）。相手が2件以上なら、
+  からも入る。相手がちょうど1件、かつその1件が `active` なら `markContested` と同じイベント（`meta.note` に根拠の
+  JSON）。相手が2件以上、または相手がちょうど1件でも既に `contested`（Issue #933 案2・ADR 0378 の
+  `findContestedByClaimKey?` 由来。2026-09-30 の直し、ADR 0378 追記）なら、
   新しい行に `updated`（`meta.reason: 'claim_key_conflict_unresolved'`）を1件だけ積み、**状態は変えない**（表の
   どの行の遷移でもない）。
 - 行12・行13の `opts.reason` は `meta.note` に入る（`meta.reason` は固定値 `'consolidated'`・`'reflected'`）。行6・行7と

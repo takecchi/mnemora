@@ -573,6 +573,135 @@ PR #1393・Issue #1232）になった。**
 
   **DB マイグレーション**: 不要（新しい列・表は追加していない）。
 
+- **`consolidate`/`reflect` が、LLM を待つ間に forget/purge された材料から新しい記憶を
+  書かなくなった**（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+  [ADR 0375](./docs/decisions/0375-purge-scope-widened.md) 決定7・2026-09-30 追記）。
+  `consolidate`/`reflect` は、材料（統合元・内省の材料）を読んでから LLM を呼び、
+  その結果から新しい Memory を書く。LLM を待っている間に材料の1件が `forget`
+  （さらに `purge`）されても、これまでは書き込みの前に見直さず、統合先・内省の
+  Memory はその本文を入れた LLM の出力から作られ `active` で書かれていた
+  （`purge()` が `"purged"` を返した後でも）。**今は、LLM が返った直後・書き込みの
+  直前に材料を読み直し、1件でも forgotten なら統合先・内省の Memory を一切作らずに
+  打ち切る**（新しい `outcome: 'aborted_source_forgotten'`）。
+
+  - `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts` に
+    `abortIfForgotten?: ReadonlyArray<MemoryId>` を足した。渡すと、書き込みの直前に
+    その id の現在の `status` を見直し、1件でも `"forgotten"` なら何も書かずに
+    新しい公開クラス `SourceMemoryForgottenError` を投げる。
+  - `@mnemora/postgres` は、この見直しを書き込みと同一トランザクションの中で
+    `SELECT … FOR UPDATE` として行う（`embed` ジョブの同種のレースを閉じた
+    [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) と同じ
+    「書く前に見直す」形）——見直しと書き込みの間に窓が無い。
+  - `@mnemora/testkit` の `InMemoryMemoryStore` と `@mnemora/core` のテスト用
+    `FakeMemoryStore` は `opts.abortIfForgotten` を実装しない（渡しても無視される）。
+    これらの adapter では、`consolidate`/`reflect` 自身が LLM 呼び出しの直後に行う
+    「書く直前の読み直し」だけが保護になり、読み直しと書き込みの間に小さな窓が残る。
+  - `ConsolidateOutcome`/`ReflectOutcome` の union に `"aborted_source_forgotten"` を、
+    `ConsolidateSourceOutcome`/`ReflectBasisOutcome` の union に
+    `{ kind: "forgotten_before_write" }` を足した。**型としては追加のみ**
+    （union に値を足す変更・opts への省略可能フィールドの追加は非破壊——
+    「数え方の規律への追記（2026-09-28）」）。
+
+  **なぜ破壊的と数えるか**: `packages/testkit` の conformance suite に、任意フラグ
+  `supportsAbortIfForgotten?`（3状態、`supportsOnlyMemoryIdsFilter?` と同じ形）を
+  新設し、`true` を宣言した adapter に対して `opts.abortIfForgotten` の契約の歯
+  （forgotten な id を含めると `SourceMemoryForgottenError` を投げて何も書かない、
+  forgotten でなければ今日どおり書く）を実行するようにした——上の
+  「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの
+  判定を厳しくする変更」に当たる。**`supportsAbortIfForgotten` は任意
+  （`?: boolean`）であり、渡さない・`false` を渡す既存の呼び出し元はこの新しい歯を
+  1本も実行しない**（PR #524/PR #526、ADR 0237 の前例に倣い、新しい独立した能力の
+  フラグを必須にはしなかった）。
+
+  **誰が影響を受けるか**: `opts.abortIfForgotten` を自分で渡している呼び出し側
+  だけ、実行時の振る舞いが変わりうる。`runtime.consolidate`/`runtime.reflect` を
+  直接呼ぶだけの利用者は、`ConsolidateOutcome`/`ReflectOutcome` を網羅的に分岐
+  している場合だけ型検査で気づく（union に値が増えたため）——今日どおりの分岐
+  ならコンパイルは壊れない。`packages/testkit` の conformance suite を自分の
+  `MemoryStore` 実装に対して走らせている利用者は、`supportsAbortIfForgotten` を
+  渡さなければ影響を受けない。
+
+  **移行の手順**: `opts.abortIfForgotten` の見直し・打ち切りを自前実装したい場合、
+  `createMemoryWithOutbox`/`supersedeWithNewMemories?` にこの欄を実装し、
+  conformance suite に `supportsAbortIfForgotten: true` を渡す。実装しない場合は
+  何もする必要が無い（`abortIfForgotten` を渡しても無視されるだけで、今日どおり動く
+  ——ただし `consolidate`/`reflect` 自身の「書く直前の読み直し」による保護は、
+  adapter の実装によらず全アダプタで効く）。
+
+  **DB マイグレーション**: 不要（新しい列・表は追加していない）。
+
+  **陽性対照（実測）**: `packages/postgres/src/__tests__/consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`。
+  書き込みの入口（読み直しの直後・書き込み直前）で障壁を置き、その間に forget/purge を
+  割り込ませる変異試験——`consolidate`（`supersedeWithNewMemories`）・`reflect`
+  （`createMemoryWithOutbox`）の両方で、新実装は10/10緑、対応する
+  `SELECT … FOR UPDATE` の見直しを外すと10/10赤。
+
+  **⚠ union に値を足す変更が型検査に影響しうる実例**: `examples/chat/src/consolidation-cost.ts`
+  は `outcomes[result.outcome] += 1` という形で `ConsolidateOutcome` を index に使っており、
+  `"aborted_source_forgotten"` を足したことで CI の typecheck が `TS7053` で落ちた（`examples/chat`
+  側の `ConsolidationOutcomeCountsJson`/`emptyOutcomeCounts` に同名の欄を足して直した）。
+  **「union に値を足す変更は破壊的と数えない」という判定は変えていない**——網羅的な
+  `Record`/`switch` で `ConsolidateOutcome`/`ReflectOutcome`/`ConsolidateSourceOutcome`/
+  `ReflectBasisOutcome` を扱っている利用者は、この種の追加でも型検査が落ちうる、という
+  影響の実例として記録する。
+
+**⚠ 2026-09-30 追記28**: 上の25回分の棚卸しとは別に、着地に先立って変更を作った本人が
+この節へ足した項目（上の追記19・20 と同じ扱い）。[Issue #933](https://github.com/takecchi/mnemora/issues/933)
+（claim key の自動 contested 検出が、同じ鍵の主張が1件ずつ届く経路で3件目以降を検出できず
+痕跡も残さない）の PR1、[ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)。
+
+- **`@mnemora/core` の `MemoryStore` に、新しい任意メソッド `findContestedByClaimKey?` が
+  増えた。`packages/testkit` の conformance suite に、これを検査する約束が新しく課された
+  ——自前で `MemoryStore` を実装している人へ**（[Issue #933](https://github.com/takecchi/mnemora/issues/933)、
+  [PR #1431](https://github.com/takecchi/mnemora/pull/1431)、
+  [ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)）。
+
+  claim key の自動 contested 検出（[ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)）は、
+  同じ鍵の主張が1件ずつ届く自然な運用シーケンスで、3件目以降を検出できず、`memory_events`
+  にも痕跡を残さなかった——`MemoryStore.findActiveByClaimKey?` が `status = 'active'` の
+  行しか見ないため、既に対になった1件目・2件目は候補から構造的に外れていた（Issue #933）。
+
+  この PR（Issue #933 の PR1、案2）は、新しい任意メソッド `MemoryStore.
+  findContestedByClaimKey?`（`findActiveByClaimKey?` と同じ絞り込みで、`status = 'active'`
+  の代わりに `status = 'contested'` を見る）を足し、`Runtime.detectClaimKeyContested` が
+  これを実装している store でだけ、`findActiveByClaimKey?` の一致と合わせて数えるように
+  した。合わせた一致が2件以上のときは、今までどおり `markContested` を呼ばず
+  （[#207](https://github.com/takecchi/mnemora/issues/207)/`memory_relations` が無いと
+  1対1では表現できない、ADR 0324 決定5・決定6）、状態を一切動かさずに `memory_events` へ
+  `claim_key_conflict_unresolved` の evidence を積むだけに留める——3件目以降の検出漏れが
+  直り、少なくとも痕跡が残るようになった。**多者間のグループを実際に `contested` として
+  束ねる書き込み（`RelationStore` が要る）は、この PR の範囲外**（PR2、ADR 0378・
+  [ADR 0327](./docs/decisions/0327-relation-graph-contested-write-path-design.md)）。
+
+  `packages/testkit` の conformance suite（`describeMemoryStoreConformance`）に、
+  `findContestedByClaimKey?` を検査する新しい任意フラグ
+  `MemoryStoreConformanceOptions.supportsFindContestedByClaimKey?: boolean` が増えた
+  ——`supportsFindActiveByClaimKey?` と同じ3状態（`true`/`false`/省略）。
+
+  **誰が影響を受けるか**:
+  - 自前の `MemoryStore` を実装していて、`findContestedByClaimKey?` を実装しない場合は、
+    今までどおり `findActiveByClaimKey?`（`active` のみ）の一致だけで判定される
+    ——**後方互換。振る舞いは1バイトも変わらない。**
+  - `describeMemoryStoreConformance` を自前実装に対して走らせている場合、
+    `supportsFindContestedByClaimKey` を渡さないと「未検査」の named it が1本登録される
+    （他の任意フラグと同じ、実行は失敗しない）。`true`/`false` を渡す場合は、実装の有無に
+    合わせて正しい方を渡すこと。
+
+  **なぜ破壊的と数えるか**: `docs/migration-v1.md`「数え方の規律への追記
+  （2026-09-28）」規律2 の ⛔ が「conformance スイートの判定を厳しくする変更は、
+  これまでどおり上の定義と各世代の分け方で数える」と明記しており、項目23・24 と同じ
+  理由——型検査は壊れないが、`supportsFindContestedByClaimKey: true` を渡して
+  `findContestedByClaimKey` を実装していない自前実装は、conformance suite を当てると
+  新しく落ちる。
+
+  **移行の手順**: `findContestedByClaimKey?` を実装する場合は、`findActiveByClaimKey?`
+  と同じ絞り込みで `status = 'contested'` の行を返すように書き、conformance suite に
+  `supportsFindContestedByClaimKey: true` を渡す。実装しない場合は何もしなくてよい
+  （省略時は「未検査」のまま、後方互換の振る舞いが保たれる）。
+
+  **DB マイグレーション**: 不要（既存の索引 `idx_memories_claim_key` は `status` を条件に
+  含めない汎用索引であり、そのまま使える——新しい migration は追加していない）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。

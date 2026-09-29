@@ -28,6 +28,16 @@ export interface ConsolidationEmbeddingSpaceJson {
 /**
  * `ConsolidateOutcome`（`packages/core`）をそのまま数え上げたもの。
  * `dryRun` は使わない運用だが、型を1つに揃えるため欄は持つ（常に0のはず）。
+ *
+ * ⚠ **2026-09-30 追記（Issue #1226、ADR 0375 決定7）: `aborted_source_forgotten` を
+ * 足した。**`ConsolidateOutcome`（`packages/core`）に同名の値が増えたことに合わせた
+ * ——`outcomes[result.outcome] += 1`（`consolidation-cost.ts`）が
+ * `ConsolidateOutcome` の全値を index できることを型検査で保証するため、この
+ * インターフェースは常に `ConsolidateOutcome` の全値と1対1で揃える
+ * （`packages/core` の union に値が増えたら、ここにも同じ名前の欄を足すこと）。
+ * この bench では起きない想定（この bench の consolidate 対象はその場で作った
+ * filler/統合結果のみで、並行して forget/purge する操作を行わない）だが、常に
+ * 0で埋める。
  */
 export interface ConsolidationOutcomeCountsJson {
   consolidated: number;
@@ -35,6 +45,7 @@ export interface ConsolidationOutcomeCountsJson {
   not_examined: number;
   llm_failed: number;
   dry_run: number;
+  aborted_source_forgotten: number;
 }
 
 export interface ConsolidationEmbeddingStatusJson {
@@ -374,9 +385,16 @@ export function buildWeightsUnavailableConsolidationCostRunJson(options: {
   };
 }
 
-/** `ConsolidateOutcome` の5値をすべて0に初期化した内訳。 */
+/** `ConsolidateOutcome` の6値をすべて0に初期化した内訳（Issue #1226、2026-09-30 追記）。 */
 export function emptyOutcomeCounts(): ConsolidationOutcomeCountsJson {
-  return { consolidated: 0, nothing_to_consolidate: 0, not_examined: 0, llm_failed: 0, dry_run: 0 };
+  return {
+    consolidated: 0,
+    nothing_to_consolidate: 0,
+    not_examined: 0,
+    llm_failed: 0,
+    dry_run: 0,
+    aborted_source_forgotten: 0,
+  };
 }
 
 /**

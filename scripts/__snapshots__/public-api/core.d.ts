@@ -586,6 +586,11 @@ export declare class MemoryStatusConflictError extends Error {
     readonly observedStatus: MemoryStatus | null;
     constructor(memoryId: MemoryId, expectedStatus: MemoryStatus, observedStatus: MemoryStatus | null);
 }
+export declare class SourceMemoryForgottenError extends Error {
+    readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories";
+    readonly forgottenIds: MemoryId[];
+    constructor(method: "createMemoryWithOutbox" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
+}
 export declare class ContestedWithoutCompanionError extends Error {
     readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
@@ -624,6 +629,7 @@ export interface MemoryStore {
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -668,6 +674,7 @@ export interface MemoryStore {
         event: NewMemoryEvent;
     }>, opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -731,6 +738,14 @@ export interface MemoryStore {
         event: MemoryEvent;
     }>;
     findActiveByClaimKey?(ctx: Ctx, query: {
+        subjectId: string | null;
+        claimKey: ClaimKey;
+        excludeMemoryId: MemoryId;
+        contentHash: string;
+        validFrom: Date | null;
+        validUntil: Date | null;
+    }): Promise<Memory[]>;
+    findContestedByClaimKey?(ctx: Ctx, query: {
         subjectId: string | null;
         claimKey: ClaimKey;
         excludeMemoryId: MemoryId;
@@ -2864,7 +2879,7 @@ export interface ConsolidateOptions {
     reason?: string;
     signal?: AbortSignal;
 }
-export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run";
+export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
 export type ConsolidateSourceOutcome = {
     memoryId: MemoryId;
@@ -2899,6 +2914,9 @@ export type ConsolidateSourceOutcome = {
 } | {
     memoryId: MemoryId;
     kind: "eligible";
+} | {
+    memoryId: MemoryId;
+    kind: "forgotten_before_write";
 };
 export interface ConsolidationResult {
     outcome: ConsolidateOutcome;
@@ -2928,7 +2946,7 @@ export interface ReflectOptions {
     reason?: string;
     signal?: AbortSignal;
 }
-export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run";
+export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
 export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
 export type ReflectBasisOutcome = {
     memoryId: MemoryId;
@@ -2954,6 +2972,9 @@ export type ReflectBasisOutcome = {
 } | {
     memoryId: MemoryId;
     kind: "eligible";
+} | {
+    memoryId: MemoryId;
+    kind: "forgotten_before_write";
 };
 export interface ReflectionResult {
     outcome: ReflectOutcome;
