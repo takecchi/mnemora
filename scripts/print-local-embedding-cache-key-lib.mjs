@@ -45,8 +45,13 @@ export function slugForCacheKey(value) {
  * CI のキャッシュは、`revision` を渡す前（2026-09-21）に `<repo>/<file>` の形で保存されたまま、鍵が
  * 変わらないので保存し直されていなかった（`actions/cache` は鍵が当たると保存しない）。
  * ⟹ **中身の形が変わったら、この値を変えて保存し直させる。**
+ *
+ * ⚠ 2026-09-29 追記（Issue #1403、ADR 0365）: `revision-layout-1` から `revision-root-2` に上げた。
+ * `@mnemora/local-embedding` は `revision` を渡されると、キャッシュの根を
+ * `<cacheDir>/<encodeURIComponent(revision)>/` に分けて、その下に `<repo>/<file>` の形で置くようになった。
+ * 古い形（`<repo>/<revision>/<file>`）のキャッシュが当たると、新しい形では読まれず、保存もし直されない。
  */
-export const CACHE_LAYOUT_TAG = "revision-layout-1";
+export const CACHE_LAYOUT_TAG = "revision-root-2";
 
 export function buildCacheKeySuffix({ repo, dtype, sha }) {
   return `${slugForCacheKey(repo)}-${slugForCacheKey(dtype)}-${slugForCacheKey(sha)}-${CACHE_LAYOUT_TAG}`;
