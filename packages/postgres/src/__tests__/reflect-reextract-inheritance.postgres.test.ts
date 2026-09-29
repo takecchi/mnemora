@@ -27,7 +27,11 @@ import {
  * （`ReflectTarget` と `Runtime.reextract` の TSDoc の 2026-09-27 追記）。約束を足すものではない。
  *
  * - reflect の `{ query }` は、連想枠で返った記憶も材料に採る。
- * - reflect の `{ memoryIds }` は有効期間を見ず、内省の Memory は有効期間を持たない（Issue #1188 のコメント）。
+ * - reflect は、いまの時点で有効期間の外にある記憶を材料にしない。内省の Memory は今どおり有効期間を
+ *   持たない（Issue #1188。2026-09-29 に「`{ memoryIds }` は有効期間を見ない」から変えた——3つの形
+ *   すべての網羅は `reflect-validity-gate.test.ts`（`packages/core`）と
+ *   `reflect-target-selection.postgres.test.ts` を見ること。ここでは `{ memoryIds }` の1形だけを、
+ *   reextract との組み合わせの文脈で確かめる）。
  * - reextract の新しい Memory は、Observation の有効期間を引き継ぎ、`claimKey` は常に null である。
  * 2実装（Postgres・testkit の InMemory）で同じ結果になることも見る。
  */
@@ -161,10 +165,11 @@ describe("reflect・reextract の材料と引き継ぎ（今の振る舞い）",
         ]);
       });
 
-      it("reflect の { memoryIds } は期限切れの記憶も材料にし、内省の Memory は有効期間を持たない", async () => {
+      it("reflect の { memoryIds } は、いまの時点で有効期間の外にある記憶を材料にしない（Issue #1188。2026-09-29 変更）。内省の Memory は今どおり有効期間を持たない", async () => {
         const kit = await makeKit();
+        const expiredValidUntil = new Date("2026-01-01T00:00:00.000Z");
         const expired = await add(kit, [1, 0, 0], {
-          validUntil: new Date("2026-01-01T00:00:00.000Z"),
+          validUntil: expiredValidUntil,
           subjectId: "alice",
         } as Partial<NewMemory>);
         const current = await add(kit, [0.95, 0.05, 0], { subjectId: "alice" });
@@ -173,12 +178,16 @@ describe("reflect・reextract の材料と引き継ぎ（今の振る舞い）",
         });
 
         expect(result.outcome).toBe("reflected");
-        expect(result.basis.map((b) => b.kind)).toEqual(["used", "used"]);
+        expect(result.basis).toEqual([
+          { memoryId: expired, kind: "expired", validUntil: expiredValidUntil },
+          { memoryId: current, kind: "used" },
+        ]);
         const reflected = await kit.memoryStore.get(ctx, result.reflectedMemoryId!);
         expect(reflected?.status).toBe("active");
         expect(reflected?.validUntil ?? null).toBeNull();
         expect(reflected?.subjectId).toBe("alice");
-        expect(reflected?.provenance).toEqual({ kind: "reflected", sources: [expired, current] });
+        expect(reflected?.provenance).toEqual({ kind: "reflected", sources: [current] });
+        expect((await kit.memoryStore.get(ctx, expired))?.status).toBe("active");
       });
 
       it("reextract の新しい Memory は Observation の有効期間を引き継ぎ、claimKey は null", async () => {

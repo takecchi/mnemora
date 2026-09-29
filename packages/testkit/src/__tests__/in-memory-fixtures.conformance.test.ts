@@ -305,7 +305,10 @@ describeTenantSettingsStoreConformance({
   createStore: () => {
     const memoryStore = new InMemoryMemoryStore();
     latestMemoryStoreForTenantSettingsFixtures = memoryStore;
-    const store = new InMemoryTenantSettingsStore(memoryStore.activitySeq);
+    const store = new InMemoryTenantSettingsStore(
+      memoryStore.activitySeq,
+      memoryStore.subjectActivitySeq,
+    );
     latestTenantSettingsStore = store;
     return store;
   },
@@ -348,6 +351,33 @@ describeTenantSettingsStoreConformance({
       explain: { stages: [] },
       returnedMemories: [],
       advanceActivityClock: true,
+    });
+  },
+  // [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+  // （Issue #338）: `advanceActivitySeq`（上）と同じ形——`tenant_subject_activity` は
+  // `MemoryStore.createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
+  // 経由でだけ進む。
+  advanceSubjectActivitySeq: async (ctx: Ctx, subjectId: string) => {
+    if (!latestMemoryStoreForTenantSettingsFixtures) {
+      throw new Error("advanceSubjectActivitySeq より先に createStore() を呼ぶ必要がある");
+    }
+    await latestMemoryStoreForTenantSettingsFixtures.createRecall(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId,
+      query: { text: "fixture" },
+      budget: null,
+      omitted: [],
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+      explain: { stages: [] },
+      returnedMemories: [],
+      advanceActivityClock: { scope: "subject", subjectId },
     });
   },
   // Issue #201 / ADR 0318: InMemoryTenantSettingsStore は getTaxonomyMode/setTaxonomyMode

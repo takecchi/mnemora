@@ -11,11 +11,14 @@ import {
   DEFAULT_TAXONOMY_MODE,
   readActivitySeq,
   readDecayClock,
+  readHasSubjectActivityCounters,
+  readSubjectActivitySeqs,
   readTaxonomyMode,
 } from "./interfaces/tenant-settings-store.js";
 import type { MemoryId } from "./ids.js";
 import { NOT_INDEXED_REASONS } from "./recall.js";
 import type { Memory } from "./memory.js";
+import { classifyValidity } from "./validity.js";
 import {
   ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE,
   DEFAULT_ASSOCIATION_ANCHOR_COUNT,
@@ -410,6 +413,10 @@ async function fetchMandatoryCompanions(
     halfLifeRecalls: number | null | undefined;
   },
   survivesAttributesFilter: (memory: Memory) => boolean,
+  // ADR 0353: 呼び出し前に、取得した companion の subjectId ぶんの `S_x` を
+  // 読み込んでおく（`decayScoringExtras` が同期的に `effectiveNowSeqFor` を呼ぶため、
+  // ここで先に await する）。`hasSubjectCounters` が false のテナントでは no-op。
+  ensureSubjectSeqs: (memories: readonly Memory[]) => Promise<void>,
 ): Promise<ScoredCandidate[]> {
   const companionIds = [
     ...new Set(
@@ -420,6 +427,7 @@ async function fetchMandatoryCompanions(
   ];
   if (companionIds.length === 0) return [];
   const fetched = await memoryStore.getMany(ctx, companionIds);
+  await ensureSubjectSeqs(fetched);
   return fetched
     .filter((companionMemory) => survivesAttributesFilter(companionMemory))
     .filter((companionMemory) => companionMemory.status === "contested")
@@ -480,14 +488,62 @@ export async function runRecall(
     deps.tenantSettingsStore === undefined
       ? DEFAULT_DECAY_CLOCK
       : await readDecayClock(deps.tenantSettingsStore, ctx);
-  // 活動時計の「いま」。'wall' のテナントでは一度も `tenant_activity` を読まない
-  // （ADR 0165 決めたこと5「activity_seq を進めるのは decay_clock != 'wall' のテナントに
-  // 限る」の読み側の対になる節約——'wall' のテナントの activity_seq は常に無意味な 0 なので
-  // 読む理由が無い）。
+  // 活動時計の「いま」（テナント単位のカウンタ T）。'wall' のテナントでは一度も
+  // `tenant_activity` を読まない（ADR 0165 決めたこと5「activity_seq を進めるのは
+  // decay_clock != 'wall' のテナントに限る」の読み側の対になる節約——'wall' のテナントの
+  // activity_seq は常に無意味な 0 なので読む理由が無い）。
   const nowSeq: number | undefined =
     decayClock === "wall" || deps.tenantSettingsStore === undefined
       ? undefined
       : await readActivitySeq(deps.tenantSettingsStore, ctx);
+
+  // ADR 0353（Issue #338）: このテナントが subject 単位のカウンタ（`S_x`）を1本でも
+  // 使っているか。既定 'tenant' の呼び出ししかしていないテナントでは false のまま
+  // ——'wall' と同じ理由で `tenant_subject_activity` を一度も読まない。
+  const hasSubjectCounters: boolean =
+    decayClock === "wall" || deps.tenantSettingsStore === undefined
+      ? false
+      : await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx);
+
+  // ADR 0353: 呼び出しがどのカウンタを前進させるか（読み取りには影響しない——
+  // `effectiveNowSeqFor` は `activityCounting` を見ない）。
+  const activityCounting: "tenant" | "subject" = validatedQuery.activityCounting ?? "tenant";
+
+  // ADR 0353: `subjectId` ごとの `S_x` を必要になった時点でまとめて読むキャッシュ。
+  // `hasSubjectCounters` が false のテナントでは一度も呼ばれない（`ensureSubjectSeqs`
+  // 冒頭の早期リターン）——`tenant_subject_activity` を一度も参照しないという
+  // 「決めたこと」の読み側の対。
+  const subjectSeqCache = new Map<string, number>();
+  async function ensureSubjectSeqs(memories: readonly Memory[]): Promise<void> {
+    if (!hasSubjectCounters || deps.tenantSettingsStore === undefined) return;
+    const missing = [
+      ...new Set(
+        memories
+          .map((m) => m.subjectId)
+          .filter((id): id is string => id != null && !subjectSeqCache.has(id)),
+      ),
+    ];
+    if (missing.length === 0) return;
+    const result = await readSubjectActivitySeqs(deps.tenantSettingsStore, ctx, missing);
+    for (const id of missing) {
+      subjectSeqCache.set(id, result[id] ?? 0);
+    }
+  }
+
+  /**
+   * ADR 0353: その Memory にとっての「有効ないま」——`T + S_x`（`subjectId` が無い、
+   * または `hasSubjectCounters` が false なテナントでは `T` のみ）。**この式は
+   * `activityCounting`（前進の対象を選ぶだけの引数）を見ない**——読み取りは常に
+   * 実際に進んだ分をそのまま反映する。呼び出し前に `ensureSubjectSeqs` で
+   * 該当 `subjectId` を読み込んでおくこと（読み込んでいない `subjectId` は `0` 扱い
+   * ——安全側〈忘却が進んでいない側〉ではなく実際の値なので、呼び出し漏れは
+   * 正しさの欠陥になる。呼び出し側の規律で担保する）。
+   */
+  function effectiveNowSeqFor(memory: Memory): number | undefined {
+    if (nowSeq === undefined) return undefined;
+    if (!hasSubjectCounters || memory.subjectId == null) return nowSeq;
+    return nowSeq + (subjectSeqCache.get(memory.subjectId) ?? 0);
+  }
 
   // Issue #201 PR-B（ADR 0323）: taxonomy の参加資格を1回だけ解決する。
   // `RecallQuery.labels`（絞り込み）か `RecallQuery.taxonomyGroups`（群カウント）の
@@ -592,6 +648,15 @@ export async function runRecall(
         ? nowSeq
         : undefined,
     decayFloorAnyAxis: decayGateActive && decayClock === "either",
+    // ADR 0353: `decayFloorSeqAfter`（上、T）に、行の subjectId に応じた S_x を
+    // 足すかどうか。`hasSubjectCounters` が false のテナントでは常に false——
+    // 段1 SQL・aggregateScope・archiveDecayed の全部が、今日どおり T のみの
+    // 単一パラメータ比較のままになる（プラン族を変えない、`hasSubjectCounters` の
+    // doc コメント参照）。
+    decayFloorSeqUsesSubjectCounters:
+      decayGateActive &&
+      (decayClock === "activity" || decayClock === "either") &&
+      hasSubjectCounters,
     // Issue #152/#153（ADR 0312）: 空オブジェクトは「絞り込み無し」（`RecallQuery.attributes`
     // の doc コメント参照）——`undefined` に正規化して、以降すべての箇所（段1・段3.5・
     // `aggregateScope`・後置フィルタ）が同じ1つの「絞り込み無し」の形を見るようにする。
@@ -644,8 +709,11 @@ export async function runRecall(
   const activityAxisAlive = (memory: Memory): boolean => {
     const floorSeq = memory.decayFloorSeq;
     if (floorSeq === undefined || floorSeq === null) return true;
-    if (nowSeq === undefined) return true;
-    return floorSeq > nowSeq;
+    // ADR 0353: 「有効ないま」は T + S_{memory.subjectId}（呼び出し側が事前に
+    // `ensureSubjectSeqs` でこの memory の subjectId を読み込んでいる前提）。
+    const effectiveNow = effectiveNowSeqFor(memory);
+    if (effectiveNow === undefined) return true;
+    return floorSeq > effectiveNow;
   };
 
   /**
@@ -672,12 +740,16 @@ export async function runRecall(
    *
    * **⚠ ここでは件数を数えない。** `expired`/`not_yet_valid` の exact な件数は
    * `aggregateScope` から取る（`period` と同じ扱い。`FilteredOmission.condition` の doc 参照）。
+   *
+   * ⚠ **2026-09-29 追記（Issue #1188）: 述語そのものは `classifyValidity`（`./validity.js`、
+   * 非公開）に切り出した。** `consolidate()`/`reflect()` も同じ関数を呼ぶ——1箇所に置く理由は
+   * `classifyValidity` の doc コメントを見ること。境界・挙動は変えていない
+   * （`classifyValidity` は先に `validUntil` を見るが、真偽値としての結果はどちらの順で見ても
+   * 変わらない——逆転した区間では両方の条件が同時に「外」を指すため）。
    */
   const survivesValidityGate = (memory: Memory): boolean => {
     if (scope.validAt === undefined) return true;
-    if (memory.validFrom != null && memory.validFrom > scope.validAt) return false;
-    if (memory.validUntil != null && memory.validUntil <= scope.validAt) return false;
-    return true;
+    return classifyValidity(memory, scope.validAt) === null;
   };
 
   /**
@@ -794,11 +866,16 @@ export async function runRecall(
    */
   const gateVectorFilterFields: Pick<
     VectorFilter,
-    "decayFloorAtAfter" | "decayFloorSeqAfter" | "decayFloorAnyAxis" | "validAt"
+    | "decayFloorAtAfter"
+    | "decayFloorSeqAfter"
+    | "decayFloorAnyAxis"
+    | "decayFloorSeqUsesSubjectCounters"
+    | "validAt"
   > = {
     decayFloorAtAfter: scope.decayFloorAtAfter,
     decayFloorSeqAfter: scope.decayFloorSeqAfter,
     decayFloorAnyAxis: scope.decayFloorAnyAxis,
+    decayFloorSeqUsesSubjectCounters: scope.decayFloorSeqUsesSubjectCounters,
     validAt: scope.validAt,
   };
 
@@ -817,7 +894,10 @@ export async function runRecall(
     halfLifeRecalls: number | null | undefined;
   } => ({
     decayClock,
-    nowSeq,
+    // ADR 0353: memory 単位の「有効ないま」（`effectiveNowSeqFor` の doc コメント参照）。
+    // 呼び出し側が `ensureSubjectSeqs` でこの memory の subjectId を先に読み込んでいる
+    // 前提——このファイル内の呼び出し箇所はすべて `getMany` 直後に読み込んでいる。
+    nowSeq: effectiveNowSeqFor(memory),
     decayBaseSeq: memory.decayBaseSeq,
     halfLifeRecalls: memory.halfLifeRecalls,
   });
@@ -1059,6 +1139,9 @@ export async function runRecall(
   const fetchedMemories =
     candidateIds.length > 0 ? await deps.memoryStore.getMany(ctx, candidateIds) : [];
   const memoriesById = new Map(fetchedMemories.map((m) => [m.id, m]));
+  // ADR 0353: この段の `activityAxisAlive`/`decayScoringExtras` が同期的に
+  // `effectiveNowSeqFor` を呼ぶため、必要な subjectId ぶんを先にまとめて読んでおく。
+  await ensureSubjectSeqs(fetchedMemories);
 
   const excludeKinds = new Set(validatedQuery.excludeProvenanceKinds ?? []);
   const filteredCandidates: { memory: Memory; distance?: number; lexicalCoverage?: number }[] = [];
@@ -1300,6 +1383,7 @@ export async function runRecall(
     validatedQuery.timeWeighting,
     decayScoringExtras,
     survivesAttributesFilter,
+    ensureSubjectSeqs,
   );
 
   stages.push({
@@ -1613,6 +1697,9 @@ export async function runRecall(
               )
             : [];
         const associationMemoriesById = new Map(associationMemories.map((m) => [m.id, m]));
+        // ADR 0353: 段1と同じ理由——`decayScoringExtras`/`activityAxisAlive` が同期的に
+        // `effectiveNowSeqFor` を呼ぶため、先にまとめて読んでおく。
+        await ensureSubjectSeqs(associationMemories);
         // ⭐ Issue #402: 席は「アンカー類似度 × decay × tagMatch × freshness × strength」の
         // 順位で埋める。`rankedCandidates` は「多層防御（下）を生き延び、順位が組める」候補
         // だけを持つ——`hit.similarity`（この段の錨との近さ）と `score.total`（下で計算する
@@ -1816,6 +1903,7 @@ export async function runRecall(
           validatedQuery.timeWeighting,
           decayScoringExtras,
           survivesAttributesFilter,
+          ensureSubjectSeqs,
         );
         // `companionOf`（owner の memoryId）で引ける——`fetchMandatoryCompanions` の
         // 契約そのもの（段3の同じ欄の使い方と同じ）。
@@ -2833,11 +2921,22 @@ export async function runRecall(
       ...(m.companionOf !== undefined ? { companionOf: m.companionOf } : {}),
       ...(m.associationOf !== undefined ? { associationOf: m.associationOf } : {}),
     })),
-    // ADR 0165 決めたこと5: `decay_clock != 'wall'` のテナントに限り、この recall で
-    // `tenant_activity.activity_seq` を進める。「1単位 = recall() 1回」——この呼び出し
-    // そのものが1回の recall なので、既定のテナント（'wall'）では false のまま渡り、
-    // `activity_seq` は1本も UPDATE が増えない。
-    advanceActivityClock: decayClock !== "wall",
+    // ADR 0165 決めたこと5 / ADR 0353（Issue #338）: `decay_clock != 'wall'` の
+    // テナントに限り、この recall がどちらかのカウンタを進める。「1単位 = recall() 1回」
+    // ——この呼び出しそのものが1回の recall なので、既定のテナント（'wall'）では
+    // false のまま渡り、`tenant_activity`/`tenant_subject_activity` のどちらにも
+    // UPDATE が増えない。
+    //
+    // `activityCounting`（既定 'tenant'）が "subject" かつ `ctx.subjectId` が指定
+    // されているときだけ、その subject のカウンタ（S_x）を進める——絞っていない
+    // recall（テナント全体）では "誰の" カウンタを進めるかという問いが無いので、
+    // 'tenant' と同じ扱いに倒す（`RecallQuery.activityCounting` の doc コメント参照）。
+    advanceActivityClock:
+      decayClock === "wall"
+        ? false
+        : activityCounting === "subject" && ctx.subjectId !== undefined
+          ? { scope: "subject" as const, subjectId: ctx.subjectId }
+          : true,
   });
 
   // -------------------------------------------------------------------

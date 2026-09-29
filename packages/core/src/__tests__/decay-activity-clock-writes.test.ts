@@ -163,6 +163,51 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
       3 + Math.ceil(DEFAULT_HALF_LIFE_RECALLS * Math.log2(1 / 0.05)),
     );
   });
+
+  it(
+    "[ADR 0353] ctx.subjectId 付きで observe すると、decayBaseSeq は T + S_x になる" +
+      "（S_x は subject 単位のカウンタ。T には触れていなくても S_x だけで進む）",
+    async () => {
+      const { runtime, stores } = buildRuntime(
+        llmReturningMemories([{ content: "東京出張の予定", provenanceKind: "stated" }]),
+      );
+      await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
+      const bobCtx: Ctx = { tenantId: ctx.tenantId, subjectId: "bob" };
+      // S_bob だけを5まで進める（T には一度も触れない、activityCounting: "subject" 相当の
+      // 前進を createRecall の口で直接行う）。
+      for (let i = 0; i < 5; i += 1) {
+        await stores.memoryStore.createRecall(ctx, {
+          tenantId: ctx.tenantId,
+          subjectId: "bob",
+          query: { text: "fixture" },
+          budget: null,
+          omitted: [],
+          usage: {
+            chars: 0,
+            estimatedTokens: 0,
+            counter: "heuristic",
+            byTier: { full: 0, digest: 0, index: 0 },
+            indexChars: 0,
+          },
+          indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+          explain: { stages: [] },
+          returnedMemories: [],
+          advanceActivityClock: { scope: "subject", subjectId: "bob" },
+        });
+      }
+      expect(await stores.tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
+
+      const result = await runtime.observe(bobCtx, {
+        kind: "utterance",
+        text: "明日東京に出張します",
+      });
+      const memory = await stores.memoryStore.get(bobCtx, result.memoryIds[0]!);
+
+      // T(0) + S_bob(5) = 5。T を1度も進めていないのに decayBaseSeq が進むことが、
+      // 「作成時も、その記憶の subject の有効ないまを使う」ことの直接の証拠。
+      expect(memory?.decayBaseSeq).toBe(5);
+    },
+  );
 });
 
 describe("runtime.consolidate — 活動時計の3つ組の配線（同じ resolveActivityClockInputs を通る、ADR 0165 決めたこと3・5・12）", () => {

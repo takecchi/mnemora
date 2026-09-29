@@ -442,6 +442,27 @@ export interface TenantSettingsStore {
   getActivitySeq?(ctx: Ctx): Promise<number>;
 
   /**
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338）: `tenant_subject_activity` に、このテナントの行が1本でもあるか。
+   * 行が無ければ `false`。**読み出し専用。**進めるのは `MemoryStore.createRecall`
+   * （`advanceActivityClock: { scope: "subject", subjectId }`）だけである。
+   *
+   * ⭐ **このフラグの目的は正しさではなく、SQL のプラン族を変えないための最適化である。**
+   * `false` のテナントでは `T`（`getActivitySeq?`）のみの単一パラメータ比較のままにし、
+   * `true` になった時点で初めて `tenant_subject_activity` を相関サブクエリで引く
+   * （`readHasSubjectActivityCounters` の doc コメント参照）。
+   */
+  hasSubjectActivityCounters?(ctx: Ctx): Promise<boolean>;
+
+  /**
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338）: `tenant_subject_activity.activity_seq`（`S_x`）を、渡した
+   * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略してよい
+   * （呼び出し側の `readSubjectActivitySeqs` が `0` へ倒す）。**読み出し専用。**
+   */
+  getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
+
+  /**
    * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`
    * （`'open'`）を返す（`getDecayClock?` と同じ規律）。
@@ -513,6 +534,85 @@ export async function readDefaultHalfLifeRecalls(
     return DEFAULT_HALF_LIFE_RECALLS;
   }
   return await store.getDefaultHalfLifeRecalls(ctx);
+}
+
+/**
+ * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
+ * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
+ * はできない？」）: テナット単位の活動カウンタ `T`（`tenant_activity.activity_seq`、
+ * `getActivitySeq?` が返す既存の値）に加え、subject 単位のカウンタ `S_x`
+ * （新テーブル `tenant_subject_activity`）を持つ。ある Memory（subject `x`）の
+ * 「有効ないま」は常に `T + S_x`（`x` が無い＝主題なしの記憶は `T` のみ）——
+ * これは呼び出しごとの `activityCounting` の値に関わらず、**読み取り時は常に
+ * 同じ式**である（`activityCounting` が制御するのは前進（+1）の対象だけ）。
+ *
+ * `hasSubjectActivityCounters?` は「このテナントで `tenant_subject_activity` に
+ * 行が1本でもあるか」を返す。**未実装 / false のテナントでは、`@mnemora/postgres` の
+ * 段1 SQL ゲート・`aggregateScope`・`archiveDecayed` は `T` のみの単一パラメータ比較
+ * のままになる**（相関サブクエリを足さない）——1本も subject カウンタを使っていない
+ * テナント（今日のすべてのテナントを含む）では、EXPLAIN のプラン族を1つも変えない
+ * ための最適化フラグである。
+ */
+export interface SubjectActivitySeqs {
+  [subjectId: string]: number;
+}
+
+/**
+ * `hasSubjectActivityCounters?` を持たない adapter では `false` へ倒す
+ * （`readActivitySeq` と同じ規律）。
+ */
+export async function readHasSubjectActivityCounters(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+): Promise<boolean> {
+  if (store.hasSubjectActivityCounters === undefined) {
+    return false;
+  }
+  return await store.hasSubjectActivityCounters(ctx);
+}
+
+/**
+ * `getSubjectActivitySeqs?` を持たない adapter では、渡した `subjectIds` すべてに
+ * `0` を割り当てた `SubjectActivitySeqs` へ倒す（行が無い subject と同じ値）。
+ * `readActivitySeq` と同じ規律。
+ */
+export async function readSubjectActivitySeqs(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+  subjectIds: readonly string[],
+): Promise<SubjectActivitySeqs> {
+  if (subjectIds.length === 0) {
+    return {};
+  }
+  if (store.getSubjectActivitySeqs === undefined) {
+    const zeros: SubjectActivitySeqs = {};
+    for (const id of subjectIds) {
+      zeros[id] = 0;
+    }
+    return zeros;
+  }
+  const result = await store.getSubjectActivitySeqs(ctx, [...subjectIds]);
+  // 未実装/未使用の subjectId は 0 へ倒す——adapter が「行が無い＝キーを省略」して
+  // 返しても、呼び出し側は毎回 `?? 0` を書かずに済む。
+  const filled: SubjectActivitySeqs = {};
+  for (const id of subjectIds) {
+    filled[id] = result[id] ?? 0;
+  }
+  return filled;
+}
+
+/**
+ * `subjectId` 単数版。`readSubjectActivitySeqs` の薄い包み——作成・強化・復元など、
+ * 単一の subject の「いま」だけが要る呼び出し側のために用意する（バッチが要らない
+ * 場面でも `Record` を作らずに済む）。
+ */
+export async function readSubjectActivitySeq(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+  subjectId: string,
+): Promise<number> {
+  const seqs = await readSubjectActivitySeqs(store, ctx, [subjectId]);
+  return seqs[subjectId] ?? 0;
 }
 
 /**
