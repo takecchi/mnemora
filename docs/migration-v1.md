@@ -1600,40 +1600,64 @@ ADR 0380「検討した代替案」を見ること。
 content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも Index Scan に
 使える。ADR 0380 の EXPLAIN 実測を参照）。
 
-### 29. `ContestedDetectionOutcome.result` の判別可能 union に `"contested_group"` が増えた（`@mnemora/core`）
+### 29. `packages/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった。新しい interface `RelationStore` と、それを検査する新設の conformance suite も増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [Issue #207](https://github.com/takecchi/mnemora/issues/207)・
 [Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、
 [PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
 [ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
 
-**何が変わったか**: `Runtime.observe()` の `contestedDetection`（`claimKey: { enabled: true,
-detectContested: true }` を渡したときだけ現れる）が返す `ContestedDetectionOutcome.result` の
-判別可能 union に、新しい判別子 `{ kind: "contested_group"; memberIds: MemoryId[];
-markContestedGroup: MarkContestedGroupResult }` が増えた。
+**何が変わったか**:
 
-**誰が影響を受けるか**: `result.kind` を**網羅的に**（`switch` の `default` 無し、または
-`never` への割り当てで）分岐しているコードだけ、型検査が落ちる。⭕ **`result.kind ===
-"no_conflict"`/`"contested"` などを個別に読むだけなら影響しない**——新しい判別子が来ても
-既存の分岐はそのまま動く（ただし今まで `"unresolved_conflict"` として扱っていたケースの
-一部が、新しい opt-in（下記）を有効にした呼び出しでは `"contested_group"` に変わる。opt-in
-しない呼び出しでは一切現れない）。
+- `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を
+  足した。`@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`
+  （`InMemoryRelationStore`）が実装する。`packages/testkit` に新設の conformance suite
+  `describeRelationStoreConformance`（9 it）ができた——`packages/testkit`
+  （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
+  （`conformance.postgres.test.ts`）の両方が当てている。
+- `@mnemora/core` の `MemoryStore` に、新しい任意メソッド `markContestedGroup?`/
+  `resolveContestedGroup?`（3件以上専用、`markContestedPair?`/`resolveContestedPair?` の
+  N者版）が増えた。`packages/testkit` の `describeMemoryStoreConformance` に、これを検査する
+  `it` と、新しい任意フラグ `MemoryStoreConformanceOptions.supportsMarkContestedGroup?`/
+  `supportsResolveContestedGroup?: boolean`（既存の3状態フラグと同じ形）が増えた——群の
+  一部だけを渡した `resolveContestedGroup?` を専用のエラー
+  （`ContestedGroupMembershipMismatchError`、新設）で拒む約束、有効期間の重なりの境目
+  （半開区間・マイクロ秒精度）の約束も検査する。
+- 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`
+  （追記30の項目）を見ること。**ここには複製しない。**
 
-**なぜ増えたか**: `ClaimKeyOptions.formContestedGroups?: boolean`（新設、既定 `false`）を
-`true` にして呼んだときだけ、一致が2件以上（または既に `contested` な1件）の検出結果を、
-evidence-only（`"unresolved_conflict"`）の代わりに、実際に `Runtime.markContestedGroup` を
-呼んで群として書き込んだ結果として返すようにした——`"contested"`（`markContested` を呼んだ
-結果）と対称な形。
+**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる
+「conformance スイートの判定を厳しくする変更」に当たる——型検査は壊れないが、
+`supportsMarkContestedGroup: true`/`supportsResolveContestedGroup: true` を渡して
+これらの口を実装していない自前実装は、conformance suite を当てると新しく落ちる。
+項目23・24・27 と同じ判断である。
 
-**既定は変わらない**: `formContestedGroups` を渡さない（または `false` の）呼び出しでは、
-`result.kind` に `"contested_group"` は一度も現れない——挙動は Issue #933 PR1（ADR 0378）の
-まま1バイトも変わらない。
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を `packages/testkit` の conformance
+suite に対して走らせている利用者のうち、上の2つの任意フラグを `true` で渡しているが
+実装していない場合だけ。**`markContestedGroup?`/`resolveContestedGroup?` を実装しない・
+上の2つのフラグを渡さない利用者は影響を受けない**——後方互換。`RelationStore` を
+`Store` バンドルへ組み込むかどうかも任意（`RuntimeDeps.relationStore?`）——配線しなくても
+`recall()` は今日どおり動く。
 
-**どう直すか**: `switch` に `case "contested_group":` を足す。何もしない（既存の
-`"unresolved_conflict"` と同じ扱いにする）のであれば、その分岐を素通りさせるだけでよい。
+⚠ **非破壊の注記（オーナー回答 ask_human `d9364c91` の規律）**: `ContestedDetectionOutcome.
+result`（`@mnemora/core`）の判別可能 union に増えた `"contested_group"`、`Omission` の
+`over_limit`/`stage_skipped` の `stage` 列挙に増えた `"relation"` は、**この文書の定義では
+破壊的変更に数えない**——`RecallStageName` への `"association"` の追加（ADR 0151 追記）・
+`ConsolidateOutcome`/`ReflectOutcome` への `"aborted_source_forgotten"` の追加
+（CHANGELOG `[1.1.0]` 節 `### Breaking` の実例）と同じ「union に値を足す変更」である。
+網羅的な `switch`/`Record` でこれらの型を扱っている利用者は型検査が落ちうるが、それは
+union 拡張一般の影響であり、この文書が破壊的変更として数える基準（interface への必須
+メンバ追加・署名そのものの変更・conformance suite の要件強化）には当たらない。
 
-**DB マイグレーション**: 不要（この項目自体は型と `Runtime` の分岐だけ。`memory_relations`
-テーブル自体は migration 0026、段階Aで既に導入済み）。
+**どう直すか**: 自前の `MemoryStore` 実装に `markContestedGroup?`/`resolveContestedGroup?`
+を実装する場合は、conformance suite に `supportsMarkContestedGroup: true`/
+`supportsResolveContestedGroup: true` を渡す。実装しない場合は何もしなくてよい（省略時は
+「未検査」のまま、後方互換の振る舞いが保たれる）。`RelationStore` を自前実装する場合は
+`describeRelationStoreConformance` を当てる。
+
+**DB マイグレーション**: 新しい migration `0026_memory_relations.sql` が1本増える
+（`memory_relations` テーブルを新設するだけ）。利用者は `mnemora-postgres-migrate`
+（または `runMigrations`）を打つこと。
 
 ⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は12件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
@@ -1641,14 +1665,6 @@ PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
 2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380）、
 PR #1442・Issue #207・#933 PR2（ADR 0381））になった。**
-
-⚠ **項目29 は、[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2（多者間の
-グループを `contested` として束ねる書き込み、まだ OPEN）が使う予定の欠番である。**
-本項目（30）はそれより先に着地する可能性があるため、番号だけ先に確定して欠番のまま
-残す——着地順が入れ替わった場合はマージ側が並びを確認し、必要なら番号を付け替える
-（[ADR 0179](./decisions/0179-adr-number-assigned-at-merge.md) と同じ「マージ直前に
-確定させる」規律。付け替える場合は [ADR 0200](./decisions/0200-adr-renumber-warns-when-titles-need-fixing.md)
-の道具に従うこと）。
 
 ### 30. `VectorStore` に必須メソッド `deleteAcrossSpaces` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
