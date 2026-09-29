@@ -59,7 +59,7 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
  *
  * ⚠ **2026-09-29 追記（クローン miku の判断。[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: 上の「中断の口も渡さない」は
+ * [ADR 0359](../../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: 上の「中断の口も渡さない」は
  * もう成り立たない。** `embed` は任意の第3引数 `opts?: AbortOptions` を受け取る。挙動は
  * `LLMProvider.complete`/`completeStructured`（`llm-provider.ts` 同日付追記）と同じ——
  * 呼ぶ前に既に abort 済みなら呼ばずに reject、呼んでいる間に abort されたら provider が
