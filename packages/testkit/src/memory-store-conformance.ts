@@ -335,6 +335,23 @@ export interface MemoryStoreConformanceOptions {
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
   supportsListActiveClaimPredicates?: boolean;
+  /**
+   * [Issue #1412](https://github.com/takecchi/mnemora/issues/1412) コメント1
+   * （Issue #1238 棚卸し、[ADR 0373](../../../docs/decisions/0373-conformance-suite-issue-1412-promises.md)）:
+   * 対象の `MemoryStore` 実装が `resolveOrphanedContested`（任意メソッド、Issue #825・
+   * ADR 0150 追記）を実装しているかどうか。**任意**（省略可）。
+   *
+   * `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` と同じ3状態を
+   * 区別する——既存の外部 adapter の呼び出しを型エラーにしないため。`true` なら
+   * CAS 違反の歯（survivor が呼び出し時点で `status !== 'contested'`、または
+   * `contestedWithId` が渡された値と食い違うと {@link MemoryStatusConflictError}
+   * （`expectedStatus: 'contested'`）で弾かれ、無傷のまま残る）を実行する。**正常系・
+   * 原子性等の他の契約はこのフラグの範囲に入らない**（ADR 0373 決めたこと3参照）。
+   * `false` なら `expect(store.resolveOrphanedContested).toBeUndefined()` を積極的に
+   * assert する——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を
+   * 1本だけ登録する。
+   */
+  supportsResolveOrphanedContested?: boolean;
 }
 
 /**
@@ -376,6 +393,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsLabels,
     supportsFindActiveByClaimKey,
     supportsListActiveClaimPredicates,
+    supportsResolveOrphanedContested,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -581,6 +599,83 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       const result = await store.getMany(ctx, [memory.id, "does-not-exist"]);
       expect(result.map((m) => m.id)).toEqual([memory.id]);
+    });
+
+    // -------------------------------------------------------------------
+    // Issue #1412 A8（Issue #1238 棚卸し、ADR 0373）: 渡した入力・返した値が、
+    // store の中の実体と切り離されている（呼び手が後から書き換えても、store 側は
+    // 変わらない／store 側の後の書き込みで、呼び手が受け取った値が遡って変わらない）。
+    // `packages/testkit/src/__tests__/in-memory-return-snapshots.test.ts`（Issue #1108）が
+    // fixture 単体でこの一般形を広く検査しているが、それは fixture 内部だけで完結する
+    // テストであり conformance suite には出ない——ここでは代表的な口だけを、外部 adapter
+    // にも課す約束として固定する。
+    // -------------------------------------------------------------------
+
+    it("createMemory は入力（tags の配列・attributes のオブジェクト・validFrom の Date）を渡した後に呼び手が書き換えても、保存した値は変わらない（Issue #1412 A8）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const validFrom = new Date("2026-01-01T00:00:00.000Z");
+      const input = buildNewMemoryFixture({
+        tenantId: "tenant-1",
+        contentHash: "a8-create-input-detached",
+        tags: ["original-tag"],
+        attributes: { region: "jp" },
+        validFrom,
+      });
+
+      const created = await store.createMemory(ctx, input);
+
+      // 保存した直後に、呼び手の手元にある入力（配列・オブジェクト・Date）を書き換える。
+      input.tags.push("mutated-by-caller");
+      (input.attributes as Record<string, unknown>).region = "mutated-by-caller";
+      validFrom.setTime(0);
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.tags).toEqual(["original-tag"]);
+      expect((reread?.attributes as Record<string, unknown> | undefined)?.region).toBe("jp");
+      expect(reread?.validFrom?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    });
+
+    it("get が返した Memory を呼び手が書き換えても、次の get は影響を受けない（Issue #1412 A8）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "a8-get-return-detached",
+          tags: ["original-tag"],
+        }),
+      );
+
+      const first = await store.get(ctx, memory.id);
+      expect(first).not.toBeNull();
+      (first as { status: string }).status = "mutated-by-caller";
+      first!.tags.push("mutated-by-caller");
+
+      const second = await store.get(ctx, memory.id);
+      expect(second?.status).toBe("active");
+      expect(second?.tags).toEqual(["original-tag"]);
+    });
+
+    it("getMany が返した Memory 配列の要素を呼び手が書き換えても、次の getMany は影響を受けない（Issue #1412 A8）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "a8-getmany-return-detached",
+          tags: ["original-tag"],
+        }),
+      );
+
+      const first = await store.getMany(ctx, [memory.id]);
+      expect(first).toHaveLength(1);
+      first[0]!.tags.push("mutated-by-caller");
+
+      const second = await store.getMany(ctx, [memory.id]);
+      expect(second[0]?.tags).toEqual(["original-tag"]);
     });
 
     // -------------------------------------------------------------------
@@ -3151,6 +3246,36 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(events).toEqual([]);
     });
 
+    it("updateStatusWithEvent が CAS で投げる MemoryStatusConflictError の memoryId/expectedStatus/observedStatus は逐次の呼び出しに限った約束である（Issue #1412 コメント2）", async () => {
+      // ⚠ ここで検査するのは、CAS が破れた「直後にもう一度読み直した値」が3欄に入る
+      // ことであって、並行の下での正しさではない——`MemoryStatusConflictError` の
+      // doc コメント（`observedStatus` は「弾かれた後に読み直した値」）どおり、
+      // 弾かれた瞬間の値と一致する保証は無い。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.updateStatus(ctx, memory.id, "archived");
+
+      let caught: unknown;
+      await store
+        .updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "superseded",
+          { expectedStatus: "active" },
+          buildSupersedeEvent(ctx, memory.id, memory.digest),
+        )
+        .catch((error: unknown) => {
+          caught = error;
+        });
+
+      expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+      const conflict = caught as MemoryStatusConflictError;
+      expect(conflict.memoryId).toBe(memory.id);
+      expect(conflict.expectedStatus).toBe("active");
+      expect(conflict.observedStatus).toBe("archived");
+    });
+
     it("updateStatusWithEvent は対象が無ければ『memory not found』の例外を投げ、イベントも積まれない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -3740,6 +3865,44 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         );
         expect(retry.created).toBe(true);
       });
+
+      it("supersedeWithNewMemories が返した created[].memory を呼び手が書き換えても、次の get は影響を受けない（Issue #1412 A8）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const old = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "a8-supersede-return-old" }),
+        );
+
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                content: "news 1",
+                contentHash: "a8-supersede-return-news",
+                tags: ["original-tag"],
+              }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              event: buildSupersedeEvent(ctx, old.id, old.digest),
+            },
+          ],
+        );
+
+        expect(result.created).toHaveLength(1);
+        const created = result.created[0]!.memory;
+        created.tags.push("mutated-by-caller");
+
+        const reread = await store.get(ctx, created.id);
+        expect(reread?.tags).toEqual(["original-tag"]);
+      });
     } else {
       it("supersedeWithNewMemories は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
@@ -3917,6 +4080,38 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(summary.meta.purgedCount).toBe(2);
         expect(new Date(summary.meta.oldestPurgedAt as string).getTime()).toBe(oldest.getTime());
         expect(new Date(summary.meta.newestPurgedAt as string).getTime()).toBe(newest.getTime());
+      });
+
+      it("purgeExpiredEvents が積む events_purged の meta の oldestPurgedAt/newestPurgedAt/olderThan は ISO 8601 の文字列である（Issue #1412 A10）", async () => {
+        // 縛るのは型（と形）だけ——値そのものの正しさは上の歯で既に検査している。
+        // `meta` は JSON を通る欄（`packages/postgres` は jsonb 列に保存する）なので、
+        // Date のまま持ち回る adapter があるとここで検出する（Issue #1211 の外の値は
+        // adapter によって往復が違うが、`events_purged` の meta は core 自身が組み立てる
+        // 値であり、adapter が選べる余地が無い）。
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-meta-iso8601" }),
+        );
+        const oldest = new Date("2024-01-01T00:00:00.000Z");
+        const newest = new Date("2024-01-02T00:00:00.000Z");
+        await seedEvent(store, ctx, memory.id, { at: oldest });
+        await seedEvent(store, ctx, memory.id, { at: newest });
+        const olderThan = new Date("2024-06-01T00:00:00.000Z");
+
+        await store.purgeExpiredEvents!(ctx, { olderThan, limit: 10 });
+
+        const purgedEvents = await listPurgedEvents(ctx);
+        expect(purgedEvents).toHaveLength(1);
+        const meta = purgedEvents[0]!.meta;
+        const iso8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+        expect(typeof meta.oldestPurgedAt).toBe("string");
+        expect(meta.oldestPurgedAt).toMatch(iso8601);
+        expect(typeof meta.newestPurgedAt).toBe("string");
+        expect(meta.newestPurgedAt).toMatch(iso8601);
+        expect(typeof meta.olderThan).toBe("string");
+        expect(meta.olderThan).toMatch(iso8601);
       });
 
       it("purgeExpiredEvents は kind='events_purged' 自身を対象から除外する（無限後退を避ける）", async () => {
@@ -4643,6 +4838,54 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(events.filter((e) => e.kind === "purged")).toHaveLength(1); // 2件目は積まれない
       });
 
+      it("purgeMemory が2度目に投げる MemoryPurgeConflictError の observedStatus/observedPurgedAt は逐次の呼び出しに限った約束である（Issue #1412 コメント2）", async () => {
+        // ⚠ 並行の下での正しさは検査しない（`MemoryPurgeConflictError` の doc コメント
+        // と同じ注意——`observedStatus`/`observedPurgedAt` は「弾かれた後に読み直した値」）。
+        // `observedPurgedAt` の宣言は `Date | null`（`packages/core/src/interfaces/memory-store.ts`）
+        // ——公開の約束として instanceof Date と getTime() の一致の両方を見る。
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-conflict-fields",
+            status: "forgotten",
+          }),
+        );
+        const event: NewMemoryEvent = {
+          tenantId: "tenant-1",
+          memoryId: memory.id,
+          kind: "purged",
+          actor: { type: "system" },
+          digestSnapshot: memory.digest,
+          meta: {},
+        };
+        const firstPurge = await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          event,
+        );
+
+        let caught: unknown;
+        await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          event,
+        ).catch((error: unknown) => {
+          caught = error;
+        });
+
+        expect(caught).toBeInstanceOf(MemoryPurgeConflictError);
+        const conflict = caught as MemoryPurgeConflictError;
+        expect(conflict.memoryId).toBe(memory.id);
+        expect(conflict.observedStatus).toBe("forgotten");
+        expect(conflict.observedPurgedAt).toBeInstanceOf(Date);
+        expect(conflict.observedPurgedAt?.getTime()).toBe(firstPurge.memory.purgedAt!.getTime());
+      });
+
       it("purgeMemory は対象が存在しなければ「memory not found」を投げる", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -4734,6 +4977,30 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.totalInScope).toBe(0);
     });
 
+    it("createMemory が投げる ContestedWithoutCompanionError の method/memoryId は 'createMemory'/null である（Issue #1412 コメント2）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      let caught: unknown;
+      await store
+        .createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            status: "contested",
+            contentHash: "lone-contested-create-fields",
+          }),
+        )
+        .catch((error: unknown) => {
+          caught = error;
+        });
+
+      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      const rejection = caught as ContestedWithoutCompanionError;
+      expect(rejection.method).toBe("createMemory");
+      expect(rejection.memoryId).toBeNull();
+    });
+
     it("createMemory は status='contested' かつ contestedWithId が既存 Memory を指すなら受け付ける", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -4776,6 +5043,31 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.totalInScope).toBe(0);
     });
 
+    it("createMemoryWithOutbox が投げる ContestedWithoutCompanionError の method/memoryId は 'createMemoryWithOutbox'/null である（Issue #1412 コメント2）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      let caught: unknown;
+      await store
+        .createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            status: "contested",
+            contentHash: "lone-contested-create-outbox-fields",
+          }),
+          ["embed"],
+        )
+        .catch((error: unknown) => {
+          caught = error;
+        });
+
+      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      const rejection = caught as ContestedWithoutCompanionError;
+      expect(rejection.method).toBe("createMemoryWithOutbox");
+      expect(rejection.memoryId).toBeNull();
+    });
+
     it("updateStatus は status='contested' への書き込みを常に ContestedWithoutCompanionError で拒否する（対象は無傷）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -4791,6 +5083,28 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const after = await store.get(ctx, memory.id);
       expect(after?.status).toBe("active"); // 無傷
       expect(after?.contestedWithId ?? null).toBeNull();
+    });
+
+    it("updateStatus が投げる ContestedWithoutCompanionError の method/memoryId は 'updateStatus'/対象の id である（Issue #1412 コメント2）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "update-status-contested-fields",
+        }),
+      );
+
+      let caught: unknown;
+      await store.updateStatus(ctx, memory.id, "contested").catch((error: unknown) => {
+        caught = error;
+      });
+
+      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      const rejection = caught as ContestedWithoutCompanionError;
+      expect(rejection.method).toBe("updateStatus");
+      expect(rejection.memoryId).toBe(memory.id);
     });
 
     it("updateStatusWithEvent は status='contested' への書き込みを常に ContestedWithoutCompanionError で拒否し、イベントも1件も積まれない", async () => {
@@ -4818,6 +5132,36 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(after?.status).toBe("active"); // 無傷
       const events = await listEventsForMemory(ctx, memory.id);
       expect(events).toHaveLength(0);
+    });
+
+    it("updateStatusWithEvent が投げる ContestedWithoutCompanionError の method/memoryId は 'updateStatusWithEvent'/対象の id である（Issue #1412 コメント2）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "update-status-with-event-contested-fields",
+        }),
+      );
+
+      let caught: unknown;
+      await store
+        .updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "contested",
+          {},
+          buildSupersedeEvent(ctx, memory.id, memory.digest),
+        )
+        .catch((error: unknown) => {
+          caught = error;
+        });
+
+      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      const rejection = caught as ContestedWithoutCompanionError;
+      expect(rejection.method).toBe("updateStatusWithEvent");
+      expect(rejection.memoryId).toBe(memory.id);
     });
 
     if (supportsSupersedeWithNewMemories) {
@@ -4873,6 +5217,48 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         // 全要素を見てから初めて書き込みを始めることの歯。
         const aggregate = await store.aggregateScope(ctx, {});
         expect(aggregate.totalInScope).toBe(1); // oldMemory だけ
+      });
+
+      it("supersedeWithNewMemories が投げる ContestedWithoutCompanionError の method/memoryId は 'supersedeWithNewMemories'/null である（Issue #1412 コメント2）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const oldMemory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "supersede-guard-fields-old",
+          }),
+        );
+
+        let caught: unknown;
+        await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                status: "contested",
+                contentHash: "supersede-guard-fields-lone-contested",
+              }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: oldMemory.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, oldMemory.id, oldMemory.digest),
+            },
+          ],
+        ).catch((error: unknown) => {
+          caught = error;
+        });
+
+        expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+        const rejection = caught as ContestedWithoutCompanionError;
+        expect(rejection.method).toBe("supersedeWithNewMemories");
+        expect(rejection.memoryId).toBeNull();
       });
     }
 
@@ -5037,6 +5423,49 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           expect(eventsB).toHaveLength(0);
         },
       );
+
+      it("markContestedPair が CAS で投げる MemoryStatusConflictError の memoryId/expectedStatus/observedStatus は逐次の呼び出しに限った約束である（Issue #1412 コメント2）", async () => {
+        // ⚠ 並行の下での正しさは検査しない（`MemoryStatusConflictError` の doc コメント
+        // と同じ注意）。片方（b）だけを非 active にして、CAS を破った側の id が
+        // 一意に決まる形にする。
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "mark-contested-fields-a" }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "mark-contested-fields-b",
+            status: "archived",
+          }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+
+        let caught: unknown;
+        await store.markContestedPair!(
+          ctx,
+          { id: a.id, event: event(a.id) },
+          { id: b.id, event: event(b.id) },
+        ).catch((error: unknown) => {
+          caught = error;
+        });
+
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        const conflict = caught as MemoryStatusConflictError;
+        expect(conflict.memoryId).toBe(b.id);
+        expect(conflict.expectedStatus).toBe("active");
+        expect(conflict.observedStatus).toBe("archived");
+      });
 
       it("markContestedPair は対象が存在しなければ「memory not found」を投げ、存在する側も無傷のまま", async () => {
         const store = await createStore();
@@ -5307,6 +5736,35 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         },
       );
 
+      it("resolveContestedPair が CAS で投げる MemoryStatusConflictError の memoryId/expectedStatus/observedStatus は逐次の呼び出しに限った約束である（Issue #1412 コメント2）", async () => {
+        // ⚠ 並行の下での正しさは検査しない。b だけを対から外に出し、CAS を破った側の
+        // id が一意に決まる形にする（`it.each` の同じ下ごしらえと同じ理由）。
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const { a, b } = await createContestedPair(
+          store,
+          ctx,
+          "resolve-contested-fields-a",
+          "resolve-contested-fields-b",
+        );
+        await store.updateStatus(ctx, b, "active");
+
+        let caught: unknown;
+        await store.resolveContestedPair!(
+          ctx,
+          { id: a, status: "active", event: buildResolveEvent(ctx, a, "updated") },
+          { id: b, status: "active", event: buildResolveEvent(ctx, b, "updated") },
+        ).catch((error: unknown) => {
+          caught = error;
+        });
+
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        const conflict = caught as MemoryStatusConflictError;
+        expect(conflict.memoryId).toBe(b);
+        expect(conflict.expectedStatus).toBe("contested");
+        expect(conflict.observedStatus).toBe("active");
+      });
+
       it("resolveContestedPair は対象が存在しなければ「memory not found」を投げ、存在する側も無傷のまま", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -5376,6 +5834,133 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       it("resolveContestedPair は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.resolveContestedPair).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // resolveOrphanedContested（Issue #825、ADR 0150 追記、任意メソッド）。
+    //
+    // Issue #1412 コメント1（Issue #1238 棚卸し、ADR 0373）: この口には conformance の
+    // 歯が1本も無かった。ここで固定するのは CAS 違反（survivor が呼び出し時点で
+    // `status !== 'contested'`、または `contestedWithId` が渡された値と食い違う）で
+    // {@link MemoryStatusConflictError}（`expectedStatus: 'contested'`）を投げ、行が
+    // 無傷のまま残ることだけである——正常系・原子性等の他の契約は、この PR の
+    // 切り出しに入っていない。
+    // -------------------------------------------------------------------
+
+    if (supportsResolveOrphanedContested === true) {
+      it("resolveOrphanedContested は survivor が contested でなければ MemoryStatusConflictError（expectedStatus: 'contested'）を投げ、無傷のまま（Issue #1412 コメント1）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "orphan-contested-not-contested-a",
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "orphan-contested-not-contested-b",
+          }),
+        );
+        const event: NewMemoryEvent = {
+          tenantId: "tenant-1",
+          memoryId: a.id,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        };
+
+        let caught: unknown;
+        await store.resolveOrphanedContested!(ctx, {
+          id: a.id,
+          contestedWithId: b.id,
+          event,
+        }).catch((error: unknown) => {
+          caught = error;
+        });
+
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        const conflict = caught as MemoryStatusConflictError;
+        expect(conflict.memoryId).toBe(a.id);
+        expect(conflict.expectedStatus).toBe("contested");
+        expect(conflict.observedStatus).toBe("active");
+
+        const after = await store.get(ctx, a.id);
+        expect(after?.status).toBe("active");
+      });
+
+      it("resolveOrphanedContested は contestedWithId が実際の対向と食い違うと MemoryStatusConflictError（expectedStatus: 'contested'）を投げ、無傷のまま（Issue #1412 コメント1）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "orphan-contested-mismatch-a",
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "orphan-contested-mismatch-b",
+          }),
+        );
+        const decoy = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "orphan-contested-mismatch-decoy",
+          }),
+        );
+        const pairEvent = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await store.markContestedPair!(
+          ctx,
+          { id: a.id, event: pairEvent(a.id) },
+          { id: b.id, event: pairEvent(b.id) },
+        );
+
+        let caught: unknown;
+        await store.resolveOrphanedContested!(ctx, {
+          id: a.id,
+          contestedWithId: decoy.id,
+          event: pairEvent(a.id),
+        }).catch((error: unknown) => {
+          caught = error;
+        });
+
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        const conflict = caught as MemoryStatusConflictError;
+        expect(conflict.memoryId).toBe(a.id);
+        expect(conflict.expectedStatus).toBe("contested");
+        expect(conflict.observedStatus).toBe("contested"); // a 自身は contested のまま — 破れたのは contestedWithId の一致
+
+        const after = await store.get(ctx, a.id);
+        expect(after?.status).toBe("contested");
+        expect(after?.contestedWithId).toBe(b.id);
+      });
+    } else if (supportsResolveOrphanedContested === false) {
+      it("resolveOrphanedContested は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.resolveOrphanedContested).toBeUndefined();
+      });
+    } else {
+      // `supportsResolveOrphanedContested` を省略した adapter。`it.skip` にしない理由は
+      // `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsResolveOrphanedContested が指定されていない — adapter "${name}" に対して resolveOrphanedContested の歯は検査していない`, () => {
+        expect(supportsResolveOrphanedContested).toBeUndefined();
       });
     }
 
@@ -8091,6 +8676,45 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
       const recall = await store.getRecall(ctx, recallId);
       expect(recall?.returnedMemories).toEqual({ breakdownCaptured: true, memories: [] });
+    });
+
+    it("getRecall は query を、渡した値のまま読み戻す（JSON を通る欄だけで組んだ query。Issue #1412 A11）", async () => {
+      // `NewRecallRecord.query`/`RecallRecord.query` は `unknown`——`MemoryStore` 自身は
+      // 中身を解釈せず、JSON として素通しする（`packages/core/src/recall.ts` の doc
+      // コメント）。ここでは `RecallQuery` の JSON を通る欄（text・tags・attributes・
+      // labels・limit・association）だけで組んだ値を使う。
+      // ⚠ 日付3欄（occurredAfter/occurredBefore/validAt）と `vector` は入れない
+      // ——adapter によって往復が違う（Issue #1206）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const query = {
+        text: "hello world",
+        tags: ["tag-a", "tag-b"],
+        attributes: { region: "jp", verified: true },
+        labels: ["registered-label"],
+        limit: 5,
+        association: 3,
+      };
+      const recallId = await store.createRecall(ctx, {
+        tenantId: "tenant-1",
+        subjectId: null,
+        query,
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic",
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
+
+      const recall = await store.getRecall(ctx, recallId);
+      expect(recall?.query).toEqual(query);
     });
 
     // -------------------------------------------------------------------

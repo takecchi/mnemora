@@ -1120,6 +1120,39 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
 
         expect(entries).toEqual([]);
       });
+
+      // -----------------------------------------------------------------
+      // Issue #1412 A8（Issue #1238 棚卸し、ADR 0373）: 渡した入力・返した値が、
+      // store の中の実体と切り離されている。`getVectors`（任意メソッド）を持つ
+      // adapter だけを対象にする——生の値をそのまま比較できる読み取り口が
+      // `getVectors` しか無いため（`search` は距離しか返さない）。
+      // -----------------------------------------------------------------
+
+      it("upsert した入力の配列を呼び手が後から書き換えても、保存したベクトルは変わらない（Issue #1412 A8）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memoryId = await prepareMemoryId(ctx);
+        const input = [1, 0.5, 0.25];
+
+        await store.upsert(ctx, space, memoryId, input);
+        input[0] = 999;
+
+        const entries = await store.getVectors!(ctx, space, [memoryId]);
+        expect(entries[0]?.vector).toEqual([1, 0.5, 0.25]);
+      });
+
+      it("getVectors が返した vector の配列を呼び手が書き換えても、次の getVectors は影響を受けない（Issue #1412 A8）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memoryId = await prepareMemoryId(ctx);
+        await store.upsert(ctx, space, memoryId, [1, 0.5, 0.25]);
+
+        const first = await store.getVectors!(ctx, space, [memoryId]);
+        first[0]!.vector[0] = 999;
+
+        const second = await store.getVectors!(ctx, space, [memoryId]);
+        expect(second[0]?.vector).toEqual([1, 0.5, 0.25]);
+      });
     } else {
       it("getVectors は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();

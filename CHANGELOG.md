@@ -441,6 +441,57 @@ PR #1393・Issue #1232）になった。**
   1・2（`resolveOrphanedContested` の CAS 例外・例外の欄の値）。理由は
   ADR 0372「決めたこと」3を見ること。
 
+- **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/
+  `EventStore`/`OutboxStore` 実装にさらに約束を新しく課すようになった——これらを
+  自前で実装している人へ**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412)
+  （Issue #1238 棚卸しの続き）、[PR #1414](https://github.com/takecchi/mnemora/pull/1414)、
+  [ADR 0373](./docs/decisions/0373-conformance-suite-issue-1412-promises.md)）。
+
+  Issue #1412 は、PR #1413（項目23）が切り出さなかった Issue #1238 の残りの候補のうち、
+  A8・A10・A11 と PR #1296 棚卸しのコメント1・2 を挙げていた。今回、実装は変えず
+  次の約束を `it` として足した——どれも今回の PR まで、この repo の2実装
+  （`@mnemora/postgres`・testkit の in-memory fixture）では既に成り立っていた。
+
+  | 約束 | suite | 内容 |
+  |---|---|---|
+  | A8: 入力・返り値の切り離し | `MemoryStore`・`VectorStore`・`EventStore`・`OutboxStore` | `createMemory`/`upsert`/`append` に渡した配列・オブジェクト・Date を呼び手が後から書き換えても保存した値は変わらない。`get`/`getMany`/`getVectors`/`claimBatch`（の `payload`）/任意メソッド `supersedeWithNewMemories` が返した値を書き換えても、store 側・次の読みは影響を受けない |
+  | A10: `events_purged` の meta の型 | `MemoryStore`（`purgeExpiredEvents?`） | `oldestPurgedAt`/`newestPurgedAt`/`olderThan` が ISO 8601 の文字列である（値そのものは既存の歯に任せ、型と形だけを縛る） |
+  | A11: `getRecall` の `query` 往復 | `MemoryStore` | JSON を通る欄（text・tags・attributes・labels・limit・association）だけで組んだ `query` が、渡した値のまま読み戻る（日付3欄と `vector` は対象外、#1206） |
+  | コメント1: `resolveOrphanedContested` の CAS | `MemoryStore`（`resolveOrphanedContested?`、新しい任意フラグ `supportsResolveOrphanedContested?`） | 生存側が呼び出し時点で `status !== 'contested'`、または `contestedWithId` が食い違うと `MemoryStatusConflictError`（`expectedStatus: 'contested'`）を投げ、無傷のまま |
+  | コメント2: 型付き例外の欄の値 | `MemoryStore` | `ContestedWithoutCompanionError` の `method`/`memoryId`（`updateStatus`/`updateStatusWithEvent` は対象の id、`createMemory`/`createMemoryWithOutbox`/`supersedeWithNewMemories` は `null`）。`markContestedPair`/`resolveContestedPair`/`updateStatusWithEvent` の `MemoryStatusConflictError` の3欄（`memoryId`/`expectedStatus`/`observedStatus`）。`purgeMemory` の `MemoryPurgeConflictError` の `observedStatus`/`observedPurgedAt`——**逐次の呼び出しに限った約束**（並行の下では保証しない） |
+
+  **A8 は `LexicalStore`・`TenantSettingsStore` を対象にしていない**——Issue #1412 の
+  下調べどおり、この2つの fixture は複合値を受け取って保存する口をほぼ持たず
+  （`InMemoryLexicalStore`/`InMemoryTenantSettingsStore` はプリミティブか、毎回
+  新しく組み立てた値だけを返す）、切り離すべき参照が無いため歯の中身が無い
+  （ADR 0373「決めたこと」2）。**A12 は足していない**（`purgeExpiredEvents` の
+  並行の正しさ——Issue #1412 のコメントが「conformance suite の外から adapter の
+  中へ遅延を差し込めず、赤くなりうる歯を書けない」と明記している）。
+
+  **`MemoryStoreConformanceOptions` に新しい任意フィールドが1つ増えた**:
+  `supportsResolveOrphanedContested?: boolean`——既存の `supportsOnlyMemoryIdsFilter`/
+  `supportsListActiveClaimPredicates` と同じ3状態（`true`/`false`/省略）。**この
+  フィールドの追加自体は非破壊**（省略すれば「未検査」の named it が1本登録される
+  だけで、既存の呼び出しは型検査・実行時のどちらも壊れない）。
+
+  **なぜ破壊的と数えるか**: `docs/migration-v1.md`「数え方の規律への追記
+  （2026-09-28）」規律2 の ⛔ が「conformance スイートの判定を厳しくする変更は、
+  これまでどおり上の定義と各世代の分け方で数える」と明記しており、項目23
+  （PR #1413）が同じ理由で先に破壊的変更と数えている。型検査は壊れないが、
+  上の約束を満たしていない自前実装は、この版から conformance suite を当てると
+  新しく落ちる。
+
+  **誰が影響を受けるか**: 自前の `MemoryStore`/`VectorStore`/`EventStore`/
+  `OutboxStore` 実装を、対応する `describe*Conformance` に対して走らせている
+  利用者のうち、上の約束のどれかを満たしていない場合。**適合テストを走らせて
+  いない・自前実装を持たない利用者は影響を受けない。**
+
+  **移行の手順**: 各約束の内容に沿って実装を直し、conformance suite を再度走らせて
+  緑になることを確認する。詳細（契約の正確な文言）は各 `*-conformance.ts` の
+  該当する `it` とその前後のコメントを見ること。
+
+  **DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
