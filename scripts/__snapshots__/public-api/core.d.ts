@@ -1287,6 +1287,7 @@ export interface ObserveEventInput {
     claimKey?: ClaimKeyOptions;
     name: string;
     data?: Record<string, unknown>;
+    extractData?: boolean;
 }
 export interface ObserveDocumentInput {
     extractionContext?: ExtractionContext;
@@ -1302,6 +1303,7 @@ export interface ObserveDocumentInput {
     claimKey?: ClaimKeyOptions;
     title?: string;
     content: string;
+    extractTitle?: boolean;
 }
 export interface ObserveMemoryUsageInput {
     kind: "memory_usage";
@@ -1380,6 +1382,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         }, z.core.$strip>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        extractData: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>,
     z.ZodObject<{
         extractionContext: z.ZodOptional<z.ZodObject<{
@@ -1415,6 +1418,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         }, z.core.$strip>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
+        extractTitle: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"memory_usage">;
