@@ -25,6 +25,13 @@ import {
  * （`completedAt`/`failedAt`）が既に付いていれば、後から来た呼び出しは行を一切変えず
  * 例外も投げない（先に付いた終端が勝つ）。同種の再呼び出し（complete+complete、
  * fail+fail）の冪等な挙動は変えていない。
+ *
+ * 2026-09-29 追記（[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
+ * [ADR 0357](../../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン
+ * miku の判断であり、オーナーの判断ではない）——取り直し（リースが切れた行の再 claim）の
+ * `availableAt` 更新も `PostgresOutboxStore` と一致させてある。初めての claim では
+ * `availableAt` を変えず、取り直しでは `opts.now` へ進める（`claimBatch` 内の該当コメント
+ * 参照）。
  */
 export class InMemoryOutboxStore implements OutboxStore {
   constructor(private readonly jobs: OutboxJobRecord[]) {}
@@ -90,6 +97,15 @@ export class InMemoryOutboxStore implements OutboxStore {
     eligible.sort((a, b) => a.availableAt.getTime() - b.availableAt.getTime());
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {
+      // 2026-09-29 追記（Issue #1196、ADR 0357）: 取り直し（この行が既に claim されたことが
+      // ある＝ `claimedAt` が非 null）なら、`availableAt` を `opts.now` へ書き直す。初めての
+      // claim（`claimedAt` が null だった）では `availableAt` を変えない。`PostgresOutboxStore`
+      // の `CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE now END` と同じ意味論——
+      // ここで見る `job.claimedAt` は、この for ループがまだ書き換えていない「更新前」の値。
+      const isReclaim = job.claimedAt !== null;
+      if (isReclaim) {
+        job.availableAt = new Date(opts.now);
+      }
       // Issue #1108: 呼び手の `now` と同じ Date を保存しない。
       job.claimedAt = new Date(opts.now);
       job.claimedBy = opts.claimedBy;

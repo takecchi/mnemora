@@ -92,6 +92,40 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   fixture で同じ（歯は `packages/postgres/src/__tests__/outbox-head-of-line.postgres.test.ts`）。
  *   止まり続ける job を後回しにする・隔離する・上限で終端にする、はしていない（新しい方針、
  *   [Issue #1196](https://github.com/takecchi/mnemora/issues/1196)）。
+ *   🔴 **2026-09-29 追記（上の先頭詰まりを解消した。[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
+ *   [ADR 0357](../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
+ *   の判断であり、オーナーの判断ではない）: `claimBatch` は、リースが切れた行を**取り直す**
+ *   （＝claim 時点で `claimed_at` が既に非 NULL）ときに限り、`available_at` を `opts.now`
+ *   へ書き直す。**初めての claim**（`claimed_at` が NULL だった行）では `available_at` を
+ *   変えない。取る順（`available_at` の古い順）そのものは変えていない——索引
+ *   `(tenant_id, available_at)` もそのまま効く。
+ *
+ *   **狙い**: 止まり続ける job が何本あっても、後ろの job がいつかは claim されること
+ *   （飢餓が起きないこと）。取り直された job は、その `available_at` がそのときの `now`
+ *   （通常は他のどの未処理 job の `available_at` よりも新しい）へ進むため、次にリースが
+ *   切れて `claimBatch` が呼ばれるときには、まだ一度も claim されていない古い job の
+ *   ほうが先に来る。**正直に書くと、取り直された job は先頭で「2回」claim されてから
+ *   後ろへ回る**——1回目は初めての claim なので `available_at` を動かさず、2回目
+ *   （最初の取り直し）で初めて `now` へ進む。3回目以降の claim では、その時点でまだ
+ *   `available_at` が古い他の job に先を譲る。
+ *
+ *   **採らなかった案**（詳細は ADR 0357）:
+ *   - B: `ORDER BY attempts, available_at`（attempts が少ない job を優先する）。
+ *     却下——流入が続く運用では、一度リースが切れた job（無実のクラッシュに巻き込まれた
+ *     job を含む）が `attempts` の大きさゆえに恒久的に後回しにされ、今度は「止まらない
+ *     job」の流入が「かつて止まった job」を飢えさせる。しかも `ORDER BY attempts,
+ *     available_at` は `(tenant_id, available_at)` の索引で並べ替えられない
+ *     （`attempts` を先頭に持つ新しい索引が要る）。
+ *   - C: `ORDER BY COALESCE(claimed_at, available_at)`。却下——`available_at` の値そのもの
+ *     は保てるが、この式に対する新しい索引（式索引）を張るマイグレーションが要る。
+ *
+ *   ⛔ **`attempts` が N を超えたら `fail` にする、のような上限で終端にする形は入れていない**
+ *   （ADR 0032「これが覆るとしたら」が範囲外として残した論点のまま。Issue #1196 の
+ *   「決めていないこと」のうち、この PR が答えたのは「後回しにする」の1点だけであり、
+ *   「隔離する・上限で終端にする」「観測できるようにする」は範囲外に残した）。
+ *
+ *   【実測 2026-09-29】`@mnemora/postgres` と testkit の fixture で同じ（歯は
+ *   `packages/postgres/src/__tests__/outbox-head-of-line.postgres.test.ts`）。
  * - ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: 取る集合は `available_at` の古い順だが、同じ
  *   `available_at` の行どうしの並びと、1回の `claimBatch` が返す配列の中の順（`tick` はこの順に
  *   処理する）は約束しない。** `@mnemora/postgres` は `ORDER BY available_at` だけで取り、

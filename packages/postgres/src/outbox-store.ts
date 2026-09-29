@@ -72,6 +72,18 @@ import { isUuidLike, rowToOutboxJob, toPgTimestamp, type OutboxJobRow } from "./
  * 対象を0行にする。先に付いた終端が勝ち、後から来た呼び出しは行を変えず、例外も投げない
  * （無言の no-op）。同じ `attempts` のまま complete → fail（逐次でも並行でも）を呼んでも、
  * `completed_at`/`failed_at` の両方が付くことはない。
+ *
+ * 🔴 **2026-09-29 追記（[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
+ * [ADR 0357](../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
+ * の判断であり、オーナーの判断ではない）: 取り直し（`claimed_at` が既に非 NULL の行を再び
+ * claim する場合）は `available_at` を `opts.now` へ書き直す。** `claimBatch` の `UPDATE`
+ * の `SET` は `available_at = CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE
+ * ${now} END` という形で、初めての claim（`claimed_at IS NULL`）では `available_at` を
+ * 変えず、取り直しでは `now` に進める。**`SET` 句の中の `o.claimed_at` は、この `UPDATE`
+ * 自身が今まさに書こうとしている新しい値ではなく、この行の更新前の値である**
+ * （PostgreSQL は同一 `UPDATE` 文の `SET` 内で他列を右辺に使うとき、常に更新前の値を見る）。
+ * 詳細・狙い・採らなかった案は `packages/core/src/interfaces/outbox-store.ts` の同日付追記
+ * と ADR 0357。
  */
 export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly db: Db) {}
@@ -98,7 +110,8 @@ export class PostgresOutboxStore implements OutboxStore {
         FOR UPDATE SKIP LOCKED
       )
       UPDATE outbox o
-      SET claimed_at = ${toPgTimestamp(opts.now)}, claimed_by = ${opts.claimedBy}, attempts = attempts + 1
+      SET claimed_at = ${toPgTimestamp(opts.now)}, claimed_by = ${opts.claimedBy}, attempts = attempts + 1,
+        available_at = CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE ${toPgTimestamp(opts.now)} END
       FROM claimable c
       WHERE o.id = c.id
       RETURNING o.*
