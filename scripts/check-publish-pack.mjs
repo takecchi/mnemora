@@ -5,8 +5,9 @@
  * **tarball の中身**を検査する門。
  *
  * ⚠ `PUBLISH_TARGETS` のうち `NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に
- * 載っているもの（初回 publish 前）は、version 検査（下の検査2）だけ対象外にする——
- * `0.0.0` のままで正しいため（ADR 0070。詳細は `NEVER_PUBLISHED_TARGETS` の doc コメント）。
+ * 載っているもの（git 上の version が `0.0.0` のままでよいもの）は、version 検査（下の検査2）
+ * だけ対象外にする（ADR 0070。publish 済みでも載っていることがある——名前と意味のずれを含め、
+ * 詳細は `NEVER_PUBLISHED_TARGETS` の doc コメント）。
  *
  * **なぜ tarball の中身を見るか（作業ツリーの package.json を見るだけでは足りない理由）**
  *
@@ -209,13 +210,13 @@ try {
     }
 
     // 2. version
-    // ⚠ NEVER_PUBLISHED_TARGETS に載っているパッケージ（初回 publish 前）は、この検査を
-    // そのパッケージにだけ適用しない――0.0.0 のままで正しい（publish-pack-checks.mjs の
-    // NEVER_PUBLISHED_TARGETS の doc コメント参照）。version 揃い検査の対象数からも外す
-    // （下の targetCount 参照）。
+    // ⚠ NEVER_PUBLISHED_TARGETS に載っているパッケージ（git 上の version が 0.0.0 のままで
+    // よいもの）は、この検査をそのパッケージにだけ適用しない（publish-pack-checks.mjs の
+    // NEVER_PUBLISHED_TARGETS の doc コメント参照。名前と意味はずれている）。version 揃い検査の
+    // 対象数からも外す（下の targetCount 参照）。
     if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
       console.log(
-        `  [${target.name}] version 検査を対象外にしました（初回 publish 前。0.0.0 のまま。` +
+        `  [${target.name}] version 検査を対象外にしました（git 上の version は 0.0.0 のままでよい。` +
           "NEVER_PUBLISHED_TARGETS）",
       );
     } else {
