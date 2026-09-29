@@ -3628,7 +3628,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 1. `memory.claimKey` が無ければ何もしない（`null` を返す——鍵が無ければ引くものが無い）。
    * 2. `deps.memoryStore.findActiveByClaimKey` が無ければ何もしない（任意メソッド。
    *    フォールバック経路は無い——`markContested` と同じ判断）。
-   * 3. 一致件数で分岐する:
+   * 2.5. **（ADR 0377、Issue #835 候補1）`matches` から、`memory.sourceObservationId` と
+   *    同じ `sourceObservationId` を持つものを、件数を数える前に除く。** `memory.
+   *    sourceObservationId` が `null` のときは何も除かない（`null` 同士を「同じ観測」と
+   *    見なさない——`null` は「分からない」であって「観測0番」ではない）。**この除外は
+   *    core 側だけで行う**——`MemoryStore.findActiveByClaimKey?` の interface・
+   *    Postgres 実装・testkit は変えない（下の doc コメント最後の段落、ADR 0377 参照）。
+   * 3. 残った一致件数で分岐する:
    *    - **0件**: 何もしない（`{ kind: "no_conflict" }`）。
    *    - **ちょうど1件**: `markContested(ctx, memory.id, other.id, { reason: <構造化JSON> })`
    *      を呼ぶ。判定の根拠（鍵・重なった有効期間・両側の `contentHash`・id）を
@@ -3651,6 +3657,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （ADR 0185 決定4・北極星 問い4「AI の推論と、ユーザーが言った事実を区別する」——
    * `claimKey` は LLM が作る鍵＝推論であり、推論から導いた「矛盾」でユーザーが言った
    * 事実を消してはならない）。
+   *
+   * ⚠ **ADR 0377（Issue #835 候補1）**: ADR 0347（PR #1318）が抽出の書き込みを
+   * 「全件書く → 全件について `created`/検出」の2ループへ分けたことで、同じ observation
+   * （＝同じ発話）から抽出された兄弟候補どうしが、互いの検出時点で既に `active` になって
+   * いた。`matches`（`findActiveByClaimKey` の返り値）は `sourceObservationId` を持つ
+   * `Memory[]` である——手順2.5 はそこから「検出中の memory と同じ observation」の行を
+   * 除いてから件数を数える。**`findActiveByClaimKey?` の契約（interface の doc コメント）
+   * 自体は変えていない**——この口は今までどおり「同じ鍵・重なる有効期間・違う内容の
+   * `active` Memory」を返す。除外は、この関数（呼び出し側）が返り値を使う際に行う。
+   * store 側（Postgres 実装・testkit）へ押し下げなかった理由と、その限界（`findActiveByClaimKey?`
+   * の contract に `LIMIT` の規定が無いため、この除外を core 側で行っても正しさは保てるが、
+   * interface 自体は adapter が独自に `LIMIT` を付けることを禁じていない）は ADR 0377 を見ること。
    */
   async function detectClaimKeyContested(
     ctx: Ctx,
@@ -3664,7 +3682,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (findActiveByClaimKey === undefined) {
       return null;
     }
-    const matches = await findActiveByClaimKey.call(deps.memoryStore, ctx, {
+    const rawMatches = await findActiveByClaimKey.call(deps.memoryStore, ctx, {
       subjectId: memory.subjectId ?? null,
       claimKey,
       excludeMemoryId: memory.id,
@@ -3672,6 +3690,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       validFrom: memory.validFrom ?? null,
       validUntil: memory.validUntil ?? null,
     });
+    // ADR 0377（Issue #835 候補1）: 同じ observation（＝同じ発話）から抽出された兄弟
+    // どうしを、互いへの誤検出の相手にしない。`memory.sourceObservationId` が `null`
+    // のときは何も除かない（`null` 同士を「同じ観測」と見なさない）。
+    const memorySourceObservationId = memory.sourceObservationId ?? null;
+    const matches =
+      memorySourceObservationId === null
+        ? rawMatches
+        : rawMatches.filter((m) => (m.sourceObservationId ?? null) !== memorySourceObservationId);
 
     if (matches.length === 0) {
       return { memoryId: memory.id, claimKey, matchCount: 0, result: { kind: "no_conflict" } };
