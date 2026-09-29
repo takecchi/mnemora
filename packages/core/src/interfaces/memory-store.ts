@@ -384,11 +384,21 @@ export interface MemoryStore {
    * id を使って組み立てる。呼び出し側が id をまだ知らない時点で呼ぶための設計）。
    * 冪等な再送（`externalId` が既存行と衝突）の場合は `created: false` を返し、
    * ジョブは一切作らない（`jobs` は空配列）。
+   *
+   * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
+   * `ReinforceOptions`/ADR 0165 決めたこと13 と同じ理由——構造的部分型の下では「呼び出し側が
+   * 省略可能な引数を渡さない」ことと「実装がその引数を最初から受け取らない」ことは区別されない）。
+   * **`opts.now` を渡すと、積む outbox 行の `availableAt`/`createdAt` にその値を使う。省略時は
+   * 実装が壁時計（`new Date()`）を使う——今日と同じ挙動。** `Clock` の doc コメント（2026-09-27・
+   * 2026-09-28 追記、2026-09-29 訂正）が「outbox の `createdAt`・`availableAt` は壁時計になる」と
+   * 記録していた問題（過去の時計を注入すると `tick` がジョブを1本も取らない）への対応——
+   * runtime はこの欄に `clock.now()` を渡す。
    */
   createObservationWithOutbox(
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
@@ -453,11 +463,17 @@ export interface MemoryStore {
    * ⚠ `input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は `MemorySchema` を
    * 通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い `stated`/`inferred`・
    * `null` の3つだけ。`createMemory` の doc 参照）。
+   *
+   * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
+   * `createObservationWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、積む outbox 行の
+   * `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に
+   * `clock.now()` を渡す。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
@@ -899,8 +915,18 @@ export interface MemoryStore {
    * 対象が `opts.limit` より多いときにどれが選ばれるかは
    * **`updatedAt` の古い順、同着は `id` の昇順**とする。積み直した行は `updatedAt` が
    * 動くので、繰り返し呼ぶと対象が一巡する（同じ行だけを取り続けて他が飢えることがない）。
+   *
+   * ⭐ **`writeOpts` は省略可能な第3引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)）。
+   * **`writeOpts.now` を渡すと、積み直す embed ジョブの `availableAt`/`createdAt` にその値を使う。
+   * 省略時は実装が壁時計を使う。** runtime（`Runtime.reembed`）はこの欄に `clock.now()` を渡す。
+   * 第2引数 `opts`（{@link RequeueEmbedJobsOptions}）は `Runtime.reembed` の公開の入力と同じ型なので、
+   * 時刻はそこへ足さず、別の引数にした。
    */
-  requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+  requeueEmbedJobs(
+    ctx: Ctx,
+    opts: RequeueEmbedJobsOptions,
+    writeOpts?: { now?: Date },
+  ): Promise<RequeueEmbedJobsResult>;
   /**
    * Issue #134 / [ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md):
    * docs/memory-model.md §11 行5 が要求する「旧行の `status`/`superseded_by_id` 更新と
@@ -981,6 +1007,11 @@ export interface MemoryStore {
    * ⚠ `news[i].input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は
    * `MemorySchema` を通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い
    * `stated`/`inferred`・`null` の3つだけ。`createMemory` の doc 参照）。
+   *
+   * ⭐ **`opts` は省略可能な第4引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
+   * `createMemoryWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、`news` に積む outbox 行の
+   * `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に
+   * `clock.now()` を渡す。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -991,6 +1022,7 @@ export interface MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
+    opts?: { now?: Date },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];

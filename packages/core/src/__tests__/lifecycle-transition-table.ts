@@ -4,6 +4,7 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import type { MemoryStore } from "../interfaces/memory-store.js";
 import type { MemoryId } from "../ids.js";
 import type { Memory, NewMemory } from "../memory.js";
+import type { MemoryEvent } from "../event.js";
 import type { Runtime } from "../runtime.js";
 import { ConsolidationLLMResultSchema } from "../strategies/consolidate.js";
 import { ExtractionResultSchema } from "../extraction.js";
@@ -434,13 +435,33 @@ export async function stateOf(
   return m.status as LifecycleState;
 }
 
-/** Memory に積まれたイベント（`kind` または `kind:meta.reason`）。 */
-export async function eventsOf(kit: LifecycleKit, id: MemoryId): Promise<string[]> {
-  const events = await kit.eventStore.list(LIFECYCLE_CTX, { memoryId: id });
-  return events.map((e) => {
-    const reason = (e.meta as { reason?: unknown } | null)?.reason;
-    return typeof reason === "string" ? `${e.kind}:${reason}` : e.kind;
-  });
+/** Memory に積まれたイベント（生の行。`id` を持つので、後から「新しく増えた分」を差分で取れる）。 */
+export async function eventsOf(kit: LifecycleKit, id: MemoryId): Promise<MemoryEvent[]> {
+  return kit.eventStore.list(LIFECYCLE_CTX, { memoryId: id });
+}
+
+/** `MemoryEvent` を表の記法（`kind` または `kind:meta.reason`）へ写す。 */
+function describeEvent(e: MemoryEvent): string {
+  const reason = (e.meta as { reason?: unknown } | null)?.reason;
+  return typeof reason === "string" ? `${e.kind}:${reason}` : e.kind;
+}
+
+/**
+ * `before`（操作の前に積まれていたイベント）と `after`（操作の後の全イベント）から、
+ * この操作が新しく積んだ分だけを表の記法で返す。
+ *
+ * ⚠ [Issue #1237](https://github.com/takecchi/mnemora/issues/1237): 以前は
+ * `after.slice(before.length)` という、`eventStore.list`（`ORDER BY at ASC`）の並びが
+ * 積んだ順と一致することに依存した切り出しだった。この表の `archived`（`sweepArchive`
+ * が `opts.now` に固定の未来日時 `SWEEP_TO_ARCHIVE_NOW` を使う）と、それに続く操作
+ * （`clock.now()` の実際の壁時計）とでは、`archived` の `at` が後続の操作の `at`より
+ * 未来になり得る——`slice` は「時刻の順」と「積んだ順」が食い違うと壊れる。`id` の集合差
+ * （`before` に無い `id` を持つ行だけを拾う）に切り替えることで、`at` の大小に関わらず
+ * 正しく「新しく増えた分」だけを取る。
+ */
+function newEventKinds(before: readonly MemoryEvent[], after: readonly MemoryEvent[]): string[] {
+  const beforeIds = new Set(before.map((e) => e.id));
+  return after.filter((e) => !beforeIds.has(e.id)).map(describeEvent);
 }
 
 /** 1マスを走らせ、表と同じ形で観測を返す。 */
@@ -457,12 +478,12 @@ export async function runCell(
   const observed: CellExpectation = {
     x: (await stateOf(kit, s.x)) as LifecycleState,
     outcome: normalizeOutcome(op, result, s.x),
-    events: (await eventsOf(kit, s.x)).slice(xBefore.length),
+    events: newEventKinds(xBefore, await eventsOf(kit, s.x)),
   };
   if (s.partner) {
     observed.partner = {
       state: (await stateOf(kit, s.partner)) as LifecycleState,
-      events: (await eventsOf(kit, s.partner)).slice(pBefore.length),
+      events: newEventKinds(pBefore, await eventsOf(kit, s.partner)),
     };
   }
   return observed;
@@ -719,7 +740,7 @@ export async function runReextractCell(
   const r = await rt.reextract(ctx, o.observationId);
   return {
     old: await stateOf(kit, oldId),
-    oldEvents: (await eventsOf(kit, oldId)).slice(before.length),
+    oldEvents: newEventKinds(before, await eventsOf(kit, oldId)),
     superseded: r.supersededMemoryIds.length,
     skipped: r.skipped.map((s) =>
       "status" in s ? `${s.kind}:${(s as { status: string }).status}` : s.kind,

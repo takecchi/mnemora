@@ -2663,6 +2663,12 @@ export interface NewRecallRecord {
    * `advanceActivityClock: true`/`false`/省略はすべて型の変更前と同じ意味のまま通る。
    */
   advanceActivityClock?: boolean | { scope: "subject"; subjectId: string };
+  /**
+   * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237): 書き込む行の `createdAt`。
+   * 省略時は実装が壁時計（`new Date()`）を使う——今日と同じ挙動（⭐ 非破壊、既存の欄を1つ
+   * 足すだけ）。`recall-runtime.ts` はこの欄に `clock.now()` を渡す。
+   */
+  createdAt?: Date;
 }
 
 /**

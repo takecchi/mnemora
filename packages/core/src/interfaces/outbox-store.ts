@@ -160,8 +160,25 @@ export interface OutboxStore {
    * ジョブを完了にする。`expectedAttempts` が行の `attempts` と違えば {@link OutboxLeaseConflictError}。行が無いときと、`attempts` が一致していれば終端済みでも、例外にしない（冒頭の doc）。
    *
    * ⚠ 既に終端が付いた行でも、行の `attempts` と違う `expectedAttempts` を渡せば {@link OutboxLeaseConflictError} を投げる——終端が付いていることは、`attempts` の検査を外す理由にならない（Issue #1292 で冒頭の doc と実装の側を正と決めた。2実装 `@mnemora/postgres`・`@mnemora/testkit/fixtures` とも、この形で動く）。`fail` も同じ。
+   *
+   * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
+   * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
+   * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
    */
-  complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
-  /** ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ。 */
-  fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void>;
+  complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: { at?: Date }): Promise<void>;
+  /**
+   * ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ。
+   *
+   * ⭐ **`opts` は省略可能な第5引数であり、この変更は非破壊である**（理由は `complete` の `opts` と同じ）。
+   * **`opts.at` を渡すと `failedAt` にその値を使う。省略時は実装が壁時計を使う。** ⚠ **`available_at`
+   * の再計算はしない**（今の振る舞い。`fail` は終端状態であり、Phase 1 では失敗したジョブの自動リトライを
+   * 行わないため——このファイル冒頭の doc 参照）。
+   */
+  fail(
+    ctx: Ctx,
+    jobId: string,
+    error: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void>;
 }
