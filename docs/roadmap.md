@@ -10,7 +10,7 @@
 
 ## 1. Phase 1（MVP）の範囲
 
-> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)、オーナー回答「すでに完了した計画は全部消しちゃっていいと思うよ」）**: 中身がすべて着地した次の節を消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L13-L45) で読める。
+> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)、オーナー回答「すでに完了した計画は全部消しちゃっていいと思うよ」）**: 中身がすべて着地した次の節を消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L13-L45) で読める。
 > - §1.1 オーナー指定の範囲
 > - §1.2 追加する項目とその理由
 >
@@ -33,7 +33,7 @@
 
 ## 2. 実装の順序
 
-> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)）**: 段階1〜7 はすべて着地した（段階1 #2 `1eee055`、段階2 #3 `87ff014`、段階3 #4 `ab693b1`、段階4・5 #5 `5ef173f`、段階6・7 #6 `669274c`）。抽出モードの既定は §5.2 で `sync` に決まっている。そのため、この節の中身を消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L62-L131) で読める。コード・テスト・CI のコメントに残っている「roadmap.md 段階N」は、この墓標から辿ること。消した見出し:
+> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)）**: 段階1〜7 はすべて着地した（段階1 #2 `1eee055`、段階2 #3 `87ff014`、段階3 #4 `ab693b1`、段階4・5 #5 `5ef173f`、段階6・7 #6 `669274c`）。抽出モードの既定は §5.2 で `sync` に決まっている。そのため、この節の中身を消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L62-L131) で読める。コード・テスト・CI のコメントに残っている「roadmap.md 段階N」は、この墓標から辿ること。消した見出し:
 > - 段階1: 土台 / 段階2: 保存 / 段階3: 取り込み / 段階4: 想起 / 段階5: 説明 / 段階6: 検証 / 段階7: サンプル
 > - 抽出モードについての注記
 
@@ -404,7 +404,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 ## 7. v1.0 までの日別予定（2026-09-29 削除）
 
-> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)、オーナー回答「すでに完了した計画は全部消しちゃっていいと思うよ」）**: v1.0.0 までの予定だった。`v1.0.0` は 2026-09-22 に Release 済みで、その後 `v1.0.1`・`v1.0.2` も出ている。そのため、この節をまるごと消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L497-L1837) で読める。節の中で名前が出ていて、削除した時点でまだ OPEN の Issue は #338・#387・#534・#548・#865 である。どれも GitHub 側で追跡している。§7.0 の「この節を消さないこと」はオーナーの回答で上書きした。外した予測という材料は、上のリンク先に残っている。他の文書から「roadmap §7.N」と指されていたら、このリンク先を読むこと。消した見出し:
+> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)、オーナー回答「すでに完了した計画は全部消しちゃっていいと思うよ」）**: v1.0.0 までの予定だった。`v1.0.0` は 2026-09-22 に Release 済みで、その後 `v1.0.1`・`v1.0.2` も出ている。そのため、この節をまるごと消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L497-L1837) で読める。節の中で名前が出ていて、削除した時点でまだ OPEN の Issue は #338・#387・#534・#548・#865 である。どれも GitHub 側で追跡している。§7.0 の「この節を消さないこと」はオーナーの回答で上書きした。外した予測という材料は、上のリンク先に残っている。他の文書から「roadmap §7.N」と指されていたら、このリンク先を読むこと。消した見出し:
 > - §7.0 この節の読み方 —— 腐っているかどうかの見分け方
 > - §7.1 なぜ立てた日のうちに作り直したか
 > - §7.2 v1.0 の定義
