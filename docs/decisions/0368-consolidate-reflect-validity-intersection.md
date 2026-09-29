@@ -76,6 +76,19 @@
 同じ理由（「複数の既存 Memory から新しい Memory を組み立てる」という同じ形の操作であり、
 同じ判定を2箇所で複製しない）。
 
+**公開 API への影響**: `intersectAttributes`・`buildConsolidatedMemory`（`BuildConsolidatedMemoryParams`
+を含む）・`buildReflectedMemory`（`BuildReflectedMemoryParams` を含む）は、いずれも
+`packages/core/src/index.ts` の `export * from "./strategies/consolidate.js"`/`"./strategies/reflect.js"`
+経由で `@mnemora/core` の公開 API に出ている（`pnpm run api:check` の snapshot、
+`scripts/__snapshots__/public-api/core.d.ts` に既に載っている）。**この PR はどちらの
+シグネチャも変えていない**——`BuildConsolidatedMemoryParams`/`BuildReflectedMemoryParams` の
+欄・`buildConsolidatedMemory`/`buildReflectedMemory` の引数と返り値の型（`NewMemory`。
+`validFrom`/`validUntil` は ADR 0145 以来、省略可能な欄として既に公開されている）は1バイトも
+変わらない。**公開 API の差分は `intersectValidity` という新しい関数の追加だけ**であり、
+既存の公開の型の削除・必須化・狭小化は無い（`api:check` の差分は追加のみであることを
+【実測】確認した）。破壊的変更かどうかの判断は CHANGELOG の `[1.1.0]` 節の本項目を見ること
+——ここには複製しない。
+
 **空の積（`validFrom >= validUntil` になる組み合わせ）は起こらない。** `eligible` は
 呼び出し側（`runtime.ts` の consolidate 手順2・reflect 手順2）が
 `classifyValidity(m, validAt)`（`validity.ts`、PR #1383/#1388 が切り出した述語）を通して
