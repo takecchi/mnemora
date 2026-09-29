@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decideAnnTruncation } from "../ann-truncation.js";
-import { purgeExpiredEventsForTenant } from "../event-retention-purge.js";
+import { computeEventRetentionCutoff } from "../event-retention-purge.js";
 import { buildNewMemoryFromCandidate } from "../extraction.js";
-import type { MemoryStore } from "../interfaces/memory-store.js";
-import type { TenantSettingsStore } from "../interfaces/tenant-settings-store.js";
 import type { Memory } from "../memory.js";
 import type { Observation } from "../observation.js";
 import { validateRecallOutput } from "../recall-output-validation.js";
@@ -15,41 +13,27 @@ import { defaultScoringStrategy } from "../strategies/scoring.js";
  * 今の振る舞いの固定であり、望ましい姿の主張ではない。
  */
 
-describe("purgeExpiredEventsForTenant: 日数が Date の範囲を越えるときの cutoff（B1）", () => {
-  const retentionOf = (days: number) =>
-    ({ getEventRetention: async () => ({ kind: "days", days }) }) as unknown as TenantSettingsStore;
+/**
+ * ⚠ 2026-09-29 追記（Issue #1232、ADR 0354）: この B1 は元々
+ * `purgeExpiredEventsForTenant` を通して cutoff の計算を縛っていた——当時はこの関数自身が
+ * `olderThan` を計算し、`MemoryStore.purgeExpiredEvents` へ渡していたため。Issue #1232 の
+ * 修正でこの計算は `computeEventRetentionCutoff`（`purgeExpiredEventsForTenant` と同じファイル、
+ * `MemoryStore.purgeExpiredEventsByRetention?` を実装する各 adapter が共有する）へ切り出され、
+ * `purgeExpiredEventsForTenant` 自身はもう `olderThan` を計算しない。**縛る対象を、抽出した
+ * 純関数そのものへ動かした**——振る舞いは変えていない（`event-retention-purge.ts` の
+ * `computeEventRetentionCutoff` の doc コメント参照）。
+ */
+describe("computeEventRetentionCutoff: 日数が Date の範囲を越えるときの cutoff（B1）", () => {
+  const NOW = new Date("2026-09-28T00:00:00.000Z");
 
-  async function olderThanFor(days: number): Promise<Date> {
-    let olderThan: Date | undefined;
-    const memoryStore = {
-      purgeExpiredEvents: async (_ctx: unknown, opts: { olderThan: Date }) => {
-        olderThan = opts.olderThan;
-        return {
-          purged: 0,
-          reachedLimit: false,
-          oldestPurgedAt: null,
-          newestPurgedAt: null,
-          dryRun: false,
-        };
-      },
-    } as unknown as MemoryStore;
-    const outcome = await purgeExpiredEventsForTenant(
-      { tenantId: "t" },
-      { memoryStore, tenantSettingsStore: retentionOf(days) },
-      { limit: 10, now: new Date("2026-09-28T00:00:00.000Z") },
-    );
-    expect(outcome.kind).toBe("executed");
-    return olderThan!;
-  }
-
-  it("約1億日を越える日数では Invalid Date にならず、表せる最も古い時刻（-8.64e15 ms）を渡す", async () => {
-    const olderThan = await olderThanFor(1e9);
+  it("約1億日を越える日数では Invalid Date にならず、表せる最も古い時刻（-8.64e15 ms）を渡す", () => {
+    const olderThan = computeEventRetentionCutoff(NOW, 1e9);
     expect(Number.isNaN(olderThan.getTime())).toBe(false);
     expect(olderThan.getTime()).toBe(-8.64e15);
   });
 
-  it("陽性対照: 範囲に収まる日数では now から days 日ぶん遡った時刻を渡す", async () => {
-    const olderThan = await olderThanFor(30);
+  it("陽性対照: 範囲に収まる日数では now から days 日ぶん遡った時刻を返す", () => {
+    const olderThan = computeEventRetentionCutoff(NOW, 30);
     expect(olderThan.toISOString()).toBe("2026-08-29T00:00:00.000Z");
   });
 });

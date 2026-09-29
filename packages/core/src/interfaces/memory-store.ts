@@ -1055,8 +1055,78 @@ export interface MemoryStore {
    * 由来を「分からない」としてまとめてしまうようになる。詳細・採らなかった案は
    * [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md) の
    * 同日付追記を参照。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+   * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）:
+   * `packages/core/src/event-retention-purge.ts` の `purgeExpiredEventsForTenant` は、
+   * もうこのメソッドを直接呼ばない。** 呼び出し元が保持期間（`TenantSettingsStore.getEventRetention`）を
+   * 読んでから `olderThan` を計算してこのメソッドへ渡す、という上の一連の呼び出し方は、
+   * 読みと削除の間に保持期間が変わる race（Issue #1232 本文）を防げない——読みと削除が
+   * 別々の adapter（`TenantSettingsStore` と `MemoryStore`）をまたぎ、かつ2回の別々の呼び出しに
+   * 分かれているため、途中に割り込む余地が残る。**この race を閉じるには、保持期間の読みと
+   * 削除を同じ adapter の同じ操作にする必要がある**——それが下の
+   * {@link MemoryStore.purgeExpiredEventsByRetention} である。**このメソッド自体は変えていない**
+   * ——`olderThan`/`limit`/`dryRun` を受け取って消すだけの下請けとして、
+   * `purgeExpiredEventsByRetention?` の実装（`@mnemora/postgres`・testkit の fixture・
+   * `packages/core/src/__tests__/runtime-fakes.ts` の `FakeMemoryStore`）が内部で呼ぶ
+   * （書き写さない、同じ本体を共有する）。
    */
   purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+  /**
+   * Issue #1232 / [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md):
+   * {@link MemoryStore.purgeExpiredEvents} と `TenantSettingsStore.getEventRetention`/
+   * `setEventRetention`（ADR 0050）をまたいで存在していた race——`purgeExpiredEventsForTenant`
+   * が保持期間を読んでから {@link MemoryStore.purgeExpiredEvents} を呼ぶまでの間に
+   * `setEventRetention` が保持期間を変えても、読んだときの古い期間で削除してしまう
+   * （[Issue #1232](https://github.com/takecchi/mnemora/issues/1232) 本文の実測）——を
+   * 閉じるための口。**保持期間を読むことと、実際に削除することを、1つの原子的な操作にする。**
+   *
+   * 🔴 **任意メソッドである。**理由は {@link MemoryStore.purgeExpiredEvents} と同じ
+   * （`@mnemora/core` は npm 公開済みで、必須化は第三者 adapter を壊す破壊的変更になる）。
+   * この口を実装しない adapter では、`purgeExpiredEventsForTenant` は
+   * `{ kind: "store_unsupported" }` を返す——**{@link MemoryStore.purgeExpiredEvents} を
+   * 実装していても、そちらへは自動的に落ちない**（`purgeExpiredEventsForTenant` の doc
+   * コメント参照）。「保持期間の読みと削除を同じ操作にできる」という宣言そのものが、
+   * この口を持つことの意味だからである——`purgeExpiredEvents?` だけを実装している adapter に
+   * 自動でフォールバックすると、Issue #1232 が指摘した race をこの新しい経路でも
+   * 再導入してしまう。
+   *
+   * 契約:
+   * - **`opts.now`・`opts.limit` は必須・既定値を持たない**（呼び出し側が明示する。
+   *   `PurgeExpiredEventsForTenantOptions` と同じ理由）。
+   * - `opts.dryRun` は省略可能（省略時 `false`）。`true` のときも、保持期間の読みは
+   *   実際の削除と同じ場所・同じ原子性で行う——**「読む」だけを先に軽く済ませない**。
+   *   `dryRun` は「読んでから、削除の代わりにプレビューを返す」だけであり、原子性の
+   *   保証（読みと、削除またはプレビューの間に割り込ませない）はどちらでも同じである。
+   * - **保持期間の読みは、呼び出しのたびにこのメソッドの内部で行う**——引数に
+   *   `retention`/`olderThan` は無い。渡された `ctx.tenantId` の
+   *   `TenantSettingsStore.getEventRetention` 相当の状態を、実装が直接読む
+   *   （`@mnemora/postgres` なら `tenant_settings.event_retention_days` へ直接 SQL を
+   *   発行する。`TenantSettingsStore` interface は経由しない——別 adapter を呼ぶと
+   *   その呼び出し自体が1つの原子的な操作の外に出てしまうため）。
+   * - 戻り値は3種:
+   *   - `{ kind: "unset" }` — 読んだ時点でそのテナントの保持期間の設定行が無い。
+   *     1行も削除しない。
+   *   - `{ kind: "unlimited" }` — 読んだ時点で無期限。1行も削除しない。
+   *   - `{ kind: "executed"; result }` — 読んだ時点で有限日数だった。`result` は
+   *     {@link MemoryStore.purgeExpiredEvents} と同じ形の
+   *     {@link PurgeExpiredEventsResult}——cutoff は `opts.now` からその日数ぶん遡った時刻
+   *     （`packages/core/src/event-retention-purge.ts` の `computeEventRetentionCutoff` で
+   *     計算する。`EARLIEST_DATE_MS` への寄せも含めて共有する）。
+   * - **「読む」と「削除する（またはプレビューする）」の間に、他の `setEventRetention` 呼び出しが
+   *   割り込んで見える結果を変えてはならない**——同じ `ctx.tenantId` の保持期間を書き換える
+   *   別の呼び出しが同時に走っている場合、この呼び出しが見る保持期間は「読んだ時点の値で
+   *   固定され、削除まで変わらない」ことを、adapter 自身の同時実行制御（Postgres なら
+   *   同一トランザクション内の `SELECT ... FOR SHARE` による行ロック）で保証する。
+   *   歯は `packages/postgres/src/__tests__/purge-expired-events-by-retention-concurrency.postgres.test.ts`。
+   * - **`kind <> 'events_purged'` の除外・`events_purged` イベントの追記・`superseded` 行も
+   *   含めて消す判断は、すべて {@link MemoryStore.purgeExpiredEvents} と同じ**——この口は
+   *   「保持期間の読み方」だけを変え、「何を消すか」は変えない。
+   */
+  purgeExpiredEventsByRetention?(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsByRetentionOptions,
+  ): Promise<PurgeExpiredEventsByRetentionOutcome>;
   /**
    * [ADR 0114](../../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md):
    * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
@@ -1923,6 +1993,45 @@ export interface PurgeExpiredEventsResult {
   /** `opts.dryRun` の写し。呼び出し側が結果だけを見て「本当に消えたか」を取り違えないため。 */
   dryRun: boolean;
 }
+
+/**
+ * {@link MemoryStore.purgeExpiredEventsByRetention} の引数（Issue #1232、
+ * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。
+ *
+ * {@link PurgeExpiredEventsOptions} と違い `olderThan` を持たない——cutoff は
+ * このメソッドの内部で、保持期間を読んだ直後に `opts.now` から計算する
+ * （呼び出し側が計算して渡すと、計算した時点と実際に読む時点がずれ、Issue #1232 の
+ * race が形を変えて残る）。
+ */
+export interface PurgeExpiredEventsByRetentionOptions {
+  /**
+   * 「いま」を何とするか。**必須・既定値なし**——`PurgeExpiredEventsForTenantOptions.now`
+   * と同じ理由（テストが決定的な cutoff を固定できるようにする。呼び出し元の
+   * `purgeExpiredEventsForTenant` は省略時に `new Date()` を補ってから渡す）。
+   */
+  now: Date;
+  /**
+   * 1回の呼び出しで削除する上限。**必須・既定値なし**——{@link PurgeExpiredEventsOptions.limit}
+   * と同じ理由（取り消せない削除の上限を `packages/core` が勝手に決めない）。
+   */
+  limit: number;
+  /**
+   * `true` なら削除もイベント追記も行わず、何が起きるかだけを返す。省略時は `false`。
+   * 保持期間の読みは `dryRun` の値によらず同じ原子性で行う（下の interface doc 参照）。
+   */
+  dryRun?: boolean;
+}
+
+/**
+ * {@link MemoryStore.purgeExpiredEventsByRetention} の戻り値（Issue #1232、ADR 0354）。
+ * `PurgeExpiredEventsForTenantOutcome`（`packages/core/src/event-retention-purge.ts`）の
+ * `store_unsupported` を除いた3種——`store_unsupported` は「この口が無い」ことそのものであり、
+ * この口の内側からは返せない。
+ */
+export type PurgeExpiredEventsByRetentionOutcome =
+  | { kind: "unset" }
+  | { kind: "unlimited" }
+  | { kind: "executed"; result: PurgeExpiredEventsResult };
 
 /**
  * {@link MemoryStore.requeueEmbedJobs} の引数（ADR 0079）。

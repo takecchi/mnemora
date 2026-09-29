@@ -207,6 +207,7 @@ export type PurgeExpiredEventsForTenantOutcome = {
     kind: "executed";
     result: PurgeExpiredEventsResult;
 };
+export declare function computeEventRetentionCutoff(now: Date, days: number): Date;
 export interface PurgeExpiredEventsForTenantOptions {
     limit: number;
     dryRun?: boolean;
@@ -661,6 +662,7 @@ export interface MemoryStore {
         }>;
     }>;
     purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+    purgeExpiredEventsByRetention?(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
     archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory?(ctx: Ctx, id: MemoryId, tombstone: {
         content: string;
@@ -776,6 +778,19 @@ export interface PurgeExpiredEventsResult {
     newestPurgedAt: Date | null;
     dryRun: boolean;
 }
+export interface PurgeExpiredEventsByRetentionOptions {
+    now: Date;
+    limit: number;
+    dryRun?: boolean;
+}
+export type PurgeExpiredEventsByRetentionOutcome = {
+    kind: "unset";
+} | {
+    kind: "unlimited";
+} | {
+    kind: "executed";
+    result: PurgeExpiredEventsResult;
+};
 export interface RequeueEmbedJobsOptions {
     statuses: NotIndexedReason[];
     memoryIds?: MemoryId[];

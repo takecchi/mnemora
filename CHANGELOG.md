@@ -148,6 +148,20 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
 公開 API の型の差分（`git diff 329bdb1..94dafe0 -- scripts/__snapshots__/public-api/`）は `core.d.ts`・`postgres.d.ts`・`testkit.d.ts` の3ファイルで、どれも PR #1380（追加のみ）——`FindCorrectionCandidatesInput`・`ArchiveDecayedOptions`・`VectorFilter`・`RecallScope`・`RecallQuery`・`ConsolidateTarget`・`ReflectTarget` に `activityCounting?`/`decayFloorSeqUsesSubjectCounters?`/`usesSubjectActivityCounters?` を、`TenantSettingsStore`（と実装の `PostgresTenantSettingsStore`・`InMemoryTenantSettingsStore`）に `hasSubjectActivityCounters?`/`getSubjectActivitySeqs?` を、それぞれ省略可能な欄・メソッドとして足した。`NewRecallRecord.advanceActivityClock` は `boolean` から `boolean | { scope: "subject"; subjectId: string }` へ広がった（上の Added の項目そのもの）。`@mnemora/testkit` の `InMemoryTenantSettingsStore` のコンストラクタに省略可能な第2引数 `subjectActivitySeqBacking?: Map<string, Map<string, number>>` が増えた——既存の末尾に足した省略可能な引数で、0引数・1引数どちらの既存の呼び出しも1行も直さず通る非破壊の変更である。`anthropic.d.ts`・`openai.d.ts`・`bullmq.d.ts` に差分は無い。マイグレーションが1本増えた（`0024_tenant_subject_activity.sql`、PR #1380。上の Added の項目のとおり）。出荷される6パッケージの `package.json`・`pnpm-lock.yaml` に差分は無い。
 ⟹ **この節の範囲（`v1.0.2`…`94dafe0`）で、確定した破壊的変更は2件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2）のままである。**この棚卸しで新しく確定した破壊的変更は無い。
 
+**⚠ 2026-09-29 追記23**: 上の棚卸しとは別に、`94dafe0`（21回目の棚卸しが数えた末尾）より後に
+`main` へ入る作業として、`@mnemora/core` に破壊的変更がもう1件確定した
+（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+[ADR 0354](./docs/decisions/0354-atomic-event-retention-purge.md)、
+[PR #1393](https://github.com/takecchi/mnemora/pull/1393)）。上の「2026-09-29 追記20」
+（PR #1377の件）・追記21内の段落（PR #1385の件）と同じ扱い——着地に先立って変更を作った
+本人がこの節に足した項目であり、棚卸しの「PR を全部当てた」手順を経て足したものではない。
+上の `### Breaking` へ3件目の項目として足した。🔴 `94dafe0` からこの変更が着地するまでの間に
+他の PR が `main` へ入っている可能性があるが、それらを1本ずつ洗って分類する棚卸しはまだ
+行っていない。**次回の棚卸しで、この追記23が数えていない範囲（`94dafe0`…この変更の着地点）を
+通しで数え直すこと。**
+⟹ **この節の範囲で、確定した破壊的変更は3件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、
+PR #1393・Issue #1232）になった。**
+
 ### Breaking
 
 - **`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が、SDK の
@@ -233,6 +247,51 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
     「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」——を根拠にした運用であり、
     詳細は ADR 0352「文脈」節と `README.md`「版の付け方」の追記を見ること。
 
+- **`@mnemora/core` の `purgeExpiredEventsForTenant`（保持期間の掃除の呼び出し口）は、
+  `MemoryStore.purgeExpiredEventsByRetention?` を実装していない adapter に対して
+  `{ kind: "store_unsupported" }` を返すようになった——`MemoryStore.purgeExpiredEvents?`
+  （既存の任意メソッド）を実装しているだけでは、もう「対応している」と扱われない**
+  （[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+  [PR #1393](https://github.com/takecchi/mnemora/pull/1393)、
+  [ADR 0354](./docs/decisions/0354-atomic-event-retention-purge.md)）。
+
+  **何が起きていたか**: `purgeExpiredEventsForTenant` は保持期間（`TenantSettingsStore.getEventRetention`）を
+  読んでから `MemoryStore.purgeExpiredEvents` を呼んでいたが、読んでから呼ぶまでの間に
+  `setEventRetention` で保持期間を変えても（無期限にしても、延ばしても）、読んだときの
+  古い期間で `memory_events` を削除してしまっていた——削除は物理削除であり戻せない
+  （Issue #1232 本文の実測）。
+
+  **何を足したか**: 保持期間を読むことと実際に削除することを1つの原子的な操作にする新しい
+  任意メソッド `MemoryStore.purgeExpiredEventsByRetention?(ctx, { now, limit, dryRun? })`。
+  `@mnemora/postgres` は同一トランザクションの中で `tenant_settings.event_retention_days` を
+  `SELECT ... FOR SHARE` で読み直し、その値で削除まで行う。
+
+  **誰が影響を受けるか**: 自前の `MemoryStore` 実装を `purgeExpiredEventsForTenant` に渡している
+  利用者のうち、`purgeExpiredEventsByRetention?` をまだ実装していない場合。
+
+  **移行の手順**:
+  1. 自分の `MemoryStore` に `purgeExpiredEventsByRetention?` を実装する。契約は
+     `packages/core/src/interfaces/memory-store.ts` の interface doc（`MemoryStore.purgeExpiredEventsByRetention`）を
+     見ること——cutoff の計算は `@mnemora/core` が export する `computeEventRetentionCutoff(now, days)`
+     を使う（自前で計算し直さない）。
+  2. **`TenantSettingsStore` と `MemoryStore` を別々の DB・別々のプロセスに持つ adapter**
+     （このリポジトリの参照実装のように同一 DB・同一トランザクションで両方を実装していない場合）は、
+     この口を完全な原子性で実装できない——選べる案は2つ:
+     - 実装しない（`purgeExpiredEventsForTenant` は `store_unsupported` を返す。保持期間の掃除は
+       運用側が別の手段で行う）。
+     - ベストエフォートで実装する（自分の `TenantSettingsStore` 相当を読んでから削除するが、
+       読みと削除の間に他の書き込みが割り込む窓が残ることを引き受ける——ADR 0354「引き受けた負債」参照）。
+  3. **途中で保持期間を短くした場合は、その回から短い期間で消すようになった**（今までは、その回は
+     読んだときの長い期間で消していた）。消すのは `setEventRetention` が返った後の値である——
+     掃除が設定の行を読んでいる最中の `setEventRetention` は、Postgres では掃除の commit まで待たされる。
+     ⚠ 残る非対称は消し過ぎない側だけにある: `purgeExpiredEventsForTenant` が最初に `unset`/`unlimited` を
+     読んだ回は、その後に有限の日数へ変えても、その回は消さない（次の回で消える）。
+
+  **公開の型としては非破壊**（新しい任意メソッドを足しただけ、既存の `purgeExpiredEvents?`/
+  `PurgeExpiredEventsOptions`/`PurgeExpiredEventsResult` の宣言は変えていない）——**実行時の
+  振る舞いが変わる**という意味での Breaking である（`purgeExpiredEvents?` だけを実装している
+  adapter の呼び出し結果が `executed` から `store_unsupported` に変わる）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
@@ -264,6 +323,18 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
   - **実測**（90件の合成日本語対話・`subjectCandidates: ["user","character"]`・`extractionContext` 無し・`gpt-5.4-mini` 実 API、before/after 各3 run、90×2×3=540 回の抽出。詳細・判定方法は ADR 0348）: この条件下で、話者取り違え（構造的信号——候補の `subjectId` が実際の話者と逆）は character 発話由来のうち **46/176（26.1%、Wilson 95% CI 20.2–33.1%）→ 0/168（CI 上限 2.2%）**——CI が重ならず明確な差。**英語混入（content/digest のラテン文字比率ルールで判定）は、件数が少なく（before 1/318・3/316）、before/after の 95% CI が重なるため、差は主張できない。**
   ⚠ **上の構造的信号は `subjectCandidates` を渡す呼び出しに限った指標であり（`subjectId` はそのときしか返らない）、デフォルト経路の取り違え発生率・改善効果については何も示していない。**
   ⭕ 非破壊と数える（公開の宣言・型は変わらず、例外も増えない。変わるのは LLM に送る system の文面と、それに応じて LLM が返す本文・要旨だけである）。
+- **`@mnemora/core` に `MemoryStore.purgeExpiredEventsByRetention?`（任意メソッド）・
+  `PurgeExpiredEventsByRetentionOptions`・`PurgeExpiredEventsByRetentionOutcome`・
+  `computeEventRetentionCutoff(now, days)` を足した**（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+  [PR #1393](https://github.com/takecchi/mnemora/pull/1393)、
+  [ADR 0354](./docs/decisions/0354-atomic-event-retention-purge.md)）——保持期間を読むことと
+  実際に削除することを1つの原子的な操作にする新しい口（上の `### Breaking` の項目参照）。
+  `@mnemora/postgres`（`PostgresMemoryStore`）・`@mnemora/testkit/fixtures`
+  （`InMemoryMemoryStore`）はこの口を実装済み。`InMemoryTenantSettingsStore` のコンストラクタに
+  省略可能な第3引数 `eventRetentionDaysBacking?: Map<string, number | null>` が増えた
+  ——既存の末尾に足した省略可能な引数で、0〜2引数の既存の呼び出しは1行も直さず通る非破壊の変更
+  （`InMemoryMemoryStore.eventRetentionDays` と共有する場合に渡す。ADR 0165 決めたこと13の
+  `subjectActivitySeqBacking?` と同じ形）。
 
 ### Fixed
 

@@ -376,5 +376,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0351](./0351-bullmq-publish-prep.md) | `@mnemora/bullmq` を npm 公開の準備状態にする — `PUBLISH_TARGETS` へ末尾で加え、初回 publish 前の version 検査を除外する仕掛けを足す（Issue #205） | 採用 (2026-09) |
 | [0352](./0352-association-score-without-total.md) | 連想枠・必須の同伴取得が返す `score` を、`total` を持たない別の形にする —— Issue #548 方向2（破壊的変更） | 採用 (2026-09) |
 | [0353](./0353-activity-counting-per-call.md) | 活動時計の数え方を、呼び出しごとの引数で選べるようにする | 採用 (2026-09) |
+| [0354](./0354-atomic-event-retention-purge.md) | 保持期間の読みと `memory_events` の削除を1つの原子的な操作にする（新しい任意メソッド） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
