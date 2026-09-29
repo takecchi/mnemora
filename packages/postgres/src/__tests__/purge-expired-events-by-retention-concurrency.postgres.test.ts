@@ -99,11 +99,11 @@ describe("PostgresMemoryStore.purgeExpiredEventsByRetention — 保持期間の�
       `);
 
       // B: 別の接続（プールの別コネクション）から、A の行ロックがまだ外れていない間に起こす。
-      bPromise = memoryStoreB
-        .purgeExpiredEventsByRetention!(ctx, { now: NOW, limit: 100 })
-        .then((r) => {
+      bPromise = memoryStoreB.purgeExpiredEventsByRetention!(ctx, { now: NOW, limit: 100 }).then(
+        (r) => {
           bResult = r;
-        });
+        },
+      );
       barrier = await waitUntilDoneOrLockWaiting(db, () => bResult !== undefined, aPid);
       // barrier を確認してから A を commit する（トランザクションのコールバックが正常に返ると commit する）。
     });
