@@ -1425,6 +1425,68 @@ adapter（`Runtime.purge` が `supported: false` を返す構成）は影響を�
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375））になった。**
 
+### 26. `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts.abortIfForgotten`（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7・2026-09-30 追記。
+**PR1（[PR #1427](https://github.com/takecchi/mnemora/pull/1427)、項目25）の後に
+着地した、この節の2件目である。**
+
+**何が変わったか**: `consolidate`/`reflect` が LLM を待つ間に、材料（統合元・内省の
+材料）が `forget`（さらに `purge`）されても、その本文から作った新しい Memory が
+`active` で書かれてしまう競合（Issue #1226 本文）を閉じた。`runtime.consolidate`/
+`runtime.reflect` は、LLM が返った直後・書き込みの直前に eligible を読み直し、1件でも
+`forgotten` なら新しい `outcome: 'aborted_source_forgotten'` で打ち切る（統合先・
+内省の Memory を一切作らない）。**型としては次の3つを追加しただけ**（削除・必須化・
+型の狭小化は無い）:
+
+- `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts` に
+  `abortIfForgotten?: ReadonlyArray<MemoryId>` を追加。
+- `ConsolidateOutcome`/`ReflectOutcome` の union に `"aborted_source_forgotten"` を追加、
+  `ConsolidateSourceOutcome`/`ReflectBasisOutcome` の union に
+  `{ kind: "forgotten_before_write" }` を追加。
+- 新しい公開クラス `SourceMemoryForgottenError`（`@mnemora/core`）を追加。
+
+これらはいずれも「数え方の規律への追記（2026-09-28）」により非破壊（union への追加・
+opts への省略可能フィールドの追加）。**破壊的と数える理由はこれらの型ではなく、下の
+conformance の判定を厳しくする変更である。**中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`consolidate`/`reflect`
+が forget/purge された材料から新しい記憶を書かなくなった」の項目）を見ること。
+**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: `packages/testkit` の conformance suite
+（`describeMemoryStoreConformance`）に、任意フラグ `supportsAbortIfForgotten?`
+（3状態、`supportsOnlyMemoryIdsFilter?`/`supportsLabels?` と同じ形）を新設し、
+`true` を宣言した adapter に対して `opts.abortIfForgotten` の契約の歯（forgotten な
+id を含めると `SourceMemoryForgottenError` を投げて何も書かない、forgotten でなければ
+今日どおり書く）を実行するようにした——上の「数え方の規律への追記（2026-09-28）」
+規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に当たる。項目21・
+23・24・25 と同じ判断である。**`supportsAbortIfForgotten` は任意（`?: boolean`）
+であり、渡さない・`false` を渡す既存の呼び出し元はこの新しい歯を1本も実行しない**
+——PR #524/PR #526（ADR 0237）の前例に倣い、新しい独立した能力のフラグを必須には
+しなかった。
+
+**誰が影響を受けるか**: `opts.abortIfForgotten` を自分で渡している呼び出し側（Postgres
+以外の `MemoryStore` 実装を使っていて、かつこの欄を明示的に使っている場合）だけ、
+実行時の振る舞いが変わりうる。**`runtime.consolidate`/`runtime.reflect` を直接呼ぶ
+だけの利用者は、`ConsolidateOutcome`/`ReflectOutcome` を網羅的に分岐している場合
+だけ型検査で気づく**（union に値が増えたため。exhaustive switch は `never` の分岐で
+落ちる）——今日どおりの分岐（`default`/未網羅の分岐）ならコンパイルは壊れない。
+`packages/testkit` の conformance suite を自分の `MemoryStore` 実装に対して走らせて
+いる利用者は、`supportsAbortIfForgotten` を渡さなければ影響を受けない。
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要（新しい列・表は追加していない。`@mnemora/postgres` の
+`createMemoryWithOutbox`/`supersedeWithNewMemories` が、`opts.abortIfForgotten` を
+渡されたときだけ追加の `SELECT … FOR UPDATE` を発行する）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は9件
+（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
+PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
+2026-09-30 追記））になった。**
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

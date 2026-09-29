@@ -165,9 +165,7 @@ for (const [name, makeKit] of KITS) {
         expect(result.atomicity).toBe("not_attempted");
         expect(result.consolidatedMemoryId).toBeNull();
         expect(result.llmCalls).toBe(1);
-        expect(
-          result.sources.map((s) => ({ memoryId: s.memoryId, kind: s.kind })),
-        ).toEqual([
+        expect(result.sources.map((s) => ({ memoryId: s.memoryId, kind: s.kind }))).toEqual([
           { memoryId: a.id, kind: "forgotten_before_write" },
           { memoryId: b.id, kind: "not_attempted" },
         ]);

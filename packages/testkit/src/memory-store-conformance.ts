@@ -127,7 +127,7 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsSupersedeWithNewMemories: boolean;
   /**
-   * Issue #1226 / ADR 0375（PR1、#1427。この枝ではまだ main に無い）決定7
+   * Issue #1226 / [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md) 決定7
    * （クローン miku の判断）: 対象の `MemoryStore` 実装が `createMemoryWithOutbox`/
    * `supersedeWithNewMemories?` の `opts.abortIfForgotten`（`SourceMemoryForgottenError`
    * を投げて書き込みを打ち切る、書き込みと同一トランザクションの `SELECT … FOR UPDATE`

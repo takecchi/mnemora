@@ -18,7 +18,12 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { closeTestClient, getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  resetTestDatabase,
+  TEST_EMBEDDING_SPACE,
+} from "./test-db.js";
 
 /**
  * Issue #1226 / ADR 0375 決定7（クローン miku の判断）: `PostgresMemoryStore.supersedeWithNewMemories`
