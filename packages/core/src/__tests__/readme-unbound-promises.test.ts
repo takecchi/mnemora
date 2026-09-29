@@ -18,6 +18,9 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * - 「単体で呼べる純関数（動く最小の例）」の片は「そのまま実行できる」。`check:doc-snippets` は型しか
  *   見ないので、ここで片そのものを README から取り出して実行する。
  * - 連想枠の `anchorCount` は `limit` が天井になる（アンカーは段2で `limit` の内側に入った候補から取る）。
+ * - 連想枠の既定値（`anchorCount` = `DEFAULT_ASSOCIATION_ANCHOR_COUNT`、
+ *   `minSimilarity` = `DEFAULT_ASSOCIATION_MIN_SIMILARITY`、どちらも `recall.ts`）は、
+ *   省略したときに実際に使われる（README.md の「連想枠」節）。
  */
 
 const README = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
@@ -144,5 +147,137 @@ describe("README「連想枠」: anchorCount は limit が天井になる", () =
 
   it("陽性対照: limit: 40 / anchorCount: 40 なら40件", async () => {
     expect(await anchorsUsed(60, 40, 40)).toBe(40);
+  });
+});
+
+describe("README「連想枠」: 既定値（anchorCount=3 / minSimilarity=0.5）は省略時に実際に使われる", () => {
+  const ctx: Ctx = { tenantId: "tenant-1" };
+  const NOW = new Date("2026-06-01T00:00:00.000Z");
+
+  function newMemory(i: number): NewMemory {
+    const halfLifeHours = 24 * 365 * 10;
+    return {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: `本文${i}`,
+      contentHash: `hash-default-${i}`,
+      digest: `digest${i}`,
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: NOW,
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours,
+      decayFloorAt: defaultDecayStrategy.floorAt({
+        recordedAt: NOW,
+        lastReinforcedAt: null,
+        strength: 1,
+        halfLifeHours,
+      }),
+      embeddingStatus: "ready",
+    };
+  }
+
+  function buildRuntime(
+    vectorStore: VectorStore,
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+  ) {
+    return createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+    });
+  }
+
+  it("anchorCount 省略時は既定の3件をアンカーに使う——3件目までは使い、4件目は使わない（境界）", async () => {
+    const stores = createFakeRuntimeStores();
+    const calls: MemoryId[][] = [];
+    const vectorStore: VectorStore = Object.assign(Object.create(stores.vectorStore), {
+      getVectors: async (
+        c: Ctx,
+        space: Parameters<NonNullable<VectorStore["getVectors"]>>[1],
+        ids: MemoryId[],
+      ) => {
+        calls.push(ids);
+        return stores.vectorStore.getVectors(c, space, ids);
+      },
+    });
+    const ids: MemoryId[] = [];
+    for (let i = 0; i < 10; i++) {
+      const memory = await stores.memoryStore.createMemory(ctx, newMemory(i));
+      ids.push(memory.id);
+      // クエリ [1,0] との類似度が i の昇順で下がるように置く（既存の「連想枠」describe と同じ配置）。
+      await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [
+        1,
+        0.001 * (i + 1),
+      ]);
+    }
+    const runtime = buildRuntime(vectorStore, stores);
+    await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      association: { maxCount: 10 }, // anchorCount を省略 → 既定の3が使われるはず
+    });
+
+    expect(calls, "連想枠は getVectors を1回だけ呼ぶ").toHaveLength(1);
+    // 既定の anchorCount=3: 上位3件（i=0,1,2）はアンカーに使い、4件目（i=3）は使わない。
+    expect(calls[0]).toEqual([ids[0], ids[1], ids[2]]);
+    expect(calls[0]).not.toContain(ids[3]);
+  });
+
+  it("minSimilarity 省略時は既定の0.5——類似度ちょうど0.5の候補は連想枠に入り、直下（0.499）は入らない（境界）", async () => {
+    const stores = createFakeRuntimeStores();
+
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory(0));
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, anchor.id, [1, 0]);
+
+    // クエリ [1,0] とのコサイン類似度がちょうど 0.5（丸め誤差で 0.5000000000000001 になるが、
+    // >= 0.5 は確実に真になる。単位ベクトル [bx, sqrt(1-bx^2)] と [1,0] の内積は bx そのもの
+    // になるため、ノルムの丸めに左右されにくい構成——このファイル追加時に実測して確認した）。
+    const atBoundary = await stores.memoryStore.createMemory(ctx, newMemory(1));
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, atBoundary.id, [
+      0.5,
+      Math.sqrt(1 - 0.5 ** 2),
+    ]);
+
+    // 類似度がちょうど 0.499（既定の下限を直下で割る）。
+    const belowBoundary = await stores.memoryStore.createMemory(ctx, newMemory(2));
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, belowBoundary.id, [
+      0.499,
+      Math.sqrt(1 - 0.499 ** 2),
+    ]);
+
+    const runtime = buildRuntime(stores.vectorStore, stores);
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 1, // アンカー自身だけが段1の withinLimit に入るようにする
+      association: { maxCount: 10, anchorCount: 1 }, // minSimilarity を省略 → 既定の0.5が使われるはず
+    });
+
+    const atBoundaryEntry = result.memories.find((m) => m.memoryId === atBoundary.id);
+    expect(atBoundaryEntry?.retrievedVia, "類似度ちょうど0.5は既定の下限以上として入る").toBe(
+      "association",
+    );
+    expect(
+      result.memories.some((m) => m.memoryId === belowBoundary.id),
+      "類似度0.499（直下）は既定の下限を割り、連想枠に入らない",
+    ).toBe(false);
   });
 });

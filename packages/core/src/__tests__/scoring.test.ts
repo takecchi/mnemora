@@ -386,3 +386,48 @@ describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0165 決め
     expect(score.decay).toBeCloseTo(0.5, 10);
   });
 });
+
+describe("defaultScoringStrategy: freshness の下限側は clamp が無く、十分古いと厳密に0になる（docs/recall.md §7.2、Issue #939）", () => {
+  // `freshness = Math.min(MAX_FRESHNESS, 0.5 ** (elapsed / halfLifeHours))`
+  // （`packages/core/src/strategies/scoring.ts` の `computeFreshness`）。下限には clamp が無い
+  // ——`elapsed / halfLifeHours` が十分大きいと `0.5 ** x` が IEEE 754 倍精度の下限を割り込み、
+  // 丸めで厳密に `0` になる。境界の具体的な整数（docs/recall.md §7.2 の実測では「約1075」）は
+  // V8 の丸めに依存するため、このファイルには焼き込まず、`0.5 ** N === 0` になる最小の整数 N を
+  // 実行時に探す。
+  const NOW = new Date("2026-09-06T00:00:00.000Z");
+
+  /** `0.5 ** N === 0` になる最小の整数 N を実行時に探す（1075 をこのテストに焼き込まない）。 */
+  function minNWhereHalvesToZero(): number {
+    let n = 1;
+    while (Math.pow(0.5, n) !== 0) {
+      n += 1;
+    }
+    return n;
+  }
+
+  it("elapsed/halfLifeHours が (N-1) では freshness は正、N ちょうどで厳密に0になる（境界）", () => {
+    const N = minNWhereHalvesToZero();
+    // 探索そのものの前提（この環境で N が実際に「最小の0になる整数」であること）を検算する。
+    expect(Math.pow(0.5, N - 1)).toBeGreaterThan(0);
+    expect(Math.pow(0.5, N)).toBe(0);
+
+    // halfLifeHours=1 にすると、elapsed をちょうど整数時間で刻めるので
+    // elapsed/halfLifeHours が丸め誤差なく N-1 / N になる。
+    const halfLifeHours = 1;
+    function freshnessAtElapsedHours(hours: number): number {
+      return defaultScoringStrategy({
+        now: NOW,
+        tags: [],
+        queryTags: [],
+        occurredAt: new Date(NOW.getTime() - hours * HOUR),
+        recordedAt: NOW,
+        lastReinforcedAt: null,
+        strength: 1,
+        halfLifeHours,
+      }).freshness;
+    }
+
+    expect(freshnessAtElapsedHours(N - 1)).toBeGreaterThan(0);
+    expect(freshnessAtElapsedHours(N)).toBe(0);
+  });
+});

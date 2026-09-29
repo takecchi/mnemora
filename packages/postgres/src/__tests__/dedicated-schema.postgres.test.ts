@@ -1,7 +1,8 @@
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, EmbeddingSpaceId } from "@mnemora/core";
+import type { ClaimKey, Ctx, EmbeddingSpaceId } from "@mnemora/core";
 import {
+  buildNewMemoryEventFixture,
   buildNewMemoryFixture,
   buildNewObservationFixture,
   buildProvenanceFixture,
@@ -63,6 +64,8 @@ const DB_DEFAULT = "mnemora_ds_default";
 const DB_VECTOR_STORE = "mnemora_ds_vector_store";
 const DB_KIND_CONSTRAINT_SCOPE = "mnemora_ds_kind_constraint_scope";
 const DB_RESERVED_WORD_SCHEMA = "mnemora_ds_reserved_word_schema";
+const DB_DELETE_ACROSS_SPACES = "mnemora_ds_delete_across_spaces";
+const DB_FIND_CONTESTED = "mnemora_ds_find_contested";
 
 const VECTOR_SPACE: EmbeddingSpaceId = {
   provider: "test",
@@ -499,6 +502,197 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
           restoredDefs,
           `${schema}: 'restored' を許す制約がちょうど1本であること（他スキーマの制約を誤って数えていないこと）`,
         ).toHaveLength(1);
+      }
+    },
+  );
+
+  // レビュー所見8: `PostgresVectorStore.deleteAcrossSpaces`（Issue #1425、ADR 0382）が
+  // `current_schema()` の中の全 space だけを対象にすることを、専用スキーマ上で確かめる。
+  // 測定5・測定7と同じ理由で、public 側にも同じ space・同じ tenantId の行を用意し、
+  // 取り違えたら赤になる形にする。
+  it(
+    "測定9: PostgresVectorStore.deleteAcrossSpaces は専用スキーマの中の全 space だけを消し、" +
+      "public 側の同名テーブルの行には触らない",
+    async () => {
+      const pool = await createBlankDatabase(DB_DELETE_ACROSS_SPACES);
+      const schema = "mnemora_das";
+
+      await runMigrations(pool);
+      await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema });
+
+      // 同じ space id を public・専用スキーマの両方に登録する——space id が同じなら
+      // embeddingSpaceTableName が返す名前も同じになるため、スキーマ違いの「同名テーブル」を
+      // 意図的に作る。
+      const spaceA: EmbeddingSpaceId = {
+        provider: "test",
+        model: "dedicated-schema-delete-across-a",
+        dimensions: 3,
+      };
+      const spaceB: EmbeddingSpaceId = {
+        provider: "test",
+        model: "dedicated-schema-delete-across-b",
+        dimensions: 3,
+      };
+      await registerEmbeddingSpace(pool, spaceA);
+      await registerEmbeddingSpace(pool, spaceB);
+      await registerEmbeddingSpace(pool, spaceA, { schema });
+      await registerEmbeddingSpace(pool, spaceB, { schema });
+
+      const dedicatedClient = createPostgresClient(connectionStringFor(DB_DELETE_ACROSS_SPACES), {
+        schema,
+      });
+      const publicClient = createPostgresClient(connectionStringFor(DB_DELETE_ACROSS_SPACES));
+      try {
+        const dedicatedMemoryStore = new PostgresMemoryStore(dedicatedClient.db);
+        const dedicatedVectorStore = new PostgresVectorStore(dedicatedClient.db);
+        const publicMemoryStore = new PostgresMemoryStore(publicClient.db);
+        const publicVectorStore = new PostgresVectorStore(publicClient.db);
+
+        const ctx: Ctx = { tenantId: "tenant-dedicated-schema-delete-across-spaces" };
+
+        // 専用スキーマ側: 消す対象（target、space A・B 両方に embedding を持つ）と、
+        // 残るはずの対照（control、space A だけに embedding を持つ）。
+        const target = await dedicatedMemoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "das-target" }),
+        );
+        const control = await dedicatedMemoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "das-control" }),
+        );
+        await dedicatedVectorStore.upsert(ctx, spaceA, target.id, [1, 0, 0]);
+        await dedicatedVectorStore.upsert(ctx, spaceB, target.id, [0, 1, 0]);
+        await dedicatedVectorStore.upsert(ctx, spaceA, control.id, [0, 0, 1]);
+
+        // public 側: 同じ tenantId・同じ space の「おとり」。
+        const publicDecoy = await publicMemoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "public-decoy" }),
+        );
+        await publicVectorStore.upsert(ctx, spaceA, publicDecoy.id, [1, 1, 1]);
+
+        // 前提の確認（消す前）。
+        expect(await dedicatedVectorStore.getVectors(ctx, spaceA, [target.id])).toHaveLength(1);
+        expect(await dedicatedVectorStore.getVectors(ctx, spaceB, [target.id])).toHaveLength(1);
+        expect(await publicVectorStore.getVectors(ctx, spaceA, [publicDecoy.id])).toHaveLength(1);
+
+        await dedicatedVectorStore.deleteAcrossSpaces(ctx, [target.id]);
+
+        // target: 専用スキーマの space A・B 両方から消えていること。
+        expect(
+          await dedicatedVectorStore.getVectors(ctx, spaceA, [target.id]),
+          "専用スキーマの space A から target が消えていること",
+        ).toHaveLength(0);
+        expect(
+          await dedicatedVectorStore.getVectors(ctx, spaceB, [target.id]),
+          "専用スキーマの space B から target が消えていること",
+        ).toHaveLength(0);
+
+        // control: 専用スキーマの space A に残っていること（対象外の memoryId まで
+        // 巻き込んでいないこと）。
+        expect(
+          await dedicatedVectorStore.getVectors(ctx, spaceA, [control.id]),
+          "専用スキーマの control は残っていること",
+        ).toHaveLength(1);
+
+        // public: 一切触っていないこと（🔴 スキーマを取り違える変異が無いと踏めない対照）。
+        expect(
+          await publicVectorStore.getVectors(ctx, spaceA, [publicDecoy.id]),
+          "public 側の同名テーブルの行は消えずに残っていること",
+        ).toHaveLength(1);
+      } finally {
+        await closePostgresClient(dedicatedClient);
+        await closePostgresClient(publicClient);
+      }
+    },
+  );
+
+  // レビュー所見8: `PostgresMemoryStore.findContestedByClaimKey`（Issue #933 案2、ADR 0378）が
+  // 専用スキーマの中の行だけを返すことを確かめる。`memories` は search_path 解決（未修飾の
+  // `FROM memories`）に頼っているため、測定5・測定7と同じ形で public 側にも同じ claimKey の
+  // 「おとり」を用意し、取り違えたら混入する形にする。
+  it(
+    "測定10: PostgresMemoryStore.findContestedByClaimKey は専用スキーマの中の contested な記憶だけを返し、" +
+      "public 側の同名テーブルの行は返さない",
+    async () => {
+      const pool = await createBlankDatabase(DB_FIND_CONTESTED);
+      const schema = "mnemora_fc";
+
+      await runMigrations(pool);
+      await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema });
+
+      const dedicatedClient = createPostgresClient(connectionStringFor(DB_FIND_CONTESTED), {
+        schema,
+      });
+      const publicClient = createPostgresClient(connectionStringFor(DB_FIND_CONTESTED));
+      try {
+        const dedicatedStore = new PostgresMemoryStore(dedicatedClient.db);
+        const publicStore = new PostgresMemoryStore(publicClient.db);
+        const ctx: Ctx = { tenantId: "tenant-dedicated-schema-find-contested" };
+        const claimKey: ClaimKey = {
+          subject: "user",
+          predicate: "dedicated-schema-find-contested",
+        };
+
+        // 専用スキーマ側に対抗ペア（status='contested'）を作る。
+        const dedicatedA = await dedicatedStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "dedicated-a", claimKey }),
+        );
+        const dedicatedB = await dedicatedStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "dedicated-b", claimKey }),
+        );
+        await dedicatedStore.markContestedPair(
+          ctx,
+          {
+            id: dedicatedA.id,
+            event: buildNewMemoryEventFixture({ memoryId: dedicatedA.id, kind: "updated" }),
+          },
+          {
+            id: dedicatedB.id,
+            event: buildNewMemoryEventFixture({ memoryId: dedicatedB.id, kind: "updated" }),
+          },
+        );
+
+        // public 側にも同じ tenantId・同じ claimKey で対抗ペアの「おとり」を作る。
+        const publicA = await publicStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "public-a", claimKey }),
+        );
+        const publicB = await publicStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ contentHash: "public-b", claimKey }),
+        );
+        await publicStore.markContestedPair(
+          ctx,
+          {
+            id: publicA.id,
+            event: buildNewMemoryEventFixture({ memoryId: publicA.id, kind: "updated" }),
+          },
+          {
+            id: publicB.id,
+            event: buildNewMemoryEventFixture({ memoryId: publicB.id, kind: "updated" }),
+          },
+        );
+
+        const found = await dedicatedStore.findContestedByClaimKey(ctx, {
+          subjectId: null,
+          claimKey,
+          excludeMemoryId: dedicatedA.id,
+          contentHash: "no-such-hash",
+          validFrom: null,
+          validUntil: null,
+        });
+        const foundIds = found.map((m) => m.id);
+
+        expect(foundIds, "専用スキーマの対抗ペアの片割れを返すこと").toContain(dedicatedB.id);
+        expect(foundIds, "public 側のおとりを返さないこと（A）").not.toContain(publicA.id);
+        expect(foundIds, "public 側のおとりを返さないこと（B）").not.toContain(publicB.id);
+        expect(foundIds, "返る件数は専用スキーマの1件だけであること").toHaveLength(1);
+      } finally {
+        await closePostgresClient(dedicatedClient);
+        await closePostgresClient(publicClient);
       }
     },
   );

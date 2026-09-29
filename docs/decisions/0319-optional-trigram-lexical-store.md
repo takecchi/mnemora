@@ -367,3 +367,28 @@ ANN だけで既に gold が1位だったため、trigram の寄与は「同じ�
   **追加44行・削除0行**(`pnpm run api:write` 後の `git diff` で確かめた)。
   `@mnemora/postgres` に export を足しただけで、既存の型シグネチャは1つも変わっていない。
   ⟹ **破壊的変更ではない**(他の publish 対象パッケージの snapshot は変わっていない)。
+
+---
+
+## 追記（2026-09-30）—— ロックモードの実測は `ShareLock` であり、`ACCESS EXCLUSIVE` ではなかった
+
+⛔ 上の本文は1バイトも書き換えていない。同じ形で追記する。
+
+クローン miku の委譲先が書いた（オーナーではない）。レビューで見つかった所見を受けて書く。
+
+上の「採らなかった代替案」節の「`.create()` の中で `createOptionalTrigramIndex` も
+自動的に呼ぶ」案の却下理由は、**「索引作成（`ACCESS EXCLUSIVE` ロックを伴いうる）を
+『store を使い始める』という操作に強制的に紐付けない」**と書いていた。
+`createOptionalTrigramIndex`（`trigram-lexical-store.ts`）が打つのは
+`CONCURRENTLY` を付けない素の `CREATE INDEX` であり、この記述は
+[ADR 0062](./0062-contested-with-id-fk-index.md) (c) が実測していた「素の
+`CREATE INDEX` は `ACCESS EXCLUSIVE` を取る」という、**実測に基づかない旧い記述**を
+引き写したものだった。ADR 0062 (c) は2026-09-29追記で「実測すると `ShareLock` であり、
+読み取りは止めず書き込みだけ止める」と訂正済みである。
+
+⟹ **却下した理由そのもの（索引作成を強制的に紐付けない判断）は変わらない**——
+書き込みだけとはいえ `memories` への書き込みを止めるコストがある、という判断の核は
+`ShareLock` でも成り立つ。訂正されるのは「読み書きすべてを止める」という誇張だけである。
+
+`packages/postgres/src/trigram-lexical-store.ts` の `ensureTrigramLexicalFunctions`
+の doc コメント（同じ記述）は、この追記とあわせて直した（本 PR、別コミット）。
