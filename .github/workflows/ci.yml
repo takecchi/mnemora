@@ -308,11 +308,11 @@ jobs:
     # ——あちらは「測定ジョブ」7本を対象にした歯であり、本ジョブは測定ではなく
     # 正しさの検査〔pass/fail が明確な歯〕なので対象が違う）。
     #
-    # `@mnemora/bullmq` は `private: true`（`scripts/publish-targets.mjs` の
-    # `PUBLISH_TARGETS` にも入れていない）ため、`build`（typecheck/lint/test/build/
-    # api:check/check:cjs-parse/pack:check）ジョブの各門はほぼそのまま素通りする——
-    # `typecheck`/`build`/`test`（Redis 不要な単体テストのみ）だけは
-    # `pnpm -r --if-present run <script>` 経由で走る。**Redis を要る歯
+    # `@mnemora/bullmq` は publish 済み（1.1.0 から。`scripts/publish-targets.mjs` の
+    # `PUBLISH_TARGETS` に載っている）ため、`build`（typecheck/lint/test/build/
+    # api:check/check:cjs-parse/pack:check）ジョブの各門は他の publish 対象と同じく
+    # bullmq も見る（`pack:check` の version 検査だけは `NEVER_PUBLISHED_TARGETS` により
+    # 対象外——`scripts/publish-pack-checks.mjs` の doc コメント参照）。**Redis を要る歯
     # （`src/**/*.redis.test.ts`、`test:redis`）だけがこのジョブの持ち場である。**
     name: "packages/bullmq（本物の Postgres + 本物の Redis）"
     runs-on: ubuntu-latest
