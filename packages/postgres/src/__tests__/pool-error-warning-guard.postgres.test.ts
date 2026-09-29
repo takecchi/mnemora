@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { POOL_ERROR_WARNING_PREFIX } from "../pool-error-warning.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
@@ -143,4 +144,38 @@ describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏�
     expect(output).toContain("pool-error-warning-guard");
     expect(output).toMatch(/unhandled error/i);
   }, 60_000);
+});
+
+/**
+ * 上の歯は、自分で生成した設定の中で守りが効くことだけを見る。本物の `vitest.config.mts` から守りを
+ * 外しても、`examples/chat` の複製した接頭辞が正本からずれても、上の歯は赤くならない——ここで縛る。
+ */
+describe("setup-pool-error-warning-guard.ts: 本物の vitest 設定に載っていて、examples/chat の複製が正本と一致する", () => {
+  const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+
+  async function setupFilesOf(configPath: string): Promise<string[]> {
+    const mod = (await import(configPath)) as {
+      default: { test?: { setupFiles?: string | string[] } };
+    };
+    const setupFiles = mod.default.test?.setupFiles ?? [];
+    return Array.isArray(setupFiles) ? setupFiles : [setupFiles];
+  }
+
+  it.each([
+    ["packages/postgres", join(repoRoot, "packages", "postgres", "vitest.config.mts")],
+    ["examples/chat", join(repoRoot, "examples", "chat", "vitest.config.mts")],
+  ])("%s の vitest.config.mts の setupFiles に守りが載っている", async (_name, configPath) => {
+    expect(await setupFilesOf(configPath)).toContain(
+      "./src/__tests__/setup-pool-error-warning-guard.ts",
+    );
+  });
+
+  it("examples/chat の守りが複製した接頭辞は、正本の POOL_ERROR_WARNING_PREFIX と同じ", () => {
+    const mirror = readFileSync(
+      join(repoRoot, "examples", "chat", "src", "__tests__", "setup-pool-error-warning-guard.ts"),
+      "utf8",
+    );
+    const match = /const POOL_ERROR_WARNING_PREFIX_MIRROR = "([^"]*)";/.exec(mirror);
+    expect(match?.[1], "examples/chat の複製").toBe(POOL_ERROR_WARNING_PREFIX);
+  });
 });
