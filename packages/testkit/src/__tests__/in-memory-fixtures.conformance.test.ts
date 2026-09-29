@@ -6,6 +6,7 @@ import type { Ctx } from "@mnemora/core";
 import { describeEventStoreConformance } from "../event-store-conformance.js";
 import { describeLexicalStoreConformance } from "../lexical-store-conformance.js";
 import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
+import { describeRelationStoreConformance } from "../relation-store-conformance.js";
 import { describeOutboxStoreConformance } from "../outbox-store-conformance.js";
 import { describeTenantSettingsStoreConformance } from "../tenant-settings-store-conformance.js";
 import { describeVectorStoreConformance } from "../vector-store-conformance.js";
@@ -14,6 +15,7 @@ import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
+import { InMemoryRelationStore } from "../__fixtures__/in-memory-relation-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
@@ -126,6 +128,35 @@ describeMemoryStoreConformance({
   // Issue #1412 コメント1 / ADR 0373: InMemoryMemoryStore は resolveOrphanedContested を
   // 実装している。
   supportsResolveOrphanedContested: true,
+  // Issue #207/#933 PR2 / ADR 0381: InMemoryMemoryStore は markContestedGroup /
+  // resolveContestedGroup を実装している。
+  supportsMarkContestedGroup: true,
+  supportsResolveContestedGroup: true,
+  listRelationsForMemory: (ctx, memoryId) => {
+    if (!latestMemoryStoreForEvents) {
+      throw new Error("listRelationsForMemory より先に createStore() を呼ぶ必要がある");
+    }
+    return latestMemoryStoreForEvents.relations
+      .filter((r) => r.tenantId === ctx.tenantId && r.fromMemoryId === memoryId)
+      .map((r) => ({ memoryId: r.toMemoryId }));
+  },
+});
+
+// Issue #207/#933 PR2（ADR 0381）: `RelationStore` の in-memory 実装。
+describeRelationStoreConformance({
+  name: "in-memory placeholder",
+  createStore: () => {
+    const memoryStore = new InMemoryMemoryStore();
+    return new InMemoryRelationStore(memoryStore, memoryStore.relations);
+  },
+  prepareMemoryId: async (ctx) => {
+    const memoryStore = new InMemoryMemoryStore();
+    const memory = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId }),
+    );
+    return memory.id;
+  },
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり

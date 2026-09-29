@@ -3,6 +3,7 @@
 export * from "./client.js";
 export * from "./advisory-lock.js";
 export * from "./memory-store.js";
+export * from "./relation-store.js";
 export * from "./vector-store.js";
 export * from "./lexical-store.js";
 export * from "./trigram-lexical-store.js";

@@ -2872,6 +2872,275 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.markContestedGroup?` の実装（契約は
+   * interface 側の doc コメントにある）。`memories`・`memory_relations`・
+   * `memory_events` を1トランザクションで書く——`memory_relations` への書き込みは
+   * `PostgresRelationStore` を経由せず、ここで直接 SQL を発行する
+   * （`createMemoryWithOutbox` が `outbox_jobs` へ直接書くのと同じ作法。
+   * `relation-store.ts` の doc コメント参照）。
+   */
+  async markContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("markContestedGroup: members must have at least 3 entries");
+    }
+    const normalized = members.map((m) => ({ ...m, id: normalizeUuidCase(m.id) }));
+    const ids = normalized.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("markContestedGroup: member ids must be unique");
+    }
+    for (const id of ids) {
+      if (!isUuidLike(id)) {
+        throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+      }
+    }
+
+    return this.db.transaction(async (tx) => {
+      // `ORDER BY id ASC FOR UPDATE`——`markContestedPair`/`resolveContestedPair` と
+      // 同じ理由（並行呼び出しどうしが常に同じ順でロックを取り、デッドロックを
+      // 構造的に避ける）を N 件へ一般化する。
+      const existing = await tx.execute(sql`
+        SELECT * FROM memories
+        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+        ORDER BY id ASC
+        FOR UPDATE
+      `);
+      const rowById = new Map(
+        existing.rows.map((row) => {
+          const memory = rowToMemory(row as unknown as MemoryRow);
+          return [memory.id, memory] as const;
+        }),
+      );
+
+      for (const id of ids) {
+        if (!rowById.has(id)) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+      }
+      // CAS（interface 側の doc コメントの3条件）。1件でも満たさなければ、
+      // 書き込みを一切行わずに投げる。
+      for (const id of ids) {
+        const memory = rowById.get(id)!;
+        const eligible =
+          memory.status === "active" ||
+          (memory.status === "contested" &&
+            (memory.contestedWithId === null ||
+              memory.contestedWithId === undefined ||
+              ids.includes(memory.contestedWithId)));
+        if (!eligible) {
+          throw new MemoryStatusConflictError(id, "active", memory.status);
+        }
+      }
+
+      const updatedById = new Map<MemoryId, Memory>();
+      for (const id of ids) {
+        const result = await tx.execute(sql`
+          UPDATE memories
+          SET status = 'contested', contested_with_id = NULL, updated_at = now()
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+            AND (
+              status = 'active'
+              OR (status = 'contested' AND (contested_with_id IS NULL OR contested_with_id = ANY(${sql.param(ids)}::uuid[])))
+            )
+          RETURNING *
+        `);
+        if (result.rows.length === 0) {
+          // FOR UPDATE で既にロックを保持しているため、通常はここへ来ない
+          // （`markContestedPair`/`resolveOrphanedContested` と同じ防御的な二重チェック）。
+          const current = await tx.execute(sql`
+            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+          `);
+          const observedStatus =
+            current.rows.length === 0
+              ? null
+              : (current.rows[0] as unknown as { status: MemoryStatus }).status;
+          if (observedStatus === null) {
+            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+          }
+          throw new MemoryStatusConflictError(id, "active", observedStatus);
+        }
+        updatedById.set(id, rowToMemory(result.rows[0] as unknown as MemoryRow));
+      }
+
+      // ADR 0381 決定1: 「完全グラフ」は「一致した全員を結ぶ」ではなく「その中で
+      // 実際に有効期間が重なる組を結ぶ」と読み替える（ADR 0324 決定4——重なりが
+      // 矛盾の必要条件——との整合）。`findActiveByClaimKey`/`findContestedByClaimKey`
+      // と同じ半開区間の重なり判定を、既に読み込んだ行に対して JS 側で行う。
+      const overlaps = (a: Memory, b: Memory): boolean =>
+        (a.validFrom === null ||
+          a.validFrom === undefined ||
+          b.validUntil === null ||
+          b.validUntil === undefined ||
+          a.validFrom < b.validUntil) &&
+        (b.validFrom === null ||
+          b.validFrom === undefined ||
+          a.validUntil === null ||
+          a.validUntil === undefined ||
+          b.validFrom < a.validUntil);
+
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = updatedById.get(ids[i]!)!;
+          const b = updatedById.get(ids[j]!)!;
+          if (!overlaps(a, b)) continue;
+          await tx.execute(sql`
+            INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
+            VALUES
+              (gen_random_uuid(), ${ctx.tenantId}, ${a.id}, ${b.id}, 'contradicts'),
+              (gen_random_uuid(), ${ctx.tenantId}, ${b.id}, ${a.id}, 'contradicts')
+            ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
+          `);
+        }
+      }
+
+      const events: MemoryEvent[] = [];
+      for (const m of normalized) {
+        const eventResult = await tx.execute(sql`
+          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+          VALUES (
+            gen_random_uuid(),
+            ${ctx.tenantId},
+            ${m.event.memoryId},
+            ${m.event.kind},
+            ${toPgTimestamp(m.event.at ?? new Date())},
+            ${JSON.stringify(m.event.actor)}::jsonb,
+            ${m.event.digestSnapshot ?? null},
+            ${m.event.sizeBeforeBytes ?? null},
+            ${JSON.stringify(m.event.meta)}::jsonb
+          )
+          RETURNING *
+        `);
+        events.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
+      }
+
+      return { members: ids.map((id) => updatedById.get(id)!), events };
+    });
+  }
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.resolveContestedGroup?` の実装
+   * （契約は interface 側の doc コメントにある）。`markContestedGroup` と対称——
+   * `memories`・`memory_relations`（削除）・`memory_events` を1トランザクションで書く。
+   */
+  async resolveContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{
+      id: MemoryId;
+      status: "active" | "superseded";
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("resolveContestedGroup: members must have at least 3 entries");
+    }
+    const normalized = members.map((m) => ({
+      ...m,
+      id: normalizeUuidCase(m.id),
+      ...(m.supersededById === undefined
+        ? {}
+        : { supersededById: normalizeUuidCase(m.supersededById) }),
+    }));
+    const ids = normalized.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("resolveContestedGroup: member ids must be unique");
+    }
+    for (const id of ids) {
+      if (!isUuidLike(id)) {
+        throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+      }
+    }
+
+    return this.db.transaction(async (tx) => {
+      const existing = await tx.execute(sql`
+        SELECT id, status FROM memories
+        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+        ORDER BY id ASC
+        FOR UPDATE
+      `);
+      const statusById = new Map(
+        existing.rows.map((row) => {
+          const r = row as unknown as { id: string; status: MemoryStatus };
+          return [r.id, r.status] as const;
+        }),
+      );
+      for (const id of ids) {
+        if (!statusById.has(id)) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+      }
+      for (const id of ids) {
+        if (statusById.get(id) !== "contested") {
+          throw new MemoryStatusConflictError(id, "contested", statusById.get(id)!);
+        }
+      }
+
+      const updatedById = new Map<MemoryId, Memory>();
+      for (const m of normalized) {
+        const result = await tx.execute(sql`
+          UPDATE memories
+          SET status = ${m.status},
+              contested_with_id = NULL,
+              superseded_by_id = COALESCE(${m.supersededById ?? null}, superseded_by_id),
+              updated_at = now()
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${m.id} AND status = 'contested'
+          RETURNING *
+        `);
+        if (result.rows.length === 0) {
+          const current = await tx.execute(sql`
+            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${m.id} LIMIT 1
+          `);
+          const observedStatus =
+            current.rows.length === 0
+              ? null
+              : (current.rows[0] as unknown as { status: MemoryStatus }).status;
+          if (observedStatus === null) {
+            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${m.id}`);
+          }
+          throw new MemoryStatusConflictError(m.id, "contested", observedStatus);
+        }
+        updatedById.set(m.id, rowToMemory(result.rows[0] as unknown as MemoryRow));
+      }
+
+      // ADR 0381 決定3: `both_active`/`supersede` のどちらでも、このメンバー全員を
+      // 結んでいた関係の行を双方向とも削除する——2者版 `resolveContestedPair` が
+      // 決着の種類に関わらず常に `contested_with_id = NULL` へ戻すのと同じ扱いに
+      // 揃える。「一度解消したら再び争わせない」印は作らない。
+      await tx.execute(sql`
+        DELETE FROM memory_relations
+        WHERE tenant_id = ${ctx.tenantId}
+          AND from_memory_id = ANY(${sql.param(ids)}::uuid[])
+          AND to_memory_id = ANY(${sql.param(ids)}::uuid[])
+          AND kind = 'contradicts'
+      `);
+
+      const events: MemoryEvent[] = [];
+      for (const m of normalized) {
+        const eventResult = await tx.execute(sql`
+          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+          VALUES (
+            gen_random_uuid(),
+            ${ctx.tenantId},
+            ${m.event.memoryId},
+            ${m.event.kind},
+            ${toPgTimestamp(m.event.at ?? new Date())},
+            ${JSON.stringify(m.event.actor)}::jsonb,
+            ${m.event.digestSnapshot ?? null},
+            ${m.event.sizeBeforeBytes ?? null},
+            ${JSON.stringify(m.event.meta)}::jsonb
+          )
+          RETURNING *
+        `);
+        events.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
+      }
+
+      return { members: ids.map((id) => updatedById.get(id)!), events };
+    });
+  }
+
+  /**
    * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
    * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここはクエリの
    * 実装のみ。

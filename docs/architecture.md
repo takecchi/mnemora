@@ -343,6 +343,7 @@ packages/
 - `bullmq` は `Scheduler` を実装していない。`runtime.tick()` を BullMQ で駆動する（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)）。`"private": true` で、npm には公開していない。
   - **⚠ 2026-09-29 追記（Issue #205）**: `"private": true` はもう正しくない——公開準備の PR が出ている（version の bump・実際の publish はまだ。ADR 0325 の追記参照）。
 - `postgres` が実装しているのは `MemoryStore`・`VectorStore`・`LexicalStore`（任意の `PostgresTrigramLexicalStore` を含む）・`EventStore`・`OutboxStore`・`TenantSettingsStore` であり、`RelationStore` は無い（§5.3、Phase 2）。
+  - **⚠ 2026-09-30 追記（Issue #207/#933 PR2、ADR 0381、段階A）**: `RelationStore`（`PostgresRelationStore`）を追加した——上の図が最初から挙げていた形に、今回で追いついた。ただし `Runtime` からの配線（`RuntimeDeps.relationStore?`）・recall 段3の分岐拡張はまだ無い（段階B）。
 - 図に無い `local-embedding`（外部サービスに繋がない `EmbeddingProvider`、[ADR 0085](./decisions/0085-local-embedding-provider.md)）がある。
 - `server`・`sdk` はまだ無い（Phase 4）。
 
@@ -532,6 +533,21 @@ interface MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent }
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
+  // Issue #207/#933 PR2（ADR 0381、2026-09-30 追記）: markContestedPair?/resolveContestedPair? の
+  // N者版（3件以上専用。2者は今日どおり上の2つのまま）。
+  markContestedGroup?(
+    ctx: Ctx,
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
+  resolveContestedGroup?(
+    ctx: Ctx,
+    members: ReadonlyArray<{
+      id: MemoryId;
+      status: 'active' | 'superseded';
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }>
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
   findActiveByClaimKey?(
     ctx: Ctx,
     query: {
@@ -838,7 +854,56 @@ interface LexicalStore {
   上限ではない。DB 側でも `statement_timeout` を設定して併用することを推奨する**
   （`packages/postgres/README.md`「運用: 語彙検索と `statement_timeout`」）。
 
-### 5.3 RelationStore — Phase 2（`status`/`superseded_by_id` 列のみ Phase 1）
+### 5.3 RelationStore — Phase 2
+
+**⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-relation-store-contested-group.md)。
+段階A の時点の記録——書き込み経路〔`Runtime.markContestedGroup` 等〕・recall 段3への
+配線はまだ無い〔段階B〕）。** 下の本文は当時（`RelationStore` 未実装）のドラフトの
+まま残す（`RelationKind` に `supports`/`derived_from` を含んでいた食い違いは
+[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) §1.3 が
+既に指摘していた）。**実装済みの正しい形は次の通り**:
+
+```ts
+type RelationKind = 'contradicts'; // 今は1値のみ（ADR 0292 決定1-a）
+
+interface Relation {
+  memoryId: MemoryId; // 対向（相手側）
+  kind: RelationKind;
+  createdAt: Date;
+}
+
+interface RelationStore {
+  link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+  unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+  listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
+}
+```
+
+`packages/postgres`（`PostgresRelationStore`）・`packages/testkit`
+（`InMemoryRelationStore`）・core の Fake（`FakeRelationStore`、テスト専用）が実装
+している。`Store` バンドルへの組み込みは任意（`RuntimeDeps.relationStore?`、
+ADR 0292 決定1-c）——配線しなくても `recall()` は今日どおり動く。
+
+**書き込み（3件以上の群の作成・解消・穴Aの合流）はこの store の口ではない**——
+`MemoryStore` の任意メソッド `markContestedGroup?`/`resolveContestedGroup?`
+（§5.1）が担う。理由は `markContestedPair?`/`resolveContestedPair?`（2者版）と
+同じ——複合トランザクション（`memories`・`memory_relations`・`memory_events` を
+同時に書く）を持てるのは、そのトランザクションを開ける `MemoryStore` 実装の
+内部だけである（`createMemoryWithOutbox` が `outbox_jobs` へも直接書くのと同じ
+作法）。`PostgresMemoryStore` は `PostgresRelationStore.link`/`unlink` を経由せず、
+自分のトランザクションの中で `memory_relations` へ直接 SQL を発行する。
+
+契約:
+- 関係グラフの汎用化（`RelationStore` そのもの）は Phase 2 に置く。ただし `contested` 判定に
+  必須な `superseded_by_id` 列と `status` 列は Phase 1 のスキーマに前倒しで入れる（後付けの
+  マイグレーションにしない、[docs/roadmap.md](./roadmap.md)）。
+- `link('contradicts', ...)` は対称関係として扱う（`listRelated` はどちら向きの `fromId`/`toId`
+  で張られていても双方から引ける）——ただし `link` 自身は片方向しか書かない。双方向2行は
+  `markContestedGroup?` などの複合書き込みの中で実現する（上記）。
+
+---
+
+**⚠ 以下は当時（RelationStore 未実装）のドラフトの記録。上の追記が正しい形。**
 
 ```ts
 interface RelationStore {
