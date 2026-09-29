@@ -146,7 +146,7 @@ describe("README「pool の `error`: 既定で名乗り、`onPoolError`/自分�
     expect(output).toContain("next query: 1");
   });
 
-  it("C-1. 利用者が pool.on(\"error\", …) を接続より前に付けていると、既定の警告は出ない", async () => {
+  it('C-1. 利用者が pool.on("error", …) を接続より前に付けていると、既定の警告は出ない', async () => {
     const { exitCode, output } = await runChild(["listen-before"]);
     expect(exitCode, output).toBe(0);
     expect(output).toContain("listener: terminating connection due to administrator command");
@@ -154,7 +154,7 @@ describe("README「pool の `error`: 既定で名乗り、`onPoolError`/自分�
     expect(output).toContain("next query: 1");
   });
 
-  it("C-2. 利用者が pool.on(\"error\", …) を接続を張ってから（切る前に）付けていると、既定の警告は出ない", async () => {
+  it('C-2. 利用者が pool.on("error", …) を接続を張ってから（切る前に）付けていると、既定の警告は出ない', async () => {
     const { exitCode, output } = await runChild(["listen-after"]);
     expect(exitCode, output).toBe(0);
     expect(output).toContain("listener: terminating connection due to administrator command");

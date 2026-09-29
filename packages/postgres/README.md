@@ -560,7 +560,7 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 [ADR 0020](../../docs/decisions/0020-temp-database-drain-before-drop.md) が却下したのは**黙って捨てる形**
 （空のリスナー）であり、本 PR の既定の振る舞いは**名乗る形**なので、その却下理由には当たらない
 （詳細・区別・引き受けた負債は
-[ADR 0354](../../docs/decisions/0354-pool-default-error-listener-warns-by-default.md)）。
+[ADR 0356](../../docs/decisions/0356-pool-default-error-listener-warns-by-default.md)）。
 
 ## 例外の見分け方（catch するとき）
 

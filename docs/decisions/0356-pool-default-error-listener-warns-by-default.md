@@ -1,4 +1,4 @@
-# ADR 0354: `createPostgresClient` の `pool` に既定の `error` リスナーを付け、名乗って続行する
+# ADR 0356: `createPostgresClient` の `pool` に既定の `error` リスナーを付け、名乗って続行する
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-29

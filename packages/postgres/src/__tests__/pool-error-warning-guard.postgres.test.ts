@@ -116,11 +116,24 @@ describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏�
 
     const result = spawnSync(
       "pnpm",
-      ["exec", "vitest", "run", "--root", fixtureDir, "--config", join(fixtureDir, "vitest.config.mts")],
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--root",
+        fixtureDir,
+        "--config",
+        join(fixtureDir, "vitest.config.mts"),
+      ],
       {
         cwd: repoRoot,
         encoding: "utf8",
-        env: { ...process.env, DATABASE_URL: requireDatabaseUrl(), NO_COLOR: "1", FORCE_COLOR: "0" },
+        env: {
+          ...process.env,
+          DATABASE_URL: requireDatabaseUrl(),
+          NO_COLOR: "1",
+          FORCE_COLOR: "0",
+        },
         timeout: 30_000,
       },
     );

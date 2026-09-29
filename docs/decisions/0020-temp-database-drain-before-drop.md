@@ -376,12 +376,12 @@
 
 ---
 
-**2026-09-29 追記**: [ADR 0354](./0354-pool-default-error-listener-warns-by-default.md) が、
+**2026-09-29 追記**: [ADR 0356](./0356-pool-default-error-listener-warns-by-default.md) が、
 `createPostgresClient` の作る `Pool` に既定の `error` リスナーを足した
 （[Issue #1213](https://github.com/takecchi/mnemora/issues/1213)）。この節が採ってはいけないと
 禁じた3案の3番目「`pool.on('error', () => {})` で握る」は、依然として採っていない——
-ADR 0354 の既定の振る舞いは「名乗って続行する」（`console.warn`）であり、「症状だけを
-黙らせる」形ではない。ADR 0354 は、本 ADR がこの節で立てた「握り潰す設定が形を変えて
+ADR 0356 の既定の振る舞いは「名乗って続行する」（`console.warn`）であり、「症状だけを
+黙らせる」形ではない。ADR 0356 は、本 ADR がこの節で立てた「握り潰す設定が形を変えて
 戻ってくる」という懸念と同じ構造のリスクを自分の既定の警告についても認め、
 `scripts/__tests__/no-unhandled-errors.test.mjs` と同じ発想の歯
 （`packages/postgres/src/__tests__/pool-error-warning-guard.postgres.test.ts`）を新設して
