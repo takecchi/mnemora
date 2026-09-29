@@ -1769,6 +1769,19 @@ export class PostgresMemoryStore implements MemoryStore {
     // 再スキャンしない——`in_scope`（`agg` の合計）から、除外 id のうち in_scope 条件を
     // 満たす件数（高々 `excludeMemoryIds.length` 件、主キー相当の `id` に乗るので
     // テナント規模に依存しない）を引き算するだけで出す。
+    //
+    // [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)（案A）:
+    // `digests` の `ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` は
+    // `migrations/0028_digest_band_index.sql` の部分索引
+    // `idx_memories_digest_band (tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC)
+    // WHERE status IN ('active', 'contested')` に支えられる——ADR 0307「引き受けた負債」
+    // 2番が残した「in-scope 件数ぶんの Seq Scan + top-N Sort」の穴を塞ぐ。
+    // `occurredAfter`/`occurredBefore`/`validAt`/`labels` を指定しない既定の呼び出しでは
+    // `in_period`/`is_valid`/`has_qualifying_label` はすべて定数 `true` になるため、
+    // 索引だけで `LIMIT` まで打ち切れる（`Index Scan Backward` + `Limit`）。指定した
+    // 呼び出しではこれらが Filter として残るが、`tenant_id` の絞り込み自体は索引が効く。
+    // SQL 文自体（このクエリの書き方）は変えていない——索引を追加しただけであり、
+    // 返す digest の中身・順序・件数は1バイトも変わらない。
     const digestBandColumns = digestBand
       ? sql`,
         (
@@ -1845,6 +1858,60 @@ export class PostgresMemoryStore implements MemoryStore {
             AND NOT (tags && ${sql.param([...taxonomyGroupCandidates])}::text[])
         ) AS taxonomy_residual_count`
         : sql``;
+
+    // [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
+    // 案C: `opts.scopeAggregate === "skip"` のときは、下の `scoped`/`flags`/`agg` の
+    // 集計クエリ（この関数の支配項、ADR 0307「引き受けた負債」1番）を**まったく実行しない**
+    // ——`AggregateScopeOptions.scopeAggregate` の doc コメントが定める「値だけ受け取って
+    // 計算は今までどおり行う実装は禁止する」を、ここで実際に満たす。`digestBand` が
+    // 指定されていれば、それだけ独立した `SELECT`（ADR 0384 案A の索引
+    // `idx_memories_digest_band` が支える）で digest を引く——集計とは別の経路なので、
+    // "skip" でも目次帯自体は今日どおり出る（`digestEligible` だけは件数の一種なので
+    // `unknown` にする）。`taxonomyGroupCandidates` が同時に指定されていても、
+    // taxonomy 群カウントも同じ理由で計算しない（`groups` は空のまま）。
+    if (opts?.scopeAggregate === "skip") {
+      let digests: ScopeAggregate["digests"] = [];
+      if (digestBand) {
+        const digestsResult = await this.db.execute(sql`
+          SELECT id, digest
+          FROM memories
+          WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
+            AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+            AND ${hasQualifyingLabel}
+            AND NOT (id = ANY(${sql.param(excludeMemoryIds)}::uuid[]))
+          ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC
+          LIMIT ${digestBand.limit}
+        `);
+        digests = (digestsResult.rows as unknown as { id: string; digest: string }[]).map((d) => ({
+          memoryId: d.id as MemoryId,
+          digest: d.digest,
+        }));
+      }
+      const unknownCount = { count: 0, countKind: "unknown" as const };
+      return {
+        groups: [],
+        totalInScope: 0,
+        countKind: "unknown",
+        notIndexed: {
+          pending: unknownCount,
+          failed: unknownCount,
+          skipped: unknownCount,
+        },
+        filteredArchived: unknownCount,
+        filteredSuperseded: unknownCount,
+        filteredForgotten: unknownCount,
+        filteredPeriod: unknownCount,
+        filteredExpired: unknownCount,
+        filteredNotYetValid: unknownCount,
+        filteredTaxonomy: unknownCount,
+        filteredDecayed: unknownCount,
+        digests,
+        // digestBand を渡していなければ「集計」自体そもそも起きないので、既存の
+        // 「digestBand を渡さない呼び出しは digestEligible: { count: 0, countKind: 'exact' }」
+        // という契約（AggregateScopeOptions.digestBand の doc コメント）を "skip" でも保つ。
+        digestEligible: digestBand ? unknownCount : { count: 0, countKind: "exact" },
+      };
+    }
 
     // Issue #355 / ADR 0307: 各行の述語を `scoped` の中で1回だけ boolean として
     // 計算し（`live`/`in_period`/`is_valid`/`is_expired`/`is_not_yet_valid`/`is_decayed`）、

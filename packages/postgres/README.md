@@ -339,7 +339,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `tenant_settings`
 - `tenant_subject_activity`
 
-### 索引（34）
+### 索引（35）
 
 - `idx_labels_by_status`
 - `idx_memories_attributes`
@@ -347,6 +347,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `idx_memories_claim_key`
 - `idx_memories_contested`
 - `idx_memories_contested_with`
+- `idx_memories_digest_band`
 - `idx_memories_lexical`
 - `idx_memories_period_ann_stage`
 - `idx_memories_provenance_kind`

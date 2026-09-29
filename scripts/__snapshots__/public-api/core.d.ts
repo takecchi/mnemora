@@ -660,6 +660,7 @@ export interface AggregateScopeOptions {
         excludeMemoryIds: readonly MemoryId[];
     };
     excludeProvenanceKinds?: readonly ProvenanceKind[];
+    scopeAggregate?: "exact" | "skip";
 }
 export interface MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
@@ -2391,6 +2392,7 @@ export interface RecallQuery {
     budget?: RecallBudget;
     scoreThreshold?: number;
     digestBandLimit?: number;
+    scopeAggregate?: "exact" | "skip";
     includeFullyDecayed?: boolean;
     validAt?: Date;
     includeOutsideValidity?: boolean;
@@ -2450,6 +2452,10 @@ export declare const RecallQuerySchema: z.ZodObject<{
     }, z.core.$strip>>;
     scoreThreshold: z.ZodOptional<z.ZodNumber>;
     digestBandLimit: z.ZodOptional<z.ZodNumber>;
+    scopeAggregate: z.ZodOptional<z.ZodEnum<{
+        exact: "exact";
+        skip: "skip";
+    }>>;
     includeFullyDecayed: z.ZodOptional<z.ZodBoolean>;
     validAt: z.ZodOptional<z.ZodDate>;
     includeOutsideValidity: z.ZodOptional<z.ZodBoolean>;
