@@ -3114,7 +3114,9 @@ export interface Runtime {
    * 対称——ジョブの `payload` は `{ memoryId }` で、`tick` はそれを `seedMemoryId` として
    * `reflect(ctx, { target: { seedMemoryId } })` を呼ぶだけである。
    * ⚠ **`reflect()` の *実運用*（Background Cognition・Scheduler による自動起動）は
-   * 依然として Phase 1 の範囲外のままである**（docs/roadmap.md §1.1/§1.3）——ここで
+   * 依然として Phase 1 の範囲外のままである**（docs/roadmap.md §1.3。⚠ 2026-09-29 追記:
+   * 併記していた §1.1 は削除した（#762）。当時の本文は
+   * https://github.com/takecchi/mnemora/blob/635c93d/docs/roadmap.md#11-オーナー指定の範囲 ）——ここで
    * 変わったのは「`tick` に渡されたジョブを処理できるようになった」ことだけであり、
    * ジョブを**自動で積む**かどうかは別の決定である。`extract` がこの種を積むのは
    * `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効に
