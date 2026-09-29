@@ -3661,6 +3661,16 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           ctx,
           buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "no-partial-write-old" }),
         );
+        // news[0] の行そのものが残っていないかを、冪等キーの索引を経由せず直接見るための
+        // 足場（`listBySourceObservation` は必須メソッド）。⚠ `createMemoryWithOutbox` の
+        // 再送だけで確認すると、冪等キーの索引だけがロールバックされて Memory 行そのものは
+        // 孤児のまま残る変異（実際に手作業で撃って確認した）を見逃す——索引が空なら
+        // 再送は「新規作成」として素通りしてしまうため。
+        const newsObservation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const newsExtractorVersion = "no-partial-write-extractor-v1";
         const labelsBefore = supportsLabels ? await store.listLabels!(ctx) : null;
 
         await expect(
@@ -3673,6 +3683,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
                   content: "news 1",
                   contentHash: "no-partial-write-news-1",
                   tags: ["no-partial-write-tag"],
+                  sourceObservationId: newsObservation.id,
+                  extractorVersion: newsExtractorVersion,
                 }),
                 jobKinds: ["embed"],
               },
@@ -3702,10 +3714,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(unchanged?.status).toBe("active");
         expect(await listEventsForMemory(ctx, old.id)).toEqual([]);
 
-        // ⚠ ラベルの確認は、下の再送（news[0] を再作成する）より前に行うこと。
-        // 再送は news[0] と同じ tags を持つ Memory を実際に作るので、先にラベルの
-        // 「増えていない」を確認してからでないと、再送自身が作ったラベルを
-        // 「ロールバックされなかった」と誤読する。
+        // news[0] の行そのものが残っていない（孤児にならない）。
+        expect(
+          await store.listBySourceObservation(ctx, newsObservation.id, newsExtractorVersion),
+        ).toEqual([]);
+
+        // ラベルも増えていない（news[0] の tags から作られるはずだったラベルが残らない）。
         if (supportsLabels) {
           expect(await store.listLabels!(ctx)).toEqual(labelsBefore);
         }
@@ -3719,6 +3733,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             content: "news 1",
             contentHash: "no-partial-write-news-1",
             tags: ["no-partial-write-tag"],
+            sourceObservationId: newsObservation.id,
+            extractorVersion: newsExtractorVersion,
           }),
           [],
         );
