@@ -3,7 +3,7 @@
  * `examples/chat` の `association-probes` サブコマンド(`MNEMORA_ASSOCIATION_JSON` が
  * 吐く JSON)を人が読める Markdown へ変換し、CI の Job Summary
  * (`$GITHUB_STEP_SUMMARY`)へ載せる CLI(Issue #291)。連想枠(ADR 0151)が
- * 想起の質を動かすかを3本の arm(off / on:maxCount=3 / on:maxCount=5)で比べる。
+ * 想起の質を動かすかを4本の arm(off / on:maxCount=3 / on:maxCount=5 / on:maxCount=10)で比べる。
  *
  * 組み立ては `./association-summary-lib.mjs` の純関数に委ねる
  * (`identifier-probe-summary.mjs`/`-lib.mjs` と同じ分担)。ここは
@@ -28,9 +28,10 @@
  * [ADR 0033](../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
  * §3 の規律に照らして閾値の門を置くには足りない標本である。
  *
- * ⚠ **`examples/chat/association-baseline.json` はまだ存在しない**(2026-09-16
- * 時点、CI で1度も実測していないため)。`--baseline` を渡さなければ、基準値なしで
- * Markdown を組み立てる(`./association-summary-lib.mjs` 参照)。
+ * `examples/chat/association-baseline.json`(ADR 0385。CI `ubuntu-latest` での実測から
+ * 手作業で置いた)を `--baseline` として渡すのが既定の使い方(`ci.yml` 参照)。
+ * `--baseline` を渡さなければ、基準値なしで Markdown を組み立てる
+ * (`./association-summary-lib.mjs` 参照)——手元実行や単体テストではこちらでよい。
  */
 import { readFileSync } from "node:fs";
 import {
