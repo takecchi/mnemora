@@ -1062,7 +1062,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は5件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は6件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`54b05bc`**（PR #1407）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
@@ -1283,6 +1283,42 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 **どう直すか**: pgvector を 0.8.0 以上へ上げるか、`ALTER EXTENSION vector UPDATE;` を実行する。**検査を外すオプションは無い。**
 
 **DB マイグレーション**: 不要（スキーマは変えていない。検査は既存のマイグレーション適用の手順に相乗りする）。
+
+### 23. `packages/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/`EventStore` 実装に7つの約束を新しく課すようになった（`@mnemora/testkit`）
+
+[Issue #1238](https://github.com/takecchi/mnemora/issues/1238)、
+[PR #1413](https://github.com/takecchi/mnemora/pull/1413)、
+[ADR 0372](./decisions/0372-conformance-suite-issue-1238-promises.md)。**この項目は、
+上の棚卸しの範囲（`54b05bc`。PR #1407）の外——着地に先立って変更を作った本人が
+この節に足した1件である**（項目19・20・21・22 と同じ扱い——棚卸しの「PR を全部当てた」
+手順を経て足したものではない）。
+
+**何が変わったか**: `describeMemoryStoreConformance`・`describeVectorStoreConformance`・
+`describeEventStoreConformance` に、7つの約束（`supersedeWithNewMemories` のロール
+バック・区切り文字を含む値の非衝突・テナント分離×並行・`onlyMemoryIds` の形式不正
+id・reinforce の起点・claim key の片方欠落・EventStore の meta/actor 往復）を検査する
+`it` が増えた。**公開の型は1バイトも変えていない**——中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`@mnemora/testkit` の
+conformance suite が…」の項目）を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 足した7つの `it` は、上の「数え方の規律への追記
+（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に
+当たる——型検査は壊れないが、この7つの約束のどれかを満たしていない自前実装は、
+conformance suite を当てると新しく落ちる（実行時に壊れる）。項目21（PR #1394）と
+同じ判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore`/`VectorStore`/`EventStore` 実装を、
+`packages/testkit` の conformance suite に対して走らせている利用者のうち、7つの
+約束のどれかを満たしていない場合。**適合テストを走らせていない・自前実装を
+持たない利用者は影響を受けない。**
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は6件
+（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238）になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

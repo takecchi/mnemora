@@ -390,6 +390,57 @@ PR #1393・Issue #1232）になった。**
   **移行の手順**: pgvector を 0.8.0 以上へ上げるか、`ALTER EXTENSION vector UPDATE;` を
   実行する。**検査を外すオプションは無い。**
 
+- **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/
+  `EventStore` 実装に7つの約束を新しく課すようになった——これらを自前で実装している
+  人へ**（[Issue #1238](https://github.com/takecchi/mnemora/issues/1238)、
+  [PR #1413](https://github.com/takecchi/mnemora/pull/1413)、
+  [ADR 0372](./docs/decisions/0372-conformance-suite-issue-1238-promises.md)）。
+
+  Issue #1238 は「2026-09-27 にマージした歯のうち、外部 adapter にも課しうる約束」を
+  棚卸ししていた（足すかどうかは決めていなかった）。その候補のうち7件を、
+  `describeMemoryStoreConformance`・`describeVectorStoreConformance`・
+  `describeEventStoreConformance` に `it` として足した——どれも今回の PR まで、
+  この repo の2実装（`@mnemora/postgres`・testkit の in-memory fixture）では既に
+  成り立っていた約束であり、実装は変えていない。
+
+  | 約束 | 内容 |
+  |---|---|
+  | `supersedeWithNewMemories` のロールバック | news の2件目が書けずに投げたら、1件目・outbox・ラベルも旧行も一切残さない |
+  | 区切り文字の非衝突 | `:`・`::` を含む tenantId・contentHash・extractorVersion・space の model でも、別の対象・別テナント・別 space と衝突しない |
+  | テナント分離 × 並行 | 2テナントで同じ口を並行に撃っても、テナントをまたいで created・行を取り違えない |
+  | `onlyMemoryIds` の形式不正 id | `restoreSupersededBy`/`previewRestoreSupersededBy` の `onlyMemoryIds` に形式不正な id が混ざっても例外にせず、形の正しい id だけが戻る |
+  | reinforce の起点（未強化） | `lastReinforcedAt: null` の記憶に、作成時刻より前の `at` で reinforce しても起点を巻き戻さない（no-op） |
+  | claim key の片方欠落 | `listActiveClaimPredicates` は subject か predicate の片方しか無い claim key を数えない |
+  | EventStore の meta/actor 往復 | `append` の `meta`・`actor` が、core が入れる形（文字列・id・id の配列）だけのまま読み戻る |
+
+  **なぜ破壊的と数えるか**: `docs/migration-v1.md`「数え方の規律への追記
+  （2026-09-28）」規律2 の ⛔ が「conformance スイートの判定を厳しくする変更は、
+  これまでどおり上の定義と各世代の分け方で数える」と明記しており、
+  [PR #1394](https://github.com/takecchi/mnemora/pull/1394)（Issue #1237）が
+  同じ理由で先に破壊的変更と数えている。型検査は壊れないが、上の7つの約束を
+  満たしていない自前実装は、この版から conformance suite を当てると新しく落ちる。
+
+  **誰が影響を受けるか**: 自前の `MemoryStore`/`VectorStore`/`EventStore` 実装を
+  `describeMemoryStoreConformance`/`describeVectorStoreConformance`/
+  `describeEventStoreConformance` に対して走らせている利用者のうち、上の7つの
+  約束のどれかを満たしていない場合。**適合テストを走らせていない・自前実装を
+  持たない利用者は影響を受けない。**
+
+  **移行の手順**: 各約束の内容に沿って実装を直し、conformance suite を再度走らせて
+  緑になることを確認する。詳細（契約の正確な文言）は各 `*-conformance.ts` の
+  該当する `it` とその前後のコメントを見ること。
+
+  **DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
+
+  **範囲の外**（Issue #1238 が棚卸しした残りの候補。足すかどうかは決めていない）:
+  A2（イベントを書く口の「投げるなら、呼ぶ前と同じ」——共通に使える入力が
+  見つかっていない）・A8（返り値・渡した入力の切り離し）・A10〜A15
+  （`events_purged` の meta の型・`getRecall` の `query` の JSON 往復・
+  `LLMProvider.completeStructured` の4スキーマ・`LexicalStore` の語の分け方・
+  adapter 間の差分ファズ・`purgeExpiredEvents` の並行）・PR #1296 の棚卸しコメント
+  1・2（`resolveOrphanedContested` の CAS 例外・例外の欄の値）。理由は
+  ADR 0372「決めたこと」3を見ること。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。

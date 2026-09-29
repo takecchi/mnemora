@@ -391,5 +391,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0367](./0367-pgvector-capability-check.md) | pgvector の `hnsw.iterative_scan` 対応を、版の文字列ではなく能力で検査する | 採用 (2026-09) |
 | [0368](./0368-consolidate-reflect-validity-intersection.md) | `consolidate`/`reflect` の統合先・内省の記憶は、材料の有効期間の積を引き継ぐ（Issue #1188 残り） | 採用 (2026-09) |
 | [0369](./0369-opt-in-extract-event-data-and-document-title.md) | `event.data`・`document.title` を抽出（LLM）へ渡す口を、opt-in の任意欄として足す | 採用 (2026-09) |
+| [0372](./0372-conformance-suite-issue-1238-promises.md) | Issue #1238 の棚卸しのうち7件を conformance suite の `it` として足す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
