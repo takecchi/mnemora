@@ -13,6 +13,7 @@ import {
   DeterministicLLMProvider,
 } from "@mnemora/testkit";
 import * as postgres from "../index.js";
+import { POOL_ERROR_WARNING_PREFIX } from "../pool-error-warning.js";
 import { closeTestClient, getTestClient, requireDatabaseUrl } from "./test-db.js";
 
 /**
@@ -107,7 +108,7 @@ describe("README「動く最小の例」: provider を testkit に差し替え�
   });
 });
 
-describe("README「⚠ 接続の `error` リスナーは、利用者が付ける」: 付けないとプロセスが落ちる", () => {
+describe("README「pool の `error`: 既定で名乗り、`onPoolError`/自分の `pool.on` で黙らせる」", () => {
   const TSX_BIN = path.join(PACKAGE_ROOT, "node_modules", ".bin", "tsx");
   const CHILD = path.join("src", "__tests__", "__fixtures__", "pool-idle-loss-child.ts");
 
@@ -128,18 +129,44 @@ describe("README「⚠ 接続の `error` リスナーは、利用者が付ける
     }
   }
 
-  it("リスナーが無ければ、待機中の接続を切られた時点で Unhandled 'error' event で落ち、次の問い合わせに届かない", async () => {
+  it("A. 何も付けなくても、待機中の接続を切られてもプロセスは落ちない。既定の警告で名乗り、次の問い合わせは通る", async () => {
     const { exitCode, output } = await runChild([]);
+    expect(exitCode, output).toBe(0);
+    expect(output).toContain(POOL_ERROR_WARNING_PREFIX);
+    expect(output).toContain("pool の待機中の接続が失われた");
+    expect(output).toContain("terminating connection due to administrator command");
+    expect(output).toContain("next query: 1");
+  });
+
+  it("B. onPoolError を渡すと、それだけが呼ばれ、既定の警告は出ない", async () => {
+    const { exitCode, output } = await runChild(["onPoolError"]);
+    expect(exitCode, output).toBe(0);
+    expect(output).toContain("onPoolError: terminating connection due to administrator command");
+    expect(output).not.toContain(POOL_ERROR_WARNING_PREFIX);
+    expect(output).toContain("next query: 1");
+  });
+
+  it('C-1. 利用者が pool.on("error", …) を接続より前に付けていると、既定の警告は出ない', async () => {
+    const { exitCode, output } = await runChild(["listen-before"]);
+    expect(exitCode, output).toBe(0);
+    expect(output).toContain("listener: terminating connection due to administrator command");
+    expect(output).not.toContain(POOL_ERROR_WARNING_PREFIX);
+    expect(output).toContain("next query: 1");
+  });
+
+  it('C-2. 利用者が pool.on("error", …) を接続を張ってから（切る前に）付けていると、既定の警告は出ない', async () => {
+    const { exitCode, output } = await runChild(["listen-after"]);
+    expect(exitCode, output).toBe(0);
+    expect(output).toContain("listener: terminating connection due to administrator command");
+    expect(output).not.toContain(POOL_ERROR_WARNING_PREFIX);
+    expect(output).toContain("next query: 1");
+  });
+
+  it("陽性対照: createPostgresClient を経由しない素の pg.Pool（error リスナー無し）なら、同じ操作で本当に落ちる", async () => {
+    const { exitCode, output } = await runChild(["raw"]);
     expect(exitCode).not.toBe(0);
     expect(output).toContain("Unhandled 'error' event");
     expect(output).not.toContain("next query:");
-  });
-
-  it("陽性対照: 同じ子プロセスでリスナーを付ければ落ちず、次の問い合わせが通る", async () => {
-    const { exitCode, output } = await runChild(["listen"]);
-    expect(exitCode, output).toBe(0);
-    expect(output).toContain("listener: terminating connection due to administrator command");
-    expect(output).toContain("next query: 1");
   });
 });
 
