@@ -124,6 +124,31 @@ describeMemoryStoreConformance({
     const { db } = await getTestClient();
     return new PostgresRelationStore(db).listRelated(ctx, memoryId);
   },
+  // ADR 0384 案C: `aggregateScope(..., { scopeAggregate: "skip" })` が
+  // `GROUP BY subject_id`（`agg` CTE、件数集計本体）を含む SQL を実際に発行しないことを
+  // 計測する。`recall.postgres.test.ts`「aggregateScope は単一の SQL 往復で完結する」と
+  // 同じ `pool.query` の差し替えによる計測手法。
+  countScopeAggregateQueries: async (fn) => {
+    const { pool } = await getTestClient();
+    let count = 0;
+    const originalQuery = pool.query.bind(pool);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pool as any).query = (...args: unknown[]) => {
+      const [config] = args as [string | { text: string }];
+      const text = typeof config === "string" ? config : config.text;
+      if (text.includes("GROUP BY subject_id")) {
+        count += 1;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (originalQuery as any)(...args);
+    };
+    try {
+      await fn();
+    } finally {
+      pool.query = originalQuery;
+    }
+    return count;
+  },
 });
 
 // Issue #207/#933 PR2（ADR 0381）: `RelationStore` の Postgres 実装。

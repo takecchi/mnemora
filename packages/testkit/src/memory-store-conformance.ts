@@ -443,6 +443,25 @@ export interface MemoryStoreConformanceOptions {
    * 無いと解消の歯が組めない）。
    */
   supportsResolveContestedGroup?: boolean;
+  /**
+   * [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
+   * 案C: `aggregateScope(ctx, scope, { scopeAggregate: "skip" })` が、実際に件数集計の
+   * 費用を払っていないことを検査するための計測フック。**任意**（省略可）——`listRelationsForMemory?`
+   * と同じ理由: 「集計の費用を払ったかどうか」を見分ける手段は adapter ごとに違う
+   * （Postgres なら発行した SQL 文、in-memory にはそもそも対応する概念が無い）ため、
+   * 汎用の `MemoryStore` interface だけからは検査できない。
+   *
+   * `fn` を実行し、その間に adapter が発行した「件数集計のクエリ」の回数を返す。
+   * 何を「集計クエリ」と見なすかは呼び出し側（adapter）が決めてよい——Postgres の
+   * 実装は `GROUP BY subject_id`（`agg` CTE、`memory-store.ts`）を含む SQL 文の
+   * 発行回数を返す（`recall.postgres.test.ts`「aggregateScope は単一の SQL 往復で
+   * 完結する」と同じ計測手法）。
+   *
+   * 渡されたときだけ、「`scopeAggregate: "skip"` は集計クエリを1本も発行しない」歯が
+   * 生成される。省略した adapter に対してこの歯は生成されない
+   * （`docs/autonomy.md` ⛔ に従い `it.skip` にはしない——歯自体を作らない）。
+   */
+  countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
 }
 
 /**
@@ -490,6 +509,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsResolveOrphanedContested,
     supportsMarkContestedGroup,
     supportsResolveContestedGroup,
+    countScopeAggregateQueries,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -8441,6 +8461,105 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const aggregate = await store.aggregateScope(ctx, { subjectId: "user-1" });
       expect(aggregate.totalInScope).toBe(1);
     });
+
+    // -------------------------------------------------------------------
+    // opts.scopeAggregate（ADR 0384 案C）: 件数集計の明示的な opt-out。
+    // -------------------------------------------------------------------
+
+    it("aggregateScope は opts.scopeAggregate を省略しても、明示的に 'exact' を渡しても、同じ結果を返す（既定は1バイトも変わらない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-2", status: "archived" }),
+      );
+
+      const omitted = await store.aggregateScope(ctx, {});
+      const explicitExact = await store.aggregateScope(ctx, {}, { scopeAggregate: "exact" });
+
+      expect(explicitExact).toEqual(omitted);
+      // 中身も実データを反映していることを確かめる（両方が揃って壊れている偽陽性を防ぐ）。
+      expect(omitted.totalInScope).toBe(1);
+      expect(omitted.filteredArchived).toEqual({ count: 1, countKind: "exact" });
+      expect(omitted.countKind).toBe("exact");
+    });
+
+    it("aggregateScope は opts.scopeAggregate: 'skip' で groups が空・totalInScope が0・countKind が 'unknown' になる（digestBand は今日どおり出る）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory1 = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-2", status: "archived" }),
+      );
+
+      const skipped = await store.aggregateScope(
+        ctx,
+        {},
+        { scopeAggregate: "skip", digestBand: { limit: 10, excludeMemoryIds: [] } },
+      );
+
+      expect(skipped.groups).toEqual([]);
+      expect(skipped.totalInScope).toBe(0);
+      expect(skipped.countKind).toBe("unknown");
+      expect(skipped.filteredArchived).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredSuperseded).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredForgotten).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredPeriod).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredExpired).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredNotYetValid).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredTaxonomy).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.filteredDecayed).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.notIndexed.pending).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.notIndexed.failed).toEqual({ count: 0, countKind: "unknown" });
+      expect(skipped.notIndexed.skipped).toEqual({ count: 0, countKind: "unknown" });
+      // 目次帯は集計とは独立した経路（ADR 0384 案A の索引が支える）なので、"skip" でも
+      // 今日どおり出る——ただし digestEligible（あと何件あるか）は件数の一種なので unknown。
+      expect(skipped.digests.map((d) => d.memoryId)).toEqual([memory1.id]);
+      expect(skipped.digestEligible).toEqual({ count: 0, countKind: "unknown" });
+    });
+
+    it("aggregateScope は opts.scopeAggregate: 'skip' かつ digestBand 省略なら digestEligible が今日どおり { count: 0, countKind: 'exact' }", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+
+      const skipped = await store.aggregateScope(ctx, {}, { scopeAggregate: "skip" });
+      expect(skipped.digests).toEqual([]);
+      expect(skipped.digestEligible).toEqual({ count: 0, countKind: "exact" });
+    });
+
+    if (countScopeAggregateQueries !== undefined) {
+      it(`aggregateScope: opts.scopeAggregate: 'skip' は件数集計のクエリを実際に発行しない（adapter "${name}"）`, async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+        );
+
+        const queryCount = await countScopeAggregateQueries(() =>
+          store.aggregateScope(ctx, {}, { scopeAggregate: "skip" }),
+        );
+        expect(queryCount).toBe(0);
+      });
+    } else {
+      // ⚠ 未検査（`docs/autonomy.md` ⛔ に従い it.skip にはしない）: この adapter は
+      // `countScopeAggregateQueries` を渡していないため、"skip" が実際に集計の費用を
+      // 払っていないかどうかは検査していない——`countKind: 'unknown'` を返すことまでは
+      // 上の歯で検査済みだが、それが「値を隠しただけ」なのか「実際に集計しなかった」のかは
+      // ここでは区別できない。
+      it(`⚠ 未検査: countScopeAggregateQueries が指定されていない — adapter "${name}" に対して scopeAggregate: 'skip' が実際に集計コストを払わないかどうかは検査していない`, () => {
+        expect(countScopeAggregateQueries).toBeUndefined();
+      });
+    }
 
     // -------------------------------------------------------------------
     // scope.includeSubjectless（Issue #608 項目③(b) / ADR 0286）: `subjectId` の等値絞りを
