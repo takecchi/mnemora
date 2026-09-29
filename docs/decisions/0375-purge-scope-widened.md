@@ -447,17 +447,25 @@ reextract」は、forget（および purge）した事実が、抽出器の版�
 が `COMMIT` するまで待たされる**——決定6が実測した `recalls` 書き換えの費用が、
 そのまま `assertNotForgottenForUpdate` の待ち時間に乗る形になる。
 
-**実測（2026-09-30、PostgreSQL 17.11、この作業専用の使い捨てデータベース。
-再現用のファイルは作らず、commit していない）**: 対象テナントの `recalls` に
-`digestBand` 5エントリ（うち1件が対象 `memoryId`）を持つ行を10万件（このテナントの
-`recalls` の物理サイズ、実測 `pg_total_relation_size` で約135MB——決定6の実測（10万行・
-約57MB）とは行の中身（`digestBand` のエントリ数・文字列長）が違うため単純比較はできない、
-同じ「10万行」という規模だけを揃えた）投入し、`purgeMemory` が発行する4文
-（上の(1)〜(4)、`COMMIT` を含む）を1つのトランザクションとして`psql`で発行しつつ、
-別接続から `SELECT id, status FROM memories WHERE id = ANY(...) FOR UPDATE` を
-0.3秒後に発行して待ち時間を計測した:
+**実測A（2026-09-30、レビュー時。PostgreSQL 17、使い捨ての DB。再現用のテストは
+commit していない）**: 対象テナントの `recalls` に `digestBand` 5エントリ（120字ずつ）を
+持つ行を10万件（`pg_total_relation_size` で約57MB——決定6の約180MBより小さい）投入し、
+`PostgresMemoryStore.purgeMemory` を1つの接続で始め、15ms後に別接続から同じ `memories` 行へ
+`SELECT … FOR UPDATE` を発行した。**purge 全体は約460ms、`FOR UPDATE` は約440ms
+（443ms）待たされ、purge の `COMMIT` とほぼ同時に返った。**決定6の実測（中央値 ≈ 285ms）と
+同じ桁であり、この相互作用の代表値としてはこちらを採る。
 
-| 区間 | 実測 |
+**実測B（2026-09-30、この追記を書いた作業。PostgreSQL 17.11、使い捨ての DB。
+再現用のファイルは作らず、commit していない）**: 行の中身を変えて（物理サイズ約135MB）
+同じ10万行を投入し、`purgeMemory` が発行する4文（上の(1)〜(4)、`COMMIT` を含む）を
+1つのトランザクションとして `psql` で発行しつつ、別接続から
+`SELECT id, status FROM memories WHERE id = ANY(...) FOR UPDATE` を0.3秒後に発行した。
+⚠ **下の表の `UPDATE recalls` の 3,436.6ms は、決定6の中央値（≈ 285ms、約180MB）の
+約12倍であり、サイズの差では説明できない。**同じ器で別の作業が並行していたことによる
+負荷の可能性があるが、**原因は確かめていない**——この表は「待ちが `COMMIT` まで続く」
+形の確認としてだけ読み、待ち時間の大きさの基準には使わないこと:
+
+| 区間 | 実測B |
 |---|---|
 | `UPDATE memories`（(1)） | 5.6ms |
 | `INSERT memory_events`（(2)） | 1.6ms |
@@ -466,8 +474,8 @@ reextract」は、forget（および purge）した事実が、抽出器の版�
 | purge トランザクション全体（`BEGIN`〜`COMMIT`） | 約3.48秒 |
 | 別接続の `FOR UPDATE`（purge の `COMMIT` 前に発行） | **約3.21秒**待たされ、purge の `COMMIT` の約30ms後に返った |
 
-⟹ **別接続の `FOR UPDATE` は、`purgeMemory` の `COMMIT` とほぼ同時（今回の実測では
-30ms後）に返った。**待っていた間、`assertNotForgottenForUpdate` 自身は何も壊れていない
+⟹ **実測A・Bのどちらでも、別接続の `FOR UPDATE` は `purgeMemory` の `COMMIT` と
+ほぼ同時（実測Bでは30ms後）に返った。**待っていた間、`assertNotForgottenForUpdate` 自身は何も壊れていない
 ——`purgeMemory` が `COMMIT` した後に読み直すと対象行は `status = 'forgotten'` のまま
 であり（`purgeMemory` は `status` 列を更新しない——本文コード doc 参照）、
 `assertNotForgottenForUpdate` は正しく `forgotten` を検出して呼び出し元を
@@ -477,7 +485,7 @@ reextract」は、forget（および purge）した事実が、抽出器の版�
 ——下の「確かめていないこと」参照）。**正しさは壊れない**——決定6・#1226 の追記が
 それぞれ引き受けた設計のとおりである。
 
-**壊れうるのは正しさではなく待ち時間である**: この実測での約3.2秒という待ちは、
+**壊れうるのは正しさではなく待ち時間である**: 実測Aでの約440msという待ちは、
 `recalls` の対象テナントの行数・`digestBand` のエントリ数に比例して伸びうる
 （決定6が同じ理由で実測している——索引が無いフルスキャン）。`consolidate`/`reflect`
 の呼び出し元（runtime・その先の HTTP/ジョブの呼び出し元）が短い `statement_timeout`/
