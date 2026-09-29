@@ -1494,6 +1494,7 @@ id を含めると `SourceMemoryForgottenError` を投げて何も書かない�
 
 [Issue #933](https://github.com/takecchi/mnemora/issues/933)（claim key の自動 contested
 検出が、同じ鍵の主張が1件ずつ届く経路で3件目以降を検出できない）の PR1、
+[PR #1431](https://github.com/takecchi/mnemora/pull/1431)、
 [ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)。
 
 **何が変わったか**: `@mnemora/core` の `MemoryStore` に、新しい任意メソッド

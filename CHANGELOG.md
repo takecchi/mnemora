@@ -653,6 +653,7 @@ PR #1393・Issue #1232）になった。**
 - **`@mnemora/core` の `MemoryStore` に、新しい任意メソッド `findContestedByClaimKey?` が
   増えた。`packages/testkit` の conformance suite に、これを検査する約束が新しく課された
   ——自前で `MemoryStore` を実装している人へ**（[Issue #933](https://github.com/takecchi/mnemora/issues/933)、
+  [PR #1431](https://github.com/takecchi/mnemora/pull/1431)、
   [ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)）。
 
   claim key の自動 contested 検出（[ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)）は、
