@@ -191,6 +191,58 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
       false,
     );
   });
+
+  it("2026-09-30 のさらなる直し: A-B・A-C がつながり B-C はつながっていない形で、B を引くと A と C まで幅優先で並ぶ（1段では止まらない）", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: true });
+    // b は候補生成（ANN）で見つかる「owner」——NOW（2026-06-01）の時点で有効な窓
+    // （[2026-01-01, 無期限)）を持たせる（同伴〔a・c〕は survivesAttributesFilter だけを
+    // 通り、validAt では検査されないため、期限切れの窓でもよい——`fetchMandatoryCompanions`
+    // の doc コメントと同じ規律）。a は無期限（null-null、誰とでも重なる）、c は
+    // b より前に終わる過去の窓（b の validFrom より前に validUntil が来る）——
+    // markContestedGroup の fix1（重なる組だけに行を張る）により、a-b・a-c の辺だけが
+    // 張られ、b-c には辺が無い。
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "B",
+        validFrom: new Date("2026-01-01T00:00:00Z"),
+        validUntil: null,
+      }),
+    );
+    const a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "A",
+        validFrom: null,
+        validUntil: null,
+      }),
+    );
+    const c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "C",
+        validFrom: new Date("2020-01-01T00:00:00Z"),
+        validUntil: new Date("2021-01-01T00:00:00Z"),
+      }),
+    );
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const related = await stores.relationStore.listRelated(ctx, b.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: b は a とだけ直接つながる。
+
+    // b だけを候補生成（ANN）で拾えるようにする——a・c は埋め込みを持たない。
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, b.id, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    // 1段（b の直接の隣接）だけなら a までしか見つからない。幅優先で a から先も
+    // 辿ることで、c（b からは2ホップ先）まで同伴取得される。
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+    expect(ids).toContain(c.id);
+    const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
+    expect(stage?.detail).toEqual({ companionsAdded: 2 });
+  });
 });
 
 describe("recall() — relationStore が配線されていなければ、群のメンバーは今までどおり単独で出ない", () => {

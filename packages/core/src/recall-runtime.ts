@@ -1461,27 +1461,38 @@ export async function runRecall(
 
   // -------------------------------------------------------------------
   // 段3（続き）: 多者間の `contested` 群の同伴取得（Issue #207/#933 PR2、ADR 0292
-  // 決定2・3、ADR 0381）。`contestedWithId` を持たない `contested`（3件以上の群の
-  // メンバー）は、上の `fetchMandatoryCompanions`（`contestedWithId` の直接参照だけを
-  // 見る、2者専用の規則）では拾えない——`RelationStore.listRelated` で1段だけ辿る。
+  // 決定2・3、ADR 0381。2026-09-30 のさらなる直し——オーナー側クローンの決定で、
+  // 1段だけではなく「関係の行でつながった全員」を幅優先で辿るようになった）。
+  // `contestedWithId` を持たない `contested`（3件以上の群のメンバー）は、上の
+  // `fetchMandatoryCompanions`（`contestedWithId` の直接参照だけを見る、2者専用の
+  // 規則）では拾えない——`resolveContestedGroup?` の CAS（fix2、§2、`WITH RECURSIVE`）
+  // が「群」を関係の行で連結した全員として扱うのに揃え、recall のこの経路も同じ
+  // 範囲を「群」と呼ぶ。
   //
   // - `deps.relationStore` が配線されていなければ、そのような候補が実際に在るときだけ
   //   `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` を
   //   積む（ADR 0292 決定3-b。`no_anchor` と同じ「実行する理由が無ければ積まない」
   //   区別）。
   // - 配線されていれば、`groupOwners`（`withinLimit` のうち `status === 'contested'`
-  //   かつ `contestedWithId === null`）それぞれについて `listRelated` を1回ずつ呼び、
-  //   まだ候補集合に無い id を集める（`relationEdges` にも両方向の辺を積む——後述の
-  //   単位組み立てが同じグラフを再利用する）。
-  // - 見つかった候補は `survivesAttributesFilter`・`status === 'contested'`
-  //   （decision10 で群を離れたメンバーを弾く「今の status の門」）を通してから、
-  //   **上限 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount 件**（連想枠と同じ既定値を
-  //   流用する、この回の決定）まで、**`validFrom` の新しい順→`id` の順**で残す
-  //   （`validFrom` が無い候補は最も古い扱いにする——`null` を「いつでも有効」ではなく
-  //   「新しさの情報が無い」として最後尾に送る）。切った分は
-  //   `over_limit { stage: "relation", countKind: "exact" }` に積む——索引つき
-  //   テーブルへの通常の `WHERE` 検索であり、ANN のような近似が無いため常に `"exact"`
-  //   （`association` の fanout 切り捨てと同じ理由、ADR 0292 決定3-a）。
+  //   かつ `contestedWithId === null`）を起点に、`RelationStore.listRelated` を
+  //   **幅優先**で辿る（複数の owner がいれば多始点 BFS）。訪れた id は二度と
+  //   `listRelated` を呼ばない（`visited`）。**`status !== 'contested'`（今の status の
+  //   門、decision10 で群を離れたメンバーを含む）な id は、そこで打ち切り——その id
+  //   からは辿らない**（辺は記録するが、そこから先は探索しない）。
+  // - **探索自体を止める安全弁**: 訪れた id の数が `maxCount`（既定10）の10倍を超えたら
+  //   BFS を打ち切る——理由は下のコメント（`EXPLORATION_VISIT_LIMIT`）参照。
+  // - 見つかった候補（元々候補集合に無かったもの）は `survivesAttributesFilter` を
+  //   通してから、**上限 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount 件**（連想枠と
+  //   同じ既定値を流用する、この回の決定。**この上限に owner 自身〔既に `withinLimit`
+  //   に居る候補〕は数えない**——`detail.companionsAdded` が「同伴として足した件数」
+  //   だけを数える既存の規約〔下の `stages.push` 参照〕と揃えた）まで、
+  //   **`validFrom` の新しい順→`id` の順**で残す（`validFrom` が無い候補は最も古い
+  //   扱いにする——`null` を「いつでも有効」ではなく「新しさの情報が無い」として
+  //   最後尾に送る）。切った分は `over_limit { stage: "relation" }` に積む——
+  //   **探索が安全弁に達せず自然に尽きていれば `countKind: "exact"`**（索引つき
+  //   テーブルへの通常の `WHERE` 検索であり ANN のような近似が無い、`association` の
+  //   fanout 切り捨てと同じ理由、ADR 0292 決定3-a）、**安全弁で打ち切った場合は
+  //   `countKind: "lower_bound"`**（その先にまだ候補が在るかもしれないため）。
   // -------------------------------------------------------------------
   const groupOwners = withinLimit.filter(
     (c) => c.memory.status === "contested" && (c.memory.contestedWithId ?? null) === null,
@@ -1504,22 +1515,56 @@ export async function runRecall(
     } else {
       const relationStore = deps.relationStore;
       const presentAfterPairs = new Set([...presentIds, ...companions.map((c) => c.memory.id)]);
-      const candidateIds = new Set<MemoryId>();
-      for (const owner of groupOwners) {
-        const related = await relationStore.listRelated(ctx, owner.memory.id, "contradicts");
-        for (const r of related) {
-          addRelationEdge(owner.memory.id, r.memoryId);
-          if (!presentAfterPairs.has(r.memoryId)) {
-            candidateIds.add(r.memoryId);
+      // 訪れた id の上限（探索自体を止める安全弁）。BFS が大きな群で `listRelated` を
+      // 呼び続けないようにする——`maxCount` の10倍という値は、「上限より遥かに多く
+      // 辿れば、真の validFrom 最新 maxCount 件をほぼ確実に含む」という実務的な安全域
+      // であり、厳密な保証ではない。これを超える巨大な群は `countKind` を
+      // `"lower_bound"` に倒して「測っていない」と正直に言う（[ADR 0292](./0292-relation-graph-table-depth-omitted-design.md)
+      // 決定2-a と同じ「測れない拡張を先取りしない」判断——今日は可変にしない）。
+      const EXPLORATION_VISIT_LIMIT = DEFAULT_RECALL_ASSOCIATION.maxCount * 10;
+      const visited = new Set<MemoryId>(groupOwners.map((o) => o.memory.id));
+      // 発見元（どの id から最初に辿り着いたか）。`companionOf` に使う——直接
+      // owner に繋がっていない（複数ホップ先の）companion でも、説明可能性の欄を
+      // 空にせず、実際に辿った経路上の1つ前の id を指す（ADR 0381 §7 負債3）。
+      const discoveredVia = new Map<MemoryId, MemoryId>();
+      let frontier: MemoryId[] = groupOwners.map((o) => o.memory.id);
+      const discoveredMemories: Memory[] = [];
+      let explorationTruncated = false;
+      while (frontier.length > 0) {
+        if (visited.size > EXPLORATION_VISIT_LIMIT) {
+          explorationTruncated = true;
+          break;
+        }
+        const nextIds = new Set<MemoryId>();
+        for (const id of frontier) {
+          const related = await relationStore.listRelated(ctx, id, "contradicts");
+          for (const r of related) {
+            addRelationEdge(id, r.memoryId);
+            if (!visited.has(r.memoryId)) {
+              visited.add(r.memoryId);
+              discoveredVia.set(r.memoryId, id);
+              nextIds.add(r.memoryId);
+            }
           }
         }
+        if (nextIds.size === 0) break;
+        const fetchedLevel = await deps.memoryStore.getMany(ctx, [...nextIds]);
+        const nextFrontier: MemoryId[] = [];
+        for (const m of fetchedLevel) {
+          if (m.status !== "contested") {
+            // 今の status の門——群を離れたメンバー（decision10）は、ここで打ち切る。
+            // その先（このメンバー経由でしか辿れない相手）は探索しない。
+            continue;
+          }
+          nextFrontier.push(m.id);
+          if (!presentAfterPairs.has(m.id)) {
+            discoveredMemories.push(m);
+          }
+        }
+        frontier = nextFrontier;
       }
-      if (candidateIds.size > 0) {
-        const fetched = await deps.memoryStore.getMany(ctx, [...candidateIds]);
-        await ensureSubjectSeqs(fetched);
-        const eligible = fetched
-          .filter((m) => survivesAttributesFilter(m))
-          .filter((m) => m.status === "contested");
+      if (discoveredMemories.length > 0) {
+        const eligible = discoveredMemories.filter((m) => survivesAttributesFilter(m));
         // 決まったこと（この回のマネージャー指示）: validFrom の新しい順→id の順。
         // validFrom が無い候補は「新しさの情報が無い」として最後尾（最も古い扱い）。
         const sorted = [...eligible].sort((a, b) => {
@@ -1541,13 +1586,16 @@ export async function runRecall(
             kind: "over_limit",
             stage: "relation",
             count: overLimitRelationCount,
-            countKind: "exact",
+            countKind: explorationTruncated ? "lower_bound" : "exact",
           });
         }
+        await ensureSubjectSeqs(capped);
         for (const companionMemory of capped) {
-          const owner = groupOwners.find((o) =>
-            relationEdges.get(o.memory.id)?.has(companionMemory.id),
-          );
+          // 発見元（`discoveredVia`）をそのまま `companionOf` に使う——owner 自身
+          // （群の起点、`withinLimit` に居た候補）のことも、複数ホップ先で他の
+          // companion 経由に辿り着いたこともある。どちらも「実際に辿った経路上の
+          // 1つ前の id」という同じ意味であり、区別しない（ADR 0381 §7 負債3）。
+          const companionOf = discoveredVia.get(companionMemory.id);
           const score = defaultScoringStrategy({
             now,
             tags: companionMemory.tags,
@@ -1563,7 +1611,7 @@ export async function runRecall(
           groupCompanions.push({
             memory: companionMemory,
             retrievedVia: "mandatory_companion",
-            companionOf: owner?.memory.id,
+            companionOf,
             score,
           });
         }

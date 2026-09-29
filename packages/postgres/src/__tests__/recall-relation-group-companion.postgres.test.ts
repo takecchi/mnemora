@@ -207,4 +207,54 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
       countKind: "exact",
     });
   });
+
+  it("2026-09-30 のさらなる直し: owner-a・a-c がつながり owner-c はつながっていない形で、owner を引くと a と c まで幅優先で並ぶ（1段では止まらない）", async () => {
+    const { runtime, memoryStore, vectorStore, relationStore } = await buildTestRuntime({
+      withRelationStore: true,
+    });
+    const ctx: Ctx = { tenantId: TENANT };
+
+    // owner: NOW（buildTestRuntime の clock、2026-01-01）の時点で有効な窓。
+    const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      validFrom: new Date("2025-12-01T00:00:00Z"),
+      validUntil: null,
+    });
+    // a: 無期限（誰とでも重なる）。
+    const a = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: null,
+        validUntil: null,
+      }),
+    );
+    // c: owner の validFrom より前に終わる過去の窓——owner とは重ならないが、
+    // 無期限の a とは重なる。companion（a・c）は validAt を検査されないため、
+    // 期限切れの窓でも同伴取得の対象になる（`fetchMandatoryCompanions` の doc
+    // コメントと同じ規律）。
+    const c = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: new Date("2020-01-01T00:00:00Z"),
+        validUntil: new Date("2021-01-01T00:00:00Z"),
+      }),
+    );
+    await runtime.markContestedGroup!(ctx, [owner.id, a.id, c.id]);
+    const related = await relationStore.listRelated(ctx, owner.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: owner は a とだけ直接つながる。
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    // 1段（owner の直接の隣接）だけなら a までしか見つからない。幅優先で a から先も
+    // 辿ることで、c（owner からは2ホップ先）まで同伴取得される。
+    expect(ids).toContain(owner.id);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(c.id);
+    const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
+    expect(stage?.detail).toEqual({ companionsAdded: 2 });
+  });
 });
