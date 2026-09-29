@@ -20,7 +20,7 @@ export * from "./local-embedding-provider.js";
 export * from "./pipeline.js";
 
 // ===== dist/local-embedding-provider.d.ts =====
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import type { CreateLocalEmbeddingPipeline, LocalEmbeddingDtype } from "./pipeline.js";
 export declare const LOCAL_EMBEDDING_PROVIDER_ID = "local";
 export declare const DEFAULT_LOCAL_EMBEDDING_REPO = "sirasagi62/ruri-v3-30m-ONNX";
@@ -53,7 +53,7 @@ export declare class LocalEmbeddingProvider implements EmbeddingProvider {
     readonly space: EmbeddingSpaceId;
     constructor(options?: LocalEmbeddingProviderOptions);
     warmup(): Promise<void>;
-    embed(_ctx: Ctx, texts: string[]): Promise<number[][]>;
+    embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 
 // ===== dist/pipeline.d.ts =====

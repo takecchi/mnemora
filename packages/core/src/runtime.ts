@@ -4918,11 +4918,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
   const tokenCounter = deps.tokenCounter ?? heuristicTokenCounter;
 
-  async function recall(
-    ctx: Ctx,
-    query: RecallQuery,
-    opts?: AbortOptions,
-  ): Promise<RecallResult> {
+  async function recall(ctx: Ctx, query: RecallQuery, opts?: AbortOptions): Promise<RecallResult> {
     return runRecall(
       ctx,
       query,

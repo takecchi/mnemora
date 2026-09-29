@@ -45,11 +45,7 @@ class HangingLLMProvider implements LLMProvider {
     throw new Error("HangingLLMProvider.complete: not used");
   }
 
-  completeStructured<T>(
-    _ctx: Ctx,
-    req: StructuredRequest<T>,
-    opts?: AbortOptions,
-  ): Promise<T> {
+  completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T> {
     this.calls.push({ req, opts });
     return new Promise<T>((resolve, reject) => {
       this.pendingResolve = resolve as (value: unknown) => void;
@@ -109,11 +105,7 @@ class TwoCallLLMProvider implements LLMProvider {
     throw new Error("TwoCallLLMProvider.complete: not used");
   }
 
-  completeStructured<T>(
-    _ctx: Ctx,
-    req: StructuredRequest<T>,
-    opts?: AbortOptions,
-  ): Promise<T> {
+  completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T> {
     this.callCount += 1;
     if (this.callCount === 1) {
       return Promise.resolve(req.schema.parse(this.firstResponse) as T);
@@ -550,9 +542,7 @@ describe("AbortSignal — tick(): embed ジョブの処理中に abort", () => {
 
     const jobs = stores.outboxStore.listJobs(ctx).filter((j) => j.kind === "embed");
     const completedCount = jobs.filter((j) => j.completedAt !== null).length;
-    const untouchedCount = jobs.filter(
-      (j) => j.completedAt === null && j.failedAt === null,
-    ).length;
+    const untouchedCount = jobs.filter((j) => j.completedAt === null && j.failedAt === null).length;
     expect(completedCount).toBe(1);
     expect(untouchedCount).toBe(1);
   });
