@@ -1475,20 +1475,23 @@ export async function runRecall(
   //   区別）。
   // - 配線されていれば、`groupOwners`（`withinLimit` のうち `status === 'contested'`
   //   かつ `contestedWithId === null`）を起点に、`RelationStore.listRelated` を
-  //   **幅優先**で辿る（複数の owner がいれば多始点 BFS）。訪れた id は二度と
+  //   **幅優先**で辿る（群ごとに1回、下の「群ごとに」を参照）。訪れた id は二度と
   //   `listRelated` を呼ばない（`visited`）。**`status !== 'contested'`（今の status の
   //   門、decision10 で群を離れたメンバーを含む）な id は、そこで打ち切り——その id
   //   からは辿らない**（辺は記録するが、そこから先は探索しない）。
-  // - **探索自体を止める安全弁**: 訪れた id の数が `maxCount`（既定10）の10倍を超えたら
-  //   BFS を打ち切る——理由は下のコメント（`EXPLORATION_VISIT_LIMIT`）参照。
+  // - **群ごとに**探索し、群ごとに切る（ADR 0381 決定4）。同じ群の owner が複数候補に
+  //   居ても、最初の owner からの探索がその群を丸ごと辿るので、2回目は探索しない。
+  // - **探索自体を止める安全弁**: 群ごとに、訪れた id の数（owner を含む）が `maxCount`
+  //   （既定10）の10倍を1件も超えないよう、1件たどるごとに確かめて BFS を打ち切る——
+  //   理由は下のコメント（`EXPLORATION_VISIT_LIMIT`）参照。
   // - 見つかった候補（元々候補集合に無かったもの）は `survivesAttributesFilter` を
-  //   通してから、**上限 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount 件**（連想枠と
+  //   通してから、**群ごとに上限 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount 件**（連想枠と
   //   同じ既定値を流用する、この回の決定。**この上限に owner 自身〔既に `withinLimit`
   //   に居る候補〕は数えない**——`detail.companionsAdded` が「同伴として足した件数」
   //   だけを数える既存の規約〔下の `stages.push` 参照〕と揃えた）まで、
   //   **`validFrom` の新しい順→`id` の順**で残す（`validFrom` が無い候補は最も古い
   //   扱いにする——`null` を「いつでも有効」ではなく「新しさの情報が無い」として
-  //   最後尾に送る）。切った分は `over_limit { stage: "relation" }` に積む——
+  //   最後尾に送る）。切った分は、群ごとに1件の `over_limit { stage: "relation" }` に積む——
   //   **探索が安全弁に達せず自然に尽きていれば `countKind: "exact"`**（索引つき
   //   テーブルへの通常の `WHERE` 検索であり ANN のような近似が無い、`association` の
   //   fanout 切り捨てと同じ理由、ADR 0292 決定3-a）、**安全弁で打ち切った場合は
@@ -1522,48 +1525,61 @@ export async function runRecall(
       // `"lower_bound"` に倒して「測っていない」と正直に言う（[ADR 0292](../../../docs/decisions/0292-relation-graph-table-depth-omitted-design.md)
       // 決定2-a と同じ「測れない拡張を先取りしない」判断——今日は可変にしない）。
       const EXPLORATION_VISIT_LIMIT = DEFAULT_RECALL_ASSOCIATION.maxCount * 10;
-      const visited = new Set<MemoryId>(groupOwners.map((o) => o.memory.id));
+      // どれかの群の探索で既に訪れた id。同じ群の owner が複数候補に居ても、2回目は
+      // 探索しない（最初の owner からの探索が、その群を丸ごと辿っている）。
+      const visitedAll = new Set<MemoryId>();
       // 発見元（どの id から最初に辿り着いたか）。`companionOf` に使う——直接
       // owner に繋がっていない（複数ホップ先の）companion でも、説明可能性の欄を
       // 空にせず、実際に辿った経路上の1つ前の id を指す（ADR 0381 §7 負債3）。
       const discoveredVia = new Map<MemoryId, MemoryId>();
-      let frontier: MemoryId[] = groupOwners.map((o) => o.memory.id);
-      const discoveredMemories: Memory[] = [];
-      let explorationTruncated = false;
-      while (frontier.length > 0) {
-        if (visited.size > EXPLORATION_VISIT_LIMIT) {
-          explorationTruncated = true;
-          break;
-        }
-        const nextIds = new Set<MemoryId>();
-        for (const id of frontier) {
-          const related = await relationStore.listRelated(ctx, id, "contradicts");
-          for (const r of related) {
-            addRelationEdge(id, r.memoryId);
-            if (!visited.has(r.memoryId)) {
-              visited.add(r.memoryId);
+      // 上限（10件）と探索の安全弁（100件）は**群ごと**に効かせる（ADR 0381 決定4）。
+      // 全体を合わせた数で切ると、後から見つかった群が丸ごと落ちる——対立する記憶を
+      // 並べて出す約束が、群の見つかった順で破れる。群の数はこの recall の候補の件数で
+      // 上が決まるので、全体の件数も無限には増えない。
+      for (const owner of groupOwners) {
+        if (visitedAll.has(owner.memory.id)) continue;
+        visitedAll.add(owner.memory.id);
+        const groupVisited = new Set<MemoryId>([owner.memory.id]);
+        let frontier: MemoryId[] = [owner.memory.id];
+        const discoveredMemories: Memory[] = [];
+        let explorationTruncated = false;
+        while (frontier.length > 0 && !explorationTruncated) {
+          const nextIds: MemoryId[] = [];
+          for (const id of frontier) {
+            if (explorationTruncated) break;
+            const related = await relationStore.listRelated(ctx, id, "contradicts");
+            for (const r of related) {
+              addRelationEdge(id, r.memoryId);
+              if (groupVisited.has(r.memoryId) || visitedAll.has(r.memoryId)) continue;
+              // 1件たどるごとに安全弁を確かめる——訪れた数（owner を含む）が
+              // EXPLORATION_VISIT_LIMIT を1件も超えないようにする。
+              if (groupVisited.size >= EXPLORATION_VISIT_LIMIT) {
+                explorationTruncated = true;
+                break;
+              }
+              groupVisited.add(r.memoryId);
+              visitedAll.add(r.memoryId);
               discoveredVia.set(r.memoryId, id);
-              nextIds.add(r.memoryId);
+              nextIds.push(r.memoryId);
             }
           }
-        }
-        if (nextIds.size === 0) break;
-        const fetchedLevel = await deps.memoryStore.getMany(ctx, [...nextIds]);
-        const nextFrontier: MemoryId[] = [];
-        for (const m of fetchedLevel) {
-          if (m.status !== "contested") {
-            // 今の status の門——群を離れたメンバー（decision10）は、ここで打ち切る。
-            // その先（このメンバー経由でしか辿れない相手）は探索しない。
-            continue;
+          if (nextIds.length === 0) break;
+          const fetchedLevel = await deps.memoryStore.getMany(ctx, nextIds);
+          const nextFrontier: MemoryId[] = [];
+          for (const m of fetchedLevel) {
+            if (m.status !== "contested") {
+              // 今の status の門——群を離れたメンバー（decision10）は、ここで打ち切る。
+              // その先（このメンバー経由でしか辿れない相手）は探索しない。
+              continue;
+            }
+            nextFrontier.push(m.id);
+            if (!presentAfterPairs.has(m.id)) {
+              discoveredMemories.push(m);
+            }
           }
-          nextFrontier.push(m.id);
-          if (!presentAfterPairs.has(m.id)) {
-            discoveredMemories.push(m);
-          }
+          frontier = nextFrontier;
         }
-        frontier = nextFrontier;
-      }
-      if (discoveredMemories.length > 0) {
+        if (discoveredMemories.length === 0) continue;
         const eligible = discoveredMemories.filter((m) => survivesAttributesFilter(m));
         // 決まったこと（この回のマネージャー指示）: validFrom の新しい順→id の順。
         // validFrom が無い候補は「新しさの情報が無い」として最後尾（最も古い扱い）。

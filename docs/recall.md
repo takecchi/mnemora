@@ -190,7 +190,7 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 **⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示）**: 上の「対向する Memory」は、2者間の対（`contestedWithId` を直接参照する）だけを想定していたが、多者間（3件以上）の `contested` 群にも広げた。`contestedWithId` を持たない `contested`（群のメンバー、`memory_relations` で束ねられる）は、`RuntimeDeps.relationStore`（`RelationStore.listRelated`）を**幅優先で、関係の行でつながった全員に達するまで**辿って仲間を同伴として取得する——`resolveContestedGroup?` の CAS（`WITH RECURSIVE`）が「群」を関係の行で連結した全員として扱うのに揃えた（2026-09-30 のさらなる直し。当初は1段だけだったが、オーナー側クローンの決定でこの形になった）。`contestedWithId` の直接参照だけを見る2者間の規則（`fetchMandatoryCompanions`、`packages/core/src/recall-runtime.ts`）は1バイトも変えていない。
 
 - **`RuntimeDeps.relationStore` が配線されていなければ、この拡張は動かない**（北極星の問い2、省略可能）——群のメンバーは今までどおり単独では返らず、対向が取れない `contested` と同じ扱い（`unit_assembly_dropped`）に落ちる。そのような候補がこの recall に実際に現れたときだけ、`omitted` に `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` を1件積む（[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定3-b と同じ「実行する理由が無ければ積まない」区別）。
-- **上限は {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（既定10）を流用する**——連想枠専用の別の欄（`RecallQuery.relations?`、ADR 0292 決定2-b が設計したが、この回では作らないと決めた）は無い。上限を超えた分は **`validFrom` の新しい順→`id` の順**で切り、`over_limit { stage: "relation", countKind: "exact" }` に積む（索引つきテーブルへの通常の `WHERE` 検索であり、ANN のような近似が無いため常に `"exact"`）。
+- **上限は {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（既定10）を流用する**——連想枠専用の別の欄（`RecallQuery.relations?`、ADR 0292 決定2-b が設計したが、この回では作らないと決めた）は無い。上限は**群ごと**に効く——1回の recall で群が複数見つかれば、それぞれの群で10件まで残す（全体を合わせた数で切ると、後から見つかった群が丸ごと落ちるため。ADR 0381 決定4・§5.5）。上限を超えた分は **`validFrom` の新しい順→`id` の順**で切り、群ごとに1件の `over_limit { stage: "relation" }` に積む。`countKind` は、探索が自然に尽きていれば `"exact"`（索引つきテーブルへの通常の `WHERE` 検索であり、ANN のような近似が無い）、探索の安全弁（下の §8 の追記）で止めた場合は `"lower_bound"`。
 - **群を離れた（forget・supersede・purge・archive で `status` がもう `'contested'` でなくなった）メンバーは、今の `status` の門で弾く**——決定10（関係の行は残す）と矛盾しない、`resolveContestedGroup?` の CAS（ADR 0381 fix2）と同じ規律。
 - 詳細（グラフ探索の形・単位組み立てへの統合）は §8、ADR 0381 §5 を見ること。
 
@@ -509,7 +509,7 @@ scope の候補を ANN が拾いきれている」という前提に立ってい
 
 **`over_limit(stage: 'relation')`・`stage_skipped(stage: 'relation')` の次の一手（2026-09-30 追記、Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示。同日のさらなる追記で「1段」から「関係の行でつながった全員」に変わった）**: 段3（§8）が、多者間の `contested` 群（`contestedWithId` を持たない `contested`）を `RelationStore.listRelated` で**幅優先に、関係の行でつながった全員に達するまで**辿って同伴取得するようになった。訪れた id は二度と辿らず、`status !== 'contested'`（群を離れたメンバー）はそこで打ち切る（その先へは辿らない）。
 
-- **`over_limit(stage: 'relation')`**: 探索で見つかった群の仲間の候補が、上限（`DEFAULT_RECALL_ASSOCIATION.maxCount`、既定10）を超えて切り捨てられた分。**この上限に owner（元々候補に居た記憶）自身は数えない**——新しく見つけた companion だけを数える（`detail.companionsAdded` と同じ「足した件数だけを数える」規約、`packages/core/src/recall-runtime.ts`）。**次の一手は今日は無い**——`association` の `maxCount` のような、呼び出し側がこの上限だけを動かせる専用のクエリ欄は無い（この回のマネージャー指示: `RecallQuery.relations?` という新しい欄は作らない、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2-b が設計していたが採らなかった）。減らす手立ては群そのものを小さくする（`resolveContestedGroup?` で一部を解消する）以外に無い。**`countKind` は、探索が自然に尽きていれば `'exact'`、探索自体の安全弁（訪れた数が `maxCount` の10倍を超えた）で打ち切った場合は `'lower_bound'`**——索引つきテーブルへの通常の `WHERE` 検索であり ANN のような近似は無いが、安全弁で打ち切った場合は「その先にまだ候補が在るかもしれない」ため正確さを名乗れない。
+- **`over_limit(stage: 'relation')`**: 探索で見つかった群の仲間の候補が、群ごとの上限（`DEFAULT_RECALL_ASSOCIATION.maxCount`、既定10）を超えて切り捨てられた分（群ごとに1件）。**この上限に owner（元々候補に居た記憶）自身は数えない**——新しく見つけた companion だけを数える（`detail.companionsAdded` と同じ「足した件数だけを数える」規約、`packages/core/src/recall-runtime.ts`）。**次の一手は今日は無い**——`association` の `maxCount` のような、呼び出し側がこの上限だけを動かせる専用のクエリ欄は無い（この回のマネージャー指示: `RecallQuery.relations?` という新しい欄は作らない、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2-b が設計していたが採らなかった）。減らす手立ては群そのものを小さくする（`resolveContestedGroup?` で一部を解消する）以外に無い。**`countKind` は、探索が自然に尽きていれば `'exact'`、探索自体の安全弁（群ごとに、訪れた数が `maxCount` の10倍に達した）で打ち切った場合は `'lower_bound'`**——索引つきテーブルへの通常の `WHERE` 検索であり ANN のような近似は無いが、安全弁で打ち切った場合は「その先にまだ候補が在るかもしれない」ため正確さを名乗れない。
 - **`stage_skipped(stage: 'relation', reason: 'relation_store_unavailable')`**: `RuntimeDeps.relationStore` が配線されていないため、探索そのものを行わなかった。**このレコードが積まれるのは、この recall に実際に `contestedWithId` の無い `contested` 候補が現れたときだけ**（`association` の `no_anchor` と同じ「実行する理由が無ければ積まない」区別）——次の一手は `relationStore` を配線すること。
 - **並び順は `validFrom` の新しい順→`id` の順**（`validFrom` が無い候補は最も古い扱い）——連想枠の `over_limit(association)` とは異なり、切り捨てられた候補の集合は「新しさ」で決まる（連想枠はランキングスコアで決まる）。この違いは、連想枠がスコアリングされた候補プールから切るのに対し、`relation` は同伴取得（スコアに関係なく足す経路）の中でしか切らないためである。
 
@@ -1312,20 +1312,24 @@ recall は既定で `status = 'active'` の Memory のみを候補にする。�
 
 - **仕組み（2026-09-30 のさらなる直し）**: `contestedWithId` を持たない `contested`
   （群のメンバー、`withinLimit` に既に居るもの＝ owner）を起点に、
-  `RelationStore.listRelated(ctx, id, 'contradicts')` を**幅優先で**辿る（複数の owner
-  が居れば多始点 BFS）。訪れた id は二度と `listRelated` を呼ばない。**`status !==
+  `RelationStore.listRelated(ctx, id, 'contradicts')` を**幅優先で**辿る（群ごとに1回。同じ
+  群の owner が複数居ても、2回目は探索しない）。訪れた id は二度と `listRelated` を呼ばない。**`status !==
   'contested'`（群を離れたメンバー、decision10）な id は、そこで打ち切る**——辺は記録
   するが、その先へは辿らない。`resolveContestedGroup?` の CAS（fix2、`WITH
   RECURSIVE`）が「群」を関係の行で連結した全員として扱うのに揃え、recall のこの
   経路も同じ範囲を「群」と呼ぶ——当初は1段だけだったが、`resolveContestedGroup?`
   の CAS と recall とで「群」の範囲が食い違う・対立する記憶が並べて出ない、という
-  弱さがあったため、オーナー側クローンの決定でこの形になった。複数の owner から
+  弱さがあったため、オーナー側クローンの決定でこの形になった。探索で集めた辺を
   辿った辺を1つの無向グラフとして束ね、連結成分ごとに1つの単位（3件以上になりうる）
   にまとめる——2者間の対（`contestedWithId` の直接参照）の組み立てとは別の経路で
   あり、既存の規則は1文字も変えていない。
-- **探索自体の安全弁**: 訪れた id の数が `DEFAULT_RECALL_ASSOCIATION.maxCount`
-  （既定10）の10倍を超えたら BFS を打ち切る——大きな群で `listRelated` を呼び続け
-  ないための実務的な上限であり、厳密な保証ではない。打ち切った場合は
+- **群ごとに探索し、群ごとに切る**（ADR 0381 決定4・§5.5）: まだどの群の探索でも
+  訪れていない owner から1回ずつ探索する。同じ群の owner が複数候補に居ても、2回目は
+  探索しない。
+- **探索自体の安全弁**: 群ごとに、訪れた id の数（owner を含む）が
+  `DEFAULT_RECALL_ASSOCIATION.maxCount`（既定10）の10倍に達したら、次の1件を訪れる前に
+  BFS を打ち切る（1件たどるごとに確かめるので、100件を1件も超えない）——大きな群で
+  `listRelated` を呼び続けないための実務的な上限であり、厳密な保証ではない。打ち切った場合は
   `over_limit(stage:'relation')` の `countKind` を `'lower_bound'` にする（上の
   「段3: 矛盾の解決と必須の同伴取得」の追記参照）。
 - **`RuntimeDeps.relationStore` を配線しない呼び出しでは、この拡張は一切動かない**（北極星の問い2）——群のメンバーは今までどおり単独で返らず、`unit_assembly_dropped` に落ちる。

@@ -257,4 +257,114 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
     const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
     expect(stage?.detail).toEqual({ companionsAdded: 2 });
   });
+
+  /**
+   * 2026-09-30 の3つ目の直し（ADR 0381 決定4・§5.5）: 上限は群ごと。2段先まで含めて
+   * 11件以上になる群の形（core の `recall-relation-group-companion.test.ts` の
+   * `buildTwoHopGroup` と同じ形。owner は a とだけ重なり、a は c0〜c10 と重なり、
+   * c0〜c10 は owner と重ならない）。
+   */
+  async function buildTwoHopGroup(
+    built: Awaited<ReturnType<typeof buildTestRuntime>>,
+    ctx: Ctx,
+    vector: number[],
+  ) {
+    const { runtime, memoryStore, vectorStore, relationStore } = built;
+    const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vector, {
+      validFrom: new Date("2025-12-01T00:00:00Z"),
+      validUntil: null,
+    });
+    const a = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: new Date("2025-06-01T00:00:00Z"),
+        validUntil: null,
+      }),
+    );
+    const cs: string[] = [];
+    for (let i = 0; i < 11; i++) {
+      const c = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: TENANT,
+          embeddingStatus: "pending",
+          validFrom: new Date(Date.UTC(2020, 0, 1 + i)),
+          validUntil: new Date("2025-09-01T00:00:00Z"),
+        }),
+      );
+      cs.push(c.id);
+    }
+    await runtime.markContestedGroup!(ctx, [owner.id, a.id, ...cs]);
+    const related = await relationStore.listRelated(ctx, owner.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: owner は a とだけ直接つながる。
+    // 新しい順: a、c10、c9 … c2 が残り、c1・c0 が落ちる。
+    const kept = [a.id, ...[...cs].reverse().slice(0, 9)];
+    const dropped = [cs[1]!, cs[0]!];
+    return { owner, kept, dropped };
+  }
+
+  it("2026-09-30 の3つ目の直し: 始点から2段先まで含めて11件以上になる群は、validFrom の新しい順→id の順で10件に切られ、切った件数が over_limit に出る", async () => {
+    const built = await buildTestRuntime({ withRelationStore: true });
+    const ctx: Ctx = { tenantId: TENANT };
+    const { owner, kept, dropped } = await buildTwoHopGroup(built, ctx, [1, 0, 0]);
+
+    const result = await built.runtime.recall(ctx, { vector: [1, 0, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    expect(ids).toContain(owner.id);
+    for (const id of kept) expect(ids).toContain(id);
+    for (const id of dropped) expect(ids).not.toContain(id);
+    const companionIds = result.memories
+      .filter((m) => m.retrievedVia === "mandatory_companion")
+      .map((m) => m.memoryId);
+    expect([...companionIds].sort()).toEqual([...kept].sort());
+    expect(result.omitted.filter((o) => o.kind === "over_limit" && o.stage === "relation")).toEqual(
+      [{ kind: "over_limit", stage: "relation", count: 2, countKind: "exact" }],
+    );
+  });
+
+  it("2026-09-30 の3つ目の直し: 群が2つ見つかり片方が11件以上でも、もう片方の群は削られない（上限と切った件数は群ごと）", async () => {
+    const built = await buildTestRuntime({ withRelationStore: true });
+    const ctx: Ctx = { tenantId: TENANT };
+    const big = await buildTwoHopGroup(built, ctx, [1, 0, 0]);
+    // 小さい群: x（候補生成で見つかる）・y・z。y・z は大きい群のどれよりも古い validFrom。
+    const x = await createEmbeddedMemory(built.memoryStore, built.vectorStore, ctx, [1, 0, 0], {
+      validFrom: new Date("2010-01-01T00:00:00Z"),
+      validUntil: null,
+    });
+    const y = await built.memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: new Date("2010-01-02T00:00:00Z"),
+        validUntil: null,
+      }),
+    );
+    const z = await built.memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: new Date("2010-01-03T00:00:00Z"),
+        validUntil: null,
+      }),
+    );
+    await built.runtime.markContestedGroup!(ctx, [x.id, y.id, z.id]);
+
+    const result = await built.runtime.recall(ctx, { vector: [1, 0, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    expect(ids).toContain(x.id);
+    expect(ids).toContain(y.id);
+    expect(ids).toContain(z.id);
+    expect(ids).toContain(big.owner.id);
+    for (const id of big.kept) expect(ids).toContain(id);
+    for (const id of big.dropped) expect(ids).not.toContain(id);
+    expect(result.omitted.filter((o) => o.kind === "over_limit" && o.stage === "relation")).toEqual(
+      [{ kind: "over_limit", stage: "relation", count: 2, countKind: "exact" }],
+    );
+  });
 });

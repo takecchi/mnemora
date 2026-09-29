@@ -53,7 +53,8 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 
 **記憶そのものを動かす中核操作**は5動詞に固定する（ここは増やさない）。`Runtime` には他にも
 メソッド（保守操作 `tick`/`reembed`/`reextract`/`sweepArchive`、是正・取り消し
-`markContested`/`resolveContested`/`resolveOrphanedContested`/`restoreArchived`/
+`markContested`/`resolveContested`/`markContestedGroup`/`resolveContestedGroup`/
+`resolveOrphanedContested`/`restoreArchived`/
 `restoreSuperseded`/`purge`、説明 `getRecall`）があるが、これらは中核を狭く保つために別の層へ
 出した口である——詳細は
 [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md) と
@@ -926,13 +927,13 @@ ADR 0292 決定1-c）——配線しなくても `recall()` は今日どおり�
   メンバー）は、`deps.relationStore` が配線されていれば `RelationStore.listRelated` を
   **幅優先で**辿り、`resolveContestedGroup?` の CAS（`WITH RECURSIVE`）と同じ範囲を
   「群」として扱う——訪れた id は二度と辿らず、`status !== 'contested'`（群を離れた
-  メンバー）はそこで打ち切る。探索自体には安全弁（訪れた数が上限の10倍を超えたら
-  打ち切り、`over_limit` の `countKind` を `'lower_bound'` にする）がある。
+  メンバー）はそこで打ち切る。探索は群ごとに行い、安全弁（群ごとに、訪れた数が上限の10倍に達したら
+  次の1件を訪れる前に打ち切り、`over_limit` の `countKind` を `'lower_bound'` にする）がある。
   `RecallQuery.relations?`（ADR 0292 決定2・決定3が設計していた独立した opt-in の
   探索チャンネル）は作らず、既存の必須の同伴取得（常時・無条件で走る段3）をそのまま
   N者の群へ一般化する形を採った（この回のマネージャー指示、オーナー側クローンの
-  判断）。上限は `DEFAULT_RECALL_ASSOCIATION.maxCount`（既定10、owner 自身は数え
-  ない）を流用し、`validFrom` の新しい順→`id` の順で切り、`Omission` に
+  判断）。上限は群ごとに `DEFAULT_RECALL_ASSOCIATION.maxCount`（既定10、owner 自身は
+  数えない）を流用し、`validFrom` の新しい順→`id` の順で切り、`Omission` に
   `over_limit { stage: "relation" }`・`stage_skipped { stage: "relation", reason:
   "relation_store_unavailable" }` を積む。詳細は [docs/recall.md](./recall.md) §2 段3・
   §8、ADR 0381 §5 を見ること。
