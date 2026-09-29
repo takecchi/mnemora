@@ -2,16 +2,16 @@
 
 **この文書は、利用者が版を上げるときに何をどう直すかだけを扱う。**⭐ **5世代を持つ**（⚠ 2026-09-18 に2→3世代、2026-09-19 に3→4世代、**2026-09-21 に4→5世代**へ訂正した。下記）**:**
 
-| 世代                                   | 破壊的変更                                                                                              | どこ                                            |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| **v0.1.9 → v0.2.0**（出荷済み）        | **7件**                                                                                                 | 「🔴 破壊的変更（v0.1.9 → v0.2.0）」の **1〜7** |
-| **v0.2.0 → v0.3.0**（🔴 **出荷済み**） | **4件**                                                                                                 | **8**・**9**・**10**・**11**                    |
-| **v0.3.0 → v0.4.0**（🔴 **出荷済み**） | **6件**                                                                                                 | **12**〜**17**                                  |
-| **v0.4.0 → v0.5.0**（🔴 **出荷済み**） | **1件**                                                                                                 | **18**                                          |
-| **v0.5.0 → v1.0.0**（🔴 **出荷済み**） | **0件**                                                                                                 | 無し（この世代には最後まで何も着地しなかった）  |
-| **v1.0.0 → v1.0.1**（🔴 **出荷済み**） | **0件**（計上を保留していたものは、破壊的と数えないと決まった。「数え方の規律への追記（2026-09-28）」） | 「🔴 破壊的変更（v1.0.0 → v1.0.1）」            |
-| **v1.0.1 → v1.0.2**（🔴 **出荷済み**） | **0件**（計上を保留していたものは、破壊的と数えないと決まった。「数え方の規律への追記（2026-09-28）」） | 「🔴 破壊的変更（v1.0.1 → v1.0.2）」            |
-| **v1.0.2 → 次の版**（未リリース）      | 件数はここに書かない（`main` が動けば変わる）                                                           | 「🔴 破壊的変更（v1.0.2 → 次の版）」            |
+| 世代 | 破壊的変更 | どこ |
+|---|---|---|
+| **v0.1.9 → v0.2.0**（出荷済み） | **7件** | 「🔴 破壊的変更（v0.1.9 → v0.2.0）」の **1〜7** |
+| **v0.2.0 → v0.3.0**（🔴 **出荷済み**） | **4件** | **8**・**9**・**10**・**11** |
+| **v0.3.0 → v0.4.0**（🔴 **出荷済み**） | **6件** | **12**〜**17** |
+| **v0.4.0 → v0.5.0**（🔴 **出荷済み**） | **1件** | **18** |
+| **v0.5.0 → v1.0.0**（🔴 **出荷済み**） | **0件** | 無し（この世代には最後まで何も着地しなかった） |
+| **v1.0.0 → v1.0.1**（🔴 **出荷済み**） | **0件**（計上を保留していたものは、破壊的と数えないと決まった。「数え方の規律への追記（2026-09-28）」） | 「🔴 破壊的変更（v1.0.0 → v1.0.1）」 |
+| **v1.0.1 → v1.0.2**（🔴 **出荷済み**） | **0件**（計上を保留していたものは、破壊的と数えないと決まった。「数え方の規律への追記（2026-09-28）」） | 「🔴 破壊的変更（v1.0.1 → v1.0.2）」 |
+| **v1.0.2 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v1.0.2 → 次の版）」 |
 
 ⭐ **全5世代の件数を書いてよいのは、両端が tag で閉じているからである。**`v0.1.9`→`v0.2.0` も
 `v0.2.0`→`v0.3.0` も `v0.3.0`→`v0.4.0` も `v0.4.0`→`v0.5.0` も `v0.5.0`→`v1.0.0` も、
@@ -77,14 +77,14 @@ npm pack @mnemora/core@0.3.0 && tar -xzOf mnemora-core-0.3.0.tgz 'package/dist/*
 [ADR 0241](./decisions/0241-migration-guide-is-a-live-doc-not-an-adr.md)）。
 ⟹ **経緯はこの1箇所に畳む。**
 
-| 2026-09-18 以前はこう書いてあった                                                   | いまの記述                                                        |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 世代が**2つ**（`v0.1.9→v0.2.0` / `v0.2.0→v1.0.0`）で、後者は「**3件・未リリース**」 | **3世代。8〜11 は `v0.3.0` で出荷済み**                           |
-| 「`@mnemora/local-embedding` に破壊的変更は無い」                                   | 🔴 **在る**（**11**。PR #446 / ADR 0205、`v0.3.0` で出荷済み）    |
-| `v0.2.0`→`v0.3.0` は「**6件**」（8〜13）                                            | **4件**（8・9・10・11）                                           |
-| **12**・**13** は「既に `v0.3.0` で出荷済み」                                       | ⛔ **未出荷。**`v0.3.0` より後である（根拠は各項目）              |
-| 🟡3件は「`v0.2.0` → `v1.0.0`」の分                                                  | **3件とも `v0.3.0` で出荷済み**                                   |
-| DB マイグレーションは `0016`/`0017` まで                                            | **`0018` を足した**（`v0.3.0`→`v0.4.0` で新たに要るのはこれだけ） |
+| 2026-09-18 以前はこう書いてあった | いまの記述 |
+|---|---|
+| 世代が**2つ**（`v0.1.9→v0.2.0` / `v0.2.0→v1.0.0`）で、後者は「**3件・未リリース**」 | **3世代。8〜11 は `v0.3.0` で出荷済み** |
+| 「`@mnemora/local-embedding` に破壊的変更は無い」 | 🔴 **在る**（**11**。PR #446 / ADR 0205、`v0.3.0` で出荷済み） |
+| `v0.2.0`→`v0.3.0` は「**6件**」（8〜13） | **4件**（8・9・10・11） |
+| **12**・**13** は「既に `v0.3.0` で出荷済み」 | ⛔ **未出荷。**`v0.3.0` より後である（根拠は各項目） |
+| 🟡3件は「`v0.2.0` → `v1.0.0`」の分 | **3件とも `v0.3.0` で出荷済み** |
+| DB マイグレーションは `0016`/`0017` まで | **`0018` を足した**（`v0.3.0`→`v0.4.0` で新たに要るのはこれだけ） |
 
 ⚠ **上の表の「いまの記述」欄は 2026-09-18 時点のものである。**⛔ **書き換えていない**——
 **下の 2026-09-19 の訂正で、12〜17 と `0018` は「未リリース」から「`v0.4.0` で出荷済み」へ変わった。**
@@ -103,11 +103,11 @@ npm pack @mnemora/core@0.3.0 && tar -xzOf mnemora-core-0.3.0.tgz 'package/dist/*
 🔴 **これは同じ形の2回目である。**上の「なぜ腐ったか」が逐語で「**同日 `v0.3.0` がリリースされ**、
 **この文書は更新されなかった**」と記録しているのと、**同じことが `v0.4.0` で起きた。**
 
-| 2026-09-19 以前はこう書いてあった                              | いまの記述                                                                                |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 2026-09-19 以前はこう書いてあった | いまの記述 |
+|---|---|
 | 世代が**3つ**で、3つ目は `v0.3.0` → `v1.0.0`（**未リリース**） | **4世代。12〜17 は `v0.4.0` で出荷済み**で、未リリース世代は `v0.4.0` → `v1.0.0` になった |
-| **12**〜**17** は「⛔ まだ出荷されていない」                   | ⚠ **`v0.4.0` で出荷済み**（根拠は各項目の【実測】）                                       |
-| DB マイグレーション `0018` は「⛔ 未リリース」                 | ⚠ **`v0.4.0` で出荷済み**                                                                 |
+| **12**〜**17** は「⛔ まだ出荷されていない」 | ⚠ **`v0.4.0` で出荷済み**（根拠は各項目の【実測】） |
+| DB マイグレーション `0018` は「⛔ 未リリース」 | ⚠ **`v0.4.0` で出荷済み** |
 
 **【実測 2026-09-19】** `v0.4.0` は **2026-09-18T20:36:04Z に published**（draft でも pre-release でもない）、
 publish ワークフローの run は **success**、npm の `@mnemora/core` の版一覧に **`0.4.0` が在る**。
@@ -122,10 +122,10 @@ publish ワークフローの run は **success**、npm の `@mnemora/core` の�
 
 🔴 **同じ形の3回目である。**⛔ **「2回目まで」と書いていた上の節は、当時の記録なので書き換えない。**
 
-| 2026-09-21 以前はこう書いてあった                              | いまの記述                                                                                                                                                     |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 世代が**4つ**で、4つ目は `v0.4.0` → `v1.0.0`（**未リリース**） | **5世代。18 は `v0.5.0` で出荷済み**で、未リリース世代は `v0.5.0` → `v1.0.0` になった                                                                          |
-| `v0.4.0` → `v1.0.0` の世代には「**まだ1件も無い**」            | ⚠ **在った**——**18**（PR #550 / ADR 0247）が `v0.4.0` より後に着地し、**そのまま `v0.5.0` で出荷された。この文書にも `CHANGELOG.md` にも計上されていなかった** |
+| 2026-09-21 以前はこう書いてあった | いまの記述 |
+|---|---|
+| 世代が**4つ**で、4つ目は `v0.4.0` → `v1.0.0`（**未リリース**） | **5世代。18 は `v0.5.0` で出荷済み**で、未リリース世代は `v0.5.0` → `v1.0.0` になった |
+| `v0.4.0` → `v1.0.0` の世代には「**まだ1件も無い**」 | ⚠ **在った**——**18**（PR #550 / ADR 0247）が `v0.4.0` より後に着地し、**そのまま `v0.5.0` で出荷された。この文書にも `CHANGELOG.md` にも計上されていなかった** |
 
 **【実測 2026-09-21】** `v0.5.0` は **2026-09-20T15:25:56Z に published**（draft でも pre-release でもない）、
 publish ワークフローの run は **success**、npm の `@mnemora/core` の版一覧に **`0.5.0` が在る**
@@ -169,10 +169,10 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 
 🔴 **⭐ 結論は、どちらも真のままである。**⛔ **腐ったのは根拠のほうだけである。**
 
-| 2026-09-21（2回目）以前はこう書いてあった                                                                                                                           | いまの記述                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `v0.5.0` → `v1.0.0` で要るマイグレーションが無い根拠が「`git rev-list --count v0.5.0..origin/main` が **0**」（「v0.3.0 → v0.4.0 で追加されたマイグレーション」節） | **`git diff --stat v0.5.0..origin/main -- packages/postgres/migrations/` が差分を返さない**（⭐ 出荷される面を直接当てる）             |
-| 「🔴 破壊的変更（v0.5.0 → v1.0.0）」節の検算が `git rev-parse` と `git rev-list --count` の2本                                                                      | **`git diff --stat … -- packages/` と `… -- scripts/__snapshots__/public-api/` の2本。**⛔ 旧2本は「この判定には使えない」として残した |
+| 2026-09-21（2回目）以前はこう書いてあった | いまの記述 |
+|---|---|
+| `v0.5.0` → `v1.0.0` で要るマイグレーションが無い根拠が「`git rev-list --count v0.5.0..origin/main` が **0**」（「v0.3.0 → v0.4.0 で追加されたマイグレーション」節） | **`git diff --stat v0.5.0..origin/main -- packages/postgres/migrations/` が差分を返さない**（⭐ 出荷される面を直接当てる） |
+| 「🔴 破壊的変更（v0.5.0 → v1.0.0）」節の検算が `git rev-parse` と `git rev-list --count` の2本 | **`git diff --stat … -- packages/` と `… -- scripts/__snapshots__/public-api/` の2本。**⛔ 旧2本は「この判定には使えない」として残した |
 
 **【実測 2026-09-21、`origin/main` = `89f8dd5`】**`git rev-list --count v0.5.0..origin/main` は
 **0 → 17**（`v0.5.0` の後に 17 本の PR が着地した）。
@@ -206,10 +206,10 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 
 🔴 **同じ形の5回目である。**⛔ **1〜4回目までの節は当時の記録なので書き換えない。**
 
-| 2026-09-26 以前はこう書いてあった                              | いまの記述                                                                            |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 世代が**5つ**で、5つ目は `v0.5.0` → `v1.0.0`（**未リリース**） | **同じ5世代のまま。`v0.5.0` → `v1.0.0` は0件のまま出荷済み**                          |
-| `v0.5.0` → `v1.0.0` の世代には「**まだ1件も無い**」            | ⚠ **最後まで1件も無いまま出荷された**（両端が tag で閉じたので、いま「0件」と書ける） |
+| 2026-09-26 以前はこう書いてあった | いまの記述 |
+|---|---|
+| 世代が**5つ**で、5つ目は `v0.5.0` → `v1.0.0`（**未リリース**） | **同じ5世代のまま。`v0.5.0` → `v1.0.0` は0件のまま出荷済み** |
+| `v0.5.0` → `v1.0.0` の世代には「**まだ1件も無い**」 | ⚠ **最後まで1件も無いまま出荷された**（両端が tag で閉じたので、いま「0件」と書ける） |
 
 **【実測 2026-09-26】** `v1.0.0` は **2026-09-22T23:54:08Z に published**
 （`gh release view v1.0.0` で `isDraft: false`・`isPrerelease: false`・`targetCommitish: main` を確認）、
@@ -289,24 +289,24 @@ PR #717・commit `ba6e5dd`）が足りずコンパイルできなくなってい
 `supportsFindActiveByClaimKey`）は [Issue #818](https://github.com/takecchi/mnemora/issues/818)
 の結果すべて任意へ戻したため、破壊的変更としては数えない——**6** の末尾を見ること）:
 
-| していること                                                                                                                     | 影響                                                                                                                                             |
-| -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@mnemora/postgres` の `PostgresMemoryStore`/`PostgresVectorStore`/… をそのまま使っている                                        | **影響なし**                                                                                                                                     |
-| `@mnemora/testkit` の in-memory 実装をテストでそのまま使っている                                                                 | **影響なし**（ただし `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` を直接呼んでいる場合だけ 🔴 8 を見ること）                          |
-| `createRuntime()` が返す `Runtime` をそのまま使っている（自分で `Runtime` interface を実装していない）                           | **影響なし**                                                                                                                                     |
-| `MemoryStore`/`VectorStore`/`TenantSettingsStore` を自分で実装している（自作 adapter）                                           | 🔴 1・2・3・6 を見ること                                                                                                                         |
-| `Runtime` interface を自分で実装している（`createRuntime()` を使わず、独自に組み立てている）                                     | 🔴 5 を見ること                                                                                                                                  |
-| `MemoryStore.createRecall`/`aggregateScope` の戻り値を直接読んでいる、または `FilteredOmission.condition` を網羅的に分岐している | 🔴 2・3・4 を見ること                                                                                                                            |
-| `TICK_SUPPORTED_JOB_KINDS` の値を網羅的に分岐している                                                                            | 🟡「`TICK_SUPPORTED_JOB_KINDS`」を見ること                                                                                                       |
-| v0.1.9 で `MemoryStore.createMemory` を直接呼び、`validFrom`/`validUntil` に non-null を書いていた                               | 🟡「`validAt` ゲート」を見ること                                                                                                                 |
-| `RecallFootprintEstimate` オブジェクトを自分で組み立てている（`estimateRecallFootprint()` の戻り値をそのまま使うだけではない）   | 🔴 7 を見ること                                                                                                                                  |
-| **`FilteredOmission` を自分で組み立てている**（自作 adapter の `aggregateScope` 実装・テストダブル）                             | 🔴 **9** を見ること（⚠ **`v0.3.0` で出荷済み**）                                                                                                 |
-| **`Omission` の `over_limit` を自分で組み立てている**                                                                            | 🔴 **10** を見ること（⚠ **`v0.3.0` で出荷済み**）                                                                                                |
-| **`LocalEmbeddingPipeline` を自前で渡している／呼んでいる**（`@mnemora/local-embedding`）                                        | 🔴 **11** を見ること（⚠ **`v0.3.0` で出荷済み**）                                                                                                |
-| **`Runtime` interface を自分で実装している**（再掲。`v0.3.0` → `v0.4.0` の分）                                                   | 🔴 **12**・**14**・**16** を見ること（⚠ **`v0.4.0` で出荷済み**）                                                                                |
-| **`@mnemora/testkit` の `MemoryStore` 適合テスト（`describeMemoryStoreConformance`）を呼んでいる**                               | 🔴 **13**・**15** を見ること（⚠ **`v0.4.0` で出荷済み**）                                                                                        |
-| **`MemoryEvent.kind` を網羅的に分岐している**（`EventStore` の戻り値を `never` で検査している）                                  | 🔴 **17** を見ること（⚠ **`v0.4.0` で出荷済み**）                                                                                                |
-| **`LocalEmbeddingProvider` に `repo` を渡している**（既定と異なるモデル／私設ミラー。`@mnemora/local-embedding`）                | 🔴 **18** を見ること（⚠ **`v0.5.0` で出荷済み**。⭕ `repo` を渡していないなら影響なし）。🔴 **この行だけ、壊れるのが型検査ではなく実行時である** |
+| していること | 影響 |
+|---|---|
+| `@mnemora/postgres` の `PostgresMemoryStore`/`PostgresVectorStore`/… をそのまま使っている | **影響なし** |
+| `@mnemora/testkit` の in-memory 実装をテストでそのまま使っている | **影響なし**（ただし `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` を直接呼んでいる場合だけ 🔴 8 を見ること） |
+| `createRuntime()` が返す `Runtime` をそのまま使っている（自分で `Runtime` interface を実装していない） | **影響なし** |
+| `MemoryStore`/`VectorStore`/`TenantSettingsStore` を自分で実装している（自作 adapter） | 🔴 1・2・3・6 を見ること |
+| `Runtime` interface を自分で実装している（`createRuntime()` を使わず、独自に組み立てている） | 🔴 5 を見ること |
+| `MemoryStore.createRecall`/`aggregateScope` の戻り値を直接読んでいる、または `FilteredOmission.condition` を網羅的に分岐している | 🔴 2・3・4 を見ること |
+| `TICK_SUPPORTED_JOB_KINDS` の値を網羅的に分岐している | 🟡「`TICK_SUPPORTED_JOB_KINDS`」を見ること |
+| v0.1.9 で `MemoryStore.createMemory` を直接呼び、`validFrom`/`validUntil` に non-null を書いていた | 🟡「`validAt` ゲート」を見ること |
+| `RecallFootprintEstimate` オブジェクトを自分で組み立てている（`estimateRecallFootprint()` の戻り値をそのまま使うだけではない） | 🔴 7 を見ること |
+| **`FilteredOmission` を自分で組み立てている**（自作 adapter の `aggregateScope` 実装・テストダブル） | 🔴 **9** を見ること（⚠ **`v0.3.0` で出荷済み**） |
+| **`Omission` の `over_limit` を自分で組み立てている** | 🔴 **10** を見ること（⚠ **`v0.3.0` で出荷済み**） |
+| **`LocalEmbeddingPipeline` を自前で渡している／呼んでいる**（`@mnemora/local-embedding`） | 🔴 **11** を見ること（⚠ **`v0.3.0` で出荷済み**） |
+| **`Runtime` interface を自分で実装している**（再掲。`v0.3.0` → `v0.4.0` の分） | 🔴 **12**・**14**・**16** を見ること（⚠ **`v0.4.0` で出荷済み**） |
+| **`@mnemora/testkit` の `MemoryStore` 適合テスト（`describeMemoryStoreConformance`）を呼んでいる** | 🔴 **13**・**15** を見ること（⚠ **`v0.4.0` で出荷済み**） |
+| **`MemoryEvent.kind` を網羅的に分岐している**（`EventStore` の戻り値を `never` で検査している） | 🔴 **17** を見ること（⚠ **`v0.4.0` で出荷済み**） |
+| **`LocalEmbeddingProvider` に `repo` を渡している**（既定と異なるモデル／私設ミラー。`@mnemora/local-embedding`） | 🔴 **18** を見ること（⚠ **`v0.5.0` で出荷済み**。⭕ `repo` を渡していないなら影響なし）。🔴 **この行だけ、壊れるのが型検査ではなく実行時である** |
 
 ---
 
@@ -328,11 +328,11 @@ DATABASE_URL=... pnpm --filter @mnemora/postgres run migrate
 v0.1.9 の時点で `0012_half_life_hours_range.sql` まで適用済みであれば、上のコマンドは
 次の3本を追加で適用する（**現物のファイル名で確認済み**）:
 
-| ファイル                                  | 内容                                                                                                                | 対応する変更                 |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `0013_recall_returned_memories_jsonb.sql` | `recalls.returned_memory_ids`（uuid[]）を削除し、`recalls.returned_memories`（jsonb）へ置き換える                   | 🔴 2                         |
-| `0014_observations_valid_from_until.sql`  | `observations` に `valid_from`/`valid_until` を追加する                                                             | 🔴 3・🟡「`validAt` ゲート」 |
-| `0015_decay_activity_clock.sql`           | `tenant_activity` テーブルを新設し、`memories` に `decay_base_seq`/`decay_floor_seq`/`half_life_recalls` を追加する | 新機能「`decay_clock`」      |
+| ファイル | 内容 | 対応する変更 |
+|---|---|---|
+| `0013_recall_returned_memories_jsonb.sql` | `recalls.returned_memory_ids`（uuid[]）を削除し、`recalls.returned_memories`（jsonb）へ置き換える | 🔴 2 |
+| `0014_observations_valid_from_until.sql` | `observations` に `valid_from`/`valid_until` を追加する | 🔴 3・🟡「`validAt` ゲート」 |
+| `0015_decay_activity_clock.sql` | `tenant_activity` テーブルを新設し、`memories` に `decay_base_seq`/`decay_floor_seq`/`half_life_recalls` を追加する | 新機能「`decay_clock`」 |
 
 **`0013` は破壊的マイグレーションである**（列の削除を含む）。適用前に `recalls` テーブルの
 バックアップを取ることを推奨する。マイグレーション自体は列の移行（`returned_memory_ids`
@@ -355,10 +355,10 @@ v0.1.9 の時点で `0012_half_life_hours_range.sql` まで適用済みであれ
 v0.2.0 の時点で `0015_decay_activity_clock.sql` まで適用済みであれば、上のコマンドは
 次の2本を追加で適用する（**現物のファイル名で確認済み**）:
 
-| ファイル                                               | 内容                                                                                                                                                                                                        | 対応する変更                                                                                                                            |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `0016_provenance_kind_matches_provenance.sql`          | `memories` に CHECK 制約 `memories_provenance_kind_matches_provenance`（`provenance_kind = provenance->>'kind'`）を `NOT VALID` で足す。既存行は走査しないが、この時点から先の INSERT/UPDATE には即座に効く | [Issue #273](https://github.com/takecchi/mnemora/issues/273) / [ADR 0182](./decisions/0182-provenance-kind-matches-provenance-check.md) |
-| `0017_provenance_kind_matches_provenance_validate.sql` | `0016` の制約を既存行に対して `VALIDATE CONSTRAINT` する                                                                                                                                                    | 同上                                                                                                                                    |
+| ファイル | 内容 | 対応する変更 |
+|---|---|---|
+| `0016_provenance_kind_matches_provenance.sql` | `memories` に CHECK 制約 `memories_provenance_kind_matches_provenance`（`provenance_kind = provenance->>'kind'`）を `NOT VALID` で足す。既存行は走査しないが、この時点から先の INSERT/UPDATE には即座に効く | [Issue #273](https://github.com/takecchi/mnemora/issues/273) / [ADR 0182](./decisions/0182-provenance-kind-matches-provenance-check.md) |
+| `0017_provenance_kind_matches_provenance_validate.sql` | `0016` の制約を既存行に対して `VALIDATE CONSTRAINT` する | 同上 |
 
 **`0013`〜`0015` と違い、`0016`/`0017` は非破壊的である**（列の削除も型変更も無い。足すのは
 CHECK 制約だけ）。**ただし `0017` は、既存の `memories` 行に
@@ -380,8 +380,8 @@ PostgreSQL 17、`0001`〜`0015` を先に適用した DB に対して実際の�
 v0.3.0 の時点で `0017_provenance_kind_matches_provenance_validate.sql` まで適用済みであれば、
 上のコマンドは次の1本を追加で適用する（**現物のファイル名で確認済み**）:
 
-| ファイル                                   | 内容                                                                                                                                                | 対応する変更                                                                                                        |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| ファイル | 内容 | 対応する変更 |
+|---|---|---|
 | `0018_memory_events_kind_unsuperseded.sql` | `memory_events.kind` の CHECK 制約の許容値に `'unsuperseded'` を足す（`0011` が `'restored'` を足したのと同じ形。他の列・索引・制約は一切変えない） | 🔴 **12**（`Runtime.restoreSuperseded`）/ [ADR 0230](./decisions/0230-restore-superseded-recovery-path.md)、PR #464 |
 
 ⚠ ****【実測 2026-09-19、`origin/main` = `420e0f4`】** `git merge-base --is-ancestor ba9f9a1 v0.4.0` は**真**である**
@@ -433,7 +433,6 @@ getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
 ```
 
 契約（`get`/`getObservation` と同じ規律）:
-
 - 対象の行が存在しない、または `tenant_id` が `ctx.tenantId` と一致しない場合は
   **例外を投げず** `null` を返す。
 - `RecallRecord` は `recalls` 行1件ぶん全部
@@ -501,14 +500,8 @@ const ids = record.returnedMemories.memories.map((m) => m.memoryId);
 **何をすればよいか**: 次の2フィールドを `ScopeAggregate` の戻り値に足す。
 
 ```ts
-filteredExpired: {
-  count: number;
-  countKind: CountKind;
-} // validUntil <= validAt で落ちた件数
-filteredNotYetValid: {
-  count: number;
-  countKind: CountKind;
-} // validFrom > validAt で落ちた件数
+filteredExpired: { count: number; countKind: CountKind };      // validUntil <= validAt で落ちた件数
+filteredNotYetValid: { count: number; countKind: CountKind };  // validFrom > validAt で落ちた件数
 ```
 
 `validAt` ゲート（下記🟡参照）を実装しない・対応しない adapter であれば、
@@ -526,24 +519,15 @@ filteredNotYetValid: {
 
 ```ts check
 switch (omission.condition) {
-  case "tenant":
-    /* ... */ break;
-  case "superseded":
-    /* ... */ break;
-  case "forgotten":
-    /* ... */ break;
-  case "archived":
-    /* ... */ break;
-  case "taxonomy":
-    /* ... */ break;
-  case "period":
-    /* ... */ break;
-  case "decayed":
-    /* ... */ break;
-  case "expired":
-    /* 追加: validUntil を過ぎて落ちた */ break;
-  case "not_yet_valid":
-    /* 追加: validFrom に未到達で落ちた */ break;
+  case "tenant": /* ... */ break;
+  case "superseded": /* ... */ break;
+  case "forgotten": /* ... */ break;
+  case "archived": /* ... */ break;
+  case "taxonomy": /* ... */ break;
+  case "period": /* ... */ break;
+  case "decayed": /* ... */ break;
+  case "expired": /* 追加: validUntil を過ぎて落ちた */ break;
+  case "not_yet_valid": /* 追加: validFrom に未到達で落ちた */ break;
   default: {
     const exhaustive: never = omission.condition;
     throw new Error(`unhandled condition: ${exhaustive}`);
@@ -597,7 +581,7 @@ describeTenantSettingsStoreConformance({
   createStore: () => new MyTenantSettingsStore(),
   // v0.2.0 で必須になった:
   supportsDecayClock: false, // 自作 adapter が getDecayClock/setDecayClock/
-  // getDefaultHalfLifeRecalls/getActivitySeq を実装していないなら false
+                              // getDefaultHalfLifeRecalls/getActivitySeq を実装していないなら false
 });
 ```
 
@@ -768,10 +752,10 @@ interface 側は `?` 付きの追加、`PostgresTenantSettingsStore` はメソ�
  });
 ```
 
-| 値              | いつ                                                                      |
-| --------------- | ------------------------------------------------------------------------- |
-| `"rescore"`     | **段2 の `RecallQuery.limit` で打ち切った**分（従来から在った唯一の経路） |
-| `"association"` | **連想枠（段3.5）の `RecallAssociationQuery.maxCount` で切り捨てた**分    |
+| 値 | いつ |
+|---|---|
+| `"rescore"` | **段2 の `RecallQuery.limit` で打ち切った**分（従来から在った唯一の経路） |
+| `"association"` | **連想枠（段3.5）の `RecallAssociationQuery.maxCount` で切り捨てた**分 |
 
 ⭐ **従来の `over_limit` はすべて `"rescore"` に相当する。**⟹ **既存のコードは
 `stage: "rescore"` を足せば意味が変わらない。**
@@ -836,7 +820,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 **どう直すか**: `restoreSuperseded(ctx, target, opts?)` を実装する。
 `superseded` を `active` へ戻す復旧口である（[ADR 0230](./decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
 
-⚠ **ADR 0230 の _本文_ は、これが破壊的であることに触れていない。**
+⚠ **ADR 0230 の *本文* は、これが破壊的であることに触れていない。**
 ⟹ 2026-09-18、ADR 0230 に「🔴🔴 訂正2」が追記されて名指しされた（PR #530）が、
 ⛔ **本文だけを読むといまも気づけない**ので、ここに書く。
 ⚠ **その追記は「`v0.3.0` で既に出荷されている」と書いている。それも誤りである**
@@ -949,10 +933,10 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 🔴 **この世代は、1〜17 と壊れ方の種類が違う。**
 
-|                | **1〜17**                                                                          | **18**                                                     |
-| -------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| | **1〜17** | **18** |
+|---|---|---|
 | どこで壊れるか | **型検査**（`interface` に必須メンバが増えた／union に値が増えた／署名が変わった） | 🔴 **実行時**（コンストラクタが `throw` するようになった） |
-| 公開 API の型  | 変わった                                                                           | ⭕ **1バイトも変わっていない**                             |
+| 公開 API の型 | 変わった | ⭕ **1バイトも変わっていない** |
 
 **【実測 2026-09-21】**
 `git diff --stat v0.4.0..v0.5.0 -- scripts/__snapshots__/public-api/` は**差分を返さない。**
@@ -1107,7 +1091,6 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 ⟹ **この節の範囲（`v1.0.2`…`54b05bc`）で、確定した破壊的変更は、なお4件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」）である。**
 
 **移行の手順（`client` を独自の型注釈で書いている場合だけ）**:
-
 1. `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`/`Pick<Anthropic, "messages">` という型注釈を、`@mnemora/openai`/`@mnemora/anthropic` が export する `OpenAIChatClient`/`OpenAIEmbeddingsClient`/`AnthropicMessagesClient` へ置き換える。
 2. SDK の client インスタンス（`new OpenAI(...)`・`new Anthropic(...)`）をそのまま `client` に渡しているだけなら、直す必要は無い——旧版・新版どちらの SDK でも通る。
 3. 偽 client（テストダブル）を使っている場合は、新しい構造型（provider が実際に呼ぶメソッドと、そのメソッドが実際に送る引数・読む戻り値のフィールドだけ）に合わせる。
@@ -1220,14 +1203,12 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 ⚠ **2026-09-29 追記（Issue #1222、[PR #1406](https://github.com/takecchi/mnemora/pull/1406)、[ADR 0364](./decisions/0364-lexical-tsvector-fallback-for-oversized-content.md)）**（⚠ 23回目の棚卸し: この段落はここまで PR 番号のリンクが無いまま書いていた——`a53b2b7` #1406 として着地済みなので、リンクを足した。数値・本文は着地時点のまま書き換えていない）: マイグレーションがさらに1本増え、上の「2本」は**3本**（`0023`〜`0025`）になった——`0025_lexical_tsvector_fallback.sql` は `idx_memories_lexical`（語彙チャンネルの式索引）を `DROP INDEX` + `CREATE INDEX` で作り直す（`CONCURRENTLY` 不可）。**この migration の適用中、`memories` への読み書きが `ACCESS EXCLUSIVE` ロックで止まる**——【実測】10万行で約1.2秒（旧式の索引作り直し約1.0秒に対し+20.3%。行数にほぼ比例して伸びる見込み）。あわせて、この索引式を通る `memories` への INSERT/UPDATE が恒常的にわずかに遅くなる（【実測】10万行の INSERT で約+17.6%）。実測の詳細は ADR 0364「実測」節。`v1.0.1` からは `0022`〜`0025` の4本、`v1.0.0` からは `0019`〜`0025` の7本が要る（上の「3本」「6本」を置き換える）。
 
 【実測 2026-09-27】この節の手順を、利用者の側で通した（`main` = `47b2aa6`）。
-
 1. npm から `@mnemora/*@1.0.2` の6パッケージを入れた素のプロジェクト（`npm`、`"type": "module"`、TypeScript 5.9 の `nodenext`）で、`npx mnemora-postgres-migrate` を空の DB に打った（`0001`〜`0022`）。
 2. 1.0.2 のコードでデータを入れた。
 3. 6パッケージを `main` の `pnpm pack` の成果物（`scripts/pack-publish-targets.mjs`）へ一度に入れ替えた。
 4. `npx mnemora-postgres-migrate` を打ち直した。1回目は `0023` だけを当て、2回目は何も当てなかった。
 
 結果は次のとおりだった。
-
 - 型検査は、上げる前も後も通った。見たのは `createRuntime` と6つの Postgres の store、`registerEmbeddingSpace`、各 provider のコンストラクタ、`RecallQuery` と `association: null`、`setEventRetention`、testkit の `buildNewMemoryFixture` と fixture の store。
 - 上の保留の6件は、1.0.2 では受け入れ、上げた後は例外になった。
   - 見た入力は、`registerLabel` の NUL、`listActiveClaimPredicates` の `limit: -1`、`setDefaultHalfLifeRecalls(1e-46)`・`setDefaultHalfLifeHours(1e39)`、`append` の `kind: "bogus"`、`createMemory` の `digestSource: "bogus"`、冪等の既存行が在るときの `status: "bogus"`。
@@ -1263,7 +1244,6 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 `docs/decisions/0115-event-retention-purge.md`）。
 
 **どう直すか**:
-
 1. 自分の `MemoryStore` に `purgeExpiredEventsByRetention?(ctx, { now, limit, dryRun? })` を実装する。
    契約は `packages/core/src/interfaces/memory-store.ts` の `MemoryStore.purgeExpiredEventsByRetention`
    の TSDoc を見ること。cutoff の計算は `@mnemora/core` が export する
