@@ -150,7 +150,9 @@ describe("searchMany: 統計が無くても memories を主キーで引く（Iss
     // `(never executed)` であれば、統計ありの場面で候補D の枝が実際には動いていない
     // ことが分かる（`memories_pkey` 自体は、統計ありの枝が独自に Nested Loop で
     // 選ぶこともあるため、`memories_pkey` の使用の有無そのものは縛らない）。
-    const subqueryScanOnMLines = plan.split("\n").filter((line) => /Subquery Scan on m(_\d+)?\b/.test(line));
+    const subqueryScanOnMLines = plan
+      .split("\n")
+      .filter((line) => /Subquery Scan on m(_\d+)?\b/.test(line));
     expect(subqueryScanOnMLines.length, `EXPLAIN 全文:\n${plan}`).toBeGreaterThan(0);
     for (const line of subqueryScanOnMLines) {
       expect(line, `EXPLAIN 全文:\n${plan}`).toMatch(/\(never executed\)/);
