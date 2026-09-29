@@ -51,6 +51,9 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  * - list の kind フィルタ・memoryId フィルタ
  * - list の並び順（`at` 昇順）・`limit`（並べ替えた後に適用）・`since`/`until`（両端含む）
  *   （docs/decisions/0042、`packages/core/src/interfaces/event-store.ts` の doc コメント）
+ * - `meta`/`actor` が、core が入れる形（文字列・id・id の配列）だけのまま読み戻る
+ *   （Issue #1238 A9、#1211 の表の外の値——Date・NaN・-0・undefined・BigInt・NUL・
+ *   孤立サロゲート・関数——は adapter によって往復が違うため対象外）
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
   const { name, createStore, prepareMemoryId } = options;
@@ -342,6 +345,59 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
         }),
       );
       expect(appended.memoryId).toBeNull();
+    });
+
+    // -------------------------------------------------------------------
+    // Issue #1238 A9（#1214 の棚卸しが挙げた候補、#1211 の表）: `meta`・`actor` が
+    // JSON として保存される前提の欄であることは `MemoryEvent.meta` の doc コメントに
+    // 書いてあるが、event-store-conformance.ts 自体には `meta` を見る歯が1本も無かった。
+    //
+    // ここで課すのは「core が実際に入れる形」だけである（#1211 の表の外は adapter
+    // によって往復が違うと明記されているため、課す範囲に入れない——Date・NaN・-0・
+    // undefined・BigInt・NUL・孤立サロゲート・関数は対象外）。「core が入れる形」は
+    // `packages/core/src/runtime.ts` の `meta:` を組み立てている箇所を `grep -n "meta:"`
+    // で洗って数えた（行番号は main が動けば変わるので書かない）——`applyCorrection` 系
+    // （`reason`/`sourceObservationId`/`extractorVersion`）、claim key 衝突の `updated`
+    // イベント（`reason`/`note`）、reextract の `superseded`（`reason`/`supersededById`/
+    // `sourceObservationId`/`extractorVersion`）、`markContestedPair`/`resolveContestedPair`
+    // の `buildMeta`（相手の `MemoryId` を1個積む）・orphan reclaim（`reason`/`resolution`/
+    // `note`/`contestedWithId`）、`consolidate`/`reflect` の `sources`（`MemoryId[]`）——
+    // どれも文字列（`reason`/`note`/`resolution`/`extractorVersion`）、id
+    // （`sourceObservationId`/`supersededById`/`contestedWithId`）、id の配列（`sources`）の
+    // いずれかである。`actor` も
+    // `EventActor`（`type` は列挙の文字列、`id?` は文字列）だけを渡す
+    // （`opts?.actor` をそのまま使う呼び出し元も、渡ってくる値の型は同じ）。
+    // -------------------------------------------------------------------
+
+    it("append は core が入れる形（文字列・id・id の配列だけの meta・actor）を、そのままの値で読み戻す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      const sourceObservationId = randomUUID();
+      const supersededById = randomUUID();
+      const contestedWithId = randomUUID();
+      const sources = [randomUUID(), randomUUID()];
+      const actor = { type: "human" as const, id: "user-1238" };
+      const meta = {
+        reason: "consolidated",
+        note: "手作業の統合（core が渡す自由記述の文字列）",
+        sourceObservationId,
+        extractorVersion: "extractor-v1",
+        supersededById,
+        contestedWithId,
+        sources,
+      };
+
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, actor, meta }),
+      );
+      expect(appended.actor).toEqual(actor);
+      expect(appended.meta).toEqual(meta);
+
+      const fetched = await store.get(ctx, appended.id);
+      expect(fetched?.actor).toEqual(actor);
+      expect(fetched?.meta).toEqual(meta);
     });
   });
 }

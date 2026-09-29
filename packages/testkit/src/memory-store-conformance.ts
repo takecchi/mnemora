@@ -745,6 +745,53 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
     });
 
+    // Issue #1238 A4（#1204 の棚卸しが挙げた候補）: 上の2本の Promise.all の歯は
+    // どちらも同一テナントの同時実行だけを見ており、別テナントの並行は検査していない。
+    // テナント分離のキーが並行の下でも本当に効いているか（例: 同じ externalId の
+    // 冪等キーがテナントをまたいで意図せず衝突しないか）を、2テナントで同じ口を
+    // 並行に撃って確かめる。
+    it("createObservationWithOutbox を2テナントで同じ externalId を使って並行に撃っても、テナントをまたいで created・行を取り違えない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-concurrent-a" };
+      const ctxB: Ctx = { tenantId: "tenant-concurrent-b" };
+      const externalId = "ext-concurrent-tenant-race";
+
+      const [a, b] = await Promise.all([
+        store.createObservationWithOutbox(
+          ctxA,
+          buildNewObservationFixture({ tenantId: "tenant-concurrent-a", externalId }),
+          ["extract"],
+        ),
+        store.createObservationWithOutbox(
+          ctxB,
+          buildNewObservationFixture({ tenantId: "tenant-concurrent-b", externalId }),
+          ["extract"],
+        ),
+      ]);
+
+      expect({
+        aCreated: a.created,
+        bCreated: b.created,
+        sameRow: a.observation.id === b.observation.id,
+        aTenant: a.observation.tenantId,
+        bTenant: b.observation.tenantId,
+        aJobTargets: a.jobs.map((job) => job.payload.observationId),
+        bJobTargets: b.jobs.map((job) => job.payload.observationId),
+      }).toEqual({
+        aCreated: true,
+        bCreated: true,
+        sameRow: false,
+        aTenant: "tenant-concurrent-a",
+        bTenant: "tenant-concurrent-b",
+        aJobTargets: [a.observation.id],
+        bJobTargets: [b.observation.id],
+      });
+
+      // 各テナントの読み戻しに相手の行が無い。
+      expect(await store.getObservation(ctxA, b.observation.id)).toBeNull();
+      expect(await store.getObservation(ctxB, a.observation.id)).toBeNull();
+    });
+
     it("createObservationWithOutbox は jobKinds が空なら job を作らない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -852,6 +899,83 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
 
       expect(second.id).not.toBe(first.id);
+    });
+
+    // Issue #1238 A3（#1146/#1135 の棚卸しが挙げた候補）: 抽出の冪等キーを区切り文字
+    // （`:`）で繋いでいる実装は、区切り文字を含む値で境目がずれると衝突しうる。
+    // `packages/postgres/src/__tests__/joined-string-keys.postgres.test.ts` が
+    // 「testkit の InMemory」と「Postgres」を直接比べる形で既に固定していたが、
+    // conformance suite 自体には歯が無かった。
+    it("createMemory の冪等キーは `:` を含む extractorVersion・contentHash でも、区切りの位置が違えば別の Memory になる（区切り文字）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+
+      const first = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v:x",
+          contentHash: "h",
+          content: "joined-key first",
+        }),
+      );
+      const second = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v",
+          contentHash: "x:h",
+          content: "joined-key second",
+        }),
+      );
+
+      expect(second.id).not.toBe(first.id);
+      expect(second.content).toBe("joined-key second");
+    });
+
+    it("createMemory の冪等キーは `:` を含む tenantId でも別テナントの Memory を返さない（区切り文字）", async () => {
+      const store = await createStore();
+      const t: Ctx = { tenantId: "joined-tenant-key" };
+      const o1 = await store.createObservation(
+        t,
+        buildNewObservationFixture({ tenantId: t.tenantId }),
+      );
+      const tO1: Ctx = { tenantId: `joined-tenant-key:${o1.id}` };
+      const o2 = await store.createObservation(
+        tO1,
+        buildNewObservationFixture({ tenantId: tO1.tenantId }),
+      );
+
+      const own = await store.createMemory(
+        t,
+        buildNewMemoryFixture({
+          tenantId: t.tenantId,
+          sourceObservationId: o1.id,
+          extractorVersion: `${o2.id}:v`,
+          contentHash: "h",
+          content: "joined-tenant own",
+        }),
+      );
+      const other = await store.createMemory(
+        tO1,
+        buildNewMemoryFixture({
+          tenantId: tO1.tenantId,
+          sourceObservationId: o2.id,
+          extractorVersion: "v",
+          contentHash: "h",
+          content: "joined-tenant other",
+        }),
+      );
+
+      expect(other.id).not.toBe(own.id);
+      expect(other.tenantId).toBe(tO1.tenantId);
+      expect(other.sourceObservationId).toBe(o2.id);
     });
 
     it("createMemory は extractorVersion が null でも冪等である（同じ Observation・同じ contentHash で重複を作らない）", async () => {
@@ -1759,6 +1883,52 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         });
         expect(predicates).toEqual([]);
       });
+
+      // Issue #1238 A7（#1106 の棚卸しが挙げた候補）: `claimKey` は主語・述語の
+      // どちらも必須の型だが、書き込みの口は片方だけの値（型を破る入力）を拒まない
+      // （`Memory.claimKey` の doc コメント、Issue #1109）。片方だけの claim key は
+      // 「鍵なし」として扱われ、findActiveByClaimKey にも listActiveClaimPredicates
+      // にも数えられないことが PR #1106 で fixture 側は固定されていたが、
+      // conformance suite 自体には歯が無かった
+      // （`packages/testkit/src/__tests__/in-memory-list-claim-predicates-incomplete-key.test.ts`
+      // が fixture 単体では既に固定している）。
+      it("subject か predicate の片方しか無い claim key を持つ Memory は数えない（null を混ぜない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-subject-only",
+            claimKey: { subject: "user" } as never,
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-predicate-only",
+            claimKey: { predicate: "home_city" } as never,
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-complete",
+            claimKey: { subject: "user", predicate: "favorite_color" },
+          }),
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual(["favorite_color"]);
+      });
     } else if (supportsListActiveClaimPredicates === false) {
       it("listActiveClaimPredicates は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
@@ -2540,6 +2710,31 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const reread = await store.get(ctx, memory.id);
       expect(reread?.lastReinforcedAt?.getTime()).toBe(late.getTime());
       expect(reread?.decayFloorAt.getTime()).toBe(floorAfterLate);
+    });
+
+    // Issue #1238 A6（#1173 の棚卸しが挙げた候補）: 上の歯は「既に late で強化済みの
+    // ところへ early を渡す」形（起点は lastReinforcedAt）だけを見ており、
+    // 「まだ一度も強化していない（lastReinforcedAt: null）記憶に、作成時刻より前の
+    // at を渡す」形（起点は recordedAt、fixture 側のコメント「未強化の記憶では
+    // 作成時刻が起点」）は検査していなかった。
+    it("reinforce は未強化（lastReinforcedAt: null）の記憶に、recordedAt より前の at を渡しても起点を巻き戻さない（no-op）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      expect(memory.lastReinforcedAt ?? null).toBeNull();
+      const before = new Date(memory.recordedAt.getTime() - 1000 * 60 * 60);
+
+      const result = await store.reinforce(ctx, memory.id, before);
+
+      // no-op: lastReinforcedAt は null のまま、decayFloorAt/updatedAt も動かない。
+      expect(result.lastReinforcedAt ?? null).toBeNull();
+      expect(result.decayFloorAt.getTime()).toBe(memory.decayFloorAt.getTime());
+      expect(result.updatedAt.getTime()).toBe(memory.updatedAt.getTime());
+
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.lastReinforcedAt ?? null).toBeNull();
+      expect(reread?.decayFloorAt.getTime()).toBe(memory.decayFloorAt.getTime());
+      expect(reread?.updatedAt.getTime()).toBe(memory.updatedAt.getTime());
     });
 
     it("⚠ reinforce は同じ at をもう一度渡すと no-op である（狭義の `<` の境界、ADR 0048/0049）", async () => {
@@ -3451,6 +3646,99 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const after = await store.get(ctx, old.id);
         expect(after?.status).toBe("superseded");
         expect(after?.decayFloorAt.getTime()).toBe(decayFloorAt.getTime());
+      });
+
+      // Issue #1238 A1（#1231 の棚卸しが挙げた候補）: news を作る途中（2件目）で
+      // 投げたら、1件目の Memory・outbox・ラベルも残さない。上の「対象がそもそも
+      // 存在しなければ throw」系の歯は supersede 側の事前検証の失敗だけを見ており、
+      // news 自体の作成途中の失敗（2件目が外部キー相当の検査で落ちる）は検査していなかった
+      // （`packages/testkit/src/__tests__/in-memory-fixtures-no-partial-write.test.ts` が
+      // fixture 単体では既に固定していたが、conformance suite には無かった）。
+      it("supersedeWithNewMemories は news[1] の sourceObservationId が実在しないと投げ、news[0]・outbox・ラベルも旧行も一切残さない（1トランザクション）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const old = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "no-partial-write-old" }),
+        );
+        // news[0] の行そのものが残っていないかを、冪等キーの索引を経由せず直接見るための
+        // 足場（`listBySourceObservation` は必須メソッド）。⚠ `createMemoryWithOutbox` の
+        // 再送だけで確認すると、冪等キーの索引だけがロールバックされて Memory 行そのものは
+        // 孤児のまま残る変異（実際に手作業で撃って確認した）を見逃す——索引が空なら
+        // 再送は「新規作成」として素通りしてしまうため。
+        const newsObservation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const newsExtractorVersion = "no-partial-write-extractor-v1";
+        const labelsBefore = supportsLabels ? await store.listLabels!(ctx) : null;
+
+        await expect(
+          store.supersedeWithNewMemories!(
+            ctx,
+            [
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  content: "news 1",
+                  contentHash: "no-partial-write-news-1",
+                  tags: ["no-partial-write-tag"],
+                  sourceObservationId: newsObservation.id,
+                  extractorVersion: newsExtractorVersion,
+                }),
+                jobKinds: ["embed"],
+              },
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  content: "news 2",
+                  contentHash: "no-partial-write-news-2",
+                  sourceObservationId: randomUUID(),
+                }),
+                jobKinds: ["embed"],
+              },
+            ],
+            [
+              {
+                id: old.id,
+                supersededByIndex: 0,
+                expectedStatus: "active",
+                event: buildSupersedeEvent(ctx, old.id, old.digest),
+              },
+            ],
+          ),
+        ).rejects.toThrow();
+
+        // 旧行（supersede 対象）は無傷のまま。
+        const unchanged = await store.get(ctx, old.id);
+        expect(unchanged?.status).toBe("active");
+        expect(await listEventsForMemory(ctx, old.id)).toEqual([]);
+
+        // news[0] の行そのものが残っていない（孤児にならない）。
+        expect(
+          await store.listBySourceObservation(ctx, newsObservation.id, newsExtractorVersion),
+        ).toEqual([]);
+
+        // ラベルも増えていない（news[0] の tags から作られるはずだったラベルが残らない）。
+        if (supportsLabels) {
+          expect(await store.listLabels!(ctx)).toEqual(labelsBefore);
+        }
+
+        // news[0] がロールバックされていたことの確認: 同じ冪等キーでもう一度作ると
+        // created: true になる（ロールバックされていなければ既存行に衝突して false）。
+        const retry = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            content: "news 1",
+            contentHash: "no-partial-write-news-1",
+            tags: ["no-partial-write-tag"],
+            sourceObservationId: newsObservation.id,
+            extractorVersion: newsExtractorVersion,
+          }),
+          [],
+        );
+        expect(retry.created).toBe(true);
       });
     } else {
       it("supersedeWithNewMemories は任意メソッドであり、この adapter は実装していない", async () => {
@@ -5728,6 +6016,72 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             );
           });
         }
+      }
+
+      // Issue #1238 A5（#1195 の棚卸しが挙げた候補）: `onlyMemoryIds` に形式不正な
+      // id（UUID の形をしていない文字列）が混ざっても例外にせず、群に居ないのと
+      // 同じ扱いにする——`get`/`getMany`/`updateStatus` 等の形式不正な id の歯
+      // （このファイル冒頭の doc コメント）と同じ規約を `onlyMemoryIds` にも課す。
+      if (supportsRestoreSupersededBy) {
+        it("restoreSupersededBy の onlyMemoryIds に形式不正な id が混ざっても例外にせず、形の正しい id だけが戻る", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const anchor = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-malformed-restore-anchor",
+            }),
+          );
+          const a = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-malformed-restore-a",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+          const now = new Date("2026-06-01T00:00:00.000Z");
+
+          const result = await store.restoreSupersededBy!(
+            ctx,
+            anchor.id,
+            { at: now },
+            { onlyMemoryIds: ["not-a-uuid", a.id] },
+          );
+
+          expect(result.restored.map((m) => m.id)).toEqual([a.id]);
+        });
+      }
+
+      if (supportsPreviewRestoreSupersededBy) {
+        it("previewRestoreSupersededBy の onlyMemoryIds に形式不正な id が混ざっても例外にせず、形の正しい id だけが戻る", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const anchor = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-malformed-preview-anchor",
+            }),
+          );
+          const a = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-malformed-preview-a",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+
+          const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id, {
+            onlyMemoryIds: ["not-a-uuid", a.id],
+          });
+
+          expect(preview.candidates.map((c) => c.memoryId)).toEqual([a.id]);
+        });
       }
 
       it("onlyMemoryIds はテナントをまたいで漏らさない", async () => {
@@ -8382,6 +8736,41 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(await store.listLabels!(ctxB)).toEqual([]);
         expect(await store.listLabels!(ctxA)).toEqual([
           { name: "only-in-a", status: "proposed", proposedCount: 1, registeredAt: null },
+        ]);
+      });
+
+      // Issue #1238 A3（#1135 の棚卸しが挙げた候補）: ラベルのキーを区切り文字
+      // （`::`）で繋いでいる実装は、`::` を含む tenantId で境目がずれると衝突しうる。
+      // `packages/postgres/src/__tests__/labels-tenant-key.postgres.test.ts` が
+      // 「testkit の InMemory」と「Postgres」を直接比べる形で既に固定していたが、
+      // conformance suite 自体には歯が無かった。
+      it("ラベルは `::` を含むテナントでも分かれる（区切り文字）", async () => {
+        const store = await createStore();
+        const a: Ctx = { tenantId: "joined-label-tenant-a" };
+        const ab: Ctx = { tenantId: "joined-label-tenant-a::b" };
+
+        await store.createMemory(
+          ab,
+          buildNewMemoryFixture({
+            tenantId: ab.tenantId,
+            contentHash: "joined-label-ab",
+            tags: ["x"],
+          }),
+        );
+        await store.createMemory(
+          a,
+          buildNewMemoryFixture({
+            tenantId: a.tenantId,
+            contentHash: "joined-label-a",
+            tags: ["b::x"],
+          }),
+        );
+
+        expect(await store.listLabels!(a)).toEqual([
+          { name: "b::x", status: "proposed", proposedCount: 1, registeredAt: null },
+        ]);
+        expect(await store.listLabels!(ab)).toEqual([
+          { name: "x", status: "proposed", proposedCount: 1, registeredAt: null },
         ]);
       });
 
