@@ -256,3 +256,17 @@
 > - 一覧と根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Fixed` を見てください——ここでは複製しません（イベントの欄の約束どおりの記録、testkit の fixture を Postgres に揃えた修正、例外の文面の改善などが載っています）。
 >
 > **移行手順の詳細は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「v1.0.2 → 次の版」の節が正です。**
+
+---
+
+## ⚠ 2026-09-30 訂正 —— `v1.1.0` の Breaking にもう1件あった
+
+**この文書は出荷済みの Release 本文の草稿として凍結されている。上の本文（バナー・表・草稿）は1バイトも書き換えていない。**この訂正は末尾に追記として足す。
+
+`v1.1.0` は 2026-09-30 にオーナーが tag `5eb6e9d` で publish し、npm にも出た。上の草稿は `62def34` までしか数えておらず、その後 `main` へ着地した [PR #1437](https://github.com/takecchi/mnemora/pull/1437)（[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)）の `### 🔴 破壊的変更` 12件目を欠いたまま出荷された。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking` の `deleteAcrossSpaces` の項目（追記29）が正——ここでは要約のみ複製する。
+
+- **`@mnemora/core` の `VectorStore` interface に必須メソッド `deleteAcrossSpaces` が増えました——自前で `VectorStore` を実装している方へ**（[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)、[PR #1437](https://github.com/takecchi/mnemora/pull/1437)、[ADR 0382](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0382-vector-store-delete-across-spaces.md)）。
+  - 自前の `VectorStore` 実装（第三者 adapter）を持つ方は、`deleteAcrossSpaces` を実装しない限り型検査に落ちます——必須メソッドの追加です。`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryVectorStore`・`Runtime.purge` をそのまま使っているだけの方は、型の変更は受けません。
+  - 詳しい移行手順は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「v1.0.2 → 次の版」の節（項目30）、一覧・根拠は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` `### Breaking` を見てください。
+
+一覧・根拠・件数の訂正（11件→12件）は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節「v1.1.0 の記載の訂正」が正——本数はそちらにだけ書く。

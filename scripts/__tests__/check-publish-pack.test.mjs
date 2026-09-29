@@ -27,9 +27,10 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
  * 冒頭のコメント参照）。この歯もその全件を直書きで持つ（`scripts/__tests__/publish-targets.test.mjs`
  * が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` と集合として一致することを検査する）。
  *
- * ⚠ `@mnemora/bullmq`（Issue #205）は初回 publish 前で、`NEVER_PUBLISHED_TARGETS`
- * （`publish-pack-checks.mjs`）に載っている——下の version 関連の2つの it が、
- * この1件だけ向きを変えて検査している理由はそこにある。
+ * ⚠ `@mnemora/bullmq`（Issue #205）は git 上の version が `0.0.0` のままで、
+ * `NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に載っている——下の version 関連の
+ * 2つの it が、この1件だけ向きを変えて検査している理由はそこにある。1.1.0 で publish 済み
+ * （2026-09-29、オーナーの手元での初回）であり、一覧の名前と意味はずれている。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -57,9 +58,16 @@ describe("publish 対象パッケージの package.json（静的）", () => {
       const manifest = readManifest(target.dir);
 
       if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
-        // 初回 publish 前は 0.0.0 のままが正しい（ADR 0070。version 揃い検査からも外れる）。
-        it("初回 publish 前なので version は 0.0.0 のまま", () => {
-          expect(manifest.version).toBe("0.0.0");
+        // git 上の version が 0.0.0 のままでよい名前（ADR 0070。version 揃い検査からも外れる）。
+        // ⚠ publish.yml は、この門を走らせる前に apply-release-version.mjs で全対象の version を
+        // tag の版へ書き換える。⟹ そのときは core と同じ版になっているのが正しい。
+        // 0.0.0 だけを許していた間は、Release のたびに publish ジョブがここで落ち、1本も上がらなかった
+        // （【実測】2026-09-30、Release v1.1.0 の publish run 36612548998）。
+        // ⚠ 一覧の名前（NEVER_PUBLISHED）と意味がずれている——bullmq は 1.1.0 で publish 済み
+        // （2026-09-29、オーナーの手元での初回）。publish-pack-checks.mjs の doc コメント参照。
+        it("git 上の version は 0.0.0 のままでよい（publish 時は tag の版＝core と同じ版）", () => {
+          const coreVersion = readManifest("packages/core").version;
+          expect(["0.0.0", coreVersion]).toContain(manifest.version);
         });
       } else {
         it("version が 0.0.0 のままではない", () => {
