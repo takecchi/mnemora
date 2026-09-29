@@ -343,6 +343,43 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(idsB).not.toContain(aId2);
     });
 
+    // Issue #1238 A3（#1146 の棚卸しが挙げた候補）: space を区切り文字（`:`）で
+    // 繋いだキーで管理している実装は、`model` に `:` を含むと前方一致で別の space を
+    // 拾いうる。`packages/postgres/src/__tests__/joined-string-keys.postgres.test.ts`
+    // が「testkit の InMemory」と「Postgres」を直接比べる形で既に固定していたが、
+    // conformance suite 自体には歯が無かった。
+    it("space の model に `:` を含んでいても、前方一致で別の space のベクトルを拾わない（区切り文字）", async () => {
+      const store = await createStore();
+      const shortSpace: EmbeddingSpaceId = {
+        provider: "joined-keys-conf",
+        model: "m",
+        dimensions: 3,
+      };
+      const longSpace: EmbeddingSpaceId = {
+        provider: "joined-keys-conf",
+        model: "m:3",
+        dimensions: 3,
+      };
+      await prepareEmbeddingSpace(shortSpace);
+      await prepareEmbeddingSpace(longSpace);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      await store.upsert(ctx, longSpace, memoryId, [1, 0, 0]);
+
+      const hitsShort = await store.search(ctx, shortSpace, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hitsShort.map((hit) => hit.memoryId)).not.toContain(memoryId);
+
+      const hitsLong = await store.search(ctx, longSpace, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hitsLong.map((hit) => hit.memoryId)).toContain(memoryId);
+    });
+
     it("delete した vector は search に現れなくなる", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
