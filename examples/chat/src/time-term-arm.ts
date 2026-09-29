@@ -3,8 +3,8 @@ import type {
   MemoryStore,
   RecallAssociationQuery,
   RecalledMemory,
+  RecalledScore,
   Runtime,
-  ScoreBreakdown,
 } from "@mnemora/core";
 import { clockPastRecentDbWrites, drainEmbedTicks } from "./embed-drain.js";
 import type { MutableClock } from "./mutable-clock.js";
@@ -77,7 +77,12 @@ export type PairOutcome =
 
 export interface PairMember {
   rank: number;
-  score: ScoreBreakdown;
+  /**
+   * Issue #548 方向2 / ADR 0352: `options.association` を明示すると
+   * （`association-default-on-measure.ts` だけが渡す）、`AffinityUnmeasuredScore`
+   * （`total`/`similarity` 無し）のことがある。
+   */
+  score: RecalledScore;
   digest: string;
 }
 
@@ -111,6 +116,13 @@ export function classifyPairOutcome(
   }
   if (older === null) {
     return "older-not-returned";
+  }
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠経由）には total が無い
+  // ——total 差での tie 判定はできない。順位（`rank`）だけで決める（2件の rank が
+  // 一致することは構造上無いので、"tied" にはならない——上の doc コメントの
+  // 「`newer.rank === older.rank` は届かない分岐」と同じ理由）。
+  if (newer.score.affinityMeasured === false || older.score.affinityMeasured === false) {
+    return newer.rank < older.rank ? "newer-ranked-higher" : "older-ranked-higher";
   }
   const diff = newer.score.total - older.score.total;
   if (Math.abs(diff) <= tieEpsilon) {
@@ -148,24 +160,37 @@ export interface TimeProbeOutcome {
   termSpreads: TermSpread[];
 }
 
-/** 片方でも欠けていれば null(0 と区別する)。 */
+/**
+ * 片方でも欠けていれば null(0 と区別する)。
+ *
+ * Issue #548 方向2 / ADR 0352: `pick` は `number | undefined` を返せるようにした
+ * ——`affinityMeasured: false` の score には `total` が無い（`totalRatio` の呼び出し側、
+ * 下）。`undefined` は「欠けている」に合流させる（値は変わらない。以前も
+ * `pick(score).total` は候補によって `undefined` になりえたが、そのときは実行時に
+ * `NaN` を作っていた——`null` にするほうが正確である）。
+ */
 function ratio(
   newer: PairMember | null,
   older: PairMember | null,
-  pick: (score: ScoreBreakdown) => number,
+  pick: (score: RecalledScore) => number | undefined,
 ): number | null {
   if (newer === null || older === null) {
     return null;
   }
-  return pick(older.score) / pick(newer.score);
+  const olderValue = pick(older.score);
+  const newerValue = pick(newer.score);
+  if (olderValue === undefined || newerValue === undefined) {
+    return null;
+  }
+  return olderValue / newerValue;
 }
 
 function similarityGap(newer: PairMember | null, older: PairMember | null): number | null {
   if (newer === null || older === null) {
     return null;
   }
-  const a = newer.score.similarity;
-  const b = older.score.similarity;
+  const a = newer.score.affinityMeasured === false ? undefined : newer.score.similarity;
+  const b = older.score.affinityMeasured === false ? undefined : older.score.similarity;
   if (a === undefined || b === undefined) {
     return null;
   }
@@ -325,7 +350,7 @@ async function runOneProbe(
     freshnessGapWithinPair: freshnessGap(newer, older),
     freshnessRatio: ratio(newer, older, (s) => s.freshness),
     decayRatio: ratio(newer, older, (s) => s.decay),
-    totalRatio: ratio(newer, older, (s) => s.total),
+    totalRatio: ratio(newer, older, (s) => (s.affinityMeasured === false ? undefined : s.total)),
     omittedKinds: result.omitted.map((o) => o.kind),
     totalInScope: result.index.totalInScope,
     termSpreads: computeTermSpreads(result.memories),
@@ -360,6 +385,16 @@ function formatPairMember(label: "newer" | "older", member: PairMember | null): 
     return `  ${label}: (返っていない)`;
   }
   const s = member.score;
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total/similarity という
+  // 欄自体が無い——「掛け算の形」を出せないので、比較可能でないことをそのまま名乗る。
+  if (s.affinityMeasured === false) {
+    return (
+      `  ${label}: #${member.rank} total=n/a（affinityMeasured: false、連想枠経由で` +
+      `比較可能ではない） = decay ${formatScoreValue(s.decay)} × ` +
+      `tagMatch ${formatScoreValue(s.tagMatch)} × freshness ${formatScoreValue(s.freshness)} × ` +
+      `strength ${formatScoreValue(s.strength)}  ${member.digest}`
+    );
+  }
   const similarity =
     s.similarity === undefined ? "(ANN 経由でない)" : formatScoreValue(s.similarity);
   return (

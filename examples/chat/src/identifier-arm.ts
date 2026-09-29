@@ -116,9 +116,13 @@ export function computeMarginStats(margins: readonly (number | null)[]): MarginS
  * 持つ要素を探し、両方に `score.similarity` があれば差を返す。片方でも無ければ `null`。
  */
 export function computeMargin(scoreDetails: readonly ProbeScoreDetail[]): number | null {
-  const goldSimilarity = scoreDetails.find((d) => d.roles.includes("gold"))?.score.similarity;
-  const distractorSimilarity = scoreDetails.find((d) => d.roles.includes("distractor"))?.score
-    .similarity;
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false には similarity という欄自体が
+  // 無い（以前も値は undefined だった——同じ「無い」の扱いに揃える）。
+  const goldScore = scoreDetails.find((d) => d.roles.includes("gold"))?.score;
+  const distractorScore = scoreDetails.find((d) => d.roles.includes("distractor"))?.score;
+  const goldSimilarity = goldScore?.affinityMeasured === false ? undefined : goldScore?.similarity;
+  const distractorSimilarity =
+    distractorScore?.affinityMeasured === false ? undefined : distractorScore?.similarity;
   if (goldSimilarity === undefined || distractorSimilarity === undefined) {
     return null;
   }

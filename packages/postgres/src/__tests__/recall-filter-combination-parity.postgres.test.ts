@@ -275,7 +275,14 @@ function normalize(result: RecallResult, ids: string[]): unknown {
     return x;
   };
   return deep({
-    memories: result.memories.map((m) => [m.memoryId, m.retrievedVia, m.score?.total]),
+    // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠・必須の同伴取得）の
+    // score は total を欄として持たない——両実装（Fake/Postgres）とも同じ形になるはず
+    // なので、undefined で揃えて比べる（無いことも決定的なので parity の指紋には影響しない）。
+    memories: result.memories.map((m) => [
+      m.memoryId,
+      m.retrievedVia,
+      m.score.affinityMeasured === false ? undefined : m.score.total,
+    ]),
     omitted: result.omitted,
   });
 }

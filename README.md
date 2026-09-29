@@ -84,6 +84,17 @@ Phase 1 の範囲と、そこに入れなかったものは [docs/roadmap.md](./
 ⟹ **何がどの版で変わったかは [CHANGELOG.md](./CHANGELOG.md)、なぜ変わったかは
 [docs/decisions/](./docs/decisions/) から辿れる。**
 
+**⚠ 2026-09-29 追記**: 上の「破壊的変更は major を上げる」は、少なくとも1件で実際には
+そうならなかった——`v1.1.0`（minor）に破壊的変更が1件入っている
+（[Issue #548](https://github.com/takecchi/mnemora/issues/548) 方向2、
+[ADR 0352](./docs/decisions/0352-association-score-without-total.md)）。根拠は
+オーナーへの問い（ask_human `6911db12` 問6、2026-09-28）への回答——逐語
+「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」。⟹ **この一文は
+「`v1.0.0` 以降、破壊的変更は必ず major を上げる」という無条件の規律ではない**——
+**ADR を書くことは今も必須のまま**であり、上の一文が指す既定の運用でもある。
+個別にオーナーが minor での破壊的変更を認めた場合はその限りではなく、そのときは
+根拠になった `ask_human` の id と逐語を、変更を入れる ADR に書くこと。
+
 名前は `mnemora`（`@mnemora/*`）に確定しており、暫定ではない
 （経緯は [docs/vision.md](./docs/vision.md) の「名前について」と
 [ADR 0014](./docs/decisions/0014-package-name-mnemora.md)）。

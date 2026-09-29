@@ -156,6 +156,13 @@ describe("runtime.recall() — 段3.5(連想枠)の contested 候補にも必須
     expect(c1Result?.retrievedVia).toBe("association");
     expect(c2Result?.retrievedVia).toBe("mandatory_companion");
     expect(c2Result?.companionOf).toBe(c1.id);
+    // Issue #548 方向2 / ADR 0352: 段3.5 経由のどちらの retrievedVia
+    // （"association"・"mandatory_companion"）も affinityMeasured: false になり、
+    // total/similarity/lexicalMatch という欄を持たない（本物の Postgres + pgvector）。
+    expect(c1Result?.score.affinityMeasured).toBe(false);
+    expect(c1Result?.score).not.toHaveProperty("total");
+    expect(c2Result?.score.affinityMeasured).toBe(false);
+    expect(c2Result?.score).not.toHaveProperty("total");
     expect(c1Result?.contestedWith).toBe(c2.id);
     expect(c2Result?.contestedWith).toBe(c1.id);
     expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);

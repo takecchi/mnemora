@@ -1062,7 +1062,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は1件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は2件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`80c79df`**（PR #1382）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20 と同じ範囲。追記14・追記19 は無い——追記19 は棚卸しではなく「保留の解消」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
@@ -1076,6 +1076,11 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 3. 偽 client（テストダブル）を使っている場合は、新しい構造型（provider が実際に呼ぶメソッドと、そのメソッドが実際に送る引数・読む戻り値のフィールドだけ）に合わせる。
 
 **型の上**: `git diff v1.0.2..f5ad59f -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。**19回目の棚卸し（`f5ad59f`…`80c79df`）で増えた分**は次の3件——① `@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が `Pick<OpenAI, ...>`/`Pick<Anthropic, ...>` から自前の構造型へ置き換わった（PR #1377）——これが上の確定した破壊的変更そのもので、ここでは複製しない。② `@mnemora/core` の公開 union `ConsolidateSourceOutcome` に `"expired"`・`"not_yet_valid"` の2値が増えた（PR #1383）——union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、上の「数え方の規律への追記（2026-09-28）」）。③ `scripts/__snapshots__/public-api/bullmq.d.ts` が新規に増えた（PR #1382 で `@mnemora/bullmq` が publish 対象へ加わり、公開 API の検査の対象に初めて入ったため）——既存の公開面の削除・狭小化ではなく、この節の対象6パッケージの変更でもない（下の「実行時」の直後の注を参照）。
+
+⚠ **2026-09-29 追記: `f5ad59f` より後に着地した項目19（下）は、この段落が数えた範囲の外である。**
+`git diff v1.0.2..f5ad59f` の時点では型の狭小化は無かったが、項目19 の変更はまさに型の狭小化
+（既存欄 `score: ScoreBreakdown` → `score: ScoreBreakdown | AffinityUnmeasuredScore`）を伴う
+——次回この段落を棚卸しするときは、`f5ad59f` より後の範囲まで diff を取り直すこと。
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
@@ -1092,7 +1097,46 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ⚠ **bullmq について（19回目の棚卸しで初めて注記）**: PR #1382 で `@mnemora/bullmq` が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` に加わったが、まだ一度も publish されていない（version は `0.0.0` のまま）。この節が数えるのは「利用者が版を上げるときに何をどう直すか」であり、一度も publish されていない package には該当する利用者が存在しない。⟹ **この節は bullmq をまだ対象に含めていない。**bullmq が実際に publish された後、bullmq 自身に破壊的変更が着地すれば、その時点でこの節（かそれに続く世代の節）の対象に加える。
 
-**DB マイグレーション**: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）の1本が増えている。`v1.0.2` から上げる場合は、6パッケージを上げた後に `npx mnemora-postgres-migrate`（`DATABASE_URL` を渡す。または `runMigrations`。上の「DB マイグレーション」）が要る——このリポジトリの workspace 内なら `pnpm --filter @mnemora/postgres run migrate` でも同じ。`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る。（⚠ 2026-09-27 訂正: この行は workspace 内の形 `pnpm --filter @mnemora/postgres run migrate` だけを書いていた。利用者のプロジェクトには `--filter` で指せる workspace が無いので、その形では打てない）
+### 19. `RecalledMemory.score`/`RecallRecordMemory.score`/`CorrectionCandidate.score` が `ScoreBreakdown` から `ScoreBreakdown | AffinityUnmeasuredScore` になった（`@mnemora/core`）
+
+[Issue #548](https://github.com/takecchi/mnemora/issues/548) 方向2、
+[ADR 0352](./decisions/0352-association-score-without-total.md)。**この1件は、これまでの
+17件（v0.1.9→v0.2.0）〜18件（v0.4.0→v0.5.0）と違い、`v1.0.0` 以降に確定した最初の
+破壊的変更である**——`v1.0.0`〜`v1.0.2` は0件のまま出荷された（上の各節）。
+
+**なぜ `v2.0.0` ではなく `v1.1.0` に入るか**: `README.md`「版の付け方」は `v1.0.0` 以降の
+破壊的変更は major を上げるとしているが、この変更はオーナーへの問い（ask_human `6911db12`
+問6、2026-09-28）への回答——逐語「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」
+——を根拠に `v1.1.0`（minor）へ入れる。詳細は `README.md`「版の付け方」の2026-09-29 追記、
+ADR 0352「文脈」節を見ること。
+
+**誰が影響を受けるか**: `RecalledMemory.score`（`recall()` の戻り値）・
+`RecallRecordMemory.score`（`getRecall()` で読み戻す内訳）・`CorrectionCandidate.score`
+（`findCorrectionCandidates()` の戻り値）のいずれかを読み、`.total`/`.similarity`/
+`.lexicalMatch` へ**型を絞り込まずに**アクセスしているコードは、型検査に落ちる。
+`strategies/consolidate.ts` の公開関数 `computeAffinity(score)` を直接呼んでいるコードも、
+引数の型が変わる（戻り値は変わらない）。
+
+⭕ **影響しないもの**: `association: null` を渡して連想枠を止めている呼び出しでも、
+候補が `mandatory_companion`（矛盾の同伴）を1件も含まなければ影響しない。`.decay`/
+`.tagMatch`/`.freshness`/`.strength` だけを読んでいるコード、`retrievedVia`・`digest`・
+`memoryId` など `score` 以外の欄だけを読んでいるコードは影響しない。独自の
+`ScoringStrategy`（`strategies/scoring.ts` の公開拡張点）を実装しているコードは、
+その関数のシグネチャ自体が変わっていないので影響しない。
+
+**どう直すか**: `affinityMeasured` で絞り込む。`true`/`undefined`（独自 `ScoringStrategy`
+がこの欄を埋めていない場合を含む）なら `ScoreBreakdown` のまま、`false`
+（連想枠・必須の同伴取得のどちらか）なら `total`/`similarity`/`lexicalMatch` は存在しない。
+
+```ts
+const total = m.score.affinityMeasured !== false ? m.score.total : null;
+```
+
+**DB マイグレーション**: 不要（ADR 0352 決定5）。永続化済みの過去の `recalls` 行は、
+書かれた当時の形のまま `getRecall()` から読み戻る——本 ADR より前に書かれた
+`association`/`mandatory_companion` の行は `total` を持つ場合がある。
+
+**DB マイグレーション**（既存の言及。上の項目19 とは別件）: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）の1本が増えている。`v1.0.2` から上げる場合は、6パッケージを上げた後に `npx mnemora-postgres-migrate`（`DATABASE_URL` を渡す。または `runMigrations`。上の「DB マイグレーション」）が要る——このリポジトリの workspace 内なら `pnpm --filter @mnemora/postgres run migrate` でも同じ。`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る。（⚠ 2026-09-27 訂正: この行は workspace 内の形 `pnpm --filter @mnemora/postgres run migrate` だけを書いていた。利用者のプロジェクトには `--filter` で指せる workspace が無いので、その形では打てない）
 
 【実測 2026-09-27】この節の手順を、利用者の側で通した（`main` = `47b2aa6`）。
 1. npm から `@mnemora/*@1.0.2` の6パッケージを入れた素のプロジェクト（`npm`、`"type": "module"`、TypeScript 5.9 の `nodenext`）で、`npx mnemora-postgres-migrate` を空の DB に打った（`0001`〜`0022`）。

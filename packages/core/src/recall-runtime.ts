@@ -44,6 +44,7 @@ import type {
   RecallResult,
   RecallScope,
   RecalledMemory,
+  RecalledScore,
   ScoreNotComparableOmission,
   ScoreBreakdown,
   StageTrace,
@@ -133,6 +134,34 @@ type ScoredCandidate = {
   associationOf?: MemoryId;
   score: ScoreBreakdown;
 };
+
+/**
+ * `ScoredCandidate.score`（内部表現。段2・段3.5 のどの候補でも常に `total` を持つ
+ * `ScoreBreakdown`）を、呼び出し側へ返す形（`RecalledScore`）へ変換する
+ * （Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+ *
+ * **`affinityMeasured === false` のときだけ `total`/`similarity`/`lexicalMatch` を落とす。**
+ * `true`/`undefined`（`ScoringStrategy` を自作していて欄を埋めていない場合。ADR 0282
+ * 「設計問2」と同じ理由で、区別できない `undefined` は安全側＝`ScoreBreakdown` のまま
+ * 返す）はそのまま返す——**判別子は `affinityMeasured` だけであり、`retrievedVia` では
+ * 判定しない**（`retrievedVia` を判別に使うと、`"mandatory_companion"`（段3・段3.5 の
+ * どちらの必須同伴取得も、今日はどちらも affinity を測っていない——`fetchMandatoryCompanions`
+ * は `similarity`/`lexicalMatch` を一度も渡さない）の一方の経路を取りこぼしうる。
+ * `affinityMeasured` は `defaultScoringStrategy` がその場で計算した実測の合図なので、
+ * 経路をどれだけ増やしても取りこぼさない）。
+ *
+ * ⚠ **内部の順位付けはこの関数を経由しない。**`compareScoredCandidates`・
+ * `partitionByThreshold`・段3.5 の `rankKey`（`hit.similarity * score.total`）は
+ * どれも変換前の `ScoredCandidate.score.total` を直接読んでおり、1バイトも変えていない
+ * ——変換するのは、返り値・永続化する行を組み立てる `finalMemories` の1箇所だけである。
+ */
+function toRecalledScore(score: ScoreBreakdown): RecalledScore {
+  if (score.affinityMeasured !== false) {
+    return score;
+  }
+  const { decay, tagMatch, freshness, strength } = score;
+  return { affinityMeasured: false, decay, tagMatch, freshness, strength };
+}
 
 /**
  * 数値の降順比較で、`NaN`（比較できない値。ADR 0040——ゼロベクトルの cosine 距離）を
@@ -2011,7 +2040,11 @@ export async function runRecall(
         // 出どころが将来変わったら、名乗りも一緒に変わる——countKind の exact が
         // リテラル固定のまま出どころだけ変わって嘘になった件（ADR 0011）の裏返しである。
         provenanceKind: member.memory.provenance.kind,
-        score: member.score,
+        // Issue #548 方向2 / ADR 0352: affinity を測っていない候補（連想枠・必須の同伴取得。
+        // `affinityMeasured === false`）は、比較可能でない `total`/`similarity`/`lexicalMatch`
+        // を持たない形で返す。`member.score`（内部表現）自体は変えない——`toRecalledScore`
+        // の doc コメント参照。
+        score: toRecalledScore(member.score),
         // Issue #579 案D（ADR 0289）: 常に値か null を書く。undefined にもキー省略にも
         // しない——「無い（null）」と「頼まなかった／書き忘れた（undefined）」を実行時に
         // 混ぜないための保証（ADR 0257 の考え方をこの欄に当てたもの）。
