@@ -6,7 +6,6 @@ import {
   seedTimeWeightingMemories,
   type TimeWeightingBenchRuntimeHandle,
 } from "../time-weighting-bench.js";
-import { clockPastRecentDbWrites } from "../embed-drain.js";
 import {
   closeTestClient,
   getTestClient,
@@ -28,9 +27,13 @@ import {
  * この検査は、**自然発生のタイミング競合に頼らない**（この器では50回中0回しか
  * 自然発生しなかった——`clockPastRecentDbWrites` の docstring・PR の報告参照）:
  *
- * 1本目は、実際に書いた行の `available_at`（us 精度で読み直す）の `floor(ms)` を
- * そのまま `claimBatch` に渡し、「0件になる」ことを直接・決定的に確かめる
- * （機構そのものの証明。+1ms すれば claim できることも合わせて確かめる）。
+ * 1本目は、この機構が Issue #1237（ADR 0355）で**無くなった**ことを確かめる。
+ * `available_at` は Postgres の `now()`（us 精度）ではなく、呼び出し側が渡す時刻
+ * （省略時は JS の壁時計、ms 精度）で書かれる。⟹ 書いた行の `available_at` は ms の
+ * 境界ちょうどであり、同じ瞬間を `now` に渡した `claimBatch` がそのジョブを取れる。
+ * ⚠ 2026-09-29 までは、ここで「`floor(ms)` の `now` では0件」という旧い機構そのものを
+ * 証明していた（us の端数が 0 の行を引くと前提が崩れる、Issue #1002）。その前提は
+ * もう成り立たないので、裏返しの形に書き換えた。
  *
  * 2本目は、`seedTimeWeightingMemories` が足した歯（Issue #719「seed 件数ぶん処理
  * されなければ例外」のガード）を、`Date.now` を書き込み前の値に固定するモックで
@@ -41,29 +44,20 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
     vi.restoreAllMocks();
   });
 
-  it("機構の証明: available_at を floor(ms) した同じ瞬間を now に渡すと claim は0件、+1ms すると claim できる", async () => {
+  it("機構が無くなったことの証明: available_at は渡した時刻（省略時は JS の壁時計）の ms ちょうどで、同じ瞬間の now で claim できる", async () => {
     await resetTestDatabase();
     const client = await getTestClient();
     const handle = await createTimeWeightingBenchRuntime(requireDatabaseUrl(), {});
     try {
-      // 🔴 前提: 書いた行の `available_at` が ms の境界ちょうど（us の端数が 0）ではないこと。
-      // 境界ちょうどだと `floor(ms)` が `available_at` そのものになり、`available_at <= now`
-      // が成り立って claim できてしまう——この機構の証明が前提にしている「同じ ms の中の
-      // us」が存在しない。`now()` の us の端数は制御できないので、自然にはおよそ千回に一度
-      // 起き（手元の実測で 5000 回中 1 回）、CI で実際にこの形の赤が出た（run 36205084679、
-      // `expected [ { …(12) } ] to have a length of +0 but got 1`、Issue #1002）。前提が成り立たなかったら、
-      // 別テナントで行を書き直す（同じテナントに境界ちょうどの行が残ると、下の claim に拾われる）。
-      const MAX_ATTEMPTS = 5;
-      let ctx = { tenantId: "" };
-      let availableAtUs = 0;
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-        ctx = { tenantId: `seed-drain-race-mechanism-${attempt}` };
-        const { memory } = await handle.memoryStore.createMemoryWithOutbox(
+      const outboxStore = new PostgresOutboxStore(client.db);
+      const writeAndReadAvailableAtUs = async (tenantId: string, now?: Date) => {
+        const ctx = { tenantId };
+        await handle.memoryStore.createMemoryWithOutbox(
           ctx,
           buildNewMemoryFixture({
-            tenantId: ctx.tenantId,
+            tenantId,
             content: "本文",
-            contentHash: sha256Hex(`${ctx.tenantId}:seed`),
+            contentHash: sha256Hex(`${tenantId}:seed`),
             digest: "本文",
             tags: [],
             occurredAt: null,
@@ -72,45 +66,42 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
             validUntil: null,
           }),
           ["embed"],
+          ...(now === undefined ? [] : [{ now }]),
         );
-        expect(memory.id).toBeDefined();
-
-        // available_at を us 精度のまま(浮動小数点変換無し)で読み直す。JS Date に通すと
+        // available_at を us 精度のまま（浮動小数点変換無し）で読み直す。JS Date に通すと
         // ms へ丸まってしまい、検査したい「ms の中の us」が消える。
         const result = await client.pool.query<{ available_at_us: string }>(
           `SELECT (EXTRACT(EPOCH FROM available_at) * 1000000)::numeric(20,0)::text AS available_at_us
            FROM outbox WHERE tenant_id = $1 AND kind = 'embed' ORDER BY created_at DESC LIMIT 1`,
-          [ctx.tenantId],
+          [tenantId],
         );
-        availableAtUs = Number(result.rows[0]!.available_at_us);
-        if (availableAtUs % 1000 !== 0) {
-          break;
-        }
-      }
-      expect(availableAtUs % 1000).not.toBe(0);
-      const flooredMs = Math.floor(availableAtUs / 1000);
+        return Number(result.rows[0]!.available_at_us);
+      };
+      const claimAt = (tenantId: string, now: Date) =>
+        outboxStore.claimBatch(
+          { tenantId },
+          {
+            now,
+            limit: 10,
+            leaseMs: 30 * 60 * 1000,
+            claimedBy: "test-mechanism-gone",
+            kinds: ["embed"],
+          },
+        );
 
-      const outboxStore = new PostgresOutboxStore(client.db);
+      // (1) 時刻を渡すと、available_at はその値そのもの。同じ瞬間の now で取れる。
+      const given = new Date(Date.now() - 60_000);
+      const givenUs = await writeAndReadAvailableAtUs("seed-drain-race-given", given);
+      expect(givenUs).toBe(given.getTime() * 1000);
+      expect(await claimAt("seed-drain-race-given", given)).toHaveLength(1);
 
-      // claimBatch を直接、floor(ms) の now で呼ぶ — 実際に0件になることを確かめる。
-      const claimedAtFloor = await outboxStore.claimBatch(ctx, {
-        now: new Date(flooredMs),
-        limit: 10,
-        leaseMs: 30 * 60 * 1000,
-        claimedBy: "test-mechanism-floor",
-        kinds: ["embed"],
-      });
-      expect(claimedAtFloor).toHaveLength(0);
-
-      // +1ms（`clockPastRecentDbWrites` と同じ式）なら claim できることも確かめる。
-      const claimedAtFloorPlusOne = await outboxStore.claimBatch(ctx, {
-        now: clockPastRecentDbWrites(flooredMs),
-        limit: 10,
-        leaseMs: 30 * 60 * 1000,
-        claimedBy: "test-mechanism-plus-one",
-        kinds: ["embed"],
-      });
-      expect(claimedAtFloorPlusOne).toHaveLength(1);
+      // (2) 省略しても、available_at は ms の境界ちょうど（us の端数が無い）。floor(ms) の
+      // now——旧い機構ではここが0件だった——で取れる。
+      const omittedUs = await writeAndReadAvailableAtUs("seed-drain-race-omitted");
+      expect(omittedUs % 1000).toBe(0);
+      expect(
+        await claimAt("seed-drain-race-omitted", new Date(Math.floor(omittedUs / 1000))),
+      ).toHaveLength(1);
     } finally {
       await handle.close();
     }
@@ -145,6 +136,9 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
       // rejecting`）。60秒前なら、経路の速さにも、同じホストの上の小さな時計のずれにも依らず、
       // claim の `now` が `available_at` に届かない。ms の境界そのものの機構は、上の「機構の証明」が
       // 別に縛っている。
+      // ⚠ 2026-09-29（Issue #1237、ADR 0355）: `available_at` は今は `now()` ではなく、store の
+      // 既定の JS の壁時計（`seed` は時刻を渡さない）で書かれる。60秒前に固定した claim の `now` が
+      // 届かないことは変わらないので、このガードの検査はそのまま成り立つ。
       const frozenMs = Date.now() - 60_000;
       vi.spyOn(Date, "now").mockReturnValue(frozenMs);
 

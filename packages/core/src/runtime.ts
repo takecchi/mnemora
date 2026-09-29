@@ -3573,6 +3573,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "created",
+      at: clock.now(),
       actor: { type: "system" },
       digestSnapshot: memory.digest,
       sizeBeforeBytes: null,
@@ -3686,6 +3687,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "updated",
+      at: clock.now(),
       actor: { type: "system" },
       digestSnapshot: memory.digest,
       meta: {
@@ -3748,10 +3750,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const written: Array<{ memory: Memory; created: boolean }> = [];
     const dropped: DroppedCandidate[] = [];
     let firstError: { error: unknown } | null = null;
+    // Issue #1237: この呼び出し全体で1回だけ読む——同じ observation から作る候補すべてに
+    // 同じ outbox の `now` を使う（`consolidate`/`reflect` と同じ規律）。
+    const outboxNow = clock.now();
     for (const [index, newMemory] of newMemories.entries()) {
       contentHashes.add(newMemory.contentHash);
       try {
-        written.push(await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, jobKinds));
+        written.push(
+          await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, jobKinds, {
+            now: outboxNow,
+          }),
+        );
       } catch (error) {
         firstError ??= { error };
         dropped.push(describeDroppedCandidate(index, newMemory.contentHash, error));
@@ -4010,6 +4019,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     observationId: ObservationId,
     opts?: AbortOptions,
   ): Promise<ReextractResult> {
+    // Issue #1237: この呼び出し全体で1回だけ読む（`consolidate`/`reflect` と同じ規律——
+    // 積む `superseded`/`created` イベントの `at` と、`createMemoryWithOutbox` の
+    // outbox 行にすべて同じ値を使う）。
+    const now = clock.now();
     const observation = await deps.memoryStore.getObservation(ctx, observationId);
     if (!observation) {
       throw new Error(`runtime.reextract: observation not found: ${observationId}`);
@@ -4109,6 +4122,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         tenantId: ctx.tenantId,
         memoryId: existing.id,
         kind: "superseded",
+        at: now,
         actor: { type: "system" },
         digestSnapshot: existing.digest,
         sizeBeforeBytes: null,
@@ -4143,6 +4157,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           // `meta.supersededById` は store が解決した id で埋める（上のコメント参照）。
           event: buildSupersedeEventFor(existing),
         })),
+        { now },
       );
 
       const memoryIds = result.created.map((c) => c.memory.id);
@@ -4179,9 +4194,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 口が無い adapter——今日どおりの2段（作成 → supersede ループ）。
     const memoryIds: MemoryId[] = [];
     for (const newMemory of newMemories) {
-      const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, [
-        "embed",
-      ]);
+      const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(
+        ctx,
+        newMemory,
+        ["embed"],
+        { now },
+      );
       memoryIds.push(memory.id);
       if (created) {
         await appendCreatedEvent(ctx, memory, observation, "ok", null);
@@ -4356,6 +4374,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const kind = observeInputKindToObservationKind(input.kind);
     const payload = extractObservationPayload(input);
     const extractMode = input.extract ?? "sync";
+    // Issue #1237: `recordedAt` と outbox 行の `now` に同じ値を使う。
+    const now = clock.now();
 
     const newObservation: NewObservation = {
       tenantId: ctx.tenantId,
@@ -4364,7 +4384,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       kind,
       payload,
       occurredAt: input.occurredAt ?? null,
-      recordedAt: clock.now(),
+      recordedAt: now,
       // Issue #280: `occurredAt` と同じ経路（`Observation.validFrom`/`validUntil` の
       // doc コメント参照。deferred 抽出でも値が残るよう Observation に持たせる）。
       validFrom: input.validFrom ?? null,
@@ -4378,6 +4398,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ctx,
       newObservation,
       ["extract"],
+      { now },
     );
 
     if (!created) {
@@ -4413,7 +4434,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
       // 生成時の値（0）のまま——「ここまで誰にも claim/complete/fail されていない」を
       // 表す自分のフェンシングトークンとして渡す。
-      await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts);
+      await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts, {
+        at: clock.now(),
+      });
     }
     return {
       observationId: observation.id,
@@ -4825,6 +4848,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             job.id,
             `${UNSUPPORTED_KIND_ERROR_PREFIX}${job.kind}`,
             job.attempts,
+            { at: clock.now() },
           );
         } catch (err) {
           if (err instanceof OutboxLeaseConflictError) {
@@ -4845,7 +4869,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // なので `leaseConflicts` に記録するだけで、`fail()` は呼ばない
         // （呼んでも同じ理由でまた弾かれるだけであり、かつ「処理には成功した」
         // ジョブを `failed` にも数えない——事実と違う顔になる）。
-        await deps.outboxStore.complete(ctx, job.id, job.attempts);
+        await deps.outboxStore.complete(ctx, job.id, job.attempts, { at: clock.now() });
         processed += 1;
       } catch (err) {
         // Issue #1200 / ADR 0359: `handler` の中で provider 呼び出しが abort された
@@ -4869,7 +4893,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // （Issue #826）、行は `completed` のまま変わらないが、それでも `failed` は
         // 1増える（`TickResult.failed` の doc コメント参照）。
         try {
-          await deps.outboxStore.fail(ctx, job.id, describeJobFailure(err), job.attempts);
+          await deps.outboxStore.fail(ctx, job.id, describeJobFailure(err), job.attempts, {
+            at: clock.now(),
+          });
         } catch (failErr) {
           if (failErr instanceof OutboxLeaseConflictError) {
             leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "fail" });
@@ -4983,7 +5009,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   async function reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
-    return deps.memoryStore.requeueEmbedJobs(ctx, opts);
+    return deps.memoryStore.requeueEmbedJobs(ctx, opts, { now: clock.now() });
   }
 
   /**
@@ -5111,6 +5137,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             tenantId: ctx.tenantId,
             memoryId: id,
             kind: "restored",
+            at: clock.now(),
             actor,
             digestSnapshot: current.digest,
             meta: opts?.reason === undefined ? {} : { reason: opts.reason },
@@ -5420,6 +5447,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             tenantId: ctx.tenantId,
             memoryId: id,
             kind: "forgotten",
+            at: clock.now(),
             actor,
             digestSnapshot: current.digest,
             meta: opts?.reason === undefined ? {} : { reason: opts.reason },
@@ -5556,6 +5584,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             tenantId: ctx.tenantId,
             memoryId: id,
             kind: "purged",
+            at: clock.now(),
             actor,
             digestSnapshot: current.digest,
             meta: opts?.reason === undefined ? {} : { reason: opts.reason },
@@ -5678,6 +5707,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         : { reason: "contested", note: opts.reason, contestedWithId };
 
     try {
+      // Issue #1237: 両側の `updated` イベントに同じ `at` を使う。
+      const now = clock.now();
       const { first, second } = await markContestedPair.call(
         deps.memoryStore,
         ctx,
@@ -5687,6 +5718,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             tenantId: ctx.tenantId,
             memoryId: firstId,
             kind: "updated",
+            at: now,
             actor,
             digestSnapshot: firstMemory.digest,
             meta: buildMeta(secondMemory.id),
@@ -5698,6 +5730,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             tenantId: ctx.tenantId,
             memoryId: secondId,
             kind: "updated",
+            at: now,
             actor,
             digestSnapshot: secondMemory.digest,
             meta: buildMeta(firstMemory.id),
@@ -5865,6 +5898,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         tenantId: ctx.tenantId,
         memoryId: id,
         kind,
+        at: clock.now(),
         actor,
         digestSnapshot: memory.digest,
         // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
@@ -5995,6 +6029,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: survivorId,
       kind: "updated",
+      at: clock.now(),
       actor,
       digestSnapshot: survivor.digest,
       meta,
@@ -6320,6 +6355,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         tenantId: ctx.tenantId,
         memoryId: "",
         kind: "created",
+        at: now,
         // `ConsolidateOptions.actor`/`reason` は、この操作が積むイベントすべてに当たる
         // （統合元の superseded と同じ。`reflect` の created と同じ形）。
         actor,
@@ -6336,6 +6372,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         tenantId: ctx.tenantId,
         memoryId: source.id,
         kind: "superseded",
+        at: now,
         actor,
         digestSnapshot: source.digest,
         sizeBeforeBytes: null,
@@ -6375,6 +6412,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           expectedStatus: "active" as MemoryStatus,
           event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
         })),
+        { now },
       );
 
       const consolidated = result.created[0]!;
@@ -6413,6 +6451,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ctx,
       newMemory,
       ["embed"],
+      { now },
     );
     if (created) {
       await deps.eventStore.append(ctx, {
@@ -6726,6 +6765,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ctx,
       newMemory,
       ["embed"],
+      { now },
     );
     if (created) {
       // 8. `created` イベントを1件積む。`reflect` はこれ以外のイベントを一切積まない
@@ -6734,6 +6774,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         tenantId: ctx.tenantId,
         memoryId: reflectedMemory.id,
         kind: "created",
+        at: now,
         actor: opts.actor ?? { type: "system" },
         digestSnapshot: reflectedMemory.digest,
         sizeBeforeBytes: null,

@@ -290,6 +290,12 @@ describeOutboxStoreConformance({
     }
     return job;
   },
+  peekJob: async (_ctx, jobId) => {
+    if (!latestMemoryStoreForOutboxSeed) {
+      throw new Error("peekJob より先に createStore() を呼ぶ必要がある");
+    }
+    return latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobId) ?? null;
+  },
 });
 
 let latestTenantSettingsStore: InMemoryTenantSettingsStore | undefined;

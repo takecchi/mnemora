@@ -2937,6 +2937,8 @@ export async function runRecall(
   const recallId = await deps.memoryStore.createRecall(ctx, {
     tenantId: ctx.tenantId,
     subjectId: ctx.subjectId ?? null,
+    // Issue #1237: 省略時は壁時計になっていた欄——runtime の注入した時計を渡す。
+    createdAt: now,
     query: validatedQuery,
     budget: budget ?? null,
     omitted,
