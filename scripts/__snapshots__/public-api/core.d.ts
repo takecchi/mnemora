@@ -133,6 +133,7 @@ export interface FindCorrectionCandidatesInput {
     text: string;
     limit?: number;
     excludeMemoryIds?: readonly MemoryId[];
+    activityCounting?: "tenant" | "subject";
 }
 export interface CorrectionCandidate {
     memoryId: MemoryId;
@@ -754,6 +755,7 @@ export interface ArchiveDecayedOptions {
     limit: number;
     nowSeq?: number;
     clock?: DecayClock;
+    usesSubjectActivityCounters?: boolean;
 }
 export interface ArchiveDecayedResult {
     archived: Array<{
@@ -861,6 +863,8 @@ export interface TenantSettingsStore {
     getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq?(ctx: Ctx): Promise<number>;
+    hasSubjectActivityCounters?(ctx: Ctx): Promise<boolean>;
+    getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
     getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
@@ -868,6 +872,12 @@ export declare const DECAY_CLOCK_UNSUPPORTED_MESSAGE = "this TenantSettingsStore
 export declare function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Promise<DecayClock>;
 export declare function readActivitySeq(store: TenantSettingsStore, ctx: Ctx): Promise<number>;
 export declare function readDefaultHalfLifeRecalls(store: TenantSettingsStore, ctx: Ctx): Promise<number>;
+export interface SubjectActivitySeqs {
+    [subjectId: string]: number;
+}
+export declare function readHasSubjectActivityCounters(store: TenantSettingsStore, ctx: Ctx): Promise<boolean>;
+export declare function readSubjectActivitySeqs(store: TenantSettingsStore, ctx: Ctx, subjectIds: readonly string[]): Promise<SubjectActivitySeqs>;
+export declare function readSubjectActivitySeq(store: TenantSettingsStore, ctx: Ctx, subjectId: string): Promise<number>;
 export declare function writeDecayClock(store: TenantSettingsStore, ctx: Ctx, clock: DecayClock): Promise<void>;
 export declare const TAXONOMY_MODE_UNSUPPORTED_MESSAGE = "this TenantSettingsStore does not support setTaxonomyMode";
 export declare function readTaxonomyMode(store: TenantSettingsStore, ctx: Ctx): Promise<TaxonomyMode>;
@@ -898,6 +908,7 @@ export interface VectorFilter {
     occurredAfter?: Date;
     occurredBefore?: Date;
     decayFloorSeqAfter?: number;
+    decayFloorSeqUsesSubjectCounters?: boolean;
     decayFloorAnyAxis?: boolean;
     validAt?: Date;
     attributes?: Attributes;
@@ -2220,6 +2231,7 @@ export interface RecallQuery {
     includeOutsideValidity?: boolean;
     association?: RecallAssociationQuery | null;
     includeSubjectless?: boolean;
+    activityCounting?: "tenant" | "subject";
     timeWeighting?: TimeWeightingPolicy;
 }
 export declare const RECALL_CHANNELS: readonly [
@@ -2276,6 +2288,10 @@ export declare const RecallQuerySchema: z.ZodObject<{
     includeFullyDecayed: z.ZodOptional<z.ZodBoolean>;
     validAt: z.ZodOptional<z.ZodDate>;
     includeOutsideValidity: z.ZodOptional<z.ZodBoolean>;
+    activityCounting: z.ZodOptional<z.ZodEnum<{
+        tenant: "tenant";
+        subject: "subject";
+    }>>;
     association: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         maxCount: z.ZodNumber;
         anchorCount: z.ZodOptional<z.ZodNumber>;
@@ -2297,6 +2313,7 @@ export interface RecallScope {
     decayFloorAtAfter?: Date;
     decayFloorSeqAfter?: number;
     decayFloorAnyAxis?: boolean;
+    decayFloorSeqUsesSubjectCounters?: boolean;
     includeSubjectless?: boolean;
     attributes?: Attributes;
     labels?: string[];
@@ -2310,6 +2327,7 @@ export declare const RecallScopeSchema: z.ZodObject<{
     decayFloorAtAfter: z.ZodOptional<z.ZodDate>;
     decayFloorSeqAfter: z.ZodOptional<z.ZodNumber>;
     decayFloorAnyAxis: z.ZodOptional<z.ZodBoolean>;
+    decayFloorSeqUsesSubjectCounters: z.ZodOptional<z.ZodBoolean>;
     includeSubjectless: z.ZodOptional<z.ZodBoolean>;
     attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -2635,7 +2653,10 @@ export interface NewRecallRecord {
         stages: StageTrace[];
     };
     returnedMemories: RecallRecordMemory[];
-    advanceActivityClock?: boolean;
+    advanceActivityClock?: boolean | {
+        scope: "subject";
+        subjectId: string;
+    };
 }
 export interface RecallRecord {
     recallId: RecallId;
@@ -2787,6 +2808,7 @@ export type ConsolidateTarget = {
     seedMemoryId: MemoryId;
     maxCandidates?: number;
     minAffinity?: number;
+    activityCounting?: "tenant" | "subject";
 };
 export declare const DEFAULT_CONSOLIDATE_MIN_AFFINITY = 0.8;
 export interface ConsolidateOptions {
@@ -2849,6 +2871,7 @@ export type ReflectTarget = {
     seedMemoryId: MemoryId;
     maxCandidates?: number;
     minAffinity?: number;
+    activityCounting?: "tenant" | "subject";
 };
 export declare const DEFAULT_REFLECT_MIN_AFFINITY = 0.4;
 export interface ReflectOptions {

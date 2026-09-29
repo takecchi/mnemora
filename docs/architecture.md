@@ -1089,6 +1089,8 @@ interface TenantSettingsStore {
   getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
   setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
   getActivitySeq?(ctx: Ctx): Promise<number>;
+  hasSubjectActivityCounters?(ctx: Ctx): Promise<boolean>;
+  getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
   setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
@@ -1116,6 +1118,12 @@ type TaxonomyMode = 'open' | 'strict';
 > 「`tenant_settings` の他の列（`taxonomy_mode`）の読み書きはこの interface の範囲外」は
 > 古くなった。`getTaxonomyMode?`/`setTaxonomyMode?`（`getDecayClock?`/`setDecayClock?` と
 > 同じ形の任意メソッド）を足し、`taxonomy_mode` の読み書きをこの interface の範囲に含めた。
+> 上のコード片は実体に合わせて更新済み。
+
+> **2026-09-29 追記（Issue #338、[ADR 0353](./decisions/0353-activity-counting-per-call.md)）**:
+> `hasSubjectActivityCounters?`/`getSubjectActivitySeqs?`（subject 単位の活動カウンタ
+> `tenant_subject_activity` の読み取り）を足した。どちらも任意メソッドで、省略時は
+> 「subject カウンタを一度も使っていない」（`false`・全 subject が 0）に倒れる。
 > 上のコード片は実体に合わせて更新済み。
 
 契約:

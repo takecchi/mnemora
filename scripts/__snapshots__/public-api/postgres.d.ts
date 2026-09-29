@@ -2192,6 +2192,8 @@ export declare class PostgresTenantSettingsStore implements TenantSettingsStore 
     getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq(ctx: Ctx): Promise<number>;
+    hasSubjectActivityCounters(ctx: Ctx): Promise<boolean>;
+    getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
     getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }

@@ -697,6 +697,27 @@ n1 = await tenantSettingsStore.getActivitySeq(ctx)   // t1 の時点
 返らなくなる。** また、`recall()` だけでは強化されない（強化は使用報告でだけ起きる）。
 回数はテナント合計で数える（別 subject に絞った recall でも進む）。
 
+**⚠ 2026-09-29 追記（[ADR 0353](./decisions/0353-activity-counting-per-call.md)、
+[Issue #338](https://github.com/takecchi/mnemora/issues/338)）: 上の「限界」2 は、もう実態ではない。**
+「`subject` 単位のカウンタにする変種は、ADR 0165『これが覆るとしたら』1 が『オーナーの判断を要する
+種類の分岐』と明記しており、本追記では踏み込まない」と書いていたが、**オーナーが答えた
+（ask_human 61355570「呼び出す際の引数で指定できるようにはできない？」）ことを受け、
+`RecallQuery.activityCounting: "tenant" | "subject"`（既定 `"tenant"`）として実装した。**
+
+- `activityCounting: "subject"` を選び、かつ `ctx.subjectId` を指定した recall は、テナント全体の
+  `T`（`tenant_activity.activity_seq`）ではなく、その subject 専用のカウンタ `S_x`
+  （新テーブル `tenant_subject_activity`、`tenant_id`/`subject_id`/`activity_seq`/`updated_at`）を進める。
+- `getActivitySeq(ctx)` が返す `T` は、`activityCounting: "subject"` を使う呼び出しがあっても
+  **変わらない**——`S_x` は別の口（`TenantSettingsStore.getSubjectActivitySeqs?(ctx, subjectIds):
+  Promise<Record<string, number>>`）で読む。
+- ある Memory（subject `x`）の忘却ゲート・段2の再スコア・掃引が実際に使う「有効ないま」は、
+  `activityCounting` の値に関わらず常に `T + S_x`（`x` が無い記憶は `T` のみ）——本追記が「限界」として
+  書いていた「そのテナント全体で何回起きたか」しか分からない、という制約は、`activityCounting: "subject"`
+  を選んだ呼び出しに限って解消されている。既定 `"tenant"` の呼び出ししかしていないテナントには、
+  この追記より前と1バイトも変わらない挙動が残る（`TenantSettingsStore.hasSubjectActivityCounters?` が
+  `false` のまま）。
+- 詳細・保守操作への配線・引き受けた負債は ADR 0353 を見ること。
+
 ---
 
 ## 8. taxonomy の strict / open

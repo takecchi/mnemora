@@ -117,6 +117,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     readonly events: MemoryEvent[];
     readonly outboxJobs: OutboxJobRecord[];
     readonly activitySeq: Map<string, number>;
+    readonly subjectActivitySeq: Map<string, Map<string, number>>;
     private readonly labels;
     private labelKey;
     private upsertProposedLabels;
@@ -282,8 +283,9 @@ export declare class InMemoryOutboxStore implements OutboxStore {
 import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
 export declare class InMemoryTenantSettingsStore implements TenantSettingsStore {
     private readonly activitySeqBacking?;
+    private readonly subjectActivitySeqBacking?;
     private readonly rows;
-    constructor(activitySeqBacking?: Map<string, number> | undefined);
+    constructor(activitySeqBacking?: Map<string, number> | undefined, subjectActivitySeqBacking?: Map<string, Map<string, number>> | undefined);
     private ensureRow;
     setDefaultHalfLifeHours(tenantId: string, hours: number): void;
     getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
@@ -294,6 +296,8 @@ export declare class InMemoryTenantSettingsStore implements TenantSettingsStore 
     getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq(ctx: Ctx): Promise<number>;
+    hasSubjectActivityCounters(ctx: Ctx): Promise<boolean>;
+    getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
     getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
@@ -525,6 +529,7 @@ export interface TenantSettingsStoreConformanceOptions {
     supportsDecayClock: boolean;
     setDefaultHalfLifeRecalls?: (ctx: Ctx, recalls: number) => Promise<void> | void;
     advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
+    advanceSubjectActivitySeq?: (ctx: Ctx, subjectId: string) => Promise<void> | void;
     supportsTaxonomyMode?: boolean;
 }
 export declare function describeTenantSettingsStoreConformance(options: TenantSettingsStoreConformanceOptions): void;

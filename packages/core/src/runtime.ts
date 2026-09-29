@@ -47,6 +47,8 @@ import {
   readActivitySeq,
   readDecayClock,
   readDefaultHalfLifeRecalls,
+  readHasSubjectActivityCounters,
+  readSubjectActivitySeq,
 } from "./interfaces/tenant-settings-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
 import type { TokenCounter } from "./interfaces/token-counter.js";
@@ -735,7 +737,20 @@ export interface ForgetResult {
 export type ConsolidateTarget =
   | { memoryIds: MemoryId[] }
   | { query: RecallQuery; maxCandidates?: number }
-  | { seedMemoryId: MemoryId; maxCandidates?: number; minAffinity?: number };
+  | {
+      seedMemoryId: MemoryId;
+      maxCandidates?: number;
+      minAffinity?: number;
+      /**
+       * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+       * （Issue #338）: 種の digest で内部的に呼ぶ `recall()` へそのまま渡す
+       * `RecallQuery.activityCounting`。**`{ query }` 形は `RecallQuery` 自体に
+       * この欄を含められるので、ここには無い**——`{ seedMemoryId }` 形だけ、
+       * `recall()` に直接触れられないためにこの欄を用意する。省略時 `"tenant"`
+       * （本 ADR 以前と1バイトも変わらない挙動）。
+       */
+      activityCounting?: "tenant" | "subject";
+    };
 
 /**
  * `{ seedMemoryId }` 形（Issue #135、ADR 0152）が使う `minAffinity` の既定値。
@@ -962,7 +977,17 @@ export interface ConsolidationResult {
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }
   | { query: RecallQuery; maxCandidates?: number }
-  | { seedMemoryId: MemoryId; maxCandidates?: number; minAffinity?: number };
+  | {
+      seedMemoryId: MemoryId;
+      maxCandidates?: number;
+      minAffinity?: number;
+      /**
+       * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+       * （Issue #338）: `ConsolidateTarget`（`{ seedMemoryId }` 形）の同名の欄と
+       * 同じ——種の digest で内部的に呼ぶ `recall()` へそのまま渡す。省略時 `"tenant"`。
+       */
+      activityCounting?: "tenant" | "subject";
+    };
 
 /**
  * `{ seedMemoryId }` 形（Issue #204、ADR 0154）が使う `minAffinity` の既定値。
@@ -3353,11 +3378,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (decayClock === "wall") {
       return {};
     }
-    const [activitySeq, halfLifeRecalls] = await Promise.all([
+    const [tenantSeq, halfLifeRecalls, subjectSeq] = await Promise.all([
       readActivitySeq(deps.tenantSettingsStore, ctx),
       readDefaultHalfLifeRecalls(deps.tenantSettingsStore, ctx),
+      // ADR 0353（Issue #338）: 書き込む Memory の「有効ないま」は T + S_x
+      // （x = ctx.subjectId。無ければ T のみ）——これから作る Memory の
+      // decayBaseSeq/decayFloorSeq は、それが属する subject の視点で計算する。
+      // 🔴 引き受けた負債: この解決は `ctx.subjectId` を「これから作る Memory の
+      // subjectId」の代わりに使う。呼び出し側（`buildNewMemoriesForCandidates`）が
+      // 複数 subject の候補を一括で作る場合、全候補が同じ `ctx.subjectId` 基準の
+      // 値を使うことになる（ADR 0353「確かめていないこと」）。
+      ctx.subjectId !== undefined
+        ? readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId)
+        : Promise.resolve(0),
     ]);
-    return { activitySeq, halfLifeRecalls };
+    return { activitySeq: tenantSeq + subjectSeq, halfLifeRecalls };
   }
 
   /**
@@ -3378,7 +3413,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (decayClock === "wall") {
       return undefined;
     }
-    return readActivitySeq(deps.tenantSettingsStore, ctx);
+    const tenantSeq = await readActivitySeq(deps.tenantSettingsStore, ctx);
+    // ADR 0353（Issue #338）: 強化される Memory の「有効ないま」は T + S_x
+    // （x = ctx.subjectId）。🔴 引き受けた負債: 対象 Memory 自身の subjectId では
+    // なく `ctx.subjectId` を使う（`resolveActivityClockInputs` と同じ負債）——
+    // 使用報告ループが複数 subject の Memory を一括で強化する場合、全件が同じ
+    // `ctx.subjectId` 基準の値を使うことになる。
+    if (ctx.subjectId === undefined) {
+      return tenantSeq;
+    }
+    const subjectSeq = await readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId);
+    return tenantSeq + subjectSeq;
   }
 
   function toReinforceOptions(nowSeq: number | undefined): { nowSeq: number } | undefined {
@@ -4719,9 +4764,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
 
-    // `text` 以外のフィールドを一切渡さない——閾値・limit・channels・overFetchFactor は
-    // すべて recall() の既定に委ねる（interface 側の doc コメント参照）。
-    const recallResult = await recall(ctx, { text: input.text });
+    // `text`/`activityCounting` 以外のフィールドを一切渡さない——閾値・limit・
+    // channels・overFetchFactor はすべて recall() の既定に委ねる（interface 側の
+    // doc コメント参照）。ADR 0353（Issue #338）: `activityCounting` は
+    // `input.activityCounting` をそのまま渡す（省略時は recall() 側の既定
+    // "tenant" に落ちる）。
+    const recallResult = await recall(ctx, {
+      text: input.text,
+      activityCounting: input.activityCounting,
+    });
 
     const excludeSet = new Set(input.excludeMemoryIds ?? []);
     // recallRank は「recall() が返した並びでの、1始まりの順位」——除外の前に固定する。
@@ -4784,7 +4835,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const nowSeq =
       opts.nowSeq ??
       (clock === "wall" ? undefined : await readActivitySeq(deps.tenantSettingsStore, ctx));
-    const result = await archiveDecayed.call(deps.memoryStore, ctx, { ...opts, clock, nowSeq });
+    // ADR 0353（Issue #338）: 掃引はテナント全体を対象にする（subject を絞らない）ため、
+    // 行ごとに違う subject の `S_x` を都度計算する必要がある——
+    // `hasSubjectActivityCounters?` が false（一度も subject カウンタを使っていない
+    // テナント）なら相関サブクエリを足さない（プラン族を変えない、`archiveDecayed`
+    // 実装側の `usesSubjectActivityCounters` の doc コメント参照）。
+    const usesSubjectActivityCounters =
+      opts.usesSubjectActivityCounters ??
+      (clock === "wall"
+        ? false
+        : await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx));
+    const result = await archiveDecayed.call(deps.memoryStore, ctx, {
+      ...opts,
+      clock,
+      nowSeq,
+      usesSubjectActivityCounters,
+    });
     return { supported: true, archived: result.archived, reachedLimit: result.reachedLimit };
   }
 
@@ -5856,7 +5922,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       } else {
         // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
         // 経路を通す（新しい「似ている」の判定を作らない）。
-        const recallResult = await recall(ctx, { text: seed.digest });
+        // ADR 0353（Issue #338）: `target.activityCounting` をそのまま渡す
+        // （省略時は recall() 側の既定 "tenant" に落ちる）。
+        const recallResult = await recall(ctx, {
+          text: seed.digest,
+          activityCounting: target.activityCounting,
+        });
         const minAffinity = target.minAffinity ?? DEFAULT_CONSOLIDATE_MIN_AFFINITY;
         const neighborIds = recallResult.memories
           // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
@@ -6237,7 +6308,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       } else {
         // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
         // 経路を通す（新しい「似ている」の判定を作らない）。
-        const recallResult = await recall(ctx, { text: seed.digest });
+        // ADR 0353（Issue #338）: `target.activityCounting` をそのまま渡す
+        // （省略時は recall() 側の既定 "tenant" に落ちる）。
+        const recallResult = await recall(ctx, {
+          text: seed.digest,
+          activityCounting: target.activityCounting,
+        });
         const minAffinity = target.minAffinity ?? DEFAULT_REFLECT_MIN_AFFINITY;
         const neighborIds = recallResult.memories
           // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
