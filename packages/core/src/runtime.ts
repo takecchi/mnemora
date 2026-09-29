@@ -430,18 +430,23 @@ export interface ObserveResult {
  * adapter では、今まで通り `findActiveByClaimKey?` の一致（`active` のみ）だけになる。
  *
  * - `matchCount === 0` ⟹ `result.kind === "no_conflict"`。
- * - `matchCount === 1` ⟹ `result.kind === "contested"`。`Runtime.markContested` を
- *   実際に呼んだ結果を `markContested` に運ぶ（`ineligible`/`conflict` になることもある
- *   ——TOCTOU で相手の status が読んだ後に変わった場合等。この関数はその結果をそのまま
- *   運ぶだけで、再試行はしない）。
- * - `matchCount >= 2` ⟹ `result.kind === "unresolved_conflict"`。**`markContested` を
- *   呼ばない**——[#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、
- *   多対多）が無いと、1対1の `contestedWithId` では3件以上を表現できない
- *   （ADR 0185 決定5）。代わりに `memory_events` へ根拠を構造として残すだけに留める
- *   （`detectClaimKeyContested` の実装コメント参照）。**`superseded` へは
- *   一切進めない。**⚠ **状態遷移そのものを動かさない**——`findContestedByClaimKey?` の
- *   一致で既に `contested` な相手が含まれていても、この関数はその相手の `status`/
- *   `contestedWithId` に一切触れない（ADR 0378 決定2、PR1 の範囲）。
+ * - `matchCount === 1` **かつその1件が `active`** ⟹ `result.kind === "contested"`。
+ *   `Runtime.markContested` を実際に呼んだ結果を `markContested` に運ぶ
+ *   （`ineligible`/`conflict` になることもある——TOCTOU で相手の status が読んだ後に
+ *   変わった場合等。この関数はその結果をそのまま運ぶだけで、再試行はしない）。
+ * - `matchCount >= 2`、**または `matchCount === 1` だがその1件が既に `contested`**
+ *   ⟹ `result.kind === "unresolved_conflict"`。**`markContested` を呼ばない**——
+ *   [#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、多対多）
+ *   が無いと、1対1の `contestedWithId` では3件以上を表現できない（ADR 0185 決定5）。
+ *   代わりに `memory_events` へ根拠を構造として残すだけに留める（`detectClaimKeyContested`
+ *   の実装コメント参照）。**`superseded` へは一切進めない。**⚠ **状態遷移そのものを
+ *   動かさない**——`findContestedByClaimKey?` の一致で既に `contested` な相手が
+ *   含まれていても、この関数はその相手の `status`/`contestedWithId` に一切触れない
+ *   （ADR 0378 決定2、PR1 の範囲）。⚠ **2026-09-30 の直し（ADR 0378 追記）**:
+ *   `matchCount === 1` でもこの分岐に入りうる（一致がちょうど1件で、その1件が既に
+ *   `contested` だった場合）——直す前は `markContested` へ進んで `ineligible` になり、
+ *   検出中の Memory は `active` のまま痕跡も残らなかった（例: 3件目の有効期間が、既に
+ *   対になった1件目・2件目のうち片方とだけ重なる場合）。
  */
 export interface ContestedDetectionOutcome {
   /** 検出の対象にした、新しく作った Memory の id。 */
@@ -3732,7 +3737,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   /**
    * Issue #372（(B) 第2段。ADR 0185 決定2・決定4、ADR 0320 の続き）: 新しく `active` に
    * なった Memory 1件について、同じ鍵の衝突を**列と索引だけで**（LLM を一度も呼ばずに）
-   * 見つけ、ちょうど1件なら `markContested` を呼ぶ。
+   * 見つけ、ちょうど1件、かつその1件が `active` なら `markContested` を呼ぶ
+   * （2026-09-30 の直し、ADR 0378 追記。下の手順3参照）。
    *
    * 手順:
    * 1. `memory.claimKey` が無ければ何もしない（`null` を返す——鍵が無ければ引くものが無い）。
@@ -3749,29 +3755,39 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    *    「観測0番」ではない）。**この除外は core 側だけで行う**——`MemoryStore.
    *    findActiveByClaimKey?`/`findContestedByClaimKey?` の interface・Postgres 実装・
    *    testkit は変えない（下の doc コメント最後の段落、ADR 0377・ADR 0378 参照）。
-   * 3. 残った一致件数で分岐する（ADR 0324 決定5・決定6 が定めた分岐そのものは変えていない
-   *    ——手順2.5 が変えるのは「何を一致として数えるか」だけである）:
+   * 3. 残った一致件数と、その `status` で分岐する（ADR 0324 決定5・決定6 が定めた
+   *    分岐そのものは変えていない——手順2.5・下記2026-09-30の直しが変えるのは
+   *    「何を一致として数えるか」「`markContested` へ進めてよい一致かどうか」だけである）:
    *    - **0件**: 何もしない（`{ kind: "no_conflict" }`）。
-   *    - **ちょうど1件**: `markContested(ctx, memory.id, other.id, { reason: <構造化JSON> })`
-   *      を呼ぶ。判定の根拠（鍵・重なった有効期間・両側の `contentHash`・id）を
-   *      `memory_events.meta.note` に構造として載せる（問い3）。`markContested` 自身が
-   *      `ineligible`/`conflict` を返すことがある（TOCTOU、または相手が既に別件で
-   *      `contested`/`active` 以外になっていた場合——`findContestedByClaimKey` の一致が
-   *      唯一の一致になった場合もここに含まれる。相手は既に `contested` なので CAS が
-   *      `ineligible` を返す）——**この関数はその結果をそのまま運ぶだけで、追加の
-   *      再試行やフォールバックはしない**（ADR 0134 が確立した「開く前に落とす」
-   *      「上限の無い再試行ループを作らない」規律をそのまま継承する）。
-   *    - **2件以上**: [#207](https://github.com/takecchi/mnemora/issues/207)
-   *      （`memory_relations`、多対多）が無いと1対1の `contestedWithId` では表現できない
-   *      （ADR 0185 決定5）。**`markContested` を一切呼ばない**——状態は一切動かさず、
-   *      根拠（鍵・関係する各 `id`/`contentHash`/有効期間・`status`・件数）を
-   *      `memory_events` へ1件、構造として残すだけに留める（`kind: "updated"`、
-   *      `meta.reason: "claim_key_conflict_unresolved"`——`"contested"` と紛れないよう
-   *      別のタグを使う。`MemoryEventKind` という公開 union には値を足さない——`meta` は
-   *      もともと自由形式である）。これにより「同じ鍵に3件以上が並んだ」件数を
-   *      `memory_events` から数えられる（Issue #933 が直る前は、この分岐は
-   *      `findContestedByClaimKey?` が無い限り実質到達不能だった——3件目以降は必ず
-   *      `no_conflict` に落ちていた。ADR 0378 参照）。
+   *    - **ちょうど1件、かつその1件が `active`**: `markContested(ctx, memory.id,
+   *      other.id, { reason: <構造化JSON> })` を呼ぶ。判定の根拠（鍵・重なった有効期間・
+   *      両側の `contentHash`・id）を `memory_events.meta.note` に構造として載せる
+   *      （問い3）。`markContested` 自身が `ineligible`/`conflict` を返すことがある
+   *      （TOCTOU で、読んでから呼ぶまでの間に相手が別件で `contested`/`active` 以外に
+   *      なっていた場合）——**この関数はその結果をそのまま運ぶだけで、追加の再試行や
+   *      フォールバックはしない**（ADR 0134 が確立した「開く前に落とす」「上限の無い
+   *      再試行ループを作らない」規律をそのまま継承する）。
+   *    - **それ以外（2件以上、または、ちょうど1件だがその1件が既に `contested`）**:
+   *      [#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、
+   *      多対多）が無いと1対1の `contestedWithId` では表現できない（ADR 0185 決定5）。
+   *      **`markContested` を一切呼ばない**——状態は一切動かさず、根拠（鍵・関係する各
+   *      `id`/`contentHash`/有効期間・`status`・件数）を `memory_events` へ1件、構造
+   *      として残すだけに留める（`kind: "updated"`、`meta.reason:
+   *      "claim_key_conflict_unresolved"`——`"contested"` と紛れないよう別のタグを使う。
+   *      `MemoryEventKind` という公開 union には値を足さない——`meta` はもともと自由
+   *      形式である）。これにより「同じ鍵に3件以上が並んだ」件数を `memory_events` から
+   *      数えられる（Issue #933 が直る前は、この分岐は `findContestedByClaimKey?` が
+   *      無い限り実質到達不能だった——3件目以降は必ず `no_conflict` に落ちていた。
+   *      ADR 0378 参照）。
+   *
+   *      ⚠ **2026-09-30 の直し（ADR 0378 追記、Issue #933 PR1 の穴埋め）**:
+   *      「ちょうど1件だがその1件が既に `contested`」は、直す前は `markContested` へ
+   *      進み、相手が既に `contested`（＝`active` でない）なので CAS が `ineligible` を
+   *      返し、検出中の Memory は `active` のまま・`memory_events` にも痕跡が残らなかった
+   *      （例: 3件目の有効期間が、既に対になった1件目・2件目のうち片方とだけ重なる場合）。
+   *      **今は、一致の `status` を見てから分岐する**——`active` な1件だけが
+   *      `markContested` の対象になり、`contested` な1件は（2件以上のときと同じ形で）
+   *      evidence だけを積む。
    *
    * ⛔ **この関数のどこにも `superseded` への言及が無い。**`contested` までで止める
    * （ADR 0185 決定4・北極星 問い4「AI の推論と、ユーザーが言った事実を区別する」——
@@ -3851,7 +3867,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       validUntil: m.validUntil ?? null,
     });
 
-    if (matches.length === 1) {
+    // 2026-09-30 の直し（ADR 0378 追記、Issue #933 PR1 の穴埋め）: `markContested` へ
+    // 進めてよいのは、一致がちょうど1件で、かつその1件がまだ `active` のときだけ。
+    // `findContestedByClaimKey` 由来で一致がちょうど1件になっても、その1件は既に
+    // `contested`（＝`active` でない）なので、直す前は `markContested` を呼んで
+    // `ineligible` になり、検出中の Memory は `active` のまま痕跡も残らなかった。
+    if (matches.length === 1 && matches[0]!.status === "active") {
       const other = matches[0]!;
       // 問い3: 根拠を構造として `meta.note`（`MarkContestedOptions.reason`）へ載せる。
       const note = JSON.stringify({
@@ -3870,7 +3891,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // matches.length >= 2: #207 が無いと1対1で表せない（ADR 0185 決定5）。
+    // それ以外（matches.length >= 2、または matches.length === 1 だがその1件が既に
+    // `contested`）: #207 が無いと1対1で表せない（ADR 0185 決定5）。
     // markContested を呼ばず、根拠だけを memory_events に残す。
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,

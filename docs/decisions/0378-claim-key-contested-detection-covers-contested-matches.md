@@ -231,9 +231,43 @@ ADR 0377 が active の一致だけに適用していた除外を、Issue #933 �
 「同じ observation の兄弟を誤って一致に数える」症状が、`findContestedByClaimKey` の
 一致経由で再発しうる。
 
-除外後の件数で、今まで通り0/1/2+の3分岐（ADR 0324 決定5）を行う——**分岐そのものは
-変えていない。変わるのは「何を一致として数えるか」だけである**（ADR 0377 が「機序」節で
-述べた構図と同じ形の変更）。
+除外後の件数で、0/1/2+の3分岐（ADR 0324 決定5）を行う——**分岐の数そのものは変えて
+いない。変わるのは「何を一致として数えるか」と、下の決定7-d が加える「ちょうど1件の
+ときに `markContested` へ進めてよいか」の判定である**（ADR 0377 が「機序」節で述べた
+構図と同じ形の変更）。
+
+### 決定7-d: 一致がちょうど1件でも、その1件が既に `contested` なら `markContested` へ
+進まない（2026-09-30 の穴埋め）
+
+決定7-b が実装した直後、一致がちょうど1件の場合を無条件に `markContested` へ渡す
+（決定5の元の実装のまま）と、新しい穴が生まれた——`findContestedByClaimKey` の一致が
+唯一の一致になる場合（例: 3件目の有効期間が、既に対になった1件目・2件目のうち片方と
+だけ重なる）、その1件は既に `contested` なので `markContested` の CAS が
+`ineligible` を返し、検出中の Memory は `active` のまま・`memory_events` にも痕跡が
+残らなかった——Issue #933 が元々塞ごうとした「検出が構造的に効かない」症状の変種が、
+`findContestedByClaimKey` を足したことで新しく生まれた形になる。
+
+**直し方**: 一致がちょうど1件のときも、その1件の `status` を見る。
+
+```ts
+if (matches.length === 1 && matches[0]!.status === "active") {
+  // 今まで通り markContested へ進む
+}
+// それ以外（2件以上、または、ちょうど1件だがその1件が既に contested）:
+// markContested を呼ばず、evidence だけを積む（決定6と同じ経路）
+```
+
+**この判定は TOCTOU ではない**——ADR 0324 決定7 が引き受けた負債（読んだ後、
+`markContested` を呼ぶまでの間に相手の状態が変わる窓）とは別の性質を持つ。こちらは
+**読んだ時点で、相手が `active` でないと既に分かっている**——`findContestedByClaimKey`
+の契約自体が `status = 'contested'` の行だけを返すため。この情報を使わずに
+`markContested` へ渡すのは、分かっている情報を捨てて無駄な CAS 失敗を起こすのと同じ
+であり、TOCTOU 由来の `ineligible`（引き受ける）と、読んだ時点で予見できた
+`ineligible`（引き受けない）を区別した。
+
+歯: `packages/core/src/__tests__/claim-key-single-contested-match.test.ts`（core の
+Fake）・`packages/postgres/src/__tests__/claim-key-single-contested-match.postgres.test.ts`
+（本物の Postgres）。
 
 ### 決定7-c: evidence の `matches` に `status` を足す
 
@@ -362,12 +396,16 @@ recall 側には一切触れていない（決定6・PR2 の範囲）。
   残り続ける。
 - **決定2（完全グラフ）の行数増加は、real-fixture で一度も検証されていない**（ADR 0324
   負債5・ADR 0327 §11 の継承）。
-- **PR1 の `findContestedByClaimKey?` の一致が、`markContested` の「ちょうど1件」分岐
+- ~~**PR1 の `findContestedByClaimKey?` の一致が、`markContested` の「ちょうど1件」分岐
   （決定5・ADR 0324 決定7）に紛れ込む edge case を作る**——ADR 0377 の兄弟除外の結果、
   合わせた一致がちょうど1件になり、かつその1件が既に `contested`（別のペアの相手）
   だった場合、`markContested` を呼ぶが CAS が `ineligible` を返す（相手が `active` で
   ない）。これは ADR 0324 決定7 が既に引き受けている「TOCTOU で相手が active でなくなる」
-  負債と同じ形として扱う——追加の救済はしない。
+  負債と同じ形として扱う——追加の救済はしない。~~ **⚠ 2026-09-30 追記: 負債として
+  引き受けず、PR1 の中で直した。**上の「決定7-d」を見ること——
+  「相手が既に `contested` と分かっている」ことは TOCTOU（読んだ後に状態が変わった）
+  ではなく、読んだ時点で判定できる情報だったため、`markContested` へ進む前に弾く形に
+  した。
 
 ---
 

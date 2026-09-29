@@ -1690,12 +1690,15 @@ export interface MemoryStore {
    * 除く（ADR 0377 の除外を、combined な一致に対しても同じ形でかける。ADR 0378）。
    *
    * ⚠ **この口の一致は `markContested` の対にはしない。**`detectClaimKeyContested` は、
-   * この口の一致を含めて件数が2件以上になったときは `markContested` を呼ばず、状態を
-   * 一切動かさずに `memory_events` へ evidence（`meta.reason:
+   * 合わせた一致（`findActiveByClaimKey?` + この口）が2件以上のとき、または、
+   * ちょうど1件でもその1件がこの口由来（＝既に `contested`）のときは `markContested` を
+   * 呼ばず、状態を一切動かさずに `memory_events` へ evidence（`meta.reason:
    * 'claim_key_conflict_unresolved'`）を積むだけに留める（ADR 0324 決定6 の経路、
-   * ADR 0378 決定2）。**多者間グループを実際に `contested` として束ねる書き込み（ADR 0327
-   * が設計した `markContestedGroup` 相当）は、この口の範囲外——`RelationStore`
-   * （ADR 0327・ADR 0292、まだ実装されていない）が要る（ADR 0378 の「PR2 へ残すもの」）。**
+   * ADR 0378 決定2・決定7-d）。`markContested` の対になれるのは、合わせた一致がちょうど
+   * 1件で、かつその1件が `findActiveByClaimKey?` 由来（＝`active`）のときだけである。
+   * **多者間グループを実際に `contested` として束ねる書き込み（ADR 0327 が設計した
+   * `markContestedGroup` 相当）は、この口の範囲外**——`RelationStore`（ADR 0327・
+   * ADR 0292、まだ実装されていない）が要る（ADR 0378 の「PR2 へ残すもの」）。
    */
   findContestedByClaimKey?(
     ctx: Ctx,

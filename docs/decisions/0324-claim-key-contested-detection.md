@@ -654,3 +654,15 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 **ただし、この直しでも「3件以上のグループを実際に `contested` として recall に載せる」ようにはならない**——決定6が引き受けていた負債（`markContested` を呼ばない、状態は一切動かさない）はそのまま残る。多者間グループを表（`memory_relations`）へ束ねる書き込み経路（ADR 0327 の未決3点、ADR 0378 決定1〜4・決定6）は、ADR 0378 が設計のみ決定し、実装は次段（Issue #933 の PR2）に残している。
 
 詳細・実装・歯は ADR 0378 を見ること。
+
+## 追記（2026-09-30・その2）: 決定5の「ちょうど1件」は、その1件が `active` の場合に限る（ADR 0378 追記）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+直前の追記は「決定5・決定6が定めた分岐そのもの（0/1/2+の3方向、2+では `markContested` を呼ばない）は変えていない」と書いたが、これは不正確だった——**一致がちょうど1件でも、その1件が既に `contested`（`findContestedByClaimKey?` 由来）だと、`markContested` へ進めてはならない**という条件が新しく必要になった。
+
+**症状（直す前）**: 一致がちょうど1件で、その1件が既に `contested` な場合（例: 3件目の有効期間が、既に対になった1件目・2件目のうち片方とだけ重なる）、そのまま `markContested(ctx, memory.id, other.id, ...)` へ進んでいた。相手（`other`）は既に `contested`（＝`active` でない）ため CAS が `ineligible` を返し、検出中の Memory は `active` のまま・`memory_events` にも痕跡が残らなかった——ADR 0324 決定7（TOCTOU で ineligible になったときの扱い）が想定していた「読んだ後に相手の状態が変わった」窓ではなく、**読んだ時点で既に `active` でないと分かっている**一致を、判定せずに `markContested` へ渡してしまう構造的な穴だった。
+
+**直し方**: 一致がちょうど1件のときも、その1件の `status` を見てから分岐する——`active` なら今まで通り `markContested`、`contested` なら（一致が2件以上のときと同じ形で）`markContested` を呼ばず `memory_events` へ `claim_key_conflict_unresolved` の evidence を積むだけに留める。**決定5・決定6が定めた3方向の分岐（0件／1件かつactive／それ以外）そのものは、この形へ精緻化されただけで、`markContested` を呼ぶ条件が狭まった以外に意味は変わっていない。**
+
+歯は core の Fake（`packages/core/src/__tests__/claim-key-single-contested-match.test.ts`）と本物の Postgres（`packages/postgres/src/__tests__/claim-key-single-contested-match.postgres.test.ts`）に追加した。詳細は ADR 0378 の同日追記を見ること。
