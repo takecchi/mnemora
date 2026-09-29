@@ -21,8 +21,9 @@
  *   `sweepArchive(ctx, { now: clock.now(), ... })` と呼べば同じ時計になる）。
  * - `purgeMemory` の `purgedAt`（`event.at` と同じ値。runtime は両方に同じ `clock.now()` を渡す）。
  * - `MemoryStore.createRecall`/`NewRecallRecord.createdAt`（recall の記録の時刻）。
- * - `MemoryStore.create{Observation,Memory}WithOutbox` の `opts.now`（積む outbox 行の
- *   `availableAt`・`createdAt`）。
+ * - `MemoryStore.create{Observation,Memory}WithOutbox`・`supersedeWithNewMemories?` の `opts.now`、
+ *   `requeueEmbedJobs` の `writeOpts.now`（積む outbox 行の `availableAt`・`createdAt`。
+ *   `observe`・`reextract`・`consolidate`・`reflect`・`reembed` のどれで積んだジョブも同じ）。
  *
  * ⟹ **壁時計より過去の時計を注入しても、`tick` は積んだジョブを取れる**——`available_at` が
  * 注入した時計に従うため、`claimBatch` の `available_at <= now` が同じ時計の中で閉じる。
@@ -30,17 +31,20 @@
  * （`injected-clock-reach.postgres.test.ts`）。
  *
  * **今も壁時計のまま残るもの**（本 Issue の範囲外。`Runtime`/`Clock` の管轄ではない列・関数）:
- * - `updated_at` 列（`memories`/`outbox` 等）。
+ * - `updated_at` 列（`memories`/`outbox` 等）と `memories.created_at`。
+ * - `recall_usages.used_at`（公開の口からは読まれない）。
  * - `vector_embeddings.created_at`。
  * - `registered_at`（`TenantSettingsStore` 系）。
  * - `tenant_settings` の補助的な列（`tenant_activity.updated_at` 等）。
  * - `packages/core/src/event-retention-purge.ts` の `purgeExpiredEventsForTenant` の
  *   `opts.now`（既定 `new Date()`）——`Runtime` のメソッドではなく
  *   `{ memoryStore, tenantSettingsStore }` だけを受け取る独立した部品であり、
- *   `RuntimeDeps.clock` を受け取らない（Issue #1237 コメント参照）。
+ *   `RuntimeDeps.clock` を受け取らない（Issue #1237 コメント参照）。この部品が積む
+ *   `events_purged` イベントの `at` も、Postgres では SQL の `now()` のまま。
  *
- * `MemoryStore.create{Observation,Memory}WithOutbox` の `opts`・`OutboxStore.complete`/`fail`
- * の `opts`・`NewRecallRecord.createdAt` はいずれも省略可能——省略すると実装は壁時計
+ * `MemoryStore.create{Observation,Memory}WithOutbox`・`supersedeWithNewMemories?` の `opts`・
+ * `requeueEmbedJobs` の `writeOpts`・`OutboxStore.complete`/`fail` の `opts`・
+ * `NewRecallRecord.createdAt` はいずれも省略可能——省略すると実装は壁時計
  * （`new Date()`）を使う（今日までと同じ挙動）。**型としては追加のみ**（ADR 0354「決めたこと」）。
  */
 export interface Clock {

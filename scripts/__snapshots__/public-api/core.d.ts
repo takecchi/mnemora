@@ -643,7 +643,9 @@ export interface MemoryStore {
     aggregateScope(ctx: Ctx, scope: RecallScope, opts?: AggregateScopeOptions): Promise<ScopeAggregate>;
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
-    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
+        now?: Date;
+    }): Promise<RequeueEmbedJobsResult>;
     supersedeWithNewMemories?(ctx: Ctx, news: ReadonlyArray<{
         input: NewMemory;
         jobKinds: OutboxJobKind[];
@@ -652,7 +654,9 @@ export interface MemoryStore {
         supersededByIndex: number;
         expectedStatus?: MemoryStatus;
         event: NewMemoryEvent;
-    }>): Promise<{
+    }>, opts?: {
+        now?: Date;
+    }): Promise<{
         created: Array<{
             memory: Memory;
             created: boolean;

@@ -79,6 +79,17 @@
      なる——測っていないことが緑ではなく skip として見える（`supportsRealConcurrency`
      と同じ形の判断）。
 
+  9. **`MemoryStore.supersedeWithNewMemories?`（任意メソッド）に末尾の引数
+     `opts?: { now?: Date }` を足す。** `news` に積む outbox 行の `availableAt`・`createdAt` に
+     使う。runtime は `reextract`・`consolidate` の優先経路でこの欄に、同じ操作のイベントの
+     `at` と同じ `clock.now()` の値を渡す。
+
+  10. **`MemoryStore.requeueEmbedJobs` に第3引数 `writeOpts?: { now?: Date }` を足す。**
+      積み直す embed ジョブの `availableAt`・`createdAt` に使う。`Runtime.reembed` はこの欄に
+      `clock.now()` を渡す。第2引数 `RequeueEmbedJobsOptions` は `Runtime.reembed` の公開の
+      入力と同じ型なので、時刻をそこへ足すと利用者が `reembed` に時刻を渡せるように見えてしまう
+      ——そのため別の引数にした。
+
 - **検討した代替案**:
 
   1. **Issue 本文の案2（`tick` の claim の `now` を壁時計にする）。**
@@ -95,13 +106,13 @@
      （既に必須）がある。どちらも「実装が壁時計を使わず、既存の引数をちゃんと使う」
      だけで直る——interface の破壊的変更どころか、宣言の変更すら不要だった。
 
-  4. **`supersedeWithNewMemories?`（任意メソッド、`reextract`/`consolidate` が優先して
-     使う経路）にも `opts.now` を足す。**
-     🔴 **今回は採らなかった**（下記「引き受けた負債」参照）——この口が積む outbox 行
-     （`news[].jobKinds`）の `availableAt`/`createdAt` は、本 ADR の後も壁時計のままである。
-     この口が積む `superseded`/`created` イベントの `at` は、`event: NewMemoryEvent`
-     （既に任意の `at`）を runtime 側が `clock.now()` で埋めるため、決めたこと7の対応で
-     直っている——直っていないのは outbox 行の2欄だけである。
+  4. **`supersedeWithNewMemories?`・`requeueEmbedJobs` を範囲の外に残す。**
+     ⛔ 採らなかった——実装の途中では `supersedeWithNewMemories?` の outbox 行を負債として
+     残す案だったが、PR の CI（`multitenant-isolation-e2e`・`time-weighting-seed-drain-race`）
+     と現物の読み直しで、この2つの口が outbox の `available_at` を SQL の `now()` で書き続けて
+     いることが分かった。過去の時計では `reextract`・`consolidate`・`reembed` の embed ジョブが
+     Issue #1237 と同じ理由で取られない。Issue の範囲（outbox の `availableAt`）の内側なので、
+     決めたこと9・10で直した。
 
 - **確かめたこと（変異試験、`AGENTS.md` の作法——`cp` で退避 → 変異 → 対象の歯が
   赤くなることを確認 → 復元）**:
@@ -114,49 +125,42 @@
   変異1・2とも、退避したファイルを `cp` で復元した後、同じ6件が緑に戻ることを実測した
   （`git status --porcelain` が空になることも確認）。
 
-  `packages/testkit` の conformance suite（`memory-store-conformance.ts`・
-  `outbox-store-conformance.ts`）に足した「渡した時刻を守る」歯・「省略時は壁時計」歯は、
-  実装（Postgres・testkit fixture）に対して緑であることを確認した——変異試験は上記の2本
-  （runtime 経由の統合的な歯）に絞り、conformance 側の個別の歯は「実装を直す前に赤かった
-  こと」を実測していない（後述「確かめていないこと」）。
+  `packages/testkit` の conformance suite に足した歯の赤も確かめた（2026-09-29）。
+  origin/main の実装に、この PR のテストファイルだけを写した別の作業ツリーで走らせた結果は次のとおり。
+
+  | 対象 | main の実装 | この PR |
+  |---|---|---|
+  | `in-memory-fixtures.conformance.test.ts` | 7 failed / 384 passed | 緑 |
+  | `conformance.postgres.test.ts` + `injected-clock-reach.postgres.test.ts` | 18 failed / 386 passed | 緑 |
+  | 決めたこと9・10 の歯（fixture） | 2 failed（`opts` を省略する歯は緑） | 緑 |
 
 - **引き受けた負債**:
 
-  1. **`supersedeWithNewMemories?` が積む outbox 行（`reextract`/`consolidate` の
-     優先経路）の `availableAt`/`createdAt` は、本 ADR の後も壁時計のままである**
-     （検討した代替案4）。この口を実装している adapter（`@mnemora/postgres`・
-     testkit fixture の両方）に対して `reextract`/`consolidate` を壁時計より過去の
-     時計で呼ぶと、その embed ジョブは Issue #1237 と同じ理由で `tick` に取られない
-     ——`observe`（`createObservationWithOutbox`/`createMemoryWithOutbox` を直接使う
-     経路）と `reflect`（`supersedeWithNewMemories` を使わない）は直っているが、
-     `reextract`/`consolidate` の embed ジョブだけこの穴が残る。
-
-  2. **`purgeExpiredEventsForTenant`（`packages/core/src/event-retention-purge.ts`）の
+  1. **`purgeExpiredEventsForTenant`（`packages/core/src/event-retention-purge.ts`）の
      `opts.now` は対象外のまま**（`RuntimeDeps.clock` を受け取らない部品であるため、
-     Issue 本文コメントが既に記録している範囲外）。
+     Issue 本文コメントが既に記録している範囲外）。この部品が積む `events_purged` イベントの
+     `at` も、Postgres では SQL の `now()` のままである。
 
-  3. **conformance suite に足した歯自体の「赤→緑」の変異試験は、実装（Postgres・
-     testkit fixture）に対する統合テスト（`injected-clock-reach.postgres.test.ts`）
-     でしか確認していない**——conformance の個別の歯（例:
-     `createObservationWithOutbox は opts.now を渡すと...`）を単独で意図的に壊して
-     赤くする変異試験は行っていない。
+  2. **補助の列は壁時計のまま**——`memories`・`tenant_settings`・`tenant_activity` の
+     `updated_at`、`memories.created_at`、`vector_embeddings.created_at`、ラベルの
+     `registered_at`、`recall_usages.used_at`（公開の口からは読まれない）。
+     `Clock` の TSDoc に、この範囲を明記した。
+
+  3. **テストのコメントに残る旧い前提**——`examples/chat` と `packages/postgres` のいくつかの
+     テストは、「`available_at` は DB の `now()` なので、runtime の時計を少し未来へ進める」と
+     書いて時計を進めている。今は不要な回避だが害は無いので、残した。
 
 - **これが覆るとしたら**:
 
-  - `reextract`/`consolidate` の embed ジョブが壁時計より過去の時計で取られない
-    ことが実運用で問題になったとき ⟹ `supersedeWithNewMemories?` にも
-    `opts?: { now?: Date }`（または `news[].jobKinds` と対にした個別の `now`）を
-    足す設計を検討する。
   - `purgeExpiredEventsForTenant` にも `RuntimeDeps.clock` を通したいという要求が
     出たとき ⟹ この部品のシグネチャ自体を見直す（`{ memoryStore,
     tenantSettingsStore }` だけを受け取る設計を変える）判断が要る。
 
 - **確かめていないこと**:
 
-  - `supersedeWithNewMemories?` を実装していない第三者 adapter での挙動（この口は
-    任意メソッドであり、実装しない adapter では `reextract`/`consolidate` は
-    フォールバック経路（`createMemoryWithOutbox` を直接呼ぶ、決めたこと2の対応が
-    届く経路）を通るため、そちらは直っているはずだが、実測はしていない）。
+  - `supersedeWithNewMemories?` を実装していない第三者 adapter での挙動（実装しない adapter では
+    `reextract`/`consolidate` はフォールバック経路（`createMemoryWithOutbox` を直接呼ぶ、
+    決めたこと2の対応が届く経路）を通るため、そちらは直っているはずだが、実測はしていない）。
   - 本番相当の規模・並行度での `opts.now`/`opts.at` 配線の性能影響（値を1つ追加で
     渡すだけであり、SQL の形は変えていないため影響は無いと考えているが、実測は
     していない）。

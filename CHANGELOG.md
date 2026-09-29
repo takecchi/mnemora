@@ -238,6 +238,9 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
   [ADR 0354](./docs/decisions/0354-inject-clock-into-store-writes.md)）——
   `MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox` の第4引数
   `opts?: { now?: Date }`（積む outbox 行の `availableAt`/`createdAt`）、
+  `MemoryStore.supersedeWithNewMemories?` の末尾の引数 `opts?: { now?: Date }`（同じ）、
+  `MemoryStore.requeueEmbedJobs` の第3引数 `writeOpts?: { now?: Date }`（積み直す embed
+  ジョブの `availableAt`/`createdAt`）、
   `OutboxStore.complete`/`fail` の末尾の引数 `opts?: { at?: Date }`
   （`completedAt`/`failedAt`）、`NewRecallRecord.createdAt?: Date`（`recalls` 行の
   `createdAt`）。**型の上では追加だけである**——構造的部分型の下では、既存の実装（この
@@ -259,7 +262,7 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
     （`packages/postgres/src/__tests__/injected-clock-reach.postgres.test.ts`）。
   - **移行の手順**:
     1. 自分の `MemoryStore`/`OutboxStore` 実装で、上に挙げた口の書き込みが
-       `opts.now`/`opts.at`/`record.createdAt`（省略時は `new Date()`）を実際に使うよう直す。
+       `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt`（省略時は `new Date()`）を実際に使うよう直す。
     2. `purgeMemory` の `purgedAt` を `event.at` に、`archiveDecayed` の `archived` の `at` を
        `opts.now` に揃える。
     3. `packages/testkit` の適合テストを実装に対して走らせ、緑になることを確認する

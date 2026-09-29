@@ -720,11 +720,14 @@ export class PostgresMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
+    opts?: { now?: Date },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
+    // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
+    const outboxNow = opts?.now ?? new Date();
     // 呼び手が壊れた索引を渡した場合は、トランザクションを開く前に落とす（ADR 0100）。
     // ⛔ `conflicted` にも「memory not found」にも混ぜない——3つとも別の失敗である。
     // 開く前に落とすので、`news` の作成も当然起きない。
@@ -823,9 +826,9 @@ export class PostgresMemoryStore implements MemoryStore {
               ${ctx.tenantId},
               ${kind},
               ${JSON.stringify({ memoryId: memory.id })}::jsonb,
-              now(),
+              ${toPgTimestamp(outboxNow)},
               0,
-              now()
+              ${toPgTimestamp(outboxNow)}
             )
             RETURNING *
           `);
@@ -1972,8 +1975,14 @@ export class PostgresMemoryStore implements MemoryStore {
    * 2つの呼び出しが同時に走っても、同じ Memory を二重に積み直さない（取ろうとして
    * いる行はスキップして次へ行く）。
    */
-  async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+  async requeueEmbedJobs(
+    ctx: Ctx,
+    opts: RequeueEmbedJobsOptions,
+    writeOpts?: { now?: Date },
+  ): Promise<RequeueEmbedJobsResult> {
     const target = buildRequeueEmbedTargetSelect(ctx, opts);
+    // Issue #1237: 積み直す embed ジョブの時刻。省略時は壁時計。
+    const outboxNow = writeOpts?.now ?? new Date();
     // `memoryIds` を渡されたのに well-formed な id が1つも残らなかった場合
     // （空集合との積）。問い合わせる意味が無い。
     if (target === null) {
@@ -1994,7 +2003,8 @@ export class PostgresMemoryStore implements MemoryStore {
       INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
       SELECT
         gen_random_uuid(), ${ctx.tenantId}, 'embed',
-        jsonb_build_object('memoryId', r.id), now(), 0, now()
+        jsonb_build_object('memoryId', r.id), ${toPgTimestamp(outboxNow)}, 0,
+        ${toPgTimestamp(outboxNow)}
       FROM requeued r
       RETURNING (payload->>'memoryId') AS memory_id
     `);

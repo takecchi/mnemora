@@ -579,8 +579,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     kind: OutboxJobKind,
     payload: Record<string, unknown>,
-    // Issue #1237: 既定は壁時計——呼び出し側（`supersedeWithNewMemories` 等、この Issue の
-    // 範囲外の口）が明示的に渡さない限り、今日と同じ挙動のまま。
+    // Issue #1237: 既定は壁時計——呼び出し側が時刻を明示的に渡さない限り、今日と同じ挙動のまま。
     now: Date = new Date(),
   ): OutboxJobRecord {
     const job: OutboxJobRecord = {
@@ -972,11 +971,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
+    opts?: { now?: Date },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
+    // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
+    const outboxNow = opts?.now ?? new Date();
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
     for (const target of supersede) {
@@ -1035,7 +1037,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           continue;
         }
         const jobs = jobKinds.map((kind) =>
-          this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }),
+          this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
         );
         created.push({ memory, created: true, jobs });
       }
@@ -1693,7 +1695,11 @@ export class InMemoryMemoryStore implements MemoryStore {
    * **`NotIndexedReason` が `EmbeddingStatus` の部分集合であることを型で確かめる**
    * ためでもある（どちらかに値が増えてこの包含が崩れたら、ここが赤くなる）。
    */
-  async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+  async requeueEmbedJobs(
+    ctx: Ctx,
+    opts: RequeueEmbedJobsOptions,
+    writeOpts?: { now?: Date },
+  ): Promise<RequeueEmbedJobsResult> {
     // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
     // 自身が例外を投げる（実測: `LIMIT must not be negative` / `invalid input syntax for
@@ -1729,11 +1735,13 @@ export class InMemoryMemoryStore implements MemoryStore {
       )
       .slice(0, opts.limit);
 
+    // Issue #1237: 積み直す embed ジョブの時刻。省略時は1回だけ壁時計を読む。
+    const outboxNow = writeOpts?.now ?? new Date();
     const memoryIds: MemoryId[] = [];
     for (const memory of targets) {
       memory.embeddingStatus = "pending";
       memory.updatedAt = new Date();
-      this.enqueueOutboxJob(ctx, "embed", { memoryId: memory.id });
+      this.enqueueOutboxJob(ctx, "embed", { memoryId: memory.id }, outboxNow);
       memoryIds.push(memory.id);
     }
     return { requeued: memoryIds.length, memoryIds };

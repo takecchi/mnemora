@@ -3201,6 +3201,83 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(await listEventsForMemory(ctx, oldConflicted.id)).toEqual([]);
       });
 
+      /**
+       * Issue #1237: `opts.now` を渡すと、news に積む outbox 行の `availableAt`・`createdAt` に
+       * その値を使う。壁時計のままだと、壁時計より過去の時計を注入した runtime の `tick` が、
+       * 訂正・統合で生まれた Memory の embed ジョブを取れない。
+       */
+      it("supersedeWithNewMemories は opts.now を渡すと、news の outbox 行の availableAt・createdAt にその値を使う", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2020-01-01T00:00:00.000Z");
+        const old = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "supersede-opts-now-old" }),
+        );
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "supersede-opts-now-new",
+              }),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, old.id, old.digest),
+            },
+          ],
+          { now },
+        );
+        const job = result.created[0]?.jobs[0];
+        expect({ availableAt: job?.availableAt, createdAt: job?.createdAt }).toEqual({
+          availableAt: now,
+          createdAt: now,
+        });
+      });
+
+      /** ⭐ 非破壊の確認: `opts` を省略すると、今日どおり壁時計になる。 */
+      it("supersedeWithNewMemories は opts を省略すると、news の outbox 行の availableAt・createdAt は壁時計になる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const startedAt = Date.now();
+        const old = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "supersede-wall-old" }),
+        );
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "supersede-wall-new",
+              }),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, old.id, old.digest),
+            },
+          ],
+        );
+        const job = result.created[0]!.jobs[0]!;
+        for (const at of [job.availableAt, job.createdAt]) {
+          expect(at.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+          expect(at.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+        }
+      });
+
       it("supersedeWithNewMemories は supersede 対象がそもそも存在しなければ throw し、news の作成も含めてロールバックする", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -7919,6 +7996,26 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         embeddingStatus: "pending",
         claimable: [memory.id],
       });
+    });
+
+    /**
+     * Issue #1237: 第3引数 `writeOpts.now` を渡すと、積み直した embed ジョブの `availableAt` に
+     * その値を使う——壁時計より過去の `now` で claim しても取れる。壁時計のままだと、過去の時計を
+     * 注入した runtime の `tick` は、`reembed` で積み直したジョブを取れない。
+     */
+    it("requeueEmbedJobs は writeOpts.now を渡すと、その時刻の claim で積み直したジョブが取れる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const past = new Date("2020-01-01T00:00:00.000Z");
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.setEmbeddingStatus(ctx, memory.id, "failed");
+
+      await store.requeueEmbedJobs(ctx, { statuses: ["failed"], limit: 10 }, { now: past });
+
+      const jobs = await claimEmbedJobs(ctx, past);
+      expect(
+        jobs.map((job) => ({ memoryId: job.payload.memoryId, availableAt: job.availableAt })),
+      ).toEqual([{ memoryId: memory.id, availableAt: past }]);
     });
 
     it("requeueEmbedJobs は pending の Memory も積み直せる（待っても解けない pending が在りうるため、ADR 0079）", async () => {

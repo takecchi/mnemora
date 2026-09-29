@@ -422,13 +422,15 @@ interface MemoryStore {
   createObservationWithOutbox(
     ctx: Ctx,
     input: NewObservation,
-    jobKinds: OutboxJobKind[]
+    jobKinds: OutboxJobKind[],
+    opts?: { now?: Date }
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
-    jobKinds: OutboxJobKind[]
+    jobKinds: OutboxJobKind[],
+    opts?: { now?: Date }
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -473,7 +475,11 @@ interface MemoryStore {
   ): Promise<ScopeAggregate>;
   createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
   getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
-  requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+  requeueEmbedJobs(
+    ctx: Ctx,
+    opts: RequeueEmbedJobsOptions,
+    writeOpts?: { now?: Date }
+  ): Promise<RequeueEmbedJobsResult>;
   supersedeWithNewMemories?(
     ctx: Ctx,
     news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
@@ -482,7 +488,8 @@ interface MemoryStore {
       supersededByIndex: number;
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
-    }>
+    }>,
+    opts?: { now?: Date }
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
@@ -1037,8 +1044,19 @@ interface OutboxStore {
    * `claimBatch`（または生成経路）から受け取った、まさにその `attempts` を渡す。
    * 一致しなければ {@link OutboxLeaseConflictError} を投げる。
    */
-  complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
-  fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void>;
+  complete(
+    ctx: Ctx,
+    jobId: string,
+    expectedAttempts: number,
+    opts?: { at?: Date }
+  ): Promise<void>;
+  fail(
+    ctx: Ctx,
+    jobId: string,
+    error: string,
+    expectedAttempts: number,
+    opts?: { at?: Date }
+  ): Promise<void>;
 }
 ```
 

@@ -135,7 +135,9 @@ export declare class PostgresMemoryStore implements MemoryStore {
         supersededByIndex: number;
         expectedStatus?: MemoryStatus;
         event: NewMemoryEvent;
-    }>): Promise<{
+    }>, opts?: {
+        now?: Date;
+    }): Promise<{
         created: Array<{
             memory: Memory;
             created: boolean;
@@ -162,7 +164,9 @@ export declare class PostgresMemoryStore implements MemoryStore {
     aggregateScope(ctx: Ctx, scope: RecallScope, opts?: AggregateScopeOptions): Promise<ScopeAggregate>;
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
-    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
+        now?: Date;
+    }): Promise<RequeueEmbedJobsResult>;
     archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory(ctx: Ctx, id: MemoryId, tombstone: {
         content: string;

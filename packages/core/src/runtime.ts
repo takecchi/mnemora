@@ -4054,6 +4054,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           // `meta.supersededById` は store が解決した id で埋める（上のコメント参照）。
           event: buildSupersedeEventFor(existing),
         })),
+        { now },
       );
 
       const memoryIds = result.created.map((c) => c.memory.id);
@@ -4830,7 +4831,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   async function reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
-    return deps.memoryStore.requeueEmbedJobs(ctx, opts);
+    return deps.memoryStore.requeueEmbedJobs(ctx, opts, { now: clock.now() });
   }
 
   /**
@@ -6216,6 +6217,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           expectedStatus: "active" as MemoryStatus,
           event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
         })),
+        { now },
       );
 
       const consolidated = result.created[0]!;
