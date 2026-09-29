@@ -70,12 +70,13 @@ export declare class OpenAIEmbeddingProvider implements EmbeddingProvider {
 }
 
 // ===== dist/errors.d.ts =====
-export type OpenAILLMFailureKind = "refusal" | "truncated" | "no_content";
+export type OpenAILLMFailureKind = "refusal" | "truncated" | "no_content" | "schema_unsupported";
 export interface OpenAILLMProviderErrorOptions {
     kind: OpenAILLMFailureKind;
     finishReason?: string | null;
     refusalMessage?: string | null;
     message?: string;
+    cause?: unknown;
 }
 export declare class OpenAILLMProviderError extends Error {
     readonly kind: OpenAILLMFailureKind;
