@@ -635,6 +635,19 @@ type GroupCount = {
 
 **Phase 1 の実装上の限界(2026-09 追記、本 PR)**: 上記は近似経路を持つことを前提に書かれているが、`MemoryStore.aggregateScope`(roadmap.md 段階4/5 の実装)は Phase 1 では**常に厳密集計のみ**を実装しており、近似経路(例えば `pg_stats`/`reltuples` に基づく安価な推定)は無い。**近似を要求するオプションも持たない**——以前は `RecallQuery.exactCounts` という欄が型に在ったが、値を受け取って黙って無視していた（呼び出し側は「頼んだ」と思い込める形だった）ため、[ADR 0024](./decisions/0024-remove-exact-counts-option.md) で**削除した**（「予約・未実装」と書き残すのではなく消した。理由は ADR を参照）。これは 100万件級のテナントで `aggregateScope` のコストが無視できなくなる可能性を先送りしたものであり、隠さずここに書く(PR 本文「設計上の疑義」参照)。（⚠ 2026-09-29 追記: 参照先の roadmap.md §2「段階4/5」は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L94-L110) にある。）
 
+> **⚠ 2026-09-30 訂正の追記（[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C）**:
+> 上の「近似を要求するオプションも持たない」は、もう成り立たない——**近似ではなく
+> 「止める」opt-in** を足した。`RecallQuery.scopeAggregate?: "exact" | "skip"`
+> （既定 `"exact"`、省略時と1バイトも変わらない）を渡すと、`aggregateScope` は
+> `count(*)`/`GROUP BY` を一切実行しなくなる（近似値を計算するのではなく、
+> **集計そのものをしない**）。`"skip"` のとき `countKind` は `'unknown'`、
+> `groups`/`totalInScope`/`filtered*` は空/0 になる——ADR 0024 が退けた
+> 「値を受け取って黙って無視する」失敗を繰り返さないよう、この欄を実装しない
+> adapter は `countKind: 'exact'` を返し続ける契約にしてある（ADR 0384「決めたこと」）。
+> ⛔ **上の「近似を要求するオプションも持たない」は消さない**（ADR 0213 決定5）
+> ——`"skip"` は近似ではなく「止める」であり、上の文が指していた「`pg_stats` 等に
+> 基づく安価な推定」は今も存在しない。
+
 ### `aggregateScope` の実測（2026-09 追記）
 
 上の「先送りにした」コストを、規模を振って測った（GitHub Actions run 34009301567、
@@ -807,6 +820,16 @@ ADR 0307。
 テナント全体を集計するコストの本体ではない。**1M行では測っていない**——上の表
 （100k→45.8ms、1M→408ms、いずれも旧い測定条件）と同じ規模で書き換え後を測ったら
 どうなるかは、本 ADR の射程外（ADR 0307「確かめていないこと」）。
+
+> **⚠ 2026-09-30 追記（[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
+> 「1M行では測っていない」を埋めた。100万行・`max_parallel_workers_per_gather=0`・
+> 同時1・warm で全体 **1305.6ms**（本体の `HashAggregate` は 1271〜1281ms——「支配項は
+> 消えていない」は1M行でもそのまま成り立つ）。同じ ADR は、支配項ではなく
+> **`digestBand`（`Seq Scan` + top-N `Sort`）側**に部分索引を足し（案A）、
+> 542.6ms→0.12ms（約4,500倍）に縮めた。⛔ **上の「支配項は消えていない」は消さない**
+> ——1M行の実測でも同じ結論だからである。**支配項そのものを止める** opt-in
+> （`RecallQuery.scopeAggregate: "skip"`、案C）も同時に足した——`"skip"` なら
+> 100万行でも p50 1.2ms（詳細は ADR 0384「測ったこと」）。
 
 ### `includeSubjectless` — subject X または主題なしを1回の recall で引く（Issue #608 項目③(b) / [ADR 0286](./decisions/0286-recall-include-subjectless.md)）
 

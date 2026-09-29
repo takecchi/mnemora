@@ -1751,6 +1751,24 @@ union 拡張一般の影響であり、この文書が破壊的変更として�
 ⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は1件
 （PR #1442・Issue #207・#933 PR2（ADR 0381））である。**
 
+⚠ **非破壊の追記（2026-09-30、[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、
+[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
+`aggregateScope` の目次帯（digestBand）まわりの性能改善で、新しい migration
+`0027_digest_band_index.sql` が1本増えた（部分索引 `idx_memories_digest_band` の
+追加のみ。列・型・SQL 文・返り値はどれも変えていない）。**この文書の定義では
+破壊的変更に数えない**——ここに書くのは、DB を更新する利用者向けの実務上の
+案内である。`RecallQuery.scopeAggregate?: "exact" | "skip"`（同 PR、既定 `"exact"`
+で1バイトも変わらない）は新しい任意の欄1つの追加のみで、DB マイグレーションは
+伴わない。
+
+**DB マイグレーション**: 新しい migration `0027_digest_band_index.sql` が1本増える
+（部分索引の追加のみ）。`v1.1.0` から上げる場合は `0026`〜`0027` の2本、
+`v1.0.2` からは `0023`〜`0027` の5本が要る。索引の構築は素の `CREATE INDEX`
+（`CONCURRENTLY` 不可、`packages/postgres/src/migrate.ts` が各 migration ファイルを
+1トランザクションで包むため）——対象テーブル（`memories`）に `ACCESS EXCLUSIVE`
+ロックを取る。本番適用時はこの停止時間を見込むこと（実測は ADR 0384「測ったこと」
+を見ること、規模ごとの構築時間は個別に測っていない）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
