@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type {
   Ctx,
   EmbeddingSpaceId,
@@ -72,20 +72,18 @@ async function withRelaxedOrderScan<T>(
   });
 }
 /**
- * `search()`/`searchMany()` の両方が使う `WHERE` 条件の組み立て。**同じヘルパーを
- * 両方から呼ぶことで、`filter` の翻訳が2箇所で食い違う経路を作らない**（Issue #377、
- * `VectorStore.searchMany?` の doc コメントが要求する「`search()` を単独で呼んだ場合と
- * 集合・順序ともに完全に一致する」契約の土台）。クエリベクトル自体はここでは扱わない
- * ——この関数が返す条件は `query`/`qvec` を一度も参照しない（`WHERE` はどれも
- * `filter` 由来で、距離での絞り込みは `ORDER BY`/`LIMIT` 側の仕事）。
+ * `search()`/`searchMany()` の両方が使う、`m.*`（memories 側）だけの `WHERE` 条件の
+ * 組み立て（ADR 0362、Issue #1181 の直しで `buildFilterConditions` から括り出した）。
+ * **`filter` の翻訳ロジックはこの1箇所だけに置く**——`e.tenant_id` 由来の条件（e 側）は
+ * ここに含まない（呼び出し側がクエリの形ごとに別に組み立てる。`buildFilterConditions`
+ * と `buildLateralMemoryConditions` の doc 参照）。
  *
- * Issue #1050: テナントは `filter.tenantId` と `ctx.tenantId` の**両方**で絞る（AND）。
- * 隔離の境界は `ctx.tenantId` である（ADR 0007）——`filter.tenantId` だけで絞ると、
- * 2つが食い違ったとき `filter` 側のテナントの行が返る。食い違えば0件になり、例外は
- * 投げない。歯は `__tests__/search-ctx-tenant-boundary.postgres.test.ts`。
+ * クエリベクトル自体はここでは扱わない——この関数が返す条件は `query`/`qvec` を
+ * 一度も参照しない（`WHERE` はどれも `filter` 由来で、距離での絞り込みは
+ * `ORDER BY`/`LIMIT` 側の仕事）。
  */
-function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
-  const conditions = [sql`e.tenant_id = ${filter.tenantId}`, sql`e.tenant_id = ${ctx.tenantId}`];
+function memoryOnlyConditions(filter: VectorFilter): SQL[] {
+  const conditions: SQL[] = [];
   if (filter.status !== undefined) {
     conditions.push(sql`m.status = ANY(${sql.param(filter.status)}::text[])`);
   }
@@ -173,6 +171,52 @@ function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
       sql`m.provenance_kind <> ALL(${sql.param(filter.excludeProvenanceKinds)}::text[])`,
     );
   }
+  return conditions;
+}
+
+/**
+ * `search()` が使う `WHERE` 条件の組み立て（Issue #377）。**この関数の戻り値は
+ * ADR 0362 の前後で1バイトも変えていない**——`e.tenant_id` の2条件を先頭に置き、
+ * 続けて `memoryOnlyConditions` をそのまま連ねるだけで、以前この関数が単体で
+ * 持っていたロジックと出力が完全に一致する（`memoryOnlyConditions` へ括り出した
+ * のは、`searchMany` が同じ `m.*` の翻訳を別の形（`buildLateralMemoryConditions`）
+ * でも使うため——翻訳ロジックの二重化を避ける。二重化するのは「どの条件を
+ * 添えるか」ではなく「e 側と m 側をどこで合流させるか」という、クエリの形に
+ * 固有の部分だけ）。
+ *
+ * Issue #1050: テナントは `filter.tenantId` と `ctx.tenantId` の**両方**で絞る（AND）。
+ * 隔離の境界は `ctx.tenantId` である（ADR 0007）——`filter.tenantId` だけで絞ると、
+ * 2つが食い違ったとき `filter` 側のテナントの行が返る。食い違えば0件になり、例外は
+ * 投げない。歯は `__tests__/search-ctx-tenant-boundary.postgres.test.ts`。
+ */
+function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
+  const conditions = [
+    sql`e.tenant_id = ${filter.tenantId}`,
+    sql`e.tenant_id = ${ctx.tenantId}`,
+    ...memoryOnlyConditions(filter),
+  ];
+  return sql.join(conditions, sql` AND `);
+}
+
+/**
+ * `searchMany` 専用（ADR 0362、Issue #1181）。`search()` の `JOIN memories m ON
+ * m.id = e.memory_id AND m.tenant_id = e.tenant_id` は、`searchMany` では
+ * `CROSS JOIN LATERAL (SELECT * FROM memories WHERE id = e.memory_id OFFSET 0) m`
+ * に置き換わる（`searchMany` の doc コメント、ADR 0362 参照）——`JOIN ... ON` が
+ * 無いため、テナント境界（`m.tenant_id = e.tenant_id`）はこの関数が明示的に足す。
+ * **これが無いと、統計の有無に関係なく他テナントの行が漏れうる**（Issue #1050 と
+ * 同じ境界。`__tests__/search-ctx-tenant-boundary.postgres.test.ts` が縛る）。
+ *
+ * `m.tenant_id = e.tenant_id` を **LATERAL の中ではなく外側の `WHERE` に置く**のが
+ * 唯一の正しい位置——LATERAL の中に足すと、プランナが `memories_pkey`
+ * （`id` 単独の一意索引）以外の索引（`idx_memories_recall_gate_seq` 等、
+ * `tenant_id` を先頭に持つ索引）も候補にでき、統計が無い場面で実際にそちらを
+ * 選んで Issue #1181 の欠陥（`m` を主キーで引かない）に戻ってしまう（ADR 0362
+ * 「実測」参照、実測で確認済み）。LATERAL の中身を `id = e.memory_id` **だけ**に
+ * 絞ることで、候補になり得る索引を `memories_pkey` 一択にする。
+ */
+function buildLateralMemoryConditions(filter: VectorFilter) {
+  const conditions = [sql`m.tenant_id = e.tenant_id`, ...memoryOnlyConditions(filter)];
   return sql.join(conditions, sql` AND `);
 }
 
@@ -353,12 +397,26 @@ export class PostgresVectorStore implements VectorStore {
    * 完全一致する）をそのまま実装する。
    *
    * **束ね方**: `VALUES` で `(query_idx, qvec)` の行を作り、各行に対して
-   * `LATERAL` で「その `qvec` を使った ANN 検索」を実行する。`LATERAL` の中身は
-   * `search()` の `SELECT`（`WHERE`/`ORDER BY`/`LIMIT`）と1文字も変えていない
-   * ——変わるのは、クエリベクトルの出どころがプレースホルダ1個（`queryLiteral`）
-   * から `q.qvec`（`VALUES` の列）になっただけである。`WHERE` 句は
-   * `buildFilterConditions`（`search()` と共有、関数の doc 参照）——クエリベクトルを
+   * `LATERAL` で「その `qvec` を使った ANN 検索」を実行する。`WHERE` 句の
+   * `filter` 翻訳（`m.*` 側）は `search()` と同じ `memoryOnlyConditions` を
+   * 共有する（`buildLateralMemoryConditions` 経由）——クエリベクトルを
    * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
+   *
+   * **⚠ ADR 0362（Issue #1181）: `memories` の JOIN の形だけは `search()` と違う。**
+   * `search()` は `JOIN memories m ON m.id = e.memory_id AND m.tenant_id =
+   * e.tenant_id` という素の JOIN を使うが、`searchMany` はここを
+   * `CROSS JOIN LATERAL (SELECT * FROM memories WHERE id = e.memory_id OFFSET 0) m`
+   * に変えている——**統計が無い小さいテナントで、`m` を主キー
+   * （`memories_pkey`）で引かせるため**（Issue #1181 本文・`buildLateralMemoryConditions`
+   * の doc コメント参照）。`OFFSET 0` は Postgres の伝統的な「最適化の柵」——
+   * この副問い合わせを外側へ引き上げず、`e` の行ごとに独立して評価させる。
+   * `id` は `memories` の一意な主キーなので、0行か1行を返す（`CROSS JOIN` は
+   * 0行なら該当する `e` の行を落とす——素の `INNER JOIN` と意味は変わらない）。
+   * テナント境界（`m.tenant_id = e.tenant_id`）は柵の**外**（`buildLateralMemoryConditions`
+   * が返す条件の中）に置く——柵の中に入れると `memories_pkey` 以外の索引
+   * （`tenant_id` を先頭に持つ索引）も候補になり得て、統計が無い場面で実際に
+   * そちらが選ばれ、Issue #1181 の欠陥に戻ってしまう（実測で確認済み。
+   * `buildLateralMemoryConditions` の doc コメント参照）。
    *
    * **key は SQL に送らない**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）: `VALUES` には
    * 送るクエリの添字（`0..n-1`）を送り、戻った行を、そのクエリの key へ引き直す。以前は key を `text` の
@@ -413,7 +471,11 @@ export class PostgresVectorStore implements VectorStore {
 
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    const whereClause = buildFilterConditions(ctx, opts.filter);
+    // `search()` と違い、`e` 側と `m` 側は別の場所で合流する（クラス doc コメント、
+    // ADR 0362 参照）——`e` 側はここでの素の `WHERE`、`m` 側は LATERAL の外側の
+    // `WHERE`（`buildLateralMemoryConditions`、テナント境界を含む）。
+    const embeddingConditions = sql`e.tenant_id = ${opts.filter.tenantId} AND e.tenant_id = ${ctx.tenantId}`;
+    const memoryConditions = buildLateralMemoryConditions(opts.filter);
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
     // key ではなく添字を送る（上の doc コメント、Issue #1285）。
@@ -433,8 +495,10 @@ export class PostgresVectorStore implements VectorStore {
               SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
                      m.recorded_at AS recorded_at
               FROM ${sql.identifier(table)} e
-              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-              WHERE ${whereClause} AND vector_norm(e.embedding) > 0
+              CROSS JOIN LATERAL (
+                SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
+              ) m
+              WHERE ${embeddingConditions} AND vector_norm(e.embedding) > 0 AND ${memoryConditions}
               ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
               LIMIT ${opts.limit}
             )
@@ -443,8 +507,10 @@ export class PostgresVectorStore implements VectorStore {
               SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
                      m.recorded_at AS recorded_at
               FROM ${sql.identifier(table)} e
-              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-              WHERE ${whereClause} AND vector_norm(e.embedding) = 0
+              CROSS JOIN LATERAL (
+                SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
+              ) m
+              WHERE ${embeddingConditions} AND vector_norm(e.embedding) = 0 AND ${memoryConditions}
               ORDER BY m.recorded_at DESC, e.memory_id
               LIMIT ${opts.limit}
             )
