@@ -1062,7 +1062,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は4件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は5件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`fd20e14`**（PR #1397）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
@@ -1256,6 +1256,25 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 **どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
 
 **DB マイグレーション**: 不要（スキーマは変えていない）。
+
+**⚠ 2026-09-29 追記**: 上の棚卸しの範囲（`fd20e14` まで）の**外**——着地に先立って変更を作った本人がこの節に足した1件——として、`@mnemora/postgres` に破壊的変更がもう1件確定した（[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、[ADR 0367](./decisions/0367-pgvector-capability-check.md)）。上の「2026-09-29 追記（20回目の棚卸し）」（項目19）・「2026-09-29 追記」（項目20）と同じ扱い——棚卸しの「PR を全部当てた」手順を経て足したものではない。下に項目22として足した（上の「🔴 破壊的変更」節の見出しの確定件数を5件に直した）。🔴 `fd20e14` からこの変更が着地するまでの間に他の PR が `main` へ入っている可能性があるが、それらを1本ずつ洗って分類する棚卸しはまだ行っていない。**次回の棚卸しで、この追記が数えていない範囲（`fd20e14`…この変更の着地点）を通しで数え直すこと。**
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は5件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、Issue #1301）になった。**
+
+### 22. `@mnemora/postgres` が、pgvector の `hnsw.iterative_scan` 対応を起動時に検査するようになった（`@mnemora/postgres`）
+
+[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、
+[ADR 0367](./decisions/0367-pgvector-capability-check.md)。
+
+**何が変わったか**: `PostgresVectorStore.search()`/`searchMany()`（インスタンスごとに初回の呼び出しでだけ）と `runMigrations`（`extensionMode` の `create`/`verify` 両方）が、pgvector が `hnsw.iterative_scan` の `relaxed_order`（[ADR 0284](./decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md)）に対応しているかを検査するようになった。対応していなければ、新しい `PgvectorVersionUnsupportedError` を投げる。**公開の型としては追加だけ**（新しいエラークラスの export）——中身・実測・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 今まで例外を投げずに進んでいた（0.5.x・PostgreSQL 15 未満）か、`recall()` の2回目の呼び出しから未分類の ERROR で落ちていた（0.6.0〜0.7.x × PostgreSQL 15 以上）構成が、この版からは `mnemora-postgres-migrate` の実行時、または `search()`/`searchMany()` の初回呼び出し時に、はっきりした型のエラーで落ちるようになる——実行時の振る舞いが変わるという意味での Breaking である（PR #1393・項目20 と同じ理由）。
+
+**誰が影響を受けるか**: pgvector が 0.8.0 未満、または `ALTER EXTENSION vector UPDATE;` をまだ実行していないために `hnsw.iterative_scan` が使えないままの環境。**判定は版の文字列ではなく能力で行うため、ライブラリが実際に 0.8.0 以上ある環境は、`pg_extension.extversion` が古く見えていても影響を受けない**（ADR 0367 決定2）。
+
+**どう直すか**: pgvector を 0.8.0 以上へ上げるか、`ALTER EXTENSION vector UPDATE;` を実行する。**検査を外すオプションは無い。**
+
+**DB マイグレーション**: 不要（スキーマは変えていない。検査は既存のマイグレーション適用の手順に相乗りする）。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

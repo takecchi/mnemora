@@ -10,6 +10,7 @@ import {
   runMigrations,
   stripCreateExtensionStatements,
 } from "../migrate.js";
+import { PgvectorVersionUnsupportedError } from "../pgvector-capability.js";
 
 /**
  * `extensionMode: "verify"`（ADR 0093）を **DB 無しで**検査する歯。
@@ -111,23 +112,61 @@ describe("MissingExtensionsError: メッセージに足りない拡張名と実�
 });
 
 /**
+ * `PGVECTOR_CAPABILITY_QUERY`（`../pgvector-capability.js`）にマッチしたときに返す、
+ * 「対応している」既定の1行。`vartype: "enum"` かつ `enumvals` に `relaxed_order` を含む
+ * ——本物の pgvector 0.8.0 で実測した形（ADR 0367）。
+ */
+const SUPPORTED_CAPABILITY_ROW = {
+  extversion: "0.8.0",
+  vartype: "enum",
+  enumvals: ["off", "relaxed_order", "strict_order"],
+};
+
+/**
  * `runMigrations` が発行した SQL を記録するだけの偽の `Pool`。
  * `../__tests__/migrate-default-path-unchanged.test.ts` と同じ形だが、
- * `pg_extension` への問い合わせだけ差し替えられた行を返せるようにしてある
+ * `pg_extension`（拡張の有無）と `PGVECTOR_CAPABILITY_QUERY`（能力検査、Issue #1301 /
+ * ADR 0367）への問い合わせだけ差し替えられた行を返せるようにしてある
  * （それ以外は今までどおり `{ rows: [] }`）。
+ *
+ * `capabilityRow` の既定は {@link SUPPORTED_CAPABILITY_ROW}（対応している）——
+ * この歯のほとんどは能力検査そのものを主題にしていないため、既定で通しておかないと
+ * 無関係な既存の歯まで `PgvectorVersionUnsupportedError` で落ちてしまう。
+ * `capabilityRow: undefined` を明示すれば「行が無い」（0.8 未満の代表的な形）を模せる。
  */
-function createFakePool(options: { extensionRows?: readonly string[] } = {}): {
+function createFakePool(
+  options: {
+    extensionRows?: readonly string[];
+    capabilityRow?: {
+      extversion: string | null;
+      vartype: string | null;
+      enumvals: string[] | null;
+    } | null;
+  } = {},
+): {
   pool: Pool;
   log: string[];
   connectCounter: { count: number };
 } {
   const log: string[] = [];
   const connectCounter = { count: 0 };
+  const capabilityRow =
+    options.capabilityRow === undefined ? SUPPORTED_CAPABILITY_ROW : options.capabilityRow;
+
+  const respond = (text: string): { rows: unknown[] } => {
+    if (/FROM pg_extension WHERE extname/.test(text)) {
+      return { rows: (options.extensionRows ?? []).map((extname) => ({ extname })) };
+    }
+    if (text.includes("pg_settings")) {
+      return { rows: capabilityRow === null ? [] : [capabilityRow] };
+    }
+    return { rows: [] };
+  };
 
   const client = {
     query: async (text: string) => {
       log.push(`client.query: ${text}`);
-      return { rows: [] };
+      return respond(text);
     },
     release: () => {},
     // `advisory-lock.ts`/`migrate.ts` が checked-out client に付け外しする空の
@@ -140,10 +179,7 @@ function createFakePool(options: { extensionRows?: readonly string[] } = {}): {
   const pool = {
     query: async (text: string) => {
       log.push(`pool.query: ${text}`);
-      if (/FROM pg_extension/.test(text)) {
-        return { rows: (options.extensionRows ?? []).map((extname) => ({ extname })) };
-      }
-      return { rows: [] };
+      return respond(text);
     },
     connect: async () => {
       connectCounter.count += 1;
@@ -219,5 +255,67 @@ describe("runMigrations({ extensionMode: 'verify' })", () => {
     expect(
       log.some((entry) => /CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA "public"/.test(entry)),
     ).toBe(true);
+  });
+});
+
+/**
+ * pgvector 能力検査（`PGVECTOR_CAPABILITY_QUERY`、Issue #1301 / ADR 0367）を
+ * `runMigrations` の `create`/`verify` 両モードで **DB 無しで**検査する歯。
+ * `capabilityRow: null` は「`pg_settings` に `hnsw.iterative_scan` の行が無い」
+ * ——0.8 未満（0.5.x・0.6〜0.7.x のいずれも、実測どおり行が現れない、Issue #1301 本文の表）
+ * を代表する形。
+ */
+describe("runMigrations: pgvector 能力検査（Issue #1301 / ADR 0367）", () => {
+  it("verify + 能力が無い: PgvectorVersionUnsupportedError を投げ、ロックもマイグレーションも一切発行しない", async () => {
+    const { pool, log, connectCounter } = createFakePool({
+      extensionRows: [...REQUIRED_EXTENSIONS],
+      capabilityRow: null,
+    });
+
+    const err = await runMigrations(pool, undefined, { extensionMode: "verify" }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(PgvectorVersionUnsupportedError);
+    const typed = err as PgvectorVersionUnsupportedError;
+    expect(typed.required).toBe("0.8.0");
+    expect(typed.missingCapability).toBe("hnsw.iterative_scan");
+
+    // 拡張の存在確認・能力検査の2問い合わせだけで決着している——advisory lock の取得
+    // （pool.connect）も、CREATE SCHEMA も、マイグレーション本文も一切発行していない。
+    expect(connectCounter.count).toBe(0);
+    for (const entry of log) {
+      expect(entry).not.toMatch(/CREATE (SCHEMA|TABLE)/);
+    }
+    expect(log.length).toBe(2);
+  });
+
+  it("verify + 能力が在る: extensionCheck が載り、エラーにならない（陰性対照）", async () => {
+    const { pool } = createFakePool({
+      extensionRows: [...REQUIRED_EXTENSIONS],
+      capabilityRow: { extversion: "0.8.0", vartype: "enum", enumvals: ["off", "relaxed_order"] },
+    });
+
+    const result = await runMigrations(pool, undefined, { extensionMode: "verify" });
+    expect(result.extensionCheck).toEqual({ verified: REQUIRED_EXTENSIONS });
+  });
+
+  it("create（既定）+ 能力が無い: マイグレーション本文は流れた上で PgvectorVersionUnsupportedError を投げる", async () => {
+    const { pool, log } = createFakePool({ capabilityRow: null });
+
+    const err = await runMigrations(pool).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(PgvectorVersionUnsupportedError);
+    // Issue #1301 / ADR 0367 決定4: `create` モードは、新規インストールでは拡張自体が
+    // マイグレーション本文（0001_init.sql）で初めて作られるため、「何も適用しないうちに
+    // 投げる」を保証できない——本文は実際に流れた上で、最後に能力検査が落ちることを示す
+    // （`verify` モードとの違いを、この歯自身が対照として固定する）。
+    expect(log.some((entry) => entry.includes("CREATE TABLE observations"))).toBe(true);
+  });
+
+  it("create（既定）+ 能力が在る: エラーにならない（陰性対照。`extensionRows` 未指定でも `pg_extension` の extname 問い合わせは create モードでは発行されないため無関係）", async () => {
+    const { pool } = createFakePool();
+    const result = await runMigrations(pool);
+    expect(result.applied.length).toBeGreaterThan(0);
   });
 });
