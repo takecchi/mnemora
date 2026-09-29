@@ -395,6 +395,32 @@ export interface VectorStore {
    */
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
   /**
+   * `ctx.tenantId` に属する `memoryIds` の埋め込み行を、この adapter が持つ**全 space**
+   * （`upsert`/`search` が `space` ごとに別々に区切っている単位のすべて）から消す
+   * （Issue #1425、[ADR 0382](../../../../docs/decisions/0382-vector-store-delete-across-spaces.md)）。
+   *
+   * **必須メソッドである。** `Runtime.purge` が埋め込みモデルを移した後も残る旧 space の
+   * 行を後始末するには、呼び出し側（`packages/core`）が「このテナントが過去に使った
+   * space の一覧」を持たずに済む形——adapter 自身が知っている全 space を対象にする形
+   * ——が要る。任意メソッドにすると、対応していない adapter では別 space の embedding が
+   * 結局消えないという限界が残る（ADR 0382「検討した代替案」参照）。
+   *
+   * **契約**:
+   * - 対象の行が存在しなければ何もしない（`void`、べき等）——`delete` と同じ
+   *   「無い」の扱い。
+   * - `memoryIds` に adapter の期待する形式でない id が混ざっていても、その id は
+   *   「存在しない」の一種として扱い、例外を投げない（`delete` の `isUuidLike` と
+   *   同じ規律）。
+   * - `ctx.tenantId` に属さない行は消さない——他テナントの行が偶然同じ `memoryId` を
+   *   持っていても触れない（`search`/`getVectors` と同じテナント境界）。
+   * - `memoryIds` が空配列なら、何もせずに返る（往復を発生させる必要は無い）。
+   * - 実装がテーブルを space ごとに分けていない（1テーブルに全 space を持つ）場合、
+   *   このメソッドは実質 `delete` の全 space 版と同じ1回の削除になってよい——契約が
+   *   要求するのは「呼び出し側が space を知らなくても全 space から消える」ことだけで、
+   *   実装がテーブルを何本持つかは関知しない。
+   */
+  deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+  /**
    * アンカーとなる Memory のベクトルをまとめて取得する（連想枠、Issue #200）。
    *
    * **任意メソッドである。**`MemoryStore.purgeMemory?`/`purgeExpiredEvents?`/

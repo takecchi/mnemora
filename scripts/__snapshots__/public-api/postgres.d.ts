@@ -40,6 +40,7 @@ export declare function sha256Hex(content: string): string;
 
 // ===== dist/embedding-space-table.d.ts =====
 import type { EmbeddingSpaceId } from "@mnemora/core";
+export declare const EMBEDDING_SPACE_TABLE_PREFIX = "memory_embeddings_";
 export declare function embeddingSpaceTableName(space: EmbeddingSpaceId): string;
 export declare function embeddingSpaceIndexName(space: EmbeddingSpaceId): string;
 export declare function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string;
@@ -2336,5 +2337,6 @@ export declare class PostgresVectorStore implements VectorStore {
         filter: VectorFilter;
     }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
+    deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
     getVectors(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }

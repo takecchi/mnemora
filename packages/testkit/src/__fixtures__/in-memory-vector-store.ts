@@ -352,6 +352,26 @@ export class InMemoryVectorStore implements VectorStore {
     this.entries.delete(this.key(space, ctx.tenantId, memoryId));
   }
 
+  /**
+   * `ctx.tenantId` に属する `memoryIds` の行を、**この store が持つ全 space**（`key()` が
+   * 区切る単位のすべて）から消す（Issue #1425、ADR 0382）。`key` は
+   * `[provider, model, dimensions, tenantId, memoryId]` の組から作られるが、この store は
+   * `entries` の値自身にも `tenantId`/`memoryId` を平文で持つ（`key()` を JSON.parse し
+   * 直す必要が無い）——`tenantId`/`memoryId` の一致だけを見て、space（key の先頭3要素）は
+   * 問わない。
+   */
+  async deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    if (memoryIds.length === 0) {
+      return;
+    }
+    const idSet = new Set<MemoryId>(memoryIds);
+    for (const [key, entry] of this.entries) {
+      if (entry.tenantId === ctx.tenantId && idSet.has(entry.memoryId)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
   async getVectors(
     ctx: Ctx,
     space: EmbeddingSpaceId,

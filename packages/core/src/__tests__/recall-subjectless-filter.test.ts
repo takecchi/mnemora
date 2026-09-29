@@ -203,6 +203,13 @@ class IncludeSubjectlessIgnoringVectorStore implements VectorStore {
     return this.inner.delete(ctx, space, memoryId);
   }
 
+  deleteAcrossSpaces(
+    ctx: Ctx,
+    memoryIds: Parameters<VectorStore["deleteAcrossSpaces"]>[1],
+  ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+    return this.inner.deleteAcrossSpaces(ctx, memoryIds);
+  }
+
   search(
     ctx: Ctx,
     space: EmbeddingSpaceId,
@@ -263,6 +270,13 @@ class SubjectFilterStrippingVectorStore implements VectorStore {
     memoryId: Parameters<VectorStore["delete"]>[2],
   ): ReturnType<VectorStore["delete"]> {
     return this.inner.delete(ctx, space, memoryId);
+  }
+
+  deleteAcrossSpaces(
+    ctx: Ctx,
+    memoryIds: Parameters<VectorStore["deleteAcrossSpaces"]>[1],
+  ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+    return this.inner.deleteAcrossSpaces(ctx, memoryIds);
   }
 
   search(
@@ -388,6 +402,13 @@ class AssociationSubjectFilterStrippingVectorStore implements VectorStore {
     memoryId: Parameters<VectorStore["delete"]>[2],
   ): ReturnType<VectorStore["delete"]> {
     return this.inner.delete(ctx, space, memoryId);
+  }
+
+  deleteAcrossSpaces(
+    ctx: Ctx,
+    memoryIds: Parameters<VectorStore["deleteAcrossSpaces"]>[1],
+  ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+    return this.inner.deleteAcrossSpaces(ctx, memoryIds);
   }
 
   getVectors(

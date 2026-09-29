@@ -1532,6 +1532,64 @@ PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
 2026-09-30 追記）、PR #1431・Issue #933）になった。**
 
+⚠ **項目28・29 は、この節の作成時点で並行して進めている別の PR が使う番号である。**
+本項目（30）はそれらより後に番号を振ったが、着地の順序はまだ決まっていない——
+着地時点でマネージャーが並びを確認し、必要なら番号を付け替える
+（[ADR 0179](./decisions/0179-adr-number-assigned-at-merge.md) と同じ「マージ直前に
+確定させる」規律。付け替える場合は [ADR 0200](./decisions/0200-adr-renumber-warns-when-titles-need-fixing.md)
+の道具に従うこと）。
+
+### 30. `VectorStore` に必須メソッド `deleteAcrossSpaces` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)、
+[ADR 0382](./decisions/0382-vector-store-delete-across-spaces.md)。**この項目は、上の
+棚卸しの範囲の外——ADR 0375 決定5が切り出した未決事項に対する、この節に足す1件である。**
+
+**何が変わったか**: `@mnemora/core` の `VectorStore` interface に、新しい**必須**メソッド
+`deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>` が増えた。
+`ctx.tenantId` に属する `memoryIds` の行を、その adapter が持つ**全 space**（`upsert`/
+`search`/`delete` が `space` 引数で区切る単位のすべて）から消す——`delete` と違い
+`space` 引数を受け取らない。`Runtime.purge` は、`purgeMemory` 成功後・および
+`already_purged`（`dryRun` を除く）のベストエフォートの埋め込み削除を、
+`deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)`（今の1つの space だけ）
+から `deps.vectorStore.deleteAcrossSpaces(ctx, [id])`（全 space）へ置き換えた。
+`PostgresVectorStore`・`@mnemora/testkit` の `InMemoryVectorStore`・
+`@mnemora/core` のテスト用 `FakeVectorStore` は、いずれもこの新しいメソッドを実装する。
+中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`
+（「`VectorStore` に `deleteAcrossSpaces` を足した」の項目）を見ること。
+**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: `VectorStore` interface に必須メソッドが増えたため、
+自前で `VectorStore` を実装している第三者 adapter は、この新しいメソッドを実装
+しなければ型検査に落ちる——項目1・5・12・14・16 と同じ「interface に必須メソッドが
+増えた」族（このファイル冒頭の「破壊的変更の数え方」参照）。`packages/testkit` の
+`describeVectorStoreConformance` にも、`deleteAcrossSpaces` の契約（複数 space から
+消える・他テナントの行は消えない・存在しない/形式不正な id・空配列は no-op）を
+検査する歯を足した——省略可能なオプションにしていない（`VectorStoreConformanceOptions`
+自体は1つも増やしていない。upsert したベクトルが実際に使う `space`/`spaceB` を
+そのまま流用できたため——`prepareEmbeddingSpace` フックは ADR 0065 から既に在る）。
+
+**誰が影響を受けるか**: 自前の `VectorStore` 実装（第三者 adapter）を持つ利用者は、
+`deleteAcrossSpaces` を実装しない限り型検査に落ちる——**必ず対応が要る**（任意
+メソッドの追加とは異なる）。`packages/testkit` の conformance suite を自分の
+`VectorStore` 実装に対して走らせている利用者は、この新しいメソッドの契約を満たさな
+ければ conformance suite が新しく落ちる。`@mnemora/postgres`・`@mnemora/testkit`の
+`InMemoryVectorStore`・`Runtime.purge` をそのまま使っているだけの利用者は、型・
+実行時のどちらも変える必要はない（参照実装が既に対応済み）——purge の埋め込み削除の
+対象が「今の space だけ」から「全 space」に広がるという**実行時の振る舞いの変化**
+だけを受ける。
+
+**どう直すか**: 自前の `VectorStore` 実装に `deleteAcrossSpaces` を足す。`upsert`/
+`search`/`delete` が管理している「space ごとの区切り」を、adapter 自身の内部データ
+構造から辿れる形（例えば `packages/postgres` はカタログを読んでテーブルを列挙する、
+`packages/testkit`/core の Fake は保持している全エントリを tenantId/memoryId だけで
+フィルタする）で実装すること。`packages/postgres/src/vector-store.ts` の
+`deleteAcrossSpaces` の doc コメント（列挙の3条件とその理由）を実装の参考にできる。
+
+**DB マイグレーション**: 不要（新しい列・表は追加していない。`PostgresVectorStore`
+の実装はカタログ（`pg_class`/`pg_constraint`/`pg_attribute`）を読むだけで、
+`registerEmbeddingSpace` が作るテーブルの形（外部キー付き）は変えていない）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

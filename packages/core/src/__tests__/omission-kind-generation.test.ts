@@ -154,6 +154,12 @@ class CappedVectorStore implements VectorStore {
   delete(...args: Parameters<VectorStore["delete"]>): ReturnType<VectorStore["delete"]> {
     return this.inner.delete(...args);
   }
+
+  deleteAcrossSpaces(
+    ...args: Parameters<VectorStore["deleteAcrossSpaces"]>
+  ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+    return this.inner.deleteAcrossSpaces(...args);
+  }
 }
 
 /**

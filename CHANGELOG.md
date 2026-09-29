@@ -702,6 +702,114 @@ PR #1393・Issue #1232）になった。**
   **DB マイグレーション**: 不要（既存の索引 `idx_memories_claim_key` は `status` を条件に
   含めない汎用索引であり、そのまま使える——新しい migration は追加していない）。
 
+**⚠ 2026-09-30 追記29**: 上の棚卸しとは別に、着地に先立って変更を作った本人がこの節へ
+足した項目（上の追記19・20・28 と同じ扱い）。[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)、
+[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)。
+
+- **`@mnemora/core` の `VectorStore` interface に、新しい**必須**メソッド
+  `deleteAcrossSpaces` が増えた——自前で `VectorStore` を実装している人へ**
+  （[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)、
+  [ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)）。
+
+  `Runtime.purge` は、`purgeMemory` の成功後・および既に purge 済み（`already_purged`）
+  だった場合のベストエフォートの埋め込み削除を、これまで
+  `deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)`（**今の**
+  `embeddingProvider.space` という**1つの空間**だけ）に対して行っていた。埋め込み
+  モデルを移した（`EmbeddingSpaceId` の `provider`/`model`/`dimensions` の組を変えた）
+  後、旧 space に残っている embedding 行は purge の対象外のまま残っていた——本文から
+  作ったベクトルが、purge の後も残る欠陥（[Issue #995](https://github.com/takecchi/mnemora/issues/995)
+  が最初に指摘、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md) 決定5が
+  「口が無い」として Issue #1425 に切り出していた）。
+
+  **`VectorStore` に新しい必須メソッドを足した**:
+
+  ```ts
+  deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+  ```
+
+  `ctx.tenantId` に属する `memoryIds` の行を、その adapter が持つ**全 space**
+  （`upsert`/`search`/`delete` が `space` 引数で区切る単位のすべて）から消す——
+  `delete` と違い `space` 引数を受け取らない。契約: 対象の行が無ければ何もしない
+  （べき等）、形式不正な `memoryId` も例外を投げない（`delete` と同じ規律）、
+  `ctx.tenantId` に属さない行は消さない、`memoryIds` が空配列なら何もしない。
+
+  `Runtime.purge` は、`vectorStore.delete(...)` を呼んでいた2箇所（`"purged"` に
+  なった直後、および `MemoryPurgeConflictError` の再読で `"already_purged"` と
+  分かった直後）を `vectorStore.deleteAcrossSpaces(ctx, [id])` に置き換えた。
+  **加えて、CAS の初回チェックで `"already_purged"` と分かった場合（再読を経ない
+  経路）でも、`opts.dryRun` が `false`（省略時を含む）ならベストエフォートで
+  `deleteAcrossSpaces` を呼ぶようになった**——既に purge 済みの記憶を、埋め込み
+  モデルを移した後に再実行すると、旧 space に残った embedding をその再実行で
+  後始末できる。`dryRun: true` のときは呼ばない。`PurgeOutcome`/`PurgeResult` の
+  型・`kind` の意味は変えていない——埋め込みの削除はベストエフォートの副作用のまま。
+
+  **`runtime.ts` の embed ジョブが purge と競合したときの後始末**
+  （[Issue #1035](https://github.com/takecchi/mnemora/issues/1035) / ADR 0124 決定5）
+  **は変えていない**——このジョブは常に今の `embeddingProvider.space` にしか
+  書いておらず、消すべきものも「そのジョブが今の space に書いたばかりの1行」
+  だけなので、全 space を対象にした `deleteAcrossSpaces` に広げる理由が無い。
+
+  **`@mnemora/postgres` の実装**（`PostgresVectorStore.deleteAcrossSpaces`）は、
+  1つのトランザクションの中で、カタログ（`pg_class`/`pg_constraint`/`pg_attribute`）
+  から対象テーブルを列挙し、テーブルごとに `DELETE FROM <t> WHERE tenant_id = $1
+  AND memory_id = ANY($2)` を打つ——`packages/postgres` は space ごとに別テーブル
+  という設計（[ADR 0002](./docs/decisions/0002-embedding-space-tables.md)）なので、
+  「このテナントが使った space の一覧」を別の台帳として持たない。列挙の条件は3つ:
+  (1) `current_schema()` の中のテーブルだけ（スキーマを跨がない）、(2) テーブル名が
+  `memory_embeddings_` で始まる、(3) `memory_id` 列が同じスキーマの `memories(id)`
+  を外部キーで参照している——利用者が同じ命名慣習で作った無関係なテーブルを
+  巻き込まない。`registerEmbeddingSpace` が作るテーブルは、この3条件をすべて満たす。
+
+  **`@mnemora/testkit` の `InMemoryVectorStore`・`@mnemora/core` のテスト用
+  `FakeVectorStore`** は、保持している全エントリを `tenantId`/`memoryId` の一致だけで
+  フィルタして消す（space を問わない）。
+
+  **なぜ破壊的か**: `VectorStore` interface に必須メソッドが増えたため、自前で
+  `VectorStore` を実装している第三者 adapter は、この新しいメソッドを実装しなければ
+  型検査に落ちる。**必須メソッドにした理由**: 任意メソッドにすると、対応していない
+  adapter では別 space の embedding が結局消えないという、Issue #1425 が指摘した
+  欠陥そのものが残ってしまうため（ADR 0382「決定」1参照）。**v1.X.0 での破壊的変更は
+  オーナーが許可済み**（ask_human `6911db12`）。
+
+  `packages/testkit` の `describeVectorStoreConformance` にも、`deleteAcrossSpaces`
+  の契約（複数 space から消える・他テナントの行は消えない・存在しない/形式不正な
+  id・空配列は no-op）を検査する歯を足した——`VectorStoreConformanceOptions` 自体は
+  増やしていない（space をまたぐ歯に必要な2つ目の space は、ADR 0065 から既に在る
+  `prepareEmbeddingSpace` フックをそのまま使えたため）。
+
+  **誰が影響を受けるか**:
+  - 🔴 **自前の `VectorStore` 実装（第三者 adapter）を持つ利用者は、
+    `deleteAcrossSpaces` を実装しない限り型検査に落ちる**——必ず対応が要る
+    （任意メソッドの追加とは異なる）。
+  - `packages/testkit` の conformance suite を自分の `VectorStore` 実装に対して
+    走らせている利用者は、この新しいメソッドの契約を満たさなければ conformance
+    suite が新しく落ちる。
+  - ⭕ `@mnemora/postgres`・`@mnemora/testkit` の `InMemoryVectorStore`・
+    `Runtime.purge` をそのまま使っているだけの利用者は、型・実行時のどちらも
+    変える必要はない（参照実装が既に対応済み）——purge の埋め込み削除の対象が
+    「今の space だけ」から「全 space」に広がるという**実行時の振る舞いの変化**
+    だけを受ける。
+
+  **移行の手順**: 自前の `VectorStore` 実装に `deleteAcrossSpaces` を足す。`upsert`/
+  `search`/`delete` が管理している「space ごとの区切り」を、adapter 自身の内部
+  データ構造から辿れる形で実装すること。`packages/postgres/src/vector-store.ts` の
+  `deleteAcrossSpaces` の doc コメント（列挙の3条件とその理由）を実装の参考にできる。
+
+  **DB マイグレーション**: 不要（新しい列・表は追加していない）。
+
+  **陽性対照（実測）**: `packages/postgres/src/__tests__/purge-across-spaces.postgres.test.ts`。
+  列挙の条件3（外部キー）を確かめる JOIN・WHERE 句を外す変異で、`memories(id)` を
+  参照していない利用者のテーブルの行まで消えてしまい対応する歯が赤くなることを
+  確認した。列挙の条件1（`current_schema()`）の絞りを外す変異で、別スキーマにしか
+  無い space のテーブル名まで列挙してしまい、`DELETE` が「relation does not exist」
+  で例外になって対応する歯が赤くなることを確認した（2つのスキーマに**同じ名前**の
+  embedding テーブルがあるだけの構成では、`DELETE` 文が未修飾の識別子で
+  `search_path` 任せに解決されるため、この変異は赤くならなかった——別スキーマに
+  **しか無い**名前のテーブルを使う歯だけが、実際にこの条件の効果を検査できる。
+  詳細は ADR 0382「確かめたこと」参照）。`InMemoryVectorStore.deleteAcrossSpaces` を
+  「今の space だけを消す」ように壊す変異で、testkit の conformance の歯が赤くなる
+  ことも確認した。いずれも戻すと緑に戻った。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
