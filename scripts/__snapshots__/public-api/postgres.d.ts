@@ -44,6 +44,7 @@ export declare const EMBEDDING_SPACE_TABLE_PREFIX = "memory_embeddings_";
 export declare function embeddingSpaceTableName(space: EmbeddingSpaceId): string;
 export declare function embeddingSpaceIndexName(space: EmbeddingSpaceId): string;
 export declare function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string;
+export declare function embeddingSpaceMemoryIdIndexName(space: EmbeddingSpaceId): string;
 export declare function assertSafeIdentifier(identifier: string): void;
 
 // ===== dist/event-store.d.ts =====
@@ -95,7 +96,7 @@ export declare class PostgresLexicalStore implements LexicalStore {
 
 // ===== dist/memory-store.d.ts =====
 import type { SQL } from "drizzle-orm";
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresMemoryStore implements MemoryStore {
     private readonly db;
@@ -280,6 +281,8 @@ export declare class PostgresMemoryStore implements MemoryStore {
     }>;
     listLabels(ctx: Ctx): Promise<LabelSummary[]>;
     registerLabel(ctx: Ctx, name: string): Promise<LabelSummary>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
+    private eraseTenantBody;
 }
 export declare function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL;
 export declare function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOptions): SQL | null;
@@ -346,7 +349,7 @@ export declare function runAnalyzeMemories(pool: Pool, options?: AnalyzeMemories
 export declare const DEFAULT_MIGRATIONS_DIR: string;
 
 // ===== dist/outbox-store.d.ts =====
-import { type ClaimOutboxJobsOptions, type Ctx, type OutboxJobRecord, type OutboxStore } from "@mnemora/core";
+import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresOutboxStore implements OutboxStore {
     private readonly db;
@@ -359,6 +362,7 @@ export declare class PostgresOutboxStore implements OutboxStore {
         at?: Date;
     }): Promise<void>;
     private raiseIfLeaseConflict;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 // ===== dist/pgvector-capability.d.ts =====
@@ -2258,7 +2262,7 @@ export declare const memoryLabels: import("drizzle-orm/pg-core").PgTableWithColu
 }>;
 
 // ===== dist/tenant-settings-store.d.ts =====
-import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
+import type { Ctx, DecayClock, EraseTenantResult, EraseTenantStoreOptions, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresTenantSettingsStore implements TenantSettingsStore {
     private readonly db;
@@ -2275,6 +2279,7 @@ export declare class PostgresTenantSettingsStore implements TenantSettingsStore 
     getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
     getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 // ===== dist/trigram-lexical-store.d.ts =====
@@ -2347,7 +2352,7 @@ export declare class RegisterEmbeddingSpaceLockUnavailableError extends Advisory
 export declare function registerEmbeddingSpace(pool: Pool, space: EmbeddingSpaceId, options?: RegisterEmbeddingSpaceOptions): Promise<RegisterEmbeddingSpaceResult>;
 
 // ===== dist/vector-store.d.ts =====
-import type { Ctx, EmbeddingSpaceId, MemoryId, VectorEntry, VectorFilter, VectorHit, VectorStore } from "@mnemora/core";
+import type { Ctx, EmbeddingSpaceId, EraseTenantResult, EraseTenantStoreOptions, MemoryId, VectorEntry, VectorFilter, VectorHit, VectorStore } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresVectorStore implements VectorStore {
     private readonly db;
@@ -2368,5 +2373,6 @@ export declare class PostgresVectorStore implements VectorStore {
     }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
     getVectors(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }

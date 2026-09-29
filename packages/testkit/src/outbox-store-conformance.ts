@@ -53,6 +53,18 @@ export interface OutboxStoreConformanceOptions {
    * 測るのは単一プロセス内の複数接続までである。
    */
   supportsRealConcurrency?: boolean;
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
+   * `OutboxStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * `memory-store-conformance.ts` の `supportsArchiveDecayed`/`supportsPurgeMemory` 等と
+   * 同じ判断——省略可にしないこと。`true` なら契約の歯（このテナントの outbox 行
+   * （完了・失敗・未処理を問わず）を消す、他テナントは無傷のまま残る、
+   * `limit`/`reachedLimit`（保守的な近似）・呼び直せば最終的に全部消える、`dryRun` で
+   * 1行も変わらない）を実行する。`false` なら `expect(store.eraseTenant).toBeUndefined()`
+   * を積極的に assert する——`it.skip` にはしない。
+   */
+  supportsEraseTenant: boolean;
 }
 
 /**
@@ -116,7 +128,8 @@ const CONCURRENT_CLAIM_ROUNDS = 10;
  *   （`claimed_at IS NULL` だけにする案を却下した理由そのもの——見えない停止にしない）。
  */
 export function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void {
-  const { name, createStore, seedJob, peekJob, supportsRealConcurrency } = options;
+  const { name, createStore, seedJob, peekJob, supportsRealConcurrency, supportsEraseTenant } =
+    options;
 
   describe(`OutboxStore conformance (${name})`, () => {
     it("claimBatch は available_at <= now の未処理ジョブを返す", async () => {
@@ -590,5 +603,91 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       // 失敗時に「何ラウンドで、どの id が重複したか」が出るように、まとめて比較する。
       expect({ duplicateRounds, samples }).toEqual({ duplicateRounds: 0, samples: [] });
     });
+
+    // -------------------------------------------------------------------
+    // eraseTenant（Issue #1207 / ADR 0383: テナント消去、任意メソッド）
+    // -------------------------------------------------------------------
+    if (supportsEraseTenant) {
+      it("eraseTenant はテナントの outbox 行を消し、他テナントは無傷のまま残す", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "erase-tenant-a" };
+        const ctxB: Ctx = { tenantId: "erase-tenant-b" };
+        await seedJob(ctxA, { kind: "extract" });
+        await seedJob(ctxA, { kind: "embed" });
+        await seedJob(ctxB, { kind: "extract" });
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000 });
+        expect(result.deleted).toBeGreaterThan(0);
+        expect(result.reachedLimit).toBe(false);
+
+        const claimedA = await store.claimBatch(ctxA, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimedA).toEqual([]);
+
+        const claimedB = await store.claimBatch(ctxB, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimedB.length).toBeGreaterThanOrEqual(1);
+      });
+
+      it("eraseTenant は limit に達すると reachedLimit: true を返し、同じ opts で呼び直すと最終的に全部消える", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-limit" };
+        for (let i = 0; i < 5; i++) {
+          await seedJob(ctx, { kind: "extract" });
+        }
+
+        const opts = { limit: 2 };
+        let result = await store.eraseTenant!(ctx, opts);
+        expect(result.reachedLimit).toBe(true);
+
+        let guard = 0;
+        while (result.reachedLimit) {
+          if (++guard > 20) {
+            throw new Error(
+              "eraseTenant did not converge after 20 retries — possible infinite loop",
+            );
+          }
+          result = await store.eraseTenant!(ctx, opts);
+        }
+
+        const claimed = await store.claimBatch(ctx, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimed).toEqual([]);
+      });
+
+      it("eraseTenant は dryRun: true のとき、削除件数を返すが実際には何も消さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-dry-run" };
+        await seedJob(ctx, { kind: "extract" });
+
+        const result = await store.eraseTenant!(ctx, { limit: 1000, dryRun: true });
+        expect(result.deleted).toBeGreaterThan(0);
+
+        const claimed = await store.claimBatch(ctx, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimed.length).toBeGreaterThanOrEqual(1);
+      });
+    } else {
+      it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.eraseTenant).toBeUndefined();
+      });
+    }
   });
 }

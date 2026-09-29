@@ -430,3 +430,28 @@ newestPurgedAt: null, dryRun }` を返した。`reachedLimit: true` になるの
 **確かめていないこと**: `limit <= -2`（`-2`・`NaN`・`Infinity`・非整数）を、この
 追記のために手元の Postgres へ改めて当ててはいない——PR #804・PR #875 の実測（Issue
 #876 本文に引用）を踏襲した。
+
+---
+
+## 追記（2026-09-30）: 決定4「`events_purged` は掃除の対象外」の射程は保持期間の掃除だけであり、`eraseTenant`（ADR 0383）には及ばない
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜9・検討した代替案・引き受けた負債・これが覆るとしたら・上の各追記）
+は書き換えていない。**当時の記録として残す。
+
+決定4は「`kind = 'events_purged'` 自身を対象から除外する（無限後退を避ける）」——
+`purgeExpiredEventsForTenant`/`purgeExpiredEventsByRetention?`（保持期間の掃除）が
+`events_purged` 行自身を消さないことで、掃除ジョブが自分の記録を消して自分を追跡
+できなくなる無限後退を避けた決定である。
+
+**[ADR 0383](./0383-erase-tenant.md) が足した独立関数 `eraseTenant`（1つのテナントを
+丸ごと対象にする、別の新しい操作）は、この決定の対象外である。** `eraseTenant` は
+`memory_events` テーブル自体を削除対象に含むため、`kind = 'events_purged'`/`'purged'`
+の行も含めて丸ごと消える——「対象外」という決定4の除外は、保持期間の掃除という
+*繰り返し実行される*操作が自分の記録を食い荒らさないための決定であり、テナントを
+丸ごと消して二度と戻さない `eraseTenant` には「無限後退」という前提そのものが無い。
+`eraseTenant` は DB に消去の記録を一切残さない（`events_purged` 相当の行も積まない）
+——`packages/core/src/interfaces/memory-store.ts` の `MemoryStore.eraseTenant?` の
+TSDoc 参照。
+#876 本文に引用）を踏襲した。

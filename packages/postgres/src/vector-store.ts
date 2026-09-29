@@ -2,6 +2,8 @@ import { sql, type SQL } from "drizzle-orm";
 import type {
   Ctx,
   EmbeddingSpaceId,
+  EraseTenantResult,
+  EraseTenantStoreOptions,
   MemoryId,
   VectorEntry,
   VectorFilter,
@@ -9,11 +11,8 @@ import type {
   VectorStore,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
-import {
-  EMBEDDING_SPACE_TABLE_PREFIX,
-  assertSafeIdentifier,
-  embeddingSpaceTableName,
-} from "./embedding-space-table.js";
+import { listEmbeddingSpaceTables } from "./embedding-space-catalog.js";
+import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
 import { isUuidLike, toPgTimestamp } from "./mapping.js";
 import { maybeAnalyzeAfterUpsert } from "./embedding-statistics.js";
 import { activityFloorSeqAliveCondition } from "./activity-decay-sql.js";
@@ -793,13 +792,18 @@ export class PostgresVectorStore implements VectorStore {
    *
    * ## テーブルの列挙（3条件、ADR 0382 決定2）
    *
+   * {@link listEmbeddingSpaceTables}（`embedding-space-catalog.ts`）へ切り出した
+   * （Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md)——
+   * `eraseTenant?`（下）が同じ列挙を必要としたため共通化した）。3条件の詳細は
+   * 同関数の doc コメントを参照:
+   *
    * 1. **`current_schema()` の中のテーブルだけ**——スキーマを跨がない。dedicated-schema
    *    （`registerEmbeddingSpace` の `options.schema`）で複数の mnemora デプロイが
    *    同じ DB に同居していても、この接続が見ているスキーマの外のテーブルには触れない。
    *    **列挙で見つけたスキーマ名を、`DELETE` 文自体にも明示的に付ける**（下記参照）
    *    ——`search_path` の解決には頼らない。
-   * 2. **テーブル名が `memory_embeddings_` で始まる**（{@link EMBEDDING_SPACE_TABLE_PREFIX}、
-   *    `embeddingSpaceTableName` の導出と同じ接頭辞）。
+   * 2. **テーブル名が `memory_embeddings_` で始まる**（`embeddingSpaceTableName` の
+   *    導出と同じ接頭辞）。
    * 3. **`memory_id` 列が、同じスキーマの `memories(id)` を外部キーで参照している**
    *    （`pg_constraint`/`pg_attribute` で確かめる）——利用者が同じ命名慣習
    *    （`memory_embeddings_` で始まる名前）で作った無関係なテーブルを巻き込まない。
@@ -842,36 +846,10 @@ export class PostgresVectorStore implements VectorStore {
       return;
     }
     await this.db.transaction(async (tx) => {
-      // 上の doc コメントの3条件をそのまま1本の SQL にする。`conkey`/`confkey` は
-      // 対象の列番号(attnum)を並べた配列——`array_length(con.conkey, 1) = 1` で
-      // 「単一列の外部キー」に絞り、`conkey[1]`/`confkey[1]`（Postgres 配列は1始まり）
-      // でその1列の attnum を取り、`pg_attribute` で列名（`memory_id`/`id`）を確かめる。
-      // `n.nspname` も返す——`DELETE` をスキーマ修飾するために使う（上の doc コメント）。
-      const tables = await tx.execute(sql`
-        SELECT c.relname AS table_name, n.nspname AS schema_name
-        FROM pg_constraint con
-        JOIN pg_class c ON c.oid = con.conrelid
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        JOIN pg_class refc ON refc.oid = con.confrelid
-        JOIN pg_namespace refn ON refn.oid = refc.relnamespace
-        JOIN pg_attribute fkatt
-          ON fkatt.attrelid = con.conrelid AND fkatt.attnum = con.conkey[1]
-        JOIN pg_attribute pkatt
-          ON pkatt.attrelid = con.confrelid AND pkatt.attnum = con.confkey[1]
-        WHERE con.contype = 'f'
-          AND n.nspname = current_schema()
-          AND starts_with(c.relname, ${EMBEDDING_SPACE_TABLE_PREFIX})
-          AND array_length(con.conkey, 1) = 1
-          AND fkatt.attname = 'memory_id'
-          AND refc.relname = 'memories'
-          AND refn.nspname = n.nspname
-          AND pkatt.attname = 'id'
-      `);
-      for (const row of tables.rows) {
-        const { table_name: table, schema_name: schema } = row as unknown as {
-          table_name: string;
-          schema_name: string;
-        };
+      // Issue #1207 / ADR 0383: 列挙は `listEmbeddingSpaceTables`（`embedding-space-catalog.ts`）
+      // に切り出した——`eraseTenant`（下）と同じ条件を共有する。
+      const tables = await listEmbeddingSpaceTables(tx);
+      for (const { table, schema } of tables) {
         // `pg_class.relname`/`pg_namespace.nspname` は既に有効な PostgreSQL 識別子だが、
         // `assertSafeIdentifier`/`assertSafeSchemaName` を通す——他のメソッドと同じ
         // 「SQL 注入対策の最後の砦」の規律をここでも揃える。
@@ -882,6 +860,64 @@ export class PostgresVectorStore implements VectorStore {
           WHERE tenant_id = ${ctx.tenantId} AND memory_id = ANY(${sql.param(validIds)}::uuid[])
         `);
       }
+    });
+  }
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+   * `VectorStore.eraseTenant?` の実装。`deleteAcrossSpaces`（上）と同じ
+   * `listEmbeddingSpaceTables` で全 space のテーブルを列挙し、`memoryIds` の集合では
+   * なく `ctx.tenantId` の行を丸ごと対象にする点だけが違う。
+   *
+   * `opts.limit` は**全 space の合計**に対する budget として消費する
+   * （1つの space だけで使い切ってもよい——`MemoryStore.eraseTenant` の interface doc
+   * が定める「保守的な近似」の `reachedLimit` をここでも採用する）。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const dryRun = opts.dryRun === true;
+    return this.db.transaction(async (tx) => {
+      const tables = await listEmbeddingSpaceTables(tx);
+      let remaining = opts.limit;
+      let total = 0;
+      let reachedLimit = false;
+      for (const { table, schema } of tables) {
+        if (remaining <= 0) {
+          reachedLimit = true;
+          break;
+        }
+        assertSafeIdentifier(table);
+        assertSafeSchemaName(schema);
+        const budget = remaining;
+        let deleted: number;
+        if (dryRun) {
+          const result = await tx.execute(sql`
+            SELECT count(*)::int AS count FROM (
+              SELECT 1 FROM ${sql.identifier(schema)}.${sql.identifier(table)}
+              WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
+            ) s
+          `);
+          deleted = (result.rows[0] as unknown as { count: number }).count;
+        } else {
+          const result = await tx.execute(sql`
+            WITH victims AS (
+              SELECT tenant_id, memory_id FROM ${sql.identifier(schema)}.${sql.identifier(table)}
+              WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
+            )
+            DELETE FROM ${sql.identifier(schema)}.${sql.identifier(table)} t
+            USING victims v
+            WHERE t.tenant_id = v.tenant_id AND t.memory_id = v.memory_id
+            RETURNING t.memory_id
+          `);
+          deleted = result.rows.length;
+        }
+        total += deleted;
+        remaining -= deleted;
+        if (deleted === budget && deleted > 0) {
+          reachedLimit = true;
+          break;
+        }
+      }
+      return { deleted: total, reachedLimit };
     });
   }
 

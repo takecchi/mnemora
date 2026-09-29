@@ -66,6 +66,43 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⭕ 次は**非破壊と数える**（union に値を足す変更。オーナーの回答 ask_human `d9364c91`）: `ContestedDetectionOutcome.result` の `"contested_group"`、`Omission` の `over_limit`/`stage_skipped` の `stage` の `"relation"`。網羅的な `switch` でこれらの型を扱っているコードは型検査が落ちうる。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目29。**DB マイグレーション**: 新しい migration `0026_memory_relations.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。
 
+- **テナント単位で全表から行を消す独立関数 `eraseTenant` と、4つの port の任意メソッド
+  `eraseTenant?` が増えた。`packages/testkit` の conformance suite に、省略できない
+  フラグ `supportsEraseTenant: boolean` が増えた——conformance suite を呼んでいる人へ**
+  （[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+  [PR #1444](https://github.com/takecchi/mnemora/pull/1444)、
+  [ADR 0383](./docs/decisions/0383-erase-tenant.md)）。
+
+  利用者に「このテナントを消してほしい」と求められたとき、mnemora の中で完結して消せる
+  口が無かった（`forget` → `purge` と保持期間の掃除を合わせても、`recalls`・
+  `recall_usages`・完了した `outbox` の行・`observations`・`tenant_settings` などが残った。
+  Issue #1207）。
+
+  - `@mnemora/core`: 独立関数 `eraseTenant(ctx, deps, opts)` を足した
+    （`purgeExpiredEventsForTenant` と同じく `Runtime` の外に置き、`tick()`/`observe()`
+    からは呼ばれない。`Runtime` のメソッドは増えていない）。`MemoryStore`・
+    `VectorStore`・`OutboxStore`・`TenantSettingsStore` に任意メソッド `eraseTenant?`
+    を足した（`EventStore` には足していない）。4つのうち1つでも無ければ、何も消さずに
+    `{ kind: "store_unsupported", missing }` を返す。他テナントの行がこのテナントの行を
+    参照していれば、1行も消さずに `{ kind: "blocked_by_foreign_reference", count }` を返す。
+  - `@mnemora/postgres`: 4つの store に `eraseTenant` を実装した。
+    **DB マイグレーション `0027_erase_tenant_fk_indexes.sql` が増えた**（外部キー検査の
+    ための単一列の索引。埋め込み空間の表には `(memory_id)` の索引を遡って足す）。
+  - `@mnemora/testkit`: in-memory fixture に `eraseTenant` を実装した。
+    `describeMemoryStoreConformance`・`describeVectorStoreConformance`・
+    `describeOutboxStoreConformance`・`describeTenantSettingsStoreConformance` の
+    options に **`supportsEraseTenant: boolean`（省略不可）** が増えた。
+
+  **移行の手順**:
+
+  1. conformance suite を呼んでいる箇所に `supportsEraseTenant` を渡す。自前の store に
+     `eraseTenant?` を実装していなければ `false`（型検査は、渡すまで通らない）。
+  2. `@mnemora/postgres` を使っていれば、上げたあとに migrate を当てる（`0027` が入る）。
+     ⚠ この migration の `CREATE INDEX` は `CONCURRENTLY` を使わないので、索引を作る
+     あいだ対象の表への書き込みが止まる。止まる時間の目安と測り方は
+     [docs/migration-v1.md](./docs/migration-v1.md) の項目31 を見ること。
+  3. `eraseTenant` を使わないなら、ほかに直すことは無い。
+
 ### Added
 
 - **`@mnemora/postgres` に `createOptionalTrigramIndexConcurrently(db)` を足した**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、[ADR 0319](./docs/decisions/0319-optional-trigram-lexical-store.md) の2026-09-30追記）。`createOptionalTrigramIndex` と同じ形の索引 `idx_memories_trigram` を、`CREATE INDEX CONCURRENTLY` で（`memories` への書き込みを止めずに）張る。トランザクションの外で呼ぶこと。前回の失敗で `indisvalid = false` の同名索引が残っていれば、`DROP INDEX CONCURRENTLY` で消してから作り直す。既存の `createOptionalTrigramIndex` は変わらない（公開 API は追加のみ）。⚠ 複数の呼び出し元が同時に呼んだときの競合は防いでいない。

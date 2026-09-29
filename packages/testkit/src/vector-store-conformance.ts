@@ -122,6 +122,19 @@ export interface VectorStoreConformanceOptions {
    * `it.skip` にはしない。
    */
   supportsGetVectors: boolean;
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
+   * `VectorStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * `supportsGetVectors`（このファイル）・`memory-store-conformance.ts` の
+   * `supportsArchiveDecayed`/`supportsPurgeMemory` 等と同じ判断——省略可にしないこと。
+   * `true` なら契約の歯（このテナントに属する行を全 space から消す、他テナントは無傷の
+   * まま残る、`limit`/`reachedLimit`（保守的な近似）・呼び直せば最終的に全部消える、
+   * `dryRun` で1行も変わらない）を実行する。`false` なら
+   * `expect(store.eraseTenant).toBeUndefined()` を積極的に assert する——`it.skip` には
+   * しない。
+   */
+  supportsEraseTenant: boolean;
 }
 
 const space: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
@@ -148,7 +161,14 @@ const spaceB: EmbeddingSpaceId = { provider: "test", model: "fixture-model-b", d
  * `packages/postgres` 側のテスト（生 SQL・`EXPLAIN` を直接扱う）に置く。
  */
 export function describeVectorStoreConformance(options: VectorStoreConformanceOptions): void {
-  const { name, createStore, prepareMemoryId, prepareEmbeddingSpace, supportsGetVectors } = options;
+  const {
+    name,
+    createStore,
+    prepareMemoryId,
+    prepareEmbeddingSpace,
+    supportsGetVectors,
+    supportsEraseTenant,
+  } = options;
 
   describe(`VectorStore conformance (${name})`, () => {
     it("upsert した vector が search で見つかる", async () => {
@@ -1240,6 +1260,105 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       it("getVectors は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.getVectors).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // eraseTenant（Issue #1207 / ADR 0383: テナント消去、任意メソッド）
+    // -------------------------------------------------------------------
+    if (supportsEraseTenant) {
+      it("eraseTenant はテナントの embedding を全 space から消し、他テナントは無傷のまま残す", async () => {
+        const store = await createStore();
+        await prepareEmbeddingSpace(spaceB);
+        const ctxA: Ctx = { tenantId: "erase-tenant-a" };
+        const ctxB: Ctx = { tenantId: "erase-tenant-b" };
+        const memoryIdA1 = await prepareMemoryId(ctxA);
+        const memoryIdA2 = await prepareMemoryId(ctxA);
+        const memoryIdB1 = await prepareMemoryId(ctxB);
+        const memoryIdB2 = await prepareMemoryId(ctxB);
+
+        await store.upsert(ctxA, space, memoryIdA1, [1, 0, 0]);
+        await store.upsert(ctxA, spaceB, memoryIdA2, [0, 1, 0]);
+        await store.upsert(ctxB, space, memoryIdB1, [1, 0, 0]);
+        await store.upsert(ctxB, spaceB, memoryIdB2, [0, 1, 0]);
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000 });
+        expect(result.deleted).toBeGreaterThan(0);
+        expect(result.reachedLimit).toBe(false);
+
+        const hitsA1 = await store.search(ctxA, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: "erase-tenant-a" },
+        });
+        const hitsA2 = await store.search(ctxA, spaceB, [0, 1, 0], {
+          limit: 10,
+          filter: { tenantId: "erase-tenant-a" },
+        });
+        expect(hitsA1.map((h) => h.memoryId)).not.toContain(memoryIdA1);
+        expect(hitsA2.map((h) => h.memoryId)).not.toContain(memoryIdA2);
+
+        const hitsB1 = await store.search(ctxB, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: "erase-tenant-b" },
+        });
+        const hitsB2 = await store.search(ctxB, spaceB, [0, 1, 0], {
+          limit: 10,
+          filter: { tenantId: "erase-tenant-b" },
+        });
+        expect(hitsB1.map((h) => h.memoryId)).toContain(memoryIdB1);
+        expect(hitsB2.map((h) => h.memoryId)).toContain(memoryIdB2);
+      });
+
+      it("eraseTenant は limit に達すると reachedLimit: true を返し、同じ opts で呼び直すと最終的に全部消える", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-limit" };
+        const memoryIds: MemoryId[] = [];
+        for (let i = 0; i < 5; i++) {
+          const memoryId = await prepareMemoryId(ctx);
+          await store.upsert(ctx, space, memoryId, [1, 0, 0]);
+          memoryIds.push(memoryId);
+        }
+
+        const opts = { limit: 2 };
+        let result = await store.eraseTenant!(ctx, opts);
+        expect(result.reachedLimit).toBe(true);
+
+        let guard = 0;
+        while (result.reachedLimit) {
+          if (++guard > 20) {
+            throw new Error(
+              "eraseTenant did not converge after 20 retries — possible infinite loop",
+            );
+          }
+          result = await store.eraseTenant!(ctx, opts);
+        }
+
+        const hits = await store.search(ctx, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId },
+        });
+        expect(hits.map((h) => h.memoryId)).toEqual([]);
+      });
+
+      it("eraseTenant は dryRun: true のとき、削除件数を返すが実際には何も消さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-dry-run" };
+        const memoryId = await prepareMemoryId(ctx);
+        await store.upsert(ctx, space, memoryId, [1, 0, 0]);
+
+        const result = await store.eraseTenant!(ctx, { limit: 1000, dryRun: true });
+        expect(result.deleted).toBeGreaterThan(0);
+
+        const hits = await store.search(ctx, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId },
+        });
+        expect(hits.map((h) => h.memoryId)).toContain(memoryId);
+      });
+    } else {
+      it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.eraseTenant).toBeUndefined();
       });
     }
   });
