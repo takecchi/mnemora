@@ -168,6 +168,25 @@ export function groupByType(classifiedCommits) {
 }
 
 /**
+ * `の範囲を数えたものである` を、文字と文字の間に改行（＋行頭の空白）が挟まっていても
+ * 拾えるようにした正規表現を作る。
+ *
+ * **なぜ要るか**: `[1.1.0]` 節の27回目の棚卸し（追記29）で、この目印の直前が
+ * `` …**`62def34`**（PR #1434）の範囲を\n数えたものである… ``（Markdown の折り返しで、
+ * 目印の文字列そのものの真ん中に改行が入った）という形になった。素の `indexOf` は
+ * 改行を含む1つの連続した文字列としてしか一致しないため、この形を見つけられず、
+ * ファイル中で次に見つかる別の節（`[1.0.0]` 節の `509f4e7`）の目印を拾ってしまっていた。
+ * ⟹ 目印の各文字の間に、任意の `\n` +（行頭の）空白・タブを許す。
+ *
+ * @param {string} marker
+ * @returns {RegExp}
+ */
+function buildLineWrapTolerantMarkerPattern(marker) {
+  const escaped = [...marker].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(escaped.join("(?:\\n[ \\t]*)?"));
+}
+
+/**
  * `CHANGELOG.md` 本文から、「この節の数字は … の範囲を数えたものである」という文が
  * 名指しする基準 sha を読み取る。**読み取れなくても例外にせず `null` を返す**
  * ——CHANGELOG.md の文言は人が手で書いており（ADR 0169）、この文自体が将来書き換わったり
@@ -177,15 +196,19 @@ export function groupByType(classifiedCommits) {
  * ウィンドウ）にある、バッククォートで囲われた7〜40桁の16進数文字列。
  * `` `v0.2.0` `` のような tag 名は16進数として拾われない（`v` や `.` が16進数字ではないため）。
  *
+ * ⚠ 目印そのものが Markdown の折り返しで改行をまたいでいても一致する
+ * （{@link buildLineWrapTolerantMarkerPattern}）——さもないと、目印を見失って
+ * ファイル中の別の節（古い節）の目印を誤って拾う。
+ *
  * @param {string} changelogText
  * @returns {string | null}
  */
 export function extractChangelogBaseSha(changelogText) {
-  const marker = "の範囲を数えたものである";
-  const idx = changelogText.indexOf(marker);
-  if (idx === -1) return null;
-  const windowStart = Math.max(0, idx - 400);
-  const window = changelogText.slice(windowStart, idx);
+  const pattern = buildLineWrapTolerantMarkerPattern("の範囲を数えたものである");
+  const match = pattern.exec(changelogText);
+  if (!match) return null;
+  const windowStart = Math.max(0, match.index - 400);
+  const window = changelogText.slice(windowStart, match.index);
   const hexMatches = [...window.matchAll(/`([0-9a-f]{7,40})`/gi)];
   if (hexMatches.length === 0) return null;
   return hexMatches[hexMatches.length - 1][1];

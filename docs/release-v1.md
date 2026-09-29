@@ -912,6 +912,8 @@ node -e 'import("./scripts/publish-targets.mjs").then(m=>{for(const t of m.PUBLI
 
 ⚠ **この PR をマージした後、段0（手元からの初回 publish）と段1（Trusted Publisher 設定）を済ませずに次の Release を切ると、ほかの6本は出るが `@mnemora/bullmq` だけが 404 で落ち、publish ジョブは赤になる（末尾に置いたので、ほかの6本が取り残されることはない）。**
 
+🔴 **2026-09-30 追記**: この予測は外れた——`v1.1.0` では門の段で7本とも止まった。実際に起きたことは、この節の末尾の「🔴 追記（2026-09-30）」にある。
+
 **この節は、`@mnemora/bullmq` を `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` へ加える PR（ADR 0325 追記・[ADR 0351](./decisions/0351-bullmq-publish-prep.md)）に合わせて書いた、オーナーがそのまま手元で実行できる手順である。** [ADR 0096](./decisions/0096-bootstrap-local-embedding-onto-npm.md)（`@mnemora/local-embedding` の bootstrap）の段0〜段3の前例に沿って書く。
 
 #### どの tag／commit から梱包するか（ADR 0096 の反省を読んで決めた）
@@ -987,6 +989,17 @@ npm view @mnemora/bullmq dist-tags
 #### 済んだ後にすること
 
 段0が完了したら、`scripts/publish-pack-checks.mjs` の `NEVER_PUBLISHED_TARGETS` から `"@mnemora/bullmq"` を消す PR を出すこと（[ADR 0351](./decisions/0351-bullmq-publish-prep.md)「引き受けた負債」1）——消し忘れると、以後も version 検査がこの1パッケージにだけ効かないまま残る。
+
+#### 🔴 追記（2026-09-30）— `v1.1.0` で実際に起きたこと（上の予測は外れた）
+
+**上の ⚠ の予測（「ほかの6本は出るが `@mnemora/bullmq` だけが 404 で落ちる」）は外れた。**本文は書き換えず、ここに記録する（ADR 0064）。【実測】
+
+1. **門の段で全部止まった。**Release `v1.1.0`（最初の tag は `52e6557`）の publish run [36612548998](https://github.com/takecchi/mnemora/actions/runs/36612548998) は、npm publish より前の「Typecheck / Lint / Format / Test / Build」の段で落ち、**7本とも上がらなかった。**`apply-release-version.mjs` が bullmq にも tag の版 `1.1.0` を書き込む一方、`scripts/__tests__/check-publish-pack.test.mjs` が `NEVER_PUBLISHED_TARGETS` の名前に `0.0.0` だけを許していた（`expected '1.1.0' to be '0.0.0'`）。予行（dry_run）は版を書き込まないので、この矛盾をすり抜けていた。
+2. **#1443**（オーナー）で、そのテストが publish 時の版（core と同じ版）も許すようにした。
+3. **オーナーが手元で `@mnemora/bullmq@1.1.0` を初回 publish した**（段0。registry の time は 2026-09-29T19:49:07Z）。
+4. **`v1.1.0` の tag を `5eb6e9d`（#1443）へ付け直した。**publish run [36622384608](https://github.com/takecchi/mnemora/actions/runs/36622384608) が success——6本は `+ @mnemora/<pkg>@1.1.0`、bullmq は「既に registry に在る（飛ばした）」。⟹ **7本とも `1.1.0` になった。**
+
+⚠ **上の「済んだ後にすること」（`NEVER_PUBLISHED_TARGETS` から bullmq を消す）は、まだ行っていない。**git 上の `packages/bullmq/package.json` の `version` が `0.0.0` のままであり、消すと `pack:check` の version 検査と版揃い検査が赤になる。git 上の `version` はオーナーの持ち場なので、一覧には残し、意味を「git 上の `version` が `0.0.0` のままでよい名前」に読み替えた（`scripts/publish-pack-checks.mjs` の doc コメント）。一覧の名前を変えるか、`version` を揃えて消すかは、オーナーの判断を待つ。
 
 ---
 
