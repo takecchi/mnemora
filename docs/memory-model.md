@@ -518,6 +518,21 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
   の対象になり、`contested` な1件は（相手が2件以上のときと同じ形で）evidence だけを
   積む（`unresolved_conflict`）。詳細は ADR 0378 追記。
 
+  ⚠ **2026-09-30 追記（Issue #933 の PR2 段階B、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）:
+  「3件以上のグループを実際に `contested` として recall に載せる」は、opt-in で実装した。**
+  `runtime.observe()` に `claimKey: { enabled: true, detectContested: true,
+  formContestedGroups: true }` を渡した呼び出しに限り（既定 `false`）、一致が2件以上・または
+  ちょうど1件でも既に `contested` な場合に、evidence-only（`unresolved_conflict`）の代わりに
+  `Runtime.markContestedGroup`（新設の任意メソッド、`markContested` の N者版）を実際に呼んで
+  群として `memory_relations`（migration 0026）へ束ねる——群のメンバーは、既存の2者間の対の
+  相方（穴A）・既存の3件以上の群（`RelationStore` 配線時のみ、合併）も含めて組み立てる。
+  **既定を `false` にしたのは、この PR1（ADR 0378）の evidence-only の挙動を期待する既存の
+  歯を1つも書き換えないためである**（ADR 0381 §4）。`formContestedGroups` を渡さない呼び出し
+  の挙動は1バイトも変わらない。**`recall()` 側（機構3の必須の同伴取得、下記 §5・§8）は
+  まだこの群に対応していない**——3件以上の群のメンバー（`status: 'contested'`・
+  `contestedWithId: null`）は、今日も単独では recall に出ない（機構2の「対向は必ず隣接」を
+  満たせないため、既存の `unit_assembly_dropped` の扱いに落ちる）。詳細は ADR 0381 §5。
+
 **`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
 （行6）までであり、`contested → active | superseded`（行7）は今日どおり
 `resolveContested` の明示呼び出しのみ。

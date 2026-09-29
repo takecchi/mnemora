@@ -2966,34 +2966,31 @@ export class PostgresMemoryStore implements MemoryStore {
 
       // ADR 0381 決定1: 「完全グラフ」は「一致した全員を結ぶ」ではなく「その中で
       // 実際に有効期間が重なる組を結ぶ」と読み替える（ADR 0324 決定4——重なりが
-      // 矛盾の必要条件——との整合）。`findActiveByClaimKey`/`findContestedByClaimKey`
-      // と同じ半開区間の重なり判定を、既に読み込んだ行に対して JS 側で行う。
-      const overlaps = (a: Memory, b: Memory): boolean =>
-        (a.validFrom === null ||
-          a.validFrom === undefined ||
-          b.validUntil === null ||
-          b.validUntil === undefined ||
-          a.validFrom < b.validUntil) &&
-        (b.validFrom === null ||
-          b.validFrom === undefined ||
-          a.validUntil === null ||
-          a.validUntil === undefined ||
-          b.validFrom < a.validUntil);
-
-      for (let i = 0; i < ids.length; i++) {
-        for (let j = i + 1; j < ids.length; j++) {
-          const a = updatedById.get(ids[i]!)!;
-          const b = updatedById.get(ids[j]!)!;
-          if (!overlaps(a, b)) continue;
-          await tx.execute(sql`
-            INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
-            VALUES
-              (gen_random_uuid(), ${ctx.tenantId}, ${a.id}, ${b.id}, 'contradicts'),
-              (gen_random_uuid(), ${ctx.tenantId}, ${b.id}, ${a.id}, 'contradicts')
-            ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
-          `);
-        }
-      }
+      // 矛盾の必要条件——との整合）。重なりの判定は `findActiveByClaimKey`/
+      // `findContestedByClaimKey` と**文字どおり同じ SQL の半開区間の式**——JS 側に
+      // 同じ式を二重に持たない（2026-09-30 の直し、ADR 0381 追記）。`memories a` ×
+      // `memories b`（どちらも `members` の集合、`a.id <> b.id`）の自己結合1本で、
+      // 重なる**順序対**（a→b と b→a の両方）を一度に生成する——`WHERE` が対称なので、
+      // 一致する各無向対について2行（両方向）が自然に出る。穴A・合併で既に存在する行は
+      // `ON CONFLICT DO NOTHING` で冪等に無視する。
+      await tx.execute(sql`
+        INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
+        SELECT gen_random_uuid(), ${ctx.tenantId}, a.id, b.id, 'contradicts'
+        FROM memories a
+        JOIN memories b
+          ON b.tenant_id = a.tenant_id
+         AND b.id <> a.id
+         AND b.id = ANY(${sql.param(ids)}::uuid[])
+        WHERE a.tenant_id = ${ctx.tenantId}
+          AND a.id = ANY(${sql.param(ids)}::uuid[])
+          AND (
+            a.valid_from IS NULL OR b.valid_until IS NULL OR a.valid_from < b.valid_until
+          )
+          AND (
+            b.valid_from IS NULL OR a.valid_until IS NULL OR b.valid_from < a.valid_until
+          )
+        ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
+      `);
 
       const events: MemoryEvent[] = [];
       for (const m of normalized) {
@@ -3075,6 +3072,39 @@ export class PostgresMemoryStore implements MemoryStore {
         if (statusById.get(id) !== "contested") {
           throw new MemoryStatusConflictError(id, "contested", statusById.get(id)!);
         }
+      }
+
+      // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: 渡された members が、
+      // 関係の行でつながった群の「今も contested な」全員と一致することを CAS で
+      // 課す——一部だけを渡した解消（部分解消）を拒む。`WITH RECURSIVE` で
+      // `members` から `memory_relations`（双方向2行が既に張られているので、
+      // `from_memory_id` の向きだけ辿れば足りる）を辿り、`status = 'contested'` の
+      // ものだけに絞った到達集合を求める——決定10（抜けたメンバーの行は残す）と
+      // 矛盾しない形: forget/supersede/purge/archive で抜けたメンバーは
+      // `status <> 'contested'` になっているので、この到達集合には入らない
+      // （行は残るが「今の群」には数えない）。
+      const reachable = await tx.execute(sql`
+        WITH RECURSIVE reachable(id) AS (
+          SELECT unnest(${sql.param(ids)}::uuid[])
+          UNION
+          SELECT r.to_memory_id
+          FROM memory_relations r
+          JOIN reachable rc ON r.from_memory_id = rc.id
+          WHERE r.tenant_id = ${ctx.tenantId} AND r.kind = 'contradicts'
+        )
+        SELECT DISTINCT m.id FROM memories m
+        JOIN reachable rc ON m.id = rc.id
+        WHERE m.tenant_id = ${ctx.tenantId} AND m.status = 'contested'
+      `);
+      const reachableIds = new Set(
+        reachable.rows.map((row) => (row as unknown as { id: string }).id),
+      );
+      const idSetForCheck = new Set(ids);
+      const missing = [...reachableIds].filter((id) => !idSetForCheck.has(id));
+      if (missing.length > 0) {
+        // 群の一部だけを渡した——足りない側（まだ contested のまま群に残っているのに
+        // 渡されなかったメンバー）を名指しして、何も書かずに CAS 違反として扱う。
+        throw new MemoryStatusConflictError(missing[0] as MemoryId, "contested", "contested");
       }
 
       const updatedById = new Map<MemoryId, Memory>();

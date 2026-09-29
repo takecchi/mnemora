@@ -7192,6 +7192,65 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         }
       });
 
+      it("境目でちょうど接する組（後者の validFrom が前者の validUntil と一致）には行を張らない——半開区間 [validFrom, validUntil) は境目を含まない（2026-09-30 の直し、ADR 0381）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // a: [2020-01-01, 2021-01-01), b: [2021-01-01, 2022-01-01)——validUntil_a === validFrom_b。
+        // c は a・b の両方と重なる橋渡し役（3件とも群には入るが、a-b 間にだけ行が無いことを見る）。
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-boundary-a",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-boundary-b",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2021-01-01T00:00:00.000Z"),
+            validUntil: new Date("2022-01-01T00:00:00.000Z"),
+          }),
+        );
+        const c = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-boundary-c",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-06-01T00:00:00.000Z"),
+            validUntil: new Date("2021-06-01T00:00:00.000Z"),
+          }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+
+        await store.markContestedGroup!(ctx, [
+          { id: a.id, event: event(a.id) },
+          { id: b.id, event: event(b.id) },
+          { id: c.id, event: event(c.id) },
+        ]);
+
+        if (listRelationsForMemory) {
+          const fromA = (await listRelationsForMemory(ctx, a.id)).map((r) => r.memoryId);
+          const fromB = (await listRelationsForMemory(ctx, b.id)).map((r) => r.memoryId);
+          // a・b はちょうど境目で接するだけ——重ならない。c とはどちらも重なる。
+          expect(fromA.sort()).toEqual([c.id]);
+          expect(fromB.sort()).toEqual([c.id]);
+        }
+      });
+
       it("穴A: 既存の対（A・B）を吸収して群を作れる——A・Bの対は壊れ、3件とも contested のまま残る", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -7447,6 +7506,51 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           },
         ]);
         expect(result.members.map((m) => m.status)).toEqual(["active", "superseded", "superseded"]);
+      });
+
+      it("resolveContestedGroup: 群の一部だけを渡すと MemoryStatusConflictError で何も書かない（2026-09-30 の直し、ADR 0381）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // 4件の群を作り、3件（>= 3 の下限は満たす）だけを渡して「部分解消」を試す
+        // ——4件目がまだ contested のまま群に残っている。
+        const memories = await Promise.all(
+          [
+            "group-partial-resolve-a",
+            "group-partial-resolve-b",
+            "group-partial-resolve-c",
+            "group-partial-resolve-d",
+          ].map((contentHash) =>
+            store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1", contentHash })),
+          ),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await store.markContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, event: event(m.id) })),
+        );
+
+        let caught: unknown;
+        await store.resolveContestedGroup!(ctx, [
+          { id: memories[0]!.id, status: "active", event: event(memories[0]!.id) },
+          { id: memories[1]!.id, status: "active", event: event(memories[1]!.id) },
+          { id: memories[2]!.id, status: "active", event: event(memories[2]!.id) },
+        ]).catch((error: unknown) => {
+          caught = error;
+        });
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+
+        // 何も書き換えていない——4件とも contested のまま。
+        for (const m of memories) {
+          const after = await store.get(ctx, m.id);
+          expect(after?.status).toBe("contested");
+        }
       });
     } else if (supportsResolveContestedGroup === false) {
       it("resolveContestedGroup は任意メソッドであり、この adapter は実装していない", async () => {

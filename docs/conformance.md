@@ -60,7 +60,7 @@ conformance suite の外から adapter の中に遅延を差し込めず、赤�
 
 ---
 
-## 1. 何が在るか — 8 suite
+## 1. 何が在るか — 8 suite（⚠ 2026-09-30 追記で9になった。下の追記を見ること）
 
 | suite                 | 住所                                                        |
 | --------------------- | ----------------------------------------------------------- |
@@ -72,6 +72,31 @@ conformance suite の外から adapter の中に遅延を差し込めず、赤�
 | `OutboxStore`         | `packages/testkit/src/outbox-store-conformance.ts`          |
 | `TenantSettingsStore` | `packages/testkit/src/tenant-settings-store-conformance.ts` |
 | `VectorStore`         | `packages/testkit/src/vector-store-conformance.ts`          |
+
+### `RelationStore` の適合 suite —— 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）: 新設された（旧: 存在しなかった）
+
+`packages/testkit/src/relation-store-conformance.ts` に `describeRelationStoreConformance` が
+新設され、9 it を持つ（`link`/`unlink`/`listRelated` の基本契約・冪等性・双方向・テナント
+分離）【実測、2026-09-30、上の§1の式で数えた】。`packages/testkit`
+（`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
+（`conformance.postgres.test.ts`）の両方が当てている——**8 suite → 9 suite になった。**
+
+同じ PR で、既存の `MemoryStore` suite（`describeMemoryStoreConformance`）にも、
+`markContestedGroup?`/`resolveContestedGroup?`（任意メソッド、`supportsMarkContestedGroup?`/
+`supportsResolveContestedGroup?` の3態フラグで「検査した」「検査していない」を区別する、
+§9 と同じ形）の it を追加した——**新設 suite ではなく既存 suite の it 数が増えただけ**
+（この節の「新設された suite」の一覧には含めない、上の §1 「`it` の数はここに書かない」の
+規律どおり）。
+
+**⚠ マイクロ秒精度の境目は、この suite の外（Postgres 専用の別ファイル）で確かめている。**
+JS の `Date` はミリ秒までしか精度を持たず、アプリの書き込み経路（`createMemory` 等）は
+すべてミリ秒精度に丸めるため、InMemory/Fake fixture はマイクロ秒だけ異なる `validFrom`/
+`validUntil` を原理的に表現できない——**適合テストとして両実装を同じ入力で当てることが
+できない範囲である。**
+`packages/postgres/src/__tests__/mark-contested-group-microsecond-boundary.postgres.test.ts`
+が、生の SQL で Postgres だけにマイクロ秒精度の境目を作り、Postgres 単独でその正しさ
+（**Postgres が正**）を確かめる——`describeMemoryStoreConformance`/`describeRelationStoreConformance`
+のどちらの呼び出し元にも数えない、Postgres 専用の歯である。
 
 **各 suite の `it` の数は、ここに書かない**（`main` が動けば変わる数である——
 [AGENTS.md](../AGENTS.md)「⚠ 数を、道具と生成物に焼き込まない」・
@@ -130,6 +155,8 @@ grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testki
 - `packages/testkit/src/__tests__/migration-guide-tenant-settings-example.test.ts`——`docs/migration-v1.md` §6 の片をそのまま実行し、必須の3口だけを持つ最小の `TenantSettingsStore` に当たる。
 
 ⟹ **本物の DB に当たるのは Postgres の2つのファイル（上の表の2行目と trigram の1つ）である。**それ以外は in-memory の擬似物か、テストの中で組み立てた store である。上の本文は当時の記録として残す。
+
+**⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）**: 上の表の2つの呼び出し元（`in-memory-fixtures.conformance.test.ts`・`conformance.postgres.test.ts`）は、`describeRelationStoreConformance({` も1つずつ追加で呼ぶようになった——「6つの `describe*Conformance({` 呼び出し」はどちらの行も7つになった。当たる実装・CI で走るかは変わらない（in-memory の擬似物／本物の Postgres、どちらも常時走る）。
 
 ### 2.2 `EmbeddingProvider` suite — 呼び出し元（下の表と、その後の 2026-09-28 追記。表は 2026-09-25 追記で6→7）
 

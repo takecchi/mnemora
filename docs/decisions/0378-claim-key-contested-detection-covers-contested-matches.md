@@ -429,3 +429,17 @@ recall 側には一切触れていない（決定6・PR2 の範囲）。
 ---
 
 Refs #933 #207
+
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
+
+段階B で、本 ADR 決定5（PR1 の範囲、「2件以上／既に contested な1件」は `markContested` を
+呼ばず evidence だけを積む）を、`ClaimKeyOptions.formContestedGroups: true`（既定 `false`、
+opt-in）を渡した呼び出しに限って上書きした——`deps.memoryStore.markContestedGroup` が
+配線されており、かつ群のメンバー（穴Aの吸収・既存群の合併を含む）が3件以上に組み上がる
+ときだけ、evidence-only の代わりに実際に `Runtime.markContestedGroup` を呼んで群として
+書き込む。**既定 `false` のため、この ADR が確立した決定5の挙動そのもの（`formContestedGroups`
+を渡さない既存の呼び出し）は1バイトも変えていない。**詳細・理由・境界条件は ADR 0381 §4 を
+見ること。

@@ -2351,6 +2351,40 @@ export class InMemoryMemoryStore implements MemoryStore {
         throw new MemoryStatusConflictError(memory.id, "contested", memory.status);
       }
     }
+
+    // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` が、関係の行で
+    // つながった「今も contested な」群の全員と一致することを CAS で課す
+    // （`PostgresMemoryStore.resolveContestedGroup` と同じ形。決定10と矛盾しない
+    // ——forget 等で抜けたメンバーは `status` が `contested` でなくなっているので、
+    // この到達集合には入らない）。
+    {
+      const idSet = new Set(ids);
+      const visited = new Set<MemoryId>(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const r of this.relations) {
+          if (
+            r.tenantId === ctx.tenantId &&
+            r.fromMemoryId === current &&
+            r.kind === "contradicts" &&
+            !visited.has(r.toMemoryId)
+          ) {
+            visited.add(r.toMemoryId);
+            queue.push(r.toMemoryId);
+          }
+        }
+      }
+      const missing = [...visited].filter((id) => {
+        if (idSet.has(id)) return false;
+        const memory = this.rawGet(ctx, id);
+        return memory !== null && memory.status === "contested";
+      });
+      if (missing.length > 0) {
+        throw new MemoryStatusConflictError(missing[0]!, "contested", "contested");
+      }
+    }
+
     for (const m of members) {
       assertStorableMemoryColumn("status", m.status);
       assertStorableMemoryEvent(m.event);

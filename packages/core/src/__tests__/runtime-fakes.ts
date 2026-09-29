@@ -2057,6 +2057,40 @@ export class FakeMemoryStore implements MemoryStore {
       }
     }
 
+    // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` が、関係の行で
+    // つながった「今も contested な」群の全員と一致することを CAS で課す
+    // （`PostgresMemoryStore.resolveContestedGroup` と同じ形）。
+    {
+      const idSet = new Set(ids);
+      const visited = new Set<MemoryId>(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const r of this.backing.relations) {
+          if (
+            r.tenantId === ctx.tenantId &&
+            r.fromMemoryId === current &&
+            r.kind === "contradicts" &&
+            !visited.has(r.toMemoryId)
+          ) {
+            visited.add(r.toMemoryId);
+            queue.push(r.toMemoryId);
+          }
+        }
+      }
+      const missing: MemoryId[] = [];
+      for (const id of visited) {
+        if (idSet.has(id)) continue;
+        const memory = await this.get(ctx, id);
+        if (memory !== null && memory.status === "contested") {
+          missing.push(id);
+        }
+      }
+      if (missing.length > 0) {
+        throw new MemoryStatusConflictError(missing[0]!, "contested", "contested");
+      }
+    }
+
     const events = members.map((m) => buildStoredEvent(ctx, m.event));
 
     for (let i = 0; i < members.length; i++) {

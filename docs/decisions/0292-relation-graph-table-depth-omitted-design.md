@@ -598,3 +598,17 @@ kind を新設する判断に切り替わる。
 ---
 
 Refs #207
+
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
+
+本 ADR 決定1（テーブル形）・決定1-b（双方向2行）は、段階A・段階Bの実装
+（`memory_relations`・`PostgresRelationStore`・`MemoryStore.markContestedGroup?`/
+`resolveContestedGroup?`）でそのまま採用した。**決定2（探索の深さ・`RecallQuery.relations?`）・
+決定3（`omitted` への出し方、`over_limit`/`stage_skipped` の `stage: "relation"`）は、
+この時点でもまだ実装していない**——recall 側の実装（本 ADR が「状態: 提案」のまま持つ
+決定2・決定3）と、Issue #207/#933 PR2 のマネージャー依頼が求める「recall 段3の変更」が
+同じものを指しているのか、別のものを指しているのかを、段階Bの調査で確認しきれなかった
+ため、実装を見送りマネージャーへ判断を仰いだ。詳細は ADR 0381 §5 を見ること。

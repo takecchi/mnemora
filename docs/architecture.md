@@ -856,7 +856,7 @@ interface LexicalStore {
 
 ### 5.3 RelationStore — Phase 2
 
-**⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-relation-store-contested-group.md)。
+**⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
 段階A の時点の記録——書き込み経路〔`Runtime.markContestedGroup` 等〕・recall 段3への
 配線はまだ無い〔段階B〕）。** 下の本文は当時（`RelationStore` 未実装）のドラフトの
 まま残す（`RelationKind` に `supports`/`derived_from` を含んでいた食い違いは
@@ -900,6 +900,27 @@ ADR 0292 決定1-c）——配線しなくても `recall()` は今日どおり�
 - `link('contradicts', ...)` は対称関係として扱う（`listRelated` はどちら向きの `fromId`/`toId`
   で張られていても双方から引ける）——ただし `link` 自身は片方向しか書かない。双方向2行は
   `markContestedGroup?` などの複合書き込みの中で実現する（上記）。
+
+**⚠ 2026-09-30 追記（段階B、ADR 0381）**: `Runtime` からの配線と、読み側の適格性を分類する
+層を実装した。
+
+- `RuntimeDeps.relationStore?: RelationStore`（`RuntimeDeps.lexicalStore?` と同じ「省略可能・
+  省略しても mnemora は成立する」設計）を追加した。
+- `Runtime.markContestedGroup?(ctx, memberIds, opts?)`/`Runtime.resolveContestedGroup?(ctx,
+  memberIds, resolution, opts?)`（任意メソッド、`Runtime.markContested`/`resolveContested`
+  （ADR 0134/ADR 0150）と対称の層）を追加した——`getMany` で各メンバーの適格性を読んでから
+  `MemoryStore.markContestedGroup?`/`resolveContestedGroup?` を呼ぶ。`resolveContestedGroup?`
+  は `deps.relationStore` が配線されていれば、store の CAS（ADR 0381 fix2）と同じ「群の一部
+  だけを渡した解消を拒む」確認を読み側でも行う。
+- `detectClaimKeyContested`（`Runtime.observe()` の claim key 衝突検出、ADR 0378）に
+  `contested_group` 分岐を追加した——`ClaimKeyOptions.formContestedGroups?: boolean`
+  （既定 `false`、opt-in）を渡した呼び出しに限り、`deps.memoryStore.markContestedGroup` を
+  実際に呼んで群として書き込む。既定 `false` にしたのは、Issue #933 PR1（ADR 0378）が確立した
+  evidence-only の挙動を持つ既存の歯を1つも書き換えないためである（ADR 0381 §4）。
+- **recall 段3（`contradiction_resolution`、必須の同伴取得）への配線は、段階Bでもまだ無い。**
+  ADR 0292 決定2・決定3（状態: 提案）が設計した「独立した opt-in の探索チャンネル
+  （`RecallQuery.relations?`）」と、既存の必須の同伴取得自体をN者の群に拡張する案のどちらを
+  実装すべきかが確認できておらず、ADR 0381 §5 がマネージャーへ判断を仰いでいる。
 
 ---
 

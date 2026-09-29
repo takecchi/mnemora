@@ -1600,11 +1600,46 @@ ADR 0380「検討した代替案」を見ること。
 content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも Index Scan に
 使える。ADR 0380 の EXPLAIN 実測を参照）。
 
-⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は11件
+### 29. `ContestedDetectionOutcome.result` の判別可能 union に `"contested_group"` が増えた（`@mnemora/core`）
+
+[Issue #207](https://github.com/takecchi/mnemora/issues/207)・
+[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、
+[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
+
+**何が変わったか**: `Runtime.observe()` の `contestedDetection`（`claimKey: { enabled: true,
+detectContested: true }` を渡したときだけ現れる）が返す `ContestedDetectionOutcome.result` の
+判別可能 union に、新しい判別子 `{ kind: "contested_group"; memberIds: MemoryId[];
+markContestedGroup: MarkContestedGroupResult }` が増えた。
+
+**誰が影響を受けるか**: `result.kind` を**網羅的に**（`switch` の `default` 無し、または
+`never` への割り当てで）分岐しているコードだけ、型検査が落ちる。⭕ **`result.kind ===
+"no_conflict"`/`"contested"` などを個別に読むだけなら影響しない**——新しい判別子が来ても
+既存の分岐はそのまま動く（ただし今まで `"unresolved_conflict"` として扱っていたケースの
+一部が、新しい opt-in（下記）を有効にした呼び出しでは `"contested_group"` に変わる。opt-in
+しない呼び出しでは一切現れない）。
+
+**なぜ増えたか**: `ClaimKeyOptions.formContestedGroups?: boolean`（新設、既定 `false`）を
+`true` にして呼んだときだけ、一致が2件以上（または既に `contested` な1件）の検出結果を、
+evidence-only（`"unresolved_conflict"`）の代わりに、実際に `Runtime.markContestedGroup` を
+呼んで群として書き込んだ結果として返すようにした——`"contested"`（`markContested` を呼んだ
+結果）と対称な形。
+
+**既定は変わらない**: `formContestedGroups` を渡さない（または `false` の）呼び出しでは、
+`result.kind` に `"contested_group"` は一度も現れない——挙動は Issue #933 PR1（ADR 0378）の
+まま1バイトも変わらない。
+
+**どう直すか**: `switch` に `case "contested_group":` を足す。何もしない（既存の
+`"unresolved_conflict"` と同じ扱いにする）のであれば、その分岐を素通りさせるだけでよい。
+
+**DB マイグレーション**: 不要（この項目自体は型と `Runtime` の分岐だけ。`memory_relations`
+テーブル自体は migration 0026、段階Aで既に導入済み）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は12件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
-2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380））になった。**
+2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380）、
+Issue #207・#933 PR2（ADR 0381））になった。**
 
 ⚠ **項目29 は、[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2（多者間の
 グループを `contested` として束ねる書き込み、まだ OPEN）が使う予定の欠番である。**

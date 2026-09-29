@@ -1700,7 +1700,20 @@ export interface MemoryStore {
    *   群のメンバーは `contestedWithId` を持たない設計（`markContestedGroup` 契約）
    *   なので、`resolveContestedPair` の「相互参照が成立していること」に相当する検査は
    *   無い——`status` だけを見る。
-   * - 存在しない id は「memory not found」の `Error`。CAS 違反は
+   * - ⚠ **2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` は、
+   *   `memory_relations` でつながった「今も `contested` な」群の全員と一致しなければ
+   *   ならない（CAS）。**一部だけを渡した解消（部分解消）は拒む——`members` から
+   *   `memory_relations`（`kind: 'contradicts'`）を辿って求めた到達集合のうち、
+   *   `status === 'contested'` のものが `members` の id 集合と完全に一致することを
+   *   要求する。**forget・supersede・purge・archive で群から抜けたメンバー
+   *   （決定10——関係の行は残すが `status` はもう `'contested'` ではない）は、この
+   *   到達集合に含めない**——「今の群」を、行の有無ではなく `status` で判定する。
+   *   足りないメンバーが見つかった場合、その1件を名指しして
+   *   {@link MemoryStatusConflictError}（`expectedStatus`/`observedStatus` とも
+   *   `'contested'`——「この id 自身の状態は問題ないが、群の全員としてこの呼び出しに
+   *   含まれていなかった」ことを表す、通常の CAS 違反〔`expectedStatus !==
+   *   observedStatus`〕とは意味が異なる特別な使い方）を投げ、何も書き込まない。
+   * - 存在しない id は「memory not found」の `Error`。それ以外の CAS 違反は
    *   {@link MemoryStatusConflictError}（`expectedStatus` は常に `'contested'`）。
    *   全部成功するか全部失敗するかのどちらか。
    * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う:
