@@ -39,9 +39,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ---
 
-## [1.1.0] - 未リリース
+## [1.1.0] - 2026-09-30
 
-⛔ **`v1.1.0` の tag はまだ切られていない。**
+**この節は `v1.0.2`（tag が指す `b981ecd`）… `v1.1.0` の差分である。**`v1.1.0` の tag が指す commit は、この見出しに日付を入れた PR より後の `main` であり、GitHub Release `v1.1.0` が正本である（⛔ ここに sha を写さない——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+
+⚠ **2026-09-30 追記**: 見出しの「未リリース」を、出す日付（日本時間）に起こした（別の節を足していない。`docs/release-v1.md` §0 の 0.10）。**下の前書きと追記は、未リリースの時点で書かれたものであり、書き換えていない**——その中の「tag はまだ切られていない」「数えた範囲」などの記述は、書いた時点の記録として読むこと。オーナーの指示（2026-09-30、この版を `v1.1.0` として出す）に基づく。
 
 ⚠ **2026-09-29 追記（[Issue #762](https://github.com/takecchi/mnemora/issues/762)、[PR #1387](https://github.com/takecchi/mnemora/pull/1387)）**: 下の出荷済みの節（`[1.0.2]` 以前）が参照している `docs/roadmap.md` の §7 などは、#762 で削除した。出荷済みの節は1バイトも書き換えていない。当時の本文は [`635c93d` の固定リンク](https://github.com/takecchi/mnemora/blob/635c93d/docs/roadmap.md) にある。7項目の現在地は [docs/north-star-paths.md](./docs/north-star-paths.md) を見ること。
 
