@@ -670,3 +670,5 @@ forgotten で取得できない場合、いまは `contestedAlone` 自体が単�
   fixture で固定する必要が生じる。
 - **連想枠の席の数え方（Unit の数、必須の同伴は席を食わない）を見直す提案が出たとき**
   ——本追記が揃えた「段3の `limit` と同じ扱い」という前提が変わる。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §1.1 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

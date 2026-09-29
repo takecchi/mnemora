@@ -433,7 +433,8 @@ export function buildSummaryMarkdown({
       "作っている（`DeterministicEmbeddingProvider` 自体のハッシュ挙動には依存しない）。" +
       "これは probe 側の試験用の配線であり、ADOPTER-SUPPLIED の集計対象ではない。",
     "- 項目3・4は実行していない（ADR 0216 決定4）。人手の監査は `docs/roadmap.md` §7.4 の" +
-      "表が持つ。",
+      "表が持つ（⚠ 同§は 2026-09-29 に削除（#762）。当時の表は 635c93d の版、現在形は" +
+      " `docs/north-star-paths.md`）。",
     "- 項目6は `result.omitted` が空でないことだけを見ている。`Omission.kind`（11種の" +
       "union）の型網羅は実行時には測れないため、この段では測らない。",
     "- テナントは項目ごとに1つずつ（複数テナント分離は見ていない）。`packages/postgres` の" +

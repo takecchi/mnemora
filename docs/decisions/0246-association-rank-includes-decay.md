@@ -311,3 +311,5 @@ const selectedHits = associationHits.slice(0, associationQuery.maxCount);
 7. **`decayClock: 'activity'` / `'either'` の経路では測っていない**（既定の壁時計のみ）。
    ⚠ ただし順位キーが使う `score.total` は段2 と同じ `decayScoringExtras(memory)` を通しており、
    **述語を書き直していない**ので、段1／段2 と同じ境界を持つはずである。⛔ **「はず」であって、測っていない。**
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7.4・§7.16 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

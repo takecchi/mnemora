@@ -460,7 +460,7 @@ claim key 衝突検出を除く。下記）。
 
 ⚠ **これは `docs/north-star.md`「目指す姿」の項目5「間違いを正すと、古いほうが先に
 出てこなくなる」が、出荷物の既定では*まだ*満たされていないということである**
-（[docs/roadmap.md](./docs/roadmap.md) §7.13）。**自動検出（会話から「これは訂正だ」を
+（[docs/roadmap.md](https://github.com/takecchi/mnemora/blob/635c93d/docs/roadmap.md#713--7項目の数の訂正2026-09-17-在る6--半分1-ではなく在る5--半分2-である) §7.13。⚠ 2026-09-29 追記: 参照先の §7.13 は削除した（#762）。リンク先は削除前の `635c93d` の版である）。**自動検出（会話から「これは訂正だ」を
 機械が判定する経路）の設計は [ADR 0185](./docs/decisions/0185-contradiction-detection-path.md)
 （状態: 提案）が2軸に分け、そのうち (B)「主張キー」方式は
 [Issue #534](https://github.com/takecchi/mnemora/issues/534) の判断により

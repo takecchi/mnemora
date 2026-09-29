@@ -349,3 +349,5 @@ CI への配線は要らない）。
   - **`docs/roadmap.md` の179件**——**1件も見ていない。**
   - **歯が CI で実際に走ること**——`vitest.config.mts` の `include` に一致する配置にしたが、
     **CI 上での実行は確かめていない**（この PR の CI が最初の実測になる）。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7（§7.4 ほか）は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

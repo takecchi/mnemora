@@ -196,3 +196,5 @@
   変わっていないのはこの ADR が決定した仕組みそのもの（`decay_floor_at` を書き込み時に
   一度だけ計算する構造、索引の3列目として最初から `decay_floor_at` を持たせる設計）であり、
   変わったのは「いつ読み取りフィルタとして使い始めるか」というタイミングだけである。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §2（段階2） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

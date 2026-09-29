@@ -43,6 +43,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⛔ **`v1.1.0` の tag はまだ切られていない。**
 
+⚠ **2026-09-29 追記（[Issue #762](https://github.com/takecchi/mnemora/issues/762)）**: 下の出荷済みの節（`[1.0.2]` 以前）が参照している `docs/roadmap.md` の §7 などは、#762 で削除した。出荷済みの節は1バイトも書き換えていない。当時の本文は [`635c93d` の固定リンク](https://github.com/takecchi/mnemora/blob/635c93d/docs/roadmap.md) にある。7項目の現在地は [docs/north-star-paths.md](./docs/north-star-paths.md) を見ること。
+
 **この節は `v1.0.2` からの差分を対象とする。**
 
 ⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`80c79df`**（PR #1382）の範囲を

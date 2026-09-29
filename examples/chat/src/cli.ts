@@ -160,7 +160,8 @@ function requireDatabaseUrl(): string {
   if (!url) {
     throw new Error(
       "DATABASE_URL が設定されていません。mnemora は Postgres + pgvector を要求する " +
-        "（docs/roadmap.md 段階2）。examples/chat/README.md「DB を用意する」の手順で DB を用意し、" +
+        "（docs/roadmap.md 段階2。⚠ 2026-09-29 に同節は削除した（#762）。当時の本文は 635c93d の版にある）。" +
+        "examples/chat/README.md「DB を用意する」の手順で DB を用意し、" +
         "DATABASE_URL を設定してから実行すること。",
     );
   }

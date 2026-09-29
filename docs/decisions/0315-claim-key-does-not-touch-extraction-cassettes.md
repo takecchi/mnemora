@@ -447,3 +447,5 @@ Issue本文は「既存の会話フィクスチャから矛盾を含みうるも
 4. 費用は`response.usage.prompt_tokens`/`completion_tokens`を積算し、
    `examples/chat/src/usage-meter.ts`の`PRICING_USD_PER_MILLION_TOKENS["gpt-4o-mini"]`
    （input $0.15/M, output $0.6/M）で概算する。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7.12 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

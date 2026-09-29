@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "roadmap.md 段階7「サンプル」。observe → recall の往復と、経路A（naive）/経路B（mnemora）の焼かれる量の比較を実演する CLI サンプル。",
+  "description": "roadmap.md 段階7「サンプル」（⚠ 2026-09-29 に同節は削除した（#762）。当時の本文は 635c93d の版にある）。observe → recall の往復と、経路A（naive）/経路B（mnemora）の焼かれる量の比較を実演する CLI サンプル。",
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

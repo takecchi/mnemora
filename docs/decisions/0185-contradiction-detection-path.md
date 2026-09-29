@@ -931,3 +931,5 @@ export function llmCassetteKey(prompt: PromptSpec): string {
 のどちらを採るかという**設計判断**である。⚠ **これは、この追記の書き手（クローン）が
 決めてよい範囲を超える。**⛔ **答えをでっち上げない。**次にこの草案を引き取る担い手か、
 オーナー本人が判定すること。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §7（§7.2・§7.4・§7.10・§7.13・§7.19 ほか）は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

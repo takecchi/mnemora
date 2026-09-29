@@ -407,3 +407,5 @@ recall 1回ごとに最大約4,000字が `index_band` に載る。
   「機構としては要らない」ことだけである。
 - **大規模テナントでの `aggregateScope` の実費。**帯の取得を同じ走査に相乗りさせたが、
   100万件規模で `ORDER BY ... LIMIT` の top-N がどれだけ効くかは測っていない。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §1.2・§2（段階4/5） は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

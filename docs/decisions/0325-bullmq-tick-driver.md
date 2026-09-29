@@ -598,3 +598,5 @@ bullmq 自身が `autorun: true` のとき内部で行っている
 - `packages/bullmq/README.md` を新設した。
 
 **まだ行っていないこと**: npm publish（段0）・Trusted Publisher 設定（段1）・直接 publish 許可（段2）・Release（段3）。オーナー向けの具体的な手順は [docs/release-v1.md](../release-v1.md) の `@mnemora/bullmq` 初回 publish の節を見ること。
+
+⚠ 2026-09-29 追記: `docs/roadmap.md` の §1.2 は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。

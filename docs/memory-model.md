@@ -778,6 +778,8 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 実装（`packages/core` の `defaultScoringStrategy`、[./recall.md](./recall.md) §7）および
 [./roadmap.md](./roadmap.md) 段階4の完了条件（「vector + tag + freshness のスコアリング」）と
 正面から食い違っていた。正しくは次の通りである。
+（⚠ 2026-09-29 追記: この段落と下の「段階3 の完了条件」が指す `docs/roadmap.md` §2 は削除した（#762）。当時の本文は
+[`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L62-L131) にある。）
 
 - **`tags` は段2の再スコア（[./recall.md](./recall.md) §2・§7）の加点要素として参加する。**
   クエリタグとの一致数に応じて `ScoreBreakdown.tagMatch` を押し上げるが、
@@ -1356,6 +1358,8 @@ CREATE INDEX idx_memories_tags
 
 ⟹ [roadmap.md](./roadmap.md) 段階3 の完了条件「同じ Observation を二重に送っても
 Memory が重複して作られない」が、**この経路だけ静かに崩れる。**
+（⚠ 2026-09-29 追記: 参照先の roadmap §2 は削除した（#762）。当時の本文は
+[`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L84-L92) にある。）
 `NULLS NOT DISTINCT`（PostgreSQL 15 以降）は NULL を1つの値として扱い、この穴を塞ぐ。
 
 **この誤りが見つからなかった理由も記録しておく。** `packages/testkit` の適合テストは
