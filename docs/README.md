@@ -1,7 +1,7 @@
 # docs — 設計判断の記録
 
 **ここに在るのは設計判断とその理由である。**実装そのものは `packages/` と `examples/` に在り、
-**Phase 1（MVP）は一巡している**（`docs/roadmap.md` §2 の段階1〜7）。
+**Phase 1（MVP）は一巡している**（`docs/roadmap.md` §2 の段階1〜7。⚠ 2026-09-29 追記: 参照先の §2 は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L62-L131) にある）。
 **この文書群は実装の説明書ではなく、なぜそう決めたかの記録である。**
 
 ## 読む順

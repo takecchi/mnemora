@@ -185,6 +185,8 @@ at-least-once が壊れる（DB がコミットされたのにジョブが飛ば
 成果物に含める。運搬役の実装がまだ `InlineScheduler` だけであっても、outbox というテーブルと
 書き込み契約自体は最初から要る。
 
+> ⚠ 2026-09-29 追記: この文書が「roadmap.md 段階N」と書いている箇所（この下・§5.1・§5.11・§5.12 の見出し・「確かめていないこと」の計7箇所）の参照先、`docs/roadmap.md` §2 は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L62-L131) にある。見出しの文字列は、アンカーを動かさないため書き換えていない。
+
 **実装（roadmap.md 段階3、ADR 0012）**: `packages/core/src/runtime.ts` の
 `createRuntime(deps: RuntimeDeps): Runtime` が `observe(ctx, input)` / `tick(ctx, opts)` を
 実装する。`deps` には `MemoryStore` / `OutboxStore`（§5.11） / `VectorStore` / `EventStore` /

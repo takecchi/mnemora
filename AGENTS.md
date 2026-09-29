@@ -37,7 +37,7 @@
 
 ## いまの状態
 
-**Phase 1（MVP）の実装が一巡した。**`docs/roadmap.md` §2 の段階1〜7 がすべて着地している。
+**Phase 1（MVP）の実装が一巡した。**`docs/roadmap.md` §2 の段階1〜7 がすべて着地している。（⚠ 2026-09-29 追記: 参照先の §2 は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L62-L131) にある。）
 
 | package | 中身 |
 |---|---|

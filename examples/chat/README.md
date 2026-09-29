@@ -1,5 +1,7 @@
 # examples/chat
 
+> ⚠ 2026-09-29 追記: この文書の「roadmap.md 段階7」（この下と「omitted と usage」の段落の2箇所）の参照先、`docs/roadmap.md` §2 は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L119-L124) にある。
+
 roadmap.md 段階7「サンプル」。**このサンプルの主目的は「動くデモ」ではなく、
 [docs/north-star.md](../../docs/north-star.md) の物差し——
 

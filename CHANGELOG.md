@@ -1292,6 +1292,8 @@ $ git diff --stat v0.5.0..origin/main -- scripts/__snapshots__/public-api/  → 
 **`v1.0.0` が節目なのは、コードが変わったからではない。**理由は
 [docs/roadmap.md](./docs/roadmap.md) の §7 と
 [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。
+（⚠ 2026-09-29 追記: 参照先の roadmap §7 は削除した（#762）。当時の本文は
+[`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L497-L1837) にある。）
 
 ⭐ **「`v1.0.0` へ上げるときに何が壊れるか」の正本は
 [docs/migration-v1.md](./docs/migration-v1.md) である**——**あちらは世代ごとに分けてある。**
@@ -1303,6 +1305,9 @@ $ git diff --stat v0.5.0..origin/main -- scripts/__snapshots__/public-api/  → 
 [docs/roadmap.md](./docs/roadmap.md) の **§7 の末尾の節**に在る
 （⛔ **節番号を固定で信じないこと**——同文書は前の節を書き換えず、後から決まったことを
 新しい節として積む。⟹ `grep -nE '^### 7\.[0-9]+ ' docs/roadmap.md` の末尾を見ること）。
+（⚠ 2026-09-29 追記: 参照先の roadmap §7 は削除した（#762）。上の grep はもう何も返さない。
+当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L497-L1837) にある。
+7項目の現在地は [docs/north-star-paths.md](./docs/north-star-paths.md) を見ること。）
 **Release 本文の草稿は [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。**
 ⛔ **どちらも件数をここへ写さない**——正は各文書である。
 
@@ -1409,6 +1414,8 @@ $ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/       → （�
 
   🔴 **この変更は、正典項目4 の判定にも効いている**——経緯は
   [docs/roadmap.md](./docs/roadmap.md) §7.17 と §7.18 に在る。
+  （⚠ 2026-09-29 追記: 参照先の §7.17・§7.18 は削除した（#762）。当時の本文は
+  [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L1470-L1661) にある。）
 
 ---
 
