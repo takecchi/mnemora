@@ -626,3 +626,17 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 [ADR 0327](./0327-relation-graph-contested-write-path-design.md) の未決）に依存する。
 案と帰結、オーナーへの問いの下書きは
 [Issue #933](https://github.com/takecchi/mnemora/issues/933) のコメントにある。
+
+## 追記（2026-09-29）: 決定5・決定6の「一致」の数え方が変わった（Issue #835、ADR 0377）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+決定5・決定6が定めた**分岐そのもの**（`findActiveByClaimKey` の一致件数で0/1/2+の3方向に
+分岐し、2+では `markContested` を呼ばない）は変わっていない。[ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+が変えたのは、**その一致を数える前に何を除くか**である——検出中の Memory と同じ
+`sourceObservationId`（＝同じ observation、同じ `observe()` 呼び出し）を持つ Memory は、
+件数に数える前に除かれるようになった（`memory.sourceObservationId` が `null` のときは
+除かない）。これにより、同じ observation から抽出された兄弟どうしが誤って「一致」に
+混入し、本来ちょうど1件になるはずの一致が2+に膨らんで決定6（`markContested` を呼ばない）
+へ誤って分岐する退行が直った。決定5・決定6 の分岐先の選び方・evidence イベントの形は
+1バイトも変えていない。詳細は ADR 0377 を見ること。

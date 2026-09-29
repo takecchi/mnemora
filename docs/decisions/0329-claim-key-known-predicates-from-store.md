@@ -633,3 +633,48 @@ predicate 一致・`contested` 成立を4/4に保つことはできなかった*
   （claimKey はカセットを壊さない、種カセットの推奨）
 - [ADR 0179](./0179-adr-number-assigned-at-merge.md)（ADR 番号はマージ直前に確定、本
   ADR が `0327`→`0328`→`0329` と振り直した経緯の根拠）
+
+## 追記（2026-09-29）: 「測ったこと」1節の訂正 4/4 ×3 は、`8c45801` 以降の main では 2/4 に退行していた（Issue #835、ADR 0377）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+「測ったこと」1節・2節が実測した新案（`knownPredicatesFromStore: true`）の訂正4件
+predicate 一致 4/4・`contested` 成立 4/4（3回とも揺れ無し）は、[PR #1303](https://github.com/takecchi/mnemora/pull/1303)
+の TSDoc（`ClaimKeyOptions.knownPredicatesFromStore`）に、記録の再生で「訂正4件が
+3回とも 4/4」という形で書き写されている。**この数字は、本 ADR を実測した時点
+（2026-09-25）の main を前提にしており、その後 main が進んだことで無効になっていた**:
+
+- [`8c45801`](https://github.com/takecchi/mnemora/pull/1318)（PR #1318、
+  [ADR 0347](./0347-extract-write-path-redelivery-and-unsaveable-candidates.md) 決定4）
+  が、抽出の書き込みを「候補ごとに書く→検出する」の1ループから「全件書く→全件について
+  検出する」の2ループへ分けた副作用として、1回の `observe()` が生んだ兄弟 Memory
+  どうしが、互いの検出時点で既に `active` になり `findActiveByClaimKey?` の一致に
+  混入するようになった。**この副作用により、`negation-moved-city`・
+  `schedule-change-deadline` の記録の再生が、訂正 `contested` 4/4 → 2/4 に退行していた**
+  （先行 Memory + 今回の2兄弟で一致が2件に膨らみ、[ADR 0324](./0324-claim-key-contested-detection.md)
+  決定5・決定6により `markContested` が一度も呼ばれなくなるため。`negation-moved-city`・
+  `schedule-change-deadline` の2件が `unresolved_conflict` になる）。`8c45801` の親
+  `f7c8d1e`（1ループ時代）では 4/4 のままだった。詳細な機序・bisect の実測（`f7c8d1e` で
+  緑・`8c45801` で赤）は [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+  「機序」節・「実測」節を見ること。
+- [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+  （Issue #835 候補1）が、`Runtime.detectClaimKeyContested`（core 側だけ）で、検出中の
+  Memory と同じ `sourceObservationId` を持つ一致を、件数を数える前に除くようにした。
+  これにより、記録の再生（`answer.claim-key.known-predicates-{1,2,3}.json`、seed 1〜3）
+  で訂正 `contested` 4/4 ×3 に戻ったことを実測した（ADR 0377「陽性対照」節・
+  「測ったこと」節）。
+- 同じ実測の範囲で、札幌/福岡（`other-period-city-this-year`、本 ADR「測ったこと」3節の
+  誤検出）は3回とも消え、`unknown-favorite-number`（本 ADR「測ったこと」3節の誤検出、
+  別 observation どうしの語彙ヒントの吸い寄せ＝上の負債1）は3回とも残ることを確認した。
+  **語彙ヒントに下限を置く案（負債1「次の手がかり」の案、issue #835 の案 (e)）は
+  今回も採らない**——下限をどこに置いても、訂正を助けている場面（本追記のとおり
+  `negation-moved-city` 等）と誤検出を起こす場面（`unknown-favorite-number`）を、
+  語彙の数という軸だけでは分けられないままである。理由の実測は
+  [issue コメント 5891683180](https://github.com/takecchi/mnemora/issues/835#issuecomment-5891683180)
+  を見ること。
+
+**PR #1303 の TSDoc（`knownPredicatesFromStore`/`detectContested` の doc コメント）が
+「訂正4件が3回とも4/4」と書いている箇所は、ADR 0377 の bisect・修正を踏まえて
+`negation-moved-city`・`schedule-change-deadline` の退行（`8c45801`）と、その後の
+ADR 0377 による回復に合わせて更新した**（PR #1424）。本 ADR 自身の本文・「測ったこと」の
+表・数字は、2026-09-25 時点の実測の記録としてそのまま残す——書き換えていない。
