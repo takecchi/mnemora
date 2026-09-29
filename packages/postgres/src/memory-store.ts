@@ -1,6 +1,10 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { defaultActivityDecayStrategy, defaultDecayStrategy } from "@mnemora/core";
+import {
+  computeEventRetentionCutoff,
+  defaultActivityDecayStrategy,
+  defaultDecayStrategy,
+} from "@mnemora/core";
 import {
   ContestedWithoutCompanionError,
   EMBEDDING_STATUS_ROLLBACK,
@@ -30,6 +34,8 @@ import type {
   ObservationId,
   OutboxJobKind,
   OutboxJobRecord,
+  PurgeExpiredEventsByRetentionOptions,
+  PurgeExpiredEventsByRetentionOutcome,
   PurgeExpiredEventsOptions,
   PurgeExpiredEventsResult,
   RecallId,
@@ -902,7 +908,10 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #210 / ADR 0115: `memory_events` から期限切れ行を消す保守ジョブ本体。
+   * Issue #210 / ADR 0115: `memory_events` から期限切れ行を消す本体。`purgeExpiredEvents`
+   * （`this.db` を渡し、自前でトランザクションの要否を決める）と
+   * `purgeExpiredEventsByRetention`（Issue #1232、ADR 0354。保持期間を読む `tx` をそのまま渡し、
+   * 同じトランザクションの中で削除まで行う）が共有する——**書き写さない**。
    *
    * 🔴 **`PostgresEventStore` を一切呼ばない。**`memory_events` へ直接 SQL を発行する
    * ——`updateStatusWithEvent`/`supersedeWithNewMemories` が append を `PostgresEventStore`
@@ -912,25 +921,23 @@ export class PostgresMemoryStore implements MemoryStore {
    * 対象の選定は {@link buildPurgeExpiredEventsTargetSelect} に切り出してある——
    * `packages/postgres/src/__tests__/memory-events-retention-index.test.ts` の `EXPLAIN`
    * がこの関数の返り値をそのまま測る（`buildRequeueEmbedTargetSelect` と同じ理由）。
-   *
-   * `dryRun` のときは対象を数えるだけで `db.transaction` を開かない——削除も INSERT も
-   * 実行しないので、トランザクションで包む対象が無い。
    */
-  async purgeExpiredEvents(
+  private async purgeExpiredEventsBody(
+    exec: SqlExecutor,
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
     const dryRun = opts.dryRun ?? false;
     // cutoff が timestamptz の下限（4714-11-24 BC）より前なら、それより古い行は存在しえない。
     // 問い合わせると `timestamp out of range` で落ちるので、0件の削除として返す
-    // （保持日数が約247万日を超えると `purgeExpiredEventsForTenant` がこの cutoff を作る）。
+    // （保持日数が約247万日を超えると `computeEventRetentionCutoff` がこの cutoff を作る）。
     if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
       return { purged: 0, reachedLimit: false, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
     }
     const target = buildPurgeExpiredEventsTargetSelect(ctx, opts);
 
     if (dryRun) {
-      const candidates = await this.db.execute(target);
+      const candidates = await exec.execute(target);
       const rows = candidates.rows as unknown as { at: string }[];
       const reachedLimit = rows.length > opts.limit;
       const victims = rows.slice(0, opts.limit);
@@ -944,57 +951,113 @@ export class PostgresMemoryStore implements MemoryStore {
       };
     }
 
+    const candidates = await exec.execute(target);
+    const rows = candidates.rows as unknown as { id: string; at: string }[];
+    const reachedLimit = rows.length > opts.limit;
+    const victims = rows.slice(0, opts.limit);
+
+    if (victims.length === 0) {
+      return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+    }
+
+    const victimIds = victims.map((row) => row.id);
+    // 対象の SELECT は行を掴まないので、同時に走った掃除は同じ行を選ぶ。先に消した側が
+    // commit した後、こちらの DELETE はその行を消さない——名乗る件数・期間は、選んだ行では
+    // なく実際に消した行（RETURNING）から取る（`purged` は「実際に削除された行数」）。
+    const deleted = await exec.execute(sql`
+      DELETE FROM memory_events
+      WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(victimIds)}::uuid[])
+      RETURNING at
+    `);
+    const deletedAts = (deleted.rows as unknown as { at: string }[])
+      .map((row) => parsePgTimestamp(row.at))
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    if (deletedAts.length === 0) {
+      return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+    }
+
+    const oldestPurgedAt = deletedAts[0]!;
+    const newestPurgedAt = deletedAts[deletedAts.length - 1]!;
+
+    await exec.execute(sql`
+      INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+      VALUES (
+        gen_random_uuid(),
+        ${ctx.tenantId},
+        NULL,
+        'events_purged',
+        now(),
+        ${JSON.stringify({ type: "system" })}::jsonb,
+        NULL,
+        NULL,
+        ${JSON.stringify({
+          purgedCount: deletedAts.length,
+          oldestPurgedAt,
+          newestPurgedAt,
+          olderThan: opts.olderThan,
+        })}::jsonb
+      )
+    `);
+
+    return { purged: deletedAts.length, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+  }
+
+  /**
+   * Issue #210 / ADR 0115: `memory_events` から期限切れ行を消す保守ジョブ本体（本体は
+   * {@link PostgresMemoryStore.purgeExpiredEventsBody} を共有する）。
+   *
+   * `dryRun` のときは対象を数えるだけで `db.transaction` を開かない——削除も INSERT も
+   * 実行しないので、トランザクションで包む対象が無い。
+   */
+  async purgeExpiredEvents(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsOptions,
+  ): Promise<PurgeExpiredEventsResult> {
+    const dryRun = opts.dryRun ?? false;
+    if (dryRun) {
+      return this.purgeExpiredEventsBody(this.db, ctx, opts);
+    }
+    return this.db.transaction((tx) => this.purgeExpiredEventsBody(tx, ctx, opts));
+  }
+
+  /**
+   * Issue #1232 / [ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md):
+   * `MemoryStore.purgeExpiredEventsByRetention?`（`@mnemora/core`）の Postgres 実装。保持期間の
+   * 読みと削除を1つのトランザクションにする——`tenant_settings.event_retention_days` を
+   * `SELECT ... FOR SHARE` で読み（`setEventRetention` の `UPDATE`/`INSERT` と行ロックで
+   * 競合する。歯は `purge-expired-events-by-retention-concurrency.postgres.test.ts`）、
+   * `days` のときだけ {@link PostgresMemoryStore.purgeExpiredEventsBody} を**同じトランザクションの
+   * 中で**呼ぶ。`dryRun` のときも `FOR SHARE` の読みは同じトランザクションで行う——
+   * `purgeExpiredEvents`（上）と違い、ここではトランザクションを省略しない。
+   *
+   * `TenantSettingsStore` を経由しない——別 adapter を呼ぶとその呼び出し自体がこの
+   * トランザクションの外に出てしまう（`MemoryStore.purgeExpiredEventsByRetention` の
+   * interface doc「契約」参照）。
+   */
+  async purgeExpiredEventsByRetention(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsByRetentionOptions,
+  ): Promise<PurgeExpiredEventsByRetentionOutcome> {
     return this.db.transaction(async (tx) => {
-      const candidates = await tx.execute(target);
-      const rows = candidates.rows as unknown as { id: string; at: string }[];
-      const reachedLimit = rows.length > opts.limit;
-      const victims = rows.slice(0, opts.limit);
-
-      if (victims.length === 0) {
-        return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
-      }
-
-      const victimIds = victims.map((row) => row.id);
-      // 対象の SELECT は行を掴まないので、同時に走った掃除は同じ行を選ぶ。先に消した側が
-      // commit した後、こちらの DELETE はその行を消さない——名乗る件数・期間は、選んだ行では
-      // なく実際に消した行（RETURNING）から取る（`purged` は「実際に削除された行数」）。
-      const deleted = await tx.execute(sql`
-        DELETE FROM memory_events
-        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(victimIds)}::uuid[])
-        RETURNING at
+      const settingsResult = await tx.execute(sql`
+        SELECT event_retention_days FROM tenant_settings WHERE tenant_id = ${ctx.tenantId}
+        FOR SHARE
       `);
-      const deletedAts = (deleted.rows as unknown as { at: string }[])
-        .map((row) => parsePgTimestamp(row.at))
-        .sort((a, b) => a.getTime() - b.getTime());
-
-      if (deletedAts.length === 0) {
-        return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+      if (settingsResult.rows.length === 0) {
+        return { kind: "unset" };
       }
-
-      const oldestPurgedAt = deletedAts[0]!;
-      const newestPurgedAt = deletedAts[deletedAts.length - 1]!;
-
-      await tx.execute(sql`
-        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
-        VALUES (
-          gen_random_uuid(),
-          ${ctx.tenantId},
-          NULL,
-          'events_purged',
-          now(),
-          ${JSON.stringify({ type: "system" })}::jsonb,
-          NULL,
-          NULL,
-          ${JSON.stringify({
-            purgedCount: deletedAts.length,
-            oldestPurgedAt,
-            newestPurgedAt,
-            olderThan: opts.olderThan,
-          })}::jsonb
-        )
-      `);
-
-      return { purged: deletedAts.length, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+      const row = settingsResult.rows[0] as unknown as { event_retention_days: number | null };
+      if (row.event_retention_days === null) {
+        return { kind: "unlimited" };
+      }
+      const olderThan = computeEventRetentionCutoff(opts.now, row.event_retention_days);
+      const result = await this.purgeExpiredEventsBody(tx, ctx, {
+        olderThan,
+        limit: opts.limit,
+        dryRun: opts.dryRun,
+      });
+      return { kind: "executed", result };
     });
   }
 

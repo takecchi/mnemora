@@ -49,7 +49,14 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore: new InMemoryEventStore(memoryStore, memoryStore.events),
-        settings: new InMemoryTenantSettingsStore(memoryStore.activitySeq),
+        // `eventRetentionDays` を共有することで、`setEventRetention`（書く側）と
+        // `memoryStore.purgeExpiredEventsByRetention`（読む側）が同じ値を見る
+        // （`InMemoryTenantSettingsStore` クラス doc の2026-09-29追記参照）。
+        settings: new InMemoryTenantSettingsStore(
+          memoryStore.activitySeq,
+          undefined,
+          memoryStore.eventRetentionDays,
+        ),
       };
     },
   ],
