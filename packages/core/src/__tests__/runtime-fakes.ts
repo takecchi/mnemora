@@ -233,6 +233,13 @@ class FakeBackingStore {
    */
   labels = new Map<string, LabelSummary>();
   /**
+   * Issue #995/#1207 / [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md):
+   * `memory_labels` 相当——`(tenantId, memoryId)` からその Memory が紐づく label 名の
+   * 集合へ。`packages/testkit` の `InMemoryMemoryStore.memoryLabels` と同じ形・同じ理由
+   * ——`purgeMemory` がこの紐付けを外し `proposedCount` を減らすために使う。
+   */
+  memoryLabels = new Map<string, Set<string>>();
+  /**
    * Issue #1232 / [ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md):
    * `tenant_settings.event_retention_days` 相当。`FakeMemoryStore.purgeExpiredEventsByRetention`
    * （読む側）と `FakeTenantSettingsStore.setEventRetention`（書く側）が同じ `FakeBackingStore` を
@@ -662,7 +669,7 @@ export class FakeMemoryStore implements MemoryStore {
       }
       // Issue #201 PR-B（ADR 0323）: `packages/testkit` の `InMemoryMemoryStore` と同じ
       // 契機——新しい行を実際に作ったときだけ `tags` から `proposed` ラベルを作る。
-      this.upsertProposedLabels(ctx, memory.tags);
+      this.upsertProposedLabels(ctx, memory.id, memory.tags);
       return memory;
     });
   }
@@ -675,12 +682,23 @@ export class FakeMemoryStore implements MemoryStore {
     return JSON.stringify([tenantId, name]);
   }
 
+  /** `labelKey` と同じ形——`(tenantId, memoryId)` を `JSON.stringify` の配列で表す。 */
+  private memoryLabelKey(tenantId: string, memoryId: string): string {
+    return JSON.stringify([tenantId, memoryId]);
+  }
+
   /**
    * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `packages/testkit` の `InMemoryMemoryStore.upsertProposedLabels` と同じ意味論。
+   * Issue #995/#1207 / [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md):
+   * どの label 名に紐づいたかを `backing.memoryLabels` にも記録する（`purgeMemory` が使う）。
    */
-  private upsertProposedLabels(ctx: Ctx, tags: readonly string[]): void {
+  private upsertProposedLabels(ctx: Ctx, memoryId: MemoryId, tags: readonly string[]): void {
     const uniqueNames = Array.from(new Set(tags));
+    if (uniqueNames.length === 0) {
+      return;
+    }
+    const linked = new Set<string>();
     for (const name of uniqueNames) {
       const key = this.labelKey(ctx.tenantId, name);
       const existing = this.backing.labels.get(key);
@@ -691,12 +709,15 @@ export class FakeMemoryStore implements MemoryStore {
           proposedCount: 1,
           registeredAt: null,
         });
+        linked.add(name);
         continue;
       }
       if (existing.status === "proposed") {
         this.backing.labels.set(key, { ...existing, proposedCount: existing.proposedCount + 1 });
       }
+      linked.add(name);
     }
+    this.backing.memoryLabels.set(this.memoryLabelKey(ctx.tenantId, memoryId), linked);
   }
 
   /**
@@ -1651,10 +1672,16 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #198 / ADR 0124: `forgotten` かつ未 purge（`purgedAt === null`）な Memory だけを
-   * 対象にした CAS。`beforeUpdateStatus`（テスト専用のフック）を CAS 判定の直前に発火する
+   * Issue #198 / ADR 0124 / [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md):
+   * `forgotten` かつ未 purge（`purgedAt === null`）な Memory だけを対象にした CAS。
+   * `beforeUpdateStatus`（テスト専用のフック）を CAS 判定の直前に発火する
    * ——`updateStatus`/`updateStatusWithEvent` と同じ位置・同じ理由（`purge` の並行の歯も
    * この既存のフックで決定的に再現する）。
+   *
+   * 🔴 ADR 0375 決定1〜3: `content`/`digest`/`purgedAt` に加えて `tags`/`attributes`/
+   * `claimKey` を空にし、label の紐付けを外して `proposedCount` を減らし、このテナントの
+   * `recalls` の `indexBand.digestBand` から該当 `memoryId` の `digest` を書き換える
+   * ——`packages/testkit` の `InMemoryMemoryStore.purgeMemory` と同じ範囲。
    */
   async purgeMemory(
     ctx: Ctx,
@@ -1675,8 +1702,47 @@ export class FakeMemoryStore implements MemoryStore {
     const storedEvent = buildStoredEvent(ctx, event);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
+    memory.tags = [];
+    memory.attributes = {};
+    memory.claimKey = null;
     memory.purgedAt = new Date();
     memory.updatedAt = new Date();
+
+    // ADR 0375 決定2: label の紐付けを外し、proposed な label の proposedCount を減らす。
+    const linkKey = this.memoryLabelKey(ctx.tenantId, id);
+    const linkedLabelNames = this.backing.memoryLabels.get(linkKey);
+    if (linkedLabelNames !== undefined) {
+      for (const name of linkedLabelNames) {
+        const key = this.labelKey(ctx.tenantId, name);
+        const existing = this.backing.labels.get(key);
+        if (existing !== undefined && existing.status === "proposed") {
+          this.backing.labels.set(key, {
+            ...existing,
+            proposedCount: Math.max(existing.proposedCount - 1, 0),
+          });
+        }
+      }
+      this.backing.memoryLabels.delete(linkKey);
+    }
+
+    // ADR 0375 決定3: このテナントの recalls.index_band の digestBand から、この
+    // memoryId のエントリを見つけてトゥームストーンへ書き換える（`recalls.query` は
+    // 触らない——決定4）。
+    for (const row of this.backing.recalls.values()) {
+      if (row.tenantId !== ctx.tenantId) continue;
+      const digestBand = row.indexBand?.digestBand;
+      if (!digestBand) continue;
+      let changed = false;
+      const nextDigestBand = digestBand.map((entry) => {
+        if (entry.memoryId !== id) return entry;
+        changed = true;
+        return { memoryId: entry.memoryId, digest: tombstone.digest };
+      });
+      if (changed) {
+        row.indexBand = { ...row.indexBand, digestBand: nextDigestBand };
+      }
+    }
+
     this.backing.events.push(storedEvent);
     return { memory, event: storedEvent };
   }

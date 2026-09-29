@@ -23,8 +23,16 @@ import {
 
 /**
  * 1つのテナントを消去した後（全記憶を forget → purge し、イベントの保持期間を1日にして掃除した後）に、
- * 表ごとに何が残るかを、今の振る舞いのまま縛る（`docs/memory-model.md` §9 の 2026-09-27 追記、Issue #1207）。
- * 約束を足すものではない——消すべきかどうかは #994・#995・#1207 で決まっていない。
+ * 表ごとに何が残るかを縛る（`docs/memory-model.md` §9 の 2026-09-29 追記、Issue #1207、
+ * [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md)）。
+ *
+ * ADR 0375 より前は、この歯は「今の振る舞い」を書き写すだけで約束を足すものではなかった
+ * （`tags`・`memory_labels`・`recalls.index_band` の digest 帯がどれも残ることを、消すべきかの
+ * 決定が無いまま記録していた）。ADR 0375 決定1〜3 がこれらを purge の契約に含めたため、
+ * この歯は**いまは契約——(a) で消えると書いた列が実際に消えることを縛る**。(b) として
+ * 残ると決めたもの（`recalls.query`・`content_hash`・`provenance.speaker`・
+ * `observations.payload`・完了した outbox の行・`recall_usages`）は、これまでどおり
+ * 「決まっていない」ではなく ADR 0375「(b) 残る」表の約束として残る。
  */
 
 const T = "erase-me";
@@ -160,24 +168,43 @@ describe("1つのテナントを消去した後に残るもの（今の振る舞
     expect(retention.kind).toBe("executed");
 
     const secret = `to_jsonb(x)::text LIKE '%${S}%'`;
-    // memories: 行は残る。content・digest は消え、tags・attributes・provenance.speaker・subject_id が残る。
+    // memories: 行は残る。(a) content・digest・tags・attributes・claim key は消える。
+    // (b) provenance.speaker・subject_id は ADR 0375 でも残ると決めた（決まっていない、ではなく約束）。
     expect(await countOf("memories", T)).toBe(ids.length);
     expect(await countOf("memories", T, `content LIKE '%${S}%' OR digest LIKE '%${S}%'`)).toBe(0);
     expect(await countOf("memories", T, `provenance->>'speaker' = '${S}-speaker'`)).toBeGreaterThan(
       0,
     );
-    expect(await countOf("memories", T, `tags::text LIKE '%${S}%'`)).toBe(ids.length);
-    // observations: payload・attributes・subject_id・external_id が元のまま。
+    // ADR 0375 決定1: tags はこのテナントの全記憶から消える（extract・consolidate・reflect の
+    // どの由来の Memory も、purge の前は `${S}-tag` を持っていた——`ids.length` は下の変更前の
+    // 期待値だったが、purge 後は0件でなければならない）。
+    expect(await countOf("memories", T, `tags::text LIKE '%${S}%'`)).toBe(0);
+    // observations: payload・attributes・subject_id・external_id が元のまま（(b)、Observation に
+    // purge の経路は無い）。
     expect(await countOf("observations", T, `payload::text LIKE '%${S} 発話%'`)).toBe(6);
     expect(await countOf("observations", T, `external_id LIKE '${S}-ext-%'`)).toBe(6);
     // 今の空間の埋め込みは消える。
     expect(await countOf(embeddingSpaceTableName(TEST_EMBEDDING_SPACE), T)).toBe(0);
-    // labels・memory_labels は残る。
+    // labels: 行そのものは残る（名前を消す口が無い、ADR 0318）が、proposed_count はこの
+    // テナントの purge で0まで減る（ADR 0375 決定2、近似のまま床は0）。
+    // memory_labels: 紐付けはすべて外れる（ADR 0375 決定2）。
     expect(await countOf("labels", T, secret)).toBe(1);
-    expect(await countOf("memory_labels", T)).toBeGreaterThan(0);
-    // recalls: 利用者の recall と、自動ジョブの中の recall の行が全部残り、問いの本文と種の digest を持つ。
+    {
+      const proposedCount = await pool.query<{ proposed_count: number }>(
+        `SELECT proposed_count FROM labels WHERE tenant_id = $1 AND name = $2`,
+        [T, `${S}-tag`],
+      );
+      expect(proposedCount.rows[0]?.proposed_count).toBe(0);
+    }
+    expect(await countOf("memory_labels", T)).toBe(0);
+    // recalls: 行そのものは全部残る（(b)、保持方針は #1207 で決まっていない）。
+    // query（問いの本文・consolidate/reflect の種の digest）は (b) として残る
+    // ——`memoryId` で特定できないため purge では触らない（ADR 0375 決定4）。
     expect(await countOf("recalls", T, `query->>'text' = '${S} の問い'`)).toBe(1);
     expect(await countOf("recalls", T, `query->>'text' LIKE '${S} 要旨 %'`)).toBeGreaterThan(0);
+    // index_band の digest 帯は (a) として伏せられる（ADR 0375 決定3）——この元の要旨は
+    // どの recall 行の index_band にも、もう文字列としては現れない。
+    expect(await countOf("recalls", T, `index_band::text LIKE '%${S} 要旨%'`)).toBe(0);
     expect(await countOf("recall_usages", T)).toBe(1);
     // outbox: 完了した行が残る（payload は id だけ）。
     expect(await countOf("outbox", T)).toBeGreaterThan(0);

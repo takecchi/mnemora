@@ -2186,12 +2186,33 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #198 / ADR 0124: `forgotten` かつ未 purge（`purged_at IS NULL`）の Memory だけを
-   * 対象にした CAS。`updateStatusWithEvent`（本ファイル上部）と同じ形——条件付き `UPDATE`
-   * が0行なら、対象がそもそも存在しないのか（`isUuidLike` の事前チェックで弾く、または
-   * 読み直しで0行）、条件を満たさなかったのか（読み直して {@link MemoryPurgeConflictError}
-   * を投げる）を切り分ける。`status` は更新しない——`purged` は `memories.status` の値
+   * Issue #198 / ADR 0124 / [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md):
+   * `forgotten` かつ未 purge（`purged_at IS NULL`）の Memory だけを対象にした CAS。
+   * `updateStatusWithEvent`（本ファイル上部）と同じ形——条件付き `UPDATE` が0行なら、
+   * 対象がそもそも存在しないのか（`isUuidLike` の事前チェックで弾く、または読み直しで
+   * 0行）、条件を満たさなかったのか（読み直して {@link MemoryPurgeConflictError} を
+   * 投げる）を切り分ける。`status` は更新しない——`purged` は `memories.status` の値
    * ではない（docs/memory-model.md §11 行10）。
+   *
+   * 🔴 ADR 0375 決定1: `content`/`digest`/`purged_at` に加えて、`tags`・`attributes`・
+   * `claim_key_subject`/`claim_key_predicate` もこの UPDATE で空にする——「その記憶の
+   * 本文から直接たどれる派生物」を一緒に消す（CAS が弾かれれば、これらも一切書かない）。
+   *
+   * CAS が通った後、同じトランザクションで2つの派生的な書き込みを追加する
+   * （ADR 0375 決定2・決定3）:
+   * 1. `memory_labels` からこの Memory の行を削除し、`status = 'proposed'` のまま残る
+   *    `labels.proposed_count` を、外した本数だけ減らす（`GREATEST(…, 0)` で床を敷く。
+   *    `upsertProposedLabels` の increment と対称。ADR 0318「引き受けた負債」1 が
+   *    `proposed_count` を近似値と既に引き受けている——この減算も同じ近似の中にいる）。
+   * 2. このテナントの `recalls.index_band` の `digestBand` に、この `memoryId` を持つ
+   *    エントリがあれば `digest` をトゥームストーンへ書き換える（`truncated` は落とす
+   *    ——もう「長さで切った」わけではないため）。`recalls.query`（`consolidate`/`reflect`
+   *    が種の digest を `text` にして撃った recall の分）はここでは触らない
+   *    ——`memoryId` で特定できないため（ADR 0375 決定4、Issue #994 のコメント）。
+   *
+   * ⚠ **この `recalls` の UPDATE はテナント全体の `index_band` を舐める**
+   * （`? 'digestBand'` と `@>` の containment で絞ってはいるが、絞り込みに使える索引が
+   * 無いため実質フルスキャン）。実測した費用は ADR 0375 決定6 を見ること。
    */
   async purgeMemory(
     ctx: Ctx,
@@ -2212,6 +2233,10 @@ export class PostgresMemoryStore implements MemoryStore {
         UPDATE memories
         SET content = ${tombstone.content},
             digest = ${tombstone.digest},
+            tags = '{}',
+            attributes = '{}'::jsonb,
+            claim_key_subject = NULL,
+            claim_key_predicate = NULL,
             purged_at = ${toPgTimestamp(at)},
             updated_at = now()
         WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
@@ -2253,6 +2278,49 @@ export class PostgresMemoryStore implements MemoryStore {
         RETURNING *
       `);
       const storedEvent = rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
+
+      // ADR 0375 決定2: memory_labels を外し、proposed な labels.proposed_count を減らす。
+      await tx.execute(sql`
+        WITH removed_labels AS (
+          DELETE FROM memory_labels
+          WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${id}
+          RETURNING label_id
+        ),
+        counted AS (
+          SELECT label_id, count(*) AS n FROM removed_labels GROUP BY label_id
+        )
+        UPDATE labels
+        SET proposed_count = GREATEST(labels.proposed_count - counted.n, 0)
+        FROM counted
+        WHERE labels.tenant_id = ${ctx.tenantId}
+          AND labels.id = counted.label_id
+          AND labels.status = 'proposed'
+      `);
+
+      // ADR 0375 決定3: このテナントの recalls.index_band の digestBand から、この
+      // memoryId のエントリを見つけてトゥームストーンへ書き換える（他のエントリ・
+      // 他テナントの行は変えない）。
+      await tx.execute(sql`
+        UPDATE recalls
+        SET index_band = jsonb_set(
+          index_band,
+          '{digestBand}',
+          (
+            SELECT coalesce(jsonb_agg(
+              CASE
+                WHEN elem->>'memoryId' = ${id}
+                THEN jsonb_build_object('memoryId', elem->'memoryId', 'digest', ${tombstone.digest}::text)
+                ELSE elem
+              END
+              ORDER BY ord
+            ), '[]'::jsonb)
+            FROM jsonb_array_elements(index_band->'digestBand') WITH ORDINALITY AS t(elem, ord)
+          )
+        )
+        WHERE tenant_id = ${ctx.tenantId}
+          AND index_band ? 'digestBand'
+          AND index_band->'digestBand' @> jsonb_build_array(jsonb_build_object('memoryId', ${id}::text))
+      `);
 
       return { memory, event: storedEvent };
     });

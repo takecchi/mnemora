@@ -1326,6 +1326,26 @@ export interface MemoryStore {
    * 参照整合性のため、また `superseded_by_id`/`contested_with_id` の参照先としても
    * 残す必要があるため）。
    *
+   * 🔴 **[ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md)（Issue #994・
+   * #995・#1207）: `content`/`digest` だけでなく、「その記憶の本文と、本文から直接
+   * たどれる派生物」も一緒に消す。**この呼び出しの中で、同じ書き込みとして:
+   * - `tags` を空配列に、`attributes` を空オブジェクトに、`claimKey` を `null` にする。
+   * - この Memory に紐づく label の紐付け（`memory_labels` 相当）をすべて外し、
+   *   `status: 'proposed'` のまま残る label の `proposedCount` を、外した本数だけ減らす
+   *   （`registered` に昇格済みの label は触らない——`upsertProposedLabels` の increment と
+   *   対称。**近似値のままである**——ADR 0318「引き受けた負債」1 が同じ `proposedCount`
+   *   を既に近似値と引き受けている）。
+   * - このテナントの `recalls`（recall の記録）の目次帯（`IndexBand.digestBand`）に、
+   *   この `memoryId` を持つエントリがあれば、その `digest` をトゥームストーンへ
+   *   書き換える（`truncated` は落とす）。
+   *
+   * 🔴 **この呼び出しの後も残るもの**（ADR 0375「(b) 残る」表）: `recalls.query`
+   * （`consolidate`/`reflect` が種の digest を `text` にして撃った recall の分を含む
+   * ——`memoryId` で特定できないため触らない）、`contentHash`、元の Observation の
+   * `payload`、`memory_events.digestSnapshot`（監査ログ）、`provenance.speaker`、
+   * `recall_usages`・完了した outbox の行、**今の `embeddingProvider.space` 以外の
+   * embedding**（決定5参照）。詳しくは ADR 0375 を見ること。
+   *
    * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
    * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`「してはいけ
    * ないこと」表の「公開 API の破壊的変更」、[ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md)
@@ -1357,22 +1377,31 @@ export interface MemoryStore {
    *   上書きし、`purgedAt` に書き込み時刻を設定し、同一トランザクションで `event`
    *   （`kind: 'purged'`）を追記する。**片方だけ起きることはない**（ADR 0031 が確立した
    *   「更新とイベントは同値」をここでも適用）。
+   * - 🔴 **[ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md) 決定1**:
+   *   同じ書き込みで `tags` を `[]` へ、`attributes` を `{}` へ、`claimKey` を `null` へ
+   *   上書きする。
+   * - 🔴 **ADR 0375 決定2**: 同じトランザクションで、この Memory に紐づく label の
+   *   紐付けをすべて外し、`status: 'proposed'` のまま残る label の `proposedCount` を
+   *   外した本数だけ減らす（床は0。`registered` な label は触らない）。
+   * - 🔴 **ADR 0375 決定3**: 同じトランザクションで、このテナントの `recalls` の
+   *   `IndexBand.digestBand` からこの `memoryId` のエントリを見つけ、`digest` を
+   *   `tombstone.digest` へ書き換える（`truncated` は落とす）。`recalls.query` は
+   *   触らない（`memoryId` で特定できないため、ADR 0375 決定4）。
    * - `status`/`contentHash`/`digestSource` は変更しない。**`status` は `'forgotten'` の
    *   ままである。**
    * - `event.digestSnapshot` は呼び出し側が上書き**前**の digest を渡すこと
    *   （このメソッド自身は snapshot を作らない——`updateStatusWithEvent` と同じ、
    *   「呼び出し側が読んだ値を event に埋める」規律）。**purge の後、`memories` の行には元の
-   *   `content`・`digest` は残らない。**元の digest は、この監査ログ（`digestSnapshot`）のほかに、
-   *   purge より前に撃った recall の記録にも残る——`recalls.index_band` の digest 帯と、
-   *   `consolidate`/`reflect` が種の digest を `text` にして撃った recall の `recalls.query` である。
-   *   recall の記録の分は、イベントの保持期間の掃除（{@link MemoryStore.purgeExpiredEvents}）で監査ログを
-   *   消した後にも残る。`memories` の外に残るもの（元の Observation の `payload` など）の一覧は
-   *   `docs/memory-model.md` §9 の 2026-09-27 追記にある。どこまで消すかは決まっていない
-   *   （[Issue #994](https://github.com/takecchi/mnemora/issues/994)・
-   *   [Issue #995](https://github.com/takecchi/mnemora/issues/995)）。
+   *   `content`・`digest`・`tags`・`attributes`・`claimKey` は残らない。**
+   *   それでも残るものの一覧（`recalls.query`・`contentHash`・元の Observation の
+   *   `payload`・監査ログの `digestSnapshot`・`provenance.speaker`・別 space の
+   *   embedding など）は ADR 0375「(b) 残る」表と `docs/memory-model.md` §9 の
+   *   2026-09-29 追記を見ること。
    *   ⚠ 2026-09-28 訂正: ここは以前「purge 後、元の digest が残る唯一の場所はこの監査ログである
-   *   （`content` は事後もどこにも残らない）」と書いていたが、上の recall の記録の分と
-   *   Observation の `payload` があり、実装と合っていなかった。文書を実装に合わせた（実装は変えていない）。
+   *   （`content` は事後もどこにも残らない）」と書いていたが、recall の記録の分と
+   *   Observation の `payload` があり、実装と合っていなかった。文書を実装に合わせた。
+   *   ⚠ 2026-09-29 追記（ADR 0375）: 上の訂正が挙げた「recall の記録に残る元の digest」は
+   *   `index_band` の分についてはこの PR で消える（`recalls.query` の分は残ったまま）。
    */
   purgeMemory?(
     ctx: Ctx,
@@ -1597,6 +1626,17 @@ export interface MemoryStore {
    *   だけで、順序に依存する判断をしない。
    * - **LLM を一度も呼ばない。**列の等値比較・範囲比較・索引アクセスだけで完結する
    *   （北極星 問い5）。
+   *
+   * ⚠ **（ADR 0377、Issue #835 候補1）この口自体は `sourceObservationId` で絞らない
+   * ——同じ observation から抽出された兄弟 Memory どうしも、他の契約（鍵・有効期間・
+   * `contentHash`）を満たせば返り値に含めてよい。** 呼び出し側（`Runtime.
+   * detectClaimKeyContested`）が、返り値から「検出中の memory と同じ
+   * `sourceObservationId`」を持つ行を件数を数える前に除く前提で実装されている
+   * （`memory.sourceObservationId` が `null` のときは除かない）。この口の contract に
+   * `LIMIT` は無いので、adapter が独自に結果件数を絞らない限りこの前提は保てる——
+   * ただし interface 自体は adapter が `LIMIT` を付けることを禁じていない（その場合
+   * core 側の除外が効かないことがある）。詳細は ADR 0377 の「店へ押し下げない理由」を
+   * 見ること。
    */
   findActiveByClaimKey?(
     ctx: Ctx,

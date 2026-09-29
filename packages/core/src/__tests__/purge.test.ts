@@ -717,3 +717,89 @@ describe("runtime.purge — ループ前の一括読み（getMany）が失敗す
     expect(stores.eventStore.events.filter((e) => e.kind === "purged")).toHaveLength(0);
   });
 });
+
+/**
+ * [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md)（Issue #994・#995・
+ * #1207）: `runtime.purge` は `memoryStore.purgeMemory` をそのまま呼ぶだけで、広げた範囲
+ * （`tags`/`attributes`/`claimKey`・label の紐付け・`recalls.index_band`）はすべて
+ * `MemoryStore.purgeMemory` 側の契約——ここでは `FakeMemoryStore`（`runtime-fakes.ts`）が
+ * `@mnemora/postgres`/`@mnemora/testkit` と同じ範囲を実装していることを、`Runtime.purge`
+ * 経由で end-to-end に確かめる（Issue #994 本文の再現方法と同じ形——fake ストアに対する
+ * 一時テストだった実測を、恒久の歯として持ち込む）。
+ */
+describe("runtime.purge — ADR 0375: 広げた範囲（tags・attributes・claim key・labels・recalls の目次帯）", () => {
+  it("purge は tags・attributes・claim key を空にする", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        status: "forgotten",
+        tags: ["secret-tag"],
+        attributes: { owner: "alice" },
+        claimKey: { subject: "user", predicate: "home_city" },
+      }),
+    );
+
+    await runtime.purge(ctx, { memoryId: memory.id });
+
+    const after = await stores.memoryStore.get(ctx, memory.id);
+    expect(after?.tags).toEqual([]);
+    expect(after?.attributes).toEqual({});
+    expect(after?.claimKey ?? null).toBeNull();
+  });
+
+  it("purge は label の紐付けを外し、proposed な label の proposedCount を減らす（他の Memory が同じ label を使い続けていれば、その分は残る）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const target = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", tags: ["shared-tag"] }),
+    );
+    await stores.memoryStore.createMemory(ctx, newMemory({ tags: ["shared-tag"] }));
+    expect(
+      (await stores.memoryStore.listLabels!(ctx)).find((l) => l.name === "shared-tag")
+        ?.proposedCount,
+    ).toBe(2);
+
+    await runtime.purge(ctx, { memoryId: target.id });
+
+    expect(
+      (await stores.memoryStore.listLabels!(ctx)).find((l) => l.name === "shared-tag"),
+    ).toEqual({ name: "shared-tag", status: "proposed", proposedCount: 1, registeredAt: null });
+  });
+
+  it("purge はこのテナントの recalls.index_band の digestBand から、この memoryId の digest を伏せる（Issue #994 の再現）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", digest: "SECRET-DIGEST" }),
+    );
+    const usage = {
+      chars: 0,
+      estimatedTokens: 0,
+      counter: "heuristic" as const,
+      byTier: { full: 0, digest: 0, index: 0 },
+      indexChars: 0,
+    };
+    const recallId = await stores.memoryStore.createRecall(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId: null,
+      query: { text: "q" },
+      budget: null,
+      omitted: [],
+      usage,
+      indexBand: {
+        groups: [],
+        totalInScope: 1,
+        countKind: "exact",
+        digestBand: [{ memoryId: memory.id, digest: memory.digest }],
+      },
+      explain: { stages: [] },
+      returnedMemories: [],
+    });
+
+    await runtime.purge(ctx, { memoryId: memory.id });
+
+    const record = await stores.memoryStore.getRecall(ctx, recallId);
+    expect(record?.indexBand.digestBand).toEqual([{ memoryId: memory.id, digest: "[purged]" }]);
+  });
+});

@@ -504,12 +504,26 @@ export class InMemoryMemoryStore implements MemoryStore {
   private readonly labels = new Map<string, LabelSummary>();
 
   /**
+   * Issue #995/#1207 / [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md):
+   * `memory_labels` 相当——`(tenantId, memoryId)` からその Memory が紐づく label 名の
+   * 集合へ。`labels`（上）は `proposedCount` 等の集計だけを持ち、どの memory がどの
+   * label を持つかを個別には追跡していなかった——`purgeMemory` が「この Memory の
+   * label の紐付けを外し、その分だけ `proposedCount` を減らす」ためにこの PR で新設した。
+   */
+  private readonly memoryLabels = new Map<string, Set<string>>();
+
+  /**
    * `(tenantId, name)` を区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId` は不透明な
    * 文字列で `::` を含んでよい（`Ctx` の doc）。以前の `${tenantId}::${name}` は、テナント `a::b` の
    * `x` とテナント `a` の `b::x` を同じキーに潰していた（`labels-tenant-key.postgres.test.ts`）。
    */
   private labelKey(tenantId: string, name: string): string {
     return JSON.stringify([tenantId, name]);
+  }
+
+  /** `labelKey` と同じ理由・同じ形——`(tenantId, memoryId)` を `JSON.stringify` の配列で表す。 */
+  private memoryLabelKey(tenantId: string, memoryId: string): string {
+    return JSON.stringify([tenantId, memoryId]);
   }
 
   /**
@@ -519,20 +533,29 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `createMemoryIdempotent` の「新しい行を実際に作った」分岐からだけ呼ぶ
    * （冪等衝突では呼ばない——postgres 実装と同じ判断）。
    */
-  private upsertProposedLabels(ctx: Ctx, tags: readonly string[]): void {
+  private upsertProposedLabels(ctx: Ctx, memoryId: MemoryId, tags: readonly string[]): void {
     const uniqueNames = Array.from(new Set(tags));
+    if (uniqueNames.length === 0) {
+      return;
+    }
+    const linked = new Set<string>();
     for (const name of uniqueNames) {
       const key = this.labelKey(ctx.tenantId, name);
       const existing = this.labels.get(key);
       if (existing === undefined) {
         this.labels.set(key, { name, status: "proposed", proposedCount: 1, registeredAt: null });
+        linked.add(name);
         continue;
       }
       if (existing.status === "proposed") {
         this.labels.set(key, { ...existing, proposedCount: existing.proposedCount + 1 });
       }
       // status === 'registered' の場合は件数を進めない（postgres 実装と同じ）。
+      linked.add(name);
     }
+    // Issue #995/#1207 / ADR 0375: この Memory がどの label 名に紐づいたかを覚える——
+    // `purgeMemory` がこの紐付けを外し、`proposedCount` を減らすために使う。
+    this.memoryLabels.set(this.memoryLabelKey(ctx.tenantId, memoryId), linked);
   }
 
   /**
@@ -736,7 +759,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       // `supersedeWithNewMemories` はすべてこの `createMemoryIdempotent` を通る
       // （このファイル冒頭の doc コメント参照）——「新しい行を実際に作った」この分岐
       // だけで1回呼べば3経路すべてを覆える。
-      this.upsertProposedLabels(ctx, stored.tags);
+      this.upsertProposedLabels(ctx, stored.id, stored.tags);
       return stored;
     });
   }
@@ -1041,6 +1064,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
     const outboxLengthBefore = this.outboxJobs.length;
     const labelsBefore = new Map(this.labels);
+    // ADR 0375: `memoryLabels` も `labels` と同じロールバック対象——新設した構造を
+    // ここで写し忘れると、途中失敗した `news` の label 紐付けだけが残ってしまう。
+    const memoryLabelsBefore = new Map(
+      [...this.memoryLabels].map(([key, names]) => [key, new Set(names)] as const),
+    );
     const extractionIndexBefore = new Map(this.extractionIndex);
     try {
       for (const { input, jobKinds } of news) {
@@ -1063,6 +1091,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.outboxJobs.splice(outboxLengthBefore);
       this.labels.clear();
       for (const [key, value] of labelsBefore) this.labels.set(key, value);
+      this.memoryLabels.clear();
+      for (const [key, value] of memoryLabelsBefore) this.memoryLabels.set(key, value);
       this.extractionIndex.clear();
       for (const [key, value] of extractionIndexBefore) this.extractionIndex.set(key, value);
       throw err;
@@ -1924,11 +1954,17 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #198 / ADR 0124: `forgotten` かつ未 purge（`purgedAt === null`）の Memory だけを
-   * 対象にした CAS——`content`/`digest` をトゥームストーンで上書きし `purgedAt` を設定した上で
+   * Issue #198 / ADR 0124 / [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md):
+   * `forgotten` かつ未 purge（`purgedAt === null`）の Memory だけを対象にした CAS
+   * ——`content`/`digest` をトゥームストーンで上書きし `purgedAt` を設定した上で
    * `kind: 'purged'` のイベントを積む。`status` は動かさない（`purged` は `status` の値では
    * ない）。条件を満たさなければ {@link MemoryPurgeConflictError} を投げる（`updateStatus`/
    * `updateStatusWithEvent` と同じ「まだ何も書いていないうちに判定する」作法）。
+   *
+   * 🔴 ADR 0375 決定1〜3: `content`/`digest`/`purgedAt` に加えて、`tags`/`attributes`/
+   * `claimKey` を空にし、label の紐付けを外して `proposedCount` を減らし（`memoryLabels`
+   * 参照）、このテナントの `recalls` の `indexBand.digestBand` から該当 `memoryId` の
+   * `digest` を書き換える——`packages/postgres` の `purgeMemory` と同じ範囲。
    */
   async purgeMemory(
     ctx: Ctx,
@@ -1950,8 +1986,47 @@ export class InMemoryMemoryStore implements MemoryStore {
     const at = event.at ?? new Date();
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
+    memory.tags = [];
+    memory.attributes = {};
+    memory.claimKey = null;
     memory.purgedAt = at;
     memory.updatedAt = new Date();
+
+    // ADR 0375 決定2: label の紐付けを外し、proposed な label の proposedCount を減らす。
+    const linkKey = this.memoryLabelKey(ctx.tenantId, id);
+    const linkedLabelNames = this.memoryLabels.get(linkKey);
+    if (linkedLabelNames !== undefined) {
+      for (const name of linkedLabelNames) {
+        const key = this.labelKey(ctx.tenantId, name);
+        const existing = this.labels.get(key);
+        if (existing !== undefined && existing.status === "proposed") {
+          this.labels.set(key, {
+            ...existing,
+            proposedCount: Math.max(existing.proposedCount - 1, 0),
+          });
+        }
+      }
+      this.memoryLabels.delete(linkKey);
+    }
+
+    // ADR 0375 決定3: このテナントの recalls.index_band の digestBand から、この
+    // memoryId のエントリを見つけてトゥームストーンへ書き換える（`recalls.query` は
+    // 触らない——`memoryId` で特定できないため、決定4）。
+    for (const row of this.recalls.values()) {
+      if (row.tenantId !== ctx.tenantId) continue;
+      const digestBand = row.indexBand?.digestBand;
+      if (!digestBand) continue;
+      let changed = false;
+      const nextDigestBand = digestBand.map((entry) => {
+        if (entry.memoryId !== id) return entry;
+        changed = true;
+        return { memoryId: entry.memoryId, digest: tombstone.digest };
+      });
+      if (changed) {
+        row.indexBand = { ...row.indexBand, digestBand: nextDigestBand };
+      }
+    }
+
     const storedEvent = buildStoredMemoryEvent(ctx, { ...event, at });
     this.events.push(storedEvent);
     return snapshot({ memory, event: storedEvent });

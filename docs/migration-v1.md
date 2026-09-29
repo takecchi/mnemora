@@ -1062,9 +1062,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は7件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は8件**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`c04ae5d`**（PR #1414）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`1998b2b`**（PR #1421）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 **2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
 
@@ -1109,6 +1109,10 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 ⚠ **2026-09-29 追記（24回目の棚卸し。CHANGELOG の追記26 と同じ範囲）**: この節が数える範囲は、さらに `c04ae5d` まで広がった。`54b05bc`…`c04ae5d` に着地した PR（2884eed #1408、3f6c9b1 #1409、9091e1f #1411、c1f2456 #1413、6321dbe #1410、c04ae5d #1414）のうち、PR #1409 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（23回目の棚卸し自身）。PR #1414 は `packages/postgres/src/__tests__/`・`packages/postgres/vitest.config.mts`・ADR 0371 だけを変えるテスト専用の PR で、出荷の `src` を1行も触っていない（この節の対象外）。PR #1408（Issue #1301、ADR 0367）と PR #1413（Issue #1238、ADR 0372）は、どちらも着地の時点で本人が既にこの節へ項目22・項目23として足しており（下）、この棚卸しでは項目22 に欠けていた PR #1408 へのリンクを足しただけである（下）。PR #1411（Issue #1185）は `ObserveEventInput.extractData?`/`ObserveDocumentInput.extractTitle?` を追加するだけで、公開の型は追加のみ（破壊的とは数えない）。PR #1410（Issue #1181、ADR 0362）は `PostgresVectorStore.searchMany()` の実行計画だけを変えるもので、公開の型を1バイトも変えていない（非破壊。詳細は CHANGELOG の `[1.1.0]` 節の同項目）。この回で新しく確定した破壊的変更は無い——件数は引き続き6件である。正の対照（`git diff --stat 54b05bc..c04ae5d -- 'packages/*/src/**' ':!**/__tests__/**'` の10ファイル）・型の上（`git diff 54b05bc..c04ae5d -- scripts/__snapshots__/public-api/` は `core.d.ts`・`postgres.d.ts` の2ファイルのみ、どちらも追加のみ）の詳細は CHANGELOG の `[1.1.0]` 節の追記26を見ること——ここには複製しない。
 
 ⟹ **この節の範囲（`v1.0.2`…`c04ae5d`）で、確定した破壊的変更は、なお6件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238）である。**
+
+⚠ **2026-09-29 追記（25回目の棚卸し。CHANGELOG の追記27 と同じ範囲）**: この節が数える範囲は、さらに `1998b2b` まで広がった。`c04ae5d`…`1998b2b` に着地した PR（94f8e17 #1417、7f596dc #1418、82a6785 #1420、1cfd3fd #1422、1998b2b #1421）のうち、PR #1420 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（24回目の棚卸し自身）。PR #1418・PR #1422 はテスト専用の PR で、出荷の `src` を1行も触っていない（PR #1422 が `packages/postgres/src/memories-statistics.ts` に足した `peekMemoriesWriteCounterForTesting()` はテスト専用関数で、`packages/postgres/src/index.ts` からは export されない）ので、この節の対象外である。PR #1417（Issue #1412、ADR 0373）は、着地の時点で本人が既にこの節へ項目24として足しており（上）、この棚卸しではリンクと分類を検証し、直すものは無かった。PR #1421（Issue #1415、ADR 0374）は `PostgresVectorStore.search()`/`searchMany()` の実行計画だけを変えるもので、公開の型を1バイトも変えていない（非破壊。詳細は CHANGELOG の `[1.1.0]` 節の同項目）——あわせて、PR #1421 が PR #1410（ADR 0362）の統計あり・無し切り替えの仕組み自体を `StatsPresenceGate` へ置き換えたことを、CHANGELOG の `[1.1.0]` 節 `### Fixed` の PR #1410 の項目の末尾に注記で足した（本文は書き換えていない）。この回で新しく確定した破壊的変更は無い。正の対照（`git diff --stat c04ae5d..1998b2b -- 'packages/*/src/**' ':!**/__tests__/**'` の6ファイル）・型の上（`git diff c04ae5d..1998b2b -- scripts/__snapshots__/public-api/` は `testkit.d.ts`・`postgres.d.ts` の2ファイルのみ、どちらも追加のみ）の詳細は CHANGELOG の `[1.1.0]` 節の追記27を見ること——ここには複製しない。
+
+⟹ **この節の範囲（`v1.0.2`…`1998b2b`）で、確定した破壊的変更は、なお7件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238、PR #1417・Issue #1412）である。**
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
@@ -1368,9 +1372,58 @@ store の中は変わらない」を満たしていなかった（この変更�
 
 **DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
 
-⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は7件
+### 25. `MemoryStore.purgeMemory?` が消す範囲が広がった——`tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の digest 帯（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #994](https://github.com/takecchi/mnemora/issues/994)・
+[Issue #995](https://github.com/takecchi/mnemora/issues/995)・
+[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+[PR #1427](https://github.com/takecchi/mnemora/pull/1427)、
+[ADR 0375](./decisions/0375-purge-scope-widened.md)。**この項目は、上の棚卸しの範囲の
+外——purge の法的な射程を広げる作業として、この節に足す1件である。**
+
+**何が変わったか**: `MemoryStore.purgeMemory?`（任意メソッド）の契約が広がった。
+これまで `content`/`digest`/`purgedAt` だけを書いていたのが、同じ書き込みで
+`tags` を `[]` へ、`attributes` を `{}` へ、claim key の2列（`claimKey`）を `null`
+へ上書きし、同じトランザクションでこの Memory に紐づく label の紐付け
+（`memory_labels` 相当）を外して `proposedCount` を減らし、このテナントの
+`recalls` の `IndexBand.digestBand` からこの `memoryId` のエントリを見つけて
+`digest` をトゥームストーンへ書き換えるようになった。**型は変えていない**
+（`purgeMemory?` のシグネチャ自体は同じ）。公開 API の型の差分
+（`scripts/__snapshots__/public-api/testkit.d.ts`）は、`@mnemora/testkit` の
+`InMemoryMemoryStore` に private メンバ `memoryLabels`・`memoryLabelKey` が増えたこと
+だけである——`private` なので利用者のコードからは参照できず、このクラスは以前から
+private メンバを持つので型の互換の性質も変わらない（PR #1114 の `rawGet` と同じ扱い）。
+破壊的と数える理由は型ではなく、下の conformance と実行時の振る舞いである。中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`MemoryStore.purgeMemory?`
+が消す範囲を広げた」の項目）を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: `packages/testkit` の conformance suite
+（`describeMemoryStoreConformance`）に、この広げた範囲を縛る `it` を3本足した
+——上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance
+スイートの判定を厳しくする変更」に当たる。加えて、`purgeMemory?` を自前実装
+している第三者 adapter が「purge は `content`/`digest`/`purgedAt` 以外を変えない」
+という前提でテストを書いていた場合、この PR のあとに揃えた conformance を
+当てると新しく落ちうる（実行時に壊れる）。項目21（PR #1394）・項目23（PR #1413）・
+項目24（Issue #1412）と同じ判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装（`purgeMemory?` を持つもの）を、
+`packages/testkit` の conformance suite に対して走らせている利用者のうち、この
+PR が足した約束のどれかを満たしていない場合。**`purgeMemory?` を実装していない
+adapter（`Runtime.purge` が `supported: false` を返す構成）は影響を受けない。**
+**適合テストを走らせていない利用者は、型検査には現れないまま、`@mnemora/postgres`・
+`@mnemora/testkit` を使っている場合は実行時の振る舞いが変わる**——purge の後、
+これまで残っていた `tags`/`attributes`/claim key・label の紐付け・`recalls.index_band`
+の元の digest が消える／伏せられる。
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要（新しい列・表は追加していない。既存列への書き込み範囲が
+広がっただけ）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は8件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
-PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412）になった。**
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
+PR #1427・Issue #994・#995・#1207（ADR 0375））になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

@@ -323,3 +323,15 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
 - **採らなかった案**: `PostgresVectorStore.upsert` を「purge 済みの Memory には書かない」条件付きにする。`VectorStore.upsert` の契約（保存の意味）を変えることになり、`VectorStore` を実装する第三者の adapter にも同じ義務を課すことになる。
 
 **引き受ける負債**: 埋め込みを書いてから消すまでの間は、purge 済みの記憶の埋め込み行が一瞬在る。ただし recall には現れない（本文の負債1と同じく、`search` は `status` で `memories` と JOIN する）。本文の負債1（`vectorStore.delete` の失敗）は、ジョブ側の削除にもそのまま当てはまる。
+
+---
+
+## 追記（2026-09-29）: 決定4の「唯一の場所」は ADR 0375 で上書きした
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜7・引き受けた負債・確かめていないこと）と、上の各追記は書き換えていない。**当時の記録として残す。
+
+決定4は「🔴 purge 後、元の digest が残る唯一の場所はこの監査ログである（`content` は事後もどこにも残らない——これが「物理削除」の実質）」と書いていた。[Issue #994](https://github.com/takecchi/mnemora/issues/994)・[Issue #995](https://github.com/takecchi/mnemora/issues/995)・[Issue #1207](https://github.com/takecchi/mnemora/issues/1207) が、この「唯一」が実装と食い違うこと（`recalls.index_band`・`recalls.query`・`memories.tags`/`attributes`/claim key・`labels`/`memory_labels` 等にも元の内容・派生物が残ること）を実測した。
+
+**[ADR 0375](./0375-purge-scope-widened.md) が、purge の約束そのものを広げ直した——「唯一の場所」という主張はもう成り立たない。** ADR 0375 は (a) 消す対象を `tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の digest 帯まで広げ、(b) それでも残るもの（`recalls.query`・`content_hash`・`provenance.speaker`・`observations.payload`・監査ログの `digest_snapshot` 自身・別 space の embedding 等）を明記した表を持つ。`packages/core/src/interfaces/memory-store.ts` の `MemoryStore.purgeMemory?` の TSDoc は ADR 0375 に合わせて書き換えてある——この ADR 0124 本文は書き換えず、この追記で指し先を更新するだけに留める。
