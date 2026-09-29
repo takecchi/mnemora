@@ -7,9 +7,14 @@ import { PostgresOutboxStore } from "../outbox-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 終端に達しないまま止まり続ける job が `limit` 本以上あると、`claimBatch` は古い順の先頭で同じ job を
- * 取り続け、後ろの job に届かない（先頭詰まり）——`OutboxStore` の doc の 2026-09-27 追記に書いた
- * 今の振る舞いを、Postgres と testkit の fixture の両方で縛る（振る舞いは変えていない）。
+ * 終端に達しないまま止まり続ける job（Issue #1196）が `limit` 本以上あっても、`claimBatch`
+ * が飢餓を起こさないことを、Postgres と testkit の fixture の両方で縛る。
+ *
+ * 新しい振る舞い（`OutboxStore` の doc の 2026-09-29 追記、ADR 0357）: **取り直し**
+ * （claim 時点で `claimed_at` が既に非 NULL＝リースが切れた行を再び claim する場合）は
+ * `available_at` を `opts.now` に書き直す。**初めての claim**（`claimed_at` が NULL
+ * だった行）では `available_at` を変えない。取る順（`available_at` の古い順）そのものは
+ * 変えていない。
  *
  * 「止まり続ける」は、claim した job に `complete` も `fail` も呼ばない（ワーカーがその job で毎回
  * 止まる）ことで作る。リースが切れるたびに次の `claimBatch` を呼ぶ。
@@ -81,23 +86,51 @@ afterAll(async () => {
 });
 
 for (const [name, makeKit] of KITS) {
-  describe(`${name}: 止まり続ける job による先頭詰まり（今の振る舞い）`, () => {
-    it("最も古い3本が毎回止まると、limit 3 の claim はリース切れのたびに同じ3本だけを取り、後ろに届かない", async () => {
+  describe(`${name}: 止まり続ける job による先頭詰まりの解消（取り直しは後ろへ回す）`, () => {
+    it("最も古い3本が毎回止まると、1回目（初めての claim）と2回目（取り直し）は同じ3本を返すが、取り直しで availableAt が now に更新され、3回目以降は後ろの job に届く", async () => {
       const kit = await makeKit();
       const ids = await enqueue(kit, 10);
       const stuck = ids.slice(0, 3);
       let now = T;
-      for (let round = 0; round < 5; round++) {
-        const claimed = await kit.outboxStore.claimBatch(ctx, {
-          limit: 3,
-          now: new Date(now),
-          claimedBy: `worker-${round}`,
-          leaseMs: LEASE_MS,
-        });
-        expect(claimed.map((j) => j.id).sort()).toEqual([...stuck].sort());
-        // 止まる: complete も fail も呼ばない。
-        now += LEASE_MS * 2;
+
+      // round0: 初めての claim。stuck の3本が古い順に取られる。availableAt は変えない。
+      const round0 = await kit.outboxStore.claimBatch(ctx, {
+        limit: 3,
+        now: new Date(now),
+        claimedBy: "worker-0",
+        leaseMs: LEASE_MS,
+      });
+      expect(round0.map((j) => j.id).sort()).toEqual([...stuck].sort());
+      for (const [i, id] of stuck.entries()) {
+        const job = round0.find((j) => j.id === id)!;
+        expect(job.availableAt.getTime()).toBe(T - 3_600_000 + i * 1000);
       }
+      // 止まる: complete も fail も呼ばない。
+
+      now += LEASE_MS * 2;
+      // round1: リース切れの取り直し。availableAt がまだ更新されていないので、依然として
+      // stuck の3本が古い順の先頭にいる。この claim で availableAt が now に書き直される。
+      const round1 = await kit.outboxStore.claimBatch(ctx, {
+        limit: 3,
+        now: new Date(now),
+        claimedBy: "worker-1",
+        leaseMs: LEASE_MS,
+      });
+      expect(round1.map((j) => j.id).sort()).toEqual([...stuck].sort());
+      for (const job of round1) {
+        expect(job.availableAt.getTime()).toBe(now);
+      }
+
+      now += LEASE_MS * 2;
+      // round2: stuck の3本の availableAt は round1 の now まで進んだので、
+      // まだ一度も claim されていない job3..5 のほうが古い順で先に来る。
+      const round2 = await kit.outboxStore.claimBatch(ctx, {
+        limit: 3,
+        now: new Date(now),
+        claimedBy: "worker-2",
+        leaseMs: LEASE_MS,
+      });
+      expect(round2.map((j) => j.id).sort()).toEqual(ids.slice(3, 6).sort());
     });
 
     it("止まった job がまだ claim 中（リースの内）のうちに別の claim が来れば、後ろの job に届く", async () => {
@@ -116,6 +149,59 @@ for (const [name, makeKit] of KITS) {
         leaseMs: LEASE_MS,
       });
       expect(next.map((j) => j.id).sort()).toEqual(ids.slice(3, 6).sort());
+    });
+
+    it("止まり続ける job が limit 本あっても、有限回のラウンドで全 job が一度は claim される（飢餓しない）", async () => {
+      const kit = await makeKit();
+      const ids = await enqueue(kit, 10);
+      const stuckSet = new Set(ids.slice(0, 3));
+      const seen = new Set<string>();
+      let now = T;
+      const MAX_ROUNDS = 20;
+      for (let round = 0; round < MAX_ROUNDS && seen.size < ids.length; round++) {
+        const claimed = await kit.outboxStore.claimBatch(ctx, {
+          limit: 3,
+          now: new Date(now),
+          claimedBy: `worker-${round}`,
+          leaseMs: LEASE_MS,
+        });
+        for (const job of claimed) {
+          seen.add(job.id);
+          if (!stuckSet.has(job.id)) {
+            // 止まらない job は前へ進める。
+            await kit.outboxStore.complete(ctx, job.id, job.attempts);
+          }
+          // stuck な job は complete/fail を呼ばない（毎回止まる）。
+        }
+        now += LEASE_MS * 2;
+      }
+      expect(seen.size).toBe(ids.length);
+    });
+
+    it("取り直し（リース切れの再 claim）では availableAt が opts.now になり、初めての claim では変えない", async () => {
+      const kit = await makeKit();
+      const ids = await enqueue(kit, 1);
+      const original = T - 3_600_000;
+      let now = T;
+
+      const first = await kit.outboxStore.claimBatch(ctx, {
+        limit: 1,
+        now: new Date(now),
+        claimedBy: "a",
+        leaseMs: LEASE_MS,
+      });
+      expect(first.map((j) => j.id)).toEqual(ids);
+      expect(first[0]!.availableAt.getTime()).toBe(original);
+
+      now += LEASE_MS * 2;
+      const second = await kit.outboxStore.claimBatch(ctx, {
+        limit: 1,
+        now: new Date(now),
+        claimedBy: "b",
+        leaseMs: LEASE_MS,
+      });
+      expect(second.map((j) => j.id)).toEqual(ids);
+      expect(second[0]!.availableAt.getTime()).toBe(now);
     });
   });
 }

@@ -14,6 +14,7 @@ import type {
   AnthropicMessagesClient,
 } from "./client-types.js";
 import { AnthropicLLMProviderError } from "./errors.js";
+import type { AnthropicJsonSchemaFormat } from "./json-schema.js";
 import { translateForAnthropicStructuredOutput } from "./json-schema.js";
 
 /**
@@ -255,9 +256,13 @@ export class AnthropicLLMProvider implements LLMProvider {
   /**
    * zod スキーマを Anthropic のネイティブ構造化出力へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
    *
-   * ⚠ **翻訳できない形は、送る前に素の `Error` を投げる**（#1148、今の振る舞い）。`z.tuple`・`z.date`・`transform` は
-   * SDK の `zodOutputFormat` が投げ、`messages.create` は呼ばれない。`z.record`・`z.lazy`・`default`・根が union は
-   * 翻訳が通って送る（Anthropic が受けるかは実 API で確かめていない）。一覧は README。
+   * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
+   * 翻訳できない形は、送る前に {@link AnthropicLLMProviderError}（`kind: "schema_unsupported"`、
+   * `cause` に元の例外）で落ちる。**`z.tuple`・`z.date`・`transform` は SDK の `zodOutputFormat`
+   * が投げた例外をこの `kind` に包む——`messages.create` は呼ばれない。`z.record`・`z.lazy`・
+   * `default`・根が union は今までどおり翻訳が通って送る（Anthropic が受けるかは実 API で
+   * 確かめていない）。一覧は README。
    *
    * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link AnthropicLLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
@@ -268,7 +273,15 @@ export class AnthropicLLMProvider implements LLMProvider {
     req: StructuredRequest<T>,
     opts?: AbortOptions,
   ): Promise<T> {
-    const format = translateForAnthropicStructuredOutput(req.schema);
+    let format: AnthropicJsonSchemaFormat;
+    try {
+      format = translateForAnthropicStructuredOutput(req.schema);
+    } catch (cause) {
+      // ⭐ ここで投げるのは、送る前の翻訳（SDK の `zodOutputFormat`）だけである。
+      // `messages.create` はまだ呼んでいない——拒否・切り詰め・応答の検証エラーとは
+      // 混ぜない（ADR 0360）。
+      throw new AnthropicLLMProviderError({ kind: "schema_unsupported", cause });
+    }
     const { system, messages } = toAnthropicRequest(req.prompt);
     const response = await this.client.messages.create(
       {

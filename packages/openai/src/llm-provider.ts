@@ -1,4 +1,9 @@
 import OpenAI from "openai";
+// `openai/lib/transform` は `openai` パッケージの `exports` には載っているが、README 等で
+// 案内される文書化された入口ではない（ADR 0360「引き受けた負債」）。実際に送る JSON Schema が
+// OpenAI 自身の strict 変換を通るかを、送る前に検査するためだけに使う——戻り値は使わない
+// （送るのは今までどおり mnemora 自身の翻訳結果である）。
+import { toStrictJsonSchema } from "openai/lib/transform";
 import type {
   AbortOptions,
   Ctx,
@@ -10,6 +15,7 @@ import type {
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type { OpenAIChatClient } from "./client-types.js";
 import { OpenAILLMProviderError } from "./errors.js";
+import type { OpenAIJsonSchemaFormat } from "./json-schema.js";
 import { translateForOpenAIStructuredOutput } from "./json-schema.js";
 import { needsRootWrap, toBaseJsonSchema, unwrapRootValue } from "./structured-root.js";
 
@@ -309,6 +315,34 @@ function assertNotRefusedOrTruncated(choice?: {
   }
 }
 
+/**
+ * `req.schema` を OpenAI の Structured Output へ翻訳し、**実際に送る JSON Schema**を OpenAI SDK
+ * 自身の strict 変換 `toStrictJsonSchema`（`openai/lib/transform`）に通してから返す
+ * （[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+ * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
+ *
+ * ⭐ **`toStrictJsonSchema` の戻り値は捨てる。**検査のためだけに呼ぶ——送るのは、あくまで
+ * mnemora 自身の翻訳（`translateForOpenAIStructuredOutput`）が作った `format.schema` である。
+ * `toStrictJsonSchema` は内部で `structuredClone` するため、渡した `format.schema` 自体も
+ * 変更しない。
+ *
+ * ここで投げた例外（`translateForOpenAIStructuredOutput` 自身が投げるもの＝ zod の既定
+ * （throw）で `z.date()`・`transform` が「representable ではない」と判定したもの、または
+ * `toStrictJsonSchema` が `z.record`・`z.tuple` 等の strict 非互換を検出したもの）は、
+ * 呼び出し元（`completeStructured`）が {@link OpenAILLMProviderError}
+ * （`kind: "schema_unsupported"`）に包んで投げ直す。**ここでは包まない**——このファイルの
+ * ほかの `assertNotRefusedOrTruncated` 等と同じく、変換の責務と例外の型付けの責務を分ける。
+ *
+ * ⚠ **自前の strict 検査は書かない**（ADR 0360 決定）。`openai` SDK 自身の検査を再利用する。
+ */
+function translateAndValidateStructuredOutputFormat<T>(
+  schema: StructuredRequest<T>["schema"],
+): OpenAIJsonSchemaFormat {
+  const format = translateForOpenAIStructuredOutput("mnemora_structured_output", schema);
+  toStrictJsonSchema(format.schema as Parameters<typeof toStrictJsonSchema>[0]);
+  return format;
+}
+
 function toOpenAIMessages(
   prompt: PromptSpec,
 ): { role: "system" | "user" | "assistant"; content: string }[] {
@@ -391,11 +425,15 @@ export class OpenAILLMProvider implements LLMProvider {
   /**
    * zod スキーマを OpenAI の Structured Output へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
    *
-   * ⚠ **送る前に「OpenAI が受け付ける形か」は検査しない**（#1148、今の振る舞い）。`z.record`・`z.tuple`・
-   * `z.date`・`transform` は、送った後に OpenAI が `BadRequestError`（HTTP 400、`param: response_format`）で拒む
-   * （【実測 2026-09-27】）。`z.lazy`（再帰）・`default`・根が union（包んで送る）は通る。一覧は README。
+   * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
+   * 送る前に検査するようになった。**`z.record`・`z.tuple`・`z.date`・`transform` は、いまは
+   * `chat.completions.create` を呼ぶ前に {@link OpenAILLMProviderError}（`kind:
+   * "schema_unsupported"`、`cause` に元の例外）で落ちる——以前はここで送ってからベンダーに
+   * 拒ませていた（`BadRequestError`、HTTP 400）。`z.lazy`（再帰）・`default`・根が union
+   * （包んで送る）は今までどおり通る。一覧は README。
    *
-   * 投げるもの: 拒否・切り詰めは `complete` と同じ {@link OpenAILLMProviderError}（`kind: "refusal"`・`"truncated"`）、
+   * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link OpenAILLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * 本文が空・欠落なら `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
    * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
    *
@@ -408,7 +446,15 @@ export class OpenAILLMProvider implements LLMProvider {
     req: StructuredRequest<T>,
     opts?: AbortOptions,
   ): Promise<T> {
-    const format = translateForOpenAIStructuredOutput("mnemora_structured_output", req.schema);
+    let format: OpenAIJsonSchemaFormat;
+    try {
+      format = translateAndValidateStructuredOutputFormat(req.schema);
+    } catch (cause) {
+      // ⭐ ここで投げるのは、翻訳（zod の既定＝throw）または送る直前の strict 検査
+      // （`toStrictJsonSchema`）のどちらかだけである。`chat.completions.create` はまだ
+      // 呼んでいない——拒否・切り詰め・応答の検証エラーとは混ぜない（ADR 0360）。
+      throw new OpenAILLMProviderError({ kind: "schema_unsupported", cause });
+    }
     const response = await this.client.chat.completions.create(
       {
         model: this.model,

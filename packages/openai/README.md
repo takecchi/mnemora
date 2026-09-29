@@ -141,15 +141,14 @@ mnemora の runtime は、recall のクエリを trim して空なら埋め込�
 `RuntimeDeps.embeddingInput` の戻り値が空文字だと、その embed ジョブは 400 で失敗する**
 （`@mnemora/local-embedding` は空文字にもベクトルを返す——provider で振る舞いが違う）。
 
-## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（今の振る舞い）
+## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（当時の振る舞い。2026-09-29 に変えた——下の追記を見ること）
 
-`OpenAILLMProvider.completeStructured` は、渡された zod スキーマを翻訳して**そのまま送る**——送る前に「OpenAI が受け付ける形か」は
-検査しない。受け付けない形は、送った後に OpenAI が拒み、SDK の `BadRequestError`（HTTP 400、`type: invalid_request_error`、
-`param: response_format`）がそのまま伝わる（`OpenAILLMProviderError` の `kind` には入らない）。
+【実測 2026-09-27、`gpt-4o-mini`、`openai@7.10.0`、各形1回】**当時**は、`OpenAILLMProvider.completeStructured` が渡された zod
+スキーマを翻訳して**そのまま送っており**、送る前に「OpenAI が受け付ける形か」を検査していなかった。受け付けない形は、送った後に
+OpenAI が拒み、SDK の `BadRequestError`（HTTP 400、`type: invalid_request_error`、`param: response_format`）がそのまま伝わっていた
+（`OpenAILLMProviderError` の `kind` には入らなかった）。
 
-【実測 2026-09-27、`gpt-4o-mini`、`openai@7.10.0`、各形1回】
-
-| zod の形                                                                 | 結果                                                       |
+| zod の形                                                                 | 結果（2026-09-27 当時）                                    |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------- |
 | `z.object`・`z.array`・`z.enum`・`optional`・`nullable`（core が使う形） | 通る（core の4つのスキーマは実 API で確かめた、#1164）     |
 | 根が union（判別可能ユニオンなど）                                       | 通る（1つの欄 `result` を持つ object に包んで送る、#1147） |
@@ -165,10 +164,31 @@ mnemora の runtime は、recall のクエリを trim して空なら埋め込�
 （`{ result: … }`）を指す——送る形が元のスキーマと変わる（翻訳の結果で確かめた。実 API には当てていない）。
 core の4つのスキーマはこの形を使わない。歯は `src/__tests__/structured-root-union.test.ts`。
 
-拒まれたときの文面はスキーマの位置だけで、プロンプトの本文と API キーは載らなかった（確かめた）。⚠ `z.date`・`transform` は、
-`openai` SDK 自身の strict 検査（`lib/transform.js` の `toStrictJsonSchema`）は通るが、実 API は拒む——SDK の検査を通ることは、
-実 API が受けることの十分条件ではない。`@mnemora/anthropic` は同じ形の一部を**送る前に**素の `Error` で落とす（あちらの README）。
-2つの provider の振る舞いをそろえる（送る前に落とす・失敗に種類を付ける）かは決めていない（#1148）。
+拒まれたときの文面はスキーマの位置だけで、プロンプトの本文と API キーは載らなかった（確かめた）。
+
+### 🔴 2026-09-29 訂正（[ADR 0360](../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）: 送る前に検査するようになった
+
+**上の「送る前には検査しない」はもう成り立たない。**`completeStructured` はいまや、実際に送る JSON Schema を **`chat.completions.create`
+を呼ぶ前に**、`openai` SDK 自身の strict 変換 `toStrictJsonSchema`（`openai/lib/transform`。戻り値は使わず、検査のためだけに呼ぶ
+——送るのは今までどおり mnemora 自身の翻訳結果である）に通す。加えて、翻訳そのもの（`z.toJSONSchema`）も zod の既定（`unrepresentable`
+省略＝ throw）で行うようになった（以前は `unrepresentable: "any"` を渡し、`z.date()`・`transform` を型の無いスキーマとして黙って
+送っていた）。
+
+| zod の形 | いまの結果（2026-09-29 以降） |
+| --- | --- |
+| `z.object`・`z.array`・`z.enum`・`optional`・`nullable`（core が使う形） | 通る（変わらない） |
+| 根が union（判別可能ユニオンなど）・`z.lazy`（再帰）・`default` | 通る（変わらない） |
+| `z.record` | **送る前に** `OpenAILLMProviderError`（`kind: "schema_unsupported"`）——`toStrictJsonSchema` が `must set additionalProperties: false` で投げる |
+| `z.tuple` | **送る前に** `OpenAILLMProviderError`（`kind: "schema_unsupported"`）——`toStrictJsonSchema` が `unsupported keyword prefixItems` で投げる |
+| `z.date` | **送る前に** `OpenAILLMProviderError`（`kind: "schema_unsupported"`）——zod 自身が `Date cannot be represented in JSON Schema` で投げる |
+| `transform` | **送る前に** `OpenAILLMProviderError`（`kind: "schema_unsupported"`）——zod 自身が `Transforms cannot be represented in JSON Schema` で投げる |
+
+どの場合も `chat.completions.create` は呼ばれず、元の例外は `OpenAILLMProviderError.cause`（ES2022 の `Error.cause`）に載る。
+**上の 2026-09-27 の実測（実 API が 400 で拒む）は、いまは踏まない経路になった**——記録として残すが、現物の振る舞いはこの節が正。
+**確かめていないこと**: `toStrictJsonSchema` が拾わない、実 API だけが拒む形（今回の4形には無かった）が他にあるかは分からない
+——この歯は「OpenAI SDK 自身の strict 検査を通るか」までしか保証しない。歯は `src/__tests__/structured-output-zod-shapes.test.ts`・
+`src/__tests__/core-schemas-send-shape.test.ts`。`@mnemora/anthropic` は `z.tuple`・`z.date`・`transform` を同じ形
+（`kind: "schema_unsupported"`、`cause` 付き）で送る前に落とすが、`z.record` は今までどおり送る（あちらの README）。
 
 ### 戻りの `null` の扱い（2026-09-28 追記）
 
