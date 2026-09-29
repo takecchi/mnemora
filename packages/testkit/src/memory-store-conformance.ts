@@ -356,6 +356,23 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsFindActiveByClaimKey?: boolean;
   /**
+   * Issue #933（案2、`docs/decisions/0378-*.md`）: 対象の `MemoryStore` 実装が
+   * `findContestedByClaimKey`（任意メソッド）を実装しているかどうか。**任意**（省略可、
+   * `supportsFindActiveByClaimKey`/`supportsLabels` と同じ3状態の規律）。
+   *
+   * - `true`: 契約の歯（同じ tenant・同じ subjectId・同じ claimKey・`status='contested'`・
+   *   `contentHash` が違う・有効期間が重なる行だけを返す、`subjectId` は `null` 同士も
+   *   一致として扱う、`excludeMemoryId` に一致する行は返さない、`contentHash` が
+   *   同じ行は返さない、`status` が `contested` でない行は返さない、有効期間が重ならない
+   *   行は返さない、テナント分離）を実行する——`supportsFindActiveByClaimKey: true` の
+   *   歯と対になる形（`active`/`contested` が入れ替わるだけ）。
+   * - `false`: `expect(store.findContestedByClaimKey).toBeUndefined()` を積極的に assert
+   *   する——`it.skip` にはしない。
+   * - **省略（`undefined`）**: `supportsFindActiveByClaimKey` の省略時と同じ規律——常に
+   *   green で終わる named `it` を1本登録し、「検査していない」ことをテスト名で明示する。
+   */
+  supportsFindContestedByClaimKey?: boolean;
+  /**
    * Issue #691続き（ADR 0329）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可）。
    *
@@ -427,6 +444,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsOnlyMemoryIdsFilter,
     supportsLabels,
     supportsFindActiveByClaimKey,
+    supportsFindContestedByClaimKey,
     supportsListActiveClaimPredicates,
     supportsResolveOrphanedContested,
   } = options;
@@ -1835,6 +1853,521 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 同じ分岐を参照。
       it(`⚠ 未検査: supportsFindActiveByClaimKey が指定されていない — adapter "${name}" に対して findActiveByClaimKey の歯は検査していない`, () => {
         expect(supportsFindActiveByClaimKey).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // findContestedByClaimKey（Issue #933 案2、`docs/decisions/0378-*.md`。任意メソッド）
+    //
+    // `findActiveByClaimKey` と同じ判定規則を、`status='active'` の代わりに
+    // `status='contested'` の行に対して適用する。既に `contested` になった相手を、
+    // 3件目以降の主張の検出に使えるようにするための口（Issue #933）。
+    //
+    // `status='contested'` へは `updateStatus` で直接遷移できない
+    // （`ContestedWithoutCompanionError`——companion なしの contested を拒む、ADR 0134）。
+    // 「相手を contested にする」ためには、必ず `markContestedPair` で相方（本題とは
+    // 無関係な使い捨ての `partner`）と対にする——実運用でも `contested` に至る経路は
+    // これしかない。
+    // -------------------------------------------------------------------
+
+    async function pairAsContested(
+      store: MemoryStore,
+      pairCtx: Ctx,
+      a: { id: MemoryId; digest: string },
+      b: { id: MemoryId; digest: string },
+    ): Promise<void> {
+      await store.markContestedPair!(
+        pairCtx,
+        {
+          id: a.id,
+          event: {
+            tenantId: pairCtx.tenantId,
+            memoryId: a.id,
+            kind: "updated",
+            actor: { type: "system" },
+            digestSnapshot: a.digest,
+            meta: { reason: "contested" },
+          },
+        },
+        {
+          id: b.id,
+          event: {
+            tenantId: pairCtx.tenantId,
+            memoryId: b.id,
+            kind: "updated",
+            actor: { type: "system" },
+            digestSnapshot: b.digest,
+            meta: { reason: "contested" },
+          },
+        },
+      );
+    }
+
+    if (supportsFindContestedByClaimKey === true) {
+      it("同じ tenant・同じ subjectId・同じ claimKey・有効期間が重なる・content_hash が違う contested な Memory を返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "find-contested-claim-key-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "find-contested-claim-key-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "find-contested-claim-key-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches.map((m) => m.id)).toEqual([other.id]);
+      });
+
+      it("excludeMemoryId に一致する行は返さない（自分自身を相手として見つけない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-exclude-self-a",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-exclude-self-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, target, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: "some-other-hash-not-used-by-target",
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("subjectId が null 同士でも一致として扱う", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: null,
+            contentHash: "contested-null-subject-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: null,
+            contentHash: "contested-null-subject-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-null-subject-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: null,
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches.map((m) => m.id)).toEqual([other.id]);
+      });
+
+      it("subjectId が違えば返さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "alice",
+            contentHash: "contested-diff-subject-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "bob",
+            contentHash: "contested-diff-subject-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-diff-subject-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "alice",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("claimKey の predicate が違えば返さない（同じ subjectId でも別の主張として扱う）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-diff-predicate-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-diff-predicate-other",
+            claimKey: { subject: "user", predicate: "favorite_color" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-diff-predicate-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("content_hash が同じ行は返さない（内容が同じなら矛盾ではない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-same-content-hash",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-same-content-hash",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-same-content-hash-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: "contested-same-content-hash",
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("status が contested でない行は返さない（active のまま・archived）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-status-gate-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const stillActive = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-status-gate-active",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const archived = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-status-gate-archived",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.updateStatus(ctx, archived.id, "archived");
+        void stillActive;
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("有効期間が重ならなければ返さない（去年の住所と今の住所）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-no-overlap-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2022-01-01T00:00:00.000Z"),
+            validUntil: new Date("2023-01-01T00:00:00.000Z"),
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-no-overlap-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-no-overlap-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("有効期間が重ならなければ返さない（逆向き: target が過去、other が現在）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-no-overlap-reversed-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-no-overlap-reversed-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2022-01-01T00:00:00.000Z"),
+            validUntil: new Date("2023-01-01T00:00:00.000Z"),
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "contested-no-overlap-reversed-partner",
+          }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("有効期間が重なれば返す（片方が無期限＝null でも重なる）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-overlap-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2024-01-01T00:00:00.000Z"),
+            validUntil: null,
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "contested-overlap-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2025-01-01T00:00:00.000Z"),
+          }),
+        );
+        const partner = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "contested-overlap-partner" }),
+        );
+        await pairAsContested(store, ctx, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches.map((m) => m.id)).toEqual([other.id]);
+      });
+
+      it("クロステナントの Memory は返さない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const target = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            subjectId: "user-1",
+            contentHash: "contested-cross-tenant-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            subjectId: "user-1",
+            contentHash: "contested-cross-tenant-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const partner = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "contested-cross-tenant-partner",
+          }),
+        );
+        await pairAsContested(store, ctxB, other, partner);
+
+        const matches = await store.findContestedByClaimKey!(ctxA, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+    } else if (supportsFindContestedByClaimKey === false) {
+      it("findContestedByClaimKey は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.findContestedByClaimKey).toBeUndefined();
+      });
+    } else {
+      // `supportsFindContestedByClaimKey` を省略した adapter。`it.skip` にしない理由は
+      // `supportsFindActiveByClaimKey` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsFindContestedByClaimKey が指定されていない — adapter "${name}" に対して findContestedByClaimKey の歯は検査していない`, () => {
+        expect(supportsFindContestedByClaimKey).toBeUndefined();
       });
     }
 

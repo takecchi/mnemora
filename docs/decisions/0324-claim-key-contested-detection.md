@@ -640,3 +640,17 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 混入し、本来ちょうど1件になるはずの一致が2+に膨らんで決定6（`markContested` を呼ばない）
 へ誤って分岐する退行が直った。決定5・決定6 の分岐先の選び方・evidence イベントの形は
 1バイトも変えていない。詳細は ADR 0377 を見ること。
+
+## 追記（2026-09-30）: 決定5・決定6の「一致」に、`contested` の行が加わった（Issue #933、ADR 0378）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+**2026-09-27 の追記が「直っていない」としていた症状は、[ADR 0378](./0378-claim-key-contested-detection-covers-contested-matches.md)（PR1）で直った。**新しい任意メソッド `MemoryStore.findContestedByClaimKey?`（`findActiveByClaimKey?` と同じ絞り込みで `status = 'active'` の代わりに `status = 'contested'` を見る）を実装している store では、`detectClaimKeyContested` が `findActiveByClaimKey?` の一致に `findContestedByClaimKey?` の一致を合わせて数える——ADR 0377 の兄弟除外も、合わせた一致に同じ形でかける。
+
+同じ鍵の主張が1件ずつ届く経路で: 1件目 `no_conflict`・2件目 1件目と対になり `contested`・**3件目は 1件目・2件目（どちらも `contested`）を合わせて一致2件 ⟹ `unresolved_conflict`。決定6の evidence が積まれる**（直る前は `no_conflict` で痕跡なしだった）・**4件目は 3件目（`active`）+ 1件目・2件目（`contested`）を合わせて一致3件 ⟹ `unresolved_conflict`**（直る前は3件目と新しい対を作っていた）。1件目・2件目の対は、3件目・4件目が届いても壊れない——決定5・決定6が定めた**分岐そのもの**（0/1/2+の3方向、2+では `markContested` を呼ばない）は変えていない。
+
+**`findContestedByClaimKey?` を実装していない adapter では、今まで通り**（後方互換、振る舞いは1バイトも変わらない）。
+
+**ただし、この直しでも「3件以上のグループを実際に `contested` として recall に載せる」ようにはならない**——決定6が引き受けていた負債（`markContested` を呼ばない、状態は一切動かさない）はそのまま残る。多者間グループを表（`memory_relations`）へ束ねる書き込み経路（ADR 0327 の未決3点、ADR 0378 決定1〜4・決定6）は、ADR 0378 が設計のみ決定し、実装は次段（Issue #933 の PR2）に残している。
+
+詳細・実装・歯は ADR 0378 を見ること。

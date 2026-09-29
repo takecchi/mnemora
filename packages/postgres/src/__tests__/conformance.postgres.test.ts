@@ -106,6 +106,8 @@ describeMemoryStoreConformance({
   supportsLabels: true,
   // Issue #372: PostgresMemoryStore は findActiveByClaimKey を実装している。
   supportsFindActiveByClaimKey: true,
+  // Issue #933 案2 / ADR 0378: PostgresMemoryStore は findContestedByClaimKey を実装している。
+  supportsFindContestedByClaimKey: true,
   // Issue #691続き / ADR 0329: PostgresMemoryStore は listActiveClaimPredicates を
   // 実装している。
   supportsListActiveClaimPredicates: true,

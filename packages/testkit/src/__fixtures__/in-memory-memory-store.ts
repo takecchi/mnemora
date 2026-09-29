@@ -2244,6 +2244,49 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #933（案2、ADR 0378）: `MemoryStore.findContestedByClaimKey?` の実装（契約は
+   * interface 側の doc コメントにある）。`findActiveByClaimKey` と同じ絞り込みのうえで、
+   * `status === "active"` の代わりに `status === "contested"` を見る。
+   */
+  async findContestedByClaimKey(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]> {
+    assertQueryDate("findContestedByClaimKey", "validFrom", query.validFrom);
+    assertQueryDate("findContestedByClaimKey", "validUntil", query.validUntil);
+    const targetFrom = query.validFrom ?? null;
+    const targetUntil = query.validUntil ?? null;
+    const matches = [...this.memories.values()].filter((m) => {
+      if (m.tenantId !== ctx.tenantId) return false;
+      if (m.id === query.excludeMemoryId) return false;
+      if ((m.subjectId ?? null) !== query.subjectId) return false;
+      if (!m.claimKey) return false;
+      if (
+        m.claimKey.subject !== query.claimKey.subject ||
+        m.claimKey.predicate !== query.claimKey.predicate
+      ) {
+        return false;
+      }
+      if (m.status !== "contested") return false;
+      if (m.contentHash === query.contentHash) return false;
+      const otherFrom = m.validFrom ?? null;
+      const otherUntil = m.validUntil ?? null;
+      const overlaps =
+        (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
+        (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
+      return overlaps;
+    });
+    return snapshot(matches);
+  }
+
+  /**
    * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装（契約は
    * interface 側の doc コメントにある）。`packages/postgres` の実装と同じ絞り込み
    * （`subjectId` は `null` 同士も一致・`status === "active"`・`claimKey` を持つ行のみ）

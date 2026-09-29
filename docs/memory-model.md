@@ -467,6 +467,23 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
   `contested` にならない（1つの発話内の言い直しが2件に分かれる場合を除き、失うものは無い。
   詳細は ADR 0377）。**この追記が扱う経路（1件ずつ届く場合）は、直っていない。**
 
+  ⚠ **2026-09-30 追記（Issue #933 の PR1。[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)）:
+  上の2つの追記（2026-09-28・2026-09-29）が「直っていない」としていた、1件ずつ届く経路の
+  症状は直った。**新しい任意メソッド `MemoryStore.findContestedByClaimKey?`
+  （`findActiveByClaimKey?` と同じ絞り込みで `status = 'active'` の代わりに
+  `status = 'contested'` を見る）を実装している store では、検出が `findActiveByClaimKey?`
+  の一致に `findContestedByClaimKey?` の一致を合わせて数える——ADR 0377 の兄弟除外も、
+  合わせた一致に同じ形でかける。⟹ 3件目は「1件目・2件目（どちらも `contested`）を合わせて
+  一致2件」で「2件以上」の分岐（決定6）に入り、`claim_key_conflict_unresolved` の
+  イベントが積まれる。4件目は「3件目（`active`）+ 1件目・2件目（`contested`）」で一致3件
+  ⟹ 同じ分岐。1件目・2件目の対は、3件目・4件目が届いても壊れない。
+  **`findContestedByClaimKey?` を実装していない adapter では、今まで通り**
+  （後方互換）。**ただし「3件以上のグループを実際に `contested` として recall に載せる」
+  ようにはなっていない**——決定6が引き受けていた負債（状態を動かさない）はそのまま
+  残る。多者間グループを表（`memory_relations`）へ束ねる書き込み経路は、
+  [ADR 0327](./decisions/0327-relation-graph-contested-write-path-design.md) の設計に
+  ADR 0378 が決定を与えたが、実装はまだ無い（Issue #933 の PR2）。詳細は ADR 0378。
+
 **`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
 （行6）までであり、`contested → active | superseded`（行7）は今日どおり
 `resolveContested` の明示呼び出しのみ。

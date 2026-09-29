@@ -1650,6 +1650,65 @@ export interface MemoryStore {
     },
   ): Promise<Memory[]>;
   /**
+   * Issue #933（案2、`docs/decisions/0378-*.md`。ADR 0324 決定5・決定6・#207・ADR 0327 の
+   * 続き）: `findActiveByClaimKey?` と**同じ絞り込み**を、`status = 'active'` の代わりに
+   * `status = 'contested'` の行に対して行う、読み取り専用の口。
+   *
+   * ## なぜこの口が要るか
+   *
+   * `findActiveByClaimKey?` は `status = 'active'` の行しか見ない。ところが
+   * `detectClaimKeyContested`（`Runtime`）が同じ鍵の主張を1件ずつ検出するたびに、
+   * 一致した2件はどちらも `markContested` で `active` から `contested` へ移る——
+   * その結果、同じ鍵に3件目が届いたときには、1件目・2件目はもう `active` ではないため
+   * `findActiveByClaimKey?` の一致から**構造的に**消えている（#933）。この口は、その
+   * 「もう `active` ではないが、同じ鍵で争われている」相手を見つけるためにある。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`findActiveByClaimKey?`/`markContestedPair?` と同じ理由）。
+   * **フォールバック経路は無い**——この口が無い adapter に対しては、`Runtime` 側の検出は
+   * 今まで通り `findActiveByClaimKey?` の一致（`active` のみ）だけで判定する。**後方互換**
+   * ——この口を実装していない既存の adapter の振る舞いは1バイトも変わらない。
+   *
+   * 契約は `findActiveByClaimKey?` と同一で、`status` の絞り込みだけが異なる:
+   *
+   * - **`subjectId` は NULL 同士も一致として扱う**（`IS NOT DISTINCT FROM`）。
+   * - **`query.claimKey.subject`/`.predicate` は正規化済みの文字列として、そのまま
+   *   等値比較する。**
+   * - **`status = 'contested'` の行だけを返す。**`active`/`superseded`/`archived`/
+   *   `forgotten` は対象外——`findActiveByClaimKey?` が `active` 以外を対象外にするのと
+   *   対称。
+   * - **`query.excludeMemoryId` に一致する行は返さない。**
+   * - **`query.contentHash` と一致する行は返さない。**
+   * - **有効期間が重ならない行は返さない**（半開区間 `[validFrom, validUntil)`、`NULL` は
+   *   `-∞`/`+∞`。`findActiveByClaimKey?` と同じ判定式）。
+   * - **返す順序は規定しない。**
+   * - **LLM を一度も呼ばない。**
+   *
+   * ⚠ **（ADR 0377 と同じ前提）この口自体は `sourceObservationId` で絞らない。**
+   * 呼び出し側（`Runtime.detectClaimKeyContested`）が、`findActiveByClaimKey?` の返り値と
+   * この口の返り値を合わせた上で、同じ `sourceObservationId` を持つ兄弟を件数を数える前に
+   * 除く（ADR 0377 の除外を、combined な一致に対しても同じ形でかける。ADR 0378）。
+   *
+   * ⚠ **この口の一致は `markContested` の対にはしない。**`detectClaimKeyContested` は、
+   * この口の一致を含めて件数が2件以上になったときは `markContested` を呼ばず、状態を
+   * 一切動かさずに `memory_events` へ evidence（`meta.reason:
+   * 'claim_key_conflict_unresolved'`）を積むだけに留める（ADR 0324 決定6 の経路、
+   * ADR 0378 決定2）。**多者間グループを実際に `contested` として束ねる書き込み（ADR 0327
+   * が設計した `markContestedGroup` 相当）は、この口の範囲外——`RelationStore`
+   * （ADR 0327・ADR 0292、まだ実装されていない）が要る（ADR 0378 の「PR2 へ残すもの」）。**
+   */
+  findContestedByClaimKey?(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]>;
+  /**
    * Issue #691 続き（`docs/decisions/0327-*.md`、ADR 0326 が「採らなかった案B」として
    * 保留した「`knownPredicates` を store の既存 predicate 一覧から動的に渡す」の実装）:
    * 同じ tenant・同じ `subjectId` で claim key を持つ `active` な Memory から、
