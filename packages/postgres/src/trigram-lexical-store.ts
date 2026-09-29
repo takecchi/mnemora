@@ -174,13 +174,23 @@ import { toPgTimestamp } from "./mapping.js";
  *   `word_similarity` が 1 にならない**——[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)
  *   §3.2 が実測した「`C` ロケールのクラスタで `pg_trgm` の日本語トライグラムが黙って
  *   空になる」という「静かな0件」を、ここで検出する。
+ * - `"extension_not_visible"`: `pg_trgm` は DB のどこかには存在するが、この接続の
+ *   `search_path`（`current_schemas(true)`）からは見えないスキーマに入っている——
+ *   専用スキーマの構成（`schema` を指定した接続）で、別の名前空間が先に `pg_trgm` を
+ *   作ってしまった場合に起きる（[Issue #1256](https://github.com/takecchi/mnemora/issues/1256)）。
+ *   `detail` に、拡張が実際に入っているスキーマ名を入れる。直すには、拡張の権限を持つ
+ *   ロールで `ALTER EXTENSION pg_trgm SET SCHEMA <extensionSchema>` を実行する——
+ *   ただし、`pg_trgm` をその名前空間の中に入れたまま `DROP SCHEMA <schema> CASCADE` する
+ *   と、拡張ごと消える（`pg_trgm` がそのスキーマ内の依存物として扱われるため。
+ *   【実測 2026-09-28】このファイルの `probeTrigramLexicalSupport` の doc「2026-09-29 追記」参照）。
  */
 export type TrigramLexicalUnavailableReason =
   | "server_encoding_not_utf8"
   | "extension_unavailable"
   | "extension_create_denied"
   | "extension_create_failed"
-  | "locale_no_japanese_trigrams";
+  | "locale_no_japanese_trigrams"
+  | "extension_not_visible";
 
 /** `pg_trgm` の前提の確認が通った結果。 */
 export interface TrigramLexicalProbeOk {
@@ -299,8 +309,12 @@ function isPermissionDenied(message: string): boolean {
  * 検査の順序（早い段階で弾けるものから）:
  * 1. `SHOW server_encoding` が `UTF8` か。
  * 2. `pg_available_extensions` に `pg_trgm` があるか。
- * 3. `CREATE EXTENSION IF NOT EXISTS pg_trgm` が成功するか。
- * 4. 日本語リテラルの自己一致（`word_similarity(x, x) >= 0.99`）が成り立つか
+ * 3. `CREATE EXTENSION IF NOT EXISTS pg_trgm`（`vector` 拡張のスキーマが分かり、それが現在の
+ *    `search_path` の先頭と違うときは、そこへ `WITH SCHEMA` で入れる。Issue #1256、下記追記）が
+ *    成功するか。
+ * 4. 作った（または既にあった）`pg_trgm` が、この接続の `search_path` から見えるか
+ *    （Issue #1256、下記追記、新設）。
+ * 5. 日本語リテラルの自己一致（`word_similarity(x, x) >= 0.99`）が成り立つか
  *    （ADR 0084 §3.2 の「`C` ロケールで黙って0件になる」を検出する本体）。
  *
  * [Issue #892](https://github.com/takecchi/mnemora/issues/892): この関数自身は、公開の
@@ -308,14 +322,29 @@ function isPermissionDenied(message: string): boolean {
  * 元の Postgres エラーを運ぶのは export しない {@link probeTrigramLexicalSupportWithCause}
  * のほうである（{@link PostgresTrigramLexicalStore.create} が使う）。
  *
- * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの、[Issue #1256](https://github.com/takecchi/mnemora/issues/1256)）:
- * 手順3の `CREATE EXTENSION` は `SCHEMA` を指定しない。**`pg_trgm` は `search_path` の先頭——専用スキーマの
- * 構成（`createPostgresClient` に `schema` を渡したとき）では接続の名前空間のスキーマ——に入り、`runMigrations`
- * が必須の拡張を入れる `extensionSchema`（既定 `public`）には入らない。そのため、同じ DB の2つ目の名前空間では、
- * 手順3は何もせず（`IF NOT EXISTS`）、手順4の `word_similarity` が見えずに **`{ ok: false, reason }` ではなく
- * DB の例外（`42883`）を投げる**（`create()` も同じ例外で、`TrigramLexicalStoreUnavailableError` ではない）。
- * `pg_trgm` が既に `extensionSchema` などの共通のスキーマに在れば起きない。
- * 【実測 2026-09-28】`trigram-probe-dedicated-schema.postgres.test.ts`。
+ * ⚠ **2026-09-29 追記（Issue #1256 の修正、今の振る舞い）: 手順3の `CREATE EXTENSION` は、
+ * `pg_extension`/`pg_namespace` を読んで `vector` 拡張（`runMigrations` が `REQUIRED_EXTENSIONS`
+ * として `extensionSchema` に入れたもの）のスキーマを引き、そのスキーマが現在の `search_path` の
+ * 先頭（`current_schema()`）と違うときだけ `WITH SCHEMA "<そのスキーマ>"` を付けて `pg_trgm` を
+ * 入れる。** `vector` が見つからないとき、または `vector` のスキーマが `current_schema()` と同じ
+ * とき（`schema` を渡さない既定の構成で、`vector` が `search_path` の先頭のスキーマに在る場合。
+ * ⚠ 既定の構成でも `vector` を先頭以外のスキーマに置いていれば、`pg_trgm` もそこへ入る——
+ * 今までは先頭のスキーマに入っていた）は、発行する SQL 文字列は今日と1バイトも
+ * 変わらない（`CREATE EXTENSION IF NOT EXISTS pg_trgm`、`SCHEMA` を指定しない。
+ * `trigram-probe-dedicated-schema.postgres.test.ts` の「既定の構成で SQL 文字列が変わらない」歯
+ * が縛る）。**⟹ 専用スキーマの構成で新しく作る DB は、どの名前空間から呼んでも `pg_trgm` は
+ * `extensionSchema`（既定 `public`）に入り、全ての名前空間から見える。**
+ *
+ * **手順4（新設）: 作成後、`pg_trgm` がこの接続の `search_path`（`current_schemas(true)`）から
+ * 見えるかを確かめる。** 見えなければ `{ ok: false, reason: "extension_not_visible", detail }`
+ * を返す（`detail` は拡張が実際に入っているスキーマ名）——このバグが直る前に作られた DB など、
+ * 既に別の名前空間へ `pg_trgm` が入ってしまっている場合に起きる。`create()` はこれを
+ * {@link TrigramLexicalStoreUnavailableError} にして投げる。**もう素の `42883`（DB の名前の付かない
+ * 例外）は出さない。** 直すには、拡張の権限を持つロールで
+ * `ALTER EXTENSION pg_trgm SET SCHEMA <extensionSchema>` を実行する——ただし、`pg_trgm` を
+ * 名前空間の中に入れたまま `DROP SCHEMA <schema> CASCADE` すると、拡張ごと消える
+ * （`pg_trgm` がそのスキーマ内の依存物として扱われるため。【実測 2026-09-28】）。
+ * 【実測 2026-09-29】`trigram-probe-dedicated-schema.postgres.test.ts`。
  */
 export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult> {
   const result = await probeTrigramLexicalSupportWithCause(db);
@@ -353,7 +382,35 @@ async function probeTrigramLexicalSupportWithCause(
   }
 
   try {
-    await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+    // Issue #1256: `vector` 拡張（`runMigrations` が `REQUIRED_EXTENSIONS` として
+    // `extensionSchema` に入れたもの）のスキーマを読み、それが現在の `search_path` の先頭
+    // （`current_schema()`）と違うときだけ、そこへ `WITH SCHEMA` で `pg_trgm` を入れる。
+    // `vector` が無い、またはスキーマが一致するとき（`schema` を渡さない既定の構成で、
+    // `vector` が `search_path` の先頭のスキーマに在る場合）は、発行する SQL 文字列を今日と
+    // 1バイトも変えない（`trigram-probe-dedicated-schema.postgres.test.ts` の歯が縛る）。
+    // ⚠ 既定の構成でも、`vector` を先頭以外のスキーマ（拡張専用のスキーマなど）に置いていれば、
+    // `pg_trgm` もそこへ入る（今までは先頭のスキーマに入っていた）。
+    const vectorSchemaResult = await db.execute(sql`
+      SELECT n.nspname AS ext_schema, current_schema() AS cur_schema
+      FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
+      WHERE e.extname = 'vector'
+    `);
+    const vectorSchemaRow = vectorSchemaResult.rows[0] as
+      { ext_schema: string; cur_schema: string } | undefined;
+    if (
+      vectorSchemaRow !== undefined &&
+      vectorSchemaRow.ext_schema !== vectorSchemaRow.cur_schema
+    ) {
+      // スキーマ名はカタログから読んだ値であり、mnemora が検証した名前とは限らない（利用者が
+      // `vector` を大文字や記号を含むスキーマに入れていることがある）。`assertSafeSchemaName` で
+      // 弾くと、今まで通っていた構成が `extension_create_failed` で落ちるようになるため、弾かずに
+      // `sql.identifier`（二重引用符で囲み、中の `"` を `""` にする）で識別子として埋め込む。
+      await db.execute(
+        sql`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA ${sql.identifier(vectorSchemaRow.ext_schema)}`,
+      );
+    } else {
+      await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -364,6 +421,26 @@ async function probeTrigramLexicalSupportWithCause(
       // 渡すため（Issue #892）。他の3つの reason は値ベースの判定であり、そもそも
       // Postgres のエラーオブジェクトを持たない。
       cause: err,
+    };
+  }
+
+  // Issue #1256（新設）: 作った（または既にあった）`pg_trgm` が、この接続の `search_path`
+  // から見えるかを確かめる。見えなければ、拡張が実際に入っているスキーマ名を `detail` に
+  // 入れて `extension_not_visible` を返す——このバグが直る前に作られた DB など、既に別の
+  // 名前空間へ `pg_trgm` が入ってしまっている場合に起きる。ここで検出せずに次の自己一致検査へ
+  // 進むと、`word_similarity` が見えない DB の素の例外（42883）になってしまう。
+  const visibilityResult = await db.execute(sql`
+    SELECT n.nspname AS ext_schema, n.nspname = ANY(current_schemas(true)) AS visible
+    FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
+    WHERE e.extname = 'pg_trgm'
+  `);
+  const visibilityRow = visibilityResult.rows[0] as
+    { ext_schema: string; visible: boolean } | undefined;
+  if (visibilityRow === undefined || !visibilityRow.visible) {
+    return {
+      ok: false,
+      reason: "extension_not_visible",
+      detail: visibilityRow?.ext_schema,
     };
   }
 
