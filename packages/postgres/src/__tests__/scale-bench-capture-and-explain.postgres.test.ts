@@ -64,6 +64,17 @@ describe("scale-bench: captureAndExplain は search() のクエリを本番と�
     // （pool が接続を使い回すかどうかは非決定的）`inTransaction[0]` が
     // `begin` にならない場合がありうる。測定を始める前に空振りの `search()` を1回
     // 打ち、検査を済ませておく。
+    //
+    // Issue #1415 / ADR 0374 追記: `StatsPresenceGate`（`vector-store.ts` の doc
+    // 参照）も同じ形の1回きりの検査を持つが、その往復は `withRelaxedOrderScan` の
+    // `db.transaction()`（この歯が観測する BEGIN/SET LOCAL/EXPLAIN の並び）が始まる
+    // **前**に、別の接続で完結する（`this.db.execute(...)`、トランザクションの外）。
+    // ⟹ この歯が縛る「捕まえた1本の SELECT が属するトランザクションの中身」には
+    // そもそも現れないため、`StatsPresenceGate` が未確認か確認済みかに関わらず、
+    // この歯の期待値（`inTransaction` の並び）は変わらない——ただし空振りの
+    // `search()` は、この歯にとっても `StatsPresenceGate` の初回検査を測定区間の
+    // 前に済ませておく効果を兼ねる（`recall-roundtrip-count.postgres.test.ts` の
+    // 歯6が、初回・2回目でこの遷移を直接測っている）。
     await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0, 0, 0], {
       limit: 1,
       filter: { tenantId: TENANT },

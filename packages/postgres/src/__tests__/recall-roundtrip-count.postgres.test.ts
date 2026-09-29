@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import type { Ctx, LLMProvider } from "@mnemora/core";
+import type { Ctx, EmbeddingSpaceId, LLMProvider } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { embeddingSpaceTableName } from "../embedding-space-table.js";
+import { registerEmbeddingSpace } from "../vector-space.js";
 import {
   closeTestClient,
   getTestClient,
@@ -107,7 +109,7 @@ const throwingLlm: LLMProvider = {
   },
 };
 
-async function buildTestRuntime() {
+async function buildTestRuntime(space: EmbeddingSpaceId = TEST_EMBEDDING_SPACE) {
   const { db } = await getTestClient();
   const memoryStore = new PostgresMemoryStore(db);
   const vectorStore = new PostgresVectorStore(db);
@@ -128,7 +130,7 @@ async function buildTestRuntime() {
     tenantSettingsStore,
     llmProvider: throwingLlm,
     embeddingProvider: {
-      space: TEST_EMBEDDING_SPACE,
+      space,
       // `RecallQuery.vector` を直接渡すので embed は呼ばれないはず。
       embed: async () => {
         throw new Error("この歯は RecallQuery.vector を直接渡すので embed を呼ばないはず");
@@ -212,10 +214,30 @@ async function seedRoundtripCorpus(
  * だけ1往復を追加で発生させ、以降はキャッシュされて追加の往復を生まない
  * （`vector-store.ts` の `PgvectorCapabilityGate` の doc 参照）。
  *
+ * **Issue #1415 / ADR 0374 追記**: `StatsPresenceGate`（`vector-store.ts` の doc
+ * 参照）も同じ形の仕組みを持つ——`memories`・埋め込み表の**両方**の統計が
+ * 確認済みになるまでは、`search()`/`searchMany()` を呼ぶたびに `reltuples` を読む
+ * ための往復を1回余分に払い、両方が確認済みになったあとは（そのインスタンス・
+ * その表の組み合わせでは）二度と払わない。この歯（歯1・歯2・歯4・歯5）が使う
+ * `TEST_EMBEDDING_SPACE` は他のテストファイルとも共有する worker DB 上の表であり、
+ * 大抵は既に何らかの `ANALYZE`（自動発火含む）を経て確認済みになっている——
+ * それでも「未確認→確認済みへ切り替わる、まさにその1回」を測定区間の中に含めて
+ * しまうと、比較の両辺で往復数が食い違いうる（`PgvectorCapabilityGate` と同じ罠）。
+ * 下の `warmUpPgvectorCapabilityCheck` は、その名前が示す能力検査だけでなく、
+ * **同じ `search()` 呼び出しのついでに `StatsPresenceGate` の遷移も測定区間より前に
+ * 済ませる**（1つの `search()` 呼び出しが両方の gate を同時に通るため、名前を
+ * 変えずに済んでいる——歯6 がこの相乗りを裏取りする）。
+ *
  * この歯（歯1・歯2・歯4・歯5）が固定するのは「候補件数・basis件数・anchorCount を
  * 変えても往復数が増えない」という**比較**であって、初回呼び出しに乗る検査ぶんの
  * +1往復そのものではない——測定を始める前に、`countClientQueries` の外側で1回だけ
  * 空振りの `search()` を打ち、検査を済ませておく。
+ *
+ * **歯6（新設、Issue #1415 / ADR 0374）は上の「測定を始める前に済ませておく」を
+ * あえて崩し、`StatsPresenceGate` の遷移そのものを歯にする**——専用の
+ * （他のテストファイルと共有しない、一度も `ANALYZE` されていない）埋め込み表を
+ * 使い、「未確認の間だけ+1往復、確認済みになったら今日と同じ数へ戻る」ことを
+ * 直接測る。
  */
 async function warmUpPgvectorCapabilityCheck(
   vectorStore: PostgresVectorStore,
@@ -516,5 +538,70 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     // ここには焼き込まない、AGENTS.md「数を、道具と生成物に焼き込まない」）。
     expect(roundtripsByAnchorCount.get(3)).toBe(roundtripsByAnchorCount.get(1));
     expect(roundtripsByAnchorCount.get(10)).toBe(roundtripsByAnchorCount.get(1));
+  });
+
+  it("歯6（Issue #1415 / ADR 0374）: recall() の往復数は、統計が未確認の間だけ+1、確認済みになったら今日と同じ数へ戻る", async () => {
+    const ctx: Ctx = { tenantId: `tenant-rtc-statsgate-${randomUUID()}` };
+    // このテストだけの専用の埋め込み表——一度も ANALYZE していない、正真正銘
+    // 「統計が無い」表を保証する（`TEST_EMBEDDING_SPACE` は他のテストファイルとも
+    // 共有するため、ここでは使わない）。
+    const space: EmbeddingSpaceId = {
+      provider: "test-issue-1415-roundtrip",
+      model: `roundtrip-statsgate-${randomUUID()}`,
+      dimensions: 3,
+    };
+    const { pool } = await getTestClient();
+    await registerEmbeddingSpace(pool, space);
+    const table = embeddingSpaceTableName(space);
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime(space);
+
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, ANCHOR_VECTOR, { digest: "one" });
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, SECOND_VECTOR, { digest: "two" });
+
+    // 1回目: pgvector 能力検査・`StatsPresenceGate` のどちらも未確認——両方の
+    // 検査ぶんの往復が乗る（`association: null` で `search()` だけを踏む——
+    // 歯1・歯4 と同じ「候補フェッチ以外の経路を混ぜない」配置）。
+    const call1 = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 2回目: pgvector 能力検査はもう確認済み（インスタンスごとに1回きり）。
+    // `StatsPresenceGate` はまだ未確認のまま——表を一度も ANALYZE していないので
+    // `reltuples < 0` を観測し続け、確認済みにはならない。
+    const call2 = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(
+      call2,
+      "pgvector 能力検査ぶんの1回だけが消え、StatsPresenceGate ぶんの+1はまだ残るはず",
+    ).toBe(call1 - 1);
+
+    // ここで初めて ANALYZE を打つ——次の呼び出しで `reltuples >= 0` が観測される。
+    await pool.query(`ANALYZE ${table}`);
+    await pool.query("ANALYZE memories");
+
+    // 3回目: この呼び出し自身が「未確認→確認済み」の遷移を起こす——遷移する
+    // その回はまだ検査ぶんの往復を払う（call2 と同じ数のはず）。
+    const call3 = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(
+      call3,
+      "確認済みへ切り替わる、まさにその回はまだ検査ぶんの往復を払うはず（call2 と同数）",
+    ).toBe(call2);
+
+    // 4回目: 前回で確認済みになったので、今日と同じ数へ戻る。
+    const call4 = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(call4, "確認済みになったので、今日と同じ数へ戻るはず").toBe(call3 - 1);
+
+    // 5回目: 4回目以降も往復数が増えない（確認済みは以後ずっと保たれる）ことの裏取り。
+    const call5 = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(call5, "確認済みは以後ずっと保たれ、往復数はこれ以上減らない（増えもしない）").toBe(
+      call4,
+    );
   });
 });
