@@ -667,7 +667,7 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 
 歯は core の Fake（`packages/core/src/__tests__/claim-key-single-contested-match.test.ts`）と本物の Postgres（`packages/postgres/src/__tests__/claim-key-single-contested-match.postgres.test.ts`）に追加した。詳細は ADR 0378 の同日追記を見ること。
 
-## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
 
 > ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
 > のものである。⛔ オーナー本人の判定ではない（ADR 0220）。

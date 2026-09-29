@@ -844,12 +844,14 @@ PR #1393・Issue #1232）になった。**
 **⚠ 2026-09-30 追記30**: 上の棚卸しとは別に、着地に先立って変更を作った本人がこの節へ
 足した項目（上の追記19・20・28 と同じ扱い）。[Issue #207](https://github.com/takecchi/mnemora/issues/207)/
 [Issue #933](https://github.com/takecchi/mnemora/issues/933) の PR2、
+[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
 [ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)（クローン
 miku の委譲先の判断であり、オーナーの判断ではない）。
 
 - **`ContestedDetectionOutcome.result`（`@mnemora/core`）の判別可能 union に
   `"contested_group"` が増えた**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)・
   [Issue #933](https://github.com/takecchi/mnemora/issues/933)、
+  [PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
   [ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)）——
   Issue #933 PR1（ADR 0378、上の追記28）が「多者間のグループを実際に `contested` として
   束ねる書き込みは範囲外」としていた部分を実装した。`ClaimKeyOptions.formContestedGroups?:

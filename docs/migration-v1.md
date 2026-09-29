@@ -1604,6 +1604,7 @@ content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも In
 
 [Issue #207](https://github.com/takecchi/mnemora/issues/207)・
 [Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、
+[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
 [ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
 
 **何が変わったか**: `Runtime.observe()` の `contestedDetection`（`claimKey: { enabled: true,
@@ -1639,7 +1640,7 @@ evidence-only（`"unresolved_conflict"`）の代わりに、実際に `Runtime.m
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
 2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380）、
-Issue #207・#933 PR2（ADR 0381））になった。**
+PR #1442・Issue #207・#933 PR2（ADR 0381））になった。**
 
 ⚠ **項目29 は、[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2（多者間の
 グループを `contested` として束ねる書き込み、まだ OPEN）が使う予定の欠番である。**

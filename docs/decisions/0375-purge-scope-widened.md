@@ -455,7 +455,7 @@ Issue #1425 に切り出しただけで、この PR は1行も直していない
 の「space ごとに別テーブル」という設計そのものが、カタログを読めば列挙できる形に
 なっている。この ADR 0375 本文は書き換えず、この追記で指し先を更新するだけに留める。
 
-## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
 
 > ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
 > のものである。⛔ オーナー本人の判定ではない（ADR 0220）。

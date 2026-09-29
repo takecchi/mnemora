@@ -599,7 +599,7 @@ kind を新設する判断に切り替わる。
 
 Refs #207
 
-## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
 
 > ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
 > のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
