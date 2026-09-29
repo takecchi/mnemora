@@ -1741,6 +1741,19 @@ export class PostgresMemoryStore implements MemoryStore {
     // 再スキャンしない——`in_scope`（`agg` の合計）から、除外 id のうち in_scope 条件を
     // 満たす件数（高々 `excludeMemoryIds.length` 件、主キー相当の `id` に乗るので
     // テナント規模に依存しない）を引き算するだけで出す。
+    //
+    // [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)（案A）:
+    // `digests` の `ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` は
+    // `migrations/0027_digest_band_index.sql` の部分索引
+    // `idx_memories_digest_band (tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC)
+    // WHERE status IN ('active', 'contested')` に支えられる——ADR 0307「引き受けた負債」
+    // 2番が残した「in-scope 件数ぶんの Seq Scan + top-N Sort」の穴を塞ぐ。
+    // `occurredAfter`/`occurredBefore`/`validAt`/`labels` を指定しない既定の呼び出しでは
+    // `in_period`/`is_valid`/`has_qualifying_label` はすべて定数 `true` になるため、
+    // 索引だけで `LIMIT` まで打ち切れる（`Index Scan Backward` + `Limit`）。指定した
+    // 呼び出しではこれらが Filter として残るが、`tenant_id` の絞り込み自体は索引が効く。
+    // SQL 文自体（このクエリの書き方）は変えていない——索引を追加しただけであり、
+    // 返す digest の中身・順序・件数は1バイトも変わらない。
     const digestBandColumns = digestBand
       ? sql`,
         (
