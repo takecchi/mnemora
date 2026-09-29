@@ -57,9 +57,14 @@ describe("publish 対象パッケージの package.json（静的）", () => {
       const manifest = readManifest(target.dir);
 
       if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
-        // 初回 publish 前は 0.0.0 のままが正しい（ADR 0070。version 揃い検査からも外れる）。
-        it("初回 publish 前なので version は 0.0.0 のまま", () => {
-          expect(manifest.version).toBe("0.0.0");
+        // 初回 publish 前は、git 上では 0.0.0 のままが正しい（ADR 0070。version 揃い検査からも外れる）。
+        // ⚠ ただし publish.yml は、この門を走らせる前に apply-release-version.mjs で全対象の version を
+        // tag の版へ書き換える。⟹ そのときは core と同じ版になっているのが正しい。
+        // 0.0.0 だけを許していた間は、Release のたびに publish ジョブがここで落ち、1本も上がらなかった
+        // （【実測】2026-09-30、Release v1.1.0 の publish run 36612548998）。
+        it("初回 publish 前なので version は 0.0.0 のまま（publish 時は tag の版＝core と同じ版）", () => {
+          const coreVersion = readManifest("packages/core").version;
+          expect(["0.0.0", coreVersion]).toContain(manifest.version);
         });
       } else {
         it("version が 0.0.0 のままではない", () => {
