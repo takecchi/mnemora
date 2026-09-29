@@ -102,7 +102,8 @@ export class InMemoryOutboxStore implements OutboxStore {
       // claim（`claimedAt` が null だった）では `availableAt` を変えない。`PostgresOutboxStore`
       // の `CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE now END` と同じ意味論——
       // ここで見る `job.claimedAt` は、この for ループがまだ書き換えていない「更新前」の値。
-      const isReclaim = job.claimedAt !== null;
+      // `claimedAt` は省略可（`undefined`）。上の絞り込みと同じく `?? null` で読む。
+      const isReclaim = (job.claimedAt ?? null) !== null;
       if (isReclaim) {
         job.availableAt = new Date(opts.now);
       }
