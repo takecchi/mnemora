@@ -630,10 +630,20 @@ PR #1393・Issue #1232）になった。**
 
   **DB マイグレーション**: 不要（新しい列・表は追加していない）。
 
-  **陽性対照（実測）**: `packages/postgres/src/__tests__/consolidate-source-forgotten-for-update-race.postgres.test.ts`。
+  **陽性対照（実測）**: `packages/postgres/src/__tests__/consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`。
   書き込みの入口（読み直しの直後・書き込み直前）で障壁を置き、その間に forget/purge を
-  割り込ませる変異試験——新実装は10/10緑、`SELECT … FOR UPDATE` の見直しを外すと
-  10/10赤。
+  割り込ませる変異試験——`consolidate`（`supersedeWithNewMemories`）・`reflect`
+  （`createMemoryWithOutbox`）の両方で、新実装は10/10緑、対応する
+  `SELECT … FOR UPDATE` の見直しを外すと10/10赤。
+
+  **⚠ union に値を足す変更が型検査に影響しうる実例**: `examples/chat/src/consolidation-cost.ts`
+  は `outcomes[result.outcome] += 1` という形で `ConsolidateOutcome` を index に使っており、
+  `"aborted_source_forgotten"` を足したことで CI の typecheck が `TS7053` で落ちた（`examples/chat`
+  側の `ConsolidationOutcomeCountsJson`/`emptyOutcomeCounts` に同名の欄を足して直した）。
+  **「union に値を足す変更は破壊的と数えない」という判定は変えていない**——網羅的な
+  `Record`/`switch` で `ConsolidateOutcome`/`ReflectOutcome`/`ConsolidateSourceOutcome`/
+  `ReflectBasisOutcome` を扱っている利用者は、この種の追加でも型検査が落ちうる、という
+  影響の実例として記録する。
 
 ### Added
 

@@ -1472,6 +1472,15 @@ id を含めると `SourceMemoryForgottenError` を投げて何も書かない�
 だけの利用者は、`ConsolidateOutcome`/`ReflectOutcome` を網羅的に分岐している場合
 だけ型検査で気づく**（union に値が増えたため。exhaustive switch は `never` の分岐で
 落ちる）——今日どおりの分岐（`default`/未網羅の分岐）ならコンパイルは壊れない。
+
+⚠ **実例（本 PR 自身で起きた）**: `examples/chat/src/consolidation-cost.ts` は
+`outcomes[result.outcome] += 1` という形で `ConsolidateOutcome` を **index** に使って
+おり（`Record` に似た「全値に対応する欄を持つ型」を経由）、`"aborted_source_forgotten"`
+を足したことで CI の typecheck が `TS7053`（index の型に無い値がある）で落ちた
+——exhaustive `switch` の `never` 検査だけでなく、この種の「全値に対応する欄を持つ
+`Record` 型を index する」形も同じ理由で型検査に引っかかる。**「union に値を足す
+変更は破壊的と数えない」という判定はこの実例でも変えていない**——影響の一言として
+記録する（対応: `ConsolidationOutcomeCountsJson`/`emptyOutcomeCounts` に同名の欄を足した）。
 `packages/testkit` の conformance suite を自分の `MemoryStore` 実装に対して走らせて
 いる利用者は、`supportsAbortIfForgotten` を渡さなければ影響を受けない。
 

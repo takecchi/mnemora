@@ -186,13 +186,14 @@ describe("buildConsolidationStoreJson", () => {
 });
 
 describe("emptyOutcomeCounts", () => {
-  it("5値すべてが0", () => {
+  it("6値すべてが0", () => {
     expect(emptyOutcomeCounts()).toEqual({
       consolidated: 0,
       nothing_to_consolidate: 0,
       not_examined: 0,
       llm_failed: 0,
       dry_run: 0,
+      aborted_source_forgotten: 0,
     });
   });
 });

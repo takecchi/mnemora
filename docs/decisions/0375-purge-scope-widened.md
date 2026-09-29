@@ -329,15 +329,20 @@ Memory を拒むため、両者は同じ条件で判定できる）なら、**�
   **その読み直しと書き込みの間に小さな窓が残る**——decision 3 が「それ以外の経路は書く直前に
   読み直すだけで窓が残る」と書いたとおりである。
 
-**陽性対照（decision の「実測は PR2 で行う」を満たす実測）**: `packages/postgres/src/__tests__/consolidate-source-forgotten-for-update-race.postgres.test.ts`。runtime の「書く直前の読み直し」が終わった直後・`supersedeWithNewMemories` の呼び出しそのものが実行される直前で障壁を置き（`purge-during-embed-job.postgres.test.ts` ＝ Issue #1035 と同じ「障壁で止めて、その間に割り込ませる」作法）、止めている間に forget → purge を完了させてから障壁を外す。
+**陽性対照（decision の「実測は PR2 で行う」を満たす実測。2026-09-30 に consolidate・
+reflect 両方で実測——当初は consolidate だけだったが、CI の型検査が壊れた棚卸しの過程で
+reflect 側の陽性対照も同じ作法で足した）**: `packages/postgres/src/__tests__/consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`。runtime の「書く直前の読み直し」が終わった直後・書き込みメソッド（consolidate は `supersedeWithNewMemories`、reflect は `createMemoryWithOutbox`）の呼び出しそのものが実行される直前で障壁を置き（`purge-during-embed-job.postgres.test.ts` ＝ Issue #1035 と同じ「障壁で止めて、その間に割り込ませる」作法）、止めている間に forget → purge を完了させてから障壁を外す。
 
-| 条件 | 結果 |
-|---|---|
-| 新実装（`SELECT … FOR UPDATE` の見直しあり） | **10/10 緑**（`outcome: 'aborted_source_forgotten'`、統合先は作られない） |
-| 見直し（`assertNotForgottenForUpdate` の呼び出し）を1行コメントアウトして外した変異 | **10/10 赤**（`outcome: 'consolidated'`——見直しが無いと、runtime の書く直前の読み直しだけでは閉じない窓から、消した内容が統合先に残ることを再現） |
+| 対象 | 条件 | 結果 |
+|---|---|---|
+| `consolidate`（`supersedeWithNewMemories` の `SELECT … FOR UPDATE`） | 新実装（見直しあり） | **10/10 緑**（`outcome: 'aborted_source_forgotten'`、統合先は作られない） |
+| `consolidate`（同上） | `assertNotForgottenForUpdate` の呼び出しを1行コメントアウトして外した変異 | **10/10 赤**（`outcome: 'consolidated'`——見直しが無いと、runtime の書く直前の読み直しだけでは閉じない窓から、消した内容が統合先に残ることを再現） |
+| `reflect`（`createMemoryWithOutbox` の `SELECT … FOR UPDATE`） | 新実装（見直しあり） | **10/10 緑**（`outcome: 'aborted_source_forgotten'`、内省の Memory は作られない） |
+| `reflect`（同上） | `createMemoryWithOutbox` 側の `assertNotForgottenForUpdate` 呼び出しを1行コメントアウトして外した変異 | **10/10 赤**（`outcome: 'reflected'`——見直しが無いと、消した内容が内省の Memory に残ることを再現。この変異では `consolidate` 側の10本は影響を受けず green のまま——2つの書き込みメソッドの見直しが互いに独立していることも確認した） |
 
-変異試験は `origin/main` から切った使い捨て worktree に、本 PR の新実装一式を `cp` で
-持ち込んで green を確認した後、`assertNotForgottenForUpdate` の呼び出し1行だけを
+変異試験は、それぞれ別の（`origin/main` から切った）使い捨て worktree に、本 PR の新実装
+一式を `cp` で持ち込んで green を確認した後、対象のメソッド（`supersedeWithNewMemories`/
+`createMemoryWithOutbox`）内の `assertNotForgottenForUpdate` の呼び出し1行だけを
 コメントアウトして赤を確認した（`cp` で復元すれば green に戻る。`diff` で元ファイルと
 一致することは確認していない——1行のコメントアウトなので目視で確認した）。
 
@@ -358,7 +363,20 @@ Memory を拒むため、両者は同じ条件で判定できる）なら、**�
 スイートの判定を厳しくする変更は…数える」に当たる。`docs/migration-v1.md` 項目26に
 登録した。`opts.abortIfForgotten` 自体（新しい省略可能フィールド）・新しい outcome
 （`aborted_source_forgotten`）・新しい `kind`（`forgotten_before_write`）・新しい
-`SourceMemoryForgottenError` は、いずれも非破壊（追加のみ）。
+`SourceMemoryForgottenError` は、いずれも非破壊（追加のみ）——この判定自体は変えていない。
+
+**⚠ 2026-09-30 追記2（同日）: union に値を足す変更が「型検査で気づかれる」実例が
+本 PR 自身で起きた。** `examples/chat/src/consolidation-cost.ts` は
+`outcomes[result.outcome] += 1` という形で `ConsolidateOutcome` を index に使っており
+（`ConsolidationOutcomeCountsJson` という、`ConsolidateOutcome` の全値と1対1の欄を
+持つ型を経由）、`"aborted_source_forgotten"` を足したことで CI の typecheck が
+`TS7053`（index の型に無い値がある）で落ちた。**「union に値を足す変更は破壊的と
+数えない」という規律（`docs/migration-v1.md` の数え方の規律）はここでは変えていない**
+——数え方の規律は「破壊的変更として計上するかどうか」の話であり、「型検査に一切
+影響しないか」とは別である。**網羅的な `Record`/`switch` で `ConsolidateOutcome`/
+`ReflectOutcome`/`ConsolidateSourceOutcome`/`ReflectBasisOutcome` を扱っている
+利用者は、この手の追加でも型検査が落ちうる**——`docs/migration-v1.md` 項目26と
+CHANGELOG の同項目に、この実例を影響の一言として書いた（計上の判定は変えていない）。
 
 **確かめていないこと（この追記の範囲）**:
 

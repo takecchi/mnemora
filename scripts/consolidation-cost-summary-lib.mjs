@@ -53,12 +53,17 @@ const REQUIRED_MEAN_FIELDS = [
   "recalledActiveShare",
 ];
 
+// ⚠ 2026-09-30 追記（Issue #1226、ADR 0375 決定7）: "aborted_source_forgotten" を足した
+// ——`ConsolidateOutcome`（packages/core）に同名の値が増えたことに合わせた
+// （`examples/chat/src/consolidation-json.ts` の `ConsolidationOutcomeCountsJson` と同じ
+// 理由で、この一覧も `ConsolidateOutcome` の全値と1対1で揃える）。
 const REQUIRED_CONSOLIDATION_OUTCOME_FIELDS = [
   "consolidated",
   "nothing_to_consolidate",
   "not_examined",
   "llm_failed",
   "dry_run",
+  "aborted_source_forgotten",
 ];
 
 function isObject(value) {
