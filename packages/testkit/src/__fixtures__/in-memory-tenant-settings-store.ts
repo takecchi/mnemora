@@ -30,18 +30,34 @@ import type {
  * half-life 用と retention 用を別々の Map にすると、half-life だけ設定したテナントの
  * retention が「行が無い」（`{ kind: "unset" }`）のままになり、Postgres と食い違う
  * （ADR 0050 参照）。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+ * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）:**
+ * 保持期間（`event_retention_days`）だけは、実際には上の「行」（`rows`）とは別の Map
+ * （`eventRetentionDays`、下記）に持つ——`InMemoryMemoryStore.purgeExpiredEventsByRetention` と
+ * 共有する必要があるため（`activitySeq`/`subjectActivitySeq` と同じ「同一プロセス内の参照共有」
+ * の形）。**ただし、直前の段落の「half-life だけ設定したテナントも retention は unlimited に
+ * なる」という Postgres との一致は崩していない**——`ensureRow`（下記）が、`rows` に新しい行を
+ * 作るたびに、`eventRetentionDays` 側にも（まだ無ければ）`null` を立てて2つの Map を
+ * 同期させる。
  */
 export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   private readonly rows = new Map<
     string,
     {
       defaultHalfLifeHours: number;
-      eventRetentionDays: number | null;
       decayClock: DecayClock;
       defaultHalfLifeRecalls: number;
       taxonomyMode: TaxonomyMode;
     }
   >();
+
+  /**
+   * `activitySeqBacking`/`subjectActivitySeqBacking` が渡されなかったときのための、
+   * このインスタンス専用の保持期間の Map（`eventRetentionDaysBacking` が渡されなかった
+   * ときのフォールバック）。{@link InMemoryTenantSettingsStore.eventRetentionDays} 参照。
+   */
+  private readonly ownEventRetentionDays = new Map<string, number | null>();
 
   /**
    * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと2・5・13
@@ -55,20 +71,40 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * （Issue #338）: `subjectActivitySeqBacking` は `tenant_subject_activity` 相当——
    * `tenantId` → `subjectId` → `S_x` の2段の `Map`。`InMemoryMemoryStore.createRecall`
    * （`advanceActivityClock: { scope: "subject", subjectId }`）が書く側と共有する。
+   *
+   * Issue #1232 / [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)
+   * （Issue #338 の `subjectActivitySeqBacking` と同じ形の追加）: `eventRetentionDaysBacking` は
+   * `tenant_settings.event_retention_days` 相当——`InMemoryMemoryStore.eventRetentionDays`
+   * （`purgeExpiredEventsByRetention` が読む側）をそのまま渡すことで、`setEventRetention`
+   * （書く側）と同じ値を見る。**省略すると、このインスタンス専用の Map
+   * （`ownEventRetentionDays`）を使う**——`purgeExpiredEventsByRetention` を持たない
+   * `MemoryStore` と組み合わせる場合など、共有が不要な既存の呼び出しをそのまま通す。
    */
   constructor(
     private readonly activitySeqBacking?: Map<string, number>,
     private readonly subjectActivitySeqBacking?: Map<string, Map<string, number>>,
+    private readonly eventRetentionDaysBacking?: Map<string, number | null>,
   ) {}
 
+  /** {@link InMemoryTenantSettingsStore.eventRetentionDaysBacking} が渡されていればそれを、無ければ自前の Map を返す。 */
+  private get eventRetentionDays(): Map<string, number | null> {
+    return this.eventRetentionDaysBacking ?? this.ownEventRetentionDays;
+  }
+
   /**
-   * 行が無ければ全列を既定値で作ってから返す（`setDefaultHalfLifeHours`/`setEventRetention`/
-   * `setDecayClock` が共通して使う——UPSERT のたびに「他の列は DB 側の DEFAULT に任せる」
-   * という Postgres 実装（`PostgresTenantSettingsStore`）と同じ挙動をここでも揃える）。
+   * 行が無ければ全列を既定値で作ってから返す（`setDefaultHalfLifeHours`/`setDecayClock` が
+   * 共通して使う——UPSERT のたびに「他の列は DB 側の DEFAULT に任せる」という Postgres 実装
+   * （`PostgresTenantSettingsStore`）と同じ挙動をここでも揃える）。
+   *
+   * ⚠ **`eventRetentionDays` はこの行の一部ではない**（上の `eventRetentionDays` getter が指す
+   * 別の Map）——`InMemoryMemoryStore` と共有できるようにするため、保持期間だけを切り出してある
+   * （クラス冒頭の doc コメント参照）。ただし「保持期間以外の設定を1つでも書くと
+   * `event_retention_days` は `NULL`（`unlimited`）を持つ行ができる」という Postgres の
+   * 挙動（`getEventRetention` の doc）はここでも揃える必要があるため、この行を新規に作るときは
+   * `eventRetentionDays` 側にも（無ければ）`null` を立てる。
    */
   private ensureRow(tenantId: string): {
     defaultHalfLifeHours: number;
-    eventRetentionDays: number | null;
     decayClock: DecayClock;
     defaultHalfLifeRecalls: number;
     taxonomyMode: TaxonomyMode;
@@ -77,12 +113,14 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     if (!row) {
       row = {
         defaultHalfLifeHours: DEFAULT_HALF_LIFE_HOURS,
-        eventRetentionDays: null,
         decayClock: DEFAULT_DECAY_CLOCK,
         defaultHalfLifeRecalls: DEFAULT_HALF_LIFE_RECALLS,
         taxonomyMode: DEFAULT_TAXONOMY_MODE,
       };
       this.rows.set(tenantId, row);
+    }
+    if (!this.eventRetentionDays.has(tenantId)) {
+      this.eventRetentionDays.set(tenantId, null);
     }
     return row;
   }
@@ -118,14 +156,14 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
-    const row = this.rows.get(ctx.tenantId);
-    if (!row) {
+    if (!this.eventRetentionDays.has(ctx.tenantId)) {
       return { kind: "unset" };
     }
-    if (row.eventRetentionDays === null) {
+    const days = this.eventRetentionDays.get(ctx.tenantId)!;
+    if (days === null) {
       return { kind: "unlimited" };
     }
-    return { kind: "days", days: row.eventRetentionDays };
+    return { kind: "days", days };
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
@@ -142,7 +180,8 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
       }
     }
     const eventRetentionDays = retention.kind === "days" ? retention.days : null;
-    this.ensureRow(ctx.tenantId).eventRetentionDays = eventRetentionDays;
+    this.ensureRow(ctx.tenantId);
+    this.eventRetentionDays.set(ctx.tenantId, eventRetentionDays);
   }
 
   /**

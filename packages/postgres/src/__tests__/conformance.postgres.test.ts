@@ -229,6 +229,13 @@ describeOutboxStoreConformance({
     `);
     return rowToOutboxJob(result.rows[0] as unknown as OutboxJobRow);
   },
+  peekJob: async (_ctx: Ctx, jobId: string) => {
+    const { db } = await getTestClient();
+    const result = await db.execute(sql`SELECT * FROM outbox WHERE id = ${jobId} LIMIT 1`);
+    return result.rows.length > 0
+      ? rowToOutboxJob(result.rows[0] as unknown as OutboxJobRow)
+      : null;
+  },
   /**
    * 並行 claim の歯（ADR 0206）を走らせる。`pg.Pool` 上の `Promise.all` は、別の
    * バックエンドで実際に時間的に重なることを実測してある【2026-09-17: 別 PID

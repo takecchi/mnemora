@@ -1062,7 +1062,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は2件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は3件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`94dafe0`**（PR #1390）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22 と同じ範囲。追記14・追記19 は無い——追記19 は棚卸しではなく「保留の解消」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
@@ -1073,6 +1073,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 ⚠ **2026-09-29 追記（20回目の棚卸し。CHANGELOG の追記21 と同じ範囲）**: この節が数える範囲は、さらに `329bdb1` まで広がった。この回で新しく確定した破壊的変更は下の項目19（PR #1385、Issue #548 方向2）で、番号付きの一覧に足した——項目19 自身は `f5ad59f` より後に着地した時点（PR #1385 の commit 自身）で既にこの節に足されており、この棚卸しでは PR 番号の欠けを直しただけである（下の項目19 を参照）。同じ範囲で着地した PR #1388（Issue #1188、reflect が有効期間の外の記憶を材料にしない件）は、公開 union `ReflectBasisOutcome` に値を2つ足すだけで、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、上の「数え方の規律への追記（2026-09-28）」）ので、この節には項目を足していない（下の「実行時」の一覧に足した）。PR #1378（Issue #868、`db.transaction()` の接続断で落ちない件）は `@mnemora/postgres` の公開の型を変えないので、この節の対象外である（CHANGELOG の `[1.1.0]` 節 `### Fixed` を見ること）。
 
 ⚠ **2026-09-29 追記（21回目の棚卸し。CHANGELOG の追記22 と同じ範囲）**: この節が数える範囲は、さらに `94dafe0` まで広がった。この回で新しく確定した破壊的変更は無い。同じ範囲で着地した PR #1380（Issue #338、ADR 0353、`NewRecallRecord.advanceActivityClock` の型を `boolean` から `boolean | { scope: "subject"; subjectId: string }` へ広げる件）は、既存の `boolean` の値をそのまま含む union への拡張で、既存の呼び出しは1行も直さず通るため、破壊的と数えない（オーナーの回答（ask_human `d9364c91`）「公開の union 型に値を足す変更は破壊的と数えない」と同じ理由——今回は union 型に値を足す側ではなく既存の型を union で広げる側だが、どちらも「呼び出し側からは既存の使い方が壊れない拡張」という点で同じ扱いとした）ので、この節の番号付きの一覧には足さず、下の「実行時」の一覧に足した（下の「⭕ 非破壊と数えたもの（オーナーの回答に当てたもの。21回目の棚卸しで足した）」を参照）。PR #1387（Issue #762、`docs/roadmap.md` の完了節の削除）は `@mnemora/core` の公開の型を変えないので、この節の対象外である。
+
+⚠ **2026-09-29 追記**: 上の棚卸しとは別に、`94dafe0`（21回目の棚卸しが数えた末尾）より後に `main` へ入る作業として、`@mnemora/core` に破壊的変更がもう1件確定した（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、[PR #1393](https://github.com/takecchi/mnemora/pull/1393)、[ADR 0354](./decisions/0354-atomic-event-retention-purge.md)）。上の「20回目の棚卸し」が項目19（PR #1385）について書いたのと同じ扱い——着地に先立って変更を作った本人がこの節に足した項目であり、棚卸しの「PR を全部当てた」手順を経て足したものではない。下に項目20として足した。🔴 `94dafe0` からこの変更が着地するまでの間に他の PR が `main` へ入っている可能性があるが、それらを1本ずつ洗って分類する棚卸しはまだ行っていない。**次回の棚卸しで、この追記が数えていない範囲（`94dafe0`…この変更の着地点）を通しで数え直すこと。**
+⟹ **この節の範囲で、確定した破壊的変更は3件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232）になった。**
 
 **移行の手順（`client` を独自の型注釈で書いている場合だけ）**:
 1. `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`/`Pick<Anthropic, "messages">` という型注釈を、`@mnemora/openai`/`@mnemora/anthropic` が export する `OpenAIChatClient`/`OpenAIEmbeddingsClient`/`AnthropicMessagesClient` へ置き換える。
@@ -1108,6 +1111,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
     (a) `if (record.advanceActivityClock)` のような真偽値としての分岐は、`{ scope: "subject", subjectId }` が来ると（object は truthy なので）真になり、意図せずテナント全体のカウンタを進めてしまう。
     (b) `=== true`（テナント全体のカウンタを進める）と、object（`scope: "subject"` で、その `subjectId` の subject 単位カウンタを進める）の分岐を、別々に扱うこと。
     (c) 既定の `activityCounting: "tenant"` で呼ばれる既存の呼び出しでは、`advanceActivityClock` に object は来ない（常に `boolean`）——挙動は変わらない。
+- ⭕ **非破壊と数えたもの（この棚卸しの範囲より後に着地した1件。上の各行と違い、棚卸しで拾ったのではなく、変更を作った本人が着地時に足した）**——`MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox`/`supersedeWithNewMemories?` に `opts?: { now?: Date }` が、`MemoryStore.requeueEmbedJobs` に `writeOpts?: { now?: Date }` が、`OutboxStore.complete`/`fail` に `opts?: { at?: Date }` が、`NewRecallRecord` に `createdAt?: Date` が、それぞれ省略可能な欄として増えた（Issue #1237「案1」、ADR 0355）。既存の呼び出し（これらを渡さない）は型としても意味としても1バイトも変わらず通る——非破壊。**ただし `MemoryStore`/`OutboxStore` を自前で実装している場合は、この新しい欄を守る（省略時は壁時計を使う）ように直さないと、`packages/testkit` の適合テストが落ち、`RuntimeDeps.clock` に壁時計より過去の時計を注入したときに `tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装にだけ残る。**詳しくは CHANGELOG.md の `[1.1.0]` 節 `### Breaking`（「`MemoryStore`/`OutboxStore` を自前で実装している人へ」の項目）を見ること——ここには複製しない。
 
 ⚠ **bullmq について（19回目の棚卸しで初めて注記）**: PR #1382 で `@mnemora/bullmq` が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` に加わったが、まだ一度も publish されていない（version は `0.0.0` のまま）。この節が数えるのは「利用者が版を上げるときに何をどう直すか」であり、一度も publish されていない package には該当する利用者が存在しない。⟹ **この節は bullmq をまだ対象に含めていない。**bullmq が実際に publish された後、bullmq 自身に破壊的変更が着地すれば、その時点でこの節（かそれに続く世代の節）の対象に加える。
 
@@ -1168,6 +1172,63 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 - 非破壊と数えた #1171 は、`setEventRetention({ kind: "bogus" })` が、1.0.2 では Postgres も fixture も `{ kind: "unlimited" }` を書き、上げた後は両方とも例外になった。
 - #1187 は、1.0.2 で書いた本文 `alpha"beta` を語彙チャンネルで `alpha"beta` と探すと、1.0.2 では0件、`0023` を当てた後は1件になった（索引は作り直していない）。
 - DB の側の経路は、[ADR 0344](./decisions/0344-upgrade-from-released-version-fixture.md) の `upgrade-from-v1.0.2.sql` を読む歯（`upgrade-from-released.postgres.test.ts`）でも通っている（同じ日に手元の Postgres 17 で緑）。
+
+### 20. `purgeExpiredEventsForTenant` が、`MemoryStore.purgeExpiredEventsByRetention?` を実装していない adapter に対して `{ kind: "store_unsupported" }` を返すようになった（`@mnemora/core`）
+
+[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+[PR #1393](https://github.com/takecchi/mnemora/pull/1393)、
+[ADR 0354](./decisions/0354-atomic-event-retention-purge.md)。
+
+**何が変わったか**: `purgeExpiredEventsForTenant`（保持期間の掃除の呼び出し口）は、保持期間が
+有限日数（`{ kind: "days" }`）のとき、これまで `MemoryStore.purgeExpiredEvents?`（既存の任意
+メソッド）を実装しているだけで「対応している」と扱っていた。この版からは、新しい任意メソッド
+`MemoryStore.purgeExpiredEventsByRetention?` を実装していなければ `{ kind: "store_unsupported" }`
+を返す——**`purgeExpiredEvents?` を実装していても、そちらへ自動的に落ちることはない。**
+
+**なぜ**: `purgeExpiredEventsForTenant` は、保持期間を読んでから `purgeExpiredEvents` を呼ぶまでの
+間に `setEventRetention` で保持期間が変わっても、読んだときの古い期間で `memory_events` を
+削除してしまう race を持っていた（Issue #1232 本文の実測。物理削除であり戻せない）。
+`purgeExpiredEventsByRetention?` は、保持期間を読むことと削除することを1つの原子的な操作にする
+ことで、この race を閉じる——`purgeExpiredEvents?` だけの adapter へ自動的に落とすと、この race を
+再導入してしまうため、意図して「旧経路への自動フォールバックは無い」と決めた（ADR 0354
+「検討した代替案」(c)）。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を `purgeExpiredEventsForTenant` に渡している
+利用者のうち、`purgeExpiredEventsByRetention?` をまだ実装していない場合。**`purgeExpiredEventsForTenant`
+を一度も呼んでいない利用者は影響を受けない**（この関数はどこからも自動的に呼ばれない設計——
+`docs/decisions/0115-event-retention-purge.md`）。
+
+**どう直すか**:
+1. 自分の `MemoryStore` に `purgeExpiredEventsByRetention?(ctx, { now, limit, dryRun? })` を実装する。
+   契約は `packages/core/src/interfaces/memory-store.ts` の `MemoryStore.purgeExpiredEventsByRetention`
+   の TSDoc を見ること。cutoff の計算は `@mnemora/core` が export する
+   `computeEventRetentionCutoff(now, days)` を使う（自前で計算し直さない——`EARLIEST_DATE_MS` への
+   寄せを含めて共有する）。
+2. **自前で `TenantSettingsStore` と `MemoryStore` を別々の場所（別の DB・別のプロセス）に持つ
+   adapter**（このリポジトリの参照実装のように同一 DB・同一トランザクションで両方を実装していない
+   場合）は、この口を完全な原子性で実装できない——`tenant_settings` 相当の設定行を `MemoryStore`
+   実装の内部から直接読む経路が無い限り、`TenantSettingsStore` interface を経由するしかなく、
+   その呼び出し自体が「1つの原子的な操作」の外に出てしまう。選べる案は2つ:
+   - **実装しない**（`purgeExpiredEventsForTenant` は `store_unsupported` を返し続ける。保持期間の
+     掃除は、この関数を経由しない別の運用手段——例えば自分の `TenantSettingsStore` を読んでから
+     `purgeExpiredEvents?` を直接呼ぶ独自のスクリプト——に任せる。Issue #1232 の race を
+     引き受けた上で使う判断も、利用者に残されている）。
+   - **ベストエフォートで実装する**（自分の `TenantSettingsStore` 相当を読んでから
+     `purgeExpiredEvents?` を呼ぶ。読みと削除の間に他の書き込みが割り込む窓が残ることを
+     引き受ける——ADR 0354「引き受けた負債」参照）。
+3. **途中で保持期間を短くした場合は、その回から短い期間で消すようになった**（今までは、その回は
+   読んだときの長い期間で消していた）。消すのは `setEventRetention` が返った後の値である——
+   掃除が設定の行を読んでいる最中の `setEventRetention` は、Postgres では掃除の commit まで待たされる。
+   ⚠ 残る非対称は消し過ぎない側だけにある: `purgeExpiredEventsForTenant` が最初に `unset`/`unlimited` を
+   読んだ回は、その後に有限の日数へ変えても、その回は消さない（次の回で消える）。移行の作業は要らない。
+
+**公開の型としては非破壊**（新しい任意メソッドを足しただけ、既存の `purgeExpiredEvents?`/
+`PurgeExpiredEventsOptions`/`PurgeExpiredEventsResult` の宣言は変えていない——`git diff` は
+追加のみ）。**破壊的なのは実行時の振る舞い**——`purgeExpiredEvents?` だけを実装している adapter を
+`purgeExpiredEventsForTenant` に渡す既存の呼び出しは、結果が `{ kind: "executed", result }` から
+`{ kind: "store_unsupported" }` へ変わる。
+
+**DB マイグレーション**: 不要（`tenant_settings`/`memory_events` のスキーマは変えていない）。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

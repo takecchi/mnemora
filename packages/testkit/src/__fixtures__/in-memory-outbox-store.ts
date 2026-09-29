@@ -98,7 +98,12 @@ export class InMemoryOutboxStore implements OutboxStore {
     return claimed.map((job) => structuredClone(job));
   }
 
-  async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
+  async complete(
+    ctx: Ctx,
+    jobId: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void> {
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -111,10 +116,17 @@ export class InMemoryOutboxStore implements OutboxStore {
     if ((job.failedAt ?? null) !== null) {
       return;
     }
-    job.completedAt = new Date();
+    // Issue #1237: 省略時は壁時計。
+    job.completedAt = opts?.at ?? new Date();
   }
 
-  async fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void> {
+  async fail(
+    ctx: Ctx,
+    jobId: string,
+    error: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void> {
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -127,7 +139,8 @@ export class InMemoryOutboxStore implements OutboxStore {
     if ((job.completedAt ?? null) !== null) {
       return;
     }
-    job.failedAt = new Date();
+    // Issue #1237: 省略時は壁時計。⚠ `availableAt` の再計算はしない（interface の doc 参照）。
+    job.failedAt = opts?.at ?? new Date();
     job.lastError = error;
   }
 }

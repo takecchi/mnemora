@@ -104,7 +104,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -118,6 +118,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     readonly outboxJobs: OutboxJobRecord[];
     readonly activitySeq: Map<string, number>;
     readonly subjectActivitySeq: Map<string, Map<string, number>>;
+    readonly eventRetentionDays: Map<string, number | null>;
     private readonly labels;
     private labelKey;
     private upsertProposedLabels;
@@ -125,14 +126,18 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     private enqueueOutboxJob;
-    createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[]): Promise<{
+    createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
+        now?: Date;
+    }): Promise<{
         observation: Observation;
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
     private createMemoryIdempotent;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
-    createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[]): Promise<{
+    createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
+        now?: Date;
+    }): Promise<{
         memory: Memory;
         created: boolean;
         jobs: OutboxJobRecord[];
@@ -161,7 +166,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         supersededByIndex: number;
         expectedStatus?: MemoryStatus;
         event: NewMemoryEvent;
-    }>): Promise<{
+    }>, opts?: {
+        now?: Date;
+    }): Promise<{
         created: Array<{
             memory: Memory;
             created: boolean;
@@ -173,7 +180,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             observedStatus: MemoryStatus;
         }>;
     }>;
+    private purgeExpiredEventsSync;
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+    purgeExpiredEventsByRetention(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
     reinforceMany(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
@@ -186,7 +195,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     aggregateScope(ctx: Ctx, scope: RecallScope, opts?: AggregateScopeOptions): Promise<ScopeAggregate>;
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
-    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+    requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
+        now?: Date;
+    }): Promise<RequeueEmbedJobsResult>;
     archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory(ctx: Ctx, id: MemoryId, tombstone: {
         content: string;
@@ -275,8 +286,12 @@ export declare class InMemoryOutboxStore implements OutboxStore {
     private readonly jobs;
     constructor(jobs: OutboxJobRecord[]);
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
-    complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
-    fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void>;
+    complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
+        at?: Date;
+    }): Promise<void>;
+    fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
+        at?: Date;
+    }): Promise<void>;
 }
 
 // ===== dist/__fixtures__/in-memory-tenant-settings-store.d.ts =====
@@ -284,8 +299,11 @@ import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMo
 export declare class InMemoryTenantSettingsStore implements TenantSettingsStore {
     private readonly activitySeqBacking?;
     private readonly subjectActivitySeqBacking?;
+    private readonly eventRetentionDaysBacking?;
     private readonly rows;
-    constructor(activitySeqBacking?: Map<string, number> | undefined, subjectActivitySeqBacking?: Map<string, Map<string, number>> | undefined);
+    private readonly ownEventRetentionDays;
+    constructor(activitySeqBacking?: Map<string, number> | undefined, subjectActivitySeqBacking?: Map<string, Map<string, number>> | undefined, eventRetentionDaysBacking?: Map<string, number | null> | undefined);
+    private get eventRetentionDays();
     private ensureRow;
     setDefaultHalfLifeHours(tenantId: string, hours: number): void;
     getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
@@ -516,6 +534,7 @@ export interface OutboxStoreConformanceOptions {
     name: string;
     createStore: () => OutboxStore | Promise<OutboxStore>;
     seedJob: (ctx: Ctx, input: SeedOutboxJobInput) => Promise<OutboxJobRecord>;
+    peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
     supportsRealConcurrency?: boolean;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;
