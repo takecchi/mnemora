@@ -20,13 +20,17 @@
  * ⚠ なぜ別プロセスか: transformers.js はファイルのメタデータの問い合わせをプロセスの中で
  * メモ化する（`measure-fetch-calls-in-fresh-node-process.mjs` の doc と同じ理由）。
  *
- * 使い方: node probe-preflight-default-cache.mjs <defaultCacheDir> <cacheDir> <repo> <dtype>
+ * 使い方: node probe-preflight-default-cache.mjs <defaultCacheDir> <cacheDir> <repo> <dtype> [revision]
+ *
+ * - `<cacheDir>` に `-` を渡すと、`cacheDir` を渡さない（既定のキャッシュだけを使う）。
+ * - `[revision]` を渡すと、`createLocalEmbeddingPipeline` の spec に `revision` として載せる（Issue #1403）。
  * 標準出力へ `{ fetchCount, urls, outcome, error }` を1行の JSON で出す。
  */
 import process from "node:process";
 
-const [, , defaultCacheDir, cacheDir, repo, dtype] = process.argv;
-if (!defaultCacheDir || !cacheDir || !repo || !dtype) {
+const [, , defaultCacheDir, cacheDirArg, repo, dtype, revision] = process.argv;
+const cacheDir = cacheDirArg === "-" ? undefined : cacheDirArg;
+if (!defaultCacheDir || !cacheDirArg || !repo || !dtype) {
   console.error(
     "usage: probe-preflight-default-cache.mjs <defaultCacheDir> <cacheDir> <repo> <dtype>",
   );
@@ -53,6 +57,7 @@ try {
     dtype,
     cacheDir,
     numThreads: 1,
+    ...(revision !== undefined ? { revision } : {}),
   });
 } catch (err) {
   outcome = "failed";

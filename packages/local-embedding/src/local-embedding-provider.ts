@@ -7,7 +7,7 @@ import type {
 } from "./pipeline.js";
 import { createLocalEmbeddingPipeline } from "./pipeline.js";
 import { LocalEmbeddingProviderError, isLocalEmbeddingProviderError } from "./errors.js";
-import { lastTransformersCacheDir } from "./transformers-cache-place.js";
+import { lastTransformersCacheDir, revisionCacheRoot } from "./transformers-cache-place.js";
 
 /**
  * `EmbeddingProvider` の**プロセス内**実装（外部サービスへ繋がない）。
@@ -665,7 +665,12 @@ function describeLoadFailure(
       : `cacheDir=未指定（transformers.js の既定: ${defaultCacheDir ?? UNKNOWN_TRANSFORMERS_CACHE_PLACE}）`;
   // 【実測 2026-09-27】キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、
   // 次のプロセスでも同じように落ち続ける。消せば次の読み込みで取り直すので、消す場所を名指す。
-  const cacheRoot = spec.cacheDir ?? defaultCacheDir;
+  // Issue #1403: `revision` を渡したときは、既定の `createPipeline` が根を `<根>/<revision>` に分ける。
+  const baseCacheRoot = spec.cacheDir ?? defaultCacheDir;
+  const cacheRoot =
+    baseCacheRoot !== undefined && spec.revision !== undefined
+      ? revisionCacheRoot(baseCacheRoot, spec.revision)
+      : baseCacheRoot;
   const repoCache =
     cacheRoot !== undefined
       ? `${cacheRoot.replace(/[\\/]+$/, "")}/${spec.repo}`

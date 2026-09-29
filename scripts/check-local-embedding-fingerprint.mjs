@@ -55,7 +55,7 @@
  * | (2) | ハッシュが食い違う | 赤 | `1` |
  * | (2) | 手元に在るが HF の tree に無いファイルが在る | 赤 | `1` |
  * | (2) | 手元のファイルが読めない（I/O エラー） | 赤 | `1` |
- * | (2) | `<cacheDir>/<repo>/` にファイルが1本も無い | 赤 | `1` |
+ * | (2) | `<cacheDir>/<repo>/` にも `<cacheDir>/<固定revision>/<repo>/` にもファイルが1本も無い（2026-09-29、Issue #1403: 後者を足した） | 赤 | `1` |
  * | (2) | tree API に届かない（再試行3回を尽くしてもネットワーク失敗） | 保留 | `2` |
  * | (2) | 🔴 **tree API が非2xx（404 を含む）を返す** | **保留** | **`2`** |
  * | (2) | 🔴 **tree API が 200 を返したが、応答が配列でない** | **保留** | **`2`** |
@@ -151,6 +151,7 @@ import {
   expectedHashOfTreeEntry,
   formatFingerprintReport,
   gitBlobSha1Hex,
+  cacheRepoDirs,
   normalizeActualPath,
 } from "./check-local-embedding-fingerprint-lib.mjs";
 
@@ -540,7 +541,6 @@ async function main() {
   for (const line of formatSkippedTreeEntries(skipped)) {
     console.error(line);
   }
-  const repoDir = join(cacheDir, repo);
   // ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記5）: キャッシュの置き場所の解釈
   // にだけ、固定した revision の宣言を読む。⛔ 「何と照合するか」は変えない
   // （tree は今も main のもの）——理由は collectActualFiles の docstring 参照。
@@ -550,7 +550,15 @@ async function main() {
       ? `固定した revision の宣言（キャッシュの置き場所の解釈にのみ使う。照合対象は main のまま）: ${pinnedRevision}`
       : "固定した revision の宣言を読めなかった（キャッシュの置き場所は revision=main のフラットな配置として解釈する）",
   );
-  const { actual, unreadable } = collectActualFiles(repoDir, expectedByPath, pinnedRevision);
+  // ⭐ 2026-09-29 追記（Issue #1403、ADR 0365）: `revision` を渡した読み込みは、根を
+  // `<cacheDir>/<encodeURIComponent(revision)>/` に分けて置く。平たい配置と両方を見る（`cacheRepoDirs`）。
+  const actual = [];
+  const unreadable = [];
+  for (const repoDir of cacheRepoDirs(cacheDir, repo, pinnedRevision)) {
+    const collected = collectActualFiles(repoDir, expectedByPath, pinnedRevision);
+    actual.push(...collected.actual);
+    unreadable.push(...collected.unreadable);
+  }
 
   const result = compareFingerprints({ actual, expectedByPath });
   console.log(formatFingerprintReport(result));
@@ -585,7 +593,15 @@ async function main() {
   if (args.json) {
     console.log(
       JSON.stringify(
-        { repo, cacheDir, repoDir, apiBase, unreadable, skippedTreeEntries: skipped, ...result },
+        {
+          repo,
+          cacheDir,
+          repoDirs: cacheRepoDirs(cacheDir, repo, pinnedRevision),
+          apiBase,
+          unreadable,
+          skippedTreeEntries: skipped,
+          ...result,
+        },
         null,
         2,
       ),
