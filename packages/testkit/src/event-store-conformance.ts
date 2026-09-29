@@ -352,14 +352,16 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
     // ここで課すのは「core が実際に入れる形」だけである（#1211 の表の外は adapter
     // によって往復が違うと明記されているため、課す範囲に入れない——Date・NaN・-0・
     // undefined・BigInt・NUL・孤立サロゲート・関数は対象外）。「core が入れる形」は
-    // `packages/core/src/runtime.ts` の `meta:` を組み立てている箇所（例: L3587
-    // `reason`/`sourceObservationId`/`extractorVersion`、L3700 `reason`/`note`、
-    // L4136 `reason`/`supersededById`/`sourceObservationId`/`extractorVersion`、
-    // L5812/L5824 の `buildMeta`（相手の `MemoryId` を1個積む）、L6107 `reason`/
-    // `resolution`/`note`/`contestedWithId`、L6452/L6467 の `sources`（`MemoryId[]`）、
-    // L6869 の `sources`）を読んで数えた——どれも文字列（`reason`/`note`/
-    // `resolution`/`extractorVersion`）、id（`sourceObservationId`/`supersededById`/
-    // `contestedWithId`）、id の配列（`sources`）のいずれかである。`actor` も
+    // `packages/core/src/runtime.ts` の `meta:` を組み立てている箇所を `grep -n "meta:"`
+    // で洗って数えた（行番号は main が動けば変わるので書かない）——`applyCorrection` 系
+    // （`reason`/`sourceObservationId`/`extractorVersion`）、claim key 衝突の `updated`
+    // イベント（`reason`/`note`）、reextract の `superseded`（`reason`/`supersededById`/
+    // `sourceObservationId`/`extractorVersion`）、`markContestedPair`/`resolveContestedPair`
+    // の `buildMeta`（相手の `MemoryId` を1個積む）・orphan reclaim（`reason`/`resolution`/
+    // `note`/`contestedWithId`）、`consolidate`/`reflect` の `sources`（`MemoryId[]`）——
+    // どれも文字列（`reason`/`note`/`resolution`/`extractorVersion`）、id
+    // （`sourceObservationId`/`supersededById`/`contestedWithId`）、id の配列（`sources`）の
+    // いずれかである。`actor` も
     // `EventActor`（`type` は列挙の文字列、`id?` は文字列）だけを渡す
     // （`opts?.actor` をそのまま使う呼び出し元も、渡ってくる値の型は同じ）。
     // -------------------------------------------------------------------
