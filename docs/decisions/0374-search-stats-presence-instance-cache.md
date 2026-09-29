@@ -165,24 +165,40 @@
   12往復以上、1点=20〜30回の中央値、alternating before/after、別 worktree/別ビルド。
   [PR #1410 の測定](https://github.com/takecchi/mnemora/pull/1410) と同じ手法）:
 
-  【実測・案A（本 ADR）、統計がある場面】
+  `recall()` は既定で `search()`（主チャンネル）と `searchMany()`（連想枠のアンカー
+  一括）の両方を1回の呼び出しの中で使うため、`recall()` 全体を測ることで両方の
+  変更を同時に検算する（12往復、各点は warmup5回を捨てた後の25回の中央値、
+  `/tmp` 配下の別 worktree・別ビルドを交互に呼ぶ）。
 
-  | 対象 | N | アンカー数 | diff 中央値 |
-  |---|---|---|---|
-  | `recall()`（`search()` 側） | 200 | 3 | 線内（2ms以内） |
-  | `recall()`（`search()` 側） | 3000 | 3 | 線内（2ms以内） |
-  | `recall()`（`searchMany()` 側） | 200 | 3 | 線内（2ms以内） |
-  | `recall()`（`searchMany()` 側） | 3000 | 3 | 線内（2ms以内） |
+  【実測・案A（本 ADR）、統計がある場面。diff = after(本ADR) − before(main)】
 
-  【実測・統計が無い場面、改善値（N=200）】
-
-  | 対象 | アンカー数 | 改善（速くなった） |
+  | N | アンカー数 | diff 中央値 |
   |---|---|---|
-  | `search()` 単体 | — | `memories_pkey` 経由（`Join Filter` 無し）へ改善 |
-  | `searchMany()` 単体 | — | `memories_pkey` 経由（`Join Filter` 無し）へ改善（ADR 0362 から変わらず維持） |
+  | 200 | 3 | -0.54ms |
+  | 3000 | 3 | -1.25ms |
+  | 200 | 10 | -0.73ms |
+  | 3000 | 10 | -0.26ms |
 
-  ⚠ 具体的な ms 値・実測ログは PR 本文に控える（`AGENTS.md`「数を、道具と生成物に
-  焼き込まない」）——ここには「線を超えたか・超えなかったか」の判定だけを書く。
+  4点とも許容線（2ms）以内、かつ N とともに伸びていない（むしろ全点で `after` が
+  `before` と同等かわずかに速い側に振れた——`main` の One-Time Filter が
+  `reltuples` を毎回読みに行っていたコストが、本 ADR で無くなった分と解釈できるが、
+  ばらつきの範囲内でもあり、これ以上の主張はしない）。
+
+  【実測・統計が無い場面、改善値（N=200、`recall()` は既定 `limit:40`）】
+
+  | 対象 | アンカー数 | before（main） | after（本ADR） |
+  |---|---|---|---|
+  | `recall()` 全体 | 3 | 72.7ms | 33.0ms |
+  | `recall()` 全体 | 10 | 57.3ms | 36.6ms |
+  | `search()` 単体 | — | 10.5ms | 4.3ms |
+  | `searchMany()` 単体 | 3 | 6.3ms | 5.0ms |
+  | `searchMany()` 単体 | 10 | 9.0ms | 8.0ms |
+
+  `search()` 単体・`recall()` 全体は、`search()` に候補D が初めて入ったことで
+  明確に速くなった（`memories_pkey` 経由、`Join Filter` 無し）。`searchMany()`
+  単体は ADR 0362 で既に候補D 経由になっていたため改善幅は小さいが、悪化はして
+  いない——`reltuples` を毎回 SQL の中で読んでいた分（One-Time Filter）が、
+  本 ADR では「未確認の間だけ余分な往復1回」に変わったことと整合する。
 
   【実測】`recall-roundtrip-count.postgres.test.ts` 歯6（新設）で、`recall()` の
   往復数が「`StatsPresenceGate` が未確認の間だけ+1、確認済みになったら今日と同じ
