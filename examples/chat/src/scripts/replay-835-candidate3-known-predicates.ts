@@ -36,6 +36,21 @@ import type { Conversation, ConversationTurn } from "../scenario.js";
  * 使い方: `DATABASE_URL=... tsx examples/chat/src/scripts/replay-835-candidate3-known-predicates.ts <cassette-path>`
  * （`OPENAI_API_KEY` は不要——記録に無い入力があれば `RecordedLLMProvider`/
  * `RecordedEmbeddingProvider` が例外を投げて止まる。黙って実 API へは落ちない。）
+ *
+ * ⚠ **claim key 派生の「記録に無い」は、例外として `ingestConversation` まで上がって
+ * こない。** `deriveClaimKeys`（`packages/core/src/claim-key.ts`）は失敗を
+ * `ObserveResult.claimKeyFailure` に丸め、鍵を `null` にして保存を続ける。
+ * 【実測】これを読まずにいた間、`answer.claim-key.candidate3-v4-1.json`（v4 の文言を
+ * 実 API へ送る直前だけ差し替えて記録したもの）を渡すと、語彙が空でなくなった2回目
+ * 以降の派生がすべて外れ、例外0件・exit 0 のまま `contested` 0件という無意味な結果が
+ * 出た（Issue #835）。⟹ `claimKeyFailure` を1件ずつ「ケース・turn・理由」で出し、
+ * 表は最後まで出したうえで、最後に件数をまとめ、1件でもあれば exit 1 にする。
+ *
+ * ⚠ **`answer.claim-key.known-predicates-{1,2,3}.json` は、`other-period-city-this-year`
+ * の2ターンが記録に無く、毎回2件の失敗で終わる（exit 1）。** 候補1（ADR 0377）の後で
+ * 語彙が変わり、カセットと合わなくなった filler であり、ADR 0377 に記録済み。訂正4件と
+ * `unknown-favorite-number` の数字には影響しない。許す一覧は持たない——既知の2件も
+ * 本当に失敗しているので、そのまま失敗として数える。
  */
 
 function toConversation(answerCase: AnswerCase): Conversation {
@@ -81,6 +96,7 @@ async function main(): Promise<void> {
   const runId = Date.now();
   const tenantPrefix = `replay-835-candidate3-${runId}`;
 
+  const claimKeyFailures: string[] = [];
   try {
     for (const answerCase of allCases) {
       const conversation = toConversation(answerCase);
@@ -89,6 +105,16 @@ async function main(): Promise<void> {
       try {
         await ingestConversation(handle.runtime, ctx, conversation, {
           claimKey: { enabled: true, detectContested: true, knownPredicatesFromStore: true },
+          onObserved: (turn, observed) => {
+            const failure = observed.claimKeyFailure ?? null;
+            if (failure !== null) {
+              const line =
+                `[${answerCase.id}] turn=${turn.index} で claim key 派生が失敗した` +
+                `（${failure.kind ?? "種類不明"}）: ${failure.message.slice(0, 80)}`;
+              claimKeyFailures.push(line);
+              console.log(`  ${line}`);
+            }
+          },
         });
       } catch (error) {
         console.log(
@@ -118,6 +144,18 @@ async function main(): Promise<void> {
       console.log(`\n${handle.usageMeter.formatReport()}`);
     } else {
       console.log("\n[replay-835-candidate3] usageMeter 無し（openai を1回も使っていない証拠）。");
+    }
+    if (claimKeyFailures.length > 0) {
+      console.log(
+        `\n[replay-835-candidate3] claim key 派生の失敗 ${claimKeyFailures.length}件` +
+          "（この再生の値は、失敗したターンの鍵が null のまま出ている）:",
+      );
+      for (const line of claimKeyFailures) {
+        console.log(`  ${line}`);
+      }
+      process.exitCode = 1;
+    } else {
+      console.log("\n[replay-835-candidate3] claim key 派生の失敗 0件。");
     }
   } finally {
     await closePostgresClient(diagPool);
