@@ -508,6 +508,7 @@ PR #1393・Issue #1232）になった。**
   （[Issue #994](https://github.com/takecchi/mnemora/issues/994)・
   [Issue #995](https://github.com/takecchi/mnemora/issues/995)・
   [Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+  [PR #1427](https://github.com/takecchi/mnemora/pull/1427)、
   [ADR 0375](./docs/decisions/0375-purge-scope-widened.md)）。
   purge の約束（オーナー代理・クローン miku の決定）を「その記憶の本文と、本文から
   直接たどれる派生物（digest を含む記録・埋め込み・tags などの付帯情報）を消す」と

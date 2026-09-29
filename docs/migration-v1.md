@@ -1373,6 +1373,7 @@ store の中は変わらない」を満たしていなかった（この変更�
 [Issue #994](https://github.com/takecchi/mnemora/issues/994)・
 [Issue #995](https://github.com/takecchi/mnemora/issues/995)・
 [Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+[PR #1427](https://github.com/takecchi/mnemora/pull/1427)、
 [ADR 0375](./decisions/0375-purge-scope-widened.md)。**この項目は、上の棚卸しの範囲の
 外——purge の法的な射程を広げる作業として、この節に足す1件である。**
 
@@ -1413,7 +1414,7 @@ adapter（`Runtime.purge` が `supported: false` を返す構成）は影響を�
 ⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は8件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
-Issue #994・#995・#1207（ADR 0375））になった。**
+PR #1427・Issue #994・#995・#1207（ADR 0375））になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
