@@ -27,11 +27,15 @@ describe("createPostgresClient: drizzle に渡す Proxy", () => {
       expect($client === client.pool).toBe(false);
       expect($client.totalCount).toBe(client.pool.totalCount);
       expect($client.totalCount).toBeGreaterThan(0);
+      // ベースラインは0ではなく1——`createPostgresClient` が既定で付ける pool error
+      // リスナー（Issue #1213）が常に1本ある。
+      const baseline = client.pool.listenerCount("error");
+      expect(baseline).toBe(1);
       const noop = (): void => {};
       $client.on("error", noop);
-      expect(client.pool.listenerCount("error")).toBe(1);
+      expect(client.pool.listenerCount("error")).toBe(baseline + 1);
       $client.removeListener("error", noop);
-      expect(client.pool.listenerCount("error")).toBe(0);
+      expect(client.pool.listenerCount("error")).toBe(baseline);
     } finally {
       await $client.end();
     }

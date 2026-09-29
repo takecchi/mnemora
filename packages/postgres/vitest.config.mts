@@ -13,8 +13,12 @@ export default defineConfig({
     fileParallelism: false,
     hookTimeout: 30_000,
     testTimeout: 30_000,
-    // recall() の戻り値の契約の検査（src/__tests__/setup-recall-output-contract.ts、TSDoc の7巡目 B1・B2）。
-    setupFiles: ["./src/__tests__/setup-recall-output-contract.ts"],
+    setupFiles: [
+      // recall() の戻り値の契約の検査（TSDoc の7巡目 B1・B2）。
+      "./src/__tests__/setup-recall-output-contract.ts",
+      // createPostgresClient の既定の pool error 警告が出たら落とす守り（Issue #1213、ADR 0020 と同じ形）。
+      "./src/__tests__/setup-pool-error-warning-guard.ts",
+    ],
   },
   resolve: {
     alias: {
