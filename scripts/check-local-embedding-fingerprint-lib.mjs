@@ -100,6 +100,32 @@ export function normalizeActualPath(relPath, pinnedRevision) {
 }
 
 /**
+ * 手元のキャッシュのうち、この門が見るディレクトリの一覧（Issue #1403・ADR 0365）。
+ *
+ * - `<cacheDir>/<repo>` … `revision` を渡さずに読み込んだもの（transformers.js の `main` の配置）。
+ * - `<cacheDir>/<encodeURIComponent(固定revision)>/<repo>` … `revision` を渡して読み込んだもの。
+ *   `@mnemora/local-embedding` の既定の `createPipeline` は、`revision` を渡されると、キャッシュの根を
+ *   `<根>/<encodeURIComponent(revision)>` に分ける（`packages/local-embedding/src/transformers-cache-place.ts`
+ *   の `revisionCacheRoot`）。この形は mnemora が決めたもので、transformers.js の内部の鍵の形ではない。
+ *
+ * ⚠ CI では、`revision` を渡すステップと渡さないステップが同じキャッシュを使うので、両方が並ぶ。
+ * `pinnedRevision` が無い（宣言が読めない）なら、前者だけを返す。
+ *
+ * @param {string} cacheDir
+ * @param {string} repo
+ * @param {string | null} pinnedRevision
+ * @returns {string[]}
+ */
+export function cacheRepoDirs(cacheDir, repo, pinnedRevision) {
+  const base = cacheDir.replace(/[\\/]+$/, "");
+  const dirs = [`${base}/${repo}`];
+  if (pinnedRevision) {
+    dirs.push(`${base}/${encodeURIComponent(pinnedRevision)}/${repo}`);
+  }
+  return dirs;
+}
+
+/**
  * 手元に実在するファイルの hash と、HF の tree から作った期待値を突き合わせる。
  *
  * 🔴 **HF の tree に在るが手元に無いファイルは、不一致にしない。**

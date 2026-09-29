@@ -275,6 +275,50 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: revision サブディ�
   );
 });
 
+/**
+ * `@mnemora/local-embedding` が `revision` を渡されたときに置く配置
+ * `<cacheDir>/<encodeURIComponent(revision)>/<repo>/<filename>`（Issue #1403・ADR 0365）。
+ * CI では、`revision` を渡さないステップの平たい配置と同じキャッシュに並ぶ。
+ */
+describe("check-local-embedding-fingerprint.mjs（CLI）: revision ごとの根（Issue #1403、ADR 0365）", () => {
+  it.concurrent("<cacheDir>/<固定revision>/<repo>/<filename> の配置でも一致する", async () => {
+    const contents = Buffer.from('{"ok":true}\n', "utf8");
+    const oid = gitBlobSha1(contents);
+    await withFixture(
+      { files: {}, respond: fixed(200, [{ type: "file", path: "config.json", oid }]) },
+      async (f) => {
+        const path = join(f.cacheDir, encodeURIComponent(pinnedRevision), repo, "config.json");
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, contents);
+        const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+        expect(r.stdout).toContain("一致: 手元の 1 本すべてが宣言された repo の内容と一致した。");
+        expect(r.code).toBe(0);
+      },
+    );
+  });
+
+  it.concurrent(
+    "平たい配置と <固定revision>/ の根が同居していても、両方を見て、中身が違えば赤になる",
+    async () => {
+      const contents = Buffer.from('{"ok":true}\n', "utf8");
+      const oid = gitBlobSha1(contents);
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n' },
+          respond: fixed(200, [{ type: "file", path: "config.json", oid }]),
+        },
+        async (f) => {
+          const path = join(f.cacheDir, encodeURIComponent(pinnedRevision), repo, "config.json");
+          mkdirSync(dirname(path), { recursive: true });
+          writeFileSync(path, '{"tampered":true}\n');
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.code).toBe(1);
+        },
+      );
+    },
+  );
+});
+
 describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ごとの終了コード", () => {
   it.concurrent("200 ＋ 手元のファイルと一致する tree ⟹ 一致（exit 0）", async () => {
     await withFixture(

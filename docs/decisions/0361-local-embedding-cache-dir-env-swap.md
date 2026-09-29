@@ -233,6 +233,10 @@ CI で再発し続けている**（Issue 本文・#1004）ことも、doc だけ
    （3回とも `resolve/main/config.json`）のままだった——同ジョブは `cacheDir` と `revision` を両方固定している。
    ⟹ `revision` を固定した使い方をオフラインで読めるようにするのは、この ADR の射程の外である
    （前段の確認に `main` の鍵を満たさせるには写しを置くしかなく、案2 と同じ理由で今回は採らない）。
+   ⚠ **2026-09-29 追記（Issue #1403）**: この負債は [ADR 0365](./0365-local-embedding-revision-in-remote-path-template.md)
+   で塞いだ。上の「写しを置くしかなく」は誤りだった——写しは置かず、`revision` を公開の設定 `env.remotePathTemplate` に埋め込み、キャッシュの根を
+   `<根>/<encodeURIComponent(revision)>/` に分けた。上の「`revision` を指定する前に温めた `cacheDir` には当たらない」も、
+   配置が変わったので、そのままの形では当たらない（ADR 0365）。
 3. **同一 repo・異なる `cacheDir` の「両方とも成功する」組み合わせを、実モデルでは
    測っていない。**「測ったこと」2番4で確かめたのは「失敗の後に成功する」組み合わせ
    だけである。`get_file_metadata`/`get_config` の `memoizePromise` は**成功した結果を

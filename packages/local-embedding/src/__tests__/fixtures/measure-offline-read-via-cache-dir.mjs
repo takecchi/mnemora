@@ -20,7 +20,8 @@
  */
 import process from "node:process";
 
-const [, , cacheDir, repo, dtype] = process.argv;
+// `[revision]` は省略できる（Issue #1403 の live の歯が渡す）。
+const [, , cacheDir, repo, dtype, revision] = process.argv;
 if (!cacheDir || !repo || !dtype) {
   console.error("usage: measure-offline-read-via-cache-dir.mjs <cacheDir> <repo> <dtype>");
   process.exit(2);
@@ -45,6 +46,7 @@ try {
     dtype,
     cacheDir,
     numThreads: 1,
+    ...(revision !== undefined ? { revision } : {}),
   });
   const [vector] = await pipeline.embed(["オフラインで読めるかの確認"]);
   vectorLen = vector?.length ?? null;

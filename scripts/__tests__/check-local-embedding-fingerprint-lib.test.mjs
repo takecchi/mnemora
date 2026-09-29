@@ -5,6 +5,7 @@ import {
   formatFingerprintReport,
   gitBlobSha1Hex,
   normalizeActualPath,
+  cacheRepoDirs,
 } from "../check-local-embedding-fingerprint-lib.mjs";
 
 /**
@@ -202,5 +203,23 @@ describe("formatFingerprintReport", () => {
       unknownOnDisk: [],
     });
     expect(report).toContain("1本も無い");
+  });
+});
+
+/**
+ * `cacheRepoDirs`（Issue #1403・ADR 0365）。`@mnemora/local-embedding` は `revision` を渡されると、根を
+ * `<cacheDir>/<encodeURIComponent(revision)>/` に分ける。門は平たい配置と両方を見る。
+ */
+describe("cacheRepoDirs", () => {
+  it("固定した revision があれば、平たい配置と <revision>/ の根の下の両方を返す", () => {
+    expect(cacheRepoDirs("/c", "o/m", "abc123")).toEqual(["/c/o/m", "/c/abc123/o/m"]);
+  });
+
+  it("revision は encodeURIComponent した名前の根になる", () => {
+    expect(cacheRepoDirs("/c/", "o/m", "refs/pr/1")).toEqual(["/c/o/m", "/c/refs%2Fpr%2F1/o/m"]);
+  });
+
+  it("固定した revision の宣言が読めなければ、平たい配置だけを返す", () => {
+    expect(cacheRepoDirs("/c", "o/m", null)).toEqual(["/c/o/m"]);
   });
 });
