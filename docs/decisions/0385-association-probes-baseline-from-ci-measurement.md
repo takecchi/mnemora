@@ -255,54 +255,92 @@ examples/chat/association-baseline.json` を足した。**ジョブ名・`needs`
 
 ---
 
-## 7. 副産物として見つけたバグ（この ADR・この PR の範囲外）
+## 7. 副産物として見つけたバグ — 修正済み（2026-09-30、オーナー指示）
 
-**`examples/chat/src/association-arm.ts:401` の `associationEnabled: association !==
-undefined` は、`off` arm でも `true` になる。** [ADR 0337](./0337-recall-association-default-on.md)
+**当初 `examples/chat/src/association-arm.ts:401` の `associationEnabled: association !==
+undefined` は、`off` arm でも `true` になっていた。** [ADR 0337](./0337-recall-association-default-on.md)
 （`packages/core` の `RecallQuery.association` の既定を on にした変更）を受けて、
 `association-arm.ts` は「`off` arm でも `recall()` へ `association: null` を明示的に渡す」
 よう直された（同ファイルのコメント参照。既定が on になった後、`association` キー自体を
 渡さないと `off` arm が黙って on になってしまうため）。**しかし
 `associationEnabled: association !== undefined` の判定は `!== null` に更新されておらず、
-`null` も「defined」と判定されるため、`off` arm でも `associationEnabled: true` になる。**
+`null` も「defined」と判定されるため、`off` arm でも `associationEnabled: true` になっていた。**
 
-**影響**: `armShortKey`/`buildArmSummaryTable` の「連想枠」列は `associationEnabled` を
-見て `off`/`on(maxCount=N)` を出し分けるため、CI の Job Summary では `off` arm の
-「連想枠」列が **`on(maxCount=null)`** と表示される（実際に `examples/chat/
-association-baseline.json` を使って `association-summary.mjs` を実行し、現物で確認した
-——2026-09-29）。**`associationMaxCount`（null/3/5/10）は正しいままなので、arm の識別
-（`armShortKey`）自体は破綻していない**——`goldReturnedCount`/`hit1Count`/`mrr` 等の
-実測値そのものには一切影響しない。
+**影響（修正前）**: `armShortKey`/`buildArmSummaryTable` の「連想枠」列は
+`associationEnabled` を見て `off`/`on(maxCount=N)` を出し分けるため、CI の Job Summary
+では `off` arm の「連想枠」列が **`on(maxCount=null)`** と表示されていた（実際に
+`examples/chat/association-baseline.json` を使って `association-summary.mjs` を実行し、
+現物で確認した——2026-09-29）。**`associationMaxCount`（null/3/5/10）は正しいままなので、
+arm の識別（`armShortKey`）自体は破綻していなかった**——`goldReturnedCount`/
+`hit1Count`/`mrr` 等の実測値そのものには一切影響していない。
 
-**この ADR・この PR では直していない**——`association-arm.ts` はベンチ本体（測定器）
-であり、ADR 0168 が「⛔ 意図して触れない」としてきた対象である。修正には独立した
-検討・歯（`associationEnabled` を検査する既存テストが無かったこと自体も含む）が要ると
-判断し、**マネージャーへ別途報告する**（この ADR の §「確かめていないこと」にも記録する）。
+**この ADR は当初「この PR の範囲外」として本 PR で修正しないと記録し、マネージャー・
+オーナーへ報告した。オーナーから「同じ PR・同じブランチで直す」との指示があり、
+2026-09-30 に本 PR で修正した**（`association-arm.ts` はベンチ本体・測定器であり、
+ADR 0168 が「⛔ 意図して触れない」としてきた対象だが、**この修正はオーナー自身の指示に
+基づく**——ADR 0168 の方針は「担当者が独断で触れない」ことであり、オーナーの指示を妨げない）。
+
+**修正内容**: `association != null`（`null`/`undefined` の両方を off として扱う）を返す
+純関数 `computeAssociationEnabled` を `association-arm.ts` に切り出して `export` し、
+`runAssociationArm` の `return` 文をそれに差し替えた。`runAssociationArm` 本体は
+本物の `Runtime`/`MemoryStore`（実質 Postgres）を要求し重いため、判定そのものは
+`examples/chat/src/__tests__/association-arm.test.ts` の `computeAssociationEnabled`
+直接呼び出しで固定し、呼び出し側の配線（`return` 文が実際にこの関数を呼んでいること）は
+同ファイル内でソースを読む構造的な歯で別途固定した——理由は、関数単体のテストだけでは
+呼び出し側が別のロジック（例: 元の inline `!== undefined`）へ差し替わった場合を検出できず、
+逆に構造的な歯だけでは関数自体の判定ロジックの誤りを検出できないため、**両方を独立に
+固定する必要がある**と判断したからである。
+
+**変異試験（`git checkout` は使わない。別 worktree `/tmp/mgr-91402725-mutation` に
+`cp` で退避してから書き換え、確認後に `cp` で戻した——作業完了後にこの worktree は
+削除済み）**:
+
+1. `computeAssociationEnabled` の内部を `association !== undefined`（修正前の形）へ
+   戻したところ、`association-arm.test.ts` の
+   `computeAssociationEnabled > null(off arm が明示的に渡す値)なら false` が
+   **期待どおり赤くなった**（`expected true to be false`、1 failed / 3 passed）。
+2. 独立して、`runAssociationArm` の `return` 文だけを inline の
+   `associationEnabled: association !== undefined` へ戻したところ（`computeAssociationEnabled`
+   自体は修正後のまま）、`runAssociationArm の配線 > 🔴 associationEnabled の値が
+computeAssociationEnabled(association) から来ている` が**期待どおり赤くなった**
+   （1 failed / 3 passed）。
+
+どちらも `cp` で元に戻し、4件全て緑に戻ることを確認した。
+
+**基準値ファイルとの整合**: `examples/chat/association-baseline.json` の `off` arm の
+`associationEnabled` を `false` に更新した（`associationEnabled` 以外の数値は変更していない
+——上記のとおり修正前後で影響を受けないため）。`provenance.note` の当該段落も
+「修正済みであり、`associationEnabled` 以外の数値は変わらない」旨に改めた。
 
 ---
 
 ## 8. 検討して採らなかった案
 
-| 採らなかった案                                                                                             | なぜ落ちるか                                                                                                                                                            |
-| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **揺れに備えてあらかじめ非0の許容幅を持たせる**                                                            | §1 の実測で揺れが0だった。実測されていない揺れを先回りして許す理由が無い(§2)                                                                                            |
-| **`hit1Count`/`hit10Count` を悪化検出の対象から外す(常に0だから)**                                         | タスク仕様が明示的に名指しした4指標であり、将来 probe 集合が変わって hit@1/hit@10 が0でなくなる可能性を今から閉じる理由が無い。実質的に発火しないことは§1で注記に留めた |
-| **`association-arm.ts` の `associationEnabled` バグ(§7)をこの PR で直す**                                  | 測定器本体への変更であり、ADR 0168 の「意図して触れない」方針・本 PR の依頼範囲(summary/baseline/ci.yml の配線)の外。独立した検討・歯が要る                             |
-| **ADR 0151「これが覆るとしたら」3番に決着を付ける(「連想枠は効いた」と断定する)ADR をこの ADR 自身で書く** | ADR 0033 §3 の標本数規律・required 化がオーナー領分であることの2点から、本 ADR の担当者が判断できる範囲を超える(§4)                                                     |
+| 採らなかった案                                                                                             | なぜ落ちるか                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **揺れに備えてあらかじめ非0の許容幅を持たせる**                                                            | §1 の実測で揺れが0だった。実測されていない揺れを先回りして許す理由が無い(§2)                                                                                                                                                                                                                         |
+| **`hit1Count`/`hit10Count` を悪化検出の対象から外す(常に0だから)**                                         | タスク仕様が明示的に名指しした4指標であり、将来 probe 集合が変わって hit@1/hit@10 が0でなくなる可能性を今から閉じる理由が無い。実質的に発火しないことは§1で注記に留めた                                                                                                                              |
+| **`association-arm.ts` の `associationEnabled` バグ(§7)をこの PR で直す**                                  | 当初は採らなかった(測定器本体への変更であり、ADR 0168 の「意図して触れない」方針・本 PR の依頼範囲(summary/baseline/ci.yml の配線)の外と判断した)。**⚠ 2026-09-30 追記: オーナーから「同じ PR・同じブランチで直せ」との指示があり、この判断は覆った——§7 参照。この行は当初の判断の記録として残す。** |
+| **ADR 0151「これが覆るとしたら」3番に決着を付ける(「連想枠は効いた」と断定する)ADR をこの ADR 自身で書く** | ADR 0033 §3 の標本数規律・required 化がオーナー領分であることの2点から、本 ADR の担当者が判断できる範囲を超える(§4)                                                                                                                                                                                  |
 
 ---
 
 ## 9. 引き受けた負債・確かめていないこと
 
-1. **6回の実測はすべて同一 PR・同一の測定対象コード（`association-arm.ts` 等は本 PR で
-   変更していない）に対するものである。** 将来 `main` が進んで association-probes 側の
-   コードが変わったとき、揺れが再び0であり続けるかは確かめていない。
+1. **6回の実測（§1）はすべて `association-arm.ts` 修正前のコードに対するものである。**
+   §7 の修正（`computeAssociationEnabled` の切り出し）は `associationEnabled` の値
+   （表示にのみ使う）を変えるだけで、`goldReturnedCount`/`hit1Count`/`hit10Count`/`mrr`/
+   `memoryCharsTotal`/`associationCharsTotal` 等の実測値の計算経路には触れていないため、
+   §1 の6回の実測値そのものは修正後も有効だと判断している——**ただしこれは修正の diff
+   を読んで導いた判断であり、修正後のコードで改めて6回実測し直してはいない。**
+   §7 の「CI の association-probes ジョブで確認した結果」が、この判断の実測による
+   裏取りに当たる。将来 `main` が進んで association-probes 側のコードがさらに変わった
+   とき、揺れが再び0であり続けるかは別途確かめる必要がある。
 2. **ローカル環境（`docs/autonomy.md` の `initdb` 手順）での実行は行っていない**（§1.3）。
    CI と手元の結果を突き合わせる ADR 0167 の作業とは異なり、本 ADR は CI のみを
    出所にしている。
-3. **§7 のバグ（`associationEnabled` が `off` arm で `true` になる）は、この ADR の
-   担当者が見つけたが直していない。** 次にこの領域へ着手する人（あるいはオーナー）が
-   判断すること。
+3. **§7 のバグ（`associationEnabled` が `off` arm で `true` になる）は、2026-09-30 に
+   オーナー指示で本 PR にて修正済みである**（§7）。
 4. **§4 で触れた「連想枠が想起の質を動かしたか」を確定する ADR は、本 ADR の範囲外**
    のまま残っている。
 
@@ -317,9 +355,10 @@ association-baseline.json` を使って `association-summary.mjs` を実行し�
    基準値が古くなったとき**——`identifier-probe-baseline.json` 等と同じ方針で、
    CI 実測から手作業で更新すること（この ADR で置いた値を焼き込みとして扱わない。
    `AGENTS.md`「⛔ 対象外——実測して repo にコミットした基準値」参照）。
-3. **§7 のバグが直されたとき**——`off` arm の「連想枠」列表示が `off` に戻る。
-   基準値ファイルの `associationEnabled` フィールドも `false` に更新する必要がある
-   （`armShortKey` は `associationMaxCount` も見るため、識別自体は壊れない）。
+3. **§7 のバグが直されたとき**——2026-09-30、本 PR にて発生・対応済み。`off` arm の
+   「連想枠」列表示が `off` に戻り、基準値ファイルの `associationEnabled` フィールドも
+   `false` に更新した（`armShortKey` は `associationMaxCount` も見るため、識別自体は
+   修正前後どちらでも壊れていない）。
 4. **誰かが「連想枠が想起の質を動かしたか」を判定する ADR を書くとき**——本 ADR §1/§3/§4
    の実測をそのまま引用できる（ADR 0158「これが覆るとしたら」3番への答えの前段として）。
 
