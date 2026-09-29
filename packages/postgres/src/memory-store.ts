@@ -11,6 +11,7 @@ import {
   isContestedWithoutCompanion,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
+  SourceMemoryForgottenError,
 } from "@mnemora/core";
 import type {
   AggregateScopeOptions,
@@ -101,6 +102,52 @@ type SqlExecutor = Pick<Db, "execute">;
  */
 function subjectIdMatches(subjectId: string | null): SQL {
   return subjectId === null ? sql`subject_id IS NULL` : sql`subject_id = ${subjectId}`;
+}
+
+/**
+ * Issue #1226 / ADR 0375 決定7: `createMemoryWithOutbox`/`supersedeWithNewMemories` の
+ * `opts.abortIfForgotten` を実装する共通部分。**呼び出し元のトランザクション（`tx`）の中で、
+ * まだ何も書く前に**呼ぶこと——`SELECT … FOR UPDATE` で対象行をロックしたうえで
+ * `status` を見直し、1件でも `"forgotten"` なら {@link SourceMemoryForgottenError} を投げる
+ * （呼び出し元の `tx` ごと rollback される）。空配列・`undefined` なら何もしない
+ * （見直しを一切行わない——今日どおり）。
+ *
+ * `FOR UPDATE` を使う理由: 見直しと同じトランザクションの中で対象行をロックすることで、
+ * 見直した後にこのトランザクションが commit するまで、他のトランザクション（`forget`/
+ * `purge`）がこの行を書き換えられなくする。見直し（この関数）と書き込み（呼び出し元が
+ * この後に行う INSERT/UPDATE）の間に窓が無い——`embed` ジョブの同種のレースを閉じた
+ * [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) は「書いた後に読み直す」形
+ * だったが、ここは「書く**前**に見直す」——ADR 0375 決定7参照。
+ *
+ * `tenant_id` の絞り込みも同じ `WHERE` に含める——他テナントの同じ id を誤って見ない。
+ */
+async function assertNotForgottenForUpdate(
+  tx: SqlExecutor,
+  ctx: Ctx,
+  ids: ReadonlyArray<MemoryId> | undefined,
+  method: "createMemoryWithOutbox" | "supersedeWithNewMemories",
+): Promise<void> {
+  if (ids === undefined || ids.length === 0) {
+    return;
+  }
+  // `getMany` と同じ理由（`isUuidLike` の doc 参照）——形式が壊れた id は「無い」のと
+  // 同じ扱いにする。呼び出し側（runtime）は既に実在を確かめた id しか渡さないため、
+  // 実際にはここで落ちることは無いはずだが、クエリを投げる前に取り除く作法は揃える。
+  const wellFormedIds = ids.filter((id) => isUuidLike(id));
+  if (wellFormedIds.length === 0) {
+    return;
+  }
+  const rows = await tx.execute(sql`
+    SELECT id, status FROM memories
+    WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
+    FOR UPDATE
+  `);
+  const forgottenIds = (rows.rows as unknown as Array<{ id: MemoryId; status: MemoryStatus }>)
+    .filter((row) => row.status === "forgotten")
+    .map((row) => row.id);
+  if (forgottenIds.length > 0) {
+    throw new SourceMemoryForgottenError(method, forgottenIds);
+  }
 }
 
 /**
@@ -391,7 +438,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
@@ -402,8 +449,12 @@ export class PostgresMemoryStore implements MemoryStore {
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
+    const abortIfForgotten = opts?.abortIfForgotten;
 
     const result = await this.db.transaction(async (tx) => {
+      // Issue #1226 / ADR 0375 決定7: INSERT より前に見直す（`assertNotForgottenForUpdate`
+      // の doc コメント参照）。`abortIfForgotten` が空・省略なら何もしない。
+      await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "createMemoryWithOutbox");
       const inserted = await tx.execute(sql`
         INSERT INTO memories (
           id, tenant_id, subject_id,
@@ -726,7 +777,7 @@ export class PostgresMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
@@ -734,6 +785,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }> {
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
+    const abortIfForgotten = opts?.abortIfForgotten;
     // 呼び手が壊れた索引を渡した場合は、トランザクションを開く前に落とす（ADR 0100）。
     // ⛔ `conflicted` にも「memory not found」にも混ぜない——3つとも別の失敗である。
     // 開く前に落とすので、`news` の作成も当然起きない。
@@ -757,6 +809,11 @@ export class PostgresMemoryStore implements MemoryStore {
     }
 
     const result = await this.db.transaction(async (tx) => {
+      // Issue #1226 / ADR 0375 決定7: `news`/`supersede` どちらの書き込みより前に見直す
+      // （`assertNotForgottenForUpdate` の doc コメント参照）。`abortIfForgotten` が
+      // 空・省略なら何もしない——既存の `conflicted`（CAS に弾かれた対象だけ飛ばして
+      // 他は commit する部分成功）はこの見直しの対象外のまま、今日どおり働く。
+      await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "supersedeWithNewMemories");
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
       for (const { input, jobKinds } of news) {

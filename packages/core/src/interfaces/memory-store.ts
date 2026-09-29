@@ -46,6 +46,47 @@ export class MemoryStatusConflictError extends Error {
 }
 
 /**
+ * Issue #1226（ADR 0375 決定7、クローン miku の判断）: `createMemoryWithOutbox`/
+ * `supersedeWithNewMemories` の `opts.abortIfForgotten` に渡した id のうち、書き込みの
+ * 直前に見直したら1件でも `status === "forgotten"`（`forget()` のみ・`forget()` の後
+ * `purge()` のどちらも含む——`purge()` は `forgotten` でない Memory を拒むため、
+ * `purgedAt` が付いた行は必ず `forgotten` でもある）だったときに投げる。
+ *
+ * `runtime.consolidate`/`runtime.reflect` が、LLM を待つ間に統合元・内省の材料が
+ * `forget`/`purge` されても、その本文から作った新しい Memory を `active` で書いて
+ * しまう競合（Issue #1226 本文）を閉じるための道具。**投げられた時点で、この呼び出しは
+ * 一切何も書いていない**——`news`（新しい Memory）も `supersede`（既存行の更新）も
+ * どちらも rollback される（`opts.abortIfForgotten` を渡さなかった呼び出しでは、この
+ * 例外は絶対に投げられない——今日どおりの振る舞いのまま）。
+ *
+ * `forgottenIds` は「見直した時点で forgotten だった id」の一覧——`abortIfForgotten` の
+ * 部分集合であり、渡した順序を保つ保証は無い。
+ *
+ * 🔴 **`@mnemora/postgres` は、この見直しを書き込みと同一トランザクションの中で
+ * `SELECT … FOR UPDATE` として行う**（ADR 0375 決定7・[Issue #1035](https://github.com/takecchi/mnemora/issues/1035)
+ * と同じ形）——見直しと書き込みの間に窓が無い。**`packages/testkit` の
+ * `InMemoryMemoryStore` と `packages/core` のテスト用 `FakeMemoryStore` は、
+ * `opts.abortIfForgotten` を受け取らない（実装しない）**——呼び出し側
+ * （`runtime.consolidate`/`runtime.reflect`）が LLM 呼び出しの直後・書き込みの直前に
+ * 行う `getMany` の見直しだけが、これらの adapter の保護になる。この2つの見直しの
+ * 間には小さな窓が残る（`Runtime.consolidate`/`Runtime.reflect` の doc コメント、
+ * `docs/memory-model.md` の該当箇所を参照）。
+ */
+export class SourceMemoryForgottenError extends Error {
+  constructor(
+    readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories",
+    readonly forgottenIds: MemoryId[],
+  ) {
+    super(
+      `MemoryStore.${method}: aborted — ${forgottenIds.length} of the memories listed in ` +
+        `opts.abortIfForgotten were forgotten (forgottenIds: ${forgottenIds.join(", ")}). ` +
+        "Nothing was written (news and supersede both rolled back).",
+    );
+    this.name = "SourceMemoryForgottenError";
+  }
+}
+
+/**
  * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * （Issue #243 続き、ADR 0136 決定3の設計メモを実装した）: `status: 'contested'` を
  * **対向（`contestedWithId`）無しで**書き込もうとしたときに、`updateStatus` /
@@ -468,12 +509,29 @@ export interface MemoryStore {
    * `createObservationWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、積む outbox 行の
    * `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に
    * `clock.now()` を渡す。
+   *
+   * ⭐ **2026-09-29 追記（Issue #1226 / ADR 0375 決定7、クローン miku の判断）: `opts.abortIfForgotten`
+   * を足した。**`runtime.reflect` が、材料にした Memory を LLM 呼び出しの間に `forget`（さらに
+   * `purge`）されても、その本文から作った内省の Memory を書いてしまう競合を閉じるための欄。
+   * 非空の配列を渡すと、**書き込み（この INSERT）の直前に、その id の現在の `status` を見直し、
+   * 1件でも `"forgotten"` だったら何も書かずに {@link SourceMemoryForgottenError} を投げる**——
+   * `input` の INSERT も outbox ジョブの積み込みも一切起きない。空配列・省略時は今日どおり
+   * （見直しを一切行わない）。
+   *
+   * 🔴 **`@mnemora/postgres` はこの見直しを、INSERT と同一トランザクションの中で
+   * `SELECT … FOR UPDATE` として行う**（{@link SourceMemoryForgottenError} の doc コメント参照。
+   * 見直しと書き込みの間に窓が無い）。**`packages/testkit` の `InMemoryMemoryStore` と
+   * `packages/core` のテスト用 `FakeMemoryStore` はこの欄を実装しない**——渡しても無視され、
+   * 例外は投げられない。これらの adapter を使う呼び出し側は、`runtime.reflect` 自身が
+   * LLM 呼び出しの直後・この呼び出しの直前に行う `getMany` の見直し（残る窓あり）だけで
+   * 保護される。第三者の adapter がこの欄を実装するかどうかは任意——実装しなくても
+   * 型は壊れない（無視されるだけ）。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
@@ -1012,6 +1070,26 @@ export interface MemoryStore {
    * `createMemoryWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、`news` に積む outbox 行の
    * `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に
    * `clock.now()` を渡す。
+   *
+   * ⭐ **2026-09-29 追記（Issue #1226 / ADR 0375 決定7、クローン miku の判断）: `opts.abortIfForgotten`
+   * を足した。**`runtime.consolidate` が、統合元にした Memory を LLM 呼び出しの間に
+   * `forget`（さらに `purge`）されても、その本文から作った統合先を `active` で書いてしまう
+   * 競合を閉じるための欄——`createMemoryWithOutbox` の同日付の追記と**同じ意味論**。非空の
+   * 配列を渡すと、**`news`/`supersede` どちらの書き込みより前に**、その id の現在の
+   * `status` を見直し、1件でも `"forgotten"` だったら何も書かずに
+   * {@link SourceMemoryForgottenError} を投げる（`news` の作成も `supersede` の CAS も
+   * 一切起きない——**この見直しは既存の `conflicted`（CAS に弾かれた対象だけ飛ばして
+   * 他は commit する部分成功）より優先する**。`abortIfForgotten` に挙げた id が
+   * `supersede[].id` の部分集合である必要はない——`{ memoryIds }` で束ねた対象のうち
+   * eligible だった全 id を渡すのが呼び出し側の使い方だが、この口自体は `supersede` との
+   * 関係を検査しない）。空配列・省略時は今日どおり（見直しを一切行わない、`conflicted` の
+   * 部分成功のみ）。
+   *
+   * 🔴 **`@mnemora/postgres` はこの見直しを、`news`/`supersede` の書き込みと同一トランザクションの
+   * 中で `SELECT … FOR UPDATE` として行う**（{@link SourceMemoryForgottenError} の doc コメント
+   * 参照。見直しと書き込みの間に窓が無い）。**`packages/testkit` の `InMemoryMemoryStore` と
+   * `packages/core` のテスト用 `FakeMemoryStore` はこの欄を実装しない**——渡しても無視され、
+   * 例外は投げられない（`createMemoryWithOutbox` の同日付の追記と同じ理由・同じ限界）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -1022,7 +1100,7 @@ export interface MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];

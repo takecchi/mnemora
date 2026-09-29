@@ -478,6 +478,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-09-29 追記（Issue #1412 コメント1、[ADR 0373](./decisions/0373-conformance-suite-issue-1412-promises.md)）**: `MemoryStoreConformanceOptions` に `supportsResolveOrphanedContested?` が増えた——`resolveOrphanedContested?`（任意メソッド、CAS 違反で `MemoryStatusConflictError` を投げること）を検査する。上の `supportsLabels?` 等と同じ3状態。`packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts`・`packages/postgres/src/__tests__/conformance.postgres.test.ts` はどちらも `true` を渡している。
 
+**⚠ 2026-09-30 追記（Issue #1226、[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7、クローン miku の判断）**: `MemoryStoreConformanceOptions` に `supportsAbortIfForgotten?` が増えた——`createMemoryWithOutbox`/`supersedeWithNewMemories?` という**既存の任意メソッド**に足した**新しいパラメータ** `opts.abortIfForgotten`（`SourceMemoryForgottenError` を投げて書き込みを打ち切る、書き込みと同一トランザクションの `SELECT … FOR UPDATE` による見直し）を検査する。上の `supportsLabels?` 等と同じ3状態。`packages/postgres/src/__tests__/conformance.postgres.test.ts` は `true` を渡す（`PostgresMemoryStore` が実装している）。`packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts` は `false` を渡す（`InMemoryMemoryStore` は `opts.abortIfForgotten` を実装しない——渡しても無視される。`Runtime.consolidate`/`Runtime.reflect` は、この能力が無い adapter に対しては自前の「書く直前の読み直し」だけで保護する。`docs/memory-model.md` の該当箇所参照）。**破壊的変更として数える**——`packages/testkit` の conformance suite の判定を厳しくする変更であり（`opts.abortIfForgotten: true` を宣言した adapter は新しい歯を通す必要がある）、`docs/migration-v1.md` 項目26に登録した。
+
 ---
 
 ## 出所について

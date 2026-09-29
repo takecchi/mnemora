@@ -111,6 +111,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -140,6 +141,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
         event: NewMemoryEvent;
     }>, opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         created: Array<{
             memory: Memory;

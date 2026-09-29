@@ -573,6 +573,78 @@ PR #1393・Issue #1232）になった。**
 
   **DB マイグレーション**: 不要（新しい列・表は追加していない）。
 
+- **`consolidate`/`reflect` が、LLM を待つ間に forget/purge された材料から新しい記憶を
+  書かなくなった**（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+  [ADR 0375](./docs/decisions/0375-purge-scope-widened.md) 決定7・2026-09-30 追記）。
+  `consolidate`/`reflect` は、材料（統合元・内省の材料）を読んでから LLM を呼び、
+  その結果から新しい Memory を書く。LLM を待っている間に材料の1件が `forget`
+  （さらに `purge`）されても、これまでは書き込みの前に見直さず、統合先・内省の
+  Memory はその本文を入れた LLM の出力から作られ `active` で書かれていた
+  （`purge()` が `"purged"` を返した後でも）。**今は、LLM が返った直後・書き込みの
+  直前に材料を読み直し、1件でも forgotten なら統合先・内省の Memory を一切作らずに
+  打ち切る**（新しい `outcome: 'aborted_source_forgotten'`）。
+
+  - `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts` に
+    `abortIfForgotten?: ReadonlyArray<MemoryId>` を足した。渡すと、書き込みの直前に
+    その id の現在の `status` を見直し、1件でも `"forgotten"` なら何も書かずに
+    新しい公開クラス `SourceMemoryForgottenError` を投げる。
+  - `@mnemora/postgres` は、この見直しを書き込みと同一トランザクションの中で
+    `SELECT … FOR UPDATE` として行う（`embed` ジョブの同種のレースを閉じた
+    [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) と同じ
+    「書く前に見直す」形）——見直しと書き込みの間に窓が無い。
+  - `@mnemora/testkit` の `InMemoryMemoryStore` と `@mnemora/core` のテスト用
+    `FakeMemoryStore` は `opts.abortIfForgotten` を実装しない（渡しても無視される）。
+    これらの adapter では、`consolidate`/`reflect` 自身が LLM 呼び出しの直後に行う
+    「書く直前の読み直し」だけが保護になり、読み直しと書き込みの間に小さな窓が残る。
+  - `ConsolidateOutcome`/`ReflectOutcome` の union に `"aborted_source_forgotten"` を、
+    `ConsolidateSourceOutcome`/`ReflectBasisOutcome` の union に
+    `{ kind: "forgotten_before_write" }` を足した。**型としては追加のみ**
+    （union に値を足す変更・opts への省略可能フィールドの追加は非破壊——
+    「数え方の規律への追記（2026-09-28）」）。
+
+  **なぜ破壊的と数えるか**: `packages/testkit` の conformance suite に、任意フラグ
+  `supportsAbortIfForgotten?`（3状態、`supportsOnlyMemoryIdsFilter?` と同じ形）を
+  新設し、`true` を宣言した adapter に対して `opts.abortIfForgotten` の契約の歯
+  （forgotten な id を含めると `SourceMemoryForgottenError` を投げて何も書かない、
+  forgotten でなければ今日どおり書く）を実行するようにした——上の
+  「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの
+  判定を厳しくする変更」に当たる。**`supportsAbortIfForgotten` は任意
+  （`?: boolean`）であり、渡さない・`false` を渡す既存の呼び出し元はこの新しい歯を
+  1本も実行しない**（PR #524/PR #526、ADR 0237 の前例に倣い、新しい独立した能力の
+  フラグを必須にはしなかった）。
+
+  **誰が影響を受けるか**: `opts.abortIfForgotten` を自分で渡している呼び出し側
+  だけ、実行時の振る舞いが変わりうる。`runtime.consolidate`/`runtime.reflect` を
+  直接呼ぶだけの利用者は、`ConsolidateOutcome`/`ReflectOutcome` を網羅的に分岐
+  している場合だけ型検査で気づく（union に値が増えたため）——今日どおりの分岐
+  ならコンパイルは壊れない。`packages/testkit` の conformance suite を自分の
+  `MemoryStore` 実装に対して走らせている利用者は、`supportsAbortIfForgotten` を
+  渡さなければ影響を受けない。
+
+  **移行の手順**: `opts.abortIfForgotten` の見直し・打ち切りを自前実装したい場合、
+  `createMemoryWithOutbox`/`supersedeWithNewMemories?` にこの欄を実装し、
+  conformance suite に `supportsAbortIfForgotten: true` を渡す。実装しない場合は
+  何もする必要が無い（`abortIfForgotten` を渡しても無視されるだけで、今日どおり動く
+  ——ただし `consolidate`/`reflect` 自身の「書く直前の読み直し」による保護は、
+  adapter の実装によらず全アダプタで効く）。
+
+  **DB マイグレーション**: 不要（新しい列・表は追加していない）。
+
+  **陽性対照（実測）**: `packages/postgres/src/__tests__/consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`。
+  書き込みの入口（読み直しの直後・書き込み直前）で障壁を置き、その間に forget/purge を
+  割り込ませる変異試験——`consolidate`（`supersedeWithNewMemories`）・`reflect`
+  （`createMemoryWithOutbox`）の両方で、新実装は10/10緑、対応する
+  `SELECT … FOR UPDATE` の見直しを外すと10/10赤。
+
+  **⚠ union に値を足す変更が型検査に影響しうる実例**: `examples/chat/src/consolidation-cost.ts`
+  は `outcomes[result.outcome] += 1` という形で `ConsolidateOutcome` を index に使っており、
+  `"aborted_source_forgotten"` を足したことで CI の typecheck が `TS7053` で落ちた（`examples/chat`
+  側の `ConsolidationOutcomeCountsJson`/`emptyOutcomeCounts` に同名の欄を足して直した）。
+  **「union に値を足す変更は破壊的と数えない」という判定は変えていない**——網羅的な
+  `Record`/`switch` で `ConsolidateOutcome`/`ReflectOutcome`/`ConsolidateSourceOutcome`/
+  `ReflectBasisOutcome` を扱っている利用者は、この種の追加でも型検査が落ちうる、という
+  影響の実例として記録する。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。

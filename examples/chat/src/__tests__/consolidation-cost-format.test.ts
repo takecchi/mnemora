@@ -45,6 +45,7 @@ function makeRound(
               not_examined: 0,
               llm_failed: 0,
               dry_run: 0,
+              aborted_source_forgotten: 0,
             },
             newMemoryCount: 2,
             embeddingStatus: { ok: 2, pending: 0, failed: 0 },
