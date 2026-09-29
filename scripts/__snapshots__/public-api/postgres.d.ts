@@ -67,6 +67,7 @@ export * from "./event-store.js";
 export * from "./outbox-store.js";
 export * from "./tenant-settings-store.js";
 export * from "./migrate.js";
+export * from "./pgvector-capability.js";
 export * from "./vector-space.js";
 export * from "./embedding-space-table.js";
 export * from "./content-hash.js";
@@ -330,6 +331,28 @@ export declare class PostgresOutboxStore implements OutboxStore {
     }): Promise<void>;
     private raiseIfLeaseConflict;
 }
+
+// ===== dist/pgvector-capability.d.ts =====
+export declare const PGVECTOR_CAPABILITY_QUERY = "SELECT ext.extversion AS extversion, s.vartype AS vartype, s.enumvals AS enumvals\nFROM (SELECT '[0]'::vector AS probe) AS load\nLEFT JOIN pg_extension ext ON ext.extname = 'vector'\nLEFT JOIN pg_settings s ON s.name = 'hnsw.iterative_scan'";
+export interface PgvectorCapabilityRow {
+    extversion: string | null;
+    vartype: string | null;
+    enumvals: readonly string[] | null;
+}
+export declare const PGVECTOR_REQUIRED_VERSION = "0.8.0";
+export type PgvectorMissingCapability = "hnsw.iterative_scan";
+export declare class PgvectorVersionUnsupportedError extends Error {
+    readonly installed: string | undefined;
+    readonly required: string;
+    readonly missingCapability: PgvectorMissingCapability;
+    constructor(installed: string | undefined);
+}
+export declare function assertPgvectorCapabilityRow(row: PgvectorCapabilityRow | undefined): void;
+export declare function assertPgvectorCapabilityViaQuery(queryable: {
+    query(text: string): Promise<{
+        rows: unknown[];
+    }>;
+}): Promise<void>;
 
 // ===== dist/schema-namespace.d.ts =====
 export declare const DEFAULT_EXTENSION_SCHEMA = "public";
@@ -2287,6 +2310,7 @@ import type { Ctx, EmbeddingSpaceId, MemoryId, VectorEntry, VectorFilter, Vector
 import type { Db } from "./client.js";
 export declare class PostgresVectorStore implements VectorStore {
     private readonly db;
+    private readonly pgvectorCapabilityGate;
     constructor(db: Db);
     upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
     search(ctx: Ctx, space: EmbeddingSpaceId, query: number[], opts: {

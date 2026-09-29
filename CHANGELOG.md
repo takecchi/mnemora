@@ -191,6 +191,7 @@ PR #1393・Issue #1232）になった。**
 **型の上**: `git diff fd20e14..54b05bc -- scripts/__snapshots__/public-api/` は `anthropic.d.ts`・`core.d.ts`・`local-embedding.d.ts`・`openai.d.ts`・`postgres.d.ts` の5ファイルに新しい差分が在り、どれも追加のみ（削除・必須化・狭小化は無い）。`core.d.ts`: 新設の `abort.ts` が export する `AbortOptions`・`abortReason`・`isAbort`・`runAbortable`、`deriveClaimKeys`/`extractCandidates`/`runRecall` の末尾に `signal?: AbortSignal`、`EmbeddingProvider.embed`/`LLMProvider.complete`/`completeStructured`/`Runtime.observe`/`recall`/`findCorrectionCandidates`/`reextract` に `opts?: AbortOptions`、`ConsolidateOptions`/`ReflectOptions`/`TickOptions` に `signal?: AbortSignal`（すべて PR #1398）。`anthropic.d.ts`・`openai.d.ts`: 上と同じ `AbortOptions` の追加（PR #1398）に加え、`AnthropicLLMFailureKind`/`OpenAILLMFailureKind` に `"schema_unsupported"` が増え、`*ProviderErrorOptions` に `cause?: unknown` が増えた（PR #1399）。`local-embedding.d.ts`: `LocalEmbeddingProvider.embed` に `opts?: AbortOptions`（PR #1398）——PR #1401・PR #1404 は `cacheDir`/`revision` の既存の欄の**挙動**だけを直しており、公開の型は1バイトも変えていない。`postgres.d.ts`: `TrigramLexicalUnavailableReason` に `"extension_not_visible"` が増えた（PR #1405、union への値の追加で破壊的と数えない——オーナーの回答（ask_human `d9364c91`）と同じ理由）——PR #1396・PR #1402・PR #1406・PR #1407 は、どれも公開の型を変えていない（`testkit.d.ts` にこの範囲で新しい差分は無い。`bullmq.d.ts` も同様）。出荷される6パッケージの `package.json`・`pnpm-lock.yaml` に差分は無い（再掲）。
 
 ⟹ **この節の範囲（`v1.0.2`…`54b05bc`）で、確定した破壊的変更は4件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」）のままである。**この棚卸しで新しく確定した破壊的変更は無い——PR #1401・PR #1404・PR #1405・PR #1406・PR #1407 はいずれも ⚠ 付きで非破壊と数えている（本文の ⚠ のとおり）。この判断はクローン miku の判断であり、オーナーの判断ではない。
+**⚠ 2026-09-29 追記25**: 上の棚卸しの範囲（`fd20e14` まで）の**外**——着地に先立って変更を作った本人がこの節に足した1件——として、`@mnemora/postgres` の pgvector 版検査が確定した破壊的変更である（[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、[ADR 0367](./docs/decisions/0367-pgvector-capability-check.md)）。中身は下の `### Breaking` を見ること——ここには複製しない。🔴 `fd20e14` からこの変更が着地するまでの間に他の PR が `main` へ入っている可能性があるが、それらを1本ずつ洗って分類する棚卸しはまだ行っていない。**次回の棚卸しで、この追記25が数えていない範囲（`fd20e14`…この変更の着地点）を通しで数え直すこと。**
 
 ### Breaking
 
@@ -358,6 +359,36 @@ PR #1393・Issue #1232）になった。**
   `PurgeExpiredEventsOptions`/`PurgeExpiredEventsResult` の宣言は変えていない）——**実行時の
   振る舞いが変わる**という意味での Breaking である（`purgeExpiredEvents?` だけを実装している
   adapter の呼び出し結果が `executed` から `store_unsupported` に変わる）。
+
+- **`@mnemora/postgres` は、pgvector が `hnsw.iterative_scan` の `relaxed_order`
+  （[ADR 0284](./docs/decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md)）に
+  対応しているかを起動時に検査するようになった——対応していなければ新しい
+  `PgvectorVersionUnsupportedError` を投げる**（[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、
+  [PR #1408](https://github.com/takecchi/mnemora/pull/1408)、
+  [ADR 0367](./docs/decisions/0367-pgvector-capability-check.md)）。
+
+  **どこで検査するか**: `PostgresVectorStore.search()`/`searchMany()`（インスタンスごとに
+  初回の呼び出しでだけ。以降はキャッシュされ、追加の往復は生まない）と、
+  `runMigrations`（`extensionMode` の `create`/`verify` 両方——`mnemora-postgres-migrate`
+  も同じ経路を通る）。
+
+  **誰が影響を受けるか**: pgvector が 0.8.0 未満（または `ALTER EXTENSION vector
+  UPDATE;` をまだ実行していないために `hnsw.iterative_scan` が使えないまま）の環境。
+  **今までは、その組み合わせによって「2回目の `recall()` から ERROR」（pgvector
+  0.6.0〜0.7.x × PostgreSQL 15 以上）か「黙って iterative scan が効かないまま動き続ける」
+  （pgvector 0.5.x、または PostgreSQL 15 未満）のどちらかだった**（Issue #1301 本文の表）。
+  この版からは、`mnemora-postgres-migrate` の実行時、または `search()`/`searchMany()` の
+  初回呼び出し時に、はっきりした型のエラー（`PgvectorVersionUnsupportedError`。
+  `installed`/`required`/`missingCapability` を持つ）で落ちる。
+
+  **判定は `pg_extension.extversion` の文字列比較ではなく、能力で行う**——`pg_settings` の
+  `hnsw.iterative_scan` 行が実際に `relaxed_order` を解釈できるかを、同じ接続で読む
+  （実測・placeholder の穴の扱いは ADR 0367）。⟹ **ライブラリが実際に 0.8.0 以上なら、
+  何らかの理由で `extversion` が古いまま報告されていても落ちない**——落ちるのは
+  「実際に iterative scan が効かない構成」だけである。
+
+  **移行の手順**: pgvector を 0.8.0 以上へ上げるか、`ALTER EXTENSION vector UPDATE;` を
+  実行する。**検査を外すオプションは無い。**
 
 ### Added
 
