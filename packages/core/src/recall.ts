@@ -1958,6 +1958,12 @@ export interface RecallQuery {
    * 頼んだのに実は集計していないのに `"exact"` と名乗る」ことは起きない。**呼び出し側は
    * 返ってきた `countKind` を見れば、その adapter がこの opt-in に対応しているかを
    * 常に判別できる（値が紛れない）。
+   *
+   * **⚠ `"skip"` では、ANN が scope の候補を拾いきったかを判定できない**（母数 `eligible` が
+   * 数えられないため、`ann_unreached` は鳴らない）。**`ann_unreached` が無いことは「拾いきった」
+   * を意味しない。** ANN の段が走っていて件数が取れなかったときは、`explain.stages` の
+   * ANN（`detail.channel === "ann"`）の `detail.annReachability: "unknown"` がそう名乗る
+   * （ADR 0390。既定 `"exact"` の出力にはこのキーは付かない）。
    */
   scopeAggregate?: "exact" | "skip";
   /**

@@ -3132,6 +3132,31 @@ export async function runRecall(
     };
   }
 
+  // ADR 0390（ADR 0384 決定7 の続き）: `scopeAggregate: "skip"` で件数が取れなかった（adapter が
+  // `countKind: 'unknown'` を返した）とき、`eligible` は 0 になり、上の `ann_unreached` も
+  // `annReturnedFewerThanReachable` も判定できない——**「鳴らない」ことが「拾いきった」を
+  // 意味しなくなる**。ANN の段が実際に走っていたなら、その stage detail に
+  // `annReachability: "unknown"`（「到達を判定できない」）と名乗る。
+  //   - `Omission` union には足さない（`kind` を増やさない。ADR 0285 §2.2 と同じ理由）。
+  //     `ann_unreached` を countKind 'unknown' で出す案は、「届かなかった」と断言する顔になり
+  //     （skip では取りこぼしてもいない recall の大半に立つ）、severity の意味も崩すので採らない。
+  //   - 条件は要求（`scopeAggregate === "skip"`）だけでなく、**返ってきた `countKind`**
+  //     （'unknown'）でも縛る——skip を無視して exact を返す adapter では今日どおりの判定になり、
+  //     何も足さない。既定 "exact" の出力は1バイトも変わらない。
+  //   - 診断キーは条件が真のときだけ足す（ADR 0084 §6 の歯②と同じ作法）。
+  if (
+    annStageTrace !== undefined &&
+    candidateGenerationExecuted &&
+    kPrime > 0 &&
+    scopeAggregateMode === "skip" &&
+    aggregate.countKind === "unknown"
+  ) {
+    annStageTrace.detail = {
+      ...annStageTrace.detail,
+      annReachability: "unknown",
+    };
+  }
+
   // -------------------------------------------------------------------
   // usage（docs/recall.md §6）: 計測と強制を混同しない——強制は段4で既に行った。
   // ここでは実際に返した量を測るだけ。

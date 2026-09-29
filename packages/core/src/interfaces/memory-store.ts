@@ -357,6 +357,10 @@ export interface AggregateScopeOptions {
    * `scopeAggregate` に対応していない」という事実を `countKind` がそのまま正直に
    * 名乗っている状態であり、`"skip"` を頼んだのに `countKind: 'exact'` の顔をした
    * 未集計の値が返ることは無い（ADR 0384「決めたこと」参照）。
+   *
+   * **⚠ `"skip"` では `recall()` は ANN の到達（`ann_unreached`）を判定できない。** 返り値の
+   * `countKind` が `'unknown'` のとき、`recall()` は ANN の stage detail に
+   * `annReachability: "unknown"` を足して、そう名乗る（ADR 0390）。
    */
   scopeAggregate?: "exact" | "skip";
 }
