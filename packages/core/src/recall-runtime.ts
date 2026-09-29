@@ -2720,6 +2720,13 @@ export async function runRecall(
       limit: digestBandLimit,
       excludeMemoryIds: finalMemories.map((m) => m.memoryId),
     },
+    // ADR 0390: 段1の ANN から除外した kind を集約へも渡す（空配列・未指定は no-op で、
+    // adapter への呼び出しも今日と同じ形）。返るのは `excludedProvenanceIndexedCount`（任意）だけで、
+    // `totalInScope` 等の意味は変わらない。
+    ...(validatedQuery.excludeProvenanceKinds !== undefined &&
+    validatedQuery.excludeProvenanceKinds.length > 0
+      ? { excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds }
+      : {}),
   });
   // Issue #152/#153（ADR 0312 追記）: `MemoryStore.aggregateScope` の `digests` は
   // adapter が組み立てる——`scope.attributes` を無視する自作 adapter だと、絞り込みの
@@ -2915,7 +2922,18 @@ export async function runRecall(
     aggregate.notIndexed.pending.count +
     aggregate.notIndexed.failed.count +
     aggregate.notIndexed.skipped.count;
-  const eligible = aggregate.totalInScope - notIndexedTotal;
+  // ADR 0390: 除外指定（非空）のとき、adapter が `excludedProvenanceIndexedCount` を返したなら、
+  // 段1が ANN から除外した「索引済みの除外 kind の行」を分母から引く（`notIndexed` と同じく
+  // 「索引済み」の補集合で揃えてあるので、引く量は ANN が本来返しうる除外行の数と一致する）。
+  // 欄を返さない adapter では `excludedIndexed` が undefined になり、今日と同じ式に倒れる。
+  const exclusionActive =
+    validatedQuery.excludeProvenanceKinds !== undefined &&
+    validatedQuery.excludeProvenanceKinds.length > 0;
+  const excludedIndexed = exclusionActive ? aggregate.excludedProvenanceIndexedCount : undefined;
+  const eligible =
+    aggregate.totalInScope -
+    notIndexedTotal -
+    (excludedIndexed !== undefined ? excludedIndexed : 0);
   // 🔴 ADR 0193: **かつてここに `annHits.length < kPrime`（窓が埋まっていない）という
   // 条件があった。** その条件は「窓が埋まっていれば ann_truncated の領域であり、
   // scope の候補は ANN が拾いきれている」という前提に立っていたが、その前提は
@@ -2936,9 +2954,11 @@ export async function runRecall(
   // `lowerBoundUsable`/`reachableLowerBound` をここへ引き上げ、真偽値
   // `annWindowUnderfilled` として先に確定させる。式そのものの由来・健全性の証明・
   // 引き受けた負債は、下の ADR 0285 追記のコメント（変えていない）を見ること。
-  const lowerBoundUsable =
-    validatedQuery.excludeProvenanceKinds === undefined ||
-    validatedQuery.excludeProvenanceKinds.length === 0;
+  // ADR 0390: 除外指定でも、adapter が除外行の件数を返したときは下限が立つ。
+  // ⚠ `filteredDecayed` は除外行の decayed も数えうるので、除外行が `eligible`（引き済み）と
+  // `filteredDecayed` の両方で引かれ、下限は真の値より小さい側へずれる——偽陽性を出さない側
+  // （警告が減るだけ）なので許容する（ADR 0390）。
+  const lowerBoundUsable = !exclusionActive || excludedIndexed !== undefined;
   const reachableLowerBound = Math.max(0, eligible - aggregate.filteredDecayed.count);
   const annWindowUnderfilled =
     candidateGenerationExecuted &&
@@ -3081,6 +3101,11 @@ export async function runRecall(
   // 「これが正確な母数である」と読めてしまうため、下限であることが名前自体から
   // 分かるよう改めた）。`detail` は型無しの診断欄なので、欄名の変更・追加は公開型を
   // 動かさない（ADR 0285 §7 実測）。
+  //
+  // 🔴 ADR 0390（2026-09-30 追記）: 上の 2. `excludeProvenanceKinds` が集約に現れない、という
+  // 点は、`AggregateScopeOptions.excludeProvenanceKinds` と `ScopeAggregate.excludedProvenanceIndexedCount`
+  // （任意）で解いた。欄を返す adapter では除外指定でも下限が立ち、欄を返さない adapter では
+  // 従来どおり判定しない。
   //
   // ADR 0288: `lowerBoundUsable`・`reachableLowerBound`・条件そのもの
   // （`annWindowUnderfilled`）は、上の `ann_unreached` の直前へ引き上げ済み

@@ -5,12 +5,12 @@
 // `packages/core/src/__tests__/fake-aggregate-scope-exclude-provenance.test.ts`。
 
 import { describe, expect, it } from "vitest";
-import type { Ctx } from "@mnemora/core";
+import type { Ctx, Provenance } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
 const ctx: Ctx = { tenantId: "tenant-1" };
-const consolidated = { kind: "consolidated", sources: ["a", "b"] } as const;
+const consolidated: Provenance = { kind: "consolidated", sources: ["a", "b"] };
 
 async function seed() {
   const store = new InMemoryMemoryStore();
@@ -34,23 +34,26 @@ async function seed() {
   return store;
 }
 
-type WithField = { excludedProvenanceIndexedCount?: number };
-
 describe("InMemoryMemoryStore.aggregateScope: options.excludeProvenanceKinds（ADR 0390）", () => {
   it("除外 kind で索引済みの行の数を excludedProvenanceIndexedCount に返す（未索引は数えない）", async () => {
     const store = await seed();
-    const aggregate = await store.aggregateScope(ctx, {}, {
-      excludeProvenanceKinds: ["consolidated"],
-    } as never);
-    expect((aggregate as WithField).excludedProvenanceIndexedCount).toBe(2);
+    const aggregate = await store.aggregateScope(
+      ctx,
+      {},
+      {
+        excludeProvenanceKinds: ["consolidated"],
+      },
+    );
+    expect(aggregate.excludedProvenanceIndexedCount).toBe(2);
     expect(aggregate.totalInScope).toBe(4);
   });
 
-  it("空配列は no-op: 欄は 0 相当で、totalInScope・groups も変わらない", async () => {
+  it("空配列は no-op: 欄は返らず、返り値全体が指定なしと同じ", async () => {
     const store = await seed();
-    const withEmpty = await store.aggregateScope(ctx, {}, { excludeProvenanceKinds: [] } as never);
+    const withEmpty = await store.aggregateScope(ctx, {}, { excludeProvenanceKinds: [] });
     const without = await store.aggregateScope(ctx, {});
-    expect((withEmpty as WithField).excludedProvenanceIndexedCount ?? 0).toBe(0);
+    expect(withEmpty).toEqual(without);
+    expect(withEmpty.excludedProvenanceIndexedCount).toBeUndefined();
     expect(withEmpty.totalInScope).toBe(without.totalInScope);
     expect(withEmpty.groups).toEqual(without.groups);
   });

@@ -1026,6 +1026,19 @@ export interface ScopeAggregate {
    */
   filteredDecayed: { count: number; countKind: CountKind };
   /**
+   * ADR 0390: `AggregateScopeOptions.excludeProvenanceKinds`（非空）が渡されたときだけ、
+   * **その kind の行のうち、スコープ内（`totalInScope` の内側）で索引済み
+   * （`embeddingStatus = 'ready'`）のものの件数**。`recall()` はこれを `eligible`
+   * （= `totalInScope` − `notIndexed` 合計 = 索引済みの行数）から引き、段1が ANN から除外した
+   * 行を分母から外す。「索引済み」の定義を `notIndexed` と揃えてあるので、
+   * 引く量は ANN が本来返しうる除外行の数と一致する。
+   *
+   * **任意フィールドである**（`filteredTaxonomy?` と同じ理由）。返さない adapter・除外を
+   * 渡さない呼び出しでは省かれ、`recall()` は今日と同じ判定に倒れる。
+   * `totalInScope`・`groups`・`filtered*` の意味は動かさない。
+   */
+  excludedProvenanceIndexedCount?: number;
+  /**
    * 目次帯（`IndexBand.digestBand`）に載せる候補（スコープ内 かつ
    * `AggregateScopeOptions.digestBand.excludeMemoryIds` に含まれないもの）を、
    * 決定的な順序で最大 `digestBand.limit` 件。`aggregateScope` の呼び出しで

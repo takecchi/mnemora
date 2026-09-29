@@ -4,6 +4,7 @@ import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
+import type { ProvenanceKind } from "../provenance.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import type {
   NewRecallRecord,
@@ -325,6 +326,17 @@ export interface AggregateScopeOptions {
      */
     excludeMemoryIds: readonly MemoryId[];
   };
+  /**
+   * ADR 0390: 段1の ANN から除外した `provenance.kind`（`RecallQuery.excludeProvenanceKinds`）。
+   * 渡すと、`ScopeAggregate.excludedProvenanceIndexedCount`（除外される kind で、スコープ内の
+   * 索引済みの行の数）を返してよい。**任意の口であり、`totalInScope`・`groups`・`filtered*`・
+   * `digests` の意味は変えない**（除外行もそれらには数えたまま）。
+   *
+   * **`undefined` と空配列 `[]` はどちらも no-op**（欄を返さない）——
+   * `VectorFilter.excludeProvenanceKinds` と同じ作法。この口を知らない adapter は無視してよく、
+   * そのとき `recall()` は今日と同じ判定（除外指定では ANN の取りこぼしを判定しない）に倒れる。
+   */
+  excludeProvenanceKinds?: readonly ProvenanceKind[];
 }
 
 /**

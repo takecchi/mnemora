@@ -6,6 +6,7 @@ import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { heuristicTokenCounter } from "../heuristic-token-counter.js";
 import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
+import type { Provenance } from "../provenance.js";
 import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { RecallOutputValidationError } from "../recall-output-validation.js";
@@ -2701,7 +2702,7 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
     });
   }
 
-  const consolidated = { kind: "consolidated", sources: ["a", "b"] } as const;
+  const consolidated: Provenance = { kind: "consolidated", sources: ["a", "b"] };
 
   function annDetail(result: RecallResult) {
     return result.explain.stages.find(
@@ -2809,7 +2810,7 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
   });
 
   it("対照3（除外指定なしは変わらない）: excludeProvenanceKinds 省略・空配列では、欄の有無に関わらず結果が一致する", async () => {
-    for (const excludeProvenanceKinds of [undefined, []] as const) {
+    for (const excludeProvenanceKinds of [undefined, [] as never[]]) {
       const outcomes: unknown[] = [];
       for (const stripField of [false, true]) {
         const runtime = await seedQ2(stripField);
