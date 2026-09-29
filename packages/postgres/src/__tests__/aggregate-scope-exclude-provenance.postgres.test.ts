@@ -117,4 +117,37 @@ describe("PostgresMemoryStore.aggregateScope: options.excludeProvenanceKinds（A
     expect(result.memories).toHaveLength(3);
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
   });
+
+  it("recall を通した skip（ADR 0390 の続き）: scopeAggregate: 'skip' で ANN の段が走ったとき annReachability: 'unknown' を名乗り、既定（exact）では名乗らない", async () => {
+    const { db } = await getTestClient();
+    for (let i = 0; i < 3; i += 1) await put();
+    const runtime = createRuntime({
+      memoryStore,
+      vectorStore,
+      eventStore: new PostgresEventStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+      llmProvider: {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      embeddingProvider: { space: TEST_EMBEDDING_SPACE, embed: async () => [] },
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    const annDetail = (r: Awaited<ReturnType<typeof runtime.recall>>) =>
+      r.explain.stages.find(
+        (s) => s.stage === "candidate_generation" && s.detail?.channel === "ann",
+      )?.detail;
+
+    const skipped = await runtime.recall(ctx, { vector: [1, 0, 0], scopeAggregate: "skip" });
+    expect(skipped.index.countKind).toBe("unknown");
+    expect(annDetail(skipped)).toMatchObject({ annReachability: "unknown" });
+
+    const exact = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    expect(Object.keys(annDetail(exact) ?? {})).not.toContain("annReachability");
+  });
 });

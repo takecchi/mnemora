@@ -2678,12 +2678,17 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
 
   function buildRuntimeWith(
     stores: ReturnType<typeof createFakeRuntimeStores>,
-    opts: { vectorStore?: VectorStore; stripField?: boolean } = {},
+    opts: {
+      vectorStore?: VectorStore;
+      stripField?: boolean;
+      wrapMemoryStore?: (store: typeof stores.memoryStore) => typeof stores.memoryStore;
+    } = {},
   ) {
+    const baseStore = opts.stripField
+      ? (withoutExcludedProvenanceField(stores.memoryStore) as typeof stores.memoryStore)
+      : stores.memoryStore;
     return createRuntime({
-      memoryStore: (opts.stripField
-        ? withoutExcludedProvenanceField(stores.memoryStore)
-        : stores.memoryStore) as typeof stores.memoryStore,
+      memoryStore: opts.wrapMemoryStore ? opts.wrapMemoryStore(baseStore) : baseStore,
       outboxStore: stores.outboxStore,
       vectorStore: opts.vectorStore ?? stores.vectorStore,
       eventStore: stores.eventStore,
@@ -2826,5 +2831,109 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
       }
       expect(outcomes[0]).toEqual(outcomes[1]);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // scopeAggregate: "skip"（ADR 0384 案C の決定7、ADR 0390 の続き）
+  //
+  // "skip" では `aggregateScope` が件数を数えない（`countKind: 'unknown'`・totalInScope 0）ので、
+  // `ann_unreached` の母数 `eligible` が 0 になり、ANN が scope の候補を取りこぼしていても
+  // 鳴らない——しかも「判定していない」と名乗る診断も出なかった。ANN の段が走っていて件数が
+  // 取れないときは、ANN の stage detail に `annReachability: "unknown"` を足して名乗る。
+  // 既定（"exact"）と、"skip" を無視して exact を返す adapter の出力は1バイトも変えない。
+  //
+  // core の Fake は `scopeAggregate` を実装していない（常に exact）ので、"skip" の返り値の形
+  // （ADR 0384: countKind 'unknown'、件数 0）をここで模す。
+  // -------------------------------------------------------------------------
+  function skippingAggregateScope(
+    memoryStore: ReturnType<typeof createFakeRuntimeStores>["memoryStore"],
+    honorSkip: boolean,
+  ) {
+    return new Proxy(memoryStore, {
+      get(target, prop, receiver) {
+        const value: unknown = Reflect.get(target, prop, receiver);
+        if (prop === "aggregateScope" && typeof value === "function") {
+          return async (...args: unknown[]) => {
+            const aggregate = (await (value as (...a: unknown[]) => Promise<object>).apply(
+              target,
+              args,
+            )) as Record<string, unknown>;
+            const opts = args[2] as { scopeAggregate?: string } | undefined;
+            if (!honorSkip || opts?.scopeAggregate !== "skip") return aggregate;
+            const zero = { count: 0, countKind: "unknown" };
+            return {
+              ...aggregate,
+              groups: [],
+              totalInScope: 0,
+              countKind: "unknown",
+              notIndexed: { pending: zero, failed: zero, skipped: zero },
+              filteredArchived: zero,
+              filteredSuperseded: zero,
+              filteredForgotten: zero,
+              filteredPeriod: zero,
+              filteredExpired: zero,
+              filteredNotYetValid: zero,
+              filteredTaxonomy: zero,
+              filteredDecayed: zero,
+              digestEligible: zero,
+            };
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  async function seedSkipRuntime(honorSkip: boolean) {
+    const stores = createFakeRuntimeStores();
+    // ANN の届く範囲が狭い（reach=2）索引。scope には5件あるので、exact なら取りこぼしを名乗れる形。
+    for (let i = 0; i < 5; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+    return buildRuntimeWith(stores, {
+      vectorStore: new ReachLimitedPostFilterVectorStore(stores.vectorStore, 2, new Set()),
+      wrapMemoryStore: (store) => skippingAggregateScope(store, honorSkip),
+    });
+  }
+
+  it("skip 1（判定できないと名乗る）: scopeAggregate: 'skip' で ANN の段が走ったとき、stage detail に annReachability: 'unknown' が付く", async () => {
+    const runtime = await seedSkipRuntime(true);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], scopeAggregate: "skip" });
+
+    expect(result.index.countKind).toBe("unknown");
+    expect(annDetail(result)).toMatchObject({ channel: "ann", annReachability: "unknown" });
+    // 母数が無いので、鳴らない・下限の診断キーも立たない（従来どおり）。名乗るのは annReachability だけ。
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+    expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReturnedFewerThanReachable");
+  });
+
+  it("skip 2（既定は変わらない）: scopeAggregate を渡さない・'exact' を渡すときは annReachability を足さない", async () => {
+    for (const query of [{}, { scopeAggregate: "exact" as const }]) {
+      const runtime = await seedSkipRuntime(true);
+      const result = await runtime.recall(ctx, { vector: [1, 0], ...query });
+      expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReachability");
+      // exact なら従来どおり取りこぼしを名乗る（対照）。
+      expect(annDetail(result)).toMatchObject({ annReturnedFewerThanReachable: true });
+    }
+  });
+
+  it("skip 3（skip を無視する adapter）: 'skip' を頼んでも exact が返ってきたら annReachability は付かず、従来の判定になる", async () => {
+    const runtime = await seedSkipRuntime(false);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], scopeAggregate: "skip" });
+
+    expect(result.index.countKind).toBe("exact");
+    expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReachability");
+    expect(annDetail(result)).toMatchObject({ annReturnedFewerThanReachable: true });
+  });
+
+  it("skip 4（ANN の段が走らないとき）: クエリに埋め込む内容が無ければ、skip でも annReachability は付かない", async () => {
+    const runtime = await seedSkipRuntime(true);
+
+    const result = await runtime.recall(ctx, { scopeAggregate: "skip" });
+
+    const keys = result.explain.stages.flatMap((s) => Object.keys(s.detail ?? {}));
+    expect(keys).not.toContain("annReachability");
   });
 });
