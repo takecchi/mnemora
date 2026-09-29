@@ -2199,7 +2199,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
     attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     basisLost: z.ZodOptional<z.ZodLiteral<true>>;
 }, z.core.$strip>;
-export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
+export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "association" | "budget_truncation" | "index_band" | "record";
 export interface StageTrace {
     stage: RecallStageName;
     executed: boolean;
@@ -2211,6 +2211,7 @@ export declare const StageTraceSchema: z.ZodObject<{
         candidate_generation: "candidate_generation";
         rescore: "rescore";
         index_band: "index_band";
+        association: "association";
         scope: "scope";
         contradiction_resolution: "contradiction_resolution";
         budget_truncation: "budget_truncation";
@@ -2616,6 +2617,7 @@ export declare const RecallResultSchema: z.ZodObject<{
                 candidate_generation: "candidate_generation";
                 rescore: "rescore";
                 index_band: "index_band";
+                association: "association";
                 scope: "scope";
                 contradiction_resolution: "contradiction_resolution";
                 budget_truncation: "budget_truncation";
