@@ -5,7 +5,10 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
-import { PostgresTrigramLexicalStore, probeTrigramLexicalSupport } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  probeTrigramLexicalSupport,
+} from "../trigram-lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
