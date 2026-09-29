@@ -1,6 +1,6 @@
 {
   "name": "@mnemora/bullmq",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "BullMQ で runtime.tick() を駆動する役。outbox は Postgres のまま正本——BullMQ はジョブの中身を持たず、「いま tick して」の合図だけを運ぶ（docs/decisions/0325-bullmq-tick-driver.md）。",
   "license": "MIT",
