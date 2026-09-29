@@ -353,7 +353,7 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: true,
     });
   },
-  // [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+  // [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
   // （Issue #338）: `advanceActivitySeq`（上）と同じ形——`tenant_subject_activity` は
   // `MemoryStore.createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
   // 経由でだけ進む。

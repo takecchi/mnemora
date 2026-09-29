@@ -33,7 +33,12 @@ import type { ProviderMode } from "./providers.js";
 
 export interface TimeTermPairMemberJson {
   rank: number;
-  total: number;
+  /**
+   * `affinityMeasured: false`（連想枠経由。Issue #548 方向2、
+   * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）なら
+   * `null`（`total` という欄自体が無い——比較可能ではないことを表す）。
+   */
+  total: number | null;
   /** ANN 経由でない場合は `undefined` になりうる欄（`ScoreBreakdown.similarity`）を `null` に写す。 */
   similarity: number | null;
   decay: number;
@@ -85,10 +90,13 @@ function memberJson(member: PairMember | null): TimeTermPairMemberJson | null {
   if (member === null) {
     return null;
   }
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total/similarity という
+  // 欄自体が無い——両方とも null に写す。
+  const score = member.score;
   return {
     rank: member.rank,
-    total: member.score.total,
-    similarity: member.score.similarity ?? null,
+    total: score.affinityMeasured === false ? null : score.total,
+    similarity: score.affinityMeasured === false ? null : (score.similarity ?? null),
     decay: member.score.decay,
     tagMatch: member.score.tagMatch,
     freshness: member.score.freshness,

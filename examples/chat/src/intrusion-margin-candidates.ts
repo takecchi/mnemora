@@ -11,6 +11,7 @@ import {
 import type { CorrectionCandidateReport } from "./correction-candidate-arm.js";
 import { resolveExternalId } from "./provenance-trace.js";
 import type { ProviderMode } from "./providers.js";
+import { requireMeasuredTotal } from "./recalled-score.js";
 
 /**
  * ⚠ **この輸出は re-export である**——`maxNonProtectedScore`/`computeProtectionMargin`
@@ -202,17 +203,23 @@ export async function measureIntrusionMarginCandidates(
     const protectedIds = c.protectedFacts.map((_, i) => correctionProtectedExternalId(c.id, i));
     const topExternalId = resolvedExternalIds[0] ?? null;
     const protectedAtTop = topExternalId !== null && protectedIds.includes(topExternalId);
+    // Issue #548 方向2 / ADR 0352: minProtectedFactScore/maxNonProtectedScore は
+    // `{ score: { total: number } }[]` という純関数の形をそのまま保つ（歯を書き換えない）。
+    // association: null（上）なので affinityMeasured は必ず true——ここで total を取り出す。
+    const scoredMemories = result.memories.map((m) => ({
+      score: { total: requireMeasuredTotal(m.score) },
+    }));
     const protectedFactScore = minProtectedFactScore(
-      result.memories,
+      scoredMemories,
       resolvedExternalIds,
       protectedIds,
     );
     const topNonProtectedScore = maxNonProtectedScore(
-      result.memories,
+      scoredMemories,
       resolvedExternalIds,
       protectedIds,
     );
-    const topScore = topMemory?.score.total ?? null;
+    const topScore = topMemory === undefined ? null : requireMeasuredTotal(topMemory.score);
     const abstained = topMemory === undefined;
 
     const priorOutcome = reportByCaseId.get(c.id);

@@ -169,7 +169,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity` に、このテナントの行が1本でもあるか。
    * **`EXISTS` だけを見る**——`activity_seq` の値そのものは読まない（呼び出し側は
    * `getSubjectActivitySeqs` を別途呼ぶ）。主キーの先頭列（`tenant_id`）で引けるので
@@ -183,7 +183,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity.activity_seq`（`S_x`）を、渡した
    * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略する
    * （`readSubjectActivitySeqs`（core）が `0` へ倒す）。

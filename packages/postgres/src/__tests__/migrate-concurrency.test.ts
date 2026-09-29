@@ -176,7 +176,7 @@ describe("runMigrations の排他（advisory lock）", () => {
 
     // DB は完全な状態に落ち着いている（11テーブル・台帳1行）。中途半端な状態が残らない。
     // Issue #201 / ADR 0318: migrations/0020_taxonomy_labels.sql が labels/memory_labels
-    // を足したため 8→10 になった（回帰ではない）。ADR 0352 / Issue #338:
+    // を足したため 8→10 になった（回帰ではない）。ADR 0353 / Issue #338:
     // migrations/0024_tenant_subject_activity.sql が tenant_subject_activity を
     // 足したため 10→11 になった（同じく回帰ではない）。
     const tables = await pool.query<{ tablename: string }>(

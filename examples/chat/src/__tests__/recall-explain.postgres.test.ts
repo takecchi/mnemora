@@ -54,8 +54,14 @@ describe("examples/chat: explain（Runtime.getRecall、本物の Postgres）", (
         expect(fromGetRecall).toEqual(fromRecall);
 
         // スコア内訳つきで読み戻せていること（各項の型・retrievedVia の値域）。
+        // Issue #548 方向2 / ADR 0352: total/similarity/lexicalMatch は affinityMeasured
+        // が false（連想枠・必須の同伴取得）なら欄自体が無い——association を明示的に
+        // 止めていないこの recall では実際に混ざりうる。decay/tagMatch/freshness/strength
+        // はどちらの形にも共通してあるので、無条件に検査する。
         for (const m of returned.memories) {
-          expect(typeof m.score.total).toBe("number");
+          if (m.score.affinityMeasured !== false) {
+            expect(typeof m.score.total).toBe("number");
+          }
           expect(typeof m.score.decay).toBe("number");
           expect(typeof m.score.tagMatch).toBe("number");
           expect(typeof m.score.freshness).toBe("number");

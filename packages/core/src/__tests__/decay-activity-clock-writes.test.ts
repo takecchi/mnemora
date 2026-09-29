@@ -165,7 +165,7 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
   });
 
   it(
-    "[ADR 0352] ctx.subjectId 付きで observe すると、decayBaseSeq は T + S_x になる" +
+    "[ADR 0353] ctx.subjectId 付きで observe すると、decayBaseSeq は T + S_x になる" +
       "（S_x は subject 単位のカウンタ。T には触れていなくても S_x だけで進む）",
     async () => {
       const { runtime, stores } = buildRuntime(

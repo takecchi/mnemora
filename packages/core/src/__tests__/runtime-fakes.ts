@@ -23,7 +23,7 @@ import type {
 } from "../interfaces/tenant-settings-store.js";
 import type { VectorStore, VectorFilter, VectorHit } from "../interfaces/vector-store.js";
 import type { LexicalStore, LexicalFilter, LexicalHit } from "../interfaces/lexical-store.js";
-import type { NotIndexedReason, RecallResult } from "../recall.js";
+import type { NotIndexedReason, RecallResult, RecalledScore, ScoreBreakdown } from "../recall.js";
 import { FILTERED_CONDITION_SCOPE_RELATION, RecallResultSchema } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import { isStrengthInRange, MAX_STRENGTH } from "../memory.js";
@@ -215,7 +215,7 @@ class FakeBackingStore {
    */
   activitySeq = new Map<string, number>();
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity` 相当。`tenantId` → `subjectId` → `S_x`
    * の2段の `Map`。`FakeMemoryStore.createRecall`（書く側）と
    * `FakeTenantSettingsStore.getSubjectActivitySeqs`/`hasSubjectActivityCounters`
@@ -261,7 +261,7 @@ class FakeBackingStore {
 function isDecayedForScope(
   memory: Pick<Memory, "decayFloorAt" | "decayFloorSeq" | "subjectId">,
   scope: RecallScope,
-  // ADR 0352（Issue #338）: このテナントの subject 単位カウンタ（`Map<subjectId, S_x>`）。
+  // ADR 0353（Issue #338）: このテナントの subject 単位カウンタ（`Map<subjectId, S_x>`）。
   // `scope.decayFloorSeqUsesSubjectCounters` が true のときだけ参照する。
   subjectActivitySeqByTenant: Map<string, number> | undefined,
 ): boolean {
@@ -1406,7 +1406,7 @@ export class FakeMemoryStore implements MemoryStore {
       const current = this.backing.activitySeq.get(ctx.tenantId) ?? 0;
       this.backing.activitySeq.set(ctx.tenantId, current + 1);
     } else if (
-      // ADR 0352（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
+      // ADR 0353（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
       typeof record.advanceActivityClock === "object" &&
       record.advanceActivityClock !== null &&
       record.advanceActivityClock.scope === "subject"
@@ -1535,7 +1535,7 @@ export class FakeMemoryStore implements MemoryStore {
     // 同じ形に揃える——境界の非対称（ゲートは狭義 `>`、掃引は境界を含む `<=`）を
     // 1バイトも変えずに写す。`'either'` は AND（両方の軸で沈んでいるものだけ掃く）。
     const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
-    // ADR 0352（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
+    // ADR 0353（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
     // その Memory の subjectId に対応する `S_x` を足す（postgres 側
     // `activityFloorSeqDeadCondition` と同じ式）。
     const subjectActivitySeqByTenant = this.backing.subjectActivitySeq.get(ctx.tenantId);
@@ -2268,7 +2268,7 @@ export class FakeVectorStore implements VectorStore {
       const seqAxisAfter = opts.filter.decayFloorSeqAfter;
       const wallAlive =
         wallAxisAfter === undefined ? undefined : memory.decayFloorAt > wallAxisAfter;
-      // ADR 0352（Issue #338）: `decayFloorSeqUsesSubjectCounters` が true のときだけ、
+      // ADR 0353（Issue #338）: `decayFloorSeqUsesSubjectCounters` が true のときだけ、
       // この行の subjectId に対応する `S_x` を足す（postgres 側
       // `activityFloorSeqAliveCondition` と同じ式）。
       const effectiveSeqAxisAfter =
@@ -2884,7 +2884,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `backing.subjectActivitySeq` に、このテナントの行が1本でもあるか。
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
@@ -2894,7 +2894,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `backing.subjectActivitySeq` から、渡した `subjectIds` ぶんを
    * まとめて読む。行が無い `subjectId` はキーを省略する。
    */
@@ -3047,4 +3047,23 @@ export function checkRecallResultContract(result: RecallResult): string[] {
     if ("count" in o && o.count === 0) problems.push(`${o.kind} の count が 0`);
   }
   return problems;
+}
+
+/**
+ * `RecalledMemory.score`/`RecallRecordMemory.score` は `ScoreBreakdown |
+ * AffinityUnmeasuredScore` の判別可能な union（Issue #548 方向2、
+ * [ADR 0352](../../../../docs/decisions/0352-association-score-without-total.md)）。
+ * `total`/`similarity`/`lexicalMatch` を読む歯は、affinity を測っている（`"ann"`/`"lexical"`
+ * 経由で、`affinityMeasured` が `false` でない）ことをテストの入力自体から知っているが、
+ * 型はそれを知らない——ここで assert し、`ScoreBreakdown` 側へ絞り込む。
+ * `affinityMeasured === false` なら、その歯の前提（affinity を測る経路のはず）が崩れている
+ * ということなので、握り潰さず投げる。
+ */
+export function assertAffinityMeasured(score: RecalledScore): asserts score is ScoreBreakdown {
+  if (score.affinityMeasured === false) {
+    throw new Error(
+      "assertAffinityMeasured: score.affinityMeasured is false (AffinityUnmeasuredScore) — " +
+        "this test expected a measured (ann/lexical) score with total/similarity/lexicalMatch",
+    );
+  }
 }

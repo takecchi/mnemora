@@ -6,8 +6,8 @@ import type {
   RecallRecord,
   RecallRecordMemory,
   RecallRecordReturnedMemories,
+  RecalledScore,
   Runtime,
-  ScoreBreakdown,
 } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
 
@@ -157,20 +157,28 @@ export async function runRecallExplainDemo(
   };
 }
 
-/** `ScoreBreakdown` の全項を、任意項は在るときだけ並べる1行に整形する。 */
-function formatScoreBreakdown(score: ScoreBreakdown): string {
+/**
+ * `RecalledScore`（`ScoreBreakdown | AffinityUnmeasuredScore`）の全項を、任意項は在るときだけ
+ * 並べる1行に整形する。**2026-09-29（Issue #548 方向2、
+ * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）:**
+ * `affinityMeasured: false`（連想枠・必須の同伴取得）は `similarity`/`lexicalMatch`/`total`
+ * を欄として持たない——その3つを省いて表示する（比較可能でない値を作らない）。
+ */
+function formatScoreBreakdown(score: RecalledScore): string {
   const parts: string[] = [];
-  if (score.similarity !== undefined) {
-    parts.push(`similarity=${score.similarity.toFixed(3)}`);
-  }
-  if (score.lexicalMatch !== undefined) {
-    parts.push(`lexicalMatch=${score.lexicalMatch.toFixed(3)}`);
+  if (score.affinityMeasured !== false) {
+    if (score.similarity !== undefined) {
+      parts.push(`similarity=${score.similarity.toFixed(3)}`);
+    }
+    if (score.lexicalMatch !== undefined) {
+      parts.push(`lexicalMatch=${score.lexicalMatch.toFixed(3)}`);
+    }
   }
   parts.push(`decay=${score.decay.toFixed(3)}`);
   parts.push(`tagMatch=${score.tagMatch.toFixed(3)}`);
   parts.push(`freshness=${score.freshness.toFixed(3)}`);
   parts.push(`strength=${score.strength.toFixed(3)}`);
-  parts.push(`total=${score.total.toFixed(3)}`);
+  parts.push(score.affinityMeasured === false ? "total=n/a" : `total=${score.total.toFixed(3)}`);
   return parts.join(" ");
 }
 

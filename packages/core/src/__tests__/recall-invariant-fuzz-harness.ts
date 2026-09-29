@@ -343,6 +343,13 @@ export async function runOps(
       if (rm.contestedWith !== undefined && !returned.has(rm.contestedWith))
         v("I8-contestedWith", rm.memoryId);
       const s = rm.score;
+      // Issue #548 方向2 / ADR 0352: affinityMeasured: false の score（AffinityUnmeasuredScore）
+      // は total/similarity/lexicalMatch を欄として持たない——I5 が比べる「公開された total」
+      // そのものが無いので、この形の記憶は I5 の検査対象から外す（内部では今日も同じ積で
+      // total を計算しているが、その値は返り値に出ない。`toRecalledScore` の doc 参照）。
+      if (s.affinityMeasured === false) {
+        continue;
+      }
       const affinity =
         s.lexicalMatch === undefined
           ? (s.similarity ?? 1)
@@ -513,7 +520,14 @@ export async function runOps(
           lastRecall = r;
           trace.push(
             JSON.stringify({
-              m: r.memories.map((x) => [x.memoryId, x.retrievedVia, x.score.total]),
+              // Issue #548 方向2 / ADR 0352: affinityMeasured: false の score には total が
+              // 無い——I9（決定性）の指紋としては null で揃える（無いことも決定的なので、
+              // トレースの一貫性には影響しない）。
+              m: r.memories.map((x) => [
+                x.memoryId,
+                x.retrievedVia,
+                x.score.affinityMeasured === false ? null : x.score.total,
+              ]),
               o: r.omitted,
               i: r.index,
             }),

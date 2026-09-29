@@ -697,7 +697,7 @@ n1 = await tenantSettingsStore.getActivitySeq(ctx)   // t1 の時点
 返らなくなる。** また、`recall()` だけでは強化されない（強化は使用報告でだけ起きる）。
 回数はテナント合計で数える（別 subject に絞った recall でも進む）。
 
-**⚠ 2026-09-29 追記（[ADR 0352](./decisions/0352-activity-counting-per-call.md)、
+**⚠ 2026-09-29 追記（[ADR 0353](./decisions/0353-activity-counting-per-call.md)、
 [Issue #338](https://github.com/takecchi/mnemora/issues/338)）: 上の「限界」2 は、もう実態ではない。**
 「`subject` 単位のカウンタにする変種は、ADR 0165『これが覆るとしたら』1 が『オーナーの判断を要する
 種類の分岐』と明記しており、本追記では踏み込まない」と書いていたが、**オーナーが答えた
@@ -716,7 +716,7 @@ n1 = await tenantSettingsStore.getActivitySeq(ctx)   // t1 の時点
   を選んだ呼び出しに限って解消されている。既定 `"tenant"` の呼び出ししかしていないテナントには、
   この追記より前と1バイトも変わらない挙動が残る（`TenantSettingsStore.hasSubjectActivityCounters?` が
   `false` のまま）。
-- 詳細・保守操作への配線・引き受けた負債は ADR 0352 を見ること。
+- 詳細・保守操作への配線・引き受けた負債は ADR 0353 を見ること。
 
 ---
 

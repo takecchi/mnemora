@@ -6,6 +6,7 @@ import {
   runCorrectionDemo,
 } from "../correction-demo.js";
 import { CORRECTION_SCENARIO } from "../correction-scenario.js";
+import { requireMeasuredTotal } from "../recalled-score.js";
 import { createExampleRuntime } from "../runtime-factory.js";
 import {
   closeTestClient,
@@ -135,7 +136,12 @@ describe("examples/chat: correction（markContested → resolveContested、本�
         (m) => m.memoryId === result.chosenId,
       );
       expect(chosenInRecall).toBeDefined();
-      expect(typeof (chosenInRecall as RecallRecordMemory).score.total).toBe("number");
+      // Issue #548 方向2 / ADR 0352: score.total は affinityMeasured: false（連想枠経由）
+      // なら欄自体が無い。この訂正デモの候補は限定的なシナリオ本文から ann 経由で
+      // 見つかるはず——`requireMeasuredTotal` は違えば投げる（握り潰さない）。
+      expect(typeof requireMeasuredTotal((chosenInRecall as RecallRecordMemory).score)).toBe(
+        "number",
+      );
     } finally {
       await handle.close();
     }

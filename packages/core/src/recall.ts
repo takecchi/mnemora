@@ -1272,6 +1272,71 @@ export const ScoreBreakdownSchema = z.object({
   affinityMeasured: z.boolean().optional(),
 }) satisfies z.ZodType<ScoreBreakdown>;
 
+/**
+ * 連想枠・必須の同伴取得（段3・段3.5とも、`retrievedVia: "mandatory_companion"` /
+ * `"association"`）が返す記憶の `score`（Issue #548 方向2、
+ * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+ *
+ * **`ScoreBreakdown` との違いは、`total`・`similarity`・`lexicalMatch` を持たないことだけ**
+ * ——この3つは「クエリとの関連度（affinity）」を前提にした量であり、affinity を測っていない
+ * 候補（`affinityMeasured: false`）ではそもそも計算に使った実測値が無い（`similarity`/
+ * `lexicalMatch` を渡さずに `defaultScoringStrategy` を呼んでいるため、`affinity` は中立の
+ * `1` に退化し、`total` はその退化した値を含んだまま `decay`/`tagMatch`/`freshness`/
+ * `strength` の積になる——他の記憶の `total` と比較すると、遠ざかったはずの記憶が
+ * 遠ざかる前より高く見えることがある。ADR 0246「⛔ これが閉じないもの」2、Issue #548）。
+ *
+ * **`affinityMeasured: false` は常にこのリテラルで、判別の鍵である**——
+ * `RecalledMemory.score` / `RecallRecordMemory.score` は
+ * `ScoreBreakdown | AffinityUnmeasuredScore` の判別可能な union であり、
+ * `score.affinityMeasured === false` で絞り込むとこちらの型になる
+ * （`score.affinityMeasured !== false` なら `ScoreBreakdown` のまま——`true` のときは
+ * もちろん、`undefined`（`ScoringStrategy` を自作していて欄を埋めていない場合。
+ * ADR 0282「設計問2」）のときも安全側に `ScoreBreakdown` 側へ倒す。**`total` を
+ * 落とすのは、affinity を測っていないと明示された記憶だけ**）。
+ *
+ * `decay`/`tagMatch`/`freshness`/`strength` は `ScoreBreakdown` と同じ意味・同じ値
+ * （`defaultScoringStrategy` は内部では常に4項＋`total` を計算しており、この型は
+ * その計算結果から `total`/`similarity`/`lexicalMatch` を落として返すだけ——**内部の
+ * 順位付け（`recall-runtime.ts` の `rankKey` や段2の並び）は `total` を持つ内部表現の
+ * ままであり、1バイトも変わらない。変わるのは呼び出し側に返す形だけである**）。
+ */
+export interface AffinityUnmeasuredScore {
+  /** 常に `false`（判別の鍵）。 */
+  affinityMeasured: false;
+  /** 減衰の係数。{@link ScoreBreakdown.decay} と同じ意味。 */
+  decay: number;
+  /** タグの一致の係数。{@link ScoreBreakdown.tagMatch} と同じ意味。 */
+  tagMatch: number;
+  /** 鮮度の係数。{@link ScoreBreakdown.freshness} と同じ意味。 */
+  freshness: number;
+  /** 候補の Memory の `strength`。{@link ScoreBreakdown.strength} と同じ意味。 */
+  strength: number;
+}
+
+/** `AffinityUnmeasuredScore` の zod スキーマ（型と揃えてある）。 */
+export const AffinityUnmeasuredScoreSchema = z.object({
+  affinityMeasured: z.literal(false),
+  decay: z.number(),
+  tagMatch: z.number(),
+  freshness: z.number(),
+  strength: z.number(),
+}) satisfies z.ZodType<AffinityUnmeasuredScore>;
+
+/**
+ * `RecalledMemory.score` / `RecallRecordMemory.score` の型
+ * （Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+ *
+ * **判別の鍵は `affinityMeasured`。**`false` なら {@link AffinityUnmeasuredScore}
+ * （`total` を持たない）、それ以外（`true`/`undefined`）なら {@link ScoreBreakdown}
+ * （`total` を持つ）。`ScoringStrategy`（公開の拡張点、`strategies/scoring.ts`）の
+ * 戻り値型はこの union ではなく `ScoreBreakdown` のまま変えていない——変換は
+ * `recall-runtime.ts` が、`ScoringStrategy` の結果を返り値へ詰めるときに行う。
+ */
+export type RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore;
+
+/** `RecalledScore` の zod スキーマ。 */
+export const RecalledScoreSchema = z.union([ScoreBreakdownSchema, AffinityUnmeasuredScoreSchema]);
+
 /** `recall()` が返した記憶1件。 */
 export interface RecalledMemory {
   /** 記憶の id。 */
@@ -1366,8 +1431,13 @@ export interface RecalledMemory {
    * `basis` そのもの（`memoryIds`/`observationIds`）は今回も返さない。
    */
   provenanceKind: ProvenanceKind;
-  /** スコアの内訳（{@link ScoreBreakdown}）。 */
-  score: ScoreBreakdown;
+  /**
+   * スコアの内訳。**`affinityMeasured: false` のときは {@link AffinityUnmeasuredScore}**
+   * （`total`/`similarity`/`lexicalMatch` を持たない）、**それ以外（`true`/`undefined`）は
+   * {@link ScoreBreakdown}**（{@link RecalledScore} の doc、Issue #548 方向2、
+   * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+   */
+  score: RecalledScore;
   /**
    * この記憶を実際に述べた人（Issue #579 案D、[ADR 0289](../../../docs/decisions/0289-recalled-memory-speaker-subject.md)）。
    *
@@ -1501,7 +1571,7 @@ export const RecalledMemorySchema = z.object({
   contestedWith: z.string().min(1).optional(),
   associationOf: z.string().min(1).optional(),
   provenanceKind: ProvenanceKindSchema,
-  score: ScoreBreakdownSchema,
+  score: RecalledScoreSchema,
   speaker: z.string().min(1).nullable().optional(),
   subjectId: z.string().min(1).nullable().optional(),
   recordedAt: z.date().optional(),
@@ -1917,7 +1987,7 @@ export interface RecallQuery {
    */
   includeSubjectless?: boolean;
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
    * はできない？」）: `decay_clock` が `'wall'` 以外のテナントで、この recall が
    * どのカウンタを `+1` するかを選ぶ。
@@ -2178,7 +2248,7 @@ export const RecallQuerySchema = z.object({
   includeFullyDecayed: z.boolean().optional(),
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),
-  // ADR 0352（Issue #338）: 数え方は前進の対象だけを選ぶ引数——読み取りには影響しない
+  // ADR 0353（Issue #338）: 数え方は前進の対象だけを選ぶ引数——読み取りには影響しない
   // （`RecallQuery.activityCounting` の doc コメント参照）。
   activityCounting: z.enum(["tenant", "subject"]).optional(),
   // .nullable() は明示的な off（ADR 0337）。.optional() は省略——省略時は
@@ -2247,7 +2317,7 @@ export interface RecallScope {
    */
   decayFloorAnyAxis?: boolean;
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味——
    * `true` なら `decayFloorSeqAfter`（`T`）に、その Memory の `subjectId` に対応する
    * `S_x` を足した値と比較する。`recall-runtime.ts` が
@@ -2479,8 +2549,18 @@ export const RecallResultSchema = z.object({
 export interface RecallRecordMemory {
   /** 返した記憶の id。 */
   memoryId: MemoryId;
-  /** 返した時点のスコアの内訳。 */
-  score: ScoreBreakdown;
+  /**
+   * 返した時点のスコアの内訳。`RecalledMemory.score` と同じ判別（{@link RecalledScore}
+   * の doc、Issue #548 方向2、ADR 0352）。
+   *
+   * ⚠ **本 PR（ADR 0352）より前に永続化された行は、`association` 経由の記憶でも
+   * `total`/`similarity`/`lexicalMatch` を含む `ScoreBreakdown` の形のまま jsonb に
+   * 残っている。**`getRecall` はこの欄を zod で検証せず（ADR 0282 決定4、
+   * `packages/postgres/src/mapping.ts` の `rowToRecallRecord` は単純な cast）、
+   * 書かれた形をそのまま返す——**過去の行を、後から `AffinityUnmeasuredScore` の形に
+   * 作り直すことはしない**（マイグレーション無し。ADR 0352「決定」参照）。
+   */
+  score: RecalledScore;
   /** どの経路で引いたか（`RecalledMemory.retrievedVia` と同じ）。 */
   retrievedVia: RecalledMemory["retrievedVia"];
   /** 同伴として引いたとき、その持ち主の id（`RecalledMemory.companionOf` と同じ）。 */
@@ -2546,7 +2626,7 @@ export interface NewRecallRecord {
    * `T`）を `+1` しなければならない。既定 `false`（省略時は今日と同じ挙動——
    * `activity_seq` は動かない）。
    *
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `{ scope: "subject"; subjectId }` を渡すと、実装は `T` ではなく
    * **`tenant_subject_activity`（`subjectId` の行、`S_x`）を同じトランザクションで
    * `+1` する**（`T` には触れない）。`RecallQuery.activityCounting: "subject"` を

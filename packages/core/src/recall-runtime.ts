@@ -46,6 +46,7 @@ import type {
   RecallResult,
   RecallScope,
   RecalledMemory,
+  RecalledScore,
   ScoreNotComparableOmission,
   ScoreBreakdown,
   StageTrace,
@@ -135,6 +136,34 @@ type ScoredCandidate = {
   associationOf?: MemoryId;
   score: ScoreBreakdown;
 };
+
+/**
+ * `ScoredCandidate.score`（内部表現。段2・段3.5 のどの候補でも常に `total` を持つ
+ * `ScoreBreakdown`）を、呼び出し側へ返す形（`RecalledScore`）へ変換する
+ * （Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+ *
+ * **`affinityMeasured === false` のときだけ `total`/`similarity`/`lexicalMatch` を落とす。**
+ * `true`/`undefined`（`ScoringStrategy` を自作していて欄を埋めていない場合。ADR 0282
+ * 「設計問2」と同じ理由で、区別できない `undefined` は安全側＝`ScoreBreakdown` のまま
+ * 返す）はそのまま返す——**判別子は `affinityMeasured` だけであり、`retrievedVia` では
+ * 判定しない**（`retrievedVia` を判別に使うと、`"mandatory_companion"`（段3・段3.5 の
+ * どちらの必須同伴取得も、今日はどちらも affinity を測っていない——`fetchMandatoryCompanions`
+ * は `similarity`/`lexicalMatch` を一度も渡さない）の一方の経路を取りこぼしうる。
+ * `affinityMeasured` は `defaultScoringStrategy` がその場で計算した実測の合図なので、
+ * 経路をどれだけ増やしても取りこぼさない）。
+ *
+ * ⚠ **内部の順位付けはこの関数を経由しない。**`compareScoredCandidates`・
+ * `partitionByThreshold`・段3.5 の `rankKey`（`hit.similarity * score.total`）は
+ * どれも変換前の `ScoredCandidate.score.total` を直接読んでおり、1バイトも変えていない
+ * ——変換するのは、返り値・永続化する行を組み立てる `finalMemories` の1箇所だけである。
+ */
+function toRecalledScore(score: ScoreBreakdown): RecalledScore {
+  if (score.affinityMeasured !== false) {
+    return score;
+  }
+  const { decay, tagMatch, freshness, strength } = score;
+  return { affinityMeasured: false, decay, tagMatch, freshness, strength };
+}
 
 /**
  * 数値の降順比較で、`NaN`（比較できない値。ADR 0040——ゼロベクトルの cosine 距離）を
@@ -383,7 +412,7 @@ async function fetchMandatoryCompanions(
     halfLifeRecalls: number | null | undefined;
   },
   survivesAttributesFilter: (memory: Memory) => boolean,
-  // ADR 0352: 呼び出し前に、取得した companion の subjectId ぶんの `S_x` を
+  // ADR 0353: 呼び出し前に、取得した companion の subjectId ぶんの `S_x` を
   // 読み込んでおく（`decayScoringExtras` が同期的に `effectiveNowSeqFor` を呼ぶため、
   // ここで先に await する）。`hasSubjectCounters` が false のテナントでは no-op。
   ensureSubjectSeqs: (memories: readonly Memory[]) => Promise<void>,
@@ -467,7 +496,7 @@ export async function runRecall(
       ? undefined
       : await readActivitySeq(deps.tenantSettingsStore, ctx);
 
-  // ADR 0352（Issue #338）: このテナントが subject 単位のカウンタ（`S_x`）を1本でも
+  // ADR 0353（Issue #338）: このテナントが subject 単位のカウンタ（`S_x`）を1本でも
   // 使っているか。既定 'tenant' の呼び出ししかしていないテナントでは false のまま
   // ——'wall' と同じ理由で `tenant_subject_activity` を一度も読まない。
   const hasSubjectCounters: boolean =
@@ -475,11 +504,11 @@ export async function runRecall(
       ? false
       : await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx);
 
-  // ADR 0352: 呼び出しがどのカウンタを前進させるか（読み取りには影響しない——
+  // ADR 0353: 呼び出しがどのカウンタを前進させるか（読み取りには影響しない——
   // `effectiveNowSeqFor` は `activityCounting` を見ない）。
   const activityCounting: "tenant" | "subject" = validatedQuery.activityCounting ?? "tenant";
 
-  // ADR 0352: `subjectId` ごとの `S_x` を必要になった時点でまとめて読むキャッシュ。
+  // ADR 0353: `subjectId` ごとの `S_x` を必要になった時点でまとめて読むキャッシュ。
   // `hasSubjectCounters` が false のテナントでは一度も呼ばれない（`ensureSubjectSeqs`
   // 冒頭の早期リターン）——`tenant_subject_activity` を一度も参照しないという
   // 「決めたこと」の読み側の対。
@@ -501,7 +530,7 @@ export async function runRecall(
   }
 
   /**
-   * ADR 0352: その Memory にとっての「有効ないま」——`T + S_x`（`subjectId` が無い、
+   * ADR 0353: その Memory にとっての「有効ないま」——`T + S_x`（`subjectId` が無い、
    * または `hasSubjectCounters` が false なテナントでは `T` のみ）。**この式は
    * `activityCounting`（前進の対象を選ぶだけの引数）を見ない**——読み取りは常に
    * 実際に進んだ分をそのまま反映する。呼び出し前に `ensureSubjectSeqs` で
@@ -618,7 +647,7 @@ export async function runRecall(
         ? nowSeq
         : undefined,
     decayFloorAnyAxis: decayGateActive && decayClock === "either",
-    // ADR 0352: `decayFloorSeqAfter`（上、T）に、行の subjectId に応じた S_x を
+    // ADR 0353: `decayFloorSeqAfter`（上、T）に、行の subjectId に応じた S_x を
     // 足すかどうか。`hasSubjectCounters` が false のテナントでは常に false——
     // 段1 SQL・aggregateScope・archiveDecayed の全部が、今日どおり T のみの
     // 単一パラメータ比較のままになる（プラン族を変えない、`hasSubjectCounters` の
@@ -679,7 +708,7 @@ export async function runRecall(
   const activityAxisAlive = (memory: Memory): boolean => {
     const floorSeq = memory.decayFloorSeq;
     if (floorSeq === undefined || floorSeq === null) return true;
-    // ADR 0352: 「有効ないま」は T + S_{memory.subjectId}（呼び出し側が事前に
+    // ADR 0353: 「有効ないま」は T + S_{memory.subjectId}（呼び出し側が事前に
     // `ensureSubjectSeqs` でこの memory の subjectId を読み込んでいる前提）。
     const effectiveNow = effectiveNowSeqFor(memory);
     if (effectiveNow === undefined) return true;
@@ -860,7 +889,7 @@ export async function runRecall(
     halfLifeRecalls: number | null | undefined;
   } => ({
     decayClock,
-    // ADR 0352: memory 単位の「有効ないま」（`effectiveNowSeqFor` の doc コメント参照）。
+    // ADR 0353: memory 単位の「有効ないま」（`effectiveNowSeqFor` の doc コメント参照）。
     // 呼び出し側が `ensureSubjectSeqs` でこの memory の subjectId を先に読み込んでいる
     // 前提——このファイル内の呼び出し箇所はすべて `getMany` 直後に読み込んでいる。
     nowSeq: effectiveNowSeqFor(memory),
@@ -1105,7 +1134,7 @@ export async function runRecall(
   const fetchedMemories =
     candidateIds.length > 0 ? await deps.memoryStore.getMany(ctx, candidateIds) : [];
   const memoriesById = new Map(fetchedMemories.map((m) => [m.id, m]));
-  // ADR 0352: この段の `activityAxisAlive`/`decayScoringExtras` が同期的に
+  // ADR 0353: この段の `activityAxisAlive`/`decayScoringExtras` が同期的に
   // `effectiveNowSeqFor` を呼ぶため、必要な subjectId ぶんを先にまとめて読んでおく。
   await ensureSubjectSeqs(fetchedMemories);
 
@@ -1663,7 +1692,7 @@ export async function runRecall(
               )
             : [];
         const associationMemoriesById = new Map(associationMemories.map((m) => [m.id, m]));
-        // ADR 0352: 段1と同じ理由——`decayScoringExtras`/`activityAxisAlive` が同期的に
+        // ADR 0353: 段1と同じ理由——`decayScoringExtras`/`activityAxisAlive` が同期的に
         // `effectiveNowSeqFor` を呼ぶため、先にまとめて読んでおく。
         await ensureSubjectSeqs(associationMemories);
         // ⭐ Issue #402: 席は「アンカー類似度 × decay × tagMatch × freshness × strength」の
@@ -2094,7 +2123,11 @@ export async function runRecall(
         // 出どころが将来変わったら、名乗りも一緒に変わる——countKind の exact が
         // リテラル固定のまま出どころだけ変わって嘘になった件（ADR 0011）の裏返しである。
         provenanceKind: member.memory.provenance.kind,
-        score: member.score,
+        // Issue #548 方向2 / ADR 0352: affinity を測っていない候補（連想枠・必須の同伴取得。
+        // `affinityMeasured === false`）は、比較可能でない `total`/`similarity`/`lexicalMatch`
+        // を持たない形で返す。`member.score`（内部表現）自体は変えない——`toRecalledScore`
+        // の doc コメント参照。
+        score: toRecalledScore(member.score),
         // Issue #579 案D（ADR 0289）: 常に値か null を書く。undefined にもキー省略にも
         // しない——「無い（null）」と「頼まなかった／書き忘れた（undefined）」を実行時に
         // 混ぜないための保証（ADR 0257 の考え方をこの欄に当てたもの）。
@@ -2883,7 +2916,7 @@ export async function runRecall(
       ...(m.companionOf !== undefined ? { companionOf: m.companionOf } : {}),
       ...(m.associationOf !== undefined ? { associationOf: m.associationOf } : {}),
     })),
-    // ADR 0165 決めたこと5 / ADR 0352（Issue #338）: `decay_clock != 'wall'` の
+    // ADR 0165 決めたこと5 / ADR 0353（Issue #338）: `decay_clock != 'wall'` の
     // テナントに限り、この recall がどちらかのカウンタを進める。「1単位 = recall() 1回」
     // ——この呼び出しそのものが1回の recall なので、既定のテナント（'wall'）では
     // false のまま渡り、`tenant_activity`/`tenant_subject_activity` のどちらにも

@@ -45,8 +45,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.2` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`f5ad59f`**（PR #1371）の範囲を
-数えたものである（2026-09-27 の4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から、6回目の棚卸しで `4514cec` から、7回目の棚卸しで `9f58833` から、8回目の棚卸しで `ef03a8f` から、2026-09-28 の9回目の棚卸しで `23f0076` から、10回目の棚卸しで `c6ca5a4` から、11回目の棚卸しで `de8a160` から、12回目の棚卸しで `dcf6ccb` から、13回目の棚卸しで `7d5f944` から、15回目の棚卸しで `a2fb621` から、16回目の棚卸しで `9378719` から、2026-09-29 の17回目の棚卸しで `0d282c1` から、18回目の棚卸しで `86b42b1` から広げた（14回目は直すものが無く、sha を進めなかった）。下の追記4〜追記13 と追記15〜追記18。それより前の棚卸しの経緯は `## [1.0.2]` 節にある）。
+⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`80c79df`**（PR #1382）の範囲を
+数えたものである（2026-09-27 の4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から、6回目の棚卸しで `4514cec` から、7回目の棚卸しで `9f58833` から、8回目の棚卸しで `ef03a8f` から、2026-09-28 の9回目の棚卸しで `23f0076` から、10回目の棚卸しで `c6ca5a4` から、11回目の棚卸しで `de8a160` から、12回目の棚卸しで `dcf6ccb` から、13回目の棚卸しで `7d5f944` から、15回目の棚卸しで `a2fb621` から、16回目の棚卸しで `9378719` から、2026-09-29 の17回目の棚卸しで `0d282c1` から、18回目の棚卸しで `86b42b1` から、19回目の棚卸しで `f5ad59f` から広げた（14回目は直すものが無く、sha を進めなかった。⚠ 19回目の棚卸しの追記は**追記20**である——追記19 は #1376 が足した「保留の解消」に既に使われており、棚卸しの回ではない。下の追記20 に同じ注記がある）。下の追記4〜追記13 と追記15〜追記18・追記20。それより前の棚卸しの経緯は `## [1.0.2]` 節にある）。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -126,6 +126,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 先立って自分でこの節に足した項目である。次回以降の棚卸しは、この項目が既に在ることを
 前提に PR 番号の有無だけ確認すればよい。
 
+**⚠ 2026-09-29 追記20（19回目の棚卸し。`80c79df` まで広げた。⚠ 追記19 は #1376 が足した「保留の解消」であり、棚卸しの回として数えていない——追記15 が追記14 について書いたのと同じ理由で、この回は「19回目の棚卸し」だが追記番号は20である）**: `f5ad59f`…`80c79df` に `main` へ入った PR を first-parent で全部当てた（PR #1372・#1373・#1375・#1374・#1376・#1383・#1381・#1377・#1379・#1382）。18回目の棚卸しの PR #1373 自身と、追記19 を足した PR #1376 自身も範囲に入るが、どちらも CHANGELOG.md・docs（と #1376 は ADR 3本）だけである。
+出荷される6パッケージの利用者に見える振る舞いの変更は次の4本で、どれも各 PR の担当者自身が着地の時点でこの節に項目を足しており（この棚卸しの「PR を全部当てた」手順を経て新規に足したものではない）、この棚卸しではリンクと分類を検証した。棚卸しで直したもの: PR #1382・#1383 の項目に PR 番号を足した（Issue 番号でしか受けていなかった）。分類は変えていない。PR #1374（Issue #1370、`### Changed`）は抽出・consolidate・reflect の system プロンプトに出力言語・話者取り違えの指示を足すもので、Issue・PR 番号とも受けている（非破壊）。PR #1377（Issue #1221、ADR 0350、`### Breaking`）は `@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型を SDK のクラスから自前の構造型へ切り離すもので、Issue・PR・ADR とも受けている——**この節の範囲に入った、確定した破壊的変更**である（下を見よ）。PR #1379（Issue #1211、`### Changed`）は testkit の fixture が `reason`・`actor.id` の NUL・孤立サロゲートを拒むようにするもので、Issue・PR 番号とも受けている（オーナーの回答（ask_human `3f3411c5`）により非破壊と数える）。PR #1383（Issue #1188、ADR 0089 追記、`### Fixed`）は `consolidate()` が、いまの時点で有効期間の外にある記憶を統合元にしないもので、Issue 番号でしか受けていなかったので PR 番号を足した。公開 union `ConsolidateSourceOutcome` に `"expired"`・`"not_yet_valid"` の2値が増えるが、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、`docs/migration-v1.md` の「数え方の規律への追記（2026-09-28）」）ので非破壊と数える。
+PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora/bullmq` を npm の公開対象（`PUBLISH_TARGETS`）に加えるもので、Issue・ADR で受けていた（PR 番号が無かったので足した）。⚠ **`@mnemora/bullmq` はこれで `PUBLISH_TARGETS` に入ったが、まだ一度も publish されておらず（version は `0.0.0` のまま）、この節の前書きの「対象パッケージの公開範囲」（6パッケージ、`v1.0.2` と同じ）はこの棚卸しでは変えていない。**bullmq 自身の `src` はこの範囲で変わっていない（`package.json` の publish 設定だけ）ので、この判断は今回の項目の有無には影響しないが、**bullmq の今後の振る舞いの変更を、この節の対象に含めるかどうかは、次回以降の棚卸しかオーナーの判断へ持ち越す**（このリポジトリでの初判断であり、覆りうる）。
+ほかはこの節に項目として足していない——この節は docs・README・テスト・scripts だけの変更を項目にしない（追記5〜18と同じ慣例）。PR #1372（テストだけ、`local-noise-arm.postgres.test.ts` を群ごとの it に分ける）・PR #1373（18回目の棚卸し自身、`CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md`）・PR #1375（テスト基盤だけ、`runtime-return-contract.ts` ほか）・PR #1376（追記19 そのもの、`CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md`・ADR 3本）・PR #1381（docs のみ、出荷済み `v1.0.0` の release-notes 草稿の削除と参照の訂正）は、どれも出荷パッケージの `src` を触っていない。出荷の `src` を触ったのは上の4本（#1374・#1377・#1379・#1383）だけで、どれも項目がある——この回はコメントだけで `src` を触った出荷 PR が無かったので `transpileModule` の比較は要らない。正の対照として、`git diff --stat f5ad59f..80c79df -- 'packages/*/src/**' ':!**/__tests__/**'` が返す14ファイルすべてを上の4 PR の項目の記述と突き合わせ、すべて説明が付くことを確認した（`packages/core/src/event.ts`・`interfaces/event-store.ts`・`packages/testkit/src/__fixtures__/memory-event-check.ts` は PR #1379、`packages/core/src/extraction.ts`・`strategies/consolidate.ts`・`strategies/reflect.ts` は PR #1374、`packages/core/src/runtime.ts` は PR #1383、`packages/anthropic/src/client-types.ts`・`index.ts`・`llm-provider.ts`・`packages/openai/src/client-types.ts`・`index.ts`・`llm-provider.ts`・`embedding-provider.ts` は PR #1377）。
+公開 API の型の差分（`git diff f5ad59f..80c79df -- scripts/__snapshots__/public-api/`）: `anthropic.d.ts`・`openai.d.ts` は PR #1377 の型置き換え（上の Breaking そのもの）。`core.d.ts` は PR #1383 の `ConsolidateSourceOutcome` への2値追加（非破壊、上のとおり）。`bullmq.d.ts` が新規に増えた——PR #1382 で bullmq が publish 対象へ加わったことで、公開 API の検査の対象に bullmq が初めて入ったためであり、既存の公開面の削除・狭小化ではない。マイグレーションは増えていない（`packages/postgres/migrations/` の差分は空）。出荷される6パッケージの `package.json`・`pnpm-lock.yaml` に差分は無い——`packages/openai/package.json`・`packages/anthropic/package.json` の devDependencies（`openai-latest`・`anthropic-sdk-latest`、PR #1377 の型の互換テスト用）と `pnpm-lock.yaml` の対応する差分は devDependencies だけで、出荷される依存関係ではない。`packages/bullmq/package.json`（`private` を外す・`publishConfig`・`repository`・`prepack`・`ioredis` の range 変更ほか、PR #1382）は、bullmq がこの節の対象6パッケージに入っていないので、この「差分は無い」という言い方の対象外として扱った——変更自体は上の Added の項目に含まれている。
+⟹ **この節の範囲（`v1.0.2`…`80c79df`）で、確定した破壊的変更は1件（PR #1377、Issue #1221）である。**上の「2026-09-29 追記」（`f5ad59f` までの範囲の**外**として書いたもの）と、追記19 の ⟹（「破壊的変更は無い」）は、どちらも書いた時点では正しかったが、この棚卸しで PR #1377 がこの節の範囲に入ったことで、いまの範囲にはもう当てはまらない——書いた時点の記録として書き換えていない。
+
 ### Breaking
 
 - **`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が、SDK の
@@ -160,17 +167,67 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `openai`・`@anthropic-ai/sdk` は引き続き `dependencies` に版を固定して持つ
   （`peerDependencies` にはしない。理由は ADR 0350「決定」3）。
 
+**⚠ 2026-09-29 追記20**: 上の18回分の棚卸しとは別に、`f5ad59f`（18回目が数えた末尾）より後に
+`main` へ入った作業として、`@mnemora/core` に破壊的変更がもう1件確定した（[Issue #548](https://github.com/takecchi/mnemora/issues/548)
+方向2、[ADR 0352](./docs/decisions/0352-association-score-without-total.md)）。上の
+`2026-09-29 追記`（PR #1377、`@mnemora/openai`/`@mnemora/anthropic` の件）と同じ扱い
+——着地に先立って変更を作った本人がこの節に足した項目であり、棚卸しの「PR を全部当てた」
+手順を経て足したものではない。上の `### Breaking` へ2件目の項目として足した（追記19 と番号が
+続けて見えるが、追記19（保留の解消）とは別件である——追記19 は既存12項目の再分類、
+この追記20 は新しい確定1件）。🔴 `f5ad59f` からこの変更が着地するまでの間に他の PR
+（例: PR #1375・#1376・#1379・#1381・#1383）が `main` へ入っているが、それらを1本ずつ
+洗って分類する棚卸しはまだ行っていない。**次回の棚卸しで、この追記20が数えていない
+範囲（`f5ad59f`…この変更の着地点）を通しで数え直すこと。**
+
+- **`@mnemora/core` の `RecalledMemory.score`/`RecallRecordMemory.score`/`CorrectionCandidate.score`
+  の型が `ScoreBreakdown` から `ScoreBreakdown | AffinityUnmeasuredScore`（新設のUnion型、
+  エクスポート名 `RecalledScore`）に変わった**（[Issue #548](https://github.com/takecchi/mnemora/issues/548)
+  方向2、[ADR 0352](./docs/decisions/0352-association-score-without-total.md)）——
+  **`affinityMeasured` が `false` の記憶（連想枠 `retrievedVia: "association"`、および
+  必須の同伴取得 `retrievedVia: "mandatory_companion"`。どちらも段3・段3.5 のどちらの
+  経由でも該当する）の `score` は、`total`/`similarity`/`lexicalMatch` という欄を
+  持たなくなった**（`undefined` になるのではなく、欄自体が無い）。これらの欄を無条件に
+  読んでいる呼び出し側（例: `memory.score.total`）は、この版から型検査に落ちる
+  （実行時は今までも `association`/`mandatory_companion` の `total` は「比較可能ではない」
+  値だった——ADR 0282／Issue #548 の核心。今回は、その事実を型でも表すようにしただけで、
+  順位・既定値・どの記憶が返るかは1ビットも変えていない）。
+  - **`strategies/consolidate.ts` の `computeAffinity(score)` の引数型も
+    `ScoreBreakdown` → `RecalledScore` に変わった**（`RecalledMemory.score` を経由する
+    公開関数のため連鎖する）。**戻り値は1バイトも変わらない**——`affinityMeasured === false`
+    のときに `-Infinity` を返す分岐を早期 return にしただけで、以前も
+    `similarity`/`lexicalMatch` がどちらも無い候補には同じ `-Infinity` を返していた。
+  - **移行の手順（`m.score.affinityMeasured !== false` で絞り込む）**:
+    ```ts
+    const total = m.score.affinityMeasured !== false ? m.score.total : null;
+    ```
+    `affinityMeasured` が `true`/`undefined`（独自の `ScoringStrategy` を実装していて
+    この欄を埋めていない場合を含む——ADR 0282「設計問2」と同じ区別できない `undefined`
+    の扱いを、安全側＝`ScoreBreakdown` へ倒す）なら `m.score.total` が読める。`false`
+    （連想枠・必須の同伴取得）なら `total`/`similarity`/`lexicalMatch` は存在しない
+    ——その `score` は `decay`/`tagMatch`/`freshness`/`strength` だけを持つ。
+  - **`ScoringStrategy`（`strategies/scoring.ts` の公開の拡張点）自体は変えていない**——
+    独自の採点関数を実装している利用者のコードはこの変更の影響を受けない。
+  - **永続化済みの過去の `recalls` 行は影響を受けない**——`getRecall` で読み戻すと、
+    本 ADR より前に書かれた `association`/`mandatory_companion` の行は、書かれた
+    当時の形（`total` を持つ場合はそのまま）で返る。マイグレーションは無い（決定・理由は
+    ADR 0352 決定5）。
+  - **版の付け方について**: `README.md`「版の付け方」は `v1.0.0` 以降の破壊的変更は
+    major を上げるとしているが、この変更は `v1.1.0`（minor）に破壊的変更として入っている。
+    これはオーナーの回答（ask_human 6911db12）（問6、2026-09-28）——逐語
+    「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」——を根拠にした運用であり、
+    詳細は ADR 0352「文脈」節と `README.md`「版の付け方」の追記を見ること。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
-- **`decay_clock` が `'wall'` 以外のテナントで、活動時計の数え方（recall のたびに進むカウンタ）を、呼び出しごとに選べるようになった**（[Issue #338](https://github.com/takecchi/mnemora/issues/338)、オーナーの回答（ask_human 61355570）「呼び出す際の引数で指定できるようにはできない？ これは使用者次第の内容だと思ったんだけど」、[PR #1380](https://github.com/takecchi/mnemora/pull/1380)、[ADR 0352](./docs/decisions/0352-activity-counting-per-call.md)）——以前は、`subject` を絞った recall でもテナント全体のカウンタ（`tenant_activity.activity_seq`）だけが進み、絞っていない別 subject の記憶の忘却も一緒に進んでいた。
+- **`decay_clock` が `'wall'` 以外のテナントで、活動時計の数え方（recall のたびに進むカウンタ）を、呼び出しごとに選べるようになった**（[Issue #338](https://github.com/takecchi/mnemora/issues/338)、オーナーの回答（ask_human 61355570）「呼び出す際の引数で指定できるようにはできない？ これは使用者次第の内容だと思ったんだけど」、[PR #1380](https://github.com/takecchi/mnemora/pull/1380)、[ADR 0353](./docs/decisions/0353-activity-counting-per-call.md)）——以前は、`subject` を絞った recall でもテナント全体のカウンタ（`tenant_activity.activity_seq`）だけが進み、絞っていない別 subject の記憶の忘却も一緒に進んでいた。
   - **`RecallQuery.activityCounting?: "tenant" | "subject"`（既定 `"tenant"`）を足した。** `"subject"` を選び、かつ `ctx.subjectId` を指定した recall は、テナント全体のカウンタではなく、その subject 専用のカウンタ（新テーブル `tenant_subject_activity`）だけを進める。`ctx.subjectId` を指定していない recall では `"tenant"` と同じ扱いになる。**既定 `"tenant"` の呼び出しは、本項目の前後でビット単位で挙動が変わらない**（`tenant_subject_activity` を一度も参照しない）。
   - 忘却ゲート・段2の再スコア・掃引・作成/強化時の起点は、`activityCounting` の値に関わらず、常にその Memory の subject が持つ実際のカウンタ（テナント全体 + subject 単位）を使う。
-  - `findCorrectionCandidates`・`consolidate`/`reflect` の `{ seedMemoryId }` 形にも同じ `activityCounting` を足し、内部で呼ぶ `recall()` へ伝播させた。`{ query }` 形は `RecallQuery` 自体に含められるのでそのまま伝播する。**`tick()` が駆動する自動 consolidate/reflect ジョブには届かない**（既定 `"tenant"` のまま）。
+  - `findCorrectionCandidates`・`consolidate`/`reflect` の `{ seedMemoryId }` 形にも同じ `activityCounting` を足し、内部で呼ぶ `recall()` へ伝播させた。`{ query }` 形は `RecallQuery` 自体に含められるのでそのまま伝播する。**`tick()` が駆動する自動 consolidate/reflect ジョブには届かない**（既定 `"tenant"` のまま——範囲外とした理由は ADR 0353「範囲外」節）。
   - `TenantSettingsStore` に `hasSubjectActivityCounters?`/`getSubjectActivitySeqs?` を、`VectorFilter`/`RecallScope` に `decayFloorSeqUsesSubjectCounters?` を、`ArchiveDecayedOptions` に `usesSubjectActivityCounters?` を、それぞれ省略可能な欄として足した——このテナントが一度も `"subject"` を使っていなければ、これらは常に既定へ倒れ、`@mnemora/postgres` の段1 SQL・`aggregateScope`・`archiveDecayed` は今日どおり単一パラメータの比較のままになる（プラン族を変えない）。
   - **`NewRecallRecord.advanceActivityClock` の型を `boolean` から `boolean | { scope: "subject"; subjectId: string }` に広げた。** `boolean` はこの union にそのまま含まれるため、既存の `true`/`false`/省略の呼び出しは1行も直さずに通る。
   - **新しい migration が1本増える**（`0024_tenant_subject_activity.sql`、`tenant_subject_activity` テーブルを新設するだけ）——利用者は `mnemora-postgres-migrate`（または `runMigrations`）を打つこと。
-- **`@mnemora/bullmq` を npm の公開対象に加えた**（[Issue #205](https://github.com/takecchi/mnemora/issues/205)、[ADR 0325](./docs/decisions/0325-bullmq-tick-driver.md) 追記、[ADR 0351](./docs/decisions/0351-bullmq-publish-prep.md)）——`private: true` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾に加えた。⚠ **初回 publish（段0のオーナー手元 bootstrap）はまだ済んでいない**——`npm install @mnemora/bullmq` はまだ 404 になる（手順は `docs/release-v1.md` §1.7）。version は `0.0.0` のまま（ADR 0070。version bump・publish・Release はオーナーの手）。
+- **`@mnemora/bullmq` を npm の公開対象に加えた**（[Issue #205](https://github.com/takecchi/mnemora/issues/205)、[PR #1382](https://github.com/takecchi/mnemora/pull/1382)、[ADR 0325](./docs/decisions/0325-bullmq-tick-driver.md) 追記、[ADR 0351](./docs/decisions/0351-bullmq-publish-prep.md)）——`private: true` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾に加えた。⚠ **初回 publish（段0のオーナー手元 bootstrap）はまだ済んでいない**——`npm install @mnemora/bullmq` はまだ 404 になる（手順は `docs/release-v1.md` §1.7）。version は `0.0.0` のまま（ADR 0070。version bump・publish・Release はオーナーの手）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -191,6 +248,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres` のストアが `db.transaction()` を実行している最中に DB の接続が切れると（DB の再起動・フェイルオーバー・`pg_terminate_backend` など）、呼び出しが reject するだけで済まずに、Node のプロセスごと `Error: Connection terminated unexpectedly` の uncaught exception で落ちていた**（[Issue #868](https://github.com/takecchi/mnemora/issues/868)、[PR #1378](https://github.com/takecchi/mnemora/pull/1378)、ADR 0349）——drizzle-orm の `db.transaction()` は pool から借りた接続に `error` リスナーを付けず、pg-pool は貸し出す直前に自分のリスナーを外すため、トランザクションの最中はリスナーが1つも無かった。`MemoryStore`・`VectorStore`・語彙ストアの、トランザクションを張るすべての口が当たっていた。いまは `createPostgresClient` が drizzle に、`connect` だけを包んだ `Proxy` を渡し、借りた接続に何もしない `error` リスナーを付けて、返すときに外す。切れた呼び出しは今までどおり reject し、次の呼び出しは新しい接続で通る。直し方（Proxy で包む）は**オーナーの回答（ask_human 7844da4c）**である。
+  - **振る舞いが1つ変わる: `client.db.$client === client.pool` が `true` から `false` になる。**`$client` は drizzle が実行時に生やす欄で、公開の型 `Db` には載っていないため、型（`.d.ts`）は変わらない。`client.db.$client` の `instanceof Pool`・`totalCount`・`on`・`end()` などは、今までどおり本物の `client.pool` に届く。
+  - **公開する `client.pool` は書き換えない。**利用者が `client.pool.connect()` で借りた接続にはリスナーは付かず、待機中の接続が切れたときに備えて `client.pool.on("error", …)` を付けるのは今までどおり利用者である（[Issue #1213](https://github.com/takecchi/mnemora/issues/1213) は未決のまま）。
+  ⭕ 非破壊と数える（プロセスが落ちなくなる側の修正で、公開の型は変わらない。変わるのは上の `db.$client` の同一性だけである）。
 - **`Runtime.observe()`（同期の抽出）と `tick()` の `extract` のジョブは、LLM の抽出結果に store が保存できない候補（本文の NUL、`@mnemora/postgres` の tsvector の上限を超える本文など）が在ると、手前の候補だけを書いたまま例外で止まっていた**（[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)、[PR #1318](https://github.com/takecchi/mnemora/pull/1318)、[ADR 0347](./docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）——候補は1件ずつ書かれ、1つのトランザクションではない。いまはその候補だけを落とし、残りの候補は書いて、投げない。落とした候補は、残った候補の `created` イベントの `meta.droppedCandidates`（`index`・`contentHash`・最も内側の原因の `code`・`message`。本文は写さない）に残り、`observe()` の戻り値には出ない。全件が保存できなければ、今どおり最初の例外を投げ、何も書かない。候補は全件を書いてから `created` を積む順になった。
   ⭕ 非破壊と数える（例外を投げる入力は減る側にだけ変わる。結果が変わるのは保存できない候補を含む抽出結果のときだけで、正常な入力の結果と `created` の `meta` の形は変わらない。公開の型も変わらない。根拠: `observe-unsaveable-candidate.postgres.test.ts` の歯を、`@mnemora/postgres` と testkit の fixture の2実装で先に赤にしてから緑にした。クローン miku の判断であり、オーナーの判断ではない）。
 - **`tick()` の `extract` のジョブは、1回目が Memory を書いた後・`complete` の前に止まり、リースが切れて逐次に再配達されると、LLM の出力が変われば2回分の Memory を両方 `active` で残していた**（[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)、[PR #1318](https://github.com/takecchi/mnemora/pull/1318)、[ADR 0347](./docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）——違う本文なら2件、1回目の LLM が落ちていれば全文フォールバックと候補の2件。いまは LLM を呼ぶ前に、その Observation から今の抽出器の版で作られた Memory（status を問わない）が在るかを見て、在れば何も書かずにジョブを完了にする（再配達のたびに LLM を呼ぶこともなくなる）。旧い版の Memory しか無ければ今どおり抽出する。`Runtime.reextract` と同期の `observe()` は、この確認を通らない。⚠ 並行の2本は塞げない。1回目が候補の一部だけを書いて止まった場合、残りの候補は作られなくなった（`reextract` で回復する）。
@@ -331,7 +392,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`Runtime.reflect()` は、LLM が `digest: ""`（空文字）を返すと、TSDoc が約束する機械的な切り出しへのフォールバックをせず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #1354](https://github.com/takecchi/mnemora/pull/1354)）——`ReflectionLLMResultSchema` の `digest` が空文字を拒んでいた。抽出・`consolidate` と同じく空文字を受け付け、`resolveDigest` で `digestSource: "fallback"` の要旨にする。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 - **`Runtime.reflect()` は、LLM の `tags` に空文字の要素が1つでもあると、その tag だけを落とさず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #1354](https://github.com/takecchi/mnemora/pull/1354)）——`ReflectionLLMResultSchema` の `tags` の要素が空文字を拒んでいた。抽出・`consolidate` と同じく空文字の要素を受け付け、`dropBlankTags` で落とす（空白だけの要素はもともと落としていた）。公開の `ReflectionLLMResultSchema` を直接使う呼び出しでも、空文字の `digest`・`tags` の要素を含む応答を受け付けるようになる。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/postgres` の `restoreSupersededBy()` は、`event.at` が Invalid Date だと、戻す対象が無くても例外を投げていた**（[PR #1366](https://github.com/takecchi/mnemora/pull/1366)、[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）——対象が無ければ testkit の fixture と同じく `{ restored: [] }` を返す。対象が在るときは今どおり例外で、1件も戻さない（例外の種類も変えていない）。`Runtime.restoreSuperseded()` は時計の値を渡すので、踏むのは store を直接呼ぶ側だけである。⭕ 非破壊（例外を投げる入力が減る）。クローン miku の判断であり、オーナーの判断ではない。
-- **`Runtime.consolidate()` は、いまの時点で有効期間（`validFrom`/`validUntil`）の外にある `active` な記憶も統合元にしていた。統合先は有効期間を持たないので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた**（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）——`{ memoryIds }`、`{ seedMemoryId }` の種、`includeOutsideValidity: true` を渡した `{ query }` で起きていた。有効期間の外にある記憶は統合元にせず、動かさず、LLM にも渡さない。`sources` では新しい `kind` の `"expired"`（`validUntil` を運ぶ）・`"not_yet_valid"`（`validFrom` を運ぶ）で名指しする。判定は `recall()` の期間のゲートと同じ（[ADR 0089](./docs/decisions/0089-runtime-consolidate-shape.md) の 2026-09-29 追記）。統合先の有効期間は今までどおり持たない。⚠ 非破壊と数える（公開の union `ConsolidateSourceOutcome` に値を2つ足した——網羅的に分岐している呼び出し側は扱いを足す必要があるが、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、[`docs/migration-v1.md`](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」）。例外を投げる入力は変わらない。期限切れ・未到来の記憶を含めて呼ぶと結果が変わり、統合されずに `nothing_to_consolidate` で返ることもある）。`reflect()` の材料の選び方は変えていない。クローン miku の判断であり、オーナーの判断ではない。
+- **`Runtime.consolidate()` は、いまの時点で有効期間（`validFrom`/`validUntil`）の外にある `active` な記憶も統合元にしていた。統合先は有効期間を持たないので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた**（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)、[PR #1383](https://github.com/takecchi/mnemora/pull/1383)）——`{ memoryIds }`、`{ seedMemoryId }` の種、`includeOutsideValidity: true` を渡した `{ query }` で起きていた。有効期間の外にある記憶は統合元にせず、動かさず、LLM にも渡さない。`sources` では新しい `kind` の `"expired"`（`validUntil` を運ぶ）・`"not_yet_valid"`（`validFrom` を運ぶ）で名指しする。判定は `recall()` の期間のゲートと同じ（[ADR 0089](./docs/decisions/0089-runtime-consolidate-shape.md) の 2026-09-29 追記）。統合先の有効期間は今までどおり持たない。⚠ 非破壊と数える（公開の union `ConsolidateSourceOutcome` に値を2つ足した——網羅的に分岐している呼び出し側は扱いを足す必要があるが、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、[`docs/migration-v1.md`](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」）。例外を投げる入力は変わらない。期限切れ・未到来の記憶を含めて呼ぶと結果が変わり、統合されずに `nothing_to_consolidate` で返ることもある）。`reflect()` の材料の選び方は変えていない。クローン miku の判断であり、オーナーの判断ではない。
 
 ---
 

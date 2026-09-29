@@ -51,7 +51,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * `FakeTenantSettingsStore`/`FakeBackingStore` と同じ設計。**省略すると
    * `getActivitySeq` は常に `0` を返す**（`FakeTenantSettingsStore` と同じ規律）。
    *
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `subjectActivitySeqBacking` は `tenant_subject_activity` 相当——
    * `tenantId` → `subjectId` → `S_x` の2段の `Map`。`InMemoryMemoryStore.createRecall`
    * （`advanceActivityClock: { scope: "subject", subjectId }`）が書く側と共有する。
@@ -231,7 +231,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `subjectActivitySeqBacking` に、このテナントの行が1本でもあるか。
    * `subjectActivitySeqBacking` 自体が渡されていなければ常に `false`
    * （`getActivitySeq` が backing 無しで常に `0` を返すのと同じ規律）。
@@ -242,7 +242,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `subjectActivitySeqBacking` から、渡された `subjectIds` ぶんを
    * まとめて読む。行が無い `subjectId` はキーを省略する（`readSubjectActivitySeqs`
    * （core）が `0` へ倒す）。

@@ -203,7 +203,7 @@ function assertObservationDatesValid(owner: string, input: NewObservation): void
 function isDecayedForScope(
   memory: Pick<Memory, "decayFloorAt" | "decayFloorSeq" | "subjectId">,
   scope: RecallScope,
-  // ADR 0352（Issue #338）: このテナントの subject 単位カウンタ（`tenantId` を
+  // ADR 0353（Issue #338）: このテナントの subject 単位カウンタ（`tenantId` を
   // 引いた後の `Map<subjectId, S_x>`）。`scope.decayFloorSeqUsesSubjectCounters` が
   // true のときだけ参照する。
   subjectActivitySeqByTenant: Map<string, number> | undefined,
@@ -475,7 +475,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   readonly activitySeq = new Map<string, number>();
 
   /**
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity` 相当。`tenantId` → `subjectId` → `S_x`
    * の2段の `Map`。`InMemoryTenantSettingsStore` にそのまま渡すことで、`createRecall`
    * （書く側）と `getSubjectActivitySeqs`/`hasSubjectActivityCounters`（読む側）が
@@ -1616,7 +1616,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       const current = this.activitySeq.get(ctx.tenantId) ?? 0;
       this.activitySeq.set(ctx.tenantId, current + 1);
     } else if (
-      // ADR 0352（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
+      // ADR 0353（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
       typeof record.advanceActivityClock === "object" &&
       record.advanceActivityClock !== null &&
       record.advanceActivityClock.scope === "subject"
@@ -1768,7 +1768,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const nowMs = opts.now.getTime();
     const clock = opts.clock ?? "wall";
     const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
-    // ADR 0352（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
+    // ADR 0353（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
     // その Memory の subjectId に対応する `S_x` を足す（postgres 側
     // `activityFloorSeqDeadCondition` と同じ式）。
     const subjectActivitySeqByTenant = this.subjectActivitySeq.get(ctx.tenantId);

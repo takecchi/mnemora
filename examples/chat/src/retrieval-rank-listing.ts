@@ -1,4 +1,5 @@
 import type { ArmReport } from "./retrieval-quality.js";
+import { scoreTotalOrNull } from "./recalled-score.js";
 
 /**
  * 固定回帰ケース(ADR 0227 の門)と同じ条件で、probe ごとの順位を一覧にする(Issue #572、
@@ -63,7 +64,8 @@ export function buildRankListing(report: ArmReport, fixedClock: string): RankLis
     },
     probes: report.probes.map((p) => {
       const gold = p.scoreDetails.find((d) => d.roles.includes("gold"));
-      const goldScore = gold ? gold.score.total : null;
+      // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total が無い。
+      const goldScore = gold ? scoreTotalOrNull(gold.score) : null;
       const lastRecalledScore = p.lastRecalledScore ?? null;
       return {
         probeId: p.probeId,

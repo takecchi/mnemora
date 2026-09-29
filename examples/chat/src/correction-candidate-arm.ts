@@ -12,6 +12,7 @@ import type { MarginStats } from "./identifier-arm.js";
 import { DEFAULT_HAYSTACK_SIZE, buildHaystackUtterance } from "./probe-set.js";
 import type { ProviderMode } from "./providers.js";
 import { resolveExternalId } from "./provenance-trace.js";
+import { requireMeasuredTotal, scoreTotalOrNull } from "./recalled-score.js";
 
 /**
  * Issue #369 (C)「訂正の口」の相手探しの精度を測る arm。
@@ -332,9 +333,13 @@ export async function runCorrectionCandidateArm(
     const distractorIndex = externalIds.indexOf(correctionDistractorExternalId(c.id));
     const goldRank = goldIndex === -1 ? null : goldIndex + 1;
     const distractorRank = distractorIndex === -1 ? null : distractorIndex + 1;
-    const goldScore = goldIndex === -1 ? null : (result.memories[goldIndex]?.score.total ?? null);
+    // association: null（上）なので affinityMeasured は必ず true（ADR 0352）。
+    const goldScore =
+      goldIndex === -1 ? null : (scoreTotalOrNull(result.memories[goldIndex]!.score) ?? null);
     const distractorScore =
-      distractorIndex === -1 ? null : (result.memories[distractorIndex]?.score.total ?? null);
+      distractorIndex === -1
+        ? null
+        : (scoreTotalOrNull(result.memories[distractorIndex]!.score) ?? null);
     hits.push({
       caseId: c.id,
       goldRank,
@@ -363,17 +368,23 @@ export async function runCorrectionCandidateArm(
     const topExternalId = resolvedExternalIds[0] ?? null;
     const protectedIds = c.protectedFacts.map((_, i) => correctionProtectedExternalId(c.id, i));
     const protectedAtTop = topExternalId !== null && protectedIds.includes(topExternalId);
+    // Issue #548 方向2 / ADR 0352: minProtectedFactScore/maxNonProtectedScore は
+    // `{ score: { total: number } }[]` という純関数の形をそのまま保つ（歯を書き換えない）。
+    // association: null（上）なので affinityMeasured は必ず true——ここで total を取り出す。
+    const scoredMemories = result.memories.map((m) => ({
+      score: { total: requireMeasuredTotal(m.score) },
+    }));
     const protectedFactScore = minProtectedFactScore(
-      result.memories,
+      scoredMemories,
       resolvedExternalIds,
       protectedIds,
     );
     const topNonProtectedScore = maxNonProtectedScore(
-      result.memories,
+      scoredMemories,
       resolvedExternalIds,
       protectedIds,
     );
-    const topScore = topMemory?.score.total ?? null;
+    const topScore = topMemory === undefined ? null : requireMeasuredTotal(topMemory.score);
     abstains.push({
       caseId: c.id,
       kind: c.kind,

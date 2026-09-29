@@ -12,7 +12,7 @@ import {
 } from "./test-db.js";
 
 /**
- * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+ * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
  * （Issue #338）: `packages/core` の `activity-counting-per-call.test.ts`（in-memory の
  * `Fake` 実装）が既に確かめた「recall のたびの前進」の意味論を、**本物の Postgres の
  * SQL**（段1 ANN ゲートの相関サブクエリ）に対しても確かめる。
@@ -25,7 +25,7 @@ import {
  * 再現するため赤くならなかった）。この歯は `PostgresVectorStore.search` を直接呼び、
  * 後置フィルタを経由せずに段1 SQL 単体の挙動を確かめる。
  */
-describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 0352、Issue #338）", () => {
+describe("PostgresVectorStore.search — decayFloorSeqUsesSubjectCounters（ADR 0353、Issue #338）", () => {
   afterAll(async () => {
     await closeTestClient();
   });

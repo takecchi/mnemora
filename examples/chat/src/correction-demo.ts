@@ -10,6 +10,7 @@ import { buildCorrectionReason } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
 import type { CorrectionScenario } from "./correction-scenario.js";
 import { CORRECTION_SCENARIO } from "./correction-scenario.js";
+import { scoreTotalOrNull } from "./recalled-score.js";
 
 /**
  * 訂正を含む会話シナリオを `Runtime` に対して実際に走らせるデモ（Issue #303 / Issue #369 (C)）。
@@ -542,10 +543,14 @@ function formatCandidates(discovery: FindCorrectionCandidatesResult): string {
     return "  (候補0件)";
   }
   return discovery.candidates
-    .map(
-      (c) =>
-        `  - #${c.recallRank}位 "${c.digest}" (memoryId=${c.memoryId}, score.total=${c.score.total.toFixed(5)})`,
-    )
+    .map((c) => {
+      // Issue #548 方向2 / ADR 0352: findCorrectionCandidates は association の既定（on、
+      // ADR 0337）をそのまま使うので、候補に affinityMeasured: false（連想枠経由）が
+      // 混ざりうる——total が無い候補は「n/a」と表示する。
+      const total = scoreTotalOrNull(c.score);
+      const totalText = total === null ? "n/a" : total.toFixed(5);
+      return `  - #${c.recallRank}位 "${c.digest}" (memoryId=${c.memoryId}, score.total=${totalText})`;
+    })
     .join("\n");
 }
 

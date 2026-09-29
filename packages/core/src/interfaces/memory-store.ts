@@ -1831,7 +1831,7 @@ export interface ArchiveDecayedOptions {
    */
   clock?: DecayClock;
   /**
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `true` のときだけ、`nowSeq`（`T`）に、行の subject に対応する
    * `tenant_subject_activity` の値（`S_x`）を足した値と比較する——段1の
    * `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味・同じ最適化理由

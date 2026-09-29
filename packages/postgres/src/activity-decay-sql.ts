@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 
 /**
- * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+ * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
  * （Issue #338）: 活動時計の忘却ゲート（生存側）述語を組み立てる共通ヘルパー。
  * `packages/postgres/src/vector-store.ts`（段1）・`memory-store.ts`（`aggregateScope`・
  * `archiveDecayed`）の3箇所が、この関数を通して同じ式を書く——`ADR 0038`「実装が2つ
@@ -16,7 +16,7 @@ import { sql, type SQL } from "drizzle-orm";
  * activity_seq`（`S_x`）を相関サブクエリで引き、`tenantSeq + COALESCE(S_x, 0)` と
  * 比較する。`subjectIdExpr` が `NULL`（主題なしの記憶）の行は、相関サブクエリが
  * 0件になり `COALESCE(..., 0)` で `0` になる——結果として `tenantSeq` のみと比較
- * される（ADR 0352「読み取りは常に T + S_x（subjectId が無い記憶は T のみ）」）。
+ * される（ADR 0353「読み取りは常に T + S_x（subjectId が無い記憶は T のみ）」）。
  *
  * `tenantIdExpr`/`subjectIdExpr` は呼び出し元のテーブルエイリアスに応じて渡す
  * （段1は `m.tenant_id`/`m.subject_id`、`aggregateScope`/`archiveDecayed` は
@@ -45,7 +45,7 @@ export function activityFloorSeqAliveCondition(params: {
 }
 
 /**
- * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+ * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
  * （Issue #338）: `activityFloorSeqAliveCondition` の否定側——`MemoryStore.
  * archiveDecayed`（掃引）が対象を選ぶときに使う。**境界は含む（`<=`）**——ゲート側
  * （狭義の `>`）とは非対称であり、これは ADR 0165 決めたこと14 が既に意図した

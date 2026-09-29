@@ -526,8 +526,10 @@ client.pool.on("error", (error) => {
 付けた場合、切れた接続は pool から捨てられ、次の呼び出しは新しい接続で通る（`idle in transaction` も残らない。
 `src/__tests__/pool-idle-connection-loss.test.ts` が縛っている）。
 
-- これは**待機中の接続**の話である。`db.transaction()` の途中（借りている最中の接続）で切れた場合もプロセスが落ちるが、
-  それは別の場所であり、利用者のリスナーでは避けられない（[Issue #868](https://github.com/takecchi/mnemora/issues/868)）。
+- これは**待機中の接続**の話である。`db.transaction()` の途中（mnemora のストアが借りている最中の接続）で切れた場合は、
+  `createPostgresClient` が drizzle に渡す包みがその接続に `error` リスナーを付けて外すので、プロセスは落ちず、その呼び出しが reject する
+  （[Issue #868](https://github.com/takecchi/mnemora/issues/868)。`src/__tests__/db-transaction-connection-loss.test.ts` が縛っている）。
+  公開する `client.pool` 自体には付けないので、利用者が `client.pool.connect()` で借りた接続には、利用者がリスナーを付けること。
 - mnemora の側でリスナーを付けるか・設定にするかは決まっていない（[Issue #1213](https://github.com/takecchi/mnemora/issues/1213)）。
   マイグレーションと `registerEmbeddingSpace` が借りる接続には、mnemora が自分でリスナーを付けている
   （[ADR 0339](../../docs/decisions/0339-checked-out-client-error-listener.md)。こちらは借りている最中の接続の話）。

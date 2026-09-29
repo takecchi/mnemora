@@ -84,7 +84,7 @@ export interface TenantSettingsStoreConformanceOptions {
   advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
 
   /**
-   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `supportsDecayClock: true` のときに使う。
    * `tenant_subject_activity`（`subjectId` の行、`S_x`）を+1する
    * （`MemoryStore.createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
@@ -392,7 +392,7 @@ export function describeTenantSettingsStoreConformance(
         });
       }
 
-      // [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
+      // [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
       // （Issue #338）: hasSubjectActivityCounters / getSubjectActivitySeqs。
       it("hasSubjectActivityCounters: 行が無いテナントには false を返す", async () => {
         const store = await createStore();

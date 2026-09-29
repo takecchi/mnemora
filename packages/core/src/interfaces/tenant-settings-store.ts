@@ -442,7 +442,7 @@ export interface TenantSettingsStore {
   getActivitySeq?(ctx: Ctx): Promise<number>;
 
   /**
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity` に、このテナントの行が1本でもあるか。
    * 行が無ければ `false`。**読み出し専用。**進めるのは `MemoryStore.createRecall`
    * （`advanceActivityClock: { scope: "subject", subjectId }`）だけである。
@@ -455,7 +455,7 @@ export interface TenantSettingsStore {
   hasSubjectActivityCounters?(ctx: Ctx): Promise<boolean>;
 
   /**
-   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity.activity_seq`（`S_x`）を、渡した
    * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略してよい
    * （呼び出し側の `readSubjectActivitySeqs` が `0` へ倒す）。**読み出し専用。**
@@ -537,7 +537,7 @@ export async function readDefaultHalfLifeRecalls(
 }
 
 /**
- * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
+ * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
  * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
  * はできない？」）: テナット単位の活動カウンタ `T`（`tenant_activity.activity_seq`、
  * `getActivitySeq?` が返す既存の値）に加え、subject 単位のカウンタ `S_x`
