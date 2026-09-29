@@ -304,3 +304,20 @@ maxBatchSize =
 - 複数ランナー間での opt-in live テストの再現性（負債3）。
 - 128件を明示的に大きく超える `maxBatchSize` を指定した利用者が、実際にどの程度
   ベクトルの変化を体感するか（負債4）。
+
+---
+
+⚠ **2026-09-29 追記（本文は書き換えていない）。公開 API 表面の破壊性【現物】。**
+公開 API 表面の門（`scripts/check-public-api-surface.mjs`、[ADR 0178](./0178-public-api-surface-gate.md)）が
+`@mnemora/local-embedding` の `.d.ts` に出した差分は、次の2行の**追加だけ**である
+（削除・変更の行は無い）:
+
+- `export declare const DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE = 128;`
+- `LocalEmbeddingProviderOptions` の `maxBatchSize?: number;`（省略可能）
+
+⭕ **非破壊と判断する**——新しい export と省略可能な option を足しただけで、既存の宣言も、
+既存の呼び出しの型検査も変わらない（CHANGELOG `[1.1.0]` の本項目の数え方と同じ）。
+実行時の意味の変化（128件を超える件数を直接渡したときにベクトルがわずかに動きうること）は
+型には現れないため、この門は拾わない——それは上の決定2と CHANGELOG に書いてある。
+**クローン miku の委譲先の判断であり、オーナーの判断ではない。**
+この判断の後に `node scripts/check-public-api-surface.mjs --write` で snapshot を更新した。
