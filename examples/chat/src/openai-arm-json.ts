@@ -33,8 +33,8 @@ export interface EmbeddingSpaceJson {
  * （群レベルの集約値=`marginStats` だけで probe ごとの値を保存していなかった）を埋める。
  *
  * ⛔ **`IdentifierProbeOutcome` のうち `probeId`/`margin` だけを持つ**——
- * `scoreDetails`/`termSpreads` 等、他の欄はこの JSON の役割（Job Summary 用の
- * margin基準「並走の判定」候補、ADR 0333 §4.3）に要らないので複製しない。
+ * `scoreDetails`/`termSpreads` 等、他の欄はこの JSON の役割（Job Summary の判定、
+ * margin基準、ADR 0333 §4.3・2026-09-30 追記）に要らないので複製しない。
  */
 export interface OpenAiArmProbeMarginJson {
   probeId: string;

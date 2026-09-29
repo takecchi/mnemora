@@ -357,7 +357,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0330](./0330-openai-embedding-live-conformance-and-determinism-measured.md) | 実 API の `OpenAIEmbeddingProvider` に適合テストを当て、決定性を測った——無条件7本は緑、単独入力は一致、3件バッチは一致しない（Issue #142 ①、測っただけ。宣言は変えない） | **提案 (2026-09)** |
 | [0331](./0331-extension-creation-shared-advisory-lock.md) | 拡張を作る段だけを、schema に依らない共有 advisory lock で直列化する | 採用 (2026-09) |
 | [0332](./0332-association-default-100k-measurement.md) | 連想枠の既定 on を10万行級で測る — 62件/1万行/10万行の実測記録（Issue #337、判定はしない） | **提案 (2026-09)** |
-| [0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md) | Issue #109 残件 A・C — 識別子2群の判定候補と `intrusionMargin` の定義候補を実測で比較する（B は範囲外） | **提案 (2026-09)** |
+| [0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md) | Issue #109 残件 A・C — 識別子2群の判定候補と `intrusionMargin` の定義候補を実測で比較する（B は範囲外） | 採用 (2026-09) |
 | [0334](./0334-claim-key-known-subjects-hint.md) | claim key の `subject` 誤帰属を、明示的な `knownSubjects` 語彙ヒントで減らす — store 自己蓄積版・`subjectCandidates` への暗黙の転用は、いずれも実測・設計検討の末に採らない（Issue #372負債6） | 採用 (2026-09) |
 | [0335](./0335-recalled-memory-contested-with.md) | `RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足す —— 矛盾する対が同伴取得を経由せず両方とも自然に候補に入った場合にも、対向の memoryId を返す（Issue #691 続き） | 採用 (2026-09) |
 | [0336](./0336-embedding-input-opt-in-hook.md) | `RuntimeDeps.embeddingInput` — 上限超過で `failed` になった Memory を、既定を変えずに回復できる opt-in フック（Issue #753、#449 の残り） | **提案 (2026-09)** |

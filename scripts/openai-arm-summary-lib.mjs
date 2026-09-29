@@ -12,24 +12,37 @@
  * `--title` で見出しを変え、群は `groups` 配列をそのまま読む(名前は基準値ファイルの
  * `group` と突き合わせる)。
  *
- * ## ⛔ 門にしない。ただし「並走の判定」を1行出す(Issue #109 後半 決めたこと3)
+ * ## ⛔ 門にしない。ただし判定を出す(Issue #109 後半 決めたこと3。ADR 0333 2026-09-30 追記)
  *
- * `examples/chat/src/openai-arm-verdict.ts` の `decideEmbeddingDriftVerdict` と
- * **同じ規則**(測定前に固定した閾値: hit@1 が基準値未満、または MRR が基準値から
- * `MRR_DROP_THRESHOLD` 以上落ちたら red)を、ここでも評価して Job Summary に出す。
+ * **このジョブの判定は margin基準(ADR 0333 §2、`decideMarginShadowVerdict`/
+ * `buildMarginShadowVerdictSection`)である。**baseline margin(gold−distractor の
+ * 類似度差)の標本標準偏差の `stdDevMultiplier` 倍以上縮んだ probe が
+ * `minShrunkProbes` 件以上あれば red。閾値は実測前に固定した `MARGIN_VERDICT_OPTIONS`
+ * (`stdDevMultiplier=3`・`minShrunkProbes=2`)——識別子2群の実測を見てから動かしていない。
+ *
+ * **旧判定(ADR 0316、`decideShadowVerdict`/`buildShadowVerdictSection`)は移行の
+ * 追跡用にそのまま残している。**`examples/chat/src/openai-arm-verdict.ts` の
+ * `decideEmbeddingDriftVerdict` と同じ規則(測定前に固定した閾値: hit@1 が基準値未満、
+ * または MRR が基準値から `MRR_DROP_THRESHOLD` 以上落ちたら red)。実測(ADR 0333 §2.3)
+ * では、識別子2群について旧判定だけが red になる巡がある——margin基準へ判定を
+ * 差し替えた後も、読み手がその移行を Job Summary の上で追えるよう、旧判定の節を
+ * margin基準の節の下に残す(Markdown 上の並び順は `buildSummaryMarkdown` 参照)。
  *
  * ⚠ **この `.mjs` は `tsx` を通さないため、TS 側の定数を import できない**
  * (`identifier-probe-summary-lib.mjs` の `WEIGHTS_UNAVAILABLE_PHRASE` や
  * `retrieval-quality-shadow-verdict.ts` の `SHADOW_MRR_THRESHOLD` と同じ制約)。
- * **二重管理であることを認めて書いておく**——値を変えるときは両方(この定数と
- * `openai-arm-verdict.ts` の `DEFAULT_MRR_DROP_THRESHOLD`)を直すこと。歯
- * (`scripts/__tests__/openai-arm-summary-lib.test.mjs` と
+ * **二重管理であることを認めて書いておく**——値を変えるときは両方
+ * (この `MRR_DROP_THRESHOLD` と `openai-arm-verdict.ts` の `DEFAULT_MRR_DROP_THRESHOLD`、
+ * または `MARGIN_VERDICT_OPTIONS` と `verdict-candidate-margin.ts` の
+ * `DEFAULT_MARGIN_DROP_OPTIONS`)を直すこと。歯
+ * (`scripts/__tests__/openai-arm-summary-lib.test.mjs`・
+ * `scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs` と
  * `examples/chat/src/__tests__/openai-arm-verdict.test.ts`)は別々に両方の値を
  * 検査しているので、片方だけ変えれば数字が食い違う(ただし片方だけ変えても
  * どちらの歯も「赤くならない」——これは検出できていない負債であり、下の
  * ADR に明記する)。
  *
- * **⛔ この判定は CI を落とさない。**`decideRetrievalQualityShadowVerdict`
+ * **⛔ どちらの判定も CI を落とさない。**`decideRetrievalQualityShadowVerdict`
  * (ADR 0276)と同じ形——判定を出力に記録するだけで、`openai-arm-summary.mjs` の
  * exit code には一切反映しない。
  */
@@ -208,9 +221,12 @@ export function diffGroup(measuredGroup, baselineGroup) {
 }
 
 /**
- * 群ごとの「並走の判定」(⛔ 門ではない。上の docstring 参照)。
- * `examples/chat/src/openai-arm-verdict.ts` の `decideEmbeddingDriftVerdict` と
- * 同じ規則を、この `.mjs` の中だけで再実装したもの(二重管理。上の docstring 参照)。
+ * 群ごとの「旧判定」(ADR 0316。⛔ 門ではない・⛔ 2026-09-30 以降はこのジョブの判定として
+ * 使っていない——上の docstring 参照)。`examples/chat/src/openai-arm-verdict.ts` の
+ * `decideEmbeddingDriftVerdict` と同じ規則を、この `.mjs` の中だけで再実装したもの
+ * (二重管理。上の docstring 参照)。**関数名は変えていない**——
+ * `scripts/__tests__/openai-arm-summary-lib.test.mjs` など既存の歯が名指しで import
+ * しているため。
  *
  * @param {Record<string, any>} measuredGroup
  * @param {Record<string, any> | undefined} baselineGroup
@@ -281,18 +297,18 @@ function buildDiffSection(measuredGroups, baselineGroups) {
 }
 
 /**
- * ## 参考節 — margin基準の判定候補(ADR 0333 §2・§4.1・§4.3「A」)
+ * ## 判定節 — margin基準(ADR 0333 §2・§4.1・§4.3「A」、2026-09-30 追記で判定に採用)
  *
  * **クローン miku の判断であり、オーナーの決定ではない**(ADR 0333 冒頭の注記と同じ立場)。
  * ADR 0333 が候補案1(margin基準、`stdDevMultiplier=3`・`minShrunkProbes=2`、
- * 識別子2群の実測を見る前に固定した閾値)を「次の候補として推す」とした——
- * その候補を、**参考としてこの Job Summary に並べて出す。**
+ * 識別子2群の実測を見る前に固定した閾値)を「次の候補として推す」とし、2026-09-30 の
+ * 追記でこの Job Summary の**判定**として採った——**この節が、このジョブの判定である。**
  *
- * ⛔ **これは判定に使っていない。**上の `decideShadowVerdict`/`buildShadowVerdictSection`
- * (ADR 0316 のまま、既存の・唯一の「並走の判定」)には1文字も触れていない。
- * `buildSummaryMarkdown` の exit code・既存の判定結果は、この節の red/green が
- * 何であっても変わらない(`openai-arm-summary.mjs` は元々 parse/validate 失敗時にしか
- * 非0にしない——この節の追加でその経路は増えていない)。
+ * ⛔ **ただし門ではない。**`buildSummaryMarkdown` の exit code は変えていない
+ * (`openai-arm-summary.mjs` は元々 parse/validate 失敗時にしか非0にしない——判定を
+ * 差し替えても、その経路は増えていない)。旧判定(ADR 0316、`decideShadowVerdict`/
+ * `buildShadowVerdictSection`)はこの節の下に、移行の追跡用として残す
+ * (上のファイル docstring 参照)。
  *
  * ⭐ **正本は `examples/chat/src/verdict-candidate-margin.ts`
  * (`DEFAULT_MARGIN_DROP_OPTIONS`・`decideMarginDropVerdict`)である。**
@@ -341,7 +357,7 @@ export function computeMarginStatsShadow(margins) {
 }
 
 /**
- * 1群ぶんの margin基準の参考判定(上の docstring 参照。⛔ 判定には使っていない)。
+ * 1群ぶんの margin基準の判定(このジョブの判定。上の docstring 参照)。
  *
  * @param {Record<string, any>} measuredGroup
  * @param {Record<string, any> | undefined} baselineGroup
@@ -431,7 +447,7 @@ export function decideMarginShadowVerdict(
 }
 
 /**
- * margin基準の参考節そのもの(⛔ 判定には使っていない。上の docstring 参照)。
+ * margin基準の判定節そのもの(このジョブの判定。上の docstring 参照)。
  *
  * @param {Record<string, any>[]} measuredGroups
  * @param {Record<string, any>[]} baselineGroups
@@ -450,16 +466,16 @@ export function buildMarginShadowVerdictSection(
   const anyRed = verdicts.some((v) => v.red);
   const comparableVerdicts = verdicts.filter((v) => v.comparable);
   const lines = [
-    "## 参考: margin基準の判定候補(ADR 0333 §2・§4.1・§4.3「A」)",
+    "## 判定: margin基準(ADR 0333 §2・§4.1・§4.3「A」。⛔ 門ではない——このジョブを落とさない)",
     "",
-    "⚠ **これは参考であり、判定には使っていない。**上の「並走の判定」" +
-      "(ADR 0316 のまま、既存の・唯一の判定)がこのジョブの唯一の判定であり、" +
-      "exit code にも実際の判定にも、ここの red/green は一切反映しない。" +
+    "**これがこのジョブの判定である**(ADR 0333 2026-09-30 追記、Issue #109 残件A)。" +
+      "exit code は変えていない(`openai-arm-summary.mjs` は元々 parse/validate 失敗時にしか" +
+      "非0にしない)。旧判定(ADR 0316)は下の節に、移行の追跡用として残している。" +
       "**クローン miku の判断であり、オーナーの決定ではない**(ADR 0333)。",
     "",
     `測定前に固定した閾値(ADR 0333 §2.2): stdDevMultiplier=${options.stdDevMultiplier}、` +
       `minShrunkProbes=${options.minShrunkProbes}。baseline margin の標本標準偏差の` +
-      `${options.stdDevMultiplier}倍以上縮んだ probe が${options.minShrunkProbes}件以上あれば参考red。`,
+      `${options.stdDevMultiplier}倍以上縮んだ probe が${options.minShrunkProbes}件以上あれば red。`,
     "",
   ];
   if (comparableVerdicts.length === 0) {
@@ -469,8 +485,8 @@ export function buildMarginShadowVerdictSection(
     );
   } else {
     lines.push(
-      `${anyRed ? "🔴" : "✅"}(参考) ${verdicts.filter((v) => v.red).length}/` +
-        `${comparableVerdicts.length} 群が参考red(比較できた群のうち)。`,
+      `${anyRed ? "🔴" : "✅"} ${verdicts.filter((v) => v.red).length}/` +
+        `${comparableVerdicts.length} 群が red(比較できた群のうち)。`,
     );
   }
   for (const v of verdicts) {
@@ -482,6 +498,10 @@ export function buildMarginShadowVerdictSection(
   return lines.join("\n");
 }
 
+/**
+ * 旧判定の節そのもの(ADR 0316。⛔ 2026-09-30 以降はこのジョブの判定として使っていない
+ * ——移行の追跡用に残している。上の docstring 参照)。
+ */
 function buildShadowVerdictSection(measuredGroups, baselineGroups) {
   const baselineByGroup = new Map(baselineGroups.map((g) => [g.group, g]));
   const verdicts = measuredGroups.map((g) => ({
@@ -490,10 +510,13 @@ function buildShadowVerdictSection(measuredGroups, baselineGroups) {
   }));
   const anyRed = verdicts.some((v) => v.red);
   const lines = [
-    "## 並走の判定(Issue #109 後半。⛔ 門ではない——このジョブを落とさない)",
+    "## 旧判定(ADR 0316、移行の追跡用。⛔ 判定には使っていない)",
     "",
-    "測定前に決めた規則: hit@1 が基準値(round 0)未満、または MRR が基準値から " +
-      `${MRR_DROP_THRESHOLD} 以上落ちたら red。`,
+    "測定前に決めた規則(ADR 0316): hit@1 が基準値(round 0)未満、または MRR が基準値から " +
+      `${MRR_DROP_THRESHOLD} 以上落ちたら red。**この節はこのジョブの判定ではない**` +
+      "——上の「判定: margin基準」節がこのジョブの判定である(ADR 0333 2026-09-30 追記)。" +
+      "識別子2群では、この旧判定だけが red になる巡が実測にある(ADR 0333 §2.3)ため、" +
+      "移行を Job Summary の上で追えるよう、この節を残している。",
     "",
   ];
   lines.push(
@@ -525,8 +548,10 @@ export function buildSummaryMarkdown({ title, measured, baseline }) {
   );
   if (baseline) {
     lines.push(buildDiffSection(measuredGroups, baseline.groups), "");
-    lines.push(buildShadowVerdictSection(measuredGroups, baseline.groups), "");
+    // 判定(margin基準、ADR 0333)を先に、旧判定(ADR 0316、移行の追跡用)をその下に置く
+    // ——ADR 0333 2026-09-30 追記。
     lines.push(buildMarginShadowVerdictSection(measuredGroups, baseline.groups), "");
+    lines.push(buildShadowVerdictSection(measuredGroups, baseline.groups), "");
   }
   lines.push(
     "⚠ ADR 0033 §3: この群の母数からは失敗率も成功率も統計的に主張しない。" +

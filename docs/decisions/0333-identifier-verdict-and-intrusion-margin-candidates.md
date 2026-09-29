@@ -1,6 +1,8 @@
 # ADR 0333: Issue #109 残件 A・C — 識別子2群の判定候補と `intrusionMargin` の定義候補を実測で比較する（B は範囲外）
 
-- **状態**: 提案 (2026-09)
+- **状態**: 採用 (2026-09-25。2026-09-30 追記でクローン miku の委譲先が「提案」から倒した
+  ——オーナー本人の判定ではない。倒した根拠と経緯は末尾の2026-09-30追記、倒し方の形式は
+  [ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) 決定2に倣う)
 - **日付**: 2026-09-25
 
 > **⚠ この ADR を書いているのは、マネージャー（クローンのセッション）から切り出された
@@ -508,3 +510,93 @@ A・C は今も参考の表示であり、`identifier-probes` / `numeral-token-p
 
 **確かめていないこと**: §6 に挙げた点（K=60 を超える標本での A の偽陽性率、`japanese` 群の
 感度の弱点、`protectedFacts` が複数件のときの C の符号）は、この追記で1つも解けていない。
+
+---
+
+## 追記（2026-09-30）: A を Job Summary の判定へ格上げし、状態を「採用」に倒す
+
+> **⚠ クローン miku の委譲先が書いた。オーナー本人の判定ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **⛔ 本文（§0〜§6）と 2026-09-26・2026-09-28 の既存の追記は書き換えない。**
+> この追記だけを新しく足す。
+
+### 状態欄を「提案」から「採用」へ倒す——2026-09-28 追記の「状態欄も…触らない」を、この追記で上書きする
+
+**2026-09-28 の追記は「状態欄も『提案』のまま触らない」としていた**（当時は A・C を
+「既存の値の隣に並べて出す」ことだけを採り、**判定そのものの入れ替え**はまだ次の判断として
+残っていたため）。**この追記で、その判断を明示的に更新する**——状態欄をトップの1行だけ
+書き換え、この追記の下に経緯を残す形は
+[ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) 決定2「状態欄だけを
+置き換え、本文と冒頭の名乗りには触らない」に倣った（同 ADR は「決定が `main` で現に
+採られている」ことを「採用」の判定基準としており、次に書くとおり、A は今回このジョブの
+判定そのものとして `main`（をターゲットにしたこの PR）に入る）。
+
+### A: Job Summary の判定を margin 基準（ADR 0333 §2・§4.1）へ入れ替えた
+
+`scripts/openai-arm-summary-lib.mjs` の Job Summary で、これまで「参考」として旧判定
+（ADR 0316）の隣に並べていた margin 基準の節を、**このジョブの判定**へ格上げした。
+閾値（`stdDevMultiplier=3`・`minShrunkProbes=2`）は §2.2 が測定前に固定した値のまま、
+1つも変えていない。**⛔ 門にはしていない**——`openai-arm-summary.mjs` の exit code は、
+元から parse/validate 失敗時にしか非0にならない構造のままである（B、門にする判断は
+今回も一切扱っていない。§0 のとおりオーナー領分のまま）。
+
+**旧判定（ADR 0316）を消さずに残した理由**: 実測（§2.3、K=60、実 API）では、識別子2群
+（`identifiersSparse`/`identifiersDense`）について**旧判定だけが red になる巡が7/60ある**
+（margin 基準は同じ7巡すべてで green）。判定を margin 基準へ完全に差し替えて旧判定を
+消すと、この7/60という移行前後の差が Job Summary からは見えなくなる。**旧判定の節を
+margin基準の節の下にそのまま残しておけば、読み手がこの移行を Job Summary の上で
+追える**——旧判定だけが red になる回に気づいたとき、「これは margin 基準の下では green
+だった」とその場で読める。
+
+**実装した内容**（詳細・赤緑の証拠は実装 PR 自身に書く。この ADR には写さない）:
+`buildSummaryMarkdown` の節の並びを margin基準（判定）→旧判定（ADR 0316、移行の追跡用）の
+順に入れ替え、見出し・docstring から「参考」「判定には使っていない」を外した。
+`decideMarginShadowVerdict`/`buildMarginShadowVerdictSection`・`decideShadowVerdict`/
+`buildShadowVerdictSection` の**関数名は変えていない**——既存の歯
+（`scripts/__tests__/openai-arm-summary-lib.test.mjs`・
+`scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs`）が名指しで import して
+いるため、名前を変えると無関係な差分が増える。
+
+### C: `protectionMargin` はコードを変えていない
+
+C（`protectionMargin` の新設、`intrusionMargin` は凍結）は 2026-09-26 の追記のとおり
+**PR #795 で main に入り済みである。この実装 PR では C 側のコード・テスト・基準値には
+1つも触れていない**——今回の変更は A（Job Summary の判定の入れ替え）だけである。
+
+### 門にする判断（B）——オーナー領分。ここでは扱わない
+
+**この判断は「クローン miku の判断（オーナーではない）」である**——§0 が最初から明記した
+とおり、B（A・C を CI の合否・required checks に使うかという門にする判断）は今回も一切
+扱っていない。マネージャーからこの追記への指示は、**この点について「門にはしない」という
+枠を、オーナーへの問い `ask_human 6911db12` 問2 への回答に基づくものとして伝えている。**
+⚠ **この書き手は `ask_human 6911db12` 問2 の記録そのものをこの repo の中に見つけていない**
+（`grep -rn "6911db12"` はこの repo に複数件ヒットするが、いずれも「問6」（semver の運用、
+[ADR 0352](./0352-association-score-without-total.md)）への参照であり、「問2」という
+逐語はこの書き手の探索では見つからなかった）——ADR 0352 が `ask_human 6911db12` 問6を
+扱ったときと同じ形で、**マネージャー経由の【受】として扱う**。実際に門にしていないことは
+コードの現物で確認できる（`openai-arm-summary.mjs` の exit code は変えていない、上の
+「A」節参照）が、その根拠として挙げられた `ask_human` の回答そのものは検算していない。
+
+### 確かめていないこと
+
+- **§6 に挙げた点は、この追記でも1つも解けていない**（K=60 を超える標本での A の偽陽性率、
+  `stdDevMultiplier`/`minShrunkProbes` のグリッドサーチ、`japanese` 群の中間劣化の見逃しの
+  原因、モデル交代・週単位の経年変化への A の挙動、k-of-n の運用コスト、
+  `identifier-probe-baseline.openai.json` の `marginStats` に関する ADR 0316 本文との
+  食い違いの経緯、`protectedFacts` が複数件のときの C の符号、`protectionMarginBest`
+  （max版）の要否）。
+- **逆向き（旧 green・margin red、中間的な劣化を margin 基準が見逃す形）の歯は作れなかった。**
+  `examples/chat/local-margin-candidate-measurement.json`（§2.4 の local 反実仮想、
+  `japanese` 群 σ=0.08 付近）を調べたが、この JSON は σ ごとの red 件数の集計値だけを持ち、
+  probe ごとの margin（baseline/measured 双方）を保存していない——実装 PR の歯
+  （`scripts/__tests__/openai-arm-margin-verdict-promotion.test.mjs`）のコメントに
+  同じ理由を書いた。生成スクリプトの再実行（本物の Postgres + `@mnemora/local-embedding`
+  を要求する）はこの追記の範囲外であり、行っていない。
+- **OpenAI の60巡の実データでの逆向き（旧 green・margin red）の件数**は、6群×60巡=360の
+  group-round のうち **0件**であることを確認した（`node -e` で
+  `openai-margin-candidate-measurement.json` の `candidate0PerRound`/`candidate1PerRound`
+  を突き合わせて実測）——§2.3 が「識別子2群について0/60」とした主張を、6群全体へ広げて
+  裏付けた形になる。
+- 本追記のこの ADR 自身の限界: 実装 PR の branch・commit・赤緑の証拠はこの ADR には写さない
+  （実装 PR 自身に書く）。この追記の担当者は、実測（§2〜§4）そのものは再導出していない
+  ——コミット済みの `openai-margin-candidate-measurement.json` を読み直しただけである。
