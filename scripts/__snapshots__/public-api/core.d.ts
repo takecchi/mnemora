@@ -114,7 +114,6 @@ export interface ClaimKeyOptions {
         limit?: number;
     };
     knownSubjects?: string[];
-    formContestedGroups?: boolean;
 }
 export declare const ClaimKeyOptionsSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
@@ -127,7 +126,6 @@ export declare const ClaimKeyOptionsSchema: z.ZodObject<{
         }, z.core.$strip>
     ]>>;
     knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    formContestedGroups: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 
 // ===== dist/clock.d.ts =====
@@ -588,6 +586,10 @@ export declare class MemoryStatusConflictError extends Error {
     readonly expectedStatus: MemoryStatus;
     readonly observedStatus: MemoryStatus | null;
     constructor(memoryId: MemoryId, expectedStatus: MemoryStatus, observedStatus: MemoryStatus | null);
+}
+export declare class ContestedGroupMembershipMismatchError extends Error {
+    readonly missingMemberId: MemoryId;
+    constructor(missingMemberId: MemoryId);
 }
 export declare class SourceMemoryForgottenError extends Error {
     readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories";
@@ -1395,7 +1397,6 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
                 }, z.core.$strip>
             ]>>;
             knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            formContestedGroups: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
@@ -1431,7 +1432,6 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
                 }, z.core.$strip>
             ]>>;
             knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            formContestedGroups: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -1468,7 +1468,6 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
                 }, z.core.$strip>
             ]>>;
             knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            formContestedGroups: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
@@ -1711,6 +1710,7 @@ import type { Clock } from "./interfaces/clock.js";
 import type { Ctx } from "./ctx.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { MemoryStore } from "./interfaces/memory-store.js";
+import type { RelationStore } from "./interfaces/relation-store.js";
 import type { TokenCounter } from "./interfaces/token-counter.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
 import type { LexicalStore } from "./interfaces/lexical-store.js";
@@ -1722,6 +1722,7 @@ import type { RecallOutputValidationMode } from "./recall-output-validation.js";
 export interface RecallRuntimeDeps {
     memoryStore: MemoryStore;
     vectorStore: VectorStore;
+    relationStore?: RelationStore;
     tenantSettingsStore?: TenantSettingsStore;
     lexicalStore?: LexicalStore;
     embeddingProvider: EmbeddingProvider;
@@ -1767,8 +1768,8 @@ export declare const CountKindSchema: z.ZodEnum<{
 }>;
 export interface StageSkippedOmission {
     kind: "stage_skipped";
-    stage: "candidate_generation" | "rescore" | "index_band" | "association";
-    reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor";
+    stage: "candidate_generation" | "rescore" | "index_band" | "association" | "relation";
+    reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor" | "relation_store_unavailable";
 }
 export type ScopeRelation = "outside_scope" | "within_scope";
 export declare const ScopeRelationSchema: z.ZodEnum<{
@@ -1794,7 +1795,7 @@ export interface BelowThresholdOmission {
 }
 export interface OverLimitOmission {
     kind: "over_limit";
-    stage: "rescore" | "association";
+    stage: "rescore" | "association" | "relation";
     count: number;
     countKind: CountKind;
 }
@@ -1857,12 +1858,14 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
             rescore: "rescore";
             index_band: "index_band";
             association: "association";
+            relation: "relation";
         }>;
         reason: z.ZodEnum<{
             embedding_provider_unavailable: "embedding_provider_unavailable";
             empty_query_content: "empty_query_content";
             vector_store_lacks_get_vectors: "vector_store_lacks_get_vectors";
             no_anchor: "no_anchor";
+            relation_store_unavailable: "relation_store_unavailable";
         }>;
     }, z.core.$strip>,
     z.ZodObject<{
@@ -1907,6 +1910,7 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
         stage: z.ZodEnum<{
             rescore: "rescore";
             association: "association";
+            relation: "relation";
         }>;
         count: z.ZodNumber;
         countKind: z.ZodEnum<{
@@ -2518,12 +2522,14 @@ export declare const RecallResultSchema: z.ZodObject<{
                 rescore: "rescore";
                 index_band: "index_band";
                 association: "association";
+                relation: "relation";
             }>;
             reason: z.ZodEnum<{
                 embedding_provider_unavailable: "embedding_provider_unavailable";
                 empty_query_content: "empty_query_content";
                 vector_store_lacks_get_vectors: "vector_store_lacks_get_vectors";
                 no_anchor: "no_anchor";
+                relation_store_unavailable: "relation_store_unavailable";
             }>;
         }, z.core.$strip>,
         z.ZodObject<{
@@ -2568,6 +2574,7 @@ export declare const RecallResultSchema: z.ZodObject<{
             stage: z.ZodEnum<{
                 rescore: "rescore";
                 association: "association";
+                relation: "relation";
             }>;
             count: z.ZodNumber;
             countKind: z.ZodEnum<{
