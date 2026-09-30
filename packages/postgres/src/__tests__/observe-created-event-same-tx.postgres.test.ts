@@ -60,8 +60,15 @@ const llm: LLMProvider = {
     }),
 };
 
+/**
+ * ADR 0407（#1492）: sync の extract ジョブは claim 済みで積まれ、失敗で完了にならなければ**リース切れまで**
+ * tick に拾われない。リース切れを待つ代わりに、時計を進める（実時間は待たない）。
+ */
+let nowMs = Date.now();
+const clock = { now: () => new Date(nowMs) };
 const hashContent = (content: string) => createHash("sha256").update(content).digest("hex");
 const shared = {
+  clock,
   llmProvider: llm,
   embeddingProvider: {
     space: TEST_EMBEDDING_SPACE,
@@ -198,6 +205,8 @@ async function extractWithCreatedFailure(
   // 抽出をやり直さないので、この時点の状態は「失敗中の結果」そのもの。
   const whileFailed = await snapshot(kit, observationId);
   // 再試行: 再配達される extract ジョブを、何度か tick で回す（backoff があっても取りこぼさないよう複数回）。
+  // ADR 0407: リースを切らせてから、再配達される extract ジョブを拾わせる。
+  nowMs += 10 * 60_000;
   let ticks = 0;
   for (let i = 0; i < 3; i += 1) {
     const t = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 });
