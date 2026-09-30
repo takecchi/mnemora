@@ -245,13 +245,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `memory_labels` への書き込みが止まる。
   - 調査担当の実測では、`memory_labels` 20万行で 46ms → 6.5ms（ADR 0400）。あわせて、全外部キーに先頭列一致の索引を要求する歯を足した（テストのみ、利用者には見えない）。
 
----
-
 - **`MemoryStore.listActiveClaimPredicates?` の同着（代表行の `created_at` が同じ predicate が複数あるとき）の並びを、predicate のコードポイント順の昇順に固定した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。以前は契約が同着の順を規定せず、`PostgresMemoryStore` は `ORDER BY MAX(created_at) DESC` だけ（同着は実行計画次第）、fixture は挿入順だった。
   - `@mnemora/postgres` は副キーに `claim_key_predicate COLLATE "C" ASC` を足した（DB の照合順序に依らない）。`@mnemora/testkit` の `InMemoryMemoryStore` は UTF-8 のバイト列の比較（コードポイント順）で揃えた。DB マイグレーションは足していない。
   - `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの歯を3本足した。
   - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
   - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
+
+---
 
 ## [1.1.0] - 2026-09-30
 
