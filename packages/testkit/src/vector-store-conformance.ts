@@ -1337,21 +1337,23 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
 
       it("searchMany: 距離が完全に同点の行の並びも、単独の search() と同じで、呼ぶたびに変わらない（Issue #339 / ADR 0170）", async () => {
         const store = await createStore();
-        // 同じ vector を5件——距離は全件同点。recordedAt は異なるもの・同じものを混ぜて、
-        // tie-break の2段目（recordedAt）と3段目（memory_id）の両方を通す。
+        // 同じ vector を11件——距離は全件同点。recordedAt は異なるもの3件と、同じもの8件を混ぜて、
+        // tie-break の2段目（recordedAt）と3段目（memory_id）の両方を通す。memory_id は書いた順とは
+        // 無関係な値なので、8件が同じ recordedAt なら、memory_id で並べ切らない実装が偶然 search() と
+        // 同じ並びになる確率は 1/8! しかない。
+        const sameRecordedAt = new Date("2026-01-03T00:00:00.000Z");
         const recorded = [
           new Date("2026-01-01T00:00:00.000Z"),
-          new Date("2026-01-03T00:00:00.000Z"),
+          ...Array.from({ length: 8 }, () => sameRecordedAt),
+          new Date("2026-01-05T00:00:00.000Z"),
           new Date("2026-01-02T00:00:00.000Z"),
-          new Date("2026-01-03T00:00:00.000Z"),
-          new Date("2026-01-01T00:00:00.000Z"),
         ];
         for (const recordedAt of recorded) {
           await seedMany(manyCtx, store, [[1, 0, 0]], { recordedAt });
         }
-        const opts = { limit: 10, filter: manyFilter };
+        const opts = { limit: 20, filter: manyFilter };
         const single = await store.search(manyCtx, space, [1, 0, 0], opts);
-        expect(single).toHaveLength(5);
+        expect(single).toHaveLength(11);
 
         for (let round = 0; round < 3; round++) {
           const many = await store.searchMany!(
