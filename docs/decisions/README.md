@@ -414,9 +414,11 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0394](./0394-activity-clock-writes-use-memorys-own-subject.md) | 活動時計の書き込みは、`ctx` ではなく記憶自身の subject の `T + S_x` を使う（ADR 0353 の負債1の解消） | 採用 (2026-09) |
 | [0395](./0395-create-recall-activity-clock-single-statement.md) | `createRecall` の活動時計の加算を、`recalls` の INSERT と1つの SQL 文にする（ADR 0165 負債1 への案1） | 採用 (2026-09) |
 | [0396](./0396-recall-relation-max-count.md) | 段3（多者間の同伴取得）の群ごとの上限を、`RecallQuery.relationMaxCount` で呼び出し側から変えられるようにする | 採用 (2026-09) |
+| [0397](./0397-postgres-db-tests-isolate-false.md) | `packages/postgres` の DB テストの並列 project を `isolate: false` にする（Issue #1276 案E） | 採用 (2026-09) |
 | [0398](./0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md) | `RelationStore.link` は、入口で両端の記憶が `ctx` のテナントに属することを確かめる（複合外部キーの migration は入れない） | 採用 (2026-09) |
 | [0399](./0399-purge-embedding-cleanup-outcome-field.md) | `Runtime.purge` の埋め込み削除の失敗を、outcome の任意欄 `embeddingCleanup` で知らせる | 採用 (2026-09) |
 | [0400](./0400-general-fk-index-tooth.md) | 外部キーの索引は、固定表ではなく `pg_constraint` から数え上げる歯で縛る——`memory_labels.label_id` の漏れを足す | 採用 (2026-09) |
+| [0401](./0401-mark-resolve-contested-group-constant-statements.md) | `markContestedGroup` / `resolveContestedGroup` の関係の行の INSERT を実表の N² 結合にせず、メンバーごとの UPDATE / events INSERT を定数個の文にまとめる | 採用 (2026-09) |
 | [0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) | 古い `recalls` と完了済みの `outbox` 行を消す口 `purgeExpiredRecalls?` / `purgeCompletedJobs?` を足す | 採用 (2026-09) |
 | [0405](./0405-roundtrip-count-confirms-stats-before-measuring.md) | `recall-roundtrip-count` は、往復を数える前に `StatsPresenceGate` を確認済みにする | 採用 (2026-09) |
 

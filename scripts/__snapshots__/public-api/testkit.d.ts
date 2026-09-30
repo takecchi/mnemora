@@ -504,6 +504,7 @@ export { InMemoryLexicalStore } from "./__fixtures__/in-memory-lexical-store.js"
 export { InMemoryEventStore } from "./__fixtures__/in-memory-event-store.js";
 export { InMemoryOutboxStore } from "./__fixtures__/in-memory-outbox-store.js";
 export { InMemoryTenantSettingsStore } from "./__fixtures__/in-memory-tenant-settings-store.js";
+export type { StoredRelation } from "./__fixtures__/in-memory-memory-store.js";
 
 // ===== dist/index.d.ts =====
 export * from "./memory-store-conformance.js";

@@ -4,7 +4,12 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * `PostgresMemoryStore.supersedeWithNewMemories`（Issue #134 / ADR 0100）を
@@ -42,6 +47,7 @@ describe("PostgresMemoryStore.supersedeWithNewMemories を本物の並行・本�
     for (const client of pools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   it("同じ1行に4本が同時に expectedStatus:'active' で supersede を撃つと、ちょうど1本だけ conflicted が空になり、memory_events にちょうど1件だけ superseded が残る。news は4本とも作られる", async () => {

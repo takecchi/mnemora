@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
 import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, resetTestDatabase } from "./test-db.js";
+import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
  * `PostgresMemoryStore.resolveOrphanedContested`（Issue #825、ADR 0150 追記）を、
@@ -171,4 +171,8 @@ describe("PostgresMemoryStore.resolveOrphanedContested — 本物の Postgres（
     expect(storedB?.status).toBe("contested");
     expect(storedB?.contestedWithId).toBe(a.id);
   });
+});
+
+afterAll(async () => {
+  await closeTestClient();
 });

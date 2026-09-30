@@ -216,6 +216,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`PostgresMemoryStore.markContestedGroup` / `resolveContestedGroup` が、群の大きさ N に依らない定数個の SQL 文で書くようになった。関係の行の INSERT は、実表どうしの N² の結合をやめた**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 1-A の案D・案E、[ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。
+  - 【実測】鎖1000の mark は 2806 → 321 ms（文は 2005 → 7）、resolve は 1724 → 568 ms、`observe` 経由の検出は 5129 → 2770 ms。完全グラフ1000（作る行が999,000行）の mark は差が出ていない（約56秒のまま）。前後の表・測定の条件・器のノイズは ADR 0401。
+  - **観測できる振る舞いは変えていない**: 作る関係の行の集合（有効期間の半開区間・マイクロ秒精度の境目を含む）、`MemoryStatusConflictError` が指す id（複数のメンバーが外れているときは入力順で最初）、返り値の並び。歯は ADR 0401。公開の型・port・DB マイグレーションは変えていない。
+
 - **`PostgresMemoryStore.createRecall` が、活動時計を進めるとき（`decay_clock != 'wall'`）、`recalls` の INSERT とカウンタ（`tenant_activity`／`tenant_subject_activity`）の UPSERT を1つの SQL 文で撃つようになった**（[ADR 0395](./docs/decisions/0395-create-recall-activity-clock-single-statement.md)、[ADR 0165](./docs/decisions/0165-decay-activity-clock.md) 負債1）。意味（1 recall = 1 単位、recalls の行とカウンタが同じ原子性）・返り値・公開 API・スキーマは変わらない。狙いは、同じテナントへの同時 createRecall がカウンタの行で直列になる時間のうち、クライアントとの往復1回分を減らすこと。**「速くなった」とは言わない**——共有器での実測（各点3回・前後交互）は、器のノイズ（±20〜30%）に埋もれて効果を示せていない（subject 単位の行は3つの並列度すべてで中央値が後の側、activity_T の並列度16・32 は同等以下）。ホット行そのものは残る。カウンタを16行に分ける案は採らなかった。
 
 - **活動時計（`decay_clock` が `'activity'`/`'either'`）で、新しく作る記憶・強化する記憶の起点（`decayBaseSeq`/`decayFloorSeq`）を、`ctx.subjectId` ではなく、その記憶自身の subject の `T + S_x` で書くようになった**（[ADR 0394](./docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)、[ADR 0353](./docs/decisions/0353-activity-counting-per-call.md) 引き受けた負債1、[Issue #338](https://github.com/takecchi/mnemora/issues/338)）
@@ -261,6 +265,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの歯を3本足した。
   - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
   - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
+
+- **`@mnemora/testkit` が `zod` を `peerDependencies`（`^4.5.4`、`@mnemora/core` と同じ範囲）に宣言するようになった。** 公開の型 `LLMProviderConformanceOptions` が `import type { z } from "zod"` を d.ts に持つのに、`zod` は `devDependencies` にしか無かった。【実測】pnpm を `hoist=false`（厳格な配置）にした利用者の一時プロジェクトで testkit の tarball を入れて `tsc`（`skipLibCheck: false`）に掛けると `TS2307: Cannot find module 'zod'` で落ちた（既定の hoist では `.pnpm/node_modules` 経由で解決できてしまう。`skipLibCheck: true` では型が黙って `any` になる）。peer にしたあとは同じ手順で解決する。実行時の import は無い（型のみ）。`dependencies` にしなかったのは、利用者側の `zod` と二重に入ると `z.ZodType` の型が噛み合わなくなるため。
+
+- **`@mnemora/testkit/fixtures` が型 `StoredRelation` を export するようになった。** `InMemoryRelationStore` のコンストラクタの第2引数（`memoryStore.relations` と共有する配列）の要素型だが、入口から名指せなかった。型の追加のみ（実行時は変わらない）。公開 API snapshot を更新した。
+
+- **`@mnemora/bullmq` の tick driver が、`runtime.tick()` の失敗を `onTickError` に渡すようになった。** BullMQ の Worker は processor の throw を `'error'` ではなく `'failed'` として emit する（【実測】bullmq 6.3.8、Redis 互換サーバ Valkey 8.1.3 上の実 Worker で `'failed'` だけが1回 emit され、`'error'` は出なかった）。以前の driver は `'error'` しか聴いていなかったため、`tick()` が throw しても `onTickError` も `onTickResult` も呼ばれず、失敗が誰にも見えなかった。いまは `'failed'` を拾い、job ではなく error を渡す（`'error'` とは別の経路で、1回の失敗につき1回）。`onTickError` を渡していない人には見える変化は無い。渡している人は、これまで届かなかった tick の失敗が届くようになる（エラー通知の件数が増えうる）。再試行は足していない（繰り返しジョブは次の発火でまた tick する）。
 
 ---
 
