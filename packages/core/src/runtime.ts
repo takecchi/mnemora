@@ -7408,9 +7408,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           actor,
           digestSnapshot: memory.digest,
           meta:
-            status === "superseded"
-              ? { ...buildMeta(), supersededById: winnerId! }
-              : buildMeta(),
+            status === "superseded" ? { ...buildMeta(), supersededById: winnerId! } : buildMeta(),
         };
         return status === "superseded"
           ? { id, status, supersededById: winnerId!, event }

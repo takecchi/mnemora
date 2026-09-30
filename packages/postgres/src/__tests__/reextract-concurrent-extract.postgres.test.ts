@@ -69,7 +69,9 @@ function gateWrite(store: MemoryStore) {
     get(target, prop) {
       const value = Reflect.get(target, prop, target);
       if (prop === "supersedeWithNewMemories") {
-        return async (...args: Parameters<NonNullable<MemoryStore["supersedeWithNewMemories"]>>) => {
+        return async (
+          ...args: Parameters<NonNullable<MemoryStore["supersedeWithNewMemories"]>>
+        ) => {
           if (gate.armed) {
             gate.armed = false;
             gate.entered();
