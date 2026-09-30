@@ -304,5 +304,96 @@ describe.each(KITS)(
         });
       }
     });
+
+    // Issue #1449 項目6: 群版 `resolveContestedGroup` の winnerId も、2者版と同じ規則で大文字小文字を救済する
+    // （一致しなければ小文字化で memberIds から候補を集め、ちょうど1件かつ store の `get` が同じ記憶と言うときだけ、
+    // その memberId の綴りを勝者として使う）。
+    const contestedTrio = async (kit: Kit, prefix: string) => {
+      const a = await create(kit, `${prefix}-a`);
+      const b = await create(kit, `${prefix}-b`);
+      const c = await create(kit, `${prefix}-c`);
+      const marked = await kit.runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+      expect(marked.outcome.kind).toBe("contested_group");
+      return { a, b, c };
+    };
+
+    it("resolveContestedGroup（supersede）: 大文字の winnerId でも、store が同じ記憶と言えば通り、敗者の supersededById とイベントの meta は列の値（小文字）", async () => {
+      const kit = await makeKit();
+      const { a, b, c } = await contestedTrio(kit, "grp-win");
+
+      const run = () =>
+        kit.runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+          kind: "supersede",
+          winnerId: upper(a.id),
+        });
+
+      if (kit.caseInsensitive) {
+        const result = await run();
+        expect(result.outcome.kind).toBe("resolved");
+        const [sa, sb, sc] = await Promise.all(
+          [a.id, b.id, c.id].map((id) => kit.memoryStore.get(ctx, id)),
+        );
+        expect([sa?.status, sb?.status, sc?.status]).toEqual([
+          "active",
+          "superseded",
+          "superseded",
+        ]);
+        expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
+        expect((await lastEventMeta(kit, b.id)).supersededById).toBe(a.id);
+        expect((await lastEventMeta(kit, c.id)).supersededById).toBe(a.id);
+      } else {
+        await expect(run()).rejects.toBeInstanceOf(RangeError);
+        expect((await kit.memoryStore.get(ctx, a.id))?.status).toBe("contested");
+      }
+    });
+
+    it("やりすぎの歯（群）: 小文字の winnerId の結果は変わらない", async () => {
+      const kit = await makeKit();
+      const { a, b, c } = await contestedTrio(kit, "grp-lower");
+
+      const result = await kit.runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+        kind: "supersede",
+        winnerId: c.id,
+      });
+
+      expect(result.outcome.kind).toBe("resolved");
+      const [sa, sc] = await Promise.all([a.id, c.id].map((id) => kit.memoryStore.get(ctx, id)));
+      expect([sa?.status, sa?.supersededById, sc?.status]).toEqual(["superseded", c.id, "active"]);
+    });
+
+    it("やりすぎの歯（群）: どの member とも違う winnerId は今どおり RangeError（何も書かない）", async () => {
+      const kit = await makeKit();
+      const { a, b, c } = await contestedTrio(kit, "grp-bad");
+
+      await expect(
+        kit.runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+          kind: "supersede",
+          winnerId: "someone-else",
+        }),
+      ).rejects.toBeInstanceOf(RangeError);
+      const statuses = await Promise.all(
+        [a.id, b.id, c.id].map(async (id) => (await kit.memoryStore.get(ctx, id))?.status),
+      );
+      expect(statuses).toEqual(["contested", "contested", "contested"]);
+    });
+
+    it("やりすぎの歯（群）: 大文字小文字だけ違う候補が2件以上あるとき（memberIds に同じ記憶の2つの綴り）は救済しない", async () => {
+      const kit = await makeKit();
+      const { a, b, c } = await contestedTrio(kit, "grp-ambiguous");
+      const capitalized = a.id.replace(/[a-z]/, (ch) => ch.toUpperCase());
+      expect(capitalized).not.toBe(a.id);
+
+      // memberIds は文字列として重複していないので入口は通るが、勝者の綴りに合う候補が2件ある。
+      await expect(
+        kit.runtime.resolveContestedGroup!(ctx, [a.id, upper(a.id), b.id, c.id], {
+          kind: "supersede",
+          winnerId: capitalized,
+        }),
+      ).rejects.toBeInstanceOf(RangeError);
+      const statuses = await Promise.all(
+        [a.id, b.id, c.id].map(async (id) => (await kit.memoryStore.get(ctx, id))?.status),
+      );
+      expect(statuses).toEqual(["contested", "contested", "contested"]);
+    });
   },
 );

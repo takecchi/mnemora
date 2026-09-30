@@ -255,3 +255,106 @@ describe("runtime.resolveContestedGroup — MemoryStore.resolveContestedGroup �
     expect(result).toEqual({ supported: false, outcome: { kind: "not_attempted" } });
   });
 });
+
+/**
+ * Issue #1449 項目6: 群版の winnerId の大文字小文字の救済（2者版 `resolveContested` と同じ規則）。
+ * Fake の `get` は大文字小文字を区別する——`@mnemora/postgres` のように区別しない store は
+ * `get` だけを小文字にそろえる差し替えで表す（救済が使うのは `get` だけで、書き込み側には
+ * 元の memberIds の綴りを渡すため）。Postgres の本物の歯は
+ * `packages/postgres/src/__tests__/uppercase-uuid-contested-runtime.postgres.test.ts`。
+ */
+describe("runtime.resolveContestedGroup — winnerId の大文字小文字の救済（Issue #1449 項目6）", () => {
+  function buildCaseInsensitiveGetRuntime(
+    override?: (id: string, real: (id: string) => Promise<unknown>) => Promise<unknown>,
+  ) {
+    const stores = createFakeRuntimeStores();
+    const calls: string[] = [];
+    const memoryStore = Object.create(stores.memoryStore) as typeof stores.memoryStore;
+    memoryStore.get = (async (c: Ctx, id: string) => {
+      calls.push(id);
+      const real = (i: string) => stores.memoryStore.get(c, i.toLowerCase());
+      return override ? override(id, real) : real(id);
+    }) as typeof stores.memoryStore.get;
+    const runtime = createRuntime({
+      memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: notUsedLlm,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+      relationStore: stores.relationStore,
+    });
+    return { runtime, stores, calls };
+  }
+
+  it("大文字の winnerId が、store が同じ記憶と言えば通り、敗者の supersededById は memberIds の綴り（列の値）になる", async () => {
+    const { runtime, stores } = buildCaseInsensitiveGetRuntime();
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+
+    const result = await runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+      kind: "supersede",
+      winnerId: a.id.toUpperCase(),
+    });
+
+    expect(result.outcome.kind).toBe("resolved");
+    const [sa, sb, sc] = await Promise.all(
+      [a.id, b.id, c.id].map((id) => stores.memoryStore.get(ctx, id)),
+    );
+    expect([sa?.status, sb?.status, sc?.status]).toEqual(["active", "superseded", "superseded"]);
+    expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
+    const events = await stores.eventStore.list(ctx, { memoryId: b.id });
+    expect(events[events.length - 1]!.meta["supersededById"]).toBe(a.id);
+  });
+
+  it("store の get が別の記憶を返すなら RangeError（何も書かない）", async () => {
+    // winnerId（大文字の綴り）として引いたときだけ、別の記憶 b を返す。
+    let bId = "";
+    const { runtime, stores } = buildCaseInsensitiveGetRuntime((id, real) =>
+      id === id.toUpperCase() && id !== id.toLowerCase() ? real(bId) : real(id),
+    );
+    const { a, b, c } = await createContestedTrio(stores);
+    bId = b.id;
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+
+    await expect(
+      runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+        kind: "supersede",
+        winnerId: a.id.toUpperCase(),
+      }),
+    ).rejects.toThrow(RangeError);
+    for (const id of [a.id, b.id, c.id]) {
+      expect((await stores.memoryStore.get(ctx, id))?.status).toBe("contested");
+    }
+  });
+
+  it("どの member とも（大文字小文字を無視しても）違う winnerId は、store を読まずに RangeError", async () => {
+    const { runtime, stores, calls } = buildCaseInsensitiveGetRuntime();
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    calls.length = 0;
+
+    await expect(
+      runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+        kind: "supersede",
+        winnerId: "someone-else",
+      }),
+    ).rejects.toThrow(RangeError);
+    expect(calls).toEqual([]);
+  });
+
+  it("大文字小文字だけ違う候補が2件以上あれば救済しない（RangeError、store は読まない）", async () => {
+    const { runtime, calls } = buildCaseInsensitiveGetRuntime();
+
+    await expect(
+      runtime.resolveContestedGroup!(ctx, ["mem-x", "MEM-X", "mem-y"], {
+        kind: "supersede",
+        winnerId: "Mem-X",
+      }),
+    ).rejects.toThrow(RangeError);
+    expect(calls).toEqual([]);
+  });
+});
