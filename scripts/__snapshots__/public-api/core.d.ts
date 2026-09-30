@@ -2385,6 +2385,7 @@ export interface RecallQuery {
     attributes?: Attributes;
     labels?: string[];
     taxonomyGroups?: boolean;
+    relationMaxCount?: number;
     occurredAfter?: Date;
     occurredBefore?: Date;
     limit?: number;
@@ -2477,6 +2478,7 @@ export declare const RecallQuerySchema: z.ZodObject<{
     }>>;
     labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
     taxonomyGroups: z.ZodOptional<z.ZodBoolean>;
+    relationMaxCount: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;

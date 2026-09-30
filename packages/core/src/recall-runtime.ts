@@ -1523,12 +1523,13 @@ export async function runRecall(
   //   `companionOf` は「id の小さい親」に決まる（Issue #1449 項目7、ADR 0381 追記）。
   // - **群ごとに**探索し、群ごとに切る（ADR 0381 決定4）。同じ群の owner が複数候補に
   //   居ても、最初の owner からの探索がその群を丸ごと辿るので、2回目は探索しない。
-  // - **探索自体を止める安全弁**: 群ごとに、訪れた id の数（owner を含む）が `maxCount`
+  // - **探索自体を止める安全弁**: 群ごとに、訪れた id の数（owner を含む）が `relationMaxCount`
   //   （既定10）の10倍を1件も超えないよう、1件たどるごとに確かめて BFS を打ち切る——
   //   理由は下のコメント（`EXPLORATION_VISIT_LIMIT`）参照。
   // - 見つかった候補（元々候補集合に無かったもの）は `survivesAttributesFilter` を
-  //   通してから、**群ごとに上限 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount 件**（連想枠と
-  //   同じ既定値を流用する、この回の決定。**この上限に owner 自身〔既に `withinLimit`
+  //   通してから、**群ごとに上限 {@link RecallQuery.relationMaxCount} 件**（省略時は連想枠と
+  //   同じ既定値 {@link DEFAULT_RECALL_ASSOCIATION}.maxCount を流用する〔ADR 0381 の決定。
+  //   欄は ADR 0396 で足した〕。**この上限に owner 自身〔既に `withinLimit`
   //   に居る候補〕は数えない**——`detail.companionsAdded` が「同伴として足した件数」
   //   だけを数える既存の規約〔下の `stages.push` 参照〕と揃えた）まで、
   //   **`validFrom` の新しい順→`id` の順**で残す（`validFrom` が無い候補は最も古い
@@ -1565,8 +1566,12 @@ export async function runRecall(
       // 辿れば、真の validFrom 最新 maxCount 件をほぼ確実に含む」という実務的な安全域
       // であり、厳密な保証ではない。これを超える巨大な群は `countKind` を
       // `"lower_bound"` に倒して「測っていない」と正直に言う（[ADR 0292](../../../docs/decisions/0292-relation-graph-table-depth-omitted-design.md)
-      // 決定2-a と同じ「測れない拡張を先取りしない」判断——今日は可変にしない）。
-      const EXPLORATION_VISIT_LIMIT = DEFAULT_RECALL_ASSOCIATION.maxCount * 10;
+      // 決定2-a と同じ「測れない拡張を先取りしない」判断。今日は上限を欄で動かせる——ADR 0396）。
+      // 群ごとの上限は `RecallQuery.relationMaxCount`（省略時 10）。安全弁はその10倍に連動する
+      // （既定なら従来どおり100件。ADR 0396）。
+      const relationMaxCount =
+        validatedQuery.relationMaxCount ?? DEFAULT_RECALL_ASSOCIATION.maxCount;
+      const EXPLORATION_VISIT_LIMIT = relationMaxCount * 10;
       // どれかの群の探索で既に訪れた id。同じ群の owner が複数候補に居ても、2回目は
       // 探索しない（最初の owner からの探索が、その群を丸ごと辿っている）。
       const visitedAll = new Set<MemoryId>();
@@ -1636,7 +1641,7 @@ export async function runRecall(
         // 決まったこと（この回のマネージャー指示）: validFrom の新しい順→id の順。
         // validFrom が無い候補は「新しさの情報が無い」として最後尾（最も古い扱い）。
         const sorted = [...eligible].sort(compareByValidFromDescThenId);
-        const capped = sorted.slice(0, DEFAULT_RECALL_ASSOCIATION.maxCount);
+        const capped = sorted.slice(0, relationMaxCount);
         const overLimitRelationCount = sorted.length - capped.length;
         if (overLimitRelationCount > 0) {
           omitted.push({

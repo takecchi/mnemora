@@ -290,12 +290,13 @@ export interface BelowThresholdOmission {
  *   （`docs/recall.md` §9）。次の一手: `maxCount` を増やす。**`limit` を増やしても
  *   直らない**——連想枠の候補は段2の `limit` とは別の上限（`maxCount`）で切られる。
  * - `"relation"`（Issue #207/#933 PR2、ADR 0292 決定3-a、ADR 0381）— 段3。多者間の
- *   `contested` 群（`RelationStore.listRelated` で辿った同伴）が
- *   {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ上限件数を超えた分
- *   （`docs/recall.md` §2 段3・§8）。次の一手: 今日この上限は呼び出し側から調整できない
- *   （`association` の `maxCount` のような専用のクエリ欄は無い）——群そのものを分割する
- *   （`resolveContestedGroup` で一部を解消する）以外に減らす手立てが無いことも含めて
- *   `docs/recall.md` に記録する。
+ *   `contested` 群（`RelationStore.listRelated` で辿った同伴）が群ごとの上限件数
+ *   （{@link RecallQuery.relationMaxCount}、省略時は
+ *   {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ10）を超えた分
+ *   （`docs/recall.md` §2 段3・§8）。次の一手: `RecallQuery.relationMaxCount` を増やす
+ *   （ADR 0396。それまでは呼び出し側から動かす口が無く、群そのものを分割する
+ *   〔`resolveContestedGroup` で一部を解消する〕以外に手立てが無かった）。`limit` や
+ *   `association.maxCount` を増やしても直らない。
  */
 export interface OverLimitOmission {
   /** 常に `"over_limit"`（{@link Omission} の判別の鍵）。 */
@@ -1854,6 +1855,28 @@ export interface RecallQuery {
    * （`taxonomy` 軸のエントリが1つも生成されない。`labels` と同じ規律）。
    */
   taxonomyGroups?: boolean;
+  /**
+   * **段3（`contradiction_resolution`）の多者間の同伴取得の、群ごとの上限件数**
+   * （Issue #1449 項目8、[ADR 0396](../../../docs/decisions/0396-recall-relation-max-count.md)）。
+   *
+   * 多者間の `contested` 群（`RuntimeDeps.relationStore` で辿る）が見つかったとき、群ごとに
+   * 何件まで同伴として載せるか。超えた分は `validFrom` の新しい順→`id` の順で切られ、
+   * 群ごとに1件の `over_limit { stage: "relation" }` に積まれる。**owner（元々候補に居た記憶）は
+   * 数えない**（`detail.companionsAdded` と同じ規約）。
+   *
+   * **省略すると {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（10）——この欄が無かった時点の
+   * 挙動と1バイトも変わらない**（明示で `10` を渡した呼び出しとも同一。歯:
+   * `recall-relation-max-count.test.ts`）。**正の整数、1〜1000。**
+   *
+   * **探索の安全弁（群ごとに訪れた数の上限）はこの欄の10倍に連動する**（既定10なら従来どおり
+   * 100件）。連動させないと、100を超える値を指定しても群の探索が100件で止まり、指定した値が
+   * 効かない（常に `countKind: "lower_bound"` になる）。上限を1000にしたのは、安全弁
+   * （＝`listRelated` を呼ぶ回数の上限）を1万件で頭打ちにするため。
+   *
+   * `association.maxCount`（連想枠）とは別の欄——連想枠には効かず、連想枠の上限もこの欄に
+   * 連動しない。
+   */
+  relationMaxCount?: number;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以後の記憶だけを対象にする（境界を含む）。 */
   occurredAfter?: Date;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以前の記憶だけを対象にする（境界を含む）。 */
@@ -2363,6 +2386,8 @@ export const RecallQuerySchema = z.object({
   // Issue #201 PR-B（ADR 0323）。
   labels: z.array(z.string()).optional(),
   taxonomyGroups: z.boolean().optional(),
+  // Issue #1449 項目8（ADR 0396）。上限1000の理由は `RecallQuery.relationMaxCount` の doc。
+  relationMaxCount: z.number().int().positive().max(1000).optional(),
 }) satisfies z.ZodType<RecallQuery>;
 
 /**
