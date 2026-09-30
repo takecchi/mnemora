@@ -500,6 +500,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`Runtime.reembed` が、`limit` を省いたとき・数なのに 0 以上の整数でないとき（負・小数・`NaN`・±`Infinity`）に、store を呼ぶ前に `RangeError`（`Runtime.reembed: limit must be a non-negative integer`）を投げるようにした**（[ADR 0433](./docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定4）。以前は `limit` を省くと Postgres の `syntax error at or near "FOR"` など、SQL の側の分かりにくい例外だった。`0` と正の整数は今までどおり通る。
 
+- **`@mnemora/testkit/fixtures` のインメモリ実装を、Postgres 実装に揃えた**（[ADR 0434](./docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)）。Postgres が拒む入力を、インメモリも同じく拒む: NUL（U+0000）を `createMemory` 系の `claimKey`・`extractorVersion`・`jobKinds`、イベントの `digestSnapshot`、`purgeMemory` の墓石、読み取りの口（`findActiveByClaimKey`・`listBySourceObservation`・`aggregateScope`・`LexicalStore.search` の `filter.attributes`・`getSubjectActivitySeqs`）に含むとき、`MemoryEvent.sizeBeforeBytes` が整数でない・int4 の範囲の外のとき、`reinforce` の `nowSeq` が整数でない・範囲の外（書くときは負も）のとき、outbox の行を書くときの `opts.now` が Invalid Date のとき。以前は通して保存し、`reinforce` は `decayBaseSeq` に `NaN` を書いていた。`createMemory` に渡した `purgedAt` は、インメモリも保存しない（Postgres と同じ。断らない）。Postgres が通す入力（境界ちょうどの値、行を書かないときの `now`・`jobKinds` など）は通したまま。`@mnemora/testkit/fixtures` は fixture なので、新しく例外を投げる変更は破壊的変更として数えない（`docs/migration-v1.md` の規律2）。公開 API に差分は無い。適合テストには足していない。
+
 ---
 
 ## [1.1.0] - 2026-09-30
