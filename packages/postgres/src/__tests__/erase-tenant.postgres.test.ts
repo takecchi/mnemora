@@ -374,4 +374,107 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     expect(await countAll(pool, T)).toEqual(beforeT);
     expect(await countAll(pool, OTHER)).toEqual(beforeOther);
   }, 120_000);
+
+  // ADR 0383 の約束: 「設定は最後にする」。`limit` で止まった回は、後ろの port
+  // （埋め込み・outbox・設定）に触れない。
+  it("limit で途中で止まった回は、設定・outbox・埋め込みを消さない（呼び直せば最後まで消える）", async () => {
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const runtime = buildRuntime(db);
+    const T = "erase-tenant-stops-at-limit";
+    const OTHER = "erase-tenant-stops-at-limit-keep";
+    await seedTenant(runtime, new PostgresTenantSettingsStore(db), T);
+    await seedTenant(runtime, new PostgresTenantSettingsStore(db), OTHER);
+
+    const embeddingTable = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
+    const before = await countAll(pool, T);
+    const otherBefore = await countAll(pool, OTHER);
+    // `limit` より多い行が残る形になっていること（そうでないと「止まった回」が作れない）。
+    const LIMIT = 10;
+    expect(before.memories).toBeGreaterThan(0);
+    expect(before.memories + before.memory_events + before.recalls).toBeGreaterThan(LIMIT);
+    expect(before.tenant_settings).toBeGreaterThan(0);
+    expect(before.outbox).toBeGreaterThan(0);
+    expect(before[embeddingTable]).toBeGreaterThan(0);
+
+    const deps = {
+      memoryStore: new PostgresMemoryStore(db),
+      vectorStore: new PostgresVectorStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+    };
+    const ctxT: Ctx = { tenantId: T };
+
+    // 1回目: `limit` で止まる。
+    const first = await eraseTenant(ctxT, deps, { confirmTenantId: T, limit: LIMIT });
+    expect(first.kind).toBe("executed");
+    if (first.kind !== "executed") throw new Error("unreachable");
+    expect(first.reachedLimit).toBe(true);
+    const afterFirst = await countAll(pool, T);
+    // まだ消え残りがある（途中で止まった）。
+    expect(afterFirst.memories + afterFirst.memory_events + afterFirst.recalls).toBeGreaterThan(0);
+    // 設定と outbox は1行も消えていない。
+    expect(afterFirst.tenant_settings).toBe(before.tenant_settings);
+    expect(afterFirst.outbox).toBe(before.outbox);
+    // 埋め込みは、消えた memories に CASCADE で巻き込まれた分しか減らない。
+    expect(before[embeddingTable]! - afterFirst[embeddingTable]!).toBeLessThanOrEqual(
+      before.memories - afterFirst.memories,
+    );
+
+    // 呼ばなかった port の deleted は 0。
+    expect(first.deleted.vectorStore).toBe(0);
+    expect(first.deleted.outboxStore).toBe(0);
+    expect(first.deleted.tenantSettingsStore).toBe(0);
+
+    // 呼び直す。途中の回では、設定は残り続ける。
+    let outcome = first;
+    let guard = 0;
+    while (outcome.reachedLimit) {
+      guard += 1;
+      expect(guard).toBeLessThan(50);
+      const mid = await countAll(pool, T);
+      expect(mid.tenant_settings).toBe(before.tenant_settings);
+      const next = await eraseTenant(ctxT, deps, { confirmTenantId: T, limit: LIMIT });
+      expect(next.kind).toBe("executed");
+      if (next.kind !== "executed") throw new Error("unreachable");
+      outcome = next;
+    }
+    expect(guard).toBeGreaterThan(0);
+    expect(outcome.reachedLimit).toBe(false);
+
+    const after = await countAll(pool, T);
+    for (const [table, n] of Object.entries(after)) {
+      expect({ table, n }).toEqual({ table, n: 0 });
+    }
+    expect(await countAll(pool, OTHER)).toEqual(otherBefore);
+  }, 120_000);
+
+  it("dryRun: true でも、memoryStore が limit で止まったら後ろの port の deleted は 0（本番の1回目と同じ形）", async () => {
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const runtime = buildRuntime(db);
+    const T = "erase-tenant-stops-at-limit-dry-run";
+    await seedTenant(runtime, new PostgresTenantSettingsStore(db), T);
+    const before = await countAll(pool, T);
+
+    const outcome = await eraseTenant(
+      { tenantId: T },
+      {
+        memoryStore: new PostgresMemoryStore(db),
+        vectorStore: new PostgresVectorStore(db),
+        outboxStore: new PostgresOutboxStore(db),
+        tenantSettingsStore: new PostgresTenantSettingsStore(db),
+      },
+      { confirmTenantId: T, limit: 10, dryRun: true },
+    );
+    expect(outcome.kind).toBe("executed");
+    if (outcome.kind !== "executed") throw new Error("unreachable");
+    expect(outcome.dryRun).toBe(true);
+    expect(outcome.reachedLimit).toBe(true);
+    expect(outcome.deleted.memoryStore).toBe(10);
+    expect(outcome.deleted.vectorStore).toBe(0);
+    expect(outcome.deleted.outboxStore).toBe(0);
+    expect(outcome.deleted.tenantSettingsStore).toBe(0);
+    expect(await countAll(pool, T)).toEqual(before);
+  }, 60_000);
 });
