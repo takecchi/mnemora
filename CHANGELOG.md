@@ -68,7 +68,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力（孤立サロゲートか NUL を含む識別子）が、新しく例外になる**。あわせて、conformance suite の判定が厳しくなり、入口で断らない自前の store は、新しく実行時に落ちる（項目21・23・24・27 と同じ扱い）。
   - **誰が影響を受けるか**: 識別子に外部の入力をそのまま渡している呼び出し側のうち、孤立サロゲートか NUL を含みうるもの。自前の store を `describeMemoryStoreConformance`・`describeOutboxStoreConformance`・`describeVectorStoreConformance`・`describeLexicalStoreConformance`・`describeEventStoreConformance`・`describeRelationStoreConformance`・`describeTenantSettingsStoreConformance` に当てている利用者。
   - **変えなかったこと**: 本文（`text`・`content`・`payload`・`attributes` の値）の扱い——`text` 列の孤立サロゲートを U+FFFD に置き換える今の扱い、`jsonb` 列が断る今の扱い。`tags` の要素・`claimKey` の主語と述語・ラベル名（今回は対象にしていない）。すでに保存された行。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目36。DB マイグレーションは無い。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目41。DB マイグレーションは無い。
   - 【確かめていないこと】本物の2つの版の core が並ぶ環境。過去に U+FFFD へ置き換わって保存された識別子がデータに在るか。
 
 - **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった。新しい interface `RelationStore` と、それを検査する新設の conformance suite も増えた**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)・[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）。**この節の範囲で1件目の破壊的変更。**
@@ -199,8 +199,20 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**conformance suite の判定が厳しくなり、テナントの条件を持たない自前の実装は、新しく実行時に落ちる**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の規律。オーナーの回答 `6911db12` により、`v1.X.0` で出してよい）。
   - **誰が影響を受けるか**: 自前の `RelationStore`・`OutboxStore`・`TenantSettingsStore` を上の suite に当てている利用者のうち、別テナントの行に触れる実装。`@mnemora/postgres` とインメモリの実装は、足した `it` に通る。
-  - **変えなかったこと**: suite の引数（適合フラグ・フック）。公開 API の型。DB マイグレーションは無い。
+  - **変えなかったこと**: suite の引数（適合フラグ・フック）。公開 API の型。**移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目36。DB マイグレーションは無い。
   - 【確かめていないこと】インメモリ実装（`packages/testkit` の `__fixtures__`）の各口を1つずつ変えて調べる走査（足した `it` がインメモリ実装で緑であることだけを確かめた）。
+
+- **`@mnemora/testkit` の `describeMemoryStoreConformance` が、自前の `MemoryStore` 実装に4つの約束を新しく課すようになった——`reinforce`/`reinforceMany?` が `memory_events` を書かないこと、`aggregateScope` が `scopeAggregate: 'skip'` を守ること、`createObservationWithOutbox` が `opts.claimedBy` を守ること（この3つはフラグ無しの `it`）、`listActiveClaimPredicates?` の同着の並び**（[PR #1452](https://github.com/takecchi/mnemora/pull/1452)・[PR #1455](https://github.com/takecchi/mnemora/pull/1455)・[PR #1484](https://github.com/takecchi/mnemora/pull/1484)・[PR #1492](https://github.com/takecchi/mnemora/pull/1492)）。
+
+  4つとも、下の `### Added`/`### Changed`/`### Fixed` に「非破壊」と書いて載せていたが、[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」規律2 の ⛔（「conformance スイートの判定を厳しくする変更」は数える）に当たる。上の [PR #1498](https://github.com/takecchi/mnemora/pull/1498) と同じ読みで、ここに数え直した。型・シグネチャは変わらない。変わるのは、条件を満たさない自前の実装が、suite を当てると**実行時に新しく落ちる**ことである。`@mnemora/postgres` とインメモリの実装は、足した `it` に通る。
+
+  1. **`reinforce`/`reinforceMany?` が `memory_events` に1行も書かない**（[Issue #871](https://github.com/takecchi/mnemora/issues/871)、PR #1452。`docs/memory-model.md` §11 行4 の約束）。フラグ無しで走る。`reinforce` の `it` は常に、`reinforceMany` の `it` は実装があるときだけ検査する。強化のたびにイベントを積む自前の実装は落ちる。
+  2. **`aggregateScope` が `opts.scopeAggregate: 'skip'` を守る**（PR #1455、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）。フラグ無しの `it` が、`'skip'` のとき `groups` が空・`totalInScope` が `0`・`countKind` が `'unknown'`（`filtered*`・`notIndexed.*` も `{ count: 0, countKind: 'unknown' }`）であること、`'skip'` かつ `digestBand` 省略なら `digestEligible` が `{ count: 0, countKind: 'exact' }` であること、省略と `'exact'` の結果が同じであることを検査する。`scopeAggregate` を読まずに常に集計して `'exact'` を返す自前の実装は落ちる。
+  3. **`listActiveClaimPredicates?` の同着の並び**（PR #1484、[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。`supportsListActiveClaimPredicates: true` の枝に、同着（代表行の `created_at` が同じ predicate が複数）を predicate のコードポイント順の昇順で返すこと、`limit` で切っても同じ先頭が残ること、照合順序（collation）に依らないことを検査する `it` が3本増えた。`true` を渡していて並びが違う実装は落ちる。フラグを渡さなければ何も変わらない。
+  4. **`createObservationWithOutbox` が `opts.claimedBy` を守る**（PR #1492、[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。フラグ無しの `it` が、`claimedBy` を渡すと outbox 行が claim 済み（`claimedBy`・`attempts: 1`）で作られること、省略すると未 claim・`attempts: 0` であることを検査する。`claimedBy` を無視する自前の実装は落ちる。
+  - **誰が影響を受けるか**: 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者。1・2・4 はフラグを渡していなくても当たる。3 は `supportsListActiveClaimPredicates: true` を渡している場合だけ当たる。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目37〜40。DB マイグレーションは無い。
+  - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres` とインメモリの実装が通ることだけを確かめた）。
 
 ### Added
 
@@ -217,7 +229,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/postgres` に、`listActiveClaimPredicates` 用の部分索引 `idx_memories_claim_predicates` を足す migration `0029_memories_claim_predicates_index.sql` を足した**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、[ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md) の2026-09-30追記）。`(tenant_id, subject_id, claim_key_predicate, created_at)` の部分索引（`WHERE status = 'active' AND claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）。SQL と振る舞いは変えない。**DB マイグレーション**: 要る（`mnemora-postgres-migrate` か `runMigrations`）。索引作成の間、`memories` への書き込みは止まる（素の `CREATE INDEX`）。100万行・visibility map が all-visible の測定で、`listActiveClaimPredicates` の中央値は 3.52ms から 1.63ms（10万行では差があるとは言えない）。数字と測っていないことは ADR に書いた。
 - **`@mnemora/postgres` に `createOptionalTrigramIndexConcurrently(db)` を足した**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、[ADR 0319](./docs/decisions/0319-optional-trigram-lexical-store.md) の2026-09-30追記）。`createOptionalTrigramIndex` と同じ形の索引 `idx_memories_trigram` を、`CREATE INDEX CONCURRENTLY` で（`memories` への書き込みを止めずに）張る。トランザクションの外で呼ぶこと。前回の失敗で `indisvalid = false` の同名索引が残っていれば、`DROP INDEX CONCURRENTLY` で消してから作り直す。既存の `createOptionalTrigramIndex` は変わらない（公開 API は追加のみ）。⚠ 複数の呼び出し元が同時に呼んだときの競合は防いでいない。
-- **`@mnemora/testkit` の `describeMemoryStoreConformance` に、`reinforce`/`reinforceMany?` が `memory_events` を1行も書かないことを検査する `it` を足した**（[Issue #871](https://github.com/takecchi/mnemora/issues/871)、[PR #1452](https://github.com/takecchi/mnemora/pull/1452)。`docs/memory-model.md` §11 行4 が約束していた振る舞いに、対応する歯が無かった。クローン miku の委譲先の判断であり、オーナーの判断ではない）——自前の `MemoryStore` 実装を conformance suite に当てている外部 adapter 実装者にも、この約束が効くようになる。
+- **`@mnemora/testkit` の `describeMemoryStoreConformance` に、`reinforce`/`reinforceMany?` が `memory_events` を1行も書かないことを検査する `it` を足した**（[Issue #871](https://github.com/takecchi/mnemora/issues/871)、[PR #1452](https://github.com/takecchi/mnemora/pull/1452)。`docs/memory-model.md` §11 行4 が約束していた振る舞いに、対応する歯が無かった。クローン miku の委譲先の判断であり、オーナーの判断ではない）——自前の `MemoryStore` 実装を conformance suite に当てている外部 adapter 実装者にも、この約束が効くようになる。⚠ **この `it` はフラグ無しで走るので、破壊的変更として上の `### Breaking` に数えた**（移行は [docs/migration-v1.md](./docs/migration-v1.md) の項目38）。
 - **多者間（3件以上）の `contested` を表す関係グラフ `memory_relations` と、それを書く・読む口を足した**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)/[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0292](./docs/decisions/0292-relation-graph-table-depth-omitted-design.md)、[ADR 0327](./docs/decisions/0327-relation-graph-contested-write-path-design.md)、[ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）——`markContested`/`resolveContested` は1対1の対にしか対応せず、1つの記憶が複数の記憶と同時に争われる場合を表せなかった。
   - **新しい migration `0026_memory_relations.sql`。** `memory_relations`（`kind` は当面 `'contradicts'` の1値。1組につき向きを変えて2行）を新設する。2者の対は今までどおり `contested_with_id` の列で持ち、既存のデータは動かさない。
   - **新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）。** `@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`（`InMemoryRelationStore`）が実装する。配線は任意（`RuntimeDeps.relationStore?`）。
@@ -228,9 +240,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`RecallQuery` に `scopeAggregate?: "exact" | "skip"` を足した**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C）——`recall()` のたびに条件なしで呼ばれる `MemoryStore.aggregateScope` の件数集計（`GROUP BY subject_id`、100万行で約1.1〜1.3秒を占める支配項）を、呼び出し側が明示的に選んだときだけ止められるようにした。
   - **既定は省略時と同じ `"exact"`——1バイトも変わらない。** `"skip"` を渡すと `IndexBand.groups` は空・`totalInScope` は `0`・`countKind` は `'unknown'` になり、`omitted` の `filtered(archived/superseded/forgotten/period/expired/not_yet_valid/taxonomy/decayed)` は一切積まれなくなる——「スコープ内で何が落ちたか」の説明力を手放す代わりに集計の費用を払わない、という明示的な取引。**`ann_unreached` も判定されない**——判定の母数（`totalInScope` − 未索引）が `0` になるため、近似索引が取りこぼしていても鳴らない。`"skip"` で `ann_unreached` が無いことは「拾いきった」を意味しない（ADR 0384「決めたこと」7）。
   - **目次帯（`digestBand`）は `"skip"` でも今日どおり出る**（集計とは独立した経路で、同じ PR の案A の索引が支える）。`digestEligible`（帯の外にあと何件あるか）だけは件数の一種なので、`digestBand` を指定した呼び出しに限り `{ count: 0, countKind: 'unknown' }` になる。
-  - **`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、常に `countKind: 'exact'` を返し続ける契約**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故を繰り返さないための設計）。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。
+  - **`AggregateScopeOptions.scopeAggregate` を読まない adapter は、`"skip"` を頼まれても `countKind: 'exact'` を返してしまう**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故の形）。⚠ **conformance suite は、この形を許さない。** `describeMemoryStoreConformance` は、フラグ無しの `it` で `aggregateScope(ctx, {}, { scopeAggregate: "skip" })` の結果が `groups` 空・`totalInScope` `0`・`countKind: 'unknown'` であることを検査する（`countScopeAggregateQueries` フックを渡したときだけ、集計クエリが実際に0本であることまで検査する）。したがって、`scopeAggregate` を実装しない自前の adapter は suite を当てると落ちる。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。この suite の要件強化は上の `### Breaking` に数えた（移行は [docs/migration-v1.md](./docs/migration-v1.md) の項目37）。
   - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm（12往復、1点ごとに別プロセス）: 案A の索引ありの `"exact"` は p50 627.7ms、`"skip"` は p50 1.5ms。往復ごとの差（skip − exact）の中央値は −644.6ms（IQR −671.1〜−541.9ms、最小〜最大 −681.3〜−504.6ms、12往復すべて負）。10万行は cold（Postgres 再起動直後）・warm-after とも `"skip"` は p50 6.6ms・1.2ms。器・手順・限界は ADR 0384「測ったこと」。
-  ⭕ 非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。
+  ⭕ `RecallQuery` の型の側は非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。⚠ **ただし conformance suite の側は、フラグ無しの `it` が `MemoryStore.aggregateScope` の実装に新しい約束を課すので、上の `### Breaking` に数えた。**
 - **抽出の言語の事後検査を足した——日本語の観測から、かな・漢字の無い（ラテン文字の）本文が出たら、`created` イベントの `meta.languageMismatch` に印を付ける**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[ADR 0391](./docs/decisions/0391-language-mismatch-mark-on-created-event.md)）。sync・deferred・`reextract` のすべての抽出経路で効く。
   - **印を付けるだけ**——再試行も全文フォールバックもしない。Memory の作り方、プロンプト、公開の型は変えない。疑いが無いときの `created` の `meta` は今までどおり。
   - ⚠ 閾値は推論で置いたもので、**実データでの偽陽性率は測っていない**。意図して英語で書かせる使い方では印が常に付きうる。
@@ -242,6 +254,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `VectorStore.searchMany?`（任意メソッド）の契約——各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並び、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、同じ key は後勝ち、NUL を含む key でも投げない、不正な `limit` は `search()` と同じく投げる、`filter`・テナント分離——を検査する歯が、これまで無かった。フラグは `supportsListActiveClaimPredicates?` と同じ3状態（`true` は歯を実行、`false` は `searchMany` が無いことを assert、省略は「⚠ 未検査」の named it を1本）。
   - ⚠ **自前の `VectorStore` に `searchMany` を実装していて `supportsSearchMany: true` を渡す人へ**: 契約に反していれば、この歯で新しく赤になりうる。フラグを渡さなければ何も変わらない（型も壊れない）。
   ⭕ 非破壊と数える（新しい任意の欄1つと、fixture への任意メソッドの追加のみ）。
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` に、任意メソッド `dispose(): Promise<void>` を足した**（[ADR 0419](./docs/decisions/0419-local-embedding-provider-dispose.md)）。読み込んだモデル（ONNX のセッション）を、上流 `@huggingface/transformers` の `dispose()` に委ねて手放す。読み込み中・推論中に呼ぶと、それらの完了を待ってから解放する。一度も読み込んでいなければ何もせず、2回呼んでも安全（上流の `dispose()` は1回）。**呼んだ後の `embed()` / `warmup()` は、入力に依らず（空配列でも）例外になる。**`EmbeddingProvider`（core の interface）には載せていない。`LocalEmbeddingPipeline`（`createPipeline` の注入口）にも任意の `dispose?()` を足した（持たなくてよい）。
+  ⭕ 非破壊と数える（任意メソッド・任意欄の追加のみ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -289,8 +303,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - outbox の `last_error` の出力は変わらない。公開の型は変えていない（`error` は `string` のまま）。
   ⭕ 非破壊と数える（型は同じ。文字列の中身だけが変わる）。
 
-### Changed（後方互換だが挙動が変わりうるもの）
-
 - **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
   - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
   - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
@@ -311,7 +323,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `@mnemora/postgres` は副キーに `claim_key_predicate COLLATE "C" ASC` を足した（DB の照合順序に依らない）。`@mnemora/testkit` の `InMemoryMemoryStore` は UTF-8 のバイト列の比較（コードポイント順）で揃えた。DB マイグレーションは足していない。
   - `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの歯を3本足した。
   - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
-  - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
+  - 型・API は変わらない。⚠ **ただし、同着の並びの歯は conformance suite の判定を厳しくするので、破壊的変更として上の `### Breaking` に数えた**（移行は [docs/migration-v1.md](./docs/migration-v1.md) の項目39）。同着の順は元から規定がなく、実装依存だった。
 
 - **`@mnemora/testkit` が `zod` を `peerDependencies`（`^4.5.4`、`@mnemora/core` と同じ範囲）に宣言するようになった。** 公開の型 `LLMProviderConformanceOptions` が `import type { z } from "zod"` を d.ts に持つのに、`zod` は `devDependencies` にしか無かった。【実測】pnpm を `hoist=false`（厳格な配置）にした利用者の一時プロジェクトで testkit の tarball を入れて `tsc`（`skipLibCheck: false`）に掛けると `TS2307: Cannot find module 'zod'` で落ちた（既定の hoist では `.pnpm/node_modules` 経由で解決できてしまう。`skipLibCheck: true` では型が黙って `any` になる）。peer にしたあとは同じ手順で解決する。実行時の import は無い（型のみ）。`dependencies` にしなかったのは、利用者側の `zod` と二重に入ると `z.ZodType` の型が噛み合わなくなるため。
 
@@ -334,6 +346,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `{ query }` 形で利用者が `query.scopeAggregate` を明示したときは、その値を尊重する。`findCorrectionCandidates()`・直接の `recall()` は変えていない（`"exact"` のまま）。公開の型・DB は変えていない。
   - 【実測】100万行・全件 active・単一テナント・並列0・同時1・単発の接続・10往復の p50（共有機、交互ではない）: `consolidate({ seedMemoryId })` は 742.9 ms → 6.4 ms（同じ器・設定で前後を続けて測った値。前の担当の測定は 893.1 ms）。条件・限界は ADR 0415。
 
+- **`probeTrigramLexicalSupport`（と `PostgresTrigramLexicalStore.create()`）の `extension_create_denied` の判定が、英語の `message` の正規表現から、SQLSTATE `42501` かつ `routine = execute_extension_script` に変わった**（[PR #1511](https://github.com/takecchi/mnemora/pull/1511)）。drizzle が包んだ失敗では `code`/`routine` が `cause` 側にあるので、`cause` の連鎖も辿る（`migration-failure-message.ts` の判定と共有）。
+  - **返る `reason` が変わる場合がある**: (a) `lc_messages` が英語以外で `CREATE EXTENSION` の権限不足が起きたとき、以前は `extension_create_failed` だったものが `extension_create_denied` になる（意図した修正）。(b) 英語の `message` が `permission denied`・`must be owner`/`superuser`・`insufficient privilege` に見えても、`code`/`routine` が違う失敗（PR #1511 の歯が使う例: SQLSTATE `42501` でも `routine = aclcheck_error`）は、以前の `extension_create_denied` から `extension_create_failed` になる。`reason` の名前で分岐している呼び出し側は、扱いを見直すこと。
+  - `TrigramLexicalUnavailableReason` の union の値は増減しない。`detail`（`message`）と `cause` の内容も変えていない。
+  - 非破壊と数える（型・公開 API・union は同じ。同じ入力で `reason` の値が、判定を直した側へ動く）。上の「利用者に返るエラー文…の整形を、outbox の `last_error` と同じにした」の項目（文字列の中身だけの変更を非破壊と数えた）が近い先例である。
+
 ### Fixed
 
 - **`runtime.observe({ extract: "sync" })` が、LLM を待つ間に tick に同じ extract ジョブを取られる穴を塞いだ**（[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。以前は、sync の observe が積んだジョブは「すぐ claim できる」状態で、observe が LLM を待つ間に tick が claim できた。すると LLM が2回呼ばれ、内容の違う記憶が2件とも active で残り、observe 自身は `complete` が `OutboxLeaseConflictError` で負けて、書き込み済みなのに失敗し `memoryIds` が返らなかった（Postgres と InMemory の両方で再現）。
@@ -342,7 +359,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **公開 API に、任意項目 `MemoryStore.createObservationWithOutbox` の `opts.claimedBy?: string` を足した。**渡すと積む行を claim 済み（`attempts: 1`）で作る。省略時は今までと同じ。`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` は対応済み。適合テスト（`describeMemoryStoreConformance`）に指定あり・なしの2件を足した。
   - ⚠ **自前の `MemoryStore` を実装している人へ**: 型は通るが、`claimedBy` を無視する実装では穴が塞がらない（従来の動きのまま）。塞ぎたければ、渡されたら `claimed_at` = `opts.now`・`claimed_by`・`attempts: 1` で行を作ること。
   - ⚠ **挙動の変化**: sync の observe が抽出中に**例外で終わった**とき、extract ジョブは observe の claim のまま残るため、リースが切れるまで tick は拾わない（以前は未 claim で残り、直後の tick が拾っていた）。拾った後の結果は変わらない。急ぐ運用は `tick` の `leaseMs` を短くとる。ADR 0407 の決めたこと4。
-  - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。
+  - 型は任意の欄の追加のみ。⚠ **ただし `claimedBy` を守ることを検査する `it` はフラグ無しで走るので、破壊的変更として上の `### Breaking` に数えた**（移行は [docs/migration-v1.md](./docs/migration-v1.md) の項目40）。DB マイグレーションは足していない。
 
 - **抽出（`observe` の sync と、`tick` の deferred の extract ジョブ）が、記憶を書いたのに `created` イベントが0件のまま残る取りこぼしを、`MemoryStore` の任意メソッド `createMemoriesWithOutboxAndEvents?` で塞いだ**（[ADR 0410](./docs/decisions/0410-extract-created-event-in-same-transaction.md)、穴 D-3。[ADR 0347](./docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)・[ADR 0100](./docs/decisions/0100-supersede-with-new-memories.md) の「守れないもの」の一部）。
   - **直した穴**: 以前は候補ごとに `createMemoryWithOutbox` で記憶をコミットしたあと、`EventStore.append` を別の文で呼んでいた。`created` の append が失敗すると `observe`／`tick` は例外になるが記憶は残り、再送や tick は「もう在る」と見て素通りして、`created` が0件のまま残った（監査ログに記憶の誕生が載らない）。

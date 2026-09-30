@@ -92,6 +92,13 @@ kind ごとに形が違う部分）は `provenance` jsonb 列にまとめる。�
 今のところ立たない——`basis.memoryIds` を持つ `inferred` を書く経路（`createMemory` を
 直接叩く等）が在ってはじめて効く。詳細は ADR 0342「引き受けた負債」。
 
+**抽出が `inferred` に付ける `confidence` の既定は `0.5` である。**抽出の LLM が返す候補
+（`ExtractedMemoryCandidate`）の `confidence` は省略できる（`0`〜`1`）。`provenanceKind: 'inferred'` の候補が
+`confidence` を省略した場合、抽出（`packages/core/src/extraction.ts`）は `confidence: 0.5` を
+書く。`stated` の候補の `confidence` は無視される（`Provenance` の `stated` に `confidence` は無い）。
+この値は `Provenance` の一部として保存されるだけで、recall は返り値にも順位づけにも使わない
+（ADR 0035 が `confidence` を返り値に載せない決定をしている）。
+
 **⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md)）: 「Observation は
 追記専用で forget/purge/削除の経路がコードに無く」に、1つだけ例外ができた。**
 `eraseTenant`（`packages/core/src/erase-tenant.ts`、独立関数、明示呼び出し専用）は
