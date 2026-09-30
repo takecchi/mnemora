@@ -34,12 +34,15 @@
      - **限界**: (i) `const enum` は実行時に実体が無い前提で値に数えない（今の snapshot には無い）。(ii) `namespace`・`export =`・`export default`・`export import`・`export * as ns` は扱わず、**出たら例外で止まる**（黙って読み飛ばさない）。(iii) 見るのは「`undefined` でない」だけで、値の中身（引数・戻り値・クラスの形）は見ない。実行時に `undefined` が正しい `export declare const X: undefined` があれば偽陽性になる（今は無い）。(iv) snapshot は build の出力の写しで、tarball の `.d.ts` そのものではない。写しが古ければ先に `check:public-api` が赤になる。(v) 型だけの名前（interface など）が実行時に在る必要は無いので見ない。型が抜けた再 export は、従来どおり 4段目の `tsc` が見る。
      - **一覧が空なら赤**: `collectEntryValueNames` は値が1つも引けなければ例外を投げる（道具が赤になる）。生成した smoke も、`valueNames[spec]` が無い・空なら赤にする。抜き出しが壊れて何も見ていないのに緑、を作らない。
      - **歯**: `scripts/__tests__/check-consumer-install-lib.test.mjs`（CI の単体テスト）に、名前が1つ欠けた mod で赤・揃った mod で緑・一覧が空（または入口の分が無い）で赤を足した（ESM・CJS の両方で、生成した smoke を一時ディレクトリの偽のパッケージに対して実際に走らせる）。あわせて、抜き出しの単体（値・型・const enum・再 export されない宣言・扱えない形）と、実際の snapshot で全入口が空でないこと・testkit の入口の対応が正しいことを測る。
-     - **CI には入れない。** この道具（`check:consumer-install`）は既定の CI に無く、リリース前に人が打つ運用のまま。ジョブの名前・本数・required status check は変えていない。
+     - **`check:consumer-install` は CI に入れない。** この道具は既定の CI に無く、リリース前に人が打つ運用のまま。ジョブの名前・本数・required status check は変えていない。
+     - **CI の既存ジョブ `cjs-require-smoke`（`scripts/check-cjs-require-smoke.mjs`、ADR 0387）にも同じ検査が掛かる。** このジョブは同じ `buildSmokeCjs` を使うので、`collectValueNamesForEntries` で同じ表を引いて渡した（渡さないと `valueNames` が無く、生成した smoke が全入口で落ちる——【実測】最初の push でこのジョブだけが赤になった）。registry に出ない設計（ADR 0387）は変わらない。snapshot は作業ツリーのファイルを読むだけ。ジョブの名前・本数・required は変えていない。
   6. **CHANGELOG**: `[1.2.0]` の `### Changed` に、README の前提の追記を1項目足した（npm に載る README が変わるため。publish 対象の変更だけを載せる規律 ADR 0243 に沿う）。BE-2・BF-1・BD-2 は文書・内部の道具なので載せない（「何を載せるか」の規律）。いずれも非破壊。**migration-v1 に項目は要らない**——型・実行時の振る舞い・conformance の判定のどれも変えておらず、数え方の規律（破壊的変更の定義）に当たらない。
 
 - **陽性対照（【実測】手元で `check:consumer-install` を実際に走らせた）**:
 
   (i) そのままで緑（全7段 ✔、入口8個）。(ii) `packages/core/src/index.ts` から `export * from "./heuristic-token-counter.js";` を1行外して build → **赤**。ESM・CommonJS の両方の段が `@mnemora/core: 実行時に undefined の値の名前がある（1 個）: heuristicTokenCounter` で落ちた。**同じ変更で、2つの型検査の段（node16・bundler）は緑のままだった**——smoke.ts は入口を namespace で import するだけで個々の名前を使わないので、値の再 export が1つ外れても型検査は落ちない。これが今回足した検査の穴の実証でもある。(iii) 戻して緑。外した1行は戻し、commit に入れていない。
+
+  `cjs-require-smoke`（【実測】手元で `pnpm run check:cjs-require-smoke`）: そのままで緑、同じ1行を外して build → **赤**（`@mnemora/core: 実行時に undefined の値の名前がある（1 個）: heuristicTokenCounter`）、戻して build → 緑。
 
 - **採らなかった案**:
 
