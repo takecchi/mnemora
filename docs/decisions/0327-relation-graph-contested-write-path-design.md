@@ -737,3 +737,19 @@ migration・`markContestedGroup`/`resolveContestedGroup`（store 側の口）は
 上の §4-b は、群の書き込みが `memory_events` へ全員分1件ずつ積むと書いている。いまの `@mnemora/postgres`・`@mnemora/testkit` の InMemory の `markContestedGroup` は、呼び出し時点で既に `contested` で `contestedWithId` も無いメンバー（既存の群の一員）には積まない。
 `observe()` の claim key の検出が積む `note`（`claim_key_conflict_group`）の `memberIds`・`matches` も、全員ではなく id の昇順で先頭10件になった（全体の件数は `memberCount`・`matchCount`）。
 理由は、群の大きさ N に対してイベントの件数が N²、バイト数が N³ で増えていたこと。本文は当時の記録として書き換えない。
+
+---
+
+## 追記（2026-10-01）: 「`RelationStore` が配線されていなければ、多者間経由の `contested` は存在しない」という前提は、今の実装と合わない（訂正）
+
+クローンのマネージャー（自動化された担い手）が書いた。オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。本文は当時の記録として書き換えていない。
+
+§4-d（350〜351行）は「`RelationStore` が配線されていなければ、**多者間経由で `contested` になった Memory はそもそも存在しない**（§4-b の前提条件）」とし、未配線のときの recall 段3 の分岐を「発火する対象が無い」と書いた。530行付近も同じ前提で「遷移そのものが起こらない」と書いている。**この前提は、`observe()` の衝突検出の経路についてだけ成り立ち、Memory の状態全体については成り立たない。**
+
+- 【現物】`observe()` の経路では、前提どおりである。`relationStore` が無いと `detectClaimKeyContested` は群を作らず、`claim_key_conflict_unresolved` の根拠を積んで止まる（`packages/postgres/README.md` の「3件目以降が『記録するだけ』で止まる条件」）。
+- 【現物】一方、`Runtime.markContestedGroup` は `relationStore` が無くても呼べる（`packages/core/src/runtime.ts` の `RuntimeDeps.relationStore` の TSDoc「`markContestedGroup`/`resolveContestedGroup` 自体は呼べる」）。`@mnemora/postgres` の `markContestedGroup` は `memory_relations` の行を自分で書く。群を書く runtime（またはプロセス）と recall する runtime とで配線が違う構成でも、群は DB に在る。
+- 【実測 2026-10-01、main `0acd356e`、クローンのマネージャーの委譲先】`@mnemora/postgres` と `@mnemora/testkit` の InMemory の両方で、g = 3・4・6 の群を `relationStore` を配線した runtime で書き、`relationStore` を配線しない runtime で `recall` した。群のヒットの数 p = 1・2・g のどれでも、返った件数は0件で、`omitted` に `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` と `unit_assembly_dropped`（count = p）が出た。陽性対照として、読む側に `relationStore` を配線すると g 件すべてが返った。g = 2（`contestedWithId` の対）は、配線に関わらず2件返った。
+
+⟹ **未配線の recall で群のメンバーに出会うことは、今の実装で現実に起きる。**そのときの振る舞い（群のメンバーは単独では返らず、ヒット自身も `unit_assembly_dropped` に落ちる）は、[ADR 0381](./0381-contested-group-write-path-implementation.md) 決定5・`docs/recall.md`（段3の「`RuntimeDeps.relationStore` が配線されていなければ、この拡張は動かない」）・`packages/core/src/recall-runtime.ts` の `RecallRuntimeDeps.relationStore` の TSDoc が明示しており、[ADR 0136](./0136-contested-lone-dropped-not-returned-alone.md)（`contested` を単独で返さない）に沿う。古いのは、本 ADR の上の前提の文だけである。
+
+509行の「採らなかった案」（`RelationStore` 未配線でも多者間 `contested` への遷移を許す）は、案としては採られていないままである。ただし、`Runtime.markContestedGroup` を直接呼ぶ経路では、未配線の runtime からの遷移も今は起きうる。その経路を塞ぐ（例えば `relationStore` が無い構成で `markContestedGroup` を断る）かどうかは、新しく throw する入力を増やすことになるので、この追記では決めていない。
