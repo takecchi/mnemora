@@ -82,6 +82,8 @@ export interface RelationStore {
   /**
    * `link` の逆——`fromId`→`toId` の関係行を1行削除する。存在しない行を指定しても
    * 例外にしない（冪等）。相手向きの行には触れない（`link` と対称）。
+   * uuid の形でない id は、存在しない id と同じ扱い（何もしない。DB 由来の型変換エラーを漏らさない）。
+   * `link` は uuid の形でない端を `memory not found` で断る（上）が、`unlink` は冪等の側に倒す。
    */
   unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   /**
@@ -96,6 +98,7 @@ export interface RelationStore {
    * - テナント分離: `ctx.tenantId` と異なるテナントの行は返さない。
    * - 返した `Relation.createdAt`（`Date`）は呼び手のもの——呼び手が書き換えても、store の中の行は変わらない
    *   （store は保存している `Date` を参照のまま返さず、複製して返す）。
+   * - uuid の形でない `memoryId` は、存在しない id と同じ扱い（空配列を返す。DB 由来の型変換エラーを漏らさない）。
    */
   listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
   /**

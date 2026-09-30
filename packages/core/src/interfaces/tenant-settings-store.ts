@@ -174,6 +174,10 @@ export const DEFAULT_HALF_LIFE_RECALLS = 720;
  * `defaultActivityDecayStrategy` の割り算 `elapsed / halfLifeRecalls` に直接入るため、
  * 0・負・非有限を拒む理由は `isHalfLifeHoursInRange` の doc コメントに実測として
  * 記録されているものと同一である）。
+ *
+ * ⚠ この関数が見るのは float64 の値域だけである。保存先の Postgres の列は `real`（float4）なので、
+ * float4 に収まらない値（上限は約 `3.4028235e38`、下限は約 `1.4e-45`）は、各 adapter が別に
+ * 明示の例外で拒む（`setDefaultHalfLifeRecalls` の doc 参照）。
  */
 export function isHalfLifeRecallsInRange(value: number): boolean {
   return value > 0 && Number.isFinite(value);
@@ -435,6 +439,8 @@ export interface TenantSettingsStore {
    * `recalls` が `isHalfLifeRecallsInRange` の値域 `(0, ∞)` の外であれば
    * `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` で失敗する
    * （`assertValidHalfLifeRecalls` 参照）。
+   *
+   * 値域は `(0, ∞)` だが、Postgres の列は `real`（float4）なので、float4 に収まる範囲（`Math.fround(x)` が有限かつ 0 でない値。上限は約 `3.4028235e38`、下限は約 `1.4e-45`）の外は、`@mnemora/postgres` も testkit の fixture も、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で拒む（DB の生の例外にはしない）。
    *
    * [ADR 0197](../../../../docs/decisions/0197-set-default-half-life-recalls.md): ADR 0165
    * 「引き受けた負債」7 と Issue #338 が対処として名指ししていた「`'activity'` を選ぶ
