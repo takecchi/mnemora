@@ -280,7 +280,11 @@ for (const [name, makeKit] of KITS) {
       expect(newMemories).toBe(1);
       expect(newCreated).toBe(newMemories);
       expect((await kit.memoryStore.get(ctx, old!.id))!.status).toBe("superseded");
-      const current = await kit.memoryStore.listBySourceObservation(ctx, observationId, "v1");
+      // `listBySourceObservation` は status で絞らない（superseded になった旧い記憶も返す）ので、
+      // 「今 active なのは新しい記憶だけ」を active で絞って縛る。
+      const current = (
+        await kit.memoryStore.listBySourceObservation(ctx, observationId, "v1")
+      ).filter((m) => m.status === "active");
       expect(current.map((m) => m.content)).toEqual(["新しい事実"]);
       expect(after.created.map((e) => e.memoryId)).toContain(current[0]!.id);
     });

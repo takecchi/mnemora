@@ -321,6 +321,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 公開 API（snapshot を更新した）: `MemoryStore` に任意メソッドを1つ足した（実装しない adapter は壊れない）。`ContestedWithoutCompanionError.method` の union に `"createMemoriesWithOutboxAndEvents"` を足した——⚠ この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される。
   - 非破壊（型は任意の追加のみ。正常な入力で最後に残る状態は変わらず、失敗のあとに残る状態だけが「記憶だけ残る」から「全部残らない」に変わった）。
 
+- **`reextract`・`consolidate`・`reflect` も、記憶を書いたのに `created` イベントが0件のまま残る取りこぼしを、口を持つ store の上では塞いだ**（[ADR 0416](./docs/decisions/0416-created-event-same-tx-remaining-paths.md)、穴 D-3 の続き。上の [ADR 0410](./docs/decisions/0410-extract-created-event-in-same-transaction.md) の「残り」のうち口ありの経路）。
+  - **直した穴**: 以前の `reextract`・`consolidate`（`supersedeWithNewMemories` を使う経路）と `reflect` は、記憶をコミットしたあとに `created` を別の文で積んでいた。その append が失敗すると記憶だけが残り、再試行は素通りして（`reextract`: 同じ内容の記憶が「在る」／`consolidate`: 統合元が `superseded` で対象なし／`reflect`: 孤児の反映先が残る）、`created` が0件のまま残った。
+  - **今の振る舞い**: `supersedeWithNewMemories` が任意の `opts.buildCreatedEvent(memory, index)` を受け取り、`created: true` の新しい Memory の `created` を **同じトランザクション**で積み、戻り値の `createdEventsWritten: true` で積んだことを名乗る。`created` の書き込みが失敗したら新しい Memory も `supersede` も残らない。**core は、名乗られたときだけ**別の append を省く——この引数を知らない（黙って無視する）既存の adapter では、今までどおり別の文で積まれ、`created` が消える退行は起きない。`reflect` は、store が `createMemoriesWithOutboxAndEvents?`（上の ADR 0410）を持つなら、内省の Memory と `created` をその口で1トランザクションに書く。**撃って投げられたときに旧経路で撃ち直さない**（ADR 0100）。`SourceMemoryForgottenError` の扱いは変えていない。
+  - **`createMemoriesWithOutboxAndEvents?` に `opts.abortIfForgotten` を足した**（`reflect` がこの口を使うため。`@mnemora/postgres` は同じトランザクションの `SELECT … FOR UPDATE` で見直す。`InMemoryMemoryStore` は `createMemoryWithOutbox` と同じく実装しない）。このメソッドは 1.2.0 で未リリースなので、リリース済みの第三者の実装は壊れない。
+  - **実装したのは `@mnemora/postgres` の `PostgresMemoryStore` と、`@mnemora/testkit` の `InMemoryMemoryStore`。** `@mnemora/testkit` の適合テストに、`MemoryStoreConformanceOptions.supportsSupersedeCreatedEvents?: boolean`（任意の3状態フラグ）と歯を足した（Postgres とインメモリで `true`）。`createMemoriesWithOutboxAndEvents` の `abortIfForgotten` の歯も足した。
+  - ⚠ **直していないもの**: 口を持たない adapter の経路——`reextract`・`consolidate` の `createMemoryWithOutbox` のループ、`createMemoriesWithOutboxAndEvents?` を持たない adapter の `reflect` と抽出——は今までどおり別コミットで、取りこぼしが残る。`supersedeWithNewMemories` を実装しても名乗らない adapter も、`created` は別の文のまま。名乗るのにトランザクションを張らない adapter は、この機構では見抜けない。
+  - 公開 API（snapshot を更新した）: `supersedeWithNewMemories` の `opts` に任意の `buildCreatedEvent`・戻り値に任意の `createdEventsWritten`、`createMemoriesWithOutboxAndEvents` の `opts` に任意の `abortIfForgotten`、`SourceMemoryForgottenError.method` の union に `"createMemoriesWithOutboxAndEvents"`——⚠ この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される。
+  - 非破壊（型は任意の追加のみ）。⚠ 口あり経路では `created` と `superseded` の挿入順が入れ替わった（`created` が先）。`PostgresEventStore.list` は `at` 昇順だけで並べ、同じ `at` の並びは仕様の外。
+
 ---
 
 ## [1.1.0] - 2026-09-30

@@ -126,6 +126,8 @@ describeMemoryStoreConformance({
   supportsResolveContestedGroup: true,
   // ADR 0410（穴 D-3）: PostgresMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
   supportsCreateMemoriesWithOutboxAndEvents: true,
+  // ADR 0416: supersedeWithNewMemories の opts.buildCreatedEvent（created を同じトランザクションで積む）。
+  supportsSupersedeCreatedEvents: true,
   listRelationsForMemory: async (ctx: Ctx, memoryId: string) => {
     const { db } = await getTestClient();
     return new PostgresRelationStore(db).listRelated(ctx, memoryId);

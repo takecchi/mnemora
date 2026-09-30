@@ -495,11 +495,16 @@ interface MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+    }
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+    createdEventsWritten?: true;
   }>;
   createMemoriesWithOutboxAndEvents?(
     ctx: Ctx,
@@ -508,7 +513,7 @@ interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>
     ) => NewMemoryEvent,
-    opts?: { now?: Date }
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;

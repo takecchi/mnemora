@@ -138,6 +138,8 @@ describeMemoryStoreConformance({
   supportsResolveContestedGroup: true,
   // ADR 0410（穴 D-3）: InMemoryMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
   supportsCreateMemoriesWithOutboxAndEvents: true,
+  // ADR 0416: supersedeWithNewMemories の opts.buildCreatedEvent（created を events 配列へ、supersede の前に積む）。
+  supportsSupersedeCreatedEvents: true,
   listRelationsForMemory: (ctx, memoryId) => {
     if (!latestMemoryStoreForEvents) {
       throw new Error("listRelationsForMemory より先に createStore() を呼ぶ必要がある");

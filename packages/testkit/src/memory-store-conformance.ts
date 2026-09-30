@@ -487,6 +487,25 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsCreateMemoriesWithOutboxAndEvents?: boolean;
   /**
+   * [ADR 0416](../../../docs/decisions/0416-created-event-same-tx-remaining-paths.md)（穴 D-3 の続き）:
+   * 対象の `MemoryStore` 実装の `supersedeWithNewMemories`（任意メソッド）が、`opts.buildCreatedEvent` を受け取って
+   * `created` イベントを **`news` の Memory と同じトランザクションで**積み、戻り値の `createdEventsWritten: true` で
+   * 名乗るかどうか。**任意**（省略可、`supportsCreateMemoriesWithOutboxAndEvents` と同じ3状態）。
+   * `supportsSupersedeWithNewMemories: false` の adapter では、`true`/`false` のどちらでも歯は登録されない
+   * （メソッドが無い）。
+   *
+   * - `true`: 契約の歯を実行する——`created: true` の要素ごとに `created` が1件積まれる・`created: false`（冪等な再送）
+   *   には積まない・`createdEventsWritten: true` で名乗る・`buildCreatedEvent` を渡さなければ名乗らず積まない・
+   *   `created` の書き込みが失敗したら `news` も `supersede` も outbox も残らない。
+   * - `false`: この adapter は `buildCreatedEvent` を知らない（黙って無視する）。渡しても **名乗らず**、`created` を
+   *   積まないことを積極的に assert する（runtime はこのとき別の `EventStore.append` で積む）。
+   * - **省略**: 検査していない、という意思表示。常に green の named `it` を1本登録し、名前で「未検査」を明示する。
+   *
+   * 🔴 **名乗りは原子性の証拠ではない。**この歯は「名乗る adapter が、`created` の失敗で `news`/`supersede` も
+   * 巻き戻す」ことを失敗の注入で縛るが、名乗るのにトランザクションを張らない adapter を一般には見抜けない。
+   */
+  supportsSupersedeCreatedEvents?: boolean;
+  /**
    * [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
    * 案C: `aggregateScope(ctx, scope, { scopeAggregate: "skip" })` が、実際に件数集計の
    * 費用を払っていないことを検査するための計測フック。**任意**（省略可）——`listRelationsForMemory?`
@@ -555,6 +574,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsMarkContestedGroup,
     supportsResolveContestedGroup,
     supportsCreateMemoriesWithOutboxAndEvents,
+    supportsSupersedeCreatedEvents,
     countScopeAggregateQueries,
   } = options;
 
@@ -5325,6 +5345,108 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           expect(stillOther?.supersededById).toBeNull();
         });
       }
+
+      if (supportsCreateMemoriesWithOutboxAndEvents === true) {
+        // ADR 0416: `createMemoriesWithOutboxAndEvents` の `opts.abortIfForgotten`（`reflect` がこの口を使う）。
+        const batchCreatedEvent = (ctx: Ctx, memory: Memory): NewMemoryEvent => ({
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "created",
+          at: new Date("2026-01-02T00:00:00.000Z"),
+          actor: { type: "system" },
+          digestSnapshot: memory.digest,
+          sizeBeforeBytes: null,
+          meta: { reason: "reflected" },
+        });
+
+        it("createMemoriesWithOutboxAndEvents は abortIfForgotten に forgotten な id を含むと SourceMemoryForgottenError を投げ、何も書かない（Memory も outbox も created も残らない）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const forgottenSource = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "abort-batch-source" }),
+          );
+          await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+          const observation = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: "tenant-1" }),
+          );
+          const news = ["abort-batch-a", "abort-batch-b"].map((contentHash) => ({
+            input: buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              sourceObservationId: observation.id,
+              extractorVersion: "v1",
+              contentHash,
+            }),
+            jobKinds: ["embed" as const],
+          }));
+
+          await expect(
+            store.createMemoriesWithOutboxAndEvents!(
+              ctx,
+              news,
+              (memory) => batchCreatedEvent(ctx, memory),
+              { abortIfForgotten: [forgottenSource.id] },
+            ),
+          ).rejects.toMatchObject({
+            name: "SourceMemoryForgottenError",
+            method: "createMemoriesWithOutboxAndEvents",
+            forgottenIds: [forgottenSource.id],
+          });
+
+          // 🔴 候補ごとの巻き戻し（`dropped`）に化けていない——例外はそのまま投げられ、何も書かれていない。
+          expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(0);
+          expect(await claimEmbedJobs(ctx, new Date("2030-01-01T00:00:00.000Z"))).toEqual([]);
+        });
+
+        it("createMemoriesWithOutboxAndEvents は abortIfForgotten の id が forgotten でなければ今日どおり書き（created も積む）、空配列・省略なら見直しを行わない", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const activeSource = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "abort-batch-active" }),
+          );
+          const forgottenSource = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "abort-batch-forgotten" }),
+          );
+          await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+          const one = (contentHash: string) => [
+            {
+              input: buildNewMemoryFixture({ tenantId: "tenant-1", contentHash }),
+              jobKinds: ["embed" as const],
+            },
+          ];
+
+          const withActive = await store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            one("abort-batch-new-1"),
+            (memory) => batchCreatedEvent(ctx, memory),
+            { abortIfForgotten: [activeSource.id] },
+          );
+          expect(withActive.written.map((w) => w.created)).toEqual([true]);
+          const createdEvents = (
+            await listEventsForMemory(ctx, withActive.written[0]!.memory.id)
+          ).filter((e) => e.kind === "created");
+          expect(createdEvents).toHaveLength(1);
+
+          const withEmpty = await store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            one("abort-batch-new-2"),
+            (memory) => batchCreatedEvent(ctx, memory),
+            { abortIfForgotten: [] },
+          );
+          expect(withEmpty.written.map((w) => w.created)).toEqual([true]);
+
+          // 省略: forgotten な記憶が在っても見直さない（abortIfForgotten を渡していない）。
+          const withOmitted = await store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            one("abort-batch-new-3"),
+            (memory) => batchCreatedEvent(ctx, memory),
+          );
+          expect(withOmitted.written.map((w) => w.created)).toEqual([true]);
+        });
+      }
     } else if (supportsAbortIfForgotten === false) {
       it("createMemoryWithOutbox は abortIfForgotten を渡しても無視し、forgotten な id があっても今日どおり書く", async () => {
         const store = await createStore();
@@ -5349,6 +5471,46 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         );
         expect(result.created).toBe(true);
       });
+
+      if (supportsCreateMemoriesWithOutboxAndEvents === true) {
+        it("createMemoriesWithOutboxAndEvents は abortIfForgotten を渡しても無視し、forgotten な id があっても今日どおり書く（ADR 0416）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const forgottenSource = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "abort-batch-ignored",
+            }),
+          );
+          await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+
+          const result = await store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            [
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  contentHash: "abort-batch-ignored-new",
+                }),
+                jobKinds: ["embed"],
+              },
+            ],
+            (memory) => ({
+              tenantId: ctx.tenantId,
+              memoryId: memory.id,
+              kind: "created",
+              at: new Date("2026-01-02T00:00:00.000Z"),
+              actor: { type: "system" },
+              digestSnapshot: memory.digest,
+              sizeBeforeBytes: null,
+              meta: { reason: "reflected" },
+            }),
+            { abortIfForgotten: [forgottenSource.id] },
+          );
+          expect(result.written.map((w) => w.created)).toEqual([true]);
+        });
+      }
     } else {
       // `supportsAbortIfForgotten` を省略した adapter。`it.skip` にしない理由は
       // `supportsOnlyMemoryIdsFilter`/`supportsLabels` の同じ分岐を参照。
@@ -8012,6 +8174,270 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 省略した adapter。`it.skip` にしない理由は `supportsResolveOrphanedContested` の同じ分岐を参照。
       it(`⚠ 未検査: supportsCreateMemoriesWithOutboxAndEvents が指定されていない — adapter "${name}" に対して createMemoriesWithOutboxAndEvents の歯は検査していない`, () => {
         expect(supportsCreateMemoriesWithOutboxAndEvents).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // supersedeWithNewMemories の opts.buildCreatedEvent / createdEventsWritten（ADR 0416、穴 D-3 の続き）。
+    // reextract・consolidate の新しい Memory の created を、news と同じトランザクションで積む。固定するのは:
+    // - created: true の news ごとに created が1件（created: false には積まない）・名乗り（createdEventsWritten: true）。
+    // - created の書き込みが失敗したら news も supersede も outbox も残らない。
+    // -------------------------------------------------------------------
+
+    if (supportsSupersedeCreatedEvents === true && supportsSupersedeWithNewMemories) {
+      const supersedeCreatedEventFor = (
+        ctx: Ctx,
+        memory: Memory,
+        index: number,
+        at: Date = new Date("2026-01-02T00:00:00.000Z"),
+      ): NewMemoryEvent => ({
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "created",
+        at,
+        actor: { type: "system" },
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta: { reason: "conformance-supersede-created", index },
+      });
+      const createdEventsOf = async (ctx: Ctx, memoryId: MemoryId) =>
+        (await listEventsForMemory(ctx, memoryId)).filter((e) => e.kind === "created");
+
+      it("supersedeWithNewMemories は buildCreatedEvent を渡すと、created: true の news ごとに created を同じトランザクションで積み、createdEventsWritten: true で名乗る。created: false（再送）には積まない（ADR 0416）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "supersede-created-target" }),
+        );
+        const news = ["supersede-created-a", "supersede-created-b", "supersede-created-c"].map(
+          (contentHash) => ({
+            input: buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              sourceObservationId: observation.id,
+              extractorVersion: "v1",
+              contentHash,
+            }),
+            jobKinds: ["embed" as const],
+          }),
+        );
+        const seen: number[] = [];
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          news,
+          [
+            {
+              id: target.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, target.id, target.digest),
+            },
+          ],
+          {
+            buildCreatedEvent: (memory, index) => {
+              seen.push(index);
+              return supersedeCreatedEventFor(ctx, memory, index);
+            },
+          },
+        );
+        // 🔴 名乗り: runtime はこれが true のときだけ別の EventStore.append を省く。
+        expect(result.createdEventsWritten).toBe(true);
+        expect(result.created.map((c) => c.created)).toEqual([true, true, true]);
+        expect(seen.sort()).toEqual([0, 1, 2]);
+        for (const [index, entry] of result.created.entries()) {
+          const events = await createdEventsOf(ctx, entry.memory.id);
+          expect(events).toHaveLength(1);
+          expect(events[0]!.meta).toMatchObject({ index });
+        }
+        expect((await store.get(ctx, target.id))?.status).toBe("superseded");
+        const supersededEvents = (await listEventsForMemory(ctx, target.id)).filter(
+          (e) => e.kind === "superseded",
+        );
+        expect(supersededEvents).toHaveLength(1);
+
+        // 冪等な再送: 同じ news は created: false で、created を積み足さない。名乗りは付く（渡したので）。
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "supersede-created-target-2",
+          }),
+        );
+        const resentSeen: number[] = [];
+        const resent = await store.supersedeWithNewMemories!(
+          ctx,
+          news,
+          [
+            {
+              id: other.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, other.id, other.digest),
+            },
+          ],
+          {
+            buildCreatedEvent: (memory, index) => {
+              resentSeen.push(index);
+              return supersedeCreatedEventFor(ctx, memory, index);
+            },
+          },
+        );
+        expect(resent.created.map((c) => c.created)).toEqual([false, false, false]);
+        expect(resentSeen).toEqual([]);
+        for (const entry of result.created) {
+          expect(await createdEventsOf(ctx, entry.memory.id)).toHaveLength(1);
+        }
+      });
+
+      it("supersedeWithNewMemories は buildCreatedEvent を渡さなければ created を積まず、名乗らない（今日どおり。ADR 0416）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "supersede-nocreated-target",
+          }),
+        );
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "supersede-nocreated-new",
+              }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: target.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, target.id, target.digest),
+            },
+          ],
+        );
+        expect(result.createdEventsWritten).toBeUndefined();
+        expect(await createdEventsOf(ctx, result.created[0]!.memory.id)).toHaveLength(0);
+      });
+
+      it("supersedeWithNewMemories は、created の書き込みが失敗したら news も supersede も outbox も残さない（ADR 0416）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "supersede-fail-target" }),
+        );
+        const news = ["supersede-fail-a", "supersede-fail-b"].map((contentHash) => ({
+          input: buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash,
+          }),
+          jobKinds: ["embed" as const],
+        }));
+        const supersede = [
+          {
+            id: target.id,
+            supersededByIndex: 0,
+            expectedStatus: "active" as const,
+            event: buildSupersedeEvent(ctx, target.id, target.digest),
+          },
+        ];
+
+        // 🔴 失敗させるのは**最後の** created だけ。先の created・news・supersede が書けたあとに落ちても、
+        // 全部巻き戻ることを見る。`at` が Invalid Date のイベントは Postgres では memory_events への INSERT が、
+        // fixture ではイベントの検査が拒む（どちらも EventStore.append と同じ拒み方）。
+        await expect(
+          store.supersedeWithNewMemories!(ctx, news, supersede, {
+            buildCreatedEvent: (memory, index) =>
+              supersedeCreatedEventFor(
+                ctx,
+                memory,
+                index,
+                index === 1 ? new Date(Number.NaN) : undefined,
+              ),
+          }),
+        ).rejects.toBeInstanceOf(Error);
+
+        expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(0);
+        const stillTarget = await store.get(ctx, target.id);
+        expect(stillTarget?.status).toBe("active");
+        expect(stillTarget?.supersededById).toBeNull();
+        expect(
+          (await listEventsForMemory(ctx, target.id)).filter((e) => e.kind === "superseded"),
+        ).toHaveLength(0);
+        expect(await claimEmbedJobs(ctx, new Date("2030-01-01T00:00:00.000Z"))).toEqual([]);
+
+        // 巻き戻ったあと、同じ呼び出しを書き直せる。
+        const retry = await store.supersedeWithNewMemories!(ctx, news, supersede, {
+          buildCreatedEvent: (memory, index) => supersedeCreatedEventFor(ctx, memory, index),
+        });
+        expect(retry.created.map((c) => c.created)).toEqual([true, true]);
+        expect(retry.createdEventsWritten).toBe(true);
+      });
+    } else if (supportsSupersedeCreatedEvents === false && supportsSupersedeWithNewMemories) {
+      it("supersedeWithNewMemories は buildCreatedEvent を渡されても名乗らず、created を積まない（この adapter は引数を知らない。runtime が別の文で積む。ADR 0416）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "supersede-ignored-target" }),
+        );
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "supersede-ignored-new",
+              }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: target.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, target.id, target.digest),
+            },
+          ],
+          {
+            buildCreatedEvent: (memory) => ({
+              tenantId: ctx.tenantId,
+              memoryId: memory.id,
+              kind: "created",
+              at: new Date("2026-01-02T00:00:00.000Z"),
+              actor: { type: "system" },
+              digestSnapshot: memory.digest,
+              sizeBeforeBytes: null,
+              meta: { reason: "conformance-supersede-created" },
+            }),
+          },
+        );
+        expect(result.createdEventsWritten).toBeUndefined();
+        expect(
+          (await listEventsForMemory(ctx, result.created[0]!.memory.id)).filter(
+            (e) => e.kind === "created",
+          ),
+        ).toHaveLength(0);
+      });
+    } else if (supportsSupersedeCreatedEvents === undefined) {
+      // 省略した adapter。`it.skip` にしない理由は `supportsResolveOrphanedContested` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsSupersedeCreatedEvents が指定されていない — adapter "${name}" に対して supersedeWithNewMemories の buildCreatedEvent の歯は検査していない`, () => {
+        expect(supportsSupersedeCreatedEvents).toBeUndefined();
       });
     }
 
