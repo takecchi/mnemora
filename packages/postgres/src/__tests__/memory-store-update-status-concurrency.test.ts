@@ -4,7 +4,12 @@ import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * `updateStatus` の `expectedStatus`（compare-and-swap、ADR 0030・安全弁3）を
@@ -33,6 +38,7 @@ describe("PostgresMemoryStore.updateStatus の expectedStatus（compare-and-swap
     for (const client of pools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   it("同じ1行に4本が同時に expectedStatus:'active' で updateStatus を撃つと、ちょうど1本だけ成功し残り3本は MemoryStatusConflictError になる", async () => {

@@ -5,7 +5,12 @@ import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * `updateStatusWithEvent`（ADR 0031、PR「supersede-status-and-event-in-one-transaction」）を
@@ -39,6 +44,7 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
     for (const client of pools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   it("同じ1行に4本が同時に expectedStatus:'active' で updateStatusWithEvent を撃つと、ちょうど1本だけ成功し、memory_events にちょうど1件だけ superseded が残る", async () => {
