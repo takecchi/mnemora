@@ -250,6 +250,39 @@ async function warmUpPgvectorCapabilityCheck(
   });
 }
 
+/**
+ * **統計が「確認済み」の状態を、測定の前に必ず作る**（Issue #1276。歯1・歯2・歯4・歯5 が使う）。
+ *
+ * `StatsPresenceGate`（`vector-store.ts`）は、`memories` と埋め込み表の**両方**が
+ * `reltuples >= 0` と確かめられるまで、`search()` のたびに `reltuples` を読む往復を1回余分に払い、
+ * 確かめられたら以後は払わない。上の `warmUpPgvectorCapabilityCheck` の空振りの `search()` は、
+ * 統計が既に在れば確認済みにするが、**統計が無ければ、読んで未確認のまま帰るだけ**である。
+ * **`resetTestDatabase()` の `TRUNCATE` は `reltuples` を `-1`（未確認）へ戻す**——CI のログで、
+ * `TRUNCATE` 直後に `memories` と埋め込み表の両方が `-1` であることを確かめた（PostgreSQL 17、
+ * このファイルの `it` の全部で）。したがって `beforeEach` の後は毎回、両方が未確認から始まる。
+ * すると従来は、**測定の最中に自動 analyze（autovacuum）が終わると**、その読みが確認済みに
+ * 変わる1回だけ往復が余分になり、limit=5 と limit=20 の往復数が食い違った
+ * （`expected 14 to be 15`、run 36664582749）。
+ *
+ * ここで両方の表を `ANALYZE` し、同じ `vectorStore` で `search()` をもう1回打つ——その読みが
+ * `reltuples >= 0` を見て、ゲートを確認済みにする。**以後この `vectorStore` は往復を余分に払わない**
+ * （一度確認済みになったら覚え続ける——`StatsPresenceGate` の doc 参照）ので、測定の中で自動 analyze が
+ * 終わっても、往復数は変わらない。**測定の直前にゲートの状態を決定的にするだけで、歯の主張
+ * （候補の件数・basis の件数・anchorCount を変えても往復数が増えない）は1バイトも弱めていない**
+ * ——許容差も、比べる本数の削減も入れていない。種まきの**後**に呼ぶ（空の表への `ANALYZE` が
+ * `reltuples` をどうするかに頼らないため）。歯6 は、この未確認→確認済みの遷移そのものを測る
+ * 別の歯（専用の表）なので、これを呼ばない。
+ */
+async function confirmStatsPresence(vectorStore: PostgresVectorStore, ctx: Ctx): Promise<void> {
+  const { pool } = await getTestClient();
+  await pool.query("ANALYZE memories");
+  await pool.query(`ANALYZE ${embeddingSpaceTableName(TEST_EMBEDDING_SPACE)}`);
+  await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
+    limit: 1,
+    filter: { tenantId: ctx.tenantId },
+  });
+}
+
 async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
   let count = 0;
   const originalQuery = Client.prototype.query;
@@ -340,6 +373,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
     await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
+    await confirmStatsPresence(vectorStore, ctx);
 
     let resultSmall: Awaited<ReturnType<typeof runtime.recall>> | undefined;
     let resultLarge: Awaited<ReturnType<typeof runtime.recall>> | undefined;
@@ -374,6 +408,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
     const { satellite } = await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
+    await confirmStatsPresence(vectorStore, ctx);
 
     const roundtripsByLimit = new Map<number, number>();
     const returnedByLimit = new Map<number, number>();
@@ -513,6 +548,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.01, 0], {
       digest: "plain-2",
     });
+    await confirmStatsPresence(vectorStore, ctx);
     const baselineRoundtrips = await countClientQueries(async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
@@ -565,6 +601,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
     await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
+    await confirmStatsPresence(vectorStore, ctx);
 
     const roundtripsByAnchorCount = new Map<number, number>();
     const returnedByAnchorCount = new Map<number, number>();
