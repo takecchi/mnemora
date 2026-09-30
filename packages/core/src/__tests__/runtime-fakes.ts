@@ -295,6 +295,11 @@ class FakeBackingStore {
   }
 }
 
+/** ADR 0431: `markContestedGroup` が書いても状態が変わらないメンバー（既に群の一員として contested）。 */
+function isUnchangedGroupMember(memory: Pick<Memory, "status" | "contestedWithId">): boolean {
+  return memory.status === "contested" && (memory.contestedWithId ?? null) === null;
+}
+
 /**
  * ⭐ Issue #329 / [ADR 0173](../../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
  * `aggregateScope` が `filteredDecayed` を数えるための述語。
@@ -2170,7 +2175,11 @@ export class FakeMemoryStore implements MemoryStore {
     }
 
     // 3. イベントを全件先に組み立てる（検査もここで走る）。
-    const events = members.map((m) => buildStoredEvent(ctx, m.event));
+    // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、書いても状態が
+    // 変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+    const events = members
+      .filter((_, i) => !isUnchangedGroupMember(memories[i]!))
+      .map((m) => buildStoredEvent(ctx, m.event));
 
     // 4. ここから先は全部成功する。
     for (const memory of memories) {
