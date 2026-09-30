@@ -20,6 +20,7 @@ import type {
   TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
+import { toFloat4Readback } from "./float4.js";
 
 /**
  * `TenantSettingsStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3。
@@ -150,7 +151,8 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
         `InMemoryTenantSettingsStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${hours})`,
       );
     }
-    this.ensureRow(tenantId).defaultHalfLifeHours = hours;
+    // float4 の列——Postgres が読み戻す値で持つ（`toFloat4Readback` の doc 参照）。
+    this.ensureRow(tenantId).defaultHalfLifeHours = toFloat4Readback(hours);
   }
 
   async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
@@ -258,7 +260,8 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
         `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
       );
     }
-    this.ensureRow(ctx.tenantId).defaultHalfLifeRecalls = recalls;
+    // float4 の列——Postgres が読み戻す値で持つ（`toFloat4Readback` の doc 参照）。
+    this.ensureRow(ctx.tenantId).defaultHalfLifeRecalls = toFloat4Readback(recalls);
   }
 
   /**

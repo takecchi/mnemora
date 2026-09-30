@@ -17,6 +17,19 @@ function memoryNotFound(id: string): Error {
 }
 
 /**
+ * `memory_relations.kind` に入れてよい値（`RelationKind` の全値。`0026_memory_relations.sql` の CHECK と同じ）。
+ * `Record<RelationKind, true>` で持つので、union に値を足すと、ここに足し忘れた時点で型検査が落ちる。
+ */
+const KNOWN_RELATION_KINDS: Record<RelationKind, true> = { contradicts: true };
+
+/**
+ * 列挙の外の kind は、CHECK 制約違反（生の DB エラー）を利用者へ漏らさず、INSERT の前にこの例外で断る。
+ */
+function unknownRelationKind(kind: string): Error {
+  return new Error(`PostgresRelationStore: unknown relation kind: ${String(kind)}`);
+}
+
+/**
  * `RelationStore` の Postgres 実装（Issue #207/#933 PR2、ADR 0292 決定1、ADR 0381）。
  *
  * **群の作成・解消（`markContestedGroup?`/`resolveContestedGroup?`）はここではない**
@@ -39,6 +52,9 @@ export class PostgresRelationStore implements RelationStore {
    * 区別できないため。
    */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    if (!Object.hasOwn(KNOWN_RELATION_KINDS, kind)) {
+      throw unknownRelationKind(kind);
+    }
     const from = normalizeUuidCase(fromId);
     const to = normalizeUuidCase(toId);
     if (!isUuidLike(from)) {

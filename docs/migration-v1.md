@@ -1984,6 +1984,33 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
+### 36. `describeOutboxStoreConformance`・`describeRelationStoreConformance`（`@mnemora/testkit`）が、adapter 間の食い違い4点を検査するようになった（`@mnemora/testkit`・`@mnemora/postgres`）
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 36 である**——項目35 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 次の `it` が足された（`OutboxStore` が4件、`RelationStore` が2件）。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+- `OutboxStore.complete`/`fail` は、`opts.at` が Invalid Date なら例外を投げる（Postgres は `timestamptz` への変換で `22007` になる）。
+- `complete`/`fail` に渡した `opts.at` を、呼び手が後から書き換えても、`completedAt`/`failedAt` は変わらない（`peekJob` を渡した adapter だけ）。
+- `fail` の `error` に NUL（U+0000）が含まれていても落とさず、6文字の `\u0000` に置き換えて `lastError` に残す（`peekJob` を渡した adapter だけ）。
+- `RelationStore.link` は、列挙の外の `kind` を、`relation kind` を含む例外で拒み、行を書かない。
+- `RelationStore.listRelated` が返した `createdAt` を書き換えても、store の行は変わらない。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**conformance suite の判定が厳しくなり、上を満たさない自前の実装は、新しく実行時に落ちる**（このファイルの規律の、conformance の判定を厳しくする変更）。項目29 の conformance の部分と同じ扱い。
+
+⚠ **数えなかったもの（判断の記録）**:
+- `@mnemora/postgres` の `PostgresRelationStore.link` が、列挙外の `kind` を DB の CHECK 違反（生のエラー）ではなく `PostgresRelationStore: unknown relation kind: <kind>` の `Error` で、INSERT の前に断るようになった。**以前も例外になった入力が、今も例外になる**——「以前は通っていた入力が新しく例外になる」に当たらないので、adapter の変更としては数えない。上の conformance の `it` としては数える。DB の生のエラーコード（`23514`）を読んでいた呼び出し側は、その読み方が効かなくなる。
+- `@mnemora/testkit/fixtures` の `InMemoryOutboxStore`・`InMemoryRelationStore` が新しく例外を投げる（規律2）。fixture が `error` の NUL を置き換える・`Date` を複製する変更、`real` 列の値を Postgres が読み戻す値で持つ変更は、例外を増やさない・conformance に足していないので、数えない。
+
+**誰が影響を受けるか**: 自前の `OutboxStore`・`RelationStore` を上の suite に当てている利用者。`@mnemora/postgres` とインメモリの実装は、足した `it` に通る。
+
+**どう直すか**:
+- `complete`/`fail` の入口で `opts.at` の `getTime()` が `NaN` なら投げる。保存するときは `new Date(opts.at)` で複製する。
+- `fail` は保存する前に `error.replaceAll("\u0000", "\\u0000")` をかける。
+- `link` は、`kind` が `RelationKind` の値のどれでもないなら、両端の検査・書き込みの前に `unknown relation kind: <kind>` を含む `Error` を投げる。`listRelated` は保存している `Date` を複製して返す。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

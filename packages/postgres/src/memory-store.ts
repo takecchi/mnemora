@@ -127,6 +127,11 @@ function subjectIdMatches(subjectId: string | null): SQL {
  * だったが、ここは「書く**前**に見直す」——ADR 0375 決定7参照。
  *
  * `tenant_id` の絞り込みも同じ `WHERE` に含める——他テナントの同じ id を誤って見ない。
+ *
+ * ⚠ `ORDER BY id ASC FOR UPDATE`: 行ロックを掴む順を、`markContestedPair`/`resolveContestedPair`/
+ * `markContestedGroup` と同じ id 昇順に揃える。`ORDER BY` が無いと掴む順が実行計画（ふつうは heap の並び）に
+ * 依存し、`consolidate` と `markContestedPair` が同じ行を逆順で掴み合って 40P01（`deadlock detected`）を
+ * 生のまま漏らしうる。歯は `__tests__/assert-not-forgotten-lock-order.postgres.test.ts`。
  */
 async function assertNotForgottenForUpdate(
   tx: SqlExecutor,
@@ -147,6 +152,7 @@ async function assertNotForgottenForUpdate(
   const rows = await tx.execute(sql`
     SELECT id, status FROM memories
     WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
+    ORDER BY id ASC
     FOR UPDATE
   `);
   const forgottenIds = (rows.rows as unknown as Array<{ id: MemoryId; status: MemoryStatus }>)
