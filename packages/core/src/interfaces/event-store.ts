@@ -31,7 +31,9 @@ export interface EventStore {
    * **`event` の形もほとんど検査しない。**
    * - 列挙に無い `actor.type`、`actor: null`、オブジェクトでない `meta`（`null`・配列・文字列）、負の `sizeBeforeBytes` も、
    *   そのまま書いて返す。**返った `MemoryEvent` は `MemoryEventSchema` を通らないことがある。**
-   * - 整数でない `sizeBeforeBytes`（例: `1.5`）は、**`@mnemora/postgres` だけが**例外を投げる（列が整数）。fixture は受け付けて返す。
+   * - 整数でない `sizeBeforeBytes`（`1.5`・`NaN`・`Infinity`）と、`integer`（int4）の範囲（`-2^31`〜`2^31 - 1`）に収まらない値は、
+   *   例外を投げる（列が `integer`。2026-10-01 から、`@mnemora/postgres` も testkit の fixture も同じ入力を拒む——
+   *   [ADR 0434](../../../../docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)。範囲の端ちょうどの値は通る）。
    * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
    *   `ctx.tenantId`）。
    * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・

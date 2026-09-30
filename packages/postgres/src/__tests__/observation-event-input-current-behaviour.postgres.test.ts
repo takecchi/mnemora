@@ -17,8 +17,9 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 /**
  * Observation とイベントの書き込みの口が入力の中身をどう扱うかの、今の振る舞い（9回目の棚卸し）。
  * `MemoryStore.createObservation`・`EventStore.append`・`MemoryEvent.memoryId` の TSDoc の歯。
- * `@mnemora/postgres` と testkit の fixture で縛り、2つが違うところ（`payload: undefined`・整数でない
- * `sizeBeforeBytes`）は、それぞれの今の振る舞いのまま縛る（揃えるかはオーナーへの問いの待ち）。
+ * `@mnemora/postgres` と testkit の fixture で縛り、2つが違うところ（`payload: undefined`）は、それぞれの今の
+ * 振る舞いのまま縛る（揃えるかはオーナーへの問いの待ち）。整数でない `sizeBeforeBytes` は、ADR 0434 で fixture を
+ * Postgres に揃えたので、どちらも拒む。
  * core の Fake の側は `packages/core/src/__tests__/fake-observation-event-rejects.test.ts`。
  *
  * ⚠ 望ましい姿の主張ではない。変えるときは、この歯ごと書き換えること。
@@ -177,14 +178,10 @@ describe.each(KITS)("イベントの入力（今の振る舞い）: %s", (kitNam
     await expect(kit.es.append(ctx, make(memoryId))).rejects.toThrow();
   });
 
-  it(`append: sizeBeforeBytes が整数でない（1.5）は、${kitName === "Postgres" ? "拒む（Postgres だけ。列が整数）" : "受け付ける（fixture。Postgres とは違う）"}`, async () => {
+  // ADR 0434: fixture も Postgres（列が整数）と同じく拒む。
+  it("append: sizeBeforeBytes が整数でない（1.5）は拒む", async () => {
     const { kit, memoryId } = await withMemory();
-    const call = kit.es.append(ctx, event(memoryId, { sizeBeforeBytes: 1.5 }));
-    if (kitName === "Postgres") {
-      await expect(call).rejects.toThrow();
-    } else {
-      await expect(call).resolves.toMatchObject({ sizeBeforeBytes: 1.5 });
-    }
+    await expect(kit.es.append(ctx, event(memoryId, { sizeBeforeBytes: 1.5 }))).rejects.toThrow();
   });
 
   it("append: tenantId が ctx と違っても、ctx のテナントとして書く", async () => {
