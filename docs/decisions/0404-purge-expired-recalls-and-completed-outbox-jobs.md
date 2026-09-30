@@ -186,3 +186,18 @@
 - **`purgeCompletedJobs` を `claimBatch` と並行に走らせたときの挙動**（`FOR UPDATE SKIP LOCKED` で対象を掴むが、並行の歯は置いていない。完了済みの行は `claimBatch` の対象ではない）。
 - **`recalls` の子として `recall_usages` の他に参照する表が将来増えたとき**の扱い（今は `pg_constraint` で1本だけ）。
 - 上の数字は自前の1台の器での1回ずつの測りであり、再現性の幅は見ていない。
+
+## 追記（2026-09-30）: 決定7は [ADR 0412](./0412-purge-target-select-indexes.md) で改めた
+
+**本文（特に決定7と「測ったこと」の判断）は書き換えていない。当時の記録として残す。**
+
+- 決定7「索引（migration）は足さない」は、**ADR 0412 で改め、索引を2本足した**（migration `0032`:
+  `recalls (tenant_id, created_at, id)` と `outbox (tenant_id, completed_at, id) WHERE completed_at IS NOT NULL`）。
+  「これが覆るとしたら」の最後の項目（実運用の行数で purge の1回が遅すぎると分かったとき）が起きた。
+- 実測の要点: 100万行（前任、main `e9e7520`）で `purgeExpiredRecalls`（`limit 100`）の p50 は 409 ms、
+  `purgeCompletedJobs` は 312 ms（対象 0 件でも 153 ms）。どちらも行数に比例する。索引を足すと
+  それぞれ約 2 ms・約 0.4 ms。10万行の測り直し（ADR 0412）は、索引なし 6〜15 ms → 索引あり 0.3〜0.7 ms。
+- 本文の「索引あり（候補）」の書き込み側の上乗せの数字は、ADR 0412 が10万行で測り直した
+  （recall の INSERT 1回あたり約 2.7 µs、`complete` の UPDATE 約 4 µs）。**上乗せを受け入れた理由は ADR 0412。**
+- `recalls-purge-index.test.ts` は「Sort が入る」を縛る向きだった。ADR 0412 で「索引があるとき Index Scan で
+  Sort も Seq Scan も無い」向きに書き換えた。

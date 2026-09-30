@@ -260,6 +260,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `memory_labels` への書き込みが止まる。
   - 調査担当の実測では、`memory_labels` 20万行で 46ms → 6.5ms（ADR 0400）。あわせて、全外部キーに先頭列一致の索引を要求する歯を足した（テストのみ、利用者には見えない）。
 
+- **`purgeExpiredRecalls`・`purgeCompletedJobs`（Postgres）の1回の呼び出しが、表の行数に比例しなくなった**（[ADR 0412](./docs/decisions/0412-purge-target-select-indexes.md)、ADR 0404 決定7を改めた）。
+  - **新しい migration `0032_purge_indexes.sql`。** `recalls (tenant_id, created_at, id)` の索引 `idx_recalls_by_created` と、`outbox (tenant_id, completed_at, id) WHERE completed_at IS NOT NULL` の部分索引 `idx_outbox_completed` を足す。`@mnemora/postgres` を上げたあと migrate を当てる。列・型・SQL 文・返り値は変えない。⭕ 非破壊と数える。
+  - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `recalls` と `outbox` への書き込みが止まる。⚠ 全 recall の INSERT と全 outbox の `complete` に、purge を呼ばない利用者も含めてマイクロ秒の上乗せが乗る（10万行の実測で 1 回あたり約 2.7 µs・約 4 µs。ADR 0412）。
+  - 10万行の実測で、対象選択の p50 は索引なし 6〜15 ms → 索引あり 0.3〜0.7 ms（前任の100万行の測りは 409 ms／312 ms が約 2 ms／約 0.4 ms）。
+
 - **`MemoryStore.listActiveClaimPredicates?` の同着（代表行の `created_at` が同じ predicate が複数あるとき）の並びを、predicate のコードポイント順の昇順に固定した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。以前は契約が同着の順を規定せず、`PostgresMemoryStore` は `ORDER BY MAX(created_at) DESC` だけ（同着は実行計画次第）、fixture は挿入順だった。
   - `@mnemora/postgres` は副キーに `claim_key_predicate COLLATE "C" ASC` を足した（DB の照合順序に依らない）。`@mnemora/testkit` の `InMemoryMemoryStore` は UTF-8 のバイト列の比較（コードポイント順）で揃えた。DB マイグレーションは足していない。
   - `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの歯を3本足した。

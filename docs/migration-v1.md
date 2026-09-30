@@ -1854,6 +1854,16 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 9本が要る。`0031` の索引の構築も素の `CREATE INDEX`（`CONCURRENTLY` を使わない理由は上と同じ）で、
 適用中は **`memory_labels` への書き込みが止まる**（読み取りは通る）。
 
+⚠ **非破壊の追記（`0032` の1本、[ADR 0412](./decisions/0412-purge-target-select-indexes.md)）**:
+新しい migration `0032_purge_indexes.sql` が1本増えた（`recalls (tenant_id, created_at, id)` の索引
+`idx_recalls_by_created` と、`outbox (tenant_id, completed_at, id) WHERE completed_at IS NOT NULL` の部分索引
+`idx_outbox_completed` の追加のみ。列・型・SQL 文・返り値は変えず、公開 API も変えない）。**この文書の定義では
+破壊的変更に数えない**。上の段落の本数は、それぞれの時点のものである（**書き換えない**）。
+いま数えるなら、`v1.1.0` から上げる場合は `0026`〜`0032` の7本、`v1.0.2` からは `0023`〜`0032` の
+10本が要る。`0032` の索引の構築も素の `CREATE INDEX`（`CONCURRENTLY` を使わない理由は上と同じ）で、
+適用中は **`recalls` と `outbox` への書き込みが止まる**（読み取りは通る）。全 recall の INSERT と全 outbox の
+`complete` に、purge を呼ばない場合も索引の分の上乗せが乗る（実測は ADR 0412）。
+
 ### 32. `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性が崩れていると例外を投げるようになった（`@mnemora/openai`）
 
 [Issue #860](https://github.com/takecchi/mnemora/issues/860)、
