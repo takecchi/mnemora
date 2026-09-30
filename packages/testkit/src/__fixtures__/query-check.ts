@@ -1,4 +1,4 @@
-// testkit の fixture の内部モジュール。読みの口（検索・集約・掃除）の関数の中身からだけ使う——`.d.ts` の
+// testkit の fixture の内部モジュール。読み・書きの口（検索・集約・掃除・書き込み）の関数の中身からだけ使う——`.d.ts` の
 // import に出ないので、公開の型の面には入らない（`memory-event-check.ts`・`memory-enum-check.ts` と同じ）。
 
 /**
@@ -53,5 +53,93 @@ export function assertFloat4Vector(method: string, vector: readonly number[]): v
         `${method}: vector component [${i}] does not fit in a float4 (pgvector) value (got ${x})`,
       );
     }
+  }
+}
+
+/**
+ * `value` を `jsonb` 列・`jsonb` の引数へ渡すとき、Postgres が NUL（U+0000）で拒むかどうか。
+ *
+ * `packages/postgres` は `jsonb` 列へ `JSON.stringify(value)` を送る。Postgres は、
+ * 文字列の値にもキーにも `\u0000` が現れると `unsupported Unicode escape sequence` で拒む
+ * （実測）。同じ文字列を JSON として往復させた値を辿るので、`toJSON` などによる変換も
+ * Postgres が受け取る形と同じになる。文字どおりの `\\u0000`（バックスラッシュ + `u0000`）は
+ * NUL ではないので拒まない。
+ */
+export function jsonContainsNul(value: unknown): boolean {
+  const text = JSON.stringify(value);
+  if (text === undefined || !text.includes("\\u0000")) {
+    return false;
+  }
+  const visit = (v: unknown): boolean => {
+    if (typeof v === "string") {
+      return v.includes("\u0000");
+    }
+    if (Array.isArray(v)) {
+      return v.some(visit);
+    }
+    if (v !== null && typeof v === "object") {
+      return Object.entries(v).some(([k, inner]) => k.includes("\u0000") || visit(inner));
+    }
+    return false;
+  };
+  return visit(JSON.parse(text));
+}
+
+/**
+ * 文字列の値に NUL（U+0000）が入っているか。文字列でない値（型を外した呼び出し）は「入っていない」と
+ * 扱う——Postgres は文字列以外を `text` の引数へ渡すと別の変換をするので、ここでは見ない。
+ */
+export function stringHasNul(value: unknown): boolean {
+  return typeof value === "string" && value.includes("\u0000");
+}
+
+/**
+ * 読みの口の `jsonb` の条件（`attributes` の包含判定など）が、Postgres の `jsonb` へ渡せるかを確かめる。
+ * NUL は、Postgres ではクエリの時点で `unsupported Unicode escape sequence`（22P05）になる。
+ * `assertQueryTextWithoutNul` と同じ文面にする。省略（`undefined`/`null`）は検査しない。
+ */
+export function assertQueryJsonWithoutNul(method: string, field: string, value: unknown): void {
+  if (value != null && jsonContainsNul(value)) {
+    throw new Error(`${method}: ${field} must not contain NUL characters (U+0000)`);
+  }
+}
+
+/**
+ * 書く口の通し番号（`reinforce` の `nowSeq`）が、Postgres の `bigint` の引数へ変換できる整数かを確かめる。整数でない
+ * （`NaN`・`Infinity` を含む）→ `22P02`、2^63 以上・-2^63 未満 → `22003`。読みの口の `assertQueryInteger` に、
+ * `bigint` の範囲の検査を足したもの。負の数そのものは拒まない（列の CHECK 制約は、行を実際に書くときに効く。
+ * 呼び出し側が、書く分岐で別に見る）。省略は検査しない。
+ */
+export function assertQueryBigint(
+  method: string,
+  field: string,
+  value: number | null | undefined,
+): void {
+  assertQueryInteger(method, field, value);
+  if (value != null && (value >= 2 ** 63 || value < -(2 ** 63))) {
+    throw new Error(`${method}: ${field} must fit in a Postgres bigint (got ${value})`);
+  }
+}
+
+/** Postgres の `integer`（int4）列が持てる範囲。 */
+export const INT4_MIN = -(2 ** 31);
+export const INT4_MAX = 2 ** 31 - 1;
+
+/**
+ * 数の値が、Postgres の `integer`（int4）列へ書けるかを確かめる。整数でない（`NaN`・`Infinity` を含む）→
+ * `22P02`、`-2^31` 未満・`2^31 - 1` より大きい → `22003`。負の数そのものは拒まない（列に CHECK 制約は無い）。
+ * 数でない値（`null`・`undefined`・型を外した呼び出し）は検査しない。
+ */
+export function assertInt4Column(method: string, field: string, value: unknown): void {
+  if (typeof value !== "number") {
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    throw new Error(`${method}: ${field} must be an integer (got ${value})`);
+  }
+  if (value < INT4_MIN || value > INT4_MAX) {
+    throw new Error(
+      `${method}: ${field} does not fit in a Postgres "integer" (int4) column (got ${value})`,
+    );
   }
 }

@@ -22,6 +22,7 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import { toFloat4Readback } from "./float4.js";
+import { assertQueryTextWithoutNul } from "./query-check.js";
 
 /**
  * `TenantSettingsStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3。
@@ -303,6 +304,10 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     assertWellFormedCtx(ctx);
+    // ADR 0434: `subject_id` は `text` 列。検索値の NUL は Postgres ではクエリの時点で `22021` になる。
+    for (const subjectId of subjectIds) {
+      assertQueryTextWithoutNul("getSubjectActivitySeqs", "subjectId", subjectId);
+    }
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
     const out: Record<string, number> = {};
     if (bySubject === undefined) {
