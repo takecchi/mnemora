@@ -477,3 +477,48 @@ describe("recall() — 群の単位の中の見せる順（2026-09-30、ADR 0381
     expect(shown).toEqual([owner.id, c2.id, c1.id, a.id]);
   });
 });
+
+describe("recall() — 同じ段で複数の親から届く同伴の companionOf は id の小さい親に決まる（Issue #1449 項目7）", () => {
+  // 菱形: O が起点、O-B・O-C・B-D・C-D。D へは B からも C からも同じ段で届く。
+  // `RelationStore.listRelated` の順は契約が規定しない（InMemory は挿入順）ので、
+  // 関係を張る順を入れ替えた2通りで作り、どちらでも D の companionOf が同じになることを縛る。
+  const orders: Array<[string, boolean]> = [
+    ["O-B, O-C, B-D, C-D の順に張る", false],
+    ["O-C, O-B, C-D, B-D の順に張る（逆）", true],
+  ];
+  it.each(orders)(
+    "菱形（%s）でも D の companionOf は B と C のうち id の小さいほう",
+    async (_n, reversed) => {
+      const { runtime, stores } = buildRuntime({ withRelationStore: true });
+      const make = (digest: string) =>
+        stores.memoryStore.createMemory(ctx, newMemory({ digest, status: "contested" }));
+      const o = await make("O");
+      const b = await make("B");
+      const c = await make("C");
+      const d = await make("D");
+      const link2 = async (x: MemoryId, y: MemoryId) => {
+        await stores.relationStore.link(ctx, "contradicts", x, y);
+        await stores.relationStore.link(ctx, "contradicts", y, x);
+      };
+      const [first, second] = reversed ? [c, b] : [b, c];
+      await link2(o.id, first.id);
+      await link2(o.id, second.id);
+      await link2(first.id, d.id);
+      await link2(second.id, d.id);
+      // 前提: O から見た listRelated の順が張った順（= 入れ替えが効いている）。
+      const viaO = await stores.relationStore.listRelated(ctx, o.id, "contradicts");
+      expect(viaO.map((r) => r.memoryId)).toEqual([first.id, second.id]);
+      await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, o.id, [1, 0]);
+
+      const result = await runtime.recall(ctx, { vector: [1, 0] });
+
+      const smaller = b.id < c.id ? b.id : c.id;
+      const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
+      expect(byId.get(d.id)?.retrievedVia).toBe("mandatory_companion");
+      expect(byId.get(d.id)?.companionOf).toBe(smaller);
+      // B・C は O の直接の同伴。
+      expect(byId.get(b.id)?.companionOf).toBe(o.id);
+      expect(byId.get(c.id)?.companionOf).toBe(o.id);
+    },
+  );
+});
