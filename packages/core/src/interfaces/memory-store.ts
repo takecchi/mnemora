@@ -522,12 +522,21 @@ export interface MemoryStore {
    * 2026-09-28 追記、2026-09-29 訂正）が「outbox の `createdAt`・`availableAt` は壁時計になる」と
    * 記録していた問題（過去の時計を注入すると `tick` がジョブを1本も取らない）への対応——
    * runtime はこの欄に `clock.now()` を渡す。
+   *
+   * ⭐ **`opts.claimedBy` も省略可能で、非破壊である**（[ADR 0407](../../../../docs/decisions/0407-sync-observe-extract-job-lease.md)）。
+   * **渡すと、積む outbox 行を「その名前で claim 済み」の状態で作る**——`claimedAt` は `opts.now`（省略時は
+   * 壁時計）、`claimedBy` はこの値、`attempts` は `1`（`claimBatch` が初回の claim で付ける値と同じ）。
+   * 作った直後の行は、他のワーカーの `claimBatch` から見て「リースを持っている行」であり、
+   * リース（`ClaimOutboxJobsOptions.leaseMs`）が切れるまで claim されない。**返る `jobs` の `attempts` を
+   * そのまま `complete`/`fail` の `expectedAttempts` に渡せば、CAS（ADR 0142）のフェンシングトークンになる。**
+   * 省略時は今日と同じ（`attempts: 0`・未 claim・すぐ claim できる）。`extract: "sync"` の `observe` は、
+   * 自分が LLM を待っている間に tick が同じジョブを取り、二重に抽出する穴を塞ぐためにこれを渡す。
    */
   createObservationWithOutbox(
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):

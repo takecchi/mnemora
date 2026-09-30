@@ -442,13 +442,14 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: observation, created } = this.createObservationIdempotent(ctx, input);
     if (!created) {
       return { observation, created: false, jobs: [] };
     }
     const jobs = jobKinds.map((kind) =>
-      this.enqueueJob(ctx, kind, { observationId: observation.id }),
+      this.enqueueJob(ctx, kind, { observationId: observation.id }, opts),
     );
     // Postgres は INSERT ... RETURNING で行の複製を返す。生の参照を返すと、後の claim が
     // 返した job の `attempts` を書き換え、CAS（ADR 0142）の食い違いが隠れる（ADR 0407）。
@@ -459,16 +460,19 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     kind: OutboxJobKind,
     payload: Record<string, unknown>,
+    opts?: { now?: Date; claimedBy?: string },
   ): OutboxJobRecord {
+    const claimedBy = opts?.claimedBy;
     const job: OutboxJobMutable = {
       id: nextId("job"),
       tenantId: ctx.tenantId,
       kind,
       payload,
       availableAt: new Date(),
-      claimedAt: null,
-      claimedBy: null,
-      attempts: 0,
+      // ADR 0407: `claimedBy` を渡されたら「その名前で claim 済み」（`attempts: 1`）で作る。
+      claimedAt: claimedBy === undefined ? null : (opts?.now ?? new Date()),
+      claimedBy: claimedBy ?? null,
+      attempts: claimedBy === undefined ? 0 : 1,
       completedAt: null,
       failedAt: null,
       lastError: null,

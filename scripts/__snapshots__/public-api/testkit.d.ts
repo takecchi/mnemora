@@ -139,6 +139,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     private enqueueOutboxJob;
     createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
+        claimedBy?: string;
     }): Promise<{
         observation: Observation;
         created: boolean;
