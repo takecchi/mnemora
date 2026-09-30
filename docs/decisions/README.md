@@ -435,5 +435,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0421](./0421-concurrent-write-and-audit-event-holes.md) | 同時の書き込みと監査イベントの小さな穴——直したもの（Q1）と、実測して縛って負債にしたもの（R4・R5） | 採用 (2026-09) |
 | [0422](./0422-reextract-created-event-at-and-meta.md) | `reextract` の `created` イベントの `at` を同じ操作の `superseded` と揃え、meta に再抽出の印を足す。同じ `at` のイベントの並びは約束しない | 採用 (2026-09) |
 | [0423](./0423-identifier-well-formed-and-error-message-without-params.md) | 識別子の文字の扱いを揃え、区別できない値を入口で断る。利用者へ伝わる例外の message から入力値を落とす | 採用 (2026-09) |
+| [0426](./0426-in-memory-erase-tenant-postgres-alignment.md) | testkit のインメモリ `eraseTenant` を Postgres 実装に揃える（`tenant_subject_activity` の行数と、埋め込みの CASCADE） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

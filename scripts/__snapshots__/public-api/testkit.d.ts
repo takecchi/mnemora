@@ -130,6 +130,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly labels;
     private readonly memoryLabels;
     readonly relations: StoredRelation[];
+    private readonly memoriesDeletedListeners;
+    onMemoriesDeleted(listener: (tenantId: string, memoryIds: readonly MemoryId[]) => void): void;
     private labelKey;
     private memoryLabelKey;
     private upsertProposedLabels;
