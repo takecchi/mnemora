@@ -28,7 +28,8 @@ import { assertLLMContentNotBlank } from "./llm-content.js";
 import { resolveCandidateSubjectId, resolveCommonSubjectId } from "./memory-subject.js";
 import { classifyValidity } from "./validity.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
-import { describeFailure } from "./failure-description.js";
+import { describeFailure, omitParamsFromError } from "./failure-description.js";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "./identifier.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
@@ -8620,7 +8621,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  return {
+  return guardRuntimeEntry({
     observe,
     tick,
     recall,
@@ -8641,5 +8642,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     applyCorrection,
     consolidate,
     reflect,
-  };
+  });
+}
+
+/**
+ * `Runtime` の各メソッドの入口と出口に掛ける関門（[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)）。
+ *
+ * - **入口**: 第1引数の {@link Ctx}（`tenantId`・`subjectId`）と、`observe` の入力の `subjectId`・`externalId` が
+ *   孤立サロゲートか NUL を含めば、何も書かずに {@link MalformedIdentifierError} で拒む（正規化はしない）。
+ *   本文（`text` など）は検査しない。`Runtime` のメソッドを新しく足したときは、ここを通る（全メソッドに掛かる）。
+ * - **出口**: store などが投げた例外の `message` から、SQL に付けた値（params）を落とす
+ *   （{@link omitParamsFromError}）。例外そのもの（`kind`・`cause`）は変えない。
+ */
+function guardRuntimeEntry(runtime: Runtime): Runtime {
+  const guarded: Record<string, unknown> = {};
+  for (const [name, method] of Object.entries(runtime) as Array<
+    [string, (...args: unknown[]) => Promise<unknown>]
+  >) {
+    guarded[name] = (...args: unknown[]): Promise<unknown> => {
+      try {
+        assertWellFormedCtx(args[0] as Ctx);
+        if (name === "observe") {
+          const input = args[1] as { subjectId?: unknown; externalId?: unknown } | null | undefined;
+          assertWellFormedIdentifier(input?.subjectId, "input.subjectId");
+          assertWellFormedIdentifier(input?.externalId, "input.externalId");
+        }
+        return method(...args).catch((error: unknown) => {
+          throw omitParamsFromError(error);
+        });
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+  }
+  return guarded as unknown as Runtime;
 }
