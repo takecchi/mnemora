@@ -262,6 +262,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
   - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
 
+- **`runtime.reextract` が、LLM を待つ間に元の記憶が `forget`（`purge` を含む）されたとき、何も書かずに打ち切るようになった**（[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226) と同じ穴）。
+  - **直した穴**: 以前は、`reextract` が LLM を待つ間にその Observation の記憶を `forget` すると、`forget` は `forgotten` を返すのに、LLM が返った後で言い換えが新しい `active` として書かれ、イベントが `created` → `forgotten` → `created` と積まれた（実測、Postgres）。`consolidate`/`reflect` が #1226 で塞いだのと同じ穴が `reextract` に残っていた。
+  - **今の振る舞い**: LLM が返った直後に、LLM の前に読んだその Observation の記憶を読み直し、1件でも `forgotten` なら何も書かない。書き込み（`supersedeWithNewMemories`／口が無い adapter 向けの `createMemoryWithOutbox`）にも `opts.abortIfForgotten` を渡し、実装する adapter（`@mnemora/postgres`）は同一トランザクションでも見直す。戻り値は「退けた記憶を持つ Observation」の早期 return と同じ形（`extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に `status_not_active`）。**例外は投げず、公開の型は増やしていない。**
+  - ⚠ `abortIfForgotten` を実装しない自前の `MemoryStore` では、読み直しだけが保護になり、読み直しと書き込みの間の窓は残る（`consolidate`/`reflect` と同じ）。待つ間に `contested` になった記憶は見直さない。
+  - 非破壊（型・DB は変えていない。forget された記憶を根拠に書き直していた挙動が、書かない挙動になった）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
