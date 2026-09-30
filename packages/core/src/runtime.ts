@@ -3407,12 +3407,14 @@ export interface Runtime {
    * 3. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `memberIds` の
    *    どの id とも一致しなければ `RangeError`
    *    （`Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds`）。
-   *    `resolveContested`（2者版）と同じ大文字小文字の救済（store に同じ記憶かを聞く）は
-   *    行わない——群は3件以上あり、「どれとも大文字小文字だけ違う」場合に候補を一意に
-   *    絞れないケースが2者よりずっと起きやすいため、単純な完全一致だけで判定する
-   *    （クローン miku の判断——2者版の救済ロジックを N者へそのまま持ち上げると、複数の
-   *    候補が同時にヒットしたときの振る舞いを新しく決めなければならず、ADR 0381 で
-   *    決めた範囲を超える）。
+   *    ただし `winnerId` が memberIds のどれかと大文字小文字だけ違うときは、`resolveContested`
+   *    （2者版）と同じ規則で救済する（Issue #1449 項目6。旧版は「群は候補を一意に絞れない
+   *    ことが多い」として見送っていたが、**一意に絞れたときだけ**救済し、絞れなければ今どおり
+   *    落とす形なら2者版と同じ規則を持ち上げられる）: 小文字にそろえて memberIds から候補を集め、
+   *    **ちょうど1件**かつ `memoryStore.get` が `winnerId` と候補に同じ id の記憶を返したとき
+   *    だけ、その memberId の綴りを勝者として使う（敗者の `supersededById` は memberIds の綴り
+   *    ＝store の列の値になる）。候補が2件以上・`get` が食い違う・どの member とも大文字小文字を
+   *    無視しても違う（この場合は store を読まない）ときは `RangeError`。
    * 4. `deps.memoryStore.resolveContestedGroup` が無ければ
    *    `{ supported: false, outcome: { kind: "not_attempted" } }`。
    * 5. `getMany(memberIds)` で一括読み、{@link ResolveContestedGroupSideOutcome}
@@ -7016,12 +7018,34 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     let winnerId: MemoryId | undefined;
     if (resolution.kind === "supersede") {
-      if (!memberIds.includes(resolution.winnerId)) {
-        throw new RangeError(
-          "Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds",
-        );
+      if (memberIds.includes(resolution.winnerId)) {
+        winnerId = resolution.winnerId;
+      } else {
+        // `winnerId` が memberIds のどれかと大文字小文字だけ違うときは、同じ記憶かを store に聞く
+        // （`resolveContested`〔2者版〕と同じ規則、Issue #1449 項目6。`@mnemora/postgres` は uuid を
+        // 大文字小文字を区別せずに比べる）。小文字にそろえて memberIds から候補を集め、ちょうど1件で、
+        // かつ store の `get` が両者に同じ id の記憶を返したときだけ、その memberId の綴りを勝者として
+        // 使う（敗者の `supersededById`・イベントの meta が、memberIds＝store の列の値の綴りになる）。
+        // 候補が2件以上（memberIds に同じ記憶の別の綴りが混じる）・`get` が食い違う・どの member とも
+        // 大文字小文字を無視しても違う、は今どおり `RangeError`（最後の場合は store を読まない）。
+        const lower = resolution.winnerId.toLowerCase();
+        const candidates = memberIds.filter((id) => id.toLowerCase() === lower);
+        const candidate = candidates.length === 1 ? candidates[0]! : undefined;
+        if (candidate !== undefined) {
+          const [winner, side] = await Promise.all([
+            deps.memoryStore.get(ctx, resolution.winnerId),
+            deps.memoryStore.get(ctx, candidate),
+          ]);
+          if (winner !== null && side !== null && winner.id === side.id) {
+            winnerId = candidate;
+          }
+        }
+        if (winnerId === undefined) {
+          throw new RangeError(
+            "Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds",
+          );
+        }
       }
-      winnerId = resolution.winnerId;
     }
 
     // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`resolveContested` と

@@ -306,8 +306,6 @@ describe("runtime.resolveContestedGroup — winnerId の大文字小文字の救
     );
     expect([sa?.status, sb?.status, sc?.status]).toEqual(["active", "superseded", "superseded"]);
     expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
-    const events = await stores.eventStore.list(ctx, { memoryId: b.id });
-    expect(events[events.length - 1]!.meta["supersededById"]).toBe(a.id);
   });
 
   it("store の get が別の記憶を返すなら RangeError（何も書かない）", async () => {

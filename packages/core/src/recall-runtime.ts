@@ -358,6 +358,11 @@ function collectGroupComponent(
  * 単位の中で見せるときの両方で使う並び。`validFrom` の新しい順、同じなら id の順。
  * `validFrom` が無い記憶は「新しさの情報が無い」として最後尾（最も古い扱い）に送る。
  */
+/** id の昇順（`compareByValidFromDescThenId` の id の比較と同じ文字列比較）。 */
+function compareIds(a: MemoryId, b: MemoryId): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function compareByValidFromDescThenId(a: Memory, b: Memory): number {
   const aTime =
     a.validFrom === null || a.validFrom === undefined
@@ -1497,6 +1502,9 @@ export async function runRecall(
   //   `listRelated` を呼ばない（`visited`）。**`status !== 'contested'`（今の status の
   //   門、decision10 で群を離れたメンバーを含む）な id は、そこで打ち切り——その id
   //   からは辿らない**（辺は記録するが、そこから先は探索しない）。
+  // - **処理順は id の昇順に固定する**（`related` も次の段の frontier も）。`listRelated`・
+  //   `getMany` の返す順は契約が規定しないので、同じ段で複数の親から届く companion の
+  //   `companionOf` は「id の小さい親」に決まる（Issue #1449 項目7、ADR 0381 追記）。
   // - **群ごとに**探索し、群ごとに切る（ADR 0381 決定4）。同じ群の owner が複数候補に
   //   居ても、最初の owner からの探索がその群を丸ごと辿るので、2回目は探索しない。
   // - **探索自体を止める安全弁**: 群ごとに、訪れた id の数（owner を含む）が `maxCount`
@@ -1565,7 +1573,15 @@ export async function runRecall(
           const nextIds: MemoryId[] = [];
           for (const id of frontier) {
             if (explorationTruncated) break;
-            const related = await relationStore.listRelated(ctx, id, "contradicts");
+            // `listRelated` の返す順は契約が規定しない（Postgres は ORDER BY なし、InMemory は
+            // 挿入順）。ここで `memoryId` の昇順に並べ、同じ段で複数の親から届く companion の
+            // 発見元（`discoveredVia` → `companionOf`）を「id の小さい親」に決定的にする
+            // （Issue #1449 項目7。frontier 自身の並びも下で id 昇順にそろえる）。比較は
+            // `compareByValidFromDescThenId` と同じ文字列比較。Postgres の uuid 列と `getMany` は
+            // 小文字で返すので、綴りの揺れで順が変わらない。
+            const related = [...(await relationStore.listRelated(ctx, id, "contradicts"))].sort(
+              (x, y) => compareIds(x.memoryId, y.memoryId),
+            );
             for (const r of related) {
               addRelationEdge(id, r.memoryId);
               if (groupVisited.has(r.memoryId) || visitedAll.has(r.memoryId)) continue;
@@ -1595,7 +1611,9 @@ export async function runRecall(
               discoveredMemories.push(m);
             }
           }
-          frontier = nextFrontier;
+          // `getMany` の返す順も規定されない——次の段の親の処理順を id 昇順に固定する
+          // （同じ子へ複数の親から届くとき、先に処理した親が発見元になるため）。
+          frontier = nextFrontier.sort(compareIds);
         }
         if (discoveredMemories.length === 0) continue;
         const eligible = discoveredMemories.filter((m) => survivesAttributesFilter(m));

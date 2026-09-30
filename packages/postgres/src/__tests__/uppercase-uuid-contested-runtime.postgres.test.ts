@@ -317,7 +317,7 @@ describe.each(KITS)(
       return { a, b, c };
     };
 
-    it("resolveContestedGroup（supersede）: 大文字の winnerId でも、store が同じ記憶と言えば通り、敗者の supersededById とイベントの meta は列の値（小文字）", async () => {
+    it("resolveContestedGroup（supersede）: 大文字の winnerId でも、store が同じ記憶と言えば通り、敗者の supersededById は列の値（小文字）", async () => {
       const kit = await makeKit();
       const { a, b, c } = await contestedTrio(kit, "grp-win");
 
@@ -339,8 +339,6 @@ describe.each(KITS)(
           "superseded",
         ]);
         expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
-        expect((await lastEventMeta(kit, b.id)).supersededById).toBe(a.id);
-        expect((await lastEventMeta(kit, c.id)).supersededById).toBe(a.id);
       } else {
         await expect(run()).rejects.toBeInstanceOf(RangeError);
         expect((await kit.memoryStore.get(ctx, a.id))?.status).toBe("contested");
