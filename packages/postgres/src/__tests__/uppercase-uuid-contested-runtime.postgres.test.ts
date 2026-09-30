@@ -339,6 +339,10 @@ describe.each(KITS)(
           "superseded",
         ]);
         expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
+        // 敗者のイベントの meta.supersededById も同じ値（ADR 0150 追記・ADR 0421）。
+        const metaB = await lastEventMeta(kit, b.id);
+        const metaC = await lastEventMeta(kit, c.id);
+        expect([metaB.supersededById, metaC.supersededById]).toEqual([a.id, a.id]);
       } else {
         await expect(run()).rejects.toBeInstanceOf(RangeError);
         expect((await kit.memoryStore.get(ctx, a.id))?.status).toBe("contested");
