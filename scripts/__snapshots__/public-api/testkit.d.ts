@@ -147,6 +147,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
+    private assertOwnMemoryRef;
+    private assertOwnObservationRef;
     private createMemoryIdempotent;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
