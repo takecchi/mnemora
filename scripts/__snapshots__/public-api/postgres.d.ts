@@ -375,6 +375,7 @@ export declare function runAnalyzeMemories(pool: Pool, options?: AnalyzeMemories
 export declare const DEFAULT_MIGRATIONS_DIR: string;
 
 // ===== dist/outbox-store.d.ts =====
+import { type SQL } from "drizzle-orm";
 import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore, type PurgeCompletedJobsOptions, type PurgeCompletedJobsResult } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresOutboxStore implements OutboxStore {
@@ -391,6 +392,7 @@ export declare class PostgresOutboxStore implements OutboxStore {
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
     purgeCompletedJobs(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
 }
+export declare function buildPurgeCompletedJobsTargetSelect(ctx: Ctx, opts: PurgeCompletedJobsOptions, lock?: boolean): SQL;
 
 // ===== dist/pgvector-capability.d.ts =====
 export declare const PGVECTOR_CAPABILITY_QUERY = "SELECT ext.extversion AS extversion, s.vartype AS vartype, s.enumvals AS enumvals\nFROM (SELECT '[0]'::vector AS probe) AS load\nLEFT JOIN pg_extension ext ON ext.extname = 'vector'\nLEFT JOIN pg_settings s ON s.name = 'hnsw.iterative_scan'";

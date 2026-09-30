@@ -425,6 +425,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0406](./0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) | `reextract` は、LLM を待つ間に元の記憶が forget されたら、何も書かずに打ち切る | 採用 (2026-09) |
 | [0407](./0407-sync-observe-extract-job-lease.md) | `extract: "sync"` の observe は、積んだ extract ジョブを claim 済みの状態で作る（`createObservationWithOutbox` の `opts.claimedBy?`） | 採用 (2026-09) |
 | [0410](./0410-extract-created-event-in-same-transaction.md) | 抽出の `created` イベントは、記憶と同じトランザクションで書く（任意メソッド `createMemoriesWithOutboxAndEvents?`） | 採用 (2026-09) |
+| [0412](./0412-purge-target-select-indexes.md) | `purgeExpiredRecalls` と `purgeCompletedJobs` の対象選択に索引を足す（ADR 0404 決定7を改める） | 採用 (2026-09) |
 | [0413](./0413-requeue-embed-zero-hit-scan-not-fixed.md) | `requeueEmbedJobs` の「全 status が0件」の走査は、測ったうえで直さない | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
