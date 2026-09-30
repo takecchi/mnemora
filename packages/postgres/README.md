@@ -339,12 +339,13 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `tenant_settings`
 - `tenant_subject_activity`
 
-### 索引（36）
+### 索引（37）
 
 - `idx_labels_by_status`
 - `idx_memories_attributes`
 - `idx_memories_by_subject`
 - `idx_memories_claim_key`
+- `idx_memories_claim_predicates`
 - `idx_memories_contested`
 - `idx_memories_contested_with`
 - `idx_memories_digest_band`
@@ -635,7 +636,7 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 | 用途 | 名前 |
 |---|---|
 | 接続 | `createPostgresClient`・`closePostgresClient`（2回目以降は冪等）・`PostgresClient`・`Db` |
-| store | `PostgresEventStore`・`PostgresOutboxStore`・`PostgresTenantSettingsStore`（上の例で使う）、`PostgresTrigramLexicalStore` とその下ごしらえ（`probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`・任意の索引 `createOptionalTrigramIndex`、`TrigramLexicalStoreUnavailableError`・`TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`、`DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD`・`TRIGRAM_NOISE_STOPWORD_PATTERN`） |
+| store | `PostgresEventStore`・`PostgresOutboxStore`・`PostgresTenantSettingsStore`（上の例で使う）、`PostgresTrigramLexicalStore` とその下ごしらえ（`probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`・任意の索引 `createOptionalTrigramIndex`（並行版は `createOptionalTrigramIndexConcurrently`）、`TrigramLexicalStoreUnavailableError`・`TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`、`DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD`・`TRIGRAM_NOISE_STOPWORD_PATTERN`） |
 | マイグレーション | `runMigrations`（`RunMigrationsOptions`・`RunMigrationsResult`・`ExtensionMode`）、`runAnalyzeMemories`、`listMigrationFiles`・`DEFAULT_MIGRATIONS_DIR`、`matchCreateExtensionLines`・`stripCreateExtensionStatements` |
 | advisory lock | `acquireAdvisoryLock`・`releaseAdvisoryLock`、同じ接続の上で取る `acquireAdvisoryLockOnClient`・`releaseAdvisoryLockOnClient`、`DEFAULT_LOCK_TIMEOUT_MS`、キーの `MIGRATION_LOCK_KEY`・`REGISTER_EMBEDDING_SPACE_LOCK_KEY`・`EXTENSION_LOCK_KEY` と導出の `migrationLockKeyFor`・`registerEmbeddingSpaceLockKeyFor`、待ちの失敗の `*LockTimeoutError`・`*LockUnavailableError` |
 | 埋め込み空間 | `registerEmbeddingSpace`（`RegisterEmbeddingSpaceOptions`・`RegisterEmbeddingSpaceResult`）、名前の導出 `embeddingSpaceTableName`・`embeddingSpaceIndexName`・`embeddingSpaceZeroNormIndexName` |

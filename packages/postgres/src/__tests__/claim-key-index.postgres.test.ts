@@ -131,7 +131,9 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
         validUntil: null,
       }),
     );
-    expect(text).toContain("idx_memories_claim_key");
+    // 緩めた理由: 0029 の部分索引 `idx_memories_claim_predicates` も `findActiveByClaimKey` のプランナが選びうるため。
+    // 残した確認: Seq Scan にならない・`subject_id` が Index Cond に入る（下の2行）。
+    expect(text).toMatch(/idx_memories_claim_(key|predicates)/);
     expect(text).not.toContain("Seq Scan on memories");
     expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*subject_id/);
   });
@@ -162,7 +164,9 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
     const text = await plan(listMatcher, () =>
       store.listActiveClaimPredicates(ctx, { subjectId, limit: 50 }),
     );
-    expect(text).toContain("idx_memories_claim_key");
+    // 緩めた理由: 0029 の部分索引 `idx_memories_claim_predicates` を `listActiveClaimPredicates` のプランナが選ぶため。
+    // 残した確認: Seq Scan にならない・`subject_id` が Index Cond に入る（下の2行。Index Only Scan は専用の歯が見る）。
+    expect(text).toMatch(/idx_memories_claim_(key|predicates)/);
     expect(text).not.toContain("Seq Scan on memories");
     expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*subject_id/);
   });
