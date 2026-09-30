@@ -56,6 +56,7 @@ import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
+  ownSubjectActivityNow,
 } from "./activity-decay-sql.js";
 import {
   isUuidLike,
@@ -1259,16 +1260,36 @@ export class PostgresMemoryStore implements MemoryStore {
     // ⚠ **壁時計側の SET 句・WHERE 句は1バイトも変えない**——この条件片は同じ SET の
     // 末尾に追記するだけであり、`opts.nowSeq` が無い呼び出し（既存の全呼び出し）では
     // 空文字列になって従来の SQL とバイト単位で同じ文になる。
-    const activitySet =
-      opts?.nowSeq !== undefined && memory.halfLifeRecalls != null
-        ? sql`, decay_base_seq = ${opts.nowSeq}, decay_floor_seq = ${defaultActivityDecayStrategy.floorAt(
-            {
-              baseSeq: opts.nowSeq,
-              strength: memory.strength,
-              halfLifeRecalls: memory.halfLifeRecalls,
-            },
-          )}`
-        : sql``;
+    //
+    // [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md):
+    // `opts.addOwnSubjectSeq === true` のときは、`opts.nowSeq`（= `T`）にこの行自身の subject の
+    // `S_x`（読む側と同じ相関サブクエリ）を UPDATE の中で足して起点にする。
+    // 床は `起点 + ceil(offset)`（`defaultActivityDecayStrategy.floorAt` と同じ式。`baseSeq: 0` で
+    // offset だけを取り、起点は SQL 側で足す）。`Number.MAX_SAFE_INTEGER` で丸める規律も同じ。
+    let activitySet = sql``;
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      if (opts.addOwnSubjectSeq === true) {
+        const offset = defaultActivityDecayStrategy.floorAt({
+          baseSeq: 0,
+          strength: memory.strength,
+          halfLifeRecalls: memory.halfLifeRecalls,
+        });
+        const effectiveNow = ownSubjectActivityNow({
+          tenantSeq: sql`${opts.nowSeq}`,
+          tenantIdExpr: sql`memories.tenant_id`,
+          subjectIdExpr: sql`memories.subject_id`,
+        });
+        activitySet = sql`, decay_base_seq = ${effectiveNow}, decay_floor_seq = LEAST(${effectiveNow} + ${offset}::bigint, ${Number.MAX_SAFE_INTEGER}::bigint)`;
+      } else {
+        activitySet = sql`, decay_base_seq = ${opts.nowSeq}, decay_floor_seq = ${defaultActivityDecayStrategy.floorAt(
+          {
+            baseSeq: opts.nowSeq,
+            strength: memory.strength,
+            halfLifeRecalls: memory.halfLifeRecalls,
+          },
+        )}`;
+      }
+    }
 
     // 🔴 減衰の起点を巻き戻さない（ADR 0048）。**この条件は WHERE 句に置く**——
     // 上の SELECT で読んだ値をアプリ側で比べて書くかどうか決めると、読みと書きの間に
@@ -1396,6 +1417,7 @@ export class PostgresMemoryStore implements MemoryStore {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${missingId}`);
     }
 
+    const addOwnSubjectSeq = opts?.addOwnSubjectSeq === true;
     const rows = existingIds.map((id) => {
       const memory = currentById.get(id)!;
       const decayFloorAt = defaultDecayStrategy.floorAt({
@@ -1407,9 +1429,12 @@ export class PostgresMemoryStore implements MemoryStore {
       // ADR 0165 決めたこと16: 行ごとに判定する——`halfLifeRecalls` を持つ行だけ
       // 活動時計側の列に触れる（`PostgresMemoryStore.reinforce` と同じ分岐）。
       const hasActivity = opts?.nowSeq !== undefined && memory.halfLifeRecalls != null;
+      // ADR 0394: `addOwnSubjectSeq` のときは、入力の列に「起点」ではなく `T`（`activityBaseSeq`）と
+      // 床までの相対（offset。`baseSeq: 0` の `floorAt`）を持ち込み、起点と床は UPDATE の中で
+      // その行自身の subject の `S_x` を足して作る。そうでなければ従来どおり起点と床を持ち込む。
       const activityFloorSeq = hasActivity
         ? defaultActivityDecayStrategy.floorAt({
-            baseSeq: opts!.nowSeq!,
+            baseSeq: addOwnSubjectSeq ? 0 : opts!.nowSeq!,
             strength: memory.strength,
             halfLifeRecalls: memory.halfLifeRecalls!,
           })
@@ -1431,6 +1456,20 @@ export class PostgresMemoryStore implements MemoryStore {
       sql`, `,
     );
 
+    // ADR 0394: `addOwnSubjectSeq` のときだけ、起点・床を行ごとに UPDATE の中で組む
+    // （`input.activity_base_seq` は `T`、`input.activity_floor_seq` は床までの相対 offset）。
+    // そうでなければ従来の文のまま（`tenant_subject_activity` を参照しない）。
+    const effectiveNow = ownSubjectActivityNow({
+      tenantSeq: sql`input.activity_base_seq`,
+      tenantIdExpr: sql`m.tenant_id`,
+      subjectIdExpr: sql`m.subject_id`,
+    });
+    const activitySetMany = addOwnSubjectSeq
+      ? sql`decay_base_seq = CASE WHEN input.has_activity THEN ${effectiveNow} ELSE m.decay_base_seq END,
+            decay_floor_seq = CASE WHEN input.has_activity THEN LEAST(${effectiveNow} + input.activity_floor_seq, ${Number.MAX_SAFE_INTEGER}::bigint) ELSE m.decay_floor_seq END`
+      : sql`decay_base_seq = CASE WHEN input.has_activity THEN input.activity_base_seq ELSE m.decay_base_seq END,
+            decay_floor_seq = CASE WHEN input.has_activity THEN input.activity_floor_seq ELSE m.decay_floor_seq END`;
+
     const result = await exec.execute(sql`
       WITH input(id, decay_floor_at, has_activity, activity_base_seq, activity_floor_seq) AS (
         VALUES ${inputRows}
@@ -1440,8 +1479,7 @@ export class PostgresMemoryStore implements MemoryStore {
         SET last_reinforced_at = ${toPgTimestamp(at)},
             decay_floor_at = input.decay_floor_at,
             updated_at = now(),
-            decay_base_seq = CASE WHEN input.has_activity THEN input.activity_base_seq ELSE m.decay_base_seq END,
-            decay_floor_seq = CASE WHEN input.has_activity THEN input.activity_floor_seq ELSE m.decay_floor_seq END
+            ${activitySetMany}
         FROM input
         WHERE m.tenant_id = ${ctx.tenantId} AND m.id = input.id
           AND COALESCE(m.last_reinforced_at, m.recorded_at) < ${toPgTimestamp(at)}

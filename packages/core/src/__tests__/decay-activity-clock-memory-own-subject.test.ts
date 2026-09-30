@@ -484,3 +484,41 @@ describe("強化（使用報告・restoreArchived）— 起点は強化される
     expectOrigin(await stores.memoryStore.get(tenantCtx, memory.id), 0);
   });
 });
+
+describe("subject カウンタを一度も使っていないテナントでは、tenant_subject_activity を引かない（ADR 0353 決めたこと4）", () => {
+  it("抽出は、subject 付きの記憶でも getSubjectActivitySeqs を呼ばず、起点は T のみ", async () => {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: llmReturning([
+        { content: "aliceの事実", provenanceKind: "stated" },
+        { content: "bobの事実", provenanceKind: "stated", subjectId: "bob" },
+      ]),
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => new Date(nowMs) },
+    });
+    await stores.tenantSettingsStore.setDecayClock(tenantCtx, "activity");
+    let subjectReads = 0;
+    const original = stores.tenantSettingsStore.getSubjectActivitySeqs.bind(
+      stores.tenantSettingsStore,
+    );
+    stores.tenantSettingsStore.getSubjectActivitySeqs = async (...args) => {
+      subjectReads += 1;
+      return original(...args);
+    };
+    expect(await stores.tenantSettingsStore.hasSubjectActivityCounters(tenantCtx)).toBe(false);
+
+    const result = await runtime.observe(aliceCtx, { kind: "utterance", text: "発話" });
+
+    expect(result.memoryIds).toHaveLength(2);
+    for (const id of result.memoryIds) {
+      expectCreatedOrigin(await stores.memoryStore.get(tenantCtx, id), 0);
+    }
+    expect(subjectReads).toBe(0);
+  });
+});

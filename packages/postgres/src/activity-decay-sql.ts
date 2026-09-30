@@ -1,6 +1,34 @@
 import { sql, type SQL } from "drizzle-orm";
 
 /**
+ * 行の `subjectIdExpr` に対応する `tenant_subject_activity.activity_seq`（`S_x`）を相関サブクエリで引く。
+ * 行が無い・`subjectIdExpr` が `NULL`（主題なしの記憶）なら `0`。
+ *
+ * 読む側（段1 ゲート・`aggregateScope`・`archiveDecayed`。下の2関数）と、書く側
+ * （[ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md) の
+ * `reinforce`/`reinforceMany`。`ReinforceOptions.addOwnSubjectSeq`）が**同じ式**を使う——
+ * 書く側と読む側の `S_x` の引き方が食い違うと、起点と「いま」が別の subject の値になる。
+ */
+export function subjectActivitySeqOrZero(tenantIdExpr: SQL, subjectIdExpr: SQL): SQL {
+  return sql`COALESCE((
+    SELECT sa.activity_seq FROM tenant_subject_activity sa
+    WHERE sa.tenant_id = ${tenantIdExpr} AND sa.subject_id = ${subjectIdExpr}
+  ), 0)`;
+}
+
+/**
+ * ADR 0394: 強化される行の活動時計の「いま」= `tenantSeq`（`T`）+ その行自身の subject の `S_x`。
+ * `tenantSeq` は SQL の式（単一行の UPDATE では bind 済みの値、`reinforceMany` では VALUES の列）。
+ */
+export function ownSubjectActivityNow(params: {
+  tenantSeq: SQL;
+  tenantIdExpr: SQL;
+  subjectIdExpr: SQL;
+}): SQL {
+  return sql`(${params.tenantSeq}::bigint + ${subjectActivitySeqOrZero(params.tenantIdExpr, params.subjectIdExpr)})`;
+}
+
+/**
  * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
  * （Issue #338）: 活動時計の忘却ゲート（生存側）述語を組み立てる共通ヘルパー。
  * `packages/postgres/src/vector-store.ts`（段1）・`memory-store.ts`（`aggregateScope`・
@@ -37,10 +65,7 @@ export function activityFloorSeqAliveCondition(params: {
   if (!usesSubjectCounters) {
     return sql`(${floorSeqExpr} IS NULL OR ${floorSeqExpr} > ${decayFloorSeqAfter})`;
   }
-  const effectiveNow = sql`(${decayFloorSeqAfter} + COALESCE((
-    SELECT sa.activity_seq FROM tenant_subject_activity sa
-    WHERE sa.tenant_id = ${tenantIdExpr} AND sa.subject_id = ${subjectIdExpr}
-  ), 0))`;
+  const effectiveNow = sql`(${decayFloorSeqAfter} + ${subjectActivitySeqOrZero(tenantIdExpr, subjectIdExpr)})`;
   return sql`(${floorSeqExpr} IS NULL OR ${floorSeqExpr} > ${effectiveNow})`;
 }
 
@@ -62,9 +87,6 @@ export function activityFloorSeqDeadCondition(params: {
   if (!usesSubjectCounters) {
     return sql`(${floorSeqExpr} IS NOT NULL AND ${floorSeqExpr} <= ${nowSeq})`;
   }
-  const effectiveNow = sql`(${nowSeq} + COALESCE((
-    SELECT sa.activity_seq FROM tenant_subject_activity sa
-    WHERE sa.tenant_id = ${tenantIdExpr} AND sa.subject_id = ${subjectIdExpr}
-  ), 0))`;
+  const effectiveNow = sql`(${nowSeq} + ${subjectActivitySeqOrZero(tenantIdExpr, subjectIdExpr)})`;
   return sql`(${floorSeqExpr} IS NOT NULL AND ${floorSeqExpr} <= ${effectiveNow})`;
 }
