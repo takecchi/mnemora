@@ -198,8 +198,8 @@ core の4つのスキーマはこの形を使わない。歯は `src/__tests__/s
 **上の 2026-09-27 の実測（実 API が 400 で拒む）は、いまは踏まない経路になった**——記録として残すが、現物の振る舞いはこの節が正。
 **確かめていないこと**: `toStrictJsonSchema` が拾わない、実 API だけが拒む形（今回の4形には無かった）が他にあるかは分からない
 ——この歯は「OpenAI SDK 自身の strict 検査を通るか」までしか保証しない。歯は `src/__tests__/structured-output-zod-shapes.test.ts`・
-`src/__tests__/core-schemas-send-shape.test.ts`。`@mnemora/anthropic` は `z.tuple`・`z.date`・`transform` を同じ形
-（`kind: "schema_unsupported"`、`cause` 付き）で送る前に落とすが、`z.record` は今までどおり送る（あちらの README）。
+`src/__tests__/core-schemas-send-shape.test.ts`。`@mnemora/anthropic` も `z.record`・`z.tuple`・`z.date`・`transform` を同じ形
+（`kind: "schema_unsupported"`、`cause` 付き）で送る前に落とす（2026-09-30 から。あちらの README）。
 
 ### 戻りの `null` の扱い（2026-09-28 追記）
 
