@@ -67,9 +67,7 @@ describe("processEmbedJob — upsert 成功後の ready の書き込みが一時
       hashContent: (content: string) => `sha256(${content})`,
       clock: { now: () => LATER },
     });
-    const { memory } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), [
-      "embed",
-    ]);
+    const { memory } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), ["embed"]);
 
     // `setEmbeddingStatus` の最初の1回だけ失敗する（= "ready" の書き込み）。
     const statusWrites: string[] = [];

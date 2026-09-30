@@ -119,7 +119,10 @@ describe("tick — 1バッチ内で後ろのジョブのリースが先に切れ
     expect(resultA.processed).toBe(1);
     expect(resultA.failed).toBe(0);
     expect(resultA.leaseConflicts).toHaveLength(1);
-    expect(resultA.leaseConflicts[0]).toMatchObject({ kind: "embed", attemptedOutcome: "complete" });
+    expect(resultA.leaseConflicts[0]).toMatchObject({
+      kind: "embed",
+      attemptedOutcome: "complete",
+    });
     // 処理は二重に走った: provider 呼び出し 2件+1件、upsert も 3 回（2件目は2回）。
     expect(embedCalls).toBe(3);
     expect(upserts).toBe(3);
