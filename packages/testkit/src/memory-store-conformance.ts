@@ -12311,6 +12311,40 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(viaEvent.memory.supersededById).toBe(target.id);
     });
 
+    it("実在しない uuid・uuid でない id も、別テナントと同じ扱いで拒まれる（ADR 0439）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "xref-missing-a" }),
+      );
+      const recallId = await prepareRecallId(ctx);
+      for (const missing of [randomUUID(), "not-a-uuid"]) {
+        await expect(store.recordUsage(ctx, missing, [memory.id])).rejects.toThrow(
+          /recall not found for tenant/,
+        );
+        await expect(store.recordUsage(ctx, recallId, [missing])).rejects.toThrow(
+          /memory not found for tenant/,
+        );
+        await expect(
+          store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "xref-missing-src",
+              sourceObservationId: missing,
+            }),
+          ),
+        ).rejects.toThrow(/observation not found for tenant/);
+        await expect(
+          store.updateStatus(ctx, memory.id, "superseded", { supersededById: missing }),
+        ).rejects.toThrow(/memory not found for tenant/);
+      }
+      expect((await store.get(ctx, memory.id))?.status).toBe("active");
+      const ok = await store.recordUsage(ctx, recallId, [memory.id]);
+      expect(ok.insertedMemoryIds).toEqual([memory.id]);
+    });
+
     if (supportsSupersedeWithNewMemories === true) {
       it("supersedeWithNewMemories は news の別テナントを指す参照を拒み、news も supersede も書かない。自テナントの参照なら書ける（ADR 0439）", async () => {
         const store = await createStore();
