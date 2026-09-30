@@ -779,26 +779,46 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
 
       it("eraseTenant は別テナントの行が先に積まれていても、limit の枠を対象テナントの行に使う", async () => {
         const store = await createStore();
-        const ctxA: Ctx = { tenantId: "erase-tenant-crowd-a" };
-        const ctxB: Ctx = { tenantId: "erase-tenant-crowd-b" };
-        // 別テナントの行を先に積む（挿入順に読む実装でも、枠が別テナントの行に取られないこと）。
-        for (let i = 0; i < 3; i++) {
-          await seedJob(ctxB, { kind: "extract" });
+        // 別テナントの tenantId は対象より辞書順で先、件数は多く、挿入も先にする。
+        const ctxOther: Ctx = { tenantId: "erase-tenant-crowd-0-other" };
+        const ctxTarget: Ctx = { tenantId: "erase-tenant-crowd-1-target" };
+        const otherCount = 6;
+        const targetCount = 3;
+        for (let i = 0; i < otherCount; i++) {
+          await seedJob(ctxOther, { kind: "extract" });
         }
-        for (let i = 0; i < 2; i++) {
-          await seedJob(ctxA, { kind: "extract" });
+        for (let i = 0; i < targetCount; i++) {
+          await seedJob(ctxTarget, { kind: "extract" });
         }
 
-        const result = await store.eraseTenant!(ctxA, { limit: 2 });
-        expect(result).toEqual({ deleted: 2, reachedLimit: true });
+        // limit 1 で reachedLimit が false になるまで呼ぶ（上限付き）。
+        // 正しい実装の結果は、行を返す順序に依らない。tenant の条件を外した実装を捕まえるかどうかは
+        // 行を返す順序に依り、その保証は無い（この配置は、捕まえやすくするためのもの）。
+        let totalDeleted = 0;
+        let calls = 0;
+        const maxCalls = targetCount + 2;
+        for (; calls < maxCalls; calls++) {
+          const result = await store.eraseTenant!(ctxTarget, { limit: 1 });
+          totalDeleted += result.deleted;
+          if (!result.reachedLimit) break;
+        }
+        expect(calls).toBeLessThan(maxCalls);
+        expect(totalDeleted).toBe(targetCount);
 
-        const claimedB = await store.claimBatch(ctxB, {
-          limit: 10,
+        const claimedTarget = await store.claimBatch(ctxTarget, {
+          limit: 100,
           now: new Date(),
           claimedBy: "worker-1",
           leaseMs: DEFAULT_LEASE_MS,
         });
-        expect(claimedB).toHaveLength(3);
+        expect(claimedTarget).toHaveLength(0);
+        const claimedOther = await store.claimBatch(ctxOther, {
+          limit: 100,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimedOther).toHaveLength(otherCount);
       });
     } else {
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
