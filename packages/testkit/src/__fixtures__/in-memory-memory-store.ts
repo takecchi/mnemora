@@ -1532,6 +1532,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     let filteredNotYetValid = 0;
     let filteredTaxonomy = 0;
     let filteredDecayed = 0;
+    const excludedKinds =
+      opts?.excludeProvenanceKinds !== undefined && opts.excludeProvenanceKinds.length > 0
+        ? new Set<string>(opts.excludeProvenanceKinds)
+        : undefined;
+    let excludedProvenanceIndexed = 0;
     // 目次帯の候補（ADR 0073）: totalInScope に数える条件と**同じ条件**で in-scope の
     // Memory を集める。`digestBand` が要求されなかった場合はこの配列を使わない。
     const inScopeMemories: Memory[] = [];
@@ -1641,6 +1646,9 @@ export class InMemoryMemoryStore implements MemoryStore {
         inScopeBySubject.set(key, (inScopeBySubject.get(key) ?? 0) + 1);
         if (memory.embeddingStatus !== "ready") {
           notIndexed[memory.embeddingStatus] += 1;
+        } else if (excludedKinds?.has(memory.provenance.kind) === true) {
+          // ADR 0390: 除外 kind で索引済み（`notIndexed` の補集合）の行。
+          excludedProvenanceIndexed += 1;
         }
       }
       // digestBand の候補集めは "skip" でも続ける（ADR 0384 案C: 目次帯は集計とは
@@ -1754,6 +1762,10 @@ export class InMemoryMemoryStore implements MemoryStore {
       groups,
       totalInScope,
       countKind,
+      // ADR 0390: 空配列・未指定・"skip" は欄を足さない（"skip" は件数集計自体をしない）。
+      ...(!skipCounting && excludedKinds !== undefined
+        ? { excludedProvenanceIndexedCount: excludedProvenanceIndexed }
+        : {}),
       notIndexed: skipCounting
         ? { pending: zeroCount, failed: zeroCount, skipped: zeroCount }
         : {
