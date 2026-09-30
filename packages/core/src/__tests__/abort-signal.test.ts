@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
+import { abortReason } from "../abort.js";
 import type { AbortOptions } from "../abort.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
@@ -642,7 +643,7 @@ describe("AbortSignal — reflect()", () => {
   });
 });
 
-describe("AbortSignal — reason が無い abort() は AbortError 相当で reject する", () => {
+describe("AbortSignal — reject する値は signal.reason（Node は reason を自動で埋める／明示した reason はそのまま）", () => {
   it("Node の AbortController.abort() は既定で reason を自動的に埋めるため、明示しなくても signal.reason が使われる", async () => {
     const llm = new HangingLLMProvider();
     const { runtime } = buildRuntime(llm);
@@ -673,5 +674,32 @@ describe("AbortSignal — reason が無い abort() は AbortError 相当で reje
     await flushMicrotasks();
     controller.abort(reason);
     await expect(promise).rejects.toBe(reason);
+  });
+});
+
+describe("abortReason — signal.reason が undefined のときだけ AbortError 相当を作る", () => {
+  // 🔴 Node の実 AbortSignal は reason を渡さない abort() でも DOMException を自動で入れるため、
+  // `reason === undefined` の分岐へは実 AbortController では届かない。reason を持たない
+  // signal 相当のオブジェクト（自前の signal 実装など）で確かめる。
+  const noReasonSignal = { aborted: true, reason: undefined } as unknown as AbortSignal;
+
+  it("reason が undefined なら、name が 'AbortError' の DOMException を返す", () => {
+    const reason = abortReason(noReasonSignal);
+    expect(reason).toBeInstanceOf(DOMException);
+    expect((reason as DOMException).name).toBe("AbortError");
+    expect((reason as DOMException).message).toBe("This operation was aborted");
+  });
+
+  it("reason が在れば、null や 0 のような falsy な値も含め、そのまま返す（作り直さない）", () => {
+    const custom = { customReason: "x" };
+    expect(abortReason({ aborted: true, reason: custom } as unknown as AbortSignal)).toBe(custom);
+    expect(abortReason({ aborted: true, reason: null } as unknown as AbortSignal)).toBeNull();
+    expect(abortReason({ aborted: true, reason: 0 } as unknown as AbortSignal)).toBe(0);
+  });
+
+  it("実 AbortController の abort()（reason 無し）は、Node が自動で入れた reason をそのまま返す", () => {
+    const controller = new AbortController();
+    controller.abort();
+    expect(abortReason(controller.signal)).toBe(controller.signal.reason);
   });
 });

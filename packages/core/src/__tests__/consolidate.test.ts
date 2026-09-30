@@ -3,7 +3,11 @@ import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
 import type { MemoryStore } from "../interfaces/memory-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
-import { buildConsolidatedMemory, computeAffinity } from "../strategies/consolidate.js";
+import {
+  buildConsolidatedMemory,
+  computeAffinity,
+  intersectAttributes,
+} from "../strategies/consolidate.js";
 import type { MemoryId } from "../ids.js";
 import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime, DEFAULT_CONSOLIDATE_MIN_AFFINITY } from "../runtime.js";
@@ -1399,6 +1403,41 @@ describe("buildConsolidatedMemory（純関数）", () => {
         now: NOW,
       });
       expect(memory.attributes).toEqual({});
+    });
+
+    it("3件以上で、あるキーが一部の件でしか一致しないなら、そのキーは残らない（every であって some ではない）", () => {
+      // region: m1・m2 は "jp" で一致するが m3 だけ "us"。tier: m1 だけが持つ。
+      // 「1件でも一致すれば残す」実装だと region も tier も残ってしまう。
+      const eligible = [
+        fixtureMemory({
+          id: "m1",
+          attributes: { visibility: "internal", region: "jp", tier: "gold" },
+        }),
+        fixtureMemory({ id: "m2", attributes: { visibility: "internal", region: "jp" } }),
+        fixtureMemory({ id: "m3", attributes: { visibility: "internal", region: "us" } }),
+      ];
+      expect(intersectAttributes(eligible)).toEqual({ visibility: "internal" });
+
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible,
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.attributes).toEqual({ visibility: "internal" });
+    });
+
+    it("3件以上で、最後の1件だけ attributes が無い（undefined）なら、何も残らない", () => {
+      expect(
+        intersectAttributes([
+          fixtureMemory({ id: "m1", attributes: { visibility: "internal" } }),
+          fixtureMemory({ id: "m2", attributes: { visibility: "internal" } }),
+          fixtureMemory({ id: "m3", attributes: undefined }),
+        ]),
+      ).toEqual({});
     });
 
     it("eligible がどちらも attributes を持たなければ {}", () => {
