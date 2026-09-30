@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { RecallResultSchema } from "./recall.js";
+import { matchesStoreErrorKind } from "./store-error-kind.js";
 import type { RecallOutputValidation, RecallOutputValidationIssue } from "./recall.js";
 
 /**
@@ -30,6 +31,8 @@ export const DEFAULT_RECALL_OUTPUT_VALIDATION: RecallOutputValidationMode = "rep
  * 相関を取れるようにしてある（ADR 0098「引き受けた負債」）。
  */
 export class RecallOutputValidationError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。判定は `instanceof` ではなく {@link isRecallOutputValidationError} で行う。 */
+  readonly kind = "recall_output_validation" as const;
   /** 検証に落ちた箇所の一覧（`path` と `message`）。 */
   readonly issues: readonly RecallOutputValidationIssue[];
   /** 既に書き込まれた `recalls` の行の id（上の doc: 例外でも記録は残る）。 */
@@ -44,6 +47,18 @@ export class RecallOutputValidationError extends Error {
     this.issues = issues;
     this.recallId = recallId;
   }
+}
+
+/**
+ * 受け取ったものが {@link RecallOutputValidationError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isRecallOutputValidationError(
+  value: unknown,
+): value is RecallOutputValidationError {
+  return matchesStoreErrorKind(value, "recall_output_validation", "RecallOutputValidationError");
 }
 
 /** zod の `safeParse` が返す `error.issues` を {@link RecallOutputValidationIssue} へ写す。 */

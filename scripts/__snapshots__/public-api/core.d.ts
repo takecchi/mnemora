@@ -624,29 +624,39 @@ export declare class MemoryStatusConflictError extends Error {
     readonly memoryId: MemoryId;
     readonly expectedStatus: MemoryStatus;
     readonly observedStatus: MemoryStatus | null;
+    readonly kind: "memory_status_conflict";
     constructor(memoryId: MemoryId, expectedStatus: MemoryStatus, observedStatus: MemoryStatus | null);
 }
+export declare function isMemoryStatusConflictError(value: unknown): value is MemoryStatusConflictError;
 export declare class ContestedGroupMembershipMismatchError extends Error {
     readonly missingMemberId: MemoryId;
+    readonly kind: "contested_group_membership_mismatch";
     constructor(missingMemberId: MemoryId);
 }
+export declare function isContestedGroupMembershipMismatchError(value: unknown): value is ContestedGroupMembershipMismatchError;
 export declare class SourceMemoryForgottenError extends Error {
     readonly method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly forgottenIds: MemoryId[];
+    readonly kind: "source_memory_forgotten";
     constructor(method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
 }
+export declare function isSourceMemoryForgottenError(value: unknown): value is SourceMemoryForgottenError;
 export declare class ContestedWithoutCompanionError extends Error {
     readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
+    readonly kind: "contested_without_companion";
     constructor(method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", memoryId: MemoryId | null);
 }
+export declare function isContestedWithoutCompanionError(value: unknown): value is ContestedWithoutCompanionError;
 export declare function isContestedWithoutCompanion(status: MemoryStatus | undefined, contestedWithId: MemoryId | null | undefined): boolean;
 export declare class MemoryPurgeConflictError extends Error {
     readonly memoryId: MemoryId;
     readonly observedStatus: MemoryStatus | null;
     readonly observedPurgedAt: Date | null;
+    readonly kind: "memory_purge_conflict";
     constructor(memoryId: MemoryId, observedStatus: MemoryStatus | null, observedPurgedAt: Date | null);
 }
+export declare function isMemoryPurgeConflictError(value: unknown): value is MemoryPurgeConflictError;
 export declare const PURGE_TOMBSTONE_CONTENT = "[purged]";
 export declare const PURGE_TOMBSTONE_DIGEST = "[purged]";
 export declare const EMBEDDING_STATUS_ROLLBACK: {
@@ -971,8 +981,10 @@ export declare class OutboxLeaseConflictError extends Error {
     readonly jobId: string;
     readonly expectedAttempts: number;
     readonly observedAttempts: number | null;
+    readonly kind: "outbox_lease_conflict";
     constructor(jobId: string, expectedAttempts: number, observedAttempts: number | null);
 }
+export declare function isOutboxLeaseConflictError(value: unknown): value is OutboxLeaseConflictError;
 export interface OutboxStore {
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
     complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
@@ -1817,10 +1829,12 @@ import type { RecallOutputValidation, RecallOutputValidationIssue } from "./reca
 export type RecallOutputValidationMode = "off" | "report" | "throw";
 export declare const DEFAULT_RECALL_OUTPUT_VALIDATION: RecallOutputValidationMode;
 export declare class RecallOutputValidationError extends Error {
+    readonly kind: "recall_output_validation";
     readonly issues: readonly RecallOutputValidationIssue[];
     readonly recallId: string;
     constructor(issues: readonly RecallOutputValidationIssue[], recallId: string);
 }
+export declare function isRecallOutputValidationError(value: unknown): value is RecallOutputValidationError;
 export declare function validateRecallOutput(draft: unknown, mode: RecallOutputValidationMode, recallId: string): RecallOutputValidation | undefined;
 
 // ===== dist/recall-runtime.d.ts =====
@@ -1884,10 +1898,16 @@ export declare const CountKindSchema: z.ZodEnum<{
     exact: "exact";
     lower_bound: "lower_bound";
 }>;
+export interface StageSkippedCause {
+    kind: "provider_threw" | "no_vector" | "dimension_mismatch" | "non_finite";
+    providerErrorKind?: string;
+    errorName?: string;
+}
 export interface StageSkippedOmission {
     kind: "stage_skipped";
     stage: "candidate_generation" | "rescore" | "index_band" | "association" | "relation";
     reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor" | "relation_store_unavailable";
+    cause?: StageSkippedCause;
 }
 export type ScopeRelation = "outside_scope" | "within_scope";
 export declare const ScopeRelationSchema: z.ZodEnum<{
@@ -1964,6 +1984,16 @@ export interface LexicalTruncatedOmission {
     countKind: "unknown";
 }
 export type Omission = StageSkippedOmission | FilteredOmission | BelowThresholdOmission | OverLimitOmission | BudgetDroppedOmission | NotIndexedOmission | AnnTruncatedOmission | AnnUnreachedOmission | LexicalTruncatedOmission | ScoreNotComparableOmission | UnitAssemblyDroppedOmission;
+export declare const StageSkippedCauseSchema: z.ZodObject<{
+    kind: z.ZodEnum<{
+        provider_threw: "provider_threw";
+        no_vector: "no_vector";
+        dimension_mismatch: "dimension_mismatch";
+        non_finite: "non_finite";
+    }>;
+    providerErrorKind: z.ZodOptional<z.ZodString>;
+    errorName: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
 export declare const AnnUnreachedSeveritySchema: z.ZodEnum<{
     info: "info";
     warning: "warning";
@@ -1985,6 +2015,16 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
             no_anchor: "no_anchor";
             relation_store_unavailable: "relation_store_unavailable";
         }>;
+        cause: z.ZodOptional<z.ZodObject<{
+            kind: z.ZodEnum<{
+                provider_threw: "provider_threw";
+                no_vector: "no_vector";
+                dimension_mismatch: "dimension_mismatch";
+                non_finite: "non_finite";
+            }>;
+            providerErrorKind: z.ZodOptional<z.ZodString>;
+            errorName: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"filtered">;
@@ -2657,6 +2697,16 @@ export declare const RecallResultSchema: z.ZodObject<{
                 no_anchor: "no_anchor";
                 relation_store_unavailable: "relation_store_unavailable";
             }>;
+            cause: z.ZodOptional<z.ZodObject<{
+                kind: z.ZodEnum<{
+                    provider_threw: "provider_threw";
+                    no_vector: "no_vector";
+                    dimension_mismatch: "dimension_mismatch";
+                    non_finite: "non_finite";
+                }>;
+                providerErrorKind: z.ZodOptional<z.ZodString>;
+                errorName: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"filtered">;

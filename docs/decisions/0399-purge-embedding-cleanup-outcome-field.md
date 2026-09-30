@@ -65,3 +65,20 @@ adapter は `deleteAcrossSpaces` が投げるか投げないかを決めるだ�
 - 失敗の種類（一時的／恒久的）を呼び出し側が区別したいという要望が出たとき——`status` に値を足すか
   詳細欄を足す。
 - 再試行を runtime が持つべきと判断されたとき——ADR 0382 の「これが覆るとしたら」1の保守操作の話になる。
+
+---
+
+## 2026-09-30 追記: 握り潰している箇所は3つだった（訂正）
+
+本文は書き換えない。「文脈」は握り潰している箇所を**2つ**と数えた（`"purged"` の後と、
+`"already_purged"` の再試行）。**3つ目があった**——`purgeMemory` が `MemoryPurgeConflictError` を投げた後、
+再読して `already_purged` になる枝の `deleteAcrossSpaces` が `catch {}` のまま残っていた。
+この追記の PR で、他の2箇所と同じ扱いにした: 失敗したら、`kind` は `"already_purged"` のまま
+`embeddingCleanup: { status: "failed", error }` を付ける（成功時は欄が無い）。
+
+- 決定5（`error` は `error instanceof Error ? error.message : String(error)`）は、同日、
+  [ADR 0363](./0363-outbox-last-error-omit-params-and-cap-length.md) の追記により outbox の `last_error` と
+  同じ整形に変わった（params を落とし、cause と SQLSTATE を足し、4096字で切る）。
+  「引き受けた負債」2の「接続情報等が含まれうる」は、SQL に付けた値については当てはまらなくなった
+  （pg の理由文に値が載る経路は ADR 0363「塞がらない経路」のまま）。
+- 歯: `packages/core/src/__tests__/outcome-error-format.test.ts`。

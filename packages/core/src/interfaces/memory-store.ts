@@ -1,4 +1,5 @@
 import type { ClaimKey } from "../claim-key.js";
+import { matchesStoreErrorKind } from "../store-error-kind.js";
 import type { Ctx } from "../ctx.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
@@ -30,6 +31,8 @@ import type { DecayClock } from "./tenant-settings-store.js";
  * 相手が何だったか」の正確な値としては読まないこと。
  */
 export class MemoryStatusConflictError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isMemoryStatusConflictError} で行う。 */
+  readonly kind = "memory_status_conflict" as const;
   constructor(
     readonly memoryId: MemoryId,
     readonly expectedStatus: MemoryStatus,
@@ -44,6 +47,16 @@ export class MemoryStatusConflictError extends Error {
     );
     this.name = "MemoryStatusConflictError";
   }
+}
+
+/**
+ * 受け取ったものが {@link MemoryStatusConflictError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isMemoryStatusConflictError(value: unknown): value is MemoryStatusConflictError {
+  return matchesStoreErrorKind(value, "memory_status_conflict", "MemoryStatusConflictError");
 }
 
 /**
@@ -70,6 +83,8 @@ export class MemoryStatusConflictError extends Error {
  * 呼び出し側が最初から適格でない集合を渡したことを表すため）。
  */
 export class ContestedGroupMembershipMismatchError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isContestedGroupMembershipMismatchError} で行う。 */
+  readonly kind = "contested_group_membership_mismatch" as const;
   constructor(readonly missingMemberId: MemoryId) {
     super(
       `MemoryStore.resolveContestedGroup: the members passed do not match the full set of ` +
@@ -79,6 +94,22 @@ export class ContestedGroupMembershipMismatchError extends Error {
     );
     this.name = "ContestedGroupMembershipMismatchError";
   }
+}
+
+/**
+ * 受け取ったものが {@link ContestedGroupMembershipMismatchError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isContestedGroupMembershipMismatchError(
+  value: unknown,
+): value is ContestedGroupMembershipMismatchError {
+  return matchesStoreErrorKind(
+    value,
+    "contested_group_membership_mismatch",
+    "ContestedGroupMembershipMismatchError",
+  );
 }
 
 /**
@@ -110,6 +141,8 @@ export class ContestedGroupMembershipMismatchError extends Error {
  * `docs/memory-model.md` の該当箇所を参照）。
  */
 export class SourceMemoryForgottenError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isSourceMemoryForgottenError} で行う。 */
+  readonly kind = "source_memory_forgotten" as const;
   constructor(
     readonly method:
       "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
@@ -122,6 +155,16 @@ export class SourceMemoryForgottenError extends Error {
     );
     this.name = "SourceMemoryForgottenError";
   }
+}
+
+/**
+ * 受け取ったものが {@link SourceMemoryForgottenError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isSourceMemoryForgottenError(value: unknown): value is SourceMemoryForgottenError {
+  return matchesStoreErrorKind(value, "source_memory_forgotten", "SourceMemoryForgottenError");
 }
 
 /**
@@ -145,6 +188,8 @@ export class SourceMemoryForgottenError extends Error {
  * 受け取った呼び出し元は、`markContestedPair` の実装有無を確認して使うこと。
  */
 export class ContestedWithoutCompanionError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。判定は `instanceof` ではなく {@link isContestedWithoutCompanionError} で行う。 */
+  readonly kind = "contested_without_companion" as const;
   constructor(
     readonly method:
       | "updateStatus"
@@ -163,6 +208,22 @@ export class ContestedWithoutCompanionError extends Error {
     );
     this.name = "ContestedWithoutCompanionError";
   }
+}
+
+/**
+ * 受け取ったものが {@link ContestedWithoutCompanionError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isContestedWithoutCompanionError(
+  value: unknown,
+): value is ContestedWithoutCompanionError {
+  return matchesStoreErrorKind(
+    value,
+    "contested_without_companion",
+    "ContestedWithoutCompanionError",
+  );
 }
 
 /**
@@ -214,6 +275,8 @@ export function isContestedWithoutCompanion(
  * `not_found`/`already_purged`/`status_not_forgotten`/`conflicted` のどれかに分類する。
  */
 export class MemoryPurgeConflictError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isMemoryPurgeConflictError} で行う。 */
+  readonly kind = "memory_purge_conflict" as const;
   constructor(
     readonly memoryId: MemoryId,
     readonly observedStatus: MemoryStatus | null,
@@ -230,6 +293,16 @@ export class MemoryPurgeConflictError extends Error {
     );
     this.name = "MemoryPurgeConflictError";
   }
+}
+
+/**
+ * 受け取ったものが {@link MemoryPurgeConflictError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isMemoryPurgeConflictError(value: unknown): value is MemoryPurgeConflictError {
+  return matchesStoreErrorKind(value, "memory_purge_conflict", "MemoryPurgeConflictError");
 }
 
 /**

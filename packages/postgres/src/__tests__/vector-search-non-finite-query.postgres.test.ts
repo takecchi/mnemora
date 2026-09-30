@@ -142,6 +142,7 @@ describe("PostgresVectorStore: 有限でない成分を含むクエリは比較�
         kind: "stage_skipped",
         stage: "candidate_generation",
         reason: "embedding_provider_unavailable",
+        cause: { kind: "non_finite" },
       });
       expect(result.omitted.find((o) => o.kind === "score_not_comparable")).toBeUndefined();
     },

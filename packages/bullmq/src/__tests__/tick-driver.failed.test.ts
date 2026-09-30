@@ -22,6 +22,7 @@ vi.mock("bullmq", () => {
     upsertJobScheduler = vi.fn().mockResolvedValue(undefined);
     removeJobScheduler = vi.fn().mockResolvedValue(undefined);
     close = vi.fn().mockResolvedValue(undefined);
+    on = vi.fn().mockReturnThis();
   }
   class Worker {
     readonly processor: Processor;

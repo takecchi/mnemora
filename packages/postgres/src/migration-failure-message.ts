@@ -25,13 +25,25 @@ export const CREATE_EXTENSION_PERMISSION_HINT =
  * エラーを出した Postgres の関数名（`routine`）が `execute_extension_script` であることも見る
  * （【実測】PostgreSQL 17: `CREATE EXTENSION` の権限不足は `routine = "execute_extension_script"`、
  * スキーマの権限不足は `routine = "aclcheck_error"`）。`message` は `lc_messages` で訳されるので見ない。
+ *
+ * 2026-09-30: `trigram-lexical-store.ts` の `extension_create_denied` の判定もこの関数に揃えた
+ * （それまでは英語の `message` の正規表現で、`lc_messages` が英語以外だと外れていた）。
  */
-function isCreateExtensionPermissionDenied(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) {
-    return false;
+export function isCreateExtensionPermissionDenied(err: unknown): boolean {
+  // drizzle の `db.execute()` は pg のエラーを `Failed query: ...` で包み、`code` / `routine` は
+  // `cause` 側にしか無い（`runMigrations` は生の pg クライアントなので外側に在る）。
+  // 両方で判定できるよう、`cause` の連鎖を辿る（循環は一度見た段で打ち切る）。
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const { code, routine } = current as { code?: unknown; routine?: unknown };
+    if (code === "42501" && routine === "execute_extension_script") {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
   }
-  const { code, routine } = err as { code?: unknown; routine?: unknown };
-  return code === "42501" && routine === "execute_extension_script";
+  return false;
 }
 
 /**

@@ -261,3 +261,27 @@ SQLSTATE、数十〜百文字程度）＋ `" <- caused by: "` の連結である
   実運用の DB に対する調査はしていない（決定5、掃除をしない理由の一部）。
 - `maxBatchSize`（ADR 0358）のような、上限4096が実際の運用でどの程度の頻度で発動するかの
   実測——この変更を実運用へ入れてからでないと測れない。
+
+---
+
+## 2026-09-30 追記: `outcome.error` にも同じ整形を当てた
+
+本文は書き換えない。この ADR の整形（`params:` 以降を落とす・`cause` の連鎖と SQLSTATE を足す・4096字の上限。
+**SQL の文そのものは残す**——決定は変えていない）は、outbox の `last_error` だけに掛かっていた。
+一方、利用者に返る次の文字列は例外の `message` をそのまま返していたので、drizzle が包んだ失敗では
+SQL に付けた値（params）が載り、pg の理由と SQLSTATE（`cause` 側）は載っていなかった。
+他テナントの値は出ていなかった（自分の呼び出しの値が、自分の返り値に載っていた）。
+
+- 対象: `forget` / `purge` / `restoreArchived` / `restoreSuperseded` の `"failed"` の `error`、
+  `reinforceError`（`restoreArchived` / `restoreSuperseded`）、`purge` の `embeddingCleanup.error`、
+  consolidate の元記憶ごとの `"failed"` の `error`、`tick` が embed 失敗後の `failed` の書き込みにも失敗したときの
+  メッセージ。
+- `describeJobFailure` を `createRuntime` のクロージャの外（`packages/core/src/failure-description.ts` の
+  `describeFailure`。公開 API ではない）へ切り出し、両方が同じ関数を通る。outbox の出力は変えていない。
+- 入れなかったもの: `describeDroppedCandidate`（recall の `dropped`。最も内側の段の message・500字・SQLSTATE という
+  別の設計）、`describeExtractionFailure` / `describeClaimKeyFailure`（LLM 呼び出しの失敗。drizzle の params を持たない）。
+  いずれも DB の失敗をここへ通さない経路として、この追記の対象外にした。確かめていない点は、
+  LLM の失敗の message に利用者の本文が載りうること（本文の「塞がらない経路」と同じ）。
+- 引き受けた負債: `error` の文字列は「例外の `message` そのまま」ではなくなる（呼び出し側が解析していれば壊れる。
+  CHANGELOG の Changed に書いた）。`tick` の二重失敗のメッセージは、最初の `params:` で切られる既存の挙動により
+  後半（マーク失敗の理由）が落ちうる（悪化はしていない）。

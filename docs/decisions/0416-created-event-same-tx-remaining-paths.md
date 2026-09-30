@@ -92,6 +92,7 @@
    - この口には名乗りを足さない。口そのものが「`created` を同じトランザクションで積む」契約であり、ADR 0410 が口の有無だけで経路を選んでいる形を変えない（口を持つのに積まない adapter は、適合テスト（ADR 0410 の2本）が見抜く）。
    - **このメソッドは 1.2.0 で未リリースである**（CHANGELOG の `## [1.2.0] - 未リリース` に載っている。リリース済みの版には無い）。だから `opts` を広げても、リリース済みの第三者の実装を壊さない。
      もし 1.2.0 が出たあとに同じことをしたら、任意の引数の追加でも、実装側の型が合わなくなる adapter が出うる（実装側は `opts` の型を狭く書いていると受け取れない）。
+   - `reflect` の `catch` は、同じ関数内の既存の分岐と同じく `isSourceMemoryForgottenError`（`kind` で判定。[ADR 0418](./0418-store-error-kind-guards.md)）で判定する。`instanceof` は使わない。
    - 公開の型に1点、小さな変化がある。`SourceMemoryForgottenError.method` の union に `"createMemoriesWithOutboxAndEvents"` を足した。この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される
      （ADR 0410 が `ContestedWithoutCompanionError.method` に足したのと同じ形）。
 

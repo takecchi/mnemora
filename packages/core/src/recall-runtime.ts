@@ -19,6 +19,7 @@ import {
 } from "./interfaces/tenant-settings-store.js";
 import type { MemoryId } from "./ids.js";
 import { NOT_INDEXED_REASONS } from "./recall.js";
+import type { StageSkippedCause } from "./recall.js";
 import type { Memory } from "./memory.js";
 import { classifyValidity } from "./validity.js";
 import {
@@ -174,6 +175,43 @@ type ScoredCandidate = {
  * どれも変換前の `ScoredCandidate.score.total` を直接読んでおり、1バイトも変えていない
  * ——変換するのは、返り値・永続化する行を組み立てる `finalMemories` の1箇所だけである。
  */
+/**
+ * クエリ埋め込みの検証（ベクトル無し・次元違い・非有限値）で投げる内部の例外。
+ * `Omission.cause.kind` を決めるためだけにあり、外へは出ない（message も `cause` に載せない）。
+ */
+class QueryEmbeddingFailure extends Error {
+  constructor(
+    readonly causeKind: "no_vector" | "dimension_mismatch" | "non_finite",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const CAUSE_LABEL_MAX = 64;
+
+/**
+ * クエリ埋め込みの失敗から `StageSkippedOmission.cause` を作る。**message・cause の本文・ベクトルの値は読まない。**
+ * `providerErrorKind` は投げられた値が文字列の `kind` を持つときだけ、`errorName` は `Error` の `name` が
+ * 文字列のときだけ（どちらも先頭 ${CAUSE_LABEL_MAX} 文字まで）。
+ */
+function describeQueryEmbeddingFailure(err: unknown): StageSkippedCause {
+  if (err instanceof QueryEmbeddingFailure) {
+    return { kind: err.causeKind };
+  }
+  const cause: StageSkippedCause = { kind: "provider_threw" };
+  if (typeof err === "object" && err !== null) {
+    const kind = (err as { kind?: unknown }).kind;
+    if (typeof kind === "string") {
+      cause.providerErrorKind = kind.slice(0, CAUSE_LABEL_MAX);
+    }
+  }
+  if (err instanceof Error && typeof err.name === "string") {
+    cause.errorName = err.name.slice(0, CAUSE_LABEL_MAX);
+  }
+  return cause;
+}
+
 function toRecalledScore(score: ScoreBreakdown): RecalledScore {
   if (score.affinityMeasured !== false) {
     return score;
@@ -1043,21 +1081,26 @@ export async function runRecall(
         // `undefined` のまま ANN の段を黙って飛ばしていた。歯は
         // `__tests__/recall-query-embedding-missing-vector.test.ts`。
         if (!Array.isArray(vector)) {
-          throw new Error("embedding provider returned no vector for the query");
+          throw new QueryEmbeddingFailure(
+            "no_vector",
+            "embedding provider returned no vector for the query",
+          );
         }
         // 2026-09-30 / ADR 0393: `space.dimensions` と違う長さも「ベクトルを返さなかった」と同じく
         // `embedding_provider_unavailable` に丸める。以前は vectorStore まで届き、Postgres では
         // `toComparableQuery` が全 0 に差し替えて `score_not_comparable` と記録され、理由の名前が
         // provider によって違っていた。
         if (vector.length !== deps.embeddingProvider.space.dimensions) {
-          throw new Error(
+          throw new QueryEmbeddingFailure(
+            "dimension_mismatch",
             `embedding provider returned a query vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
           );
         }
         // 有限性も同じ形で確かめる（ADR 0393）。次元違いと同じく `embedding_provider_unavailable` に丸める。
         const badIndex = vector.findIndex((x) => !Number.isFinite(x));
         if (badIndex !== -1) {
-          throw new Error(
+          throw new QueryEmbeddingFailure(
+            "non_finite",
             `embedding provider returned a query vector containing a non-finite value at index ${badIndex} (${String(vector[badIndex])})`,
           );
         }
@@ -1072,6 +1115,7 @@ export async function runRecall(
           kind: "stage_skipped",
           stage: "candidate_generation",
           reason: "embedding_provider_unavailable",
+          cause: describeQueryEmbeddingFailure(err),
         });
       }
     } else {

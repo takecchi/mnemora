@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
-import { MemoryStatusConflictError } from "@mnemora/core";
+import { isMemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -120,7 +120,7 @@ describe("PostgresMemoryStore.markContestedPair / resolveContestedPair — 対�
       for (const r of results) {
         if (r.status === "fulfilled") {
           successCount++;
-        } else if (r.reason instanceof MemoryStatusConflictError) {
+        } else if (isMemoryStatusConflictError(r.reason)) {
           conflictCount++;
         } else {
           unexpected.push(r.reason);
@@ -182,7 +182,7 @@ describe("PostgresMemoryStore.markContestedPair / resolveContestedPair — 対�
       for (const r of results) {
         if (r.status === "fulfilled") {
           successCount++;
-        } else if (r.reason instanceof MemoryStatusConflictError) {
+        } else if (isMemoryStatusConflictError(r.reason)) {
           conflictCount++;
         } else {
           unexpected.push(r.reason);

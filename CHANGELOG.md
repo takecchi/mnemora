@@ -192,6 +192,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
+  ⭕ 非破壊と数える（任意欄の追加のみ）。
 - **`RelationStore` に任意メソッド `listRelatedMany?(ctx, memoryIds, kind?)` を足した。`Runtime` の幅優先探索（recall 段3の群の同伴取得・`resolveContestedGroup` の部分解消の確認・claim key の群の検出）は、1段の起点をまるごとこれに渡して1往復で読む**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 案A、[ADR 0402](./docs/decisions/0402-relation-store-list-related-many.md)。案D・案E は [ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。
   - `result[i]` は `listRelated(ctx, memoryIds[i], kind)` と同じ集合（位置で対応。重複した id は同じ内容、実在しない id は空配列）。`@mnemora/postgres`（`PostgresRelationStore`、`from_memory_id = ANY(...)` の1文）と `@mnemora/testkit`（`InMemoryRelationStore`）が実装する。**実装しない adapter では、`Runtime` は今までどおり `listRelated` を起点ごとに直列に呼ぶ**——結果（提示順・`companionOf`・`omitted`・resolve の outcome）は、あるときと無いときで完全に一致する（歯で縛っている）。
   - `@mnemora/testkit` の `describeRelationStoreConformance` に、任意フラグ `implementsListRelatedMany?: boolean` を足した。実装が有れば宣言に依らず契約の節がかかり、実装が無ければ skip、`true` を宣言して実装が無ければ赤。
@@ -223,6 +225,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 - **`runtime.purge` の `"purged"`／`"already_purged"` outcome に、任意の欄 `embeddingCleanup?: { status: "failed"; error: string }` を足した**（[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)「引き受けた負債」1、[PR #1475](https://github.com/takecchi/mnemora/pull/1475)、[ADR 0399](./docs/decisions/0399-purge-embedding-cleanup-outcome-field.md)）。埋め込み行の後始末（`deleteAcrossSpaces`）が失敗したときだけ付き、`kind` は変わらない。成功時はプロパティ自体が無く、出力は変わらない。⭕ 非破壊と数える（任意欄の追加のみ）。
+  - 2026-09-30 追記: ADR 0399 は握りつぶしを2箇所と数えたが、競合の後に再読して `already_purged` になる枝にも3つ目が残っていた。そこも失敗したら同じ `embeddingCleanup` を付けるようにした（ADR 0399 の追記）。
 - **`@mnemora/testkit` の `describeVectorStoreConformance` に、任意フラグ `supportsSearchMany?: boolean` を足した。`InMemoryVectorStore` に `searchMany` を実装した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。
   - `VectorStore.searchMany?`（任意メソッド）の契約——各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並び、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、同じ key は後勝ち、NUL を含む key でも投げない、不正な `limit` は `search()` と同じく投げる、`filter`・テナント分離——を検査する歯が、これまで無かった。フラグは `supportsListActiveClaimPredicates?` と同じ3状態（`true` は歯を実行、`false` は `searchMany` が無いことを assert、省略は「⚠ 未検査」の named it を1本）。
   - ⚠ **自前の `VectorStore` に `searchMany` を実装していて `supportsSearchMany: true` を渡す人へ**: 契約に反していれば、この歯で新しく赤になりうる。フラグを渡さなければ何も変わらない（型も壊れない）。
@@ -262,6 +265,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る。`ACCESS EXCLUSIVE` ではない）。100万行で構築を含む migration が約1.2秒（1回だけの測定）。
   ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
 
+- **利用者に返るエラー文（`forget` / `purge` / `restoreArchived` / `restoreSuperseded` の `"failed"` の `error`、`reinforceError`、`purge` の `embeddingCleanup.error`）の整形を、outbox の `last_error` と同じにした**（[ADR 0363](./docs/decisions/0363-outbox-last-error-omit-params-and-cap-length.md) の 2026-09-30 追記）——利用者に返るエラー文が、SQL に付いた値（params）を含んでいたので、outbox 側の既存の整形に揃えた。他テナントの値は出ていなかった。
+  - **文字列の形が変わる**: 例外の `message` そのままではなくなる。drizzle が包んだ失敗では `params:` 以降が `(omitted by mnemora, N chars)` に置き換わり、`cause` の連鎖（pg の理由）と SQLSTATE（`(code: 42501)` の形）が ` <- caused by: ` で続き、全体は4096字で切られる（SQL の文そのものは残る）。包まれていない単純な `Error("...")` は、`message` のまま変わらない。文字列を解析している呼び出し側は見直すこと。
+  - outbox の `last_error` の出力は変わらない。公開の型は変えていない（`error` は `string` のまま）。
+  ⭕ 非破壊と数える（型は同じ。文字列の中身だけが変わる）。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
@@ -291,6 +299,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/testkit/fixtures` が型 `StoredRelation` を export するようになった。** `InMemoryRelationStore` のコンストラクタの第2引数（`memoryStore.relations` と共有する配列）の要素型だが、入口から名指せなかった。型の追加のみ（実行時は変わらない）。公開 API snapshot を更新した。
 
 - **`@mnemora/bullmq` の tick driver が、`runtime.tick()` の失敗を `onTickError` に渡すようになった。** BullMQ の Worker は processor の throw を `'error'` ではなく `'failed'` として emit する（【実測】bullmq 6.3.8、Redis 互換サーバ Valkey 8.1.3 上の実 Worker で `'failed'` だけが1回 emit され、`'error'` は出なかった）。以前の driver は `'error'` しか聴いていなかったため、`tick()` が throw しても `onTickError` も `onTickResult` も呼ばれず、失敗が誰にも見えなかった。いまは `'failed'` を拾い、job ではなく error を渡す（`'error'` とは別の経路で、1回の失敗につき1回）。`onTickError` を渡していない人には見える変化は無い。渡している人は、これまで届かなかった tick の失敗が届くようになる（エラー通知の件数が増えうる）。再試行は足していない（繰り返しジョブは次の発火でまた tick する）。
+
+- **`@mnemora/bullmq` の tick driver が、`Queue` 側の `'error'`（Redis 接続の失敗など）も `onTickError` に渡すようになった。** 以前は `Worker` にだけ listener を付けており、繰り返しジョブの登録に使う `Queue` の error は listener が無いため bullmq（6.3.8 の `QueueBase.emit`）が `console.error` へ固定で出すだけで、`onTickError` には届かなかった。いまは `onTickError` を渡していれば、`Queue` の error もそこへ届く。
+  - ⚠ **`onTickError` を渡していない人には見える変化は無い。**渡していないときは `Queue` に listener を付けず、従来どおり bullmq の `console.error` に出る（付けるとその既定の出力が消え、`Queue` の異常が黙るため）。
+  - ⚠ **`onTickError` を渡している人は、通知の件数が増えうる。**`Queue` と `Worker` は別々の Redis 接続を持ち、接続ごとに `'error'` を出す。Redis が落ちると、同じ障害について `Queue` 由来と `Worker` 由来の通知が別々に届く（【実測】Redis が居ないポートを指すと、両方が `ECONNREFUSED` を出した。bullmq 6.3.8）。driver は束ねない。`'failed'`（tick の失敗）は従来どおり1回の失敗につき1回。
+  - 非破壊（型・公開 API は変えていない。`onTickError` の契約が、届く経路を1つ増やした）。【確かめていない】Redis が在る状態での `Queue` の error（実 Redis での再現）。歯は fake の `Queue` が emit する形で縛っている。
 
 - **`runtime.reextract` が、LLM を待つ間に元の記憶が `forget`（`purge` を含む）されたとき、何も書かずに打ち切るようになった**（[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226) と同じ穴）。
   - **直した穴**: 以前は、`reextract` が LLM を待つ間にその Observation の記憶を `forget` すると、`forget` は `forgotten` を返すのに、LLM が返った後で言い換えが新しい `active` として書かれ、イベントが `created` → `forgotten` → `created` と積まれた（実測、Postgres）。`consolidate`/`reflect` が #1226 で塞いだのと同じ穴が `reextract` に残っていた。
@@ -329,6 +342,17 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **直していないもの**: 口を持たない adapter の経路——`reextract`・`consolidate` の `createMemoryWithOutbox` のループ、`createMemoriesWithOutboxAndEvents?` を持たない adapter の `reflect` と抽出——は今までどおり別コミットで、取りこぼしが残る。`supersedeWithNewMemories` を実装しても名乗らない adapter も、`created` は別の文のまま。名乗るのにトランザクションを張らない adapter は、この機構では見抜けない。
   - 公開 API（snapshot を更新した）: `supersedeWithNewMemories` の `opts` に任意の `buildCreatedEvent`・戻り値に任意の `createdEventsWritten`、`createMemoriesWithOutboxAndEvents` の `opts` に任意の `abortIfForgotten`、`SourceMemoryForgottenError.method` の union に `"createMemoriesWithOutboxAndEvents"`——⚠ この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される。
   - 非破壊（型は任意の追加のみ）。⚠ 口あり経路では `created` と `superseded` の挿入順が入れ替わった（`created` が先）。`PostgresEventStore.list` は `at` 昇順だけで並べ、同じ `at` の並びは仕様の外。
+
+- **`@mnemora/core` が利用者の手元で2つの版に分かれたとき、adapter が投げる store 例外を runtime が見分けられず、`tick()` 全体が reject される穴を塞いだ**（[ADR 0418](./docs/decisions/0418-store-error-kind-guards.md)、[PR #1509](https://github.com/takecchi/mnemora/pull/1509)）。adapter は core を `dependencies` の `^` で持つので、利用者が core を範囲外の版に固定すると、adapter 側にもう1つの core が入る。そのとき adapter が投げる例外は、runtime 側の `instanceof` で false になっていた。
+  - **【実測】** 本物の `@mnemora/postgres` 1.1.0 と `@mnemora/core` 1.0.2 の組で、`tick()` の complete 経路の `OutboxLeaseConflictError` が見分けられず、runtime は `fail()` へ進み、それも CAS で弾かれて `throw failErr` になった。**`tick()` 全体が reject され、同じバッチの後続ジョブは処理されず、`leaseConflicts` も返らなかった。** `restoreArchived` では `MemoryStatusConflictError` が `kind: "failed"` になっていた（本来は `status_not_archived`）。
+  - **直し方**: store 例外5クラス（`OutboxLeaseConflictError`・`MemoryStatusConflictError`・`ContestedGroupMembershipMismatchError`・`SourceMemoryForgottenError`・`MemoryPurgeConflictError`）に値の判別子 `kind` を足し、判定関数 `isOutboxLeaseConflictError` など5つを公開した。runtime と `strategies/reextract.ts` の計20か所の `instanceof` をすべてこれに置き換えた。**判定は「`kind` を見て、`kind` が無ければ `name` を見る」**——判別子がまだ無い古い版の core を引いた adapter が投げた例外にも効く。
+  - ⚠ **`name` は偽装できる**が、store は利用者が自分で配線する信頼された部品なので実害は無いと判断した（ADR 0418）。core を `peerDependencies` にする案（破壊的変更）と、2つの版を検知して警告する案は採らなかった。
+  - 公開 API（snapshot を更新した）: 5クラスに `readonly kind` を足し、判定関数を5つ足した。**非破壊**（追加のみ）。DB マイグレーションは足していない。
+
+- **残りの公開エラー2クラス（`ContestedWithoutCompanionError`・`RecallOutputValidationError`）にも、値の判別子 `kind` と、`instanceof` を使わない判定関数を付けた**（[ADR 0418](./docs/decisions/0418-store-error-kind-guards.md) の追記、直前の項目の続き）。core が公開する `Error` 継承のクラス7つのうち、`kind` を持たなかったのはこの2つだけだった。
+  - **付けたもの**: `ContestedWithoutCompanionError.kind` は `"contested_without_companion"`、`RecallOutputValidationError.kind` は `"recall_output_validation"`。判定関数は `isContestedWithoutCompanionError`・`isRecallOutputValidationError`（「`kind`、無ければ `name`」）。
+  - 公開 API（snapshot を更新した）: 2クラスに `readonly kind` を足し、判定関数を2つ足した。**非破壊**（追加のみ）。DB マイグレーションは足していない。
+  - `packages/postgres` のテスト内の `instanceof` 6行を判定関数へ置き換えた（利用者への影響は無い）。`toBeInstanceOf` / `rejects.toThrow(<クラス>)` は置き換えていない（ADR 0418 の追記に件数と理由がある）。
 
 ---
 

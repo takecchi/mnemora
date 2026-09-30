@@ -1,6 +1,6 @@
 import type { MemoryId } from "../ids.js";
 import type { Memory, MemoryStatus } from "../memory.js";
-import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
+import { isMemoryStatusConflictError } from "../interfaces/memory-store.js";
 
 /**
  * `runtime.reextract` が既存 Memory を supersede しなかった理由（ADR 0029）。
@@ -51,7 +51,7 @@ export type ReextractSkip =
  * 開け直すことになる。
  */
 export function classifySupersedeFailure(memoryId: MemoryId, error: unknown): ReextractSkip | null {
-  if (error instanceof MemoryStatusConflictError) {
+  if (isMemoryStatusConflictError(error)) {
     return {
       kind: "status_changed_concurrently",
       memoryId,

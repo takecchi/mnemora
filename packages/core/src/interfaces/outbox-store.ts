@@ -1,4 +1,5 @@
 import type { Ctx } from "../ctx.js";
+import { matchesStoreErrorKind } from "../store-error-kind.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 import type { OutboxJobKind } from "./scheduler.js";
@@ -172,6 +173,8 @@ export interface ClaimOutboxJobsOptions {
  * それでも adapter 間の実装差に備え、型は `number | null` のままにする。
  */
 export class OutboxLeaseConflictError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isOutboxLeaseConflictError} で行う。 */
+  readonly kind = "outbox_lease_conflict" as const;
   constructor(
     readonly jobId: string,
     readonly expectedAttempts: number,
@@ -183,6 +186,16 @@ export class OutboxLeaseConflictError extends Error {
     );
     this.name = "OutboxLeaseConflictError";
   }
+}
+
+/**
+ * 受け取ったものが {@link OutboxLeaseConflictError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isOutboxLeaseConflictError(value: unknown): value is OutboxLeaseConflictError {
+  return matchesStoreErrorKind(value, "outbox_lease_conflict", "OutboxLeaseConflictError");
 }
 
 /** outbox の未処理のジョブを claim し、完了・失敗を記録する口。契約（重複 claim の禁止・リース・CAS）は、このファイルの冒頭の doc を見ること。 */
