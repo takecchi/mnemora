@@ -82,6 +82,10 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   `failedAt`）が既に付いていれば、先に付いた終端が勝つ——行を変えず、例外も投げない
  *   （無言の no-op）。同じ claim（同じ `attempts`）のまま complete と fail の両方が
  *   呼ばれても、両方の終端が同時に付くことはない。
+ * - 🔴 **終端は先勝ちである（ADR 0440）。** 同じ claim（同じ `attempts`）で同種（`complete` → `complete`、
+ *   `fail` → `fail`）が再び呼ばれても、1回目の `completedAt`／`failedAt`・`lastError` を保つ
+ *   （2回目の `at`・`error` は捨てる。`purgeCompletedJobs` の `completedAt < olderThan` の境界も
+ *   1回目で決まる）。戻り値と例外は変わらない——「冪等」とは、2回目が無言の no-op であることを指す。
  * - ⚠ **`attempts` は claim のたびに1増え、上限は無い**（今の振る舞い）。終端に達しないまま
  *   止まり続ける job（毎回ワーカーを止めてしまう job など）は、リースが切れるたびに claim され
  *   続ける。`attempts` はフェンシングにだけ使い、再試行の上限には使っていない
@@ -205,7 +209,7 @@ export interface OutboxStore {
    */
   claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
   /**
-   * ジョブを完了にする。`expectedAttempts` が行の `attempts` と違えば {@link OutboxLeaseConflictError}。行が無いときと、`attempts` が一致していれば終端済みでも、例外にしない（冒頭の doc）。
+   * ジョブを完了にする。`expectedAttempts` が行の `attempts` と違えば {@link OutboxLeaseConflictError}。行が無いときと、`attempts` が一致していれば終端済みでも、例外にしない（冒頭の doc）。**終端済みの行への呼び出しは、行を変えない（先勝ち、ADR 0440）。**
    *
    * ⚠ 既に終端が付いた行でも、行の `attempts` と違う `expectedAttempts` を渡せば {@link OutboxLeaseConflictError} を投げる——終端が付いていることは、`attempts` の検査を外す理由にならない（Issue #1292 で冒頭の doc と実装の側を正と決めた。2実装 `@mnemora/postgres`・`@mnemora/testkit/fixtures` とも、この形で動く）。`fail` も同じ。
    *
@@ -222,7 +226,7 @@ export interface OutboxStore {
     opts?: { at?: Date | undefined },
   ): Promise<void>;
   /**
-   * ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ。
+   * ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ（終端済みの行には、`failedAt`・`lastError` を含めて何も書かない。先勝ち、ADR 0440）。
    *
    * ⭐ **`opts` は省略可能な第5引数であり、この変更は非破壊である**（理由は `complete` の `opts` と同じ）。
    * **`opts.at` を渡すと `failedAt` にその値を使う。省略時は実装が壁時計を使う。** ⚠ **`available_at`
