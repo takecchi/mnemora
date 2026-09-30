@@ -19,7 +19,7 @@ const DELIBERATELY_VIOLATING_TESTS: readonly string[] = [];
 vi.mock("../../../core/src/runtime.js", async (importOriginal) => {
   const { wrapRuntimeModule } =
     await import("../../../core/src/__tests__/runtime-output-contract-harness.js");
-  return await importOriginal<typeof RuntimeModule>();
+  return wrapRuntimeModule(await importOriginal<typeof RuntimeModule>());
 });
 
 failOnRuntimeOutputContractViolations(DELIBERATELY_VIOLATING_TESTS);
