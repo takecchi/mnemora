@@ -60,6 +60,7 @@ import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
+import { lockTenantForErase } from "./erase-tenant-lock.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
@@ -4038,6 +4039,8 @@ export class PostgresMemoryStore implements MemoryStore {
     const dryRun = opts.dryRun === true;
     try {
       return await this.db.transaction(async (tx) => {
+        // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする。
+        await lockTenantForErase(tx, ctx.tenantId);
         const blocked = await countForeignReferences(tx, ctx.tenantId);
         if (blocked > 0) {
           return { kind: "blocked_by_foreign_reference", count: blocked };

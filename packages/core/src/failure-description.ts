@@ -82,6 +82,11 @@ export function omitDrizzleParams(message: string): string {
     return message;
   }
   const paramsStart = markerIndex + DESCRIBE_JOB_FAILURE_PARAMS_MARKER.length;
+  // ADR 0430: 既に落とした印なら、そのまま返す（べき等）。独立関数と `Runtime` の両方が掛かっても、
+  // 落とした文字数の数字が「印の長さ」に書き換わらない。
+  if (/^\(omitted by mnemora, \d+ chars\)$/.test(message.slice(paramsStart))) {
+    return message;
+  }
   const omittedChars = message.length - paramsStart;
   return `${message.slice(0, paramsStart)}(omitted by mnemora, ${omittedChars} chars)`;
 }
