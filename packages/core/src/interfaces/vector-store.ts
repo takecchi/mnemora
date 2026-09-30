@@ -323,11 +323,13 @@ export interface VectorStore {
    * **保証するのは、長さが `space.dimensions` と一致し、成分がすべて有限のベクトルを渡したときの
    * 振る舞いだけである**という store 側の約束は変わらない（守るのは Runtime の embed ジョブ）。
    *
-   * ⚠ **`memoryId` がほかのテナントの Memory を指していても、テナントの一致は約束として
-   * 検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
-   * `@mnemora/postgres` は受け付けて呼んだテナントの行として書くが、`search` は `memories` と
-   * テナントで突き合わせるので、その行は検索に出ない。`InMemoryVectorStore` は「memory not
-   * found」で拒む。`docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   * **`memoryId` の Memory が `ctx.tenantId` の Memory でなければ、行を書かずに `memory not found for tenant: <id>` を
+   * 含むメッセージの `Error` を投げる**（ADR 0436。ADR 0398 の `RelationStore.link` と同じ作法。クラス名の接頭辞は
+   * `PostgresVectorStore:`／`InMemoryVectorStore:`）。実在しない id・別のテナントの Memory の id・uuid の形でない id
+   * （`@mnemora/postgres`）を区別しない。`@mnemora/postgres` は確かめと書き込みを1つの SQL 文にしている。
+   * ⚠ **ADR 0436 より前は違った**: `@mnemora/postgres` はほかのテナントの Memory の id も受け付け、呼んだテナントの行として書いた
+   * （その行は `search` には出ないが、指された Memory のテナントの `eraseTenant` を `blocked_by_foreign_reference` で止めた）。
+   * `docs/memory-model.md` §5 の 2026-09-27 追記（Issue #1051）の表は、その当時の記録である。
    */
   upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
   /**

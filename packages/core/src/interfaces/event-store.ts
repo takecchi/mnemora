@@ -11,16 +11,14 @@ import type { EventFilter, MemoryEvent, NewMemoryEvent } from "../event.js";
  */
 export interface EventStore {
   /**
-   * ⚠ **`event.memoryId` がほかのテナントの Memory を指していても、テナントの一致は
-   * 約束として検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
-   * adapter によって違う:
-   * - `@mnemora/postgres`: 受け付け、呼んだテナントのイベントとして記録する
-   *   （`memories(id)` への外部キーは `tenant_id` を見ない）。
-   * - `@mnemora/testkit` の `InMemoryEventStore`: `ctx` のテナントで Memory を引くので、
-   *   「memory not found」で拒む。
-   *
-   * どちらでも、ほかのテナントの行とイベントは変わらない。`Runtime` は同じ `ctx` で確かめた
-   * id しか渡さない。`docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   * **`event.memoryId` が非 `null` のとき、その Memory が `ctx.tenantId` の Memory でなければ、行を書かずに
+   * `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる**（ADR 0436。ADR 0398 の `RelationStore.link` と同じ作法。
+   * クラス名の接頭辞は `PostgresEventStore:`／`InMemoryEventStore:`）。実在しない id・別のテナントの Memory の id・
+   * uuid の形でない id（`@mnemora/postgres`）を区別しない。`memoryId` が `null` のイベント（`events_purged`）は Memory を
+   * 指さないので検査しない。`@mnemora/postgres` は確かめと書き込みを1つの SQL 文にしている。
+   * ⚠ **ADR 0436 より前は違った**: `@mnemora/postgres` はほかのテナントの Memory の id も受け付け、呼んだテナントのイベントとして
+   * 書いた（`memories(id)` への外部キーは `tenant_id` を見ない）。その行は、指された Memory のテナントの `eraseTenant` を
+   * `blocked_by_foreign_reference` で止めた。`docs/memory-model.md` §5 の 2026-09-27 追記（Issue #1051）の表は、その当時の記録である。
    *
    * ⚠ **`event.meta`・`event.actor` の値の中身は検査しない。**JSON で往復しない値と、NUL・孤立サロゲートを
    * 含む文字列の扱いは adapter によって違う（**BigInt は 2026-09-29 から両 adapter で揃った**——下記参照）
@@ -35,7 +33,7 @@ export interface EventStore {
    * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
    *   `ctx.tenantId`）。
    * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・
-   *   存在しない（または形式の壊れた）`memoryId`・`actor`/`meta` に含まれる NUL（U+0000）か孤立サロゲートの文字列
+   *   存在しない（または形式の壊れた）`memoryId`・別のテナントの Memory を指す `memoryId`（ADR 0436）・`actor`/`meta` に含まれる NUL（U+0000）か孤立サロゲートの文字列
    *   （2026-09-29、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）・
    *   `actor`/`meta` に含まれる BigInt（2026-09-29、[Issue #1384](https://github.com/takecchi/mnemora/issues/1384)。
    *   同じく両方とも adapter で同じ入力を拒む）である（例外の種類は adapter で違う）。

@@ -43,14 +43,21 @@ append-only・並び順・外部キー相当の契約などを検査できる。
 ```ts check
 // my-event-store.test.ts
 import { randomUUID } from "node:crypto";
-import type { Ctx, EventFilter, EventId, EventStore, MemoryEvent, NewMemoryEvent } from "@mnemora/core";
+import type {
+  Ctx,
+  EventFilter,
+  EventId,
+  EventStore,
+  MemoryEvent,
+  NewMemoryEvent,
+} from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import { describeEventStoreConformance } from "@mnemora/testkit";
 
-// 適合テストは「memoryId が実在の Memory を指しているか」（外部キー相当）も検査する。
-// ここでは実際の MemoryStore を持たない最小の例なので、prepareMemoryId が登録した id
-// だけを「実在する」ことにする素朴な実装にしてある。
-const knownMemoryIds = new Set<string>();
+// 適合テストは「memoryId が実在の Memory を指しているか」（外部キー相当）と、その Memory が
+// ctx のテナントのものか（ADR 0436）も検査する。ここでは実際の MemoryStore を持たない最小の例なので、
+// prepareMemoryId が登録した id だけを、登録したテナントの Memory として「実在する」ことにする素朴な実装にしてある。
+const knownMemoryIds = new Map<string, string>(); // memoryId -> tenantId
 
 class MyEventStore implements EventStore {
   private rows: MemoryEvent[] = [];
@@ -58,8 +65,9 @@ class MyEventStore implements EventStore {
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
     // 孤立サロゲート・NUL を含む識別子は入口で断る（適合テストが検査する約束。ADR 0423）。
     assertWellFormedCtx(ctx);
-    if (event.memoryId !== null && !knownMemoryIds.has(event.memoryId)) {
-      throw new Error(`append: unknown memoryId: ${event.memoryId}`);
+    // 実在しない Memory も、別のテナントの Memory も、同じ例外で断る（行は書かない）。
+    if (event.memoryId !== null && knownMemoryIds.get(event.memoryId) !== ctx.tenantId) {
+      throw new Error(`MyEventStore: memory not found for tenant: ${event.memoryId}`);
     }
     // structuredClone で複製して持つ——受け取った入力（meta の配列・オブジェクト）を
     // 呼び手が後から書き換えても、store の中身は変わらない（適合テストが検査する約束）。
@@ -95,9 +103,9 @@ class MyEventStore implements EventStore {
 describeEventStoreConformance({
   name: "my-event-store",
   createStore: () => new MyEventStore(),
-  prepareMemoryId: async () => {
+  prepareMemoryId: async (ctx) => {
     const id = randomUUID();
-    knownMemoryIds.add(id);
+    knownMemoryIds.set(id, ctx.tenantId);
     return id;
   },
 });

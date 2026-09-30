@@ -2935,8 +2935,9 @@ export class FakeVectorStore implements VectorStore {
     // `search` は同じ `backing.memories` を真実の源として引いており（クラス doc 参照）、
     // 書き込み側（upsert）でも同じ非対称を強制する——ADR 0034 が実装した「MemoryStore が
     // 真実の源」を、書き込み時点でも成り立たせる。
-    if (!this.backing.memories.has(memoryId)) {
-      throw new Error(`FakeVectorStore: memory not found: ${memoryId}`);
+    // ADR 0436: `ctx.tenantId` の記憶であることも確かめる（別のテナントの記憶は、実在しない id と同じく拒む）。
+    if (this.backing.memories.get(memoryId)?.tenantId !== ctx.tenantId) {
+      throw new Error(`FakeVectorStore: memory not found for tenant: ${memoryId}`);
     }
     // 穴 O-6-2（ADR 0424）: float4 に収まらない成分は Postgres の upsert が拒む（`InMemoryVectorStore` と同じ）。
     for (const [i, x] of vector.entries()) {
@@ -3590,8 +3591,12 @@ export class FakeEventStore implements EventStore {
     // 外部キー相当（ADR 0047）: `memory_events.memory_id → memories(id)`（nullable。
     // `kind = 'events_purged'` の場合のみ NULL が正当）。**NULL は拒まない**——kind を
     // 問わず、`memoryId` が非 null のときだけ実在を要求する。
-    if (event.memoryId !== null && !this.backing.memories.has(event.memoryId)) {
-      throw new Error(`FakeEventStore: memory not found: ${event.memoryId}`);
+    // ADR 0436: `ctx.tenantId` の記憶であることも確かめる（別のテナントの記憶は、実在しない id と同じく拒む）。
+    if (
+      event.memoryId !== null &&
+      this.backing.memories.get(event.memoryId)?.tenantId !== ctx.tenantId
+    ) {
+      throw new Error(`FakeEventStore: memory not found for tenant: ${event.memoryId}`);
     }
     const stored = buildStoredEvent(ctx, event);
     this.backing.events.push(stored);
