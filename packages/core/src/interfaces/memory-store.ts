@@ -560,11 +560,13 @@ export interface MemoryStore {
    *   `text`・`content`・`speaker`・`data` などは全部 `payload` に入る**ので、
    *   `observe({ kind: "utterance", text: "…\uD83D" })`（サロゲートペアの間で切った文字列）は
    *   Observation を1件も書かずに例外になる。
-   * - `PostgresMemoryStore`、`text` 列の欄（`subjectId`/`externalId`。実測したのはこの2つ）: 例外を投げず、
-   *   U+FFFD（置換文字）に置き換えて保存する（node-postgres が UTF-8 へエンコードするときに
-   *   置き換える。`createMemory` の `text` 列の欄と同じ）。
-   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`:
-   *   どの欄でも例外を投げず、入力をそのまま保持する。
+   * - ⭐ **識別子の欄（`subjectId`・`externalId`、`ctx.tenantId`・`ctx.subjectId`）は、孤立サロゲートも NUL も書く前に断る**
+   *   （[ADR 0423](../../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)。`MalformedIdentifierError`、
+   *   `kind: "malformed_identifier"`。正規化はしない）。`PostgresMemoryStore` と `InMemoryMemoryStore` は同じ判定
+   *   （`assertWellFormedIdentifier`）を入口で掛ける。**以前は**、`PostgresMemoryStore` は U+FFFD に置き換えて保存し、
+   *   `InMemoryMemoryStore` は入力をそのまま保持していた。
+   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、本文の欄:
+   *   例外を投げず、入力をそのまま保持する（`FakeMemoryStore` は識別子の欄も断らない。core の `Runtime` の入口が先に断る）。
    *
    * `createObservationWithOutbox` も同じである。今の振る舞いは
    * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
@@ -628,6 +630,8 @@ export interface MemoryStore {
    * ユニット）を含む文字列を渡したときの挙動は、adapter によって異なる。Postgres では、
    * 欄の列の型によっても異なる（Issue #816・#1075、実測。契約として現状を記録するだけで、
    * この非対称を無くす変更は本 doc コメントの対象外）。**
+   * - ⭐ `subjectId`（識別子）は、孤立サロゲートも NUL も書く前に断る（ADR 0423。上の `createObservation` の節と同じ）。
+   *   以下は `subjectId` 以外の欄の話である。
    * - `PostgresMemoryStore`、`text` 列の欄（`content`/`subjectId`/`tags`/`digest`）:
    *   例外を投げない。node-postgres（`pg`）ドライバが JS 文字列を UTF-8 バイト列へ
    *   エンコードする際、対をなさないサロゲートを静かに U+FFFD（置換文字）へ置換する

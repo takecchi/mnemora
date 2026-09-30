@@ -38,7 +38,7 @@ function record(override: Partial<NewRecallRecord> = {}): NewRecallRecord {
 
 describe("testkit の fixture は createRecall で Postgres が書けない記録を拒む", () => {
   const cases: Array<[string, Partial<NewRecallRecord>, RegExp]> = [
-    ["subjectId に NUL", { subjectId: "s\u0000" }, /^createRecall: subjectId must not contain NUL/],
+    ["subjectId に NUL", { subjectId: "s\u0000" }, /^record\.subjectId contains a NUL character/],
     ["query に NUL", { query: { text: "q\u0000" } }, /^createRecall: query must not contain NUL/],
     ["query が undefined", { query: undefined }, /^createRecall: query must be JSON-serializable/],
     [
