@@ -4,6 +4,18 @@ import type { InMemoryMemoryStore, StoredRelation } from "./in-memory-memory-sto
 import { nextId } from "./id.js";
 
 /**
+ * `memory_relations.kind` に入れてよい値（`RelationKind` の全値）。`Record<RelationKind, true>` で持つので、
+ * union に値を足すと、ここに足し忘れた時点で型検査が落ちる。
+ */
+const KNOWN_RELATION_KINDS: Record<RelationKind, true> = { contradicts: true };
+
+function assertKnownRelationKind(store: string, kind: string): void {
+  if (!Object.hasOwn(KNOWN_RELATION_KINDS, kind)) {
+    throw new Error(`${store}: unknown relation kind: ${String(kind)}`);
+  }
+}
+
+/**
  * `RelationStore` の in-memory 実装（Issue #207/#933 PR2、ADR 0381）。
  *
  * **群の作成・解消（`markContestedGroup`/`resolveContestedGroup`）はここではない**——
@@ -25,6 +37,8 @@ export class InMemoryRelationStore implements RelationStore {
    */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
     assertWellFormedCtx(ctx);
+    // 列挙の外の kind は、Postgres の CHECK（`0026_memory_relations.sql`）の違反を漏らさず、INSERT の前に断る。
+    assertKnownRelationKind("InMemoryRelationStore", kind);
     for (const id of [fromId, toId]) {
       if ((await this.memoryStore.get(ctx, id)) === null) {
         throw new Error(`InMemoryRelationStore: memory not found for tenant: ${id}`);
@@ -79,13 +93,16 @@ export class InMemoryRelationStore implements RelationStore {
   }
 
   private relatedOf(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Relation[] {
-    return this.relations
-      .filter(
-        (r) =>
-          r.tenantId === ctx.tenantId &&
-          r.fromMemoryId === memoryId &&
-          (kind === undefined || r.kind === kind),
-      )
-      .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: r.createdAt }));
+    return (
+      this.relations
+        .filter(
+          (r) =>
+            r.tenantId === ctx.tenantId &&
+            r.fromMemoryId === memoryId &&
+            (kind === undefined || r.kind === kind),
+        )
+        // Issue #1108: 保存している Date をそのまま返さない（呼び手が書き換えても行は変わらない）。
+        .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: new Date(r.createdAt) }))
+    );
   }
 }

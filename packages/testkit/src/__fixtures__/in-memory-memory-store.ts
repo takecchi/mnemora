@@ -58,6 +58,7 @@ import type {
 import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import { assertQueryDate, assertQueryInteger } from "./query-check.js";
+import { toFloat4Readback } from "./float4.js";
 import { assertCloneableMemoryEvent, assertStorableMemoryEvent } from "./memory-event-check.js";
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
@@ -800,15 +801,18 @@ export class InMemoryMemoryStore implements MemoryStore {
         // （`Memory.claimKey` の doc コメント参照）——`?? null` で転記しないと `undefined`
         // のまま消える。上の `decayBaseSeq` と同じ漏れを作らない。
         claimKey: input.claimKey ?? null,
-        strength: input.strength,
-        halfLifeHours: input.halfLifeHours,
+        // `strength`・`halfLifeHours`・`halfLifeRecalls` は Postgres の `real`（float4）列——Postgres が読み戻す値で
+        // 持つ（`toFloat4Readback` の doc 参照）。
+        strength: toFloat4Readback(input.strength),
+        halfLifeHours: toFloat4Readback(input.halfLifeHours),
         decayFloorAt: input.decayFloorAt,
         // ADR 0165（Issue #305）: 活動時計の3つ組。省略可能なフィールドなので `?? null` で
         // 転記しないと `undefined` のまま消える——これが前任の作業者が実際に踏んだ漏れ1
         // （core commit 5e37afb の doc 参照）。ここで同じ漏れを作らない。
         decayBaseSeq: input.decayBaseSeq ?? null,
         decayFloorSeq: input.decayFloorSeq ?? null,
-        halfLifeRecalls: input.halfLifeRecalls ?? null,
+        halfLifeRecalls:
+          input.halfLifeRecalls == null ? null : toFloat4Readback(input.halfLifeRecalls),
         embeddingStatus: input.embeddingStatus,
         purgedAt: input.purgedAt ?? null,
         // Issue #152/#153（ADR 0312）: runtime は常に `{}` 以上の値を書く。
