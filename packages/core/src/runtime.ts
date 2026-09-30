@@ -13,6 +13,7 @@ import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correc
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
 import { DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT, deriveClaimKeys } from "./claim-key.js";
+import { normalizeContentForComparison } from "./content-comparison.js";
 import type { ClaimKey, ClaimKeyOptions } from "./claim-key.js";
 import {
   buildNewMemoryFromCandidate,
@@ -4466,10 +4467,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // どうしを、互いへの誤検出の相手にしない。`memory.sourceObservationId` が `null`
     // のときは何も除かない（`null` 同士を「同じ観測」と見なさない）。
     const memorySourceObservationId = memory.sourceObservationId ?? null;
-    const matches =
+    const notSiblings =
       memorySourceObservationId === null
         ? rawMatches
         : rawMatches.filter((m) => (m.sourceObservationId ?? null) !== memorySourceObservationId);
+    // 穴 O-3（ADR 0424）: store は生の `content_hash` だけで「同じ内容」を除くので、NFC と NFD の
+    // 違いや末尾の空白1つだけで別の行として返ってくる。`content` を NFC + trim で比べて、
+    // 検出中の memory と等しい行も、件数を数える前に除く（保存値・`content_hash` は変えない）。
+    // `matches` を使う下の分岐（1件の `markContested`・`contested_group`・evidence だけ）は
+    // すべてこの後の値を見る。
+    const memoryComparableContent = normalizeContentForComparison(memory.content);
+    const matches = notSiblings.filter(
+      (m) => normalizeContentForComparison(m.content) !== memoryComparableContent,
+    );
 
     if (matches.length === 0) {
       return { memoryId: memory.id, claimKey, matchCount: 0, result: { kind: "no_conflict" } };
