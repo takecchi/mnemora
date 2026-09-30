@@ -272,6 +272,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/bullmq` の tick driver が、`runtime.tick()` の失敗を `onTickError` に渡すようになった。** BullMQ の Worker は processor の throw を `'error'` ではなく `'failed'` として emit する（【実測】bullmq 6.3.8、Redis 互換サーバ Valkey 8.1.3 上の実 Worker で `'failed'` だけが1回 emit され、`'error'` は出なかった）。以前の driver は `'error'` しか聴いていなかったため、`tick()` が throw しても `onTickError` も `onTickResult` も呼ばれず、失敗が誰にも見えなかった。いまは `'failed'` を拾い、job ではなく error を渡す（`'error'` とは別の経路で、1回の失敗につき1回）。`onTickError` を渡していない人には見える変化は無い。渡している人は、これまで届かなかった tick の失敗が届くようになる（エラー通知の件数が増えうる）。再試行は足していない（繰り返しジョブは次の発火でまた tick する）。
 
+- **`runtime.reextract` が、LLM を待つ間に元の記憶が `forget`（`purge` を含む）されたとき、何も書かずに打ち切るようになった**（[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226) と同じ穴）。
+  - **直した穴**: 以前は、`reextract` が LLM を待つ間にその Observation の記憶を `forget` すると、`forget` は `forgotten` を返すのに、LLM が返った後で言い換えが新しい `active` として書かれ、イベントが `created` → `forgotten` → `created` と積まれた（実測、Postgres）。`consolidate`/`reflect` が #1226 で塞いだのと同じ穴が `reextract` に残っていた。
+  - **今の振る舞い**: LLM が返った直後に、LLM の前に読んだその Observation の記憶を読み直し、1件でも `forgotten` なら何も書かない。書き込み（`supersedeWithNewMemories`／口が無い adapter 向けの `createMemoryWithOutbox`）にも `opts.abortIfForgotten` を渡し、実装する adapter（`@mnemora/postgres`）は同一トランザクションでも見直す。戻り値は「退けた記憶を持つ Observation」の早期 return と同じ形（`extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に `status_not_active`）。**例外は投げず、公開の型は増やしていない。**
+  - ⚠ `abortIfForgotten` を実装しない自前の `MemoryStore` では、読み直しだけが保護になり、読み直しと書き込みの間の窓は残る（`consolidate`/`reflect` と同じ）。待つ間に `contested` になった記憶は見直さない。
+  - 非破壊（型・DB は変えていない。forget された記憶を根拠に書き直していた挙動が、書かない挙動になった）。
+
 ### Fixed
 
 - **`runtime.observe({ extract: "sync" })` が、LLM を待つ間に tick に同じ extract ジョブを取られる穴を塞いだ**（[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。以前は、sync の observe が積んだジョブは「すぐ claim できる」状態で、observe が LLM を待つ間に tick が claim できた。すると LLM が2回呼ばれ、内容の違う記憶が2件とも active で残り、observe 自身は `complete` が `OutboxLeaseConflictError` で負けて、書き込み済みなのに失敗し `memoryIds` が返らなかった（Postgres と InMemory の両方で再現）。
