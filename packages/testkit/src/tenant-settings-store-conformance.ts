@@ -9,6 +9,10 @@ import {
   TAXONOMY_MODE_INVALID_MESSAGE,
 } from "@mnemora/core";
 import type { Ctx, DecayClock, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /**
  * `setEventRetention` に不正な `days` を渡したときのメッセージが `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
@@ -582,6 +586,27 @@ export function describeTenantSettingsStoreConformance(
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.eraseTenant).toBeUndefined();
+      });
+    }
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "getDefaultHalfLifeHours の ctx.tenantId",
+            () => store.getDefaultHalfLifeHours({ tenantId: value }),
+          ],
+          ["getEventRetention の ctx.tenantId", () => store.getEventRetention({ tenantId: value })],
+          [
+            "getEventRetention の ctx.subjectId",
+            () => store.getEventRetention({ tenantId: "tenant-wf", subjectId: value }),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
       });
     }
   });

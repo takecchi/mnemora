@@ -9,6 +9,7 @@ import type {
   VectorHit,
   VectorStore,
 } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 import { assertQueryDate, assertQueryInteger } from "./query-check.js";
 
@@ -110,7 +111,18 @@ function cosineDistance(a: number[], b: number[]): number {
 export class InMemoryVectorStore implements VectorStore {
   private readonly entries = new Map<string, Entry>();
 
-  constructor(private readonly memoryStore: InMemoryMemoryStore) {}
+  constructor(private readonly memoryStore: InMemoryMemoryStore) {
+    // ADR 0426: `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` に当たる動き——
+    // `memories` の行が消えたら、全 space からその埋め込みを消す。
+    memoryStore.onMemoriesDeleted((tenantId, memoryIds) => {
+      const idSet = new Set<MemoryId>(memoryIds);
+      for (const [key, entry] of this.entries) {
+        if (entry.tenantId === tenantId && idSet.has(entry.memoryId)) {
+          this.entries.delete(key);
+        }
+      }
+    });
+  }
 
   private key(space: EmbeddingSpaceId, tenantId: string, memoryId: MemoryId): string {
     // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`provider`・`model` は `:` を含みうる
@@ -125,6 +137,7 @@ export class InMemoryVectorStore implements VectorStore {
     memoryId: MemoryId,
     vector: number[],
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
     // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
     // `search` は既に `this.memoryStore.get(...)` を真実の源として引いている
     // （クラス doc 参照）——書き込み側（upsert）でも同じ非対称を強制する。
@@ -146,6 +159,8 @@ export class InMemoryVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
     assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
@@ -362,6 +377,8 @@ export class InMemoryVectorStore implements VectorStore {
     queries: { key: string; vector: number[] }[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<Map<string, VectorHit[]>> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     const result = new Map<string, VectorHit[]>();
     // `queries` が空なら `search()` を一度も呼ばないので、`limit` が不正でも投げない
     // （`PostgresVectorStore.searchMany` も空配列は往復せず空の Map を返す）。
@@ -372,6 +389,7 @@ export class InMemoryVectorStore implements VectorStore {
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     this.entries.delete(this.key(space, ctx.tenantId, memoryId));
   }
 
@@ -384,6 +402,7 @@ export class InMemoryVectorStore implements VectorStore {
    * 問わない。
    */
   async deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    assertWellFormedCtx(ctx);
     if (memoryIds.length === 0) {
       return;
     }
@@ -401,6 +420,7 @@ export class InMemoryVectorStore implements VectorStore {
    * `tenantId` の一致だけを見る」形。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     const matchingKeys: string[] = [];
     for (const [key, entry] of this.entries) {
       if (matchingKeys.length >= opts.limit) {
@@ -423,6 +443,7 @@ export class InMemoryVectorStore implements VectorStore {
     space: EmbeddingSpaceId,
     memoryIds: MemoryId[],
   ): Promise<VectorEntry[]> {
+    assertWellFormedCtx(ctx);
     // `key` は space + tenantId + memoryId から機械的に決まる（クラス冒頭の `key` 参照）
     // ので、tenant 境界は search と同じくキーの一致だけで自然に掛かる——他テナントの
     // memoryId が渡っても、そのテナントの key には一致しない。

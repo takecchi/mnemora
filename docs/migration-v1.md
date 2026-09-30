@@ -2062,6 +2062,34 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
+### 41. 孤立サロゲートか NUL を含む識別子が、入口で `MalformedIdentifierError` になった。conformance suite に、それを検査する `it` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0423](./decisions/0423-identifier-well-formed-and-error-message-without-params.md)。
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 41 である**——項目40 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 識別子（`tenantId`・`subjectId`・`observe` の `externalId`）に、孤立サロゲート（対をなさない UTF-16 のサロゲートコードユニット）か NUL（U+0000）が含まれていると、
+`Runtime` の全メソッドの入口と、`@mnemora/postgres`・`@mnemora/testkit` のインメモリ実装の store の入口が、書く前に `MalformedIdentifierError`（`kind: "malformed_identifier"`）を投げる。
+これまでは実装によって扱いが違った（Postgres は U+FFFD に置き換えて保存する、または DB の生の例外。インメモリ実装は通る）。**正規化はしない**（書き換えて通さない）。
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。あわせて、conformance suite に足した `it` は、入口で断らない自前の store を新しく落とす。項目21・23・24・27・34 と同じ扱い。
+
+**誰が影響を受けるか**:
+- 識別子に外部の入力（ユーザー名・外部の ID など）をそのまま渡していて、その値が孤立サロゲートか NUL を含みうる呼び出し側。対をなすサロゲート（絵文字など）は、これまでどおり通る。
+- 自前の store を `describeMemoryStoreConformance`・`describeOutboxStoreConformance`・`describeVectorStoreConformance`・`describeLexicalStoreConformance`・`describeEventStoreConformance`・`describeRelationStoreConformance`・`describeTenantSettingsStoreConformance` に当てている人。足した `it` が落ちうる。
+- 本文（`text` など）は変わらない。`tags` の要素・`claimKey` の主語と述語・ラベル名も今回は変わらない。
+
+**どう直すか**:
+- 呼び出し側: 識別子を渡す前に、自分で扱いを決める（孤立サロゲートを除く、別の文字に置き換える、ハッシュにするなど）。mnemora は値を書き換えない。
+  すでに U+FFFD に置き換わって保存された識別子は、そのまま残る（この変更は既存の行を直さない）。
+- 自前の store: 各メソッドの入口で、core が公開する `assertWellFormedCtx(ctx)` を呼ぶ。識別子を入力に持つ口（Observation・Memory の書き込みの `subjectId`・`externalId`、検索条件の `filter` など）は `assertWellFormedIdentifier(value, "<欄の名前>")`・`assertWellFormedFilter(filter)` も呼ぶ。
+- `isMalformedIdentifierError(error)` で捕まえられる（`instanceof` ではなく `kind` を見る。ADR 0418）。例外の message に入力値は入らない。
+
+**あわせて変わること（破壊的とは数えない）**: `Runtime` が投げ直す例外の message から、SQL に付けた値（`params:` 以降）が落ちる。SQL の文・`kind`・`cause` は残る。詳しくは CHANGELOG の `### Changed`。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
