@@ -96,6 +96,14 @@ export default defineConfig({
           // 明示的に固定する理由は resolveDefaultMaxWorkers() の docstring
           // （globalSetup が worker DB の数を決めるのに、解決後の値を読めないと困る）。
           maxWorkers: resolveDefaultMaxWorkers(),
+          // ⚠ 並列の群だけ `isolate: false`（Issue #1276 / ADR 0397）: ファイルごとに worker の実行環境を
+          // 作り直さず、import と setup を worker 内で共有する（ファイルごとの固定費が約 1.0 s から
+          // 約 0.07 s に落ちた。実測は ADR 0397）。代わりに、モジュール最上位の状態は同じ worker の
+          // ファイルをまたいで残る——手当ては ADR 0397 の「残る危険と手当て」（累計カウンタは
+          // setup-reset-process-counters.ts、共有クライアントは各ファイルの afterAll、契約の検査は
+          // setup-recall-output-contract-positive-control.test.ts）。⛔ 直列の群は `isolate: true` のまま
+          // （接続切断・プール終了を見るテストが多く、状態の持ち越しが害になる）。
+          isolate: false,
           sequence: { groupOrder: 0 },
         },
       },
