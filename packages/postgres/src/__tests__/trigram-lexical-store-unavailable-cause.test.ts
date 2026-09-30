@@ -118,11 +118,13 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
   });
 
   it("extension_create_denied は message でなく code/routine で決まる（lc_messages が英語以外でも同じ）", async () => {
-    const original = Object.assign(new Error("拡張機能\"pg_trgm\"を作成する権限がありません"), {
+    const original = Object.assign(new Error('拡張機能"pg_trgm"を作成する権限がありません'), {
       code: "42501",
       routine: "execute_extension_script",
     });
-    const result = await probeTrigramLexicalSupport(createFakeDb({ extensionCreateError: original }));
+    const result = await probeTrigramLexicalSupport(
+      createFakeDb({ extensionCreateError: original }),
+    );
 
     expect(result).toMatchObject({ ok: false, reason: "extension_create_denied" });
   });
@@ -135,7 +137,9 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
     const wrapped = new Error("Failed query: CREATE EXTENSION IF NOT EXISTS pg_trgm\nparams: ", {
       cause: pgError,
     });
-    const result = await probeTrigramLexicalSupport(createFakeDb({ extensionCreateError: wrapped }));
+    const result = await probeTrigramLexicalSupport(
+      createFakeDb({ extensionCreateError: wrapped }),
+    );
 
     expect(result).toMatchObject({ ok: false, reason: "extension_create_denied" });
   });
@@ -145,7 +149,9 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
       code: "42501",
       routine: "aclcheck_error",
     });
-    const result = await probeTrigramLexicalSupport(createFakeDb({ extensionCreateError: original }));
+    const result = await probeTrigramLexicalSupport(
+      createFakeDb({ extensionCreateError: original }),
+    );
 
     expect(result).toMatchObject({ ok: false, reason: "extension_create_failed" });
   });

@@ -8,6 +8,7 @@ import {
   capLexicalQueryWords,
 } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
+import { isCreateExtensionPermissionDenied } from "./migration-failure-message.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -295,10 +296,6 @@ const JAPANESE_TRIGRAM_SELF_TEST_LITERAL = "田中さんが会議に参加しま
 /** 自己一致検査で「1」とみなす下限。浮動小数の誤差のためちょうど1ではなく閾値で見る。 */
 const SELF_SIMILARITY_OK_THRESHOLD = 0.99;
 
-function isPermissionDenied(message: string): boolean {
-  return /permission denied|must be (owner|superuser)|insufficient privilege/i.test(message);
-}
-
 /**
  * `pg_trgm` が日本語の語彙照合に使える状態かどうかを確かめる。
  *
@@ -415,7 +412,9 @@ async function probeTrigramLexicalSupportWithCause(
     const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
-      reason: isPermissionDenied(message) ? "extension_create_denied" : "extension_create_failed",
+      reason: isCreateExtensionPermissionDenied(err)
+        ? "extension_create_denied"
+        : "extension_create_failed",
       detail: message,
       // 元の Postgres エラーを保持する——`TrigramLexicalStoreUnavailableError.cause` に
       // 渡すため（Issue #892）。他の3つの reason は値ベースの判定であり、そもそも

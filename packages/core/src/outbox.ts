@@ -49,9 +49,9 @@ export interface OutboxJobRecord {
    *
    * ⚠ **2026-09-29 追記（ADR 0363）**: 上の「削らずに載せる」「削る・上限を置くかは決まっていない」は、
    * `@mnemora/postgres` で DB への書き込みが失敗した経路については、もう成り立たない。
-   * `tick()` の `describeJobFailure`（`runtime.ts`）は、drizzle が包んだエラー文の `params:` 以降
+   * `tick()` の `describeFailure`（`failure-description.ts`。もとの名は `describeJobFailure`）は、drizzle が包んだエラー文の `params:` 以降
    * （失敗したクエリに渡した値そのもの）を落とし、`(omitted by mnemora, N chars)` という印に
-   * 置き換える。さらに、戻り値全体の長さに上限（4096文字。根拠は `describeJobFailure` の doc
+   * 置き換える。さらに、戻り値全体の長さに上限（4096文字。根拠は `describeFailure` の doc
    * コメント）を掛け、超えた分は切り詰めて末尾に印を付ける。
    * **それでも本文が丸ごと載りうる経路は残っている**（ADR 0363「塞がらない経路」）:
    * `@mnemora/openai` の拒否の文面（`OpenAILLMProviderError`、ADR 0075）や、pg の生エラーの

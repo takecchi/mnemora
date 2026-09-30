@@ -223,6 +223,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 - **`runtime.purge` の `"purged"`／`"already_purged"` outcome に、任意の欄 `embeddingCleanup?: { status: "failed"; error: string }` を足した**（[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)「引き受けた負債」1、[PR #1475](https://github.com/takecchi/mnemora/pull/1475)、[ADR 0399](./docs/decisions/0399-purge-embedding-cleanup-outcome-field.md)）。埋め込み行の後始末（`deleteAcrossSpaces`）が失敗したときだけ付き、`kind` は変わらない。成功時はプロパティ自体が無く、出力は変わらない。⭕ 非破壊と数える（任意欄の追加のみ）。
+  - 2026-09-30 追記: ADR 0399 は握りつぶしを2箇所と数えたが、競合の後に再読して `already_purged` になる枝にも3つ目が残っていた。そこも失敗したら同じ `embeddingCleanup` を付けるようにした（ADR 0399 の追記）。
 - **`@mnemora/testkit` の `describeVectorStoreConformance` に、任意フラグ `supportsSearchMany?: boolean` を足した。`InMemoryVectorStore` に `searchMany` を実装した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。
   - `VectorStore.searchMany?`（任意メソッド）の契約——各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並び、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、同じ key は後勝ち、NUL を含む key でも投げない、不正な `limit` は `search()` と同じく投げる、`filter`・テナント分離——を検査する歯が、これまで無かった。フラグは `supportsListActiveClaimPredicates?` と同じ3状態（`true` は歯を実行、`false` は `searchMany` が無いことを assert、省略は「⚠ 未検査」の named it を1本）。
   - ⚠ **自前の `VectorStore` に `searchMany` を実装していて `supportsSearchMany: true` を渡す人へ**: 契約に反していれば、この歯で新しく赤になりうる。フラグを渡さなければ何も変わらない（型も壊れない）。
@@ -261,6 +262,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 【実測】`main`（案A の前）とこの枝を、同じデータ・同じ器で12往復、1点ごとに別プロセスで交互に測った（`max_parallel_workers_per_gather=0`・同時1・digestBand込み）。往復ごとの差（後 − 前）の中央値: 100万行 warm の p50 は −284.0ms（IQR −308.0〜−250.3ms、最小〜最大 −353.3〜−221.8ms、12往復すべて負。p50 の絶対値は前 930.4ms・後 627.7ms）。10万行は cold（Postgres 再起動直後の1回目）で −31.4ms（IQR −36.0〜−25.1ms）、warm-after の p50 で −27.5ms（IQR −29.6〜−23.1ms）。器は共有で、絶対値は測る時刻の負荷で動く。EXPLAIN では `digestBand` 側の `Seq Scan` + top-N `Sort`（349.5ms）が `Index Scan`（0.104ms）に置き換わった。テナント全体を `GROUP BY subject_id` で束ねる本体（支配項）は変わっていない。cold は OS のページキャッシュが残る近似で、真の cold は測っていない（詳細は ADR 0384「測ったこと」）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る。`ACCESS EXCLUSIVE` ではない）。100万行で構築を含む migration が約1.2秒（1回だけの測定）。
   ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
+
+- **利用者に返るエラー文（`forget` / `purge` / `restoreArchived` / `restoreSuperseded` の `"failed"` の `error`、`reinforceError`、`purge` の `embeddingCleanup.error`）の整形を、outbox の `last_error` と同じにした**（[ADR 0363](./docs/decisions/0363-outbox-last-error-omit-params-and-cap-length.md) の 2026-09-30 追記）——利用者に返るエラー文が、SQL に付いた値（params）を含んでいたので、outbox 側の既存の整形に揃えた。他テナントの値は出ていなかった。
+  - **文字列の形が変わる**: 例外の `message` そのままではなくなる。drizzle が包んだ失敗では `params:` 以降が `(omitted by mnemora, N chars)` に置き換わり、`cause` の連鎖（pg の理由）と SQLSTATE（`(code: 42501)` の形）が ` <- caused by: ` で続き、全体は4096字で切られる（SQL の文そのものは残る）。包まれていない単純な `Error("...")` は、`message` のまま変わらない。文字列を解析している呼び出し側は見直すこと。
+  - outbox の `last_error` の出力は変わらない。公開の型は変えていない（`error` は `string` のまま）。
+  ⭕ 非破壊と数える（型は同じ。文字列の中身だけが変わる）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
