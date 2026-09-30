@@ -1008,13 +1008,14 @@ interface LLMProvider {
 インスタンスを渡す。
 
 ⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
-[ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)。上の 2026-09-27 追記のうち「長さ」を覆した）**:
+[ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)。上の 2026-09-27 追記のうち「長さ」と「有限性」を覆した）**:
 `packages/core` は、provider が返したベクトルの長さが `EmbeddingSpaceId.dimensions` と違えば、provider を問わず
 弾く。embed ジョブは `VectorStore.upsert` の前に確かめ、違えばジョブを失敗にして `embeddingStatus: 'failed'`
 にする（`InMemoryVectorStore` でも `'ready'` にならない）。`recall()` は provider が返した問い合わせベクトルの
 長さが違えば `embedding_provider_unavailable` に丸める（`score_not_comparable` ではない）。呼び出し側が
 `RecallQuery.vector` を直接渡した経路と、`VectorStore` を直接呼ぶ経路は、この検査を通らない（store の側の
-「比較不能」の扱いが残る）。確かめるのは**長さだけ**で、`NaN`/`Infinity` は上の 2026-09-27 追記のままである。
+「比較不能」の扱いが残る）。成分の有限性（`NaN`/`Infinity`）も同じ形で確かめ、崩れていれば embed ジョブは失敗、
+`recall()` は `embedding_provider_unavailable` になる（上の 2026-09-27 追記の「有限性」も覆った）。
 
 ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
 [ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）**:

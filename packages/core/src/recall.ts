@@ -1737,7 +1737,7 @@ export interface RecallQuery {
    *
    * ⚠ **2026-09-30 追記（ADR 0393）: 長さの検査を受けるのは、`text` から provider が作った
    * 問い合わせベクトルだけである。**この `vector` を呼び出し側が直接渡したときは core は長さを
-   * 確かめず、上の「比較不能」の扱い（`score_not_comparable`）のままである。provider が返した
+   * 確かめず（有限性も同じ）、上の「比較不能」の扱い（`score_not_comparable`）のままである。provider が返した
    * 問い合わせベクトルの長さが違うときは `embedding_provider_unavailable` になる（`RecallQuery.text`
    * の経路）。
    */

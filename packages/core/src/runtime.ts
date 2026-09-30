@@ -5281,6 +5281,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           `runtime.tick: embedding provider returned a vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
         );
       }
+      // 有限性も同じ形で確かめる（ADR 0393）。`NaN`/`Infinity` を upsert に渡さない。
+      const badIndex = vector.findIndex((x) => !Number.isFinite(x));
+      if (badIndex !== -1) {
+        throw new Error(
+          `runtime.tick: embedding provider returned a vector containing a non-finite value at index ${badIndex} (${String(vector[badIndex])})`,
+        );
+      }
       await deps.vectorStore.upsert(ctx, deps.embeddingProvider.space, memory.id, vector);
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {

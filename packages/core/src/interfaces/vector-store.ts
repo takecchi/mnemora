@@ -269,14 +269,12 @@ export interface VectorStore {
    * `InMemoryVectorStore` でも同じである。上の表の「長さが違う・空」の行は、**Runtime を通らずに
    * store を直接呼んだとき**の振る舞いを指す。
    *
-   * 確かめるのは**長さだけ**である。`NaN`・`Infinity` を含むベクトルは今も確かめずに渡すので、
-   * provider がそれを返すと、`@mnemora/postgres` ではジョブが失敗して `embeddingStatus: 'failed'`
-   * （`recall()` では `not_indexed`）になり、`InMemoryVectorStore` では `'ready'` のまま保存される
-   * （`recall()` では `score_not_comparable`）。同じ Memory の embed ジョブが2本走り、有限でない
-   * ベクトルを返す遅い方が後に終わると、`InMemoryVectorStore` では先に書かれた正しいベクトルが
-   * 上書きされる（`@mnemora/postgres` では遅い方が失敗し、正しいベクトルが残る）。
+   * **成分の有限性も同じ形で確かめる。**`NaN`・`Infinity`・`-Infinity` を含むベクトルも、`upsert` を呼ばずに
+   * ジョブを失敗にし、`embeddingStatus: 'failed'` にする（メッセージに位置と値を含む）。`InMemoryVectorStore` でも
+   * `'ready'` にならず、遅く終わるジョブが先に書かれた正しいベクトルを壊れたもので上書きすることも、Runtime を通る限り無い。
+   * 表の「`NaN`・`Infinity` を含む」の行も、**Runtime を通らずに store を直接呼んだとき**の振る舞いを指す。
    * **保証するのは、長さが `space.dimensions` と一致し、成分がすべて有限のベクトルを渡したときの
-   * 振る舞いだけである**（長さの一致は Runtime の embed ジョブが守り、有限性は守らない）。
+   * 振る舞いだけである**という store 側の約束は変わらない（守るのは Runtime の embed ジョブ）。
    *
    * ⚠ **`memoryId` がほかのテナントの Memory を指していても、テナントの一致は約束として
    * 検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。

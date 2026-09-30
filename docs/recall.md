@@ -156,14 +156,15 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 
 **⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
 [ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)）: provider が返した問い合わせベクトルの
-長さが `space.dimensions` と違うときは、`score_not_comparable` ではなく
+長さが `space.dimensions` と違うとき、または `NaN`/`Infinity` を含むときは、`score_not_comparable` ではなく
 `embedding_provider_unavailable` になる。**`RecallQuery.text` から provider に作らせた問い合わせ
 ベクトルは、`vectorStore` へ渡す前に core が長さを確かめ、違えば「ベクトルを返さなかった」と同じ
 `stage_skipped`（`candidate_generation`）に丸める。以前は provider によって理由の名前が違った
 （Postgres では `toComparableQuery` が全 0 に差し替えて `score_not_comparable`、`local-embedding` は
 throw するので `embedding_provider_unavailable`）。**呼び出し側が `RecallQuery.vector` を直接渡した
-ときは、この検査を通らない**——上の段落のとおり `score_not_comparable` のままである。確かめるのは長さだけで、
-`NaN`/`Infinity` を含む問い合わせベクトルは、今も store の側が比較不能として扱う。
+ときは、この検査を通らない**——上の段落のとおり `score_not_comparable` のままである。直接渡された
+ベクトルの有限性も検査せず、`NaN`/`Infinity` は今も store の側が比較不能として扱う。一方、provider が返した
+問い合わせベクトルが `NaN`/`Infinity` を含むときは、次元違いと同じく `embedding_provider_unavailable` になる。
 
 **Phase 1 の範囲(2026-09 追記、本 PR の決定)**: 上記は3チャンネル(ANN・タグ一致・直近取得)が並行して走る一般形を述べているが、roadmap.md 段階4の完了条件は「二段検索(段1: 索引が効く形のフィルタ + ANN、段2: over-fetch した候補への再スコア)」とのみ明記しており、タグ一致・直近取得を独立した候補生成チャンネルとして要求していない。**Phase 1 は ANN の1チャンネルのみを実装する。** タグは段2の再スコア(§7)における加点要素としてのみ参加し、それ自体で候補を拾い上げる経路にはしない。（⚠ 2026-09-29 追記: 参照先の roadmap.md §2「段階4」は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L94-L102) にある。）
 

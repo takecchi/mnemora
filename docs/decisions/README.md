@@ -409,6 +409,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0387](./0387-cjs-require-esm-smoke-in-default-ci.md) | README の「CommonJS からは require(esm) で読める」を、registry に出ない切り出し版で毎 PR の CI に入れる | 採用 (2026-09) |
 | [0389](./0389-recalls-digest-band-index.md) | `recalls.index_band` の目次帯に式の GIN 索引を足す——`purgeMemory` が `recalls` を全部読まないようにする | 採用 (2026-09) |
 | [0390](./0390-ann-unreached-aware-of-excluded-provenance-and-skip.md) | `ann_unreached` が `excludeProvenanceKinds` を分母から引く（除外行の索引済み件数を集約が返す）と、`scopeAggregate: "skip"` で到達を判定できないと名乗る | 採用 (2026-09) |
-| [0393](./0393-core-checks-embedding-dimension.md) | core が、provider の返す埋め込みの次元を `space.dimensions` と突き合わせる | 採用 (2026-09) |
+| [0393](./0393-core-checks-embedding-dimension.md) | core が、provider の返す埋め込みの次元（`space.dimensions`）と成分の有限性を確かめる | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

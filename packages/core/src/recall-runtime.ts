@@ -1048,6 +1048,13 @@ export async function runRecall(
             `embedding provider returned a query vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
           );
         }
+        // 有限性も同じ形で確かめる（ADR 0393）。次元違いと同じく `embedding_provider_unavailable` に丸める。
+        const badIndex = vector.findIndex((x) => !Number.isFinite(x));
+        if (badIndex !== -1) {
+          throw new Error(
+            `embedding provider returned a query vector containing a non-finite value at index ${badIndex} (${String(vector[badIndex])})`,
+          );
+        }
         queryVector = vector;
       } catch (err) {
         // 2026-09-29 追記（Issue #1200、ADR 0359）: abort による reject は

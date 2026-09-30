@@ -390,4 +390,4 @@ migration 適用時点で既に存在する空間は 0022 が作る**——名�
 渡す前に `embedding_provider_unavailable` に丸めるようになった。したがって、その経路で `toComparableQuery` が
 全 0 に差し替えて `score_not_comparable` と記録することは無くなった。**ここの決定（長さの違う `RecallQuery.vector`
 は比較不能）は変えていない**——`RecallQuery.vector` を呼び出し側が直接渡した経路と、`VectorStore.search`/`searchMany`
-の直接呼び出しは検査を通らず、2026-09-26 の契約のままである。`toComparableQuery` も残した（ADR 0393 決定4）。
+の直接呼び出しは検査を通らず、2026-09-26 の契約のままである。`toComparableQuery` も残した（ADR 0393 決定5）。
