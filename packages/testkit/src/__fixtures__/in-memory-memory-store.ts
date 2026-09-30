@@ -2652,11 +2652,13 @@ export class InMemoryMemoryStore implements MemoryStore {
         latestByPredicate.set(predicate, createdAtMs);
       }
     }
-    return [...latestByPredicate.entries()]
-      // 同着は predicate のコードポイント順（UTF-8 のバイト順と一致する。JS の `<` は UTF-16 コード単位順で食い違う）。
-      .sort((a, b) => b[1] - a[1] || Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])))
-      .slice(0, query.limit)
-      .map(([predicate]) => predicate);
+    return (
+      [...latestByPredicate.entries()]
+        // 同着は predicate のコードポイント順（UTF-8 のバイト順と一致する。JS の `<` は UTF-16 コード単位順で食い違う）。
+        .sort((a, b) => b[1] - a[1] || Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])))
+        .slice(0, query.limit)
+        .map(([predicate]) => predicate)
+    );
   }
 
   /**
