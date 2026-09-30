@@ -72,6 +72,11 @@ export interface RelationStore {
    * 「実在しない」と「別のテナントの記憶」は区別しない。DB 由来のエラー（外部キー違反・型変換エラー）は
    * 利用者へ漏らさない。冪等の扱い（上）は両端が確かめられた後の話で、既に同じ行が在っても、
    * 端が確かめられなければ投げる。
+   *
+   * **`kind` が {@link RelationKind} の列挙の外の値のときも、例外を投げ、行は書かない**（型を外れた値が実行時に
+   * 渡ったとき——JS の呼び出し側・型を `as` で曲げた呼び出し）。例外のメッセージは `unknown relation kind: <kind>`
+   * を含む。`kind` の検査は、両端の検査・DB への書き込みより前に行う。Postgres では `memory_relations.kind` の
+   * CHECK 違反を生のまま漏らさず、INSERT の前にこの例外で断る（in-memory 実装も同じ）。
    */
   link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   /**
@@ -89,6 +94,8 @@ export interface RelationStore {
    * - 返す順序は規定しない——呼び出し側（`Runtime`）が必要な順（例:
    *   `validFrom` の新しい順）に並べ替える。
    * - テナント分離: `ctx.tenantId` と異なるテナントの行は返さない。
+   * - 返した `Relation.createdAt`（`Date`）は呼び手のもの——呼び手が書き換えても、store の中の行は変わらない
+   *   （store は保存している `Date` を参照のまま返さず、複製して返す）。
    */
   listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
   /**
