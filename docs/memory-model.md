@@ -107,6 +107,10 @@ kind ごとに形が違う部分）は `provenance` jsonb 列にまとめる。�
 引き続きこの経路が無い。この上の段落・ADR 0257 が言う「探していない」という設計は、
 `Runtime.forget`/`Runtime.purge` の射程についての記述としては変わっていない。
 
+**⚠ 2026-10 追記（[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)）: Memory の `sourceObservationId` は、同じテナントの Observation を指す。**
+`createMemory` 系は、`sourceObservationId` が `ctx.tenantId` の observation でなければ、行を書かずに `observation not found for tenant: <id>` で投げる
+（以前は外部キーが `observations(id)` だけでテナントを見ず、別テナントの Observation を指す Memory が書けた。その行は指された側の `eraseTenant` を止めた）。
+
 ---
 
 ## 3. 三つ（四つ）の時計
@@ -407,6 +411,14 @@ FK すら持たないため、存在しない id を渡しても素通る。
 同じ `ctx` で存在を確かめた id からしか `contestedWithId`/`supersededById` を組み立てない
 ——到達するのは `MemoryStore`（`@mnemora/core` の公開 interface）を直接呼ぶ経路だけである。
 
+⚠ **2026-10 追記（[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)）: 上の節（#854）は、もう今の振る舞いではない。**
+`superseded_by_id`/`contested_with_id` に書く口は、参照先が `ctx.tenantId` の記憶でなければ、何も書かずに `memory not found for tenant: <id>` で投げる
+（`createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の入力、`updateStatus`・`updateStatusWithEvent`・
+`resolveContestedPair`・`resolveContestedGroup` の `supersededById`。`@mnemora/postgres`・`@mnemora/testkit` の fixture とも）。
+上の「それでも読み取り漏洩・書き込み漏洩には繋がらない」は、`eraseTenant` と `purgeExpiredRecalls` を見落としていた——別テナントの id を指す行が1本在ると、
+指された側の `eraseTenant` が `blocked_by_foreign_reference` で止まる（ADR 0439 の「文脈」）。読みの漏洩が無いことは今も変わらない。
+上の本文は、当時の記録として書き換えていない。
+
 ### ⚠ 2026-09-27 追記（Issue #1051）: ほかの書き込みの口も、参照の id のテナント一致を検査しない
 
 上の #854 の節と同じ形が、`superseded_by_id`/`contested_with_id` のほかにも在る。次の口は、ほかの
@@ -433,6 +445,12 @@ Postgres の外部キー（`observations(id)`/`recalls(id)`/`memories(id)`）は
 上の「読み取り漏洩・書き込み漏洩には繋がらない」は、`eraseTenant` を見落としていた——別テナントの記憶 id を指すイベント・埋め込みの行が1本在ると、
 指された記憶のテナントの `eraseTenant` が `blocked_by_foreign_reference` で止まる（ADR 0436 の「文脈」）。
 `MemoryStore.createMemory`・`recordUsage` の2行は変わらない。上の本文は、当時の記録として書き換えていない。
+
+⚠ **2026-10 追記（[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)）: 上の表の残り2行（`MemoryStore.createMemory` の `sourceObservationId`、`MemoryStore.recordUsage` の `recallId`・`memoryIds`）も、もう成り立たない。**
+`sourceObservationId` が `ctx.tenantId` の observation でなければ `observation not found for tenant: <id>`、`recallId` が `ctx.tenantId` の recall でなければ
+`recall not found for tenant: <id>`、`memoryIds` のどれかが `ctx.tenantId` の記憶でなければ `memory not found for tenant: <id>` で、行を書かずに投げる
+（`@mnemora/postgres` も fixture と同じ。1件でも違えば `recordUsage` は全体を書かない）。上の「2026-10 追記（ADR 0436）」の「変わらない」は、この追記が覆した。
+これで、表の4行はすべて「拒む」になった。既に書かれてしまった行は遡って消していない（見つける SQL は ADR 0439 の「引き受けた負債」）。
 
 ### ⚠ 2026-09 追記（Issue #371、(B) 第1段。[ADR 0185](./decisions/0185-contradiction-detection-path.md)/[ADR 0315](./decisions/0315-claim-key-does-not-touch-extraction-cassettes.md)）: `claimKey`（主張キー）を足した——**検出はまだ無い**
 
@@ -600,7 +618,7 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 mnemora は `usedMemoryIds` を、その recall（`recallId`）が返した集合とも、呼んだ `ctx.subjectId` とも
 突き合わせない。その recall が返していない記憶や、別の subject の記憶（subject なしの記憶を含む）を
 報告しても、同じテナントに在れば記録されて強化される（`@mnemora/postgres` と `@mnemora/testkit` の
-fixture の両方で確かめた）。ほかのテナントの id は強化の段で「memory not found」になる（Issue #1051）。
+fixture の両方で確かめた）。ほかのテナントの id は「not found for tenant」になる（Issue #1051。2026-10 の [ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md) 以降は、強化の段ではなく記録の段で拒まれ、何も書かれない）。
 ⟹ 上の「実際に使われたものだけを強化する」を守るのは**呼び出し側の報告**であり、
 `usedMemoryIds` を `recall()` の `memories` から選ぶのは呼び出し側の責務である。この約束は、強化の
 きっかけを「報告されたこと」に置いた上の文と食い違わない（報告を検証するとは書いていない）。

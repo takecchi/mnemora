@@ -754,6 +754,27 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
+   * ADR 0439: 別の行への参照は、`ctx` のテナントの行を指さなければならない。実在しない id と別テナントの id は区別しない
+   * （`PostgresMemoryStore` と同じ。message も `… not found for tenant: <id>` にそろえる）。`null`・`undefined` は「参照しない」
+   * （空文字は参照として扱い、どのテナントの行でもないので拒む）。
+   */
+  private assertOwnMemoryRef(ctx: Ctx, id: MemoryId | null | undefined): void {
+    if (id === null || id === undefined) return;
+    const memory = this.memories.get(id);
+    if (!memory || memory.tenantId !== ctx.tenantId) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+    }
+  }
+
+  private assertOwnObservationRef(ctx: Ctx, id: string | null | undefined): void {
+    if (id === null || id === undefined) return;
+    const observation = this.observations.get(id);
+    if (!observation || observation.tenantId !== ctx.tenantId) {
+      throw new Error(`InMemoryMemoryStore: observation not found for tenant: ${id}`);
+    }
+  }
+
+  /**
    * ADR 0054: 冪等キーの判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから
    * 出す（`createObservationIdempotent` と同じ理由）。
    */
@@ -774,8 +795,14 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // 書ける値かの検査は、冪等の衝突の判定より前に置く。Postgres の `INSERT ... ON CONFLICT DO NOTHING`
     // は、衝突を見る前に行の値を型に変換し CHECK 制約を当てるので、同じ鍵の既存の行が在っても拒む（実測）。
-    // 外部キー相当の検査（下の `resolveIdempotentCreate` の中）は、行を実際に書くときにだけ当たるので中に残す。
+    // 外部キー相当の検査は、ADR 0439 以降、次の参照先の検査（テナントも見る）に移した。
     assertStorableNewMemory(input);
+    // ADR 0439: 参照先は `ctx` のテナントの行であること（別テナントの行を指す行は書けない）。検査の順は
+    // `PostgresMemoryStore` と同じ（observation、superseded-by、contested-with）。`PostgresMemoryStore` は検査と書き込みを
+    // 1つの文にするので、冪等の衝突で既存の行を返す呼び出しでも検査は当たる——ここも衝突の判定より前に置く。
+    this.assertOwnObservationRef(ctx, input.sourceObservationId);
+    this.assertOwnMemoryRef(ctx, input.supersededById);
+    this.assertOwnMemoryRef(ctx, input.contestedWithId);
     const idemKey = this.extractionKey(
       ctx.tenantId,
       input.sourceObservationId ?? null,
@@ -795,21 +822,6 @@ export class InMemoryMemoryStore implements MemoryStore {
       // 書き込みが手元では黙って成功する」（ADR 0047）。**「存在」だけを見る——一対一等の
       // 整合までは踏み込まない（`contested_with_id` が双方向かどうかはここでは見ない）。**
       // 空文字も参照として扱う（`null`/`undefined` だけが「参照しない」）——Postgres は空文字を uuid として読めずに拒む。
-      if (input.sourceObservationId != null && !this.observations.has(input.sourceObservationId)) {
-        throw new Error(
-          `InMemoryMemoryStore: source observation not found: ${input.sourceObservationId}`,
-        );
-      }
-      if (input.supersededById != null && !this.memories.has(input.supersededById)) {
-        throw new Error(
-          `InMemoryMemoryStore: superseded-by memory not found: ${input.supersededById}`,
-        );
-      }
-      if (input.contestedWithId != null && !this.memories.has(input.contestedWithId)) {
-        throw new Error(
-          `InMemoryMemoryStore: contested-with memory not found: ${input.contestedWithId}`,
-        );
-      }
 
       const now = new Date();
       const memory: Memory = {
@@ -1201,15 +1213,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
+    // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
+    // ならない（`memories.superseded_by_id → memories(id)`）。ADR 0439: `ctx` のテナントの Memory であること。
+    // 検査の順は `PostgresMemoryStore` と同じ（対象の行、`supersededById`、`expectedStatus`）。
+    this.assertOwnMemoryRef(ctx, opts?.supersededById);
     if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
-    }
-    // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
-    // ならない（`memories.superseded_by_id → memories(id)`）。
-    if (opts?.supersededById !== undefined && !this.memories.has(opts.supersededById)) {
-      throw new Error(
-        `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
-      );
     }
     assertStorableMemoryColumn("status", status);
     memory.status = status;
@@ -1244,14 +1253,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
+    // 外部キー相当（ADR 0047）・ADR 0439: updateStatus と同じ理由・同じ検査・同じ順。
+    this.assertOwnMemoryRef(ctx, opts.supersededById);
     if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
-    }
-    // 外部キー相当（ADR 0047）: updateStatus と同じ理由・同じ検査。
-    if (opts.supersededById !== undefined && !this.memories.has(opts.supersededById)) {
-      throw new Error(
-        `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
-      );
     }
     assertStorableMemoryColumn("status", status);
     assertStorableMemoryEvent(event);
@@ -1861,13 +1866,13 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (memoryIds.length === 0) {
       return { insertedMemoryIds: [] };
     }
-    if (!this.recalls.has(recallId)) {
-      throw new Error(`InMemoryMemoryStore: recall not found: ${recallId}`);
+    // ADR 0439: recall も memory も `ctx` のテナントの行であること（`PostgresMemoryStore` と同じ順・同じ message）。
+    const recall = this.recalls.get(recallId);
+    if (!recall || recall.tenantId !== ctx.tenantId) {
+      throw new Error(`InMemoryMemoryStore: recall not found for tenant: ${recallId}`);
     }
     for (const memoryId of memoryIds) {
-      if (!this.memories.has(memoryId)) {
-        throw new Error(`InMemoryMemoryStore: memory not found: ${memoryId}`);
-      }
+      this.assertOwnMemoryRef(ctx, memoryId);
     }
 
     const insertedMemoryIds: MemoryId[] = [];
@@ -2694,6 +2699,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (secondMemory.status !== "contested" || secondMemory.contestedWithId !== first.id) {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
+    // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（`PostgresMemoryStore` は UPDATE の中で確かめる）。
+    this.assertOwnMemoryRef(ctx, first.supersededById);
+    this.assertOwnMemoryRef(ctx, second.supersededById);
 
     assertStorableMemoryColumn("status", first.status);
     assertStorableMemoryColumn("status", second.status);
@@ -2915,6 +2923,10 @@ export class InMemoryMemoryStore implements MemoryStore {
         // 再利用をやめ、専用のエラーを投げる。
         throw new ContestedGroupMembershipMismatchError(missing[0]!);
       }
+    }
+    // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること。
+    for (const m of members) {
+      this.assertOwnMemoryRef(ctx, m.supersededById);
     }
 
     for (const m of members) {

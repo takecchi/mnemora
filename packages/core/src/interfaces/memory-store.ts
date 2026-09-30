@@ -341,22 +341,17 @@ export function isClaimKeyIndexLimitError(value: unknown): value is ClaimKeyInde
  * 置く——判定基準が adapter ごとにずれることを防ぐ（ADR 0053 の
  * `isEmbeddingStatusRollback` と同じ形の判断）。
  *
- * ⚠ **2026-09-26 追記（Issue #854）: この判定は「対向が無いこと」だけを見る——**
- * **`contestedWithId` が指す先が呼び出し元と同じテナントの行かは見ない。**
- * `contestedWithId`/`supersededById` はどちらも、書き手が同じテナントの id を渡す
- * 前提で設計された欄であり、`MemoryStore` 自身はテナントの一致を検査しない
- * （Postgres の FK は `memories(id)` への単純参照で `tenant_id` を見ない
- * ——`packages/postgres/migrations/0001_init.sql` の `superseded_by_id`/
- * `contested_with_id` 列。`packages/testkit` の Fake は FK すら持たない）。
- * **読み取りへの実害は無い**——`MemoryStore` の他の全ての口は
- * `tenant_id = ctx.tenantId` で読み書きを絞るため、他テナントの id を指す
- * ダングリング参照が行き先テナント自身の行に残るだけで、その参照先の本文が
- * 別テナントから読めるようになることはない（`get`/`getMany` はテナントが
- * 違えば `null`/`[]` を返す）。`Runtime` を経由する呼び出し
- * （`markContested`/`resolveContested`/`consolidate`/`reflect`/`reextract`）は、
- * いずれも同じ `ctx` で存在を確かめた id からしか `contestedWithId`/
- * `supersededById` を組み立てない——到達するのは `MemoryStore`（`@mnemora/core`
- * の公開 interface）を直接呼ぶ経路だけである。
+ * ⚠ **この判定は「対向が無いこと」だけを見る——`contestedWithId` が指す先が呼び出し元と同じ
+ * テナントの行かは、この関数は見ない。**
+ *
+ * **[ADR 0439](../../../../docs/decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)
+ * 以降の今の振る舞い**: テナントの一致は、この関数ではなく**書き込み口が検査する**。`contestedWithId`・
+ * `supersededById`・`sourceObservationId`・`recordUsage` の `recallId`/`memoryIds` が `ctx.tenantId` の行を
+ * 指していなければ、どの口も何も書かずに `… not found for tenant: <id>` の `Error` を投げる
+ * （実在しない id・別テナントの id・uuid の形でない id を区別しない）。
+ * （Issue #854 が2026-09-26 に「検査しない。読み取りへの実害は無い」と書いて閉じた判断は、
+ * 別テナントを指す行が**相手のテナントの `eraseTenant` と `purgeExpiredRecalls` を止める**ことが実測されて
+ * 成り立たなくなった。経緯は ADR 0439。）
  */
 export function isContestedWithoutCompanion(
   status: MemoryStatus | undefined,
@@ -733,8 +728,12 @@ export interface MemoryStore {
    * が判定する）。対向を明示した作成（`contestedWithId` に既存 Memory の id を渡す）は
    * 引き続き許される。
    *
-   * ⚠ **`input.contestedWithId` が `ctx.tenantId` と同じテナントの行を指しているかは
-   * 検査しない**（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
+   * 🔴 [ADR 0439](../../../../docs/decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md):
+   * `input.sourceObservationId`（observation）・`input.supersededById`・`input.contestedWithId`（memory）は、
+   * `ctx.tenantId` の行を指していなければ、行を書かずに `observation not found for tenant: <id>`／
+   * `memory not found for tenant: <id>` の `Error` を投げる。実在しない id・別テナントの id・uuid の形でない id を
+   * 区別しない（以前は別テナントの行を指す行が書けた。Issue #854 の「今の振る舞い」の節は、履歴になった）。
+   * `null`・`undefined` は「参照しない」。冪等の衝突で既存の行を返す呼び出しにも検査は当たる。
    *
    * ⚠ **孤立サロゲート（`\uD800` 単体など、対をなさない UTF-16 サロゲートコード
    * ユニット）を含む文字列を渡したときの挙動は、adapter によって異なる。Postgres では、
@@ -785,8 +784,8 @@ export interface MemoryStore {
    * は、衝突を見る前に値を型に変換し CHECK 制約を当てるためで、testkit の fixture も同じく拒む（実測 2026-09-27）。
    *
    * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
-   * の制約を受ける。⚠ `input.contestedWithId` のテナント一致も `createMemory` と同じく
-   * 検査しない（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
+   * の制約を受ける。🔴 `input.sourceObservationId`・`supersededById`・`contestedWithId` のテナント一致も
+   * `createMemory` と同じく検査する（ADR 0439。`ctx.tenantId` の行でなければ何も書かずに `… not found for tenant`）。
    *
    * ⚠ `input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は `MemorySchema` を
    * 通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い `stated`/`inferred`・
@@ -923,9 +922,11 @@ export interface MemoryStore {
    * 余地なく単独の `contested` になる。`contested` を正しく書くには `markContestedPair`
    * （ADR 0134）を使うこと。
    *
-   * ⚠ **`opts.supersededById` が `ctx.tenantId` と同じテナントの行を指しているかは
-   * 検査しない**（`isContestedWithoutCompanion` の doc コメント、Issue #854。同じ注意は
-   * `contestedWithId` にも当たるが、この口には `contestedWithId` を渡す引数が無い）。
+   * 🔴 [ADR 0439](../../../../docs/decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md):
+   * `opts.supersededById` が `ctx.tenantId` の記憶を指していなければ、何も書かずに
+   * `memory not found for tenant: <supersededById>` の `Error` を投げる（実在しない・別テナント・uuid の形でない、を区別しない）。
+   * 対象の `id` が無いとき、`supersededById` が無いとき、`expectedStatus` が違うとき（{@link MemoryStatusConflictError}）は、
+   * この順で判定する。
    */
   updateStatus(
     ctx: Ctx,
@@ -958,8 +959,8 @@ export interface MemoryStore {
    *   「存在しない」の一種として扱う（`updateStatus` の doc コメント・
    *   `packages/postgres/src/mapping.ts` の `isUuidLike` の doc コメント参照）。
    *
-   * ⚠ **`opts.supersededById` のテナント一致は `updateStatus` と同じく検査しない**
-   * （`isContestedWithoutCompanion` の doc コメント、Issue #854）。
+   * 🔴 `opts.supersededById` のテナント一致は `updateStatus` と同じく検査する（ADR 0439。`ctx.tenantId` の記憶でなければ、
+   * 状態もイベントも書かずに `memory not found for tenant`）。
    *
    * 🔴 **買わない不変条件**（呼び出し側の `reextract` ループが対象1件ごとにこのメソッドを
    * 呼ぶ場合）: 「複数回の呼び出しをまとめて全部成功させるか全部失敗させるか」は買わない。
@@ -1158,14 +1159,16 @@ export interface MemoryStore {
    * D9: 使用報告を記録する。`(recall_id, memory_id)` の挿入が実際に起きたものだけを
    * `insertedMemoryIds` として返す（再送は空配列になりうる）。
    *
-   * ⚠ **テナントの一致は検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
-   * `recallId`・`memoryIds` にほかのテナントの id を渡しても、`@mnemora/postgres` と
-   * `@mnemora/testkit` の `InMemoryMemoryStore` のどちらも受け付け、`insertedMemoryIds` に
-   * 入れる。ほかのテナントの行は変わらず、本文も読めない。`Runtime` の
-   * `observe({ kind: "memory_usage" })` は、口が在れば {@link MemoryStore.recordUsageAndReinforce}
-   * を通り、強化の段で「memory not found」になって記録ごと巻き戻る（口が無い adapter では
-   * `recordUsage` → `reinforce` の2段になり、記録だけが残る）。
-   * `docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   * 🔴 [ADR 0439](../../../../docs/decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md):
+   * **`recallId` が `ctx.tenantId` の recall でなければ `recall not found for tenant: <id>`、`memoryIds` のどれかが
+   * `ctx.tenantId` の記憶でなければ `memory not found for tenant: <id>` の `Error` を投げ、1件も書かない**
+   * （1件でも違えば全体を書かない。実在しない id・別テナントの id・uuid の形でない id を区別しない。`memoryIds` が
+   * 空配列のときは、何も検査せず空の結果を返す）。
+   * （[Issue #1051](https://github.com/takecchi/mnemora/issues/1051) は、以前の「テナントの一致は検査しない」を
+   * 「ほかのテナントの行は変わらず、本文も読めない」として閉じたが、別テナントを指す `recall_usages` の行は相手の
+   * `purgeExpiredRecalls`（外部キー違反）と `eraseTenant` を止めた。`docs/memory-model.md` §5 の 2026-09-27 追記は、
+   * 当時の記録として残してあり、ADR 0439 の追記が「もう今の振る舞いではない」と書いている。）
+   * `Runtime` の `observe({ kind: "memory_usage" })` は、同じ `ctx` で確かめた id しか渡さない。
    */
   recordUsage(
     ctx: Ctx,
@@ -1189,6 +1192,8 @@ export interface MemoryStore {
    * 契約: 強化の規律（減衰の起点を巻き戻さない・活動時計・`status` を見ない・
    * `memory_events` を書かない）は `reinforceMany` の doc コメントのとおり。
    * **例外を投げたときは、使用の記録も強化も1件も残さない。**
+   * `recallId`・`memoryIds` のテナント一致の検査は `recordUsage` と同じ（ADR 0439。`ctx.tenantId` の行でなければ
+   * 何も書かず、強化もしない）。
    *
    * 🔴 **任意メソッドである**（`reinforceMany?` と同じ理由——必須にすると第三者の
    * adapter を壊す）。この口を持たない adapter では `runtime.ts` の
@@ -1406,9 +1411,9 @@ export interface MemoryStore {
    * `news[i].input` にも `createMemory` と同じ制約が掛かる——`status === 'contested'` かつ
    * `contestedWithId` が `null`/`undefined` の要素が1件でもあれば、`news`/`supersede`
    * どちらの書き込みも一切行わずに {@link ContestedWithoutCompanionError} を投げる。
-   * ⚠ `news[i].input.contestedWithId` が `ctx.tenantId` と同じテナントの行を指しているかは
-   * `createMemory` と同じく検査しない（`isContestedWithoutCompanion` の doc コメント、
-   * Issue #854）。`supersede[].supersededByIndex` は `news` への索引であり
+   * 🔴 `news[i].input` の `sourceObservationId`・`supersededById`・`contestedWithId` のテナント一致も
+   * `createMemory` と同じく検査する（ADR 0439。`ctx.tenantId` の行でなければ、`news` も `supersede` も書かずに
+   * `… not found for tenant`）。`supersede[].supersededByIndex` は `news` への索引であり
    * `MemoryId` を直接受け取らないため、この注意は当たらない（上の doc 参照）。
    *
    * ⚠ `news[i].input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は
@@ -1666,8 +1671,9 @@ export interface MemoryStore {
    * - **`recall_usages` は同一トランザクションで先に消える。**`recall_usages.recall_id` は
    *   `recalls(id)` への外部キー（`ON DELETE` 指定なし）なので、親だけを消せない。
    *   ⟹ **消えた recall の使用記録（どの記憶を使ったと報告されたか）も消える。**
-   *   消した後にその `recallId` で {@link MemoryStore.recordUsage} を呼ぶと、外部キー違反
-   *   （`@mnemora/postgres`）／同じ検査（`recall not found`、testkit の InMemory 実装）で例外になる。
+   *   消した後にその `recallId` で {@link MemoryStore.recordUsage} を呼ぶと、`recall not found for tenant` の
+   *   `Error` になる（ADR 0439。`@mnemora/postgres` も testkit の InMemory 実装も同じ。以前の Postgres は
+   *   外部キー違反）。
    * - `memory_events.meta` に `recallId` の文字列が載っていても、外部キーではないので残る。
    * - **`recalls.query` の中身（約束の範囲）には触れていない**——行ごと消えるだけで、
    *   「どこまでを消すと約束するか」はここでは決めていない（ADR 0404）。
@@ -2035,11 +2041,11 @@ export interface MemoryStore {
    *   `expectedStatus` は常に `'contested'`。`markContestedPair` と同じく**この口も
    *   全部成功するか全部失敗するかのどちらかである**——部分成功は無い（対向ペアは本質的
    *   に結合しているため）。
-   * ⚠ **`first.supersededById`/`second.supersededById` が `ctx.tenantId` と同じテナントの
-   * 行を指しているかは検査しない**（`isContestedWithoutCompanion` の doc コメント、
-   * Issue #854）。`Runtime.resolveContested` は勝者の id（`first.id`/`second.id` のどちらか、
-   * 同じ `ctx` で存在を確かめた側）をそのまま渡すため、この口を `Runtime` 経由で使う限り
-   * 実際には他テナントを指す値は渡らない。
+   * 🔴 **`first.supersededById`/`second.supersededById` が `ctx.tenantId` の記憶を指していなければ、
+   * 何も書かずに `memory not found for tenant: <id>` の `Error` を投げる**（ADR 0439。両側とも全部成功するか
+   * 全部失敗するかのどちらかのまま。CAS の判定（{@link MemoryStatusConflictError}）のあとに当たる）。
+   * `Runtime.resolveContested` は勝者の id（`first.id`/`second.id` のどちらか、同じ `ctx` で存在を確かめた側）を
+   * そのまま渡す。
    *
    * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う: 両側とも
    *   `contestedWithId` を `null` にし、`first.status`/`second.status`（呼び出し側が
@@ -2216,6 +2222,10 @@ export interface MemoryStore {
    * - 存在しない id は「memory not found」の `Error`。それ以外の CAS 違反は
    *   {@link MemoryStatusConflictError}（`expectedStatus` は常に `'contested'`）。
    *   全部成功するか全部失敗するかのどちらか。
+   * - 🔴 **`members[].supersededById` が `ctx.tenantId` の記憶を指していなければ、何も書かずに
+   *   `memory not found for tenant: <id>` の `Error` を投げる**（[ADR 0439](../../../../docs/decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)。
+   *   実在しない・別テナント・uuid の形でない、を区別しない。以前は検査せず、別テナントの記憶を指す値が書けた。
+   *   メンバー・到達集合の判定（上の CAS）のあとに当たる）。
    * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う:
    *   1. 各メンバーを `members[].status`（`'active'` か `'superseded'`）へ更新し、
    *      `'superseded'` を指定した側は `members[].supersededById` も書く。
@@ -2702,6 +2712,9 @@ export interface MemoryStore {
    *   埋め込み空間の表のように、このテナントの行を消すと巻き込まれて消える行も含む）、
    *   `{ kind: "blocked_by_foreign_reference"; count }` を返し、1行も消さない**
    *   （他テナントの行は一度も書き換えない）。`count` は参照している他テナントの行数。
+   *   ⭐ ADR 0439 以降、`MemoryStore` の書き込み口は別テナントの行を指す参照（`superseded_by_id`・`contested_with_id`・
+   *   `source_observation_id`・`recall_usages`）を書かないので、この結果は、ADR 0439 より前に書かれた行が残っているときに
+   *   だけ起こりうる（見つける SQL は ADR 0439 の「引き受けた負債」）。
    *   **この検査・削除は1つのトランザクションの中で行う**——検査で見つからなければ、その
    *   同じトランザクションでそのまま削除を進める。`eraseTenant`（独立関数）はこの口を
    *   4つの port の中で最初に呼ぶので、これが返ったときほかの port にはまだ触れていない

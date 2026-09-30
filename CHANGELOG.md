@@ -286,6 +286,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目50。DB マイグレーションは無い。
   - 【確かめていないこと】他に識別子を入力に持つ口が無いこと（機械では確かめていない）。
 
+- **`MemoryStore` の書き込み口が、別の行を指す参照（`recordUsage` の `recallId`・`memoryIds`、`createMemory` 系の `sourceObservationId`・`contestedWithId`・`supersededById`、`updateStatus`・`updateStatusWithEvent`・`resolveContestedPair`・`resolveContestedGroup` の `supersededById`）の参照先が `ctx` のテナントの行でないとき、行を書かずに例外を投げるようになった。適合テストに、これを検査する `it` が増えた——自前の `MemoryStore` を適合テストに当てている人へ**（[ADR 0439](./docs/decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)、`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）。クローン miku の委譲先の担い手が書いた（決めたのはクローンで、オーナーの判断ではない。[ADR 0398](./docs/decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md)・[ADR 0436](./docs/decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md) と同じ作法）。
+
+  これまで `PostgresMemoryStore` は、これらの参照先が `ctx.tenantId` の行かを確かめず、別テナントの id を指す行を `ctx.tenantId` の行として書いた（外部キーは `recalls(id)`・`memories(id)`・`observations(id)` だけでテナントを含まない）。
+  その行は、指された側のテナントの `eraseTenant` を `blocked_by_foreign_reference` で止め、`recall_usages` が別テナントの recall を指す行は、指された側の `purgeExpiredRecalls` を生の外部キー違反（SQLSTATE 23503）で落とした（実測は ADR 0439）。Issue #854・#1051 は「読み取りの漏洩は無い」として検査を足さずに閉じたが、この害を見落としていた。
+  今は、書く前に確かめ、実在しない・別のテナントの行・uuid の形でない id は、**何も書かずに** `PostgresMemoryStore: <recall|memory|observation> not found for tenant: <id>` の `Error` を投げる（区別しない）。Postgres は確かめと書き込みを1つの SQL 文にしている。
+  `recordUsage` は1件でも違えば全体を書かない。`createMemoriesWithOutboxAndEvents` は、落ちた候補を `dropped` に積む（既存の扱い）。testkit の `InMemoryMemoryStore`・core の `FakeMemoryStore` もテナントを見る形に揃えた（message は `… not found for tenant: <id>`）。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた書き込み（別テナントの行を指すもの）が、新しく例外になる**（実在しない uuid・uuid でない id は以前も落ちたが、外部キー違反・`Failed query` の生の DB エラーから、明示の例外に変わる）。項目21・23・24・27・34・49 と同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。加えて、適合テストの判定が厳しくなる変更（項目36・49 と同じ）でもある。
+  - **誰が影響を受けるか**: `MemoryStore` の上の口を直接呼び、別テナントの id を渡している利用者。`Runtime` は同じ `ctx` で確かめた id しか渡さないので、`observe()`・`recall()`・`tick()`・`consolidate()` などの挙動は変わらない。自前の `MemoryStore` を `describeMemoryStoreConformance` に当てている利用者は、新しい `it` が落ちうる（`prepareRecallId(ctx)` が、渡した `ctx` のテナントの recall を、`createStore()` の store から見える形で返すこと）。
+  - **変えなかったこと**: DB のスキーマ・複合外部キー（理由は ADR 0439）。**既に書かれた別テナントを指す行は消さない**（データの書き換えはオーナーの領分）。適合テストの `restoreSupersededBy`・`previewRestoreSupersededBy` の別テナントの `it` は、別テナントの anchor を指す行を API で作れなくなったので、仕込みを変えた（生 SQL の歯は `@mnemora/postgres` の個別のテストに移した）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目51。**DB マイグレーションは無い。**修正前に書かれた、別テナントを指す行（`recall_usages`・`memories.source_observation_id`・`contested_with_id`・`superseded_by_id`）が在るかを調べる SQL は ADR 0439 に在る（読み取りだけ）。
+  - 【確かめていないこと】`memory_events` への INSERT 11箇所（ADR 0436 から変わらず、1つずつは確かめていない）。検査と書き込みの間に並行して参照先が消えた場合の、外部キー違反の生のエラーの見え方。`FakeMemoryStore`（core）の検査を縛る歯（適合テストに当てられていない）。手元以外の環境・既存データでの食い違う行の有無。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。

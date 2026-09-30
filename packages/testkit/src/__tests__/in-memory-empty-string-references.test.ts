@@ -16,17 +16,17 @@ describe("testkit の fixture は空文字の参照・冪等の鍵を「値が�
     [
       "sourceObservationId",
       { sourceObservationId: "" },
-      /^InMemoryMemoryStore: source observation not found: $/,
+      /^InMemoryMemoryStore: observation not found for tenant: $/,
     ],
     [
       "supersededById",
       { status: "superseded" as const, supersededById: "" },
-      /^InMemoryMemoryStore: superseded-by memory not found: $/,
+      /^InMemoryMemoryStore: memory not found for tenant: $/,
     ],
     [
       "contestedWithId",
       { status: "contested" as const, contestedWithId: "" },
-      /^InMemoryMemoryStore: contested-with memory not found: $/,
+      /^InMemoryMemoryStore: memory not found for tenant: $/,
     ],
   ])("createMemory: 空文字の %s を拒み、何も書かない", async (field, override, message) => {
     const store = new InMemoryMemoryStore();
