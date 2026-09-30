@@ -1729,6 +1729,8 @@ export interface MemoryStore {
    *   （ADR 0031 が `updateStatusWithEvent` で確立した「更新とイベントは同値」の
    *   不変条件を、この掃引にも適用する）。
    * - 対象が0件なら `{ archived: [], reachedLimit: false }` を返す（例外を投げない）。
+   *   `opts.limit` が `0` のときも（対象が在っても）`{ archived: [], reachedLimit: false }`
+   *   ——`limit: 0` は断らず、何も掃かない（ADR 0432 AL-4。`ArchiveDecayedResult.reachedLimit`）。
    * - **一度 `archived` になった行は `status = 'active'` の条件に合わなくなるため、
    *   同じ範囲を繰り返し掃引しても同じ行が二度 archived になることはない**
    *   （呼び出し自体が特別にべき等性を持つのではなく、対象条件が書き込みの結果として
@@ -2855,7 +2857,7 @@ export interface ArchiveDecayedResult {
   archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }>;
   /**
    * 🔴 **`true` は「`limit` 件ちょうど返した＝まだ在るかもしれない」を意味する。**
-   * `archived.length === opts.limit` のときに `true`——`decay_floor_at <= now` を満たす
+   * `opts.limit > 0 && archived.length === opts.limit` のときに `true`——`decay_floor_at <= now` を満たす
    * `active` な Memory が、まだこの呼び出しの範囲の外に残っている可能性がある
    * （`countKind` の `'unknown'`/`'lower_bound'` と同じ理由づけ。`docs/recall.md` §4
    * 「推定値を実測値の顔で出さない」）。
@@ -2866,6 +2868,13 @@ export interface ArchiveDecayedResult {
    * 衝突する。「もう無い」（`false`）と「分からない」（`true`）を区別するところまでが
    * この口の契約であり、`ann_truncated`/`ann_unreached`（`docs/recall.md` §4）が
    * 守っている規律と同じ形である。
+   *
+   * **`limit: 0` のときは、対象が何件在っても `false`**（ADR 0432 AL-4）。`limit: 0` は
+   * 断らない——何も掃かず `{ archived: [], reachedLimit: false }` を返す。0件を「`limit` 件
+   * ちょうど返した」と読むと、掃くつもりの無い呼び出しが「まだ在るかもしれない」と名乗って
+   * しまう（旧実装は `archived.length === opts.limit` で、`limit: 0` なら対象が0件でも
+   * `true` だった）。⚠ 裏返しとして、`limit: 0` の `false` は「もう無い」とは読めない
+   * ——対象が残っていても `false` である。残りを知りたければ `limit` を1以上にして呼ぶこと。
    */
   reachedLimit: boolean;
 }

@@ -2360,7 +2360,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
         (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
     );
-    return { archived, reachedLimit: archived.length === opts.limit };
+    return { archived, reachedLimit: opts.limit > 0 && archived.length === opts.limit };
   }
 
   /**

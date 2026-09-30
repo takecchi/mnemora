@@ -2816,7 +2816,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const r = row as unknown as { id: string; decay_floor_at: string };
       return { memoryId: r.id as MemoryId, decayFloorAt: parsePgTimestamp(r.decay_floor_at) };
     });
-    return { archived, reachedLimit: archived.length === opts.limit };
+    return { archived, reachedLimit: opts.limit > 0 && archived.length === opts.limit };
   }
 
   /**
