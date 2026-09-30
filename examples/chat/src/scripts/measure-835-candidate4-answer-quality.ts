@@ -38,7 +38,7 @@ import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette, saveCassette } from ".
  * 集計側の仕事。このスクリプト自体は生データを出すだけで判定はしない）。
  *
  * 使い方: `DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_CANDIDATE4_CONDITION=with-tag|no-tag \
- *   MNEMORA_RECORD_CASSETTE_PATH=... tsx examples/chat/src/scripts/measure-835-candidate4-answer-quality.ts`
+ *   MNEMORA_RECORD_CASSETTE_PATH=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-835-candidate4-answer-quality.ts`
  */
 
 const TARGET_CASE_IDS = [
@@ -73,7 +73,7 @@ function claimKeyOptionsFor(condition: Condition): ClaimKeyOptions {
 const usage = () => {
   console.error(
     "使い方: DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_CANDIDATE4_CONDITION=with-tag|no-tag " +
-      "MNEMORA_RECORD_CASSETTE_PATH=... tsx examples/chat/src/scripts/measure-835-candidate4-answer-quality.ts",
+      "MNEMORA_RECORD_CASSETTE_PATH=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-835-candidate4-answer-quality.ts",
   );
 };
 

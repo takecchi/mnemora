@@ -61,7 +61,7 @@ export function loadOpenAiArmCassette(path: string): Cassette {
     throw new Error(
       `openai arm cassette が無い: ${path}\n` +
         "`OPENAI_API_KEY`/`DATABASE_URL` を設定して " +
-        "`tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts` を先に実行すること。",
+        "`pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts` を先に実行すること。",
     );
   }
   const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));

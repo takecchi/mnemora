@@ -79,7 +79,7 @@ import { ANSWER_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io
 const usage = () => {
   console.error(
     "使い方: DATABASE_URL=... OPENAI_API_KEY=... " +
-      "tsx examples/chat/src/scripts/record-answer-retention-mutation.ts",
+      "pnpm --filter @mnemora/example-chat exec tsx src/scripts/record-answer-retention-mutation.ts",
   );
 };
 

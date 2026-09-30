@@ -35,7 +35,7 @@ import { tryGitRevParseHead } from "../git-info.js";
  * ## 使い方
  *
  * ```
- * tsx examples/chat/src/scripts/openai-fp-ceiling-kofn-analysis.ts
+ * pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-fp-ceiling-kofn-analysis.ts
  * ```
  *
  * ⛔ DB も実 API も呼ばない——既存 JSON を読むだけの純粋な後処理。
