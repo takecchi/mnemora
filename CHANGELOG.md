@@ -336,6 +336,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`runMigrations`（と `mnemora-postgres-migrate`）が、台帳から行が欠けたまま番号の小さい migration が当たり直されるとき、警告を出すようにした（穴探し6巡目 S-1、[ADR 0425](./docs/decisions/0425-migrate-warns-on-ledger-drift.md)）。**台帳から `0011` の行だけが欠けた DB で流すと、0011 が単独で当たり直り、0018 が足した `'unsuperseded'` が `memory_events_kind_check` から黙って消えていた。未適用のファイルのうち台帳の最大の番号より小さいものが在れば、`console.warn`（`[@mnemora/postgres] migrate: …`）で名指しして続行する。止めない・適用の順序と中身は変えない（そのファイルも当てる）。公開の型・オプションは変わらない。
+- **`runMigrations`（と `mnemora-postgres-migrate`）が、台帳に手元の `migrations/` に無い名前があるとき、警告を出すようにした（穴探し6巡目 S-3、[ADR 0425](./docs/decisions/0425-migrate-warns-on-ledger-drift.md)）。**新しい版で上げた DB に古い版から流すと、何も言わずに「すべて適用済み」になっていた。手元の版が DB より古い可能性を警告する。止めない。公開の型・オプションは変わらない。
 - **`runtime.observe({ extract: "sync" })` が、LLM を待つ間に tick に同じ extract ジョブを取られる穴を塞いだ**（[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。以前は、sync の observe が積んだジョブは「すぐ claim できる」状態で、observe が LLM を待つ間に tick が claim できた。すると LLM が2回呼ばれ、内容の違う記憶が2件とも active で残り、observe 自身は `complete` が `OutboxLeaseConflictError` で負けて、書き込み済みなのに失敗し `memoryIds` が返らなかった（Postgres と InMemory の両方で再現）。
   - **直し方**: sync の observe は、extract ジョブを **observe が claim 済み**（`claimed_at` = now・`claimed_by` = `"runtime.observe:sync"`・`attempts` 1）の状態で積む。リースの内側では tick は取らない。observe が LLM の途中で死んだときは、リース切れの後に tick が拾う（transactional outbox の意味は保たれる）。deferred は今までどおり。
   - **LLM がリースより長くかかり tick に取り直されたとき**: observe は `OutboxLeaseConflictError` だけを握り、書き込み済みの結果（`memoryIds`）を返す。**この窓での二重抽出は塞いでいない**（`leaseMs` を LLM の最長時間より長くとる運用で狭める。ADR 0407 の「引き受けた負債」）。
