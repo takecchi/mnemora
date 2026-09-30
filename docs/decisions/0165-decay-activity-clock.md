@@ -629,3 +629,13 @@
 その設計判断自体はオーナーの判断ではない——ADR 0353 参照。）
 
 ⚠ 2026-09-29 追記: `docs/roadmap.md` の §7（§7.4 ほか）は 2026-09-29 に削除した（#762）。当時の本文は [635c93d](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md) を参照。
+
+## 追記（2026-09-30、[ADR 0395](./0395-create-recall-activity-clock-single-statement.md)）: 負債1（ホット行）を測った——案1（1文にする）を入れたが、効果は実測のノイズに埋もれて示せていない
+
+上の本文は書き換えていない。引き受けた負債1 が「測れる」と書いていたホット行について、ADR 0395 が測った。
+
+- 同じテナントへの同時 `createRecall` は、`tenant_activity`（`activityCounting: "subject"` なら `tenant_subject_activity`）の
+  UPSERT の行ロックで直列になる（待ちは `Lock/transactionid`・`Lock/tuple`・`LWLock/LockManager`）。
+- `createRecall` の `recalls` INSERT とカウンタの UPSERT を1つの SQL 文にした（意味は変えていない）。
+  **共有器での測定では、効果はノイズ（±20〜30%）に埋もれて示せていない**（「速くなった」とは言わない）。ホット行そのものは残っている。
+- カウンタを複数行に分ける案は、「いま」のずれの分析とともに ADR 0395 に書いた（採らないと決めた。専用の器で並列度16以上の効果が出たら見直す）。

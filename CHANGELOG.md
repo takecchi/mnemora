@@ -186,6 +186,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`PostgresMemoryStore.createRecall` が、活動時計を進めるとき（`decay_clock != 'wall'`）、`recalls` の INSERT とカウンタ（`tenant_activity`／`tenant_subject_activity`）の UPSERT を1つの SQL 文で撃つようになった**（[ADR 0395](./docs/decisions/0395-create-recall-activity-clock-single-statement.md)、[ADR 0165](./docs/decisions/0165-decay-activity-clock.md) 負債1）。意味（1 recall = 1 単位、recalls の行とカウンタが同じ原子性）・返り値・公開 API・スキーマは変わらない。狙いは、同じテナントへの同時 createRecall がカウンタの行で直列になる時間のうち、クライアントとの往復1回分を減らすこと。**「速くなった」とは言わない**——共有器での実測（各点3回・前後交互）は、器のノイズ（±20〜30%）に埋もれて効果を示せていない（subject 単位の行は3つの並列度すべてで中央値が後の側、activity_T の並列度16・32 は同等以下）。ホット行そのものは残る。カウンタを16行に分ける案は採らなかった。
+
 - **活動時計（`decay_clock` が `'activity'`/`'either'`）で、新しく作る記憶・強化する記憶の起点（`decayBaseSeq`/`decayFloorSeq`）を、`ctx.subjectId` ではなく、その記憶自身の subject の `T + S_x` で書くようになった**（[ADR 0394](./docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)、[ADR 0353](./docs/decisions/0353-activity-counting-per-call.md) 引き受けた負債1、[Issue #338](https://github.com/takecchi/mnemora/issues/338)）
   - **効くのは `tenant_subject_activity` に行があるテナント（`activityCounting: "subject"` を使ったテナント）だけ。**それ以外（`'wall'` のテナント、subject カウンタを一度も使っていないテナント）の書き込みは、値も SQL も変わらない。
   - 直った経路: 抽出（同期・deferred の `tick`・`reextract`。ctx と候補・観測の subject がずれるとき、`tick` の ctx に subject が無いとき）、consolidate・reflect、使用報告の強化、`restoreArchived`・`restoreSuperseded`。以前は、ずれると読む側（行ごとに自身の `S_x` を足す）より小さい起点が書かれ、作成・強化の直後から忘却ゲートの下にいることがあった。
