@@ -2480,14 +2480,15 @@ export interface MemoryStore {
    *
    * **消す表**（Issue #1207 の実測が数え上げた、テナント消去で残っていた表）: `memories`・
    * `observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・
-   * `memory_labels`・`tenant_activity`・`tenant_subject_activity`。**`DB には消去の記録を
+   * `memory_labels`・`memory_relations`・`tenant_activity`・`tenant_subject_activity`
+   * （計10表。`@mnemora/postgres` の `eraseTenantBody` が消す表と同じ）。**`DB には消去の記録を
    * 何も残さない**——`memory_events` に `events_purged` 相当の行を積んだりしない
    * （ADR 0115 決定4「`events_purged` は掃除の対象外」は保持期間の掃除だけの話であり、
    * テナント消去はこの行自体も消す。ADR 0383 参照）。呼び出し側に返すのは戻り値だけである。
    *
    * 契約:
    * - `opts.limit` 個を目安に、子→親の順（`memory_labels`・`recall_usages`・
-   *   `memory_events` → `memories` → `observations` → `recalls` → `labels` →
+   *   `memory_events`・`memory_relations` → `memories` → `observations` → `recalls` → `labels` →
    *   `tenant_activity`・`tenant_subject_activity`）で削除する。**1回の呼び出しで
    *   全部消し切れるとは限らない**——`result.reachedLimit === true` なら、呼び出し側は
    *   同じ `opts`（`limit` はそのまま）で呼び直すこと。**この口は何度呼んでも安全**
@@ -2518,8 +2519,8 @@ export interface MemoryStore {
    * - `opts.dryRun === true` のときは、削除もこの自己参照の書き換えも一切行わず、
    *   削除していたら消えていたであろう件数だけを返す（`purgeExpiredEventsByRetention`
    *   の `dryRun` と同じ意味）。
-   * - 戻り値の `deleted` は、この呼び出しで実際に削除した行数の合計（対象8表すべての
-   *   合計。`dryRun` のときはプレビューの合計）。
+   * - 戻り値の `deleted` は、この呼び出しで実際に削除した行数の合計（上の10表すべての
+   *   行数の合計であり、`memories` だけの行数ではない。`dryRun` のときはプレビューの合計）。
    *
    * ⚠ **`recalls` の保持方針は、この ADR では決めていない**（[ADR 0290](../../../../docs/decisions/0290-activity-seq-read-path-documented-not-implemented.md)
    * が「`recalls` の保持方針」を先の話として残したまま——この口は「テナントを丸ごと
