@@ -2719,8 +2719,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * claim_key_predicate)`、`migrations/0021_memories_claim_key.sql`）の先頭2列
    * （`tenant_id`, `subject_id`）で絞り込み、`status`/`claim_key_predicate IS NOT NULL`
    * を追加の `WHERE` で絞ったうえで `GROUP BY claim_key_predicate` して
-   * `MAX(created_at)` で新しい順に並べる。**新しい索引は足さない**——ADR 0329 決定4
-   * 参照（この口はテナントの1 subjectId に閉じた、既に小さい行数を前提にしている）。
+   * `MAX(created_at)` で新しい順に並べる。当初は「新しい索引は足さない」（ADR 0329 決定4）だったが、**専用の部分索引
+   * `idx_memories_claim_predicates`（`migrations/0029_memories_claim_predicates_index.sql`）を足した**
+   * ——ADR 0329 の 2026-09-30 追記。SQL は変えていない。
    *
    * `subject_id` は `findActiveByClaimKey` と同じく NULL 同士も一致として扱う
    * （{@link subjectIdMatches}）。
