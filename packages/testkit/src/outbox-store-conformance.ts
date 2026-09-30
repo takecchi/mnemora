@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  OutboxLeaseConflictError,
+  isOutboxLeaseConflictError,
   type Ctx,
   type OutboxJobKind,
   type OutboxJobRecord,
+  type OutboxLeaseConflictError,
   type OutboxStore,
 } from "@mnemora/core";
+import { expectStoreError } from "./error-guards.js";
 
 /** `OutboxStoreConformanceOptions.seedJob` に渡る、作ってほしい outbox の行。 */
 export interface SeedOutboxJobInput {
@@ -536,7 +538,7 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       const wrongAttempts = claimedJob.attempts - 1;
 
       const error = await store.complete(ctx, job.id, wrongAttempts).catch((err: unknown) => err);
-      expect(error).toBeInstanceOf(OutboxLeaseConflictError);
+      expectStoreError(error, isOutboxLeaseConflictError, "OutboxLeaseConflictError");
       const conflict = error as OutboxLeaseConflictError;
       expect(conflict.jobId).toBe(job.id);
       expect(conflict.expectedAttempts).toBe(wrongAttempts);
@@ -571,7 +573,7 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       const error = await store
         .fail(ctx, job.id, "boom", wrongAttempts)
         .catch((err: unknown) => err);
-      expect(error).toBeInstanceOf(OutboxLeaseConflictError);
+      expectStoreError(error, isOutboxLeaseConflictError, "OutboxLeaseConflictError");
       const conflict = error as OutboxLeaseConflictError;
       expect(conflict.jobId).toBe(job.id);
       expect(conflict.expectedAttempts).toBe(wrongAttempts);
@@ -616,9 +618,9 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
         .fail(ctx, job.id, "worker-A: stale failure", jobAsClaimedByA.attempts)
         .catch((err: unknown) => err);
       const error = await staleCall;
-      expect(error).toBeInstanceOf(OutboxLeaseConflictError);
+      expectStoreError(error, isOutboxLeaseConflictError, "OutboxLeaseConflictError");
 
-      // 上の `expect(error).toBeInstanceOf(OutboxLeaseConflictError)` は
+      // 上の `expectStoreError(error, isOutboxLeaseConflictError, "OutboxLeaseConflictError")` は
       // 「Aのfailが実際に(SQL/状態変更として)実行される前に弾かれた」ことの証拠になる
       // ——本実装はどちらも「CASが一致しない場合、対象行への書き込みを一切行わずに
       // 例外を投げる」形（`attempts = expectedAttempts` を満たす行が無ければ0行更新、
