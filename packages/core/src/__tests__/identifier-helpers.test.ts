@@ -1,0 +1,129 @@
+import { describe, expect, it } from "vitest";
+import {
+  assertWellFormedFilter,
+  findMalformedIdentifierPart,
+  isMalformedIdentifierError,
+  MalformedIdentifierError,
+} from "../identifier.js";
+
+/**
+ * `findMalformedIdentifierPart`・`assertWellFormedFilter`（ADR 0423）の TSDoc が約束していることの直接の歯。
+ *
+ * `findMalformedIdentifierPart`: 識別子に含まれる**最初の**問題（孤立サロゲートか NUL）を返し、無ければ `null`。
+ * 対をなすサロゲート（絵文字など）は問題にしない。`index` は UTF-16 のコードユニット単位・0 始まり。
+ *
+ * `assertWellFormedFilter`: `tenantId`・`subjectId` で絞る検索条件に、識別子と同じ検査を掛ける。`field` は例外に載る
+ * 欄の名前（既定 `filter`、例 `opts.filter`）。**値は例外に載せない。** 文字列でない値・検索条件が無い（null・undefined）
+ * ときは検査しない。
+ */
+
+describe("findMalformedIdentifierPart", () => {
+  it("問題の無い値（空文字・ASCII・日本語・対をなすサロゲート〔絵文字〕）は null", () => {
+    for (const value of ["", "tenant-1", "テナント", "😀", "a😀b", "\u{10FFFF}", "😀😀"]) {
+      expect(findMalformedIdentifierPart(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it("NUL は reason: nul と位置", () => {
+    expect(findMalformedIdentifierPart("\u0000")).toEqual({ reason: "nul", index: 0 });
+    expect(findMalformedIdentifierPart("ab\u0000c")).toEqual({ reason: "nul", index: 2 });
+  });
+
+  it("孤立した上位サロゲート（末尾・下位以外が続く）と孤立した下位サロゲート（先頭・上位の直後でない）は lone_surrogate", () => {
+    expect(findMalformedIdentifierPart("a\uD800")).toEqual({ reason: "lone_surrogate", index: 1 });
+    expect(findMalformedIdentifierPart("\uD800a")).toEqual({ reason: "lone_surrogate", index: 0 });
+    expect(findMalformedIdentifierPart("\uD800\uD800")).toEqual({
+      reason: "lone_surrogate",
+      index: 0,
+    });
+    expect(findMalformedIdentifierPart("\uDC00")).toEqual({ reason: "lone_surrogate", index: 0 });
+    expect(findMalformedIdentifierPart("ab\uDFFF")).toEqual({ reason: "lone_surrogate", index: 2 });
+    // 下位→上位の並びは対ではない（先頭の下位が孤立）。
+    expect(findMalformedIdentifierPart("\uDE00\uD83D")).toEqual({
+      reason: "lone_surrogate",
+      index: 0,
+    });
+  });
+
+  it("境界: 上位サロゲートの範囲 D800〜DBFF・下位の範囲 DC00〜DFFF の両端", () => {
+    expect(findMalformedIdentifierPart("퟿")).toBeNull();
+    expect(findMalformedIdentifierPart("")).toBeNull();
+    expect(findMalformedIdentifierPart("\uDBFF")).not.toBeNull();
+    expect(findMalformedIdentifierPart("􏰀")).toBeNull();
+    expect(findMalformedIdentifierPart("𐏿")).toBeNull();
+  });
+
+  it("位置は UTF-16 のコードユニット単位（対のサロゲートは2つ数える）で、返すのは最初の問題", () => {
+    expect(findMalformedIdentifierPart("😀\u0000")).toEqual({ reason: "nul", index: 2 });
+    expect(findMalformedIdentifierPart("😀😀\uD800")).toEqual({
+      reason: "lone_surrogate",
+      index: 4,
+    });
+    // 複数あれば最初（NUL が先・孤立サロゲートが先のどちらでも）。
+    expect(findMalformedIdentifierPart("a\u0000\uD800")).toEqual({ reason: "nul", index: 1 });
+    expect(findMalformedIdentifierPart("a\uD800\u0000")).toEqual({
+      reason: "lone_surrogate",
+      index: 1,
+    });
+  });
+});
+
+function thrownBy(run: () => void): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+describe("assertWellFormedFilter", () => {
+  it("tenantId・subjectId が well-formed（省略・絵文字を含む）なら何も投げない", () => {
+    expect(() => assertWellFormedFilter({ tenantId: "t" })).not.toThrow();
+    expect(() => assertWellFormedFilter({ tenantId: "t😀", subjectId: "s😀" })).not.toThrow();
+    expect(() => assertWellFormedFilter({})).not.toThrow();
+  });
+
+  it("tenantId の問題は `<field>.tenantId`、subjectId の問題は `<field>.subjectId` を名指しして MalformedIdentifierError", () => {
+    const tenant = thrownBy(() => assertWellFormedFilter({ tenantId: "a\u0000" }));
+    expect(tenant).toBeInstanceOf(MalformedIdentifierError);
+    expect(tenant).toMatchObject({ field: "filter.tenantId", reason: "nul", index: 1 });
+    const subject = thrownBy(() => assertWellFormedFilter({ tenantId: "t", subjectId: "\uD800" }));
+    expect(isMalformedIdentifierError(subject)).toBe(true);
+    expect(subject).toMatchObject({
+      field: "filter.subjectId",
+      reason: "lone_surrogate",
+      index: 0,
+    });
+  });
+
+  it("`field` を渡すとその名前で載る", () => {
+    const error = thrownBy(() =>
+      assertWellFormedFilter({ tenantId: "t", subjectId: "x\u0000" }, "opts.filter"),
+    );
+    expect(error).toMatchObject({ field: "opts.filter.subjectId" });
+  });
+
+  it("両方に問題があれば tenantId が先に報告される", () => {
+    const error = thrownBy(() =>
+      assertWellFormedFilter({ tenantId: "\u0000", subjectId: "\u0000" }),
+    );
+    expect(error).toMatchObject({ field: "filter.tenantId" });
+  });
+
+  it("例外の message に入力値を載せない", () => {
+    const secret = "SECRET-VALUE-9f2";
+    const error = thrownBy(() => assertWellFormedFilter({ tenantId: `${secret}\u0000` }));
+    expect(error).toBeInstanceOf(MalformedIdentifierError);
+    expect((error as Error).message).not.toContain(secret);
+    expect(JSON.stringify(error)).not.toContain(secret);
+  });
+
+  it("文字列でない値と、検索条件が無い（null・undefined・オブジェクトでない）場合は検査しない", () => {
+    expect(() => assertWellFormedFilter({ tenantId: undefined, subjectId: null })).not.toThrow();
+    expect(() => assertWellFormedFilter({ tenantId: 123, subjectId: {} })).not.toThrow();
+    expect(() => assertWellFormedFilter(null)).not.toThrow();
+    expect(() => assertWellFormedFilter(undefined)).not.toThrow();
+    expect(() => assertWellFormedFilter("a\u0000" as never)).not.toThrow();
+  });
+});

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ClaimKeyIndexLimitError,
   ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   SourceMemoryForgottenError,
   SourceMemoryStatusChangedError,
+  isClaimKeyIndexLimitError,
   isContestedGroupMembershipMismatchError,
   isContestedWithoutCompanionError,
   isMemoryPurgeConflictError,
@@ -97,6 +99,13 @@ const cases = [
     kind: "embedding_space_not_registered",
     guard: isEmbeddingSpaceNotRegisteredError,
     make: () => new EmbeddingSpaceNotRegisteredError({ provider: "p", model: "m", dimensions: 3 }),
+  },
+  // ADR 0435: claim key の索引の上限。
+  {
+    name: "ClaimKeyIndexLimitError",
+    kind: "claim_key_index_limit",
+    guard: isClaimKeyIndexLimitError,
+    make: () => new ClaimKeyIndexLimitError("createMemory"),
   },
 ] as const;
 
