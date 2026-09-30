@@ -114,12 +114,8 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
 
 const ctx: Ctx = { tenantId: "observe-aux-field-drop" };
 const NUL = "ab\u0000cd";
-/** 4 バイト文字の 513 字（UTF-8 で 2052 バイト。上限 512 コードポイントを1つ超える）。 */
-const LONG_TAG = "\u{1F600}".repeat(513);
-/** 圧縮が効かない 3000 字（GIN 索引が拒む）。 */
-const INCOMPRESSIBLE = Array.from({ length: 3000 }, (_, i) =>
-  String.fromCodePoint(0x4e00 + ((i * 7919) % 20000)),
-).join("");
+/** 圧縮が効く 4 バイト文字の 513 字。以前から保存できていた値で、字数では落とさない（ADR 0443 決定1）。 */
+const LONG_COMPRESSIBLE_TAG = "\u{1F600}".repeat(513);
 
 async function observeWith(
   kit: Kit,
@@ -177,7 +173,7 @@ for (const [name, makeKit] of KITS) {
       }
     });
 
-    it("tags: NUL の要素・巨大な要素だけを捨て、ほかの要素は並びも含めて残す", async () => {
+    it("tags: NUL の要素だけを捨て、圧縮が効く 513 字以上の要素を含むほかの要素は並びも含めて残す", async () => {
       const kit = await makeKit();
       const got = await observeWith(
         kit,
@@ -185,13 +181,13 @@ for (const [name, makeKit] of KITS) {
           {
             content: "一件目の事実",
             digest: "要旨",
-            tags: ["a", NUL, "b", LONG_TAG, INCOMPRESSIBLE, "a"],
+            tags: ["a", NUL, "b", LONG_COMPRESSIBLE_TAG, "a"],
           },
         ],
         "tags",
       );
       const memory = got.byContent("一件目の事実")!;
-      expect(memory.tags).toEqual(["a", "b", "a"]);
+      expect(memory.tags).toEqual(["a", "b", LONG_COMPRESSIBLE_TAG, "a"]);
       expect(memory.digest).toBe("要旨");
       expect(memory.digestSource).toBe("llm");
       expect(got.createdMetas).toHaveLength(1);
@@ -203,14 +199,6 @@ for (const [name, makeKit] of KITS) {
           reason: "nul_character",
           count: 1,
           tagIndexes: [1],
-        },
-        {
-          index: 0,
-          contentHash: hashContent("一件目の事実"),
-          field: "tags",
-          reason: "too_long",
-          count: 2,
-          tagIndexes: [3, 4],
         },
       ]);
     });

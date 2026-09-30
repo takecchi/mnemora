@@ -14,7 +14,7 @@
   **(1) 補助の欄。**【現物】抽出の候補（`ExtractedMemoryCandidate`）は、本文のほかに LLM が返す `digest`・`tags`、別の構造化呼び出しで得る claim key を持つ。これらのどれか1つが保存できない値だと、本文が正しくても `createMemoryWithOutbox` が拒み、候補ごと落ちていた（[ADR 0347](./0347-extract-write-path-redelivery-and-unsaveable-candidates.md) の「保存できない候補」の経路。落ちた候補は `created` の `meta.droppedCandidates` に残る）。補助の欄は要約や索引のための値で、本文より軽い。本文を道連れにするのは釣り合わない（[ADR 0433](./0433-claim-key-length-space-error-reembed-limit.md) が claim key の長さで同じ判断をした）。
   【実測】（手元の Postgres 17、UTF8 の `C.UTF-8`）保存できない値は2つあった。
   - **NUL（U+0000）を含む文字列**: text 列に入らない（`digest`・`tags`・claim key の3つとも）。testkit の fixture も `digest`・`tags` の NUL を拒む。
-  - **`tags` の巨大な要素**: `idx_memories_tags`（GIN、`(tenant_id, tags)`）は、1要素が圧縮後でおよそ 2712 バイトを超えると INSERT が落ちる（`index row size 2816 exceeds maximum 2712`）。4バイト文字のランダムな値は、512 字（UTF-8 で 2048 バイト）は通り、700 字（2800 バイト）で落ちた。⚠ ADR 0433 と同じく、繰り返しなど圧縮が効く値は同じ長さでも通る。
+  - **`tags` の巨大な要素**: `idx_memories_tags`（GIN、`(tenant_id, tags)`）は、1要素が圧縮後でおよそ 2712 バイトを超えると INSERT が落ちる（`index row size 2816 exceeds maximum 2712`）。4バイト文字のランダムな値は、512 字（UTF-8 で 2048 バイト）は通り、700 字（2800 バイト）で落ちた。⚠ ADR 0433 と同じく、繰り返しなど圧縮が効く値は同じ長さでも通る。**この件は直さない**（決定1の「既知の限界」）。
   - **`digest` の長さ**: 索引が無い。【実測】10MB の値が text 列に入った（`memories` ではなく使い捨ての表で。`memories` への INSERT は、テストで 10 万字の digest が通ることを確かめた）。長さで落ちる根拠が見つからなかったので、長さは見ない。
   claim key の長さは ADR 0433 が決定済みである（256 コードポイントを超えれば `null`）。NUL は見ていなかった。
 
@@ -27,10 +27,10 @@
 
   1. **補助の欄は、保存できない値だけを落とし、候補は残す。**
      - `digest` が NUL を含めば、無い（`undefined`）ことにする。あとの `resolveDigest` が、空・欠落と同じく本文の先頭を切り出したフォールバック（`digestSource: "fallback"`）へ倒す。
-     - `tags` は、NUL を含む要素と、512 コードポイントを超える要素だけを捨てる。ほかの要素の並び・重複・前後の空白は残す。512 の根拠は、4バイト文字で 512 × 4 = 2048 バイトが、圧縮が効かなくても GIN の1エントリの上限（約 2712 バイト）に届かないこと（ADR 0433 の 256 字と同じ考え方）。数え方はコードポイント（`Array.from`）。
+     - `tags` は、NUL を含む要素だけを捨てる。ほかの要素の並び・重複・前後の空白は残す。**長さでは落とさない**: 巨大な tag が GIN 索引の上限に当たるかどうかは圧縮後の大きさで決まり、字数では線を引けない。字数の上限（初版は 512 コードポイント）を置くと、今まで保存できていた圧縮の効く長い tag を新しく黙って捨てることになる。クローンの線は「断る・落とす入力を今より増やさない」（ADR 0433 の claim key と同じ扱い）。**既知の限界: 長い tag は索引の上限で落ちうる**（圧縮が効かない値。今までどおり `createMemoryWithOutbox` が例外を投げ、候補ごと落ちる）。
      - claim key は、正規化のあとの `subject`・`predicate` のどちらかが NUL を含めば `null` にする（`deriveClaimKeys`。長さの上限と同じ場所・同じ形。`failure` の印は付けない）。
      - 処理は `packages/core/src/llm-aux-fields.ts`（内部。`index.ts` からは出さない）。`observe`（sync・deferred）と `reextract` が、抽出の直後・claim key を引く前に `digest`・`tags` を通す。
-     - **落とした欄は、`created` イベントの `meta.droppedFields` に残す**（何も落とさなければ `meta` の形は変わらない）。1件が `{ index, contentHash, field: "digest" | "tags", reason: "nul_character" | "too_long", count?, tagIndexes? }`。候補は `droppedCandidates` と同じ `index`（LLM が返した順の 0 起点）と `contentHash` で指し、**値そのものは写さない**。`tags` の `count` は捨てた数、`tagIndexes` は LLM が返した `tags` の中の添字で、先頭から 20 個まで（何万件でも `meta` を膨らませない）。同じ抽出で作られた記憶すべての `created` に同じ配列が入る（`droppedCandidates` と同じ形）。
+     - **落とした欄は、`created` イベントの `meta.droppedFields` に残す**（何も落とさなければ `meta` の形は変わらない）。1件が `{ index, contentHash, field: "digest" | "tags", reason: "nul_character", count?, tagIndexes? }`。候補は `droppedCandidates` と同じ `index`（LLM が返した順の 0 起点）と `contentHash` で指し、**値そのものは写さない**。`tags` の `count` は捨てた数、`tagIndexes` は LLM が返した `tags` の中の添字で、先頭から 20 個まで（何万件でも `meta` を膨らませない）。同じ抽出で作られた記憶すべての `created` に同じ配列が入る（`droppedCandidates` と同じ形）。
      - 本文（`content`）の NUL はこの直しの対象ではない。従来どおり候補ごと落ちる（本文は落とせない）。
   2. **`reinforceMany` は `VALUES` をやめ、列ごとの配列5個を `unnest` で渡す。`searchMany` はクエリを 16384 件ずつに分けて、同じトランザクションの中で1文ずつ撃つ。**
      - `reinforceMany`: パラメータは件数によらず5個（と `tenant`・`at`）。1文のまま（原子性・往復数の「定数2往復」は変わらない）。`memory_usage` の観測は同じ口を通るので、同時に直る。
@@ -48,7 +48,7 @@
 
 - **検討した代替案**:
 
-  1. **決定1で、長さの判定を置かない**（WIP の初版の案。圧縮が効く値は上限を超えても通るため、今保存できている値を落とさない）。採らなかった。長さで落ちるかどうかが値の中身（圧縮のされ方）で決まり、adapter（fixture は通す）でも変わる。中身で分けるより、コードポイントで上限を置くほうが説明できる（ADR 0433 と同じ）。引き受けた負債に、圧縮が効く 513 字以上の tag を落とすことを書いた。
+  1. **決定1で、`tags` に字数の上限を置く**（初版は 512 コードポイント。4バイト文字で 2048 バイトが GIN の上限に届かない見積もり）。採らなかった。【実測】圧縮が効く 513 字以上の tag は、今まで保存できていた。上限を置くと、今保存できている値を新しく黙って捨てる。長さで落ちるかどうかは圧縮後の大きさで決まり、字数では線を引けない。クローンの決定で外した（歯は、圧縮が効く 513 字の tag が保存されること）。
   2. **決定1で、`digest` にも長さの上限を置く。** 採らなかった。索引が無く、落ちる根拠が見つからなかった。
   3. **決定1で、落とす欄を `created` の `meta` ではなく `droppedCandidates` に混ぜる。** 採らなかった。`droppedCandidates` は「候補ごと落ちた」の記録で、意味が違う。欄が落ちても候補は残る。
   4. **決定1で、保存を試みてから落ちた欄を特定して撃ち直す。** 採らなかった。`createMemoryWithOutbox` の例外から落ちた欄を特定するのは adapter の message に依存し、二重に書きうる（ADR 0410 と同じ）。事前に値を見るほうが単純。
@@ -58,7 +58,7 @@
 
 - **引き受けた負債**:
 
-  - **圧縮が効く 513 字以上の tag が落ちる。** 以前は Postgres で通っていた値である（繰り返しなど）。`meta.droppedFields` に `too_long` で残る。
+  - **長い tag は、圧縮が効かない値だと索引の上限で落ちる（既知の限界）。** 今までどおり例外になり、候補ごと落ちる（`droppedCandidates` に残る）。字数では線を引かないので、この直しでは減らしていない。
   - **NUL を含む・長い claim key を落としたことは記録されない。** `deriveClaimKeys` の戻り値に `null` の理由が無く、空白だけの要素・長さの超過と同じ扱いにした（ADR 0433 の負債と同じ）。`meta.droppedFields` には claim key は現れない。`droppedFields` の型は `field: "claimKey"` を許すが、今は書いていない。
   - **`consolidate`・`reflect` が書く `digest`・`tags` は対象にしていない。** LLM の値が NUL を含むと、その操作は今も例外になる（抽出の候補の経路だけを直した）。
   - **`searchMany` の例外の `cause` には、1文ぶんの `params`（最大 16384 件のベクトル）が残る。** `Runtime` を通れば `omitParamsFromError`（ADR 0423）が落とすが、store を直接呼ぶ呼び出しでは落ちない（ADR 0430 の負債と同じ）。
@@ -67,7 +67,7 @@
 
 - **これが覆るとしたら**:
 
-  - `tags` の上限を、圧縮を見た判定（バイト数で測る、`pg_column_size` を使う）にしたいとき。落とす値が減る代わりに adapter 依存になる。
+  - `tags` の長さの落とし方を、圧縮を見た判定（バイト数で測る、`pg_column_size` を使う）にしたいとき。落とす値が減る代わりに adapter 依存になる。
   - 落とした claim key を呼び出し側が知る必要が出たとき。`DeriveClaimKeysResult` に欄を足す公開の型の変更になる。
   - `consolidate`・`reflect` の補助の欄も同じ扱いにしたいとき。
   - 連想枠のコストが実運用で問題になったとき。席に着く件数を先に見積もる別の設計（段階的に広げる取得など）を、結果が変わることを承知のうえで検討する。
@@ -75,7 +75,7 @@
 
 - **測ったこと**（【実測】2026-10-01、手元の Postgres 17、UTF8（`C.UTF-8`）。歯を先に走らせて赤を見てから直した）:
 
-  - 決定1: `packages/postgres/src/__tests__/observe-aux-field-drop.postgres.test.ts`（2実装 × 8本。digest の NUL、tags の NUL・巨大、添字の上限、claim key の NUL、deferred、reextract、本文の NUL は従来どおり候補ごと落ちる、保存できる値は変えない）。`sanitizeCandidateAuxFields` の呼び出しを外し、claim key の NUL の判定を外す変異で 12 本が赤（ほかの 4 本は「やりすぎ」を見る歯で、直す前から緑）。戻すと 16 本とも緑。
+  - 決定1: `packages/postgres/src/__tests__/observe-aux-field-drop.postgres.test.ts`（2実装 × 8本。digest の NUL、tags の NUL（圧縮が効く 513 字の tag は残る）、添字の上限、claim key の NUL、deferred、reextract、本文の NUL は従来どおり候補ごと落ちる、保存できる値は変えない）。`sanitizeCandidateAuxFields` の呼び出しを外し、claim key の NUL の判定を外す変異で 12 本が赤（ほかの 4 本は「やりすぎ」を見る歯で、直す前から緑）。戻すと 16 本とも緑。追加の直しで字数の上限（512）を外した: 上限ありの実装では、「NUL の tag だけが落ち、圧縮が効く 513 字の tag は残る」歯が2実装とも赤（16 本中 2 本）、上限を外すと 16 本とも緑。
   - 決定2: `packages/postgres/src/__tests__/bind-parameter-limit-cliff.postgres.test.ts`（11本）。直す前は、`reinforceMany` は 13106 件が緑・13107 件が赤（40000 件でも赤を確認したあと、CI の 30 秒の時間切れを避けるため歯の大きさを 30000 件にした）、`memory_usage` は 13106 件が緑・13107 件が赤、`searchMany` は 32000 件が緑・32767 / 32768 / 40000 件とチャンクをまたぐ一致の歯が赤、存在しない id を含む 20000 件の message の歯が赤。直した後は 11 本とも緑。`reinforce-many-equivalence`・`vector-store-search-many`・`vector-search-many-diff`・`record-usage-and-reinforce`・`search-many-primary-key-lookup` ほか、関連する既存の歯が緑。
   - 決定3: 上の差分試験（使い捨て。CI には載せていない）。
-  - **測っていないこと**: `searchMany` の実行計画が、チャンクに分けても同じであること（`EXPLAIN` は取っていない。分けた各文の形は以前と同じ `VALUES` である）。チャンクの大きさ（16384）が最速かどうか。SQL_ASCII の DB での補助の欄の歯。
+  - **測っていないこと**（未測定）: `searchMany` の実行計画が、チャンクに分けても同じであること（`EXPLAIN` は取っていない。分けた各文の形は以前と同じ `VALUES` である）。`searchMany` のチャンクの大きさ（16384）が最速かどうか（未測定）。SQL_ASCII の DB での補助の欄の歯。`consolidate`・`reflect` が書く `digest`・`tags` の NUL は今回対象外で、今も例外になる。

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DROPPED_TAG_INDEXES_MAX,
-  MAX_TAG_CODE_POINTS,
-  sanitizeCandidateAuxFields,
-} from "../llm-aux-fields.js";
+import { DROPPED_TAG_INDEXES_MAX, sanitizeCandidateAuxFields } from "../llm-aux-fields.js";
 import { deriveClaimKeys } from "../claim-key.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 
@@ -15,7 +11,7 @@ describe("sanitizeCandidateAuxFields", () => {
     const candidate = {
       ...base,
       digest: "要旨",
-      tags: [" a ", "a", "😀".repeat(MAX_TAG_CODE_POINTS)],
+      tags: [" a ", "a", "😀".repeat(5000)],
     };
     const result = sanitizeCandidateAuxFields(candidate);
     expect(result.candidate).toBe(candidate);
@@ -29,13 +25,12 @@ describe("sanitizeCandidateAuxFields", () => {
     expect(result.dropped).toEqual([{ field: "digest", reason: "nul_character" }]);
   });
 
-  it("tags: NUL の要素と上限を1字超える要素だけを、添字つきで捨てる", () => {
-    const tooLong = "😀".repeat(MAX_TAG_CODE_POINTS + 1);
-    const result = sanitizeCandidateAuxFields({ ...base, tags: ["a", "b\u0000", tooLong, "a"] });
-    expect(result.candidate.tags).toEqual(["a", "a"]);
+  it("tags: NUL の要素だけを、添字つきで捨てる（長い要素は捨てない）", () => {
+    const long = "😀".repeat(5000);
+    const result = sanitizeCandidateAuxFields({ ...base, tags: ["a", "b\u0000", long, "a"] });
+    expect(result.candidate.tags).toEqual(["a", long, "a"]);
     expect(result.dropped).toEqual([
       { field: "tags", reason: "nul_character", count: 1, tagIndexes: [1] },
-      { field: "tags", reason: "too_long", count: 1, tagIndexes: [2] },
     ]);
   });
 
