@@ -29,6 +29,11 @@ import {
   expectRejectsWithStoreError,
   expectStoreError,
 } from "./error-guards.js";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+  WELL_FORMED_NON_BMP_IDENTIFIER,
+} from "./malformed-identifier-cases.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
 
 /**
@@ -12731,5 +12736,132 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(store.eraseTenant).toBeUndefined();
       });
     }
+    // -------------------------------------------------------------------
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    // -------------------------------------------------------------------
+
+    describe("識別子の文字の扱い", () => {
+      for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+        it(`${label}を含む識別子は、書き込みも読み出しも断る`, async () => {
+          const store = await createStore();
+          const ok: Ctx = { tenantId: "tenant-wf" };
+          const cases: Array<[string, () => Promise<unknown>]> = [
+            [
+              "createObservation の ctx.tenantId",
+              () =>
+                store.createObservation(
+                  { tenantId: value },
+                  buildNewObservationFixture({ tenantId: value }),
+                ),
+            ],
+            [
+              "createObservation の ctx.subjectId",
+              () =>
+                store.createObservation(
+                  { tenantId: ok.tenantId, subjectId: value },
+                  buildNewObservationFixture({ tenantId: ok.tenantId }),
+                ),
+            ],
+            [
+              "createObservation の input.subjectId",
+              () =>
+                store.createObservation(
+                  ok,
+                  buildNewObservationFixture({ tenantId: ok.tenantId, subjectId: value }),
+                ),
+            ],
+            [
+              "createObservation の input.externalId",
+              () =>
+                store.createObservation(
+                  ok,
+                  buildNewObservationFixture({ tenantId: ok.tenantId, externalId: value }),
+                ),
+            ],
+            [
+              "createObservationWithOutbox の input.externalId",
+              () =>
+                store.createObservationWithOutbox(
+                  ok,
+                  buildNewObservationFixture({ tenantId: ok.tenantId, externalId: value }),
+                  [],
+                ),
+            ],
+            [
+              "createObservationWithOutbox の ctx.tenantId",
+              () =>
+                store.createObservationWithOutbox(
+                  { tenantId: value },
+                  buildNewObservationFixture({ tenantId: value }),
+                  [],
+                ),
+            ],
+            [
+              "createMemory の input.subjectId",
+              () =>
+                store.createMemory(
+                  ok,
+                  buildNewMemoryFixture({
+                    tenantId: ok.tenantId,
+                    subjectId: value,
+                    contentHash: "wf-subject",
+                  }),
+                ),
+            ],
+            [
+              "createMemory の ctx.tenantId",
+              () =>
+                store.createMemory(
+                  { tenantId: value },
+                  buildNewMemoryFixture({ tenantId: value, contentHash: "wf-tenant" }),
+                ),
+            ],
+            ["get の ctx.tenantId", () => store.get({ tenantId: value }, NONEXISTENT_MEMORY_ID)],
+            [
+              "get の ctx.subjectId",
+              () => store.get({ tenantId: ok.tenantId, subjectId: value }, NONEXISTENT_MEMORY_ID),
+            ],
+            [
+              "getObservation の ctx.tenantId",
+              () => store.getObservation({ tenantId: value }, NONEXISTENT_MEMORY_ID),
+            ],
+          ];
+          for (const [where, call] of cases) {
+            await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+          }
+        });
+      }
+
+      it("対をなすサロゲート（BMP の外の文字）を含む識別子は受け付け、そのまま読み返せる", async () => {
+        const store = await createStore();
+        const value = WELL_FORMED_NON_BMP_IDENTIFIER;
+        const ctx: Ctx = { tenantId: value, subjectId: value };
+        const { observation, created } = await store.createObservationWithOutbox(
+          ctx,
+          buildNewObservationFixture({ tenantId: value, subjectId: value, externalId: value }),
+          [],
+        );
+        expect(created).toBe(true);
+        expect(observation.tenantId).toBe(value);
+        expect(observation.subjectId).toBe(value);
+        expect(observation.externalId).toBe(value);
+      });
+
+      it("断られた書き込みは、何も残さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-wf-nothing" };
+        await expect(
+          store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId, externalId: "x\uD800" }),
+          ),
+        ).rejects.toThrow();
+        const fresh = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: ctx.tenantId, externalId: "x�" }),
+        );
+        expect(fresh.externalId).toBe("x�");
+      });
+    });
   });
 }

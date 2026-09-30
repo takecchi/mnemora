@@ -6,6 +6,7 @@ import type {
   MemoryEvent,
   NewMemoryEvent,
 } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import { nextId } from "./id.js";
 import { assertQueryDate } from "./query-check.js";
 import { assertStorableMemoryEvent } from "./memory-event-check.js";
@@ -81,6 +82,7 @@ export class InMemoryEventStore implements EventStore {
   ) {}
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
+    assertWellFormedCtx(ctx);
     // 外部キー相当（ADR 0047）: `memoryId` が非 null なら実在する Memory を指さなければ
     // ならない。**NULL は拒まない**——`kind = 'events_purged'` は `memoryId` が無い
     // 正当なケースであり、他の kind であっても NULL 自体を本メソッドは咎めない
@@ -98,6 +100,7 @@ export class InMemoryEventStore implements EventStore {
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
+    assertWellFormedCtx(ctx);
     const event = this.events.find((e) => e.id === id);
     if (!event || event.tenantId !== ctx.tenantId) {
       return null;
@@ -106,6 +109,7 @@ export class InMemoryEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    assertWellFormedCtx(ctx);
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
     assertQueryDate("list", "since", filter.since);
     assertQueryDate("list", "until", filter.until);
