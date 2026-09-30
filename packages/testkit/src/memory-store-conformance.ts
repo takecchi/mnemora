@@ -12731,5 +12731,37 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(store.eraseTenant).toBeUndefined();
       });
     }
+
+    // -------------------------------------------------------------------
+    // 穴 O-6-3（ADR 0424）: contentHash の NUL。`content`/`digest`/`tags`/`subjectId` の NUL は
+    // インメモリが明示の例外で拒んでいたが、contentHash だけ検査が無く、インメモリは保存してしまい、
+    // Postgres は DB の生の例外（`invalid byte sequence for encoding "UTF8": 0x00`）で落ちていた。
+    // 両方で、DB に触れる前の明示の例外（メッセージに contentHash と NUL を含む）で断る。
+    // （識別子の NUL — tenantId など — は別の穴で、ここでは扱わない。）
+    // -------------------------------------------------------------------
+    it("contentHash に NUL (U+0000) を含む Memory は、明示の例外で断り、何も保存しない（穴 O-6-3）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const bad = buildNewMemoryFixture({
+        tenantId: "tenant-1",
+        sourceObservationId: observation.id,
+        extractorVersion: "v1",
+        contentHash: "nul\u0000hash",
+      });
+
+      await expect(store.createMemory(ctx, bad)).rejects.toThrow(/contentHash.*NUL/);
+      await expect(store.createMemoryWithOutbox(ctx, bad, ["embed"])).rejects.toThrow(
+        /contentHash.*NUL/,
+      );
+      expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(0);
+
+      // 陽性対照: NUL を含まない contentHash は今までどおり保存できる。
+      const ok = await store.createMemory(ctx, { ...bad, contentHash: "no-nul-hash" });
+      expect(ok.contentHash).toBe("no-nul-hash");
+    });
   });
 }

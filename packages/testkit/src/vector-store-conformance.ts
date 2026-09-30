@@ -1187,6 +1187,50 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // 穴 O-6-2（ADR 0424）: float4 に収まらない成分。pgvector の `vector` は float4 で、
+    // `1e308` は `"1e+308" is out of range for type vector` で拒まれる。以前は Postgres の upsert だけが
+    // DB の生の例外で落ち、インメモリは `Math.fround` で Infinity にして保存し、距離が NaN になっていた。
+    //   - upsert: 両方で、DB に触れる前の明示の例外（メッセージに float4 を含む）で断る。
+    //   - 検索のクエリ: 有限でない成分（NaN・Infinity）と同じ扱い——投げず、距離が比較の通らない値になる
+    //     （ADR 0040 の経路。`recall()` は `score_not_comparable` に数える）。投げるのは upsert だけ。
+    // -------------------------------------------------------------------
+
+    it("upsert は float4 に収まらない成分（1e308）の vector を、明示の例外で断り、何も保存しない（穴 O-6-2）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      await expect(store.upsert(ctx, space, memoryId, [1e308, 0, 0])).rejects.toThrow(/float4/);
+      await expect(store.upsert(ctx, space, memoryId, [0, -1e308, 0])).rejects.toThrow(/float4/);
+
+      // 何も保存されていない（壊れた vector が検索に出ない）。
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hits).toEqual([]);
+
+      // 陽性対照: float4 の最大値に近い有限の成分は通る。
+      await expect(store.upsert(ctx, space, memoryId, [3e38, 0, 0])).resolves.toBeUndefined();
+    });
+
+    it("search は float4 に収まらない成分（1e308）のクエリでも投げず、距離が比較の通らない値になる（穴 O-6-2）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      await store.upsert(ctx, space, memoryId, [1, 0, 0]);
+
+      const hits = await store.search(ctx, space, [1e308, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      const hit = hits.find((h) => h.memoryId === memoryId);
+      expect(hit).toBeDefined();
+      expect(hit!.distance >= 0).toBe(false);
+      expect(hit!.distance <= 0).toBe(false);
+    });
+
+    // -------------------------------------------------------------------
     // getVectors（Issue #200: 連想枠、任意メソッド）。`archiveDecayed`/`purgeMemory`
     // （`memory-store-conformance.ts`）と同じ形——`supportsGetVectors` で分岐し、
     // 実装していない adapter に対しても「実装していない」ことを積極的に assert する
