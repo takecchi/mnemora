@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingSpaceId, LLMProvider } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
@@ -267,8 +268,67 @@ async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
 }
 
 describe("recall() の往復数は候補の件数に比例しない — 本物の Postgres + pgvector（Postgres クエリ効率監査）", () => {
-  beforeEach(async () => {
+  let restoreProbe: (() => void) | undefined;
+  afterEach(() => {
+    restoreProbe?.();
+    restoreProbe = undefined;
+  });
+
+  beforeEach(async (ctx) => {
     await resetTestDatabase();
+    // 【試走専用・マージしない】TRUNCATE 直後の reltuples を記録する（Issue #1276。TRUNCATE が reltuples を戻すかの確認）。
+    const { pool } = await getTestClient();
+    const table = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
+    const rel = await pool.query(
+      "SELECT relname, reltuples FROM pg_class WHERE oid IN ('memories'::regclass, $1::regclass) ORDER BY relname",
+      [table],
+    );
+    console.log(
+      "PROBE reltuples after resetTestDatabase [" +
+        ctx.task.name.slice(0, 6) +
+        "]: " +
+        JSON.stringify(rel.rows),
+    );
+    // 【試走専用・マージしない】歯2 だけ、「自動 analyze が warm-up のあと・limit=5 の最初の reltuples 読みより前に
+    // 終わる」状況を決定的に作る: 2回目の reltuples を読むクエリの直前に、別接続で ANALYZE を打つ。
+    if (ctx.task.name.startsWith("歯2")) {
+      // 統計を「未確認」（reltuples < 0）にしておく（superuser。TRUNCATE が既に -1 にしていれば no-op）。
+      await pool.query(
+        "UPDATE pg_class SET reltuples = -1 WHERE oid IN ('memories'::regclass, $1::regclass)",
+        [table],
+      );
+      const probeClient = new Client({ connectionString: process.env.DATABASE_URL });
+      await probeClient.connect();
+      const originalQuery = Client.prototype.query;
+      let reads = 0;
+      let inProbe = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
+        const text =
+          typeof args[0] === "string" ? args[0] : ((args[0] as { text?: string })?.text ?? "");
+        if (!inProbe && this !== probeClient && text.includes("reltuples")) {
+          reads += 1;
+          if (reads === 2) {
+            inProbe = true;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const run = async () => {
+              await (originalQuery as any).call(probeClient, "ANALYZE memories");
+              await (originalQuery as any).call(probeClient, "ANALYZE " + table);
+              console.log("PROBE: ANALYZE injected before reltuples read #2");
+              inProbe = false;
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return run().then(() => (originalQuery as any).apply(this, args));
+          }
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (originalQuery as any).apply(this, args);
+      };
+      restoreProbe = () => {
+        Client.prototype.query = originalQuery;
+        void probeClient.end();
+      };
+    }
   });
 
   afterAll(async () => {
