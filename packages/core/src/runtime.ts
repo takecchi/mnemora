@@ -3989,6 +3989,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * `subjectId` が無く、抽出は候補ごとに `subjectId` が違いうる）。各 Memory の `subjectId` が
    * 決まった後で、`readActivitySeqForSubjects` が distinct な subject の `S_x` をまとめて引き、
    * `activityClockInputsFor` が Memory ごとに `T + S_x` を組む。
+   *
+   * 🔴 **まだ残っている負債**（ADR 0394「引き受けた負債」）: 書く側の subject の取り違えは直したが、
+   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect・
+   * `sweepArchive` 等）の中の `recall()` が活動時計を進めること、(2) `tick` の自動ジョブに
+   * `activityCounting` を届けないこと、(3) recall 側の前進が `T` か `S_ctx` か。
    */
   async function resolveActivityClockBase(
     ctx: Ctx,
@@ -4062,6 +4067,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （store が UPDATE の中で行ごとに解く）。`tenant_subject_activity` に行が無いテナント
    * （`hasSubjectActivityCounters` が `false`）では `S_x` はどの行でも `0` なので、この項目は付けない
    * （store は相関サブクエリを足さず、今日と同じ SQL のまま）。
+   *
+   * 🔴 **引き受けた負債**: `addOwnSubjectSeq` を知らない adapter（`ReinforceOptions` の項目を読まない第三者の
+   * `MemoryStore`）に `true` を渡すと、`S_x` は足されず `T` のまま起点に書かれる。`tenant_subject_activity`
+   * を使うテナントで、その adapter は `reinforce` にこの項目を実装する必要がある
+   * （`ReinforceOptions.addOwnSubjectSeq` の TSDoc、testkit の適合テスト）。
    */
   async function resolveReinforceOptions(ctx: Ctx): Promise<ReinforceOptions | undefined> {
     const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);

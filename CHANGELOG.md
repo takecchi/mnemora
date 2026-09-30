@@ -153,6 +153,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **活動時計（`decay_clock` が `'activity'`/`'either'`）で、新しく作る記憶・強化する記憶の起点（`decayBaseSeq`/`decayFloorSeq`）を、`ctx.subjectId` ではなく、その記憶自身の subject の `T + S_x` で書くようになった**（[ADR 0394](./docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)、[ADR 0353](./docs/decisions/0353-activity-counting-per-call.md) 引き受けた負債1、[Issue #338](https://github.com/takecchi/mnemora/issues/338)）
+  - **効くのは `tenant_subject_activity` に行があるテナント（`activityCounting: "subject"` を使ったテナント）だけ。**それ以外（`'wall'` のテナント、subject カウンタを一度も使っていないテナント）の書き込みは、値も SQL も変わらない。
+  - 直った経路: 抽出（同期・deferred の `tick`・`reextract`。ctx と候補・観測の subject がずれるとき、`tick` の ctx に subject が無いとき）、consolidate・reflect、使用報告の強化、`restoreArchived`・`restoreSuperseded`。以前は、ずれると読む側（行ごとに自身の `S_x` を足す）より小さい起点が書かれ、作成・強化の直後から忘却ゲートの下にいることがあった。
+  - **公開 API に、任意項目 `ReinforceOptions.addOwnSubjectSeq?: boolean` が増えた**（`true` のとき、`nowSeq` を `T` として扱い、store が行ごとに Memory 自身の subject の `S_x` を足す）。非破壊（省略・`false` は今までと同じ）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は実装済み。
+  - ⚠ **自前の `MemoryStore` を実装していて `tenant_subject_activity` 相当を持つ人へ**: `reinforce`/`reinforceMany` が `addOwnSubjectSeq: true` を読まないと、`S_x` が足されず `T` のまま起点に書かれる。`describeMemoryStoreConformance` に、この項目の歯が増えた。
+  - 既に書かれた起点を遡って直してはいない（強化・再作成で置き換わる）。DB マイグレーションは足していない。
+
 - **`excludeProvenanceKinds` を指定した recall の `ann_unreached` の判定が、除外した kind の行を母数に数えなくなった。`scopeAggregate: "skip"` の recall は、ANN の到達を判定できないと名乗るようになった**（[PR #1458](https://github.com/takecchi/mnemora/pull/1458)、[ADR 0390](./docs/decisions/0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)）——除外指定のとき、ANN が取りこぼしても `severity: "info"` のまま・診断キーも付かず（黙る）、除外しない候補を全部拾えても鳴る（鳴りすぎ）、という2つの誤りを直した。`AggregateScopeOptions.excludeProvenanceKinds?` と `ScopeAggregate.excludedProvenanceIndexedCount?`（除外される kind で、スコープ内の索引済みの行の数）を足し（どちらも任意の欄。`totalInScope`・`groups`・`filtered*` の意味は変えない）、`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` が実装した。
   - **既定は変わらない**: 除外指定なし・欄を返さない自作 adapter・`scopeAggregate: "exact"` の recall の出力は1バイトも変わらない。Postgres の SQL も、除外指定（非空）のときだけ列を足す。**除外指定のある recall の `omitted`（`ann_unreached` の有無・severity）と `explain.stages` の診断キーは、欄を返す adapter では変わる**（変わる向きは、取りこぼしを名乗る・鳴りすぎを止める）。
   - `scopeAggregate: "skip"` で ANN の段が走り、adapter が `countKind: 'unknown'` を返したときは、ANN の stage detail に `annReachability: "unknown"`（到達を判定できない）が付く。`ann_unreached` が鳴らないこと自体は変わらない——**キーが付いているときの「無い」は「拾いきった」ではない**（[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 「決めたこと」7 の手当て）。

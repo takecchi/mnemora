@@ -455,6 +455,24 @@ describe("強化（使用報告・restoreArchived）— 起点は強化される
     });
   }
 
+  it("restoreSuperseded: subjectId の無い ctx から、統合で superseded になった alice の記憶を復帰させると、群の全件が T + S_alice（reinforceMany）", async () => {
+    const { runtime, stores } = await setup(llmConsolidatingTo("統合後"));
+    const a = await stores.memoryStore.createMemory(tenantCtx, newMemory({ subjectId: "alice" }));
+    const b = await stores.memoryStore.createMemory(tenantCtx, newMemory({ subjectId: "alice" }));
+    const consolidated = await runtime.consolidate(aliceCtx, {
+      target: { memoryIds: [a.id, b.id] },
+    });
+    expect((await stores.memoryStore.get(tenantCtx, a.id))?.status).toBe("superseded");
+
+    const result = await runtime.restoreSuperseded(tenantCtx, {
+      supersededById: consolidated.consolidatedMemoryId!,
+    });
+
+    expect(result.outcomes.map((o) => o.kind)).toEqual(["restored", "restored"]);
+    expectOrigin(await stores.memoryStore.get(tenantCtx, a.id), NOW_ALICE);
+    expectOrigin(await stores.memoryStore.get(tenantCtx, b.id), NOW_ALICE);
+  });
+
   it("subject カウンタを一度も使っていないテナントでは、S_x を足す指示を store へ渡さない（プラン族を変えない）", async () => {
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({

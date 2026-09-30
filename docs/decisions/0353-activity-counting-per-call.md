@@ -260,3 +260,17 @@
   - `tenant_subject_activity` を使うテナントでの段1 SQL の EXPLAIN プラン
     （相関サブクエリを含む場合の性能）は、小規模なテストデータでしか確認して
     いない——大規模テナントでの実測は今後の課題。
+
+## 追記（2026-09-30）: 引き受けた負債1・2・3 のその後
+
+上の本文は書き換えていない。負債の3つはそれぞれ、次のとおりになった。
+
+- **負債1（`resolveActivityClockInputs`/`resolveReinforceNowSeq` は `ctx.subjectId` を基準にする）は、[ADR 0394](./0394-activity-clock-writes-use-memorys-own-subject.md) で解消した。**
+  新しい記憶の起点は、記憶自身の subject の `T + S_x` で計算する（抽出・consolidate・reflect）。強化は、store が UPDATE の中で行ごとにその Memory 自身の `S_x` を足す
+  （`ReinforceOptions.addOwnSubjectSeq`）。本文の「検討した代替案4」（対象ごとの個別解決）が退けた理由（`reinforceMany` の「`at`/`opts` は呼び出し全体で1つ」の契約を破る）は、
+  行ごとの解決を store の中に置くことで、契約を保ったまま避けた。上の本文が名指しした関数名は、ADR 0394 で `resolveActivityClockBase`・`readActivitySeqForSubjects`・`resolveReinforceOptions` に分かれた。
+- **負債2（`processReflectJob` は ADR 0317 の `processConsolidateJob` 相当の対応をしていない）は、#851（Issue #820）で既に直っていた。**
+  `processReflectJob` は種の Memory の `subjectId` が `null` でなければ `ctx.subjectId` をそれで置き換えてから `reflect()` を呼ぶ（`runtime.ts`。Issue #820）。本文の記載は、書かれた時点のものである。
+- **負債3（`tenant_subject_activity` のホット行）は、PR2（ADR 0395、別 PR。この追記を書いた時点では未マージのため、リンクは張っていない）の実測で答えが出た。**
+  【実測】共有の器・単一の node プロセスで、同じ subject に集めると、並列度 16・32 で `createRecall` は約 470〜590 ops/s（wall は 3,500〜6,800）。
+  subject を分ければ Lock 待ちはほぼ 0。測った器・プロセスの構成での数であり、別の構成での値は測っていない。詳細と手順は ADR 0395。

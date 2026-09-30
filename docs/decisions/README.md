@@ -410,5 +410,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0389](./0389-recalls-digest-band-index.md) | `recalls.index_band` の目次帯に式の GIN 索引を足す——`purgeMemory` が `recalls` を全部読まないようにする | 採用 (2026-09) |
 | [0390](./0390-ann-unreached-aware-of-excluded-provenance-and-skip.md) | `ann_unreached` が `excludeProvenanceKinds` を分母から引く（除外行の索引済み件数を集約が返す）と、`scopeAggregate: "skip"` で到達を判定できないと名乗る | 採用 (2026-09) |
 | [0391](./0391-language-mismatch-mark-on-created-event.md) | 抽出の言語の事後検査は「印を付けるだけ」にし、`created` イベントの `meta.languageMismatch` に出す | 採用 (2026-09) |
+| [0394](./0394-activity-clock-writes-use-memorys-own-subject.md) | 活動時計の書き込みは、`ctx` ではなく記憶自身の subject の `T + S_x` を使う（ADR 0353 の負債1の解消） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
