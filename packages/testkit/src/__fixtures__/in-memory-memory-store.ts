@@ -1368,6 +1368,11 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （`PostgresMemoryStore.reinforce` と同じ分岐。`ReinforceOptions.nowSeq` の doc
    * コメント参照）。
    */
+  /** ADR 0394: `ReinforceOptions.addOwnSubjectSeq` を読める（`reinforce` の実装を参照）。 */
+  supportsAddOwnSubjectSeq(): boolean {
+    return true;
+  }
+
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     const memory = this.rawGet(ctx, id);
     if (!memory) {

@@ -55,6 +55,7 @@ import {
   readDecayClock,
   readDefaultHalfLifeRecalls,
   readHasSubjectActivityCounters,
+  readSubjectActivitySeq,
   readSubjectActivitySeqs,
 } from "./interfaces/tenant-settings-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
@@ -4068,10 +4069,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （`hasSubjectActivityCounters` が `false`）では `S_x` はどの行でも `0` なので、この項目は付けない
    * （store は相関サブクエリを足さず、今日と同じ SQL のまま）。
    *
-   * 🔴 **引き受けた負債**: `addOwnSubjectSeq` を知らない adapter（`ReinforceOptions` の項目を読まない第三者の
-   * `MemoryStore`）に `true` を渡すと、`S_x` は足されず `T` のまま起点に書かれる。`tenant_subject_activity`
-   * を使うテナントで、その adapter は `reinforce` にこの項目を実装する必要がある
-   * （`ReinforceOptions.addOwnSubjectSeq` の TSDoc、testkit の適合テスト）。
+   * ⭐ **`addOwnSubjectSeq` を渡すのは、store が `MemoryStore.supportsAddOwnSubjectSeq?()` で `true` を
+   * 宣言しているときだけ**（第三者 adapter の挙動を今より悪くしないため）。宣言の無い store には、
+   * ADR 0394 以前と同じ `T + S_ctx` をフラグなしの `nowSeq` として渡す。
+   *
+   * 🔴 **引き受けた負債**: 宣言の無い store では、強化される Memory の subject が `ctx.subjectId` とずれる呼び出しで、
+   * ADR 0394 以前と同じ取り違え（起点が `ctx` の subject の `S_x` で書かれる）が残る。直すには、その adapter が
+   * `reinforce` に `addOwnSubjectSeq` を実装して宣言すること（`ReinforceOptions.addOwnSubjectSeq`・
+   * `MemoryStore.supportsAddOwnSubjectSeq` の TSDoc、testkit の適合テスト）。
    */
   async function resolveReinforceOptions(ctx: Ctx): Promise<ReinforceOptions | undefined> {
     const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
@@ -4079,10 +4084,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return undefined;
     }
     const nowSeq = await readActivitySeq(deps.tenantSettingsStore, ctx);
-    if (await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx)) {
+    if (!(await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx))) {
+      return { nowSeq };
+    }
+    // store が `addOwnSubjectSeq` を読めると宣言しているときだけ、`T` とフラグを渡す。
+    if (deps.memoryStore.supportsAddOwnSubjectSeq?.() === true) {
       return { nowSeq, addOwnSubjectSeq: true };
     }
-    return { nowSeq };
+    // 宣言の無い store（フラグを知らない第三者 adapter）には、今までどおり `T + S_ctx`
+    // （ctx の subject の `S_x`。ctx に subject が無ければ `T` のみ）をそのまま `nowSeq` として渡す。
+    // 対象の subject が ctx とずれる呼び出しでは食い違う値のままだが、ADR 0394 以前より悪くならない。
+    const ctxSubjectSeq =
+      ctx.subjectId === undefined
+        ? 0
+        : await readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId);
+    return { nowSeq: nowSeq + ctxSubjectSeq };
   }
 
   async function buildNewMemoriesForCandidates(

@@ -1229,6 +1229,14 @@ export class PostgresMemoryStore implements MemoryStore {
     return rowToMemory(result.rows[0] as unknown as MemoryRow);
   }
 
+  /**
+   * ADR 0394: `ReinforceOptions.addOwnSubjectSeq` を読める（`reinforce`/`reinforceMany`/
+   * `recordUsageAndReinforce` が、行ごとに Memory 自身の subject の `S_x` を UPDATE の中で足す）。
+   */
+  supportsAddOwnSubjectSeq(): boolean {
+    return true;
+  }
+
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる（mapping.ts の
