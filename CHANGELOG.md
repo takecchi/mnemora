@@ -127,6 +127,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る。`ACCESS EXCLUSIVE` ではない）。100万行で構築を含む migration が約1.2秒（1回だけの測定）。
   ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
 
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
+  - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
+  - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
+
 ---
 
 ## [1.1.0] - 2026-09-30
