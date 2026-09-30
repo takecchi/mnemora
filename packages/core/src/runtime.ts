@@ -1301,6 +1301,20 @@ export interface TickOptions {
    * （`attempts` が変わらないので `complete` の CAS が通る。`processed` に数えられ、`leaseConflicts` は空）。
    * 別の `tick` が取った場合は、遅れた側が `leaseConflicts` に載る（#1092 の形）。リースを超えたこと自体を
    * 名乗る口は無い。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ。
+   *
+   * ⚠ **2026-09-30 追記（今の振る舞いを書いたもの）: リースはバッチの claim 時点から数える。後ろのジョブは、自分の番が来る前に切れうる。**
+   * `tick` は {@link TickOptions.limit}（既定 50）件を1回の `claimBatch` で一括して claim する（全件の `claimed_at` は同じ `now`）。
+   * そのあと1件ずつ順に処理するので、各ジョブのリースは**そのジョブの処理開始からではなく、バッチの claim 時点から**減っていく。
+   * 前のジョブに時間が掛かると、後ろのジョブは自分の処理が始まる前に、あるいは始まって間もなく切れる。1件あたりの処理時間が
+   * `leaseMs` より短くても、`limit` 件の合計が `leaseMs` を超えれば起きる。切れたジョブは別の `tick` が再 claim できる。
+   * そのとき **provider 呼び出しと書き込み（`embed` なら埋め込みの呼び出しと `upsert`）は二重に走る**——CAS（ADR 0142）が
+   * 無害にするのは完了の記録だけで、遅れて `complete` した側は {@link TickResult.leaseConflicts} に載る。
+   * 結果は壊れない（2件とも完了し、`attempts` が進む）が、二重の呼び出し分の費用は掛かる。`embed` は上書きなので冪等、
+   * `extract` は再配達の確認（`OutboxStore` の doc）、`reflect` は再配達で2件になりうる（`Runtime.reflect` の doc）。
+   * 避けるには、`leaseMs` を「`limit` 件を最後まで処理する時間」より長く取るか、`limit` を小さくする。
+   * `tick` はジョブの所要時間を知らないので、この関係を検査しない。各ジョブの前にリースを延ばす口も `OutboxStore` には無い。
+   * 【実測 2026-09-30】`packages/core/src/__tests__/tick-batch-lease-expiry.test.ts`（fake の store で、A が2件を claim →
+   * 2件目の処理中に時計を進めて別の `tick` B が2件目を再 claim → A の `complete` は `leaseConflicts`、provider 呼び出しは3回）。
    */
   leaseMs: number;
   /**
@@ -5411,6 +5425,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
       }
       await deps.vectorStore.upsert(ctx, deps.embeddingProvider.space, memory.id, vector);
+      // ⚠ 2026-09-30 追記（今の振る舞いを書いたもの）: `upsert` に成功したあとのこの `ready` の書き込みが
+      // 一時的に失敗しても、下の `catch` は「埋め込みの失敗」と区別しない——`failed` を書いて投げ直す。
+      // 結果: ベクトルは書けているのに記憶は `failed`（`recall` は `not_indexed{ reason: "failed" }` と名乗る）、
+      // ジョブは `fail()` で終端になる（Phase 1 に自動リトライは無い）ので、次の `tick` では回復しない。
+      // 戻すには `reembed({ statuses: ["failed"], … })` で積み直して `tick` する（`failed → ready` は許される）。
+      // 直さない理由: この `catch` の中の `failed` は「ここまでの store 呼び出しのどれかが落ちた」を等しく扱う
+      // 唯一の口で、`ready` だけ分けても、ジョブが終端になる点（＝リトライが無い点）は変わらず、
+      // 一時的な失敗が1件の記憶を `reembed` が要る状態にする、という同じ形が `memoryStore.get` などにもある。
+      // 【実測 2026-09-30】`packages/core/src/__tests__/embed-job-ready-write-fails.test.ts`。
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {
       // Issue #1200 / ADR 0359: abort による reject は、埋め込みの失敗と同じ顔にしない

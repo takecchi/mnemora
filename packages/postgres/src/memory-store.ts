@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import {
@@ -154,6 +155,74 @@ async function assertNotForgottenForUpdate(
   if (forgottenIds.length > 0) {
     throw new SourceMemoryForgottenError(method, forgottenIds);
   }
+}
+
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/**
+ * `markContestedGroup` / `resolveContestedGroup` の UPDATE が期待より少ない行数しか返さなかった
+ * とき、旧実装（メンバーごとの UPDATE）が投げていたものと同じエラーを作る
+ * （Issue #1449 PR1、ADR 0401）。呼び出し側は「入力順で最初に更新されなかった id」を渡す。
+ */
+async function conflictAfterEmptyUpdate(
+  tx: Tx,
+  ctx: Ctx,
+  id: MemoryId,
+  expected: MemoryStatus,
+): Promise<Error> {
+  const current = await tx.execute(sql`
+    SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+  `);
+  if (current.rows.length === 0) {
+    return new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+  }
+  const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
+  return new MemoryStatusConflictError(id, expected, observedStatus);
+}
+
+/**
+ * `memory_events` へ複数行を**1文**で入れ、**入力と同じ順**で返す（Issue #1449 PR1、ADR 0401）。
+ * 行の id は JS 側で採番し、`RETURNING` の順序に依存せず id で入力順へ戻す。
+ * 各列の式は、旧実装のメンバーごとの `INSERT ... VALUES` と同じ（`at` は `toPgTimestamp` の
+ * 文字列を `timestamptz` へ、`actor`/`meta` は `jsonb` へ）。
+ */
+async function insertMemoryEventsBatch(
+  tx: Tx,
+  ctx: Ctx,
+  events: ReadonlyArray<NewMemoryEvent>,
+): Promise<MemoryEvent[]> {
+  const eventIds = events.map(() => randomUUID());
+  // 1つの JSON 配列（jsonb）で渡し、`jsonb_to_recordset` で列へ開く。`meta` は群の大きさに比例して
+  // 大きくなりうる（多者間の検出は全メンバーの id を載せる）ので、列ごとの `text[]` に JSON 文字列を
+  // 詰めて `::jsonb` へキャストする形（二重のエスケープと二重の構文解析）は採らない。
+  const payload = JSON.stringify(
+    events.map((e, i) => ({
+      id: eventIds[i],
+      memory_id: e.memoryId ?? null,
+      kind: e.kind,
+      at: toPgTimestamp(e.at ?? new Date()),
+      actor: e.actor,
+      digest_snapshot: e.digestSnapshot ?? null,
+      size_before_bytes: e.sizeBeforeBytes ?? null,
+      meta: e.meta,
+    })),
+  );
+  const result = await tx.execute(sql`
+    INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+    SELECT e.id, ${ctx.tenantId}, e.memory_id, e.kind, e.at, e.actor, e.digest_snapshot, e.size_before_bytes, e.meta
+    FROM jsonb_to_recordset(${payload}::jsonb) AS e(
+      id uuid, memory_id uuid, kind text, at timestamptz, actor jsonb,
+      digest_snapshot text, size_before_bytes integer, meta jsonb
+    )
+    RETURNING *
+  `);
+  const byId = new Map<string, MemoryEvent>(
+    result.rows.map((row) => {
+      const event = rowToMemoryEvent(row as unknown as MemoryEventRow);
+      return [event.id as string, event] as const;
+    }),
+  );
+  return eventIds.map((id) => byId.get(id)!);
 }
 
 /**
@@ -3199,34 +3268,32 @@ export class PostgresMemoryStore implements MemoryStore {
         }
       }
 
-      const updatedById = new Map<MemoryId, Memory>();
-      for (const id of ids) {
-        const result = await tx.execute(sql`
-          UPDATE memories
-          SET status = 'contested', contested_with_id = NULL, updated_at = now()
-          WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
-            AND (
-              status = 'active'
-              OR (status = 'contested' AND (contested_with_id IS NULL OR contested_with_id = ANY(${sql.param(ids)}::uuid[])))
-            )
-          RETURNING *
-        `);
-        if (result.rows.length === 0) {
-          // FOR UPDATE で既にロックを保持しているため、通常はここへ来ない
-          // （`markContestedPair`/`resolveOrphanedContested` と同じ防御的な二重チェック）。
-          const current = await tx.execute(sql`
-            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
-          `);
-          const observedStatus =
-            current.rows.length === 0
-              ? null
-              : (current.rows[0] as unknown as { status: MemoryStatus }).status;
-          if (observedStatus === null) {
-            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
-          }
-          throw new MemoryStatusConflictError(id, "active", observedStatus);
-        }
-        updatedById.set(id, rowToMemory(result.rows[0] as unknown as MemoryRow));
+      // Issue #1449 PR1（ADR 0401）: メンバーごとの UPDATE をやめ、全員を1文で更新する
+      // （文の数を N に依らず一定にする）。SET も WHERE の3条件も全員で同じ式なので、
+      // `id = ANY(...)` に畳んでも、1件ずつ打った結果と更新される行の集合は同じ。
+      const result = await tx.execute(sql`
+        UPDATE memories
+        SET status = 'contested', contested_with_id = NULL, updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+          AND (
+            status = 'active'
+            OR (status = 'contested' AND (contested_with_id IS NULL OR contested_with_id = ANY(${sql.param(ids)}::uuid[])))
+          )
+        RETURNING *
+      `);
+      // RETURNING の順序には依存しない——id で引き、以降は入力順（`ids`）で使う。
+      const updatedById = new Map<MemoryId, Memory>(
+        result.rows.map((row) => {
+          const memory = rowToMemory(row as unknown as MemoryRow);
+          return [memory.id, memory] as const;
+        }),
+      );
+      if (updatedById.size !== ids.length) {
+        // FOR UPDATE で既にロックを保持しているため、通常はここへ来ない
+        // （`markContestedPair`/`resolveOrphanedContested` と同じ防御的な二重チェック）。
+        // 旧実装は入力順に1件ずつ打ち、最初に0行だった id を名指しした——同じ id を指す。
+        const failedId = ids.find((id) => !updatedById.has(id))!;
+        throw await conflictAfterEmptyUpdate(tx, ctx, failedId, "active");
       }
 
       // ADR 0381 決定1: 「完全グラフ」は「一致した全員を結ぶ」ではなく「その中で
@@ -3238,44 +3305,32 @@ export class PostgresMemoryStore implements MemoryStore {
       // 重なる**順序対**（a→b と b→a の両方）を一度に生成する——`WHERE` が対称なので、
       // 一致する各無向対について2行（両方向）が自然に出る。穴A・合併で既に存在する行は
       // `ON CONFLICT DO NOTHING` で冪等に無視する。
+      //
+      // Issue #1449 PR1（ADR 0401）: 旧実装は実表 `memories a` × `memories b` を直接結合し、
+      // N² の組それぞれで b 側の実表を引いていた（鎖1000で結合だけ1.7秒）。対象の memories を
+      // `MATERIALIZED` の CTE で**1回だけ**読み、その N 行どうしを結合する。述語（半開区間の式。
+      // `timestamptz` のマイクロ秒精度の比較）は1文字も変えていない——作る行の集合は同じ。
       await tx.execute(sql`
+        WITH m AS MATERIALIZED (
+          SELECT id, valid_from, valid_until
+          FROM memories
+          WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+        )
         INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
         SELECT gen_random_uuid(), ${ctx.tenantId}, a.id, b.id, 'contradicts'
-        FROM memories a
-        JOIN memories b
-          ON b.tenant_id = a.tenant_id
-         AND b.id <> a.id
-         AND b.id = ANY(${sql.param(ids)}::uuid[])
-        WHERE a.tenant_id = ${ctx.tenantId}
-          AND a.id = ANY(${sql.param(ids)}::uuid[])
-          AND (
-            a.valid_from IS NULL OR b.valid_until IS NULL OR a.valid_from < b.valid_until
-          )
-          AND (
-            b.valid_from IS NULL OR a.valid_until IS NULL OR b.valid_from < a.valid_until
-          )
+        FROM m a
+        JOIN m b
+          ON b.id <> a.id
+         AND (a.valid_from IS NULL OR b.valid_until IS NULL OR a.valid_from < b.valid_until)
+         AND (b.valid_from IS NULL OR a.valid_until IS NULL OR b.valid_from < a.valid_until)
         ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
       `);
 
-      const events: MemoryEvent[] = [];
-      for (const m of normalized) {
-        const eventResult = await tx.execute(sql`
-          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
-          VALUES (
-            gen_random_uuid(),
-            ${ctx.tenantId},
-            ${m.event.memoryId},
-            ${m.event.kind},
-            ${toPgTimestamp(m.event.at ?? new Date())},
-            ${JSON.stringify(m.event.actor)}::jsonb,
-            ${m.event.digestSnapshot ?? null},
-            ${m.event.sizeBeforeBytes ?? null},
-            ${JSON.stringify(m.event.meta)}::jsonb
-          )
-          RETURNING *
-        `);
-        events.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
-      }
+      const events = await insertMemoryEventsBatch(
+        tx,
+        ctx,
+        normalized.map((m) => m.event),
+      );
 
       return { members: ids.map((id) => updatedById.get(id)!), events };
     });
@@ -3374,31 +3429,33 @@ export class PostgresMemoryStore implements MemoryStore {
         throw new ContestedGroupMembershipMismatchError(missing[0] as MemoryId);
       }
 
-      const updatedById = new Map<MemoryId, Memory>();
-      for (const m of normalized) {
-        const result = await tx.execute(sql`
-          UPDATE memories
-          SET status = ${m.status},
-              contested_with_id = NULL,
-              superseded_by_id = COALESCE(${m.supersededById ?? null}, superseded_by_id),
-              updated_at = now()
-          WHERE tenant_id = ${ctx.tenantId} AND id = ${m.id} AND status = 'contested'
-          RETURNING *
-        `);
-        if (result.rows.length === 0) {
-          const current = await tx.execute(sql`
-            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${m.id} LIMIT 1
-          `);
-          const observedStatus =
-            current.rows.length === 0
-              ? null
-              : (current.rows[0] as unknown as { status: MemoryStatus }).status;
-          if (observedStatus === null) {
-            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${m.id}`);
-          }
-          throw new MemoryStatusConflictError(m.id, "contested", observedStatus);
-        }
-        updatedById.set(m.id, rowToMemory(result.rows[0] as unknown as MemoryRow));
+      // Issue #1449 PR1（ADR 0401）: メンバーごとの UPDATE を `UPDATE ... FROM unnest(...)` の1文に
+      // まとめる。`supersededById` の COALESCE も、メンバーごとの値を配列で渡して同じ式のまま。
+      const result = await tx.execute(sql`
+        UPDATE memories AS t
+        SET status = v.status,
+            contested_with_id = NULL,
+            superseded_by_id = COALESCE(v.superseded_by_id, t.superseded_by_id),
+            updated_at = now()
+        FROM unnest(
+          ${sql.param(ids)}::uuid[],
+          ${sql.param(normalized.map((m) => m.status))}::text[],
+          ${sql.param(normalized.map((m) => m.supersededById ?? null))}::uuid[]
+        ) AS v(id, status, superseded_by_id)
+        WHERE t.tenant_id = ${ctx.tenantId} AND t.id = v.id AND t.status = 'contested'
+        RETURNING t.*
+      `);
+      // RETURNING の順序には依存しない（id で引く）。
+      const updatedById = new Map<MemoryId, Memory>(
+        result.rows.map((row) => {
+          const memory = rowToMemory(row as unknown as MemoryRow);
+          return [memory.id, memory] as const;
+        }),
+      );
+      if (updatedById.size !== ids.length) {
+        // 旧実装は入力順に1件ずつ打ち、最初に0行だった id を名指しした——同じ id を指す。
+        const failedId = ids.find((id) => !updatedById.has(id))!;
+        throw await conflictAfterEmptyUpdate(tx, ctx, failedId, "contested");
       }
 
       // ADR 0381 決定3: `both_active`/`supersede` のどちらでも、このメンバー全員を
@@ -3413,25 +3470,11 @@ export class PostgresMemoryStore implements MemoryStore {
           AND kind = 'contradicts'
       `);
 
-      const events: MemoryEvent[] = [];
-      for (const m of normalized) {
-        const eventResult = await tx.execute(sql`
-          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
-          VALUES (
-            gen_random_uuid(),
-            ${ctx.tenantId},
-            ${m.event.memoryId},
-            ${m.event.kind},
-            ${toPgTimestamp(m.event.at ?? new Date())},
-            ${JSON.stringify(m.event.actor)}::jsonb,
-            ${m.event.digestSnapshot ?? null},
-            ${m.event.sizeBeforeBytes ?? null},
-            ${JSON.stringify(m.event.meta)}::jsonb
-          )
-          RETURNING *
-        `);
-        events.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
-      }
+      const events = await insertMemoryEventsBatch(
+        tx,
+        ctx,
+        normalized.map((m) => m.event),
+      );
 
       return { members: ids.map((id) => updatedById.get(id)!), events };
     });
