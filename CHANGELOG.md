@@ -461,6 +461,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **文書だけの訂正（挙動は変えない）**: (1) `probeTrigramLexicalSupport` の doc の「この関数自身は投げない」を、実装に合わせた（先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、接続の失敗・権限の不足で reject する）。(2) `ScoringInput.similarity` の doc の「0〜1」を、負になりうると直した。`MemoryStatusConflictError` の doc の `instanceof` を `isMemoryStatusConflictError` に追随させた。(3) `SQL_ASCII` の DB では、migration 0025 の `left(content, 150000)` が文字ではなくバイトで切ることを、現行の doc に書いた（ADR 0364 に追記。実測した。migration の SQL は出荷済みなので変えていない）。(4) `docs/recall.md` に `stage_skipped` の `stage: 'relation'`・`reason: 'relation_store_unavailable'` を足し、`docs/architecture.md` の 2つの片（`RelationKind` のドラフトの囲み、`OutboxLeaseConflictError` の宣言）を直した。
 
+- **`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding` を直に呼んで `signal` を abort したとき、reject の値を `signal.reason` に揃えた**（[ADR 0428](./docs/decisions/0428-provider-abort-reason-and-error-guards.md)。ADR 0359 決定4の約束に実装を合わせた）。
+  - openai・anthropic: reject の値が SDK の `APIUserAbortError` から `signal.reason` に**変わる**（abort 済みなら SDK を呼ばずに reject。SDK の再試行待ち＝429 の `retry-after` の最中でも abort で即座に切れる。以前は約3秒待っていた）。local-embedding: モデルの読み込み中・再試行の待ちも `signal` ごとに切れる（読み込みそのものは止まらず、同じ読み込みを待つ別の呼び出しは巻き添えにならない）。
+  - 足したもの: `isOpenAILLMProviderError`・`isAnthropicLLMProviderError`（`instanceof` を使わない判定関数。ADR 0418 の作法）。3つの provider の README に `signal` の振る舞いを追記し、openai README の `kind` の列挙に `schema_unsupported` を足した。公開 API は追加のみ。
+
 ---
 
 ## [1.1.0] - 2026-09-30

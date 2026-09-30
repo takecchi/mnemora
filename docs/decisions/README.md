@@ -439,5 +439,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0425](./0425-migrate-warns-on-ledger-drift.md) | `runMigrations` は、台帳と手元のファイルのずれを見つけたら警告を出して続行する | 採用 (2026-09) |
 | [0426](./0426-in-memory-erase-tenant-postgres-alignment.md) | testkit のインメモリ `eraseTenant` を Postgres 実装に揃える（`tenant_subject_activity` の行数と、埋め込みの CASCADE） | 採用 (2026-09) |
 | [0427](./0427-events-purged-at-millisecond.md) | `events_purged` の `at` を SQL の `now()` から JS 側の時刻（`toPgTimestamp`）へ替える | 採用 (2026-09) |
+| [0428](./0428-provider-abort-reason-and-error-guards.md) | provider を直に呼んだときの abort の reject を `signal.reason` に揃え、openai・anthropic の例外に判定関数を足す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
