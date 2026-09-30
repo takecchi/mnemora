@@ -9,6 +9,7 @@ import {
   type PurgeCompletedJobsOptions,
   type PurgeCompletedJobsResult,
 } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import { assertQueryDate } from "./query-check.js";
 
 /**
@@ -42,6 +43,7 @@ export class InMemoryOutboxStore implements OutboxStore {
   constructor(private readonly jobs: OutboxJobRecord[]) {}
 
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
+    assertWellFormedCtx(ctx);
     // `PostgresOutboxStore` は `limit` を生 SQL の `LIMIT` にそのまま渡すため、負数を
     // 渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる（クエリを
     // 一切実行しない——claim の副作用も起きない）。ここで同じ入力を検査せずに
@@ -126,6 +128,10 @@ export class InMemoryOutboxStore implements OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
+    // `PostgresOutboxStore.complete` は `at` を `timestamptz` として送るため、Invalid Date は行の有無に
+    // 関わらずクエリの時点で拒まれる（`22007`）。同じ入力を、探す前に拒む。
+    assertQueryDate("complete", "opts.at", opts?.at);
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -138,8 +144,8 @@ export class InMemoryOutboxStore implements OutboxStore {
     if ((job.failedAt ?? null) !== null) {
       return;
     }
-    // Issue #1237: 省略時は壁時計。
-    job.completedAt = opts?.at ?? new Date();
+    // Issue #1237: 省略時は壁時計。Issue #1108: 呼び手の `at` と同じ Date を保存しない。
+    job.completedAt = opts?.at ? new Date(opts.at) : new Date();
   }
 
   async fail(
@@ -149,6 +155,9 @@ export class InMemoryOutboxStore implements OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
+    // `complete` と同じ理由（Invalid Date は Postgres が `22007` で拒む）。
+    assertQueryDate("fail", "opts.at", opts?.at);
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -162,8 +171,11 @@ export class InMemoryOutboxStore implements OutboxStore {
       return;
     }
     // Issue #1237: 省略時は壁時計。⚠ `availableAt` の再計算はしない（interface の doc 参照）。
-    job.failedAt = opts?.at ?? new Date();
-    job.lastError = error;
+    // Issue #1108: 呼び手の `at` と同じ Date を保存しない。
+    job.failedAt = opts?.at ? new Date(opts.at) : new Date();
+    // Postgres の `text` は NUL（U+0000）を保存できない（22021）。`PostgresOutboxStore.fail` は
+    // 目に見える6文字の `\u0000` へ置き換えて書く——同じ置換をする。
+    job.lastError = error.replaceAll("\u0000", "\\u0000");
   }
 
   /**
@@ -177,6 +189,7 @@ export class InMemoryOutboxStore implements OutboxStore {
    * 残っていなくても `true` を返すことがある。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     const matchingIndexes: number[] = [];
     for (let i = 0; i < this.jobs.length && matchingIndexes.length < opts.limit; i++) {
       if (this.jobs[i]!.tenantId === ctx.tenantId) {
@@ -202,6 +215,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     ctx: Ctx,
     opts: PurgeCompletedJobsOptions,
   ): Promise<PurgeCompletedJobsResult> {
+    assertWellFormedCtx(ctx);
     assertQueryDate("purgeCompletedJobs", "olderThan", opts.olderThan);
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeCompletedJobs: limit must be an integer (got ${opts.limit})`);

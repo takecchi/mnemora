@@ -130,6 +130,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly labels;
     private readonly memoryLabels;
     readonly relations: StoredRelation[];
+    private readonly memoriesDeletedListeners;
+    onMemoriesDeleted(listener: (tenantId: string, memoryIds: readonly MemoryId[]) => void): void;
     private labelKey;
     private memoryLabelKey;
     private upsertProposedLabels;
@@ -149,11 +151,13 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
+        abortIfSuperseded?: ReadonlyArray<MemoryId>;
     }): Promise<{
         memory: Memory;
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
+    private assertNoneSuperseded;
     private captureWriteState;
     createMemoriesWithOutboxAndEvents(ctx: Ctx, news: ReadonlyArray<{
         input: NewMemory;
@@ -164,6 +168,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>) => NewMemoryEvent, opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        abortIfSuperseded?: ReadonlyArray<MemoryId>;
     }): Promise<{
         written: Array<{
             index: number;
@@ -204,6 +209,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>, opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        abortIfSuperseded?: ReadonlyArray<MemoryId>;
+        abortIfAllConflicted?: boolean;
         buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }): Promise<{
         created: Array<{

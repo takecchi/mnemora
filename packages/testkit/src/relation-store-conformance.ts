@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, RelationStore } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /** {@link describeRelationStoreConformance} に渡す設定。 */
 export interface RelationStoreConformanceOptions {
@@ -235,6 +240,40 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       }
     }
 
+    // 列挙の外の kind（`RelationKind` の union に無い値）。Postgres は `memory_relations.kind` の CHECK
+    // （`0026_memory_relations.sql`）で拒むが、その違反を生の DB エラーのまま漏らさず、分かりやすい例外
+    // （`relation kind` を含む文面）で INSERT の前に断る。in-memory 実装も同じく断る。
+    it("列挙の外の kind を渡す link は、分かりやすい例外で拒まれ、行は書かれない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+
+      const error = await store.link(ctx, "not-a-kind" as unknown as "contradicts", a, b).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/relation kind/);
+      expect((error as Error).message).not.toMatch(/Failed query|check constraint|violates/i);
+      expect(await store.listRelated(ctx, a)).toEqual([]);
+    });
+
+    it("listRelated が返した createdAt を呼び手が書き換えても、store 側の行は変わらない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+
+      await store.link(ctx, "contradicts", a, b);
+      const first = await store.listRelated(ctx, a);
+      const original = first[0]!.createdAt.getTime();
+      first[0]!.createdAt.setTime(0);
+
+      const second = await store.listRelated(ctx, a);
+      expect(second[0]!.createdAt.getTime()).toBe(original);
+    });
+
     it("N件の完全グラフ（3件）を双方向で張ると、どのメンバーからも残り2件が引ける", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -399,5 +438,25 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect(asB[0]).toEqual([]);
       expect(asB[1]!.map((r) => r.memoryId)).toEqual([b2]);
     });
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "listRelated の ctx.tenantId",
+            () => store.listRelated({ tenantId: value }, randomUUID()),
+          ],
+          [
+            "listRelated の ctx.subjectId",
+            () => store.listRelated({ tenantId: "tenant-wf", subjectId: value }, randomUUID()),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
+      });
+    }
   });
 }

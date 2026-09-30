@@ -40,7 +40,9 @@
  *   `opts.now`（既定 `new Date()`）——`Runtime` のメソッドではなく
  *   `{ memoryStore, tenantSettingsStore }` だけを受け取る独立した部品であり、
  *   `RuntimeDeps.clock` を受け取らない（Issue #1237 コメント参照）。この部品が積む
- *   `events_purged` イベントの `at` も、Postgres では SQL の `now()` のまま。
+ *   `events_purged` イベントの `at` も `clock` の時刻ではない——Postgres も testkit の
+ *   fixture も、store の中の JS の壁時計（`new Date()`）で積む（Postgres は SQL の `now()`
+ *   だったが、ADR 0427 でミリ秒に揃えるため JS 側の時刻へ替えた）。
  *
  * `MemoryStore.create{Observation,Memory}WithOutbox`・`supersedeWithNewMemories?` の `opts`・
  * `requeueEmbedJobs` の `writeOpts`・`OutboxStore.complete`/`fail` の `opts`・

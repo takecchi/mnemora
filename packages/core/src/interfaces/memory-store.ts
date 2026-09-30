@@ -169,6 +169,57 @@ export function isSourceMemoryForgottenError(value: unknown): value is SourceMem
 }
 
 /**
+ * ADR 0420: `createMemoryWithOutbox`/`supersedeWithNewMemories`/`createMemoriesWithOutboxAndEvents` の
+ * `opts.abortIfSuperseded`（に渡した id の1件以上が、書き込みの直前に見直したら `status === "superseded"`
+ * だった）、または `supersedeWithNewMemories` の `opts.abortIfAllConflicted`（`supersede` の対象が
+ * **すべて** CAS に弾かれた）のときに投げる。{@link SourceMemoryForgottenError} を superseded・全件 CAS
+ * 弾かれにも広げたもの。
+ *
+ * **投げられた時点で、この呼び出しは一切何も書いていない**——`news`（新しい Memory）も `supersede`・
+ * `created` イベントも rollback される。どちらの欄も渡さなかった呼び出しでは、この例外は絶対に
+ * 投げられない（今日どおり）。
+ *
+ * `changed` は「見直した時点で `active` でなかった（弾いた）id と、そのとき見えた `status`」の一覧。
+ * `abortIfSuperseded` の場合は superseded だったものだけ、`abortIfAllConflicted` の場合は
+ * 弾かれた全件が入る。渡した順序を保つ保証は無い。
+ *
+ * 🔴 `@mnemora/postgres` は、見直しを書き込みと同一トランザクションの `SELECT … FOR UPDATE`
+ * （`abortIfSuperseded`）と、`supersede` の CAS の結果（`abortIfAllConflicted`。throw で tx ごと巻き戻す）で
+ * 行う。`packages/testkit` の `InMemoryMemoryStore` も実装する。この欄を実装しない adapter は
+ * 渡されても無視する——呼び出し側（runtime）の「LLM 呼び出しの直後の読み直し」だけが保護になる（残る窓あり）。
+ */
+export class SourceMemoryStatusChangedError extends Error {
+  /** 判別子。分岐は `instanceof` ではなく {@link isSourceMemoryStatusChangedError} で行う（ADR 0418）。 */
+  readonly kind = "source_memory_status_changed" as const;
+  constructor(
+    readonly method:
+      "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+    readonly changed: Array<{ id: MemoryId; observedStatus: MemoryStatus }>,
+  ) {
+    super(
+      `MemoryStore.${method}: aborted — ${changed.length} source memories were no longer active ` +
+        `(${changed.map((c) => `${c.id}:${c.observedStatus}`).join(", ")}) under ` +
+        "opts.abortIfSuperseded / opts.abortIfAllConflicted. " +
+        "Nothing was written (news and supersede both rolled back).",
+    );
+    this.name = "SourceMemoryStatusChangedError";
+  }
+}
+
+/**
+ * 受け取ったものが {@link SourceMemoryStatusChangedError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ */
+export function isSourceMemoryStatusChangedError(
+  value: unknown,
+): value is SourceMemoryStatusChangedError {
+  return matchesStoreErrorKind(
+    value,
+    "source_memory_status_changed",
+    "SourceMemoryStatusChangedError",
+  );
+}
+
+/**
  * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * （Issue #243 続き、ADR 0136 決定3の設計メモを実装した）: `status: 'contested'` を
  * **対向（`contestedWithId`）無しで**書き込もうとしたときに、`updateStatus` /
@@ -561,11 +612,13 @@ export interface MemoryStore {
    *   `text`・`content`・`speaker`・`data` などは全部 `payload` に入る**ので、
    *   `observe({ kind: "utterance", text: "…\uD83D" })`（サロゲートペアの間で切った文字列）は
    *   Observation を1件も書かずに例外になる。
-   * - `PostgresMemoryStore`、`text` 列の欄（`subjectId`/`externalId`。実測したのはこの2つ）: 例外を投げず、
-   *   U+FFFD（置換文字）に置き換えて保存する（node-postgres が UTF-8 へエンコードするときに
-   *   置き換える。`createMemory` の `text` 列の欄と同じ）。
-   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`:
-   *   どの欄でも例外を投げず、入力をそのまま保持する。
+   * - ⭐ **識別子の欄（`subjectId`・`externalId`、`ctx.tenantId`・`ctx.subjectId`）は、孤立サロゲートも NUL も書く前に断る**
+   *   （[ADR 0423](../../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)。`MalformedIdentifierError`、
+   *   `kind: "malformed_identifier"`。正規化はしない）。`PostgresMemoryStore` と `InMemoryMemoryStore` は同じ判定
+   *   （`assertWellFormedIdentifier`）を入口で掛ける。**以前は**、`PostgresMemoryStore` は U+FFFD に置き換えて保存し、
+   *   `InMemoryMemoryStore` は入力をそのまま保持していた。
+   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、本文の欄:
+   *   例外を投げず、入力をそのまま保持する（`FakeMemoryStore` は識別子の欄も断らない。core の `Runtime` の入口が先に断る）。
    *
    * `createObservationWithOutbox` も同じである。今の振る舞いは
    * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
@@ -629,6 +682,8 @@ export interface MemoryStore {
    * ユニット）を含む文字列を渡したときの挙動は、adapter によって異なる。Postgres では、
    * 欄の列の型によっても異なる（Issue #816・#1075、実測。契約として現状を記録するだけで、
    * この非対称を無くす変更は本 doc コメントの対象外）。**
+   * - ⭐ `subjectId`（識別子）は、孤立サロゲートも NUL も書く前に断る（ADR 0423。上の `createObservation` の節と同じ）。
+   *   以下は `subjectId` 以外の欄の話である。
    * - `PostgresMemoryStore`、`text` 列の欄（`content`/`subjectId`/`tags`/`digest`）:
    *   例外を投げない。node-postgres（`pg`）ドライバが JS 文字列を UTF-8 バイト列へ
    *   エンコードする際、対をなさないサロゲートを静かに U+FFFD（置換文字）へ置換する
@@ -700,12 +755,26 @@ export interface MemoryStore {
    * LLM 呼び出しの直後・この呼び出しの直前に行う `getMany` の見直し（残る窓あり）だけで
    * 保護される。第三者の adapter がこの欄を実装するかどうかは任意——実装しなくても
    * 型は壊れない（無視されるだけ）。
+   *
+   *
+   * ⭐ **ADR 0420: `opts.abortIfSuperseded` を足した**（`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`
+   * にも同じ欄）。`abortIfForgotten` を **superseded にも広げた**もの——`runtime.reflect` が、材料にした Memory を
+   * LLM 呼び出しの間に別の記憶で置き換えられても（`reextract` など）、退けた古い本文から作った内省を `active` で
+   * 書いてしまう競合を閉じる。非空の配列を渡すと、書き込みの前に（`abortIfForgotten` と同じ `SELECT … FOR UPDATE`
+   * で）その id の `status` を見直し、1件でも `"superseded"` なら何も書かずに
+   * {@link SourceMemoryStatusChangedError} を投げる。空配列・省略時は今日どおり。
+   * **`abortIfForgotten` の見直しが先**（forgotten を含めば {@link SourceMemoryForgottenError}）。
+   * `@mnemora/postgres` と `InMemoryMemoryStore` は実装し、実装しない adapter は無視する（任意）。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
@@ -1329,6 +1398,23 @@ export interface MemoryStore {
    *   `createdEventsWritten` は付けない。
    * - 🔴 **名乗りは原子性の証拠ではない。**名乗るのにトランザクションを張らない adapter は、この機構では見抜けない
    *   （適合テストが `createdEventsWritten` と「`created` が落ちたら `news`/`supersede` も残らない」を固定する）。
+   *
+   *
+   * ⭐ **ADR 0420: `opts.abortIfSuperseded` を足した**（`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`
+   * にも同じ欄）。`abortIfForgotten` を **superseded にも広げた**もの——`runtime.reflect` が、材料にした Memory を
+   * LLM 呼び出しの間に別の記憶で置き換えられても（`reextract` など）、退けた古い本文から作った内省を `active` で
+   * 書いてしまう競合を閉じる。非空の配列を渡すと、書き込みの前に（`abortIfForgotten` と同じ `SELECT … FOR UPDATE`
+   * で）その id の `status` を見直し、1件でも `"superseded"` なら何も書かずに
+   * {@link SourceMemoryStatusChangedError} を投げる。空配列・省略時は今日どおり。
+   * **`abortIfForgotten` の見直しが先**（forgotten を含めば {@link SourceMemoryForgottenError}）。
+   * `@mnemora/postgres` と `InMemoryMemoryStore` は実装し、実装しない adapter は無視する（任意）。
+   *
+   * ⭐ **ADR 0420: `opts.abortIfAllConflicted: true`** を足した——`supersede` の対象が**すべて** CAS に弾かれた
+   * （`conflicted.length === supersede.length`、かつ `supersede` が空でない）ときは、`news`・`created` イベントごと
+   * トランザクションを巻き戻し、弾かれた全件を載せた {@link SourceMemoryStatusChangedError} を投げる。
+   * `runtime.consolidate` が、同じ ids の consolidate が同時に走ったときに統合先だけが残る（同じ内容の統合記憶が
+   * 2件 active になる）のを防ぐ。**1件でも CAS を通れば今までどおりの部分成功**（`conflicted` に積んで commit）。
+   * 省略・`false` は今日どおり。`reextract` は渡さない（範囲外）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -1342,6 +1428,8 @@ export interface MemoryStore {
     opts?: {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      abortIfAllConflicted?: boolean;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     },
   ): Promise<{
@@ -1400,6 +1488,16 @@ export interface MemoryStore {
    * 空配列・省略時は見直しを行わない。`@mnemora/postgres` は同一トランザクションの `SELECT … FOR UPDATE` で実装し、
    * `packages/testkit` の `InMemoryMemoryStore` は `createMemoryWithOutbox` と同じく**実装しない**（渡しても無視）。
    * このメソッドは 1.2.0 で未リリースなので、引数を足しても既存の第三者 adapter を壊さない（ADR 0416）。
+   *
+   *
+   * ⭐ **ADR 0420: `opts.abortIfSuperseded` を足した**（`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`
+   * にも同じ欄）。`abortIfForgotten` を **superseded にも広げた**もの——`runtime.reflect` が、材料にした Memory を
+   * LLM 呼び出しの間に別の記憶で置き換えられても（`reextract` など）、退けた古い本文から作った内省を `active` で
+   * 書いてしまう競合を閉じる。非空の配列を渡すと、書き込みの前に（`abortIfForgotten` と同じ `SELECT … FOR UPDATE`
+   * で）その id の `status` を見直し、1件でも `"superseded"` なら何も書かずに
+   * {@link SourceMemoryStatusChangedError} を投げる。空配列・省略時は今日どおり。
+   * **`abortIfForgotten` の見直しが先**（forgotten を含めば {@link SourceMemoryForgottenError}）。
+   * `@mnemora/postgres` と `InMemoryMemoryStore` は実装し、実装しない adapter は無視する（任意）。
    */
   createMemoriesWithOutboxAndEvents?(
     ctx: Ctx,
@@ -1408,7 +1506,11 @@ export interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -2477,14 +2579,15 @@ export interface MemoryStore {
    *
    * **消す表**（Issue #1207 の実測が数え上げた、テナント消去で残っていた表）: `memories`・
    * `observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・
-   * `memory_labels`・`tenant_activity`・`tenant_subject_activity`。**`DB には消去の記録を
+   * `memory_labels`・`memory_relations`・`tenant_activity`・`tenant_subject_activity`
+   * （計10表。`@mnemora/postgres` の `eraseTenantBody` が消す表と同じ）。**`DB には消去の記録を
    * 何も残さない**——`memory_events` に `events_purged` 相当の行を積んだりしない
    * （ADR 0115 決定4「`events_purged` は掃除の対象外」は保持期間の掃除だけの話であり、
    * テナント消去はこの行自体も消す。ADR 0383 参照）。呼び出し側に返すのは戻り値だけである。
    *
    * 契約:
    * - `opts.limit` 個を目安に、子→親の順（`memory_labels`・`recall_usages`・
-   *   `memory_events` → `memories` → `observations` → `recalls` → `labels` →
+   *   `memory_events`・`memory_relations` → `memories` → `observations` → `recalls` → `labels` →
    *   `tenant_activity`・`tenant_subject_activity`）で削除する。**1回の呼び出しで
    *   全部消し切れるとは限らない**——`result.reachedLimit === true` なら、呼び出し側は
    *   同じ `opts`（`limit` はそのまま）で呼び直すこと。**この口は何度呼んでも安全**
@@ -2515,8 +2618,8 @@ export interface MemoryStore {
    * - `opts.dryRun === true` のときは、削除もこの自己参照の書き換えも一切行わず、
    *   削除していたら消えていたであろう件数だけを返す（`purgeExpiredEventsByRetention`
    *   の `dryRun` と同じ意味）。
-   * - 戻り値の `deleted` は、この呼び出しで実際に削除した行数の合計（対象8表すべての
-   *   合計。`dryRun` のときはプレビューの合計）。
+   * - 戻り値の `deleted` は、この呼び出しで実際に削除した行数の合計（上の10表すべての
+   *   行数の合計であり、`memories` だけの行数ではない。`dryRun` のときはプレビューの合計）。
    *
    * ⚠ **`recalls` の保持方針は、この ADR では決めていない**（[ADR 0290](../../../../docs/decisions/0290-activity-seq-read-path-documented-not-implemented.md)
    * が「`recalls` の保持方針」を先の話として残したまま——この口は「テナントを丸ごと

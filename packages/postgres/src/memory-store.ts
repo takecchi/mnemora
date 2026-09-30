@@ -15,6 +15,7 @@ import {
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   SourceMemoryForgottenError,
+  SourceMemoryStatusChangedError,
 } from "@mnemora/core";
 import type {
   AggregateScopeOptions,
@@ -55,6 +56,7 @@ import type {
   RequeueEmbedJobsResult,
   ScopeAggregate,
 } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
@@ -129,6 +131,11 @@ function subjectIdMatches(subjectId: string | null): SQL {
  * だったが、ここは「書く**前**に見直す」——ADR 0375 決定7参照。
  *
  * `tenant_id` の絞り込みも同じ `WHERE` に含める——他テナントの同じ id を誤って見ない。
+ *
+ * ⚠ `ORDER BY id ASC FOR UPDATE`: 行ロックを掴む順を、`markContestedPair`/`resolveContestedPair`/
+ * `markContestedGroup` と同じ id 昇順に揃える。`ORDER BY` が無いと掴む順が実行計画（ふつうは heap の並び）に
+ * 依存し、`consolidate` と `markContestedPair` が同じ行を逆順で掴み合って 40P01（`deadlock detected`）を
+ * 生のまま漏らしうる。歯は `__tests__/assert-not-forgotten-lock-order.postgres.test.ts`。
  */
 async function assertNotForgottenForUpdate(
   tx: SqlExecutor,
@@ -150,6 +157,7 @@ async function assertNotForgottenForUpdate(
   const rows = await tx.execute(sql`
     SELECT id, status FROM memories
     WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
+    ORDER BY id ASC
     FOR UPDATE
   `);
   const forgottenIds = (rows.rows as unknown as Array<{ id: MemoryId; status: MemoryStatus }>)
@@ -157,6 +165,41 @@ async function assertNotForgottenForUpdate(
     .map((row) => row.id);
   if (forgottenIds.length > 0) {
     throw new SourceMemoryForgottenError(method, forgottenIds);
+  }
+}
+
+/**
+ * ADR 0420: `opts.abortIfSuperseded` を実装する共通部分。{@link assertNotForgottenForUpdate} の直後に、
+ * 同じトランザクションの中で（すでにロックした行を）`FOR UPDATE` でもう一度読み、1件でも
+ * `"superseded"` なら {@link SourceMemoryStatusChangedError} を投げる（呼び出し元の `tx` ごと rollback）。
+ * 空配列・`undefined` なら何もしない。行ロックの下で見るので、見直しの後に他のトランザクションが
+ * `superseded` へ動かすことはない（すでに動かした側が先に commit していれば、ここで見える）。
+ */
+async function assertNotSupersededForUpdate(
+  tx: SqlExecutor,
+  ctx: Ctx,
+  ids: ReadonlyArray<MemoryId> | undefined,
+  method:
+    "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+): Promise<void> {
+  if (ids === undefined || ids.length === 0) {
+    return;
+  }
+  const wellFormedIds = ids.filter((id) => isUuidLike(id));
+  if (wellFormedIds.length === 0) {
+    return;
+  }
+  const rows = await tx.execute(sql`
+    SELECT id, status FROM memories
+    WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
+    ORDER BY id ASC
+    FOR UPDATE
+  `);
+  const changed = (rows.rows as unknown as Array<{ id: MemoryId; status: MemoryStatus }>)
+    .filter((row) => row.status === "superseded")
+    .map((row) => ({ id: row.id, observedStatus: row.status }));
+  if (changed.length > 0) {
+    throw new SourceMemoryStatusChangedError(method, changed);
   }
 }
 
@@ -313,6 +356,9 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    assertWellFormedIdentifier(input.externalId, "input.externalId");
     const externalId = input.externalId ?? null;
     const inserted = await this.db.execute(sql`
       INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -348,6 +394,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。UUID の形をしていない入力は「存在しない」と同じ扱いにする
     // （実 DB 検査で判明: 素通しすると invalid input syntax for type uuid で例外になる）。
     if (!isUuidLike(id)) {
@@ -374,6 +421,9 @@ export class PostgresMemoryStore implements MemoryStore {
     jobKinds: OutboxJobKind[],
     opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    assertWellFormedIdentifier(input.externalId, "input.externalId");
     const externalId = input.externalId ?? null;
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
@@ -453,6 +503,8 @@ export class PostgresMemoryStore implements MemoryStore {
    * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
    */
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
@@ -644,8 +696,14 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemoryWithOutbox", null);
@@ -658,6 +716,13 @@ export class PostgresMemoryStore implements MemoryStore {
       // Issue #1226 / ADR 0375 決定7: INSERT より前に見直す（`assertNotForgottenForUpdate`
       // の doc コメント参照）。`abortIfForgotten` が空・省略なら何もしない。
       await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "createMemoryWithOutbox");
+      // ADR 0420: forgotten の見直しに続けて superseded も見直す（同じ行ロックの下）。
+      await assertNotSupersededForUpdate(
+        tx,
+        ctx,
+        opts?.abortIfSuperseded,
+        "createMemoryWithOutbox",
+      );
       return this.insertMemoryWithOutboxRows(tx, ctx, input, jobKinds, outboxNow);
     });
 
@@ -698,11 +763,19 @@ export class PostgresMemoryStore implements MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
   }> {
+    assertWellFormedCtx(ctx);
+    news.forEach((entry, i) =>
+      assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
+    );
     // Issue #1237: 省略時は1回だけ壁時計を読み、積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const abortIfForgotten = opts?.abortIfForgotten;
@@ -714,6 +787,13 @@ export class PostgresMemoryStore implements MemoryStore {
         tx,
         ctx,
         abortIfForgotten,
+        "createMemoriesWithOutboxAndEvents",
+      );
+      // ADR 0420: forgotten の見直しに続けて superseded も見直す。
+      await assertNotSupersededForUpdate(
+        tx,
+        ctx,
+        opts?.abortIfSuperseded,
         "createMemoriesWithOutboxAndEvents",
       );
       const written: Array<{
@@ -756,6 +836,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。この口の契約は「無い == null」なので、形式が壊れた入力も
     // クエリを投げる前に同じ null へ寄せる（mapping.ts の isUuidLike の doc参照）。
     if (!isUuidLike(id)) {
@@ -768,6 +849,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     // この口の契約は「無い id は静かに落とす」（D9）。形式が壊れた id も同じ扱いにする
     // ため、クエリを投げる前に取り除く——呼び出し全体を弾かない
     // （mapping.ts の isUuidLike の doc参照）。
@@ -792,6 +874,7 @@ export class PostgresMemoryStore implements MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     // source_observation_id 列は uuid 型。この口の契約は「無い == []」なので、
     // 形式が壊れた observationId もクエリを投げる前に空配列へ寄せる
     // （mapping.ts の isUuidLike の doc参照）。
@@ -817,6 +900,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     observationId: ObservationId,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     // source_observation_id 列は uuid 型。この口の契約は「無い == []」なので、
     // 形式が壊れた observationId もクエリを投げる前に空配列へ寄せる
     // （mapping.ts の isUuidLike の doc参照）。
@@ -852,6 +936,7 @@ export class PostgresMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
     // 書き込みは常に単独になる。UPDATE を投げる前に落とす。
     if (status === "contested") {
@@ -917,6 +1002,7 @@ export class PostgresMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     // ADR 0140: updateStatus と同じ理由（contestedWithId を渡す引数が無い）。
     // トランザクションを開く前に落とす。
     if (status === "contested") {
@@ -1019,6 +1105,8 @@ export class PostgresMemoryStore implements MemoryStore {
     opts?: {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      abortIfAllConflicted?: boolean;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     },
   ): Promise<{
@@ -1027,6 +1115,10 @@ export class PostgresMemoryStore implements MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
     createdEventsWritten?: true;
   }> {
+    assertWellFormedCtx(ctx);
+    news.forEach((entry, i) =>
+      assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
+    );
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const abortIfForgotten = opts?.abortIfForgotten;
@@ -1060,6 +1152,13 @@ export class PostgresMemoryStore implements MemoryStore {
       // 空・省略なら何もしない——既存の `conflicted`（CAS に弾かれた対象だけ飛ばして
       // 他は commit する部分成功）はこの見直しの対象外のまま、今日どおり働く。
       await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "supersedeWithNewMemories");
+      // ADR 0420: forgotten の見直しに続けて superseded も見直す（同じ行ロックの下）。
+      await assertNotSupersededForUpdate(
+        tx,
+        ctx,
+        opts?.abortIfSuperseded,
+        "supersedeWithNewMemories",
+      );
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
       for (const { input, jobKinds } of news) {
@@ -1211,6 +1310,16 @@ export class PostgresMemoryStore implements MemoryStore {
         superseded.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
       }
 
+      // ADR 0420: `supersede` の対象がすべて CAS に弾かれたら、`news`・`created` イベントごと巻き戻す
+      // （tx の中で投げる）。1件でも通ったなら今までどおりの部分成功。
+      if (
+        opts?.abortIfAllConflicted === true &&
+        supersede.length > 0 &&
+        conflicted.length === supersede.length
+      ) {
+        throw new SourceMemoryStatusChangedError("supersedeWithNewMemories", conflicted);
+      }
+
       return { created, superseded, conflicted };
     });
 
@@ -1305,6 +1414,9 @@ export class PostgresMemoryStore implements MemoryStore {
     const oldestPurgedAt = deletedAts[0]!;
     const newestPurgedAt = deletedAts[deletedAts.length - 1]!;
 
+    // ADR 0427: `at` は SQL の `now()`（マイクロ秒）ではなく、他の書き込みの口と同じく JS の
+    // 壁時計を `toPgTimestamp` で渡す——読み戻すとミリ秒になる値のまま列に入れないと、
+    // 読み戻した `at` を `EventStore.list` の `until` に渡したときにその行自身が当たらない。
     await exec.execute(sql`
       INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
       VALUES (
@@ -1312,7 +1424,7 @@ export class PostgresMemoryStore implements MemoryStore {
         ${ctx.tenantId},
         NULL,
         'events_purged',
-        now(),
+        ${toPgTimestamp(new Date())},
         ${JSON.stringify({ type: "system" })}::jsonb,
         NULL,
         NULL,
@@ -1339,6 +1451,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun ?? false;
     if (dryRun) {
       return this.purgeExpiredEventsBody(this.db, ctx, opts);
@@ -1364,6 +1477,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsByRetentionOptions,
   ): Promise<PurgeExpiredEventsByRetentionOutcome> {
+    assertWellFormedCtx(ctx);
     return this.db.transaction(async (tx) => {
       const settingsResult = await tx.execute(sql`
         SELECT event_retention_days FROM tenant_settings WHERE tenant_id = ${ctx.tenantId}
@@ -1400,6 +1514,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredRecallsOptions,
   ): Promise<PurgeExpiredRecallsResult> {
+    assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun ?? false;
     if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
       return {
@@ -1479,6 +1594,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる（mapping.ts の
     // isUuidLike の doc参照）。
@@ -1560,6 +1676,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる（mapping.ts の
     // isUuidLike の doc参照）。
@@ -1708,6 +1825,7 @@ export class PostgresMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     return this.reinforceManyOn(this.db, ctx, ids, at, opts);
   }
 
@@ -1841,6 +1959,7 @@ export class PostgresMemoryStore implements MemoryStore {
     recallId: RecallId,
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    assertWellFormedCtx(ctx);
     return this.recordUsageOn(this.db, ctx, recallId, memoryIds);
   }
 
@@ -1857,6 +1976,7 @@ export class PostgresMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    assertWellFormedCtx(ctx);
     if (memoryIds.length === 0) {
       return { insertedMemoryIds: [] };
     }
@@ -1985,6 +2105,8 @@ export class PostgresMemoryStore implements MemoryStore {
     scope: RecallScope,
     opts?: AggregateScopeOptions,
   ): Promise<ScopeAggregate> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
     // Issue #608 項目③(b) / ADR 0286: 段1（ANN・語彙）の押し下げと同じ opt-in。
     // `scope.subjectId` が無ければこの欄自体を見ない——「テナント全体」は定義上すでに
     // 主題なしを含む上位集合であり、広げる余地が無い。
@@ -2485,6 +2607,8 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`subjectId` の行、`S_x`）を同じトランザクションで `+1` する——**`T` には触れない。**
    */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(record.subjectId, "record.subjectId");
     // Issue #298 / ADR 0155: 新しく書く行は常に breakdownCaptured: true。「内訳を持たない
     // 新規行」は無い（recall-runtime.ts が finalMemories から毎回内訳を計算しているため）。
     const returnedMemories: RecallRecordReturnedMemories = {
@@ -2565,6 +2689,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * 契約は `get`/`getObservation` と同じ——見つからなければ `null`（例外にしない）。
    */
   async getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。形式が壊れた入力も「無い」と同じ扱いにする
     // （`get`/`getObservation` と同じ規律。mapping.ts の isUuidLike の doc参照）。
     if (!isUuidLike(id)) {
@@ -2606,6 +2731,7 @@ export class PostgresMemoryStore implements MemoryStore {
     opts: RequeueEmbedJobsOptions,
     writeOpts?: { now?: Date },
   ): Promise<RequeueEmbedJobsResult> {
+    assertWellFormedCtx(ctx);
     const target = buildRequeueEmbedTargetSelect(ctx, opts);
     // Issue #1237: 積み直す embed ジョブの時刻。省略時は壁時計。
     const outboxNow = writeOpts?.now ?? new Date();
@@ -2659,6 +2785,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * 順序契約はここで別途つけ直す必要がある。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    assertWellFormedCtx(ctx);
     const target = buildArchiveDecayedTargetSelect(ctx, opts);
 
     const result = await this.db.execute(sql`
@@ -2729,6 +2856,7 @@ export class PostgresMemoryStore implements MemoryStore {
     tombstone: { content: string; digest: string },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -2848,6 +2976,7 @@ export class PostgresMemoryStore implements MemoryStore {
     first: { id: MemoryId; event: NewMemoryEvent },
     second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    assertWellFormedCtx(ctx);
     // 入口の正規化（`normalizeUuidCase`）。同じ行を小文字と大文字で渡したときも、下の検査で TSDoc どおり
     // `RangeError` になる（そろえる前は、この検査を通り抜けて「memory not found」になっていた）。
     first = { ...first, id: normalizeUuidCase(first.id) };
@@ -3008,6 +3137,8 @@ export class PostgresMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     // 入口の正規化（`normalizeUuidCase`）。下の除外は JS で比べるので、DB が返す小文字の id に揃える
     // ——以前は大文字の UUID を渡すと自分自身が返っていた（`get` は同じ行を返すのに）。
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
@@ -3055,6 +3186,8 @@ export class PostgresMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
     const validFrom = toPgTimestamp(query.validFrom);
     const validUntil = toPgTimestamp(query.validUntil);
@@ -3116,6 +3249,8 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     const result = await this.db.execute(sql`
       SELECT claim_key_predicate AS predicate
       FROM memories
@@ -3156,6 +3291,7 @@ export class PostgresMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    assertWellFormedCtx(ctx);
     // 入口の正規化（`normalizeUuidCase`）。下の `rowById` の引き当てと `contested_with_id` との比較は JS で行う
     // ので、そろえないと大文字の id だけで「memory not found」か `MemoryStatusConflictError` になっていた。
     // 同じ行を小文字と大文字で渡したときも、次の検査で TSDoc どおり `RangeError` になる。
@@ -3297,6 +3433,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     // 入口の正規化（`normalizeUuidCase`）。
     survivor = {
       ...survivor,
@@ -3372,6 +3509,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    assertWellFormedCtx(ctx);
     if (members.length < 3) {
       throw new RangeError("markContestedGroup: members must have at least 3 entries");
     }
@@ -3505,6 +3643,7 @@ export class PostgresMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    assertWellFormedCtx(ctx);
     if (members.length < 3) {
       throw new RangeError("resolveContestedGroup: members must have at least 3 entries");
     }
@@ -3685,6 +3824,7 @@ export class PostgresMemoryStore implements MemoryStore {
     event: { reason?: string; actor?: EventActor; at: Date },
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
+    assertWellFormedCtx(ctx);
     // 入口の正規化（`normalizeUuidCase`）。`meta.supersededById` に写す値を、列（`superseded_by_id`）の値と揃える。
     supersededById = normalizeUuidCase(supersededById);
     if (!isUuidLike(supersededById)) {
@@ -3780,6 +3920,7 @@ export class PostgresMemoryStore implements MemoryStore {
     supersededById: MemoryId,
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    assertWellFormedCtx(ctx);
     if (!isUuidLike(supersededById)) {
       return { candidates: [] };
     }
@@ -3831,6 +3972,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * DB の既定ロケールに関わらず常にコードポイント順（バイト順）で返す。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT * FROM labels WHERE tenant_id = ${ctx.tenantId} ORDER BY name COLLATE "C" ASC
     `);
@@ -3846,6 +3988,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * 無ければ今にする」を1つの UPSERT で表す。
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       INSERT INTO labels (id, tenant_id, name, status, proposed_count, registered_at)
       VALUES (gen_random_uuid(), ${ctx.tenantId}, ${name}, 'registered', 0, now())
@@ -3891,6 +4034,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`purgeExpiredEventsByRetention` と同じ判断）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
+    assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun === true;
     try {
       return await this.db.transaction(async (tx) => {

@@ -761,3 +761,12 @@ Fake は綴りをそのまま比べる（大文字は not found）。⟹ store �
 段3の群ごとの上限を呼び出し側から変えられるように、任意の欄 `RecallQuery.relationMaxCount?`（正の整数 1〜1000、省略時は従来の10）を足した。
 探索の安全弁（§5.4・§5.5、負債5）はこの欄の10倍に連動する（省略時は従来の100件）。上の本文は当時の記録として書き換えない。
 理由・測定・非破壊の根拠は ADR 0396。
+
+---
+
+## 追記（2026-09-30）: 上の「（群の解消のイベントの `meta` は `supersededById` を持たない）」は理由の無い事実の記述であり、[ADR 0421](./0421-concurrent-write-and-audit-event-holes.md) で [ADR 0150](./0150-resolve-contested-explicit-operation.md) に揃えた
+
+上の本文（大文字小文字の救済の節の括弧書き）は、なぜ持たせないかを書いていない事実の注記だった。ADR 0381 の本文と PR #1442 の本文に理由は無く、
+ADR 0150 の 2026-09-27 の追記（負けた側の `superseded` は `meta.supersededById` を持つ）と食い違っていた。
+いまは `resolveContestedGroup` も、負けた側の `superseded` イベントの `meta.supersededById` に勝った側の id（`memberIds` の綴り）を持つ。
+本文は当時の記録として書き換えない。経緯と歯は ADR 0421。

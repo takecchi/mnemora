@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { capLexicalQueryWords } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
@@ -315,6 +316,8 @@ export class PostgresLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     const select = buildLexicalSearchSelect(query, { ...opts, ctxTenantId: ctx.tenantId });
     const result = await this.db.execute(select);
     return result.rows.map((row) => {

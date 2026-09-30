@@ -76,7 +76,7 @@ describe("InMemoryMemoryStore.createMemory: subjectId に NUL 文字を含むと
           subjectId: "abc\u0000def",
         }),
       ),
-    ).rejects.toThrow(/subjectId must not contain NUL/);
+    ).rejects.toThrow(/input\.subjectId contains a NUL character/);
     expect(store.listByTenant(ctx)).toHaveLength(0);
   });
 

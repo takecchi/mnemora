@@ -469,6 +469,28 @@ export interface IdempotentCreateResult<T> {
 }
 export declare function resolveIdempotentCreate<T>(existing: T | null | undefined, insert: () => T): IdempotentCreateResult<T>;
 
+// ===== dist/identifier.d.ts =====
+import type { Ctx } from "./ctx.js";
+export type MalformedIdentifierReason = "lone_surrogate" | "nul";
+export declare class MalformedIdentifierError extends Error {
+    readonly field: string;
+    readonly reason: MalformedIdentifierReason;
+    readonly index: number;
+    readonly kind: "malformed_identifier";
+    constructor(field: string, reason: MalformedIdentifierReason, index: number);
+}
+export declare function isMalformedIdentifierError(value: unknown): value is MalformedIdentifierError;
+export declare function findMalformedIdentifierPart(value: string): {
+    reason: MalformedIdentifierReason;
+    index: number;
+} | null;
+export declare function assertWellFormedIdentifier(value: unknown, field: string): void;
+export declare function assertWellFormedCtx(ctx: Ctx, field?: string): void;
+export declare function assertWellFormedFilter(filter: {
+    tenantId?: unknown;
+    subjectId?: unknown;
+} | null | undefined, field?: string): void;
+
 // ===== dist/ids.d.ts =====
 export type MemoryId = string;
 export type ObservationId = string;
@@ -477,6 +499,7 @@ export type RecallId = string;
 
 // ===== dist/index.d.ts =====
 export * from "./ctx.js";
+export * from "./identifier.js";
 export * from "./abort.js";
 export * from "./ids.js";
 export * from "./attributes.js";
@@ -641,6 +664,19 @@ export declare class SourceMemoryForgottenError extends Error {
     constructor(method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
 }
 export declare function isSourceMemoryForgottenError(value: unknown): value is SourceMemoryForgottenError;
+export declare class SourceMemoryStatusChangedError extends Error {
+    readonly method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
+    readonly changed: Array<{
+        id: MemoryId;
+        observedStatus: MemoryStatus;
+    }>;
+    readonly kind: "source_memory_status_changed";
+    constructor(method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", changed: Array<{
+        id: MemoryId;
+        observedStatus: MemoryStatus;
+    }>);
+}
+export declare function isSourceMemoryStatusChangedError(value: unknown): value is SourceMemoryStatusChangedError;
 export declare class ContestedWithoutCompanionError extends Error {
     readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
@@ -687,6 +723,7 @@ export interface MemoryStore {
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        abortIfSuperseded?: ReadonlyArray<MemoryId>;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -734,6 +771,8 @@ export interface MemoryStore {
     }>, opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        abortIfSuperseded?: ReadonlyArray<MemoryId>;
+        abortIfAllConflicted?: boolean;
         buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }): Promise<{
         created: Array<{
@@ -757,6 +796,7 @@ export interface MemoryStore {
     }>) => NewMemoryEvent, opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        abortIfSuperseded?: ReadonlyArray<MemoryId>;
     }): Promise<{
         written: Array<{
             index: number;
@@ -3107,7 +3147,7 @@ export interface ConsolidateOptions {
     reason?: string;
     signal?: AbortSignal;
 }
-export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
+export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten" | "aborted_source_status_changed";
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
 export type ConsolidateSourceOutcome = {
     memoryId: MemoryId;
@@ -3174,7 +3214,7 @@ export interface ReflectOptions {
     reason?: string;
     signal?: AbortSignal;
 }
-export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
+export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten" | "aborted_source_status_changed";
 export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
 export type ReflectBasisOutcome = {
     memoryId: MemoryId;
@@ -3203,6 +3243,10 @@ export type ReflectBasisOutcome = {
 } | {
     memoryId: MemoryId;
     kind: "forgotten_before_write";
+} | {
+    memoryId: MemoryId;
+    kind: "status_changed_before_write";
+    observedStatus: MemoryStatus;
 };
 export interface ReflectionResult {
     outcome: ReflectOutcome;

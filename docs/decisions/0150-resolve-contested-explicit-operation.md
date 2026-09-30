@@ -519,3 +519,9 @@ PR）の本文に記録した——ここには複製しない。
 **当て直し**: `packages/postgres/src/__tests__/contested-event-counterpart.postgres.test.ts`（Postgres と testkit の fixture）を
 先に書き、両方で赤を確かめてから直した。`meta` を全体一致で縛っていた既存の歯（core の `mark-contested`・
 `resolve-contested`、postgres の `memory-events-meta-parity`）は、この形に改めた。
+
+---
+
+## 追記（2026-09-30）: 群版の `resolveContestedGroup` も、負けた側の `superseded` に `meta.supersededById` を持つ（[ADR 0421](./0421-concurrent-write-and-audit-event-holes.md)）
+
+上の 2026-09-27 の追記が決めた形は、群版で抜けていた。ADR 0421 で揃えた（欄を足すだけ。非破壊）。本文・既存の追記は書き換えていない。

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
 import {
   TRIGRAM_JAPANESE_QUERY_MAX_CHARS,
@@ -888,6 +889,8 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     const threshold = this.threshold;
     // `content %> $ja` は `pg_trgm.word_similarity_threshold`（セッション変数）を読む。
     // `set_config(name, value, true)` で設定する——値はパラメータで渡し、第3引数の `true`
