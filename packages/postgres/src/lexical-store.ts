@@ -58,7 +58,7 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  *
  * | 側 | 関数 | 何をするか |
  * |---|---|---|
- * | 本文（索引式） | `mnemora_lexical_tsvector`（`migrations/0025_*.sql`、Issue #1222） | `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が1MBを超える本文だけ先頭150,000文字で作り直す |
+ * | 本文（索引式） | `mnemora_lexical_tsvector`（`migrations/0025_*.sql`、Issue #1222） | `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が1MBを超える本文だけ先頭150,000文字（`SQL_ASCII` の DB ではバイト）で作り直す |
  * | クエリ | `mnemora_lexical_query_terms`（`migrations/0008_*.sql`） | **非 ASCII の連なりを空白に落とす** |
  *
  * `mnemora_lexical_normalize`（ASCII の連なりの前後に空白を入れる）は
@@ -220,7 +220,7 @@ export function buildLexicalSearchSelect(
   // 🔴 本文側と query 側で、通す関数が違う（migrations/0008_*.sql に実測の根拠が在る）。
   // 本文側は mnemora_lexical_tsvector（migrations/0025、Issue #1222）——
   // `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が
-  // 1MB を超える本文だけ本文の先頭150,000文字で作り直す。1MB に収まる本文では
+  // 1MB を超える本文だけ本文の先頭150,000文字で作り直す（`server_encoding` が `SQL_ASCII` の DB では `left` がバイトで切る——ADR 0364 の 2026-09-30 の追記）。1MB に収まる本文では
   // 今までと1バイトも違わない tsvector を返す（ADR 0364「歯」節、実測で完全一致を
   // 縛っている）。query 側は mnemora_lexical_query_terms（非 ASCII の連なりを空白に
   // 落とす。mnemora_lexical_query_or の内部で呼ばれる）。日本語を残すと、その全体が

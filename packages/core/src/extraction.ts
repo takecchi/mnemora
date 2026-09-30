@@ -171,7 +171,7 @@ function buildLanguageAndSpeakerInstruction(): string {
  * ⚠ 2026-09-29 追記（上の追記を反転させる。`packages/postgres/migrations/0025_lexical_tsvector_fallback.sql`、
  * `docs/decisions/0364-lexical-tsvector-fallback-for-oversized-content.md`）:
  * **`@mnemora/postgres` も直った。**`idx_memories_lexical` の式に、tsvector が1MBを超える本文だけ
- * 本文の先頭150,000文字で作り直すフォールバックを挟んだ（`mnemora_lexical_tsvector`）。**`@mnemora/postgres`
+ * 本文の先頭150,000文字（`SQL_ASCII` の DB ではバイト。ADR 0364 の 2026-09-30 の追記）で作り直すフォールバックを挟んだ（`mnemora_lexical_tsvector`）。**`@mnemora/postgres`
  * も testkit の fixture と同じく、本文は1文字も落ちずに1件の Memory として残る**——`memories.content` は
  * 無傷のまま全文を保存する。縮退するのは語彙**索引**だけで、150,000文字より後ろにしか現れない語は
  * `LexicalStore`（語彙チャンネル）からは引けない（ベクトル検索等、他の recall チャンネルには影響しない）。
@@ -335,7 +335,7 @@ function fallbackWholeObservationCandidate(observation: Observation): ExtractedM
  *   ⚠ **2026-09-29 から `@mnemora/postgres` も、語の多い大きな本文でこの Memory を書ける**
  *   （`migrations/0025`・ADR 0364、Issue #1222。以前は DB の例外を投げていた——
  *   {@link buildExtractionPrompt} の doc の追記を見ること）。1MBを超える本文は、
- *   本文自体は無傷で残るが、先頭150,000文字より後ろの語は語彙チャンネルからは引けない。
+ *   本文自体は無傷で残るが、先頭150,000文字（`SQL_ASCII` の DB ではバイト）より後ろの語は語彙チャンネルからは引けない。
  * - `skipped` — この呼び出しでは抽出を実行していない（`deferred`、`memory_usage`、冪等な再送）。
  */
 export type ExtractionOutcome = "ok" | "llm_failed_whole_observation" | "skipped";

@@ -427,7 +427,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   /**
-   * `texts` を埋め込み、入力と同じ件数・順で返す。空配列ならモデルを読まずに `[]` を返す。
+   * `texts` を埋め込み、入力と同じ件数・順で返す。空配列ならモデルを読まずに `[]` を返す（ただし `opts.signal` が abort 済みなら、空配列でも `[]` を返さず reject する）。
    *
    * 投げるもの（どれも reject として届く）:
    * - {@link LocalEmbeddingProvider.dispose} の後は、入力に関わらず（空配列でも）素の `Error`（ADR 0419）。
@@ -472,6 +472,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   async #embed(texts: string[], opts?: AbortOptions): Promise<number[][]> {
+    // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
+    opts?.signal?.throwIfAborted();
     // `packages/openai` と同じ早期 return。**空でモデルを起こさない。**
     // ⟹ ウォームアップは `warmup()` を使うこと。
     if (texts.length === 0) {

@@ -38,6 +38,22 @@ describe("LocalEmbeddingProvider — AbortSignal", () => {
     expect(createCalls).toBe(0);
   });
 
+  it("既に abort 済みなら、空配列でも [] を返さず reject する（pipeline も読まない）", async () => {
+    let createCalls = 0;
+    const createPipeline: CreateLocalEmbeddingPipeline = async () => {
+      createCalls += 1;
+      return fakeLocalEmbeddingPipeline(async (texts) => texts.map(() => [0]));
+    };
+    const provider = new LocalEmbeddingProvider({ createPipeline, dimensions: 2 });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(provider.embed(ctx, [], { signal: controller.signal })).rejects.toBe(
+      controller.signal.reason,
+    );
+    expect(createCalls).toBe(0);
+  });
+
   it("推論は最後まで走り、終わった時点で abort 済みならベクトルを返さずに reject する", async () => {
     let resolveEmbed: ((vectors: number[][]) => void) | undefined;
     const createPipeline: CreateLocalEmbeddingPipeline = async () =>

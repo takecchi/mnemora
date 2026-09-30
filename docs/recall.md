@@ -35,6 +35,8 @@ type RecallResult = {
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: `RecallResult` は上の型例には無い任意欄 `outputValidation?` も持つ（[ADR 0098](./decisions/0098-validate-recall-output.md)）。`recall()` の返り値を `RecallResultSchema` で検証した結果であり、`undefined`（検証していない。`RecallRuntimeDeps.outputValidation: "off"`）・`{ ok: true, issues: [] }`（通った）・`{ ok: false, issues }`（落ちた）の3つの状態を取る。既定は `"report"` で、落ちても例外を投げない。型例は書き換えず、ここに追記する。
 
+**⚠ 2026-09-30 追記（上の一覧への足し）**: 型例に無い `stage_skipped` がもう1つある——`stage: 'relation'`・`reason: 'relation_store_unavailable'`（段3の必須の同伴取得で、多者間の群のメンバーがいるのに `deps.relationStore` が配線されていない）。正は `packages/core/src/recall.ts` の `StageSkippedOmission`（と `OmissionSchema`）。
+
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の排他性の段落は、段3.5 による昇格と `below_threshold` の取り下げだけを書いている。いまはこれが一般則になっている——**1件の Memory は `omitted` の中で1回だけ、最後にそれを落とした段で数える**（ADR 0203 追記3〜6）。`below_threshold` と `over_limit(stage:"rescore")` は、段3の同伴・段3.5 の席・段3.5 で席に着けなかった分のどの経路で扱われても、`omitted` の中で1回だけ数えられる。詳細は §9.8。
 
 **⚠ 2026-09-27 追記（ADR 0203 追記9、Issue #1021・#1025）**: 上の排他性の段落と直前の追記がいう「返らなかったものの分類」「1回だけ数える」は、**候補ごとの層**の札（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・`unit_assembly_dropped`）について成り立つ。**集約の層**の札（`not_indexed`、`filtered` のすべての `condition`）は、スコープ全体の集約から出す件数で、返った記憶を含みうる。札の一覧と理由は §9.8 の追記9 と ADR 0203 追記9。
