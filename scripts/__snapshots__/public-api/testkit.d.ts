@@ -661,5 +661,6 @@ export interface VectorStoreConformanceOptions {
     prepareEmbeddingSpace: (space: EmbeddingSpaceId) => Promise<void> | void;
     supportsGetVectors: boolean;
     supportsEraseTenant: boolean;
+    supportsSearchMany?: boolean;
 }
 export declare function describeVectorStoreConformance(options: VectorStoreConformanceOptions): void;

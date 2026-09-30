@@ -135,6 +135,21 @@ export interface VectorStoreConformanceOptions {
    * しない。
    */
   supportsEraseTenant: boolean;
+  /**
+   * [Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き: 対象の `VectorStore` 実装が
+   * `searchMany`（任意メソッド、Issue #377。契約は `VectorStore.searchMany?` の doc）を実装しているかどうか。
+   * **任意**（省略可）。
+   *
+   * `memory-store-conformance.ts` の `supportsListActiveClaimPredicates` と同じ3状態を区別する——
+   * 既存の外部 adapter の呼び出しを型エラーにしないため（公開 API の追加は任意項目に限る）。
+   * - `true`: 契約の歯（各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並びも
+   *   `search()` と同じ、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、
+   *   同じ key は後勝ちで位置は最初、NUL を含む key でも投げない、`limit` の不正は `search()` と同じく投げる、
+   *   `filter`・テナント分離が効く）を実行する。
+   * - `false`: `expect(store.searchMany).toBeUndefined()` を積極的に assert する——`it.skip` にはしない。
+   * - **省略（`undefined`）**: 「⚠ 未検査」の named it を1本だけ登録する。
+   */
+  supportsSearchMany?: boolean;
 }
 
 const space: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
@@ -168,6 +183,7 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     prepareEmbeddingSpace,
     supportsGetVectors,
     supportsEraseTenant,
+    supportsSearchMany,
   } = options;
 
   describe(`VectorStore conformance (${name})`, () => {
@@ -1260,6 +1276,226 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       it("getVectors は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.getVectors).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // searchMany（Issue #377: 連想枠のアンカーごとの ANN 検索を1往復に束ねる、任意メソッド。
+    // Issue #1412 の続き）。`supportsSearchMany` の3状態で分岐する
+    // （`memory-store-conformance.ts` の `supportsListActiveClaimPredicates` と同じ作法）。
+    //
+    // 契約の核は「各 `queries[i]` の結果は、`search()` を単独で呼んだ場合と、集合・順序とも
+    // 完全に一致する」こと。だから歯の多くは `search()` を対照（oracle）にして比べる。
+    // -------------------------------------------------------------------
+    if (supportsSearchMany === true) {
+      const manyCtx: Ctx = { tenantId: "search-many-tenant" };
+      const manyFilter = { tenantId: "search-many-tenant" };
+      const idsOf = (hits: { memoryId: MemoryId }[]) => hits.map((h) => h.memoryId);
+
+      const seedMany = async (
+        ctx: Ctx,
+        store: VectorStore,
+        vectors: number[][],
+        attrs?: PrepareMemoryIdAttrs,
+      ): Promise<MemoryId[]> => {
+        const ids: MemoryId[] = [];
+        for (const vector of vectors) {
+          const id = await prepareMemoryId(ctx, attrs);
+          await store.upsert(ctx, space, id, vector);
+          ids.push(id);
+        }
+        return ids;
+      };
+
+      it("searchMany: 各 key の結果は、同じ opts で単独に search() した結果と集合・順序とも一致する", async () => {
+        const store = await createStore();
+        await seedMany(manyCtx, store, [
+          [1, 0, 0],
+          [0.9, 0.1, 0],
+          [0.5, 0.5, 0],
+          [0, 1, 0],
+          [0, 0.9, 0.1],
+          [0, 0, 1],
+        ]);
+        const queries = [
+          { key: "q-x", vector: [1, 0, 0] },
+          { key: "q-y", vector: [0, 1, 0] },
+          { key: "q-z", vector: [0, 0, 1] },
+        ];
+        const opts = { limit: 4, filter: manyFilter };
+
+        const many = await store.searchMany!(manyCtx, space, queries, opts);
+
+        expect([...many.keys()]).toEqual(["q-x", "q-y", "q-z"]);
+        for (const q of queries) {
+          const single = await store.search(manyCtx, space, q.vector, opts);
+          const got = many.get(q.key)!;
+          expect(idsOf(got)).toEqual(idsOf(single));
+          got.forEach((hit, i) => expect(hit.distance).toBeCloseTo(single[i]!.distance, 5));
+        }
+      });
+
+      it("searchMany: 距離が完全に同点の行の並びも、単独の search() と同じで、呼ぶたびに変わらない（Issue #339 / ADR 0170）", async () => {
+        const store = await createStore();
+        // 同じ vector を5件——距離は全件同点。recordedAt は異なるもの・同じものを混ぜて、
+        // tie-break の2段目（recordedAt）と3段目（memory_id）の両方を通す。
+        const recorded = [
+          new Date("2026-01-01T00:00:00.000Z"),
+          new Date("2026-01-03T00:00:00.000Z"),
+          new Date("2026-01-02T00:00:00.000Z"),
+          new Date("2026-01-03T00:00:00.000Z"),
+          new Date("2026-01-01T00:00:00.000Z"),
+        ];
+        for (const recordedAt of recorded) {
+          await seedMany(manyCtx, store, [[1, 0, 0]], { recordedAt });
+        }
+        const opts = { limit: 10, filter: manyFilter };
+        const single = await store.search(manyCtx, space, [1, 0, 0], opts);
+        expect(single).toHaveLength(5);
+
+        for (let round = 0; round < 3; round++) {
+          const many = await store.searchMany!(
+            manyCtx,
+            space,
+            [
+              { key: "a", vector: [1, 0, 0] },
+              { key: "b", vector: [1, 0, 0] },
+            ],
+            opts,
+          );
+          expect(idsOf(many.get("a")!)).toEqual(idsOf(single));
+          expect(idsOf(many.get("b")!)).toEqual(idsOf(single));
+        }
+      });
+
+      it("searchMany: 各 key の結果は limit を超えない", async () => {
+        const store = await createStore();
+        await seedMany(manyCtx, store, [
+          [1, 0, 0],
+          [0.9, 0.1, 0],
+          [0.8, 0.2, 0],
+          [0, 1, 0],
+          [0, 0.9, 0.1],
+        ]);
+        const many = await store.searchMany!(
+          manyCtx,
+          space,
+          [
+            { key: "a", vector: [1, 0, 0] },
+            { key: "b", vector: [0, 1, 0] },
+          ],
+          { limit: 2, filter: manyFilter },
+        );
+        expect(many.get("a")).toHaveLength(2);
+        expect(many.get("b")).toHaveLength(2);
+      });
+
+      it("searchMany: 結果が0件のクエリでも key は Map に在る（欠落するのは queries に無い key だけ）", async () => {
+        const store = await createStore();
+        await seedMany(manyCtx, store, [[1, 0, 0]], { status: "active" });
+        const many = await store.searchMany!(
+          manyCtx,
+          space,
+          [
+            { key: "empty-1", vector: [1, 0, 0] },
+            { key: "empty-2", vector: [0, 1, 0] },
+          ],
+          { limit: 5, filter: { ...manyFilter, status: ["archived"] } },
+        );
+        expect([...many.keys()]).toEqual(["empty-1", "empty-2"]);
+        expect(many.get("empty-1")).toEqual([]);
+        expect(many.get("empty-2")).toEqual([]);
+        expect(many.has("never-asked")).toBe(false);
+      });
+
+      it("searchMany: queries が空配列なら、空の Map を返す", async () => {
+        const store = await createStore();
+        const many = await store.searchMany!(manyCtx, space, [], { limit: 5, filter: manyFilter });
+        expect(many.size).toBe(0);
+      });
+
+      it("searchMany: 同じ key が2回以上あるときは最後のクエリの結果だけを返し、Map の並びは最初に現れた位置（Issue #1284）", async () => {
+        const store = await createStore();
+        const [near, far] = await seedMany(manyCtx, store, [
+          [1, 0, 0],
+          [0, 1, 0],
+        ]);
+        const many = await store.searchMany!(
+          manyCtx,
+          space,
+          [
+            { key: "dup", vector: [1, 0, 0] },
+            { key: "other", vector: [1, 0, 0] },
+            { key: "dup", vector: [0, 1, 0] },
+          ],
+          { limit: 1, filter: manyFilter },
+        );
+        expect([...many.keys()]).toEqual(["dup", "other"]);
+        expect(idsOf(many.get("dup")!)).toEqual([far]);
+        expect(idsOf(many.get("other")!)).toEqual([near]);
+      });
+
+      it("searchMany: key は NUL（U+0000）を含む文字列でも、空文字でも投げない（Issue #1285）", async () => {
+        const store = await createStore();
+        const [id] = await seedMany(manyCtx, store, [[1, 0, 0]]);
+        const many = await store.searchMany!(
+          manyCtx,
+          space,
+          [
+            { key: "a\u0000b", vector: [1, 0, 0] },
+            { key: "", vector: [1, 0, 0] },
+          ],
+          { limit: 5, filter: manyFilter },
+        );
+        expect(idsOf(many.get("a\u0000b")!)).toEqual([id]);
+        expect(idsOf(many.get("")!)).toEqual([id]);
+      });
+
+      it("searchMany: limit が不正（負数・非整数・NaN）なとき、単独の search() が投げる入力では投げる（Issue #1285）", async () => {
+        const store = await createStore();
+        await seedMany(manyCtx, store, [[1, 0, 0]]);
+        for (const limit of [-1, 1.5, Number.NaN]) {
+          const opts = { limit, filter: manyFilter };
+          const searchThrew = await store.search(manyCtx, space, [1, 0, 0], opts).then(
+            () => false,
+            () => true,
+          );
+          const manyThrew = await store.searchMany!(
+            manyCtx,
+            space,
+            [{ key: "a", vector: [1, 0, 0] }],
+            opts,
+          ).then(
+            () => false,
+            () => true,
+          );
+          expect(manyThrew, `limit=${limit}`).toBe(searchThrew);
+        }
+      });
+
+      it("searchMany: filter が効き（status）、他テナントの行は返らない", async () => {
+        const store = await createStore();
+        const otherCtx: Ctx = { tenantId: "search-many-other-tenant" };
+        const [active] = await seedMany(manyCtx, store, [[1, 0, 0]], { status: "active" });
+        await seedMany(manyCtx, store, [[1, 0, 0]], { status: "archived" });
+        await seedMany(otherCtx, store, [[1, 0, 0]], { status: "active" });
+
+        const many = await store.searchMany!(manyCtx, space, [{ key: "a", vector: [1, 0, 0] }], {
+          limit: 10,
+          filter: { ...manyFilter, status: ["active"] },
+        });
+        expect(idsOf(many.get("a")!)).toEqual([active]);
+      });
+    } else if (supportsSearchMany === false) {
+      it("searchMany は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.searchMany).toBeUndefined();
+      });
+    } else {
+      // `supportsSearchMany` を省略した adapter。`it.skip` にしない理由は
+      // `memory-store-conformance.ts` の `supportsListActiveClaimPredicates` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsSearchMany が指定されていない — adapter "${name}" に対して searchMany の歯は検査していない`, () => {
+        expect(supportsSearchMany).toBeUndefined();
       });
     }
 
