@@ -15,7 +15,7 @@ import {
  * `memory-store-contested-write-guard.test.ts` と同じ理由・同じ形。
  *
  * 検査していること: `CREATE EXTENSION IF NOT EXISTS pg_trgm` の発行（`db.execute` の
- * 3回目の呼び出し）が失敗したとき、
+ * 4回目の呼び出し）が失敗したとき、
  * - `PostgresTrigramLexicalStore.create()` が投げる {@link TrigramLexicalStoreUnavailableError}
  *   の `.cause` が、元の Postgres エラーオブジェクトと**同一**であること（`extension_create_denied`/
  *   `extension_create_failed` の両方）。
@@ -27,7 +27,7 @@ import {
  */
 
 type FakeDbOptions = {
-  /** 3回目の呼び出し（CREATE EXTENSION）で投げるエラー。省略すると全呼び出しが成功する。 */
+  /** 4回目の呼び出し（CREATE EXTENSION。1回目は ADR 0430 の advisory lock）で投げるエラー。省略すると全呼び出しが成功する。 */
   extensionCreateError?: Error;
 };
 
@@ -36,14 +36,18 @@ function createFakeDb(opts: FakeDbOptions = {}): Db {
   const execute = async (): Promise<{ rows: unknown[] }> => {
     call += 1;
     if (call === 1) {
+      // pg_advisory_xact_lock（ADR 0430。`create()`/probe は EXTENSION_LOCK_KEY の lock を先頭で取る）
+      return { rows: [] };
+    }
+    if (call === 2) {
       // SHOW server_encoding
       return { rows: [{ server_encoding: "UTF8" }] };
     }
-    if (call === 2) {
+    if (call === 3) {
       // pg_available_extensions
       return { rows: [{ present: 1 }] };
     }
-    if (call === 3) {
+    if (call === 4) {
       // CREATE EXTENSION IF NOT EXISTS pg_trgm
       if (opts.extensionCreateError) {
         throw opts.extensionCreateError;
@@ -53,7 +57,9 @@ function createFakeDb(opts: FakeDbOptions = {}): Db {
     // word_similarity の自己一致検査
     return { rows: [{ score: 1 }] };
   };
-  return { execute } as unknown as Db;
+  const db = { execute } as unknown as { execute: typeof execute; transaction: unknown };
+  db.transaction = async (cb: (tx: unknown) => Promise<unknown>) => cb(db);
+  return db as unknown as Db;
 }
 
 describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）", () => {
@@ -90,10 +96,14 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
       execute: async (): Promise<{ rows: unknown[] }> => {
         call += 1;
         if (call === 1) {
+          return { rows: [] }; // pg_advisory_xact_lock（ADR 0430）
+        }
+        if (call === 2) {
           return { rows: [{ server_encoding: "SQL_ASCII" }] };
         }
         throw new Error("この歯では呼ばれないはずの呼び出し");
       },
+      transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb(db),
     } as unknown as Db;
 
     const thrown: unknown = await PostgresTrigramLexicalStore.create(db).catch((e: unknown) => e);

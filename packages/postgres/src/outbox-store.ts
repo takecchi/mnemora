@@ -12,6 +12,7 @@ import {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { lockTenantForErase } from "./erase-tenant-lock.js";
 import {
   isUuidLike,
   parsePgTimestamp,
@@ -254,16 +255,20 @@ export class PostgresOutboxStore implements OutboxStore {
       const deleted = (result.rows[0] as unknown as { count: number }).count;
       return { deleted, reachedLimit: deleted === opts.limit };
     }
-    const result = await this.db.execute(sql`
-      WITH victims AS (
-        SELECT id FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
-      )
-      DELETE FROM outbox o
-      USING victims v
-      WHERE o.tenant_id = ${ctx.tenantId} AND o.id = v.id
-      RETURNING o.id
-    `);
-    const deleted = result.rows.length;
+    // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする（lock を取るためにトランザクションで包む）。
+    const deleted = await this.db.transaction(async (tx) => {
+      await lockTenantForErase(tx, ctx.tenantId);
+      const result = await tx.execute(sql`
+        WITH victims AS (
+          SELECT id FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
+        )
+        DELETE FROM outbox o
+        USING victims v
+        WHERE o.tenant_id = ${ctx.tenantId} AND o.id = v.id
+        RETURNING o.id
+      `);
+      return result.rows.length;
+    });
     return { deleted, reachedLimit: deleted === opts.limit };
   }
 
