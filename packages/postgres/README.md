@@ -373,17 +373,17 @@ for (const outcome of observed.contestedDetection ?? []) {
 
 | 条件 | 現物 | 呼び出し側に見えるもの |
 |---|---|---|
-| `relationStore` を配線していない | `runtime.ts:4326` の `deps.relationStore !== undefined`（群を作る分岐に入る条件） | `contestedDetection[].result` が `{ kind: "unresolved_conflict", matchMemoryIds }`（`runtime.ts:4397-4420`）。`memory_events` に `kind: "updated"`・`meta.reason: "claim_key_conflict_unresolved"` の行が1件積まれる |
-| `memoryStore.markContestedGroup` が無い adapter | 同 4326 の `deps.memoryStore.markContestedGroup !== undefined`（`PostgresMemoryStore` は実装している: `memory-store.ts:2986`） | 同上 |
-| 組み立てた群が3件未満 | `runtime.ts:4363` の `memberIdSet.size >= 3`（コメントは 4316） | 同上 |
-| `markContestedGroup` が `contested_group` 以外（`ineligible` / `conflict`）を返した | `runtime.ts:4376-4378`（`outcome.kind === "contested_group"` のときだけ群として返す。4380） | 同上 |
+| `relationStore` を配線していない | `detectClaimKeyContested` 内の `deps.relationStore !== undefined && deps.memoryStore.markContestedGroup !== undefined`（群を作る分岐に入る条件の前半） | `contestedDetection[].result` が `{ kind: "unresolved_conflict", matchMemoryIds }`（同関数が `kind: "unresolved_conflict", matchMemoryIds: matches` を返す末尾）。`memory_events` に `kind: "updated"`・`meta.reason: "claim_key_conflict_unresolved"` の行が1件積まれる |
+| `memoryStore.markContestedGroup` が無い adapter | 上と同じ条件の後半 `deps.memoryStore.markContestedGroup !== undefined`（`PostgresMemoryStore` は `packages/postgres/src/memory-store.ts` の `async markContestedGroup(` で実装している） | 同上 |
+| 組み立てた群が3件未満 | `memberIdSet.size >= 3`（`runtime.ts`） | 同上 |
+| `markContestedGroup` が `contested_group` 以外（`ineligible` / `conflict`）を返した | `markResult.outcome.kind === "contested_group"`（`runtime.ts`。このときだけ `groupOutcome` に入り、群として返す） | 同上 |
 
 - `memory_events` の根拠（`note` の JSON）には claim key・新しい Memory・一致した Memory の `status`/`contentHash`/有効期間が入る。
 - `superseded` へは進めない。
 - **`detectContested` を渡さない（または `false`）と、検出そのものが走らない**——上の「記録するだけ」ですらなく、
-  `memory_events` の根拠も積まれず、`ObserveResult.contestedDetection` の欄自体が無い（`undefined`。`runtime.ts:4489`・`5180`）。
-  `claimKey.enabled: true` も要る（無いと Memory に claim key が付かず、検出は `null` を返す。`runtime.ts:4211-4214`）。
-- ちょうど1件の `active` な一致は、配線に関わらず2者間の `contested`（`kind: "contested"`）になる（`runtime.ts:4266`）。
+  `memory_events` の根拠も積まれず、`ObserveResult.contestedDetection` の欄自体が無い（`undefined`。`runtime.ts` の `claimKeyOptions?.detectContested === true` と `input.claimKey?.detectContested === true ? { contestedDetection }`）。
+  `claimKey.enabled: true` も要る（無いと Memory に claim key が付かず、検出は `null` を返す。`detectClaimKeyContested` 冒頭の `const claimKey = memory.claimKey ?? null;`）。
+- ちょうど1件の `active` な一致は、配線に関わらず2者間の `contested`（`kind: "contested"`）になる（`detectClaimKeyContested` の `matches.length === 1 && matches[0]!.status === "active"` の分岐）。
 
 ## adapter として自作する場合
 
