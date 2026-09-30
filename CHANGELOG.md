@@ -282,6 +282,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **今の振る舞い**: LLM が返った直後に、LLM の前に読んだその Observation の記憶を読み直し、1件でも `forgotten` なら何も書かない。書き込み（`supersedeWithNewMemories`／口が無い adapter 向けの `createMemoryWithOutbox`）にも `opts.abortIfForgotten` を渡し、実装する adapter（`@mnemora/postgres`）は同一トランザクションでも見直す。戻り値は「退けた記憶を持つ Observation」の早期 return と同じ形（`extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に `status_not_active`）。**例外は投げず、公開の型は増やしていない。**
   - ⚠ `abortIfForgotten` を実装しない自前の `MemoryStore` では、読み直しだけが保護になり、読み直しと書き込みの間の窓は残る（`consolidate`/`reflect` と同じ）。待つ間に `contested` になった記憶は見直さない。
   - 非破壊（型・DB は変えていない。forget された記憶を根拠に書き直していた挙動が、書かない挙動になった）。
+- **`consolidate()` / `reflect()` の内部の `recall()`（`{ seedMemoryId }`・`{ query }` 形と、tick の consolidate / reflect ジョブ）が、使わない件数集計を撃たなくなった**（[ADR 0415](./docs/decisions/0415-consolidate-reflect-skip-scope-aggregate.md)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C の `scopeAggregate: "skip"` を内部に使う）。両方とも recall の `memories` しか読まないのに、`MemoryStore.aggregateScope` の `GROUP BY subject_id` が毎回走っていた。
+  - **`consolidate()` / `reflect()` の返り値は変わらない。変わるのは、内部の recall が書く `recalls` 行**（`getRecall` で読める）**の中身**: `query` に `scopeAggregate: "skip"` が付き、`index_band` の `groups` は空・`totalInScope` は `0`・`countKind` は `'unknown'`、`omitted` の `filtered(...)`・`not_indexed`・`ann_unreached` は積まれず、ANN の stage detail に `annReachability: "unknown"` が付く。目次帯の中身は同じ。`recallId` は返り値に載らないので、見えるのは `recalls` 表を直接読むとき。
+  - `{ query }` 形で利用者が `query.scopeAggregate` を明示したときは、その値を尊重する。`findCorrectionCandidates()`・直接の `recall()` は変えていない（`"exact"` のまま）。公開の型・DB は変えていない。
+  - 【実測】100万行・全件 active・単一テナント・並列0・同時1・単発の接続・10往復の p50（共有機、交互ではない）: `consolidate({ seedMemoryId })` は 742.9 ms → 6.4 ms（同じ器・設定で前後を続けて測った値。前の担当の測定は 893.1 ms）。条件・限界は ADR 0415。
 
 ### Fixed
 

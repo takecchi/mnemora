@@ -745,6 +745,22 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 ない。**利用者の入力を検索クエリとして渡す場合は、DB 側でも `statement_timeout`
 （ロール・データベース・接続のいずれかの単位）を設定して併用することを推奨する。
 
+## 運用: 並列クエリ（`max_parallel_workers_per_gather`）は、件数集計を撃つ経路に効く
+
+`recall()` の段5（`MemoryStore.aggregateScope` の `GROUP BY subject_id`）は、テナントの行数に比例して重くなる。
+**並列クエリ（`max_parallel_workers_per_gather`）を 0 より大きくすると、この集計は速くなる**（Postgres 側の設定で、コードの変更は要らない）。
+ただし、`recall()` の `scopeAggregate: "skip"` を渡す（`consolidate` / `reflect` の内部の recall は、これを渡す。
+[ADR 0415](../../docs/decisions/0415-consolidate-reflect-skip-scope-aggregate.md)）と集計自体を撃たないので、並列の有無は効かない。
+
+- 【実測】`consolidate({ target: { seedMemoryId } })` の p50（集計が走る経路。ADR 0415 より前の `main`）: 並列0 で 893 ms、
+  `max_parallel_workers_per_gather=2` で 406 ms（約2.2倍）、4 で 269 ms（約3.3倍）。
+- 測った条件: PostgreSQL 17.11、100万行・全件 active・単一テナント、`shared_buffers=2GB`、`max_worker_processes=16`、
+  `max_parallel_workers=8`、32 vCPU の共有機（load average 23〜32）、単発の接続（同時1）。
+- ⚠ **`/dev/shm` が小さい器（コンテナなど）では、並列クエリが動的共有メモリを確保できず失敗することがある。**
+  その場合は `dynamic_shared_memory_type=mmap` を設定する。
+- ⚠ **同時実行や他の負荷の下では測っていない。**並列ワーカーは `max_parallel_workers` を他のクエリと取り合うので、
+  同時に走るクエリが多いと倍率は下がりうる（推論。測っていない）。
+
 ## ほかに export しているもの（約束は各 TSDoc）
 
 上の例と節に出てこない公開の名前を、用途ごとに並べる（どれも `@mnemora/postgres` の入口から import できる）。
