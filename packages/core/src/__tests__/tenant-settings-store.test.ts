@@ -12,6 +12,9 @@ import {
   readActivitySeq,
   readDecayClock,
   readDefaultHalfLifeRecalls,
+  readHasSubjectActivityCounters,
+  readSubjectActivitySeq,
+  readSubjectActivitySeqs,
   readTaxonomyMode,
   TAXONOMY_MODE_INVALID_MESSAGE,
   TAXONOMY_MODE_UNSUPPORTED_MESSAGE,
@@ -115,6 +118,94 @@ describe("readActivitySeq", () => {
 
   it("getActivitySeq が在って投げた場合は素通しで投げる", async () => {
     await expect(readActivitySeq(throwingStore("db down"), ctx)).rejects.toThrow("db down");
+  });
+});
+
+describe("readHasSubjectActivityCounters", () => {
+  it("hasSubjectActivityCounters を持たない adapter では false へ倒す", async () => {
+    expect(await readHasSubjectActivityCounters(minimalStore(), ctx)).toBe(false);
+  });
+
+  it("hasSubjectActivityCounters が在れば、true も false もそのまま返す", async () => {
+    const withValue = (value: boolean): TenantSettingsStore => ({
+      ...minimalStore(),
+      async hasSubjectActivityCounters(_ctx: Ctx): Promise<boolean> {
+        return value;
+      },
+    });
+    expect(await readHasSubjectActivityCounters(withValue(true), ctx)).toBe(true);
+    expect(await readHasSubjectActivityCounters(withValue(false), ctx)).toBe(false);
+  });
+});
+
+describe("readSubjectActivitySeqs / readSubjectActivitySeq", () => {
+  /** 行が在る subject だけを返し、行が無い subject はキーを省略する adapter。 */
+  function storeWithRows(rows: Record<string, number>): TenantSettingsStore {
+    return {
+      ...minimalStore(),
+      async getSubjectActivitySeqs(
+        _ctx: Ctx,
+        subjectIds: string[],
+      ): Promise<Record<string, number>> {
+        const out: Record<string, number> = {};
+        for (const id of subjectIds) {
+          if (id in rows) out[id] = rows[id]!;
+        }
+        return out;
+      },
+    };
+  }
+
+  it("getSubjectActivitySeqs を持たない adapter では、渡した subjectId すべてを 0 にして返す", async () => {
+    expect(await readSubjectActivitySeqs(minimalStore(), ctx, ["s1", "s2"])).toEqual({
+      s1: 0,
+      s2: 0,
+    });
+    expect(await readSubjectActivitySeq(minimalStore(), ctx, "s1")).toBe(0);
+  });
+
+  it("subjectIds が空なら {}（adapter を呼ばない）", async () => {
+    let called = false;
+    const store: TenantSettingsStore = {
+      ...minimalStore(),
+      async getSubjectActivitySeqs(): Promise<Record<string, number>> {
+        called = true;
+        return {};
+      },
+    };
+    expect(await readSubjectActivitySeqs(store, ctx, [])).toEqual({});
+    expect(called).toBe(false);
+  });
+
+  it("行が無い subjectId（adapter がキーを省略）は 0 に倒し、行が在るものはその値を返す", async () => {
+    const store = storeWithRows({ s1: 7 });
+    expect(await readSubjectActivitySeqs(store, ctx, ["s1", "s2"])).toEqual({ s1: 7, s2: 0 });
+  });
+
+  it("adapter が渡していない余計なキーを返しても、結果には渡した subjectId だけが入る", async () => {
+    const store: TenantSettingsStore = {
+      ...minimalStore(),
+      async getSubjectActivitySeqs(): Promise<Record<string, number>> {
+        return { s1: 7, other: 9 };
+      },
+    };
+    expect(await readSubjectActivitySeqs(store, ctx, ["s1"])).toEqual({ s1: 7 });
+  });
+
+  it("単数版: 行が在れば値、行が無ければ 0", async () => {
+    const store = storeWithRows({ s1: 7 });
+    expect(await readSubjectActivitySeq(store, ctx, "s1")).toBe(7);
+    expect(await readSubjectActivitySeq(store, ctx, "missing")).toBe(0);
+  });
+
+  it("getSubjectActivitySeqs が在って投げた場合は素通しで投げる", async () => {
+    const store: TenantSettingsStore = {
+      ...minimalStore(),
+      async getSubjectActivitySeqs(): Promise<Record<string, number>> {
+        throw new Error("db down");
+      },
+    };
+    await expect(readSubjectActivitySeqs(store, ctx, ["s1"])).rejects.toThrow("db down");
   });
 });
 

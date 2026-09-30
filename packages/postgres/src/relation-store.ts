@@ -22,7 +22,7 @@ function memoryNotFound(id: string): Error {
  * **群の作成・解消（`markContestedGroup?`/`resolveContestedGroup?`）はここではない**
  * ——`PostgresMemoryStore` が自分のトランザクションの中で `memory_relations` へ直接
  * SQL を発行する（`memory-store.ts` の doc コメント参照）。この class が持つのは
- * 単発の `link`/`unlink`（トランザクション外）と、読み取り専用の `listRelated` だけ。
+ * 単発の `link`/`unlink`（トランザクション外）と、読み取り専用の `listRelated`・`listRelatedMany` だけ。
  */
 export class PostgresRelationStore implements RelationStore {
   constructor(private readonly db: Db) {}
@@ -81,6 +81,48 @@ export class PostgresRelationStore implements RelationStore {
         AND to_memory_id = ${to}
         AND kind = ${kind}
     `);
+  }
+
+  /**
+   * `listRelated` を複数の起点に対して1文（`from_memory_id = ANY(...)`）で行う（Issue #1449、ADR 0402。
+   * 契約は `RelationStore.listRelatedMany` の doc）。`result[i]` は `memoryIds[i]` の相手側の一覧——
+   * 起点ごとの分け方は uuid を小文字にそろえたキーで行うので、渡した id の綴りの揺れに依らない。
+   * uuid の形でない id は DB へ投げず（型変換エラーでバッチ全体が落ちるため）、その位置は空配列にする。
+   * 重複した id は1回だけ DB へ渡し、位置ごとに別々の配列を返す。
+   */
+  async listRelatedMany(
+    ctx: Ctx,
+    memoryIds: readonly MemoryId[],
+    kind?: RelationKind,
+  ): Promise<Relation[][]> {
+    const ids = memoryIds.map((id) => normalizeUuidCase(id));
+    const queryable = [...new Set(ids.filter((id) => isUuidLike(id)))];
+    const byFrom = new Map<string, Relation[]>();
+    if (queryable.length > 0) {
+      const result = kind
+        ? await this.db.execute(sql`
+            SELECT from_memory_id, to_memory_id, kind, created_at FROM memory_relations
+            WHERE tenant_id = ${ctx.tenantId}
+              AND from_memory_id = ANY(${sql.param(queryable)}::uuid[])
+              AND kind = ${kind}
+          `)
+        : await this.db.execute(sql`
+            SELECT from_memory_id, to_memory_id, kind, created_at FROM memory_relations
+            WHERE tenant_id = ${ctx.tenantId}
+              AND from_memory_id = ANY(${sql.param(queryable)}::uuid[])
+          `);
+      for (const row of result.rows) {
+        const r = row as unknown as MemoryRelationRow;
+        const list = byFrom.get(r.from_memory_id) ?? [];
+        list.push({
+          memoryId: r.to_memory_id as MemoryId,
+          kind: r.kind as RelationKind,
+          createdAt: parsePgTimestamp(r.created_at),
+        });
+        byFrom.set(r.from_memory_id, list);
+      }
+    }
+    return ids.map((id) => (byFrom.get(id) ?? []).map((r) => ({ ...r })));
   }
 
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {

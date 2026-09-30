@@ -202,7 +202,15 @@ describe("core の Fake: 保存できない候補を含む抽出結果（#1063�
     expect(resent.extraction).toBe("skipped");
     expect(await kit.contents(resent.observationId)).toEqual([]);
     expect(await kit.createdMetas()).toEqual([]);
-    // 今どおり: sync の extract ジョブは完了にならずに残り、tick の再試行も同じ所で落ちる。
+    // ADR 0407（挙動の変化）: sync の extract ジョブは observe が claim 済みのまま残る。
+    // 以前は未 claim で残り、直後の tick がすぐ拾っていた。今はリースの内側では拾われない。
+    const early = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
+    expect({ processed: early.processed, failed: early.failed }).toEqual({
+      processed: 0,
+      failed: 0,
+    });
+    // 完了にならずに残る点は今どおり: リースが切れた後の tick の再試行は同じ所で落ちる。
+    nowMs += LEASE_MS * 2;
     const tick = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     expect({ processed: tick.processed, failed: tick.failed }).toEqual({ processed: 0, failed: 1 });
   });

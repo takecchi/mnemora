@@ -158,6 +158,7 @@ describeMemoryStoreConformance({
 // Issue #207/#933 PR2（ADR 0381）: `RelationStore` の Postgres 実装。
 describeRelationStoreConformance({
   name: "postgres",
+  implementsListRelatedMany: true,
   createStore: async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();

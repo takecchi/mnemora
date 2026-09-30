@@ -427,7 +427,7 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date }
+    opts?: { now?: Date; claimedBy?: string }
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   createMemoryWithOutbox(
@@ -894,6 +894,12 @@ interface RelationStore {
   link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
+  /** 任意（Issue #1449、ADR 0402）。listRelated を複数の起点に1往復で行う。result[i] は memoryIds[i] の相手側 */
+  listRelatedMany?(
+    ctx: Ctx,
+    memoryIds: readonly MemoryId[],
+    kind?: RelationKind,
+  ): Promise<Relation[][]>;
 }
 ```
 
@@ -901,6 +907,9 @@ interface RelationStore {
 （`InMemoryRelationStore`）・core の Fake（`FakeRelationStore`、テスト専用）が実装
 している。`Store` バンドルへの組み込みは任意（`RuntimeDeps.relationStore?`、
 ADR 0292 決定1-c）——配線しなくても `recall()` は今日どおり動く。
+`listRelatedMany?` は `PostgresRelationStore`・`InMemoryRelationStore` が実装する。実装しない
+adapter では `Runtime` が `listRelated` を起点ごとに直列に呼ぶ（結果は同じ。
+[ADR 0402](./decisions/0402-relation-store-list-related-many.md)）。
 
 **書き込み（3件以上の群の作成・解消・穴Aの合流）はこの store の口ではない**——
 `MemoryStore` の任意メソッド `markContestedGroup?`/`resolveContestedGroup?`
