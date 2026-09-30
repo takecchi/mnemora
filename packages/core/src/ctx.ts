@@ -41,6 +41,21 @@ import { z } from "zod";
  * そのまま1つのテナント・主題として動く（`claimKey` の主語と述語・ラベル名・`tags` の要素も同じ）。
  * 例外は `observe` の `externalId` で、入力の schema が空文字を拒む（空白だけは受け付ける）。
  *
+ * ⚠ **2026-09-30 訂正: 上の「例外は `externalId`」は、`observe` の入力（`ObserveInputSchema`、`observation.ts`）が
+ * `min(1)` で断る欄の一部しか挙げていなかった。**`observe` の入力で、空文字（`""`）・空配列を `ZodError` にする欄は
+ * 次のとおりである（どれも空白だけの文字列は受け付ける。検査そのものは変えていない）。
+ * - 文字列が空文字だと断る: `subjectId`・`externalId`（4種類すべての `kind`。`memory_usage` は `subjectId` を持たない）、
+ *   `utterance` の `speaker`・`text`、`event` の `name`、`document` の `title`・`content`、`memory_usage` の `recallId`。
+ * - 配列の要素が空文字だと断る: `subjectCandidates`・`memory_usage` の `usedMemoryIds`・`claimKey.knownPredicates`・
+ *   `claimKey.knownSubjects`。
+ * - 配列そのものが空だと断る: `memory_usage` の `usedMemoryIds`（`subjectCandidates` の空配列は受け付け、「渡していない」と同じに扱う）。
+ * - 入れ子の欄: `extractionContext.messages[].text`・`extractionContext.messages[].speaker`・`extractionContext.timeZone`、
+ *   `attributes` のキー（`ATTRIBUTE_KEY_MIN_LENGTH` = 1）。
+ * ⟹ **`ctx.subjectId: ""` は通るが、`observe` の入力の `subjectId: ""` は断られる**——同じ名前の欄で扱いが違う。
+ * また、`observe` の入力の**未知のキーは、例外にも警告にもならず黙って捨てられる**（`ObserveInputSchema` は `.strict()` ではない。
+ * `ObserveInput` の doc・[Issue #1123](https://github.com/takecchi/mnemora/issues/1123)）。`subjectid` のような綴り違いは、
+ * 無いものとして扱われる。
+ *
  * ⚠ **空文字の `tenantId`・`subjectId` は受け付けるが、出力の側の schema を通らない値を作る**（今の振る舞い）。
  * `subjectId: ""` で書いた記憶を `recall()` が返すと `RecalledMemory.subjectId` が `""` になり
  * （`RecalledMemorySchema` は `min(1)`）、`recall()` の `outputValidation` が `ok: false` になる。
