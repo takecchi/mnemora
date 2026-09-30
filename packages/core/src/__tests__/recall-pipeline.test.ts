@@ -2834,7 +2834,7 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
   });
 
   // -------------------------------------------------------------------------
-  // scopeAggregate: "skip"（ADR 0384 案C の決定7、ADR 0390 の続き）
+  // scopeAggregate: "skip"（ADR 0384 案C の「決めたこと」7、ADR 0390 の続き）
   //
   // "skip" では `aggregateScope` が件数を数えない（`countKind: 'unknown'`・totalInScope 0）ので、
   // `ann_unreached` の母数 `eligible` が 0 になり、ANN が scope の候補を取りこぼしていても

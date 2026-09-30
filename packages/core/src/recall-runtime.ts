@@ -3132,7 +3132,7 @@ export async function runRecall(
     };
   }
 
-  // ADR 0390（ADR 0384 決定7 の続き）: `scopeAggregate: "skip"` で件数が取れなかった（adapter が
+  // ADR 0390（ADR 0384「決めたこと」7 の続き）: `scopeAggregate: "skip"` で件数が取れなかった（adapter が
   // `countKind: 'unknown'` を返した）とき、`eligible` は 0 になり、上の `ann_unreached` も
   // `annReturnedFewerThanReachable` も判定できない——**「鳴らない」ことが「拾いきった」を
   // 意味しなくなる**。ANN の段が実際に走っていたなら、その stage detail に
