@@ -223,6 +223,8 @@ describeVectorStoreConformance({
   supportsGetVectors: true,
   // Issue #1207 / ADR 0383: InMemoryVectorStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // Issue #1412 の続き: InMemoryVectorStore が searchMany を実装しているか（歯は宣言した adapter にだけかかる）。
+  supportsSearchMany: true,
 });
 
 // ADR 0084 / Issue #106: `InMemoryLexicalStore` は自前の Map を持たず、`memoryStore` の

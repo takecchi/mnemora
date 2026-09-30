@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
 import type {
   Ctx,
@@ -2687,6 +2687,114 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           limit: 10,
         });
         expect(predicates).toEqual(["favorite_color"]);
+      });
+
+      // ---------------------------------------------------------------
+      // 同着（代表行の created_at が同じ predicate が複数ある）の並び規則。
+      // 契約: 副キーは predicate の**コードポイント順の昇順**。DB の照合順序（collation）にも、
+      // 行を書いた順にも、実装の内部表現（UTF-16 コード単位）にも依存しない。
+      //
+      // 同着の行を作る方法: 1回の `supersedeWithNewMemories`（1トランザクション。Postgres は
+      // `now()` が同じになる）で作る。無い adapter は `createMemory` を続けて呼び、時計の
+      // `Date` を固定して同じ `createdAt` にする（in-memory 実装は `new Date()` を書く）。
+      // ---------------------------------------------------------------
+      const createTiedPredicates = async (
+        store: MemoryStore,
+        ctx: Ctx,
+        predicates: readonly string[],
+        at: Date,
+        tag: string,
+      ): Promise<void> => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(at);
+        try {
+          const inputs = predicates.map((predicate, i) =>
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              subjectId: "user-1",
+              contentHash: `${tag}-${i}`,
+              claimKey: { subject: "user", predicate },
+            }),
+          );
+          if (store.supersedeWithNewMemories !== undefined) {
+            await store.supersedeWithNewMemories(
+              ctx,
+              inputs.map((input) => ({ input, jobKinds: [] })),
+              [],
+            );
+          } else {
+            for (const input of inputs) await store.createMemory(ctx, input);
+          }
+        } finally {
+          vi.useRealTimers();
+        }
+      };
+
+      it("created_at が同着の predicate は、predicate の昇順で返る（書いた順に依らない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await createTiedPredicates(
+          store,
+          ctx,
+          ["pred_c", "pred_a", "pred_b"],
+          new Date("2026-03-01T00:00:00.000Z"),
+          "tie-basic",
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual(["pred_a", "pred_b", "pred_c"]);
+      });
+
+      it("同着の並びは、新しい順の大きな規則の内側にだけ効き、limit で切っても同じ先頭が残る", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await createTiedPredicates(
+          store,
+          ctx,
+          ["b", "a"],
+          new Date("2026-03-01T00:00:00.000Z"),
+          "tie-older",
+        );
+        await createTiedPredicates(
+          store,
+          ctx,
+          ["y", "x"],
+          new Date("2026-03-02T00:00:00.000Z"),
+          "tie-newer",
+        );
+
+        expect(
+          await store.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
+        ).toEqual(["x", "y", "a", "b"]);
+        expect(
+          await store.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 3 }),
+        ).toEqual(["x", "y", "a"]);
+      });
+
+      it("同着の並びは照合順序（collation）に依らず、コードポイント順である（大文字が小文字より前、UTF-16 の並びとも違う）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // コードポイント順: B(U+0042) < Z(U+005A) < _(U+005F) < a(U+0061) < é(U+00E9)
+        //   < ～(U+FF5E) < 😀(U+1F600)。
+        // 言語別の照合（en_US など）は `_` < a < B < Z < é のように並べる。UTF-16 のコード単位順
+        // （JS の `<`）は 😀（D83D DE00）を ～（FF5E）より前に置く——どちらとも食い違う組。
+        const scrambled = ["\u{1F600}", "a", "～", "Z", "é", "_", "B"];
+        await createTiedPredicates(
+          store,
+          ctx,
+          scrambled,
+          new Date("2026-03-01T00:00:00.000Z"),
+          "tie-codepoint",
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual(["B", "Z", "_", "a", "é", "～", "\u{1F600}"]);
       });
     } else if (supportsListActiveClaimPredicates === false) {
       it("listActiveClaimPredicates は任意メソッドであり、この adapter は実装していない", async () => {

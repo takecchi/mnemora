@@ -234,6 +234,8 @@ describeVectorStoreConformance({
   supportsGetVectors: true,
   // Issue #1207 / ADR 0383: PostgresVectorStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // Issue #377 / Issue #1412 の続き: PostgresVectorStore は searchMany を実装している。
+  supportsSearchMany: true,
 });
 
 describeLexicalStoreConformance({

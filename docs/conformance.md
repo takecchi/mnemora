@@ -511,6 +511,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-09-30 追記（[ADR 0404](./decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）**: `MemoryStoreConformanceOptions` に `supportsPurgeExpiredRecalls?`、`OutboxStoreConformanceOptions` に `supportsPurgeCompletedJobs?` が増えた——それぞれ `MemoryStore.purgeExpiredRecalls?`・`OutboxStore.purgeCompletedJobs?` を検査する。上の `supportsAbortIfForgotten?` 等と同じ3状態（`true` は歯を走らせ、各 `it` の冒頭で口の存在を要求する／`false` は口が無いことを assert する／省略は「⚠ 未検査」の named it を1本だけ登録する）。**任意なので、既存の呼び出し側は壊れない（非破壊）。**`purgeCompletedJobs?` の歯のうち終端後の行を読むものは `peekJob` を要り、`peekJob` の無い adapter では `it.skip` になる。`packages/postgres` と `packages/testkit` の fixture は `true` を渡す。
 
+**⚠ 2026-09-30 追記（Issue #1412 の続き）**: `VectorStoreConformanceOptions` に `supportsSearchMany?` が増えた——`VectorStore.searchMany?`（任意メソッド、Issue #377）の歯（各 key の結果が単独の `search()` と一致する・同点の並び・`limit`・0件でも key が Map に在る・空 `queries`・同じ key は後勝ち・NUL を含む key・不正な `limit`・`filter`/テナント分離）を `true` で実行し、`false` で `expect(store.searchMany).toBeUndefined()` を assert し、省略で「⚠ 未検査: supportsSearchMany が指定されていない — …」の named it を1本登録する（`supportsListActiveClaimPredicates?` と同じ3状態）。`in-memory-fixtures.conformance.test.ts`・`conformance.postgres.test.ts` はどちらも `true` を渡す。⚠ 省略時の named it を検査する `conformance-omitted-flags-named-it.test.ts` は `VectorStore` を対象にしていないので、この named it の登録そのものを縛る歯は無い。`supportsListActiveClaimPredicates: true` の枝には、同着の並び（predicate のコードポイント順の昇順）の歯が3本増えた。
+
 ---
 
 ## 出所について

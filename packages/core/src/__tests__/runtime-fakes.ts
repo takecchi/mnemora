@@ -2472,10 +2472,13 @@ export class FakeMemoryStore implements MemoryStore {
         latestByPredicate.set(predicate, createdAtMs);
       }
     }
-    return [...latestByPredicate.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, query.limit)
-      .map(([predicate]) => predicate);
+    return (
+      [...latestByPredicate.entries()]
+        // 同着は predicate のコードポイント順（UTF-8 のバイト順と一致する。JS の `<` は UTF-16 コード単位順で食い違う）。
+        .sort((a, b) => b[1] - a[1] || Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])))
+        .slice(0, query.limit)
+        .map(([predicate]) => predicate)
+    );
   }
 
   /**
@@ -3171,6 +3174,53 @@ export class FakeVectorStore implements VectorStore {
     }
     return { deleted: matchingKeys.length, reachedLimit: matchingKeys.length === opts.limit };
   }
+}
+
+/**
+ * Issue #377 / Issue #1412 の続き: `searchMany`（任意メソッド）を持つ `VectorStore` を模す薄いラッパー。
+ * `FakeVectorStore` へ全部委譲し、`searchMany` は契約（`VectorStore.searchMany?` の doc）どおり
+ * 「`new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ」に実装する
+ * ——同じ key は後勝ち、Map の並びは最初に現れた位置。`searchCalls`/`searchManyCalls` は、
+ * `recall-runtime.ts` の段3.5が束ねる経路と search へ戻る経路のどちらを通ったかを見るための記録。
+ * `FakeVectorStore` 自体には足さない——足すと他の全テストの連想枠が束ねる経路に切り替わる。
+ */
+export function withSearchMany(store: FakeVectorStore): VectorStore & {
+  searchCalls: number;
+  searchManyCalls: { keys: string[]; opts: { limit: number; filter: VectorFilter } }[];
+} {
+  const wrapper = {
+    searchCalls: 0,
+    searchManyCalls: [] as { keys: string[]; opts: { limit: number; filter: VectorFilter } }[],
+    upsert: (ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]) =>
+      store.upsert(ctx, space, memoryId, vector),
+    search: (
+      ctx: Ctx,
+      space: EmbeddingSpaceId,
+      query: number[],
+      opts: { limit: number; filter: VectorFilter },
+    ) => {
+      wrapper.searchCalls += 1;
+      return store.search(ctx, space, query, opts);
+    },
+    delete: (ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId) =>
+      store.delete(ctx, space, memoryId),
+    deleteAcrossSpaces: (ctx: Ctx, memoryIds: readonly MemoryId[]) =>
+      store.deleteAcrossSpaces(ctx, memoryIds),
+    getVectors: (ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]) =>
+      store.getVectors(ctx, space, memoryIds),
+    searchMany: async (
+      ctx: Ctx,
+      space: EmbeddingSpaceId,
+      queries: { key: string; vector: number[] }[],
+      opts: { limit: number; filter: VectorFilter },
+    ) => {
+      wrapper.searchManyCalls.push({ keys: queries.map((q) => q.key), opts });
+      const result = new Map<string, VectorHit[]>();
+      for (const q of queries) result.set(q.key, await store.search(ctx, space, q.vector, opts));
+      return result;
+    },
+  };
+  return wrapper;
 }
 
 /**

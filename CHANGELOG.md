@@ -209,6 +209,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 - **`runtime.purge` の `"purged"`／`"already_purged"` outcome に、任意の欄 `embeddingCleanup?: { status: "failed"; error: string }` を足した**（[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)「引き受けた負債」1、[PR #1475](https://github.com/takecchi/mnemora/pull/1475)、[ADR 0399](./docs/decisions/0399-purge-embedding-cleanup-outcome-field.md)）。埋め込み行の後始末（`deleteAcrossSpaces`）が失敗したときだけ付き、`kind` は変わらない。成功時はプロパティ自体が無く、出力は変わらない。⭕ 非破壊と数える（任意欄の追加のみ）。
+- **`@mnemora/testkit` の `describeVectorStoreConformance` に、任意フラグ `supportsSearchMany?: boolean` を足した。`InMemoryVectorStore` に `searchMany` を実装した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。
+  - `VectorStore.searchMany?`（任意メソッド）の契約——各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並び、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、同じ key は後勝ち、NUL を含む key でも投げない、不正な `limit` は `search()` と同じく投げる、`filter`・テナント分離——を検査する歯が、これまで無かった。フラグは `supportsListActiveClaimPredicates?` と同じ3状態（`true` は歯を実行、`false` は `searchMany` が無いことを assert、省略は「⚠ 未検査」の named it を1本）。
+  - ⚠ **自前の `VectorStore` に `searchMany` を実装していて `supportsSearchMany: true` を渡す人へ**: 契約に反していれば、この歯で新しく赤になりうる。フラグを渡さなければ何も変わらない（型も壊れない）。
+  ⭕ 非破壊と数える（新しい任意の欄1つと、fixture への任意メソッドの追加のみ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -251,6 +255,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **新しい migration `0031_memory_labels_label_id_index.sql`。** `memory_labels (label_id)` に索引 `idx_memory_labels_label_id` を1本足す。`@mnemora/postgres` を上げたあと migrate を当てる。列・型・SQL 文・返り値は変えない。⭕ 非破壊と数える。
   - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `memory_labels` への書き込みが止まる。
   - 調査担当の実測では、`memory_labels` 20万行で 46ms → 6.5ms（ADR 0400）。あわせて、全外部キーに先頭列一致の索引を要求する歯を足した（テストのみ、利用者には見えない）。
+
+- **`MemoryStore.listActiveClaimPredicates?` の同着（代表行の `created_at` が同じ predicate が複数あるとき）の並びを、predicate のコードポイント順の昇順に固定した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。以前は契約が同着の順を規定せず、`PostgresMemoryStore` は `ORDER BY MAX(created_at) DESC` だけ（同着は実行計画次第）、fixture は挿入順だった。
+  - `@mnemora/postgres` は副キーに `claim_key_predicate COLLATE "C" ASC` を足した（DB の照合順序に依らない）。`@mnemora/testkit` の `InMemoryMemoryStore` は UTF-8 のバイト列の比較（コードポイント順）で揃えた。DB マイグレーションは足していない。
+  - `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの歯を3本足した。
+  - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
+  - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
 
 ---
 
