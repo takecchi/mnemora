@@ -554,7 +554,7 @@ const CASES: Case[] = [
   {
     name: "getSubjectActivitySeqs: subjectId に NUL",
     expect: "reject",
-    message: /subjectId must not contain NUL/,
+    message: /subjectIds\[1\] contains a NUL character/, // ADR 0437: MalformedIdentifierError が先に断る
     run: (k) => k.tenantSettings.getSubjectActivitySeqs!(ctx, ["ok", NUL]),
   },
   {

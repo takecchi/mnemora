@@ -20,7 +20,7 @@ import type {
   TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
-import { assertWellFormedCtx } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { assertHalfLifeRecallsFitsFloat4 } from "./half-life-float4.js";
 import type { Db } from "./client.js";
 
@@ -207,6 +207,8 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     assertWellFormedCtx(ctx);
+    // ADR 0437 決定2: `subjectIds` の各要素も識別子の検査の内側に置く（読む前に断る）。
+    subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
     if (subjectIds.length === 0) {
       return {};
     }

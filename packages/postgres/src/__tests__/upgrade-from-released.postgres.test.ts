@@ -106,7 +106,7 @@ for (const fixture of FIXTURES) {
     const snapshotRows = () =>
       q(
         `SELECT id, tenant_id, status, embedding_status, superseded_by_id, contested_with_id,
-                purged_at, content FROM memories ORDER BY id`,
+                purged_at, content, tags FROM memories ORDER BY id`,
       );
 
     beforeAll(async () => {
@@ -127,6 +127,11 @@ for (const fixture of FIXTURES) {
       const ledger = await q<{ name: string }>("SELECT name FROM _mnemora_migrations");
       const done = new Set(ledger.map((r) => r.name));
       pendingBefore = listMigrationFiles(DEFAULT_MIGRATIONS_DIR).filter((f) => !done.has(f));
+      // ADR 0437 決定3: v1.0.0〜v1.0.2 の purge は `tags` を消さなかった（v1.1.0 の ADR 0375 から消える）。
+      // fixture の purge 済みの行に、その残り方（purged_at があり、tags が残る）を再現する。
+      // `attributes`・claim key の列は v1.0.x の DB には無い（migration 0019・0021 が足す）ので、
+      // migration の前には書けない。
+      await q("UPDATE memories SET tags = ARRAY['legacy-residue'] WHERE purged_at IS NOT NULL");
       rowsBefore = await snapshotRows();
 
       applied.push((await runMigrations(client.pool)).applied);
@@ -168,6 +173,43 @@ for (const fixture of FIXTURES) {
     // 書き換えた後か）に結果が依存しないようにするため。
     it("migration の前後で既存の記憶の行（状態・埋め込みの状態・関係・本文）が変わらない", () => {
       expect(rowsAfter).toEqual(rowsBefore);
+    });
+
+    // ADR 0437 決定3: migration は遡って消さない（tags は migration の前後で変わらない、上の it）。
+    // 消えるのは、今のコードで purge をかけ直したとき。
+    it("v1.0.x が残した purge 済みの行の tags・memory_labels は、purge をかけ直すと消える（labels の件数は実数に揃う）", async () => {
+      const purged = await q<{ id: string; tenant_id: string }>(
+        "SELECT id, tenant_id FROM memories WHERE purged_at IS NOT NULL ORDER BY id",
+      );
+      expect(purged.length).toBeGreaterThan(0);
+      for (const row of purged) {
+        const before = await q<{ tags: string[] }>("SELECT tags FROM memories WHERE id = $1", [
+          row.id,
+        ]);
+        expect(before[0]!.tags).toEqual(["legacy-residue"]);
+      }
+      for (const row of purged) {
+        const ctx: Ctx = { tenantId: row.tenant_id };
+        const result = await runtimeFor(row.tenant_id).purge(ctx, { memoryId: row.id });
+        expect(result.outcomes[0]!.kind).toBe("already_purged");
+      }
+      for (const row of purged) {
+        const after = await q<{ tags: string[]; links: number }>(
+          `SELECT tags, (SELECT count(*)::int FROM memory_labels WHERE memory_id = memories.id) AS links
+           FROM memories WHERE id = $1`,
+          [row.id],
+        );
+        expect(after[0]).toEqual({ tags: [], links: 0 });
+      }
+      // proposed_count は、残っている紐付けの本数と一致する（負にならない）。
+      const labels = await q<{ name: string; proposed_count: number; links: number }>(
+        `SELECT l.name, l.proposed_count::int AS proposed_count,
+                (SELECT count(*)::int FROM memory_labels ml WHERE ml.label_id = l.id) AS links
+         FROM labels l WHERE l.status = 'proposed'`,
+      );
+      for (const label of labels) {
+        expect(label.proposed_count, label.name).toBe(label.links);
+      }
     });
 
     it("zero-norm 部分索引は空間ごとにちょうど1本（migration と registerEmbeddingSpace で重複しない）", async () => {

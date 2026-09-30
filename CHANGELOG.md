@@ -279,6 +279,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目49。**DB マイグレーションは無い。**修正前に書かれた食い違う行（`memory_events`・`memory_embeddings_<space>`）が在るかを調べる SQL は ADR 0436 に在る（読み取りだけ）。
   - 【確かめていないこと】`PostgresMemoryStore` の中の `memory_events` への INSERT 11箇所が、別テナントの記憶を指さないこと（1つずつは確かめていない）。検査と INSERT の間に並行して記憶が消えた場合の、外部キー違反の生のエラーの見え方。手元以外の環境・既存データでの食い違う行の有無。
 
+- **`TenantSettingsStore.getSubjectActivitySeqs` の `subjectIds` の各要素と、`MemoryStore.createRecall` の `advanceActivityClock.subjectId` に孤立サロゲートか NUL（U+0000）を含む値を、入口で `MalformedIdentifierError` で断るようになった。conformance suite に、これを検査する `it` が増えた——自前の store 実装を conformance suite に当てている人へ**（[ADR 0437](./docs/decisions/0437-helpers-params-subject-ids-repurge.md)、[ADR 0423](./docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md) 決定4(b) の一覧の漏れ、`@mnemora/postgres`・`@mnemora/testkit`）。
+
+  ADR 0423 が識別子の検査を掛けた口の一覧から、この2つの欄が漏れていた。NUL は Postgres で生の DB の例外（message に値が載る）、孤立サロゲートは通り、インメモリ実装は断らず Postgres と食い違っていた。今は、**書く・読む前に**、`field` を `subjectIds[i]`・`record.advanceActivityClock.subjectId` とする `MalformedIdentifierError` で断る。対をなすサロゲート（絵文字など）は、これまでどおり通る。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。あわせて、conformance suite（`describeTenantSettingsStoreConformance`・`describeMemoryStoreConformance`）の判定が厳しくなり、この2つの欄を断らない自前の store は、新しく実行時に落ちる（ADR 0423 と同じ扱い）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目50。DB マイグレーションは無い。
+  - 【確かめていないこと】他に識別子を入力に持つ口が無いこと（機械では確かめていない）。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
@@ -324,6 +331,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（新しい任意の欄1つと、fixture への任意メソッドの追加のみ）。
 - **`@mnemora/local-embedding` の `LocalEmbeddingProvider` に、任意メソッド `dispose(): Promise<void>` を足した**（[ADR 0419](./docs/decisions/0419-local-embedding-provider-dispose.md)）。読み込んだモデル（ONNX のセッション）を、上流 `@huggingface/transformers` の `dispose()` に委ねて手放す。読み込み中・推論中に呼ぶと、それらの完了を待ってから解放する。一度も読み込んでいなければ何もせず、2回呼んでも安全（上流の `dispose()` は1回）。**呼んだ後の `embed()` / `warmup()` は、入力に依らず（空配列でも）例外になる。**`EmbeddingProvider`（core の interface）には載せていない。`LocalEmbeddingPipeline`（`createPipeline` の注入口）にも任意の `dispose?()` を足した（持たなくてよい）。
   ⭕ 非破壊と数える（任意メソッド・任意欄の追加のみ）。
+
+- **`MemoryStore` に任意メソッド `scrubPurged?(ctx, memoryIds)` を、`runtime.purge` の `"already_purged"` outcome に任意の欄 `residueCleanup?: { status: "failed"; error: string }` を、`@mnemora/testkit` の `describeMemoryStoreConformance` に任意の `supportsScrubPurged?`・`seedLegacyPurgedRow?` を足した**（[ADR 0437](./docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3。下の Fixed の項目と対）。
+  - `scrubPurged` は、既に purge 済みの行（`status = 'forgotten'` かつ `purgedAt` が非 `null`）だけを対象に、`tags`・`attributes`・claim key・label の紐付けを消し、`proposed` な label の `proposedCount` を外した本数だけ減らす（べき等。監査イベントは積まない）。`Runtime.purge` が `already_purged`（`dryRun` でないとき）に、`deleteAcrossSpaces` と並べてベストエフォートで呼ぶ。失敗しても `kind` は変わらず、`residueCleanup` だけが付く。`@mnemora/postgres` とインメモリ実装が実装した。
+  ⭕ 非破壊と数える（任意メソッド・任意の欄・任意フラグの追加のみ。`supportsScrubPurged` を省略した既存の呼び出し側には「⚠ 未検査」の named it が1本増えるだけ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -431,6 +442,26 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **v1.1.0 より前（v1.0.0〜v1.0.2）に purge した行に残っていた `tags`・`attributes`・claim key・`memory_labels` が、purge をかけ直すと消えるようになった。**（[ADR 0437](./docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3・4、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)・[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md) の続き）
+  - **穴**: v1.0.x の `purgeMemory` は `content`・`digest`・`purged_at` しか書き換えなかった。v1.1.0（ADR 0375）からは、purge はそれらも消すが、**既に purge 済みの行には効かない**（migration は遡らない。purge をかけ直しても `already_purged` が返るだけだった）。
+  - **いまの振る舞い**: **v1.1.0 より前に purge した行は、purge をかけ直すと消える。かけ直すまでは残る。** `runtime.purge` が `already_purged` を返すとき（`dryRun` でないとき）、`MemoryStore.scrubPurged` が呼ばれ、`tags`・`attributes`・claim key・`memory_labels` を消し、`proposed` な label の `proposedCount` を外した本数だけ減らす。今のコードで purge した行を、二重に数え減らさない（べき等）。**migration で遡って一括で消すことは、していない**（オーナーの領分）。
+  - **残っている行の見つけ方**（現行の schema に移行したあと）:
+    ```sql
+    SELECT id, tenant_id FROM memories
+    WHERE purged_at IS NOT NULL
+      AND (
+        cardinality(tags) > 0
+        OR attributes <> '{}'::jsonb
+        OR claim_key_subject IS NOT NULL
+        OR claim_key_predicate IS NOT NULL
+        OR EXISTS (SELECT 1 FROM memory_labels ml WHERE ml.memory_id = memories.id)
+      );
+    ```
+    見つかった `id` を、その `tenant_id` の `ctx` で `runtime.purge(ctx, { memoryIds })` にかけ直す。
+  - **直していないもの**: `recalls.index_band` の digest（Issue #994 の系統）は、v1.0.x の purge が残したものが今も残っているかを**確かめていない**（範囲外）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目50。DB マイグレーションは無い。
+- **`readDecayClock`・`readActivitySeq`・`readDefaultHalfLifeRecalls`・`readHasSubjectActivityCounters`・`readSubjectActivitySeqs`・`readSubjectActivitySeq`・`writeDecayClock`・`readTaxonomyMode`・`writeTaxonomyMode`（`@mnemora/core` の公開ヘルパー9本）が投げる例外の message から、drizzle の `params:` より後ろを落とすようにした**（[ADR 0437](./docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定1、[ADR 0430](./docs/decisions/0430-concurrent-create-erase-and-standalone-params.md) 決定3の対象を広げた）。store が投げた例外の `message`（と `stack`・`cause`）の `params` を `(omitted by mnemora, N chars)` に落とす。例外そのものを返す（`kind`・`cause` は変わらない）。
+
 - **`recall()` の段1と連想枠が、`search()` のあとに archived・forgotten になった記憶を `memories` に返すことがあった**（[ADR 0432](./docs/decisions/0432-recall-status-recheck-and-archive-docs.md) AL-1）。`VectorFilter.status` は検索の時点でしか効かず、後置の再検査が `status` を見ていなかった。今は後置でも `status ∈ {active, contested}` を見て落とす（返す件数が減る方向で、新しい throw は無い。落とした分の `omitted` は段5の `filtered(archived)` などが数える）。
 - **`archiveDecayed`（`Runtime.sweepArchive`）の `reachedLimit` が、`limit: 0` のとき対象が0件でも `true` になっていた**（ADR 0432 AL-4）。`@mnemora/postgres` と `@mnemora/testkit` のインメモリで、`limit > 0` のときだけ `true` にした。`limit: 0` は断らず、何も掃かずに `reachedLimit: false` を返す。
 - **`PostgresTrigramLexicalStore.create()`（と `probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`）を別々の pool から同時に呼ぶと落ちていた**（[ADR 0430](./docs/decisions/0430-concurrent-create-erase-and-standalone-params.md) 決定1）。拡張が無い DB では `CREATE EXTENSION` が 23505 で `TrigramLexicalStoreUnavailableError(extension_create_failed)`、拡張も関数も在る DB では `CREATE OR REPLACE FUNCTION` が XX000（`tuple concurrently updated`）の素の `Error` になった。拡張の作成と関数のインストールを1つのトランザクションに入れ、`runMigrations` の拡張作成と同じ `pg_advisory_xact_lock` で直列にした。待ちに mnemora の上限は掛けず、新しい例外も足していない（利用者の `lock_timeout` / `statement_timeout` は効く）。
@@ -525,6 +556,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`PostgresMemoryStore.purgeMemory` に大文字の uuid を渡すと、`memories` の行は purge されるのに、`recalls.index_band` の目次帯の digest が書き換わらなかった**（[ADR 0438](./docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md)）。入口で uuid の大文字小文字をそろえるようにした。`Runtime` 経由（小文字の id）は影響なし。落ちる入力は増えない。
 
 - **`decay_clock=activity` で subject 単位のカウンタ（`usesSubjectActivityCounters`）を使うとき、`archiveDecayed` と `aggregateScope`（忘却ゲートの件数）が、カウンタ行を別テナント・別 subject の行と区別していなかった**（ADR 0438）。`tenant_subject_activity` の行が2本以上あると「more than one row returned by a subquery」で落ち、1本だけのときは別テナント・別 subject のカウンタで判定していた。相関サブクエリに修飾した `tenant_id`/`subject_id` を渡すようにした。壁時計のゲート・テナント単位のカウンタ・`search`・`reinforce` は影響なし。
+
+- **`observe` に `extractionContext: { timeZone }` と、年が 1000 未満・10000 以上・紀元前の `occurredAt` を渡すと、LLM を呼ばずに全文フォールバック（`extraction: "llm_failed_whole_observation"`、`failure.message` は `Invalid time value`）へ黙って倒れていたのを、約束どおり抽出するようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定1）。node の `Intl.DateTimeFormat("en-CA")` は年を4桁に0詰めせず（`"999-06-01"`・`"10000-01-01"`）、紀元前は符号を落とす（天文学年 0 が `"1"`）ため、その文字列を `Date.parse` に渡すと NaN になっていた。年月日を `formatToParts` で取り、`era` で紀元前を符号付きの天文学年に戻し、`setUTCFullYear` で組み直す。
+  - **プロンプトに出す暦日（`observedLocalDate`・`relativeDates`）の書き方は `Date#toISOString` と同じ**（0〜9999 年は4桁に0詰め、範囲外は `+010000-01-01`・`-000100-06-01` の符号付き6桁）。**1000〜9999 年と `timeZone` 無しは、プロンプトの content を1バイトも変えていない**（直す前の出力を固定値で縛った）。ただし、現地の暦日が 9999-12-31 のとき、`relativeDates` の「明日」「明後日」は、以前は `"+010000-01"` と切れた文字列だったのが `"+010000-01-01"`・`"+010000-01-02"` になる。`Date` の範囲（±8.64e15 ms）の外へ出る日付は、落ちずに `null` になる。
+
+- **`OutboxStore.complete`/`fail` を、同じリース（同じ `attempts`）での2回目の呼び出しで、1回目の終端の値を保つ（先勝ち）ようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定2）。以前は complete×2 で `completedAt` が2回目の `at` に、fail×2 で `failedAt`・`lastError` が2回目の値に上書きされ、`purgeCompletedJobs` の `olderThan` の境界も後ろにずれた。`@mnemora/postgres` は `UPDATE` の `WHERE` を `completed_at IS NULL AND failed_at IS NULL` の両方にし、`@mnemora/testkit/fixtures` のインメモリ実装も揃えた。**戻り値（`void`）と例外は変えていない**（`attempts` 不一致は `OutboxLeaseConflictError`、行が無ければ no-op、終端後の `claimBatch` は0件）。
 
 ---
 

@@ -541,6 +541,7 @@ interface MemoryStore {
     tombstone: { content: string; digest: string },
     event: NewMemoryEvent
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
+  scrubPurged?(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
   markContestedPair?(
     ctx: Ctx,
     first: { id: MemoryId; event: NewMemoryEvent },

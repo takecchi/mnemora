@@ -2697,6 +2697,13 @@ export class PostgresMemoryStore implements MemoryStore {
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(record.subjectId, "record.subjectId");
+    // ADR 0437 決定2: 書き込む先の subject のカウンタ（`tenant_subject_activity.subject_id`）も、書く前に断る。
+    if (typeof record.advanceActivityClock === "object" && record.advanceActivityClock !== null) {
+      assertWellFormedIdentifier(
+        record.advanceActivityClock.subjectId,
+        "record.advanceActivityClock.subjectId",
+      );
+    }
     // Issue #298 / ADR 0155: 新しく書く行は常に breakdownCaptured: true。「内訳を持たない
     // 新規行」は無い（recall-runtime.ts が finalMemories から毎回内訳を計算しているため）。
     const returnedMemories: RecallRecordReturnedMemories = {
@@ -3050,6 +3057,70 @@ export class PostgresMemoryStore implements MemoryStore {
       `);
 
       return { memory, event: storedEvent };
+    });
+  }
+
+  /**
+   * [ADR 0437](../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3:
+   * v1.1.0（ADR 0375）より前の `purgeMemory` が残した、`tags`・`attributes`・
+   * `claim_key_subject`/`claim_key_predicate`・`memory_labels` を、**既に purge 済みの行**
+   * （`status = 'forgotten' AND purged_at IS NOT NULL`）について消し、`labels.proposed_count`
+   * （`status = 'proposed'` のもの）を外した紐付けの本数だけ減らす（`GREATEST(…, 0)`）。
+   *
+   * - **1トランザクション。**3文とも `purged_at IS NOT NULL` の行だけを対象にするので、
+   *   未 purge の行・他テナントの行は、渡された id に含まれていても触らない。
+   * - **べき等。**`memories` の UPDATE は「残骸が在る行」だけを更新する（`updated_at` も、残骸の無い行では
+   *   動かさない）。`memory_labels` の DELETE は `RETURNING` した本数だけ `proposed_count` を減らすので、
+   *   2回目以降（または今のコードで purge した行）は外す行が無く、減算は0件になる。同時に2本が
+   *   同じ行を消しにきても、後から来た DELETE は先の DELETE の確定後に行を見直すので、二重には数えない
+   *   （`READ COMMITTED`）。
+   * - 形式不正な id は、`deleteAcrossSpaces` と同じく「無い」として落とす（クエリを投げる前に）。
+   * - `content`/`digest`/`purged_at`・`memory_events`・`recalls` は書かない（監査イベントも積まない）。
+   */
+  async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    assertWellFormedCtx(ctx);
+    const validIds = memoryIds.filter(isUuidLike);
+    if (validIds.length === 0) {
+      return;
+    }
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`
+        UPDATE memories
+        SET tags = '{}',
+            attributes = '{}'::jsonb,
+            claim_key_subject = NULL,
+            claim_key_predicate = NULL,
+            updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId}
+          AND id = ANY(${sql.param(validIds)}::uuid[])
+          AND status = 'forgotten' AND purged_at IS NOT NULL
+          AND (
+            cardinality(tags) > 0
+            OR attributes <> '{}'::jsonb
+            OR claim_key_subject IS NOT NULL
+            OR claim_key_predicate IS NOT NULL
+          )
+      `);
+      await tx.execute(sql`
+        WITH removed_labels AS (
+          DELETE FROM memory_labels ml
+          USING memories m
+          WHERE ml.tenant_id = ${ctx.tenantId}
+            AND ml.memory_id = ANY(${sql.param(validIds)}::uuid[])
+            AND m.tenant_id = ml.tenant_id AND m.id = ml.memory_id
+            AND m.status = 'forgotten' AND m.purged_at IS NOT NULL
+          RETURNING ml.label_id
+        ),
+        counted AS (
+          SELECT label_id, count(*) AS n FROM removed_labels GROUP BY label_id
+        )
+        UPDATE labels
+        SET proposed_count = GREATEST(labels.proposed_count - counted.n, 0)
+        FROM counted
+        WHERE labels.tenant_id = ${ctx.tenantId}
+          AND labels.id = counted.label_id
+          AND labels.status = 'proposed'
+      `);
     });
   }
 

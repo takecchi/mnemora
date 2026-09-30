@@ -94,6 +94,17 @@ describeMemoryStoreConformance({
   supportsArchiveDecayed: true,
   // Issue #198 / ADR 0124: PostgresMemoryStore は purgeMemory を実装している。
   supportsPurgeMemory: true,
+  // ADR 0437 決定3: PostgresMemoryStore は scrubPurged を実装している。v1.0.x の purge が残した状態
+  // （purged_at だけ立ち、tags・attributes・claim key・memory_labels が残る）は、生 SQL で作る。
+  supportsScrubPurged: true,
+  seedLegacyPurgedRow: async (ctx: Ctx, memoryId: string) => {
+    const { db } = await getTestClient();
+    await db.execute(sql`
+      UPDATE memories
+      SET content = '[purged]', digest = '[purged]', purged_at = now()
+      WHERE tenant_id = ${ctx.tenantId} AND id = ${memoryId}
+    `);
+  },
   // Issue #197 / ADR 0134: PostgresMemoryStore は markContestedPair を実装している。
   supportsMarkContestedPair: true,
   // Issue #197 / ADR 0150: PostgresMemoryStore は resolveContestedPair を実装している。

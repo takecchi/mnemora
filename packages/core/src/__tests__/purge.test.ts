@@ -559,6 +559,100 @@ describe("runtime.purge — already_purged の再実行でも embedding をベ�
   });
 });
 
+describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の purge が残した残骸も消す（ADR 0437 決定3）", () => {
+  type Scrub = (ctx: Ctx, ids: readonly MemoryId[]) => Promise<void>;
+  function installScrub(stores: ReturnType<typeof createFakeRuntimeStores>, fn: Scrub) {
+    Object.defineProperty(stores.memoryStore, "scrubPurged", { value: fn, configurable: true });
+  }
+
+  it("already_purged（dryRun でない）のときだけ scrubPurged を、その id で呼ぶ。purged・would_purge・status_not_forgotten・not_found では呼ばない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const calls: MemoryId[][] = [];
+    installScrub(stores, async (_ctx, ids) => {
+      calls.push([...ids]);
+    });
+    const purgedAlready = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", contentHash: "scrub-a" }),
+    );
+    const fresh = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", contentHash: "scrub-b" }),
+    );
+    const active = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "active", contentHash: "scrub-c" }),
+    );
+    await runtime.purge(ctx, { memoryId: purgedAlready.id });
+    // 最初の purge（purged）では呼ばない。
+    expect(calls).toEqual([]);
+
+    const result = await runtime.purge(ctx, {
+      memoryIds: [purgedAlready.id, fresh.id, active.id, "missing" as MemoryId],
+    });
+    expect(result.outcomes.map((o) => o.kind)).toEqual([
+      "already_purged",
+      "purged",
+      "status_not_forgotten",
+      "not_found",
+    ]);
+    expect(calls).toEqual([[purgedAlready.id]]);
+
+    // dryRun: 下見は何も書かない。
+    await runtime.purge(ctx, { memoryId: purgedAlready.id }, { dryRun: true });
+    await runtime.purge(ctx, { memoryId: fresh.id }, { dryRun: true });
+    expect(calls).toEqual([[purgedAlready.id]]);
+  });
+
+  it("競合で already_purged になった分岐（MemoryPurgeConflictError の再読）でも呼ぶ", async () => {
+    const { runtime, stores } = buildRuntime();
+    const calls: MemoryId[][] = [];
+    installScrub(stores, async (_ctx, ids) => {
+      calls.push([...ids]);
+    });
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === memory.id) {
+        memory.purgedAt = new Date();
+        memory.content = "[purged]";
+        memory.digest = "[purged]";
+      }
+    };
+    const result = await runtime.purge(ctx, { memoryId: memory.id });
+    expect(result.outcomes[0]?.kind).toBe("already_purged");
+    expect(calls).toEqual([[memory.id]]);
+  });
+
+  it("scrubPurged が失敗しても kind は already_purged のまま、residueCleanup が付く。embedding の後始末は止まらない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await runtime.purge(ctx, { memoryId: memory.id });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
+    installScrub(stores, async () => {
+      throw new Error("simulated scrub outage");
+    });
+
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(second.outcomes).toEqual([
+      {
+        memoryId: memory.id,
+        kind: "already_purged",
+        residueCleanup: { status: "failed", error: "simulated scrub outage" },
+      },
+    ]);
+    expect(stores.vectorStore.entries.size).toBe(0);
+  });
+
+  it("scrubPurged が無い adapter では飛ばす（残骸の欄も付かない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await runtime.purge(ctx, { memoryId: memory.id });
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+    expect(second.outcomes).toEqual([{ memoryId: memory.id, kind: "already_purged" }]);
+  });
+});
+
 describe("runtime.purge — MemoryStore.purgeMemory が無い adapter（任意メソッド）", () => {
   it("purgeMemory が無ければ supported: false・全対象が not_attempted・書き込みは一切起きない", async () => {
     const { runtime, stores } = buildRuntime();

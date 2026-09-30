@@ -151,6 +151,51 @@ function buildLanguageAndSpeakerInstruction(): string {
   );
 }
 
+interface CalendarDate {
+  /** 天文学年（1 BC = 0、2 BC = -1）。 */
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+}
+
+/** `timeZone` での `at` の暦日（ADR 0440）。`Intl` の年の書き方の癖は {@link buildExtractionPrompt} の中の注を参照。 */
+function localCalendarDate(at: Date, timeZone: string): CalendarDate | null {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    era: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const get = (type: string): string | undefined => parts.find((p) => p.type === type)?.value;
+  const year = Number(get("year"));
+  const month = Number(get("month"));
+  const day = Number(get("day"));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  // `en-CA`（gregory）の era は "AD" / "BC"。紀元前の年は 1 から数える
+  return { year: get("era") === "BC" ? 1 - year : year, month, day };
+}
+
+/** `Date#toISOString` の日付部分と同じ書き方（0〜9999 年は4桁、それ以外は符号付き6桁）。 */
+function formatCalendarDate(date: CalendarDate): string {
+  const { year } = date;
+  const y =
+    year >= 0 && year <= 9999
+      ? String(year).padStart(4, "0")
+      : `${year < 0 ? "-" : "+"}${String(Math.abs(year)).padStart(6, "0")}`;
+  return `${y}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
+}
+
+/** 暦日に `offsetDays` を足した暦日の文字列。`Date` の範囲（±8.64e15 ms）を出るときは null。 */
+function shiftedCalendarDate(date: CalendarDate, offsetDays: number): string | null {
+  const base = new Date(0);
+  base.setUTCFullYear(date.year, date.month - 1, date.day);
+  const shifted = new Date(base.getTime() + offsetDays * 86400000);
+  if (Number.isNaN(shifted.getTime())) return null;
+  const iso = shifted.toISOString();
+  return iso.slice(0, iso.indexOf("T"));
+}
+
 /**
  * `completeStructured` へ渡すプロンプト。文面はこの PR の裁量であり、契約はスキーマ側にある。
  *
@@ -215,17 +260,19 @@ export function buildExtractionPrompt(
       "相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。" +
       "記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。";
     system += " digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。";
-    const localDate =
+    // ADR 0440: `Intl.DateTimeFormat#format` は年を4桁に0詰めせず（"999-06-01"・"10000-01-01"）、紀元前は
+    // 符号を落とす（天文学年 0 が "1"、-100 が "101"）。その文字列を `Date.parse` に渡すと NaN になり、
+    // 全文フォールバックへ黙って倒れていた。年月日は `formatToParts` で取り、`era` で紀元前を符号付きの
+    // 天文学年（1 BC = 0）へ戻し、`setUTCFullYear` で組み直す。
+    // プロンプトに出す暦日の書き方は `Date#toISOString` と同じ（0〜9999 年は4桁に0詰め、範囲外は ±6桁）。
+    // 1000〜9999 年は旧実装と1バイトも変わらない。
+    const localParts =
       observation.occurredAt && context.timeZone
-        ? new Intl.DateTimeFormat("en-CA", {
-            timeZone: context.timeZone,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          }).format(observation.occurredAt)
+        ? localCalendarDate(observation.occurredAt, context.timeZone)
         : null;
+    const localDate = localParts === null ? null : formatCalendarDate(localParts);
     const relativeDates =
-      localDate === null
+      localParts === null
         ? null
         : Object.fromEntries(
             [
@@ -233,12 +280,7 @@ export function buildExtractionPrompt(
               ["今日", 0],
               ["明日", 1],
               ["明後日", 2],
-            ].map(([label, offset]) => [
-              label,
-              new Date(Date.parse(`${localDate}T00:00:00Z`) + Number(offset) * 86400000)
-                .toISOString()
-                .slice(0, 10),
-            ]),
+            ].map(([label, offset]) => [label, shiftedCalendarDate(localParts, Number(offset))]),
           );
     content = JSON.stringify({
       observation: {

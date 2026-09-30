@@ -96,6 +96,29 @@ export function inMemoryMemoryStoreConformanceOptions(
     supportsArchiveDecayed: true,
     // Issue #198 / ADR 0124: InMemoryMemoryStore は purgeMemory を実装している。
     supportsPurgeMemory: true,
+    // ADR 0437 決定3: InMemoryMemoryStore は scrubPurged を実装している。v1.0.x の purge が残した状態
+    // （purgedAt だけ立ち、tags・attributes・claim key・label の紐付けが残る）は、内部の Map を書き換えて作る。
+    supportsScrubPurged: true,
+    seedLegacyPurgedRow: async (ctx, memoryId) => {
+      if (!latestMemoryStoreForEvents) {
+        throw new Error("seedLegacyPurgedRow より先に createStore() を呼ぶ必要がある");
+      }
+      const memories = (
+        latestMemoryStoreForEvents as unknown as {
+          memories: Map<
+            string,
+            { tenantId: string; content: string; digest: string; purgedAt?: Date | null }
+          >;
+        }
+      ).memories;
+      const memory = memories.get(memoryId);
+      if (!memory || memory.tenantId !== ctx.tenantId) {
+        throw new Error(`seedLegacyPurgedRow: memory not found: ${memoryId}`);
+      }
+      memory.content = "[purged]";
+      memory.digest = "[purged]";
+      memory.purgedAt = new Date();
+    },
     // Issue #197 / ADR 0134: InMemoryMemoryStore は markContestedPair を実装している。
     supportsMarkContestedPair: true,
     // Issue #197 / ADR 0150: InMemoryMemoryStore は resolveContestedPair を実装している。

@@ -29,8 +29,12 @@ import { assertQueryDate } from "./query-check.js";
  *
  * `complete`/`fail` は互いに排他でもある（Issue #826）——相手側の終端列
  * （`completedAt`/`failedAt`）が既に付いていれば、後から来た呼び出しは行を一切変えず
- * 例外も投げない（先に付いた終端が勝つ）。同種の再呼び出し（complete+complete、
- * fail+fail）の冪等な挙動は変えていない。
+ * 例外も投げない（先に付いた終端が勝つ）。
+ *
+ * 🔴 **終端は先勝ち（ADR 0440）**——同種の再呼び出し（complete+complete、fail+fail）も、同じ
+ * `attempts` なら1回目の `completedAt`／`failedAt`・`lastError` を保つ（2回目の `at`・`error` は
+ * 捨てる）。戻り値（`void`）と例外は変わらない。`PostgresOutboxStore` の `UPDATE` の条件
+ * （`completed_at IS NULL AND failed_at IS NULL`）と一致させてある。
  *
  * 2026-09-29 追記（[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
  * [ADR 0357](../../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン
@@ -141,7 +145,8 @@ export class InMemoryOutboxStore implements OutboxStore {
     }
     // Issue #826: 相手側の終端（fail）が既に付いていれば、先に付いた終端を勝たせる
     // ——行を変えず、例外も投げない。
-    if ((job.failedAt ?? null) !== null) {
+    // ADR 0440: 同種の終端（complete）が既に付いていても同じ——先勝ち（`completedAt` を上書きしない）。
+    if ((job.failedAt ?? null) !== null || (job.completedAt ?? null) !== null) {
       return;
     }
     // Issue #1237: 省略時は壁時計。Issue #1108: 呼び手の `at` と同じ Date を保存しない。
@@ -167,7 +172,8 @@ export class InMemoryOutboxStore implements OutboxStore {
     }
     // Issue #826: 相手側の終端（complete）が既に付いていれば、先に付いた終端を勝たせる
     // ——行を変えず、例外も投げない。
-    if ((job.completedAt ?? null) !== null) {
+    // ADR 0440: 同種の終端（fail）が既に付いていても同じ——先勝ち（`failedAt`・`lastError` を上書きしない）。
+    if ((job.completedAt ?? null) !== null || (job.failedAt ?? null) !== null) {
       return;
     }
     // Issue #1237: 省略時は壁時計。⚠ `availableAt` の再計算はしない（interface の doc 参照）。

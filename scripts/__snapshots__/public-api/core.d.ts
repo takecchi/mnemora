@@ -826,6 +826,7 @@ export interface MemoryStore {
         memory: Memory;
         event: MemoryEvent;
     }>;
+    scrubPurged?(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
     markContestedPair?(ctx: Ctx, first: {
         id: MemoryId;
         event: NewMemoryEvent;
@@ -3387,6 +3388,10 @@ export type PurgeEmbeddingCleanup = {
     status: "failed";
     error: string;
 };
+export type PurgeResidueCleanup = {
+    status: "failed";
+    error: string;
+};
 export type PurgeOutcome = {
     memoryId: MemoryId;
     kind: "purged";
@@ -3400,6 +3405,7 @@ export type PurgeOutcome = {
     memoryId: MemoryId;
     kind: "already_purged";
     embeddingCleanup?: PurgeEmbeddingCleanup;
+    residueCleanup?: PurgeResidueCleanup;
 } | {
     memoryId: MemoryId;
     kind: "status_not_forgotten";
