@@ -42,6 +42,8 @@ await runtime.observe(ctx, {
   5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる。`node10` は TypeScript 5.x なら
   パッケージの入口の型を解決できるが、`exports` を読まないので `@mnemora/testkit/fixtures` のような
   subpath は解決できず、TypeScript 6 で非推奨・7 で廃止された。2026-09-27 に TypeScript 5.0〜7.0 で実測）
+- **TypeScript の `lib`・`target` は ES2022 以上**。公開の `.d.ts` が `ErrorOptions`（ES2022 の lib）を使う（`memory-store`・`vector-store` の例外クラス）。
+  ES2021 以下で `skipLibCheck: false` だと `TS2304`、`skipLibCheck: true` だと `cause` の型が失われる
 - 実行時の依存は zod のみ
 
 ## ⚠ `@mnemora/core` だけでは動く物が組めない

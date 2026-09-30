@@ -22,8 +22,9 @@
  *    解決し、見つかった実体の package.json の `name` を確かめて symlink 先を決める）。
  *    registry には出ない——このジョブの手前の `pnpm install --frozen-lockfile` が
  *    ロックファイルどおりに解決済みのものを、そのまま再利用するだけである。
- * 4. `./check-consumer-install-lib.mjs` の `buildSmokeCjs(EXPECTED_ENTRY_POINTS)` で
- *    全入口を `require` する `smoke.cjs` を作り、node で実行する。
+ * 4. `./check-consumer-install-lib.mjs` の `buildSmokeCjs(EXPECTED_ENTRY_POINTS, valueNames)` で
+ *    全入口を `require` する `smoke.cjs` を作り、node で実行する。`valueNames` は公開 API の snapshot から引いた
+ *    入口ごとの値の名前で、実行時に undefined のものがあれば赤にする（ADR 0441）。
  *
  * ## 見ないこと（`scripts/check-consumer-install.mjs` が見続ける）
  *
@@ -57,7 +58,11 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EXPECTED_ENTRY_POINTS, buildSmokeCjs } from "./check-consumer-install-lib.mjs";
+import {
+  EXPECTED_ENTRY_POINTS,
+  buildSmokeCjs,
+  collectValueNamesForEntries,
+} from "./check-consumer-install-lib.mjs";
 import {
   externalRuntimeDependencyNames,
   meetsRequireEsmNodeVersion,
@@ -214,7 +219,9 @@ try {
     join(consumerDir, "package.json"),
     `${JSON.stringify({ name: "mnemora-cjs-require-smoke", private: true, version: "0.0.0" }, null, 2)}\n`,
   );
-  writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS));
+  // ADR 0441: 公開 API の snapshot の値の名前が、全入口で実行時に undefined でないことも見る（`check-consumer-install.mjs` と同じ表）。
+  const valueNames = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, REPO_ROOT);
+  writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS, valueNames));
   const cjs = step("CommonJS で全入口を require（require(esm)、README の約束そのもの）", () => {
     const r = spawnSync(process.execPath, ["smoke.cjs"], { cwd: consumerDir, encoding: "utf8" });
     const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();

@@ -26,7 +26,7 @@ import ts from "typescript";
  * 副産物として、この import だけ `.cjs` を指す）。ここを詰めないと BFS が
  * `migrations-dir.d.cts` へ辿り着かず、公開型として認識しないまま snapshot に穴が空く。
  */
-const DECLARATION_EXTENSION_BY_SOURCE_EXTENSION = {
+export const DECLARATION_EXTENSION_BY_SOURCE_EXTENSION = {
   ".js": ".d.ts",
   ".mjs": ".d.mts",
   ".cjs": ".d.cts",
