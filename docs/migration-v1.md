@@ -1732,11 +1732,16 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
 - 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking`
   を見ること。**ここには複製しない。**
 
-**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる
-「conformance スイートの判定を厳しくする変更」に当たる——型検査は壊れないが、
-`supportsMarkContestedGroup: true`/`supportsResolveContestedGroup: true` を渡して
-これらの口を実装していない自前実装は、conformance suite を当てると新しく落ちる。
-項目23・24・27 と同じ判断である。
+**破壊的変更として数えない**（2026-10-01 に数え直した。書いた当初は、上の「数え方の規律への追記
+（2026-09-28）」規律2 の ⛔「conformance スイートの判定を厳しくする変更」に当たるとして数えていた）。
+足した `it` は、この変更で新しくできた任意フラグ `supportsMarkContestedGroup?`/`supportsResolveContestedGroup?`
+の内側にだけある。口（`markContestedGroup?`/`resolveContestedGroup?`）もフラグも持たない adapter には、
+新しい約束を課さない。`describeRelationStoreConformance` も、新しくできた interface の新設の suite である。
+[PR #1516](https://github.com/takecchi/mnemora/pull/1516) が #1507 の適合テストで採った判定
+（任意フラグの内側で、口もフラグも持たない adapter に新しい約束を課さないものは数えない）と、
+同じ版の任意フラグの追加（CHANGELOG `[1.2.0]` の `### Added` の `implementsListRelatedMany?`・
+`supportsPurgeExpiredRecalls?` など）に揃えた。既存のフラグの枝に `it` を足した項目39 とは形が違う。
+番号は、CHANGELOG と上の節の欠番の注記から指されているので残す。
 
 **誰が影響を受けるか**: 自前の `MemoryStore` 実装を `packages/testkit` の conformance
 suite に対して走らせている利用者のうち、上の2つの任意フラグを `true` で渡しているが
@@ -1765,7 +1770,7 @@ union 拡張一般の影響であり、この文書が破壊的変更として�
 （`memory_relations` テーブルを新設するだけ）。利用者は `mnemora-postgres-migrate`
 （または `runMigrations`）を打つこと。
 
-⟹ **この項目（PR #1442・Issue #207・#933 PR2（ADR 0381））は、この節が数える破壊的変更である。**
+⟹ **この項目（PR #1442・Issue #207・#933 PR2（ADR 0381））は、この節が数える破壊的変更に入れない。**移行の手順と DB マイグレーションの案内として残す。
 
 ### 31. テナント単位で全表から行を消す `eraseTenant` が増え、conformance suite に省略できない `supportsEraseTenant` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
@@ -2136,7 +2141,7 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 - `RelationStore.link` は、列挙の外の `kind` を、`relation kind` を含む例外で拒み、行を書かない。
 - `RelationStore.listRelated` が返した `createdAt` を書き換えても、store の行は変わらない。
 
-**なぜ破壊的と数えるか**: 型検査は壊れないが、**conformance suite の判定が厳しくなり、上を満たさない自前の実装は、新しく実行時に落ちる**（このファイルの規律の、conformance の判定を厳しくする変更）。項目29 の conformance の部分と同じ扱い。
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**conformance suite の判定が厳しくなり、上を満たさない自前の実装は、新しく実行時に落ちる**（このファイルの規律の、conformance の判定を厳しくする変更）。項目36 と同じ扱い。
 
 ⚠ **数えなかったもの（判断の記録）**:
 - `@mnemora/postgres` の `PostgresRelationStore.link` が、列挙外の `kind` を DB の CHECK 違反（生のエラー）ではなく `PostgresRelationStore: unknown relation kind: <kind>` の `Error` で、INSERT の前に断るようになった。**以前も例外になった入力が、今も例外になる**——「以前は通っていた入力が新しく例外になる」に当たらないので、adapter の変更としては数えない。上の conformance の `it` としては数える。DB の生のエラーコード（`23514`）を読んでいた呼び出し側は、その読み方が効かなくなる。
