@@ -1384,7 +1384,7 @@ recall は既定で `status = 'active'` の Memory のみを候補にする。�
   「段3: 矛盾の解決と必須の同伴取得」の追記参照）。
 - **`RuntimeDeps.relationStore` を配線しない呼び出しでは、この拡張は一切動かない**（北極星の問い2）——群のメンバーは今までどおり単独で返らず、`unit_assembly_dropped` に落ちる。
 - **上限・並び順・切り捨ての出し方**は上の「段3: 矛盾の解決と必須の同伴取得」の追記を見ること。
-- **`RecalledMemory.contestedWith`（2者間専用の欄、ADR 0335）は群のメンバーには付かない**——`contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3 の継承）のため。群の一員であることは `companionOf`（BFS で実際に辿った経路上の1つ前の id——owner とは限らず、複数ホップ先の companion 経由のこともある）でしか読めない。
+- **`RecalledMemory.contestedWith`（2者間専用の欄、ADR 0335）は群のメンバーには付かない**——`contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3 の継承）のため。群の一員であることは `companionOf`（BFS で実際に辿った経路上の1つ前の id——owner とは限らず、複数ホップ先の companion 経由のこともある）でしか読めない。**同じ段で複数の親から届く companion の `companionOf` は「id の小さい親」に決まる**（親を id の昇順に処理する。`RelationStore.listRelated`・`getMany` の返す順には依存しない。[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md) 追記、Issue #1449 項目7）。段が違うときは、浅い段で先に届いた親になる。
 - **`docs/memory-model.md` §5 機構3「対向は必ず隣接させる」は、この拡張により「対向（2件）」から「群（1件以上）」へ一般化された**——詳細は同ファイルを見ること。
 ---
 
