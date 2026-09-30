@@ -2854,6 +2854,19 @@ export interface Runtime {
    * - 見直すのは `forgotten` だけ。待つ間に `contested` になった記憶は見直さない（ADR 0406「引き受けた負債」1）。
    * 歯: `packages/postgres/src/__tests__/reextract-forget-race.postgres.test.ts`・
    * `reextract-source-forgotten-for-update-race.postgres.test.ts`。
+   *
+   * ⚠ **2026-10 記録（[ADR 0432](../../../docs/decisions/0432-recall-status-recheck-and-archive-docs.md) AL-5。
+   * 今の振る舞いを書くだけ）: `archived` の記憶を持つ Observation を reextract したときの帰結。**
+   * `archived` は「退けた記憶」に数えない（ADR 0028）ので、上の早期 return には入らず、抽出は走る。
+   * - **抽出結果が今の記憶と同じ内容なら、何も起きない。**新しい記憶は作られず（`memoryIds` は既存の
+   *   記憶そのものを指す）、記憶は `archived` のまま、`skipped` にその記憶の `status_not_active`
+   *   （`status: "archived"`）が入る。⟹ reextract は `archived` の記憶を戻さない。戻すには
+   *   `restoreArchived` を呼ぶ。
+   * - **抽出結果の内容が違えば、新しい版が `active` で作られる。**古い `archived` は `superseded` に
+   *   ならず `archived` のまま残る（supersede の対象は `active` だけ）。その古い版を
+   *   `restoreArchived` で戻すと、新旧の2件が `active` で並ぶ。
+   * 【確かめた】両 adapter（testkit の InMemory と Postgres）で、上の2つを走らせて確かめた。歯:
+   * `packages/postgres/src/__tests__/reextract-archived-memory.postgres.test.ts`。
    */
   reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
   /**
@@ -3001,6 +3014,19 @@ export interface Runtime {
    * `reinforce` が失敗しても、既に成功した `status` の復帰は握り潰さない——`outcomes`
    * の `kind` は `"restored"` のままで、失敗は `RestoreArchivedOutcome` の
    * `reinforceError` に運ぶ（`RestoreArchivedOutcome` の doc コメント参照）。
+   *
+   * ⚠ **`sweepArchive` と重なると、`"restored"` と返っても `status` が `archived` のままのことがある**
+   * （ADR 0432 AL-2。記録であり、この版では直していない）。`status` の復帰（`updateStatusWithEvent`）と
+   * `reinforce` は**別々の書き込み**で、そのあいだは `decay_floor_at` がまだ過去を指している。
+   * その窓に同じ Memory を対象にした `sweepArchive` が入ると、掃引は `status = 'active'` かつ
+   * `decay_floor_at` を過ぎた行として選び、もう一度 `archived` にする。そのあとで `reinforce` が
+   * 成功すると `decay_floor_at` だけが先へ延び、`status` は `archived` のまま残る。
+   * 返る outcome は `"restored"` のまま（`reinforceError` も付かない）で、`memory_events` には
+   * `archived → restored → archived` の3件が並ぶ。【実測】両 adapter（testkit の InMemory と Postgres）で、
+   * `reinforce` の直前に `sweepArchive` を割り込ませて再現した（前の巡の担い手の実測）。
+   * 呼び出し側が確かめるなら、復帰のあとに `recall` か `get` で今の `status` を読むこと。
+   * 結果に欄を足す・`status` の復帰と `reinforce` を1つの store 操作にする、という直しは
+   * オーナーの判断に回してある（ADR 0432）。
    *
    * ⚠ **`recall()` 自身は一切変更していない。**`status` が `"active"` へ戻った時点で、
    * 段1の候補生成が使う既存の status ゲート（`["active","contested"]`、
