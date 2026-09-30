@@ -421,5 +421,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0401](./0401-mark-resolve-contested-group-constant-statements.md) | `markContestedGroup` / `resolveContestedGroup` の関係の行の INSERT を実表の N² 結合にせず、メンバーごとの UPDATE / events INSERT を定数個の文にまとめる | 採用 (2026-09) |
 | [0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) | 古い `recalls` と完了済みの `outbox` 行を消す口 `purgeExpiredRecalls?` / `purgeCompletedJobs?` を足す | 採用 (2026-09) |
 | [0405](./0405-roundtrip-count-confirms-stats-before-measuring.md) | `recall-roundtrip-count` は、往復を数える前に `StatsPresenceGate` を確認済みにする | 採用 (2026-09) |
+| [0406](./0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) | `reextract` は、LLM を待つ間に元の記憶が forget されたら、何も書かずに打ち切る | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
