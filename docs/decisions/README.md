@@ -433,5 +433,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0418](./0418-store-error-kind-guards.md) | store 例外は `instanceof` ではなく `kind`（無ければ `name`）で判定する | 採用 (2026-09) |
 | [0419](./0419-local-embedding-provider-dispose.md) | `LocalEmbeddingProvider` に任意の `dispose()` を足す | 採用 (2026-09) |
 | [0421](./0421-concurrent-write-and-audit-event-holes.md) | 同時の書き込みと監査イベントの小さな穴——直したもの（Q1）と、実測して縛って負債にしたもの（R4・R5） | 採用 (2026-09) |
+| [0422](./0422-reextract-created-event-at-and-meta.md) | `reextract` の `created` イベントの `at` を同じ操作の `superseded` と揃え、meta に再抽出の印を足す。同じ `at` のイベントの並びは約束しない | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

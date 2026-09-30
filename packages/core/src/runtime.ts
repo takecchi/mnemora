@@ -4273,11 +4273,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `reextract` が `created` に渡す追加の指定（ADR 0422）。`at` は同じ操作の `superseded` と揃える時刻、
+   * `reextracted` は meta に足す印。どちらも省けば今までの形（observe・抽出の経路）。
+   */
+  interface CreatedEventReextractOpts {
+    readonly at?: Date;
+    readonly reextracted?: boolean;
+  }
+
+  /**
    * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
    * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
    * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
    * INSERT する）が共有する——`meta` の中身が2つの経路でずれないように、組み立てはここ1箇所に置く
    * （ADR 0410）。
+   *
+   * `reextractOpts`（ADR 0422）は `reextract` だけが渡す。`at` を渡すとその値を使い（同じ操作の `superseded` と
+   * 同じ入口の `now`）、`reextracted: true` を渡すと meta にその印を足す。省くと今までどおり
+   * （`at` は組み立て時の `clock.now()`、meta に印は無い）。
+   *
+   * ⚠ 同じ `at` を持つ `created` と `superseded`（`consolidate`・`reextract`）の**並びは約束しない**
+   * （`EventStore.list` は `at` の昇順だけ。ADR 0422）。順が要るなら `kind` と meta の `supersededById` で読む。
    */
   function buildCreatedEventFor(
     ctx: Ctx,
@@ -4286,6 +4302,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
+    reextractOpts?: CreatedEventReextractOpts,
   ): NewMemoryEvent {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
@@ -4295,7 +4312,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "created",
-      at: clock.now(),
+      // ADR 0422: 渡されたときはその値（`reextract` は入口の `now`——同じ操作の `superseded` と揃える）。
+      // 渡さないとき（observe・抽出の経路）は今までどおり組み立て時の `clock.now()`。
+      at: reextractOpts?.at ?? clock.now(),
       actor: { type: "system" },
       digestSnapshot: memory.digest,
       sizeBeforeBytes: null,
@@ -4319,6 +4338,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 本文が出たときだけ足す——疑いが無い呼び出しの meta の形は変えない。**印を付けるだけ**で、
         // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
         ...(languageMismatch !== null ? { languageMismatch } : {}),
+        // ADR 0422: `reextract` の `created` にだけ足す印。既存のキーの意味（`reason: "extracted"` など）は
+        // 変えない——足すだけ。observe・抽出の経路の meta の形は変えない。
+        ...(reextractOpts?.reextracted === true ? { reextracted: true } : {}),
       },
     };
   }
@@ -4348,10 +4370,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
+    reextractOpts?: CreatedEventReextractOpts,
   ): Promise<void> {
     await deps.eventStore.append(
       ctx,
-      buildCreatedEventFor(ctx, memory, observation, outcome, failure, droppedCandidates),
+      buildCreatedEventFor(
+        ctx,
+        memory,
+        observation,
+        outcome,
+        failure,
+        droppedCandidates,
+        reextractOpts,
+      ),
     );
   }
 
@@ -5160,6 +5191,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         },
       }) satisfies NewMemoryEvent;
 
+    // ADR 0422: この操作の `created` は、`superseded`（`buildSupersedeEventFor`）と同じ入口の `now` を `at` に使い、
+    // meta に `reextracted: true` を足す。3経路（口あり・名乗らない adapter の別の追記・口なし）すべてで同じ値を渡す。
+    const reextractCreated: CreatedEventReextractOpts = { at: now, reextracted: true };
+
     // ------------------------------------------------------------------
     // ADR 0100: 口が在れば、作成と supersede を1トランザクションで撃つ。
     // 🔴 フォールバックは**口の不在に対してだけ**（書き込みの前に1度判定する）。
@@ -5192,7 +5227,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             now,
             abortIfForgotten: knownMemoryIds,
             buildCreatedEvent: (memory) =>
-              buildCreatedEventFor(ctx, memory, observation, "ok", null),
+              buildCreatedEventFor(ctx, memory, observation, "ok", null, [], reextractCreated),
           },
         );
       } catch (error) {
@@ -5211,7 +5246,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (result.createdEventsWritten !== true) {
         for (const { memory, created } of result.created) {
           if (created) {
-            await appendCreatedEvent(ctx, memory, observation, "ok", null);
+            await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
           }
         }
       }
@@ -5267,7 +5302,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       const { memory, created } = written;
       memoryIds.push(memory.id);
       if (created) {
-        await appendCreatedEvent(ctx, memory, observation, "ok", null);
+        await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
       }
     }
     // `candidates.length === 0` を上で早期リターンしている以上 `memoryIds` は非空

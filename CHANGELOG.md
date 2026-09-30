@@ -287,6 +287,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
   - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
   - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
+- **`RecallQuery.scopeAggregate` の TSDoc（`packages/core/src/recall.ts`）と `docs/recall.md` の「実装しない adapter は常に `countKind: 'exact'` を返し続ける契約」を訂正した。** conformance suite は、フラグ無しで `"skip"` を守ること（`groups` 空・`totalInScope` `0`・`countKind: 'unknown'`）を求め、`'exact'` を返し続ける実装は落ちる。コメントと文書だけの訂正で、振る舞い・公開の型は変えていない（上の `### Breaking` の同項を参照）。
+
 - **`docs/migration-v1.md` の未リリースの節が `0029`・`0030` を知らなかったのを直し、CHANGELOG の未リリース節が名指す migration が同文書にも在ることの歯を足した**（`scripts/__tests__/migration-v1-changelog-migrations.test.mjs`）。同文書の本数の案内は `0028` で止まっていた（`v1.1.0` から3本・`v1.0.2` から6本と書いていたが、実際は5本・8本）。DB の動作は変わらない（`mnemora-postgres-migrate` は台帳をファイル名で見る）。文書の正確さだけの訂正で、出荷済みの節は触っていない。
 
 - **`labels` の行を消す（`eraseTenant` など）ときの外部キー検査が、`memory_labels` を全走査しなくなった**（[ADR 0400](./docs/decisions/0400-general-fk-index-tooth.md)）。
@@ -359,6 +361,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **直していないもの**: 口を持たない adapter の経路——`reextract`・`consolidate` の `createMemoryWithOutbox` のループ、`createMemoriesWithOutboxAndEvents?` を持たない adapter の `reflect` と抽出——は今までどおり別コミットで、取りこぼしが残る。`supersedeWithNewMemories` を実装しても名乗らない adapter も、`created` は別の文のまま。名乗るのにトランザクションを張らない adapter は、この機構では見抜けない。
   - 公開 API（snapshot を更新した）: `supersedeWithNewMemories` の `opts` に任意の `buildCreatedEvent`・戻り値に任意の `createdEventsWritten`、`createMemoriesWithOutboxAndEvents` の `opts` に任意の `abortIfForgotten`、`SourceMemoryForgottenError.method` の union に `"createMemoriesWithOutboxAndEvents"`——⚠ この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される。
   - 非破壊（型は任意の追加のみ）。⚠ 口あり経路では `created` と `superseded` の挿入順が入れ替わった（`created` が先）。`PostgresEventStore.list` は `at` 昇順だけで並べ、同じ `at` の並びは仕様の外。
+
+- **`reextract` が積む `created` イベントの `at` を同じ操作の `superseded` と揃え、meta に再抽出の印 `reextracted: true` を足した**（[ADR 0422](./docs/decisions/0422-reextract-created-event-at-and-meta.md)、上の [ADR 0416](./docs/decisions/0416-created-event-same-tx-remaining-paths.md) の続き）。
+  - **直した穴**: (1) `reextract` の `created` の `at` は、組み立てるときの時計の読みで、LLM の待ちの分だけ同じ操作の `superseded`（入口の `now`）より後だった。(2) `created` の meta は observe と同じ形で、再抽出から来たことが読めなかった。
+  - **今の振る舞い**: `reextract` の `created` の `at` は `superseded` と同じ入口の `now`（口あり・名乗らない adapter の別の追記・口なしの3経路とも）。meta には `reextracted: true` が**足される**——既存のキー（`reason: "extracted"`・`sourceObservationId`・`extractorVersion` など）の意味は変えていない。observe・抽出の `created` の `at` と meta は今までどおり。
+  - ⚠ **同じ `at` のイベントどうしの並びは約束しない。当てにしないこと。** `consolidate`・`reextract` の `created` と `superseded` は同じ `at` を持ち、`EventStore.list`（`ORDER BY at ASC`）の並びは入れ替わりうる。順が要るときは `kind` と meta（`superseded` の `meta.supersededById` など）で関係を読むこと。
+  - ⚠ この版より前に書かれた `reextract` の `created` は `at` も meta も直らない（印が無いことは observe 由来を意味しない）。
+  - 公開 API に変更は無い（型は変わらない。snapshot は変わらない）。非破壊（meta にキーを足すだけ）。DB マイグレーションは足していない。
 
 - **`@mnemora/core` が利用者の手元で2つの版に分かれたとき、adapter が投げる store 例外を runtime が見分けられず、`tick()` 全体が reject される穴を塞いだ**（[ADR 0418](./docs/decisions/0418-store-error-kind-guards.md)、[PR #1509](https://github.com/takecchi/mnemora/pull/1509)）。adapter は core を `dependencies` の `^` で持つので、利用者が core を範囲外の版に固定すると、adapter 側にもう1つの core が入る。そのとき adapter が投げる例外は、runtime 側の `instanceof` で false になっていた。
   - **【実測】** 本物の `@mnemora/postgres` 1.1.0 と `@mnemora/core` 1.0.2 の組で、`tick()` の complete 経路の `OutboxLeaseConflictError` が見分けられず、runtime は `fail()` へ進み、それも CAS で弾かれて `throw failErr` になった。**`tick()` 全体が reject され、同じバッチの後続ジョブは処理されず、`leaseConflicts` も返らなかった。** `restoreArchived` では `MemoryStatusConflictError` が `kind: "failed"` になっていた（本来は `status_not_archived`）。
