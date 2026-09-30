@@ -40,7 +40,7 @@ export interface OpenAIEmbeddingProviderOptions {
   model: string;
   /**
    * 返すベクトルの次元。API の `dimensions` にそのまま渡し、`space.dimensions` にも入る。
-   * このクラスは返ったベクトルの次元を検査しない（下の `embed` の doc）。
+   * 返ったベクトルの次元がこれと違えば `embed` は例外を投げる（下の `embed` の doc）。
    */
   dimensions: number;
   /**
@@ -97,26 +97,30 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
    * `texts` を1回の API 呼び出しで埋め込み、入力と同じ順（応答の `index` で並べ直す）で返す。
    * 空配列なら API を呼ばずに `[]` を返す。
    *
-   * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。件数・次元は検査しない（下の注）。
+   * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。
+   *
+   * ⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+   * [ADR 0305](../../../docs/decisions/0305-embedding-provider-input-limit-contract.md) の同日付追記）:
+   * 応答を検査する。** 次のどれかが崩れていれば、素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まる。
+   * 専用のエラー型・`kind` は無い）を投げる——(1) `response.data` の件数が `texts.length` と等しい、
+   * (2) `index` が 0..n-1 をちょうど1回ずつ（重複・欠落・範囲外が無い）、(3) 各ベクトルの長さが
+   * `space.dimensions` と等しい、(4) 成分がすべて有限（`NaN`/`Infinity` が無い）。メッセージには期待値・実際の値・
+   * 何番目かを入れ、入力テキストの本文と API キーは入れない。以前（〜1.1.x）は検査せず、食い違った応答の
+   * 戻り値は未定義だった。これは**新しく例外になる場合が増える変更**であり、CHANGELOG の `[1.2.0]` と
+   * docs/migration-v1.md に破壊的変更として書いてある。
    */
   // ⚠ 2026-09-26 追記（Issue #885）: `response.data` キー自体が丸ごと無い応答
-  // （`{}` が返る等）が来ると、下の `[...response.data]` は
-  // `TypeError: response.data is not iterable` を投げる。このクラスは専用の
+  // （`{}` が返る等）が来ると、下の `data.length` は `TypeError`（`Cannot read properties of
+  // undefined`）を投げる。このクラスは専用の
   // エラー型を持たず（`OpenAILLMProvider` の `kind` 分類に相当するものが埋め込み側には
   // 無い）、壊れた応答は最初から生の例外がそのまま呼び出し元へ伝播する形である
   // （`packages/openai/src/errors.ts` 冒頭コメントの同日付追記を参照）。
+  // 2026-09-30: 上の検査は `data` が配列として在ることが前提で、その形の検査は足していない
+  // （`{}` は従来どおり `TypeError` のまま）。
   //
-  // ⚠ 2026-09-26 追記（Issue #860）: `response.data` の件数が `texts.length` と
-  // 食い違った場合（多い・少ない・0件など）を検査していない。下の
-  // `.sort(...).map(...)` は `response.data` に何件あってもその件数のまま返す
-  // ——`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
-  // （`packages/local-embedding/src/local-embedding-provider.ts`）と違い、件数・次元の
-  // 突き合わせを実行時に行わない。`EmbeddingProvider` の契約（`embed` は入力と同じ件数を
-  // 返す）を守っているのは、OpenAI のサーバが常に `texts.length` 件を返すことへの
-  // 依存であり、この関数自身の検査ではない。応答の件数が食い違ったときの戻り値は
-  // 未定義である（ADR 0305 の「上限超過をサーバの拒否に依存する」負債と同じ形）。
-  // 本番経路（`packages/core` の `runtime.ts`/`recall-runtime.ts`）は常に `texts` を
-  // 1件ずつ渡すため、この食い違いは踏まれていない。
+  // ⚠ 2026-09-30 追記（Issue #860）: 2026-09-26 に「件数を検査しない・戻り値は未定義」と書いたが、
+  // 上のとおり検査を足した。お手本は `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
+  // （`packages/local-embedding/src/local-embedding-provider.ts`）。
   async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
     if (texts.length === 0) {
       return [];
@@ -129,8 +133,63 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       },
       { signal: opts?.signal },
     );
+    const data = response.data;
+
+    // 件数: 入力と同じ件数でなければ、呼び出し側で memory とベクトルが1つずれて対応する。
+    if (data.length !== texts.length) {
+      throw new Error(
+        `OpenAIEmbeddingProvider: ${texts.length} 件のテキストに対して ` +
+          `${data.length} 件のベクトルが返った（model=${this.model}）`,
+      );
+    }
+
+    // index: 0..n-1 をちょうど1回ずつ（重複・欠落・範囲外を落とす）。
     // OpenAI は入力順を保つと文書化しているが、`index` で並べ直して前提を作らない
     // （原則の姿3寄り: 順序の保証を暗黙のものとして信頼しない）。
-    return [...response.data].sort((a, b) => a.index - b.index).map((item) => item.embedding);
+    const ordered = new Array<number[] | undefined>(texts.length);
+    for (const [position, item] of data.entries()) {
+      const index = item.index;
+      if (!Number.isInteger(index) || index < 0 || index >= texts.length) {
+        throw new Error(
+          `OpenAIEmbeddingProvider: 応答の ${position} 番目の index が範囲外だった ` +
+            `（index=${String(index)}、期待は 0 以上 ${texts.length} 未満の整数。model=${this.model}）`,
+        );
+      }
+      if (ordered[index] !== undefined) {
+        throw new Error(
+          `OpenAIEmbeddingProvider: 応答の index=${index} が重複している ` +
+            `（${position} 番目。0..${texts.length - 1} をちょうど1回ずつ期待。model=${this.model}）`,
+        );
+      }
+      ordered[index] = item.embedding;
+    }
+
+    const vectors: number[][] = [];
+    for (const [index, vector] of ordered.entries()) {
+      if (vector === undefined) {
+        // 件数が一致し、範囲外・重複が無ければ欠落は起きない。型の上で確かめておく。
+        throw new Error(
+          `OpenAIEmbeddingProvider: 応答に index=${index} が無い（model=${this.model}）`,
+        );
+      }
+      // 次元: 宣言した `space.dimensions` と実物の食い違いを、DB へ入る前に落とす。
+      if (vector.length !== this.space.dimensions) {
+        throw new Error(
+          `OpenAIEmbeddingProvider: 宣言した次元数 ${this.space.dimensions} に対して、` +
+            `API が返したベクトルは ${vector.length} 次元だった（${index} 番目。model=${this.model}）`,
+        );
+      }
+      // 有限性: NaN / Infinity は pgvector が拒否する。原因から離れた SQL の失敗にしない。
+      const nonFinite = vector.findIndex((component) => !Number.isFinite(component));
+      if (nonFinite !== -1) {
+        throw new Error(
+          `OpenAIEmbeddingProvider: 返したベクトルに有限でない成分がある ` +
+            `（${index} 番目のベクトルの ${nonFinite} 番目の成分が ${String(vector[nonFinite])}。` +
+            `model=${this.model}）`,
+        );
+      }
+      vectors.push(vector);
+    }
+    return vectors;
   }
 }

@@ -99,6 +99,11 @@ const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };
  * 扱う（PR 本文参照）。ここで測るのはあくまで「1回の `embed` 呼び出しの中で、
  * 返る順序が入力順に対応するか」までである。
  *
+ * ⚠ **2026-09-30 追記（Issue #860）: 下の 2026-09-26 の追記のうち「`@mnemora/openai` は検査を持たない」は
+ * 古くなった。`@mnemora/openai` も応答の件数・index・次元・有限性を検査するようになった**
+ * （その歯は `packages/openai/src/__tests__/embedding-response-validation.test.ts`）。この suite 自体が
+ * 下層の食い違いを注入しない点は変わらない。
+ *
  * ⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）:
  * この suite が「件数・順序」の名目で測っているのは、`createProvider` が返す
  * provider が正常に応答した場合の件数・順序であって、下層（本物の HTTP 応答など）が
