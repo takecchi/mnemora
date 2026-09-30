@@ -1317,9 +1317,15 @@ export class FakeMemoryStore implements MemoryStore {
     // ことで、Issue #730 の「同じ at の2回目は活動時計側も動かさない」を1バイトも
     // 変えずに保つ。
     if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
-      memory.decayBaseSeq = opts.nowSeq;
+      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す。
+      const baseSeq =
+        opts.addOwnSubjectSeq === true && memory.subjectId != null
+          ? opts.nowSeq +
+            (this.backing.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+          : opts.nowSeq;
+      memory.decayBaseSeq = baseSeq;
       memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
-        baseSeq: opts.nowSeq,
+        baseSeq,
         strength: memory.strength,
         halfLifeRecalls: memory.halfLifeRecalls,
       });

@@ -863,6 +863,7 @@ export interface LabelSummary {
 }
 export interface ReinforceOptions {
     nowSeq?: number;
+    addOwnSubjectSeq?: boolean;
 }
 export interface ArchiveDecayedOptions {
     now: Date;
