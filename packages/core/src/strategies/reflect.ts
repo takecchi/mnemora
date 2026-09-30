@@ -7,6 +7,7 @@ import { dropBlankTags } from "../llm-tags.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
+import { resolveCommonSubjectId } from "../memory-subject.js";
 
 /**
  * `runtime.reflect`（Issue #104）が LLM に返させる構造化スキーマ。
@@ -157,8 +158,7 @@ export interface BuildReflectedMemoryParams {
 export function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMemory {
   const { eligible, llmResult, now } = params;
 
-  const subjectIds = new Set(eligible.map((m) => m.subjectId ?? null));
-  const subjectId = subjectIds.size === 1 ? [...subjectIds][0]! : null;
+  const subjectId = resolveCommonSubjectId(eligible);
 
   const { digest, digestSource } = resolveDigest(
     { content: llmResult.content, digest: llmResult.digest },

@@ -8,6 +8,7 @@ import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import type { RecalledScore } from "../recall.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
+import { resolveCommonSubjectId } from "../memory-subject.js";
 
 /**
  * `attributes` の積集合（ADR 0312 決定4）: `eligible` **全件**に同じキー・同じ値で
@@ -143,8 +144,7 @@ export interface BuildConsolidatedMemoryParams {
 export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): NewMemory {
   const { eligible, llmResult, now } = params;
 
-  const subjectIds = new Set(eligible.map((m) => m.subjectId ?? null));
-  const subjectId = subjectIds.size === 1 ? [...subjectIds][0]! : null;
+  const subjectId = resolveCommonSubjectId(eligible);
 
   const { digest, digestSource } = resolveDigest(
     { content: llmResult.content, digest: llmResult.digest },
