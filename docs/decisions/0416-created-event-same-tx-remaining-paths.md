@@ -189,3 +189,11 @@
 - **本物の並行**での、`created` の INSERT と `abortIfForgotten` の `FOR UPDATE` の相互作用。`reflect` の既存の並行の歯（`consolidate-reflect-forget-race`・`consolidate-reflect-source-forgotten-for-update-race`）は口を通っても緑だが、`created` の INSERT の有無で変わる窓は測っていない。
 - 第三者 adapter が `buildCreatedEvent` を実装し、かつ `created` の失敗で正しく巻き戻すか（決定2・負債）。
 - 同じ `at` の `created` と `superseded` の並びを当てにする呼び出し側が無いこと（決定5。見つけていないだけで、網羅は確かめていない）。
+
+## 追記 (2026-09-30): `reextract` の `created` の `at` と meta、同じ `at` のイベントの並びは [ADR 0422](./0422-reextract-created-event-at-and-meta.md)
+
+- 決定5の「`created` と `superseded` の挿入順が入れ替わった」と「確かめていないこと」の最後の項（同じ `at` の並びを当てにする呼び出し側）について、[ADR 0422](./0422-reextract-created-event-at-and-meta.md) が
+  **同じ `at` のイベントどうしの並びは約束しない・当てにしてはいけない**ことを文書に明記した（`EventStore.list` の doc・`docs/architecture.md` §5.8・ADR 0422）。`InMemoryEventStore.list` は挿入順を保つが、
+  Postgres の `ORDER BY at ASC` は保たない（行の物理位置が動くと入れ替わる。ADR 0422 に実測）。
+- この ADR が入れた `reextract` の `created` には、`at` が同じ操作の `superseded` と揃っていない（組み立て時の `clock.now()`）点と、再抽出から来たことを示す meta の印が無い点が残っていた。
+  ADR 0422 が、`at` を入口の `now` に揃え、meta に `reextracted: true` を足した。

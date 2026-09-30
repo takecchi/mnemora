@@ -1,4 +1,5 @@
 import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import type { InMemoryMemoryStore, StoredRelation } from "./in-memory-memory-store.js";
 import { nextId } from "./id.js";
 
@@ -35,6 +36,7 @@ export class InMemoryRelationStore implements RelationStore {
    * （ADR 0398。`PostgresRelationStore.link` と同じ振る舞い）。無ければ `memory not found for tenant`。
    */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     // 列挙の外の kind は、Postgres の CHECK（`0026_memory_relations.sql`）の違反を漏らさず、INSERT の前に断る。
     assertKnownRelationKind("InMemoryRelationStore", kind);
     for (const id of [fromId, toId]) {
@@ -61,6 +63,7 @@ export class InMemoryRelationStore implements RelationStore {
   }
 
   async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     for (let i = this.relations.length - 1; i >= 0; i--) {
       const r = this.relations[i]!;
       if (
@@ -75,6 +78,7 @@ export class InMemoryRelationStore implements RelationStore {
   }
 
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
+    assertWellFormedCtx(ctx);
     return this.relatedOf(ctx, memoryId, kind);
   }
 
@@ -84,6 +88,7 @@ export class InMemoryRelationStore implements RelationStore {
     memoryIds: readonly MemoryId[],
     kind?: RelationKind,
   ): Promise<Relation[][]> {
+    assertWellFormedCtx(ctx);
     return memoryIds.map((id) => this.relatedOf(ctx, id, kind));
   }
 

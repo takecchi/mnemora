@@ -44,6 +44,7 @@ append-only・並び順・外部キー相当の契約などを検査できる。
 // my-event-store.test.ts
 import { randomUUID } from "node:crypto";
 import type { Ctx, EventFilter, EventId, EventStore, MemoryEvent, NewMemoryEvent } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import { describeEventStoreConformance } from "@mnemora/testkit";
 
 // 適合テストは「memoryId が実在の Memory を指しているか」（外部キー相当）も検査する。
@@ -55,6 +56,8 @@ class MyEventStore implements EventStore {
   private rows: MemoryEvent[] = [];
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
+    // 孤立サロゲート・NUL を含む識別子は入口で断る（適合テストが検査する約束。ADR 0423）。
+    assertWellFormedCtx(ctx);
     if (event.memoryId !== null && !knownMemoryIds.has(event.memoryId)) {
       throw new Error(`append: unknown memoryId: ${event.memoryId}`);
     }
@@ -70,12 +73,14 @@ class MyEventStore implements EventStore {
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
+    assertWellFormedCtx(ctx);
     const row = this.rows.find((row) => row.tenantId === ctx.tenantId && row.id === id);
     // 返す値も複製する——呼び手が受け取った値を書き換えても、次の get は影響を受けない。
     return row ? structuredClone(row) : null;
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    assertWellFormedCtx(ctx);
     return this.rows
       .filter((row) => row.tenantId === ctx.tenantId)
       .filter((row) => filter.kind === undefined || row.kind === filter.kind)

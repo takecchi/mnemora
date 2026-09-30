@@ -8,6 +8,10 @@ import {
   type OutboxStore,
 } from "@mnemora/core";
 import { expectStoreError } from "./error-guards.js";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /** `OutboxStoreConformanceOptions.seedJob` に渡る、作ってほしい outbox の行。 */
 export interface SeedOutboxJobInput {
@@ -1169,6 +1173,34 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
     } else {
       it(`⚠ 未検査: supportsPurgeCompletedJobs が指定されていない — adapter "${name}" に対して purgeCompletedJobs の歯は検査していない`, () => {
         expect(supportsPurgeCompletedJobs).toBeUndefined();
+      });
+    }
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "claimBatch の ctx.tenantId",
+            () =>
+              store.claimBatch(
+                { tenantId: value },
+                { kinds: ["embed"], limit: 1, now: new Date(), claimedBy: "wf", leaseMs: 60_000 },
+              ),
+          ],
+          [
+            "claimBatch の ctx.subjectId",
+            () =>
+              store.claimBatch(
+                { tenantId: "tenant-wf", subjectId: value },
+                { kinds: ["embed"], limit: 1, now: new Date(), claimedBy: "wf", leaseMs: 60_000 },
+              ),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
       });
     }
   });

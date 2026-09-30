@@ -20,6 +20,7 @@ import type {
   TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import { toFloat4Readback } from "./float4.js";
 
 /**
@@ -156,10 +157,12 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     return this.rows.get(ctx.tenantId)?.defaultHalfLifeHours ?? DEFAULT_HALF_LIFE_HOURS;
   }
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
+    assertWellFormedCtx(ctx);
     if (!this.eventRetentionDays.has(ctx.tenantId)) {
       return { kind: "unset" };
     }
@@ -171,6 +174,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    assertWellFormedCtx(ctx);
     // Issue #1168: 型の外の kind を、無期限として書かずに拒む（decay_clock・taxonomy と同じ形）。
     assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
@@ -194,6 +198,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * と同じ規律。
    */
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
+    assertWellFormedCtx(ctx);
     return this.rows.get(ctx.tenantId)?.decayClock ?? DEFAULT_DECAY_CLOCK;
   }
 
@@ -202,6 +207,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * と同じ検証関数）で拒む——実装ごとに条件式を書き直さない。
    */
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
     this.ensureRow(ctx.tenantId).decayClock = clock;
   }
@@ -211,6 +217,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * `getDefaultHalfLifeHours` と同じ規律。
    */
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     return this.rows.get(ctx.tenantId)?.defaultHalfLifeRecalls ?? DEFAULT_HALF_LIFE_RECALLS;
   }
 
@@ -236,6 +243,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * （`InMemoryMemoryStore` 側は本 ADR の対象外）。
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidHalfLifeRecalls(recalls);
     // `assertValidHalfLifeRecalls`（core 共有）の値域は `(0, ∞)`——JS の float64 では
     // 有限だが、`tenant_settings.default_half_life_recalls` は Postgres の `real`
@@ -271,6 +279,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * 渡されていなければ常に `0`（`FakeTenantSettingsStore` と同じ規律）。
    */
   async getActivitySeq(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     return this.activitySeqBacking?.get(ctx.tenantId) ?? 0;
   }
 
@@ -281,6 +290,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * （`getActivitySeq` が backing 無しで常に `0` を返すのと同じ規律）。
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
+    assertWellFormedCtx(ctx);
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
     return bySubject !== undefined && bySubject.size > 0;
   }
@@ -292,6 +302,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * （core）が `0` へ倒す）。
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
+    assertWellFormedCtx(ctx);
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
     const out: Record<string, number> = {};
     if (bySubject === undefined) {
@@ -311,6 +322,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * `getDecayClock` と同じ規律。
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
+    assertWellFormedCtx(ctx);
     return this.rows.get(ctx.tenantId)?.taxonomyMode ?? DEFAULT_TAXONOMY_MODE;
   }
 
@@ -319,6 +331,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * .setTaxonomyMode` と同じ検証関数）で拒む——`setDecayClock` と同じ形。
    */
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
     this.ensureRow(ctx.tenantId).taxonomyMode = mode;
   }
@@ -328,6 +341,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * 高々1行なので `reachedLimit` は常に `false`（interface doc 参照）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     const existed = this.rows.has(ctx.tenantId) || this.eventRetentionDays.has(ctx.tenantId);
     if (!opts.dryRun) {
       this.rows.delete(ctx.tenantId);

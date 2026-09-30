@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { isUuidLike, normalizeUuidCase, parsePgTimestamp } from "./mapping.js";
 
@@ -52,6 +53,7 @@ export class PostgresRelationStore implements RelationStore {
    * 区別できないため。
    */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     if (!Object.hasOwn(KNOWN_RELATION_KINDS, kind)) {
       throw unknownRelationKind(kind);
     }
@@ -88,6 +90,7 @@ export class PostgresRelationStore implements RelationStore {
   }
 
   async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     const from = normalizeUuidCase(fromId);
     const to = normalizeUuidCase(toId);
     await this.db.execute(sql`
@@ -111,6 +114,7 @@ export class PostgresRelationStore implements RelationStore {
     memoryIds: readonly MemoryId[],
     kind?: RelationKind,
   ): Promise<Relation[][]> {
+    assertWellFormedCtx(ctx);
     const ids = memoryIds.map((id) => normalizeUuidCase(id));
     const queryable = [...new Set(ids.filter((id) => isUuidLike(id)))];
     const byFrom = new Map<string, Relation[]>();
@@ -142,6 +146,7 @@ export class PostgresRelationStore implements RelationStore {
   }
 
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
+    assertWellFormedCtx(ctx);
     const id = normalizeUuidCase(memoryId);
     const result = kind
       ? await this.db.execute(sql`

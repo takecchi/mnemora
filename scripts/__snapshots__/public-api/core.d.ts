@@ -469,6 +469,28 @@ export interface IdempotentCreateResult<T> {
 }
 export declare function resolveIdempotentCreate<T>(existing: T | null | undefined, insert: () => T): IdempotentCreateResult<T>;
 
+// ===== dist/identifier.d.ts =====
+import type { Ctx } from "./ctx.js";
+export type MalformedIdentifierReason = "lone_surrogate" | "nul";
+export declare class MalformedIdentifierError extends Error {
+    readonly field: string;
+    readonly reason: MalformedIdentifierReason;
+    readonly index: number;
+    readonly kind: "malformed_identifier";
+    constructor(field: string, reason: MalformedIdentifierReason, index: number);
+}
+export declare function isMalformedIdentifierError(value: unknown): value is MalformedIdentifierError;
+export declare function findMalformedIdentifierPart(value: string): {
+    reason: MalformedIdentifierReason;
+    index: number;
+} | null;
+export declare function assertWellFormedIdentifier(value: unknown, field: string): void;
+export declare function assertWellFormedCtx(ctx: Ctx, field?: string): void;
+export declare function assertWellFormedFilter(filter: {
+    tenantId?: unknown;
+    subjectId?: unknown;
+} | null | undefined, field?: string): void;
+
 // ===== dist/ids.d.ts =====
 export type MemoryId = string;
 export type ObservationId = string;
@@ -477,6 +499,7 @@ export type RecallId = string;
 
 // ===== dist/index.d.ts =====
 export * from "./ctx.js";
+export * from "./identifier.js";
 export * from "./abort.js";
 export * from "./ids.js";
 export * from "./attributes.js";
