@@ -14,11 +14,20 @@ import { nextId } from "./id.js";
  */
 export class InMemoryRelationStore implements RelationStore {
   constructor(
-    _memoryStore: InMemoryMemoryStore,
+    private readonly memoryStore: InMemoryMemoryStore,
     private readonly relations: StoredRelation[] = [],
   ) {}
 
+  /**
+   * 両端の記憶が `ctx.tenantId` の記憶であることを、渡された `InMemoryMemoryStore` で確かめてから書く
+   * （ADR 0398。`PostgresRelationStore.link` と同じ振る舞い）。無ければ `memory not found for tenant`。
+   */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    for (const id of [fromId, toId]) {
+      if ((await this.memoryStore.get(ctx, id)) === null) {
+        throw new Error(`InMemoryRelationStore: memory not found for tenant: ${id}`);
+      }
+    }
     const exists = this.relations.some(
       (r) =>
         r.tenantId === ctx.tenantId &&

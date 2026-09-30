@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { normalizeUuidCase, parsePgTimestamp } from "./mapping.js";
+import { isUuidLike, normalizeUuidCase, parsePgTimestamp } from "./mapping.js";
 
 /** `memory_relations` の1行。`listRelated` の組み立てにだけ使う内部形。 */
 interface MemoryRelationRow {
@@ -9,6 +9,11 @@ interface MemoryRelationRow {
   to_memory_id: string;
   kind: string;
   created_at: string;
+}
+
+/** 他の store（`PostgresMemoryStore` ほか）と同じ形の「そのテナントに無い」例外。 */
+function memoryNotFound(id: string): Error {
+  return new Error(`PostgresRelationStore: memory not found for tenant: ${id}`);
 }
 
 /**
@@ -22,14 +27,48 @@ interface MemoryRelationRow {
 export class PostgresRelationStore implements RelationStore {
   constructor(private readonly db: Db) {}
 
+  /**
+   * 両端の記憶が `ctx.tenantId` の `memories` に在ることを確かめてから書く（ADR 0398）。
+   * 確かめと書き込みは**1文**（存在検査の CTE と INSERT を同じ文に載せる）——検査と書き込みの間に
+   * 別の文が挟まる窓を作らない。uuid の形でない id は DB へ投げる前に弾く（`isUuidLike` の doc 参照）。
+   * どちらの端も在らなければ、行を書かずに `memory not found for tenant` を投げる
+   * （他の store の同種の例外と同じ形。DB 由来のエラーは利用者に見せない）。
+   *
+   * ⚠ 「行を書いたか」ではなく「両端が在ったか」を返り値の `ok` で見る——既に同じ行が在って
+   * `ON CONFLICT DO NOTHING` が0行にした場合（冪等）と、検査で落ちた場合を、書き込みの行数では
+   * 区別できないため。
+   */
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
     const from = normalizeUuidCase(fromId);
     const to = normalizeUuidCase(toId);
-    await this.db.execute(sql`
-      INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
-      VALUES (gen_random_uuid(), ${ctx.tenantId}, ${from}, ${to}, ${kind})
-      ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
+    if (!isUuidLike(from)) {
+      throw memoryNotFound(from);
+    }
+    if (!isUuidLike(to)) {
+      throw memoryNotFound(to);
+    }
+    const result = await this.db.execute(sql`
+      WITH ends AS (
+        SELECT
+          EXISTS (SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${from}) AS from_ok,
+          EXISTS (SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${to}) AS to_ok
+      ),
+      ins AS (
+        INSERT INTO memory_relations (id, tenant_id, from_memory_id, to_memory_id, kind)
+        SELECT gen_random_uuid(), ${ctx.tenantId}, ${from}, ${to}, ${kind}
+        FROM ends
+        WHERE from_ok AND to_ok
+        ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
+      )
+      SELECT from_ok, to_ok FROM ends
     `);
+    const ends = result.rows[0] as unknown as { from_ok: boolean; to_ok: boolean } | undefined;
+    if (!ends?.from_ok) {
+      throw memoryNotFound(from);
+    }
+    if (!ends.to_ok) {
+      throw memoryNotFound(to);
+    }
   }
 
   async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
