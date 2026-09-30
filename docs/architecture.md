@@ -434,7 +434,11 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    }
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -498,6 +502,8 @@ interface MemoryStore {
     opts?: {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      abortIfAllConflicted?: boolean;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }
   ): Promise<{
@@ -513,7 +519,11 @@ interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    }
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -985,7 +995,7 @@ adapter では `Runtime` が `listRelated` を起点ごとに直列に呼ぶ（�
 
 **⚠ 以下は当時（RelationStore 未実装）のドラフトの記録。上の追記が正しい形。**
 
-```ts
+```text
 interface RelationStore {
   link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
@@ -1242,12 +1252,11 @@ interface ClaimOutboxJobsOptions {
 
 class OutboxLeaseConflictError extends Error {
   /** 判別子（ADR 0418）。クラスが2つの版に分かれても読める値。 */
-  readonly kind: "outbox_lease_conflict";
-  constructor(
-    readonly jobId: string,
-    readonly expectedAttempts: number,
-    readonly observedAttempts: number | null,
-  );
+  declare readonly kind: "outbox_lease_conflict";
+  declare readonly jobId: string;
+  declare readonly expectedAttempts: number;
+  declare readonly observedAttempts: number | null;
+  constructor(jobId: string, expectedAttempts: number, observedAttempts: number | null);
 }
 
 /**

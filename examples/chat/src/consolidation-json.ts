@@ -46,6 +46,7 @@ export interface ConsolidationOutcomeCountsJson {
   llm_failed: number;
   dry_run: number;
   aborted_source_forgotten: number;
+  aborted_source_status_changed: number;
 }
 
 export interface ConsolidationEmbeddingStatusJson {
@@ -385,7 +386,7 @@ export function buildWeightsUnavailableConsolidationCostRunJson(options: {
   };
 }
 
-/** `ConsolidateOutcome` の6値をすべて0に初期化した内訳（Issue #1226、2026-09-30 追記）。 */
+/** `ConsolidateOutcome` の7値をすべて0に初期化した内訳（Issue #1226、2026-09-30 追記）。 */
 export function emptyOutcomeCounts(): ConsolidationOutcomeCountsJson {
   return {
     consolidated: 0,
@@ -394,6 +395,7 @@ export function emptyOutcomeCounts(): ConsolidationOutcomeCountsJson {
     llm_failed: 0,
     dry_run: 0,
     aborted_source_forgotten: 0,
+    aborted_source_status_changed: 0,
   };
 }
 

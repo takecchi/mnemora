@@ -267,6 +267,8 @@ export interface Memory {
    * 段2の減衰係数（`scoring.ts`）も、Postgres では丸めた値で計算される。
    * 列の型を変える案・書く前に丸める案は採らず、今の振る舞いを記録した（クローン miku の判断）。
    * `docs/memory-model.md` §7 の 2026-09-27 追記を参照。
+   *
+   * 値域は `(0, ∞)` だが、Postgres の列は `real`（float4）なので、float4 に収まる範囲（`Math.fround(x)` が有限かつ 0 でない値。上限は約 `3.4028235e38`、下限は約 `1.4e-45`）の外は、`@mnemora/postgres` も testkit の fixture も、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で拒む（DB の生の例外にはしない）。
    */
   halfLifeHours: number;
   /** 壁時計で、強さが忘却の閾値を下回る時刻（書き込み時・強化時に計算して保存する）。recall の忘却ゲート（既定で有効。`RecallQuery.includeFullyDecayed` で外せる）は、この時刻が「今」以前の Memory を除く。 */
@@ -293,7 +295,7 @@ export interface Memory {
   decayBaseSeq?: number | null;
   /** `decayBaseSeq` の doc コメント参照。活動時計の床。 */
   decayFloorSeq?: number | null;
-  /** `decayBaseSeq` の doc コメント参照。活動時計での Memory 単位の半減期。 */
+  /** `decayBaseSeq` の doc コメント参照。活動時計での Memory 単位の半減期。値域は `(0, ∞)` だが、Postgres の列は `real`（float4）なので、float4 に収まる範囲（`Math.fround(x)` が有限かつ 0 でない値。上限は約 `3.4028235e38`、下限は約 `1.4e-45`）の外は、`@mnemora/postgres` も testkit の fixture も、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で拒む（DB の生の例外にはしない）。 */
   halfLifeRecalls?: number | null;
 
   /** 埋め込みの状態（{@link EmbeddingStatus}）。 */

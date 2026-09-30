@@ -28,7 +28,8 @@ import { assertLLMContentNotBlank } from "./llm-content.js";
 import { resolveCandidateSubjectId, resolveCommonSubjectId } from "./memory-subject.js";
 import { classifyValidity } from "./validity.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
-import { describeFailure } from "./failure-description.js";
+import { describeFailure, omitParamsFromError } from "./failure-description.js";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "./identifier.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
@@ -37,6 +38,7 @@ import {
   isMemoryPurgeConflictError,
   isMemoryStatusConflictError,
   isSourceMemoryForgottenError,
+  isSourceMemoryStatusChangedError,
   PURGE_TOMBSTONE_CONTENT,
   PURGE_TOMBSTONE_DIGEST,
 } from "./interfaces/memory-store.js";
@@ -913,6 +915,17 @@ export interface ConsolidateOptions {
  *   クローン miku の判断）。{@link ConsolidateSourceOutcome} の `"forgotten_before_write"`
  *   参照。破壊的変更とは数えない（union に値を足す変更は数えない。同日付の
  *   「数え方の規律への追記（2026-09-28）」、`"expired"`/`"not_yet_valid"` の追加と同じ扱い）。
+ * - `"aborted_source_status_changed"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前（または書き込みの
+ *   トランザクション内）に見直したら、eligible の1件以上が `superseded` になっていた（`reextract` などが
+ *   LLM を待つ間に別の記憶で置き換えた）、または eligible の**すべて**が `active` でなくなっていた
+ *   （同じ ids の `consolidate` が同時に走って先に commit した、など）ので、**何も書かずに打ち切った**
+ *   （統合先は作らない。eligible のどれ1つも `superseded` へ動かさない）。
+ *   `aborted_source_forgotten` を superseded・全件 CAS 弾かれにも広げたもの（ADR 0420）。
+ *   {@link ConsolidateSourceOutcome} の `"status_changed_concurrently"` が、動いていた要素を名指しする。
+ *   ⚠ 1件でも `active` のまま残り、`superseded` になったものが無いなら、今までどおりの部分成功
+ *   （`"consolidated"`、動いていた要素だけ `"status_changed_concurrently"`）。
+ *   **破壊的変更として数える**（今まで `"consolidated"` で返っていた入力が、この値で返る。
+ *   `docs/migration-v1.md` 項目42）。
  */
 export type ConsolidateOutcome =
   | "consolidated"
@@ -920,7 +933,8 @@ export type ConsolidateOutcome =
   | "not_examined"
   | "llm_failed"
   | "dry_run"
-  | "aborted_source_forgotten";
+  | "aborted_source_forgotten"
+  | "aborted_source_status_changed";
 
 /**
  * `ConsolidateOutcome: "nothing_to_consolidate"` の理由（Issue #103、ADR 0089）。
@@ -1193,6 +1207,11 @@ export interface ReflectOptions {
  *   2026-09-30 追記（Issue #1226、ADR 0375 決定7、クローン miku の判断）。
  *   {@link ReflectBasisOutcome} の `"forgotten_before_write"` 参照。破壊的変更とは数えない
  *   （union に値を足す変更は数えない。`ConsolidateOutcome` の同日付の追記と同じ扱い）。
+ * - `"aborted_source_status_changed"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前（または書き込みの
+ *   トランザクション内）に見直したら、eligible の1件以上が `superseded` になっていたので、**何も書かずに
+ *   打ち切った**（内省の Memory を作らない）。`aborted_source_forgotten` を superseded にも広げたもの
+ *   （ADR 0420）。{@link ReflectBasisOutcome} の `"status_changed_before_write"` 参照。
+ *   **破壊的変更として数える**（今まで `"reflected"` で返っていた入力が、この値で返る。`docs/migration-v1.md` 項目42）。
  */
 export type ReflectOutcome =
   | "reflected"
@@ -1200,7 +1219,8 @@ export type ReflectOutcome =
   | "not_examined"
   | "llm_failed"
   | "dry_run"
-  | "aborted_source_forgotten";
+  | "aborted_source_forgotten"
+  | "aborted_source_status_changed";
 
 /**
  * `ReflectOutcome: "nothing_to_reflect"` の理由（Issue #104）。
@@ -1234,6 +1254,9 @@ export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
  *   （`dryRun: true` で下見しただけ／LLM 呼び出しが失敗した／LLM が「無い」と答えた／
  *   他の eligible が `"forgotten_before_write"` になり呼び出し全体が打ち切られた（この
  *   要素自身は forgotten ではなかった。2026-09-30 追記、Issue #1226）、のいずれか）。
+ * - `"status_changed_before_write"` — 書き込みの直前（または書き込みのトランザクション内）の見直しで、すでに
+ *   `superseded` になっていた（`observedStatus` はそのとき見えた値）。この呼び出し全体が
+ *   `outcome: 'aborted_source_status_changed'` で打ち切られる（ADR 0420）。他の eligible は `"eligible"` のまま。
  *
  * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
  * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も材料にして
@@ -1276,7 +1299,8 @@ export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "not_yet_valid"; validFrom: Date }
   | { memoryId: MemoryId; kind: "basis_is_reflected" }
   | { memoryId: MemoryId; kind: "eligible" }
-  | { memoryId: MemoryId; kind: "forgotten_before_write" };
+  | { memoryId: MemoryId; kind: "forgotten_before_write" }
+  | { memoryId: MemoryId; kind: "status_changed_before_write"; observedStatus: MemoryStatus };
 
 /**
  * `runtime.reflect` の結果（Issue #104）。
@@ -3576,7 +3600,9 @@ export interface Runtime {
    * `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
    * `'supersede' | 'both_active'`。`opts.reason` を渡すと `meta.note` に追加で入る。
    * `meta.contestedWithId` は積まない（`markContestedGroup` と同じ理由——群のメンバーは
-   * その欄自体を持たない）。
+   * その欄自体を持たない）。負けた側の `superseded` は `meta.supersededById` に勝った側の id
+   * （`memberIds` の綴りに寄せた `winnerId`。store へ渡す値と同じ）を持つ——2者版
+   * `resolveContested` と同じ形（ADR 0150 追記。ADR 0421 で揃えた）。勝者の `updated` には足さない。
    *
    * ⚠ **`recall()` 側は一切変更していない。**`markContested`/`resolveContested` と同じ
    * 理由。
@@ -3768,6 +3794,14 @@ export interface Runtime {
    *    今日も存在する**——`forgotten`/`purged` 以外の理由（例: 別の呼び出しが同じ eligible を
    *    先に `superseded`/`contested` へ動かした）で CAS が破れたときは、今どおり部分成功として扱う
    *    （その1件だけ `status_changed_concurrently`、統合先は書かれる）。
+   *    ⚠ **2026-09-30 変更（[ADR 0420](../../../docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)）:**
+   *    上の「`superseded` へ動かした」場合は、もう部分成功にならない。eligible の1件でも `superseded` になっていた
+   *    ときと、eligible の**すべて**が `active` でなくなっていた（CAS がすべて破れた）ときは、統合先を書かず
+   *    `outcome: 'aborted_source_status_changed'` で打ち切る（手順5の直後の読み直しと、
+   *    `supersedeWithNewMemories?` の `opts.abortIfSuperseded`/`opts.abortIfAllConflicted`）。部分成功が残るのは、
+   *    `superseded` 以外の理由（`contested`・`archived` など）で**一部だけ**が破れたときである。
+   *    ⚠ `supersedeWithNewMemories?` を実装しない adapter の2段の経路では、統合先を書いた後で CAS するので、
+   *    手順5の直後の読み直しより後に全件が破れた場合は打ち切れない（統合先は残る。ADR 0420 の「引き受けた負債」）。
    * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
    *
    * `memory_events.meta.reason` は `superseded` イベントに `'consolidated'` を積む
@@ -7440,6 +7474,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind }
         : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
+    // 敗者の superseded イベントの meta には、勝者の id を `supersededById` として残す
+    // （2者版 `resolveContested` と同じ。ADR 0150 追記、ADR 0421）。store へ渡す値と同じ
+    // （`memberIds` の綴りに寄せた winnerId）。勝者・both_active の updated には足さない。
 
     try {
       const now = clock.now();
@@ -7455,7 +7492,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           at: now,
           actor,
           digestSnapshot: memory.digest,
-          meta: buildMeta(),
+          meta:
+            status === "superseded" ? { ...buildMeta(), supersededById: winnerId! } : buildMeta(),
         };
         return status === "superseded"
           ? { id, status, supersededById: winnerId!, event }
@@ -7819,6 +7857,48 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
+    // ADR 0420: 同じ読み直しで、superseded も見る。forgotten と同じ形で、退けた古い本文から作った統合先を
+    // active で残さない。加えて、eligible の**すべて**が active でなくなっていた（同じ ids の consolidate が
+    // 先に commit した、など）ときも、統合先だけが残らないよう打ち切る。1件でも active が残り superseded が
+    // 無いなら、今までどおりの部分成功（動いていた要素だけ `status_changed_concurrently`）。
+    const changedBeforeConsolidateWrite = new Map<MemoryId, MemoryStatus>();
+    for (const id of eligibleIds) {
+      const status = recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status;
+      if (status === "superseded") {
+        changedBeforeConsolidateWrite.set(id, status);
+      }
+    }
+    if (
+      eligibleIds.every((id) => {
+        const status = recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status;
+        return status !== undefined && status !== "active";
+      })
+    ) {
+      for (const id of eligibleIds) {
+        changedBeforeConsolidateWrite.set(
+          id,
+          recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))!.status,
+        );
+      }
+    }
+    if (changedBeforeConsolidateWrite.size > 0) {
+      return {
+        // 書き込みを1件も試みていない（ADR 0100 と同じ扱い——このトランザクション自体を開いていない）。
+        atomicity: "not_attempted" as const,
+        outcome: "aborted_source_status_changed",
+        nothingReason: null,
+        consolidatedMemoryId: null,
+        sources: mapSources((id) => {
+          const observed = changedBeforeConsolidateWrite.get(id);
+          return observed !== undefined
+            ? { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed }
+            : { memoryId: id, kind: "not_attempted" };
+        }),
+        llmCalls: 1,
+        llmFailure: null,
+      };
+    }
+
     // 6. 統合先を作る。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -7917,7 +7997,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           })),
           // ADR 0416（穴 D-3 の続き）: 統合先の `created` も同じトランザクションで積ませる（実装する adapter だけ。
           // 積んだかどうかは戻り値の `createdEventsWritten` で判断する）。
-          { now, abortIfForgotten: eligibleIds, buildCreatedEvent },
+          {
+            now,
+            abortIfForgotten: eligibleIds,
+            // ADR 0420: superseded・全件 CAS 弾かれは統合先を commit せず打ち切る（tx ごと巻き戻る）。
+            abortIfSuperseded: eligibleIds,
+            abortIfAllConflicted: true,
+            buildCreatedEvent,
+          },
         );
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
@@ -7934,6 +8021,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
                 ? { memoryId: id, kind: "forgotten_before_write" }
                 : { memoryId: id, kind: "not_attempted" },
             ),
+            llmCalls: 1,
+            llmFailure: null,
+          };
+        }
+        if (isSourceMemoryStatusChangedError(error)) {
+          const changedLate = new Map(error.changed.map((c) => [c.id, c.observedStatus]));
+          return {
+            // 全部巻き戻った——書き込みを試みていないのと呼び出し側からは区別が付かない。
+            atomicity: "not_attempted" as const,
+            outcome: "aborted_source_status_changed",
+            nothingReason: null,
+            consolidatedMemoryId: null,
+            sources: mapSources((id) => {
+              const observed = changedLate.get(id);
+              return observed !== undefined
+                ? { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed }
+                : { memoryId: id, kind: "not_attempted" };
+            }),
             llmCalls: 1,
             llmFailure: null,
           };
@@ -7982,7 +8087,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         ctx,
         newMemory,
         ["embed"],
-        { now, abortIfForgotten: eligibleIds },
+        // ADR 0420: superseded を見直す（実装する adapter だけ。`abortIfAllConflicted` は 2 段の書き込みには
+        // 当たらない——統合先を commit した後で CAS するため、下の手順7は部分成功のまま）。
+        { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
       );
       consolidatedMemory = createResult.memory;
       created = createResult.created;
@@ -7999,6 +8106,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               ? { memoryId: id, kind: "forgotten_before_write" }
               : { memoryId: id, kind: "not_attempted" },
           ),
+          llmCalls: 1,
+          llmFailure: null,
+        };
+      }
+      if (isSourceMemoryStatusChangedError(error)) {
+        const changedLate = new Map(error.changed.map((c) => [c.id, c.observedStatus]));
+        return {
+          atomicity: "not_attempted" as const,
+          outcome: "aborted_source_status_changed",
+          nothingReason: null,
+          consolidatedMemoryId: null,
+          sources: mapSources((id) => {
+            const observed = changedLate.get(id);
+            return observed !== undefined
+              ? { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed }
+              : { memoryId: id, kind: "not_attempted" };
+          }),
           llmCalls: 1,
           llmFailure: null,
         };
@@ -8333,6 +8457,31 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
+    // ADR 0420: 同じ読み直しで、superseded も見る（forgotten と同じ形）。LLM を待つ間に別の記憶で置き換えられた
+    // 材料の古い本文から作った内省を、active で残さない。
+    const supersededBeforeReflectWrite = new Map<MemoryId, MemoryStatus>();
+    for (const id of eligibleIds) {
+      const status = recheckedByIdBeforeReflectWrite.get(lookupKey(id))?.status;
+      if (status === "superseded") {
+        supersededBeforeReflectWrite.set(id, status);
+      }
+    }
+    if (supersededBeforeReflectWrite.size > 0) {
+      return {
+        outcome: "aborted_source_status_changed",
+        nothingReason: null,
+        reflectedMemoryId: null,
+        basis: mapBasis((id) => {
+          const observed = supersededBeforeReflectWrite.get(id);
+          return observed !== undefined
+            ? { memoryId: id, kind: "status_changed_before_write", observedStatus: observed }
+            : { memoryId: id, kind: "eligible" };
+        }),
+        llmCalls: 1,
+        llmFailure: null,
+      };
+    }
+
     // 7. 新しい Memory を1件作る（既存の行へは一切書き込まない——決定4）。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -8391,7 +8540,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           ctx,
           [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
           (memory) => buildReflectedCreatedEvent(memory),
-          { now, abortIfForgotten: eligibleIds },
+          { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
         );
         // 候補は1件なので、全件が落ちたなら store は最初の例外を投げている（`dropped` は空のはず）。
         // 契約に反して `written` が空で返ったときは、落とした例外があればそれを、無ければ契約違反として投げる。
@@ -8412,7 +8561,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           ctx,
           newMemory,
           ["embed"],
-          { now, abortIfForgotten: eligibleIds },
+          { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
         );
         reflectedMemory = createResult.memory;
         created = createResult.created;
@@ -8429,6 +8578,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               ? { memoryId: id, kind: "forgotten_before_write" }
               : { memoryId: id, kind: "eligible" },
           ),
+          llmCalls: 1,
+          llmFailure: null,
+        };
+      }
+      if (isSourceMemoryStatusChangedError(error)) {
+        const changedLate = new Map(error.changed.map((c) => [c.id, c.observedStatus]));
+        return {
+          outcome: "aborted_source_status_changed",
+          nothingReason: null,
+          reflectedMemoryId: null,
+          basis: mapBasis((id) => {
+            const observed = changedLate.get(id);
+            return observed !== undefined
+              ? { memoryId: id, kind: "status_changed_before_write", observedStatus: observed }
+              : { memoryId: id, kind: "eligible" };
+          }),
           llmCalls: 1,
           llmFailure: null,
         };
@@ -8456,7 +8621,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  return {
+  return guardRuntimeEntry({
     observe,
     tick,
     recall,
@@ -8477,5 +8642,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     applyCorrection,
     consolidate,
     reflect,
-  };
+  });
+}
+
+/**
+ * `Runtime` の各メソッドの入口と出口に掛ける関門（[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)）。
+ *
+ * - **入口**: 第1引数の {@link Ctx}（`tenantId`・`subjectId`）と、`observe` の入力の `subjectId`・`externalId` が
+ *   孤立サロゲートか NUL を含めば、何も書かずに {@link MalformedIdentifierError} で拒む（正規化はしない）。
+ *   本文（`text` など）は検査しない。`Runtime` のメソッドを新しく足したときは、ここを通る（全メソッドに掛かる）。
+ * - **出口**: store などが投げた例外の `message` から、SQL に付けた値（params）を落とす
+ *   （{@link omitParamsFromError}）。例外そのもの（`kind`・`cause`）は変えない。
+ */
+function guardRuntimeEntry(runtime: Runtime): Runtime {
+  const guarded: Record<string, unknown> = {};
+  for (const [name, method] of Object.entries(runtime) as Array<
+    [string, (...args: unknown[]) => Promise<unknown>]
+  >) {
+    guarded[name] = (...args: unknown[]): Promise<unknown> => {
+      try {
+        assertWellFormedCtx(args[0] as Ctx);
+        if (name === "observe") {
+          const input = args[1] as { subjectId?: unknown; externalId?: unknown } | null | undefined;
+          assertWellFormedIdentifier(input?.subjectId, "input.subjectId");
+          assertWellFormedIdentifier(input?.externalId, "input.externalId");
+        }
+        return method(...args).catch((error: unknown) => {
+          throw omitParamsFromError(error);
+        });
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+  }
+  return guarded as unknown as Runtime;
 }

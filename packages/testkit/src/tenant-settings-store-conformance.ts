@@ -9,12 +9,18 @@ import {
   TAXONOMY_MODE_INVALID_MESSAGE,
 } from "@mnemora/core";
 import type { Ctx, DecayClock, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /**
  * `setEventRetention` に不正な `days` を渡したときのメッセージが `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
  * を含むことを見る。`TypeError` のような別種の失敗と区別するため、`.toThrow()` は引数なしで
  * 使わない（`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由・同じ形）。
  */
+/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
+const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
 /**
  * `setDecayClock` に不正な値を渡したときのメッセージが `DECAY_CLOCK_INVALID_MESSAGE` を
@@ -357,6 +363,18 @@ export function describeTenantSettingsStoreConformance(
           expect(await store.getDefaultHalfLifeRecalls!(ctx)).toBe(48);
         });
 
+        it("⚠ float4（Postgres の real 列）に収まらない default_half_life_recalls を、明示の例外で拒む（DB の生の例外にしない）", async () => {
+          // 値域は `(0, ∞)` だが、列は `real`（float4）。`Math.fround(x)` が Infinity か 0 に
+          // なる値は入らない。メッセージに `float4` を含む明示の例外で断る。
+          for (const recalls of [1e39, 1e-50]) {
+            const ctx: Ctx = { tenantId: `tenant-half-life-recalls-f4-${Math.random()}` };
+            await expect(
+              Promise.resolve().then(() => setDefaultHalfLifeRecalls(ctx, recalls)),
+              `default_half_life_recalls=${recalls} は float4 に収まらないと名指しして拒まれなければならない`,
+            ).rejects.toThrow(FLOAT4_MESSAGE);
+          }
+        });
+
         // ⭐ 行が無いテナントに書き込むと行ができることの芯（`setDefaultHalfLifeHours` の
         // 「half-life だけを設定した…テナントは unlimited」の歯と同じ発想）。行が
         // 無ければ `getEventRetention` は `{ kind: "unset" }` を返す——`{ kind:
@@ -582,6 +600,27 @@ export function describeTenantSettingsStoreConformance(
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.eraseTenant).toBeUndefined();
+      });
+    }
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "getDefaultHalfLifeHours の ctx.tenantId",
+            () => store.getDefaultHalfLifeHours({ tenantId: value }),
+          ],
+          ["getEventRetention の ctx.tenantId", () => store.getEventRetention({ tenantId: value })],
+          [
+            "getEventRetention の ctx.subjectId",
+            () => store.getEventRetention({ tenantId: "tenant-wf", subjectId: value }),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
       });
     }
   });

@@ -373,3 +373,202 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     expect(await stores.memoryStore.get(otherCtx, otherMemory.id)).not.toBeNull();
   });
 });
+
+/**
+ * ADR 0383 の約束: 「設定は最後にする——途中で処理が中断しても、まだ『テナントが存在する』
+ * ことの手がかりとして残る」。`limit` で途中で止まった回（いずれかの port が
+ * `reachedLimit: true` を返した回）に、後ろの port（とくに `tenantSettingsStore`）へ進むと、
+ * この約束が破れる。ここでは、止まった回に後ろの port が**呼ばれない**こと・データが残ること・
+ * 呼び直せば最後まで消えることを縛る。
+ */
+describe("eraseTenant: limit で止まった回は、後ろの port を呼ばない（ADR 0383 の追記）", () => {
+  const memoryInput = (i: number) => ({
+    tenantId: ctx.tenantId,
+    subjectId: null,
+    sourceObservationId: null,
+    extractorVersion: null,
+    content: `本文${i}`,
+    contentHash: `hash-stop-at-limit-${i}`,
+    digest: "digest",
+    digestSource: "llm" as const,
+    provenance: { kind: "imported" as const, batchId: "fixture" },
+    tags: [],
+    occurredAt: null,
+    recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+    lastReinforcedAt: null,
+    strength: 1,
+    halfLifeHours: 720,
+    decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+    embeddingStatus: "pending" as const,
+  });
+
+  const SPACE = { provider: "fake", model: "fake-model", dimensions: 2 };
+
+  type Stores = ReturnType<typeof createFakeRuntimeStores>;
+
+  async function seed(stores: Stores) {
+    for (let i = 0; i < 3; i++) {
+      const m = await stores.memoryStore.createMemory(ctx, memoryInput(i));
+      await stores.vectorStore.upsert(ctx, SPACE, m.id, [1, 2]);
+    }
+    for (let i = 0; i < 2; i++) {
+      await stores.memoryStore.createObservationWithOutbox(
+        ctx,
+        {
+          tenantId: ctx.tenantId,
+          subjectId: null,
+          externalId: null,
+          kind: "utterance",
+          payload: { text: `x${i}` },
+        },
+        ["extract"],
+      );
+    }
+    await stores.tenantSettingsStore.setEventRetention(ctx, { kind: "days", days: 30 });
+  }
+
+  const outboxCount = (stores: Stores): number =>
+    (
+      stores.outboxStore as unknown as { backing: { outboxJobs: { tenantId: string }[] } }
+    ).backing.outboxJobs.filter((j) => j.tenantId === ctx.tenantId).length;
+
+  const depsOf = (stores: Stores) => ({
+    memoryStore: stores.memoryStore,
+    vectorStore: stores.vectorStore,
+    outboxStore: stores.outboxStore,
+    tenantSettingsStore: stores.tenantSettingsStore,
+  });
+
+  it("memoryStore が reachedLimit のとき、埋め込み・outbox・設定は残り、reachedLimit: true で返る（呼ばなかった port の deleted は 0）", async () => {
+    const stores = createFakeRuntimeStores();
+    await seed(stores);
+    const vectorsBefore = stores.vectorStore.entries.size;
+    const jobsBefore = outboxCount(stores);
+    expect(vectorsBefore).toBe(3);
+    expect(jobsBefore).toBe(2);
+
+    const outcome = await eraseTenant(ctx, depsOf(stores), {
+      confirmTenantId: ctx.tenantId,
+      limit: 2,
+    });
+
+    expect(outcome).toEqual({
+      kind: "executed",
+      dryRun: false,
+      deleted: { memoryStore: 2, vectorStore: 0, outboxStore: 0, tenantSettingsStore: 0 },
+      reachedLimit: true,
+    });
+    expect(stores.vectorStore.entries.size).toBe(vectorsBefore);
+    expect(outboxCount(stores)).toBe(jobsBefore);
+    expect(await stores.tenantSettingsStore.getEventRetention(ctx)).toEqual({
+      kind: "days",
+      days: 30,
+    });
+  });
+
+  it("呼び直すと最後まで消え、全部が空になった回で reachedLimit: false になる（設定が消えるのは最後の回）", async () => {
+    const stores = createFakeRuntimeStores();
+    await seed(stores);
+
+    let calls = 0;
+    for (;;) {
+      calls += 1;
+      expect(calls).toBeLessThan(20);
+      const outcome = await eraseTenant(ctx, depsOf(stores), {
+        confirmTenantId: ctx.tenantId,
+        limit: 2,
+      });
+      expect(outcome.kind).toBe("executed");
+      if (outcome.kind !== "executed") throw new Error("unreachable");
+      if (!outcome.reachedLimit) break;
+      // まだ続く回では、設定は残っている。
+      expect(await stores.tenantSettingsStore.getEventRetention(ctx)).toEqual({
+        kind: "days",
+        days: 30,
+      });
+    }
+    expect(calls).toBeGreaterThan(1);
+    expect(stores.vectorStore.entries.size).toBe(0);
+    expect(outboxCount(stores)).toBe(0);
+    expect(await stores.tenantSettingsStore.getEventRetention(ctx)).toEqual({ kind: "unset" });
+  });
+
+  it("vectorStore が reachedLimit のとき、outboxStore・tenantSettingsStore を呼ばない", async () => {
+    const stores = createFakeRuntimeStores();
+    const touched: string[] = [];
+    stores.memoryStore.eraseTenant = async () => ({
+      kind: "executed",
+      deleted: 0,
+      reachedLimit: false,
+    });
+    stores.vectorStore.eraseTenant = async () => ({ deleted: 5, reachedLimit: true });
+    stores.outboxStore.eraseTenant = async () => {
+      touched.push("outboxStore");
+      return { deleted: 0, reachedLimit: false };
+    };
+    stores.tenantSettingsStore.eraseTenant = async () => {
+      touched.push("tenantSettingsStore");
+      return { deleted: 0, reachedLimit: false };
+    };
+
+    const outcome = await eraseTenant(ctx, depsOf(stores), {
+      confirmTenantId: ctx.tenantId,
+      limit: 5,
+    });
+
+    expect(touched).toEqual([]);
+    expect(outcome).toEqual({
+      kind: "executed",
+      dryRun: false,
+      deleted: { memoryStore: 0, vectorStore: 5, outboxStore: 0, tenantSettingsStore: 0 },
+      reachedLimit: true,
+    });
+  });
+
+  it("outboxStore が reachedLimit のとき、tenantSettingsStore を呼ばない", async () => {
+    const stores = createFakeRuntimeStores();
+    const touched: string[] = [];
+    stores.memoryStore.eraseTenant = async () => ({
+      kind: "executed",
+      deleted: 1,
+      reachedLimit: false,
+    });
+    stores.vectorStore.eraseTenant = async () => ({ deleted: 2, reachedLimit: false });
+    stores.outboxStore.eraseTenant = async () => ({ deleted: 5, reachedLimit: true });
+    stores.tenantSettingsStore.eraseTenant = async () => {
+      touched.push("tenantSettingsStore");
+      return { deleted: 1, reachedLimit: false };
+    };
+
+    const outcome = await eraseTenant(ctx, depsOf(stores), {
+      confirmTenantId: ctx.tenantId,
+      limit: 5,
+    });
+
+    expect(touched).toEqual([]);
+    expect(outcome).toEqual({
+      kind: "executed",
+      dryRun: false,
+      deleted: { memoryStore: 1, vectorStore: 2, outboxStore: 5, tenantSettingsStore: 0 },
+      reachedLimit: true,
+    });
+  });
+
+  it("dryRun でも同じ: memoryStore が reachedLimit なら後ろの port を呼ばず、deleted は 0 で reachedLimit: true", async () => {
+    const stores = createFakeRuntimeStores();
+    await seed(stores);
+
+    const outcome = await eraseTenant(ctx, depsOf(stores), {
+      confirmTenantId: ctx.tenantId,
+      limit: 2,
+      dryRun: true,
+    });
+
+    expect(outcome).toEqual({
+      kind: "executed",
+      dryRun: true,
+      deleted: { memoryStore: 2, vectorStore: 0, outboxStore: 0, tenantSettingsStore: 0 },
+      reachedLimit: true,
+    });
+  });
+});

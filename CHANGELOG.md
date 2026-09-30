@@ -59,6 +59,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Breaking
 
+- **識別子に孤立サロゲートか NUL（U+0000）を含む値を、入口で `MalformedIdentifierError`（`kind: "malformed_identifier"`）で断るようになった。`@mnemora/testkit` の conformance suite に、これを検査する `it` が増えた——自前の store 実装を conformance suite に当てている人へ**（[ADR 0423](./docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)、`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）。
+
+  識別子（`tenantId`・`subjectId`・`observe` の `externalId`）の文字の扱いを揃えた。孤立サロゲート（対をなさない UTF-16 のサロゲートコードユニット）か NUL を含む識別子は、これまで実装によって扱いが違った（Postgres では U+FFFD に置き換わって保存される、または DB の生の例外、インメモリ実装では通る）。今は、**書き込みより前に**、明示の例外で断る。**正規化はしない**（書き換えて通さない。`Ctx` の「正規化せず完全一致で比べる」は変わらない）。対をなすサロゲート（絵文字など）は、これまでどおり通る。
+
+  - **断る場所**: `createRuntime` が返す `Runtime` の全メソッドの入口（第1引数の `Ctx` の `tenantId`・`subjectId`、`observe` の入力の `subjectId`・`externalId`）。`@mnemora/postgres` とインメモリ実装（`@mnemora/testkit`）の store の、`ctx` を取る全メソッドの入口と、識別子を入力に持つ口（Observation・Memory の書き込みの `subjectId`・`externalId`、検索条件の `filter` など）。
+  - **例外**: `MalformedIdentifierError`（`kind: "malformed_identifier"`、`field`・`reason`・`index`）。判定関数 `isMalformedIdentifierError`（ADR 0418 の作法。`instanceof` を使わない）。message に入力値は入らない。判定の関数 `assertWellFormedIdentifier`・`assertWellFormedCtx`・`assertWellFormedFilter`・`findMalformedIdentifierPart` も公開した（自前の store が同じ判定を使える）。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力（孤立サロゲートか NUL を含む識別子）が、新しく例外になる**。あわせて、conformance suite の判定が厳しくなり、入口で断らない自前の store は、新しく実行時に落ちる（項目21・23・24・27 と同じ扱い）。
+  - **誰が影響を受けるか**: 識別子に外部の入力をそのまま渡している呼び出し側のうち、孤立サロゲートか NUL を含みうるもの。自前の store を `describeMemoryStoreConformance`・`describeOutboxStoreConformance`・`describeVectorStoreConformance`・`describeLexicalStoreConformance`・`describeEventStoreConformance`・`describeRelationStoreConformance`・`describeTenantSettingsStoreConformance` に当てている利用者。
+  - **変えなかったこと**: 本文（`text`・`content`・`payload`・`attributes` の値）の扱い——`text` 列の孤立サロゲートを U+FFFD に置き換える今の扱い、`jsonb` 列が断る今の扱い。`tags` の要素・`claimKey` の主語と述語・ラベル名（今回は対象にしていない）。すでに保存された行。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目41。DB マイグレーションは無い。
+  - 【確かめていないこと】本物の2つの版の core が並ぶ環境。過去に U+FFFD へ置き換わって保存された識別子がデータに在るか。
+
 - **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった。新しい interface `RelationStore` と、それを検査する新設の conformance suite も増えた**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)・[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）。**この節の範囲で1件目の破壊的変更。**
   - `describeMemoryStoreConformance` に、新しい任意メソッド `markContestedGroup?`/`resolveContestedGroup?` を検査する `it` と、任意フラグ `supportsMarkContestedGroup?`/`supportsResolveContestedGroup?`（既存の3状態フラグと同じ形）が増えた。群の一部だけを渡した `resolveContestedGroup?` を専用のエラー `ContestedGroupMembershipMismatchError`（新設）で拒む約束と、有効期間の重なりの境目（半開区間）の約束も検査する。
   - 新設の `describeRelationStoreConformance` が、`RelationStore` の実装を検査する。
@@ -85,6 +97,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
     を足した（`EventStore` には足していない）。4つのうち1つでも無ければ、何も消さずに
     `{ kind: "store_unsupported", missing }` を返す。他テナントの行がこのテナントの行を
     参照していれば、1行も消さずに `{ kind: "blocked_by_foreign_reference", count }` を返す。
+    **いずれかの port が `reachedLimit: true` を返した回（`limit` で途中で止まった回）は、
+    `memoryStore` → `vectorStore` → `outboxStore` の順に、そこで打ち切って後ろの port を
+    呼ばない**（設定は最後、という [ADR 0383](./docs/decisions/0383-erase-tenant.md) の
+    約束。呼ばなかった port の `deleted` は `0`、`dryRun` も同じ。追記は同 ADR の末尾、
+    [PR #1526](https://github.com/takecchi/mnemora/pull/1526)）。設定が消えるのは、前の port が
+    消し切った最後の回だけ。`deleted.memoryStore` は `memoryStore` が消す10表の合計、
+    `deleted.vectorStore` は本番では CASCADE のため `0` になる（doc を直した）。
   - `@mnemora/postgres`: 4つの store に `eraseTenant` を実装した。
     **DB マイグレーション `0027_erase_tenant_fk_indexes.sql` が増えた**（外部キー検査の
     ための単一列の索引。埋め込み空間の表には `(memory_id)` の索引を遡って足す）。
@@ -190,6 +209,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **変えなかったこと**: suite の引数（適合フラグ・フック）。公開 API の型。**移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目36。DB マイグレーションは無い。
   - 【確かめていないこと】インメモリ実装（`packages/testkit` の `__fixtures__`）の各口を1つずつ変えて調べる走査（足した `it` がインメモリ実装で緑であることだけを確かめた）。
 
+- **`@mnemora/testkit` の `describeOutboxStoreConformance`・`describeRelationStoreConformance` が、adapter 間の食い違い4点を検査するようになった**（Issue なし・クローンの棚卸し R3・P2〜P5 の PR、`@mnemora/testkit`・`@mnemora/postgres`・`@mnemora/core` の doc）。足した `it` は、`OutboxStore` が4件（`complete`/`fail` の `opts.at` が Invalid Date なら例外、の2件。渡した `opts.at` を後から書き換えても `completedAt`/`failedAt` が変わらない、の1件。`fail` の `error` の NUL を6文字の `\u0000` に置き換えて `lastError` に残す、の1件。後ろの2件は `peekJob` を渡した adapter だけ）、`RelationStore` が2件（列挙の外の `kind` を渡す `link` が「`relation kind`」を含む例外で拒まれ行が書かれない、`listRelated` が返した `createdAt` を書き換えても store の行が変わらない）。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**conformance suite の判定が厳しくなり、上の4点を満たさない自前の実装は、新しく実行時に落ちる**（Issue #1412 の規律。項目41）。
+  - **誰が影響を受けるか**: 自前の `OutboxStore`・`RelationStore` を上の suite に当てている利用者。`@mnemora/postgres` は、`RelationStore.link` の列挙外 `kind` の `it` だけ、修正前は落ちた（次の `### Fixed`）。ほかの5件は修正前から通る。インメモリ実装（`@mnemora/testkit/fixtures`）は、6件とも足した修正で通る。
+  - **`@mnemora/postgres` の `PostgresRelationStore.link` の変化（破壊的とは別に数えない）**: 列挙外の `kind` は、これまでも `memory_relations.kind` の CHECK 違反で例外になっていた。今は INSERT の前に `PostgresRelationStore: unknown relation kind: <kind>` の `Error` で断る。**以前通っていた入力が新しく落ちるわけではない**（例外になる入力は同じ）。変わるのは例外の中身だけで、DB の生のエラー（`23514`）を `cause` などから読んでいた呼び出し側は、その読み方が効かなくなる。
+  - **`@mnemora/testkit/fixtures` の変化（数えない）**: `InMemoryOutboxStore.complete`/`fail` が Invalid Date の `opts.at` を拒み、`InMemoryRelationStore.link` が列挙外の `kind` を拒むようになった。fixture が新しく例外を投げる変更は、数えない（[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」規律2）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目43。DB マイグレーションは無い。
+  - 【確かめていないこと】`complete`/`fail` の Invalid Date を、`jobId` が uuid の形でないときにどうするか: Postgres は先に何もせず返す（`at` を見ない）が、fixture は `jobId` を見る前に拒む。この差は `it` で縛っていない。
 - **`@mnemora/testkit` の `describeMemoryStoreConformance` が、自前の `MemoryStore` 実装に4つの約束を新しく課すようになった——`reinforce`/`reinforceMany?` が `memory_events` を書かないこと、`aggregateScope` が `scopeAggregate: 'skip'` を守ること、`createObservationWithOutbox` が `opts.claimedBy` を守ること（この3つはフラグ無しの `it`）、`listActiveClaimPredicates?` の同着の並び**（[PR #1452](https://github.com/takecchi/mnemora/pull/1452)・[PR #1455](https://github.com/takecchi/mnemora/pull/1455)・[PR #1484](https://github.com/takecchi/mnemora/pull/1484)・[PR #1492](https://github.com/takecchi/mnemora/pull/1492)）。
 
   4つとも、下の `### Added`/`### Changed`/`### Fixed` に「非破壊」と書いて載せていたが、[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」規律2 の ⛔（「conformance スイートの判定を厳しくする変更」は数える）に当たる。上の [PR #1498](https://github.com/takecchi/mnemora/pull/1498) と同じ読みで、ここに数え直した。型・シグネチャは変わらない。変わるのは、条件を満たさない自前の実装が、suite を当てると**実行時に新しく落ちる**ことである。`@mnemora/postgres` とインメモリの実装は、足した `it` に通る。
@@ -201,6 +228,29 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **誰が影響を受けるか**: 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者。1・2・4 はフラグを渡していなくても当たる。3 は `supportsListActiveClaimPredicates: true` を渡している場合だけ当たる。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目37〜40。DB マイグレーションは無い。
   - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres` とインメモリの実装が通ることだけを確かめた）。
+- **DB の生の例外で失敗していた3つの入力が、明示の扱いに変わった。conformance suite に `it` が3本増えた**（PR「fix/hunt-n-small-holes」の候補 N-3・N-4・N-5）。
+  - **`@mnemora/postgres` は、float4（`real` 列）に収まらない `halfLifeHours`・`halfLifeRecalls`（例: `1e39`・`1e-50`）を、DB へ渡す前に、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で断る**。対象は `createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `NewMemory` と `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls`。以前も例外にはなったが、DB の生の例外（`out of range for type real`）だった。testkit の fixture は既にこの判定・この文言で断っていた。core の doc に float4 の上限・下限を書いた。
+  - **`@mnemora/openai` と `@mnemora/local-embedding` の `embed()` は、abort 済みの `signal` を渡されたら、空配列でも `[]` を返さず `signal.reason` で reject する**（以前は空配列だと signal を見ずに `[]` を返した）。
+  - **`@mnemora/postgres` の `RelationStore.unlink` は、uuid の形でない id を何もせずに返し、`listRelated` は空配列を返す**（存在しない id と同じ扱い。以前は DB の型変換エラーで reject した）。testkit のインメモリは既にこの振る舞い。core の doc に書いた。
+  - **conformance に `it` を足した**: `describeMemoryStoreConformance`（float4 の範囲外の `createMemory`）、`describeTenantSettingsStoreConformance`（`setDefaultHalfLifeRecalls` の float4 の範囲外。この口を渡した場合）、`describeRelationStoreConformance`（uuid の形でない id の `unlink`・`listRelated` 各1本）。フラグ無しで走る。
+  - **誰が影響を受けるか**: 自前の `MemoryStore`/`TenantSettingsStore`/`RelationStore` 実装を conformance に当てている利用者。上の3つの adapter を、DB の生の例外の文言で捕まえていた呼び出し側。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目44・45。DB マイグレーションは無い。
+
+
+- **`runtime.consolidate`・`runtime.reflect` が、材料が superseded になったときと、統合元がすべて CAS に弾かれたときに、統合先・内省を書かずに `outcome: 'aborted_source_status_changed'` で打ち切るようになった**（[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)、[PR #1523](https://github.com/takecchi/mnemora/pull/1523)）。
+  - **何が壊れていたか**:
+    - 同じ ids の `consolidate` が2本同時に走ると、後から書く側は統合元がすべて CAS に弾かれる。それでも統合先が commit され、`"consolidated"` で返っていた（同じ内容の統合記憶が2件 active になる）。
+    - `consolidate`/`reflect` が LLM を待つ間に `reextract` が材料を置き換えると、退けた古い本文から作った統合先・内省が active で残っていた。
+    - forget に対しては打ち切ると決めていた（ADR 0375 決定7・ADR 0406）が、superseded には同じ扱いが無かった。
+  - **何が変わったか**:
+    - `ConsolidateOutcome`・`ReflectOutcome` に `"aborted_source_status_changed"` が、`ReflectBasisOutcome` に `"status_changed_before_write"` が増えた。
+    - `MemoryStore` の3つの書き込みの口に任意の `opts.abortIfSuperseded` が、`supersedeWithNewMemories?` に任意の `opts.abortIfAllConflicted` が増えた。
+    - store が投げる例外は、新しい `SourceMemoryStatusChangedError`（判定関数は `isSourceMemoryStatusChangedError`）である。
+    - `@mnemora/postgres` は行ロックの下で見直し、トランザクションごと巻き戻す。`@mnemora/testkit` の `InMemoryMemoryStore` も実装する。
+    - 1件でも `active` のまま残り、`superseded` になったものが無ければ、今までどおりの部分成功である。
+  - **なぜ破壊的か**: 今まで `"consolidated"`/`"reflected"` で返り、統合先・内省が書かれていた入力が、書かれずに新しい値で返る。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目42。DB マイグレーションは無い。
+  - 【確かめていないこと】`supersedeWithNewMemories?` を実装しない adapter の2段の経路では、LLM 直後の読み直しより後に全件が破れても打ち切れない（ADR 0420 の「引き受けた負債」）。
 
 ### Added
 
@@ -246,6 +296,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（任意メソッド・任意欄の追加のみ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`Runtime` が投げ直す例外の message から、SQL に付けた値（params）を落とすようになった**（[ADR 0423](./docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)、`@mnemora/core`。[ADR 0363](./docs/decisions/0363-outbox-last-error-omit-params-and-cap-length.md)・[Issue #1064](https://github.com/takecchi/mnemora/issues/1064) と同じ作法）。
+
+  drizzle が包んだ失敗（`Failed query: <SQL>\nparams: <値>`）の message には、SQL に渡した値（本文を含む）がそのまま入っていた。`Runtime` の全メソッド（`observe`・`recall` など）が、store などが投げた例外の message を、SQL の文を残したまま `params:` の値だけを落とした形（`(omitted by mnemora, N chars)`）にしてから投げ直す。**例外は新しく作らず、その場で書き換える**ので、`kind`・`name`・`cause`・独自の欄は残る。`stack` の先頭の message も同じく書き換える。
+
+  - **破壊的と数えない理由**: 型・例外の種類は変わらない。変わるのは message の文字列の後半だけである。message の `params:` 以降を読んで処理している呼び出し側は、値を読めなくなる。
+  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。store を `Runtime` を通さずに直接呼んだときの例外。
 
 - **`PostgresMemoryStore.markContestedGroup` / `resolveContestedGroup` が、群の大きさ N に依らない定数個の SQL 文で書くようになった。関係の行の INSERT は、実表どうしの N² の結合をやめた**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 1-A の案D・案E、[ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。
   - 【実測】鎖1000の mark は 2806 → 321 ms（文は 2005 → 7）、resolve は 1724 → 568 ms、`observe` 経由の検出は 5129 → 2770 ms。完全グラフ1000（作る行が999,000行）の mark は差が出ていない（約56秒のまま）。前後の表・測定の条件・器のノイズは ADR 0401。
@@ -386,6 +443,23 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **振る舞いの変更**: 適合テストは、adapter が投げた例外を core の判定関数（`isMemoryStatusConflictError`・`isOutboxLeaseConflictError` など。「`kind`、無ければ `name`」）で見る。core が2つの版に分かれた環境でも、正しい adapter は緑になる。`memoryId` / `expectedAttempts` などの欄を読む検査は変えていない。**別のクラスの例外・素の `Error` を投げる adapter は、これまでどおり赤になる。**
   - ⚠ 適合テストは core の判定関数（この版の core が公開したもの）を import する。判定関数を持たない古い版の core と組み合わせた testkit は動かない。
   - 公開 API に変更は無い（判定用の道具 `error-guards.ts` は export していない。snapshot は変わらない）。非破壊。
+
+- **`runtime.resolveContestedGroup` で負けた側の `superseded` イベントの `meta` に、勝った側の id を `supersededById` として持たせた**（[ADR 0421](./docs/decisions/0421-concurrent-write-and-audit-event-holes.md)、[ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) の追記に揃えた）。2者版 `resolveContested` は最初から持っていたが、群版は持たず、`memory_events` の `meta` だけを読む人には「誰に負けたか」が分からなかった（記憶の行の `supersededById` 列は今までも入っていた）。
+  - 値は store へ渡している `supersededById` と同じ（`memberIds` の綴りに寄せた `winnerId`）。勝者の `updated` と `both_active` の `updated` には足さない。
+  - 欄を足すだけで、既存の欄は変えていない。**非破壊**。公開 API に変更は無い（JSDoc のみ）。DB マイグレーションは足していない。
+- **`@mnemora/testkit` のインメモリ `eraseTenant` が、Postgres 実装と同じく `tenant_subject_activity` を subject ごとの行で数え、消した `memories` の埋め込みも一緒に消す（`ON DELETE CASCADE` に当たる動き）ようになった**（[ADR 0426](./docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md)）。`InMemoryMemoryStore` に public メソッド `onMemoriesDeleted` が増えた（非破壊）。conformance suite の要件は変わらない。
+
+- **`@mnemora/postgres` の `purgeExpiredEvents` が積む `events_purged` の `at` を、読み戻した値のまま `EventStore.list` の `until` に渡すと、その行自身が返らなかった穴を塞いだ**（[ADR 0427](./docs/decisions/0427-events-purged-at-millisecond.md)）。`at` を SQL の `now()`（マイクロ秒）から、他の書き込みの口と同じ JS の時刻（`toPgTimestamp`、ミリ秒）へ替えた。`at` は DB サーバの時計ではなく adapter のプロセスの時計になる。公開 API の変更は無い。
+
+- **`PostgresMemoryStore` の `opts.abortIfForgotten` の `SELECT … FOR UPDATE`（`assertNotForgottenForUpdate`）に `ORDER BY id ASC` を足し、行ロックを他の口と同じ id 昇順で取るようにした**。`markContestedPair`・`resolveContestedPair`・`markContestedGroup` は `ORDER BY id ASC FOR UPDATE` で揃えていたが、この文だけ `ORDER BY` が無く、掴む順が実行計画（ふつうは heap の並び）に依存していた。`consolidate`・`reflect` と `markContestedPair` が同じ行を逆順で掴み合うと、40P01（`deadlock detected`）が生のまま漏れうる。歯は `packages/postgres/src/__tests__/assert-not-forgotten-lock-order.postgres.test.ts`（実際に発行された文を別接続で流し、返る行の順が id 昇順であることを見る。タイミングに依存しない）。非破壊。DB マイグレーションは無い。
+  - 【確かめていないこと】2接続で実際に 40P01 を起こして直ったことまでは見ていない（歯は「掴む順が id 昇順」までを縛る）。
+
+- **`@mnemora/testkit/fixtures` が、Postgres の `real`（float4）の列の値を、Postgres が読み戻すのと同じ値で持つようになった**（`InMemoryMemoryStore` の `strength`・`halfLifeHours`・`halfLifeRecalls`、`InMemoryTenantSettingsStore` の既定の half-life 2つ。`InMemoryVectorStore` の Issue #1268 と同じ趣旨）。`0.1 + 0.2` を渡すと、Postgres は `0.3` を返す。fixture は `0.30000000000000004` を返していた。⚠ `Math.fround(x)` の値そのものではない: Postgres は float4 の最短の10進表記で返すので、`720.1` は `720.1` のまま返る（`Math.fround(720.1)` は `720.0999755859375`）。fixture は同じ最短表記を探して返す。歯は `in-memory-fixtures-float4-readback.test.ts`（fixture）と `float4-readback.postgres.test.ts`（本物の Postgres で同じ表を確かめる）。conformance には足していない（float4 は Postgres の列の性質で、adapter 一般の契約ではない）。fixture の返す値が変わるだけで、型・シグネチャは変わらず、数えない。
+  - 【確かめていないこと】`real` の列の全部（migration の `grep`: `memories` の3列と `tenant_settings` の2列）のうち、`reinforce` などが書き換える経路は、`strength`・`halfLifeHours`・`halfLifeRecalls` を書き換えないことをコードで見た（更新の口は無い）。
+
+- **`OutboxStore` の fixture が、`fail` の `error` の NUL を6文字の `\u0000` に置き換え、`complete`/`fail` の `opts.at` を複製して持つようになった。`RelationStore` の fixture が、`listRelated` の `createdAt` を複製して返すようになった**（Issue #1108 の方針、上の `### Breaking` の項目の fixture 側）。`@mnemora/core` の `OutboxStore`・`RelationStore` の doc にも約束を書いた。
+
+- **文書だけの訂正（挙動は変えない）**: (1) `probeTrigramLexicalSupport` の doc の「この関数自身は投げない」を、実装に合わせた（先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、接続の失敗・権限の不足で reject する）。(2) `ScoringInput.similarity` の doc の「0〜1」を、負になりうると直した。`MemoryStatusConflictError` の doc の `instanceof` を `isMemoryStatusConflictError` に追随させた。(3) `SQL_ASCII` の DB では、migration 0025 の `left(content, 150000)` が文字ではなくバイトで切ることを、現行の doc に書いた（ADR 0364 に追記。実測した。migration の SQL は出荷済みなので変えていない）。(4) `docs/recall.md` に `stage_skipped` の `stage: 'relation'`・`reason: 'relation_store_unavailable'` を足し、`docs/architecture.md` の 2つの片（`RelationKind` のドラフトの囲み、`OutboxLeaseConflictError` の宣言）を直した。
 
 ---
 

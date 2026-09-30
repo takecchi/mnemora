@@ -224,7 +224,7 @@ digest の生成方式がどちらであったかを隠さないのは同じ原�
 
 **⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1222](https://github.com/takecchi/mnemora/issues/1222)）**: 2 は、`@mnemora/postgres` では本文の大きさで働かないことがある。`memories.content` は語彙の索引（`to_tsvector` の GIN）に入り、tsvector は 1MB（1048575 バイト）を超えられない。語の多い本文ではフォールバックの Memory の INSERT が失敗し、`observe()` は DB の例外を投げる。Observation と extract ジョブは残り、Memory は1件も残らない（ランダムな16進の語では約0.9MB で落ちた）。`tick()` での再試行も同じ所で失敗する。`@mnemora/testkit` の fixture は1件残す。どう直すか（切り詰める・索引に入れない・入力に上限を置く）は決まっていない。
 
-**⚠ 2026-09-29 追記（上の追記を反転させる、[migrations/0025](../packages/postgres/migrations/0025_lexical_tsvector_fallback.sql)、[ADR 0364](./decisions/0364-lexical-tsvector-fallback-for-oversized-content.md)）**: 上の「`@mnemora/postgres` では働かないことがある」は直った。`idx_memories_lexical` の式に `mnemora_lexical_tsvector(content)`（新しい plpgsql 関数）を挟み、tsvector が1MBを超える本文だけ、本文の先頭150,000文字で作り直すようにした——**`@mnemora/postgres` も `@mnemora/testkit` の fixture と同じく、1MBを超える本文でも1件の Memory を残す。**`memories.content` には全文が無傷で残る（縮退するのは語彙**索引**だけ）。⚠ ただし、先頭150,000文字より後ろにしか現れない語は、この語彙チャンネル（`LexicalStore`）からは引けない——ベクトル検索等、他の recall チャンネルには影響しない。N=150,000 の安全性の根拠（理論上限・実測）は ADR 0364「N の実測」。
+**⚠ 2026-09-29 追記（上の追記を反転させる、[migrations/0025](../packages/postgres/migrations/0025_lexical_tsvector_fallback.sql)、[ADR 0364](./decisions/0364-lexical-tsvector-fallback-for-oversized-content.md)）**: 上の「`@mnemora/postgres` では働かないことがある」は直った。`idx_memories_lexical` の式に `mnemora_lexical_tsvector(content)`（新しい plpgsql 関数）を挟み、tsvector が1MBを超える本文だけ、本文の先頭150,000文字（`server_encoding` が `UTF8` の DB の場合。`SQL_ASCII` の DB では `left` がバイトで切るので、先頭150,000**バイト**——UTF-8 の日本語なら約50,000文字。ADR 0364 の 2026-09-30 の追記）で作り直すようにした——**`@mnemora/postgres` も `@mnemora/testkit` の fixture と同じく、1MBを超える本文でも1件の Memory を残す。**`memories.content` には全文が無傷で残る（縮退するのは語彙**索引**だけ）。⚠ ただし、先頭150,000文字より後ろにしか現れない語は、この語彙チャンネル（`LexicalStore`）からは引けない——ベクトル検索等、他の recall チャンネルには影響しない。N=150,000 の安全性の根拠（理論上限・実測）は ADR 0364「N の実測」。
 
 **2 で残る Memory は「抽出されたもの」ではない。未処理の生テキストである。**
 当初の実装はこれを 1 と同じ顔で記録していた——`ObserveResult` は `extracted: true` を返し、
@@ -1151,10 +1151,11 @@ mnemora ではこの前提が成立しない。
 このリポジトリは「呼ぶための部品」だけを提供する。
 
 **⚠ 2026-09-30 追記（文書だけ。実行時の振る舞いは変えていない）: `events_purged` の行の `at` は、`Runtime` に渡した `clock` の時刻ではない。**
-実装ごとに時計が違う（どちらも `clock` ではない）。`@mnemora/postgres` は SQL の `now()`（DB の時計。
-`purgeExpiredEvents` の `INSERT` 文の `at` 列）、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
+どちらの実装も `clock` ではなく、adapter を動かすプロセスの壁時計（ミリ秒）で積む。`@mnemora/postgres` は
+`purgeExpiredEvents` の `INSERT` 文の `at` 列に `new Date()` を `toPgTimestamp` で渡し、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
 `buildStoredMemoryEvent` が `event.at ?? new Date()`（JS の壁時計）で埋める。⟹ テストで `clock` を固定しても、
-この `at` は固定されない。（Postgres の `now()` が「文の時刻」か「トランザクション開始の時刻」かは、確かめていない。）
+この `at` は固定されない。（`@mnemora/postgres` は 2026-09-30 まで SQL の `now()`（DB の時計・マイクロ秒）で積んでいたが、
+読み戻した `at` を `until` に渡すとその行自身が返らなかったため、[ADR 0427](./decisions/0427-events-purged-at-millisecond.md) でプロセスの時計に替えた。）
 `meta` の `olderThan` は別で、`purgeExpiredEventsForTenant` が `opts.now ?? new Date()` から保持期間で
 引いた値である（これも `Runtime` の `clock` ではない）。
 
@@ -1254,7 +1255,7 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **この追記が上書きしないもの**: `recalls` の保持方針（生きているテナントの分。ADR 0290 が未決のまま）——`eraseTenant` は「丸ごと消す」操作であり、「どれだけの期間保持するか」という問いには答えていない。`forget`/`purge`（1つの Memory を対象にした既存の口）自体の契約も変わっていない——上の表・ADR 0375 の約束は「1つの Memory を purge したとき」の話として、引き続きそのまま成り立つ。
 
-**⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md) 末尾の追記）: `eraseTenant` の戻り値の `deleted.vectorStore` は、`dryRun` では実数（例: `26`）、本番では `0` になりうる。行は正しく消えている。**`memoryStore` を先に消す（順序は ADR 0383 決定5の不変条件）と、`memories` の削除で `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みを一緒に消すため、その後に呼ばれる `VectorStore.eraseTenant?` には数えるものが残らない。`dryRun` は何も消さないので、消える予定の埋め込みをそのまま数える。件数は「その port 自身が消した行数」であり、消去の完了は戻り値の件数ではなく、消去後に表を数えて確かめること。
+**⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md) 末尾の追記。同日、続きの追記で `limit` で止まった回の振る舞いを直した）: `eraseTenant` の戻り値の `deleted` の各欄は「その port 自身が、この呼び出しで消した行数」であり、とくに `deleted.vectorStore` は、`dryRun` では実数（例: `26`）、本番では `0` になりうる。行は正しく消えている。**`memoryStore` を先に消す（順序は ADR 0383 決定5の不変条件）と、`memories` の削除で `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みを一緒に消すため、その後に呼ばれる `VectorStore.eraseTenant?` には数えるものが残らない。`dryRun` は何も消さないので、消える予定の埋め込みをそのまま数える。**`limit` で `memoryStore`（または `vectorStore`・`outboxStore`）が途中で止まった回は、後ろの port を呼ばない**（`reachedLimit: true` で返り、呼ばなかった port の `deleted` は `0`。`dryRun` も同じ）——設定・outbox・埋め込みは、`memories` などを消し切る呼び直しの回まで残る（「設定は最後」の約束。ADR 0383 の追記）。`deleted.memoryStore` は `memories` だけの行数ではなく、`memoryStore` が消す10表の行数の合計である。消去の完了は戻り値の件数ではなく、消去後に表を数えて確かめること。
 
 **⚠ 2026-09-30 追記（文書だけ。[ADR 0383](./decisions/0383-erase-tenant.md) の追記2）: `eraseTenant` は、そのテナントへの書き込みを止めてから呼ぶ。終わりは `deleted` が全部 `0` になった回である。**
 同じテナントへ `observe()`・`tick()` などで書き込みながら呼ぶと、行が残りうる——消している途中に書かれた行は、その回では消えない。
@@ -1923,6 +1924,8 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   同じく持つ（2026-09-27 に、`actor` が `{ type: "system" }` に決め打ちで `note` も無かった食い違いを直した）。
 - 行7の `supersede` で負けた側の `superseded` は、`meta.supersededById` に勝った側の id を持つ（行5・行12・reextract の
   `superseded` と同じ形。2026-09-27 に足した。[ADR 0150](./decisions/0150-resolve-contested-explicit-operation.md) の追記）。
+  群版の `resolveContestedGroup` で負けた側の `superseded` も同じく `meta.supersededById` を持つ（2026-09-30 に揃えた。
+  [ADR 0421](./decisions/0421-concurrent-write-and-audit-event-holes.md)）。
 - 行11の `events_purged` の meta の日時（`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）は ISO 8601 の文字列である。
   `@mnemora/postgres` は meta を JSON で保存するので文字列で読み戻り、`@mnemora/testkit` の fixture も 2026-09-27 から
   同じく文字列で持つ（それまでは `Date` のまま持っていた）。
