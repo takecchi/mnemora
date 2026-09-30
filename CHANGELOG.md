@@ -216,6 +216,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`PostgresMemoryStore.markContestedGroup` / `resolveContestedGroup` が、群の大きさ N に依らない定数個の SQL 文で書くようになった。関係の行の INSERT は、実表どうしの N² の結合をやめた**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 1-A の案D・案E、[ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。
+  - 【実測】鎖1000の mark は 2806 → 321 ms（文は 2005 → 7）、resolve は 1724 → 568 ms、`observe` 経由の検出は 5129 → 2770 ms。完全グラフ1000（作る行が999,000行）の mark は差が出ていない（約56秒のまま）。前後の表・測定の条件・器のノイズは ADR 0401。
+  - **観測できる振る舞いは変えていない**: 作る関係の行の集合（有効期間の半開区間・マイクロ秒精度の境目を含む）、`MemoryStatusConflictError` が指す id（複数のメンバーが外れているときは入力順で最初）、返り値の並び。歯は ADR 0401。公開の型・port・DB マイグレーションは変えていない。
+
 - **`PostgresMemoryStore.createRecall` が、活動時計を進めるとき（`decay_clock != 'wall'`）、`recalls` の INSERT とカウンタ（`tenant_activity`／`tenant_subject_activity`）の UPSERT を1つの SQL 文で撃つようになった**（[ADR 0395](./docs/decisions/0395-create-recall-activity-clock-single-statement.md)、[ADR 0165](./docs/decisions/0165-decay-activity-clock.md) 負債1）。意味（1 recall = 1 単位、recalls の行とカウンタが同じ原子性）・返り値・公開 API・スキーマは変わらない。狙いは、同じテナントへの同時 createRecall がカウンタの行で直列になる時間のうち、クライアントとの往復1回分を減らすこと。**「速くなった」とは言わない**——共有器での実測（各点3回・前後交互）は、器のノイズ（±20〜30%）に埋もれて効果を示せていない（subject 単位の行は3つの並列度すべてで中央値が後の側、activity_T の並列度16・32 は同等以下）。ホット行そのものは残る。カウンタを16行に分ける案は採らなかった。
 
 - **活動時計（`decay_clock` が `'activity'`/`'either'`）で、新しく作る記憶・強化する記憶の起点（`decayBaseSeq`/`decayFloorSeq`）を、`ctx.subjectId` ではなく、その記憶自身の subject の `T + S_x` で書くようになった**（[ADR 0394](./docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)、[ADR 0353](./docs/decisions/0353-activity-counting-per-call.md) 引き受けた負債1、[Issue #338](https://github.com/takecchi/mnemora/issues/338)）
