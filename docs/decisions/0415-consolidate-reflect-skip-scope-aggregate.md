@@ -113,7 +113,7 @@ consolidate・reflect の `{ seedMemoryId }`・`{ query }`（明示なし／`"ex
 
 ## 確かめていないこと
 
-- **`"skip"` を honor しない自前の `MemoryStore`**（`scopeAggregate` を実装しない adapter）は、`"exact"` を返し続けるので、この変更の効果（性能）は出ない。結果は変わらない。
+- **`"skip"` を honor しない自前の `MemoryStore`**（`scopeAggregate` を実装しない adapter）は、`"exact"` を返し続けるので、この変更の効果（性能）は出ない。結果は変わらない。（⚠ 2026-09-30 追記: 「`"skip"` を honor しない adapter が許される」は誤り。conformance suite（フラグ無しの `it`）は `"skip"` のとき `countKind: 'unknown'` を求め、`"exact"` を返し続ける実装は落ちる。CHANGELOG `[1.2.0]` 参照。）
 - **`recalls` 行を読んで使う下流**（監査の画面・分析）が `totalInScope` や `filtered*` を当てにしているかは、repo の中では見つかっていない（`getRecall`・`index_band` を読む src は core / postgres / testkit の型とマッピングだけ）が、
   利用者側の自前の読み手までは分からない。
 - **同時実行・他の負荷の下**の効果（load average 23〜32 の共有機で測ったが、同時に複数の consolidate を走らせた測定はない）。測ったのは同時1のみ。
