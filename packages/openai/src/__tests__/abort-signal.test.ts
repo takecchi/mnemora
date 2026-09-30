@@ -107,6 +107,22 @@ describe("OpenAIEmbeddingProvider — AbortSignal", () => {
     expect(create).toHaveBeenCalledWith(expect.anything(), { signal: controller.signal });
   });
 
+  it("embed: 既に abort 済みなら、空配列でも [] を返さず reject する（API も呼ばない）", async () => {
+    const create = vi.fn();
+    const provider = new OpenAIEmbeddingProvider({
+      model: "text-embedding-3-small",
+      dimensions: 2,
+      client: { embeddings: { create } } as never,
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(provider.embed(ctx, [], { signal: controller.signal })).rejects.toBe(
+      controller.signal.reason,
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("embed: signal を尊重する体の偽 client では、abort で reject する", async () => {
     const create = vi.fn().mockImplementation(
       (_params: unknown, options?: { signal?: AbortSignal }) =>

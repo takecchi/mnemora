@@ -15,6 +15,8 @@ import type { Ctx, DecayClock, TaxonomyMode, TenantSettingsStore } from "@mnemor
  * を含むことを見る。`TypeError` のような別種の失敗と区別するため、`.toThrow()` は引数なしで
  * 使わない（`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由・同じ形）。
  */
+/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
+const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
 /**
  * `setDecayClock` に不正な値を渡したときのメッセージが `DECAY_CLOCK_INVALID_MESSAGE` を
@@ -355,6 +357,18 @@ export function describeTenantSettingsStoreConformance(
           const ctx: Ctx = { tenantId: `tenant-half-life-recalls-in-range-${Math.random()}` };
           await setDefaultHalfLifeRecalls(ctx, 48);
           expect(await store.getDefaultHalfLifeRecalls!(ctx)).toBe(48);
+        });
+
+        it("⚠ float4（Postgres の real 列）に収まらない default_half_life_recalls を、明示の例外で拒む（DB の生の例外にしない）", async () => {
+          // 値域は `(0, ∞)` だが、列は `real`（float4）。`Math.fround(x)` が Infinity か 0 に
+          // なる値は入らない。メッセージに `float4` を含む明示の例外で断る。
+          for (const recalls of [1e39, 1e-50]) {
+            const ctx: Ctx = { tenantId: `tenant-half-life-recalls-f4-${Math.random()}` };
+            await expect(
+              Promise.resolve().then(() => setDefaultHalfLifeRecalls(ctx, recalls)),
+              `default_half_life_recalls=${recalls} は float4 に収まらないと名指しして拒まれなければならない`,
+            ).rejects.toThrow(FLOAT4_MESSAGE);
+          }
         });
 
         // ⭐ 行が無いテナントに書き込むと行ができることの芯（`setDefaultHalfLifeHours` の
