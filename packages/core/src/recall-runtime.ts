@@ -979,7 +979,7 @@ async function runRecallBody(
    * ⚠ **落とした件数は、ここでは数えない**——`survivesDecayGate` と同じ規律（ADR 0172 決めたこと3・
    * ADR 0173）。archived は段5の `aggregateScope` が `filtered(archived)` として厳密に数える
    * （`scope` 内の集合の大きさであって、どの段が落としたかではない）ので、ここで足すと二重計上になる。
-   * forgotten/superseded は `filtered` の条件に無く、もともと `omitted` の対象外である。
+   * forgotten・superseded も同じ——それぞれ `filtered(forgotten)`・`filtered(superseded)` として段5が数える。
    */
   const survivesStatusGate = (memory: Memory): boolean =>
     memory.status === "active" || memory.status === "contested";

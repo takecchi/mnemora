@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, MemoryStore, Runtime, VectorStore } from "@mnemora/core";
+import type { Ctx, MemoryStore, RecallQuery, Runtime, VectorStore } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import {
@@ -150,7 +150,7 @@ function interposeAfterSearchMany(kit: Kit, hook: () => Promise<unknown>): void 
   };
 }
 
-const QUERY = { vector: [1, 0, 0], limit: 10, includeFullyDecayed: true } as const;
+const QUERY: RecallQuery = { vector: [1, 0, 0], limit: 10, includeFullyDecayed: true };
 const ASSOCIATION = { maxCount: 5, anchorCount: 1 } as const;
 
 for (const [name, makeKit] of KITS) {
@@ -214,7 +214,7 @@ for (const [name, makeKit] of KITS) {
       expect(ids).not.toContain(associated.id);
     });
 
-    it("連想枠: 連想用 search のあとの forget で forgotten になった記憶は入らない", async () => {
+    it("連想枠: 連想用 searchMany のあとの forget で forgotten になった記憶は入らない", async () => {
       const kit = await makeKit();
       await seed(kit, "anchor-f", ANCHOR, false);
       const associated = await seed(kit, "associated-f", ASSOCIATED, false);

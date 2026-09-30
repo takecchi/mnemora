@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { Memory, NewMemory } from "../memory.js";
+import type { RecallQuery } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
@@ -107,7 +108,7 @@ function interposeAfterSearch(
   };
 }
 
-const QUERY = { vector: [1, 0], limit: 10, includeFullyDecayed: true } as const;
+const QUERY: RecallQuery = { vector: [1, 0], limit: 10, includeFullyDecayed: true };
 
 describe("recall() — 段1の後置の再検査は status を見る（ADR 0432 AL-1）", () => {
   it("陽性対照: 割り込ませなければ、sweep 済みの archived は返らない", async () => {
