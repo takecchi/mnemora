@@ -121,3 +121,10 @@ ins AS (INSERT ... SELECT ... FROM ends WHERE from_ok AND to_ok ON CONFLICT ... 
     そのときの条件: 検出 SQL が全環境で0行であることを利用者が確かめられる手順（migration の前段の検査、または
     `NOT VALID` で外部キーを足してから `VALIDATE`）を用意する。
   - 検出 SQL が実データで行を返したとき——行の扱いを決める別の判断が要る。
+
+- **2026-10 追記（[ADR 0436](./0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)）**:
+
+  上の「覆る条件」の1つ目（書き込みの口が増えたとき）に関わる。`memory_events`（`EventStore.append`）と
+  `memory_embeddings_<space>`（`VectorStore.upsert`）の2つの書き込み口にも、ADR 0436 で同じ検査（記憶が `ctx.tenantId` に属することを、
+  書く前に1つの SQL 文の中で確かめる）を足した。複合外部キーは、この2つの表についても入れていない。
+  この ADR の本文（上）は書き換えていない。

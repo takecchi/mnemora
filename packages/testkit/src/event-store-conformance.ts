@@ -336,6 +336,89 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect(appended.memoryId).toBe(memoryId);
     });
 
+    // -------------------------------------------------------------------
+    // テナントの一致（ADR 0436。ADR 0398 決定5 と同じ扱い）: `memoryId` の記憶が `ctx.tenantId` の記憶でなければ、
+    // 行を書かずに `memory not found for tenant` で拒む。実在しない id・uuid の形でない id と区別しない。
+    // 自テナントの正しい記憶への append は通る（断りすぎを防ぐ歯は、上の「実在する memoryId では成功する」と、
+    // 下の各 it の最後の append）。
+    // -------------------------------------------------------------------
+
+    it("ctx のテナントに属さない記憶を指す append は拒まれ、イベントは書かれない（ADR 0436）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const inTenantA = await prepareMemoryId(ctxA);
+      const inTenantB = await prepareMemoryId(ctxB);
+
+      await expect(
+        store.append(
+          ctxA,
+          buildNewMemoryEventFixture({
+            tenantId: "tenant-a",
+            memoryId: inTenantB,
+            kind: "created",
+          }),
+        ),
+      ).rejects.toThrow(/memory not found for tenant/);
+
+      expect(await store.list(ctxA, {})).toEqual([]);
+      expect(await store.list(ctxB, {})).toEqual([]);
+      expect(await store.list(ctxA, { memoryId: inTenantB })).toEqual([]);
+      expect(await store.list(ctxB, { memoryId: inTenantB })).toEqual([]);
+
+      // 拒んだ後も、それぞれ自分の記憶になら積める（断りすぎていない）。
+      const appendedA = await store.append(
+        ctxA,
+        buildNewMemoryEventFixture({ tenantId: "tenant-a", memoryId: inTenantA, kind: "created" }),
+      );
+      const appendedB = await store.append(
+        ctxB,
+        buildNewMemoryEventFixture({ tenantId: "tenant-b", memoryId: inTenantB, kind: "created" }),
+      );
+      expect(appendedA.memoryId).toBe(inTenantA);
+      expect(appendedB.memoryId).toBe(inTenantB);
+      expect((await store.list(ctxA, {})).map((e) => e.id)).toEqual([appendedA.id]);
+      expect((await store.list(ctxB, {})).map((e) => e.id)).toEqual([appendedB.id]);
+    });
+
+    // 存在しない id は2通り: uuid の形をしているもの（Postgres では外部キー違反になる形）と、
+    // uuid の形でないもの（Postgres では型変換エラーになる形）。どちらも DB 由来の生のエラーではなく、
+    // 同じ「memory not found for tenant」で拒まれること。
+    const missingMemoryIds: Array<[string, string]> = [
+      ["uuid の形をした存在しない id", "00000000-0000-4000-8000-000000000000"],
+      ["uuid の形でない id", "does-not-exist"],
+    ];
+    for (const [label, missing] of missingMemoryIds) {
+      it(`append は存在しない記憶（${label}）を指すと「memory not found for tenant」で拒まれ、イベントは書かれない（ADR 0436）`, async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memoryId = await prepareMemoryId(ctx);
+
+        const error = await store
+          .append(
+            ctx,
+            buildNewMemoryEventFixture({
+              tenantId: "tenant-1",
+              memoryId: missing as MemoryId,
+              kind: "created",
+            }),
+          )
+          .then(
+            () => null,
+            (e: unknown) => e,
+          );
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toMatch(/memory not found for tenant/);
+        expect(await store.list(ctx, {})).toEqual([]);
+
+        const appended = await store.append(
+          ctx,
+          buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, kind: "created" }),
+        );
+        expect(appended.memoryId).toBe(memoryId);
+      });
+    }
+
     it("append は memoryId が null なら外部キーを要求しない（events_purged 等、NULL は拒まない）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

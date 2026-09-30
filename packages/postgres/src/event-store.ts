@@ -9,7 +9,17 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { isUuidLike, rowToMemoryEvent, toPgTimestamp, type MemoryEventRow } from "./mapping.js";
+import {
+  isUuidLike,
+  normalizeUuidCase,
+  rowToMemoryEvent,
+  toPgTimestamp,
+  type MemoryEventRow,
+} from "./mapping.js";
+
+function memoryNotFound(id: string): Error {
+  return new Error(`PostgresEventStore: memory not found for tenant: ${id}`);
+}
 
 /**
  * `EventStore` の Postgres 実装（docs/architecture.md §5.8、docs/memory-model.md §9）。
@@ -20,24 +30,70 @@ import { isUuidLike, rowToMemoryEvent, toPgTimestamp, type MemoryEventRow } from
 export class PostgresEventStore implements EventStore {
   constructor(private readonly db: Db) {}
 
+  /**
+   * ADR 0436 決定1・2・3: `event.memoryId` が非 null のとき、その記憶が `ctx.tenantId` の記憶であることを
+   * **書く前に**確かめる。実在しない・別のテナントの記憶・uuid の形でない id は、行を書かずに
+   * `PostgresEventStore: memory not found for tenant: <id>` を含む `Error` を投げる（区別しない）。
+   * 確かめと書き込みは1つの SQL 文（検査の EXISTS と、`WHERE ok` で絞った INSERT の CTE）——間に別の文が挟まらない。
+   * `memoryId` が null のイベント（`events_purged`）は記憶を指さないので検査しない。
+   */
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
     assertWellFormedCtx(ctx);
+    if (event.memoryId === null) {
+      const result = await this.db.execute(sql`
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        VALUES (
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          ${null},
+          ${event.kind},
+          ${toPgTimestamp(event.at ?? new Date())},
+          ${JSON.stringify(event.actor)}::jsonb,
+          ${event.digestSnapshot ?? null},
+          ${event.sizeBeforeBytes ?? null},
+          ${JSON.stringify(event.meta)}::jsonb
+        )
+        RETURNING *
+      `);
+      return rowToMemoryEvent(result.rows[0] as unknown as MemoryEventRow);
+    }
+    const memoryId = normalizeUuidCase(event.memoryId);
+    if (!isUuidLike(memoryId)) {
+      throw memoryNotFound(memoryId);
+    }
+    // 検査で落ちたかは、戻り値の `tenant_check_ok`（検査の結果そのもの）で見る（ADR 0398 決定2 と同じ作法）。
     const result = await this.db.execute(sql`
-      INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
-      VALUES (
-        gen_random_uuid(),
-        ${ctx.tenantId},
-        ${event.memoryId},
-        ${event.kind},
-        ${toPgTimestamp(event.at ?? new Date())},
-        ${JSON.stringify(event.actor)}::jsonb,
-        ${event.digestSnapshot ?? null},
-        ${event.sizeBeforeBytes ?? null},
-        ${JSON.stringify(event.meta)}::jsonb
+      WITH mem AS (
+        SELECT EXISTS (
+          SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${memoryId}
+        ) AS ok
+      ),
+      ins AS (
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        SELECT
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          ${memoryId}::uuid,
+          ${event.kind},
+          ${toPgTimestamp(event.at ?? new Date())}::timestamptz,
+          ${JSON.stringify(event.actor)}::jsonb,
+          ${event.digestSnapshot ?? null}::text,
+          ${event.sizeBeforeBytes ?? null}::integer,
+          ${JSON.stringify(event.meta)}::jsonb
+        FROM mem
+        WHERE ok
+        RETURNING *
       )
-      RETURNING *
+      SELECT mem.ok AS tenant_check_ok, ins.*
+      FROM mem
+      LEFT JOIN ins ON true
     `);
-    return rowToMemoryEvent(result.rows[0] as unknown as MemoryEventRow);
+    const row = result.rows[0] as unknown as
+      (MemoryEventRow & { tenant_check_ok: boolean }) | undefined;
+    if (!row?.tenant_check_ok) {
+      throw memoryNotFound(memoryId);
+    }
+    return rowToMemoryEvent(row);
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
