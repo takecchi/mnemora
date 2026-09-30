@@ -72,6 +72,16 @@ import { omitParamsFromError } from "./failure-description.js";
  * 済んだ port は0件で通過する——各 store の `eraseTenant?` は冪等であり、副作用が
  * 二重に起きることはない。
  *
+ * ⚠ **同じテナントへの同時呼び出しは直列になる**（[ADR 0430](../../../docs/decisions/0430-concurrent-create-erase-and-standalone-params.md) 決定2）。
+ * `@mnemora/postgres` は、`memoryStore`・`vectorStore`・`outboxStore` の各 `eraseTenant` のトランザクションの
+ * 先頭で、テナントごとの advisory lock（`pg_advisory_xact_lock`）を取る。後から来た呼び出しは、先の
+ * 呼び出しの**その port のトランザクション**のコミットを待ち、コミット後の状態から数え始める（待ちに
+ * mnemora の上限は掛けない）。直列になるのは port ごとであり、4つの port をまたぐ全体ではない（別の
+ * 呼び出しが port の間に割り込みうる）。別のテナントは待たない。この lock を取らない実装（自前の adapter
+ * など）では、同時に呼ぶと相手が先に消した行が数えられず、「予算未満なら表は空」と読み違えうる。
+ *
+ * ⚠ **投げる例外の message から、drizzle の `params:` より後ろを落とす**（ADR 0430 決定3。`Runtime` の全メソッドと
+ * 同じ作法、[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md) 決定6）。 *
  * ## 引数の検査（書き込み前）
  *
  * - `opts.confirmTenantId !== ctx.tenantId` なら `RangeError` を投げる——`ctx.tenantId`

@@ -1,6 +1,9 @@
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { PostgresTrigramLexicalStore, probeTrigramLexicalSupport } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  probeTrigramLexicalSupport,
+} from "../trigram-lexical-store.js";
 import { closePostgresClient, createPostgresClient, type PostgresClient } from "../client.js";
 import { EXTENSION_LOCK_KEY, runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
@@ -75,7 +78,9 @@ describe("PostgresTrigramLexicalStore.create() の同時呼び出し（ADR 0430�
   it("(a) pg_trgm が無い DB へ、別々の pool から同時に create() しても全部成功する", async () => {
     for (let trial = 0; trial < 5; trial++) {
       await withFreshDatabase(`${BASE}_a`, async (clients) => {
-        const ext = await clients[0]!.pool.query(`SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'`);
+        const ext = await clients[0]!.pool.query(
+          `SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'`,
+        );
         expect(ext.rowCount).toBe(0);
         const results = await Promise.allSettled(
           clients.map((c) => PostgresTrigramLexicalStore.create(c.db)),

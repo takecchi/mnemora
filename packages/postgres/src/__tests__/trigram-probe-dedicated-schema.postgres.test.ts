@@ -75,14 +75,14 @@ function captureCreateExtensionSql(): { texts: string[]; restore: () => void } {
   // `pg.Client.prototype.query` を見る。
   const original = PgClient.prototype.query as unknown as (...args: unknown[]) => unknown;
   const texts: string[] = [];
-  PgClient.prototype.query = (function (this: unknown, ...args: unknown[]) {
+  PgClient.prototype.query = function (this: unknown, ...args: unknown[]) {
     const first = args[0];
     const text = typeof first === "string" ? first : (first as { text?: string } | undefined)?.text;
     if (typeof text === "string" && /^\s*CREATE EXTENSION\b/i.test(text)) {
       texts.push(text.trim());
     }
     return original.apply(this, args);
-  }) as unknown as PgClient["query"];
+  } as unknown as PgClient["query"];
   return {
     texts,
     restore: () => {

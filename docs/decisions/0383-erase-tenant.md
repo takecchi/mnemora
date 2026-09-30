@@ -495,3 +495,14 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
 **これが覆るとしたら。**`eraseTenant` を呼ぶ運用側が「1回の呼び出しで全 port を進める」ことを前提にしていると分かったとき。ただし `eraseTenant` は未リリースの 1.2.0 で入った関数で、その前提は約束（本文）が最初から否定していた。
 
 **区分。**`eraseTenant` は `v1.1.0` に入っていない（未リリースの `[1.2.0]` 節で入った関数）ので、`v1.1.0` から上げる利用者にとって変わる振る舞いは無い。よって `docs/migration-v1.md` の破壊的変更の一覧には載せず、CHANGELOG は既存の `eraseTenant` の項に書き足した。
+
+
+## 追記（2026-09-30）: 同じテナントへの同時呼び出しは直列になる（ADR 0430 決定2）
+
+⛔ 上の本文と、これまでの追記は書き換えていない。
+
+**何が起きていたか。**各 port の `eraseTenant` は、消せた行数が予算（`limit`）未満なら「その表は空になった」と読んでいた。同じテナントへ別の呼び出しが同時に走ると、相手が先に消した行は自分の `DELETE` に数えられず、行が残っているのに `memories` へ進み、23503（外部キー違反）で reject した。実測は [ADR 0430](./0430-concurrent-create-erase-and-standalone-params.md)。
+
+**決めたこと。**`@mnemora/postgres` の `memoryStore`・`vectorStore`・`outboxStore` の `eraseTenant` は、トランザクションの先頭でテナントごとの `pg_advisory_xact_lock` を取る。同じテナントへの同時呼び出しは、その port のトランザクションごとに直列になる。別のテナントは待たない。`tenantSettingsStore` は対象にしなかった（理由は ADR 0430）。`packages/core/src/erase-tenant.ts` の doc にも同じことを書いた。
+
+**残ること。**直列になるのは port ごとであり、`eraseTenant` 全体（4つの port をまたぐ呼び出し）ではない。

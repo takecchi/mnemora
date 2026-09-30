@@ -25,5 +25,7 @@ export function eraseTenantLockKey(tenantId: string): bigint {
 
 /** トランザクション `tx` の先頭で呼ぶ。 */
 export async function lockTenantForErase(tx: Db, tenantId: string): Promise<void> {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(${eraseTenantLockKey(tenantId).toString()}::bigint)`);
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(${eraseTenantLockKey(tenantId).toString()}::bigint)`,
+  );
 }

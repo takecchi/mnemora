@@ -11,7 +11,10 @@ import { runMigrations } from "../migrate.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
 import { requireDatabaseUrl, TEST_EMBEDDING_SPACE } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
-import { buildEraseTenantTestRuntime, seedAllTablesForTenant } from "./erase-tenant-test-helpers.js";
+import {
+  buildEraseTenantTestRuntime,
+  seedAllTablesForTenant,
+} from "./erase-tenant-test-helpers.js";
 
 /**
  * ADR 0430 決定1: 同じテナントへの `eraseTenant` の同時呼び出しは、port ごとのトランザクションの
@@ -97,8 +100,8 @@ describe("同じテナントへの eraseTenant の同時呼び出しは reject �
         if (a === 0 && b === 0) break;
       }
     }
-    expect(rejections.map((e) => (e instanceof Error ? e.message.slice(0, 200) : String(e)))).toEqual(
-      [],
-    );
+    expect(
+      rejections.map((e) => (e instanceof Error ? e.message.slice(0, 200) : String(e))),
+    ).toEqual([]);
   }, 300_000);
 });
