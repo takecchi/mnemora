@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertValidEventRetentionDays,
+  assertWellFormedCtx,
   DEFAULT_HALF_LIFE_HOURS,
   isHalfLifeHoursInRange,
   type Ctx,
@@ -98,9 +99,11 @@ class MinimalTenantSettingsStore implements TenantSettingsStore {
     this.halfLifeHours.set(ctx.tenantId, hours);
   }
   async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     return this.halfLifeHours.get(ctx.tenantId) ?? DEFAULT_HALF_LIFE_HOURS;
   }
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
+    assertWellFormedCtx(ctx);
     const retention = this.retention.get(ctx.tenantId);
     if (retention) return retention;
     return this.halfLifeHours.has(ctx.tenantId) ? { kind: "unlimited" } : { kind: "unset" };

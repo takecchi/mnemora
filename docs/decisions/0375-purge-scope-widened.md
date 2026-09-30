@@ -599,3 +599,11 @@ Issue #207/#933 PR2（決定10、マネージャー経由でオーナー側の�
 `UPDATE` の中央値は 393.6ms → 74.9ms）。決定6が「トレードオフを要する」とした
 `createRecall` 側の費用（INSERT の上乗せ）は ADR 0389 が実測し、負債として引き受けた。
 決定3・決定6の実測（当時の数字）そのものは、上の本文のまま残る。
+
+---
+
+## 追記（2026-09-30）: purge と同時に走る recall は、この約束の範囲外のままである（[ADR 0421](./0421-concurrent-write-and-audit-event-holes.md)）
+
+上の決定が約束しているのは「purge より前に撃った recall」の `recalls.index_band` である。recall の途中で forget → purge が終わると、
+後から INSERT される行に purge 前の digest が残る窓を、InMemory と Postgres で実測して歯で縛った（`recall-purge-race.postgres.test.ts`）。
+塞いでいない。直し方の3案・大きさ・直さなかった理由は ADR 0421。

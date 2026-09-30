@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, RelationStore } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /** {@link describeRelationStoreConformance} に渡す設定。 */
 export interface RelationStoreConformanceOptions {
@@ -378,5 +383,25 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect(asB[0]).toEqual([]);
       expect(asB[1]!.map((r) => r.memoryId)).toEqual([b2]);
     });
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "listRelated の ctx.tenantId",
+            () => store.listRelated({ tenantId: value }, randomUUID()),
+          ],
+          [
+            "listRelated の ctx.subjectId",
+            () => store.listRelated({ tenantId: "tenant-wf", subjectId: value }, randomUUID()),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
+      });
+    }
   });
 }

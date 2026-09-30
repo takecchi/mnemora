@@ -28,7 +28,8 @@ import { assertLLMContentNotBlank } from "./llm-content.js";
 import { resolveCandidateSubjectId, resolveCommonSubjectId } from "./memory-subject.js";
 import { classifyValidity } from "./validity.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
-import { describeFailure } from "./failure-description.js";
+import { describeFailure, omitParamsFromError } from "./failure-description.js";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "./identifier.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
@@ -3576,7 +3577,9 @@ export interface Runtime {
    * `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
    * `'supersede' | 'both_active'`。`opts.reason` を渡すと `meta.note` に追加で入る。
    * `meta.contestedWithId` は積まない（`markContestedGroup` と同じ理由——群のメンバーは
-   * その欄自体を持たない）。
+   * その欄自体を持たない）。負けた側の `superseded` は `meta.supersededById` に勝った側の id
+   * （`memberIds` の綴りに寄せた `winnerId`。store へ渡す値と同じ）を持つ——2者版
+   * `resolveContested` と同じ形（ADR 0150 追記。ADR 0421 で揃えた）。勝者の `updated` には足さない。
    *
    * ⚠ **`recall()` 側は一切変更していない。**`markContested`/`resolveContested` と同じ
    * 理由。
@@ -4271,11 +4274,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `reextract` が `created` に渡す追加の指定（ADR 0422）。`at` は同じ操作の `superseded` と揃える時刻、
+   * `reextracted` は meta に足す印。どちらも省けば今までの形（observe・抽出の経路）。
+   */
+  interface CreatedEventReextractOpts {
+    readonly at?: Date;
+    readonly reextracted?: boolean;
+  }
+
+  /**
    * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
    * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
    * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
    * INSERT する）が共有する——`meta` の中身が2つの経路でずれないように、組み立てはここ1箇所に置く
    * （ADR 0410）。
+   *
+   * `reextractOpts`（ADR 0422）は `reextract` だけが渡す。`at` を渡すとその値を使い（同じ操作の `superseded` と
+   * 同じ入口の `now`）、`reextracted: true` を渡すと meta にその印を足す。省くと今までどおり
+   * （`at` は組み立て時の `clock.now()`、meta に印は無い）。
+   *
+   * ⚠ 同じ `at` を持つ `created` と `superseded`（`consolidate`・`reextract`）の**並びは約束しない**
+   * （`EventStore.list` は `at` の昇順だけ。ADR 0422）。順が要るなら `kind` と meta の `supersededById` で読む。
    */
   function buildCreatedEventFor(
     ctx: Ctx,
@@ -4284,6 +4303,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
+    reextractOpts?: CreatedEventReextractOpts,
   ): NewMemoryEvent {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
@@ -4293,7 +4313,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "created",
-      at: clock.now(),
+      // ADR 0422: 渡されたときはその値（`reextract` は入口の `now`——同じ操作の `superseded` と揃える）。
+      // 渡さないとき（observe・抽出の経路）は今までどおり組み立て時の `clock.now()`。
+      at: reextractOpts?.at ?? clock.now(),
       actor: { type: "system" },
       digestSnapshot: memory.digest,
       sizeBeforeBytes: null,
@@ -4317,6 +4339,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 本文が出たときだけ足す——疑いが無い呼び出しの meta の形は変えない。**印を付けるだけ**で、
         // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
         ...(languageMismatch !== null ? { languageMismatch } : {}),
+        // ADR 0422: `reextract` の `created` にだけ足す印。既存のキーの意味（`reason: "extracted"` など）は
+        // 変えない——足すだけ。observe・抽出の経路の meta の形は変えない。
+        ...(reextractOpts?.reextracted === true ? { reextracted: true } : {}),
       },
     };
   }
@@ -4346,10 +4371,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
+    reextractOpts?: CreatedEventReextractOpts,
   ): Promise<void> {
     await deps.eventStore.append(
       ctx,
-      buildCreatedEventFor(ctx, memory, observation, outcome, failure, droppedCandidates),
+      buildCreatedEventFor(
+        ctx,
+        memory,
+        observation,
+        outcome,
+        failure,
+        droppedCandidates,
+        reextractOpts,
+      ),
     );
   }
 
@@ -5158,6 +5192,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         },
       }) satisfies NewMemoryEvent;
 
+    // ADR 0422: この操作の `created` は、`superseded`（`buildSupersedeEventFor`）と同じ入口の `now` を `at` に使い、
+    // meta に `reextracted: true` を足す。3経路（口あり・名乗らない adapter の別の追記・口なし）すべてで同じ値を渡す。
+    const reextractCreated: CreatedEventReextractOpts = { at: now, reextracted: true };
+
     // ------------------------------------------------------------------
     // ADR 0100: 口が在れば、作成と supersede を1トランザクションで撃つ。
     // 🔴 フォールバックは**口の不在に対してだけ**（書き込みの前に1度判定する）。
@@ -5190,7 +5228,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             now,
             abortIfForgotten: knownMemoryIds,
             buildCreatedEvent: (memory) =>
-              buildCreatedEventFor(ctx, memory, observation, "ok", null),
+              buildCreatedEventFor(ctx, memory, observation, "ok", null, [], reextractCreated),
           },
         );
       } catch (error) {
@@ -5209,7 +5247,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (result.createdEventsWritten !== true) {
         for (const { memory, created } of result.created) {
           if (created) {
-            await appendCreatedEvent(ctx, memory, observation, "ok", null);
+            await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
           }
         }
       }
@@ -5265,7 +5303,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       const { memory, created } = written;
       memoryIds.push(memory.id);
       if (created) {
-        await appendCreatedEvent(ctx, memory, observation, "ok", null);
+        await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
       }
     }
     // `candidates.length === 0` を上で早期リターンしている以上 `memoryIds` は非空
@@ -7405,6 +7443,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind }
         : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
+    // 敗者の superseded イベントの meta には、勝者の id を `supersededById` として残す
+    // （2者版 `resolveContested` と同じ。ADR 0150 追記、ADR 0421）。store へ渡す値と同じ
+    // （`memberIds` の綴りに寄せた winnerId）。勝者・both_active の updated には足さない。
 
     try {
       const now = clock.now();
@@ -7420,7 +7461,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           at: now,
           actor,
           digestSnapshot: memory.digest,
-          meta: buildMeta(),
+          meta:
+            status === "superseded" ? { ...buildMeta(), supersededById: winnerId! } : buildMeta(),
         };
         return status === "superseded"
           ? { id, status, supersededById: winnerId!, event }
@@ -8421,7 +8463,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  return {
+  return guardRuntimeEntry({
     observe,
     tick,
     recall,
@@ -8442,5 +8484,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     applyCorrection,
     consolidate,
     reflect,
-  };
+  });
+}
+
+/**
+ * `Runtime` の各メソッドの入口と出口に掛ける関門（[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)）。
+ *
+ * - **入口**: 第1引数の {@link Ctx}（`tenantId`・`subjectId`）と、`observe` の入力の `subjectId`・`externalId` が
+ *   孤立サロゲートか NUL を含めば、何も書かずに {@link MalformedIdentifierError} で拒む（正規化はしない）。
+ *   本文（`text` など）は検査しない。`Runtime` のメソッドを新しく足したときは、ここを通る（全メソッドに掛かる）。
+ * - **出口**: store などが投げた例外の `message` から、SQL に付けた値（params）を落とす
+ *   （{@link omitParamsFromError}）。例外そのもの（`kind`・`cause`）は変えない。
+ */
+function guardRuntimeEntry(runtime: Runtime): Runtime {
+  const guarded: Record<string, unknown> = {};
+  for (const [name, method] of Object.entries(runtime) as Array<
+    [string, (...args: unknown[]) => Promise<unknown>]
+  >) {
+    guarded[name] = (...args: unknown[]): Promise<unknown> => {
+      try {
+        assertWellFormedCtx(args[0] as Ctx);
+        if (name === "observe") {
+          const input = args[1] as { subjectId?: unknown; externalId?: unknown } | null | undefined;
+          assertWellFormedIdentifier(input?.subjectId, "input.subjectId");
+          assertWellFormedIdentifier(input?.externalId, "input.externalId");
+        }
+        return method(...args).catch((error: unknown) => {
+          throw omitParamsFromError(error);
+        });
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+  }
+  return guarded as unknown as Runtime;
 }

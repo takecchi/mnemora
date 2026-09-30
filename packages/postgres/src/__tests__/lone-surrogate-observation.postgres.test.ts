@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
-import { createRuntime } from "@mnemora/core";
+import { createRuntime, isMalformedIdentifierError } from "@mnemora/core";
 import { buildNewObservationFixture } from "@mnemora/testkit";
 import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -17,11 +17,10 @@ import {
 } from "./test-db.js";
 
 /**
- * 孤立サロゲート（対をなさない UTF-16 サロゲートコードユニット）を含む Observation の書き込みが、
- * adapter と列の型によって違うことを、今の振る舞いのまま縛る（Issue #1075）。
+ * 孤立サロゲート（対をなさない UTF-16 サロゲートコードユニット）を含む Observation の書き込みの扱いを縛る（Issue #1075）。
  *
- * どれに揃えるか（正規化・拒否・このまま）は決めていない。この歯は約束を足すものではなく、
- * `MemoryStore.createObservation` の doc コメントに書いた実態が崩れたら気づくためのもの。
+ * 識別子の欄（`subjectId`・`externalId`）は書く前に断る（ADR 0423）。本文の欄（`payload`・`attributes`）は、
+ * 列の型によって違う今の振る舞いのまま（`jsonb` は例外）。この歯は、`MemoryStore.createObservation` の doc コメントに書いた実態が崩れたら気づくためのもの。
  * Memory の側（`createMemory`）は同じ doc の `createMemory` の節（PR #1078）。
  */
 
@@ -72,16 +71,26 @@ describe("PostgresMemoryStore.createObservation — 孤立サロゲート", () =
     );
   });
 
-  it("text 列（subjectId・externalId）: 例外を投げず、U+FFFD に置き換えて保存する", async () => {
-    const { db } = await getTestClient();
+  it("識別子の欄（subjectId・externalId）: 保存の形で区別できないので、書く前に断る（ADR 0423）", async () => {
+    const { db, pool } = await getTestClient();
     const store = new PostgresMemoryStore(db);
-    const created = await store.createObservation(
-      ctx,
-      buildNewObservationFixture({ tenantId: ctx.tenantId, subjectId: LONE, externalId: LONE }),
+    for (const overrides of [{ subjectId: LONE }, { externalId: LONE }]) {
+      const error = await store
+        .createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: ctx.tenantId, ...overrides }),
+        )
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(isMalformedIdentifierError(error)).toBe(true);
+    }
+    const { rows } = await pool.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM observations WHERE tenant_id = $1",
+      [ctx.tenantId],
     );
-    const read = await store.getObservation(ctx, created.id);
-    expect(read?.subjectId).toBe("途中で切れた�");
-    expect(read?.externalId).toBe("途中で切れた�");
+    expect(rows[0]?.n).toBe("0");
   });
 
   it("runtime.observe({ text }) は Observation を書く前に例外になる", async () => {
@@ -114,21 +123,29 @@ describe("PostgresMemoryStore.createObservation — 孤立サロゲート", () =
 });
 
 describe("testkit の InMemoryMemoryStore.createObservation — 孤立サロゲート", () => {
-  it("どの欄でも例外を投げず、入力をそのまま保持する", async () => {
+  it("識別子の欄は断り、本文の欄（payload・attributes）は例外を投げず、入力をそのまま保持する", async () => {
     const store = new InMemoryMemoryStore();
+    for (const overrides of [{ subjectId: LONE }, { externalId: LONE }]) {
+      const error = await store
+        .createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: ctx.tenantId, ...overrides }),
+        )
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(isMalformedIdentifierError(error)).toBe(true);
+    }
     const created = await store.createObservation(
       ctx,
       buildNewObservationFixture({
         tenantId: ctx.tenantId,
-        subjectId: LONE,
-        externalId: LONE,
         payload: { text: LONE },
         attributes: { note: LONE },
       }),
     );
     const read = await store.getObservation(ctx, created.id);
-    expect(read?.subjectId).toBe(LONE);
-    expect(read?.externalId).toBe(LONE);
     expect(read?.payload).toEqual({ text: LONE });
     expect(read?.attributes).toEqual({ note: LONE });
   });

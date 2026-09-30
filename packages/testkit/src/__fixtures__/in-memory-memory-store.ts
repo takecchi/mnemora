@@ -54,6 +54,7 @@ import type {
   RequeueEmbedJobsResult,
   ScopeAggregate,
 } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import { assertQueryDate, assertQueryInteger } from "./query-check.js";
 import { assertCloneableMemoryEvent, assertStorableMemoryEvent } from "./memory-event-check.js";
@@ -648,10 +649,14 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    assertWellFormedIdentifier(input.externalId, "input.externalId");
     return snapshot(this.createObservationIdempotent(ctx, input).value);
   }
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
+    assertWellFormedCtx(ctx);
     const observation = this.observations.get(id);
     if (!observation || observation.tenantId !== ctx.tenantId) {
       return null;
@@ -692,6 +697,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     jobKinds: OutboxJobKind[],
     opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    assertWellFormedIdentifier(input.externalId, "input.externalId");
     const { value: observation, created } = this.createObservationIdempotent(ctx, input);
     if (!created) {
       return { observation: snapshot(observation), created: false, jobs: [] };
@@ -824,6 +832,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     return snapshot(this.createMemoryIdempotent(ctx, input).value);
   }
 
@@ -833,6 +843,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     jobKinds: OutboxJobKind[],
     opts?: { now?: Date },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     const { value: memory, created } = this.createMemoryIdempotent(
       ctx,
       input,
@@ -912,6 +924,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
   }> {
+    assertWellFormedCtx(ctx);
+    news.forEach((entry, i) =>
+      assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
+    );
     // Issue #1237: 省略時は1回だけ壁時計を読み、積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const restoreAll = this.captureWriteState();
@@ -964,6 +980,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
+    assertWellFormedCtx(ctx);
     const memory = this.rawGet(ctx, id);
     return memory === null ? null : snapshot(memory);
   }
@@ -983,6 +1000,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引く
     // （実測）。同じ id が `ids` に複数回含まれていても、一致する行は主キーの性質上
     // 1回しか無いため、返る件数は**一意な id の数**にしかならない。ここで検査せず
@@ -1040,6 +1058,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const results: Memory[] = [];
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
@@ -1058,6 +1077,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     observationId: ObservationId,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const results: Memory[] = [];
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
@@ -1079,6 +1099,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
     // 書き込みは常に単独になる。PostgresMemoryStore と同じ位置（対象の存在確認より前）で
     // 落とす。
@@ -1123,6 +1144,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     // ADR 0140: updateStatus と同じ理由・同じ位置。
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
@@ -1213,6 +1235,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
     createdEventsWritten?: true;
   }> {
+    assertWellFormedCtx(ctx);
+    news.forEach((entry, i) =>
+      assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
+    );
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const buildCreatedEvent = opts?.buildCreatedEvent;
@@ -1440,6 +1466,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    assertWellFormedCtx(ctx);
     return this.purgeExpiredEventsSync(ctx, opts);
   }
 
@@ -1453,6 +1480,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredRecallsOptions,
   ): Promise<PurgeExpiredRecallsResult> {
+    assertWellFormedCtx(ctx);
     assertQueryDate("purgeExpiredRecalls", "olderThan", opts.olderThan);
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeExpiredRecalls: limit must be an integer (got ${opts.limit})`);
@@ -1516,6 +1544,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsByRetentionOptions,
   ): Promise<PurgeExpiredEventsByRetentionOutcome> {
+    assertWellFormedCtx(ctx);
     if (!this.eventRetentionDays.has(ctx.tenantId)) {
       return { kind: "unset" };
     }
@@ -1550,6 +1579,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `failed → ready` は妨げない（片側だけの規則）。
    */
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -1586,6 +1616,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -1645,6 +1676,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const results: Memory[] = [];
     for (const id of ids) {
       results.push(await this.reinforce(ctx, id, at, opts));
@@ -1666,6 +1698,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    assertWellFormedCtx(ctx);
     const result = await this.recordUsage(ctx, recallId, memoryIds);
     if (result.insertedMemoryIds.length === 0) {
       return result;
@@ -1686,6 +1719,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     recallId: RecallId,
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    assertWellFormedCtx(ctx);
     // 外部キー相当（ADR 0047）: `recall_usages.recall_id → recalls(id)` /
     // `recall_usages.memory_id → memories(id)`。Postgres は単一の
     // `INSERT ... SELECT ... FROM unnest(...)` で全件をまとめて書くため、どれか1件でも
@@ -1737,6 +1771,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     scope: RecallScope,
     opts?: AggregateScopeOptions,
   ): Promise<ScopeAggregate> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryDate("aggregateScope", "occurredAfter", scope.occurredAfter);
     assertQueryDate("aggregateScope", "occurredBefore", scope.occurredBefore);
@@ -2024,6 +2060,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    * ADR の意味論をここでも守る）。
    */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(record.subjectId, "record.subjectId");
     assertRecallRecordStorable(record);
     const id = nextId("rcl");
     // Issue #1237: 省略時は壁時計。
@@ -2059,6 +2097,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 同じ契約——テナントが一致しない、または見つからなければ `null`。
    */
   async getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null> {
+    assertWellFormedCtx(ctx);
     const row = this.recalls.get(id);
     if (!row || row.tenantId !== ctx.tenantId) {
       return null;
@@ -2101,6 +2140,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     opts: RequeueEmbedJobsOptions,
     writeOpts?: { now?: Date },
   ): Promise<RequeueEmbedJobsResult> {
+    assertWellFormedCtx(ctx);
     // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
     // 自身が例外を投げる（実測: `LIMIT must not be negative` / `invalid input syntax for
@@ -2166,6 +2206,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `forget` と同じ規約、docs/memory-model.md §9）。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    assertWellFormedCtx(ctx);
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryDate("archiveDecayed", "now", opts.now);
     assertQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
@@ -2285,6 +2326,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     tombstone: { content: string; digest: string },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -2360,6 +2402,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     first: { id: MemoryId; event: NewMemoryEvent },
     second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    assertWellFormedCtx(ctx);
     if (first.id === second.id) {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
@@ -2427,6 +2470,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    assertWellFormedCtx(ctx);
     if (first.id === second.id) {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
@@ -2486,6 +2530,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    assertWellFormedCtx(ctx);
     if (members.length < 3) {
       throw new RangeError("markContestedGroup: members must have at least 3 entries");
     }
@@ -2603,6 +2648,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    assertWellFormedCtx(ctx);
     if (members.length < 3) {
       throw new RangeError("resolveContestedGroup: members must have at least 3 entries");
     }
@@ -2710,6 +2756,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     const memory = this.rawGet(ctx, survivor.id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${survivor.id}`);
@@ -2748,6 +2795,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
     assertQueryDate("findActiveByClaimKey", "validFrom", query.validFrom);
     assertQueryDate("findActiveByClaimKey", "validUntil", query.validUntil);
@@ -2794,6 +2843,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     assertQueryDate("findContestedByClaimKey", "validFrom", query.validFrom);
     assertQueryDate("findContestedByClaimKey", "validUntil", query.validUntil);
     const targetFrom = query.validFrom ?? null;
@@ -2832,6 +2883,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     // `PostgresMemoryStore.listActiveClaimPredicates` は `query.limit` を生 SQL の `LIMIT`（bigint の
     // パラメータ）へそのまま渡すので、負数・`NaN`・`Infinity`・非整数・2^63 以上では Postgres が
     // 例外を投げる。検査せず `slice(0, limit)` へ渡すと違う件数を黙って返すので、他の `limit` を
@@ -2890,6 +2943,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     event: { reason?: string; actor?: EventActor; at: Date },
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
+    assertWellFormedCtx(ctx);
     const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.memories.values()].filter(
       (m) =>
@@ -2958,6 +3012,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     supersededById: MemoryId,
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    assertWellFormedCtx(ctx);
     const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.memories.values()].filter(
       (m) =>
@@ -2999,6 +3054,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （このファイル下）に置き換える。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
+    assertWellFormedCtx(ctx);
     const results: LabelSummary[] = [];
     for (const [key, label] of this.labels) {
       if ((JSON.parse(key) as [string, string])[0] === ctx.tenantId) {
@@ -3019,6 +3075,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （Issue #816）。
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    assertWellFormedCtx(ctx);
     if (name.includes("\u0000")) {
       throw new Error(`InMemoryMemoryStore: label name must not contain NUL characters (U+0000)`);
     }
@@ -3059,6 +3116,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 追加で確認せず `true` を返す）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
+    assertWellFormedCtx(ctx);
     const limit = opts.limit;
     const dryRun = opts.dryRun === true;
     let remaining = limit;

@@ -20,6 +20,7 @@ import type {
   TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
 
 /**
@@ -35,6 +36,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   constructor(private readonly db: Db) {}
 
   async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT default_half_life_hours FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -46,6 +48,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT event_retention_days FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -60,6 +63,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    assertWellFormedCtx(ctx);
     // Issue #1168: 型の外の kind を、無期限として書かずに拒む（decay_clock・taxonomy と同じ形）。
     assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
@@ -82,6 +86,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * `DEFAULT_DECAY_CLOCK`（`'wall'`）——`getDefaultHalfLifeHours` と同じ規律。
    */
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT decay_clock FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -102,6 +107,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * 指定しない——行が無い場合は DB 側の DEFAULT に任せる（`setEventRetention` と同じ形）。
    */
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
     await this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, decay_clock, updated_at)
@@ -116,6 +122,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * 行が無ければ `DEFAULT_HALF_LIFE_RECALLS`（720）——`getDefaultHalfLifeHours` と同じ規律。
    */
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT default_half_life_recalls FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -139,6 +146,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * `half_life_recalls`/`decay_floor_seq` を1件も書き換えない。
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidHalfLifeRecalls(recalls);
     await this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, default_half_life_recalls, updated_at)
@@ -160,6 +168,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * カウンタであり、そこまで到達する前に他の限界に当たる）。
    */
   async getActivitySeq(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT activity_seq FROM tenant_activity WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -178,6 +187,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * 追加の索引は要らない。
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT 1 FROM tenant_subject_activity WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -193,6 +203,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * `activity_seq` は `bigint` 列——`getActivitySeq` と同じ理由で `Number()` に変換する。
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
+    assertWellFormedCtx(ctx);
     if (subjectIds.length === 0) {
       return {};
     }
@@ -215,6 +226,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * `DEFAULT_TAXONOMY_MODE`（`'open'`）——`getDecayClock` と同じ規律。
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       SELECT taxonomy_mode FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
     `);
@@ -236,6 +248,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * （`setDecayClock` と同じ形）。
    */
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
     await this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, taxonomy_mode, updated_at)
@@ -251,6 +264,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    * PK なので高々1行——`reachedLimit` は常に `false`（interface doc 参照）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     if (opts.dryRun === true) {
       const result = await this.db.execute(sql`
         SELECT 1 FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
