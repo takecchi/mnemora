@@ -71,13 +71,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目41。DB マイグレーションは無い。
   - 【確かめていないこと】本物の2つの版の core が並ぶ環境。過去に U+FFFD へ置き換わって保存された識別子がデータに在るか。
 
-- **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった。新しい interface `RelationStore` と、それを検査する新設の conformance suite も増えた**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)・[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）。**この節の範囲で1件目の破壊的変更。**
-  - `describeMemoryStoreConformance` に、新しい任意メソッド `markContestedGroup?`/`resolveContestedGroup?` を検査する `it` と、任意フラグ `supportsMarkContestedGroup?`/`supportsResolveContestedGroup?`（既存の3状態フラグと同じ形）が増えた。群の一部だけを渡した `resolveContestedGroup?` を専用のエラー `ContestedGroupMembershipMismatchError`（新設）で拒む約束と、有効期間の重なりの境目（半開区間）の約束も検査する。
-  - 新設の `describeRelationStoreConformance` が、`RelationStore` の実装を検査する。
-  - **誰が影響を受けるか**: 自前の `MemoryStore` 実装を conformance suite に当てている利用者のうち、上の2つの任意フラグを `true` で渡しているのに口を実装していない場合だけ。口を実装しない・フラグを渡さない利用者は影響を受けない。
-  - ⭕ 次は**非破壊と数える**（union に値を足す変更。オーナーの回答 ask_human `d9364c91`）: `ContestedDetectionOutcome.result` の `"contested_group"`、`Omission` の `over_limit`/`stage_skipped` の `stage` の `"relation"`。網羅的な `switch` でこれらの型を扱っているコードは型検査が落ちうる。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目29。**DB マイグレーション**: 新しい migration `0026_memory_relations.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。
-
 - **テナント単位で全表から行を消す独立関数 `eraseTenant` と、4つの port の任意メソッド
   `eraseTenant?` が増えた。`packages/testkit` の conformance suite に、省略できない
   フラグ `supportsEraseTenant: boolean` が増えた——conformance suite を呼んでいる人へ**
@@ -294,7 +287,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`MemoryStore` と `Runtime` に任意メソッド `markContestedGroup?`/`resolveContestedGroup?`（`markContested`/`resolveContested` の N者版）。** 関係の行は、有効期間が重なる組の間にだけ張る。対に3件目が来たら、対の列を空にして群へ移す。群どうしが一致したら合併する。解消（`supersede` と `both_active`）では関係の行も消す。
   - **`Runtime.observe()` の claim key 衝突検出**: `detectContested` が on で `RelationStore` が配線されていれば、一致が2件以上（または `contested` の1件だけ）のとき、記録だけを積む代わりに群として書き込み、`ContestedDetectionOutcome.result` に `"contested_group"` を返す。`RelationStore` を配線しない呼び出しは、1バイトも変わらない。
   - **recall の段3（対立する記憶を必ず並べて出す）が、群にも効くようになった。** 関係の行でつながった全員を幅優先でたどり、群ごとに10件（`DEFAULT_RECALL_ASSOCIATION.maxCount`）まで、`validFrom` の新しい順・同じなら id の順に残して並べる。切った件数は群ごとに `over_limit { stage: "relation" }` に出す。`RelationStore` が配線されていなければ `stage_skipped { stage: "relation" }` を出す。
-  - ⭕ 非破壊と数える（どれも省略可能。conformance suite の要件が増えた分だけを、上の `### Breaking` に数えた）。
+  - **conformance suite**: `describeMemoryStoreConformance` に、新しい任意メソッド `markContestedGroup?`/`resolveContestedGroup?` を検査する `it` と、任意フラグ `supportsMarkContestedGroup?`/`supportsResolveContestedGroup?`（既存の3状態フラグと同じ形）が増えた。群の一部だけを渡した `resolveContestedGroup?` を専用のエラー `ContestedGroupMembershipMismatchError`（新設）で拒む約束と、有効期間の重なりの境目（半開区間）の約束も検査する。新設の `describeRelationStoreConformance` が、`RelationStore` の実装を検査する。影響を受けうるのは、上の2つの任意フラグを `true` で渡しているのに口を実装していない自前の実装だけである。
+  - ⭕ 次も非破壊と数える（union に値を足す変更。オーナーの回答 ask_human `d9364c91`）: `ContestedDetectionOutcome.result` の `"contested_group"`、`Omission` の `over_limit`/`stage_skipped` の `stage` の `"relation"`。網羅的な `switch` でこれらの型を扱っているコードは型検査が落ちうる。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目29。**DB マイグレーション**: 新しい migration `0026_memory_relations.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。
+  - ⭕ 非破壊と数える（どれも省略可能）。⚠ 2026-10-01 に数え直した: conformance suite の分は、書いた当初は `### Breaking` に数えていた。足した `it` は新しい任意フラグの内側にだけあり、口もフラグも持たない adapter に新しい約束を課さないので、[PR #1516](https://github.com/takecchi/mnemora/pull/1516) が #1507 で採った判定と、同じ版の任意フラグの追加（`implementsListRelatedMany?`・`supportsPurgeExpiredRecalls?` など）に揃えて、ここへ移した。
 - **`RecallQuery` に `scopeAggregate?: "exact" | "skip"` を足した**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C）——`recall()` のたびに条件なしで呼ばれる `MemoryStore.aggregateScope` の件数集計（`GROUP BY subject_id`、100万行で約1.1〜1.3秒を占める支配項）を、呼び出し側が明示的に選んだときだけ止められるようにした。
   - **既定は省略時と同じ `"exact"`——1バイトも変わらない。** `"skip"` を渡すと `IndexBand.groups` は空・`totalInScope` は `0`・`countKind` は `'unknown'` になり、`omitted` の `filtered(archived/superseded/forgotten/period/expired/not_yet_valid/taxonomy/decayed)` は一切積まれなくなる——「スコープ内で何が落ちたか」の説明力を手放す代わりに集計の費用を払わない、という明示的な取引。**`ann_unreached` も判定されない**——判定の母数（`totalInScope` − 未索引）が `0` になるため、近似索引が取りこぼしていても鳴らない。`"skip"` で `ann_unreached` が無いことは「拾いきった」を意味しない（ADR 0384「決めたこと」7）。
   - **目次帯（`digestBand`）は `"skip"` でも今日どおり出る**（集計とは独立した経路で、同じ PR の案A の索引が支える）。`digestEligible`（帯の外にあと何件あるか）だけは件数の一種なので、`digestBand` を指定した呼び出しに限り `{ count: 0, countKind: 'unknown' }` になる。
