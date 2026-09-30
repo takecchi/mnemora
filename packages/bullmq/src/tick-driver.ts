@@ -145,6 +145,13 @@ export interface CreateBullmqTickDriverOptions {
    * たびにも）呼ばれうる。同じ事象の重複ではなく別の接続の事象であり、driver は束ねない（束ねると片方だけが
    * 壊れたときに見えなくなる）。【実測】Redis が居ないポートを指すと、Queue と Worker がそれぞれ
    * ECONNREFUSED を emit した（bullmq 6.3.8）。
+   *
+   * ⚠ **【未実測】lock の期限切れ（stalled）で、1回の tick に `onTickResult` の後で `onTickError` が届きうる**
+   * （bullmq 6.3.8 の `worker.js` の `processJob`・`retryIfFailed` を読んだだけで、Redis では走らせていない）。
+   * lock（`lockDuration`、bullmq の既定 30000 ms。この driver からは設定できない）が切れると、stalled checker が
+   * ジョブを戻して別の Worker が2本目の tick を走らせうる。outbox の CAS でジョブは二重に処理されず、データは壊れない。
+   * 遅れて終わった1本目は `onTickResult` を呼んだ後、`moveToCompleted` が `Missing lock` で失敗し、`error` 経由で
+   * `onTickError` に届きうる。詳しくは README の「lock の期限切れ（stalled）」。
    */
   onTickError?: ((error: unknown) => void) | undefined;
 }
