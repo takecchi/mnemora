@@ -1,5 +1,5 @@
 import type { Ctx } from "@mnemora/core";
-import { Pool } from "pg";
+import { Client as PgClient, Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { closePostgresClient, createPostgresClient } from "../client.js";
 import { runMigrations } from "../migrate.js";
@@ -70,21 +70,23 @@ async function extensionSchemasOf(pool: Pool, extname: string): Promise<string[]
  * 呼び直す**——結果を偽造しない。`vi.spyOn(...).mockImplementation` は `Pool#query` の
  * オーバーロードと噛み合わせにくいため、代入して復元する素朴な形にしてある。
  */
-function captureCreateExtensionSql(pool: Pool): { texts: string[]; restore: () => void } {
-  const original = pool.query.bind(pool) as (...args: unknown[]) => unknown;
+function captureCreateExtensionSql(): { texts: string[]; restore: () => void } {
+  // ADR 0430: probe は `db.transaction`（専用の接続）の中で流れるので、`pool.query` ではなく
+  // `pg.Client.prototype.query` を見る。
+  const original = PgClient.prototype.query as unknown as (...args: unknown[]) => unknown;
   const texts: string[] = [];
-  pool.query = ((...args: unknown[]) => {
+  PgClient.prototype.query = (function (this: unknown, ...args: unknown[]) {
     const first = args[0];
     const text = typeof first === "string" ? first : (first as { text?: string } | undefined)?.text;
     if (typeof text === "string" && /^\s*CREATE EXTENSION\b/i.test(text)) {
       texts.push(text.trim());
     }
-    return original(...args);
-  }) as unknown as Pool["query"];
+    return original.apply(this, args);
+  }) as unknown as PgClient["query"];
   return {
     texts,
     restore: () => {
-      pool.query = original as unknown as Pool["query"];
+      PgClient.prototype.query = original as unknown as PgClient["query"];
     },
   };
 }
@@ -279,7 +281,7 @@ describe("probeTrigramLexicalSupport と専用スキーマ（Issue #1256 修正�
           return;
         }
 
-        const { texts, restore } = captureCreateExtensionSql(client.pool);
+        const { texts, restore } = captureCreateExtensionSql();
         try {
           expect(await probeTrigramLexicalSupport(client.db)).toEqual({ ok: true });
         } finally {
