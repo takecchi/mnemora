@@ -76,8 +76,11 @@ conformance suite の外から adapter の中に遅延を差し込めず、赤�
 ### `RelationStore` の適合 suite —— 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）: 新設された（旧: 存在しなかった）
 
 `packages/testkit/src/relation-store-conformance.ts` に `describeRelationStoreConformance` が
-新設され、9 it を持つ（`link`/`unlink`/`listRelated` の基本契約・冪等性・双方向・テナント
-分離）【実測、2026-09-30、上の§1の式で数えた】。`packages/testkit`
+新設された（`link`/`unlink`/`listRelated` の基本契約・冪等性・双方向・テナント
+分離を検査する）。
+
+**⚠ 2026-09-30 追記**: この節には、以前は it の数（9）を手で書いていた。現物は12本で食い違っていたので、数を消して出所（`packages/testkit/src/relation-store-conformance.ts`）を指す形にした。数えるなら上の§1の式を当てること（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+`packages/testkit`
 （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
 （`conformance.postgres.test.ts`）の両方が当てている——**8 suite → 9 suite になった。**
 
@@ -512,6 +515,10 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 **⚠ 2026-09-30 追記（[ADR 0404](./decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）**: `MemoryStoreConformanceOptions` に `supportsPurgeExpiredRecalls?`、`OutboxStoreConformanceOptions` に `supportsPurgeCompletedJobs?` が増えた——それぞれ `MemoryStore.purgeExpiredRecalls?`・`OutboxStore.purgeCompletedJobs?` を検査する。上の `supportsAbortIfForgotten?` 等と同じ3状態（`true` は歯を走らせ、各 `it` の冒頭で口の存在を要求する／`false` は口が無いことを assert する／省略は「⚠ 未検査」の named it を1本だけ登録する）。**任意なので、既存の呼び出し側は壊れない（非破壊）。**`purgeCompletedJobs?` の歯のうち終端後の行を読むものは `peekJob` を要り、`peekJob` の無い adapter では `it.skip` になる。`packages/postgres` と `packages/testkit` の fixture は `true` を渡す。
 
 **⚠ 2026-09-30 追記（Issue #1412 の続き）**: `VectorStoreConformanceOptions` に `supportsSearchMany?` が増えた——`VectorStore.searchMany?`（任意メソッド、Issue #377）の歯（各 key の結果が単独の `search()` と一致する・同点の並び・`limit`・0件でも key が Map に在る・空 `queries`・同じ key は後勝ち・NUL を含む key・不正な `limit`・`filter`/テナント分離）を `true` で実行し、`false` で `expect(store.searchMany).toBeUndefined()` を assert し、省略で「⚠ 未検査: supportsSearchMany が指定されていない — …」の named it を1本登録する（`supportsListActiveClaimPredicates?` と同じ3状態）。`in-memory-fixtures.conformance.test.ts`・`conformance.postgres.test.ts` はどちらも `true` を渡す。⚠ 省略時の named it を検査する `conformance-omitted-flags-named-it.test.ts` は `VectorStore` を対象にしていないので、この named it の登録そのものを縛る歯は無い。`supportsListActiveClaimPredicates: true` の枝には、同着の並び（predicate のコードポイント順の昇順）の歯が3本増えた。
+
+**⚠ 2026-09-30 追記（省略時の named it を縛る歯の対象拡張）**: 上の追記が挙げる「省略したときの named it の一覧」の件数（「5つから6つ」「7つ」）と、直前の追記の「`VectorStore` を対象にしていないので、この named it の登録そのものを縛る歯は無い」は、当時の記録であり、いまは成り立たない。`conformance-omitted-flags-named-it.test.ts` は `VectorStoreConformanceOptions.supportsSearchMany?` と `OutboxStoreConformanceOptions.supportsPurgeCompletedJobs?` の省略時の named it も縛るようになった。⛔ 一覧の件数はここに書かない——数えるなら、そのテストファイルと各 `*-conformance.ts` の Options 型が出所である（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。省略で named it が登録される `MemoryStoreConformanceOptions.countScopeAggregateQueries?`（フラグではなく関数フックの2状態）は、この歯の対象外のままである。
+
+**⚠ 2026-09-30 追記（`countScopeAggregateQueries?` を縛った）**: 直前の追記が「この歯の対象外のまま」とした `MemoryStoreConformanceOptions.countScopeAggregateQueries?`（関数フックの2状態）も、`conformance-omitted-flags-named-it.test.ts` が縛るようになった。省略すると「⚠ 未検査: countScopeAggregateQueries が指定されていない — …」の named it が1本登録されること（`it.skip` ではなく常に実行される it であること）を検査する。2状態でも「省いたら named it が出る」という約束はフラグの3状態と同じ、というオーナーの判断による。上の「対象外のまま」は当時の記録であり、いまは成り立たない。`supportsRealConcurrency?`（省略で `it.skip`）と `supportsTaxonomyMode?`（省略で何も登録されない）は、形が違うので対象外のままである。
 
 ---
 
