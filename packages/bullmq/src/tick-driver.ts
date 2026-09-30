@@ -36,8 +36,8 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * await driver.stop();
  * ```
  *
- * tick の失敗（`runtime.tick()` の throw）と Worker の異常は、`onTickError` に届く。成功した tick の
- * 結果は `onTickResult` に届く（どちらも省略可）。詳しくは `CreateBullmqTickDriverOptions` の各 doc。
+ * tick の失敗（`runtime.tick()` の throw）と、Worker・Queue の異常（接続の失敗など）は、`onTickError` に
+ * 届く。成功した tick の結果は `onTickResult` に届く（どちらも省略可）。詳しくは `CreateBullmqTickDriverOptions` の各 doc。
  *
  * **`start()` を呼ぶまでジョブは処理しない**（Issue #890）。`createBullmqTickDriver(...)`
  * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
@@ -88,7 +88,7 @@ export interface CreateBullmqTickDriverOptions {
   /** `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。 */
   onTickResult?: (result: TickResult) => void;
   /**
-   * tick の失敗と Worker の異常を受け取る（観測用。省略可）。次の2つの経路から、`error` を渡して呼ばれる。
+   * tick の失敗と、Worker・Queue の異常を受け取る（観測用。省略可）。次の3つの経路から、`error` を渡して呼ばれる。
    *
    * - **`runtime.tick()`（と `onTickResult`）が throw した** ——BullMQ の Worker は processor の throw を
    *   `'error'` ではなく `'failed'`（job, err）として emit する（bullmq 6.3.8 の実測）ので、driver は
@@ -97,8 +97,20 @@ export interface CreateBullmqTickDriverOptions {
    *   次の発火でまた tick する（この driver は再試行を足していない）。
    * - Worker が `'error'` を emit した（Redis 接続の異常、`worker.run()` の reject など）。
    *
-   * 1回の失敗につき、どちらか一方の経路で1回だけ呼ばれる（BullMQ は processor の throw で `'error'` を
-   * 併せて emit しない）。
+   * - Queue が `'error'` を emit した（繰り返しジョブの登録に使う Queue の Redis 接続の異常など）。
+   *   以前は Queue に listener が無く、bullmq が `console.error` へ固定で出すだけだった。
+   *
+   * 🔴 **`onTickError` を渡さないとき、Queue には listener を付けない。** 付けると bullmq（6.3.8 の
+   * `QueueBase.emit`。listener の無い `'error'` は EventEmitter が throw し、それを捕まえて `console.error`
+   * へ出す）の既定の出力が消え、Queue の異常が完全に黙る。渡していなければ従来どおり `console.error` に出る。
+   * （Worker は従来から常に listener を付けており、`onTickError` が無ければ Worker の異常は黙る。そこは変えていない。）
+   *
+   * **1回の tick の失敗は `'failed'` の1回だけ**（BullMQ は processor の throw で `'error'` を併せて emit しない）。
+   * 一方、Queue と Worker は別々の Redis 接続を持ち、接続ごとに `'error'` を emit する。Redis が落ちると
+   * **両方の接続**が error を出すので、`onTickError` は同じ障害について複数回（Queue 由来と Worker 由来。再接続の
+   * たびにも）呼ばれうる。同じ事象の重複ではなく別の接続の事象であり、driver は束ねない（束ねると片方だけが
+   * 壊れたときに見えなくなる）。【実測】Redis が居ないポートを指すと、Queue と Worker がそれぞれ
+   * ECONNREFUSED を emit した（bullmq 6.3.8）。
    */
   onTickError?: (error: unknown) => void;
 }
@@ -146,6 +158,14 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
   const concurrency = resolveConcurrency(opts.concurrency);
 
   const queue = new Queue(opts.queueName, { connection: opts.connection });
+  // `onTickError` があるときだけ Queue の `'error'` を拾う。無いときに listener を付けると、bullmq の既定の
+  // `console.error`（listener が無い `'error'` の落ち先）まで消え、Queue の異常が黙る。
+  const onQueueError = opts.onTickError;
+  if (onQueueError) {
+    queue.on("error", (err) => {
+      onQueueError(err);
+    });
+  }
   const worker = new Worker(
     opts.queueName,
     async (_job: Job) => {
