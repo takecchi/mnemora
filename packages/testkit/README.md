@@ -37,7 +37,7 @@ npm i -D @mnemora/testkit @mnemora/core vitest
 append-only・並び順・外部キー相当の契約などを検査できる。**以下は `EventStore` を
 自作した場合の例（`describeEventStoreConformance` を使う。他に
 `describeMemoryStoreConformance` / `describeVectorStoreConformance` /
-`describeLexicalStoreConformance` / `describeOutboxStoreConformance` /
+`describeLexicalStoreConformance` / `describeRelationStoreConformance` / `describeOutboxStoreConformance` /
 `describeTenantSettingsStoreConformance` / `describeEmbeddingProviderConformance` / `describeLLMProviderConformance` がある)。
 
 ```ts check
@@ -137,7 +137,7 @@ const embeddingProvider = new DeterministicEmbeddingProvider(); // 既定で 8�
 ## `@mnemora/testkit/fixtures`（インメモリの store。適合スイートの入力にしない）
 
 `@mnemora/testkit/fixtures` は、`InMemoryMemoryStore`・`InMemoryVectorStore`・`InMemoryLexicalStore`・
-`InMemoryEventStore`・`InMemoryOutboxStore`・`InMemoryTenantSettingsStore` を export する別の入口である。
+`InMemoryRelationStore`・`InMemoryEventStore`・`InMemoryOutboxStore`・`InMemoryTenantSettingsStore` を export する別の入口である。
 DB 無しで `createRuntime` を組み立てて、本物の provider を通しで動かすためにある。
 
 **⛔ これを `describe*Conformance` の `createStore` に渡してはいけない**——自分の adapter を1文字も測らないまま

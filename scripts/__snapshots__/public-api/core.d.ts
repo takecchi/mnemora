@@ -736,6 +736,7 @@ export interface MemoryStore {
         }>;
     }>;
     purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+    purgeExpiredRecalls?(ctx: Ctx, opts: PurgeExpiredRecallsOptions): Promise<PurgeExpiredRecallsResult>;
     purgeExpiredEventsByRetention?(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
     archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory?(ctx: Ctx, id: MemoryId, tombstone: {
@@ -887,6 +888,19 @@ export interface PurgeExpiredEventsOptions {
     limit: number;
     dryRun?: boolean;
 }
+export interface PurgeExpiredRecallsOptions {
+    olderThan: Date;
+    limit: number;
+    dryRun?: boolean;
+}
+export interface PurgeExpiredRecallsResult {
+    purged: number;
+    purgedUsages: number;
+    reachedLimit: boolean;
+    oldestPurgedAt: Date | null;
+    newestPurgedAt: Date | null;
+    dryRun: boolean;
+}
 export interface PurgeExpiredEventsResult {
     purged: number;
     reachedLimit: boolean;
@@ -944,6 +958,19 @@ export interface OutboxStore {
         at?: Date;
     }): Promise<void>;
     eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+    purgeCompletedJobs?(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
+}
+export interface PurgeCompletedJobsOptions {
+    olderThan: Date;
+    limit: number;
+    dryRun?: boolean;
+}
+export interface PurgeCompletedJobsResult {
+    purged: number;
+    reachedLimit: boolean;
+    oldestPurgedAt: Date | null;
+    newestPurgedAt: Date | null;
+    dryRun: boolean;
 }
 
 // ===== dist/interfaces/relation-store.d.ts =====

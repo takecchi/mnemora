@@ -11,6 +11,10 @@ import {
 import type { RunnerTask } from "vitest";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
+import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
+import { describeOutboxStoreConformance } from "../outbox-store-conformance.js";
+import { describeVectorStoreConformance } from "../vector-store-conformance.js";
+import { buildNewMemoryFixture, buildProvenanceFixture } from "../test-data.js";
 import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
 import { describeTenantSettingsStoreConformance } from "../tenant-settings-store-conformance.js";
 
@@ -76,10 +80,10 @@ describeMemoryStoreConformance({
   supportsPreviewRestoreSupersededBy: true,
   // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
   supportsEraseTenant: true,
-  // ⭐ 任意の9つ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
+  // ⭐ 任意の10個（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
   // supportsFindContestedByClaimKey / supportsListActiveClaimPredicates /
   // supportsResolveOrphanedContested / supportsAbortIfForgotten / supportsMarkContestedGroup /
-  // supportsResolveContestedGroup）は意図的に渡さない。
+  // supportsResolveContestedGroup / supportsPurgeExpiredRecalls）と、関数フックの countScopeAggregateQueries は意図的に渡さない。
 });
 
 /**
@@ -119,6 +123,80 @@ describeTenantSettingsStoreConformance({
   // ⭐ supportsTaxonomyMode は意図的に渡さない。
 });
 
+/**
+ * VectorStore: 必須の口（`supportsGetVectors`/`supportsEraseTenant`）だけを渡し、
+ * `supportsSearchMany` は意図的に渡さない（Issue #1412 の続き）。
+ */
+const VECTOR_NAME = "omitted optional flags (vector)";
+let latestVectorMemoryStore: InMemoryMemoryStore | undefined;
+let vectorHashCounter = 0;
+describeVectorStoreConformance({
+  name: VECTOR_NAME,
+  createStore: () => {
+    latestVectorMemoryStore = new InMemoryMemoryStore();
+    return new InMemoryVectorStore(latestVectorMemoryStore);
+  },
+  prepareMemoryId: async (ctx, attrs) => {
+    if (!latestVectorMemoryStore) throw new Error("createStore() より先に呼ばれた");
+    vectorHashCounter += 1;
+    const memory = await latestVectorMemoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: `omitted-flags-vector-${vectorHashCounter}`,
+        ...(attrs?.status !== undefined ? { status: attrs.status } : {}),
+        ...(attrs?.subjectId !== undefined ? { subjectId: attrs.subjectId } : {}),
+        ...(attrs?.decayFloorAt !== undefined ? { decayFloorAt: attrs.decayFloorAt } : {}),
+        ...(attrs?.decayFloorSeq !== undefined ? { decayFloorSeq: attrs.decayFloorSeq } : {}),
+        ...(attrs?.provenanceKind !== undefined
+          ? { provenance: buildProvenanceFixture(attrs.provenanceKind) }
+          : {}),
+        ...(attrs?.occurredAt !== undefined ? { occurredAt: attrs.occurredAt } : {}),
+        ...(attrs?.recordedAt !== undefined ? { recordedAt: attrs.recordedAt } : {}),
+        ...(attrs?.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
+        ...(attrs?.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
+        ...(attrs?.attributes !== undefined ? { attributes: attrs.attributes } : {}),
+        ...(attrs?.tags !== undefined ? { tags: attrs.tags } : {}),
+      }),
+    );
+    return memory.id;
+  },
+  prepareEmbeddingSpace: () => {},
+  supportsGetVectors: true,
+  supportsEraseTenant: true,
+  // ⭐ supportsSearchMany は意図的に渡さない。
+});
+
+/**
+ * OutboxStore: `supportsPurgeCompletedJobs` を意図的に渡さない（ADR 0404）。
+ * `supportsRealConcurrency` は省略/false で `it.skip` になる別の形なので対象外。
+ */
+const OUTBOX_NAME = "omitted optional flags (outbox)";
+let latestOutboxMemoryStore: InMemoryMemoryStore | undefined;
+describeOutboxStoreConformance({
+  name: OUTBOX_NAME,
+  createStore: () => {
+    latestOutboxMemoryStore = new InMemoryMemoryStore();
+    return new InMemoryOutboxStore(latestOutboxMemoryStore.outboxJobs);
+  },
+  seedJob: async (ctx, input) => {
+    if (!latestOutboxMemoryStore) throw new Error("createStore() より先に呼ばれた");
+    const { jobs } = await latestOutboxMemoryStore.createObservationWithOutbox(
+      ctx,
+      { tenantId: ctx.tenantId, subjectId: null, externalId: null, kind: "utterance", payload: {} },
+      [input.kind],
+    );
+    const job = latestOutboxMemoryStore.outboxJobs.find((j) => j.id === jobs[0]!.id)!;
+    if (input.payload) job.payload = input.payload;
+    if (input.availableAt) job.availableAt = input.availableAt;
+    return job;
+  },
+  peekJob: async (_ctx, jobId) =>
+    latestOutboxMemoryStore?.outboxJobs.find((j) => j.id === jobId) ?? null,
+  supportsEraseTenant: true,
+  // ⭐ supportsPurgeCompletedJobs は意図的に渡さない。
+});
+
 /** task の木から、名前に `needle` を含む describe の下の it を全部集める。 */
 function testsUnder(root: RunnerTask, needle: string): RunnerTask[] {
   const out: RunnerTask[] = [];
@@ -131,8 +209,25 @@ function testsUnder(root: RunnerTask, needle: string): RunnerTask[] {
   return out;
 }
 
+function expectOneUncheckedNamedIt(file: RunnerTask, suiteName: string, flags: string[]): void {
+  const tests = testsUnder(file, suiteName);
+  const names = tests.map((t) => t.name);
+  const control = tests.find((t) => !t.name.includes("未検査"));
+  expect(names.length, "suite が実際に登録されている").toBeGreaterThan(10);
+  for (const flag of flags) {
+    const unchecked = names.filter((n) =>
+      n.startsWith(`⚠ 未検査: ${flag} が指定されていない — adapter "${suiteName}" に対して `),
+    );
+    expect(unchecked, flag).toHaveLength(1);
+    // `-t` で絞られて同じ suite の普通の it が run でないときは mode を比べない（MemoryStore の歯と同じ）。
+    if (control?.mode === "run") {
+      expect(tests.find((t) => t.name === unchecked[0])?.mode, flag).toBe("run");
+    }
+  }
+}
+
 describe("docs/conformance.md §9: 任意フラグを省略したときに登録される it", () => {
-  it("MemoryStore: 省略した9つのフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
+  it("MemoryStore: 省略した10個のフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
     task,
   }) => {
     const tests = testsUnder(task.file, MEMORY_NAME);
@@ -149,6 +244,7 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
       "supportsAbortIfForgotten",
       "supportsMarkContestedGroup",
       "supportsResolveContestedGroup",
+      "supportsPurgeExpiredRecalls",
     ]) {
       const unchecked = names.filter((n) =>
         n.startsWith(`⚠ 未検査: ${flag} が指定されていない — adapter "${MEMORY_NAME}" に対して `),
@@ -161,6 +257,24 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
         expect(tests.find((t) => t.name === unchecked[0])?.mode, flag).toBe("run");
       }
     }
+  });
+
+  it("VectorStore: supportsSearchMany を省略すると「⚠ 未検査」の named it が1本登録される", ({
+    task,
+  }) => {
+    expectOneUncheckedNamedIt(task.file, VECTOR_NAME, ["supportsSearchMany"]);
+  });
+
+  it("OutboxStore: supportsPurgeCompletedJobs を省略すると「⚠ 未検査」の named it が1本登録される", ({
+    task,
+  }) => {
+    expectOneUncheckedNamedIt(task.file, OUTBOX_NAME, ["supportsPurgeCompletedJobs"]);
+  });
+
+  it("MemoryStore: 関数フックの countScopeAggregateQueries を省略しても「⚠ 未検査」の named it が1本登録される（2状態）", ({
+    task,
+  }) => {
+    expectOneUncheckedNamedIt(task.file, MEMORY_NAME, ["countScopeAggregateQueries"]);
   });
 
   it("TenantSettingsStore: supportsTaxonomyMode を省略すると、taxonomy mode の歯も「未検査」の it も登録されない（今の振る舞い）", ({

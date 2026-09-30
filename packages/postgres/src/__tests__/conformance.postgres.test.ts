@@ -84,6 +84,8 @@ describeMemoryStoreConformance({
   supportsAbortIfForgotten: true,
   // Issue #210 / ADR 0115: PostgresMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
+  // ADR 0404: PostgresMemoryStore は purgeExpiredRecalls を実装している。
+  supportsPurgeExpiredRecalls: true,
   listPurgedEvents: async (ctx: Ctx) => {
     const { db } = await getTestClient();
     return new PostgresEventStore(db).list(ctx, { kind: "events_purged" });
@@ -232,6 +234,8 @@ describeVectorStoreConformance({
   supportsGetVectors: true,
   // Issue #1207 / ADR 0383: PostgresVectorStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // Issue #377 / Issue #1412 の続き: PostgresVectorStore は searchMany を実装している。
+  supportsSearchMany: true,
 });
 
 describeLexicalStoreConformance({
@@ -311,6 +315,8 @@ describeOutboxStoreConformance({
   supportsRealConcurrency: true,
   // Issue #1207 / ADR 0383: PostgresOutboxStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // ADR 0404: PostgresOutboxStore は purgeCompletedJobs を実装している。
+  supportsPurgeCompletedJobs: true,
 });
 
 describeTenantSettingsStoreConformance({

@@ -159,7 +159,31 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目33。DB マイグレーションは無い。
   - 【確かめていないこと】Postgres での実機の再現（`DATABASE_URL` が無く、Postgres のテストは走らせていない）。実 API は使っていない。
 
+- **`RelationStore.link` が、両端の記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった**（[ADR 0398](./docs/decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md)、`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）。
+
+  これまで `link` は、`fromId`/`toId` が `ctx.tenantId` の記憶かどうかを確かめなかった。`PostgresRelationStore` は別テナントの記憶を端に取る行を受け付け、
+  存在しない uuid は外部キー違反の生の DB エラー、uuid でない文字列は `Failed query` になった。`InMemoryRelationStore` は存在しない id も受け付けた。
+  今は、書く前に両端が `ctx.tenantId` の記憶であることを確かめ、どちらかが実在しない・別のテナントの記憶なら、**行を書かずに** `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる。
+  Postgres は確かめと書き込みを1つの SQL 文にしている。uuid でない id は DB へ投げる前に弾く。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた `link`（別テナントの記憶・実在しない id を端に取るもの）が、新しく例外になる**。項目21・23・24・27 と同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。
+  - **誰が影響を受けるか**: `RelationStore.link` を直接呼ぶ利用者（`PostgresRelationStore` は公開 API）のうち、実在しない id・別テナントの id を渡しているもの。runtime は `link`/`unlink` を呼ばず、`MemoryStore.markContestedGroup?` は元から両端を `ctx` のテナントで確かめているので、`recall()` や `tick()` の挙動は変わらない。自前の `RelationStore` を `describeRelationStoreConformance` に当てている利用者は、新しい `it` が落ちうる（`prepareMemoryId` が返す記憶が、`createStore()` の store から見えること、渡した `ctx` のテナントの記憶であることを要する）。
+  - **変えなかったこと**: `unlink`・`listRelated` の振る舞い（どちらも元から `ctx.tenantId` の行だけを見る）。DB のスキーマ・複合外部キーは変えない（理由は ADR 0398）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目34。**DB マイグレーション**は無い。修正前に書かれた食い違う行が在るかを調べる SQL は ADR 0398 に在る。
+  - 【確かめていないこと】検査と INSERT の間に、並行して記憶が消えた場合の Postgres のエラーの見え方（外部キー違反の生のエラーのまま）。手元以外の環境・既存データでの食い違う行の有無。
+
+- **`@mnemora/anthropic` の `completeStructured` が、`z.record` を含むスキーマを、送る前に `kind: "schema_unsupported"` の `AnthropicLLMProviderError` で落とすようになった**（[ADR 0360](./docs/decisions/0360-schema-unsupported-thrown-before-send.md) の 2026-09-30 の追記、負債3、`@mnemora/anthropic`）。
+
+  これまで Anthropic 側は `z.record` を翻訳して送っていた。SDK の翻訳は `additionalProperties: false` を強制し、record のキーと値の制約を `description` に降格するので、送る形は**空の object しか許さない**ものになり、record の欄は**例外が出ないまま常に空**になっていた。今は、object の欄・配列の要素・`optional`/`nullable`/`default` の内側・union や intersection の枝・`z.lazy` の先のどこに `z.record` があっても、`messages.create` を呼ぶ前に `kind: "schema_unsupported"` で投げる。`cause` の `Error` に理由が載る。`@mnemora/openai` は元から同じ形を落としており、2つの provider の振る舞いが揃った。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は例外なしに通っていた `z.record` を含むスキーマが、新しく例外になる**。
+  - **誰が影響を受けるか**: `AnthropicLLMProvider.completeStructured` に `z.record` を含む zod スキーマを渡している利用者。core が渡す4つのスキーマ（抽出・claim key・統合・内省）に `z.record` は無く、`runtime` の経路は変わらない。
+  - **変えなかったこと**: `z.lazy`（再帰そのもの）・`default`・根が union は、今までどおり送る（`z.record` を含めば落ちる）。`@mnemora/openai` の振る舞い、送る JSON の形（record を含まないスキーマ）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目35。record を `z.array(z.object({ key: z.string(), value: … }))` に置き換える。DB マイグレーションは無い。
+  - 【確かめていないこと】Anthropic の実 API には当てていない（鍵が無い）。
+
 ### Added
+
+- **古い `recalls` と完了済みの `outbox` 行を消す任意メソッド `MemoryStore.purgeExpiredRecalls?` と `OutboxStore.purgeCompletedJobs?` を足した**（[ADR 0404](./docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)、[PR #1479](https://github.com/takecchi/mnemora/pull/1479)）。`purgeExpiredEvents?` と同じ形で、`olderThan` と `limit` は呼び出し側が必ず渡す（**保持期間の既定値は無い**）。`purgeExpiredRecalls?` は `created_at < olderThan` の `recalls` をその `recall_usages` ごと同一トランザクションで消す（**消した `recallId` への `recordUsage` は例外になる**）。`purgeCompletedJobs?` は `completed_at < olderThan` の完了済みの行**だけ**を消し、claim 中・未処理・`failed` の行は消さない。**`recalls.query` を約束の範囲に入れるか、`failed` 行の扱い、既定の保持期間は決めていない**（オーナーに聞く事柄）。新しい型は `PurgeExpiredRecallsOptions`/`PurgeExpiredRecallsResult`/`PurgeCompletedJobsOptions`/`PurgeCompletedJobsResult`。`@mnemora/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に任意フラグ `supportsPurgeExpiredRecalls?`/`supportsPurgeCompletedJobs?` が増えた（省略可・3状態。**非破壊**。省略すると「⚠ 未検査」の `it` が1本増える）。**DB マイグレーションは増えない**（索引を足さない判断と測った数字は ADR 0404）。
 
 - **`RecallQuery.relationMaxCount?`（任意、正の整数 1〜1000）を足した**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目8、[PR #1470](https://github.com/takecchi/mnemora/pull/1470)、[ADR 0396](./docs/decisions/0396-recall-relation-max-count.md)）。段3（`contradiction_resolution`）の多者間の `contested` 群の同伴取得について、群ごとの上限件数を呼び出し側から変えられる。超えた分は従来どおり `over_limit { stage: "relation" }` に積まれる。探索の安全弁（群ごとに訪れた数の上限）はこの値の10倍に連動する。**省略すると従来の10（安全弁は100）のままで、`recall()` の結果は1バイトも変わらない。**型は任意の欄1つの追加のみで、DB マイグレーションは伴わない（`recalls.query` は jsonb にそのまま入る）。ADR 0381 §5.3・§6 の「専用のクエリ欄は作らない」を覆した。
 
@@ -185,6 +209,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 - **`runtime.purge` の `"purged"`／`"already_purged"` outcome に、任意の欄 `embeddingCleanup?: { status: "failed"; error: string }` を足した**（[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)「引き受けた負債」1、[PR #1475](https://github.com/takecchi/mnemora/pull/1475)、[ADR 0399](./docs/decisions/0399-purge-embedding-cleanup-outcome-field.md)）。埋め込み行の後始末（`deleteAcrossSpaces`）が失敗したときだけ付き、`kind` は変わらない。成功時はプロパティ自体が無く、出力は変わらない。⭕ 非破壊と数える（任意欄の追加のみ）。
+- **`@mnemora/testkit` の `describeVectorStoreConformance` に、任意フラグ `supportsSearchMany?: boolean` を足した。`InMemoryVectorStore` に `searchMany` を実装した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。
+  - `VectorStore.searchMany?`（任意メソッド）の契約——各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並び、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、同じ key は後勝ち、NUL を含む key でも投げない、不正な `limit` は `search()` と同じく投げる、`filter`・テナント分離——を検査する歯が、これまで無かった。フラグは `supportsListActiveClaimPredicates?` と同じ3状態（`true` は歯を実行、`false` は `searchMany` が無いことを assert、省略は「⚠ 未検査」の named it を1本）。
+  - ⚠ **自前の `VectorStore` に `searchMany` を実装していて `supportsSearchMany: true` を渡す人へ**: 契約に反していれば、この歯で新しく赤になりうる。フラグを渡さなければ何も変わらない（型も壊れない）。
+  ⭕ 非破壊と数える（新しい任意の欄1つと、fixture への任意メソッドの追加のみ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -231,6 +259,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **新しい migration `0031_memory_labels_label_id_index.sql`。** `memory_labels (label_id)` に索引 `idx_memory_labels_label_id` を1本足す。`@mnemora/postgres` を上げたあと migrate を当てる。列・型・SQL 文・返り値は変えない。⭕ 非破壊と数える。
   - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `memory_labels` への書き込みが止まる。
   - 調査担当の実測では、`memory_labels` 20万行で 46ms → 6.5ms（ADR 0400）。あわせて、全外部キーに先頭列一致の索引を要求する歯を足した（テストのみ、利用者には見えない）。
+
+- **`MemoryStore.listActiveClaimPredicates?` の同着（代表行の `created_at` が同じ predicate が複数あるとき）の並びを、predicate のコードポイント順の昇順に固定した**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き）。以前は契約が同着の順を規定せず、`PostgresMemoryStore` は `ORDER BY MAX(created_at) DESC` だけ（同着は実行計画次第）、fixture は挿入順だった。
+  - `@mnemora/postgres` は副キーに `claim_key_predicate COLLATE "C" ASC` を足した（DB の照合順序に依らない）。`@mnemora/testkit` の `InMemoryMemoryStore` は UTF-8 のバイト列の比較（コードポイント順）で揃えた。DB マイグレーションは足していない。
+  - `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの歯を3本足した。
+  - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
+  - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
 
 ---
 
