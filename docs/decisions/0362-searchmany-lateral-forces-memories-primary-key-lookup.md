@@ -464,3 +464,13 @@ Issue #1181 本文の「段1は統計なしでも Hash Join で 0.5ms」は、�
 - PostgreSQL 18 系・pgvector の異なる版での再現性。`reltuples = -1` の意味が
   PostgreSQL 14 以降で安定していることは [ADR 0062](./0062-contested-with-id-fk-index.md)
   の実測を引用したが、本 ADR 自身では PostgreSQL 17 でしか実測していない。
+
+---
+
+## 追記（2026-09-30）: 「`search()` は直していない」とした件は、解消済み
+
+**上の本文は当時の記録として書き換えない。** 「`search()`（段1、参考——この ADR では変えていない）」節と「確かめていないこと」の末尾で未決とした `search()` の扱いは、[Issue #1415](https://github.com/takecchi/mnemora/issues/1415) として起票され、[PR #1421](https://github.com/takecchi/mnemora/pull/1421) で解消した（Issue #1415 は閉じている）。
+
+- PR #1421 の調査で、`search()` にも同じ欠陥が実測された。
+- 本 ADR の「案2」を `search()` にそのまま当てると、統計がある場面（N=200・アンカー3）で `recall()` の前後差の中央値が +5.06ms となり、許容線（2ms）を超えた（PR #1421 本文）。
+- そのため、案2は `search()`・`searchMany()` の両方から撤去し、`PostgresVectorStore` のインスタンスごと・表ごとに統計の有無を一度だけ確認して覚える仕組みに置き換えた。決定・測定・引き受けた負債は [ADR 0374](./0374-search-stats-presence-instance-cache.md) にある。冒頭の 2026-09-29 の追記も同じ ADR を指している。
