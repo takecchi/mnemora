@@ -653,6 +653,10 @@ export class FakeMemoryStore implements MemoryStore {
       if (input.digest.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: digest must not contain NUL characters (U+0000)`);
       }
+      // 穴 O-6-3（ADR 0424）: `content_hash` も `text` 列（`InMemoryMemoryStore` と同じ）。
+      if (input.contentHash.includes("\u0000")) {
+        throw new Error(`FakeMemoryStore: contentHash must not contain NUL characters (U+0000)`);
+      }
       // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
       // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
       if (jsonContainsNul(input.attributes ?? {})) {
@@ -2934,6 +2938,14 @@ export class FakeVectorStore implements VectorStore {
     if (!this.backing.memories.has(memoryId)) {
       throw new Error(`FakeVectorStore: memory not found: ${memoryId}`);
     }
+    // 穴 O-6-2（ADR 0424）: float4 に収まらない成分は Postgres の upsert が拒む（`InMemoryVectorStore` と同じ）。
+    for (const [i, x] of vector.entries()) {
+      if (!Number.isFinite(Math.fround(x))) {
+        throw new RangeError(
+          `FakeVectorStore.upsert: vector component [${i}] does not fit in a float4 (pgvector) value (got ${x})`,
+        );
+      }
+    }
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,
@@ -3429,6 +3441,10 @@ export class FakeLexicalStore implements LexicalStore {
     this.calls.push({ ctx, query, opts });
     if (this.shouldThrow) {
       throw new Error("FakeLexicalStore: simulated search failure");
+    }
+    // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない（`InMemoryLexicalStore` と同じ）。
+    if (query.includes("\u0000")) {
+      throw new Error("FakeLexicalStore.search: query must not contain NUL characters (U+0000)");
     }
     // `PostgresLexicalStore.search`/`PostgresTrigramLexicalStore.search` は `opts.limit` を
     // 生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・
