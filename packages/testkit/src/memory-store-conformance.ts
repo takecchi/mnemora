@@ -1084,6 +1084,44 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(jobs[0]!.createdAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
     });
 
+    /**
+     * [ADR 0407](../../../docs/decisions/0407-sync-observe-extract-job-lease.md): `opts.claimedBy` を
+     * 渡すと、積む outbox 行を「その名前で claim 済み」（`claimedAt` は `opts.now`、`attempts` は 1）で作る。
+     * 返る `attempts` は `complete`/`fail` の `expectedAttempts` にそのまま渡せる値。省略時（上の2件）は
+     * 未 claim・`attempts: 0` のまま。
+     */
+    it("createObservationWithOutbox は opts.claimedBy を渡すと、outbox 行を claim 済み（attempts 1）で作る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const now = new Date("2020-01-01T00:00:00.000Z");
+      const { jobs } = await store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-opts-claimed-by-1" }),
+        ["extract"],
+        { now, claimedBy: "conformance-claimer" },
+      );
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.claimedBy).toBe("conformance-claimer");
+      expect(jobs[0]?.claimedAt).toEqual(now);
+      expect(jobs[0]?.attempts).toBe(1);
+      expect(jobs[0]?.availableAt).toEqual(now);
+      expect(jobs[0]?.completedAt ?? null).toBeNull();
+    });
+
+    it("createObservationWithOutbox は opts.claimedBy を省略すると、outbox 行は未 claim・attempts 0", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const { jobs } = await store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-opts-claimed-by-2" }),
+        ["extract"],
+        { now: new Date("2020-01-01T00:00:00.000Z") },
+      );
+      expect(jobs[0]?.claimedBy ?? null).toBeNull();
+      expect(jobs[0]?.claimedAt ?? null).toBeNull();
+      expect(jobs[0]?.attempts).toBe(0);
+    });
+
     // -------------------------------------------------------------------
     // createMemory の冪等性（docs/architecture.md §3.5、§5.1）
     // -------------------------------------------------------------------

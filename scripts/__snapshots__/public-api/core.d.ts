@@ -667,6 +667,7 @@ export interface MemoryStore {
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
+        claimedBy?: string;
     }): Promise<{
         observation: Observation;
         created: boolean;

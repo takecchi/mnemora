@@ -422,5 +422,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) | 古い `recalls` と完了済みの `outbox` 行を消す口 `purgeExpiredRecalls?` / `purgeCompletedJobs?` を足す | 採用 (2026-09) |
 | [0405](./0405-roundtrip-count-confirms-stats-before-measuring.md) | `recall-roundtrip-count` は、往復を数える前に `StatsPresenceGate` を確認済みにする | 採用 (2026-09) |
 | [0406](./0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) | `reextract` は、LLM を待つ間に元の記憶が forget されたら、何も書かずに打ち切る | 採用 (2026-09) |
+| [0407](./0407-sync-observe-extract-job-lease.md) | `extract: "sync"` の observe は、積んだ extract ジョブを claim 済みの状態で作る（`createObservationWithOutbox` の `opts.claimedBy?`） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

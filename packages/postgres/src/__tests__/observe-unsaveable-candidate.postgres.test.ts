@@ -195,8 +195,16 @@ for (const [name, makeKit] of KITS) {
       expect(got.threw).toBe(true);
       expect(got.contents).toEqual([]);
       expect(got.createdMetas).toEqual([]);
-      // 今どおり: sync の extract ジョブは完了にならずに残り、tick の再試行も同じ所で落ちる。
-      expect(got.tick).toEqual({ processed: 0, failed: 1 });
+      // ADR 0407（挙動の変化）: sync の extract ジョブは observe が claim 済みのまま残る。
+      // 以前は未 claim で残り、直後の tick がすぐ拾っていた。今はリースの内側では拾われない。
+      expect(got.tick).toEqual({ processed: 0, failed: 0 });
+      // 完了にならずに残る点は今どおり: リースが切れた後の tick の再試行は同じ所で落ちる。
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const later = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 1 });
+      expect({ processed: later.processed, failed: later.failed }).toEqual({
+        processed: 0,
+        failed: 1,
+      });
     });
 
     it("正常な候補だけなら、今どおり全件を書き、created の meta も変わらない", async () => {

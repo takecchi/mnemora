@@ -5283,6 +5283,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
+  /** ADR 0407: sync の observe が積んだ extract ジョブを持つ間の `claimedBy`。 */
+  const SYNC_OBSERVE_CLAIMED_BY = "runtime.observe:sync";
+
   async function handleExtractableObservation(
     ctx: Ctx,
     input: ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput,
@@ -5315,7 +5318,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ctx,
       newObservation,
       ["extract"],
-      { now },
+      // ADR 0407: sync のときだけ、observe 自身が LLM を待つあいだ tick に取られないよう、
+      // 「observe が claim 済み」の状態で積む（deferred は tick に渡すためのジョブなので従来どおり）。
+      extractMode === "sync" ? { now, claimedBy: SYNC_OBSERVE_CLAIMED_BY } : { now },
     );
 
     if (!created) {
@@ -5348,12 +5353,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey, signal);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
-      // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
-      // 生成時の値（0）のまま——「ここまで誰にも claim/complete/fail されていない」を
-      // 表す自分のフェンシングトークンとして渡す。
-      await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts, {
-        at: clock.now(),
-      });
+      // CAS（ADR 0142）: ジョブは observe が claim 済みの状態で作られている（ADR 0407。
+      // `attempts` は 1）。作ったときに返った `attempts` を、自分のフェンシングトークンとして渡す。
+      try {
+        await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts, {
+          at: clock.now(),
+        });
+      } catch (err) {
+        // ADR 0407: LLM がリースより長くかかり、tick に取り直されていた。observe の書き込み
+        // （Observation と抽出した Memory）は既に済んでおり、ジョブの終端は取り直した側が持つ。
+        // ここで投げると「書き込み済みなのに失敗」になり `memoryIds` が失われる。良性なので握る
+        // （tick 側の `leaseConflicts` と同じ扱い）。それ以外の例外は今までどおり投げる。
+        if (!(err instanceof OutboxLeaseConflictError)) {
+          throw err;
+        }
+      }
     }
     return {
       observationId: observation.id,

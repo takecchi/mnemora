@@ -342,12 +342,14 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const externalId = input.externalId ?? null;
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
     const outboxNow = opts?.now ?? new Date();
+    // ADR 0407: 渡されたら、積む行を「その名前で claim 済み」（`attempts: 1`）で作る。
+    const claimedBy = opts?.claimedBy;
     return this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -386,14 +388,16 @@ export class PostgresMemoryStore implements MemoryStore {
       const jobs: OutboxJobRecord[] = [];
       for (const kind of jobKinds) {
         const jobResult = await tx.execute(sql`
-          INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
+          INSERT INTO outbox (id, tenant_id, kind, payload, available_at, claimed_at, claimed_by, attempts, created_at)
           VALUES (
             gen_random_uuid(),
             ${ctx.tenantId},
             ${kind},
             ${JSON.stringify({ observationId: observation.id })}::jsonb,
             ${toPgTimestamp(outboxNow)},
-            0,
+            ${claimedBy === undefined ? null : toPgTimestamp(outboxNow)},
+            ${claimedBy ?? null},
+            ${claimedBy === undefined ? 0 : 1},
             ${toPgTimestamp(outboxNow)}
           )
           RETURNING *
