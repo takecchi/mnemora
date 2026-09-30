@@ -266,6 +266,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/testkit/fixtures` が型 `StoredRelation` を export するようになった。** `InMemoryRelationStore` のコンストラクタの第2引数（`memoryStore.relations` と共有する配列）の要素型だが、入口から名指せなかった。型の追加のみ（実行時は変わらない）。公開 API snapshot を更新した。
 
+- **`@mnemora/bullmq` の tick driver が、`runtime.tick()` の失敗を `onTickError` に渡すようになった。** BullMQ の Worker は processor の throw を `'error'` ではなく `'failed'` として emit する（【実測】bullmq 6.3.8、Redis 互換サーバ Valkey 8.1.3 上の実 Worker で `'failed'` だけが1回 emit され、`'error'` は出なかった）。以前の driver は `'error'` しか聴いていなかったため、`tick()` が throw しても `onTickError` も `onTickResult` も呼ばれず、失敗が誰にも見えなかった。いまは `'failed'` を拾い、job ではなく error を渡す（`'error'` とは別の経路で、1回の失敗につき1回）。`onTickError` を渡していない人には見える変化は無い。渡している人は、これまで届かなかった tick の失敗が届くようになる（エラー通知の件数が増えうる）。再試行は足していない（繰り返しジョブは次の発火でまた tick する）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
