@@ -386,6 +386,13 @@ export declare class InMemoryVectorStore implements VectorStore {
         limit: number;
         filter: VectorFilter;
     }): Promise<VectorHit[]>;
+    searchMany(ctx: Ctx, space: EmbeddingSpaceId, queries: {
+        key: string;
+        vector: number[];
+    }[], opts: {
+        limit: number;
+        filter: VectorFilter;
+    }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
