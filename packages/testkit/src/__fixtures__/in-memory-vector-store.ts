@@ -11,7 +11,7 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
-import { assertQueryDate, assertQueryInteger } from "./query-check.js";
+import { assertFloat4Vector, assertQueryDate, assertQueryInteger } from "./query-check.js";
 
 interface Entry {
   tenantId: string;
@@ -145,6 +145,9 @@ export class InMemoryVectorStore implements VectorStore {
     if (!memory) {
       throw new Error(`InMemoryVectorStore: memory not found for tenant: ${memoryId}`);
     }
+    // 穴 O-6-2（ADR 0424）: float4 に収まらない成分は、`Math.fround` で Infinity にして保存せず断る
+    // （Postgres の upsert は pgvector が拒む）。検索のクエリ側は投げない（下の `search`）。
+    assertFloat4Vector("InMemoryVectorStore.upsert", vector);
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,

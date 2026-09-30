@@ -733,6 +733,29 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       expect(ids).not.toContain(subjectOnlyMatchId);
     });
 
+    // -------------------------------------------------------------------
+    // 穴 O-6-1（ADR 0424）: 検索語の NUL。Postgres の `text` は NUL を構造的に拒む
+    // （C 文字列表現に由来）。以前は Postgres だけが DB の生の例外
+    // （`invalid byte sequence for encoding "UTF8": 0x00`）で落ち、インメモリは0件を返していた。
+    // 両方で、DB に触れる前の明示の例外（メッセージに `query` と NUL を含む）で断る。
+    // -------------------------------------------------------------------
+    it("検索語に NUL (U+0000) を含めると、明示の例外で断る（0件を返さない。穴 O-6-1）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await prepareMemory(ctx, { content: "obsidian shards glimmer" });
+
+      await expect(
+        store.search(ctx, "obsi\u0000dian", { limit: 10, filter: { tenantId: "tenant-1" } }),
+      ).rejects.toThrow(/query.*NUL/);
+
+      // 陽性対照: NUL を含まない同じ検索は通る。
+      const hits = await store.search(ctx, "obsidian", {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hits).toHaveLength(1);
+    });
+
     // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
     for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
       it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
