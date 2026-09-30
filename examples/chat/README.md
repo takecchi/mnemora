@@ -1495,7 +1495,7 @@ red）がこのジョブの判定であり、その下に**旧判定**（測定�
 
 **カセット・基準値ファイルの録り直し・K回の再計測**は、ルートの
 [README.md「OpenAI 実埋め込みでの偽陽性率の上限（Issue #109 後半）」](../../README.md#openai-実埋め込みでの偽陽性率の上限issue-109-後半)
-の手順（`tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts`）を使うこと——
+の手順（`pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts`。repo のルートから打つ）を使うこと——
 `identifier-probes`/`numeral-token-probes` 両サブコマンドの基準値・カセットを同時に作る。
 
 ---

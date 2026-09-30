@@ -57,11 +57,15 @@ declare const runtime: Runtime;
 const ctx = { tenantId: "guild-123", subjectId: "user-456" };
 
 await runtime.observe(ctx, { kind: "utterance", text: "明日、京都へ出張する", speaker: "user" });
+// observe は outbox に積むだけ。索引づけは tick が行う（tick 無しで recall すると memories は空）
+await runtime.tick(ctx, { leaseMs: 30_000 });
 const recalled = await runtime.recall(ctx, { text: "京都の予定は?" });
 await runtime.reflect(ctx, { target: { memoryIds: [] } });
 await runtime.consolidate(ctx, { target: { memoryIds: [] } });
 await runtime.forget(ctx, { memoryIds: [] });
 ```
+
+⚠ **`observe()` は記憶を outbox に積むだけで、索引づけ（埋め込み）は `tick()` が行う。**`tick()` を呼ばずに `recall()` すると、`memories: []` が返り、`omitted` に `not_indexed`（`reason: "pending"`）が出る（インメモリの store と `@mnemora/testkit` の決定的な provider で、tick 無しは空・tick を1回呼ぶと1件返ることを確かめた）。常駐のワーカーが `tick()` を回す構成では、この1行は要らない（[`@mnemora/bullmq`](./packages/bullmq/README.md)）。`leaseMs`（ジョブを掴む時間）は必須。
 
 **⟹ 中核の5動詞の正式なシグネチャは「## 外から見える API」節、`ctx` の意味は
 「## 記憶を誰に紐づけるか」節を見ること。**
@@ -208,8 +212,10 @@ Issue #109 の閉じる条件と、実測した偽陽性率の上限は
 
 ```bash
 OPENAI_API_KEY=... DATABASE_URL=postgresql://<user>@127.0.0.1:<port>/<db> \
-  tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts
+  pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts
 ```
+
+⚠ **repo のルートで素の `tsx` は `command not found` になる**（`tsx` は `examples/chat` の devDependency で、ルートの PATH には無い）。`pnpm --filter … exec` は cwd を `examples/chat` へ移すので、スクリプトのパスは `src/scripts/…` になる（`examples/chat/` を付けない。repo のルートで `pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts` を打ち、鍵が無いと「`OPENAI_API_KEY が環境に無い`」でスクリプトの側が止まるところまでは確かめた。実際の再計測は鍵が要るので走らせていない）。
 
 - **鍵の渡し方**: 環境変数 `OPENAI_API_KEY` を、実行するシェルにだけ渡す。スクリプトは
   値をログ・生成物のどちらにも出力しない——呼び出し回数・トークン数・概算費用だけを

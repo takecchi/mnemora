@@ -96,7 +96,14 @@ const { observationId } = await runtime.observe(ctx, {
   text: "明日、京都へ出張する",
   speaker: "user",
 });
+
+// observe は outbox に積むだけ。索引づけは tick が行う（tick 無しで recall すると memories は空）
+await runtime.tick(ctx, { leaseMs: 30_000 });
+const recalled = await runtime.recall(ctx, { text: "京都の予定は?" });
+console.log(observationId, recalled.memories.length);
 ```
+
+⚠ **`observe()` は記憶を outbox に積むだけで、索引づけ（埋め込み）は `tick()` が行う。**`tick()` を呼ばずに `recall()` すると、`memories: []` が返り、`omitted` に `not_indexed`（`reason: "pending"`）が出る（インメモリの store と `@mnemora/testkit` の決定的な provider で、tick 無しは空・tick を1回呼ぶと1件返ることを確かめた）。常駐のワーカーが `tick()` を回す構成では、この1行は要らない（[`@mnemora/bullmq`](../bullmq/README.md)）。`leaseMs`（ジョブを掴む時間）は必須。
 
 配線をすぐ試したいだけなら、`@mnemora/postgres` と `@mnemora/openai` の README にある
 そのままの例をつなげば動く（`@mnemora/postgres` 側は本物の Postgres + pgvector が要る）。
