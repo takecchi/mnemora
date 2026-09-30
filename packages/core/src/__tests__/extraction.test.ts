@@ -444,8 +444,11 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
     expect(prompt.system).toContain("user:b");
     // ADR 0271「引き受けた負債1」の申し送り: 一覧に無い・主題が無いなら null を明示させる。
     expect(prompt.system).toContain("null");
-    // messages（ユーザー発話本文）は候補一覧の影響を受けない。
-    expect(prompt.messages).toEqual([{ role: "user", content: "明日は東京に出張する予定です" }]);
+    // messages は候補一覧そのものの影響を受けない。話者（既定の fixture は speaker あり）だけが、
+    // Issue #1370（PR1）で本文の前に1行足される（extractionContext が無い候補経路）。
+    expect(prompt.messages).toEqual([
+      { role: "user", content: "話者（speaker）: 田中\n\n明日は東京に出張する予定です" },
+    ]);
   });
 
   it("subjectCandidates を渡すと、鍵（llmCassetteKey 相当）は渡さない場合と異なる", () => {
@@ -542,6 +545,64 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
       // 2文とも独立して現れる（互いを部分文字列として含んでいない＝重複していない）。
       expect(newSpeakerSentence).not.toContain(existingContextSentence);
       expect(existingContextSentence).not.toContain(newSpeakerSentence);
+    });
+
+    /**
+     * Issue #1370（PR1）: 話者の一文が「または speaker」と言う以上、候補あり・extractionContext 無しの
+     * 経路でも payload.speaker が LLM の入力に見えていなければならない。出す形は
+     * 「話者（speaker）: <値>」の1行＋空行＋本文。それ以外の経路は1バイトも変えない。
+     */
+    describe("候補経路（extractionContext 無し）で payload.speaker を user 入力に出す", () => {
+      const SPEAKER_TEXT = "明日は東京に出張する予定です";
+
+      it("候補あり＋speaker あり → user 入力の先頭に話者が出る", () => {
+        const observation = makeObservation({ payload: { text: SPEAKER_TEXT, speaker: "田中" } });
+        const prompt = buildExtractionPrompt(observation, ["user:a"]);
+        expect(prompt.messages).toEqual([
+          { role: "user", content: `話者（speaker）: 田中\n\n${SPEAKER_TEXT}` },
+        ]);
+      });
+
+      it("候補あり＋speaker なし → 今と同じ（本文だけ）", () => {
+        const observation = makeObservation({ payload: { text: SPEAKER_TEXT } });
+        expect(buildExtractionPrompt(observation, ["user:a"]).messages).toEqual([
+          { role: "user", content: SPEAKER_TEXT },
+        ]);
+        const emptySpeaker = makeObservation({ payload: { text: SPEAKER_TEXT, speaker: "" } });
+        expect(buildExtractionPrompt(emptySpeaker, ["user:a"]).messages).toEqual([
+          { role: "user", content: SPEAKER_TEXT },
+        ]);
+      });
+
+      it("候補なし（省略・空配列）＋speaker あり → 今と1バイトも同じ（本文だけ・system は基底のまま）", () => {
+        const observation = makeObservation({ payload: { text: SPEAKER_TEXT, speaker: "田中" } });
+        for (const prompt of [
+          buildExtractionPrompt(observation),
+          buildExtractionPrompt(observation, []),
+        ]) {
+          expect(prompt).toEqual({
+            system: BASE_SYSTEM,
+            messages: [{ role: "user", content: SPEAKER_TEXT }],
+          });
+        }
+      });
+
+      it("候補＋extractionContext → user 入力は今のJSONのまま（speaker は observation.speaker に1回だけ）", () => {
+        const observation = makeObservation({
+          payload: {
+            text: SPEAKER_TEXT,
+            speaker: "田中",
+            extractionContext: { messages: [{ speaker: "assistant", text: "了解です" }] },
+          },
+        });
+        const withCandidates = buildExtractionPrompt(observation, ["user:a"]);
+        const withoutCandidates = buildExtractionPrompt(observation);
+        expect(withCandidates.messages).toEqual(withoutCandidates.messages);
+        const content = withCandidates.messages[0]?.content as string;
+        expect(content.startsWith("{")).toBe(true);
+        expect(content).not.toContain("話者（speaker）:");
+        expect(JSON.parse(content).observation.speaker).toBe("田中");
+      });
     });
   });
 });

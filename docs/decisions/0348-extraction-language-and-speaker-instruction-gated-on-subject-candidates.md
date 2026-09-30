@@ -140,3 +140,23 @@ system プロンプトへの指示追加で減らせるか。**
   引き受けた場合。そのときは決定1・決定4を差し替える新しい ADR を書く（この ADR 本文は書き換えない）。
 - より大きい標本・別のモデルでの再測定で、英語混入の指示に統計的に有意な効果が見えた場合、
   「主張できない」という上の実測結果に追記する（本文は書き換えず、追記する）。
+
+---
+
+## 追記（2026-09-30）: 話者の一文が言う「speaker」を、候補経路の入力に出した（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370) PR1）
+
+**本文は書き換えない。**この追記は、決定で足した話者の一文が、入力に無いものを指していた点を直す。
+
+- **見つかったこと**: 決定の話者の一文は「観測の発言の話者（本文の先頭の話者ラベル、**または speaker**）」と言う。
+  だが `extractionContext` が無い呼び出しでは、user メッセージは本文だけで、`payload.speaker` は LLM に見えない。
+  `speaker` が入るのは `extractionContext` 分岐の JSON（`observation.speaker`）だけだった。
+  つまり「候補あり・`extractionContext` 無し」の経路では、一文が指す `speaker` が存在しなかった。
+- **採った方向**: 一文から「または speaker」を外さず、**一文を本当にする**。`subjectCandidates` を渡し、
+  `extractionContext` が無く、`speaker` があるときだけ、user メッセージの本文の前に
+  `話者（speaker）: <値>` と空行を足す。
+- **変えていない経路（1バイトも）**: 候補なし（省略・空配列）の system・user、`extractionContext` 分岐
+  （候補の有無を問わず。候補＋`extractionContext` は既に JSON で `speaker` が見えている）。
+  ⇒ カセット鍵・Issue #704 の録音は動かない。前提確認として、`examples/chat/cassettes/` と
+  `packages/core/src/__tests__/fixtures/` に `候補一覧が渡されています` を含む録音が0件であることを再確認した。
+- **引き受けた負債**: 効果は実 API で測っていない。上の実測（26.1% → 0%）は、この追記より前の入力
+  （`speaker` が見えない）で得た値であり、`speaker` を足した入力での値ではない。
