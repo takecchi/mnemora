@@ -2,24 +2,33 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
 import type {
+  ContestedGroupMembershipMismatchError,
+  ContestedWithoutCompanionError,
   Ctx,
   Memory,
   MemoryEvent,
   MemoryId,
+  MemoryPurgeConflictError,
+  MemoryStatusConflictError,
   MemoryStore,
   NewMemoryEvent,
   OutboxJobRecord,
   RecallId,
 } from "@mnemora/core";
 import {
-  ContestedGroupMembershipMismatchError,
-  ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
   FILTERED_CONDITION_SCOPE_RELATION,
-  MemoryPurgeConflictError,
-  MemoryStatusConflictError,
+  isContestedGroupMembershipMismatchError,
+  isContestedWithoutCompanionError,
+  isMemoryPurgeConflictError,
+  isMemoryStatusConflictError,
 } from "@mnemora/core";
+import {
+  expectRejectsWithoutStoreError,
+  expectRejectsWithStoreError,
+  expectStoreError,
+} from "./error-guards.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
 
 /**
@@ -4401,9 +4410,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       await store.updateStatus(ctx, memory.id, "archived"); // 現在の status を archived にしておく
 
-      await expect(
+      await expectRejectsWithStoreError(
         store.updateStatus(ctx, memory.id, "superseded", { expectedStatus: "active" }),
-      ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+        isMemoryStatusConflictError,
+        "MemoryStatusConflictError",
+      );
 
       // 読み直して、行が一切変わっていないことを確認する（黙って部分的に書かれていない）。
       const unchanged = await store.get(ctx, memory.id);
@@ -4423,7 +4434,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-      expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+      expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
       const conflict = caught as MemoryStatusConflictError;
       expect(conflict.memoryId).toBe(memory.id);
       expect(conflict.expectedStatus).toBe("active");
@@ -4446,7 +4457,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const ctx: Ctx = { tenantId: "tenant-1" };
 
       // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
-      // `.rejects.not.toBeInstanceOf(MemoryStatusConflictError)` だけでは
+      // 「MemoryStatusConflictError ではない」を確かめるだけでは
       // 「競合ではない」までしか測れず、ガード節が抜けて null 参照の TypeError に
       // すり替わっても（TypeError も MemoryStatusConflictError ではないので）緑のまま
       // になる。ADR 0030 の主張どおり「競合ではなく『対象が無い』」であることまで
@@ -4454,7 +4465,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const rejection = store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "superseded", {
         expectedStatus: "active",
       });
-      await expect(rejection).rejects.not.toBeInstanceOf(MemoryStatusConflictError);
+      await expectRejectsWithoutStoreError(
+        rejection,
+        isMemoryStatusConflictError,
+        "MemoryStatusConflictError",
+      );
       await expect(rejection).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
     });
 
@@ -4508,7 +4523,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       await store.updateStatus(ctx, memory.id, "archived"); // 現在の status を archived にしておく
 
-      await expect(
+      await expectRejectsWithStoreError(
         store.updateStatusWithEvent(
           ctx,
           memory.id,
@@ -4516,7 +4531,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           { expectedStatus: "active" },
           buildSupersedeEvent(ctx, memory.id, memory.digest),
         ),
-      ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+        isMemoryStatusConflictError,
+        "MemoryStatusConflictError",
+      );
 
       // 行が一切変わっていない（黙って部分的に書かれていない）。
       const unchanged = await store.get(ctx, memory.id);
@@ -4550,7 +4567,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-      expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+      expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
       const conflict = caught as MemoryStatusConflictError;
       expect(conflict.memoryId).toBe(memory.id);
       expect(conflict.expectedStatus).toBe("active");
@@ -6434,7 +6451,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             }),
           );
 
-          await expect(
+          await expectRejectsWithStoreError(
             store.purgeMemory!(
               ctx,
               memory.id,
@@ -6448,7 +6465,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
                 meta: {},
               },
             ),
-          ).rejects.toThrow(MemoryPurgeConflictError);
+            isMemoryPurgeConflictError,
+            "MemoryPurgeConflictError",
+          );
 
           const after = await store.get(ctx, memory.id);
           expect(after?.status).toBe(status);
@@ -6482,9 +6501,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           event,
         );
 
-        await expect(
+        await expectRejectsWithStoreError(
           store.purgeMemory!(ctx, memory.id, { content: "[purged]", digest: "[purged]" }, event),
-        ).rejects.toThrow(MemoryPurgeConflictError);
+          isMemoryPurgeConflictError,
+          "MemoryPurgeConflictError",
+        );
 
         const events = await listEventsForMemory(ctx, memory.id);
         expect(events.filter((e) => e.kind === "purged")).toHaveLength(1); // 2件目は積まれない
@@ -6530,7 +6551,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-        expect(caught).toBeInstanceOf(MemoryPurgeConflictError);
+        expectStoreError(caught, isMemoryPurgeConflictError, "MemoryPurgeConflictError");
         const conflict = caught as MemoryPurgeConflictError;
         expect(conflict.memoryId).toBe(memory.id);
         expect(conflict.observedStatus).toBe("forgotten");
@@ -6818,7 +6839,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
 
-      await expect(
+      await expectRejectsWithStoreError(
         store.createMemory(
           ctx,
           buildNewMemoryFixture({
@@ -6827,7 +6848,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             contentHash: "lone-contested-create",
           }),
         ),
-      ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+        isContestedWithoutCompanionError,
+        "ContestedWithoutCompanionError",
+      );
 
       // 何も書かれていないことを、別クエリ（aggregateScope）で確かめる——例外の型だけでなく
       // 副作用の不在まで見る。
@@ -6853,7 +6876,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      expectStoreError(caught, isContestedWithoutCompanionError, "ContestedWithoutCompanionError");
       const rejection = caught as ContestedWithoutCompanionError;
       expect(rejection.method).toBe("createMemory");
       expect(rejection.memoryId).toBeNull();
@@ -6885,7 +6908,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
 
-      await expect(
+      await expectRejectsWithStoreError(
         store.createMemoryWithOutbox(
           ctx,
           buildNewMemoryFixture({
@@ -6895,7 +6918,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           }),
           ["embed"],
         ),
-      ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+        isContestedWithoutCompanionError,
+        "ContestedWithoutCompanionError",
+      );
 
       const aggregate = await store.aggregateScope(ctx, {});
       expect(aggregate.totalInScope).toBe(0);
@@ -6920,7 +6945,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      expectStoreError(caught, isContestedWithoutCompanionError, "ContestedWithoutCompanionError");
       const rejection = caught as ContestedWithoutCompanionError;
       expect(rejection.method).toBe("createMemoryWithOutbox");
       expect(rejection.memoryId).toBeNull();
@@ -6934,8 +6959,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "update-status-contested" }),
       );
 
-      await expect(store.updateStatus(ctx, memory.id, "contested")).rejects.toBeInstanceOf(
-        ContestedWithoutCompanionError,
+      await expectRejectsWithStoreError(
+        store.updateStatus(ctx, memory.id, "contested"),
+        isContestedWithoutCompanionError,
+        "ContestedWithoutCompanionError",
       );
 
       const after = await store.get(ctx, memory.id);
@@ -6959,7 +6986,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         caught = error;
       });
 
-      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      expectStoreError(caught, isContestedWithoutCompanionError, "ContestedWithoutCompanionError");
       const rejection = caught as ContestedWithoutCompanionError;
       expect(rejection.method).toBe("updateStatus");
       expect(rejection.memoryId).toBe(memory.id);
@@ -6976,7 +7003,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         }),
       );
 
-      await expect(
+      await expectRejectsWithStoreError(
         store.updateStatusWithEvent(
           ctx,
           memory.id,
@@ -6984,7 +7011,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           {},
           buildSupersedeEvent(ctx, memory.id, memory.digest),
         ),
-      ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+        isContestedWithoutCompanionError,
+        "ContestedWithoutCompanionError",
+      );
 
       const after = await store.get(ctx, memory.id);
       expect(after?.status).toBe("active"); // 無傷
@@ -7016,7 +7045,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-      expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+      expectStoreError(caught, isContestedWithoutCompanionError, "ContestedWithoutCompanionError");
       const rejection = caught as ContestedWithoutCompanionError;
       expect(rejection.method).toBe("updateStatusWithEvent");
       expect(rejection.memoryId).toBe(memory.id);
@@ -7034,7 +7063,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           }),
         );
 
-        await expect(
+        await expectRejectsWithStoreError(
           store.supersedeWithNewMemories!(
             ctx,
             [
@@ -7066,7 +7095,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
               },
             ],
           ),
-        ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+          isContestedWithoutCompanionError,
+          "ContestedWithoutCompanionError",
+        );
 
         // supersede 対象も無傷（ロールバック済みと同じに見える）。
         const afterOld = await store.get(ctx, oldMemory.id);
@@ -7113,7 +7144,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-        expect(caught).toBeInstanceOf(ContestedWithoutCompanionError);
+        expectStoreError(
+          caught,
+          isContestedWithoutCompanionError,
+          "ContestedWithoutCompanionError",
+        );
         const rejection = caught as ContestedWithoutCompanionError;
         expect(rejection.method).toBe("supersedeWithNewMemories");
         expect(rejection.memoryId).toBeNull();
@@ -7262,13 +7297,15 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             meta: {},
           });
 
-          await expect(
+          await expectRejectsWithStoreError(
             store.markContestedPair!(
               ctx,
               { id: a.id, event: event(a.id) },
               { id: b.id, event: event(b.id) },
             ),
-          ).rejects.toThrow(MemoryStatusConflictError);
+            isMemoryStatusConflictError,
+            "MemoryStatusConflictError",
+          );
 
           const afterA = await store.get(ctx, a.id);
           const afterB = await store.get(ctx, b.id);
@@ -7318,7 +7355,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
         const conflict = caught as MemoryStatusConflictError;
         expect(conflict.memoryId).toBe(b.id);
         expect(conflict.expectedStatus).toBe("active");
@@ -7578,13 +7615,15 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           // その残留自体は本歯の主題ではない）。
           await store.updateStatus(ctx, b, status);
 
-          await expect(
+          await expectRejectsWithStoreError(
             store.resolveContestedPair!(
               ctx,
               { id: a, status: "active", event: buildResolveEvent(ctx, a, "updated") },
               { id: b, status: "active", event: buildResolveEvent(ctx, b, "updated") },
             ),
-          ).rejects.toThrow(MemoryStatusConflictError);
+            isMemoryStatusConflictError,
+            "MemoryStatusConflictError",
+          );
 
           const afterA = await store.get(ctx, a);
           const afterB = await store.get(ctx, b);
@@ -7616,7 +7655,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
         const conflict = caught as MemoryStatusConflictError;
         expect(conflict.memoryId).toBe(b);
         expect(conflict.expectedStatus).toBe("contested");
@@ -7742,7 +7781,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
         const conflict = caught as MemoryStatusConflictError;
         expect(conflict.memoryId).toBe(a.id);
         expect(conflict.expectedStatus).toBe("contested");
@@ -7799,7 +7838,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           caught = error;
         });
 
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
         const conflict = caught as MemoryStatusConflictError;
         expect(conflict.memoryId).toBe(a.id);
         expect(conflict.expectedStatus).toBe("contested");
@@ -8311,7 +8350,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         ]).catch((error: unknown) => {
           caught = error;
         });
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
 
         const afterA = await store.get(ctx, a.id);
         const afterB = await store.get(ctx, b.id);
@@ -8374,7 +8413,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         ).catch((error: unknown) => {
           caught = error;
         });
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        expectStoreError(caught, isMemoryStatusConflictError, "MemoryStatusConflictError");
 
         // 「一度解消したら再び争わせない」印は無い——同じ3件へもう一度 markContestedGroup を
         // 呼べる（後から同じ claim key の新しい記憶が来て一致すれば、また群になりうる）。
@@ -8472,7 +8511,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
         // 再利用をやめ、専用のエラー型（ContestedGroupMembershipMismatchError）を
         // 投げるようになった——エラーの型まで縛る。
-        expect(caught).toBeInstanceOf(ContestedGroupMembershipMismatchError);
+        expectStoreError(
+          caught,
+          isContestedGroupMembershipMismatchError,
+          "ContestedGroupMembershipMismatchError",
+        );
         expect((caught as ContestedGroupMembershipMismatchError).missingMemberId).toBe(
           memories[3]!.id,
         );
@@ -8558,7 +8601,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         buildNewMemoryFixture({ tenantId: "tenant-1", status: "active" }),
       );
 
-      await expect(
+      await expectRejectsWithStoreError(
         store.updateStatusWithEvent(
           ctx,
           memory.id,
@@ -8566,7 +8609,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           { expectedStatus: "archived" },
           buildRestoredEvent(ctx, memory.id, memory.digest),
         ),
-      ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+        isMemoryStatusConflictError,
+        "MemoryStatusConflictError",
+      );
 
       const events = await listEventsForMemory(ctx, memory.id);
       expect(events).toEqual([]);
