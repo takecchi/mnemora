@@ -27,10 +27,9 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
  * 冒頭のコメント参照）。この歯もその全件を直書きで持つ（`scripts/__tests__/publish-targets.test.mjs`
  * が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` と集合として一致することを検査する）。
  *
- * ⚠ `@mnemora/bullmq`（Issue #205）は git 上の version が `0.0.0` のままで、
- * `NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に載っている——下の version 関連の
- * 2つの it が、この1件だけ向きを変えて検査している理由はそこにある。1.1.0 で publish 済み
- * （2026-09-29、オーナーの手元での初回）であり、一覧の名前と意味はずれている。
+ * ⚠ 下の version 関連の2つの it は、`NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に
+ * 載っている名前だけ向きを変えて検査する。いまその一覧は空である——`@mnemora/bullmq`
+ * （Issue #205）は 1.1.0 で publish 済みになり、2026-09-30 に git 上の version を揃えて外した。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
