@@ -1151,10 +1151,11 @@ mnemora ではこの前提が成立しない。
 このリポジトリは「呼ぶための部品」だけを提供する。
 
 **⚠ 2026-09-30 追記（文書だけ。実行時の振る舞いは変えていない）: `events_purged` の行の `at` は、`Runtime` に渡した `clock` の時刻ではない。**
-実装ごとに時計が違う（どちらも `clock` ではない）。`@mnemora/postgres` は SQL の `now()`（DB の時計。
-`purgeExpiredEvents` の `INSERT` 文の `at` 列）、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
+どちらの実装も `clock` ではなく、adapter を動かすプロセスの壁時計（ミリ秒）で積む。`@mnemora/postgres` は
+`purgeExpiredEvents` の `INSERT` 文の `at` 列に `new Date()` を `toPgTimestamp` で渡し、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
 `buildStoredMemoryEvent` が `event.at ?? new Date()`（JS の壁時計）で埋める。⟹ テストで `clock` を固定しても、
-この `at` は固定されない。（Postgres の `now()` が「文の時刻」か「トランザクション開始の時刻」かは、確かめていない。）
+この `at` は固定されない。（`@mnemora/postgres` は 2026-09-30 まで SQL の `now()`（DB の時計・マイクロ秒）で積んでいたが、
+読み戻した `at` を `until` に渡すとその行自身が返らなかったため、[ADR 0427](./decisions/0427-events-purged-at-millisecond.md) でプロセスの時計に替えた。）
 `meta` の `olderThan` は別で、`purgeExpiredEventsForTenant` が `opts.now ?? new Date()` から保持期間で
 引いた値である（これも `Runtime` の `clock` ではない）。
 
