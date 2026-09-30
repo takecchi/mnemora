@@ -506,6 +506,100 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
+   * `createMemoryWithOutbox` の1件ぶんの書き込み（Memory の INSERT ... ON CONFLICT DO NOTHING、衝突時は既存行の
+   * SELECT、新規なら proposed ラベルと outbox ジョブ）を、**呼び出し元のトランザクション `tx` の中で**行う。
+   * `createMemoryWithOutbox` と `createMemoriesWithOutboxAndEvents`（ADR 0410）が共有する——書き写さない。
+   * 呼び出し元は `isContestedWithoutCompanion` の検査を済ませていること。
+   */
+  private async insertMemoryWithOutboxRows(
+    tx: SqlExecutor,
+    ctx: Ctx,
+    input: NewMemory,
+    jobKinds: OutboxJobKind[],
+    outboxNow: Date,
+  ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
+    const sourceObservationId = input.sourceObservationId ?? null;
+    const extractorVersion = input.extractorVersion ?? null;
+    const provenanceKind = input.provenance.kind;
+    const inserted = await tx.execute(sql`
+      INSERT INTO memories (
+        id, tenant_id, subject_id,
+        source_observation_id, extractor_version,
+        content, content_hash, digest, digest_source,
+        provenance_kind, provenance,
+        status, superseded_by_id, contested_with_id,
+        tags,
+        occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+        claim_key_subject, claim_key_predicate,
+        strength, half_life_hours, decay_floor_at,
+        decay_base_seq, decay_floor_seq, half_life_recalls,
+        embedding_status,
+        attributes,
+        created_at, updated_at
+      ) VALUES (
+        gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
+        ${sourceObservationId}, ${extractorVersion},
+        ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
+        ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
+        ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
+        ${sql.param(input.tags)},
+        ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
+        ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
+        ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
+        ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
+        ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
+        ${input.embeddingStatus},
+        ${JSON.stringify(input.attributes ?? {})}::jsonb,
+        now(), now()
+      )
+      ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
+        WHERE source_observation_id IS NOT NULL
+      DO NOTHING
+      RETURNING *
+    `);
+
+    if (inserted.rows.length === 0) {
+      const existing = await tx.execute(sql`
+        SELECT * FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND source_observation_id = ${sourceObservationId}
+          AND extractor_version IS NOT DISTINCT FROM ${extractorVersion}
+          AND content_hash = ${input.contentHash}
+        LIMIT 1
+      `);
+      return {
+        memory: rowToMemory(existing.rows[0] as unknown as MemoryRow),
+        created: false,
+        jobs: [],
+      };
+    }
+
+    const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+    // Issue #201 / ADR 0318: 同一トランザクションで proposed ラベルを作る
+    // （冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない——`createMemory`
+    // の doc コメントと同じ判断）。
+    await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
+    const jobs: OutboxJobRecord[] = [];
+    for (const kind of jobKinds) {
+      const jobResult = await tx.execute(sql`
+        INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
+        VALUES (
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          ${kind},
+          ${JSON.stringify({ memoryId: memory.id })}::jsonb,
+          ${toPgTimestamp(outboxNow)},
+          0,
+          ${toPgTimestamp(outboxNow)}
+        )
+        RETURNING *
+      `);
+      jobs.push(rowToOutboxJob(jobResult.rows[0] as unknown as OutboxJobRow));
+    }
+    return { memory, created: true, jobs };
+  }
+
+  /**
    * transactional outbox（docs/architecture.md §3.4・memory-model.md §11 行3）: Memory の
    * INSERT と outbox への埋め込みジョブ書き込みを同一トランザクションで行う。抽出の
    * 冪等キーに衝突した場合（`created: false`）は埋め込みジョブを作らない——既に埋め込み済み
@@ -525,91 +619,13 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     // Issue #1237: `createObservationWithOutbox` と同じ理由——省略時は1回だけ壁時計を読む。
     const outboxNow = opts?.now ?? new Date();
-    const sourceObservationId = input.sourceObservationId ?? null;
-    const extractorVersion = input.extractorVersion ?? null;
-    const provenanceKind = input.provenance.kind;
     const abortIfForgotten = opts?.abortIfForgotten;
 
     const result = await this.db.transaction(async (tx) => {
       // Issue #1226 / ADR 0375 決定7: INSERT より前に見直す（`assertNotForgottenForUpdate`
       // の doc コメント参照）。`abortIfForgotten` が空・省略なら何もしない。
       await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "createMemoryWithOutbox");
-      const inserted = await tx.execute(sql`
-        INSERT INTO memories (
-          id, tenant_id, subject_id,
-          source_observation_id, extractor_version,
-          content, content_hash, digest, digest_source,
-          provenance_kind, provenance,
-          status, superseded_by_id, contested_with_id,
-          tags,
-          occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
-          claim_key_subject, claim_key_predicate,
-          strength, half_life_hours, decay_floor_at,
-          decay_base_seq, decay_floor_seq, half_life_recalls,
-          embedding_status,
-          attributes,
-          created_at, updated_at
-        ) VALUES (
-          gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
-          ${sourceObservationId}, ${extractorVersion},
-          ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
-          ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
-          ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
-          ${sql.param(input.tags)},
-          ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
-          ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
-          ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-          ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
-          ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
-          ${input.embeddingStatus},
-          ${JSON.stringify(input.attributes ?? {})}::jsonb,
-          now(), now()
-        )
-        ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
-          WHERE source_observation_id IS NOT NULL
-        DO NOTHING
-        RETURNING *
-      `);
-
-      if (inserted.rows.length === 0) {
-        const existing = await tx.execute(sql`
-          SELECT * FROM memories
-          WHERE tenant_id = ${ctx.tenantId}
-            AND source_observation_id = ${sourceObservationId}
-            AND extractor_version IS NOT DISTINCT FROM ${extractorVersion}
-            AND content_hash = ${input.contentHash}
-          LIMIT 1
-        `);
-        return {
-          memory: rowToMemory(existing.rows[0] as unknown as MemoryRow),
-          created: false,
-          jobs: [],
-        };
-      }
-
-      const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
-      // Issue #201 / ADR 0318: 同一トランザクションで proposed ラベルを作る
-      // （冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない——`createMemory`
-      // の doc コメントと同じ判断）。
-      await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
-      const jobs: OutboxJobRecord[] = [];
-      for (const kind of jobKinds) {
-        const jobResult = await tx.execute(sql`
-          INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
-          VALUES (
-            gen_random_uuid(),
-            ${ctx.tenantId},
-            ${kind},
-            ${JSON.stringify({ memoryId: memory.id })}::jsonb,
-            ${toPgTimestamp(outboxNow)},
-            0,
-            ${toPgTimestamp(outboxNow)}
-          )
-          RETURNING *
-        `);
-        jobs.push(rowToOutboxJob(jobResult.rows[0] as unknown as OutboxJobRow));
-      }
-      return { memory, created: true, jobs };
+      return this.insertMemoryWithOutboxRows(tx, ctx, input, jobKinds, outboxNow);
     });
 
     if (result.created) {
@@ -618,6 +634,90 @@ export class PostgresMemoryStore implements MemoryStore {
       // 実行できるが、上のトランザクションが保持する行ロックと
       // `ShareUpdateExclusiveLock`（ADR 0143 決定3）を無用に重ねないため
       // （詳細は ./memories-statistics.ts のファイル doc）。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
+    }
+    return result;
+  }
+
+  /**
+   * [ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
+   * 抽出の全候補の Memory と `created` イベントを1つの `db.transaction()` で書く。
+   *
+   * - 候補ごとに **SAVEPOINT**（drizzle の入れ子の `tx.transaction`）を張り、保存できない候補
+   *   （本文の NUL など）が投げたら、その候補の書き込みだけを `ROLLBACK TO SAVEPOINT` で巻き戻して
+   *   `dropped` に積む。残りは書く。**SAVEPOINT が要る理由**: Postgres は文が失敗するとトランザクション全体が
+   *   aborted になり、外側で握りつぶしても以後の文が全部落ちる。
+   * - 全候補が落ちたら最初の例外を投げる（外側のトランザクションごと rollback。何も書かない）。
+   * - 全候補の成否が確定したあと、書けた候補のうち `created: true` のものだけ、`buildCreatedEvent(memory, dropped)` の
+   *   イベントを **同じトランザクションで** `memory_events` へ INSERT する（`EventStore.append` は経由しない——
+   *   `supersedeWithNewMemories` と同じ形）。この INSERT が失敗したら、Memory も outbox も含めて全部巻き戻る。
+   * - `status: "contested"` で `contestedWithId` が無い入力は、その候補だけ
+   *   {@link ContestedWithoutCompanionError} で落とす（今の経路で候補ごとに `createMemoryWithOutbox` が投げて
+   *   落とされていたのと同じ）。
+   */
+  async createMemoriesWithOutboxAndEvents(
+    ctx: Ctx,
+    news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
+    buildCreatedEvent: (
+      memory: Memory,
+      dropped: ReadonlyArray<{ index: number; error: unknown }>,
+    ) => NewMemoryEvent,
+    opts?: { now?: Date },
+  ): Promise<{
+    written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+    dropped: Array<{ index: number; error: unknown }>;
+  }> {
+    // Issue #1237: 省略時は1回だけ壁時計を読み、積む outbox 行すべてに使う。
+    const outboxNow = opts?.now ?? new Date();
+    const result = await this.db.transaction(async (tx) => {
+      const written: Array<{
+        index: number;
+        memory: Memory;
+        created: boolean;
+        jobs: OutboxJobRecord[];
+      }> = [];
+      const dropped: Array<{ index: number; error: unknown }> = [];
+      for (const [index, { input, jobKinds }] of news.entries()) {
+        try {
+          const one = await tx.transaction((savepoint) => {
+            if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+              throw new ContestedWithoutCompanionError("createMemoriesWithOutboxAndEvents", null);
+            }
+            return this.insertMemoryWithOutboxRows(savepoint, ctx, input, jobKinds, outboxNow);
+          });
+          written.push({ index, ...one });
+        } catch (error) {
+          dropped.push({ index, error });
+        }
+      }
+      if (written.length === 0 && dropped.length > 0) {
+        throw dropped[0]!.error;
+      }
+      for (const { memory, created } of written) {
+        if (!created) {
+          continue;
+        }
+        const event = buildCreatedEvent(memory, dropped);
+        await tx.execute(sql`
+          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+          VALUES (
+            gen_random_uuid(),
+            ${ctx.tenantId},
+            ${event.memoryId},
+            ${event.kind},
+            ${toPgTimestamp(event.at ?? new Date())},
+            ${JSON.stringify(event.actor)}::jsonb,
+            ${event.digestSnapshot ?? null},
+            ${event.sizeBeforeBytes ?? null},
+            ${JSON.stringify(event.meta)}::jsonb
+          )
+        `);
+      }
+      return { written, dropped };
+    });
+
+    if (result.written.some((entry) => entry.created)) {
+      // `createMemoryWithOutbox` と同じ理由・同じ位置（トランザクションの外側）。
       await maybeAnalyzeMemoriesAfterWrite(this.db);
     }
     return result;

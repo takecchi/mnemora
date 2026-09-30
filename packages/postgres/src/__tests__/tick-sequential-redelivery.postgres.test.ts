@@ -100,14 +100,27 @@ function crashable(inner: OutboxStore): { store: OutboxStore; state: { crash: bo
  * 候補を書いている途中でワーカーが止まる形を作る（候補の一部だけが書かれる）。`hangOnCreate` が n なら、
  * n 回目の `createMemoryWithOutbox` が決して返らない（プロセスが死んだのと同じ。例外にすると、止まったのではなく
  * 「保存できない候補」として落とされる）。止まった時点で `reached` が解決する。
+ *
+ * ADR 0410: 2つの store はどちらも `createMemoriesWithOutboxAndEvents`（全候補を1トランザクションで書く任意メソッド）を持つので、
+ * 抽出は `createMemoryWithOutbox` を呼ばず、「候補の一部だけが書かれて止まる」形は作れない。
+ * - `withoutBatchMethod`: この口を**持たない adapter** のふりをする（`undefined` を返す）。今までの
+ *   候補ごとの経路——一部だけ書かれて止まる形——を、この口を持たない adapter の振る舞いとして縛り続けるために使う。
+ * - `hangOnBatch`: `createMemoriesWithOutboxAndEvents` の呼び出しが決して返らない（コミットの前に止まる。何も書かれない）。
  */
 function hangableMemory(inner: MemoryStore): {
   store: MemoryStore;
-  state: { hangOnCreate: number; reached: Promise<void> };
+  state: {
+    hangOnCreate: number;
+    withoutBatchMethod: boolean;
+    hangOnBatch: boolean;
+    reached: Promise<void>;
+  };
 } {
   let signal = () => {};
   const state = {
     hangOnCreate: 0,
+    withoutBatchMethod: false,
+    hangOnBatch: false,
     reached: new Promise<void>((resolve) => {
       signal = resolve;
     }),
@@ -116,6 +129,17 @@ function hangableMemory(inner: MemoryStore): {
   const store = new Proxy(inner, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver) as unknown;
+      if (prop === "createMemoriesWithOutboxAndEvents" && typeof value === "function") {
+        if (state.withoutBatchMethod) return undefined;
+        return (...args: unknown[]) => {
+          if (state.hangOnBatch) {
+            state.hangOnBatch = false;
+            signal();
+            return new Promise(() => {});
+          }
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      }
       if (typeof value !== "function") return value;
       if (prop !== "createMemoryWithOutbox") return value.bind(target);
       return (...args: Parameters<MemoryStore["createMemoryWithOutbox"]>) => {
@@ -149,7 +173,7 @@ interface Kit {
   memoryStore: MemoryStore;
   eventStore: EventStore;
   crash: { crash: boolean };
-  memoryHang: { hangOnCreate: number; reached: Promise<void> };
+  memoryHang: ReturnType<typeof hangableMemory>["state"];
   upsertVector: (ctx: Ctx, memoryId: string) => Promise<void>;
   countVectors: (ctx: Ctx, memoryIds: string[]) => Promise<number>;
   listMemories: (
@@ -425,9 +449,11 @@ for (const [name, makeKit] of KITS) {
       ]);
     });
 
-    it("extract: 1回目が候補の一部だけを書いて止まると、再配達は残りを書かず、reextract で回復する", async () => {
+    it("extract（createMemoriesWithOutboxAndEvents を持たない adapter）: 1回目が候補の一部だけを書いて止まると、再配達は残りを書かず、reextract で回復する", async () => {
       nowMs = Date.parse("2030-01-01T00:00:00.000Z");
       const kit = await makeKit();
+      // ADR 0410: この口を持たない adapter のふり（持つ adapter は、全候補を1トランザクションで書くので、一部だけ書かれて止まらない。下の it）。
+      kit.memoryHang.withoutBatchMethod = true;
       extractOutputs = [
         ["候補1", "候補2"],
         ["候補1", "候補2"],
@@ -457,6 +483,33 @@ for (const [name, makeKit] of KITS) {
           .sort(),
       ).toEqual(["候補1", "候補2"]);
       expect(memories).toHaveLength(2);
+    });
+
+    it("extract（createMemoriesWithOutboxAndEvents を持つ adapter、ADR 0410）: 1回目が全候補のコミットの前に止まると何も書かれず、再配達が全候補と created を書く", async () => {
+      nowMs = Date.parse("2030-01-01T00:00:00.000Z");
+      const kit = await makeKit();
+      extractOutputs = [
+        ["候補1", "候補2"],
+        ["候補1", "候補2"],
+      ];
+      await kit.runtime.observe(ctx, { kind: "utterance", text: "発話", extract: "deferred" });
+      nowMs += 1000;
+      // 全候補を1トランザクションで書く呼び出しの途中でワーカーが止まる（この tick は返らない）。
+      // 1トランザクションなので、止まったときに書かれているものは無い（旧経路の「1件目だけ書かれた」は起きない）。
+      kit.memoryHang.hangOnBatch = true;
+      void kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
+      await kit.memoryHang.reached;
+      expect(await kit.listMemories(ctx)).toEqual([]);
+      nowMs += LEASE_MS * 2;
+      const redelivered = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
+      expect(redelivered.processed).toBe(1);
+      expect((await kit.listMemories(ctx)).map((m) => m.content).sort()).toEqual([
+        "候補1",
+        "候補2",
+      ]);
+      // 何も書かれていなかったので、再配達は抽出をやり直す（LLM の2回目の出力を使い切る）。
+      expect(extractOutputs).toEqual([]);
+      expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(2);
     });
   });
 }

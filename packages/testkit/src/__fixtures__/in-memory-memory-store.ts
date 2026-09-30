@@ -699,7 +699,10 @@ export class InMemoryMemoryStore implements MemoryStore {
   private createMemoryIdempotent(
     ctx: Ctx,
     input: NewMemory,
-    method: "createMemory" | "createMemoryWithOutbox" = "createMemory",
+    method:
+      | "createMemory"
+      | "createMemoryWithOutbox"
+      | "createMemoriesWithOutboxAndEvents" = "createMemory",
   ): IdempotentCreateResult<Memory> {
     // ADR 0140: createMemory/createMemoryWithOutbox 共通の入口。PostgresMemoryStore の
     // createMemory と同じ位置（何も書く前）で落とす——冪等衝突の判定より前に見る。
@@ -825,6 +828,117 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
     );
     return { memory: snapshot(memory), created: true, jobs: snapshot(jobs) };
+  }
+
+  /**
+   * 今の書き込みの状態（Memory・冪等キー・outbox・ラベル）を写し取り、呼ぶと**そこへ戻す**関数を返す。
+   * Postgres の SAVEPOINT／トランザクションの巻き戻しの代わり——この store は `await` を挟まない同期区間で
+   * 書くので、写してから戻すまでの間に他の書き込みは入らない。`supersedeWithNewMemories` と
+   * `createMemoriesWithOutboxAndEvents` が共有する。
+   *
+   * ⚠ 戻すのは上の4つだけ。`events`（共有配列）は呼び出し側が長さで切り戻す。
+   */
+  private captureWriteState(): () => void {
+    const memoryIdsBefore = new Set(this.memories.keys());
+    const outboxLengthBefore = this.outboxJobs.length;
+    const labelsBefore = new Map(this.labels);
+    // ADR 0375: `memoryLabels` も `labels` と同じロールバック対象——新設した構造をここで写し忘れると、
+    // 途中失敗した書き込みの label 紐付けだけが残ってしまう。
+    const memoryLabelsBefore = new Map(
+      [...this.memoryLabels].map(([key, names]) => [key, new Set(names)] as const),
+    );
+    const extractionIndexBefore = new Map(this.extractionIndex);
+    return () => {
+      for (const id of [...this.memories.keys()]) {
+        if (!memoryIdsBefore.has(id)) {
+          this.memories.delete(id);
+        }
+      }
+      this.outboxJobs.splice(outboxLengthBefore);
+      this.labels.clear();
+      for (const [key, value] of labelsBefore) this.labels.set(key, value);
+      this.memoryLabels.clear();
+      for (const [key, value] of memoryLabelsBefore) this.memoryLabels.set(key, value);
+      this.extractionIndex.clear();
+      for (const [key, value] of extractionIndexBefore) this.extractionIndex.set(key, value);
+    };
+  }
+
+  /**
+   * [ADR 0410](../../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
+   * 抽出の全候補の Memory と `created` イベントを、1つの同期区間（＝トランザクションの代わり）で書く。
+   *
+   * - 候補ごとに写し取り（`captureWriteState`）、保存できない候補（`createMemoryIdempotent` が投げる）は
+   *   その候補の書き込みだけを戻して `dropped` に積む（Postgres の SAVEPOINT に当たる）。
+   * - 全候補が落ちたら最初の例外を投げる（何も書かない）。
+   * - 全候補の成否が確定したあと、`created: true` の候補ぶんの `created` イベントを共有の `events` 配列へ積む。
+   *   ここで投げたら（イベントが書けない値・`events.push` が投げる）、Memory・outbox・ラベル・積みかけの
+   *   イベントも全部戻して、そのまま投げる。
+   * - ⚠ イベントは `InMemoryMemoryStore.events` に積まれる。`InMemoryEventStore` から読むには、第2引数に
+   *   `memoryStore.events` を渡して配列を共有すること（`InMemoryEventStore` のクラス doc）。共有しない組み立ての
+   *   `InMemoryEventStore` に対しては、この口を使った抽出の `created` は `EventStore.list` に出ない。
+   */
+  async createMemoriesWithOutboxAndEvents(
+    ctx: Ctx,
+    news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
+    buildCreatedEvent: (
+      memory: Memory,
+      dropped: ReadonlyArray<{ index: number; error: unknown }>,
+    ) => NewMemoryEvent,
+    opts?: { now?: Date },
+  ): Promise<{
+    written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+    dropped: Array<{ index: number; error: unknown }>;
+  }> {
+    // Issue #1237: 省略時は1回だけ壁時計を読み、積む outbox 行すべてに使う。
+    const outboxNow = opts?.now ?? new Date();
+    const restoreAll = this.captureWriteState();
+    const eventsLengthBefore = this.events.length;
+    const written: Array<{
+      index: number;
+      memory: Memory;
+      created: boolean;
+      jobs: OutboxJobRecord[];
+    }> = [];
+    const dropped: Array<{ index: number; error: unknown }> = [];
+    try {
+      for (const [index, { input, jobKinds }] of news.entries()) {
+        const restoreOne = this.captureWriteState();
+        try {
+          const { value: memory, created } = this.createMemoryIdempotent(
+            ctx,
+            input,
+            "createMemoriesWithOutboxAndEvents",
+          );
+          const jobs = created
+            ? jobKinds.map((kind) =>
+                this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
+              )
+            : [];
+          written.push({ index, memory, created, jobs });
+        } catch (error) {
+          restoreOne();
+          dropped.push({ index, error });
+        }
+      }
+      if (written.length === 0 && dropped.length > 0) {
+        throw dropped[0]!.error;
+      }
+      for (const { memory, created } of written) {
+        if (!created) {
+          continue;
+        }
+        this.events.push(buildStoredMemoryEvent(ctx, buildCreatedEvent(snapshot(memory), dropped)));
+      }
+    } catch (error) {
+      restoreAll();
+      this.events.splice(eventsLengthBefore);
+      throw error;
+    }
+    return {
+      written: written.map((entry) => snapshot(entry)),
+      dropped,
+    };
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
@@ -1116,14 +1230,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     //    ——そのときは、この呼び出しで先に作った Memory・冪等キー・outbox・ラベルを取り消して、
     //    何も起きなかったのと同じに見せる（Postgres は1トランザクションで巻き戻る）。
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
-    const outboxLengthBefore = this.outboxJobs.length;
-    const labelsBefore = new Map(this.labels);
-    // ADR 0375: `memoryLabels` も `labels` と同じロールバック対象——新設した構造を
-    // ここで写し忘れると、途中失敗した `news` の label 紐付けだけが残ってしまう。
-    const memoryLabelsBefore = new Map(
-      [...this.memoryLabels].map(([key, names]) => [key, new Set(names)] as const),
-    );
-    const extractionIndexBefore = new Map(this.extractionIndex);
+    const restoreWriteState = this.captureWriteState();
     try {
       for (const { input, jobKinds } of news) {
         const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
@@ -1137,18 +1244,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         created.push({ memory, created: true, jobs });
       }
     } catch (err) {
-      for (const entry of created) {
-        if (entry.created) {
-          this.memories.delete(entry.memory.id);
-        }
-      }
-      this.outboxJobs.splice(outboxLengthBefore);
-      this.labels.clear();
-      for (const [key, value] of labelsBefore) this.labels.set(key, value);
-      this.memoryLabels.clear();
-      for (const [key, value] of memoryLabelsBefore) this.memoryLabels.set(key, value);
-      this.extractionIndex.clear();
-      for (const [key, value] of extractionIndexBefore) this.extractionIndex.set(key, value);
+      restoreWriteState();
       throw err;
     }
 

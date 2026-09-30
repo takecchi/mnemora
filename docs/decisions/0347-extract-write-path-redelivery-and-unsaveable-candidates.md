@@ -186,3 +186,16 @@ fixture）で縛っていた。
 を持つ一致を件数を数える前に除くようにして、この退行を直した。本 ADR の決定1〜4（extract の
 再配達・保存できない候補の扱い）自体は変えていない——`createMemoryWithOutbox` の呼び出しを
 候補ごとに捕まえる形・全件書いてから `created` を積む形は、`8c45801` のまま残る。
+
+## 追記（2026-09-30）: 「`created` の追記が遅れる窓」は、任意メソッドを持つ store では閉じた（ADR 0410）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。本文は書き換えていない。
+
+上の「引き受けた負債」の「`created` の追記が遅れる窓が広がった」は、実害を出していた——`created` の `EventStore.append` が失敗すると
+記憶だけが残り、決定1の `listBySourceObservation` が再送・tick を素通りさせて、`created` が0件のまま残った（穴 D-3）。
+[ADR 0410](./0410-extract-created-event-in-same-transaction.md) が、`MemoryStore` の任意メソッド `createMemoriesWithOutboxAndEvents?` で、
+全候補の記憶・outbox・`created` を1つのトランザクションで書くようにして、この窓を閉じた。
+
+決定2〜4（保存できない候補だけを落とす・全件が落ちたら最初の例外を投げて何も書かない・`created` の `meta.droppedCandidates`・全候補が確定してから `created` を積む）は、
+**変えていない**——この口は同じ意味論を、候補ごとの SAVEPOINT と同じトランザクションの `created` の INSERT で守る。⚠ **口を持たない adapter は、本文の経路のまま**で、
+窓は残る（ADR 0410「引き受けた負債」）。

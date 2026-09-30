@@ -149,6 +149,7 @@ export class ContestedWithoutCompanionError extends Error {
       | "updateStatusWithEvent"
       | "createMemory"
       | "createMemoryWithOutbox"
+      | "createMemoriesWithOutboxAndEvents"
       | "supersedeWithNewMemories",
     readonly memoryId: MemoryId | null,
   ) {
@@ -1250,6 +1251,60 @@ export interface MemoryStore {
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+  }>;
+  /**
+   * [ADR 0410](../../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
+   * 抽出（`runtime.observe` の sync／`tick` の deferred の extract ジョブ）が書く「候補ごとの Memory」と、
+   * その `created` イベントを**1つのトランザクション**で書く。今の経路は候補ごとに
+   * `createMemoryWithOutbox` でコミットしたあと `EventStore.append` を別の文で呼ぶので、append が
+   * 失敗すると記憶だけが残り、再送・tick は `listBySourceObservation` で「在る」と見て素通りして
+   * `created` が0件のまま残る（ADR 0347 決定1）。この口はその窓を閉じる。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を壊す破壊的変更になる。
+   * 実装しない adapter は今日どおり `createMemoryWithOutbox` の候補ごとのループ＋別の `EventStore.append`
+   * のままでよい——**その adapter では取りこぼしが残る**（ADR 0410「引き受けた負債」）。
+   * runtime は、この口が**在るかどうか**だけで経路を選ぶ。撃って投げられたときに、旧経路で撃ち直さない
+   * （二重に書きうるため。ADR 0100 の `supersedeWithNewMemories` と同じ規律）。
+   *
+   * 意味論（ADR 0347 決定2〜4 を、1トランザクションの中で守る）:
+   * - `news` の各要素は {@link MemoryStore.createMemoryWithOutbox} と**同じ冪等経路**（ON CONFLICT。既存行と
+   *   衝突したら `created: false`、ジョブは積まない）。
+   * - 🔴 **候補ごとに書きを区切り（Postgres は SAVEPOINT）、保存できない候補（store が拒む値。本文の NUL
+   *   など）だけを巻き戻して `dropped` に積む。**残りの候補は書く。
+   * - 🔴 **全候補が落ちたら、最初の例外をそのまま投げ、何も書かない**（ADR 0347 決定2。例外の集合は増えない）。
+   * - 🔴 **`created` は、書けた候補（`created: true` のものだけ。冪等な再送〔`created: false`〕では積まない）に
+   *   ついて、全候補の成否が確定してから同じトランザクションで積む。**`buildCreatedEvent(memory, dropped)` が
+   *   返す {@link NewMemoryEvent} を、この store がそのまま `memory_events` へ INSERT する。`dropped` は
+   *   store が確定した「落とした候補」（`index` は `news` の索引、`error` は store が投げた例外そのもの）であり、
+   *   `meta.droppedCandidates` の組み立て（原因の最内の code/message・NUL と孤立サロゲートの置換・500 文字）
+   *   は core 側が行う——store は例外を返すだけである。
+   *   `buildCreatedEvent` は**同期・副作用なし**の関数で、書き込みの途中（トランザクションの中）で呼ばれる。
+   * - 🔴 **`created` の INSERT が失敗したら、トランザクション全体を巻き戻す**（記憶も outbox も残らない）。
+   *   この例外は `dropped` に混ぜず、そのまま投げる。
+   * - 戻り値の `written` は書けた候補（`created: false` の既存行を含む）を `news` の順に並べたもので、
+   *   `index` が `news` の索引である。`dropped` は落とした候補を `news` の順に並べたもの。
+   * - claim key の衝突検出（`detectContested`）はこの口の外——runtime が書いたあとに今どおり走らせる。
+   *
+   * ⚠ **範囲は抽出の経路だけである。**`reextract`・`consolidate`・`reflect` などは、この口を使わない
+   * （ADR 0410「残り」）。
+   *
+   * 🔴 **原子性の証拠ではない。**`supersedeWithNewMemories` と同じく、この口が在ることは「実装したと宣言した」
+   * ことしか意味しない。実際に測るのは適合テストと `packages/postgres` の歯である。
+   *
+   * ⭐ `opts.now` は `createMemoryWithOutbox` の同じ欄と同じ意味（積む outbox 行の `availableAt`/`createdAt`）。
+   * `abortIfForgotten` は取らない（抽出は材料の Memory を持たない）。
+   */
+  createMemoriesWithOutboxAndEvents?(
+    ctx: Ctx,
+    news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
+    buildCreatedEvent: (
+      memory: Memory,
+      dropped: ReadonlyArray<{ index: number; error: unknown }>,
+    ) => NewMemoryEvent,
+    opts?: { now?: Date },
+  ): Promise<{
+    written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+    dropped: Array<{ index: number; error: unknown }>;
   }>;
   /**
    * Issue #210: `docs/roadmap.md` §5.4「監査ログの既定保持期間」でオーナーが必須と決めた

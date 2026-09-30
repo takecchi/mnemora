@@ -366,6 +366,12 @@ export interface ObserveResult {
    * `digestSnapshot` は purge 前の digest）。`at` の順に読むと「消した後に作られた」と読めるが、実際は作られてから
    * 消され、作成の記録だけが遅れて積まれたものである。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture
    * で同じ（`observe-created-event-after-purge.postgres.test.ts`）。
+   *
+   * ⚠ **2026-09-30 追記（[ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)）: 上の段落は、
+   * `MemoryStore.createMemoriesWithOutboxAndEvents?` を持たない adapter の経路の話である。**持つ store
+   * （`@mnemora/postgres`・testkit の fixture）では、全候補の記憶と `created` を1つのトランザクションで書くので、
+   * 書いた記憶は `created` と一緒にコミットされるまで `forget`・`purge` の対象にならない——この窓は無い
+   * （上の歯は、口を外した store で今の経路を縛り続けている）。
    */
   memoryIds: MemoryId[];
   /**
@@ -4212,27 +4218,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * 新しく作られた Memory について `created` イベントを積む。
-   *
-   * ⚠ **このイベントは `memories` への INSERT と同一トランザクションではない**
-   * （`EventStore.append` は別コミット）。ADR 0100 が満たしたのは
-   * docs/memory-model.md §11 行5 が名指しした「旧行の更新」と「新 Memory の作成」の
-   * 対であり、`created` イベントはその要求文に含まれていない——この非同時性は
-   * ADR 0100 の「守れないもの」に記録してある。
+   * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
+   * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
+   * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
+   * INSERT する）が共有する——`meta` の中身が2つの経路でずれないように、組み立てはここ1箇所に置く
+   * （ADR 0410）。
    */
-  async function appendCreatedEvent(
+  function buildCreatedEventFor(
     ctx: Ctx,
     memory: Memory,
     observation: Observation,
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
-  ): Promise<void> {
+  ): NewMemoryEvent {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
         ? null
         : detectLanguageMismatch(observationPayloadText(observation), memory.content);
-    await deps.eventStore.append(ctx, {
+    return {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "created",
@@ -4261,7 +4265,34 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
         ...(languageMismatch !== null ? { languageMismatch } : {}),
       },
-    });
+    };
+  }
+
+  /**
+   * 新しく作られた Memory について `created` イベントを積む。
+   *
+   * ⚠ **このイベントは `memories` への INSERT と同一トランザクションではない**
+   * （`EventStore.append` は別コミット）。**この関数を通るのは次の経路だけである**（ADR 0410）:
+   * - 抽出（sync／deferred）のうち、`MemoryStore.createMemoriesWithOutboxAndEvents?` を**持たない** adapter。
+   *   持つ adapter は `createMemoriesFromCandidates` がその口で `created` を同じトランザクションに積む。
+   * - 抽出の外の経路——`reextract`（口の有無を問わず）・`consolidate`・`reflect` など（ADR 0410「残り」）。
+   *
+   * ADR 0100 が満たしたのは docs/memory-model.md §11 行5 が名指しした「旧行の更新」と「新 Memory の作成」の
+   * 対であり、`created` イベントはその要求文に含まれていない——この非同時性は ADR 0100 の「守れないもの」に
+   * 記録してあり、ADR 0410 が抽出の経路の一部について直した（残りは同じ記録のまま）。
+   */
+  async function appendCreatedEvent(
+    ctx: Ctx,
+    memory: Memory,
+    observation: Observation,
+    outcome: ExtractionOutcome,
+    failure: ExtractionFailure | null,
+    droppedCandidates: readonly DroppedCandidate[] = [],
+  ): Promise<void> {
+    await deps.eventStore.append(
+      ctx,
+      buildCreatedEventFor(ctx, memory, observation, outcome, failure, droppedCandidates),
+    );
   }
 
   /**
@@ -4601,12 +4632,50 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 店が丸ごと落ちている一時的な障害も、今どおり例外で伝わる）。
     // 落とした候補は、残った候補の `created` の `meta.droppedCandidates` に残す。そのために、候補を全件
     // 書いてから `created` を積む（落とした候補は、全件を書き終えるまで分からない）。
-    const written: Array<{ memory: Memory; created: boolean }> = [];
-    const dropped: DroppedCandidate[] = [];
-    let firstError: { error: unknown } | null = null;
+    // ADR 0410（穴 D-3）: store が `createMemoriesWithOutboxAndEvents?` を持つなら、全候補の書き込みと `created` の
+    // 追記を1つのトランザクションに任せる。**口が在るかどうかだけで選ぶ**——撃って投げられたときに、下の旧経路で
+    // 撃ち直さない（二重に書きうる。ADR 0100 の `supersedeWithNewMemories` と同じ規律）。
+    // 落とした候補の記述（`describeDroppedCandidate`）は core が作り、store は落とした候補の例外を返すだけ。
     // Issue #1237: この呼び出し全体で1回だけ読む——同じ observation から作る候補すべてに
     // 同じ outbox の `now` を使う（`consolidate`/`reflect` と同じ規律）。
     const outboxNow = clock.now();
+    const createBatch = deps.memoryStore.createMemoriesWithOutboxAndEvents;
+    if (createBatch !== undefined) {
+      for (const newMemory of newMemories) {
+        contentHashes.add(newMemory.contentHash);
+      }
+      const batch = await createBatch.call(
+        deps.memoryStore,
+        ctx,
+        newMemories.map((input) => ({ input, jobKinds })),
+        (memory, droppedByStore) =>
+          buildCreatedEventFor(
+            ctx,
+            memory,
+            observation,
+            outcome,
+            failure,
+            droppedByStore.map(({ index, error }) =>
+              describeDroppedCandidate(index, newMemories[index]!.contentHash, error),
+            ),
+          ),
+        { now: outboxNow },
+      );
+      for (const { memory, created } of batch.written) {
+        memoryIds.push(memory.id);
+        // Issue #372: 冪等な再送（`created === false`）では走らせない（下の旧経路と同じ）。
+        if (created && detectContested === true) {
+          const outcomeForMemory = await detectClaimKeyContested(ctx, memory);
+          if (outcomeForMemory !== null) {
+            contestedDetection.push(outcomeForMemory);
+          }
+        }
+      }
+      return { memoryIds, contentHashes, contestedDetection };
+    }
+    const written: Array<{ memory: Memory; created: boolean }> = [];
+    const dropped: DroppedCandidate[] = [];
+    let firstError: { error: unknown } | null = null;
     for (const [index, newMemory] of newMemories.entries()) {
       contentHashes.add(newMemory.contentHash);
       try {

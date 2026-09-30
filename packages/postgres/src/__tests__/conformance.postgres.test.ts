@@ -124,6 +124,8 @@ describeMemoryStoreConformance({
   // resolveContestedGroup を実装している。
   supportsMarkContestedGroup: true,
   supportsResolveContestedGroup: true,
+  // ADR 0410（穴 D-3）: PostgresMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
+  supportsCreateMemoriesWithOutboxAndEvents: true,
   listRelationsForMemory: async (ctx: Ctx, memoryId: string) => {
     const { db } = await getTestClient();
     return new PostgresRelationStore(db).listRelated(ctx, memoryId);
