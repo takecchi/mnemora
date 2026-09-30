@@ -164,3 +164,10 @@
   - 本番相当の規模・並行度での `opts.now`/`opts.at` 配線の性能影響（値を1つ追加で
     渡すだけであり、SQL の形は変えていないため影響は無いと考えているが、実測は
     していない）。
+
+## 追記 (2026-09-30): `events_purged` の `at` は、[ADR 0427](./0427-events-purged-at-millisecond.md) でプロセスの時計に変わった
+
+- 「引き受けた負債」1の「`events_purged` イベントの `at` も、Postgres では SQL の `now()` のままである」は、ADR 0427 の時点で事実と合わなくなった。
+  `@mnemora/postgres` の `purgeExpiredEvents`（`purgeExpiredEventsByRetention` も同じ本体を通る）は、`at` を SQL の `now()`（DB の時計・マイクロ秒）ではなく、
+  adapter を動かすプロセスの壁時計（`new Date()`）を `toPgTimestamp` で渡して積む（ミリ秒）。読み戻した `at` を `EventStore.list` の `until` に渡すと、その行自身が返らなかった穴（穴探し7巡目の W-1）を塞ぐためである。
+- `Runtime` の `clock` が届かない点は変わっていない（この ADR の範囲外に残したまま）。上の本文は書き換えていない。
