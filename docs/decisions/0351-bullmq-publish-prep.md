@@ -209,10 +209,10 @@ vitest worker が `EAGAIN`/`SIGABRT` で落ちることがあった——**こ�
 
 **上の本文は当時の記録として書き換えない。** 以下は PR・`git log`・`AGENTS.md` の現物で確かめた事実である。
 
-- **`@mnemora/bullmq` は npm に出た。** `v1.1.0` で公開された（[PR #1446](https://github.com/takecchi/mnemora/pull/1446)、`AGENTS.md` の package 表の bullmq の行）。初版はオーナーが手元から出した（`docs/release-v1.md` の段0）ため、provenance は無い（同 PR・`AGENTS.md`）。⚠ 公開日は、PR #1446 の本文と `AGENTS.md` が 2026-09-30、[PR #1454](https://github.com/takecchi/mnemora/pull/1454) の本文が 2026-09-29 と書いており、食い違っている。どちらが正しいかは npm 側で確かめていない。
+- **`@mnemora/bullmq` は npm に出た。** `v1.1.0` で公開された（[PR #1446](https://github.com/takecchi/mnemora/pull/1446)、`AGENTS.md` の package 表の bullmq の行）。初版はオーナーが手元から出した（`docs/release-v1.md` の段0）ため、provenance は無い（同 PR・`AGENTS.md`）。⚠ 公開日は、PR #1446 の本文と `AGENTS.md` が 2026-09-30、[PR #1454](https://github.com/takecchi/mnemora/pull/1454) の本文が 2026-09-29 と書いており、一見食い違う。【実測 2026-09-30】`npm view @mnemora/bullmq time` は `1.1.0` の公開を `2026-09-29T19:49:07Z`（UTC）と返した。日本時間では 2026-09-30 04:49 であり、2つの記述は時間帯の違いで説明がつく。
 - **`NEVER_PUBLISHED_TARGETS` から `"@mnemora/bullmq"` を外した**（PR #1454、`e269de6`）。`NEVER_PUBLISHED_TARGETS` は空の `Set` として残してある（`scripts/publish-pack-checks.mjs`）。外すには git 上の `packages/bullmq/package.json` の `version` が他の publish 対象と揃っている必要があったので、`0.0.0` を他と同じ置き値 `0.1.1` にした（版の権威は Release の tag のまま、ADR 0070）。
 - **「引き受けた負債」1（消し忘れを機械的には検知できない）**: 段0の実行後に消す、という手順は実行された（PR #1454）。一覧が手保守である性質は変わっていない。
 - **「引き受けた負債」2（`docs/release-v1.md` の手順がまだ実行されていない）**: 段0は実行された（PR #1446 本文の記述）。ただし手順が書かれたとおりに通ったかどうかは、この追記の書き手は確かめていない。
 - **「これが覆るとしたら」1（オーナーが段0を実行したとき ⟹ `NEVER_PUBLISHED_TARGETS` から消す）**: 発火し、PR #1454 で実行された。
 - 「これが覆るとしたら」3（初回 publish 前のパッケージが `PUBLISH_TARGETS` に加わったとき）のために、`Set` は空のまま残してある。
-- Issue #205 は、この追記の時点で閉じているかを確かめていない。
+- Issue #205 は閉じている（【実測 2026-09-30】`gh issue view 205` は `CLOSED`・`COMPLETED`、閉じた時刻は `2026-09-29T21:22:36Z`）。
