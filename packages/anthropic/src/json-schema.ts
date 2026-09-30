@@ -1,4 +1,5 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { toJSONSchema } from "zod";
 import type { z } from "zod";
 
 /**
@@ -60,10 +61,47 @@ export interface AnthropicJsonSchemaFormat {
 export function translateForAnthropicStructuredOutput<T>(
   schema: z.ZodType<T>,
 ): AnthropicJsonSchemaFormat {
+  assertNoRecord(schema);
   const format = zodOutputFormat(schema);
   // `format` は `{ type, schema, parse }` で、`parse` は関数を持つ。リクエストに載るのは
   // `{ type, schema }` だけであり、関数を持ったまま渡すと「何を送ったか」を JSON として
   // 検査できなくなる（テストで `JSON.stringify` の往復を検査する狙いもここにある）ため、
   // ここで `parse` を落として純データにする。
   return { type: "json_schema", schema: format.schema };
+}
+
+/**
+ * `z.record` を含むスキーマを、送る前に投げる（[ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)
+ * の 2026-09-30 追記、負債3）。
+ *
+ * **なぜ落とすか**: SDK の `zodOutputFormat` は `z.record` の翻訳で投げないが、`transformJSONSchema` が
+ * `additionalProperties: false` を強制し、キーと値の制約を `description` へ降格する——送る形は
+ * **空の object しか許さない**。翻訳が失敗しない代わりに、利用者から見て record の欄が例外無しで
+ * 黙って空になる。`@mnemora/openai` は同じ形を送る前に `schema_unsupported` にしている。
+ *
+ * **検出の作法**: zod 自身の `z.toJSONSchema` の `override` フックを使う。フックは走査の途中で、
+ * 訪れた全スキーマ（object の欄・配列の要素・optional/nullable/default の内側・union/intersection の枝・
+ * `z.lazy` の先）に対して呼ばれ、**循環（`z.lazy`・getter）は zod が `$ref` で止める**——自前の
+ * 再帰走査は持たない。依存するのは zod v4 の内部表現 `schema._zod.def.type === "record"`
+ * （`zod ^4.5.4`、実測 4.5.4 で確かめた。zod の版上げで表現が変われば歯が赤になる）。`unrepresentable: "any"` は、`z.tuple`・`z.date`・`transform` を
+ * **ここでは投げない**ため（それらは後段の `zodOutputFormat` が今までどおりの例外で落とす）。
+ *
+ * ⚠ **`z.lazy`・`default`・根が union は対象外のまま**（それ自体では落とさない。中に `z.record` が
+ * 在れば落ちる）。
+ */
+function assertNoRecord(schema: z.ZodType<unknown>): void {
+  let found = false;
+  toJSONSchema(schema, {
+    unrepresentable: "any",
+    cycles: "ref",
+    reused: "ref",
+    override: (ctx) => {
+      if (ctx.zodSchema._zod.def.type === "record") found = true;
+    },
+  });
+  if (found) {
+    throw new Error(
+      "z.record cannot be sent to Anthropic structured output: the translation forces additionalProperties: false, so the field would always be an empty object. Use an array of { key, value } instead.",
+    );
+  }
 }
