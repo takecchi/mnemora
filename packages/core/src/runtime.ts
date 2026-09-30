@@ -5282,6 +5282,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (!vector) {
         throw new Error("runtime.tick: embedding provider returned no vector");
       }
+      // 2026-09-30 / ADR 0393: provider が宣言した `space.dimensions` と違う長さのベクトルは
+      // upsert に渡さない。Postgres では pgvector の `expected N dimensions` で落ちて原因が
+      // SQL の失敗に見え、InMemory / Fake は黙って 'ready' にしていた。既存の失敗の経路
+      // （下の catch: `failed` を書いて投げ直す）に乗せる。
+      if (vector.length !== deps.embeddingProvider.space.dimensions) {
+        throw new Error(
+          `runtime.tick: embedding provider returned a vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
+        );
+      }
+      // 有限性も同じ形で確かめる（ADR 0393）。`NaN`/`Infinity` を upsert に渡さない。
+      const badIndex = vector.findIndex((x) => !Number.isFinite(x));
+      if (badIndex !== -1) {
+        throw new Error(
+          `runtime.tick: embedding provider returned a vector containing a non-finite value at index ${badIndex} (${String(vector[badIndex])})`,
+        );
+      }
       await deps.vectorStore.upsert(ctx, deps.embeddingProvider.space, memory.id, vector);
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {

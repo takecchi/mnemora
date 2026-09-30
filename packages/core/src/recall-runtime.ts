@@ -1039,6 +1039,22 @@ export async function runRecall(
         if (!Array.isArray(vector)) {
           throw new Error("embedding provider returned no vector for the query");
         }
+        // 2026-09-30 / ADR 0393: `space.dimensions` と違う長さも「ベクトルを返さなかった」と同じく
+        // `embedding_provider_unavailable` に丸める。以前は vectorStore まで届き、Postgres では
+        // `toComparableQuery` が全 0 に差し替えて `score_not_comparable` と記録され、理由の名前が
+        // provider によって違っていた。
+        if (vector.length !== deps.embeddingProvider.space.dimensions) {
+          throw new Error(
+            `embedding provider returned a query vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
+          );
+        }
+        // 有限性も同じ形で確かめる（ADR 0393）。次元違いと同じく `embedding_provider_unavailable` に丸める。
+        const badIndex = vector.findIndex((x) => !Number.isFinite(x));
+        if (badIndex !== -1) {
+          throw new Error(
+            `embedding provider returned a query vector containing a non-finite value at index ${badIndex} (${String(vector[badIndex])})`,
+          );
+        }
         queryVector = vector;
       } catch (err) {
         // 2026-09-29 追記（Issue #1200、ADR 0359）: abort による reject は

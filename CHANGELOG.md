@@ -130,6 +130,35 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目32。DB マイグレーションは無い。
   - 【確かめていないこと】実 API がこれらの食い違いを実際に返すか（実 API は使っていない）。
 
+- **`@mnemora/core` が、provider の返す埋め込みの長さ（`space.dimensions`）と成分の有限性を確かめるようになった——embed ジョブは次元違い・`NaN`/`Infinity` を失敗にし、recall は同じ問い合わせベクトルを `embedding_provider_unavailable` に丸める**
+  （[Issue #860](https://github.com/takecchi/mnemora/issues/860)、[ADR 0393](./docs/decisions/0393-core-checks-embedding-dimension.md)。
+  provider の側で応答を検査する [PR #1462](https://github.com/takecchi/mnemora/pull/1462)（`@mnemora/openai`）の続きで、provider を問わず
+  第三者の実装も含めて core が守る）。
+
+  以前は、次元違いの出力をそのまま `VectorStore` へ渡していた。結果は store と provider の組で決まっていた
+  （Postgres は pgvector の `expected N dimensions` で SQL の失敗に見える形で落ち、InMemory・Fake は黙って `'ready'` で保存した）。
+  今は、`Runtime.tick` の embed ジョブが `VectorStore.upsert` の前に、`recall()` が provider の問い合わせベクトルを使う前に、
+  `vector.length === embeddingProvider.space.dimensions` と、成分がすべて有限（`NaN`・`Infinity`・`-Infinity` が無い）ことを確かめる。
+
+  **破壊的変更として名乗るのは次の2点**:
+
+  1. **InMemory・Fake の経路で `'ready'` だったものが `failed` になる。** provider が `space.dimensions` と違う長さ、または `NaN`/`Infinity` を含むベクトルを返すと、
+     `@mnemora/testkit` の `InMemoryVectorStore` や core の `FakeVectorStore` では以前は `embeddingStatus: 'ready'` で保存され、
+     今は embed ジョブが失敗し `embeddingStatus: 'failed'`（`recall()` では `not_indexed`）になる。メッセージは期待した次元と実際の次元を含む。
+     自前の偽の provider に宣言と違う長さのベクトルを返させているテストは、新しく落ちる。
+  2. **recall の理由が `score_not_comparable` から `embedding_provider_unavailable` に変わる。** provider が返した問い合わせベクトルの長さが
+     違うか `NaN`/`Infinity` を含むとき、Postgres では以前は全 0 に差し替えられて `omitted` の `score_not_comparable` と記録されていた。今は「provider がベクトルを
+     返さなかった」と同じ `stage_skipped`（`candidate_generation`）の `embedding_provider_unavailable` になる。この理由の名前で分岐している
+     呼び出し側は、扱いを見直すこと。
+
+  - **公開 API の型・シグネチャは変わらない。**`Omission` の union も変わらない（既存の値の使われ方が変わるだけ）。
+  - **正常な provider（宣言どおりの次元を返す）では何も変わらない。**
+  - **変えなかったこと**: `RecallQuery.vector` を呼び出し側が直接渡した場合は検査しない（長さ違いは今も `score_not_comparable`）。
+    `VectorStore.search`/`searchMany` の直接呼び出しも変わらず、`@mnemora/postgres` の `toComparableQuery` も残した。
+    直接渡されたベクトルは、長さも有限性も検査しない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目33。DB マイグレーションは無い。
+  - 【確かめていないこと】Postgres での実機の再現（`DATABASE_URL` が無く、Postgres のテストは走らせていない）。実 API は使っていない。
+
 ### Added
 
 - **`RecallQuery.relationMaxCount?`（任意、正の整数 1〜1000）を足した**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目8、[PR #1470](https://github.com/takecchi/mnemora/pull/1470)、[ADR 0396](./docs/decisions/0396-recall-relation-max-count.md)）。段3（`contradiction_resolution`）の多者間の `contested` 群の同伴取得について、群ごとの上限件数を呼び出し側から変えられる。超えた分は従来どおり `over_limit { stage: "relation" }` に積まれる。探索の安全弁（群ごとに訪れた数の上限）はこの値の10倍に連動する。**省略すると従来の10（安全弁は100）のままで、`recall()` の結果は1バイトも変わらない。**型は任意の欄1つの追加のみで、DB マイグレーションは伴わない（`recalls.query` は jsonb にそのまま入る）。ADR 0381 §5.3・§6 の「専用のクエリ欄は作らない」を覆した。

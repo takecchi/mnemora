@@ -50,7 +50,8 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * 1件だけ渡すので、「渡した件数より少ない」はこのジョブでは「空」と同じである
  * （`runtime.ts` の `processEmbedJob`。歯は `packages/core/src/__tests__/embed-job-missing-vector.test.ts`）。
  *
- * ⚠ **2026-09-27 追記（[Issue #1070](https://github.com/takecchi/mnemora/issues/1070)）: 返ったベクトルが
+ * ⚠ **2026-09-27 追記（[Issue #1070](https://github.com/takecchi/mnemora/issues/1070)。**長さも有限性も
+ * 下の 2026-09-30 追記で覆った**）: 返ったベクトルが
  * 壊れているとき（長さが `space.dimensions` と違う・空・`NaN`/`Infinity` を含む）、
  * `packages/core` は embed ジョブで中身を確かめない。**そのまま `VectorStore.upsert`（`interfaces/vector-store.ts`） に
  * 渡すので、結果は store の adapter で決まる——`@mnemora/postgres` ではジョブが失敗して
@@ -58,6 +59,18 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * 保存される（書き分けは `VectorStore.upsert` の doc）。有限性を自分で確かめるのは
  * `@mnemora/local-embedding` だけである（Issue #992）。クエリの埋め込みの側は、
  * 長さ違い・有限でない値とも `recall()` が比較不能として扱う（`RecallQuery.vector` の doc）。
+ *
+ * ⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、ADR 0393）:
+ * 返ったベクトルの長さが `space.dimensions` と違うか、成分に
+ * `NaN`/`Infinity` を含むとき、`packages/core` は provider を問わずこれを弾く。**embed ジョブ
+ * （`runtime.ts` の `processEmbedJob`）は `VectorStore.upsert` の前に確かめ、崩れていればジョブを失敗にして
+ * `embeddingStatus: 'failed'` にする（次元違いなら期待した次元と実際の次元、有限でなければ位置と値を
+ * メッセージに含む）。`recall()` は、provider が返した問い合わせベクトルが崩れていれば
+ * 「ベクトルを返さなかった」と同じく `embedding_provider_unavailable` に丸める
+ * （`recall-runtime.ts`。`score_not_comparable` にはならない）。**呼び出し側が `RecallQuery.vector` を直接渡した
+ * 経路は検査しない**。歯は `packages/core/src/__tests__/embed-job-dimension-mismatch.test.ts`・
+ * `recall-query-embedding-dimension-mismatch.test.ts`・`embed-job-non-finite-vector.test.ts`・
+ * `recall-query-embedding-non-finite.test.ts`。
  *
  * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)）:
  * runtime はこの呼び出しに時間の上限を付けず、中断の口（`AbortSignal` など）も渡さない。**`embed` が

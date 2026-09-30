@@ -1845,6 +1845,32 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 0..n-1 でない）応答を返しているなら、偽物を直すこと。`instanceof` で捕まえたい場合、専用のエラー型・`kind` は
 無い（素の `Error`、メッセージは `OpenAIEmbeddingProvider:` で始まる）。
 
+### 33. core が provider の埋め込みの長さと有限性を検査するようになり、次元違い・有限でない成分を含む embed ジョブは失敗に、同じ問い合わせベクトルは `embedding_provider_unavailable` になった（`@mnemora/core`）
+
+[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+[ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)。
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 33 である**——項目32 は
+[PR #1462](https://github.com/takecchi/mnemora/pull/1462)（`OpenAIEmbeddingProvider.embed()` の応答検査）が使っている。
+
+**何が変わったか**: `Runtime.tick` の embed ジョブは `VectorStore.upsert` の前に、`recall()` は provider が返した問い合わせベクトルを
+使う前に、ベクトルの長さが `embeddingProvider.space.dimensions` と等しいこと、成分がすべて有限であることを確かめる。型・シグネチャは変わらない。
+中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、通らなくなる／記録が変わる**。次の2点である。
+既存の項目21・23・24・27 と同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。
+
+1. InMemory・Fake の経路で `'ready'` だったものが `failed` になる（provider が次元違い、または `NaN`/`Infinity` を含むベクトルを返したとき）。
+2. recall の `omitted` の理由が、provider が次元違い・有限でない成分を含む問い合わせベクトルを返したとき `score_not_comparable` から
+   `embedding_provider_unavailable` に変わる。
+
+**誰が影響を受けるか**: provider が宣言（`space.dimensions`）と違う長さ、または `NaN`/`Infinity` を含むベクトルを返す場合だけ。正常な provider では何も変わらない。
+`RecallQuery.vector` を直接渡す呼び出しと `VectorStore` の直接呼び出しは変わらない。
+
+**どう直すか**: 自前の偽の provider が宣言と違う長さ、または有限でない成分を返しているなら、`space.dimensions` か返すベクトルを直すこと。
+`omitted` の `score_not_comparable` の有無で「次元違い」を検出していた呼び出し側は、`embedding_provider_unavailable`
+（`stage_skipped`、`stage: 'candidate_generation'`）も見ること。
+
 **DB マイグレーション**: 要らない。
 
 ⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更に、この項目（Issue #860）が加わる。**

@@ -1731,9 +1731,16 @@ export interface RecallQuery {
    * `packages/postgres`・`packages/testkit`・`packages/core` の3実装が同じ振る舞いをする
    * （[ADR 0040 追記 2026-09-26](../../../docs/decisions/0040-zero-vector-never-returned.md)）。
    *
-   * **覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを渡したときの扱いは
+   * **覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを**直接**渡したときの扱いは
    * この決定の対象外（Issue #867「範囲外で見つけたもの」）——Postgres は例外、Fake は
-   * そのまま保存する食い違いが残ったままである。
+   * そのまま保存する食い違いが残ったままである。`Runtime.tick` の embed ジョブは
+   * 2026-09-30 から `upsert` の前に長さを確かめる（ADR 0393）。
+   *
+   * ⚠ **2026-09-30 追記（ADR 0393）: 長さの検査を受けるのは、`text` から provider が作った
+   * 問い合わせベクトルだけである。**この `vector` を呼び出し側が直接渡したときは core は長さを
+   * 確かめず（有限性も同じ）、上の「比較不能」の扱い（`score_not_comparable`）のままである。provider が返した
+   * 問い合わせベクトルの長さが違うときは `embedding_provider_unavailable` になる（`RecallQuery.text`
+   * の経路）。
    */
   vector?: number[];
   /** クエリのタグ。スコアの `tagMatch` にだけ効く（絞り込みではない）。 */
