@@ -1487,6 +1487,11 @@ Issue #200 は**2つの読み方**を挙げていた。
    段3と同じ札・同じ `countKind`）に計上する——原則1（争われている主張は、それを
    争う相手と必ず同時に提示する）を段3.5にも適用したものである。
 
+**⚠ `minSimilarity` と `scoreThreshold` が負のとき、順位は単調でなくなる**（2026-10-01 追記、今の振る舞いを書くだけ。[ADR 0433](./decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定2。負の値を断る直しはしていない）。
+手順6の順位キー `アンカー類似度 × decay × tagMatch × freshness × strength` は、**類似度が正のときだけ「古く弱い記憶ほど後ろ」になる**。類似度（`1 - distance`、コサイン距離は最大 2 まで出るので **−1 まで下がる**）が負の候補では、`decay` などの積が小さいほど積の絶対値が小さくなり、**順位キーが 0 に近づいて上位へ来る**——古く弱い（`decay` が小さい）記憶ほど、席の順位で先に座りうる。`RecallAssociationQuery.minSimilarity` の既定（0.5、`DEFAULT_ASSOCIATION_MIN_SIMILARITY`）は、負の類似度をそもそも通さない。**`minSimilarity` を負にしたときだけ**、負の類似度の候補が手順5を通り、この逆転が起きる。
+段2（§2 段2）にも同じ形がある。`total = affinity × decay × …` の `affinity`（`similarity`）が負のとき、`total` も負になり、`scoreThreshold`（既定 `DEFAULT_SCORE_THRESHOLD` = 0.1）が**負**（`total` が閾値以上になる）だとそれを通す。通った候補の並びは `total` の降順なので、負の `total` どうしでは`decay` が小さい（古く弱い）ものほど 0 に近く、上位に来る。
+⟹ **`minSimilarity`・`scoreThreshold` を負にする呼び出しでは、連想枠の席の順位と段2の並びが「新しく強いほど上」という向きを保たない**。この2つの欄は値の範囲を検査していない（`RecallAssociationQuerySchema.minSimilarity` は `z.number()`、`scoreThreshold` も同じ）。負にする理由が無ければ、どちらも 0 以上にすること。
+
 **⚠ `anchorCount` の天井は `RecallQuery.limit` である**（2026-09-17 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377)）——
 手順3のアンカーは「段3までに残った候補」全部からではなく、**そのうち `limit` の内側に入った分**から取る
 （`recall-runtime.ts` の `const anchors = withinLimit.slice(0, anchorCount)`、`withinLimit` は段2の

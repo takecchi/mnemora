@@ -303,7 +303,7 @@ const embeddingProvider = new OpenAIEmbeddingProvider({
 });
 
 // 埋め込み空間ごとのテーブルは、先に registerEmbeddingSpace で作っておく必要がある
-// （未登録の空間に PostgresVectorStore.upsert を呼ぶと "relation does not exist" で失敗する）。
+// （未登録の空間に PostgresVectorStore.upsert などを呼ぶと EmbeddingSpaceNotRegisteredError で失敗する。ADR 0433）。
 await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
 const runtime = createRuntime({

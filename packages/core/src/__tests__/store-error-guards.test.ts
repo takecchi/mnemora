@@ -14,6 +14,10 @@ import {
   isSourceMemoryStatusChangedError,
 } from "../interfaces/memory-store.js";
 import {
+  EmbeddingSpaceNotRegisteredError,
+  isEmbeddingSpaceNotRegisteredError,
+} from "../interfaces/vector-store.js";
+import {
   OutboxLeaseConflictError,
   isOutboxLeaseConflictError,
 } from "../interfaces/outbox-store.js";
@@ -86,6 +90,13 @@ const cases = [
     kind: "recall_output_validation",
     guard: isRecallOutputValidationError,
     make: () => new RecallOutputValidationError([], "r"),
+  },
+  // ADR 0433 決定3: 未登録の埋め込み空間。
+  {
+    name: "EmbeddingSpaceNotRegisteredError",
+    kind: "embedding_space_not_registered",
+    guard: isEmbeddingSpaceNotRegisteredError,
+    make: () => new EmbeddingSpaceNotRegisteredError({ provider: "p", model: "m", dimensions: 3 }),
   },
 ] as const;
 

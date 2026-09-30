@@ -10,7 +10,11 @@ import type {
   VectorHit,
   VectorStore,
 } from "@mnemora/core";
-import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
+import {
+  assertWellFormedCtx,
+  assertWellFormedFilter,
+  EmbeddingSpaceNotRegisteredError,
+} from "@mnemora/core";
 import type { Db } from "./client.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { listEmbeddingSpaceTables } from "./embedding-space-catalog.js";
@@ -435,6 +439,49 @@ class StatsPresenceGate {
 }
 
 /**
+ * ADR 0433 決定3: 空間の索引の表が無い（SQLSTATE 42P01 `undefined_table`）ときだけ、
+ * {@link EmbeddingSpaceNotRegisteredError} に包む。原因の Error は `cause` に残す。
+ *
+ * 判定は「`cause` の連鎖のどこかが `code === "42P01"` で、message がこの空間の表名の
+ * `does not exist` を指している」こと。別の表（`memories` など）が無いときの 42P01 は包まない。
+ */
+async function translateUnregisteredSpace<T>(
+  space: EmbeddingSpaceId,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isUndefinedTableError(error, embeddingSpaceTableName(space))) {
+      throw new EmbeddingSpaceNotRegisteredError(space, { cause: error });
+    }
+    throw error;
+  }
+}
+
+function isUndefinedTableError(error: unknown, table: string): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const { code, message, cause } = current as {
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    if (
+      code === "42P01" &&
+      typeof message === "string" &&
+      message.includes(`${table}" does not exist`)
+    ) {
+      return true;
+    }
+    current = cause;
+  }
+  return false;
+}
+
+/**
  * `VectorStore` の Postgres 実装（docs/architecture.md §5.2、pgvector）。
  *
  * 契約（docs/decisions/0003-memorystore-vs-vectorstore.md）: `MemoryStore` が真実の源であり、
@@ -469,8 +516,11 @@ class StatsPresenceGate {
  * である（ADR 0170「確かめていないこと」参照）。
  *
  * テーブルは事前に `registerEmbeddingSpace`（`./vector-space.ts`）で作られている前提。
- * 未登録の空間に対して呼ぶと Postgres の `relation does not exist` エラーになる
- * （黙って何もしない、より安全な失敗の仕方）。
+ * 未登録の空間に対して `upsert`・`search`・`searchMany`・`delete`・`getVectors` を呼ぶと
+ * `EmbeddingSpaceNotRegisteredError`（`kind: "embedding_space_not_registered"`、原因の Postgres の
+ * `relation does not exist`（42P01）は `cause`）になる（ADR 0433 決定3。黙って何もしない、より安全な
+ * 失敗の仕方）。形式不正な id だけの `delete`・`getVectors` と空の `searchMany` は空間を引かないので、
+ * 未登録でも例外にならない。
  */
 export class PostgresVectorStore implements VectorStore {
   // Issue #1301 / ADR 0367: インスタンスごとに1つ。`search()`/`searchMany()` の両方の
@@ -492,12 +542,14 @@ export class PostgresVectorStore implements VectorStore {
     assertWellFormedCtx(ctx);
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    await this.db.execute(sql`
-      INSERT INTO ${sql.identifier(table)} (tenant_id, memory_id, embedding, model, created_at)
-      VALUES (${ctx.tenantId}, ${memoryId}, ${toVectorLiteral(vector)}::vector, ${space.model}, now())
-      ON CONFLICT (tenant_id, memory_id)
-      DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, created_at = now()
-    `);
+    await translateUnregisteredSpace(space, () =>
+      this.db.execute(sql`
+        INSERT INTO ${sql.identifier(table)} (tenant_id, memory_id, embedding, model, created_at)
+        VALUES (${ctx.tenantId}, ${memoryId}, ${toVectorLiteral(vector)}::vector, ${space.model}, now())
+        ON CONFLICT (tenant_id, memory_id)
+        DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, created_at = now()
+      `),
+    );
     // Issue #360 / ADR 0194: 統計が実態から遅れているときだけ ANALYZE を撃つ（詳細は
     // ./embedding-statistics.ts のクラス doc）。ここでは呼ぶだけ——判断はそちらに集約する。
     await maybeAnalyzeAfterUpsert(this.db, space);
@@ -597,15 +649,17 @@ export class PostgresVectorStore implements VectorStore {
           sql`${queryLiteral}::vector`,
           opts.limit,
         );
-    const result = await withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
-      tx.execute(sql`
-        SELECT combined.memory_id AS memory_id, combined.distance AS distance
-        FROM (
-          ${branches}
-        ) AS combined
-        ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
-        LIMIT ${opts.limit}
-      `),
+    const result = await translateUnregisteredSpace(space, () =>
+      withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
+        tx.execute(sql`
+          SELECT combined.memory_id AS memory_id, combined.distance AS distance
+          FROM (
+            ${branches}
+          ) AS combined
+          ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
+          LIMIT ${opts.limit}
+        `),
+      ),
     );
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; distance: number };
@@ -749,19 +803,21 @@ export class PostgresVectorStore implements VectorStore {
       return sql`(${index}::int, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
 
-    const result = await withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
-      tx.execute(sql`
-        SELECT q.query_idx AS query_idx, hit.memory_id AS memory_id, hit.distance AS distance
-        FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_idx, qvec)
-        CROSS JOIN LATERAL (
-          SELECT combined.memory_id AS memory_id, combined.distance AS distance
-          FROM (
-            ${branches}
-          ) AS combined
-          ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
-          LIMIT ${opts.limit}
-        ) AS hit
-      `),
+    const result = await translateUnregisteredSpace(space, () =>
+      withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
+        tx.execute(sql`
+          SELECT q.query_idx AS query_idx, hit.memory_id AS memory_id, hit.distance AS distance
+          FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_idx, qvec)
+          CROSS JOIN LATERAL (
+            SELECT combined.memory_id AS memory_id, combined.distance AS distance
+            FROM (
+              ${branches}
+            ) AS combined
+            ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
+            LIMIT ${opts.limit}
+          ) AS hit
+        `),
+      ),
     );
     for (const row of result.rows) {
       const r = row as unknown as { query_idx: number; memory_id: string; distance: number };
@@ -784,9 +840,11 @@ export class PostgresVectorStore implements VectorStore {
     }
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    await this.db.execute(sql`
-      DELETE FROM ${sql.identifier(table)} WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
-    `);
+    await translateUnregisteredSpace(space, () =>
+      this.db.execute(sql`
+        DELETE FROM ${sql.identifier(table)} WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
+      `),
+    );
   }
 
   /**
@@ -950,11 +1008,13 @@ export class PostgresVectorStore implements VectorStore {
     assertSafeIdentifier(table);
     // tenant 境界を必ず掛ける（`VectorEntry` の doc・`search` の `filter.tenantId` と
     // 同じ境界）——他テナントの memoryId が偶然 validIds に混ざっていても返さない。
-    const result = await this.db.execute(sql`
-      SELECT memory_id AS memory_id, embedding::text AS embedding
-      FROM ${sql.identifier(table)}
-      WHERE tenant_id = ${ctx.tenantId} AND memory_id = ANY(${sql.param(validIds)}::uuid[])
-    `);
+    const result = await translateUnregisteredSpace(space, () =>
+      this.db.execute(sql`
+        SELECT memory_id AS memory_id, embedding::text AS embedding
+        FROM ${sql.identifier(table)}
+        WHERE tenant_id = ${ctx.tenantId} AND memory_id = ANY(${sql.param(validIds)}::uuid[])
+      `),
+    );
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; embedding: string };
       return { memoryId: r.memory_id, vector: parseVectorLiteral(r.embedding) };

@@ -54,6 +54,25 @@ export function normalizeClaimKeyPart(value: string): string {
   return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, "_");
 }
 
+/**
+ * ADR 0433 決定1: 正規化のあとの `subject`・`predicate` の長さの上限（**コードポイント**の数）。
+ * これを超えた要素を含む鍵は、`deriveClaimKeys` が `null` にする。
+ *
+ * Postgres の `idx_memories_claim_key`（btree）は1行 2704 バイトを超えると INSERT が落ちる。
+ * UTF-8 で1コードポイントは最大4バイトなので、256 字 × 4 バイト × 2（subject と predicate）= 2048 バイト、
+ * 残り 656 バイトを `tenant_id`・`subject_id`・行の見出しに残す。数え方は `Array.from`（UTF-16 の単位
+ * ではなくコードポイント。絵文字などのサロゲートペアを1と数える）。
+ */
+const MAX_CLAIM_KEY_PART_CODE_POINTS = 256;
+
+function exceedsClaimKeyPartLimit(value: string): boolean {
+  // UTF-16 の単位数はコードポイント数以上なので、これ以下なら数えるまでもなく上限内
+  if (value.length <= MAX_CLAIM_KEY_PART_CODE_POINTS) {
+    return false;
+  }
+  return Array.from(value).length > MAX_CLAIM_KEY_PART_CODE_POINTS;
+}
+
 /** `subject`/`predicate` の両方に {@link normalizeClaimKeyPart} を適用する。 */
 export function normalizeClaimKey(key: ClaimKey): ClaimKey {
   return {
@@ -154,6 +173,10 @@ export interface DeriveClaimKeysResult {
    * `null` になる——**部分的な対応付けを推測ででっち上げない**（`AGENTS.md`「機械には
    * 検出まで」と同じ規律。長さが合わない時点で、どの鍵がどの候補に対応するかを機械的に
    * 決める方法が無い）。
+   *
+   * 要素単位でも `null` になる: 正規化のあとで `subject`・`predicate` のどちらかが空文字列
+   * になったとき、または長さが上限（256 コードポイント、ADR 0433 決定1）を超えたとき。
+   * 後者は Postgres の索引の1行の上限を超えて INSERT が落ちるのを防ぐ。印（`failure`）は付かない。
    */
   claimKeys: (ClaimKey | null)[];
   /**
@@ -238,9 +261,18 @@ export async function deriveClaimKeys(
       // `{ subject: "", predicate: "" }` のまま返すと、無関係な複数の Memory が
       // 同じ「空の鍵」で誤って一致し、`detectClaimKeyContested` が的外れに
       // `contested` を立ててしまう（実測、`__tests__/claim-key.test.ts`）。
+      //
+      // ADR 0433 決定1: 正規化のあとで長さが上限（{@link MAX_CLAIM_KEY_PART_CODE_POINTS}）を超えた
+      // 要素も、同じ形で `null` にする。索引の1行の上限を超える値は INSERT を落とし、observation
+      // だけが残って memory が 0 件になるため。印（`failure`）は付けない——空白だけの要素と同じ扱い。
       claimKeys: result.claims.map((claim) => {
         const normalized = normalizeClaimKey(claim);
-        return normalized.subject === "" || normalized.predicate === "" ? null : normalized;
+        return normalized.subject === "" ||
+          normalized.predicate === "" ||
+          exceedsClaimKeyPartLimit(normalized.subject) ||
+          exceedsClaimKeyPartLimit(normalized.predicate)
+          ? null
+          : normalized;
       }),
       failure: null,
     };

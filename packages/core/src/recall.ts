@@ -1970,6 +1970,12 @@ export interface RecallQuery {
    * 既定値 `DEFAULT_SCORE_THRESHOLD`（0.1）を置く——強い根拠がある値ではなく、
    * 「明らかに無関係な候補（類似度が低い、または大きく減衰した候補）を落とす」
    * という最低限の閾値である。呼び出し側が上書きできる。
+   *
+   * ⚠ **負にすると、段2の並びが単調でなくなりうる**（[ADR 0433](../../../docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定2。
+   * 値の範囲は検査していない）。`ScoreBreakdown.total` は類似度が負の候補で負になる
+   * （コサイン距離は最大 2 まで出るので `similarity` は −1 まで下がる）。閾値が負だと、その候補が
+   * 段2を通り、並びは `total` の降順なので、負の `total` どうしでは `decay` が小さい（古く弱い）ものほど
+   * 0 に近く、**上位に来る**。負にする理由が無ければ 0 以上にすること（docs/recall.md §9.2）。
    */
   scoreThreshold?: number | undefined;
   /**
@@ -2324,6 +2330,14 @@ export interface RecallAssociationQuery {
    * `scoreThreshold` の値をそのまま流用すると、単位の違う2つの閾値が
    * 同じ数字を共有する偶然の一致になり、どちらかを見直すときにもう片方を
    * 巻き込む——だから独立の定数を置く。
+   *
+   * ⚠ **負の値にすると、連想枠の席の順位が単調でなくなる**（[ADR 0433](../../../docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定2。
+   * 値の範囲は検査していない。負の値を断る直しもしていない）。席の順位キーは
+   * `アンカー類似度 × decay × tagMatch × freshness × strength` で、類似度が負の候補では、
+   * 積の絶対値が小さい（`decay` が小さい、つまり古く弱い）ほど 0 に近く、**上位に来る**。
+   * 既定（{@link DEFAULT_ASSOCIATION_MIN_SIMILARITY}）は負の類似度を通さないので、この逆転は
+   * `minSimilarity` を負にしたときだけ起きる。負にする理由が無ければ 0 以上にすること
+   * （docs/recall.md §9.2）。
    */
   minSimilarity?: number;
 }

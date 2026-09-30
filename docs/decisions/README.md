@@ -442,5 +442,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0428](./0428-provider-abort-reason-and-error-guards.md) | provider を直に呼んだときの abort の reject を `signal.reason` に揃え、openai・anthropic の例外に判定関数を足す | 採用 (2026-09) |
 | [0429](./0429-exact-optional-property-types-input-types.md) | 入力側の公開型の任意欄を `?: T \| undefined` に広げ、`exactOptionalPropertyTypes: true` の利用者から `undefined` を渡せるようにする | 採用 (2026-09) |
 | [0430](./0430-concurrent-create-erase-and-standalone-params.md) | 同時呼び出しで落ちる2つの口（trigram store の `create()`、同じテナントへの `eraseTenant`）を直列にし、公開の独立関数の例外からも `params` を落とす | 採用 (2026-09) |
+| [0433](./0433-claim-key-length-space-error-reembed-limit.md) | claim key の長さに上限を置く・負の類似度の順位を文書に書く・未登録の埋め込み空間を型付きの例外にする・`reembed` の `limit` を入口で検査する | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
