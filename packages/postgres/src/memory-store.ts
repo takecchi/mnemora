@@ -257,6 +257,155 @@ async function conflictAfterEmptyUpdate(
 }
 
 /**
+ * ADR 0439: 書き込み口が受け取る、別の行への参照（`superseded_by_id`・`contested_with_id`・`source_observation_id`・
+ * `recall_usages` の recall と memory）の入口の検査。DB へ投げる前に、uuid の形でない id を「`ctx` のテナントに無い」と
+ * 同じ message で弾き（実在しない・別テナントと区別しない）、大文字の uuid は小文字にそろえる。
+ * `null`・`undefined` は「参照しない」。**空文字は参照として扱う**（uuid の形でないので弾かれる）。
+ */
+type RefKind = "memory" | "observation" | "recall";
+
+function refNotFound(kind: RefKind, id: string): Error {
+  return new Error(`PostgresMemoryStore: ${kind} not found for tenant: ${id}`);
+}
+
+function checkedRef(kind: RefKind, id: string | null | undefined): string | null {
+  if (id === null || id === undefined) {
+    return null;
+  }
+  if (!isUuidLike(id)) {
+    throw refNotFound(kind, id);
+  }
+  return id.toLowerCase();
+}
+
+/**
+ * ADR 0439: 「`id` の行が `ctx` のテナントに在る」を表す述語（`id` は uuid の形に検査済みの値、または `NULL`）。
+ * `NULL` は参照しないので真。**書く文の中に置く**（検査と書き込みの間に別の文を挟まない）。
+ */
+function refExists(table: "memories" | "observations" | "recalls", tenantId: string, id: SQL): SQL {
+  return sql`(${id}::uuid IS NULL OR EXISTS (
+    SELECT 1 FROM ${sql.raw(table)} rf WHERE rf.tenant_id = ${tenantId} AND rf.id = ${id}::uuid
+  ))`;
+}
+
+/**
+ * `UPDATE memories SET superseded_by_id = …` が0行だったときの切り分け（ADR 0439）。対象の行が無い・`supersededById` が
+ * `ctx` のテナントの記憶でない・`expectedStatus` が違う、の3つを、この順で別々の例外にする。
+ */
+async function explainEmptyStatusUpdate(
+  exec: SqlExecutor,
+  ctx: Ctx,
+  id: MemoryId,
+  supersededById: string | null,
+  expectedStatus: MemoryStatus | undefined,
+): Promise<Error> {
+  const current = await exec.execute(sql`
+    SELECT status, ${refExists("memories", ctx.tenantId, sql`${supersededById}`)} AS ref_ok
+    FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+  `);
+  if (current.rows.length === 0) {
+    return refNotFound("memory", id);
+  }
+  const row = current.rows[0] as unknown as { status: MemoryStatus; ref_ok: boolean };
+  if (supersededById !== null && !row.ref_ok) {
+    return refNotFound("memory", supersededById);
+  }
+  if (expectedStatus === undefined) {
+    return refNotFound("memory", id);
+  }
+  return new MemoryStatusConflictError(id, expectedStatus, row.status);
+}
+
+/**
+ * `memories` へ1行を書く INSERT ... ON CONFLICT DO NOTHING（`createMemory`・`createMemoryWithOutbox`・
+ * `createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` が共有する。書き写さない）。
+ *
+ * ADR 0439: `sourceObservationId`・`supersededById`・`contestedWithId` が `ctx` のテナントの行であることを、
+ * **同じ SQL 文の中で**確かめる（`WITH chk AS (SELECT … EXISTS …), ins AS (INSERT … SELECT … FROM chk WHERE …)`）。
+ * 外部キーは `observations(id)`・`memories(id)` だけでテナントを含まないので、検査が無いと別テナントの id を指す行が
+ * 書けた。拒まれたときは行を書かずに投げる。`ON CONFLICT DO NOTHING` の「書かなかった」と検査の「拒んだ」は、
+ * 戻り値の `*_ok` で区別する（どちらも挿入は0行）。
+ *
+ * 書いたら行を、冪等の衝突で書かなかったら `null` を返す。
+ */
+async function insertMemoryRow(
+  exec: SqlExecutor,
+  ctx: Ctx,
+  input: NewMemory,
+  method: Parameters<typeof translateClaimKeyIndexLimit>[0],
+): Promise<MemoryRow | null> {
+  const sourceObservationId = checkedRef("observation", input.sourceObservationId);
+  const supersededById = checkedRef("memory", input.supersededById);
+  const contestedWithId = checkedRef("memory", input.contestedWithId);
+  const extractorVersion = input.extractorVersion ?? null;
+  const provenanceKind = input.provenance.kind;
+  const result = await translateClaimKeyIndexLimit(method, ctx, input, () =>
+    exec.execute(sql`
+      WITH chk AS (
+        SELECT
+          ${refExists("observations", ctx.tenantId, sql`${sourceObservationId}`)} AS ref_source_ok,
+          ${refExists("memories", ctx.tenantId, sql`${supersededById}`)} AS ref_superseded_ok,
+          ${refExists("memories", ctx.tenantId, sql`${contestedWithId}`)} AS ref_contested_ok
+      ), ins AS (
+        INSERT INTO memories (
+          id, tenant_id, subject_id,
+          source_observation_id, extractor_version,
+          content, content_hash, digest, digest_source,
+          provenance_kind, provenance,
+          status, superseded_by_id, contested_with_id,
+          tags,
+          occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+          claim_key_subject, claim_key_predicate,
+          strength, half_life_hours, decay_floor_at,
+          decay_base_seq, decay_floor_seq, half_life_recalls,
+          embedding_status,
+          attributes,
+          created_at, updated_at
+        )
+        SELECT
+          gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
+          ${sourceObservationId}::uuid, ${extractorVersion},
+          ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
+          ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
+          ${input.status ?? "active"}, ${supersededById}::uuid, ${contestedWithId}::uuid,
+          ${sql.param(input.tags)},
+          ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
+          ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
+          ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
+          ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
+          ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
+          ${input.embeddingStatus},
+          ${JSON.stringify(input.attributes ?? {})}::jsonb,
+          now(), now()
+        FROM chk
+        WHERE chk.ref_source_ok AND chk.ref_superseded_ok AND chk.ref_contested_ok
+        ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
+          WHERE source_observation_id IS NOT NULL
+        DO NOTHING
+        RETURNING *
+      )
+      SELECT chk.ref_source_ok, chk.ref_superseded_ok, chk.ref_contested_ok, ins.*
+      FROM chk LEFT JOIN ins ON TRUE
+    `),
+  );
+  const row = result.rows[0] as unknown as MemoryRow & {
+    ref_source_ok: boolean;
+    ref_superseded_ok: boolean;
+    ref_contested_ok: boolean;
+  };
+  if (!row.ref_source_ok) {
+    throw refNotFound("observation", sourceObservationId!);
+  }
+  if (!row.ref_superseded_ok) {
+    throw refNotFound("memory", supersededById!);
+  }
+  if (!row.ref_contested_ok) {
+    throw refNotFound("memory", contestedWithId!);
+  }
+  return row.id === null ? null : row;
+}
+
+/**
  * `memory_events` へ複数行を**1文**で入れ、**入力と同じ順**で返す（Issue #1449 PR1、ADR 0401）。
  * 行の id は JS 側で採番し、`RETURNING` の順序に依存せず id で入力順へ戻す。
  * 各列の式は、旧実装のメンバーごとの `INSERT ... VALUES` と同じ（`at` は `toPgTimestamp` の
@@ -518,7 +667,6 @@ export class PostgresMemoryStore implements MemoryStore {
     assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
-    const provenanceKind = input.provenance.kind;
 
     // Issue #201 / ADR 0318: 新しく作った Memory の `tags` から `proposed` ラベルを
     // 同一トランザクションで作るため、このメソッド自身がトランザクションを開く
@@ -528,46 +676,9 @@ export class PostgresMemoryStore implements MemoryStore {
     // （PR #724 の追加をそのまま引き継ぐ）。Issue #371: `claim_key_subject`/
     // `claim_key_predicate` 列を足した（PR #736 の追加をそのまま引き継ぐ）。
     const result = await this.db.transaction(async (tx) => {
-      const inserted = await translateClaimKeyIndexLimit("createMemory", ctx, input, () =>
-        tx.execute(sql`
-        INSERT INTO memories (
-          id, tenant_id, subject_id,
-          source_observation_id, extractor_version,
-          content, content_hash, digest, digest_source,
-          provenance_kind, provenance,
-          status, superseded_by_id, contested_with_id,
-          tags,
-          occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
-          claim_key_subject, claim_key_predicate,
-          strength, half_life_hours, decay_floor_at,
-          decay_base_seq, decay_floor_seq, half_life_recalls,
-          embedding_status,
-          attributes,
-          created_at, updated_at
-        ) VALUES (
-          gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
-          ${sourceObservationId}, ${extractorVersion},
-          ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
-          ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
-          ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
-          ${sql.param(input.tags)},
-          ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
-          ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
-          ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-          ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
-          ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
-          ${input.embeddingStatus},
-          ${JSON.stringify(input.attributes ?? {})}::jsonb,
-          now(), now()
-        )
-        ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
-          WHERE source_observation_id IS NOT NULL
-        DO NOTHING
-        RETURNING *
-      `),
-      );
+      const insertedRow = await insertMemoryRow(tx, ctx, input, "createMemory");
 
-      if (inserted.rows.length === 0) {
+      if (insertedRow === null) {
         const existing = await tx.execute(sql`
           SELECT * FROM memories
           WHERE tenant_id = ${ctx.tenantId}
@@ -579,7 +690,7 @@ export class PostgresMemoryStore implements MemoryStore {
         return { memory: rowToMemory(existing.rows[0] as unknown as MemoryRow), created: false };
       }
 
-      const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+      const memory = rowToMemory(insertedRow);
       await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
       return { memory, created: true };
     });
@@ -614,47 +725,9 @@ export class PostgresMemoryStore implements MemoryStore {
     assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
-    const provenanceKind = input.provenance.kind;
-    const inserted = await translateClaimKeyIndexLimit(method, ctx, input, () =>
-      tx.execute(sql`
-      INSERT INTO memories (
-        id, tenant_id, subject_id,
-        source_observation_id, extractor_version,
-        content, content_hash, digest, digest_source,
-        provenance_kind, provenance,
-        status, superseded_by_id, contested_with_id,
-        tags,
-        occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
-        claim_key_subject, claim_key_predicate,
-        strength, half_life_hours, decay_floor_at,
-        decay_base_seq, decay_floor_seq, half_life_recalls,
-        embedding_status,
-        attributes,
-        created_at, updated_at
-      ) VALUES (
-        gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
-        ${sourceObservationId}, ${extractorVersion},
-        ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
-        ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
-        ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
-        ${sql.param(input.tags)},
-        ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
-        ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
-        ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-        ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
-        ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
-        ${input.embeddingStatus},
-        ${JSON.stringify(input.attributes ?? {})}::jsonb,
-        now(), now()
-      )
-      ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
-        WHERE source_observation_id IS NOT NULL
-      DO NOTHING
-      RETURNING *
-    `),
-    );
+    const insertedRow = await insertMemoryRow(tx, ctx, input, method);
 
-    if (inserted.rows.length === 0) {
+    if (insertedRow === null) {
       const existing = await tx.execute(sql`
         SELECT * FROM memories
         WHERE tenant_id = ${ctx.tenantId}
@@ -670,7 +743,7 @@ export class PostgresMemoryStore implements MemoryStore {
       };
     }
 
-    const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+    const memory = rowToMemory(insertedRow);
     // Issue #201 / ADR 0318: 同一トランザクションで proposed ラベルを作る
     // （冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない——`createMemory`
     // の doc コメントと同じ判断）。
@@ -978,34 +1051,26 @@ export class PostgresMemoryStore implements MemoryStore {
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
+    // ADR 0439: `supersededById` は `ctx` のテナントの記憶を指すこと。形が壊れていれば DB へ投げる前に弾く。
+    const supersededById = checkedRef("memory", opts?.supersededById);
     const expectedStatus = opts?.expectedStatus;
     const statusCondition =
       expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
     const result = await this.db.execute(sql`
       UPDATE memories
       SET status = ${status},
-          superseded_by_id = COALESCE(${opts?.supersededById ?? null}, superseded_by_id),
+          superseded_by_id = COALESCE(${supersededById}::uuid, superseded_by_id),
           updated_at = now()
       WHERE tenant_id = ${ctx.tenantId} AND id = ${id} ${statusCondition}
+        AND ${refExists("memories", ctx.tenantId, sql`${supersededById}`)}
       RETURNING *
     `);
     if (result.rows.length > 0) {
       return rowToMemory(result.rows[0] as unknown as MemoryRow);
     }
 
-    if (expectedStatus === undefined) {
-      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
-    }
-
     // 0行だった理由を切り分けるための読み直し（上記 doc コメント参照）。
-    const current = await this.db.execute(sql`
-      SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
-    `);
-    if (current.rows.length === 0) {
-      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
-    }
-    const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
-    throw new MemoryStatusConflictError(id, expectedStatus, observedStatus);
+    throw await explainEmptyStatusUpdate(this.db, ctx, id, supersededById, expectedStatus);
   }
 
   /**
@@ -1044,6 +1109,8 @@ export class PostgresMemoryStore implements MemoryStore {
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
+    // ADR 0439: `updateStatus` と同じ（`supersededById` は `ctx` のテナントの記憶を指すこと）。
+    const supersededById = checkedRef("memory", opts.supersededById);
     const expectedStatus = opts.expectedStatus;
     const statusCondition =
       expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
@@ -1052,25 +1119,16 @@ export class PostgresMemoryStore implements MemoryStore {
       const result = await tx.execute(sql`
         UPDATE memories
         SET status = ${status},
-            superseded_by_id = COALESCE(${opts.supersededById ?? null}, superseded_by_id),
+            superseded_by_id = COALESCE(${supersededById}::uuid, superseded_by_id),
             updated_at = now()
         WHERE tenant_id = ${ctx.tenantId} AND id = ${id} ${statusCondition}
+          AND ${refExists("memories", ctx.tenantId, sql`${supersededById}`)}
         RETURNING *
       `);
 
       if (result.rows.length === 0) {
-        if (expectedStatus === undefined) {
-          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
-        }
         // 0行だった理由を切り分けるための読み直し（`updateStatus` の doc コメント参照）。
-        const current = await tx.execute(sql`
-          SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
-        `);
-        if (current.rows.length === 0) {
-          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
-        }
-        const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
-        throw new MemoryStatusConflictError(id, expectedStatus, observedStatus);
+        throw await explainEmptyStatusUpdate(tx, ctx, id, supersededById, expectedStatus);
       }
 
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
@@ -1198,52 +1256,10 @@ export class PostgresMemoryStore implements MemoryStore {
       for (const { input, jobKinds } of news) {
         const sourceObservationId = input.sourceObservationId ?? null;
         const extractorVersion = input.extractorVersion ?? null;
-        const provenanceKind = input.provenance.kind;
 
-        const inserted = await translateClaimKeyIndexLimit(
-          "supersedeWithNewMemories",
-          ctx,
-          input,
-          () =>
-            tx.execute(sql`
-          INSERT INTO memories (
-            id, tenant_id, subject_id,
-            source_observation_id, extractor_version,
-            content, content_hash, digest, digest_source,
-            provenance_kind, provenance,
-            status, superseded_by_id, contested_with_id,
-            tags,
-            occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
-            claim_key_subject, claim_key_predicate,
-            strength, half_life_hours, decay_floor_at,
-            decay_base_seq, decay_floor_seq, half_life_recalls,
-            embedding_status,
-            attributes,
-            created_at, updated_at
-          ) VALUES (
-            gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
-            ${sourceObservationId}, ${extractorVersion},
-            ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
-            ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
-            ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
-            ${sql.param(input.tags)},
-            ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
-            ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
-            ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-            ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
-            ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
-            ${input.embeddingStatus},
-            ${JSON.stringify(input.attributes ?? {})}::jsonb,
-            now(), now()
-          )
-          ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
-            WHERE source_observation_id IS NOT NULL
-          DO NOTHING
-          RETURNING *
-        `),
-        );
+        const insertedRow = await insertMemoryRow(tx, ctx, input, "supersedeWithNewMemories");
 
-        if (inserted.rows.length === 0) {
+        if (insertedRow === null) {
           const existing = await tx.execute(sql`
             SELECT * FROM memories
             WHERE tenant_id = ${ctx.tenantId}
@@ -1260,7 +1276,7 @@ export class PostgresMemoryStore implements MemoryStore {
           continue;
         }
 
-        const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+        const memory = rowToMemory(insertedRow);
         // Issue #201 / ADR 0318: `news` の各要素について、同一トランザクションで
         // proposed ラベルを作る（`createMemory`/`createMemoryWithOutbox` と同じ判断
         // ——冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない）。
@@ -2039,17 +2055,47 @@ export class PostgresMemoryStore implements MemoryStore {
     if (memoryIds.length === 0) {
       return { insertedMemoryIds: [] };
     }
+    // ADR 0439: recall も memory も `ctx` のテナントの行であること。DB へ投げる前に、形の壊れた id を同じ message で弾く。
+    const checkedRecallId = checkedRef("recall", recallId)!;
+    const ids = memoryIds.map((id) => checkedRef("memory", id)!);
+    // 確かめと書き込みを1つの SQL 文にする。外部キーは `recalls(id)`・`memories(id)` だけでテナントを含まないので、
+    // 検査が無いと別テナントの recall・memory を指す行が `ctx` の行として書け、その行が相手のテナントの
+    // `purgeExpiredRecalls`（外部キー違反）と `eraseTenant` を止めた。どれか1件でも違えば、全体を書かない。
     const result = await exec.execute(sql`
-      INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at)
-      SELECT ${ctx.tenantId}, ${recallId}, m, now()
-      FROM unnest(${sql.param(memoryIds)}::uuid[]) AS m
-      ON CONFLICT (tenant_id, recall_id, memory_id) DO NOTHING
-      RETURNING memory_id
+      WITH chk AS (
+        SELECT
+          ${refExists("recalls", ctx.tenantId, sql`${checkedRecallId}`)} AS recall_ok,
+          (
+            SELECT u.id FROM unnest(${sql.param(ids)}::uuid[]) AS u(id)
+            WHERE NOT EXISTS (
+              SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = u.id
+            )
+            LIMIT 1
+          ) AS missing_memory_id
+      ), ins AS (
+        INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at)
+        SELECT ${ctx.tenantId}, ${checkedRecallId}::uuid, m.id, now()
+        FROM unnest(${sql.param(ids)}::uuid[]) AS m(id), chk
+        WHERE chk.recall_ok AND chk.missing_memory_id IS NULL
+        ON CONFLICT (tenant_id, recall_id, memory_id) DO NOTHING
+        RETURNING memory_id
+      )
+      SELECT chk.recall_ok, chk.missing_memory_id, ins.memory_id
+      FROM chk LEFT JOIN ins ON TRUE
     `);
+    const rows = result.rows as unknown as Array<{
+      recall_ok: boolean;
+      missing_memory_id: string | null;
+      memory_id: string | null;
+    }>;
+    if (!rows[0]!.recall_ok) {
+      throw refNotFound("recall", checkedRecallId);
+    }
+    if (rows[0]!.missing_memory_id !== null) {
+      throw refNotFound("memory", rows[0]!.missing_memory_id);
+    }
     return {
-      insertedMemoryIds: result.rows.map(
-        (row) => (row as unknown as { memory_id: string }).memory_id,
-      ),
+      insertedMemoryIds: rows.flatMap((row) => (row.memory_id === null ? [] : [row.memory_id])),
     };
   }
 
@@ -3428,6 +3474,9 @@ export class PostgresMemoryStore implements MemoryStore {
     if (!isUuidLike(second.id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${second.id}`);
     }
+    // ADR 0439: `supersededById` の形が壊れていれば、DB へ投げる前に弾く（`ctx` のテナントの記憶かは、UPDATE の中で確かめる）。
+    checkedRef("memory", first.supersededById);
+    checkedRef("memory", second.supersededById);
 
     return this.db.transaction(async (tx) => {
       // 事前検証——存在確認。両方の UPDATE を撃つ前に済ませる（`markContestedPair` と
@@ -3477,28 +3526,23 @@ export class PostgresMemoryStore implements MemoryStore {
         side: { id: MemoryId; status: "active" | "superseded"; supersededById?: MemoryId },
         oppositeId: MemoryId,
       ): Promise<Memory> => {
+        const supersededById = checkedRef("memory", side.supersededById);
         const result = await tx.execute(sql`
           UPDATE memories
           SET status = ${side.status},
               contested_with_id = NULL,
-              superseded_by_id = COALESCE(${side.supersededById ?? null}, superseded_by_id),
+              superseded_by_id = COALESCE(${supersededById}::uuid, superseded_by_id),
               updated_at = now()
           WHERE tenant_id = ${ctx.tenantId} AND id = ${side.id}
             AND status = 'contested' AND contested_with_id = ${oppositeId}
+            AND ${refExists("memories", ctx.tenantId, sql`${supersededById}`)}
           RETURNING *
         `);
         if (result.rows.length === 0) {
-          // 事前検証を通った直後にここへ来るとすれば TOCTOU（事前検証と UPDATE の間に
-          // 別の書き込みが割り込んだ）——読み直して切り分ける（`markContestedPair` と
-          // 同じ作法）。
-          const current = await tx.execute(sql`
-            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${side.id} LIMIT 1
-          `);
-          if (current.rows.length === 0) {
-            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${side.id}`);
-          }
-          const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
-          throw new MemoryStatusConflictError(side.id, "contested", observedStatus);
+          // 事前検証を通った直後にここへ来るとすれば、（ADR 0439）`supersededById` が `ctx` のテナントの記憶でなかった、
+          // または TOCTOU（事前検証と UPDATE の間に別の書き込みが割り込んだ）——読み直して切り分ける
+          // （`markContestedPair` と同じ作法）。
+          throw await explainEmptyStatusUpdate(tx, ctx, side.id, supersededById, "contested");
         }
         return rowToMemory(result.rows[0] as unknown as MemoryRow);
       };
@@ -3786,6 +3830,15 @@ export class PostgresMemoryStore implements MemoryStore {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
       }
     }
+    // ADR 0439: `supersededById` の形が壊れていれば、DB へ投げる前に弾く（`ctx` のテナントの記憶かは、UPDATE の中で確かめる）。
+    const supersededRefs = [
+      ...new Set(
+        normalized.flatMap((m) => {
+          const ref = checkedRef("memory", m.supersededById);
+          return ref === null ? [] : [ref];
+        }),
+      ),
+    ];
 
     return this.db.transaction(async (tx) => {
       const existing = await tx.execute(sql`
@@ -3860,6 +3913,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${sql.param(normalized.map((m) => m.supersededById ?? null))}::uuid[]
         ) AS v(id, status, superseded_by_id)
         WHERE t.tenant_id = ${ctx.tenantId} AND t.id = v.id AND t.status = 'contested'
+          AND ${refExists("memories", ctx.tenantId, sql`v.superseded_by_id`)}
         RETURNING t.*
       `);
       // RETURNING の順序には依存しない（id で引く）。
@@ -3870,6 +3924,20 @@ export class PostgresMemoryStore implements MemoryStore {
         }),
       );
       if (updatedById.size !== ids.length) {
+        // ADR 0439: 全員が contested であることは上で確かめて行ロックも掴んでいるので、0行になる理由は
+        // `supersededById` が `ctx` のテナントの記憶でないこと。先にそれを名指しする。
+        if (supersededRefs.length > 0) {
+          const badRef = await tx.execute(sql`
+            SELECT r.id FROM unnest(${sql.param(supersededRefs)}::uuid[]) AS r(id)
+            WHERE NOT EXISTS (
+              SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = r.id
+            )
+            LIMIT 1
+          `);
+          if (badRef.rows.length > 0) {
+            throw refNotFound("memory", (badRef.rows[0] as unknown as { id: string }).id);
+          }
+        }
         // 旧実装は入力順に1件ずつ打ち、最初に0行だった id を名指しした——同じ id を指す。
         const failedId = ids.find((id) => !updatedById.has(id))!;
         throw await conflictAfterEmptyUpdate(tx, ctx, failedId, "contested");
