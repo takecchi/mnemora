@@ -502,6 +502,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/testkit/fixtures` のインメモリ実装を、Postgres 実装に揃えた**（[ADR 0434](./docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)）。Postgres が拒む入力を、インメモリも同じく拒む: NUL（U+0000）を `createMemory` 系の `claimKey`・`extractorVersion`・`jobKinds`、イベントの `digestSnapshot`、`purgeMemory` の墓石、読み取りの口（`findActiveByClaimKey`・`listBySourceObservation`・`aggregateScope`・`LexicalStore.search` の `filter.attributes`・`getSubjectActivitySeqs`）に含むとき、`MemoryEvent.sizeBeforeBytes` が整数でない・int4 の範囲の外のとき、`reinforce` の `nowSeq` が整数でない・範囲の外（書くときは負も）のとき、outbox の行を書くときの `opts.now` が Invalid Date のとき。以前は通して保存し、`reinforce` は `decayBaseSeq` に `NaN` を書いていた。`createMemory` に渡した `purgedAt` は、インメモリも保存しない（Postgres と同じ。断らない）。Postgres が通す入力（境界ちょうどの値、行を書かないときの `now`・`jobKinds` など）は通したまま。`@mnemora/testkit/fixtures` は fixture なので、新しく例外を投げる変更は破壊的変更として数えない（`docs/migration-v1.md` の規律2）。公開 API に差分は無い。適合テストには足していない。
 
+- **`PostgresMemoryStore.purgeMemory` に大文字の uuid を渡すと、`memories` の行は purge されるのに、`recalls.index_band` の目次帯の digest が書き換わらなかった**（[ADR 0438](./docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md)）。入口で uuid の大文字小文字をそろえるようにした。`Runtime` 経由（小文字の id）は影響なし。落ちる入力は増えない。
+
+- **`decay_clock=activity` で subject 単位のカウンタ（`usesSubjectActivityCounters`）を使うとき、`archiveDecayed` と `aggregateScope`（忘却ゲートの件数）が、カウンタ行を別テナント・別 subject の行と区別していなかった**（ADR 0438）。`tenant_subject_activity` の行が2本以上あると「more than one row returned by a subquery」で落ち、1本だけのときは別テナント・別 subject のカウンタで判定していた。相関サブクエリに修飾した `tenant_id`/`subject_id` を渡すようにした。壁時計のゲート・テナント単位のカウンタ・`search`・`reinforce` は影響なし。
+
 ---
 
 ## [1.1.0] - 2026-09-30

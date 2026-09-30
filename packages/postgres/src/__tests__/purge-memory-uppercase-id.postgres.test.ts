@@ -33,11 +33,19 @@ describe("purgeMemory: 大文字の id でも recall の目次帯の digest を�
     const mem = new PostgresMemoryStore(db);
     const target = await mem.createMemory(
       ctx,
-      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "h-target", digest: "SECRET-DIGEST" }),
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "h-target",
+        digest: "SECRET-DIGEST",
+      }),
     );
     const other = await mem.createMemory(
       ctx,
-      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "h-other", digest: "KEEP-DIGEST" }),
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "h-other",
+        digest: "KEEP-DIGEST",
+      }),
     );
     await mem.updateStatus(ctx, target.id, "forgotten");
     const recallId = await mem.createRecall(ctx, {

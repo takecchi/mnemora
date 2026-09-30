@@ -81,16 +81,18 @@ describe("markContestedGroup: 別テナントの記憶を群に入れられな�
     const members = (ms: { id: MemoryId }[]) => ms.map((m) => ({ id: m.id, event: event(m.id) }));
 
     await expect(mem.markContestedGroup!(A, members(b))).rejects.toThrow(/not found for tenant/);
-    await expect(
-      mem.markContestedGroup!(A, members([a[0]!, a[1]!, b[2]!])),
-    ).rejects.toThrow(/not found for tenant/);
+    await expect(mem.markContestedGroup!(A, members([a[0]!, a[1]!, b[2]!]))).rejects.toThrow(
+      /not found for tenant/,
+    );
 
     const rows = await pool.query<{ status: string; contested_with_id: string | null }>(
       "SELECT status, contested_with_id FROM memories WHERE tenant_id = $1",
       [B.tenantId],
     );
     expect(rows.rows).toHaveLength(3);
-    expect(rows.rows.every((r) => r.status === "active" && r.contested_with_id === null)).toBe(true);
+    expect(rows.rows.every((r) => r.status === "active" && r.contested_with_id === null)).toBe(
+      true,
+    );
     const rels = await pool.query("SELECT 1 FROM memory_relations");
     expect(rels.rows).toHaveLength(0);
     const evs = await pool.query("SELECT 1 FROM memory_events WHERE kind = 'updated'");
@@ -105,7 +107,10 @@ describe("resolveContestedGroup: 別テナントの行・関係に触れない",
   it("A の ctx で B の contested 群を渡すと拒まれ、B の群と関係は contested のまま残る", async () => {
     const { pool, mem, make } = await setup();
     const b = [await make(B, "b1"), await make(B, "b2"), await make(B, "b3")];
-    await mem.markContestedGroup!(B, b.map((m) => ({ id: m.id, event: event(m.id) })));
+    await mem.markContestedGroup!(
+      B,
+      b.map((m) => ({ id: m.id, event: event(m.id) })),
+    );
 
     await expect(
       mem.resolveContestedGroup!(
@@ -119,7 +124,9 @@ describe("resolveContestedGroup: 別テナントの行・関係に触れない",
       [B.tenantId],
     );
     expect(rows.rows.map((r) => r.status)).toEqual(["contested", "contested", "contested"]);
-    const rels = await pool.query("SELECT 1 FROM memory_relations WHERE tenant_id = $1", [B.tenantId]);
+    const rels = await pool.query("SELECT 1 FROM memory_relations WHERE tenant_id = $1", [
+      B.tenantId,
+    ]);
     expect(rels.rows.length).toBeGreaterThan(0);
   });
 
@@ -129,7 +136,10 @@ describe("resolveContestedGroup: 別テナントの行・関係に触れない",
     const bx = await make(B, "bx");
     // B の記憶を contested にする（単独 contested は API が拒むので生 SQL）。
     await pool.query("UPDATE memories SET status = 'contested' WHERE id = $1", [bx.id]);
-    await mem.markContestedGroup!(A, a.map((m) => ({ id: m.id, event: event(m.id) })));
+    await mem.markContestedGroup!(
+      A,
+      a.map((m) => ({ id: m.id, event: event(m.id) })),
+    );
     // A の群の記憶から B の contested な記憶への関係（負債の形。API では作れない）。
     await pool.query(
       `INSERT INTO memory_relations (tenant_id, from_memory_id, to_memory_id, kind)
@@ -142,14 +152,19 @@ describe("resolveContestedGroup: 別テナントの行・関係に触れない",
       a.map((m) => ({ id: m.id, status: "active" as const, event: event(m.id) })),
     );
     expect(res.members.map((m) => m.status)).toEqual(["active", "active", "active"]);
-    const bRow = await pool.query<{ status: string }>("SELECT status FROM memories WHERE id = $1", [bx.id]);
+    const bRow = await pool.query<{ status: string }>("SELECT status FROM memories WHERE id = $1", [
+      bx.id,
+    ]);
     expect(bRow.rows[0]!.status).toBe("contested");
   });
 
   it("群の解消は、別テナントの行の関係（A の id を両端に持つ tenant B の行）を消さない", async () => {
     const { pool, mem, make } = await setup();
     const a = [await make(A, "a1"), await make(A, "a2"), await make(A, "a3")];
-    await mem.markContestedGroup!(A, a.map((m) => ({ id: m.id, event: event(m.id) })));
+    await mem.markContestedGroup!(
+      A,
+      a.map((m) => ({ id: m.id, event: event(m.id) })),
+    );
     await pool.query(
       `INSERT INTO memory_relations (tenant_id, from_memory_id, to_memory_id, kind)
        VALUES ($1, $2, $3, 'contradicts')`,
@@ -159,9 +174,13 @@ describe("resolveContestedGroup: 別テナントの行・関係に触れない",
       A,
       a.map((m) => ({ id: m.id, status: "active" as const, event: event(m.id) })),
     );
-    const left = await pool.query("SELECT 1 FROM memory_relations WHERE tenant_id = $1", [B.tenantId]);
+    const left = await pool.query("SELECT 1 FROM memory_relations WHERE tenant_id = $1", [
+      B.tenantId,
+    ]);
     expect(left.rows).toHaveLength(1);
-    const mine = await pool.query("SELECT 1 FROM memory_relations WHERE tenant_id = $1", [A.tenantId]);
+    const mine = await pool.query("SELECT 1 FROM memory_relations WHERE tenant_id = $1", [
+      A.tenantId,
+    ]);
     expect(mine.rows).toHaveLength(0);
   });
 });
@@ -191,7 +210,9 @@ describe("VectorStore.search: 統計ありの枝でも ctx のテナントで絞
     const am = await make(A, "a1");
     await seedVec.upsert(B, TEST_EMBEDDING_SPACE, bm.id, [1, 0, 0]);
     await seedVec.upsert(A, TEST_EMBEDDING_SPACE, am.id, [1, 0, 0]);
-    const table = (await import("../embedding-space-table.js")).embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
+    const table = (await import("../embedding-space-table.js")).embeddingSpaceTableName(
+      TEST_EMBEDDING_SPACE,
+    );
     await pool.query("ANALYZE memories");
     await pool.query(`ANALYZE ${table}`);
     const vec = new PostgresVectorStore(db); // StatsPresenceGate は新しいインスタンスごと
@@ -251,16 +272,10 @@ describe("previewRestoreSupersededBy: superseded の理由を別テナントの�
     const { pool, mem, make } = await setup();
     const old = await make(A, "old");
     const winner = await make(A, "winner");
-    await mem.updateStatusWithEvent(
-      A,
-      old.id,
-      "superseded",
-      { supersededById: winner.id },
-      {
-        ...(event(old.id, "superseded", { reason: "A-reason" }) as object),
-        at: new Date("2026-01-01T00:00:00.000Z"),
-      } as never,
-    );
+    await mem.updateStatusWithEvent(A, old.id, "superseded", { supersededById: winner.id }, {
+      ...(event(old.id, "superseded", { reason: "A-reason" }) as object),
+      at: new Date("2026-01-01T00:00:00.000Z"),
+    } as never);
     await pool.query(
       `INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, meta)
        VALUES (gen_random_uuid(), $1, $2, 'superseded', $3, '{"type":"system"}'::jsonb, '{"reason":"B-leak"}'::jsonb)`,
