@@ -561,7 +561,10 @@ function migrationNumber(name: string): bigint | undefined {
  * - (a) 未適用のファイルのうち、台帳の最大の番号より番号が小さいものが在る。
  * - (b) 台帳にある名前が、手元のファイルに無い。
  */
-function describeLedgerDrift(alreadyApplied: ReadonlySet<string>, files: readonly string[]): string[] {
+function describeLedgerDrift(
+  alreadyApplied: ReadonlySet<string>,
+  files: readonly string[],
+): string[] {
   const messages: string[] = [];
 
   let maxName: string | undefined;
