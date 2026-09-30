@@ -60,7 +60,7 @@ describe("recall() — クエリ埋め込みがベクトルを返さなかった
 
     const result = await runtime.recall(ctx, { text: "何かのクエリ" });
 
-    expect(result.omitted).toContainEqual(UNAVAILABLE);
+    expect(result.omitted).toContainEqual(expect.objectContaining(UNAVAILABLE));
     const trace = result.explain.stages.find((s) => s.stage === "candidate_generation");
     expect(trace?.executed).toBe(false);
   });
@@ -93,6 +93,6 @@ describe("recall() — クエリ埋め込みがベクトルを返さなかった
     });
 
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual(UNAVAILABLE);
+    expect(result.omitted).toContainEqual(expect.objectContaining(UNAVAILABLE));
   });
 });

@@ -166,6 +166,16 @@ throw するので `embedding_provider_unavailable`）。**呼び出し側が `R
 ベクトルの有限性も検査せず、`NaN`/`Infinity` は今も store の側が比較不能として扱う。一方、provider が返した
 問い合わせベクトルが `NaN`/`Infinity` を含むときは、次元違いと同じく `embedding_provider_unavailable` になる。
 
+**原因の種類は `cause`（任意）で読める**（PR #1504）。`reason: 'embedding_provider_unavailable'` の `stage_skipped` にだけ付きうる欄で、
+`cause.kind` は `'provider_threw'`（`embed` が throw / reject）・`'no_vector'`（ベクトルを返さなかった）・
+`'dimension_mismatch'`（次元違い）・`'non_finite'`（`NaN`/`Infinity` を含む）の4つ。`provider_threw` のときだけ、
+投げられた値が文字列の `kind` を持てば `providerErrorKind`（`@mnemora/local-embedding` の `LocalEmbeddingProviderError` など。
+`@mnemora/openai` の embed の失敗は `kind` を持たない）、`Error` なら `errorName`（`name`）が入る（どちらも先頭64文字まで）。
+**error の message・cause の本文・ベクトルの値は載せない**（利用者データや内部情報が混ざりうるため）。
+`empty_query_content` には付かない。**`embeddingProvider` が配線されていないとき**も同じ Omission（`reason` は同じ）になり、
+`embed` を呼べず `TypeError` になるため `cause` は `{ kind: 'provider_threw', errorName: 'TypeError' }` である
+（別の kind は足していない）。既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変わらない。
+
 **Phase 1 の範囲(2026-09 追記、本 PR の決定)**: 上記は3チャンネル(ANN・タグ一致・直近取得)が並行して走る一般形を述べているが、roadmap.md 段階4の完了条件は「二段検索(段1: 索引が効く形のフィルタ + ANN、段2: over-fetch した候補への再スコア)」とのみ明記しており、タグ一致・直近取得を独立した候補生成チャンネルとして要求していない。**Phase 1 は ANN の1チャンネルのみを実装する。** タグは段2の再スコア(§7)における加点要素としてのみ参加し、それ自体で候補を拾い上げる経路にはしない。（⚠ 2026-09-29 追記: 参照先の roadmap.md §2「段階4」は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L94-L102) にある。）
 
 **⚠ この「1チャンネルのみ」は、2026-09-10 に改められた([ADR 0084](./decisions/0084-lexical-recall-channel.md)、Issue #106)。** 候補生成は `RecallQuery.channels` が指すチャンネルを並行して走らせる形になり、**語彙(lexical)チャンネル**が足された——PostgreSQL 組み込みの `to_tsvector('simple', …)` に ASCII 境界の正規化を掛けた式索引で、固有名詞・識別子を**文字列として**引く経路である(追加の PostgreSQL 拡張は要求しない)。**⚠ ただし既定は今も ANN 1本であり(`DEFAULT_RECALL_CHANNELS`)、`channels` を渡さない呼び出しの挙動は1バイトも変わっていない。**⛔ そして**「タグ一致」「直近取得」は、今も実装が無い**——ADR 0084 が足したのは語彙1本だけである。**⚠ 語彙チャンネルは日本語の文に埋もれた日本語の語(人名を含む)を引けない**(ADR 0084 §2 に実測がある)。**この限界を理由に `REQUIRED_EXTENSIONS`(`pg_trgm` 等)を増やすかどうかは [ADR 0149](./decisions/0149-japanese-lexical-no-required-extension.md) が検討し、増やさないと決めている**——買えるのは日本語の固有名詞1点であり、`C` ロケールのクラスタでは黙って0件を返す(ADR 0084 §3.2)という代償のほうが重いためである。**⚠ 日本語表記のチャンネル名・社内システム名についても、人名と同じ穴に落ちる可能性が高いが、確かめていない**(ADR 0149)。**⚠ 2026-09 追記([ADR 0092](./decisions/0092-lexical-or-coverage.md))**: クエリ語彙は OR で結ばれ、`score.lexicalMatch` は「一致した語彙数 ÷ クエリ語彙数」(被覆率)になった——以前はクエリの ASCII の語どうしを AND で結んでおり、`what did we say about PROJ-1234` のような英語の自然文は全語を含む記憶しか返らなかった(ADR 0084 §2.1.1・§8 の負債)。この変更は「引ける」を広げるだけで、低選択率のクエリ(ありふれた語1つ)で語彙候補どうしの順序が事実上任意である、という ADR 0084 §8 の負債そのものは塞いでいない。走らせられるチャンネルの一覧を**ここに書き写さないこと**——唯一の出所は `packages/core/src/recall.ts` の `RECALL_CHANNELS` である。したがって、embeddable なクエリが無い場合(`text`/`vector` のいずれも無い場合)、Phase 1 の `memories` は実際に空になる——「タグ一致や直近取得が別途走っていれば空にならないこともある」という上記の記述は Phase 2 以降でチャンネルを追加した場合に成立する記述であり、Phase 1 の実装はこの緩和を持たない。この限定は、embeddable な内容が無いクエリでは `omitted` に `stage_skipped` が付き、`memories` が空でも `index`(§5)が「スコープ内に何が在るか」を独立に示し続けることで、原則3の要求(「無い」を分類して見せる)は満たされたままである。
@@ -247,7 +257,7 @@ throw するので `embedding_provider_unavailable`）。**呼び出し側が `R
 | 段（`stage`） | `executed: false` になるとき | `stage_skipped` を名乗るか |
 |---|---|---|
 | `scope` | ならない（常に `true`） | — |
-| `candidate_generation`（`detail.channel` ごとに1件） | その経路が走らなかったとき（クエリに埋め込む内容が無い、埋め込み provider が失敗した） | **名乗る**——`stage_skipped(candidate_generation, empty_query_content \| embedding_provider_unavailable)`。ANN と語彙の両方が走らなかったときも、`empty_query_content` は1件だけ |
+| `candidate_generation`（`detail.channel` ごとに1件） | その経路が走らなかったとき（クエリに埋め込む内容が無い、埋め込み provider が失敗した） | **名乗る**——`stage_skipped(candidate_generation, empty_query_content \| embedding_provider_unavailable)`（後者には原因の種類 `cause` が任意で付く）。ANN と語彙の両方が走らなかったときも、`empty_query_content` は1件だけ |
 | `rescore` | **採点する候補が0件だったとき**（段は飛ばしていない） | 名乗らない（候補が無い理由は、前の段の `stage_skipped` か `index` で分かる） |
 | `association`（段3.5、[Issue #865](https://github.com/takecchi/mnemora/issues/865)、2026-09-29） | `stage_skipped(association, vector_store_lacks_get_vectors \| no_anchor)` と対になるときだけ | **名乗る**——`rescore` と同じ区別で、「探して0件だった」（`detail.hits`/`detail.selected` が0のまま `executed: true`）とは分ける |
 | `contradiction_resolution`・`budget_truncation`・`index_band`・`record` | ならない（常に `true`）。`budget_truncation` は予算が無くても `true` で、予算の有無は `detail.budgetApplied` に出る | — |
@@ -360,7 +370,9 @@ type CountKind = 'exact' | 'lower_bound' | 'unknown'
 type Omission =
   | { kind: 'stage_skipped'
       stage: 'candidate_generation' | 'rescore' | 'index_band'
-      reason: 'embedding_provider_unavailable' | 'empty_query_content' }
+      reason: 'embedding_provider_unavailable' | 'empty_query_content'
+      cause?: { kind: 'provider_threw' | 'no_vector' | 'dimension_mismatch' | 'non_finite'
+                providerErrorKind?: string; errorName?: string } } // cause は embedding_provider_unavailable のときだけ
   | { kind: 'filtered'
       condition: 'tenant' | 'superseded' | 'forgotten' | 'archived' | 'taxonomy' | 'period'
       count: number; countKind: CountKind }

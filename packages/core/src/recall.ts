@@ -24,6 +24,28 @@ export const CountKindSchema = z.enum([
 // Omission（docs/recall.md §4、ADR 0008）
 // ---------------------------------------------------------------------------
 
+/**
+ * `stage_skipped` の `reason` が `"embedding_provider_unavailable"` のときだけ付きうる、失敗の原因の種類。
+ *
+ * **message・cause の本文・ベクトルの値は載せない**（利用者データや内部情報が混ざりうるため）。
+ * 載るのは種類と、投げられた値の `kind` / `name`（文字列のときだけ、先頭64文字まで）だけである。
+ *
+ * - `"provider_threw"`: `EmbeddingProvider.embed` が throw / reject した。`embeddingProvider` が配線されて
+ *   いないときも（`embed` を呼べず `TypeError` になるため）ここに入り、`errorName` が `"TypeError"` になる。
+ * - `"no_vector"`: reject せず、ベクトルを返さなかった（`[]`、または配列でない要素）。
+ * - `"dimension_mismatch"`: `space.dimensions` と長さが違うベクトルを返した。
+ * - `"non_finite"`: `NaN` / `Infinity` を含むベクトルを返した。
+ *
+ * `providerErrorKind` は、投げられた値が文字列の `kind` を持つときだけ入る（`@mnemora/local-embedding` の
+ * `LocalEmbeddingProviderError` など。`@mnemora/openai` の embed の失敗は `kind` を持たない）。
+ * `errorName` は投げられたものが `Error` のときの `name`。どちらも `kind: "provider_threw"` のときだけ入る。
+ */
+export interface StageSkippedCause {
+  kind: "provider_threw" | "no_vector" | "dimension_mismatch" | "non_finite";
+  providerErrorKind?: string;
+  errorName?: string;
+}
+
 /** 段そのものを実行しなかった（docs/recall.md §4）。「実行して0件だった」ではない。 */
 export interface StageSkippedOmission {
   /** 常に `"stage_skipped"`（{@link Omission} の判別の鍵）。 */
@@ -67,6 +89,11 @@ export interface StageSkippedOmission {
     | "vector_store_lacks_get_vectors"
     | "no_anchor"
     | "relation_store_unavailable";
+  /**
+   * 失敗の原因の種類（任意）。**`reason: "embedding_provider_unavailable"` のときだけ付きうる**
+   * （`empty_query_content` などには付かない）。型と載せないものは {@link StageSkippedCause}。
+   */
+  cause?: StageSkippedCause;
 }
 
 /**
@@ -553,6 +580,12 @@ export type Omission =
   | ScoreNotComparableOmission
   | UnitAssemblyDroppedOmission;
 
+export const StageSkippedCauseSchema = z.object({
+  kind: z.enum(["provider_threw", "no_vector", "dimension_mismatch", "non_finite"]),
+  providerErrorKind: z.string().optional(),
+  errorName: z.string().optional(),
+}) satisfies z.ZodType<StageSkippedCause>;
+
 const StageSkippedOmissionSchema = z.object({
   kind: z.literal("stage_skipped"),
   stage: z.enum(["candidate_generation", "rescore", "index_band", "association", "relation"]),
@@ -563,6 +596,7 @@ const StageSkippedOmissionSchema = z.object({
     "no_anchor",
     "relation_store_unavailable",
   ]),
+  cause: StageSkippedCauseSchema.optional(),
 }) satisfies z.ZodType<StageSkippedOmission>;
 
 const FilteredOmissionSchema = z.object({
