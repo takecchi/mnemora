@@ -146,6 +146,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、常に `countKind: 'exact'` を返し続ける契約**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故を繰り返さないための設計）。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。
   - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm（12往復、1点ごとに別プロセス）: 案A の索引ありの `"exact"` は p50 627.7ms、`"skip"` は p50 1.5ms。往復ごとの差（skip − exact）の中央値は −644.6ms（IQR −671.1〜−541.9ms、最小〜最大 −681.3〜−504.6ms、12往復すべて負）。10万行は cold（Postgres 再起動直後）・warm-after とも `"skip"` は p50 6.6ms・1.2ms。器・手順・限界は ADR 0384「測ったこと」。
   ⭕ 非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。
+- **抽出の言語の事後検査を足した——日本語の観測から、かな・漢字の無い（ラテン文字の）本文が出たら、`created` イベントの `meta.languageMismatch` に印を付ける**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[ADR 0391](./docs/decisions/0391-language-mismatch-mark-on-created-event.md)）。sync・deferred・`reextract` のすべての抽出経路で効く。
+  - **印を付けるだけ**——再試行も全文フォールバックもしない。Memory の作り方、プロンプト、公開の型は変えない。疑いが無いときの `created` の `meta` は今までどおり。
+  - ⚠ 閾値は推論で置いたもので、**実データでの偽陽性率は測っていない**。意図して英語で書かせる使い方では印が常に付きうる。
+  ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
