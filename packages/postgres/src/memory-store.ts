@@ -342,12 +342,14 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const externalId = input.externalId ?? null;
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
     const outboxNow = opts?.now ?? new Date();
+    // ADR 0407: 渡されたら、積む行を「その名前で claim 済み」（`attempts: 1`）で作る。
+    const claimedBy = opts?.claimedBy;
     return this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -386,14 +388,16 @@ export class PostgresMemoryStore implements MemoryStore {
       const jobs: OutboxJobRecord[] = [];
       for (const kind of jobKinds) {
         const jobResult = await tx.execute(sql`
-          INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
+          INSERT INTO outbox (id, tenant_id, kind, payload, available_at, claimed_at, claimed_by, attempts, created_at)
           VALUES (
             gen_random_uuid(),
             ${ctx.tenantId},
             ${kind},
             ${JSON.stringify({ observationId: observation.id })}::jsonb,
             ${toPgTimestamp(outboxNow)},
-            0,
+            ${claimedBy === undefined ? null : toPgTimestamp(outboxNow)},
+            ${claimedBy ?? null},
+            ${claimedBy === undefined ? 0 : 1},
             ${toPgTimestamp(outboxNow)}
           )
           RETURNING *
@@ -4059,6 +4063,11 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
  * 直したときに歯だけが古い述語を測り続ける**（`outbox-claim-lease-index.test.ts` が
  * DDL をマイグレーションファイルから読むのと同じ理由。AGENTS.md が北極星の要約を
  * 置かないのと同じ理由でもある）。
+ *
+ * ⚠ **`statuses` のどれにも当たる行が無い（全 status が0件の）ときは、0007 の索引を最後まで読み、
+ * `ready` 以外の行を Filter で捨てて0行を返す**（走査の量はそのテナントの `ready` 以外の行数に比例する。
+ * 100万行・約4%が `ready` 以外で温 約30 ms）。**測って、直さないと判断した**（ADR 0413。
+ * 呼び出し元は手動の保守操作 `Runtime.reembed` だけ。第一候補の案 D と、覆る条件は同 ADR）。
  *
  * `memoryIds` を渡されたのに well-formed な id が1つも残らなかったときは `null` を返す
  * ——形式が壊れた id は `getMany` と同じく静かに落とす（uuid 列への cast で文全体が

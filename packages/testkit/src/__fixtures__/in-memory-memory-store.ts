@@ -646,6 +646,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     payload: Record<string, unknown>,
     // Issue #1237: 既定は壁時計——呼び出し側が時刻を明示的に渡さない限り、今日と同じ挙動のまま。
     now: Date = new Date(),
+    // ADR 0407: 渡されたら「その名前で claim 済み」（`attempts: 1`）で作る。
+    claimedBy?: string,
   ): OutboxJobRecord {
     const job: OutboxJobRecord = {
       id: nextId("job"),
@@ -653,9 +655,9 @@ export class InMemoryMemoryStore implements MemoryStore {
       kind,
       payload,
       availableAt: now,
-      claimedAt: null,
-      claimedBy: null,
-      attempts: 0,
+      claimedAt: claimedBy === undefined ? null : now,
+      claimedBy: claimedBy ?? null,
+      attempts: claimedBy === undefined ? 0 : 1,
       completedAt: null,
       failedAt: null,
       lastError: null,
@@ -669,7 +671,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: observation, created } = this.createObservationIdempotent(ctx, input);
     if (!created) {
@@ -679,7 +681,13 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
     const outboxNow = opts?.now ?? new Date();
     const jobs = jobKinds.map((kind) =>
-      this.enqueueOutboxJob(ctx, kind, { observationId: observation.id }, outboxNow),
+      this.enqueueOutboxJob(
+        ctx,
+        kind,
+        { observationId: observation.id },
+        outboxNow,
+        opts?.claimedBy,
+      ),
     );
     return snapshot({ observation, created: true, jobs });
   }

@@ -183,6 +183,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **`RelationStore` に任意メソッド `listRelatedMany?(ctx, memoryIds, kind?)` を足した。`Runtime` の幅優先探索（recall 段3の群の同伴取得・`resolveContestedGroup` の部分解消の確認・claim key の群の検出）は、1段の起点をまるごとこれに渡して1往復で読む**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 案A、[ADR 0402](./docs/decisions/0402-relation-store-list-related-many.md)。案D・案E は [ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。
+  - `result[i]` は `listRelated(ctx, memoryIds[i], kind)` と同じ集合（位置で対応。重複した id は同じ内容、実在しない id は空配列）。`@mnemora/postgres`（`PostgresRelationStore`、`from_memory_id = ANY(...)` の1文）と `@mnemora/testkit`（`InMemoryRelationStore`）が実装する。**実装しない adapter では、`Runtime` は今までどおり `listRelated` を起点ごとに直列に呼ぶ**——結果（提示順・`companionOf`・`omitted`・resolve の outcome）は、あるときと無いときで完全に一致する（歯で縛っている）。
+  - `@mnemora/testkit` の `describeRelationStoreConformance` に、任意フラグ `implementsListRelatedMany?: boolean` を足した。実装が有れば宣言に依らず契約の節がかかり、実装が無ければ skip、`true` を宣言して実装が無ければ赤。
+  - 【実測】関係の行 112,080 行・Postgres 17・loopback・15回の中央値: recall 段3（幅60の群）は文が 75 → 17（関係の SELECT は 60 → 2）、31〜43 → 19 ms。resolve の部分解消の確認（幅316の群、先頭100件を渡す）は文が 318 → 4（関係の SELECT は 316 → 2）、235〜241 → 155〜163 ms。鎖のように1段が1件の形は往復が減らない。claim key の群の検出の時間と、往復の遅延が大きい構成は測っていない。
+  ⭕ 非破壊と数える（任意メソッドと任意のフラグの追加のみ）。
 - **古い `recalls` と完了済みの `outbox` 行を消す任意メソッド `MemoryStore.purgeExpiredRecalls?` と `OutboxStore.purgeCompletedJobs?` を足した**（[ADR 0404](./docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)、[PR #1479](https://github.com/takecchi/mnemora/pull/1479)）。`purgeExpiredEvents?` と同じ形で、`olderThan` と `limit` は呼び出し側が必ず渡す（**保持期間の既定値は無い**）。`purgeExpiredRecalls?` は `created_at < olderThan` の `recalls` をその `recall_usages` ごと同一トランザクションで消す（**消した `recallId` への `recordUsage` は例外になる**）。`purgeCompletedJobs?` は `completed_at < olderThan` の完了済みの行**だけ**を消し、claim 中・未処理・`failed` の行は消さない。**`recalls.query` を約束の範囲に入れるか、`failed` 行の扱い、既定の保持期間は決めていない**（オーナーに聞く事柄）。新しい型は `PurgeExpiredRecallsOptions`/`PurgeExpiredRecallsResult`/`PurgeCompletedJobsOptions`/`PurgeCompletedJobsResult`。`@mnemora/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に任意フラグ `supportsPurgeExpiredRecalls?`/`supportsPurgeCompletedJobs?` が増えた（省略可・3状態。**非破壊**。省略すると「⚠ 未検査」の `it` が1本増える）。**DB マイグレーションは増えない**（索引を足さない判断と測った数字は ADR 0404）。
 
 - **`RecallQuery.relationMaxCount?`（任意、正の整数 1〜1000）を足した**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目8、[PR #1470](https://github.com/takecchi/mnemora/pull/1470)、[ADR 0396](./docs/decisions/0396-recall-relation-max-count.md)）。段3（`contradiction_resolution`）の多者間の `contested` 群の同伴取得について、群ごとの上限件数を呼び出し側から変えられる。超えた分は従来どおり `over_limit { stage: "relation" }` に積まれる。探索の安全弁（群ごとに訪れた数の上限）はこの値の10倍に連動する。**省略すると従来の10（安全弁は100）のままで、`recall()` の結果は1バイトも変わらない。**型は任意の欄1つの追加のみで、DB マイグレーションは伴わない（`recalls.query` は jsonb にそのまま入る）。ADR 0381 §5.3・§6 の「専用のクエリ欄は作らない」を覆した。
@@ -282,6 +287,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **今の振る舞い**: LLM が返った直後に、LLM の前に読んだその Observation の記憶を読み直し、1件でも `forgotten` なら何も書かない。書き込み（`supersedeWithNewMemories`／口が無い adapter 向けの `createMemoryWithOutbox`）にも `opts.abortIfForgotten` を渡し、実装する adapter（`@mnemora/postgres`）は同一トランザクションでも見直す。戻り値は「退けた記憶を持つ Observation」の早期 return と同じ形（`extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に `status_not_active`）。**例外は投げず、公開の型は増やしていない。**
   - ⚠ `abortIfForgotten` を実装しない自前の `MemoryStore` では、読み直しだけが保護になり、読み直しと書き込みの間の窓は残る（`consolidate`/`reflect` と同じ）。待つ間に `contested` になった記憶は見直さない。
   - 非破壊（型・DB は変えていない。forget された記憶を根拠に書き直していた挙動が、書かない挙動になった）。
+
+### Fixed
+
+- **`runtime.observe({ extract: "sync" })` が、LLM を待つ間に tick に同じ extract ジョブを取られる穴を塞いだ**（[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。以前は、sync の observe が積んだジョブは「すぐ claim できる」状態で、observe が LLM を待つ間に tick が claim できた。すると LLM が2回呼ばれ、内容の違う記憶が2件とも active で残り、observe 自身は `complete` が `OutboxLeaseConflictError` で負けて、書き込み済みなのに失敗し `memoryIds` が返らなかった（Postgres と InMemory の両方で再現）。
+  - **直し方**: sync の observe は、extract ジョブを **observe が claim 済み**（`claimed_at` = now・`claimed_by` = `"runtime.observe:sync"`・`attempts` 1）の状態で積む。リースの内側では tick は取らない。observe が LLM の途中で死んだときは、リース切れの後に tick が拾う（transactional outbox の意味は保たれる）。deferred は今までどおり。
+  - **LLM がリースより長くかかり tick に取り直されたとき**: observe は `OutboxLeaseConflictError` だけを握り、書き込み済みの結果（`memoryIds`）を返す。**この窓での二重抽出は塞いでいない**（`leaseMs` を LLM の最長時間より長くとる運用で狭める。ADR 0407 の「引き受けた負債」）。
+  - **公開 API に、任意項目 `MemoryStore.createObservationWithOutbox` の `opts.claimedBy?: string` を足した。**渡すと積む行を claim 済み（`attempts: 1`）で作る。省略時は今までと同じ。`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` は対応済み。適合テスト（`describeMemoryStoreConformance`）に指定あり・なしの2件を足した。
+  - ⚠ **自前の `MemoryStore` を実装している人へ**: 型は通るが、`claimedBy` を無視する実装では穴が塞がらない（従来の動きのまま）。塞ぎたければ、渡されたら `claimed_at` = `opts.now`・`claimed_by`・`attempts: 1` で行を作ること。
+  - ⚠ **挙動の変化**: sync の observe が抽出中に**例外で終わった**とき、extract ジョブは observe の claim のまま残るため、リースが切れるまで tick は拾わない（以前は未 claim で残り、直後の tick が拾っていた）。拾った後の結果は変わらない。急ぐ運用は `tick` の `leaseMs` を短くとる。ADR 0407 の決めたこと4。
+  - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。
 
 ---
 

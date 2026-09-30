@@ -91,4 +91,27 @@ export interface RelationStore {
    * - テナント分離: `ctx.tenantId` と異なるテナントの行は返さない。
    */
   listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
+  /**
+   * **任意メソッド**（Issue #1449、ADR 0402）。{@link RelationStore.listRelated} を複数の起点に対して
+   * **1回の往復**で行う。`Runtime` の幅優先探索（recall 段3の群の同伴取得・`resolveContestedGroup` の
+   * 部分解消の確認・claim key の群の検出）は、1段の frontier をまるごとこれに渡す。実装していない
+   * adapter では、`Runtime` は今までどおり `listRelated` を起点ごとに直列に呼ぶ——**実装は義務ではなく、
+   * 結果も変わらない**（任意メソッドの追加は非破壊）。
+   *
+   * - **返り値は `memoryIds` と同じ長さ・同じ並び**の配列で、`result[i]` は
+   *   `listRelated(ctx, memoryIds[i], kind)` と**同じ集合**（同じ `kind` の扱い・同じテナント分離）。
+   *   起点ごとの分け方は位置で決まるので、綴り（uuid の大文字小文字）の揺れに依らない。
+   * - `memoryIds` に**重複があってもよい**——同じ id の位置それぞれに同じ内容を返す（別々の配列）。
+   * - **実在しない id・`ctx` のテナントに関係の行を持たない id は、その位置に空配列**を返し、
+   *   他の位置には影響しない（例外にしない）。空の `memoryIds` は空配列を返す。
+   * - 各要素の中の順序は**規定しない**（`listRelated` と同じ）。呼び出し側（`Runtime`）が必要な順に
+   *   並べ替える。位置の順だけは上のとおり規定する。
+   * - `listRelated` と違い、uuid の形でない id（Postgres では型変換エラーになる形）でも**例外にせず空配列**を
+   *   返してよい（1つの不正な id がバッチ全体を落とさないため）。
+   */
+  listRelatedMany?(
+    ctx: Ctx,
+    memoryIds: readonly MemoryId[],
+    kind?: RelationKind,
+  ): Promise<Relation[][]>;
 }

@@ -153,6 +153,7 @@ describeMemoryStoreConformance({
 let latestMemoryStoreForRelations: InMemoryMemoryStore | undefined;
 
 describeRelationStoreConformance({
+  implementsListRelatedMany: true,
   name: "in-memory placeholder",
   createStore: () => {
     const memoryStore = new InMemoryMemoryStore();

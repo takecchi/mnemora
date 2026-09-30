@@ -100,6 +100,7 @@ import {
   ReflectionLLMResultSchema,
 } from "./strategies/reflect.js";
 import type { ReflectionLLMResult } from "./strategies/reflect.js";
+import { listRelatedLevel } from "./relation-level.js";
 
 /**
  * `runtime.observe` / `runtime.tick` の実装（roadmap.md 段階3、docs/architecture.md §3.2・§3.3）。
@@ -4474,20 +4475,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           .filter((m) => m.status === "contested" && (m.contestedWithId ?? null) === null)
           .map((m) => m.id);
         const visited = new Set(seedIds);
-        const queue = [...seedIds];
+        // 幅優先を1段ずつ進める。1段ぶんは `listRelatedMany?` があれば1往復（Issue #1449、ADR 0402）、
+        // 無ければ今までどおり起点ごとに直列。処理する順（= 先入れ先出しの queue と同じ）は変わらない。
+        let level = [...seedIds];
         const discovered = new Set<MemoryId>();
-        while (queue.length > 0) {
-          const current = queue.shift()!;
-          const related = await relationStore.listRelated(ctx, current, "contradicts");
-          for (const r of related) {
-            if (!memberIdSet.has(r.memoryId)) {
-              discovered.add(r.memoryId);
-            }
-            if (!visited.has(r.memoryId)) {
-              visited.add(r.memoryId);
-              queue.push(r.memoryId);
+        while (level.length > 0) {
+          const relatedByOrigin = await listRelatedLevel(relationStore, ctx, level, "contradicts");
+          const nextLevel: MemoryId[] = [];
+          for (const related of relatedByOrigin) {
+            for (const r of related) {
+              if (!memberIdSet.has(r.memoryId)) {
+                discovered.add(r.memoryId);
+              }
+              if (!visited.has(r.memoryId)) {
+                visited.add(r.memoryId);
+                nextLevel.push(r.memoryId);
+              }
             }
           }
+          level = nextLevel;
         }
         if (discovered.size > 0) {
           const discoveredMemories = await deps.memoryStore.getMany(ctx, [...discovered]);
@@ -5283,6 +5289,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
+  /** ADR 0407: sync の observe が積んだ extract ジョブを持つ間の `claimedBy`。 */
+  const SYNC_OBSERVE_CLAIMED_BY = "runtime.observe:sync";
+
   async function handleExtractableObservation(
     ctx: Ctx,
     input: ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput,
@@ -5315,7 +5324,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ctx,
       newObservation,
       ["extract"],
-      { now },
+      // ADR 0407: sync のときだけ、observe 自身が LLM を待つあいだ tick に取られないよう、
+      // 「observe が claim 済み」の状態で積む（deferred は tick に渡すためのジョブなので従来どおり）。
+      extractMode === "sync" ? { now, claimedBy: SYNC_OBSERVE_CLAIMED_BY } : { now },
     );
 
     if (!created) {
@@ -5348,12 +5359,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey, signal);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
-      // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
-      // 生成時の値（0）のまま——「ここまで誰にも claim/complete/fail されていない」を
-      // 表す自分のフェンシングトークンとして渡す。
-      await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts, {
-        at: clock.now(),
-      });
+      // CAS（ADR 0142）: ジョブは observe が claim 済みの状態で作られている（ADR 0407。
+      // `attempts` は 1）。作ったときに返った `attempts` を、自分のフェンシングトークンとして渡す。
+      try {
+        await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts, {
+          at: clock.now(),
+        });
+      } catch (err) {
+        // ADR 0407: LLM がリースより長くかかり、tick に取り直されていた。observe の書き込み
+        // （Observation と抽出した Memory）は既に済んでおり、ジョブの終端は取り直した側が持つ。
+        // ここで投げると「書き込み済みなのに失敗」になり `memoryIds` が失われる。良性なので握る
+        // （tick 側の `leaseConflicts` と同じ扱い）。それ以外の例外は今までどおり投げる。
+        if (!(err instanceof OutboxLeaseConflictError)) {
+          throw err;
+        }
+      }
     }
     return {
       observationId: observation.id,
@@ -7316,18 +7336,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (deps.relationStore !== undefined) {
       const visitedKeys = new Set(memberKeySet);
       const visitedIds: MemoryId[] = [...memberIds];
-      const queue: MemoryId[] = [...memberIds];
-      while (queue.length > 0) {
-        const current = queue.shift()!;
-        const related = await deps.relationStore.listRelated(ctx, current, "contradicts");
-        for (const r of related) {
-          const key = lookupKey(r.memoryId);
-          if (!visitedKeys.has(key)) {
-            visitedKeys.add(key);
-            visitedIds.push(r.memoryId);
-            queue.push(r.memoryId);
+      // 幅優先を1段ずつ進める（1段ぶんは `listRelatedMany?` があれば1往復。Issue #1449、ADR 0402）。
+      let level: MemoryId[] = [...memberIds];
+      while (level.length > 0) {
+        const relatedByOrigin = await listRelatedLevel(
+          deps.relationStore,
+          ctx,
+          level,
+          "contradicts",
+        );
+        const nextLevel: MemoryId[] = [];
+        for (const related of relatedByOrigin) {
+          for (const r of related) {
+            const key = lookupKey(r.memoryId);
+            if (!visitedKeys.has(key)) {
+              visitedKeys.add(key);
+              visitedIds.push(r.memoryId);
+              nextLevel.push(r.memoryId);
+            }
           }
         }
+        level = nextLevel;
       }
       const extraIds = visitedIds.filter((id) => !memberKeySet.has(lookupKey(id)));
       if (extraIds.length > 0) {
