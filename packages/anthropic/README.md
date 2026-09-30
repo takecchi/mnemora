@@ -101,8 +101,10 @@ SDK は例外を投げず、`content` にはテキストブロックが1つも�
 | `kind` | 何が起きたか | 付いてくる情報 |
 |---|---|---|
 | `"refusal"` | 安全性の分類器が介入した | `refusalCategory`（`cyber` / `bio` / `frontier_llm` …。**開いた集合**） |
-| `"truncated"` | 応答が途中で切れた | `stopReason`（`max_tokens` / `model_context_window_exceeded`）。**`maxTokens` を上げるか、プロンプトを短くする** |
+| `"truncated"` | 応答が途中で切れた | `stopReason`（`max_tokens` / `model_context_window_exceeded`）。**`maxTokens` を上げるか、プロンプトを短くする**（⚠ 上げすぎると別の失敗になる。下の注） |
 | `"no_content"` | 上記のどれでもないのに、テキストブロックが無かった | — |
+
+⚠ **2026-10-01 追記（ADR 0445）: `maxTokens` を約 21,333 より大きくすると、SDK が「streaming が要る」と言って、リクエストを1本も送らずに素の例外（`AnthropicError: Streaming is required for operations that may take longer than 10 minutes…`。`kind` は付かない）で落ちる。** 実測（`@anthropic-ai/sdk@0.124.0`、`client` を省略）: 21000 は通り、22000・32000・64000 は落ちた。SDK が非ストリーミングの予想所要時間（`max_tokens` に比例）を 10 分と比べて拒むためである。**`client` に `timeout` を明示すれば通る**（`new Anthropic({ apiKey, timeout: 20 * 60_000 })` で 22000・32000・64000 とも送信された）。この境目は SDK の仕様であり mnemora の契約ではない。provider 側での検査や `kind` は足していない。
 
 **⚠ 2026-09-26 追記（Issue #885）: `kind` が表すのはこの3種のどれかである。** HTTP 200 の
 応答オブジェクトそのものの形が壊れている場合——トップレベルの `content` 欄がキーごと
@@ -200,6 +202,10 @@ import { AnthropicLLMProvider } from "@mnemora/anthropic";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 60_000 });
 const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client });
 ```
+
+⚠ **2026-10-01 追記（ADR 0445）: `timeout` は試行ごとに効く。** 応答しないサーバーへ `timeout: 300, maxRetries: 2` で当てると、合計で約2.2秒かかった（3回試行・間の待ちを含む。擬似サーバーと実物の SDK、`@anthropic-ai/sdk@0.124.0`）。⟹ **最悪の合計時間は `timeout × (maxRetries + 1)` に、再送の待ち（指数バックオフ・`retry-after`）を足したもの**であり、既定（`timeout: 600000`・`maxRetries: 2`）なら 30 分を超えうる。`timeout: 60_000` だけを設定して `maxRetries` を既定のままにすると、最悪で約3分待つ。呼び出し全体の上限が欲しいなら、`signal`（`AbortSignal.timeout(ms)`）を `opts` に渡す（下の「`signal`（abort）を直に渡したときの振る舞い」）。
+
+⚠ **同じく 2026-10-01 追記（ADR 0445）: 再送で治る失敗と治らない失敗がある。** SDK が再送するのは 429・5xx と、応答を受け取る前の接続の失敗である。**200 のヘッダを受け取った後に本文が途中で切れた場合は再送されず**、素の `TypeError`（`terminated`）になる——`embed` のジョブなら `failed` で終わり、`reembed` で回復する。mnemora の provider の側で再送する形にはしていない（Phase 1 に自動リトライは無い。ADR 0032・ADR 0157）。また **SDK の再送には冪等キーが付かない**（`x-stainless-retry-count` だけ）ので、プロバイダ側では呼び出しが2回に数えられうる（mnemora が書くのは1回だけ）。
 
 ⚠ 2026-09-27 追記: この例は `@anthropic-ai/sdk` を自分の依存として入れないと動かない（pnpm では `Cannot find package '@anthropic-ai/sdk'`）。
 

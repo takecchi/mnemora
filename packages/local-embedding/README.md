@@ -189,6 +189,7 @@ npm i @mnemora/local-embedding @mnemora/core
 
 ## 前提
 
+- **TypeScript の `lib`・`target` は ES2022 以上**。公開の `.d.ts` が `ErrorOptions`（ES2022 の lib）を使う（`LocalEmbeddingProviderError` のコンストラクタ。`@mnemora/core` の `memory-store`・`vector-store` の例外クラスも同じ）。
 - Node.js >= 22
 - **ESM のみ**（`"type": "module"`）
 - **初回だけネットワークが要る**（Hugging Face から重みを取得する）。2回目以降はキャッシュから読む。
@@ -322,6 +323,7 @@ const runtime = createRuntime({
 abort した呼び出しの待ちだけである（ある呼び出しの abort が、同じ読み込みを待つ別の呼び出しを巻き添えにしない。全員が
 abort しても読み込みは終わりまで走り、成功すればモデルは保持される）。⚠ **推論の途中も止まらない**——`/transformers`
 の呼び出し自体を中断する口が無いので、推論が終わるまで待ち、終わった時点で abort 済みならベクトルを返さずに reject する。
+⚠ **2026-10-01 追記（ADR 0445）: 件数が `maxBatchSize`（既定 128）を超えて分割されたときは、チャンクの合間で abort を見る**——動いている1チャンクは止まらないが、abort 済みなら残りのチャンクは推論せずに `signal.reason` で reject する（以前は全チャンクを推論してから reject していた）。
 `warmup()` は `signal` を取らない。
 ### モデルは**最初の `embed()` まで読み込まれない**
 

@@ -577,6 +577,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`OutboxStore.complete`/`fail` を、同じリース（同じ `attempts`）での2回目の呼び出しで、1回目の終端の値を保つ（先勝ち）ようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定2）。以前は complete×2 で `completedAt` が2回目の `at` に、fail×2 で `failedAt`・`lastError` が2回目の値に上書きされ、`purgeCompletedJobs` の `olderThan` の境界も後ろにずれた。`@mnemora/postgres` は `UPDATE` の `WHERE` を `completed_at IS NULL AND failed_at IS NULL` の両方にし、`@mnemora/testkit/fixtures` のインメモリ実装も揃えた。**戻り値（`void`）と例外は変えていない**（`attempts` 不一致は `OutboxLeaseConflictError`、行が無ければ no-op、終端後の `claimBatch` は0件）。
 
+- **`@mnemora/local-embedding` の `embed()` が、件数が `maxBatchSize`（既定128）を超えて分割されたとき、チャンクの合間で `signal` の abort を見るようになった**（[ADR 0445](./docs/decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。以前は abort の後も残りのチャンクをすべて推論してから reject していた。動いている1チャンクは今までどおり止まらない。reject の値（`signal.reason`）は変わらない。件数が `maxBatchSize` 以下の呼び出しは1バイトも変わらない。
+  - 文書: `@mnemora/anthropic` の README に、`maxTokens` を約21,333より上げると SDK が streaming を求めて素の例外で落ちること（`client` に `timeout` を明示すれば通る）を、openai・anthropic の README に、SDK の `timeout` が試行ごとに効くこと・本文が途中で切れた失敗は再送されないこと・再送に冪等キーが付かないことを、`@mnemora/local-embedding` の README に「`lib`・`target` は ES2022 以上」を足した。
+
 ---
 
 ## [1.1.0] - 2026-09-30

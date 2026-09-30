@@ -8,7 +8,7 @@ import type {
   RecallResult,
   Runtime,
 } from "@mnemora/core";
-import { drainEmbedTicks } from "./embed-drain.js";
+import { drainEmbedTicks, type DrainResult } from "./embed-drain.js";
 import type { Conversation, ConversationTurn } from "./scenario.js";
 
 /**
@@ -109,7 +109,7 @@ export async function ingestConversation(
   ctx: Ctx,
   conversation: Conversation,
   opts: IngestConversationOptions = {},
-): Promise<void> {
+): Promise<DrainResult> {
   // Issue #719: `observed.memoryIds`(冪等な再送では空配列——`ObserveResult` の
   // docstring)を積算し、`drainEmbedTicks` に渡す——`compare`/`retrieval` が使う
   // 主測定の取り込み段であるため、「available_at との ms 競合で claim 0件のまま」
@@ -129,7 +129,8 @@ export async function ingestConversation(
     expectedEmbedJobs += observed.memoryIds.length;
     opts.onObserved?.(turn, observed);
   }
-  await drainEmbedTicks(runtime, ctx, { expectedProcessed: expectedEmbedJobs });
+  // ADR 0445: drain の結果を返す（以前は捨てていた）。`chat` が `totalFailed` を画面に出す。
+  return drainEmbedTicks(runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 }
 
 /**

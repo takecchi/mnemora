@@ -126,6 +126,10 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, t
 const llmProvider = new OpenAILLMProvider({ model: "gpt-4o-mini", client });
 ```
 
+⚠ **2026-10-01 追記（ADR 0445）: `timeout` は試行ごとに効く。** 応答しないサーバーへ `timeout: 300, maxRetries: 2` で当てると、合計で約2.2秒かかった（3回試行・間の待ちを含む。擬似サーバーと実物の SDK、`openai@7.10.0`）。⟹ **最悪の合計時間は `timeout × (maxRetries + 1)` に、再送の待ち（指数バックオフ・`retry-after`）を足したもの**であり、既定（`timeout: 600000`・`maxRetries: 2`）なら 30 分を超えうる。`timeout: 60_000` だけを設定して `maxRetries` を既定のままにすると、最悪で約3分待つ。呼び出し全体の上限が欲しいなら、`signal`（`AbortSignal.timeout(ms)`）を `opts` に渡す（下の「`signal`（abort）を直に渡したときの振る舞い」）。
+
+⚠ **同じく 2026-10-01 追記（ADR 0445）: 再送で治る失敗と治らない失敗がある。** SDK が再送するのは 429・5xx と、応答を受け取る前の接続の失敗である。**200 のヘッダを受け取った後に本文が途中で切れた場合は再送されず**、素の `TypeError`（`terminated`）になる——`embed` のジョブなら `failed` で終わり、`reembed` で回復する。mnemora の provider の側で再送する形にはしていない（Phase 1 に自動リトライは無い。ADR 0032・ADR 0157）。また **SDK の再送には冪等キーが付かない**（`x-stainless-retry-count` だけ）ので、プロバイダ側では呼び出しが2回に数えられうる（mnemora が書くのは1回だけ）。
+
 ⚠ 2026-09-27 追記: この例は `openai` を自分の依存として入れないと動かない（pnpm では `Cannot find package 'openai'`）。
 
 🔴 **2026-09-29 訂正（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](../../docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）: 上の「同じ版を入れること」はもう要らない。** `client` の型は `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`（`openai` パッケージのクラスをそのまま切り出した型）から、`@mnemora/openai` 自前の構造型（`OpenAIChatClient`/`OpenAIEmbeddingsClient`、`openai` パッケージの型を一切参照しない）へ変わった。**`openai` を自分の依存として入れる版は、`@mnemora/openai` が固定している版（`7.10.0`）と揃える必要が無い**——`pnpm add openai`・`npm i openai` で最新を入れても、`OpenAI` インスタンスはそのまま `client` に渡せる（版ごとの `RequestOptions`/`NullableHeaders` の食い違いは、構造型が SDK のクラスを名指ししなくなったことで解消した）。旧型 `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">` を自分の型注釈にそのまま書いていても、`OpenAI`/`OpenAIChatClient` の代入関係は壊れていない——ただし公開の宣言自体を指す型注釈（例: 独自の偽 client の型を `OpenAILLMProviderOptions["client"]` から `typeof` で取り出す等）は新しい型名を参照するよう直すこと。移行の詳細は [CHANGELOG.md](../../CHANGELOG.md) の `[1.1.0]` 節を見ること。

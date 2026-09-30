@@ -89,6 +89,14 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * `@mnemora/openai` は SDK 呼び出しへ `{ signal }` を渡す。`@mnemora/local-embedding` は
  * 推論の**前後**で `signal.throwIfAborted()` 相当を確かめるだけであり、**推論の途中では
  * 止まらない**（transformers.js のパイプライン呼び出し自体を中断する口を持たないため）。
+ *
+ * ⚠ **2026-10-01 追記（[ADR 0445](../../../../docs/decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)。上の2文は
+ * [ADR 0428](../../../../docs/decisions/0428-provider-abort-reason-and-error-guards.md) より前の記述で、不完全だった）:**
+ * - `@mnemora/openai` は SDK 呼び出しを core の `runAbortable` で包む。**直に呼んだときも**、abort の reject の値は
+ *   `signal.reason`（SDK の `APIUserAbortError` ではない）で、SDK の再試行待ち（429 の `retry-after` 等）の最中でも abort の時点で返る。
+ * - `@mnemora/local-embedding` は、**モデルの読み込み待ち・読み込みの再試行の待ちも** `signal` ごとに切る。ただし共有の読み込み
+ *   そのものは止まらない。件数が `maxBatchSize` を超えて分割されたときは、チャンクの合間でも abort を見る
+ *   （動いている1チャンクは止まらない）。
  */
 export interface EmbeddingProvider {
   /** この provider が作るベクトルの埋め込み空間（`provider`・`model`・`dimensions`）。構築時に決まり、変わらない（1インスタンス = 1空間）。 */
