@@ -453,5 +453,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0438](./0438-tenant-boundary-teeth-and-purge-uuid-case.md) | 別テナントを混ぜた歯を足す・purgeMemory の大文字の id を直す・subject カウンタの相関サブクエリの修飾を直す | 採用 (2026-10) |
 | [0439](./0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md) | `MemoryStore` の書き込み口は、別の行を指す参照の参照先が `ctx` のテナントの行であることを、書く前に確かめる（複合外部キーの migration は入れない） | 採用 (2026-10) |
 | [0440](./0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) | 抽出の現地の暦日を年の範囲によらず組み直す・outbox の終端を先勝ちにする・BullMQ の stalled を README に書く | 採用 (2026-10) |
+| [0441](./0441-changelog-migration-refs-consumer-smoke-names.md) | CHANGELOG と migration-v1 の参照の食い違いを直す・postgres の例外は `name` だけと訂正する・README に ES2022 を書く・consumer-install の実行検査に値の名前を足す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

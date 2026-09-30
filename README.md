@@ -282,6 +282,10 @@ npm i @mnemora/core @mnemora/postgres @mnemora/openai
 ```
 
 **Node.js >= 22 と ESM が要る**（CommonJS からは Node 22.12 以降の `require(esm)` で読める）。
+**TypeScript の `lib`・`target` は ES2022 以上にすること**——公開の `.d.ts` が `ErrorOptions`（ES2022 の lib）を使う
+（`@mnemora/core` の `MemoryStore`・`VectorStore` の例外クラスと、`@mnemora/postgres` の `TrigramLexicalStoreUnavailableError`）。
+ES2021 以下で `skipLibCheck: false` だと `TS2304`、`skipLibCheck: true` だと `cause` の型が失われる
+（[ADR 0441](./docs/decisions/0441-changelog-migration-refs-consumer-smoke-names.md)）。
 `@mnemora/postgres` は本物の Postgres + pgvector を要求する——擬似物での代替は無い。
 
 LLM を Anthropic で回すなら `@mnemora/anthropic` を足す。**ただし埋め込みは別の provider が要る**

@@ -1713,6 +1713,10 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
 [PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
 [ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
 
+⚠ **非破壊に数え直した（番号の参照を崩さないため、ここに残す）**: 下の「破壊的変更として数えない」の
+とおり 2026-10-01 に非破壊へ数え直した。置き場所は 🔴 の節のままで、項目を動かしていない
+（[ADR 0441](./decisions/0441-changelog-migration-refs-consumer-smoke-names.md)）。
+
 **何が変わったか**:
 
 - `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を
@@ -1729,7 +1733,7 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
   一部だけを渡した `resolveContestedGroup?` を専用のエラー
   （`ContestedGroupMembershipMismatchError`、新設）で拒む約束、有効期間の重なりの境目
   （半開区間・マイクロ秒精度）の約束も検査する。
-- 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking`
+- 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Added`
   を見ること。**ここには複製しない。**
 
 **破壊的変更として数えない**（2026-10-01 に数え直した。書いた当初は、上の「数え方の規律への追記

@@ -16,7 +16,8 @@
  * 4. すべての入口を import する `smoke.ts` を、`moduleResolution` が `node16` と `bundler` の両方で
  *    `tsc --noEmit`（strict、`skipLibCheck: true`）に掛ける。
  * 5. すべての入口を import する `smoke.mjs` を node で実行する（解決先が install 先であること、
- *    export が1つ以上あること）。
+ *    export が1つ以上あること、`scripts/__snapshots__/public-api/*.d.ts` から引いた値の名前が
+ *    実行時に undefined でないこと。値と型の区別とその限界は `check-consumer-install-lib.mjs` と ADR 0441）。
  * 6. すべての入口を `require` する `smoke.cjs` を node で実行する（README の前提「CommonJS からは
  *    Node 22.12 以降の `require(esm)` で読み込める」。見るものは 5 と同じ。型は見ない）。
  *
@@ -46,6 +47,7 @@ import {
   buildSmokeMjs,
   buildSmokeTs,
   buildTsconfig,
+  collectValueNamesForEntries,
   compareEntryPoints,
   entryPointsFromExports,
 } from "./check-consumer-install-lib.mjs";
@@ -143,9 +145,11 @@ try {
   );
   if (!install.ok) throw new Error("install");
 
+  // snapshot の値の名前（入口ごと）。空・引けないときは例外で止まり、赤になる。
+  const valueNames = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, REPO_ROOT);
   writeFileSync(join(consumerDir, "smoke.ts"), buildSmokeTs(EXPECTED_ENTRY_POINTS));
-  writeFileSync(join(consumerDir, "smoke.mjs"), buildSmokeMjs(EXPECTED_ENTRY_POINTS));
-  writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS));
+  writeFileSync(join(consumerDir, "smoke.mjs"), buildSmokeMjs(EXPECTED_ENTRY_POINTS, valueNames));
+  writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS, valueNames));
   const tsc = join(consumerDir, "node_modules", "typescript", "bin", "tsc");
   for (const mr of ["node16", "bundler"]) {
     writeFileSync(join(consumerDir, `tsconfig.${mr}.json`), buildTsconfig(mr));
