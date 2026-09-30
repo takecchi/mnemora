@@ -3225,10 +3225,15 @@ export interface PurgeOptions {
     actor?: EventActor;
     dryRun?: boolean;
 }
+export type PurgeEmbeddingCleanup = {
+    status: "failed";
+    error: string;
+};
 export type PurgeOutcome = {
     memoryId: MemoryId;
     kind: "purged";
     previousStatus: "forgotten";
+    embeddingCleanup?: PurgeEmbeddingCleanup;
 } | {
     memoryId: MemoryId;
     kind: "would_purge";
@@ -3236,6 +3241,7 @@ export type PurgeOutcome = {
 } | {
     memoryId: MemoryId;
     kind: "already_purged";
+    embeddingCleanup?: PurgeEmbeddingCleanup;
 } | {
     memoryId: MemoryId;
     kind: "status_not_forgotten";

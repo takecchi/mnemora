@@ -1821,6 +1821,31 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 （**書き込みは構築が終わるまで止まり、読み取りは通る**。`ACCESS EXCLUSIVE` ではない）。
 本番適用時は書き込みが止まる時間を見込むこと（構築時間は ADR 0384「測ったこと」を見ること）。
 
+⚠ **追記（`0029`・`0030` の2本、上の本数の訂正）**: 上の段落は `0028` の時点で書かれ、その後に増えた
+migration を数えていない。**この節（`v1.1.0` より後）で足された migration は `0026`〜`0030` の5本、
+`v1.0.2` からは `0023`〜`0030` の8本である**（上の「3本」「6本」は、それぞれ5本・8本と読み替えること）。
+`0029`・`0030` はどちらも索引の追加のみで、列・型・SQL 文・返り値は変えず、公開 API も変えない。
+**この文書の定義では破壊的変更に数えない**（実務上の案内としてここに書く）。
+
+- **`0029_memories_claim_predicates_index.sql`**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、
+  [ADR 0329](./decisions/0329-claim-key-known-predicates-from-store.md) の 2026-09-30 追記）:
+  `listActiveClaimPredicates` 用の部分索引 `idx_memories_claim_predicates`
+  （`(tenant_id, subject_id, claim_key_predicate, created_at)`、`WHERE status = 'active' AND
+  claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）を `memories` に足す。
+  適用中は **`memories` への書き込みが止まる**（読み取りは通る）。
+- **`0030_recalls_digest_band_index.sql`**（[ADR 0389](./decisions/0389-recalls-digest-band-index.md)）:
+  `purge()` が `recalls.index_band` の目次帯を書き換える `UPDATE` 用に、式の GIN 索引
+  `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を `recalls` に足す。
+  適用中は **`recalls` への書き込みが止まる**（読み取りは通る）。
+
+どちらも素の `CREATE INDEX` である。`CONCURRENTLY` を使わない理由は `0027`・`0028` と同じで
+（migration ファイルは1トランザクションで包まれ、`CONCURRENTLY` はその中で実行できない）、
+`0029` は [Issue #760](https://github.com/takecchi/mnemora/issues/760) の決定（手で
+`CONCURRENTLY` を流せる経路を作らない）にも従う。`ShareLock` の意味は上の `0028` の段落と同じで、
+止まる時間は表の行数で決まる——書き込みの多い時間帯を避けて当てること。作成時間・索引サイズ・
+書き込みへの上乗せの実測は、`0029` は ADR 0329 の追記、`0030` は ADR 0389 を見ること
+（この PR は測り直していない）。
+
 ### 32. `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性が崩れていると例外を投げるようになった（`@mnemora/openai`）
 
 [Issue #860](https://github.com/takecchi/mnemora/issues/860)、
