@@ -8,9 +8,11 @@
  * （ADR 0347 の「保存できない候補」の経路）。本文（`content`）の NUL はここでは扱わない（本文は落とせない。
  * 従来どおり候補ごと落ちる）。
  *
- * ⚠ 長さは見ない。Postgres の GIN 索引（`idx_memories_tags`）は長すぎる tag を拒むが、拒む長さは値の
- * 圧縮のされ方で変わり（同じ長さでも繰り返しは通る）、testkit の fixture は通す。今保存できている値を
- * 落とさないために、長さの判定は置いていない（ADR 0443 決定2）。
+ * もう1つ、**`tags` の要素の巨大さ**も見る。Postgres の GIN 索引（`idx_memories_tags`）は1要素が約 2.7KB
+ * （圧縮したあと）を超えると INSERT を拒む。上限は {@link MAX_TAG_CODE_POINTS} コードポイント（UTF-8 で最大
+ * 4 バイト × 512 = 2048 バイトで、圧縮が効かなくても届かない）。⚠ 圧縮が効く値（繰り返しなど）は
+ * 上限超えでも保存できていたが、値で分けると判定が adapter 依存になるので、長さだけで落とす（ADR 0443 決定2）。
+ * `digest` の長さは見ない（索引が無く、手元の Postgres で巨大な値も保存できた）。
  */
 import type { ExtractedMemoryCandidate } from "./extraction.js";
 
@@ -26,8 +28,8 @@ export interface DroppedAuxField {
   contentHash: string;
   /** 落とした欄。`digest` はフォールバックの digest に、`claimKey` は `null` に、`tags` は該当の要素だけを捨てた。 */
   field: "digest" | "tags" | "claimKey";
-  /** 落とした理由。今は NUL だけ。 */
-  reason: "nul_character";
+  /** 落とした理由。`nul_character` は NUL を含む、`too_long` は `tags` の要素が {@link MAX_TAG_CODE_POINTS} を超える。 */
+  reason: "nul_character" | "too_long";
   /** `tags` のときだけ: 捨てた要素の数。 */
   count?: number;
   /** `tags` のときだけ: 捨てた要素の、LLM が返した `tags` の中の添字（先頭から {@link DROPPED_TAG_INDEXES_MAX} 個まで）。 */
@@ -36,6 +38,18 @@ export interface DroppedAuxField {
 
 /** `DroppedAuxField.tagIndexes` に載せる添字の数の上限（tag が何万件も NUL でも meta を膨らませない）。 */
 export const DROPPED_TAG_INDEXES_MAX = 20;
+
+/** `tags` の1要素の長さの上限（コードポイント）。GIN 索引の1エントリの上限（約 2.7KB）に、最悪の4バイト文字でも届かない値。 */
+export const MAX_TAG_CODE_POINTS = 512;
+
+/** 文字列が {@link MAX_TAG_CODE_POINTS} を超えるか。 */
+export function exceedsTagLimit(value: string): boolean {
+  // UTF-16 の単位数はコードポイント数以上なので、これ以下なら数えるまでもなく上限内
+  if (value.length <= MAX_TAG_CODE_POINTS) {
+    return false;
+  }
+  return Array.from(value).length > MAX_TAG_CODE_POINTS;
+}
 
 /** 文字列が NUL（U+0000）を含むか。 */
 export function containsNul(value: string): boolean {
@@ -51,11 +65,11 @@ export interface SanitizedCandidateAuxFields {
 }
 
 /**
- * 候補の `digest` と `tags` から、NUL を含むものを落とす。
+ * 候補の `digest` と `tags` から、保存できないものを落とす。
  *
  * - `digest` が NUL を含めば、`digest` を無い（`undefined`）ことにする——あとの `resolveDigest` が、空・欠落と同じく
  *   本文の先頭を切り出したフォールバックへ倒す。
- * - `tags` は NUL を含む要素だけを捨てる。ほかの要素の並び・重複・前後の空白はそのまま残す。
+ * - `tags` は NUL を含む要素、{@link MAX_TAG_CODE_POINTS} を超える要素だけを捨てる。ほかの要素の並び・重複・前後の空白はそのまま残す。
  *
  * 空白だけの要素は、ここでは扱わない（従来どおり `dropBlankTags` が捨てる）。
  */
@@ -70,22 +84,40 @@ export function sanitizeCandidateAuxFields(
     dropped.push({ field: "digest", reason: "nul_character" });
   }
   const tags = candidate.tags;
-  if (tags !== undefined && tags.some(containsNul)) {
-    const tagIndexes: number[] = [];
-    let count = 0;
+  if (tags !== undefined) {
+    const nul = { indexes: [] as number[], count: 0 };
+    const long = { indexes: [] as number[], count: 0 };
     const kept: string[] = [];
     tags.forEach((tag, tagIndex) => {
-      if (containsNul(tag)) {
-        count += 1;
-        if (tagIndexes.length < DROPPED_TAG_INDEXES_MAX) {
-          tagIndexes.push(tagIndex);
-        }
-      } else {
+      const bucket = containsNul(tag) ? nul : exceedsTagLimit(tag) ? long : undefined;
+      if (bucket === undefined) {
         kept.push(tag);
+        return;
+      }
+      bucket.count += 1;
+      if (bucket.indexes.length < DROPPED_TAG_INDEXES_MAX) {
+        bucket.indexes.push(tagIndex);
       }
     });
-    next = { ...next, tags: kept };
-    dropped.push({ field: "tags", reason: "nul_character", count, tagIndexes });
+    if (nul.count + long.count > 0) {
+      next = { ...next, tags: kept };
+      if (nul.count > 0) {
+        dropped.push({
+          field: "tags",
+          reason: "nul_character",
+          count: nul.count,
+          tagIndexes: nul.indexes,
+        });
+      }
+      if (long.count > 0) {
+        dropped.push({
+          field: "tags",
+          reason: "too_long",
+          count: long.count,
+          tagIndexes: long.indexes,
+        });
+      }
+    }
   }
   return { candidate: next, dropped };
 }

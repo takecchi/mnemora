@@ -13,6 +13,7 @@ import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correc
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
 import { DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT, deriveClaimKeys } from "./claim-key.js";
+import { sanitizeCandidateAuxFields, type DroppedAuxField } from "./llm-aux-fields.js";
 import { normalizeContentForComparison } from "./content-comparison.js";
 import type { ClaimKey, ClaimKeyOptions } from "./claim-key.js";
 import {
@@ -4075,6 +4076,29 @@ interface DroppedCandidate {
 const DROPPED_CANDIDATE_MESSAGE_MAX_CHARS = 500;
 
 /**
+ * ADR 0443: 候補それぞれの補助の欄（`digest`・`tags`）から、保存できない値だけを落とす。候補は捨てない。
+ * 落とした欄の記録は、`created` イベントの `meta.droppedFields` に入る。何も落とさなければ、渡した配列と
+ * 候補そのものを返す（`droppedFields` は空）。
+ */
+function sanitizeCandidatesAuxFields(
+  candidates: ExtractedMemoryCandidate[],
+  hashContent: (content: string) => string,
+): { candidates: ExtractedMemoryCandidate[]; droppedFields: DroppedAuxField[] } {
+  const droppedFields: DroppedAuxField[] = [];
+  const sanitized = candidates.map((candidate, index) => {
+    const result = sanitizeCandidateAuxFields(candidate);
+    if (result.dropped.length > 0) {
+      const contentHash = hashContent(candidate.content);
+      for (const entry of result.dropped) {
+        droppedFields.push({ index, contentHash, ...entry });
+      }
+    }
+    return result.candidate;
+  });
+  return { candidates: droppedFields.length === 0 ? candidates : sanitized, droppedFields };
+}
+
+/**
  * `createMemoryWithOutbox` が投げた例外から {@link DroppedCandidate} を作る。
  *
  * 外側の `message` は使わない——drizzle の `Failed query: <SQL> params: …` は params（候補の本文）を
@@ -4399,6 +4423,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
     reextractOpts?: CreatedEventReextractOpts,
+    droppedFields: readonly DroppedAuxField[] = [],
   ): NewMemoryEvent {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
@@ -4430,6 +4455,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // Issue #1063（ADR 0347）: 同じ抽出で保存できずに落とした候補があったときだけ足す——
         // 落とした候補が無い呼び出しの meta の形は変えない。
         ...(droppedCandidates.length > 0 ? { droppedCandidates: [...droppedCandidates] } : {}),
+        // ADR 0443: 保存できない補助の欄（digest・tags・claim key は対象外。下記）だけを落として候補を残したときに足す。
+        ...(droppedFields.length > 0 ? { droppedFields: [...droppedFields] } : {}),
         // Issue #1370（ADR 0391）: 言語の事後検査。日本語の観測から、かな・漢字の無い（ラテン文字の）
         // 本文が出たときだけ足す——疑いが無い呼び出しの meta の形は変えない。**印を付けるだけ**で、
         // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
@@ -4467,6 +4494,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
     reextractOpts?: CreatedEventReextractOpts,
+    droppedFields: readonly DroppedAuxField[] = [],
   ): Promise<void> {
     await deps.eventStore.append(
       ctx,
@@ -4478,6 +4506,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         failure,
         droppedCandidates,
         reextractOpts,
+        droppedFields,
       ),
     );
   }
@@ -4815,6 +4844,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     failure: ExtractionFailure | null,
     claimKeys?: readonly (ClaimKey | null)[],
     detectContested?: boolean,
+    droppedFields: readonly DroppedAuxField[] = [],
   ): Promise<{
     memoryIds: MemoryId[];
     contentHashes: Set<string>;
@@ -4870,6 +4900,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             droppedByStore.map(({ index, error }) =>
               describeDroppedCandidate(index, newMemories[index]!.contentHash, error),
             ),
+            undefined,
+            droppedFields,
           ),
         { now: outboxNow },
       );
@@ -4907,7 +4939,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     for (const { memory, created } of written) {
       memoryIds.push(memory.id);
       if (created) {
-        await appendCreatedEvent(ctx, memory, observation, outcome, failure, dropped);
+        await appendCreatedEvent(
+          ctx,
+          memory,
+          observation,
+          outcome,
+          failure,
+          dropped,
+          undefined,
+          droppedFields,
+        );
         // Issue #372: 書き込み時（新しい Memory が active になる時点）の延長として、
         // opt-in のときだけ検出を走らせる。**冪等な再送（`created === false`）では
         // 走らせない**——「新しく active になった」わけではないため。
@@ -5036,11 +5077,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     contestedDetection: ContestedDetectionOutcome[];
   }> {
     const {
-      candidates,
+      candidates: extractedCandidates,
       usedWholeObservationFallback,
       failure,
       rejectedSubjectIds: rawRejectedSubjectIds,
     } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates, signal);
+    // ADR 0443: 保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
+    const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
+      extractedCandidates,
+      deps.hashContent,
+    );
     // `ExtractCandidatesResult.rejectedSubjectIds` は型としては optional
     // （`docs/decisions/0178-public-api-surface-gate.md` 対応。extraction.ts の doc
     // コメント参照）だが、`extractCandidates` の両方の経路が必ず値を埋めるため、
@@ -5093,6 +5139,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       failure,
       claimKeys,
       claimKeyOptions?.detectContested === true,
+      droppedFields,
     );
     return { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection };
   }
@@ -5204,12 +5251,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    const { candidates, usedWholeObservationFallback, failure } = await extractCandidates(
-      deps.llmProvider,
-      ctx,
-      observation,
-      undefined,
-      opts?.signal,
+    const {
+      candidates: extractedCandidates,
+      usedWholeObservationFallback,
+      failure,
+    } = await extractCandidates(deps.llmProvider, ctx, observation, undefined, opts?.signal);
+    // ADR 0443: observe と同じ。保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
+    const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
+      extractedCandidates,
+      deps.hashContent,
     );
 
     if (usedWholeObservationFallback) {
@@ -5348,7 +5398,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             now,
             abortIfForgotten: knownMemoryIds,
             buildCreatedEvent: (memory) =>
-              buildCreatedEventFor(ctx, memory, observation, "ok", null, [], reextractCreated),
+              buildCreatedEventFor(
+                ctx,
+                memory,
+                observation,
+                "ok",
+                null,
+                [],
+                reextractCreated,
+                droppedFields,
+              ),
           },
         );
       } catch (error) {
@@ -5367,7 +5426,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (result.createdEventsWritten !== true) {
         for (const { memory, created } of result.created) {
           if (created) {
-            await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
+            await appendCreatedEvent(
+              ctx,
+              memory,
+              observation,
+              "ok",
+              null,
+              [],
+              reextractCreated,
+              droppedFields,
+            );
           }
         }
       }
@@ -5423,7 +5491,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       const { memory, created } = written;
       memoryIds.push(memory.id);
       if (created) {
-        await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
+        await appendCreatedEvent(
+          ctx,
+          memory,
+          observation,
+          "ok",
+          null,
+          [],
+          reextractCreated,
+          droppedFields,
+        );
       }
     }
     // `candidates.length === 0` を上で早期リターンしている以上 `memoryIds` は非空
