@@ -38,7 +38,7 @@
      **判定は「`kind` を見て、`kind` が在ればそれで決める。`kind` が無ければ `name` を見る」**。
      `kind` が無い古い版の core を引いた adapter が投げた例外にも効かせるためである。`kind` が在って別の種類なら、
      `name` が一致しても通さない。
-  3. **`runtime.ts` の24か所と `strategies/reextract.ts` の1か所、計25か所の `instanceof` をすべて判定関数へ置き換えた。**
+  3. **`runtime.ts` の19か所と `strategies/reextract.ts` の1か所、計20か所の `instanceof` をすべて判定関数へ置き換えた。**
      core の src（テスト以外）にこの5クラスの `instanceof` は残っていない。
   4. **歯**: store に「別の realm の例外」（`vm` で定義し直したクラス。`kind` 無しの版と有りの版の両方）を投げさせ、
      (a) `tick()` が reject されない、(b) その衝突が `leaseConflicts` に積まれ後続のジョブが処理される、
