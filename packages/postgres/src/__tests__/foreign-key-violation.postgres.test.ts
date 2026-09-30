@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, resetTestDatabase } from "./test-db.js";
+import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
  * ADR 0047 の決め手を実測する歯。
@@ -100,4 +100,8 @@ describe("PostgresMemoryStore.recordUsage — 外部キー違反（ADR 0047 の�
     const result = await store.recordUsage(ctx, recallId, [memory.id]);
     expect(result.insertedMemoryIds).toEqual([memory.id]);
   });
+});
+
+afterAll(async () => {
+  await closeTestClient();
 });

@@ -3,7 +3,12 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * `PostgresMemoryStore.restoreSupersededBy` を、**本物の2接続の並行**で検査する。
@@ -53,6 +58,7 @@ describe("PostgresMemoryStore.restoreSupersededBy を本物の並行（forget �
     for (const client of pools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   /**

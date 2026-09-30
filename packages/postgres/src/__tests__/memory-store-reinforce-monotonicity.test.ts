@@ -3,7 +3,12 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * `reinforce` が `last_reinforced_at` / `decay_floor_at` を**巻き戻さない**ことを検査する
@@ -26,6 +31,7 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
     for (const client of pools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   async function seed() {

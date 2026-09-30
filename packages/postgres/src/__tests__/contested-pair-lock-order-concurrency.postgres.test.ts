@@ -5,7 +5,12 @@ import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * `PostgresMemoryStore.markContestedPair` / `resolveContestedPair`（Issue #197、
@@ -53,6 +58,7 @@ describe("PostgresMemoryStore.markContestedPair / resolveContestedPair — 対�
     for (const client of pools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   function event(memoryId: MemoryId): NewMemoryEvent {
