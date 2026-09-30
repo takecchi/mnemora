@@ -2865,6 +2865,8 @@ export class PostgresMemoryStore implements MemoryStore {
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
+    // ADR 0438: 大文字の uuid でも `recalls.index_band` の目次帯（文字列で比べる）に当たるよう、入口でそろえる。
+    id = normalizeUuidCase(id);
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
