@@ -129,10 +129,12 @@ grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testki
 [ADR 0266](./decisions/0266-llm-provider-conformance.md)、PR #603）でもう成り立たなくなった。**
 
 `packages/testkit/src/llm-provider-conformance.ts` に `describeLLMProviderConformance` が在り、
-8 it（条項1: ベンダー型が漏れない検査2本／決定性2本／失敗伝播とリトライ非内蔵4本）を持つ。
+it を持つ（本数と内訳はここに書かない——出所は `packages/testkit/src/llm-provider-conformance.ts`。数えるなら §1 と同じ式で数えること。下の「⚠ 2026-09-30 追記」を見ること）。
 `@mnemora/openai`（`packages/openai/src/__tests__/llm-provider.conformance.test.ts`）・
 `@mnemora/anthropic`（`packages/anthropic/src/__tests__/llm-provider.conformance.test.ts`）の
 両方が当てている——**詳細と「何を測っていないか」は §2.3**。
+
+**⚠ 2026-09-30 追記**: この節には、以前は it の数と内訳（「8 it（条項1: ベンダー型が漏れない検査2本／決定性2本／失敗伝播とリトライ非内蔵4本）」）を手で書いていた。数え直すと一致していた（素の `it(` 2 ＋ `maybeDeterministicIt(`/`maybeFailingIt(` 6 の宣言の行の合計）が、門で照合している数ではないので、数と内訳を消して出所（`packages/testkit/src/llm-provider-conformance.ts`）を指す形にした（元の値は git の履歴に在る）。§2.3 の「8 it は skip なく全部走る」も同じ理由で本数を外した（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 両実装が同じ契約に従うことは `packages/anthropic/src/__tests__/provider-parity.test.ts`
 も見ているが、**それは2実装を突き合わせる歯であって、契約そのものの歯ではない**——
@@ -202,7 +204,7 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 | 1 | `packages/openai/src/__tests__/llm-provider.conformance.test.ts` | `OpenAILLMProvider` ＋ 注入した偽 client（固定応答。**本物の `openai` SDK ではない**） | **走る**（常時） |
 | 2 | `packages/anthropic/src/__tests__/llm-provider.conformance.test.ts` | `AnthropicLLMProvider` ＋ 注入した偽 client（固定応答。**本物の `@anthropic-ai/sdk` ではない**） | **走る**（常時） |
 
-**両方とも `deterministic: true`・`createFailing` を渡しており、8 it は skip なく全部走る**
+**両方とも `deterministic: true`・`createFailing` を渡しており、この suite の it は skip なく全部走る**
 【現物: 両ファイルの `describeLLMProviderConformance({` 呼び出し】。⟹ **本物の実 API に
 当たる `LLMProvider` 適合テストは、この suite にも無い**——測っているのは「core の契約
 （ベンダー型を漏らさない・例外を同一性のまま伝播する・リトライを内蔵しない）を、
@@ -216,7 +218,7 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 
 - `packages/testkit/src/__tests__/llm-provider-conformance.test.ts` の2つ（`DeterministicLLMProvider`・`RecordedLLMProvider`）。
   **`createFailing: null` を渡すので、失敗系の歯は `it.skip` になる**（名前は残る。同ファイル冒頭のコメント）。
-  上の「8 it は skip なく全部走る」は、表の2つについての記述である。
+  上の「この suite の it は skip なく全部走る」は、表の2つについての記述である。
 - `packages/testkit/src/__tests__/wrapper-providers.conformance.test.ts` の2つ（`SeededLLMProvider`・`RecordingLLMProvider`）と、
   `examples/chat/src/__tests__/wrapper-providers.conformance.test.ts` の1つ（`CountingLLMProvider`）。
   包まれる側は `DeterministicLLMProvider`、`createFailing` は必ず失敗する包まれる側を渡している。
