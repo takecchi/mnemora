@@ -90,3 +90,5 @@
   - O-6 の元の失敗は `hunt-o/m18.mjs`・`m22.mjs` 相当を再実行して確かめた: Postgres（UTF8・SQL_ASCII）は
     `invalid byte sequence for encoding "UTF8": 0x00`（contentHash・検索語）と `"1e+308" is out of range for type vector`（vector）、testkit は保存または0件だった。
   - 【確かめていないこと】自前の `MemoryStore` 実装が、追加した `it` でどれだけ落ちるか。`Intl.Segmenter` の書記素の規則が Node の版で変わったときの境界の差。
+  - 2026-10-01 追記（引き継ぎ）: 上の「赤→緑は commit 列に残る」について、この枝の CI が走ったのは `addc6c31` と `ae9ee92c` の2回だけで、赤のテストだけの commit（`870d425f`・`c7d803a5`・`163fade8`）の CI の記録は無い。
+    引き継いだ側が手元で変異を当てた: `runtime.ts` の正規化した `content` での除外を外すと、`claim-key-normalized-equal-not-contested.test.ts` の2本が赤。`packDigestBand` の切り詰めを `slice` に替えると、`digest-band.test.ts` の書記素の3本（とサロゲートペアの既存の1本）が赤。どちらも戻すと27本が緑。O-6 の変異は当てていない（Postgres を立てていない）。
