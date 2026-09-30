@@ -504,6 +504,7 @@ interface MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsByRetentionOptions,
   ): Promise<PurgeExpiredEventsByRetentionOutcome>;
+  purgeExpiredRecalls?(ctx: Ctx, opts: PurgeExpiredRecallsOptions): Promise<PurgeExpiredRecallsResult>;
   archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
   purgeMemory?(
     ctx: Ctx,
@@ -1235,6 +1236,7 @@ interface OutboxStore {
     opts?: { at?: Date }
   ): Promise<void>;
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+  purgeCompletedJobs?(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
 }
 ```
 
