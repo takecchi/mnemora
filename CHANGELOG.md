@@ -172,7 +172,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目34。**DB マイグレーション**は無い。修正前に書かれた食い違う行が在るかを調べる SQL は ADR 0398 に在る。
   - 【確かめていないこと】検査と INSERT の間に、並行して記憶が消えた場合の Postgres のエラーの見え方（外部キー違反の生のエラーのまま）。手元以外の環境・既存データでの食い違う行の有無。
 
+- **`@mnemora/anthropic` の `completeStructured` が、`z.record` を含むスキーマを、送る前に `kind: "schema_unsupported"` の `AnthropicLLMProviderError` で落とすようになった**（[ADR 0360](./docs/decisions/0360-schema-unsupported-thrown-before-send.md) の 2026-09-30 の追記、負債3、`@mnemora/anthropic`）。
+
+  これまで Anthropic 側は `z.record` を翻訳して送っていた。SDK の翻訳は `additionalProperties: false` を強制し、record のキーと値の制約を `description` に降格するので、送る形は**空の object しか許さない**ものになり、record の欄は**例外が出ないまま常に空**になっていた。今は、object の欄・配列の要素・`optional`/`nullable`/`default` の内側・union や intersection の枝・`z.lazy` の先のどこに `z.record` があっても、`messages.create` を呼ぶ前に `kind: "schema_unsupported"` で投げる。`cause` の `Error` に理由が載る。`@mnemora/openai` は元から同じ形を落としており、2つの provider の振る舞いが揃った。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は例外なしに通っていた `z.record` を含むスキーマが、新しく例外になる**。
+  - **誰が影響を受けるか**: `AnthropicLLMProvider.completeStructured` に `z.record` を含む zod スキーマを渡している利用者。core が渡す4つのスキーマ（抽出・claim key・統合・内省）に `z.record` は無く、`runtime` の経路は変わらない。
+  - **変えなかったこと**: `z.lazy`（再帰そのもの）・`default`・根が union は、今までどおり送る（`z.record` を含めば落ちる）。`@mnemora/openai` の振る舞い、送る JSON の形（record を含まないスキーマ）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目35。record を `z.array(z.object({ key: z.string(), value: … }))` に置き換える。DB マイグレーションは無い。
+  - 【確かめていないこと】Anthropic の実 API には当てていない（鍵が無い）。
+
 ### Added
+
+- **古い `recalls` と完了済みの `outbox` 行を消す任意メソッド `MemoryStore.purgeExpiredRecalls?` と `OutboxStore.purgeCompletedJobs?` を足した**（[ADR 0404](./docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)、[PR #1479](https://github.com/takecchi/mnemora/pull/1479)）。`purgeExpiredEvents?` と同じ形で、`olderThan` と `limit` は呼び出し側が必ず渡す（**保持期間の既定値は無い**）。`purgeExpiredRecalls?` は `created_at < olderThan` の `recalls` をその `recall_usages` ごと同一トランザクションで消す（**消した `recallId` への `recordUsage` は例外になる**）。`purgeCompletedJobs?` は `completed_at < olderThan` の完了済みの行**だけ**を消し、claim 中・未処理・`failed` の行は消さない。**`recalls.query` を約束の範囲に入れるか、`failed` 行の扱い、既定の保持期間は決めていない**（オーナーに聞く事柄）。新しい型は `PurgeExpiredRecallsOptions`/`PurgeExpiredRecallsResult`/`PurgeCompletedJobsOptions`/`PurgeCompletedJobsResult`。`@mnemora/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に任意フラグ `supportsPurgeExpiredRecalls?`/`supportsPurgeCompletedJobs?` が増えた（省略可・3状態。**非破壊**。省略すると「⚠ 未検査」の `it` が1本増える）。**DB マイグレーションは増えない**（索引を足さない判断と測った数字は ADR 0404）。
 
 - **`RecallQuery.relationMaxCount?`（任意、正の整数 1〜1000）を足した**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目8、[PR #1470](https://github.com/takecchi/mnemora/pull/1470)、[ADR 0396](./docs/decisions/0396-recall-relation-max-count.md)）。段3（`contradiction_resolution`）の多者間の `contested` 群の同伴取得について、群ごとの上限件数を呼び出し側から変えられる。超えた分は従来どおり `over_limit { stage: "relation" }` に積まれる。探索の安全弁（群ごとに訪れた数の上限）はこの値の10倍に連動する。**省略すると従来の10（安全弁は100）のままで、`recall()` の結果は1バイトも変わらない。**型は任意の欄1つの追加のみで、DB マイグレーションは伴わない（`recalls.query` は jsonb にそのまま入る）。ADR 0381 §5.3・§6 の「専用のクエリ欄は作らない」を覆した。
 

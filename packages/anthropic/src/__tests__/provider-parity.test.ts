@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { Ctx, LLMProvider, StructuredRequest } from "@mnemora/core";
-import { OpenAILLMProvider } from "@mnemora/openai";
+import { OpenAILLMProvider, OpenAILLMProviderError } from "@mnemora/openai";
 import { AnthropicLLMProvider } from "../llm-provider.js";
+import { AnthropicLLMProviderError } from "../errors.js";
 
 /**
  * **「差し替えられる」の証明（ADR 0072 決定3）。**
@@ -177,6 +178,33 @@ describe("provider parity: AnthropicLLMProvider と OpenAILLMProvider", () => {
     expect(Object.keys(as).sort()).toEqual(["content", "digest"]);
     expect(Object.keys(os).sort()).toEqual(["content", "digest"]);
   });
+});
+
+describe("provider parity: 送る前に schema_unsupported で落ちる形は2つの provider で揃っている（ADR 0360 の 2026-09-30 追記、負債3）", () => {
+  // 同じ形が、同じ kind で、create を呼ぶ前に落ちる。z.record は以前 Anthropic だけ送っていた（割れていた）。
+  it.each([
+    ["z.record", z.object({ x: z.record(z.string(), z.string()) })],
+    ["z.record（配列の要素）", z.object({ x: z.array(z.record(z.string(), z.number())) })],
+    ["z.record（optional の内側）", z.object({ x: z.record(z.string(), z.string()).optional() })],
+    ["z.tuple", z.object({ x: z.tuple([z.string(), z.number()]) })],
+    ["z.date", z.object({ x: z.date() })],
+    ["transform", z.object({ x: z.string().transform((s) => s.length) })],
+  ] as const)(
+    "%s は、両方が create を呼ばず kind: schema_unsupported で投げる",
+    async (_l, schema) => {
+      const a = buildAnthropic("{}");
+      const o = buildOpenAI("{}");
+      const req = { prompt: sharedRequest.prompt, schema: schema as z.ZodType<unknown> };
+      const ea: unknown = await a.provider.completeStructured(ctx, req).catch((e: unknown) => e);
+      const eo: unknown = await o.provider.completeStructured(ctx, req).catch((e: unknown) => e);
+      expect(ea).toBeInstanceOf(AnthropicLLMProviderError);
+      expect(eo).toBeInstanceOf(OpenAILLMProviderError);
+      expect((ea as AnthropicLLMProviderError).kind).toBe("schema_unsupported");
+      expect((eo as OpenAILLMProviderError).kind).toBe("schema_unsupported");
+      expect(a.create).not.toHaveBeenCalled();
+      expect(o.create).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("provider divergence: 翻訳の形は同じではない（そこがベンダーの差である）", () => {

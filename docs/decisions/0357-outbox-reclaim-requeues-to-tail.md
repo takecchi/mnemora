@@ -140,3 +140,17 @@ Issue #1196 の先頭詰まりを起こしたままになる。CHANGELOG の当�
 - 案B（`ORDER BY attempts, available_at`）を採る場合が来たら、既存の索引
   `(tenant_id, available_at)` を張り替える（または `attempts` を先頭に持つ新しい索引を
   足す）マイグレーションが要る。
+
+---
+
+## 追記（2026-09-30）: 完了した outbox 行を消す口は [ADR 0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) で足した——負債1の「止まり続ける job」は消えない
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文は書き換えていない。**
+
+「引き受けた負債」1の「outbox 行は無限に蓄積する」のうち、**完了した行**については、
+`OutboxStore.purgeCompletedJobs?`（[ADR 0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md)）で
+消せるようになった。**ただし対象は `completed_at` が付いた行だけである。** 止まり続ける job（`completed_at` も
+`failed_at` も付かないまま再 claim され続ける行）と、`failed_at` が付いた行は、この口では**決して消さない**
+——この負債はそのまま残る。保持期間の既定値と `failed` 行の扱いは、オーナーに聞く事柄として ADR 0404 に残した。

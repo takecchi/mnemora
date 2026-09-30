@@ -42,6 +42,8 @@ import type {
   PurgeExpiredEventsByRetentionOptions,
   PurgeExpiredEventsByRetentionOutcome,
   PurgeExpiredEventsOptions,
+  PurgeExpiredRecallsOptions,
+  PurgeExpiredRecallsResult,
   PurgeExpiredEventsResult,
   RecallId,
   RecallRecord,
@@ -1288,6 +1290,65 @@ export class InMemoryMemoryStore implements MemoryStore {
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
     return this.purgeExpiredEventsSync(ctx, opts);
+  }
+
+  /**
+   * [ADR 0404](../../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `MemoryStore.purgeExpiredRecalls?` の in-memory 実装（`PostgresMemoryStore` と同じ契約）。
+   * 対象の recall を先に確定し、その `recall_usages` を消してから recall を消す。
+   * `await` を挟まない（1回の同期区間で終わる）。
+   */
+  async purgeExpiredRecalls(
+    ctx: Ctx,
+    opts: PurgeExpiredRecallsOptions,
+  ): Promise<PurgeExpiredRecallsResult> {
+    assertQueryDate("purgeExpiredRecalls", "olderThan", opts.olderThan);
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`purgeExpiredRecalls: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`purgeExpiredRecalls: limit must not be negative (got ${opts.limit})`);
+    }
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(
+        `purgeExpiredRecalls: limit must fit in a Postgres bigint (got ${opts.limit})`,
+      );
+    }
+    const dryRun = opts.dryRun ?? false;
+    const candidates = [...this.recalls.entries()]
+      .filter(
+        ([, row]) =>
+          row.tenantId === ctx.tenantId && row.createdAt.getTime() < opts.olderThan.getTime(),
+      )
+      .sort(
+        ([idA, a], [idB, b]) =>
+          a.createdAt.getTime() - b.createdAt.getTime() || (idA < idB ? -1 : idA > idB ? 1 : 0),
+      );
+    const reachedLimit = candidates.length > opts.limit;
+    const victims = candidates.slice(0, opts.limit);
+    const purged = victims.length;
+    const oldestPurgedAt = purged > 0 ? new Date(victims[0]![1].createdAt) : null;
+    const newestPurgedAt = purged > 0 ? new Date(victims[purged - 1]![1].createdAt) : null;
+    const usageKeys: string[] = [];
+    for (const [id] of victims) {
+      const prefix = `${ctx.tenantId}:${id}:`;
+      for (const key of this.usages) {
+        if (key.startsWith(prefix)) usageKeys.push(key);
+      }
+    }
+    if (!dryRun) {
+      // 子（recall_usages）が先、親（recalls）が後。
+      for (const key of usageKeys) this.usages.delete(key);
+      for (const [id] of victims) this.recalls.delete(id);
+    }
+    return {
+      purged,
+      purgedUsages: usageKeys.length,
+      reachedLimit,
+      oldestPurgedAt,
+      newestPurgedAt,
+      dryRun,
+    };
   }
 
   /**

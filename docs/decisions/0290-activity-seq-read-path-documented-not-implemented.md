@@ -247,3 +247,18 @@ $ pnpm --filter @mnemora/postgres exec vitest run \
 `recalls` をどれだけの期間・どういう条件で保持するか」という本 ADR の未決の問いには
 答えていない——「丸ごと消す」と「保持方針を決める」は別の軸である。この節が予告した
 「`MemoryStore` に集計メソッドを足す ADR」は、依然として書かれていない。
+
+---
+
+## 追記（2026-09-30）: 古い `recalls` を消す口は [ADR 0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) で足した——代替案1の材料が消えうる
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文と、直前の追記は書き換えていない。**
+
+「検討した代替案」1(b) と、直前の追記が「無い」と書いていた `recalls` の削除の口は、
+[ADR 0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) の `MemoryStore.purgeExpiredRecalls?`
+で足した。**ただし保持期間の既定値は決めていない**（呼び出し側が `olderThan` を必ず渡す。オーナーに聞く事柄として
+ADR 0404 に残した）。**代替案1（`recalls` の集計で活動量を測る）は、この時点でも未実装である。**
+この口を使うと、`olderThan` より古い日の recall 回数は `recalls` から数えられなくなる——代替案1の材料が消える。
+`tenant_activity.activity_seq` は消えない。

@@ -26,7 +26,7 @@ import { AnthropicLLMProvider } from "../llm-provider.js";
  * ⚠ **射程は送る前の変換まで。**Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない
  * （鍵が無いため。README の「🔴 実 API には、適合テストを一度も当てていない」）。
  *
- * 利用者が渡す zod の形（`z.tuple`・`z.date`・`transform` は送る前に落ちる）は
+ * 利用者が渡す zod の形（`z.tuple`・`z.date`・`transform`・`z.record` は送る前に落ちる）は
  * `structured-output-zod-shapes.test.ts` が縛る。ここは core が実際に渡す形だけを縛る。
  */
 

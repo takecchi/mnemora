@@ -244,3 +244,50 @@ pnpm --filter @mnemora/example-chat exec vitest run src/__tests__/cassette-cover
   （`anthropic-sdk-latest`）で、`toStrictJsonSchema`・`zodOutputFormat` が同じ形で例外を
   投げるかは検証していない。** 固定した版（`openai@7.10.0`・`@anthropic-ai/sdk@0.124.0`）
   でのみ確認した。
+
+## 追記（2026-09-30）: Anthropic 側も `z.record` を含むスキーマを送る前に `schema_unsupported` にした——負債3の解消
+
+**本文は書き換えない。** 上の「検討した代替案」の最後の項目（「Anthropic 側も `z.record` を
+`schema_unsupported` にする」）は**却下していたが、今回それを採った。**新しい ADR は立てない
+（決定の筋は本 ADR が引いた線——「送る前に、送れない形を `kind: "schema_unsupported"` で落とす」——の
+中に収まり、対象の基準を1つ広げただけである）。オーナー代理の決定済みの方針であり、v1.X.0 では破壊的変更が
+許される（オーナーの回答 ask_human 6911db12 問6）。
+
+- **覆した理由**: 却下したときの根拠は「Anthropic の `z.record` は翻訳が失敗しない（空の object に降格するだけ）
+  ので、対象基準『翻訳・検査が例外を投げるもの』に当たらない」だった。**だが翻訳が失敗しないことは、安全である
+  ことを意味しない。**SDK の `transformJSONSchema` は `additionalProperties: false` を強制し、record のキーと値の
+  制約を `description` へ降格するので、送る形は**空の object しか許さない**（README の 2026-09-28 追記、
+  `structured-output-zod-shapes.test.ts` が旧版で縛っていた形）。利用者から見ると、**例外が出ないまま record の欄が
+  常に空になる**——例外で気づける OpenAI 側より悪い。基準を「翻訳が投げるか」から「送る形が、書いたスキーマの
+  意味を保つか」へ寄せた。
+- **負債3の解消**: 上の「引き受けた負債」の3つ目（「`z.record` の扱いが2つの provider で割れたままである」）は
+  解消した。4形（`z.record`・`z.tuple`・`z.date`・`transform`）は、2つの provider で同じ `kind` で、
+  `create` を呼ぶ前に落ちる（歯: `packages/anthropic/src/__tests__/provider-parity.test.ts` の表）。
+- **検出の作法**: `packages/anthropic/src/json-schema.ts` の `translateForAnthropicStructuredOutput` の先頭で、
+  zod 自身の `z.toJSONSchema` の `override` フックから、訪れた各スキーマの `_zod.def.type === "record"` を見る
+  （`unrepresentable: "any"` で、tuple・date・transform はここでは投げず、後段の `zodOutputFormat` が今までの例外で落とす）。
+  自前の再帰走査は持たない——zod が欄・配列の要素・optional/nullable/default の内側・union/intersection の枝・
+  `z.lazy` の先を辿り、循環は `$ref` で止める。**依存する内部表現は zod v4 の `_zod.def.type`**
+  （`zod ^4.5.4`、実測 4.5.4）。OpenAI 側に同じ検出は無く（あちらは `openai` SDK の `toStrictJsonSchema` が投げる）、
+  共有するものは無い。`cause` の `Error` に「`z.record` は送れない、`{ key, value }` の配列を使うこと」を載せる。
+- **今回は対象外（今までどおり送る）**: `z.lazy`（再帰そのもの）・`default`・根が union。**`z.record` を
+  中に含むときだけ落ちる**——それ以外の形は触っていない。Anthropic の実 API がこれらを受けるかは確かめていない。
+- **既存の利用者に起きること**: Anthropic の `completeStructured` に `z.record` を含むスキーマを渡していたコードは、
+  以後 `AnthropicLLMProviderError`（`kind: "schema_unsupported"`、`cause` に理由）を投げる。以前は例外無しで
+  record の欄が空で返っていた（＝その値を使っていたなら、元から意味のある値は得られていなかった）。
+  移行は `{ key, value }` の配列への置き換え（`docs/migration-v1.md` の項目35）。**core が
+  `completeStructured` へ渡す4スキーマ（抽出・claim key・統合・内省）には `z.record` が無く、
+  この変更で落ちない**（`core-schemas-send-shape.test.ts` が、送る前の翻訳を通すことで縛る）。
+- **【実測】赤→緑**: 歯だけを先に書き、`origin/main`（7782c1c）の worktree へテストファイル3本
+  （`structured-output-zod-shapes`・`provider-parity`・`core-schemas-send-shape`）だけ置いて
+  `vitest run` すると **16 failed | 28 passed**（落ちたのは `z.record` の13形と、parity 表の `z.record` 3行。
+  tuple・date・transform の行と core の4スキーマは元から緑）。実装後は同じ3本と `json-schema.test.ts` の
+  計4本で 53 passed。
+- **【実測】変異試験**（`json-schema.ts` を書き換えて同4本を走らせ、毎回戻した）: 検出の呼び出しを外す → 16 failed／
+  `def.type` の比較先を `"map"` にする → 16 failed／検出を `path.length <= 2` に限る（深いネストを見ない）→ 9 failed／
+  union の枝（`anyOf`）を見ない → 2 failed／見つけても投げない → 16 failed／`"object"` を検出する（偽陽性）→ 31 failed。
+  すべて赤になった。
+- **確かめていないこと**: Anthropic の実 API には当てていない（鍵が無い）。`z.record` を落とす判断は「送る形が
+  空の object になる」という翻訳の実測に基づき、実 API が実際に空を返すかは確認していない。`@anthropic-ai/sdk` の
+  新しい版（`anthropic-sdk-latest`）で `transformJSONSchema` が record を別の形に翻訳するようになっても、この検出は
+  送る前に落とし続ける（版上げで record が正しく送れるようになったなら、この判断を見直すこと）。

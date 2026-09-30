@@ -1933,6 +1933,29 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。修正前に書かれた、食い違う行が在るかを調べる SQL は ADR 0398 に在る（読み取りだけ）。
 
+### 35. `AnthropicLLMProvider.completeStructured` が、`z.record` を含むスキーマを、送る前に `kind: "schema_unsupported"` で落とすようになった（`@mnemora/anthropic`）
+
+[ADR 0360](./decisions/0360-schema-unsupported-thrown-before-send.md) の 2026-09-30 の追記（負債3）。
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 35 である**——項目34 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: Anthropic 側は `z.record` を翻訳して送っていた（送る形は、空の object しか許さないもの——record の欄が例外なしで常に空になる）。
+今は `z.record` を含むスキーマ（深さを問わない）を、`messages.create` の前に `AnthropicLLMProviderError`（`kind: "schema_unsupported"`、`cause` に理由）で落とす。
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。項目34 と同じ扱い。
+
+**誰が影響を受けるか**: `AnthropicLLMProvider.completeStructured` に `z.record` を含む zod スキーマを渡している呼び出し側。
+以前は例外が出なかったが、record の欄は常に空で返っていたので、意味のある値は元から得られていない。
+`@mnemora/openai` は元から同じ形を落とすので、そちらの利用者は変わらない。core が渡す4つのスキーマに `z.record` は無く、`recall()`・`tick()`・`observe()` は変わらない。
+
+**どう直すか**:
+- record を `{ key, value }` の配列に置き換える。例: `z.record(z.string(), z.number())` → `z.array(z.object({ key: z.string(), value: z.number() }))`。受け取った後にコードで `Object.fromEntries(items.map((i) => [i.key, i.value]))` へ戻せる。
+- `instanceof AnthropicLLMProviderError` かつ `kind === "schema_unsupported"` で捕まえられる（`@mnemora/openai` と同じ形）。`cause` の `Error` の文面に `z.record` が入る。
+- `z.lazy`・`default`・根が union は今までどおり送る。`z.record` を含まなければ何も変わらない。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
