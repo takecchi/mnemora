@@ -271,6 +271,15 @@ runtime の5つの口（`observe`・`claimKey` 付きの `observe`・`reextract`
   返った JSON は `req.schema.parse` で検査するので、値が外れていれば `ZodError`（抽出なら全文フォールバック、
   `consolidate`/`reflect` なら `llm_failed`）になる。
 
+## ⚠ 2026-09-30 追記（ADR 0428）: `signal`（abort）を直に渡したときの振る舞い
+
+`complete` / `completeStructured` の `opts.signal` を、provider を**直に**呼んで abort すると、reject する値は
+`signal.reason`（`reason` 無しの `abort()` なら `AbortError` の `DOMException`）である。SDK の `APIUserAbortError` には
+ならない。呼ぶ前に abort 済みなら、SDK を呼ばず（リクエストを送らず）に reject する。SDK の再試行待ち
+（429 の `retry-after` 等）の最中でも、abort で即座に打ち切られる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
+`signal` を渡さなければ、今までどおり返るまで待つ。失敗の判定は `isAnthropicLLMProviderError`（`kind`、無ければ `name` で見る。
+`instanceof` を使わない）でもできる。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§4・§5.4 — `LLMProvider` の契約と provider 構成

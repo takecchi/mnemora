@@ -7,6 +7,7 @@ import type {
   PromptSpec,
   StructuredRequest,
 } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type {
   AnthropicContentBlock,
@@ -231,17 +232,23 @@ export class AnthropicLLMProvider implements LLMProvider {
    * `stop_reason: "refusal"` は `kind: "refusal"`、`"max_tokens"`・`"model_context_window_exceeded"` は `kind: "truncated"` の
    * {@link AnthropicLLMProviderError} を投げる。⚠ どちらでもなくテキストブロックが無いときは、例外にせず空文字を返す
    * （ADR 0072「引き受けた負債」2。`@mnemora/openai` も同じ形）。
+   *
+   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
+   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
    */
   async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
     const { system, messages } = toAnthropicRequest(req);
-    const response = await this.client.messages.create(
-      {
-        model: this.model,
-        max_tokens: this.maxTokens,
-        ...(system !== undefined ? { system } : {}),
-        messages,
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          ...(system !== undefined ? { system } : {}),
+          messages,
+        },
+        { signal },
+      ),
     );
     assertNotRefusedOrTruncated(response);
     // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
@@ -270,6 +277,10 @@ export class AnthropicLLMProvider implements LLMProvider {
    * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link AnthropicLLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
    * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
+   *
+   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
+   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
    */
   async completeStructured<T>(
     _ctx: Ctx,
@@ -286,15 +297,17 @@ export class AnthropicLLMProvider implements LLMProvider {
       throw new AnthropicLLMProviderError({ kind: "schema_unsupported", cause });
     }
     const { system, messages } = toAnthropicRequest(req.prompt);
-    const response = await this.client.messages.create(
-      {
-        model: this.model,
-        max_tokens: this.maxTokens,
-        ...(system !== undefined ? { system } : {}),
-        messages,
-        output_config: { format },
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          ...(system !== undefined ? { system } : {}),
+          messages,
+          output_config: { format },
+        },
+        { signal },
+      ),
     );
 
     // ⭐ **`content` を読む前に `stop_reason` を見る。**順序が本質である

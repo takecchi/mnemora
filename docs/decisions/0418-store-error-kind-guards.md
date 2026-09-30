@@ -184,3 +184,19 @@
   - 利用者が自分で古い core を直接入れていても、同じことが言える。古い core が testkit の範囲の外にあれば、testkit の下には別の core が入る
     （本文の「段1の実測」と同じ形）。
   - 利用者の adapter が古い core の例外を投げても、適合テストは通る。判定関数は「`kind`、無ければ `name`」で見るので、`kind` を持たない古い版の例外にも効く。
+
+## 追記 (2026-09-30): 本文26行目の「provider のエラーは、既に判定関数を持つ」は、openai・anthropic には当たらなかった
+
+> **⚠ 2026-09-30 追記:** 上の本文と、これまでの追記は書き換えていない。本文の「文脈」の終わり近く（26行目）に、
+> 「`@mnemora/local-embedding` などの provider のエラーは、既に値の判別子 `kind` と `instanceof` を使わない判定関数
+> （`isLocalEmbeddingProviderError`）を持つ」と書いた。実態は次のとおりで、「など」に openai・anthropic を含めて読むと違っていた。
+> 書いたのは、上と同じくクローンの委譲先であり、オーナーの判断ではない。
+
+- **違っていた点**: `OpenAILLMProviderError`・`AnthropicLLMProviderError` は値の判別子 `kind`（ADR 0075・ADR 0072 の追記）を持っていたが、
+  `instanceof` を使わない判定関数は持っていなかった。判定関数を持っていたのは `@mnemora/local-embedding` の
+  `isLocalEmbeddingProviderError` だけだった。呼び出し側が2つの版の同じパッケージに挟まれたとき（bundler の二重読み込みなど）、
+  この2つの provider の例外は、`kind` を自分で読まない限り `instanceof` に頼るしかなかった。
+- **[ADR 0428](./0428-provider-abort-reason-and-error-guards.md) で足したもの**: `@mnemora/openai` に `isOpenAILLMProviderError`、
+  `@mnemora/anthropic` に `isAnthropicLLMProviderError` を、公開 export として足した（追加のみ。既存の公開面は変えていない）。
+  判定は本文の作法どおり「`kind` を見て、`kind` が無ければ `name` を見る」。`kind` があるときは、その値が各パッケージの
+  `*LLMFailureKind` のどれかであることだけを見る。

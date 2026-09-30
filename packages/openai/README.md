@@ -71,10 +71,10 @@ README にある。
 **OpenAI の拒否は HTTP 200 で返る。**`message.refusal` に拒否理由の文字列が入り、
 このとき `message.content` は `null` になる。SDK は例外を投げない。
 `LLMProvider.complete`/`completeStructured` は `content` を読む前にこれを見て、
-`OpenAILLMProviderError` を `kind: "refusal" | "truncated" | "no_content"` として
+`OpenAILLMProviderError` を `kind: "refusal" | "truncated" | "no_content" | "schema_unsupported"` として
 投げる（`src/errors.ts` 参照。`@mnemora/anthropic` の `kind` タクソノミーと対になる形）。
 
-**⚠ 2026-09-26 追記（Issue #885）: `kind` が表すのはこの3種のどれかである。** HTTP 200
+**⚠ 2026-09-26 追記（Issue #885）: `kind` が表すのは、この種類（`OpenAILLMFailureKind`）のどれかである。** HTTP 200
 の応答オブジェクトそのものの形が壊れている場合——`chat.completions.create` の
 `choices` や `embeddings.create` の `data` がトップレベルからキーごと丸ごと無い場合
 （`{}` が返る等）——は、`kind` の**外**にある生の例外（`TypeError` 等。壊れた JSON の
@@ -215,6 +215,15 @@ strict への翻訳は `.optional()` の欄を「必須 + `null` 許容」にし
 いまは、`null` を消して検査して落ちたときだけ、スキーマが許す `null` を残して検査し直す（通る入力の結果は変えず、それでも落ちれば最初の
 `ZodError` を投げる）。union の枝ごとに扱いが割れる欄の `null` は消す側に倒す。`@mnemora/anthropic` は `null` をそのまま検査する。
 歯は `src/__tests__/structured-nullable-roundtrip.test.ts`。
+
+## ⚠ 2026-09-30 追記（ADR 0428）: `signal`（abort）を直に渡したときの振る舞い
+
+`complete` / `completeStructured` / `embed` の `opts.signal` を、provider を**直に**呼んで abort すると、reject する値は
+`signal.reason`（`reason` 無しの `abort()` なら `AbortError` の `DOMException`）である。SDK の `APIUserAbortError` には
+ならない。呼ぶ前に abort 済みなら、SDK を呼ばず（リクエストを送らず）に reject する。SDK の再試行待ち
+（429 の `retry-after` 等）の最中でも、abort で即座に打ち切られる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
+`signal` を渡さなければ、今までどおり返るまで待つ。失敗の判定は `isOpenAILLMProviderError`（`kind`、無ければ `name` で見る。
+`instanceof` を使わない）でもできる。
 
 ## もっと詳しく
 

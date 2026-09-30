@@ -415,6 +415,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 値は store へ渡している `supersededById` と同じ（`memberIds` の綴りに寄せた `winnerId`）。勝者の `updated` と `both_active` の `updated` には足さない。
   - 欄を足すだけで、既存の欄は変えていない。**非破壊**。公開 API に変更は無い（JSDoc のみ）。DB マイグレーションは足していない。
 
+- **`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding` を直に呼んで `signal` を abort したとき、reject の値を `signal.reason` に揃えた**（[ADR 0428](./docs/decisions/0428-provider-abort-reason-and-error-guards.md)。ADR 0359 決定4の約束に実装を合わせた）。
+  - openai・anthropic: reject の値が SDK の `APIUserAbortError` から `signal.reason` に**変わる**（abort 済みなら SDK を呼ばずに reject。SDK の再試行待ち＝429 の `retry-after` の最中でも abort で即座に切れる。以前は約3秒待っていた）。local-embedding: モデルの読み込み中・再試行の待ちも `signal` ごとに切れる（読み込みそのものは止まらず、同じ読み込みを待つ別の呼び出しは巻き添えにならない）。
+  - 足したもの: `isOpenAILLMProviderError`・`isAnthropicLLMProviderError`（`instanceof` を使わない判定関数。ADR 0418 の作法）。3つの provider の README に `signal` の振る舞いを追記し、openai README の `kind` の列挙に `schema_unsupported` を足した。公開 API は追加のみ。
+
 ---
 
 ## [1.1.0] - 2026-09-30

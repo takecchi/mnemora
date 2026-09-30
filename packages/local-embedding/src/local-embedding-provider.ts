@@ -1,4 +1,5 @@
 import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import type {
   CreateLocalEmbeddingPipeline,
   LocalEmbeddingDtype,
@@ -451,6 +452,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * 効く——この対応が意味を持つのは、この provider を `packages/core` を介さず直接呼ぶ
    * 呼び出し側にとってである。
    *
+   * ⚠ **2026-09-30 追記（ADR 0428）: モデルの読み込み中・読み込みの再試行の待ち（`retry` の `sleep` を含む）も、
+   * `signal` ごとに切れる。** abort された呼び出しは、読み込みの完了を待たずに `signal.reason`（`abortReason(signal)`）で
+   * 即座に reject する。**ただし読み込みそのものは abort で止まらない**——複数の `embed()`・`warmup()` が待つ共有の読み込み
+   * （と、その中の再試行）は続き、切れるのは abort された呼び出しの「待ち」だけである。ある呼び出しの abort が、
+   * 同じ読み込みを待つ別の呼び出しを巻き添えにしない。全員が abort しても、読み込みは終わりまで走り、
+   * 成功すればモデルは保持されて次の `embed()` が使う。`warmup()` は `signal` を取らない（待ちは切れない）。
+   *
    * ⭐ **`texts.length` が `maxBatchSize`（既定 {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}）
    * 以下なら、今までどおり1回の `pipeline.embed()` で済ませる（ビット一致）。**超えたときだけ、
    * 先頭から `maxBatchSize` 件ずつに分けて順に（直列で）推論し、結果を順番どおりに連結する
@@ -479,7 +487,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     }
     opts?.signal?.throwIfAborted();
 
-    const pipeline = await this.#load();
+    // ⭐ 待ちだけを signal ごとに切る（ADR 0428）。`#load()` 自体（共有の読み込み・再試行）は止めない。
+    const pipeline = await runAbortable(opts?.signal, () => this.#load());
     opts?.signal?.throwIfAborted();
 
     // ⭐ **prefix が空でも、必ず新しい配列を作る**（`this.#prefix === "" ? texts : ...` と

@@ -129,3 +129,32 @@ export class AnthropicLLMProviderError extends Error {
     this.refusalCategory = options.refusalCategory ?? null;
   }
 }
+
+const ANTHROPIC_LLM_FAILURE_KINDS: ReadonlySet<unknown> = new Set<AnthropicLLMFailureKind>([
+  "refusal",
+  "truncated",
+  "no_content",
+  "schema_unsupported",
+]);
+
+/**
+ * 受け取ったものが {@link AnthropicLLMProviderError} かを、**`instanceof` を使わずに**判定する
+ * （[ADR 0418](../../../docs/decisions/0418-store-error-kind-guards.md) の作法、
+ * ADR 0428）。
+ *
+ * **「`kind` を見て、`kind` が無ければ `name` を見る」。** `kind` があるときは、それが
+ * {@link AnthropicLLMFailureKind} のどれかであることだけを見る（`name` は見ない）。`kind` が無い値
+ * （`kind` を持たない古い版が投げた例外など）は、`name === "AnthropicLLMProviderError"` で見る。
+ * bundler が同じクラスを二重に読み込んでいても効く。`name` は偽装できるが、provider は利用者が
+ * 自分で配線する信頼された部品なので実害は無いと判断している。
+ */
+export function isAnthropicLLMProviderError(value: unknown): value is AnthropicLLMProviderError {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { kind?: unknown; name?: unknown };
+  if (candidate.kind !== undefined) {
+    return ANTHROPIC_LLM_FAILURE_KINDS.has(candidate.kind);
+  }
+  return candidate.name === "AnthropicLLMProviderError";
+}
