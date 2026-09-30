@@ -2904,6 +2904,12 @@ export interface Runtime {
    * **そのまま使う**（`TickOptions` のように別の型を立てない）。この口は store の同名
    * メソッドへ素通しするだけで、runtime 側が足す選択肢が1つも無いためである——
    * 同じ形の型を2つ置くと、片方だけ直したときに黙ってずれる。
+   *
+   * **`limit` は入口で検査する**（ADR 0433 決定4）。省略したとき（JavaScript からの呼び出し・`as` 経由）と、
+   * 数なのに 0 以上の整数でないとき（負・小数・`NaN`・±`Infinity`）は、store を呼ぶ前に `RangeError`
+   * （`Runtime.reembed: limit must be a non-negative integer`）を投げる——以前は store が SQL の `LIMIT` に
+   * 渡して、Postgres の `syntax error at or near "FOR"` などになっていた。`0` は例外にならず、何も積み直さない
+   * （今までどおり）。
    */
   reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
   /**
@@ -6210,6 +6216,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   async function reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+    // ADR 0433 決定4: `limit` の検査。省略（JavaScript からの呼び出し・`as` 経由）と、数なのに
+    // 0 以上の整数でないもの（負・小数・`NaN`・±`Infinity`）は、store が SQL の `LIMIT` に渡して
+    // 分かりにくい例外（`syntax error at or near "FOR"` など）になっていたので、store を呼ぶ前に
+    // `RangeError` にする（`findCorrectionCandidates` の `limit` と同じ型）。
+    // ⚠ 断るのは「今も例外になる値」だけ。`0`（何も積み直さず成功する）と 2^63 未満の正の整数は
+    // 今までどおり通す。数以外の型（`null`・数字の文字列・`bigint`）は Postgres が受け付けて成功する
+    // ことがあるので、ここでは触らない。2^63 以上の数も store の側の検査に任せる（今と同じ）。
+    const limit = (opts as { limit?: unknown } | null | undefined)?.limit;
+    if (
+      limit === undefined ||
+      (typeof limit === "number" && (!Number.isInteger(limit) || limit < 0))
+    ) {
+      throw new RangeError(
+        `Runtime.reembed: limit must be a non-negative integer (got ${String(limit)})`,
+      );
+    }
     return deps.memoryStore.requeueEmbedJobs(ctx, opts, { now: clock.now() });
   }
 

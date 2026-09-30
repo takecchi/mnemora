@@ -1,4 +1,5 @@
 import type { Attributes } from "../attributes.js";
+import { matchesStoreErrorKind } from "../store-error-kind.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { MemoryId } from "../ids.js";
@@ -236,6 +237,52 @@ export interface VectorHit {
    * adapter 非依存の歯として検査する。
    */
   distance: number;
+}
+
+/**
+ * 登録していない埋め込み空間（その空間の索引の表が無い）で {@link VectorStore} を引いたことを表す
+ * （ADR 0433 決定3）。`@mnemora/postgres` の `PostgresVectorStore` は、`upsert`・`search`・
+ * `searchMany`・`delete`・`getVectors` が未登録の空間で落ちるとき、Postgres の生の
+ * `relation "memory_embeddings_..." does not exist`（SQLSTATE 42P01）の代わりにこれを投げる。
+ * 元の Error は `cause` に残る。
+ *
+ * 判定は `instanceof` ではなく {@link isEmbeddingSpaceNotRegisteredError} で行う（ADR 0418）。
+ * 空間を登録してから（`@mnemora/postgres` の `registerEmbeddingSpace`）呼び直す。
+ *
+ * ⚠ **投げる入力は変えていない。** これまで未登録の空間でも例外にならなかった入力（形式不正な id
+ * だけの `delete`・`getVectors`、空の `searchMany`、全 space を掃く `deleteAcrossSpaces`・
+ * `eraseTenant`）は、今も例外にならない。他の adapter（testkit の in-memory など）がこの例外を
+ * 投げることは、適合テストの要件にしていない。
+ */
+export class EmbeddingSpaceNotRegisteredError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は {@link isEmbeddingSpaceNotRegisteredError} で行う。 */
+  readonly kind = "embedding_space_not_registered" as const;
+  constructor(
+    readonly space: EmbeddingSpaceId,
+    options?: ErrorOptions,
+  ) {
+    super(
+      `VectorStore: embedding space (provider "${space.provider}", model "${space.model}", ` +
+        `dimensions ${space.dimensions}) is not registered — its index table does not exist. ` +
+        "Register the space (registerEmbeddingSpace) before using it.",
+      options,
+    );
+    this.name = "EmbeddingSpaceNotRegisteredError";
+  }
+}
+
+/**
+ * 受け取ったものが {@link EmbeddingSpaceNotRegisteredError} かを、**`instanceof` を使わずに**判定する
+ * （ADR 0418）。`kind` を見て、`kind` が無ければ `name` を見る。
+ */
+export function isEmbeddingSpaceNotRegisteredError(
+  value: unknown,
+): value is EmbeddingSpaceNotRegisteredError {
+  return matchesStoreErrorKind(
+    value,
+    "embedding_space_not_registered",
+    "EmbeddingSpaceNotRegisteredError",
+  );
 }
 
 /**

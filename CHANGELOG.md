@@ -494,6 +494,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - openai・anthropic: reject の値が SDK の `APIUserAbortError` から `signal.reason` に**変わる**（abort 済みなら SDK を呼ばずに reject。SDK の再試行待ち＝429 の `retry-after` の最中でも abort で即座に切れる。以前は約3秒待っていた）。local-embedding: モデルの読み込み中・再試行の待ちも `signal` ごとに切れる（読み込みそのものは止まらず、同じ読み込みを待つ別の呼び出しは巻き添えにならない）。
   - 足したもの: `isOpenAILLMProviderError`・`isAnthropicLLMProviderError`（`instanceof` を使わない判定関数。ADR 0418 の作法）。3つの provider の README に `signal` の振る舞いを追記し、openai README の `kind` の列挙に `schema_unsupported` を足した。公開 API は追加のみ。
 
+- **`observe(... claimKey: { enabled: true })` で、LLM が長すぎる `subject`・`predicate` を返すと INSERT が落ちて、observation だけが残り memory が 0 件になる穴を塞いだ**（[ADR 0433](./docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定1）。`@mnemora/core` の `deriveClaimKeys` は、正規化のあとで 256 コードポイントを超えた要素を含む鍵を `null` にする（空白だけの要素と同じ扱い。`failure` の印は付けない）。以前は `@mnemora/postgres` の索引 `idx_memories_claim_key`（btree、1行 2704 バイトまで）を超える値で `index row size ... exceeds btree version 4 maximum 2704` になった。256 字以下の鍵は変わらない。
+
+- **`@mnemora/postgres` の `PostgresVectorStore` が、登録していない埋め込み空間で引かれたとき、生の `relation "memory_embeddings_..." does not exist`（`kind` なしの `Error`）ではなく、`kind: "embedding_space_not_registered"` の `EmbeddingSpaceNotRegisteredError` を投げるようにした**（[ADR 0433](./docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定3）。対象は `upsert`・`search`・`searchMany`・`delete`・`getVectors`。原因の Error は `cause` に残る。判定関数 `isEmbeddingSpaceNotRegisteredError` を `@mnemora/core` から公開した（`instanceof` を使わない。ADR 0418 の作法）。これまで例外にならなかった入力（形式不正な id だけの `delete`・`getVectors`、空の `searchMany`、`deleteAcrossSpaces`・`eraseTenant`）は今も例外にならない。公開 API は追加のみ。
+
+- **`Runtime.reembed` が、`limit` を省いたとき・数なのに 0 以上の整数でないとき（負・小数・`NaN`・±`Infinity`）に、store を呼ぶ前に `RangeError`（`Runtime.reembed: limit must be a non-negative integer`）を投げるようにした**（[ADR 0433](./docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定4）。以前は `limit` を省くと Postgres の `syntax error at or near "FOR"` など、SQL の側の分かりにくい例外だった。`0` と正の整数は今までどおり通る。
+
 ---
 
 ## [1.1.0] - 2026-09-30
