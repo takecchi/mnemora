@@ -476,6 +476,8 @@ it が赤になった（検査の一部は別の検査が代わりに例外を�
 **反映先**: `packages/openai/src/embedding-provider.ts`、`packages/core/src/interfaces/embedding-provider.ts`、
 `docs/architecture.md` §5.5、`packages/openai/README.md`、`packages/testkit/src/embedding-provider-conformance.ts`。
 
+---
+
 ## ⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、[ADR 0393](./0393-core-checks-embedding-dimension.md)）: core も次元を守る
 
 **上の本文と、これまでの追記は書き換えていない。**2026-09-27 の追記（Issue #1070）は「`packages/core` は embed ジョブで
