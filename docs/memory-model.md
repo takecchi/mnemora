@@ -1204,6 +1204,8 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **⚠ 2026-09-30 追記（[ADR 0389](./decisions/0389-recalls-digest-band-index.md)）: `purge()` が `recalls.index_band` の digest 帯を書き換えるときの走査の費用は、索引を足して解消した。** ADR 0375 決定6 は、この書き換えがテナントの `recalls` 全体を走査し、索引を足すかどうかは「決めていない」として残していた。`migrations/0030_recalls_digest_band_index.sql` の式 GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を足し、走査は対象行だけを引く形になった（振る舞いは変えていない）。代わりに `recalls` への INSERT の費用が増える（実測は ADR 0389）。`recalls` の**保持方針**（生きているテナントの分）は、引き続き決まっていない（ADR 0290）。
 
+**⚠ 2026-09-30 追記（[ADR 0404](./decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）: 生きているテナントの `recalls` と完了した `outbox` の行を消す口を足した。上の表の「行は全部残る」「完了した行を消す経路も保持期間も無い」は、口が無いという意味ではもう今の姿ではない。** `MemoryStore.purgeExpiredRecalls?`（`created_at < olderThan` の `recalls` を、その `recall_usages` ごと同一トランザクションで消す）と `OutboxStore.purgeCompletedJobs?`（`completed_at IS NOT NULL AND completed_at < olderThan` の行だけを消す。claim 中・未処理・`failed_at` の行は消さない）。どちらも任意メソッドで、`olderThan` は呼び出し側が必ず渡す。**保持期間の既定値・`failed` 行の扱い・`recalls.query` を約束の範囲に入れるか・監査行を積むかは、決まっていない**（オーナーに聞く事柄。ADR 0404）。消した `recallId` への `recordUsage` は例外になり、`memory_events.meta` に載った `recallId` の文字列は残る。
+
 ---
 
 ## 10. DB schema 案

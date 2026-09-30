@@ -6,7 +6,10 @@ import {
   type EraseTenantStoreOptions,
   type OutboxJobRecord,
   type OutboxStore,
+  type PurgeCompletedJobsOptions,
+  type PurgeCompletedJobsResult,
 } from "@mnemora/core";
+import { assertQueryDate } from "./query-check.js";
 
 /**
  * `OutboxStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3）。
@@ -187,5 +190,54 @@ export class InMemoryOutboxStore implements OutboxStore {
       }
     }
     return { deleted: matchingIndexes.length, reachedLimit: matchingIndexes.length === opts.limit };
+  }
+
+  /**
+   * [ADR 0404](../../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `OutboxStore.purgeCompletedJobs?` の in-memory 実装（`PostgresOutboxStore` と同じ契約）。
+   * `completedAt` が付いていて `< olderThan` の行だけを消す——claim 中・未処理・
+   * `failedAt` の行は対象にならない。共有配列なので `splice` でその場から取り除く。
+   */
+  async purgeCompletedJobs(
+    ctx: Ctx,
+    opts: PurgeCompletedJobsOptions,
+  ): Promise<PurgeCompletedJobsResult> {
+    assertQueryDate("purgeCompletedJobs", "olderThan", opts.olderThan);
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`purgeCompletedJobs: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`purgeCompletedJobs: limit must not be negative (got ${opts.limit})`);
+    }
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(
+        `purgeCompletedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`,
+      );
+    }
+    const dryRun = opts.dryRun ?? false;
+    const candidates = this.jobs
+      .filter(
+        (job) =>
+          job.tenantId === ctx.tenantId &&
+          (job.completedAt ?? null) !== null &&
+          job.completedAt!.getTime() < opts.olderThan.getTime(),
+      )
+      .sort(
+        (a, b) =>
+          a.completedAt!.getTime() - b.completedAt!.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    const reachedLimit = candidates.length > opts.limit;
+    const victims = candidates.slice(0, opts.limit);
+    const purged = victims.length;
+    const oldestPurgedAt = purged > 0 ? new Date(victims[0]!.completedAt!) : null;
+    const newestPurgedAt = purged > 0 ? new Date(victims[purged - 1]!.completedAt!) : null;
+    if (!dryRun && purged > 0) {
+      const victimIds = new Set(victims.map((job) => job.id));
+      for (let i = this.jobs.length - 1; i >= 0; i--) {
+        if (victimIds.has(this.jobs[i]!.id)) this.jobs.splice(i, 1);
+      }
+    }
+    return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
   }
 }

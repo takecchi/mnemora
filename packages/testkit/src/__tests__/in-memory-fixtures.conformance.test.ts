@@ -92,6 +92,8 @@ describeMemoryStoreConformance({
   supportsAbortIfForgotten: false,
   // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
+  // ADR 0404: InMemoryMemoryStore は purgeExpiredRecalls を実装している。
+  supportsPurgeExpiredRecalls: true,
   listPurgedEvents: (ctx) => {
     if (!latestMemoryStoreForEvents) {
       throw new Error("listPurgedEvents より先に createStore() を呼ぶ必要がある");
@@ -346,6 +348,8 @@ describeOutboxStoreConformance({
   },
   // Issue #1207 / ADR 0383: InMemoryOutboxStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // ADR 0404: InMemoryOutboxStore は purgeCompletedJobs を実装している。
+  supportsPurgeCompletedJobs: true,
 });
 
 let latestTenantSettingsStore: InMemoryTenantSettingsStore | undefined;

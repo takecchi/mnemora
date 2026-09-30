@@ -509,6 +509,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-09-30 追記（Issue #1226、[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7、クローン miku の判断）**: `MemoryStoreConformanceOptions` に `supportsAbortIfForgotten?` が増えた——`createMemoryWithOutbox`/`supersedeWithNewMemories?` という**既存の任意メソッド**に足した**新しいパラメータ** `opts.abortIfForgotten`（`SourceMemoryForgottenError` を投げて書き込みを打ち切る、書き込みと同一トランザクションの `SELECT … FOR UPDATE` による見直し）を検査する。上の `supportsLabels?` 等と同じ3状態。`packages/postgres/src/__tests__/conformance.postgres.test.ts` は `true` を渡す（`PostgresMemoryStore` が実装している）。`packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts` は `false` を渡す（`InMemoryMemoryStore` は `opts.abortIfForgotten` を実装しない——渡しても無視される。`Runtime.consolidate`/`Runtime.reflect` は、この能力が無い adapter に対しては自前の「書く直前の読み直し」だけで保護する。`docs/memory-model.md` の該当箇所参照）。**破壊的変更として数える**——`packages/testkit` の conformance suite の判定を厳しくする変更であり（`opts.abortIfForgotten: true` を宣言した adapter は新しい歯を通す必要がある）、`docs/migration-v1.md` 項目26に登録した。「任意フラグを省略したときの named it」の一覧は、上の追記の6つとあわせて7つになった。
 
+**⚠ 2026-09-30 追記（[ADR 0404](./decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）**: `MemoryStoreConformanceOptions` に `supportsPurgeExpiredRecalls?`、`OutboxStoreConformanceOptions` に `supportsPurgeCompletedJobs?` が増えた——それぞれ `MemoryStore.purgeExpiredRecalls?`・`OutboxStore.purgeCompletedJobs?` を検査する。上の `supportsAbortIfForgotten?` 等と同じ3状態（`true` は歯を走らせ、各 `it` の冒頭で口の存在を要求する／`false` は口が無いことを assert する／省略は「⚠ 未検査」の named it を1本だけ登録する）。**任意なので、既存の呼び出し側は壊れない（非破壊）。**`purgeCompletedJobs?` の歯のうち終端後の行を読むものは `peekJob` を要り、`peekJob` の無い adapter では `it.skip` になる。`packages/postgres` と `packages/testkit` の fixture は `true` を渡す。
+
 ---
 
 ## 出所について

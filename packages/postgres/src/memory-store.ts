@@ -41,6 +41,8 @@ import type {
   PurgeExpiredEventsByRetentionOptions,
   PurgeExpiredEventsByRetentionOutcome,
   PurgeExpiredEventsOptions,
+  PurgeExpiredRecallsOptions,
+  PurgeExpiredRecallsResult,
   PurgeExpiredEventsResult,
   RecallId,
   RecallRecord,
@@ -1154,6 +1156,98 @@ export class PostgresMemoryStore implements MemoryStore {
       });
       return { kind: "executed", result };
     });
+  }
+
+  /**
+   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `MemoryStore.purgeExpiredRecalls?` の実装。対象の `recalls` を先に確定し（古い順に
+   * `limit + 1` 件、`FOR UPDATE` で行を掴む）、**同じトランザクションで**その子の
+   * `recall_usages` → `recalls` の順に消す（`recall_usages.recall_id` は `ON DELETE` 無しの
+   * 外部キー）。`limit` は recalls の行数で数える。掴んだ行に並行の `recordUsage`（外部キー検査が
+   * 行ロックを取る）が割り込むと、そちらが待たされ、こちらの commit 後に外部キー違反になる。
+   *
+   * `dryRun` のときはトランザクションを開かず、行も掴まない。
+   */
+  async purgeExpiredRecalls(
+    ctx: Ctx,
+    opts: PurgeExpiredRecallsOptions,
+  ): Promise<PurgeExpiredRecallsResult> {
+    const dryRun = opts.dryRun ?? false;
+    if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+      return {
+        purged: 0,
+        purgedUsages: 0,
+        reachedLimit: false,
+        oldestPurgedAt: null,
+        newestPurgedAt: null,
+        dryRun,
+      };
+    }
+    if (dryRun) {
+      return this.purgeExpiredRecallsBody(this.db, ctx, opts, dryRun);
+    }
+    return this.db.transaction((tx) => this.purgeExpiredRecallsBody(tx, ctx, opts, dryRun));
+  }
+
+  private async purgeExpiredRecallsBody(
+    exec: SqlExecutor,
+    ctx: Ctx,
+    opts: PurgeExpiredRecallsOptions,
+    dryRun: boolean,
+  ): Promise<PurgeExpiredRecallsResult> {
+    const candidates = await exec.execute(buildPurgeExpiredRecallsTargetSelect(ctx, opts, !dryRun));
+    const rows = candidates.rows as unknown as { id: string; created_at: string }[];
+    const reachedLimit = rows.length > opts.limit;
+    const victims = rows.slice(0, opts.limit);
+    if (victims.length === 0) {
+      return {
+        purged: 0,
+        purgedUsages: 0,
+        reachedLimit,
+        oldestPurgedAt: null,
+        newestPurgedAt: null,
+        dryRun,
+      };
+    }
+    const victimIds = victims.map((row) => row.id);
+
+    if (dryRun) {
+      const usages = await exec.execute(sql`
+        SELECT count(*)::int AS count FROM recall_usages
+        WHERE tenant_id = ${ctx.tenantId} AND recall_id = ANY(${sql.param(victimIds)}::uuid[])
+      `);
+      return {
+        purged: victims.length,
+        purgedUsages: (usages.rows[0] as unknown as { count: number }).count,
+        reachedLimit,
+        oldestPurgedAt: parsePgTimestamp(victims[0]!.created_at),
+        newestPurgedAt: parsePgTimestamp(victims[victims.length - 1]!.created_at),
+        dryRun,
+      };
+    }
+
+    // 子（recall_usages）が先。親の recalls は、その後に消す。
+    const usages = await exec.execute(sql`
+      DELETE FROM recall_usages
+      WHERE tenant_id = ${ctx.tenantId} AND recall_id = ANY(${sql.param(victimIds)}::uuid[])
+      RETURNING recall_id
+    `);
+    const deleted = await exec.execute(sql`
+      DELETE FROM recalls
+      WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(victimIds)}::uuid[])
+      RETURNING created_at
+    `);
+    const createdAts = (deleted.rows as unknown as { created_at: string }[])
+      .map((row) => parsePgTimestamp(row.created_at))
+      .sort((a, b) => a.getTime() - b.getTime());
+    return {
+      purged: createdAts.length,
+      purgedUsages: usages.rows.length,
+      reachedLimit,
+      oldestPurgedAt: createdAts.length > 0 ? createdAts[0]! : null,
+      newestPurgedAt: createdAts.length > 0 ? createdAts[createdAts.length - 1]! : null,
+      dryRun,
+    };
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
@@ -4003,6 +4097,24 @@ export function buildPurgeExpiredEventsTargetSelect(
       AND kind <> 'events_purged'
     ORDER BY at ASC
     LIMIT ${opts.limit + 1}`;
+}
+
+/**
+ * `purgeExpiredRecalls` が消す対象の `recalls` の行を選ぶ SELECT
+ * （`created_at < opts.olderThan`、古い順に `opts.limit + 1` 件——上限に届いたかを判定するために1件多く取る）。
+ * `lock` が真なら `FOR UPDATE` で行を掴む（削除するとき）。EXPLAIN の歯がこの関数の返り値を測る。
+ */
+export function buildPurgeExpiredRecallsTargetSelect(
+  ctx: Ctx,
+  opts: PurgeExpiredRecallsOptions,
+  lock = false,
+): SQL {
+  return sql`
+    SELECT id, created_at FROM recalls
+    WHERE tenant_id = ${ctx.tenantId}
+      AND created_at < ${toPgTimestamp(opts.olderThan)}
+    ORDER BY created_at ASC, id ASC
+    LIMIT ${opts.limit + 1}${lock ? sql` FOR UPDATE` : sql``}`;
 }
 
 /** 外部キー違反の SQLSTATE（`eraseTenant` が他テナントからの参照を見分けるのに使う）。 */

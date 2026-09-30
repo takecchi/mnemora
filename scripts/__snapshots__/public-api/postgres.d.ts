@@ -96,7 +96,7 @@ export declare class PostgresLexicalStore implements LexicalStore {
 
 // ===== dist/memory-store.d.ts =====
 import type { SQL } from "drizzle-orm";
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredRecallsOptions, PurgeExpiredRecallsResult, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresMemoryStore implements MemoryStore {
     private readonly db;
@@ -161,6 +161,8 @@ export declare class PostgresMemoryStore implements MemoryStore {
     private purgeExpiredEventsBody;
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
     purgeExpiredEventsByRetention(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
+    purgeExpiredRecalls(ctx: Ctx, opts: PurgeExpiredRecallsOptions): Promise<PurgeExpiredRecallsResult>;
+    private purgeExpiredRecallsBody;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     supportsAddOwnSubjectSeq(): boolean;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
@@ -288,6 +290,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
 export declare function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL;
 export declare function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOptions): SQL | null;
 export declare function buildPurgeExpiredEventsTargetSelect(ctx: Ctx, opts: PurgeExpiredEventsOptions): SQL;
+export declare function buildPurgeExpiredRecallsTargetSelect(ctx: Ctx, opts: PurgeExpiredRecallsOptions, lock?: boolean): SQL;
 
 // ===== dist/migrate.d.ts =====
 import type { Pool } from "pg";
@@ -350,7 +353,7 @@ export declare function runAnalyzeMemories(pool: Pool, options?: AnalyzeMemories
 export declare const DEFAULT_MIGRATIONS_DIR: string;
 
 // ===== dist/outbox-store.d.ts =====
-import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore } from "@mnemora/core";
+import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore, type PurgeCompletedJobsOptions, type PurgeCompletedJobsResult } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresOutboxStore implements OutboxStore {
     private readonly db;
@@ -364,6 +367,7 @@ export declare class PostgresOutboxStore implements OutboxStore {
     }): Promise<void>;
     private raiseIfLeaseConflict;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+    purgeCompletedJobs(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
 }
 
 // ===== dist/pgvector-capability.d.ts =====

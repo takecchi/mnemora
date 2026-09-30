@@ -629,6 +629,30 @@ add("purgeExpiredEvents(limit:0)", (h) =>
 add("purgeExpiredEvents(dryRun)", (h) =>
   h.s.ms.purgeExpiredEvents(h.ctx, { olderThan: later(), limit: 10, dryRun: true }),
 );
+add("purgeExpiredRecalls(olderThan: Invalid Date)", (h) =>
+  h.s.ms.purgeExpiredRecalls(h.ctx, { olderThan: new Date(Number.NaN), limit: 10 }),
+);
+add("purgeExpiredRecalls(limit:0)", (h) =>
+  h.s.ms.purgeExpiredRecalls(h.ctx, { olderThan: later(), limit: 0 }),
+);
+add("purgeExpiredRecalls(limit:1.5)", (h) =>
+  h.s.ms.purgeExpiredRecalls(h.ctx, { olderThan: later(), limit: 1.5 }),
+);
+add("purgeExpiredRecalls(dryRun)", (h) =>
+  h.s.ms.purgeExpiredRecalls(h.ctx, { olderThan: later(), limit: 10, dryRun: true }),
+);
+add("outbox.purgeCompletedJobs(olderThan: Invalid Date)", (h) =>
+  h.s.os.purgeCompletedJobs!(h.ctx, { olderThan: new Date(Number.NaN), limit: 10 }),
+);
+add("outbox.purgeCompletedJobs(limit:0)", (h) =>
+  h.s.os.purgeCompletedJobs!(h.ctx, { olderThan: later(), limit: 0 }),
+);
+add("outbox.purgeCompletedJobs(limit:1.5)", (h) =>
+  h.s.os.purgeCompletedJobs!(h.ctx, { olderThan: later(), limit: 1.5 }),
+);
+add("outbox.purgeCompletedJobs(dryRun)", (h) =>
+  h.s.os.purgeCompletedJobs!(h.ctx, { olderThan: later(), limit: 10, dryRun: true }),
+);
 add("archiveDecayed(now: Invalid Date)", (h) =>
   h.s.ms.archiveDecayed(h.ctx, { now: new Date(Number.NaN), limit: 10 }),
 );

@@ -1319,6 +1319,39 @@ export interface MemoryStore {
    */
   purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
   /**
+   * [ADR 0404](../../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `createdAt < opts.olderThan` の `recalls` 行を、その `recall_usages` ごと消す。
+   * `eraseTenant` 以外に `recalls` の行を消す経路が無かった（ADR 0290 の 2026-09-30 追記、
+   * ADR 0357 の負債1）ことへの口。
+   *
+   * 🔴 **任意メソッドである。**理由は {@link MemoryStore.purgeExpiredEvents} と同じ
+   * （`@mnemora/core` は npm 公開済みで、必須化は第三者 adapter を壊す破壊的変更になる）。
+   *
+   * 契約:
+   * - **`opts.olderThan` は必須・既定の保持期間を持たない。**何日残すかは呼び出し側が決める。
+   * - 対象は `tenant_id = ctx.tenantId` かつ `created_at < opts.olderThan`（境界
+   *   `createdAt === olderThan` は対象外。{@link PurgeExpiredEventsOptions.olderThan} と同じ）。
+   *   並びは `created_at` 昇順（最も古い行から消す）。
+   * - **`recall_usages` は同一トランザクションで先に消える。**`recall_usages.recall_id` は
+   *   `recalls(id)` への外部キー（`ON DELETE` 指定なし）なので、親だけを消せない。
+   *   ⟹ **消えた recall の使用記録（どの記憶を使ったと報告されたか）も消える。**
+   *   消した後にその `recallId` で {@link MemoryStore.recordUsage} を呼ぶと、外部キー違反
+   *   （`@mnemora/postgres`）／同じ検査（`recall not found`、testkit の InMemory 実装）で例外になる。
+   * - `memory_events.meta` に `recallId` の文字列が載っていても、外部キーではないので残る。
+   * - **`recalls.query` の中身（約束の範囲）には触れていない**——行ごと消えるだけで、
+   *   「どこまでを消すと約束するか」はここでは決めていない（ADR 0404）。
+   * - `opts.limit` は必須・既定値なし（{@link PurgeExpiredEventsOptions.limit} と同じ理由）。
+   *   対象が `limit` を超えれば `reachedLimit: true`。`limit` は **recalls の行数**であり、
+   *   同時に消える `recall_usages` の行数は数えない（`result.purgedUsages` に別に返す）。
+   * - `opts.dryRun === true` は1行も消さず、消していたら何が起きたかを返す。
+   * - `events_purged` のような監査行は積まない（`memory_events` は `memory_id` を軸にした
+   *   記憶の履歴であり、`recalls` は記憶ではない）。
+   */
+  purgeExpiredRecalls?(
+    ctx: Ctx,
+    opts: PurgeExpiredRecallsOptions,
+  ): Promise<PurgeExpiredRecallsResult>;
+  /**
    * Issue #1232 / [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md):
    * {@link MemoryStore.purgeExpiredEvents} と `TenantSettingsStore.getEventRetention`/
    * `setEventRetention`（ADR 0050）をまたいで存在していた race——`purgeExpiredEventsForTenant`
@@ -2588,6 +2621,32 @@ export interface PurgeExpiredEventsOptions {
    * と同じ既定）。
    */
   dryRun?: boolean;
+}
+
+/** {@link MemoryStore.purgeExpiredRecalls} の引数（ADR 0404）。 */
+export interface PurgeExpiredRecallsOptions {
+  /** この日時より古い（`created_at < olderThan`）recall だけが対象。境界値は対象外。**既定値なし。** */
+  olderThan: Date;
+  /** 1回の呼び出しで消す `recalls` の行数の上限。**必須・既定値なし。**0以上の整数を渡す前提（負数の結果は未定義）。 */
+  limit: number;
+  /** `true` なら何も消さず、消していたら何が起きたかだけを返す。省略時 `false`。 */
+  dryRun?: boolean;
+}
+
+/** {@link MemoryStore.purgeExpiredRecalls} の返り値（ADR 0404）。 */
+export interface PurgeExpiredRecallsResult {
+  /** 消した `recalls` の行数（`dryRun` のときは消していたであろう行数）。 */
+  purged: number;
+  /** 一緒に消えた（`dryRun` のときは消えていたであろう）`recall_usages` の行数。 */
+  purgedUsages: number;
+  /** 対象が `opts.limit` より多かった（この呼び出しだけでは消しきれなかった）ことを示す専用の信号。 */
+  reachedLimit: boolean;
+  /** 消した recall のうち最も古い `createdAt`。`purged === 0` なら `null`。 */
+  oldestPurgedAt: Date | null;
+  /** 消した recall のうち最も新しい `createdAt`。`purged === 0` なら `null`。 */
+  newestPurgedAt: Date | null;
+  /** `opts.dryRun` の写し。 */
+  dryRun: boolean;
 }
 
 /** {@link MemoryStore.purgeExpiredEvents} の返り値（Issue #210、ADR 0115）。 */

@@ -65,6 +65,20 @@ export interface OutboxStoreConformanceOptions {
    * を積極的に assert する——`it.skip` にはしない。
    */
   supportsEraseTenant: boolean;
+  /**
+   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * 対象の `OutboxStore` 実装が `purgeCompletedJobs`（任意メソッド）を実装しているかどうか。
+   *
+   * ⚠ **任意（省略可）の3状態フラグである**（`memory-store-conformance.ts` の
+   * `supportsPurgeExpiredRecalls` と同じ理由——必須にすると既存の呼び出し側を壊す）。
+   * - `true`: 契約の歯（完了した古い行だけを消す・境界・**未処理／claim 中／failed の行は
+   *   どれだけ古くても消さない**・テナント越境しない・`limit`/`reachedLimit`・`dryRun`）を実行する。
+   *   **各 `it` の冒頭で口の存在を要求する**——実装が無い adapter が `true` を名乗ると赤になる。
+   *   ⚠ 終端後の行を読む歯は `peekJob` を要る——**`peekJob` が無い adapter では `it.skip`** になる。
+   * - `false`: `expect(store.purgeCompletedJobs).toBeUndefined()` を積極的に assert する。
+   * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
+   */
+  supportsPurgeCompletedJobs?: boolean;
 }
 
 /**
@@ -128,8 +142,15 @@ const CONCURRENT_CLAIM_ROUNDS = 10;
  *   （`claimed_at IS NULL` だけにする案を却下した理由そのもの——見えない停止にしない）。
  */
 export function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void {
-  const { name, createStore, seedJob, peekJob, supportsRealConcurrency, supportsEraseTenant } =
-    options;
+  const {
+    name,
+    createStore,
+    seedJob,
+    peekJob,
+    supportsRealConcurrency,
+    supportsEraseTenant,
+    supportsPurgeCompletedJobs,
+  } = options;
 
   describe(`OutboxStore conformance (${name})`, () => {
     it("claimBatch は available_at <= now の未処理ジョブを返す", async () => {
@@ -687,6 +708,216 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.eraseTenant).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // purgeCompletedJobs（ADR 0404）。🔴 任意メソッド——`supportsPurgeCompletedJobs` の3状態。
+    // -------------------------------------------------------------------
+
+    /**
+     * ジョブを1件積み、claim して、終端（`complete` または `fail`）を `at` で付ける。
+     * 直前までの行はすべて claim 済みか未来の `availableAt` なので、ここで claim できるのは
+     * 積んだばかりの1件だけである。
+     */
+    async function seedTerminal(
+      store: OutboxStore,
+      ctx: Ctx,
+      how: "complete" | "fail",
+      at: Date,
+    ): Promise<OutboxJobRecord> {
+      const seeded = await seedJob(ctx, { kind: "embed" });
+      const claimed = await store.claimBatch(ctx, {
+        limit: 100,
+        now: new Date(),
+        claimedBy: "purge-fixture",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      const mine = claimed.find((j) => j.id === seeded.id);
+      if (!mine) throw new Error("seedTerminal: 積んだジョブを claim できなかった");
+      if (how === "complete") {
+        await store.complete(ctx, mine.id, mine.attempts, { at });
+      } else {
+        await store.fail(ctx, mine.id, "purge-fixture failure", mine.attempts, { at });
+      }
+      return mine;
+    }
+
+    const FAR_FUTURE = new Date("2999-01-01T00:00:00.000Z");
+
+    if (supportsPurgeCompletedJobs === true) {
+      (peekJob ? it : it.skip)(
+        "purgeCompletedJobs は completedAt < olderThan の完了行だけを消す（境界 completedAt === olderThan は対象外）",
+        async () => {
+          const store = await createStore();
+          expect(typeof store.purgeCompletedJobs).toBe("function");
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const cutoff = new Date("2025-06-01T00:00:00.000Z");
+          const old = await seedTerminal(
+            store,
+            ctx,
+            "complete",
+            new Date("2025-05-31T23:59:59.999Z"),
+          );
+          const veryOld = await seedTerminal(
+            store,
+            ctx,
+            "complete",
+            new Date("2020-01-01T00:00:00.000Z"),
+          );
+          const boundary = await seedTerminal(store, ctx, "complete", cutoff);
+          const fresh = await seedTerminal(
+            store,
+            ctx,
+            "complete",
+            new Date("2025-06-01T00:00:00.001Z"),
+          );
+
+          const result = await store.purgeCompletedJobs!(ctx, { olderThan: cutoff, limit: 10 });
+
+          expect(result.purged).toBe(2);
+          expect(result.reachedLimit).toBe(false);
+          expect(result.dryRun).toBe(false);
+          expect(result.oldestPurgedAt).toEqual(new Date("2020-01-01T00:00:00.000Z"));
+          expect(result.newestPurgedAt).toEqual(new Date("2025-05-31T23:59:59.999Z"));
+          expect(await peekJob!(ctx, old.id)).toBeNull();
+          expect(await peekJob!(ctx, veryOld.id)).toBeNull();
+          expect(await peekJob!(ctx, boundary.id)).not.toBeNull();
+          expect(await peekJob!(ctx, fresh.id)).not.toBeNull();
+        },
+      );
+
+      (peekJob ? it : it.skip)(
+        "purgeCompletedJobs は完了していない行を、どれだけ古くても決して消さない（failed・claim 中・未処理）",
+        async () => {
+          const store = await createStore();
+          expect(typeof store.purgeCompletedJobs).toBe("function");
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          // failed_at が極端に古い行——「failed は完了ではない」（ADR 0404）。
+          const failed = await seedTerminal(
+            store,
+            ctx,
+            "fail",
+            new Date("2000-01-01T00:00:00.000Z"),
+          );
+          // claim 済みで、まだ終端が付いていない行。
+          const claimedOnly = await seedJob(ctx, { kind: "embed" });
+          const claimed = await store.claimBatch(ctx, {
+            limit: 100,
+            now: new Date(),
+            claimedBy: "purge-fixture",
+            leaseMs: DEFAULT_LEASE_MS,
+          });
+          expect(claimed.map((j) => j.id)).toContain(claimedOnly.id);
+          // 未処理（未来の availableAt なので claim されない）の行。
+          const pending = await seedJob(ctx, {
+            kind: "embed",
+            availableAt: new Date("2999-01-01T00:00:00.000Z"),
+          });
+          // 完了した古い行が1件だけ、対照として在る（陽性対照——この行は消える）。
+          const done = await seedTerminal(
+            store,
+            ctx,
+            "complete",
+            new Date("2000-01-01T00:00:00.000Z"),
+          );
+
+          const result = await store.purgeCompletedJobs!(ctx, {
+            olderThan: FAR_FUTURE,
+            limit: 100,
+          });
+
+          expect(result.purged).toBe(1);
+          expect(await peekJob!(ctx, done.id)).toBeNull();
+          const failedAfter = await peekJob!(ctx, failed.id);
+          expect(failedAfter).not.toBeNull();
+          expect(failedAfter?.failedAt).toEqual(new Date("2000-01-01T00:00:00.000Z"));
+          expect(await peekJob!(ctx, claimedOnly.id)).not.toBeNull();
+          expect(await peekJob!(ctx, pending.id)).not.toBeNull();
+        },
+      );
+
+      (peekJob ? it : it.skip)("purgeCompletedJobs はテナント越境しない", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeCompletedJobs).toBe("function");
+        const ctx1: Ctx = { tenantId: "tenant-1" };
+        const ctx2: Ctx = { tenantId: "tenant-2" };
+        const longAgo = new Date("2020-01-01T00:00:00.000Z");
+        const mine = await seedTerminal(store, ctx1, "complete", longAgo);
+        const theirs = await seedTerminal(store, ctx2, "complete", longAgo);
+
+        const result = await store.purgeCompletedJobs!(ctx1, {
+          olderThan: new Date("2025-01-01T00:00:00.000Z"),
+          limit: 10,
+        });
+
+        expect(result.purged).toBe(1);
+        expect(await peekJob!(ctx1, mine.id)).toBeNull();
+        expect(await peekJob!(ctx2, theirs.id)).not.toBeNull();
+      });
+
+      (peekJob ? it : it.skip)(
+        "purgeCompletedJobs は limit を超えた対象を reachedLimit: true で知らせ、古い順に消し、超えない呼び出しでは false になる",
+        async () => {
+          const store = await createStore();
+          expect(typeof store.purgeCompletedJobs).toBe("function");
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const jobs: OutboxJobRecord[] = [];
+          for (let i = 0; i < 5; i++) {
+            jobs.push(
+              await seedTerminal(store, ctx, "complete", new Date(Date.UTC(2020, 0, 1 + i))),
+            );
+          }
+          const olderThan = new Date("2025-01-01T00:00:00.000Z");
+
+          const first = await store.purgeCompletedJobs!(ctx, { olderThan, limit: 3 });
+          expect(first.purged).toBe(3);
+          expect(first.reachedLimit).toBe(true);
+          expect(await peekJob!(ctx, jobs[0]!.id)).toBeNull();
+          expect(await peekJob!(ctx, jobs[2]!.id)).toBeNull();
+          expect(await peekJob!(ctx, jobs[3]!.id)).not.toBeNull();
+          expect(first.newestPurgedAt).toEqual(new Date(Date.UTC(2020, 0, 3)));
+
+          // 残りちょうど limit 件は reachedLimit: false（purged === limit からの推測に頼らせない）。
+          const second = await store.purgeCompletedJobs!(ctx, { olderThan, limit: 2 });
+          expect(second.purged).toBe(2);
+          expect(second.reachedLimit).toBe(false);
+        },
+      );
+
+      (peekJob ? it : it.skip)(
+        "purgeCompletedJobs は dryRun のとき1行も消さず、消していたら何が起きたかを返す",
+        async () => {
+          const store = await createStore();
+          expect(typeof store.purgeCompletedJobs).toBe("function");
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const job = await seedTerminal(
+            store,
+            ctx,
+            "complete",
+            new Date("2020-01-01T00:00:00.000Z"),
+          );
+
+          const result = await store.purgeCompletedJobs!(ctx, {
+            olderThan: new Date("2025-01-01T00:00:00.000Z"),
+            limit: 10,
+            dryRun: true,
+          });
+
+          expect(result.dryRun).toBe(true);
+          expect(result.purged).toBe(1);
+          expect(result.oldestPurgedAt).toEqual(new Date("2020-01-01T00:00:00.000Z"));
+          expect(await peekJob!(ctx, job.id)).not.toBeNull();
+        },
+      );
+    } else if (supportsPurgeCompletedJobs === false) {
+      it("purgeCompletedJobs は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.purgeCompletedJobs).toBeUndefined();
+      });
+    } else {
+      it(`⚠ 未検査: supportsPurgeCompletedJobs が指定されていない — adapter "${name}" に対して purgeCompletedJobs の歯は検査していない`, () => {
+        expect(supportsPurgeCompletedJobs).toBeUndefined();
       });
     }
   });
