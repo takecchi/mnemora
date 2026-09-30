@@ -22,8 +22,10 @@ import {
  * 以前は、`toVectorLiteral` がそのまま `[NaN,0,0]` を作り、pgvector が
  * 「NaN not allowed in vector」／「infinite value not allowed in vector」で拒んで、
  * 未捕捉の `DrizzleQueryError` になっていた。`runtime.recall()` 自体が reject される。
- * 経路は、埋め込み provider がクエリ埋め込みに有限でない成分を返したときである（provider の
- * 出力は core では検証しない）。利用者が `recall({ vector })` に渡す値は `RecallQuerySchema`
+ * 経路は、埋め込み provider がクエリ埋め込みに有限でない成分を返したときだった（当時 provider の
+ * 出力は core では検証しなかった）。**2026-09-30（ADR 0393）から、この経路は core が vectorStore へ渡す前に
+ * 弾き、`embedding_provider_unavailable` になる**。`search`/`searchMany` を直接呼ぶ場合の
+ * 「比較不能」の扱いは変わらない（上の2つの it）。利用者が `recall({ vector })` に渡す値は `RecallQuerySchema`
  * の `z.number()` が `NaN`・`Infinity` とも拒むので、この経路には来ない（実測）。
  *
  * Issue #867 の案B（次元の不一致は比較不能として扱い、`space.dimensions` 長の全 0 ベクトルに
@@ -106,7 +108,7 @@ describe("PostgresVectorStore: 有限でない成分を含むクエリは比較�
   );
 
   it.each(NON_FINITE_QUERIES)(
-    "runtime.recall: 埋め込み provider がクエリに %s を返しても reject せず、score_not_comparable に数える",
+    "runtime.recall: 埋め込み provider がクエリに %s を返しても reject せず、embedding_provider_unavailable に数える（2026-09-30、ADR 0393）",
     async (_label, query) => {
       const { db, memoryStore, vectorStore } = await seedEmbedded();
       const embeddingProvider: EmbeddingProvider = {
@@ -134,9 +136,14 @@ describe("PostgresVectorStore: 有限でない成分を含むクエリは比較�
       const result = await runtime.recall(ctx, { text: "何かのクエリ", association: null });
 
       expect(result.memories).toEqual([]);
-      expect(result.omitted.find((o) => o.kind === "score_not_comparable")).toMatchObject({
-        count: 1,
+      // 2026-09-30（ADR 0393）: core が provider の問い合わせベクトルの有限性を、vectorStore へ渡す前に
+      // 確かめる。以前はここが score_not_comparable だった（toComparableQuery が全 0 に差し替えていた）。
+      expect(result.omitted).toContainEqual({
+        kind: "stage_skipped",
+        stage: "candidate_generation",
+        reason: "embedding_provider_unavailable",
       });
+      expect(result.omitted.find((o) => o.kind === "score_not_comparable")).toBeUndefined();
     },
   );
 });
