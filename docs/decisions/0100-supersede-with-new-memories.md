@@ -414,3 +414,18 @@
 - 🔴 **この口を持たない adapter では、抽出の `created` の取りこぼしが残る**（`createMemoryWithOutbox` のあと別の `EventStore.append`。append が失敗すると記憶だけ残り、再送・tick は素通りする）。
 - 🔴 **抽出以外の経路は、この項のまま**（別コミット）: `reextract`（`supersedeWithNewMemories` を使う経路と使わない経路）・`consolidate`（同）・`reflect` の `created`。
   `supersedeWithNewMemories` を使う経路でも、`created` は口の外で積まれる（この口は `superseded` だけを同じトランザクションに積む）。詳しくは ADR 0410 の「残り」。
+
+## 追記（2026-09-30）: `reextract`・`consolidate` の `created` も、名乗る store では同じトランザクションに入った（ADR 0416）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。本文と、上の ADR 0410 の追記は書き換えていない。
+
+上の「守れないもの」の `created` イベントの項に対して、[ADR 0416](./0416-created-event-same-tx-remaining-paths.md) は、この口（`supersedeWithNewMemories`）自身に
+`opts.buildCreatedEvent?: (memory, index) => NewMemoryEvent` を足して、`reextract`・`consolidate` の新しい Memory の `created` を、`news` と同じトランザクションで積めるようにした。
+store は積んだことを戻り値の `createdEventsWritten: true` で名乗り、**core は名乗られたときだけ**別の `created` の append を省く。
+
+**`created` の項への追記（守れないもの）:**
+
+- 🔴 **名乗らない adapter（この口を実装するが `opts.buildCreatedEvent` を知らない実装）では、`created` は今までどおり別の文で積まれる**（消えはしないが、取りこぼしの窓は残る）。
+  引数を黙って無視する adapter で `created` が消えないよう、引数の有無ではなく名乗りで決める。撃って投げられたときに旧経路で撃ち直さない規律は、この口に対しても変わらない。
+- 🔴 **名乗るのにトランザクションを張らない adapter は見抜けない**（「原子性の証拠ではない」の項と同じ）。
+- 🔴 **口なしの経路（`createMemoryWithOutbox` のループ）の `created` は、この項のまま**（別コミット）。

@@ -133,7 +133,8 @@ async function assertNotForgottenForUpdate(
   tx: SqlExecutor,
   ctx: Ctx,
   ids: ReadonlyArray<MemoryId> | undefined,
-  method: "createMemoryWithOutbox" | "supersedeWithNewMemories",
+  method:
+    "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
 ): Promise<void> {
   if (ids === undefined || ids.length === 0) {
     return;
@@ -156,6 +157,33 @@ async function assertNotForgottenForUpdate(
   if (forgottenIds.length > 0) {
     throw new SourceMemoryForgottenError(method, forgottenIds);
   }
+}
+
+/**
+ * `created` イベント1件を、呼び出し元のトランザクション（`tx`）の中で `memory_events` へ直接 INSERT する。
+ * `EventStore.append` は経由しない（別コミットになるため）。`createMemoriesWithOutboxAndEvents`（ADR 0410）と
+ * `supersedeWithNewMemories` の `opts.buildCreatedEvent`（ADR 0416）が共有する——書き写さない。
+ * 失敗したら投げる（呼び出し元の `tx` ごと rollback される）。
+ */
+async function insertCreatedEventRow(
+  tx: SqlExecutor,
+  ctx: Ctx,
+  event: NewMemoryEvent,
+): Promise<void> {
+  await tx.execute(sql`
+    INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+    VALUES (
+      gen_random_uuid(),
+      ${ctx.tenantId},
+      ${event.memoryId},
+      ${event.kind},
+      ${toPgTimestamp(event.at ?? new Date())},
+      ${JSON.stringify(event.actor)}::jsonb,
+      ${event.digestSnapshot ?? null},
+      ${event.sizeBeforeBytes ?? null},
+      ${JSON.stringify(event.meta)}::jsonb
+    )
+  `);
 }
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -655,6 +683,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * - `status: "contested"` で `contestedWithId` が無い入力は、その候補だけ
    *   {@link ContestedWithoutCompanionError} で落とす（今の経路で候補ごとに `createMemoryWithOutbox` が投げて
    *   落とされていたのと同じ）。
+   * - ADR 0416: `opts.abortIfForgotten` が非空なら、どの候補の書き込みより前に同じトランザクションで
+   *   `SELECT … FOR UPDATE` し、forgotten が1件でもあれば {@link SourceMemoryForgottenError} を投げる
+   *   （`dropped` に積まずそのまま投げる。何も書かない）。`reflect` がこの口を使う。
    */
   async createMemoriesWithOutboxAndEvents(
     ctx: Ctx,
@@ -663,14 +694,24 @@ export class PostgresMemoryStore implements MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
   }> {
     // Issue #1237: 省略時は1回だけ壁時計を読み、積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
+    const abortIfForgotten = opts?.abortIfForgotten;
     const result = await this.db.transaction(async (tx) => {
+      // ADR 0416: どの候補の INSERT より前に見直す（`assertNotForgottenForUpdate` の doc コメント参照）。
+      // 候補ごとの SAVEPOINT の外で呼ぶので、この例外は `dropped` に積まれずそのまま投げられる
+      // （外側のトランザクションごと rollback。何も書かない）。
+      await assertNotForgottenForUpdate(
+        tx,
+        ctx,
+        abortIfForgotten,
+        "createMemoriesWithOutboxAndEvents",
+      );
       const written: Array<{
         index: number;
         memory: Memory;
@@ -698,21 +739,7 @@ export class PostgresMemoryStore implements MemoryStore {
         if (!created) {
           continue;
         }
-        const event = buildCreatedEvent(memory, dropped);
-        await tx.execute(sql`
-          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
-          VALUES (
-            gen_random_uuid(),
-            ${ctx.tenantId},
-            ${event.memoryId},
-            ${event.kind},
-            ${toPgTimestamp(event.at ?? new Date())},
-            ${JSON.stringify(event.actor)}::jsonb,
-            ${event.digestSnapshot ?? null},
-            ${event.sizeBeforeBytes ?? null},
-            ${JSON.stringify(event.meta)}::jsonb
-          )
-        `);
+        await insertCreatedEventRow(tx, ctx, buildCreatedEvent(memory, dropped));
       }
       return { written, dropped };
     });
@@ -971,6 +998,10 @@ export class PostgresMemoryStore implements MemoryStore {
    *
    * ⚠ 新しい行に `status: "contested"` で `contestedWithId` が無いものがあれば、何も書かずに
    * {@link ContestedWithoutCompanionError} を投げる（これは CAS の弾きとは別で、例外になる）。
+   *
+   * ADR 0416（穴 D-3 の続き）: `opts.buildCreatedEvent` が渡されたら、`created: true` の `news` の Memory ごとに
+   * `created` イベントを**同じトランザクションで** `memory_events` へ INSERT し（`supersede` の処理の前）、
+   * 戻り値に `createdEventsWritten: true` を付けて名乗る。INSERT が失敗したら `news`・`supersede` ごと全部巻き戻る。
    */
   async supersedeWithNewMemories(
     ctx: Ctx,
@@ -981,15 +1012,21 @@ export class PostgresMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+    },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+    createdEventsWritten?: true;
   }> {
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const abortIfForgotten = opts?.abortIfForgotten;
+    const buildCreatedEvent = opts?.buildCreatedEvent;
     // 呼び手が壊れた索引を渡した場合は、トランザクションを開く前に落とす（ADR 0100）。
     // ⛔ `conflicted` にも「memory not found」にも混ぜない——3つとも別の失敗である。
     // 開く前に落とすので、`news` の作成も当然起きない。
@@ -1104,6 +1141,17 @@ export class PostgresMemoryStore implements MemoryStore {
         created.push({ memory, created: true, jobs });
       }
 
+      // ADR 0416（穴 D-3 の続き）: `created: true` の新しい Memory の `created` イベントを、同じトランザクションで積む
+      // （`supersede` の処理の前。fixture と同じ順）。投げたら `news` も `supersede` も含めて全部巻き戻る。
+      // `buildCreatedEvent` が無ければ何もしない。
+      if (buildCreatedEvent !== undefined) {
+        for (const [index, entry] of created.entries()) {
+          if (entry.created) {
+            await insertCreatedEventRow(tx, ctx, buildCreatedEvent(entry.memory, index));
+          }
+        }
+      }
+
       const superseded: MemoryEvent[] = [];
       const conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
 
@@ -1175,7 +1223,8 @@ export class PostgresMemoryStore implements MemoryStore {
       // （ADR 0143 決定3）を無用に重ねないため。
       await maybeAnalyzeMemoriesAfterWrite(this.db);
     }
-    return result;
+    // ADR 0416: 積んだことを名乗る（渡していない呼び出しでは付けない）。
+    return buildCreatedEvent === undefined ? result : { ...result, createdEventsWritten: true };
   }
 
   /**

@@ -189,3 +189,14 @@ ADR 0100 の「守れないもの」は、`created` イベントが記憶の作�
 - 範囲外の5箇所が、実際に取りこぼす入力を歯で確かめていない（同じ形であることをコードで読んだだけ）。
 - 本物の並行（同じ Observation を2つの `tick`／`observe` が同時に処理する）での、この口と決定1の相互作用。ADR 0347 の並行の2本は、この口でも変えていないが、この口に対しては測っていない。
 - 第三者 adapter が、口を実装したうえで SAVEPOINT 相当の巻き戻しを正しく行うか。適合テスト (a) が固定しているのは、保存できない候補が真ん中にあっても残りが揃うことだけ。
+
+## 追記（2026-09-30）: 「残り」のうち口ありの経路は、ADR 0416 で直した
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。本文は書き換えていない。
+
+上の「引き受けた負債」の「残り」の5か所のうち、`reextract` の口あり経路（1）・`consolidate` の口あり経路（3）・`reflect`（5。`createMemoriesWithOutboxAndEvents?` を持つ adapter の上）は、
+[ADR 0416](./0416-created-event-same-tx-remaining-paths.md) が直した——`supersedeWithNewMemories` の `opts.buildCreatedEvent` と戻り値の `createdEventsWritten`（名乗り）で `created` を同じトランザクションに積み、
+この口の `opts` に `abortIfForgotten` を足して `reflect` が1件で使う。**口なしの経路（`reextract`・`consolidate`・`reflect` の口なし、抽出の口なし）は直していない。**
+
+「委譲の指示は『6経路』と数えていた」の差は、**数え方の違いだった**（0416 の「数え方」の表）: 「6」は #1496 より前の数えで、抽出の口なしを含む。上の「5」は抽出を除いた数。見落としは見つけていない。
+このメソッドの `opts` に `abortIfForgotten` を足したのは、1.2.0 が未リリースのうちである（ADR 0416 決定3）。

@@ -635,10 +635,10 @@ export declare class ContestedGroupMembershipMismatchError extends Error {
 }
 export declare function isContestedGroupMembershipMismatchError(value: unknown): value is ContestedGroupMembershipMismatchError;
 export declare class SourceMemoryForgottenError extends Error {
-    readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories";
+    readonly method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly forgottenIds: MemoryId[];
     readonly kind: "source_memory_forgotten";
-    constructor(method: "createMemoryWithOutbox" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
+    constructor(method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
 }
 export declare function isSourceMemoryForgottenError(value: unknown): value is SourceMemoryForgottenError;
 export declare class ContestedWithoutCompanionError extends Error {
@@ -734,6 +734,7 @@ export interface MemoryStore {
     }>, opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -745,6 +746,7 @@ export interface MemoryStore {
             id: MemoryId;
             observedStatus: MemoryStatus;
         }>;
+        createdEventsWritten?: true;
     }>;
     createMemoriesWithOutboxAndEvents?(ctx: Ctx, news: ReadonlyArray<{
         input: NewMemory;
@@ -754,6 +756,7 @@ export interface MemoryStore {
         error: unknown;
     }>) => NewMemoryEvent, opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         written: Array<{
             index: number;

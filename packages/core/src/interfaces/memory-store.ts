@@ -114,7 +114,8 @@ export function isContestedGroupMembershipMismatchError(
 
 /**
  * Issue #1226（ADR 0375 決定7、クローン miku の判断）: `createMemoryWithOutbox`/
- * `supersedeWithNewMemories` の `opts.abortIfForgotten` に渡した id のうち、書き込みの
+ * `supersedeWithNewMemories`（と、ADR 0416 以降は `createMemoriesWithOutboxAndEvents`）の
+ * `opts.abortIfForgotten` に渡した id のうち、書き込みの
  * 直前に見直したら1件でも `status === "forgotten"`（`forget()` のみ・`forget()` の後
  * `purge()` のどちらも含む——`purge()` は `forgotten` でない Memory を拒むため、
  * `purgedAt` が付いた行は必ず `forgotten` でもある）だったときに投げる。
@@ -143,7 +144,8 @@ export class SourceMemoryForgottenError extends Error {
   /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isSourceMemoryForgottenError} で行う。 */
   readonly kind = "source_memory_forgotten" as const;
   constructor(
-    readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories",
+    readonly method:
+      "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
     readonly forgottenIds: MemoryId[],
   ) {
     super(
@@ -1309,6 +1311,23 @@ export interface MemoryStore {
    * 参照。見直しと書き込みの間に窓が無い）。**`packages/testkit` の `InMemoryMemoryStore` と
    * `packages/core` のテスト用 `FakeMemoryStore` はこの欄を実装しない**——渡しても無視され、
    * 例外は投げられない（`createMemoryWithOutbox` の同日付の追記と同じ理由・同じ限界）。
+   *
+   * ⭐ **2026-09-30 追記（[ADR 0416](../../../../docs/decisions/0416-created-event-same-tx-remaining-paths.md)、穴 D-3 の続き）:
+   * `opts.buildCreatedEvent` と戻り値の `createdEventsWritten` を足した。**
+   * `reextract`・`consolidate` の新しい Memory の `created` イベントを、`news` の Memory と同じトランザクションで
+   * 積むための欄。
+   * - `opts.buildCreatedEvent(memory, index)` は、`created: true` になった `news[index]` の Memory ごとに、store が
+   *   **同じトランザクションの中で**呼び、返った {@link NewMemoryEvent} を `memory_events` へ INSERT する
+   *   （`EventStore.append` は経由しない）。**同期・副作用なし**の関数で、`created: false`（冪等な再送で既存行に
+   *   衝突した要素）には呼ばない。`supersede[].event` と違い `meta.supersededById` のような追記は行わず、返り値を
+   *   そのまま書く。この INSERT が失敗したら**トランザクション全体が巻き戻る**（`news` も `supersede` も残らない）。
+   * - 🔴 **積んだことは戻り値の `createdEventsWritten: true` で名乗る。**`buildCreatedEvent` を渡しても、この欄を
+   *   知らない（黙って無視する）adapter はありうる。呼び出し側（runtime）は、**名乗られたときだけ**別の
+   *   `EventStore.append` を省き、名乗られなければ今までどおり別の文で積む——⛔ 引数の有無だけで「積まれた」と
+   *   決めると、無視する adapter で `created` がまるごと消える。⚠ `buildCreatedEvent` を渡していない呼び出しでは、
+   *   `createdEventsWritten` は付けない。
+   * - 🔴 **名乗りは原子性の証拠ではない。**名乗るのにトランザクションを張らない adapter は、この機構では見抜けない
+   *   （適合テストが `createdEventsWritten` と「`created` が落ちたら `news`/`supersede` も残らない」を固定する）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -1319,11 +1338,16 @@ export interface MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+    },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+    createdEventsWritten?: true;
   }>;
   /**
    * [ADR 0410](../../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
@@ -1358,14 +1382,23 @@ export interface MemoryStore {
    *   `index` が `news` の索引である。`dropped` は落とした候補を `news` の順に並べたもの。
    * - claim key の衝突検出（`detectContested`）はこの口の外——runtime が書いたあとに今どおり走らせる。
    *
-   * ⚠ **範囲は抽出の経路だけである。**`reextract`・`consolidate`・`reflect` などは、この口を使わない
-   * （ADR 0410「残り」）。
+   * ⚠ **範囲**: 抽出（ADR 0410）に加えて、`reflect` の内省の `created` もこの口で積む（1件。ADR 0416）。
+   * `reextract`・`consolidate` の口あり経路は `supersedeWithNewMemories` の `opts.buildCreatedEvent` で積む
+   * （ADR 0416）。口を持たない adapter の経路と、`reextract`/`consolidate` の口なし経路は今までどおり別の文で積む。
    *
    * 🔴 **原子性の証拠ではない。**`supersedeWithNewMemories` と同じく、この口が在ることは「実装したと宣言した」
    * ことしか意味しない。実際に測るのは適合テストと `packages/postgres` の歯である。
    *
    * ⭐ `opts.now` は `createMemoryWithOutbox` の同じ欄と同じ意味（積む outbox 行の `availableAt`/`createdAt`）。
-   * `abortIfForgotten` は取らない（抽出は材料の Memory を持たない）。
+   *
+   * ⭐ **2026-09-30 追記（ADR 0416）: `opts.abortIfForgotten` を足した**（`reflect` がこの口を使うため。抽出は渡さない）。
+   * `createMemoryWithOutbox`・`supersedeWithNewMemories` の同じ欄と**同じ意味論**: 非空の配列を渡すと、**どの候補の
+   * 書き込みより前に**その id の現在の `status` を見直し、1件でも `"forgotten"` なら何も書かずに
+   * {@link SourceMemoryForgottenError}（`method: "createMemoriesWithOutboxAndEvents"`）を投げる。この例外は
+   * 候補ごとの巻き戻し・`dropped` の対象ではなく、**そのまま投げる**（全候補が落ちたときの例外とも別）。
+   * 空配列・省略時は見直しを行わない。`@mnemora/postgres` は同一トランザクションの `SELECT … FOR UPDATE` で実装し、
+   * `packages/testkit` の `InMemoryMemoryStore` は `createMemoryWithOutbox` と同じく**実装しない**（渡しても無視）。
+   * このメソッドは 1.2.0 で未リリースなので、引数を足しても既存の第三者 adapter を壊さない（ADR 0416）。
    */
   createMemoriesWithOutboxAndEvents?(
     ctx: Ctx,
@@ -1374,7 +1407,7 @@ export interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;

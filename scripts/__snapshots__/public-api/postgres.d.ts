@@ -130,6 +130,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
         error: unknown;
     }>) => NewMemoryEvent, opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         written: Array<{
             index: number;
@@ -168,6 +169,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
     }>, opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
+        buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -179,6 +181,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
             id: MemoryId;
             observedStatus: MemoryStatus;
         }>;
+        createdEventsWritten?: true;
     }>;
     private purgeExpiredEventsBody;
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
