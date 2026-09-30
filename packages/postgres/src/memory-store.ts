@@ -1300,6 +1300,9 @@ export class PostgresMemoryStore implements MemoryStore {
     const oldestPurgedAt = deletedAts[0]!;
     const newestPurgedAt = deletedAts[deletedAts.length - 1]!;
 
+    // ADR 0427: `at` は SQL の `now()`（マイクロ秒）ではなく、他の書き込みの口と同じく JS の
+    // 壁時計を `toPgTimestamp` で渡す——読み戻すとミリ秒になる値のまま列に入れないと、
+    // 読み戻した `at` を `EventStore.list` の `until` に渡したときにその行自身が当たらない。
     await exec.execute(sql`
       INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
       VALUES (
@@ -1307,7 +1310,7 @@ export class PostgresMemoryStore implements MemoryStore {
         ${ctx.tenantId},
         NULL,
         'events_purged',
-        now(),
+        ${toPgTimestamp(new Date())},
         ${JSON.stringify({ type: "system" })}::jsonb,
         NULL,
         NULL,

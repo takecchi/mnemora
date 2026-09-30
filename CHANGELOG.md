@@ -378,6 +378,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ 適合テストは core の判定関数（この版の core が公開したもの）を import する。判定関数を持たない古い版の core と組み合わせた testkit は動かない。
   - 公開 API に変更は無い（判定用の道具 `error-guards.ts` は export していない。snapshot は変わらない）。非破壊。
 
+- **`@mnemora/postgres` の `purgeExpiredEvents` が積む `events_purged` の `at` を、読み戻した値のまま `EventStore.list` の `until` に渡すと、その行自身が返らなかった穴を塞いだ**（[ADR 0427](./docs/decisions/0427-events-purged-at-millisecond.md)）。`at` を SQL の `now()`（マイクロ秒）から、他の書き込みの口と同じ JS の時刻（`toPgTimestamp`、ミリ秒）へ替えた。`at` は DB サーバの時計ではなく adapter のプロセスの時計になる。公開 API の変更は無い。
+
 ---
 
 ## [1.1.0] - 2026-09-30
