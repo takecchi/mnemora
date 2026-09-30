@@ -264,6 +264,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/testkit` が `zod` を `peerDependencies`（`^4.5.4`、`@mnemora/core` と同じ範囲）に宣言するようになった。** 公開の型 `LLMProviderConformanceOptions` が `import type { z } from "zod"` を d.ts に持つのに、`zod` は `devDependencies` にしか無かった。【実測】pnpm を `hoist=false`（厳格な配置）にした利用者の一時プロジェクトで testkit の tarball を入れて `tsc`（`skipLibCheck: false`）に掛けると `TS2307: Cannot find module 'zod'` で落ちた（既定の hoist では `.pnpm/node_modules` 経由で解決できてしまう。`skipLibCheck: true` では型が黙って `any` になる）。peer にしたあとは同じ手順で解決する。実行時の import は無い（型のみ）。`dependencies` にしなかったのは、利用者側の `zod` と二重に入ると `z.ZodType` の型が噛み合わなくなるため。
 
+- **`@mnemora/testkit/fixtures` が型 `StoredRelation` を export するようになった。** `InMemoryRelationStore` のコンストラクタの第2引数（`memoryStore.relations` と共有する配列）の要素型だが、入口から名指せなかった。型の追加のみ（実行時は変わらない）。公開 API snapshot を更新した。
+
 ---
 
 ## [1.1.0] - 2026-09-30
