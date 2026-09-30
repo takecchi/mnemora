@@ -446,6 +446,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0431](./0431-contested-group-event-growth-and-recall-cut.md) | 群（`markContestedGroup`）の監査イベントの増え方を N の線形にし、段4の `cut` の求め方を O(n²) から O(n) にする | 採用 (2026-10) |
 | [0432](./0432-recall-status-recheck-and-archive-docs.md) | recall の段1・連想枠の後置に `status` の再検査を足し、`archiveDecayed` の `reachedLimit` を直し、archived まわりの文書を実装に揃える | 採用 (2026-10) |
 | [0433](./0433-claim-key-length-space-error-reembed-limit.md) | claim key の長さに上限を置く・負の類似度の順位を文書に書く・未登録の埋め込み空間を型付きの例外にする・`reembed` の `limit` を入口で検査する | 採用 (2026-10) |
+| [0434](./0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md) | testkit のインメモリ実装を Postgres 実装に揃える（NUL の口の追加・`sizeBeforeBytes` の int4・`reinforce` の `nowSeq`・outbox の `now` の Invalid Date・`createMemory` の `purgedAt`） | 採用 (2026-10) |
+| [0435](./0435-claim-key-index-limit-typed-error-and-helper-tests.md) | claim key の索引の上限（SQLSTATE 54000）を型付きの例外に包む・直接のテストが無かった4つの関数に TSDoc の約束の歯を足す | 採用 (2026-10) |
 | [0436](./0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md) | `EventStore.append`・`VectorStore.upsert` は、入口で記憶が `ctx` のテナントに属することを確かめる（複合外部キーの migration は入れない） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

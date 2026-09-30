@@ -1,5 +1,6 @@
 import type { NewMemoryEvent } from "@mnemora/core";
 import { MemoryEventKindSchema } from "@mnemora/core";
+import { assertInt4Column, stringHasNul } from "./query-check.js";
 
 // testkit の fixture の内部モジュール。`InMemoryEventStore` と `InMemoryMemoryStore` の関数の中身から
 // だけ使う——`.d.ts` の import に出ないので、公開の型の面（`exports` から辿れる宣言）には入らない。
@@ -141,6 +142,18 @@ export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
       `memory_events.meta must not contain NUL (U+0000) or a lone surrogate code unit`,
     );
   }
+  // ADR 0434: `digest_snapshot` は `text` 列で、Postgres は NUL を拒む（`22021`）。孤立サロゲートは拒まない
+  // （node-postgres が U+FFFD へ置き換える）ので、ここでは NUL だけを見る。
+  if (stringHasNul(event.digestSnapshot)) {
+    throw new Error(`memory_events.digestSnapshot must not contain NUL characters (U+0000)`);
+  }
+  // ADR 0434: `size_before_bytes` は `integer`（int4）列。整数でない・`NaN`・`Infinity`・範囲外（`-2^31` 未満、
+  // `2^31 - 1` 超）は Postgres が `22P02`・`22003` で拒む。負の数そのものは拒まない（列に CHECK は無い）。
+  //
+  // ⚠ `markContestedGroup`・`resolveContestedGroup` だけは、Postgres が複数のイベントを1つの `jsonb` の配列で渡す
+  // （`insertMemoryEventsBatch`）ので、`NaN`・`±Infinity` は `JSON.stringify` で `null` になって通る（【実測】。`1.5`・範囲の外は
+  // 他の口と同じく拒む）。その2つの口は、この関数を呼ぶ前に {@link asJsonSerializedSizeBeforeBytes} で `null` に置き換える。
+  assertInt4Column("memory_events", "sizeBeforeBytes", event.sizeBeforeBytes);
 }
 
 /**
@@ -153,4 +166,16 @@ export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
  */
 export function assertCloneableMemoryEvent(event: NewMemoryEvent): void {
   structuredClone({ actor: event.actor, meta: event.meta });
+}
+
+/**
+ * イベントを、Postgres が `jsonb` の配列（`JSON.stringify`）で渡したときに届く形にする（ADR 0434）。`sizeBeforeBytes` の
+ * `NaN`・`±Infinity` は `JSON.stringify` で `null` になり、`integer` 列へ `NULL` として入る。`markContestedGroup`・
+ * `resolveContestedGroup`（`insertMemoryEventsBatch`）だけがこの経路で、他の口は `jsonb` を通らず、`NaN` を `22P02` で拒む。
+ */
+export function asJsonSerializedSizeBeforeBytes(event: NewMemoryEvent): NewMemoryEvent {
+  const size = event.sizeBeforeBytes;
+  return typeof size === "number" && !Number.isFinite(size)
+    ? { ...event, sizeBeforeBytes: null }
+    : event;
 }
