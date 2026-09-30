@@ -37,6 +37,8 @@ const SERIAL_TEST_FILES = [
   // ADR 0371 と同じ機械的な規約（この4語に当たるファイルは直列群）に合わせて足した
   // （PR 本文に理由を書く）。
   "src/__tests__/create-index-lock-mode.postgres.test.ts",
+  // ADR 0319 の 2026-09-30 追記。同じく pg_locks を読むので直列群（同じ規約）。
+  "src/__tests__/trigram-index-concurrently-lock-mode.postgres.test.ts",
   "src/__tests__/extension-mode.postgres.test.ts",
   "src/__tests__/migrate-concurrency.test.ts",
   "src/__tests__/vector-space-concurrency.test.ts",

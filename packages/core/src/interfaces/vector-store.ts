@@ -262,14 +262,19 @@ export interface VectorStore {
    * | `NaN`・`Infinity` を含む | 例外（pgvector が拒む） | そのまま保存する |
    * | 成分がすべて `0` | 保存する（ADR 0040。`search` の距離は比較不能） | 同じ |
    *
-   * `Runtime.tick` の embed ジョブは provider の出力を確かめずにここへ渡すので、
-   * provider が壊れたベクトルを返すと、`@mnemora/postgres` ではジョブが失敗して
-   * `embeddingStatus: 'failed'`（`recall()` では `not_indexed`）になり、`InMemoryVectorStore` では
-   * `'ready'` のまま保存される（`recall()` では `score_not_comparable`）。同じ Memory の embed
-   * ジョブが2本走り、壊れたベクトルを返す遅い方が後に終わると、`InMemoryVectorStore` では
-   * 先に書かれた正しいベクトルが上書きされる（`@mnemora/postgres` では遅い方が失敗し、正しい
-   * ベクトルが残る）。**保証するのは、長さが `space.dimensions` と一致し、成分がすべて有限の
-   * ベクトルを渡したときの振る舞いだけである。**
+   * ⚠ **2026-09-30 追記（ADR 0393）: `Runtime.tick` の embed ジョブは、`upsert` へ渡す前に
+   * ベクトルの長さが `embeddingProvider.space.dimensions` と等しいことを確かめる。**違えば
+   * `upsert` を呼ばずにジョブを失敗にし、`embeddingStatus: 'failed'`（`recall()` では
+   * `not_indexed`）にする——provider が第三者の実装でも、store が `@mnemora/postgres` でも
+   * `InMemoryVectorStore` でも同じである。上の表の「長さが違う・空」の行は、**Runtime を通らずに
+   * store を直接呼んだとき**の振る舞いを指す。
+   *
+   * **成分の有限性も同じ形で確かめる。**`NaN`・`Infinity`・`-Infinity` を含むベクトルも、`upsert` を呼ばずに
+   * ジョブを失敗にし、`embeddingStatus: 'failed'` にする（メッセージに位置と値を含む）。`InMemoryVectorStore` でも
+   * `'ready'` にならず、遅く終わるジョブが先に書かれた正しいベクトルを壊れたもので上書きすることも、Runtime を通る限り無い。
+   * 表の「`NaN`・`Infinity` を含む」の行も、**Runtime を通らずに store を直接呼んだとき**の振る舞いを指す。
+   * **保証するのは、長さが `space.dimensions` と一致し、成分がすべて有限のベクトルを渡したときの
+   * 振る舞いだけである**という store 側の約束は変わらない（守るのは Runtime の embed ジョブ）。
    *
    * ⚠ **`memoryId` がほかのテナントの Memory を指していても、テナントの一致は約束として
    * 検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
@@ -297,8 +302,10 @@ export interface VectorStore {
    * ゼロベクトル差し替え、`packages/testkit`/`packages/core` の Fake の長さ不一致検査）は
    * 同じ振る舞いをする（実装の詳細である `NaN` という値そのものは揃えない——ADR 0040
    * 決定1と同じ自由度）。**`query` が有限でない成分（`NaN`・`Infinity`）を含むときも
-   * 同じく「比較不能」であり、`search` は例外を投げない**（埋め込み provider がクエリに
-   * そうした値を返した場合。`PostgresVectorStore` は同じゼロベクトルへの差し替えで満たす）。
+   * 同じく「比較不能」であり、`search` は例外を投げない**（`PostgresVectorStore` は同じゼロベクトルへの
+   * 差し替えで満たす）。⚠ 2026-09-30（ADR 0393）: 埋め込み provider がクエリに有限でない成分を返した場合は、
+   * `Runtime.recall` がここへ渡す前に弾いて `embedding_provider_unavailable` にする。この段落が指すのは
+   * `search`/`searchMany` を直接呼ぶ場合と、長さ違いの `RecallQuery.vector` の直接指定である。
    *
    * **⚠ 距離が完全に一致する行が複数あるときの順序も、adapter の責務である**
    * （Issue #339 / [ADR 0170](../../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)）。

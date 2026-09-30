@@ -299,6 +299,92 @@ await runtime.observe(ctx, {
 
 ⚠ 2026-09-27 追記: 当時の見出しにあった「DB へは未実行」は、その時点の記録である。`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、`npx mnemora-postgres-migrate` の後に、この例の LLM・埋め込みだけを `@mnemora/testkit` の決定的な provider に差し替えて Postgres 17 + pgvector に対して走らせ、observe → tick → recall が通ることを確かめた。例そのまま（OpenAI）は鍵を要るので走らせていない——鍵が無いと `new OpenAIEmbeddingProvider(...)` の時点で OpenAI の SDK が `Missing credentials` で止まる。
 
+## `PostgresRelationStore` を配線する（3件以上の主張の衝突を群にする）
+
+**省略しても mnemora は成立する。**上の最小の例は `PostgresRelationStore` を渡していない。渡すと、
+`runtime.observe()` の主張キーの衝突検出（`claimKey: { enabled: true, detectContested: true }`）で、
+同じ claim key に3件以上の主張が来たとき、`memory_relations` で束ねた `contested` の群を作る
+（[ADR 0381](../../docs/decisions/0381-contested-group-write-path-implementation.md)）。
+渡す先は `createRuntime` の `relationStore` である。
+
+```ts check
+import { createRuntime } from "@mnemora/core";
+import type { EmbeddingProvider, LLMProvider } from "@mnemora/core";
+import {
+  createPostgresClient,
+  PostgresMemoryStore,
+  PostgresVectorStore,
+  PostgresEventStore,
+  PostgresOutboxStore,
+  PostgresTenantSettingsStore,
+  PostgresRelationStore,
+} from "@mnemora/postgres";
+import { createHash } from "node:crypto";
+
+// 上の最小の例と同じ LLM・埋め込みの provider（registerEmbeddingSpace も同じく先に済ませておく）。
+declare const llmProvider: LLMProvider;
+declare const embeddingProvider: EmbeddingProvider;
+
+const client = createPostgresClient(process.env.DATABASE_URL ?? "");
+
+const groupRuntime = createRuntime({
+  memoryStore: new PostgresMemoryStore(client.db),
+  vectorStore: new PostgresVectorStore(client.db),
+  eventStore: new PostgresEventStore(client.db),
+  outboxStore: new PostgresOutboxStore(client.db),
+  tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
+  relationStore: new PostgresRelationStore(client.db), // ← これを足す
+  llmProvider,
+  embeddingProvider,
+  hashContent: (content) => createHash("sha256").update(content).digest("hex"),
+});
+
+// 衝突検出は observe の呼び出しごとの opt-in。配線しただけでは検出は走らない。
+const observed = await groupRuntime.observe(
+  { tenantId: "tenant-1" },
+  {
+    kind: "utterance",
+    text: "今は福岡に住んでいる",
+    speaker: "user",
+    claimKey: { enabled: true, detectContested: true },
+  },
+);
+
+for (const outcome of observed.contestedDetection ?? []) {
+  if (outcome.result.kind === "contested_group") {
+    // 3件以上が status = 'contested' の群になった。
+    console.log(outcome.result.memberIds);
+  } else if (outcome.result.kind === "unresolved_conflict") {
+    // 記録しただけ（下の表）。status は動いていない。
+    console.log(outcome.result.matchMemoryIds);
+  }
+}
+```
+
+**recall 側の効果**: 群のメンバーは単独では返らず、`RuntimeDeps.relationStore` を辿って仲間を同伴して返す
+（上限・`over_limit { stage: "relation" }` は [docs/recall.md](../../docs/recall.md) の段3と ADR 0381 §5）。
+配線しないと、群のメンバーは今までどおり `unit_assembly_dropped` に落ちる。
+
+### 3件目以降が「記録するだけ」で止まる条件
+
+主張キーの衝突検出は `Runtime.observe()` 内の `detectClaimKeyContested`
+（`packages/core/src/runtime.ts`）が行う。一致が2件以上、または1件でもそれが既に `contested` のとき、
+次のどれかなら `status` は動かず、根拠だけを残す。
+
+| 条件 | 現物 | 呼び出し側に見えるもの |
+|---|---|---|
+| `relationStore` を配線していない | `runtime.ts:4326` の `deps.relationStore !== undefined`（群を作る分岐に入る条件） | `contestedDetection[].result` が `{ kind: "unresolved_conflict", matchMemoryIds }`（`runtime.ts:4397-4420`）。`memory_events` に `kind: "updated"`・`meta.reason: "claim_key_conflict_unresolved"` の行が1件積まれる |
+| `memoryStore.markContestedGroup` が無い adapter | 同 4326 の `deps.memoryStore.markContestedGroup !== undefined`（`PostgresMemoryStore` は実装している: `memory-store.ts:2986`） | 同上 |
+| 組み立てた群が3件未満 | `runtime.ts:4363` の `memberIdSet.size >= 3`（コメントは 4316） | 同上 |
+| `markContestedGroup` が `contested_group` 以外（`ineligible` / `conflict`）を返した | `runtime.ts:4376-4378`（`outcome.kind === "contested_group"` のときだけ群として返す。4380） | 同上 |
+
+- `memory_events` の根拠（`note` の JSON）には claim key・新しい Memory・一致した Memory の `status`/`contentHash`/有効期間が入る。
+- `superseded` へは進めない。
+- **`detectContested` を渡さない（または `false`）と、検出そのものが走らない**——上の「記録するだけ」ですらなく、
+  `memory_events` の根拠も積まれず、`ObserveResult.contestedDetection` の欄自体が無い（`undefined`。`runtime.ts:4489`・`5180`）。
+  `claimKey.enabled: true` も要る（無いと Memory に claim key が付かず、検出は `null` を返す。`runtime.ts:4211-4214`）。
+- ちょうど1件の `active` な一致は、配線に関わらず2者間の `contested`（`kind: "contested"`）になる（`runtime.ts:4266`）。
+
 ## adapter として自作する場合
 
 `MemoryStore` 等の自作実装を書くなら、[`@mnemora/testkit`](../testkit/README.md) の
@@ -339,12 +425,13 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `tenant_settings`
 - `tenant_subject_activity`
 
-### 索引（36）
+### 索引（37）
 
 - `idx_labels_by_status`
 - `idx_memories_attributes`
 - `idx_memories_by_subject`
 - `idx_memories_claim_key`
+- `idx_memories_claim_predicates`
 - `idx_memories_contested`
 - `idx_memories_contested_with`
 - `idx_memories_digest_band`
@@ -635,7 +722,7 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 | 用途 | 名前 |
 |---|---|
 | 接続 | `createPostgresClient`・`closePostgresClient`（2回目以降は冪等）・`PostgresClient`・`Db` |
-| store | `PostgresEventStore`・`PostgresOutboxStore`・`PostgresTenantSettingsStore`（上の例で使う）、`PostgresTrigramLexicalStore` とその下ごしらえ（`probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`・任意の索引 `createOptionalTrigramIndex`、`TrigramLexicalStoreUnavailableError`・`TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`、`DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD`・`TRIGRAM_NOISE_STOPWORD_PATTERN`） |
+| store | `PostgresEventStore`・`PostgresOutboxStore`・`PostgresTenantSettingsStore`（上の例で使う）、`PostgresTrigramLexicalStore` とその下ごしらえ（`probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`・任意の索引 `createOptionalTrigramIndex`（並行版は `createOptionalTrigramIndexConcurrently`）、`TrigramLexicalStoreUnavailableError`・`TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`、`DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD`・`TRIGRAM_NOISE_STOPWORD_PATTERN`） |
 | マイグレーション | `runMigrations`（`RunMigrationsOptions`・`RunMigrationsResult`・`ExtensionMode`）、`runAnalyzeMemories`、`listMigrationFiles`・`DEFAULT_MIGRATIONS_DIR`、`matchCreateExtensionLines`・`stripCreateExtensionStatements` |
 | advisory lock | `acquireAdvisoryLock`・`releaseAdvisoryLock`、同じ接続の上で取る `acquireAdvisoryLockOnClient`・`releaseAdvisoryLockOnClient`、`DEFAULT_LOCK_TIMEOUT_MS`、キーの `MIGRATION_LOCK_KEY`・`REGISTER_EMBEDDING_SPACE_LOCK_KEY`・`EXTENSION_LOCK_KEY` と導出の `migrationLockKeyFor`・`registerEmbeddingSpaceLockKeyFor`、待ちの失敗の `*LockTimeoutError`・`*LockUnavailableError` |
 | 埋め込み空間 | `registerEmbeddingSpace`（`RegisterEmbeddingSpaceOptions`・`RegisterEmbeddingSpaceResult`）、名前の導出 `embeddingSpaceTableName`・`embeddingSpaceIndexName`・`embeddingSpaceZeroNormIndexName` |

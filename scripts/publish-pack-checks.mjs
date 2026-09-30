@@ -111,10 +111,10 @@ export const EXACT_PINNED_DEPENDENCY_EXEMPTIONS = {
  * 書き換える(ADR 0070)。git 上の `version` はオーナーの持ち場であり、道具の都合で手で版を
  * 振らない(ADR 0325 決定2 / docs/decisions/README.md の追記参照)。
  *
- * ⚠ **名前と意味がずれている。**もとは「registry へ一度も publish されたことが無い」の意味で
- * 足したが、`@mnemora/bullmq` は 1.1.0 で publish 済みである(2026-09-29、オーナーの手元での
- * 初回。`docs/release-v1.md` §1.7)。git 上の `version` が `0.0.0` のままなので、一覧には
- * 残している。名前を変えるか、`version` を揃えて一覧から消すかは、オーナーの判断を待つ。
+ * ⚠ **いまは空である。**`@mnemora/bullmq` は 1.1.0 で publish 済みになった(2026-09-29、
+ * オーナーの手元での初回。`docs/release-v1.md` §1.7)。2026-09-30、オーナーの指示で git 上の
+ * `version` を他の publish 対象と同じ置き値(`0.1.1`)に揃え、この一覧から消した。
+ * 仕組みは、次に「初回 publish 前の publish 対象」が増えたときのために残している。
  *
  * **ここに載っている間は**:
  * - 単一パッケージの version 検査(`findVersionViolations`)を、そのパッケージにだけ適用しない
@@ -126,7 +126,7 @@ export const EXACT_PINNED_DEPENDENCY_EXEMPTIONS = {
  * ――消した瞬間、他の publish 対象と同じ検査を受けるようになる
  * (`EXACT_PINNED_DEPENDENCY_EXEMPTIONS` と同じ「消せば検査が始まる」設計)。
  */
-export const NEVER_PUBLISHED_TARGETS = new Set(["@mnemora/bullmq"]);
+export const NEVER_PUBLISHED_TARGETS = new Set([]);
 
 /**
  * `main` / `types` / `bin` / `exports` が指すファイルのうち、tarball 内に実在しないものを集める。

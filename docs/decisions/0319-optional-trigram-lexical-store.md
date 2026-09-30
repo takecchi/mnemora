@@ -392,3 +392,42 @@ ANN だけで既に gold が1位だったため、trigram の寄与は「同じ�
 
 `packages/postgres/src/trigram-lexical-store.ts` の `ensureTrigramLexicalFunctions`
 の doc コメント（同じ記述）は、この追記とあわせて直した（本 PR、別コミット）。
+
+---
+
+## 追記（2026-09-30）—— `CONCURRENTLY` 版の索引作成関数 `createOptionalTrigramIndexConcurrently` を足した
+
+⛔ 上の本文と、直前の2026-09-30追記は1バイトも書き換えていない。同じ形で追記する。
+
+クローン miku の委譲先が書いた（オーナーではない）。
+
+`createOptionalTrigramIndex` の doc は「大きな `memories` に対しては、呼び出し側が `CONCURRENTLY` 付きの
+索引を別途自分で組み立てることもできる」と書くだけだった。直前の追記のとおり素の版は `ShareLock` で
+`memories` への書き込みを止めるので、その「別途」を**公開関数として用意した**
+（`trigram-lexical-store.ts` の `createOptionalTrigramIndexConcurrently(db)`）。
+
+- **索引の形は素の版と同じ**（名前 `idx_memories_trigram`・`gin (tenant_id, content gin_trgm_ops)`・
+  `WHERE status IN ('active', 'contested')`）。素の版の SQL は変えていない。
+- **トランザクションの外で呼ぶ前提**（`CONCURRENTLY` はトランザクションブロックの中で実行できない）。
+  migration の経路には載せない（Issue #760 の決定のまま）。
+- **前回の `CONCURRENTLY` が失敗・中断して `pg_index.indisvalid = false` の同名索引が残っていれば、
+  `DROP INDEX CONCURRENTLY` で消してから作り直す。**`IF NOT EXISTS` は名前しか見ないので、
+  残った INVALID を黙って素通りしてしまうため。`memories` と同じスキーマ
+  （`to_regclass('memories')` の `indrelid`）の索引だけを見る。VALID なら何もしない。
+- **歯**: `packages/postgres/src/__tests__/trigram-index-concurrently-lock-mode.postgres.test.ts`
+  （`pg_locks` を自分の DB に絞って読むので `SERIAL_TEST_FILES` に加えた）。素の版は `ShareLock` で
+  並行する `INSERT` が止まる／`CONCURRENTLY` 版は `ShareUpdateExclusiveLock` で `INSERT` が通る／
+  どちらで作っても `pg_get_indexdef` が同じ／INVALID（`statement_timeout` で `CONCURRENTLY` をキャンセルして
+  実際に作る）を作り直すと `indisvalid = true` かつ定義が同じ、を固定する。
+- **変異で赤を見た**（commit していない）: (a) `CONCURRENTLY` を外すと lock-mode の歯
+  （「CONCURRENTLY 版は ShareUpdateExclusiveLock を取り…」）が赤になる。
+  (b) INVALID の検出（`AND NOT i.indisvalid`）を外すと、作り直しの歯が赤になる
+  （作り直した後の `indisvalid` が `false` のまま）。どちらも戻して緑を再確認した。
+- **公開 API**: `scripts/__snapshots__/public-api/postgres.d.ts` に1行の追加のみ。既存の型は変わらない。
+
+**確かめていないこと**:
+
+- **複数の呼び出し元が同時に呼んだときの競合（片方が `DROP` している間に他方が `CREATE` する等）は
+  防いでいない。**advisory lock などで直列化していない。
+- 大きな `memories` での所要時間や、`CONCURRENTLY` の索引作成が長い書き込みトランザクションに
+  待たされる時間は測っていない（歯は「待ちの最中でも `INSERT` が通る」ことだけを見ている）。

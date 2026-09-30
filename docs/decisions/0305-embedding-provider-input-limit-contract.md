@@ -475,3 +475,12 @@ it が赤になった（検査の一部は別の検査が代わりに例外を�
 
 **反映先**: `packages/openai/src/embedding-provider.ts`、`packages/core/src/interfaces/embedding-provider.ts`、
 `docs/architecture.md` §5.5、`packages/openai/README.md`、`packages/testkit/src/embedding-provider-conformance.ts`。
+
+---
+
+## ⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、[ADR 0393](./0393-core-checks-embedding-dimension.md)）: core も次元を守る
+
+**上の本文と、これまでの追記は書き換えていない。**2026-09-27 の追記（Issue #1070）は「`packages/core` は embed ジョブで
+中身を確かめない」と書いたが、**長さについてはこの日に覆った**。`Runtime.tick` の embed ジョブは `VectorStore.upsert` の前に、
+`recall()` は provider が返した問い合わせベクトルを使う前に、長さを `space.dimensions` と突き合わせる。provider が
+`@mnemora/openai`・`@mnemora/local-embedding`・第三者のどれでも同じである。確かめるのは長さと成分の有限性である（有限性は同日に足した）。
