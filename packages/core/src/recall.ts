@@ -1772,7 +1772,10 @@ export interface RecallQuery {
    *
    * ⚠ **2026-09-30 追記（ADR 0393）: 長さの検査を受けるのは、`text` から provider が作った
    * 問い合わせベクトルだけである。**この `vector` を呼び出し側が直接渡したときは core は長さを
-   * 確かめず（有限性も同じ）、上の「比較不能」の扱い（`score_not_comparable`）のままである。provider が返した
+   * 確かめず、上の「比較不能」の扱い（`score_not_comparable`）のままである。⚠ **2026-09-30 訂正: 有限性は
+   * 長さと同じ扱いではない。**`NaN`・`Infinity`・`-Infinity` を成分に含む `vector` は、`runRecall` の入口の
+   * {@link RecallQuerySchema}（`z.array(z.number())`。zod の `z.number()` は有限でない数を拒む）で
+   * `ZodError` になり、`score_not_comparable` には数えられない（ADR 0393 決定4-5 の記述と同じ）。provider が返した
    * 問い合わせベクトルの長さが違うときは `embedding_provider_unavailable` になる（`RecallQuery.text`
    * の経路）。
    */
