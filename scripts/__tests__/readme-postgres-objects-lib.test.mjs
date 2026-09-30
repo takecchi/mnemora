@@ -177,7 +177,9 @@ describe("deriveMigrationObjects", () => {
     // ADR 0329 の 2026-09-30 追記: migrations/0029_memories_claim_predicates_index.sql が
     // `idx_memories_claim_predicates`（索引+1）を足した。36→37 も同様に反映であり、回帰ではない。
     expect(result.tables).toHaveLength(12);
-    expect(result.indexes).toHaveLength(37);
+    // ADR 0400: migrations/0031_memory_labels_label_id_index.sql が `idx_memory_labels_label_id`
+    // （索引+1）を足した。37→38 も同様に反映であり、回帰ではない。
+    expect(result.indexes).toHaveLength(38);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

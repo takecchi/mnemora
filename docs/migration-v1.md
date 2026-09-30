@@ -1846,6 +1846,14 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 書き込みへの上乗せの実測は、`0029` は ADR 0329 の追記、`0030` は ADR 0389 を見ること
 （この PR は測り直していない）。
 
+⚠ **非破壊の追記（`0031` の1本、[ADR 0400](./decisions/0400-general-fk-index-tooth.md)）**:
+新しい migration `0031_memory_labels_label_id_index.sql` が1本増えた（`memory_labels (label_id)`
+の索引の追加のみ。列・型・SQL 文・返り値は変えず、公開 API も変えない）。**この文書の定義では
+破壊的変更に数えない**。上の2つの段落の本数は、それぞれの時点のものである（**書き換えない**）。
+いま数えるなら、`v1.1.0` から上げる場合は `0026`〜`0031` の6本、`v1.0.2` からは `0023`〜`0031` の
+9本が要る。`0031` の索引の構築も素の `CREATE INDEX`（`CONCURRENTLY` を使わない理由は上と同じ）で、
+適用中は **`memory_labels` への書き込みが止まる**（読み取りは通る）。
+
 ### 32. `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性が崩れていると例外を投げるようになった（`@mnemora/openai`）
 
 [Issue #860](https://github.com/takecchi/mnemora/issues/860)、
