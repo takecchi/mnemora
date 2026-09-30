@@ -260,9 +260,12 @@ export class AnthropicLLMProvider implements LLMProvider {
    * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
    * 翻訳できない形は、送る前に {@link AnthropicLLMProviderError}（`kind: "schema_unsupported"`、
    * `cause` に元の例外）で落ちる。**`z.tuple`・`z.date`・`transform` は SDK の `zodOutputFormat`
-   * が投げた例外をこの `kind` に包む——`messages.create` は呼ばれない。`z.record`・`z.lazy`・
-   * `default`・根が union は今までどおり翻訳が通って送る（Anthropic が受けるかは実 API で
-   * 確かめていない）。一覧は README。
+   * が投げた例外をこの `kind` に包む——`messages.create` は呼ばれない。
+   * ⚠ **2026-09-30 追記（ADR 0360 の追記、負債3）: `z.record` を含むスキーマも、深さを問わず（欄・配列の要素・
+   * optional/nullable の内側・union の枝・`z.lazy` の先）同じ `kind` で送る前に落ちる**——以前は翻訳が通り、
+   * 空の object しか許さない形で送って、record の欄が例外無しで黙って空になっていた。`@mnemora/openai` と揃う。
+   * 代わりに `{ key, value }` の配列を使うこと。`z.lazy`・`default`・根が union は今までどおり送る
+   * （Anthropic が受けるかは実 API で確かめていない）。一覧は README。
    *
    * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link AnthropicLLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、

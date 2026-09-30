@@ -41,9 +41,9 @@
  * `kind: "schema_unsupported"` を足した。** `completeStructured` は、送る前の翻訳
  * （`json-schema.ts` の `translateForAnthropicStructuredOutput`、SDK の `zodOutputFormat`）
  * が投げた例外を、この `kind` に包んで `messages.create` を呼ぶ前に投げ直す。**元の例外は
- * `cause`（ES2022 の `Error.cause`）に載る**。`z.tuple`・`z.date`・`transform` がこの経路に
- * 当たる（`z.record` は今までどおり翻訳が通り、送る。README「`completeStructured` に渡せる
- * zod の形」参照）。
+ * `cause`（ES2022 の `Error.cause`）に載る**。`z.tuple`・`z.date`・`transform` と、
+ * **`z.record`（2026-09-30 から。ADR 0360 の追記）**がこの経路に当たる（README「`completeStructured` に
+ * 渡せる zod の形」参照）。
  */
 
 /**
