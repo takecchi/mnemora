@@ -194,6 +194,17 @@ export function buildExtractionPrompt(
       ? (payload as Record<string, unknown>).extractionContext
       : undefined;
   let content = observationPayloadText(observation);
+  // Issue #1370（PR1）: 話者の一文（buildLanguageAndSpeakerInstruction）は「本文の先頭の話者ラベル、または
+  // speaker」と言う。extractionContext が無いと user 入力は本文だけで payload.speaker が見えないので、
+  // **候補あり・extractionContext 無し・speaker ありのときだけ**、本文の前に1行足す。
+  // 候補なし（既定経路）と extractionContext 分岐（下。JSON の observation.speaker に既に出ている）は
+  // 1バイトも変えない（カセット鍵・Issue #704 録音を動かさない）。
+  if (hasCandidates && rawContext === undefined) {
+    const speaker = observationSpeaker(observation);
+    if (speaker !== undefined) {
+      content = `話者（speaker）: ${speaker}\n\n${content}`;
+    }
+  }
   if (rawContext !== undefined) {
     const context = ExtractionContextSchema.parse(rawContext);
     system +=
