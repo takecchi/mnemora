@@ -25,6 +25,7 @@ import type {
   ExtractionOutcome,
 } from "./extraction.js";
 import { assertLLMContentNotBlank } from "./llm-content.js";
+import { resolveCandidateSubjectId, resolveCommonSubjectId } from "./memory-subject.js";
 import { classifyValidity } from "./validity.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
 import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
@@ -42,6 +43,7 @@ import {
 import type {
   ArchiveDecayedOptions,
   MemoryStore,
+  ReinforceOptions,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
 } from "./interfaces/memory-store.js";
@@ -54,6 +56,7 @@ import {
   readDefaultHalfLifeRecalls,
   readHasSubjectActivityCounters,
   readSubjectActivitySeq,
+  readSubjectActivitySeqs,
 } from "./interfaces/tenant-settings-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
 import type { TokenCounter } from "./interfaces/token-counter.js";
@@ -3407,12 +3410,14 @@ export interface Runtime {
    * 3. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `memberIds` の
    *    どの id とも一致しなければ `RangeError`
    *    （`Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds`）。
-   *    `resolveContested`（2者版）と同じ大文字小文字の救済（store に同じ記憶かを聞く）は
-   *    行わない——群は3件以上あり、「どれとも大文字小文字だけ違う」場合に候補を一意に
-   *    絞れないケースが2者よりずっと起きやすいため、単純な完全一致だけで判定する
-   *    （クローン miku の判断——2者版の救済ロジックを N者へそのまま持ち上げると、複数の
-   *    候補が同時にヒットしたときの振る舞いを新しく決めなければならず、ADR 0381 で
-   *    決めた範囲を超える）。
+   *    ただし `winnerId` が memberIds のどれかと大文字小文字だけ違うときは、`resolveContested`
+   *    （2者版）と同じ規則で救済する（Issue #1449 項目6。旧版は「群は候補を一意に絞れない
+   *    ことが多い」として見送っていたが、**一意に絞れたときだけ**救済し、絞れなければ今どおり
+   *    落とす形なら2者版と同じ規則を持ち上げられる）: 小文字にそろえて memberIds から候補を集め、
+   *    **ちょうど1件**かつ `memoryStore.get` が `winnerId` と候補に同じ id の記憶を返したとき
+   *    だけ、その memberId の綴りを勝者として使う（敗者の `supersededById` は memberIds の綴り
+   *    ＝store の列の値になる）。候補が2件以上・`get` が食い違う・どの member とも大文字小文字を
+   *    無視しても違う（この場合は store を読まない）ときは `RangeError`。
    * 4. `deps.memoryStore.resolveContestedGroup` が無ければ
    *    `{ supported: false, outcome: { kind: "not_attempted" } }`。
    * 5. `getMany(memberIds)` で一括読み、{@link ResolveContestedGroupSideOutcome}
@@ -3968,76 +3973,134 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    */
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・3・5・12:
-   * Memory 書き込み側3箇所（抽出・consolidate 手順6・reflect 手順7）が共通して要る、
-   * 活動時計の入力の組み立て。
+   * Memory 書き込み側（抽出・consolidate 手順6・reflect 手順7）が共通して要る、
+   * 活動時計の入力のうち **subject に依らない部分**（`T` と `halfLifeRecalls`）。
    *
    * **`decay_clock === 'wall'` のテナントでは `tenant_activity` を一度も読まない**
-   * ——`{}` を返し、`activitySeq`/`halfLifeRecalls` は `undefined` のまま
-   * `buildNewMemoryFromCandidate` 等へ渡る。これらの関数は両方揃っているときだけ
+   * ——`undefined` を返し、`activityClockInputsFor` は `{}` を返す。`activitySeq`/`halfLifeRecalls` は
+   * `undefined` のまま `buildNewMemoryFromCandidate` 等へ渡る。これらの関数は両方揃っているときだけ
    * 活動時計の3つ組（`decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls`）を作る
    * （`extraction.ts` の doc 参照）ので、`'wall'` のテナントで作られる Memory は
    * 本 ADR の前後で1バイトも変わらない。
    *
    * ⚠ **これは 0163 の話であり、tick が consolidate/reflect を駆動する ADR 0157 とは無関係**
    * ——ここで読むのは `decay_clock`/`activity_seq` だけで、tick のスケジューリングには触れない。
-   */
-  async function resolveActivityClockInputs(
-    ctx: Ctx,
-  ): Promise<{ activitySeq?: number; halfLifeRecalls?: number }> {
-    const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
-    if (decayClock === "wall") {
-      return {};
-    }
-    const [tenantSeq, halfLifeRecalls, subjectSeq] = await Promise.all([
-      readActivitySeq(deps.tenantSettingsStore, ctx),
-      readDefaultHalfLifeRecalls(deps.tenantSettingsStore, ctx),
-      // ADR 0353（Issue #338）: 書き込む Memory の「有効ないま」は T + S_x
-      // （x = ctx.subjectId。無ければ T のみ）——これから作る Memory の
-      // decayBaseSeq/decayFloorSeq は、それが属する subject の視点で計算する。
-      // 🔴 引き受けた負債: この解決は `ctx.subjectId` を「これから作る Memory の
-      // subjectId」の代わりに使う。呼び出し側（`buildNewMemoriesForCandidates`）が
-      // 複数 subject の候補を一括で作る場合、全候補が同じ `ctx.subjectId` 基準の
-      // 値を使うことになる（ADR 0353「確かめていないこと」）。
-      ctx.subjectId !== undefined
-        ? readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId)
-        : Promise.resolve(0),
-    ]);
-    return { activitySeq: tenantSeq + subjectSeq, halfLifeRecalls };
-  }
-
-  /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
-   * `reinforce` の呼び出し側2箇所（使用報告ループ・`restoreArchived`）が共通して要る、
-   * 活動時計の「いま」の解決。
    *
-   * `resolveActivityClockInputs` と同じく `decay_clock === 'wall'` のテナントでは
-   * `tenant_activity` を一度も読まない。`reinforce` は Memory 単位の `halfLifeRecalls` を
-   * 対象の Memory 自身から読む（store 側の実装、`ReinforceOptions.nowSeq` の doc
-   * コメント参照）ので、ここでは `activitySeq` だけを読めば足り、
-   * `resolveActivityClockInputs` が読む `default_half_life_recalls` は不要——
-   * 読まない分だけ `'activity'`/`'either'` のテナントでも `tenant_settings` への
-   * 往復を1回減らせる。
+   * ⭐ [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
+   * （ADR 0353 の負債1の解消）: 「いま」の `S_x` は、ここでは足さない。`x` は**これから作る
+   * Memory 自身の `subjectId`**であって `ctx.subjectId` ではない（`tick` の ctx には通常
+   * `subjectId` が無く、抽出は候補ごとに `subjectId` が違いうる）。各 Memory の `subjectId` が
+   * 決まった後で、`readActivitySeqForSubjects` が distinct な subject の `S_x` をまとめて引き、
+   * `activityClockInputsFor` が Memory ごとに `T + S_x` を組む。
+   *
+   * 🔴 **まだ残っている負債**（ADR 0394「引き受けた負債」）: 書く側の subject の取り違えは直したが、
+   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect・
+   * `sweepArchive` 等）の中の `recall()` が活動時計を進めること、(2) `tick` の自動ジョブに
+   * `activityCounting` を届けないこと、(3) recall 側の前進が `T` か `S_ctx` か。
    */
-  async function resolveReinforceNowSeq(ctx: Ctx): Promise<number | undefined> {
+  async function resolveActivityClockBase(
+    ctx: Ctx,
+  ): Promise<{ tenantSeq: number; halfLifeRecalls: number } | undefined> {
     const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
     if (decayClock === "wall") {
       return undefined;
     }
-    const tenantSeq = await readActivitySeq(deps.tenantSettingsStore, ctx);
-    // ADR 0353（Issue #338）: 強化される Memory の「有効ないま」は T + S_x
-    // （x = ctx.subjectId）。🔴 引き受けた負債: 対象 Memory 自身の subjectId では
-    // なく `ctx.subjectId` を使う（`resolveActivityClockInputs` と同じ負債）——
-    // 使用報告ループが複数 subject の Memory を一括で強化する場合、全件が同じ
-    // `ctx.subjectId` 基準の値を使うことになる。
-    if (ctx.subjectId === undefined) {
-      return tenantSeq;
-    }
-    const subjectSeq = await readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId);
-    return tenantSeq + subjectSeq;
+    const [tenantSeq, halfLifeRecalls] = await Promise.all([
+      readActivitySeq(deps.tenantSettingsStore, ctx),
+      readDefaultHalfLifeRecalls(deps.tenantSettingsStore, ctx),
+    ]);
+    return { tenantSeq, halfLifeRecalls };
   }
 
-  function toReinforceOptions(nowSeq: number | undefined): { nowSeq: number } | undefined {
-    return nowSeq === undefined ? undefined : { nowSeq };
+  /**
+   * ADR 0394: 渡した subject（`null`/`undefined` は主題なし。読まない）のうち distinct なものの
+   * `S_x`（`tenant_subject_activity.activity_seq`）を、まとめて1回で引く。
+   *
+   * `hasSubjectActivityCounters` が `false`（`tenant_subject_activity` に行が1本も無い、または
+   * 未実装）のテナントでは**何も引かない**——`S_x` はどの subject でも `0` で、`T` のみと同じ値になる
+   * （ADR 0353 決めたこと4。段1 SQL 等と同じ規律）。
+   */
+  async function readActivitySeqForSubjects(
+    ctx: Ctx,
+    subjectIds: Iterable<string | null | undefined>,
+  ): Promise<ReadonlyMap<string, number>> {
+    const distinct = [...new Set([...subjectIds].filter((id): id is string => id != null))];
+    if (distinct.length === 0) {
+      return new Map();
+    }
+    if (!(await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx))) {
+      return new Map();
+    }
+    const seqs = await readSubjectActivitySeqs(deps.tenantSettingsStore, ctx, distinct);
+    return new Map(distinct.map((id) => [id, seqs[id] ?? 0]));
+  }
+
+  /**
+   * ADR 0394: 1つの Memory（`subjectId` が決まったもの）の活動時計の入力。`activitySeq` は
+   * `T + S_x`（`x` = その Memory 自身の `subjectId`。主題なし・`subjectSeqs` に無い subject は
+   * `T` のみ）。`base` が `undefined`（`'wall'` のテナント）なら `{}`。
+   */
+  function activityClockInputsFor(
+    base: { tenantSeq: number; halfLifeRecalls: number } | undefined,
+    subjectSeqs: ReadonlyMap<string, number>,
+    subjectId: string | null | undefined,
+  ): { activitySeq?: number; halfLifeRecalls?: number } {
+    if (base === undefined) {
+      return {};
+    }
+    const subjectSeq = subjectId == null ? 0 : (subjectSeqs.get(subjectId) ?? 0);
+    return { activitySeq: base.tenantSeq + subjectSeq, halfLifeRecalls: base.halfLifeRecalls };
+  }
+
+  /**
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
+   * `reinforce` の呼び出し側（使用報告ループ・`restoreArchived`・`restoreSuperseded`）が共通して要る、
+   * 活動時計の「いま」の解決。**`ReinforceOptions` そのものを返す。**
+   *
+   * `resolveActivityClockBase` と同じく `decay_clock === 'wall'` のテナントでは
+   * `tenant_activity` を一度も読まない（`undefined`）。`reinforce` は Memory 単位の `halfLifeRecalls` を
+   * 対象の Memory 自身から読む（store 側の実装、`ReinforceOptions.nowSeq` の doc
+   * コメント参照）ので、ここでは `activitySeq`（`T`）だけを読めば足り、`default_half_life_recalls` は不要。
+   *
+   * ⭐ [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
+   * （ADR 0353 の負債1の解消）: `nowSeq` には **`T` だけ**を入れ、`S_x` は足さない。
+   * `reinforceMany` は同じ `opts` を全件に適用し、使用報告は subject の違う Memory を1回の呼び出しで
+   * 強化しうる——呼び出し側は Memory ごとの subject を知らない（強化の前に読み直さない）ので、
+   * 「Memory 自身の subject の `S_x` を足す」ことを `addOwnSubjectSeq: true` で store に頼む
+   * （store が UPDATE の中で行ごとに解く）。`tenant_subject_activity` に行が無いテナント
+   * （`hasSubjectActivityCounters` が `false`）では `S_x` はどの行でも `0` なので、この項目は付けない
+   * （store は相関サブクエリを足さず、今日と同じ SQL のまま）。
+   *
+   * ⭐ **`addOwnSubjectSeq` を渡すのは、store が `MemoryStore.supportsAddOwnSubjectSeq?()` で `true` を
+   * 宣言しているときだけ**（第三者 adapter の挙動を今より悪くしないため）。宣言の無い store には、
+   * ADR 0394 以前と同じ `T + S_ctx` をフラグなしの `nowSeq` として渡す。
+   *
+   * 🔴 **引き受けた負債**: 宣言の無い store では、強化される Memory の subject が `ctx.subjectId` とずれる呼び出しで、
+   * ADR 0394 以前と同じ取り違え（起点が `ctx` の subject の `S_x` で書かれる）が残る。直すには、その adapter が
+   * `reinforce` に `addOwnSubjectSeq` を実装して宣言すること（`ReinforceOptions.addOwnSubjectSeq`・
+   * `MemoryStore.supportsAddOwnSubjectSeq` の TSDoc、testkit の適合テスト）。
+   */
+  async function resolveReinforceOptions(ctx: Ctx): Promise<ReinforceOptions | undefined> {
+    const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
+    if (decayClock === "wall") {
+      return undefined;
+    }
+    const nowSeq = await readActivitySeq(deps.tenantSettingsStore, ctx);
+    if (!(await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx))) {
+      return { nowSeq };
+    }
+    // store が `addOwnSubjectSeq` を読めると宣言しているときだけ、`T` とフラグを渡す。
+    if (deps.memoryStore.supportsAddOwnSubjectSeq?.() === true) {
+      return { nowSeq, addOwnSubjectSeq: true };
+    }
+    // 宣言の無い store（フラグを知らない第三者 adapter）には、今までどおり `T + S_ctx`
+    // （ctx の subject の `S_x`。ctx に subject が無ければ `T` のみ）をそのまま `nowSeq` として渡す。
+    // 対象の subject が ctx とずれる呼び出しでは食い違う値のままだが、ADR 0394 以前より悪くならない。
+    const ctxSubjectSeq =
+      ctx.subjectId === undefined
+        ? 0
+        : await readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId);
+    return { nowSeq: nowSeq + ctxSubjectSeq };
   }
 
   async function buildNewMemoriesForCandidates(
@@ -4053,7 +4116,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const now = clock.now();
     // ADR 0165 決めたこと3・5・12: 活動時計の3つ組を、書き込み側3箇所のうちの1つとして
     // ここで織り込む。
-    const activityClockInputs = await resolveActivityClockInputs(ctx);
+    // ADR 0394: 「いま」の `S_x` の x は、候補ごとに決まる**その Memory 自身の subjectId**
+    // （候補の `subjectId` → observation の `subjectId`。`ctx.subjectId` ではない）。
+    // distinct な subject の `S_x` をまとめて1回で引き、候補ごとに `T + S_x` を組む。
+    const activityClockBase = await resolveActivityClockBase(ctx);
+    const subjectSeqs =
+      activityClockBase === undefined
+        ? new Map<string, number>()
+        : await readActivitySeqForSubjects(
+            ctx,
+            candidates.map((candidate) => resolveCandidateSubjectId(candidate, observation)),
+          );
     return candidates.map((candidate, index) =>
       buildNewMemoryFromCandidate({
         ctx,
@@ -4067,7 +4140,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         now,
         digestFallbackLength,
         claimKey: claimKeys?.[index] ?? null,
-        ...activityClockInputs,
+        ...activityClockInputsFor(
+          activityClockBase,
+          subjectSeqs,
+          resolveCandidateSubjectId(candidate, observation),
+        ),
       }),
     );
   }
@@ -5024,7 +5101,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const reinforcedAt = clock.now();
     // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
     // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
-    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+    const reinforceOpts = await resolveReinforceOptions(ctx);
     // ⚠ `insertedMemoryIds` の status は確かめない——`MemoryStore.reinforce`/
     // `MemoryStore.reinforceMany` の doc コメント（Issue #840）が、status を絞らない
     // ことの帰結を status ごとに明記している。
@@ -5845,10 +5922,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （分割代入したメソッドは `this` を失うので、呼び出し時に元のオブジェクトを渡す）。
    *
    * ADR 0186: `opts.clock` を省略したら `tenant_settings.decay_clock` に従う
-   * （`resolveActivityClockInputs`/`resolveReinforceNowSeq` と同じ `readDecayClock`/
+   * （`resolveActivityClockBase`/`resolveReinforceOptions` と同じ `readDecayClock`/
    * `readActivitySeq` を使う、同じ規律）。**`opts.clock` を明示で渡した呼び出し元の
    * 挙動は変えない**（`??` で省略時だけ補う）。解決した `clock` が `'wall'` のときは
-   * `tenant_activity` を一度も読まない——`resolveActivityClockInputs` 等と同じ理由で、
+   * `tenant_activity` を一度も読まない——`resolveActivityClockBase` 等と同じ理由で、
    * `decay_clock` を設定していないテナント（既定 `'wall'`）の挙動を1バイトも変えない。
    */
   async function sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult> {
@@ -5914,14 +5991,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // Issue #964: ループ前の読みの失敗も「競合以外の例外」である——まだ1件も書いていない
     // ので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
     let found: Memory[];
-    let reinforceOpts: ReturnType<typeof toReinforceOptions>;
+    let reinforceOpts: ReinforceOptions | undefined;
     try {
       found = await deps.memoryStore.getMany(ctx, ids);
       // ADR 0165 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
-      // が `resolveActivityClockInputs` を候補バッチ1つにつき1回だけ読むのと同じ理由——
+      // が `resolveActivityClockBase` を候補バッチ1つにつき1回だけ読むのと同じ理由——
       // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
       // `tenant_activity` への往復が増える）。
-      reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+      reinforceOpts = await resolveReinforceOptions(ctx);
     } catch (error) {
       return abortAt(0, error);
     }
@@ -6116,7 +6193,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     // ADR 0165 決めたこと16 と同じ理由（`restoreArchived` の実装コメント参照）:
     // この呼び出し全体で1回だけ読む。
-    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+    const reinforceOpts = await resolveReinforceOptions(ctx);
 
     // 群の強化を1回に束ねる（`MemoryStore.reinforceMany?` が在るとき）。群の復帰そのものは
     // SQL 1本なのに、以前は強化を1件ずつ呼んでいたため、群が1件増えるごとに往復が増えていた
@@ -7032,12 +7109,34 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     let winnerId: MemoryId | undefined;
     if (resolution.kind === "supersede") {
-      if (!memberIds.includes(resolution.winnerId)) {
-        throw new RangeError(
-          "Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds",
-        );
+      if (memberIds.includes(resolution.winnerId)) {
+        winnerId = resolution.winnerId;
+      } else {
+        // `winnerId` が memberIds のどれかと大文字小文字だけ違うときは、同じ記憶かを store に聞く
+        // （`resolveContested`〔2者版〕と同じ規則、Issue #1449 項目6。`@mnemora/postgres` は uuid を
+        // 大文字小文字を区別せずに比べる）。小文字にそろえて memberIds から候補を集め、ちょうど1件で、
+        // かつ store の `get` が両者に同じ id の記憶を返したときだけ、その memberId の綴りを勝者として
+        // 使う（敗者の `supersededById`・イベントの meta が、memberIds＝store の列の値の綴りになる）。
+        // 候補が2件以上（memberIds に同じ記憶の別の綴りが混じる）・`get` が食い違う・どの member とも
+        // 大文字小文字を無視しても違う、は今どおり `RangeError`（最後の場合は store を読まない）。
+        const lower = resolution.winnerId.toLowerCase();
+        const candidates = memberIds.filter((id) => id.toLowerCase() === lower);
+        const candidate = candidates.length === 1 ? candidates[0]! : undefined;
+        if (candidate !== undefined) {
+          const [winner, side] = await Promise.all([
+            deps.memoryStore.get(ctx, resolution.winnerId),
+            deps.memoryStore.get(ctx, candidate),
+          ]);
+          if (winner !== null && side !== null && winner.id === side.id) {
+            winnerId = candidate;
+          }
+        }
+        if (winnerId === undefined) {
+          throw new RangeError(
+            "Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds",
+          );
+        }
       }
-      winnerId = resolution.winnerId;
     }
 
     // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`resolveContested` と
@@ -7484,7 +7583,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
     // ADR 0165 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（consolidate 手順6）。
-    const activityClockInputs = await resolveActivityClockInputs(ctx);
+    // ADR 0394: 統合先の subject（eligible 全件が一致すればその値、割れれば null）の `T + S_x`。
+    const activityClockBase = await resolveActivityClockBase(ctx);
+    const consolidatedSubjectId = resolveCommonSubjectId(eligibleMemories);
+    const activityClockInputs = activityClockInputsFor(
+      activityClockBase,
+      activityClockBase === undefined
+        ? new Map()
+        : await readActivitySeqForSubjects(ctx, [consolidatedSubjectId]),
+      consolidatedSubjectId,
+    );
     const newMemory = buildConsolidatedMemory({
       ctx,
       eligible: eligibleMemories,
@@ -7980,7 +8088,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
     // ADR 0165 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（reflect 手順7）。
-    const activityClockInputs = await resolveActivityClockInputs(ctx);
+    // ADR 0394: 反映先の subject（eligible 全件が一致すればその値、割れれば null）の `T + S_x`。
+    const activityClockBase = await resolveActivityClockBase(ctx);
+    const reflectedSubjectId = resolveCommonSubjectId(eligibleMemories);
+    const activityClockInputs = activityClockInputsFor(
+      activityClockBase,
+      activityClockBase === undefined
+        ? new Map()
+        : await readActivitySeqForSubjects(ctx, [reflectedSubjectId]),
+      reflectedSubjectId,
+    );
     const newMemory = buildReflectedMemory({
       ctx,
       eligible: eligibleMemories,

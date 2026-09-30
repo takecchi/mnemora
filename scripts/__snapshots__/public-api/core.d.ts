@@ -698,6 +698,7 @@ export interface MemoryStore {
     }>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+    supportsAddOwnSubjectSeq?(): boolean;
     reinforceMany?(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
     recordUsage(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[]): Promise<{
         insertedMemoryIds: MemoryId[];
@@ -865,6 +866,7 @@ export interface LabelSummary {
 }
 export interface ReinforceOptions {
     nowSeq?: number;
+    addOwnSubjectSeq?: boolean;
 }
 export interface ArchiveDecayedOptions {
     now: Date;
@@ -2383,6 +2385,7 @@ export interface RecallQuery {
     attributes?: Attributes;
     labels?: string[];
     taxonomyGroups?: boolean;
+    relationMaxCount?: number;
     occurredAfter?: Date;
     occurredBefore?: Date;
     limit?: number;
@@ -2475,6 +2478,7 @@ export declare const RecallQuerySchema: z.ZodObject<{
     }>>;
     labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
     taxonomyGroups: z.ZodOptional<z.ZodBoolean>;
+    relationMaxCount: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;

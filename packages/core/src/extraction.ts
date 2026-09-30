@@ -3,6 +3,7 @@ import { isAbort, runAbortable } from "./abort.js";
 import type { ClaimKey } from "./claim-key.js";
 import type { Ctx } from "./ctx.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./strategies/decay.js";
+import { resolveCandidateSubjectId } from "./memory-subject.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
 import type { DigestSource, NewMemory } from "./memory.js";
 import { observationPayloadText } from "./observation-text.js";
@@ -640,10 +641,8 @@ export function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMe
     // Issue #608 項目①: 候補の subjectId を優先する。`undefined`（省略・未指定）のときだけ
     // 従来どおり observation の値へ落ちる。`null`（明示的な「主題なし」）は observation の値が
     // あってもそのまま通す——上書きしてしまうと「主題なしを明示した」候補が書けなくなる。
-    subjectId:
-      params.candidate.subjectId !== undefined
-        ? params.candidate.subjectId
-        : (params.observation.subjectId ?? null),
+    // 規則は `memory-subject.ts`（runtime.ts が活動時計の「いま」を解くときも同じ関数を使う。ADR 0394）。
+    subjectId: resolveCandidateSubjectId(params.candidate, params.observation),
     sourceObservationId: params.observation.id,
     extractorVersion: params.extractorVersion,
     content: params.candidate.content,

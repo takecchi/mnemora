@@ -402,4 +402,63 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
 
     expect(shown).toEqual([owner.id, c2.id, c1.id, a.id]);
   });
+
+  // Issue #1449 項目7: 菱形（O が起点、O-B・O-C・B-D・C-D）。D へは B からも C からも同じ段で届く。
+  // `listRelated` は ORDER BY を持たない（契約も順を規定しない）ので、関係を張る順を入れ替えた
+  // 2通りで作り、どちらでも D の companionOf が id の小さい親になることを縛る。
+  it.each([
+    ["O-B, O-C, B-D, C-D の順に張る", false],
+    ["O-C, O-B, C-D, B-D の順に張る（逆）", true],
+  ] as const)(
+    "菱形（%s）でも D の companionOf は B と C のうち id の小さいほう",
+    async (_name, reversed) => {
+      const { runtime, memoryStore, vectorStore, relationStore } = await buildTestRuntime({
+        withRelationStore: true,
+      });
+      const ctx: Ctx = { tenantId: TENANT };
+      const make = () =>
+        memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: TENANT,
+            embeddingStatus: "pending",
+          }),
+        );
+      const o = await make();
+      await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, o.id, [1, 0, 0]);
+      // 段3の frontier は `getMany` の返す順（ORDER BY なし＝ヒープ順＝作った順）に並ぶ。
+      // 「作った順で先の B」が id の大きいほうになる組を選ぶ（順に頼った実装なら B が親になって赤）。
+      const b = await make();
+      let c = await make();
+      while (!(b.id > c.id)) c = await make();
+      const d = await make();
+      // 3件以上の contested は markContestedGroup でしか作れない（createMemory は拒む）。
+      // 4件の完全な群を作ってから、全辺を外して菱形だけを張る順を選んで張り直す。
+      await runtime.markContestedGroup!(ctx, [o.id, b.id, c.id, d.id]);
+      const all = [o.id, b.id, c.id, d.id];
+      for (const x of all) {
+        for (const y of all) {
+          if (x !== y) await relationStore.unlink(ctx, "contradicts", x, y);
+        }
+      }
+      const link2 = async (x: string, y: string) => {
+        await relationStore.link(ctx, "contradicts", x, y);
+        await relationStore.link(ctx, "contradicts", y, x);
+      };
+      const [first, second] = reversed ? [c, b] : [b, c];
+      await link2(o.id, first.id);
+      await link2(o.id, second.id);
+      await link2(first.id, d.id);
+      await link2(second.id, d.id);
+
+      const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
+
+      const smaller = b.id < c.id ? b.id : c.id;
+      const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
+      expect(byId.get(d.id)?.retrievedVia).toBe("mandatory_companion");
+      expect(byId.get(d.id)?.companionOf).toBe(smaller);
+      expect(byId.get(b.id)?.companionOf).toBe(o.id);
+      expect(byId.get(c.id)?.companionOf).toBe(o.id);
+    },
+  );
 });

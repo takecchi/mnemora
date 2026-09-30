@@ -1281,6 +1281,11 @@ export class FakeMemoryStore implements MemoryStore {
    * ——狭義の `<`（同じ `at` は no-op）で `lastReinforcedAt`/`decayFloorAt` を
    * 同じ条件でまとめて動かす。古い `at` は例外にせず、no-op のまま現在の行を返す。
    */
+  /** ADR 0394: `ReinforceOptions.addOwnSubjectSeq` を読める（`reinforce` の実装を参照）。 */
+  supportsAddOwnSubjectSeq(): boolean {
+    return true;
+  }
+
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -1317,9 +1322,15 @@ export class FakeMemoryStore implements MemoryStore {
     // ことで、Issue #730 の「同じ at の2回目は活動時計側も動かさない」を1バイトも
     // 変えずに保つ。
     if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
-      memory.decayBaseSeq = opts.nowSeq;
+      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す。
+      const baseSeq =
+        opts.addOwnSubjectSeq === true && memory.subjectId != null
+          ? opts.nowSeq +
+            (this.backing.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+          : opts.nowSeq;
+      memory.decayBaseSeq = baseSeq;
       memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
-        baseSeq: opts.nowSeq,
+        baseSeq,
         strength: memory.strength,
         halfLifeRecalls: memory.halfLifeRecalls,
       });

@@ -700,3 +700,64 @@ Issue #207 の受け入れ条件「1〜3 が ADR で決まっている」「探�
 測っていない点は [Issue #1449](https://github.com/takecchi/mnemora/issues/1449) に
 まとめて切り出した。Issue #207 自体は、この PR のマージ後にクローン miku が別途閉じる
 （この PR ではクローズしない）。
+---
+
+## 追記（2026-09-30、Issue #1449 項目7・項目6、負債3・負債1の解消）
+
+本文（§6・§7）は書き換えていない。§7 負債1・負債3 は、この追記のとおり解消した。
+
+### 負債3（`companionOf` の曖昧さ）: 親を id の昇順に処理して決定的にした【判】
+
+recall 段3の BFS は、`RelationStore.listRelated` の返す順（契約が規定しない。Postgres は
+`ORDER BY` なし、InMemory は挿入順）と、`getMany` の返す順（同じく規定しない）に、
+「最初に見つけた親」が依存していた。**どちらも id の昇順に並べ直してから処理する**
+（`related` を `memoryId` の昇順、次の段の親 `frontier` も id の昇順）。同じ段で複数の親から
+届く companion の `companionOf` は「id の小さい親」になる。比較は `compareByValidFromDescThenId`
+の id の比較と同じ文字列比較。id の綴り: Postgres の uuid 列と `getMany` は小文字で返し、
+`RelationStore.listRelated` も列の値を返す——綴りの揺れで順が変わらないことを確かめて決めた。
+
+- **`related` だけでなく `frontier` も並べる理由**: 同じ子へ届く親どうしの処理順を決めるのは
+  `frontier` の並び（`getMany` の順）であり、`related` の並びだけでは足りない。本物の Postgres で
+  `related` だけを並べても赤のままだった（`getMany` はヒープ順）ことを歯の設計で確かめた。
+- 採らなかった案: 「発見元を後から小さい id で上書きする」。段をまたぐ上書きの規則を新しく
+  決める必要があり、処理順を固定するほうが探索の打ち切り（安全弁）まで決定的になる。
+- 歯: 菱形（O が起点、O-B・O-C・B-D・C-D）を、関係を張る順を入れ替えた2通りで作り、D の
+  `companionOf` が同じになることを、core（Fake）と Postgres で固定した。
+- ⚠ 決まるのは「同じ段で届く親の中で id が小さいもの」である。**最短の段で届く親**を採る点は
+  BFS のまま変わらない（段が違う親どうしでは、浅いほうが親になる）。
+
+### 負債1（`winnerId` の大文字小文字救済）: 2者版と同じ規則を群にも足した【判】
+
+見送った理由は「複数候補が同時にヒットしたときの振る舞いを新しく決める必要がある」だった。
+**「一意に絞れたときだけ救済し、絞れなければ今どおり落とす」と決めれば、新しく決めることは
+無い**——2者版がすでに同じ形（`resolveContested`）で持っている規則をそのまま持ち上げた:
+
+1. `winnerId` が `memberIds` のどれかと完全一致すれば、今どおり。
+2. 一致しなければ、小文字にそろえて `memberIds` から候補を集める。**ちょうど1件**で、かつ
+   `memoryStore.get` が `winnerId` と候補に**同じ id の記憶**を返したときだけ、その `memberIds`
+   の綴りを勝者として使う。
+3. 候補が0件（store は読まない）・2件以上・`get` が食い違う場合は、今どおり `RangeError`。
+
+**正規化を Runtime に置いた理由（CAS の綴りの実測）**: `PostgresMemoryStore.resolveContestedGroup`
+は `members` の id と `supersededById` を `normalizeUuidCase` で小文字にしてから CAS・UPDATE
+するので、store には大文字の綴りを渡しても通る。ただしその前の Runtime が
+`memberIds.includes(winnerId)` の完全一致で先に落としていた。`InMemoryMemoryStore`（testkit）と
+Fake は綴りをそのまま比べる（大文字は not found）。⟹ store の CAS は直さず、Runtime が
+「`winnerId` を `memberIds` の綴りに寄せる」だけにした。敗者の `supersededById` は、渡した `memberIds` の綴り
+（＝ store の列の値の綴り）になる（群の解消のイベントの `meta` は `supersededById` を持たない）。
+
+- 歯: (1) 3件の群で大文字の `winnerId` が通り、敗者の `supersededById` が列の値になる
+  (2) `get` が別の記憶を返せば `RangeError` (3) どの member とも違う `winnerId` は store を読まずに
+  `RangeError` (4) 候補が2件以上なら救済しない。Postgres の本物の歯は
+  `uppercase-uuid-contested-runtime.postgres.test.ts`、core は `resolve-contested-group.test.ts`。
+- 覆るとしたら: 大文字小文字を区別しない store が、`get` は同じ記憶と言うのに CAS では一致しない
+  形で `id` を返すようになったとき（`get` の id と `memberIds` の綴りの一致を確かめているので、
+  その場合は救済せず `RangeError` に倒れる）。
+
+---
+
+## 追記（2026-09-30）: §5.3・§6・§7 負債4 の「専用のクエリ欄は作らない」は、[ADR 0396](./0396-recall-relation-max-count.md) で覆った
+
+段3の群ごとの上限を呼び出し側から変えられるように、任意の欄 `RecallQuery.relationMaxCount?`（正の整数 1〜1000、省略時は従来の10）を足した。
+探索の安全弁（§5.4・§5.5、負債5）はこの欄の10倍に連動する（省略時は従来の100件）。上の本文は当時の記録として書き換えない。
+理由・測定・非破壊の根拠は ADR 0396。
