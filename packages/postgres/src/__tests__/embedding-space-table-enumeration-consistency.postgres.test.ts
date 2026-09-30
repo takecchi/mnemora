@@ -112,6 +112,11 @@ describe("listEmbeddingSpaceTables（TS）と migration 0027 の列挙（SQL）�
 
   it("両方とも、同じ空間について1バイトも違わない索引名を導く", async () => {
     const { pool } = await getTestClient();
+    // 前の it に頼らず、自分で空間を登録する（`--sequence.shuffle` で it の順が入れ替わると、
+    // この it が先に走り、SPACE_A/SPACE_B のテーブルがまだ無くて 0 件で落ちた。Issue #1276 / ADR 0397）。
+    // `registerEmbeddingSpace` は冪等（前の it が先に走っても同じ）。
+    await registerEmbeddingSpace(pool, SPACE_A);
+    await registerEmbeddingSpace(pool, SPACE_B);
     for (const space of [SPACE_A, SPACE_B]) {
       const table = embeddingSpaceTableName(space);
       const tsIndexName = embeddingSpaceMemoryIdIndexName(space);
