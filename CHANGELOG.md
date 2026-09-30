@@ -127,10 +127,21 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `scopeAggregate: "skip"` で ANN の段が走り、adapter が `countKind: 'unknown'` を返したときは、ANN の stage detail に `annReachability: "unknown"`（到達を判定できない）が付く。`ann_unreached` が鳴らないこと自体は変わらない——**キーが付いているときの「無い」は「拾いきった」ではない**（[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 「決めたこと」7 の手当て）。
   - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。`filteredDecayed` に除外行が混ざって下限が小さくなる側へずれるのは、偽陽性を出さない側として許容した（ADR 0390 決定6）。
 
+- **抽出（`subjectCandidates` を渡し、`extractionContext` を渡さず、観測に `payload.speaker` がある呼び出しに限る）で、LLM への user 入力の本文の前に `話者（speaker）: <値>` と空行が足される**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370) PR1、[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md) 末尾の 2026-09-30 追記）——[PR #1374](https://github.com/takecchi/mnemora/pull/1374) が候補経路の system に足した話者の一文は「本文の先頭の話者ラベル、または speaker」と言うが、この経路の入力には `speaker` が出ていなかった。一文を本当にするための変更。
+  - **変えていない経路**: `subjectCandidates` 省略・空配列の呼び出し（既定経路）と、`extractionContext` を渡す呼び出し（候補の有無を問わない。JSON の `observation.speaker` に既に出ている）は、system・user とも1バイトも変わらない。録音（カセット、Issue #704）の鍵は動かない。
+  - **`RuntimeConfig.promptVersion` を上げることを勧める**（[#1374](https://github.com/takecchi/mnemora/pull/1374) と同じ扱い。この経路の LLM への入力が変わるため、抽出結果が変わりうる）。上の経路に当たらない利用者は上げなくてよい。
+  - 実 API での効果は未測定。
+
 - **`@mnemora/postgres` の `aggregateScope` が、目次帯（`digestBand`）を組むときの内部の索引の使い方だけを変えた**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案A）——`ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` を支える部分索引 `idx_memories_digest_band`（新しい migration `0028_digest_band_index.sql`）を足した。**SQL 文・返り値の中身/順序/件数は1バイトも変えていない**——索引を追加しただけである。
   - 【実測】`main`（案A の前）とこの枝を、同じデータ・同じ器で12往復、1点ごとに別プロセスで交互に測った（`max_parallel_workers_per_gather=0`・同時1・digestBand込み）。往復ごとの差（後 − 前）の中央値: 100万行 warm の p50 は −284.0ms（IQR −308.0〜−250.3ms、最小〜最大 −353.3〜−221.8ms、12往復すべて負。p50 の絶対値は前 930.4ms・後 627.7ms）。10万行は cold（Postgres 再起動直後の1回目）で −31.4ms（IQR −36.0〜−25.1ms）、warm-after の p50 で −27.5ms（IQR −29.6〜−23.1ms）。器は共有で、絶対値は測る時刻の負荷で動く。EXPLAIN では `digestBand` 側の `Seq Scan` + top-N `Sort`（349.5ms）が `Index Scan`（0.104ms）に置き換わった。テナント全体を `GROUP BY subject_id` で束ねる本体（支配項）は変わっていない。cold は OS のページキャッシュが残る近似で、真の cold は測っていない（詳細は ADR 0384「測ったこと」）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る。`ACCESS EXCLUSIVE` ではない）。100万行で構築を含む migration が約1.2秒（1回だけの測定）。
   ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
+
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
+  - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
+  - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
 
 ---
 

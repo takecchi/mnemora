@@ -2335,9 +2335,12 @@ export class PostgresMemoryStore implements MemoryStore {
    *    が種の digest を `text` にして撃った recall の分）はここでは触らない
    *    ——`memoryId` で特定できないため（ADR 0375 決定4、Issue #994 のコメント）。
    *
-   * ⚠ **この `recalls` の UPDATE はテナント全体の `index_band` を舐める**
-   * （`? 'digestBand'` と `@>` の containment で絞ってはいるが、絞り込みに使える索引が
-   * 無いため実質フルスキャン）。実測した費用は ADR 0375 決定6 を見ること。
+   * この `recalls` の UPDATE の `@>` は、`migrations/0030_recalls_digest_band_index.sql` の
+   * 式 GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）で
+   * 引ける（ADR 0389）。**索引の式と `WHERE` の式が一致していることに依存する**——この
+   * 述語を書き換えるときは、`recalls-digest-band-index.postgres.test.ts` が縛る。
+   * 索引が無かった時代の費用（テナント全体の実質フルスキャン）は ADR 0375 決定6、
+   * 索引の前後の実測は ADR 0389 を見ること。
    */
   async purgeMemory(
     ctx: Ctx,
