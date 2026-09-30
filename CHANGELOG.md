@@ -103,6 +103,33 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
      [docs/migration-v1.md](./docs/migration-v1.md) の項目31 を見ること。
   3. `eraseTenant` を使わないなら、ほかに直すことは無い。
 
+- **`@mnemora/openai` の `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性を検査し、崩れていれば例外を投げるようになった——以前は素通りしていた食い違った応答が、新しく例外になる**
+  （[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+  [ADR 0305](./docs/decisions/0305-embedding-provider-input-limit-contract.md) の 2026-09-30 追記）。
+
+  以前は `response.data` を `index` で並べ替えて返すだけで、応答が `texts` と食い違っていても検査しなかった
+  （2026-09-26 に「検査しない・結果は未定義」と文書化した）。本物の SDK に偽の `fetch` を渡して確かめると、件数の過不足・
+  次元違い・`index` の重複/欠落/範囲外・空の `data` のどれも、例外なしに素通りした。今回、次の4つを確かめ、
+  崩れていれば素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まり、期待値・実際の値・何番目かを含む。
+  入力テキストの本文と API キーは含まない。専用のエラー型・`kind` は無い）を投げる。
+
+  1. `response.data` の件数が `texts.length` と等しい。
+  2. `index` が 0..n-1 をちょうど1回ずつ。
+  3. 各ベクトルの長さが `space.dimensions` と等しい。
+  4. 成分がすべて有限（`NaN`/`Infinity` が無い）。
+
+  - **公開 API の型・シグネチャは変わらない**（`embed` の戻り値の型も同じ）。変わるのは、食い違った応答に対する振る舞い
+    （返す → 投げる）だけである。
+  - **誰が影響を受けるか**: OpenAI が `texts` と食い違う応答（件数違い・次元違い・`NaN`/`Infinity`・`index` の異常）を
+    返したとき、以前は黙って通っていたものが `embed()` の例外になる。`Runtime.tick` の embed ジョブでは、その例外は
+    ジョブの失敗（`embeddingStatus: 'failed'`）として扱われる。**正常な応答（件数一致・宣言どおりの次元・有限）を
+    返す限り、何も変わらない。** `client` に自前の偽物を注入していて、件数や次元が宣言と合わないベクトルを返して
+    いるテストがあれば、新しく落ちる。
+  - **変えなかったこと**: `response.data` キー自体が無い応答は従来どおり生の `TypeError`。入力の上限超過は今もサーバの
+    拒否に依存している。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目32。DB マイグレーションは無い。
+  - 【確かめていないこと】実 API がこれらの食い違いを実際に返すか（実 API は使っていない）。
+
 ### Added
 
 - **`@mnemora/testkit` の `describeMemoryStoreConformance` に、`reinforce`/`reinforceMany?` が `memory_events` を1行も書かないことを検査する `it` を足した**（[Issue #871](https://github.com/takecchi/mnemora/issues/871)、[PR #1452](https://github.com/takecchi/mnemora/pull/1452)。`docs/memory-model.md` §11 行4 が約束していた振る舞いに、対応する歯が無かった。クローン miku の委譲先の判断であり、オーナーの判断ではない）——自前の `MemoryStore` 実装を conformance suite に当てている外部 adapter 実装者にも、この約束が効くようになる。

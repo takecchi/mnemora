@@ -1037,7 +1037,15 @@ interface EmbeddingProvider {
   [#116](https://github.com/takecchi/mnemora/issues/116)）。
   実装が増えても、契約を機械的に検査する歯は今のところ無い。
 
-⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）**:
+⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、ADR 0305 の同日付追記）**:
+下の 2026-09-26 の追記のうち「`OpenAIEmbeddingProvider.embed` は検査を持たず、食い違ったときの結果は未定義」は
+もう成り立たない。`OpenAIEmbeddingProvider.embed` も、応答の件数・`index`（0..n-1 をちょうど1回ずつ）・
+次元（`space.dimensions`）・成分の有限性を確かめ、崩れていれば素の `Error`（`OpenAIEmbeddingProvider:` で
+始まる）を投げる。新しく例外になる場合が増える変更で、CHANGELOG `[1.2.0]` に破壊的変更として書いてある。
+入力の上限超過は今もサーバの拒否に依存している（別の話）。
+
+⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)。`packages/openai` についての
+部分は上の 2026-09-30 の追記で古くなった。当時の記述として残す）**:
 `embed` は入力と同じ件数・同じ順序でベクトルを返すことが契約だが、守り方は実装ごとに
 違う。`packages/local-embedding` は件数・次元の食い違いを実行時に検査して例外を投げる
 （ADR 0085 決定5）。`packages/openai` の `OpenAIEmbeddingProvider.embed` はこの検査を
