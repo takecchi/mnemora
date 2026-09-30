@@ -419,8 +419,10 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0399](./0399-purge-embedding-cleanup-outcome-field.md) | `Runtime.purge` の埋め込み削除の失敗を、outcome の任意欄 `embeddingCleanup` で知らせる | 採用 (2026-09) |
 | [0400](./0400-general-fk-index-tooth.md) | 外部キーの索引は、固定表ではなく `pg_constraint` から数え上げる歯で縛る——`memory_labels.label_id` の漏れを足す | 採用 (2026-09) |
 | [0401](./0401-mark-resolve-contested-group-constant-statements.md) | `markContestedGroup` / `resolveContestedGroup` の関係の行の INSERT を実表の N² 結合にせず、メンバーごとの UPDATE / events INSERT を定数個の文にまとめる | 採用 (2026-09) |
+| [0402](./0402-relation-store-list-related-many.md) | `RelationStore.listRelatedMany?` を足し、幅優先探索の1段（frontier）を1往復で読む | 採用 (2026-09) |
 | [0404](./0404-purge-expired-recalls-and-completed-outbox-jobs.md) | 古い `recalls` と完了済みの `outbox` 行を消す口 `purgeExpiredRecalls?` / `purgeCompletedJobs?` を足す | 採用 (2026-09) |
 | [0405](./0405-roundtrip-count-confirms-stats-before-measuring.md) | `recall-roundtrip-count` は、往復を数える前に `StatsPresenceGate` を確認済みにする | 採用 (2026-09) |
 | [0406](./0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) | `reextract` は、LLM を待つ間に元の記憶が forget されたら、何も書かずに打ち切る | 採用 (2026-09) |
+| [0407](./0407-sync-observe-extract-job-lease.md) | `extract: "sync"` の observe は、積んだ extract ジョブを claim 済みの状態で作る（`createObservationWithOutbox` の `opts.claimedBy?`） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

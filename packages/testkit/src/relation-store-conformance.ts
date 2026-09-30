@@ -18,6 +18,12 @@ export interface RelationStoreConformanceOptions {
    * `createStore()` が返した store から見て実在する記憶で、かつ渡した `ctx` のテナントの記憶であること。
    */
   prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
+  /**
+   * この adapter が任意メソッド `listRelatedMany?` を実装していると宣言する（Issue #1449、ADR 0402）。
+   * `true` のとき、実装が無ければ赤にする。省略・`false` のとき、実装が無ければ `listRelatedMany` の節は skip する
+   * （実装していない adapter に、既存の判定より厳しいものを課さない）。実装が有れば、宣言に依らず節はかかる。
+   */
+  implementsListRelatedMany?: boolean;
 }
 
 /**
@@ -26,7 +32,7 @@ export interface RelationStoreConformanceOptions {
  * 走らせる。
  */
 export function describeRelationStoreConformance(options: RelationStoreConformanceOptions): void {
-  const { name, createStore, prepareMemoryId } = options;
+  const { name, createStore, prepareMemoryId, implementsListRelatedMany = false } = options;
 
   describe(`RelationStore conformance (${name})`, () => {
     it("link した相手を listRelated が返す", async () => {
@@ -209,6 +215,142 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect((await store.listRelated(ctx, c)).map((r) => r.memoryId).sort()).toEqual(
         [a, b].sort(),
       );
+    });
+
+    // -----------------------------------------------------------------
+    // `listRelatedMany?`（任意メソッド、Issue #1449、ADR 0402）。**実装した adapter にだけかける**——
+    // 実装していない adapter（`store.listRelatedMany === undefined`）ではこの節の it は skip する
+    // （既存の判定を厳しくしない。`docs/migration-v1.md` の規律）。ただし `implementsListRelatedMany: true` を
+    // 宣言した adapter が実装していなければ、skip ではなく赤にする（「実装したつもりで skip され続ける」を防ぐ）。
+    // 契約は `RelationStore.listRelatedMany` の doc のとおり: `result[i]` は `listRelated(ids[i])` と同じ集合。
+    // -----------------------------------------------------------------
+    it.skipIf(!implementsListRelatedMany)(
+      "listRelatedMany を実装していると宣言した adapter は、実際に実装している",
+      async () => {
+        const store = await createStore();
+        expect(typeof store.listRelatedMany).toBe("function");
+      },
+    );
+
+    /** `listRelatedMany` が無い adapter では skip して `undefined` を返す。 */
+    async function createManyStore(t: { skip: () => never }) {
+      const store = await createStore();
+      if (store.listRelatedMany === undefined) {
+        // 宣言があるのに無い場合は、上の it が赤にする。ここは skip でよい。
+        return t.skip();
+      }
+      return store as RelationStore & Required<Pick<RelationStore, "listRelatedMany">>;
+    }
+    /** 比較用: 順序を規定しないので、相手側の id と kind で整列した形にする。 */
+    const norm = (rs: Array<{ memoryId: string; kind: string }>) =>
+      rs.map((r) => `${r.kind}:${r.memoryId}`).sort();
+
+    it("listRelatedMany は起点ごとに listRelated と同じ集合を、起点と同じ位置に返す", async (t) => {
+      const store = await createManyStore(t);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+      const c = await prepareMemoryId(ctx);
+      const d = await prepareMemoryId(ctx);
+      const lonely = await prepareMemoryId(ctx);
+      for (const [from, to] of [
+        [a, b],
+        [b, a],
+        [a, c],
+        [c, a],
+        [b, c],
+        [c, b],
+        [d, a],
+      ] as const) {
+        await store.link(ctx, "contradicts", from, to);
+      }
+
+      const ids = [c, lonely, a, d, b];
+      const many = await store.listRelatedMany(ctx, ids);
+      expect(many).toHaveLength(ids.length);
+      for (const [i, id] of ids.entries()) {
+        expect(norm(many[i]!)).toEqual(norm(await store.listRelated(ctx, id)));
+      }
+      // 位置の対応を直接も縛る（同じ集合を返す実装が位置を取り違えると、上は通っても下で落ちる）。
+      expect(many[1]).toEqual([]);
+      expect(many[3]!.map((r) => r.memoryId)).toEqual([a]);
+      expect(norm(many[2]!)).toEqual(
+        norm([b, c].map((m) => ({ memoryId: m, kind: "contradicts" }))),
+      );
+      expect(many[0]![0]?.createdAt).toBeInstanceOf(Date);
+    });
+
+    it("listRelatedMany は kind を渡しても省略しても、listRelated と同じ集合を返す", async (t) => {
+      const store = await createManyStore(t);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+      await store.link(ctx, "contradicts", a, b);
+      await store.link(ctx, "contradicts", b, a);
+
+      for (const kind of [undefined, "contradicts"] as const) {
+        const many = await store.listRelatedMany(ctx, [a, b], kind);
+        expect(norm(many[0]!)).toEqual(norm(await store.listRelated(ctx, a, kind)));
+        expect(norm(many[1]!)).toEqual(norm(await store.listRelated(ctx, b, kind)));
+        expect(many[0]!.map((r) => r.memoryId)).toEqual([b]);
+        expect(many[1]!.map((r) => r.memoryId)).toEqual([a]);
+      }
+    });
+
+    it("listRelatedMany は重複した id の位置それぞれに同じ内容を返す（別々の配列で）", async (t) => {
+      const store = await createManyStore(t);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+      await store.link(ctx, "contradicts", a, b);
+
+      const many = await store.listRelatedMany(ctx, [a, b, a]);
+      expect(many).toHaveLength(3);
+      expect(many[0]!.map((r) => r.memoryId)).toEqual([b]);
+      expect(many[1]).toEqual([]);
+      expect(many[2]!.map((r) => r.memoryId)).toEqual([b]);
+      expect(many[0]).not.toBe(many[2]);
+    });
+
+    it("listRelatedMany は空の起点に空配列を返す", async (t) => {
+      const store = await createManyStore(t);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      expect(await store.listRelatedMany(ctx, [])).toEqual([]);
+    });
+
+    it("listRelatedMany は実在しない id の位置に空配列を返し、他の位置に影響しない", async (t) => {
+      const store = await createManyStore(t);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+      await store.link(ctx, "contradicts", a, b);
+      const missing = "00000000-0000-4000-8000-000000000000" as MemoryId;
+
+      const many = await store.listRelatedMany(ctx, [missing, a, missing]);
+      expect(many).toHaveLength(3);
+      expect(many[0]).toEqual([]);
+      expect(many[1]!.map((r) => r.memoryId)).toEqual([b]);
+      expect(many[2]).toEqual([]);
+    });
+
+    it("listRelatedMany は別テナントの ctx では、同じ id を起点にしても関係を返さない", async (t) => {
+      const store = await createManyStore(t);
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const a1 = await prepareMemoryId(ctxA);
+      const a2 = await prepareMemoryId(ctxA);
+      const b1 = await prepareMemoryId(ctxB);
+      const b2 = await prepareMemoryId(ctxB);
+      await store.link(ctxA, "contradicts", a1, a2);
+      await store.link(ctxB, "contradicts", b1, b2);
+
+      // 同じ呼び出しに、自分のテナントの起点と他テナントの起点を混ぜる。
+      const asA = await store.listRelatedMany(ctxA, [a1, b1]);
+      expect(asA[0]!.map((r) => r.memoryId)).toEqual([a2]);
+      expect(asA[1]).toEqual([]);
+      const asB = await store.listRelatedMany(ctxB, [a1, b1]);
+      expect(asB[0]).toEqual([]);
+      expect(asB[1]!.map((r) => r.memoryId)).toEqual([b2]);
     });
   });
 }
