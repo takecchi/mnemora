@@ -45,6 +45,15 @@ afterAll(async () => {
   }
 });
 
+/**
+ * SQL_ASCII のクラスタでは `pg_trgm` を日本語の語彙照合に使えない（`server_encoding_not_utf8`）ので、
+ * この脚は飛ばす（`trigram-probe-dedicated-schema.postgres.test.ts` の `isUtf8` と同じ扱い）。
+ */
+async function isUtf8(): Promise<boolean> {
+  const { rows } = await admin().query<{ server_encoding: string }>("SHOW server_encoding");
+  return rows[0]!.server_encoding.toUpperCase() === "UTF8";
+}
+
 async function withFreshDatabase<T>(
   name: string,
   body: (clients: PostgresClient[]) => Promise<T>,
@@ -76,6 +85,7 @@ function failures(results: PromiseSettledResult<unknown>[]): string[] {
 
 describe("PostgresTrigramLexicalStore.create() の同時呼び出し（ADR 0430）", () => {
   it("(a) pg_trgm が無い DB へ、別々の pool から同時に create() しても全部成功する", async () => {
+    if (!(await isUtf8())) return;
     for (let trial = 0; trial < 5; trial++) {
       await withFreshDatabase(`${BASE}_a`, async (clients) => {
         const ext = await clients[0]!.pool.query(
@@ -91,6 +101,7 @@ describe("PostgresTrigramLexicalStore.create() の同時呼び出し（ADR 0430�
   }, 120_000);
 
   it("(b) pg_trgm も関数も既にある DB へ、別々の pool から同時に create() しても全部成功する", async () => {
+    if (!(await isUtf8())) return;
     await withFreshDatabase(`${BASE}_b`, async (clients) => {
       await PostgresTrigramLexicalStore.create(clients[0]!.db);
       for (let round = 0; round < 15; round++) {
@@ -103,6 +114,7 @@ describe("PostgresTrigramLexicalStore.create() の同時呼び出し（ADR 0430�
   }, 120_000);
 
   it("(c) 公開の probeTrigramLexicalSupport() の同時呼び出しも、全部 ok: true を返す", async () => {
+    if (!(await isUtf8())) return;
     await withFreshDatabase(`${BASE}_c`, async (clients) => {
       const results = await Promise.allSettled(
         clients.map((c) => probeTrigramLexicalSupport(c.db)),
@@ -115,6 +127,7 @@ describe("PostgresTrigramLexicalStore.create() の同時呼び出し（ADR 0430�
   }, 120_000);
 
   it("(d) migrate の拡張を作る段（EXTENSION_LOCK_KEY）が握られている間は create() が待ち、放されたら成功する", async () => {
+    if (!(await isUtf8())) return;
     await withFreshDatabase(`${BASE}_d`, async (clients) => {
       const holder = await clients[0]!.pool.connect();
       try {
