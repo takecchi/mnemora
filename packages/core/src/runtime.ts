@@ -3576,7 +3576,9 @@ export interface Runtime {
    * `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
    * `'supersede' | 'both_active'`。`opts.reason` を渡すと `meta.note` に追加で入る。
    * `meta.contestedWithId` は積まない（`markContestedGroup` と同じ理由——群のメンバーは
-   * その欄自体を持たない）。
+   * その欄自体を持たない）。負けた側の `superseded` は `meta.supersededById` に勝った側の id
+   * （`memberIds` の綴りに寄せた `winnerId`。store へ渡す値と同じ）を持つ——2者版
+   * `resolveContested` と同じ形（ADR 0150 追記。ADR 0421 で揃えた）。勝者の `updated` には足さない。
    *
    * ⚠ **`recall()` 側は一切変更していない。**`markContested`/`resolveContested` と同じ
    * 理由。
@@ -7440,6 +7442,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind }
         : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
+    // 敗者の superseded イベントの meta には、勝者の id を `supersededById` として残す
+    // （2者版 `resolveContested` と同じ。ADR 0150 追記、ADR 0421）。store へ渡す値と同じ
+    // （`memberIds` の綴りに寄せた winnerId）。勝者・both_active の updated には足さない。
 
     try {
       const now = clock.now();
@@ -7455,7 +7460,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           at: now,
           actor,
           digestSnapshot: memory.digest,
-          meta: buildMeta(),
+          meta:
+            status === "superseded" ? { ...buildMeta(), supersededById: winnerId! } : buildMeta(),
         };
         return status === "superseded"
           ? { id, status, supersededById: winnerId!, event }

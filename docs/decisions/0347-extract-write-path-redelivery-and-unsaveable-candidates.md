@@ -199,3 +199,10 @@ fixture）で縛っていた。
 決定2〜4（保存できない候補だけを落とす・全件が落ちたら最初の例外を投げて何も書かない・`created` の `meta.droppedCandidates`・全候補が確定してから `created` を積む）は、
 **変えていない**——この口は同じ意味論を、候補ごとの SAVEPOINT と同じトランザクションの `created` の INSERT で守る。⚠ **口を持たない adapter は、本文の経路のまま**で、
 窓は残る（ADR 0410「引き受けた負債」）。
+
+---
+
+## 追記（2026-09-30）: 並行の負債は reextract にも広がる（[ADR 0421](./0421-concurrent-write-and-audit-event-holes.md)）
+
+上の並行の実測は tick どうしだけだった。`reextract` どうし、`reextract` と tick の抽出でも、同じ Observation から2件が `active` になる窓を
+Postgres で実測して歯で縛った（`reextract-concurrent-extract.postgres.test.ts`）。塞いでいない。表と理由は ADR 0421。
