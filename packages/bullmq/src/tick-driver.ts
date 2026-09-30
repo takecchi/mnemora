@@ -39,6 +39,9 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * tick の失敗（`runtime.tick()` の throw）と、Worker・Queue の異常（接続の失敗など）は、`onTickError` に
  * 届く。成功した tick の結果は `onTickResult` に届く（どちらも省略可）。詳しくは `CreateBullmqTickDriverOptions` の各 doc。
  *
+ * ⚠ **`onTickError` は、tick の中の個々のジョブ（outbox の行）の失敗を知らせない。** tick が throw しなければ鳴らない。
+ * 個々のジョブの失敗は、`onTickResult` の `TickResult.failed`・`unsupported` と、outbox の `last_error` 列で見る。
+ *
  * **`start()` を呼ぶまでジョブは処理しない**（Issue #890）。`createBullmqTickDriver(...)`
  * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
  * `start()` が明示的に `worker.run()` を呼んで初めて始まる。
@@ -82,13 +85,24 @@ export interface CreateBullmqTickDriverOptions {
    * 複数プロセス・複数 Worker が同じ queue に付くと、プロセスをまたいだ同時実行も
    * 起こりうる（上の doc 参照）——`concurrency` はあくまで「このプロセス内」の上限。
    */
-  concurrency?: number;
+  concurrency?: number | undefined;
   /** 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。 */
-  jobName?: string;
-  /** `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。 */
-  onTickResult?: (result: TickResult) => void;
+  jobName?: string | undefined;
+  /**
+   * `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。
+   *
+   * ⚠ **tick の中の個々のジョブ（outbox の行）の失敗は、`onTickError` ではなくここに届く。** 個々のジョブが失敗しても
+   * `runtime.tick()` は throw せず `TickResult` を返すので、`result.failed`（`fail()` を呼んでリース競合で弾かれなかった
+   * 件数。⚠ 終端 `failed` になった行の数と常に一致するとは限らない）と `result.unsupported`（`failed` の内訳のうち、`tick` が
+   * その kind を処理できなかったもの）を見ること。失敗した行の理由は outbox の `last_error` 列にある。
+   */
+  onTickResult?: ((result: TickResult) => void) | undefined;
   /**
    * tick の失敗と、Worker・Queue の異常を受け取る（観測用。省略可）。次の3つの経路から、`error` を渡して呼ばれる。
+   *
+   * 🔴 **届くのはこの3つだけである。** tick の中の個々のジョブ（outbox の行）が失敗しても、`runtime.tick()` が throw
+   * しなければ `onTickError` は鳴らない（その失敗は `onTickResult` に渡る `TickResult` の `failed`・`unsupported` と、
+   * outbox の `last_error` 列で見る）。`onTickError` を渡しただけでは、ジョブ単位の失敗は分からない。
    *
    * - **`runtime.tick()`（と `onTickResult`）が throw した** ——BullMQ の Worker は processor の throw を
    *   `'error'` ではなく `'failed'`（job, err）として emit する（bullmq 6.3.8 の実測）ので、driver は
@@ -112,7 +126,7 @@ export interface CreateBullmqTickDriverOptions {
    * 壊れたときに見えなくなる）。【実測】Redis が居ないポートを指すと、Queue と Worker がそれぞれ
    * ECONNREFUSED を emit した（bullmq 6.3.8）。
    */
-  onTickError?: (error: unknown) => void;
+  onTickError?: ((error: unknown) => void) | undefined;
 }
 
 export interface BullmqTickDriver {

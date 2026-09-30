@@ -19,6 +19,8 @@ import {
  * を含むことを見る。`TypeError` のような別種の失敗と区別するため、`.toThrow()` は引数なしで
  * 使わない（`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由・同じ形）。
  */
+/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
+const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
 /**
  * `setDecayClock` に不正な値を渡したときのメッセージが `DECAY_CLOCK_INVALID_MESSAGE` を
@@ -42,7 +44,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 省略時はこのケースをスキップする（in-memory 実装は簡易な setter を持つ想定だが、
    * 将来 setter を持たない読み取り専用 adapter が来た場合にも壊れないようにする）。
    */
-  setDefaultHalfLifeHours?: (ctx: Ctx, hours: number) => Promise<void> | void;
+  setDefaultHalfLifeHours?: ((ctx: Ctx, hours: number) => Promise<void> | void) | undefined;
 
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13
@@ -74,7 +76,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 「読み書きが正しく往復するか」だけでなく、**production の UPSERT/検証ロジックそのもの**
    * を検査する。
    */
-  setDefaultHalfLifeRecalls?: (ctx: Ctx, recalls: number) => Promise<void> | void;
+  setDefaultHalfLifeRecalls?: ((ctx: Ctx, recalls: number) => Promise<void> | void) | undefined;
 
   /**
    * `supportsDecayClock: true` のときに使う。`tenant_activity.activity_seq` を+1する
@@ -85,7 +87,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * `getActivitySeq` を「進める」歯をスキップする（`0` を返すことの歯は
    * `supportsDecayClock: true` だけで検査する）。
    */
-  advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
+  advanceActivitySeq?: ((ctx: Ctx) => Promise<void> | void) | undefined;
 
   /**
    * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
@@ -98,7 +100,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 省略時はこのフックを使う歯をスキップする（`false`/`{}` を返すことの歯は
    * `supportsDecayClock: true` だけで検査する）。
    */
-  advanceSubjectActivitySeq?: (ctx: Ctx, subjectId: string) => Promise<void> | void;
+  advanceSubjectActivitySeq?: ((ctx: Ctx, subjectId: string) => Promise<void> | void) | undefined;
 
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
@@ -124,7 +126,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 巻き込んで壊す理由にはならない、という判断**（クローン miku の判断——オーナーの
    * 判断ではない）。
    */
-  supportsTaxonomyMode?: boolean;
+  supportsTaxonomyMode?: boolean | undefined;
 
   /**
    * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
@@ -359,6 +361,18 @@ export function describeTenantSettingsStoreConformance(
           const ctx: Ctx = { tenantId: `tenant-half-life-recalls-in-range-${Math.random()}` };
           await setDefaultHalfLifeRecalls(ctx, 48);
           expect(await store.getDefaultHalfLifeRecalls!(ctx)).toBe(48);
+        });
+
+        it("⚠ float4（Postgres の real 列）に収まらない default_half_life_recalls を、明示の例外で拒む（DB の生の例外にしない）", async () => {
+          // 値域は `(0, ∞)` だが、列は `real`（float4）。`Math.fround(x)` が Infinity か 0 に
+          // なる値は入らない。メッセージに `float4` を含む明示の例外で断る。
+          for (const recalls of [1e39, 1e-50]) {
+            const ctx: Ctx = { tenantId: `tenant-half-life-recalls-f4-${Math.random()}` };
+            await expect(
+              Promise.resolve().then(() => setDefaultHalfLifeRecalls(ctx, recalls)),
+              `default_half_life_recalls=${recalls} は float4 に収まらないと名指しして拒まれなければならない`,
+            ).rejects.toThrow(FLOAT4_MESSAGE);
+          }
         });
 
         // ⭐ 行が無いテナントに書き込むと行ができることの芯（`setDefaultHalfLifeHours` の

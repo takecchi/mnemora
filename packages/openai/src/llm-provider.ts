@@ -12,6 +12,7 @@ import type {
   PromptSpec,
   StructuredRequest,
 } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type { OpenAIChatClient } from "./client-types.js";
 import { OpenAILLMProviderError } from "./errors.js";
@@ -47,7 +48,7 @@ export interface OpenAILLMProviderOptions {
    * メッセージの `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** OpenAI のチャットモデル名（例: `gpt-4o-mini`）。必須で、既定値は無い。 */
   model: string;
   /**
@@ -60,7 +61,7 @@ export interface OpenAILLMProviderOptions {
    * `@mnemora/openai` が固定している版と揃える必要が無い**——`OpenAI` インスタンスは、
    * 版が違ってもこの構造型を満たす限りそのまま渡せる（packages/openai/README.md 参照）。
    */
-  client?: OpenAIChatClient;
+  client?: OpenAIChatClient | undefined;
   /**
    * `chat.completions.create` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
    *
@@ -70,7 +71,7 @@ export interface OpenAILLMProviderOptions {
    * `CreateProvidersOptions.llmTemperature`（`providers.ts`）経由でのみ使う——
    * 他のベンチ・呼び出し元はこの欄を渡さない。
    */
-  temperature?: number;
+  temperature?: number | undefined;
 }
 
 /**
@@ -402,15 +403,21 @@ export class OpenAILLMProvider implements LLMProvider {
    * 拒否（`message.refusal`・`finish_reason === "content_filter"`）は `kind: "refusal"`、`finish_reason === "length"` は
    * `kind: "truncated"` の {@link OpenAILLMProviderError} を投げる。⚠ どちらでもない空応答は、例外にせず空文字を返す
    * （ADR 0072「引き受けた負債」2。`@mnemora/anthropic` も同じ形）。
+   *
+   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
+   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
    */
   async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
-    const response = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        messages: toOpenAIMessages(req),
-        ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: toOpenAIMessages(req),
+          ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
+        },
+        { signal },
+      ),
     );
     assertNotRefusedOrTruncated(response.choices[0]);
     // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
@@ -440,6 +447,10 @@ export class OpenAILLMProvider implements LLMProvider {
    * 戻りの `null`: `.optional()` の欄の `null`（strict への翻訳が足したもの）は省略へ戻す。スキーマがもともと `null` を許す
    * 必須の欄（`.nullable()`）・配列の要素・根の `null` は `null` のまま返す。`.nullable().optional()` の欄の `null` は
    * 省略として届く（Issue #1082。`stripNulls` の doc）。
+   *
+   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
+   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
    */
   async completeStructured<T>(
     _ctx: Ctx,
@@ -455,14 +466,16 @@ export class OpenAILLMProvider implements LLMProvider {
       // 呼んでいない——拒否・切り詰め・応答の検証エラーとは混ぜない（ADR 0360）。
       throw new OpenAILLMProviderError({ kind: "schema_unsupported", cause });
     }
-    const response = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        messages: toOpenAIMessages(req.prompt),
-        response_format: { type: "json_schema", json_schema: format },
-        ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: toOpenAIMessages(req.prompt),
+          response_format: { type: "json_schema", json_schema: format },
+          ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
+        },
+        { signal },
+      ),
     );
     // ⭐ **`content` を読む前に拒否・切り詰めを見る。**順序が本質である
     // ——後ろに置くと、拒否が `no_content` に化けて種類が潰れる（拒否時は `content` が `null`）。

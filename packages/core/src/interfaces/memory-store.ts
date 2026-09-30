@@ -22,7 +22,8 @@ import type { DecayClock } from "./tenant-settings-store.js";
  * それと一致しなかったことを表す（PR「update-status-compare-and-swap」、ADR 0030）。
  * `packages/postgres/src/advisory-lock.ts` の型付きエラー階層（`AdvisoryLockTimeoutError` /
  * `AdvisoryLockUnavailableError`）に倣い、`Error` を継承した専用の型として定義する
- * ——呼び出し側が `instanceof` で「対象が無かった」と区別できることが目的。
+ * ——呼び出し側が「対象が無かった」と区別できることが目的（判定は `instanceof` ではなく
+ * {@link isMemoryStatusConflictError} で行う。ADR 0418）。
  *
  * **`observedStatus` は「弾かれた後に読み直した値」であり、弾かれた瞬間の値とは限らない。**
  * adapter（`packages/postgres`）は `UPDATE ... WHERE status = expectedStatus` が0行だった
@@ -441,18 +442,20 @@ export function isEmbeddingStatusRollback(
  */
 export interface AggregateScopeOptions {
   /** 目次帯（段5）の digest も集めるときに渡す。省けば digest を集めない。 */
-  digestBand?: {
-    /** 取得する上限件数。 */
-    limit: number;
-    /**
-     * 帯から除外する memoryId（`memories` として返したもの）。
-     *
-     * adapter の期待する形式でない id（`@mnemora/postgres` なら uuid の形でないもの・空文字）は、どの
-     * Memory とも一致しないので「無いもの」として扱い、例外にしない——`get`・`getMany` と同じ扱い。ほかの
-     * id の除外はそのまま効く（Issue #1262。`@mnemora/postgres` は以前、DB の例外で投げていた）。
-     */
-    excludeMemoryIds: readonly MemoryId[];
-  };
+  digestBand?:
+    | {
+        /** 取得する上限件数。 */
+        limit: number;
+        /**
+         * 帯から除外する memoryId（`memories` として返したもの）。
+         *
+         * adapter の期待する形式でない id（`@mnemora/postgres` なら uuid の形でないもの・空文字）は、どの
+         * Memory とも一致しないので「無いもの」として扱い、例外にしない——`get`・`getMany` と同じ扱い。ほかの
+         * id の除外はそのまま効く（Issue #1262。`@mnemora/postgres` は以前、DB の例外で投げていた）。
+         */
+        excludeMemoryIds: readonly MemoryId[];
+      }
+    | undefined;
   /**
    * ADR 0390: 段1の ANN から除外した `provenance.kind`（`RecallQuery.excludeProvenanceKinds`）。
    * 渡すと、`ScopeAggregate.excludedProvenanceIndexedCount`（除外される kind で、スコープ内の
@@ -463,7 +466,7 @@ export interface AggregateScopeOptions {
    * `VectorFilter.excludeProvenanceKinds` と同じ作法。この口を知らない adapter は無視してよく、
    * そのとき `recall()` は今日と同じ判定（除外指定では ANN の取りこぼしを判定しない）に倒れる。
    */
-  excludeProvenanceKinds?: readonly ProvenanceKind[];
+  excludeProvenanceKinds?: readonly ProvenanceKind[] | undefined;
   /**
    * 件数集計（群カウント・`totalInScope`・`filtered*`・`notIndexed`）を止めるかどうか
    * （[ADR 0384](../../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
@@ -489,7 +492,7 @@ export interface AggregateScopeOptions {
    * `countKind` が `'unknown'` のとき、`recall()` は ANN の stage detail に
    * `annReachability: "unknown"` を足して、そう名乗る（ADR 0390）。
    */
-  scopeAggregate?: "exact" | "skip";
+  scopeAggregate?: "exact" | "skip" | undefined;
 }
 
 /**
@@ -665,7 +668,7 @@ export interface MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; claimedBy?: string },
+    opts?: { now?: Date | undefined; claimedBy?: string | undefined },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
    * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
@@ -770,9 +773,9 @@ export interface MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
     opts?: {
-      now?: Date;
-      abortIfForgotten?: ReadonlyArray<MemoryId>;
-      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
@@ -872,7 +875,7 @@ export interface MemoryStore {
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    opts?: { supersededById?: MemoryId | undefined; expectedStatus?: MemoryStatus | undefined },
   ): Promise<Memory>;
   /**
    * ADR 0031: `updateStatus` と同じ status 更新を行い、**同一トランザクションで**
@@ -921,7 +924,7 @@ export interface MemoryStore {
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    opts: { supersededById?: MemoryId | undefined; expectedStatus?: MemoryStatus | undefined },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   /**
@@ -1273,7 +1276,7 @@ export interface MemoryStore {
   requeueEmbedJobs(
     ctx: Ctx,
     opts: RequeueEmbedJobsOptions,
-    writeOpts?: { now?: Date },
+    writeOpts?: { now?: Date | undefined },
   ): Promise<RequeueEmbedJobsResult>;
   /**
    * Issue #134 / [ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md):
@@ -1421,15 +1424,15 @@ export interface MemoryStore {
     supersede: ReadonlyArray<{
       id: MemoryId;
       supersededByIndex: number;
-      expectedStatus?: MemoryStatus;
+      expectedStatus?: MemoryStatus | undefined;
       event: NewMemoryEvent;
     }>,
     opts?: {
-      now?: Date;
-      abortIfForgotten?: ReadonlyArray<MemoryId>;
-      abortIfSuperseded?: ReadonlyArray<MemoryId>;
-      abortIfAllConflicted?: boolean;
-      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+      abortIfAllConflicted?: boolean | undefined;
+      buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
@@ -1506,9 +1509,9 @@ export interface MemoryStore {
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
     opts?: {
-      now?: Date;
-      abortIfForgotten?: ReadonlyArray<MemoryId>;
-      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
@@ -1971,13 +1974,13 @@ export interface MemoryStore {
     first: {
       id: MemoryId;
       status: "active" | "superseded";
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     },
     second: {
       id: MemoryId;
       status: "active" | "superseded";
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
@@ -2142,7 +2145,7 @@ export interface MemoryStore {
     members: ReadonlyArray<{
       id: MemoryId;
       status: "active" | "superseded";
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
@@ -2434,8 +2437,8 @@ export interface MemoryStore {
   restoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
-    event: { reason?: string; actor?: EventActor; at: Date },
-    filter?: { onlyMemoryIds?: MemoryId[] },
+    event: { reason?: string | undefined; actor?: EventActor | undefined; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] | undefined },
   ): Promise<{ restored: Memory[] }>;
   /**
    * `restoreSupersededBy?` を実際に呼ぶ**前**に、その群に何が入っているかを見るための
@@ -2495,7 +2498,7 @@ export interface MemoryStore {
   previewRestoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
-    filter?: { onlyMemoryIds?: MemoryId[] },
+    filter?: { onlyMemoryIds?: MemoryId[] | undefined },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
 
   /**
@@ -2646,7 +2649,7 @@ export interface EraseTenantStoreOptions {
    */
   limit: number;
   /** `true` なら削除を一切行わず、削除していたら消えていたであろう件数だけを返す。省略時は `false`。 */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -2740,7 +2743,7 @@ export interface ReinforceOptions {
    * （`Memory.decayBaseSeq` の doc コメント、ADR 0165 決めたこと4「NULL は…緩い側へ倒す」
    * と同じ理由）。
    */
-  nowSeq?: number;
+  nowSeq?: number | undefined;
 
   /**
    * [ADR 0394](../../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
@@ -2767,7 +2770,7 @@ export interface ReinforceOptions {
    * として扱うこと。`tenant_subject_activity` に行が無いテナント（`hasSubjectActivityCounters` が
    * `false`）では `S_x` はどの行でも `0` で結果が同じなので、runtime はこの項目を渡さない。
    */
-  addOwnSubjectSeq?: boolean;
+  addOwnSubjectSeq?: boolean | undefined;
 }
 
 /**
@@ -2796,7 +2799,7 @@ export interface ArchiveDecayedOptions {
    * 読みに行かない。** `clock` が `'activity'`/`'either'` のときに必須になる（`clock` の
    * doc コメント参照）。
    */
-  nowSeq?: number;
+  nowSeq?: number | undefined;
   /**
    * ADR 0165 決めたこと1・12・15: どの軸で掃くかを選ぶ。省略時は `'wall'`
    * （本 ADR 以前と1バイトも変わらない挙動）。
@@ -2830,7 +2833,7 @@ export interface ArchiveDecayedOptions {
    * そのまま写す。片方だけ `>=` にする実装ミスは、境界1件のズレとして歯に出ないまま
    * 紛れ込みうる——`packages/testkit` の適合テストが境界の歯を seq 側にも同じ形で置く。
    */
-  clock?: DecayClock;
+  clock?: DecayClock | undefined;
   /**
    * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `true` のときだけ、`nowSeq`（`T`）に、行の subject に対応する
@@ -2838,7 +2841,7 @@ export interface ArchiveDecayedOptions {
    * `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味・同じ最適化理由
    * （既定/未使用のテナントでは相関サブクエリを足さない）。既定 `false`。
    */
-  usesSubjectActivityCounters?: boolean;
+  usesSubjectActivityCounters?: boolean | undefined;
 }
 
 /** {@link MemoryStore.archiveDecayed} の返り値（ADR 0114）。 */
@@ -2901,7 +2904,7 @@ export interface PurgeExpiredEventsOptions {
    * 省略時は `false`（`runtime.ts` の `ConsolidateOptions.dryRun`/`ReflectOptions.dryRun`
    * と同じ既定）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /** {@link MemoryStore.purgeExpiredRecalls} の引数（ADR 0404）。 */
@@ -2911,7 +2914,7 @@ export interface PurgeExpiredRecallsOptions {
   /** 1回の呼び出しで消す `recalls` の行数の上限。**必須・既定値なし。**0以上の整数を渡す前提（負数の結果は未定義）。 */
   limit: number;
   /** `true` なら何も消さず、消していたら何が起きたかだけを返す。省略時 `false`。 */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /** {@link MemoryStore.purgeExpiredRecalls} の返り値（ADR 0404）。 */
@@ -2976,7 +2979,7 @@ export interface PurgeExpiredEventsByRetentionOptions {
    * `true` なら削除もイベント追記も行わず、何が起きるかだけを返す。省略時は `false`。
    * 保持期間の読みは `dryRun` の値によらず同じ原子性で行う（下の interface doc 参照）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -3018,7 +3021,7 @@ export interface RequeueEmbedJobsOptions {
    */
   statuses: NotIndexedReason[];
   /** 対象をこの id の集合との積に絞る（任意）。省略時は `statuses` の条件だけで選ぶ。 */
-  memoryIds?: MemoryId[];
+  memoryIds?: MemoryId[] | undefined;
   /** 1回の呼び出しで積み直す上限。**既定値なし**（上の doc コメント参照）。 */
   limit: number;
 }

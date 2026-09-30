@@ -1,4 +1,5 @@
 import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import type {
   CreateLocalEmbeddingPipeline,
   LocalEmbeddingDtype,
@@ -134,27 +135,27 @@ export function defaultLocalEmbeddingRetryDelayMs(attempt: number): number {
  */
 export interface LocalEmbeddingRetryOptions {
   /** 合計の試行回数（初回を含む）。既定 {@link DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS}。 */
-  attempts?: number;
+  attempts?: number | undefined;
   /**
    * `attempt` 回目（1始まり、今回失敗した試行の番号）の後、次の試行まで待つ時間(ms)を返す。
    * 既定 {@link defaultLocalEmbeddingRetryDelayMs}。
    */
-  delayMs?: (attempt: number) => number;
+  delayMs?: ((attempt: number) => number) | undefined;
 }
 
 /** {@link LocalEmbeddingProvider} のコンストラクタに渡す設定。どれも省略でき、省くと既定のモデルを使う。 */
 export interface LocalEmbeddingProviderOptions {
   /** Hugging Face の repo id。既定 `sirasagi62/ruri-v3-30m-ONNX`。 */
-  repo?: string;
+  repo?: string | undefined;
   /** 量子化の別。既定 `"q8"`。 */
-  dtype?: LocalEmbeddingDtype;
+  dtype?: LocalEmbeddingDtype | undefined;
   /** 宣言する次元数。既定 `256`。**実物と食い違えば初回 `embed()` で例外になる。** */
-  dimensions?: number;
+  dimensions?: number | undefined;
   /**
    * `space.model` に載せる文字列。既定 `"ruri-v3-30m/sym"`。
    * **prefix 方式を変えるなら、ここも変えること**（`DEFAULT_LOCAL_EMBEDDING_MODEL_ID` の説明）。
    */
-  modelId?: string;
+  modelId?: string | undefined;
   /**
    * 全テキストの先頭に付ける文字列。既定は `""`。
    *
@@ -172,15 +173,15 @@ export interface LocalEmbeddingProviderOptions {
    * 非対称 prefix が本当に要るようになったら、それは `EmbeddingProvider` の契約を
    * 変える話であって、このオプションの形を変える話ではない。
    */
-  prefix?: string;
+  prefix?: string | undefined;
   /**
    * モデルファイルの置き場所。未指定なら transformers.js の既定——`@huggingface/transformers`
    * パッケージ自身の中の `.cache/`（`node_modules/@huggingface/transformers/.cache/` など）。
    * `node_modules` を消す・入れ直すと一緒に消える。
    */
-  cacheDir?: string;
+  cacheDir?: string | undefined;
   /** onnxruntime の intra-op スレッド数。既定 `4`。 */
-  numThreads?: number;
+  numThreads?: number | undefined;
   /**
    * `embed(ctx, texts)` を1回の推論に渡す最大件数。既定
    * {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}（128）。
@@ -196,7 +197,7 @@ export interface LocalEmbeddingProviderOptions {
    * 空バッチを起こしうる。`NaN`・0以下は 1（1件ずつ）に、非整数は
    * 切り捨てて使う。`Infinity` は「分割しない」として有効な値である。
    */
-  maxBatchSize?: number;
+  maxBatchSize?: number | undefined;
   /**
    * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら transformers.js の既定
    * （`"main"`）のままで、この option を足す前と同じ呼び出しになる**（Issue #597）。
@@ -206,24 +207,24 @@ export interface LocalEmbeddingProviderOptions {
    * revision をどう扱うかは決めていない**（Issue #597 の「先に決めるべきこと」のうち、
    * 決めたのは「既定値は変えない」だけである）。
    */
-  revision?: string;
+  revision?: string | undefined;
   /**
    * モデルを読み込む関数。**テストで本物のモデルを落とさないための注入点である**
    * （`packages/openai` の `client` と同じ役目）。未指定なら transformers.js を使う。
    */
-  createPipeline?: CreateLocalEmbeddingPipeline;
+  createPipeline?: CreateLocalEmbeddingPipeline | undefined;
   /**
    * モデルの読み込みが失敗したときのリトライ設定。**Issue #261 / ADR 0141。**
    * 既定は {@link DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS} 回・
    * {@link defaultLocalEmbeddingRetryDelayMs} のバックオフ。
    */
-  retry?: LocalEmbeddingRetryOptions;
+  retry?: LocalEmbeddingRetryOptions | undefined;
   /**
    * リトライの待ち時間を実際に待つ関数。**テスト用の注入点**（`createPipeline` と同じ役目
    * ——待たずに何度も失敗させるテストが、実時間を消費しないようにする）。
    * 未指定なら `setTimeout` を使う本物の待ちになる。
    */
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: ((ms: number) => Promise<void>) | undefined;
 }
 
 /**
@@ -427,7 +428,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   /**
-   * `texts` を埋め込み、入力と同じ件数・順で返す。空配列ならモデルを読まずに `[]` を返す。
+   * `texts` を埋め込み、入力と同じ件数・順で返す。空配列ならモデルを読まずに `[]` を返す（ただし `opts.signal` が abort 済みなら、空配列でも `[]` を返さず reject する）。
    *
    * 投げるもの（どれも reject として届く）:
    * - {@link LocalEmbeddingProvider.dispose} の後は、入力に関わらず（空配列でも）素の `Error`（ADR 0419）。
@@ -451,6 +452,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * 効く——この対応が意味を持つのは、この provider を `packages/core` を介さず直接呼ぶ
    * 呼び出し側にとってである。
    *
+   * ⚠ **2026-09-30 追記（ADR 0428）: モデルの読み込み中・読み込みの再試行の待ち（`retry` の `sleep` を含む）も、
+   * `signal` ごとに切れる。** abort された呼び出しは、読み込みの完了を待たずに `signal.reason`（`abortReason(signal)`）で
+   * 即座に reject する。**ただし読み込みそのものは abort で止まらない**——複数の `embed()`・`warmup()` が待つ共有の読み込み
+   * （と、その中の再試行）は続き、切れるのは abort された呼び出しの「待ち」だけである。ある呼び出しの abort が、
+   * 同じ読み込みを待つ別の呼び出しを巻き添えにしない。全員が abort しても、読み込みは終わりまで走り、
+   * 成功すればモデルは保持されて次の `embed()` が使う。`warmup()` は `signal` を取らない（待ちは切れない）。
+   *
    * ⭐ **`texts.length` が `maxBatchSize`（既定 {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}）
    * 以下なら、今までどおり1回の `pipeline.embed()` で済ませる（ビット一致）。**超えたときだけ、
    * 先頭から `maxBatchSize` 件ずつに分けて順に（直列で）推論し、結果を順番どおりに連結する
@@ -472,6 +480,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   async #embed(texts: string[], opts?: AbortOptions): Promise<number[][]> {
+    // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
+    opts?.signal?.throwIfAborted();
     // `packages/openai` と同じ早期 return。**空でモデルを起こさない。**
     // ⟹ ウォームアップは `warmup()` を使うこと。
     if (texts.length === 0) {
@@ -479,7 +489,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     }
     opts?.signal?.throwIfAborted();
 
-    const pipeline = await this.#load();
+    // ⭐ 待ちだけを signal ごとに切る（ADR 0428）。`#load()` 自体（共有の読み込み・再試行）は止めない。
+    const pipeline = await runAbortable(opts?.signal, () => this.#load());
     opts?.signal?.throwIfAborted();
 
     // ⭐ **prefix が空でも、必ず新しい配列を作る**（`this.#prefix === "" ? texts : ...` と

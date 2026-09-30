@@ -79,11 +79,11 @@ export interface OpenAILLMProviderErrorOptions {
   /** 失敗の種類（{@link OpenAILLMFailureKind}）。 */
   kind: OpenAILLMFailureKind;
   /** SDK が返した生の `finish_reason`。分からなければ `null`（偽 client など） */
-  finishReason?: string | null;
+  finishReason?: string | null | undefined;
   /** `message.refusal` の中身（拒否理由の文面）。無ければ `null` */
-  refusalMessage?: string | null;
+  refusalMessage?: string | null | undefined;
   /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
-  message?: string;
+  message?: string | undefined;
   /** `kind: "schema_unsupported"` のとき、送る前の翻訳・検査が投げた元の例外。
    * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
   cause?: unknown;
@@ -140,4 +140,38 @@ export class OpenAILLMProviderError extends Error {
     this.finishReason = options.finishReason ?? null;
     this.refusalMessage = options.refusalMessage ?? null;
   }
+}
+
+const OPENAI_LLM_FAILURE_KINDS: ReadonlySet<unknown> = new Set<OpenAILLMFailureKind>([
+  "refusal",
+  "truncated",
+  "no_content",
+  "schema_unsupported",
+]);
+
+/**
+ * 受け取ったものが {@link OpenAILLMProviderError} かを、**`instanceof` を使わずに**判定する
+ * （[ADR 0418](../../../docs/decisions/0418-store-error-kind-guards.md) の作法、
+ * ADR 0428）。
+ *
+ * **「`kind` を見て、`kind` が無ければ `name` を見る」。** `kind` があるときは、それが
+ * {@link OpenAILLMFailureKind} のどれかであることを見る。`kind` の値は openai と anthropic で重なるので、`name` が文字列ならそれが `"OpenAILLMProviderError"` であることも見る（`name` を持たない素の値は `kind` だけで見る）。`kind` が無い値
+ * （`kind` を持たない古い版が投げた例外など）は、`name === "OpenAILLMProviderError"` で見る。
+ * bundler が同じクラスを二重に読み込んでいても効く。`name` は偽装できるが、provider は利用者が
+ * 自分で配線する信頼された部品なので実害は無いと判断している。
+ */
+export function isOpenAILLMProviderError(value: unknown): value is OpenAILLMProviderError {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { kind?: unknown; name?: unknown };
+  if (candidate.kind !== undefined) {
+    // kind の値は openai と anthropic で重なる（`refusal` など）。`name` を持つ値は、
+    // それが一致することも見る——相手の provider の例外を取り違えないため。
+    return (
+      OPENAI_LLM_FAILURE_KINDS.has(candidate.kind) &&
+      (typeof candidate.name !== "string" || candidate.name === "OpenAILLMProviderError")
+    );
+  }
+  return candidate.name === "OpenAILLMProviderError";
 }

@@ -114,9 +114,9 @@ export interface BuildReflectedMemoryParams {
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls`・
    * `consolidate.ts` の `BuildConsolidatedMemoryParams` と同じ形。
    */
-  activitySeq?: number;
+  activitySeq?: number | undefined;
   /** 活動時計のテナントの半減期（`recall()` の回数）。`activitySeq` と揃って渡したときだけ効く。 */
-  halfLifeRecalls?: number;
+  halfLifeRecalls?: number | undefined;
 }
 
 /**

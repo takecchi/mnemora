@@ -34,7 +34,7 @@ export interface FindCorrectionCandidatesInput {
    * 整数でない、または `1` 未満を渡すと `Runtime.findCorrectionCandidates` は
    * `RangeError` を投げる（書き込みはおろか `recall()` すら呼ばない前に落ちる）。
    */
-  limit?: number;
+  limit?: number | undefined;
   /**
    * 候補から除く memoryId。訂正の発話そのものを先に `observe()` していた場合の
    * 自己除外に使う——`recall()` は「訂正の発話から作られたばかりの Memory」自身を
@@ -44,14 +44,14 @@ export interface FindCorrectionCandidatesInput {
    * `recall()` が返した並びに対する後処理であり、順位という「recall の何位だったか」
    * という事実そのものは変えない（{@link CorrectionCandidate.recallRank} の doc参照）。
    */
-  excludeMemoryIds?: readonly MemoryId[];
+  excludeMemoryIds?: readonly MemoryId[] | undefined;
   /**
    * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: 内部で1回呼ぶ `recall()` へそのまま渡す
    * `RecallQuery.activityCounting`。省略時 `"tenant"`（本 ADR 以前と1バイトも
    * 変わらない挙動）。
    */
-  activityCounting?: "tenant" | "subject";
+  activityCounting?: "tenant" | "subject" | undefined;
 }
 
 /**

@@ -99,7 +99,7 @@ export interface Observation {
 
 /** `MemoryStore.createObservation` などに渡す新しい Observation。`id` は store が付け、`recordedAt` は省略できる。 */
 export type NewObservation = Omit<Observation, "id" | "recordedAt"> & {
-  recordedAt?: Date;
+  recordedAt?: Date | undefined;
 };
 
 /** `Observation` の zod スキーマ。値を実行時に検査するときに使う（型 `Observation` と揃えてある）。 */
@@ -259,31 +259,31 @@ export type ExtractionContext = z.infer<typeof ExtractionContextSchema>;
 /** `observe` に渡す発話。 */
 export interface ObserveUtteranceInput {
   /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
-  extractionContext?: ExtractionContext;
+  extractionContext?: ExtractionContext | undefined;
   /** 常に `"utterance"`。 */
   kind: "utterance";
   /** この観測の主題。`ctx.subjectId` より優先する（どちらも無ければ主題の無い観測になる）。 */
-  subjectId?: string;
+  subjectId?: string | undefined;
   /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
-  externalId?: string;
+  externalId?: string | undefined;
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
-  occurredAt?: Date;
+  occurredAt?: Date | undefined;
   /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
-  validFrom?: Date;
+  validFrom?: Date | undefined;
   /** 有効期間の終わり（{@link Observation.validFrom} の doc コメント参照）。 */
-  validUntil?: Date;
+  validUntil?: Date | undefined;
   /** 抽出の実行のしかた（{@link ExtractMode}）。省略なら `"sync"`（`observe` の中で抽出する）。`"deferred"` は outbox に積み、`tick` で抽出する。 */
-  extract?: ExtractMode;
+  extract?: ExtractMode | undefined;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
-  subjectCandidates?: SubjectCandidatesInput;
+  subjectCandidates?: SubjectCandidatesInput | undefined;
   /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0312）。 */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
    * `deriveClaimKeys` は一度も呼ばれない。 */
-  claimKey?: ClaimKeyOptions;
+  claimKey?: ClaimKeyOptions | undefined;
   /** 話者（例: `"user"`）。抽出に渡し、`stated` の Memory の出所にも残る。 */
-  speaker?: string;
+  speaker?: string | undefined;
   /** 発話の本文。抽出（LLM）に渡し、LLM が失敗したときの全文フォールバックの Memory の本文にもなる。 */
   text: string;
 }
@@ -291,29 +291,29 @@ export interface ObserveUtteranceInput {
 /** `observe` に渡す出来事。⚠ 抽出に渡るのは既定では `name` だけである（`data` の doc、`extractData` で opt-in できる）。 */
 export interface ObserveEventInput {
   /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
-  extractionContext?: ExtractionContext;
+  extractionContext?: ExtractionContext | undefined;
   /** 常に `"event"`。 */
   kind: "event";
   /** この観測の主題。`ctx.subjectId` より優先する（どちらも無ければ主題の無い観測になる）。 */
-  subjectId?: string;
+  subjectId?: string | undefined;
   /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
-  externalId?: string;
+  externalId?: string | undefined;
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
-  occurredAt?: Date;
+  occurredAt?: Date | undefined;
   /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
-  validFrom?: Date;
+  validFrom?: Date | undefined;
   /** 有効期間の終わり（{@link Observation.validFrom} の doc コメント参照）。 */
-  validUntil?: Date;
+  validUntil?: Date | undefined;
   /** 抽出の実行のしかた（{@link ExtractMode}）。省略なら `"sync"`（`observe` の中で抽出する）。`"deferred"` は outbox に積み、`tick` で抽出する。 */
-  extract?: ExtractMode;
+  extract?: ExtractMode | undefined;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
-  subjectCandidates?: SubjectCandidatesInput;
+  subjectCandidates?: SubjectCandidatesInput | undefined;
   /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0312）。 */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
    * `deriveClaimKeys` は一度も呼ばれない。 */
-  claimKey?: ClaimKeyOptions;
+  claimKey?: ClaimKeyOptions | undefined;
   /**
    * 出来事の名前。**`extractData`（下記）を渡さない既定の呼び出しでは、抽出（LLM）に渡すのは
    * この欄だけである**（今の振る舞い。下の `data` の doc 参照）。LLM 呼び出しが失敗したときの
@@ -353,7 +353,7 @@ export interface ObserveEventInput {
    * プロンプトへ入るのは、この JSON 往復を経た後の `data`（`extractObservationPayload` が
    * `payload` へ書いた値）である**——adapter によって `JSON.stringify(data)` の中身が変わりうる。
    */
-  data?: Record<string, unknown>;
+  data?: Record<string, unknown> | undefined;
   /**
    * Issue #1185: `data` を抽出（LLM）に渡すかどうかの opt-in。**既定は `false`（渡さない、
    * 上の `data` の doc 参照）。** `true` のときだけ、Observation の `payload` に
@@ -368,35 +368,35 @@ export interface ObserveEventInput {
    * 上限は無い（`content`/`name` が今も上限を持たないのと同じ。詳細は
    * [ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)）。
    */
-  extractData?: boolean;
+  extractData?: boolean | undefined;
 }
 
 /** `observe` に渡す文書。⚠ 抽出に渡るのは既定では `content` だけである（`title` の doc、`extractTitle` で opt-in できる）。 */
 export interface ObserveDocumentInput {
   /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
-  extractionContext?: ExtractionContext;
+  extractionContext?: ExtractionContext | undefined;
   /** 常に `"document"`。 */
   kind: "document";
   /** この観測の主題。`ctx.subjectId` より優先する（どちらも無ければ主題の無い観測になる）。 */
-  subjectId?: string;
+  subjectId?: string | undefined;
   /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
-  externalId?: string;
+  externalId?: string | undefined;
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
-  occurredAt?: Date;
+  occurredAt?: Date | undefined;
   /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
-  validFrom?: Date;
+  validFrom?: Date | undefined;
   /** 有効期間の終わり（{@link Observation.validFrom} の doc コメント参照）。 */
-  validUntil?: Date;
+  validUntil?: Date | undefined;
   /** 抽出の実行のしかた（{@link ExtractMode}）。省略なら `"sync"`（`observe` の中で抽出する）。`"deferred"` は outbox に積み、`tick` で抽出する。 */
-  extract?: ExtractMode;
+  extract?: ExtractMode | undefined;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
-  subjectCandidates?: SubjectCandidatesInput;
+  subjectCandidates?: SubjectCandidatesInput | undefined;
   /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0312）。 */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
    * `deriveClaimKeys` は一度も呼ばれない。 */
-  claimKey?: ClaimKeyOptions;
+  claimKey?: ClaimKeyOptions | undefined;
   /**
    * ⚠ **既定ではこの欄は抽出（LLM）に渡らない**（[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
    * testkit の fixture の両方で実測した、既定の振る舞い）。既定では抽出のプロンプトと全文
@@ -412,7 +412,7 @@ export interface ObserveDocumentInput {
    * 本文にする**（末尾の区切りが浮かないよう、`${title}\n\n${content}` の代わりに `title` 単体
    * にする）。
    */
-  title?: string;
+  title?: string | undefined;
   /** 抽出（LLM）に渡す本文。既定ではこの欄だけを本文にする（全文フォールバックの Memory も同じ）。 */
   content: string;
   /**
@@ -429,7 +429,7 @@ export interface ObserveDocumentInput {
    * 上限は無い（`content`/`name` が今も上限を持たないのと同じ。詳細は
    * [ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)）。
    */
-  extractTitle?: boolean;
+  extractTitle?: boolean | undefined;
 }
 
 /**
@@ -457,7 +457,7 @@ export interface ObserveMemoryUsageInput {
    * `recordUsage`/`reinforce` を呼ばず、他 kind の冪等な再送と同じ形
    * （`memoryIds: []`、`extraction: 'skipped'`）で返す。
    */
-  externalId?: string;
+  externalId?: string | undefined;
   /** 使った記憶を返した `recall()` の `recallId`。 */
   recallId: string;
   /**

@@ -215,7 +215,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **誰が影響を受けるか**: 自前の `OutboxStore`・`RelationStore` を上の suite に当てている利用者。`@mnemora/postgres` は、`RelationStore.link` の列挙外 `kind` の `it` だけ、修正前は落ちた（次の `### Fixed`）。ほかの5件は修正前から通る。インメモリ実装（`@mnemora/testkit/fixtures`）は、6件とも足した修正で通る。
   - **`@mnemora/postgres` の `PostgresRelationStore.link` の変化（破壊的とは別に数えない）**: 列挙外の `kind` は、これまでも `memory_relations.kind` の CHECK 違反で例外になっていた。今は INSERT の前に `PostgresRelationStore: unknown relation kind: <kind>` の `Error` で断る。**以前通っていた入力が新しく落ちるわけではない**（例外になる入力は同じ）。変わるのは例外の中身だけで、DB の生のエラー（`23514`）を `cause` などから読んでいた呼び出し側は、その読み方が効かなくなる。
   - **`@mnemora/testkit/fixtures` の変化（数えない）**: `InMemoryOutboxStore.complete`/`fail` が Invalid Date の `opts.at` を拒み、`InMemoryRelationStore.link` が列挙外の `kind` を拒むようになった。fixture が新しく例外を投げる変更は、数えない（[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」規律2）。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目41。DB マイグレーションは無い。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目43。DB マイグレーションは無い。
   - 【確かめていないこと】`complete`/`fail` の Invalid Date を、`jobId` が uuid の形でないときにどうするか: Postgres は先に何もせず返す（`at` を見ない）が、fixture は `jobId` を見る前に拒む。この差は `it` で縛っていない。
 - **`@mnemora/testkit` の `describeMemoryStoreConformance` が、自前の `MemoryStore` 実装に4つの約束を新しく課すようになった——`reinforce`/`reinforceMany?` が `memory_events` を書かないこと、`aggregateScope` が `scopeAggregate: 'skip'` を守ること、`createObservationWithOutbox` が `opts.claimedBy` を守ること（この3つはフラグ無しの `it`）、`listActiveClaimPredicates?` の同着の並び**（[PR #1452](https://github.com/takecchi/mnemora/pull/1452)・[PR #1455](https://github.com/takecchi/mnemora/pull/1455)・[PR #1484](https://github.com/takecchi/mnemora/pull/1484)・[PR #1492](https://github.com/takecchi/mnemora/pull/1492)）。
 
@@ -228,6 +228,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **誰が影響を受けるか**: 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者。1・2・4 はフラグを渡していなくても当たる。3 は `supportsListActiveClaimPredicates: true` を渡している場合だけ当たる。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目37〜40。DB マイグレーションは無い。
   - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres` とインメモリの実装が通ることだけを確かめた）。
+- **DB の生の例外で失敗していた3つの入力が、明示の扱いに変わった。conformance suite に `it` が3本増えた**（PR「fix/hunt-n-small-holes」の候補 N-3・N-4・N-5）。
+  - **`@mnemora/postgres` は、float4（`real` 列）に収まらない `halfLifeHours`・`halfLifeRecalls`（例: `1e39`・`1e-50`）を、DB へ渡す前に、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で断る**。対象は `createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `NewMemory` と `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls`。以前も例外にはなったが、DB の生の例外（`out of range for type real`）だった。testkit の fixture は既にこの判定・この文言で断っていた。core の doc に float4 の上限・下限を書いた。
+  - **`@mnemora/openai` と `@mnemora/local-embedding` の `embed()` は、abort 済みの `signal` を渡されたら、空配列でも `[]` を返さず `signal.reason` で reject する**（以前は空配列だと signal を見ずに `[]` を返した）。
+  - **`@mnemora/postgres` の `RelationStore.unlink` は、uuid の形でない id を何もせずに返し、`listRelated` は空配列を返す**（存在しない id と同じ扱い。以前は DB の型変換エラーで reject した）。testkit のインメモリは既にこの振る舞い。core の doc に書いた。
+  - **conformance に `it` を足した**: `describeMemoryStoreConformance`（float4 の範囲外の `createMemory`）、`describeTenantSettingsStoreConformance`（`setDefaultHalfLifeRecalls` の float4 の範囲外。この口を渡した場合）、`describeRelationStoreConformance`（uuid の形でない id の `unlink`・`listRelated` 各1本）。フラグ無しで走る。
+  - **誰が影響を受けるか**: 自前の `MemoryStore`/`TenantSettingsStore`/`RelationStore` 実装を conformance に当てている利用者。上の3つの adapter を、DB の生の例外の文言で捕まえていた呼び出し側。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目44・45。DB マイグレーションは無い。
+
 
 - **`runtime.consolidate`・`runtime.reflect` が、材料が superseded になったときと、統合元がすべて CAS に弾かれたときに、統合先・内省を書かずに `outcome: 'aborted_source_status_changed'` で打ち切るようになった**（[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)、[PR #1523](https://github.com/takecchi/mnemora/pull/1523)）。
   - **何が壊れていたか**:
@@ -383,8 +391,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `TrigramLexicalUnavailableReason` の union の値は増減しない。`detail`（`message`）と `cause` の内容も変えていない。
   - 非破壊と数える（型・公開 API・union は同じ。同じ入力で `reason` の値が、判定を直した側へ動く）。上の「利用者に返るエラー文…の整形を、outbox の `last_error` と同じにした」の項目（文字列の中身だけの変更を非破壊と数えた）が近い先例である。
 
+- **入力側の公開型の任意欄が `?: T | undefined` になった。`exactOptionalPropertyTypes: true` の利用者が `{ limit: maybeLimit }` のように `undefined` を渡せる**（[ADR 0429](./docs/decisions/0429-exact-optional-property-types-input-types.md)）。各パッケージの `*Options`・`RecallQuery`・`observe`/`tick` などの入力・port のメソッド引数の `opts` の型が広がるだけで、その設定を有効にしていない利用者では同じ型であり、既存のコードは壊れない（非破壊）。出力にも使われる型（`Memory`・`MemoryEvent` など）は広げていない。
+
 ### Fixed
 
+- **`runMigrations`（と `mnemora-postgres-migrate`）が、台帳から行が欠けたまま番号の小さい migration が当たり直されるとき、警告を出すようにした（穴探し6巡目 S-1、[ADR 0425](./docs/decisions/0425-migrate-warns-on-ledger-drift.md)）。**台帳から `0011` の行だけが欠けた DB で流すと、0011 が単独で当たり直り、0018 が足した `'unsuperseded'` が `memory_events_kind_check` から黙って消えていた。未適用のファイルのうち台帳の最大の番号より小さいものが在れば、`console.warn`（`[@mnemora/postgres] migrate: …`）で名指しして続行する。止めない・適用の順序と中身は変えない（そのファイルも当てる）。公開の型・オプションは変わらない。
+- **`runMigrations`（と `mnemora-postgres-migrate`）が、台帳に手元の `migrations/` に無い名前があるとき、警告を出すようにした（穴探し6巡目 S-3、[ADR 0425](./docs/decisions/0425-migrate-warns-on-ledger-drift.md)）。**新しい版で上げた DB に古い版から流すと、何も言わずに「すべて適用済み」になっていた。手元の版が DB より古い可能性を警告する。止めない。公開の型・オプションは変わらない。
 - **`runtime.observe({ extract: "sync" })` が、LLM を待つ間に tick に同じ extract ジョブを取られる穴を塞いだ**（[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。以前は、sync の observe が積んだジョブは「すぐ claim できる」状態で、observe が LLM を待つ間に tick が claim できた。すると LLM が2回呼ばれ、内容の違う記憶が2件とも active で残り、observe 自身は `complete` が `OutboxLeaseConflictError` で負けて、書き込み済みなのに失敗し `memoryIds` が返らなかった（Postgres と InMemory の両方で再現）。
   - **直し方**: sync の observe は、extract ジョブを **observe が claim 済み**（`claimed_at` = now・`claimed_by` = `"runtime.observe:sync"`・`attempts` 1）の状態で積む。リースの内側では tick は取らない。observe が LLM の途中で死んだときは、リース切れの後に tick が拾う（transactional outbox の意味は保たれる）。deferred は今までどおり。
   - **LLM がリースより長くかかり tick に取り直されたとき**: observe は `OutboxLeaseConflictError` だけを握り、書き込み済みの結果（`memoryIds`）を返す。**この窓での二重抽出は塞いでいない**（`leaseMs` を LLM の最長時間より長くとる運用で狭める。ADR 0407 の「引き受けた負債」）。
@@ -448,6 +460,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 【確かめていないこと】`real` の列の全部（migration の `grep`: `memories` の3列と `tenant_settings` の2列）のうち、`reinforce` などが書き換える経路は、`strength`・`halfLifeHours`・`halfLifeRecalls` を書き換えないことをコードで見た（更新の口は無い）。
 
 - **`OutboxStore` の fixture が、`fail` の `error` の NUL を6文字の `\u0000` に置き換え、`complete`/`fail` の `opts.at` を複製して持つようになった。`RelationStore` の fixture が、`listRelated` の `createdAt` を複製して返すようになった**（Issue #1108 の方針、上の `### Breaking` の項目の fixture 側）。`@mnemora/core` の `OutboxStore`・`RelationStore` の doc にも約束を書いた。
+
+- **文書だけの訂正（挙動は変えない）**: (1) `probeTrigramLexicalSupport` の doc の「この関数自身は投げない」を、実装に合わせた（先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、接続の失敗・権限の不足で reject する）。(2) `ScoringInput.similarity` の doc の「0〜1」を、負になりうると直した。`MemoryStatusConflictError` の doc の `instanceof` を `isMemoryStatusConflictError` に追随させた。(3) `SQL_ASCII` の DB では、migration 0025 の `left(content, 150000)` が文字ではなくバイトで切ることを、現行の doc に書いた（ADR 0364 に追記。実測した。migration の SQL は出荷済みなので変えていない）。(4) `docs/recall.md` に `stage_skipped` の `stage: 'relation'`・`reason: 'relation_store_unavailable'` を足し、`docs/architecture.md` の 2つの片（`RelationKind` のドラフトの囲み、`OutboxLeaseConflictError` の宣言）を直した。
+
+- **`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding` を直に呼んで `signal` を abort したとき、reject の値を `signal.reason` に揃えた**（[ADR 0428](./docs/decisions/0428-provider-abort-reason-and-error-guards.md)。ADR 0359 決定4の約束に実装を合わせた）。
+  - openai・anthropic: reject の値が SDK の `APIUserAbortError` から `signal.reason` に**変わる**（abort 済みなら SDK を呼ばずに reject。SDK の再試行待ち＝429 の `retry-after` の最中でも abort で即座に切れる。以前は約3秒待っていた）。local-embedding: モデルの読み込み中・再試行の待ちも `signal` ごとに切れる（読み込みそのものは止まらず、同じ読み込みを待つ別の呼び出しは巻き添えにならない）。
+  - 足したもの: `isOpenAILLMProviderError`・`isAnthropicLLMProviderError`（`instanceof` を使わない判定関数。ADR 0418 の作法）。3つの provider の README に `signal` の振る舞いを追記し、openai README の `kind` の列挙に `schema_unsupported` を足した。公開 API は追加のみ。
 
 ---
 

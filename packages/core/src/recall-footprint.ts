@@ -453,9 +453,9 @@ export interface RecallFootprintShape {
    */
   memoryCountInScope: number;
   /** `RecallQuery.limit`。省略時は `DEFAULT_RECALL_LIMIT`。 */
-  limit?: number;
+  limit?: number | undefined;
   /** `RecallQuery.digestBandLimit`。省略時は `DEFAULT_DIGEST_BAND_LIMIT`。 */
-  digestBandLimit?: number;
+  digestBandLimit?: number | undefined;
   /**
    * 連想枠（`RecallQuery.association`、ADR 0151）が実際に **本体（memories tier）へ
    * 昇格させると見込む件数**。省略時は `0`。
@@ -484,7 +484,7 @@ export interface RecallFootprintShape {
    * （＝ `limit` の外に居る候補の総数）を超える分は、渡しても切り詰められる
    * ——昇格できる候補がそれ以上存在しないため。
    */
-  associationCount?: number;
+  associationCount?: number | undefined;
 }
 
 /** 見積もりの内訳。**「なぜその数になったか」を後から説明できる形で返す**（北極星の問い3）。 */
@@ -818,9 +818,9 @@ export interface FullLogComparisonInput {
   /** 見積もる recall の形（スコープ内の件数など。{@link RecallFootprintShape}）。 */
   shape: RecallFootprintShape;
   /** 見積もりの係数。省略すると同梱の既定プロファイル（このリポジトリのベンチで測った値）を使う。 */
-  profile?: RecallFootprintProfile;
+  profile?: RecallFootprintProfile | undefined;
   /** `'too_close_to_call'` を返す幅。既定は `DEFAULT_FOOTPRINT_TOLERANCE`。 */
-  tolerance?: number;
+  tolerance?: number | undefined;
 }
 
 /** {@link compareWithFullLog} の結果。 */

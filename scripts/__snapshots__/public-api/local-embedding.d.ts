@@ -33,22 +33,22 @@ export declare const DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE = 128;
 export declare const DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS = 3;
 export declare function defaultLocalEmbeddingRetryDelayMs(attempt: number): number;
 export interface LocalEmbeddingRetryOptions {
-    attempts?: number;
-    delayMs?: (attempt: number) => number;
+    attempts?: number | undefined;
+    delayMs?: ((attempt: number) => number) | undefined;
 }
 export interface LocalEmbeddingProviderOptions {
-    repo?: string;
-    dtype?: LocalEmbeddingDtype;
-    dimensions?: number;
-    modelId?: string;
-    prefix?: string;
-    cacheDir?: string;
-    numThreads?: number;
-    maxBatchSize?: number;
-    revision?: string;
-    createPipeline?: CreateLocalEmbeddingPipeline;
-    retry?: LocalEmbeddingRetryOptions;
-    sleep?: (ms: number) => Promise<void>;
+    repo?: string | undefined;
+    dtype?: LocalEmbeddingDtype | undefined;
+    dimensions?: number | undefined;
+    modelId?: string | undefined;
+    prefix?: string | undefined;
+    cacheDir?: string | undefined;
+    numThreads?: number | undefined;
+    maxBatchSize?: number | undefined;
+    revision?: string | undefined;
+    createPipeline?: CreateLocalEmbeddingPipeline | undefined;
+    retry?: LocalEmbeddingRetryOptions | undefined;
+    sleep?: ((ms: number) => Promise<void>) | undefined;
 }
 export declare class LocalEmbeddingProvider implements EmbeddingProvider {
     #private;

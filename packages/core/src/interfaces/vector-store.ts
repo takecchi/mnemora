@@ -43,14 +43,14 @@ export interface VectorFilter {
   /**
    * 指定すると、この中のどれかの status を持つ行だけを返す。未指定なら status で絞らない。⚠ 空配列なら1件も通らない（`@mnemora/postgres` と testkit の fixture で同じ）。
    */
-  status?: MemoryStatus[];
+  status?: MemoryStatus[] | undefined;
   /**
    * **狭義の `>`。** `decayFloorAt` が境界と*ちょうど同じ* Memory は含まれない
    * （`packages/postgres/src/vector-store.ts` の `m.decay_floor_at > ${decayFloorAtAfter}`
    * がこの意味論の基準）。`>=` にすると忘却の境界上にある記憶が想起され続けてしまう
    * （ADR 0004 の「忘却をクエリ時に算出する」設計と整合させるため）。
    */
-  decayFloorAtAfter?: Date;
+  decayFloorAtAfter?: Date | undefined;
   /**
    * subject の等値一致（`docs/vision.md` の「Tenant と Subject を混同しない」区別における
    * テナント内の整理の単位）。等値比較なので上のクラス doc の「索引で表現できる形」に
@@ -61,7 +61,7 @@ export interface VectorFilter {
    * 式索引（`COALESCE(occurred_at, recorded_at)`）を1本追加することで受けた
    * （ADR 0023 が「降ろすにはスキーマに踏み込む判断が要る」と書いた、その判断そのもの）。
    */
-  subjectId?: string;
+  subjectId?: string | undefined;
   /**
    * **`subjectId` の等値絞りを、`subject_id IS NULL`（主題なし）まで広げる opt-in**
    * （Issue #608 項目③(b)、[ADR 0286](../../../../docs/decisions/0286-recall-include-subjectless.md)）。
@@ -78,7 +78,7 @@ export interface VectorFilter {
    * 後置フィルタが、adapter がこの欄を守らなかった場合の多層防御になっている——
    * `decayFloorAtAfter` 等と同じ規律）。
    */
-  includeSubjectless?: boolean;
+  includeSubjectless?: boolean | undefined;
   /**
    * **除外**の列挙である（ADR 0056）。**上の `status` とは向きが逆**——`status` は
    * 「この配列に*在る*ものだけ通す」包含の列挙だが、`excludeProvenanceKinds` は
@@ -99,7 +99,7 @@ export interface VectorFilter {
    * 「除外する kind が0個」という意味であり全件を通す。適合テストの歯
    * （`vector-store-conformance.ts`）がこの非対称を固定している。
    */
-  excludeProvenanceKinds?: ProvenanceKind[];
+  excludeProvenanceKinds?: ProvenanceKind[] | undefined;
   /**
    * **期間の下限。両端とも包含（`>=`）（ADR 0059）。** 比較対象は
    * `COALESCE(occurredAt, recordedAt)`——「実効時刻」の定義（ADR 0039 が4箇所に在ると
@@ -118,12 +118,12 @@ export interface VectorFilter {
    * 事情が異なる。ADR 0059 はこれを式索引（`COALESCE(occurred_at, recorded_at)` に対する
    * 3列索引）で受けている。
    */
-  occurredAfter?: Date;
+  occurredAfter?: Date | undefined;
   /**
    * 期間の上限。`occurredAfter` と対になる——同じ実効時刻の定義（`COALESCE(occurredAt,
    * recordedAt)`）・同じ境界の含み方（**包含、`<=`**）。詳細は `occurredAfter` の doc を参照。
    */
-  occurredBefore?: Date;
+  occurredBefore?: Date | undefined;
   /**
    * 活動時計の忘却ゲート（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
    * 決めたこと1・12、`decay_clock: 'activity'`/`'either'`）。**狭義の `>`**——`decayFloorAtAfter`
@@ -134,7 +134,7 @@ export interface VectorFilter {
    * 活動時計では沈まない」（ADR 0165 決めたこと4）——`decayFloorSeqAfter` を渡しても、
    * `decay_floor_seq` が無い行を落としてはならない。
    */
-  decayFloorSeqAfter?: number;
+  decayFloorSeqAfter?: number | undefined;
   /**
    * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `true` のとき、`decayFloorSeqAfter`（テナント単位の `T`）に、その
@@ -150,7 +150,7 @@ export interface VectorFilter {
    * プラン族を変えないための最適化**（本欄の doc、`readHasSubjectActivityCounters` の
    * doc コメント参照）。
    */
-  decayFloorSeqUsesSubjectCounters?: boolean;
+  decayFloorSeqUsesSubjectCounters?: boolean | undefined;
   /**
    * `decayFloorAtAfter` と `decayFloorSeqAfter` の結び方を切り替える（ADR 0165 決めたこと1、
    * `decay_clock: 'either'` の表現）。既定 `false`（未指定時と同じ）。
@@ -165,7 +165,7 @@ export interface VectorFilter {
    * この欄は無視される（もう片方が無いので OR にする相手がいない——単に渡された側の
    * 条件だけが効く）。
    */
-  decayFloorAnyAxis?: boolean;
+  decayFloorAnyAxis?: boolean | undefined;
   /**
    * **「この時刻において真だった記憶」ゲート**（Issue #280、Issue #202 第2弾、
    * `@mnemora/core` の `RecallQuery.validAt` の doc 参照）。
@@ -186,14 +186,14 @@ export interface VectorFilter {
    * 要旨: 既存行の大多数が両端 `NULL` でこの述語を通るため、索引で絞れる対象
    * （落ちる行）が少数であり、btree/部分索引でも計画が改善しない。
    */
-  validAt?: Date;
+  validAt?: Date | undefined;
   /**
    * **AND 等値の絞り込み**（Issue #152/#153、ADR 0312）。`RecallScope.attributes`/
    * `RecallQuery.attributes` の doc コメント参照。`jsonb` の containment（`@>`）に
    * 落ちる形——渡したキーすべてが、その Memory の `attributes` に同じ値で存在する
    * 場合だけ通す。**未指定・空オブジェクトは no-op**（絞り込み無し）。
    */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /**
    * **OR の集合絞り込み**（Issue #201 PR-B、
    * [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
@@ -203,7 +203,7 @@ export interface VectorFilter {
    * 参加資格がある」ことが呼び出し側（core）で解決済みであり、この interface の
    * 実装は `status`（`registered`/`proposed`）を意識しなくてよい。
    */
-  labels?: string[];
+  labels?: string[] | undefined;
 }
 
 /** `VectorStore.getVectors` が返す1件。 */

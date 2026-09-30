@@ -69,13 +69,13 @@ export interface LLMProviderConformanceOptions<T> {
   createFailing:
     ((error: unknown) => LLMProviderFailureHarness | Promise<LLMProviderFailureHarness>) | null;
   /** 省略時は `{ tenantId: "llm-provider-conformance" }`。 */
-  ctx?: Ctx;
+  ctx?: Ctx | undefined;
   /**
    * 各 `it` のタイムアウト（ミリ秒）。**省略時は vitest の既定（5秒）。**
    * 理由は `describeEmbeddingProviderConformance` の同名オプションと同じ
    * ——本物の実装（ネットワーク往復）に当てることを想定している。
    */
-  timeout?: number;
+  timeout?: number | undefined;
 }
 
 const defaultCtx: Ctx = { tenantId: "llm-provider-conformance" };

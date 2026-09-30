@@ -93,6 +93,10 @@ export class PostgresRelationStore implements RelationStore {
     assertWellFormedCtx(ctx);
     const from = normalizeUuidCase(fromId);
     const to = normalizeUuidCase(toId);
+    // uuid の形でない id は、存在しない id と同じ（張られている行は無い）ので何もしない。
+    if (!isUuidLike(from) || !isUuidLike(to)) {
+      return;
+    }
     await this.db.execute(sql`
       DELETE FROM memory_relations
       WHERE tenant_id = ${ctx.tenantId}
@@ -148,6 +152,10 @@ export class PostgresRelationStore implements RelationStore {
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
     assertWellFormedCtx(ctx);
     const id = normalizeUuidCase(memoryId);
+    // uuid の形でない id は、存在しない id と同じ（関係は無い）ので、DB へ投げず空を返す。
+    if (!isUuidLike(id)) {
+      return [];
+    }
     const result = kind
       ? await this.db.execute(sql`
           SELECT from_memory_id, to_memory_id, kind, created_at FROM memory_relations

@@ -28,7 +28,7 @@ export interface RelationStoreConformanceOptions {
    * `true` のとき、実装が無ければ赤にする。省略・`false` のとき、実装が無ければ `listRelatedMany` の節は skip する
    * （実装していない adapter に、既存の判定より厳しいものを課さない）。実装が有れば、宣言に依らず節はかかる。
    */
-  implementsListRelatedMany?: boolean;
+  implementsListRelatedMany?: boolean | undefined;
 }
 
 /**
@@ -100,6 +100,27 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       const b = await prepareMemoryId(ctx);
 
       await expect(store.unlink(ctx, "contradicts", a, b)).resolves.toBeUndefined();
+    });
+
+    it("unlink は uuid の形でない id を、存在しない id と同じに扱う（何もしない。DB の生の例外にしない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+
+      await expect(
+        store.unlink(ctx, "contradicts", "not-a-uuid" as MemoryId, a),
+      ).resolves.toBeUndefined();
+      await expect(
+        store.unlink(ctx, "contradicts", a, "not-a-uuid" as MemoryId),
+      ).resolves.toBeUndefined();
+    });
+
+    it("listRelated は uuid の形でない id に空配列を返す（存在しない id と同じ。DB の生の例外にしない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      expect(await store.listRelated(ctx, "not-a-uuid" as MemoryId)).toEqual([]);
+      expect(await store.listRelated(ctx, "not-a-uuid" as MemoryId, "contradicts")).toEqual([]);
     });
 
     it("listRelated は関係の無い Memory に対して空配列を返す", async () => {

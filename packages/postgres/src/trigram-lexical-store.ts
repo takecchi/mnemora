@@ -212,9 +212,18 @@ export interface TrigramLexicalProbeUnavailable {
 
 /**
  * `probeTrigramLexicalSupport` の戻り値。「なぜ使えないか」を値として返す
- * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数自身は
- * 投げない——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）のために
- * 例外と値の両方の入口を用意する）。
+ * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数は
+ * 「使えない理由」を値で返す——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）の
+ * ために例外と値の両方の入口を用意する）。
+ *
+ * ⚠ **「使えない」ことを値で返すのであって、この関数が一切 reject しないわけではない。**
+ * 先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、失敗を握らずそのまま
+ * 伝える——接続の失敗・権限の不足（カタログを読めない等）はここで reject する（値の
+ * {@link TrigramLexicalProbeUnavailable} にはならない）。値になるのは、エンコーディングが UTF8 でない
+ * （`server_encoding_not_utf8`）・拡張が入手できない（`extension_unavailable`）・`CREATE EXTENSION`
+ * 以降で失敗した（`extension_create_denied`/`extension_create_failed`。`vector` の
+ * スキーマを読む SELECT もこの `try` の中）場合である。ヘルスチェックに使うときは、reject も
+ * 「使えるか分からない」として扱うこと。
  */
 export type TrigramLexicalProbeResult = TrigramLexicalProbeOk | TrigramLexicalProbeUnavailable;
 
@@ -693,7 +702,12 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  */
 export function buildTrigramLexicalSearchSelect(
   query: string,
-  opts: { limit: number; filter: LexicalFilter; threshold: number; ctxTenantId?: string },
+  opts: {
+    limit: number;
+    filter: LexicalFilter;
+    threshold: number;
+    ctxTenantId?: string | undefined;
+  },
 ): SQL {
   // Issue #878: 全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc）は
   // ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
@@ -852,7 +866,10 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
    * 別途、自分のタイミングで呼ぶ（このファイル冒頭の doc「なぜフィルタ条件の組み立てを
    * 複製するか」の下、`ensureTrigramLexicalFunctions` の doc参照）。
    */
-  static async create(db: Db, opts?: { threshold?: number }): Promise<PostgresTrigramLexicalStore> {
+  static async create(
+    db: Db,
+    opts?: { threshold?: number | undefined },
+  ): Promise<PostgresTrigramLexicalStore> {
     const probe = await probeTrigramLexicalSupportWithCause(db);
     if (!probe.ok) {
       // `probe.cause` は `extension_create_denied`/`extension_create_failed` のときだけ
