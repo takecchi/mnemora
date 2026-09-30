@@ -12055,6 +12055,475 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // 別テナントの行を指す参照（ADR 0439。ADR 0398・0436 と同じ扱い）: `recordUsage` の `recallId`・`memoryIds`、
+    // `createMemory` 系の `sourceObservationId`・`contestedWithId`・`supersededById`、`updateStatus*` と
+    // `resolveContested*` の `supersededById` は、`ctx.tenantId` の行を指していなければ、何も書かずに
+    // `… not found for tenant` で拒む。実在しない id と区別しない。
+    // 各 it は、拒んだ後に自テナントの正しい参照なら書けること（断りすぎを防ぐ歯）まで見る。
+    // ⚠ 適合テストから見えるのは store の口までである。別テナントを指す行が実際に書かれていないこと、
+    // 被害側の `eraseTenant`・`purgeExpiredRecalls` が止まらないことは、Postgres の個別の歯が生 SQL で数えて縛る。
+    // -------------------------------------------------------------------
+
+    const FOREIGN_REFERENCE_EVENT = (ctx: Ctx, memoryId: MemoryId): NewMemoryEvent => ({
+      tenantId: ctx.tenantId,
+      memoryId,
+      kind: "updated",
+      actor: { type: "system" },
+      digestSnapshot: "digest",
+      meta: {},
+    });
+
+    it("recordUsage は別テナントの recall・memory を指すと拒み、何も書かない。自テナントの正しい参照なら書ける（ADR 0439）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const memoryA = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-usage-a" }),
+      );
+      const memoryB = await store.createMemory(
+        ctxB,
+        buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-usage-b" }),
+      );
+      const recallA = await prepareRecallId(ctxA);
+      const recallB = await prepareRecallId(ctxB);
+
+      await expect(store.recordUsage(ctxA, recallA, [memoryB.id])).rejects.toThrow(
+        /memory not found for tenant/,
+      );
+      // 自テナントと別テナントの記憶を混ぜても全体が拒まれ、自テナントの分も書かれない。
+      await expect(store.recordUsage(ctxA, recallA, [memoryA.id, memoryB.id])).rejects.toThrow(
+        /memory not found for tenant/,
+      );
+      await expect(store.recordUsage(ctxA, recallB, [memoryA.id])).rejects.toThrow(
+        /recall not found for tenant/,
+      );
+
+      // 拒んだ後も、自テナントの正しい参照は書ける。（混ぜた呼び出しが部分的に書いていたら、ここは [] になる。）
+      const ok = await store.recordUsage(ctxA, recallA, [memoryA.id]);
+      expect(ok.insertedMemoryIds).toEqual([memoryA.id]);
+    });
+
+    it("recordUsageAndReinforce（任意メソッド、あれば）も、別テナントの recall・memory を指すと拒み、強化もしない（ADR 0439）", async () => {
+      const store = await createStore();
+      if (typeof store.recordUsageAndReinforce !== "function") {
+        return;
+      }
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const memoryA = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-usage-reinforce-a" }),
+      );
+      const memoryB = await store.createMemory(
+        ctxB,
+        buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-usage-reinforce-b" }),
+      );
+      const recallA = await prepareRecallId(ctxA);
+      const recallB = await prepareRecallId(ctxB);
+      const at = new Date("2026-06-01T00:00:00.000Z");
+
+      await expect(
+        store.recordUsageAndReinforce(ctxA, recallA, [memoryA.id, memoryB.id], at),
+      ).rejects.toThrow(/memory not found for tenant/);
+      await expect(store.recordUsageAndReinforce(ctxA, recallB, [memoryA.id], at)).rejects.toThrow(
+        /recall not found for tenant/,
+      );
+      expect((await store.get(ctxA, memoryA.id))?.lastReinforcedAt).toBeNull();
+      expect((await store.get(ctxB, memoryB.id))?.lastReinforcedAt).toBeNull();
+
+      const ok = await store.recordUsageAndReinforce(ctxA, recallA, [memoryA.id], at);
+      expect(ok.insertedMemoryIds).toEqual([memoryA.id]);
+    });
+
+    it("createMemory・createMemoryWithOutbox は別テナントの observation・memory を指す参照を拒み、何も書かない。自テナントの参照なら書ける（ADR 0439）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const observationA = await store.createObservation(
+        ctxA,
+        buildNewObservationFixture({ tenantId: "tenant-a" }),
+      );
+      const observationB = await store.createObservation(
+        ctxB,
+        buildNewObservationFixture({ tenantId: "tenant-b" }),
+      );
+      const memoryA = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-create-a" }),
+      );
+      const memoryB = await store.createMemory(
+        ctxB,
+        buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-create-b" }),
+      );
+
+      await expect(
+        store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-create-src",
+            sourceObservationId: observationB.id,
+          }),
+        ),
+      ).rejects.toThrow(/observation not found for tenant/);
+      await expect(
+        store.createMemoryWithOutbox(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-create-src-outbox",
+            sourceObservationId: observationB.id,
+          }),
+          ["embed"],
+        ),
+      ).rejects.toThrow(/observation not found for tenant/);
+      await expect(
+        store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-create-contested",
+            status: "contested",
+            contestedWithId: memoryB.id,
+          }),
+        ),
+      ).rejects.toThrow(/memory not found for tenant/);
+      await expect(
+        store.createMemoryWithOutbox(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-create-contested-outbox",
+            status: "contested",
+            contestedWithId: memoryB.id,
+          }),
+          ["embed"],
+        ),
+      ).rejects.toThrow(/memory not found for tenant/);
+      await expect(
+        store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-create-superseded",
+            status: "superseded",
+            supersededById: memoryB.id,
+          }),
+        ),
+      ).rejects.toThrow(/memory not found for tenant/);
+
+      // 行は書かれていない（A の ctx から、B の observation を指す行は見えない）。
+      expect(await store.listBySourceObservationAllVersions(ctxA, observationB.id)).toEqual([]);
+
+      // 拒んだ後も、自テナントの正しい参照なら書ける。
+      const withSource = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({
+          tenantId: "tenant-a",
+          contentHash: "xref-create-src-ok",
+          sourceObservationId: observationA.id,
+        }),
+      );
+      expect(withSource.sourceObservationId).toBe(observationA.id);
+      const contested = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({
+          tenantId: "tenant-a",
+          contentHash: "xref-create-contested-ok",
+          status: "contested",
+          contestedWithId: memoryA.id,
+        }),
+      );
+      expect(contested.contestedWithId).toBe(memoryA.id);
+      const superseded = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({
+          tenantId: "tenant-a",
+          contentHash: "xref-create-superseded-ok",
+          status: "superseded",
+          supersededById: memoryA.id,
+        }),
+      );
+      expect(superseded.supersededById).toBe(memoryA.id);
+    });
+
+    it("updateStatus・updateStatusWithEvent は別テナントの memory を supersededById に取ると拒み、対象は変わらない。自テナントの参照なら書ける（ADR 0439）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const target = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-status-target" }),
+      );
+      const own = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-status-own" }),
+      );
+      const memoryB = await store.createMemory(
+        ctxB,
+        buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-status-b" }),
+      );
+
+      await expect(
+        store.updateStatus(ctxA, target.id, "superseded", { supersededById: memoryB.id }),
+      ).rejects.toThrow(/memory not found for tenant/);
+      await expect(
+        store.updateStatusWithEvent(
+          ctxA,
+          target.id,
+          "superseded",
+          { supersededById: memoryB.id },
+          FOREIGN_REFERENCE_EVENT(ctxA, target.id),
+        ),
+      ).rejects.toThrow(/memory not found for tenant/);
+      const unchanged = await store.get(ctxA, target.id);
+      expect(unchanged?.status).toBe("active");
+      expect(unchanged?.supersededById).toBeNull();
+      expect(await listEventsForMemory(ctxA, target.id)).toEqual([]);
+
+      const updated = await store.updateStatus(ctxA, target.id, "superseded", {
+        supersededById: own.id,
+      });
+      expect(updated.supersededById).toBe(own.id);
+      const viaEvent = await store.updateStatusWithEvent(
+        ctxA,
+        own.id,
+        "superseded",
+        { supersededById: target.id },
+        FOREIGN_REFERENCE_EVENT(ctxA, own.id),
+      );
+      expect(viaEvent.memory.supersededById).toBe(target.id);
+    });
+
+    if (supportsSupersedeWithNewMemories === true) {
+      it("supersedeWithNewMemories は news の別テナントを指す参照を拒み、news も supersede も書かない。自テナントの参照なら書ける（ADR 0439）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const observationA = await store.createObservation(
+          ctxA,
+          buildNewObservationFixture({ tenantId: "tenant-a" }),
+        );
+        const observationB = await store.createObservation(
+          ctxB,
+          buildNewObservationFixture({ tenantId: "tenant-b" }),
+        );
+        const memoryB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-supersede-b" }),
+        );
+        const old = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-supersede-old" }),
+        );
+        const supersedeOld = (index: number) => [
+          {
+            id: old.id,
+            supersededByIndex: index,
+            expectedStatus: "active" as const,
+            event: buildSupersedeEvent(ctxA, old.id, old.digest),
+          },
+        ];
+
+        for (const [label, override] of [
+          ["sourceObservationId", { sourceObservationId: observationB.id }],
+          ["contestedWithId", { status: "contested" as const, contestedWithId: memoryB.id }],
+          ["supersededById", { status: "superseded" as const, supersededById: memoryB.id }],
+        ] as const) {
+          await expect(
+            store.supersedeWithNewMemories!(
+              ctxA,
+              [
+                {
+                  input: buildNewMemoryFixture({
+                    tenantId: "tenant-a",
+                    contentHash: `xref-supersede-new-${label}`,
+                    ...override,
+                  }),
+                  jobKinds: ["embed"],
+                },
+              ],
+              supersedeOld(0),
+            ),
+          ).rejects.toThrow(/not found for tenant/);
+          expect((await store.get(ctxA, old.id))?.status).toBe("active");
+        }
+        expect(await store.listBySourceObservationAllVersions(ctxA, observationB.id)).toEqual([]);
+
+        const ok = await store.supersedeWithNewMemories!(
+          ctxA,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-a",
+                contentHash: "xref-supersede-new-ok",
+                sourceObservationId: observationA.id,
+              }),
+              jobKinds: ["embed"],
+            },
+          ],
+          supersedeOld(0),
+        );
+        expect(ok.created[0]?.memory.sourceObservationId).toBe(observationA.id);
+        expect((await store.get(ctxA, old.id))?.supersededById).toBe(ok.created[0]?.memory.id);
+      });
+    }
+
+    if (supportsCreateMemoriesWithOutboxAndEvents === true) {
+      it("createMemoriesWithOutboxAndEvents は別テナントを指す候補を dropped にし、自テナントの候補は書く（ADR 0439）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const observationA = await store.createObservation(
+          ctxA,
+          buildNewObservationFixture({ tenantId: "tenant-a" }),
+        );
+        const observationB = await store.createObservation(
+          ctxB,
+          buildNewObservationFixture({ tenantId: "tenant-b" }),
+        );
+        const buildCreated = (memory: Memory): NewMemoryEvent =>
+          FOREIGN_REFERENCE_EVENT(ctxA, memory.id);
+        const bad = {
+          input: buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-batch-bad",
+            sourceObservationId: observationB.id,
+          }),
+          jobKinds: ["embed" as const],
+        };
+        const good = {
+          input: buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "xref-batch-good",
+            sourceObservationId: observationA.id,
+          }),
+          jobKinds: ["embed" as const],
+        };
+
+        await expect(
+          store.createMemoriesWithOutboxAndEvents!(ctxA, [bad], buildCreated),
+        ).rejects.toThrow(/observation not found for tenant/);
+
+        const result = await store.createMemoriesWithOutboxAndEvents!(
+          ctxA,
+          [bad, good],
+          buildCreated,
+        );
+        expect(result.written.map((w) => w.index)).toEqual([1]);
+        expect(result.dropped.map((d) => d.index)).toEqual([0]);
+        expect(String((result.dropped[0]?.error as Error).message)).toMatch(
+          /observation not found for tenant/,
+        );
+        expect(await store.listBySourceObservationAllVersions(ctxA, observationB.id)).toEqual([]);
+      });
+    }
+
+    if (supportsMarkContestedPair === true && supportsResolveContestedPair === true) {
+      it("resolveContestedPair は別テナントの memory を supersededById に取ると拒み、対は contested のまま。自テナントの参照なら書ける（ADR 0439）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const first = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-pair-first" }),
+        );
+        const second = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "xref-pair-second" }),
+        );
+        const memoryB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-pair-b" }),
+        );
+        await store.markContestedPair!(
+          ctxA,
+          { id: first.id, event: FOREIGN_REFERENCE_EVENT(ctxA, first.id) },
+          { id: second.id, event: FOREIGN_REFERENCE_EVENT(ctxA, second.id) },
+        );
+
+        await expect(
+          store.resolveContestedPair!(
+            ctxA,
+            {
+              id: first.id,
+              status: "superseded",
+              supersededById: memoryB.id,
+              event: FOREIGN_REFERENCE_EVENT(ctxA, first.id),
+            },
+            { id: second.id, status: "active", event: FOREIGN_REFERENCE_EVENT(ctxA, second.id) },
+          ),
+        ).rejects.toThrow(/memory not found for tenant/);
+        await expect(
+          store.resolveContestedPair!(
+            ctxA,
+            { id: first.id, status: "active", event: FOREIGN_REFERENCE_EVENT(ctxA, first.id) },
+            {
+              id: second.id,
+              status: "superseded",
+              supersededById: memoryB.id,
+              event: FOREIGN_REFERENCE_EVENT(ctxA, second.id),
+            },
+          ),
+        ).rejects.toThrow(/memory not found for tenant/);
+        expect((await store.get(ctxA, first.id))?.status).toBe("contested");
+        expect((await store.get(ctxA, second.id))?.status).toBe("contested");
+
+        const ok = await store.resolveContestedPair!(
+          ctxA,
+          {
+            id: first.id,
+            status: "superseded",
+            supersededById: second.id,
+            event: FOREIGN_REFERENCE_EVENT(ctxA, first.id),
+          },
+          { id: second.id, status: "active", event: FOREIGN_REFERENCE_EVENT(ctxA, second.id) },
+        );
+        expect(ok.first.supersededById).toBe(second.id);
+      });
+    }
+
+    if (supportsMarkContestedGroup === true && supportsResolveContestedGroup === true) {
+      it("resolveContestedGroup は別テナントの memory を supersededById に取ると拒み、群は contested のまま。自テナントの参照なら書ける（ADR 0439）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const members = await Promise.all(
+          ["xref-group-a", "xref-group-b", "xref-group-c"].map((contentHash) =>
+            store.createMemory(ctxA, buildNewMemoryFixture({ tenantId: "tenant-a", contentHash })),
+          ),
+        );
+        const memoryB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "xref-group-other" }),
+        );
+        await store.markContestedGroup!(
+          ctxA,
+          members.map((m) => ({ id: m.id, event: FOREIGN_REFERENCE_EVENT(ctxA, m.id) })),
+        );
+        const resolveWith = (supersededById: MemoryId) =>
+          store.resolveContestedGroup!(
+            ctxA,
+            members.map((m, i) => ({
+              id: m.id,
+              status: i === 0 ? ("active" as const) : ("superseded" as const),
+              ...(i === 0 ? {} : { supersededById }),
+              event: FOREIGN_REFERENCE_EVENT(ctxA, m.id),
+            })),
+          );
+
+        await expect(resolveWith(memoryB.id)).rejects.toThrow(/memory not found for tenant/);
+        for (const m of members) {
+          expect((await store.get(ctxA, m.id))?.status).toBe("contested");
+        }
+
+        const ok = await resolveWith(members[0]!.id);
+        expect(ok.members.filter((m) => m.supersededById === members[0]!.id)).toHaveLength(2);
+      });
+    }
+
+    // -------------------------------------------------------------------
     // requeueEmbedJobs（ADR 0079: 索引に載っていない Memory を積み直す）
     //
     // ここで検査するのは「`embeddingStatus` が `pending` に戻ったか」ではなく
