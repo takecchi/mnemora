@@ -937,3 +937,45 @@ Index Only Scan になりうるため。
 - ⛔ **subject の分布が偏った場合**（上の測定は subject 300 が一様）。
 - ⛔ **planning 時間**（約3ms）は、この索引では縮まない。
 - 測定用のスクリプトは commit していない。
+
+### `findActiveByClaimKey` と新索引（同日、測定を足した）
+
+⛔ 上の本文は書き換えていない。上の「副作用」（`findActiveByClaimKey` も新しい索引を選ぶことがある）を、
+数字で測った。「速くなった」「遅くならない」とは断定しない。
+
+**背景**: `claim-key-index.postgres.test.ts` の20,000行の形では、`findActiveByClaimKey` も
+`idx_memories_claim_predicates` を選ぶことがある。そのときのコスト見積もりは 8.32（旧
+`idx_memories_claim_key`）と 8.31（新）でほぼ同点で、どちらを選ぶかは揺れうる。
+
+**測定1（通常の分布）**: 前回と同じ100万行のテナント（subject 300、`claim_key_subject` 50種、
+predicate 500種）。前（main `1becd89`）と後（枝 `dd79c0e`）の**両方で旧索引 `idx_memories_claim_key` が
+選ばれ、プランは同じ**だった。visibility map は全ページ all-visible（28564/28564）。14往復、1点は別の
+node プロセスで50回の中央値。
+
+| 問い | 前 | 後 | 差（後 − 前）の中央値 | 範囲 | Q1〜Q3 |
+|---|---|---|---|---|---|
+| A（一致する active が2行） | 1.39ms | 1.52ms | +0.24ms | −0.52〜+0.51 | −0.00〜+0.28 |
+| B（ヒット0件） | 1.23ms | 1.18ms | −0.04ms | −0.54〜+1.21 | −0.20〜+0.18 |
+
+プランが同じなので、この差は索引によるものとは言えない。
+
+**測定2（新索引が選ばれる形）**: `claim-key-index.postgres.test.ts` の seed の形（subject 20種 + NULL 5%、
+`claim_key_subject` は `user` の1種、predicate 200種、active : contested = 1 : 1、別テナントは N/4）を、同じ
+比率で active 100万行まで広げた（計 2.25M 行）。前後で全行の hash と件数は一致し、visibility map は全ページ
+all-visible（66177/66177）。後で `idx_memories_claim_predicates` が選ばれることを EXPLAIN で確かめた
+（前は旧索引で、contested の1667行を Filter で捨てる。後は部分索引の Index Scan で、`claim_key_subject` は
+Filter）。一致は1667件で、前後同じ。14往復。
+
+- 前 27.84ms / 後 27.44ms。差（後 − 前）の中央値 −0.48ms、範囲 −6.92〜+4.12、Q1〜Q3 −1.36〜+1.44
+  （負8・正6往復）。
+
+**受け入れた理由**: 新索引が選ばれる形でも、後のほうが揺れの幅を超えて遅くなってはいない。通常の分布では
+旧索引が選ばれ、プランが変わらない。⚠ この判定は、**オーナーではなくクローン側が定めた基準**
+（「揺れを超えて遅くならなければ受け入れる」）による。オーナーが確認した基準ではない。
+
+**確かめていないこと**:
+
+- ⛔ 一致行が数行の典型的な組で、新索引が選ばれる形（測定2は一致が1667件）。
+- ⛔ `subject_id IS NULL` での呼び出し。
+- ⛔ 書き込み負荷のもとでの挙動。
+- 測定用のスクリプトは commit していない。
