@@ -11,6 +11,7 @@ import type {
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   MemoryStore,
+  NewRecallRecord,
   NewMemoryEvent,
   OutboxJobRecord,
   RecallId,
@@ -225,6 +226,29 @@ export interface MemoryStoreConformanceOptions {
    * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
    */
   supportsPurgeExpiredRecalls?: boolean | undefined;
+  /**
+   * [ADR 0437](../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3:
+   * 対象の `MemoryStore` 実装が `scrubPurged`（任意メソッド。v1.1.0 より前に purge した行の残骸を、
+   * purge のかけ直しで消す口）を実装しているかどうか。`supportsPurgeMemory: true` のときだけ見る。
+   *
+   * ⚠ `supportsPurgeExpiredRecalls` と同じ、任意（省略可）の3状態フラグである（必須にすると、この口を
+   * 知らない既存の呼び出し側がコンパイルできなくなる）。
+   *
+   * - `true`: 契約の歯（v1.0.x 相当の purge 済みの行の `tags`・`attributes`・claim key・label の紐付けが消え、
+   *   `proposedCount` が揃う・べき等で二重に数え減らさない・今のコードで purge した行を数え減らさない・
+   *   未 purge の行／他テナントの行は触らない・存在しない id で例外にしない）を実行する。
+   *   **`seedLegacyPurgedRow` が必要**（無ければ赤）。
+   * - `false`: `expect(store.scrubPurged).toBeUndefined()` を積極的に assert する。
+   * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
+   */
+  supportsScrubPurged?: boolean | undefined;
+  /**
+   * `supportsScrubPurged: true` のときに呼ばれる。**v1.1.0 より前の `purgeMemory` が残した状態**を作る:
+   * `status = 'forgotten'` の行を、`content`・`digest` をトゥームストーンへ上書きして `purgedAt` を立てるだけにする
+   * （`tags`・`attributes`・claim key・label の紐付けは触らない）。現在の `purgeMemory` は、それらも消すので、
+   * 公開の口だけではこの状態を作れない——adapter ごとに、生 SQL や内部の状態の書き換えで作る。
+   */
+  seedLegacyPurgedRow?: ((ctx: Ctx, memoryId: string) => Promise<void>) | undefined;
   /**
    * ADR 0114: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
    * 実装しているかどうか。**必須。**
@@ -575,6 +599,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsAbortIfForgotten,
     supportsPurgeExpiredEvents,
     supportsPurgeExpiredRecalls,
+    supportsScrubPurged,
+    seedLegacyPurgedRow,
     listPurgedEvents,
     supportsArchiveDecayed,
     supportsPurgeMemory,
@@ -7017,6 +7043,227 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           { memoryId: memory.id, digest: memory.digest },
         ]);
       });
+
+      // ADR 0437 決定3: 既に purge 済みの行（v1.1.0 より前に purge した行）の残骸を消す `scrubPurged`。
+      if (supportsScrubPurged === true) {
+        const purgeMetaFor = (memoryId: string, digest: string) =>
+          ({
+            tenantId: "tenant-1",
+            memoryId,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: digest,
+            meta: {},
+          }) as const;
+        const readLabel = async (store: MemoryStore, ctx: Ctx, name: string) =>
+          (await store.listLabels!(ctx)).find((l) => l.name === name);
+
+        it("scrubPurged: v1.0.x 相当の purge 済みの行の tags・attributes・claim key が消え、content/digest/purgedAt/status は変わらない", async () => {
+          expect(
+            seedLegacyPurgedRow,
+            "supportsScrubPurged: true には seedLegacyPurgedRow が要る",
+          ).toBeDefined();
+          const store = await createStore();
+          expect(store.scrubPurged).toBeDefined();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "scrub-purged-basic",
+              status: "forgotten",
+              tags: ["legacy-tag"],
+              attributes: { owner: "alice" },
+              claimKey: { subject: "user", predicate: "home_city" },
+            }),
+          );
+          await seedLegacyPurgedRow!(ctx, memory.id);
+          const legacy = await store.get(ctx, memory.id);
+          // 前提: v1.0.x の状態が作れている（purge 済みなのに残骸が在る）。
+          expect(legacy?.purgedAt).toBeInstanceOf(Date);
+          expect(legacy?.tags).toEqual(["legacy-tag"]);
+
+          await store.scrubPurged!(ctx, [memory.id]);
+
+          const after = await store.get(ctx, memory.id);
+          expect({
+            tags: after?.tags,
+            attributes: after?.attributes,
+            claimKey: after?.claimKey,
+            status: after?.status,
+            content: after?.content,
+            digest: after?.digest,
+            purgedAt: after?.purgedAt?.getTime(),
+          }).toEqual({
+            tags: [],
+            attributes: {},
+            claimKey: null,
+            status: "forgotten",
+            content: legacy?.content,
+            digest: legacy?.digest,
+            purgedAt: legacy?.purgedAt?.getTime(),
+          });
+        });
+
+        if (supportsLabels) {
+          it("scrubPurged: label の紐付けを外し、proposedCount を外した本数だけ減らす。べき等で、二重に数え減らさない", async () => {
+            expect(seedLegacyPurgedRow).toBeDefined();
+            const store = await createStore();
+            const ctx: Ctx = { tenantId: "tenant-1" };
+            const legacy = await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "scrub-purged-label-legacy",
+                status: "forgotten",
+                tags: ["scrub-shared"],
+              }),
+            );
+            await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "scrub-purged-label-keep",
+                tags: ["scrub-shared"],
+              }),
+            );
+            expect((await readLabel(store, ctx, "scrub-shared"))?.proposedCount).toBe(2);
+            await seedLegacyPurgedRow!(ctx, legacy.id);
+            // 今のコードで purge した行（残骸は purge 自身が消した）。数え減らしは purge の時点で済んでいる。
+            const current = await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "scrub-purged-label-current",
+                status: "forgotten",
+                tags: ["scrub-shared"],
+              }),
+            );
+            expect((await readLabel(store, ctx, "scrub-shared"))?.proposedCount).toBe(3);
+            await store.purgeMemory!(
+              ctx,
+              current.id,
+              { content: "[purged]", digest: "[purged]" },
+              purgeMetaFor(current.id, current.digest),
+            );
+            expect((await readLabel(store, ctx, "scrub-shared"))?.proposedCount).toBe(2);
+
+            await store.scrubPurged!(ctx, [legacy.id, current.id]);
+            // 外したのは legacy の1本だけ——current の分を二重に減らさない。
+            expect((await readLabel(store, ctx, "scrub-shared"))?.proposedCount).toBe(1);
+
+            // べき等: 何度呼んでも変わらない（0 を割らない）。
+            await store.scrubPurged!(ctx, [legacy.id, current.id]);
+            await store.scrubPurged!(ctx, [legacy.id]);
+            expect(await readLabel(store, ctx, "scrub-shared")).toEqual({
+              name: "scrub-shared",
+              status: "proposed",
+              proposedCount: 1,
+              registeredAt: null,
+            });
+          });
+        }
+
+        it("scrubPurged: 残骸の無い行は書き換えない（updatedAt も動かさない）", async () => {
+          expect(seedLegacyPurgedRow).toBeDefined();
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "scrub-purged-noop",
+              status: "forgotten",
+              tags: ["noop-tag"],
+            }),
+          );
+          await store.purgeMemory!(
+            ctx,
+            memory.id,
+            { content: "[purged]", digest: "[purged]" },
+            purgeMetaFor(memory.id, memory.digest),
+          );
+          const before = await store.get(ctx, memory.id);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          await store.scrubPurged!(ctx, [memory.id]);
+          const after = await store.get(ctx, memory.id);
+          expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
+          expect(after).toEqual(before);
+        });
+
+        it("scrubPurged: 未 purge の行（forgotten でも active でも）と他テナントの行は、id を渡されても触らない", async () => {
+          expect(seedLegacyPurgedRow).toBeDefined();
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const otherCtx: Ctx = { tenantId: "tenant-2" };
+          const common = {
+            tags: ["keep-tag"],
+            attributes: { owner: "bob" },
+            claimKey: { subject: "user", predicate: "home_city" },
+          };
+          const forgottenUnpurged = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "scrub-purged-unpurged-forgotten",
+              status: "forgotten",
+              ...common,
+            }),
+          );
+          const active = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "scrub-purged-active",
+              ...common,
+            }),
+          );
+          const otherTenantLegacy = await store.createMemory(
+            otherCtx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-2",
+              contentHash: "scrub-purged-other-tenant",
+              status: "forgotten",
+              ...common,
+            }),
+          );
+          await seedLegacyPurgedRow!(otherCtx, otherTenantLegacy.id);
+          const snapshotOf = async () => ({
+            a: await store.get(ctx, forgottenUnpurged.id),
+            b: await store.get(ctx, active.id),
+            c: await store.get(otherCtx, otherTenantLegacy.id),
+          });
+          const before = await snapshotOf();
+          expect(before.c?.tags).toEqual(["keep-tag"]);
+
+          await store.scrubPurged!(ctx, [forgottenUnpurged.id, active.id, otherTenantLegacy.id]);
+
+          expect(await snapshotOf()).toEqual(before);
+          if (supportsLabels) {
+            // 紐付けも外れていない（3件とも tags を持つので、label の件数は3本分のまま）。
+            expect((await readLabel(store, ctx, "keep-tag"))?.proposedCount).toBe(2);
+          }
+        });
+
+        it("scrubPurged: 存在しない id・形式不正な id・空配列は例外にしない", async () => {
+          expect(seedLegacyPurgedRow).toBeDefined();
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          await expect(store.scrubPurged!(ctx, [])).resolves.toBeUndefined();
+          await expect(
+            store.scrubPurged!(ctx, ["not-a-uuid", "00000000-0000-4000-8000-000000000000"]),
+          ).resolves.toBeUndefined();
+        });
+      } else if (supportsScrubPurged === false) {
+        it("scrubPurged は任意メソッドであり、この adapter は実装していない", async () => {
+          const store = await createStore();
+          expect(store.scrubPurged).toBeUndefined();
+        });
+      } else {
+        it(`⚠ 未検査: supportsScrubPurged が指定されていない — adapter "${name}" に対して scrubPurged の歯は検査していない`, () => {
+          expect(supportsScrubPurged).toBeUndefined();
+        });
+      }
     } else {
       it("purgeMemory は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
@@ -12806,6 +13053,60 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // -------------------------------------------------------------------
 
     describe("識別子の文字の扱い", () => {
+      /** `createRecall` の最小の入力（`advanceActivityClock` だけを差し替える）。 */
+      const recallRecordFor = (
+        tenantId: string,
+        overrides: Partial<NewRecallRecord> = {},
+      ): NewRecallRecord => ({
+        tenantId,
+        subjectId: null,
+        query: { text: "fixture" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic" as const,
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" as const },
+        explain: { stages: [] },
+        returnedMemories: [],
+        ...overrides,
+      });
+
+      // ADR 0437 決定2: `createRecall` の `advanceActivityClock.subjectId`（書き込む先の subject のカウンタ）も
+      // 識別子の検査の内側に置く。
+      for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+        it(`${label}を含む createRecall の advanceActivityClock.subjectId は、書く前に断る`, async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-wf-recall" };
+          await expectMalformedIdentifierRejection(
+            store.createRecall(
+              ctx,
+              recallRecordFor(ctx.tenantId, {
+                advanceActivityClock: { scope: "subject", subjectId: value },
+              }),
+            ),
+            `${label} / createRecall の advanceActivityClock.subjectId`,
+            value,
+          );
+        });
+      }
+
+      it("createRecall の advanceActivityClock.subjectId が対をなすサロゲート（絵文字）でも、断らない（陽性対照、ADR 0437）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-wf-recall-ok" };
+        const id = await store.createRecall(
+          ctx,
+          recallRecordFor(ctx.tenantId, {
+            advanceActivityClock: { scope: "subject", subjectId: WELL_FORMED_NON_BMP_IDENTIFIER },
+          }),
+        );
+        expect(typeof id).toBe("string");
+      });
+
       for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
         it(`${label}を含む識別子は、書き込みも読み出しも断る`, async () => {
           const store = await createStore();

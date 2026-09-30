@@ -218,6 +218,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
         memory: Memory;
         event: MemoryEvent;
     }>;
+    scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
     markContestedPair(ctx: Ctx, first: {
         id: MemoryId;
         event: NewMemoryEvent;

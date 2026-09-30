@@ -12,6 +12,7 @@ import type { Ctx, DecayClock, TaxonomyMode, TenantSettingsStore } from "@mnemor
 import {
   expectMalformedIdentifierRejection,
   MALFORMED_IDENTIFIER_CASES,
+  WELL_FORMED_NON_BMP_IDENTIFIER,
 } from "./malformed-identifier-cases.js";
 
 /**
@@ -613,6 +614,16 @@ export function describeTenantSettingsStoreConformance(
             () => store.getDefaultHalfLifeHours({ tenantId: value }),
           ],
           ["getEventRetention の ctx.tenantId", () => store.getEventRetention({ tenantId: value })],
+          // ADR 0437 決定2: `subjectIds` の各要素（ctx の外の識別子）も断る。
+          // `getSubjectActivitySeqs` は `supportsDecayClock: true` の adapter だけが持つ。
+          ...(supportsDecayClock
+            ? ([
+                [
+                  "getSubjectActivitySeqs の subjectIds[1]",
+                  () => store.getSubjectActivitySeqs!({ tenantId: "tenant-wf" }, ["alice", value]),
+                ],
+              ] as Array<[string, () => Promise<unknown>]>)
+            : []),
           [
             "getEventRetention の ctx.subjectId",
             () => store.getEventRetention({ tenantId: "tenant-wf", subjectId: value }),
@@ -621,6 +632,16 @@ export function describeTenantSettingsStoreConformance(
         for (const [where, call] of calls) {
           await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
         }
+      });
+    }
+
+    if (supportsDecayClock) {
+      it("getSubjectActivitySeqs: 対をなすサロゲート（絵文字）を含む subjectIds は断らない（陽性対照、ADR 0437）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-subject-ids-wf-${Math.random()}` };
+        expect(
+          await store.getSubjectActivitySeqs!(ctx, ["alice", WELL_FORMED_NON_BMP_IDENTIFIER]),
+        ).toEqual({});
       });
     }
   });

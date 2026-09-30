@@ -253,6 +253,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         memory: Memory;
         event: MemoryEvent;
     }>;
+    scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
     markContestedPair(ctx: Ctx, first: {
         id: MemoryId;
         event: NewMemoryEvent;
@@ -619,6 +620,8 @@ export interface MemoryStoreConformanceOptions {
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
     supportsPurgeExpiredRecalls?: boolean | undefined;
+    supportsScrubPurged?: boolean | undefined;
+    seedLegacyPurgedRow?: ((ctx: Ctx, memoryId: string) => Promise<void>) | undefined;
     supportsArchiveDecayed: boolean;
     supportsPurgeMemory: boolean;
     supportsMarkContestedPair: boolean;

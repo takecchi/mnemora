@@ -20,9 +20,8 @@ import type {
   TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
-import { assertWellFormedCtx } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { toFloat4Readback } from "./float4.js";
-import { assertQueryTextWithoutNul } from "./query-check.js";
 
 /**
  * `TenantSettingsStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3。
@@ -304,10 +303,9 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     assertWellFormedCtx(ctx);
-    // ADR 0434: `subject_id` は `text` 列。検索値の NUL は Postgres ではクエリの時点で `22021` になる。
-    for (const subjectId of subjectIds) {
-      assertQueryTextWithoutNul("getSubjectActivitySeqs", "subjectId", subjectId);
-    }
+    // ADR 0437 決定2: `subjectIds` の各要素も識別子の検査の内側に置く（読む前に断る）。
+    subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
+    // （ADR 0434 が足した NUL だけの検査は、これに含まれる。NUL も `MalformedIdentifierError` で断る。）
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
     const out: Record<string, number> = {};
     if (bySubject === undefined) {
