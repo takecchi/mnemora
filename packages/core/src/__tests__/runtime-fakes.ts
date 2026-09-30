@@ -517,6 +517,15 @@ export class FakeMemoryStore implements MemoryStore {
    *   Memory を意図的に作り、scoring 側の NaN 処理の防御を検査している——検査を足すと
    *   この2件の回帰テストが書けなくなる（Issue #768 の調査で実測）。
    */
+  /** ADR 0439: 別の行への参照は `ctx` のテナントの記憶を指すこと（`null`・`undefined`・空文字は「参照しない」——この Fake の従来の扱い）。 */
+  private assertOwnMemoryRef(ctx: Ctx, id: MemoryId | null | undefined): void {
+    if (!id) return;
+    const memory = this.backing.memories.get(id);
+    if (!memory || memory.tenantId !== ctx.tenantId) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
+    }
+  }
+
   private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
     // 8回目の TSDoc の棚卸し: testkit の fixture（`InMemoryMemoryStore.createMemoryIdempotent`）と
     // `@mnemora/postgres` が拒む `provenance` の形のうち、2つをこの Fake も同じく拒む（冪等の衝突の判定より前。
@@ -550,19 +559,17 @@ export class FakeMemoryStore implements MemoryStore {
       // 同じ理由・同じ検査）: `sourceObservationId`/`supersededById`/`contestedWithId` は
       // 非 null なら実在する行を指さなければならない。**「存在」だけを見る**——一対一等の
       // 整合まではここでは踏み込まない。
-      if (input.sourceObservationId && !this.backing.observations.has(input.sourceObservationId)) {
-        throw new Error(
-          `FakeMemoryStore: source observation not found: ${input.sourceObservationId}`,
-        );
+      // ADR 0439: 参照先は `ctx` のテナントの行であること（別テナントの行は、実在しない id と同じく拒む）。
+      if (input.sourceObservationId) {
+        const observation = this.backing.observations.get(input.sourceObservationId);
+        if (!observation || observation.tenantId !== ctx.tenantId) {
+          throw new Error(
+            `FakeMemoryStore: observation not found for tenant: ${input.sourceObservationId}`,
+          );
+        }
       }
-      if (input.supersededById && !this.backing.memories.has(input.supersededById)) {
-        throw new Error(`FakeMemoryStore: superseded-by memory not found: ${input.supersededById}`);
-      }
-      if (input.contestedWithId && !this.backing.memories.has(input.contestedWithId)) {
-        throw new Error(
-          `FakeMemoryStore: contested-with memory not found: ${input.contestedWithId}`,
-        );
-      }
+      this.assertOwnMemoryRef(ctx, input.supersededById);
+      this.assertOwnMemoryRef(ctx, input.contestedWithId);
       // 値域（ADR 0078）: `InMemoryMemoryStore.createMemoryIdempotent` と同じ位置・
       // 同じ理由——ここで放置すると「本番（Postgres の CHECK 制約）では落ちる書き込みが
       // 手元では黙って成功する」。`halfLifeHours`（ADR 0125）を検査しない理由は、この
@@ -1015,13 +1022,13 @@ export class FakeMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
+    // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
+    // ならない。ADR 0439: `ctx` のテナントの Memory であること（検査の順は実装と同じ: 対象、参照、`expectedStatus`）。
+    if (opts?.supersededById !== undefined) {
+      this.assertOwnMemoryRef(ctx, opts.supersededById);
+    }
     if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
-    }
-    // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
-    // ならない。
-    if (opts?.supersededById !== undefined && !this.backing.memories.has(opts.supersededById)) {
-      throw new Error(`FakeMemoryStore: superseded-by memory not found: ${opts.supersededById}`);
     }
     memory.status = status;
     if (opts?.supersededById !== undefined) {
@@ -1051,12 +1058,12 @@ export class FakeMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
+    // 外部キー相当（ADR 0047）・ADR 0439: updateStatus と同じ理由・同じ検査・同じ順。
+    if (opts.supersededById !== undefined) {
+      this.assertOwnMemoryRef(ctx, opts.supersededById);
+    }
     if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
-    }
-    // 外部キー相当（ADR 0047）: updateStatus と同じ理由・同じ検査。
-    if (opts.supersededById !== undefined && !this.backing.memories.has(opts.supersededById)) {
-      throw new Error(`FakeMemoryStore: superseded-by memory not found: ${opts.supersededById}`);
     }
     // 9回目の棚卸し: イベントを先に組み立てる（検査もここで走る）。以前は状態を書き換えた後に組み立てていたので、
     // イベントが書けない（Invalid Date の `at` など）と、状態だけが書き換わったまま投げていた——Postgres は
@@ -1482,13 +1489,13 @@ export class FakeMemoryStore implements MemoryStore {
     if (memoryIds.length === 0) {
       return { insertedMemoryIds: [] };
     }
-    if (!this.backing.recalls.has(recallId)) {
-      throw new Error(`FakeMemoryStore: recall not found: ${recallId}`);
+    // ADR 0439: recall も memory も `ctx` のテナントの行であること。
+    const recall = this.backing.recalls.get(recallId);
+    if (!recall || recall.tenantId !== ctx.tenantId) {
+      throw new Error(`FakeMemoryStore: recall not found for tenant: ${recallId}`);
     }
     for (const memoryId of memoryIds) {
-      if (!this.backing.memories.has(memoryId)) {
-        throw new Error(`FakeMemoryStore: memory not found: ${memoryId}`);
-      }
+      this.assertOwnMemoryRef(ctx, memoryId);
     }
 
     const insertedMemoryIds: MemoryId[] = [];
@@ -2109,6 +2116,9 @@ export class FakeMemoryStore implements MemoryStore {
     if (secondMemory.status !== "contested" || secondMemory.contestedWithId !== first.id) {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
+    // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（何も書く前）。
+    this.assertOwnMemoryRef(ctx, first.supersededById);
+    this.assertOwnMemoryRef(ctx, second.supersededById);
 
     // 3. イベントを2件とも先に組み立てる（検査もここで走る）。書けないイベントなら、どちらの状態も書き換える前に
     // 投げる——`updateStatusWithEvent`（#1368）と同じ形。
@@ -2314,6 +2324,10 @@ export class FakeMemoryStore implements MemoryStore {
         // 再利用をやめ、専用のエラーを投げる。
         throw new ContestedGroupMembershipMismatchError(missing[0]!);
       }
+    }
+    // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（何も書く前）。
+    for (const m of members) {
+      this.assertOwnMemoryRef(ctx, m.supersededById);
     }
 
     const events = members.map((m) => buildStoredEvent(ctx, m.event));

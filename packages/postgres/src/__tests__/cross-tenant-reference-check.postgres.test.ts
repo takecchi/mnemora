@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
+import type { Ctx, MemoryId, NewMemory, NewMemoryEvent } from "@mnemora/core";
 import { eraseTenant } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -249,11 +249,12 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
     const bObs = await observe(B);
     const before = await count(pool, "SELECT 1 FROM memories WHERE tenant_id = $1", [TA]);
 
-    for (const over of [
+    const overs: Array<Partial<NewMemory>> = [
       { sourceObservationId: bObs.id },
       { status: "contested", contestedWithId: b1.id },
       { status: "superseded", supersededById: b1.id },
-    ]) {
+    ];
+    for (const [i, over] of overs.entries()) {
       await expect(
         mem.supersedeWithNewMemories!(
           A,
@@ -261,7 +262,7 @@ describe("別テナントの参照は、口ごとに行を書かずに拒む（A
             {
               input: buildNewMemoryFixture({
                 tenantId: TA,
-                contentHash: `xref-sw-${JSON.stringify(over).length}`,
+                contentHash: `xref-sw-${i}`,
                 ...over,
               }),
               jobKinds: ["embed"],
@@ -445,5 +446,38 @@ describe("ADR 0439 の検出 SQL: 食い違いが無ければ0行、仕込んだ
     for (const [name, text] of Object.entries(DETECTION_SQL)) {
       expect(await count(pool, text), name).toBe(1);
     }
+  });
+});
+
+describe("別テナントを指す行（ADR 0439 より前に書かれた形。生 SQL で仕込む）に、restoreSupersededBy は触れない", () => {
+  it("B の行が A の anchor を superseded_by_id に持っていても、A の restore・preview は A の行だけを扱う", async () => {
+    // 適合テスト（`restoreSupersededBy は別テナントの行を巻き込まない`）は、この形を API で作っていた。
+    // ADR 0439 で API からは作れなくなったので、テナントで絞る歯は、生 SQL で形を作るここが持つ。
+    const { pool, mem, make } = await setup();
+    const anchorA = await make(A, "anchor-a");
+    const anchorB = await make(B, "anchor-b");
+    const supersededA = await make(A, "superseded-a", {
+      status: "superseded",
+      supersededById: anchorA.id,
+    });
+    const supersededB = await make(B, "superseded-b", {
+      status: "superseded",
+      supersededById: anchorB.id,
+    });
+    await pool.query("UPDATE memories SET superseded_by_id = $1 WHERE id = $2", [
+      anchorA.id,
+      supersededB.id,
+    ]);
+
+    const preview = await mem.previewRestoreSupersededBy!(A, anchorA.id);
+    expect(preview.candidates.map((c) => c.memoryId)).toEqual([supersededA.id]);
+
+    const result = await mem.restoreSupersededBy!(A, anchorA.id, {
+      at: new Date("2026-06-01T00:00:00.000Z"),
+    });
+    expect(result.restored.map((m) => m.id)).toEqual([supersededA.id]);
+    const bAfter = await mem.get(B, supersededB.id);
+    expect(bAfter?.status).toBe("superseded");
+    expect(bAfter?.supersededById).toBe(anchorA.id);
   });
 });

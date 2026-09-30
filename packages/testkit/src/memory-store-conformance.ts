@@ -9231,16 +9231,25 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             supersededById: anchorA.id,
           }),
         );
-        // 別テナントの行が、たまたま同じ id を `superseded_by_id` に持つ（FK は
-        // テナントをまたいでも成立する——`superseded_by_id` は `memories(id)` への
-        // 参照であり `tenant_id` を条件にしない）。
+        // 別テナントにも、superseded の行が在る。
+        // ⚠ ADR 0439 より前は、この行が A の anchor の id を `superseded_by_id` に持つ形（別テナントを指す参照）を
+        // この it が API で作っていた。その形は書けなくなったので、B 自身の anchor を指す行にした。A の anchor を指す
+        // B の行（生 SQL で仕込む形）に対する歯は、`packages/postgres` の
+        // `cross-tenant-reference-check.postgres.test.ts` にある。
+        const anchorB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "restore-superseded-tenant-anchor-b",
+          }),
+        );
         const supersededB = await store.createMemory(
           ctxB,
           buildNewMemoryFixture({
             tenantId: "tenant-b",
             contentHash: "restore-superseded-tenant-b",
             status: "superseded",
-            supersededById: anchorA.id,
+            supersededById: anchorB.id,
           }),
         );
 
@@ -9251,7 +9260,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(result.restored.map((m) => m.id)).toEqual([supersededA.id]);
         const bAfter = await store.get(ctxB, supersededB.id);
         expect(bAfter?.status).toBe("superseded"); // 触られていない
-        expect(bAfter?.supersededById).toBe(anchorA.id);
+        expect(bAfter?.supersededById).toBe(anchorB.id);
       });
 
       it("restoreSupersededBy は対象が無くても例外を投げない", async () => {
@@ -9412,13 +9421,19 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             supersededById: anchorA.id,
           }),
         );
+        // ADR 0439: A の anchor を指す B の行は API で書けなくなったので、B 自身の anchor を指す行にした
+        // （生 SQL で仕込む形の歯は、`packages/postgres` の `cross-tenant-reference-check.postgres.test.ts`）。
+        const anchorB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "preview-tenant-anchor-b" }),
+        );
         await store.createMemory(
           ctxB,
           buildNewMemoryFixture({
             tenantId: "tenant-b",
             contentHash: "preview-tenant-b",
             status: "superseded",
-            supersededById: anchorA.id,
+            supersededById: anchorB.id,
           }),
         );
 
