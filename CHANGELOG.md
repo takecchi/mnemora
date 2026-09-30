@@ -327,6 +327,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **`name` は偽装できる**が、store は利用者が自分で配線する信頼された部品なので実害は無いと判断した（ADR 0418）。core を `peerDependencies` にする案（破壊的変更）と、2つの版を検知して警告する案は採らなかった。
   - 公開 API（snapshot を更新した）: 5クラスに `readonly kind` を足し、判定関数を5つ足した。**非破壊**（追加のみ）。DB マイグレーションは足していない。
 
+- **残りの公開エラー2クラス（`ContestedWithoutCompanionError`・`RecallOutputValidationError`）にも、値の判別子 `kind` と、`instanceof` を使わない判定関数を付けた**（[ADR 0418](./docs/decisions/0418-store-error-kind-guards.md) の追記、直前の項目の続き）。core が公開する `Error` 継承のクラス7つのうち、`kind` を持たなかったのはこの2つだけだった。
+  - **付けたもの**: `ContestedWithoutCompanionError.kind` は `"contested_without_companion"`、`RecallOutputValidationError.kind` は `"recall_output_validation"`。判定関数は `isContestedWithoutCompanionError`・`isRecallOutputValidationError`（「`kind`、無ければ `name`」）。
+  - 公開 API（snapshot を更新した）: 2クラスに `readonly kind` を足し、判定関数を2つ足した。**非破壊**（追加のみ）。DB マイグレーションは足していない。
+  - `packages/postgres` のテスト内の `instanceof` 6行を判定関数へ置き換えた（利用者への影響は無い）。`toBeInstanceOf` / `rejects.toThrow(<クラス>)` は置き換えていない（ADR 0418 の追記に件数と理由がある）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

@@ -186,6 +186,8 @@ export function isSourceMemoryForgottenError(value: unknown): value is SourceMem
  * 受け取った呼び出し元は、`markContestedPair` の実装有無を確認して使うこと。
  */
 export class ContestedWithoutCompanionError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。判定は `instanceof` ではなく {@link isContestedWithoutCompanionError} で行う。 */
+  readonly kind = "contested_without_companion" as const;
   constructor(
     readonly method:
       | "updateStatus"
@@ -204,6 +206,22 @@ export class ContestedWithoutCompanionError extends Error {
     );
     this.name = "ContestedWithoutCompanionError";
   }
+}
+
+/**
+ * 受け取ったものが {@link ContestedWithoutCompanionError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ *
+ * `kind` を見て、`kind` が無ければ `name` を見る。core が2つの版に分かれていても、
+ * `kind` がまだ無い古い版の core が投げたものでも効く。
+ */
+export function isContestedWithoutCompanionError(
+  value: unknown,
+): value is ContestedWithoutCompanionError {
+  return matchesStoreErrorKind(
+    value,
+    "contested_without_companion",
+    "ContestedWithoutCompanionError",
+  );
 }
 
 /**

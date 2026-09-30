@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  ContestedWithoutCompanionError,
-  MemoryPurgeConflictError,
-  MemoryStatusConflictError,
-  OutboxLeaseConflictError,
+  isContestedWithoutCompanionError,
+  isMemoryPurgeConflictError,
+  isMemoryStatusConflictError,
+  isOutboxLeaseConflictError,
 } from "@mnemora/core";
 import type {
   ClaimOutboxJobsOptions,
@@ -1232,10 +1232,10 @@ async function runOn(backend: Backend, f: (h: Kit) => Promise<unknown>): Promise
 
 /** 約束の4クラスなら、クラス名と TSDoc が約束する欄（それ以外は `null`＝「投げた」とだけ比べる）。 */
 function typedError(error: unknown): Record<string, unknown> | null {
-  if (error instanceof ContestedWithoutCompanionError) {
+  if (isContestedWithoutCompanionError(error)) {
     return { class: error.name, method: error.method, memoryId: error.memoryId };
   }
-  if (error instanceof MemoryStatusConflictError) {
+  if (isMemoryStatusConflictError(error)) {
     return {
       class: error.name,
       memoryId: error.memoryId,
@@ -1243,7 +1243,7 @@ function typedError(error: unknown): Record<string, unknown> | null {
       observedStatus: error.observedStatus,
     };
   }
-  if (error instanceof MemoryPurgeConflictError) {
+  if (isMemoryPurgeConflictError(error)) {
     return {
       class: error.name,
       memoryId: error.memoryId,
@@ -1251,7 +1251,7 @@ function typedError(error: unknown): Record<string, unknown> | null {
       observedPurgedAt: error.observedPurgedAt,
     };
   }
-  if (error instanceof OutboxLeaseConflictError) {
+  if (isOutboxLeaseConflictError(error)) {
     return {
       class: error.name,
       jobId: error.jobId,

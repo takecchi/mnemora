@@ -644,8 +644,10 @@ export declare function isSourceMemoryForgottenError(value: unknown): value is S
 export declare class ContestedWithoutCompanionError extends Error {
     readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
+    readonly kind: "contested_without_companion";
     constructor(method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", memoryId: MemoryId | null);
 }
+export declare function isContestedWithoutCompanionError(value: unknown): value is ContestedWithoutCompanionError;
 export declare function isContestedWithoutCompanion(status: MemoryStatus | undefined, contestedWithId: MemoryId | null | undefined): boolean;
 export declare class MemoryPurgeConflictError extends Error {
     readonly memoryId: MemoryId;
@@ -1824,10 +1826,12 @@ import type { RecallOutputValidation, RecallOutputValidationIssue } from "./reca
 export type RecallOutputValidationMode = "off" | "report" | "throw";
 export declare const DEFAULT_RECALL_OUTPUT_VALIDATION: RecallOutputValidationMode;
 export declare class RecallOutputValidationError extends Error {
+    readonly kind: "recall_output_validation";
     readonly issues: readonly RecallOutputValidationIssue[];
     readonly recallId: string;
     constructor(issues: readonly RecallOutputValidationIssue[], recallId: string);
 }
+export declare function isRecallOutputValidationError(value: unknown): value is RecallOutputValidationError;
 export declare function validateRecallOutput(draft: unknown, mode: RecallOutputValidationMode, recallId: string): RecallOutputValidation | undefined;
 
 // ===== dist/recall-runtime.d.ts =====

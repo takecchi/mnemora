@@ -23,10 +23,12 @@ const KIND_BY_NAME: Record<string, string> = {
   ContestedGroupMembershipMismatchError: "contested_group_membership_mismatch",
   SourceMemoryForgottenError: "source_memory_forgotten",
   MemoryPurgeConflictError: "memory_purge_conflict",
+  ContestedWithoutCompanionError: "contested_without_companion",
+  RecallOutputValidationError: "recall_output_validation",
 };
 
 /** 別の realm で定義したクラスの、コンストラクタ引数をそのまま欄に写したインスタンスを返す。 */
-function foreignError(
+export function foreignError(
   name: keyof typeof KIND_BY_NAME,
   fields: Record<string, unknown>,
   variant: ForeignVariant,
@@ -72,4 +74,20 @@ export function foreignMemoryStatusConflict(
     { memoryId, expectedStatus, observedStatus },
     variant,
   );
+}
+
+export function foreignContestedWithoutCompanion(
+  method: string,
+  memoryId: string | null,
+  variant: ForeignVariant,
+): Error {
+  return foreignError("ContestedWithoutCompanionError", { method, memoryId }, variant);
+}
+
+export function foreignRecallOutputValidation(
+  issues: readonly { path: string; code: string; message: string }[],
+  recallId: string,
+  variant: ForeignVariant,
+): Error {
+  return foreignError("RecallOutputValidationError", { issues, recallId }, variant);
 }
