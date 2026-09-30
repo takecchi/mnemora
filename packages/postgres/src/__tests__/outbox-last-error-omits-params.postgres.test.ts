@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx, LLMProvider } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
@@ -31,6 +31,11 @@ import {
  * 書き込みを失敗させるのには、`outbox-fail-nul-last-error.postgres.test.ts` と同じく、
  * 抽出結果の本文に NUL を入れる（Postgres の `text` は NUL を保存できない）。本文は
  * 合成したもの（目印の uuid を含む）で、実データではない。
+ *
+ * `hashContent` は本文の sha256 の16進（NUL を含まない）にしてある。`contentHash` に NUL が
+ * 入ると、`PostgresMemoryStore` が DB に触れる前に明示の例外で断る（ADR 0424 の O-6）ため、
+ * DB の失敗（drizzle の `Failed query` と `params:`）が起きない。本文の NUL は入口で断られず、
+ * DB の INSERT まで届いて `22021` で落ちる。
  */
 
 const ctx: Ctx = { tenantId: `outbox-last-error-body-${randomUUID()}` };
@@ -66,7 +71,7 @@ describe("OutboxJob.lastError は、失敗したクエリの params（利用者�
         space: TEST_EMBEDDING_SPACE,
         embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
       },
-      hashContent: (content: string) => `sha256(${content})`,
+      hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
     });
 
     await runtime.observe(ctx, { kind: "utterance", text: "元の発話", extract: "deferred" });

@@ -13,6 +13,7 @@ import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correc
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
 import { DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT, deriveClaimKeys } from "./claim-key.js";
+import { normalizeContentForComparison } from "./content-comparison.js";
 import type { ClaimKey, ClaimKeyOptions } from "./claim-key.js";
 import {
   buildNewMemoryFromCandidate,
@@ -190,6 +191,18 @@ const DEFAULT_PROMPT_VERSION = "v1";
 const DEFAULT_DIGEST_FALLBACK_LENGTH = 200;
 const DEFAULT_CLAIMED_BY = "runtime.tick";
 const DEFAULT_TICK_LIMIT = 50;
+/**
+ * ADR 0431: 群の `updated/contested` イベントの `note` に入れる、`memberIds`・`matches` の先頭の件数。
+ * 超えたときは `memberIdsTruncated`・`matchesTruncated` が `true` になり、全体の件数は
+ * `memberCount`・`matchCount` が持つ。`claim_key_conflict_unresolved` の `note` の `matches` も
+ * 同じ件数で切る（`matchCount`・`matchesTruncated`）。
+ */
+const CONTESTED_GROUP_NOTE_SAMPLE_LIMIT = 10;
+
+/** UTF-16 コード単位の昇順（ロケールに依らず決定的）。 */
+function compareCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
 
 /**
  * Issue #1136: `consolidate` / `reflect` の `{ seedMemoryId }` 形で、種の `digest` を検索語にして
@@ -4537,10 +4550,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // どうしを、互いへの誤検出の相手にしない。`memory.sourceObservationId` が `null`
     // のときは何も除かない（`null` 同士を「同じ観測」と見なさない）。
     const memorySourceObservationId = memory.sourceObservationId ?? null;
-    const matches =
+    const notSiblings =
       memorySourceObservationId === null
         ? rawMatches
         : rawMatches.filter((m) => (m.sourceObservationId ?? null) !== memorySourceObservationId);
+    // 穴 O-3（ADR 0424）: store は生の `content_hash` だけで「同じ内容」を除くので、NFC と NFD の
+    // 違いや末尾の空白1つだけで別の行として返ってくる。`content` を NFC + trim で比べて、
+    // 検出中の memory と等しい行も、件数を数える前に除く（保存値・`content_hash` は変えない）。
+    // `matches` を使う下の分岐（1件の `markContested`・`contested_group`・evidence だけ）は
+    // すべてこの後の値を見る。
+    const memoryComparableContent = normalizeContentForComparison(memory.content);
+    const matches = notSiblings.filter(
+      (m) => normalizeContentForComparison(m.content) !== memoryComparableContent,
+    );
 
     if (matches.length === 0) {
       return { memoryId: memory.id, claimKey, matchCount: 0, result: { kind: "no_conflict" } };
@@ -4666,14 +4688,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       if (memberIdSet.size >= 3) {
         const memberIds = [...memberIdSet];
+        // ADR 0431: 監査イベントの `note` には、群の全員ではなく件数と先頭 K 件だけを入れる（全員を
+        // 入れると、群の全メンバーに積むイベントの1件ごとに N 件ぶんが入り、積み上げで N³ バイトになった）。
+        // 先頭は id の昇順（UTF-16 コード単位順。store の返す順に依らず決定的）。全員の id は
+        // 戻り値の `memberIds` と、各 Memory の状態から引ける。
+        const sortedMemberIds = [...memberIds].sort(compareCodeUnits);
+        const sortedMatches = [...matches].sort((a, b) => compareCodeUnits(a.id, b.id));
         const note = JSON.stringify({
           kind: "claim_key_conflict_group",
           claimKey,
           subjectId: memory.subjectId ?? null,
           triggering: describeSide(memory),
-          matches: matches.map(describeSide),
+          matches: sortedMatches.slice(0, CONTESTED_GROUP_NOTE_SAMPLE_LIMIT).map(describeSide),
           matchCount: matches.length,
-          memberIds,
+          matchesTruncated: matches.length > CONTESTED_GROUP_NOTE_SAMPLE_LIMIT,
+          memberIds: sortedMemberIds.slice(0, CONTESTED_GROUP_NOTE_SAMPLE_LIMIT),
+          memberCount: memberIds.length,
+          memberIdsTruncated: memberIds.length > CONTESTED_GROUP_NOTE_SAMPLE_LIMIT,
         });
         const markResult = await markContestedGroup(ctx, memberIds, { reason: note });
         if (markResult.outcome.kind === "contested_group") {
@@ -4697,6 +4728,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // markContestedGroup を呼ばなかった（配線されていない／群が3件未満にしか広がらな
     // かった）、または呼んだが `contested_group` にならなかった: 今まで通り
     // markContested を呼ばず、根拠だけを memory_events に残す。
+    // ADR 0431: `note` の `matches` は、群の `note` と同じく id の昇順の先頭 K 件に切り、
+    // 件数（`matchCount`）と切った印（`matchesTruncated`）を付ける。全員の id は戻り値の
+    // `matchMemoryIds` にある。
+    const sortedUnresolvedMatches = [...matches].sort((a, b) => compareCodeUnits(a.id, b.id));
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
@@ -4711,8 +4746,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           claimKey,
           subjectId: memory.subjectId ?? null,
           triggering: describeSide(memory),
-          matches: matches.map(describeSide),
+          matches: sortedUnresolvedMatches
+            .slice(0, CONTESTED_GROUP_NOTE_SAMPLE_LIMIT)
+            .map(describeSide),
           matchCount: matches.length,
+          matchesTruncated: matches.length > CONTESTED_GROUP_NOTE_SAMPLE_LIMIT,
         }),
       },
     });

@@ -295,6 +295,11 @@ class FakeBackingStore {
   }
 }
 
+/** ADR 0431: `markContestedGroup` が書いても状態が変わらないメンバー（既に群の一員として contested）。 */
+function isUnchangedGroupMember(memory: Pick<Memory, "status" | "contestedWithId">): boolean {
+  return memory.status === "contested" && (memory.contestedWithId ?? null) === null;
+}
+
 /**
  * ⭐ Issue #329 / [ADR 0173](../../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
  * `aggregateScope` が `filteredDecayed` を数えるための述語。
@@ -647,6 +652,10 @@ export class FakeMemoryStore implements MemoryStore {
       }
       if (input.digest.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: digest must not contain NUL characters (U+0000)`);
+      }
+      // 穴 O-6-3（ADR 0424）: `content_hash` も `text` 列（`InMemoryMemoryStore` と同じ）。
+      if (input.contentHash.includes("\u0000")) {
+        throw new Error(`FakeMemoryStore: contentHash must not contain NUL characters (U+0000)`);
       }
       // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
       // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
@@ -2166,7 +2175,11 @@ export class FakeMemoryStore implements MemoryStore {
     }
 
     // 3. イベントを全件先に組み立てる（検査もここで走る）。
-    const events = members.map((m) => buildStoredEvent(ctx, m.event));
+    // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、書いても状態が
+    // 変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+    const events = members
+      .filter((_, i) => !isUnchangedGroupMember(memories[i]!))
+      .map((m) => buildStoredEvent(ctx, m.event));
 
     // 4. ここから先は全部成功する。
     for (const memory of memories) {
@@ -2925,6 +2938,14 @@ export class FakeVectorStore implements VectorStore {
     if (!this.backing.memories.has(memoryId)) {
       throw new Error(`FakeVectorStore: memory not found: ${memoryId}`);
     }
+    // 穴 O-6-2（ADR 0424）: float4 に収まらない成分は Postgres の upsert が拒む（`InMemoryVectorStore` と同じ）。
+    for (const [i, x] of vector.entries()) {
+      if (!Number.isFinite(Math.fround(x))) {
+        throw new RangeError(
+          `FakeVectorStore.upsert: vector component [${i}] does not fit in a float4 (pgvector) value (got ${x})`,
+        );
+      }
+    }
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,
@@ -3420,6 +3441,10 @@ export class FakeLexicalStore implements LexicalStore {
     this.calls.push({ ctx, query, opts });
     if (this.shouldThrow) {
       throw new Error("FakeLexicalStore: simulated search failure");
+    }
+    // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない（`InMemoryLexicalStore` と同じ）。
+    if (query.includes("\u0000")) {
+      throw new Error("FakeLexicalStore.search: query must not contain NUL characters (U+0000)");
     }
     // `PostgresLexicalStore.search`/`PostgresTrigramLexicalStore.search` は `opts.limit` を
     // 生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・

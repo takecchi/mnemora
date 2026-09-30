@@ -107,12 +107,6 @@ const DOCUMENTED_DIFFERENCES: Readonly<Record<string, DocumentedDifference>> = {
     fixture: "returns-null",
     vector: { memory: "SELF", postgres: [1, 0, 0], fixture: [1, 0] },
   },
-  "vector.upsert(self,[NaN,0,0])": {
-    where: `NaN を含むベクトル: Postgres は拒み、fixture は保存する（${BROKEN_VECTOR_DOC}。Issue #1070 はこれを doc に書いて閉じた）`,
-    postgres: "throws",
-    fixture: "returns-null",
-    vector: { memory: "SELF", postgres: [1, 0, 0], fixture: ["NaN", 0, 0] },
-  },
 };
 
 const SPACE = TEST_EMBEDDING_SPACE;

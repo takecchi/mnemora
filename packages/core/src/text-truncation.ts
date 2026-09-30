@@ -37,3 +37,31 @@ export function sliceWithoutSplittingSurrogatePair(text: string, maxLength: numb
   const clamped = Math.max(0, maxLength);
   return text.slice(0, truncationBoundary(text, clamped));
 }
+
+/**
+ * `text` の先頭から、`maxLength`（UTF-16 コードユニット）以下に収まる最長の書記素の並びを返す
+ * （穴 O-5、ADR 0424）。
+ *
+ * `sliceWithoutSplittingSurrogatePair` はサロゲートペアの内側だけを避ける。NFD の「が」
+ * （`か` + 結合濁点）の途中や、ZWJ で繋がった絵文字の途中では切ってしまい、「か」や
+ * ZWJ だけが残る。こちらは `Intl.Segmenter`（書記素）の境界でだけ切る。単位は
+ * コードユニットのまま。最初の書記素だけで `maxLength` を超えるなら空文字列を返す。
+ * `maxLength` が負数なら0として扱う。
+ */
+export function sliceAtGraphemeBoundary(text: string, maxLength: number): string {
+  const limit = Math.max(0, maxLength);
+  if (text.length <= limit) {
+    return text;
+  }
+  let end = 0;
+  for (const { segment, index } of graphemeSegmenter.segment(text)) {
+    const next = index + segment.length;
+    if (next > limit) {
+      break;
+    }
+    end = next;
+  }
+  return text.slice(0, end);
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });

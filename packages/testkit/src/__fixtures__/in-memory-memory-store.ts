@@ -442,6 +442,11 @@ function assertStorableNewMemory(input: NewMemory): void {
   if (input.digest.includes("\u0000")) {
     throw new Error(`InMemoryMemoryStore: digest must not contain NUL characters (U+0000)`);
   }
+  // 穴 O-6-3（ADR 0424）: `content_hash` も `text` 列——Postgres は NUL を拒む。以前ここだけ検査が無く、
+  // インメモリは NUL 入りの contentHash を保存していた。
+  if (input.contentHash.includes("\u0000")) {
+    throw new Error(`InMemoryMemoryStore: contentHash must not contain NUL characters (U+0000)`);
+  }
   // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
   // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
   if (jsonContainsNul(input.attributes ?? {})) {
@@ -2618,6 +2623,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertCloneableMemoryEvent(m.event);
     }
 
+    // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、書いても状態が
+    // 変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+    const unchanged = memories.map(
+      (memory) => memory.status === "contested" && (memory.contestedWithId ?? null) === null,
+    );
     for (const memory of memories) {
       memory.status = "contested";
       memory.contestedWithId = null;
@@ -2645,11 +2655,13 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
     }
 
-    const events = members.map((m) => {
-      const event = buildStoredMemoryEvent(ctx, m.event);
-      this.events.push(event);
-      return event;
-    });
+    const events = members
+      .filter((_, i) => !unchanged[i])
+      .map((m) => {
+        const event = buildStoredMemoryEvent(ctx, m.event);
+        this.events.push(event);
+        return event;
+      });
 
     return snapshot({ members: memories, events });
   }

@@ -61,6 +61,7 @@ import type { Db } from "./client.js";
 import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
+import { assertNoNul } from "./input-check.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
@@ -506,6 +507,7 @@ export class PostgresMemoryStore implements MemoryStore {
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
@@ -604,6 +606,7 @@ export class PostgresMemoryStore implements MemoryStore {
     outboxNow: Date,
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
+    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -1145,6 +1148,8 @@ export class PostgresMemoryStore implements MemoryStore {
         throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
       }
       assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
+      // 穴 O-6-3（ADR 0424）: contentHash の NUL も、トランザクションを開く前に落とす。
+      assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     }
 
     const result = await this.db.transaction(async (tx) => {
@@ -3620,10 +3625,18 @@ export class PostgresMemoryStore implements MemoryStore {
         ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
       `);
 
+      // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、UPDATE しても
+      // 状態が変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+      // 判定は FOR UPDATE で読んだ行（`rowById`）から——UPDATE の前の状態である。
       const events = await insertMemoryEventsBatch(
         tx,
         ctx,
-        normalized.map((m) => m.event),
+        normalized
+          .filter((m) => {
+            const before = rowById.get(m.id)!;
+            return !(before.status === "contested" && (before.contestedWithId ?? null) === null);
+          })
+          .map((m) => m.event),
       );
 
       return { members: ids.map((id) => updatedById.get(id)!), events };

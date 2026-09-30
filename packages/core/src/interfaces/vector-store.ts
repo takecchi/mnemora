@@ -306,7 +306,7 @@ export interface VectorStore {
    * | `vector` | `@mnemora/postgres` | `@mnemora/testkit` の `InMemoryVectorStore` |
    * |---|---|---|
    * | 長さが `space.dimensions` と違う・空 | 例外（pgvector の `expected N dimensions` など）。前の埋め込みは残る | そのまま保存する。`search` ではその行の距離が `NaN` になる |
-   * | `NaN`・`Infinity` を含む | 例外（pgvector が拒む） | そのまま保存する |
+   * | `NaN`・`Infinity`・float4 に収まらない値（`1e308` など）を含む | 例外（DB に触れる前の `RangeError`。ADR 0424） | 同じ（ADR 0424 で揃えた。以前はそのまま保存していた） |
    * | 成分がすべて `0` | 保存する（ADR 0040。`search` の距離は比較不能） | 同じ |
    *
    * ⚠ **2026-09-30 追記（ADR 0393）: `Runtime.tick` の embed ジョブは、`upsert` へ渡す前に

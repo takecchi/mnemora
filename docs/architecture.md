@@ -1116,6 +1116,11 @@ interface EmbeddingProvider {
 クローン miku の判断で、core での検査・adapter を揃える案は採らず、今の振る舞いを記録した（選び直す
 余地は Issue に残してある）。書き分けは `VectorStore.upsert` の TSDoc。
 
+⚠ **2026-09-30 追記（[ADR 0424](./decisions/0424-normalized-content-comparison-and-boundary-conformance.md)）**:
+上の「`NaN`/`Infinity` を含む」は、store を直接呼んだときも2実装で揃った。`packages/testkit` の
+`InMemoryVectorStore.upsert` も、`packages/postgres` と同じく float4 に収まらない成分（`NaN`・`Infinity`・`1e308` など）を
+`RangeError` で拒み、保存しない。長さが違う・空のベクトルの差は残っている。
+
 ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
 [ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）**:
 `embed` は任意の第3引数 `opts?: AbortOptions` を受け取る。挙動は `LLMProvider`（§5.4 同日付
