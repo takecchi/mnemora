@@ -1,4 +1,5 @@
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 import { assertQueryDate, assertQueryTextWithoutNul } from "./query-check.js";
 
@@ -223,6 +224,8 @@ export class InMemoryLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない。
     assertQueryTextWithoutNul("InMemoryLexicalStore.search", "query", query);
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。

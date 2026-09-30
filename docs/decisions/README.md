@@ -432,6 +432,16 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0416](./0416-created-event-same-tx-remaining-paths.md) | `created` イベントを記憶と同じトランザクションで積む範囲を、reextract・consolidate の口あり経路と reflect へ広げる（穴 D-3 の続き） | 採用 (2026-09) |
 | [0418](./0418-store-error-kind-guards.md) | store 例外は `instanceof` ではなく `kind`（無ければ `name`）で判定する | 採用 (2026-09) |
 | [0419](./0419-local-embedding-provider-dispose.md) | `LocalEmbeddingProvider` に任意の `dispose()` を足す | 採用 (2026-09) |
+| [0420](./0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md) | `consolidate`・`reflect` は、材料が superseded になったときと、統合元がすべて CAS に弾かれたときに打ち切る | 採用 (2026-09) |
+| [0421](./0421-concurrent-write-and-audit-event-holes.md) | 同時の書き込みと監査イベントの小さな穴——直したもの（Q1）と、実測して縛って負債にしたもの（R4・R5） | 採用 (2026-09) |
+| [0422](./0422-reextract-created-event-at-and-meta.md) | `reextract` の `created` イベントの `at` を同じ操作の `superseded` と揃え、meta に再抽出の印を足す。同じ `at` のイベントの並びは約束しない | 採用 (2026-09) |
+| [0423](./0423-identifier-well-formed-and-error-message-without-params.md) | 識別子の文字の扱いを揃え、区別できない値を入口で断る。利用者へ伝わる例外の message から入力値を落とす | 採用 (2026-09) |
 | [0424](./0424-normalized-content-comparison-and-boundary-conformance.md) | 「同じ内容」の比較を正規化し（NFC + trim、core で除く）、testkit と Postgres の入力の境界を揃える | 採用 (2026-09) |
+| [0425](./0425-migrate-warns-on-ledger-drift.md) | `runMigrations` は、台帳と手元のファイルのずれを見つけたら警告を出して続行する | 採用 (2026-09) |
+| [0426](./0426-in-memory-erase-tenant-postgres-alignment.md) | testkit のインメモリ `eraseTenant` を Postgres 実装に揃える（`tenant_subject_activity` の行数と、埋め込みの CASCADE） | 採用 (2026-09) |
+| [0427](./0427-events-purged-at-millisecond.md) | `events_purged` の `at` を SQL の `now()` から JS 側の時刻（`toPgTimestamp`）へ替える | 採用 (2026-09) |
+| [0428](./0428-provider-abort-reason-and-error-guards.md) | provider を直に呼んだときの abort の reject を `signal.reason` に揃え、openai・anthropic の例外に判定関数を足す | 採用 (2026-09) |
+| [0429](./0429-exact-optional-property-types-input-types.md) | 入力側の公開型の任意欄を `?: T \| undefined` に広げ、`exactOptionalPropertyTypes: true` の利用者から `undefined` を渡せるようにする | 採用 (2026-09) |
+| [0430](./0430-concurrent-create-erase-and-standalone-params.md) | 同時呼び出しで落ちる2つの口（trigram store の `create()`、同じテナントへの `eraseTenant`）を直列にし、公開の独立関数の例外からも `params` を落とす | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

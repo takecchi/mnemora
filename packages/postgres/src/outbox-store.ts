@@ -10,7 +10,9 @@ import {
   type PurgeCompletedJobsOptions,
   type PurgeCompletedJobsResult,
 } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { lockTenantForErase } from "./erase-tenant-lock.js";
 import {
   isUuidLike,
   parsePgTimestamp,
@@ -102,6 +104,7 @@ export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly db: Db) {}
 
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
+    assertWellFormedCtx(ctx);
     const kindsFilter =
       opts.kinds !== undefined ? sql`AND kind = ANY(${sql.param(opts.kinds)}::text[])` : sql``;
     // リースが切れたとみなす境界時刻。`claimed_at <= leaseExpiresBefore` の行は
@@ -136,8 +139,9 @@ export class PostgresOutboxStore implements OutboxStore {
     ctx: Ctx,
     jobId: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）
     // という契約のため、UUID の形をしていない入力はここで静かに無視する
     // （実 DB 検査で判明: 素通しすると invalid input syntax for type uuid で例外になる）。
@@ -166,8 +170,9 @@ export class PostgresOutboxStore implements OutboxStore {
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
     if (!isUuidLike(jobId)) {
       return;
     }
@@ -240,6 +245,7 @@ export class PostgresOutboxStore implements OutboxStore {
    * 失敗・未処理を問わず削除する。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     if (opts.dryRun === true) {
       const result = await this.db.execute(sql`
         SELECT count(*)::int AS count FROM (
@@ -249,16 +255,20 @@ export class PostgresOutboxStore implements OutboxStore {
       const deleted = (result.rows[0] as unknown as { count: number }).count;
       return { deleted, reachedLimit: deleted === opts.limit };
     }
-    const result = await this.db.execute(sql`
-      WITH victims AS (
-        SELECT id FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
-      )
-      DELETE FROM outbox o
-      USING victims v
-      WHERE o.tenant_id = ${ctx.tenantId} AND o.id = v.id
-      RETURNING o.id
-    `);
-    const deleted = result.rows.length;
+    // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする（lock を取るためにトランザクションで包む）。
+    const deleted = await this.db.transaction(async (tx) => {
+      await lockTenantForErase(tx, ctx.tenantId);
+      const result = await tx.execute(sql`
+        WITH victims AS (
+          SELECT id FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
+        )
+        DELETE FROM outbox o
+        USING victims v
+        WHERE o.tenant_id = ${ctx.tenantId} AND o.id = v.id
+        RETURNING o.id
+      `);
+      return result.rows.length;
+    });
     return { deleted, reachedLimit: deleted === opts.limit };
   }
 
@@ -274,6 +284,7 @@ export class PostgresOutboxStore implements OutboxStore {
     ctx: Ctx,
     opts: PurgeCompletedJobsOptions,
   ): Promise<PurgeCompletedJobsResult> {
+    assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun ?? false;
     if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
       return { purged: 0, reachedLimit: false, oldestPurgedAt: null, newestPurgedAt: null, dryRun };

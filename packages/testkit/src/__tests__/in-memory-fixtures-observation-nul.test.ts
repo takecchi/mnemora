@@ -57,14 +57,14 @@ describe("InMemoryMemoryStore: Observation の口は、NUL を含む値を Postg
       const store = new InMemoryMemoryStore();
       await expect(
         store.createObservationWithOutbox(ctx, observation(overrides), ["extract"]),
-      ).rejects.toThrow(/must not contain NUL characters/);
+      ).rejects.toThrow(/must not contain NUL characters|contains a NUL character/);
       expect(store.outboxJobs).toHaveLength(0);
     });
 
     it(`createObservation: ${label} に NUL → 例外`, async () => {
       const store = new InMemoryMemoryStore();
       await expect(store.createObservation(ctx, observation(overrides))).rejects.toThrow(
-        /must not contain NUL characters/,
+        /must not contain NUL characters|contains a NUL character/,
       );
     });
   }

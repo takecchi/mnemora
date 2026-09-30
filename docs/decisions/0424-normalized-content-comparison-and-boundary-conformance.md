@@ -75,7 +75,7 @@
     `LIMIT` の規定が口に無いのは ADR 0377 と同じ。
   - `sliceWithoutSplittingSurrogatePair` の他の呼び出し元（`extraction.ts`・`failure-description.ts`）は、書記素の途中でまだ切る。
   - `findActiveByClaimKey?` などの `contentHash` の引数に NUL を渡した場合の Postgres の例外は、生の例外のまま（書く口だけを揃えた）。
-  - 適合テストの `it` は自前の実装にも課される（破壊的変更として数える。`docs/migration-v1.md` の項目43〜45）。
+  - 適合テストの `it` は自前の実装にも課される（破壊的変更として数える。`docs/migration-v1.md` の項目46〜48）。
 
 - **これが覆るとしたら**:
 

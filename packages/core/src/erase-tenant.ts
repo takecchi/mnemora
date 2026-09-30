@@ -3,6 +3,7 @@ import type { MemoryStore } from "./interfaces/memory-store.js";
 import type { OutboxStore } from "./interfaces/outbox-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
+import { omitParamsFromError } from "./failure-description.js";
 
 /**
  * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
@@ -49,12 +50,38 @@ import type { VectorStore } from "./interfaces/vector-store.js";
  * 設定（`tenantSettingsStore`）は最後にする——`getEventRetention` 等が読む設定は、
  * 途中で処理が中断してもまだ「テナントが存在する」ことの手がかりとして残る。
  *
+ * 🔴 **いずれかの port が `reachedLimit: true` を返したら、そこで打ち切り、後ろの port は
+ * 呼ばない**（`memoryStore` → `vectorStore` → `outboxStore` の順に、最初に `reachedLimit` を
+ * 返した port で止まり、`reachedLimit: true` で返る）。「設定は最後」は、前の port が消し切って
+ * いないときに設定を消さないことまで含む約束である。`limit` で止まった回に後ろの port まで
+ * 進むと、`memories` が残ったまま設定・outbox・埋め込みだけが先に消える（Postgres の実測:
+ * `limit: 10` の1回で、`memories` 13件のうち一部だけが消え、`tenant_settings` は 1 → 0、
+ * 埋め込みは 13 → 3、outbox は 31 → 21 になった）。実装はこの約束より先に進んでいた——
+ * ADR 0383 の追記で、実装を約束に合わせた。
+ *
+ * - **呼ばなかった port の `deleted` は `0`** を返す。`deleted` は「この呼び出しでその port が
+ *   実際に消した行数」であり、呼ばなかった port は1行も消していない。欠落や `undefined` に
+ *   すると戻り値の型が割れ、呼び手が4つの欄を足し算するたびに分岐が要る。
+ * - **`dryRun` も同じ経路を通る**: `memoryStore` が `reachedLimit` なら、後ろの port は数えずに
+ *   `0` で返す。プレビューは「本番の1回目がどういう形で返るか」を写すものなので、`dryRun`
+ *   だけ全 port を数えると、プレビューの形と実際に起きる形が割れる。
+ *
  * ⚠ **4つの port は別々の呼び出しであり、分散トランザクションではない。**
  * `blocked_by_foreign_reference` 以外の理由（接続断など）で途中の port が例外を投げた
  * 場合、それより前の port の削除はコミット済みのまま残る。次に同じ `opts` で呼び直せば、
  * 済んだ port は0件で通過する——各 store の `eraseTenant?` は冪等であり、副作用が
  * 二重に起きることはない。
  *
+ * ⚠ **同じテナントへの同時呼び出しは直列になる**（[ADR 0430](../../../docs/decisions/0430-concurrent-create-erase-and-standalone-params.md) 決定2）。
+ * `@mnemora/postgres` は、`memoryStore`・`vectorStore`・`outboxStore` の各 `eraseTenant` のトランザクションの
+ * 先頭で、テナントごとの advisory lock（`pg_advisory_xact_lock`）を取る。後から来た呼び出しは、先の
+ * 呼び出しの**その port のトランザクション**のコミットを待ち、コミット後の状態から数え始める（待ちに
+ * mnemora の上限は掛けない）。直列になるのは port ごとであり、4つの port をまたぐ全体ではない（別の
+ * 呼び出しが port の間に割り込みうる）。別のテナントは待たない。この lock を取らない実装（自前の adapter
+ * など）では、同時に呼ぶと相手が先に消した行が数えられず、「予算未満なら表は空」と読み違えうる。
+ *
+ * ⚠ **投げる例外の message から、drizzle の `params:` より後ろを落とす**（ADR 0430 決定3。`Runtime` の全メソッドと
+ * 同じ作法、[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md) 決定6）。 *
  * ## 引数の検査（書き込み前）
  *
  * - `opts.confirmTenantId !== ctx.tenantId` なら `RangeError` を投げる——`ctx.tenantId`
@@ -76,17 +103,54 @@ import type { VectorStore } from "./interfaces/vector-store.js";
  * - `{ kind: "executed"; dryRun; deleted; reachedLimit }` — 実行した（または `dryRun` で
  *   プレビューした）。`reachedLimit === true` なら、呼び出し側は同じ `opts` で
  *   呼び直すこと——**この関数は何度呼んでも安全**（既に空になった表は0件を返すだけ）。
+ *   ⚠ **`reachedLimit === false` は「空になった」の証明ではない**（次の節）。
  *
- * ### ⚠ `deleted.vectorStore` は、`dryRun` では実数、本番では `0` になりうる
+ * ### ⚠ そのテナントへの書き込みを止めてから呼ぶ／`deleted` が全部 `0` になるまで呼び直す
  *
- * `memoryStore` を先に消す（上の順序）と、`memories` の行が消えた時点で、
+ * **同じテナントへ書き込み（`observe()`・`tick()` など）を続けながら呼ぶと、行が残りうる。**
+ * 消している途中に別の処理が書いた行は、その回では消えない。⟹ **そのテナントへの書き込みを
+ * 止めてから呼ぶこと**（止め方は呼び出し側の責務。この関数は書き込みを止めない）。
+ *
+ * **終わりの判定は、`reachedLimit` だけでなく `deleted` を見る。**書き込みが止まっていなければ、
+ * `reachedLimit === false` で返った回の後にも行が残りうる（`reachedLimit` は「ある表でちょうど
+ * `limit` 件消せた」ときだけ `true` になる近似であり、消している間に書かれた行は知らない）。
+ * ⟹ **書き込みを止めたうえで、`deleted` の4欄が全部 `0` で返る回が1回出るまで、同じ `opts` で
+ * 呼び直すこと。**「消えたか」の確認は、下の節のとおり、消去後に表を数えて行う
+ * （`deleted.vectorStore` は CASCADE のため本番では `0` になりうるので、`deleted` が全部 `0` に
+ * なったことは「この回は何も見つからなかった」だけを言う）。
+ *
+ * どの表に残りうるか（`@mnemora/postgres` の実装を読んで書いた。⚠ **書き込みを実際に割り込ませて
+ * 起こしてはいない——コードから読んだ推論である**）:
+ * - `memoryStore`: 1つのトランザクションだが、表ごとの削除は「先に対象の id を選び、その id だけを
+ *   消す」文である。その文が始まった後に他のトランザクションがコミットした行（`memories`・
+ *   `observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・`memory_labels`・
+ *   `memory_relations`）は、その回の対象にならず残る。`tenant_activity`・`tenant_subject_activity`
+ *   も、`observe()`・`tick()` が書くたびに作り直されうる。
+ * - `outboxStore`: `memoryStore` の後に消す。その後に積まれたジョブ（`embed`・`extract` など）は残る。
+ * - `vectorStore`: `memoryStore` の後に消す。`memories` の削除で埋め込みは CASCADE で消えている。
+ *   その後に走った `embed` の書き込みは、`memories` への外部キーで失敗するはずだが、確かめていない。
+ * - `tenantSettingsStore`: 最後に消す。`setEventRetention` などが呼ばれると、行が作り直される。
+ *
+ * ### ⚠ `deleted` の各欄は「その port 自身が、この呼び出しで消した行数」である
+ *
+ * 合計ではなく、CASCADE で巻き込まれて消えた行も数えない。とくに **`deleted.vectorStore`**:
+ * `memoryStore` を先に消す（上の順序）と、`memories` の行が消えた時点で
  * `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みの行を一緒に消す。
- * `vectorStore.eraseTenant?` が呼ばれる頃には、そのテナントの埋め込みはもう残っておらず、
- * 数えるものが無い——だから本番では `deleted.vectorStore` が `0` を返す（`dryRun` は何も消さないので、
- * 消える予定の埋め込みを数えて `26` のような実数を返す）。**行は正しく消えている。**
- * `deleted.vectorStore` は「`VectorStore.eraseTenant?` 自身が消した行数」であって、
- * 「消えた埋め込みの総数」ではない。CASCADE で消えた分は、どの欄にも数えられない
- * （`deleted.memoryStore` も `memories` 側の行数を数えるだけである）。
+ *
+ * - **1回で消し切ったとき**（`memoryStore` が `reachedLimit` を返さなかった回）: `vectorStore.eraseTenant?`
+ *   が呼ばれる頃には、そのテナントの埋め込みはもう残っていない。本番の `deleted.vectorStore` は `0`
+ *   になる（`dryRun` は何も消さないので、消える予定の埋め込みを数えて `26` のような実数を返す）。
+ *   埋め込みは正しく消えている。
+ * - **`limit` で途中で止まったとき**（`memoryStore` が `reachedLimit` を返した回）: `vectorStore` は
+ *   呼ばれず、`deleted.vectorStore` は `0`（`dryRun` でも `0`）。この回に消えた `memories` の埋め込みは
+ *   CASCADE で消えているが、どの欄にも数えられない。残りの埋め込みは、`memories` を消し切る
+ *   呼び直しの回に、同じ CASCADE で消える。
+ *
+ * 本番で `deleted.vectorStore` が実数になるのは、`memoryStore` が消し切ったあとになお埋め込みの行が
+ * 残っているとき（`VectorStore` の別実装が、CASCADE を持たずに行を残している場合など）だけである
+ * ——**確かめていない**（`@mnemora/postgres` では、その行は `memories` の FK に縛られている）。
+ * `deleted.memoryStore` も同じで、`memoryStore` が消した全表（`memories` を含む10表。消す表の一覧は
+ * `MemoryStore.eraseTenant` の doc）の行数の合計であり、`memories` だけの行数ではない。
  * 呼び順は [ADR 0383](../../../docs/decisions/0383-erase-tenant.md) 決定5の不変条件のために変えない。
  * 「消えたか」は戻り値の件数ではなく、消去後に表を数えて確かめること。
  *
@@ -135,7 +199,7 @@ export interface EraseTenantOptions {
    */
   limit: number;
   /** `true` なら削除を一切行わず、削除していたら消えていたであろう件数だけを返す。省略時は `false`。 */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /** {@link eraseTenant} の deps。4つとも任意メソッド `eraseTenant?` を持ちうる port。 */
@@ -147,6 +211,19 @@ export interface EraseTenantDeps {
 }
 
 export async function eraseTenant(
+  ctx: Ctx,
+  deps: EraseTenantDeps,
+  opts: EraseTenantOptions,
+): Promise<EraseTenantOutcome> {
+  try {
+    return await eraseTenantBody(ctx, deps, opts);
+  } catch (error) {
+    // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:` を落とす。
+    throw omitParamsFromError(error);
+  }
+}
+
+async function eraseTenantBody(
   ctx: Ctx,
   deps: EraseTenantDeps,
   opts: EraseTenantOptions,
@@ -195,24 +272,46 @@ export async function eraseTenant(
     return { kind: "blocked_by_foreign_reference", count: memoryResult.count };
   }
 
+  // 🔴 **止まった回は、後ろの port を呼ばない。** いずれかの port が `reachedLimit: true` を
+  // 返したら、そこで打ち切って `reachedLimit: true` で返す——「設定は最後」の約束
+  // （上の doc、ADR 0383）は、前の port が消し切っていないときに設定を消さないことまで含む。
+  // 呼ばなかった port の `deleted` は `0`（その port は今回1行も消していない）。
+  // `dryRun` も同じ経路を通る（本番の1回目と同じ形のプレビューを返す）。
+  const deleted = {
+    memoryStore: memoryResult.deleted,
+    vectorStore: 0,
+    outboxStore: 0,
+    tenantSettingsStore: 0,
+  };
+  const stopped = (): EraseTenantOutcome => ({
+    kind: "executed",
+    dryRun: opts.dryRun ?? false,
+    deleted: { ...deleted },
+    reachedLimit: true,
+  });
+  if (memoryResult.reachedLimit) {
+    return stopped();
+  }
+
   const vectorResult = await deps.vectorStore.eraseTenant!(ctx, storeOpts);
+  deleted.vectorStore = vectorResult.deleted;
+  if (vectorResult.reachedLimit) {
+    return stopped();
+  }
+
   const outboxResult = await deps.outboxStore.eraseTenant!(ctx, storeOpts);
+  deleted.outboxStore = outboxResult.deleted;
+  if (outboxResult.reachedLimit) {
+    return stopped();
+  }
 
   const tenantSettingsResult = await deps.tenantSettingsStore.eraseTenant!(ctx, storeOpts);
+  deleted.tenantSettingsStore = tenantSettingsResult.deleted;
 
   return {
     kind: "executed",
     dryRun: opts.dryRun ?? false,
-    deleted: {
-      vectorStore: vectorResult.deleted,
-      outboxStore: outboxResult.deleted,
-      memoryStore: memoryResult.deleted,
-      tenantSettingsStore: tenantSettingsResult.deleted,
-    },
-    reachedLimit:
-      vectorResult.reachedLimit ||
-      outboxResult.reachedLimit ||
-      memoryResult.reachedLimit ||
-      tenantSettingsResult.reachedLimit,
+    deleted,
+    reachedLimit: tenantSettingsResult.reachedLimit,
   };
 }

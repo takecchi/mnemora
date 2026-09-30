@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx, LexicalStore, MemoryId, MemoryStatus, ProvenanceKind } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /**
  * `prepareMemory` が用意する Memory の属性。
@@ -751,5 +755,38 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       });
       expect(hits).toHaveLength(1);
     });
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "search の ctx.tenantId",
+            () =>
+              store.search({ tenantId: value }, "query", { limit: 5, filter: { tenantId: value } }),
+          ],
+          [
+            "search の filter.tenantId",
+            () =>
+              store.search({ tenantId: "tenant-wf" }, "query", {
+                limit: 5,
+                filter: { tenantId: value },
+              }),
+          ],
+          [
+            "search の filter.subjectId",
+            () =>
+              store.search({ tenantId: "tenant-wf" }, "query", {
+                limit: 5,
+                filter: { tenantId: "tenant-wf", subjectId: value },
+              }),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
+      });
+    }
   });
 }

@@ -76,12 +76,17 @@ const DESCRIBE_JOB_FAILURE_PARAMS_MARKER = "\nparams: ";
  * ⟹ 最初の出現で切る判断は、実際の params の開始位置と一致するか、それより手前
  * （＝より多く削る側）にしか倒れない。SQL の後半を誤って残してしまう向きのずれは無い。
  */
-function omitDrizzleParams(message: string): string {
+export function omitDrizzleParams(message: string): string {
   const markerIndex = message.indexOf(DESCRIBE_JOB_FAILURE_PARAMS_MARKER);
   if (markerIndex === -1) {
     return message;
   }
   const paramsStart = markerIndex + DESCRIBE_JOB_FAILURE_PARAMS_MARKER.length;
+  // ADR 0430: 既に落とした印なら、そのまま返す（べき等）。独立関数と `Runtime` の両方が掛かっても、
+  // 落とした文字数の数字が「印の長さ」に書き換わらない。
+  if (/^\(omitted by mnemora, \d+ chars\)$/.test(message.slice(paramsStart))) {
+    return message;
+  }
   const omittedChars = message.length - paramsStart;
   return `${message.slice(0, paramsStart)}(omitted by mnemora, ${omittedChars} chars)`;
 }
@@ -124,4 +129,46 @@ function capDescribeJobFailureLength(message: string): string {
   const originalLength = message.length;
   const sliced = sliceWithoutSplittingSurrogatePair(message, DESCRIBE_JOB_FAILURE_MAX_CHARS);
   return `${sliced}… (truncated by mnemora, original length ${originalLength} chars)`;
+}
+
+/**
+ * 利用者へ投げ直す例外から、SQL に付けた値（params）を落とす（ADR 0423。ADR 0363・Issue #1064 と同じ作法）。
+ *
+ * drizzle の `DrizzleQueryError` の `message` は `Failed query: <SQL>\nparams: <値>` で、`params` には
+ * 利用者が渡した本文がそのまま入る。`Runtime` の各メソッドは、store が投げた例外をこの関数に通してから
+ * 投げ直す。
+ *
+ * - **例外そのものを返す**（新しい例外を作らない）。`kind`・`name`・`cause`・独自の欄はそのまま残る。
+ *   落とすのは `message` の `params:` より後ろと、その文字列を含む `stack` の先頭の行だけ。
+ *   SQL の文は残す。`cause` の連鎖も同じ処理を掛ける（一度見た段で打ち切る）。
+ * - `params:` の目印が無い例外は何も変えない。
+ * - `message` が書き換えられない例外（凍結されたもの）は、そのまま返す（落とせないときは落とさない側に倒れる）。
+ *
+ * ⚠ **`DrizzleQueryError` の `params` プロパティ（値の配列）と、`cause`（pg のエラー）の `message`・`detail` は
+ * 変えない。** 前者は message の文字列ではなくプロパティ、後者は pg が組み立てた文面で、ここでは触らない
+ * （ADR 0423「塞がらない経路」）。
+ */
+export function omitParamsFromError(error: unknown): unknown {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const target = current as { message?: unknown; stack?: unknown; cause?: unknown };
+    if (typeof target.message === "string") {
+      const omitted = omitDrizzleParams(target.message);
+      if (omitted !== target.message) {
+        const original = target.message;
+        try {
+          target.message = omitted;
+          if (typeof target.stack === "string") {
+            target.stack = target.stack.replace(original, () => omitted);
+          }
+        } catch {
+          // 書き換えられない例外は、そのまま返す。
+        }
+      }
+    }
+    current = target.cause;
+  }
+  return error;
 }

@@ -31,9 +31,9 @@ export interface LexicalFilter {
    */
   tenantId: string;
   /** `VectorFilter.status` と同じ意味（未指定なら絞らない。空配列なら1件も通らない）。 */
-  status?: MemoryStatus[];
+  status?: MemoryStatus[] | undefined;
   /** 指定すると、この `subjectId` の行だけを返す（`includeSubjectless` で、主題の無い行も含められる）。未指定なら主題で絞らない。 */
-  subjectId?: string;
+  subjectId?: string | undefined;
   /**
    * `VectorFilter.includeSubjectless` と同じ欄・同じ意味（Issue #608 項目③(b)、
    * [ADR 0286](../../../../docs/decisions/0286-recall-include-subjectless.md)）——
@@ -41,29 +41,29 @@ export interface LexicalFilter {
    * subject_id IS NULL` へ広げる。追加のみの欄であり、知らない adapter は無視してよい
    * （`VectorFilter.includeSubjectless` の doc 参照）。
    */
-  includeSubjectless?: boolean;
+  includeSubjectless?: boolean | undefined;
   /** この中の `provenance.kind` を持つ行を除く。未指定・空配列なら除かない。 */
-  excludeProvenanceKinds?: ProvenanceKind[];
+  excludeProvenanceKinds?: ProvenanceKind[] | undefined;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以後の行だけを返す（境界を含む。ADR 0039）。 */
-  occurredAfter?: Date;
+  occurredAfter?: Date | undefined;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以前の行だけを返す（境界を含む。ADR 0039）。 */
-  occurredBefore?: Date;
+  occurredBefore?: Date | undefined;
   /**
    * Issue #280（Issue #202 第2弾）: `VectorFilter.validAt` と同じ絞り・同じ意味
    * （`@mnemora/core` の `RecallQuery.validAt` の doc 参照）。`period` と同じ扱いで
    * 両チャンネルに存在する——`decayFloorAtAfter`（`LexicalFilter` は持たない）とは
    * 違い、この欄は語彙チャンネルの SQL にも直接効く。
    */
-  validAt?: Date;
+  validAt?: Date | undefined;
   /**
    * `VectorFilter.attributes` と同じ欄・同じ意味（Issue #152/#153、ADR 0312）。
    */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /**
    * `VectorFilter.labels` と同じ欄・同じ意味（Issue #201 PR-B、
    * [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
    */
-  labels?: string[];
+  labels?: string[] | undefined;
 }
 
 /** `LexicalStore.search` が返す1件。 */

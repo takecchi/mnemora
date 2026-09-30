@@ -29,7 +29,8 @@ import { assertLLMContentNotBlank } from "./llm-content.js";
 import { resolveCandidateSubjectId, resolveCommonSubjectId } from "./memory-subject.js";
 import { classifyValidity } from "./validity.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
-import { describeFailure } from "./failure-description.js";
+import { describeFailure, omitParamsFromError } from "./failure-description.js";
+import { assertWellFormedCtx, assertWellFormedIdentifier } from "./identifier.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
@@ -38,6 +39,7 @@ import {
   isMemoryPurgeConflictError,
   isMemoryStatusConflictError,
   isSourceMemoryForgottenError,
+  isSourceMemoryStatusChangedError,
   PURGE_TOMBSTONE_CONTENT,
   PURGE_TOMBSTONE_DIGEST,
 } from "./interfaces/memory-store.js";
@@ -120,28 +122,28 @@ export interface RuntimeConfig {
    * 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。
    * 省略時（`undefined`・`null`）は `"v1"`。空文字は既定に倒れず、空文字のまま書かれる。
    */
-  extractorVersion?: string;
+  extractorVersion?: string | undefined;
   /**
    * `provenance.inferred.model` に書き込むモデル識別子。呼び出し側の LLMProvider の実体に合わせる。
    * 省略時（`undefined`・空文字）は `"unknown"`。空白だけの値はそのまま書く。
    */
-  llmModelId?: string;
+  llmModelId?: string | undefined;
   /**
    * `provenance.inferred.promptVersion`。抽出プロンプトを変えたら上げる。省略時（`undefined`・空文字）は `"v1"`。
    * 空白だけの値はそのまま書く。
    */
-  promptVersion?: string;
+  promptVersion?: string | undefined;
   /**
    * digest フォールバック（機械的な先頭文字列切り出し）の最大文字数。既定 200。
    * ⚠ 値は検査しない（今の振る舞い）。0・負の数・`NaN` を渡すと、本文が収まらない限り
    * digest は `"…"` だけになる（本文は `content` にそのまま残る）。
    */
-  digestFallbackLength?: number;
+  digestFallbackLength?: number | undefined;
   /**
    * `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。省略時は `"runtime.tick"`。
    * ⚠ 空文字は既定に倒れず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
-  defaultClaimedBy?: string;
+  defaultClaimedBy?: string | undefined;
   /**
    * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
    * [ADR 0157](../../../docs/decisions/0157-tick-drives-consolidate-and-reflect.md):
@@ -180,7 +182,7 @@ export interface RuntimeConfig {
    * 無関係に変わらない**——呼び手は自分の `ctx.subjectId` で完全に制御できる
    * （ADR 0310 決定2）。
    */
-  autoQueueConsolidateReflectOnExtract?: boolean;
+  autoQueueConsolidateReflectOnExtract?: boolean | undefined;
 }
 
 const DEFAULT_EXTRACTOR_VERSION = "v1";
@@ -260,7 +262,7 @@ export interface RuntimeDeps {
    * （`recall.ts` の `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`）。**黙って0件を返さない**——
    * 理由は `RecallQuery.channels` の doc に書いてある。
    */
-  lexicalStore?: LexicalStore;
+  lexicalStore?: LexicalStore | undefined;
   /**
    * `memory_relations` を読む store（Issue #207/#933 PR2、ADR 0292 決定1、ADR 0327、
    * ADR 0381）。
@@ -274,7 +276,7 @@ export interface RuntimeDeps {
    * （`Runtime.resolveContestedGroup` の doc コメント手順6）も、この欄が無ければ行わず
    * store 側の CAS だけに任せる。
    */
-  relationStore?: RelationStore;
+  relationStore?: RelationStore | undefined;
   /** 監査ログ（`memory_events`）を読み書きする store。 */
   eventStore: EventStore;
   /** テナントの設定（既定の半減期・減衰の時計・保持期間など）を読む store。 */
@@ -290,22 +292,22 @@ export interface RuntimeDeps {
    * `restoreSuperseded` の `unsuperseded` だけが注入した時計で、`restoreArchived` の `restored`・`sweepArchive` の
    * `archived` は壁時計——{@link Clock} の doc 参照（Issue #1237）。
    */
-  clock?: Clock;
+  clock?: Clock | undefined;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
   hashContent: (content: string) => string;
   /** runtime の設定（{@link RuntimeConfig}）。省略すると既定値で動く。 */
-  config?: RuntimeConfig;
+  config?: RuntimeConfig | undefined;
   /**
    * roadmap.md 段階4: `usage`（docs/recall.md §6）の計測に使う。省略時は
    * `heuristicTokenCounter`（文字数ベースの推定、`counter: 'heuristic'`）。
    */
-  tokenCounter?: TokenCounter;
+  tokenCounter?: TokenCounter | undefined;
   /**
    * `recall()` の戻り値を zod で検証するときの倒れ方（Issue #131、ADR 0098）。
    * 省略時は `"report"`（`DEFAULT_RECALL_OUTPUT_VALIDATION`（`recall-output-validation.ts`））——既定では投げない。
    * `recall-runtime.js` の `RecallRuntimeDeps.outputValidation` へそのまま渡る。
    */
-  outputValidation?: RecallOutputValidationMode;
+  outputValidation?: RecallOutputValidationMode | undefined;
   /**
    * `processEmbedJob` が `embed(ctx, [...])` へ送る文字列を、`Memory` から差し替える
    * **任意**のフック（Issue #753、#449 の残り。ADR 0305 は「上限超過は例外」を契約に
@@ -336,7 +338,7 @@ export interface RuntimeDeps {
    * `embeddingStatus` を `'failed'` にしてから再送出する——このフックのために
    * 新しい throw の経路を既定側へ作らない。
    */
-  embeddingInput?: (memory: Memory) => string;
+  embeddingInput?: ((memory: Memory) => string) | undefined;
 }
 
 /** `Runtime.observe` の戻り値。 */
@@ -716,9 +718,9 @@ export interface ForgetOptions {
    * 落ちた」と「運用の都合で落とした」を後から区別するためにある。省略時、
    * `meta` に `reason` キー自体を持たせない（`""` と「省略」を区別する）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
 }
 
 /**
@@ -833,11 +835,11 @@ export interface ForgetResult {
  */
 export type ConsolidateTarget =
   | { memoryIds: MemoryId[] }
-  | { query: RecallQuery; maxCandidates?: number }
+  | { query: RecallQuery; maxCandidates?: number | undefined }
   | {
       seedMemoryId: MemoryId;
-      maxCandidates?: number;
-      minAffinity?: number;
+      maxCandidates?: number | undefined;
+      minAffinity?: number | undefined;
       /**
        * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
        * （Issue #338）: 種の digest で内部的に呼ぶ `recall()` へそのまま渡す
@@ -846,7 +848,7 @@ export type ConsolidateTarget =
        * `recall()` に直接触れられないためにこの欄を用意する。省略時 `"tenant"`
        * （本 ADR 以前と1バイトも変わらない挙動）。
        */
-      activityCounting?: "tenant" | "subject";
+      activityCounting?: "tenant" | "subject" | undefined;
     };
 
 /**
@@ -870,15 +872,15 @@ export interface ConsolidateOptions {
    * `true` なら **LLM を呼ばず・1件も書かず**、束ねられる対象だけを見て返す
    * （{@link ConsolidateSourceOutcome} の `"eligible"` を参照）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（統合元の `superseded`・統合先の `created` の両方）。省略時は積まない。
    * `meta.reason` は常に固定値 `'consolidated'` であり、この欄では上書きしない（`MarkContestedOptions.reason` と
    * 同じ形。`ForgetOptions.reason` とは違う）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /**
    * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
    * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
@@ -891,7 +893,7 @@ export interface ConsolidateOptions {
    * LLM 呼び出しは、束ねる対象を1件も書く前に行う（上の手順5）ので、abort の時点では
    * 何も書かれていない。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -914,6 +916,17 @@ export interface ConsolidateOptions {
  *   クローン miku の判断）。{@link ConsolidateSourceOutcome} の `"forgotten_before_write"`
  *   参照。破壊的変更とは数えない（union に値を足す変更は数えない。同日付の
  *   「数え方の規律への追記（2026-09-28）」、`"expired"`/`"not_yet_valid"` の追加と同じ扱い）。
+ * - `"aborted_source_status_changed"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前（または書き込みの
+ *   トランザクション内）に見直したら、eligible の1件以上が `superseded` になっていた（`reextract` などが
+ *   LLM を待つ間に別の記憶で置き換えた）、または eligible の**すべて**が `active` でなくなっていた
+ *   （同じ ids の `consolidate` が同時に走って先に commit した、など）ので、**何も書かずに打ち切った**
+ *   （統合先は作らない。eligible のどれ1つも `superseded` へ動かさない）。
+ *   `aborted_source_forgotten` を superseded・全件 CAS 弾かれにも広げたもの（ADR 0420）。
+ *   {@link ConsolidateSourceOutcome} の `"status_changed_concurrently"` が、動いていた要素を名指しする。
+ *   ⚠ 1件でも `active` のまま残り、`superseded` になったものが無いなら、今までどおりの部分成功
+ *   （`"consolidated"`、動いていた要素だけ `"status_changed_concurrently"`）。
+ *   **破壊的変更として数える**（今まで `"consolidated"` で返っていた入力が、この値で返る。
+ *   `docs/migration-v1.md` 項目42）。
  */
 export type ConsolidateOutcome =
   | "consolidated"
@@ -921,7 +934,8 @@ export type ConsolidateOutcome =
   | "not_examined"
   | "llm_failed"
   | "dry_run"
-  | "aborted_source_forgotten";
+  | "aborted_source_forgotten"
+  | "aborted_source_status_changed";
 
 /**
  * `ConsolidateOutcome: "nothing_to_consolidate"` の理由（Issue #103、ADR 0089）。
@@ -1124,17 +1138,17 @@ export interface ConsolidationResult {
  */
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }
-  | { query: RecallQuery; maxCandidates?: number }
+  | { query: RecallQuery; maxCandidates?: number | undefined }
   | {
       seedMemoryId: MemoryId;
-      maxCandidates?: number;
-      minAffinity?: number;
+      maxCandidates?: number | undefined;
+      minAffinity?: number | undefined;
       /**
        * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
        * （Issue #338）: `ConsolidateTarget`（`{ seedMemoryId }` 形）の同名の欄と
        * 同じ——種の digest で内部的に呼ぶ `recall()` へそのまま渡す。省略時 `"tenant"`。
        */
-      activityCounting?: "tenant" | "subject";
+      activityCounting?: "tenant" | "subject" | undefined;
     };
 
 /**
@@ -1158,21 +1172,21 @@ export interface ReflectOptions {
    * `true` なら **LLM を呼ばず・1件も書かず**、土台になりうる対象だけを見て返す
    * （{@link ReflectBasisOutcome} の `"eligible"` を参照）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   /** `memory_events.actor`（`created` イベント）。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`created` イベント）。省略時は積まない。`meta.reason` は常に固定値
    * `'reflected'` であり、この欄では上書きしない（`ConsolidateOptions.reason` と同じ形）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /**
    * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
    * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
    * 中断の合図。`ConsolidateOptions.signal` と同じ形——内部で呼ぶ `recall()` と LLM 呼び出しの
    * 両方に効く。abort されると `reflect()` は reject し、既存の `"llm_failed"` には倒さない。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -1194,6 +1208,11 @@ export interface ReflectOptions {
  *   2026-09-30 追記（Issue #1226、ADR 0375 決定7、クローン miku の判断）。
  *   {@link ReflectBasisOutcome} の `"forgotten_before_write"` 参照。破壊的変更とは数えない
  *   （union に値を足す変更は数えない。`ConsolidateOutcome` の同日付の追記と同じ扱い）。
+ * - `"aborted_source_status_changed"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前（または書き込みの
+ *   トランザクション内）に見直したら、eligible の1件以上が `superseded` になっていたので、**何も書かずに
+ *   打ち切った**（内省の Memory を作らない）。`aborted_source_forgotten` を superseded にも広げたもの
+ *   （ADR 0420）。{@link ReflectBasisOutcome} の `"status_changed_before_write"` 参照。
+ *   **破壊的変更として数える**（今まで `"reflected"` で返っていた入力が、この値で返る。`docs/migration-v1.md` 項目42）。
  */
 export type ReflectOutcome =
   | "reflected"
@@ -1201,7 +1220,8 @@ export type ReflectOutcome =
   | "not_examined"
   | "llm_failed"
   | "dry_run"
-  | "aborted_source_forgotten";
+  | "aborted_source_forgotten"
+  | "aborted_source_status_changed";
 
 /**
  * `ReflectOutcome: "nothing_to_reflect"` の理由（Issue #104）。
@@ -1235,6 +1255,9 @@ export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
  *   （`dryRun: true` で下見しただけ／LLM 呼び出しが失敗した／LLM が「無い」と答えた／
  *   他の eligible が `"forgotten_before_write"` になり呼び出し全体が打ち切られた（この
  *   要素自身は forgotten ではなかった。2026-09-30 追記、Issue #1226）、のいずれか）。
+ * - `"status_changed_before_write"` — 書き込みの直前（または書き込みのトランザクション内）の見直しで、すでに
+ *   `superseded` になっていた（`observedStatus` はそのとき見えた値）。この呼び出し全体が
+ *   `outcome: 'aborted_source_status_changed'` で打ち切られる（ADR 0420）。他の eligible は `"eligible"` のまま。
  *
  * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
  * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も材料にして
@@ -1277,7 +1300,8 @@ export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "not_yet_valid"; validFrom: Date }
   | { memoryId: MemoryId; kind: "basis_is_reflected" }
   | { memoryId: MemoryId; kind: "eligible" }
-  | { memoryId: MemoryId; kind: "forgotten_before_write" };
+  | { memoryId: MemoryId; kind: "forgotten_before_write" }
+  | { memoryId: MemoryId; kind: "status_changed_before_write"; observedStatus: MemoryStatus };
 
 /**
  * `runtime.reflect` の結果（Issue #104）。
@@ -1356,7 +1380,7 @@ export interface TickOptions {
    * （`OutboxStore.claimBatch` がそのまま受け取る。Postgres は DB の例外、testkit の fixture は
    * 専用のメッセージ）。
    */
-  limit?: number;
+  limit?: number | undefined;
   /**
    * claim する job の種類。省略時は {@link TICK_SUPPORTED_JOB_KINDS}。
    *
@@ -1367,12 +1391,12 @@ export interface TickOptions {
    * - claim の順は、種類に関わらず `available_at` の古い順である。種類ごとの枠の配分は無い
    *   ——古い job が `limit` を埋めていれば、後から積まれた別の種類の job は次の `tick` に回る。
    */
-  kinds?: OutboxJobKind[];
+  kinds?: OutboxJobKind[] | undefined;
   /**
    * claim した worker の名前（outbox の行の `claimed_by`）。省略すると `RuntimeConfig.defaultClaimedBy`、それも無ければ `"runtime.tick"`。
    * ⚠ 空文字は省略と同じにはならず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
-  claimedBy?: string;
+  claimedBy?: string | undefined;
   /**
    * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
    * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
@@ -1389,7 +1413,7 @@ export interface TickOptions {
    * - `tick` がリースを超えたこと自体を名乗る口は、今回も追加していない
    *   （上の「今の振る舞い」の追記のとおり）。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -1537,9 +1561,9 @@ export interface RestoreArchivedOptions {
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。省略時、`meta` に `reason`
    * キー自体を持たせない（`ForgetOptions.reason` と同じ規律）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
 }
 
 /**
@@ -1703,7 +1727,7 @@ export type RestoreSupersededTarget = {
    * [ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)
    * の同日付追記を参照。
    */
-  onlyMemoryIds?: MemoryId[];
+  onlyMemoryIds?: MemoryId[] | undefined;
 };
 
 /**
@@ -1827,9 +1851,9 @@ export interface RestoreSupersededOptions {
    * 存在するほうが検索・集計しやすい——1件ずつの CAS である `restoreArchived` とは
    * 前提が違う、という判断。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * 🔴 **下見（Issue #515、ADR 0237、方向3「戻す前に何が戻るかを返す」）。**
    * `true` のとき、一切の書き込み（`memories` の `UPDATE`・`memory_events` への
@@ -1841,7 +1865,7 @@ export interface RestoreSupersededOptions {
    * `MemoryStore.previewRestoreSupersededBy?` が `restoreSupersededBy?` と同じ
    * `WHERE` で選ぶ。前者が無い adapter では `supported: false`）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -1956,9 +1980,9 @@ export interface PurgeOptions {
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。省略時、`meta` に `reason`
    * キー自体を持たせない（`ForgetOptions.reason` と同じ規律）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * 🔴 **下見（issue #198 の受け入れ条件が名指しする「dryRun 相当の下見」）。**
    * `true` のとき、一切の書き込み（`content`/`digest`/`purgedAt` の更新、
@@ -1970,7 +1994,7 @@ export interface PurgeOptions {
    * が既に書き込み0件を意味していても、この欄がある限りベストエフォートの副作用
    * （embedding の削除）も止める。省略時 `false`。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -2118,13 +2142,13 @@ export type MarkContestedOutcome =
  */
 export interface MarkContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
    * この欄では上書きしない——`consolidate`/`reflect` の `opts.reason` → `meta.note` と
    * 同じ形）。省略時は `meta` に `note` キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2212,14 +2236,14 @@ export type ResolveContestedOutcome =
  */
 export interface ResolveContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値
    * `'contested_resolved'` であり、この欄では上書きしない——`markContested`/`consolidate`/
    * `reflect` の `opts.reason` → `meta.note` と同じ形）。省略時は `meta` に `note` キー
    * 自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2294,13 +2318,13 @@ export type ResolveOrphanedContestedOutcome =
  */
 export interface ResolveOrphanedContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値
    * `'contested_resolved'` であり、この欄では上書きしない）。省略時は `meta` に `note`
    * キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2376,13 +2400,13 @@ export type MarkContestedGroupOutcome =
  */
 export interface MarkContestedGroupOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
    * この欄では上書きしない——`markContested` の `opts.reason` → `meta.note` と同じ形）。
    * 省略時は `meta` に `note` キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2461,12 +2485,12 @@ export type ContestedGroupResolution = ContestedResolution;
  */
 export interface ResolveContestedGroupOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested_resolved'`
    * であり、この欄では上書きしない）。省略時は `meta` に `note` キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -3577,7 +3601,9 @@ export interface Runtime {
    * `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
    * `'supersede' | 'both_active'`。`opts.reason` を渡すと `meta.note` に追加で入る。
    * `meta.contestedWithId` は積まない（`markContestedGroup` と同じ理由——群のメンバーは
-   * その欄自体を持たない）。
+   * その欄自体を持たない）。負けた側の `superseded` は `meta.supersededById` に勝った側の id
+   * （`memberIds` の綴りに寄せた `winnerId`。store へ渡す値と同じ）を持つ——2者版
+   * `resolveContested` と同じ形（ADR 0150 追記。ADR 0421 で揃えた）。勝者の `updated` には足さない。
    *
    * ⚠ **`recall()` 側は一切変更していない。**`markContested`/`resolveContested` と同じ
    * 理由。
@@ -3769,6 +3795,14 @@ export interface Runtime {
    *    今日も存在する**——`forgotten`/`purged` 以外の理由（例: 別の呼び出しが同じ eligible を
    *    先に `superseded`/`contested` へ動かした）で CAS が破れたときは、今どおり部分成功として扱う
    *    （その1件だけ `status_changed_concurrently`、統合先は書かれる）。
+   *    ⚠ **2026-09-30 変更（[ADR 0420](../../../docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)）:**
+   *    上の「`superseded` へ動かした」場合は、もう部分成功にならない。eligible の1件でも `superseded` になっていた
+   *    ときと、eligible の**すべて**が `active` でなくなっていた（CAS がすべて破れた）ときは、統合先を書かず
+   *    `outcome: 'aborted_source_status_changed'` で打ち切る（手順5の直後の読み直しと、
+   *    `supersedeWithNewMemories?` の `opts.abortIfSuperseded`/`opts.abortIfAllConflicted`）。部分成功が残るのは、
+   *    `superseded` 以外の理由（`contested`・`archived` など）で**一部だけ**が破れたときである。
+   *    ⚠ `supersedeWithNewMemories?` を実装しない adapter の2段の経路では、統合先を書いた後で CAS するので、
+   *    手順5の直後の読み直しより後に全件が破れた場合は打ち切れない（統合先は残る。ADR 0420 の「引き受けた負債」）。
    * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
    *
    * `memory_events.meta.reason` は `superseded` イベントに `'consolidated'` を積む
@@ -4272,11 +4306,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `reextract` が `created` に渡す追加の指定（ADR 0422）。`at` は同じ操作の `superseded` と揃える時刻、
+   * `reextracted` は meta に足す印。どちらも省けば今までの形（observe・抽出の経路）。
+   */
+  interface CreatedEventReextractOpts {
+    readonly at?: Date;
+    readonly reextracted?: boolean;
+  }
+
+  /**
    * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
    * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
    * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
    * INSERT する）が共有する——`meta` の中身が2つの経路でずれないように、組み立てはここ1箇所に置く
    * （ADR 0410）。
+   *
+   * `reextractOpts`（ADR 0422）は `reextract` だけが渡す。`at` を渡すとその値を使い（同じ操作の `superseded` と
+   * 同じ入口の `now`）、`reextracted: true` を渡すと meta にその印を足す。省くと今までどおり
+   * （`at` は組み立て時の `clock.now()`、meta に印は無い）。
+   *
+   * ⚠ 同じ `at` を持つ `created` と `superseded`（`consolidate`・`reextract`）の**並びは約束しない**
+   * （`EventStore.list` は `at` の昇順だけ。ADR 0422）。順が要るなら `kind` と meta の `supersededById` で読む。
    */
   function buildCreatedEventFor(
     ctx: Ctx,
@@ -4285,6 +4335,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
+    reextractOpts?: CreatedEventReextractOpts,
   ): NewMemoryEvent {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
@@ -4294,7 +4345,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "created",
-      at: clock.now(),
+      // ADR 0422: 渡されたときはその値（`reextract` は入口の `now`——同じ操作の `superseded` と揃える）。
+      // 渡さないとき（observe・抽出の経路）は今までどおり組み立て時の `clock.now()`。
+      at: reextractOpts?.at ?? clock.now(),
       actor: { type: "system" },
       digestSnapshot: memory.digest,
       sizeBeforeBytes: null,
@@ -4318,6 +4371,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 本文が出たときだけ足す——疑いが無い呼び出しの meta の形は変えない。**印を付けるだけ**で、
         // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
         ...(languageMismatch !== null ? { languageMismatch } : {}),
+        // ADR 0422: `reextract` の `created` にだけ足す印。既存のキーの意味（`reason: "extracted"` など）は
+        // 変えない——足すだけ。observe・抽出の経路の meta の形は変えない。
+        ...(reextractOpts?.reextracted === true ? { reextracted: true } : {}),
       },
     };
   }
@@ -4347,10 +4403,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
+    reextractOpts?: CreatedEventReextractOpts,
   ): Promise<void> {
     await deps.eventStore.append(
       ctx,
-      buildCreatedEventFor(ctx, memory, observation, outcome, failure, droppedCandidates),
+      buildCreatedEventFor(
+        ctx,
+        memory,
+        observation,
+        outcome,
+        failure,
+        droppedCandidates,
+        reextractOpts,
+      ),
     );
   }
 
@@ -5168,6 +5233,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         },
       }) satisfies NewMemoryEvent;
 
+    // ADR 0422: この操作の `created` は、`superseded`（`buildSupersedeEventFor`）と同じ入口の `now` を `at` に使い、
+    // meta に `reextracted: true` を足す。3経路（口あり・名乗らない adapter の別の追記・口なし）すべてで同じ値を渡す。
+    const reextractCreated: CreatedEventReextractOpts = { at: now, reextracted: true };
+
     // ------------------------------------------------------------------
     // ADR 0100: 口が在れば、作成と supersede を1トランザクションで撃つ。
     // 🔴 フォールバックは**口の不在に対してだけ**（書き込みの前に1度判定する）。
@@ -5200,7 +5269,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             now,
             abortIfForgotten: knownMemoryIds,
             buildCreatedEvent: (memory) =>
-              buildCreatedEventFor(ctx, memory, observation, "ok", null),
+              buildCreatedEventFor(ctx, memory, observation, "ok", null, [], reextractCreated),
           },
         );
       } catch (error) {
@@ -5219,7 +5288,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (result.createdEventsWritten !== true) {
         for (const { memory, created } of result.created) {
           if (created) {
-            await appendCreatedEvent(ctx, memory, observation, "ok", null);
+            await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
           }
         }
       }
@@ -5275,7 +5344,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       const { memory, created } = written;
       memoryIds.push(memory.id);
       if (created) {
-        await appendCreatedEvent(ctx, memory, observation, "ok", null);
+        await appendCreatedEvent(ctx, memory, observation, "ok", null, [], reextractCreated);
       }
     }
     // `candidates.length === 0` を上で早期リターンしている以上 `memoryIds` は非空
@@ -7415,6 +7484,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind }
         : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
+    // 敗者の superseded イベントの meta には、勝者の id を `supersededById` として残す
+    // （2者版 `resolveContested` と同じ。ADR 0150 追記、ADR 0421）。store へ渡す値と同じ
+    // （`memberIds` の綴りに寄せた winnerId）。勝者・both_active の updated には足さない。
 
     try {
       const now = clock.now();
@@ -7430,7 +7502,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           at: now,
           actor,
           digestSnapshot: memory.digest,
-          meta: buildMeta(),
+          meta:
+            status === "superseded" ? { ...buildMeta(), supersededById: winnerId! } : buildMeta(),
         };
         return status === "superseded"
           ? { id, status, supersededById: winnerId!, event }
@@ -7794,6 +7867,48 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
+    // ADR 0420: 同じ読み直しで、superseded も見る。forgotten と同じ形で、退けた古い本文から作った統合先を
+    // active で残さない。加えて、eligible の**すべて**が active でなくなっていた（同じ ids の consolidate が
+    // 先に commit した、など）ときも、統合先だけが残らないよう打ち切る。1件でも active が残り superseded が
+    // 無いなら、今までどおりの部分成功（動いていた要素だけ `status_changed_concurrently`）。
+    const changedBeforeConsolidateWrite = new Map<MemoryId, MemoryStatus>();
+    for (const id of eligibleIds) {
+      const status = recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status;
+      if (status === "superseded") {
+        changedBeforeConsolidateWrite.set(id, status);
+      }
+    }
+    if (
+      eligibleIds.every((id) => {
+        const status = recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status;
+        return status !== undefined && status !== "active";
+      })
+    ) {
+      for (const id of eligibleIds) {
+        changedBeforeConsolidateWrite.set(
+          id,
+          recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))!.status,
+        );
+      }
+    }
+    if (changedBeforeConsolidateWrite.size > 0) {
+      return {
+        // 書き込みを1件も試みていない（ADR 0100 と同じ扱い——このトランザクション自体を開いていない）。
+        atomicity: "not_attempted" as const,
+        outcome: "aborted_source_status_changed",
+        nothingReason: null,
+        consolidatedMemoryId: null,
+        sources: mapSources((id) => {
+          const observed = changedBeforeConsolidateWrite.get(id);
+          return observed !== undefined
+            ? { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed }
+            : { memoryId: id, kind: "not_attempted" };
+        }),
+        llmCalls: 1,
+        llmFailure: null,
+      };
+    }
+
     // 6. 統合先を作る。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -7892,7 +8007,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           })),
           // ADR 0416（穴 D-3 の続き）: 統合先の `created` も同じトランザクションで積ませる（実装する adapter だけ。
           // 積んだかどうかは戻り値の `createdEventsWritten` で判断する）。
-          { now, abortIfForgotten: eligibleIds, buildCreatedEvent },
+          {
+            now,
+            abortIfForgotten: eligibleIds,
+            // ADR 0420: superseded・全件 CAS 弾かれは統合先を commit せず打ち切る（tx ごと巻き戻る）。
+            abortIfSuperseded: eligibleIds,
+            abortIfAllConflicted: true,
+            buildCreatedEvent,
+          },
         );
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
@@ -7909,6 +8031,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
                 ? { memoryId: id, kind: "forgotten_before_write" }
                 : { memoryId: id, kind: "not_attempted" },
             ),
+            llmCalls: 1,
+            llmFailure: null,
+          };
+        }
+        if (isSourceMemoryStatusChangedError(error)) {
+          const changedLate = new Map(error.changed.map((c) => [c.id, c.observedStatus]));
+          return {
+            // 全部巻き戻った——書き込みを試みていないのと呼び出し側からは区別が付かない。
+            atomicity: "not_attempted" as const,
+            outcome: "aborted_source_status_changed",
+            nothingReason: null,
+            consolidatedMemoryId: null,
+            sources: mapSources((id) => {
+              const observed = changedLate.get(id);
+              return observed !== undefined
+                ? { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed }
+                : { memoryId: id, kind: "not_attempted" };
+            }),
             llmCalls: 1,
             llmFailure: null,
           };
@@ -7957,7 +8097,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         ctx,
         newMemory,
         ["embed"],
-        { now, abortIfForgotten: eligibleIds },
+        // ADR 0420: superseded を見直す（実装する adapter だけ。`abortIfAllConflicted` は 2 段の書き込みには
+        // 当たらない——統合先を commit した後で CAS するため、下の手順7は部分成功のまま）。
+        { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
       );
       consolidatedMemory = createResult.memory;
       created = createResult.created;
@@ -7974,6 +8116,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               ? { memoryId: id, kind: "forgotten_before_write" }
               : { memoryId: id, kind: "not_attempted" },
           ),
+          llmCalls: 1,
+          llmFailure: null,
+        };
+      }
+      if (isSourceMemoryStatusChangedError(error)) {
+        const changedLate = new Map(error.changed.map((c) => [c.id, c.observedStatus]));
+        return {
+          atomicity: "not_attempted" as const,
+          outcome: "aborted_source_status_changed",
+          nothingReason: null,
+          consolidatedMemoryId: null,
+          sources: mapSources((id) => {
+            const observed = changedLate.get(id);
+            return observed !== undefined
+              ? { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed }
+              : { memoryId: id, kind: "not_attempted" };
+          }),
           llmCalls: 1,
           llmFailure: null,
         };
@@ -8308,6 +8467,31 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
+    // ADR 0420: 同じ読み直しで、superseded も見る（forgotten と同じ形）。LLM を待つ間に別の記憶で置き換えられた
+    // 材料の古い本文から作った内省を、active で残さない。
+    const supersededBeforeReflectWrite = new Map<MemoryId, MemoryStatus>();
+    for (const id of eligibleIds) {
+      const status = recheckedByIdBeforeReflectWrite.get(lookupKey(id))?.status;
+      if (status === "superseded") {
+        supersededBeforeReflectWrite.set(id, status);
+      }
+    }
+    if (supersededBeforeReflectWrite.size > 0) {
+      return {
+        outcome: "aborted_source_status_changed",
+        nothingReason: null,
+        reflectedMemoryId: null,
+        basis: mapBasis((id) => {
+          const observed = supersededBeforeReflectWrite.get(id);
+          return observed !== undefined
+            ? { memoryId: id, kind: "status_changed_before_write", observedStatus: observed }
+            : { memoryId: id, kind: "eligible" };
+        }),
+        llmCalls: 1,
+        llmFailure: null,
+      };
+    }
+
     // 7. 新しい Memory を1件作る（既存の行へは一切書き込まない——決定4）。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
@@ -8366,7 +8550,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           ctx,
           [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
           (memory) => buildReflectedCreatedEvent(memory),
-          { now, abortIfForgotten: eligibleIds },
+          { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
         );
         // 候補は1件なので、全件が落ちたなら store は最初の例外を投げている（`dropped` は空のはず）。
         // 契約に反して `written` が空で返ったときは、落とした例外があればそれを、無ければ契約違反として投げる。
@@ -8387,7 +8571,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           ctx,
           newMemory,
           ["embed"],
-          { now, abortIfForgotten: eligibleIds },
+          { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
         );
         reflectedMemory = createResult.memory;
         created = createResult.created;
@@ -8404,6 +8588,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               ? { memoryId: id, kind: "forgotten_before_write" }
               : { memoryId: id, kind: "eligible" },
           ),
+          llmCalls: 1,
+          llmFailure: null,
+        };
+      }
+      if (isSourceMemoryStatusChangedError(error)) {
+        const changedLate = new Map(error.changed.map((c) => [c.id, c.observedStatus]));
+        return {
+          outcome: "aborted_source_status_changed",
+          nothingReason: null,
+          reflectedMemoryId: null,
+          basis: mapBasis((id) => {
+            const observed = changedLate.get(id);
+            return observed !== undefined
+              ? { memoryId: id, kind: "status_changed_before_write", observedStatus: observed }
+              : { memoryId: id, kind: "eligible" };
+          }),
           llmCalls: 1,
           llmFailure: null,
         };
@@ -8431,7 +8631,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  return {
+  return guardRuntimeEntry({
     observe,
     tick,
     recall,
@@ -8452,5 +8652,38 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     applyCorrection,
     consolidate,
     reflect,
-  };
+  });
+}
+
+/**
+ * `Runtime` の各メソッドの入口と出口に掛ける関門（[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)）。
+ *
+ * - **入口**: 第1引数の {@link Ctx}（`tenantId`・`subjectId`）と、`observe` の入力の `subjectId`・`externalId` が
+ *   孤立サロゲートか NUL を含めば、何も書かずに {@link MalformedIdentifierError} で拒む（正規化はしない）。
+ *   本文（`text` など）は検査しない。`Runtime` のメソッドを新しく足したときは、ここを通る（全メソッドに掛かる）。
+ * - **出口**: store などが投げた例外の `message` から、SQL に付けた値（params）を落とす
+ *   （{@link omitParamsFromError}）。例外そのもの（`kind`・`cause`）は変えない。
+ */
+function guardRuntimeEntry(runtime: Runtime): Runtime {
+  const guarded: Record<string, unknown> = {};
+  for (const [name, method] of Object.entries(runtime) as Array<
+    [string, (...args: unknown[]) => Promise<unknown>]
+  >) {
+    guarded[name] = (...args: unknown[]): Promise<unknown> => {
+      try {
+        assertWellFormedCtx(args[0] as Ctx);
+        if (name === "observe") {
+          const input = args[1] as { subjectId?: unknown; externalId?: unknown } | null | undefined;
+          assertWellFormedIdentifier(input?.subjectId, "input.subjectId");
+          assertWellFormedIdentifier(input?.externalId, "input.externalId");
+        }
+        return method(...args).catch((error: unknown) => {
+          throw omitParamsFromError(error);
+        });
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
+  }
+  return guarded as unknown as Runtime;
 }

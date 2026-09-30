@@ -66,13 +66,13 @@ export interface AnthropicLLMProviderErrorOptions {
   /** 失敗の種類（{@link AnthropicLLMFailureKind}）。 */
   kind: AnthropicLLMFailureKind;
   /** SDK が返した生の `stop_reason`。分からなければ `null`（偽 client・streaming の途中など） */
-  stopReason?: string | null;
+  stopReason?: string | null | undefined;
   /** `stop_details.category`（`cyber` / `bio` / `frontier_llm` / `reasoning_extraction` …）。
    * **開いた集合である**——SDK の型は将来値が増えることを前提にしているので、
    * ここでも文字列のまま持ち、列挙に押し込めない。 */
-  refusalCategory?: string | null;
+  refusalCategory?: string | null | undefined;
   /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
-  message?: string;
+  message?: string | undefined;
   /** `kind: "schema_unsupported"` のとき、送る前の翻訳が投げた元の例外。
    * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
   cause?: unknown;
@@ -128,4 +128,38 @@ export class AnthropicLLMProviderError extends Error {
     this.stopReason = options.stopReason ?? null;
     this.refusalCategory = options.refusalCategory ?? null;
   }
+}
+
+const ANTHROPIC_LLM_FAILURE_KINDS: ReadonlySet<unknown> = new Set<AnthropicLLMFailureKind>([
+  "refusal",
+  "truncated",
+  "no_content",
+  "schema_unsupported",
+]);
+
+/**
+ * 受け取ったものが {@link AnthropicLLMProviderError} かを、**`instanceof` を使わずに**判定する
+ * （[ADR 0418](../../../docs/decisions/0418-store-error-kind-guards.md) の作法、
+ * ADR 0428）。
+ *
+ * **「`kind` を見て、`kind` が無ければ `name` を見る」。** `kind` があるときは、それが
+ * {@link AnthropicLLMFailureKind} のどれかであることを見る。`kind` の値は openai と anthropic で重なるので、`name` が文字列ならそれが `"AnthropicLLMProviderError"` であることも見る（`name` を持たない素の値は `kind` だけで見る）。`kind` が無い値
+ * （`kind` を持たない古い版が投げた例外など）は、`name === "AnthropicLLMProviderError"` で見る。
+ * bundler が同じクラスを二重に読み込んでいても効く。`name` は偽装できるが、provider は利用者が
+ * 自分で配線する信頼された部品なので実害は無いと判断している。
+ */
+export function isAnthropicLLMProviderError(value: unknown): value is AnthropicLLMProviderError {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { kind?: unknown; name?: unknown };
+  if (candidate.kind !== undefined) {
+    // kind の値は openai と anthropic で重なる（`refusal` など）。`name` を持つ値は、
+    // それが一致することも見る——相手の provider の例外を取り違えないため。
+    return (
+      ANTHROPIC_LLM_FAILURE_KINDS.has(candidate.kind) &&
+      (typeof candidate.name !== "string" || candidate.name === "AnthropicLLMProviderError")
+    );
+  }
+  return candidate.name === "AnthropicLLMProviderError";
 }

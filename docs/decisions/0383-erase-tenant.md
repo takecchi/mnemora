@@ -455,3 +455,54 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
 **採らなかった案**: `vectorStore` を先に呼んで件数を実数にする——決定5の不変条件（止まるときに他の port へ1行も触れていない状態を保つ）を壊す。CASCADE で消えた分を `memoryStore` 側で数えて足す——連鎖して消える行数を別に数える手段が要る。今はその必要を認めていない（検討しただけで、試していない）。**食い違いは戻り値の型を変えずに文書で説明する**に留めた。
 
 **消去の完了は、戻り値の件数ではなく表を数えて確かめること。**同じ説明を `packages/core/src/erase-tenant.ts` の doc コメントと `docs/memory-model.md` §9 の追記に置いた。
+
+## 追記2（2026-09-30）: そのテナントへの書き込みを止めてから呼ぶ／`deleted` が全部 `0` になるまで呼び直す
+
+⛔ 上の本文と上の追記は書き換えていない。決定も変えていない（文書の追記だけ）。
+
+**同じテナントへ書き込みながら `eraseTenant` を呼ぶと、行が残りうる。**消している途中に `observe()`・`tick()` などが書いた行は、その回では消えない。⟹ **そのテナントへの書き込みを止めてから呼ぶ。**本文の「`reachedLimit === true` なら呼び直す」は、`limit` で区切られた分の話であり、`reachedLimit === false` が「空になった」を保証するものではない（書き込みが止まっていなければ）。⟹ **書き込みを止めたうえで、`deleted` の4欄が全部 `0` で返る回が出るまで呼び直す。**その後に表を数えて確かめる（上の追記のとおり、`deleted.vectorStore` は CASCADE で本番では `0` になりうるので、`deleted` の件数だけでは「消えた」を言えない）。
+
+どの表に何が残りうるかは、`packages/core/src/erase-tenant.ts` の doc コメントと [`docs/memory-model.md`](../memory-model.md) §9 に書いた。
+
+**確かめていないこと**: 書き込みを実際に割り込ませて、残る行を起こしてはいない。上の説明は `@mnemora/postgres` の実装（表ごとに「対象の id を先に選んでその id だけを消す」文）を読んだ推論である。`embed` の書き込みが `memories` の削除の後にどうなるか（外部キーで失敗するはず）も確かめていない。
+
+## 追記（2026-09-30）: 約束と実装が違っていたので、実装を約束に合わせた——`limit` で止まった回は、後ろの port を呼ばない
+
+⛔ 上の本文と、直前の追記（`deleted.vectorStore`）は書き換えていない。決定5（呼び出し順序）も変えていない。
+
+**何が違っていたか。**決定5と `eraseTenant` の doc は「設定（`tenantSettingsStore`）は最後にする——途中で処理が中断しても、まだ『テナントが存在する』ことの手がかりとして残る」と約束していた。だが実装は、`memoryStore.eraseTenant?` が `reachedLimit: true` を返しても、続けて `vectorStore`・`outboxStore`・`tenantSettingsStore` を呼んでいた。Postgres で `limit: 10` を渡して1回呼ぶと、`memories` 13件のうち消えたのは一部なのに、`tenant_settings` は 1 → 0、埋め込みは 13 → 3、outbox は 31 → 21 になった（別の担当の実測）。`memories` が残っているのに設定が無い、という「途中で止まった」ことの手がかりを消す状態である。**約束が正しく、実装が約束に届いていなかった。**
+
+**決めたこと（実装を約束に合わせた）。**
+
+1. **いずれかの port が `reachedLimit: true` を返したら、そこで打ち切り、後ろの port は呼ばずに `reachedLimit: true` で返す。**順序は `memoryStore` → `vectorStore` → `outboxStore` → `tenantSettingsStore` のまま。`vectorStore`・`outboxStore` が `reachedLimit` を返したときも同じ（前の port が消し切っていないときに設定を消さない、という約束は `memoryStore` に限らないため）。設定が消えるのは、前の3つが消し切った回だけ——つまり `reachedLimit: false` で返る回に限られる。
+2. **呼ばなかった port の `deleted` は `0`。**型（`deleted` は「この呼び出しでその port が実際に消した行数」）どおり、呼ばなかった port は1行も消していない。採らなかった案: 欄を欠落・`undefined` にする（戻り値の型が割れ、呼び手が4欄を足し算するたびに分岐が要る）、前の回の値を持ち越す（`eraseTenant` は状態を持たない）。
+3. **`dryRun` も同じ経路を通る。**`memoryStore` が `reachedLimit` を返したら、後ろの port は数えず `0` で返す。プレビューは「本番の1回目がどういう形で返るか」を写すもので、`dryRun` だけ全 port を数えると、プレビューの形と実際に起きる形が割れる。採らなかった案: `dryRun` だけは何も消さないので全 port を数える（実数は見えるが、上の理由で採らなかった。`limit` で止まらない `dryRun` は、これまでどおり全 port を数える）。
+4. **`reachedLimit` は保守的な近似**（本文の `reachedLimit` の決め方の節）のままなので、`deleted` が `limit` ちょうどで消し切れていた port でも、その回は後ろの port へ進まず、次の回で進む。呼び直しの回数が高々1回増えるだけで、消え残りは出ない。
+
+**確かめたこと（2026-09-30、自分専用の PostgreSQL 17 + pgvector。UTF8（`C.UTF-8`）と SQL_ASCII（`C`）の2つ。`migrate` で全 migration を適用した DB）**:
+
+- 直す前の実装に、`limit` で止まった回に設定・outbox・埋め込みが残ることを見る歯を当てた（core の fake の store と Postgres の両方）。core は5本中5本、Postgres は2本中2本が赤（Postgres の1本目は `tenant_settings` が 1 → 0、2本目の `dryRun` は `deleted.vectorStore` が 0 でなく 10）。
+- 直した後の実装で、上と同じ形の 1テナント（`memories` 13・埋め込み13・outbox 31・`tenant_settings` 1）に `limit: 10` を 11 回呼んだ。1〜7回目は `memoryStore` の 10 だけが `deleted` に入り、`tenant_settings` は 1 のまま。4回目に `memories` が 9 に、5回目に 0 になり、埋め込みも同じ回に 9 → 0（CASCADE。どの欄にも数えられない）。8〜10回目に outbox が 31 → 21 → 11 → 1、11回目に outbox の最後の 1 と `tenant_settings` の 1 が消えて `reachedLimit: false`。全 11 回で `deleted.vectorStore` は `0` だった。呼び直せば最後まで消え、`tenant_settings` が消えるのは最後の回だけである。
+
+**直前の追記の「確かめていないこと」の解決。**直前の追記は「`limit` で `memoryStore` が途中で止まった回の `deleted.vectorStore` の値」を打っていなかった。これは、`vectorStore` を**呼ばない**ので `0` である（`dryRun` でも `0`）。`memories` を消し切る回では、CASCADE で埋め込みも消えているので `vectorStore` には数えるものが残らず、やはり `0` になる。よって `@mnemora/postgres` では、本番の `deleted.vectorStore` は（並行する書き込みが無い限り）つねに `0` である。並行する書き込みが有るときの値は打っていない。
+
+**`deleted.memoryStore` の数え方の訂正（doc）。**`packages/core/src/erase-tenant.ts` の doc に「`deleted.memoryStore` も `memories` 側の行数を数えるだけである」とあったのは誤りだった（直前の追記の `memoryStore: 73` が、`memories` 14 行より大きいことに現れている）。実装（`PostgresMemoryStore` の `eraseTenantBody`）は 10 表（`memory_labels`・`recall_usages`・`memory_events`・`memory_relations`・`memories`・`observations`・`recalls`・`labels`・`tenant_activity`・`tenant_subject_activity`）を消し、`deleted.memoryStore` はその全表の合計である。`MemoryStore.eraseTenant` の doc の「対象8表」も、`memory_relations` を欠いた一覧だったので 10 表に直した。
+
+**報告に留めたこと。**`@mnemora/testkit` の `InMemoryMemoryStore.eraseTenant` は Postgres と同じ 10 表の合計を数える（`tenant_subject_activity` だけは、テナントあたり 1 行と単純化している。Postgres は subject ごとの行数）。ただし `InMemoryVectorStore` は `memories` の削除で埋め込みを巻き込まない（Postgres の CASCADE に当たる動きが無い）ので、インメモリの組では本番でも `deleted.vectorStore` が実数になる。conformance の範囲に関わるので、本 PR では揃えていない。
+
+**引き受けた負債。**呼び直しが増える: `limit` が小さいと、`vectorStore`・`outboxStore` の削除は前の port が消し切った後の回に回るので、全体の呼び出し回数は前より増える（上の 11 回の実測）。設定が消えるまでの間、テナントは「消去の途中」として見え続ける（それが約束）。
+
+**これが覆るとしたら。**`eraseTenant` を呼ぶ運用側が「1回の呼び出しで全 port を進める」ことを前提にしていると分かったとき。ただし `eraseTenant` は未リリースの 1.2.0 で入った関数で、その前提は約束（本文）が最初から否定していた。
+
+**区分。**`eraseTenant` は `v1.1.0` に入っていない（未リリースの `[1.2.0]` 節で入った関数）ので、`v1.1.0` から上げる利用者にとって変わる振る舞いは無い。よって `docs/migration-v1.md` の破壊的変更の一覧には載せず、CHANGELOG は既存の `eraseTenant` の項に書き足した。
+
+
+## 追記（2026-09-30）: 同じテナントへの同時呼び出しは直列になる（ADR 0430 決定2）
+
+⛔ 上の本文と、これまでの追記は書き換えていない。
+
+**何が起きていたか。**各 port の `eraseTenant` は、消せた行数が予算（`limit`）未満なら「その表は空になった」と読んでいた。同じテナントへ別の呼び出しが同時に走ると、相手が先に消した行は自分の `DELETE` に数えられず、行が残っているのに `memories` へ進み、23503（外部キー違反）で reject した。実測は [ADR 0430](./0430-concurrent-create-erase-and-standalone-params.md)。
+
+**決めたこと。**`@mnemora/postgres` の `memoryStore`・`vectorStore`・`outboxStore` の `eraseTenant` は、トランザクションの先頭でテナントごとの `pg_advisory_xact_lock` を取る。同じテナントへの同時呼び出しは、その port のトランザクションごとに直列になる。別のテナントは待たない。`tenantSettingsStore` は対象にしなかった（理由は ADR 0430）。`packages/core/src/erase-tenant.ts` の doc にも同じことを書いた。
+
+**残ること。**直列になるのは port ごとであり、`eraseTenant` 全体（4つの port をまたぐ呼び出し）ではない。

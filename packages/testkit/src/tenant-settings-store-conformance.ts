@@ -9,12 +9,18 @@ import {
   TAXONOMY_MODE_INVALID_MESSAGE,
 } from "@mnemora/core";
 import type { Ctx, DecayClock, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /**
  * `setEventRetention` に不正な `days` を渡したときのメッセージが `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
  * を含むことを見る。`TypeError` のような別種の失敗と区別するため、`.toThrow()` は引数なしで
  * 使わない（`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由・同じ形）。
  */
+/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
+const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
 /**
  * `setDecayClock` に不正な値を渡したときのメッセージが `DECAY_CLOCK_INVALID_MESSAGE` を
@@ -38,7 +44,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 省略時はこのケースをスキップする（in-memory 実装は簡易な setter を持つ想定だが、
    * 将来 setter を持たない読み取り専用 adapter が来た場合にも壊れないようにする）。
    */
-  setDefaultHalfLifeHours?: (ctx: Ctx, hours: number) => Promise<void> | void;
+  setDefaultHalfLifeHours?: ((ctx: Ctx, hours: number) => Promise<void> | void) | undefined;
 
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13
@@ -70,7 +76,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 「読み書きが正しく往復するか」だけでなく、**production の UPSERT/検証ロジックそのもの**
    * を検査する。
    */
-  setDefaultHalfLifeRecalls?: (ctx: Ctx, recalls: number) => Promise<void> | void;
+  setDefaultHalfLifeRecalls?: ((ctx: Ctx, recalls: number) => Promise<void> | void) | undefined;
 
   /**
    * `supportsDecayClock: true` のときに使う。`tenant_activity.activity_seq` を+1する
@@ -81,7 +87,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * `getActivitySeq` を「進める」歯をスキップする（`0` を返すことの歯は
    * `supportsDecayClock: true` だけで検査する）。
    */
-  advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
+  advanceActivitySeq?: ((ctx: Ctx) => Promise<void> | void) | undefined;
 
   /**
    * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
@@ -94,7 +100,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 省略時はこのフックを使う歯をスキップする（`false`/`{}` を返すことの歯は
    * `supportsDecayClock: true` だけで検査する）。
    */
-  advanceSubjectActivitySeq?: (ctx: Ctx, subjectId: string) => Promise<void> | void;
+  advanceSubjectActivitySeq?: ((ctx: Ctx, subjectId: string) => Promise<void> | void) | undefined;
 
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
@@ -120,7 +126,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * 巻き込んで壊す理由にはならない、という判断**（クローン miku の判断——オーナーの
    * 判断ではない）。
    */
-  supportsTaxonomyMode?: boolean;
+  supportsTaxonomyMode?: boolean | undefined;
 
   /**
    * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
@@ -357,6 +363,18 @@ export function describeTenantSettingsStoreConformance(
           expect(await store.getDefaultHalfLifeRecalls!(ctx)).toBe(48);
         });
 
+        it("⚠ float4（Postgres の real 列）に収まらない default_half_life_recalls を、明示の例外で拒む（DB の生の例外にしない）", async () => {
+          // 値域は `(0, ∞)` だが、列は `real`（float4）。`Math.fround(x)` が Infinity か 0 に
+          // なる値は入らない。メッセージに `float4` を含む明示の例外で断る。
+          for (const recalls of [1e39, 1e-50]) {
+            const ctx: Ctx = { tenantId: `tenant-half-life-recalls-f4-${Math.random()}` };
+            await expect(
+              Promise.resolve().then(() => setDefaultHalfLifeRecalls(ctx, recalls)),
+              `default_half_life_recalls=${recalls} は float4 に収まらないと名指しして拒まれなければならない`,
+            ).rejects.toThrow(FLOAT4_MESSAGE);
+          }
+        });
+
         // ⭐ 行が無いテナントに書き込むと行ができることの芯（`setDefaultHalfLifeHours` の
         // 「half-life だけを設定した…テナントは unlimited」の歯と同じ発想）。行が
         // 無ければ `getEventRetention` は `{ kind: "unset" }` を返す——`{ kind:
@@ -582,6 +600,27 @@ export function describeTenantSettingsStoreConformance(
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.eraseTenant).toBeUndefined();
+      });
+    }
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "getDefaultHalfLifeHours の ctx.tenantId",
+            () => store.getDefaultHalfLifeHours({ tenantId: value }),
+          ],
+          ["getEventRetention の ctx.tenantId", () => store.getEventRetention({ tenantId: value })],
+          [
+            "getEventRetention の ctx.subjectId",
+            () => store.getEventRetention({ tenantId: "tenant-wf", subjectId: value }),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
       });
     }
   });

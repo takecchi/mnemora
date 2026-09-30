@@ -13,6 +13,7 @@ import {
   releaseAdvisoryLockOnClient,
 } from "./advisory-lock.js";
 import { describeMigrationFailure } from "./migration-failure-message.js";
+import { POOL_ERROR_WARNING_PREFIX } from "./pool-error-warning.js";
 import { assertPgvectorCapabilityViaQuery } from "./pgvector-capability.js";
 import { resolveCurrentSchema } from "./resolve-current-schema.js";
 import {
@@ -311,7 +312,7 @@ export interface RunMigrationsOptions extends SchemaNamespaceOptions {
    * **両方に同じ値を使う**（1つの `runMigrations` 呼び出しが待ってよい上限は1つ、という
    * 単純な線を優先した。2本のロックそれぞれに別の上限を持たせる需要はまだ無い）。
    */
-  lockTimeoutMs?: number;
+  lockTimeoutMs?: number | undefined;
   /**
    * advisory lock のキー。テスト以外で既定の {@link MIGRATION_LOCK_KEY} を変える理由は無い。
    *
@@ -323,13 +324,13 @@ export interface RunMigrationsOptions extends SchemaNamespaceOptions {
    * `EXTENSION_LOCK_KEY` を直接使って別セッションから握る（`migrate-extension-lock-race.test.ts`
    * のような形）。
    */
-  lockKey?: bigint;
+  lockKey?: bigint | undefined;
   /**
    * 拡張（`REQUIRED_EXTENSIONS`）の用意のしかた。既定は `"create"`
    * （今日どおり。**指定しなければ発行される SQL は1バイトも変わらない**）。
    * `"verify"` の詳細は {@link ExtensionMode} の doc（ADR 0093）参照。
    */
-  extensionMode?: ExtensionMode;
+  extensionMode?: ExtensionMode | undefined;
 }
 
 /**
@@ -544,6 +545,69 @@ export function listMigrationFiles(migrationsDir: string): string[] {
     .sort();
 }
 
+/** ファイル名の先頭の数字（`0011_x.sql` → `11n`）。先頭が数字でなければ `undefined`。 */
+function migrationNumber(name: string): bigint | undefined {
+  const m = /^(\d+)/.exec(name);
+  return m ? BigInt(m[1]!) : undefined;
+}
+
+/**
+ * 台帳（`alreadyApplied`）と手元のファイル（`files`）のずれを探して、警告の文面を返す（ADR 0425、
+ * 穴探し6巡目 S-1・S-3）。**止めない・順序も中身も変えない**——文面を返すだけで、呼び出し側は
+ * `console.warn` して続行する。
+ *
+ * ⚠ **export しない**（`index.ts` は `export * from "./migrate.js"` なので、export すると公開 API になる）。
+ *
+ * - (a) 未適用のファイルのうち、台帳の最大の番号より番号が小さいものが在る。
+ * - (b) 台帳にある名前が、手元のファイルに無い。
+ */
+function describeLedgerDrift(
+  alreadyApplied: ReadonlySet<string>,
+  files: readonly string[],
+): string[] {
+  const messages: string[] = [];
+
+  let maxName: string | undefined;
+  let maxNumber: bigint | undefined;
+  for (const name of alreadyApplied) {
+    const n = migrationNumber(name);
+    if (n !== undefined && (maxNumber === undefined || n > maxNumber)) {
+      maxNumber = n;
+      maxName = name;
+    }
+  }
+  if (maxNumber !== undefined) {
+    const limit = maxNumber;
+    const behind = files.filter((file) => {
+      if (alreadyApplied.has(file)) {
+        return false;
+      }
+      const n = migrationNumber(file);
+      return n !== undefined && n < limit;
+    });
+    if (behind.length > 0) {
+      messages.push(
+        `${POOL_ERROR_WARNING_PREFIX} migrate: 台帳（_mnemora_migrations）の最大の番号（${maxName}）より ` +
+          `小さい番号の未適用の migration がある: ${behind.join(", ")}。続行してこれらも適用するが、` +
+          `後から適用済みの migration が変えた内容を、これらの当たり直しが巻き戻しうる ` +
+          `（例: 台帳の行が消えた migration が、後の migration の変更を上書きする）。` +
+          `台帳の行を誤って消していないか、別の版の migrations から流していないかを確かめること。`,
+      );
+    }
+  }
+
+  const fileSet = new Set(files);
+  const unknown = [...alreadyApplied].filter((name) => !fileSet.has(name)).sort();
+  if (unknown.length > 0) {
+    messages.push(
+      `${POOL_ERROR_WARNING_PREFIX} migrate: 台帳（_mnemora_migrations）に、手元の migrations に無い名前がある: ` +
+        `${unknown.join(", ")}。続行するが、手元の版がこの DB より古い可能性がある ` +
+        `（新しい版で上げた DB に古い版から流している）。この DB を使うアプリの版を確かめること。`,
+    );
+  }
+  return messages;
+}
+
 /**
  * 未適用の `migrations/*.sql` を名前の昇順で適用する。適用済みは `_mnemora_migrations` に
  * 記録し、二重適用しない（何度呼んでも安全 = 冪等なマイグレーション実行）。
@@ -739,7 +803,12 @@ export async function runMigrations(
     const alreadyApplied = new Set(rows.map((row) => row.name));
 
     const applied: string[] = [];
-    for (const file of listMigrationFiles(migrationsDir)) {
+    const migrationFiles = listMigrationFiles(migrationsDir);
+    // 台帳と手元のファイルのずれは警告して続行する（ADR 0425）。止めない・順序も中身も変えない。
+    for (const message of describeLedgerDrift(alreadyApplied, migrationFiles)) {
+      console.warn(message);
+    }
+    for (const file of migrationFiles) {
       if (alreadyApplied.has(file)) {
         continue;
       }
@@ -852,7 +921,7 @@ export interface AnalyzeMemoriesOptions {
    * （{@link assertSafeSchemaName}）。省略時は接続の `search_path` 任せ（今日どおり、
    * 識別子を一切修飾しない）。
    */
-  schema?: string;
+  schema?: string | undefined;
 }
 
 /** `analyzeMemories` の戻り値。 */

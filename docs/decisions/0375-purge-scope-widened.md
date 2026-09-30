@@ -599,3 +599,42 @@ Issue #207/#933 PR2（決定10、マネージャー経由でオーナー側の�
 `UPDATE` の中央値は 393.6ms → 74.9ms）。決定6が「トレードオフを要する」とした
 `createRecall` 側の費用（INSERT の上乗せ）は ADR 0389 が実測し、負債として引き受けた。
 決定3・決定6の実測（当時の数字）そのものは、上の本文のまま残る。
+
+---
+
+## 追記（2026-09-30）: purge と同時に走る recall は、この約束の範囲外のままである（[ADR 0421](./0421-concurrent-write-and-audit-event-holes.md)）
+
+上の決定が約束しているのは「purge より前に撃った recall」の `recalls.index_band` である。recall の途中で forget → purge が終わると、
+後から INSERT される行に purge 前の digest が残る窓を、InMemory と Postgres で実測して歯で縛った（`recall-purge-race.postgres.test.ts`）。
+塞いでいない。直し方の3案・大きさ・直さなかった理由は ADR 0421。
+
+---
+
+## 追記（2026-09-30）: claim key の検出が積む監査イベントの `meta.note` に、claimKey の写しが残る（決定4「(b) 残る」表への書き足し）
+
+クローンのマネージャー（自動化された担い手）が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜8・検討した代替案・引き受けた負債・これが覆るとしたら・確かめた
+こと・確かめていないこと）は書き換えていない。**当時の記録として残す。
+
+決定1は `memories` の `claim_key_subject`・`claim_key_predicate` を `NULL` で上書きする理由を
+「誰について何の主張だったか」が残っていた（#995）としていた。**同じ claimKey（主語と述語）の写しが、
+`memory_events` の `meta.note` にも入っており、purge はそれに触れない。**決定4の「(b) 残る」表には、
+この経路が載っていなかった。以下は今の振る舞いを事実として書き足すもので、実行時の振る舞いは変えていない。
+
+| 表 / 値 | 残る理由（今の振る舞い） |
+|---|---|
+| `memory_events.meta.note` のうち、`observe()` の claim key の検出（`claimKey: { enabled: true, detectContested: true }`、既定 off）が積む JSON 文字列の `claimKey`（`subject`・`predicate`）。`kind` の値は `"claim_key_conflict"`（相手が1件のとき、`markContested` 経由）・`"claim_key_conflict_group"`（3件以上の群のとき、`markContestedGroup` 経由）・`"claim_key_conflict_unresolved"`（それ以外、`updated` イベントを直接積む） | purge（`purgeMemory`）は `memory_events` の行を書き換えない（`digest_snapshot` と同じく監査ログの行はそのまま残る）。同じ JSON には `subjectId` と、両側の `id`・`status`・`contentHash`・`validFrom`・`validUntil` も入る。本文（`content`）と `digest` は入らない |
+
+【現物】書いている場所は `packages/core/src/runtime.ts` の `detectClaimKeyContested` 付近（3種類の
+`JSON.stringify({ kind: "claim_key_conflict…", claimKey, … })`）。`meta.note` の型（JSON 文字列であること）は
+`docs/memory-model.md` §9「`meta.reason` の意味は、経路で2通りに割れている」に在る。【実測】はしていない
+——purge の後にこの `meta.note` が残ることを、走らせて確かめてはいない（コードからの読み。purge の実装が
+`memory_events` を `UPDATE` しないことは `packages/postgres/src/memory-store.ts` の `purgeMemory` と
+`packages/testkit` の fixture を読んで確かめた）。
+
+**直し方は決めていない。**考えられる形は2つあり、どちらもこの追記では採っていない——
+(1) `meta.note` に claimKey を写すのをやめる（検出の根拠を後から読めなくなる）、
+(2) purge のときに該当する監査行の `meta.note` を書き換える（監査ログの行を書き換えることになり、
+上の表の `memory_events.digest_snapshot` の行が「意図的に残す」とした理由と正面から当たる）。
+どちらを採るか、あるいは残すと約束し直すかは、オーナーの判断に回した。

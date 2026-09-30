@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertNoNul } from "./input-check.js";
 import {
@@ -10,6 +11,7 @@ import {
 } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
 import { isCreateExtensionPermissionDenied } from "./migration-failure-message.js";
+import { EXTENSION_LOCK_KEY } from "./migrate.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -212,9 +214,18 @@ export interface TrigramLexicalProbeUnavailable {
 
 /**
  * `probeTrigramLexicalSupport` の戻り値。「なぜ使えないか」を値として返す
- * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数自身は
- * 投げない——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）のために
- * 例外と値の両方の入口を用意する）。
+ * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数は
+ * 「使えない理由」を値で返す——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）の
+ * ために例外と値の両方の入口を用意する）。
+ *
+ * ⚠ **「使えない」ことを値で返すのであって、この関数が一切 reject しないわけではない。**
+ * 先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、失敗を握らずそのまま
+ * 伝える——接続の失敗・権限の不足（カタログを読めない等）はここで reject する（値の
+ * {@link TrigramLexicalProbeUnavailable} にはならない）。値になるのは、エンコーディングが UTF8 でない
+ * （`server_encoding_not_utf8`）・拡張が入手できない（`extension_unavailable`）・`CREATE EXTENSION`
+ * 以降で失敗した（`extension_create_denied`/`extension_create_failed`。`vector` の
+ * スキーマを読む SELECT もこの `try` の中）場合である。ヘルスチェックに使うときは、reject も
+ * 「使えるか分からない」として扱うこと。
  */
 export type TrigramLexicalProbeResult = TrigramLexicalProbeOk | TrigramLexicalProbeUnavailable;
 
@@ -345,7 +356,7 @@ const SELF_SIMILARITY_OK_THRESHOLD = 0.99;
  * 【実測 2026-09-29】`trigram-probe-dedicated-schema.postgres.test.ts`。
  */
 export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult> {
-  const result = await probeTrigramLexicalSupportWithCause(db);
+  const result = await withExtensionLock(db, (tx) => probeTrigramLexicalSupportWithCause(tx));
   if (result.ok) {
     return result;
   }
@@ -353,6 +364,26 @@ export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexical
   // （公開の戻り値のオブジェクトに `cause` キーが漏れないことを、この行自体が保証する）。
   const { cause: _cause, ...publicResult } = result;
   return publicResult;
+}
+
+/**
+ * `CREATE EXTENSION`・`CREATE OR REPLACE FUNCTION` は「在るか見る」と「作る」がアトミックではなく、
+ * 別々の接続から同時に流すと 23505（`pg_extension_name_index`）や XX000（`tuple concurrently updated`）で
+ * 落ちる。`body` を1つのトランザクションに包み、先頭で `migrate.ts` の {@link EXTENSION_LOCK_KEY} の
+ * `pg_advisory_xact_lock` を取って直列にする（ADR 0430 決定1）。
+ *
+ * - **待ちに mnemora の上限は掛けない**（`lock_timeout` を敷かない・待ち時間切れの例外を足さない）。
+ *   利用者の `lock_timeout` / `statement_timeout` は効く。
+ * - `body` が返す結果（`ok: false` を含む）は、そのまま返す。`body` が投げれば、トランザクションは
+ *   ロールバックされて同じ例外が出る。
+ * - `CREATE EXTENSION` が失敗するとトランザクションは中断状態になる（25P02）。probe は失敗を値にして
+ *   すぐ返すので、以降の SQL は流れない。
+ */
+async function withExtensionLock<T>(db: Db, body: (tx: Db) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${EXTENSION_LOCK_KEY.toString()}::bigint)`);
+    return body(tx);
+  });
 }
 
 /**
@@ -542,9 +573,14 @@ const TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL = sql`
  * 避けた理由と同じ配慮）。
  */
 export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
-  await db.execute(TRIGRAM_QUERY_NONASCII_FUNCTION_SQL);
-  await db.execute(TRIGRAM_STRIP_NOISE_FUNCTION_SQL);
-  await db.execute(TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL);
+  // ADR 0430 決定1: `CREATE OR REPLACE FUNCTION` も同時呼び出しでは XX000（`tuple concurrently updated`）で
+  // 落ちるので、{@link withExtensionLock} の中で流す（`create()` の中からは、既に取った lock の中の
+  // 入れ子になる——同じセッションの advisory lock は重ねて取れる）。
+  await withExtensionLock(db, async (tx) => {
+    await tx.execute(TRIGRAM_QUERY_NONASCII_FUNCTION_SQL);
+    await tx.execute(TRIGRAM_STRIP_NOISE_FUNCTION_SQL);
+    await tx.execute(TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL);
+  });
 }
 
 /**
@@ -693,7 +729,12 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  */
 export function buildTrigramLexicalSearchSelect(
   query: string,
-  opts: { limit: number; filter: LexicalFilter; threshold: number; ctxTenantId?: string },
+  opts: {
+    limit: number;
+    filter: LexicalFilter;
+    threshold: number;
+    ctxTenantId?: string | undefined;
+  },
 ): SQL {
   // Issue #878: 全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc）は
   // ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
@@ -852,8 +893,20 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
    * 別途、自分のタイミングで呼ぶ（このファイル冒頭の doc「なぜフィルタ条件の組み立てを
    * 複製するか」の下、`ensureTrigramLexicalFunctions` の doc参照）。
    */
-  static async create(db: Db, opts?: { threshold?: number }): Promise<PostgresTrigramLexicalStore> {
-    const probe = await probeTrigramLexicalSupportWithCause(db);
+  static async create(
+    db: Db,
+    opts?: { threshold?: number | undefined },
+  ): Promise<PostgresTrigramLexicalStore> {
+    // ADR 0430 決定1: probe の `CREATE EXTENSION` と関数のインストールを、1つのトランザクションの中で
+    // `EXTENSION_LOCK_KEY` の advisory lock の下に置く。失敗（`ok: false`）は値で返してから、
+    // トランザクションの外で今までと同じ例外にする。
+    const probe = await withExtensionLock(db, async (tx) => {
+      const result = await probeTrigramLexicalSupportWithCause(tx);
+      if (result.ok) {
+        await ensureTrigramLexicalFunctions(tx);
+      }
+      return result;
+    });
     if (!probe.ok) {
       // `probe.cause` は `extension_create_denied`/`extension_create_failed` のときだけ
       // 値を持つ（Issue #892）。無いときは `options` を渡さない——`{ cause: undefined }` を
@@ -865,7 +918,6 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
         probe.cause !== undefined ? { cause: probe.cause } : undefined,
       );
     }
-    await ensureTrigramLexicalFunctions(db);
     const threshold = opts?.threshold ?? DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD;
     if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
       throw new RangeError(
@@ -880,6 +932,8 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     // 穴 O-6-1（ADR 0424）: 検索語の NUL は、DB に触れる前に明示の例外で断る。
     assertNoNul("PostgresTrigramLexicalStore.search", "query", query);
     const threshold = this.threshold;

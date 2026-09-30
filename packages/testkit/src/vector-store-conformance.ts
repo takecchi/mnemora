@@ -8,6 +8,10 @@ import type {
   ProvenanceKind,
   VectorStore,
 } from "@mnemora/core";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /**
  * `prepareMemoryId` が用意する Memory の属性。指定しなかった属性が何になるかは
@@ -149,7 +153,7 @@ export interface VectorStoreConformanceOptions {
    * - `false`: `expect(store.searchMany).toBeUndefined()` を積極的に assert する——`it.skip` にはしない。
    * - **省略（`undefined`）**: 「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsSearchMany?: boolean;
+  supportsSearchMany?: boolean | undefined;
 }
 
 const space: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
@@ -1641,6 +1645,43 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.eraseTenant).toBeUndefined();
+      });
+    }
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          [
+            "search の ctx.tenantId",
+            () =>
+              store.search({ tenantId: value }, space, [1, 0, 0], {
+                limit: 5,
+                filter: { tenantId: value },
+              }),
+          ],
+          [
+            "search の filter.tenantId",
+            () =>
+              store.search({ tenantId: "tenant-wf" }, space, [1, 0, 0], {
+                limit: 5,
+                filter: { tenantId: value },
+              }),
+          ],
+          [
+            "search の filter.subjectId",
+            () =>
+              store.search({ tenantId: "tenant-wf" }, space, [1, 0, 0], {
+                limit: 5,
+                filter: { tenantId: "tenant-wf", subjectId: value },
+              }),
+          ],
+          ["delete の ctx.tenantId", () => store.delete({ tenantId: value }, space, randomUUID())],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
       });
     }
   });

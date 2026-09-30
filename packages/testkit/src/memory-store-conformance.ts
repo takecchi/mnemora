@@ -29,7 +29,14 @@ import {
   expectRejectsWithStoreError,
   expectStoreError,
 } from "./error-guards.js";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+  WELL_FORMED_NON_BMP_IDENTIFIER,
+} from "./malformed-identifier-cases.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
+/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
+const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 
 /**
  * 「対象が無い」系の検査専用の、well-formed だが実在しない id。
@@ -109,10 +116,12 @@ export interface MemoryStoreConformanceOptions {
    * 張ることを検査する歯のために、これも渡すこと。省略すると、その歯は生成されない
    * （CAS 系の歯はこのフックを使わないので、省略しても他の歯には影響しない）。
    */
-  listRelationsForMemory?: (
-    ctx: Ctx,
-    memoryId: MemoryId,
-  ) => Promise<Array<{ memoryId: MemoryId }>> | Array<{ memoryId: MemoryId }>;
+  listRelationsForMemory?:
+    | ((
+        ctx: Ctx,
+        memoryId: MemoryId,
+      ) => Promise<Array<{ memoryId: MemoryId }>> | Array<{ memoryId: MemoryId }>)
+    | undefined;
   /**
    * ADR 0079: `requeueEmbedJobs` が積み直した `embed` ジョブを、**運搬役が実際に
    * claim できるところまで**検査するためのフック。**必須。**
@@ -182,7 +191,7 @@ export interface MemoryStoreConformanceOptions {
    *   `it` を1本登録し、テスト名で「検査していない」ことを明示する
    *   （`supportsOnlyMemoryIdsFilter`/`supportsLabels` と同じ規律）。
    */
-  supportsAbortIfForgotten?: boolean;
+  supportsAbortIfForgotten?: boolean | undefined;
   /**
    * Issue #210 / ADR 0115: 対象の `MemoryStore` 実装が `purgeExpiredEvents`
    * （任意メソッド）を実装しているかどうか。**必須。**
@@ -215,7 +224,7 @@ export interface MemoryStoreConformanceOptions {
    * - `false`: `expect(store.purgeExpiredRecalls).toBeUndefined()` を積極的に assert する。
    * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
    */
-  supportsPurgeExpiredRecalls?: boolean;
+  supportsPurgeExpiredRecalls?: boolean | undefined;
   /**
    * ADR 0114: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
    * 実装しているかどうか。**必須。**
@@ -339,7 +348,7 @@ export interface MemoryStoreConformanceOptions {
    *   （`docs/decisions/0015-root-test-gate-reports-skipped-db-tests.md` と同じ規律
    *   ——走らなかったことと走って通ったことを、出力の上で区別できる形にする）。
    */
-  supportsOnlyMemoryIdsFilter?: boolean;
+  supportsOnlyMemoryIdsFilter?: boolean | undefined;
 
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md): 対象の
@@ -369,7 +378,7 @@ export interface MemoryStoreConformanceOptions {
    *   テスト名で明示する（`supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates`
    *   と同じ規律）。
    */
-  supportsLabels?: boolean;
+  supportsLabels?: boolean | undefined;
   /**
    * Issue #372（(B) 第2段）: 対象の `MemoryStore` 実装が `findActiveByClaimKey`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可、
@@ -392,7 +401,7 @@ export interface MemoryStoreConformanceOptions {
    * - **省略（`undefined`）**: `supportsLabels` の省略時と同じ規律——常に green で
    *   終わる named `it` を1本登録し、「検査していない」ことをテスト名で明示する。
    */
-  supportsFindActiveByClaimKey?: boolean;
+  supportsFindActiveByClaimKey?: boolean | undefined;
   /**
    * Issue #933（案2、`docs/decisions/0378-*.md`）: 対象の `MemoryStore` 実装が
    * `findContestedByClaimKey`（任意メソッド）を実装しているかどうか。**任意**（省略可、
@@ -409,7 +418,7 @@ export interface MemoryStoreConformanceOptions {
    * - **省略（`undefined`）**: `supportsFindActiveByClaimKey` の省略時と同じ規律——常に
    *   green で終わる named `it` を1本登録し、「検査していない」ことをテスト名で明示する。
    */
-  supportsFindContestedByClaimKey?: boolean;
+  supportsFindContestedByClaimKey?: boolean | undefined;
   /**
    * Issue #691続き（ADR 0329）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可）。
@@ -423,7 +432,7 @@ export interface MemoryStoreConformanceOptions {
    * `expect(store.listActiveClaimPredicates).toBeUndefined()` を積極的に assert する
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsListActiveClaimPredicates?: boolean;
+  supportsListActiveClaimPredicates?: boolean | undefined;
   /**
    * [Issue #1412](https://github.com/takecchi/mnemora/issues/1412) コメント1
    * （Issue #1238 棚卸し、[ADR 0373](../../../docs/decisions/0373-conformance-suite-issue-1412-promises.md)）:
@@ -440,7 +449,7 @@ export interface MemoryStoreConformanceOptions {
    * assert する——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を
    * 1本だけ登録する。
    */
-  supportsResolveOrphanedContested?: boolean;
+  supportsResolveOrphanedContested?: boolean | undefined;
   /**
    * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
    * `MemoryStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。**必須。**
@@ -468,7 +477,7 @@ export interface MemoryStoreConformanceOptions {
    * `expect(store.markContestedGroup).toBeUndefined()` を積極的に assert する
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsMarkContestedGroup?: boolean;
+  supportsMarkContestedGroup?: boolean | undefined;
   /**
    * Issue #207/#933 PR2（ADR 0381）: 対象の `MemoryStore` 実装が `resolveContestedGroup`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可、同じ3状態）。
@@ -482,7 +491,7 @@ export interface MemoryStoreConformanceOptions {
    * （`resolveContestedPair`/`supportsResolveContestedPair` と同じ判断——群を作る手段が
    * 無いと解消の歯が組めない）。
    */
-  supportsResolveContestedGroup?: boolean;
+  supportsResolveContestedGroup?: boolean | undefined;
   /**
    * [ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
    * 対象の `MemoryStore` 実装が `createMemoriesWithOutboxAndEvents`（任意メソッド）を実装しているかどうか。
@@ -494,7 +503,7 @@ export interface MemoryStoreConformanceOptions {
    * `false` なら `expect(store.createMemoriesWithOutboxAndEvents).toBeUndefined()` を積極的に assert する
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsCreateMemoriesWithOutboxAndEvents?: boolean;
+  supportsCreateMemoriesWithOutboxAndEvents?: boolean | undefined;
   /**
    * [ADR 0416](../../../docs/decisions/0416-created-event-same-tx-remaining-paths.md)（穴 D-3 の続き）:
    * 対象の `MemoryStore` 実装の `supersedeWithNewMemories`（任意メソッド）が、`opts.buildCreatedEvent` を受け取って
@@ -513,7 +522,7 @@ export interface MemoryStoreConformanceOptions {
    * 🔴 **名乗りは原子性の証拠ではない。**この歯は「名乗る adapter が、`created` の失敗で `news`/`supersede` も
    * 巻き戻す」ことを失敗の注入で縛るが、名乗るのにトランザクションを張らない adapter を一般には見抜けない。
    */
-  supportsSupersedeCreatedEvents?: boolean;
+  supportsSupersedeCreatedEvents?: boolean | undefined;
   /**
    * [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
    * 案C: `aggregateScope(ctx, scope, { scopeAggregate: "skip" })` が、実際に件数集計の
@@ -532,7 +541,7 @@ export interface MemoryStoreConformanceOptions {
    * 生成される。省略した adapter に対してこの歯は生成されない
    * （`docs/autonomy.md` ⛔ に従い `it.skip` にはしない——歯自体を作らない）。
    */
-  countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
+  countScopeAggregateQueries?: ((fn: () => Promise<unknown>) => Promise<number>) | undefined;
 }
 
 /**
@@ -3807,6 +3816,34 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           buildNewMemoryFixture({ tenantId: "tenant-1", halfLifeHours }),
         );
         expect(memory.halfLifeHours).toBeCloseTo(halfLifeHours, 6);
+      }
+    });
+
+    it("⚠ createMemory は float4（Postgres の real 列）に収まらない halfLifeHours・halfLifeRecalls を、明示の例外で拒む（DB の生の例外にしない）", async () => {
+      // 値域は `(0, ∞)` だが、Postgres の列は `real`（float4）で、`Math.fround(x)` が
+      // `Infinity` か 0 になる値は入らない。どの adapter も、DB へ渡す前に「float4 に収まらない」
+      // と名指しする例外で断る（メッセージに `float4` を含む）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const validFloorAt = new Date("2026-06-01T00:00:00.000Z");
+      for (const [field, value] of [
+        ["halfLifeHours", 1e39],
+        ["halfLifeHours", 1e-50],
+        ["halfLifeRecalls", 1e39],
+        ["halfLifeRecalls", 1e-50],
+      ] as const) {
+        await expect(
+          store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              decayFloorAt: validFloorAt,
+              ...(field === "halfLifeRecalls" ? { decayBaseSeq: 0, decayFloorSeq: 500 } : {}),
+              [field]: value,
+            }),
+          ),
+          `${field}=${value} は float4 に収まらないと名指しして拒まれなければならない`,
+        ).rejects.toThrow(FLOAT4_MESSAGE);
       }
     });
 
@@ -12762,6 +12799,134 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 陽性対照: NUL を含まない contentHash は今までどおり保存できる。
       const ok = await store.createMemory(ctx, { ...bad, contentHash: "no-nul-hash" });
       expect(ok.contentHash).toBe("no-nul-hash");
+    });
+
+    // -------------------------------------------------------------------
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    // -------------------------------------------------------------------
+
+    describe("識別子の文字の扱い", () => {
+      for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+        it(`${label}を含む識別子は、書き込みも読み出しも断る`, async () => {
+          const store = await createStore();
+          const ok: Ctx = { tenantId: "tenant-wf" };
+          const cases: Array<[string, () => Promise<unknown>]> = [
+            [
+              "createObservation の ctx.tenantId",
+              () =>
+                store.createObservation(
+                  { tenantId: value },
+                  buildNewObservationFixture({ tenantId: value }),
+                ),
+            ],
+            [
+              "createObservation の ctx.subjectId",
+              () =>
+                store.createObservation(
+                  { tenantId: ok.tenantId, subjectId: value },
+                  buildNewObservationFixture({ tenantId: ok.tenantId }),
+                ),
+            ],
+            [
+              "createObservation の input.subjectId",
+              () =>
+                store.createObservation(
+                  ok,
+                  buildNewObservationFixture({ tenantId: ok.tenantId, subjectId: value }),
+                ),
+            ],
+            [
+              "createObservation の input.externalId",
+              () =>
+                store.createObservation(
+                  ok,
+                  buildNewObservationFixture({ tenantId: ok.tenantId, externalId: value }),
+                ),
+            ],
+            [
+              "createObservationWithOutbox の input.externalId",
+              () =>
+                store.createObservationWithOutbox(
+                  ok,
+                  buildNewObservationFixture({ tenantId: ok.tenantId, externalId: value }),
+                  [],
+                ),
+            ],
+            [
+              "createObservationWithOutbox の ctx.tenantId",
+              () =>
+                store.createObservationWithOutbox(
+                  { tenantId: value },
+                  buildNewObservationFixture({ tenantId: value }),
+                  [],
+                ),
+            ],
+            [
+              "createMemory の input.subjectId",
+              () =>
+                store.createMemory(
+                  ok,
+                  buildNewMemoryFixture({
+                    tenantId: ok.tenantId,
+                    subjectId: value,
+                    contentHash: "wf-subject",
+                  }),
+                ),
+            ],
+            [
+              "createMemory の ctx.tenantId",
+              () =>
+                store.createMemory(
+                  { tenantId: value },
+                  buildNewMemoryFixture({ tenantId: value, contentHash: "wf-tenant" }),
+                ),
+            ],
+            ["get の ctx.tenantId", () => store.get({ tenantId: value }, NONEXISTENT_MEMORY_ID)],
+            [
+              "get の ctx.subjectId",
+              () => store.get({ tenantId: ok.tenantId, subjectId: value }, NONEXISTENT_MEMORY_ID),
+            ],
+            [
+              "getObservation の ctx.tenantId",
+              () => store.getObservation({ tenantId: value }, NONEXISTENT_MEMORY_ID),
+            ],
+          ];
+          for (const [where, call] of cases) {
+            await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+          }
+        });
+      }
+
+      it("対をなすサロゲート（BMP の外の文字）を含む識別子は受け付け、そのまま読み返せる", async () => {
+        const store = await createStore();
+        const value = WELL_FORMED_NON_BMP_IDENTIFIER;
+        const ctx: Ctx = { tenantId: value, subjectId: value };
+        const { observation, created } = await store.createObservationWithOutbox(
+          ctx,
+          buildNewObservationFixture({ tenantId: value, subjectId: value, externalId: value }),
+          [],
+        );
+        expect(created).toBe(true);
+        expect(observation.tenantId).toBe(value);
+        expect(observation.subjectId).toBe(value);
+        expect(observation.externalId).toBe(value);
+      });
+
+      it("断られた書き込みは、何も残さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-wf-nothing" };
+        await expect(
+          store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId, externalId: "x\uD800" }),
+          ),
+        ).rejects.toThrow();
+        const fresh = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: ctx.tenantId, externalId: "x�" }),
+        );
+        expect(fresh.externalId).toBe("x�");
+      });
     });
   });
 }

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type { OpenAIEmbeddingsClient } from "./client-types.js";
 
@@ -35,7 +36,7 @@ export interface OpenAIEmbeddingProviderOptions {
    * メッセージの `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** OpenAI の埋め込みモデル名（例: `text-embedding-3-small`）。`space.model` にそのまま入る。既定値は無い。 */
   model: string;
   /**
@@ -52,7 +53,7 @@ export interface OpenAIEmbeddingProviderOptions {
    * である（以前は `Pick<OpenAI, "embeddings">` だった）。**`openai` を自分の依存として入れる
    * 版は、`@mnemora/openai` が固定している版と揃える必要が無い**（packages/openai/README.md 参照）。
    */
-  client?: OpenAIEmbeddingsClient;
+  client?: OpenAIEmbeddingsClient | undefined;
 }
 
 /**
@@ -95,7 +96,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   /**
    * `texts` を1回の API 呼び出しで埋め込み、入力と同じ順（応答の `index` で並べ直す）で返す。
-   * 空配列なら API を呼ばずに `[]` を返す。
+   * 空配列なら API を呼ばずに `[]` を返す（ただし `opts.signal` が abort 済みなら、空配列でも `[]` を返さず
+   * `signal.reason` で reject する）。
    *
    * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。
    *
@@ -121,17 +123,24 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   // ⚠ 2026-09-30 追記（Issue #860）: 2026-09-26 に「件数を検査しない・戻り値は未定義」と書いたが、
   // 上のとおり検査を足した。お手本は `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
   // （`packages/local-embedding/src/local-embedding-provider.ts`）。
+  //
+  // ⚠ `opts?.signal`（ADR 0359・ADR 0428）: 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+  // `signal.reason` で reject する。SDK の `APIUserAbortError` には化けず、SDK の再試行待ちの最中でも切れる。
   async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
+    // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
+    opts?.signal?.throwIfAborted();
     if (texts.length === 0) {
       return [];
     }
-    const response = await this.client.embeddings.create(
-      {
-        model: this.model,
-        input: texts,
-        dimensions: this.space.dimensions,
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.embeddings.create(
+        {
+          model: this.model,
+          input: texts,
+          dimensions: this.space.dimensions,
+        },
+        { signal },
+      ),
     );
     const data = response.data;
 

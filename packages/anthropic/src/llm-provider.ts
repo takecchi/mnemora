@@ -7,6 +7,7 @@ import type {
   PromptSpec,
   StructuredRequest,
 } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type {
   AnthropicContentBlock,
@@ -60,12 +61,12 @@ export interface AnthropicLLMProviderOptions {
    * `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** ⚠ 必須。既定値を持たない（`@mnemora/openai` の `OpenAILLMProviderOptions.model` と
    * 同じ規律——どのモデルを使うかは呼び出し側が決める）。 */
   model: string;
   /** 省略時 {@link DEFAULT_MAX_TOKENS}。 */
-  maxTokens?: number;
+  maxTokens?: number | undefined;
   /**
    * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
    * キーの検査もしない。
@@ -76,7 +77,7 @@ export interface AnthropicLLMProviderOptions {
    * **`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している
    * 版と揃える必要が無い**（packages/anthropic/README.md 参照）。
    */
-  client?: AnthropicMessagesClient;
+  client?: AnthropicMessagesClient | undefined;
 }
 
 /** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。
@@ -231,17 +232,23 @@ export class AnthropicLLMProvider implements LLMProvider {
    * `stop_reason: "refusal"` は `kind: "refusal"`、`"max_tokens"`・`"model_context_window_exceeded"` は `kind: "truncated"` の
    * {@link AnthropicLLMProviderError} を投げる。⚠ どちらでもなくテキストブロックが無いときは、例外にせず空文字を返す
    * （ADR 0072「引き受けた負債」2。`@mnemora/openai` も同じ形）。
+   *
+   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
+   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
    */
   async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
     const { system, messages } = toAnthropicRequest(req);
-    const response = await this.client.messages.create(
-      {
-        model: this.model,
-        max_tokens: this.maxTokens,
-        ...(system !== undefined ? { system } : {}),
-        messages,
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          ...(system !== undefined ? { system } : {}),
+          messages,
+        },
+        { signal },
+      ),
     );
     assertNotRefusedOrTruncated(response);
     // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
@@ -270,6 +277,10 @@ export class AnthropicLLMProvider implements LLMProvider {
    * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link AnthropicLLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
    * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
+   *
+   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
+   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
    */
   async completeStructured<T>(
     _ctx: Ctx,
@@ -286,15 +297,17 @@ export class AnthropicLLMProvider implements LLMProvider {
       throw new AnthropicLLMProviderError({ kind: "schema_unsupported", cause });
     }
     const { system, messages } = toAnthropicRequest(req.prompt);
-    const response = await this.client.messages.create(
-      {
-        model: this.model,
-        max_tokens: this.maxTokens,
-        ...(system !== undefined ? { system } : {}),
-        messages,
-        output_config: { format },
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.messages.create(
+        {
+          model: this.model,
+          max_tokens: this.maxTokens,
+          ...(system !== undefined ? { system } : {}),
+          messages,
+          output_config: { format },
+        },
+        { signal },
+      ),
     );
 
     // ⭐ **`content` を読む前に `stop_reason` を見る。**順序が本質である

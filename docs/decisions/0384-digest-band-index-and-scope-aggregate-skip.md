@@ -92,7 +92,7 @@
        返し続けていた（「頼んだのに、頼んだこと自体が読めない」二重の嘘）——を
        繰り返さないための設計判断がこれである。ADR 0024 と違うのは、**この欄は
        無視されても嘘をつかない**という一点であり、この一点のために
-       「実装しない adapter は `'exact'` を返し続ける」という契約を明文化した。
+       「実装しない adapter は `'exact'` を返し続ける」という契約を明文化した。（⚠ 2026-09-30 追記: この契約は誤り。conformance suite は `"skip"` のとき `groups` 空・`totalInScope` 0・`countKind: 'unknown'` を求め、`'exact'` を返し続ける実装は落ちる。CHANGELOG `[1.2.0]` 参照。）
   3. **`"skip"` を渡された実装（Postgres）は、実際に集計をしない。** 値だけ受け取って
      計算は今までどおり行い、返り値だけを差し替える実装は禁止する
      （`AggregateScopeOptions.scopeAggregate` の doc コメントに明記）——`"skip"` の

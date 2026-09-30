@@ -139,7 +139,7 @@ import type { OutboxJobKind } from "./scheduler.js";
  */
 export interface ClaimOutboxJobsOptions {
   /** この種別のジョブだけを取る。省略なら種別で絞らない。 */
-  kinds?: OutboxJobKind[];
+  kinds?: OutboxJobKind[] | undefined;
   /** 1回に取る上限の本数。 */
   limit: number;
   /** 「今」の時刻。`available_at <= now` とリースの切れ目の判定に使う。 */
@@ -212,8 +212,15 @@ export interface OutboxStore {
    * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
    * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
    * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
+   *
+   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
    */
-  complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: { at?: Date }): Promise<void>;
+  complete(
+    ctx: Ctx,
+    jobId: string,
+    expectedAttempts: number,
+    opts?: { at?: Date | undefined },
+  ): Promise<void>;
   /**
    * ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ。
    *
@@ -221,13 +228,15 @@ export interface OutboxStore {
    * **`opts.at` を渡すと `failedAt` にその値を使う。省略時は実装が壁時計を使う。** ⚠ **`available_at`
    * の再計算はしない**（今の振る舞い。`fail` は終端状態であり、Phase 1 では失敗したジョブの自動リトライを
    * 行わないため——このファイル冒頭の doc 参照）。
+   *
+   * **`error` に NUL（U+0000）が含まれていてもよい**——`text` 列は NUL を保存できないので、実装は目に見える6文字の `\u0000` に置き換えて `lastError` に残す（`@mnemora/postgres`・`@mnemora/testkit/fixtures` とも）。
    */
   fail(
     ctx: Ctx,
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void>;
   /**
    * `ctx.tenantId` に属する `outbox` の行を跡形なく消す
@@ -280,7 +289,7 @@ export interface PurgeCompletedJobsOptions {
   /** 1回の呼び出しで消す行数の上限。**必須・既定値なし。**0以上の整数を渡す前提（負数の結果は未定義）。 */
   limit: number;
   /** `true` なら何も消さず、消していたら何が起きたかだけを返す。省略時 `false`。 */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /** {@link OutboxStore.purgeCompletedJobs} の返り値（ADR 0404）。 */

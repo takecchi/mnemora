@@ -35,6 +35,8 @@ type RecallResult = {
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: `RecallResult` は上の型例には無い任意欄 `outputValidation?` も持つ（[ADR 0098](./decisions/0098-validate-recall-output.md)）。`recall()` の返り値を `RecallResultSchema` で検証した結果であり、`undefined`（検証していない。`RecallRuntimeDeps.outputValidation: "off"`）・`{ ok: true, issues: [] }`（通った）・`{ ok: false, issues }`（落ちた）の3つの状態を取る。既定は `"report"` で、落ちても例外を投げない。型例は書き換えず、ここに追記する。
 
+**⚠ 2026-09-30 追記（上の一覧への足し）**: 型例に無い `stage_skipped` がもう1つある——`stage: 'relation'`・`reason: 'relation_store_unavailable'`（段3の必須の同伴取得で、多者間の群のメンバーがいるのに `deps.relationStore` が配線されていない）。正は `packages/core/src/recall.ts` の `StageSkippedOmission`（と `OmissionSchema`）。
+
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の排他性の段落は、段3.5 による昇格と `below_threshold` の取り下げだけを書いている。いまはこれが一般則になっている——**1件の Memory は `omitted` の中で1回だけ、最後にそれを落とした段で数える**（ADR 0203 追記3〜6）。`below_threshold` と `over_limit(stage:"rescore")` は、段3の同伴・段3.5 の席・段3.5 で席に着けなかった分のどの経路で扱われても、`omitted` の中で1回だけ数えられる。詳細は §9.8。
 
 **⚠ 2026-09-27 追記（ADR 0203 追記9、Issue #1021・#1025）**: 上の排他性の段落と直前の追記がいう「返らなかったものの分類」「1回だけ数える」は、**候補ごとの層**の札（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・`unit_assembly_dropped`）について成り立つ。**集約の層**の札（`not_indexed`、`filtered` のすべての `condition`）は、スコープ全体の集約から出す件数で、返った記憶を含みうる。札の一覧と理由は §9.8 の追記9 と ADR 0203 追記9。
@@ -668,7 +670,8 @@ type GroupCount = {
 > **集計そのものをしない**）。`"skip"` のとき `countKind` は `'unknown'`、
 > `groups`/`totalInScope`/`filtered*` は空/0 になる——ADR 0024 が退けた
 > 「値を受け取って黙って無視する」失敗を繰り返さないよう、この欄を実装しない
-> adapter は `countKind: 'exact'` を返し続ける契約にしてある（ADR 0384「決めたこと」）。
+> adapter は conformance suite に落ちる契約にしてある（`"skip"` を頼まれたら `countKind: 'unknown'` を返す。
+> 「`'exact'` を返し続ける」は誤りで、CHANGELOG `[1.2.0]` で訂正済み。ADR 0384「決めたこと」）。
 > **⚠ `"skip"` のとき、`ann_unreached`（§「`ann_truncated` と `ann_unreached` の違い」）は
 > 判定されない。** 判定の母数 `eligible`（`totalInScope` − 未索引）が `0` になるため、
 > 近似索引が scope の候補を取りこぼしていても鳴らない——**`"skip"` の呼び出しで

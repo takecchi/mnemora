@@ -39,6 +39,9 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * tick の失敗（`runtime.tick()` の throw）と、Worker・Queue の異常（接続の失敗など）は、`onTickError` に
  * 届く。成功した tick の結果は `onTickResult` に届く（どちらも省略可）。詳しくは `CreateBullmqTickDriverOptions` の各 doc。
  *
+ * ⚠ **`onTickError` は、tick の中の個々のジョブ（outbox の行）の失敗を知らせない。** tick が throw しなければ鳴らない。
+ * 個々のジョブの失敗は、`onTickResult` の `TickResult.failed`・`unsupported` と、outbox の `last_error` 列で見る。
+ *
  * **`start()` を呼ぶまでジョブは処理しない**（Issue #890）。`createBullmqTickDriver(...)`
  * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
  * `start()` が明示的に `worker.run()` を呼んで初めて始まる。
@@ -64,6 +67,26 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * （`FOR UPDATE SKIP LOCKED`、ADR 0206）であって、この package や BullMQ 自身では
  * ない。**その主張を複数 OS プロセス・複数 `pg.Pool` に対して実測したのが
  * `src/__tests__/concurrent-tick.redis.test.ts`（ADR 0325「測ったこと」）。
+ *
+ * 🔴 **1台の `stop()` が、全プロセスの予定を止める**（今の振る舞い。コードからの読みで、Redis では走らせていない）。
+ * `stop()` は共有の scheduler を `queue.removeJobScheduler(jobName)` で消すので、他のプロセスの Worker は
+ * 動いたままでも tick のジョブが発火しなくなる。エラーにもならない。動いている driver の `start()` は冪等で
+ * 登録し直さないので、残りのどれかで新しい driver を作って `start()` すると再び登録される。
+ * {@link BullmqTickDriver.stop} の doc 参照。
+ *
+ * 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること**（コードからの読みで、走らせていない）。
+ * Worker はジョブの中身を見ずに、自分の `ctx` で `runtime.tick()` を呼ぶ。テナントの違う driver が同じ
+ * `queueName` と同じ `jobName`（既定 `"mnemora-tick"`）を使うと、scheduler は1つに上書きされ（`everyMs` は最後に
+ * `start()` した driver の値）、1回の発火はどれか1つのテナントの tick にしかならない。
+ *
+ * ## 完了したジョブ・失敗したジョブは Redis に残り続ける
+ *
+ * この driver は Worker にもジョブにも `removeOnComplete`・`removeOnFail` を指定していない。BullMQ 6.3.8 は、
+ * どちらも指定が無いと完了したジョブも失敗したジョブも全部残す（`redis-queue-backend.js` の `getKeepJobs` が
+ * `{ count: -1 }` を返す）。⟹ `everyMs` ごとに1件ずつ、`TickResult` を戻り値に持った完了ジョブが溜まる。
+ * driver に保持を設定する口は無い。同じ `queueName` の `Queue` を自分で作り、`queue.clean(grace, limit, type)`
+ * を定期的に呼んで掃除する（README「完了したジョブ・失敗したジョブは Redis に残り続ける」）。
+ * 保持の既定値を driver に入れるかどうかは決まっていない。
  */
 export interface CreateBullmqTickDriverOptions {
   /** BullMQ の Redis 接続先。`bullmq` 自身の `ConnectionOptions`（ioredis 互換）をそのまま使う。 */
@@ -82,13 +105,24 @@ export interface CreateBullmqTickDriverOptions {
    * 複数プロセス・複数 Worker が同じ queue に付くと、プロセスをまたいだ同時実行も
    * 起こりうる（上の doc 参照）——`concurrency` はあくまで「このプロセス内」の上限。
    */
-  concurrency?: number;
+  concurrency?: number | undefined;
   /** 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。 */
-  jobName?: string;
-  /** `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。 */
-  onTickResult?: (result: TickResult) => void;
+  jobName?: string | undefined;
+  /**
+   * `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。
+   *
+   * ⚠ **tick の中の個々のジョブ（outbox の行）の失敗は、`onTickError` ではなくここに届く。** 個々のジョブが失敗しても
+   * `runtime.tick()` は throw せず `TickResult` を返すので、`result.failed`（`fail()` を呼んでリース競合で弾かれなかった
+   * 件数。⚠ 終端 `failed` になった行の数と常に一致するとは限らない）と `result.unsupported`（`failed` の内訳のうち、`tick` が
+   * その kind を処理できなかったもの）を見ること。失敗した行の理由は outbox の `last_error` 列にある。
+   */
+  onTickResult?: ((result: TickResult) => void) | undefined;
   /**
    * tick の失敗と、Worker・Queue の異常を受け取る（観測用。省略可）。次の3つの経路から、`error` を渡して呼ばれる。
+   *
+   * 🔴 **届くのはこの3つだけである。** tick の中の個々のジョブ（outbox の行）が失敗しても、`runtime.tick()` が throw
+   * しなければ `onTickError` は鳴らない（その失敗は `onTickResult` に渡る `TickResult` の `failed`・`unsupported` と、
+   * outbox の `last_error` 列で見る）。`onTickError` を渡しただけでは、ジョブ単位の失敗は分からない。
    *
    * - **`runtime.tick()`（と `onTickResult`）が throw した** ——BullMQ の Worker は processor の throw を
    *   `'error'` ではなく `'failed'`（job, err）として emit する（bullmq 6.3.8 の実測）ので、driver は
@@ -112,7 +146,7 @@ export interface CreateBullmqTickDriverOptions {
    * 壊れたときに見えなくなる）。【実測】Redis が居ないポートを指すと、Queue と Worker がそれぞれ
    * ECONNREFUSED を emit した（bullmq 6.3.8）。
    */
-  onTickError?: (error: unknown) => void;
+  onTickError?: ((error: unknown) => void) | undefined;
 }
 
 export interface BullmqTickDriver {
@@ -129,6 +163,11 @@ export interface BullmqTickDriver {
    * 繰り返しジョブの登録を外し、Worker と Queue の接続を閉じる。**`start()` を一度も
    * 呼んでいなくても安全に呼べる。** 一度呼ぶと、この driver は使い捨てになる
    * （以後の `start()` は Error を投げる。Issue #891）。
+   *
+   * ⚠ **外す「繰り返しジョブの登録」は、同じ `queueName`・`jobName` の全プロセスで共有しているものである。**
+   * 複数のプロセスで動かしているとき、1台がこれを呼ぶと、残りのプロセスの Worker は動いたままでも tick が
+   * 発火しなくなる（エラーにもならない）。動いている driver の `start()` は冪等で登録し直さないので、
+   * 残りのどれかで新しく `createBullmqTickDriver(...)` を作って `start()` すると、再び登録される。
    */
   stop(): Promise<void>;
 }

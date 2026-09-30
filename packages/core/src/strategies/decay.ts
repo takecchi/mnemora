@@ -8,7 +8,7 @@ export interface DecayParams {
   /** Memory.recordedAt。lastReinforcedAt が無い場合の起点として使う。 */
   recordedAt: Date;
   /** Memory.lastReinforcedAt。無ければ recordedAt を起点にする（ADR 0010）。 */
-  lastReinforcedAt?: Date | null;
+  lastReinforcedAt?: Date | null | undefined;
   /** 減衰させる前の強さ（`Memory.strength`）。 */
   strength: number;
   /** 半減期（時間）。起点からこの時間が経つと強さが半分になる。 */

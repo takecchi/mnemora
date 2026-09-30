@@ -1244,8 +1244,12 @@ function cosine(a: readonly number[], b: readonly number[]): number {
  */
 const DRIFT_COSINE_THRESHOLD = 0.99;
 async function runVerify(target: CassetteTarget): Promise<void> {
+  // 前提が足りないだけなので、例外（stack trace）にせず1行で案内して exit 1 で終わる
+  // （未知のサブコマンドや `answer-trials-compare` の引数不足と同じ形）。
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error("verify は実 API と記録を突き合わせる。OPENAI_API_KEY を設定すること。");
+    console.error("verify は実 API と記録を突き合わせる。OPENAI_API_KEY を設定すること。");
+    process.exitCode = 1;
+    return;
   }
   const cassette = loadCassette(cassettePathFor(target));
   console.log(`照合するカセット（${target}）: ${describeCassette(cassette)}`);
