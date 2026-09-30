@@ -499,7 +499,7 @@ scope の候補を ANN が拾いきれている」という前提に立ってい
 | `not_indexed` | 記憶は存在するが埋め込みがまだ無いと分かる（`embeddingStatus`、`./memory-model.md` 参照）。記憶が失われたと誤認しない。**`reason` によって次の一手が分かれる**——`pending` は待つ・再試行する、`failed` は埋め込みパイプラインそのものを疑う、`skipped` は意図した除外なので何もしなくてよい。この3つを1つに潰すと、恒久的な失敗と一時的な遅延が同じ顔になる（2026-09 追記。当初案は `reason` を持たなかった）。⚠ **`failed` が埋め込み入力の上限超過で起きている場合、`reembed()`（ADR 0079）を呼ぶだけでは直らない**——同じ `content` を再送してまた `failed` に戻る。`RuntimeDeps.embeddingInput`（任意フック、[Issue #753](https://github.com/takecchi/mnemora/issues/753) / [ADR 0336](./decisions/0336-embedding-input-opt-in-hook.md)）を渡した `runtime` で `reembed()` → `tick({kinds:['embed']})` すると、`content` を変えずに索引へ戻せる。⚠ **`failed` でも、ベクトル行が在って記憶が `memories` に返ることがある**（今の振る舞い、[ADR 0053](./decisions/0053-set-embedding-status-does-not-roll-back-ready.md) の追記、[Issue #962](https://github.com/takecchi/mnemora/issues/962)）——埋め込みジョブが upsert を終えた後で `ready` の書き込み（または `PostgresVectorStore.upsert` の後の ANALYZE）が失敗すると、ワーカー1体でも `failed` になり、同じ呼び出しの `not_indexed{reason:"failed"}` にも数えられる。原因はパイプラインではなくその書き込みの一時的な失敗で、`reembed({ statuses: ["failed"] })` → `tick({ kinds: ["embed"] })` で `ready` に戻る。 |
 | `lexical_truncated` | 語彙チャンネルが窓（k'）を埋めたと分かる（[ADR 0084](./decisions/0084-lexical-recall-channel.md) §7.1）。`ann_truncated` とは別の札——語彙チャンネルは損失可能性を判定する機構を持たないため、`countKind` は常に `'unknown'` である。次の一手は「窓を広げる（`overFetchFactor`/`limit`）」であり、閾値やフィルタの調整では直らない。 |
 | `ann_truncated` | 「見えていない領域があるかもしれない」という不確実性そのものが一手になる——例えば厳密検索へのフォールバックを選べる。 |
-| `ann_unreached` | 近似索引が scope の候補を拾いきれなかった可能性がある、と分かる（ADR 0025・0026。2026-09-17 ADR 0193 が発火条件を拡張）。`ann_truncated`（証明）とは別の問い——こちらは scope 内にまだ見られていない候補が残っている疑いであり、厳密検索へのフォールバックや subject を絞り直す一手につながる。**窓が満杯でも鳴りうる**（ADR 0193）——`ann_truncated` と同時に立つことがある。件数は原理的に分からない（`countKind` は常に `'unknown'`）。**⚠ 2026-09-24 追記（Issue #671 / [ADR 0285](./decisions/0285-ann-window-empty-of-in-scope-candidates-stage-detail.md)）**: この札は「窓は満杯だが scope の候補は一部拾えている」正常時と、「窓が他テナント等 scope 外の行だけで埋まり scope 内の候補を1件も拾えなかった」全滅時の両方で同じ形で鳴り、`omitted` だけを見る限り区別できない。この区別は `Omission` union を増やさず、`RecallResult.explain.stages` の ANN チャンネルの trace（`detail.channel === 'ann'`）に補助的な診断キー（型無し欄——zod では検証されない）を足した。**⚠ 2026-09-24 追記その2（Issue #671 続報 / ADR 0285 追記）**: 当初の `detail.annWindowHadNoInScopeCandidates: boolean`（条件 `eligible > 0 && annHits.length === 0`）には偽陽性があった——`eligible` は忘却ゲート（ADR 0173）を知らないため、scope 内で埋め込みのある行が全て decayed で ANN が正しく0件を返した場合にも真になっていた。正しい分母（「scope 内・埋め込みあり・忘却ゲートを通る行」）は `MemoryStore` の契約を変えないと厳密には求まらないため、`reachableLowerBound = max(0, eligible - filteredDecayed.count)` という**下限**（常に真の分母以下になることが構造的に保証される値）で判定するよう倒した——`excludeProvenanceKinds` 指定時はこの下限の保証自体が崩れるため、引き続き判定しない。条件を `annHits.length < min(kPrime, reachableLowerBound)` に一般化し（天井による打ち切りも同じ形で捕まえる）、キーを `detail.annReturnedFewerThanReachable: boolean`・`detail.annReachableLowerBound: number` に改めた（下限による近似のため、未索引かつ decayed な行がある場合は取りこぼしを見逃すことがある。詳細・論証は ADR 0285 参照）。 |
+| `ann_unreached` | 近似索引が scope の候補を拾いきれなかった可能性がある、と分かる（ADR 0025・0026。2026-09-17 ADR 0193 が発火条件を拡張）。`ann_truncated`（証明）とは別の問い——こちらは scope 内にまだ見られていない候補が残っている疑いであり、厳密検索へのフォールバックや subject を絞り直す一手につながる。**窓が満杯でも鳴りうる**（ADR 0193）——`ann_truncated` と同時に立つことがある。件数は原理的に分からない（`countKind` は常に `'unknown'`）。**⚠ 2026-09-24 追記（Issue #671 / [ADR 0285](./decisions/0285-ann-window-empty-of-in-scope-candidates-stage-detail.md)）**: この札は「窓は満杯だが scope の候補は一部拾えている」正常時と、「窓が他テナント等 scope 外の行だけで埋まり scope 内の候補を1件も拾えなかった」全滅時の両方で同じ形で鳴り、`omitted` だけを見る限り区別できない。この区別は `Omission` union を増やさず、`RecallResult.explain.stages` の ANN チャンネルの trace（`detail.channel === 'ann'`）に補助的な診断キー（型無し欄——zod では検証されない）を足した。**⚠ 2026-09-24 追記その2（Issue #671 続報 / ADR 0285 追記）**: 当初の `detail.annWindowHadNoInScopeCandidates: boolean`（条件 `eligible > 0 && annHits.length === 0`）には偽陽性があった——`eligible` は忘却ゲート（ADR 0173）を知らないため、scope 内で埋め込みのある行が全て decayed で ANN が正しく0件を返した場合にも真になっていた。正しい分母（「scope 内・埋め込みあり・忘却ゲートを通る行」）は `MemoryStore` の契約を変えないと厳密には求まらないため、`reachableLowerBound = max(0, eligible - filteredDecayed.count)` という**下限**（常に真の分母以下になることが構造的に保証される値）で判定するよう倒した——`excludeProvenanceKinds` 指定時はこの下限の保証自体が崩れるため、引き続き判定しない。条件を `annHits.length < min(kPrime, reachableLowerBound)` に一般化し（天井による打ち切りも同じ形で捕まえる）、キーを `detail.annReturnedFewerThanReachable: boolean`・`detail.annReachableLowerBound: number` に改めた（下限による近似のため、未索引かつ decayed な行がある場合は取りこぼしを見逃すことがある。詳細・論証は ADR 0285 参照）。**⚠ 2026-09-30 追記（[ADR 0390](./decisions/0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)）**: `excludeProvenanceKinds` 指定時に判定しない、は改めた——`aggregateScope` が除外 kind の索引済み件数を任意の欄（`excludedProvenanceIndexedCount`）で返すようになり、欄が在るときは母数から除外行を引いて、除外指定でも `ann_unreached` の severity と診断キーが効く（除外行だけで窓が埋まった取りこぼしを名乗れる。除外しない候補を全部拾えたのに鳴る、という鳴りすぎも止まる）。欄を返さない adapter では今までどおり判定しない。 |
 | `score_not_comparable` | **スコアが閾値と比較できなかった**と分かる（[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）。閾値を緩めても直らない——`below_threshold` とは別の出来事である。実際に起きるのは埋め込みがゼロベクトルのとき（コサインが未定義になり距離が `NaN` になる。[ADR 0040](./decisions/0040-zero-vector-never-returned.md)）で、次の一手は「その記憶の埋め込みを作り直す」であって「閾値を下げる」ではない。**件数は数え上げられる**（段2が触った候補の三分割なので）——ただし `countKind` は三分割が網羅であることを確かめた結果から決まる。**`RecallQuery.vector` の長さが `space.dimensions` と違う場合もここに入る**（Issue #867 / 案B）——3実装（Postgres・testkit・core の Fake）とも距離を `NaN` に差し替え、この分類へ倒す。**覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを渡したときの扱いは対象外のまま（Issue #867「範囲外で見つけたもの」、上記「段1: 候補生成」の注記参照）。 |
 | `unit_assembly_dropped` | **段3で単位を組むときに候補が漏れた**と分かる（[ADR 0043](./decisions/0043-unit-assembly-dropped-omission.md)）。原因は `contested_with_id` の一対一が破れていることであり、次の一手は「その対向関係を直す」——閾値にも予算にも索引にも関係がない。**⚠ 口は在るが、今日は `Runtime` 経由では発火しない**（2026-09-16 訂正）——[Issue #197](https://github.com/takecchi/mnemora/issues/197) / [ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) で `Runtime.markContested` が入り、**`contested` を書く主体そのものは存在するようになった。**ただし `markContested` は両側 `status='active'` の CAS を課したうえで相互参照を1トランザクションで書くため、**`Runtime` 経由で作られた `contested` ペアが一対一を破ることは無い**——⟹ **今日この分岐が通るとすれば、`MemoryStore` を `Runtime` を経由せず直接叩いた場合に限る**（`packages/core/src/recall-runtime.ts` の同じ分岐のコメントが、同じことを書いている）。**さらに、`markContested` を呼ぶ本番コードは今日ひとつも無い**（【実測】2026-09-16、`main` が `5f11291` の時点で `rg "markContested" --glob '!**/__tests__/**' packages examples` が返すのは定義と適合テストだけである）——追跡は [Issue #284](https://github.com/takecchi/mnemora/issues/284)。`countKind` は `'lower_bound'`——二重計上が同時に起きていると消失が隠れるため、下限しか言えない。**⚠ 2026-09-27 追記（Issue #959 / [ADR 0151](./decisions/0151-recall-association-unprompted.md) 2026-09-27 追記）**: この kind は、いまは段3.5（連想枠、§9）が選んだ `contested` の対向が取得できなかったときにも同じ札・同じ `countKind` で積まれる——段3.5にも段3と同じ必須の同伴取得規則がかかるようになったため（§9.2 手順6の後に追加）。上の「今日この分岐が通るとすれば」以下の記述は段3（`withinLimit` 由来）だけを指しており、段3.5経由の発火条件（forget 済み・存在しない・片側だけの contested・`attributes` 絞り込みで外れた等）はそちらと同じで、一対一の破れを必要としない。**⚠ 2026-09-30 追記（Issue #207/#933 PR2、ADR 0381）**: `contestedWithId` を持たない `contested`（多者間の群のメンバー）も、`RuntimeDeps.relationStore` が配線されていない、または `RelationStore.listRelated` で仲間が1件も見つからない場合に、同じ `unit_assembly_dropped` へ落ちる——こちらは「一対一が破れている」のではなく「群を辿る手段が無い／群が実際には1件しかない」ことが原因であり、次の一手は「`relationStore` を配線する」である。 |
 
@@ -634,6 +634,31 @@ type GroupCount = {
 > ⛔ **上の「全規模で 1ms 未満」は消さない**——[ADR 0213](./decisions/0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5は「主張は追記で訂正する」であり、ここは宛先（ポインタ）ではなく主張だからである。
 
 **Phase 1 の実装上の限界(2026-09 追記、本 PR)**: 上記は近似経路を持つことを前提に書かれているが、`MemoryStore.aggregateScope`(roadmap.md 段階4/5 の実装)は Phase 1 では**常に厳密集計のみ**を実装しており、近似経路(例えば `pg_stats`/`reltuples` に基づく安価な推定)は無い。**近似を要求するオプションも持たない**——以前は `RecallQuery.exactCounts` という欄が型に在ったが、値を受け取って黙って無視していた（呼び出し側は「頼んだ」と思い込める形だった）ため、[ADR 0024](./decisions/0024-remove-exact-counts-option.md) で**削除した**（「予約・未実装」と書き残すのではなく消した。理由は ADR を参照）。これは 100万件級のテナントで `aggregateScope` のコストが無視できなくなる可能性を先送りしたものであり、隠さずここに書く(PR 本文「設計上の疑義」参照)。（⚠ 2026-09-29 追記: 参照先の roadmap.md §2「段階4/5」は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L94-L110) にある。）
+
+> **⚠ 2026-09-30 訂正の追記（[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C）**:
+> 上の「近似を要求するオプションも持たない」は、もう成り立たない——**近似ではなく
+> 「止める」opt-in** を足した。`RecallQuery.scopeAggregate?: "exact" | "skip"`
+> （既定 `"exact"`、省略時と1バイトも変わらない）を渡すと、`aggregateScope` は
+> `count(*)`/`GROUP BY` を一切実行しなくなる（近似値を計算するのではなく、
+> **集計そのものをしない**）。`"skip"` のとき `countKind` は `'unknown'`、
+> `groups`/`totalInScope`/`filtered*` は空/0 になる——ADR 0024 が退けた
+> 「値を受け取って黙って無視する」失敗を繰り返さないよう、この欄を実装しない
+> adapter は `countKind: 'exact'` を返し続ける契約にしてある（ADR 0384「決めたこと」）。
+> **⚠ `"skip"` のとき、`ann_unreached`（§「`ann_truncated` と `ann_unreached` の違い」）は
+> 判定されない。** 判定の母数 `eligible`（`totalInScope` − 未索引）が `0` になるため、
+> 近似索引が scope の候補を取りこぼしていても鳴らない——**`"skip"` の呼び出しで
+> `ann_unreached` が無いことは「拾いきった」を意味しない。** `explain.stages` の
+> `annReturnedFewerThanReachable` も同じ理由で立たない。今は「判定していない」と名乗る
+> 診断も出ない（ADR 0384「決めたこと」7）。
+> **（2026-09-30 追記、[ADR 0390](./decisions/0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)
+> 決定7）**: 「判定していない」と名乗る診断を足した。`"skip"` で ANN の段が走り、adapter が
+> `countKind: 'unknown'` を返したとき、`explain.stages` の ANN（`detail.channel === "ann"`）の
+> `detail.annReachability` が `"unknown"` になる。`ann_unreached` は鳴らないままで、
+> **キーが付いているときの「`ann_unreached` が無い」は「拾いきった」ではない。**
+> 既定 `"exact"` にはこのキーは付かない。
+> ⛔ **上の「近似を要求するオプションも持たない」は消さない**（ADR 0213 決定5）
+> ——`"skip"` は近似ではなく「止める」であり、上の文が指していた「`pg_stats` 等に
+> 基づく安価な推定」は今も存在しない。
 
 ### `aggregateScope` の実測（2026-09 追記）
 
@@ -807,6 +832,16 @@ ADR 0307。
 テナント全体を集計するコストの本体ではない。**1M行では測っていない**——上の表
 （100k→45.8ms、1M→408ms、いずれも旧い測定条件）と同じ規模で書き換え後を測ったら
 どうなるかは、本 ADR の射程外（ADR 0307「確かめていないこと」）。
+
+> **⚠ 2026-09-30 追記（[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
+> 「1M行では測っていない」を埋めた。100万行・`max_parallel_workers_per_gather=0`・
+> 同時1・warm で全体 p50 **627.7ms**（案A の索引あり。索引なしは 930.4ms、12往復——
+> 「支配項は消えていない」は1M行でもそのまま成り立つ: `"skip"` は p50 1.5ms）。
+> 同じ ADR は、支配項ではなく **`digestBand`（`Seq Scan` + top-N `Sort`）側**に部分索引を足し（案A）、
+> その部分の EXPLAIN を 349.5ms→0.104ms に変えた。⛔ **上の「支配項は消えていない」は消さない**
+> ——1M行の実測でも同じ結論だからである。**支配項そのものを止める** opt-in
+> （`RecallQuery.scopeAggregate: "skip"`、案C）も同時に足した——`"skip"` なら
+> 100万行でも p50 1.5ms（詳細は ADR 0384「測ったこと」）。
 
 ### `includeSubjectless` — subject X または主題なしを1回の recall で引く（Issue #608 項目③(b) / [ADR 0286](./decisions/0286-recall-include-subjectless.md)）
 

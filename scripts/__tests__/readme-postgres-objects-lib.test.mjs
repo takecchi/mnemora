@@ -142,7 +142,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル12・索引34・関数6になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル12・索引35・関数6になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -170,10 +170,14 @@ describe("deriveMigrationObjects", () => {
     // Issue #1207 / ADR 0383: migrations/0027_erase_tenant_fk_indexes.sql が外部キー検査用の
     // 単一列索引8本（`idx_memory_events_memory_id` 等。`memory_relations` の2本を含む）を足した。26→34 も同様に反映であり、
     // 回帰ではない（埋め込み空間の表の `(memory_id)` 索引は `DO` ブロックの動的 SQL で、数に入らない）。
+    // ADR 0384 / PR #1455: migrations/0028_digest_band_index.sql が `idx_memories_digest_band`
+    // （索引+1）を足した。34→35 も同様に反映であり、回帰ではない。
+    // ADR 0389: migrations/0030_recalls_digest_band_index.sql が `idx_recalls_digest_band`
+    // （索引+1）を足した。35→36 も同様に反映であり、回帰ではない。
     // ADR 0329 の 2026-09-30 追記: migrations/0029_memories_claim_predicates_index.sql が
-    // `idx_memories_claim_predicates`（索引+1）を足した。34→35 も同様に反映であり、回帰ではない。
+    // `idx_memories_claim_predicates`（索引+1）を足した。36→37 も同様に反映であり、回帰ではない。
     expect(result.tables).toHaveLength(12);
-    expect(result.indexes).toHaveLength(35);
+    expect(result.indexes).toHaveLength(37);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

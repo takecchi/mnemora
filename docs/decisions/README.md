@@ -404,7 +404,11 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0381](./0381-contested-group-write-path-implementation.md) | 多者間 `contested`（`memory_relations`）の書き込み経路の実装 —— Issue #207/#933 PR2 段階B の直しと設計判断 | 採用 (2026-09) |
 | [0382](./0382-vector-store-delete-across-spaces.md) | `VectorStore` に `deleteAcrossSpaces`（必須メソッド）を足す——`purge` が全 space の embedding を消す | 採用 (2026-09) |
 | [0383](./0383-erase-tenant.md) | テナント単位で全表から行を消す `eraseTenant` を足す | 採用 (2026-09) |
+| [0384](./0384-digest-band-index-and-scope-aggregate-skip.md) | `aggregateScope` の重さに対して、目次帯へ部分索引を足す（案A）と、件数集計を止める明示的な opt-in を足す（案C） | 採用 (2026-09) |
 | [0385](./0385-association-probes-baseline-from-ci-measurement.md) | association-probes の基準値を CI 実測（6回）から置き、基準値より悪化した arm を警告する節を足す — 許容幅は0、ADR 0158 が挙げた #316/#317 の前提は CI でも成立した（Issue #291） | 採用 (2026-09) |
 | [0387](./0387-cjs-require-esm-smoke-in-default-ci.md) | README の「CommonJS からは require(esm) で読める」を、registry に出ない切り出し版で毎 PR の CI に入れる | 採用 (2026-09) |
+| [0389](./0389-recalls-digest-band-index.md) | `recalls.index_band` の目次帯に式の GIN 索引を足す——`purgeMemory` が `recalls` を全部読まないようにする | 採用 (2026-09) |
+| [0390](./0390-ann-unreached-aware-of-excluded-provenance-and-skip.md) | `ann_unreached` が `excludeProvenanceKinds` を分母から引く（除外行の索引済み件数を集約が返す）と、`scopeAggregate: "skip"` で到達を判定できないと名乗る | 採用 (2026-09) |
+| [0391](./0391-language-mismatch-mark-on-created-event.md) | 抽出の言語の事後検査は「印を付けるだけ」にし、`created` イベントの `meta.languageMismatch` に出す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

@@ -615,6 +615,7 @@ import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
+import type { ProvenanceKind } from "../provenance.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import type { NewRecallRecord, NotIndexedReason, RecallRecord, RecallScope, ScopeAggregate } from "../recall.js";
 import type { OutboxJobKind } from "./scheduler.js";
@@ -658,6 +659,8 @@ export interface AggregateScopeOptions {
         limit: number;
         excludeMemoryIds: readonly MemoryId[];
     };
+    excludeProvenanceKinds?: readonly ProvenanceKind[];
+    scopeAggregate?: "exact" | "skip";
 }
 export interface MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
@@ -2190,6 +2193,7 @@ export interface ScopeAggregate {
         count: number;
         countKind: CountKind;
     };
+    excludedProvenanceIndexedCount?: number;
     digests: DigestEntry[];
     digestEligible: {
         count: number;
@@ -2388,6 +2392,7 @@ export interface RecallQuery {
     budget?: RecallBudget;
     scoreThreshold?: number;
     digestBandLimit?: number;
+    scopeAggregate?: "exact" | "skip";
     includeFullyDecayed?: boolean;
     validAt?: Date;
     includeOutsideValidity?: boolean;
@@ -2447,6 +2452,10 @@ export declare const RecallQuerySchema: z.ZodObject<{
     }, z.core.$strip>>;
     scoreThreshold: z.ZodOptional<z.ZodNumber>;
     digestBandLimit: z.ZodOptional<z.ZodNumber>;
+    scopeAggregate: z.ZodOptional<z.ZodEnum<{
+        exact: "exact";
+        skip: "skip";
+    }>>;
     includeFullyDecayed: z.ZodOptional<z.ZodBoolean>;
     validAt: z.ZodOptional<z.ZodDate>;
     includeOutsideValidity: z.ZodOptional<z.ZodBoolean>;

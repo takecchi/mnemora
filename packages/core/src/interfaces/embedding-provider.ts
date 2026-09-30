@@ -17,11 +17,20 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  *   か）・例外の型は実装ごとに決めてよい——ここが要求するのは
  *   「黙って切って返さないこと」だけである。`@mnemora/local-embedding` は
  *   `kind: "input_too_long"` の例外で満たす（ADR 0090）。`@mnemora/openai` は
- *   専用の検査を持たず、OpenAI のサーバが上限超過を拒否することに依存している——
+ *   入力上限については専用の検査を持たず（応答の検査とは別の話。2026-09-30 に応答の検査は足した）、OpenAI のサーバが上限超過を拒否することに依存している——
  *   その依存自体は本 interface の契約ではなく、`@mnemora/openai` 側の負債として
  *   ADR 0305 に記録してある。
  *
- * ⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）:
+ * ⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、ADR 0305 の同日付追記）:
+ * 下の 2026-09-26 の追記（「`@mnemora/openai` は検査せず、食い違ったときの結果は未定義」）は、もう成り立たない。**
+ * `OpenAIEmbeddingProvider.embed` も、応答の件数が `texts.length` と等しいこと・`index` が 0..n-1 を
+ * ちょうど1回ずつであること・各ベクトルの長さが `space.dimensions` と等しいこと・成分がすべて有限であることを
+ * 確かめ、崩れていれば素の `Error`（`OpenAIEmbeddingProvider:` で始まる）を投げる。2つの実装
+ * （`@mnemora/openai`・`@mnemora/local-embedding`）とも、食い違った応答を黙って返さない。
+ * これは新しく例外になる場合が増える変更であり、CHANGELOG `[1.2.0]` に破壊的変更として書いてある。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)。⚠ `@mnemora/openai` に
+ * ついての部分は上の 2026-09-30 の追記で古くなった。当時の記述として残す）:
  * `embed` は `texts` と同じ件数・同じ順序でベクトルを返す。この一致自体は本
  * interface の契約だが、守り方は実装ごとに違う。**`@mnemora/local-embedding` は
  * 返ってきたベクトルの件数・次元を実行時に `texts`/`space.dimensions` と突き合わせ、
@@ -71,6 +80,6 @@ import type { EmbeddingSpaceId } from "../embedding.js";
 export interface EmbeddingProvider {
   /** この provider が作るベクトルの埋め込み空間（`provider`・`model`・`dimensions`）。構築時に決まり、変わらない（1インスタンス = 1空間）。 */
   readonly space: EmbeddingSpaceId;
-  /** `texts` を埋め込み、同じ件数・同じ順でベクトルを返す。空配列なら `[]`（上の追記: 件数・次元の守り方は実装ごとに違う）。`opts.signal` は上の2026-09-29追記を参照。 */
+  /** `texts` を埋め込み、同じ件数・同じ順でベクトルを返す。空配列なら `[]`（件数・次元・有限性は、`@mnemora/openai`・`@mnemora/local-embedding` とも実行時に検査する。上の 2026-09-30 の追記）。`opts.signal` は上の2026-09-29追記を参照。 */
   embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }

@@ -931,7 +931,14 @@ export interface ScopeAggregate {
   groups: GroupCount[];
   /** スコープ内（tenant + subject? + period? + status ゲート + validity? ゲート）の総数。 */
   totalInScope: number;
-  /** groups の総和が totalInScope と一致することの信頼度。Phase 1 は常に 'exact'。 */
+  /**
+   * groups の総和が totalInScope と一致することの信頼度。
+   *
+   * ⚠ **2026-09-30 追記（ADR 0384 案C）**: 「Phase 1 は常に 'exact'」という以前の
+   * 記述は、`RecallQuery.scopeAggregate` が無かった時点のものである。`"skip"` を
+   * 渡した呼び出しでは `'unknown'` になる（`groups: []`・`totalInScope: 0` とともに）。
+   * **渡さない・`"exact"` を渡した呼び出しは今日どおり常に `'exact'`。**
+   */
   countKind: CountKind;
   /**
    * スコープ内だが埋め込みがまだ無い件数を、**理由ごとに分けて**持つ。
@@ -1025,6 +1032,19 @@ export interface ScopeAggregate {
    * 詳細は ADR 0173。
    */
   filteredDecayed: { count: number; countKind: CountKind };
+  /**
+   * ADR 0390: `AggregateScopeOptions.excludeProvenanceKinds`（非空）が渡されたときだけ、
+   * **その kind の行のうち、スコープ内（`totalInScope` の内側）で索引済み
+   * （`embeddingStatus = 'ready'`）のものの件数**。`recall()` はこれを `eligible`
+   * （= `totalInScope` − `notIndexed` 合計 = 索引済みの行数）から引き、段1が ANN から除外した
+   * 行を分母から外す。「索引済み」の定義を `notIndexed` と揃えてあるので、
+   * 引く量は ANN が本来返しうる除外行の数と一致する。
+   *
+   * **任意フィールドである**（`filteredTaxonomy?` と同じ理由）。返さない adapter・除外を
+   * 渡さない呼び出しでは省かれ、`recall()` は今日と同じ判定に倒れる。
+   * `totalInScope`・`groups`・`filtered*` の意味は動かさない。
+   */
+  excludedProvenanceIndexedCount?: number;
   /**
    * 目次帯（`IndexBand.digestBand`）に載せる候補（スコープ内 かつ
    * `AggregateScopeOptions.digestBand.excludeMemoryIds` に含まれないもの）を、
@@ -1908,6 +1928,45 @@ export interface RecallQuery {
    */
   digestBandLimit?: number;
   /**
+   * **段5（`MemoryStore.aggregateScope`）の件数集計を止める、明示的な opt-in**
+   * （[ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
+   * 案C）。
+   *
+   * **既定 `"exact"`（省略時と同じ）——この欄を渡さない呼び出しの結果は1バイトも
+   * 変わらない。** `aggregateScope` は今日どおり `GROUP BY subject_id` で群カウント・
+   * `totalInScope`・`filtered*`・`notIndexed` を厳密に数える。
+   *
+   * `"skip"` を渡すと、`MemoryStore.aggregateScope` はこれらの件数を**実際に数えない**
+   * ——`IndexBand.groups` は空配列、`IndexBand.totalInScope` は `0`、
+   * `IndexBand.countKind`（と `ScopeAggregate` の各 `countKind`）は `"unknown"` になる。
+   * `omitted` の `filtered(archived/superseded/forgotten/period/expired/not_yet_valid/
+   * taxonomy/decayed)` は、件数が数えられない以上どれも `count > 0` の条件を満たさず、
+   * 一切積まれない——**`"skip"` は「スコープ内で何が落ちたか」の説明力を手放す代わりに
+   * 集計の費用を払わない、という取引である**（北極星の問い3「選ばれた理由を後から
+   * 説明できるか」に対して、この欄は正直に「説明できなくなる」と名乗る）。
+   *
+   * **目次帯（`digestBand`）は「skip」でも今日どおり出る**——digest 候補の取得
+   * （`ORDER BY ... LIMIT`）は件数集計とは別の経路であり、ADR 0384 案A の索引
+   * （`idx_memories_digest_band`）で支えられる。ただし `digestEligible`（帯の外に
+   * まだ何件あるか）も件数の一種なので `countKind: "unknown"`・`count: 0` になる
+   * ——「帯には何が載っているか」は分かるが「あと何件あるか」は分からなくなる。
+   *
+   * **ADR 0024 の事故（`exactCounts` を受け取って黙って無視していた）を繰り返さない**
+   * ため、`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、必ず
+   * `countKind: "exact"` を返し続けなければならない（`MemoryStore.aggregateScope` の
+   * 契約）——**「`"skip"` を頼んだのに `"exact"` が返る」ことはあっても、「`"skip"` を
+   * 頼んだのに実は集計していないのに `"exact"` と名乗る」ことは起きない。**呼び出し側は
+   * 返ってきた `countKind` を見れば、その adapter がこの opt-in に対応しているかを
+   * 常に判別できる（値が紛れない）。
+   *
+   * **⚠ `"skip"` では、ANN が scope の候補を拾いきったかを判定できない**（母数 `eligible` が
+   * 数えられないため、`ann_unreached` は鳴らない）。**`ann_unreached` が無いことは「拾いきった」
+   * を意味しない。** ANN の段が走っていて件数が取れなかったときは、`explain.stages` の
+   * ANN（`detail.channel === "ann"`）の `detail.annReachability: "unknown"` がそう名乗る
+   * （ADR 0390。既定 `"exact"` の出力にはこのキーは付かない）。
+   */
+  scopeAggregate?: "exact" | "skip";
+  /**
    * **忘却ゲート（decay floor gate）の明示的な opt-out**
    * （マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
    *
@@ -2279,6 +2338,8 @@ export const RecallQuerySchema = z.object({
   budget: RecallBudgetSchema.optional(),
   scoreThreshold: z.number().optional(),
   digestBandLimit: z.number().int().positive().optional(),
+  // ADR 0384 案C: 既定は省略（"exact" と同じ）。
+  scopeAggregate: z.enum(["exact", "skip"]).optional(),
   includeFullyDecayed: z.boolean().optional(),
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),

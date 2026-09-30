@@ -1,0 +1,70 @@
+-- 0028_digest_band_index.sql
+--
+-- Issue #355 の残件（ADR 0307「引き受けた負債」2番）/ [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)（案A）:
+-- `PostgresMemoryStore.aggregateScope` の `digestBand` サブクエリ（目次帯・第3階、
+-- docs/recall.md §5）のための索引。
+--
+-- 対象の SQL（`memory-store.ts` の `digestBandColumns`）は次の形をしている:
+--
+--   SELECT id, digest, COALESCE(occurred_at, recorded_at) AS eff_time
+--   FROM memories
+--   WHERE tenant_id = $1 [AND subject_id = $2] [AND attributes @> $3]
+--     AND status IN ('active', 'contested')
+--     AND <in_period> AND <is_valid> AND <has_qualifying_label>
+--     AND NOT (id = ANY($n::uuid[]))
+--   ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC
+--   LIMIT $m
+--
+-- ADR 0307 が単一パス化した時点で、この部分は「`memories` を直接（`scoped`/`agg` を
+-- 経由せず）スキャンする独立したサブクエリ」になったが、`ORDER BY ... LIMIT` を
+-- 支える索引が無いため、in-scope 件数ぶんの行を毎回 `Seq Scan` + top-N `Sort` している
+-- （ADR 0307「引き受けた負債」2番、ADR 0307「測ったこと」の EXPLAIN が示す
+-- `Seq Scan on memories` ← `Sort`（top-N heapsort））。
+--
+-- ## なぜこの形（部分索引・status を述語側に置く）か
+--
+-- `status IN ('active', 'contested')` を索引の**列**に含めず、**部分述語**として置く。
+-- 複数値の等値条件（`status = ANY(...)`）を索引の列に含めると、B-tree は値ごとに
+-- 別々の範囲になり、`ORDER BY <expr> DESC, id DESC` の全順序を1本のスキャンでは
+-- 提供できない（値ごとにスキャンしてマージする必要があり、`LIMIT` で早期終了できない）。
+-- 部分述語にすれば、索引そのものが「対象行だけを `eff_time DESC, id DESC` の順に
+-- 並べたリスト」になり、`tenant_id = $1` の等値条件と組み合わせて
+-- `Index Scan Backward` + `LIMIT` で必要な件数だけ読める（未達なら残りを読み進める）。
+--
+-- `in_period`/`is_valid`/`has_qualifying_label` は呼び出しごとに変わる動的な述語
+-- （`occurredAfter`/`occurredBefore`/`validAt`/`labels` の有無で式が変わる）なので、
+-- 索引の述語には含められない——索引を使ってもこれらは Filter として残る。
+-- **`occurredAfter`/`occurredBefore`/`validAt`/`labels` を指定しない呼び出し
+-- （既定の recall）では、これらの式は常に真になる**ため、実質的に索引だけで
+-- `LIMIT` まで打ち切れる。指定した呼び出しでは、該当しない行を読み飛ばしながら
+-- `LIMIT` へ向かうぶん、対象行の密度に応じて読む行数が増える——それでも
+-- `tenant_id` の絞り込み自体は索引が効かせる。
+--
+-- `id DESC` を2列目に置くのは、`ORDER BY` の tie-break（同時刻の複数行）と索引の
+-- ソート順を1バイトも違わない形に揃えるため（`digest` のクエリ自体が
+-- `ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC` と書いている）。
+--
+-- ## subject 絞り込みは列に含めない（今回は見送り）
+--
+-- `scope.subjectId` を伴う呼び出しは ADR 0307 の実測で既に軽い
+-- （10万行・中規模 subject で 6.9ms 台）——テナント全体の集計 1件が支配的コストであり、
+-- subject 単位の digestBand もこの索引（`tenant_id` の絞り込み＋部分述語）の恩恵を
+-- そのまま受ける（`subject_id` の等値条件は Filter として乗るだけで、対象行が
+-- 少ないぶん Filter のコストも小さい）。専用の `(tenant_id, subject_id, eff_time DESC,
+-- id DESC)` 索引を別途足す実測上の必要は、今回の測定範囲（ADR 0384「測ったこと」）では
+-- 見えなかった——将来 subject 絞りの digestBand が支配的コストになったら再検討する
+-- （ADR 0384「これが覆るとしたら」）。
+--
+-- ## `CREATE INDEX` は素のまま（`CONCURRENTLY` を付けない）
+--
+-- `packages/postgres/src/migrate.ts` が各移行ファイルを1トランザクションで包んでおり、
+-- `CREATE INDEX CONCURRENTLY` はトランザクションブロックの中では実行できない
+-- （0002/0003/0007/0010 などと同じ理由・同じ形）。素の `CREATE INDEX` は対象テーブルに
+-- `SHARE` ロックを取る——**書き込み（INSERT/UPDATE/DELETE）は構築が終わるまで止まるが、
+-- 読み取り（SELECT）は通る**（`ACCESS EXCLUSIVE` ではない。同じ主張を
+-- `create-index-lock-mode.postgres.test.ts` が別の索引で固定している）。行数が増えた本番で
+-- 適用するときは、書き込みが止まる時間を見込むこと。
+
+CREATE INDEX idx_memories_digest_band
+  ON memories (tenant_id, (COALESCE(occurred_at, recorded_at)) DESC, id DESC)
+  WHERE status IN ('active', 'contested');

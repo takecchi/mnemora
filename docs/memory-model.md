@@ -1202,6 +1202,8 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **この追記が上書きしないもの**: `recalls` の保持方針（生きているテナントの分。ADR 0290 が未決のまま）——`eraseTenant` は「丸ごと消す」操作であり、「どれだけの期間保持するか」という問いには答えていない。`forget`/`purge`（1つの Memory を対象にした既存の口）自体の契約も変わっていない——上の表・ADR 0375 の約束は「1つの Memory を purge したとき」の話として、引き続きそのまま成り立つ。
 
+**⚠ 2026-09-30 追記（[ADR 0389](./decisions/0389-recalls-digest-band-index.md)）: `purge()` が `recalls.index_band` の digest 帯を書き換えるときの走査の費用は、索引を足して解消した。** ADR 0375 決定6 は、この書き換えがテナントの `recalls` 全体を走査し、索引を足すかどうかは「決めていない」として残していた。`migrations/0030_recalls_digest_band_index.sql` の式 GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を足し、走査は対象行だけを引く形になった（振る舞いは変えていない）。代わりに `recalls` への INSERT の費用が増える（実測は ADR 0389）。`recalls` の**保持方針**（生きているテナントの分）は、引き続き決まっていない（ADR 0290）。
+
 ---
 
 ## 10. DB schema 案

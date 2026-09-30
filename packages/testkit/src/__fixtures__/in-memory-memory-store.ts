@@ -1532,9 +1532,20 @@ export class InMemoryMemoryStore implements MemoryStore {
     let filteredNotYetValid = 0;
     let filteredTaxonomy = 0;
     let filteredDecayed = 0;
+    const excludedKinds =
+      opts?.excludeProvenanceKinds !== undefined && opts.excludeProvenanceKinds.length > 0
+        ? new Set<string>(opts.excludeProvenanceKinds)
+        : undefined;
+    let excludedProvenanceIndexed = 0;
     // 目次帯の候補（ADR 0073）: totalInScope に数える条件と**同じ条件**で in-scope の
     // Memory を集める。`digestBand` が要求されなかった場合はこの配列を使わない。
     const inScopeMemories: Memory[] = [];
+    // [ADR 0384](../../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
+    // 案C: `"skip"` のときはスコープ判定（`continue` するかどうか）は今までどおり行うが
+    // ——`inScopeMemories`（digestBand の候補集め）に必要——、件数の集計（各カウンタの
+    // インクリメント）だけを止める。`AggregateScopeOptions.scopeAggregate` の doc コメント
+    // 「値だけ受け取って計算は今までどおり行う実装は禁止する」を、この fixture でも守る。
+    const skipCounting = opts?.scopeAggregate === "skip";
 
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) {
@@ -1563,15 +1574,15 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
 
       if (memory.status === "archived") {
-        filteredArchived += 1;
+        if (!skipCounting) filteredArchived += 1;
         continue;
       }
       if (memory.status === "superseded") {
-        filteredSuperseded += 1;
+        if (!skipCounting) filteredSuperseded += 1;
         continue;
       }
       if (memory.status === "forgotten") {
-        filteredForgotten += 1;
+        if (!skipCounting) filteredForgotten += 1;
         continue;
       }
       // ここに来るのは status IN ('active','contested') のみ。
@@ -1581,7 +1592,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         (scope.occurredAfter === undefined || effectiveTime >= scope.occurredAfter) &&
         (scope.occurredBefore === undefined || effectiveTime <= scope.occurredBefore);
       if (!inPeriod) {
-        filteredPeriod += 1;
+        if (!skipCounting) filteredPeriod += 1;
         continue;
       }
       // Issue #280（Issue #202 第2弾）: validAt ゲート。両端 null は「いつでも真」
@@ -1593,10 +1604,10 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (scope.validAt !== undefined) {
         const isNotYetValid = memory.validFrom != null && memory.validFrom > scope.validAt;
         const isExpired = memory.validUntil != null && memory.validUntil <= scope.validAt;
-        if (isNotYetValid) {
+        if (isNotYetValid && !skipCounting) {
           filteredNotYetValid += 1;
         }
-        if (isExpired) {
+        if (isExpired && !skipCounting) {
           filteredExpired += 1;
         }
         if (isNotYetValid || isExpired) {
@@ -1611,25 +1622,37 @@ export class InMemoryMemoryStore implements MemoryStore {
         const labels = scope.labels;
         const hasQualifyingLabel = memory.tags.some((tag) => labels.includes(tag));
         if (!hasQualifyingLabel) {
-          filteredTaxonomy += 1;
+          if (!skipCounting) filteredTaxonomy += 1;
           continue;
         }
       }
 
-      totalInScope += 1;
+      if (!skipCounting) {
+        totalInScope += 1;
+      }
       // ⭐ Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。**`continue` しない**
       // ——`archived`/`period`/`expired` と違い、減衰しきった Memory は
       // `totalInScope`・群カウント・目次帯のいずれからも除かれない（スコープ内に在る）。
       // 述語は `PostgresMemoryStore.aggregateScope` の `isDecayed` と、
       // `recall-runtime.ts` の `survivesDecayGate` の否定と、同じものでなければならない。
-      if (isDecayedForScope(memory, scope, this.subjectActivitySeq.get(ctx.tenantId))) {
+      if (
+        !skipCounting &&
+        isDecayedForScope(memory, scope, this.subjectActivitySeq.get(ctx.tenantId))
+      ) {
         filteredDecayed += 1;
       }
-      const key = memory.subjectId ?? null;
-      inScopeBySubject.set(key, (inScopeBySubject.get(key) ?? 0) + 1);
-      if (memory.embeddingStatus !== "ready") {
-        notIndexed[memory.embeddingStatus] += 1;
+      if (!skipCounting) {
+        const key = memory.subjectId ?? null;
+        inScopeBySubject.set(key, (inScopeBySubject.get(key) ?? 0) + 1);
+        if (memory.embeddingStatus !== "ready") {
+          notIndexed[memory.embeddingStatus] += 1;
+        } else if (excludedKinds?.has(memory.provenance.kind) === true) {
+          // ADR 0390: 除外 kind で索引済み（`notIndexed` の補集合）の行。
+          excludedProvenanceIndexed += 1;
+        }
       }
+      // digestBand の候補集めは "skip" でも続ける（ADR 0384 案C: 目次帯は集計とは
+      // 独立した経路。`AggregateScopeOptions.scopeAggregate` の doc コメント参照）。
       inScopeMemories.push(memory);
     }
 
@@ -1648,7 +1671,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 既に `has_qualifying_label` を含む最終スコープなので、`hasQualifyingLabel`
     // フィルタと同じ内側を数える）。カウント0のラベル・残差は載せない
     // （`axis: 'subject'` の `in_scope > 0` と同じ規約）。
-    if (scope.taxonomyGroupCandidates !== undefined) {
+    // ADR 0384 案C: "skip" のときは taxonomy 群カウントも計算しない（`groups` は空のまま）
+    // ——`RecallQuery.scopeAggregate` の doc コメント「件数集計を止める」が対象にするのは
+    // `axis: 'subject'` だけではない。
+    if (scope.taxonomyGroupCandidates !== undefined && !skipCounting) {
       const candidates = scope.taxonomyGroupCandidates;
       const perLabelCount = new Map<string, number>();
       let residual = 0;
@@ -1716,30 +1742,51 @@ export class InMemoryMemoryStore implements MemoryStore {
         if (aTime !== bTime) return bTime - aTime;
         return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
       });
-      digestEligible = { count: eligibleMemories.length, countKind: "exact" };
+      // ADR 0384 案C: `digestEligible` は件数の一種なので、"skip" では in-scope の
+      // 母数（`totalInScope`）を数えていないぶん `eligibleMemories.length` も
+      // 信じられる値ではない——`unknown`/`0` にする。digest 本文の候補一覧
+      // （`digests`）自体は `inScopeMemories`（skip でも push を続けている）から
+      // 変わらず正しく求まる。
+      digestEligible = skipCounting
+        ? { count: 0, countKind: "unknown" }
+        : { count: eligibleMemories.length, countKind: "exact" };
       digests = eligibleMemories.slice(0, opts.digestBand.limit).map((m) => ({
         memoryId: m.id,
         digest: m.digest,
       }));
     }
 
+    const countKind = skipCounting ? ("unknown" as const) : ("exact" as const);
+    const zeroCount = { count: 0, countKind } as const;
     return {
       groups,
       totalInScope,
-      countKind: "exact",
-      notIndexed: {
-        pending: { count: notIndexed.pending, countKind: "exact" },
-        failed: { count: notIndexed.failed, countKind: "exact" },
-        skipped: { count: notIndexed.skipped, countKind: "exact" },
-      },
-      filteredArchived: { count: filteredArchived, countKind: "exact" },
-      filteredSuperseded: { count: filteredSuperseded, countKind: "exact" },
-      filteredForgotten: { count: filteredForgotten, countKind: "exact" },
-      filteredPeriod: { count: filteredPeriod, countKind: "exact" },
-      filteredExpired: { count: filteredExpired, countKind: "exact" },
-      filteredNotYetValid: { count: filteredNotYetValid, countKind: "exact" },
-      filteredTaxonomy: { count: filteredTaxonomy, countKind: "exact" },
-      filteredDecayed: { count: filteredDecayed, countKind: "exact" },
+      countKind,
+      // ADR 0390: 空配列・未指定・"skip" は欄を足さない（"skip" は件数集計自体をしない）。
+      ...(!skipCounting && excludedKinds !== undefined
+        ? { excludedProvenanceIndexedCount: excludedProvenanceIndexed }
+        : {}),
+      notIndexed: skipCounting
+        ? { pending: zeroCount, failed: zeroCount, skipped: zeroCount }
+        : {
+            pending: { count: notIndexed.pending, countKind: "exact" },
+            failed: { count: notIndexed.failed, countKind: "exact" },
+            skipped: { count: notIndexed.skipped, countKind: "exact" },
+          },
+      filteredArchived: skipCounting ? zeroCount : { count: filteredArchived, countKind: "exact" },
+      filteredSuperseded: skipCounting
+        ? zeroCount
+        : { count: filteredSuperseded, countKind: "exact" },
+      filteredForgotten: skipCounting
+        ? zeroCount
+        : { count: filteredForgotten, countKind: "exact" },
+      filteredPeriod: skipCounting ? zeroCount : { count: filteredPeriod, countKind: "exact" },
+      filteredExpired: skipCounting ? zeroCount : { count: filteredExpired, countKind: "exact" },
+      filteredNotYetValid: skipCounting
+        ? zeroCount
+        : { count: filteredNotYetValid, countKind: "exact" },
+      filteredTaxonomy: skipCounting ? zeroCount : { count: filteredTaxonomy, countKind: "exact" },
+      filteredDecayed: skipCounting ? zeroCount : { count: filteredDecayed, countKind: "exact" },
       digests,
       digestEligible,
     };

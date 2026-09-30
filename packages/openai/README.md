@@ -85,7 +85,18 @@ README にある。
 確認していない（詳細は
 [ADR 0072](../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記）。
 
-## ⚠ 2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）: `embed()` は応答の件数を確かめない
+## ⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）: `embed()` は応答を検査する（下の 2026-09-26 の節は古くなった）
+
+`OpenAIEmbeddingProvider.embed` は、応答が次のどれかを満たさなければ、素の `Error`（メッセージは
+`OpenAIEmbeddingProvider:` で始まる。専用のエラー型・`kind` は無い）を投げる: (1) `response.data` の件数が
+入力の件数と等しい、(2) `index` が 0..n-1 をちょうど1回ずつ、(3) 各ベクトルの長さが `dimensions` と等しい、
+(4) 成分がすべて有限（`NaN`/`Infinity` が無い）。メッセージには期待値・実際の値・何番目かを入れ、入力テキストの
+本文と API キーは入れない。**新しく例外になる場合が増える変更**で、[CHANGELOG.md](../../CHANGELOG.md) の
+`[1.2.0]` に破壊的変更として書いた（`response.data` キー自体が無い応答は従来どおり生の `TypeError`）。
+入力の上限超過は今もサーバの拒否に依存している（[ADR 0305](../../docs/decisions/0305-embedding-provider-input-limit-contract.md)）。
+実 API がこれらの食い違いを実際に返すかは確認していない（偽の `fetch` を本物の SDK に渡して確かめた）。
+
+## ⚠ 2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）: `embed()` は応答の件数を確かめない（⚠ 2026-09-30 に古くなった。当時の記述として残す）
 
 `EmbeddingProvider.embed` の契約は「入力と同じ件数・同じ順序でベクトルを返す」ことだが、
 `OpenAIEmbeddingProvider.embed` はこれを実行時に確かめない。`response.data` を `index` で

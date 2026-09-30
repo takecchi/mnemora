@@ -1803,6 +1803,53 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 ⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は2件
 （PR #1442・Issue #207・#933 PR2（ADR 0381）、PR #1444・Issue #1207（ADR 0383））になった。**
 
+⚠ **非破壊の追記（2026-09-30、[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、
+[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
+`aggregateScope` の目次帯（digestBand）まわりの性能改善で、新しい migration
+`0028_digest_band_index.sql` が1本増えた（部分索引 `idx_memories_digest_band` の
+追加のみ。列・型・SQL 文・返り値はどれも変えていない）。**この文書の定義では
+破壊的変更に数えない**——ここに書くのは、DB を更新する利用者向けの実務上の
+案内である。`RecallQuery.scopeAggregate?: "exact" | "skip"`（同 PR、既定 `"exact"`
+で1バイトも変わらない）は新しい任意の欄1つの追加のみで、DB マイグレーションは
+伴わない。
+
+**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える
+（部分索引の追加のみ）。`v1.1.0` から上げる場合は `0026`〜`0028` の3本（`0027` は PR #1444 の
+`0027_erase_tenant_fk_indexes.sql`）、`v1.0.2` からは `0023`〜`0028` の6本が要る。索引の構築は素の `CREATE INDEX`
+（`CONCURRENTLY` 不可、`packages/postgres/src/migrate.ts` が各 migration ファイルを
+1トランザクションで包むため）——対象テーブル（`memories`）に `SHARE` ロックを取る
+（**書き込みは構築が終わるまで止まり、読み取りは通る**。`ACCESS EXCLUSIVE` ではない）。
+本番適用時は書き込みが止まる時間を見込むこと（構築時間は ADR 0384「測ったこと」を見ること）。
+
+### 32. `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性が崩れていると例外を投げるようになった（`@mnemora/openai`）
+
+[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+[ADR 0305](./decisions/0305-embedding-provider-input-limit-contract.md) の 2026-09-30 追記。
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える。番号は項目31 の続き）。
+
+**何が変わったか**: `OpenAIEmbeddingProvider.embed()` は、これまで応答を検査せず、`response.data` を `index` で
+並べ替えて返すだけだった。今は、件数が入力と等しい・`index` が 0..n-1 をちょうど1回ずつ・各ベクトルの長さが
+`dimensions` と等しい・成分がすべて有限、のどれかが崩れていれば、素の `Error`（メッセージは
+`OpenAIEmbeddingProvider:` で始まる）を投げる。型・シグネチャは変わらない。中身は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は例外にならなかった入力（食い違った応答）が、新しく例外に
+なる**。このリポジトリは、既存の「conformance suite が新しく落とすようになる」変更（項目21・23・24・27）と
+同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。
+
+**誰が影響を受けるか**: OpenAI（または `client` に注入した自前の偽物）が、`texts` と食い違う応答を返す場合だけ。
+正常な応答を返す限り、何も変わらない。`Runtime.tick` の embed ジョブでは、この例外はジョブの失敗として扱われる。
+
+**どう直すか**: 通常は何もしなくてよい。`client` に注入した偽物が、件数・次元が宣言と合わない（または `index` が
+0..n-1 でない）応答を返しているなら、偽物を直すこと。`instanceof` で捕まえたい場合、専用のエラー型・`kind` は
+無い（素の `Error`、メッセージは `OpenAIEmbeddingProvider:` で始まる）。
+
+**DB マイグレーション**: 要らない。
+
+⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更に、この項目（Issue #860）が加わる。**
+⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

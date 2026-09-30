@@ -103,6 +103,33 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
      [docs/migration-v1.md](./docs/migration-v1.md) の項目31 を見ること。
   3. `eraseTenant` を使わないなら、ほかに直すことは無い。
 
+- **`@mnemora/openai` の `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性を検査し、崩れていれば例外を投げるようになった——以前は素通りしていた食い違った応答が、新しく例外になる**
+  （[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+  [ADR 0305](./docs/decisions/0305-embedding-provider-input-limit-contract.md) の 2026-09-30 追記）。
+
+  以前は `response.data` を `index` で並べ替えて返すだけで、応答が `texts` と食い違っていても検査しなかった
+  （2026-09-26 に「検査しない・結果は未定義」と文書化した）。本物の SDK に偽の `fetch` を渡して確かめると、件数の過不足・
+  次元違い・`index` の重複/欠落/範囲外・空の `data` のどれも、例外なしに素通りした。今回、次の4つを確かめ、
+  崩れていれば素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まり、期待値・実際の値・何番目かを含む。
+  入力テキストの本文と API キーは含まない。専用のエラー型・`kind` は無い）を投げる。
+
+  1. `response.data` の件数が `texts.length` と等しい。
+  2. `index` が 0..n-1 をちょうど1回ずつ。
+  3. 各ベクトルの長さが `space.dimensions` と等しい。
+  4. 成分がすべて有限（`NaN`/`Infinity` が無い）。
+
+  - **公開 API の型・シグネチャは変わらない**（`embed` の戻り値の型も同じ）。変わるのは、食い違った応答に対する振る舞い
+    （返す → 投げる）だけである。
+  - **誰が影響を受けるか**: OpenAI が `texts` と食い違う応答（件数違い・次元違い・`NaN`/`Infinity`・`index` の異常）を
+    返したとき、以前は黙って通っていたものが `embed()` の例外になる。`Runtime.tick` の embed ジョブでは、その例外は
+    ジョブの失敗（`embeddingStatus: 'failed'`）として扱われる。**正常な応答（件数一致・宣言どおりの次元・有限）を
+    返す限り、何も変わらない。** `client` に自前の偽物を注入していて、件数や次元が宣言と合わないベクトルを返して
+    いるテストがあれば、新しく落ちる。
+  - **変えなかったこと**: `response.data` キー自体が無い応答は従来どおり生の `TypeError`。入力の上限超過は今もサーバの
+    拒否に依存している。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目32。DB マイグレーションは無い。
+  - 【確かめていないこと】実 API がこれらの食い違いを実際に返すか（実 API は使っていない）。
+
 ### Added
 
 - **`@mnemora/postgres` に、`listActiveClaimPredicates` 用の部分索引 `idx_memories_claim_predicates` を足す migration `0029_memories_claim_predicates_index.sql` を足した**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、[ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md) の2026-09-30追記）。`(tenant_id, subject_id, claim_key_predicate, created_at)` の部分索引（`WHERE status = 'active' AND claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）。SQL と振る舞いは変えない。**DB マイグレーション**: 要る（`mnemora-postgres-migrate` か `runMigrations`）。索引作成の間、`memories` への書き込みは止まる（素の `CREATE INDEX`）。100万行・visibility map が all-visible の測定で、`listActiveClaimPredicates` の中央値は 3.52ms から 1.63ms（10万行では差があるとは言えない）。数字と測っていないことは ADR に書いた。
@@ -115,6 +142,39 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`Runtime.observe()` の claim key 衝突検出**: `detectContested` が on で `RelationStore` が配線されていれば、一致が2件以上（または `contested` の1件だけ）のとき、記録だけを積む代わりに群として書き込み、`ContestedDetectionOutcome.result` に `"contested_group"` を返す。`RelationStore` を配線しない呼び出しは、1バイトも変わらない。
   - **recall の段3（対立する記憶を必ず並べて出す）が、群にも効くようになった。** 関係の行でつながった全員を幅優先でたどり、群ごとに10件（`DEFAULT_RECALL_ASSOCIATION.maxCount`）まで、`validFrom` の新しい順・同じなら id の順に残して並べる。切った件数は群ごとに `over_limit { stage: "relation" }` に出す。`RelationStore` が配線されていなければ `stage_skipped { stage: "relation" }` を出す。
   - ⭕ 非破壊と数える（どれも省略可能。conformance suite の要件が増えた分だけを、上の `### Breaking` に数えた）。
+- **`RecallQuery` に `scopeAggregate?: "exact" | "skip"` を足した**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C）——`recall()` のたびに条件なしで呼ばれる `MemoryStore.aggregateScope` の件数集計（`GROUP BY subject_id`、100万行で約1.1〜1.3秒を占める支配項）を、呼び出し側が明示的に選んだときだけ止められるようにした。
+  - **既定は省略時と同じ `"exact"`——1バイトも変わらない。** `"skip"` を渡すと `IndexBand.groups` は空・`totalInScope` は `0`・`countKind` は `'unknown'` になり、`omitted` の `filtered(archived/superseded/forgotten/period/expired/not_yet_valid/taxonomy/decayed)` は一切積まれなくなる——「スコープ内で何が落ちたか」の説明力を手放す代わりに集計の費用を払わない、という明示的な取引。**`ann_unreached` も判定されない**——判定の母数（`totalInScope` − 未索引）が `0` になるため、近似索引が取りこぼしていても鳴らない。`"skip"` で `ann_unreached` が無いことは「拾いきった」を意味しない（ADR 0384「決めたこと」7）。
+  - **目次帯（`digestBand`）は `"skip"` でも今日どおり出る**（集計とは独立した経路で、同じ PR の案A の索引が支える）。`digestEligible`（帯の外にあと何件あるか）だけは件数の一種なので、`digestBand` を指定した呼び出しに限り `{ count: 0, countKind: 'unknown' }` になる。
+  - **`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、常に `countKind: 'exact'` を返し続ける契約**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故を繰り返さないための設計）。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。
+  - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm（12往復、1点ごとに別プロセス）: 案A の索引ありの `"exact"` は p50 627.7ms、`"skip"` は p50 1.5ms。往復ごとの差（skip − exact）の中央値は −644.6ms（IQR −671.1〜−541.9ms、最小〜最大 −681.3〜−504.6ms、12往復すべて負）。10万行は cold（Postgres 再起動直後）・warm-after とも `"skip"` は p50 6.6ms・1.2ms。器・手順・限界は ADR 0384「測ったこと」。
+  ⭕ 非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。
+- **抽出の言語の事後検査を足した——日本語の観測から、かな・漢字の無い（ラテン文字の）本文が出たら、`created` イベントの `meta.languageMismatch` に印を付ける**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[ADR 0391](./docs/decisions/0391-language-mismatch-mark-on-created-event.md)）。sync・deferred・`reextract` のすべての抽出経路で効く。
+  - **印を付けるだけ**——再試行も全文フォールバックもしない。Memory の作り方、プロンプト、公開の型は変えない。疑いが無いときの `created` の `meta` は今までどおり。
+  - ⚠ 閾値は推論で置いたもので、**実データでの偽陽性率は測っていない**。意図して英語で書かせる使い方では印が常に付きうる。
+  ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
+
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`excludeProvenanceKinds` を指定した recall の `ann_unreached` の判定が、除外した kind の行を母数に数えなくなった。`scopeAggregate: "skip"` の recall は、ANN の到達を判定できないと名乗るようになった**（[PR #1458](https://github.com/takecchi/mnemora/pull/1458)、[ADR 0390](./docs/decisions/0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)）——除外指定のとき、ANN が取りこぼしても `severity: "info"` のまま・診断キーも付かず（黙る）、除外しない候補を全部拾えても鳴る（鳴りすぎ）、という2つの誤りを直した。`AggregateScopeOptions.excludeProvenanceKinds?` と `ScopeAggregate.excludedProvenanceIndexedCount?`（除外される kind で、スコープ内の索引済みの行の数）を足し（どちらも任意の欄。`totalInScope`・`groups`・`filtered*` の意味は変えない）、`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` が実装した。
+  - **既定は変わらない**: 除外指定なし・欄を返さない自作 adapter・`scopeAggregate: "exact"` の recall の出力は1バイトも変わらない。Postgres の SQL も、除外指定（非空）のときだけ列を足す。**除外指定のある recall の `omitted`（`ann_unreached` の有無・severity）と `explain.stages` の診断キーは、欄を返す adapter では変わる**（変わる向きは、取りこぼしを名乗る・鳴りすぎを止める）。
+  - `scopeAggregate: "skip"` で ANN の段が走り、adapter が `countKind: 'unknown'` を返したときは、ANN の stage detail に `annReachability: "unknown"`（到達を判定できない）が付く。`ann_unreached` が鳴らないこと自体は変わらない——**キーが付いているときの「無い」は「拾いきった」ではない**（[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 「決めたこと」7 の手当て）。
+  - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。`filteredDecayed` に除外行が混ざって下限が小さくなる側へずれるのは、偽陽性を出さない側として許容した（ADR 0390 決定6）。
+
+- **抽出（`subjectCandidates` を渡し、`extractionContext` を渡さず、観測に `payload.speaker` がある呼び出しに限る）で、LLM への user 入力の本文の前に `話者（speaker）: <値>` と空行が足される**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370) PR1、[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md) 末尾の 2026-09-30 追記）——[PR #1374](https://github.com/takecchi/mnemora/pull/1374) が候補経路の system に足した話者の一文は「本文の先頭の話者ラベル、または speaker」と言うが、この経路の入力には `speaker` が出ていなかった。一文を本当にするための変更。
+  - **変えていない経路**: `subjectCandidates` 省略・空配列の呼び出し（既定経路）と、`extractionContext` を渡す呼び出し（候補の有無を問わない。JSON の `observation.speaker` に既に出ている）は、system・user とも1バイトも変わらない。録音（カセット、Issue #704）の鍵は動かない。
+  - **`RuntimeConfig.promptVersion` を上げることを勧める**（[#1374](https://github.com/takecchi/mnemora/pull/1374) と同じ扱い。この経路の LLM への入力が変わるため、抽出結果が変わりうる）。上の経路に当たらない利用者は上げなくてよい。
+  - 実 API での効果は未測定。
+
+- **`@mnemora/postgres` の `aggregateScope` が、目次帯（`digestBand`）を組むときの内部の索引の使い方だけを変えた**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案A）——`ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` を支える部分索引 `idx_memories_digest_band`（新しい migration `0028_digest_band_index.sql`）を足した。**SQL 文・返り値の中身/順序/件数は1バイトも変えていない**——索引を追加しただけである。
+  - 【実測】`main`（案A の前）とこの枝を、同じデータ・同じ器で12往復、1点ごとに別プロセスで交互に測った（`max_parallel_workers_per_gather=0`・同時1・digestBand込み）。往復ごとの差（後 − 前）の中央値: 100万行 warm の p50 は −284.0ms（IQR −308.0〜−250.3ms、最小〜最大 −353.3〜−221.8ms、12往復すべて負。p50 の絶対値は前 930.4ms・後 627.7ms）。10万行は cold（Postgres 再起動直後の1回目）で −31.4ms（IQR −36.0〜−25.1ms）、warm-after の p50 で −27.5ms（IQR −29.6〜−23.1ms）。器は共有で、絶対値は測る時刻の負荷で動く。EXPLAIN では `digestBand` 側の `Seq Scan` + top-N `Sort`（349.5ms）が `Index Scan`（0.104ms）に置き換わった。テナント全体を `GROUP BY subject_id` で束ねる本体（支配項）は変わっていない。cold は OS のページキャッシュが残る近似で、真の cold は測っていない（詳細は ADR 0384「測ったこと」）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る。`ACCESS EXCLUSIVE` ではない）。100万行で構築を含む migration が約1.2秒（1回だけの測定）。
+  ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
+
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
+  - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
+  - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
 
 ---
 

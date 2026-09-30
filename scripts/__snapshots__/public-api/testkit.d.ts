@@ -586,6 +586,7 @@ export interface MemoryStoreConformanceOptions {
     supportsEraseTenant: boolean;
     supportsMarkContestedGroup?: boolean;
     supportsResolveContestedGroup?: boolean;
+    countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 

@@ -1,0 +1,40 @@
+-- 0030_recalls_digest_band_index.sql
+--
+-- ADR 0389（ADR 0375 決定6・「引き受けた負債」1 の解消）: `PostgresMemoryStore.purgeMemory`
+-- （`packages/postgres/src/memory-store.ts`）が `recalls.index_band` の目次帯（`digestBand`）
+-- から特定の `memoryId` のエントリを探して書き換える `UPDATE` の `WHERE` 句
+--
+--   WHERE tenant_id = $1
+--     AND index_band ? 'digestBand'
+--     AND index_band->'digestBand' @> jsonb_build_array(jsonb_build_object('memoryId', $2::text))
+--
+-- は、`idx_recalls_by_subject (tenant_id, subject_id, created_at)` でテナントへ絞ったあと、
+-- `index_band` の中身を行ごとに調べていた（絞り込みに使える索引が無く、テナントの `recalls`
+-- を全部読む）。この migration は、その `@>` の左辺の式 `index_band->'digestBand'` に GIN 索引
+-- を張る——クエリの式と索引の式が一致するので、planner は BitmapAnd/Bitmap Index Scan で
+-- 対象行だけを引ける。
+--
+-- ## `jsonb_path_ops` を選んだ理由
+--
+-- 使うのは `@>`（containment）だけであり、`?` は使わない（`index_band ? 'digestBand'` は
+-- 索引を経由せず、絞られた行への Filter として残る——`@>` が真なら `digestBand` は必ず
+-- 在るので、結果は変わらない）。`jsonb_path_ops` は `@>` 専用で、既定の `jsonb_ops` より
+-- 索引が小さく、書き込みも軽い。
+--
+-- ## 部分索引にしない
+--
+-- `index_band` は `NOT NULL` で、`digestBand` を持たない行が多数派になる根拠が無い
+-- （`recall()` は目次帯を常に載せる）。式が NULL になる行は、GIN にはキーが載らないだけで
+-- 索引は小さくならない理由が無いため、`WHERE` は付けない（0027 が同じ理由で無条件索引を
+-- 選んだ形）。
+--
+-- ⚠ この `CREATE INDEX` は素のまま（`CONCURRENTLY` を付けない）。
+-- `packages/postgres/src/migrate.ts` が各移行ファイルを1トランザクションで包んでおり、
+-- `CREATE INDEX CONCURRENTLY` はトランザクション内で実行できないためである
+-- （0002/0003/0004/0007/0010/0027 と同じ理由・同じ形）。既存の `recalls` の行数に比例して
+-- `recalls` への書き込みが止まる。実測（作成時間・索引サイズ・`purgeMemory` の `UPDATE` の
+-- 前後・`createRecall` の `INSERT` への上乗せ）は ADR 0389「実測」節を参照——ここには写さない
+-- （`AGENTS.md`「数を、道具と生成物に焼き込まない」）。
+
+CREATE INDEX idx_recalls_digest_band
+  ON recalls USING gin ((index_band->'digestBand') jsonb_path_ops);
