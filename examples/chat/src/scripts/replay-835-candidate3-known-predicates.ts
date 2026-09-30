@@ -33,7 +33,7 @@ import type { Conversation, ConversationTurn } from "../scenario.js";
  * 分かる（ADR 0329/0377 の実測手法と同じ）——`recall()`/回答生成を経由しないので、
  * 減衰の時刻依存を踏まない。
  *
- * 使い方: `DATABASE_URL=... tsx examples/chat/src/scripts/replay-835-candidate3-known-predicates.ts <cassette-path>`
+ * 使い方: `DATABASE_URL=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/replay-835-candidate3-known-predicates.ts <cassette-path>`
  * （`OPENAI_API_KEY` は不要——記録に無い入力があれば `RecordedLLMProvider`/
  * `RecordedEmbeddingProvider` が例外を投げて止まる。黙って実 API へは落ちない。）
  *

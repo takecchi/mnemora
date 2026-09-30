@@ -31,7 +31,7 @@ import { computeMarginStats } from "../identifier-arm.js";
  * ## 使い方
  *
  * ```
- * tsx examples/chat/src/scripts/openai-margin-candidate-sensitivity.ts
+ * pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-margin-candidate-sensitivity.ts
  * ```
  */
 

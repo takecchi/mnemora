@@ -42,7 +42,7 @@ import type { SignedMarginStats } from "../intrusion-margin-candidates.js";
  *
  * ```
  * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   tsx examples/chat/src/scripts/measure-intrusion-margin-candidates.ts
+ *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-intrusion-margin-candidates.ts
  * ```
  *
  * ⛔ 実 API は一切叩かない（`OPENAI_API_KEY` は読まない。LLM=`deterministic`、
@@ -192,8 +192,8 @@ async function main(): Promise<void> {
         commit,
         measuredAt: measuredAt.toISOString(),
         how:
-          "env -u OPENAI_API_KEY DATABASE_URL=<port> tsx " +
-          "examples/chat/src/scripts/measure-intrusion-margin-candidates.ts",
+          "env -u OPENAI_API_KEY DATABASE_URL=<port> pnpm --filter @mnemora/example-chat exec tsx " +
+          "src/scripts/measure-intrusion-margin-candidates.ts",
         database: "PostgreSQL 17 + pgvector(ローカル、非本番。docs/autonomy.md の initdb 手順)",
         embeddingSpace: space,
         llmMode: handle.llmMode,

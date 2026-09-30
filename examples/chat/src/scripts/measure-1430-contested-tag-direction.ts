@@ -46,7 +46,7 @@ import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette, saveCassette } from ".
  * `reconciled`・回答本文を記録する。
  *
  * 使い方: `DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_1430_CONDITION=c1|c2 \
- *   MNEMORA_RECORD_CASSETTE_PATH=... tsx examples/chat/src/scripts/measure-1430-contested-tag-direction.ts`
+ *   MNEMORA_RECORD_CASSETTE_PATH=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-1430-contested-tag-direction.ts`
  */
 
 const TARGET_CASE_IDS = [
@@ -81,7 +81,7 @@ const CLAIM_KEY_OPTIONS: ClaimKeyOptions = {
 const usage = () => {
   console.error(
     "使い方: DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_1430_CONDITION=c1|c2 " +
-      "MNEMORA_RECORD_CASSETTE_PATH=... tsx examples/chat/src/scripts/measure-1430-contested-tag-direction.ts",
+      "MNEMORA_RECORD_CASSETTE_PATH=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-1430-contested-tag-direction.ts",
   );
 };
 
