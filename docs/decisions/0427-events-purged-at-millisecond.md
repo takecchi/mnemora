@@ -23,7 +23,10 @@
      - `packages/postgres/src/__tests__/events-purged-at-millisecond.postgres.test.ts`: 読み戻した `at` を `until`・`since` に渡すと行自身が返ること、列の値がミリ秒で揃っていること。
      - `packages/testkit/src/__tests__/in-memory-events-purged-at-until-boundary.test.ts`: インメモリ実装でも同じ端で1件返ること。
      - `*-conformance.ts` には要件を足していない。
-  3. **`packages/core/src/interfaces/clock.ts` の TSDoc**（「Postgres では SQL の `now()` のまま」）を、この変更に合わせて直した。
+  3. **この変更で事実と合わなくなった記述を直した。**
+     - `packages/core/src/interfaces/clock.ts` の TSDoc（「Postgres では SQL の `now()` のまま」）。
+     - [docs/memory-model.md](../memory-model.md) の 2026-09-30 追記（[PR #1524](https://github.com/takecchi/mnemora/pull/1524)）の「`@mnemora/postgres` は SQL の `now()`（DB の時計）」を、プロセスの時計（ミリ秒）に直した。
+     - [ADR 0355](./0355-inject-clock-into-store-writes.md) は採用済みなので本文（「Postgres では SQL の `now()` のままである」）を書き換えず、末尾に 2026-09-30 の追記を足した。
 
 - **検討した代替案**:
 
@@ -34,7 +37,6 @@
 - **引き受けた負債**:
 
   - `at` は DB サーバの時計ではなく、adapter を動かすプロセスの時計になった。複数のプロセスで時計がずれていると、`events_purged` の `at` の並びは DB の時計の並びと一致しないことがある（他の書き込みの口と同じ性質）。
-  - [docs/memory-model.md](../memory-model.md) の 2026-09-30 追記（[PR #1524](https://github.com/takecchi/mnemora/pull/1524)）は、`@mnemora/postgres` について「SQL の `now()`（DB の時計）」と書いている。この変更でその記述は事実と合わなくなったが、この PR では直していない。ADR 0355 の本文（「Postgres では SQL の `now()` のままである」）も採用済みの ADR なので書き換えていない。
 
 - **これが覆るとしたら**:
 
