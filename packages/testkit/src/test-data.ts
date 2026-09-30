@@ -1,4 +1,4 @@
-import { defaultDecayStrategy } from "@mnemora/core";
+import { DEFAULT_HALF_LIFE_HOURS, defaultDecayStrategy } from "@mnemora/core";
 import type {
   NewMemory,
   NewMemoryEvent,
@@ -40,7 +40,7 @@ import type {
 export function buildNewMemoryFixture(overrides: Partial<NewMemory> = {}): NewMemory {
   const recordedAt = overrides.recordedAt ?? new Date("2026-01-01T00:00:00.000Z");
   const strength = overrides.strength ?? 1;
-  const halfLifeHours = overrides.halfLifeHours ?? 720;
+  const halfLifeHours = overrides.halfLifeHours ?? DEFAULT_HALF_LIFE_HOURS;
   const base: NewMemory = {
     tenantId: "tenant-1",
     subjectId: null,
