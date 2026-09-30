@@ -201,6 +201,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **誰が影響を受けるか**: 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者。1・2・4 はフラグを渡していなくても当たる。3 は `supportsListActiveClaimPredicates: true` を渡している場合だけ当たる。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目37〜40。DB マイグレーションは無い。
   - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres` とインメモリの実装が通ることだけを確かめた）。
+- **DB の生の例外で失敗していた3つの入力が、明示の扱いに変わった。conformance suite に `it` が3本増えた**（PR「fix/hunt-n-small-holes」の候補 N-3・N-4・N-5）。
+  - **`@mnemora/postgres` は、float4（`real` 列）に収まらない `halfLifeHours`・`halfLifeRecalls`（例: `1e39`・`1e-50`）を、DB へ渡す前に、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で断る**。対象は `createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `NewMemory` と `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls`。以前も例外にはなったが、DB の生の例外（`out of range for type real`）だった。testkit の fixture は既にこの判定・この文言で断っていた。core の doc に float4 の上限・下限を書いた。
+  - **`@mnemora/openai` と `@mnemora/local-embedding` の `embed()` は、abort 済みの `signal` を渡されたら、空配列でも `[]` を返さず `signal.reason` で reject する**（以前は空配列だと signal を見ずに `[]` を返した）。
+  - **`@mnemora/postgres` の `RelationStore.unlink` は、uuid の形でない id を何もせずに返し、`listRelated` は空配列を返す**（存在しない id と同じ扱い。以前は DB の型変換エラーで reject した）。testkit のインメモリは既にこの振る舞い。core の doc に書いた。
+  - **conformance に `it` を足した**: `describeMemoryStoreConformance`（float4 の範囲外の `createMemory`）、`describeTenantSettingsStoreConformance`（`setDefaultHalfLifeRecalls` の float4 の範囲外。この口を渡した場合）、`describeRelationStoreConformance`（uuid の形でない id の `unlink`・`listRelated` 各1本）。フラグ無しで走る。
+  - **誰が影響を受けるか**: 自前の `MemoryStore`/`TenantSettingsStore`/`RelationStore` 実装を conformance に当てている利用者。上の3つの adapter を、DB の生の例外の文言で捕まえていた呼び出し側。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目41・42。DB マイグレーションは無い。
+
 
 ### Added
 
@@ -375,6 +383,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **振る舞いの変更**: 適合テストは、adapter が投げた例外を core の判定関数（`isMemoryStatusConflictError`・`isOutboxLeaseConflictError` など。「`kind`、無ければ `name`」）で見る。core が2つの版に分かれた環境でも、正しい adapter は緑になる。`memoryId` / `expectedAttempts` などの欄を読む検査は変えていない。**別のクラスの例外・素の `Error` を投げる adapter は、これまでどおり赤になる。**
   - ⚠ 適合テストは core の判定関数（この版の core が公開したもの）を import する。判定関数を持たない古い版の core と組み合わせた testkit は動かない。
   - 公開 API に変更は無い（判定用の道具 `error-guards.ts` は export していない。snapshot は変わらない）。非破壊。
+
+- **文書だけの訂正（挙動は変えない）**: (1) `probeTrigramLexicalSupport` の doc の「この関数自身は投げない」を、実装に合わせた（先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、接続の失敗・権限の不足で reject する）。(2) `ScoringInput.similarity` の doc の「0〜1」を、負になりうると直した。`MemoryStatusConflictError` の doc の `instanceof` を `isMemoryStatusConflictError` に追随させた。(3) `SQL_ASCII` の DB では、migration 0025 の `left(content, 150000)` が文字ではなくバイトで切ることを、現行の doc に書いた（ADR 0364 に追記。実測した。migration の SQL は出荷済みなので変えていない）。(4) `docs/recall.md` に `stage_skipped` の `stage: 'relation'`・`reason: 'relation_store_unavailable'` を足し、`docs/architecture.md` の 2つの片（`RelationKind` のドラフトの囲み、`OutboxLeaseConflictError` の宣言）を直した。
 
 ---
 
