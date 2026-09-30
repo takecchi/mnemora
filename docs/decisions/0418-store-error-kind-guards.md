@@ -201,3 +201,20 @@
   判定は本文の作法（「`kind` を見て、`kind` が無ければ `name` を見る」）を基にし、`kind` があるときは、その値が各パッケージの
   `*LLMFailureKind` のどれかであることに加えて、`name` が文字列ならそれが自分のクラス名であることも見る。openai と anthropic は
   `kind` の値が重なる（`"refusal"` など）ので、`kind` だけでは相手の provider の例外を取り違えるためである。
+
+## 追記 (2026-10-01): 「core 以外のパッケージの例外は、既に `kind` と判定関数を持つ」は、`@mnemora/postgres` の公開9クラスには当たらなかった
+
+> **⚠ 2026-10-01 追記:** 上の本文と、これまでの追記は書き換えていない。2026-09-30 の追記の「列挙」の括弧書き
+> 「core 以外のパッケージの例外——`AnthropicLLMProviderError` など——は、本 ADR の「core の store 例外」の範囲外であり、
+> 既に `kind` と判定関数を持つ」は、`@mnemora/postgres` の公開の例外クラスについては事実と違っていた。
+> 書いたのは、上と同じくクローンの委譲先であり、オーナーの判断ではない。
+
+- **事実**: `scripts/__snapshots__/public-api/postgres.d.ts` と `packages/postgres/src` で確かめた。`@mnemora/postgres` が公開する
+  例外クラスは9つで、いずれも `kind` も `is*` の判定関数も持たない（`name` だけ）。
+  `AdvisoryLockTimeoutError`・`AdvisoryLockUnavailableError`・`PgvectorVersionUnsupportedError`・`MissingExtensionsError`・
+  `MigrationLockTimeoutError`・`MigrationLockUnavailableError`・`RegisterEmbeddingSpaceLockTimeoutError`・
+  `RegisterEmbeddingSpaceLockUnavailableError`・`TrigramLexicalStoreUnavailableError`。
+  （`packages/postgres/src` で `kind` を含むのは SQL の `provenance_kind` だけで、`is*Error` の公開関数も無い。）
+- **扱い**: postgres の9クラスは `name` だけ。揃えるかは [Issue #1184](https://github.com/takecchi/mnemora/issues/1184) の判断
+  （v1 の中では揃えない）に従う。9クラスのコードは変えていない。
+- 訂正は [ADR 0441](./0441-changelog-migration-refs-consumer-smoke-names.md) で行った。

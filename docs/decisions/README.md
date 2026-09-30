@@ -452,5 +452,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0437](./0437-helpers-params-subject-ids-repurge.md) | 公開ヘルパー9本の例外から `params` を落とす・`subjectIds` と `advanceActivityClock.subjectId` を識別子の検査の内側に置く・v1.1.0 より前に purge した行の残骸を purge のかけ直しで消す | 採用 (2026-10) |
 | [0438](./0438-tenant-boundary-teeth-and-purge-uuid-case.md) | 別テナントを混ぜた歯を足す・purgeMemory の大文字の id を直す・subject カウンタの相関サブクエリの修飾を直す | 採用 (2026-10) |
 | [0440](./0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) | 抽出の現地の暦日を年の範囲によらず組み直す・outbox の終端を先勝ちにする・BullMQ の stalled を README に書く | 採用 (2026-10) |
+| [0441](./0441-changelog-migration-refs-consumer-smoke-names.md) | CHANGELOG と migration-v1 の参照の食い違いを直す・postgres の例外は `name` だけと訂正する・README に ES2022 を書く・consumer-install の実行検査に値の名前を足す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

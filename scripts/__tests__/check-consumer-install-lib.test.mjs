@@ -1,4 +1,7 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +10,8 @@ import {
   buildSmokeMjs,
   buildSmokeTs,
   buildTsconfig,
+  collectEntryValueNames,
+  collectValueNamesForEntries,
   compareEntryPoints,
   entryPointsFromExports,
 } from "../check-consumer-install-lib.mjs";
@@ -73,14 +78,14 @@ describe("生成するファイル", () => {
   });
 
   it("smoke.mjs は解決先が node_modules の配下であることと、export の有無を見る", () => {
-    const src = buildSmokeMjs(["@a/b"]);
+    const src = buildSmokeMjs(["@a/b"], { "@a/b": ["x"] });
     expect(src).toContain('["@a/b"]');
     expect(src).toContain('"/node_modules/"');
     expect(src).toContain("Object.keys(mod).length === 0");
   });
 
   it("smoke.cjs は require で読み、解決先が node_modules の配下であることと、export の有無を見る", () => {
-    const src = buildSmokeCjs(["@a/b"]);
+    const src = buildSmokeCjs(["@a/b"], { "@a/b": ["x"] });
     expect(src).toContain('["@a/b"]');
     expect(src).toContain("require.resolve(spec)");
     expect(src).toContain("require(spec)");
@@ -100,4 +105,118 @@ describe("生成するファイル", () => {
     ]);
     expect([n.strict, n.skipLibCheck, b.strict, b.skipLibCheck]).toEqual([true, true, true, true]);
   });
+});
+
+describe("snapshot から引く値の名前（collectEntryValueNames）", () => {
+  const snapshot = [
+    "// ===== dist/index.d.ts =====",
+    'export * from "./a.js";',
+    'export { fromB, type TypeFromB } from "./b.js";',
+    'export type { OnlyType } from "./b.js";',
+    'import { fromC } from "./c.cjs";',
+    "export { fromC };",
+    "// ===== dist/a.d.ts =====",
+    "export declare const A_CONST: string;",
+    "export declare function aFn(): void;",
+    "export declare class AClass {}",
+    "export declare enum AEnum { X = 0 }",
+    "export declare const enum AConstEnum { X = 0 }",
+    "export interface AInterface {}",
+    "export type AType = string;",
+    "declare const internal: number;",
+    "// ===== dist/b.d.ts =====",
+    "export declare const fromB: number;",
+    "export interface TypeFromB {}",
+    "export interface OnlyType {}",
+    "export declare const notReExported: number;",
+    "// ===== dist/c.d.cts =====",
+    "export declare const fromC: string;",
+    "",
+  ].join("\n");
+
+  it("値だけを、入口から見える名前に限って引く（型・const enum・再 export されない宣言は除く）", () => {
+    expect(collectEntryValueNames(snapshot, "dist/index.d.ts")).toEqual(
+      ["A_CONST", "AClass", "AEnum", "aFn", "fromB", "fromC"].sort(),
+    );
+  });
+
+  it("値が1つも引けなければ例外（抜き出しが壊れたまま緑にしない）", () => {
+    expect(() =>
+      collectEntryValueNames(
+        "// ===== dist/index.d.ts =====\nexport interface I {}\n",
+        "dist/index.d.ts",
+      ),
+    ).toThrow(/値の名前が1つも引けなかった/);
+  });
+
+  it("扱えない形（namespace）は黙って読み飛ばさず例外", () => {
+    expect(() =>
+      collectEntryValueNames(
+        "// ===== dist/index.d.ts =====\nexport declare namespace N { const x: number; }\n",
+        "dist/index.d.ts",
+      ),
+    ).toThrow(/namespace/);
+  });
+
+  it("実際の snapshot: 全入口で空でなく、testkit の . と ./fixtures の対応が正しい", () => {
+    const names = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, repoRoot);
+    for (const spec of EXPECTED_ENTRY_POINTS) expect(names[spec].length).toBeGreaterThan(0);
+    expect(names["@mnemora/testkit/fixtures"]).toContain("InMemoryMemoryStore");
+    expect(names["@mnemora/testkit"]).not.toContain("InMemoryMemoryStore");
+    expect(names["@mnemora/testkit"]).toContain("CassetteRecorder");
+    expect(names["@mnemora/postgres"]).toContain("DEFAULT_MIGRATIONS_DIR");
+    expect(names["@mnemora/core"]).not.toContain("MemoryStore");
+  });
+});
+
+describe("生成した smoke が、値の名前の欠けを実行時に検出する", () => {
+  /** node_modules/@a/b（ESM の index.mjs と CJS の index.cjs）を持つ一時ディレクトリで smoke を実行する。 */
+  function runSmoke(kind, exportedNames, valueNames) {
+    const dir = mkdtempSync(join(tmpdir(), "mnemora-smoke-test-"));
+    try {
+      const pkgDir = join(dir, "node_modules", "@a", "b");
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(
+        join(pkgDir, "package.json"),
+        JSON.stringify({
+          name: "@a/b",
+          version: "0.0.0",
+          exports: { ".": { import: "./index.mjs", require: "./index.cjs" } },
+        }),
+      );
+      writeFileSync(
+        join(pkgDir, "index.mjs"),
+        `${exportedNames.map((n) => `export const ${n} = 1;`).join("\n")}\nexport const __present = 1;\n`,
+      );
+      writeFileSync(
+        join(pkgDir, "index.cjs"),
+        `${exportedNames.map((n) => `exports.${n} = 1;`).join("\n")}\nexports.__present = 1;\n`,
+      );
+      const file = kind === "mjs" ? "smoke.mjs" : "smoke.cjs";
+      const build = kind === "mjs" ? buildSmokeMjs : buildSmokeCjs;
+      writeFileSync(join(dir, file), build(["@a/b"], valueNames));
+      const r = spawnSync(process.execPath, [file], { cwd: dir, encoding: "utf8" });
+      return { status: r.status, out: `${r.stdout}${r.stderr}` };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  for (const kind of ["mjs", "cjs"]) {
+    it(`(${kind}) 名前が揃った mod で緑`, () => {
+      const r = runSmoke(kind, ["foo", "bar"], { "@a/b": ["foo", "bar"] });
+      expect(r.status).toBe(0);
+    });
+
+    it(`(${kind}) 名前が1つ欠けた mod で赤（欠けた名前を名指しする）`, () => {
+      const r = runSmoke(kind, ["foo"], { "@a/b": ["foo", "bar"] });
+      expect(r.status).toBe(1);
+      expect(r.out).toContain("（1 個）: bar");
+    });
+
+    it(`(${kind}) 名前の一覧が空・入口の分が無いときは赤`, () => {
+      expect(runSmoke(kind, ["foo"], { "@a/b": [] }).status).toBe(1);
+      expect(runSmoke(kind, ["foo"], {}).status).toBe(1);
+    });
+  }
 });
