@@ -223,6 +223,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
 - **`docs/migration-v1.md` の未リリースの節が `0029`・`0030` を知らなかったのを直し、CHANGELOG の未リリース節が名指す migration が同文書にも在ることの歯を足した**（`scripts/__tests__/migration-v1-changelog-migrations.test.mjs`）。同文書の本数の案内は `0028` で止まっていた（`v1.1.0` から3本・`v1.0.2` から6本と書いていたが、実際は5本・8本）。DB の動作は変わらない（`mnemora-postgres-migrate` は台帳をファイル名で見る）。文書の正確さだけの訂正で、出荷済みの節は触っていない。
 
+- **`labels` の行を消す（`eraseTenant` など）ときの外部キー検査が、`memory_labels` を全走査しなくなった**（[ADR 0400](./docs/decisions/0400-general-fk-index-tooth.md)）。
+  - **新しい migration `0031_memory_labels_label_id_index.sql`。** `memory_labels (label_id)` に索引 `idx_memory_labels_label_id` を1本足す。`@mnemora/postgres` を上げたあと migrate を当てる。列・型・SQL 文・返り値は変えない。⭕ 非破壊と数える。
+  - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `memory_labels` への書き込みが止まる。
+  - 調査担当の実測では、`memory_labels` 20万行で 46ms → 6.5ms（ADR 0400）。あわせて、全外部キーに先頭列一致の索引を要求する歯を足した（テストのみ、利用者には見えない）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
