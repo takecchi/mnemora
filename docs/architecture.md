@@ -803,7 +803,9 @@ interface VectorEntry {
   を持つ。recall はこれを「候補にすら上がらなかった件数」として `omitted.kind = 'not_indexed'`
   で報告する——**索引の遅れを黙って無かったことにしない**。原則の姿3そのものの適用である
   （[docs/recall.md](./recall.md)）。
-- **core は埋め込みの次元を知らない。** `EmbeddingSpaceId` は「(provider, モデル, 次元)」の組
+- **core は埋め込みの次元を知らない。**（⚠ 2026-09-30: 「知らない」は空間の単位としての話である。
+  embed ジョブと `recall()` の問い合わせ埋め込みは、provider が返したベクトルの長さを
+  `EmbeddingSpaceId.dimensions` と突き合わせる——ADR 0393。）`EmbeddingSpaceId` は「(provider, モデル, 次元)」の組
   （D8）を単位にし、空間ごとにテーブル（`memory_embeddings_<space>`）を分ける設計を前提とする
   （[docs/decisions/](./decisions/)、pgvector の可変次元列は索引が張れないため）。
 - **`search` は、渡された `space` と一致しない vector を返してはならない。** 同一 tenant の中でも、
@@ -1004,6 +1006,16 @@ interface LLMProvider {
 `timeout: 600000`ms で 429・5xx 等を再試行する。実測、Issue #884）。この数値は SDK の
 既定値であり mnemora の契約ではない——変えたい呼び出し側は `client` に自前の SDK
 インスタンスを渡す。
+
+⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+[ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)。上の 2026-09-27 追記のうち「長さ」と「有限性」を覆した）**:
+`packages/core` は、provider が返したベクトルの長さが `EmbeddingSpaceId.dimensions` と違えば、provider を問わず
+弾く。embed ジョブは `VectorStore.upsert` の前に確かめ、違えばジョブを失敗にして `embeddingStatus: 'failed'`
+にする（`InMemoryVectorStore` でも `'ready'` にならない）。`recall()` は provider が返した問い合わせベクトルの
+長さが違えば `embedding_provider_unavailable` に丸める（`score_not_comparable` ではない）。呼び出し側が
+`RecallQuery.vector` を直接渡した経路と、`VectorStore` を直接呼ぶ経路は、この検査を通らない（store の側の
+「比較不能」の扱いが残る）。成分の有限性（`NaN`/`Infinity`）も同じ形で確かめ、崩れていれば embed ジョブは失敗、
+`recall()` は `embedding_provider_unavailable` になる（上の 2026-09-27 追記の「有限性」も覆った）。
 
 ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
 [ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）**:
