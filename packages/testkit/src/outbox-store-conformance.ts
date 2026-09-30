@@ -292,6 +292,66 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(after?.failedAt).toEqual(at);
     });
 
+    /**
+     * `opts.at` が Invalid Date のとき、Postgres は `timestamptz` への変換で拒む（`22007`）。
+     * 静かに `completedAt`/`failedAt` へ Invalid Date を書いてはならない。
+     */
+    for (const how of ["complete", "fail"] as const) {
+      it(`${how} は opts.at が Invalid Date なら例外を投げる`, async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+        const at = new Date(Number.NaN);
+
+        const call =
+          how === "complete"
+            ? store.complete(ctx, job.id, job.attempts, { at })
+            : store.fail(ctx, job.id, "simulated failure", job.attempts, { at });
+        await expect(call).rejects.toThrow();
+      });
+    }
+
+    /** 渡した `at` の Date を、store が参照のまま持たない（後から呼び手が書き換えても行は変わらない）。 */
+    (peekJob ? it : it.skip)(
+      "complete/fail に渡した opts.at を、呼び手が後から書き換えても、completedAt/failedAt は変わらない",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const completeJob = await seedJob(ctx, { kind: "extract" });
+        const failJob = await seedJob(ctx, { kind: "embed" });
+        const completeAt = new Date("2020-01-01T00:00:00.000Z");
+        const failAt = new Date("2020-02-02T00:00:00.000Z");
+
+        await store.complete(ctx, completeJob.id, completeJob.attempts, { at: completeAt });
+        await store.fail(ctx, failJob.id, "simulated failure", failJob.attempts, { at: failAt });
+        completeAt.setTime(0);
+        failAt.setTime(0);
+
+        const completedAfter = await peekJob!(ctx, completeJob.id);
+        const failedAfter = await peekJob!(ctx, failJob.id);
+        expect(completedAfter?.completedAt?.toISOString()).toBe("2020-01-01T00:00:00.000Z");
+        expect(failedAfter?.failedAt?.toISOString()).toBe("2020-02-02T00:00:00.000Z");
+      },
+    );
+
+    /**
+     * `text` は NUL（U+0000）を保存できない（Postgres は 22021）。`fail` の `error` に NUL が混ざっても
+     * 落とさず、目に見える6文字の `\\u0000` に置き換えて `lastError` に残す（`PostgresOutboxStore.fail`）。
+     */
+    (peekJob ? it : it.skip)(
+      "fail は error の NUL を、6文字の \\u0000 に置き換えて lastError に残す",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+
+        await store.fail(ctx, job.id, "bad\u0000output\u0000", job.attempts);
+
+        const after = await peekJob!(ctx, job.id);
+        expect(after?.lastError).toBe("bad\\u0000output\\u0000");
+      },
+    );
+
     /** ⭐ 非破壊の確認: `opts` を省略すると、今日どおり壁時計になる。 */
     (peekJob ? it : it.skip)(
       "complete/fail は opts を省略すると、completedAt/failedAt は壁時計になる",
