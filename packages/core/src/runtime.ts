@@ -5411,6 +5411,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
       }
       await deps.vectorStore.upsert(ctx, deps.embeddingProvider.space, memory.id, vector);
+      // ⚠ 2026-09-30 追記（今の振る舞いを書いたもの）: `upsert` に成功したあとのこの `ready` の書き込みが
+      // 一時的に失敗しても、下の `catch` は「埋め込みの失敗」と区別しない——`failed` を書いて投げ直す。
+      // 結果: ベクトルは書けているのに記憶は `failed`（`recall` は `not_indexed{ reason: "failed" }` と名乗る）、
+      // ジョブは `fail()` で終端になる（Phase 1 に自動リトライは無い）ので、次の `tick` では回復しない。
+      // 戻すには `reembed({ statuses: ["failed"], … })` で積み直して `tick` する（`failed → ready` は許される）。
+      // 直さない理由: この `catch` の中の `failed` は「ここまでの store 呼び出しのどれかが落ちた」を等しく扱う
+      // 唯一の口で、`ready` だけ分けても、ジョブが終端になる点（＝リトライが無い点）は変わらず、
+      // 一時的な失敗が1件の記憶を `reembed` が要る状態にする、という同じ形が `memoryStore.get` などにもある。
+      // 【実測 2026-09-30】`packages/core/src/__tests__/embed-job-ready-write-fails.test.ts`。
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {
       // Issue #1200 / ADR 0359: abort による reject は、埋め込みの失敗と同じ顔にしない
