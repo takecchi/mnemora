@@ -29,3 +29,29 @@ export function assertQueryInteger(
     throw new Error(`${method}: ${field} must be an integer (got ${value})`);
   }
 }
+
+/**
+ * 読みの口の検索語が、Postgres の `text` へ渡せるかを確かめる（穴 O-6-1、ADR 0424）。NUL (U+0000) は、
+ * Postgres ではクエリの時点で `invalid byte sequence for encoding "UTF8": 0x00` になる。
+ * 書く口の NUL の検査（#816）と同じ文面にする。
+ */
+export function assertQueryTextWithoutNul(method: string, field: string, value: string): void {
+  if (value.includes("\u0000")) {
+    throw new Error(`${method}: ${field} must not contain NUL characters (U+0000)`);
+  }
+}
+
+/**
+ * ベクトルの成分が pgvector の float4 に収まるかを確かめる（穴 O-6-2、ADR 0424）。`Math.fround` が有限に
+ * ならない成分（`1e308`・`NaN`・`Infinity`）は、Postgres の upsert では `out of range for type vector` 等になる。
+ */
+export function assertFloat4Vector(method: string, vector: readonly number[]): void {
+  for (let i = 0; i < vector.length; i++) {
+    const x = vector[i]!;
+    if (!Number.isFinite(Math.fround(x))) {
+      throw new RangeError(
+        `${method}: vector component [${i}] does not fit in a float4 (pgvector) value (got ${x})`,
+      );
+    }
+  }
+}

@@ -2186,6 +2186,59 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
+### 46. `runtime.observe()` の contested 検出が、NFC + trim で同じ `content` の行を一致に数えなくなった（`@mnemora/core`）
+
+[ADR 0424](./decisions/0424-normalized-content-comparison-and-boundary-conformance.md)、[PR #1527](https://github.com/takecchi/mnemora/pull/1527)。
+
+⚠ **未リリース**。**番号は 46 である**——項目45 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `Runtime.detectClaimKeyContested` が、store から返った行（`findActiveByClaimKey?`・`findContestedByClaimKey?`）のうち、`content` を NFC にして `trim()` した値が、検出中の memory と等しいものを、件数を数える前に除くようになった。以前は生の `content_hash` の違いだけで一致に数え、NFC と NFD の違いや末尾の空白1つだけの同じ文を `contested`（または `unresolved_conflict`）にしていた。`content_hash` の値・保存する `content`・store の口の引数は変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型・シグネチャは変わらないが、同じ入力（`claimKey: { enabled: true, detectContested: true }` の `observe()`）に対する `contestedDetection` と、`contested` になる Memory の集合が変わる。実 adapter を使う利用者ではなく core の振る舞いの変更なので、上の数え方の規律（実際の振る舞いの変更は数える）に従った。
+
+**誰が影響を受けるか**: `claimKey.detectContested` を使い、NFC/NFD や前後の空白だけが違う同じ文を `contested` として読んでいたコード（`contestedDetection[].result.kind === "contested"` に依存する分岐、`status: "contested"` の Memory の一覧）。自前の `MemoryStore` 実装は変える必要が無い（core が除く）。
+
+**どう直すか**: 何もしなくてよい（誤検出が減る側にしか変わらない）。以前の振る舞いに依存していた場合は、`content` を書く前に自前で正規化していなかったことを見直す。
+
+**DB マイグレーション**: 要らない。
+
+### 47. `packDigestBand`（`@mnemora/core`）が、1件の digest を書記素の境界で切り詰めるようになった
+
+[ADR 0424](./decisions/0424-normalized-content-comparison-and-boundary-conformance.md)、[PR #1527](https://github.com/takecchi/mnemora/pull/1527)。
+
+⚠ **未リリース**。**番号は 47 である**——項目46 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `packDigestBand` の `maxEntryChars` を超える digest の切り詰めが、UTF-16 コードユニットで切る（サロゲートペアの内側だけ避ける）代わりに、`Intl.Segmenter` の書記素の境界で切るようになった。`maxEntryChars` の単位（UTF-16 コードユニット）は変わらない。以前は NFD の「が」（`か` + 結合濁点）が「か」に、ZWJ で繋いだ絵文字が ZWJ だけに切れていた。書記素の途中に当たると、以前より短く（最大で書記素1つぶん）切れる。最初の書記素だけで上限を超える digest は空文字列になる。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型は変わらないが、`recall()` の `digestBand` の `digest`（と `DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS` を含む文字数の予算の消費）が、上の入力では以前と違う値になる。
+
+**誰が影響を受けるか**: `digestBand` の `digest` の文字列や文字数を、切り詰めが起きる長さで固定していた利用者（テスト・snapshot）。`maxEntryChars` 以下の digest は変わらない。
+
+**どう直すか**: 期待値を書記素の境界で切った値に更新する。
+
+**DB マイグレーション**: 要らない。
+
+### 48. `describeMemoryStoreConformance`・`describeVectorStoreConformance`・`describeLexicalStoreConformance` に、入力の境界の `it` が増えた。`@mnemora/postgres` は DB の生の例外の代わりに明示の例外を投げるようになった（`@mnemora/testkit`・`@mnemora/postgres`）
+
+[ADR 0424](./decisions/0424-normalized-content-comparison-and-boundary-conformance.md)、[PR #1527](https://github.com/takecchi/mnemora/pull/1527)。
+
+⚠ **未リリース**。**番号は 48 である**——項目47 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: フラグ無しで走る `it` が3つの suite に増えた。
+  1. **`describeLexicalStoreConformance`**: `search` の検索語に NUL (U+0000) を含めると、`query` と NUL を名指しする例外で断る（0件を返さない）。
+  2. **`describeVectorStoreConformance`**: `upsert` が float4 に収まらない成分（`1e308`・`-1e308`）の vector を `float4` を名指しする例外で断り、何も保存しない。`search` は同じ成分のクエリでも投げず、距離が比較の通らない値（`NaN`）になる。
+  3. **`describeMemoryStoreConformance`**: `contentHash` に NUL を含む `createMemory`・`createMemoryWithOutbox` が、`contentHash` と NUL を名指しする例外で断り、何も保存しない。
+
+`@mnemora/postgres` の振る舞いも変わった: 上の 1・3 と 2 の `upsert` は、以前は DB の生の例外（`DrizzleQueryError`、原因は `invalid byte sequence for encoding "UTF8": 0x00`／`"1e+308" is out of range for type vector`）だったが、DB に触れる前の明示の例外（NUL は `Error`、float4 は `RangeError`）になった。2 の `search`・`searchMany` は、以前は `1e308` のクエリで生の例外だったが、`NaN`・`Infinity` と同じ「比較不能」（投げず、`recall()` は `score_not_comparable` に数える）になった。`createMemoriesWithOutboxAndEvents` では、`contentHash` に NUL を含む候補だけが落ちる（`dropped`）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 項目36 と同じ（conformance スイートの判定を厳しくする変更）。加えて `@mnemora/postgres` は fixture ではなく本物の adapter なので、投げる例外が変わる変更は上の数え方の規律 2 の ⛔ に当たる。`InMemory*` の fixture が新しく例外を投げること自体は、同じ規律 2 により数えない。
+
+**誰が影響を受けるか**: (a) 自前の `LexicalStore`・`VectorStore`・`MemoryStore` 実装を suite に当てている利用者のうち、NUL の検索語・`contentHash` の NUL・float4 に収まらない `upsert` を受け入れる実装。(b) `@mnemora/postgres` の例外を、生の DB の例外（`cause.code === "22021"`・`"22003"`）として捕まえていたコード。
+
+**どう直すか**: (a) 同じ入力を、DB に触れる前に例外で断る。検索のクエリの float4 は、有限でない成分と同じ「比較不能」として扱う。(b) 生の DB の例外の代わりに、`Error`（メッセージに `NUL`）／`RangeError`（メッセージに `float4`）を捕まえる。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

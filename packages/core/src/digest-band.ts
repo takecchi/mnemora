@@ -1,5 +1,5 @@
 import type { DigestBandLimitedBy, DigestEntry } from "./recall.js";
-import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
+import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 
 /**
  * `packDigestBand` — 目次帯（`IndexBand.digestBand`）を組む純関数（docs/recall.md §5、本 PR）。
@@ -95,10 +95,10 @@ export function packDigestBand(
     // 別の意味になり、先頭からの切り詰めにならない（負数の `maxEntryChars` を渡すと、
     // 上限より長い文字列がそのまま残っていた）。`maxEntryChars` は「1件の digest の
     // 文字数上限」であり、負数は上限0（何も残さない）の下限として扱う。サロゲートペアの
-    // 内側で切って孤立サロゲートを作らないための丸めも `sliceWithoutSplittingSurrogatePair`
+    // 内側で切って孤立サロゲートを作らないための丸めも `sliceAtGraphemeBoundary`
     // に集約してある（`text-truncation.ts` の doc コメント参照）。
     const digest = digestTooLong
-      ? sliceWithoutSplittingSurrogatePair(candidate.digest, opts.maxEntryChars)
+      ? sliceAtGraphemeBoundary(candidate.digest, opts.maxEntryChars)
       : candidate.digest;
     const cost =
       DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + digest.length + DIGEST_BAND_ENTRY_SEPARATOR_CHARS;
