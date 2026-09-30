@@ -2124,6 +2124,68 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
+### 43. `describeOutboxStoreConformance`・`describeRelationStoreConformance`（`@mnemora/testkit`）が、adapter 間の食い違い4点を検査するようになった（`@mnemora/testkit`・`@mnemora/postgres`）
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 43 である**——項目42 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 次の `it` が足された（`OutboxStore` が4件、`RelationStore` が2件）。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+- `OutboxStore.complete`/`fail` は、`opts.at` が Invalid Date なら例外を投げる（Postgres は `timestamptz` への変換で `22007` になる）。
+- `complete`/`fail` に渡した `opts.at` を、呼び手が後から書き換えても、`completedAt`/`failedAt` は変わらない（`peekJob` を渡した adapter だけ）。
+- `fail` の `error` に NUL（U+0000）が含まれていても落とさず、6文字の `\u0000` に置き換えて `lastError` に残す（`peekJob` を渡した adapter だけ）。
+- `RelationStore.link` は、列挙の外の `kind` を、`relation kind` を含む例外で拒み、行を書かない。
+- `RelationStore.listRelated` が返した `createdAt` を書き換えても、store の行は変わらない。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**conformance suite の判定が厳しくなり、上を満たさない自前の実装は、新しく実行時に落ちる**（このファイルの規律の、conformance の判定を厳しくする変更）。項目29 の conformance の部分と同じ扱い。
+
+⚠ **数えなかったもの（判断の記録）**:
+- `@mnemora/postgres` の `PostgresRelationStore.link` が、列挙外の `kind` を DB の CHECK 違反（生のエラー）ではなく `PostgresRelationStore: unknown relation kind: <kind>` の `Error` で、INSERT の前に断るようになった。**以前も例外になった入力が、今も例外になる**——「以前は通っていた入力が新しく例外になる」に当たらないので、adapter の変更としては数えない。上の conformance の `it` としては数える。DB の生のエラーコード（`23514`）を読んでいた呼び出し側は、その読み方が効かなくなる。
+- `@mnemora/testkit/fixtures` の `InMemoryOutboxStore`・`InMemoryRelationStore` が新しく例外を投げる（規律2）。fixture が `error` の NUL を置き換える・`Date` を複製する変更、`real` 列の値を Postgres が読み戻す値で持つ変更は、例外を増やさない・conformance に足していないので、数えない。
+
+**誰が影響を受けるか**: 自前の `OutboxStore`・`RelationStore` を上の suite に当てている利用者。`@mnemora/postgres` とインメモリの実装は、足した `it` に通る。
+
+**どう直すか**:
+- `complete`/`fail` の入口で `opts.at` の `getTime()` が `NaN` なら投げる。保存するときは `new Date(opts.at)` で複製する。
+- `fail` は保存する前に `error.replaceAll("\u0000", "\\u0000")` をかける。
+- `link` は、`kind` が `RelationKind` の値のどれでもないなら、両端の検査・書き込みの前に `unknown relation kind: <kind>` を含む `Error` を投げる。`listRelated` は保存している `Date` を複製して返す。
+
+**DB マイグレーション**: 要らない。
+
+### 44. 半減期が float4 に収まらない入力と、uuid の形でない id の関係操作が、DB の生の例外でなく明示の扱いになった。conformance suite に `it` が増えた（`@mnemora/postgres`・`@mnemora/testkit`）
+
+[CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking`（「DB の生の例外で失敗していた3つの入力」）。**ここには複製しない。**
+
+⚠ **未リリース**。**番号は 44 である**——項目43 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**:
+- `PostgresMemoryStore` の `NewMemory` を受ける口と `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls` が、float4（`real` 列）に収まらない `halfLifeHours`・`halfLifeRecalls` を、メッセージに `does not fit in a Postgres "real" (float4) column` を含む素の `Error` で断る。以前は DB の生の例外（`out of range for type real`）だった。
+- `PostgresRelationStore.unlink` は uuid の形でない id で何もせず返し、`listRelated` は空配列を返す。以前は DB の型変換エラーで reject した。
+- `describeMemoryStoreConformance`・`describeTenantSettingsStoreConformance`（`setDefaultHalfLifeRecalls` を渡した場合）・`describeRelationStoreConformance` に `it` が増えた。フラグ無しで走る。型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: conformance suite が新しく落とすようになる変更（項目21・23・24・27・36〜40 と同じ扱い）。加えて、実 adapter（`@mnemora/postgres`）の振る舞い（失敗の種類、例外になっていた入力が例外でなくなる）が変わる。
+
+**誰が影響を受けるか**: 自前の `MemoryStore`/`TenantSettingsStore`/`RelationStore` を conformance に当てている利用者（DB の生の例外を投げる実装、uuid の形でない id で投げる実装は新しい `it` が落ちる）。`@mnemora/postgres` の例外を DB の文言で捕まえていた呼び出し側。
+
+**どう直すか**: 自前の実装は、DB へ渡す前に `Math.fround(x)` が `Infinity` か 0 になる半減期を、`float4` を含むメッセージの `Error` で断る。uuid の形でない id は、存在しない id と同じに扱う。`@mnemora/postgres` の利用者は、`unlink`/`listRelated` の呼び出しで例外を握っていたなら不要になる。
+
+**DB マイグレーション**: 要らない。
+
+### 45. `OpenAIEmbeddingProvider.embed()`・`LocalEmbeddingProvider.embed()` が、abort 済みの signal なら空配列でも reject するようになった（`@mnemora/openai`・`@mnemora/local-embedding`）
+
+[CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking`（項目44 と同じ箇条）。**ここには複製しない。**
+
+⚠ **未リリース**。**番号は 45 である**——項目44 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `embed(ctx, [], { signal })` は、`signal` が abort 済みでも `[]` を返していた。今は `signal.reason` で reject する。空でない `texts` の挙動は変わらない。型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 以前は例外にならなかった入力が、新しく例外になる（項目32 と同じ扱い）。
+
+**誰が影響を受けるか**: 空配列と abort 済みの signal を同時に渡していた呼び出し側だけ。
+
+**どう直すか**: abort 済みの signal を渡さない、または reject を握る。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

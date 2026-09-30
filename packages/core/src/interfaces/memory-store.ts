@@ -22,7 +22,8 @@ import type { DecayClock } from "./tenant-settings-store.js";
  * それと一致しなかったことを表す（PR「update-status-compare-and-swap」、ADR 0030）。
  * `packages/postgres/src/advisory-lock.ts` の型付きエラー階層（`AdvisoryLockTimeoutError` /
  * `AdvisoryLockUnavailableError`）に倣い、`Error` を継承した専用の型として定義する
- * ——呼び出し側が `instanceof` で「対象が無かった」と区別できることが目的。
+ * ——呼び出し側が「対象が無かった」と区別できることが目的（判定は `instanceof` ではなく
+ * {@link isMemoryStatusConflictError} で行う。ADR 0418）。
  *
  * **`observedStatus` は「弾かれた後に読み直した値」であり、弾かれた瞬間の値とは限らない。**
  * adapter（`packages/postgres`）は `UPDATE ... WHERE status = expectedStatus` が0行だった
