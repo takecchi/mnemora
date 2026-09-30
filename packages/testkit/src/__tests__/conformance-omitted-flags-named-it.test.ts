@@ -83,7 +83,7 @@ describeMemoryStoreConformance({
   // ⭐ 任意の10個（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
   // supportsFindContestedByClaimKey / supportsListActiveClaimPredicates /
   // supportsResolveOrphanedContested / supportsAbortIfForgotten / supportsMarkContestedGroup /
-  // supportsResolveContestedGroup / supportsPurgeExpiredRecalls）は意図的に渡さない。
+  // supportsResolveContestedGroup / supportsPurgeExpiredRecalls）と、関数フックの countScopeAggregateQueries は意図的に渡さない。
 });
 
 /**
@@ -269,6 +269,12 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
     task,
   }) => {
     expectOneUncheckedNamedIt(task.file, OUTBOX_NAME, ["supportsPurgeCompletedJobs"]);
+  });
+
+  it("MemoryStore: 関数フックの countScopeAggregateQueries を省略しても「⚠ 未検査」の named it が1本登録される（2状態）", ({
+    task,
+  }) => {
+    expectOneUncheckedNamedIt(task.file, MEMORY_NAME, ["countScopeAggregateQueries"]);
   });
 
   it("TenantSettingsStore: supportsTaxonomyMode を省略すると、taxonomy mode の歯も「未検査」の it も登録されない（今の振る舞い）", ({
