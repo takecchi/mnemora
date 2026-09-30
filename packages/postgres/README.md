@@ -403,6 +403,7 @@ for (const outcome of observed.contestedDetection ?? []) {
 **recall 側の効果**: 群のメンバーは単独では返らず、`RuntimeDeps.relationStore` を辿って仲間を同伴して返す
 （上限・`over_limit { stage: "relation" }` は [docs/recall.md](../../docs/recall.md) の段3と ADR 0381 §5）。
 配線しないと、群のメンバーは今までどおり `unit_assembly_dropped` に落ちる。
+⚠ 群は `relationStore` 無しでも存在しうる（`Runtime.markContestedGroup` は配線しない runtime からも呼べ、群を書いた runtime と recall する runtime とで配線が違うこともある）。そのとき recall では同伴だけでなく**群のヒット自身も**落ち、3件以上の群のメンバーだけがヒットした recall では、群のヒットが1件だけのときも、返る件数は0件になる（【実測 2026-10-01】この package と `@mnemora/testkit` の InMemory の両方。[ADR 0327](../../docs/decisions/0327-relation-graph-contested-write-path-design.md) 末尾の 2026-10-01 追記）。
 
 ### 3件目以降が「記録するだけ」で止まる条件
 
@@ -416,6 +417,7 @@ for (const outcome of observed.contestedDetection ?? []) {
 | `memoryStore.markContestedGroup` が無い adapter | 上と同じ条件の後半 `deps.memoryStore.markContestedGroup !== undefined`（`PostgresMemoryStore` は `packages/postgres/src/memory-store.ts` の `async markContestedGroup(` で実装している） | 同上 |
 | 組み立てた群が3件未満 | `memberIdSet.size >= 3`（`runtime.ts`） | 同上 |
 | `markContestedGroup` が `contested_group` 以外（`ineligible` / `conflict`）を返した | `markResult.outcome.kind === "contested_group"`（`runtime.ts`。このときだけ `groupOutcome` に入り、群として返す） | 同上 |
+| （recall の側。上の4行とは違い、observe で群が作られた**後**の条件）群は DB に在るが、recall する runtime に `relationStore` を配線していない | `packages/core/src/recall-runtime.ts` の段3・段4（`contestedWithId` の無い `contested` 候補は仲間を辿れず、単位を組めない。`RecallRuntimeDeps.relationStore` の TSDoc） | その recall で、群のメンバーは同伴もヒット自身も返らない。`omitted` に `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` と `unit_assembly_dropped`（群のヒットの件数）が出る。`status` は動かない（群のまま） |
 
 - `memory_events` の根拠（`note` の JSON）には claim key・新しい Memory・一致した Memory の `status`/`contentHash`/有効期間が入る。
 - `superseded` へは進めない。
