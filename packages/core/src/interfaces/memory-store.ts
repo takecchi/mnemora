@@ -2083,9 +2083,14 @@ export interface MemoryStore {
    *      重なる組を結ぶ」と読み替える）、双方向2行ずつ `kind: 'contradicts'` で
    *      追記する。**既に同じ行が存在する場合は無視する**（`ON CONFLICT DO NOTHING`
    *      相当——穴A・合併で一部の対が既に表に住んでいることがあるため）。
-   *   3. `memory_events` へ、`members[].event` をそれぞれ1件ずつ追記する
+   *   3. `memory_events` へ、`members[].event` を1件ずつ追記する
    *      （`event.kind` は呼び出し側が渡した値をそのまま使う。`markContestedPair` と
-   *      同じ「渡された event をそのまま積む」規律）。
+   *      同じ「渡された event をそのまま積む」規律）。**ただし、呼び出し時点で既に
+   *      `status === 'contested'` かつ `contestedWithId` が無いメンバー（既存の群の一員。
+   *      書いても状態が変わらない）の event は積まない**（ADR 0431。`@mnemora/postgres` と
+   *      `@mnemora/testkit` の InMemory の実装）。戻り値の `events` は、積んだ分だけである
+   *      ——`members` より短くなりうる。この点は適合テストに要件として足していない
+   *      ——渡された event を全部積む adapter も、これまでどおり適合する。
    * - 🔴 **原子性の証拠ではない。**`markContestedPair` の doc コメントと同じ注意
    *   ——この口が在ることは adapter がこの口を実装したことしか意味しない。
    */

@@ -731,3 +731,9 @@ migration・`markContestedGroup`/`resolveContestedGroup`（store 側の口）は
 [ADR 0292](./0292-relation-graph-table-depth-omitted-design.md) の同名の追記に書いた。
 不採用のまま残った論点・測っていない点は
 [Issue #1449](https://github.com/takecchi/mnemora/issues/1449) に切り出した。
+
+## 追記 (2026-10-01): §4-b の「`memory_events` へ全員分1件ずつ積む」と、`note` に全員の id を入れる点は、[ADR 0431](./0431-contested-group-event-growth-and-recall-cut.md) で変わった
+
+上の §4-b は、群の書き込みが `memory_events` へ全員分1件ずつ積むと書いている。いまの `@mnemora/postgres`・`@mnemora/testkit` の InMemory の `markContestedGroup` は、呼び出し時点で既に `contested` で `contestedWithId` も無いメンバー（既存の群の一員）には積まない。
+`observe()` の claim key の検出が積む `note`（`claim_key_conflict_group`）の `memberIds`・`matches` も、全員ではなく id の昇順で先頭10件になった（全体の件数は `memberCount`・`matchCount`）。
+理由は、群の大きさ N に対してイベントの件数が N²、バイト数が N³ で増えていたこと。本文は当時の記録として書き換えない。

@@ -59,6 +59,7 @@ import type {
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
 import { listRelatedManyIfSupported } from "./relation-level.js";
+import { findBudgetCut } from "./recall-budget-cut.js";
 import {
   DEFAULT_RECALL_OUTPUT_VALIDATION,
   validateRecallOutput,
@@ -414,14 +415,6 @@ function compareByValidFromDescThenId(a: Memory, b: Memory): number {
       : b.validFrom.getTime();
   if (aTime !== bTime) return bTime - aTime;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
-
-function unitChars(unit: Unit): number {
-  return unit.members.reduce((sum, m) => sum + m.memory.digest.length, 0);
-}
-
-function unitTokens(unit: Unit, tokenCounter: TokenCounter): number {
-  return unit.members.reduce((sum, m) => sum + tokenCounter.count(m.memory.digest).tokens, 0);
 }
 
 /** budget が指定されたトークン予算の中で最も厳しい(小さい)ものを1本にまとめる。 */
@@ -2447,21 +2440,8 @@ async function runRecallBody(
   if (budget) {
     const maxMemoryChars = budget.maxMemoryChars;
     const maxTokens = effectiveTokenBudget(budget);
-    const fits = (candidateUnits: Unit[]): boolean => {
-      if (maxMemoryChars !== undefined) {
-        const chars = candidateUnits.reduce((sum, u) => sum + unitChars(u), 0);
-        if (chars > maxMemoryChars) return false;
-      }
-      if (maxTokens !== undefined) {
-        const tokens = candidateUnits.reduce((sum, u) => sum + unitTokens(u, deps.tokenCounter), 0);
-        if (tokens > maxTokens) return false;
-      }
-      return true;
-    };
-    let cut = allUnits.length;
-    while (cut > 0 && !fits(allUnits.slice(0, cut))) {
-      cut -= 1;
-    }
+    // ADR 0431: 累積和を1回作って二分探索する（旧: prefix を毎回足し直す O(n²)）。結果は旧実装と同じ。
+    const cut = findBudgetCut(allUnits, { maxMemoryChars, maxTokens }, deps.tokenCounter);
     keptUnits = allUnits.slice(0, cut);
     const droppedUnits = allUnits.slice(cut);
     const droppedCount = droppedUnits.reduce((sum, u) => sum + u.members.length, 0);

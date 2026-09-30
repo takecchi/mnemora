@@ -770,3 +770,9 @@ Fake は綴りをそのまま比べる（大文字は not found）。⟹ store �
 ADR 0150 の 2026-09-27 の追記（負けた側の `superseded` は `meta.supersededById` を持つ）と食い違っていた。
 いまは `resolveContestedGroup` も、負けた側の `superseded` イベントの `meta.supersededById` に勝った側の id（`memberIds` の綴り）を持つ。
 本文は当時の記録として書き換えない。経緯と歯は ADR 0421。
+
+## 追記 (2026-10-01): `markContestedGroup` が積む `updated` イベントは、状態が変わるメンバーだけになり、`note` の `memberIds` は先頭10件になった（[ADR 0431](./0431-contested-group-event-growth-and-recall-cut.md)）
+
+この ADR の実装は、群の全メンバーに `members[].event` を1件ずつ積み、`observe()` の検出が積む `note` に全員の `memberIds` を入れていた。
+群の大きさ N に対してイベントの件数が N²、バイト数が N³ で増えるため、`@mnemora/postgres`・`@mnemora/testkit` の InMemory の実装は、既に `contested` で `contestedWithId` も無いメンバーの event を積まなくなり、`note` は `memberIds`・`matches` の先頭10件と件数・切った印（`memberCount`・`memberIdsTruncated`・`matchesTruncated`）を持つ形になった。
+関係の行（決定1〜3）と CAS の規則は変えていない。本文は当時の記録として書き換えない。

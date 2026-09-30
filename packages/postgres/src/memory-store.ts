@@ -3625,10 +3625,18 @@ export class PostgresMemoryStore implements MemoryStore {
         ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
       `);
 
+      // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、UPDATE しても
+      // 状態が変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+      // 判定は FOR UPDATE で読んだ行（`rowById`）から——UPDATE の前の状態である。
       const events = await insertMemoryEventsBatch(
         tx,
         ctx,
-        normalized.map((m) => m.event),
+        normalized
+          .filter((m) => {
+            const before = rowById.get(m.id)!;
+            return !(before.status === "contested" && (before.contestedWithId ?? null) === null);
+          })
+          .map((m) => m.event),
       );
 
       return { members: ids.map((id) => updatedById.get(id)!), events };
