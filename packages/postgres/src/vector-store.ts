@@ -12,6 +12,7 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { listEmbeddingSpaceTables } from "./embedding-space-catalog.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
 import { isUuidLike, toPgTimestamp } from "./mapping.js";
@@ -885,6 +886,8 @@ export class PostgresVectorStore implements VectorStore {
     assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun === true;
     return this.db.transaction(async (tx) => {
+      // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする。
+      await lockTenantForErase(tx, ctx.tenantId);
       const tables = await listEmbeddingSpaceTables(tx);
       let remaining = opts.limit;
       let total = 0;
