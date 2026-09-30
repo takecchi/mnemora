@@ -522,6 +522,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 書きかけの残り方は変えていない: `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` はトランザクションごと戻る（`supersedeWithNewMemories` は旧い行が `active` のまま）。`createMemoriesWithOutboxAndEvents` は正常な候補だけ書き、悪い候補は `dropped` に積む（その `error` が今回から `ClaimKeyIndexLimitError`）。
   - あわせて、直接のテストが無かった4つの関数（`isContestedWithoutCompanion`・`findMalformedIdentifierPart`・`assertWellFormedFilter`・`isAbort`）に、TSDoc の約束を縛る単体テストを足した（振る舞いは変えていない）。
 
+- **`PostgresMemoryStore.purgeMemory` に大文字の uuid を渡すと、`memories` の行は purge されるのに、`recalls.index_band` の目次帯の digest が書き換わらなかった**（[ADR 0438](./docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md)）。入口で uuid の大文字小文字をそろえるようにした。`Runtime` 経由（小文字の id）は影響なし。落ちる入力は増えない。
+
+- **`decay_clock=activity` で subject 単位のカウンタ（`usesSubjectActivityCounters`）を使うとき、`archiveDecayed` と `aggregateScope`（忘却ゲートの件数）が、カウンタ行を別テナント・別 subject の行と区別していなかった**（ADR 0438）。`tenant_subject_activity` の行が2本以上あると「more than one row returned by a subquery」で落ち、1本だけのときは別テナント・別 subject のカウンタで判定していた。相関サブクエリに修飾した `tenant_id`/`subject_id` を渡すようにした。壁時計のゲート・テナント単位のカウンタ・`search`・`reinforce` は影響なし。
+
 - **`observe` に `extractionContext: { timeZone }` と、年が 1000 未満・10000 以上・紀元前の `occurredAt` を渡すと、LLM を呼ばずに全文フォールバック（`extraction: "llm_failed_whole_observation"`、`failure.message` は `Invalid time value`）へ黙って倒れていたのを、約束どおり抽出するようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定1）。node の `Intl.DateTimeFormat("en-CA")` は年を4桁に0詰めせず（`"999-06-01"`・`"10000-01-01"`）、紀元前は符号を落とす（天文学年 0 が `"1"`）ため、その文字列を `Date.parse` に渡すと NaN になっていた。年月日を `formatToParts` で取り、`era` で紀元前を符号付きの天文学年に戻し、`setUTCFullYear` で組み直す。
   - **プロンプトに出す暦日（`observedLocalDate`・`relativeDates`）の書き方は `Date#toISOString` と同じ**（0〜9999 年は4桁に0詰め、範囲外は `+010000-01-01`・`-000100-06-01` の符号付き6桁）。**1000〜9999 年と `timeZone` 無しは、プロンプトの content を1バイトも変えていない**（直す前の出力を固定値で縛った）。ただし、現地の暦日が 9999-12-31 のとき、`relativeDates` の「明日」「明後日」は、以前は `"+010000-01"` と切れた文字列だったのが `"+010000-01-01"`・`"+010000-01-02"` になる。`Date` の範囲（±8.64e15 ms）の外へ出る日付は、落ちずに `null` になる。
 
