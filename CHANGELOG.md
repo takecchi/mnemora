@@ -181,6 +181,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目35。record を `z.array(z.object({ key: z.string(), value: … }))` に置き換える。DB マイグレーションは無い。
   - 【確かめていないこと】Anthropic の実 API には当てていない（鍵が無い）。
 
+- **`@mnemora/testkit` の `describeRelationStoreConformance`・`describeOutboxStoreConformance`・`describeTenantSettingsStoreConformance` が、別テナントの ctx からの呼び出しがそのテナントの行に触れない・見えないことを、これまでより多くの口で検査するようになった**（[PR #1498](https://github.com/takecchi/mnemora/pull/1498)、`@mnemora/testkit`）。テナントの条件の一部の口に、対応する歯が無かった。`@mnemora/postgres` の実装に漏れは無く、実装の変更は無い。
+
+  足した検査の対象は、`RelationStore` の `unlink` と kind を指定した `listRelated`、`OutboxStore` の `complete`・`fail`・`eraseTenant?`（`dryRun` を含む）・`purgeCompletedJobs?`、`TenantSettingsStore` の `getDefaultHalfLifeHours`・`hasSubjectActivityCounters?`・`eraseTenant?` の `dryRun`。`@mnemora/postgres` の各口について、条件を外した変異を入れると足した `it` が赤になり、戻すと緑に戻ることを確かめた。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**conformance suite の判定が厳しくなり、テナントの条件を持たない自前の実装は、新しく実行時に落ちる**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の規律。オーナーの回答 `6911db12` により、`v1.X.0` で出してよい）。
+  - **誰が影響を受けるか**: 自前の `RelationStore`・`OutboxStore`・`TenantSettingsStore` を上の suite に当てている利用者のうち、別テナントの行に触れる実装。`@mnemora/postgres` とインメモリの実装は、足した `it` に通る。
+  - **変えなかったこと**: suite の引数（適合フラグ・フック）。公開 API の型。DB マイグレーションは無い。
+  - 【確かめていないこと】インメモリ実装（`packages/testkit` の `__fixtures__`）の各口を1つずつ変えて調べる走査（足した `it` がインメモリ実装で緑であることだけを確かめた）。
+
 ### Added
 
 - **`RelationStore` に任意メソッド `listRelatedMany?(ctx, memoryIds, kind?)` を足した。`Runtime` の幅優先探索（recall 段3の群の同伴取得・`resolveContestedGroup` の部分解消の確認・claim key の群の検出）は、1段の起点をまるごとこれに渡して1往復で読む**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 案A、[ADR 0402](./docs/decisions/0402-relation-store-list-related-many.md)。案D・案E は [ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。

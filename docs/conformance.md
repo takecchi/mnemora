@@ -58,6 +58,18 @@ PR #1296 棚卸しのコメント1（`resolveOrphanedContested?` の CAS 違反�
 conformance suite の外から adapter の中に遅延を差し込めず、赤くなりうる歯を書けない
 （Issue #1412 のコメント）。
 
+**⚠ 2026-09-30 追記（テナント条件の歯の補完）**: `RelationStore`・`OutboxStore`・
+`TenantSettingsStore` の suite に、別テナントの ctx からの呼び出しが、そのテナントの行に
+触れない・見えないことを確かめる it を足した（対象: `RelationStore` の `unlink` と kind を
+指定した `listRelated`、`OutboxStore` の `complete`/`fail`/`eraseTenant`（`dryRun` を含む）/
+`purgeCompletedJobs`、`TenantSettingsStore` の `getDefaultHalfLifeHours`/
+`hasSubjectActivityCounters`/`eraseTenant` の `dryRun`）。**住所・呼び出し元の一覧（§1・§2.1）に
+変更は無い**（既存の suite の中身が増えただけ）。**任意の適合フラグは増えていない**
+（既存のフックだけで書いた）。**この節の数（it の宣言数）はどこにも書いていない。**
+⚠ **in-memory 実装（`packages/testkit/src/__fixtures__/` 側）が同じ条件を持つかを、1か所ずつ
+変えて確かめる走査は、していない**（未走査）。足した it が in-memory 実装で緑であることだけを
+確かめた。
+
 ---
 
 ## 1. 何が在るか — 8 suite（⚠ 2026-09-30 追記で9になった。下の追記を見ること）
