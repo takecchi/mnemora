@@ -10,6 +10,7 @@ import {
 } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
 import { isCreateExtensionPermissionDenied } from "./migration-failure-message.js";
+import { EXTENSION_LOCK_KEY } from "./migrate.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -354,7 +355,7 @@ const SELF_SIMILARITY_OK_THRESHOLD = 0.99;
  * 【実測 2026-09-29】`trigram-probe-dedicated-schema.postgres.test.ts`。
  */
 export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult> {
-  const result = await probeTrigramLexicalSupportWithCause(db);
+  const result = await withExtensionLock(db, (tx) => probeTrigramLexicalSupportWithCause(tx));
   if (result.ok) {
     return result;
   }
@@ -362,6 +363,26 @@ export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexical
   // （公開の戻り値のオブジェクトに `cause` キーが漏れないことを、この行自体が保証する）。
   const { cause: _cause, ...publicResult } = result;
   return publicResult;
+}
+
+/**
+ * `CREATE EXTENSION`・`CREATE OR REPLACE FUNCTION` は「在るか見る」と「作る」がアトミックではなく、
+ * 別々の接続から同時に流すと 23505（`pg_extension_name_index`）や XX000（`tuple concurrently updated`）で
+ * 落ちる。`body` を1つのトランザクションに包み、先頭で `migrate.ts` の {@link EXTENSION_LOCK_KEY} の
+ * `pg_advisory_xact_lock` を取って直列にする（ADR 0430 決定1）。
+ *
+ * - **待ちに mnemora の上限は掛けない**（`lock_timeout` を敷かない・待ち時間切れの例外を足さない）。
+ *   利用者の `lock_timeout` / `statement_timeout` は効く。
+ * - `body` が返す結果（`ok: false` を含む）は、そのまま返す。`body` が投げれば、トランザクションは
+ *   ロールバックされて同じ例外が出る。
+ * - `CREATE EXTENSION` が失敗するとトランザクションは中断状態になる（25P02）。probe は失敗を値にして
+ *   すぐ返すので、以降の SQL は流れない。
+ */
+async function withExtensionLock<T>(db: Db, body: (tx: Db) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${EXTENSION_LOCK_KEY.toString()}::bigint)`);
+    return body(tx);
+  });
 }
 
 /**
@@ -551,9 +572,14 @@ const TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL = sql`
  * 避けた理由と同じ配慮）。
  */
 export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
-  await db.execute(TRIGRAM_QUERY_NONASCII_FUNCTION_SQL);
-  await db.execute(TRIGRAM_STRIP_NOISE_FUNCTION_SQL);
-  await db.execute(TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL);
+  // ADR 0430 決定1: `CREATE OR REPLACE FUNCTION` も同時呼び出しでは XX000（`tuple concurrently updated`）で
+  // 落ちるので、{@link withExtensionLock} の中で流す（`create()` の中からは、既に取った lock の中の
+  // 入れ子になる——同じセッションの advisory lock は重ねて取れる）。
+  await withExtensionLock(db, async (tx) => {
+    await tx.execute(TRIGRAM_QUERY_NONASCII_FUNCTION_SQL);
+    await tx.execute(TRIGRAM_STRIP_NOISE_FUNCTION_SQL);
+    await tx.execute(TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL);
+  });
 }
 
 /**
@@ -870,7 +896,16 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     db: Db,
     opts?: { threshold?: number | undefined },
   ): Promise<PostgresTrigramLexicalStore> {
-    const probe = await probeTrigramLexicalSupportWithCause(db);
+    // ADR 0430 決定1: probe の `CREATE EXTENSION` と関数のインストールを、1つのトランザクションの中で
+    // `EXTENSION_LOCK_KEY` の advisory lock の下に置く。失敗（`ok: false`）は値で返してから、
+    // トランザクションの外で今までと同じ例外にする。
+    const probe = await withExtensionLock(db, async (tx) => {
+      const result = await probeTrigramLexicalSupportWithCause(tx);
+      if (result.ok) {
+        await ensureTrigramLexicalFunctions(tx);
+      }
+      return result;
+    });
     if (!probe.ok) {
       // `probe.cause` は `extension_create_denied`/`extension_create_failed` のときだけ
       // 値を持つ（Issue #892）。無いときは `options` を渡さない——`{ cause: undefined }` を
@@ -882,7 +917,6 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
         probe.cause !== undefined ? { cause: probe.cause } : undefined,
       );
     }
-    await ensureTrigramLexicalFunctions(db);
     const threshold = opts?.threshold ?? DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD;
     if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
       throw new RangeError(

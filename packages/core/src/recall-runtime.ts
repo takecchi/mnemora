@@ -65,6 +65,7 @@ import {
   validateRecallOutput,
 } from "./recall-output-validation.js";
 import type { RecallOutputValidationMode } from "./recall-output-validation.js";
+import { omitParamsFromError } from "./failure-description.js";
 
 /**
  * `recall()` の実装（roadmap.md 段階4「想起」・段階5「説明」）。
@@ -579,6 +580,20 @@ async function fetchMandatoryCompanions(
  * ため、recall の記録も `activity_seq` の前進も起きない。
  */
 export async function runRecall(
+  ctx: Ctx,
+  query: RecallQuery,
+  deps: RecallRuntimeDeps,
+  signal?: AbortSignal,
+): Promise<RecallResult> {
+  try {
+    return await runRecallBody(ctx, query, deps, signal);
+  } catch (error) {
+    // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:`（問いの本文）を落とす。
+    throw omitParamsFromError(error);
+  }
+}
+
+async function runRecallBody(
   ctx: Ctx,
   query: RecallQuery,
   deps: RecallRuntimeDeps,
