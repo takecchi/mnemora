@@ -9,7 +9,7 @@ import { nextId } from "./id.js";
  * `InMemoryMemoryStore` が自分の `relations` 配列へ直接書く（`PostgresMemoryStore` が
  * `memory_relations` へ直接 SQL を発行するのと同じ作法。`in-memory-memory-store.ts`
  * の `StoredRelation` の doc コメント参照）。この class が持つのは単発の `link`/`unlink`
- * と、読み取り専用の `listRelated` だけ——`InMemoryEventStore`/`InMemoryOutboxStore` と
+ * と、読み取り専用の `listRelated`・`listRelatedMany` だけ——`InMemoryEventStore`/`InMemoryOutboxStore` と
  * 同じ「共有した配列を読み書きする薄いラッパー」の形。
  */
 export class InMemoryRelationStore implements RelationStore {
@@ -61,6 +61,19 @@ export class InMemoryRelationStore implements RelationStore {
   }
 
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
+    return this.relatedOf(ctx, memoryId, kind);
+  }
+
+  /** `listRelated` を起点ごとに行い、起点と同じ位置に並べる（Issue #1449、ADR 0402）。 */
+  async listRelatedMany(
+    ctx: Ctx,
+    memoryIds: readonly MemoryId[],
+    kind?: RelationKind,
+  ): Promise<Relation[][]> {
+    return memoryIds.map((id) => this.relatedOf(ctx, id, kind));
+  }
+
+  private relatedOf(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Relation[] {
     return this.relations
       .filter(
         (r) =>

@@ -57,6 +57,7 @@ import type {
 } from "./recall.js";
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
+import { listRelatedManyIfSupported } from "./relation-level.js";
 import {
   DEFAULT_RECALL_OUTPUT_VALIDATION,
   validateRecallOutput,
@@ -1592,7 +1593,17 @@ export async function runRecall(
         let explorationTruncated = false;
         while (frontier.length > 0 && !explorationTruncated) {
           const nextIds: MemoryId[] = [];
-          for (const id of frontier) {
+          // `RelationStore.listRelatedMany?` があれば、この段の frontier を1往復で取る（Issue #1449、
+          // ADR 0402）。無ければ下の直列の `listRelated` のまま。どちらでも、下の処理（id 昇順・
+          // 1件ごとの安全弁・打ち切った後は先へ進まない）は同じ順に同じことをする——一括で取っても、
+          // 安全弁で止まった位置より後ろの起点の結果は捨てる（辺も記録しない）。
+          const batched = await listRelatedManyIfSupported(
+            relationStore,
+            ctx,
+            frontier,
+            "contradicts",
+          );
+          for (const [frontierIndex, id] of frontier.entries()) {
             if (explorationTruncated) break;
             // `listRelated` の返す順は契約が規定しない（Postgres は ORDER BY なし、InMemory は
             // 挿入順）。ここで `memoryId` の昇順に並べ、同じ段で複数の親から届く companion の
@@ -1600,9 +1611,9 @@ export async function runRecall(
             // （Issue #1449 項目7。frontier 自身の並びも下で id 昇順にそろえる）。比較は
             // `compareByValidFromDescThenId` と同じ文字列比較。Postgres の uuid 列と `getMany` は
             // 小文字で返すので、綴りの揺れで順が変わらない。
-            const related = [...(await relationStore.listRelated(ctx, id, "contradicts"))].sort(
-              (x, y) => compareIds(x.memoryId, y.memoryId),
-            );
+            const fetched =
+              batched?.[frontierIndex] ?? (await relationStore.listRelated(ctx, id, "contradicts"));
+            const related = [...fetched].sort((x, y) => compareIds(x.memoryId, y.memoryId));
             for (const r of related) {
               addRelationEdge(id, r.memoryId);
               if (groupVisited.has(r.memoryId) || visitedAll.has(r.memoryId)) continue;

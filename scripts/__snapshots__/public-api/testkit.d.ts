@@ -347,6 +347,8 @@ export declare class InMemoryRelationStore implements RelationStore {
     link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
+    listRelatedMany(ctx: Ctx, memoryIds: readonly MemoryId[], kind?: RelationKind): Promise<Relation[][]>;
+    private relatedOf;
 }
 
 // ===== dist/__fixtures__/in-memory-tenant-settings-store.d.ts =====
@@ -628,6 +630,7 @@ export interface RelationStoreConformanceOptions {
     name: string;
     createStore: () => RelationStore | Promise<RelationStore>;
     prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
+    implementsListRelatedMany?: boolean;
 }
 export declare function describeRelationStoreConformance(options: RelationStoreConformanceOptions): void;
 

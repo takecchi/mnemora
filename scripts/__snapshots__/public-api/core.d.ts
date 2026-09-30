@@ -987,6 +987,7 @@ export interface RelationStore {
     link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
+    listRelatedMany?(ctx: Ctx, memoryIds: readonly MemoryId[], kind?: RelationKind): Promise<Relation[][]>;
 }
 
 // ===== dist/interfaces/scheduler.d.ts =====

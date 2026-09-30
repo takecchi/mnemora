@@ -401,6 +401,7 @@ export declare class PostgresRelationStore implements RelationStore {
     constructor(db: Db);
     link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    listRelatedMany(ctx: Ctx, memoryIds: readonly MemoryId[], kind?: RelationKind): Promise<Relation[][]>;
     listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
 }
 
