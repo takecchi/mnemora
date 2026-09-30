@@ -44,9 +44,11 @@ const unusedLLMProvider: LLMProvider = {
  * 入口（(1) の読み直しは別メソッド `getMany` なので影響を受けない。(2) の呼び出し
  * そのものが実行される直前で止める）。
  *
- * `consolidate`（`supersedeWithNewMemories` 経由）と `reflect`（`createMemoryWithOutbox`
- * 経由）の両方を、同じ作法で確かめる——2つは別のメソッドで別の `SELECT … FOR UPDATE`
- * を持つため、片方が閉じていても他方が閉じているとは限らない。
+ * `consolidate`（`supersedeWithNewMemories` 経由）と `reflect` の両方を、同じ作法で確かめる——
+ * 別のメソッドで別の `SELECT … FOR UPDATE` を持つため、片方が閉じていても他方が閉じているとは限らない。
+ * `reflect` は、store が `createMemoriesWithOutboxAndEvents?` を持てばそれ（ADR 0416 以降。`PostgresMemoryStore`
+ * は持つ）、持たなければ `createMemoryWithOutbox` を呼ぶ。**両方の経路を確かめる**（後者は口を `undefined`
+ * にした store で走らせる）。
  */
 
 /** `GatedPostgresMemoryStore` の各書き込みメソッドの入口で1回だけ通る障壁。 */
@@ -89,6 +91,14 @@ class GatedPostgresMemoryStore extends PostgresMemoryStore {
   ): ReturnType<PostgresMemoryStore["createMemoryWithOutbox"]> {
     await this.createGate?.pass();
     return super.createMemoryWithOutbox(...args);
+  }
+
+  // ADR 0416: `reflect` は口があればこちらを呼ぶ（`createMemoryWithOutbox` は呼ばれない）。
+  override async createMemoriesWithOutboxAndEvents(
+    ...args: Parameters<PostgresMemoryStore["createMemoriesWithOutboxAndEvents"]>
+  ): ReturnType<PostgresMemoryStore["createMemoriesWithOutboxAndEvents"]> {
+    await this.createGate?.pass();
+    return super.createMemoriesWithOutboxAndEvents(...args);
   }
 }
 
@@ -185,7 +195,11 @@ async function runConsolidateOnce(): Promise<RaceResult> {
   };
 }
 
-async function runReflectOnce(): Promise<RaceResult> {
+/**
+ * `withoutPort: true` は、`createMemoriesWithOutboxAndEvents?` を持たない adapter のふり（`reflect` は
+ * `createMemoryWithOutbox` の経路に落ちる。ADR 0416）。
+ */
+async function runReflectOnce(withoutPort = false): Promise<RaceResult> {
   const { db } = await getTestClient();
   const gatedStore = new GatedPostgresMemoryStore(db);
   const plainStore: MemoryStore = new PostgresMemoryStore(db);
@@ -248,6 +262,11 @@ async function runReflectOnce(): Promise<RaceResult> {
     }),
   );
 
+  if (withoutPort) {
+    (
+      gatedStore as { createMemoriesWithOutboxAndEvents?: unknown }
+    ).createMemoriesWithOutboxAndEvents = undefined;
+  }
   const gate = new Gate();
   gatedStore.createGate = gate;
   const pending = runtime.reflect(ctx, { target: { memoryIds: [a.id, b.id] } });
@@ -290,10 +309,21 @@ describe("consolidate: shallow recheck と書き込みの間の窓は、supersed
   }
 });
 
-describe("reflect: shallow recheck と書き込みの間の窓は、createMemoryWithOutbox の SELECT … FOR UPDATE が閉じる（Issue #1226、陽性対照）", () => {
+describe("reflect（口あり）: shallow recheck と書き込みの間の窓は、createMemoriesWithOutboxAndEvents の SELECT … FOR UPDATE が閉じる（Issue #1226・ADR 0416、陽性対照）", () => {
   for (let i = 0; i < 10; i += 1) {
     it(`試行 ${i + 1}/10: FOR UPDATE の見直しが打ち切る（outcome: aborted_source_forgotten）`, async () => {
       const result = await runReflectOnce();
+      expect(result.llmRequestContainedA).toBe(true);
+      expect(result.outcome).toBe("aborted_source_forgotten");
+      expect(result.writtenMemoryId).toBeNull();
+    });
+  }
+});
+
+describe("reflect（口なし）: shallow recheck と書き込みの間の窓は、createMemoryWithOutbox の SELECT … FOR UPDATE が閉じる（Issue #1226、陽性対照）", () => {
+  for (let i = 0; i < 10; i += 1) {
+    it(`試行 ${i + 1}/10: FOR UPDATE の見直しが打ち切る（outcome: aborted_source_forgotten）`, async () => {
+      const result = await runReflectOnce(true);
       expect(result.llmRequestContainedA).toBe(true);
       expect(result.outcome).toBe("aborted_source_forgotten");
       expect(result.writtenMemoryId).toBeNull();
