@@ -10,13 +10,13 @@ import { buildAdrEntries } from "../generate-adr-index-lib.mjs";
  * ⚠ **この歯は `adr-index-freshness.test.mjs` に足していない。**
  * あのファイルは `GITHUB_REF` が `refs/heads/main` のときだけ走り、`pull_request`
  * では常に skip する（`describe.skipIf(!mainNow)`。理由は同ファイルの docstring
- * ——ADR PR の作成者は `docs/decisions/README.md` を触らない設計（ADR 0137）なので、
- * 索引の「陳腐化」検査を PR ブランチで無条件に走らせると、すべての ADR PR で
- * 赤くなってしまう）。
+ * ——ADR PR は索引を生成する前は陳腐化した状態になるので（ADR 0137）、
+ * 索引の「陳腐化」検査を手元の PR ブランチで無条件に走らせると、生成前の
+ * ADR PR で赤くなってしまう）。
  *
  * しかし「番号が重複しているか」は**索引が最新かどうかに依存しない**
- * ——`docs/decisions/*.md` のファイル名だけで決まる。ADR PR 作成者が
- * 索引を触らないことと、重複番号を検出することは無関係であり、`main` 限定に
+ * ——`docs/decisions/*.md` のファイル名だけで決まる。索引を生成したかどうかと、
+ * 重複番号を検出することは無関係であり、`main` 限定に
  * する理由が無い。重複は `main` へ着地する前に止めたい（Issue #315 の
  * 「起きかけた」実例: PR #310 の 0156 と、並行して open だった PR #313 の 0156）
  * ので、この歯は `describe.skipIf` を付けず、**PR ブランチでも無条件に走る**

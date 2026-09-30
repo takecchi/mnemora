@@ -15,9 +15,10 @@
  * ## 判定基準（ADR 0192 で拡張）
  *
  * 1. **手元（`GITHUB_REF` が無い）は、常に `git のブランチ名 === "main"` で判定する。**
- *    ADR 0137 の設計をそのまま保つ——ADR PR の作成者の手元では、この歯は
- *    鳴らない（`docs/decisions/README.md` を意図的に触らない設計そのものと
- *    矛盾しないため）。
+ *    ADR 0137 の判定をそのまま保つ——ADR PR のブランチ上の手元では、この歯は
+ *    鳴らない（手元の `pnpm run test` を、索引を生成する前でも赤くしないため）。
+ *    索引が最新かは、PR 上の CI か `node scripts/generate-adr-index.mjs --check`
+ *    で見る。
  * 2. **CI の `push`（`GITHUB_REF === "refs/heads/main"`）は、従来どおり有効。**
  * 3. **CI の `pull_request`（`GITHUB_REF` が `refs/pull/<n>/merge` の形）も、
  *    ADR 0192 から有効にする。** 理由: `.github/workflows/ci.yml` の
@@ -27,7 +28,7 @@
  *    `HEAD is now at <sha> Merge <head> into <base>` と出る）を checkout する。
  *    ⟹ `pull_request` の CI は、**マージ後の `main` がどうなるかを、マージする前に
  *    測れる位置に既にいる。** ここでこの歯を有効にすると、ADR 0137 が
- *    「マージ直前に PR ブランチ上で索引を再生成する」と定めた手順が
+ *    「マージ前に PR ブランチ上で索引を再生成する」と定めた手順が
  *    **実際に踏まれたかどうかを、注意力ではなく機構（CI の required status check）
  *    で確かめられる**——`typecheck / lint / test / build` は branch protection の
  *    required status check であり（`enforce_admins: true`）、赤なら GitHub が

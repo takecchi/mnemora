@@ -27,7 +27,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 
 ## 一覧
 
-**この表は手で編集しない。** `docs/decisions/*.md` の1行目の見出しと状態欄から `node scripts/generate-adr-index.mjs` が生成する（[ADR 0137](./0137-adr-index-generated-from-source.md)）。ADR を追加する PR の作成者はこの表を触らない——マージする側が、squash merge する**直前**に PR ブランチ上で上のコマンドを実行してコミットし、push してからマージする（手順は ADR 0137「決定」2番）。
+**この表は手で編集しない。** `docs/decisions/*.md` の1行目の見出しと状態欄から `node scripts/generate-adr-index.mjs` が生成する（[ADR 0137](./0137-adr-index-generated-from-source.md)）。ADR を追加する PR の側で上のコマンドを実行して索引も一緒にコミットし、`adr-index-freshness` の歯を PR 上で緑にしてからマージする。ほかの ADR の PR と索引の行が衝突したら、`main` を merge で取り込み、生成器で作り直す（ADR 0137「決定」2番は「作成者は触らない」と読めるが、実際の運用はこちら。同 ADR 末尾の 2026-09-30 の追記）。
 
 <!-- ADR-INDEX:GENERATED:START -->
 

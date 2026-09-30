@@ -16,12 +16,12 @@ import { execSyncWithDeadline, isDeadlineError } from "./spawn-with-deadline.mjs
  * ADR 0128 の「索引と ADR 本数の一致を検査する歯」の後継。
  *
  * ⚠ **この歯は ADR PR 自身の「手元」では意図してスキップされる。**
- * ADR 0137 の設計では、ADR を追加する PR の**作成者**は
- * `docs/decisions/README.md` を一切触らない（並行 PR 間の行位置の衝突を
- * 構造的に無くすため）。そのため ADR PR のブランチ上では「ファイルは在るが
- * 索引にまだ無い」状態が、マージする側が再生成コマンドを打つまでの間
- * **常に**一時的に起こる——作者の手元の `pnpm run test` をこれで赤くすると、
- * 6つの門のうち関係の無い1つを毎回落とすことになる。だから**手元
+ * ADR を追加する PR では、ファイルを足してから索引を生成するまでの間、
+ * 「ファイルは在るが索引にまだ無い」状態が一時的に起こる——その間の
+ * 手元の `pnpm run test` をこれで赤くすると、6つの門のうち関係の無い1つを
+ * 落とすことになる。（実際の運用では、ADR を足す PR の側で
+ * `node scripts/generate-adr-index.mjs` を実行して索引も commit する。
+ * ADR 0137 末尾の 2026-09-30 の追記。）だから**手元
  * （`GITHUB_REF` が無い環境）では、ブランチが `main` のときだけ有効になる**
  * （`shouldEnforceAdrIndexFreshness` — 手元で ADR PR の作業をしていても、
  * ブランチは `main` ではないので、この歯は鳴らない）。
@@ -30,8 +30,8 @@ import { execSyncWithDeadline, isDeadlineError } from "./spawn-with-deadline.mjs
  *
  * 2026-09-16、ADR 0190 / 0191 が**マージ直前の索引再生成を経ずに** squash
  * merge され、`main` の `f46af8c` で `typecheck / lint / test / build` が
- * 失敗した——ADR 0137「決定」2番の手順（マージする側がマージ直前に
- * PR ブランチ上で再生成する）は、「PR を準備する層」と「マージする層」が
+ * 失敗した——ADR 0137「決定」2番の手順（マージ直前に PR ブランチ上で
+ * 再生成する）は、「PR を準備する層」と「マージする層」が
  * 同じ人であることを暗黙に前提しており、その前提が崩れると鮮度は人の
  * 注意力だけに委ねられていた。
  *
@@ -41,18 +41,19 @@ import { execSyncWithDeadline, isDeadlineError } from "./spawn-with-deadline.mjs
  * は、マージ後の `main` がどうなるかを、マージする前に測れる位置に
  * 既にいる。** ここでこの歯を有効にすると、`typecheck / lint / test / build`
  * （branch protection の required status check、`enforce_admins: true`）が
- * 赤くなり、**GitHub 自身がマージを拒む**——マージする側が手順を忘れても、
+ * 赤くなり、**GitHub 自身がマージを拒む**——再生成を忘れたまま出しても、
  * 機構が止める。詳しい経緯・引き受けた負債・確かめていないことは
  * [ADR 0192](../../docs/decisions/0192-adr-index-freshness-enforced-in-pull-request-ci.md)。
  *
  * **手元の6つの門は従来どおり影響を受けない**——`shouldEnforceAdrIndexFreshness`
  * は `GITHUB_REF` が無い環境では常に「ブランチが `main` かどうか」だけで
- * 判定するため、作者が手元で `pnpm run test` を走らせても赤くならない。
+ * 判定するため、PR の担当が手元で `pnpm run test` を走らせても赤くならない。
  *
  * ## 手順が守られている限り、なぜ routine では鳴らないか
  *
- * 索引の再生成は「マージ**後**の `main` 上」ではなく「マージ**直前**の
- * PR ブランチ上」で、マージする側が行う（ADR 0137「決定」2番）。これにより、
+ * 索引の再生成は「マージ**後**の `main` 上」ではなく「マージ**前**の
+ * PR ブランチ上」で、ADR を足す PR の側が行う（ADR 0137「決定」2番と、
+ * 同 ADR 末尾の 2026-09-30 の追記）。これにより、
  * `main` へ実際に着地する squash コミットは、ADR ファイルの追加と索引の
  * 再生成を最初から同じコミットとして含む——**`main` が索引の陳腐化した
  * 状態を一瞬でも持つことが無い。** ADR 0192 で `pull_request` の CI にも
@@ -128,17 +129,16 @@ describe.skipIf(!enforceFreshnessNow)(
         .join(" / ");
 
       const howToFix = [
-        "これは ADR PR では想定された過渡状態であることがある",
-        "（ADR PR の作成者は索引を意図的に触らない設計——ADR 0137「決定」2番）。",
-        "⛔ この PR の【作成者】は、これを自分で直さないこと——【実測】並行する2本が",
-        "   どちらも索引を再生成すると、表の末尾の同じ位置へ1行ずつ足すため衝突する",
-        "   （ADR 0192「測ったこと」）。作成者が触らないことが、その衝突を消している。",
-        "⭐【マージする側】が、マージ直前に PR ブランチ上で次を実行してコミット・push すれば緑になる:",
+        "ADR を足す PR で、索引をまだ生成していないときに出る赤である。",
+        "⭐ この PR の側で、PR ブランチ上で次を実行してコミット・push すれば緑になる:",
         "  node scripts/generate-adr-index.mjs",
         "  git add docs/decisions/README.md",
-        '  git commit -m "docs(adr-index): regenerate before merging #<PR番号>"',
+        '  git commit -m "docs(adr): 索引に <番号> を足す（生成器で作り直した）"',
         "  git push",
-        "手順の全体は docs/decisions/0137-adr-index-generated-from-source.md「決定」2番。",
+        "ほかの ADR の PR と索引の行が衝突したら、main を merge で取り込み、",
+        "上の生成器で作り直す（衝突を手で解かない）。",
+        "（ADR 0137「決定」2番は「作成者は触らない」と読めるが、実際の運用はこちら。",
+        "  docs/decisions/0137-adr-index-generated-from-source.md 末尾の 2026-09-30 の追記。）",
         "この検査を CI の pull_request でも有効にした理由・引き受けた負債は",
         "docs/decisions/0192-adr-index-freshness-enforced-in-pull-request-ci.md。",
       ].join("\n");

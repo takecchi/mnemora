@@ -158,7 +158,7 @@ node scripts/generate-adr-index.mjs
 （書けば、それもまた同じ理由で腐る）。
 
 ⛔ **索引の表を手で編集しないこと**（`docs/decisions/README.md`「この表は手で編集しない。」、ADR 0137）。
-再生成は、ADR を足す PR を **squash merge する直前に PR ブランチ上で**マージする側が行う
+再生成は、ADR を足す PR の側で **squash merge する前に PR ブランチ上で**行い、索引も同じ PR で commit する
 （`scripts/generate-adr-index.mjs:11-22`。【読んで確かめた】）。⚠ **「マージした直後に `main` 上で」ではない**
 ——そうすると陳腐化したままの squash コミットが `main` に着地し、`ci.yml` を赤くする。
 
