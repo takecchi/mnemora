@@ -110,6 +110,8 @@ job id（UTF8 / SQL_ASCII、1・2・3回目の順）:
 | (b) 共有クライアントの持ち越し | `test-db.ts` の `sharedClient` は、`closeTestClient()` が `undefined` に戻す。`getTestClient()` を使うのに `closeTestClient()` を呼ばないファイルが 12 本あった（うち1本は `getTestClient` をコメントで書いているだけで、実際は 11 本）。`isolate: true` ではファイルが終わると worker ごと捨てられて表に出なかったが、`isolate: false` ではプールが開いたまま次のファイルへ渡る。 | 11 本に `closeTestClient()` を足した（既存の `afterAll` があれば、その末尾）。直列の群の `restore-superseded-concurrent-forget` にも揃えて足した。 |
 | (c) 出力の契約の検査が黙って効かなくなる | `setup-recall-output-contract.ts` は `vi.mock` で `createRuntime` の戻り値を検査に通す。`isolate: false` ではモジュールが共有されるので、2つ目以降のファイルで包みが効き続けるかは、検査の側から見えない。`DELIBERATELY_VIOLATING_TESTS` は空で、わざと破るテストが無いので、包みが消えても緑のまま。 | 陽性対照 `setup-recall-output-contract-positive-control.test.ts`（並列 project）。わざと契約を破る `recall()`（非整数のトークン数を返す `TokenCounter`）で、破れが溜まることを確かめる。取り出し口は harness に足したテスト専用の `takeRuntimeOutputContractProblemsForTesting()`。守る呼び出しでは何も溜まらない対も置いた。 |
 
+**陽性対照を `DELIBERATELY_VIOLATING_TESTS`（名前で外す一覧）ではなく、別の取り出し口（`takeRuntimeOutputContractProblemsForTesting()`）で作った理由**: 一覧は溜まった破れを無視するだけで、検査が破れを捕まえたことを確かめられない。溜まった破れを取り出して `expect` する形のほうが、包みが効かなくなったときに赤になるので正しい。
+
 ### 確かめたこと【実測】
 
 1. **陽性対照は、`isolate: false` の下で、包みを外すと赤になる。**
