@@ -2588,6 +2588,13 @@ export class FakeRelationStore implements RelationStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    // ADR 0398: 両端の記憶が ctx のテナントに在ることを確かめてから書く（本物の store と同じ）。
+    for (const id of [fromId, toId]) {
+      const memory = this.backing.memories.get(id);
+      if (memory === undefined || memory.tenantId !== ctx.tenantId) {
+        throw new Error(`FakeRelationStore: memory not found for tenant: ${id}`);
+      }
+    }
     const exists = this.backing.relations.some(
       (r) =>
         r.tenantId === ctx.tenantId &&

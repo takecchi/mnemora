@@ -159,6 +159,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目33。DB マイグレーションは無い。
   - 【確かめていないこと】Postgres での実機の再現（`DATABASE_URL` が無く、Postgres のテストは走らせていない）。実 API は使っていない。
 
+- **`RelationStore.link` が、両端の記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった**（[ADR 0398](./docs/decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md)、`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）。
+
+  これまで `link` は、`fromId`/`toId` が `ctx.tenantId` の記憶かどうかを確かめなかった。`PostgresRelationStore` は別テナントの記憶を端に取る行を受け付け、
+  存在しない uuid は外部キー違反の生の DB エラー、uuid でない文字列は `Failed query` になった。`InMemoryRelationStore` は存在しない id も受け付けた。
+  今は、書く前に両端が `ctx.tenantId` の記憶であることを確かめ、どちらかが実在しない・別のテナントの記憶なら、**行を書かずに** `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる。
+  Postgres は確かめと書き込みを1つの SQL 文にしている。uuid でない id は DB へ投げる前に弾く。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた `link`（別テナントの記憶・実在しない id を端に取るもの）が、新しく例外になる**。項目21・23・24・27 と同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。
+  - **誰が影響を受けるか**: `RelationStore.link` を直接呼ぶ利用者（`PostgresRelationStore` は公開 API）のうち、実在しない id・別テナントの id を渡しているもの。runtime は `link`/`unlink` を呼ばず、`MemoryStore.markContestedGroup?` は元から両端を `ctx` のテナントで確かめているので、`recall()` や `tick()` の挙動は変わらない。自前の `RelationStore` を `describeRelationStoreConformance` に当てている利用者は、新しい `it` が落ちうる（`prepareMemoryId` が返す記憶が、`createStore()` の store から見えること、渡した `ctx` のテナントの記憶であることを要する）。
+  - **変えなかったこと**: `unlink`・`listRelated` の振る舞い（どちらも元から `ctx.tenantId` の行だけを見る）。DB のスキーマ・複合外部キーは変えない（理由は ADR 0398）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目34。**DB マイグレーション**は無い。修正前に書かれた食い違う行が在るかを調べる SQL は ADR 0398 に在る。
+  - 【確かめていないこと】検査と INSERT の間に、並行して記憶が消えた場合の Postgres のエラーの見え方（外部キー違反の生のエラーのまま）。手元以外の環境・既存データでの食い違う行の有無。
+
 ### Added
 
 - **古い `recalls` と完了済みの `outbox` 行を消す任意メソッド `MemoryStore.purgeExpiredRecalls?` と `OutboxStore.purgeCompletedJobs?` を足した**（[ADR 0404](./docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)、[PR #1479](https://github.com/takecchi/mnemora/pull/1479)）。`purgeExpiredEvents?` と同じ形で、`olderThan` と `limit` は呼び出し側が必ず渡す（**保持期間の既定値は無い**）。`purgeExpiredRecalls?` は `created_at < olderThan` の `recalls` をその `recall_usages` ごと同一トランザクションで消す（**消した `recallId` への `recordUsage` は例外になる**）。`purgeCompletedJobs?` は `completed_at < olderThan` の完了済みの行**だけ**を消し、claim 中・未処理・`failed` の行は消さない。**`recalls.query` を約束の範囲に入れるか、`failed` 行の扱い、既定の保持期間は決めていない**（オーナーに聞く事柄）。新しい型は `PurgeExpiredRecallsOptions`/`PurgeExpiredRecallsResult`/`PurgeCompletedJobsOptions`/`PurgeCompletedJobsResult`。`@mnemora/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に任意フラグ `supportsPurgeExpiredRecalls?`/`supportsPurgeCompletedJobs?` が増えた（省略可・3状態。**非破壊**。省略すると「⚠ 未検査」の `it` が1本増える）。**DB マイグレーションは増えない**（索引を足さない判断と測った数字は ADR 0404）。

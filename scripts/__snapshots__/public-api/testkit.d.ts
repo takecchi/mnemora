@@ -340,8 +340,9 @@ export declare class InMemoryOutboxStore implements OutboxStore {
 import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
 import type { InMemoryMemoryStore, StoredRelation } from "./in-memory-memory-store.js";
 export declare class InMemoryRelationStore implements RelationStore {
+    private readonly memoryStore;
     private readonly relations;
-    constructor(_memoryStore: InMemoryMemoryStore, relations?: StoredRelation[]);
+    constructor(memoryStore: InMemoryMemoryStore, relations?: StoredRelation[]);
     link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
