@@ -157,7 +157,7 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  */
 export function buildLexicalSearchSelect(
   query: string,
-  opts: { limit: number; filter: LexicalFilter; ctxTenantId?: string },
+  opts: { limit: number; filter: LexicalFilter; ctxTenantId?: string | undefined },
 ): SQL {
   const cappedQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];

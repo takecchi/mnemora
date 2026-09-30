@@ -391,6 +391,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `TrigramLexicalUnavailableReason` の union の値は増減しない。`detail`（`message`）と `cause` の内容も変えていない。
   - 非破壊と数える（型・公開 API・union は同じ。同じ入力で `reason` の値が、判定を直した側へ動く）。上の「利用者に返るエラー文…の整形を、outbox の `last_error` と同じにした」の項目（文字列の中身だけの変更を非破壊と数えた）が近い先例である。
 
+- **入力側の公開型の任意欄が `?: T | undefined` になった。`exactOptionalPropertyTypes: true` の利用者が `{ limit: maybeLimit }` のように `undefined` を渡せる**（[ADR 0429](./docs/decisions/0429-exact-optional-property-types-input-types.md)）。各パッケージの `*Options`・`RecallQuery`・`observe`/`tick` などの入力・port のメソッド引数の `opts` の型が広がるだけで、その設定を有効にしていない利用者では同じ型であり、既存のコードは壊れない（非破壊）。出力にも使われる型（`Memory`・`MemoryEvent` など）は広げていない。
+
 ### Fixed
 
 - **`PostgresTrigramLexicalStore.create()`（と `probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`）を別々の pool から同時に呼ぶと落ちていた**（[ADR 0430](./docs/decisions/0430-concurrent-create-erase-and-standalone-params.md) 決定1）。拡張が無い DB では `CREATE EXTENSION` が 23505 で `TrigramLexicalStoreUnavailableError(extension_create_failed)`、拡張も関数も在る DB では `CREATE OR REPLACE FUNCTION` が XX000（`tuple concurrently updated`）の素の `Error` になった。拡張の作成と関数のインストールを1つのトランザクションに入れ、`runMigrations` の拡張作成と同じ `pg_advisory_xact_lock` で直列にした。待ちに mnemora の上限は掛けず、新しい例外も足していない（利用者の `lock_timeout` / `statement_timeout` は効く）。

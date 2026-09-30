@@ -1750,7 +1750,7 @@ export const StageTraceSchema = z.object({
  */
 export interface RecallQuery {
   /** クエリの本文。埋め込み（`vector` を渡さないとき）と語彙チャンネルに使う。空文字は `ZodError` になる。 */
-  text?: string;
+  text?: string | undefined;
   /**
    * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と
    * 一致することは、この型では検証しない——**一致させるのは呼び出し側の責任**である。
@@ -1772,13 +1772,16 @@ export interface RecallQuery {
    *
    * ⚠ **2026-09-30 追記（ADR 0393）: 長さの検査を受けるのは、`text` から provider が作った
    * 問い合わせベクトルだけである。**この `vector` を呼び出し側が直接渡したときは core は長さを
-   * 確かめず（有限性も同じ）、上の「比較不能」の扱い（`score_not_comparable`）のままである。provider が返した
+   * 確かめず、上の「比較不能」の扱い（`score_not_comparable`）のままである。⚠ **2026-09-30 訂正: 有限性は
+   * 長さと同じ扱いではない。**`NaN`・`Infinity`・`-Infinity` を成分に含む `vector` は、`runRecall` の入口の
+   * {@link RecallQuerySchema}（`z.array(z.number())`。zod の `z.number()` は有限でない数を拒む）で
+   * `ZodError` になり、`score_not_comparable` には数えられない（ADR 0393 決定4-5 の記述と同じ）。provider が返した
    * 問い合わせベクトルの長さが違うときは `embedding_provider_unavailable` になる（`RecallQuery.text`
    * の経路）。
    */
-  vector?: number[];
+  vector?: number[] | undefined;
   /** クエリのタグ。スコアの `tagMatch` にだけ効く（絞り込みではない）。 */
-  tags?: string[];
+  tags?: string[] | undefined;
   /**
    * **母集合を段1（候補生成）で減らす、AND 等値の絞り込み**（Issue #152/#153、ADR 0312）。
    *
@@ -1814,7 +1817,7 @@ export interface RecallQuery {
    * **渡したキー数・キー長・値長には上限がある**（`AttributesSchema`、`attributes.ts`）。
    * 上限超過は `parse()` の時点で例外になる——`ObserveXxxInput.attributes` と同じ検査。
    */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /**
    * **taxonomy によるラベルの絞り込み**（Issue #201 PR-B、
    * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
@@ -1869,7 +1872,7 @@ export interface RecallQuery {
    * taxonomy は `period`/`validity` と同じくスコープを定義するゲートとして報告される。
    * ADR 0323「前提として確認したこと」参照）。`totalInScope` はこの絞り込みの内側を数える。
    */
-  labels?: string[];
+  labels?: string[] | undefined;
   /**
    * **`IndexBand.groups` に `axis: 'taxonomy'` の群を作るかどうかの明示的な opt-in**
    * （Issue #201 PR-B、ADR 0323「決定5」）。
@@ -1888,7 +1891,7 @@ export interface RecallQuery {
    * **`MemoryStore.listLabels?` を実装していない adapter では、この欄は静かに無視される**
    * （`taxonomy` 軸のエントリが1つも生成されない。`labels` と同じ規律）。
    */
-  taxonomyGroups?: boolean;
+  taxonomyGroups?: boolean | undefined;
   /**
    * **段3（`contradiction_resolution`）の多者間の同伴取得の、群ごとの上限件数**
    * （Issue #1449 項目8、[ADR 0396](../../../docs/decisions/0396-recall-relation-max-count.md)）。
@@ -1910,13 +1913,13 @@ export interface RecallQuery {
    * `association.maxCount`（連想枠）とは別の欄——連想枠には効かず、連想枠の上限もこの欄に
    * 連動しない。
    */
-  relationMaxCount?: number;
+  relationMaxCount?: number | undefined;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以後の記憶だけを対象にする（境界を含む）。 */
-  occurredAfter?: Date;
+  occurredAfter?: Date | undefined;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以前の記憶だけを対象にする（境界を含む）。 */
-  occurredBefore?: Date;
+  occurredBefore?: Date | undefined;
   /** 段2で残す上限の件数（正の整数）。省略すると {@link DEFAULT_RECALL_LIMIT}。超えた分は `over_limit` になる。 */
-  limit?: number;
+  limit?: number | undefined;
   /**
    * 段1で取り込む候補数の倍率（`k' = round(limit × overFetchFactor)`、既定は
    * {@link DEFAULT_OVER_FETCH_FACTOR}。`docs/recall.md` §3）。段3.5（連想枠）の過取得
@@ -1930,9 +1933,9 @@ export interface RecallQuery {
    * `recall()` ごと reject する（例: `limit` 10 なら `overFetchFactor` が約 9.2e17 以上）。
    * 2^63 未満でも、大きな値はそのまま大きな `LIMIT` になる（費用は呼び出し側の選択である）。
    */
-  overFetchFactor?: number;
+  overFetchFactor?: number | undefined;
   /** D5: recall は既定で inferred を含める。除外したい provenance.kind を明示する。 */
-  excludeProvenanceKinds?: ProvenanceKind[];
+  excludeProvenanceKinds?: ProvenanceKind[] | undefined;
   /**
    * **段1（候補生成）で走らせるチャンネル**
    * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
@@ -1955,9 +1958,9 @@ export interface RecallQuery {
    * `TICK_SUPPORTED_JOB_KINDS` について引いた線と同じ——**散文で数え直した瞬間に、
    * 次に値が増えたとき黙って嘘になる。コメントは検査されない。**）
    */
-  channels?: RecallChannel[];
+  channels?: RecallChannel[] | undefined;
   /** 返却量の予算（{@link RecallBudget}）。収まらない分は `budget_dropped` になる。省略すれば予算で絞らない。 */
-  budget?: RecallBudget;
+  budget?: RecallBudget | undefined;
   /**
    * 段2（再スコア）で候補を残すか捨てるかの閾値（docs/recall.md §2 段2）。
    *
@@ -1968,7 +1971,7 @@ export interface RecallQuery {
    * 「明らかに無関係な候補（類似度が低い、または大きく減衰した候補）を落とす」
    * という最低限の閾値である。呼び出し側が上書きできる。
    */
-  scoreThreshold?: number;
+  scoreThreshold?: number | undefined;
   /**
    * 帯に載せる件数の上限。既定 `DEFAULT_DIGEST_BAND_LIMIT`。
    *
@@ -1990,7 +1993,7 @@ export interface RecallQuery {
    * 呼び出し側が渡した数字ひとつでその保証が消えてはならない。`RecallQuery.limit` と
    * 同じ作法——上げ下げはできるが、0にして帯そのものを消すことはできない。
    */
-  digestBandLimit?: number;
+  digestBandLimit?: number | undefined;
   /**
    * **段5（`MemoryStore.aggregateScope`）の件数集計を止める、明示的な opt-in**
    * （[ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
@@ -2032,7 +2035,7 @@ export interface RecallQuery {
    * ANN（`detail.channel === "ann"`）の `detail.annReachability: "unknown"` がそう名乗る
    * （ADR 0390。既定 `"exact"` の出力にはこのキーは付かない）。
    */
-  scopeAggregate?: "exact" | "skip";
+  scopeAggregate?: "exact" | "skip" | undefined;
   /**
    * **忘却ゲート（decay floor gate）の明示的な opt-out**
    * （マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
@@ -2058,7 +2061,7 @@ export interface RecallQuery {
    * **ゲートが効いたかどうかは、呼び出し側から常に見える**（マネージャー決定「⚠ 件数を
    * 偽らない」の一部）。
    */
-  includeFullyDecayed?: boolean;
+  includeFullyDecayed?: boolean | undefined;
   /**
    * **「この時刻において真だった記憶」を問う**（Issue #280、Issue #202 第2弾、
    * マネージャー決定1）。
@@ -2094,7 +2097,7 @@ export interface RecallQuery {
    * doc を参照）。**新しい索引は足していない**——理由は
    * [ADR 0164](../../../docs/decisions/0164-valid-from-until-recall.md) を参照。
    */
-  validAt?: Date;
+  validAt?: Date | undefined;
   /**
    * `validAt` ゲートの明示的な opt-out（`includeFullyDecayed` と対称）。
    *
@@ -2102,7 +2105,7 @@ export interface RecallQuery {
    * （区間の内外を問わずすべての記憶が候補に残る）に戻る。**`validAt` を同時に
    * 渡しても無視される**（ゲートそのものが無効になるため）。
    */
-  includeOutsideValidity?: boolean;
+  includeOutsideValidity?: boolean | undefined;
   /**
    * **連想枠（Issue #200、北極星「聞かれていないことを、自分から思い出す」）。**
    *
@@ -2119,7 +2122,7 @@ export interface RecallQuery {
    *
    * 詳細は {@link RecallAssociationQuery} と `recall-runtime.ts` の段3.5の doc を参照。
    */
-  association?: RecallAssociationQuery | null;
+  association?: RecallAssociationQuery | null | undefined;
   /**
    * **`ctx.subjectId` の等値絞りを、明示的な `null`（主題なし）まで広げる opt-in**
    * （Issue #608 項目③(b)、[ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
@@ -2145,7 +2148,7 @@ export interface RecallQuery {
    * （追加のみの契約なので無視してよい）、後置フィルタが取りこぼすことはあっても
    * **別の subject の Memory を混ぜることはない**（ADR 0286「採らなかった案」）。
    */
-  includeSubjectless?: boolean;
+  includeSubjectless?: boolean | undefined;
   /**
    * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
@@ -2170,7 +2173,7 @@ export interface RecallQuery {
    * （`TenantSettingsStore.hasSubjectActivityCounters?` が `false` のまま）**——
    * この欄を1本も使わないテナントには、ビット単位で本 ADR 以前と同じ挙動が保たれる。
    */
-  activityCounting?: "tenant" | "subject";
+  activityCounting?: "tenant" | "subject" | undefined;
   /**
    * **段2（再スコア）の時間項の方針を明示的に選ぶ**
    * （Issue #690、[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
@@ -2198,7 +2201,7 @@ export interface RecallQuery {
    * **既定を `"eventAwareFreshness"` にするかどうかはオーナー判断であり、本 ADR の
    * 時点では決めていない**（ADR 0300 §7、`v2.0.0` の候補）。
    */
-  timeWeighting?: TimeWeightingPolicy;
+  timeWeighting?: TimeWeightingPolicy | undefined;
 }
 
 /**
@@ -2441,17 +2444,17 @@ export const RecallQuerySchema = z.object({
  */
 export interface RecallScope {
   /** スコープの主題（`ctx.subjectId`）。無ければテナント全体。 */
-  subjectId?: string;
+  subjectId?: string | undefined;
   /** `RecallQuery.occurredAfter` のまま。 */
-  occurredAfter?: Date;
+  occurredAfter?: Date | undefined;
   /** `RecallQuery.occurredBefore` のまま。 */
-  occurredBefore?: Date;
+  occurredBefore?: Date | undefined;
   /**
    * Issue #280: `RecallQuery.validAt` ゲートが有効なときの基準時刻。`recall-runtime.ts`
    * が `RecallQuery.includeOutsideValidity` を見て、ゲート無効なら `undefined` にする
    * （`period` が未指定なら `undefined` のままなのと同じ形）。
    */
-  validAt?: Date;
+  validAt?: Date | undefined;
   /**
    * Issue #329 / [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
    * 忘却ゲートの**壁時計側**の基準時刻。`validAt` とまったく同じ形で入る——
@@ -2464,13 +2467,13 @@ export interface RecallScope {
    * **同じ述語**を見ていることが、`omitted.filtered(decayed)` の件数を信じられる唯一の
    * 根拠だからである（ADR 0173）。
    */
-  decayFloorAtAfter?: Date;
+  decayFloorAtAfter?: Date | undefined;
   /**
    * 忘却ゲートの**活動時計側**の基準（ADR 0165 の `activity_seq`）。
    * `decayFloorSeq` が NULL の Memory は「この軸には床が無い」ので常に生き残る
    * （ADR 0165 決めたこと4）——`VectorFilter.decayFloorSeqAfter` と同じ規則。
    */
-  decayFloorSeqAfter?: number;
+  decayFloorSeqAfter?: number | undefined;
   /**
    * `decay_clock: 'either'`（ADR 0165 決めたこと1）のとき `true`。2軸を **OR** で結ぶ
    * （どちらかが生きていれば通す＝最も緩い）。`VectorFilter.decayFloorAnyAxis` と同じく、
@@ -2479,7 +2482,7 @@ export interface RecallScope {
    * ⚠ `MemoryStore.archiveDecayed` の `'either'` は **AND** であり向きが逆である
    * （`ArchiveDecayedOptions.clock` の doc「⭐」）。ここはゲート側なので OR。
    */
-  decayFloorAnyAxis?: boolean;
+  decayFloorAnyAxis?: boolean | undefined;
   /**
    * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
    * （Issue #338）: `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味——
@@ -2488,7 +2491,7 @@ export interface RecallScope {
    * `TenantSettingsStore.hasSubjectActivityCounters?` の結果をそのまま置くだけであり、
    * このテナントが一度も subject カウンタを使っていなければ `false`。
    */
-  decayFloorSeqUsesSubjectCounters?: boolean;
+  decayFloorSeqUsesSubjectCounters?: boolean | undefined;
   /**
    * `RecallQuery.includeSubjectless` がそのまま入る（Issue #608 項目③(b)、
    * [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
@@ -2500,7 +2503,7 @@ export interface RecallScope {
    * のときは無視される——テナント全体は定義上すでに主題なし（`subjectId: null`）の
    * Memory を含む上位集合であり、この欄が広げる余地が無い。
    */
-  includeSubjectless?: boolean;
+  includeSubjectless?: boolean | undefined;
   /**
    * Issue #152/#153（ADR 0312）: `RecallQuery.attributes` がそのまま入る（空オブジェクト
    * なら `recall-runtime.ts` が `undefined` に正規化する——「絞り込み無し」を1つの形に
@@ -2509,7 +2512,7 @@ export interface RecallScope {
    * および `MemoryStore.aggregateScope` は、いずれもこの欄を読むだけで自前の式を持たない
    * （`decayFloorAtAfter` 等と同じ「2箇所に式を書くと食い違う」規律、ADR 0038）。
    */
-  attributes?: Attributes;
+  attributes?: Attributes | undefined;
   /**
    * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `RecallQuery.labels` を、現在の `taxonomy_mode` での参加資格（`registered` は常に、
@@ -2542,7 +2545,7 @@ export interface RecallScope {
    * **必須の同伴取得（段3）では検査しない**——`tags` 自体が同伴取得を素通しするのと
    * 同じ理由（ADR 0323「決定3」）。
    */
-  labels?: string[];
+  labels?: string[] | undefined;
   /**
    * Issue #201 PR-B（ADR 0323）: `RecallQuery.taxonomyGroups: true` のときだけ、
    * `IndexBand.groups` に `axis: 'taxonomy'` の群を作るための候補ラベル名（現在の
@@ -2563,7 +2566,7 @@ export interface RecallScope {
    * `docs/recall.md` §5、ADR 0323「決定6」を参照。ラベルは多対多なので、この軸の
    * `count` の総和は `totalInScope` と一致しない（超えうる）。
    */
-  taxonomyGroupCandidates?: string[];
+  taxonomyGroupCandidates?: string[] | undefined;
 }
 
 /** `RecallScope` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallScope` と揃えてある）。 */
@@ -2764,7 +2767,7 @@ export interface NewRecallRecord {
   /** recall を呼んだテナント。 */
   tenantId: string;
   /** recall のスコープの主題。無ければ `null`。 */
-  subjectId?: string | null;
+  subjectId?: string | null | undefined;
   /**
    * 発行された recall クエリ/オプションのスナップショット（JSON にシリアライズ可能な形）。
    * `recall()` は検証した後のクエリをそのまま渡すので、`Date` の欄を含みうる。読み戻したときの
@@ -2772,7 +2775,7 @@ export interface NewRecallRecord {
    */
   query: unknown;
   /** 渡された予算。無ければ `null`。 */
-  budget?: RecallBudget | null;
+  budget?: RecallBudget | null | undefined;
   /** 返さなかったものの理由（`RecallResult.omitted`）。 */
   omitted: Omission[];
   /** 返した量の計測。 */
@@ -2810,13 +2813,13 @@ export interface NewRecallRecord {
    * ⭐ **非破壊**: `boolean` はこの union にそのまま含まれるため、既存の
    * `advanceActivityClock: true`/`false`/省略はすべて型の変更前と同じ意味のまま通る。
    */
-  advanceActivityClock?: boolean | { scope: "subject"; subjectId: string };
+  advanceActivityClock?: boolean | { scope: "subject"; subjectId: string } | undefined;
   /**
    * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237): 書き込む行の `createdAt`。
    * 省略時は実装が壁時計（`new Date()`）を使う——今日と同じ挙動（⭐ 非破壊、既存の欄を1つ
    * 足すだけ）。`recall-runtime.ts` はこの欄に `clock.now()` を渡す。
    */
-  createdAt?: Date;
+  createdAt?: Date | undefined;
 }
 
 /**

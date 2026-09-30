@@ -91,12 +91,12 @@ export interface PurgeExpiredEventsForTenantOptions {
   /**
    * `true` なら削除もイベント追記も行わず、何が起きるかだけを返す。省略時は `false`。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   /**
    * 「いま」を何とするか。省略時は `new Date()`。テストが決定的な cutoff を
    * 固定するために上書きできる。
    */
-  now?: Date;
+  now?: Date | undefined;
 }
 
 /**

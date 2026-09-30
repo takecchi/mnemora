@@ -18,7 +18,7 @@ export interface RecordedLLMProviderOptions {
    * 呼び出し側が期待するモデル名。指定すると、記録元と食い違ったときに構築時に落ちる
    * （`RecordedEmbeddingProvider.expectedSpace` と同じ狙い）。
    */
-  expectedModel?: string;
+  expectedModel?: string | undefined;
 }
 
 /**

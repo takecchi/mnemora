@@ -118,9 +118,9 @@ export interface BuildConsolidatedMemoryParams {
    * ——両方揃っているときだけ活動時計の3つ組を作る。`'wall'` のテナントでは
    * 呼び出し側がどちらも渡さない。
    */
-  activitySeq?: number;
+  activitySeq?: number | undefined;
   /** 活動時計のテナントの半減期（`recall()` の回数）。`activitySeq` と揃って渡したときだけ効く。 */
-  halfLifeRecalls?: number;
+  halfLifeRecalls?: number | undefined;
 }
 
 /**

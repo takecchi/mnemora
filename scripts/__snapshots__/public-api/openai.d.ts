@@ -56,10 +56,10 @@ export interface OpenAIEmbeddingsClient {
 import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import type { OpenAIEmbeddingsClient } from "./client-types.js";
 export interface OpenAIEmbeddingProviderOptions {
-    apiKey?: string;
+    apiKey?: string | undefined;
     model: string;
     dimensions: number;
-    client?: OpenAIEmbeddingsClient;
+    client?: OpenAIEmbeddingsClient | undefined;
 }
 export declare class OpenAIEmbeddingProvider implements EmbeddingProvider {
     readonly space: EmbeddingSpaceId;
@@ -73,9 +73,9 @@ export declare class OpenAIEmbeddingProvider implements EmbeddingProvider {
 export type OpenAILLMFailureKind = "refusal" | "truncated" | "no_content" | "schema_unsupported";
 export interface OpenAILLMProviderErrorOptions {
     kind: OpenAILLMFailureKind;
-    finishReason?: string | null;
-    refusalMessage?: string | null;
-    message?: string;
+    finishReason?: string | null | undefined;
+    refusalMessage?: string | null | undefined;
+    message?: string | undefined;
     cause?: unknown;
 }
 export declare class OpenAILLMProviderError extends Error {
@@ -106,10 +106,10 @@ export declare function translateForOpenAIStructuredOutput<T>(name: string, sche
 import type { AbortOptions, Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import type { OpenAIChatClient } from "./client-types.js";
 export interface OpenAILLMProviderOptions {
-    apiKey?: string;
+    apiKey?: string | undefined;
     model: string;
-    client?: OpenAIChatClient;
-    temperature?: number;
+    client?: OpenAIChatClient | undefined;
+    temperature?: number | undefined;
 }
 export declare class OpenAILLMProvider implements LLMProvider {
     private readonly client;

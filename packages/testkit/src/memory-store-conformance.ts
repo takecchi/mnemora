@@ -116,10 +116,12 @@ export interface MemoryStoreConformanceOptions {
    * 張ることを検査する歯のために、これも渡すこと。省略すると、その歯は生成されない
    * （CAS 系の歯はこのフックを使わないので、省略しても他の歯には影響しない）。
    */
-  listRelationsForMemory?: (
-    ctx: Ctx,
-    memoryId: MemoryId,
-  ) => Promise<Array<{ memoryId: MemoryId }>> | Array<{ memoryId: MemoryId }>;
+  listRelationsForMemory?:
+    | ((
+        ctx: Ctx,
+        memoryId: MemoryId,
+      ) => Promise<Array<{ memoryId: MemoryId }>> | Array<{ memoryId: MemoryId }>)
+    | undefined;
   /**
    * ADR 0079: `requeueEmbedJobs` が積み直した `embed` ジョブを、**運搬役が実際に
    * claim できるところまで**検査するためのフック。**必須。**
@@ -189,7 +191,7 @@ export interface MemoryStoreConformanceOptions {
    *   `it` を1本登録し、テスト名で「検査していない」ことを明示する
    *   （`supportsOnlyMemoryIdsFilter`/`supportsLabels` と同じ規律）。
    */
-  supportsAbortIfForgotten?: boolean;
+  supportsAbortIfForgotten?: boolean | undefined;
   /**
    * Issue #210 / ADR 0115: 対象の `MemoryStore` 実装が `purgeExpiredEvents`
    * （任意メソッド）を実装しているかどうか。**必須。**
@@ -222,7 +224,7 @@ export interface MemoryStoreConformanceOptions {
    * - `false`: `expect(store.purgeExpiredRecalls).toBeUndefined()` を積極的に assert する。
    * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
    */
-  supportsPurgeExpiredRecalls?: boolean;
+  supportsPurgeExpiredRecalls?: boolean | undefined;
   /**
    * ADR 0114: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
    * 実装しているかどうか。**必須。**
@@ -346,7 +348,7 @@ export interface MemoryStoreConformanceOptions {
    *   （`docs/decisions/0015-root-test-gate-reports-skipped-db-tests.md` と同じ規律
    *   ——走らなかったことと走って通ったことを、出力の上で区別できる形にする）。
    */
-  supportsOnlyMemoryIdsFilter?: boolean;
+  supportsOnlyMemoryIdsFilter?: boolean | undefined;
 
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md): 対象の
@@ -376,7 +378,7 @@ export interface MemoryStoreConformanceOptions {
    *   テスト名で明示する（`supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates`
    *   と同じ規律）。
    */
-  supportsLabels?: boolean;
+  supportsLabels?: boolean | undefined;
   /**
    * Issue #372（(B) 第2段）: 対象の `MemoryStore` 実装が `findActiveByClaimKey`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可、
@@ -399,7 +401,7 @@ export interface MemoryStoreConformanceOptions {
    * - **省略（`undefined`）**: `supportsLabels` の省略時と同じ規律——常に green で
    *   終わる named `it` を1本登録し、「検査していない」ことをテスト名で明示する。
    */
-  supportsFindActiveByClaimKey?: boolean;
+  supportsFindActiveByClaimKey?: boolean | undefined;
   /**
    * Issue #933（案2、`docs/decisions/0378-*.md`）: 対象の `MemoryStore` 実装が
    * `findContestedByClaimKey`（任意メソッド）を実装しているかどうか。**任意**（省略可、
@@ -416,7 +418,7 @@ export interface MemoryStoreConformanceOptions {
    * - **省略（`undefined`）**: `supportsFindActiveByClaimKey` の省略時と同じ規律——常に
    *   green で終わる named `it` を1本登録し、「検査していない」ことをテスト名で明示する。
    */
-  supportsFindContestedByClaimKey?: boolean;
+  supportsFindContestedByClaimKey?: boolean | undefined;
   /**
    * Issue #691続き（ADR 0329）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可）。
@@ -430,7 +432,7 @@ export interface MemoryStoreConformanceOptions {
    * `expect(store.listActiveClaimPredicates).toBeUndefined()` を積極的に assert する
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsListActiveClaimPredicates?: boolean;
+  supportsListActiveClaimPredicates?: boolean | undefined;
   /**
    * [Issue #1412](https://github.com/takecchi/mnemora/issues/1412) コメント1
    * （Issue #1238 棚卸し、[ADR 0373](../../../docs/decisions/0373-conformance-suite-issue-1412-promises.md)）:
@@ -447,7 +449,7 @@ export interface MemoryStoreConformanceOptions {
    * assert する——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を
    * 1本だけ登録する。
    */
-  supportsResolveOrphanedContested?: boolean;
+  supportsResolveOrphanedContested?: boolean | undefined;
   /**
    * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
    * `MemoryStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。**必須。**
@@ -475,7 +477,7 @@ export interface MemoryStoreConformanceOptions {
    * `expect(store.markContestedGroup).toBeUndefined()` を積極的に assert する
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsMarkContestedGroup?: boolean;
+  supportsMarkContestedGroup?: boolean | undefined;
   /**
    * Issue #207/#933 PR2（ADR 0381）: 対象の `MemoryStore` 実装が `resolveContestedGroup`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可、同じ3状態）。
@@ -489,7 +491,7 @@ export interface MemoryStoreConformanceOptions {
    * （`resolveContestedPair`/`supportsResolveContestedPair` と同じ判断——群を作る手段が
    * 無いと解消の歯が組めない）。
    */
-  supportsResolveContestedGroup?: boolean;
+  supportsResolveContestedGroup?: boolean | undefined;
   /**
    * [ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
    * 対象の `MemoryStore` 実装が `createMemoriesWithOutboxAndEvents`（任意メソッド）を実装しているかどうか。
@@ -501,7 +503,7 @@ export interface MemoryStoreConformanceOptions {
    * `false` なら `expect(store.createMemoriesWithOutboxAndEvents).toBeUndefined()` を積極的に assert する
    * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsCreateMemoriesWithOutboxAndEvents?: boolean;
+  supportsCreateMemoriesWithOutboxAndEvents?: boolean | undefined;
   /**
    * [ADR 0416](../../../docs/decisions/0416-created-event-same-tx-remaining-paths.md)（穴 D-3 の続き）:
    * 対象の `MemoryStore` 実装の `supersedeWithNewMemories`（任意メソッド）が、`opts.buildCreatedEvent` を受け取って
@@ -520,7 +522,7 @@ export interface MemoryStoreConformanceOptions {
    * 🔴 **名乗りは原子性の証拠ではない。**この歯は「名乗る adapter が、`created` の失敗で `news`/`supersede` も
    * 巻き戻す」ことを失敗の注入で縛るが、名乗るのにトランザクションを張らない adapter を一般には見抜けない。
    */
-  supportsSupersedeCreatedEvents?: boolean;
+  supportsSupersedeCreatedEvents?: boolean | undefined;
   /**
    * [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
    * 案C: `aggregateScope(ctx, scope, { scopeAggregate: "skip" })` が、実際に件数集計の
@@ -539,7 +541,7 @@ export interface MemoryStoreConformanceOptions {
    * 生成される。省略した adapter に対してこの歯は生成されない
    * （`docs/autonomy.md` ⛔ に従い `it.skip` にはしない——歯自体を作らない）。
    */
-  countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
+  countScopeAggregateQueries?: ((fn: () => Promise<unknown>) => Promise<number>) | undefined;
 }
 
 /**

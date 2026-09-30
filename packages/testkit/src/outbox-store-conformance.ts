@@ -43,7 +43,7 @@ export interface OutboxStoreConformanceOptions {
    * 省略した adapter では、この欄を検査する歯は `it.skip` になる——測っていないことが
    * 緑ではなく skip として見える。
    */
-  peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
+  peekJob?: ((ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>) | undefined;
   /**
    * **本物の並行で `claimBatch` を測れる adapter だけが `true` を渡す**（ADR 0206）。
    *
@@ -58,7 +58,7 @@ export interface OutboxStoreConformanceOptions {
    * ⚠ **この歯は、複数プロセスが実際にネットワーク越しで撃つ状況までは測らない。**
    * 測るのは単一プロセス内の複数接続までである。
    */
-  supportsRealConcurrency?: boolean;
+  supportsRealConcurrency?: boolean | undefined;
   /**
    * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
    * `OutboxStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。**必須。**
@@ -84,7 +84,7 @@ export interface OutboxStoreConformanceOptions {
    * - `false`: `expect(store.purgeCompletedJobs).toBeUndefined()` を積極的に assert する。
    * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
    */
-  supportsPurgeCompletedJobs?: boolean;
+  supportsPurgeCompletedJobs?: boolean | undefined;
 }
 
 /**

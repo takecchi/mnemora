@@ -139,7 +139,7 @@ export class PostgresOutboxStore implements OutboxStore {
     ctx: Ctx,
     jobId: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     // id 列は uuid 型。べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）
@@ -170,7 +170,7 @@ export class PostgresOutboxStore implements OutboxStore {
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     if (!isUuidLike(jobId)) {

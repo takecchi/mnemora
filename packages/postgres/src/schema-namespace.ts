@@ -55,12 +55,12 @@ export interface SchemaNamespaceOptions {
    * **省略時は接続の `search_path` 任せ**（＝今日どおりの振る舞い。既定では
    * `SET search_path` も `CREATE SCHEMA` も一切発行しない）。
    */
-  schema?: string;
+  schema?: string | undefined;
   /**
    * `vector` / `btree_gin` / `pgcrypto` を置くスキーマ。**`schema` を指定したときだけ効く。**
    * 既定は {@link DEFAULT_EXTENSION_SCHEMA}。
    */
-  extensionSchema?: string;
+  extensionSchema?: string | undefined;
 }
 
 /** PostgreSQL の識別子の上限（NAMEDATALEN - 1）。`embedding-space-table.ts` の

@@ -12,10 +12,10 @@ export interface CreateBullmqTickDriverOptions {
     ctx: Ctx;
     tick: TickOptions;
     everyMs: number;
-    concurrency?: number;
-    jobName?: string;
-    onTickResult?: (result: TickResult) => void;
-    onTickError?: (error: unknown) => void;
+    concurrency?: number | undefined;
+    jobName?: string | undefined;
+    onTickResult?: ((result: TickResult) => void) | undefined;
+    onTickError?: ((error: unknown) => void) | undefined;
 }
 export interface BullmqTickDriver {
     start(): Promise<void>;

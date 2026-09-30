@@ -39,9 +39,9 @@ export interface AnthropicMessagesClient {
 export type AnthropicLLMFailureKind = "refusal" | "truncated" | "no_content" | "schema_unsupported";
 export interface AnthropicLLMProviderErrorOptions {
     kind: AnthropicLLMFailureKind;
-    stopReason?: string | null;
-    refusalCategory?: string | null;
-    message?: string;
+    stopReason?: string | null | undefined;
+    refusalCategory?: string | null | undefined;
+    message?: string | undefined;
     cause?: unknown;
 }
 export declare class AnthropicLLMProviderError extends Error {
@@ -71,10 +71,10 @@ import type { AbortOptions, Ctx, LLMProvider, LLMResponse, PromptSpec, Structure
 import type { AnthropicMessageParam, AnthropicMessagesClient } from "./client-types.js";
 export declare const DEFAULT_MAX_TOKENS = 16000;
 export interface AnthropicLLMProviderOptions {
-    apiKey?: string;
+    apiKey?: string | undefined;
     model: string;
-    maxTokens?: number;
-    client?: AnthropicMessagesClient;
+    maxTokens?: number | undefined;
+    client?: AnthropicMessagesClient | undefined;
 }
 export interface AnthropicRequest {
     system?: string;

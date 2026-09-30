@@ -327,7 +327,7 @@ export interface ClaimKeyOptions {
    * `ClaimKeyOptionsSchema` の `z.infer` と型を完全一致させるため
    * （`__tests__/schema-type-equals-parity.test.ts` の歯）。
    */
-  knownPredicates?: string[];
+  knownPredicates?: string[] | undefined;
   /**
    * Issue #372（(B) 第2段）: 鍵の衝突検出を opt-in で有効にする。**既定 `false`（省略と
    * 同じ）。** `enabled: true` と組み合わせたときだけ意味を持つ——`enabled` が
@@ -358,7 +358,7 @@ export interface ClaimKeyOptions {
    * 今までどおり contested になる**——`negation-moved-city`・`schedule-change-deadline`
    * 等（ADR 0329 の測定ケース）を見ること。
    */
-  detectContested?: boolean;
+  detectContested?: boolean | undefined;
   /**
    * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` から集めた
    * predicate 一覧を、`knownPredicates` の語彙ヒントへ動的に足す。**既定 `false`
@@ -395,7 +395,7 @@ export interface ClaimKeyOptions {
    * 誤検出は `unknown-favorite-number` の1/2 ×3 のみ（`other-period-city-this-year` は
    * 0/2 ×3）——ADR 0377 の「陽性対照」節に実測の詳細がある。
    */
-  knownPredicatesFromStore?: boolean | { limit?: number };
+  knownPredicatesFromStore?: boolean | { limit?: number | undefined } | undefined;
   /**
    * Issue #372負債6（ADR 0324「real-fixture 実測で、誤検出（30%）のほぼ全量が claim key
    * の `subject` 誤帰属だと分かった」、ADR 0334）: `knownPredicates` と同型の語彙ヒントを
@@ -405,7 +405,7 @@ export interface ClaimKeyOptions {
    * 行わない**（ADR 0334 追記〔2026-09-26〕——`subjectCandidates` と同じ語彙をヒントに
    * 使いたい呼び出し側は、同じ配列をここへも明示的に渡すこと）。
    */
-  knownSubjects?: string[];
+  knownSubjects?: string[] | undefined;
 }
 
 /** `ClaimKeyOptions` の zod スキーマ。値を実行時に検査するときに使う（型 `ClaimKeyOptions` と揃えてある）。 */

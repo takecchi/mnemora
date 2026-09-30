@@ -104,7 +104,7 @@ export interface RecallRuntimeDeps {
    * 候補が実際にこの recall に現れたときだけ。`RuntimeDeps.relationStore` と同じ
    * インスタンスを渡すことを想定している（`runtime.ts` の `recall` 関数がそのまま渡す）。
    */
-  relationStore?: RelationStore;
+  relationStore?: RelationStore | undefined;
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md): 忘却ゲート（段1・
    * 後置フィルタ）と段2の再スコアが、そのテナントの `decay_clock`・活動時計の「いま」
@@ -116,7 +116,7 @@ export interface RecallRuntimeDeps {
    * 呼び出し側を壊さないため——省略すると `decay_clock` は `'wall'` 固定として動く
    * （＝本 ADR 以前とまったく同じ挙動）。
    */
-  tenantSettingsStore?: TenantSettingsStore;
+  tenantSettingsStore?: TenantSettingsStore | undefined;
   /**
    * 語彙チャンネル（ADR 0084）。**省略可能**——語彙チャンネルを無効にしたまま
    * mnemora は成立する（北極星の問い2）。
@@ -124,7 +124,7 @@ export interface RecallRuntimeDeps {
    * **🔴 省略したまま `channels` に `"lexical"` を渡すと `recall()` は投げる。**
    * 黙って0件にしない理由は `RecallQuery.channels` の doc に書いてある。
    */
-  lexicalStore?: LexicalStore;
+  lexicalStore?: LexicalStore | undefined;
   /** クエリの本文を埋め込むのに使う（`RecallQuery.vector` を渡したときは呼ばない）。 */
   embeddingProvider: EmbeddingProvider;
   /** 「今」の時刻（減衰・`validAt` の既定・記録の時刻）。 */
@@ -135,7 +135,7 @@ export interface RecallRuntimeDeps {
    * `recall()` の戻り値を zod で検証するときの倒れ方（Issue #131、ADR 0098）。
    * 省略時は {@link DEFAULT_RECALL_OUTPUT_VALIDATION}（`"report"`）——既定では投げない。
    */
-  outputValidation?: RecallOutputValidationMode;
+  outputValidation?: RecallOutputValidationMode | undefined;
 }
 
 type ScoredCandidate = {
