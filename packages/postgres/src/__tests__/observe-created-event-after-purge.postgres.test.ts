@@ -22,12 +22,17 @@ import {
 } from "./test-db.js";
 
 /**
- * `observe()` が候補を1件ずつ「書く → `created` イベントを積む」間に、書いた1件が `forget`・`purge` されたときの
+ * `observe()` が候補を1件ずつ「書く → `created` イベントを積む」間に（口を持たない adapter の経路）、書いた1件が `forget`・`purge` されたときの
  * 今の振る舞いを縛る（Issue #1234。`ObserveResult.memoryIds` の doc の 2026-09-27 追記）。振る舞いは変えていない。
  *
  * 1件目を書いた直後（`createMemoryWithOutbox` が返った直後）を門で止め、止めている間に forget → purge してから
  * 門を外す。監査ログには `forgotten`・`purged` の後に `created` が積まれ、戻り値の `memoryIds` にも purge した id が入る。
  * Postgres と testkit の fixture で同じ。イベントの `at` はどれも store が書き込み時の時刻で埋める。
+ *
+ * ⚠ **ADR 0410 以後、この形は `createMemoriesWithOutboxAndEvents`（全候補と `created` を1トランザクションで書く任意メソッド）を
+ * 持たない adapter の振る舞いである。**2つの store はどちらもその口を持ち、持つ store では「書いた1件が、`created` の前に
+ * forget・purge される」窓が無い（書いた記憶は `created` と一緒にコミットされるまで、ほかから見えない）。
+ * この歯は今の経路の振る舞いを縛り続けるため、store の口を外して（持たない adapter のふり）走らせる。
  */
 
 const llm: LLMProvider = {
@@ -129,6 +134,8 @@ for (const [name, makeKit] of KITS) {
   describe(`${name}: observe の書き込みの途中で、書いた1件を forget・purge したとき（今の振る舞い）`, () => {
     it("監査ログには purged の後に created が積まれ、戻り値の memoryIds にも purge した id が入る", async () => {
       const kit = await makeKit();
+      // ADR 0410: 口を持たない adapter のふり。runtime は口が無ければ、候補ごとの `createMemoryWithOutbox` の経路を使う。
+      kit.memoryStore.createMemoriesWithOutboxAndEvents = undefined;
       const hold = holdAfterFirstCreate(kit.memoryStore);
       const pending = kit.runtime.observe(ctx, { kind: "utterance", text: "二つの事実" });
       const firstId = await hold.stopped;

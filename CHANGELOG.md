@@ -312,6 +312,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **挙動の変化**: sync の observe が抽出中に**例外で終わった**とき、extract ジョブは observe の claim のまま残るため、リースが切れるまで tick は拾わない（以前は未 claim で残り、直後の tick が拾っていた）。拾った後の結果は変わらない。急ぐ運用は `tick` の `leaseMs` を短くとる。ADR 0407 の決めたこと4。
   - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。
 
+- **抽出（`observe` の sync と、`tick` の deferred の extract ジョブ）が、記憶を書いたのに `created` イベントが0件のまま残る取りこぼしを、`MemoryStore` の任意メソッド `createMemoriesWithOutboxAndEvents?` で塞いだ**（[ADR 0410](./docs/decisions/0410-extract-created-event-in-same-transaction.md)、穴 D-3。[ADR 0347](./docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)・[ADR 0100](./docs/decisions/0100-supersede-with-new-memories.md) の「守れないもの」の一部）。
+  - **直した穴**: 以前は候補ごとに `createMemoryWithOutbox` で記憶をコミットしたあと、`EventStore.append` を別の文で呼んでいた。`created` の append が失敗すると `observe`／`tick` は例外になるが記憶は残り、再送や tick は「もう在る」と見て素通りして、`created` が0件のまま残った（監査ログに記憶の誕生が載らない）。
+  - **今の振る舞い**: store がこの口を持つとき、全候補の記憶・outbox・`created` を **1つのトランザクション**で書く。保存できない候補（本文の NUL など。ADR 0347 決定2〜4）は候補ごとの SAVEPOINT でその候補だけ巻き戻し、`meta.droppedCandidates` は書けた候補の `created` に今までどおり付く。`created` の書き込みが失敗したら記憶も残らないので、再送・再配達で全部書き直される。全候補が落ちたら最初の例外を投げて何も書かない（今までどおり）。冪等な再送（`created: false`）では `created` を積まない。claim key の衝突検出は、書いたあとに今までどおり走る。
+  - **実装したのは `@mnemora/postgres` の `PostgresMemoryStore` と、`@mnemora/testkit` の `InMemoryMemoryStore`。** `@mnemora/testkit` の適合テストに、`MemoryStoreConformanceOptions.supportsCreateMemoriesWithOutboxAndEvents?: boolean`（任意の3状態フラグ）と2本の歯を足した（Postgres とインメモリで `true`）。
+  - ⚠ **この口を持たない自前の `MemoryStore` では、この取りこぼしが残る**（今までどおりの経路に落ちる。口が在って投げたときに、古い経路で撃ち直すことはしない）。範囲外として残した経路: `reextract`（`supersedeWithNewMemories` を使う経路と使わない経路）・`consolidate`（同）・`reflect` の `created`。詳しくは ADR 0410 の「残り」。
+  - ⚠ `@mnemora/testkit` の `InMemoryMemoryStore` はこの口で `created` を自分の `events` 配列に積む。`InMemoryEventStore` から読むには、第2引数に `memoryStore.events` を渡して配列を共有すること（`InMemoryEventStore` のクラス doc に元からある注意。共有しない組み立てでは `EventStore.list` に出ない）。
+  - 公開 API（snapshot を更新した）: `MemoryStore` に任意メソッドを1つ足した（実装しない adapter は壊れない）。`ContestedWithoutCompanionError.method` の union に `"createMemoriesWithOutboxAndEvents"` を足した——⚠ この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される。
+  - 非破壊（型は任意の追加のみ。正常な入力で最後に残る状態は変わらず、失敗のあとに残る状態だけが「記憶だけ残る」から「全部残らない」に変わった）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

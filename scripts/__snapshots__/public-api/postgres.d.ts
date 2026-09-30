@@ -113,6 +113,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
         jobs: OutboxJobRecord[];
     }>;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
+    private insertMemoryWithOutboxRows;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date;
         abortIfForgotten?: ReadonlyArray<MemoryId>;
@@ -120,6 +121,26 @@ export declare class PostgresMemoryStore implements MemoryStore {
         memory: Memory;
         created: boolean;
         jobs: OutboxJobRecord[];
+    }>;
+    createMemoriesWithOutboxAndEvents(ctx: Ctx, news: ReadonlyArray<{
+        input: NewMemory;
+        jobKinds: OutboxJobKind[];
+    }>, buildCreatedEvent: (memory: Memory, dropped: ReadonlyArray<{
+        index: number;
+        error: unknown;
+    }>) => NewMemoryEvent, opts?: {
+        now?: Date;
+    }): Promise<{
+        written: Array<{
+            index: number;
+            memory: Memory;
+            created: boolean;
+            jobs: OutboxJobRecord[];
+        }>;
+        dropped: Array<{
+            index: number;
+            error: unknown;
+        }>;
     }>;
     get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
     getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;

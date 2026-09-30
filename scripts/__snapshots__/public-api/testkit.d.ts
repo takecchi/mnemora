@@ -154,6 +154,27 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
+    private captureWriteState;
+    createMemoriesWithOutboxAndEvents(ctx: Ctx, news: ReadonlyArray<{
+        input: NewMemory;
+        jobKinds: OutboxJobKind[];
+    }>, buildCreatedEvent: (memory: Memory, dropped: ReadonlyArray<{
+        index: number;
+        error: unknown;
+    }>) => NewMemoryEvent, opts?: {
+        now?: Date;
+    }): Promise<{
+        written: Array<{
+            index: number;
+            memory: Memory;
+            created: boolean;
+            jobs: OutboxJobRecord[];
+        }>;
+        dropped: Array<{
+            index: number;
+            error: unknown;
+        }>;
+    }>;
     get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
     private rawGet;
     getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -602,6 +623,7 @@ export interface MemoryStoreConformanceOptions {
     supportsEraseTenant: boolean;
     supportsMarkContestedGroup?: boolean;
     supportsResolveContestedGroup?: boolean;
+    supportsCreateMemoriesWithOutboxAndEvents?: boolean;
     countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;

@@ -636,9 +636,9 @@ export declare class SourceMemoryForgottenError extends Error {
     constructor(method: "createMemoryWithOutbox" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
 }
 export declare class ContestedWithoutCompanionError extends Error {
-    readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "supersedeWithNewMemories";
+    readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
-    constructor(method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "supersedeWithNewMemories", memoryId: MemoryId | null);
+    constructor(method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", memoryId: MemoryId | null);
 }
 export declare function isContestedWithoutCompanion(status: MemoryStatus | undefined, contestedWithId: MemoryId | null | undefined): boolean;
 export declare class MemoryPurgeConflictError extends Error {
@@ -734,6 +734,26 @@ export interface MemoryStore {
         conflicted: Array<{
             id: MemoryId;
             observedStatus: MemoryStatus;
+        }>;
+    }>;
+    createMemoriesWithOutboxAndEvents?(ctx: Ctx, news: ReadonlyArray<{
+        input: NewMemory;
+        jobKinds: OutboxJobKind[];
+    }>, buildCreatedEvent: (memory: Memory, dropped: ReadonlyArray<{
+        index: number;
+        error: unknown;
+    }>) => NewMemoryEvent, opts?: {
+        now?: Date;
+    }): Promise<{
+        written: Array<{
+            index: number;
+            memory: Memory;
+            created: boolean;
+            jobs: OutboxJobRecord[];
+        }>;
+        dropped: Array<{
+            index: number;
+            error: unknown;
         }>;
     }>;
     purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;

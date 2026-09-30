@@ -475,6 +475,18 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsResolveContestedGroup?: boolean;
   /**
+   * [ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)（穴 D-3）:
+   * 対象の `MemoryStore` 実装が `createMemoriesWithOutboxAndEvents`（任意メソッド）を実装しているかどうか。
+   * **任意**（省略可、`supportsResolveOrphanedContested` と同じ3状態）。
+   *
+   * `true` なら契約の歯（候補の途中で1件が保存できなくても、ほかの候補と `created`〔落とした候補の情報付き〕が揃う・
+   * 冪等な再送では `created` を積まない・全候補が落ちたら投げて何も書かない／`created` の書き込みが失敗したら
+   * Memory も outbox も残らない）を実行する。`created` の読み出しには `listEventsForMemory` を使う。
+   * `false` なら `expect(store.createMemoriesWithOutboxAndEvents).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
+   */
+  supportsCreateMemoriesWithOutboxAndEvents?: boolean;
+  /**
    * [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
    * 案C: `aggregateScope(ctx, scope, { scopeAggregate: "skip" })` が、実際に件数集計の
    * 費用を払っていないことを検査するための計測フック。**任意**（省略可）——`listRelationsForMemory?`
@@ -542,6 +554,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsEraseTenant,
     supportsMarkContestedGroup,
     supportsResolveContestedGroup,
+    supportsCreateMemoriesWithOutboxAndEvents,
     countScopeAggregateQueries,
   } = options;
 
@@ -7806,6 +7819,199 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` の同じ分岐を参照。
       it(`⚠ 未検査: supportsResolveOrphanedContested が指定されていない — adapter "${name}" に対して resolveOrphanedContested の歯は検査していない`, () => {
         expect(supportsResolveOrphanedContested).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // createMemoriesWithOutboxAndEvents（ADR 0410、穴 D-3、任意メソッド）。
+    // 抽出の全候補の Memory と `created` を1トランザクションで書く。固定するのは次の2つ:
+    // - 候補の途中で1件が保存できなくても、ほかの候補と `created`（落とした候補の情報付き）が揃う。
+    // - `created` の書き込みが失敗したら、Memory も outbox も残らない。
+    // -------------------------------------------------------------------
+
+    if (supportsCreateMemoriesWithOutboxAndEvents === true) {
+      const createdEventFor = (
+        ctx: Ctx,
+        memory: Memory,
+        dropped: ReadonlyArray<{ index: number; error: unknown }>,
+        at: Date = new Date("2026-01-02T00:00:00.000Z"),
+      ): NewMemoryEvent => ({
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "created",
+        at,
+        actor: { type: "system" },
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta: { reason: "extracted", droppedIndexes: dropped.map((d) => d.index) },
+      });
+
+      it("createMemoriesWithOutboxAndEvents は、候補の途中で1件が保存できなくても、ほかの候補と created（落とした候補の情報付き）が揃い、再送では created を積まない（ADR 0410）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const candidate = (contentHash: string, content: string) => ({
+          input: buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash,
+            content,
+          }),
+          jobKinds: ["embed" as const],
+        });
+        // 🔴 保存できない候補を**真ん中**に置く——先頭や末尾では、途中の失敗で後ろの候補が巻き込まれる実装
+        // （Postgres で SAVEPOINT が無く、失敗後のトランザクションが aborted のまま続く形）を見逃す。
+        const news = [
+          candidate("created-batch-a", "一件目の事実"),
+          candidate("created-batch-b", "二件目\u0000"),
+          candidate("created-batch-c", "三件目の事実"),
+        ];
+        const now = new Date("2026-01-01T00:00:00.000Z");
+
+        const first = await store.createMemoriesWithOutboxAndEvents!(
+          ctx,
+          news,
+          (memory, dropped) => createdEventFor(ctx, memory, dropped),
+          { now },
+        );
+        expect(first.written.map((w) => w.index)).toEqual([0, 2]);
+        expect(first.written.map((w) => w.created)).toEqual([true, true]);
+        expect(first.written.map((w) => w.memory.contentHash)).toEqual([
+          "created-batch-a",
+          "created-batch-c",
+        ]);
+        expect(first.dropped.map((d) => d.index)).toEqual([1]);
+        expect(first.dropped[0]!.error).toBeInstanceOf(Error);
+        expect(first.written.every((w) => w.jobs.length === 1 && w.jobs[0]!.kind === "embed")).toBe(
+          true,
+        );
+
+        // 書けた候補ごとに created が1件、落とした候補（index 1）が meta に残っている。
+        const stored = await store.listBySourceObservation(ctx, observation.id, "v1");
+        expect(stored.map((m) => m.contentHash).sort()).toEqual([
+          "created-batch-a",
+          "created-batch-c",
+        ]);
+        for (const { memory } of first.written) {
+          const created = (await listEventsForMemory(ctx, memory.id)).filter(
+            (e) => e.kind === "created",
+          );
+          expect(created).toHaveLength(1);
+          expect(created[0]!.meta).toMatchObject({ reason: "extracted", droppedIndexes: [1] });
+        }
+
+        // 冪等な再送: 同じ候補は created: false で、created を積み足さない。保存できない候補は今回も落ちる。
+        const resent = await store.createMemoriesWithOutboxAndEvents!(
+          ctx,
+          news,
+          (memory, dropped) => createdEventFor(ctx, memory, dropped),
+          { now },
+        );
+        expect(resent.written.map((w) => [w.index, w.created])).toEqual([
+          [0, false],
+          [2, false],
+        ]);
+        expect(resent.written.map((w) => w.memory.id)).toEqual(
+          first.written.map((w) => w.memory.id),
+        );
+        expect(resent.dropped.map((d) => d.index)).toEqual([1]);
+        for (const { memory } of first.written) {
+          const created = (await listEventsForMemory(ctx, memory.id)).filter(
+            (e) => e.kind === "created",
+          );
+          expect(created).toHaveLength(1);
+        }
+
+        // 全候補が保存できないなら、最初の例外を投げて何も書かない。
+        const otherObservation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1", externalId: "created-batch-all-bad" }),
+        );
+        const bad = (contentHash: string) => ({
+          input: buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: otherObservation.id,
+            extractorVersion: "v1",
+            contentHash,
+            content: "壊れた\u0000本文",
+          }),
+          jobKinds: ["embed" as const],
+        });
+        await expect(
+          store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            [bad("created-batch-bad-1"), bad("created-batch-bad-2")],
+            (memory, dropped) => createdEventFor(ctx, memory, dropped),
+            { now },
+          ),
+        ).rejects.toBeInstanceOf(Error);
+        expect(await store.listBySourceObservation(ctx, otherObservation.id, "v1")).toHaveLength(0);
+      });
+
+      it("createMemoriesWithOutboxAndEvents は、created の書き込みが失敗したら Memory も outbox も残さない（ADR 0410）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const news = ["created-fail-a", "created-fail-b", "created-fail-c"].map((contentHash) => ({
+          input: buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash,
+          }),
+          jobKinds: ["embed" as const],
+        }));
+        const now = new Date("2026-01-01T00:00:00.000Z");
+
+        // 🔴 失敗させるのは**最後の** created だけ——先の2件の created は書けたあとに落ちる。
+        // Memory だけでなく、書けたはずの created も含めて全部巻き戻ることを、この順で見る。
+        // `at` が Invalid Date のイベントは、Postgres では memory_events への INSERT が、fixture では
+        // イベントの検査が拒む（どちらも `EventStore.append` と同じ拒み方）。
+        await expect(
+          store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            news,
+            (memory, dropped) =>
+              createdEventFor(
+                ctx,
+                memory,
+                dropped,
+                memory.contentHash === "created-fail-c" ? new Date(Number.NaN) : undefined,
+              ),
+            { now },
+          ),
+        ).rejects.toBeInstanceOf(Error);
+
+        expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(0);
+        // outbox の embed ジョブも残らない。
+        expect(await claimEmbedJobs(ctx, new Date("2030-01-01T00:00:00.000Z"))).toEqual([]);
+
+        // 巻き戻ったあと、同じ候補を書き直せる（冪等キーが残って created: false になったりしない）。
+        const retry = await store.createMemoriesWithOutboxAndEvents!(
+          ctx,
+          news,
+          (memory, dropped) => createdEventFor(ctx, memory, dropped),
+          { now },
+        );
+        expect(retry.written.map((w) => w.created)).toEqual([true, true, true]);
+        expect(retry.dropped).toEqual([]);
+      });
+    } else if (supportsCreateMemoriesWithOutboxAndEvents === false) {
+      it("createMemoriesWithOutboxAndEvents は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.createMemoriesWithOutboxAndEvents).toBeUndefined();
+      });
+    } else {
+      // 省略した adapter。`it.skip` にしない理由は `supportsResolveOrphanedContested` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsCreateMemoriesWithOutboxAndEvents が指定されていない — adapter "${name}" に対して createMemoriesWithOutboxAndEvents の歯は検査していない`, () => {
+        expect(supportsCreateMemoriesWithOutboxAndEvents).toBeUndefined();
       });
     }
 

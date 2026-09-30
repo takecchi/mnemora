@@ -136,6 +136,8 @@ describeMemoryStoreConformance({
   // resolveContestedGroup を実装している。
   supportsMarkContestedGroup: true,
   supportsResolveContestedGroup: true,
+  // ADR 0410（穴 D-3）: InMemoryMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
+  supportsCreateMemoriesWithOutboxAndEvents: true,
   listRelationsForMemory: (ctx, memoryId) => {
     if (!latestMemoryStoreForEvents) {
       throw new Error("listRelationsForMemory より先に createStore() を呼ぶ必要がある");

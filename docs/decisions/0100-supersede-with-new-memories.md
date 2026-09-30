@@ -399,3 +399,18 @@
     呼び手もこの口へ寄せる判断が要る（今は寄せない——`forget` は新 Memory を作らない）。
   - **CI の postgres ジョブで、決定3（CAS 不一致は0行でエラーにならない）の前提が崩れた
     とき。**例えばデッドロックで複数本が例外になる場合、`conflicted` の意味論を見直す。
+
+## 追記（2026-09-30）: 抽出の `created` は、任意メソッドを持つ store では同じトランザクションに入った（ADR 0410）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。本文は書き換えていない。
+
+上の「守れないもの」の `created` イベントの項（「`created` イベントは、このトランザクションの外に在る」）に対して、
+[ADR 0410](./0410-extract-created-event-in-same-transaction.md) は、**抽出（`observe` の sync／`tick` の deferred の extract ジョブ）の経路だけ**を直した——
+`MemoryStore` の別の任意メソッド `createMemoriesWithOutboxAndEvents?` が、記憶・outbox・`created` を1つのトランザクションで書く。
+この口は `supersedeWithNewMemories` とは別の口である（`supersede` を伴わない）。**口の有無だけで経路を選び、撃って投げられたときに旧経路で撃ち直さない**——本 ADR の規律と同じ。
+
+**`created` の項への追記（守れないもの）:**
+
+- 🔴 **この口を持たない adapter では、抽出の `created` の取りこぼしが残る**（`createMemoryWithOutbox` のあと別の `EventStore.append`。append が失敗すると記憶だけ残り、再送・tick は素通りする）。
+- 🔴 **抽出以外の経路は、この項のまま**（別コミット）: `reextract`（`supersedeWithNewMemories` を使う経路と使わない経路）・`consolidate`（同）・`reflect` の `created`。
+  `supersedeWithNewMemories` を使う経路でも、`created` は口の外で積まれる（この口は `superseded` だけを同じトランザクションに積む）。詳しくは ADR 0410 の「残り」。

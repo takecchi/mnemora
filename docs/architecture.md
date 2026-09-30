@@ -501,6 +501,18 @@ interface MemoryStore {
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }>;
+  createMemoriesWithOutboxAndEvents?(
+    ctx: Ctx,
+    news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
+    buildCreatedEvent: (
+      memory: Memory,
+      dropped: ReadonlyArray<{ index: number; error: unknown }>
+    ) => NewMemoryEvent,
+    opts?: { now?: Date }
+  ): Promise<{
+    written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+    dropped: Array<{ index: number; error: unknown }>;
+  }>;
   purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
   purgeExpiredEventsByRetention?(
     ctx: Ctx,
