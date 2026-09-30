@@ -513,6 +513,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-09-30 追記（Issue #1412 の続き）**: `VectorStoreConformanceOptions` に `supportsSearchMany?` が増えた——`VectorStore.searchMany?`（任意メソッド、Issue #377）の歯（各 key の結果が単独の `search()` と一致する・同点の並び・`limit`・0件でも key が Map に在る・空 `queries`・同じ key は後勝ち・NUL を含む key・不正な `limit`・`filter`/テナント分離）を `true` で実行し、`false` で `expect(store.searchMany).toBeUndefined()` を assert し、省略で「⚠ 未検査: supportsSearchMany が指定されていない — …」の named it を1本登録する（`supportsListActiveClaimPredicates?` と同じ3状態）。`in-memory-fixtures.conformance.test.ts`・`conformance.postgres.test.ts` はどちらも `true` を渡す。⚠ 省略時の named it を検査する `conformance-omitted-flags-named-it.test.ts` は `VectorStore` を対象にしていないので、この named it の登録そのものを縛る歯は無い。`supportsListActiveClaimPredicates: true` の枝には、同着の並び（predicate のコードポイント順の昇順）の歯が3本増えた。
 
+**⚠ 2026-09-30 追記（省略時の named it を縛る歯の対象拡張）**: 上の追記が挙げる「省略したときの named it の一覧」の件数（「5つから6つ」「7つ」）と、直前の追記の「`VectorStore` を対象にしていないので、この named it の登録そのものを縛る歯は無い」は、当時の記録であり、いまは成り立たない。`conformance-omitted-flags-named-it.test.ts` は `VectorStoreConformanceOptions.supportsSearchMany?` と `OutboxStoreConformanceOptions.supportsPurgeCompletedJobs?` の省略時の named it も縛るようになった。⛔ 一覧の件数はここに書かない——数えるなら、そのテストファイルと各 `*-conformance.ts` の Options 型が出所である（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。省略で named it が登録される `MemoryStoreConformanceOptions.countScopeAggregateQueries?`（フラグではなく関数フックの2状態）は、この歯の対象外のままである。
+
 ---
 
 ## 出所について
