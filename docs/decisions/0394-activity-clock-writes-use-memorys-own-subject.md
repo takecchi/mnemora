@@ -50,14 +50,20 @@ ADR 0353 決めたこと7 と引き受けた負債1 が「対象 Memory 自身�
 - 強化は、呼び出し側が対象の subject を知らない（強化の前に読み直さない）うえ、`reinforceMany` の契約は「`at`/`opts` は呼び出し全体で1つ」である。
   そこで **`ReinforceOptions` に任意項目 `addOwnSubjectSeq?: boolean` を足した**。`true` のとき `nowSeq` は `T` だけを意味し、
   store が**強化される行自身の subject の `S_x`** を足した `T + S_x` を `decay_base_seq` に、その起点からの床を `decay_floor_seq` に書く。
-- **非破壊**: 任意項目を1つ足すだけ。省略・`false` のときは `nowSeq` をそのまま起点にする（今までと同じ）。この項目を知らない adapter は今までどおり動く（ただし下の負債1）。
+- **非破壊**: 任意項目を1つ足すだけ。省略・`false` のときは `nowSeq` をそのまま起点にする（今までと同じ）。
+- **store が「読める」ことを宣言する（決定2b）**: `MemoryStore.supportsAddOwnSubjectSeq?(): boolean`（任意メソッド）を足した。**宣言が無い store（未実装・`false`）には、runtime は今までどおりの値**
+  （`T + S_ctx` をそのまま `nowSeq` に入れ、`addOwnSubjectSeq` は付けない）**を渡す**。`true` を宣言する store にだけ、`T` と `addOwnSubjectSeq: true` を渡す。
+  ⟹ この項目を知らない第三者の adapter は、この ADR の前より悪くならない。`PostgresMemoryStore` と testkit の `InMemoryMemoryStore` は `true` を宣言する。
+  宣言の形は、runtime が「口が在るか／`true` を返すか」を見て分岐する既存の作法（`hasSubjectActivityCounters?`（`TenantSettingsStore`）、`reinforceMany?`・`recordUsageAndReinforce?`・`archiveDecayed?`（`MemoryStore`））に揃えた。
+  `supportsXxx` の名前は testkit の適合テストの**オプション**（`supportsEraseTenant` 等。テスト側の、runtime からは見えない旗）にあるが、runtime が読む宣言は core の interface 上の任意メソッドなので、メソッドにした。
+  **作成側（決定1）は runtime だけで完結し、宣言に依存しない**（build 系に `T + S_x` を渡すだけで、store の対応は要らない）。
 - Postgres: `reinforce` は SET 句の中、`reinforceMany` は UPDATE の中で、**読む側（段1・`aggregateScope`・`archiveDecayed`）と同じ相関サブクエリ**を使う
   （`activity-decay-sql.ts` の `subjectActivitySeqOrZero` に切り出して共有した。書く側と読む側で引き方が食い違わないため）。
   床は `起点 + ceil(offset)`（`defaultActivityDecayStrategy.floorAt` の式。`baseSeq: 0` で相対だけを JS で取り、起点は SQL 側で足す。`Number.MAX_SAFE_INTEGER` で丸める規律も同じ）。
   **`reinforceMany` の定数2往復・「同じ `opts` を全件に適用」・`recordUsageAndReinforce` の1トランザクション（#961）の形は変えていない。**
-- runtime の `resolveReinforceOptions` は `nowSeq` に `T` だけを入れ、`hasSubjectActivityCounters` が `true` のときだけ `addOwnSubjectSeq: true` を付ける。
+- runtime の `resolveReinforceOptions` は、`hasSubjectActivityCounters` が `true` で**かつ store が宣言しているとき**だけ、`nowSeq` に `T` だけを入れて `addOwnSubjectSeq: true` を付ける。
   `false`（`tenant_subject_activity` に行が無いテナント）では付けない——`S_x` はどの行でも `0` で結果が同じであり、store は相関サブクエリを足さず、SQL は今日と同じままである（ADR 0353 決めたこと4）。
-- testkit の in-memory fixture と core のテスト用 fake にも実装し、`describeMemoryStoreConformance` に適合テストを足した（行ごとの解決、ctx の subject に依らないこと、`reinforceMany`・`recordUsageAndReinforce`、省略・`false` は `nowSeq` そのまま、`nowSeq` が無ければ何もしない）。
+- testkit の in-memory fixture と core のテスト用 fake にも実装し、`describeMemoryStoreConformance` に適合テストを足した（宣言した store にだけ当てる。行ごとの解決、ctx の subject に依らないこと、`reinforceMany`・`recordUsageAndReinforce`、省略・`false` は `nowSeq` そのまま、`nowSeq` が無ければ何もしない）。
 
 ### 決定3. 変えないもの（オーナーに問い合わせ中。触らない）
 
@@ -75,12 +81,14 @@ ADR 0353 決めたこと7 と引き受けた負債1 が「対象 Memory 自身�
    抽出の候補・使用報告の記憶は1回の呼び出しに複数の subject が混ざる。ctx は1つしか持てない。
 3. **store が `tenant_activity`（`T`）も読んで、`nowSeq` を要らなくする。** ADR 0037「時刻は呼び出し側が渡す」・`ReinforceOptions.nowSeq` の doc が退けている（store が自分で読みに行かない）。
 4. **読む側を `ctx.subjectId` に合わせる。** 読む側は正しい。向きが逆である。
+5. **宣言なしで、常に `addOwnSubjectSeq: true` を渡す（この ADR の初稿の形）。** 項目を知らない第三者 adapter が、ctx と記憶の subject が一致する呼び出しでも `S_x` を足されず、以前より悪くなる。オーナー代理の決定で、宣言のある store にだけ渡す形（決定2b）にした。
+6. **subject が一様なときだけ `T + S_ctx` を渡す互換の経路を runtime に足す。** 強化の前に対象を読み直す（採らなかった案1）ことになるので退けた。宣言の無い store は今までどおりの値で足りる。
 
 ## 引き受けた負債
 
-1. 🔴 **`addOwnSubjectSeq` を知らない第三者の `MemoryStore`** に、`tenant_subject_activity` を使うテナントで `true` を渡すと、`S_x` が足されず `T` のまま起点に書かれる。
-   以前は、ctx の subject と記憶の subject が一致する呼び出しでは（たまたま）正しい値が書かれていたので、**その adapter にとっては、一致する場合が悪くなる方向の変化である。**
-   型は壊れない（任意項目）。対処は adapter 側で `reinforce`/`reinforceMany` にこの項目を実装すること（TSDoc と適合テストに書いた）。**公開 API の破壊的変更には当たらないと判断したが、この点は報告に上げる。**
+1. **`addOwnSubjectSeq` を知らない第三者の `MemoryStore`** は、`supportsAddOwnSubjectSeq?()` を宣言しなければ、runtime が今までどおりの値（`T + S_ctx`・フラグなし）を渡すので、**この ADR の前より悪くならない**（決定2b。初稿の負債1を、store の宣言で解消した）。
+   ただし、**宣言の無い store では、強化される記憶の subject が `ctx.subjectId` とずれる呼び出しで、この ADR 以前と同じ取り違えが残る**（作成側は直る）。直すには、その adapter が `reinforce`/`reinforceMany` に `addOwnSubjectSeq` を実装して宣言すること
+   （TSDoc と適合テストに書いた）。型は壊れない（任意メソッドと任意項目）ので、公開 API の破壊的変更には当たらない。**`supportsAddOwnSubjectSeq` を `true` と宣言しながら項目を読まない adapter は、testkit の適合テストが赤にする**が、宣言しない adapter の歯は skip される（宣言が外れたことは、宣言の歯が捕まえる）。
 2. `hasSubjectActivityCounters` の読みが、`'activity'`/`'either'` のテナントの書き込み（抽出・consolidate・reflect の各1回、強化の各1回）に1往復ぶん増えた（主題なしだけの書き込みでは読まない）。
    従来は `ctx.subjectId` があるときに `S_x` を1往復で読んでいたので、subject 付きの書き込みでの純増は「有無の確認」の1往復である。**実測していない。**
 3. `hasSubjectActivityCounters` が `false` と読まれた直後に、別の呼び出しが最初の subject カウンタ行を作ると、その書き込みは `S_x` を `0` として起点を書く。誤差は `S_x` の最初の数回ぶんに限られる（ホット行の話ではなく、読みの一瞬のずれ）。
@@ -88,7 +96,7 @@ ADR 0353 決めたこと7 と引き受けた負債1 が「対象 Memory 自身�
 
 ## これが覆るとしたら
 
-- `addOwnSubjectSeq` を実装しない第三者 adapter が実際に困ったとき ⟹ runtime 側で subject が一様（全件が ctx と同じ）なときだけ `T + S_ctx` を `nowSeq` に入れる互換の経路を足す。
+- 宣言しない第三者 adapter の、ctx と記憶の subject のずれによる誤りが実際に困ったとき ⟹ 強化の前に対象の subject を読み直し、subject ごとに `nowSeq` を分けて呼ぶ経路（採らなかった案1・6）を、宣言の無い store 向けに足す。
 - Postgres の `reinforceMany` の UPDATE の相関サブクエリが、大きな群・大きな subject 数で計画を悪くすると実測されたとき ⟹ VALUES に `S_x` を持ち込む形（SELECT で subject の `S_x` を先にまとめて引く。往復は増える）を検討する。
 
 ## 確かめたこと
@@ -116,11 +124,16 @@ ADR 0353 決めたこと7 と引き受けた負債1 が「対象 Memory 自身�
 | P4 | Postgres `reinforce`: 相関サブクエリの `tenant_id` を別テナントにする | 2 本が赤 |
 | P5 | Postgres `reinforceMany`: `addOwnSubjectSeq` を無視する | 3 本が赤 |
 | F1 | testkit の in-memory: `S_x` を足さない | 4 本が赤 |
+| D1 | Postgres の宣言を外す（`false`） | 宣言の歯と、runtime 経由の強化の実物の歯 2 本（計 3 本）が赤 |
+| D2 | runtime が宣言を無視して常にフラグを付ける | 宣言の無い store の歯 4 本が赤 |
+| D3 | testkit の in-memory の宣言を外す | 宣言の歯が赤 |
+| D4 | 宣言の無い store への渡し方で `S_ctx` を足さない | 3 本が赤 |
+| D5 | 宣言の無い store にもフラグを付ける | 4 本が赤 |
 
 ## 確かめていないこと
 
 - **実運用の規模**での `reinforceMany` の UPDATE の計画・所要時間（相関サブクエリは主キー `(tenant_id, subject_id)` の1点引きだが、`EXPLAIN` は取っていない）。
 - **実害の最大例**（`S_alice = 3500`、強さ 0.034）は前段の調査の実測であり、本 PR では再現していない。本 PR の歯は小さい数（`T=10`・`S_alice=7`・`S_bob=20`）で起点の値を確かめている。
-- `addOwnSubjectSeq` を実装していない第三者 adapter（負債1）。リポジトリの外の実装は見ていない。
+- 宣言しない第三者 adapter の実物（負債1）。リポジトリの外の実装は見ていない。宣言の無い store の歯は、フラグを読まずに `nowSeq` だけを使う偽の store で確かめた。
 - 既に書かれてしまった起点（この修正より前に、取り違えた値で書かれた `decay_base_seq`/`decay_floor_seq`）の**遡っての修正は、していない**。強化・再作成で新しい値に置き換わるだけである。
 - `hasSubjectActivityCounters` の追加往復（負債2）の実測。
