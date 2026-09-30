@@ -145,15 +145,20 @@ describeMemoryStoreConformance({
 });
 
 // Issue #207/#933 PR2（ADR 0381）: `RelationStore` の in-memory 実装。
+// `link` は両端の記憶が `ctx` のテナントに在ることを、渡された `InMemoryMemoryStore` で確かめる
+// ——`prepareMemoryId` は `createStore()` が組んだ、まさにその `InMemoryMemoryStore` に
+// 記憶を作る（`latestMemoryStoreForEvents` と同じ持ち回りの形）。
+let latestMemoryStoreForRelations: InMemoryMemoryStore | undefined;
+
 describeRelationStoreConformance({
   name: "in-memory placeholder",
   createStore: () => {
     const memoryStore = new InMemoryMemoryStore();
+    latestMemoryStoreForRelations = memoryStore;
     return new InMemoryRelationStore(memoryStore, memoryStore.relations);
   },
   prepareMemoryId: async (ctx) => {
-    const memoryStore = new InMemoryMemoryStore();
-    const memory = await memoryStore.createMemory(
+    const memory = await latestMemoryStoreForRelations!.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: ctx.tenantId }),
     );
