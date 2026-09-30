@@ -16,7 +16,9 @@ import { z } from "zod";
  * （btree 2704 バイト、GIN 2712 バイト）を超えると、書き込みが例外になる
  * （`index row size … exceeds …`）。圧縮後の大きさで決まるので、上限は文字数でもバイト数でも
  * 一意に言えない——同じ文字の繰り返しは1万字でも通り、ランダムな値は約2.7KBで落ちる。
- * `@mnemora/testkit` の fixture はどの長さも受け入れる。**保証するのは、索引の1行が上の上限に
+ * `@mnemora/testkit` の fixture はどの長さも受け入れる。
+ * `@mnemora/postgres` は、claim key の索引の上限で落ちる入力だけを、型付きの例外 `ClaimKeyIndexLimitError`
+ * （`kind: "claim_key_index_limit"`）で断る（ADR 0435。断る入力は変えていない）。**保証するのは、索引の1行が上の上限に
  * 収まる長さのときだけである。**長い外部の ID（URL の連結など）は、呼び出し側でハッシュなどに
  * 縮めてから渡すこと。
  *
