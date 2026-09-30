@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import {
   OutboxLeaseConflictError,
   type ClaimOutboxJobsOptions,
@@ -280,13 +280,9 @@ export class PostgresOutboxStore implements OutboxStore {
     }
     const olderThan = toPgTimestamp(opts.olderThan);
     if (dryRun) {
-      const candidates = await this.db.execute(sql`
-        SELECT completed_at FROM outbox
-        WHERE tenant_id = ${ctx.tenantId}
-          AND completed_at IS NOT NULL AND completed_at < ${olderThan}
-        ORDER BY completed_at ASC, id ASC
-        LIMIT ${opts.limit + 1}
-      `);
+      const candidates = await this.db.execute(
+        buildPurgeCompletedJobsTargetSelect(ctx, opts, false),
+      );
       const rows = candidates.rows as unknown as { completed_at: string }[];
       const victims = rows.slice(0, opts.limit);
       return {
@@ -299,14 +295,7 @@ export class PostgresOutboxStore implements OutboxStore {
       };
     }
     return this.db.transaction(async (tx) => {
-      const candidates = await tx.execute(sql`
-        SELECT id, completed_at FROM outbox
-        WHERE tenant_id = ${ctx.tenantId}
-          AND completed_at IS NOT NULL AND completed_at < ${olderThan}
-        ORDER BY completed_at ASC, id ASC
-        LIMIT ${opts.limit + 1}
-        FOR UPDATE SKIP LOCKED
-      `);
+      const candidates = await tx.execute(buildPurgeCompletedJobsTargetSelect(ctx, opts, true));
       const rows = candidates.rows as unknown as { id: string; completed_at: string }[];
       const reachedLimit = rows.length > opts.limit;
       const victimIds = rows.slice(0, opts.limit).map((row) => row.id);
@@ -333,4 +322,25 @@ export class PostgresOutboxStore implements OutboxStore {
       };
     });
   }
+}
+
+/**
+ * `purgeCompletedJobs` が消す対象の `outbox` の行を選ぶ SELECT
+ * （`completed_at IS NOT NULL AND completed_at < opts.olderThan`、古い順に `opts.limit + 1` 件
+ * ——上限に届いたかを判定するために1件多く取る）。`lock` が真なら `FOR UPDATE SKIP LOCKED` で
+ * 行を掴む（削除するとき）。EXPLAIN の歯（`outbox-purge-index.test.ts`）がこの関数の返り値を測る。
+ * 述語を `idx_outbox_completed`（migration 0032、`WHERE completed_at IS NOT NULL` の部分索引）の
+ * 述語と揃えてある——ここを変えるときは索引も見直すこと。
+ */
+export function buildPurgeCompletedJobsTargetSelect(
+  ctx: Ctx,
+  opts: PurgeCompletedJobsOptions,
+  lock = false,
+): SQL {
+  return sql`
+    SELECT id, completed_at FROM outbox
+    WHERE tenant_id = ${ctx.tenantId}
+      AND completed_at IS NOT NULL AND completed_at < ${toPgTimestamp(opts.olderThan)}
+    ORDER BY completed_at ASC, id ASC
+    LIMIT ${opts.limit + 1}${lock ? sql` FOR UPDATE SKIP LOCKED` : sql``}`;
 }
