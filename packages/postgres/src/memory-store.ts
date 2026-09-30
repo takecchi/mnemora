@@ -2195,14 +2195,16 @@ export class PostgresMemoryStore implements MemoryStore {
         : undefined;
     // ADR 0353（Issue #338）: `scope.decayFloorSeqUsesSubjectCounters` が true の
     // ときだけ相関サブクエリで subject 単位のカウンタを足す（段1の `buildFilterConditions`
-    // と同じ述語、`activityFloorSeqAliveCondition` の doc コメント参照）。このテーブルは
-    // エイリアス無しの `memories` そのものなので `tenant_id`/`subject_id` をそのまま渡す。
+    // と同じ述語、`activityFloorSeqAliveCondition` の doc コメント参照）。
+    // ⚠ この述語は `flags` CTE（`FROM scoped`）の中で評価される。相関サブクエリの中の修飾の無い
+    // `tenant_id`/`subject_id` は内側の `tenant_subject_activity` の列に解決されて恒真になる（ADR 0438）ので、
+    // テナントは `scoped` の行が全部 `ctx.tenantId` であることを使って値で渡し、subject は `scoped.` で修飾する。
     const activityAxisAlive = activityFloorSeqAliveCondition({
       decayFloorSeqAfter,
       usesSubjectCounters: scope.decayFloorSeqUsesSubjectCounters === true,
       floorSeqExpr: sql`decay_floor_seq`,
-      tenantIdExpr: sql`tenant_id`,
-      subjectIdExpr: sql`subject_id`,
+      tenantIdExpr: sql`${ctx.tenantId}`,
+      subjectIdExpr: sql`scoped.subject_id`,
     });
     let isDecayed: SQL;
     if (wallAxisAlive === undefined && activityAxisAlive === undefined) {
@@ -4321,8 +4323,9 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
       nowSeq: opts.nowSeq,
       usesSubjectCounters: opts.usesSubjectActivityCounters === true,
       floorSeqExpr: sql`decay_floor_seq`,
-      tenantIdExpr: sql`tenant_id`,
-      subjectIdExpr: sql`subject_id`,
+      // 相関サブクエリの中では、修飾の無い列名は内側の `tenant_subject_activity` に解決される（ADR 0438）。
+      tenantIdExpr: sql`memories.tenant_id`,
+      subjectIdExpr: sql`memories.subject_id`,
     });
   };
 
