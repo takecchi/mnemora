@@ -41,7 +41,7 @@
 
 | package | 中身 |
 |---|---|
-| `packages/core` | 型・interface・`runtime.observe/tick/recall`・純関数の戦略。実行時依存は zod だけ（機械的に検査している） |
+| `packages/core` | 型・interface・`runtime.observe/tick/recall`・純関数の戦略。実行時依存は zod だけ（`packages/core/src/__tests__/dependency-boundary.test.ts` が `dependencies` のキーと src の実行時 import の両方を検査している） |
 | `packages/testkit` | adapter の適合テスト一式（conformance suite）とインメモリのプレースホルダ実装 |
 | `packages/postgres` | `MemoryStore` / `VectorStore` / `LexicalStore` / `EventStore` / `OutboxStore` / `TenantSettingsStore`。手書きマイグレーション |
 | `packages/openai` | `EmbeddingProvider` / `LLMProvider` |
