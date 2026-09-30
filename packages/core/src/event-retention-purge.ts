@@ -1,6 +1,7 @@
 import type { Ctx } from "./ctx.js";
 import type { MemoryStore, PurgeExpiredEventsResult } from "./interfaces/memory-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
+import { omitParamsFromError } from "./failure-description.js";
 
 /**
  * Issue #210 / [ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)
@@ -144,6 +145,19 @@ export interface PurgeExpiredEventsForTenantOptions {
  * 「変えた後の期間を守る」側の期待で緑になることを確かめた。
  */
 export async function purgeExpiredEventsForTenant(
+  ctx: Ctx,
+  deps: { memoryStore: MemoryStore; tenantSettingsStore: TenantSettingsStore },
+  opts: PurgeExpiredEventsForTenantOptions,
+): Promise<PurgeExpiredEventsForTenantOutcome> {
+  try {
+    return await purgeExpiredEventsForTenantBody(ctx, deps, opts);
+  } catch (error) {
+    // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:` を落とす。
+    throw omitParamsFromError(error);
+  }
+}
+
+async function purgeExpiredEventsForTenantBody(
   ctx: Ctx,
   deps: { memoryStore: MemoryStore; tenantSettingsStore: TenantSettingsStore },
   opts: PurgeExpiredEventsForTenantOptions,

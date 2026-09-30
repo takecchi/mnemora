@@ -3,6 +3,7 @@ import type { MemoryStore } from "./interfaces/memory-store.js";
 import type { OutboxStore } from "./interfaces/outbox-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
+import { omitParamsFromError } from "./failure-description.js";
 
 /**
  * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
@@ -200,6 +201,19 @@ export interface EraseTenantDeps {
 }
 
 export async function eraseTenant(
+  ctx: Ctx,
+  deps: EraseTenantDeps,
+  opts: EraseTenantOptions,
+): Promise<EraseTenantOutcome> {
+  try {
+    return await eraseTenantBody(ctx, deps, opts);
+  } catch (error) {
+    // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:` を落とす。
+    throw omitParamsFromError(error);
+  }
+}
+
+async function eraseTenantBody(
   ctx: Ctx,
   deps: EraseTenantDeps,
   opts: EraseTenantOptions,
