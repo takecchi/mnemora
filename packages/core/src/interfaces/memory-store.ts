@@ -279,6 +279,62 @@ export function isContestedWithoutCompanionError(
 }
 
 /**
+ * ADR 0435: `@mnemora/postgres` が、claim key（`claimKey.subject`・`claimKey.predicate`）を入れる btree 索引
+ * （`idx_memories_claim_key`・`idx_memories_claim_predicates`）の1行の上限（SQLSTATE 54000）を超えたときに
+ * 投げる。`createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・
+ * `supersedeWithNewMemories` の INSERT が対象で、以前は生の `DrizzleQueryError`（message は
+ * `Failed query: INSERT …\nparams: …`）だった。
+ *
+ * 🔴 **断る入力は変えていない。**今通る入力（圧縮で索引の1行に収まる長い文字列を含む）は今も通り、
+ * 今 54000 で落ちる入力だけがこの例外になる。長さの上限を入口に置いたものではない
+ * （{@link Ctx} の「識別子の長さに上限は約束しない」はそのまま）。`@mnemora/testkit` のインメモリ実装は
+ * どの長さも受け入れ、この例外を投げない。
+ *
+ * 🔴 **message にも `cause` にも入力の値を残さない**（ADR 0423 の作法。ADR 0433 が
+ * `EmbeddingSpaceNotRegisteredError` の負債にした `cause` の `params:` を、ここでは残さない）。`cause` は
+ * drizzle の例外ではなく、Postgres のエラーから `code`・`schema`・`table`・`constraint`（索引名）と、
+ * 値を含まない決まった形の message だけを写した新しい `Error` である。
+ *
+ * **書きかけの残り方は、例外にする前と変えていない:**
+ * - `createMemory`・`createMemoryWithOutbox`: トランザクションごと戻る（何も残らない）。
+ * - `supersedeWithNewMemories`: トランザクションごと戻る。`supersede` の対象だった旧い行は `active` のまま残る。
+ * - `createMemoriesWithOutboxAndEvents`: 候補ごとに書きを区切り、この例外になった候補だけを戻して
+ *   `dropped` に積む（`error` がこの例外）。ほかの候補は書く。全候補が落ちたときは、最初の例外
+ *   （この例外かもしれない）をそのまま投げ、何も書かない。
+ *
+ * 判定は `instanceof` ではなく {@link isClaimKeyIndexLimitError} で行う（ADR 0418）。
+ * 直し方は、`claimKey` の主語・述語を短くする（または縮めた表現・ハッシュにする）こと。
+ */
+export class ClaimKeyIndexLimitError extends Error {
+  /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は {@link isClaimKeyIndexLimitError} で行う。 */
+  readonly kind = "claim_key_index_limit" as const;
+  constructor(
+    readonly method:
+      | "createMemory"
+      | "createMemoryWithOutbox"
+      | "createMemoriesWithOutboxAndEvents"
+      | "supersedeWithNewMemories",
+    options?: ErrorOptions,
+  ) {
+    super(
+      `MemoryStore.${method}: the claim key is too large for the claim key index ` +
+        "(the index row exceeds the btree limit, SQLSTATE 54000). " +
+        "Shorten claimKey.subject / claimKey.predicate.",
+      options,
+    );
+    this.name = "ClaimKeyIndexLimitError";
+  }
+}
+
+/**
+ * 受け取ったものが {@link ClaimKeyIndexLimitError} かを、**`instanceof` を使わずに**判定する（ADR 0418）。
+ * `kind` を見て、`kind` が無ければ `name` を見る。
+ */
+export function isClaimKeyIndexLimitError(value: unknown): value is ClaimKeyIndexLimitError {
+  return matchesStoreErrorKind(value, "claim_key_index_limit", "ClaimKeyIndexLimitError");
+}
+
+/**
  * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * が使う判定そのもの。`ContestedWithoutCompanionError` を投げるべきかどうかを、
  * adapter（`packages/postgres`・`packages/testkit`）それぞれで書き写さず、ここ1箇所に

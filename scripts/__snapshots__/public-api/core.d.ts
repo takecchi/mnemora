@@ -684,6 +684,12 @@ export declare class ContestedWithoutCompanionError extends Error {
     constructor(method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", memoryId: MemoryId | null);
 }
 export declare function isContestedWithoutCompanionError(value: unknown): value is ContestedWithoutCompanionError;
+export declare class ClaimKeyIndexLimitError extends Error {
+    readonly method: "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
+    readonly kind: "claim_key_index_limit";
+    constructor(method: "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", options?: ErrorOptions);
+}
+export declare function isClaimKeyIndexLimitError(value: unknown): value is ClaimKeyIndexLimitError;
 export declare function isContestedWithoutCompanion(status: MemoryStatus | undefined, contestedWithId: MemoryId | null | undefined): boolean;
 export declare class MemoryPurgeConflictError extends Error {
     readonly memoryId: MemoryId;

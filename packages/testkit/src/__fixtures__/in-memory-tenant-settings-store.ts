@@ -305,6 +305,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     assertWellFormedCtx(ctx);
     // ADR 0437 決定2: `subjectIds` の各要素も識別子の検査の内側に置く（読む前に断る）。
     subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
+    // （ADR 0434 が足した NUL だけの検査は、これに含まれる。NUL も `MalformedIdentifierError` で断る。）
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
     const out: Record<string, number> = {};
     if (bySubject === undefined) {

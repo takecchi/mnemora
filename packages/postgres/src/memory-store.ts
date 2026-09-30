@@ -61,6 +61,7 @@ import type { Db } from "./client.js";
 import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
+import { translateClaimKeyIndexLimit } from "./claim-key-index-limit.js";
 import { assertNoNul } from "./input-check.js";
 import {
   activityFloorSeqAliveCondition,
@@ -503,6 +504,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`@mnemora/core`）。挙動は変えない。
    *
    * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
+   * ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる（以前は生の drizzle の例外）。トランザクションごと戻り、何も残らない。
    */
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
@@ -526,7 +528,8 @@ export class PostgresMemoryStore implements MemoryStore {
     // （PR #724 の追加をそのまま引き継ぐ）。Issue #371: `claim_key_subject`/
     // `claim_key_predicate` 列を足した（PR #736 の追加をそのまま引き継ぐ）。
     const result = await this.db.transaction(async (tx) => {
-      const inserted = await tx.execute(sql`
+      const inserted = await translateClaimKeyIndexLimit("createMemory", ctx, input, () =>
+        tx.execute(sql`
         INSERT INTO memories (
           id, tenant_id, subject_id,
           source_observation_id, extractor_version,
@@ -561,7 +564,8 @@ export class PostgresMemoryStore implements MemoryStore {
           WHERE source_observation_id IS NOT NULL
         DO NOTHING
         RETURNING *
-      `);
+      `),
+      );
 
       if (inserted.rows.length === 0) {
         const existing = await tx.execute(sql`
@@ -604,13 +608,15 @@ export class PostgresMemoryStore implements MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
     outboxNow: Date,
+    method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents",
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
     assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
-    const inserted = await tx.execute(sql`
+    const inserted = await translateClaimKeyIndexLimit(method, ctx, input, () =>
+      tx.execute(sql`
       INSERT INTO memories (
         id, tenant_id, subject_id,
         source_observation_id, extractor_version,
@@ -645,7 +651,8 @@ export class PostgresMemoryStore implements MemoryStore {
         WHERE source_observation_id IS NOT NULL
       DO NOTHING
       RETURNING *
-    `);
+    `),
+    );
 
     if (inserted.rows.length === 0) {
       const existing = await tx.execute(sql`
@@ -695,6 +702,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * か、既に埋め込みジョブが積まれているはずの Memory に対して重複ジョブを積まない。
    *
    * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
+   * ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる（以前は生の drizzle の例外）。トランザクションごと戻り、何も残らない。
    */
   async createMemoryWithOutbox(
     ctx: Ctx,
@@ -727,7 +735,14 @@ export class PostgresMemoryStore implements MemoryStore {
         opts?.abortIfSuperseded,
         "createMemoryWithOutbox",
       );
-      return this.insertMemoryWithOutboxRows(tx, ctx, input, jobKinds, outboxNow);
+      return this.insertMemoryWithOutboxRows(
+        tx,
+        ctx,
+        input,
+        jobKinds,
+        outboxNow,
+        "createMemoryWithOutbox",
+      );
     });
 
     if (result.created) {
@@ -759,6 +774,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * - ADR 0416: `opts.abortIfForgotten` が非空なら、どの候補の書き込みより前に同じトランザクションで
    *   `SELECT … FOR UPDATE` し、forgotten が1件でもあれば {@link SourceMemoryForgottenError} を投げる
    *   （`dropped` に積まずそのまま投げる。何も書かない）。`reflect` がこの口を使う。
+   * - ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちた候補は、他の保存できない候補と同じく巻き戻して `dropped` に積む。
+   *   `dropped[].error` は {@link ClaimKeyIndexLimitError}（以前は生の drizzle の例外）。ほかの候補は書く。全候補が落ちたときは
+   *   最初の例外（これかもしれない）をそのまま投げ、何も書かない。この残り方は例外を型付きにする前と変えていない。
    */
   async createMemoriesWithOutboxAndEvents(
     ctx: Ctx,
@@ -813,7 +831,14 @@ export class PostgresMemoryStore implements MemoryStore {
             if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
               throw new ContestedWithoutCompanionError("createMemoriesWithOutboxAndEvents", null);
             }
-            return this.insertMemoryWithOutboxRows(savepoint, ctx, input, jobKinds, outboxNow);
+            return this.insertMemoryWithOutboxRows(
+              savepoint,
+              ctx,
+              input,
+              jobKinds,
+              outboxNow,
+              "createMemoriesWithOutboxAndEvents",
+            );
           });
           written.push({ index, ...one });
         } catch (error) {
@@ -1096,6 +1121,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * ADR 0416（穴 D-3 の続き）: `opts.buildCreatedEvent` が渡されたら、`created: true` の `news` の Memory ごとに
    * `created` イベントを**同じトランザクションで** `memory_events` へ INSERT し（`supersede` の処理の前）、
    * 戻り値に `createdEventsWritten: true` を付けて名乗る。INSERT が失敗したら `news`・`supersede` ごと全部巻き戻る。
+   *
+   * ADR 0435: `news` の claim key が claim key の索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる。
+   * トランザクションごと戻る——`news` も `supersede` も何も残らず、`supersede` の対象だった旧い行は `active` のまま残る。
    */
   async supersedeWithNewMemories(
     ctx: Ctx,
@@ -1172,7 +1200,12 @@ export class PostgresMemoryStore implements MemoryStore {
         const extractorVersion = input.extractorVersion ?? null;
         const provenanceKind = input.provenance.kind;
 
-        const inserted = await tx.execute(sql`
+        const inserted = await translateClaimKeyIndexLimit(
+          "supersedeWithNewMemories",
+          ctx,
+          input,
+          () =>
+            tx.execute(sql`
           INSERT INTO memories (
             id, tenant_id, subject_id,
             source_observation_id, extractor_version,
@@ -1207,7 +1240,8 @@ export class PostgresMemoryStore implements MemoryStore {
             WHERE source_observation_id IS NOT NULL
           DO NOTHING
           RETURNING *
-        `);
+        `),
+        );
 
         if (inserted.rows.length === 0) {
           const existing = await tx.execute(sql`

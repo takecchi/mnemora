@@ -57,9 +57,21 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
-import { assertQueryDate, assertQueryInteger } from "./query-check.js";
+import {
+  assertQueryDate,
+  assertQueryInteger,
+  assertQueryJsonWithoutNul,
+  assertQueryTextWithoutNul,
+  assertQueryBigint,
+  jsonContainsNul,
+  stringHasNul,
+} from "./query-check.js";
 import { toFloat4Readback } from "./float4.js";
-import { assertCloneableMemoryEvent, assertStorableMemoryEvent } from "./memory-event-check.js";
+import {
+  assertCloneableMemoryEvent,
+  assertStorableMemoryEvent,
+  asJsonSerializedSizeBeforeBytes,
+} from "./memory-event-check.js";
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
 
@@ -91,35 +103,6 @@ export interface StoredRelation {
 }
 
 /**
- * `value` を `jsonb` 列へ書くとき、Postgres が NUL（U+0000）で拒むかどうか。
- *
- * `packages/postgres` は `jsonb` 列へ `JSON.stringify(value)` を送る。Postgres は、
- * 文字列の値にもキーにも `\u0000` が現れると `unsupported Unicode escape sequence` で拒む
- * （実測）。同じ文字列を JSON として往復させた値を辿るので、`toJSON` などによる変換も
- * Postgres が受け取る形と同じになる。文字どおりの `\\u0000`（バックスラッシュ + `u0000`）は
- * NUL ではないので拒まない。
- */
-function jsonContainsNul(value: unknown): boolean {
-  const text = JSON.stringify(value);
-  if (text === undefined || !text.includes("\\u0000")) {
-    return false;
-  }
-  const visit = (v: unknown): boolean => {
-    if (typeof v === "string") {
-      return v.includes("\u0000");
-    }
-    if (Array.isArray(v)) {
-      return v.some(visit);
-    }
-    if (v !== null && typeof v === "object") {
-      return Object.entries(v).some(([k, inner]) => k.includes("\u0000") || visit(inner));
-    }
-    return false;
-  };
-  return visit(JSON.parse(text));
-}
-
-/**
  * `createRecall` で、Postgres が `recalls` の行を書けずに拒む入力を先に検査する（何も書かず、
  * 活動時計も進めない）。`subjectId` は `text` 列（NUL を拒む）。`query`・`omitted`・`usage`・
  * `indexBand`・`explain`・`returnedMemories` は `NOT NULL` の `jsonb` 列、`budget` は `jsonb` 列で、
@@ -148,6 +131,27 @@ function assertRecallRecordStorable(record: NewRecallRecord): void {
     if (jsonContainsNul(value)) {
       throw new Error(`createRecall: ${field} must not contain NUL characters (U+0000)`);
     }
+  }
+}
+
+/**
+ * outbox の行を**実際に書く**ときに Postgres が拒む入力（ADR 0434）を、何も書く前に検査する。
+ * `jobKinds` の要素は `outbox.kind`（`text` 列）に入るので NUL を拒み、`now` は `available_at`・`created_at`
+ * （`timestamptz`）に入るので Invalid Date を拒む（`22021`・`22007`）。**行を書かないときは拒まない**——
+ * `jobKinds` が空・冪等の既存の行が在って新しい行を作らないとき、Postgres は outbox へ INSERT せず、
+ * どちらも値を見ない（実測）。呼び出し側は、新しい行を実際に作る分岐の中（`beforeInsert`）で呼ぶ。
+ */
+function assertOutboxRowsWritable(
+  method: string,
+  jobKinds: ReadonlyArray<OutboxJobKind>,
+  now: Date | undefined,
+): void {
+  if (jobKinds.length === 0) {
+    return;
+  }
+  assertQueryDate(method, "opts.now", now);
+  if (jobKinds.some((kind) => stringHasNul(kind))) {
+    throw new Error(`${method}: jobKinds must not contain NUL characters (U+0000)`);
   }
 }
 
@@ -447,6 +451,24 @@ function assertStorableNewMemory(input: NewMemory): void {
   if (input.contentHash.includes("\u0000")) {
     throw new Error(`InMemoryMemoryStore: contentHash must not contain NUL characters (U+0000)`);
   }
+  // `extractor_version`・`claim_key_subject`・`claim_key_predicate` も `text` 列で、Postgres は NUL を拒む
+  // （ADR 0434、実測。`createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`・
+  // `createMemoriesWithOutboxAndEvents` のどれでも、冪等の既存の行が在っても拒む）。
+  if (stringHasNul(input.extractorVersion)) {
+    throw new Error(
+      `InMemoryMemoryStore: extractorVersion must not contain NUL characters (U+0000)`,
+    );
+  }
+  if (stringHasNul(input.claimKey?.subject)) {
+    throw new Error(
+      `InMemoryMemoryStore: claimKey.subject must not contain NUL characters (U+0000)`,
+    );
+  }
+  if (stringHasNul(input.claimKey?.predicate)) {
+    throw new Error(
+      `InMemoryMemoryStore: claimKey.predicate must not contain NUL characters (U+0000)`,
+    );
+  }
   // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
   // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
   if (jsonContainsNul(input.attributes ?? {})) {
@@ -622,6 +644,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   private createObservationIdempotent(
     ctx: Ctx,
     input: NewObservation,
+    // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる（ADR 0434）。
+    beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("InMemoryMemoryStore", input);
     assertObservationDatesValid("InMemoryMemoryStore", input);
@@ -633,6 +657,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           )
         : undefined;
     return resolveIdempotentCreate(existing, () => {
+      beforeInsert?.();
       const observation: Observation = {
         id: nextId("obs"),
         tenantId: ctx.tenantId,
@@ -707,13 +732,15 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
-    const { value: observation, created } = this.createObservationIdempotent(ctx, input);
-    if (!created) {
-      return { observation: snapshot(observation), created: false, jobs: [] };
-    }
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
     const outboxNow = opts?.now ?? new Date();
+    const { value: observation, created } = this.createObservationIdempotent(ctx, input, () =>
+      assertOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts?.now),
+    );
+    if (!created) {
+      return { observation: snapshot(observation), created: false, jobs: [] };
+    }
     const jobs = jobKinds.map((kind) =>
       this.enqueueOutboxJob(
         ctx,
@@ -737,6 +764,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       | "createMemory"
       | "createMemoryWithOutbox"
       | "createMemoriesWithOutboxAndEvents" = "createMemory",
+    // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる（ADR 0434）。
+    beforeInsert?: () => void,
   ): IdempotentCreateResult<Memory> {
     // ADR 0140: createMemory/createMemoryWithOutbox 共通の入口。PostgresMemoryStore の
     // createMemory と同じ位置（何も書く前）で落とす——冪等衝突の判定より前に見る。
@@ -758,6 +787,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const existing = existingId !== undefined ? this.memories.get(existingId) : undefined;
 
     return resolveIdempotentCreate(existing, () => {
+      beforeInsert?.();
       // 外部キー相当（0001_init.sql）: `memories.source_observation_id` /
       // `superseded_by_id` / `contested_with_id` は、非 null なら実在する行を指さなければ
       // ならない。`packages/postgres` は実際の外部キー制約でこれを強制するが、この
@@ -819,7 +849,10 @@ export class InMemoryMemoryStore implements MemoryStore {
         halfLifeRecalls:
           input.halfLifeRecalls == null ? null : toFloat4Readback(input.halfLifeRecalls),
         embeddingStatus: input.embeddingStatus,
-        purgedAt: input.purgedAt ?? null,
+        // ADR 0434: `input.purgedAt` は保存しない。`MemoryStore.purgeMemory` の doc が言う「`purgedAt` を書く経路は
+        // この口以外に無い」とおり、`PostgresMemoryStore.createMemory` は `purged_at` を INSERT に含めず、
+        // 渡しても `null` で読み戻る（実測）。渡された値は断らず、無視する（型は変えない）。
+        purgedAt: null,
         // Issue #152/#153（ADR 0312）: runtime は常に `{}` 以上の値を書く。
         attributes: input.attributes ?? {},
         createdAt: now,
@@ -861,6 +894,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       ctx,
       input,
       "createMemoryWithOutbox",
+      () => assertOutboxRowsWritable("createMemoryWithOutbox", jobKinds, opts?.now),
     );
     if (!created) {
       return { memory: snapshot(memory), created: false, jobs: [] };
@@ -994,6 +1028,8 @@ export class InMemoryMemoryStore implements MemoryStore {
             ctx,
             input,
             "createMemoriesWithOutboxAndEvents",
+            () =>
+              assertOutboxRowsWritable("createMemoriesWithOutboxAndEvents", jobKinds, opts?.now),
           );
           const jobs = created
             ? jobKinds.map((kind) =>
@@ -1106,6 +1142,14 @@ export class InMemoryMemoryStore implements MemoryStore {
     extractorVersion: string | null,
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    // ADR 0434: `extractor_version` は `text` 列。検索語の NUL は Postgres ではクエリの時点で拒まれる。
+    // （`observationId` が uuid の形でないとき、Postgres はクエリを発行せずに `[]` を返して NUL を見ない。この
+    // fixture の id は uuid の形ではないので、その入力だけは揃えていない。）
+    assertQueryTextWithoutNul(
+      "listBySourceObservation",
+      "extractorVersion",
+      extractorVersion ?? "",
+    );
     const results: Memory[] = [];
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
@@ -1354,7 +1398,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     const eventsLengthBefore = this.events.length;
     try {
       for (const { input, jobKinds } of news) {
-        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
+        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(
+          ctx,
+          input,
+          "createMemory",
+          () => assertOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts?.now),
+        );
         if (!wasCreated) {
           created.push({ memory, created: false, jobs: [] });
           continue;
@@ -1693,11 +1742,35 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (Number.isNaN(at.getTime())) {
       throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
     }
+    // ADR 0434: `opts.nowSeq` は `decay_base_seq`・`decay_floor_seq`（`bigint`）へ書く値で、Postgres は整数でない・範囲外を
+    // クエリの時点で拒む（`22P02`・`22003`。実測）。**この Memory が `halfLifeRecalls` を持つときだけ**（持たなければ
+    // `nowSeq` は使われず、Postgres は何も見ない）。下の「起点より新しい `at` のときだけ書く」の no-op でも
+    // Postgres は同じ UPDATE 文を発行するので、no-op の判定より前に見る。`archiveDecayed` の `nowSeq` と同じ検査
+    // （`assertQueryInteger`）に、`bigint` の範囲を足したもの。負は、行を実際に書くときの CHECK 制約なので、下で見る。
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      assertQueryBigint("reinforce", "nowSeq", opts.nowSeq);
+    }
     // 起点（lastReinforcedAt ?? recordedAt）より新しい at のときだけ書く（Issue #1093）。未強化の
     // 記憶では作成時刻が起点なので、それより前・ちょうどの at は、活動時計の欄も含めて何も書かない。
     if ((memory.lastReinforcedAt ?? memory.recordedAt).getTime() >= at.getTime()) {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
       return snapshot(memory);
+    }
+    // 活動時計側に書く起点（`opts.nowSeq` が渡され、かつこの Memory が `halfLifeRecalls` を持つときだけ）。
+    // 何かを書き換える前に決めて検査する——投げたときに、壁時計側の列だけが書き換わった状態を残さない。
+    let activityBaseSeq: number | undefined;
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す。
+      activityBaseSeq =
+        opts.addOwnSubjectSeq === true && memory.subjectId != null
+          ? opts.nowSeq + (this.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+          : opts.nowSeq;
+      // ADR 0434: `memories_decay_seq_non_negative`（CHECK）——書く値が負なら Postgres は拒む。no-op の（何も書かない）
+      // 呼び出しでは効かない。`addOwnSubjectSeq` のときは `nowSeq + S_x` が書く値なので、`nowSeq` が負でも `S_x` で
+      // 0 以上になれば通る。
+      if (activityBaseSeq < 0) {
+        throw new Error(`reinforce: decayBaseSeq must not be negative (got ${activityBaseSeq})`);
+      }
     }
     memory.lastReinforcedAt = new Date(at);
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
@@ -1706,15 +1779,10 @@ export class InMemoryMemoryStore implements MemoryStore {
       strength: memory.strength,
       halfLifeHours: memory.halfLifeHours,
     });
-    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
-      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す。
-      const baseSeq =
-        opts.addOwnSubjectSeq === true && memory.subjectId != null
-          ? opts.nowSeq + (this.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
-          : opts.nowSeq;
-      memory.decayBaseSeq = baseSeq;
+    if (activityBaseSeq !== undefined && memory.halfLifeRecalls != null) {
+      memory.decayBaseSeq = activityBaseSeq;
       memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
-        baseSeq,
+        baseSeq: activityBaseSeq,
         strength: memory.strength,
         halfLifeRecalls: memory.halfLifeRecalls,
       });
@@ -1840,6 +1908,15 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertQueryDate("aggregateScope", "validAt", scope.validAt);
     assertQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
     assertQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
+    // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
+    // 時点で拒まれる（`22P05`・`22021`）。`scopeAggregate: "skip"` で `digestBand` も無いときだけ、Postgres は
+    // 集計も目次帯も引かずにクエリを1本も発行しないので、見ない。
+    if (!(opts?.scopeAggregate === "skip" && opts.digestBand === undefined)) {
+      assertQueryJsonWithoutNul("aggregateScope", "attributes", scope.attributes);
+      for (const label of scope.labels ?? []) {
+        assertQueryTextWithoutNul("aggregateScope", "labels", label);
+      }
+    }
     const inScopeBySubject = new Map<string | null, number>();
     let totalInScope = 0;
     const notIndexed: Record<NotIndexedReason, number> = { pending: 0, failed: 0, skipped: 0 };
@@ -2228,6 +2305,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (opts.limit >= 2 ** 63) {
       throw new Error(`requeueEmbedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
+    // ADR 0434: `writeOpts.now` は `available_at`・`created_at`（`timestamptz`）の引数で、Postgres は対象の行が
+    // 0件でも Invalid Date を `22007` で拒む（実測）。`memoryIds` が空配列のときだけ、Postgres はクエリを
+    // 発行せずに `{ requeued: 0 }` を返す（`buildRequeueEmbedTargetSelect` が `null`）ので、見ない。
+    if (opts.memoryIds === undefined || opts.memoryIds.length > 0) {
+      assertQueryDate("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
+    }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
     const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds);
     const targets = [...this.memories.values()]
@@ -2395,6 +2478,18 @@ export class InMemoryMemoryStore implements MemoryStore {
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
+    // ADR 0434: 墓石の `content`・`digest` は `text` 列へ書く値で、Postgres は NUL を拒む（`22021`）。対象の行が
+    // 無くても・CAS に弾かれる状態でも、同じ UPDATE 文の引数として拒む（実測）ので、行を引く前に見る。
+    if (stringHasNul(tombstone.content)) {
+      throw new Error(
+        `InMemoryMemoryStore: tombstone.content must not contain NUL characters (U+0000)`,
+      );
+    }
+    if (stringHasNul(tombstone.digest)) {
+      throw new Error(
+        `InMemoryMemoryStore: tombstone.digest must not contain NUL characters (U+0000)`,
+      );
+    }
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -2668,7 +2763,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
     }
     for (const m of members) {
-      assertStorableMemoryEvent(m.event);
+      assertStorableMemoryEvent(asJsonSerializedSizeBeforeBytes(m.event));
       assertCloneableMemoryEvent(m.event);
     }
 
@@ -2707,7 +2802,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const events = members
       .filter((_, i) => !unchanged[i])
       .map((m) => {
-        const event = buildStoredMemoryEvent(ctx, m.event);
+        const event = buildStoredMemoryEvent(ctx, asJsonSerializedSizeBeforeBytes(m.event));
         this.events.push(event);
         return event;
       });
@@ -2824,7 +2919,7 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     for (const m of members) {
       assertStorableMemoryColumn("status", m.status);
-      assertStorableMemoryEvent(m.event);
+      assertStorableMemoryEvent(asJsonSerializedSizeBeforeBytes(m.event));
       assertCloneableMemoryEvent(m.event);
     }
 
@@ -2853,7 +2948,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
 
     const events = members.map((m) => {
-      const event = buildStoredMemoryEvent(ctx, m.event);
+      const event = buildStoredMemoryEvent(ctx, asJsonSerializedSizeBeforeBytes(m.event));
       this.events.push(event);
       return event;
     });
@@ -2917,6 +3012,13 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
     assertQueryDate("findActiveByClaimKey", "validFrom", query.validFrom);
     assertQueryDate("findActiveByClaimKey", "validUntil", query.validUntil);
+    // ADR 0434: `claim_key_subject`・`claim_key_predicate` は `text` 列。検索値の NUL は Postgres ではクエリの時点で拒まれる。
+    assertQueryTextWithoutNul("findActiveByClaimKey", "claimKey.subject", query.claimKey.subject);
+    assertQueryTextWithoutNul(
+      "findActiveByClaimKey",
+      "claimKey.predicate",
+      query.claimKey.predicate,
+    );
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     const matches = [...this.memories.values()].filter((m) => {
