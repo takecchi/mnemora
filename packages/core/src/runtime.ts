@@ -1905,6 +1905,20 @@ export interface PurgeOptions {
 }
 
 /**
+ * `"purged"` / `"already_purged"` の後始末（`VectorStore.deleteAcrossSpaces`）が失敗したことの知らせ
+ * （ADR 0399、ADR 0382「引き受けた負債」1）。
+ *
+ * **失敗したときだけ付く。成功したときはプロパティ自体が無い。** `kind` は変わらない
+ * （MemoryStore 側の書き込みは確定している）。`error` は例外のメッセージ。
+ * `status` は将来の値のための判別子。
+ */
+export type PurgeEmbeddingCleanup = { status: "failed"; error: string };
+
+function embeddingCleanupFailed(error: unknown): PurgeEmbeddingCleanup {
+  return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+}
+
+/**
  * `runtime.purge` が対象1件ごとに返す結果（Issue #198、ADR 0124）。
  * `ForgetOutcome`/`RestoreArchivedOutcome` と同じ「無い」の分類（ADR 0008）に、
  * `purge` 固有の2値（`"would_purge"`/`"already_purged"`）を足す。
@@ -1912,7 +1926,9 @@ export interface PurgeOptions {
  * - `"purged"`: この呼び出しで実際に `content`/`digest` をトゥームストーンで上書きし、
  *   `purgedAt` を設定し、`memory_events` に `kind: 'purged'` を積んだ
  *   （`VectorStore.deleteAcrossSpaces` もベストエフォートで試みた——失敗してもこの kind は
- *   変わらない。`Runtime.purge` の doc コメント参照）。`previousStatus` は常に `"forgotten"`。
+ *   変わらない。`Runtime.purge` の doc コメント参照）。**その試みが失敗したときだけ**
+ *   `embeddingCleanup`（{@link PurgeEmbeddingCleanup}、ADR 0399）が付く。成功時は無い。
+ *   `previousStatus` は常に `"forgotten"`。
  * - `"would_purge"`: `opts.dryRun: true` のとき、対象が `status === "forgotten"` かつ
  *   未 purge（`purgedAt` が `null`）であり、`dryRun: false` で呼べば `"purged"` に
  *   なったはずであることを示す。**書き込みは一切起きていない。**
@@ -1922,7 +1938,7 @@ export interface PurgeOptions {
  *   `false`（省略時を含む）なら、`VectorStore.deleteAcrossSpaces` をベストエフォートで
  *   試みる**（Issue #1425、ADR 0382——埋め込みモデルを移した後に purge を再実行すると、
  *   旧 space に残った埋め込みをこの kind でも後始末できる）。`dryRun: true` のときは
- *   呼ばない。
+ *   呼ばない。失敗したときだけ `embeddingCleanup` が付く（`"purged"` と同じ）。
  * - `"status_not_forgotten"`: 対象の `status` が `"forgotten"` ではなかった
  *   （`purge` は `forgotten` からのみ遷移できる、ADR 0124 決定1）。`status` に現在値が入る。
  *   **書き込みは一切起きていない。**
@@ -1937,9 +1953,14 @@ export interface PurgeOptions {
  *   この要素はまだ見ていない。
  */
 export type PurgeOutcome =
-  | { memoryId: MemoryId; kind: "purged"; previousStatus: "forgotten" }
+  | {
+      memoryId: MemoryId;
+      kind: "purged";
+      previousStatus: "forgotten";
+      embeddingCleanup?: PurgeEmbeddingCleanup;
+    }
   | { memoryId: MemoryId; kind: "would_purge"; previousStatus: "forgotten" }
-  | { memoryId: MemoryId; kind: "already_purged" }
+  | { memoryId: MemoryId; kind: "already_purged"; embeddingCleanup?: PurgeEmbeddingCleanup }
   | { memoryId: MemoryId; kind: "status_not_forgotten"; status: Exclude<MemoryStatus, "forgotten"> }
   | { memoryId: MemoryId; kind: "not_found" }
   | { memoryId: MemoryId; kind: "conflicted"; observedStatus: MemoryStatus | null }
@@ -6464,7 +6485,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         continue;
       }
       if ((current.purgedAt ?? null) !== null) {
-        outcomes.push({ memoryId: id, kind: "already_purged" });
+        const alreadyPurged: Extract<PurgeOutcome, { kind: "already_purged" }> = {
+          memoryId: id,
+          kind: "already_purged",
+        };
+        outcomes.push(alreadyPurged);
         // Issue #1425 / ADR 0382: 既に purge 済みでも、埋め込みの後始末はベストエフォート
         // で試みる——埋め込みモデルを移した後に再実行すれば、旧 space に残った行を
         // 消せるようにするため（`kind` の意味は変えない。書き込みが起きていない、という
@@ -6472,8 +6497,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         if (!dryRun) {
           try {
             await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
-          } catch {
-            // 握り潰す。ADR 0124/0382「引き受けた負債」参照。
+          } catch (cleanupError) {
+            // 結果は変えず、失敗だけを任意の欄で知らせる（ADR 0399）。
+            alreadyPurged.embeddingCleanup = embeddingCleanupFailed(cleanupError);
           }
         }
         continue;
@@ -6501,7 +6527,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           },
         );
         byId.set(lookupKey(id), memory);
-        outcomes.push({ memoryId: id, kind: "purged", previousStatus: "forgotten" });
+        const purgedOutcome: Extract<PurgeOutcome, { kind: "purged" }> = {
+          memoryId: id,
+          kind: "purged",
+          previousStatus: "forgotten",
+        };
+        outcomes.push(purgedOutcome);
 
         // ADR 0124 決定5・ADR 0382: ベストエフォート。失敗しても "purged" の判定は変えない
         // ——MemoryStore 側の書き込みは既に確定しており、ここで "failed" に格下げすると
@@ -6509,8 +6540,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 今の space だけでなく、この adapter が持つ全 space から消す。
         try {
           await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
-        } catch {
-          // 握り潰す。ADR 0124/0382「引き受けた負債」参照。
+        } catch (cleanupError) {
+          // "purged" のまま、失敗だけを任意の欄で知らせる（ADR 0399。成功時は欄を出さない）。
+          purgedOutcome.embeddingCleanup = embeddingCleanupFailed(cleanupError);
         }
       } catch (error) {
         if (error instanceof MemoryPurgeConflictError) {

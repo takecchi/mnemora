@@ -184,6 +184,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ 閾値は推論で置いたもので、**実データでの偽陽性率は測っていない**。意図して英語で書かせる使い方では印が常に付きうる。
   ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
+- **`runtime.purge` の `"purged"`／`"already_purged"` outcome に、任意の欄 `embeddingCleanup?: { status: "failed"; error: string }` を足した**（[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md)「引き受けた負債」1、[PR #1475](https://github.com/takecchi/mnemora/pull/1475)、[ADR 0399](./docs/decisions/0399-purge-embedding-cleanup-outcome-field.md)）。埋め込み行の後始末（`deleteAcrossSpaces`）が失敗したときだけ付き、`kind` は変わらない。成功時はプロパティ自体が無く、出力は変わらない。⭕ 非破壊と数える（任意欄の追加のみ）。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresMemoryStore.createRecall` が、活動時計を進めるとき（`decay_clock != 'wall'`）、`recalls` の INSERT とカウンタ（`tenant_activity`／`tenant_subject_activity`）の UPSERT を1つの SQL 文で撃つようになった**（[ADR 0395](./docs/decisions/0395-create-recall-activity-clock-single-statement.md)、[ADR 0165](./docs/decisions/0165-decay-activity-clock.md) 負債1）。意味（1 recall = 1 単位、recalls の行とカウンタが同じ原子性）・返り値・公開 API・スキーマは変わらない。狙いは、同じテナントへの同時 createRecall がカウンタの行で直列になる時間のうち、クライアントとの往復1回分を減らすこと。**「速くなった」とは言わない**——共有器での実測（各点3回・前後交互）は、器のノイズ（±20〜30%）に埋もれて効果を示せていない（subject 単位の行は3つの並列度すべてで中央値が後の側、activity_T の並列度16・32 は同等以下）。ホット行そのものは残る。カウンタを16行に分ける案は採らなかった。
