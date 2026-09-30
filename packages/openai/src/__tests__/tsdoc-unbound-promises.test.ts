@@ -154,8 +154,8 @@ describe("応答の形そのものが壊れているとき（Issue #885）: 生�
   });
 });
 
-describe("embed: 件数・次元を検査しない（TSDoc、README の Issue #860）", () => {
-  it("応答の件数と次元が入力・宣言と食い違っても、例外にせずそのまま返す", async () => {
+describe("embed: 件数・次元を検査する（TSDoc、README の Issue #860。2026-09-30 に「検査しない」から変えた）", () => {
+  it("応答の件数と次元が入力・宣言と食い違えば、素の Error で拒む（メッセージは `OpenAIEmbeddingProvider:` で始まる）", async () => {
     const create = vi.fn().mockResolvedValue({ data: [{ index: 0, embedding: [1] }] });
     const provider = new OpenAIEmbeddingProvider({
       model: "m",
@@ -163,7 +163,10 @@ describe("embed: 件数・次元を検査しない（TSDoc、README の Issue #8
       client: { embeddings: { create } } as never,
     });
     // 入力は2件・宣言は3次元なのに、1件・1次元が返る。
-    await expect(provider.embed(ctx, ["a", "b"])).resolves.toEqual([[1]]);
+    const error = await rejection(() => provider.embed(ctx, ["a", "b"]));
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/^OpenAIEmbeddingProvider:/);
+    expect(error).not.toHaveProperty("kind");
   });
 });
 

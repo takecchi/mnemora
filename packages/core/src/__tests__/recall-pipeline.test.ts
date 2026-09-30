@@ -6,6 +6,7 @@ import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { heuristicTokenCounter } from "../heuristic-token-counter.js";
 import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
+import type { Provenance } from "../provenance.js";
 import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { RecallOutputValidationError } from "../recall-output-validation.js";
@@ -2597,5 +2598,342 @@ describe("recall() — 出力検証（Issue #131、ADR 0098）", () => {
     expect(result.outputValidation?.ok).toBe(false);
     // 「投げなかった」ことそのもの——ここへ到達している時点で resolve している。
     expect(result.memories).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ann_unreached × excludeProvenanceKinds（ADR 0390 の歯。ADR 0285 の引き受けた負債7）
+//
+// 今日の `eligible = aggregate.totalInScope - notIndexedTotal` は、`excludeProvenanceKinds`
+// で段1の ANN から除外した kind の行も数える（`aggregateScope` に除外が渡らない）。
+//   問い1（黙る）: 除外指定で ANN が取りこぼしても、`lowerBoundUsable=false` により
+//     severity は "info" のまま・診断キーも付かない。
+//   問い2（鳴りすぎ）: 除外しない候補を全部拾えても、`annHits.length < eligible`
+//     （除外行込み）で `ann_unreached` が鳴る。
+// 直し方（案2・非破壊）: `aggregateScope` が任意の欄 `excludedProvenanceIndexedCount`
+// （除外される kind で、索引済みの行の数）を返し、core がそれで eligible と下限を引き直す。
+// **欄を返さない adapter では今日と1バイトも変わらない**——下の「対照」がそれを固定する。
+// （欄名・オプション名は ADR 0390 で確定する。ここでは暫定の名前を使う。）
+// ---------------------------------------------------------------------------
+describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", () => {
+  /**
+   * 「索引は近傍 `reach` 件しか見ず、`excludeProvenanceKinds` は後段（後置フィルタ）で落とす」
+   * VectorStore。段1が渡す filter から `excludeProvenanceKinds` を抜いて inner.search を呼び、
+   * `slice(0, reach)` のあとで除外 id を落とす——除外行が候補枠を占拠して、除外しない候補を
+   * 取りこぼす近似索引の形。
+   */
+  class ReachLimitedPostFilterVectorStore implements VectorStore {
+    constructor(
+      private readonly inner: VectorStore,
+      private readonly reach: number,
+      private readonly excludedIds: ReadonlySet<string>,
+    ) {}
+
+    upsert(...args: Parameters<VectorStore["upsert"]>): ReturnType<VectorStore["upsert"]> {
+      return this.inner.upsert(...args);
+    }
+
+    async search(...args: Parameters<VectorStore["search"]>): ReturnType<VectorStore["search"]> {
+      const [c, space, query, opts] = args;
+      const { excludeProvenanceKinds: _dropped, ...filter } = opts.filter;
+      const hits = await this.inner.search(c, space, query, { ...opts, filter });
+      return hits.slice(0, this.reach).filter((h) => !this.excludedIds.has(h.memoryId));
+    }
+
+    delete(...args: Parameters<VectorStore["delete"]>): ReturnType<VectorStore["delete"]> {
+      return this.inner.delete(...args);
+    }
+
+    deleteAcrossSpaces(
+      ...args: Parameters<VectorStore["deleteAcrossSpaces"]>
+    ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+      return this.inner.deleteAcrossSpaces(...args);
+    }
+  }
+
+  /**
+   * 新しい欄（`excludedProvenanceIndexedCount`）を返さない adapter を模す: `aggregateScope` の
+   * 返り値からその欄を落とす。それ以外は素通し。
+   */
+  function withoutExcludedProvenanceField(
+    memoryStore: ReturnType<typeof createFakeRuntimeStores>["memoryStore"],
+  ) {
+    return new Proxy(memoryStore, {
+      get(target, prop, receiver) {
+        const value: unknown = Reflect.get(target, prop, receiver);
+        if (prop === "aggregateScope" && typeof value === "function") {
+          return async (...args: unknown[]) => {
+            const aggregate = (await (value as (...a: unknown[]) => Promise<object>).apply(
+              target,
+              args,
+            )) as Record<string, unknown>;
+            const { excludedProvenanceIndexedCount: _dropped, ...rest } = aggregate;
+            return rest;
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  function buildRuntimeWith(
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+    opts: {
+      vectorStore?: VectorStore;
+      stripField?: boolean;
+      wrapMemoryStore?: (store: typeof stores.memoryStore) => typeof stores.memoryStore;
+    } = {},
+  ) {
+    const baseStore = opts.stripField
+      ? (withoutExcludedProvenanceField(stores.memoryStore) as typeof stores.memoryStore)
+      : stores.memoryStore;
+    return createRuntime({
+      memoryStore: opts.wrapMemoryStore ? opts.wrapMemoryStore(baseStore) : baseStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: opts.vectorStore ?? stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+    });
+  }
+
+  const consolidated: Provenance = { kind: "consolidated", sources: ["a", "b"] };
+
+  function annDetail(result: RecallResult) {
+    return result.explain.stages.find(
+      (s) => s.stage === "candidate_generation" && s.detail?.channel === "ann",
+    )?.detail;
+  }
+
+  /** 問い1の形: 除外 kind 4件がクエリに最も近く、除外しない3件は少し遠い。索引の reach=4。 */
+  async function seedQ1(stripField: boolean) {
+    const stores = createFakeRuntimeStores();
+    const excluded = new Set<string>();
+    for (let i = 0; i < 4; i += 1) {
+      const m = await createEmbeddedMemory(stores, [1, 0], { provenance: consolidated });
+      excluded.add(m.id);
+    }
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 1]);
+    }
+    const runtime = buildRuntimeWith(stores, {
+      vectorStore: new ReachLimitedPostFilterVectorStore(stores.vectorStore, 4, excluded),
+      stripField,
+    });
+    return runtime;
+  }
+
+  /** 問い2の形: 除外しない3件も除外4件も全部 [1,0]。素の fake VectorStore（除外は索引が効かせる）。 */
+  async function seedQ2(stripField: boolean) {
+    const stores = createFakeRuntimeStores();
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+    for (let i = 0; i < 4; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], { provenance: consolidated });
+    }
+    return buildRuntimeWith(stores, { stripField });
+  }
+
+  it("問い1（黙る）: 除外指定で ANN が除外しない候補を取りこぼしたら、warning と診断キー（除外後の下限）が付く", async () => {
+    const runtime = await seedQ1(false);
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      excludeProvenanceKinds: ["consolidated"],
+    });
+
+    expect(result.memories).toEqual([]);
+    // eligible = 7 - 索引済みの除外行 4 = 3。hits(0) < min(kPrime, 3) ⟹ warning。
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "warning",
+    });
+    expect(annDetail(result)).toMatchObject({
+      annReturnedFewerThanReachable: true,
+      annReachableLowerBound: 3,
+    });
+  });
+
+  it("問い2（鳴りすぎ）: 除外指定で除外しない候補を全部拾えたら、ann_unreached は鳴らない", async () => {
+    const runtime = await seedQ2(false);
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      excludeProvenanceKinds: ["consolidated"],
+    });
+
+    expect(result.memories).toHaveLength(3);
+    // eligible = 7 - 4 = 3 = hits ⟹ 鳴らない。
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+    expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReturnedFewerThanReachable");
+  });
+
+  it("対照1（欄を返さない adapter は今日と同じ）: 問い1の形でも severity は info・診断キー無し", async () => {
+    const runtime = await seedQ1(true);
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      excludeProvenanceKinds: ["consolidated"],
+    });
+
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "info",
+    });
+    const keys = Object.keys(annDetail(result) ?? {});
+    expect(keys).not.toContain("annReturnedFewerThanReachable");
+    expect(keys).not.toContain("annReachableLowerBound");
+  });
+
+  it("対照2（欄を返さない adapter は今日と同じ）: 問い2の形では今日どおり info で ann_unreached が鳴る", async () => {
+    const runtime = await seedQ2(true);
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      excludeProvenanceKinds: ["consolidated"],
+    });
+
+    expect(result.memories).toHaveLength(3);
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "info",
+    });
+  });
+
+  it("対照3（除外指定なしは変わらない）: excludeProvenanceKinds 省略・空配列では、欄の有無に関わらず結果が一致する", async () => {
+    for (const excludeProvenanceKinds of [undefined, [] as never[]]) {
+      const outcomes: unknown[] = [];
+      for (const stripField of [false, true]) {
+        const runtime = await seedQ2(stripField);
+        const result = await runtime.recall(ctx, {
+          vector: [1, 0],
+          ...(excludeProvenanceKinds === undefined ? {} : { excludeProvenanceKinds }),
+        });
+        outcomes.push({
+          omitted: result.omitted,
+          detail: annDetail(result),
+          memories: result.memories.length,
+        });
+      }
+      expect(outcomes[0]).toEqual(outcomes[1]);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // scopeAggregate: "skip"（ADR 0384 案C の「決めたこと」7、ADR 0390 の続き）
+  //
+  // "skip" では `aggregateScope` が件数を数えない（`countKind: 'unknown'`・totalInScope 0）ので、
+  // `ann_unreached` の母数 `eligible` が 0 になり、ANN が scope の候補を取りこぼしていても
+  // 鳴らない——しかも「判定していない」と名乗る診断も出なかった。ANN の段が走っていて件数が
+  // 取れないときは、ANN の stage detail に `annReachability: "unknown"` を足して名乗る。
+  // 既定（"exact"）と、"skip" を無視して exact を返す adapter の出力は1バイトも変えない。
+  //
+  // core の Fake は `scopeAggregate` を実装していない（常に exact）ので、"skip" の返り値の形
+  // （ADR 0384: countKind 'unknown'、件数 0）をここで模す。
+  // -------------------------------------------------------------------------
+  function skippingAggregateScope(
+    memoryStore: ReturnType<typeof createFakeRuntimeStores>["memoryStore"],
+    honorSkip: boolean,
+  ) {
+    return new Proxy(memoryStore, {
+      get(target, prop, receiver) {
+        const value: unknown = Reflect.get(target, prop, receiver);
+        if (prop === "aggregateScope" && typeof value === "function") {
+          return async (...args: unknown[]) => {
+            const aggregate = (await (value as (...a: unknown[]) => Promise<object>).apply(
+              target,
+              args,
+            )) as Record<string, unknown>;
+            const opts = args[2] as { scopeAggregate?: string } | undefined;
+            if (!honorSkip || opts?.scopeAggregate !== "skip") return aggregate;
+            const zero = { count: 0, countKind: "unknown" };
+            return {
+              ...aggregate,
+              groups: [],
+              totalInScope: 0,
+              countKind: "unknown",
+              notIndexed: { pending: zero, failed: zero, skipped: zero },
+              filteredArchived: zero,
+              filteredSuperseded: zero,
+              filteredForgotten: zero,
+              filteredPeriod: zero,
+              filteredExpired: zero,
+              filteredNotYetValid: zero,
+              filteredTaxonomy: zero,
+              filteredDecayed: zero,
+              digestEligible: zero,
+            };
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  async function seedSkipRuntime(honorSkip: boolean) {
+    const stores = createFakeRuntimeStores();
+    // ANN の届く範囲が狭い（reach=2）索引。scope には5件あるので、exact なら取りこぼしを名乗れる形。
+    for (let i = 0; i < 5; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+    return buildRuntimeWith(stores, {
+      vectorStore: new ReachLimitedPostFilterVectorStore(stores.vectorStore, 2, new Set()),
+      wrapMemoryStore: (store) => skippingAggregateScope(store, honorSkip),
+    });
+  }
+
+  it("skip 1（判定できないと名乗る）: scopeAggregate: 'skip' で ANN の段が走ったとき、stage detail に annReachability: 'unknown' が付く", async () => {
+    const runtime = await seedSkipRuntime(true);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], scopeAggregate: "skip" });
+
+    expect(result.index.countKind).toBe("unknown");
+    expect(annDetail(result)).toMatchObject({ channel: "ann", annReachability: "unknown" });
+    // 母数が無いので、鳴らない・下限の診断キーも立たない（従来どおり）。名乗るのは annReachability だけ。
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+    expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReturnedFewerThanReachable");
+  });
+
+  it("skip 2（既定は変わらない）: scopeAggregate を渡さない・'exact' を渡すときは annReachability を足さない", async () => {
+    for (const query of [{}, { scopeAggregate: "exact" as const }]) {
+      const runtime = await seedSkipRuntime(true);
+      const result = await runtime.recall(ctx, { vector: [1, 0], ...query });
+      expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReachability");
+      // exact なら従来どおり取りこぼしを名乗る（対照）。
+      expect(annDetail(result)).toMatchObject({ annReturnedFewerThanReachable: true });
+    }
+  });
+
+  it("skip 3（skip を無視する adapter）: 'skip' を頼んでも exact が返ってきたら annReachability は付かず、従来の判定になる", async () => {
+    const runtime = await seedSkipRuntime(false);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], scopeAggregate: "skip" });
+
+    expect(result.index.countKind).toBe("exact");
+    expect(Object.keys(annDetail(result) ?? {})).not.toContain("annReachability");
+    expect(annDetail(result)).toMatchObject({ annReturnedFewerThanReachable: true });
+  });
+
+  it("skip 4（ANN の段が走らないとき）: クエリに埋め込む内容が無ければ、skip でも annReachability は付かない", async () => {
+    const runtime = await seedSkipRuntime(true);
+
+    const result = await runtime.recall(ctx, { scopeAggregate: "skip" });
+
+    const keys = result.explain.stages.flatMap((s) => Object.keys(s.detail ?? {}));
+    expect(keys).not.toContain("annReachability");
   });
 });

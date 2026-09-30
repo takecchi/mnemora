@@ -103,6 +103,33 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
      [docs/migration-v1.md](./docs/migration-v1.md) の項目31 を見ること。
   3. `eraseTenant` を使わないなら、ほかに直すことは無い。
 
+- **`@mnemora/openai` の `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性を検査し、崩れていれば例外を投げるようになった——以前は素通りしていた食い違った応答が、新しく例外になる**
+  （[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+  [ADR 0305](./docs/decisions/0305-embedding-provider-input-limit-contract.md) の 2026-09-30 追記）。
+
+  以前は `response.data` を `index` で並べ替えて返すだけで、応答が `texts` と食い違っていても検査しなかった
+  （2026-09-26 に「検査しない・結果は未定義」と文書化した）。本物の SDK に偽の `fetch` を渡して確かめると、件数の過不足・
+  次元違い・`index` の重複/欠落/範囲外・空の `data` のどれも、例外なしに素通りした。今回、次の4つを確かめ、
+  崩れていれば素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まり、期待値・実際の値・何番目かを含む。
+  入力テキストの本文と API キーは含まない。専用のエラー型・`kind` は無い）を投げる。
+
+  1. `response.data` の件数が `texts.length` と等しい。
+  2. `index` が 0..n-1 をちょうど1回ずつ。
+  3. 各ベクトルの長さが `space.dimensions` と等しい。
+  4. 成分がすべて有限（`NaN`/`Infinity` が無い）。
+
+  - **公開 API の型・シグネチャは変わらない**（`embed` の戻り値の型も同じ）。変わるのは、食い違った応答に対する振る舞い
+    （返す → 投げる）だけである。
+  - **誰が影響を受けるか**: OpenAI が `texts` と食い違う応答（件数違い・次元違い・`NaN`/`Infinity`・`index` の異常）を
+    返したとき、以前は黙って通っていたものが `embed()` の例外になる。`Runtime.tick` の embed ジョブでは、その例外は
+    ジョブの失敗（`embeddingStatus: 'failed'`）として扱われる。**正常な応答（件数一致・宣言どおりの次元・有限）を
+    返す限り、何も変わらない。** `client` に自前の偽物を注入していて、件数や次元が宣言と合わないベクトルを返して
+    いるテストがあれば、新しく落ちる。
+  - **変えなかったこと**: `response.data` キー自体が無い応答は従来どおり生の `TypeError`。入力の上限超過は今もサーバの
+    拒否に依存している。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目32。DB マイグレーションは無い。
+  - 【確かめていないこと】実 API がこれらの食い違いを実際に返すか（実 API は使っていない）。
+
 ### Added
 
 - **`@mnemora/testkit` の `describeMemoryStoreConformance` に、`reinforce`/`reinforceMany?` が `memory_events` を1行も書かないことを検査する `it` を足した**（[Issue #871](https://github.com/takecchi/mnemora/issues/871)、[PR #1452](https://github.com/takecchi/mnemora/pull/1452)。`docs/memory-model.md` §11 行4 が約束していた振る舞いに、対応する歯が無かった。クローン miku の委譲先の判断であり、オーナーの判断ではない）——自前の `MemoryStore` 実装を conformance suite に当てている外部 adapter 実装者にも、この約束が効くようになる。
@@ -119,10 +146,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、常に `countKind: 'exact'` を返し続ける契約**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故を繰り返さないための設計）。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。
   - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm（12往復、1点ごとに別プロセス）: 案A の索引ありの `"exact"` は p50 627.7ms、`"skip"` は p50 1.5ms。往復ごとの差（skip − exact）の中央値は −644.6ms（IQR −671.1〜−541.9ms、最小〜最大 −681.3〜−504.6ms、12往復すべて負）。10万行は cold（Postgres 再起動直後）・warm-after とも `"skip"` は p50 6.6ms・1.2ms。器・手順・限界は ADR 0384「測ったこと」。
   ⭕ 非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。
+- **抽出の言語の事後検査を足した——日本語の観測から、かな・漢字の無い（ラテン文字の）本文が出たら、`created` イベントの `meta.languageMismatch` に印を付ける**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[ADR 0391](./docs/decisions/0391-language-mismatch-mark-on-created-event.md)）。sync・deferred・`reextract` のすべての抽出経路で効く。
+  - **印を付けるだけ**——再試行も全文フォールバックもしない。Memory の作り方、プロンプト、公開の型は変えない。疑いが無いときの `created` の `meta` は今までどおり。
+  - ⚠ 閾値は推論で置いたもので、**実データでの偽陽性率は測っていない**。意図して英語で書かせる使い方では印が常に付きうる。
+  ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresMemoryStore.createRecall` が、活動時計を進めるとき（`decay_clock != 'wall'`）、`recalls` の INSERT とカウンタ（`tenant_activity`／`tenant_subject_activity`）の UPSERT を1つの SQL 文で撃つようになった**（[ADR 0395](./docs/decisions/0395-create-recall-activity-clock-single-statement.md)、[ADR 0165](./docs/decisions/0165-decay-activity-clock.md) 負債1）。意味（1 recall = 1 単位、recalls の行とカウンタが同じ原子性）・返り値・公開 API・スキーマは変わらない。同じテナントへの同時 createRecall がカウンタの行で直列になる問題は、共有器での実測では並列度4で小さな改善、16・32 で改善が見えなかった（ホット行は残る）。
+
+- **`excludeProvenanceKinds` を指定した recall の `ann_unreached` の判定が、除外した kind の行を母数に数えなくなった。`scopeAggregate: "skip"` の recall は、ANN の到達を判定できないと名乗るようになった**（[PR #1458](https://github.com/takecchi/mnemora/pull/1458)、[ADR 0390](./docs/decisions/0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)）——除外指定のとき、ANN が取りこぼしても `severity: "info"` のまま・診断キーも付かず（黙る）、除外しない候補を全部拾えても鳴る（鳴りすぎ）、という2つの誤りを直した。`AggregateScopeOptions.excludeProvenanceKinds?` と `ScopeAggregate.excludedProvenanceIndexedCount?`（除外される kind で、スコープ内の索引済みの行の数）を足し（どちらも任意の欄。`totalInScope`・`groups`・`filtered*` の意味は変えない）、`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` が実装した。
+  - **既定は変わらない**: 除外指定なし・欄を返さない自作 adapter・`scopeAggregate: "exact"` の recall の出力は1バイトも変わらない。Postgres の SQL も、除外指定（非空）のときだけ列を足す。**除外指定のある recall の `omitted`（`ann_unreached` の有無・severity）と `explain.stages` の診断キーは、欄を返す adapter では変わる**（変わる向きは、取りこぼしを名乗る・鳴りすぎを止める）。
+  - `scopeAggregate: "skip"` で ANN の段が走り、adapter が `countKind: 'unknown'` を返したときは、ANN の stage detail に `annReachability: "unknown"`（到達を判定できない）が付く。`ann_unreached` が鳴らないこと自体は変わらない——**キーが付いているときの「無い」は「拾いきった」ではない**（[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 「決めたこと」7 の手当て）。
+  - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。`filteredDecayed` に除外行が混ざって下限が小さくなる側へずれるのは、偽陽性を出さない側として許容した（ADR 0390 決定6）。
 
 - **抽出（`subjectCandidates` を渡し、`extractionContext` を渡さず、観測に `payload.speaker` がある呼び出しに限る）で、LLM への user 入力の本文の前に `話者（speaker）: <値>` と空行が足される**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370) PR1、[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md) 末尾の 2026-09-30 追記）——[PR #1374](https://github.com/takecchi/mnemora/pull/1374) が候補経路の system に足した話者の一文は「本文の先頭の話者ラベル、または speaker」と言うが、この経路の入力には `speaker` が出ていなかった。一文を本当にするための変更。
   - **変えていない経路**: `subjectCandidates` 省略・空配列の呼び出し（既定経路）と、`extractionContext` を渡す呼び出し（候補の有無を問わない。JSON の `observation.speaker` に既に出ている）は、system・user とも1バイトも変わらない。録音（カセット、Issue #704）の鍵は動かない。

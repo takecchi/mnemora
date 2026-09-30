@@ -615,6 +615,7 @@ import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
+import type { ProvenanceKind } from "../provenance.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import type { NewRecallRecord, NotIndexedReason, RecallRecord, RecallScope, ScopeAggregate } from "../recall.js";
 import type { OutboxJobKind } from "./scheduler.js";
@@ -658,6 +659,7 @@ export interface AggregateScopeOptions {
         limit: number;
         excludeMemoryIds: readonly MemoryId[];
     };
+    excludeProvenanceKinds?: readonly ProvenanceKind[];
     scopeAggregate?: "exact" | "skip";
 }
 export interface MemoryStore {
@@ -2191,6 +2193,7 @@ export interface ScopeAggregate {
         count: number;
         countKind: CountKind;
     };
+    excludedProvenanceIndexedCount?: number;
     digests: DigestEntry[];
     digestEligible: {
         count: number;
