@@ -202,6 +202,26 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目37〜40。DB マイグレーションは無い。
   - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres` とインメモリの実装が通ることだけを確かめた）。
 
+- **contested の検出が、NFC と NFD の違いや前後の空白だけが違う同じ `content` を矛盾と判定しなくなった**（[ADR 0424](./docs/decisions/0424-normalized-content-comparison-and-boundary-conformance.md)、[PR #1527](https://github.com/takecchi/mnemora/pull/1527)、探索の穴 O-3）。`Runtime.detectClaimKeyContested` が、store が返した行の `content` を NFC にして `trim()` した値が検出中の memory と等しいものを、件数を数える前に除く（`sourceObservationId` の除外と同じ場所）。
+  - **直し方**: 比較の前だけの正規化で、`content_hash` の値・保存する `content`・`MemoryStore` の口の契約は変えない。SQL 側に入れないのは、Postgres の `normalize()` が `SQL_ASCII` で使えないため。
+  - **振る舞いの変更**: `claimKey: { enabled: true, detectContested: true }` の `observe()` で、NFC/NFD や末尾の空白1つだけが違う同じ文は `contested`（または `unresolved_conflict`）にならない。誤検出が減る側にしか変わらない。
+  - **正規化しないもの**: NFKC（全角と半角など）、大文字小文字、内部の空白、ゼロ幅文字。それらが違う文は今までどおり別の文として扱う。
+  - **誰が影響を受けるか / 移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目43。DB マイグレーションは無い。
+  - 【確かめていないこと】実際の LLM の抽出結果で、NFC/NFD の違いがどれだけ起きているか。
+
+- **`packDigestBand` が、1件の digest を書記素の境界で切り詰めるようになった**（[ADR 0424](./docs/decisions/0424-normalized-content-comparison-and-boundary-conformance.md)、[PR #1527](https://github.com/takecchi/mnemora/pull/1527)、探索の穴 O-5）。以前は UTF-16 コードユニットで切り（サロゲートペアの内側だけ避けていた）、NFD の「が」が「か」に、ZWJ で繋いだ絵文字が ZWJ だけになっていた。`Intl.Segmenter`（Node 22 の組み込み。依存は増えない）で、`maxEntryChars`（UTF-16 コードユニット）以下に収まる最長の書記素の並びを残す。
+  - **振る舞いの変更**: 単位は変わらない。書記素の途中に当たった digest は、以前より短く（書記素1つぶん）切れる。最初の書記素だけで上限を超えると空文字列になる。上限以下の digest は変わらない。
+  - **直していないもの**: `sliceWithoutSplittingSurrogatePair` の他の呼び出し元（`extraction.ts` のフォールバック digest、`failure-description.ts`）は書記素の途中でまだ切る。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目44。DB マイグレーションは無い。
+
+- **適合テストに入力の境界の `it` が増え、`@mnemora/postgres` は DB の生の例外の代わりに明示の例外を投げるようになった**（[ADR 0424](./docs/decisions/0424-normalized-content-comparison-and-boundary-conformance.md)、[PR #1527](https://github.com/takecchi/mnemora/pull/1527)、探索の穴 O-6）。testkit と Postgres で揃っていなかった3つの境界を揃えた。
+  1. **検索語の NUL**（`describeLexicalStoreConformance`）: `PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`InMemoryLexicalStore` の `search` が、`query` に NUL を含むと `Error` で断る。以前は Postgres が生の DB の例外、インメモリは0件だった。
+  2. **float4 に収まらない `vector` の成分**（`describeVectorStoreConformance`）: `upsert` が `RangeError` で断り、何も保存しない（以前は Postgres が生の DB の例外、インメモリは `Math.fround` で Infinity にして保存していた）。**検索のクエリは投げない**——`NaN`・`Infinity` と同じ「比較不能」として扱う（以前は Postgres が生の例外、インメモリは距離が `NaN`）。
+  3. **`contentHash` の NUL**（`describeMemoryStoreConformance`）: `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`（その候補だけが落ちる）が `Error` で断る。以前は Postgres が生の DB の例外、インメモリは保存していた。
+  - **誰が影響を受けるか**: 自前の `LexicalStore`・`VectorStore`・`MemoryStore` 実装を suite に当てている利用者（フラグ無しで走る）。`@mnemora/postgres` の生の DB の例外を捕まえていたコード。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目45。DB マイグレーションは無い。
+  - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres`〈UTF8・SQL_ASCII〉とインメモリの実装が通ることだけを確かめた）。識別子（tenantId など）の NUL は扱っていない。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
