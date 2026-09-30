@@ -1821,6 +1821,14 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 （**書き込みは構築が終わるまで止まり、読み取りは通る**。`ACCESS EXCLUSIVE` ではない）。
 本番適用時は書き込みが止まる時間を見込むこと（構築時間は ADR 0384「測ったこと」を見ること）。
 
+⚠ **非破壊の追記（2026-09-30、[ADR 0400](./decisions/0400-general-fk-index-tooth.md)）**:
+新しい migration `0031_memory_labels_label_id_index.sql` が1本増えた（`memory_labels (label_id)`
+の索引の追加のみ。列・型・SQL 文・返り値は変えない）。**この文書の定義では破壊的変更に数えない**。
+上の `0028` の案内の本数は、その時点のものである（**書き換えない**）。いま数えるなら、`v1.1.0` から上げる
+場合は `0026`〜`0031` の6本、`v1.0.2` からは `0023`〜`0031` の9本が要る。`0031` の索引の構築も
+素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、`memory_labels` に `SHARE` ロックを取る
+（書き込みは構築が終わるまで止まり、読み取りは通る）。
+
 ### 32. `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性が崩れていると例外を投げるようになった（`@mnemora/openai`）
 
 [Issue #860](https://github.com/takecchi/mnemora/issues/860)、
