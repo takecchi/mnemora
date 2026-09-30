@@ -40,7 +40,7 @@ import type { DecayClock } from "../interfaces/tenant-settings-store.js";
 export interface ScoringInput {
   /** スコアを計算する時点（`decay`・`freshness` の計算に使う）。 */
   now: Date;
-  /** ANN 経由の場合のみ渡す。0〜1 の類似度（距離から変換済み）。 */
+  /** ANN 経由の場合のみ渡す。類似度（`1 - distance`、距離から変換済み）。上は 1、**負にもなりうる**（コサイン距離は最大 2 まで出るので −1 まで下がる。冒頭の doc と `interfaces/vector-store.ts` の `VectorHit.distance` の doc）。 */
   similarity?: number;
   /**
    * 語彙チャンネルが引き当てた場合のみ渡す（ADR 0084）。

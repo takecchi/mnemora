@@ -55,6 +55,7 @@ import type {
   ScopeAggregate,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
   activityFloorSeqAliveCondition,
@@ -455,6 +456,8 @@ export class PostgresMemoryStore implements MemoryStore {
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
     }
+    // 半減期が float4（`real` 列）に収まらない値は、DB の生の例外でなく明示の例外で断る（testkit と同じ判定）。
+    assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -546,6 +549,7 @@ export class PostgresMemoryStore implements MemoryStore {
     jobKinds: OutboxJobKind[],
     outboxNow: Date,
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
+    assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -1046,6 +1050,7 @@ export class PostgresMemoryStore implements MemoryStore {
       if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
         throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
       }
+      assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
     }
 
     const result = await this.db.transaction(async (tx) => {

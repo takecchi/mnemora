@@ -20,6 +20,7 @@ import type {
   TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
+import { assertHalfLifeRecallsFitsFloat4 } from "./half-life-float4.js";
 import type { Db } from "./client.js";
 
 /**
@@ -140,6 +141,8 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
     assertValidHalfLifeRecalls(recalls);
+    // 列は `real`（float4）。収まらない値は DB の生の例外でなく明示の例外で断る（testkit と同じ判定）。
+    assertHalfLifeRecallsFitsFloat4("PostgresTenantSettingsStore", recalls);
     await this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, default_half_life_recalls, updated_at)
       VALUES (${ctx.tenantId}, ${recalls}, now())

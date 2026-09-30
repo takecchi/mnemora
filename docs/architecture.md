@@ -212,11 +212,11 @@ digest 安全弁と対になる）。
 再送・二重配信は前提として設計する。**カウンタの盲目的インクリメントを設計原則として禁止する。**
 値を直接足すのではなく、一意制約を持つ行の挿入が「実際に起きたか」で数える。
 
-| 対象 | 冪等キー | 挙動 |
-|---|---|---|
-| Observation | `externalId`（テナント内一意, 任意） | 再送は同じ Observation を返す |
-| 抽出 → Memory | `(observationId, extractorVersion)` | `(tenant_id, source_observation_id, extractor_version, content_hash)` に一意制約 |
-| 使用報告 | `(recall_id, memory_id)` | 主キー。再送は挿入が弾かれるだけ。`last_reinforced_at` / `decay_floor_at` は挿入が実際に起きたときだけ更新する（`strength` は動かさない。[ADR 0041](./decisions/0041-reinforce-does-not-change-strength.md)） |
+| 対象          | 冪等キー                             | 挙動                                                                                                                                                                                                          |
+| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Observation   | `externalId`（テナント内一意, 任意） | 再送は同じ Observation を返す                                                                                                                                                                                 |
+| 抽出 → Memory | `(observationId, extractorVersion)`  | `(tenant_id, source_observation_id, extractor_version, content_hash)` に一意制約                                                                                                                              |
+| 使用報告      | `(recall_id, memory_id)`             | 主キー。再送は挿入が弾かれるだけ。`last_reinforced_at` / `decay_floor_at` は挿入が実際に起きたときだけ更新する（`strength` は動かさない。[ADR 0041](./decisions/0041-reinforce-does-not-change-strength.md)） |
 
 この対応表が示す通り、**「使われたかどうか」は行の存在で表現する**。カラムを+1するのではない。
 
@@ -251,7 +251,7 @@ devDependency の実行時 import は build を待たず test で赤になる）
 // packages/core — provider 非依存
 interface StructuredRequest<T> {
   prompt: PromptSpec;
-  schema: ZodType<T>;      // core は zod でスキーマを記述するだけ
+  schema: ZodType<T>; // core は zod でスキーマを記述するだけ
 }
 
 interface LLMProvider {
@@ -288,12 +288,12 @@ nullable へ倒し、返りで `null` を省略へ戻す」往復が、Anthropic
 
 Structured Output は次の4箇所で強く使う方針とする:
 
-| 用途 | 何を構造化するか |
-|---|---|
-| 抽出（observe の sync/deferred 経路） | Observation → Memory 候補 + digest |
-| 要旨生成 | Memory → digest（NOT NULL。§4 の非対称理由） |
-| 統合（consolidate） | 複数 Memory → 1 Memory + `provenance.sources` |
-| 矛盾判定 | 新規 Memory と既存 Memory の関係 → `active` / `superseded` / `contested` |
+| 用途                                  | 何を構造化するか                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| 抽出（observe の sync/deferred 経路） | Observation → Memory 候補 + digest                                       |
+| 要旨生成                              | Memory → digest（NOT NULL。§4 の非対称理由）                             |
+| 統合（consolidate）                   | 複数 Memory → 1 Memory + `provenance.sources`                            |
+| 矛盾判定                              | 新規 Memory と既存 Memory の関係 → `active` / `superseded` / `contested` |
 
 矛盾判定と抽出の結果は `provenance.kind = 'inferred'` として記録され、`basis`（根拠となった
 memoryIds/observationIds）を伴う。**根拠を欠いた推論をそのまま提示しない**——原則の姿2の適用
@@ -343,6 +343,7 @@ packages/
 ```
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 上の図は、いまの `packages/` と次の点で違う。
+
 - `bullmq` は `Scheduler` を実装していない。`runtime.tick()` を BullMQ で駆動する（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)）。`"private": true` で、npm には公開していない。
   - **⚠ 2026-09-29 追記（Issue #205）**: `"private": true` はもう正しくない——公開準備の PR が出ている（version の bump・実際の publish はまだ。ADR 0325 の追記参照）。
 - `postgres` が実装しているのは `MemoryStore`・`VectorStore`・`LexicalStore`（任意の `PostgresTrigramLexicalStore` を含む）・`EventStore`・`OutboxStore`・`TenantSettingsStore` であり、`RelationStore` は無い（§5.3、Phase 2）。
@@ -427,35 +428,35 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; claimedBy?: string }
+    opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
   listBySourceObservation(
     ctx: Ctx,
     observationId: ObservationId,
-    extractorVersion: string | null
+    extractorVersion: string | null,
   ): Promise<Memory[]>;
   listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
   updateStatus(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus }
+    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory>;
   updateStatusWithEvent(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
-    event: NewMemoryEvent
+    event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
@@ -464,7 +465,7 @@ interface MemoryStore {
   recordUsage(
     ctx: Ctx,
     recallId: RecallId,
-    memoryIds: MemoryId[]
+    memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
   /** Issue #961: recordUsage と、挿入した id への強化を1トランザクションで（任意。無ければ2段） */
   recordUsageAndReinforce?(
@@ -472,19 +473,19 @@ interface MemoryStore {
     recallId: RecallId,
     memoryIds: MemoryId[],
     at: Date,
-    opts?: ReinforceOptions
+    opts?: ReinforceOptions,
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
   aggregateScope(
     ctx: Ctx,
     scope: RecallScope,
-    opts?: AggregateScopeOptions
+    opts?: AggregateScopeOptions,
   ): Promise<ScopeAggregate>;
   createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
   getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
   requeueEmbedJobs(
     ctx: Ctx,
     opts: RequeueEmbedJobsOptions,
-    writeOpts?: { now?: Date }
+    writeOpts?: { now?: Date },
   ): Promise<RequeueEmbedJobsResult>;
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -499,7 +500,7 @@ interface MemoryStore {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
-    }
+    },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
@@ -511,9 +512,9 @@ interface MemoryStore {
     news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
     buildCreatedEvent: (
       memory: Memory,
-      dropped: ReadonlyArray<{ index: number; error: unknown }>
+      dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -523,52 +524,55 @@ interface MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsByRetentionOptions,
   ): Promise<PurgeExpiredEventsByRetentionOutcome>;
-  purgeExpiredRecalls?(ctx: Ctx, opts: PurgeExpiredRecallsOptions): Promise<PurgeExpiredRecallsResult>;
+  purgeExpiredRecalls?(
+    ctx: Ctx,
+    opts: PurgeExpiredRecallsOptions,
+  ): Promise<PurgeExpiredRecallsResult>;
   archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
   purgeMemory?(
     ctx: Ctx,
     id: MemoryId,
     tombstone: { content: string; digest: string },
-    event: NewMemoryEvent
+    event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   markContestedPair?(
     ctx: Ctx,
     first: { id: MemoryId; event: NewMemoryEvent },
-    second: { id: MemoryId; event: NewMemoryEvent }
+    second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
   resolveContestedPair?(
     ctx: Ctx,
     first: {
       id: MemoryId;
-      status: 'active' | 'superseded';
+      status: "active" | "superseded";
       supersededById?: MemoryId;
       event: NewMemoryEvent;
     },
     second: {
       id: MemoryId;
-      status: 'active' | 'superseded';
+      status: "active" | "superseded";
       supersededById?: MemoryId;
       event: NewMemoryEvent;
-    }
+    },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
   resolveOrphanedContested?(
     ctx: Ctx,
-    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent }
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   /** Issue #207/#933 PR2（ADR 0381、2026-09-30 追記）: markContestedPair?/resolveContestedPair? の
    *  N者版（3件以上専用。2者は今日どおり上の2つのまま）。 */
   markContestedGroup?(
     ctx: Ctx,
-    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
   resolveContestedGroup?(
     ctx: Ctx,
     members: ReadonlyArray<{
       id: MemoryId;
-      status: 'active' | 'superseded';
+      status: "active" | "superseded";
       supersededById?: MemoryId;
       event: NewMemoryEvent;
-    }>
+    }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
   findActiveByClaimKey?(
     ctx: Ctx,
@@ -579,7 +583,7 @@ interface MemoryStore {
       contentHash: string;
       validFrom: Date | null;
       validUntil: Date | null;
-    }
+    },
   ): Promise<Memory[]>;
   findContestedByClaimKey?(
     ctx: Ctx,
@@ -590,29 +594,29 @@ interface MemoryStore {
       contentHash: string;
       validFrom: Date | null;
       validUntil: Date | null;
-    }
+    },
   ): Promise<Memory[]>;
   listActiveClaimPredicates?(
     ctx: Ctx,
-    query: { subjectId: string | null; limit: number }
+    query: { subjectId: string | null; limit: number },
   ): Promise<string[]>;
   restoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
     event: { reason?: string; actor?: EventActor; at: Date },
-    filter?: { onlyMemoryIds?: MemoryId[] }
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }>;
   previewRestoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
-    filter?: { onlyMemoryIds?: MemoryId[] }
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
   listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
   registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
 }
 
-type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgotten';
+type MemoryStatus = "active" | "superseded" | "contested" | "archived" | "forgotten";
 ```
 
 > **docs/604-sync-architecture-section5（2026-09-23、[ADR 0273](./decisions/0273-architecture-section5-is-a-copy.md) の実装）**:
@@ -705,6 +709,7 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
 >   `insertedMemoryIds` に含まれるものだけ `reinforce` を呼ぶ。
 
 契約:
+
 - `createMemory` は `(tenant_id, source_observation_id, extractor_version, content_hash)` の
   一意制約により冪等（§3.5）。
 - `getMany` は `get` の複数件版。**存在しない・クロステナントの id は結果から静かに除く**
@@ -725,7 +730,7 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
   近似経路（例えば `pg_stats`/`reltuples` に基づく安価な推定）は実装していない
   （PR 本文「設計上の疑義」参照）。
 - `aggregateScope` の第3引数 `opts?: AggregateScopeOptions`（`{ digestBand?: { limit: number;
-  excludeMemoryIds: readonly MemoryId[] } }`）は任意——渡すと `ScopeAggregate.digests`/
+excludeMemoryIds: readonly MemoryId[] } }`）は任意——渡すと `ScopeAggregate.digests`/
   `digestEligible` も同じ集約クエリから埋めて返す（[ADR 0073](./decisions/0073-digest-band-bounded-without-taxonomy.md)、
   [docs/recall.md](./recall.md) §5）。省略時は `digests: []`・
   `digestEligible: { count: 0, countKind: 'exact' }` を返し、実装は帯のための追加の仕事をしない。
@@ -741,7 +746,7 @@ interface VectorStore {
     ctx: Ctx,
     space: EmbeddingSpaceId,
     query: number[],
-    opts: { limit: number; filter: VectorFilter }
+    opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]>;
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
   deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
@@ -751,7 +756,7 @@ interface VectorStore {
     ctx: Ctx,
     space: EmbeddingSpaceId,
     queries: { key: string; vector: number[] }[],
-    opts: { limit: number; filter: VectorFilter }
+    opts: { limit: number; filter: VectorFilter },
   ): Promise<Map<string, VectorHit[]>>;
 }
 
@@ -813,6 +818,7 @@ interface VectorEntry {
 > `deleteAcrossSpaces` と違い任意メソッドにした理由はソースの doc コメントを参照。
 
 契約:
+
 - **`MemoryStore` が真実の源(source of truth)であり、`VectorStore` は再構築可能な派生索引である。**
   これは非対称な契約であり、VectorStore を失っても MemoryStore から再 embed して復旧できるが、
   逆はできない。理由の詳細は [docs/decisions/](./decisions/) の ADR に譲るが、契約としての
@@ -845,7 +851,7 @@ interface LexicalStore {
   search(
     ctx: Ctx,
     query: string,
-    opts: { limit: number; filter: LexicalFilter }
+    opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]>;
 }
 ```
@@ -854,6 +860,7 @@ interface LexicalStore {
 番号を繰り下げると、この interface と無関係な節への参照が repo 中で一斉に古くなる。
 
 契約:
+
 - **`MemoryStore` が真実の源であり、語彙索引は再構築可能な派生索引である**（`VectorStore` と同じ非対称）。
 - **クエリ語彙は OR で結ばれる**（[ADR 0092](./decisions/0092-lexical-or-coverage.md)。
   ADR 0084 が定めた旧契約は AND だった）——クエリから作れる語彙のいずれか1つでも
@@ -899,7 +906,7 @@ interface LexicalStore {
 既に指摘していた）。**実装済みの正しい形は次の通り**:
 
 ```ts
-type RelationKind = 'contradicts'; // 今は1値のみ（ADR 0292 決定1-a）
+type RelationKind = "contradicts"; // 今は1値のみ（ADR 0292 決定1-a）
 
 interface Relation {
   memoryId: MemoryId; // 対向（相手側）
@@ -938,6 +945,7 @@ adapter では `Runtime` が `listRelated` を起点ごとに直列に呼ぶ（�
 自分のトランザクションの中で `memory_relations` へ直接 SQL を発行する。
 
 契約:
+
 - 関係グラフの汎用化（`RelationStore` そのもの）は Phase 2 に置く。ただし `contested` 判定に
   必須な `superseded_by_id` 列と `status` 列は Phase 1 のスキーマに前倒しで入れる（後付けの
   マイグレーションにしない、[docs/roadmap.md](./roadmap.md)）。
@@ -951,14 +959,14 @@ adapter では `Runtime` が `listRelated` を起点ごとに直列に呼ぶ（�
 - `RuntimeDeps.relationStore?: RelationStore`（`RuntimeDeps.lexicalStore?` と同じ「省略可能・
   省略しても mnemora は成立する」設計）を追加した。
 - `Runtime.markContestedGroup?(ctx, memberIds, opts?)`/`Runtime.resolveContestedGroup?(ctx,
-  memberIds, resolution, opts?)`（任意メソッド、`Runtime.markContested`/`resolveContested`
+memberIds, resolution, opts?)`（任意メソッド、`Runtime.markContested`/`resolveContested`
   （ADR 0134/ADR 0150）と対称の層）を追加した——`getMany` で各メンバーの適格性を読んでから
   `MemoryStore.markContestedGroup?`/`resolveContestedGroup?` を呼ぶ。`resolveContestedGroup?`
   は `deps.relationStore` が配線されていれば、store の CAS（ADR 0381 fix2）と同じ「群の一部
   だけを渡した解消を拒む」確認を読み側でも行う。
 - `detectClaimKeyContested`（`Runtime.observe()` の claim key 衝突検出、ADR 0378）に
   `contested_group` 分岐を追加した——`detectContested: true` かつ `RuntimeDeps.
-  relationStore` が配線されている呼び出しに限り、`deps.memoryStore.markContestedGroup` を
+relationStore` が配線されている呼び出しに限り、`deps.memoryStore.markContestedGroup` を
   実際に呼んで群として書き込む（2026-09-30 のさらなる直し、オーナー側クローンの判断で
   当初の専用フラグ `ClaimKeyOptions.formContestedGroups?` を廃止し、`relationStore` の
   配線そのものを条件にした）。`relationStore` を配線しない呼び出しの挙動は1バイトも
@@ -978,14 +986,14 @@ adapter では `Runtime` が `listRelated` を起点ごとに直列に呼ぶ（�
   判断）。上限は群ごとに `DEFAULT_RECALL_ASSOCIATION.maxCount`（既定10、owner 自身は
   数えない）を流用し、`validFrom` の新しい順→`id` の順で切り、`Omission` に
   `over_limit { stage: "relation" }`・`stage_skipped { stage: "relation", reason:
-  "relation_store_unavailable" }` を積む。詳細は [docs/recall.md](./recall.md) §2 段3・
+"relation_store_unavailable" }` を積む。詳細は [docs/recall.md](./recall.md) §2 段3・
   §8、ADR 0381 §5 を見ること。
 
 ---
 
 **⚠ 以下は当時（RelationStore 未実装）のドラフトの記録。上の追記が正しい形。**
 
-```ts
+```text
 interface RelationStore {
   link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
@@ -996,6 +1004,7 @@ type RelationKind = 'contradicts' | 'supports' | 'derived_from';
 ```
 
 契約:
+
 - 関係グラフの汎用化（`RelationStore` そのもの）は Phase 2 に置く。ただし `contested` 判定に
   必須な `superseded_by_id` 列と `status` 列は Phase 1 のスキーマに前倒しで入れる（後付けの
   マイグレーションにしない、[docs/roadmap.md](./roadmap.md)）。
@@ -1012,6 +1021,7 @@ interface LLMProvider {
 ```
 
 契約:
+
 - `completeStructured` はベンダー固有の Structured Output 機構へ翻訳する義務を negate できない
   （§3.8）。core・呼び出し側に OpenAI/Anthropic SDK の型を漏らしてはならない。
 - タイムアウト・レート制限・失敗時は例外を投げる。呼び出し側（runtime）がリトライ方針を持つ。
@@ -1064,13 +1074,14 @@ interface EmbeddingProvider {
 ```
 
 契約:
+
 - 1つの `EmbeddingProvider` インスタンスは1つの `EmbeddingSpaceId` に固定される。次元をモデルに
   応じて動的に変える実装は許容しない（`VectorStore` 側がテーブルを空間ごとに分ける前提と対応する）。
 - `packages/anthropic` はこの interface を実装しない（§4）。
 - **実装は2つある**（[ADR 0085](./decisions/0085-local-embedding-provider.md)）。
   `packages/openai` は実 API を叩き、**`packages/local-embedding` は外部サービスに繋がず、
   ONNX のモデルをプロセス内・CPU で推論する**（既定 `{ provider: "local",
-  model: "ruri-v3-30m/sym", dimensions: 256 }`）。
+model: "ruri-v3-30m/sym", dimensions: 256 }`）。
   ⚠ **`space.model` の `/sym` は prefix 方式である。**`embed(ctx, texts)` はクエリと文書を
   区別できないので対称 prefix を使っており、将来 reranking で非対称へ移るときに
   **既存ベクトルと混ざらないよう別空間になる**ことを、この名前が担保している。**消さないこと。**
@@ -1121,6 +1132,7 @@ interface Scheduler {
 ```
 
 契約:
+
 - `enqueue` はジョブの重複投入に対して冪等でなくてよい（重複排除は消費側/extractor の
   `(observationId, extractorVersion)` 冪等制約が担う。§3.5）。Scheduler 自体は「運ぶ」役に
   縮小されている（§3.4 の outbox 設計のおかげで Scheduler の選択が支配的な決定にならない、
@@ -1151,6 +1163,7 @@ type DecayStrategy = {
 > 名は使われていない）。
 
 契約:
+
 - **両方とも純関数であり、状態を保存しない。** `DecayStrategy.strengthAt` の結果はどこにも
   永続化されない。永続化されるのは書き込み時に一度だけ計算する `decay_floor_at`（単調に増加する
   時刻であり、強化イベントが起きたときだけ再計算される。§3.5・[docs/decisions/](./decisions/) の
@@ -1174,6 +1187,7 @@ interface EventStore {
 ```
 
 契約:
+
 - **`update` / `delete` を意図的に持たせない。** append-only。alteroid（github.com/takecchi/alteroid）の
   `JournalStore` interface が同じ形——`append` / `list` / `get` のみで update/delete が型に存在しない
   ——を採っており、mnemora はこの担保の作り方をそのまま真似る。理由は「運用の規律」ではなく
@@ -1196,11 +1210,12 @@ interface EventStore {
 
 ```ts
 interface TokenCounter {
-  count(text: string): { tokens: number; counter: 'heuristic' | 'exact' };
+  count(text: string): { tokens: number; counter: "heuristic" | "exact" };
 }
 ```
 
 契約:
+
 - 既定実装は文字数ベースの推定（`counter: 'heuristic'`）。モデル固有のトークナイザに依存する
   正確な実装を差し込める。**推定値を実測値の顔で返してはならない**——`counter` フィールドは
   必須であり、これも原則（姿3寄りの適用: 精度の性質を隠さない）である。
@@ -1218,6 +1233,7 @@ interface Clock {
 ```
 
 契約:
+
 - `ScoringStrategy` / `DecayStrategy` は `now` を引数として受け取る純関数であり、`Clock` を
   直接は使わない。`Clock` は runtime が「現在時刻」を取得する唯一の場所であり、テストで固定時刻を
   注入できるようにするための境界。alteroid・オーナー案のどちらにも無いが、multi-tenant・複数
@@ -1237,12 +1253,11 @@ interface ClaimOutboxJobsOptions {
 
 class OutboxLeaseConflictError extends Error {
   /** 判別子（ADR 0418）。クラスが2つの版に分かれても読める値。 */
-  readonly kind: "outbox_lease_conflict";
-  constructor(
-    readonly jobId: string,
-    readonly expectedAttempts: number,
-    readonly observedAttempts: number | null,
-  );
+  declare readonly kind: "outbox_lease_conflict";
+  declare readonly jobId: string;
+  declare readonly expectedAttempts: number;
+  declare readonly observedAttempts: number | null;
+  constructor(jobId: string, expectedAttempts: number, observedAttempts: number | null);
 }
 
 /**
@@ -1259,18 +1274,13 @@ interface OutboxStore {
    * `claimBatch`（または生成経路）から受け取った、まさにその `attempts` を渡す。
    * 一致しなければ {@link OutboxLeaseConflictError} を投げる。
    */
-  complete(
-    ctx: Ctx,
-    jobId: string,
-    expectedAttempts: number,
-    opts?: { at?: Date }
-  ): Promise<void>;
+  complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: { at?: Date }): Promise<void>;
   fail(
     ctx: Ctx,
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date }
+    opts?: { at?: Date },
   ): Promise<void>;
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
   purgeCompletedJobs?(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
@@ -1287,6 +1297,7 @@ transactional outbox の「書く」側だとすれば、`OutboxStore` は `runt
 使う「読んで処理する」側である。
 
 契約:
+
 - `claimBatch` は `completed_at IS NULL AND failed_at IS NULL AND available_at <= now`
   のジョブだけを返す。複数ワーカーが同時に呼んでも同じジョブを二重に claim しない
   （`packages/postgres` は `FOR UPDATE SKIP LOCKED` で実装する）。
@@ -1336,13 +1347,13 @@ interface TenantSettingsStore {
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
-type EventRetention = { kind: 'unset' } | { kind: 'unlimited' } | { kind: 'days'; days: number };
+type EventRetention = { kind: "unset" } | { kind: "unlimited" } | { kind: "days"; days: number };
 
-type EventRetentionSetting = Exclude<EventRetention, { kind: 'unset' }>;
+type EventRetentionSetting = Exclude<EventRetention, { kind: "unset" }>;
 
-type DecayClock = 'wall' | 'activity' | 'either';
+type DecayClock = "wall" | "activity" | "either";
 
-type TaxonomyMode = 'open' | 'strict';
+type TaxonomyMode = "open" | "strict";
 ```
 
 > **docs/604-sync-architecture-section5（2026-09-23、ADR 0273 の実装）**: この節は当初
@@ -1374,6 +1385,7 @@ type TaxonomyMode = 'open' | 'strict';
 > **最後に**呼ばれる（他 port の削除が完了した後）。
 
 契約:
+
 - テナントに `tenant_settings` 行が無い場合は `DEFAULT_HALF_LIFE_HOURS`（720、DB 側の
   `default_half_life_hours DEFAULT 720` と同じ値）を返す（エラーにしない）。
 - `tenant_settings.taxonomy_mode` の読み書きは `getTaxonomyMode?`/`setTaxonomyMode?`
