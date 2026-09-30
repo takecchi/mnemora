@@ -166,7 +166,7 @@ export interface FindCorrectionCandidatesResult {
 import { z } from "zod";
 export interface Ctx {
     tenantId: string;
-    subjectId?: string | undefined;
+    subjectId?: string;
 }
 export declare const CtxSchema: z.ZodObject<{
     tenantId: z.ZodString;
@@ -1073,7 +1073,7 @@ export interface OutboxJob {
     tenantId: string;
     kind: OutboxJobKind;
     payload: Record<string, unknown>;
-    availableAt?: Date | undefined;
+    availableAt?: Date;
 }
 export interface Scheduler {
     enqueue(ctx: Ctx, job: OutboxJob): Promise<void>;

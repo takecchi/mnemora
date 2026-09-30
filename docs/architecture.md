@@ -411,7 +411,7 @@ core を組み立てる合成ルート（どの adapter を使うかは server �
 ```ts
 interface Ctx {
   tenantId: string;
-  subjectId?: string | undefined;
+  subjectId?: string;
 }
 ```
 

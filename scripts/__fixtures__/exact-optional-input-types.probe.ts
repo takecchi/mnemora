@@ -42,7 +42,6 @@ import type {
   ObserveEventInput,
   ObserveMemoryUsageInput,
   ObserveUtteranceInput,
-  OutboxJob,
   OutboxStore,
   PurgeCompletedJobsOptions,
   PurgeExpiredEventsByRetentionOptions,
@@ -123,7 +122,6 @@ export const _core: {
   claimKey: Ok<ClaimKeyOptions>;
   claimKeyFromStore: Ok<Exclude<NonNullable<ClaimKeyOptions["knownPredicatesFromStore"]>, boolean>>;
   findCorrection: Ok<FindCorrectionCandidatesInput>;
-  ctx: Ok<Ctx>;
   eraseTenant: Ok<EraseTenantOptions>;
   purgeForTenant: Ok<PurgeExpiredEventsForTenantOptions>;
   eventFilter: Ok<EventFilter>;
@@ -140,7 +138,6 @@ export const _core: {
   requeue: Ok<RequeueEmbedJobsOptions>;
   claimOutbox: Ok<ClaimOutboxJobsOptions>;
   purgeJobs: Ok<PurgeCompletedJobsOptions>;
-  outboxJob: Ok<OutboxJob>;
   buildNew: Ok<BuildNewMemoryParams>;
   buildConsolidated: Ok<BuildConsolidatedMemoryParams>;
   buildReflected: Ok<BuildReflectedMemoryParams>;
@@ -184,7 +181,6 @@ export const _core: {
   claimKey: true,
   claimKeyFromStore: true,
   findCorrection: true,
-  ctx: true,
   eraseTenant: true,
   purgeForTenant: true,
   eventFilter: true,
@@ -201,7 +197,6 @@ export const _core: {
   requeue: true,
   claimOutbox: true,
   purgeJobs: true,
-  outboxJob: true,
   buildNew: true,
   buildConsolidated: true,
   buildReflected: true,
