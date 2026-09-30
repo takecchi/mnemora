@@ -262,6 +262,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ **自前の `MemoryStore` に `listActiveClaimPredicates` を実装していて `supportsListActiveClaimPredicates: true` を渡す人へ**: 同着の並びが上の規則と違えば、この歯で新しく赤になりうる。呼び出し側（`knownPredicatesFromStore`）が語彙ヒントの優先順位に順序をそのまま使うので、同着の順が呼び出しごとに変わる実装は、同じ入力に別のプロンプトを出しうる。
   - 非破壊（契約を締めただけで、型・API は変わらない。同着の順は元から規定がなく、実装依存だった）。
 
+- **`@mnemora/testkit` が `zod` を `peerDependencies`（`^4.5.4`、`@mnemora/core` と同じ範囲）に宣言するようになった。** 公開の型 `LLMProviderConformanceOptions` が `import type { z } from "zod"` を d.ts に持つのに、`zod` は `devDependencies` にしか無かった。【実測】pnpm を `hoist=false`（厳格な配置）にした利用者の一時プロジェクトで testkit の tarball を入れて `tsc`（`skipLibCheck: false`）に掛けると `TS2307: Cannot find module 'zod'` で落ちた（既定の hoist では `.pnpm/node_modules` 経由で解決できてしまう。`skipLibCheck: true` では型が黙って `any` になる）。peer にしたあとは同じ手順で解決する。実行時の import は無い（型のみ）。`dependencies` にしなかったのは、利用者側の `zod` と二重に入ると `z.ZodType` の型が噛み合わなくなるため。
+
 ---
 
 ## [1.1.0] - 2026-09-30
