@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { assertNoNul } from "./input-check.js";
 import { capLexicalQueryWords } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
 
@@ -315,6 +316,8 @@ export class PostgresLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    // 穴 O-6-1（ADR 0424）: 検索語の NUL は、DB に触れる前に明示の例外で断る。
+    assertNoNul("PostgresLexicalStore.search", "query", query);
     const select = buildLexicalSearchSelect(query, { ...opts, ctxTenantId: ctx.tenantId });
     const result = await this.db.execute(select);
     return result.rows.map((row) => {

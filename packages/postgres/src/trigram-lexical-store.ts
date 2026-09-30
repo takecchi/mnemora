@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { assertNoNul } from "./input-check.js";
 import {
   TRIGRAM_JAPANESE_QUERY_MAX_CHARS,
   capLexicalQueryTotalChars,
@@ -879,6 +880,8 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    // 穴 O-6-1（ADR 0424）: 検索語の NUL は、DB に触れる前に明示の例外で断る。
+    assertNoNul("PostgresTrigramLexicalStore.search", "query", query);
     const threshold = this.threshold;
     // `content %> $ja` は `pg_trgm.word_similarity_threshold`（セッション変数）を読む。
     // `set_config(name, value, true)` で設定する——値はパラメータで渡し、第3引数の `true`

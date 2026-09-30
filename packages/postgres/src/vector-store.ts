@@ -22,6 +22,7 @@ import {
   type PgvectorCapabilityRow,
   assertPgvectorCapabilityRow,
 } from "./pgvector-capability.js";
+import { assertFloat4Vector, fitsFloat4 } from "./input-check.js";
 
 /** `number[]` を pgvector のテキスト表現（`[1,2,3]`）に変換する。 */
 function toVectorLiteral(vector: number[]): string {
@@ -36,6 +37,10 @@ function toVectorLiteral(vector: number[]): string {
  *
  * 比較不能とするもの:
  * - 長さが `space.dimensions` と違う（空配列を含む。Issue #857・#867 の案B）
+ * - float4 に収まらない成分（`1e308` など。穴 O-6-2、ADR 0424）を含む。pgvector は
+ *   `"1e+308" is out of range for type vector` で拒み、未捕捉の `DrizzleQueryError` になっていた。
+ *   testkit の `InMemoryVectorStore` は `Math.fround` で Infinity になり距離が `NaN` だった。
+ *   有限でない成分と同じ扱いに揃える（`search` は投げない。投げるのは `upsert` だけ）。
  * - 有限でない成分（`NaN`・`Infinity`・`-Infinity`）を含む。pgvector は
  *   「NaN not allowed in vector」／「infinite value not allowed in vector」で拒み、
  *   未捕捉の `DrizzleQueryError` になっていた。core の `FakeVectorStore` と testkit の
@@ -43,7 +48,11 @@ function toVectorLiteral(vector: number[]): string {
  *   （歯は `__tests__/vector-search-non-finite-query.postgres.test.ts`）。
  */
 function toComparableQuery(query: number[], dimensions: number): number[] {
-  if (query.length !== dimensions || !query.every((x) => Number.isFinite(x))) {
+  if (
+    query.length !== dimensions ||
+    !query.every((x) => Number.isFinite(x)) ||
+    !fitsFloat4(query)
+  ) {
     return new Array(dimensions).fill(0);
   }
   return query;
@@ -487,6 +496,8 @@ export class PostgresVectorStore implements VectorStore {
     memoryId: MemoryId,
     vector: number[],
   ): Promise<void> {
+    // 穴 O-6-2（ADR 0424）: float4 に収まらない成分は、DB に触れる前に明示の例外で断る。
+    assertFloat4Vector("PostgresVectorStore.upsert", vector);
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
     await this.db.execute(sql`

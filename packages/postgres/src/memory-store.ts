@@ -57,6 +57,7 @@ import type {
 } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
+import { assertNoNul } from "./input-check.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
@@ -452,6 +453,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
    */
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
+    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
@@ -547,6 +549,7 @@ export class PostgresMemoryStore implements MemoryStore {
     jobKinds: OutboxJobKind[],
     outboxNow: Date,
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
+    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -1047,6 +1050,8 @@ export class PostgresMemoryStore implements MemoryStore {
       if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
         throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
       }
+      // 穴 O-6-3（ADR 0424）: contentHash の NUL も、トランザクションを開く前に落とす。
+      assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
     }
 
     const result = await this.db.transaction(async (tx) => {

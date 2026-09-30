@@ -439,6 +439,11 @@ function assertStorableNewMemory(input: NewMemory): void {
   if (input.digest.includes("\u0000")) {
     throw new Error(`InMemoryMemoryStore: digest must not contain NUL characters (U+0000)`);
   }
+  // 穴 O-6-3（ADR 0424）: `content_hash` も `text` 列——Postgres は NUL を拒む。以前ここだけ検査が無く、
+  // インメモリは NUL 入りの contentHash を保存していた。
+  if (input.contentHash.includes("\u0000")) {
+    throw new Error(`InMemoryMemoryStore: contentHash must not contain NUL characters (U+0000)`);
+  }
   // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
   // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
   if (jsonContainsNul(input.attributes ?? {})) {
