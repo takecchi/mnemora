@@ -176,6 +176,18 @@ export function wrapRuntimeModule(actual: typeof RuntimeModule): typeof RuntimeM
 }
 
 /**
+ * 溜まった破れを取り出して空にする（**陽性対照の専用**。Issue #1276 / ADR 0397）。
+ *
+ * 検査が本当に配線されているか（`vi.mock` の包みが効いているか）を、わざと契約を破る呼び出しで
+ * 確かめるテストだけが呼ぶ。取り出した破れは `afterEach` から消えるので、そのテストは
+ * `DELIBERATELY_VIOLATING_TESTS` に名前を足さなくても赤にならない——代わりに、そのテスト自身が
+ * 「破れが1件以上溜まっていた」ことを `expect` する（配線が壊れて何も溜まらなければ、そこで赤になる）。
+ */
+export function takeRuntimeOutputContractProblemsForTesting(): string[] {
+  return problems.splice(0);
+}
+
+/**
  * 溜まった破れを、そのテストの `afterEach` で赤にする。
  *
  * ⛔ **`deliberatelyViolatingTests` には、わざと契約を破らせるテストだけを、名前（`it` の名前の末尾一致）で置く。**

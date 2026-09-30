@@ -391,6 +391,24 @@ recall で引ける」）が `observe()` で新しい記憶を書き込む。宣
 
 ---
 
+## 追記（2026-09-30）—— 並列 project は `isolate: false` になった（[ADR 0397](./0397-postgres-db-tests-isolate-false.md)）
+
+マネージャーから委譲された担い手が書いた（オーナー本人ではない）。**上の本文は書き換えていない。**
+
+- **並列 project（`postgres-db-parallel`）だけ `isolate: false` で走る**（Issue #1276）。直列 project は
+  `isolate: true` のまま。理由・実測・手当て・残る危険は ADR 0397。
+- この ADR の本文の「vitest は既定で `isolate: true`——テストファイルごとにモジュールレジストリが
+  新しくなる」は、並列 project では今は当てはまらない。`setup-worker-database.ts` の
+  `BASE_DATABASE_URL_ENV`（元の `DATABASE_URL` を退避して二重書き換えを避ける）は、
+  `isolate: false` でも成り立つ——`process.env[BASE] ?? DATABASE_URL` から毎回同じ値を組み立てる
+  ので冪等である（読んで確かめた。ADR 0397 の試走でも壊れなかった）。
+- 「前後の所要時間」の「CI 実測は未計測」に対して: ADR 0397 に、基準・worker 4 つ・`isolate: false`
+  の CI 実測（`test:db` の段で基準 232.7〜260.6 s に対し `isolate: false` は 149.5〜212.5 s）を置いた。
+- 「`--sequence.shuffle` で見つかった壊れ方」の `upgrade-from-released` の順序依存は Issue #1416 で
+  直っている。`isolate: false` の試走で `--sequence.shuffle` を当てたところ、別のファイル
+  （`embedding-space-table-enumeration-consistency.postgres.test.ts`）に同じ形の `it` の順序依存が
+  見つかり、直した（ADR 0397）。
+
 ## 追記（2026-09-30）: 「`upgrade-from-released` の順序依存は範囲外」とした件は、解消済み
 
 **上の本文は当時の記録として書き換えない。** 「`--sequence.shuffle` で見つかった、この PR とは無関係な既存の壊れ方」と「確かめていないこと」の末尾で範囲外とした `upgrade-from-released.postgres.test.ts` の `it()` 順序依存は、[Issue #1416](https://github.com/takecchi/mnemora/issues/1416) として起票され、[PR #1418](https://github.com/takecchi/mnemora/pull/1418) で直った（Issue #1416 は閉じている）。

@@ -36,6 +36,9 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * await driver.stop();
  * ```
  *
+ * tick の失敗（`runtime.tick()` の throw）と Worker の異常は、`onTickError` に届く。成功した tick の
+ * 結果は `onTickResult` に届く（どちらも省略可）。詳しくは `CreateBullmqTickDriverOptions` の各 doc。
+ *
  * **`start()` を呼ぶまでジョブは処理しない**（Issue #890）。`createBullmqTickDriver(...)`
  * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
  * `start()` が明示的に `worker.run()` を呼んで初めて始まる。
@@ -84,7 +87,19 @@ export interface CreateBullmqTickDriverOptions {
   jobName?: string;
   /** `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。 */
   onTickResult?: (result: TickResult) => void;
-  /** Worker が `"error"` を emit したときに呼ばれる（観測用。省略可）。 */
+  /**
+   * tick の失敗と Worker の異常を受け取る（観測用。省略可）。次の2つの経路から、`error` を渡して呼ばれる。
+   *
+   * - **`runtime.tick()`（と `onTickResult`）が throw した** ——BullMQ の Worker は processor の throw を
+   *   `'error'` ではなく `'failed'`（job, err）として emit する（bullmq 6.3.8 の実測）ので、driver は
+   *   `'failed'` を拾って **job ではなく error だけ**を渡す。以前はこの経路が届かず、tick の失敗が
+   *   誰にも見えなかった。失敗した tick のジョブは BullMQ 側に failed として残るが、繰り返しジョブは
+   *   次の発火でまた tick する（この driver は再試行を足していない）。
+   * - Worker が `'error'` を emit した（Redis 接続の異常、`worker.run()` の reject など）。
+   *
+   * 1回の失敗につき、どちらか一方の経路で1回だけ呼ばれる（BullMQ は processor の throw で `'error'` を
+   * 併せて emit しない）。
+   */
   onTickError?: (error: unknown) => void;
 }
 
@@ -146,6 +161,13 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
     { connection: opts.connection, concurrency, autorun: false },
   );
   worker.on("error", (err) => {
+    opts.onTickError?.(err);
+  });
+  // 🔴 processor（= `runtime.tick()`）の throw は `'error'` ではなく `'failed'` で来る（bullmq 6.3.8
+  // `worker.js` の `handleFailed`: `this.emit('failed', job, err, 'active')`。実 Redis での実測は
+  // `tick-driver.failed.redis.test.ts`）。拾わないと `onTickError` が tick の失敗を取りこぼす。
+  // 渡すのは job ではなく error。`'error'` は emit されないので二重には通知しない。
+  worker.on("failed", (_job, err) => {
     opts.onTickError?.(err);
   });
 

@@ -224,8 +224,10 @@ digest 安全弁と対になる）。
 
 `packages/core` が実行時に依存してよいのは **zod だけ**である。DB クライアント、LLM SDK、
 キュークライアントのいずれも `core` の `package.json` の `dependencies` に現れない。これは
-方針ではなく `packages/testkit` の CI チェックと `package.json` の lint（禁止依存の静的検査）で
-機械的に担保する。core が知ってよいのは interface（この doc の §5）と純関数の戦略（`ScoringStrategy` /
+方針ではなく `packages/core/src/__tests__/dependency-boundary.test.ts` の2本で機械的に担保する
+（`package.json` の `dependencies` のキーが `zod` だけであること／`src`（テスト除く）が実行時に import するものが
+`zod`・相対パス・`node:` 組み込みだけであること。後者は TypeScript の AST で見るので、`import type` は許し、
+devDependency の実行時 import は build を待たず test で赤になる）。core が知ってよいのは interface（この doc の §5）と純関数の戦略（`ScoringStrategy` /
 `DecayStrategy`）だけであり、実体（Postgres・OpenAI・BullMQ）は adapter パッケージ側にしか存在しない。
 
 ### 3.7 multi-tenant
