@@ -97,6 +97,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
     を足した（`EventStore` には足していない）。4つのうち1つでも無ければ、何も消さずに
     `{ kind: "store_unsupported", missing }` を返す。他テナントの行がこのテナントの行を
     参照していれば、1行も消さずに `{ kind: "blocked_by_foreign_reference", count }` を返す。
+    **いずれかの port が `reachedLimit: true` を返した回（`limit` で途中で止まった回）は、
+    `memoryStore` → `vectorStore` → `outboxStore` の順に、そこで打ち切って後ろの port を
+    呼ばない**（設定は最後、という [ADR 0383](./docs/decisions/0383-erase-tenant.md) の
+    約束。呼ばなかった port の `deleted` は `0`、`dryRun` も同じ。追記は同 ADR の末尾、
+    [PR #1526](https://github.com/takecchi/mnemora/pull/1526)）。設定が消えるのは、前の port が
+    消し切った最後の回だけ。`deleted.memoryStore` は `memoryStore` が消す10表の合計、
+    `deleted.vectorStore` は本番では CASCADE のため `0` になる（doc を直した）。
   - `@mnemora/postgres`: 4つの store に `eraseTenant` を実装した。
     **DB マイグレーション `0027_erase_tenant_fk_indexes.sql` が増えた**（外部キー検査の
     ための単一列の索引。埋め込み空間の表には `(memory_id)` の索引を遡って足す）。
@@ -422,6 +429,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`runtime.resolveContestedGroup` で負けた側の `superseded` イベントの `meta` に、勝った側の id を `supersededById` として持たせた**（[ADR 0421](./docs/decisions/0421-concurrent-write-and-audit-event-holes.md)、[ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) の追記に揃えた）。2者版 `resolveContested` は最初から持っていたが、群版は持たず、`memory_events` の `meta` だけを読む人には「誰に負けたか」が分からなかった（記憶の行の `supersededById` 列は今までも入っていた）。
   - 値は store へ渡している `supersededById` と同じ（`memberIds` の綴りに寄せた `winnerId`）。勝者の `updated` と `both_active` の `updated` には足さない。
   - 欄を足すだけで、既存の欄は変えていない。**非破壊**。公開 API に変更は無い（JSDoc のみ）。DB マイグレーションは足していない。
+- **`@mnemora/testkit` のインメモリ `eraseTenant` が、Postgres 実装と同じく `tenant_subject_activity` を subject ごとの行で数え、消した `memories` の埋め込みも一緒に消す（`ON DELETE CASCADE` に当たる動き）ようになった**（[ADR 0426](./docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md)）。`InMemoryMemoryStore` に public メソッド `onMemoriesDeleted` が増えた（非破壊）。conformance suite の要件は変わらない。
+
+- **`@mnemora/postgres` の `purgeExpiredEvents` が積む `events_purged` の `at` を、読み戻した値のまま `EventStore.list` の `until` に渡すと、その行自身が返らなかった穴を塞いだ**（[ADR 0427](./docs/decisions/0427-events-purged-at-millisecond.md)）。`at` を SQL の `now()`（マイクロ秒）から、他の書き込みの口と同じ JS の時刻（`toPgTimestamp`、ミリ秒）へ替えた。`at` は DB サーバの時計ではなく adapter のプロセスの時計になる。公開 API の変更は無い。
 
 ---
 

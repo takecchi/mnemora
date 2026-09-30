@@ -1151,10 +1151,11 @@ mnemora ではこの前提が成立しない。
 このリポジトリは「呼ぶための部品」だけを提供する。
 
 **⚠ 2026-09-30 追記（文書だけ。実行時の振る舞いは変えていない）: `events_purged` の行の `at` は、`Runtime` に渡した `clock` の時刻ではない。**
-実装ごとに時計が違う（どちらも `clock` ではない）。`@mnemora/postgres` は SQL の `now()`（DB の時計。
-`purgeExpiredEvents` の `INSERT` 文の `at` 列）、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
+どちらの実装も `clock` ではなく、adapter を動かすプロセスの壁時計（ミリ秒）で積む。`@mnemora/postgres` は
+`purgeExpiredEvents` の `INSERT` 文の `at` 列に `new Date()` を `toPgTimestamp` で渡し、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
 `buildStoredMemoryEvent` が `event.at ?? new Date()`（JS の壁時計）で埋める。⟹ テストで `clock` を固定しても、
-この `at` は固定されない。（Postgres の `now()` が「文の時刻」か「トランザクション開始の時刻」かは、確かめていない。）
+この `at` は固定されない。（`@mnemora/postgres` は 2026-09-30 まで SQL の `now()`（DB の時計・マイクロ秒）で積んでいたが、
+読み戻した `at` を `until` に渡すとその行自身が返らなかったため、[ADR 0427](./decisions/0427-events-purged-at-millisecond.md) でプロセスの時計に替えた。）
 `meta` の `olderThan` は別で、`purgeExpiredEventsForTenant` が `opts.now ?? new Date()` から保持期間で
 引いた値である（これも `Runtime` の `clock` ではない）。
 
@@ -1254,7 +1255,7 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **この追記が上書きしないもの**: `recalls` の保持方針（生きているテナントの分。ADR 0290 が未決のまま）——`eraseTenant` は「丸ごと消す」操作であり、「どれだけの期間保持するか」という問いには答えていない。`forget`/`purge`（1つの Memory を対象にした既存の口）自体の契約も変わっていない——上の表・ADR 0375 の約束は「1つの Memory を purge したとき」の話として、引き続きそのまま成り立つ。
 
-**⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md) 末尾の追記）: `eraseTenant` の戻り値の `deleted.vectorStore` は、`dryRun` では実数（例: `26`）、本番では `0` になりうる。行は正しく消えている。**`memoryStore` を先に消す（順序は ADR 0383 決定5の不変条件）と、`memories` の削除で `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みを一緒に消すため、その後に呼ばれる `VectorStore.eraseTenant?` には数えるものが残らない。`dryRun` は何も消さないので、消える予定の埋め込みをそのまま数える。件数は「その port 自身が消した行数」であり、消去の完了は戻り値の件数ではなく、消去後に表を数えて確かめること。
+**⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md) 末尾の追記。同日、続きの追記で `limit` で止まった回の振る舞いを直した）: `eraseTenant` の戻り値の `deleted` の各欄は「その port 自身が、この呼び出しで消した行数」であり、とくに `deleted.vectorStore` は、`dryRun` では実数（例: `26`）、本番では `0` になりうる。行は正しく消えている。**`memoryStore` を先に消す（順序は ADR 0383 決定5の不変条件）と、`memories` の削除で `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みを一緒に消すため、その後に呼ばれる `VectorStore.eraseTenant?` には数えるものが残らない。`dryRun` は何も消さないので、消える予定の埋め込みをそのまま数える。**`limit` で `memoryStore`（または `vectorStore`・`outboxStore`）が途中で止まった回は、後ろの port を呼ばない**（`reachedLimit: true` で返り、呼ばなかった port の `deleted` は `0`。`dryRun` も同じ）——設定・outbox・埋め込みは、`memories` などを消し切る呼び直しの回まで残る（「設定は最後」の約束。ADR 0383 の追記）。`deleted.memoryStore` は `memories` だけの行数ではなく、`memoryStore` が消す10表の行数の合計である。消去の完了は戻り値の件数ではなく、消去後に表を数えて確かめること。
 
 **⚠ 2026-09-30 追記（文書だけ。[ADR 0383](./decisions/0383-erase-tenant.md) の追記2）: `eraseTenant` は、そのテナントへの書き込みを止めてから呼ぶ。終わりは `deleted` が全部 `0` になった回である。**
 同じテナントへ `observe()`・`tick()` などで書き込みながら呼ぶと、行が残りうる——消している途中に書かれた行は、その回では消えない。
