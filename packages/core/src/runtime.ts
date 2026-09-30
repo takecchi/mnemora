@@ -7523,6 +7523,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           {
             text: seed.digest,
             activityCounting: target.activityCounting,
+            // ADR 0415: この recall は `memories` しか読まない（`totalInScope`・目次帯・`filtered*` は読まない）ので、
+            // 件数の集計（`aggregateScope` の `GROUP BY subject_id`）を発行しない。
+            scopeAggregate: "skip",
           },
           { signal: opts.signal },
         );
@@ -7542,7 +7545,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     } else {
-      const recallResult = await recall(ctx, target.query, { signal: opts.signal });
+      // ADR 0415: 利用者が `scopeAggregate` を明示していなければ "skip"（件数の集計を発行しない）。
+      // ここは `memories` しか読まない。明示された値（"exact" を含む）は尊重する。
+      const recallResult = await recall(
+        ctx,
+        { ...target.query, scopeAggregate: target.query.scopeAggregate ?? "skip" },
+        { signal: opts.signal },
+      );
       const recalledIds = recallResult.memories.map((m) => m.memoryId);
       ids =
         target.maxCandidates === undefined
@@ -8025,6 +8034,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           {
             text: seed.digest,
             activityCounting: target.activityCounting,
+            // ADR 0415: この recall は `memories` しか読まない（`totalInScope`・目次帯・`filtered*` は読まない）ので、
+            // 件数の集計（`aggregateScope` の `GROUP BY subject_id`）を発行しない。
+            scopeAggregate: "skip",
           },
           { signal: opts.signal },
         );
@@ -8044,7 +8056,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     } else {
-      const recallResult = await recall(ctx, target.query, { signal: opts.signal });
+      // ADR 0415: 利用者が `scopeAggregate` を明示していなければ "skip"（件数の集計を発行しない）。
+      // ここは `memories` しか読まない。明示された値（"exact" を含む）は尊重する。
+      const recallResult = await recall(
+        ctx,
+        { ...target.query, scopeAggregate: target.query.scopeAggregate ?? "skip" },
+        { signal: opts.signal },
+      );
       const recalledIds = recallResult.memories.map((m) => m.memoryId);
       ids =
         target.maxCandidates === undefined
