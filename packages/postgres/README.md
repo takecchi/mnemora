@@ -120,6 +120,27 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
   `pg_extension` を読む。同時に既定の `create` のプロセスが拡張を作っている最中だと、`verify` のほうは
   「必要な拡張が見当たりません」で失敗しうる——拡張ができた後に打ち直せば通る。
 
+### ⚠ `lockTimeoutMs` は DDL の表ロック待ちには効かない（上限を付けるなら接続側で）
+
+- **`runMigrations` の `lockTimeoutMs`（既定 30 秒）が効くのは、advisory lock を待つ間だけである。**ロックを取った直後に
+  `RESET lock_timeout` するので（`src/migrate.ts` の `runMigrations`。共有の拡張ロックを待つ `acquireExtensionLock` も、待つ間だけ敷いて
+  `RESET` する）、本体の DDL が**表のロック**（稼働中のアプリが握っている表への `ALTER TABLE` など）を待つ間は、
+  セッションの `lock_timeout` の既定値に従う。サーバの既定は `0`（上限なし）なので、**何も渡さなければ DDL はロックを待ち続ける**。
+  `lockTimeoutMs` に小さい値を渡しても変わらない。
+- **上限を付けたければ、接続側で `lock_timeout` を渡す。**次のどれでもよい。
+  - 接続文字列: `DATABASE_URL=postgresql://user:pass@host:5432/mydb?options=-c%20lock_timeout%3D5s`（CLI もこれで効く）
+  - pg の `PoolConfig`: `new Pool({ connectionString, options: "-c lock_timeout=5s" })`
+  - ロール・DB の設定: `ALTER ROLE migrator SET lock_timeout = '5s'`（`ALTER DATABASE … SET` も同様）
+- ⚠ `RESET lock_timeout` が戻すのは「セッションの既定値」であり、`0` ではない。接続の起動パラメータやロール・DB の設定で渡した値は、
+  `RESET` のあとも残る。【実測】2026-09-30、PostgreSQL 17.11・ローカル。別セッションが `ACCESS EXCLUSIVE` で握っている表に
+  `ALTER TABLE … ADD COLUMN` するマイグレーション1本を `runMigrations(pool, dir, { lockTimeoutMs: 100 })` で流した:
+  接続文字列の `options`・`PoolConfig.options`・`ALTER ROLE … SET lock_timeout='2s'` の3通りは、いずれも約2秒で失敗した。
+  何も渡さない場合は、握っている側が手放す（約8秒後）まで待って成功した（`lockTimeoutMs: 100` は効かなかった）。
+  **測っていないもの**: `ALTER DATABASE … SET`、`PGOPTIONS` 環境変数、pgbouncer などの接続プール越し（起動パラメータが落ちる構成がありうる）。
+- **時間切れになったとき**: そのファイルのトランザクションは `ROLLBACK` され、`migration <file> failed: canceling statement due to lock timeout`
+  で throw される（`MigrationLockTimeoutError` ではない——あれは advisory lock の待ちの時間切れ）。台帳（`_mnemora_migrations`）にも
+  載らないので、そのまま再実行できる（上の実測で、失敗後の台帳は空・列は増えていなかった）。
+
 ### ⚠ 新規インストール後、最初のデータ投入が終わったら `--analyze-memories` を実行すること
 
 **新規インストールの直後は、ANN（近似最近傍）検索が「索引が無いのと同じ遅さ」で動く。**
