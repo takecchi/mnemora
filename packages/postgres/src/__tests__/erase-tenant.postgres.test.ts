@@ -391,8 +391,8 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     const otherBefore = await countAll(pool, OTHER);
     // `limit` より多い行が残る形になっていること（そうでないと「止まった回」が作れない）。
     const LIMIT = 10;
-    expect(before.memories).toBeGreaterThan(0);
-    expect(before.memories + before.memory_events + before.recalls).toBeGreaterThan(LIMIT);
+    expect(before.memories!).toBeGreaterThan(0);
+    expect(before.memories! + before.memory_events! + before.recalls!).toBeGreaterThan(LIMIT);
     expect(before.tenant_settings).toBeGreaterThan(0);
     expect(before.outbox).toBeGreaterThan(0);
     expect(before[embeddingTable]).toBeGreaterThan(0);
@@ -412,13 +412,15 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     expect(first.reachedLimit).toBe(true);
     const afterFirst = await countAll(pool, T);
     // まだ消え残りがある（途中で止まった）。
-    expect(afterFirst.memories + afterFirst.memory_events + afterFirst.recalls).toBeGreaterThan(0);
+    expect(afterFirst.memories! + afterFirst.memory_events! + afterFirst.recalls!).toBeGreaterThan(
+      0,
+    );
     // 設定と outbox は1行も消えていない。
     expect(afterFirst.tenant_settings).toBe(before.tenant_settings);
     expect(afterFirst.outbox).toBe(before.outbox);
     // 埋め込みは、消えた memories に CASCADE で巻き込まれた分しか減らない。
     expect(before[embeddingTable]! - afterFirst[embeddingTable]!).toBeLessThanOrEqual(
-      before.memories - afterFirst.memories,
+      before.memories! - afterFirst.memories!,
     );
 
     // 呼ばなかった port の deleted は 0。

@@ -85,6 +85,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
     を足した（`EventStore` には足していない）。4つのうち1つでも無ければ、何も消さずに
     `{ kind: "store_unsupported", missing }` を返す。他テナントの行がこのテナントの行を
     参照していれば、1行も消さずに `{ kind: "blocked_by_foreign_reference", count }` を返す。
+    **いずれかの port が `reachedLimit: true` を返した回（`limit` で途中で止まった回）は、
+    `memoryStore` → `vectorStore` → `outboxStore` の順に、そこで打ち切って後ろの port を
+    呼ばない**（設定は最後、という [ADR 0383](./docs/decisions/0383-erase-tenant.md) の
+    約束。呼ばなかった port の `deleted` は `0`、`dryRun` も同じ。追記は同 ADR の末尾、
+    [PR #1526](https://github.com/takecchi/mnemora/pull/1526)）。設定が消えるのは、前の port が
+    消し切った最後の回だけ。`deleted.memoryStore` は `memoryStore` が消す10表の合計、
+    `deleted.vectorStore` は本番では CASCADE のため `0` になる（doc を直した）。
   - `@mnemora/postgres`: 4つの store に `eraseTenant` を実装した。
     **DB マイグレーション `0027_erase_tenant_fk_indexes.sql` が増えた**（外部キー検査の
     ための単一列の索引。埋め込み空間の表には `(memory_id)` の索引を遡って足す）。
