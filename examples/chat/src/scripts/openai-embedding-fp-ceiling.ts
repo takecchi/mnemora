@@ -74,7 +74,7 @@ import {
  *
  * ```
  * OPENAI_API_KEY=... DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts
+ *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts
  * ```
  *
  * 環境変数:
@@ -371,7 +371,7 @@ async function main(): Promise<void> {
       measuredAt: recordedAt,
       how:
         "OPENAI_API_KEY=... DATABASE_URL=... " +
-        "tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts",
+        "pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts",
       embeddingSpace: space,
       note:
         "round 0(このファイルの出所)。round 1.." +
@@ -396,7 +396,7 @@ async function main(): Promise<void> {
       measuredAt: recordedAt,
       how:
         "OPENAI_API_KEY=... DATABASE_URL=... " +
-        "tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts",
+        "pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts",
       embeddingSpace: space,
       note: `round 0(このファイルの出所)。round 1..${rounds} は openai-embedding-fp-ceiling-measurement.json。`,
     },

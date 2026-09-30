@@ -107,16 +107,21 @@ Queue/Worker を構築するだけで、Worker は `autorun: false` で作る—
     onTickError: (error) => console.error("mnemora tick failed", error),
   });
   ```
-- **`Queue` 側のエラーは `onTickError` に届かない。** driver は `Worker` にだけ `'error'`・`'failed'` の listener を付け、
-  `Queue`（繰り返しジョブの登録に使う）には listener を付けていない。`Queue` が `'error'` を emit しても
-  listener が無いので、bullmq（6.3.8 の `QueueBase.emit`）が **`console.error` へ固定で出す**——出力先を変える口は
-  この driver には無い。Redis に繋がらないときの接続エラーは、`onTickError` を渡していても、こちらの経路では
-  標準エラーにしか出ない。
-  - 【実測】Redis が居ないポートを指した `Queue` を listener 無しで作ると、`listenerCount("error")` は 0 で、
-    `ECONNREFUSED` が `console.error` に出る（bullmq 6.3.8、Redis 無しで確かめた）。**`Worker` 側の経路と、
-    Redis が在る状態での `Queue` の失敗は、この PR では測っていない。**
-  - コードは変えていない。`Queue` の error も `onTickError` へ流すかどうかは別の判断である（流すなら
-    `tick-driver.ts` で `queue.on("error", …)` を足すことになる）。
+- **`Queue` 側のエラーも `onTickError` に届く**（`onTickError` を渡しているとき）。driver は `Worker` の
+  `'error'`・`'failed'` に加え、`Queue`（繰り返しジョブの登録に使う）の `'error'` にも listener を付け、
+  Redis 接続の失敗などを `onTickError` へ渡す。以前は `Queue` に listener が無く、bullmq が `console.error` へ
+  固定で出すだけだった。
+  - **`onTickError` を渡さないときは、`Queue` に listener を付けない。**付けると bullmq（6.3.8 の `QueueBase.emit`:
+    listener の無い `'error'` は EventEmitter が throw し、bullmq がそれを捕まえて `console.error` へ出す）の
+    既定の出力が消え、`Queue` の異常が完全に黙るため。渡していなければ従来どおり標準エラーに出る
+    （`Worker` 側は従来から、渡していなければ黙る）。
+  - **同じ障害で、`onTickError` が複数回呼ばれうる。**`Queue` と `Worker` は別々の Redis 接続を持ち、接続ごとに
+    `'error'` を出す。Redis が落ちると両方が出す——同じ事象の重複ではなく別の接続の事象なので、driver は束ねない。
+    tick の失敗（`'failed'`）は、1回の失敗につき1回。通知のたびに通知先（アラートなど）が鳴るなら、
+    呼び出し側で間引くこと。
+  - 【実測】Redis が居ないポートを指した `Queue` と `Worker` は、それぞれ `ECONNREFUSED` を emit した
+    （bullmq 6.3.8、Redis 無しで確かめた）。**Redis が在る状態での `Queue` の失敗は測っていない**
+    （歯は fake の `Queue` が emit する形で縛っている）。
 
 ## 確かめていないこと
 
