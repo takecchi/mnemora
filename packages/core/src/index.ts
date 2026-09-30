@@ -2,6 +2,7 @@
 // このファイルからのみ、外部から見えるべき名前をすべて名前付きで export する。
 
 export * from "./ctx.js";
+export * from "./identifier.js";
 export * from "./abort.js";
 export * from "./ids.js";
 export * from "./attributes.js";

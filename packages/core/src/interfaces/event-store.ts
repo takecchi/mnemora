@@ -64,6 +64,10 @@ export interface EventStore {
    * - **並び順**: `at` の昇順（`PostgresEventStore` の `ORDER BY at ASC` が基準）。
    *   **`at` が同値の行同士の順序は規定しない** —— Postgres の `ORDER BY at ASC` は
    *   同値の行の順序を保証しないため、規定しても守れない約束になる。
+   *   ⚠ **この順序を当てにしてはいけない**（ADR 0422）。同じ操作が積む `created` と `superseded`
+   *   （`consolidate`・`reextract`）は同じ `at` を持つので、その並びは挿入順とも限らない
+   *   （実装の都合で挿入順が入れ替わることもある）。順が要るときは `kind` と `meta`
+   *   （例: `superseded` の `meta.supersededById`）で関係を読むこと。
    * - **`limit`**: 上記の並び順に**並べ替えた後**に適用する。すなわち「`at` が最も
    *   古い n 件」を返す —— 挿入順の先頭 n 件ではない。`append` は呼び出し側が
    *   任意の `at` を渡せる（`event.at ?? new Date()`）ため、挿入順と `at` 順は

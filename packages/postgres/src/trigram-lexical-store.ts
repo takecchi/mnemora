@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
 import {
   TRIGRAM_JAPANESE_QUERY_MAX_CHARS,
@@ -211,9 +212,18 @@ export interface TrigramLexicalProbeUnavailable {
 
 /**
  * `probeTrigramLexicalSupport` の戻り値。「なぜ使えないか」を値として返す
- * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数自身は
- * 投げない——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）のために
- * 例外と値の両方の入口を用意する）。
+ * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数は
+ * 「使えない理由」を値で返す——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）の
+ * ために例外と値の両方の入口を用意する）。
+ *
+ * ⚠ **「使えない」ことを値で返すのであって、この関数が一切 reject しないわけではない。**
+ * 先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、失敗を握らずそのまま
+ * 伝える——接続の失敗・権限の不足（カタログを読めない等）はここで reject する（値の
+ * {@link TrigramLexicalProbeUnavailable} にはならない）。値になるのは、エンコーディングが UTF8 でない
+ * （`server_encoding_not_utf8`）・拡張が入手できない（`extension_unavailable`）・`CREATE EXTENSION`
+ * 以降で失敗した（`extension_create_denied`/`extension_create_failed`。`vector` の
+ * スキーマを読む SELECT もこの `try` の中）場合である。ヘルスチェックに使うときは、reject も
+ * 「使えるか分からない」として扱うこと。
  */
 export type TrigramLexicalProbeResult = TrigramLexicalProbeOk | TrigramLexicalProbeUnavailable;
 
@@ -879,6 +889,8 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     const threshold = this.threshold;
     // `content %> $ja` は `pg_trgm.word_similarity_threshold`（セッション変数）を読む。
     // `set_config(name, value, true)` で設定する——値はパラメータで渡し、第3引数の `true`

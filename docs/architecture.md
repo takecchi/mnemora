@@ -434,7 +434,11 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    }
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -498,6 +502,8 @@ interface MemoryStore {
     opts?: {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      abortIfAllConflicted?: boolean;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }
   ): Promise<{
@@ -513,7 +519,11 @@ interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    }
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -985,7 +995,7 @@ adapter では `Runtime` が `listRelated` を起点ごとに直列に呼ぶ（�
 
 **⚠ 以下は当時（RelationStore 未実装）のドラフトの記録。上の追記が正しい形。**
 
-```ts
+```text
 interface RelationStore {
   link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
@@ -1181,6 +1191,11 @@ interface EventStore {
   （[docs/memory-model.md](./memory-model.md) の監査ログの節）。
 - 本文は記録しない。記録するのは tenant_id・memory_id・kind・at・actor・digest のスナップショット・
   直前のサイズのみ。
+- **`list` の並びは `at` の昇順だけで、`at` が同じイベントどうしの並びは約束しない。当てにしてはいけない。**
+  同じ操作が積む `created` と `superseded`（`consolidate`・`reextract`）は同じ `at`（その操作の入口の `now`）を
+  持つ。順が要るときは `kind` と `meta`（例: `superseded` の `meta.supersededById`）で関係を読むこと
+  （[ADR 0422](./decisions/0422-reextract-created-event-at-and-meta.md)。`list` の `limit`・`since` の
+  扱いは [ADR 0042](./decisions/0042-event-store-list-order-and-limit.md)）。
 - `forget()` は status の更新とイベントの追記を同一トランザクションで行う。**その2つを1呼び出しに
   まとめた口が `MemoryStore.updateStatusWithEvent`**（ADR 0031）であり、`Runtime.forget()` は
   これを使う（[ADR 0087](./decisions/0087-runtime-forget-shape.md)）。`updateStatus` と
@@ -1237,12 +1252,11 @@ interface ClaimOutboxJobsOptions {
 
 class OutboxLeaseConflictError extends Error {
   /** 判別子（ADR 0418）。クラスが2つの版に分かれても読める値。 */
-  readonly kind: "outbox_lease_conflict";
-  constructor(
-    readonly jobId: string,
-    readonly expectedAttempts: number,
-    readonly observedAttempts: number | null,
-  );
+  declare readonly kind: "outbox_lease_conflict";
+  declare readonly jobId: string;
+  declare readonly expectedAttempts: number;
+  declare readonly observedAttempts: number | null;
+  constructor(jobId: string, expectedAttempts: number, observedAttempts: number | null);
 }
 
 /**
