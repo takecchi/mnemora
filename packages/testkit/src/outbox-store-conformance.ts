@@ -373,6 +373,64 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(claimedB).toEqual([]);
     });
 
+    // 別テナントの ctx からの `complete` / `fail` は、その行に触れない・存在も知らせない。
+    // 「触れない」は、リースが切れた後に持ち主が再 claim できる（＝終端が付いていない）ことで測る。
+    // 「知らせない」は、attempts が一致しない呼び出しでも `OutboxLeaseConflictError` にならず
+    // 存在しない id と同じ無言の no-op になることで測る。
+    for (const how of ["complete", "fail"] as const) {
+      const terminate = (
+        store: OutboxStore,
+        ctx: Ctx,
+        jobId: string,
+        attempts: number,
+      ): Promise<void> =>
+        how === "complete"
+          ? store.complete(ctx, jobId, attempts)
+          : store.fail(ctx, jobId, "cross-tenant", attempts);
+
+      it(`${how} は別テナントの ctx からは、同じ id と attempts を指定してもそのジョブに終端を付けない`, async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const job = await seedJob(ctxA, { kind: "extract" });
+        const claimed = await store.claimBatch(ctxA, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-a",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        const claimedJob = claimed.find((j) => j.id === job.id)!;
+
+        await expect(terminate(store, ctxB, job.id, claimedJob.attempts)).resolves.toBeUndefined();
+
+        const reclaimed = await store.claimBatch(ctxA, {
+          limit: 10,
+          now: new Date(Date.now() + DEFAULT_LEASE_MS + 1),
+          claimedBy: "worker-a2",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(reclaimed.map((j) => j.id)).toContain(job.id);
+      });
+
+      it(`${how} は別テナントの ctx からは、attempts が一致しなくても OutboxLeaseConflictError にならない（存在しない id と同じ扱い）`, async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const job = await seedJob(ctxA, { kind: "extract" });
+        const claimed = await store.claimBatch(ctxA, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-a",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        const claimedJob = claimed.find((j) => j.id === job.id)!;
+
+        await expect(
+          terminate(store, ctxB, job.id, claimedJob.attempts - 1),
+        ).resolves.toBeUndefined();
+      });
+    }
+
     // -------------------------------------------------------------------
     // claim のリース（ADR 0032）
     // -------------------------------------------------------------------
@@ -704,6 +762,44 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
         });
         expect(claimed.length).toBeGreaterThanOrEqual(1);
       });
+
+      it("eraseTenant は dryRun: true のとき、別テナントの行を件数に数えない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "erase-tenant-dry-a" };
+        const ctxB: Ctx = { tenantId: "erase-tenant-dry-b" };
+        await seedJob(ctxA, { kind: "extract" });
+        await seedJob(ctxA, { kind: "embed" });
+        await seedJob(ctxB, { kind: "extract" });
+        await seedJob(ctxB, { kind: "embed" });
+        await seedJob(ctxB, { kind: "extract" });
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000, dryRun: true });
+        expect(result).toEqual({ deleted: 2, reachedLimit: false });
+      });
+
+      it("eraseTenant は別テナントの行が先に積まれていても、limit の枠を対象テナントの行に使う", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "erase-tenant-crowd-a" };
+        const ctxB: Ctx = { tenantId: "erase-tenant-crowd-b" };
+        // 別テナントの行を先に積む（挿入順に読む実装でも、枠が別テナントの行に取られないこと）。
+        for (let i = 0; i < 3; i++) {
+          await seedJob(ctxB, { kind: "extract" });
+        }
+        for (let i = 0; i < 2; i++) {
+          await seedJob(ctxA, { kind: "extract" });
+        }
+
+        const result = await store.eraseTenant!(ctxA, { limit: 2 });
+        expect(result).toEqual({ deleted: 2, reachedLimit: true });
+
+        const claimedB = await store.claimBatch(ctxB, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        expect(claimedB).toHaveLength(3);
+      });
     } else {
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
@@ -908,6 +1004,79 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
           expect(result.purged).toBe(1);
           expect(result.oldestPurgedAt).toEqual(new Date("2020-01-01T00:00:00.000Z"));
           expect(await peekJob!(ctx, job.id)).not.toBeNull();
+        },
+      );
+
+      // 別テナントの完了行が古く・先に在る状況で、対象テナントの結果が別テナントの行に
+      // 侵されないこと（件数・reachedLimit・古さの端）。
+      (peekJob ? it : it.skip)(
+        "purgeCompletedJobs は dryRun のとき、別テナントの完了行を件数・時刻の端に数えない",
+        async () => {
+          const store = await createStore();
+          expect(typeof store.purgeCompletedJobs).toBe("function");
+          const ctxA: Ctx = { tenantId: "tenant-a" };
+          const ctxB: Ctx = { tenantId: "tenant-b" };
+          await seedTerminal(store, ctxB, "complete", new Date("2019-01-01T00:00:00.000Z"));
+          await seedTerminal(store, ctxB, "complete", new Date("2019-01-02T00:00:00.000Z"));
+          await seedTerminal(store, ctxA, "complete", new Date("2020-01-01T00:00:00.000Z"));
+          await seedTerminal(store, ctxA, "complete", new Date("2020-01-02T00:00:00.000Z"));
+
+          const result = await store.purgeCompletedJobs!(ctxA, {
+            olderThan: new Date("2025-01-01T00:00:00.000Z"),
+            limit: 2,
+            dryRun: true,
+          });
+
+          expect(result.purged).toBe(2);
+          expect(result.reachedLimit).toBe(false);
+          expect(result.oldestPurgedAt).toEqual(new Date("2020-01-01T00:00:00.000Z"));
+          expect(result.newestPurgedAt).toEqual(new Date("2020-01-02T00:00:00.000Z"));
+        },
+      );
+
+      (peekJob ? it : it.skip)(
+        "purgeCompletedJobs は別テナントの完了行のほうが古くても、limit の枠を対象テナントの行に使う",
+        async () => {
+          const store = await createStore();
+          expect(typeof store.purgeCompletedJobs).toBe("function");
+          const ctxA: Ctx = { tenantId: "tenant-a" };
+          const ctxB: Ctx = { tenantId: "tenant-b" };
+          const theirs1 = await seedTerminal(
+            store,
+            ctxB,
+            "complete",
+            new Date("2019-01-01T00:00:00.000Z"),
+          );
+          const theirs2 = await seedTerminal(
+            store,
+            ctxB,
+            "complete",
+            new Date("2019-01-02T00:00:00.000Z"),
+          );
+          const mine1 = await seedTerminal(
+            store,
+            ctxA,
+            "complete",
+            new Date("2020-01-01T00:00:00.000Z"),
+          );
+          const mine2 = await seedTerminal(
+            store,
+            ctxA,
+            "complete",
+            new Date("2020-01-02T00:00:00.000Z"),
+          );
+
+          const result = await store.purgeCompletedJobs!(ctxA, {
+            olderThan: new Date("2025-01-01T00:00:00.000Z"),
+            limit: 2,
+          });
+
+          expect(result.purged).toBe(2);
+          expect(result.reachedLimit).toBe(false);
+          expect(await peekJob!(ctxA, mine1.id)).toBeNull();
+          expect(await peekJob!(ctxA, mine2.id)).toBeNull();
+          expect(await peekJob!(ctxB, theirs1.id)).not.toBeNull();
+          expect(await peekJob!(ctxB, theirs2.id)).not.toBeNull();
         },
       );
     } else if (supportsPurgeCompletedJobs === false) {

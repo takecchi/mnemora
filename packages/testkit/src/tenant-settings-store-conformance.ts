@@ -173,6 +173,15 @@ export function describeTenantSettingsStoreConformance(
         expect(await store.getDefaultHalfLifeHours(ctx)).toBe(24);
       });
 
+      it("別テナントだけが設定済みのとき、設定行が無いテナントには DEFAULT_HALF_LIFE_HOURS を返す", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: `tenant-half-life-unset-${Math.random()}` };
+        const ctxB: Ctx = { tenantId: `tenant-half-life-set-${Math.random()}` };
+        await setDefaultHalfLifeHours(ctxB, 24);
+        expect(await store.getDefaultHalfLifeHours(ctxB)).toBe(24);
+        expect(await store.getDefaultHalfLifeHours(ctxA)).toBe(DEFAULT_HALF_LIFE_HOURS);
+      });
+
       it("⚠ 値域の外の default_half_life_hours を拒む（ADR 0125 / Issue #231）", async () => {
         // `default_half_life_hours` は `getDefaultHalfLifeHours` を経由して
         // `Memory.halfLifeHours` の既定値になり、`decay`/`freshness` の式
@@ -441,6 +450,15 @@ export function describeTenantSettingsStoreConformance(
           expect(await store.getActivitySeq!(ctx)).toBe(0);
         });
 
+        it("hasSubjectActivityCounters: 別テナントだけにカウンタが在るとき、行が無いテナントには false を返す", async () => {
+          const store = await createStore();
+          const ctxA: Ctx = { tenantId: `tenant-subject-activity-has-a-${Math.random()}` };
+          const ctxB: Ctx = { tenantId: `tenant-subject-activity-has-b-${Math.random()}` };
+          await advanceSubjectActivitySeq(ctxB, "alice");
+          expect(await store.hasSubjectActivityCounters!(ctxB)).toBe(true);
+          expect(await store.hasSubjectActivityCounters!(ctxA)).toBe(false);
+        });
+
         it("getSubjectActivitySeqs: テナントごとに独立している", async () => {
           const store = await createStore();
           const ctxA: Ctx = { tenantId: `tenant-subject-activity-a-${Math.random()}` };
@@ -548,6 +566,17 @@ export function describeTenantSettingsStoreConformance(
         expect(result.deleted).toBe(1);
 
         expect(await store.getEventRetention(ctx)).toEqual({ kind: "days", days: 30 });
+      });
+
+      it("eraseTenant は dryRun: true のとき、別テナントだけが行を持つなら deleted: 0 を返す", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: `erase-tenant-dry-none-${Math.random()}` };
+        const ctxB: Ctx = { tenantId: `erase-tenant-dry-other-${Math.random()}` };
+        await store.setEventRetention(ctxB, { kind: "days", days: 60 });
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000, dryRun: true });
+        expect(result).toEqual({ deleted: 0, reachedLimit: false });
+        expect(await store.getEventRetention(ctxB)).toEqual({ kind: "days", days: 60 });
       });
     } else {
       it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
