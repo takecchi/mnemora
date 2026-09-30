@@ -269,4 +269,11 @@ describe("upgrade fixture の在り処", () => {
   it("少なくとも1本の fixture が在る（ディレクトリの取り違えで歯が空振りしない）", () => {
     expect(FIXTURES.length).toBeGreaterThan(0);
   });
+
+  // v1.0.1 以降の fixture だけが在り、v1.0.0 から直接上げる経路はどの歯も見ていなかった。
+  // 列挙は `upgrade-from-*.sql` を拾うだけなので、足し忘れた版は黙って空振りする。
+  // ⚠ ここに書くのは「直接上げる経路を必ず見る」と決めた版だけ（版を出すたびには足さない）。
+  it.each(["v1.0.0"])("%s で作った DB の fixture が在る", (tag) => {
+    expect(FIXTURES).toContain(`upgrade-from-${tag}.sql`);
+  });
 });
