@@ -190,3 +190,21 @@ job id（UTF8 / SQL_ASCII、1・2・3回目の順）:
   陽性対照（c）が赤くならないことを確かめること。
 - **runner の vCPU 数が変わったとき。** 固定費の大きさ（約 1.0 s と約 0.07 s）は、この4 vCPU の
   実測である。
+
+## 追記（2026-09-30）—— 本 PR の CI で見えた `recall-roundtrip-count` 歯2 の赤は、ファイル間の漏れではなかった
+
+クローンの委譲先が書いた（オーナーではない）。**上の本文は書き換えていない。**
+
+本 PR の CI で、`recall-roundtrip-count.postgres.test.ts` の歯2 が1回だけ赤になった（run 36664582749、`expected 14 to be 15`）。
+これは上の「これが覆るとしたら」の1番目（ファイル間の漏れによる赤）には当たらない。
+
+- このファイルは `SERIAL_TEST_FILES` に入っている。直列の群は `isolate: true` のままなので、`isolate: false` の対象ではない。
+- 原因は `StatsPresenceGate` のゲートの状態が、測定のたびに違うことだった。各 `it` は、ゲートが未確認の状態から
+  測り始める。その測定の途中で自動 analyze が終わると、その後の読みだけ往復が1回減る。見立て・陽性対照・直しは
+  [ADR 0405](./0405-roundtrip-count-confirms-stats-before-measuring.md)（#1489）にある。
+- ゲートは `PostgresVectorStore` のインスタンスのフィールドである。その `vectorStore` は各 `it` の中で作り直され、
+  `confirmStatsPresence()` も各 `it` の中で測定の直前に呼ばれる。したがって、仮にこのファイルが `isolate: false` の群へ
+  移っても、この歯の決定性はモジュールの状態の持ち越しに依らない。
+
+**確かめていないこと**: `isolate: false` にした構成でだけ赤が見えた（約20回中1回。main と手当てだけの版では24回中0回）。
+構成によって自動 analyze の時刻が変わったせいか、ただの偶然かは、切り分けていない。
