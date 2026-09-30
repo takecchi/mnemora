@@ -210,8 +210,7 @@ jobs:
         # (歯が赤くなっても値は残る)。このジョブの他のテストはこの変数を無視する。
         env:
           MNEMORA_LEXICAL_REGIME_JSON: ${{ github.workspace }}/lexical-regime.json
-        # 試走専用（Issue #1276 案D、マージしない）: worker を 4 にする。
-        run: pnpm --filter @mnemora/postgres run test:db --maxWorkers=4
+        run: pnpm --filter @mnemora/postgres run test:db
 
       - name: "実測した regime を Job Summary に残す(⛔ 値の良し悪しの門ではない。ただし宣言と実測の食い違いは門である。Issue #148 ②)"
         # このステップは常に走る(`if: always()`)——上の test:db が(regime とは無関係な

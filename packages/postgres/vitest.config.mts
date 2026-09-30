@@ -94,6 +94,8 @@ export default defineConfig({
           // 明示的に固定する理由は resolveDefaultMaxWorkers() の docstring
           // （globalSetup が worker DB の数を決めるのに、解決後の値を読めないと困る）。
           maxWorkers: resolveDefaultMaxWorkers(),
+          // 試走専用（Issue #1276 案D、マージしない）: ファイル間でモジュールを共有する。
+          isolate: false,
           sequence: { groupOrder: 0 },
         },
       },
