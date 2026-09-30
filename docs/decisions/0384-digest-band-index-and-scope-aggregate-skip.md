@@ -134,6 +134,11 @@
      挙動だが、本 ADR はこれまでそれを名乗っていなかった。「判定できない」と名乗る
      手当ては本 PR では入れず、ADR 0390（案2の実装）の続きとして別 PR で扱う。
 
+     （2026-09-30 追記: [ADR 0390](./0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)
+     決定7で手当てした。`"skip"` で ANN の段が走り、adapter が `countKind: 'unknown'` を返した
+     ときは、ANN の stage detail に `annReachability: "unknown"`（到達を判定できない）を足して
+     名乗る。`ann_unreached` が鳴らないこと自体は変わらない。既定 `"exact"` の出力は変えていない。）
+
 - **測ったこと**:
 
   ### 器・データ・手順（2026-09-30、このPRの担当が測り直した）

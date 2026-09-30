@@ -423,3 +423,55 @@ memory とベクトルの対応が1つずれる、という実害はこの2経�
 `OpenAIEmbeddingProvider.embed` で送ると、`BadRequestError`（HTTP 400）「`Invalid 'input[0]': maximum input length is 8192 tokens.`」
 で拒まれ、そのまま伝わった（§2 の素の `input` 超過と同じ文面）。同じ回に当てたほかの入力の境界（空文字・1回の件数の上限・
 `dimensions` の範囲）は `packages/openai/README.md` に書いた。§9 のほかの項目は、引き続き確かめていない。
+
+---
+
+## ⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）: 上の 2026-09-26 の追記を覆した——`OpenAIEmbeddingProvider.embed()` は応答を検査する
+
+**上の本文と、2026-09-26 の追記（Issue #860）は書き換えていない。当時の記録として残す。**
+追記の書き手はクローン miku の委譲先であり、オーナーではない
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。判断者は依頼元の
+マネージャーのクローンで、`v1.X.0` での破壊的変更はオーナーから許されている（ask_human `6911db12` 問6）。
+
+**何を覆したか**: 2026-09-26 の追記は「`OpenAIEmbeddingProvider.embed()` は応答の件数・次元を検査しない。
+食い違ったときの結果は未定義」を今の契約として書き、採らなかった案1（`@mnemora/local-embedding` と同じく
+例外にする）を「新しく throw する変更で、委譲された範囲を超える」として却下した。今回、その案1を採る。
+却下の理由は範囲の問題であって、案そのものの欠点ではなかった。
+
+**何を決めたか**: `embed()` は次の4つを確かめ、崩れていれば素の `Error`（メッセージは
+`OpenAIEmbeddingProvider:` で始まり、期待値・実際の値・何番目かを含む。入力テキストの本文と API キーは含めない）
+を投げる。専用のエラー型・`kind` は付けない（`LocalEmbeddingProvider` と同じ形）。
+
+1. `response.data` の件数が `texts.length` と等しい。
+2. `index` が 0..n-1 をちょうど1回ずつ（重複・欠落・範囲外が無い）。
+3. 各ベクトルの長さが `space.dimensions` と等しい。
+4. 成分がすべて有限（`NaN`/`Infinity` が無い）。
+
+**なぜ**: 本物の SDK（`openai@7.10.0`）に偽の `fetch` を渡して確かめると、件数の過不足・次元違い・`index` の
+重複/欠落/範囲外・空の `data` のどれも、例外なしに素通りした（既定で `encoding_format: "base64"` を送り、
+応答の base64 を Float32 に戻すので、`NaN`/`Infinity` も同じ道を通る）。黙って返すと、呼び出し側で memory と
+ベクトルが1つずれて対応する、または宣言と中身が食い違ったまま DB へ入る、または pgvector の書き込みで
+原因から離れた SQL の失敗として現れる。同じ `EmbeddingProvider` の2実装のうち片方だけが守っている
+状態を解消する。
+
+**引き受けた負債（変更の代償）**: これは新しく例外になる場合が増える変更である。以前は素通りしていた
+食い違った応答が、`Error` になる。CHANGELOG `[1.2.0]` の `### Breaking` と `docs/migration-v1.md`
+の項目32に、破壊的変更として書いた。`packages/core` の本番経路は `embed` に常に1件ずつ渡すので、
+正常な応答（1件・宣言どおりの次元・有限）を返すサーバでは何も変わらない。
+
+**変えなかったこと**:
+- 入力の上限超過は今もサーバの拒否に依存している（本文の決定1・負債2）。
+- `response.data` キー自体が無い応答は、従来どおり生の `TypeError`（Issue #885）。専用のエラー型は足していない。
+- `packages/testkit` の適合テストには、下層の食い違いを注入する歯を足していない（2026-09-26 の案2はそのまま
+  却下のまま。歯は `packages/openai/src/__tests__/embedding-response-validation.test.ts` に置いた）。
+- 新しい ADR は起こしていない（既存の決定の変更であり、この ADR の追記で足りると判断した）。
+
+**歯**: `packages/openai/src/__tests__/embedding-response-validation.test.ts`（本物の SDK＋偽 `fetch`）。
+実装前の `main` で走らせると、10 件が赤・正常系の1件だけが緑だった。検査を1つずつ外すと、それぞれ狙った
+it が赤になった（検査の一部は別の検査が代わりに例外を投げるため、どの検査が落としたかをメッセージまで固定した）。
+
+**確かめていないこと**: 実 API がこれらの食い違いを実際に返すか（鍵が無く、実 API は使っていない）。
+`encoding_format: "float"` を明示した経路・SDK の版が上がったときの base64 の復号の挙動。
+
+**反映先**: `packages/openai/src/embedding-provider.ts`、`packages/core/src/interfaces/embedding-provider.ts`、
+`docs/architecture.md` §5.5、`packages/openai/README.md`、`packages/testkit/src/embedding-provider-conformance.ts`。

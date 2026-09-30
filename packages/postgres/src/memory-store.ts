@@ -1767,6 +1767,32 @@ export class PostgresMemoryStore implements MemoryStore {
       isDecayed = sql`(NOT ${activityAxisAlive!})`;
     }
 
+    // ADR 0390: 段1の ANN から除外した kind（非空のときだけ）。除外される kind で **索引済み**
+    // （`embedding_status = 'ready'`＝ `not_indexed_*` の補集合）の行を、`in_scope` と同じ絞りの上で
+    // 数える列を足す——`recall()` が `eligible`（`in_scope` − `not_indexed`）から引くため。
+    // **未指定・空配列のときは、列も欄も足さない**（SQL テキストが今日と1バイトも変わらない。
+    // `digestBandColumns`/`taxonomyGroupColumns` と同じパターン）。
+    const excludeProvenanceKinds =
+      opts?.excludeProvenanceKinds !== undefined && opts.excludeProvenanceKinds.length > 0
+        ? [...opts.excludeProvenanceKinds]
+        : undefined;
+    const provenanceScopedColumn = excludeProvenanceKinds ? sql`, provenance_kind` : sql``;
+    const provenanceFlagColumn = excludeProvenanceKinds
+      ? sql`,
+          (provenance_kind = ANY(${sql.param(excludeProvenanceKinds)}::text[])) AS is_excluded_provenance`
+      : sql``;
+    const provenanceAggColumn = excludeProvenanceKinds
+      ? sql`,
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND has_qualifying_label
+              AND embedding_status = 'ready' AND is_excluded_provenance
+          )::int AS excluded_provenance_indexed`
+      : sql``;
+    const provenanceResultColumn = excludeProvenanceKinds
+      ? sql`,
+        coalesce(sum(excluded_provenance_indexed), 0)::int AS excluded_provenance_indexed`
+      : sql``;
+
     const digestBand = opts?.digestBand;
     // Issue #1262: uuid の形でない除外の id は、どの記憶とも一致しないので「無いもの」として扱い、SQL へは
     // 渡さない（`get`・`getMany` などほかの読みの口と同じ扱い。mapping.ts の isUuidLike の doc 参照）。
@@ -1941,7 +1967,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const result = await this.db.execute(sql`
       WITH scoped AS (
         SELECT subject_id, occurred_at, recorded_at, embedding_status, status,
-               valid_from, valid_until, decay_floor_at, decay_floor_seq, tags
+               valid_from, valid_until, decay_floor_at, decay_floor_seq, tags${provenanceScopedColumn}
         FROM memories
         WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
       ),
@@ -1960,7 +1986,7 @@ export class PostgresMemoryStore implements MemoryStore {
           (${isExpired}) AS is_expired,
           (${isNotYetValid}) AS is_not_yet_valid,
           (${isDecayed}) AS is_decayed,
-          (${hasQualifyingLabel}) AS has_qualifying_label
+          (${hasQualifyingLabel}) AS has_qualifying_label${provenanceFlagColumn}
         FROM scoped
       ),
       agg AS (
@@ -2001,7 +2027,7 @@ export class PostgresMemoryStore implements MemoryStore {
           -- 被覆不変条件 (axis: 'subject' の群カウントの総和 = totalInScope) は動かない。
           count(*) FILTER (
             WHERE live AND in_period AND is_valid AND has_qualifying_label AND is_decayed
-          )::int AS decayed_filtered
+          )::int AS decayed_filtered${provenanceAggColumn}
         FROM flags
         GROUP BY subject_id
       )
@@ -2024,7 +2050,7 @@ export class PostgresMemoryStore implements MemoryStore {
         coalesce(sum(expired_filtered), 0)::int AS expired_filtered,
         coalesce(sum(not_yet_valid_filtered), 0)::int AS not_yet_valid_filtered,
         coalesce(sum(taxonomy_filtered), 0)::int AS taxonomy_filtered,
-        coalesce(sum(decayed_filtered), 0)::int AS decayed_filtered
+        coalesce(sum(decayed_filtered), 0)::int AS decayed_filtered${provenanceResultColumn}
         ${digestBandColumns}
         ${taxonomyGroupColumns}
       FROM agg
@@ -2044,6 +2070,7 @@ export class PostgresMemoryStore implements MemoryStore {
       not_yet_valid_filtered: number;
       taxonomy_filtered: number;
       decayed_filtered: number;
+      excluded_provenance_indexed?: number;
       digests?: { memoryId: string; digest: string }[];
       digest_eligible_count?: number;
       taxonomy_label_groups?: { key: string; count: number }[];
@@ -2090,6 +2117,10 @@ export class PostgresMemoryStore implements MemoryStore {
       groups,
       totalInScope: row.in_scope,
       countKind: "exact",
+      // ADR 0390: 除外指定（非空）のときだけ欄を返す。
+      ...(excludeProvenanceKinds !== undefined
+        ? { excludedProvenanceIndexedCount: row.excluded_provenance_indexed ?? 0 }
+        : {}),
       notIndexed: {
         pending: { count: row.not_indexed_pending, countKind: "exact" },
         failed: { count: row.not_indexed_failed, countKind: "exact" },

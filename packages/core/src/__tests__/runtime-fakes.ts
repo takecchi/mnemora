@@ -1433,6 +1433,11 @@ export class FakeMemoryStore implements MemoryStore {
     let filteredNotYetValid = 0;
     let filteredTaxonomy = 0;
     let filteredDecayed = 0;
+    const excludedKinds =
+      opts?.excludeProvenanceKinds !== undefined && opts.excludeProvenanceKinds.length > 0
+        ? new Set<string>(opts.excludeProvenanceKinds)
+        : undefined;
+    let excludedProvenanceIndexed = 0;
     // 目次帯の候補（本 PR）: totalInScope に数える条件と**同じ条件**で in-scope の
     // Memory を集める。`digestBand` が要求されなかった場合はこの配列を使わない。
     const inScopeMemories: Memory[] = [];
@@ -1518,6 +1523,9 @@ export class FakeMemoryStore implements MemoryStore {
       inScopeBySubject.set(key, (inScopeBySubject.get(key) ?? 0) + 1);
       if (memory.embeddingStatus !== "ready") {
         notIndexed[memory.embeddingStatus] += 1;
+      } else if (excludedKinds?.has(memory.provenance.kind) === true) {
+        // ADR 0390: 除外 kind で索引済み（`notIndexed` の補集合）の行。
+        excludedProvenanceIndexed += 1;
       }
       inScopeMemories.push(memory);
     }
@@ -1606,6 +1614,10 @@ export class FakeMemoryStore implements MemoryStore {
       groups,
       totalInScope,
       countKind: "exact",
+      // ADR 0390: 空配列・未指定は欄を足さない（no-op）。
+      ...(excludedKinds !== undefined
+        ? { excludedProvenanceIndexedCount: excludedProvenanceIndexed }
+        : {}),
       notIndexed: {
         pending: { count: notIndexed.pending, countKind: "exact" },
         failed: { count: notIndexed.failed, countKind: "exact" },

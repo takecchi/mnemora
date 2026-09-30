@@ -603,6 +603,9 @@ src/__tests__/recall-pipeline.test.ts src/__tests__/recall-channels.test.ts`:
 7. **`excludeProvenanceKinds` を指定した recall では、この診断キーは
    ANN が実際に候補を取りこぼしていても一切鳴らない。** 契約変更（§「これが
    覆るとしたら」1番）までこの制約は残る。
+   （2026-09-30 追記: [ADR 0390](./0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)
+   で、`aggregateScope` が除外 kind の索引済み件数を任意の欄で返すようにし、欄が在るときは
+   除外指定でも下限を立てるようにした。欄を返さない adapter では、この負債は今も残る。）
 
 ## 追記（2026-09-28）: 「これが覆るとしたら」1 の条件（[Issue #541](https://github.com/takecchi/mnemora/issues/541) の線引き）が起きた
 

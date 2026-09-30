@@ -4,6 +4,7 @@ import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
+import type { ProvenanceKind } from "../provenance.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import type {
   NewRecallRecord,
@@ -326,6 +327,17 @@ export interface AggregateScopeOptions {
     excludeMemoryIds: readonly MemoryId[];
   };
   /**
+   * ADR 0390: 段1の ANN から除外した `provenance.kind`（`RecallQuery.excludeProvenanceKinds`）。
+   * 渡すと、`ScopeAggregate.excludedProvenanceIndexedCount`（除外される kind で、スコープ内の
+   * 索引済みの行の数）を返してよい。**任意の口であり、`totalInScope`・`groups`・`filtered*`・
+   * `digests` の意味は変えない**（除外行もそれらには数えたまま）。
+   *
+   * **`undefined` と空配列 `[]` はどちらも no-op**（欄を返さない）——
+   * `VectorFilter.excludeProvenanceKinds` と同じ作法。この口を知らない adapter は無視してよく、
+   * そのとき `recall()` は今日と同じ判定（除外指定では ANN の取りこぼしを判定しない）に倒れる。
+   */
+  excludeProvenanceKinds?: readonly ProvenanceKind[];
+  /**
    * 件数集計（群カウント・`totalInScope`・`filtered*`・`notIndexed`）を止めるかどうか
    * （[ADR 0384](../../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
    * 案C、`RecallQuery.scopeAggregate` のそのままの値）。
@@ -345,6 +357,10 @@ export interface AggregateScopeOptions {
    * `scopeAggregate` に対応していない」という事実を `countKind` がそのまま正直に
    * 名乗っている状態であり、`"skip"` を頼んだのに `countKind: 'exact'` の顔をした
    * 未集計の値が返ることは無い（ADR 0384「決めたこと」参照）。
+   *
+   * **⚠ `"skip"` では `recall()` は ANN の到達（`ann_unreached`）を判定できない。** 返り値の
+   * `countKind` が `'unknown'` のとき、`recall()` は ANN の stage detail に
+   * `annReachability: "unknown"` を足して、そう名乗る（ADR 0390）。
    */
   scopeAggregate?: "exact" | "skip";
 }
