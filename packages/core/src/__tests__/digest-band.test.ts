@@ -266,3 +266,33 @@ describe("packDigestBand — eligible が 0", () => {
     expect(result.limitedBy).toBeUndefined();
   });
 });
+
+describe("packDigestBand — 切り詰め位置が書記素の途中（穴 O-5、ADR 0424）", () => {
+  const pack = (digest: string, maxEntryChars: number) =>
+    packDigestBand([entry("m1", digest)], 1, { limit: 10, maxChars: 10_000, maxEntryChars })
+      .band[0]!.digest;
+
+  it("NFD の「が」（か + 結合濁点）を、濁点だけ落として「か」にしない", () => {
+    const nfdGa = "が".normalize("NFD"); // "か" + U+3099（2コードユニット）
+    expect(nfdGa).toHaveLength(2);
+    // "ab" + が(2) + "cd"。3文字目までの位置 3 は「か」と濁点のあいだ。
+    expect(pack(`ab${nfdGa}cd`, 3)).toBe("ab");
+    expect(pack(`ab${nfdGa}cd`, 4)).toBe(`ab${nfdGa}`);
+  });
+
+  it("ZWJ で繋がった絵文字を、ZWJ だけ残して切らない", () => {
+    const family = "👨‍👩‍👧"; // 👨 ZWJ 👩 ZWJ 👧（8コードユニット）
+    expect(family).toHaveLength(8);
+    expect(pack(`a${family}b`, 4)).toBe("a");
+    expect(pack(`a${family}b`, 8)).toBe("a");
+    expect(pack(`a${family}b`, 9)).toBe(`a${family}`);
+  });
+
+  it("最初の書記素だけで上限を超えるなら、空文字列になる（上限は超えない）", () => {
+    expect(pack("👨‍👩‍👧", 3)).toBe("");
+  });
+
+  it("陽性対照: 書記素が1コードユニットの ASCII は今までどおり maxEntryChars 文字で切れる", () => {
+    expect(pack("0123456789", 5)).toBe("01234");
+  });
+});
