@@ -378,11 +378,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ 適合テストは core の判定関数（この版の core が公開したもの）を import する。判定関数を持たない古い版の core と組み合わせた testkit は動かない。
   - 公開 API に変更は無い（判定用の道具 `error-guards.ts` は export していない。snapshot は変わらない）。非破壊。
 
-### Docs（文書のみ。コードと型は変えていない）
-
-- **`@mnemora/bullmq` の `onTickError` が、ジョブ単位の失敗を知らせないことを書いた**（README「エラーの通知先」と `tick-driver.ts` の TSDoc）。`onTickError` に届くのは `runtime.tick()`（と `onTickResult`）の throw と Worker・Queue の異常だけで、tick の中の個々のジョブが失敗しても鳴らない——`onTickResult` の `TickResult.failed`・`unsupported` と outbox の `last_error` 列で見る。`onTickResult` の例を足した。挙動は変えていない。
-- **`@mnemora/postgres` の README に、`runMigrations` の `lockTimeoutMs` が advisory lock の待ちにしか効かないことを書いた**。DDL の表ロック待ちはセッションの `lock_timeout`（既定は上限なし）に従うので、上限を付けるなら接続側（`options=-c lock_timeout=…`・ロールの設定）で渡す。PostgreSQL 17 で実測済み。公開オプションは足していない。
-
 ---
 
 ## [1.1.0] - 2026-09-30
