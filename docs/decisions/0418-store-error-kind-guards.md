@@ -85,3 +85,49 @@
     tick の歯が赤、restoreArchived の1か所を戻すと restoreArchived の歯が赤になり、戻すとどれも緑に戻った。
   - **測っていないこと**: 修正後の版で、本物の `@mnemora/postgres` と2つの版の組を作って再実測はしていない
     （歯は `vm` による別 realm の再現であり、本物の2版の組ではない）。
+
+---
+
+## 追記 (2026-09-30): 残りの公開エラー2クラスに `kind` と判定関数を付けた
+
+> **⚠ 2026-09-30 追記:** 上の本文は書き換えていない。「引き受けた負債」の4つ目
+> （`ContestedWithoutCompanionError` ほか、runtime が `instanceof` で分岐していない store 例外には付けていない）を片付けた記録である。
+> 書いたのは、上と同じくクローンの委譲先であり、オーナーの判断ではない。
+
+- **列挙（公開面から辿った）。** `packages/core/src/index.ts` の `export *` の先（`packages/core/src` の非テストの `.ts`）で
+  `class … extends …` を grep し、`scripts/__snapshots__/public-api/core.d.ts` の `export declare class … extends Error` と突き合わせた。
+  - `Error` を継承するクラスは7つで、snapshot の7つと一致した。`Error` 以外を継承するクラス・`Error` を間接的に継承するクラスは無い。
+  - 旧5クラス（上の決めたこと1）に加え、**`ContestedWithoutCompanionError`（`interfaces/memory-store.ts`）と
+    `RecallOutputValidationError`（`recall-output-validation.ts`）の2つが `kind` を持っていなかった。**これで7つすべてが `kind` を持つ。
+  - **外したもの: 無い。**公開されていない例外クラスは core の src に見つからなかった。
+    （core 以外のパッケージの例外——`AnthropicLLMProviderError` など——は、本 ADR の「core の store 例外」の範囲外であり、
+    既に `kind` と判定関数を持つ。）
+  - 2クラスとも `name` は既に設定されていた。`kind` という名前の別の意味の欄も無く、衝突しなかった。
+- **付けた `kind` の値。** `ContestedWithoutCompanionError` は `"contested_without_companion"`、
+  `RecallOutputValidationError` は `"recall_output_validation"`。判定関数は `isContestedWithoutCompanionError`・
+  `isRecallOutputValidationError`（どちらも「`kind`、無ければ `name`」。共通の `matchesStoreErrorKind` を使う）。
+  **2クラスの `name` も変えないこと**（旧5クラスと同じ理由）。値は公開 API であり、変えるのは破壊的変更である。
+  - ⚠ `RecallOutputValidationError` は store 例外ではなく、`recall()` の `outputValidation: "throw"` が投げる検証の例外である。
+    同じ作法（別 realm でも読める判別子）が要るので同じ形にしたが、共通の道具のファイル名 `store-error-kind.ts` は変えていない（公開しない内部の名前のため）。
+- **core の外の `instanceof` の grep（`packages/*/src` と `examples/`、`node_modules`・`dist` を除く）。**
+  対象は上の7クラスの名前で、`instanceof <クラス名>` の形。
+  - 前: **6行、2ファイル**（どちらも `packages/postgres/src/__tests__/`。
+    `store-boundary-diff.postgres.test.ts` の4行（`ContestedWithoutCompanionError`・`MemoryStatusConflictError`・`MemoryPurgeConflictError`・`OutboxLeaseConflictError`）と、
+    `contested-pair-lock-order-concurrency.postgres.test.ts` の2行（`MemoryStatusConflictError`））。
+    `packages/*/src` の非テストのファイルと `examples/` には無かった。
+  - 後: **0行**。6行を判定関数（`isXxxError`）へ置き換えた（テストの中も）。
+  - core の `__tests__` に `instanceof` は2行残っている（`foreign-realm-store-errors.test.ts` の陽性対照。
+    「別 realm の例外は本物のクラスの `instanceof` では false になる」ことを示すために、意図して置いている）。
+  - **置き換えていないもの（判断を要する）:** `toBeInstanceOf(<クラス>)` と `rejects.toThrow(<クラス>)` は、実体は `instanceof` である。
+    `packages/*/src` に**74行、13ファイル**ある（`packages/testkit/src/memory-store-conformance.ts` 28行・`outbox-store-conformance.ts` 4行・
+    testkit の `__tests__` 4ファイル・postgres の `__tests__` 7ファイル）。本 PR の依頼は「`instanceof`」の置き換えなので、これらは触っていない。
+    ただし **適合テスト（`memory-store-conformance.ts` / `outbox-store-conformance.ts`）は利用者が自分の adapter に当てる公開の道具**であり、
+    core が2つの版に分かれた環境で当てると、ここが同じ理由で赤になりうる。**直すかどうかは別の判断として残した**（測っていない）。
+- **歯。** `foreign-realm-errors.ts` に、`ContestedWithoutCompanionError`・`RecallOutputValidationError` の別 realm 版
+  （`kind` 無し・有りの両方）を作る口を足し、`store-error-guards.test.ts` に、**全7クラス**を別 realm のクラスで検査する節を足した
+  （`instanceof` が false であること・判定関数が通ること・`kind` の有無が変種どおりであること・他の6種を通さないこと）。
+  - 変異試験（`packages/core`、手元。`store-error-guards.test.ts`）: `name` フォールバックを消すと 15 本が赤、`kind` を見ないようにすると 14 本が赤、
+    `isRecallOutputValidationError` を `instanceof` に戻すと 6 本が赤、`isContestedWithoutCompanionError` を `instanceof` に戻すと 6 本が赤、
+    `kind` の値を1文字変えると 1 本が赤になり、戻すとすべて緑（72 本）に戻った。
+  - 置き換えた postgres の `typedError` は、`isMemoryPurgeConflictError` の分岐を潰すと `store-boundary-diff.postgres.test.ts` の1本が赤になり、戻すと緑（5本）に戻った
+    （手元の Postgres 17。`contested-pair-lock-order-concurrency.postgres.test.ts` を含む2ファイル 7 本が緑）。
