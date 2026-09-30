@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll } from "vitest";
 import {
   assertValidEventRetentionDays,
+  assertWellFormedCtx,
   DEFAULT_HALF_LIFE_HOURS,
   type Ctx,
   type EventRetention,
@@ -27,11 +28,13 @@ import {
 class MyTenantSettingsStore implements TenantSettingsStore {
   private readonly retention = new Map<string, EventRetentionSetting>();
 
-  async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
+  async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     return DEFAULT_HALF_LIFE_HOURS;
   }
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
+    assertWellFormedCtx(ctx);
     return this.retention.get(ctx.tenantId) ?? { kind: "unset" };
   }
 

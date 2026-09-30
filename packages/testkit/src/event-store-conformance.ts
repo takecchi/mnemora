@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx, EventStore, MemoryId } from "@mnemora/core";
 import { buildNewMemoryEventFixture } from "./test-data.js";
+import {
+  expectMalformedIdentifierRejection,
+  MALFORMED_IDENTIFIER_CASES,
+} from "./malformed-identifier-cases.js";
 
 /** {@link describeEventStoreConformance} に渡す設定。 */
 export interface EventStoreConformanceOptions {
@@ -450,5 +454,28 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       const second = await store.get(ctx, appended.id);
       expect(second?.meta).toEqual({ reason: "consolidated", sources });
     });
+
+    // 保存の形で区別できない識別子は、入口で断る（ADR 0423）
+    for (const [label, value] of MALFORMED_IDENTIFIER_CASES) {
+      it(`${label}を含む識別子は、ctx.tenantId でも ctx.subjectId でも断る`, async () => {
+        const store = await createStore();
+        const calls: Array<[string, () => Promise<unknown>]> = [
+          ["list の ctx.tenantId", () => store.list({ tenantId: value }, {})],
+          [
+            "list の ctx.subjectId",
+            () => store.list({ tenantId: "tenant-wf", subjectId: value }, {}),
+          ],
+          ["get の ctx.tenantId", () => store.get({ tenantId: value }, randomUUID())],
+          [
+            "append の ctx.tenantId",
+            () =>
+              store.append({ tenantId: value }, buildNewMemoryEventFixture({ tenantId: value })),
+          ],
+        ];
+        for (const [where, call] of calls) {
+          await expectMalformedIdentifierRejection(call(), `${label} / ${where}`, value);
+        }
+      });
+    }
   });
 }

@@ -668,7 +668,8 @@ type GroupCount = {
 > **集計そのものをしない**）。`"skip"` のとき `countKind` は `'unknown'`、
 > `groups`/`totalInScope`/`filtered*` は空/0 になる——ADR 0024 が退けた
 > 「値を受け取って黙って無視する」失敗を繰り返さないよう、この欄を実装しない
-> adapter は `countKind: 'exact'` を返し続ける契約にしてある（ADR 0384「決めたこと」）。
+> adapter は conformance suite に落ちる契約にしてある（`"skip"` を頼まれたら `countKind: 'unknown'` を返す。
+> 「`'exact'` を返し続ける」は誤りで、CHANGELOG `[1.2.0]` で訂正済み。ADR 0384「決めたこと」）。
 > **⚠ `"skip"` のとき、`ann_unreached`（§「`ann_truncated` と `ann_unreached` の違い」）は
 > 判定されない。** 判定の母数 `eligible`（`totalInScope` − 未索引）が `0` になるため、
 > 近似索引が scope の候補を取りこぼしていても鳴らない——**`"skip"` の呼び出しで

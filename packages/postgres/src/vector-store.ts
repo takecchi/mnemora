@@ -10,6 +10,7 @@ import type {
   VectorHit,
   VectorStore,
 } from "@mnemora/core";
+import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { listEmbeddingSpaceTables } from "./embedding-space-catalog.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
@@ -487,6 +488,7 @@ export class PostgresVectorStore implements VectorStore {
     memoryId: MemoryId,
     vector: number[],
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
     await this.db.execute(sql`
@@ -506,6 +508,8 @@ export class PostgresVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
     // Issue #857: `query` が空配列だと `toVectorLiteral([])` が `"[]"` を作り、下の
@@ -693,6 +697,8 @@ export class PostgresVectorStore implements VectorStore {
     queries: { key: string; vector: number[] }[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<Map<string, VectorHit[]>> {
+    assertWellFormedCtx(ctx);
+    assertWellFormedFilter(opts.filter, "opts.filter");
     const resultMap = new Map<string, VectorHit[]>();
     // 契約（`VectorStore.searchMany?` の doc コメント）: `queries` の `key` の集合は
     // 返り値の `Map` にそのまま現れる——結果が0件の key も欠落させない。
@@ -766,6 +772,7 @@ export class PostgresVectorStore implements VectorStore {
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     // memory_id 列は uuid 型。この口の契約は「無い == 何もしない」（void、族A）なので、
     // 形式が壊れた memoryId もクエリを投げる前に同じ no-op へ寄せる——DELETE は
     // 0行に終わるだけで実害は無いが、素通しすると invalid input syntax for type uuid が
@@ -838,6 +845,7 @@ export class PostgresVectorStore implements VectorStore {
    * 「確かめていないこと」参照）。
    */
   async deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    assertWellFormedCtx(ctx);
     // `delete` と同じ規律（`isUuidLike` の doc コメント参照）——形式不正な id は
     // 「存在しない」の一種として扱い、クエリを投げる前に落とす。空配列（または全件
     // 形式不正）なら、列挙のクエリすら発行せずに返る。
@@ -874,6 +882,7 @@ export class PostgresVectorStore implements VectorStore {
    * が定める「保守的な近似」の `reachedLimit` をここでも採用する）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun === true;
     return this.db.transaction(async (tx) => {
       const tables = await listEmbeddingSpaceTables(tx);
@@ -926,6 +935,7 @@ export class PostgresVectorStore implements VectorStore {
     space: EmbeddingSpaceId,
     memoryIds: MemoryId[],
   ): Promise<VectorEntry[]> {
+    assertWellFormedCtx(ctx);
     // `memory_id` 列は uuid 型。形式不正な id は「存在しない」の一種として扱う
     // （`delete` と同じ判断。`isUuidLike` の doc コメント参照）——クエリを投げる前に
     // 落とし、DB 由来の invalid input syntax を漏らさない。

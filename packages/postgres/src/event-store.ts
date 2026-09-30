@@ -7,6 +7,7 @@ import type {
   MemoryEvent,
   NewMemoryEvent,
 } from "@mnemora/core";
+import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { isUuidLike, rowToMemoryEvent, toPgTimestamp, type MemoryEventRow } from "./mapping.js";
 
@@ -20,6 +21,7 @@ export class PostgresEventStore implements EventStore {
   constructor(private readonly db: Db) {}
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
+    assertWellFormedCtx(ctx);
     const result = await this.db.execute(sql`
       INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
       VALUES (
@@ -39,6 +41,7 @@ export class PostgresEventStore implements EventStore {
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
+    assertWellFormedCtx(ctx);
     // id 列は uuid 型。この口の契約は「無い == null」なので、形式が壊れた入力も
     // クエリを投げる前に同じ null へ寄せる（mapping.ts の isUuidLike の doc参照）。
     if (!isUuidLike(id)) {
@@ -53,6 +56,7 @@ export class PostgresEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    assertWellFormedCtx(ctx);
     // memory_id 列は uuid 型。この口の契約は「無い == []」なので、形式が壊れた
     // memoryId もクエリを投げる前に空配列へ寄せる（他のフィルタの値に関わらず、
     // memory_id の等値条件が絶対に一致しえない以上、結果は必ず空になるため）
