@@ -131,7 +131,7 @@ describe("RecallQuery.relationMaxCount — 省略時は既定値10を明示し�
 
     const b = await recallGroup(4, { relationMaxCount: 3 });
     const rec2 = await b.stores.memoryStore.getRecall(ctx, b.result.recallId);
-    expect(rec2?.query.relationMaxCount).toBe(3);
+    expect(rec2?.query).toMatchObject({ relationMaxCount: 3 });
   });
 });
 
