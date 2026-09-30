@@ -169,10 +169,15 @@
   | M3': Postgres の `createMemoriesWithOutboxAndEvents` が `created` を tx の外に出す | 歯 Postgres の2本（reflect の直接とジョブ）＋適合の1本（ADR 0410 の `created` 失敗の歯） |
   | M3'': InMemory の `supersedeWithNewMemories` が失敗時に巻き戻さない | 歯 InMemory の3本＋適合（InMemory）の2本（うち1本は既存の「`news` の途中で失敗したら何も残さない」の歯） |
   | M4: `reflect` が口を使わない（`createBatch` を `undefined` にする） | 歯の reflect 4本（InMemory・Postgres × 直接・ジョブ）＋core の新しい歯2本 |
-  | M5: Postgres の `createMemoriesWithOutboxAndEvents` が `abortIfForgotten` を無視する | 適合の1本＋既存の `consolidate-reflect-source-forgotten-for-update-race` の「試行 n/10」10本（30秒の時間切れで赤） |
+  | M5: Postgres の `createMemoriesWithOutboxAndEvents` が `abortIfForgotten` を無視する | 適合の1本＋`consolidate-reflect-source-forgotten-for-update-race` の reflect（口あり）10本（下の「既存の歯の調整」。調整前は実装が正しくても時間切れで赤になっていたので、この変異の根拠にしたのは調整後の実測） |
   | M6: core が名乗りを見ず、常に別の append を省く | 名乗らない adapter の歯: core の既存の3本（`consolidate.test.ts` の2本・`language-mismatch-mark.test.ts` の1本）＋新しい2本 |
   | M6': core が名乗りを見ず、常に別の append も足す | 名乗る adapter の歯: core の新しい2本（二重に積まれる） |
 
+- **既存の歯1ファイルを、reflect が使う口に合わせて直した**（`consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`）。この歯は `createMemoryWithOutbox` の入口に障壁を置いて reflect を止め、その間に forget・purge を割り込ませる。
+  reflect が `createMemoriesWithOutboxAndEvents` を呼ぶようになったので障壁に届かず、reflect の10本が30秒の時間切れで赤になった（**実装の退行ではなく、歯が縛っていた経路が口を持つ store では通らなくなった**。ADR 0410 が2本の歯を直したのと同じ形）。
+  歯を弱めず、(1) 同じ障壁を `createMemoriesWithOutboxAndEvents` の入口にも置いた reflect（口あり）10本にし、(2) 口を `undefined` にして `createMemoryWithOutbox` の経路を走らせる reflect（口なし）10本を足した。どちらも、見直しを外す変異（M5）で赤になる（口なしの経路の見直しを外した場合は、既存の `createMemoryWithOutbox` の適合の歯が縛る）。
+- **手元の `pnpm run test` で赤が3つ残った（この変更とは無関係）**: `dedicated-schema.postgres.test.ts`・`migrate-ledger-handover.test.ts`・`role-name-schema-lock-key.postgres.test.ts` の `afterAll` が30秒で時間切れ。
+  [ADR 0414](./0414-drop-database-checkpoint-wait-not-fixed.md)（`DROP DATABASE` の checkpoint 待ち。直さないと判断した）が記録している症状と一致する。この3本を単独で走らせると3ファイルとも緑（19本）で、全体実行（並列）の1回目だけ時間切れになり、歯を直したあとの2回目の全体実行では赤が無く、ルートの test 門は通過した。main で全体実行して同じ赤が出るかは確かめていない（この3本は本変更のコードを通らない）。
 - **名乗らない adapter の経路の歯**: core の `FakeMemoryStore` は `supersedeWithNewMemories` を持つが第4引数を受け取らず名乗らない。`FakeMemoryStore` に対する既存の core のテスト（reextract・consolidate の `created` を数える歯）が緑であること自体が、
   名乗らない経路の歯になる（M6 で赤になる）。加えて `created-event-claim.test.ts` が、名乗る adapter・名乗った後に投げる adapter（旧経路で撃ち直さない）・reflect の口の有無と `SourceMemoryForgottenError` を縛る。
 - 適合テスト: Postgres とインメモリの両方で、追加した歯が緑（実行した数字は PR 本文）。
