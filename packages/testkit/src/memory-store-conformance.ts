@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
 import type {
   Ctx,
+  Memory,
   MemoryEvent,
   MemoryId,
   MemoryStore,
@@ -3889,6 +3890,261 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reread?.decayBaseSeq).toBe(firstSeq);
       expect(reread?.decayFloorSeq).toBe(firstDecayFloorSeq);
       expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
+    });
+
+    // -------------------------------------------------------------------
+    // reinforce と活動時計 — `ReinforceOptions.addOwnSubjectSeq`（行ごとの解決）
+    // ([ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)、
+    // ADR 0353 の負債1の解消）
+    //
+    // ⚠ **`nowSeq` はテナントのカウンタ `T` だけを渡し、store が強化される Memory 自身の
+    // subject の `S_x`（`createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
+    // が進める `tenant_subject_activity`）を行ごとに足す。**呼び出し側が `ctx.subjectId` の
+    // `S_x` を先に足して全件へ配る形だと、`ctx` と Memory の subject がずれたとき、読む側
+    // （行ごとに自身の `S_x` を足す）と食い違う起点が書かれる。
+    // -------------------------------------------------------------------
+
+    /** T=10・S_alice=7・S_bob=20 の状態を作る。`S` だけを進め、`T` は呼び出し側が `nowSeq` で渡す。 */
+    async function seedSubjectCounters(store: MemoryStore, ctx: Ctx): Promise<void> {
+      for (const [subjectId, n] of [
+        ["alice", 7],
+        ["bob", 20],
+      ] as const) {
+        for (let i = 0; i < n; i += 1) {
+          await store.createRecall(ctx, {
+            tenantId: ctx.tenantId,
+            subjectId,
+            query: { text: "fixture" },
+            budget: null,
+            omitted: [],
+            usage: {
+              chars: 0,
+              estimatedTokens: 0,
+              counter: "heuristic" as const,
+              byTier: { full: 0, digest: 0, index: 0 },
+              indexChars: 0,
+            },
+            indexBand: { groups: [], totalInScope: 0, countKind: "exact" as const },
+            explain: { stages: [] },
+            returnedMemories: [],
+            advanceActivityClock: { scope: "subject", subjectId },
+          });
+        }
+      }
+    }
+
+    const OWN_SUBJECT_T = 10;
+    const OWN_SUBJECT_EXPECTED_NOW = { alice: 17, bob: 30, none: 10, unseen: 10 } as const;
+
+    function ownSubjectFloor(baseSeq: number): number {
+      return defaultActivityDecayStrategy.floorAt({
+        baseSeq,
+        strength: 1,
+        halfLifeRecalls: 360,
+      });
+    }
+
+    async function memoryForOwnSubject(
+      store: MemoryStore,
+      ctx: Ctx,
+      subjectId: string | null,
+      hash: string,
+    ): Promise<Memory> {
+      return store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: hash,
+          subjectId,
+          strength: 1,
+          decayBaseSeq: 0,
+          decayFloorSeq: 10,
+          halfLifeRecalls: 360,
+        }),
+      );
+    }
+
+    it("reinforce は addOwnSubjectSeq: true で、強化される Memory 自身の subject の S_x を nowSeq(T) に足して起点にする（ADR 0394）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedSubjectCounters(store, ctx);
+      const expectations = [
+        ["alice", "alice", OWN_SUBJECT_EXPECTED_NOW.alice],
+        ["bob", "bob", OWN_SUBJECT_EXPECTED_NOW.bob],
+        // 主題なしの記憶は T のみ。
+        [null, "none", OWN_SUBJECT_EXPECTED_NOW.none],
+        // subject カウンタの行が無い subject も T のみ（S_x = 0）。
+        ["carol", "unseen", OWN_SUBJECT_EXPECTED_NOW.unseen],
+      ] as const;
+      for (const [subjectId, label, expected] of expectations) {
+        const memory = await memoryForOwnSubject(store, ctx, subjectId, `own-subject-${label}`);
+        const at = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
+        const reinforced = await store.reinforce(ctx, memory.id, at, {
+          nowSeq: OWN_SUBJECT_T,
+          addOwnSubjectSeq: true,
+        });
+        expect(reinforced.decayBaseSeq).toBe(expected);
+        expect(reinforced.decayFloorSeq).toBe(ownSubjectFloor(expected));
+        // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+        const reread = await store.get(ctx, memory.id);
+        expect(reread?.decayBaseSeq).toBe(expected);
+        expect(reread?.decayFloorSeq).toBe(ownSubjectFloor(expected));
+      }
+    });
+
+    it("reinforce は ctx の subjectId に関わらず、Memory 自身の subject の S_x を足す（ctx=bob で alice の記憶、ctx に subject 無しで bob の記憶）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
+      const tenantCtx: Ctx = { tenantId: "tenant-1" };
+      await seedSubjectCounters(store, tenantCtx);
+      const alice = await memoryForOwnSubject(store, tenantCtx, "alice", "own-subject-ctx-a");
+      const bob = await memoryForOwnSubject(store, tenantCtx, "bob", "own-subject-ctx-b");
+      const at = new Date(alice.recordedAt.getTime() + 1000 * 60 * 60);
+
+      const reinforcedAlice = await store.reinforce(
+        { tenantId: "tenant-1", subjectId: "bob" },
+        alice.id,
+        at,
+        { nowSeq: OWN_SUBJECT_T, addOwnSubjectSeq: true },
+      );
+      const reinforcedBob = await store.reinforce(tenantCtx, bob.id, at, {
+        nowSeq: OWN_SUBJECT_T,
+        addOwnSubjectSeq: true,
+      });
+
+      expect(reinforcedAlice.decayBaseSeq).toBe(OWN_SUBJECT_EXPECTED_NOW.alice);
+      expect(reinforcedBob.decayBaseSeq).toBe(OWN_SUBJECT_EXPECTED_NOW.bob);
+    });
+
+    it("reinforceMany は同じ opts（addOwnSubjectSeq: true）を全件に適用しつつ、行ごとに自身の subject の S_x を足す（ADR 0394）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
+      if (typeof store.reinforceMany !== "function") {
+        // 任意メソッド——実装していない adapter ではこの歯は成立しない（skip 相当）。
+        return;
+      }
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedSubjectCounters(store, ctx);
+      const alice = await memoryForOwnSubject(store, ctx, "alice", "own-subject-many-a");
+      const bob = await memoryForOwnSubject(store, ctx, "bob", "own-subject-many-b");
+      const none = await memoryForOwnSubject(store, ctx, null, "own-subject-many-n");
+      const at = new Date(alice.recordedAt.getTime() + 1000 * 60 * 60);
+
+      const results = await store.reinforceMany(ctx, [alice.id, bob.id, none.id], at, {
+        nowSeq: OWN_SUBJECT_T,
+        addOwnSubjectSeq: true,
+      });
+
+      expect(results.map((m) => m.decayBaseSeq)).toEqual([
+        OWN_SUBJECT_EXPECTED_NOW.alice,
+        OWN_SUBJECT_EXPECTED_NOW.bob,
+        OWN_SUBJECT_EXPECTED_NOW.none,
+      ]);
+      for (const [id, expected] of [
+        [alice.id, OWN_SUBJECT_EXPECTED_NOW.alice],
+        [bob.id, OWN_SUBJECT_EXPECTED_NOW.bob],
+        [none.id, OWN_SUBJECT_EXPECTED_NOW.none],
+      ] as const) {
+        const reread = await store.get(ctx, id);
+        expect(reread?.decayBaseSeq).toBe(expected);
+        expect(reread?.decayFloorSeq).toBe(ownSubjectFloor(expected));
+      }
+    });
+
+    it("recordUsageAndReinforce（任意メソッド、あれば）も、行ごとに自身の subject の S_x を足す（ADR 0394 / Issue #961）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
+      if (typeof store.recordUsageAndReinforce !== "function") {
+        return;
+      }
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedSubjectCounters(store, ctx);
+      const alice = await memoryForOwnSubject(store, ctx, "alice", "own-subject-usage-a");
+      const bob = await memoryForOwnSubject(store, ctx, "bob", "own-subject-usage-b");
+      const recallId = await store.createRecall(ctx, {
+        tenantId: "tenant-1",
+        subjectId: null,
+        query: { text: "fixture" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic" as const,
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" as const },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
+      const at = new Date(alice.recordedAt.getTime() + 1000 * 60 * 60);
+
+      await store.recordUsageAndReinforce(ctx, recallId, [alice.id, bob.id], at, {
+        nowSeq: OWN_SUBJECT_T,
+        addOwnSubjectSeq: true,
+      });
+
+      expect((await store.get(ctx, alice.id))?.decayBaseSeq).toBe(OWN_SUBJECT_EXPECTED_NOW.alice);
+      expect((await store.get(ctx, bob.id))?.decayBaseSeq).toBe(OWN_SUBJECT_EXPECTED_NOW.bob);
+    });
+
+    it("supportsAddOwnSubjectSeq を宣言する store は、真偽値を返す（宣言は任意。省略は「読めない」と同じ）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq === undefined) {
+        return;
+      }
+      expect(typeof store.supportsAddOwnSubjectSeq()).toBe("boolean");
+    });
+
+    it("addOwnSubjectSeq を省略・false にすると、nowSeq をそのまま起点にする（S_x があっても足さない。この項目を足す以前と同じ）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedSubjectCounters(store, ctx);
+      const omitted = await memoryForOwnSubject(store, ctx, "alice", "own-subject-omit-a");
+      const explicitFalse = await memoryForOwnSubject(store, ctx, "bob", "own-subject-omit-b");
+      const at = new Date(omitted.recordedAt.getTime() + 1000 * 60 * 60);
+
+      const a = await store.reinforce(ctx, omitted.id, at, { nowSeq: OWN_SUBJECT_T });
+      const b = await store.reinforce(ctx, explicitFalse.id, at, {
+        nowSeq: OWN_SUBJECT_T,
+        addOwnSubjectSeq: false,
+      });
+
+      expect(a.decayBaseSeq).toBe(OWN_SUBJECT_T);
+      expect(a.decayFloorSeq).toBe(ownSubjectFloor(OWN_SUBJECT_T));
+      expect(b.decayBaseSeq).toBe(OWN_SUBJECT_T);
+    });
+
+    it("addOwnSubjectSeq: true でも nowSeq が無ければ何もしない（活動時計側の3列は据え置く。S_x を『いま』として扱わない）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedSubjectCounters(store, ctx);
+      const memory = await memoryForOwnSubject(store, ctx, "alice", "own-subject-no-nowseq");
+      const at = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
+
+      const reinforced = await store.reinforce(ctx, memory.id, at, { addOwnSubjectSeq: true });
+
+      expect(reinforced.decayBaseSeq).toBe(0);
+      expect(reinforced.decayFloorSeq).toBe(10);
+      expect(reinforced.halfLifeRecalls).toBe(360);
     });
 
     // -------------------------------------------------------------------

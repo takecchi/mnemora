@@ -411,6 +411,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0390](./0390-ann-unreached-aware-of-excluded-provenance-and-skip.md) | `ann_unreached` が `excludeProvenanceKinds` を分母から引く（除外行の索引済み件数を集約が返す）と、`scopeAggregate: "skip"` で到達を判定できないと名乗る | 採用 (2026-09) |
 | [0391](./0391-language-mismatch-mark-on-created-event.md) | 抽出の言語の事後検査は「印を付けるだけ」にし、`created` イベントの `meta.languageMismatch` に出す | 採用 (2026-09) |
 | [0393](./0393-core-checks-embedding-dimension.md) | core が、provider の返す埋め込みの次元（`space.dimensions`）と成分の有限性を確かめる | 採用 (2026-09) |
+| [0394](./0394-activity-clock-writes-use-memorys-own-subject.md) | 活動時計の書き込みは、`ctx` ではなく記憶自身の subject の `T + S_x` を使う（ADR 0353 の負債1の解消） | 採用 (2026-09) |
 | [0396](./0396-recall-relation-max-count.md) | 段3（多者間の同伴取得）の群ごとの上限を、`RecallQuery.relationMaxCount` で呼び出し側から変えられるようにする | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

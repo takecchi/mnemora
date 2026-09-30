@@ -196,6 +196,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
     purgeExpiredEventsByRetention(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
+    supportsAddOwnSubjectSeq(): boolean;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
     reinforceMany(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
     recordUsageAndReinforce(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<{

@@ -1368,6 +1368,11 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （`PostgresMemoryStore.reinforce` と同じ分岐。`ReinforceOptions.nowSeq` の doc
    * コメント参照）。
    */
+  /** ADR 0394: `ReinforceOptions.addOwnSubjectSeq` を読める（`reinforce` の実装を参照）。 */
+  supportsAddOwnSubjectSeq(): boolean {
+    return true;
+  }
+
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     const memory = this.rawGet(ctx, id);
     if (!memory) {
@@ -1398,9 +1403,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       halfLifeHours: memory.halfLifeHours,
     });
     if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
-      memory.decayBaseSeq = opts.nowSeq;
+      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す。
+      const baseSeq =
+        opts.addOwnSubjectSeq === true && memory.subjectId != null
+          ? opts.nowSeq + (this.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+          : opts.nowSeq;
+      memory.decayBaseSeq = baseSeq;
       memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
-        baseSeq: opts.nowSeq,
+        baseSeq,
         strength: memory.strength,
         halfLifeRecalls: memory.halfLifeRecalls,
       });

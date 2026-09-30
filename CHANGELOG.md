@@ -186,6 +186,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **活動時計（`decay_clock` が `'activity'`/`'either'`）で、新しく作る記憶・強化する記憶の起点（`decayBaseSeq`/`decayFloorSeq`）を、`ctx.subjectId` ではなく、その記憶自身の subject の `T + S_x` で書くようになった**（[ADR 0394](./docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)、[ADR 0353](./docs/decisions/0353-activity-counting-per-call.md) 引き受けた負債1、[Issue #338](https://github.com/takecchi/mnemora/issues/338)）
+  - **効くのは `tenant_subject_activity` に行があるテナント（`activityCounting: "subject"` を使ったテナント）だけ。**それ以外（`'wall'` のテナント、subject カウンタを一度も使っていないテナント）の書き込みは、値も SQL も変わらない。
+  - 直った経路: 抽出（同期・deferred の `tick`・`reextract`。ctx と候補・観測の subject がずれるとき、`tick` の ctx に subject が無いとき）、consolidate・reflect、使用報告の強化、`restoreArchived`・`restoreSuperseded`。以前は、ずれると読む側（行ごとに自身の `S_x` を足す）より小さい起点が書かれ、作成・強化の直後から忘却ゲートの下にいることがあった。
+  - **公開 API に、任意項目 `ReinforceOptions.addOwnSubjectSeq?: boolean` と、任意メソッド `MemoryStore.supportsAddOwnSubjectSeq?(): boolean`（store の宣言）が増えた。**`true` を宣言する store にだけ、runtime は `nowSeq` に `T` を入れて `addOwnSubjectSeq: true` を渡し、store が行ごとに Memory 自身の subject の `S_x` を足す。宣言の無い store には、今までどおり `T + S_ctx` をフラグなしの `nowSeq` で渡す。非破壊。`@mnemora/postgres` の `PostgresMemoryStore` と `@mnemora/testkit` の `InMemoryMemoryStore` は宣言している。
+  - ⚠ **自前の `MemoryStore` を実装している人へ**: 何もしなくてよい（宣言が無ければ、強化は今までと同じ値で呼ばれる）。ただし、強化される記憶の subject が `ctx.subjectId` とずれる呼び出しの取り違え（強化側）は、宣言しない実装では直らない。直すには、`reinforce`/`reinforceMany`（と `recordUsageAndReinforce`）が `addOwnSubjectSeq: true` を読むようにし、`supportsAddOwnSubjectSeq() { return true; }` を足す。`describeMemoryStoreConformance` は、宣言した実装にだけ、この項目の歯を当てる。
+  - 既に書かれた起点を遡って直してはいない（強化・再作成で置き換わる）。DB マイグレーションは足していない。
+
 - **多者間の `contested` 群の recall で、`companionOf`（同じ段で複数の親から届く companion の発見元）が「id の小さい親」に決まるようになった。`Runtime.resolveContestedGroup` の `winnerId` が、`resolveContested`（2者版）と同じ規則で大文字小文字を救済するようになった**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目7・項目6、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md) §7 負債3・負債1の解消）。
   - `companionOf` は説明可能性の欄だけが変わる（`memories`/`omitted` の中身・件数は変わらない）。以前は `RelationStore.listRelated`（契約が順を規定しない）の返す順に依存していた。
   - `resolveContestedGroup` は、`winnerId` が `memberIds` のどれとも完全一致しないとき、小文字にそろえた候補がちょうど1件で、`memoryStore.get` が同じ id の記憶を返す場合に限り、その `memberIds` の綴りを勝者として使う。以前はこの場合 `RangeError` だった。候補が2件以上・`get` が食い違う場合は今どおり `RangeError`。エラーだった呼び出しが通るようになるだけで、通っていた呼び出しの結果は変わらない。

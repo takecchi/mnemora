@@ -865,6 +865,25 @@ export interface MemoryStore {
    * `runtime.observe` に渡す `usedMemoryIds` の出どころを正しく保つ責務を負う。
    */
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+
+  /**
+   * [ADR 0394](../../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md):
+   * この store の `reinforce`/`reinforceMany`/`recordUsageAndReinforce` が
+   * {@link ReinforceOptions.addOwnSubjectSeq} を読めること（`true` のとき、強化される
+   * Memory 自身の subject の `S_x` を行ごとに足すこと）の**宣言**。読めるなら `true` を返す。
+   *
+   * ⭐ **任意メソッドである**——`hasSubjectActivityCounters?`（`TenantSettingsStore`）と同じく、
+   * 「口が在るか／`true` を返すか」を runtime が見て分岐する作法に揃えた。**宣言が無い（未実装・
+   * `false`）store には、runtime は今までどおりの値**（`T + S_ctx` をそのまま `nowSeq` に入れ、
+   * `addOwnSubjectSeq` は付けない）**を渡す**——`addOwnSubjectSeq` を知らない第三者の adapter の
+   * 挙動は、この項目を足す以前より悪くならない。`true` を宣言する store にだけ、runtime は
+   * `nowSeq` に `T` だけを入れ、`addOwnSubjectSeq: true` を付ける。
+   *
+   * ⚠ `true` を宣言するなら、`reinforce` だけでなく `reinforceMany?`・`recordUsageAndReinforce?`
+   * （実装しているなら）も読むこと。`@mnemora/testkit` の適合テストが、宣言した store にだけ
+   * この項目の歯を当てる。
+   */
+  supportsAddOwnSubjectSeq?(): boolean;
   /**
    * [Issue #874](https://github.com/takecchi/mnemora/issues/874) / ADR 0303 追記節
    * （2026-09-26、クローン miku）: `reinforce` を `ids` の各要素について呼んだのと
@@ -2408,6 +2427,33 @@ export interface ReinforceOptions {
    * と同じ理由）。
    */
   nowSeq?: number;
+
+  /**
+   * [ADR 0394](../../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
+   * （ADR 0353 の負債1の解消）: `true` のとき、`nowSeq` は**テナントのカウンタ `T` だけ**を
+   * 意味し、store は**強化する Memory 自身の `subjectId` の `S_x`**
+   * （`tenant_subject_activity.activity_seq`。行が無い・`subjectId` が `null` なら `0`）を
+   * **行ごとに**足した `T + S_x` を、その Memory の活動時計の「いま」
+   * （`decayBaseSeq` に書く値。`decayFloorSeq` の計算の起点）として使う。
+   *
+   * 読む側（段1 SQL・`archiveDecayed`・`recall` の段2）は、行ごとに Memory 自身の `S_x` を足して
+   * 「有効ないま」を作る（ADR 0353）。書く側が呼び出しの `ctx.subjectId` の `S_x` を
+   * 全件に足すと、`ctx.subjectId` と Memory の `subjectId` が違うとき（`tick` の ctx には
+   * 通常 `subjectId` が無い。`reinforceMany` は同じ `opts` を全件に適用する）に、読む側の
+   * 式と食い違う起点が書かれる。この項目は、その食い違いを store が行ごとに解くことで防ぐ。
+   *
+   * `nowSeq` が省略されたときは何もしない（`nowSeq` の契約のとおり、活動時計側の列は据え置く）。
+   * 省略、または `false` のときは、`nowSeq` をそのまま起点として使う（この項目を足す以前と同じ）。
+   *
+   * ⭐ **非破壊である**——任意の項目を1つ足すだけ。この項目を知らない adapter は `nowSeq` を
+   * 「そのまま起点」として読み続ける。**runtime は、`MemoryStore.supportsAddOwnSubjectSeq?()` が
+   * `true` を返す store にだけこの項目を渡す**（宣言が無い store には、今までどおり `T + S_ctx` を
+   * フラグなしの `nowSeq` として渡す）。⟹ この項目を読まない adapter は、宣言しなければ今より悪くならない。
+   * 宣言する store は、`tenant_subject_activity` に行が無い subject・主題なしの Memory には `S_x = 0`
+   * として扱うこと。`tenant_subject_activity` に行が無いテナント（`hasSubjectActivityCounters` が
+   * `false`）では `S_x` はどの行でも `0` で結果が同じなので、runtime はこの項目を渡さない。
+   */
+  addOwnSubjectSeq?: boolean;
 }
 
 /**
