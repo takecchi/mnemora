@@ -1861,10 +1861,16 @@ export declare const CountKindSchema: z.ZodEnum<{
     exact: "exact";
     lower_bound: "lower_bound";
 }>;
+export interface StageSkippedCause {
+    kind: "provider_threw" | "no_vector" | "dimension_mismatch" | "non_finite";
+    providerErrorKind?: string;
+    errorName?: string;
+}
 export interface StageSkippedOmission {
     kind: "stage_skipped";
     stage: "candidate_generation" | "rescore" | "index_band" | "association" | "relation";
     reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor" | "relation_store_unavailable";
+    cause?: StageSkippedCause;
 }
 export type ScopeRelation = "outside_scope" | "within_scope";
 export declare const ScopeRelationSchema: z.ZodEnum<{
@@ -1941,6 +1947,16 @@ export interface LexicalTruncatedOmission {
     countKind: "unknown";
 }
 export type Omission = StageSkippedOmission | FilteredOmission | BelowThresholdOmission | OverLimitOmission | BudgetDroppedOmission | NotIndexedOmission | AnnTruncatedOmission | AnnUnreachedOmission | LexicalTruncatedOmission | ScoreNotComparableOmission | UnitAssemblyDroppedOmission;
+export declare const StageSkippedCauseSchema: z.ZodObject<{
+    kind: z.ZodEnum<{
+        provider_threw: "provider_threw";
+        no_vector: "no_vector";
+        dimension_mismatch: "dimension_mismatch";
+        non_finite: "non_finite";
+    }>;
+    providerErrorKind: z.ZodOptional<z.ZodString>;
+    errorName: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
 export declare const AnnUnreachedSeveritySchema: z.ZodEnum<{
     info: "info";
     warning: "warning";
@@ -1962,6 +1978,16 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
             no_anchor: "no_anchor";
             relation_store_unavailable: "relation_store_unavailable";
         }>;
+        cause: z.ZodOptional<z.ZodObject<{
+            kind: z.ZodEnum<{
+                provider_threw: "provider_threw";
+                no_vector: "no_vector";
+                dimension_mismatch: "dimension_mismatch";
+                non_finite: "non_finite";
+            }>;
+            providerErrorKind: z.ZodOptional<z.ZodString>;
+            errorName: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"filtered">;
@@ -2634,6 +2660,16 @@ export declare const RecallResultSchema: z.ZodObject<{
                 no_anchor: "no_anchor";
                 relation_store_unavailable: "relation_store_unavailable";
             }>;
+            cause: z.ZodOptional<z.ZodObject<{
+                kind: z.ZodEnum<{
+                    provider_threw: "provider_threw";
+                    no_vector: "no_vector";
+                    dimension_mismatch: "dimension_mismatch";
+                    non_finite: "non_finite";
+                }>;
+                providerErrorKind: z.ZodOptional<z.ZodString>;
+                errorName: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"filtered">;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
+import type { StageSkippedOmission } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
@@ -48,13 +49,14 @@ function buildRuntime(
 async function unavailable(runtime: ReturnType<typeof buildRuntime>["runtime"]) {
   const result = await runtime.recall(ctx, { text: "何かのクエリ" });
   const found = result.omitted.filter(
-    (o) => o.kind === "stage_skipped" && o.reason === "embedding_provider_unavailable",
+    (o): o is StageSkippedOmission =>
+      o.kind === "stage_skipped" && o.reason === "embedding_provider_unavailable",
   );
   expect(found).toHaveLength(1);
-  return found[0] as Record<string, unknown>;
+  return found[0] as StageSkippedOmission;
 }
 
-function expectBase(o: Record<string, unknown>) {
+function expectBase(o: StageSkippedOmission) {
   expect(o).toMatchObject({
     kind: "stage_skipped",
     stage: "candidate_generation",
@@ -109,7 +111,7 @@ describe("recall() — 埋め込み失敗の原因が cause で読める", () =>
   });
 
   it("次元違い: dimension_mismatch（ベクトルの値は載らない）", async () => {
-    const { runtime } = buildRuntime(async () => [[0.123456, 0.654321]]);
+    const { runtime } = buildRuntime(async () => [[0.123456, 0.654321, 0.5]]);
     const o = await unavailable(runtime);
     expectBase(o);
     expect(o.cause).toEqual({ kind: "dimension_mismatch" });

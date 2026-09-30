@@ -10,6 +10,7 @@ import type {
   OmissionSchema,
   ScopeRelationSchema,
   AnnUnreachedSeveritySchema,
+  StageSkippedCauseSchema,
   GroupCountSchema,
   DigestEntrySchema,
   DigestBandLimitedBySchema,
@@ -34,6 +35,7 @@ import type {
   NotIndexedReason,
   Omission,
   ScopeRelation,
+  StageSkippedCause,
   StageSkippedOmission,
   FilteredOmission,
   BelowThresholdOmission,
@@ -520,6 +522,13 @@ type _p60_AnnUnreachedSeverity = Expect<
   Equals<z.infer<typeof AnnUnreachedSeveritySchema>, AnnUnreachedSeverity>
 >;
 
+// `StageSkippedOmission.cause?: StageSkippedCause`（PR #1504）: 埋め込み失敗の原因の種類。
+// `_p04`/`_p03` は枝・union 全体を見ているので `cause` も自動で縛られるが、
+// `StageSkippedCauseSchema` 自身の `satisfies` にも対応するペアを登録する。
+type _p65_StageSkippedCause = Expect<
+  Equals<z.infer<typeof StageSkippedCauseSchema>, StageSkippedCause>
+>;
+
 // =============================================================================
 // packages/core/src/attributes.ts — 1ペア（Issue #152/#153、ADR 0312）
 // =============================================================================
@@ -548,7 +557,7 @@ type _p62_ClaimKeyOptions = Expect<Equals<z.infer<typeof ClaimKeyOptionsSchema>,
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
-const EXPECTED_PAIR_COUNT = 64;
+const EXPECTED_PAIR_COUNT = 65;
 
 /**
  * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
@@ -575,7 +584,7 @@ describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
       "取り込んだ分、1本（_p60 AnnUnreachedSeverity、ADR 0288 / Issue #361）が" +
       "`AnnUnreachedOmission.severity` 追加分、1本（_p61 Attributes、Issue #152/#153 / " +
       "ADR 0312）が `attributes.ts` の新設分、1本（_p62 ClaimKeyOptions、Issue #371 / " +
-      "ADR 0185・0315）が `claim-key.ts` の新設分（Issue #272 / ADR 0181 参照）。";
+      "ADR 0185・0315）が `claim-key.ts` の新設分、1本（_p65 StageSkippedCause、PR #1504）が `StageSkippedOmission.cause` 追加分（Issue #272 / ADR 0181 参照）。";
 
     expect(numbers.length, howToFix).toBe(EXPECTED_PAIR_COUNT);
 
@@ -622,7 +631,7 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-const EXPECTED_SATISFIES_COUNT = 63;
+const EXPECTED_SATISFIES_COUNT = 64;
 
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
   it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件`, () => {

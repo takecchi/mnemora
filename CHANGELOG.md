@@ -192,6 +192,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
+  ⭕ 非破壊と数える（任意欄の追加のみ）。
 - **`RelationStore` に任意メソッド `listRelatedMany?(ctx, memoryIds, kind?)` を足した。`Runtime` の幅優先探索（recall 段3の群の同伴取得・`resolveContestedGroup` の部分解消の確認・claim key の群の検出）は、1段の起点をまるごとこれに渡して1往復で読む**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 案A、[ADR 0402](./docs/decisions/0402-relation-store-list-related-many.md)。案D・案E は [ADR 0401](./docs/decisions/0401-mark-resolve-contested-group-constant-statements.md)）。
   - `result[i]` は `listRelated(ctx, memoryIds[i], kind)` と同じ集合（位置で対応。重複した id は同じ内容、実在しない id は空配列）。`@mnemora/postgres`（`PostgresRelationStore`、`from_memory_id = ANY(...)` の1文）と `@mnemora/testkit`（`InMemoryRelationStore`）が実装する。**実装しない adapter では、`Runtime` は今までどおり `listRelated` を起点ごとに直列に呼ぶ**——結果（提示順・`companionOf`・`omitted`・resolve の outcome）は、あるときと無いときで完全に一致する（歯で縛っている）。
   - `@mnemora/testkit` の `describeRelationStoreConformance` に、任意フラグ `implementsListRelatedMany?: boolean` を足した。実装が有れば宣言に依らず契約の節がかかり、実装が無ければ skip、`true` を宣言して実装が無ければ赤。
