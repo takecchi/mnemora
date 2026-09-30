@@ -59,9 +59,9 @@ function sqlStateOf(error: unknown): string | undefined {
 }
 
 describe("PostgresMemoryStore.recordUsage — 外部キー違反（ADR 0047 の決め手）", () => {
-  it("実在しない recallId に対しては外部キー違反（23503）で失敗し、実在する recallId では成功する", async () => {
+  it("実在しない recallId に対しては失敗し（外部キーも今も効いている）、実在する recallId では成功する", async () => {
     await resetTestDatabase();
-    const { db } = await getTestClient();
+    const { db, pool } = await getTestClient();
     const store = new PostgresMemoryStore(db);
     const ctx: Ctx = { tenantId: "tenant-fk-decisive" };
 
@@ -69,14 +69,24 @@ describe("PostgresMemoryStore.recordUsage — 外部キー違反（ADR 0047 の�
 
     // 実在しない recallId（well-formed な UUID だが recalls 行が無い）。
     const missingRecallId = randomUUID();
+    // ⚠ ADR 0439 以降、store の口は外部キーに当たる前に「ctx のテナントの recall か」を同じ SQL 文の中で確かめるので、
+    // store 越しには `recall not found for tenant` で拒まれる（生の 23503 は利用者に見えない）。
+    await expect(store.recordUsage(ctx, missingRecallId, [memory.id])).rejects.toThrow(
+      /PostgresMemoryStore: recall not found for tenant: /,
+    );
+    // 外部キー制約そのものは、今も効いている（ADR 0047 の決め手）——生 SQL で同じ行を書くと SQLSTATE 23503 になる。
+    // ⚠ 「何か失敗した」では足りない。SQLSTATE 23503（foreign_key_violation）そのものを当てる（sqlStateOf の doc 参照）。
     let caught: unknown;
-    await store.recordUsage(ctx, missingRecallId, [memory.id]).catch((error: unknown) => {
-      caught = error;
-    });
-
+    await pool
+      .query("INSERT INTO recall_usages (tenant_id, recall_id, memory_id) VALUES ($1, $2, $3)", [
+        ctx.tenantId,
+        missingRecallId,
+        memory.id,
+      ])
+      .catch((error: unknown) => {
+        caught = error;
+      });
     expect(caught).toBeDefined();
-    // ⚠ 「何か失敗した」では足りない。外部キー制約が実際に効いていることの証明として、
-    // SQLSTATE 23503（foreign_key_violation）そのものを当てる（sqlStateOf の doc 参照）。
     expect(sqlStateOf(caught)).toBe("23503");
 
     // 非対称の相方: 実在する recallId では成功する。

@@ -2321,6 +2321,42 @@ WHERE purged_at IS NOT NULL
 
 **DB マイグレーション**: 要らない。
 
+### 51. `MemoryStore` の書き込み口が、別の行を指す参照の参照先が `ctx` のテナントの行でないときに例外を投げるようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーの判断ではない。[ADR 0436](./decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md) の続き）。
+
+⚠ **未リリース**。**番号は 51 である**——項目50 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 次の欄は、これまで参照先が `ctx.tenantId` の行かを確かめなかった（`@mnemora/postgres`）。今は書く前に確かめ、実在しない・別のテナントの行・uuid の形でない id は、何も書かずに `… not found for tenant: <id>` を含むメッセージの `Error` を投げる。
+
+| 口                                                                                                                             | 欄                                  | 主語（message）                                              |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------ |
+| `recordUsage`・`recordUsageAndReinforce?`                                                                                      | `recallId`                          | `recall not found for tenant`                                |
+| 同上                                                                                                                           | `memoryIds`                         | `memory not found for tenant`（1件でも違えば全体を書かない） |
+| `createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents?`・`supersedeWithNewMemories?`（`news[i].input`） | `sourceObservationId`               | `observation not found for tenant`                           |
+| 同上                                                                                                                           | `contestedWithId`・`supersededById` | `memory not found for tenant`                                |
+| `updateStatus`・`updateStatusWithEvent`                                                                                        | `opts.supersededById`               | `memory not found for tenant`                                |
+| `resolveContestedPair?`・`resolveContestedGroup?`                                                                              | `supersededById`                    | `memory not found for tenant`                                |
+
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。項目21・23・24・27・34・49 と同じ扱い。加えて、conformance スイートの判定を厳しくする変更（項目36・49 と同じ）でもある。
+
+**誰が影響を受けるか**: 上の口を直接呼び、別のテナントの id を渡している呼び出し側。`Runtime` は同じ `ctx` で確かめた id しか渡さないので、`observe()`・`recall()`・`tick()` などは変わらない。
+自前の `MemoryStore` を `describeMemoryStoreConformance` に当てている場合は、新しい `it`（9本。任意メソッドの分は `supportsXxx` のフラグの下）が落ちうる。
+実在しない uuid・uuid でない id を渡していた呼び出し側は、以前も落ちていたが、外部キー違反・`Failed query` の生の DB エラーから、上の明示の例外に変わる。
+冪等の衝突で既存の行を返していた `createMemory*` も、参照が壊れていれば拒むようになる。
+
+**どう直すか**:
+
+- 参照に渡す id は、同じ `ctx` で `MemoryStore.get`・`getObservation`・`getRecall` などで取れた行のものにする。
+- 専用のエラー型・`kind` は無い（素の `Error`、メッセージは `PostgresMemoryStore:`/`InMemoryMemoryStore:`/`FakeMemoryStore:` で始まる）。
+- 自前の `MemoryStore` 実装は、上の口の入口で同じ確かめを足す。適合テストの `prepareRecallId(ctx)` は、渡した `ctx` のテナントの recall を、`createStore()` の store から見える形で返すこと。
+- 適合テストの `restoreSupersededBy は別テナントの行を巻き込まない`・`previewRestoreSupersededBy は別テナントの行を巻き込まない` は、B の行の仕込みを、B 自身の anchor を指す形に変えた（別テナントの anchor を指す行は、API で書けなくなったため）。自前の adapter で、その形を別の方法で作っている場合は、仕込みを見直すこと。
+
+**DB マイグレーション**: 要らない。修正前に書かれた、別テナントを指す行が在るかを調べる SQL（4本。`recall_usages`・`memories.source_observation_id`・`contested_with_id`・`superseded_by_id`）は ADR 0439 に在る（読み取りだけ）。
+**既存の行は消さない。**行が出た場合の扱いはオーナーの判断が要る（消す・残す・付け替える、のどれもデータの書き換えである）。そのような行が在ると、指された側のテナントの `eraseTenant` は `blocked_by_foreign_reference` で止まり、`recall_usages` が別テナントの recall を指す行は、指された側の `purgeExpiredRecalls` を外部キー違反で落とす。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

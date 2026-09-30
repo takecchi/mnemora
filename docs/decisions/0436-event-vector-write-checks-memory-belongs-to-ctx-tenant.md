@@ -162,3 +162,8 @@ ins AS (INSERT … SELECT … FROM mem WHERE ok [ON CONFLICT …]) SELECT …`�
   - **上の「今回塞がない、同じ種類の残りの口」を別の担当が塞いだとき**——塞いだ口ごとに、この ADR の「引き受けた負債」の該当の箇条書きへ追記する。
     口が全部塞がったら、`docs/memory-model.md` §5 の 2026-09-26（#854）・2026-09-27（#1051）の「検査しない」の表の残りの行も、
     この ADR の書き方（当時の記録は書き換えず、追記で「もう成り立たない」と書く）で直す。
+
+- **追記（2026-10、[ADR 0439](./0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)）: 上の「今回塞がない、同じ種類の残りの口」は、ADR 0439 で塞いだ。**
+  `MemoryStore.recordUsage`（`recordUsageAndReinforce?` を含む）の `recallId`・`memoryIds`、`createMemory` 系の `sourceObservationId`・`contestedWithId`・`supersededById`、`updateStatus`・`updateStatusWithEvent`・`resolveContestedPair`・`resolveContestedGroup` の `supersededById` が、
+  この ADR と同じ作法（入口の検査と書き込みを1つの SQL 文にする、uuid でない id を弾く、適合テスト・TSDoc・破壊的変更の記載をそろえる）で、参照先が `ctx` のテナントの行であることを確かめるようになった。
+  上の「`eraseTenant` が `blocked_by_foreign_reference` で止まる経路は、〜起こりうる」の見込みは、ADR 0439 の【実測】で確かめた（`superseded_by_id`・`contested_with_id`・`recall_usages`（memory 側）・`source_observation_id` のどれでも止まった。`recall_usages` が別テナントの recall を指す場合は、さらに指された側の `purgeExpiredRecalls` が外部キー違反で落ちた）。本文は書き換えていない。

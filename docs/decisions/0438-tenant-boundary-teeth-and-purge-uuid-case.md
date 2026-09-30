@@ -64,3 +64,8 @@
 - **これが覆るとしたら**:
 
   conformance に別テナントの歯を足す方針にオーナーが変えたとき、個別のテストの一部をそちらへ移すことになる。
+
+- **追記（2026-10、[ADR 0439](./0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md)）**: 上の「引き受けた負債」の1つめ（歯の一部が、別テナントの id を指す行を生 SQL で作る）と、決定5（C1・C2 はこの PR では扱わない）について。
+  ADR 0439 で、C1（別テナントの id を参照する書き込み口が、別テナントの purge・erase を止めうる）と C2（`resolveContestedGroup` の `supersededById`）を塞いだ。API からは、別テナントを指す行が書けなくなった。
+  この ADR の歯は生 SQL で形を作っているので、壊れていない（`tenant-boundary-teeth.postgres.test.ts` の10本は、ADR 0439 の枝で緑のまま。`erase-tenant.postgres.test.ts` の `superseded_by_id` の歯も同じ）。
+  壊れたのは、形を API で作っていた既存の適合テスト2本（`restoreSupersededBy`・`previewRestoreSupersededBy` の別テナントの it）だけで、ADR 0439 の決定9で直した。
