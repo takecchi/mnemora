@@ -232,10 +232,21 @@ const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client })
 **上の「素の `Error`」「`kind` を持たない」はもう成り立たない。**`z.tuple`・`z.date`・`transform` が送る前の翻訳で投げた例外は、
 いまは `AnthropicLLMProviderError`（`kind: "schema_unsupported"`）に包んで投げ直す。**元の例外（上の表の文面）は
 `cause`（ES2022 の `Error.cause`）にそのまま載る**——文面そのものは変えていない。`messages.create` が呼ばれないことも変えていない。
-**`z.record` は今までどおり**——`schema_unsupported` にはせず、翻訳が通って送る（上の 2026-09-28 追記のとおり、送る形は
-「空の object」に降格する）。`@mnemora/openai` は同じ4形すべて（`z.record`・`z.tuple`・`z.date`・`transform`）を送る前に
-同じ `kind: "schema_unsupported"` で落とす（あちらの README）——**この点だけ2つの provider で振る舞いが割れる**（`z.record` を
-Anthropic 側だけ通す判断は、クローン miku が ADR 0360 で決めた。オーナーの判断ではない）。
+**（⚠ 2026-09-30 に、この段落の `z.record` の扱いを変えた——下の「2026-09-30 訂正」。以前ここには「`z.record` は今までどおり、`schema_unsupported` にはせず翻訳が通って送る。`@mnemora/openai` と、この点だけ振る舞いが割れる」と書いてあった。）**
+
+### 🔴 2026-09-30 訂正（[ADR 0360](../../docs/decisions/0360-schema-unsupported-thrown-before-send.md) の同日の追記、負債3の解消）: `z.record` も送る前に `schema_unsupported` で落ちる
+
+**上の表の `z.record` の行（翻訳は通り、送る）と、2026-09-28 追記の「空の object の形で送る」は、もう成り立たない。**
+`z.record` を**含む**スキーマ（object の欄・配列の要素・`optional`/`nullable`/`default` の内側・union や intersection の枝・
+`z.lazy` の先。深さを問わない）は、`AnthropicLLMProviderError`（`kind: "schema_unsupported"`）を投げ、`messages.create` は
+呼ばれない。`cause` の `Error` に「`z.record` は送れない」旨が載る。理由は、翻訳が失敗しない代わりに、record の欄が例外無しで
+**黙って空になる**こと。`@mnemora/openai` と同じ4形（`z.record`・`z.tuple`・`z.date`・`transform`）が、2つの provider で揃った。
+
+- **代わりに**: record を `z.array(z.object({ key: z.string(), value: … }))` に置き換える（`docs/migration-v1.md` の未リリース節）。
+- **今までどおり送る**: `z.lazy`（再帰そのもの）・`default`・根が union。`z.record` を含まなければ落ちない。
+  送った後に Anthropic が受けるかは確かめていない。
+- 検出は zod v4 の内部表現（`_zod.def.type === "record"`、`zod ^4.5.4`）に依存する。歯は
+  `src/__tests__/structured-output-zod-shapes.test.ts`・`provider-parity.test.ts`。
 
 **core が渡す4つのスキーマは、送る前の変換を通る**【2026-09-27、偽の `client` で確かめた。**射程は送る前の変換まで**——
 Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない】（歯: `src/__tests__/core-schemas-send-shape.test.ts`）。
@@ -249,7 +260,7 @@ Anthropic の実 API が、送った JSON Schema を受けるかは確かめて�
 
 runtime の5つの口（`observe`・`claimKey` 付きの `observe`・`reextract`・`reflect`・`consolidate`）は、どれも
 `messages.create` まで届いて `output_config.format.schema` を送る。4つのどれにも、送る前に落ちる形（`z.tuple`・`z.date`・
-`transform`）は含まれていない。
+`transform`・`z.record`）は含まれていない。
 
 ⚠ 送る形の中身で、次の2つは確かめたことの記録として書く（直していない）:
 

@@ -408,3 +408,11 @@ recall で引ける」）が `observe()` で新しい記憶を書き込む。宣
   直っている。`isolate: false` の試走で `--sequence.shuffle` を当てたところ、別のファイル
   （`embedding-space-table-enumeration-consistency.postgres.test.ts`）に同じ形の `it` の順序依存が
   見つかり、直した（ADR 0397）。
+
+## 追記（2026-09-30）: 「`upgrade-from-released` の順序依存は範囲外」とした件は、解消済み
+
+**上の本文は当時の記録として書き換えない。** 「`--sequence.shuffle` で見つかった、この PR とは無関係な既存の壊れ方」と「確かめていないこと」の末尾で範囲外とした `upgrade-from-released.postgres.test.ts` の `it()` 順序依存は、[Issue #1416](https://github.com/takecchi/mnemora/issues/1416) として起票され、[PR #1418](https://github.com/takecchi/mnemora/pull/1418) で直った（Issue #1416 は閉じている）。
+
+- 直し方（PR #1418 本文）: 比べる「後」の値（migration 直後のスナップショット）も `beforeAll` の中で凍結し、対象の `it()` は凍結した2つの値を `toEqual` で比べるだけにした。比較する列・`toEqual` は変えていない（主張は弱めていない）。
+- PR #1418 本文は、修正前の origin/main で `--sequence.shuffle` を付けると seed 3つで 2/19 が赤、修正後は緑と報告している。この追記の書き手は再実行していない。
+- 上の本文が述べた原因（同じ `describe` の書き換える `it()` との順序依存であり、ファイル並列化・DB の共有とは無関係）は、PR #1418 の原因の説明と一致している。

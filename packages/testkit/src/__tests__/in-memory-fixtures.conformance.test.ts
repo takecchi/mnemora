@@ -92,6 +92,8 @@ describeMemoryStoreConformance({
   supportsAbortIfForgotten: false,
   // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
+  // ADR 0404: InMemoryMemoryStore は purgeExpiredRecalls を実装している。
+  supportsPurgeExpiredRecalls: true,
   listPurgedEvents: (ctx) => {
     if (!latestMemoryStoreForEvents) {
       throw new Error("listPurgedEvents より先に createStore() を呼ぶ必要がある");
@@ -145,15 +147,20 @@ describeMemoryStoreConformance({
 });
 
 // Issue #207/#933 PR2（ADR 0381）: `RelationStore` の in-memory 実装。
+// `link` は両端の記憶が `ctx` のテナントに在ることを、渡された `InMemoryMemoryStore` で確かめる
+// ——`prepareMemoryId` は `createStore()` が組んだ、まさにその `InMemoryMemoryStore` に
+// 記憶を作る（`latestMemoryStoreForEvents` と同じ持ち回りの形）。
+let latestMemoryStoreForRelations: InMemoryMemoryStore | undefined;
+
 describeRelationStoreConformance({
   name: "in-memory placeholder",
   createStore: () => {
     const memoryStore = new InMemoryMemoryStore();
+    latestMemoryStoreForRelations = memoryStore;
     return new InMemoryRelationStore(memoryStore, memoryStore.relations);
   },
   prepareMemoryId: async (ctx) => {
-    const memoryStore = new InMemoryMemoryStore();
-    const memory = await memoryStore.createMemory(
+    const memory = await latestMemoryStoreForRelations!.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: ctx.tenantId }),
     );
@@ -216,6 +223,8 @@ describeVectorStoreConformance({
   supportsGetVectors: true,
   // Issue #1207 / ADR 0383: InMemoryVectorStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // Issue #1412 の続き: InMemoryVectorStore が searchMany を実装しているか（歯は宣言した adapter にだけかかる）。
+  supportsSearchMany: true,
 });
 
 // ADR 0084 / Issue #106: `InMemoryLexicalStore` は自前の Map を持たず、`memoryStore` の
@@ -341,6 +350,8 @@ describeOutboxStoreConformance({
   },
   // Issue #1207 / ADR 0383: InMemoryOutboxStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+  // ADR 0404: InMemoryOutboxStore は purgeCompletedJobs を実装している。
+  supportsPurgeCompletedJobs: true,
 });
 
 let latestTenantSettingsStore: InMemoryTenantSettingsStore | undefined;

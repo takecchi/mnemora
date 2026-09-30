@@ -7,9 +7,20 @@ import {
   type EraseTenantStoreOptions,
   type OutboxJobRecord,
   type OutboxStore,
+  type PurgeCompletedJobsOptions,
+  type PurgeCompletedJobsResult,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { isUuidLike, rowToOutboxJob, toPgTimestamp, type OutboxJobRow } from "./mapping.js";
+import {
+  isUuidLike,
+  parsePgTimestamp,
+  rowToOutboxJob,
+  toPgTimestamp,
+  type OutboxJobRow,
+} from "./mapping.js";
+
+/** PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC）。これより前に完了した行は存在しえない。 */
+const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
 /**
  * `OutboxStore` の Postgres 実装（roadmap.md 段階3、ADR 0005 の transactional outbox
@@ -249,5 +260,77 @@ export class PostgresOutboxStore implements OutboxStore {
     `);
     const deleted = result.rows.length;
     return { deleted, reachedLimit: deleted === opts.limit };
+  }
+
+  /**
+   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `OutboxStore.purgeCompletedJobs?` の実装。`completed_at IS NOT NULL AND completed_at < olderThan`
+   * の行**だけ**を消す——claim 中・未処理・`failed_at` が付いた行は、述語に `completed_at` が
+   * 入っている限り対象にならない（`complete` と `fail` は互いに排他なので、`failed_at` の行に
+   * `completed_at` は付かない）。対象を先に確定し（`FOR UPDATE SKIP LOCKED`）、その id だけを
+   * 消す。
+   */
+  async purgeCompletedJobs(
+    ctx: Ctx,
+    opts: PurgeCompletedJobsOptions,
+  ): Promise<PurgeCompletedJobsResult> {
+    const dryRun = opts.dryRun ?? false;
+    if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+      return { purged: 0, reachedLimit: false, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+    }
+    const olderThan = toPgTimestamp(opts.olderThan);
+    if (dryRun) {
+      const candidates = await this.db.execute(sql`
+        SELECT completed_at FROM outbox
+        WHERE tenant_id = ${ctx.tenantId}
+          AND completed_at IS NOT NULL AND completed_at < ${olderThan}
+        ORDER BY completed_at ASC, id ASC
+        LIMIT ${opts.limit + 1}
+      `);
+      const rows = candidates.rows as unknown as { completed_at: string }[];
+      const victims = rows.slice(0, opts.limit);
+      return {
+        purged: victims.length,
+        reachedLimit: rows.length > opts.limit,
+        oldestPurgedAt: victims.length > 0 ? parsePgTimestamp(victims[0]!.completed_at) : null,
+        newestPurgedAt:
+          victims.length > 0 ? parsePgTimestamp(victims[victims.length - 1]!.completed_at) : null,
+        dryRun,
+      };
+    }
+    return this.db.transaction(async (tx) => {
+      const candidates = await tx.execute(sql`
+        SELECT id, completed_at FROM outbox
+        WHERE tenant_id = ${ctx.tenantId}
+          AND completed_at IS NOT NULL AND completed_at < ${olderThan}
+        ORDER BY completed_at ASC, id ASC
+        LIMIT ${opts.limit + 1}
+        FOR UPDATE SKIP LOCKED
+      `);
+      const rows = candidates.rows as unknown as { id: string; completed_at: string }[];
+      const reachedLimit = rows.length > opts.limit;
+      const victimIds = rows.slice(0, opts.limit).map((row) => row.id);
+      if (victimIds.length === 0) {
+        return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+      }
+      // 述語をもう一度書く: 消すのは、確定した id のうち今も完了済みの行だけ。
+      const deleted = await tx.execute(sql`
+        DELETE FROM outbox
+        WHERE tenant_id = ${ctx.tenantId}
+          AND id = ANY(${sql.param(victimIds)}::uuid[])
+          AND completed_at IS NOT NULL AND completed_at < ${olderThan}
+        RETURNING completed_at
+      `);
+      const completedAts = (deleted.rows as unknown as { completed_at: string }[])
+        .map((row) => parsePgTimestamp(row.completed_at))
+        .sort((a, b) => a.getTime() - b.getTime());
+      return {
+        purged: completedAts.length,
+        reachedLimit,
+        oldestPurgedAt: completedAts.length > 0 ? completedAts[0]! : null,
+        newestPurgedAt: completedAts.length > 0 ? completedAts[completedAts.length - 1]! : null,
+        dryRun,
+      };
+    });
   }
 }

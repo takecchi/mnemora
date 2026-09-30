@@ -4,7 +4,12 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
 import type { Relation, RelationKind, RelationStore } from "../interfaces/relation-store.js";
 import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
-import type { ClaimOutboxJobsOptions, OutboxStore } from "../interfaces/outbox-store.js";
+import type {
+  ClaimOutboxJobsOptions,
+  OutboxStore,
+  PurgeCompletedJobsOptions,
+  PurgeCompletedJobsResult,
+} from "../interfaces/outbox-store.js";
 import type { OutboxJobKind } from "../interfaces/scheduler.js";
 import {
   assertValidDecayClock,
@@ -52,6 +57,8 @@ import type {
   PurgeExpiredEventsByRetentionOptions,
   PurgeExpiredEventsByRetentionOutcome,
   PurgeExpiredEventsOptions,
+  PurgeExpiredRecallsOptions,
+  PurgeExpiredRecallsResult,
   PurgeExpiredEventsResult,
   ReinforceOptions,
   RequeueEmbedJobsOptions,
@@ -1225,6 +1232,64 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `MemoryStore.purgeExpiredRecalls?` の in-memory 実装（`PostgresMemoryStore` と同じ契約）。
+   * 対象の recall を先に確定し、その `recall_usages` を消してから recall を消す。
+   * `await` を挟まない（1回の同期区間で終わる）。
+   */
+  async purgeExpiredRecalls(
+    ctx: Ctx,
+    opts: PurgeExpiredRecallsOptions,
+  ): Promise<PurgeExpiredRecallsResult> {
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`purgeExpiredRecalls: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`purgeExpiredRecalls: limit must not be negative (got ${opts.limit})`);
+    }
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(
+        `purgeExpiredRecalls: limit must fit in a Postgres bigint (got ${opts.limit})`,
+      );
+    }
+    const dryRun = opts.dryRun ?? false;
+    const candidates = [...this.backing.recalls.entries()]
+      .filter(
+        ([, row]) =>
+          row.tenantId === ctx.tenantId && row.createdAt.getTime() < opts.olderThan.getTime(),
+      )
+      .sort(
+        ([idA, a], [idB, b]) =>
+          a.createdAt.getTime() - b.createdAt.getTime() || (idA < idB ? -1 : idA > idB ? 1 : 0),
+      );
+    const reachedLimit = candidates.length > opts.limit;
+    const victims = candidates.slice(0, opts.limit);
+    const purged = victims.length;
+    const oldestPurgedAt = purged > 0 ? new Date(victims[0]![1].createdAt) : null;
+    const newestPurgedAt = purged > 0 ? new Date(victims[purged - 1]![1].createdAt) : null;
+    const usageKeys: string[] = [];
+    for (const [id] of victims) {
+      const prefix = `${ctx.tenantId}:${id}:`;
+      for (const key of this.backing.usages) {
+        if (key.startsWith(prefix)) usageKeys.push(key);
+      }
+    }
+    if (!dryRun) {
+      // 子（recall_usages）が先、親（recalls）が後。
+      for (const key of usageKeys) this.backing.usages.delete(key);
+      for (const [id] of victims) this.backing.recalls.delete(id);
+    }
+    return {
+      purged,
+      purgedUsages: usageKeys.length,
+      reachedLimit,
+      oldestPurgedAt,
+      newestPurgedAt,
+      dryRun,
+    };
+  }
+
+  /**
    * Issue #1232 / [ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md):
    * `MemoryStore.purgeExpiredEventsByRetention?` の Fake 実装。`backing.eventRetentionDays`
    * （`FakeTenantSettingsStore.setEventRetention` と共有）を読んでから
@@ -1643,7 +1708,12 @@ export class FakeMemoryStore implements MemoryStore {
 
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     const id = nextId("rcl");
-    this.backing.recalls.set(id, { ...record, tenantId: ctx.tenantId, createdAt: new Date() });
+    // ADR 0404: 実装（`InMemoryMemoryStore`・`PostgresMemoryStore`）と同じく、`record.createdAt` を渡せばそれを使う。
+    this.backing.recalls.set(id, {
+      ...record,
+      tenantId: ctx.tenantId,
+      createdAt: record.createdAt ?? new Date(),
+    });
     // ADR 0165 決めたこと5: `recalls` への INSERT と「同一トランザクション」で
     // `activity_seq` を +1 する。フェイクには本物のトランザクションが無いので、
     // 同期的に隣り合わせて書くことで同じ性質（片方だけが書かれることはない）を再現する。
@@ -2402,10 +2472,13 @@ export class FakeMemoryStore implements MemoryStore {
         latestByPredicate.set(predicate, createdAtMs);
       }
     }
-    return [...latestByPredicate.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, query.limit)
-      .map(([predicate]) => predicate);
+    return (
+      [...latestByPredicate.entries()]
+        // 同着は predicate のコードポイント順（UTF-8 のバイト順と一致する。JS の `<` は UTF-16 コード単位順で食い違う）。
+        .sort((a, b) => b[1] - a[1] || Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])))
+        .slice(0, query.limit)
+        .map(([predicate]) => predicate)
+    );
   }
 
   /**
@@ -2518,6 +2591,13 @@ export class FakeRelationStore implements RelationStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    // ADR 0398: 両端の記憶が ctx のテナントに在ることを確かめてから書く（本物の store と同じ）。
+    for (const id of [fromId, toId]) {
+      const memory = this.backing.memories.get(id);
+      if (memory === undefined || memory.tenantId !== ctx.tenantId) {
+        throw new Error(`FakeRelationStore: memory not found for tenant: ${id}`);
+      }
+    }
     const exists = this.backing.relations.some(
       (r) =>
         r.tenantId === ctx.tenantId &&
@@ -2637,7 +2717,12 @@ export class FakeOutboxStore implements OutboxStore {
   // （Issue #826）——相手側の終端列（`completedAt`/`failedAt`）が既に付いていれば、
   // 後から来た呼び出しは行を一切変えず例外も投げない（先に付いた終端が勝つ）。
   // 同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は変えていない。
-  async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
+  async complete(
+    ctx: Ctx,
+    jobId: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -2650,10 +2735,17 @@ export class FakeOutboxStore implements OutboxStore {
     if ((job.failedAt ?? null) !== null) {
       return;
     }
-    job.completedAt = new Date();
+    // Issue #1237: 実装（`InMemoryOutboxStore`・`PostgresOutboxStore`）と同じく、`opts.at` を渡せばそれを使う。
+    job.completedAt = opts?.at ?? new Date();
   }
 
-  async fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void> {
+  async fail(
+    ctx: Ctx,
+    jobId: string,
+    error: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -2666,7 +2758,7 @@ export class FakeOutboxStore implements OutboxStore {
     if ((job.completedAt ?? null) !== null) {
       return;
     }
-    job.failedAt = new Date();
+    job.failedAt = opts?.at ?? new Date();
     job.lastError = error;
   }
 
@@ -2692,6 +2784,54 @@ export class FakeOutboxStore implements OutboxStore {
       }
     }
     return { deleted: matchingIndexes.length, reachedLimit: matchingIndexes.length === opts.limit };
+  }
+
+  /**
+   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * `OutboxStore.purgeCompletedJobs?` の in-memory 実装（`PostgresOutboxStore` と同じ契約）。
+   * `completedAt` が付いていて `< olderThan` の行だけを消す——claim 中・未処理・
+   * `failedAt` の行は対象にならない。共有配列なので `splice` でその場から取り除く。
+   */
+  async purgeCompletedJobs(
+    ctx: Ctx,
+    opts: PurgeCompletedJobsOptions,
+  ): Promise<PurgeCompletedJobsResult> {
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`purgeCompletedJobs: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`purgeCompletedJobs: limit must not be negative (got ${opts.limit})`);
+    }
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(
+        `purgeCompletedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`,
+      );
+    }
+    const dryRun = opts.dryRun ?? false;
+    const candidates = this.backing.outboxJobs
+      .filter(
+        (job) =>
+          job.tenantId === ctx.tenantId &&
+          (job.completedAt ?? null) !== null &&
+          job.completedAt!.getTime() < opts.olderThan.getTime(),
+      )
+      .sort(
+        (a, b) =>
+          a.completedAt!.getTime() - b.completedAt!.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      );
+    const reachedLimit = candidates.length > opts.limit;
+    const victims = candidates.slice(0, opts.limit);
+    const purged = victims.length;
+    const oldestPurgedAt = purged > 0 ? new Date(victims[0]!.completedAt!) : null;
+    const newestPurgedAt = purged > 0 ? new Date(victims[purged - 1]!.completedAt!) : null;
+    if (!dryRun && purged > 0) {
+      const victimIds = new Set(victims.map((job) => job.id));
+      for (let i = this.backing.outboxJobs.length - 1; i >= 0; i--) {
+        if (victimIds.has(this.backing.outboxJobs[i]!.id)) this.backing.outboxJobs.splice(i, 1);
+      }
+    }
+    return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
   }
 }
 
@@ -3034,6 +3174,53 @@ export class FakeVectorStore implements VectorStore {
     }
     return { deleted: matchingKeys.length, reachedLimit: matchingKeys.length === opts.limit };
   }
+}
+
+/**
+ * Issue #377 / Issue #1412 の続き: `searchMany`（任意メソッド）を持つ `VectorStore` を模す薄いラッパー。
+ * `FakeVectorStore` へ全部委譲し、`searchMany` は契約（`VectorStore.searchMany?` の doc）どおり
+ * 「`new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ」に実装する
+ * ——同じ key は後勝ち、Map の並びは最初に現れた位置。`searchCalls`/`searchManyCalls` は、
+ * `recall-runtime.ts` の段3.5が束ねる経路と search へ戻る経路のどちらを通ったかを見るための記録。
+ * `FakeVectorStore` 自体には足さない——足すと他の全テストの連想枠が束ねる経路に切り替わる。
+ */
+export function withSearchMany(store: FakeVectorStore): VectorStore & {
+  searchCalls: number;
+  searchManyCalls: { keys: string[]; opts: { limit: number; filter: VectorFilter } }[];
+} {
+  const wrapper = {
+    searchCalls: 0,
+    searchManyCalls: [] as { keys: string[]; opts: { limit: number; filter: VectorFilter } }[],
+    upsert: (ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]) =>
+      store.upsert(ctx, space, memoryId, vector),
+    search: (
+      ctx: Ctx,
+      space: EmbeddingSpaceId,
+      query: number[],
+      opts: { limit: number; filter: VectorFilter },
+    ) => {
+      wrapper.searchCalls += 1;
+      return store.search(ctx, space, query, opts);
+    },
+    delete: (ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId) =>
+      store.delete(ctx, space, memoryId),
+    deleteAcrossSpaces: (ctx: Ctx, memoryIds: readonly MemoryId[]) =>
+      store.deleteAcrossSpaces(ctx, memoryIds),
+    getVectors: (ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]) =>
+      store.getVectors(ctx, space, memoryIds),
+    searchMany: async (
+      ctx: Ctx,
+      space: EmbeddingSpaceId,
+      queries: { key: string; vector: number[] }[],
+      opts: { limit: number; filter: VectorFilter },
+    ) => {
+      wrapper.searchManyCalls.push({ keys: queries.map((q) => q.key), opts });
+      const result = new Map<string, VectorHit[]>();
+      for (const q of queries) result.set(q.key, await store.search(ctx, space, q.vector, opts));
+      return result;
+    },
+  };
+  return wrapper;
 }
 
 /**

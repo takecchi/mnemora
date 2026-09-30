@@ -350,6 +350,27 @@ export class InMemoryVectorStore implements VectorStore {
     return hits.slice(0, opts.limit).map(({ memoryId, distance }) => ({ memoryId, distance }));
   }
 
+  /**
+   * Issue #377 / Issue #1412 の続き: `VectorStore.searchMany?` の実装。契約そのものが
+   * 「各クエリを `search()` で単独に呼んだ結果と一致する。同じ key は後勝ち、`Map` の並びは最初に
+   * 現れた位置」なので、`search()` を呼ぶ形にする——例外（`limit`・日時の検査）・float4 の丸め・
+   * テナント境界が `search()` と自動で一致する。往復を束ねる利点は、DB を持たないこの実装には無い。
+   */
+  async searchMany(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    queries: { key: string; vector: number[] }[],
+    opts: { limit: number; filter: VectorFilter },
+  ): Promise<Map<string, VectorHit[]>> {
+    const result = new Map<string, VectorHit[]>();
+    // `queries` が空なら `search()` を一度も呼ばないので、`limit` が不正でも投げない
+    // （`PostgresVectorStore.searchMany` も空配列は往復せず空の Map を返す）。
+    for (const q of queries) {
+      result.set(q.key, await this.search(ctx, space, q.vector, opts));
+    }
+    return result;
+  }
+
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
     this.entries.delete(this.key(space, ctx.tenantId, memoryId));
   }

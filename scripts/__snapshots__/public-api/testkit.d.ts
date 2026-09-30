@@ -104,7 +104,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RelationKind, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredRecallsOptions, PurgeExpiredRecallsResult, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RelationKind, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export interface StoredRelation {
     id: string;
     tenantId: string;
@@ -194,6 +194,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>;
     private purgeExpiredEventsSync;
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+    purgeExpiredRecalls(ctx: Ctx, opts: PurgeExpiredRecallsOptions): Promise<PurgeExpiredRecallsResult>;
     purgeExpiredEventsByRetention(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     supportsAddOwnSubjectSeq(): boolean;
@@ -320,7 +321,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
 }
 
 // ===== dist/__fixtures__/in-memory-outbox-store.d.ts =====
-import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore } from "@mnemora/core";
+import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore, type PurgeCompletedJobsOptions, type PurgeCompletedJobsResult } from "@mnemora/core";
 export declare class InMemoryOutboxStore implements OutboxStore {
     private readonly jobs;
     constructor(jobs: OutboxJobRecord[]);
@@ -332,14 +333,16 @@ export declare class InMemoryOutboxStore implements OutboxStore {
         at?: Date;
     }): Promise<void>;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+    purgeCompletedJobs(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
 }
 
 // ===== dist/__fixtures__/in-memory-relation-store.d.ts =====
 import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
 import type { InMemoryMemoryStore, StoredRelation } from "./in-memory-memory-store.js";
 export declare class InMemoryRelationStore implements RelationStore {
+    private readonly memoryStore;
     private readonly relations;
-    constructor(_memoryStore: InMemoryMemoryStore, relations?: StoredRelation[]);
+    constructor(memoryStore: InMemoryMemoryStore, relations?: StoredRelation[]);
     link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
     listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
@@ -385,6 +388,13 @@ export declare class InMemoryVectorStore implements VectorStore {
         limit: number;
         filter: VectorFilter;
     }): Promise<VectorHit[]>;
+    searchMany(ctx: Ctx, space: EmbeddingSpaceId, queries: {
+        key: string;
+        vector: number[];
+    }[], opts: {
+        limit: number;
+        filter: VectorFilter;
+    }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
@@ -572,6 +582,7 @@ export interface MemoryStoreConformanceOptions {
     supportsAbortIfForgotten?: boolean;
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
+    supportsPurgeExpiredRecalls?: boolean;
     supportsArchiveDecayed: boolean;
     supportsPurgeMemory: boolean;
     supportsMarkContestedPair: boolean;
@@ -605,6 +616,7 @@ export interface OutboxStoreConformanceOptions {
     peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
     supportsRealConcurrency?: boolean;
     supportsEraseTenant: boolean;
+    supportsPurgeCompletedJobs?: boolean;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;
 
@@ -661,5 +673,6 @@ export interface VectorStoreConformanceOptions {
     prepareEmbeddingSpace: (space: EmbeddingSpaceId) => Promise<void> | void;
     supportsGetVectors: boolean;
     supportsEraseTenant: boolean;
+    supportsSearchMany?: boolean;
 }
 export declare function describeVectorStoreConformance(options: VectorStoreConformanceOptions): void;
