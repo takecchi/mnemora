@@ -459,11 +459,44 @@ describe("runtime.purge — 対応する embedding が実際に消える", () =>
 
     const result = await runtime.purge(ctx, { memoryId: memory.id });
 
+    // kind はそのまま。失敗は任意の欄 `embeddingCleanup` で知らせる（ADR 0399）。
     expect(result.outcomes).toEqual([
-      { memoryId: memory.id, kind: "purged", previousStatus: "forgotten" },
+      {
+        memoryId: memory.id,
+        kind: "purged",
+        previousStatus: "forgotten",
+        embeddingCleanup: { status: "failed", error: "simulated vector store outage" },
+      },
     ]);
     const stored = await stores.memoryStore.get(ctx, memory.id);
     expect(stored?.purgedAt).toBeInstanceOf(Date); // MemoryStore 側の書き込みは確定している
+  });
+
+  it("埋め込み削除が Error 以外を投げても、error は文字列になる", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    stores.vectorStore.deleteAcrossSpaces = async () => {
+      throw "plain string outage";
+    };
+
+    const result = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(result.outcomes[0]).toMatchObject({
+      kind: "purged",
+      embeddingCleanup: { status: "failed", error: "plain string outage" },
+    });
+  });
+
+  it("埋め込み削除が成功したときは、embeddingCleanup というプロパティ自体が無い（出力は今日と1バイトも変わらない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+
+    const result = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(Object.keys(result.outcomes[0]!).sort()).toEqual(["kind", "memoryId", "previousStatus"]);
+    expect(JSON.stringify(result.outcomes[0])).toBe(
+      JSON.stringify({ memoryId: memory.id, kind: "purged", previousStatus: "forgotten" }),
+    );
   });
 });
 
@@ -483,6 +516,35 @@ describe("runtime.purge — already_purged の再実行でも embedding をベ�
     const second = await runtime.purge(ctx, { memoryId: memory.id });
     expect(second.outcomes[0]?.kind).toBe("already_purged");
     expect(stores.vectorStore.entries.size).toBe(0);
+  });
+
+  it("既に purge 済みの再実行で deleteAcrossSpaces が失敗すると、kind はそのまま already_purged で embeddingCleanup が付く（ADR 0399）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await runtime.purge(ctx, { memoryId: memory.id });
+    stores.vectorStore.deleteAcrossSpaces = async () => {
+      throw new Error("simulated retry outage");
+    };
+
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(second.outcomes).toEqual([
+      {
+        memoryId: memory.id,
+        kind: "already_purged",
+        embeddingCleanup: { status: "failed", error: "simulated retry outage" },
+      },
+    ]);
+  });
+
+  it("already_purged の再実行で成功したときは、embeddingCleanup というプロパティ自体が無い", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await runtime.purge(ctx, { memoryId: memory.id });
+
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(Object.keys(second.outcomes[0]!).sort()).toEqual(["kind", "memoryId"]);
   });
 
   it("dryRun: true のときは、already_purged でも embedding を消さない", async () => {
