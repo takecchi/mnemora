@@ -178,6 +178,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ---
 
+## [1.1.1] - 2026-09-30
+
+**この節は `v1.1.0` … `v1.1.1` の差分である。**`v1.1.1` は `main` からではなく、tag `v1.1.0` から切った枝 `release/1.1` の上で出した——`main` には `v1.1.0` の後に破壊的変更と新機能（`[1.2.0]` 節）が入っており、パッチ版に含められないため。**コードの変更は無い**（7パッケージとも `v1.1.0` と同じ中身で、版だけが上がる）。
+
+### Changed
+
+- **`@mnemora/bullmq` の README から「まだ npm には出ていない」の節を外し、`v1.1.0` から npm に出ていることと、初版 `1.1.0` には provenance が付いていないことを書いた**（[Issue #205](https://github.com/takecchi/mnemora/issues/205)、[PR #1446](https://github.com/takecchi/mnemora/pull/1446)）。npmjs.com のページの README は publish した tarball のものなので、この版を出すまで旧い文面のままだった。
+
 ## [1.1.0] - 2026-09-30
 
 **この節は `v1.0.2`（tag が指す `b981ecd`）… `v1.1.0` の差分である。**`v1.1.0` の tag が指す commit は、この見出しに日付を入れた PR より後の `main` であり、GitHub Release `v1.1.0` が正本である（⛔ ここに sha を写さない——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
