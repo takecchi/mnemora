@@ -416,5 +416,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0396](./0396-recall-relation-max-count.md) | 段3（多者間の同伴取得）の群ごとの上限を、`RecallQuery.relationMaxCount` で呼び出し側から変えられるようにする | 採用 (2026-09) |
 | [0398](./0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md) | `RelationStore.link` は、入口で両端の記憶が `ctx` のテナントに属することを確かめる（複合外部キーの migration は入れない） | 採用 (2026-09) |
 | [0399](./0399-purge-embedding-cleanup-outcome-field.md) | `Runtime.purge` の埋め込み削除の失敗を、outcome の任意欄 `embeddingCleanup` で知らせる | 採用 (2026-09) |
+| [0400](./0400-general-fk-index-tooth.md) | 外部キーの索引は、固定表ではなく `pg_constraint` から数え上げる歯で縛る——`memory_labels.label_id` の漏れを足す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
