@@ -121,28 +121,28 @@ export interface RuntimeConfig {
    * 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。
    * 省略時（`undefined`・`null`）は `"v1"`。空文字は既定に倒れず、空文字のまま書かれる。
    */
-  extractorVersion?: string;
+  extractorVersion?: string | undefined;
   /**
    * `provenance.inferred.model` に書き込むモデル識別子。呼び出し側の LLMProvider の実体に合わせる。
    * 省略時（`undefined`・空文字）は `"unknown"`。空白だけの値はそのまま書く。
    */
-  llmModelId?: string;
+  llmModelId?: string | undefined;
   /**
    * `provenance.inferred.promptVersion`。抽出プロンプトを変えたら上げる。省略時（`undefined`・空文字）は `"v1"`。
    * 空白だけの値はそのまま書く。
    */
-  promptVersion?: string;
+  promptVersion?: string | undefined;
   /**
    * digest フォールバック（機械的な先頭文字列切り出し）の最大文字数。既定 200。
    * ⚠ 値は検査しない（今の振る舞い）。0・負の数・`NaN` を渡すと、本文が収まらない限り
    * digest は `"…"` だけになる（本文は `content` にそのまま残る）。
    */
-  digestFallbackLength?: number;
+  digestFallbackLength?: number | undefined;
   /**
    * `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。省略時は `"runtime.tick"`。
    * ⚠ 空文字は既定に倒れず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
-  defaultClaimedBy?: string;
+  defaultClaimedBy?: string | undefined;
   /**
    * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
    * [ADR 0157](../../../docs/decisions/0157-tick-drives-consolidate-and-reflect.md):
@@ -181,7 +181,7 @@ export interface RuntimeConfig {
    * 無関係に変わらない**——呼び手は自分の `ctx.subjectId` で完全に制御できる
    * （ADR 0310 決定2）。
    */
-  autoQueueConsolidateReflectOnExtract?: boolean;
+  autoQueueConsolidateReflectOnExtract?: boolean | undefined;
 }
 
 const DEFAULT_EXTRACTOR_VERSION = "v1";
@@ -261,7 +261,7 @@ export interface RuntimeDeps {
    * （`recall.ts` の `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`）。**黙って0件を返さない**——
    * 理由は `RecallQuery.channels` の doc に書いてある。
    */
-  lexicalStore?: LexicalStore;
+  lexicalStore?: LexicalStore | undefined;
   /**
    * `memory_relations` を読む store（Issue #207/#933 PR2、ADR 0292 決定1、ADR 0327、
    * ADR 0381）。
@@ -275,7 +275,7 @@ export interface RuntimeDeps {
    * （`Runtime.resolveContestedGroup` の doc コメント手順6）も、この欄が無ければ行わず
    * store 側の CAS だけに任せる。
    */
-  relationStore?: RelationStore;
+  relationStore?: RelationStore | undefined;
   /** 監査ログ（`memory_events`）を読み書きする store。 */
   eventStore: EventStore;
   /** テナントの設定（既定の半減期・減衰の時計・保持期間など）を読む store。 */
@@ -291,22 +291,22 @@ export interface RuntimeDeps {
    * `restoreSuperseded` の `unsuperseded` だけが注入した時計で、`restoreArchived` の `restored`・`sweepArchive` の
    * `archived` は壁時計——{@link Clock} の doc 参照（Issue #1237）。
    */
-  clock?: Clock;
+  clock?: Clock | undefined;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
   hashContent: (content: string) => string;
   /** runtime の設定（{@link RuntimeConfig}）。省略すると既定値で動く。 */
-  config?: RuntimeConfig;
+  config?: RuntimeConfig | undefined;
   /**
    * roadmap.md 段階4: `usage`（docs/recall.md §6）の計測に使う。省略時は
    * `heuristicTokenCounter`（文字数ベースの推定、`counter: 'heuristic'`）。
    */
-  tokenCounter?: TokenCounter;
+  tokenCounter?: TokenCounter | undefined;
   /**
    * `recall()` の戻り値を zod で検証するときの倒れ方（Issue #131、ADR 0098）。
    * 省略時は `"report"`（`DEFAULT_RECALL_OUTPUT_VALIDATION`（`recall-output-validation.ts`））——既定では投げない。
    * `recall-runtime.js` の `RecallRuntimeDeps.outputValidation` へそのまま渡る。
    */
-  outputValidation?: RecallOutputValidationMode;
+  outputValidation?: RecallOutputValidationMode | undefined;
   /**
    * `processEmbedJob` が `embed(ctx, [...])` へ送る文字列を、`Memory` から差し替える
    * **任意**のフック（Issue #753、#449 の残り。ADR 0305 は「上限超過は例外」を契約に
@@ -337,7 +337,7 @@ export interface RuntimeDeps {
    * `embeddingStatus` を `'failed'` にしてから再送出する——このフックのために
    * 新しい throw の経路を既定側へ作らない。
    */
-  embeddingInput?: (memory: Memory) => string;
+  embeddingInput?: ((memory: Memory) => string) | undefined;
 }
 
 /** `Runtime.observe` の戻り値。 */
@@ -717,9 +717,9 @@ export interface ForgetOptions {
    * 落ちた」と「運用の都合で落とした」を後から区別するためにある。省略時、
    * `meta` に `reason` キー自体を持たせない（`""` と「省略」を区別する）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
 }
 
 /**
@@ -834,11 +834,11 @@ export interface ForgetResult {
  */
 export type ConsolidateTarget =
   | { memoryIds: MemoryId[] }
-  | { query: RecallQuery; maxCandidates?: number }
+  | { query: RecallQuery; maxCandidates?: number | undefined }
   | {
       seedMemoryId: MemoryId;
-      maxCandidates?: number;
-      minAffinity?: number;
+      maxCandidates?: number | undefined;
+      minAffinity?: number | undefined;
       /**
        * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
        * （Issue #338）: 種の digest で内部的に呼ぶ `recall()` へそのまま渡す
@@ -847,7 +847,7 @@ export type ConsolidateTarget =
        * `recall()` に直接触れられないためにこの欄を用意する。省略時 `"tenant"`
        * （本 ADR 以前と1バイトも変わらない挙動）。
        */
-      activityCounting?: "tenant" | "subject";
+      activityCounting?: "tenant" | "subject" | undefined;
     };
 
 /**
@@ -871,15 +871,15 @@ export interface ConsolidateOptions {
    * `true` なら **LLM を呼ばず・1件も書かず**、束ねられる対象だけを見て返す
    * （{@link ConsolidateSourceOutcome} の `"eligible"` を参照）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（統合元の `superseded`・統合先の `created` の両方）。省略時は積まない。
    * `meta.reason` は常に固定値 `'consolidated'` であり、この欄では上書きしない（`MarkContestedOptions.reason` と
    * 同じ形。`ForgetOptions.reason` とは違う）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /**
    * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
    * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
@@ -892,7 +892,7 @@ export interface ConsolidateOptions {
    * LLM 呼び出しは、束ねる対象を1件も書く前に行う（上の手順5）ので、abort の時点では
    * 何も書かれていない。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -1137,17 +1137,17 @@ export interface ConsolidationResult {
  */
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }
-  | { query: RecallQuery; maxCandidates?: number }
+  | { query: RecallQuery; maxCandidates?: number | undefined }
   | {
       seedMemoryId: MemoryId;
-      maxCandidates?: number;
-      minAffinity?: number;
+      maxCandidates?: number | undefined;
+      minAffinity?: number | undefined;
       /**
        * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
        * （Issue #338）: `ConsolidateTarget`（`{ seedMemoryId }` 形）の同名の欄と
        * 同じ——種の digest で内部的に呼ぶ `recall()` へそのまま渡す。省略時 `"tenant"`。
        */
-      activityCounting?: "tenant" | "subject";
+      activityCounting?: "tenant" | "subject" | undefined;
     };
 
 /**
@@ -1171,21 +1171,21 @@ export interface ReflectOptions {
    * `true` なら **LLM を呼ばず・1件も書かず**、土台になりうる対象だけを見て返す
    * （{@link ReflectBasisOutcome} の `"eligible"` を参照）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   /** `memory_events.actor`（`created` イベント）。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`created` イベント）。省略時は積まない。`meta.reason` は常に固定値
    * `'reflected'` であり、この欄では上書きしない（`ConsolidateOptions.reason` と同じ形）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /**
    * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
    * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
    * 中断の合図。`ConsolidateOptions.signal` と同じ形——内部で呼ぶ `recall()` と LLM 呼び出しの
    * 両方に効く。abort されると `reflect()` は reject し、既存の `"llm_failed"` には倒さない。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -1379,7 +1379,7 @@ export interface TickOptions {
    * （`OutboxStore.claimBatch` がそのまま受け取る。Postgres は DB の例外、testkit の fixture は
    * 専用のメッセージ）。
    */
-  limit?: number;
+  limit?: number | undefined;
   /**
    * claim する job の種類。省略時は {@link TICK_SUPPORTED_JOB_KINDS}。
    *
@@ -1390,12 +1390,12 @@ export interface TickOptions {
    * - claim の順は、種類に関わらず `available_at` の古い順である。種類ごとの枠の配分は無い
    *   ——古い job が `limit` を埋めていれば、後から積まれた別の種類の job は次の `tick` に回る。
    */
-  kinds?: OutboxJobKind[];
+  kinds?: OutboxJobKind[] | undefined;
   /**
    * claim した worker の名前（outbox の行の `claimed_by`）。省略すると `RuntimeConfig.defaultClaimedBy`、それも無ければ `"runtime.tick"`。
    * ⚠ 空文字は省略と同じにはならず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
-  claimedBy?: string;
+  claimedBy?: string | undefined;
   /**
    * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
    * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
@@ -1412,7 +1412,7 @@ export interface TickOptions {
    * - `tick` がリースを超えたこと自体を名乗る口は、今回も追加していない
    *   （上の「今の振る舞い」の追記のとおり）。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -1560,9 +1560,9 @@ export interface RestoreArchivedOptions {
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。省略時、`meta` に `reason`
    * キー自体を持たせない（`ForgetOptions.reason` と同じ規律）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
 }
 
 /**
@@ -1726,7 +1726,7 @@ export type RestoreSupersededTarget = {
    * [ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)
    * の同日付追記を参照。
    */
-  onlyMemoryIds?: MemoryId[];
+  onlyMemoryIds?: MemoryId[] | undefined;
 };
 
 /**
@@ -1850,9 +1850,9 @@ export interface RestoreSupersededOptions {
    * 存在するほうが検索・集計しやすい——1件ずつの CAS である `restoreArchived` とは
    * 前提が違う、という判断。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * 🔴 **下見（Issue #515、ADR 0237、方向3「戻す前に何が戻るかを返す」）。**
    * `true` のとき、一切の書き込み（`memories` の `UPDATE`・`memory_events` への
@@ -1864,7 +1864,7 @@ export interface RestoreSupersededOptions {
    * `MemoryStore.previewRestoreSupersededBy?` が `restoreSupersededBy?` と同じ
    * `WHERE` で選ぶ。前者が無い adapter では `supported: false`）。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -1979,9 +1979,9 @@ export interface PurgeOptions {
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。省略時、`meta` に `reason`
    * キー自体を持たせない（`ForgetOptions.reason` と同じ規律）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * 🔴 **下見（issue #198 の受け入れ条件が名指しする「dryRun 相当の下見」）。**
    * `true` のとき、一切の書き込み（`content`/`digest`/`purgedAt` の更新、
@@ -1993,7 +1993,7 @@ export interface PurgeOptions {
    * が既に書き込み0件を意味していても、この欄がある限りベストエフォートの副作用
    * （embedding の削除）も止める。省略時 `false`。
    */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -2141,13 +2141,13 @@ export type MarkContestedOutcome =
  */
 export interface MarkContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
    * この欄では上書きしない——`consolidate`/`reflect` の `opts.reason` → `meta.note` と
    * 同じ形）。省略時は `meta` に `note` キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2235,14 +2235,14 @@ export type ResolveContestedOutcome =
  */
 export interface ResolveContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値
    * `'contested_resolved'` であり、この欄では上書きしない——`markContested`/`consolidate`/
    * `reflect` の `opts.reason` → `meta.note` と同じ形）。省略時は `meta` に `note` キー
    * 自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2317,13 +2317,13 @@ export type ResolveOrphanedContestedOutcome =
  */
 export interface ResolveOrphanedContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値
    * `'contested_resolved'` であり、この欄では上書きしない）。省略時は `meta` に `note`
    * キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2399,13 +2399,13 @@ export type MarkContestedGroupOutcome =
  */
 export interface MarkContestedGroupOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
    * この欄では上書きしない——`markContested` の `opts.reason` → `meta.note` と同じ形）。
    * 省略時は `meta` に `note` キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**
@@ -2484,12 +2484,12 @@ export type ContestedGroupResolution = ContestedResolution;
  */
 export interface ResolveContestedGroupOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
   /**
    * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested_resolved'`
    * であり、この欄では上書きしない）。省略時は `meta` に `note` キー自体を持たせない。
    */
-  reason?: string;
+  reason?: string | undefined;
 }
 
 /**

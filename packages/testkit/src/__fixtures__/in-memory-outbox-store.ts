@@ -126,7 +126,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     ctx: Ctx,
     jobId: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     // `PostgresOutboxStore.complete` は `at` を `timestamptz` として送るため、Invalid Date は行の有無に
@@ -153,7 +153,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     // `complete` と同じ理由（Invalid Date は Postgres が `22007` で拒む）。

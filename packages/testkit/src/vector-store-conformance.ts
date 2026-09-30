@@ -153,7 +153,7 @@ export interface VectorStoreConformanceOptions {
    * - `false`: `expect(store.searchMany).toBeUndefined()` を積極的に assert する——`it.skip` にはしない。
    * - **省略（`undefined`）**: 「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsSearchMany?: boolean;
+  supportsSearchMany?: boolean | undefined;
 }
 
 const space: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };

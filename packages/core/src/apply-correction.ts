@@ -39,7 +39,7 @@ export interface ApplyCorrectionInput {
    * `{ kind: "awaiting_choice" }` を返す——ADR 0232 の B群が示した危険（棄権しない）を、
    * この口の一段上（呼び出し側が指名しない、という選択）で可視化する経路そのもの。
    */
-  correctedId?: MemoryId;
+  correctedId?: MemoryId | undefined;
   /**
    * 訂正する側（新しい発話・新しい事実）の id。**常に必須**——この口は「訂正だ」という
    * 宣言そのものを表す発話の Memory を常に持っている前提で呼ばれる。
@@ -60,7 +60,7 @@ export interface ApplyCorrectionInput {
    * 実際に使い、`markContested` 直後の `recall()` で対（mandatory companion）を見せてから
    * `resolveContested` へ進む、という Issue #303 由来の実演を保っている）。
    */
-  resolution?: ContestedResolution;
+  resolution?: ContestedResolution | undefined;
   /**
    * `markContested`/`resolveContested` の**両方**に、`opts.reason` としてそのまま渡す
    * （ADR 0238「同じ文字列を渡す」をこの口でも保つ）。
@@ -71,9 +71,9 @@ export interface ApplyCorrectionInput {
    * 推測して書き込まない（推測させると、この口が実質的に「相手を選ぶ」判断を持つことに
    * 近づいてしまう。上の doc コメント参照）。
    */
-  reason?: string;
+  reason?: string | undefined;
   /** `markContested`/`resolveContested` の両方に渡す `memory_events.actor`。 */
-  actor?: EventActor;
+  actor?: EventActor | undefined;
 }
 
 /**

@@ -312,7 +312,7 @@ export interface RunMigrationsOptions extends SchemaNamespaceOptions {
    * **両方に同じ値を使う**（1つの `runMigrations` 呼び出しが待ってよい上限は1つ、という
    * 単純な線を優先した。2本のロックそれぞれに別の上限を持たせる需要はまだ無い）。
    */
-  lockTimeoutMs?: number;
+  lockTimeoutMs?: number | undefined;
   /**
    * advisory lock のキー。テスト以外で既定の {@link MIGRATION_LOCK_KEY} を変える理由は無い。
    *
@@ -324,13 +324,13 @@ export interface RunMigrationsOptions extends SchemaNamespaceOptions {
    * `EXTENSION_LOCK_KEY` を直接使って別セッションから握る（`migrate-extension-lock-race.test.ts`
    * のような形）。
    */
-  lockKey?: bigint;
+  lockKey?: bigint | undefined;
   /**
    * 拡張（`REQUIRED_EXTENSIONS`）の用意のしかた。既定は `"create"`
    * （今日どおり。**指定しなければ発行される SQL は1バイトも変わらない**）。
    * `"verify"` の詳細は {@link ExtensionMode} の doc（ADR 0093）参照。
    */
-  extensionMode?: ExtensionMode;
+  extensionMode?: ExtensionMode | undefined;
 }
 
 /**
@@ -921,7 +921,7 @@ export interface AnalyzeMemoriesOptions {
    * （{@link assertSafeSchemaName}）。省略時は接続の `search_path` 任せ（今日どおり、
    * 識別子を一切修飾しない）。
    */
-  schema?: string;
+  schema?: string | undefined;
 }
 
 /** `analyzeMemories` の戻り値。 */

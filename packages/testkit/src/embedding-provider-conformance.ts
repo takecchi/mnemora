@@ -44,7 +44,7 @@ export interface EmbeddingProviderConformanceOptions {
   /** 埋め込ませるテキスト3本。理由は `EmbeddingProviderConformanceTexts` の doc を参照。 */
   texts: EmbeddingProviderConformanceTexts;
   /** 省略時は `{ tenantId: "embedding-provider-conformance" }`。 */
-  ctx?: Ctx;
+  ctx?: Ctx | undefined;
   /**
    * 🔴 **任意。渡すと、`EmbeddingProvider` の契約——「入力が実装の上限を超えたら
    * `embed` は例外を投げる。黙って切り詰めてベクトルを返さない」（`embedding-provider.ts`
@@ -62,7 +62,7 @@ export interface EmbeddingProviderConformanceOptions {
    * ため任意にしてある。省略時は `it.skip` として名前だけ残る——
    * 「上限超過を測っていない」ことをテスト名で名乗る。
    */
-  overLimitText?: string;
+  overLimitText?: string | undefined;
   /**
    * 各 `it` のタイムアウト（ミリ秒）。**省略時は vitest の既定（5秒）。**
    *
@@ -78,7 +78,7 @@ export interface EmbeddingProviderConformanceOptions {
    * `it(name, fn, undefined)` が `it(name, fn)` と同じに振る舞うことは、
    * vitest 5.0.0 で実際に走らせて確かめてある。
    */
-  timeout?: number;
+  timeout?: number | undefined;
 }
 
 const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };

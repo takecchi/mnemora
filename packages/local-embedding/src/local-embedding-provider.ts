@@ -135,27 +135,27 @@ export function defaultLocalEmbeddingRetryDelayMs(attempt: number): number {
  */
 export interface LocalEmbeddingRetryOptions {
   /** 合計の試行回数（初回を含む）。既定 {@link DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS}。 */
-  attempts?: number;
+  attempts?: number | undefined;
   /**
    * `attempt` 回目（1始まり、今回失敗した試行の番号）の後、次の試行まで待つ時間(ms)を返す。
    * 既定 {@link defaultLocalEmbeddingRetryDelayMs}。
    */
-  delayMs?: (attempt: number) => number;
+  delayMs?: ((attempt: number) => number) | undefined;
 }
 
 /** {@link LocalEmbeddingProvider} のコンストラクタに渡す設定。どれも省略でき、省くと既定のモデルを使う。 */
 export interface LocalEmbeddingProviderOptions {
   /** Hugging Face の repo id。既定 `sirasagi62/ruri-v3-30m-ONNX`。 */
-  repo?: string;
+  repo?: string | undefined;
   /** 量子化の別。既定 `"q8"`。 */
-  dtype?: LocalEmbeddingDtype;
+  dtype?: LocalEmbeddingDtype | undefined;
   /** 宣言する次元数。既定 `256`。**実物と食い違えば初回 `embed()` で例外になる。** */
-  dimensions?: number;
+  dimensions?: number | undefined;
   /**
    * `space.model` に載せる文字列。既定 `"ruri-v3-30m/sym"`。
    * **prefix 方式を変えるなら、ここも変えること**（`DEFAULT_LOCAL_EMBEDDING_MODEL_ID` の説明）。
    */
-  modelId?: string;
+  modelId?: string | undefined;
   /**
    * 全テキストの先頭に付ける文字列。既定は `""`。
    *
@@ -173,15 +173,15 @@ export interface LocalEmbeddingProviderOptions {
    * 非対称 prefix が本当に要るようになったら、それは `EmbeddingProvider` の契約を
    * 変える話であって、このオプションの形を変える話ではない。
    */
-  prefix?: string;
+  prefix?: string | undefined;
   /**
    * モデルファイルの置き場所。未指定なら transformers.js の既定——`@huggingface/transformers`
    * パッケージ自身の中の `.cache/`（`node_modules/@huggingface/transformers/.cache/` など）。
    * `node_modules` を消す・入れ直すと一緒に消える。
    */
-  cacheDir?: string;
+  cacheDir?: string | undefined;
   /** onnxruntime の intra-op スレッド数。既定 `4`。 */
-  numThreads?: number;
+  numThreads?: number | undefined;
   /**
    * `embed(ctx, texts)` を1回の推論に渡す最大件数。既定
    * {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}（128）。
@@ -197,7 +197,7 @@ export interface LocalEmbeddingProviderOptions {
    * 空バッチを起こしうる。`NaN`・0以下は 1（1件ずつ）に、非整数は
    * 切り捨てて使う。`Infinity` は「分割しない」として有効な値である。
    */
-  maxBatchSize?: number;
+  maxBatchSize?: number | undefined;
   /**
    * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら transformers.js の既定
    * （`"main"`）のままで、この option を足す前と同じ呼び出しになる**（Issue #597）。
@@ -207,24 +207,24 @@ export interface LocalEmbeddingProviderOptions {
    * revision をどう扱うかは決めていない**（Issue #597 の「先に決めるべきこと」のうち、
    * 決めたのは「既定値は変えない」だけである）。
    */
-  revision?: string;
+  revision?: string | undefined;
   /**
    * モデルを読み込む関数。**テストで本物のモデルを落とさないための注入点である**
    * （`packages/openai` の `client` と同じ役目）。未指定なら transformers.js を使う。
    */
-  createPipeline?: CreateLocalEmbeddingPipeline;
+  createPipeline?: CreateLocalEmbeddingPipeline | undefined;
   /**
    * モデルの読み込みが失敗したときのリトライ設定。**Issue #261 / ADR 0141。**
    * 既定は {@link DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS} 回・
    * {@link defaultLocalEmbeddingRetryDelayMs} のバックオフ。
    */
-  retry?: LocalEmbeddingRetryOptions;
+  retry?: LocalEmbeddingRetryOptions | undefined;
   /**
    * リトライの待ち時間を実際に待つ関数。**テスト用の注入点**（`createPipeline` と同じ役目
    * ——待たずに何度も失敗させるテストが、実時間を消費しないようにする）。
    * 未指定なら `setTimeout` を使う本物の待ちになる。
    */
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: ((ms: number) => Promise<void>) | undefined;
 }
 
 /**

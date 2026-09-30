@@ -702,7 +702,12 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  */
 export function buildTrigramLexicalSearchSelect(
   query: string,
-  opts: { limit: number; filter: LexicalFilter; threshold: number; ctxTenantId?: string },
+  opts: {
+    limit: number;
+    filter: LexicalFilter;
+    threshold: number;
+    ctxTenantId?: string | undefined;
+  },
 ): SQL {
   // Issue #878: 全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc）は
   // ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
@@ -861,7 +866,10 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
    * 別途、自分のタイミングで呼ぶ（このファイル冒頭の doc「なぜフィルタ条件の組み立てを
    * 複製するか」の下、`ensureTrigramLexicalFunctions` の doc参照）。
    */
-  static async create(db: Db, opts?: { threshold?: number }): Promise<PostgresTrigramLexicalStore> {
+  static async create(
+    db: Db,
+    opts?: { threshold?: number | undefined },
+  ): Promise<PostgresTrigramLexicalStore> {
     const probe = await probeTrigramLexicalSupportWithCause(db);
     if (!probe.ok) {
       // `probe.cause` は `extension_create_denied`/`extension_create_failed` のときだけ

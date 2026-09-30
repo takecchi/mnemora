@@ -48,7 +48,7 @@ export interface OpenAILLMProviderOptions {
    * メッセージの `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** OpenAI のチャットモデル名（例: `gpt-4o-mini`）。必須で、既定値は無い。 */
   model: string;
   /**
@@ -61,7 +61,7 @@ export interface OpenAILLMProviderOptions {
    * `@mnemora/openai` が固定している版と揃える必要が無い**——`OpenAI` インスタンスは、
    * 版が違ってもこの構造型を満たす限りそのまま渡せる（packages/openai/README.md 参照）。
    */
-  client?: OpenAIChatClient;
+  client?: OpenAIChatClient | undefined;
   /**
    * `chat.completions.create` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
    *
@@ -71,7 +71,7 @@ export interface OpenAILLMProviderOptions {
    * `CreateProvidersOptions.llmTemperature`（`providers.ts`）経由でのみ使う——
    * 他のベンチ・呼び出し元はこの欄を渡さない。
    */
-  temperature?: number;
+  temperature?: number | undefined;
 }
 
 /**

@@ -391,6 +391,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `TrigramLexicalUnavailableReason` の union の値は増減しない。`detail`（`message`）と `cause` の内容も変えていない。
   - 非破壊と数える（型・公開 API・union は同じ。同じ入力で `reason` の値が、判定を直した側へ動く）。上の「利用者に返るエラー文…の整形を、outbox の `last_error` と同じにした」の項目（文字列の中身だけの変更を非破壊と数えた）が近い先例である。
 
+- **入力側の公開型の任意欄が `?: T | undefined` になった。`exactOptionalPropertyTypes: true` の利用者が `{ limit: maybeLimit }` のように `undefined` を渡せる**（[ADR 0429](./docs/decisions/0429-exact-optional-property-types-input-types.md)）。各パッケージの `*Options`・`RecallQuery`・`observe`/`tick` などの入力・port のメソッド引数の `opts` の型が広がるだけで、その設定を有効にしていない利用者では同じ型であり、既存のコードは壊れない（非破壊）。出力にも使われる型（`Memory`・`MemoryEvent` など）は広げていない。
+
 ### Fixed
 
 - **`runMigrations`（と `mnemora-postgres-migrate`）が、台帳から行が欠けたまま番号の小さい migration が当たり直されるとき、警告を出すようにした（穴探し6巡目 S-1、[ADR 0425](./docs/decisions/0425-migrate-warns-on-ledger-drift.md)）。**台帳から `0011` の行だけが欠けた DB で流すと、0011 が単独で当たり直り、0018 が足した `'unsuperseded'` が `memory_events_kind_check` から黙って消えていた。未適用のファイルのうち台帳の最大の番号より小さいものが在れば、`console.warn`（`[@mnemora/postgres] migrate: …`）で名指しして続行する。止めない・適用の順序と中身は変えない（そのファイルも当てる）。公開の型・オプションは変わらない。

@@ -31,7 +31,7 @@ export interface PostgresClient {
     db: Db;
 }
 export declare function createPostgresClient(connectionString: string, config?: PoolConfig & SchemaNamespaceOptions & {
-    onPoolError?: (error: Error) => void;
+    onPoolError?: ((error: Error) => void) | undefined;
 }): PostgresClient;
 export declare function closePostgresClient(client: PostgresClient): Promise<void>;
 
@@ -83,7 +83,7 @@ import type { Db } from "./client.js";
 export declare function buildLexicalSearchSelect(query: string, opts: {
     limit: number;
     filter: LexicalFilter;
-    ctxTenantId?: string;
+    ctxTenantId?: string | undefined;
 }): SQL;
 export declare class PostgresLexicalStore implements LexicalStore {
     private readonly db;
@@ -105,8 +105,8 @@ export declare class PostgresMemoryStore implements MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
-        now?: Date;
-        claimedBy?: string;
+        now?: Date | undefined;
+        claimedBy?: string | undefined;
     }): Promise<{
         observation: Observation;
         created: boolean;
@@ -115,9 +115,9 @@ export declare class PostgresMemoryStore implements MemoryStore {
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     private insertMemoryWithOutboxRows;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
-        abortIfSuperseded?: ReadonlyArray<MemoryId>;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -130,9 +130,9 @@ export declare class PostgresMemoryStore implements MemoryStore {
         index: number;
         error: unknown;
     }>) => NewMemoryEvent, opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
-        abortIfSuperseded?: ReadonlyArray<MemoryId>;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         written: Array<{
             index: number;
@@ -150,12 +150,12 @@ export declare class PostgresMemoryStore implements MemoryStore {
     listBySourceObservation(ctx: Ctx, observationId: ObservationId, extractorVersion: string | null): Promise<Memory[]>;
     listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
     updateStatus(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts?: {
-        supersededById?: MemoryId;
-        expectedStatus?: MemoryStatus;
+        supersededById?: MemoryId | undefined;
+        expectedStatus?: MemoryStatus | undefined;
     }): Promise<Memory>;
     updateStatusWithEvent(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts: {
-        supersededById?: MemoryId;
-        expectedStatus?: MemoryStatus;
+        supersededById?: MemoryId | undefined;
+        expectedStatus?: MemoryStatus | undefined;
     }, event: NewMemoryEvent): Promise<{
         memory: Memory;
         event: MemoryEvent;
@@ -166,14 +166,14 @@ export declare class PostgresMemoryStore implements MemoryStore {
     }>, supersede: ReadonlyArray<{
         id: MemoryId;
         supersededByIndex: number;
-        expectedStatus?: MemoryStatus;
+        expectedStatus?: MemoryStatus | undefined;
         event: NewMemoryEvent;
     }>, opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
-        abortIfSuperseded?: ReadonlyArray<MemoryId>;
-        abortIfAllConflicted?: boolean;
-        buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+        abortIfAllConflicted?: boolean | undefined;
+        buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -208,7 +208,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
     requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
-        now?: Date;
+        now?: Date | undefined;
     }): Promise<RequeueEmbedJobsResult>;
     archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory(ctx: Ctx, id: MemoryId, tombstone: {
@@ -255,12 +255,12 @@ export declare class PostgresMemoryStore implements MemoryStore {
     resolveContestedPair(ctx: Ctx, first: {
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }, second: {
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }): Promise<{
         first: Memory;
@@ -288,23 +288,23 @@ export declare class PostgresMemoryStore implements MemoryStore {
     resolveContestedGroup(ctx: Ctx, members: ReadonlyArray<{
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }>): Promise<{
         members: Memory[];
         events: MemoryEvent[];
     }>;
     restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
-        reason?: string;
-        actor?: EventActor;
+        reason?: string | undefined;
+        actor?: EventActor | undefined;
         at: Date;
     }, filter?: {
-        onlyMemoryIds?: MemoryId[];
+        onlyMemoryIds?: MemoryId[] | undefined;
     }): Promise<{
         restored: Memory[];
     }>;
     previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId, filter?: {
-        onlyMemoryIds?: MemoryId[];
+        onlyMemoryIds?: MemoryId[] | undefined;
     }): Promise<{
         candidates: Array<{
             memoryId: MemoryId;
@@ -348,9 +348,9 @@ export declare class MissingExtensionsError extends Error {
     constructor(missing: readonly string[], extensionSchema: string | undefined);
 }
 export interface RunMigrationsOptions extends SchemaNamespaceOptions {
-    lockTimeoutMs?: number;
-    lockKey?: bigint;
-    extensionMode?: ExtensionMode;
+    lockTimeoutMs?: number | undefined;
+    lockKey?: bigint | undefined;
+    extensionMode?: ExtensionMode | undefined;
 }
 export declare function migrationLockKeyFor(schema?: string): bigint;
 export interface RunMigrationsResult {
@@ -371,7 +371,7 @@ export declare class MigrationLockUnavailableError extends AdvisoryLockUnavailab
 export declare function listMigrationFiles(migrationsDir: string): string[];
 export declare function runMigrations(pool: Pool, migrationsDir?: string, options?: RunMigrationsOptions): Promise<RunMigrationsResult>;
 export interface AnalyzeMemoriesOptions {
-    schema?: string;
+    schema?: string | undefined;
 }
 export interface AnalyzeMemoriesResult {
     table: string;
@@ -390,10 +390,10 @@ export declare class PostgresOutboxStore implements OutboxStore {
     constructor(db: Db);
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
     complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
-        at?: Date;
+        at?: Date | undefined;
     }): Promise<void>;
     fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
-        at?: Date;
+        at?: Date | undefined;
     }): Promise<void>;
     private raiseIfLeaseConflict;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
@@ -438,8 +438,8 @@ export declare class PostgresRelationStore implements RelationStore {
 // ===== dist/schema-namespace.d.ts =====
 export declare const DEFAULT_EXTENSION_SCHEMA = "public";
 export interface SchemaNamespaceOptions {
-    schema?: string;
-    extensionSchema?: string;
+    schema?: string | undefined;
+    extensionSchema?: string | undefined;
 }
 export declare function assertSafeSchemaName(schema: string): void;
 export declare function qualify(schema: string | undefined, name: string): string;
@@ -2349,14 +2349,14 @@ export declare function buildTrigramLexicalSearchSelect(query: string, opts: {
     limit: number;
     filter: LexicalFilter;
     threshold: number;
-    ctxTenantId?: string;
+    ctxTenantId?: string | undefined;
 }): SQL;
 export declare class PostgresTrigramLexicalStore implements LexicalStore {
     private readonly db;
     private readonly threshold;
     private constructor();
     static create(db: Db, opts?: {
-        threshold?: number;
+        threshold?: number | undefined;
     }): Promise<PostgresTrigramLexicalStore>;
     search(ctx: Ctx, query: string, opts: {
         limit: number;
@@ -2371,8 +2371,8 @@ import { AdvisoryLockTimeoutError, AdvisoryLockUnavailableError } from "./adviso
 import { type SchemaNamespaceOptions } from "./schema-namespace.js";
 export declare const REGISTER_EMBEDDING_SPACE_LOCK_KEY = -4359922960011245935n;
 export interface RegisterEmbeddingSpaceOptions extends SchemaNamespaceOptions {
-    lockTimeoutMs?: number;
-    lockKey?: bigint;
+    lockTimeoutMs?: number | undefined;
+    lockKey?: bigint | undefined;
 }
 export declare function registerEmbeddingSpaceLockKeyFor(schema?: string): bigint;
 export interface RegisterEmbeddingSpaceResult {
