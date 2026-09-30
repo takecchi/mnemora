@@ -236,3 +236,13 @@ AssertionError: docs/decisions/README.md が陳腐化している: 索引に無�
 - **負債2（並行 ADR PR）を実際に2本並行させて撃っていない。**
 - **`pnpm run test` の全体実行はしていない**（この器の規律）。名指しで走らせたのは `scripts/__tests__/adr-index-freshness.test.mjs` と `scripts/__tests__/adr-index-freshness-branch-lib.test.mjs` のみ。**他の歯がこの改名で壊れていないことは CI が初めて確かめる。**
 - **branch protection・merge queue・ADR PR の頻度の4点は【受】である**——調査担当が引いた出力を受け取ったもので、この書き手は再実行していない。
+
+> **追記（2026-09-30）—— 「作成者は索引を触らない」は、実際の運用ではこう読み替えられている。これはクローン miku の判断であり、オーナーの判断ではない。**
+>
+> 本文（決定3。作成者が自分で直さないことの明記）は「ADR を足す PR の作成者は `docs/decisions/README.md` を触らない。マージする側が squash 直前に生成して commit する」と読める。**実際の運用はそうなっていない。**ADR を足す PR の側で `node scripts/generate-adr-index.mjs` を当て、索引も同じ PR で commit し、`adr-index-freshness` の歯を PR 上で緑にしてからマージしている。ほかの ADR の PR と索引の行が衝突したら、`main` を merge で取り込み、生成器で作り直す。
+>
+> - **根拠（読んで確かめた）**: #1489・#1490・#1492・#1493・#1497・#1499・#1500 の7本は、いずれも PR の差分に `docs/decisions/README.md` を含み、マージされている（CI 19本が全部 SUCCESS だったことは、#1497 と #1500 で `statusCheckRollup` を見て確かめた。ほかの5本は依頼元からの受けで、こちらでは見ていない）。#1497 と #1500 には「docs(adr): 索引に 04xx を足す（生成器で作り直した）」という commit が PR 側に在る。
+> - **実害**: 文面どおりに読んで「作成者は触らない」と止まった担当が3人続き、CI の `adr-index-freshness` を赤のまま報告した（#1500・#1497・#1496）。
+> - **0137 の理由との関係**: 「作成者は触らない」の理由は、並行 ADR PR が索引の同じ位置を奪い合う衝突を構造的に消すことだった。運用では、その衝突を「衝突したら `main` を merge して生成器で作り直す」で吸収している。生成器は `docs/decisions/*.md` から表を作り直すだけなので、作り直しに人の判断は要らない。
+> - **確かめていないこと**: 並行する ADR PR が実際に索引で衝突し、再生成で解消した事例があるかは確かめていない（上の7本に `main` の merge commit が在ることは見たが、衝突の有無と解消の中身は見ていない）。運用が定着するかも、この追記の時点では分からない。
+> - **本文は書き換えていない。**現在の案内は `docs/decisions/README.md`「一覧」節、`docs/autonomy.md`、`scripts/generate-adr-index.mjs` 冒頭コメントに書き直した。
