@@ -58,11 +58,11 @@ afterAll(async () => {
 describe("reinforceMany — 件数の崖（ADR 0443）", () => {
   let ids: MemoryId[];
   beforeAll(async () => {
-    ids = await seedMemories(40_000);
-  });
+    ids = await seedMemories(30_000);
+  }, 120_000);
 
   // 13106 × 5 + 3 = 65533 は上限の手前、13107 × 5 + 3 = 65538 は奥。
-  for (const n of [13_106, 13_107, 40_000]) {
+  for (const n of [13_106, 13_107, 30_000]) {
     it(`${n} 件: 例外にならず、全件を強化して、入力と同じ順で返す`, async () => {
       const slice = ids.slice(0, n);
       const at = new Date("2030-01-01T00:00:00.000Z");
@@ -70,7 +70,7 @@ describe("reinforceMany — 件数の崖（ADR 0443）", () => {
       expect(result).toHaveLength(n);
       expect(result.map((m) => m.id)).toEqual(slice);
       expect(result.every((m) => m.lastReinforcedAt?.getTime() === at.getTime())).toBe(true);
-    });
+    }, 120_000);
   }
 
   it("存在しない id が混ざる大きな呼び出し: 例外の message は巨大にならない", async () => {
@@ -87,7 +87,7 @@ describe("reinforceMany — 件数の崖（ADR 0443）", () => {
     expect(error).not.toBeNull();
     expect(error!.message).toContain("memory not found");
     expect(error!.message.length).toBeLessThan(MESSAGE_MAX_CHARS);
-  });
+  }, 120_000);
 });
 
 describe("observe({ kind: 'memory_usage' }) — 件数の崖（ADR 0443）", () => {

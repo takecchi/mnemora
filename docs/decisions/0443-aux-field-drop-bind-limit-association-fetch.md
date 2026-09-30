@@ -76,6 +76,6 @@
 - **測ったこと**（【実測】2026-10-01、手元の Postgres 17、UTF8（`C.UTF-8`）。歯を先に走らせて赤を見てから直した）:
 
   - 決定1: `packages/postgres/src/__tests__/observe-aux-field-drop.postgres.test.ts`（2実装 × 8本。digest の NUL、tags の NUL・巨大、添字の上限、claim key の NUL、deferred、reextract、本文の NUL は従来どおり候補ごと落ちる、保存できる値は変えない）。`sanitizeCandidateAuxFields` の呼び出しを外し、claim key の NUL の判定を外す変異で 12 本が赤（ほかの 4 本は「やりすぎ」を見る歯で、直す前から緑）。戻すと 16 本とも緑。
-  - 決定2: `packages/postgres/src/__tests__/bind-parameter-limit-cliff.postgres.test.ts`（11本）。直す前は、`reinforceMany` は 13106 件が緑・13107 件と 40000 件が赤、`memory_usage` は 13106 件が緑・13107 件が赤、`searchMany` は 32000 件が緑・32767 / 32768 / 40000 件とチャンクをまたぐ一致の歯が赤、存在しない id を含む 20000 件の message の歯が赤。直した後は 11 本とも緑。`reinforce-many-equivalence`・`vector-store-search-many`・`vector-search-many-diff`・`record-usage-and-reinforce`・`search-many-primary-key-lookup` ほか、関連する既存の歯が緑。
+  - 決定2: `packages/postgres/src/__tests__/bind-parameter-limit-cliff.postgres.test.ts`（11本）。直す前は、`reinforceMany` は 13106 件が緑・13107 件が赤（40000 件でも赤を確認したあと、CI の 30 秒の時間切れを避けるため歯の大きさを 30000 件にした）、`memory_usage` は 13106 件が緑・13107 件が赤、`searchMany` は 32000 件が緑・32767 / 32768 / 40000 件とチャンクをまたぐ一致の歯が赤、存在しない id を含む 20000 件の message の歯が赤。直した後は 11 本とも緑。`reinforce-many-equivalence`・`vector-store-search-many`・`vector-search-many-diff`・`record-usage-and-reinforce`・`search-many-primary-key-lookup` ほか、関連する既存の歯が緑。
   - 決定3: 上の差分試験（使い捨て。CI には載せていない）。
   - **測っていないこと**: `searchMany` の実行計画が、チャンクに分けても同じであること（`EXPLAIN` は取っていない。分けた各文の形は以前と同じ `VALUES` である）。チャンクの大きさ（16384）が最速かどうか。SQL_ASCII の DB での補助の欄の歯。
