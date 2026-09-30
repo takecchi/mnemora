@@ -161,6 +161,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **`@mnemora/postgres` に、`listActiveClaimPredicates` 用の部分索引 `idx_memories_claim_predicates` を足す migration `0029_memories_claim_predicates_index.sql` を足した**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、[ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md) の2026-09-30追記）。`(tenant_id, subject_id, claim_key_predicate, created_at)` の部分索引（`WHERE status = 'active' AND claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）。SQL と振る舞いは変えない。**DB マイグレーション**: 要る（`mnemora-postgres-migrate` か `runMigrations`）。索引作成の間、`memories` への書き込みは止まる（素の `CREATE INDEX`）。100万行・visibility map が all-visible の測定で、`listActiveClaimPredicates` の中央値は 3.52ms から 1.63ms（10万行では差があるとは言えない）。数字と測っていないことは ADR に書いた。
+- **`@mnemora/postgres` に `createOptionalTrigramIndexConcurrently(db)` を足した**（[PR #1457](https://github.com/takecchi/mnemora/pull/1457)、[ADR 0319](./docs/decisions/0319-optional-trigram-lexical-store.md) の2026-09-30追記）。`createOptionalTrigramIndex` と同じ形の索引 `idx_memories_trigram` を、`CREATE INDEX CONCURRENTLY` で（`memories` への書き込みを止めずに）張る。トランザクションの外で呼ぶこと。前回の失敗で `indisvalid = false` の同名索引が残っていれば、`DROP INDEX CONCURRENTLY` で消してから作り直す。既存の `createOptionalTrigramIndex` は変わらない（公開 API は追加のみ）。⚠ 複数の呼び出し元が同時に呼んだときの競合は防いでいない。
 - **`@mnemora/testkit` の `describeMemoryStoreConformance` に、`reinforce`/`reinforceMany?` が `memory_events` を1行も書かないことを検査する `it` を足した**（[Issue #871](https://github.com/takecchi/mnemora/issues/871)、[PR #1452](https://github.com/takecchi/mnemora/pull/1452)。`docs/memory-model.md` §11 行4 が約束していた振る舞いに、対応する歯が無かった。クローン miku の委譲先の判断であり、オーナーの判断ではない）——自前の `MemoryStore` 実装を conformance suite に当てている外部 adapter 実装者にも、この約束が効くようになる。
 - **多者間（3件以上）の `contested` を表す関係グラフ `memory_relations` と、それを書く・読む口を足した**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)/[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0292](./docs/decisions/0292-relation-graph-table-depth-omitted-design.md)、[ADR 0327](./docs/decisions/0327-relation-graph-contested-write-path-design.md)、[ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）——`markContested`/`resolveContested` は1対1の対にしか対応せず、1つの記憶が複数の記憶と同時に争われる場合を表せなかった。
   - **新しい migration `0026_memory_relations.sql`。** `memory_relations`（`kind` は当面 `'contradicts'` の1値。1組につき向きを変えて2行）を新設する。2者の対は今までどおり `contested_with_id` の列で持ち、既存のデータは動かさない。
@@ -175,6 +177,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、常に `countKind: 'exact'` を返し続ける契約**（[ADR 0024](./docs/decisions/0024-remove-exact-counts-option.md) の「値を受け取って黙って無視する」事故を繰り返さないための設計）。`@mnemora/postgres`・`@mnemora/testkit` はこの版で対応済み。
   - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm（12往復、1点ごとに別プロセス）: 案A の索引ありの `"exact"` は p50 627.7ms、`"skip"` は p50 1.5ms。往復ごとの差（skip − exact）の中央値は −644.6ms（IQR −671.1〜−541.9ms、最小〜最大 −681.3〜−504.6ms、12往復すべて負）。10万行は cold（Postgres 再起動直後）・warm-after とも `"skip"` は p50 6.6ms・1.2ms。器・手順・限界は ADR 0384「測ったこと」。
   ⭕ 非破壊と数える（新しい任意の欄1つの追加のみ。既存の呼び出しは1行も直さず通る）。
+- **抽出の言語の事後検査を足した——日本語の観測から、かな・漢字の無い（ラテン文字の）本文が出たら、`created` イベントの `meta.languageMismatch` に印を付ける**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[ADR 0391](./docs/decisions/0391-language-mismatch-mark-on-created-event.md)）。sync・deferred・`reextract` のすべての抽出経路で効く。
+  - **印を付けるだけ**——再試行も全文フォールバックもしない。Memory の作り方、プロンプト、公開の型は変えない。疑いが無いときの `created` の `meta` は今までどおり。
+  - ⚠ 閾値は推論で置いたもので、**実データでの偽陽性率は測っていない**。意図して英語で書かせる使い方では印が常に付きうる。
+  ⭕ 非破壊と数える（既存のイベントの `meta`（自由形式）への任意のキーの追加のみ。型・DB は変えない）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

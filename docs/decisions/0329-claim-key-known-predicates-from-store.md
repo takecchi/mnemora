@@ -853,3 +853,129 @@ observation**）が両方とも predicate `plans_weekend_activity` に吸い寄�
 候補4（誤検出の `[矛盾候補:]` が回答の品質に効いているか）は
 [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
 の追記に記録する——本追記は候補3（v4 の再測定）だけを対象にした。
+
+---
+
+## 追記（2026-09-30）—— 決定2・負債6への応答: `idx_memories_claim_predicates`（migration 0029）を足した
+
+⛔ 上の本文と、直前の2026-09-30追記は1バイトも書き換えていない。同じ形で追記する。
+
+クローン miku の委譲先が書いた（オーナーではない）。
+
+### 何をしたか
+
+決定2は「migration は追加しない」と決め、負債6は「新しい索引を足していないため、大規模テナントでの
+実行計画・レイテンシは未測定」と書いていた。これに応えて、`listActiveClaimPredicates` 専用の部分索引を
+migration `0029_memories_claim_predicates_index.sql` で足した:
+
+```sql
+CREATE INDEX idx_memories_claim_predicates
+  ON memories (tenant_id, subject_id, claim_key_predicate, created_at)
+  WHERE status = 'active'
+    AND claim_key_subject IS NOT NULL
+    AND claim_key_predicate IS NOT NULL;
+```
+
+`listActiveClaimPredicates` の SQL と振る舞いは変えていない（Issue #835 に隣接する opt-in の経路なので）。
+
+⚠ 決定2は、covering index を足すなら migration の番号を `0022` と書いていた。**`0022` は実際には別のもの
+（`0022_embedding_zero_norm_index.sql`）に使われている。**今回の番号は `0029`（オーナー側で決定済み。`0028`
+は別の PR が使う予定）。
+
+### 決定2が挙げた案からの変更: `status` をキーから外し、部分索引の述語へ移した
+
+決定2・負債6が挙げた案は `(tenant_id, subject_id, status, claim_key_predicate, created_at)` だった。
+`status` をキーの列にはせず、部分索引の述語（`WHERE status = 'active' AND …`）へ移した。理由は、SQL の
+`WHERE` が `status = 'active'` と等号で固定した形なので、同じ形の述語にすればプランナが述語を導け、
+キーの列が1つ減り、問い合わせが読む列（`claim_key_predicate`・`created_at`）がすべて索引に入って
+Index Only Scan になりうるため。
+
+### 測ったこと（数字だけを書く。「速くなった」とは書かない）
+
+- **器**: nproc 48 / 384GB（共用で、負荷は一定でない）、PostgreSQL 17、`shared_buffers=8GB`。
+- **データ**: 前後で同一（全行の hash と件数の一致を確認した）。テナント2つ（10万行 / 100万行）、
+  subject 300（一様）+ `subject_id` NULL 5%、status は active 70% / superseded 15% / contested 5% /
+  archived 5% / forgotten 5%。claim key は全行の約30%、predicate は500種（偏りあり）。測定対象の subject の
+  claim key 行は、10万で83行（active 59）、100万で965行（active 664）。
+- **手順**: 1点ごとに別の node プロセスで、ウォームアップ5回 + 50回の中央値。前（main）と後（索引あり）を
+  交互に14往復し、往復ごとに順番を入れ替えた。`limit = 20`。結果は前後で一致した。
+- **第2セット（`VACUUM` 後、visibility map の全ページが all-visible）**:
+  - 10万行: 前 1.45ms / 後 1.35ms。差（後 − 前）の中央値 −0.16ms、範囲 −1.16〜+0.69、IQR −0.29〜+0.15
+    ⟹ 揺れに埋もれ、差があるとは言えない。
+  - 100万行: 前 3.52ms / 後 1.63ms。差の中央値 −1.70ms、範囲 −4.65〜−1.16、IQR −1.95〜−1.29
+    ⟹ 14往復すべてで負だった。
+- **第1セット（visibility map が不完全。`db_idx` の `relallvisible` 2856/31420）**:
+  - 10万行: 差の中央値 −0.20ms（範囲 −1.12〜+1.15）。
+  - 100万行: 差の中央値 −0.89ms（範囲 −1.85〜+0.25、正は1往復）。
+- **EXPLAIN**（100万行）:
+  - 前: `idx_memories_claim_key` の Index Scan + `status` の Filter + Sort/Aggregate（buffers hit=976）。
+  - 後: Index Only Scan、Heap Fetches 0、GroupAggregate（hit=11）。visibility map が不完全なときは
+    Heap Fetches 664。
+- **索引サイズ**: 12MB（既存の `idx_memories_claim_key` は 16MB）。
+
+### 歯
+
+`packages/postgres/src/__tests__/claim-predicates-index.postgres.test.ts`: 索引の定義（`pg_get_indexdef`）と、
+`listActiveClaimPredicates` が `Index Only Scan using idx_memories_claim_predicates` になること
+（`subjectId` が文字列のときと `null` のとき）を EXPLAIN で見る。EXPLAIN の歯にした理由は、定義だけの歯だと
+プランナが選ばなくなっても緑のままで、索引が飾りになるため。プランナ依存の留保はテストの docstring に書いた
+（`VACUUM ANALYZE` で visibility map を揃えている）。
+
+副作用: `findActiveByClaimKey`（`status = 'active'` の等値）も、この索引を選ぶことが実測で分かった
+（20,000 行の歯で `Index Scan using idx_memories_claim_predicates`）。`claim-key-index.postgres.test.ts` の
+`findActiveByClaimKey` と `listActiveClaimPredicates` の期待は、「`idx_memories_claim_key` か
+`idx_memories_claim_predicates` のどちらか」に緩めた（`subject_id` が Index Cond に入ること・Seq Scan に
+しないことは変えていない）。`findActiveByClaimKey` の速度は測っていない。
+
+### 確かめていないこと
+
+- ⛔ **書き込み負荷の下での挙動と、索引の維持コスト**（INSERT の遅延、status の更新で述語から外れる分）。
+- ⛔ **autovacuum の追随具合が visibility map の状態に与える影響。**本番は上の第1セットと第2セットの間に
+  なりうる（第1セットでは Heap Fetches が残り、差は小さい）。
+- ⛔ **`subject_id IS NULL` での呼び出しの実測**（EXPLAIN の歯は `null` の形を見るが、上の速度の測定は
+  対象 subject が文字列の場合だけ）。
+- ⛔ **subject の分布が偏った場合**（上の測定は subject 300 が一様）。
+- ⛔ **planning 時間**（約3ms）は、この索引では縮まない。
+- 測定用のスクリプトは commit していない。
+
+### `findActiveByClaimKey` と新索引（同日、測定を足した）
+
+⛔ 上の本文は書き換えていない。上の「副作用」（`findActiveByClaimKey` も新しい索引を選ぶことがある）を、
+数字で測った。「速くなった」「遅くならない」とは断定しない。
+
+**背景**: `claim-key-index.postgres.test.ts` の20,000行の形では、`findActiveByClaimKey` も
+`idx_memories_claim_predicates` を選ぶことがある。そのときのコスト見積もりは 8.32（旧
+`idx_memories_claim_key`）と 8.31（新）でほぼ同点で、どちらを選ぶかは揺れうる。
+
+**測定1（通常の分布）**: 前回と同じ100万行のテナント（subject 300、`claim_key_subject` 50種、
+predicate 500種）。前（main `1becd89`）と後（枝 `dd79c0e`）の**両方で旧索引 `idx_memories_claim_key` が
+選ばれ、プランは同じ**だった。visibility map は全ページ all-visible（28564/28564）。14往復、1点は別の
+node プロセスで50回の中央値。
+
+| 問い | 前 | 後 | 差（後 − 前）の中央値 | 範囲 | Q1〜Q3 |
+|---|---|---|---|---|---|
+| A（一致する active が2行） | 1.39ms | 1.52ms | +0.24ms | −0.52〜+0.51 | −0.00〜+0.28 |
+| B（ヒット0件） | 1.23ms | 1.18ms | −0.04ms | −0.54〜+1.21 | −0.20〜+0.18 |
+
+プランが同じなので、この差は索引によるものとは言えない。
+
+**測定2（新索引が選ばれる形）**: `claim-key-index.postgres.test.ts` の seed の形（subject 20種 + NULL 5%、
+`claim_key_subject` は `user` の1種、predicate 200種、active : contested = 1 : 1、別テナントは N/4）を、同じ
+比率で active 100万行まで広げた（計 2.25M 行）。前後で全行の hash と件数は一致し、visibility map は全ページ
+all-visible（66177/66177）。後で `idx_memories_claim_predicates` が選ばれることを EXPLAIN で確かめた
+（前は旧索引で、contested の1667行を Filter で捨てる。後は部分索引の Index Scan で、`claim_key_subject` は
+Filter）。一致は1667件で、前後同じ。14往復。
+
+- 前 27.84ms / 後 27.44ms。差（後 − 前）の中央値 −0.48ms、範囲 −6.92〜+4.12、Q1〜Q3 −1.36〜+1.44
+  （負8・正6往復）。
+
+**受け入れた理由**: 新索引が選ばれる形でも、後のほうが揺れの幅を超えて遅くなってはいない。通常の分布では
+旧索引が選ばれ、プランが変わらない。⚠ この判定は、**オーナーではなくクローン側が定めた基準**
+（「揺れを超えて遅くならなければ受け入れる」）による。オーナーが確認した基準ではない。
+
+**確かめていないこと**:
+
+- ⛔ 一致行が数行の典型的な組で、新索引が選ばれる形（測定2は一致が1667件）。
+- ⛔ `subject_id IS NULL` での呼び出し。
+- ⛔ 書き込み負荷のもとでの挙動。
+- 測定用のスクリプトは commit していない。

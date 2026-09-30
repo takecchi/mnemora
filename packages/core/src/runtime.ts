@@ -80,6 +80,8 @@ import type { OutboxJobRecord } from "./outbox.js";
 import { runRecall } from "./recall-runtime.js";
 import type { RecallQuery, RecallRecord, RecallResult } from "./recall.js";
 import type { RecallOutputValidationMode } from "./recall-output-validation.js";
+import { detectLanguageMismatch } from "./language-mismatch.js";
+import { observationPayloadText } from "./observation-text.js";
 import { classifyReextractTargets, classifySupersedeFailure } from "./strategies/reextract.js";
 import type { ReextractSkip } from "./strategies/reextract.js";
 import {
@@ -3807,7 +3809,7 @@ function extractObservationPayload(
     case "event":
       // Issue #1185: `extractData: true` のときだけ payload に印を足す。`false`・省略では
       // `payload` は今までと1バイトも変わらない（`extractData` キー自体が増えない）
-      // ——`observationPayloadText`（extraction.ts）はこの印を見て `data` を本文へ合成する。
+      // ——`observationPayloadText`（observation-text.ts）はこの印を見て `data` を本文へ合成する。
       return {
         name: input.name,
         data: input.data ?? {},
@@ -4087,6 +4089,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     failure: ExtractionFailure | null,
     droppedCandidates: readonly DroppedCandidate[] = [],
   ): Promise<void> {
+    const languageMismatch =
+      outcome === "llm_failed_whole_observation"
+        ? null
+        : detectLanguageMismatch(observationPayloadText(observation), memory.content);
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
@@ -4111,6 +4117,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // Issue #1063（ADR 0347）: 同じ抽出で保存できずに落とした候補があったときだけ足す——
         // 落とした候補が無い呼び出しの meta の形は変えない。
         ...(droppedCandidates.length > 0 ? { droppedCandidates: [...droppedCandidates] } : {}),
+        // Issue #1370（ADR 0391）: 言語の事後検査。日本語の観測から、かな・漢字の無い（ラテン文字の）
+        // 本文が出たときだけ足す——疑いが無い呼び出しの meta の形は変えない。**印を付けるだけ**で、
+        // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
+        ...(languageMismatch !== null ? { languageMismatch } : {}),
       },
     });
   }
