@@ -1191,6 +1191,84 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // テナントの一致（ADR 0436。ADR 0398 決定5 と同じ扱い）: `memoryId` の記憶が `ctx.tenantId` の記憶でなければ、
+    // 行を書かずに `memory not found for tenant` で拒む。実在しない id・uuid の形でない id と区別しない。
+    // 自テナントの正しい記憶への upsert は通る（断りすぎを防ぐ歯は、各 it の最後の upsert と search）。
+    // -------------------------------------------------------------------
+
+    it("ctx のテナントに属さない記憶を指す upsert は拒まれ、行は書かれない（ADR 0436）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const inTenantA = await prepareMemoryId(ctxA);
+      const inTenantB = await prepareMemoryId(ctxB);
+
+      await expect(store.upsert(ctxA, space, inTenantB, [1, 0, 0])).rejects.toThrow(
+        /memory not found for tenant/,
+      );
+
+      const hitsA = await store.search(ctxA, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-a" },
+      });
+      const hitsB = await store.search(ctxB, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-b" },
+      });
+      expect(hitsA).toEqual([]);
+      expect(hitsB).toEqual([]);
+
+      // 拒んだ後も、それぞれ自分の記憶になら書ける（断りすぎていない）。
+      await store.upsert(ctxA, space, inTenantA, [1, 0, 0]);
+      await store.upsert(ctxB, space, inTenantB, [0, 1, 0]);
+      const afterA = await store.search(ctxA, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-a" },
+      });
+      const afterB = await store.search(ctxB, space, [0, 1, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-b" },
+      });
+      expect(afterA.map((h) => h.memoryId)).toEqual([inTenantA]);
+      expect(afterB.map((h) => h.memoryId)).toEqual([inTenantB]);
+    });
+
+    // 存在しない id は2通り: uuid の形をしているもの（Postgres では外部キー違反になる形）と、
+    // uuid の形でないもの（Postgres では型変換エラーになる形）。どちらも DB 由来の生のエラーではなく、
+    // 同じ「memory not found for tenant」で拒まれること。
+    const missingMemoryIds: Array<[string, string]> = [
+      ["uuid の形をした存在しない id", "00000000-0000-4000-8000-000000000000"],
+      ["uuid の形でない id", "does-not-exist"],
+    ];
+    for (const [label, missing] of missingMemoryIds) {
+      it(`upsert は存在しない記憶（${label}）を指すと「memory not found for tenant」で拒まれ、行は書かれない（ADR 0436）`, async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memoryId = await prepareMemoryId(ctx);
+
+        const error = await store.upsert(ctx, space, missing as MemoryId, [1, 0, 0]).then(
+          () => null,
+          (e: unknown) => e,
+        );
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toMatch(/memory not found for tenant/);
+        expect(
+          await store.search(ctx, space, [1, 0, 0], {
+            limit: 10,
+            filter: { tenantId: "tenant-1" },
+          }),
+        ).toEqual([]);
+
+        await store.upsert(ctx, space, memoryId, [1, 0, 0]);
+        const hits = await store.search(ctx, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: "tenant-1" },
+        });
+        expect(hits.map((h) => h.memoryId)).toEqual([memoryId]);
+      });
+    }
+
+    // -------------------------------------------------------------------
     // 穴 O-6-2（ADR 0424）: float4 に収まらない成分。pgvector の `vector` は float4 で、
     // `1e308` は `"1e+308" is out of range for type vector` で拒まれる。以前は Postgres の upsert だけが
     // DB の生の例外で落ち、インメモリは `Math.fround` で Infinity にして保存し、距離が NaN になっていた。

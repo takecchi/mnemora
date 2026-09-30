@@ -265,6 +265,20 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目48。DB マイグレーションは無い。
   - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres`〈UTF8・SQL_ASCII〉とインメモリの実装が通ることだけを確かめた）。識別子（tenantId など）の NUL は扱っていない。
 
+- **`EventStore.append`・`VectorStore.upsert` が、記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった**（[ADR 0436](./docs/decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)、`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）。クローン miku の決定（オーナーの判断ではない。[ADR 0398](./docs/decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md) と同じ作法）。
+
+  これまで `PostgresEventStore.append`・`PostgresVectorStore.upsert` は、`memoryId` の記憶が `ctx.tenantId` のものかを確かめず、別テナントの記憶 id を指す行を
+  `ctx.tenantId` の行として書いた（外部キーは `memories(id)` だけでテナントを含まない）。その行が1本在ると、指された記憶のテナントの `eraseTenant` が
+  `blocked_by_foreign_reference` で止まり、そのテナントは自分の記憶を消せなくなった。インメモリは元から断っていた。
+  今は、書く前に確かめ、実在しない・別のテナントの記憶なら、**行を書かずに** `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる。
+  Postgres は確かめと書き込みを1つの SQL 文にしている。uuid でない id は DB へ投げる前に弾く。`append` は `memoryId` が `null` のイベント（`events_purged`）を検査しない。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた `append`・`upsert`（別テナントの記憶を指すもの）が、新しく例外になる**（実在しない uuid・uuid でない id は以前も落ちたが、外部キー違反・`Failed query` の生の DB エラーから、明示の例外に変わる）。項目21・23・24・27・34 と同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。
+  - **誰が影響を受けるか**: `EventStore.append`・`VectorStore.upsert` を直接呼ぶ利用者のうち、別テナントの記憶 id を渡しているもの。`Runtime` は同じ `ctx` で確かめた id しか渡さないので、`observe()`・`recall()`・`tick()` の挙動は変わらない。自前の `EventStore`・`VectorStore` を `describeEventStoreConformance`・`describeVectorStoreConformance` に当てている利用者は、新しい `it` が落ちうる（`prepareMemoryId(ctx)` が、渡した `ctx` のテナントの記憶を、`createStore()` の store から見える形で返すこと）。
+  - **変えなかったこと**: DB のスキーマ・複合外部キー（理由は ADR 0436）。`MemoryStore.createMemory`・`recordUsage` の別テナントの id の扱い（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051) の表の残り2行）。**既に書かれた食い違う行は消さない**（データの書き換えはオーナーの領分）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目49。**DB マイグレーションは無い。**修正前に書かれた食い違う行（`memory_events`・`memory_embeddings_<space>`）が在るかを調べる SQL は ADR 0436 に在る（読み取りだけ）。
+  - 【確かめていないこと】`PostgresMemoryStore` の中の `memory_events` への INSERT 11箇所が、別テナントの記憶を指さないこと（1つずつは確かめていない）。検査と INSERT の間に並行して記憶が消えた場合の、外部キー違反の生のエラーの見え方。手元以外の環境・既存データでの食い違う行の有無。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
