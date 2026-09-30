@@ -97,7 +97,7 @@ Queue/Worker を構築するだけで、Worker は `autorun: false` で作る—
 
 ## ⚠ エラーの通知先（`onTickError`）
 
-- **`onTickError` を渡さないと、tick の失敗は誰にも知らされない。**`runtime.tick()` の throw（BullMQ の `'failed'`）も、
+- **`onTickError` を渡さないと、tick 自体の失敗は誰にも知らされない。**`runtime.tick()` の throw（BullMQ の `'failed'`）も、
   Worker の `'error'`（接続エラーなど）も、driver は `opts.onTickError?.(err)` へ渡すだけで、
   渡していなければ何も出さない（[`src/tick-driver.ts`](./src/tick-driver.ts)）。ログにも例外にもならず、
   tick が動かないまま見た目は静かである。**本番で使うなら渡すこと**（ログに出す・メトリクスに積むなど）。
@@ -107,6 +107,31 @@ Queue/Worker を構築するだけで、Worker は `autorun: false` で作る—
     onTickError: (error) => console.error("mnemora tick failed", error),
   });
   ```
+- 🔴 **`onTickError` を渡せば「失敗が全部分かる」わけではない。**`onTickError` に届くのは、`runtime.tick()`（と `onTickResult`）の
+  throw と、Worker・Queue の異常だけである。tick の中の**個々のジョブ（outbox の行）が失敗しても、tick が throw しなければ
+  `onTickError` は鳴らない**——その tick は成功として返り、失敗は戻り値の `TickResult` に数として載る。
+  - **個々のジョブの失敗は `onTickResult` で見る。**`TickResult.failed` は、その tick で `outboxStore.fail()` を呼んで
+    リース競合で弾かれなかった件数、`TickResult.unsupported` は `failed` の内訳のうち「`tick` がその kind を処理する分岐を
+    持っていなかった」ジョブの配列である（`unsupported` に入ったジョブも `failed` に数える。
+    フィールドの定義は `packages/core` の `TickResult`）。
+    ```ts
+    createBullmqTickDriver({
+      // ...
+      onTickResult: (result) => {
+        if (result.failed > 0) {
+          console.warn("mnemora tick: jobs failed", {
+            failed: result.failed,
+            unsupported: result.unsupported,
+          });
+        }
+      },
+    });
+    ```
+  - **失敗した行そのものは、outbox の `last_error` 列（`text`）で見る。**`TickResult` は件数と
+    `unsupported` の名指ししか持たないので、「どの行が・なぜ」は DB を引くこと。
+  - ⚠ `failed` の件数は「行が終端 `failed` になった数」と常に一致するとは限らない（コミット後の接続断など。`TickResult.failed` の
+    doc、Issue #836）。
+  - `onTickError` の守備範囲は変えていない。`failed > 0` で `onTickError` を呼ぶ形や、`TickResult` の形を変える形は採っていない。
 - **`Queue` 側のエラーも `onTickError` に届く**（`onTickError` を渡しているとき）。driver は `Worker` の
   `'error'`・`'failed'` に加え、`Queue`（繰り返しジョブの登録に使う）の `'error'` にも listener を付け、
   Redis 接続の失敗などを `onTickError` へ渡す。以前は `Queue` に listener が無く、bullmq が `console.error` へ

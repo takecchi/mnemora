@@ -7,7 +7,7 @@ import {
   assertSafeSchemaName,
   searchPathFor,
 } from "./schema-namespace.js";
-import { POOL_ERROR_WARNING_PREFIX } from "./pool-error-warning.js";
+import { POOL_ERROR_WARNING_HEAD } from "./pool-error-warning.js";
 
 /** このパッケージの store が受け取る drizzle のデータベース（`NodePgDatabase`、このパッケージのスキーマ付き）。 */
 export type Db = NodePgDatabase<typeof schema>;
@@ -130,10 +130,7 @@ export function createPostgresClient(
     // 二重の警告を抑える: 利用者が自分で `pool.on("error", …)` を付けていれば
     // （付けた順番に依らず）、emit の時点でリスナーは2つ以上になっている。
     if (pool.listenerCount("error") === 1) {
-      console.warn(
-        `${POOL_ERROR_WARNING_PREFIX} pool の待機中の接続が失われた。捨てて続行する: ${error.message}`,
-        error,
-      );
+      console.warn(`${POOL_ERROR_WARNING_HEAD}: ${error.message}`, error);
     }
   });
   const db = drizzle(poolWithCheckoutErrorListener(pool), { schema });
