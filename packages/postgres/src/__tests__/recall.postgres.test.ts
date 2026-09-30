@@ -183,11 +183,14 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
 
     const { runtime: runtimeFailingEmbed } = await buildTestRuntime({ embeddingShouldFail: true });
     const failedEmbed = await runtimeFailingEmbed.recall(ctx, { text: "hello" });
-    expect(failedEmbed.omitted).toContainEqual({
-      kind: "stage_skipped",
-      stage: "candidate_generation",
-      reason: "embedding_provider_unavailable",
-    });
+    // 任意欄 `cause`（原因の種類）が付くので、既存の3欄だけを objectContaining で見る。
+    expect(failedEmbed.omitted).toContainEqual(
+      expect.objectContaining({
+        kind: "stage_skipped",
+        stage: "candidate_generation",
+        reason: "embedding_provider_unavailable",
+      }),
+    );
   });
 
   it("omitted: filtered(archived) / filtered(superseded) / filtered(forgotten) / filtered(period) / not_indexed", async () => {

@@ -185,11 +185,14 @@ describe("recall() — omitted.kind = 'stage_skipped'（候補生成、docs/reca
     const { runtime, stores } = buildRuntime();
     stores.embeddingProvider.shouldFail = true;
     const result = await runtime.recall(ctx, { text: "何かのクエリ" });
-    expect(result.omitted).toContainEqual({
-      kind: "stage_skipped",
-      stage: "candidate_generation",
-      reason: "embedding_provider_unavailable",
-    });
+    // 任意欄 `cause`（原因の種類）が付くので、既存の3欄だけを objectContaining で見る。
+    expect(result.omitted).toContainEqual(
+      expect.objectContaining({
+        kind: "stage_skipped",
+        stage: "candidate_generation",
+        reason: "embedding_provider_unavailable",
+      }),
+    );
   });
 });
 

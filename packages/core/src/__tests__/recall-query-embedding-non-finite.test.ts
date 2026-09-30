@@ -60,7 +60,7 @@ describe("recall() — クエリ埋め込みが有限でない成分を含むな
 
       const result = await runtime.recall(ctx, { text: "何かのクエリ" });
 
-      expect(result.omitted).toContainEqual(UNAVAILABLE);
+      expect(result.omitted).toContainEqual(expect.objectContaining(UNAVAILABLE));
       expect(JSON.stringify(result.omitted)).not.toContain("score_not_comparable");
       const trace = result.explain.stages.find((s) => s.stage === "candidate_generation");
       expect(trace?.executed).toBe(false);
