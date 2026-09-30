@@ -41,7 +41,8 @@
   5. **Postgres の `toComparableQuery` は残す**（長さの差し替えも、有限性の差し替えも）。core の検査の後でも届く経路が在る:
      - `recall({ vector })` で呼び出し側が直接渡した問い合わせベクトル（`recall-runtime.ts` は `validatedQuery.vector` を
        そのまま `queryVector` に入れ、`recall.ts` の zod は `z.array(z.number())` で長さを見ない）。
-     - `VectorStore.search`/`searchMany` を利用者が直接呼ぶ場合（`interfaces/vector-store.ts` の `search` の doc が
+     - `VectorStore.search`/`searchMany` を利用者が直接呼ぶ場合（有限でない成分はこの経路にだけ届く。`RecallQuery.vector` は
+       zod の `z.number()` が `NaN`・`Infinity` を拒む。`packages/postgres/src/__tests__/vector-search-non-finite-query.postgres.test.ts`）（`interfaces/vector-store.ts` の `search` の doc が
        「長さが違っても新しい例外を投げない」と約束している公開 adapter の契約）。
        消すと、これらが pgvector の未捕捉の `DrizzleQueryError` に戻る。
 
