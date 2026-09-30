@@ -95,6 +95,29 @@ Queue/Worker を構築するだけで、Worker は `autorun: false` で作る—
 詳しい API（`CreateBullmqTickDriverOptions` の各フィールド）は
 [`src/tick-driver.ts`](./src/tick-driver.ts) の doc コメントを見ること。
 
+## ⚠ エラーの通知先（`onTickError`）
+
+- **`onTickError` を渡さないと、tick の失敗は誰にも知らされない。**`runtime.tick()` の throw（BullMQ の `'failed'`）も、
+  Worker の `'error'`（接続エラーなど）も、driver は `opts.onTickError?.(err)` へ渡すだけで、
+  渡していなければ何も出さない（[`src/tick-driver.ts`](./src/tick-driver.ts)）。ログにも例外にもならず、
+  tick が動かないまま見た目は静かである。**本番で使うなら渡すこと**（ログに出す・メトリクスに積むなど）。
+  ```ts
+  createBullmqTickDriver({
+    // ...
+    onTickError: (error) => console.error("mnemora tick failed", error),
+  });
+  ```
+- **`Queue` 側のエラーは `onTickError` に届かない。** driver は `Worker` にだけ `'error'`・`'failed'` の listener を付け、
+  `Queue`（繰り返しジョブの登録に使う）には listener を付けていない。`Queue` が `'error'` を emit しても
+  listener が無いので、bullmq（6.3.8 の `QueueBase.emit`）が **`console.error` へ固定で出す**——出力先を変える口は
+  この driver には無い。Redis に繋がらないときの接続エラーは、`onTickError` を渡していても、こちらの経路では
+  標準エラーにしか出ない。
+  - 【実測】Redis が居ないポートを指した `Queue` を listener 無しで作ると、`listenerCount("error")` は 0 で、
+    `ECONNREFUSED` が `console.error` に出る（bullmq 6.3.8、Redis 無しで確かめた）。**`Worker` 側の経路と、
+    Redis が在る状態での `Queue` の失敗は、この PR では測っていない。**
+  - コードは変えていない。`Queue` の error も `onTickError` へ流すかどうかは別の判断である（流すなら
+    `tick-driver.ts` で `queue.on("error", …)` を足すことになる）。
+
 ## 確かめていないこと
 
 - BullMQ の Job Scheduler が実運用のワークロードでどの程度「重なる」かは測っていない。

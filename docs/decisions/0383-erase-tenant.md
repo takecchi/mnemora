@@ -439,3 +439,19 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
   - `packages/bullmq`・`examples/chat` など、`eraseTenant` を呼ぶ運用側の
     スクリプト・ドライバの実装（本 Issue の範囲外——`packages/core`/
     `packages/postgres` の口を用意するところまでが本 PR の射程）。
+
+## 追記（2026-09-30）: `dryRun` の `deleted.vectorStore` と本番の値が食い違う——CASCADE による
+
+⛔ 上の本文は書き換えていない。決定5（呼び出し順序）も変えていない。
+
+**何が起きるか。**`eraseTenant` の戻り値の `deleted.vectorStore` は、`dryRun: true` では `26` のような実数を返すのに、本番では `0` を返す。**行は正しく消えている。**原因は決定5の順序にある: `memoryStore` を先に消すと、`memories` の行が消えた時点で `memory_embeddings_<space>.memory_id`（`ON DELETE CASCADE`）が埋め込みの行を一緒に消す。`vectorStore.eraseTenant?` が呼ばれる頃、そのテナントの埋め込みはもう無く、数えるものが残っていない。`dryRun` は何も消さないので、消える予定の行をそのまま数える。
+
+**確かめたこと（2026-09-30、自分専用の PostgreSQL 17 + pgvector。`migrate` で全 migration を適用した DB）**:
+
+- `eraseTenant` の歯が使う種まき（`erase-tenant-test-helpers.ts` の `seedAllTablesForTenant`）で1テナントに行を作り、`memories` 14行・埋め込みの表14行の状態から `eraseTenant` を呼んだ。`dryRun: true` は `{ vectorStore: 14, outboxStore: 32, memoryStore: 73, tenantSettingsStore: 1 }` を返し、呼んだ後も `memories` 14行・埋め込み14行のまま。続けて本番を呼ぶと `{ vectorStore: 0, outboxStore: 32, memoryStore: 73, tenantSettingsStore: 1 }` を返し、`memories` 0行・埋め込み0行になった。**実数が `0` になるのは `vectorStore` の1欄だけで、行は消えている。**
+- `pg_constraint` で、埋め込みの表から `memories` への外部キーの `confdeltype` が `c`（CASCADE）であることを確かめた。⚠ **この外部キーは `migrations/*.sql` ではなく、`registerEmbeddingSpace`（`packages/postgres/src/vector-space.ts`）が空間ごとの表を作るときの DDL に在る**——埋め込みの表は migration が作らない（`migrations/0022` の冒頭の注と同じ）。
+- **確かめていないこと**: `limit` で `memoryStore` のバッチが途中で止まった（`reachedLimit: true`）回の `deleted.vectorStore` の値（`memoryStore` が消した分の埋め込みは CASCADE で消え、残った分の `memories` にはまだ埋め込みが在るので、`vectorStore` 側は `memoryStore` が触れなかった行だけを数えるはずだが、打っていない）。`VectorStore` の別実装（`@mnemora/postgres` 以外）で CASCADE が無い場合の値。
+
+**採らなかった案**: `vectorStore` を先に呼んで件数を実数にする——決定5の不変条件（止まるときに他の port へ1行も触れていない状態を保つ）を壊す。CASCADE で消えた分を `memoryStore` 側で数えて足す——連鎖して消える行数を別に数える手段が要る。今はその必要を認めていない（検討しただけで、試していない）。**食い違いは戻り値の型を変えずに文書で説明する**に留めた。
+
+**消去の完了は、戻り値の件数ではなく表を数えて確かめること。**同じ説明を `packages/core/src/erase-tenant.ts` の doc コメントと `docs/memory-model.md` §9 の追記に置いた。

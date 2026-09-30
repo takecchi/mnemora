@@ -77,6 +77,19 @@ import type { VectorStore } from "./interfaces/vector-store.js";
  *   プレビューした）。`reachedLimit === true` なら、呼び出し側は同じ `opts` で
  *   呼び直すこと——**この関数は何度呼んでも安全**（既に空になった表は0件を返すだけ）。
  *
+ * ### ⚠ `deleted.vectorStore` は、`dryRun` では実数、本番では `0` になりうる
+ *
+ * `memoryStore` を先に消す（上の順序）と、`memories` の行が消えた時点で、
+ * `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みの行を一緒に消す。
+ * `vectorStore.eraseTenant?` が呼ばれる頃には、そのテナントの埋め込みはもう残っておらず、
+ * 数えるものが無い——だから本番では `deleted.vectorStore` が `0` を返す（`dryRun` は何も消さないので、
+ * 消える予定の埋め込みを数えて `26` のような実数を返す）。**行は正しく消えている。**
+ * `deleted.vectorStore` は「`VectorStore.eraseTenant?` 自身が消した行数」であって、
+ * 「消えた埋め込みの総数」ではない。CASCADE で消えた分は、どの欄にも数えられない
+ * （`deleted.memoryStore` も `memories` 側の行数を数えるだけである）。
+ * 呼び順は [ADR 0383](../../../docs/decisions/0383-erase-tenant.md) 決定5の不変条件のために変えない。
+ * 「消えたか」は戻り値の件数ではなく、消去後に表を数えて確かめること。
+ *
  * ## DB には消去の記録を何も残さない
  *
  * `purgeExpiredEventsForTenant` と違い、この操作は `memory_events` に

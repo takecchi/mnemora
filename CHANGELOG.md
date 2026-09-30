@@ -327,6 +327,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 公開 API（snapshot を更新した）: `MemoryStore` に任意メソッドを1つ足した（実装しない adapter は壊れない）。`ContestedWithoutCompanionError.method` の union に `"createMemoriesWithOutboxAndEvents"` を足した——⚠ この欄で網羅的に分岐（`never` 検査）している呼び出し側は、型検査で新しい値を指摘される。
   - 非破壊（型は任意の追加のみ。正常な入力で最後に残る状態は変わらず、失敗のあとに残る状態だけが「記憶だけ残る」から「全部残らない」に変わった）。
 
+- **`@mnemora/core` が利用者の手元で2つの版に分かれたとき、adapter が投げる store 例外を runtime が見分けられず、`tick()` 全体が reject される穴を塞いだ**（[ADR 0418](./docs/decisions/0418-store-error-kind-guards.md)、[PR #1509](https://github.com/takecchi/mnemora/pull/1509)）。adapter は core を `dependencies` の `^` で持つので、利用者が core を範囲外の版に固定すると、adapter 側にもう1つの core が入る。そのとき adapter が投げる例外は、runtime 側の `instanceof` で false になっていた。
+  - **【実測】** 本物の `@mnemora/postgres` 1.1.0 と `@mnemora/core` 1.0.2 の組で、`tick()` の complete 経路の `OutboxLeaseConflictError` が見分けられず、runtime は `fail()` へ進み、それも CAS で弾かれて `throw failErr` になった。**`tick()` 全体が reject され、同じバッチの後続ジョブは処理されず、`leaseConflicts` も返らなかった。** `restoreArchived` では `MemoryStatusConflictError` が `kind: "failed"` になっていた（本来は `status_not_archived`）。
+  - **直し方**: store 例外5クラス（`OutboxLeaseConflictError`・`MemoryStatusConflictError`・`ContestedGroupMembershipMismatchError`・`SourceMemoryForgottenError`・`MemoryPurgeConflictError`）に値の判別子 `kind` を足し、判定関数 `isOutboxLeaseConflictError` など5つを公開した。runtime と `strategies/reextract.ts` の計20か所の `instanceof` をすべてこれに置き換えた。**判定は「`kind` を見て、`kind` が無ければ `name` を見る」**——判別子がまだ無い古い版の core を引いた adapter が投げた例外にも効く。
+  - ⚠ **`name` は偽装できる**が、store は利用者が自分で配線する信頼された部品なので実害は無いと判断した（ADR 0418）。core を `peerDependencies` にする案（破壊的変更）と、2つの版を検知して警告する案は採らなかった。
+  - 公開 API（snapshot を更新した）: 5クラスに `readonly kind` を足し、判定関数を5つ足した。**非破壊**（追加のみ）。DB マイグレーションは足していない。
+
 ---
 
 ## [1.1.0] - 2026-09-30
