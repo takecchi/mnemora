@@ -164,8 +164,8 @@ export interface FilteredOmission {
    * 外れたことを表す。**`"archived"` に相乗りさせない**——`archived` は
    * `status` 列によるゲート（掃引が明示的に書き換えた状態）だが、`"decayed"` は
    * `decay_floor_at` 列によるゲート（書き込み時に計算された時刻と「いま」の比較）であり、
-   * 別の列・別の条件・別の次の一手（`archived` は強化すれば戻る可能性があるが、
-   * `decayed` は強化すれば `decayFloorAt` 自体が先へ延びるため、そもそも次の recall では
+   * 別の列・別の条件・別の次の一手（`archived` を戻すには `restoreArchived` を呼ぶ——
+   * 強化（`reinforce`）では戻らない。`decayed` は強化すれば `decayFloorAt` 自体が先へ延びるため、そもそも次の recall では
    * この条件に当たらなくなる）を持つ。
    *
    * **`count`/`countKind`（2026-09-16 変更、Issue #329 /

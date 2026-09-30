@@ -444,6 +444,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0429](./0429-exact-optional-property-types-input-types.md) | 入力側の公開型の任意欄を `?: T \| undefined` に広げ、`exactOptionalPropertyTypes: true` の利用者から `undefined` を渡せるようにする | 採用 (2026-09) |
 | [0430](./0430-concurrent-create-erase-and-standalone-params.md) | 同時呼び出しで落ちる2つの口（trigram store の `create()`、同じテナントへの `eraseTenant`）を直列にし、公開の独立関数の例外からも `params` を落とす | 採用 (2026-09) |
 | [0431](./0431-contested-group-event-growth-and-recall-cut.md) | 群（`markContestedGroup`）の監査イベントの増え方を N の線形にし、段4の `cut` の求め方を O(n²) から O(n) にする | 採用 (2026-10) |
+| [0432](./0432-recall-status-recheck-and-archive-docs.md) | recall の段1・連想枠の後置に `status` の再検査を足し、`archiveDecayed` の `reachedLimit` を直し、archived まわりの文書を実装に揃える | 採用 (2026-10) |
 | [0433](./0433-claim-key-length-space-error-reembed-limit.md) | claim key の長さに上限を置く・負の類似度の順位を文書に書く・未登録の埋め込み空間を型付きの例外にする・`reembed` の `limit` を入口で検査する | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
