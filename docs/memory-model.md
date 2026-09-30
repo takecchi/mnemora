@@ -257,6 +257,8 @@ supersede しなかった理由（`contested`/`forgotten` だったので飛ば�
 `superseded` は数えない。observe の再送の規律（#897）と同じである。詳細は `Runtime.reextract` の doc と
 [ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) の 2026-09-28 追記。
 
+⚠ **2026-09-30 追記（[ADR 0406](./decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)。[Issue #1226](https://github.com/takecchi/mnemora/issues/1226) と同じ穴）: LLM を待つ間に、その Observation から出た記憶が `forget`（`purge` を含む）されたときも、`reextract` は何も書かずに打ち切る。** 判定は LLM の前だけでなく、LLM が返った直後（書く前）にも行い、書き込み自身にも `abortIfForgotten` を渡す（`consolidate`/`reflect` と同じ2段）。戻り値は上の早期 return と同じ形（`status_not_active`、公開の型は増やしていない）。`abortIfForgotten` を実装しない adapter では読み直しだけが保護になり、読み直しと書き込みの間の窓は残る。待つ間の `contested` は見直さない。
+
 ⚠ **2026-09-26 追記（Issue #873）: `extractorVersion` を跨いだ旧い版の Memory は見ない。**
 「同じ Observation に対して抽出をもう一度走らせ」の判定対象は
 `MemoryStore.listBySourceObservation(ctx, observationId, extractorVersion)` が返す

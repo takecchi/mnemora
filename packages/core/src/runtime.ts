@@ -620,6 +620,11 @@ export interface ReextractResult {
    * 抽出をやり直さない。**`skipped` に版の欄は足していない**（`memoryId` から
    * `MemoryStore.get` で版をたどれるため）。詳細は `Runtime.reextract` の doc の
    * 2026-09-30 変更を参照。
+   *
+   * ⚠ **2026-09-30 追記（[ADR 0406](../../../docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)）:
+   * LLM を待つ間に元の記憶が `forget` されたときも、この早期 return と同じ形で返る**（`status_not_active`、
+   * `status: "forgotten"`）。LLM を呼んだ**後**に打ち切った点だけが違うが、戻り値からは区別できない
+   * （どちらも「何も書かれていない」）。
    */
   skipped: ReextractSkip[];
   /** 抽出がどう終わったか（{@link ExtractionOutcome}）。 */
@@ -2732,6 +2737,27 @@ export interface Runtime {
    *   有効である。版を跨いで退けたものが無い Observation では、今どおり新しい版で抽出され、
    *   旧い版の `active` は supersede されない。
    * - 詳細・却下した案・EXPLAIN の実測は ADR 0380。
+   *
+   * ⚠ **2026-09-30 追記（[ADR 0406](../../../docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)。
+   * [Issue #1226](https://github.com/takecchi/mnemora/issues/1226) と同じ穴）: LLM を待つ間に、その
+   * Observation から出た記憶が `forget`（`purge` を含む）されたら、何も書かずに打ち切る。**
+   * 以前は、上の「退けた記憶」の確認が LLM の**前**だけで、待つ間の `forget` を見なかった——LLM が返った
+   * 後に、言い換えが新しい `active` として書かれ、イベントが `created` → `forgotten` → `created` と
+   * 積まれた（実測、Postgres）。今は LLM が返った直後に、LLM の前に読んだその Observation の記憶
+   * （版・status を問わない）を `getMany` で読み直し、1件でも `forgotten` なら打ち切る。書き込み
+   * （`supersedeWithNewMemories`／口が無い adapter 向けの `createMemoryWithOutbox`）にも
+   * `opts.abortIfForgotten` を渡し、実装する adapter（`@mnemora/postgres`）は書き込みと同一
+   * トランザクションでもう一度見直す（{@link SourceMemoryForgottenError}）。
+   * - **打ち切ったときの戻り値**は、退けた記憶を持つ Observation の早期 return と同じ形——`memoryIds: []`・
+   *   `supersededMemoryIds: []`・`extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に
+   *   forgotten だった記憶ごとの `status_not_active`。**例外は投げない。公開の型は増やしていない**
+   *   （`consolidate`/`reflect` の `outcome: 'aborted_source_forgotten'` に当たる欄は `ReextractResult` に無い）。
+   *   LLM は呼んだ（この場合 `extraction: "skipped"` でも LLM の呼び出しは起きている）。
+   * - `abortIfForgotten` を実装しない adapter（testkit の `InMemoryMemoryStore`・core の fake）では、
+   *   読み直しだけが保護になる（`consolidate`/`reflect` と同じ。読み直しと書き込みの間の窓は残る）。
+   * - 見直すのは `forgotten` だけ。待つ間に `contested` になった記憶は見直さない（ADR 0406「引き受けた負債」1）。
+   * 歯: `packages/postgres/src/__tests__/reextract-forget-race.postgres.test.ts`・
+   * `reextract-source-forgotten-for-update-race.postgres.test.ts`。
    */
   reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
   /**
@@ -4836,11 +4862,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （#873「運用側の責務」）は変えていない**——退けたものが無い Observation では、今どおり
    * 新しい版で抽出され、旧い版の `active` は supersede されない。
    */
-  async function listWithdrawnBySourceObservation(
-    ctx: Ctx,
-    observationId: ObservationId,
-  ): Promise<Memory[]> {
-    const existing = await deps.memoryStore.listBySourceObservationAllVersions(ctx, observationId);
+  async function listWithdrawnAmong(ctx: Ctx, existing: readonly Memory[]): Promise<Memory[]> {
     const withdrawn: Memory[] = [];
     for (const memory of existing) {
       if (memory.status === "forgotten" || memory.status === "contested") {
@@ -4880,7 +4902,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // Issue #1079・#1149: 利用者の意思で退けた記憶が1件でも在れば、抽出をやり直さない（observe の再送の
     // #897 と同じ規律）。やり直すと、LLM の言い方しだいで退けた事実が印の無い `active` として戻るため。
     // LLM を呼ぶ前に確かめ、何も書かない。
-    const withdrawn = await listWithdrawnBySourceObservation(ctx, observationId);
+    const existingAllVersions = await deps.memoryStore.listBySourceObservationAllVersions(
+      ctx,
+      observationId,
+    );
+    const withdrawn = await listWithdrawnAmong(ctx, existingAllVersions);
     if (withdrawn.length > 0) {
       return {
         observationId,
@@ -4932,6 +4958,36 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         extraction: "ok",
         extractionFailure: null,
       };
+    }
+
+    // Issue #1226 と同じ穴（ADR 0406）: LLM を待つ間に、この Observation から出た記憶が `forget`
+    // （`purge` を含む）されても、上の退けた記憶の確認（LLM の前）は古いままである。LLM が
+    // 返った直後・書く前に、LLM の前に見えていた記憶を読み直し、1件でも forgotten なら
+    // 何も書かずに打ち切る（`consolidate`/`reflect` の「書く直前の読み直し」と同じ作法）。
+    // 戻り値は、退けた記憶を持つ Observation の早期 return と同じ形（公開の型は増やさない）。
+    // `abortIfForgotten` を実装しない adapter（InMemory・core の fake）では、この読み直しだけが
+    // 保護になる。実装する adapter（`@mnemora/postgres`）は、下の書き込み自身が同一
+    // トランザクションの `SELECT … FOR UPDATE` で、この読み直しと書き込みの間の窓も閉じる。
+    const knownMemoryIds = existingAllVersions.map((memory) => memory.id);
+    const abortedSourceForgotten = (forgottenIds: readonly MemoryId[]): ReextractResult => ({
+      observationId,
+      memoryIds: [],
+      supersededMemoryIds: [],
+      skipped: forgottenIds.map((memoryId) => ({
+        kind: "status_not_active" as const,
+        memoryId,
+        status: "forgotten" as const,
+      })),
+      atomicity: "not_attempted",
+      extraction: "skipped",
+      extractionFailure: null,
+    });
+    if (knownMemoryIds.length > 0) {
+      const rechecked = await deps.memoryStore.getMany(ctx, knownMemoryIds);
+      const forgottenNow = rechecked.filter((memory) => memory.status === "forgotten");
+      if (forgottenNow.length > 0) {
+        return abortedSourceForgotten(forgottenNow.map((memory) => memory.id));
+      }
     }
 
     // supersede 判定は「今回作る前」の既存 Memory を基準にする——これから作る Memory 自身が
@@ -4987,19 +5043,29 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // `supersededByIndex: 0` は「この呼び出しの news[0]」——今日の
       // `const supersededById = memoryIds[0]!` と同じ対象を指す（ADR 0028 の
       // 「今回作った Memory の1件」）。
-      const result = await supersedeWithNewMemories.call(
-        deps.memoryStore,
-        ctx,
-        newMemories.map((input) => ({ input, jobKinds: ["embed"] as OutboxJobKind[] })),
-        toSupersede.map((existing) => ({
-          id: existing.id,
-          supersededByIndex: 0,
-          expectedStatus: "active" as MemoryStatus,
-          // `meta.supersededById` は store が解決した id で埋める（上のコメント参照）。
-          event: buildSupersedeEventFor(existing),
-        })),
-        { now },
-      );
+      let result: Awaited<ReturnType<typeof supersedeWithNewMemories>>;
+      try {
+        result = await supersedeWithNewMemories.call(
+          deps.memoryStore,
+          ctx,
+          newMemories.map((input) => ({ input, jobKinds: ["embed"] as OutboxJobKind[] })),
+          toSupersede.map((existing) => ({
+            id: existing.id,
+            supersededByIndex: 0,
+            expectedStatus: "active" as MemoryStatus,
+            // `meta.supersededById` は store が解決した id で埋める（上のコメント参照）。
+            event: buildSupersedeEventFor(existing),
+          })),
+          // ADR 0406: 書き込みと同一トランザクションでの見直し（実装する adapter だけ）。
+          { now, abortIfForgotten: knownMemoryIds },
+        );
+      } catch (error) {
+        if (error instanceof SourceMemoryForgottenError) {
+          // 作成も supersede も rollback された——書き込みを試みていないのと区別が付かない。
+          return abortedSourceForgotten(error.forgottenIds);
+        }
+        throw error;
+      }
 
       const memoryIds = result.created.map((c) => c.memory.id);
       for (const { memory, created } of result.created) {
@@ -5035,12 +5101,28 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 口が無い adapter——今日どおりの2段（作成 → supersede ループ）。
     const memoryIds: MemoryId[] = [];
     for (const newMemory of newMemories) {
-      const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(
-        ctx,
-        newMemory,
-        ["embed"],
-        { now },
-      );
+      let written: Awaited<ReturnType<MemoryStore["createMemoryWithOutbox"]>>;
+      try {
+        // ADR 0406: `abortIfForgotten` を渡す（実装しない adapter では無視され、上の読み直しだけが保護）。
+        written = await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, ["embed"], {
+          now,
+          abortIfForgotten: knownMemoryIds,
+        });
+      } catch (error) {
+        if (error instanceof SourceMemoryForgottenError) {
+          if (memoryIds.length === 0) return abortedSourceForgotten(error.forgottenIds);
+          // 2件目以降で打ち切られた（この経路は1件ずつ書くため、1件目は既にコミット済み）。
+          // 書いた分は隠さず返し、既存の supersede には進まない。
+          return {
+            ...abortedSourceForgotten(error.forgottenIds),
+            memoryIds,
+            atomicity: "store_unsupported",
+            extraction: "ok",
+          };
+        }
+        throw error;
+      }
+      const { memory, created } = written;
       memoryIds.push(memory.id);
       if (created) {
         await appendCreatedEvent(ctx, memory, observation, "ok", null);
