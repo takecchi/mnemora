@@ -624,17 +624,23 @@ export declare class MemoryStatusConflictError extends Error {
     readonly memoryId: MemoryId;
     readonly expectedStatus: MemoryStatus;
     readonly observedStatus: MemoryStatus | null;
+    readonly kind: "memory_status_conflict";
     constructor(memoryId: MemoryId, expectedStatus: MemoryStatus, observedStatus: MemoryStatus | null);
 }
+export declare function isMemoryStatusConflictError(value: unknown): value is MemoryStatusConflictError;
 export declare class ContestedGroupMembershipMismatchError extends Error {
     readonly missingMemberId: MemoryId;
+    readonly kind: "contested_group_membership_mismatch";
     constructor(missingMemberId: MemoryId);
 }
+export declare function isContestedGroupMembershipMismatchError(value: unknown): value is ContestedGroupMembershipMismatchError;
 export declare class SourceMemoryForgottenError extends Error {
     readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories";
     readonly forgottenIds: MemoryId[];
+    readonly kind: "source_memory_forgotten";
     constructor(method: "createMemoryWithOutbox" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
 }
+export declare function isSourceMemoryForgottenError(value: unknown): value is SourceMemoryForgottenError;
 export declare class ContestedWithoutCompanionError extends Error {
     readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
@@ -645,8 +651,10 @@ export declare class MemoryPurgeConflictError extends Error {
     readonly memoryId: MemoryId;
     readonly observedStatus: MemoryStatus | null;
     readonly observedPurgedAt: Date | null;
+    readonly kind: "memory_purge_conflict";
     constructor(memoryId: MemoryId, observedStatus: MemoryStatus | null, observedPurgedAt: Date | null);
 }
+export declare function isMemoryPurgeConflictError(value: unknown): value is MemoryPurgeConflictError;
 export declare const PURGE_TOMBSTONE_CONTENT = "[purged]";
 export declare const PURGE_TOMBSTONE_DIGEST = "[purged]";
 export declare const EMBEDDING_STATUS_ROLLBACK: {
@@ -968,8 +976,10 @@ export declare class OutboxLeaseConflictError extends Error {
     readonly jobId: string;
     readonly expectedAttempts: number;
     readonly observedAttempts: number | null;
+    readonly kind: "outbox_lease_conflict";
     constructor(jobId: string, expectedAttempts: number, observedAttempts: number | null);
 }
+export declare function isOutboxLeaseConflictError(value: unknown): value is OutboxLeaseConflictError;
 export interface OutboxStore {
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
     complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
