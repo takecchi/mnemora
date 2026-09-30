@@ -425,7 +425,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `tenant_settings`
 - `tenant_subject_activity`
 
-### 索引（37）
+### 索引（38）
 
 - `idx_labels_by_status`
 - `idx_memories_attributes`
@@ -450,6 +450,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `idx_memory_events_by_retention`
 - `idx_memory_events_memory_id`
 - `idx_memory_labels_by_label`
+- `idx_memory_labels_label_id`
 - `idx_memory_labels_memory_id`
 - `idx_memory_relations_from`
 - `idx_memory_relations_from_memory_id`
@@ -513,6 +514,35 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 （`OR REPLACE` ではない、上の判断が対象にしている形のまま）で、以後変更していない。**関数は6つになった**
 （上の「5関数」という当時の実測件数は、この commit より前の履歴を指すものとして書き換えていない）。
 シグネチャの重複は無く、⟹ 名前だけを見る形を据え置く判断は変えていない。
+
+### opt-in で作られるもの（トライグラム経路）
+
+**上の「テーブル」「索引」「関数」の一覧には含まれない**（見出しの件数にも数えない）。次のオブジェクトは
+`migrations/*.sql` では**作られない**——`PostgresTrigramLexicalStore`
+（[ADR 0319](../../docs/decisions/0319-optional-trigram-lexical-store.md)）を使うと決めた採用者が、
+下の口を呼んだときにだけ作られる（[`src/trigram-lexical-store.ts`](./src/trigram-lexical-store.ts)）。
+使わなければ、この3関数も索引も共有 DB に現れない。
+
+関数（`ensureTrigramLexicalFunctions`。`CREATE OR REPLACE FUNCTION`、冪等。
+`PostgresTrigramLexicalStore.create()` が内部で呼ぶ）:
+
+- `mnemora_trigram_query_nonascii`
+- `mnemora_trigram_strip_noise`
+- `mnemora_trigram_hybrid_coverage`
+
+索引（**関数のインストールとは別の口**。`create()` は張らない。呼ばなくても検索は正しい結果を返し、
+Seq Scan になるだけ）:
+
+- `idx_memories_trigram` ——`memories` の `gin (tenant_id, content gin_trgm_ops)`
+  （`WHERE status IN ('active', 'contested')` の部分索引）。
+  - `createOptionalTrigramIndex`: 素の `CREATE INDEX IF NOT EXISTS`（書き込みを止めうる）。
+  - `createOptionalTrigramIndexConcurrently`: 同じ名前・同じ形を `CREATE INDEX CONCURRENTLY` で張る
+    （**トランザクションの外で呼ぶこと**。INVALID な同名索引が残っていれば消して作り直す）。
+
+**この節は、上の突き合わせの歯（`scripts/readme-postgres-objects-lib.mjs`）が読まない**
+（`parseReadmeObjectsSection` は `テーブル` / `索引` / `関数` で始まる見出しの節だけを読み、
+この節の見出しはどれでも始まらない。migrations の集合とも突き合わせない）。
+名前が `src/trigram-lexical-store.ts` で変わったら、この節は人手で直すこと。
 
 ### 実行時に増える系列（埋め込み空間ごと）
 

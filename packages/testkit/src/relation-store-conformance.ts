@@ -13,6 +13,9 @@ export interface RelationStoreConformanceOptions {
    * この適合テストは `RelationStore` 単体を検査するが、外部キーを持つ adapter のために
    * 「実在の Memory の id を用意する」フックを持つ（`vector-store-conformance.ts` の
    * `prepareMemoryId` と同じ理由）。**省略可のオプションにしない**——同じ理由。
+   *
+   * `link` は両端の記憶が `ctx` のテナントに在ることを入口で確かめる（ADR 0398）。⟹ このフックが返す id は
+   * `createStore()` が返した store から見て実在する記憶で、かつ渡した `ctx` のテナントの記憶であること。
    */
   prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
 }
@@ -107,19 +110,77 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect(related.map((r) => r.memoryId)).toEqual([b]);
     });
 
-    it("クロステナントの関係は返さない", async () => {
+    it("listRelated は別テナントの ctx では、同じ id を起点にしても関係を返さない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const a1 = await prepareMemoryId(ctxA);
+      const a2 = await prepareMemoryId(ctxA);
+
+      await store.link(ctxA, "contradicts", a1, a2);
+      expect((await store.listRelated(ctxA, a1)).map((r) => r.memoryId)).toEqual([a2]);
+      expect(await store.listRelated(ctxB, a1)).toEqual([]);
+    });
+
+    it("ctx のテナントに属さない記憶を from に取る link は拒まれ、行は書かれない", async () => {
       const store = await createStore();
       const ctxA: Ctx = { tenantId: "tenant-a" };
       const ctxB: Ctx = { tenantId: "tenant-b" };
       const a = await prepareMemoryId(ctxA);
       const bInTenantB = await prepareMemoryId(ctxB);
 
-      // 別テナントの id へ link しても、そのテナントの listRelated には出ない
-      // （postgres は tenant_id をそのまま書くだけで検査しない——呼び出し側が同じ ctx で
-      // 確かめた id しか渡さない前提。`EventStore` の同種の契約と同じ形）。
-      await store.link(ctxA, "contradicts", a, bInTenantB);
+      await expect(store.link(ctxA, "contradicts", bInTenantB, a)).rejects.toThrow(
+        /memory not found for tenant/,
+      );
+      expect(await store.listRelated(ctxA, bInTenantB)).toEqual([]);
+      expect(await store.listRelated(ctxB, bInTenantB)).toEqual([]);
+      expect(await store.listRelated(ctxA, a)).toEqual([]);
+    });
+
+    it("ctx のテナントに属さない記憶を to に取る link は拒まれ、行は書かれない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const a = await prepareMemoryId(ctxA);
+      const bInTenantB = await prepareMemoryId(ctxB);
+
+      await expect(store.link(ctxA, "contradicts", a, bInTenantB)).rejects.toThrow(
+        /memory not found for tenant/,
+      );
+      expect(await store.listRelated(ctxA, a)).toEqual([]);
       expect(await store.listRelated(ctxB, bInTenantB)).toEqual([]);
     });
+
+    // 存在しない id は2通り: uuid の形をしているもの（Postgres では外部キー違反になる形）と、
+    // uuid の形でないもの（Postgres では型変換エラーになる形）。どちらも DB 由来の生の
+    // エラーではなく、同じ「memory not found for tenant」で拒まれること。
+    const missingIds: Array<[string, string]> = [
+      ["uuid の形をした存在しない id", "00000000-0000-4000-8000-000000000000"],
+      ["uuid の形でない id", "does-not-exist"],
+    ];
+    for (const [label, missing] of missingIds) {
+      for (const end of ["from", "to"] as const) {
+        it(`存在しない記憶（${label}）を ${end} に取る link は拒まれ、行は書かれない`, async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const a = await prepareMemoryId(ctx);
+          const m = missing as MemoryId;
+
+          const error = await (
+            end === "from"
+              ? store.link(ctx, "contradicts", m, a)
+              : store.link(ctx, "contradicts", a, m)
+          ).then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toMatch(/memory not found for tenant/);
+          expect((error as Error).message).not.toMatch(/Failed query|foreign key|invalid input/i);
+          expect(await store.listRelated(ctx, a)).toEqual([]);
+        });
+      }
+    }
 
     it("N件の完全グラフ（3件）を双方向で張ると、どのメンバーからも残り2件が引ける", async () => {
       const store = await createStore();

@@ -62,6 +62,16 @@ export interface RelationStore {
    * 冪等——同じ `(tenantId, fromId, toId, kind)` の行が既にあれば、何もしない
    * （2度目の呼び出しでエラーにしない。`UNIQUE` 制約への `ON CONFLICT DO NOTHING`
    * 相当）。
+   *
+   * **両端の記憶が `ctx.tenantId` のテナントに在ることを、書く前に確かめる**（ADR 0398）。次のとき
+   * **例外を投げ、行は書かない**:
+   * - `fromId`・`toId` のどちらかが、実在しない記憶を指す（uuid の形でない id も同じ）
+   * - `fromId`・`toId` のどちらかが、`ctx.tenantId` 以外のテナントの記憶を指す
+   *
+   * 例外のメッセージは `memory not found for tenant: <id>` を含む（`MemoryStore` の同種の例外と同じ形）。
+   * 「実在しない」と「別のテナントの記憶」は区別しない。DB 由来のエラー（外部キー違反・型変換エラー）は
+   * 利用者へ漏らさない。冪等の扱い（上）は両端が確かめられた後の話で、既に同じ行が在っても、
+   * 端が確かめられなければ投げる。
    */
   link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
   /**

@@ -159,6 +159,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目33。DB マイグレーションは無い。
   - 【確かめていないこと】Postgres での実機の再現（`DATABASE_URL` が無く、Postgres のテストは走らせていない）。実 API は使っていない。
 
+- **`RelationStore.link` が、両端の記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった**（[ADR 0398](./docs/decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md)、`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）。
+
+  これまで `link` は、`fromId`/`toId` が `ctx.tenantId` の記憶かどうかを確かめなかった。`PostgresRelationStore` は別テナントの記憶を端に取る行を受け付け、
+  存在しない uuid は外部キー違反の生の DB エラー、uuid でない文字列は `Failed query` になった。`InMemoryRelationStore` は存在しない id も受け付けた。
+  今は、書く前に両端が `ctx.tenantId` の記憶であることを確かめ、どちらかが実在しない・別のテナントの記憶なら、**行を書かずに** `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる。
+  Postgres は確かめと書き込みを1つの SQL 文にしている。uuid でない id は DB へ投げる前に弾く。
+
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた `link`（別テナントの記憶・実在しない id を端に取るもの）が、新しく例外になる**。項目21・23・24・27 と同じく、以前は通っていたものが通らなくなる変更を破壊的と数える。
+  - **誰が影響を受けるか**: `RelationStore.link` を直接呼ぶ利用者（`PostgresRelationStore` は公開 API）のうち、実在しない id・別テナントの id を渡しているもの。runtime は `link`/`unlink` を呼ばず、`MemoryStore.markContestedGroup?` は元から両端を `ctx` のテナントで確かめているので、`recall()` や `tick()` の挙動は変わらない。自前の `RelationStore` を `describeRelationStoreConformance` に当てている利用者は、新しい `it` が落ちうる（`prepareMemoryId` が返す記憶が、`createStore()` の store から見えること、渡した `ctx` のテナントの記憶であることを要する）。
+  - **変えなかったこと**: `unlink`・`listRelated` の振る舞い（どちらも元から `ctx.tenantId` の行だけを見る）。DB のスキーマ・複合外部キーは変えない（理由は ADR 0398）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目34。**DB マイグレーション**は無い。修正前に書かれた食い違う行が在るかを調べる SQL は ADR 0398 に在る。
+  - 【確かめていないこと】検査と INSERT の間に、並行して記憶が消えた場合の Postgres のエラーの見え方（外部キー違反の生のエラーのまま）。手元以外の環境・既存データでの食い違う行の有無。
+
 ### Added
 
 - **`RecallQuery.relationMaxCount?`（任意、正の整数 1〜1000）を足した**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目8、[PR #1470](https://github.com/takecchi/mnemora/pull/1470)、[ADR 0396](./docs/decisions/0396-recall-relation-max-count.md)）。段3（`contradiction_resolution`）の多者間の `contested` 群の同伴取得について、群ごとの上限件数を呼び出し側から変えられる。超えた分は従来どおり `over_limit { stage: "relation" }` に積まれる。探索の安全弁（群ごとに訪れた数の上限）はこの値の10倍に連動する。**省略すると従来の10（安全弁は100）のままで、`recall()` の結果は1バイトも変わらない。**型は任意の欄1つの追加のみで、DB マイグレーションは伴わない（`recalls.query` は jsonb にそのまま入る）。ADR 0381 §5.3・§6 の「専用のクエリ欄は作らない」を覆した。
@@ -222,6 +235,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
   - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
 - **`docs/migration-v1.md` の未リリースの節が `0029`・`0030` を知らなかったのを直し、CHANGELOG の未リリース節が名指す migration が同文書にも在ることの歯を足した**（`scripts/__tests__/migration-v1-changelog-migrations.test.mjs`）。同文書の本数の案内は `0028` で止まっていた（`v1.1.0` から3本・`v1.0.2` から6本と書いていたが、実際は5本・8本）。DB の動作は変わらない（`mnemora-postgres-migrate` は台帳をファイル名で見る）。文書の正確さだけの訂正で、出荷済みの節は触っていない。
+
+- **`labels` の行を消す（`eraseTenant` など）ときの外部キー検査が、`memory_labels` を全走査しなくなった**（[ADR 0400](./docs/decisions/0400-general-fk-index-tooth.md)）。
+  - **新しい migration `0031_memory_labels_label_id_index.sql`。** `memory_labels (label_id)` に索引 `idx_memory_labels_label_id` を1本足す。`@mnemora/postgres` を上げたあと migrate を当てる。列・型・SQL 文・返り値は変えない。⭕ 非破壊と数える。
+  - ⚠ `CREATE INDEX` は `CONCURRENTLY` を使わない（`0027` などと同じ前例）。作るあいだ `memory_labels` への書き込みが止まる。
+  - 調査担当の実測では、`memory_labels` 20万行で 46ms → 6.5ms（ADR 0400）。あわせて、全外部キーに先頭列一致の索引を要求する歯を足した（テストのみ、利用者には見えない）。
 
 ---
 

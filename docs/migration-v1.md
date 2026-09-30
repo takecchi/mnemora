@@ -1846,6 +1846,14 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 書き込みへの上乗せの実測は、`0029` は ADR 0329 の追記、`0030` は ADR 0389 を見ること
 （この PR は測り直していない）。
 
+⚠ **非破壊の追記（`0031` の1本、[ADR 0400](./decisions/0400-general-fk-index-tooth.md)）**:
+新しい migration `0031_memory_labels_label_id_index.sql` が1本増えた（`memory_labels (label_id)`
+の索引の追加のみ。列・型・SQL 文・返り値は変えず、公開 API も変えない）。**この文書の定義では
+破壊的変更に数えない**。上の2つの段落の本数は、それぞれの時点のものである（**書き換えない**）。
+いま数えるなら、`v1.1.0` から上げる場合は `0026`〜`0031` の6本、`v1.0.2` からは `0023`〜`0031` の
+9本が要る。`0031` の索引の構築も素の `CREATE INDEX`（`CONCURRENTLY` を使わない理由は上と同じ）で、
+適用中は **`memory_labels` への書き込みが止まる**（読み取りは通る）。
+
 ### 32. `OpenAIEmbeddingProvider.embed()` が、応答の件数・`index`・次元・成分の有限性が崩れていると例外を投げるようになった（`@mnemora/openai`）
 
 [Issue #860](https://github.com/takecchi/mnemora/issues/860)、
@@ -1900,6 +1908,30 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 ⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更に、この項目（Issue #860）が加わる。**
 ⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+### 34. `RelationStore.link` が、両端の記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0398](./decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md)。
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 34 である**——項目33 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `RelationStore.link(ctx, kind, fromId, toId)` は、これまで両端が `ctx.tenantId` の記憶かどうかを確かめなかった。
+今は書く前に確かめ、どちらかが実在しない（uuid の形でない id も同じ）、または別のテナントの記憶なら、行を書かずに
+`memory not found for tenant: <id>` を含むメッセージの `Error` を投げる。型・シグネチャは変わらない。
+中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。項目21・23・24・27 と同じ扱い。
+
+**誰が影響を受けるか**: `RelationStore.link` を直接呼び、実在しない id・別のテナントの id を渡している呼び出し側。
+`Runtime` は `link`/`unlink` を呼ばないので、`recall()`・`tick()` は変わらない。
+自前の `RelationStore` を `describeRelationStoreConformance` に当てている場合は、新しい `it` が落ちうる。
+
+**どう直すか**:
+- `link` に渡す id は、同じ `ctx` で `MemoryStore.get` などで取れた記憶のものにする。
+- `instanceof` で捕まえたい場合、専用のエラー型・`kind` は無い（素の `Error`、メッセージは `PostgresRelationStore:`/`InMemoryRelationStore:` で始まり、`memory not found for tenant` を含む）。
+- 自前の `RelationStore` 実装は、`link` の入口で同じ確かめを足す。適合テストの `prepareMemoryId` は、`createStore()` の store から見える、渡した `ctx` のテナントの記憶を返すこと。
+
+**DB マイグレーション**: 要らない。修正前に書かれた、食い違う行が在るかを調べる SQL は ADR 0398 に在る（読み取りだけ）。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
