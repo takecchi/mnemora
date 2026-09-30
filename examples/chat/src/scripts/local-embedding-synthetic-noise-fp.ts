@@ -50,7 +50,7 @@ import { tryGitRevParseHead } from "../git-info.js";
  *
  * ```
  * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   tsx examples/chat/src/scripts/local-embedding-synthetic-noise-fp.ts
+ *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/local-embedding-synthetic-noise-fp.ts
  * ```
  *
  * ⛔ 実 API は一切叩かない（`OPENAI_API_KEY` は読まない）。

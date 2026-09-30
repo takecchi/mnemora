@@ -42,7 +42,7 @@ import { tryGitRevParseHead } from "../git-info.js";
  *
  * ```
  * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   tsx examples/chat/src/scripts/local-noise-arm-candidate-diff.ts
+ *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/local-noise-arm-candidate-diff.ts
  * ```
  */
 

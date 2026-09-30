@@ -3,6 +3,10 @@
 //   プレースホルダ実装に対して動く」
 
 import type { Ctx } from "@mnemora/core";
+import {
+  inMemoryMemoryStoreConformanceOptions,
+  inMemoryOutboxStoreConformanceOptions,
+} from "./in-memory-conformance-options.js";
 import { describeEventStoreConformance } from "../event-store-conformance.js";
 import { describeLexicalStoreConformance } from "../lexical-store-conformance.js";
 import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
@@ -14,141 +18,11 @@ import { buildNewMemoryFixture, buildProvenanceFixture } from "../test-data.js";
 import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
-import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryRelationStore } from "../__fixtures__/in-memory-relation-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-// `listEventsForMemory`（ADR 0031）も `seedJob`/`setDefaultHalfLifeHours` と同じ理由で
-// 直近のインスタンスを持ち回る——`updateStatusWithEvent` が積んだイベントを読むには、
-// `createStore()` が作った、まさにその `InMemoryMemoryStore` インスタンスの `events` 配列を
-// 見る必要がある。
-let latestMemoryStoreForEvents: InMemoryMemoryStore | undefined;
-
-describeMemoryStoreConformance({
-  name: "in-memory placeholder",
-  createStore: () => {
-    const store = new InMemoryMemoryStore();
-    latestMemoryStoreForEvents = store;
-    return store;
-  },
-  listEventsForMemory: (ctx, memoryId) => {
-    if (!latestMemoryStoreForEvents) {
-      throw new Error("listEventsForMemory より先に createStore() を呼ぶ必要がある");
-    }
-    return latestMemoryStoreForEvents.events.filter(
-      (event) => event.tenantId === ctx.tenantId && event.memoryId === memoryId,
-    );
-  },
-  // ADR 0047: `recall_usages.recall_id → recalls(id)` の外部キーを `InMemoryMemoryStore`
-  // にも適用したことで、`recordUsage` の適合テストには実在の recallId が要る
-  // （既定の固定文字列 `"recall-1"` はもう通らない）。`MemoryStore.createRecall` は
-  // 本体がまさに用意している「recall を記録する」書き込み口そのものなので、それを使う
-  // （`memory-store-conformance.ts` の「createRecall は recallId を発行する」の歯と
-  // 同じ最小フィクスチャ）。
-  prepareRecallId: async (ctx) => {
-    if (!latestMemoryStoreForEvents) {
-      throw new Error("prepareRecallId より先に createStore() を呼ぶ必要がある");
-    }
-    return latestMemoryStoreForEvents.createRecall(ctx, {
-      tenantId: ctx.tenantId,
-      subjectId: null,
-      query: { text: "fixture" },
-      budget: null,
-      omitted: [],
-      usage: {
-        chars: 0,
-        estimatedTokens: 0,
-        counter: "heuristic",
-        byTier: { full: 0, digest: 0, index: 0 },
-        indexChars: 0,
-      },
-      indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
-      explain: { stages: [] },
-      returnedMemories: [],
-    });
-  },
-  // ADR 0079: 積み直した `embed` ジョブを、運搬役が実際に claim できるところまで見る。
-  // `InMemoryOutboxStore` は `InMemoryMemoryStore.outboxJobs` の配列を共有参照で受け取る
-  // ——`createStore()` が作った、まさにその instance のジョブを claim する必要がある
-  // （`listEventsForMemory` と同じ理由・同じ形）。
-  // `leaseMs` はこの検査の中だけの値であり、実運用のリース長とは無関係（ADR 0032）。
-  claimEmbedJobs: (ctx, now) => {
-    if (!latestMemoryStoreForEvents) {
-      throw new Error("claimEmbedJobs より先に createStore() を呼ぶ必要がある");
-    }
-    return new InMemoryOutboxStore(latestMemoryStoreForEvents.outboxJobs).claimBatch(ctx, {
-      kinds: ["embed"],
-      limit: 100,
-      now,
-      claimedBy: "conformance-requeue",
-      leaseMs: 60_000,
-    });
-  },
-  // Issue #134 / ADR 0100: InMemoryMemoryStore は supersedeWithNewMemories を実装している。
-  supportsSupersedeWithNewMemories: true,
-  // Issue #1226 / ADR 0375 決定7: InMemoryMemoryStore は opts.abortIfForgotten を実装
-  // しない（渡しても無視される。`SourceMemoryForgottenError` の doc コメント参照）。
-  supportsAbortIfForgotten: false,
-  // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
-  supportsPurgeExpiredEvents: true,
-  // ADR 0404: InMemoryMemoryStore は purgeExpiredRecalls を実装している。
-  supportsPurgeExpiredRecalls: true,
-  listPurgedEvents: (ctx) => {
-    if (!latestMemoryStoreForEvents) {
-      throw new Error("listPurgedEvents より先に createStore() を呼ぶ必要がある");
-    }
-    return latestMemoryStoreForEvents.events.filter(
-      (event) => event.tenantId === ctx.tenantId && event.kind === "events_purged",
-    );
-  },
-  // ADR 0114: InMemoryMemoryStore は archiveDecayed を実装している。
-  supportsArchiveDecayed: true,
-  // Issue #198 / ADR 0124: InMemoryMemoryStore は purgeMemory を実装している。
-  supportsPurgeMemory: true,
-  // Issue #197 / ADR 0134: InMemoryMemoryStore は markContestedPair を実装している。
-  supportsMarkContestedPair: true,
-  // Issue #197 / ADR 0150: InMemoryMemoryStore は resolveContestedPair を実装している。
-  supportsResolveContestedPair: true,
-  // 本 PR: InMemoryMemoryStore は restoreSupersededBy を実装している。
-  supportsRestoreSupersededBy: true,
-  // Issue #515: InMemoryMemoryStore は previewRestoreSupersededBy を実装している。
-  supportsPreviewRestoreSupersededBy: true,
-  // Issue #515 方向①、ADR 0258: InMemoryMemoryStore は onlyMemoryIds フィルタを
-  // 実装している。
-  supportsOnlyMemoryIdsFilter: true,
-  // Issue #201 / ADR 0318: InMemoryMemoryStore は listLabels/registerLabel を
-  // 実装している。
-  supportsLabels: true,
-  // Issue #372: InMemoryMemoryStore は findActiveByClaimKey を実装している。
-  supportsFindActiveByClaimKey: true,
-  // Issue #933 案2 / ADR 0378: InMemoryMemoryStore は findContestedByClaimKey を実装している。
-  supportsFindContestedByClaimKey: true,
-  // Issue #691続き / ADR 0329: InMemoryMemoryStore は listActiveClaimPredicates を
-  // 実装している。
-  supportsListActiveClaimPredicates: true,
-  // Issue #1412 コメント1 / ADR 0373: InMemoryMemoryStore は resolveOrphanedContested を
-  // 実装している。
-  supportsResolveOrphanedContested: true,
-  // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
-  supportsEraseTenant: true,
-  // Issue #207/#933 PR2 / ADR 0381: InMemoryMemoryStore は markContestedGroup /
-  // resolveContestedGroup を実装している。
-  supportsMarkContestedGroup: true,
-  supportsResolveContestedGroup: true,
-  // ADR 0410（穴 D-3）: InMemoryMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
-  supportsCreateMemoriesWithOutboxAndEvents: true,
-  // ADR 0416: supersedeWithNewMemories の opts.buildCreatedEvent（created を events 配列へ、supersede の前に積む）。
-  supportsSupersedeCreatedEvents: true,
-  listRelationsForMemory: (ctx, memoryId) => {
-    if (!latestMemoryStoreForEvents) {
-      throw new Error("listRelationsForMemory より先に createStore() を呼ぶ必要がある");
-    }
-    return latestMemoryStoreForEvents.relations
-      .filter((r) => r.tenantId === ctx.tenantId && r.fromMemoryId === memoryId)
-      .map((r) => ({ memoryId: r.toMemoryId }));
-  },
-});
+describeMemoryStoreConformance(inMemoryMemoryStoreConformanceOptions());
 
 // Issue #207/#933 PR2（ADR 0381）: `RelationStore` の in-memory 実装。
 // `link` は両端の記憶が `ctx` のテナントに在ることを、渡された `InMemoryMemoryStore` で確かめる
@@ -306,58 +180,13 @@ describeEventStoreConformance({
   },
 });
 
-// `describeOutboxStoreConformance` の各 `it()` は必ず `createStore()` を先に呼ぶ
-// （outbox-store-conformance.ts の全ケースがそうなっている）。in-memory 実装では
-// `seedJob` が「OutboxStore 単体には無い enqueue」を `MemoryStore` 経由で代行する必要があり、
-// `createStore()` が最後に作った `MemoryStore`（=同じジョブ配列を共有する側）を
-// `seedJob` からも参照できるよう、モジュールスコープで直近のインスタンスを持ち回る。
-// vitest はデフォルトで同一 describe 内の it() を並行実行しないため、この持ち回りは安全
-// （`packages/postgres` が同じ理由で単一の共有 DB 接続を使い回すのと同じパターン）。
-let latestMemoryStoreForOutboxSeed: InMemoryMemoryStore | undefined;
-
 // ⛔ `supportsRealConcurrency` は**渡さない**（ADR 0206）——in-memory 実装の
 // `claimBatch` は本体に `await` を1つも含まないため、async 関数は最初の `await` まで
 // 同期実行される ⟹ `Promise.all` で並べても**完全に逐次化される。**渡すと
 // 「何も測っていないのに緑」になる。渡さないことで並行の歯は `it.skip` になり、
 // **測っていないことがログ上で skip として見える。**
 // 🔴 「in-memory でも通るように」とここへ `true` を足さないこと。
-describeOutboxStoreConformance({
-  name: "in-memory placeholder",
-  createStore: () => {
-    const memoryStore = new InMemoryMemoryStore();
-    latestMemoryStoreForOutboxSeed = memoryStore;
-    return new InMemoryOutboxStore(memoryStore.outboxJobs);
-  },
-  seedJob: async (ctx, input) => {
-    if (!latestMemoryStoreForOutboxSeed) {
-      throw new Error("seedJob より先に createStore() を呼ぶ必要がある");
-    }
-    const { jobs } = await latestMemoryStoreForOutboxSeed.createObservationWithOutbox(
-      ctx,
-      { tenantId: ctx.tenantId, subjectId: null, externalId: null, kind: "utterance", payload: {} },
-      [input.kind],
-    );
-    // Issue #1108: 返るジョブは複製なので、store の中の行（共有している `outboxJobs`）を書き換える。
-    const job = latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobs[0]!.id)!;
-    if (input.payload) {
-      job.payload = input.payload;
-    }
-    if (input.availableAt) {
-      job.availableAt = input.availableAt;
-    }
-    return job;
-  },
-  peekJob: async (_ctx, jobId) => {
-    if (!latestMemoryStoreForOutboxSeed) {
-      throw new Error("peekJob より先に createStore() を呼ぶ必要がある");
-    }
-    return latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobId) ?? null;
-  },
-  // Issue #1207 / ADR 0383: InMemoryOutboxStore は eraseTenant を実装している。
-  supportsEraseTenant: true,
-  // ADR 0404: InMemoryOutboxStore は purgeCompletedJobs を実装している。
-  supportsPurgeCompletedJobs: true,
-});
+describeOutboxStoreConformance(inMemoryOutboxStoreConformanceOptions());
 
 let latestTenantSettingsStore: InMemoryTenantSettingsStore | undefined;
 // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと2・5・13

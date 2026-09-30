@@ -32,7 +32,7 @@ import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette, saveCassette } from ".
  * 先行して使った「real 層だけを monkey-patch する」手法と同型）。
  *
  * 使い方: `DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_RECORD_CASSETTE_PATH=... \
- *   tsx examples/chat/src/scripts/measure-835-candidate3-v4.ts`
+ *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-835-candidate3-v4.ts`
  */
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ function installV4Patch(): () => void {
 const usage = () => {
   console.error(
     "使い方: DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_RECORD_CASSETTE_PATH=... " +
-      "tsx examples/chat/src/scripts/measure-835-candidate3-v4.ts",
+      "pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-835-candidate3-v4.ts",
   );
 };
 

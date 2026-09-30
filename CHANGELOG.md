@@ -354,6 +354,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 公開 API（snapshot を更新した）: 2クラスに `readonly kind` を足し、判定関数を2つ足した。**非破壊**（追加のみ）。DB マイグレーションは足していない。
   - `packages/postgres` のテスト内の `instanceof` 6行を判定関数へ置き換えた（利用者への影響は無い）。`toBeInstanceOf` / `rejects.toThrow(<クラス>)` は置き換えていない（ADR 0418 の追記に件数と理由がある）。
 
+- **`@mnemora/testkit` の適合テストが、core の例外を `instanceof` ではなく判定関数で見るようになった**（[ADR 0418](./docs/decisions/0418-store-error-kind-guards.md) の追記、直前の項目の続き）。`describeMemoryStoreConformance`（28か所）と `describeOutboxStoreConformance`（4か所）は、`toBeInstanceOf(<クラス>)` / `rejects.toThrow(<クラス>)`（中身は `instanceof`）で `MemoryStatusConflictError` などを見ていた。利用者の手元で `@mnemora/core` が2つの版に分かれると、正しい adapter が投げた例外も別のクラスになり、これらが誤って赤になった。
+  - **振る舞いの変更**: 適合テストは、adapter が投げた例外を core の判定関数（`isMemoryStatusConflictError`・`isOutboxLeaseConflictError` など。「`kind`、無ければ `name`」）で見る。core が2つの版に分かれた環境でも、正しい adapter は緑になる。`memoryId` / `expectedAttempts` などの欄を読む検査は変えていない。**別のクラスの例外・素の `Error` を投げる adapter は、これまでどおり赤になる。**
+  - ⚠ 適合テストは core の判定関数（この版の core が公開したもの）を import する。判定関数を持たない古い版の core と組み合わせた testkit は動かない。
+  - 公開 API に変更は無い（判定用の道具 `error-guards.ts` は export していない。snapshot は変わらない）。非破壊。
+
 ---
 
 ## [1.1.0] - 2026-09-30

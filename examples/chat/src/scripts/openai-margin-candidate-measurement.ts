@@ -44,7 +44,7 @@ import { tryGitRevParseHead } from "../git-info.js";
  *
  * ```
  * OPENAI_API_KEY=... DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   tsx examples/chat/src/scripts/openai-margin-candidate-measurement.ts
+ *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-margin-candidate-measurement.ts
  * ```
  *
  * 環境変数: `MNEMORA_MARGIN_CANDIDATE_ROUNDS`(既定20)。

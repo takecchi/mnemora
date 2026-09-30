@@ -144,7 +144,7 @@ const usage = () => {
       "[MNEMORA_RECORD_CONDITION=baseline|known-predicates-from-store|known-subjects] " +
       "[MNEMORA_RECORD_CASSETTE_PATH=...] " +
       "[MNEMORA_ANSWER_CASE_SET=default|separate-turn] " +
-      "tsx examples/chat/src/scripts/record-answer-claim-key.ts",
+      "pnpm --filter @mnemora/example-chat exec tsx src/scripts/record-answer-claim-key.ts",
   );
 };
 
