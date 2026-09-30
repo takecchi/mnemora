@@ -50,6 +50,7 @@ export declare class AnthropicLLMProviderError extends Error {
     readonly refusalCategory: string | null;
     constructor(options: AnthropicLLMProviderErrorOptions);
 }
+export declare function isAnthropicLLMProviderError(value: unknown): value is AnthropicLLMProviderError;
 
 // ===== dist/index.d.ts =====
 export * from "./client-types.js";
