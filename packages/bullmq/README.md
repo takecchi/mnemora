@@ -188,6 +188,15 @@ await queue.close();
     （bullmq 6.3.8、Redis 無しで確かめた）。**Redis が在る状態での `Queue` の失敗は測っていない**
     （歯は fake の `Queue` が emit する形で縛っている）。
 
+## ⚠ lock の期限切れ（stalled）で、1回の tick に `onTickResult` と `onTickError` の両方が届きうる
+
+🔴 **【未実測】BullMQ 6.3.8 のソース（`dist/cjs/classes/worker.js` の `processJob`・`retryIfFailed`）を読んだだけで、Redis で走らせて確かめてはいない。** 以下は読みからの推定である。
+
+- BullMQ は、Worker が処理中のジョブの lock を `lockDuration`（既定 30000 ms）で持ち、その半分の間隔で延長する。**この driver は `lockDuration` を設定しない**（`CreateBullmqTickDriverOptions` に口が無い。`Worker` には bullmq の既定値が渡る）。`runtime.tick()` がイベントループを長く塞ぐ・Redis との接続が途切れるなどで lock の延長が間に合わずに期限が切れると、stalled checker（既定 `stalledInterval` 30000 ms）がそのジョブを wait へ戻し、**別の Worker が2本目の tick を走らせうる**（同じジョブの再実行）。
+- **データは壊れない。** 2本の tick が重なっても、outbox の行は `claimBatch` の行ロック・リース・CAS（`attempts`）で二重に処理されない（「複数プロセスで動かすとき」と同じ守り）。driver も同じジョブを二重に数えない。
+- **ただし通知は素直ではない。** 遅れて終わった1本目は、processor の中で `onTickResult` を呼んだあと、BullMQ が完了を記録する `moveToCompleted` を `Missing lock` で失敗させ、Worker の `'error'` 経由で **`onTickError` に届きうる（2回届く読み）**。つまり**その tick の `onTickResult` が届いたあとに `onTickError` が鳴る**ことがある。`onTickError` を「tick が動かなかった」の意味でだけ扱うと、この場合は誤る。
+- 対処は書いていない（口を足す・driver で束ねる、のどちらも採っていない）。`onTickError` のログには、同じ時刻の `onTickResult` があるかを見ること。`lockDuration` を変える口は、公開 API の追加になるため足していない（[ADR 0440](../../docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md)）。
+
 ## 確かめていないこと
 
 - BullMQ の Job Scheduler が実運用のワークロードでどの程度「重なる」かは測っていない。

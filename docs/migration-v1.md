@@ -2244,11 +2244,37 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
-### 49. `getSubjectActivitySeqs` の `subjectIds` と `createRecall` の `advanceActivityClock.subjectId` が、孤立サロゲート・NUL を断るようになった。v1.1.0 より前に purge した行は、purge をかけ直すと消える（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+### 49. `EventStore.append`・`VectorStore.upsert` が、記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0436](./decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)（クローン miku の決定。[ADR 0398](./decisions/0398-relation-store-link-checks-both-ends-belong-to-ctx-tenant.md) と同じ作法）。
+
+⚠ **未リリース**。**番号は 49 である**——項目48 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `EventStore.append(ctx, event)` は `event.memoryId` が、`VectorStore.upsert(ctx, space, memoryId, vector)` は `memoryId` が、
+これまで `ctx.tenantId` の記憶かどうかを確かめなかった（`@mnemora/postgres`）。今は書く前に確かめ、実在しない（uuid の形でない id も同じ）、または別のテナントの記憶なら、
+行を書かずに `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる。`append` で `memoryId` が `null` のイベント（`events_purged`）は検査しない。
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。項目21・23・24・27・34 と同じ扱い。加えて、conformance スイートの判定を厳しくする変更（項目36 と同じ）でもある。
+
+**誰が影響を受けるか**: `EventStore.append`・`VectorStore.upsert` を直接呼び、別のテナントの記憶 id を渡している呼び出し側。
+`Runtime` は同じ `ctx` で確かめた id しか渡さないので、`observe()`・`recall()`・`tick()` は変わらない。
+自前の `EventStore`・`VectorStore` を `describeEventStoreConformance`・`describeVectorStoreConformance` に当てている場合は、新しい `it` が落ちうる。
+実在しない uuid・uuid でない id を渡していた呼び出し側は、以前も落ちていたが、外部キー違反・`Failed query` の生の DB エラーから、上の明示の例外に変わる。
+
+**どう直すか**:
+- `append`・`upsert` に渡す id は、同じ `ctx` で `MemoryStore.get` などで取れた記憶のものにする。
+- 専用のエラー型・`kind` は無い（素の `Error`、メッセージは `PostgresEventStore:`/`PostgresVectorStore:`/`InMemoryEventStore:`/`InMemoryVectorStore:` で始まり、`memory not found for tenant` を含む）。
+- 自前の `EventStore`・`VectorStore` 実装は、入口で同じ確かめを足す。適合テストの `prepareMemoryId(ctx)` は、`createStore()` の store から見える、渡した `ctx` のテナントの記憶を返すこと。
+
+**DB マイグレーション**: 要らない。修正前に書かれた、食い違う行（別テナントの記憶を指す `memory_events`・`memory_embeddings_<space>` の行）が在るかを調べる SQL は ADR 0436 に在る（読み取りだけ）。
+**既存の行は消さない。**行が出た場合の扱いはオーナーの判断が要る（消す・残す・付け替える、のどれもデータの書き換えである）。そのような行が在ると、指された記憶のテナントの `eraseTenant` は `blocked_by_foreign_reference` で止まる。
+
+### 50. `getSubjectActivitySeqs` の `subjectIds` と `createRecall` の `advanceActivityClock.subjectId` が、孤立サロゲート・NUL を断るようになった。v1.1.0 より前に purge した行は、purge をかけ直すと消える（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [ADR 0437](./decisions/0437-helpers-params-subject-ids-repurge.md)。
 
-⚠ **未リリース**。**番号は 49 である**——項目48 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+⚠ **未リリース**。**番号は 50 である**——項目49 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
 **何が変わったか**:
   1. **(破壊的)** 次の2つの欄に孤立サロゲートか NUL（U+0000）を含む値を渡すと、`MalformedIdentifierError`（`kind: "malformed_identifier"`）で、書く・読む前に断る。
