@@ -1116,7 +1116,7 @@ UPDATE するようなショートカット）を作らない。
 **`meta.note` の型**: 上の表の「利用者の文」が入る `note` は、**呼び出し側が渡した文字列そのまま（平文）**である。
 **例外は、`observe()` の claim key の検出が積む3種類だけ**——`meta.note` に、オブジェクトではなく
 **JSON 文字列**（`JSON.stringify` の結果）が入る。`kind` の値は、相手が1件のとき `"claim_key_conflict"`、
-3件以上の群のとき `"claim_key_conflict_group"`、`claim_key_conflict_unresolved` のとき
+3件以上の群のとき `"claim_key_conflict_group"`（⚠ この `note` の `memberIds`・`matches` は **id の昇順で先頭10件だけ**。全体の件数は `memberCount`・`matchCount`、切ったかどうかは `memberIdsTruncated`・`matchesTruncated`。[ADR 0431](./decisions/0431-contested-group-event-growth-and-recall-cut.md)）、`claim_key_conflict_unresolved` のとき
 `"claim_key_conflict_unresolved"`（書いているのは `packages/core/src/runtime.ts` の
 `detectClaimKeyContested` 付近）。**読む側は `JSON.parse(meta.note)` が要る**——`meta.note` は
 `Record<string, unknown>` の中の文字列であり、ネストしたオブジェクトではない。⚠ `applyCorrection` は
@@ -1885,14 +1885,14 @@ Issue #198 / ADR 0124 で実装済みである。**図そのもの（遷移の�
 後から足すこともできない（`EventStore` は追記専用で、`update` を持たない。§9）。古い `both_active` の対は、引き続き監査ログからは辿れない。
 
 **⚠ 2026-09-30 追記（文書だけ。今の振る舞いを書いたもの）: 上の表は2者版の話である。群版（3件以上。`markContestedGroup`・`resolveContestedGroup`）の `updated` の `meta` には、`contestedWithId` が無い。**
-`markContestedGroup` の各メンバーの `updated` は `{ reason: "contested" }`（`opts.reason` があれば `note` が加わる）、
+`markContestedGroup` の各メンバーの `updated` は `{ reason: "contested" }`（`opts.reason` があれば `note` が加わる。⚠ **2026-10-01 から、呼び出し時点で既に `contested` で `contestedWithId` も無いメンバー〔既存の群の一員〕には積まない**。`active` から入るメンバーと、2者の対から吸収されて `contestedWithId` が外れるメンバーには積む。[ADR 0431](./decisions/0431-contested-group-event-growth-and-recall-cut.md)）、
 `resolveContestedGroup` の勝者・`both_active` の各メンバーの `updated` は `{ reason: "contested_resolved", resolution }`
 （同じく `note`）で、相手の id は載らない。群は1対1の列 `contested_with_id` に収まらないので、相手は
 `memory_relations` の行（`kind: 'contradicts'`、メンバー全員の間の双方向の完全グラフ）で持つ設計である（[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md) 決定1・決定2）。
 ⟹ **群の相手は、`RelationStore.listRelated(ctx, memoryId, "contradicts")` で辿る。**⚠ **辿れるのは `contested` の間だけ**——
 `resolveContestedGroup` は決着の種類に関わらずメンバー間の `contradicts` の行を消す（[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md) 決定3）ので、
 解消した後の群は、`updated` の `meta` からも表からも「誰と群だったか」を辿れない（`observe()` の claim key の検出が結んだ群なら、
-結んだときの `meta.note`〔JSON 文字列〕の `memberIds` に全員の id が残る。それ以外で辿る手段は、確かめていない）。
+結んだときの `meta.note`〔JSON 文字列〕の `memberIds` に、id の昇順で先頭10件が残る——⚠ **11件以上の群では全員は残らない**〔`memberCount` が全体の件数、`memberIdsTruncated` が切ったかどうか。2026-10-01 まで全員を入れていた。[ADR 0431](./decisions/0431-contested-group-event-growth-and-recall-cut.md)〕。それ以外で辿る手段は、確かめていない）。
 
 **同期/非同期の要点**: `observe()` は常に同期でリターンする（呼び出し側は待たされない）。
 「重い処理」——抽出・埋め込み・アーカイブ掃引・監査ログの保持期間掃除——はすべて非同期に

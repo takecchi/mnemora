@@ -2618,6 +2618,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertCloneableMemoryEvent(m.event);
     }
 
+    // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、書いても状態が
+    // 変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+    const unchanged = memories.map(
+      (memory) => memory.status === "contested" && (memory.contestedWithId ?? null) === null,
+    );
     for (const memory of memories) {
       memory.status = "contested";
       memory.contestedWithId = null;
@@ -2645,11 +2650,13 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
     }
 
-    const events = members.map((m) => {
-      const event = buildStoredMemoryEvent(ctx, m.event);
-      this.events.push(event);
-      return event;
-    });
+    const events = members
+      .filter((_, i) => !unchanged[i])
+      .map((m) => {
+        const event = buildStoredMemoryEvent(ctx, m.event);
+        this.events.push(event);
+        return event;
+      });
 
     return snapshot({ members: memories, events });
   }

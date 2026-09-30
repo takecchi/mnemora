@@ -441,5 +441,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0427](./0427-events-purged-at-millisecond.md) | `events_purged` の `at` を SQL の `now()` から JS 側の時刻（`toPgTimestamp`）へ替える | 採用 (2026-09) |
 | [0428](./0428-provider-abort-reason-and-error-guards.md) | provider を直に呼んだときの abort の reject を `signal.reason` に揃え、openai・anthropic の例外に判定関数を足す | 採用 (2026-09) |
 | [0429](./0429-exact-optional-property-types-input-types.md) | 入力側の公開型の任意欄を `?: T \| undefined` に広げ、`exactOptionalPropertyTypes: true` の利用者から `undefined` を渡せるようにする | 採用 (2026-09) |
+| [0431](./0431-contested-group-event-growth-and-recall-cut.md) | 群（`markContestedGroup`）の監査イベントの増え方を N の線形にし、段4の `cut` の求め方を O(n²) から O(n) にする | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

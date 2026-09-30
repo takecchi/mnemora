@@ -393,6 +393,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **入力側の公開型の任意欄が `?: T | undefined` になった。`exactOptionalPropertyTypes: true` の利用者が `{ limit: maybeLimit }` のように `undefined` を渡せる**（[ADR 0429](./docs/decisions/0429-exact-optional-property-types-input-types.md)）。各パッケージの `*Options`・`RecallQuery`・`observe`/`tick` などの入力・port のメソッド引数の `opts` の型が広がるだけで、その設定を有効にしていない利用者では同じ型であり、既存のコードは壊れない（非破壊）。出力にも使われる型（`Memory`・`MemoryEvent` など）は広げていない。
 
+- **`observe({ claimKey: { detectContested: true } })` が3件以上の群を作るときの監査イベントが、群の大きさ N に対して線形にしか増えなくなった。あわせて、段4（予算による切り詰め）の `cut` の求め方を O(n²) から O(n) に替えた（挙動は変わらない）**（穴探し10巡目、[ADR 0431](./docs/decisions/0431-contested-group-event-growth-and-recall-cut.md)）。以前は、群の全メンバーに `updated`（`meta.reason: "contested"`）を1件ずつ積み（既に群の一員で状態が変わらないメンバーにも）、各イベントの `meta.note` に群の全員の id と一致の全員の要約が入っていたため、同じ claim key の発話を N 件積むとイベントが約 N²件・約 N³バイトになった（N=40 で 859 件・4.3MB、N=80 で 3319 件・32.8MB）。
+  - **(a)** `MemoryStore.markContestedGroup` の `@mnemora/postgres` と `@mnemora/testkit`（InMemory）の実装は、呼び出し時点で既に `contested` かつ `contestedWithId` が無いメンバー（既存の群の一員）に `updated` を積まない。`active` から `contested` になるメンバーと、2者の対から群へ吸収されて `contestedWithId` が外れるメンバーには、従来どおり積む。戻り値の `events` は、その分だけ `members` より短くなりうる。自前の `MemoryStore` は、渡された `event` を全部積む実装のままでも壊れない（`Runtime` は `events` の長さに依らない）。
+  - **(b)** `meta.note`（JSON 文字列）の `kind: "claim_key_conflict_group"` は、`memberIds` と `matches` に**先頭10件だけ**（id の昇順。`matches` は id 昇順の先頭）を入れ、全体の件数を `memberCount`（新設）・`matchCount` に、切ったかどうかを `memberIdsTruncated`・`matchesTruncated`（どちらも新設の真偽値）に持つ。`Runtime.observe` の戻り値の `contestedDetection[].result.memberIds` は全員のまま。**解消後の群の全メンバーを `note` から辿る手段は、11件以上の群では無くなる**（`memory_relations` の行は解消時に消える、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md) 決定3）。
+  - 公開の型・DB は変えていない。非破壊と数える（`meta.note` は型の付かない JSON 文字列で、中身のキーは契約の型ではない。理由は ADR 0431）。
+
 ### Fixed
 
 - **`runMigrations`（と `mnemora-postgres-migrate`）が、台帳から行が欠けたまま番号の小さい migration が当たり直されるとき、警告を出すようにした（穴探し6巡目 S-1、[ADR 0425](./docs/decisions/0425-migrate-warns-on-ledger-drift.md)）。**台帳から `0011` の行だけが欠けた DB で流すと、0011 が単独で当たり直り、0018 が足した `'unsuperseded'` が `memory_events_kind_check` から黙って消えていた。未適用のファイルのうち台帳の最大の番号より小さいものが在れば、`console.warn`（`[@mnemora/postgres] migrate: …`）で名指しして続行する。止めない・適用の順序と中身は変えない（そのファイルも当てる）。公開の型・オプションは変わらない。
