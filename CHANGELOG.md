@@ -508,6 +508,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 書きかけの残り方は変えていない: `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` はトランザクションごと戻る（`supersedeWithNewMemories` は旧い行が `active` のまま）。`createMemoriesWithOutboxAndEvents` は正常な候補だけ書き、悪い候補は `dropped` に積む（その `error` が今回から `ClaimKeyIndexLimitError`）。
   - あわせて、直接のテストが無かった4つの関数（`isContestedWithoutCompanion`・`findMalformedIdentifierPart`・`assertWellFormedFilter`・`isAbort`）に、TSDoc の約束を縛る単体テストを足した（振る舞いは変えていない）。
 
+- **`observe` に `extractionContext: { timeZone }` と、年が 1000 未満・10000 以上・紀元前の `occurredAt` を渡すと、LLM を呼ばずに全文フォールバック（`extraction: "llm_failed_whole_observation"`、`failure.message` は `Invalid time value`）へ黙って倒れていたのを、約束どおり抽出するようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定1）。node の `Intl.DateTimeFormat("en-CA")` は年を4桁に0詰めせず（`"999-06-01"`・`"10000-01-01"`）、紀元前は符号を落とす（天文学年 0 が `"1"`）ため、その文字列を `Date.parse` に渡すと NaN になっていた。年月日を `formatToParts` で取り、`era` で紀元前を符号付きの天文学年に戻し、`setUTCFullYear` で組み直す。
+  - **プロンプトに出す暦日（`observedLocalDate`・`relativeDates`）の書き方は `Date#toISOString` と同じ**（0〜9999 年は4桁に0詰め、範囲外は `+010000-01-01`・`-000100-06-01` の符号付き6桁）。**1000〜9999 年と `timeZone` 無しは、プロンプトの content を1バイトも変えていない**（直す前の出力を固定値で縛った）。ただし、現地の暦日が 9999-12-31 のとき、`relativeDates` の「明日」「明後日」は、以前は `"+010000-01"` と切れた文字列だったのが `"+010000-01-01"`・`"+010000-01-02"` になる。`Date` の範囲（±8.64e15 ms）の外へ出る日付は、落ちずに `null` になる。
+
+- **`OutboxStore.complete`/`fail` を、同じリース（同じ `attempts`）での2回目の呼び出しで、1回目の終端の値を保つ（先勝ち）ようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定2）。以前は complete×2 で `completedAt` が2回目の `at` に、fail×2 で `failedAt`・`lastError` が2回目の値に上書きされ、`purgeCompletedJobs` の `olderThan` の境界も後ろにずれた。`@mnemora/postgres` は `UPDATE` の `WHERE` を `completed_at IS NULL AND failed_at IS NULL` の両方にし、`@mnemora/testkit/fixtures` のインメモリ実装も揃えた。**戻り値（`void`）と例外は変えていない**（`attempts` 不一致は `OutboxLeaseConflictError`、行が無ければ no-op、終端後の `claimBatch` は0件）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

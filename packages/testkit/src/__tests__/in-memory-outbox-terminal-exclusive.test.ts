@@ -70,30 +70,35 @@ describe("InMemoryOutboxStore.complete/fail — 相手側の終端が既に付�
     expect(job.completedAt).toBeNull();
   });
 
-  it("同種の再呼び出し（complete → complete）は変わらず成功する（冪等、既存契約）", async () => {
+  it("同種の再呼び出し（complete → complete）は例外にならず、completedAt は1回目のまま（先勝ち、ADR 0440）", async () => {
     const job = makeJob();
     const store = new InMemoryOutboxStore([job]);
+    const first = new Date("2026-02-01T00:00:00.000Z");
 
-    await store.complete(ctx, job.id, job.attempts);
-    const firstCompletedAt = job.completedAt;
-    await expect(store.complete(ctx, job.id, job.attempts)).resolves.not.toThrow();
+    await store.complete(ctx, job.id, job.attempts, { at: first });
+    await expect(
+      store.complete(ctx, job.id, job.attempts, { at: new Date("2026-03-01T00:00:00.000Z") }),
+    ).resolves.not.toThrow();
 
-    expect(job.completedAt).not.toBeNull();
+    expect(job.completedAt).toEqual(first);
     expect(job.failedAt).toBeNull();
-    // 冪等呼び出しでも completedAt は最新の呼び出し時刻に更新される(既存の挙動、本 issue の対象外)。
-    void firstCompletedAt;
   });
 
-  it("同種の再呼び出し（fail → fail）は変わらず成功し、lastError は後勝ち（既存契約）", async () => {
+  it("同種の再呼び出し（fail → fail）は例外にならず、failedAt と lastError は1回目のまま（先勝ち、ADR 0440）", async () => {
     const job = makeJob();
     const store = new InMemoryOutboxStore([job]);
+    const first = new Date("2026-02-01T00:00:00.000Z");
 
-    await store.fail(ctx, job.id, "first-error", job.attempts);
-    await expect(store.fail(ctx, job.id, "second-error", job.attempts)).resolves.not.toThrow();
+    await store.fail(ctx, job.id, "first-error", job.attempts, { at: first });
+    await expect(
+      store.fail(ctx, job.id, "second-error", job.attempts, {
+        at: new Date("2026-03-01T00:00:00.000Z"),
+      }),
+    ).resolves.not.toThrow();
 
-    expect(job.failedAt).not.toBeNull();
+    expect(job.failedAt).toEqual(first);
     expect(job.completedAt).toBeNull();
-    expect(job.lastError).toBe("second-error");
+    expect(job.lastError).toBe("first-error");
   });
 
   it("attempts が不一致なら、相手側の終端の有無に関わらず OutboxLeaseConflictError を投げる（既存契約）", async () => {

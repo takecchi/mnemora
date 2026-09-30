@@ -88,6 +88,12 @@ const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
  * （無言の no-op）。同じ `attempts` のまま complete → fail（逐次でも並行でも）を呼んでも、
  * `completed_at`/`failed_at` の両方が付くことはない。
  *
+ * 🔴 **終端は先勝ち（ADR 0440）**——同じ `attempts` のまま同種（complete → complete、fail → fail）を
+ * 呼んでも、1回目の `completed_at`／`failed_at`・`last_error` を保つ（2回目の `at`・`error` は捨てる。
+ * `purgeCompletedJobs` の `completed_at < olderThan` の境界も1回目で決まる）。`UPDATE` の `WHERE` は
+ * `completed_at IS NULL AND failed_at IS NULL` の両方を見る。戻り値（`void`）と例外は変わらない
+ * （`attempts` 不一致だけが `OutboxLeaseConflictError`、それ以外の再呼び出しは無言の no-op）。
+ *
  * 🔴 **2026-09-29 追記（[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
  * [ADR 0357](../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
  * の判断であり、オーナーの判断ではない）: 取り直し（`claimed_at` が既に非 NULL の行を再び
@@ -152,11 +158,13 @@ export class PostgresOutboxStore implements OutboxStore {
     const completedAt = opts?.at ?? new Date();
     // Issue #826: 相手側の終端（fail）が既に付いていたら、この UPDATE は0行のまま
     // 何も書かない（`failed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
+    // ADR 0440: 同種の終端（complete）が既に付いていても同じ（`completed_at IS NULL` ——先勝ち。
+    // 2回目の `at` で `completed_at` を上書きしない）。
     const result = await this.db.execute(sql`
       UPDATE outbox
       SET completed_at = ${toPgTimestamp(completedAt)}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
-        AND failed_at IS NULL
+        AND failed_at IS NULL AND completed_at IS NULL
       RETURNING id
     `);
     if (result.rows.length > 0) {
@@ -186,11 +194,13 @@ export class PostgresOutboxStore implements OutboxStore {
     const failedAt = opts?.at ?? new Date();
     // Issue #826: 相手側の終端（complete）が既に付いていたら、この UPDATE は0行のまま
     // 何も書かない（`completed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
+    // ADR 0440: 同種の終端（fail）が既に付いていても同じ（`failed_at IS NULL` ——先勝ち。
+    // 2回目の `at`・`error` で `failed_at`・`last_error` を上書きしない）。
     const result = await this.db.execute(sql`
       UPDATE outbox
       SET failed_at = ${toPgTimestamp(failedAt)}, last_error = ${storableError}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
-        AND completed_at IS NULL
+        AND completed_at IS NULL AND failed_at IS NULL
       RETURNING id
     `);
     if (result.rows.length > 0) {

@@ -448,5 +448,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0433](./0433-claim-key-length-space-error-reembed-limit.md) | claim key の長さに上限を置く・負の類似度の順位を文書に書く・未登録の埋め込み空間を型付きの例外にする・`reembed` の `limit` を入口で検査する | 採用 (2026-10) |
 | [0434](./0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md) | testkit のインメモリ実装を Postgres 実装に揃える（NUL の口の追加・`sizeBeforeBytes` の int4・`reinforce` の `nowSeq`・outbox の `now` の Invalid Date・`createMemory` の `purgedAt`） | 採用 (2026-10) |
 | [0435](./0435-claim-key-index-limit-typed-error-and-helper-tests.md) | claim key の索引の上限（SQLSTATE 54000）を型付きの例外に包む・直接のテストが無かった4つの関数に TSDoc の約束の歯を足す | 採用 (2026-10) |
+| [0440](./0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) | 抽出の現地の暦日を年の範囲によらず組み直す・outbox の終端を先勝ちにする・BullMQ の stalled を README に書く | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
