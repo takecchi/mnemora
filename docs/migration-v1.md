@@ -1984,59 +1984,6 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
-### 36. `packages/testkit` の conformance suite が、`createMemoriesWithOutboxAndEvents?` を実装している（または実装していない）自前の `MemoryStore` に約束を新しく課すようになった（`@mnemora/testkit`）
-
-[PR #1496](https://github.com/takecchi/mnemora/pull/1496)、
-[ADR 0410](./decisions/0410-extract-created-event-in-same-transaction.md)。
-
-⚠ **この項目は、PR #1496 が着地したときに足し忘れたものを、後から補ったものである**（PR #1507 の項目37 も同じ）。
-**未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 36 である**——項目35 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
-
-**何が変わったか**: `describeMemoryStoreConformance` に、任意の3状態フラグ `MemoryStoreConformanceOptions.supportsCreateMemoriesWithOutboxAndEvents?: boolean` と、それで切り替わる歯が増えた。
-`true` は、記憶・outbox・`created` イベントを1つのトランザクションで書く約束と、`created` の書き込みが失敗したら何も残らない約束を検査する。
-`false` は、この adapter が `createMemoriesWithOutboxAndEvents` を実装していない（`undefined`）ことを検査する。省略は「⚠ 未検査」の it が1本増えるだけで、判定は変わらない。
-中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Fixed`（ADR 0410 の項目）を見ること。**ここには複製しない。**
-
-**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に当たる。型検査は壊れないが、フラグの値と実装が食い違う自前実装は、conformance suite を当てると新しく落ちる。項目29 と同じ判断である。
-
-**誰が影響を受けるか**: 自前の `MemoryStore` 実装を `packages/testkit` の conformance suite に走らせている利用者のうち、
-(a) `supportsCreateMemoriesWithOutboxAndEvents: true` を渡しているが、`createMemoriesWithOutboxAndEvents` が `created` を同じトランザクションに積まない（または失敗しても巻き戻さない）場合、
-(b) `supportsCreateMemoriesWithOutboxAndEvents: false` を渡しているが、そのメソッドを実装している場合。
-**フラグを渡さない利用者は影響を受けない**（「⚠ 未検査」の it が1本増えるだけ）。
-
-**どう直すか**: メソッドを実装するなら、`created` を同じトランザクションで積むようにして `true` を渡す。実装しないなら、何も足さず、`false` か省略にする。
-
-**DB マイグレーション**: 要らない。
-
-⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更に、この項目（PR #1496・ADR 0410）が加わる。**
-⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
-
-### 37. `packages/testkit` の conformance suite が、`supersedeWithNewMemories` の `buildCreatedEvent` と、`createMemoriesWithOutboxAndEvents` の `abortIfForgotten` について、自前の `MemoryStore` に約束を新しく課すようになった（`@mnemora/testkit`）
-
-[PR #1507](https://github.com/takecchi/mnemora/pull/1507)、
-[ADR 0416](./decisions/0416-created-event-same-tx-remaining-paths.md)。
-
-⚠ **この項目も、PR #1507 が着地したときに足し忘れたものを、後から補ったものである。未リリース。番号は 37 である**——項目36 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
-
-**何が変わったか**: `describeMemoryStoreConformance` に次が増えた。
-- 任意の3状態フラグ `MemoryStoreConformanceOptions.supportsSupersedeCreatedEvents?: boolean`。`true` は、`supersedeWithNewMemories` が `opts.buildCreatedEvent` で `created` を同じトランザクションに積み、積んだことを `createdEventsWritten: true` で名乗る約束と、`created` が失敗したら `news`・`supersede`・outbox が残らない約束を検査する。`false` は、渡されても名乗らず積まないことを検査する。省略は「⚠ 未検査」の it が増えるだけ。
-- `createMemoriesWithOutboxAndEvents` の `opts.abortIfForgotten` の歯。`supportsAbortIfForgotten: true` かつ `supportsCreateMemoriesWithOutboxAndEvents: true` の adapter は、forgotten を含めると `SourceMemoryForgottenError` を投げて何も書かない約束を検査される。`supportsAbortIfForgotten: false` の adapter は、渡されても無視して書くことを検査される。
-中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Fixed`（ADR 0416 の項目）を見ること。**ここには複製しない。**
-
-**なぜ破壊的と数えるか**: 項目36 と同じ（規律2 の ⛔ の「conformance スイートの判定を厳しくする変更」）。型検査は壊れないが、フラグの値と実装が食い違う自前実装は、conformance suite を当てると新しく落ちる。
-
-**誰が影響を受けるか**: 自前の `MemoryStore` 実装を conformance suite に走らせている利用者のうち、
-(a) `supportsSupersedeCreatedEvents: true` を渡しているが約束を守らない場合、`false` を渡しているが `buildCreatedEvent` を実際には積む場合、
-(b) `supportsAbortIfForgotten` と `supportsCreateMemoriesWithOutboxAndEvents` を渡しているのに、`createMemoriesWithOutboxAndEvents` の `abortIfForgotten` の扱いがフラグと食い違う場合。
-**フラグを渡さない（`supportsSupersedeCreatedEvents` を省略し、`createMemoriesWithOutboxAndEvents` を実装しない）利用者は影響を受けない。**
-
-**どう直すか**: `buildCreatedEvent` を実装するなら、同じトランザクションで積んで `createdEventsWritten: true` を返し、`supportsSupersedeCreatedEvents: true` を渡す。実装しないなら `false` か省略にする。`abortIfForgotten` は、同じトランザクション内で対象を見直す実装なら `supportsAbortIfForgotten: true`、見直さないなら `false` を渡す。
-
-**DB マイグレーション**: 要らない。
-
-⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更に、この項目（PR #1507・ADR 0416）が加わる。**
-⛔ ここに件数を書かない（ADR 0234）。
-
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
