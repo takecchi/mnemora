@@ -100,6 +100,7 @@ import {
   ReflectionLLMResultSchema,
 } from "./strategies/reflect.js";
 import type { ReflectionLLMResult } from "./strategies/reflect.js";
+import { listRelatedLevel } from "./relation-level.js";
 
 /**
  * `runtime.observe` / `runtime.tick` の実装（roadmap.md 段階3、docs/architecture.md §3.2・§3.3）。
@@ -4434,20 +4435,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           .filter((m) => m.status === "contested" && (m.contestedWithId ?? null) === null)
           .map((m) => m.id);
         const visited = new Set(seedIds);
-        const queue = [...seedIds];
+        // 幅優先を1段ずつ進める。1段ぶんは `listRelatedMany?` があれば1往復（Issue #1449、ADR 0402）、
+        // 無ければ今までどおり起点ごとに直列。処理する順（= 先入れ先出しの queue と同じ）は変わらない。
+        let level = [...seedIds];
         const discovered = new Set<MemoryId>();
-        while (queue.length > 0) {
-          const current = queue.shift()!;
-          const related = await relationStore.listRelated(ctx, current, "contradicts");
-          for (const r of related) {
-            if (!memberIdSet.has(r.memoryId)) {
-              discovered.add(r.memoryId);
-            }
-            if (!visited.has(r.memoryId)) {
-              visited.add(r.memoryId);
-              queue.push(r.memoryId);
+        while (level.length > 0) {
+          const relatedByOrigin = await listRelatedLevel(relationStore, ctx, level, "contradicts");
+          const nextLevel: MemoryId[] = [];
+          for (const related of relatedByOrigin) {
+            for (const r of related) {
+              if (!memberIdSet.has(r.memoryId)) {
+                discovered.add(r.memoryId);
+              }
+              if (!visited.has(r.memoryId)) {
+                visited.add(r.memoryId);
+                nextLevel.push(r.memoryId);
+              }
             }
           }
+          level = nextLevel;
         }
         if (discovered.size > 0) {
           const discoveredMemories = await deps.memoryStore.getMany(ctx, [...discovered]);
@@ -7211,18 +7217,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (deps.relationStore !== undefined) {
       const visitedKeys = new Set(memberKeySet);
       const visitedIds: MemoryId[] = [...memberIds];
-      const queue: MemoryId[] = [...memberIds];
-      while (queue.length > 0) {
-        const current = queue.shift()!;
-        const related = await deps.relationStore.listRelated(ctx, current, "contradicts");
-        for (const r of related) {
-          const key = lookupKey(r.memoryId);
-          if (!visitedKeys.has(key)) {
-            visitedKeys.add(key);
-            visitedIds.push(r.memoryId);
-            queue.push(r.memoryId);
+      // 幅優先を1段ずつ進める（1段ぶんは `listRelatedMany?` があれば1往復。Issue #1449、ADR 0402）。
+      let level: MemoryId[] = [...memberIds];
+      while (level.length > 0) {
+        const relatedByOrigin = await listRelatedLevel(
+          deps.relationStore,
+          ctx,
+          level,
+          "contradicts",
+        );
+        const nextLevel: MemoryId[] = [];
+        for (const related of relatedByOrigin) {
+          for (const r of related) {
+            const key = lookupKey(r.memoryId);
+            if (!visitedKeys.has(key)) {
+              visitedKeys.add(key);
+              visitedIds.push(r.memoryId);
+              nextLevel.push(r.memoryId);
+            }
           }
         }
+        level = nextLevel;
       }
       const extraIds = visitedIds.filter((id) => !memberKeySet.has(lookupKey(id)));
       if (extraIds.length > 0) {

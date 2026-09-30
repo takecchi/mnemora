@@ -223,6 +223,24 @@ async function buildTwoHop(stores: Stores, children: number) {
   return owner.id;
 }
 
+/**
+ * 菱形: O が起点、O-B・O-C・B-D・C-D。D へは B からも C からも同じ段で届く。関係を張る順を入れ替えて、
+ * `listRelated`／`listRelatedMany` の返す順が変わっても D の発見元が変わらないことを見るための形。
+ */
+async function buildDiamond(stores: Stores, reversed: boolean) {
+  const o = await contested(stores, "O");
+  const b = await contested(stores, "B");
+  const c = await contested(stores, "C");
+  const d = await contested(stores, "D");
+  const [first, second] = reversed ? [c, b] : [b, c];
+  await link2(stores, o.id, first.id);
+  await link2(stores, o.id, second.id);
+  await link2(stores, first.id, d.id);
+  await link2(stores, second.id, d.id);
+  await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, o.id, [1, 0]);
+  return { o: o.id, b: b.id, c: c.id, d: d.id };
+}
+
 /** 結果の比較用: 提示順・発見元・省略・段の説明。 */
 function shape(result: Awaited<ReturnType<ReturnType<typeof createRuntime>["recall"]>>) {
   return {
@@ -339,6 +357,24 @@ describe("recall 段3: listRelatedMany があるときと無いときで結果�
       expect(JSON.stringify(a.omitted)).toContain("lower_bound");
     }
   });
+});
+
+describe("recall 段3: listRelatedMany の返す順に依らず、companionOf は同じ段の id の小さい親に決まる", () => {
+  it.each([false, true])(
+    "菱形（逆順に張る=%s）: listRelatedMany 経由でも D の companionOf は B と C のうち id の小さいほう",
+    async (reversed) => {
+      const { stores, withMany, withoutMany } = buildRuntimes();
+      const { b, c, d } = await buildDiamond(stores, reversed);
+
+      const a = await withMany.runtime.recall(ctx, { vector: [1, 0] });
+      const s = await withoutMany.runtime.recall(ctx, { vector: [1, 0] });
+
+      expect(withMany.spy.listRelatedManyCalls.length).toBeGreaterThan(0);
+      const smaller = b < c ? b : c;
+      expect(a.memories.find((m) => m.memoryId === d)?.companionOf).toBe(smaller);
+      expect(shape(a)).toEqual(shape(s));
+    },
+  );
 });
 
 describe("resolveContestedGroup: listRelatedMany があると、部分解消の確認が1段1往復になる", () => {
