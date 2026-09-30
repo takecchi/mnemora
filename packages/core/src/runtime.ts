@@ -4327,14 +4327,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 新しく作られた Memory について `created` イベントを積む。
    *
    * ⚠ **このイベントは `memories` への INSERT と同一トランザクションではない**
-   * （`EventStore.append` は別コミット）。**この関数を通るのは次の経路だけである**（ADR 0410）:
+   * （`EventStore.append` は別コミット）。**この関数を通るのは次の経路だけである**（ADR 0410・0416）:
    * - 抽出（sync／deferred）のうち、`MemoryStore.createMemoriesWithOutboxAndEvents?` を**持たない** adapter。
    *   持つ adapter は `createMemoriesFromCandidates` がその口で `created` を同じトランザクションに積む。
-   * - 抽出の外の経路——`reextract`（口の有無を問わず）・`consolidate`・`reflect` など（ADR 0410「残り」）。
+   * - `reextract` の、(a) 口あり経路（`supersedeWithNewMemories`）で store が `createdEventsWritten: true` を
+   *   **名乗らなかった**とき（`opts.buildCreatedEvent` を知らない adapter。名乗ったら省く）、(b) 口なし経路
+   *   （`createMemoryWithOutbox` のループ。直さない負債）。
+   * - ⚠ `consolidate`・`reflect` は `eventStore.append` を直に呼ぶ（この関数を通らない）が、同じ形の別コミットである
+   *   （ADR 0416。`consolidate` の口あり経路は名乗られたら省く、口なし経路は直さない。`reflect` は
+   *   `createMemoriesWithOutboxAndEvents?` があればそれで積み、無ければ別コミット）。
    *
    * ADR 0100 が満たしたのは docs/memory-model.md §11 行5 が名指しした「旧行の更新」と「新 Memory の作成」の
    * 対であり、`created` イベントはその要求文に含まれていない——この非同時性は ADR 0100 の「守れないもの」に
-   * 記録してあり、ADR 0410 が抽出の経路の一部について直した（残りは同じ記録のまま）。
+   * 記録してあり、ADR 0410・0416 が口を持つ adapter の経路について直した（口を持たない adapter の経路は同じ記録のまま）。
    */
   async function appendCreatedEvent(
     ctx: Ctx,
@@ -5181,7 +5186,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             event: buildSupersedeEventFor(existing),
           })),
           // ADR 0406: 書き込みと同一トランザクションでの見直し（実装する adapter だけ）。
-          { now, abortIfForgotten: knownMemoryIds },
+          // ADR 0416（穴 D-3 の続き）: `created` も同じトランザクションで積ませる（実装する adapter だけ。
+          // 積んだかどうかは戻り値の `createdEventsWritten` で判断する——下を見ること）。
+          {
+            now,
+            abortIfForgotten: knownMemoryIds,
+            buildCreatedEvent: (memory) =>
+              buildCreatedEventFor(ctx, memory, observation, "ok", null),
+          },
         );
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
@@ -5192,9 +5204,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
 
       const memoryIds = result.created.map((c) => c.memory.id);
-      for (const { memory, created } of result.created) {
-        if (created) {
-          await appendCreatedEvent(ctx, memory, observation, "ok", null);
+      // ADR 0416: store が `createdEventsWritten: true` と**名乗ったときだけ**別の append を省く。名乗らない
+      // adapter（`opts.buildCreatedEvent` を黙って無視する既存の第三者の実装）では、今までどおり別の文で積む——
+      // 引数を渡したことだけで「積まれた」と決めると、そういう adapter で `created` がまるごと消える。
+      // ⛔ 投げられたときに撃ち直さない（上の `catch` は投げ直すだけ。ADR 0100）。
+      if (result.createdEventsWritten !== true) {
+        for (const { memory, created } of result.created) {
+          if (created) {
+            await appendCreatedEvent(ctx, memory, observation, "ok", null);
+          }
         }
       }
 
@@ -7797,16 +7815,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ...activityClockInputs,
     });
     const actor = opts.actor ?? { type: "system" };
-    const buildCreatedEvent = () =>
+    // ADR 0416: 口あり経路では store が同じトランザクションで呼ぶ（`supersedeWithNewMemories` の
+    // `opts.buildCreatedEvent`）ため、Memory を受け取って `memoryId`/`digestSnapshot` を埋める形にした
+    // （以前は `memoryId: ""` のプレースホルダを呼び出し側が上書きしていた）。
+    const buildCreatedEvent = (memory: Memory) =>
       ({
         tenantId: ctx.tenantId,
-        memoryId: "",
+        memoryId: memory.id,
         kind: "created",
         at: now,
         // `ConsolidateOptions.actor`/`reason` は、この操作が積むイベントすべてに当たる
         // （統合元の superseded と同じ。`reflect` の created と同じ形）。
         actor,
-        digestSnapshot: "",
+        digestSnapshot: memory.digest,
         sizeBeforeBytes: null,
         meta: {
           reason: "consolidated",
@@ -7865,7 +7886,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             expectedStatus: "active" as MemoryStatus,
             event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
           })),
-          { now, abortIfForgotten: eligibleIds },
+          // ADR 0416（穴 D-3 の続き）: 統合先の `created` も同じトランザクションで積ませる（実装する adapter だけ。
+          // 積んだかどうかは戻り値の `createdEventsWritten` で判断する）。
+          { now, abortIfForgotten: eligibleIds, buildCreatedEvent },
         );
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
@@ -7890,12 +7913,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
 
       const consolidated = result.created[0]!;
-      if (consolidated.created) {
-        await deps.eventStore.append(ctx, {
-          ...buildCreatedEvent(),
-          memoryId: consolidated.memory.id,
-          digestSnapshot: consolidated.memory.digest,
-        });
+      // ADR 0416: 名乗られたときだけ別の append を省く（reextract の同じ箇所のコメント参照）。
+      // ⛔ 投げられたときに撃ち直さない。
+      if (consolidated.created && result.createdEventsWritten !== true) {
+        await deps.eventStore.append(ctx, buildCreatedEvent(consolidated.memory));
       }
 
       const conflictedById = new Map(result.conflicted.map((c) => [c.id, c.observedStatus]));
@@ -7955,12 +7976,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       throw error;
     }
+    // ADR 0416: この口なしの経路の `created` は別コミットのまま（直さない負債）。
     if (created) {
-      await deps.eventStore.append(ctx, {
-        ...buildCreatedEvent(),
-        memoryId: consolidatedMemory.id,
-        digestSnapshot: consolidatedMemory.digest,
-      });
+      await deps.eventStore.append(ctx, buildCreatedEvent(consolidatedMemory));
     }
     // embed ジョブは常に outbox 経由（`createMemoryWithOutbox` が積む）。ここでは何もしない
     // — tick() の processEmbedJob が処理する。
@@ -8313,17 +8331,63 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // Issue #1226: 上の読み直しに続く、書き込みそのものの中での見直し。`@mnemora/postgres`
     // はこれを INSERT と同一トランザクションの `SELECT … FOR UPDATE` として実装する
     // （`abortIfForgotten` の doc コメント参照）。
+    //
+    // ADR 0416（穴 D-3 の続き）: store が `createMemoriesWithOutboxAndEvents?` を持つなら、内省の Memory と
+    // `created` をその口で**1トランザクション**に書く（1件。`abortIfForgotten` も同じ呼び出しに渡す）。
+    // 口が無い adapter は今までどおり `createMemoryWithOutbox` + 別の `eventStore.append`（直さない負債）。
+    // 🔴 口の有無だけで経路を選ぶ。⛔ 撃って投げられたときに旧経路で撃ち直さない（二重に書きうる。ADR 0100）。
+    const buildReflectedCreatedEvent = (memory: Memory) =>
+      ({
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "created",
+        at: now,
+        actor: opts.actor ?? { type: "system" },
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta: {
+          reason: "reflected",
+          sources: eligibleIds,
+          ...(opts.reason !== undefined ? { note: opts.reason } : {}),
+        },
+      }) satisfies NewMemoryEvent;
+    const createBatch = deps.memoryStore.createMemoriesWithOutboxAndEvents;
     let reflectedMemory: Memory;
     let created: boolean;
+    let createdEventWritten = false;
     try {
-      const createResult = await deps.memoryStore.createMemoryWithOutbox(
-        ctx,
-        newMemory,
-        ["embed"],
-        { now, abortIfForgotten: eligibleIds },
-      );
-      reflectedMemory = createResult.memory;
-      created = createResult.created;
+      if (createBatch !== undefined) {
+        const batch = await createBatch.call(
+          deps.memoryStore,
+          ctx,
+          [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
+          (memory) => buildReflectedCreatedEvent(memory),
+          { now, abortIfForgotten: eligibleIds },
+        );
+        // 候補は1件なので、全件が落ちたなら store は最初の例外を投げている（`dropped` は空のはず）。
+        // 契約に反して `written` が空で返ったときは、落とした例外があればそれを、無ければ契約違反として投げる。
+        const only = batch.written[0];
+        if (only === undefined) {
+          throw (
+            batch.dropped[0]?.error ??
+            new Error(
+              "MemoryStore.createMemoriesWithOutboxAndEvents returned no written entry for a single candidate",
+            )
+          );
+        }
+        reflectedMemory = only.memory;
+        created = only.created;
+        createdEventWritten = true;
+      } else {
+        const createResult = await deps.memoryStore.createMemoryWithOutbox(
+          ctx,
+          newMemory,
+          ["embed"],
+          { now, abortIfForgotten: eligibleIds },
+        );
+        reflectedMemory = createResult.memory;
+        created = createResult.created;
+      }
     } catch (error) {
       if (isSourceMemoryForgottenError(error)) {
         const forgottenLate = new Set(error.forgottenIds);
@@ -8342,23 +8406,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       throw error;
     }
-    if (created) {
-      // 8. `created` イベントを1件積む。`reflect` はこれ以外のイベントを一切積まない
+    if (created && !createdEventWritten) {
+      // 8. `created` イベントを1件積む（口が無い adapter の経路。口がある adapter は上の呼び出しで同じ
+      // トランザクションに積み済み）。`reflect` はこれ以外のイベントを一切積まない
       // （既存の行の status を動かさないため、`superseded`/`forgotten` の類は存在しない）。
-      await deps.eventStore.append(ctx, {
-        tenantId: ctx.tenantId,
-        memoryId: reflectedMemory.id,
-        kind: "created",
-        at: now,
-        actor: opts.actor ?? { type: "system" },
-        digestSnapshot: reflectedMemory.digest,
-        sizeBeforeBytes: null,
-        meta: {
-          reason: "reflected",
-          sources: eligibleIds,
-          ...(opts.reason !== undefined ? { note: opts.reason } : {}),
-        },
-      });
+      await deps.eventStore.append(ctx, buildReflectedCreatedEvent(reflectedMemory));
     }
     // embed ジョブは常に outbox 経由（`createMemoryWithOutbox` が積む）。ここでは何もしない
     // — tick() の processEmbedJob が処理する。

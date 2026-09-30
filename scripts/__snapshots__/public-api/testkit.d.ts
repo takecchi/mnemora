@@ -163,6 +163,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         error: unknown;
     }>) => NewMemoryEvent, opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
     }): Promise<{
         written: Array<{
             index: number;
@@ -202,6 +203,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         event: NewMemoryEvent;
     }>, opts?: {
         now?: Date;
+        abortIfForgotten?: ReadonlyArray<MemoryId>;
+        buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -213,6 +216,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             id: MemoryId;
             observedStatus: MemoryStatus;
         }>;
+        createdEventsWritten?: true;
     }>;
     private purgeExpiredEventsSync;
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
@@ -624,6 +628,7 @@ export interface MemoryStoreConformanceOptions {
     supportsMarkContestedGroup?: boolean;
     supportsResolveContestedGroup?: boolean;
     supportsCreateMemoriesWithOutboxAndEvents?: boolean;
+    supportsSupersedeCreatedEvents?: boolean;
     countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
