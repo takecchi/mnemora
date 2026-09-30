@@ -28,21 +28,21 @@
 
   【実測】変異は `tenant_id = …` を `TRUE` に置き換える（記載が無ければ）。赤は `tenant-boundary-teeth.postgres.test.ts` の10件のうち1件が落ちたこと、緑は10件すべて通ったこと。元の実装では10件すべて緑。
 
-  | 口                                                                     | 変異         | 結果                                                   |
-  | ---------------------------------------------------------------------- | ------------ | ------------------------------------------------------ |
-  | `markContestedGroup` の3段（存在検査・UPDATE・関係の CTE）             | 3段同時      | 赤                                                     |
-  | 同上                                                                   | 1段だけ      | 緑（ほかの2段が拒むため。等価な変異）                  |
-  | `resolveContestedGroup` の存在検査と UPDATE                            | 2段同時      | 赤                                                     |
-  | 同上                                                                   | 1段だけ      | 緑（等価）                                             |
-  | `resolveContestedGroup` の到達集合の `memories` 側（`m.tenant_id`）    | 単独         | 赤                                                     |
-  | `resolveContestedGroup` の再帰 CTE の関係側（`r.tenant_id`）           | 単独         | 緑（`m.tenant_id` が別テナントの行を落とすため。等価） |
-  | `resolveContestedGroup` の関係の DELETE                                | 単独         | 赤                                                     |
-  | `VectorStore.delete`（単発）                                           | 単独         | 赤                                                     |
-  | `search()` の統計ありの枝（`e.tenant_id = ctx`）                       | 行を消す     | 赤                                                     |
-  | `purgeExpiredRecalls` の usage の数え（dryRun）・DELETE                | それぞれ単独 | 赤・赤                                                 |
-  | `listRelatedMany` の kind 付きの枝                                     | 単独         | 赤                                                     |
-  | `previewRestoreSupersededBy` のイベントとの結合（`me.tenant_id`）      | 単独         | 赤                                                     |
-  | 活動時計の subject の相関（`activity-decay-sql.ts` の `sa.tenant_id`） | 単独         | 赤（vector search の歯）                               |
+  | 口 | 変異 | 結果 |
+  |---|---|---|
+  | `markContestedGroup` の3段（存在検査・UPDATE・関係の CTE） | 3段同時 | 赤 |
+  | 同上 | 1段だけ | 緑（ほかの2段が拒むため。等価な変異） |
+  | `resolveContestedGroup` の存在検査と UPDATE | 2段同時 | 赤 |
+  | 同上 | 1段だけ | 緑（等価） |
+  | `resolveContestedGroup` の到達集合の `memories` 側（`m.tenant_id`） | 単独 | 赤 |
+  | `resolveContestedGroup` の再帰 CTE の関係側（`r.tenant_id`） | 単独 | 緑（`m.tenant_id` が別テナントの行を落とすため。等価） |
+  | `resolveContestedGroup` の関係の DELETE | 単独 | 赤 |
+  | `VectorStore.delete`（単発） | 単独 | 赤 |
+  | `search()` の統計ありの枝（`e.tenant_id = ctx`） | 行を消す | 赤 |
+  | `purgeExpiredRecalls` の usage の数え（dryRun）・DELETE | それぞれ単独 | 赤・赤 |
+  | `listRelatedMany` の kind 付きの枝 | 単独 | 赤 |
+  | `previewRestoreSupersededBy` のイベントとの結合（`me.tenant_id`） | 単独 | 赤 |
+  | 活動時計の subject の相関（`activity-decay-sql.ts` の `sa.tenant_id`） | 単独 | 赤（vector search の歯） |
 
   実バグの歯（`activity-subject-counter-tenant-qualification.postgres.test.ts`、4件）: 直す前は4件とも赤（2件は「more than one row returned by a subquery」、2件は別テナントのカウンタで判定が変わる）、直した後は4件とも緑。`purge-memory-uppercase-id.postgres.test.ts`: 直す前は赤（`expected 'SECRET-DIGEST' to be '[purged]'`）、直した後は緑。
 
