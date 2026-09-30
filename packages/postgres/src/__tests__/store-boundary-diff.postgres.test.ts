@@ -78,23 +78,11 @@ interface DocumentedDifference {
   vector?: { memory: "SELF" | "OTHER"; postgres: StoredVector; fixture: StoredVector };
 }
 
-const TENANT_REF_DOC = "docs/memory-model.md §5「2026-09-27 追記（Issue #1051）」の表";
 const BROKEN_VECTOR_DOC =
   "VectorStore.upsert の TSDoc の adapter ごとの表（docs/architecture.md §5.5 の 2026-09-27 追記も同じ）";
 
 /** 場面の名前 → doc に書いた差（向きと、書いた後のベクトル）。 */
 const DOCUMENTED_DIFFERENCES: Readonly<Record<string, DocumentedDifference>> = {
-  "vector.upsert(other)": {
-    where: `他テナントの memoryId: Postgres は受け付けて呼んだテナントの行として書き、fixture は拒む（${TENANT_REF_DOC}・VectorStore.upsert の TSDoc。Issue #1051 はこれを doc に書いて閉じた）`,
-    postgres: "returns-null",
-    fixture: "throws",
-    vector: { memory: "OTHER", postgres: [0, 1, 0], fixture: null },
-  },
-  "event.append(memoryId:other)": {
-    where: `他テナントの memoryId: Postgres は受け付けて記録し、fixture は拒む（${TENANT_REF_DOC}・EventStore.append の TSDoc。Issue #1051 はこれを doc に書いて閉じた）`,
-    postgres: "returns-value",
-    fixture: "throws",
-  },
   "vector.upsert(self,[])": {
     where: `空のベクトル: Postgres は拒んで前の埋め込みを残し、fixture は保存する（${BROKEN_VECTOR_DOC}。Issue #1070 はこれを doc に書いて閉じた）`,
     postgres: "throws",

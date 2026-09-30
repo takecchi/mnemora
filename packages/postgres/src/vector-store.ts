@@ -19,7 +19,7 @@ import type { Db } from "./client.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { listEmbeddingSpaceTables } from "./embedding-space-catalog.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
-import { isUuidLike, toPgTimestamp } from "./mapping.js";
+import { isUuidLike, normalizeUuidCase, toPgTimestamp } from "./mapping.js";
 import { maybeAnalyzeAfterUpsert } from "./embedding-statistics.js";
 import { activityFloorSeqAliveCondition } from "./activity-decay-sql.js";
 import { assertSafeSchemaName } from "./schema-namespace.js";
@@ -29,6 +29,10 @@ import {
   assertPgvectorCapabilityRow,
 } from "./pgvector-capability.js";
 import { assertFloat4Vector, fitsFloat4 } from "./input-check.js";
+
+function memoryNotFound(id: string): Error {
+  return new Error(`PostgresVectorStore: memory not found for tenant: ${id}`);
+}
 
 /** `number[]` を pgvector のテキスト表現（`[1,2,3]`）に変換する。 */
 function toVectorLiteral(vector: number[]): string {
@@ -553,14 +557,35 @@ export class PostgresVectorStore implements VectorStore {
     assertFloat4Vector("PostgresVectorStore.upsert", vector);
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    await translateUnregisteredSpace(space, () =>
+    // ADR 0436 決定1・2・3: 記憶が `ctx.tenantId` のものであることを、書く前に確かめる。実在しない・別のテナントの
+    // 記憶・uuid の形でない id は、行を書かずに `memory not found for tenant` で投げる（区別しない）。
+    // 確かめと書き込みは1つの SQL 文（CTE）。検査で落ちたかは、`ON CONFLICT DO UPDATE` の行数ではなく
+    // 戻り値の `ok`（検査の結果そのもの）で見る（ADR 0398 決定2 と同じ作法）。
+    const id = normalizeUuidCase(memoryId);
+    if (!isUuidLike(id)) {
+      throw memoryNotFound(id);
+    }
+    const result = await translateUnregisteredSpace(space, () =>
       this.db.execute(sql`
-        INSERT INTO ${sql.identifier(table)} (tenant_id, memory_id, embedding, model, created_at)
-        VALUES (${ctx.tenantId}, ${memoryId}, ${toVectorLiteral(vector)}::vector, ${space.model}, now())
-        ON CONFLICT (tenant_id, memory_id)
-        DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, created_at = now()
+        WITH mem AS (
+          SELECT EXISTS (
+            SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+          ) AS ok
+        ),
+        ins AS (
+          INSERT INTO ${sql.identifier(table)} (tenant_id, memory_id, embedding, model, created_at)
+          SELECT ${ctx.tenantId}, ${id}::uuid, ${toVectorLiteral(vector)}::vector, ${space.model}, now()
+          FROM mem
+          WHERE ok
+          ON CONFLICT (tenant_id, memory_id)
+          DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, created_at = now()
+        )
+        SELECT ok FROM mem
       `),
     );
+    if (!(result.rows[0] as unknown as { ok: boolean } | undefined)?.ok) {
+      throw memoryNotFound(id);
+    }
     // Issue #360 / ADR 0194: 統計が実態から遅れているときだけ ANALYZE を撃つ（詳細は
     // ./embedding-statistics.ts のクラス doc）。ここでは呼ぶだけ——判断はそちらに集約する。
     await maybeAnalyzeAfterUpsert(this.db, space);

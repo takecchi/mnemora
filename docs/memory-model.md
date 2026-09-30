@@ -428,6 +428,12 @@ Postgres の外部キー（`observations(id)`/`recalls(id)`/`memories(id)`）は
 「memory not found」になって記録ごと巻き戻る。⟹ この形になるのは、`MemoryStore`/`EventStore`/
 `VectorStore`（公開の interface）を直接呼ぶ経路だけである。各口の TSDoc にも同じことを書いた。
 
+⚠ **2026-10 追記（[ADR 0436](./decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)）: 上の表の `EventStore.append` と `VectorStore.upsert` の2行は、もう成り立たない。**
+両方とも、記憶が `ctx.tenantId` のものでなければ、行を書かずに `memory not found for tenant: <id>` で投げる（`@mnemora/postgres` も、fixture と同じ）。
+上の「読み取り漏洩・書き込み漏洩には繋がらない」は、`eraseTenant` を見落としていた——別テナントの記憶 id を指すイベント・埋め込みの行が1本在ると、
+指された記憶のテナントの `eraseTenant` が `blocked_by_foreign_reference` で止まる（ADR 0436 の「文脈」）。
+`MemoryStore.createMemory`・`recordUsage` の2行は変わらない。上の本文は、当時の記録として書き換えていない。
+
 ### ⚠ 2026-09 追記（Issue #371、(B) 第1段。[ADR 0185](./decisions/0185-contradiction-detection-path.md)/[ADR 0315](./decisions/0315-claim-key-does-not-touch-extraction-cassettes.md)）: `claimKey`（主張キー）を足した——**検出はまだ無い**
 
 `memories.claim_key_subject`/`claim_key_predicate`（`Memory.claimKey: {subject, predicate} | null`）
