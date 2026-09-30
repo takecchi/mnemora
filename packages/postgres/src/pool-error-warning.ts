@@ -18,3 +18,11 @@
  * 値をリテラルとして複製している（複製先のコメントに、ここが正本である旨を書いてある）。
  */
 export const POOL_ERROR_WARNING_PREFIX = "[@mnemora/postgres]";
+
+/**
+ * pool error 警告の**頭の部分**（接頭辞 + 固定の文言）。`client.ts` がこれに続けて `: <error.message>` を付ける。
+ *
+ * `src/__tests__/setup-pool-error-warning-guard.ts` はこの頭で**だけ**落ちる。接頭辞 {@link POOL_ERROR_WARNING_PREFIX} は
+ * `runMigrations` の台帳ずれの警告（ADR 0425）も共有するため、接頭辞だけで守りを掛けると、そちらでも落ちてしまう。
+ */
+export const POOL_ERROR_WARNING_HEAD = `${POOL_ERROR_WARNING_PREFIX} pool の待機中の接続が失われた。捨てて続行する`;
