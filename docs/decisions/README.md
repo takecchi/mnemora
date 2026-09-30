@@ -449,5 +449,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0434](./0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md) | testkit のインメモリ実装を Postgres 実装に揃える（NUL の口の追加・`sizeBeforeBytes` の int4・`reinforce` の `nowSeq`・outbox の `now` の Invalid Date・`createMemory` の `purgedAt`） | 採用 (2026-10) |
 | [0435](./0435-claim-key-index-limit-typed-error-and-helper-tests.md) | claim key の索引の上限（SQLSTATE 54000）を型付きの例外に包む・直接のテストが無かった4つの関数に TSDoc の約束の歯を足す | 採用 (2026-10) |
 | [0436](./0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md) | `EventStore.append`・`VectorStore.upsert` は、入口で記憶が `ctx` のテナントに属することを確かめる（複合外部キーの migration は入れない） | 採用 (2026-10) |
+| [0438](./0438-tenant-boundary-teeth-and-purge-uuid-case.md) | 別テナントを混ぜた歯を足す・purgeMemory の大文字の id を直す・subject カウンタの相関サブクエリの修飾を直す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

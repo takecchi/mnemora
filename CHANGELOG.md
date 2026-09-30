@@ -522,6 +522,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 書きかけの残り方は変えていない: `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` はトランザクションごと戻る（`supersedeWithNewMemories` は旧い行が `active` のまま）。`createMemoriesWithOutboxAndEvents` は正常な候補だけ書き、悪い候補は `dropped` に積む（その `error` が今回から `ClaimKeyIndexLimitError`）。
   - あわせて、直接のテストが無かった4つの関数（`isContestedWithoutCompanion`・`findMalformedIdentifierPart`・`assertWellFormedFilter`・`isAbort`）に、TSDoc の約束を縛る単体テストを足した（振る舞いは変えていない）。
 
+- **`PostgresMemoryStore.purgeMemory` に大文字の uuid を渡すと、`memories` の行は purge されるのに、`recalls.index_band` の目次帯の digest が書き換わらなかった**（[ADR 0438](./docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md)）。入口で uuid の大文字小文字をそろえるようにした。`Runtime` 経由（小文字の id）は影響なし。落ちる入力は増えない。
+
+- **`decay_clock=activity` で subject 単位のカウンタ（`usesSubjectActivityCounters`）を使うとき、`archiveDecayed` と `aggregateScope`（忘却ゲートの件数）が、カウンタ行を別テナント・別 subject の行と区別していなかった**（ADR 0438）。`tenant_subject_activity` の行が2本以上あると「more than one row returned by a subquery」で落ち、1本だけのときは別テナント・別 subject のカウンタで判定していた。相関サブクエリに修飾した `tenant_id`/`subject_id` を渡すようにした。壁時計のゲート・テナント単位のカウンタ・`search`・`reinforce` は影響なし。
+
 ---
 
 ## [1.1.0] - 2026-09-30
