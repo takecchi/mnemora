@@ -3809,7 +3809,7 @@ function extractObservationPayload(
     case "event":
       // Issue #1185: `extractData: true` のときだけ payload に印を足す。`false`・省略では
       // `payload` は今までと1バイトも変わらない（`extractData` キー自体が増えない）
-      // ——`observationPayloadText`（extraction.ts）はこの印を見て `data` を本文へ合成する。
+      // ——`observationPayloadText`（observation-text.ts）はこの印を見て `data` を本文へ合成する。
       return {
         name: input.name,
         data: input.data ?? {},
