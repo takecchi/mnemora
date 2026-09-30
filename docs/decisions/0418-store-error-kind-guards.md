@@ -131,3 +131,41 @@
     `kind` の値を1文字変えると 1 本が赤になり、戻すとすべて緑（72 本）に戻った。
   - 置き換えた postgres の `typedError` は、`isMemoryPurgeConflictError` の分岐を潰すと `store-boundary-diff.postgres.test.ts` の1本が赤になり、戻すと緑（5本）に戻った
     （手元の Postgres 17。`contested-pair-lock-order-concurrency.postgres.test.ts` を含む2ファイル 7 本が緑）。
+
+---
+
+## 追記 (2026-09-30): testkit の適合テストも、core の例外を `instanceof` ではなく判定関数で見る
+
+> **⚠ 2026-09-30 追記:** 上の本文と、直前の追記は書き換えていない。直前の追記が「直すかどうかは別の判断として残した（測っていない）」とした
+> 適合テストの穴を、直した記録である。書いたのは、上と同じくクローンの委譲先であり、オーナーの判断ではない。
+
+- **直したもの。** `packages/testkit/src/memory-store-conformance.ts` の28か所と `outbox-store-conformance.ts` の4か所
+  （core の公開エラーのクラスを取るもの。内訳は `expect(x).toBeInstanceOf(<クラス>)` 19か所・`rejects.toBeInstanceOf(<クラス>)` 8か所・
+  `rejects.toThrow(<クラス>)` 4か所・`rejects.not.toBeInstanceOf(<クラス>)` 1か所。複数行にまたがる書き方も数えた）を、core の判定関数（`isMemoryStatusConflictError` など。「`kind`、無ければ `name`」）で見る形に置き換えた。
+  - 置き換えの道具は `packages/testkit/src/error-guards.ts`（`expectStoreError` / `expectRejectsWithStoreError` / `expectRejectsWithoutStoreError`）。
+    **公開しない**（`index.ts` から export していない）。判定関数が通らなかったときは、実際に来た値の `name` / `kind` / `message` を添えて落ちる。
+  - `memoryId` / `expectedStatus` / `observedStatus` / `expectedAttempts` / `method` などの欄を読む検査は、そのまま残した。
+    判定関数は型の絞り込み（`value is <クラス>`）を返すので、欄の読み方も変わらない。
+  - **置き換えなかったもの:** `Date`・`Error`・`RangeError` への `toBeInstanceOf` / `toThrow`（core の公開エラーではない。ADR 0418 の範囲外）。
+    `instanceof Date`（`purgedAt` の型の検査）も同じ。
+- **なぜ直したか。** 適合テストは利用者が自分の adapter に当てる公開の道具である。core が2つの版に分かれた環境では、
+  正しい adapter が投げる例外も適合テストが import したクラスとは別物になり、`toBeInstanceOf` / `toThrow(クラス)`（中身は `instanceof`）が
+  誤って赤になる。runtime の穴（本文）と同じ原因で、置き換えた側だけが残っていた。
+- **歯。** `packages/testkit/src/__tests__/foreign-realm-conformance.test.ts`。testkit の in-memory 実装を `Proxy` で包み、投げる（reject する）core の例外だけを
+  `vm` の別 context で定義し直したもの（`kind` 無し・有りの両方）へ差し替えて、`describeMemoryStoreConformance` / `describeOutboxStoreConformance` をそのまま当てる。
+  in-memory の設定は `in-memory-conformance-options.ts` へ切り出し、通常の適合テスト（`in-memory-fixtures.conformance.test.ts`）と共有した。
+  **修正前の適合テストに対して、この歯は 39 本 × 2 種 = 78 本が赤になった**（PR #1514 の最初の commit）。修正後は緑。
+- **変異試験（手元、`packages/testkit`）。** いずれも戻すと緑に戻った。
+  - `updateStatus` の CAS が投げる例外を素の `Error` にすると、通常・別 realm 2種の計6本が赤（判定関数が「別のものを通さない」）。
+  - 同じ箇所で別の core の例外（`ContestedWithoutCompanionError`）を投げさせても、同じ6本が赤。
+  - `InMemoryOutboxStore.complete` の例外を素の `Error` にすると、3本が赤。
+  - 歯の側で別 realm の例外から欄（`memoryId` など）を落とすと、別 realm の2種で計30本が赤（**欄の検査が弱まっていない**ことの確認）。
+- **引き受けた負債。**
+  - `packages/*/src/__tests__` に、同じ形（`toBeInstanceOf(<クラス>)`・`instanceof <クラス>` など）が残っている。これらは利用者に渡らない内部の検査で、
+    同じ realm のクラスを見る限り正しい。**触っていない**（別 realm の対照として意図して置いている `foreign-realm-store-errors.test.ts` の2行を含む）。
+  - 適合テストは core の判定関数を import するようになった。判定関数を持たない古い版の core（1.1.0 以前）と組み合わせた testkit は動かない
+    （testkit は core を `dependencies` で持つので、通常は同梱の版が使われる）。
+  - `Error` / `RangeError` への `toBeInstanceOf` は、別 realm の組み込みエラーでは同じ理由で false になりうる。core の公開エラーではないので、今回は範囲外にした。
+  - 新しい適合テストの検査を足すときにも `toBeInstanceOf(<core のクラス>)` を書けてしまう。この規律を機械では縛っていない
+    （歯は、現在ある検査が別 realm で通ることだけを見る。**新しく書かれる検査は、in-memory の設定を共有する歯が、同じ store 例外を投げさせる限りで拾う**）。
+- **測っていないこと。** 本物の `@mnemora/postgres` を core 2版の組で当てた再実測はしていない（歯は `vm` による別 realm の再現）。
