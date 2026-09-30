@@ -55,6 +55,7 @@ export declare class LocalEmbeddingProvider implements EmbeddingProvider {
     readonly space: EmbeddingSpaceId;
     constructor(options?: LocalEmbeddingProviderOptions);
     warmup(): Promise<void>;
+    dispose(): Promise<void>;
     embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 
@@ -71,6 +72,7 @@ export interface LocalEmbeddingPipeline {
     readonly maxInputTokens: number;
     countTokens(texts: string[]): number[];
     embed(texts: string[]): Promise<number[][]>;
+    dispose?(): Promise<void>;
 }
 export type CreateLocalEmbeddingPipeline = (spec: LocalEmbeddingModelSpec) => Promise<LocalEmbeddingPipeline>;
 export interface LocalEmbeddingTokenizer {
@@ -83,6 +85,7 @@ export interface LocalEmbeddingExtractor {
         normalize: boolean;
     }): Promise<unknown>;
     readonly tokenizer: LocalEmbeddingTokenizer;
+    dispose?(): Promise<void>;
 }
 export declare function buildLocalEmbeddingPipeline(extractor: LocalEmbeddingExtractor): LocalEmbeddingPipeline;
 export declare function toVectors(output: unknown): number[][];

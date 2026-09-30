@@ -270,6 +270,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    */
   #ready: Promise<LocalEmbeddingPipeline> | null = null;
 
+  /** `dispose()` が呼ばれたら以後 `true`（戻らない）。ADR 0419。 */
+  #disposed = false;
+  /** 最初の `dispose()` の Promise。2回目以降は同じものを返す（上流の dispose を1回に畳む）。 */
+  #disposing: Promise<void> | null = null;
+  /** 走っている `embed()`。`dispose()` はこれが終わるのを待ってから上流を解放する。 */
+  readonly #inflight = new Set<Promise<unknown>>();
+
   constructor(options: LocalEmbeddingProviderOptions = {}) {
     // ⭐ **宣言（repo と modelId）が食い違ったまま space が確定するのを、ここで落とす。**
     //
@@ -365,13 +372,65 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * せずにそのまま投げる。
    */
   async warmup(): Promise<void> {
+    this.#assertNotDisposed("warmup");
     await this.#load();
+  }
+
+  /**
+   * 保持しているモデル（pipeline）を手放す。**任意の口**であり、`EmbeddingProvider` interface には無い
+   * （[ADR 0419](../../../docs/decisions/0419-local-embedding-provider-dispose.md)）。
+   *
+   * - 上流（`@huggingface/transformers`）の `dispose()` に委ねる。pipeline が `dispose` を持たなければ何もしない。
+   * - 一度も読み込んでいなければ何もしない（読み込みも起こさない）。
+   * - **読み込み中・推論中なら、それらが終わるのを待ってから**解放する（漏らさない）。読み込みが失敗していたら、
+   *   解放するものが無いので reject しない。
+   * - 2回以上呼んでもよい。2回目以降は最初と同じ Promise を返し、上流の `dispose()` は1回しか呼ばない。
+   * - 呼んだ時点から、`embed()` / `warmup()` は reject する（{@link LocalEmbeddingProvider.embed} を見ること）。
+   * - 上流の `dispose()` が reject したら、この Promise も同じ理由で reject する。
+   */
+  dispose(): Promise<void> {
+    if (this.#disposing === null) {
+      // 同期に立てる: 以後の embed / warmup は、解放の完了を待たずに断られる。
+      this.#disposed = true;
+      this.#disposing = this.#release();
+    }
+    return this.#disposing;
+  }
+
+  async #release(): Promise<void> {
+    const ready = this.#ready;
+    if (ready === null) {
+      return;
+    }
+    let pipeline: LocalEmbeddingPipeline;
+    try {
+      pipeline = await ready;
+    } catch {
+      return; // 読み込みに失敗した——解放するものが無い。
+    }
+    // 走っている推論の足元から解放しない。終わり方（成功か失敗か）は問わない。
+    while (this.#inflight.size > 0) {
+      await Promise.allSettled([...this.#inflight]);
+    }
+    this.#ready = null;
+    await pipeline.dispose?.();
+  }
+
+  #assertNotDisposed(method: string): void {
+    if (this.#disposed) {
+      throw new Error(
+        `LocalEmbeddingProvider: dispose() 済みのため ${method}() できない。` +
+          `dispose() はモデルを手放す一方向の操作で、同じインスタンスでは読み込み直さない` +
+          `（続けるなら新しい LocalEmbeddingProvider を作ること）`,
+      );
+    }
   }
 
   /**
    * `texts` を埋め込み、入力と同じ件数・順で返す。空配列ならモデルを読まずに `[]` を返す（ただし `opts.signal` が abort 済みなら、空配列でも `[]` を返さず reject する）。
    *
    * 投げるもの（どれも reject として届く）:
+   * - {@link LocalEmbeddingProvider.dispose} の後は、入力に関わらず（空配列でも）素の `Error`（ADR 0419）。
    * - モデルの読み込みの失敗は {@link LocalEmbeddingProvider.warmup} と同じ。
    * - 既定の pipeline（`createPipeline` を省いたとき。`buildLocalEmbeddingPipeline` で組み立てた pipeline も同じ）では、
    *   入力がモデルの上限トークン数を超えれば、`kind: "input_too_long"` の `LocalEmbeddingProviderError`
@@ -399,6 +458,20 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * ——分割するかどうかを決める前に、まず `texts` 全体に prefix を付ける。
    */
   async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
+    // ⭐ dispose 済みの断りは、入力の検査（空配列の早期 return・abort 済み signal）より**前**に置く
+    // （ADR 0419）。使い終わったものを使っている、というプログラムの誤りは、入力が空でも
+    // 検査より先に見せる——空配列だけ通ると、誤りが特定の入力のときだけ隠れる。
+    this.#assertNotDisposed("embed");
+    const running = this.#embed(texts, opts);
+    this.#inflight.add(running);
+    try {
+      return await running;
+    } finally {
+      this.#inflight.delete(running);
+    }
+  }
+
+  async #embed(texts: string[], opts?: AbortOptions): Promise<number[][]> {
     // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
     opts?.signal?.throwIfAborted();
     // `packages/openai` と同じ早期 return。**空でモデルを起こさない。**

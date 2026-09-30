@@ -91,6 +91,11 @@ export interface LocalEmbeddingPipeline {
   countTokens(texts: string[]): number[];
   /** 実際にベクトルへ変換する。 */
   embed(texts: string[]): Promise<number[][]>;
+  /**
+   * 保持しているモデル（ONNX のセッション）を手放す。**任意**——持たない pipeline も注入できる
+   * （`LocalEmbeddingProvider.dispose()` は、在れば呼び、無ければ何もしない。ADR 0419）。
+   */
+  dispose?(): Promise<void>;
 }
 
 /** モデルを読み込んで `LocalEmbeddingPipeline` を返す関数。**ここが注入点である。** */
@@ -126,6 +131,11 @@ export interface LocalEmbeddingExtractor {
   (texts: string[], options: { pooling: "mean"; normalize: boolean }): Promise<unknown>;
   /** 上限の検査に使うトークナイザ（{@link LocalEmbeddingTokenizer}）。 */
   readonly tokenizer: LocalEmbeddingTokenizer;
+  /**
+   * 上流の pipeline が持つ `async dispose()`（ONNX のセッションを解放する）。
+   * 古い版・擬似の extractor は持たないことがあるので任意にしてある（ADR 0419）。
+   */
+  dispose?(): Promise<void>;
 }
 
 /**
@@ -175,6 +185,9 @@ export function buildLocalEmbeddingPipeline(
   return {
     maxInputTokens,
     countTokens,
+    // 上流の dispose に委ねる（ADR 0419）。`this` を失わないよう extractor 越しに呼ぶ。
+    // 持たない extractor には生やさない（呼ぶ側は「在れば呼ぶ」）。
+    ...(typeof extractor.dispose === "function" ? { dispose: () => extractor.dispose!() } : {}),
     async embed(texts) {
       for (const [index, text] of texts.entries()) {
         const tokens = extractor.tokenizer.encode(text).length;
