@@ -450,7 +450,9 @@ export class FakeMemoryStore implements MemoryStore {
     const jobs = jobKinds.map((kind) =>
       this.enqueueJob(ctx, kind, { observationId: observation.id }),
     );
-    return { observation, created: true, jobs };
+    // Postgres は INSERT ... RETURNING で行の複製を返す。生の参照を返すと、後の claim が
+    // 返した job の `attempts` を書き換え、CAS（ADR 0142）の食い違いが隠れる（ADR 0407）。
+    return { observation, created: true, jobs: jobs.map((job) => ({ ...job })) };
   }
 
   private enqueueJob(
