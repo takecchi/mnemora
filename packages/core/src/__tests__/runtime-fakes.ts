@@ -1281,6 +1281,11 @@ export class FakeMemoryStore implements MemoryStore {
    * ——狭義の `<`（同じ `at` は no-op）で `lastReinforcedAt`/`decayFloorAt` を
    * 同じ条件でまとめて動かす。古い `at` は例外にせず、no-op のまま現在の行を返す。
    */
+  /** ADR 0394: `ReinforceOptions.addOwnSubjectSeq` を読める（`reinforce` の実装を参照）。 */
+  supportsAddOwnSubjectSeq(): boolean {
+    return true;
+  }
+
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {

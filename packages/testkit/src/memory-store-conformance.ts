@@ -3966,6 +3966,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
     it("reinforce は addOwnSubjectSeq: true で、強化される Memory 自身の subject の S_x を nowSeq(T) に足して起点にする（ADR 0394）", async () => {
       const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
       const ctx: Ctx = { tenantId: "tenant-1" };
       await seedSubjectCounters(store, ctx);
       const expectations = [
@@ -3994,6 +3998,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
     it("reinforce は ctx の subjectId に関わらず、Memory 自身の subject の S_x を足す（ctx=bob で alice の記憶、ctx に subject 無しで bob の記憶）", async () => {
       const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
       const tenantCtx: Ctx = { tenantId: "tenant-1" };
       await seedSubjectCounters(store, tenantCtx);
       const alice = await memoryForOwnSubject(store, tenantCtx, "alice", "own-subject-ctx-a");
@@ -4017,6 +4025,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
     it("reinforceMany は同じ opts（addOwnSubjectSeq: true）を全件に適用しつつ、行ごとに自身の subject の S_x を足す（ADR 0394）", async () => {
       const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
       if (typeof store.reinforceMany !== "function") {
         // 任意メソッド——実装していない adapter ではこの歯は成立しない（skip 相当）。
         return;
@@ -4051,6 +4063,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
     it("recordUsageAndReinforce（任意メソッド、あれば）も、行ごとに自身の subject の S_x を足す（ADR 0394 / Issue #961）", async () => {
       const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
       if (typeof store.recordUsageAndReinforce !== "function") {
         return;
       }
@@ -4086,6 +4102,14 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect((await store.get(ctx, bob.id))?.decayBaseSeq).toBe(OWN_SUBJECT_EXPECTED_NOW.bob);
     });
 
+    it("supportsAddOwnSubjectSeq を宣言する store は、真偽値を返す（宣言は任意。省略は「読めない」と同じ）", async () => {
+      const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq === undefined) {
+        return;
+      }
+      expect(typeof store.supportsAddOwnSubjectSeq()).toBe("boolean");
+    });
+
     it("addOwnSubjectSeq を省略・false にすると、nowSeq をそのまま起点にする（S_x があっても足さない。この項目を足す以前と同じ）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -4107,6 +4131,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
     it("addOwnSubjectSeq: true でも nowSeq が無ければ何もしない（活動時計側の3列は据え置く。S_x を『いま』として扱わない）", async () => {
       const store = await createStore();
+      if (store.supportsAddOwnSubjectSeq?.() !== true) {
+        // 任意の宣言（ADR 0394）——宣言しない adapter には runtime が今までどおりの値を渡すので、この歯は成立しない（skip 相当）。
+        return;
+      }
       const ctx: Ctx = { tenantId: "tenant-1" };
       await seedSubjectCounters(store, ctx);
       const memory = await memoryForOwnSubject(store, ctx, "alice", "own-subject-no-nowseq");

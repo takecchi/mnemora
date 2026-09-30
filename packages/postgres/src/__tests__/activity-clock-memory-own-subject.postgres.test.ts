@@ -135,6 +135,11 @@ function floorFrom(baseSeq: number, halfLifeRecalls: number): number {
 }
 
 describe("ADR 0394: 書く側の活動時計の「いま」は、記憶自身の subject の T + S_x（Postgres の列）", () => {
+  it("PostgresMemoryStore は addOwnSubjectSeq を読めることを宣言している（宣言が外れると runtime は T + S_ctx を渡し、適合テストの歯も skip される）", async () => {
+    const { db } = await getTestClient();
+    expect(new PostgresMemoryStore(db).supportsAddOwnSubjectSeq?.()).toBe(true);
+  });
+
   it("作成（deferred 抽出）: subjectId の無い ctx（tick）から alice の記憶を作ると、decay_base_seq = T + S_alice", async () => {
     const { db, runtime } = await setup(
       llmReturning([{ content: "aliceの事実", provenanceKind: "stated" }]),
