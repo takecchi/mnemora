@@ -878,6 +878,9 @@ export class InMemoryMemoryStore implements MemoryStore {
    * - 全候補の成否が確定したあと、`created: true` の候補ぶんの `created` イベントを共有の `events` 配列へ積む。
    *   ここで投げたら（イベントが書けない値・`events.push` が投げる）、Memory・outbox・ラベル・積みかけの
    *   イベントも全部戻して、そのまま投げる。
+   * - ⚠ `opts.abortIfForgotten`（ADR 0416）は**実装しない**——渡しても無視され、例外は投げられない
+   *   （`createMemoryWithOutbox`・`supersedeWithNewMemories` と同じ。適合テストは `supportsAbortIfForgotten: false`
+   *   でそれを積極的に assert する）。
    * - ⚠ イベントは `InMemoryMemoryStore.events` に積まれる。`InMemoryEventStore` から読むには、第2引数に
    *   `memoryStore.events` を渡して配列を共有すること（`InMemoryEventStore` のクラス doc）。共有しない組み立ての
    *   `InMemoryEventStore` に対しては、この口を使った抽出の `created` は `EventStore.list` に出ない。
@@ -889,7 +892,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -1169,6 +1172,11 @@ export class InMemoryMemoryStore implements MemoryStore {
    *
    * 新しい行に `status: "contested"` で `contestedWithId` が無いものがあれば、何も書かずに
    * {@link ContestedWithoutCompanionError} を投げる。
+   *
+   * ADR 0416（穴 D-3 の続き）: `opts.buildCreatedEvent` が渡されたら、`created: true` の `news` の Memory ごとに
+   * `created` イベントを共有の `events` 配列へ積み（**`supersede` の書き込みより前**。ここで投げたら `news` の
+   * Memory・outbox・ラベルとイベントを全部戻す。`supersede` にはまだ触れていない）、戻り値に
+   * `createdEventsWritten: true` を付けて名乗る。`opts.abortIfForgotten` は実装しない（従来どおり無視）。
    */
   async supersedeWithNewMemories(
     ctx: Ctx,
@@ -1179,14 +1187,20 @@ export class InMemoryMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    opts?: { now?: Date },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+    },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+    createdEventsWritten?: true;
   }> {
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
+    const buildCreatedEvent = opts?.buildCreatedEvent;
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
     for (const target of supersede) {
@@ -1235,6 +1249,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     //    何も起きなかったのと同じに見せる（Postgres は1トランザクションで巻き戻る）。
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
     const restoreWriteState = this.captureWriteState();
+    const eventsLengthBefore = this.events.length;
     try {
       for (const { input, jobKinds } of news) {
         const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
@@ -1247,8 +1262,19 @@ export class InMemoryMemoryStore implements MemoryStore {
         );
         created.push({ memory, created: true, jobs });
       }
+      // ADR 0416: `created` イベントも、`supersede` に触れる前に積む（積めなければ news の書き込みごと戻す）。
+      if (buildCreatedEvent !== undefined) {
+        for (const [index, entry] of created.entries()) {
+          if (entry.created) {
+            this.events.push(
+              buildStoredMemoryEvent(ctx, buildCreatedEvent(snapshot(entry.memory), index)),
+            );
+          }
+        }
+      }
     } catch (err) {
       restoreWriteState();
+      this.events.splice(eventsLengthBefore);
       throw err;
     }
 
@@ -1279,7 +1305,9 @@ export class InMemoryMemoryStore implements MemoryStore {
       superseded.push(storedEvent);
     }
 
-    return snapshot({ created, superseded, conflicted });
+    const result = snapshot({ created, superseded, conflicted });
+    // ADR 0416: 積んだことを名乗る（渡していない呼び出しでは付けない）。
+    return buildCreatedEvent === undefined ? result : { ...result, createdEventsWritten: true };
   }
 
   /**
