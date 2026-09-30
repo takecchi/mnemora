@@ -427,6 +427,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0410](./0410-extract-created-event-in-same-transaction.md) | 抽出の `created` イベントは、記憶と同じトランザクションで書く（任意メソッド `createMemoriesWithOutboxAndEvents?`） | 採用 (2026-09) |
 | [0412](./0412-purge-target-select-indexes.md) | `purgeExpiredRecalls` と `purgeCompletedJobs` の対象選択に索引を足す（ADR 0404 決定7を改める） | 採用 (2026-09) |
 | [0413](./0413-requeue-embed-zero-hit-scan-not-fixed.md) | `requeueEmbedJobs` の「全 status が0件」の走査は、測ったうえで直さない | 採用 (2026-09) |
+| [0414](./0414-drop-database-checkpoint-wait-not-fixed.md) | `DROP DATABASE` の checkpoint 待ちで afterAll が時間切れになりうることは、測ったうえで直さない | 採用 (2026-09) |
 | [0415](./0415-consolidate-reflect-skip-scope-aggregate.md) | consolidate / reflect の内部 recall に `scopeAggregate: "skip"` を渡し、使わない件数集計を払わない | 採用 (2026-09) |
 | [0416](./0416-created-event-same-tx-remaining-paths.md) | `created` イベントを記憶と同じトランザクションで積む範囲を、reextract・consolidate の口あり経路と reflect へ広げる（穴 D-3 の続き） | 採用 (2026-09) |
 
