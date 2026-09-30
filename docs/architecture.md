@@ -425,7 +425,7 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date }
+    opts?: { now?: Date; claimedBy?: string }
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   createMemoryWithOutbox(

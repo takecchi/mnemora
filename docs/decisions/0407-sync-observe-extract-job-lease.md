@@ -52,13 +52,25 @@
      `leaseMs` を LLM の最長時間より長くとる運用で狭める）。歯: 「LLM がリースより長くかかり tick に取り直されても、
      書き込み済みの observe は例外を投げず memoryIds を返す」。
 
-  4. **InMemory の outbox（`@mnemora/testkit`）と core の Fake も同じ意味にする。** `claimedBy` を渡すと
+  4. **observe が抽出中に例外で終わったとき（挙動の変化）**: ジョブは observe の claim のまま残り、リースが切れるまで
+     tick は拾わない。以前は未 claim で残り、直後の tick がすぐ拾って `failed` を数えていた（Issue #1063 の歯
+     「全件が保存できなければ、今どおり observe は例外で、何も書かない」が縛っていた）。
+     **(a) 例外で抜けるときに claim を手放す、案は採らなかった。**手放すには `OutboxStore` に新しい口
+     （release 相当）が要り、既存の `fail`（終端）では再試行の道を閉じてしまう。公開の port を増やす割に、
+     得るのは「リース1本分の再試行の遅れを無くす」だけである。**(b) を採る**: 例外で終わった observe は、
+     プロセスが死んだ場合と同じく「リース切れの後に tick が拾う」扱いにする。取り直しの結果（同じ所で落ちて
+     `failed`）は変わらず、遅れるだけである。歯（`extract-redelivery-unsaveable-fake.test.ts`・
+     `observe-unsaveable-candidate.postgres.test.ts` の同名テスト）は、「リースの内側では拾われない（0/0）」と
+     「リース切れの後は拾われ同じ所で落ちる（0/1）」の2段に直した。期待値を変えた理由はこの項である。
+     ⚠ 再試行を急ぎたい運用は、`tick` の `leaseMs` を短くとる。
+
+  5. **InMemory の outbox（`@mnemora/testkit`）と core の Fake も同じ意味にする。** `claimedBy` を渡すと
      `claimedAt = now`・`attempts: 1` で作る。あわせて、core の `FakeMemoryStore.createObservationWithOutbox` は
      job の**複製**を返すようにした（Postgres の `INSERT ... RETURNING` と同じ）。生の参照を返していたため、
      後の claim が observe の手元の `attempts` を書き換え、CAS の食い違いが Fake の上では起きなかった。
      適合テスト（`memory-store-conformance.ts`）に、`claimedBy` の指定あり・なしの2件を足した。
 
-  5. **破壊的かどうか**: **破壊的ではない。** `opts` は既に省略可能な第4引数で（Issue #1237）、`claimedBy` も省略可能。
+  6. **破壊的かどうか**: **破壊的ではない。** `opts` は既に省略可能な第4引数で（Issue #1237）、`claimedBy` も省略可能。
      省略時の振る舞いは今日と同じ。第三者の `MemoryStore` 実装が `claimedBy` を無視しても型は通る——ただしその実装では
      穴が塞がらない（無視すると未 claim・`attempts: 0` で積まれ、従来の動きになる）。公開 API の snapshot
      （`core.d.ts`・`postgres.d.ts`・`testkit.d.ts`）は、この1欄の分だけ変わる。**v1.2.0 の Fixed として出す。**

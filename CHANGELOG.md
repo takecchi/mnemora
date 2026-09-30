@@ -269,6 +269,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **LLM がリースより長くかかり tick に取り直されたとき**: observe は `OutboxLeaseConflictError` だけを握り、書き込み済みの結果（`memoryIds`）を返す。**この窓での二重抽出は塞いでいない**（`leaseMs` を LLM の最長時間より長くとる運用で狭める。ADR 0407 の「引き受けた負債」）。
   - **公開 API に、任意項目 `MemoryStore.createObservationWithOutbox` の `opts.claimedBy?: string` を足した。**渡すと積む行を claim 済み（`attempts: 1`）で作る。省略時は今までと同じ。`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` は対応済み。適合テスト（`describeMemoryStoreConformance`）に指定あり・なしの2件を足した。
   - ⚠ **自前の `MemoryStore` を実装している人へ**: 型は通るが、`claimedBy` を無視する実装では穴が塞がらない（従来の動きのまま）。塞ぎたければ、渡されたら `claimed_at` = `opts.now`・`claimed_by`・`attempts: 1` で行を作ること。
+  - ⚠ **挙動の変化**: sync の observe が抽出中に**例外で終わった**とき、extract ジョブは observe の claim のまま残るため、リースが切れるまで tick は拾わない（以前は未 claim で残り、直後の tick が拾っていた）。拾った後の結果は変わらない。急ぐ運用は `tick` の `leaseMs` を短くとる。ADR 0407 の決めたこと4。
   - 非破壊（追加の任意欄のみ）。DB マイグレーションは足していない。
 
 ---
