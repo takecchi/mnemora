@@ -125,6 +125,27 @@ describe("runtime.resolveContestedGroup — 基本の成功", () => {
     expect(storedC?.supersededById).toBe(a.id);
   });
 
+  it("supersede: 敗者の superseded イベントの meta.supersededById は勝者の id（ADR 0150 追記・2者版 resolveContested と同じ。勝者の updated には足さない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const eventsBefore = stores.eventStore.events.length;
+
+    await runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+      kind: "supersede",
+      winnerId: a.id,
+    });
+
+    const newEvents = stores.eventStore.events.slice(eventsBefore);
+    const byMemory = new Map(newEvents.map((e) => [e.memoryId, e]));
+    expect(byMemory.get(b.id)?.kind).toBe("superseded");
+    expect(byMemory.get(b.id)?.meta).toMatchObject({ supersededById: a.id });
+    expect(byMemory.get(c.id)?.kind).toBe("superseded");
+    expect(byMemory.get(c.id)?.meta).toMatchObject({ supersededById: a.id });
+    expect(byMemory.get(a.id)?.kind).toBe("updated");
+    expect(byMemory.get(a.id)?.meta).not.toHaveProperty("supersededById");
+  });
+
   it("resolution.winnerId が memberIds に無ければ書き込み前に RangeError", async () => {
     const { runtime, stores } = buildRuntime();
     const { a, b, c } = await createContestedTrio(stores);
@@ -306,6 +327,23 @@ describe("runtime.resolveContestedGroup — winnerId の大文字小文字の救
     );
     expect([sa?.status, sb?.status, sc?.status]).toEqual(["active", "superseded", "superseded"]);
     expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
+  });
+
+  it("大文字の winnerId でも、敗者のイベントの meta.supersededById は store へ渡す値と同じ memberIds の綴り", async () => {
+    const { runtime, stores } = buildCaseInsensitiveGetRuntime();
+    const { a, b, c } = await createContestedTrio(stores);
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const eventsBefore = stores.eventStore.events.length;
+
+    await runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+      kind: "supersede",
+      winnerId: a.id.toUpperCase(),
+    });
+
+    const losers = stores.eventStore.events
+      .slice(eventsBefore)
+      .filter((e) => e.kind === "superseded");
+    expect(losers.map((e) => e.meta?.supersededById)).toEqual([a.id, a.id]);
   });
 
   it("store の get が別の記憶を返すなら RangeError（何も書かない）", async () => {
