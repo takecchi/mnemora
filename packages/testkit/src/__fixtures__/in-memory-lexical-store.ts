@@ -1,7 +1,11 @@
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
-import { assertQueryDate, assertQueryTextWithoutNul } from "./query-check.js";
+import {
+  assertQueryDate,
+  assertQueryJsonWithoutNul,
+  assertQueryTextWithoutNul,
+} from "./query-check.js";
 
 /**
  * `'simple'` dictionary の代わりに使う、素朴な語彙正規化。
@@ -232,6 +236,8 @@ export class InMemoryLexicalStore implements LexicalStore {
     assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
     assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
     assertQueryDate("search", "filter.validAt", opts.filter.validAt);
+    // ADR 0434: `attributes` は `jsonb` の包含判定の引数。NUL は Postgres ではクエリの時点で `22P05` になる。
+    assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
     // `PostgresLexicalStore.search`（`buildLexicalSearchSelect`）は `opts.limit` を
     // 生 SQL の `LIMIT` にそのまま渡すため、負数を渡すと Postgres 自身が
     // `LIMIT must not be negative` で例外を投げる（実測済み。in-memory-vector-store.ts の
