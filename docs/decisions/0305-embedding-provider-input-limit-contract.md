@@ -423,3 +423,12 @@ memory とベクトルの対応が1つずれる、という実害はこの2経�
 `OpenAIEmbeddingProvider.embed` で送ると、`BadRequestError`（HTTP 400）「`Invalid 'input[0]': maximum input length is 8192 tokens.`」
 で拒まれ、そのまま伝わった（§2 の素の `input` 超過と同じ文面）。同じ回に当てたほかの入力の境界（空文字・1回の件数の上限・
 `dimensions` の範囲）は `packages/openai/README.md` に書いた。§9 のほかの項目は、引き続き確かめていない。
+
+---
+
+## ⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、[ADR 0393](./0393-core-checks-embedding-dimension.md)）: core も次元を守る
+
+**上の本文と、これまでの追記は書き換えていない。**2026-09-27 の追記（Issue #1070）は「`packages/core` は embed ジョブで
+中身を確かめない」と書いたが、**長さについてはこの日に覆った**。`Runtime.tick` の embed ジョブは `VectorStore.upsert` の前に、
+`recall()` は provider が返した問い合わせベクトルを使う前に、長さを `space.dimensions` と突き合わせる。provider が
+`@mnemora/openai`・`@mnemora/local-embedding`・第三者のどれでも同じである。確かめるのは長さだけで、有限性は確かめない。

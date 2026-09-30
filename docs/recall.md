@@ -154,6 +154,17 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 **覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを渡したときの扱いは対象外
 （Issue #867「範囲外で見つけたもの」）。
 
+**⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+[ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)）: provider が返した問い合わせベクトルの
+長さが `space.dimensions` と違うときは、`score_not_comparable` ではなく
+`embedding_provider_unavailable` になる。**`RecallQuery.text` から provider に作らせた問い合わせ
+ベクトルは、`vectorStore` へ渡す前に core が長さを確かめ、違えば「ベクトルを返さなかった」と同じ
+`stage_skipped`（`candidate_generation`）に丸める。以前は provider によって理由の名前が違った
+（Postgres では `toComparableQuery` が全 0 に差し替えて `score_not_comparable`、`local-embedding` は
+throw するので `embedding_provider_unavailable`）。**呼び出し側が `RecallQuery.vector` を直接渡した
+ときは、この検査を通らない**——上の段落のとおり `score_not_comparable` のままである。確かめるのは長さだけで、
+`NaN`/`Infinity` を含む問い合わせベクトルは、今も store の側が比較不能として扱う。
+
 **Phase 1 の範囲(2026-09 追記、本 PR の決定)**: 上記は3チャンネル(ANN・タグ一致・直近取得)が並行して走る一般形を述べているが、roadmap.md 段階4の完了条件は「二段検索(段1: 索引が効く形のフィルタ + ANN、段2: over-fetch した候補への再スコア)」とのみ明記しており、タグ一致・直近取得を独立した候補生成チャンネルとして要求していない。**Phase 1 は ANN の1チャンネルのみを実装する。** タグは段2の再スコア(§7)における加点要素としてのみ参加し、それ自体で候補を拾い上げる経路にはしない。（⚠ 2026-09-29 追記: 参照先の roadmap.md §2「段階4」は削除した（#762）。当時の本文は [`635c93d` の版](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md?plain=1#L94-L102) にある。）
 
 **⚠ この「1チャンネルのみ」は、2026-09-10 に改められた([ADR 0084](./decisions/0084-lexical-recall-channel.md)、Issue #106)。** 候補生成は `RecallQuery.channels` が指すチャンネルを並行して走らせる形になり、**語彙(lexical)チャンネル**が足された——PostgreSQL 組み込みの `to_tsvector('simple', …)` に ASCII 境界の正規化を掛けた式索引で、固有名詞・識別子を**文字列として**引く経路である(追加の PostgreSQL 拡張は要求しない)。**⚠ ただし既定は今も ANN 1本であり(`DEFAULT_RECALL_CHANNELS`)、`channels` を渡さない呼び出しの挙動は1バイトも変わっていない。**⛔ そして**「タグ一致」「直近取得」は、今も実装が無い**——ADR 0084 が足したのは語彙1本だけである。**⚠ 語彙チャンネルは日本語の文に埋もれた日本語の語(人名を含む)を引けない**(ADR 0084 §2 に実測がある)。**この限界を理由に `REQUIRED_EXTENSIONS`(`pg_trgm` 等)を増やすかどうかは [ADR 0149](./decisions/0149-japanese-lexical-no-required-extension.md) が検討し、増やさないと決めている**——買えるのは日本語の固有名詞1点であり、`C` ロケールのクラスタでは黙って0件を返す(ADR 0084 §3.2)という代償のほうが重いためである。**⚠ 日本語表記のチャンネル名・社内システム名についても、人名と同じ穴に落ちる可能性が高いが、確かめていない**(ADR 0149)。**⚠ 2026-09 追記([ADR 0092](./decisions/0092-lexical-or-coverage.md))**: クエリ語彙は OR で結ばれ、`score.lexicalMatch` は「一致した語彙数 ÷ クエリ語彙数」(被覆率)になった——以前はクエリの ASCII の語どうしを AND で結んでおり、`what did we say about PROJ-1234` のような英語の自然文は全語を含む記憶しか返らなかった(ADR 0084 §2.1.1・§8 の負債)。この変更は「引ける」を広げるだけで、低選択率のクエリ(ありふれた語1つ)で語彙候補どうしの順序が事実上任意である、という ADR 0084 §8 の負債そのものは塞いでいない。走らせられるチャンネルの一覧を**ここに書き写さないこと**——唯一の出所は `packages/core/src/recall.ts` の `RECALL_CHANNELS` である。したがって、embeddable なクエリが無い場合(`text`/`vector` のいずれも無い場合)、Phase 1 の `memories` は実際に空になる——「タグ一致や直近取得が別途走っていれば空にならないこともある」という上記の記述は Phase 2 以降でチャンネルを追加した場合に成立する記述であり、Phase 1 の実装はこの緩和を持たない。この限定は、embeddable な内容が無いクエリでは `omitted` に `stage_skipped` が付き、`memories` が空でも `index`(§5)が「スコープ内に何が在るか」を独立に示し続けることで、原則3の要求(「無い」を分類して見せる)は満たされたままである。

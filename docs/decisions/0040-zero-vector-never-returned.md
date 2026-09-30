@@ -380,3 +380,14 @@ migration 適用時点で既に存在する空間は 0022 が作る**——名�
 - 100万行を大きく超える規模での部分索引の構築時間、同時実行下でのレイテンシ増分。
 - schema-namespace（ADR 0057）を実際に指定した状態での、`registerEmbeddingSpace` の
   新しい `CREATE INDEX` の実機での動作。
+
+---
+
+## ⚠ 2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、[ADR 0393](./0393-core-checks-embedding-dimension.md)）: provider が返した問い合わせベクトルの次元違いは、ここまで届かなくなった
+
+**上の本文と、2026-09-26 の追記は書き換えていない。当時の記録として残す。**
+`recall()` は、provider が返した問い合わせベクトルの長さが `space.dimensions` と違えば、`vectorStore` へ
+渡す前に `embedding_provider_unavailable` に丸めるようになった。したがって、その経路で `toComparableQuery` が
+全 0 に差し替えて `score_not_comparable` と記録することは無くなった。**ここの決定（長さの違う `RecallQuery.vector`
+は比較不能）は変えていない**——`RecallQuery.vector` を呼び出し側が直接渡した経路と、`VectorStore.search`/`searchMany`
+の直接呼び出しは検査を通らず、2026-09-26 の契約のままである。`toComparableQuery` も残した（ADR 0393 決定4）。

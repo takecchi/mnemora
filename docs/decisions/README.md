@@ -408,5 +408,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0385](./0385-association-probes-baseline-from-ci-measurement.md) | association-probes の基準値を CI 実測（6回）から置き、基準値より悪化した arm を警告する節を足す — 許容幅は0、ADR 0158 が挙げた #316/#317 の前提は CI でも成立した（Issue #291） | 採用 (2026-09) |
 | [0387](./0387-cjs-require-esm-smoke-in-default-ci.md) | README の「CommonJS からは require(esm) で読める」を、registry に出ない切り出し版で毎 PR の CI に入れる | 採用 (2026-09) |
 | [0389](./0389-recalls-digest-band-index.md) | `recalls.index_band` の目次帯に式の GIN 索引を足す——`purgeMemory` が `recalls` を全部読まないようにする | 採用 (2026-09) |
+| [0393](./0393-core-checks-embedding-dimension.md) | core が、provider の返す埋め込みの次元を `space.dimensions` と突き合わせる | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

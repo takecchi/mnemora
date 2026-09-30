@@ -5,6 +5,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 
 /**
  * `Runtime.tick` の embed ジョブは、provider が返したベクトルの長さが
