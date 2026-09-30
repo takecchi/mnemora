@@ -4060,6 +4060,11 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
  * DDL をマイグレーションファイルから読むのと同じ理由。AGENTS.md が北極星の要約を
  * 置かないのと同じ理由でもある）。
  *
+ * ⚠ **`statuses` のどれにも当たる行が無い（全 status が0件の）ときは、0007 の索引を最後まで読み、
+ * `ready` 以外の行を Filter で捨てて0行を返す**（走査の量はそのテナントの `ready` 以外の行数に比例する。
+ * 100万行・約4%が `ready` 以外で温 約30 ms）。**測って、直さないと判断した**（ADR 0413。
+ * 呼び出し元は手動の保守操作 `Runtime.reembed` だけ。第一候補の案 D と、覆る条件は同 ADR）。
+ *
  * `memoryIds` を渡されたのに well-formed な id が1つも残らなかったときは `null` を返す
  * ——形式が壊れた id は `getMany` と同じく静かに落とす（uuid 列への cast で文全体が
  * 例外になるのを避ける。`mapping.ts` の `isUuidLike` の doc 参照）が、**絞り込みを
