@@ -970,6 +970,21 @@ async function runRecallBody(
   };
 
   /**
+   * ⭐ `status` の後置検査（ADR 0432 AL-1）。段1・段3.5 の `VectorFilter.status`
+   * （`["active", "contested"]`）は**検索の時点**でしか効かない。`search()` が返してから
+   * `getMany` が今の状態を読むまでのあいだに `sweepArchive`（archived）・`forget`
+   * （forgotten）・supersede が入ると、その記憶が `memories` に混ざっていた。ここで今の
+   * `status` を見て落とす（落とす方向に倒す＝返す件数が減るだけで、新しい throw は無い）。
+   *
+   * ⚠ **落とした件数は、ここでは数えない**——`survivesDecayGate` と同じ規律（ADR 0172 決めたこと3・
+   * ADR 0173）。archived は段5の `aggregateScope` が `filtered(archived)` として厳密に数える
+   * （`scope` 内の集合の大きさであって、どの段が落としたかではない）ので、ここで足すと二重計上になる。
+   * forgotten/superseded は `filtered` の条件に無く、もともと `omitted` の対象外である。
+   */
+  const survivesStatusGate = (memory: Memory): boolean =>
+    memory.status === "active" || memory.status === "contested";
+
+  /**
    * ⭐ 段1（ANN）と段3.5（連想枠）の `VectorFilter` へ渡す、**ゲートの欄だけ**をまとめた断片
    * （Issue #347 / ADR 0172）。**1箇所で作って、両方の `vectorStore.search()` が同じものを撒く。**
    *
@@ -1345,6 +1360,9 @@ async function runRecallBody(
     if (!survivesAttributesFilter(memory)) continue;
     // Issue #201 PR-B（ADR 0323）: 同じ規律。`survivesLabelsFilter` に1箇所へまとめてある。
     if (!survivesLabelsFilter(memory)) continue;
+    // ADR 0432 AL-1: `search()` のあとに archived/forgotten になった記憶を落とす。
+    // ⚠ ここでは数えない（段5の `filtered(archived)` が数える。`survivesStatusGate` の doc）。
+    if (!survivesStatusGate(memory)) continue;
     const effectiveTime = memory.occurredAt ?? memory.recordedAt;
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
     if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
@@ -2140,6 +2158,8 @@ async function runRecallBody(
           if (!survivesAttributesFilter(memory)) continue;
           // Issue #201 PR-B（ADR 0323）: 段1と同じ述語を共有する（`survivesLabelsFilter`）。
           if (!survivesLabelsFilter(memory)) continue;
+          // ADR 0432 AL-1: 段1と同じ述語（`survivesStatusGate`）。ここでも数えない。
+          if (!survivesStatusGate(memory)) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
           if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
           if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
