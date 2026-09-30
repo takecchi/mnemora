@@ -1998,6 +1998,14 @@ export interface MemoryStore {
    *   「新しい順」であることを契約にする（`findActiveByClaimKey?` の「順序は規定しない」
    *   とは異なる——あちらは呼び出し側が件数でしか分岐しないが、こちらは語彙ヒントの
    *   優先順位に順序がそのまま使われる）。
+   * - **同着（代表行の `created_at` が同じ predicate が複数ある）は、predicate の
+   *   コードポイント順の昇順**で並べる。同着の順が実装ごと・呼び出しごとに変わると、
+   *   `limit` で切った先頭の集合と、語彙ヒントの優先順位が変わり、同じ入力に別の
+   *   プロンプトが出るため。DB の照合順序（collation）にも、書いた順にも、UTF-16 コード単位順
+   *   （JS の `<`。BMP の U+E000〜U+FFFF と補助面の文字で、コードポイント順と食い違う）にも
+   *   依らない。`PostgresMemoryStore` は `COLLATE "C"`、`packages/testkit` の in-memory 実装は
+   *   UTF-8 のバイト列の比較で、これに揃える。⚠ 以前は同着の順を規定していなかった
+   *   （Issue #1412 の続き）。
    * - **`query.limit` を超えない件数を返す。**`limit` は呼び出し側
    *   （`ClaimKeyOptions.knownPredicatesFromStore`）が決める——この口自身は既定値を
    *   持たない。

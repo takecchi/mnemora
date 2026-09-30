@@ -2781,6 +2781,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * claim key は2列とも NULL か2列とも非 NULL（`0021_memories_claim_key.sql` の「NULL の意味」）
    * なので、書き込みの口から作られる行について結果は変わらない。
    *
+   * **同着の副キーは `claim_key_predicate COLLATE "C" ASC`**（コードポイント順の昇順。interface の契約参照）。
+   * `COLLATE "C"` は UTF-8 のバイト順で、DB の既定の照合順序に依らずコードポイント順になる。
+   *
    * `GROUP BY claim_key_predicate ORDER BY MAX(created_at) DESC` は「同じ predicate を
    * 持つ行のうち最も新しい `created_at` で代表させ、その代表値で降順に並べる」という
    * interface 側の契約をそのまま SQL に落としたもの——`DISTINCT ON` ではなく
@@ -2800,7 +2803,7 @@ export class PostgresMemoryStore implements MemoryStore {
         AND claim_key_subject IS NOT NULL
         AND claim_key_predicate IS NOT NULL
       GROUP BY claim_key_predicate
-      ORDER BY MAX(created_at) DESC
+      ORDER BY MAX(created_at) DESC, claim_key_predicate COLLATE "C" ASC
       LIMIT ${query.limit}
     `);
     return result.rows.map((row) => (row as unknown as { predicate: string }).predicate);
