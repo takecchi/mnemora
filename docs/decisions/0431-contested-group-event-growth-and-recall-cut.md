@@ -27,6 +27,7 @@
      - `memberIds`: id の昇順（UTF-16 コード単位順）の先頭10件。`memberCount`（新設）に全体の件数、`memberIdsTruncated`（新設、真偽値）に切ったかどうか。
      - `matches`: id の昇順の先頭10件の要約。`matchCount`（既存）に全体の件数、`matchesTruncated`（新設、真偽値）に切ったかどうか。
      - `triggering`・`claimKey`・`subjectId`・`kind` は変えない。
+     - `kind: "claim_key_conflict_unresolved"`（`relationStore` を配線していないときなどに1件だけ積む evidence）の `note` の `matches` も、同じ K=10 で id の昇順の先頭に切り、`matchesTruncated`（新設、真偽値）を付けた（`matchCount` は既存）。同じ族の肥大（一致が N 件たまると、1回の observe で N 件ぶんの要約が入り、積み上げで O(N²) バイト）であり、同じ PR で揃えた。全員の id は戻り値の `matchMemoryIds` にある。歯は `packages/core/src/__tests__/contested-unresolved-note-growth.test.ts`（直す前は3本とも赤: `matches` が39件のまま・印が無い・N=20 と N=40 で note の長さの差が 2040 文字）。
      - 並びを id の昇順にしたのは、store が `findActiveByClaimKey`／`findContestedByClaimKey` の返す順や、群の探索の順（集合の挿入順）に依らず、同じ群から同じ note が決定的に出るようにするため。
      - 全員の id は、`observe()` の戻り値 `contestedDetection[].result.memberIds`（変えていない）と、各 Memory の状態と `memory_relations`（群が `contested` の間）から引ける。
      - K を10、印を真偽値2つと件数1つにした理由: 1件の `meta` が約1.5KB で頭打ちになり（下の測定）、監査ログを読む人が「どのくらいの群で、切られているか」と「代表の数件」を1件のイベントから読める。既存の meta は、件数（`matchCount`・`count`）と固定タグ、状態を表す値で書かれており、`Truncated` のような真偽値の印を新しく足すのはこの ADR が初めてである。
@@ -44,7 +45,6 @@
      - 群の関係の行を完全グラフでなくす（(d)）。`memory_relations` の行数は群の大きさの2乗のままである。
      - `findActiveByClaimKey`／`findContestedByClaimKey` への `LIMIT`（候補3）。
      - `normalizeClaimKeyPart` の正規化の変更（候補4）。
-     - `claim_key_conflict_unresolved`（`relationStore` を配線していないとき）の `note` は、`matches` の全員を入れたままである。1回の observe に1件だけ積むので O(N²) バイトで、この ADR の対象にしていない。
 
 - **検討した代替案**:
 

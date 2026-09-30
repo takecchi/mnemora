@@ -193,7 +193,8 @@ const DEFAULT_TICK_LIMIT = 50;
 /**
  * ADR 0431: 群の `updated/contested` イベントの `note` に入れる、`memberIds`・`matches` の先頭の件数。
  * 超えたときは `memberIdsTruncated`・`matchesTruncated` が `true` になり、全体の件数は
- * `memberCount`・`matchCount` が持つ。
+ * `memberCount`・`matchCount` が持つ。`claim_key_conflict_unresolved` の `note` の `matches` も
+ * 同じ件数で切る（`matchCount`・`matchesTruncated`）。
  */
 const CONTESTED_GROUP_NOTE_SAMPLE_LIMIT = 10;
 
@@ -4711,6 +4712,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // markContestedGroup を呼ばなかった（配線されていない／群が3件未満にしか広がらな
     // かった）、または呼んだが `contested_group` にならなかった: 今まで通り
     // markContested を呼ばず、根拠だけを memory_events に残す。
+    // ADR 0431: `note` の `matches` は、群の `note` と同じく id の昇順の先頭 K 件に切り、
+    // 件数（`matchCount`）と切った印（`matchesTruncated`）を付ける。全員の id は戻り値の
+    // `matchMemoryIds` にある。
+    const sortedUnresolvedMatches = [...matches].sort((a, b) => compareCodeUnits(a.id, b.id));
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
@@ -4725,8 +4730,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           claimKey,
           subjectId: memory.subjectId ?? null,
           triggering: describeSide(memory),
-          matches: matches.map(describeSide),
+          matches: sortedUnresolvedMatches
+            .slice(0, CONTESTED_GROUP_NOTE_SAMPLE_LIMIT)
+            .map(describeSide),
           matchCount: matches.length,
+          matchesTruncated: matches.length > CONTESTED_GROUP_NOTE_SAMPLE_LIMIT,
         }),
       },
     });

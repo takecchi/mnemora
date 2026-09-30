@@ -1116,8 +1116,8 @@ UPDATE するようなショートカット）を作らない。
 **`meta.note` の型**: 上の表の「利用者の文」が入る `note` は、**呼び出し側が渡した文字列そのまま（平文）**である。
 **例外は、`observe()` の claim key の検出が積む3種類だけ**——`meta.note` に、オブジェクトではなく
 **JSON 文字列**（`JSON.stringify` の結果）が入る。`kind` の値は、相手が1件のとき `"claim_key_conflict"`、
-3件以上の群のとき `"claim_key_conflict_group"`（⚠ この `note` の `memberIds`・`matches` は **id の昇順で先頭10件だけ**。全体の件数は `memberCount`・`matchCount`、切ったかどうかは `memberIdsTruncated`・`matchesTruncated`。[ADR 0431](./decisions/0431-contested-group-event-growth-and-recall-cut.md)）、`claim_key_conflict_unresolved` のとき
-`"claim_key_conflict_unresolved"`（書いているのは `packages/core/src/runtime.ts` の
+3件以上の群のとき `"claim_key_conflict_group"`（⚠ この `note` の `memberIds`・`matches` は **id の昇順で先頭10件だけ**。全体の件数は `memberCount`・`matchCount`、切ったかどうかは `memberIdsTruncated`・`matchesTruncated`。**`memberIdsTruncated` が `true` なら、`note` の `memberIds` は先頭の10件だけ**で、群の全メンバーではない。**群の全メンバーは `note` からは辿れない**——`contested` の間は `RelationStore.listRelated(ctx, memoryId, "contradicts")`（下の「群の相手は」の段落）、検出した `observe()` の戻り値なら `contestedDetection[].result.memberIds` で辿る。[ADR 0431](./decisions/0431-contested-group-event-growth-and-recall-cut.md)）、`claim_key_conflict_unresolved` のとき
+`"claim_key_conflict_unresolved"`（⚠ この `note` の `matches` も **id の昇順で先頭10件だけ**。全体の件数は `matchCount`、切ったかどうかは `matchesTruncated`。全員の id は `observe()` の戻り値の `matchMemoryIds` にある。ADR 0431）（書いているのは `packages/core/src/runtime.ts` の
 `detectClaimKeyContested` 付近）。**読む側は `JSON.parse(meta.note)` が要る**——`meta.note` は
 `Record<string, unknown>` の中の文字列であり、ネストしたオブジェクトではない。⚠ `applyCorrection` は
 この例外ではない（`reason` をそのまま渡すだけで、JSON にはしない）。ほかの経路の `note` を
