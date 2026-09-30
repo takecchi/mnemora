@@ -2073,7 +2073,8 @@ export class PostgresMemoryStore implements MemoryStore {
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5:
    * `record.advanceActivityClock === true` のとき、`recalls` への INSERT と**同一
-   * トランザクションで** `tenant_activity.activity_seq` を `+1` する（UPSERT——行が
+   * トランザクションで**（[ADR 0395](../../../docs/decisions/0395-create-recall-activity-clock-single-statement.md)
+   * 以後は**同一の1文で**）`tenant_activity.activity_seq` を `+1` する（UPSERT——行が
    * 無ければ `activity_seq = 1` の行を作る。`ON CONFLICT DO UPDATE` の `EXCLUDED` は
    * 使わない——`+1` は既存値に依存するため）。**`false`/未指定なら `UPDATE` を1本も
    * 撃たない**（既定 `'wall'` のテナントでは、この行を一度も触らない、という ADR の
@@ -2094,7 +2095,8 @@ export class PostgresMemoryStore implements MemoryStore {
     // Issue #1237: 省略時は1回だけ壁時計を読む（`advanceActivityClock` の分岐によらず
     // 同じ値を使う——下の3分岐はどれもこの1つの `insertRecall` を実行するだけである）。
     const createdAt = record.createdAt ?? new Date();
-    const insertRecall = sql`
+    // recalls の INSERT（3分岐で共通）。advance ありの分岐は、これを `WITH r AS (...)` の中へ入れる。
+    const insertRecallBody = sql`
       INSERT INTO recalls (
         id, tenant_id, subject_id, query, budget, omitted, usage, index_band, explain,
         returned_memories, created_at
@@ -2112,17 +2114,27 @@ export class PostgresMemoryStore implements MemoryStore {
       RETURNING id
     `;
 
+    // ADR 0395: advance ありの2分岐は、`recalls` の INSERT とカウンタの UPSERT を**1つの SQL 文**
+    // （data-modifying CTE）で撃つ。1文は1トランザクションで走るので、明示的な
+    // `BEGIN`/`COMMIT` は要らず（`requeueEmbedJobs` と同じ形）、どちらかが失敗すれば
+    // 両方が戻る（意味は「2文＋`db.transaction`」だったときと同じ）。
+    // 狙いはカウンタの行ロックを持つ時間を縮めること: 旧形は INSERT・UPSERT・COMMIT の
+    // 3往復のあいだロックを持ち、同じテナントへの同時 createRecall がそこで直列になっていた。
+    // 1文なら、ロックを取ってから解くまでにクライアントとの往復が挟まらない。
+    // `u`（UPSERT）は外側の SELECT から参照されないが、data-modifying CTE は参照の有無に
+    // よらず最後まで実行される（PostgreSQL の仕様）。
     if (record.advanceActivityClock === true) {
-      return this.db.transaction(async (tx) => {
-        const result = await tx.execute(insertRecall);
-        await tx.execute(sql`
+      const result = await this.db.execute(sql`
+        WITH r AS (${insertRecallBody}),
+        u AS (
           INSERT INTO tenant_activity (tenant_id, activity_seq, updated_at)
           VALUES (${ctx.tenantId}, 1, now())
           ON CONFLICT (tenant_id) DO UPDATE
             SET activity_seq = tenant_activity.activity_seq + 1, updated_at = now()
-        `);
-        return (result.rows[0] as unknown as { id: string }).id;
-      });
+        )
+        SELECT id FROM r
+      `);
+      return (result.rows[0] as unknown as { id: string }).id;
     }
 
     if (
@@ -2131,19 +2143,20 @@ export class PostgresMemoryStore implements MemoryStore {
       record.advanceActivityClock.scope === "subject"
     ) {
       const subjectId = record.advanceActivityClock.subjectId;
-      return this.db.transaction(async (tx) => {
-        const result = await tx.execute(insertRecall);
-        await tx.execute(sql`
+      const result = await this.db.execute(sql`
+        WITH r AS (${insertRecallBody}),
+        u AS (
           INSERT INTO tenant_subject_activity (tenant_id, subject_id, activity_seq, updated_at)
           VALUES (${ctx.tenantId}, ${subjectId}, 1, now())
           ON CONFLICT (tenant_id, subject_id) DO UPDATE
             SET activity_seq = tenant_subject_activity.activity_seq + 1, updated_at = now()
-        `);
-        return (result.rows[0] as unknown as { id: string }).id;
-      });
+        )
+        SELECT id FROM r
+      `);
+      return (result.rows[0] as unknown as { id: string }).id;
     }
 
-    const result = await this.db.execute(insertRecall);
+    const result = await this.db.execute(insertRecallBody);
     return (result.rows[0] as unknown as { id: string }).id;
   }
 
