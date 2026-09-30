@@ -572,6 +572,7 @@ export interface MemoryStoreConformanceOptions {
     supportsAbortIfForgotten?: boolean;
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
+    supportsPurgeExpiredRecalls?: boolean;
     supportsArchiveDecayed: boolean;
     supportsPurgeMemory: boolean;
     supportsMarkContestedPair: boolean;
@@ -605,6 +606,7 @@ export interface OutboxStoreConformanceOptions {
     peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
     supportsRealConcurrency?: boolean;
     supportsEraseTenant: boolean;
+    supportsPurgeCompletedJobs?: boolean;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;
 

@@ -193,6 +193,21 @@ export interface MemoryStoreConformanceOptions {
    */
   listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
   /**
+   * [ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * 対象の `MemoryStore` 実装が `purgeExpiredRecalls`（任意メソッド）を実装しているかどうか。
+   *
+   * ⚠ **`supportsAbortIfForgotten` と同じ、任意（省略可）の3状態フラグである**——必須にすると
+   * この口を知らない既存の呼び出し側の `describeMemoryStoreConformance(...)` がコンパイルできなく
+   * なる（`@mnemora/testkit` は公開されている。ADR 0237 の教訓）。
+   *
+   * - `true`: 契約の歯（境界・`recall_usages` ごと消える・消した recall への `recordUsage` が
+   *   拒まれる・テナント越境しない・`limit`/`reachedLimit`・`dryRun` で1行も変わらない）を実行する。
+   *   **各 `it` の冒頭で口の存在を要求する**——実装が無い adapter が `true` を名乗ると赤になる。
+   * - `false`: `expect(store.purgeExpiredRecalls).toBeUndefined()` を積極的に assert する。
+   * - **省略**: 「⚠ 未検査」の named it を1本だけ登録する（`it.skip` にしない）。
+   */
+  supportsPurgeExpiredRecalls?: boolean;
+  /**
    * ADR 0114: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
    * 実装しているかどうか。**必須。**
    *
@@ -510,6 +525,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsSupersedeWithNewMemories,
     supportsAbortIfForgotten,
     supportsPurgeExpiredEvents,
+    supportsPurgeExpiredRecalls,
     listPurgedEvents,
     supportsArchiveDecayed,
     supportsPurgeMemory,
@@ -5420,6 +5436,211 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       it("purgeExpiredEvents は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.purgeExpiredEvents).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // purgeExpiredRecalls（ADR 0404）。🔴 任意メソッド——`supportsPurgeExpiredRecalls` の3状態。
+    // -------------------------------------------------------------------
+
+    /** `createdAt` を指定して `recalls` の行を1件作る（`createRecall` の最小形）。 */
+    async function seedRecall(store: MemoryStore, ctx: Ctx, createdAt: Date): Promise<string> {
+      return store.createRecall(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        createdAt,
+        query: { text: "purge-expired-recalls" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic",
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
+    }
+
+    if (supportsPurgeExpiredRecalls === true) {
+      it("purgeExpiredRecalls は createdAt < olderThan の recall だけを消す（境界 createdAt === olderThan は対象外）", async () => {
+        const store = await createStore();
+        // 🔴 口が無い adapter が `true` を名乗ったら、ここで赤くなる。
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const cutoff = new Date("2025-06-01T00:00:00.000Z");
+        const old = await seedRecall(store, ctx, new Date("2025-05-31T23:59:59.999Z"));
+        const veryOld = await seedRecall(store, ctx, new Date("2020-01-01T00:00:00.000Z"));
+        const boundary = await seedRecall(store, ctx, cutoff);
+        const fresh = await seedRecall(store, ctx, new Date("2025-06-01T00:00:00.001Z"));
+
+        const result = await store.purgeExpiredRecalls!(ctx, { olderThan: cutoff, limit: 10 });
+
+        expect(result.purged).toBe(2);
+        expect(result.reachedLimit).toBe(false);
+        expect(result.dryRun).toBe(false);
+        expect(result.oldestPurgedAt).toEqual(new Date("2020-01-01T00:00:00.000Z"));
+        expect(result.newestPurgedAt).toEqual(new Date("2025-05-31T23:59:59.999Z"));
+        expect(await store.getRecall(ctx, old)).toBeNull();
+        expect(await store.getRecall(ctx, veryOld)).toBeNull();
+        expect(await store.getRecall(ctx, boundary)).not.toBeNull();
+        expect(await store.getRecall(ctx, fresh)).not.toBeNull();
+      });
+
+      it("purgeExpiredRecalls は対象が無ければ purged: 0 で、oldest/newest は null", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const kept = await seedRecall(store, ctx, new Date("2025-06-01T00:00:00.000Z"));
+
+        const result = await store.purgeExpiredRecalls!(ctx, {
+          olderThan: new Date("2025-06-01T00:00:00.000Z"),
+          limit: 10,
+        });
+
+        expect(result).toEqual({
+          purged: 0,
+          purgedUsages: 0,
+          reachedLimit: false,
+          oldestPurgedAt: null,
+          newestPurgedAt: null,
+          dryRun: false,
+        });
+        expect(await store.getRecall(ctx, kept)).not.toBeNull();
+      });
+
+      it("purgeExpiredRecalls はテナント越境しない", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx1: Ctx = { tenantId: "tenant-1" };
+        const ctx2: Ctx = { tenantId: "tenant-2" };
+        const longAgo = new Date("2020-01-01T00:00:00.000Z");
+        const mine = await seedRecall(store, ctx1, longAgo);
+        const theirs = await seedRecall(store, ctx2, longAgo);
+
+        const result = await store.purgeExpiredRecalls!(ctx1, {
+          olderThan: new Date("2025-01-01T00:00:00.000Z"),
+          limit: 10,
+        });
+
+        expect(result.purged).toBe(1);
+        expect(await store.getRecall(ctx1, mine)).toBeNull();
+        expect(await store.getRecall(ctx2, theirs)).not.toBeNull();
+      });
+
+      it("purgeExpiredRecalls は limit を超えた対象を reachedLimit: true で知らせ、古い順に消し、超えない呼び出しでは false になる", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const ids: string[] = [];
+        for (let i = 0; i < 5; i++) {
+          ids.push(await seedRecall(store, ctx, new Date(Date.UTC(2020, 0, 1 + i))));
+        }
+        const olderThan = new Date("2025-01-01T00:00:00.000Z");
+
+        const first = await store.purgeExpiredRecalls!(ctx, { olderThan, limit: 3 });
+        expect(first.purged).toBe(3);
+        expect(first.reachedLimit).toBe(true);
+        // 古い3件だけが消え、新しい2件は残る。
+        expect(await store.getRecall(ctx, ids[0]!)).toBeNull();
+        expect(await store.getRecall(ctx, ids[2]!)).toBeNull();
+        expect(await store.getRecall(ctx, ids[3]!)).not.toBeNull();
+        expect(first.newestPurgedAt).toEqual(new Date(Date.UTC(2020, 0, 3)));
+
+        // 残りちょうど limit 件は reachedLimit: false（purged === limit からの推測に頼らせない）。
+        const second = await store.purgeExpiredRecalls!(ctx, { olderThan, limit: 2 });
+        expect(second.purged).toBe(2);
+        expect(second.reachedLimit).toBe(false);
+      });
+
+      it("purgeExpiredRecalls は dryRun のとき1行も消さず、消していたら何が起きたかを返す", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1" }),
+        );
+        const recallId = await seedRecall(store, ctx, new Date("2020-01-01T00:00:00.000Z"));
+        await store.recordUsage(ctx, recallId, [memory.id]);
+
+        const result = await store.purgeExpiredRecalls!(ctx, {
+          olderThan: new Date("2025-01-01T00:00:00.000Z"),
+          limit: 10,
+          dryRun: true,
+        });
+
+        expect(result.dryRun).toBe(true);
+        expect(result.purged).toBe(1);
+        expect(result.purgedUsages).toBe(1);
+        expect(await store.getRecall(ctx, recallId)).not.toBeNull();
+        // 使用記録も残っている（再送は挿入が起きないので空配列）。
+        expect((await store.recordUsage(ctx, recallId, [memory.id])).insertedMemoryIds).toEqual([]);
+      });
+
+      it("purgeExpiredRecalls は recall_usages を一緒に消し（purgedUsages）、Memory 本体・新しい recall の使用記録は残す", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memoryA = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-recalls-a" }),
+        );
+        const memoryB = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-recalls-b" }),
+        );
+        const oldRecall = await seedRecall(store, ctx, new Date("2020-01-01T00:00:00.000Z"));
+        const freshRecall = await seedRecall(store, ctx, new Date("2025-06-01T00:00:00.000Z"));
+        await store.recordUsage(ctx, oldRecall, [memoryA.id, memoryB.id]);
+        await store.recordUsage(ctx, freshRecall, [memoryA.id]);
+
+        const result = await store.purgeExpiredRecalls!(ctx, {
+          olderThan: new Date("2025-01-01T00:00:00.000Z"),
+          limit: 10,
+        });
+
+        expect(result.purged).toBe(1);
+        // 古い recall の使用記録2行が一緒に消えた。
+        expect(result.purgedUsages).toBe(2);
+        // Memory 本体は無傷。
+        expect(await store.get(ctx, memoryA.id)).not.toBeNull();
+        expect(await store.get(ctx, memoryB.id)).not.toBeNull();
+        // 新しい recall の使用記録は残っている（再送は挿入が起きない）。
+        expect((await store.recordUsage(ctx, freshRecall, [memoryA.id])).insertedMemoryIds).toEqual(
+          [],
+        );
+      });
+
+      it("purgeExpiredRecalls が消した recall へは、もう recordUsage できない（Postgres は外部キー違反、InMemory は同じ検査で例外）", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredRecalls).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1" }),
+        );
+        const recallId = await seedRecall(store, ctx, new Date("2020-01-01T00:00:00.000Z"));
+        await store.recordUsage(ctx, recallId, [memory.id]);
+
+        await store.purgeExpiredRecalls!(ctx, {
+          olderThan: new Date("2025-01-01T00:00:00.000Z"),
+          limit: 10,
+        });
+
+        await expect(store.recordUsage(ctx, recallId, [memory.id])).rejects.toThrow();
+      });
+    } else if (supportsPurgeExpiredRecalls === false) {
+      it("purgeExpiredRecalls は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.purgeExpiredRecalls).toBeUndefined();
+      });
+    } else {
+      it(`⚠ 未検査: supportsPurgeExpiredRecalls が指定されていない — adapter "${name}" に対して purgeExpiredRecalls の歯は検査していない`, () => {
+        expect(supportsPurgeExpiredRecalls).toBeUndefined();
       });
     }
 

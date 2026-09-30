@@ -238,4 +238,48 @@ export interface OutboxStore {
    *   何度呼んでも安全。
    */
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+  /**
+   * [ADR 0404](../../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md):
+   * **完了した**ジョブ（`completed_at IS NOT NULL AND completed_at < opts.olderThan`）だけを消す。
+   * `eraseTenant` 以外に `outbox` の行を消す経路が無かった（ADR 0290 の 2026-09-30 追記、
+   * ADR 0357 の負債1）ことへの口。
+   *
+   * 🔴 **任意メソッドである。**理由は `eraseTenant?` と同じ。
+   *
+   * 契約:
+   * - **`opts.olderThan` は必須・既定の保持期間を持たない。**
+   * - **完了していない行は決して消さない**——claim 中（リース内でもリース切れでも）・未処理・
+   *   `failed_at` が付いた行のいずれも、どれだけ古くても対象外。**`failed` は完了ではない**
+   *   （扱いはオーナー判断。ADR 0404）。
+   * - 境界は `completed_at < olderThan`（`completed_at === olderThan` は対象外。
+   *   `MemoryStore.purgeExpiredEvents` と同じ）。並びは `completed_at` 昇順。
+   * - `opts.limit` は必須・既定値なし。対象が `limit` を超えれば `reachedLimit: true`。
+   * - `opts.dryRun === true` は1行も消さず、消していたら何が起きたかを返す。
+   * - 他テナントの行には触れない。
+   */
+  purgeCompletedJobs?(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
+}
+
+/** {@link OutboxStore.purgeCompletedJobs} の引数（ADR 0404）。 */
+export interface PurgeCompletedJobsOptions {
+  /** この日時より前に完了した（`completed_at < olderThan`）ジョブだけが対象。境界値は対象外。**既定値なし。** */
+  olderThan: Date;
+  /** 1回の呼び出しで消す行数の上限。**必須・既定値なし。**0以上の整数を渡す前提（負数の結果は未定義）。 */
+  limit: number;
+  /** `true` なら何も消さず、消していたら何が起きたかだけを返す。省略時 `false`。 */
+  dryRun?: boolean;
+}
+
+/** {@link OutboxStore.purgeCompletedJobs} の返り値（ADR 0404）。 */
+export interface PurgeCompletedJobsResult {
+  /** 消した行数（`dryRun` のときは消していたであろう行数）。 */
+  purged: number;
+  /** 対象が `opts.limit` より多かった（この呼び出しだけでは消しきれなかった）ことを示す専用の信号。 */
+  reachedLimit: boolean;
+  /** 消した行のうち最も古い `completedAt`。`purged === 0` なら `null`。 */
+  oldestPurgedAt: Date | null;
+  /** 消した行のうち最も新しい `completedAt`。`purged === 0` なら `null`。 */
+  newestPurgedAt: Date | null;
+  /** `opts.dryRun` の写し。 */
+  dryRun: boolean;
 }
