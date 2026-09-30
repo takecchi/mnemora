@@ -73,3 +73,18 @@
   - 決定1: `packages/postgres/src/__tests__/trigram-create-concurrency.postgres.test.ts`（4本、4つの pool）。(a) 拡張が無い DB（新しい DB を作って migrate 直後、5試行）、(b) 拡張も関数も在る DB（15ラウンド）、(c) 公開の `probeTrigramLexicalSupport` の同時呼び出し、(d) `EXTENSION_LOCK_KEY` を別のセッションが握っている間は `create()` が待ち、放されると成功する。直す前は4本とも赤、直した後は3回走らせて3回とも4本緑。
   - 既存の trigram・erase-tenant・migrate の歯（31ファイル）が緑であること。`trigram-lexical-store-unavailable-cause.test.ts`（偽の `Db`）は、`transaction` と lock の1回分を足した。`trigram-probe-dedicated-schema.postgres.test.ts` の「発行される CREATE EXTENSION の SQL 文字列」は、`pool.query` ではなく `pg.Client.prototype.query` を見る形にした（probe が専用接続で流れるため。SQL 文字列そのものは変わらない）。
   - **測っていないこと**: `runMigrations` が拡張を作る段と `create()` を実際に同時に流す競合（(d) は、キーを共有していることを、握られている間の待ちで確かめただけ）。`create()` の待ちに `lock_timeout` を敷いたときの例外の形。SQL_ASCII の DB での trigram の歯（`server_encoding_not_utf8` で `pg_trgm` を使えないので、`trigram-create-concurrency` はその脚を飛ばす。CI の SQL_ASCII 脚で最初に赤になって分かった）。vector・outbox の lock を縛る歯（変異試験で、`memory-store.ts` の lock を外すと決定2の歯は赤になる。`vector-store.ts` だけ、`outbox-store.ts` だけを外しても緑のままで、この2つの lock は歯で縛れていない。対象にした理由は、上の【判断】のとおり読み違いの構造が同じことだけである）。
+
+---
+
+## 追記（2026-10-01）: 決定3の対象を ADR 0437 で広げた
+
+クローン miku の決定（[ADR 0437](./0437-helpers-params-subject-ids-repurge.md)）。担い手が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜3・検討した代替案・引き受けた負債・これが覆るとしたら・測ったこと）は書き換えていない。**当時の記録として残す。
+
+決定3は `omitParamsFromError` を掛ける対象を、公開の独立関数 `runRecall`・`eraseTenant`・`purgeExpiredEventsForTenant` の3つとした。
+**同じ形の公開関数が、ほかにもあった**: `TenantSettingsStore` を第1引数に取る `read*`／`write*` の9本（`readDecayClock`・`readActivitySeq`・`readDefaultHalfLifeRecalls`・`readHasSubjectActivityCounters`・`readSubjectActivitySeqs`・`readSubjectActivitySeq`・`writeDecayClock`・`readTaxonomyMode`・`writeTaxonomyMode`）。
+これらは store が投げた例外をそのまま伝え、drizzle の `params:` が message に残っていた。
+
+**ADR 0437 決定1で、この9本にも同じ処理（`omitParamsFromError`）を掛けた。**例外そのものを返す点・べき等な処理である点は決定3のまま。
+決定3の「引き受けた負債」の「`Runtime` を通らず store を直接呼ぶ呼び出しの message は、依然として落とさない」は、この追記でも変わらない（store を直接呼ぶ経路には掛けていない）。

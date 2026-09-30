@@ -2244,6 +2244,43 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
+### 49. `getSubjectActivitySeqs` の `subjectIds` と `createRecall` の `advanceActivityClock.subjectId` が、孤立サロゲート・NUL を断るようになった。v1.1.0 より前に purge した行は、purge をかけ直すと消える（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0437](./decisions/0437-helpers-params-subject-ids-repurge.md)。
+
+⚠ **未リリース**。**番号は 49 である**——項目48 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**:
+  1. **(破壊的)** 次の2つの欄に孤立サロゲートか NUL（U+0000）を含む値を渡すと、`MalformedIdentifierError`（`kind: "malformed_identifier"`）で、書く・読む前に断る。
+     - `TenantSettingsStore.getSubjectActivitySeqs(ctx, subjectIds)` の `subjectIds` の各要素（`field` は `subjectIds[i]`）。
+     - `MemoryStore.createRecall` の `record.advanceActivityClock`（`{ scope: "subject", subjectId }`）の `subjectId`（`field` は `record.advanceActivityClock.subjectId`）。
+     以前は、NUL は Postgres で生の DB の例外（message に値が載る）、孤立サロゲートは通り、インメモリ実装は断らなかった。対をなすサロゲート（絵文字など）は、これまでどおり通る。`describeTenantSettingsStoreConformance`・`describeMemoryStoreConformance` に、これを検査する `it` が増えた（フラグ無しで走る）。項目41 の続き（ADR 0423 決定4(b) の一覧の漏れ）。
+  2. **(後方互換)** `@mnemora/core` の公開ヘルパー9本（`readDecayClock`・`readActivitySeq`・`readDefaultHalfLifeRecalls`・`readHasSubjectActivityCounters`・`readSubjectActivitySeqs`・`readSubjectActivitySeq`・`writeDecayClock`・`readTaxonomyMode`・`writeTaxonomyMode`）が投げる例外の message から、drizzle の `params:` より後ろが落ちる。
+  3. **(後方互換)** `MemoryStore` に任意メソッド `scrubPurged?` が増え、`runtime.purge` は `already_purged`（`dryRun` でないとき）にこれを呼ぶ。**v1.1.0 より前に purge した行は、purge をかけ直すと消える。かけ直すまでは残る。**
+
+**なぜ 1 を破壊的と数えるか**: 項目41 と同じ（通っていた入力が throw する。conformance suite の判定が厳しくなる）。2・3 は任意の追加と、例外の message の params を落とす変更だけで、数えない。
+
+**誰が影響を受けるか**: (a) `subjectIds`・`advanceActivityClock.subjectId` に外部の入力をそのまま渡している呼び出し側のうち、孤立サロゲートか NUL を含みうるもの（`Runtime.recall` は `ctx.subjectId` から渡す。`Runtime` の入口は ADR 0423 で既に断っている）。(b) 自前の `TenantSettingsStore`・`MemoryStore` を、`describeTenantSettingsStoreConformance`・`describeMemoryStoreConformance` に当てている利用者。(c) v1.0.0〜v1.0.2 で purge した行を持つ DB。
+
+**どう直すか**: (a) 識別子に外部の入力を渡す前に、孤立サロゲートと NUL を取り除くか、呼び出しを断る（`assertWellFormedIdentifier` を使える）。(b) この2つの欄に `assertWellFormedIdentifier` を掛け、書く・読む前に断る。(c) 下の SQL で、残っている行を探し、その `tenant_id` の `ctx` で `runtime.purge(ctx, { memoryIds })` をかけ直す（`scrubPurged` が、`tags`・`attributes`・claim key・`memory_labels` を消し、`labels.proposed_count` を外した本数だけ減らす。べき等）。
+
+```sql
+-- v1.1.0 より前に purge した行のうち、残骸が残っているもの（現行の schema に移行したあとで流す）
+SELECT id, tenant_id FROM memories
+WHERE purged_at IS NOT NULL
+  AND (
+    cardinality(tags) > 0
+    OR attributes <> '{}'::jsonb
+    OR claim_key_subject IS NOT NULL
+    OR claim_key_predicate IS NOT NULL
+    OR EXISTS (SELECT 1 FROM memory_labels ml WHERE ml.memory_id = memories.id)
+  );
+```
+
+**migration で遡って一括で消すことは、していない**（オーナーの領分）。`recalls.index_band` の digest（Issue #994 の系統）は、v1.0.x の purge が残したものが今も残っているかを**確かめていない**（範囲外）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

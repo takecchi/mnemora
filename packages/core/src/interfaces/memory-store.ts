@@ -1856,6 +1856,32 @@ export interface MemoryStore {
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   /**
+   * [ADR 0437](../../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3:
+   * **既に purge 済みの行**（`status = 'forgotten'` かつ `purgedAt` が非 `null`）に、
+   * v1.1.0（[ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md)）より前の
+   * `purgeMemory`（`content`/`digest`/`purgedAt` しか書き換えなかった）が残した
+   * `tags`・`attributes`・`claimKey`・label の紐付けを消し、`status: 'proposed'` の label の
+   * `proposedCount` を外した本数だけ減らす（床は0）。`Runtime.purge` が `already_purged` の
+   * 対象（`dryRun` でないとき）に、`VectorStore.deleteAcrossSpaces`（ADR 0382）と並べて
+   * ベストエフォートで呼ぶ。
+   *
+   * 🔴 **任意メソッドである。**必須にすると第三者の adapter を壊す。実装しない adapter では、
+   * `Runtime.purge` はこの後始末を飛ばす（`already_purged` の意味は変わらない）。
+   *
+   * 契約:
+   * - **`status = 'forgotten'` かつ `purgedAt` が非 `null` の行だけを対象にする。**未 purge の行
+   *   （`forgotten` でも、`active` などでも）・他テナントの行は、渡された id に含まれていても触らない。
+   * - **べき等。**残骸の無い行（今のコードで purge した行を含む）に対しては何も書かない
+   *   （`updatedAt` も動かさない）。**`proposedCount` は、実際に外した紐付けの本数だけ減らす**
+   *   ——2回目以降は外す紐付けが無いので減らない（二重に数え減らさない）。
+   * - 存在しない・形式不正な id は「無い」の一種として扱い、例外を投げない（`VectorStore.deleteAcrossSpaces`
+   *   と同じ）。空配列は何もしない。
+   * - `content`/`digest`/`purgedAt`/`status`・`memory_events`・`recalls` は書かない（`purgeMemory` の
+   *   仕事であり、ここは「その後の派生物」だけ）。**監査イベントは積まない**（新しい `kind` を足さない）。
+   * - 返り値は無い（`void`）。
+   */
+  scrubPurged?(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+  /**
    * Issue #197（ADR 0134）: `docs/memory-model.md` §11 行6「判定できない対向を検出
    * → 両側の `status='contested'`、`contested_with_id` を相互に設定」を書き込む口。
    *

@@ -2025,6 +2025,17 @@ function embeddingCleanupFailed(error: unknown): PurgeEmbeddingCleanup {
 }
 
 /**
+ * `"already_purged"` の後始末（`MemoryStore.scrubPurged`、v1.1.0 より前に purge した行の
+ * `tags`・`attributes`・claim key・label の紐付けの掃除。ADR 0437 決定3）が失敗したことの知らせ。
+ * {@link PurgeEmbeddingCleanup} と同じ形・同じ規律（失敗したときだけ付く。`kind` は変わらない）。
+ */
+export type PurgeResidueCleanup = { status: "failed"; error: string };
+
+function residueCleanupFailed(error: unknown): PurgeResidueCleanup {
+  return { status: "failed", error: describeFailure(error) };
+}
+
+/**
  * `runtime.purge` が対象1件ごとに返す結果（Issue #198、ADR 0124）。
  * `ForgetOutcome`/`RestoreArchivedOutcome` と同じ「無い」の分類（ADR 0008）に、
  * `purge` 固有の2値（`"would_purge"`/`"already_purged"`）を足す。
@@ -2045,6 +2056,9 @@ function embeddingCleanupFailed(error: unknown): PurgeEmbeddingCleanup {
  *   試みる**（Issue #1425、ADR 0382——埋め込みモデルを移した後に purge を再実行すると、
  *   旧 space に残った埋め込みをこの kind でも後始末できる）。`dryRun: true` のときは
  *   呼ばない。失敗したときだけ `embeddingCleanup` が付く（`"purged"` と同じ）。
+ *   **同じく `dryRun` が `false` なら、`MemoryStore.scrubPurged`（任意メソッド）もベストエフォートで
+ *   試みる**（ADR 0437——v1.1.0 より前の `purge` は `tags`・`attributes`・claim key・label の
+ *   紐付けを残していたので、purge をかけ直すとそれらが消える）。失敗したときだけ `residueCleanup` が付く。
  * - `"status_not_forgotten"`: 対象の `status` が `"forgotten"` ではなかった
  *   （`purge` は `forgotten` からのみ遷移できる、ADR 0124 決定1）。`status` に現在値が入る。
  *   **書き込みは一切起きていない。**
@@ -2066,7 +2080,12 @@ export type PurgeOutcome =
       embeddingCleanup?: PurgeEmbeddingCleanup;
     }
   | { memoryId: MemoryId; kind: "would_purge"; previousStatus: "forgotten" }
-  | { memoryId: MemoryId; kind: "already_purged"; embeddingCleanup?: PurgeEmbeddingCleanup }
+  | {
+      memoryId: MemoryId;
+      kind: "already_purged";
+      embeddingCleanup?: PurgeEmbeddingCleanup;
+      residueCleanup?: PurgeResidueCleanup;
+    }
   | { memoryId: MemoryId; kind: "status_not_forgotten"; status: Exclude<MemoryStatus, "forgotten"> }
   | { memoryId: MemoryId; kind: "not_found" }
   | { memoryId: MemoryId; kind: "conflicted"; observedStatus: MemoryStatus | null }
@@ -6773,6 +6792,30 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const actor = opts?.actor ?? { type: "system" };
     const dryRun = opts?.dryRun ?? false;
 
+    // `already_purged`（`dryRun` でないとき）の後始末。2つは独立にベストエフォートで試み、
+    // 片方の失敗がもう片方を止めない。`kind` は変えず、失敗だけを欄で知らせる。
+    // (1) 埋め込み（ADR 0382・0399）。(2) v1.1.0 より前に purge した行の残骸（ADR 0437 決定3。
+    // `scrubPurged` は任意メソッド——無い adapter では飛ばす）。
+    const cleanupAlreadyPurged = async (
+      cleanupCtx: Ctx,
+      id: MemoryId,
+      outcome: Extract<PurgeOutcome, { kind: "already_purged" }>,
+    ): Promise<void> => {
+      try {
+        await deps.vectorStore.deleteAcrossSpaces(cleanupCtx, [id]);
+      } catch (cleanupError) {
+        outcome.embeddingCleanup = embeddingCleanupFailed(cleanupError);
+      }
+      const scrubPurged = deps.memoryStore.scrubPurged;
+      if (scrubPurged !== undefined) {
+        try {
+          await scrubPurged.call(deps.memoryStore, cleanupCtx, [id]);
+        } catch (cleanupError) {
+          outcome.residueCleanup = residueCleanupFailed(cleanupError);
+        }
+      }
+    };
+
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
       const current = byId.get(lookupKey(id));
@@ -6799,12 +6842,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 消せるようにするため（`kind` の意味は変えない。書き込みが起きていない、という
         // 判定はそのまま）。`dryRun` のときは呼ばない。
         if (!dryRun) {
-          try {
-            await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
-          } catch (cleanupError) {
-            // 結果は変えず、失敗だけを任意の欄で知らせる（ADR 0399）。
-            alreadyPurged.embeddingCleanup = embeddingCleanupFailed(cleanupError);
-          }
+          await cleanupAlreadyPurged(ctx, id, alreadyPurged);
         }
         continue;
       }
@@ -6873,13 +6911,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             // Issue #1425 / ADR 0382: この分岐は purgeMemory を呼んだ後の競合の後始末
             // であり dryRun では到達しない（dryRun は purgeMemory 自体を呼ばない）——
             // 上の already_purged 分岐と同じくベストエフォートで埋め込みを消す。
-            try {
-              await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
-            } catch (cleanupError) {
-              // 握り潰さず、他の2箇所と同じく欄で知らせる（ADR 0399 の 2026-09-30 追記。
-              // 0399 は「握り潰しは2箇所」と書いたが、この3つ目が残っていた）。
-              racedAlreadyPurged.embeddingCleanup = embeddingCleanupFailed(cleanupError);
-            }
+            // 握り潰さず、欄で知らせる（ADR 0399 の 2026-09-30 追記）。ADR 0437: 残骸の掃除も同じ。
+            await cleanupAlreadyPurged(ctx, id, racedAlreadyPurged);
           } else if (refetched.status !== "forgotten") {
             byId.set(lookupKey(id), refetched);
             outcomes.push({

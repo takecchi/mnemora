@@ -1,4 +1,5 @@
 import type { Ctx } from "../ctx.js";
+import { omitParamsFromError } from "../failure-description.js";
 import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 
 /**
@@ -548,6 +549,22 @@ export const DECAY_CLOCK_UNSUPPORTED_MESSAGE =
   "this TenantSettingsStore does not support setDecayClock";
 
 /**
+ * [ADR 0437](../../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定1:
+ * 下の公開ヘルパー9本（`read*` / `write*`）は、store が投げた例外に `omitParamsFromError` を
+ * 掛けてから投げ直す（[ADR 0430](../../../../docs/decisions/0430-concurrent-create-erase-and-standalone-params.md)
+ * 決定3と同じ作法）。drizzle の `Failed query: <SQL>\nparams: <値>` の `params:` より後ろを落とす。
+ * 例外そのものを返す（新しい例外を作らない。`kind`・`cause` は変わらない）。
+ * 「未実装」のときに投げる `*_UNSUPPORTED_MESSAGE` の `Error` は params を持たないので通さない。
+ */
+async function omittingParams<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    throw omitParamsFromError(error);
+  }
+}
+
+/**
  * `getDecayClock` を持たない adapter では `DEFAULT_DECAY_CLOCK`（`'wall'`）へ倒す
  * （ADR 0165 決めたこと13）。
  *
@@ -559,7 +576,7 @@ export async function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Prom
   if (store.getDecayClock === undefined) {
     return DEFAULT_DECAY_CLOCK;
   }
-  return await store.getDecayClock(ctx);
+  return await omittingParams(() => store.getDecayClock!(ctx));
 }
 
 /**
@@ -570,7 +587,7 @@ export async function readActivitySeq(store: TenantSettingsStore, ctx: Ctx): Pro
   if (store.getActivitySeq === undefined) {
     return 0;
   }
-  return await store.getActivitySeq(ctx);
+  return await omittingParams(() => store.getActivitySeq!(ctx));
 }
 
 /**
@@ -584,7 +601,7 @@ export async function readDefaultHalfLifeRecalls(
   if (store.getDefaultHalfLifeRecalls === undefined) {
     return DEFAULT_HALF_LIFE_RECALLS;
   }
-  return await store.getDefaultHalfLifeRecalls(ctx);
+  return await omittingParams(() => store.getDefaultHalfLifeRecalls!(ctx));
 }
 
 /**
@@ -619,7 +636,7 @@ export async function readHasSubjectActivityCounters(
   if (store.hasSubjectActivityCounters === undefined) {
     return false;
   }
-  return await store.hasSubjectActivityCounters(ctx);
+  return await omittingParams(() => store.hasSubjectActivityCounters!(ctx));
 }
 
 /**
@@ -642,7 +659,7 @@ export async function readSubjectActivitySeqs(
     }
     return zeros;
   }
-  const result = await store.getSubjectActivitySeqs(ctx, [...subjectIds]);
+  const result = await omittingParams(() => store.getSubjectActivitySeqs!(ctx, [...subjectIds]));
   // 未実装/未使用の subjectId は 0 へ倒す——adapter が「行が無い＝キーを省略」して
   // 返しても、呼び出し側は毎回 `?? 0` を書かずに済む。
   const filled: SubjectActivitySeqs = {};
@@ -679,7 +696,7 @@ export async function writeDecayClock(
   if (store.setDecayClock === undefined) {
     throw new Error(DECAY_CLOCK_UNSUPPORTED_MESSAGE);
   }
-  await store.setDecayClock(ctx, clock);
+  await omittingParams(() => store.setDecayClock!(ctx, clock));
 }
 
 /**
@@ -702,7 +719,7 @@ export async function readTaxonomyMode(
   if (store.getTaxonomyMode === undefined) {
     return DEFAULT_TAXONOMY_MODE;
   }
-  return await store.getTaxonomyMode(ctx);
+  return await omittingParams(() => store.getTaxonomyMode!(ctx));
 }
 
 /**
@@ -718,5 +735,5 @@ export async function writeTaxonomyMode(
   if (store.setTaxonomyMode === undefined) {
     throw new Error(TAXONOMY_MODE_UNSUPPORTED_MESSAGE);
   }
-  await store.setTaxonomyMode(ctx, mode);
+  await omittingParams(() => store.setTaxonomyMode!(ctx, mode));
 }

@@ -2123,6 +2123,13 @@ export class InMemoryMemoryStore implements MemoryStore {
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(record.subjectId, "record.subjectId");
+    // ADR 0437 決定2: 書き込む先の subject のカウンタ（`tenant_subject_activity.subject_id`）も、書く前に断る。
+    if (typeof record.advanceActivityClock === "object" && record.advanceActivityClock !== null) {
+      assertWellFormedIdentifier(
+        record.advanceActivityClock.subjectId,
+        "record.advanceActivityClock.subjectId",
+      );
+    }
     assertRecallRecordStorable(record);
     const id = nextId("rcl");
     // Issue #1237: 省略時は壁時計。
@@ -2446,6 +2453,48 @@ export class InMemoryMemoryStore implements MemoryStore {
     const storedEvent = buildStoredMemoryEvent(ctx, { ...event, at });
     this.events.push(storedEvent);
     return snapshot({ memory, event: storedEvent });
+  }
+
+  /**
+   * [ADR 0437](../../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3:
+   * `packages/postgres` の `scrubPurged` と同じ契約。`forgotten` かつ `purgedAt` が非 `null` の
+   * 行だけを対象に、`tags`・`attributes`・`claimKey` を空にし、label の紐付けを外して
+   * `proposedCount` を外した本数だけ減らす。残骸の無い行は書き換えない（`updatedAt` も動かさない）。
+   * in-memory は同期区間で完結する（`await` を挟まない）ので、同時呼び出しでも二重には数えない。
+   */
+  async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    assertWellFormedCtx(ctx);
+    for (const id of memoryIds) {
+      const memory = this.rawGet(ctx, id);
+      if (!memory || memory.status !== "forgotten" || (memory.purgedAt ?? null) === null) {
+        continue;
+      }
+      if (
+        memory.tags.length > 0 ||
+        Object.keys(memory.attributes ?? {}).length > 0 ||
+        (memory.claimKey ?? null) !== null
+      ) {
+        memory.tags = [];
+        memory.attributes = {};
+        memory.claimKey = null;
+        memory.updatedAt = new Date();
+      }
+      const linkKey = this.memoryLabelKey(ctx.tenantId, id);
+      const linkedLabelNames = this.memoryLabels.get(linkKey);
+      if (linkedLabelNames !== undefined) {
+        for (const name of linkedLabelNames) {
+          const key = this.labelKey(ctx.tenantId, name);
+          const existing = this.labels.get(key);
+          if (existing !== undefined && existing.status === "proposed") {
+            this.labels.set(key, {
+              ...existing,
+              proposedCount: Math.max(existing.proposedCount - 1, 0),
+            });
+          }
+        }
+        this.memoryLabels.delete(linkKey);
+      }
+    }
   }
 
   /**

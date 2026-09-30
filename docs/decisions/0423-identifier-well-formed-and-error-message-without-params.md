@@ -109,3 +109,19 @@
     SQL の文・`cause` の SQLSTATE（`22P02`）が残ることを見た。
   - **測っていないこと**: 本物の2版の core が並ぶ環境での動作。`stack` の形が違うランタイム。`tags`・claim key・ラベル名に対する同じ検査の影響。
     本番規模のデータで、過去に U+FFFD へ置き換わって保存された識別子の有無。
+
+---
+
+## 追記（2026-10-01）: 決定4(b) の一覧に、`getSubjectActivitySeqs` の `subjectIds` と `createRecall` の `advanceActivityClock.subjectId` を加えた
+
+クローン miku の決定（[ADR 0437](./0437-helpers-params-subject-ids-repurge.md)）。担い手が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜6・検討した代替案・引き受けた負債・これが覆るとしたら・測ったこと）は書き換えていない。**当時の記録として残す。
+
+決定4(b) は、store の実装で断る口を列挙した。**次の2つが、その一覧から漏れていた**:
+
+- `TenantSettingsStore.getSubjectActivitySeqs(ctx, subjectIds)` の `subjectIds` の各要素。
+- `MemoryStore.createRecall` の `record.advanceActivityClock`（`{ scope: "subject", subjectId }`）の `subjectId`。`record.subjectId` は一覧に在った（`createRecall` の `subjectId`）が、書き込む先の subject のカウンタを指すこの欄は別の欄である。
+
+**ADR 0437 決定2で、この2つに `assertWellFormedIdentifier` を掛けた**（`@mnemora/postgres` と `@mnemora/testkit` のインメモリ実装。field 名は `subjectIds[i]`・`record.advanceActivityClock.subjectId`。書く・読む前に断る）。適合テストに、決定4の作法と同じ `it` を足した。通っていた入力が throw するようになるので、破壊的変更として数える。
+**一覧は、今もこれで網羅したとは言っていない**: 他に識別子を入力に持つ口が無いことは、機械では確かめていない（この追記が挙げた2つは、穴探しで見つかったものだけである）。
