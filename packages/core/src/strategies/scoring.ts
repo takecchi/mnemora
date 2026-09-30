@@ -1,5 +1,6 @@
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
 import type { ScoreBreakdown } from "../recall.js";
+import { DEFAULT_DECAY_CLOCK } from "../interfaces/tenant-settings-store.js";
 import type { DecayClock } from "../interfaces/tenant-settings-store.js";
 
 /**
@@ -323,7 +324,7 @@ function computeDecay(input: ScoringInput): number {
     halfLifeHours: input.halfLifeHours,
   });
 
-  const clock = input.decayClock ?? "wall";
+  const clock = input.decayClock ?? DEFAULT_DECAY_CLOCK;
   if (clock === "wall") {
     return wallDecay;
   }

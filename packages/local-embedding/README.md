@@ -487,6 +487,18 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 （初回推論のグラフ確保ぶんは残る）。ウォームアップのつもりで
 モデルへ勝手な入力を流さないため、意図してそうしてある。
 
+### 使い終わったら `dispose()`（任意）
+
+```ts check
+await embeddingProvider.dispose(); // モデル（ONNX のセッション）を手放す
+```
+
+- 上流（`@huggingface/transformers`）の `dispose()` に委ねる。一度も読み込んでいなければ何もしない。
+- 読み込み中・推論中に呼んでも、それらが終わるのを待ってから解放する。2回呼んでも安全。
+- 🔴 **呼んだ後の `embed()` / `warmup()` は例外になる**（空配列でも）。読み込み直さない——続けるなら新しいインスタンスを作ること。
+- `EmbeddingProvider` の interface には無い（この provider だけの任意の口）。`runtime` は呼ばない。
+  終了時に呼ぶのは利用者の仕事（[ADR 0419](../../docs/decisions/0419-local-embedding-provider-dispose.md)）。
+
 ### オプション
 
 | オプション       | 既定                                          |                                                                                                                                                                   |

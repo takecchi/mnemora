@@ -1718,7 +1718,7 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
 - `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を
   足した。`@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`
   （`InMemoryRelationStore`）が実装する。`packages/testkit` に新設の conformance suite
-  `describeRelationStoreConformance`（9 it）ができた——`packages/testkit`
+  `describeRelationStoreConformance` ができた——`packages/testkit`
   （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
   （`conformance.postgres.test.ts`）の両方が当てている。
 - `@mnemora/core` の `MemoryStore` に、新しい任意メソッド `markContestedGroup?`/
@@ -1742,7 +1742,7 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
 suite に対して走らせている利用者のうち、上の2つの任意フラグを `true` で渡しているが
 実装していない場合だけ。**`markContestedGroup?`/`resolveContestedGroup?` を実装しない・
 上の2つのフラグを渡さない利用者は影響を受けない**——後方互換。`RelationStore` を
-`Store` バンドルへ組み込むかどうかも任意（`RuntimeDeps.relationStore?`）——配線しなくても
+`RuntimeDeps.relationStore?` へ配線するかどうかも任意——配線しなくても
 `recall()` は今日どおり動く。
 
 ⚠ **非破壊の注記（オーナー回答 ask_human `d9364c91` の規律）**: `ContestedDetectionOutcome.
@@ -1765,8 +1765,7 @@ union 拡張一般の影響であり、この文書が破壊的変更として�
 （`memory_relations` テーブルを新設するだけ）。利用者は `mnemora-postgres-migrate`
 （または `runMigrations`）を打つこと。
 
-⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は1件
-（PR #1442・Issue #207・#933 PR2（ADR 0381））である。**
+⟹ **この項目（PR #1442・Issue #207・#933 PR2（ADR 0381））は、この節が数える破壊的変更である。**
 
 ### 31. テナント単位で全表から行を消す `eraseTenant` が増え、conformance suite に省略できない `supportsEraseTenant` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
@@ -1816,8 +1815,7 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 ほかのテナントの行も含めて表全体を走査する）、索引ありでは 0.50 秒だった。INSERT の遅れは
 約4〜5%（`memory_events` へ5万行、3回ずつ。測り方は ADR 0383）。
 
-⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は2件
-（PR #1442・Issue #207・#933 PR2（ADR 0381）、PR #1444・Issue #1207（ADR 0383））になった。**
+⟹ **この項目（PR #1444・Issue #1207（ADR 0383））も、この節が数える破壊的変更である。**
 
 ⚠ **非破壊の追記（2026-09-30、[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、
 [ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
@@ -1934,7 +1932,7 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
-⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更に、この項目（Issue #860）が加わる。**
+⟹ **この項目（Issue #860）も、この節が数える破壊的変更である。**
 ⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 ### 34. `RelationStore.link` が、両端の記憶が `ctx` のテナントに属さない（または実在しない）ときに例外を投げるようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
@@ -1984,7 +1982,84 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
-### 36. `describeOutboxStoreConformance`・`describeRelationStoreConformance`（`@mnemora/testkit`）が、adapter 間の食い違い4点を検査するようになった（`@mnemora/testkit`・`@mnemora/postgres`）
+### 36. `packages/testkit` の conformance suite が、別テナントの ctx からの呼び出しがそのテナントの行に触れない・見えないことを、より多くの口で検査するようになった（`@mnemora/testkit`）
+
+[PR #1498](https://github.com/takecchi/mnemora/pull/1498)。
+
+⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 41 である**——項目40 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `describeRelationStoreConformance`・`describeOutboxStoreConformance`・`describeTenantSettingsStoreConformance` に、テナントの条件を検査する `it` が増えた。対象の口は、`RelationStore` の `unlink` と kind を指定した `listRelated`、`OutboxStore` の `complete`・`fail`・`eraseTenant?`（`dryRun` を含む）・`purgeCompletedJobs?`、`TenantSettingsStore` の `getDefaultHalfLifeHours`・`hasSubjectActivityCounters?`・`eraseTenant?` の `dryRun`。suite の引数（適合フラグ・フック）と公開 API の型は変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に当たる。型検査は壊れないが、テナントの条件を持たない自前の実装は、suite を当てると新しく実行時に落ちる（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の規律。オーナーの回答 `6911db12` により、`v1.X.0` で出してよい）。項目23・24・27 と同じ判断である。
+
+**誰が影響を受けるか**: 自前の `RelationStore`・`OutboxStore`・`TenantSettingsStore` を上の suite に当てている利用者のうち、別テナントの行に触れる実装。`@mnemora/postgres` とインメモリの実装は通る。フラグを渡す・渡さないでは避けられない（新しい `it` はフラグ無しで走る）。
+
+**どう直すか**: 落ちた `it` の名前が指す口（`unlink`・`listRelated`・`complete`・`fail` など）に、`ctx.tenantId` の条件を足す。
+
+**DB マイグレーション**: 要らない。
+
+### 37. `describeMemoryStoreConformance` が、`reinforce`/`reinforceMany?` が `memory_events` を書かないことを、フラグ無しで検査するようになった（`@mnemora/testkit`）
+
+[Issue #871](https://github.com/takecchi/mnemora/issues/871)、[PR #1452](https://github.com/takecchi/mnemora/pull/1452)。
+
+⚠ **未リリース**。**番号は 37 である**——項目36 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `reinforce` の後で `memory_events` が1行も増えていないこと、`reinforceMany?` を実装していればそれも同じであることを検査する `it` が増えた（`docs/memory-model.md` §11 行4 が約束していた振る舞い）。型・フラグは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 項目36 と同じ。規律2 の ⛔ の「conformance スイートの判定を厳しくする変更」に当たる。CHANGELOG では `### Added` に載せていたが、`it` がフラグ無しで走るので、数え直した。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を suite に当てている利用者のうち、`reinforce`/`reinforceMany?` が強化のたびにイベントを書く実装。`reinforceMany` の `it` は、実装しない adapter では何も検査しない。
+
+**どう直すか**: 強化でイベントを積まないようにする。積みたい事情があるなら、`docs/memory-model.md` §11 行4 の約束と食い違うので、先にそちらを見ること。
+
+**DB マイグレーション**: 要らない。
+
+### 38. `describeMemoryStoreConformance` が、`aggregateScope` が `scopeAggregate: "skip"` を守ることを、フラグ無しで検査するようになった（`@mnemora/testkit`）
+
+[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)。
+
+⚠ **未リリース**。**番号は 38 である**——項目37 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `aggregateScope(ctx, scope, { scopeAggregate: "skip" })` の結果が、`groups` 空・`totalInScope` `0`・`countKind: "unknown"`（`filtered*`・`notIndexed.*` も `{ count: 0, countKind: "unknown" }`）であること、`digestBand` を指定したときは `digestEligible` が `unknown`・省略したときは `{ count: 0, countKind: "exact" }` であること、`scopeAggregate` の省略と `"exact"` の結果が同じであることを検査する `it` が増えた。`RecallQuery.scopeAggregate?`（任意の欄の追加）自体は非破壊と数える。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 項目36 と同じ。フラグ無しの `it` が、自前の `MemoryStore.aggregateScope` に新しい約束を課す。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を suite に当てている利用者のうち、`aggregateScope` が `opts.scopeAggregate` を読まない実装（`"skip"` を頼まれても集計して `"exact"` を返す）。⚠ CHANGELOG の以前の文面（`### Added`）は「実装しない adapter は常に `countKind: 'exact'` を返し続ける契約」と書いていたが、suite の実際の振る舞いは逆で、その形の実装は落ちる。なお、`packages/core/src/recall.ts` の `RecallQuery.scopeAggregate` の TSDoc に、同じ古い文面が残っている（この文書の PR は TSDoc を直していない）。
+
+**どう直すか**: `aggregateScope` が `opts.scopeAggregate === "skip"` を読み、件数集計を行わずに、上の値を返すようにする。集計クエリを実際に発行していないことまで suite に検査させたい場合は、`countScopeAggregateQueries` フックを渡す（任意）。
+
+**DB マイグレーション**: 要らない（`0028` の索引は別の話で、上の節の追記を見ること）。
+
+### 39. `describeMemoryStoreConformance` の `supportsListActiveClaimPredicates: true` の枝に、同着の並びの `it` が3本増えた（`@mnemora/testkit`）
+
+[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の続き、[PR #1484](https://github.com/takecchi/mnemora/pull/1484)。
+
+⚠ **未リリース**。**番号は 39 である**——項目38 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `listActiveClaimPredicates?` が、代表行の `created_at` が同じ predicate を、predicate のコードポイント順の昇順で返すこと、`limit` で切っても同じ先頭が残ること、照合順序（collation）に依らないことを検査する `it` が増えた。`@mnemora/postgres` は副キーに `claim_key_predicate COLLATE "C" ASC` を足した。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Changed` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 項目36 と同じ。CHANGELOG では `### Changed` に「非破壊（契約を締めただけ）」と書いていたが、判定を厳しくする変更なので、数え直した。
+
+**誰が影響を受けるか**: `listActiveClaimPredicates?` を実装し、`supportsListActiveClaimPredicates: true` を渡している利用者のうち、同着の並びが上の規則と違う実装。**フラグを渡していない・実装していない利用者は影響を受けない**（この項目は、項目37・38・40 と違い、フラグで避けられる）。
+
+**どう直すか**: 同着の副キーを predicate のコードポイント順の昇順にする。直せない間は `supportsListActiveClaimPredicates` を渡さない。
+
+**DB マイグレーション**: 要らない。
+
+### 40. `describeMemoryStoreConformance` が、`createObservationWithOutbox` が `opts.claimedBy` を守ることを、フラグ無しで検査するようになった（`@mnemora/testkit`）
+
+[ADR 0407](./decisions/0407-sync-observe-extract-job-lease.md)、[PR #1492](https://github.com/takecchi/mnemora/pull/1492)。
+
+⚠ **未リリース**。**番号は 40 である**——項目39 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `createObservationWithOutbox` に `opts.claimedBy` を渡すと outbox 行が claim 済み（`claimedBy`・`attempts: 1`）で作られること、省略すると未 claim・`attempts: 0` であることを検査する `it` が2本増えた。`opts.claimedBy?` 自体は任意の欄の追加である。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 項目36 と同じ。CHANGELOG では `### Fixed` に「非破壊（追加の任意欄のみ）」と書いていたが、`it` がフラグ無しで走るので、数え直した。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を suite に当てている利用者のうち、`claimedBy` を無視する実装。実行時の `observe({ extract: "sync" })` の穴が塞がらないのも同じ実装である。
+
+**どう直すか**: `claimedBy` が渡されたら、`claimed_at` = `opts.now`・`claimed_by`・`attempts: 1` で行を作る。
+### 41. `describeOutboxStoreConformance`・`describeRelationStoreConformance`（`@mnemora/testkit`）が、adapter 間の食い違い4点を検査するようになった（`@mnemora/testkit`・`@mnemora/postgres`）
 
 ⚠ **未リリース**（この節は `v1.1.0` より後の変更を数える）。**番号は 36 である**——項目35 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
