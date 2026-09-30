@@ -182,7 +182,7 @@ async function conflictAfterEmptyUpdate(
  * `memory_events` へ複数行を**1文**で入れ、**入力と同じ順**で返す（Issue #1449 PR1、ADR 0401）。
  * 行の id は JS 側で採番し、`RETURNING` の順序に依存せず id で入力順へ戻す。
  * 各列の式は、旧実装のメンバーごとの `INSERT ... VALUES` と同じ（`at` は `toPgTimestamp` の
- * 文字列を `timestamptz` へ、`actor`/`meta` は JSON 文字列を `jsonb` へ）。
+ * 文字列を `timestamptz` へ、`actor`/`meta` は `jsonb` へ）。
  */
 async function insertMemoryEventsBatch(
   tx: Tx,
@@ -190,20 +190,28 @@ async function insertMemoryEventsBatch(
   events: ReadonlyArray<NewMemoryEvent>,
 ): Promise<MemoryEvent[]> {
   const eventIds = events.map(() => randomUUID());
+  // 1つの JSON 配列（jsonb）で渡し、`jsonb_to_recordset` で列へ開く。`meta` は群の大きさに比例して
+  // 大きくなりうる（多者間の検出は全メンバーの id を載せる）ので、列ごとの `text[]` に JSON 文字列を
+  // 詰めて `::jsonb` へキャストする形（二重のエスケープと二重の構文解析）は採らない。
+  const payload = JSON.stringify(
+    events.map((e, i) => ({
+      id: eventIds[i],
+      memory_id: e.memoryId ?? null,
+      kind: e.kind,
+      at: toPgTimestamp(e.at ?? new Date()),
+      actor: e.actor,
+      digest_snapshot: e.digestSnapshot ?? null,
+      size_before_bytes: e.sizeBeforeBytes ?? null,
+      meta: e.meta,
+    })),
+  );
   const result = await tx.execute(sql`
     INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
-    SELECT e.id, ${ctx.tenantId}, e.memory_id, e.kind, e.at::timestamptz, e.actor::jsonb,
-           e.digest_snapshot, e.size_before_bytes, e.meta::jsonb
-    FROM unnest(
-      ${sql.param(eventIds)}::uuid[],
-      ${sql.param(events.map((e) => e.memoryId))}::uuid[],
-      ${sql.param(events.map((e) => e.kind))}::text[],
-      ${sql.param(events.map((e) => toPgTimestamp(e.at ?? new Date())))}::text[],
-      ${sql.param(events.map((e) => JSON.stringify(e.actor)))}::text[],
-      ${sql.param(events.map((e) => e.digestSnapshot ?? null))}::text[],
-      ${sql.param(events.map((e) => e.sizeBeforeBytes ?? null))}::integer[],
-      ${sql.param(events.map((e) => JSON.stringify(e.meta)))}::text[]
-    ) AS e(id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+    SELECT e.id, ${ctx.tenantId}, e.memory_id, e.kind, e.at, e.actor, e.digest_snapshot, e.size_before_bytes, e.meta
+    FROM jsonb_to_recordset(${payload}::jsonb) AS e(
+      id uuid, memory_id uuid, kind text, at timestamptz, actor jsonb,
+      digest_snapshot text, size_before_bytes integer, meta jsonb
+    )
     RETURNING *
   `);
   const byId = new Map<string, MemoryEvent>(
