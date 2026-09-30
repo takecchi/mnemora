@@ -122,6 +122,32 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect(await store.listRelated(ctxB, a1)).toEqual([]);
     });
 
+    it("listRelated は kind を渡した場合も、別テナントの ctx では関係を返さない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const a1 = await prepareMemoryId(ctxA);
+      const a2 = await prepareMemoryId(ctxA);
+
+      await store.link(ctxA, "contradicts", a1, a2);
+      expect((await store.listRelated(ctxA, a1, "contradicts")).map((r) => r.memoryId)).toEqual([
+        a2,
+      ]);
+      expect(await store.listRelated(ctxB, a1, "contradicts")).toEqual([]);
+    });
+
+    it("unlink は別テナントの ctx からは、同じ組を指定してもその行を消さない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const a1 = await prepareMemoryId(ctxA);
+      const a2 = await prepareMemoryId(ctxA);
+
+      await store.link(ctxA, "contradicts", a1, a2);
+      await store.unlink(ctxB, "contradicts", a1, a2);
+      expect((await store.listRelated(ctxA, a1)).map((r) => r.memoryId)).toEqual([a2]);
+    });
+
     it("ctx のテナントに属さない記憶を from に取る link は拒まれ、行は書かれない", async () => {
       const store = await createStore();
       const ctxA: Ctx = { tenantId: "tenant-a" };
