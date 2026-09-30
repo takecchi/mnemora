@@ -506,3 +506,19 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
 **決めたこと。**`@mnemora/postgres` の `memoryStore`・`vectorStore`・`outboxStore` の `eraseTenant` は、トランザクションの先頭でテナントごとの `pg_advisory_xact_lock` を取る。同じテナントへの同時呼び出しは、その port のトランザクションごとに直列になる。別のテナントは待たない。`tenantSettingsStore` は対象にしなかった（理由は ADR 0430）。`packages/core/src/erase-tenant.ts` の doc にも同じことを書いた。
 
 **残ること。**直列になるのは port ごとであり、`eraseTenant` 全体（4つの port をまたぐ呼び出し）ではない。
+
+## 追記（2026-10-01）: `0027` は、止めずに当てると動いているアプリと deadlock しうる（ADR 0442）
+
+⛔ 上の本文と、これまでの追記は書き換えていない。
+
+**何が分かったか。**この ADR が足した migration `0027_erase_tenant_fk_indexes.sql` は、1つのトランザクションの中で複数の表
+（`memory_events`・`recall_usages`・`memory_labels`・`memories` など）に `CREATE INDEX` を続けて撃ち、それぞれの表の `ShareLock` を
+コミットまで持つ。`observe()` のトランザクションは `memories` に書いたまま `memory_events` へ書くので、アプリの書き込みを止めずに当てると、
+2つが互い違いに表を取り合って deadlock（`40P01`）になりうる。上で書いた「索引を作るあいだ、書き込みが止まる」だけでは済まない。
+【実測】2026-10-01、PostgreSQL 17・ローカル、memories 10万件・recalls 3万件、observe・recall・tick を回しながら当てて5回のうち4回。
+migrate が犠牲になると `deadlock detected` で失敗してロールバックされ（再実行で当たる）、アプリが犠牲になると `observe()` が `40P01` で落ちる
+（observation は残り、extract のジョブはリース切れの後に `tick` が拾い直す）。
+
+**決めたこと。**文書だけを直した。`0027` は、アプリの書き込みを止めてから当てる（`docs/migration-v1.md` の該当項目、`packages/postgres/README.md`）。
+適用済みの migration を編集・分割することと、アプリ側に `40P01` の再試行を足すことはしていない（前者はリリースの方針に関わるのでオーナーへ回した）。
+`0027` 以外の同じ形の migration（`0020`・`0032` など）は測っていない。

@@ -1713,6 +1713,10 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
 [PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
 [ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)。
 
+⚠ **非破壊に数え直した（番号の参照を崩さないため、ここに残す）**: 下の「破壊的変更として数えない」の
+とおり 2026-10-01 に非破壊へ数え直した。置き場所は 🔴 の節のままで、項目を動かしていない
+（[ADR 0441](./decisions/0441-changelog-migration-refs-consumer-smoke-names.md)）。
+
 **何が変わったか**:
 
 - `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を
@@ -1729,7 +1733,7 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
   一部だけを渡した `resolveContestedGroup?` を専用のエラー
   （`ContestedGroupMembershipMismatchError`、新設）で拒む約束、有効期間の重なりの境目
   （半開区間・マイクロ秒精度）の約束も検査する。
-- 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking`
+- 中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Added`
   を見ること。**ここには複製しない。**
 
 **破壊的変更として数えない**（2026-10-01 に数え直した。書いた当初は、上の「数え方の規律への追記
@@ -1813,6 +1817,20 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 （[#1423](https://github.com/takecchi/mnemora/issues/1423) で訂正済み）が `memories`
 への同じ種類の索引で実測した「100万行で約2.1秒」の形である。この PR 自身は 100万行規模で
 測り直していない。書き込みの多い時間帯を避けて当てること。
+
+⚠ **2026-10-01 追記（[ADR 0442](./decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）: 止まるだけでなく、deadlock しうる。この migration は、アプリの書き込みを止めてから当てること。**
+0027 は1つのトランザクションの中で、`memory_events`・`recall_usages`・`memory_labels`・`memories` などに `CREATE INDEX` を続けて撃ち、
+それぞれの表の `ShareLock` をコミットまで持つ。一方 `observe()` のトランザクションは、`memories` に書いて `RowExclusiveLock` を持ったまま
+`memory_events` へ書く。2つが互い違いに表を取り合うので、止めずに当てると deadlock（SQLSTATE `40P01`）になりうる。
+【実測】2026-10-01、PostgreSQL 17・ローカル、memories 10万件・recalls 3万件の DB で、observe・recall・tick を4本のループで回しながら
+0025・0027〜0032 を当てた。5回のうち4回で deadlock になり、犠牲はどちらの側にもなった:
+- migrate 側が犠牲のとき（2回）: `migration 0027_erase_tenant_fk_indexes.sql failed: deadlock detected` で失敗する。ロールバックされ、台帳は進まない。
+  もう一度 `runMigrations` を当てれば適用される。
+- アプリ側が犠牲のとき（計4件）: `observe()` が `40P01` の例外で落ちる。その observation は保存されたまま、memory は作られない。
+  extract のジョブは claim されたまま残り、リースが切れた後に `tick` が拾い直して抽出する（同期抽出が途中で失敗したときと同じ扱い）。
+
+**未測定**: 0027 以外で複数の表を1トランザクションで触る migration（`0020`・`0032` など）が同じ形で deadlock するかは、測っていない。
+同じ形の migration も、書き込みを止めてから当てるのが安全である。
 
 なぜ索引が要るか（実測、[ADR 0383](./decisions/0383-erase-tenant.md)）: PG 17.11、消す
 テナント 10万 memories・ほかのテナント計20万 memories で、子の表を先に消してから

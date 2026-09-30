@@ -24,6 +24,8 @@ npm i @mnemora/postgres @mnemora/core
   5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる。`node10` は TypeScript 5.x なら
   パッケージの入口の型を解決できるが、`exports` を読まないので `@mnemora/testkit/fixtures` のような
   subpath は解決できず、TypeScript 6 で非推奨・7 で廃止された。2026-09-27 に TypeScript 5.0〜7.0 で実測）
+- **TypeScript の `lib`・`target` は ES2022 以上**。公開の `.d.ts` が `ErrorOptions`（ES2022 の lib）を使う（`trigram-lexical-store` の `TrigramLexicalStoreUnavailableError` のコンストラクタ。`@mnemora/core` の `memory-store`・`vector-store` の例外クラスも同じ）。
+  ES2021 以下で `skipLibCheck: false` だと `TS2304`、`skipLibCheck: true` だと `cause` の型が失われる
 - **CommonJS へ変換するテストランナー（ts-jest 等）からも読める。**配布物に
   `import.meta` を含めていないため（[ADR 0086](../../docs/decisions/0086-no-import-meta-in-published-artifacts.md)）。
   `import.meta` は CommonJS として解析されると**構文解析の時点で**落ちるので、
@@ -148,6 +150,22 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
   接続文字列の `options`・`PoolConfig.options`・`ALTER ROLE … SET lock_timeout='2s'` の3通りは、いずれも約2秒で失敗した。
   何も渡さない場合は、握っている側が手放す（約8秒後）まで待って成功した（`lockTimeoutMs: 100` は効かなかった）。
   **測っていないもの**: `ALTER DATABASE … SET`、`PGOPTIONS` 環境変数、pgbouncer などの接続プール越し（起動パラメータが落ちる構成がありうる）。
+- ⚠ **DDL がロックを待っている間は、その後ろに並んだアプリの操作も止まる**（[ADR 0442](../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
+  PostgreSQL は、待っている DDL より後から来たロックの要求を、その DDL の後ろに並べる。【実測】2026-10-01、PostgreSQL 17・ローカル。
+  8秒続くアプリのトランザクションが `memories` に書いている裏で、`CREATE INDEX`（`ShareLock`）を当てると、後から来た `observe()` の書き込みが
+  約8秒止まった（索引の構築そのものは約0.15秒。読み取りは止まらなかった）。`ALTER TABLE … ADD COLUMN`（`ACCESS EXCLUSIVE`）では、`recall()` も約8秒止まった。
+  接続側で `lock_timeout=3s` を渡すと、migrate が3秒で `lock timeout` の失敗になり、アプリが止まるのも3秒までで済んだ（アプリ側のエラーは0件）。
+  ⟹ 上の `lock_timeout` は、migrate の待ちだけでなく、**アプリが止まる時間の上限**にもなる。
+
+### ⚠ 複数の表を1トランザクションで触る migration（`0027` など）は、アプリの書き込みを止めてから当てる
+
+- `0027_erase_tenant_fk_indexes.sql` は1つのトランザクションで複数の表に `CREATE INDEX` を撃ち、それぞれの表のロックをコミットまで持つ。
+  `observe()` も複数の表（`memories` → `memory_events`）に書くので、止めずに当てると **deadlock（`40P01`）になりうる**。
+  【実測】2026-10-01、observe・recall・tick を回しながら当てて、5回のうち4回。migrate が犠牲なら `deadlock detected` で失敗してロールバックされ
+  （もう一度当てれば適用される）、アプリが犠牲なら `observe()` が `40P01` で落ちる（observation は残り、extract のジョブはリース切れの後に `tick` が拾い直す）。
+  詳細は [docs/migration-v1.md](../../docs/migration-v1.md) の `0027` の項目と ADR 0442。
+- **未測定**: `0027` 以外で複数の表を1トランザクションで触る migration（`0020`・`0032` など）。同じ形のものも、書き込みを止めてから当てるのが安全である。
+- 上の「複数プロセスが同時に実行しても安全（advisory lock で直列化する）」は、migrate どうしの話であり、動いているアプリとの同時実行は約束していない。
 - **時間切れになったとき**: そのファイルのトランザクションは `ROLLBACK` され、`migration <file> failed: canceling statement due to lock timeout`
   で throw される（`MigrationLockTimeoutError` ではない——あれは advisory lock の待ちの時間切れ）。台帳（`_mnemora_migrations`）にも
   載らないので、そのまま再実行できる（上の実測で、失敗後の台帳は空・列は増えていなかった）。
