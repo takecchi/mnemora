@@ -1,6 +1,6 @@
 // ===== dist/abort.d.ts =====
 export interface AbortOptions {
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
 }
 export declare function abortReason(signal: AbortSignal): unknown;
 export declare function isAbort(signal: AbortSignal | undefined): boolean;
@@ -36,11 +36,11 @@ import type { FindCorrectionCandidatesResult } from "./correction-candidates.js"
 import type { ContestedResolution, MarkContestedResult, ResolveContestedResult } from "./runtime.js";
 export interface ApplyCorrectionInput {
     discovery: FindCorrectionCandidatesResult;
-    correctedId?: MemoryId;
+    correctedId?: MemoryId | undefined;
     correctingId: MemoryId;
-    resolution?: ContestedResolution;
-    reason?: string;
-    actor?: EventActor;
+    resolution?: ContestedResolution | undefined;
+    reason?: string | undefined;
+    actor?: EventActor | undefined;
 }
 export type ApplyCorrectionResult = {
     kind: "awaiting_choice";
@@ -108,12 +108,12 @@ export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, cont
 export declare const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
 export interface ClaimKeyOptions {
     enabled: boolean;
-    knownPredicates?: string[];
-    detectContested?: boolean;
+    knownPredicates?: string[] | undefined;
+    detectContested?: boolean | undefined;
     knownPredicatesFromStore?: boolean | {
-        limit?: number;
-    };
-    knownSubjects?: string[];
+        limit?: number | undefined;
+    } | undefined;
+    knownSubjects?: string[] | undefined;
 }
 export declare const ClaimKeyOptionsSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
@@ -139,9 +139,9 @@ import type { Omission, RecalledMemory, RecalledScore, StageTrace } from "./reca
 export declare const DEFAULT_CORRECTION_CANDIDATE_LIMIT = 3;
 export interface FindCorrectionCandidatesInput {
     text: string;
-    limit?: number;
-    excludeMemoryIds?: readonly MemoryId[];
-    activityCounting?: "tenant" | "subject";
+    limit?: number | undefined;
+    excludeMemoryIds?: readonly MemoryId[] | undefined;
+    activityCounting?: "tenant" | "subject" | undefined;
 }
 export interface CorrectionCandidate {
     memoryId: MemoryId;
@@ -166,7 +166,7 @@ export interface FindCorrectionCandidatesResult {
 import { z } from "zod";
 export interface Ctx {
     tenantId: string;
-    subjectId?: string;
+    subjectId?: string | undefined;
 }
 export declare const CtxSchema: z.ZodObject<{
     tenantId: z.ZodString;
@@ -228,7 +228,7 @@ export type EraseTenantOutcome = {
 export interface EraseTenantOptions {
     confirmTenantId: string;
     limit: number;
-    dryRun?: boolean;
+    dryRun?: boolean | undefined;
 }
 export interface EraseTenantDeps {
     memoryStore: MemoryStore;
@@ -255,8 +255,8 @@ export type PurgeExpiredEventsForTenantOutcome = {
 export declare function computeEventRetentionCutoff(now: Date, days: number): Date;
 export interface PurgeExpiredEventsForTenantOptions {
     limit: number;
-    dryRun?: boolean;
-    now?: Date;
+    dryRun?: boolean | undefined;
+    now?: Date | undefined;
 }
 export declare function purgeExpiredEventsForTenant(ctx: Ctx, deps: {
     memoryStore: MemoryStore;
@@ -330,7 +330,7 @@ export declare const MemoryEventSchema: z.ZodObject<{
     meta: z.ZodRecord<z.ZodString, z.ZodUnknown>;
 }, z.core.$strip>;
 export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at"> & {
-    at?: Date;
+    at?: Date | undefined;
 };
 export declare const NewMemoryEventSchema: z.ZodObject<{
     tenantId: z.ZodString;
@@ -360,11 +360,11 @@ export declare const NewMemoryEventSchema: z.ZodObject<{
     meta: z.ZodRecord<z.ZodString, z.ZodUnknown>;
 }, z.core.$strip>;
 export interface EventFilter {
-    memoryId?: MemoryId;
-    kind?: MemoryEventKind;
-    since?: Date;
-    until?: Date;
-    limit?: number;
+    memoryId?: MemoryId | undefined;
+    kind?: MemoryEventKind | undefined;
+    since?: Date | undefined;
+    until?: Date | undefined;
+    limit?: number | undefined;
 }
 export declare const EventFilterSchema: z.ZodObject<{
     memoryId: z.ZodOptional<z.ZodString>;
@@ -452,9 +452,9 @@ export interface BuildNewMemoryParams {
     halfLifeHours: number;
     now: Date;
     digestFallbackLength: number;
-    activitySeq?: number;
-    halfLifeRecalls?: number;
-    claimKey?: ClaimKey | null;
+    activitySeq?: number | undefined;
+    halfLifeRecalls?: number | undefined;
+    claimKey?: ClaimKey | null | undefined;
 }
 export declare function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMemory;
 
@@ -585,15 +585,15 @@ import type { MemoryStatus } from "../memory.js";
 import type { ProvenanceKind } from "../provenance.js";
 export interface LexicalFilter {
     tenantId: string;
-    status?: MemoryStatus[];
-    subjectId?: string;
-    includeSubjectless?: boolean;
-    excludeProvenanceKinds?: ProvenanceKind[];
-    occurredAfter?: Date;
-    occurredBefore?: Date;
-    validAt?: Date;
-    attributes?: Attributes;
-    labels?: string[];
+    status?: MemoryStatus[] | undefined;
+    subjectId?: string | undefined;
+    includeSubjectless?: boolean | undefined;
+    excludeProvenanceKinds?: ProvenanceKind[] | undefined;
+    occurredAfter?: Date | undefined;
+    occurredBefore?: Date | undefined;
+    validAt?: Date | undefined;
+    attributes?: Attributes | undefined;
+    labels?: string[] | undefined;
 }
 export interface LexicalHit {
     memoryId: MemoryId;
@@ -691,16 +691,16 @@ export interface AggregateScopeOptions {
     digestBand?: {
         limit: number;
         excludeMemoryIds: readonly MemoryId[];
-    };
-    excludeProvenanceKinds?: readonly ProvenanceKind[];
-    scopeAggregate?: "exact" | "skip";
+    } | undefined;
+    excludeProvenanceKinds?: readonly ProvenanceKind[] | undefined;
+    scopeAggregate?: "exact" | "skip" | undefined;
 }
 export interface MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
-        now?: Date;
-        claimedBy?: string;
+        now?: Date | undefined;
+        claimedBy?: string | undefined;
     }): Promise<{
         observation: Observation;
         created: boolean;
@@ -708,8 +708,8 @@ export interface MemoryStore {
     }>;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -720,12 +720,12 @@ export interface MemoryStore {
     listBySourceObservation(ctx: Ctx, observationId: ObservationId, extractorVersion: string | null): Promise<Memory[]>;
     listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
     updateStatus(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts?: {
-        supersededById?: MemoryId;
-        expectedStatus?: MemoryStatus;
+        supersededById?: MemoryId | undefined;
+        expectedStatus?: MemoryStatus | undefined;
     }): Promise<Memory>;
     updateStatusWithEvent(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts: {
-        supersededById?: MemoryId;
-        expectedStatus?: MemoryStatus;
+        supersededById?: MemoryId | undefined;
+        expectedStatus?: MemoryStatus | undefined;
     }, event: NewMemoryEvent): Promise<{
         memory: Memory;
         event: MemoryEvent;
@@ -744,7 +744,7 @@ export interface MemoryStore {
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
     requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
-        now?: Date;
+        now?: Date | undefined;
     }): Promise<RequeueEmbedJobsResult>;
     supersedeWithNewMemories?(ctx: Ctx, news: ReadonlyArray<{
         input: NewMemory;
@@ -752,12 +752,12 @@ export interface MemoryStore {
     }>, supersede: ReadonlyArray<{
         id: MemoryId;
         supersededByIndex: number;
-        expectedStatus?: MemoryStatus;
+        expectedStatus?: MemoryStatus | undefined;
         event: NewMemoryEvent;
     }>, opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
-        buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -778,8 +778,8 @@ export interface MemoryStore {
         index: number;
         error: unknown;
     }>) => NewMemoryEvent, opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         written: Array<{
             index: number;
@@ -820,12 +820,12 @@ export interface MemoryStore {
     resolveContestedPair?(ctx: Ctx, first: {
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }, second: {
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }): Promise<{
         first: Memory;
@@ -853,7 +853,7 @@ export interface MemoryStore {
     resolveContestedGroup?(ctx: Ctx, members: ReadonlyArray<{
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }>): Promise<{
         members: Memory[];
@@ -880,16 +880,16 @@ export interface MemoryStore {
         limit: number;
     }): Promise<string[]>;
     restoreSupersededBy?(ctx: Ctx, supersededById: MemoryId, event: {
-        reason?: string;
-        actor?: EventActor;
+        reason?: string | undefined;
+        actor?: EventActor | undefined;
         at: Date;
     }, filter?: {
-        onlyMemoryIds?: MemoryId[];
+        onlyMemoryIds?: MemoryId[] | undefined;
     }): Promise<{
         restored: Memory[];
     }>;
     previewRestoreSupersededBy?(ctx: Ctx, supersededById: MemoryId, filter?: {
-        onlyMemoryIds?: MemoryId[];
+        onlyMemoryIds?: MemoryId[] | undefined;
     }): Promise<{
         candidates: Array<{
             memoryId: MemoryId;
@@ -902,7 +902,7 @@ export interface MemoryStore {
 }
 export interface EraseTenantStoreOptions {
     limit: number;
-    dryRun?: boolean;
+    dryRun?: boolean | undefined;
 }
 export interface EraseTenantResult {
     deleted: number;
@@ -923,15 +923,15 @@ export interface LabelSummary {
     registeredAt: Date | null;
 }
 export interface ReinforceOptions {
-    nowSeq?: number;
-    addOwnSubjectSeq?: boolean;
+    nowSeq?: number | undefined;
+    addOwnSubjectSeq?: boolean | undefined;
 }
 export interface ArchiveDecayedOptions {
     now: Date;
     limit: number;
-    nowSeq?: number;
-    clock?: DecayClock;
-    usesSubjectActivityCounters?: boolean;
+    nowSeq?: number | undefined;
+    clock?: DecayClock | undefined;
+    usesSubjectActivityCounters?: boolean | undefined;
 }
 export interface ArchiveDecayedResult {
     archived: Array<{
@@ -943,12 +943,12 @@ export interface ArchiveDecayedResult {
 export interface PurgeExpiredEventsOptions {
     olderThan: Date;
     limit: number;
-    dryRun?: boolean;
+    dryRun?: boolean | undefined;
 }
 export interface PurgeExpiredRecallsOptions {
     olderThan: Date;
     limit: number;
-    dryRun?: boolean;
+    dryRun?: boolean | undefined;
 }
 export interface PurgeExpiredRecallsResult {
     purged: number;
@@ -968,7 +968,7 @@ export interface PurgeExpiredEventsResult {
 export interface PurgeExpiredEventsByRetentionOptions {
     now: Date;
     limit: number;
-    dryRun?: boolean;
+    dryRun?: boolean | undefined;
 }
 export type PurgeExpiredEventsByRetentionOutcome = {
     kind: "unset";
@@ -980,7 +980,7 @@ export type PurgeExpiredEventsByRetentionOutcome = {
 };
 export interface RequeueEmbedJobsOptions {
     statuses: NotIndexedReason[];
-    memoryIds?: MemoryId[];
+    memoryIds?: MemoryId[] | undefined;
     limit: number;
 }
 export interface RequeueEmbedJobsResult {
@@ -994,7 +994,7 @@ import type { OutboxJobRecord } from "../outbox.js";
 import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 import type { OutboxJobKind } from "./scheduler.js";
 export interface ClaimOutboxJobsOptions {
-    kinds?: OutboxJobKind[];
+    kinds?: OutboxJobKind[] | undefined;
     limit: number;
     now: Date;
     claimedBy: string;
@@ -1011,10 +1011,10 @@ export declare function isOutboxLeaseConflictError(value: unknown): value is Out
 export interface OutboxStore {
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
     complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
-        at?: Date;
+        at?: Date | undefined;
     }): Promise<void>;
     fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
-        at?: Date;
+        at?: Date | undefined;
     }): Promise<void>;
     eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
     purgeCompletedJobs?(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
@@ -1022,7 +1022,7 @@ export interface OutboxStore {
 export interface PurgeCompletedJobsOptions {
     olderThan: Date;
     limit: number;
-    dryRun?: boolean;
+    dryRun?: boolean | undefined;
 }
 export interface PurgeCompletedJobsResult {
     purged: number;
@@ -1056,7 +1056,7 @@ export interface OutboxJob {
     tenantId: string;
     kind: OutboxJobKind;
     payload: Record<string, unknown>;
-    availableAt?: Date;
+    availableAt?: Date | undefined;
 }
 export interface Scheduler {
     enqueue(ctx: Ctx, job: OutboxJob): Promise<void>;
@@ -1142,19 +1142,19 @@ import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.
 import type { ProvenanceKind } from "../provenance.js";
 export interface VectorFilter {
     tenantId: string;
-    status?: MemoryStatus[];
-    decayFloorAtAfter?: Date;
-    subjectId?: string;
-    includeSubjectless?: boolean;
-    excludeProvenanceKinds?: ProvenanceKind[];
-    occurredAfter?: Date;
-    occurredBefore?: Date;
-    decayFloorSeqAfter?: number;
-    decayFloorSeqUsesSubjectCounters?: boolean;
-    decayFloorAnyAxis?: boolean;
-    validAt?: Date;
-    attributes?: Attributes;
-    labels?: string[];
+    status?: MemoryStatus[] | undefined;
+    decayFloorAtAfter?: Date | undefined;
+    subjectId?: string | undefined;
+    includeSubjectless?: boolean | undefined;
+    excludeProvenanceKinds?: ProvenanceKind[] | undefined;
+    occurredAfter?: Date | undefined;
+    occurredBefore?: Date | undefined;
+    decayFloorSeqAfter?: number | undefined;
+    decayFloorSeqUsesSubjectCounters?: boolean | undefined;
+    decayFloorAnyAxis?: boolean | undefined;
+    validAt?: Date | undefined;
+    attributes?: Attributes | undefined;
+    labels?: string[] | undefined;
 }
 export interface VectorEntry {
     memoryId: MemoryId;
@@ -1420,7 +1420,7 @@ export interface Observation {
     attributes?: Attributes;
 }
 export type NewObservation = Omit<Observation, "id" | "recordedAt"> & {
-    recordedAt?: Date;
+    recordedAt?: Date | undefined;
 };
 export declare const ObservationSchema: z.ZodObject<{
     id: z.ZodString;
@@ -1465,55 +1465,55 @@ export declare const ExtractionContextSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type ExtractionContext = z.infer<typeof ExtractionContextSchema>;
 export interface ObserveUtteranceInput {
-    extractionContext?: ExtractionContext;
+    extractionContext?: ExtractionContext | undefined;
     kind: "utterance";
-    subjectId?: string;
-    externalId?: string;
-    occurredAt?: Date;
-    validFrom?: Date;
-    validUntil?: Date;
-    extract?: ExtractMode;
-    subjectCandidates?: SubjectCandidatesInput;
-    attributes?: Attributes;
-    claimKey?: ClaimKeyOptions;
-    speaker?: string;
+    subjectId?: string | undefined;
+    externalId?: string | undefined;
+    occurredAt?: Date | undefined;
+    validFrom?: Date | undefined;
+    validUntil?: Date | undefined;
+    extract?: ExtractMode | undefined;
+    subjectCandidates?: SubjectCandidatesInput | undefined;
+    attributes?: Attributes | undefined;
+    claimKey?: ClaimKeyOptions | undefined;
+    speaker?: string | undefined;
     text: string;
 }
 export interface ObserveEventInput {
-    extractionContext?: ExtractionContext;
+    extractionContext?: ExtractionContext | undefined;
     kind: "event";
-    subjectId?: string;
-    externalId?: string;
-    occurredAt?: Date;
-    validFrom?: Date;
-    validUntil?: Date;
-    extract?: ExtractMode;
-    subjectCandidates?: SubjectCandidatesInput;
-    attributes?: Attributes;
-    claimKey?: ClaimKeyOptions;
+    subjectId?: string | undefined;
+    externalId?: string | undefined;
+    occurredAt?: Date | undefined;
+    validFrom?: Date | undefined;
+    validUntil?: Date | undefined;
+    extract?: ExtractMode | undefined;
+    subjectCandidates?: SubjectCandidatesInput | undefined;
+    attributes?: Attributes | undefined;
+    claimKey?: ClaimKeyOptions | undefined;
     name: string;
-    data?: Record<string, unknown>;
-    extractData?: boolean;
+    data?: Record<string, unknown> | undefined;
+    extractData?: boolean | undefined;
 }
 export interface ObserveDocumentInput {
-    extractionContext?: ExtractionContext;
+    extractionContext?: ExtractionContext | undefined;
     kind: "document";
-    subjectId?: string;
-    externalId?: string;
-    occurredAt?: Date;
-    validFrom?: Date;
-    validUntil?: Date;
-    extract?: ExtractMode;
-    subjectCandidates?: SubjectCandidatesInput;
-    attributes?: Attributes;
-    claimKey?: ClaimKeyOptions;
-    title?: string;
+    subjectId?: string | undefined;
+    externalId?: string | undefined;
+    occurredAt?: Date | undefined;
+    validFrom?: Date | undefined;
+    validUntil?: Date | undefined;
+    extract?: ExtractMode | undefined;
+    subjectCandidates?: SubjectCandidatesInput | undefined;
+    attributes?: Attributes | undefined;
+    claimKey?: ClaimKeyOptions | undefined;
+    title?: string | undefined;
     content: string;
-    extractTitle?: boolean;
+    extractTitle?: boolean | undefined;
 }
 export interface ObserveMemoryUsageInput {
     kind: "memory_usage";
-    externalId?: string;
+    externalId?: string | undefined;
     recallId: string;
     usedMemoryIds: string[];
 }
@@ -1779,9 +1779,9 @@ export declare function footprintSampleFromRecall(result: RecallResult): RecallF
 export declare function calibrateRecallFootprint(samples: readonly RecallFootprintSample[], fallback?: RecallFootprintProfile): RecallFootprintProfile;
 export interface RecallFootprintShape {
     memoryCountInScope: number;
-    limit?: number;
-    digestBandLimit?: number;
-    associationCount?: number;
+    limit?: number | undefined;
+    digestBandLimit?: number | undefined;
+    associationCount?: number | undefined;
 }
 export interface RecallFootprintEstimate {
     chars: number;
@@ -1835,8 +1835,8 @@ export type FootprintReason = {
 export interface FullLogComparisonInput {
     fullLogChars: number;
     shape: RecallFootprintShape;
-    profile?: RecallFootprintProfile;
-    tolerance?: number;
+    profile?: RecallFootprintProfile | undefined;
+    tolerance?: number | undefined;
 }
 export interface FullLogComparison {
     verdict: FullLogVerdict;
@@ -1877,13 +1877,13 @@ import type { RecallOutputValidationMode } from "./recall-output-validation.js";
 export interface RecallRuntimeDeps {
     memoryStore: MemoryStore;
     vectorStore: VectorStore;
-    relationStore?: RelationStore;
-    tenantSettingsStore?: TenantSettingsStore;
-    lexicalStore?: LexicalStore;
+    relationStore?: RelationStore | undefined;
+    tenantSettingsStore?: TenantSettingsStore | undefined;
+    lexicalStore?: LexicalStore | undefined;
     embeddingProvider: EmbeddingProvider;
     clock: Clock;
     tokenCounter: TokenCounter;
-    outputValidation?: RecallOutputValidationMode;
+    outputValidation?: RecallOutputValidationMode | undefined;
 }
 type ScoredCandidate = {
     memory: Memory;
@@ -2494,30 +2494,30 @@ export declare const StageTraceSchema: z.ZodObject<{
     detail: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
 }, z.core.$strip>;
 export interface RecallQuery {
-    text?: string;
-    vector?: number[];
-    tags?: string[];
-    attributes?: Attributes;
-    labels?: string[];
-    taxonomyGroups?: boolean;
-    relationMaxCount?: number;
-    occurredAfter?: Date;
-    occurredBefore?: Date;
-    limit?: number;
-    overFetchFactor?: number;
-    excludeProvenanceKinds?: ProvenanceKind[];
-    channels?: RecallChannel[];
-    budget?: RecallBudget;
-    scoreThreshold?: number;
-    digestBandLimit?: number;
-    scopeAggregate?: "exact" | "skip";
-    includeFullyDecayed?: boolean;
-    validAt?: Date;
-    includeOutsideValidity?: boolean;
-    association?: RecallAssociationQuery | null;
-    includeSubjectless?: boolean;
-    activityCounting?: "tenant" | "subject";
-    timeWeighting?: TimeWeightingPolicy;
+    text?: string | undefined;
+    vector?: number[] | undefined;
+    tags?: string[] | undefined;
+    attributes?: Attributes | undefined;
+    labels?: string[] | undefined;
+    taxonomyGroups?: boolean | undefined;
+    relationMaxCount?: number | undefined;
+    occurredAfter?: Date | undefined;
+    occurredBefore?: Date | undefined;
+    limit?: number | undefined;
+    overFetchFactor?: number | undefined;
+    excludeProvenanceKinds?: ProvenanceKind[] | undefined;
+    channels?: RecallChannel[] | undefined;
+    budget?: RecallBudget | undefined;
+    scoreThreshold?: number | undefined;
+    digestBandLimit?: number | undefined;
+    scopeAggregate?: "exact" | "skip" | undefined;
+    includeFullyDecayed?: boolean | undefined;
+    validAt?: Date | undefined;
+    includeOutsideValidity?: boolean | undefined;
+    association?: RecallAssociationQuery | null | undefined;
+    includeSubjectless?: boolean | undefined;
+    activityCounting?: "tenant" | "subject" | undefined;
+    timeWeighting?: TimeWeightingPolicy | undefined;
 }
 export declare const RECALL_CHANNELS: readonly [
     "ann",
@@ -2596,18 +2596,18 @@ export declare const RecallQuerySchema: z.ZodObject<{
     relationMaxCount: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export interface RecallScope {
-    subjectId?: string;
-    occurredAfter?: Date;
-    occurredBefore?: Date;
-    validAt?: Date;
-    decayFloorAtAfter?: Date;
-    decayFloorSeqAfter?: number;
-    decayFloorAnyAxis?: boolean;
-    decayFloorSeqUsesSubjectCounters?: boolean;
-    includeSubjectless?: boolean;
-    attributes?: Attributes;
-    labels?: string[];
-    taxonomyGroupCandidates?: string[];
+    subjectId?: string | undefined;
+    occurredAfter?: Date | undefined;
+    occurredBefore?: Date | undefined;
+    validAt?: Date | undefined;
+    decayFloorAtAfter?: Date | undefined;
+    decayFloorSeqAfter?: number | undefined;
+    decayFloorAnyAxis?: boolean | undefined;
+    decayFloorSeqUsesSubjectCounters?: boolean | undefined;
+    includeSubjectless?: boolean | undefined;
+    attributes?: Attributes | undefined;
+    labels?: string[] | undefined;
+    taxonomyGroupCandidates?: string[] | undefined;
 }
 export declare const RecallScopeSchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodString>;
@@ -2947,9 +2947,9 @@ export type RecallRecordReturnedMemories = {
 };
 export interface NewRecallRecord {
     tenantId: string;
-    subjectId?: string | null;
+    subjectId?: string | null | undefined;
     query: unknown;
-    budget?: RecallBudget | null;
+    budget?: RecallBudget | null | undefined;
     omitted: Omission[];
     usage: RecallUsage;
     indexBand: IndexBand;
@@ -2960,8 +2960,8 @@ export interface NewRecallRecord {
     advanceActivityClock?: boolean | {
         scope: "subject";
         subjectId: string;
-    };
-    createdAt?: Date;
+    } | undefined;
+    createdAt?: Date | undefined;
 }
 export interface RecallRecord {
     recallId: RecallId;
@@ -3007,12 +3007,12 @@ import type { RecallQuery, RecallRecord, RecallResult } from "./recall.js";
 import type { RecallOutputValidationMode } from "./recall-output-validation.js";
 import type { ReextractSkip } from "./strategies/reextract.js";
 export interface RuntimeConfig {
-    extractorVersion?: string;
-    llmModelId?: string;
-    promptVersion?: string;
-    digestFallbackLength?: number;
-    defaultClaimedBy?: string;
-    autoQueueConsolidateReflectOnExtract?: boolean;
+    extractorVersion?: string | undefined;
+    llmModelId?: string | undefined;
+    promptVersion?: string | undefined;
+    digestFallbackLength?: number | undefined;
+    defaultClaimedBy?: string | undefined;
+    autoQueueConsolidateReflectOnExtract?: boolean | undefined;
 }
 export declare const TICK_SUPPORTED_JOB_KINDS: readonly [
     "extract",
@@ -3026,18 +3026,18 @@ export interface RuntimeDeps {
     memoryStore: MemoryStore;
     outboxStore: OutboxStore;
     vectorStore: VectorStore;
-    lexicalStore?: LexicalStore;
-    relationStore?: RelationStore;
+    lexicalStore?: LexicalStore | undefined;
+    relationStore?: RelationStore | undefined;
     eventStore: EventStore;
     tenantSettingsStore: TenantSettingsStore;
     llmProvider: LLMProvider;
     embeddingProvider: EmbeddingProvider;
-    clock?: Clock;
+    clock?: Clock | undefined;
     hashContent: (content: string) => string;
-    config?: RuntimeConfig;
-    tokenCounter?: TokenCounter;
-    outputValidation?: RecallOutputValidationMode;
-    embeddingInput?: (memory: Memory) => string;
+    config?: RuntimeConfig | undefined;
+    tokenCounter?: TokenCounter | undefined;
+    outputValidation?: RecallOutputValidationMode | undefined;
+    embeddingInput?: ((memory: Memory) => string) | undefined;
 }
 export interface ObserveResult {
     observationId: ObservationId;
@@ -3105,8 +3105,8 @@ export type ForgetOutcome = {
     kind: "not_attempted";
 };
 export interface ForgetOptions {
-    reason?: string;
-    actor?: EventActor;
+    reason?: string | undefined;
+    actor?: EventActor | undefined;
 }
 export interface ForgetResult {
     outcomes: ForgetOutcome[];
@@ -3115,20 +3115,20 @@ export type ConsolidateTarget = {
     memoryIds: MemoryId[];
 } | {
     query: RecallQuery;
-    maxCandidates?: number;
+    maxCandidates?: number | undefined;
 } | {
     seedMemoryId: MemoryId;
-    maxCandidates?: number;
-    minAffinity?: number;
-    activityCounting?: "tenant" | "subject";
+    maxCandidates?: number | undefined;
+    minAffinity?: number | undefined;
+    activityCounting?: "tenant" | "subject" | undefined;
 };
 export declare const DEFAULT_CONSOLIDATE_MIN_AFFINITY = 0.8;
 export interface ConsolidateOptions {
     target: ConsolidateTarget;
-    dryRun?: boolean;
-    actor?: EventActor;
-    reason?: string;
-    signal?: AbortSignal;
+    dryRun?: boolean | undefined;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
+    signal?: AbortSignal | undefined;
 }
 export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
@@ -3182,20 +3182,20 @@ export type ReflectTarget = {
     memoryIds: MemoryId[];
 } | {
     query: RecallQuery;
-    maxCandidates?: number;
+    maxCandidates?: number | undefined;
 } | {
     seedMemoryId: MemoryId;
-    maxCandidates?: number;
-    minAffinity?: number;
-    activityCounting?: "tenant" | "subject";
+    maxCandidates?: number | undefined;
+    minAffinity?: number | undefined;
+    activityCounting?: "tenant" | "subject" | undefined;
 };
 export declare const DEFAULT_REFLECT_MIN_AFFINITY = 0.4;
 export interface ReflectOptions {
     target: ReflectTarget;
-    dryRun?: boolean;
-    actor?: EventActor;
-    reason?: string;
-    signal?: AbortSignal;
+    dryRun?: boolean | undefined;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
+    signal?: AbortSignal | undefined;
 }
 export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
 export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
@@ -3237,10 +3237,10 @@ export interface ReflectionResult {
 }
 export interface TickOptions {
     leaseMs: number;
-    limit?: number;
-    kinds?: OutboxJobKind[];
-    claimedBy?: string;
-    signal?: AbortSignal;
+    limit?: number | undefined;
+    kinds?: OutboxJobKind[] | undefined;
+    claimedBy?: string | undefined;
+    signal?: AbortSignal | undefined;
 }
 export interface UnsupportedOutboxJob {
     jobId: string;
@@ -3271,8 +3271,8 @@ export type RestoreArchivedTarget = {
     memoryIds: MemoryId[];
 };
 export interface RestoreArchivedOptions {
-    reason?: string;
-    actor?: EventActor;
+    reason?: string | undefined;
+    actor?: EventActor | undefined;
 }
 export type RestoreArchivedOutcome = {
     memoryId: MemoryId;
@@ -3303,7 +3303,7 @@ export interface RestoreArchivedResult {
 }
 export type RestoreSupersededTarget = {
     supersededById: MemoryId;
-    onlyMemoryIds?: MemoryId[];
+    onlyMemoryIds?: MemoryId[] | undefined;
 };
 export type SupersededOperationGroup = {
     supersededReason: string | null;
@@ -3315,9 +3315,9 @@ export declare function groupSupersededCandidatesByOperation(candidates: Readonl
     supersededReason: string | null;
 }>): SupersededOperationGroup[];
 export interface RestoreSupersededOptions {
-    reason?: string;
-    actor?: EventActor;
-    dryRun?: boolean;
+    reason?: string | undefined;
+    actor?: EventActor | undefined;
+    dryRun?: boolean | undefined;
 }
 export type RestoreSupersededOutcome = {
     memoryId: MemoryId;
@@ -3346,9 +3346,9 @@ export type PurgeTarget = {
     memoryIds: MemoryId[];
 };
 export interface PurgeOptions {
-    reason?: string;
-    actor?: EventActor;
-    dryRun?: boolean;
+    reason?: string | undefined;
+    actor?: EventActor | undefined;
+    dryRun?: boolean | undefined;
 }
 export type PurgeEmbeddingCleanup = {
     status: "failed";
@@ -3421,8 +3421,8 @@ export type MarkContestedOutcome = {
     kind: "not_attempted";
 };
 export interface MarkContestedOptions {
-    actor?: EventActor;
-    reason?: string;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
 }
 export interface MarkContestedResult {
     supported: boolean;
@@ -3469,8 +3469,8 @@ export type ResolveContestedOutcome = {
     kind: "not_attempted";
 };
 export interface ResolveContestedOptions {
-    actor?: EventActor;
-    reason?: string;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
 }
 export interface ResolveContestedResult {
     supported: boolean;
@@ -3504,8 +3504,8 @@ export type ResolveOrphanedContestedOutcome = {
     kind: "not_attempted";
 };
 export interface ResolveOrphanedContestedOptions {
-    actor?: EventActor;
-    reason?: string;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
 }
 export interface ResolveOrphanedContestedResult {
     supported: boolean;
@@ -3539,8 +3539,8 @@ export type MarkContestedGroupOutcome = {
     kind: "not_attempted";
 };
 export interface MarkContestedGroupOptions {
-    actor?: EventActor;
-    reason?: string;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
 }
 export interface MarkContestedGroupResult {
     supported: boolean;
@@ -3575,8 +3575,8 @@ export type ResolveContestedGroupOutcome = {
 };
 export type ContestedGroupResolution = ContestedResolution;
 export interface ResolveContestedGroupOptions {
-    actor?: EventActor;
-    reason?: string;
+    actor?: EventActor | undefined;
+    reason?: string | undefined;
 }
 export interface ResolveContestedGroupResult {
     supported: boolean;
@@ -3629,8 +3629,8 @@ export interface BuildConsolidatedMemoryParams {
     digestFallbackLength: number;
     halfLifeHours: number;
     now: Date;
-    activitySeq?: number;
-    halfLifeRecalls?: number;
+    activitySeq?: number | undefined;
+    halfLifeRecalls?: number | undefined;
 }
 export declare function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): NewMemory;
 export declare function computeAffinity(score: RecalledScore): number;
@@ -3638,7 +3638,7 @@ export declare function computeAffinity(score: RecalledScore): number;
 // ===== dist/strategies/decay.d.ts =====
 export interface DecayParams {
     recordedAt: Date;
-    lastReinforcedAt?: Date | null;
+    lastReinforcedAt?: Date | null | undefined;
     strength: number;
     halfLifeHours: number;
 }
@@ -3714,8 +3714,8 @@ export interface BuildReflectedMemoryParams {
     digestFallbackLength: number;
     halfLifeHours: number;
     now: Date;
-    activitySeq?: number;
-    halfLifeRecalls?: number;
+    activitySeq?: number | undefined;
+    halfLifeRecalls?: number | undefined;
 }
 export declare function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMemory;
 
@@ -3724,20 +3724,20 @@ import type { ScoreBreakdown } from "../recall.js";
 import type { DecayClock } from "../interfaces/tenant-settings-store.js";
 export interface ScoringInput {
     now: Date;
-    similarity?: number;
-    lexicalMatch?: number;
+    similarity?: number | undefined;
+    lexicalMatch?: number | undefined;
     tags: string[];
     queryTags: string[];
-    occurredAt?: Date | null;
+    occurredAt?: Date | null | undefined;
     recordedAt: Date;
-    lastReinforcedAt?: Date | null;
+    lastReinforcedAt?: Date | null | undefined;
     strength: number;
     halfLifeHours: number;
-    decayClock?: DecayClock;
-    nowSeq?: number;
-    decayBaseSeq?: number | null;
-    halfLifeRecalls?: number | null;
-    timeWeighting?: TimeWeightingPolicy;
+    decayClock?: DecayClock | undefined;
+    nowSeq?: number | undefined;
+    decayBaseSeq?: number | null | undefined;
+    halfLifeRecalls?: number | null | undefined;
+    timeWeighting?: TimeWeightingPolicy | undefined;
 }
 export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
 export declare const TIME_WEIGHTING_POLICIES: readonly [

@@ -82,11 +82,11 @@ export interface CreateBullmqTickDriverOptions {
    * 複数プロセス・複数 Worker が同じ queue に付くと、プロセスをまたいだ同時実行も
    * 起こりうる（上の doc 参照）——`concurrency` はあくまで「このプロセス内」の上限。
    */
-  concurrency?: number;
+  concurrency?: number | undefined;
   /** 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。 */
-  jobName?: string;
+  jobName?: string | undefined;
   /** `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。 */
-  onTickResult?: (result: TickResult) => void;
+  onTickResult?: ((result: TickResult) => void) | undefined;
   /**
    * tick の失敗と、Worker・Queue の異常を受け取る（観測用。省略可）。次の3つの経路から、`error` を渡して呼ばれる。
    *
@@ -112,7 +112,7 @@ export interface CreateBullmqTickDriverOptions {
    * 壊れたときに見えなくなる）。【実測】Redis が居ないポートを指すと、Queue と Worker がそれぞれ
    * ECONNREFUSED を emit した（bullmq 6.3.8）。
    */
-  onTickError?: (error: unknown) => void;
+  onTickError?: ((error: unknown) => void) | undefined;
 }
 
 export interface BullmqTickDriver {

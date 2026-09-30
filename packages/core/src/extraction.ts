@@ -577,7 +577,7 @@ export interface BuildNewMemoryParams {
    * `'wall'` 以外のときだけ呼び出し側が渡す）。`halfLifeRecalls` と対で渡すこと——
    * 片方だけ渡しても活動時計の3つ組は作られない（下記 `halfLifeRecalls` 参照）。
    */
-  activitySeq?: number;
+  activitySeq?: number | undefined;
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3:
    * この Memory の活動時計での半減期（単位: recall 回数）。**`activitySeq` と両方
@@ -586,13 +586,13 @@ export interface BuildNewMemoryParams {
    * `undefined` のまま Memory に書かれる（ADR 0165 決めたこと5「`'wall'` のテナントでは
    * 何も増えない」）。
    */
-  halfLifeRecalls?: number;
+  halfLifeRecalls?: number | undefined;
   /**
    * Issue #371（claim-key.ts の `ClaimKey` 参照）: opt-in で取れた claim key。
    * `undefined`/`null` はどちらも「鍵なし」——呼び出し側（`runtime.ts`）が claim key
    * opt-in を使っていない、またはこの候補について鍵が取れなかった場合。
    */
-  claimKey?: ClaimKey | null;
+  claimKey?: ClaimKey | null | undefined;
 }
 
 function buildProvenance(params: BuildNewMemoryParams): Provenance {

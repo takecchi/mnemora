@@ -60,12 +60,12 @@ export interface AnthropicLLMProviderOptions {
    * `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** ⚠ 必須。既定値を持たない（`@mnemora/openai` の `OpenAILLMProviderOptions.model` と
    * 同じ規律——どのモデルを使うかは呼び出し側が決める）。 */
   model: string;
   /** 省略時 {@link DEFAULT_MAX_TOKENS}。 */
-  maxTokens?: number;
+  maxTokens?: number | undefined;
   /**
    * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
    * キーの検査もしない。
@@ -76,7 +76,7 @@ export interface AnthropicLLMProviderOptions {
    * **`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している
    * 版と揃える必要が無い**（packages/anthropic/README.md 参照）。
    */
-  client?: AnthropicMessagesClient;
+  client?: AnthropicMessagesClient | undefined;
 }
 
 /** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。

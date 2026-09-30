@@ -376,7 +376,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; claimedBy?: string },
+    opts?: { now?: Date | undefined; claimedBy?: string | undefined },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
@@ -650,7 +650,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: { now?: Date | undefined; abortIfForgotten?: ReadonlyArray<MemoryId> | undefined },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
@@ -706,7 +706,7 @@ export class PostgresMemoryStore implements MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: { now?: Date | undefined; abortIfForgotten?: ReadonlyArray<MemoryId> | undefined },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -866,7 +866,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    opts?: { supersededById?: MemoryId | undefined; expectedStatus?: MemoryStatus | undefined },
   ): Promise<Memory> {
     assertWellFormedCtx(ctx);
     // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
@@ -931,7 +931,7 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    opts: { supersededById?: MemoryId | undefined; expectedStatus?: MemoryStatus | undefined },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
@@ -1031,13 +1031,13 @@ export class PostgresMemoryStore implements MemoryStore {
     supersede: ReadonlyArray<{
       id: MemoryId;
       supersededByIndex: number;
-      expectedStatus?: MemoryStatus;
+      expectedStatus?: MemoryStatus | undefined;
       event: NewMemoryEvent;
     }>,
     opts?: {
-      now?: Date;
-      abortIfForgotten?: ReadonlyArray<MemoryId>;
-      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
@@ -2641,7 +2641,7 @@ export class PostgresMemoryStore implements MemoryStore {
   async requeueEmbedJobs(
     ctx: Ctx,
     opts: RequeueEmbedJobsOptions,
-    writeOpts?: { now?: Date },
+    writeOpts?: { now?: Date | undefined },
   ): Promise<RequeueEmbedJobsResult> {
     assertWellFormedCtx(ctx);
     const target = buildRequeueEmbedTargetSelect(ctx, opts);
@@ -3193,13 +3193,13 @@ export class PostgresMemoryStore implements MemoryStore {
     first: {
       id: MemoryId;
       status: "active" | "superseded";
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     },
     second: {
       id: MemoryId;
       status: "active" | "superseded";
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
@@ -3551,7 +3551,7 @@ export class PostgresMemoryStore implements MemoryStore {
     members: ReadonlyArray<{
       id: MemoryId;
       status: "active" | "superseded";
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
@@ -3733,8 +3733,8 @@ export class PostgresMemoryStore implements MemoryStore {
   async restoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
-    event: { reason?: string; actor?: EventActor; at: Date },
-    filter?: { onlyMemoryIds?: MemoryId[] },
+    event: { reason?: string | undefined; actor?: EventActor | undefined; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] | undefined },
   ): Promise<{ restored: Memory[] }> {
     assertWellFormedCtx(ctx);
     // 入口の正規化（`normalizeUuidCase`）。`meta.supersededById` に写す値を、列（`superseded_by_id`）の値と揃える。
@@ -3830,7 +3830,7 @@ export class PostgresMemoryStore implements MemoryStore {
   async previewRestoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
-    filter?: { onlyMemoryIds?: MemoryId[] },
+    filter?: { onlyMemoryIds?: MemoryId[] | undefined },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
     assertWellFormedCtx(ctx);
     if (!isUuidLike(supersededById)) {

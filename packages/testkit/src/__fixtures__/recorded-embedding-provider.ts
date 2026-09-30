@@ -28,7 +28,7 @@ export interface RecordedEmbeddingProviderOptions {
    * カセットを読んだ場合、ベクトルは正常に引けてしまい、順位も出てしまう——
    * **数字が出るのに意味が違う**という最も見つけにくい壊れ方になる。ここで照合する。
    */
-  expectedSpace?: EmbeddingSpaceId;
+  expectedSpace?: EmbeddingSpaceId | undefined;
 }
 
 /**

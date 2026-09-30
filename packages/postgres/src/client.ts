@@ -106,7 +106,8 @@ export interface PostgresClient {
  */
 export function createPostgresClient(
   connectionString: string,
-  config?: PoolConfig & SchemaNamespaceOptions & { onPoolError?: (error: Error) => void },
+  config?: PoolConfig &
+    SchemaNamespaceOptions & { onPoolError?: ((error: Error) => void) | undefined },
 ): PostgresClient {
   const { schema: namespaceSchema, extensionSchema, onPoolError, ...poolConfig } = config ?? {};
 

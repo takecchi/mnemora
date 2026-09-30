@@ -42,14 +42,14 @@ export interface ScoringInput {
   /** スコアを計算する時点（`decay`・`freshness` の計算に使う）。 */
   now: Date;
   /** ANN 経由の場合のみ渡す。0〜1 の類似度（距離から変換済み）。 */
-  similarity?: number;
+  similarity?: number | undefined;
   /**
    * 語彙チャンネルが引き当てた場合のみ渡す（ADR 0084）。
    * **`(0, 1]` の被覆率を取る**（ADR 0092。一致したクエリ語彙数 ÷ クエリ語彙の総数）
    * ——理由と、それが順位に何を意味するかは `ScoreBreakdown.lexicalMatch`
    * （`recall.ts`）の doc に書いてある。
    */
-  lexicalMatch?: number;
+  lexicalMatch?: number | undefined;
   /** 候補の Memory の `tags`。 */
   tags: string[];
   /** `RecallQuery.tags`（`tagMatch` に使う）。 */
@@ -58,11 +58,11 @@ export interface ScoringInput {
    * 候補の Memory の `occurredAt`。`freshness` の起点になる（無ければ `recordedAt`。どちらの `timeWeighting` でも）。
    * `timeWeighting` が `"eventAwareFreshness"` で、この値が無いときは、`freshness` を最大にする。
    */
-  occurredAt?: Date | null;
+  occurredAt?: Date | null | undefined;
   /** 候補の Memory の `recordedAt`。 */
   recordedAt: Date;
   /** 候補の Memory の `lastReinforcedAt`（`decay` の起点。無ければ `recordedAt`）。 */
-  lastReinforcedAt?: Date | null;
+  lastReinforcedAt?: Date | null | undefined;
   /** 候補の Memory の `strength`。 */
   strength: number;
   /** 候補の Memory の `halfLifeHours`。 */
@@ -74,13 +74,13 @@ export interface ScoringInput {
    * 揃っていなければ壁時計へフォールバックする——「揃っていない」は「この軸に床が無い
    * （NULL）＝活動時計では沈まない」（ADR 0165 決めたこと4）と同じ向きの判断である。
    */
-  decayClock?: DecayClock;
+  decayClock?: DecayClock | undefined;
   /** 活動時計の「いま」（`TenantSettingsStore.getActivitySeq` の値）。 */
-  nowSeq?: number;
+  nowSeq?: number | undefined;
   /** `Memory.decayBaseSeq`。活動時計の起点。 */
-  decayBaseSeq?: number | null;
+  decayBaseSeq?: number | null | undefined;
   /** `Memory.halfLifeRecalls`。活動時計での Memory 単位の半減期。 */
-  halfLifeRecalls?: number | null;
+  halfLifeRecalls?: number | null | undefined;
   /**
    * **段2の時間項の方針**（Issue #690、
    * [ADR 0300](../../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
@@ -95,7 +95,7 @@ export interface ScoringInput {
    * であり、忘却ゲート（`decay_floor_at`/`decay_floor_seq`）・`validAt` ゲートは
    * この欄を一切参照しない（`recall-runtime.ts` の段1押し下げ・後置フィルタの述語を見ること）。
    */
-  timeWeighting?: TimeWeightingPolicy;
+  timeWeighting?: TimeWeightingPolicy | undefined;
 }
 
 /** 候補1件のスコアの内訳を計算する純関数（上の doc）。上界を宣言する戦略は {@link BoundedScoringStrategy}。 */

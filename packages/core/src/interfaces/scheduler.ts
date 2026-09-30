@@ -28,7 +28,7 @@ export interface OutboxJob {
   /** ジョブの中身（種別ごとの JSON）。 */
   payload: Record<string, unknown>;
   /** 処理してよい最早の時刻（`outbox.available_at` に対応する）。省略できる。⚠ `InlineScheduler` はこの値を見ず、その場で実行する。 */
-  availableAt?: Date;
+  availableAt?: Date | undefined;
 }
 
 /**

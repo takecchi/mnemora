@@ -27,7 +27,7 @@ export interface AbortOptions {
    * 無視する adapter）でも、呼んだ Runtime の口は返る——runtime 自身が provider の Promise と
    * abort を競わせるため（`runAbortable` 参照）。
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**

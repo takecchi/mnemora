@@ -411,7 +411,7 @@ core を組み立てる合成ルート（どの adapter を使うかは server �
 ```ts
 interface Ctx {
   tenantId: string;
-  subjectId?: string;
+  subjectId?: string | undefined;
 }
 ```
 
@@ -427,14 +427,14 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; claimedBy?: string }
+    opts?: { now?: Date | undefined; claimedBy?: string | undefined }
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   createMemoryWithOutbox(
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: { now?: Date | undefined; abortIfForgotten?: ReadonlyArray<MemoryId> | undefined }
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -448,13 +448,13 @@ interface MemoryStore {
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus }
+    opts?: { supersededById?: MemoryId | undefined; expectedStatus?: MemoryStatus | undefined }
   ): Promise<Memory>;
   updateStatusWithEvent(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    opts: { supersededById?: MemoryId | undefined; expectedStatus?: MemoryStatus | undefined },
     event: NewMemoryEvent
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
@@ -484,7 +484,7 @@ interface MemoryStore {
   requeueEmbedJobs(
     ctx: Ctx,
     opts: RequeueEmbedJobsOptions,
-    writeOpts?: { now?: Date }
+    writeOpts?: { now?: Date | undefined }
   ): Promise<RequeueEmbedJobsResult>;
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -492,13 +492,13 @@ interface MemoryStore {
     supersede: ReadonlyArray<{
       id: MemoryId;
       supersededByIndex: number;
-      expectedStatus?: MemoryStatus;
+      expectedStatus?: MemoryStatus | undefined;
       event: NewMemoryEvent;
     }>,
     opts?: {
-      now?: Date;
-      abortIfForgotten?: ReadonlyArray<MemoryId>;
-      buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
@@ -513,7 +513,7 @@ interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> }
+    opts?: { now?: Date | undefined; abortIfForgotten?: ReadonlyArray<MemoryId> | undefined }
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -541,13 +541,13 @@ interface MemoryStore {
     first: {
       id: MemoryId;
       status: 'active' | 'superseded';
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     },
     second: {
       id: MemoryId;
       status: 'active' | 'superseded';
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     }
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
@@ -566,7 +566,7 @@ interface MemoryStore {
     members: ReadonlyArray<{
       id: MemoryId;
       status: 'active' | 'superseded';
-      supersededById?: MemoryId;
+      supersededById?: MemoryId | undefined;
       event: NewMemoryEvent;
     }>
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
@@ -599,13 +599,13 @@ interface MemoryStore {
   restoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
-    event: { reason?: string; actor?: EventActor; at: Date },
-    filter?: { onlyMemoryIds?: MemoryId[] }
+    event: { reason?: string | undefined; actor?: EventActor | undefined; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] | undefined }
   ): Promise<{ restored: Memory[] }>;
   previewRestoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
-    filter?: { onlyMemoryIds?: MemoryId[] }
+    filter?: { onlyMemoryIds?: MemoryId[] | undefined }
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
   listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
   registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
@@ -1268,14 +1268,14 @@ interface OutboxStore {
     ctx: Ctx,
     jobId: string,
     expectedAttempts: number,
-    opts?: { at?: Date }
+    opts?: { at?: Date | undefined }
   ): Promise<void>;
   fail(
     ctx: Ctx,
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date }
+    opts?: { at?: Date | undefined }
   ): Promise<void>;
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
   purgeCompletedJobs?(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;

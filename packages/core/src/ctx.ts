@@ -51,7 +51,7 @@ export interface Ctx {
   /** 隔離の単位（必須）。呼び出し側が渡す不透明な文字列で、store はこの値で行を分ける。跨いだら事故である。 */
   tenantId: string;
   /** テナントの中の整理の単位（利用者など。省略できる）。**省略すると、テナント全体が対象になる**（packages/core/README.md）。書き込む口では、主題の無い記憶として扱う。 */
-  subjectId?: string;
+  subjectId?: string | undefined;
 }
 
 /** `Ctx` の zod スキーマ。値を実行時に検査するときに使う（型 `Ctx` と揃えてある）。 */

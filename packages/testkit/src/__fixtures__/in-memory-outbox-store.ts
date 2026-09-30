@@ -126,7 +126,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     ctx: Ctx,
     jobId: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
@@ -150,7 +150,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     jobId: string,
     error: string,
     expectedAttempts: number,
-    opts?: { at?: Date },
+    opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);

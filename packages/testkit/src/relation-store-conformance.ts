@@ -28,7 +28,7 @@ export interface RelationStoreConformanceOptions {
    * `true` のとき、実装が無ければ赤にする。省略・`false` のとき、実装が無ければ `listRelatedMany` の節は skip する
    * （実装していない adapter に、既存の判定より厳しいものを課さない）。実装が有れば、宣言に依らず節はかかる。
    */
-  implementsListRelatedMany?: boolean;
+  implementsListRelatedMany?: boolean | undefined;
 }
 
 /**

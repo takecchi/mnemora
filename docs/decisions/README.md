@@ -437,5 +437,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0423](./0423-identifier-well-formed-and-error-message-without-params.md) | 識別子の文字の扱いを揃え、区別できない値を入口で断る。利用者へ伝わる例外の message から入力値を落とす | 採用 (2026-09) |
 | [0426](./0426-in-memory-erase-tenant-postgres-alignment.md) | testkit のインメモリ `eraseTenant` を Postgres 実装に揃える（`tenant_subject_activity` の行数と、埋め込みの CASCADE） | 採用 (2026-09) |
 | [0427](./0427-events-purged-at-millisecond.md) | `events_purged` の `at` を SQL の `now()` から JS 側の時刻（`toPgTimestamp`）へ替える | 採用 (2026-09) |
+| [0429](./0429-exact-optional-property-types-input-types.md) | 入力側の公開型の任意欄を `?: T \| undefined` に広げ、`exactOptionalPropertyTypes: true` の利用者から `undefined` を渡せるようにする | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

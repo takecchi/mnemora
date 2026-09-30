@@ -360,6 +360,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `TrigramLexicalUnavailableReason` の union の値は増減しない。`detail`（`message`）と `cause` の内容も変えていない。
   - 非破壊と数える（型・公開 API・union は同じ。同じ入力で `reason` の値が、判定を直した側へ動く）。上の「利用者に返るエラー文…の整形を、outbox の `last_error` と同じにした」の項目（文字列の中身だけの変更を非破壊と数えた）が近い先例である。
 
+- **入力側の公開型の任意欄が `?: T | undefined` になった。`exactOptionalPropertyTypes: true` の利用者が `{ limit: maybeLimit }` のように `undefined` を渡せる**（[ADR 0429](./docs/decisions/0429-exact-optional-property-types-input-types.md)）。各パッケージの `*Options`・`RecallQuery`・`observe`/`tick` などの入力・port のメソッド引数の `opts` の型が広がるだけで、その設定を有効にしていない利用者では同じ型であり、既存のコードは壊れない（非破壊）。出力にも使われる型（`Memory`・`MemoryEvent` など）は広げていない。
+
 ### Fixed
 
 - **`runtime.observe({ extract: "sync" })` が、LLM を待つ間に tick に同じ extract ジョブを取られる穴を塞いだ**（[ADR 0407](./docs/decisions/0407-sync-observe-extract-job-lease.md)）。以前は、sync の observe が積んだジョブは「すぐ claim できる」状態で、observe が LLM を待つ間に tick が claim できた。すると LLM が2回呼ばれ、内容の違う記憶が2件とも active で残り、observe 自身は `complete` が `OutboxLeaseConflictError` で負けて、書き込み済みなのに失敗し `memoryIds` が返らなかった（Postgres と InMemory の両方で再現）。

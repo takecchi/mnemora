@@ -188,7 +188,7 @@ export interface EraseTenantOptions {
    */
   limit: number;
   /** `true` なら削除を一切行わず、削除していたら消えていたであろう件数だけを返す。省略時は `false`。 */
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
 }
 
 /** {@link eraseTenant} の deps。4つとも任意メソッド `eraseTenant?` を持ちうる port。 */

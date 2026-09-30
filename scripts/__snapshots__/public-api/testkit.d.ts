@@ -140,8 +140,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     private enqueueOutboxJob;
     createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
-        now?: Date;
-        claimedBy?: string;
+        now?: Date | undefined;
+        claimedBy?: string | undefined;
     }): Promise<{
         observation: Observation;
         created: boolean;
@@ -150,7 +150,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     private createMemoryIdempotent;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
-        now?: Date;
+        now?: Date | undefined;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -164,8 +164,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         index: number;
         error: unknown;
     }>) => NewMemoryEvent, opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         written: Array<{
             index: number;
@@ -185,12 +185,12 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     listBySourceObservation(ctx: Ctx, observationId: ObservationId, extractorVersion: string | null): Promise<Memory[]>;
     listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
     updateStatus(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts?: {
-        supersededById?: MemoryId;
-        expectedStatus?: MemoryStatus;
+        supersededById?: MemoryId | undefined;
+        expectedStatus?: MemoryStatus | undefined;
     }): Promise<Memory>;
     updateStatusWithEvent(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts: {
-        supersededById?: MemoryId;
-        expectedStatus?: MemoryStatus;
+        supersededById?: MemoryId | undefined;
+        expectedStatus?: MemoryStatus | undefined;
     }, event: NewMemoryEvent): Promise<{
         memory: Memory;
         event: MemoryEvent;
@@ -201,12 +201,12 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>, supersede: ReadonlyArray<{
         id: MemoryId;
         supersededByIndex: number;
-        expectedStatus?: MemoryStatus;
+        expectedStatus?: MemoryStatus | undefined;
         event: NewMemoryEvent;
     }>, opts?: {
-        now?: Date;
-        abortIfForgotten?: ReadonlyArray<MemoryId>;
-        buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
+        now?: Date | undefined;
+        abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }): Promise<{
         created: Array<{
             memory: Memory;
@@ -238,7 +238,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
     requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions, writeOpts?: {
-        now?: Date;
+        now?: Date | undefined;
     }): Promise<RequeueEmbedJobsResult>;
     archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
     purgeMemory(ctx: Ctx, id: MemoryId, tombstone: {
@@ -265,12 +265,12 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     resolveContestedPair(ctx: Ctx, first: {
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }, second: {
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }): Promise<{
         first: Memory;
@@ -291,7 +291,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     resolveContestedGroup(ctx: Ctx, members: ReadonlyArray<{
         id: MemoryId;
         status: "active" | "superseded";
-        supersededById?: MemoryId;
+        supersededById?: MemoryId | undefined;
         event: NewMemoryEvent;
     }>): Promise<{
         members: Memory[];
@@ -326,16 +326,16 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         limit: number;
     }): Promise<string[]>;
     restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
-        reason?: string;
-        actor?: EventActor;
+        reason?: string | undefined;
+        actor?: EventActor | undefined;
         at: Date;
     }, filter?: {
-        onlyMemoryIds?: MemoryId[];
+        onlyMemoryIds?: MemoryId[] | undefined;
     }): Promise<{
         restored: Memory[];
     }>;
     previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId, filter?: {
-        onlyMemoryIds?: MemoryId[];
+        onlyMemoryIds?: MemoryId[] | undefined;
     }): Promise<{
         candidates: Array<{
             memoryId: MemoryId;
@@ -355,10 +355,10 @@ export declare class InMemoryOutboxStore implements OutboxStore {
     constructor(jobs: OutboxJobRecord[]);
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
     complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
-        at?: Date;
+        at?: Date | undefined;
     }): Promise<void>;
     fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
-        at?: Date;
+        at?: Date | undefined;
     }): Promise<void>;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
     purgeCompletedJobs(ctx: Ctx, opts: PurgeCompletedJobsOptions): Promise<PurgeCompletedJobsResult>;
@@ -436,7 +436,7 @@ import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import type { EmbeddingCassetteSection } from "./cassette.js";
 export interface RecordedEmbeddingProviderOptions {
     section: EmbeddingCassetteSection;
-    expectedSpace?: EmbeddingSpaceId;
+    expectedSpace?: EmbeddingSpaceId | undefined;
 }
 export declare class RecordedEmbeddingProvider implements EmbeddingProvider {
     readonly space: EmbeddingSpaceId;
@@ -450,7 +450,7 @@ import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } fro
 import type { LLMCassetteSection } from "./cassette.js";
 export interface RecordedLLMProviderOptions {
     section: LLMCassetteSection;
-    expectedModel?: string;
+    expectedModel?: string | undefined;
 }
 export declare class RecordedLLMProvider implements LLMProvider {
     private readonly entries;
@@ -509,9 +509,9 @@ export interface EmbeddingProviderConformanceOptions {
     createProvider: () => EmbeddingProvider | Promise<EmbeddingProvider>;
     deterministic: boolean;
     texts: EmbeddingProviderConformanceTexts;
-    ctx?: Ctx;
-    overLimitText?: string;
-    timeout?: number;
+    ctx?: Ctx | undefined;
+    overLimitText?: string | undefined;
+    timeout?: number | undefined;
 }
 export declare function describeEmbeddingProviderConformance(options: EmbeddingProviderConformanceOptions): void;
 
@@ -591,8 +591,8 @@ export interface LLMProviderConformanceOptions<T> {
         schema: z.ZodType<T>;
     };
     createFailing: ((error: unknown) => LLMProviderFailureHarness | Promise<LLMProviderFailureHarness>) | null;
-    ctx?: Ctx;
-    timeout?: number;
+    ctx?: Ctx | undefined;
+    timeout?: number | undefined;
 }
 export declare function describeLLMProviderConformance<T>(options: LLMProviderConformanceOptions<T>): void;
 
@@ -603,35 +603,35 @@ export interface MemoryStoreConformanceOptions {
     createStore: () => MemoryStore | Promise<MemoryStore>;
     prepareRecallId: (ctx: Ctx) => Promise<RecallId> | RecallId;
     listEventsForMemory: (ctx: Ctx, memoryId: MemoryId) => Promise<MemoryEvent[]> | MemoryEvent[];
-    listRelationsForMemory?: (ctx: Ctx, memoryId: MemoryId) => Promise<Array<{
+    listRelationsForMemory?: ((ctx: Ctx, memoryId: MemoryId) => Promise<Array<{
         memoryId: MemoryId;
     }>> | Array<{
         memoryId: MemoryId;
-    }>;
+    }>) | undefined;
     claimEmbedJobs: (ctx: Ctx, now: Date) => Promise<OutboxJobRecord[]> | OutboxJobRecord[];
     supportsSupersedeWithNewMemories: boolean;
-    supportsAbortIfForgotten?: boolean;
+    supportsAbortIfForgotten?: boolean | undefined;
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
-    supportsPurgeExpiredRecalls?: boolean;
+    supportsPurgeExpiredRecalls?: boolean | undefined;
     supportsArchiveDecayed: boolean;
     supportsPurgeMemory: boolean;
     supportsMarkContestedPair: boolean;
     supportsResolveContestedPair: boolean;
     supportsRestoreSupersededBy: boolean;
     supportsPreviewRestoreSupersededBy: boolean;
-    supportsOnlyMemoryIdsFilter?: boolean;
-    supportsLabels?: boolean;
-    supportsFindActiveByClaimKey?: boolean;
-    supportsFindContestedByClaimKey?: boolean;
-    supportsListActiveClaimPredicates?: boolean;
-    supportsResolveOrphanedContested?: boolean;
+    supportsOnlyMemoryIdsFilter?: boolean | undefined;
+    supportsLabels?: boolean | undefined;
+    supportsFindActiveByClaimKey?: boolean | undefined;
+    supportsFindContestedByClaimKey?: boolean | undefined;
+    supportsListActiveClaimPredicates?: boolean | undefined;
+    supportsResolveOrphanedContested?: boolean | undefined;
     supportsEraseTenant: boolean;
-    supportsMarkContestedGroup?: boolean;
-    supportsResolveContestedGroup?: boolean;
-    supportsCreateMemoriesWithOutboxAndEvents?: boolean;
-    supportsSupersedeCreatedEvents?: boolean;
-    countScopeAggregateQueries?: (fn: () => Promise<unknown>) => Promise<number>;
+    supportsMarkContestedGroup?: boolean | undefined;
+    supportsResolveContestedGroup?: boolean | undefined;
+    supportsCreateMemoriesWithOutboxAndEvents?: boolean | undefined;
+    supportsSupersedeCreatedEvents?: boolean | undefined;
+    countScopeAggregateQueries?: ((fn: () => Promise<unknown>) => Promise<number>) | undefined;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
@@ -646,10 +646,10 @@ export interface OutboxStoreConformanceOptions {
     name: string;
     createStore: () => OutboxStore | Promise<OutboxStore>;
     seedJob: (ctx: Ctx, input: SeedOutboxJobInput) => Promise<OutboxJobRecord>;
-    peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
-    supportsRealConcurrency?: boolean;
+    peekJob?: ((ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>) | undefined;
+    supportsRealConcurrency?: boolean | undefined;
     supportsEraseTenant: boolean;
-    supportsPurgeCompletedJobs?: boolean;
+    supportsPurgeCompletedJobs?: boolean | undefined;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;
 
@@ -659,7 +659,7 @@ export interface RelationStoreConformanceOptions {
     name: string;
     createStore: () => RelationStore | Promise<RelationStore>;
     prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
-    implementsListRelatedMany?: boolean;
+    implementsListRelatedMany?: boolean | undefined;
 }
 export declare function describeRelationStoreConformance(options: RelationStoreConformanceOptions): void;
 
@@ -668,12 +668,12 @@ import type { Ctx, TenantSettingsStore } from "@mnemora/core";
 export interface TenantSettingsStoreConformanceOptions {
     name: string;
     createStore: () => TenantSettingsStore | Promise<TenantSettingsStore>;
-    setDefaultHalfLifeHours?: (ctx: Ctx, hours: number) => Promise<void> | void;
+    setDefaultHalfLifeHours?: ((ctx: Ctx, hours: number) => Promise<void> | void) | undefined;
     supportsDecayClock: boolean;
-    setDefaultHalfLifeRecalls?: (ctx: Ctx, recalls: number) => Promise<void> | void;
-    advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
-    advanceSubjectActivitySeq?: (ctx: Ctx, subjectId: string) => Promise<void> | void;
-    supportsTaxonomyMode?: boolean;
+    setDefaultHalfLifeRecalls?: ((ctx: Ctx, recalls: number) => Promise<void> | void) | undefined;
+    advanceActivitySeq?: ((ctx: Ctx) => Promise<void> | void) | undefined;
+    advanceSubjectActivitySeq?: ((ctx: Ctx, subjectId: string) => Promise<void> | void) | undefined;
+    supportsTaxonomyMode?: boolean | undefined;
     supportsEraseTenant: boolean;
 }
 export declare function describeTenantSettingsStoreConformance(options: TenantSettingsStoreConformanceOptions): void;
@@ -707,6 +707,6 @@ export interface VectorStoreConformanceOptions {
     prepareEmbeddingSpace: (space: EmbeddingSpaceId) => Promise<void> | void;
     supportsGetVectors: boolean;
     supportsEraseTenant: boolean;
-    supportsSearchMany?: boolean;
+    supportsSearchMany?: boolean | undefined;
 }
 export declare function describeVectorStoreConformance(options: VectorStoreConformanceOptions): void;

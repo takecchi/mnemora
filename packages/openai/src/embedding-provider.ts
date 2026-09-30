@@ -35,7 +35,7 @@ export interface OpenAIEmbeddingProviderOptions {
    * メッセージの `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** OpenAI の埋め込みモデル名（例: `text-embedding-3-small`）。`space.model` にそのまま入る。既定値は無い。 */
   model: string;
   /**
@@ -52,7 +52,7 @@ export interface OpenAIEmbeddingProviderOptions {
    * である（以前は `Pick<OpenAI, "embeddings">` だった）。**`openai` を自分の依存として入れる
    * 版は、`@mnemora/openai` が固定している版と揃える必要が無い**（packages/openai/README.md 参照）。
    */
-  client?: OpenAIEmbeddingsClient;
+  client?: OpenAIEmbeddingsClient | undefined;
 }
 
 /**

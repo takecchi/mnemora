@@ -195,7 +195,7 @@ export const MemoryEventSchema = z
   }) satisfies z.ZodType<MemoryEvent>;
 
 /** `EventStore.append` に渡す新しいイベント。`id` は store が付け、`at` は省略すると store が今の時刻を入れる。 */
-export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at"> & { at?: Date };
+export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at"> & { at?: Date | undefined };
 
 /** `NewMemoryEvent` の zod スキーマ。値を実行時に検査するときに使う（型 `NewMemoryEvent` と揃えてある）。 */
 export const NewMemoryEventSchema = z
@@ -217,18 +217,18 @@ export const NewMemoryEventSchema = z
 /** `EventStore.list` の絞り込み。どの欄も省略でき、渡した条件をすべて満たす行を `at` の古い順に返す。 */
 export interface EventFilter {
   /** この Memory のイベントだけを返す。 */
-  memoryId?: MemoryId;
+  memoryId?: MemoryId | undefined;
   /** この種類のイベントだけを返す。 */
-  kind?: MemoryEventKind;
+  kind?: MemoryEventKind | undefined;
   /** `at` がこの時刻以後のイベントだけを返す（境界を含む）。 */
-  since?: Date;
+  since?: Date | undefined;
   /** `at` がこの時刻以前のイベントだけを返す（境界を含む）。 */
-  until?: Date;
+  until?: Date | undefined;
   /**
    * 返す上限の件数（古い順の先頭から）。省略なら全件。負数・非整数は例外になる（`@mnemora/postgres` と testkit の fixture で同じ）。
    * `0` は例外にならず、0件を返す（今の振る舞い。{@link EventFilterSchema} は `0` を拒むので、schema と store で違う）。
    */
-  limit?: number;
+  limit?: number | undefined;
 }
 
 /**

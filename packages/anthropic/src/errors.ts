@@ -66,13 +66,13 @@ export interface AnthropicLLMProviderErrorOptions {
   /** 失敗の種類（{@link AnthropicLLMFailureKind}）。 */
   kind: AnthropicLLMFailureKind;
   /** SDK が返した生の `stop_reason`。分からなければ `null`（偽 client・streaming の途中など） */
-  stopReason?: string | null;
+  stopReason?: string | null | undefined;
   /** `stop_details.category`（`cyber` / `bio` / `frontier_llm` / `reasoning_extraction` …）。
    * **開いた集合である**——SDK の型は将来値が増えることを前提にしているので、
    * ここでも文字列のまま持ち、列挙に押し込めない。 */
-  refusalCategory?: string | null;
+  refusalCategory?: string | null | undefined;
   /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
-  message?: string;
+  message?: string | undefined;
   /** `kind: "schema_unsupported"` のとき、送る前の翻訳が投げた元の例外。
    * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
   cause?: unknown;

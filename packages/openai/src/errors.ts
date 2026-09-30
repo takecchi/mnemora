@@ -79,11 +79,11 @@ export interface OpenAILLMProviderErrorOptions {
   /** 失敗の種類（{@link OpenAILLMFailureKind}）。 */
   kind: OpenAILLMFailureKind;
   /** SDK が返した生の `finish_reason`。分からなければ `null`（偽 client など） */
-  finishReason?: string | null;
+  finishReason?: string | null | undefined;
   /** `message.refusal` の中身（拒否理由の文面）。無ければ `null` */
-  refusalMessage?: string | null;
+  refusalMessage?: string | null | undefined;
   /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
-  message?: string;
+  message?: string | undefined;
   /** `kind: "schema_unsupported"` のとき、送る前の翻訳・検査が投げた元の例外。
    * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
   cause?: unknown;
