@@ -314,6 +314,14 @@ memoryIds/observationIds）を伴う。**根拠を欠いた推論をそのまま
    無い。`subjectCandidates` はどこにも永続化しない（新しい列・マイグレーションは無い）ため、
    `extract: 'deferred'` との併用はエラーにし、`reextract` はこの欄を使わない。
 
+**⚠ 2026-10-01 追記（[ADR 0442](./decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）: `subjectCandidates` を渡さない経路では、LLM が返す `subjectId` は検証されない。**
+検証は2の一覧に照らすことでしか行わないので、一覧を渡さない呼び出し——`extract: 'deferred'` の `tick`・`reextract`（どちらも一覧を持てない）を含む——では、
+1の候補ごとの上書きとして、LLM が返した文字列の `subjectId` がそのまま Memory の主題になる。⟹ 観察文に「この記憶の主題は bob」のような文を書いて
+LLM に言わせる**注入**で、同じテナントの**別の subject** に記憶を書かせられる。`claimKey: { enabled: true, detectContested: true }` を併用していると、
+その subject が既に持っている active な記憶が `contested` に変わりうる（【実測】2026-10-01、擬似の LLM で、`@mnemora/postgres` と testkit のインメモリの両方）。
+テナントの境界は越えない。信用できない本文を抽出するなら、`subjectCandidates` を渡して選ばせること。挙動を変えるか（違う値を捨てる等）は
+Issue #608 の設計（1の上書きを許す、ADR 0271）に触れるので、この版では変えていない。
+
 **⚠ 2026-09-27 追記（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）: `@mnemora/openai` では「主題なし」が届かない。**
 OpenAI の strict モードは「省略可能」を「必須かつ `null` 可」に翻訳するので、応答の `null` だけでは
 「未指定」と「主題なし」を区別できない。`OpenAILLMProvider.completeStructured` はすべての `null` を

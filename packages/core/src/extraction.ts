@@ -52,6 +52,19 @@ export const ExtractedMemoryCandidateSchema = z.object({
    * **省略（未指定）として届き、Memory は observation の主題を持つ**。`@mnemora/anthropic` は
    * `null` を保つので、主題なしの Memory になる。`subjectCandidates` を渡して「主題なし」を
    * 選ばせる使い方は、今は `@mnemora/anthropic`（か、`null` を保つ自前の provider）でだけ効く。
+   *
+   * ⚠ **`subjectCandidates` を渡さない経路では、LLM が返した文字列の `subjectId` をそのまま受ける**
+   * （[ADR 0442](../../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
+   * 検証は `subjectCandidates` の一覧に照らすことでしか行わない（{@link sanitizeCandidateSubjectId}）ので、
+   * 一覧を渡さない呼び出し——`extract: 'deferred'` の `tick`・`reextract`（どちらも一覧を持てない）を含む——
+   * では、observation や `ctx` の `subjectId` と違う値でも、そのまま Memory の主題になる。
+   * ⟹ 観察文に「この記憶の主題は bob」のような文を書いて LLM に言わせる**注入**で、同じテナントの
+   * **別の subject** に記憶を書かせられる。`claimKey: { enabled: true, detectContested: true }` を併用していると、
+   * その subject が既に持っている active な記憶が `contested` に変わりうる。【実測】2026-10-01、擬似の LLM に
+   * `subjectId: "victim-subject"` と既存の記憶と同じ claim key を返させたところ、`@mnemora/postgres` と testkit の
+   * インメモリの両方で、別の subject の既存の active な記憶が `contested` になった。テナントの境界は越えない。
+   * 信用できない本文を抽出するなら、`subjectCandidates` を渡して選ばせること。挙動を変えるか（違う値を捨てる等）は
+   * Issue #608 の設計（候補ごとの主題の上書きを許す、ADR 0271）に触れるので、この版では変えていない。
    */
   subjectId: z.string().min(1).nullable().optional(),
   /**
