@@ -414,5 +414,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0394](./0394-activity-clock-writes-use-memorys-own-subject.md) | 活動時計の書き込みは、`ctx` ではなく記憶自身の subject の `T + S_x` を使う（ADR 0353 の負債1の解消） | 採用 (2026-09) |
 | [0395](./0395-create-recall-activity-clock-single-statement.md) | `createRecall` の活動時計の加算を、`recalls` の INSERT と1つの SQL 文にする（ADR 0165 負債1 への案1） | 採用 (2026-09) |
 | [0396](./0396-recall-relation-max-count.md) | 段3（多者間の同伴取得）の群ごとの上限を、`RecallQuery.relationMaxCount` で呼び出し側から変えられるようにする | 採用 (2026-09) |
+| [0397](./0397-postgres-db-tests-isolate-false.md) | `packages/postgres` の DB テストの並列 project を `isolate: false` にする（Issue #1276 案E） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
