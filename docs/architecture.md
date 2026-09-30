@@ -434,7 +434,11 @@ interface MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date | undefined; abortIfForgotten?: ReadonlyArray<MemoryId> | undefined }
+    opts?: {
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+    }
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
@@ -498,6 +502,8 @@ interface MemoryStore {
     opts?: {
       now?: Date | undefined;
       abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+      abortIfAllConflicted?: boolean | undefined;
       buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }
   ): Promise<{
@@ -513,7 +519,11 @@ interface MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>
     ) => NewMemoryEvent,
-    opts?: { now?: Date | undefined; abortIfForgotten?: ReadonlyArray<MemoryId> | undefined }
+    opts?: {
+      now?: Date | undefined;
+      abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+      abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+    }
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;

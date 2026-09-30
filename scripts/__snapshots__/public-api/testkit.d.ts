@@ -151,11 +151,13 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         memory: Memory;
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
+    private assertNoneSuperseded;
     private captureWriteState;
     createMemoriesWithOutboxAndEvents(ctx: Ctx, news: ReadonlyArray<{
         input: NewMemory;
@@ -166,6 +168,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>) => NewMemoryEvent, opts?: {
         now?: Date | undefined;
         abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         written: Array<{
             index: number;
@@ -206,6 +209,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>, opts?: {
         now?: Date | undefined;
         abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+        abortIfAllConflicted?: boolean | undefined;
         buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }): Promise<{
         created: Array<{

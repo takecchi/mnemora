@@ -212,6 +212,8 @@ export interface OutboxStore {
    * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
    * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
    * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
+   *
+   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
    */
   complete(
     ctx: Ctx,
@@ -226,6 +228,8 @@ export interface OutboxStore {
    * **`opts.at` を渡すと `failedAt` にその値を使う。省略時は実装が壁時計を使う。** ⚠ **`available_at`
    * の再計算はしない**（今の振る舞い。`fail` は終端状態であり、Phase 1 では失敗したジョブの自動リトライを
    * 行わないため——このファイル冒頭の doc 参照）。
+   *
+   * **`error` に NUL（U+0000）が含まれていてもよい**——`text` 列は NUL を保存できないので、実装は目に見える6文字の `\u0000` に置き換えて `lastError` に残す（`@mnemora/postgres`・`@mnemora/testkit/fixtures` とも）。
    */
   fail(
     ctx: Ctx,

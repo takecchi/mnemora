@@ -5,11 +5,13 @@ import {
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   SourceMemoryForgottenError,
+  SourceMemoryStatusChangedError,
   isContestedGroupMembershipMismatchError,
   isContestedWithoutCompanionError,
   isMemoryPurgeConflictError,
   isMemoryStatusConflictError,
   isSourceMemoryForgottenError,
+  isSourceMemoryStatusChangedError,
 } from "../interfaces/memory-store.js";
 import {
   OutboxLeaseConflictError,
@@ -55,6 +57,16 @@ const cases = [
     kind: "source_memory_forgotten",
     guard: isSourceMemoryForgottenError,
     make: () => new SourceMemoryForgottenError("createMemoryWithOutbox", ["m"]),
+  },
+  // ADR 0420: superseded・全件 CAS 弾かれの打ち切り。
+  {
+    name: "SourceMemoryStatusChangedError",
+    kind: "source_memory_status_changed",
+    guard: isSourceMemoryStatusChangedError,
+    make: () =>
+      new SourceMemoryStatusChangedError("supersedeWithNewMemories", [
+        { id: "m", observedStatus: "superseded" },
+      ]),
   },
   {
     name: "MemoryPurgeConflictError",
@@ -117,7 +129,7 @@ describe.each(cases)("$name の判定関数", ({ name, kind, guard, make }) => {
 
 /**
  * 別の realm（`vm`）で定義し直したクラスでも通る（`kind` 無し・有りの両方）。
- * 全7クラスを対象にする。陽性対照として、本物のクラスの `instanceof` は false になることも見る。
+ * 全8クラスを対象にする。陽性対照として、本物のクラスの `instanceof` は false になることも見る。
  */
 const foreignCases = [
   {
@@ -139,6 +151,11 @@ const foreignCases = [
     name: "SourceMemoryForgottenError",
     real: SourceMemoryForgottenError,
     guard: isSourceMemoryForgottenError,
+  },
+  {
+    name: "SourceMemoryStatusChangedError",
+    real: SourceMemoryStatusChangedError,
+    guard: isSourceMemoryStatusChangedError,
   },
   {
     name: "MemoryPurgeConflictError",

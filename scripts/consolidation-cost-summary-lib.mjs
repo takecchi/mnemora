@@ -64,6 +64,7 @@ const REQUIRED_CONSOLIDATION_OUTCOME_FIELDS = [
   "llm_failed",
   "dry_run",
   "aborted_source_forgotten",
+  "aborted_source_status_changed",
 ];
 
 function isObject(value) {

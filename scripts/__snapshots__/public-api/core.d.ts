@@ -664,6 +664,19 @@ export declare class SourceMemoryForgottenError extends Error {
     constructor(method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", forgottenIds: MemoryId[]);
 }
 export declare function isSourceMemoryForgottenError(value: unknown): value is SourceMemoryForgottenError;
+export declare class SourceMemoryStatusChangedError extends Error {
+    readonly method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
+    readonly changed: Array<{
+        id: MemoryId;
+        observedStatus: MemoryStatus;
+    }>;
+    readonly kind: "source_memory_status_changed";
+    constructor(method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories", changed: Array<{
+        id: MemoryId;
+        observedStatus: MemoryStatus;
+    }>);
+}
+export declare function isSourceMemoryStatusChangedError(value: unknown): value is SourceMemoryStatusChangedError;
 export declare class ContestedWithoutCompanionError extends Error {
     readonly method: "updateStatus" | "updateStatusWithEvent" | "createMemory" | "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
     readonly memoryId: MemoryId | null;
@@ -710,6 +723,7 @@ export interface MemoryStore {
     createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
         now?: Date | undefined;
         abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         memory: Memory;
         created: boolean;
@@ -757,6 +771,8 @@ export interface MemoryStore {
     }>, opts?: {
         now?: Date | undefined;
         abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
+        abortIfAllConflicted?: boolean | undefined;
         buildCreatedEvent?: ((memory: Memory, index: number) => NewMemoryEvent) | undefined;
     }): Promise<{
         created: Array<{
@@ -780,6 +796,7 @@ export interface MemoryStore {
     }>) => NewMemoryEvent, opts?: {
         now?: Date | undefined;
         abortIfForgotten?: ReadonlyArray<MemoryId> | undefined;
+        abortIfSuperseded?: ReadonlyArray<MemoryId> | undefined;
     }): Promise<{
         written: Array<{
             index: number;
@@ -3130,7 +3147,7 @@ export interface ConsolidateOptions {
     reason?: string | undefined;
     signal?: AbortSignal | undefined;
 }
-export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
+export type ConsolidateOutcome = "consolidated" | "nothing_to_consolidate" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten" | "aborted_source_status_changed";
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
 export type ConsolidateSourceOutcome = {
     memoryId: MemoryId;
@@ -3197,7 +3214,7 @@ export interface ReflectOptions {
     reason?: string | undefined;
     signal?: AbortSignal | undefined;
 }
-export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten";
+export type ReflectOutcome = "reflected" | "nothing_to_reflect" | "not_examined" | "llm_failed" | "dry_run" | "aborted_source_forgotten" | "aborted_source_status_changed";
 export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
 export type ReflectBasisOutcome = {
     memoryId: MemoryId;
@@ -3226,6 +3243,10 @@ export type ReflectBasisOutcome = {
 } | {
     memoryId: MemoryId;
     kind: "forgotten_before_write";
+} | {
+    memoryId: MemoryId;
+    kind: "status_changed_before_write";
+    observedStatus: MemoryStatus;
 };
 export interface ReflectionResult {
     outcome: ReflectOutcome;
