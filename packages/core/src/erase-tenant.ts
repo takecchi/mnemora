@@ -76,6 +76,33 @@ import type { VectorStore } from "./interfaces/vector-store.js";
  * - `{ kind: "executed"; dryRun; deleted; reachedLimit }` — 実行した（または `dryRun` で
  *   プレビューした）。`reachedLimit === true` なら、呼び出し側は同じ `opts` で
  *   呼び直すこと——**この関数は何度呼んでも安全**（既に空になった表は0件を返すだけ）。
+ *   ⚠ **`reachedLimit === false` は「空になった」の証明ではない**（次の節）。
+ *
+ * ### ⚠ そのテナントへの書き込みを止めてから呼ぶ／`deleted` が全部 `0` になるまで呼び直す
+ *
+ * **同じテナントへ書き込み（`observe()`・`tick()` など）を続けながら呼ぶと、行が残りうる。**
+ * 消している途中に別の処理が書いた行は、その回では消えない。⟹ **そのテナントへの書き込みを
+ * 止めてから呼ぶこと**（止め方は呼び出し側の責務。この関数は書き込みを止めない）。
+ *
+ * **終わりの判定は、`reachedLimit` だけでなく `deleted` を見る。**書き込みが止まっていなければ、
+ * `reachedLimit === false` で返った回の後にも行が残りうる（`reachedLimit` は「ある表でちょうど
+ * `limit` 件消せた」ときだけ `true` になる近似であり、消している間に書かれた行は知らない）。
+ * ⟹ **書き込みを止めたうえで、`deleted` の4欄が全部 `0` で返る回が1回出るまで、同じ `opts` で
+ * 呼び直すこと。**「消えたか」の確認は、下の節のとおり、消去後に表を数えて行う
+ * （`deleted.vectorStore` は CASCADE のため本番では `0` になりうるので、`deleted` が全部 `0` に
+ * なったことは「この回は何も見つからなかった」だけを言う）。
+ *
+ * どの表に残りうるか（`@mnemora/postgres` の実装を読んで書いた。⚠ **書き込みを実際に割り込ませて
+ * 起こしてはいない——コードから読んだ推論である**）:
+ * - `memoryStore`: 1つのトランザクションだが、表ごとの削除は「先に対象の id を選び、その id だけを
+ *   消す」文である。その文が始まった後に他のトランザクションがコミットした行（`memories`・
+ *   `observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・`memory_labels`・
+ *   `memory_relations`）は、その回の対象にならず残る。`tenant_activity`・`tenant_subject_activity`
+ *   も、`observe()`・`tick()` が書くたびに作り直されうる。
+ * - `outboxStore`: `memoryStore` の後に消す。その後に積まれたジョブ（`embed`・`extract` など）は残る。
+ * - `vectorStore`: `memoryStore` の後に消す。`memories` の削除で埋め込みは CASCADE で消えている。
+ *   その後に走った `embed` の書き込みは、`memories` への外部キーで失敗するはずだが、確かめていない。
+ * - `tenantSettingsStore`: 最後に消す。`setEventRetention` などが呼ばれると、行が作り直される。
  *
  * ### ⚠ `deleted.vectorStore` は、`dryRun` では実数、本番では `0` になりうる
  *
