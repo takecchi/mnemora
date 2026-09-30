@@ -53,7 +53,7 @@ CLI が元のエラーの後ろに `→ …（examples/chat/README.md「DB を�
 ```bash
 # リポジトリルートで
 pnpm install     # 素の clone では「Failed to create bin … mnemora-postgres-migrate … dist/bin/migrate.js」の
-                 # WARN が3行出る（pnpm 11.25.0 の `pnpm install` では同じ3行が2回、計6行）。dist がまだ無いためで、下のコマンドには影響しない（無視してよい）
+                 # WARN が出る（行数は pnpm の版と workspace のパッケージ数で変わる）。dist がまだ無いためで、下のコマンドには影響しない（無視してよい）
 # pnpm run build は、この README のコマンドには要らない。examples/chat の CLI（tsx）は
 # tsconfig.json の paths で @mnemora/* を各パッケージの src から直接読む
 # （素の clone から build せずに migrate・chat・compare・scope・explain・answer が通ることを確かめた）。
@@ -111,6 +111,14 @@ pnpm --filter @mnemora/example-chat run verify:compare
 export DATABASE_URL=...
 pnpm --filter @mnemora/example-chat run test:db
 ```
+
+⚠ **`test:db` は、`DATABASE_URL` が指す DB の mnemora の表を空にする。**テストは
+`src/__tests__/test-db.ts` の `resetTestDatabase()` で、`memories`・`observations`・`memory_events`・`outbox`・
+`recalls`・`recall_usages`・`tenant_settings`・埋め込みの表を `TRUNCATE … RESTART IDENTITY CASCADE` する
+（`CASCADE` なので、これらを外部キーで参照する表も一緒に空になる）。
+上の「動かす」で `chat` や `compare` を走らせた DB を指したまま打つと、そのデータも消える。
+**テストには、消えてよい使い捨ての DB を指すこと**（DB 名などで止める安全弁は入っていない）。
+ルートの `DATABASE_URL=... pnpm run test`（下）も、この検査を一緒に走らせる。
 
 本物の Postgres に接続する（擬似物では代替しない）。`observe → recall` の往復・
 `budget` による切り詰め・`runComparison` の量の計測をすべて実DBに対して検査する。

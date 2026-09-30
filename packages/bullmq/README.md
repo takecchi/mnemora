@@ -92,8 +92,48 @@ Queue/Worker を構築するだけで、Worker は `autorun: false` で作る—
 保証しない。** その重なりから outbox の二重処理を防いでいるのは、上に書いたとおり
 `@mnemora/postgres` 側の行ロックである。
 
+🔴 **1台の `stop()` が、全プロセスの予定を止める。**`stop()` は Worker と Queue を閉じる前に
+`queue.removeJobScheduler(jobName)` を呼ぶ。この scheduler は上のとおり全プロセスで共有している
+（同じ `jobSchedulerId`）ので、1つのプロセスが `stop()` すると、他のプロセスの Worker は動いたままでも
+tick のジョブがもう発火しない。エラーにもならない。動いている driver の `start()` をもう一度呼んでも
+何もしない（冪等）ので、登録はし直されない。新しく作った driver の `start()` が `upsertJobScheduler` で登録し直すと、
+再び発火する。⟹ rolling deploy や台数の縮小で1台を止めるときは、残りのプロセスのどれかを再起動する
+（新しい driver で `start()` する）こと。
+（今の振る舞いを書いたもの。コードを読んで確かめた。Redis が無いため走らせてはいない。）
+
+🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること。**Worker はジョブの中身を見ずに、
+自分に渡された `ctx` で `runtime.tick(ctx, tick)` を呼ぶ。テナントの違う driver が同じ `queueName` と
+同じ `jobName`（既定は `"mnemora-tick"`）を使うと、scheduler は1つに上書きされ（`everyMs` は最後に
+`start()` した driver の値になる）、1回の発火はどれか1つの Worker、つまりどれか1つのテナントの tick に
+しかならない。どのテナントが何回 tick されるかは決まらない。上の `stop()` も、全テナントの予定を止める。
+（コードからの読み。走らせてはいない。）
+
 詳しい API（`CreateBullmqTickDriverOptions` の各フィールド）は
 [`src/tick-driver.ts`](./src/tick-driver.ts) の doc コメントを見ること。
+
+## ⚠ 完了したジョブ・失敗したジョブは Redis に残り続ける
+
+この driver は、Worker にもジョブにも `removeOnComplete`・`removeOnFail` を指定していない。BullMQ（6.3.8）は、
+どちらも指定が無いとき、完了したジョブも失敗したジョブも**全部残す**（`redis-queue-backend.js` の `getKeepJobs` が
+`{ count: -1 }` を返す）。⟹ `everyMs` ごとに1件ずつ、`runtime.tick()` の戻り値（`TickResult`）を持った完了ジョブが
+Redis に溜まる（`everyMs: 5_000` なら1日に 17,280 件）。`runtime.tick()` が throw した回は、失敗の理由と stack を
+持った失敗ジョブとして残る。（コードを読んで確かめた。Redis が無いため、溜まる量は測っていない。）
+
+driver には保持の設定を渡す口が無い。Queue の側で掃除するには、同じ `queueName` の `Queue` を自分で作り、
+BullMQ の `queue.clean(grace, limit, type)` を定期的に呼ぶ（`grace` ミリ秒より古いジョブを、`type` ごとに
+最大 `limit` 件消す）。
+
+```ts
+import { Queue } from "bullmq";
+
+const queue = new Queue("mnemora-tick", { connection: { host: "127.0.0.1", port: 6379 } });
+// 1時間より古い完了ジョブと、1日より古い失敗ジョブを、それぞれ最大1000件消す。
+await queue.clean(60 * 60 * 1000, 1000, "completed");
+await queue.clean(24 * 60 * 60 * 1000, 1000, "failed");
+await queue.close();
+```
+
+（この例は Redis が無いため走らせていない。）保持の既定値を driver に入れるかどうかは決まっていない。
 
 ## ⚠ エラーの通知先（`onTickError`）
 
