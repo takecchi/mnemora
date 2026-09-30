@@ -55,6 +55,8 @@ const SERIAL_TEST_FILES = [
 const SHARED_SETUP_FILES = [
   // worker 専用 DB へ DATABASE_URL を向ける（Issue #1277）。他の setupFile より先に置く。
   "./src/__tests__/setup-worker-database.ts",
+  // プロセス内の書き込み累計（ANALYZE の閾値）をファイルごとに 0 へ戻す（Issue #1276 / ADR 0397）。
+  "./src/__tests__/setup-reset-process-counters.ts",
   // recall() の戻り値の契約の検査(TSDoc の7巡目 B1・B2)。
   "./src/__tests__/setup-recall-output-contract.ts",
   // createPostgresClient の既定の pool error 警告が出たら落とす守り(Issue #1213、ADR 0020 と同じ形)。

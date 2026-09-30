@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import {
   buildNewMemoryFixture,
@@ -6,7 +6,7 @@ import {
   buildProvenanceFixture,
 } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, resetTestDatabase } from "./test-db.js";
+import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
  * Issue #273 / ADR 0182: `memories_provenance_kind_matches_provenance`
@@ -169,4 +169,8 @@ describe("memories_provenance_kind_matches_provenance", () => {
       ),
     ).rejects.toThrow(/memories_provenance_kind_matches_provenance/);
   });
+});
+
+afterAll(async () => {
+  await closeTestClient();
 });

@@ -1,5 +1,5 @@
 import type { Ctx } from "@mnemora/core";
-import { beforeEach } from "vitest";
+import { afterAll, beforeEach } from "vitest";
 import {
   buildNewMemoryFixture,
   buildProvenanceFixture,
@@ -10,7 +10,7 @@ import {
   PostgresTrigramLexicalStore,
   probeTrigramLexicalSupport,
 } from "../trigram-lexical-store.js";
-import { getTestClient, resetTestDatabase } from "./test-db.js";
+import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
  * `packages/testkit` の `LexicalStore` 適合テスト一式を、語彙の trigram 経路
@@ -63,4 +63,8 @@ describeLexicalStoreConformance({
     );
     return memory.id;
   },
+});
+
+afterAll(async () => {
+  await closeTestClient();
 });

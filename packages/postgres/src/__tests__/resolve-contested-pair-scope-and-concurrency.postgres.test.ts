@@ -4,7 +4,12 @@ import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * Issue #759（ADR 0183 が `markContestedPair` だけに絞って残した負債の解消）。
@@ -73,6 +78,7 @@ describe("PostgresMemoryStore.resolveContestedPair — 適合テストが踏ま�
     for (const client of extraPools) {
       await client.pool.end();
     }
+    await closeTestClient();
   });
 
   it("対象外の別の contested 対は無傷のまま残る（対象2件だけを動かす）", async () => {
