@@ -1231,12 +1231,21 @@ interface ClaimOutboxJobsOptions {
 }
 
 class OutboxLeaseConflictError extends Error {
+  /** 判別子（ADR 0418）。クラスが2つの版に分かれても読める値。 */
+  readonly kind: "outbox_lease_conflict";
   constructor(
     readonly jobId: string,
     readonly expectedAttempts: number,
     readonly observedAttempts: number | null,
   );
 }
+
+/**
+ * `instanceof` を使わずに判定する（ADR 0418）。`kind` を見て、`kind` が無ければ `name` を見る。
+ * 同じ形の判定関数が、`MemoryStatusConflictError`・`ContestedGroupMembershipMismatchError`・
+ * `SourceMemoryForgottenError`・`MemoryPurgeConflictError` にも在る（`packages/core/src/interfaces/memory-store.ts`）。
+ */
+function isOutboxLeaseConflictError(value: unknown): value is OutboxLeaseConflictError;
 
 interface OutboxStore {
   claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;

@@ -33,12 +33,12 @@ import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
 import {
-  ContestedGroupMembershipMismatchError,
-  MemoryPurgeConflictError,
-  MemoryStatusConflictError,
+  isContestedGroupMembershipMismatchError,
+  isMemoryPurgeConflictError,
+  isMemoryStatusConflictError,
+  isSourceMemoryForgottenError,
   PURGE_TOMBSTONE_CONTENT,
   PURGE_TOMBSTONE_DIGEST,
-  SourceMemoryForgottenError,
 } from "./interfaces/memory-store.js";
 import type {
   ArchiveDecayedOptions,
@@ -47,7 +47,7 @@ import type {
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
 } from "./interfaces/memory-store.js";
-import { OutboxLeaseConflictError } from "./interfaces/outbox-store.js";
+import { isOutboxLeaseConflictError } from "./interfaces/outbox-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "./interfaces/outbox-store.js";
 import type { OutboxJobKind } from "./interfaces/scheduler.js";
 import {
@@ -5129,7 +5129,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           { now, abortIfForgotten: knownMemoryIds },
         );
       } catch (error) {
-        if (error instanceof SourceMemoryForgottenError) {
+        if (isSourceMemoryForgottenError(error)) {
           // 作成も supersede も rollback された——書き込みを試みていないのと区別が付かない。
           return abortedSourceForgotten(error.forgottenIds);
         }
@@ -5178,7 +5178,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           abortIfForgotten: knownMemoryIds,
         });
       } catch (error) {
-        if (error instanceof SourceMemoryForgottenError) {
+        if (isSourceMemoryForgottenError(error)) {
           if (memoryIds.length === 0) return abortedSourceForgotten(error.forgottenIds);
           // 2件目以降で打ち切られた（この経路は1件ずつ書くため、1件目は既にコミット済み）。
           // 書いた分は隠さず返し、既存の supersede には進まない。
@@ -5439,7 +5439,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // （Observation と抽出した Memory）は既に済んでおり、ジョブの終端は取り直した側が持つ。
         // ここで投げると「書き込み済みなのに失敗」になり `memoryIds` が失われる。良性なので握る
         // （tick 側の `leaseConflicts` と同じ扱い）。それ以外の例外は今までどおり投げる。
-        if (!(err instanceof OutboxLeaseConflictError)) {
+        if (!isOutboxLeaseConflictError(err)) {
           throw err;
         }
       }
@@ -5967,7 +5967,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             { at: clock.now() },
           );
         } catch (err) {
-          if (err instanceof OutboxLeaseConflictError) {
+          if (isOutboxLeaseConflictError(err)) {
             leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "fail" });
             continue;
           }
@@ -5996,7 +5996,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         if (signal?.aborted) {
           break;
         }
-        if (err instanceof OutboxLeaseConflictError) {
+        if (isOutboxLeaseConflictError(err)) {
           leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "complete" });
           continue;
         }
@@ -6013,7 +6013,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             at: clock.now(),
           });
         } catch (failErr) {
-          if (failErr instanceof OutboxLeaseConflictError) {
+          if (isOutboxLeaseConflictError(failErr)) {
             leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "fail" });
             continue;
           }
@@ -6300,7 +6300,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           });
         }
       } catch (error) {
-        if (error instanceof MemoryStatusConflictError) {
+        if (isMemoryStatusConflictError(error)) {
           // 安全弁（`forget` と同じ形。1回だけ再読して打ち切る——上限の無い
           // 再試行ループを作らない）。
           let refetched: Memory | null;
@@ -6569,7 +6569,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         byId.set(lookupKey(id), memory);
         outcomes.push({ memoryId: id, kind: "forgotten", previousStatus: observedStatus });
       } catch (error) {
-        if (error instanceof MemoryStatusConflictError) {
+        if (isMemoryStatusConflictError(error)) {
           // 安全弁（ADR 0030 と同じ形。ただし `reextract` と違い、ここは1回だけ
           // 再読して打ち切る——上限の無い再試行ループを作らない、という明示の決定）。
           let refetched: Memory | null;
@@ -6739,7 +6739,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           purgedOutcome.embeddingCleanup = embeddingCleanupFailed(cleanupError);
         }
       } catch (error) {
-        if (error instanceof MemoryPurgeConflictError) {
+        if (isMemoryPurgeConflictError(error)) {
           // 安全弁（`forget`/`restoreArchived` と同じ形。1回だけ再読して打ち切る
           // ——上限の無い再試行ループを作らない）。
           let refetched: Memory | null;
@@ -6884,7 +6884,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       return { supported: true, outcome: { kind: "contested", first, second } };
     } catch (error) {
-      if (error instanceof MemoryStatusConflictError) {
+      if (isMemoryStatusConflictError(error)) {
         // 安全弁（`forget`/`restoreArchived`/`purge` と同じ形。1回だけ再読して打ち切る
         // ——上限の無い再試行ループを作らない）。
         const refetched = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
@@ -7078,7 +7078,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       return { supported: true, outcome: { kind: "resolved", first, second } };
     } catch (error) {
-      if (error instanceof MemoryStatusConflictError) {
+      if (isMemoryStatusConflictError(error)) {
         // 安全弁（`markContested` と同じ形。1回だけ再読して打ち切る——上限の無い再試行
         // ループを作らない）。
         const refetched = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
@@ -7188,7 +7188,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       });
       return { supported: true, outcome: { kind: "resolved", memory } };
     } catch (error) {
-      if (error instanceof MemoryStatusConflictError) {
+      if (isMemoryStatusConflictError(error)) {
         // 安全弁（`resolveContested` と同じ形。1回だけ再読して打ち切る——上限の無い
         // 再試行ループを作らない）。
         const refetched = await deps.memoryStore.get(ctx, survivorId);
@@ -7291,7 +7291,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       return { supported: true, outcome: { kind: "contested_group", members: writtenMembers } };
     } catch (error) {
-      if (error instanceof MemoryStatusConflictError) {
+      if (isMemoryStatusConflictError(error)) {
         // 安全弁（`markContested`/`resolveContested`/`forget`/`restoreArchived`/`purge` と
         // 同じ形。1回だけ再読して打ち切る——上限の無い再試行ループを作らない）。
         const refetched = await deps.memoryStore.getMany(ctx, [...memberIds]);
@@ -7479,13 +7479,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // 最初から適格でない集合を渡していた）であり、`conflict`（1回だけ再読して打ち切る
       // 安全弁）には分類しない。`sides` は手順5で読んだ時点の分類（全員 "eligible"）を
       // そのまま運び、`missingMembers` にエラーが名指しした1件を積む。
-      if (error instanceof ContestedGroupMembershipMismatchError) {
+      if (isContestedGroupMembershipMismatchError(error)) {
         return {
           supported: true,
           outcome: { kind: "ineligible", sides, missingMembers: [error.missingMemberId] },
         };
       }
-      if (error instanceof MemoryStatusConflictError) {
+      if (isMemoryStatusConflictError(error)) {
         // 安全弁（`resolveContested` と同じ形。1回だけ再読して打ち切る）。
         const refetched = await deps.memoryStore.getMany(ctx, [...memberIds]);
         const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
@@ -7919,7 +7919,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           { now, abortIfForgotten: eligibleIds },
         );
       } catch (error) {
-        if (error instanceof SourceMemoryForgottenError) {
+        if (isSourceMemoryForgottenError(error)) {
           const forgottenLate = new Set(error.forgottenIds);
           return {
             // `news`/`supersede` どちらも rollback された——書き込みを試みていないのと
@@ -7988,7 +7988,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       consolidatedMemory = createResult.memory;
       created = createResult.created;
     } catch (error) {
-      if (error instanceof SourceMemoryForgottenError) {
+      if (isSourceMemoryForgottenError(error)) {
         const forgottenLate = new Set(error.forgottenIds);
         return {
           atomicity: "not_attempted" as const,
@@ -8030,7 +8030,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
         finalOutcomeById.set(id, { memoryId: id, kind: "superseded", previousStatus: "active" });
       } catch (error) {
-        if (error instanceof MemoryStatusConflictError) {
+        if (isMemoryStatusConflictError(error)) {
           // CAS が破れた——この1件だけ飛ばして続行する（`reextract` と同じ）。
           finalOutcomeById.set(id, {
             memoryId: id,
@@ -8376,7 +8376,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       reflectedMemory = createResult.memory;
       created = createResult.created;
     } catch (error) {
-      if (error instanceof SourceMemoryForgottenError) {
+      if (isSourceMemoryForgottenError(error)) {
         const forgottenLate = new Set(error.forgottenIds);
         return {
           outcome: "aborted_source_forgotten",
