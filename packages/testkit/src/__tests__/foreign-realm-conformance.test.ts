@@ -21,6 +21,7 @@ const KIND_BY_NAME: Record<string, string> = {
   MemoryStatusConflictError: "memory_status_conflict",
   ContestedGroupMembershipMismatchError: "contested_group_membership_mismatch",
   SourceMemoryForgottenError: "source_memory_forgotten",
+  SourceMemoryStatusChangedError: "source_memory_status_changed",
   MemoryPurgeConflictError: "memory_purge_conflict",
   ContestedWithoutCompanionError: "contested_without_companion",
   RecallOutputValidationError: "recall_output_validation",

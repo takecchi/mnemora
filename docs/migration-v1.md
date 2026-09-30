@@ -2062,6 +2062,42 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **DB マイグレーション**: 要らない。
 
+### 42. `consolidate`・`reflect` が、材料が superseded になったときと、統合元がすべて CAS に弾かれたときに、統合先・内省を書かずに打ち切るようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0420](./decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)、[PR #1523](https://github.com/takecchi/mnemora/pull/1523)。
+
+⚠ **未リリース**。**番号は 42 である**。PR #1517 が 41 を使う予定なので、その続きにした。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**:
+- **`runtime.consolidate`：**次のどちらかのとき、統合先を書かずに `outcome: 'aborted_source_status_changed'` を返す。
+  - LLM を待つ間に、eligible の1件でも `superseded` になっていたとき
+  - eligible の**すべて**が `active` でなくなっていたとき（同じ ids の `consolidate` が同時に走って先に commit した、など）
+
+  このとき、動いていた要素は `status_changed_concurrently`（`observedStatus` 付き）、残りは `not_attempted` になる。`atomicity` は `not_attempted` になる。
+- **`runtime.reflect`：**材料の1件でも `superseded` になっていたとき、内省を書かずに `outcome: 'aborted_source_status_changed'` を返す。動いていた材料は、新しい `ReflectBasisOutcome` の `"status_changed_before_write"`（`observedStatus` 付き）になる。
+- **増えた型の値：**`ConsolidateOutcome`・`ReflectOutcome` に `"aborted_source_status_changed"` が、`ReflectBasisOutcome` に `"status_changed_before_write"` が増えた。
+- **`MemoryStore` の欄と例外：**
+  - `createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents?`・`supersedeWithNewMemories?` に、任意の `opts.abortIfSuperseded` が増えた。
+  - `supersedeWithNewMemories?` に、任意の `opts.abortIfAllConflicted` が増えた。
+  - 投げる例外は、新しい `SourceMemoryStatusChangedError`（判定関数は `isSourceMemoryStatusChangedError`）である。
+
+**なぜ破壊的と数えるか**: 今まで `"consolidated"`/`"reflected"` で返り、統合先・内省が書かれていた入力が、書かれずに `"aborted_source_status_changed"` で返るからである。実行時の振る舞いが変わる。
+- この振る舞いは依頼元が決めた。v1.X.0 で出してよい、というオーナーの回答（ask_human `6911db12`）がある。
+- ⚠ union に値を足したことだけなら、規律1により数えない。ここで数えるのは、振る舞いが変わることである。
+
+**誰が影響を受けるか**:
+- `consolidate`/`reflect` の `outcome` で分岐している利用者。新しい値を知らない分岐は、それを「成功ではない何か」として扱う。
+- 同じ ids の `consolidate` を並行に走らせる運用（tick の consolidate ジョブを複数のワーカーで回す、など）。これまで重複して作られていた統合記憶が、作られなくなる。
+- 自前の `MemoryStore` を書いている adapter 実装者。新しい欄は任意なので、実装しなくても型は壊れない（無視されるだけ）。ただしその場合、書き込みの直前の窓は残る。
+
+**どう直すか**:
+- **利用者：**`outcome` の網羅的な分岐に `"aborted_source_status_changed"` を足す。扱いは `"aborted_source_forgotten"` と同じでよい。何も書かれていないので、材料を読み直して、呼び直すかどうかを決める。
+- **adapter 実装者（同じ保護が欲しい場合）：**
+  - 書き込みのトランザクションの中で、`abortIfSuperseded` の id の `status` を行ロックの下で見直す。1件でも `superseded` なら、何も書かずに `SourceMemoryStatusChangedError` を投げる。
+  - `abortIfAllConflicted: true` のときは、`supersede` の CAS がすべて破れたら、トランザクションごと巻き戻して同じ例外を投げる。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

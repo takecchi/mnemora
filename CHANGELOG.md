@@ -202,6 +202,21 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目37〜40。DB マイグレーションは無い。
   - 【確かめていないこと】自前の実装が実際にどれだけ落ちるか（`@mnemora/postgres` とインメモリの実装が通ることだけを確かめた）。
 
+- **`runtime.consolidate`・`runtime.reflect` が、材料が superseded になったときと、統合元がすべて CAS に弾かれたときに、統合先・内省を書かずに `outcome: 'aborted_source_status_changed'` で打ち切るようになった**（[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)、[PR #1523](https://github.com/takecchi/mnemora/pull/1523)）。
+  - **何が壊れていたか**:
+    - 同じ ids の `consolidate` が2本同時に走ると、後から書く側は統合元がすべて CAS に弾かれる。それでも統合先が commit され、`"consolidated"` で返っていた（同じ内容の統合記憶が2件 active になる）。
+    - `consolidate`/`reflect` が LLM を待つ間に `reextract` が材料を置き換えると、退けた古い本文から作った統合先・内省が active で残っていた。
+    - forget に対しては打ち切ると決めていた（ADR 0375 決定7・ADR 0406）が、superseded には同じ扱いが無かった。
+  - **何が変わったか**:
+    - `ConsolidateOutcome`・`ReflectOutcome` に `"aborted_source_status_changed"` が、`ReflectBasisOutcome` に `"status_changed_before_write"` が増えた。
+    - `MemoryStore` の3つの書き込みの口に任意の `opts.abortIfSuperseded` が、`supersedeWithNewMemories?` に任意の `opts.abortIfAllConflicted` が増えた。
+    - store が投げる例外は、新しい `SourceMemoryStatusChangedError`（判定関数は `isSourceMemoryStatusChangedError`）である。
+    - `@mnemora/postgres` は行ロックの下で見直し、トランザクションごと巻き戻す。`@mnemora/testkit` の `InMemoryMemoryStore` も実装する。
+    - 1件でも `active` のまま残り、`superseded` になったものが無ければ、今までどおりの部分成功である。
+  - **なぜ破壊的か**: 今まで `"consolidated"`/`"reflected"` で返り、統合先・内省が書かれていた入力が、書かれずに新しい値で返る。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目42。DB マイグレーションは無い。
+  - 【確かめていないこと】`supersedeWithNewMemories?` を実装しない adapter の2段の経路では、LLM 直後の読み直しより後に全件が破れても打ち切れない（ADR 0420 の「引き受けた負債」）。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。

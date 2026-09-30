@@ -15,6 +15,7 @@ import {
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   SourceMemoryForgottenError,
+  SourceMemoryStatusChangedError,
 } from "@mnemora/core";
 import type {
   AggregateScopeOptions,
@@ -156,6 +157,41 @@ async function assertNotForgottenForUpdate(
     .map((row) => row.id);
   if (forgottenIds.length > 0) {
     throw new SourceMemoryForgottenError(method, forgottenIds);
+  }
+}
+
+/**
+ * ADR 0420: `opts.abortIfSuperseded` を実装する共通部分。{@link assertNotForgottenForUpdate} の直後に、
+ * 同じトランザクションの中で（すでにロックした行を）`FOR UPDATE` でもう一度読み、1件でも
+ * `"superseded"` なら {@link SourceMemoryStatusChangedError} を投げる（呼び出し元の `tx` ごと rollback）。
+ * 空配列・`undefined` なら何もしない。行ロックの下で見るので、見直しの後に他のトランザクションが
+ * `superseded` へ動かすことはない（すでに動かした側が先に commit していれば、ここで見える）。
+ */
+async function assertNotSupersededForUpdate(
+  tx: SqlExecutor,
+  ctx: Ctx,
+  ids: ReadonlyArray<MemoryId> | undefined,
+  method:
+    "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+): Promise<void> {
+  if (ids === undefined || ids.length === 0) {
+    return;
+  }
+  const wellFormedIds = ids.filter((id) => isUuidLike(id));
+  if (wellFormedIds.length === 0) {
+    return;
+  }
+  const rows = await tx.execute(sql`
+    SELECT id, status FROM memories
+    WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
+    ORDER BY id ASC
+    FOR UPDATE
+  `);
+  const changed = (rows.rows as unknown as Array<{ id: MemoryId; status: MemoryStatus }>)
+    .filter((row) => row.status === "superseded")
+    .map((row) => ({ id: row.id, observedStatus: row.status }));
+  if (changed.length > 0) {
+    throw new SourceMemoryStatusChangedError(method, changed);
   }
 }
 
@@ -640,7 +676,11 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
@@ -654,6 +694,13 @@ export class PostgresMemoryStore implements MemoryStore {
       // Issue #1226 / ADR 0375 決定7: INSERT より前に見直す（`assertNotForgottenForUpdate`
       // の doc コメント参照）。`abortIfForgotten` が空・省略なら何もしない。
       await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "createMemoryWithOutbox");
+      // ADR 0420: forgotten の見直しに続けて superseded も見直す（同じ行ロックの下）。
+      await assertNotSupersededForUpdate(
+        tx,
+        ctx,
+        opts?.abortIfSuperseded,
+        "createMemoryWithOutbox",
+      );
       return this.insertMemoryWithOutboxRows(tx, ctx, input, jobKinds, outboxNow);
     });
 
@@ -694,7 +741,11 @@ export class PostgresMemoryStore implements MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -710,6 +761,13 @@ export class PostgresMemoryStore implements MemoryStore {
         tx,
         ctx,
         abortIfForgotten,
+        "createMemoriesWithOutboxAndEvents",
+      );
+      // ADR 0420: forgotten の見直しに続けて superseded も見直す。
+      await assertNotSupersededForUpdate(
+        tx,
+        ctx,
+        opts?.abortIfSuperseded,
         "createMemoriesWithOutboxAndEvents",
       );
       const written: Array<{
@@ -1015,6 +1073,8 @@ export class PostgresMemoryStore implements MemoryStore {
     opts?: {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      abortIfAllConflicted?: boolean;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     },
   ): Promise<{
@@ -1055,6 +1115,13 @@ export class PostgresMemoryStore implements MemoryStore {
       // 空・省略なら何もしない——既存の `conflicted`（CAS に弾かれた対象だけ飛ばして
       // 他は commit する部分成功）はこの見直しの対象外のまま、今日どおり働く。
       await assertNotForgottenForUpdate(tx, ctx, abortIfForgotten, "supersedeWithNewMemories");
+      // ADR 0420: forgotten の見直しに続けて superseded も見直す（同じ行ロックの下）。
+      await assertNotSupersededForUpdate(
+        tx,
+        ctx,
+        opts?.abortIfSuperseded,
+        "supersedeWithNewMemories",
+      );
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
       for (const { input, jobKinds } of news) {
@@ -1204,6 +1271,16 @@ export class PostgresMemoryStore implements MemoryStore {
           RETURNING *
         `);
         superseded.push(rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow));
+      }
+
+      // ADR 0420: `supersede` の対象がすべて CAS に弾かれたら、`news`・`created` イベントごと巻き戻す
+      // （tx の中で投げる）。1件でも通ったなら今までどおりの部分成功。
+      if (
+        opts?.abortIfAllConflicted === true &&
+        supersede.length > 0 &&
+        conflicted.length === supersede.length
+      ) {
+        throw new SourceMemoryStatusChangedError("supersedeWithNewMemories", conflicted);
       }
 
       return { created, superseded, conflicted };
