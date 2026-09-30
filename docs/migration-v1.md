@@ -2024,7 +2024,7 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **なぜ破壊的と数えるか**: 項目36 と同じ。フラグ無しの `it` が、自前の `MemoryStore.aggregateScope` に新しい約束を課す。
 
-**誰が影響を受けるか**: 自前の `MemoryStore` 実装を suite に当てている利用者のうち、`aggregateScope` が `opts.scopeAggregate` を読まない実装（`"skip"` を頼まれても集計して `"exact"` を返す）。⚠ CHANGELOG の以前の文面（`### Added`）は「実装しない adapter は常に `countKind: 'exact'` を返し続ける契約」と書いていたが、suite の実際の振る舞いは逆で、その形の実装は落ちる。なお、`packages/core/src/recall.ts` の `RecallQuery.scopeAggregate` の TSDoc に、同じ古い文面が残っている（この文書の PR は TSDoc を直していない）。
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を suite に当てている利用者のうち、`aggregateScope` が `opts.scopeAggregate` を読まない実装（`"skip"` を頼まれても集計して `"exact"` を返す）。⚠ CHANGELOG の以前の文面（`### Added`）は「実装しない adapter は常に `countKind: 'exact'` を返し続ける契約」と書いていたが、suite の実際の振る舞いは逆で、その形の実装は落ちる。なお、`packages/core/src/recall.ts` の `RecallQuery.scopeAggregate` の TSDoc と `docs/recall.md` に残っていた同じ古い文面は、後続の docs PR（枝 `docs/scope-aggregate-tsdoc`）で直した。
 
 **どう直すか**: `aggregateScope` が `opts.scopeAggregate === "skip"` を読み、件数集計を行わずに、上の値を返すようにする。集計クエリを実際に発行していないことまで suite に検査させたい場合は、`countScopeAggregateQueries` フックを渡す（任意）。
 
