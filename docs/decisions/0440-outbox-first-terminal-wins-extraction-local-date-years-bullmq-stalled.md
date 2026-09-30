@@ -38,7 +38,7 @@
      - 既存の testkit のテスト2件（complete → complete、fail → fail）は、値を縛っていなかった／後勝ちを縛っていたので、先勝ちへ書き換えた。
   3. **BullMQ の stalled を README に1節足す。** `packages/bullmq/README.md` に「lock の期限切れ（stalled）で、1回の tick に `onTickResult` と `onTickError` の両方が届きうる」を足し、`onTickError` の TSDoc にも同じ趣旨を短く足した。内容: stalled で `onTickResult` の後に `onTickError` が届きうること、データは壊れないこと（outbox の CAS）、`lockDuration` の意味（既定 30000 ms・この driver からは設定できない）。**その節に「【未実測】BullMQ 6.3.8 のソースを読んだだけで、Redis で走らせていない」と明記した。**
   4. **`lockDuration` を通す口は足さなかった。** 公開 API（`CreateBullmqTickDriverOptions`）の追加になり、追加するかはオーナーが決めることなので、足していない（台帳に残す）。
-  5. **再配達の件（[ADR 0394](./0394-activity-clock-writes-use-memorys-own-subject.md) の負債(1)）には触れていない。**
+  5. **再配達の件（[ADR 0394](./0394-activity-clock-writes-use-memorys-own-subject.md) の決定3「変えないもの（オーナーに問い合わせ中）」の1つ目＝保守の操作の中の `recall()` が活動時計を進めること）には触れていない。**
 
 - **検討した代替案**:
 
@@ -58,7 +58,7 @@
   - **`Date` の範囲の端では、`relativeDates` の一部が `null` になる。** `null` のとき、LLM には「この日は計算できない」としか見えない。
   - 先勝ちにしたことで、同じ claim の2回目の `fail` の `error` は捨てられる。`last_error` は最初の失敗の原因を指す。2回目の失敗の原因を残す口は無い。
   - `fail` の戻り値は、2回目が捨てられたかを知らせない（`void` のまま）。
-  - 再配達の件（ADR 0394 の負債(1)）は残っている。
+  - 再配達の件（ADR 0394 の決定3「変えないもの（オーナーに問い合わせ中）」の1つ目）は残っている。
 
 - **これが覆るとしたら**:
 
