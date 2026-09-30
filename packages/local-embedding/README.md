@@ -313,6 +313,16 @@ const runtime = createRuntime({
 });
 ```
 
+### `signal`（abort）を渡したときの振る舞い（ADR 0359 / ADR 0428）
+
+`embed(ctx, texts, { signal })` は、abort されると reject する。値は `signal.reason`（`reason` 無しの `abort()` なら
+`AbortError` の `DOMException`）。呼ぶ前に abort 済みならモデルを読み込まずに reject する。**モデルの読み込み中・読み込みの
+再試行の待ちも、`signal` ごとに切れる**——abort された呼び出しは読み込みの完了を待たずに即座に reject する。
+⚠ **ただし読み込みそのものは abort で止まらない。**複数の `embed()` が待つ共有の読み込み（とその再試行）は続き、切れるのは
+abort した呼び出しの待ちだけである（ある呼び出しの abort が、同じ読み込みを待つ別の呼び出しを巻き添えにしない。全員が
+abort しても読み込みは終わりまで走り、成功すればモデルは保持される）。⚠ **推論の途中も止まらない**——`/transformers`
+の呼び出し自体を中断する口が無いので、推論が終わるまで待ち、終わった時点で abort 済みならベクトルを返さずに reject する。
+`warmup()` は `signal` を取らない。
 ### モデルは**最初の `embed()` まで読み込まれない**
 
 `new` はモデルを読まない。読むのは最初の `embed()` である。

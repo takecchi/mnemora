@@ -141,3 +141,37 @@ export class OpenAILLMProviderError extends Error {
     this.refusalMessage = options.refusalMessage ?? null;
   }
 }
+
+const OPENAI_LLM_FAILURE_KINDS: ReadonlySet<unknown> = new Set<OpenAILLMFailureKind>([
+  "refusal",
+  "truncated",
+  "no_content",
+  "schema_unsupported",
+]);
+
+/**
+ * 受け取ったものが {@link OpenAILLMProviderError} かを、**`instanceof` を使わずに**判定する
+ * （[ADR 0418](../../../docs/decisions/0418-store-error-kind-guards.md) の作法、
+ * ADR 0428）。
+ *
+ * **「`kind` を見て、`kind` が無ければ `name` を見る」。** `kind` があるときは、それが
+ * {@link OpenAILLMFailureKind} のどれかであることを見る。`kind` の値は openai と anthropic で重なるので、`name` が文字列ならそれが `"OpenAILLMProviderError"` であることも見る（`name` を持たない素の値は `kind` だけで見る）。`kind` が無い値
+ * （`kind` を持たない古い版が投げた例外など）は、`name === "OpenAILLMProviderError"` で見る。
+ * bundler が同じクラスを二重に読み込んでいても効く。`name` は偽装できるが、provider は利用者が
+ * 自分で配線する信頼された部品なので実害は無いと判断している。
+ */
+export function isOpenAILLMProviderError(value: unknown): value is OpenAILLMProviderError {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { kind?: unknown; name?: unknown };
+  if (candidate.kind !== undefined) {
+    // kind の値は openai と anthropic で重なる（`refusal` など）。`name` を持つ値は、
+    // それが一致することも見る——相手の provider の例外を取り違えないため。
+    return (
+      OPENAI_LLM_FAILURE_KINDS.has(candidate.kind) &&
+      (typeof candidate.name !== "string" || candidate.name === "OpenAILLMProviderError")
+    );
+  }
+  return candidate.name === "OpenAILLMProviderError";
+}

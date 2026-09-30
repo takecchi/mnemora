@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type { OpenAIEmbeddingsClient } from "./client-types.js";
 
@@ -122,19 +123,24 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   // ⚠ 2026-09-30 追記（Issue #860）: 2026-09-26 に「件数を検査しない・戻り値は未定義」と書いたが、
   // 上のとおり検査を足した。お手本は `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
   // （`packages/local-embedding/src/local-embedding-provider.ts`）。
+  //
+  // ⚠ `opts?.signal`（ADR 0359・ADR 0428）: 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
+  // `signal.reason` で reject する。SDK の `APIUserAbortError` には化けず、SDK の再試行待ちの最中でも切れる。
   async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
     // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
     opts?.signal?.throwIfAborted();
     if (texts.length === 0) {
       return [];
     }
-    const response = await this.client.embeddings.create(
-      {
-        model: this.model,
-        input: texts,
-        dimensions: this.space.dimensions,
-      },
-      { signal: opts?.signal },
+    const response = await runAbortable(opts?.signal, async (signal) =>
+      this.client.embeddings.create(
+        {
+          model: this.model,
+          input: texts,
+          dimensions: this.space.dimensions,
+        },
+        { signal },
+      ),
     );
     const data = response.data;
 

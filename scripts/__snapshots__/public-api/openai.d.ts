@@ -84,6 +84,7 @@ export declare class OpenAILLMProviderError extends Error {
     readonly refusalMessage: string | null;
     constructor(options: OpenAILLMProviderErrorOptions);
 }
+export declare function isOpenAILLMProviderError(value: unknown): value is OpenAILLMProviderError;
 
 // ===== dist/index.d.ts =====
 export * from "./client-types.js";
