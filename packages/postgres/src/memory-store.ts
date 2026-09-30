@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import {
   computeEventRetentionCutoff,
+  DEFAULT_DECAY_CLOCK,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
 } from "@mnemora/core";
@@ -4141,7 +4142,7 @@ export class PostgresMemoryStore implements MemoryStore {
  * 持たない——`decay_floor_at` は常に non-null なので、この列で安定した順序を作れる。
  */
 export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL {
-  const clock = opts.clock ?? "wall";
+  const clock = opts.clock ?? DEFAULT_DECAY_CLOCK;
   const wallCondition = sql`decay_floor_at <= ${toPgTimestamp(opts.now)}`;
   const activityCondition = (): SQL => {
     if (opts.nowSeq === undefined) {

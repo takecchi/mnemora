@@ -242,6 +242,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `VectorStore.searchMany?`（任意メソッド）の契約——各 key の結果が単独の `search()` と集合・順序とも一致する、同点の並び、`limit` を超えない、0件でも key が Map に在る、空 `queries` は空 Map、同じ key は後勝ち、NUL を含む key でも投げない、不正な `limit` は `search()` と同じく投げる、`filter`・テナント分離——を検査する歯が、これまで無かった。フラグは `supportsListActiveClaimPredicates?` と同じ3状態（`true` は歯を実行、`false` は `searchMany` が無いことを assert、省略は「⚠ 未検査」の named it を1本）。
   - ⚠ **自前の `VectorStore` に `searchMany` を実装していて `supportsSearchMany: true` を渡す人へ**: 契約に反していれば、この歯で新しく赤になりうる。フラグを渡さなければ何も変わらない（型も壊れない）。
   ⭕ 非破壊と数える（新しい任意の欄1つと、fixture への任意メソッドの追加のみ）。
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` に、任意メソッド `dispose(): Promise<void>` を足した**（[ADR 0419](./docs/decisions/0419-local-embedding-provider-dispose.md)）。読み込んだモデル（ONNX のセッション）を、上流 `@huggingface/transformers` の `dispose()` に委ねて手放す。読み込み中・推論中に呼ぶと、それらの完了を待ってから解放する。一度も読み込んでいなければ何もせず、2回呼んでも安全（上流の `dispose()` は1回）。**呼んだ後の `embed()` / `warmup()` は、入力に依らず（空配列でも）例外になる。**`EmbeddingProvider`（core の interface）には載せていない。`LocalEmbeddingPipeline`（`createPipeline` の注入口）にも任意の `dispose?()` を足した（持たなくてよい）。
+  ⭕ 非破壊と数える（任意メソッド・任意欄の追加のみ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
