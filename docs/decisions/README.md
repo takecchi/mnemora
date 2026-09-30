@@ -433,5 +433,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0418](./0418-store-error-kind-guards.md) | store 例外は `instanceof` ではなく `kind`（無ければ `name`）で判定する | 採用 (2026-09) |
 | [0419](./0419-local-embedding-provider-dispose.md) | `LocalEmbeddingProvider` に任意の `dispose()` を足す | 採用 (2026-09) |
 | [0420](./0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md) | `consolidate`・`reflect` は、材料が superseded になったときと、統合元がすべて CAS に弾かれたときに打ち切る | 採用 (2026-09) |
+| [0422](./0422-reextract-created-event-at-and-meta.md) | `reextract` の `created` イベントの `at` を同じ操作の `superseded` と揃え、meta に再抽出の印を足す。同じ `at` のイベントの並びは約束しない | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
