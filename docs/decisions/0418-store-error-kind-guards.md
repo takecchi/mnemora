@@ -198,5 +198,6 @@
   この2つの provider の例外は、`kind` を自分で読まない限り `instanceof` に頼るしかなかった。
 - **[ADR 0428](./0428-provider-abort-reason-and-error-guards.md) で足したもの**: `@mnemora/openai` に `isOpenAILLMProviderError`、
   `@mnemora/anthropic` に `isAnthropicLLMProviderError` を、公開 export として足した（追加のみ。既存の公開面は変えていない）。
-  判定は本文の作法どおり「`kind` を見て、`kind` が無ければ `name` を見る」。`kind` があるときは、その値が各パッケージの
-  `*LLMFailureKind` のどれかであることだけを見る。
+  判定は本文の作法（「`kind` を見て、`kind` が無ければ `name` を見る」）を基にし、`kind` があるときは、その値が各パッケージの
+  `*LLMFailureKind` のどれかであることに加えて、`name` が文字列ならそれが自分のクラス名であることも見る。openai と anthropic は
+  `kind` の値が重なる（`"refusal"` など）ので、`kind` だけでは相手の provider の例外を取り違えるためである。

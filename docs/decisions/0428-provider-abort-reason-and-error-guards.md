@@ -44,6 +44,8 @@
   4. **openai・anthropic の例外に判定関数を足す。**`isOpenAILLMProviderError`・`isAnthropicLLMProviderError` を公開 export にした。
      [ADR 0418](./0418-store-error-kind-guards.md) の作法で、`instanceof` を使わず「`kind` があればその値が各パッケージの `*LLMFailureKind` のいずれかであることを、
      `kind` が無ければ `name` が `"OpenAILLMProviderError"` / `"AnthropicLLMProviderError"` であることを」見る。`kind` は既に在ったので足していない。
+     ただし `kind` の値は openai と anthropic で重なる（`"refusal"` など）ので、`kind` が在っても `name` が文字列なら、それが自分のクラス名であることも見る
+     （`name` を持たない素の値は `kind` だけで見る）。ADR 0418 の「`kind`、無ければ `name`」から一歩締めた形で、相手の provider の例外を取り違えないためである。
   5. **README の訂正。**`packages/openai/README.md` の `kind` の列挙に、型 `OpenAILLMFailureKind` の4種目 `schema_unsupported` を足した。
      3つの provider の README に、`signal` の振る舞いを1節ずつ書いた。
 
@@ -67,8 +69,8 @@
   - openai・anthropic で、abort 後に SDK が遅れて完了・失敗しても結果は捨てる（`runAbortable` の仕様）。裏のリクエストは `signal` を渡しているので切れるはずだが、
     サーバ側の処理までは止まらない。実 API では確かめていない。
   - 推論の途中は止まらない（ADR 0359のまま）。
-  - openai・anthropic の判定関数は、`kind` が在るときは `name` を見ない。別のパッケージの例外が、たまたま同じ `kind` の値（`"refusal"` 等）を持っていれば true になる
-    （anthropic と openai は `kind` の値が重なる）。`instanceof` を使わない判定関数の一般的な限界であり、provider は利用者が自分で配線する信頼された部品なので許容した。
+  - openai・anthropic の判定関数は、`name` を持たない素の値を `kind` だけで見る。`name` を持たず、たまたま同じ `kind` の値（`"refusal"` 等）を持つ別のパッケージの値は true になる。
+    `name` は偽装もできる。`instanceof` を使わない判定関数の一般的な限界であり、provider は利用者が自分で配線する信頼された部品なので許容した。
 
 - **これが覆るとしたら**:
 
@@ -85,6 +87,7 @@
     値は `APIUserAbortError` で `signal.reason` と食い違い、429 の3本は約3000msかかった）。anthropic は8本すべて赤（同じ形）。
     local-embedding は7本すべて赤（読み込みの gate が開くまで reject せず、5秒のテスト timeout）。実装後は openai 12本・anthropic 8本・local-embedding 7本とも緑。
   - 判定関数の歯（`packages/openai/src/__tests__/error-guard.test.ts`・`packages/anthropic/src/__tests__/error-guard.test.ts`）は、実装のあとに書いた
-    （実装前の赤は見ていない）。
+    （実装前の赤は見ていない）。ただし「kind の値が重なる相手の provider の例外（`name` が違う）を true と判定しない」の1本は、`kind` だけを見る最初の実装に当てて
+    両パッケージで赤を見てから、`name` も見る形に締めて緑にした。
   - 公開 API の表面（`scripts/__snapshots__/public-api/openai.d.ts`・`anthropic.d.ts`）の差分は、判定関数の `export declare function` が各1行増えただけ（追加のみ）。
   - **測っていないこと**: 実 API での abort・再試行待ち（擬似サーバ＋実物の SDK まで）。本物のモデルの読み込み中の abort。

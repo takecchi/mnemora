@@ -21,7 +21,7 @@ describe("isOpenAILLMProviderError", () => {
     expect(isOpenAILLMProviderError(new Error("other"))).toBe(false);
   });
 
-  it("kind があるなら name は見ない（未知の kind は、name が一致していても false）", () => {
+  it("未知の kind は、name が一致していても false", () => {
     expect(isOpenAILLMProviderError({ kind: "unknown_kind", name: "OpenAILLMProviderError" })).toBe(
       false,
     );
@@ -35,5 +35,14 @@ describe("isOpenAILLMProviderError", () => {
 
   it("他の provider のエラー（別の kind 体系）を取り違えない", () => {
     expect(isOpenAILLMProviderError({ kind: "input_too_long" })).toBe(false);
+  });
+  it("kind の値が重なる相手の provider の例外（name が違う）を true と判定しない", () => {
+    const other = Object.assign(new Error("other"), {
+      name: "AnthropicLLMProviderError",
+      kind: "refusal",
+    });
+    expect(isOpenAILLMProviderError(other)).toBe(false);
+    // name を持たない素のオブジェクト（二重読み込みを模したもの）は、引き続き kind で見る。
+    expect(isOpenAILLMProviderError({ kind: "refusal" })).toBe(true);
   });
 });

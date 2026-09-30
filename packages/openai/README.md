@@ -222,8 +222,8 @@ strict への翻訳は `.optional()` の欄を「必須 + `null` 許容」にし
 `signal.reason`（`reason` 無しの `abort()` なら `AbortError` の `DOMException`）である。SDK の `APIUserAbortError` には
 ならない。呼ぶ前に abort 済みなら、SDK を呼ばず（リクエストを送らず）に reject する。SDK の再試行待ち
 （429 の `retry-after` 等）の最中でも、abort で即座に打ち切られる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
-`signal` を渡さなければ、今までどおり返るまで待つ。失敗の判定は `isOpenAILLMProviderError`（`kind`、無ければ `name` で見る。
-`instanceof` を使わない）でもできる。
+`signal` を渡さなければ、今までどおり返るまで待つ。失敗の判定は `isOpenAILLMProviderError`（`kind`、無ければ `name` で見る。`kind` の値は openai と anthropic で重なるので、`name` が文字列ならそれが
+`"OpenAILLMProviderError"` であることも見る。`instanceof` を使わない）でもできる。
 
 ## もっと詳しく
 
