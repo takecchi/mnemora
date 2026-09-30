@@ -58,7 +58,10 @@ function createFakeDb(opts: FakeDbOptions = {}): Db {
 
 describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）", () => {
   it("extension_create_denied: create() が投げる例外の .cause は元の Postgres エラーと同一である", async () => {
-    const original = new Error('permission denied to create extension "pg_trgm"');
+    const original = Object.assign(new Error('permission denied to create extension "pg_trgm"'), {
+      code: "42501",
+      routine: "execute_extension_script",
+    });
     const db = createFakeDb({ extensionCreateError: original });
 
     const thrown: unknown = await PostgresTrigramLexicalStore.create(db).catch((e: unknown) => e);
@@ -102,12 +105,48 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
   });
 
   it("公開の probeTrigramLexicalSupport の戻り値には cause 欄が漏れていない", async () => {
-    const original = new Error('permission denied to create extension "pg_trgm"');
+    const original = Object.assign(new Error('permission denied to create extension "pg_trgm"'), {
+      code: "42501",
+      routine: "execute_extension_script",
+    });
     const db = createFakeDb({ extensionCreateError: original });
 
     const result = await probeTrigramLexicalSupport(db);
 
     expect(result.ok).toBe(false);
     expect(result).not.toHaveProperty("cause");
+  });
+
+  it("extension_create_denied は message でなく code/routine で決まる（lc_messages が英語以外でも同じ）", async () => {
+    const original = Object.assign(new Error("拡張機能\"pg_trgm\"を作成する権限がありません"), {
+      code: "42501",
+      routine: "execute_extension_script",
+    });
+    const result = await probeTrigramLexicalSupport(createFakeDb({ extensionCreateError: original }));
+
+    expect(result).toMatchObject({ ok: false, reason: "extension_create_denied" });
+  });
+
+  it("drizzle が包んだ失敗（code/routine は cause 側）でも extension_create_denied になる", async () => {
+    const pgError = Object.assign(new Error("permission denied to create extension"), {
+      code: "42501",
+      routine: "execute_extension_script",
+    });
+    const wrapped = new Error("Failed query: CREATE EXTENSION IF NOT EXISTS pg_trgm\nparams: ", {
+      cause: pgError,
+    });
+    const result = await probeTrigramLexicalSupport(createFakeDb({ extensionCreateError: wrapped }));
+
+    expect(result).toMatchObject({ ok: false, reason: "extension_create_denied" });
+  });
+
+  it("message が権限不足に見えても、code/routine が違えば extension_create_failed（英語の message で判定しない）", async () => {
+    const original = Object.assign(new Error("permission denied for schema public"), {
+      code: "42501",
+      routine: "aclcheck_error",
+    });
+    const result = await probeTrigramLexicalSupport(createFakeDb({ extensionCreateError: original }));
+
+    expect(result).toMatchObject({ ok: false, reason: "extension_create_failed" });
   });
 });
