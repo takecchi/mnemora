@@ -96,7 +96,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   /**
    * `texts` を1回の API 呼び出しで埋め込み、入力と同じ順（応答の `index` で並べ直す）で返す。
-   * 空配列なら API を呼ばずに `[]` を返す。
+   * 空配列なら API を呼ばずに `[]` を返す（ただし `opts.signal` が abort 済みなら、空配列でも `[]` を返さず
+   * `signal.reason` で reject する）。
    *
    * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。
    *
@@ -126,6 +127,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   // ⚠ `opts?.signal`（ADR 0359・ADR 0428）: 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
   // `signal.reason` で reject する。SDK の `APIUserAbortError` には化けず、SDK の再試行待ちの最中でも切れる。
   async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
+    // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
+    opts?.signal?.throwIfAborted();
     if (texts.length === 0) {
       return [];
     }

@@ -102,6 +102,27 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       await expect(store.unlink(ctx, "contradicts", a, b)).resolves.toBeUndefined();
     });
 
+    it("unlink は uuid の形でない id を、存在しない id と同じに扱う（何もしない。DB の生の例外にしない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+
+      await expect(
+        store.unlink(ctx, "contradicts", "not-a-uuid" as MemoryId, a),
+      ).resolves.toBeUndefined();
+      await expect(
+        store.unlink(ctx, "contradicts", a, "not-a-uuid" as MemoryId),
+      ).resolves.toBeUndefined();
+    });
+
+    it("listRelated は uuid の形でない id に空配列を返す（存在しない id と同じ。DB の生の例外にしない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      expect(await store.listRelated(ctx, "not-a-uuid" as MemoryId)).toEqual([]);
+      expect(await store.listRelated(ctx, "not-a-uuid" as MemoryId, "contradicts")).toEqual([]);
+    });
+
     it("listRelated は関係の無い Memory に対して空配列を返す", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -218,6 +239,40 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
         });
       }
     }
+
+    // 列挙の外の kind（`RelationKind` の union に無い値）。Postgres は `memory_relations.kind` の CHECK
+    // （`0026_memory_relations.sql`）で拒むが、その違反を生の DB エラーのまま漏らさず、分かりやすい例外
+    // （`relation kind` を含む文面）で INSERT の前に断る。in-memory 実装も同じく断る。
+    it("列挙の外の kind を渡す link は、分かりやすい例外で拒まれ、行は書かれない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+
+      const error = await store.link(ctx, "not-a-kind" as unknown as "contradicts", a, b).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/relation kind/);
+      expect((error as Error).message).not.toMatch(/Failed query|check constraint|violates/i);
+      expect(await store.listRelated(ctx, a)).toEqual([]);
+    });
+
+    it("listRelated が返した createdAt を呼び手が書き換えても、store 側の行は変わらない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+
+      await store.link(ctx, "contradicts", a, b);
+      const first = await store.listRelated(ctx, a);
+      const original = first[0]!.createdAt.getTime();
+      first[0]!.createdAt.setTime(0);
+
+      const second = await store.listRelated(ctx, a);
+      expect(second[0]!.createdAt.getTime()).toBe(original);
+    });
 
     it("N件の完全グラフ（3件）を双方向で張ると、どのメンバーからも残り2件が引ける", async () => {
       const store = await createStore();

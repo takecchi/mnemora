@@ -119,6 +119,38 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
 - `--extension-mode verify` の確認は、ロックを取る前（ほかのプロセスの移行を待つ前）に、起動した時点の
   `pg_extension` を読む。同時に既定の `create` のプロセスが拡張を作っている最中だと、`verify` のほうは
   「必要な拡張が見当たりません」で失敗しうる——拡張ができた後に打ち直せば通る。
+- **台帳と手元のファイルがずれていると、警告を出して続行する**（穴探し6巡目 S-1・S-3、ADR 0425）。止めない。適用の順序も中身も
+  変えない。標準エラー（ライブラリとして呼んだときは `console.warn`）に `[@mnemora/postgres] migrate: ` で始まる文が出る。
+  - **番号の小さい未適用のファイルがある**（台帳の最大の番号より小さい番号のファイルが、台帳に載っていない）。そのファイルも
+    いまどおり当たるが、**当たり直しが、後に適用済みの migration が変えた内容を巻き戻しうる**。例: 台帳から
+    `0011_memory_events_kind_restored.sql` の行だけが欠けた DB では、0011 が単独で当たり直り、0018 が足した `'unsuperseded'` が
+    `memory_events_kind_check` から消える。出たら、台帳の行を誤って消していないか（手での編集・部分的な復元）、別の版の
+    `migrations/` から流していないかを確かめる。巻き戻ったかどうかは `pg_get_constraintdef` などで DB 側を見ること。
+  - **台帳に、手元の `migrations/` に無い名前がある**。**手元の版が DB より古い可能性がある**（新しい版で上げた DB に、古い版から流している。
+    警告が無かった頃は「すべて適用済み」とだけ出た）。出たら、この DB を使っているアプリ・CLI の版を揃える。ファイル名を自分で変えたのなら、
+    この警告は想定内である。
+  - 警告を出さないための公開オプションは無い。止めたい運用は、標準エラーの出力を見て判断すること。
+
+### ⚠ `lockTimeoutMs` は DDL の表ロック待ちには効かない（上限を付けるなら接続側で）
+
+- **`runMigrations` の `lockTimeoutMs`（既定 30 秒）が効くのは、advisory lock を待つ間だけである。**ロックを取った直後に
+  `RESET lock_timeout` するので（`src/migrate.ts` の `runMigrations`。共有の拡張ロックを待つ `acquireExtensionLock` も、待つ間だけ敷いて
+  `RESET` する）、本体の DDL が**表のロック**（稼働中のアプリが握っている表への `ALTER TABLE` など）を待つ間は、
+  セッションの `lock_timeout` の既定値に従う。サーバの既定は `0`（上限なし）なので、**何も渡さなければ DDL はロックを待ち続ける**。
+  `lockTimeoutMs` に小さい値を渡しても変わらない。
+- **上限を付けたければ、接続側で `lock_timeout` を渡す。**次のどれでもよい。
+  - 接続文字列: `DATABASE_URL=postgresql://user:pass@host:5432/mydb?options=-c%20lock_timeout%3D5s`（CLI もこれで効く）
+  - pg の `PoolConfig`: `new Pool({ connectionString, options: "-c lock_timeout=5s" })`
+  - ロール・DB の設定: `ALTER ROLE migrator SET lock_timeout = '5s'`（`ALTER DATABASE … SET` も同様）
+- ⚠ `RESET lock_timeout` が戻すのは「セッションの既定値」であり、`0` ではない。接続の起動パラメータやロール・DB の設定で渡した値は、
+  `RESET` のあとも残る。【実測】2026-09-30、PostgreSQL 17.11・ローカル。別セッションが `ACCESS EXCLUSIVE` で握っている表に
+  `ALTER TABLE … ADD COLUMN` するマイグレーション1本を `runMigrations(pool, dir, { lockTimeoutMs: 100 })` で流した:
+  接続文字列の `options`・`PoolConfig.options`・`ALTER ROLE … SET lock_timeout='2s'` の3通りは、いずれも約2秒で失敗した。
+  何も渡さない場合は、握っている側が手放す（約8秒後）まで待って成功した（`lockTimeoutMs: 100` は効かなかった）。
+  **測っていないもの**: `ALTER DATABASE … SET`、`PGOPTIONS` 環境変数、pgbouncer などの接続プール越し（起動パラメータが落ちる構成がありうる）。
+- **時間切れになったとき**: そのファイルのトランザクションは `ROLLBACK` され、`migration <file> failed: canceling statement due to lock timeout`
+  で throw される（`MigrationLockTimeoutError` ではない——あれは advisory lock の待ちの時間切れ）。台帳（`_mnemora_migrations`）にも
+  載らないので、そのまま再実行できる（上の実測で、失敗後の台帳は空・列は増えていなかった）。
 
 ### ⚠ 新規インストール後、最初のデータ投入が終わったら `--analyze-memories` を実行すること
 
