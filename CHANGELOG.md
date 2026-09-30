@@ -215,7 +215,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **誰が影響を受けるか**: 自前の `OutboxStore`・`RelationStore` を上の suite に当てている利用者。`@mnemora/postgres` は、`RelationStore.link` の列挙外 `kind` の `it` だけ、修正前は落ちた（次の `### Fixed`）。ほかの5件は修正前から通る。インメモリ実装（`@mnemora/testkit/fixtures`）は、6件とも足した修正で通る。
   - **`@mnemora/postgres` の `PostgresRelationStore.link` の変化（破壊的とは別に数えない）**: 列挙外の `kind` は、これまでも `memory_relations.kind` の CHECK 違反で例外になっていた。今は INSERT の前に `PostgresRelationStore: unknown relation kind: <kind>` の `Error` で断る。**以前通っていた入力が新しく落ちるわけではない**（例外になる入力は同じ）。変わるのは例外の中身だけで、DB の生のエラー（`23514`）を `cause` などから読んでいた呼び出し側は、その読み方が効かなくなる。
   - **`@mnemora/testkit/fixtures` の変化（数えない）**: `InMemoryOutboxStore.complete`/`fail` が Invalid Date の `opts.at` を拒み、`InMemoryRelationStore.link` が列挙外の `kind` を拒むようになった。fixture が新しく例外を投げる変更は、数えない（[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」規律2）。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目41。DB マイグレーションは無い。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目43。DB マイグレーションは無い。
   - 【確かめていないこと】`complete`/`fail` の Invalid Date を、`jobId` が uuid の形でないときにどうするか: Postgres は先に何もせず返す（`at` を見ない）が、fixture は `jobId` を見る前に拒む。この差は `it` で縛っていない。
 - **`@mnemora/testkit` の `describeMemoryStoreConformance` が、自前の `MemoryStore` 実装に4つの約束を新しく課すようになった——`reinforce`/`reinforceMany?` が `memory_events` を書かないこと、`aggregateScope` が `scopeAggregate: 'skip'` を守ること、`createObservationWithOutbox` が `opts.claimedBy` を守ること（この3つはフラグ無しの `it`）、`listActiveClaimPredicates?` の同着の並び**（[PR #1452](https://github.com/takecchi/mnemora/pull/1452)・[PR #1455](https://github.com/takecchi/mnemora/pull/1455)・[PR #1484](https://github.com/takecchi/mnemora/pull/1484)・[PR #1492](https://github.com/takecchi/mnemora/pull/1492)）。
 
