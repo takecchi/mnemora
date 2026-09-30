@@ -213,7 +213,7 @@ jobs:
         # 試走専用（Issue #1276、マージしない）: 並びを変える。
         # 試走専用（Issue #1276、マージしない）: 並びを変える。
         # 試走専用（Issue #1276、マージしない）: 並びを変える。
-        run: pnpm --filter @mnemora/postgres run test:db --sequence.shuffle --sequence.seed=90210
+        run: pnpm --filter @mnemora/postgres run test:db --sequence.shuffle --sequence.seed=11
 
       - name: "実測した regime を Job Summary に残す(⛔ 値の良し悪しの門ではない。ただし宣言と実測の食い違いは門である。Issue #148 ②)"
         # このステップは常に走る(`if: always()`)——上の test:db が(regime とは無関係な

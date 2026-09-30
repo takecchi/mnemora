@@ -103,7 +103,6 @@ export default defineConfig({
           // setup-reset-process-counters.ts、共有クライアントは各ファイルの afterAll、契約の検査は
           // setup-recall-output-contract-positive-control.test.ts）。⛔ 直列の群は `isolate: true` のまま
           // （接続切断・プール終了を見るテストが多く、状態の持ち越しが害になる）。
-          isolate: false,
           sequence: { groupOrder: 0 },
         },
       },
