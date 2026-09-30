@@ -186,6 +186,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **多者間の `contested` 群の recall で、`companionOf`（同じ段で複数の親から届く companion の発見元）が「id の小さい親」に決まるようになった。`Runtime.resolveContestedGroup` の `winnerId` が、`resolveContested`（2者版）と同じ規則で大文字小文字を救済するようになった**（[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) 項目7・項目6、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md) §7 負債3・負債1の解消）。
+  - `companionOf` は説明可能性の欄だけが変わる（`memories`/`omitted` の中身・件数は変わらない）。以前は `RelationStore.listRelated`（契約が順を規定しない）の返す順に依存していた。
+  - `resolveContestedGroup` は、`winnerId` が `memberIds` のどれとも完全一致しないとき、小文字にそろえた候補がちょうど1件で、`memoryStore.get` が同じ id の記憶を返す場合に限り、その `memberIds` の綴りを勝者として使う。以前はこの場合 `RangeError` だった。候補が2件以上・`get` が食い違う場合は今どおり `RangeError`。エラーだった呼び出しが通るようになるだけで、通っていた呼び出しの結果は変わらない。
+
 - **`excludeProvenanceKinds` を指定した recall の `ann_unreached` の判定が、除外した kind の行を母数に数えなくなった。`scopeAggregate: "skip"` の recall は、ANN の到達を判定できないと名乗るようになった**（[PR #1458](https://github.com/takecchi/mnemora/pull/1458)、[ADR 0390](./docs/decisions/0390-ann-unreached-aware-of-excluded-provenance-and-skip.md)）——除外指定のとき、ANN が取りこぼしても `severity: "info"` のまま・診断キーも付かず（黙る）、除外しない候補を全部拾えても鳴る（鳴りすぎ）、という2つの誤りを直した。`AggregateScopeOptions.excludeProvenanceKinds?` と `ScopeAggregate.excludedProvenanceIndexedCount?`（除外される kind で、スコープ内の索引済みの行の数）を足し（どちらも任意の欄。`totalInScope`・`groups`・`filtered*` の意味は変えない）、`@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore` が実装した。
   - **既定は変わらない**: 除外指定なし・欄を返さない自作 adapter・`scopeAggregate: "exact"` の recall の出力は1バイトも変わらない。Postgres の SQL も、除外指定（非空）のときだけ列を足す。**除外指定のある recall の `omitted`（`ann_unreached` の有無・severity）と `explain.stages` の診断キーは、欄を返す adapter では変わる**（変わる向きは、取りこぼしを名乗る・鳴りすぎを止める）。
   - `scopeAggregate: "skip"` で ANN の段が走り、adapter が `countKind: 'unknown'` を返したときは、ANN の stage detail に `annReachability: "unknown"`（到達を判定できない）が付く。`ann_unreached` が鳴らないこと自体は変わらない——**キーが付いているときの「無い」は「拾いきった」ではない**（[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 「決めたこと」7 の手当て）。
