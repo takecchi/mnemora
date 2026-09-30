@@ -515,6 +515,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-09-30 追記（省略時の named it を縛る歯の対象拡張）**: 上の追記が挙げる「省略したときの named it の一覧」の件数（「5つから6つ」「7つ」）と、直前の追記の「`VectorStore` を対象にしていないので、この named it の登録そのものを縛る歯は無い」は、当時の記録であり、いまは成り立たない。`conformance-omitted-flags-named-it.test.ts` は `VectorStoreConformanceOptions.supportsSearchMany?` と `OutboxStoreConformanceOptions.supportsPurgeCompletedJobs?` の省略時の named it も縛るようになった。⛔ 一覧の件数はここに書かない——数えるなら、そのテストファイルと各 `*-conformance.ts` の Options 型が出所である（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。省略で named it が登録される `MemoryStoreConformanceOptions.countScopeAggregateQueries?`（フラグではなく関数フックの2状態）は、この歯の対象外のままである。
 
+**⚠ 2026-09-30 追記（`countScopeAggregateQueries?` を縛った）**: 直前の追記が「この歯の対象外のまま」とした `MemoryStoreConformanceOptions.countScopeAggregateQueries?`（関数フックの2状態）も、`conformance-omitted-flags-named-it.test.ts` が縛るようになった。省略すると「⚠ 未検査: countScopeAggregateQueries が指定されていない — …」の named it が1本登録されること（`it.skip` ではなく常に実行される it であること）を検査する。2状態でも「省いたら named it が出る」という約束はフラグの3状態と同じ、というオーナーの判断による。上の「対象外のまま」は当時の記録であり、いまは成り立たない。`supportsRealConcurrency?`（省略で `it.skip`）と `supportsTaxonomyMode?`（省略で何も登録されない）は、形が違うので対象外のままである。
+
 ---
 
 ## 出所について
