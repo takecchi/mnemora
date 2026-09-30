@@ -432,5 +432,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0416](./0416-created-event-same-tx-remaining-paths.md) | `created` イベントを記憶と同じトランザクションで積む範囲を、reextract・consolidate の口あり経路と reflect へ広げる（穴 D-3 の続き） | 採用 (2026-09) |
 | [0418](./0418-store-error-kind-guards.md) | store 例外は `instanceof` ではなく `kind`（無ければ `name`）で判定する | 採用 (2026-09) |
 | [0419](./0419-local-embedding-provider-dispose.md) | `LocalEmbeddingProvider` に任意の `dispose()` を足す | 採用 (2026-09) |
+| [0426](./0426-in-memory-erase-tenant-postgres-alignment.md) | testkit のインメモリ `eraseTenant` を Postgres 実装に揃える（`tenant_subject_activity` の行数と、埋め込みの CASCADE） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

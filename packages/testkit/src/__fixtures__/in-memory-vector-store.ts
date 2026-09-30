@@ -110,7 +110,18 @@ function cosineDistance(a: number[], b: number[]): number {
 export class InMemoryVectorStore implements VectorStore {
   private readonly entries = new Map<string, Entry>();
 
-  constructor(private readonly memoryStore: InMemoryMemoryStore) {}
+  constructor(private readonly memoryStore: InMemoryMemoryStore) {
+    // ADR 0426: `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` に当たる動き——
+    // `memories` の行が消えたら、全 space からその埋め込みを消す。
+    memoryStore.onMemoriesDeleted((tenantId, memoryIds) => {
+      const idSet = new Set<MemoryId>(memoryIds);
+      for (const [key, entry] of this.entries) {
+        if (entry.tenantId === tenantId && idSet.has(entry.memoryId)) {
+          this.entries.delete(key);
+        }
+      }
+    });
+  }
 
   private key(space: EmbeddingSpaceId, tenantId: string, memoryId: MemoryId): string {
     // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`provider`・`model` は `:` を含みうる

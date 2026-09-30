@@ -542,6 +542,25 @@ export class InMemoryMemoryStore implements MemoryStore {
   readonly relations: StoredRelation[] = [];
 
   /**
+   * [ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md):
+   * `memories` の行を消したときに呼ぶ listener。`memory_embeddings_<space>.memory_id` の
+   * `ON DELETE CASCADE`（`packages/postgres/src/vector-space.ts`）に当たる動きを、
+   * `InMemoryVectorStore` がコンストラクタで {@link onMemoriesDeleted} を通して登録する。
+   */
+  private readonly memoriesDeletedListeners: Array<
+    (tenantId: string, memoryIds: readonly MemoryId[]) => void
+  > = [];
+
+  /**
+   * [ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md):
+   * `memories` の行が消えたとき（`eraseTenant`。`dryRun` では呼ばない）に `listener` を呼ぶ。
+   * `InMemoryVectorStore` が埋め込みを一緒に消すために使う（Postgres の CASCADE）。
+   */
+  onMemoriesDeleted(listener: (tenantId: string, memoryIds: readonly MemoryId[]) => void): void {
+    this.memoriesDeletedListeners.push(listener);
+  }
+
+  /**
    * `(tenantId, name)` を区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId` は不透明な
    * 文字列で `::` を含んでよい（`Ctx` の doc）。以前の `${tenantId}::${name}` は、テナント `a::b` の
    * `x` とテナント `a` の `b::x` を同じキーに潰していた（`labels-tenant-key.postgres.test.ts`）。
@@ -3030,6 +3049,11 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （`superseded_by_id`/`contested_with_id`）の事前 NULL 化も、`Map` からの削除が
    * FK エラーを起こさないため不要——単純に対象の行を消すだけでよい。
    *
+   * [ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md):
+   * 消した `memories` の埋め込みは、{@link onMemoriesDeleted} で登録された
+   * `InMemoryVectorStore` が一緒に消す（Postgres の `ON DELETE CASCADE`。件数には数えない）。
+   * `tenant_subject_activity` は subject ごとに1行として数える。
+   *
    * `reachedLimit` は `PostgresMemoryStore.eraseTenant` と同じ「保守的な近似」
    * （ある表でちょうど budget 分だけ削除できた場合、それ以上残っているかを
    * 追加で確認せず `true` を返す）。
@@ -3125,10 +3149,21 @@ export class InMemoryMemoryStore implements MemoryStore {
       // memory_relations（Issue #207/#933 PR2 の `relations`。`InMemoryRelationStore` と共有）
       () => drainArray(this.relations, (relation) => relation.tenantId),
       // memories（+ 冪等キー extractionIndex の掃除。budget には数えない——見えない
-      // 内部索引であり、Postgres 側に対応する別テーブルが無いため）
+      // 内部索引であり、Postgres 側に対応する別テーブルが無いため）。
+      // ADR 0426: 消した memories の埋め込みも listener 経由で消す（Postgres の
+      // `ON DELETE CASCADE`）。CASCADE で消えた行と同じく、budget にも `deleted` にも数えない。
       () => {
+        const tenantMemoryIds = [...this.memories.values()]
+          .filter((memory) => memory.tenantId === ctx.tenantId)
+          .map((memory) => memory.id);
         const deleted = drainMap(this.memories, (memory) => memory.tenantId);
         if (!dryRun) {
+          const deletedIds = tenantMemoryIds.filter((id) => !this.memories.has(id));
+          if (deletedIds.length > 0) {
+            for (const listener of this.memoriesDeletedListeners) {
+              listener(ctx.tenantId, deletedIds);
+            }
+          }
           for (const key of [...this.extractionIndex.keys()]) {
             const [tenantId] = JSON.parse(key) as [string, ...unknown[]];
             if (tenantId === ctx.tenantId) {
@@ -3151,13 +3186,14 @@ export class InMemoryMemoryStore implements MemoryStore {
         if (!dryRun) this.activitySeq.delete(ctx.tenantId);
         return 1;
       },
-      // tenant_subject_activity（テナント1件＝そのテナントの subject 別カウンタ全部で1行、
-      // という単純化——`Map<tenantId, Map<subjectId, seq>>` の外側キー1つを1行として数える）
+      // tenant_subject_activity（`(tenant_id, subject_id)` が主キー——ADR 0426: 内側の
+      // `Map<subjectId, seq>` の1エントリを1行として数え、budget ぶんだけ消す）
       () => {
-        if (remaining <= 0) return 0;
-        if (!this.subjectActivitySeq.has(ctx.tenantId)) return 0;
-        if (!dryRun) this.subjectActivitySeq.delete(ctx.tenantId);
-        return 1;
+        const bySubject = this.subjectActivitySeq.get(ctx.tenantId);
+        if (bySubject === undefined) return 0;
+        const deleted = drainMap(bySubject, () => ctx.tenantId);
+        if (!dryRun && bySubject.size === 0) this.subjectActivitySeq.delete(ctx.tenantId);
+        return deleted;
       },
     ];
 

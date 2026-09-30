@@ -376,6 +376,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - ⚠ 適合テストは core の判定関数（この版の core が公開したもの）を import する。判定関数を持たない古い版の core と組み合わせた testkit は動かない。
   - 公開 API に変更は無い（判定用の道具 `error-guards.ts` は export していない。snapshot は変わらない）。非破壊。
 
+- **`@mnemora/testkit` のインメモリ `eraseTenant` が、Postgres 実装と同じく `tenant_subject_activity` を subject ごとの行で数え、消した `memories` の埋め込みも一緒に消す（`ON DELETE CASCADE` に当たる動き）ようになった**（[ADR 0426](./docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md)）。`InMemoryMemoryStore` に public メソッド `onMemoriesDeleted` が増えた（非破壊）。conformance suite の要件は変わらない。
+
 ---
 
 ## [1.1.0] - 2026-09-30
