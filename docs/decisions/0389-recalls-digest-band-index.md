@@ -159,3 +159,18 @@
   - `gin_pending_list_limit`・`fastupdate` を変えたときの書き込みの裾。
   - ADR 0375 追記（`FOR UPDATE` との相互作用）が測った purge の待ち時間への効果
     （`UPDATE recalls` が短くなれば待ちも短くなるはずだが、測っていない）。
+
+## 追記（2026-09-30）: 既定の `DEFAULT_DIGEST_BAND_LIMIT`（50件）では、`CREATE INDEX` は約25秒・約381MB になる
+
+⛔ 上の本文・実測の数字は書き換えていない。決定3（`CONCURRENTLY` を付けない。[Issue #760](https://github.com/takecchi/mnemora/issues/760) の決定）も変えていない。
+
+**何が食い違っていたか。**上の実測は「10万行・1行あたり目次帯5エントリ」で `CREATE INDEX` 5.0秒・索引34MB だった。しかし `recall()` の既定の目次帯は `DEFAULT_DIGEST_BAND_LIMIT = 50`（`packages/core/src/recall.ts`）で、**実運用の `recalls` の `digestBand` は最大50エントリ**になる。5エントリで測った「10万行で約5秒」を既定の利用者の見積もりに使うと、桁が違う。
+
+**測り直した結果**（別の担当の実測と、この PR の実測。2つは一致した）:
+
+- **別の担当の実測**: 10万行・50エントリで約24秒・約381MB。**この PR ではその測り方は見ていない**（数字だけを受け取った）。
+- **この PR の実測（2026-09-30）**【自分専用の PostgreSQL 17 + pgvector（`initdb` の手順、`maintenance_work_mem` 64MB・`shared_buffers` 128MB の既定のまま）、単一接続・他の負荷なし。使い捨ての SQL で、commit していない】: `migrate` で全 migration を適用した DB から `idx_recalls_digest_band` を落とし、`recalls` にテナント `benchtenant` の10万行を INSERT した（各行の `index_band.digestBand` は50エントリ。1エントリは UUID（`gen_random_uuid()`）と約30文字の日本語の要約。`query`/`usage`/`returned_memories` は最小の JSON）。表は278MB。そこで上の migration と同じ `CREATE INDEX idx_recalls_digest_band ON recalls USING gin ((index_band->'digestBand') jsonb_path_ops)` を `psql \timing` で測った。**25.9秒（1回目）・24.4秒（2回目）、索引のサイズ 381MB（399,925,248バイト）。**別の担当の約24秒・約381MB と一致した。
+
+**引き受けた負債2・3の読み替え。**「索引を作るあいだ `recalls` への書き込みが止まる（10万行で約5秒）」は、**既定の目次帯の件数では10万行で約25秒**であり、索引は34MBではなく約381MB（`recalls` 本体の約278MB を超える）になる。**行数に比例する**点は変わらない——100万行なら桁が1つ上がると見込まれるが、**100万行は測っていない**（上の「確かめていないこと」と同じ）。**適用は書き込みの少ない時間帯に当てること**（`docs/migration-v1.md` の `0030` の段落にも同じことを書いた）。
+
+**確かめていないこと（この追記）**: 5エントリでの5秒の再現（この PR は50エントリだけを測った）。`purgeMemory` の `UPDATE` の高速化（決定の動機）と、`createRecall` の `INSERT` への上乗せを、50エントリで測り直すこと——**上の本文の「約5.3倍速い」「約+9%」は5エントリの値であり、50エントリでは変わりうる**（`digestBand` が大きいほど、索引のキーも増えるので、INSERT への上乗せは増えると考えられるが、測っていない）。10万行を超える規模。
