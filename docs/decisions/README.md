@@ -431,6 +431,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0415](./0415-consolidate-reflect-skip-scope-aggregate.md) | consolidate / reflect の内部 recall に `scopeAggregate: "skip"` を渡し、使わない件数集計を払わない | 採用 (2026-09) |
 | [0416](./0416-created-event-same-tx-remaining-paths.md) | `created` イベントを記憶と同じトランザクションで積む範囲を、reextract・consolidate の口あり経路と reflect へ広げる（穴 D-3 の続き） | 採用 (2026-09) |
 | [0418](./0418-store-error-kind-guards.md) | store 例外は `instanceof` ではなく `kind`（無ければ `name`）で判定する | 採用 (2026-09) |
+| [0419](./0419-local-embedding-provider-dispose.md) | `LocalEmbeddingProvider` に任意の `dispose()` を足す | 採用 (2026-09) |
 | [0421](./0421-concurrent-write-and-audit-event-holes.md) | 同時の書き込みと監査イベントの小さな穴——直したもの（Q1）と、実測して縛って負債にしたもの（R4・R5） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
