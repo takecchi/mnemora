@@ -76,6 +76,7 @@ function makeConsolidation(overrides = {}) {
       llm_failed: 0,
       dry_run: 0,
       aborted_source_forgotten: 0,
+      aborted_source_status_changed: 0,
     },
     newMemoryCount: 2,
     embeddingStatus: { ok: 2, pending: 0, failed: 0 },
@@ -315,6 +316,7 @@ describe("validateMeasured", () => {
     "llm_failed",
     "dry_run",
     "aborted_source_forgotten",
+    "aborted_source_status_changed",
   ]) {
     it(`consolidation.outcomes.${field} が欠けていれば名指しで落ちる`, () => {
       const round = makeRound({ round: 1, consolidation: makeConsolidation() });

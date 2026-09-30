@@ -195,7 +195,8 @@
           "not_examined": 0,
           "llm_failed": 0,
           "dry_run": 0,
-          "aborted_source_forgotten": 0
+          "aborted_source_forgotten": 0,
+          "aborted_source_status_changed": 0
         },
         "newMemoryCount": 12,
         "embeddingStatus": {
@@ -369,7 +370,8 @@
           "not_examined": 0,
           "llm_failed": 0,
           "dry_run": 0,
-          "aborted_source_forgotten": 0
+          "aborted_source_forgotten": 0,
+          "aborted_source_status_changed": 0
         },
         "newMemoryCount": 3,
         "embeddingStatus": {
@@ -543,7 +545,8 @@
           "not_examined": 0,
           "llm_failed": 0,
           "dry_run": 0,
-          "aborted_source_forgotten": 0
+          "aborted_source_forgotten": 0,
+          "aborted_source_status_changed": 0
         },
         "newMemoryCount": 1,
         "embeddingStatus": {

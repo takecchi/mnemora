@@ -13,6 +13,7 @@ import {
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   resolveIdempotentCreate,
+  SourceMemoryStatusChangedError,
 } from "@mnemora/core";
 import type { IdempotentCreateResult, NotIndexedReason } from "@mnemora/core";
 import type {
@@ -841,10 +842,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
-    opts?: { now?: Date },
+    opts?: { now?: Date; abortIfSuperseded?: ReadonlyArray<MemoryId> },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    // ADR 0420: 何も書く前に見直す（`abortIfForgotten` は実装しないが、こちらは実装する）。
+    this.assertNoneSuperseded(ctx, opts?.abortIfSuperseded, "createMemoryWithOutbox");
     const { value: memory, created } = this.createMemoryIdempotent(
       ctx,
       input,
@@ -859,6 +862,35 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
     );
     return { memory: snapshot(memory), created: true, jobs: snapshot(jobs) };
+  }
+
+  /**
+   * ADR 0420: `opts.abortIfSuperseded` の実装。渡された id のうち1件でも `superseded`（この tenant の行）なら
+   * {@link SourceMemoryStatusChangedError} を投げる。**何も書く前に**呼ぶこと（同期区間なので窓は無い）。
+   */
+  private assertNoneSuperseded(
+    ctx: Ctx,
+    ids: ReadonlyArray<MemoryId> | undefined,
+    method:
+      "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+  ): void {
+    if (ids === undefined || ids.length === 0) {
+      return;
+    }
+    const changed: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
+    for (const id of ids) {
+      const memory = this.memories.get(id);
+      if (
+        memory !== undefined &&
+        memory.tenantId === ctx.tenantId &&
+        memory.status === "superseded"
+      ) {
+        changed.push({ id, observedStatus: memory.status });
+      }
+    }
+    if (changed.length > 0) {
+      throw new SourceMemoryStatusChangedError(method, changed);
+    }
   }
 
   /**
@@ -919,7 +951,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       memory: Memory,
       dropped: ReadonlyArray<{ index: number; error: unknown }>,
     ) => NewMemoryEvent,
-    opts?: { now?: Date; abortIfForgotten?: ReadonlyArray<MemoryId> },
+    opts?: {
+      now?: Date;
+      abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+    },
   ): Promise<{
     written: Array<{ index: number; memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     dropped: Array<{ index: number; error: unknown }>;
@@ -928,6 +964,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     news.forEach((entry, i) =>
       assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
     );
+    // ADR 0420: 何も書く前に見直す。
+    this.assertNoneSuperseded(ctx, opts?.abortIfSuperseded, "createMemoriesWithOutboxAndEvents");
     // Issue #1237: 省略時は1回だけ壁時計を読み、積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const restoreAll = this.captureWriteState();
@@ -1227,6 +1265,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     opts?: {
       now?: Date;
       abortIfForgotten?: ReadonlyArray<MemoryId>;
+      abortIfSuperseded?: ReadonlyArray<MemoryId>;
+      abortIfAllConflicted?: boolean;
       buildCreatedEvent?: (memory: Memory, index: number) => NewMemoryEvent;
     },
   ): Promise<{
@@ -1272,16 +1312,28 @@ export class InMemoryMemoryStore implements MemoryStore {
     //     確かめる（写せないと 3. の `buildStoredMemoryEvent` で、status を書き換えた後に投げる）。
     //     CAS に弾かれる対象はイベントを書かないので確かめない——投げる入力を増やさない。
     //     同じ id が2回並ぶと2回目は弾かれる（1回目が superseded にする）ので、それも写す。
+    // ADR 0420: 下の 3. で CAS に弾かれる対象（`abortIfAllConflicted` の判定に使う）。
+    const wouldConflict: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
     const willSupersede = new Set<MemoryId>();
     for (const target of supersede) {
       const status = willSupersede.has(target.id)
         ? "superseded"
         : this.memories.get(target.id)!.status;
       if (target.expectedStatus !== undefined && status !== target.expectedStatus) {
+        wouldConflict.push({ id: target.id, observedStatus: status });
         continue;
       }
       assertCloneableMemoryEvent(target.event);
       willSupersede.add(target.id);
+    }
+    // ADR 0420: 見直し。何も書く前（news の作成より前）に投げる。
+    this.assertNoneSuperseded(ctx, opts?.abortIfSuperseded, "supersedeWithNewMemories");
+    if (
+      opts?.abortIfAllConflicted === true &&
+      supersede.length > 0 &&
+      wouldConflict.length === supersede.length
+    ) {
+      throw new SourceMemoryStatusChangedError("supersedeWithNewMemories", wouldConflict);
     }
 
     // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
