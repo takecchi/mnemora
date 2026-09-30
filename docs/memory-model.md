@@ -487,7 +487,9 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 `idx_memories_claim_key` を使う）で探す。**LLM を一度も呼ばない。**
 
 - **相手がちょうど1件** ⟹ `Runtime.markContested` を呼ぶ（機構2そのもの）。根拠
-  （鍵・重なった有効期間・両側の `content_hash`）を `meta.note` に構造として載せる。
+  （鍵・重なった有効期間・両側の `content_hash`）を `meta.note` に構造として載せる。⚠ **「構造として」は、`meta.note` の値が
+  オブジェクトだという意味ではない。**入っているのは `JSON.stringify` した**文字列**で、読む側は
+  `JSON.parse` が要る（§9「`meta.reason` の意味は、経路で2通りに割れている」の `meta.note` の型）。
 - **相手が0件** ⟹ 何もしない。
 - **相手が2件以上** ⟹ **`markContested` を呼ばない。**[#207](https://github.com/takecchi/mnemora/issues/207)
   （`memory_relations`、多対多）が無いと1対1の `contested_with_id` では表現できないため
@@ -1091,6 +1093,39 @@ DB 側は `packages/postgres/migrations/` の `memory_events` の `kind` の CHE
 リポジトリ層を経由しない削除経路（例えば `packages/postgres` から直接 `memories` を
 UPDATE するようなショートカット）を作らない。
 
+**⚠ 2026-09-30 追記（文書だけ。実行時の振る舞いは変えていない）: `meta.reason` の意味は、経路で2通りに割れている。**
+利用者が渡した `reason`（`forget`・`purge`・`consolidate` などの `opts.reason`）は、経路によって
+`meta.reason` に入るか `meta.note` に入るかが違う。**`meta.reason` だけを読んで「利用者の文」と決めつけないこと。**
+`packages/core/src/runtime.ts` を読んで、経路ごとに並べた（`@mnemora/postgres` の `memory-store.ts` と
+`@mnemora/testkit` の fixture も、restoreSuperseded と archived は突き合わせた。それ以外の経路の2実装の一致は確かめていない）。
+
+| 経路（`kind`） | `meta.reason` | 利用者の `opts.reason` |
+|---|---|---|
+| `forget`（`forgotten`）・`purge`（`purged`）・`restoreArchived`（`restored`） | 利用者の文。**省略すると `reason` キー自体が無い**（`meta` は `{}`） | `meta.reason` に入る |
+| `restoreSuperseded`（`unsuperseded`） | 利用者の文。**省略すると固定タグ `'unsuperseded'`**（`@mnemora/postgres` は `event.reason ?? "unsuperseded"`、`@mnemora/testkit` の fixture も同じ）。`meta.supersededById` も付く | `meta.reason` に入る |
+| `observe()` の抽出（`created`） | 固定タグ `'extracted'`、または全件失敗の代替経路の `'extraction_failed_whole_observation_fallback'` | 受け口が無い |
+| `reextract`（旧い行の `superseded`） | 固定タグ `'reextract_superseded'` | 受け口が無い |
+| `markContested`・`markContestedGroup`（`updated`） | 固定タグ `'contested'` | `meta.note` に入る |
+| `resolveContested`・`resolveContestedGroup`・`resolveOrphanedContested`（`updated`・`superseded`） | 固定タグ `'contested_resolved'`（`meta.resolution` に決着の種類） | `meta.note` に入る |
+| `consolidate`（統合先の `created`・統合元の `superseded`） | 固定タグ `'consolidated'` | `meta.note` に入る |
+| `reflect`（`created`） | 固定タグ `'reflected'` | `meta.note` に入る |
+| `applyCorrection`（中で呼ぶ `markContested`・`resolveContested` のイベント） | 上の2行と同じ（`'contested'`・`'contested_resolved'`） | 渡した `reason` をそのまま `markContested`・`resolveContested` の `reason` に渡すので、`meta.note` に入る（平文） |
+| `observe()` の claim key の検出（`claimKey: { detectContested: true }`） | `'contested'`（相手が1件で `active`、または3件以上の群を `markContestedGroup` で結んだとき）、`'claim_key_conflict_unresolved'`（それ以外） | 受け口が無い。**`meta.note` には根拠の JSON 文字列が入る**（下） |
+| `archived`（`sweepArchive`）・`events_purged` | `reason` キーが無い（`archived` の `meta` は `{}`、`events_purged` は件数と期間） | 受け口が無い |
+
+**`meta.note` の型**: 上の表の「利用者の文」が入る `note` は、**呼び出し側が渡した文字列そのまま（平文）**である。
+**例外は、`observe()` の claim key の検出が積む3種類だけ**——`meta.note` に、オブジェクトではなく
+**JSON 文字列**（`JSON.stringify` の結果）が入る。`kind` の値は、相手が1件のとき `"claim_key_conflict"`、
+3件以上の群のとき `"claim_key_conflict_group"`、`claim_key_conflict_unresolved` のとき
+`"claim_key_conflict_unresolved"`（書いているのは `packages/core/src/runtime.ts` の
+`detectClaimKeyContested` 付近）。**読む側は `JSON.parse(meta.note)` が要る**——`meta.note` は
+`Record<string, unknown>` の中の文字列であり、ネストしたオブジェクトではない。⚠ `applyCorrection` は
+この例外ではない（`reason` をそのまま渡すだけで、JSON にはしない）。ほかの経路の `note` を
+`JSON.parse` すると、利用者の文によっては例外になる。`note` が JSON 文字列かどうかは、
+同じイベントの `meta.reason` と `JSON.parse` の成否で見分けること（JSON 文字列を積む経路の `reason` は
+上の表の3値に限られるが、利用者が `markContested` の `reason` に JSON を渡しても `'contested'` になるので、
+`reason` だけでは見分けられない。⚠ その区別を機械的に付ける手段は、確かめていない）。
+
 ### 保持方針（alteroid に無く、mnemora に要るもの）
 
 alteroid の日誌は無期限に積む設計であり、保持期間・ローテーション・上限を持たない。
@@ -1114,6 +1149,14 @@ mnemora ではこの前提が成立しない。
 `TenantSettingsStore.getEventRetention` の3状態を読み、有限日数のときだけこれを呼ぶ。
 **`tick()`/`observe()` には配線していない**——呼び出すのは運用側のスクリプト・cron の責務であり、
 このリポジトリは「呼ぶための部品」だけを提供する。
+
+**⚠ 2026-09-30 追記（文書だけ。実行時の振る舞いは変えていない）: `events_purged` の行の `at` は、`Runtime` に渡した `clock` の時刻ではない。**
+実装ごとに時計が違う（どちらも `clock` ではない）。`@mnemora/postgres` は SQL の `now()`（DB の時計。
+`purgeExpiredEvents` の `INSERT` 文の `at` 列）、`@mnemora/testkit` のインメモリ実装は `at` を渡さず、
+`buildStoredMemoryEvent` が `event.at ?? new Date()`（JS の壁時計）で埋める。⟹ テストで `clock` を固定しても、
+この `at` は固定されない。（Postgres の `now()` が「文の時刻」か「トランザクション開始の時刻」かは、確かめていない。）
+`meta` の `olderThan` は別で、`purgeExpiredEventsForTenant` が `opts.now ?? new Date()` から保持期間で
+引いた値である（これも `Runtime` の `clock` ではない）。
 
 ```sql
 CREATE TABLE tenant_settings (
@@ -1212,6 +1255,19 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 **この追記が上書きしないもの**: `recalls` の保持方針（生きているテナントの分。ADR 0290 が未決のまま）——`eraseTenant` は「丸ごと消す」操作であり、「どれだけの期間保持するか」という問いには答えていない。`forget`/`purge`（1つの Memory を対象にした既存の口）自体の契約も変わっていない——上の表・ADR 0375 の約束は「1つの Memory を purge したとき」の話として、引き続きそのまま成り立つ。
 
 **⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md) 末尾の追記）: `eraseTenant` の戻り値の `deleted.vectorStore` は、`dryRun` では実数（例: `26`）、本番では `0` になりうる。行は正しく消えている。**`memoryStore` を先に消す（順序は ADR 0383 決定5の不変条件）と、`memories` の削除で `memory_embeddings_<space>.memory_id` の `ON DELETE CASCADE` が埋め込みを一緒に消すため、その後に呼ばれる `VectorStore.eraseTenant?` には数えるものが残らない。`dryRun` は何も消さないので、消える予定の埋め込みをそのまま数える。件数は「その port 自身が消した行数」であり、消去の完了は戻り値の件数ではなく、消去後に表を数えて確かめること。
+
+**⚠ 2026-09-30 追記（文書だけ。[ADR 0383](./decisions/0383-erase-tenant.md) の追記2）: `eraseTenant` は、そのテナントへの書き込みを止めてから呼ぶ。終わりは `deleted` が全部 `0` になった回である。**
+同じテナントへ `observe()`・`tick()` などで書き込みながら呼ぶと、行が残りうる——消している途中に書かれた行は、その回では消えない。
+`reachedLimit === false` で返った回も、書き込みが止まっていなければ「空になった」の証明ではない。⟹ **書き込みを止めたうえで、
+`deleted` の4欄が全部 `0` で返る回が出るまで、同じ `opts` で呼び直す。**「消えたか」は、その後に表を数えて確かめる
+（上の `deleted.vectorStore` の追記と同じ。4欄が全部 `0` は「この回は何も見つからなかった」だけを言う）。
+残りうる表は、`@mnemora/postgres` の実装を読んで次のように考えた（⚠ **書き込みを割り込ませて起こしてはいない——コードからの推論**）:
+`memoryStore` 側は、表ごとの削除が「対象の id を先に選んでその id だけを消す」文なので、その文が始まった後にコミットされた
+`memories`・`observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・`memory_labels`・`memory_relations` の行は残り、
+`tenant_activity`・`tenant_subject_activity` は書き込みのたびに作り直されうる。`outbox` は `memoryStore` の後に消すので、その後に積まれた
+ジョブ（`embed`・`extract` など）が残る。埋め込みは `memories` の削除で CASCADE により消えるが、消えた後の `embed` の書き込みがどうなるかは
+確かめていない（外部キーで失敗するはず）。`tenant_settings` は最後に消すので、その後の `setEventRetention` などで行が作り直される。
+契約は `packages/core/src/erase-tenant.ts` の doc コメントにも同じ内容を書いた。
 
 **⚠ 2026-09-30 追記（[ADR 0389](./decisions/0389-recalls-digest-band-index.md)）: `purge()` が `recalls.index_band` の digest 帯を書き換えるときの走査の費用は、索引を足して解消した。** ADR 0375 決定6 は、この書き換えがテナントの `recalls` 全体を走査し、索引を足すかどうかは「決めていない」として残していた。`migrations/0030_recalls_digest_band_index.sql` の式 GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を足し、走査は対象行だけを引く形になった（振る舞いは変えていない）。代わりに `recalls` への INSERT の費用が増える（実測は ADR 0389）。`recalls` の**保持方針**（生きているテナントの分）は、引き続き決まっていない（ADR 0290）。
 
@@ -1827,6 +1883,16 @@ Issue #198 / ADR 0124 で実装済みである。**図そのもの（遷移の�
 `opts.reason` を渡したときは、どれも `note` が加わる。⚠ **射程**: この版より前に積まれたイベントには `contestedWithId` が無く、
 後から足すこともできない（`EventStore` は追記専用で、`update` を持たない。§9）。古い `both_active` の対は、引き続き監査ログからは辿れない。
 
+**⚠ 2026-09-30 追記（文書だけ。今の振る舞いを書いたもの）: 上の表は2者版の話である。群版（3件以上。`markContestedGroup`・`resolveContestedGroup`）の `updated` の `meta` には、`contestedWithId` が無い。**
+`markContestedGroup` の各メンバーの `updated` は `{ reason: "contested" }`（`opts.reason` があれば `note` が加わる）、
+`resolveContestedGroup` の勝者・`both_active` の各メンバーの `updated` は `{ reason: "contested_resolved", resolution }`
+（同じく `note`）で、相手の id は載らない。群は1対1の列 `contested_with_id` に収まらないので、相手は
+`memory_relations` の行（`kind: 'contradicts'`、メンバー全員の間の双方向の完全グラフ）で持つ設計である（[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md) 決定1・決定2）。
+⟹ **群の相手は、`RelationStore.listRelated(ctx, memoryId, "contradicts")` で辿る。**⚠ **辿れるのは `contested` の間だけ**——
+`resolveContestedGroup` は決着の種類に関わらずメンバー間の `contradicts` の行を消す（[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md) 決定3）ので、
+解消した後の群は、`updated` の `meta` からも表からも「誰と群だったか」を辿れない（`observe()` の claim key の検出が結んだ群なら、
+結んだときの `meta.note`〔JSON 文字列〕の `memberIds` に全員の id が残る。それ以外で辿る手段は、確かめていない）。
+
 **同期/非同期の要点**: `observe()` は常に同期でリターンする（呼び出し側は待たされない）。
 「重い処理」——抽出・埋め込み・アーカイブ掃引・監査ログの保持期間掃除——はすべて非同期に
 逃がされるが、逃がし方は一様ではない。抽出と埋め込みは `outbox` を経由する
@@ -1857,6 +1923,8 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   同じく持つ（2026-09-27 に、`actor` が `{ type: "system" }` に決め打ちで `note` も無かった食い違いを直した）。
 - 行7の `supersede` で負けた側の `superseded` は、`meta.supersededById` に勝った側の id を持つ（行5・行12・reextract の
   `superseded` と同じ形。2026-09-27 に足した。[ADR 0150](./decisions/0150-resolve-contested-explicit-operation.md) の追記）。
+  群版の `resolveContestedGroup` で負けた側の `superseded` も同じく `meta.supersededById` を持つ（2026-09-30 に揃えた。
+  [ADR 0421](./decisions/0421-concurrent-write-and-audit-event-holes.md)）。
 - 行11の `events_purged` の meta の日時（`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）は ISO 8601 の文字列である。
   `@mnemora/postgres` は meta を JSON で保存するので文字列で読み戻り、`@mnemora/testkit` の fixture も 2026-09-27 から
   同じく文字列で持つ（それまでは `Date` のまま持っていた）。

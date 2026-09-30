@@ -2016,12 +2016,15 @@ export interface RecallQuery {
    * ——「帯には何が載っているか」は分かるが「あと何件あるか」は分からなくなる。
    *
    * **ADR 0024 の事故（`exactCounts` を受け取って黙って無視していた）を繰り返さない**
-   * ため、`AggregateScopeOptions.scopeAggregate` を実装しない adapter は、必ず
-   * `countKind: "exact"` を返し続けなければならない（`MemoryStore.aggregateScope` の
-   * 契約）——**「`"skip"` を頼んだのに `"exact"` が返る」ことはあっても、「`"skip"` を
-   * 頼んだのに実は集計していないのに `"exact"` と名乗る」ことは起きない。**呼び出し側は
-   * 返ってきた `countKind` を見れば、その adapter がこの opt-in に対応しているかを
-   * 常に判別できる（値が紛れない）。
+   * ため、`AggregateScopeOptions.scopeAggregate` を読まずに、`"skip"` を頼まれても集計して
+   * `countKind: "exact"` を返す adapter は、conformance suite が許さない
+   * （`packages/testkit/src/memory-store-conformance.ts` の aggregateScope / scopeAggregate の
+   * `it` は、フラグ無しで `"skip"` を守ることを求める）。`"skip"` を頼まれたら、
+   * `groups` は空・`totalInScope` は `0`・`countKind` は `"unknown"` を返さなければならない
+   * ——**`"exact"` を返し続ける実装は suite に落ちる。**
+   * （訂正: 以前のこの段落は「実装しない adapter は必ず `"exact"` を返し続ける」と書いていたが、
+   * suite の実際の要求と逆だった。CHANGELOG `[1.2.0]` と docs/migration-v1.md 項目38 で
+   * 先に訂正済み。）
    *
    * **⚠ `"skip"` では、ANN が scope の候補を拾いきったかを判定できない**（母数 `eligible` が
    * 数えられないため、`ann_unreached` は鳴らない）。**`ann_unreached` が無いことは「拾いきった」

@@ -1181,6 +1181,11 @@ interface EventStore {
   （[docs/memory-model.md](./memory-model.md) の監査ログの節）。
 - 本文は記録しない。記録するのは tenant_id・memory_id・kind・at・actor・digest のスナップショット・
   直前のサイズのみ。
+- **`list` の並びは `at` の昇順だけで、`at` が同じイベントどうしの並びは約束しない。当てにしてはいけない。**
+  同じ操作が積む `created` と `superseded`（`consolidate`・`reextract`）は同じ `at`（その操作の入口の `now`）を
+  持つ。順が要るときは `kind` と `meta`（例: `superseded` の `meta.supersededById`）で関係を読むこと
+  （[ADR 0422](./decisions/0422-reextract-created-event-at-and-meta.md)。`list` の `limit`・`since` の
+  扱いは [ADR 0042](./decisions/0042-event-store-list-order-and-limit.md)）。
 - `forget()` は status の更新とイベントの追記を同一トランザクションで行う。**その2つを1呼び出しに
   まとめた口が `MemoryStore.updateStatusWithEvent`**（ADR 0031）であり、`Runtime.forget()` は
   これを使う（[ADR 0087](./decisions/0087-runtime-forget-shape.md)）。`updateStatus` と
