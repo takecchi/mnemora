@@ -122,6 +122,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`PostgresMemoryStore.createRecall` が、活動時計を進めるとき（`decay_clock != 'wall'`）、`recalls` の INSERT とカウンタ（`tenant_activity`／`tenant_subject_activity`）の UPSERT を1つの SQL 文で撃つようになった**（[ADR 0395](./docs/decisions/0395-create-recall-activity-clock-single-statement.md)、[ADR 0165](./docs/decisions/0165-decay-activity-clock.md) 負債1）。意味（1 recall = 1 単位、recalls の行とカウンタが同じ原子性）・返り値・公開 API・スキーマは変わらない。同じテナントへの同時 createRecall がカウンタの行で直列になる問題は、共有器での実測では並列度4で小さな改善、16・32 で改善が見えなかった（ホット行は残る）。
+
 - **抽出（`subjectCandidates` を渡し、`extractionContext` を渡さず、観測に `payload.speaker` がある呼び出しに限る）で、LLM への user 入力の本文の前に `話者（speaker）: <値>` と空行が足される**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370) PR1、[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md) 末尾の 2026-09-30 追記）——[PR #1374](https://github.com/takecchi/mnemora/pull/1374) が候補経路の system に足した話者の一文は「本文の先頭の話者ラベル、または speaker」と言うが、この経路の入力には `speaker` が出ていなかった。一文を本当にするための変更。
   - **変えていない経路**: `subjectCandidates` 省略・空配列の呼び出し（既定経路）と、`extractionContext` を渡す呼び出し（候補の有無を問わない。JSON の `observation.speaker` に既に出ている）は、system・user とも1バイトも変わらない。録音（カセット、Issue #704）の鍵は動かない。
   - **`RuntimeConfig.promptVersion` を上げることを勧める**（[#1374](https://github.com/takecchi/mnemora/pull/1374) と同じ扱い。この経路の LLM への入力が変わるため、抽出結果が変わりうる）。上の経路に当たらない利用者は上げなくてよい。
