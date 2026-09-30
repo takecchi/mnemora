@@ -1181,6 +1181,12 @@ export interface VectorHit {
     memoryId: MemoryId;
     distance: number;
 }
+export declare class EmbeddingSpaceNotRegisteredError extends Error {
+    readonly space: EmbeddingSpaceId;
+    readonly kind: "embedding_space_not_registered";
+    constructor(space: EmbeddingSpaceId, options?: ErrorOptions);
+}
+export declare function isEmbeddingSpaceNotRegisteredError(value: unknown): value is EmbeddingSpaceNotRegisteredError;
 export interface VectorStore {
     upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
     search(ctx: Ctx, space: EmbeddingSpaceId, query: number[], opts: {
