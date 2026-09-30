@@ -76,8 +76,11 @@ conformance suite の外から adapter の中に遅延を差し込めず、赤�
 ### `RelationStore` の適合 suite —— 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）: 新設された（旧: 存在しなかった）
 
 `packages/testkit/src/relation-store-conformance.ts` に `describeRelationStoreConformance` が
-新設され、9 it を持つ（`link`/`unlink`/`listRelated` の基本契約・冪等性・双方向・テナント
-分離）【実測、2026-09-30、上の§1の式で数えた】。`packages/testkit`
+新設された（`link`/`unlink`/`listRelated` の基本契約・冪等性・双方向・テナント
+分離を検査する）。
+
+**⚠ 2026-09-30 追記**: この節には、以前は it の数（9）を手で書いていた。現物は12本で食い違っていたので、数を消して出所（`packages/testkit/src/relation-store-conformance.ts`）を指す形にした。数えるなら上の§1の式を当てること（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+`packages/testkit`
 （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
 （`conformance.postgres.test.ts`）の両方が当てている——**8 suite → 9 suite になった。**
 
