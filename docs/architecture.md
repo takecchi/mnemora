@@ -457,6 +457,7 @@ interface MemoryStore {
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+  supportsAddOwnSubjectSeq?(): boolean;
   reinforceMany?(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
   recordUsage(
     ctx: Ctx,
