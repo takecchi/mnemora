@@ -2561,6 +2561,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append`: `event.memoryId` が大文字の uuid でも、小文字にそろえて受ける**（[ADR 0475](./decisions/0475-eventstore-append-uuid-case.md)。上の項目（ADR 0466・0469）と 🔴 の項目49・52 の続き）。
   `PostgresEventStore.append` は uuid を小文字にそろえて比べるので、大文字の uuid を自テナントの記憶として受ける。`InMemoryEventStore.append` は、ADR 0469 の時点では完全一致で引き、自テナントの記憶の id を大文字にしたものも断っていた。いまは `@mnemora/postgres` と同じく小文字にそろえて受け、積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。`null`（`events_purged`）は検査しない。
   **落ちる入力が減る変更**（新しく断る入力は無い）。core のテスト専用の `FakeEventStore.append`（公開されていない）も同じに揃えた。conformance suite は変えていない。
+- **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany`: `kind` が偽の値（`""`・`null`・`0`）のときは、絞り込まずに全件を返す**（[ADR 0488](./decisions/0488-relation-store-fake-alignment.md)。上の項目（ADR 0466・0469・0475）の続き）。
+  `PostgresRelationStore` は `kind` の真偽で絞り込みの有無を決めるので、偽の値なら全件を返す。`InMemoryRelationStore` は `kind === undefined` で決めていたため、同じ入力で 0 件を返していた。いまは `@mnemora/postgres` と同じく全件を返す。`undefined` と、正しい `kind`・範囲外の文字列（`"bogus"` は 0 件）の返りは変えていない。
+  **落ちる入力が減る変更**（新しく断る入力は無い。型の外の入力の返りが、本物に揃う）。core のテスト専用の `FakeRelationStore`（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
 ### この節に載せなかったもの（理由つき）
 
