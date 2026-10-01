@@ -493,6 +493,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0479](./0479-tenant-settings-write-fake-alignment.md) | 穴探し50巡目 — `TenantSettingsStore` の書き込み口。core の `FakeTenantSettingsStore` だけが、他の2実装が拒む値を受けていたので揃える | 採用 (2026-10) |
 | [0480](./0480-recall-record-createdat-invalid-date-fake-aliasing.md) | 穴探し51巡目 — 想起の記録の往復。`createRecall` の Invalid Date の `createdAt` を InMemory と Fake が受けていた。Fake の記録は呼び出し側と同じオブジェクトを共有していた | 採用 (2026-10) |
 | [0481](./0481-recall-output-validation-on-real-postgres.md) | 穴探し52巡目 — 実 Postgres のテストが一度も渡していない `RecallQuery` の欄を、`outputValidation: "throw"` で当てる（ずれは見つからなかった） | 採用 (2026-10) |
+| [0482](./0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) | 穴探し53巡目 — `observe()` の入力の種類ごとの扱い。`event.data` の「JSON で往復しない値」の表に歯が無く、関数・`Symbol`・`toJSON` の3行も載っていなかった | 採用 (2026-10) |
 | [0485](./0485-find-correction-candidates-exclude-ids.md) | 穴探し56巡目 — 訂正の候補を探す `findCorrectionCandidates`。`excludeMemoryIds` は大文字の uuid を除外せず、反復できない値では recall の記録を書いた後に落ちていた | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
