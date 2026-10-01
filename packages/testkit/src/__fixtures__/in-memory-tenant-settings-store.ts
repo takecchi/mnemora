@@ -307,7 +307,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
     // （ADR 0434 が足した NUL だけの検査は、これに含まれる。NUL も `MalformedIdentifierError` で断る。）
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
-    const out: Record<string, number> = {};
+    const out = Object.create(null) as Record<string, number>;
     if (bySubject === undefined) {
       return out;
     }

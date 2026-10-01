@@ -482,5 +482,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0468](./0468-openai-null-strip-copies-own-proto-key-as-own-property.md) | 穴探し39巡目 — provider の構造化出力の往復を当て、`@mnemora/openai` が応答の `"__proto__"` を継承された値として読ませていたのを直す | 採用 (2026-10) |
 | [0469](./0469-fake-event-target-and-uuid-case.md) | core の `FakeMemoryStore` も、別テナントを指す `NewMemoryEvent.memoryId` を断る・大文字の uuid の扱いを3実装で測って揃える | 採用 (2026-10) |
 | [0470](./0470-footprint-digits-failure-description-grapheme.md) | 穴探し41巡目 — ADR 0467 の材料のうち、線の内側のものを直す（footprint の桁の数え・失敗の説明の書記素切り）。`estimateRecallFootprint` の NaN は材料のまま | 採用 (2026-10) |
+| [0471](./0471-structured-output-zod-shapes-recorded-in-readme.md) | 穴探し42巡目 — 構造化出力の、README の表に無い zod の形5つの今の振る舞いを、2つの provider の README と歯に記録する（文書の直し） | 採用 (2026-10) |
+| [0472](./0472-subject-activity-seqs-object-prototype-keys.md) | 穴探し43巡目 — subjectId が `Object.prototype` のキー名（`constructor`・`valueOf`・`__proto__` など）のとき、subject 別の活動カウンタの読みが壊れるのを直す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

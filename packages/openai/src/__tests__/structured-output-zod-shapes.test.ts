@@ -84,3 +84,74 @@ describe("OpenAILLMProvider.completeStructured: 送る前に schema_unsupported 
     },
   );
 });
+
+/**
+ * README「上の表に無い形の、今の振る舞い」の歯（[ADR 0471](../../../../docs/decisions/0471-structured-output-zod-shapes-recorded-in-readme.md)）。
+ * ⚠ **今の振る舞いの記録であって、約束ではない**——変えるかどうかはオーナーの判断が要る。変えると決まったら、この歯と README の表を一緒に書き換えること。
+ */
+describe("OpenAILLMProvider.completeStructured: 上の表に無い形の、今の振る舞い（記録）", () => {
+  async function sendAndParse(schema: z.ZodType<unknown>, response: unknown) {
+    const create = vi.fn(async (_body: unknown) => ({
+      choices: [
+        { finish_reason: "stop", message: { refusal: null, content: JSON.stringify(response) } },
+      ],
+    }));
+    const provider = new OpenAILLMProvider({
+      model: "m",
+      client: { chat: { completions: { create } } } as never,
+    });
+    let result: unknown;
+    let error: unknown;
+    try {
+      result = await provider.completeStructured(ctx, { prompt, schema });
+    } catch (e) {
+      error = e;
+    }
+    const body = create.mock.calls[0]?.[0] as
+      | { response_format: { json_schema: { schema: { properties: Record<string, unknown> } } } }
+      | undefined;
+    return { create, result, error, sent: body?.response_format.json_schema.schema };
+  }
+
+  it("z.any()・z.unknown() は型の無い {} で送り、どんな値でも通す（@mnemora/anthropic は送る前に落とす）", async () => {
+    for (const schema of [z.object({ x: z.any() }), z.object({ x: z.unknown() })]) {
+      const { create, result, sent } = await sendAndParse(schema, { x: { k: 1 } });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(sent?.properties.x).toEqual({});
+      expect(result).toEqual({ x: { k: 1 } });
+    }
+  });
+
+  it(".nullable().optional() は null が2回入る anyOf、z.null().optional() は type: [null, null] で送る", async () => {
+    const a = await sendAndParse(z.object({ x: z.string().nullable().optional() }), { x: "v" });
+    expect(a.sent?.properties.x).toEqual({
+      anyOf: [{ type: ["string", "null"] }, { type: "null" }],
+    });
+    const b = await sendAndParse(z.object({ x: z.null().optional() }), {});
+    expect(b.sent?.properties.x).toEqual({ type: ["null", "null"] });
+  });
+
+  it(".catchall(T) は additionalProperties: false で送り、T を送らない", async () => {
+    const { sent } = await sendAndParse(z.object({ a: z.string() }).catchall(z.number()), {
+      a: "v",
+    });
+    expect((sent as unknown as { additionalProperties: unknown }).additionalProperties).toBe(false);
+    expect(Object.keys(sent?.properties ?? {})).toEqual(["a"]);
+  });
+
+  it(".nullable().default(v) に null が返ると v になる（@mnemora/anthropic は null のまま）", async () => {
+    const { result } = await sendAndParse(z.object({ a: z.string().nullable().default("x") }), {
+      a: null,
+    });
+    expect(result).toEqual({ a: "x" });
+  });
+
+  it("入力と出力の型が違う pipe は出力側の型で送り、送った形どおりの値は ZodError になる", async () => {
+    const schema = z.object({ x: z.string().pipe(z.coerce.number()) });
+    const asSent = await sendAndParse(schema, { x: 5 });
+    expect(asSent.sent?.properties.x).toEqual({ type: "number" });
+    expect((asSent.error as Error | undefined)?.name).toBe("ZodError");
+    const asInput = await sendAndParse(schema, { x: "5" });
+    expect(asInput.result).toEqual({ x: 5 });
+  });
+});

@@ -3847,7 +3847,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * まとめて読む。行が無い `subjectId` はキーを省略する。
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
-    const out: Record<string, number> = {};
+    const out = Object.create(null) as Record<string, number>;
     if (this.backing === undefined) return out;
     const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
     if (bySubject === undefined) return out;
