@@ -2361,6 +2361,34 @@ WHERE purged_at IS NOT NULL
 **DB マイグレーション**: 要らない。修正前に書かれた、別テナントを指す行が在るかを調べる SQL（4本。`recall_usages`・`memories.source_observation_id`・`contested_with_id`・`superseded_by_id`）は ADR 0439 に在る（読み取りだけ）。
 **既存の行は消さない。**行が出た場合の扱いはオーナーの判断が要る（消す・残す・付け替える、のどれもデータの書き換えである）。そのような行が在ると、指された側のテナントの `eraseTenant` は `blocked_by_foreign_reference` で止まり、`recall_usages` が別テナントの recall を指す行は、指された側の `purgeExpiredRecalls` を外部キー違反で落とす。
 
+### 52. `MemoryStore` の書き込み口が受ける `NewMemoryEvent.memoryId` が、`ctx` のテナントの記憶でないときに例外を投げるようになった（`@mnemora/postgres`）
+
+[ADR 0456](./decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の H4（[PR #1562](https://github.com/takecchi/mnemora/pull/1562)。クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0436](./decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)・[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md) と同じ作法）。
+
+⚠ **未リリース**。**番号は 52 である**——項目51 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+⚠ **この項目は 2026-10-01 の点検（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）で足した。**ADR 0456 の PR は、この変更を CHANGELOG の `### Fixed` に書いたが、この文書の一覧には載せておらず、[ADR 0459](./decisions/0459-round32-doc-drift-after-1550-1563.md) の PR は 🟡 に置いていた。項目34・49・51 と同じ「本物の adapter が、以前は通っていた入力を新しく断る」変更なので、同じ規律で 🔴 に数える。
+
+**何が変わったか**: `updateStatusWithEvent`・`supersedeWithNewMemories?`（`supersede[i].event`）・`purgeMemory?`・`markContestedPair?`・`resolveContestedPair?`・`resolveOrphanedContested?`・`markContestedGroup?`・`resolveContestedGroup?`・
+`createMemoriesWithOutboxAndEvents?`（`buildCreatedEvent` が返すイベント）は、引数のイベントの `memoryId` をそのまま `memory_events` に書き、これまで `ctx.tenantId` の記憶かを確かめなかった（`@mnemora/postgres`）。
+今は書く前に、同じトランザクションの中で確かめ、実在しない・別のテナントの記憶なら、行を書かずに `PostgresMemoryStore: memory not found for tenant: <id>` の `Error` を投げる（status の更新ごと戻る）。
+その呼び出しが今更新・作成した行の id と同じなら問い合わせない。`memoryId` が `null`・`undefined`（記憶を指さないイベント）は確かめない。同じテナントの別の記憶を指すイベントは、境界の穴ではないので断らない。
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Fixed` の「`NewMemoryEvent.memoryId` が別テナントの記憶でも、イベントが書けた穴」の箇条を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。項目21・23・24・27・34・49・51 と同じ扱い（本物の adapter が新しく断る変更。公開の fixture が断る変更は数えない、という上の規律の「当たらないもの」の側）。
+conformance スイートは変えていない（ADR 0456 は testkit に1行も手を入れていない）ので、適合テストの判定が厳しくなる側面は無い。
+
+**誰が影響を受けるか**: 上の口を `PostgresMemoryStore` に直接呼び、別のテナントの記憶 id をイベントに入れている呼び出し側。`Runtime` は常に自分の行を指すので、`observe()`・`recall()`・`tick()` などは変わらない。
+uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` で落ちていたので、断る入力は増えない（例外の形が変わるだけ）。
+
+**どう直すか**:
+- イベントの `memoryId` は、同じ `ctx` で `MemoryStore.get` などで取れた記憶のものにする。
+- 専用のエラー型・`kind` は無い（素の `Error`、メッセージは `PostgresMemoryStore:` で始まり、`memory not found for tenant` を含む）。
+- 自前の `MemoryStore` 実装は、イベントを書く口の入口で同じ確かめを足す（適合テストは検査しない）。
+
+**確かめていないこと**: testkit のインメモリ実装 `InMemoryMemoryStore` が同じ入力を断るか（ADR 0456 の M7。直していない）。
+
+**DB マイグレーション**: 要らない。修正前に書かれた、別テナントの記憶を指す `memory_events` の行が在れば、指された記憶のテナントの後始末（`purge`・`eraseTenant`）を止めうる形である（項目49 と同じ。ADR 0456 の S2 では、止まることまでは測っていない）。**既存の行は消さない**（データの書き換えはオーナーの判断が要る）。調べる SQL は項目49 の ADR 0436 に在る（`memory_events` の `tenant_id` と、指された記憶の `tenant_id` の食い違いを数える、読み取りだけ）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
@@ -2472,9 +2500,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   以前は、本文が正しくても `digest`・`tags` の要素・claim key に NUL が1つあるだけで、抽出ではその候補が丸ごと落ち、統合・内省は例外で終わった。落とした欄は `created` の `meta.droppedFields` に残る（[docs/memory-model.md](./memory-model.md) §11）。本文の NUL は従来どおり。
 - **`@mnemora/postgres`: 読み取りの絞り（`labels`・`attributes` の key・value）・claim key・`extractorVersion` に NUL を渡すと、DB の生の例外（`Failed query: …`）ではなく、DB に触れる前の名指しの例外で断る**（[PR #1562](https://github.com/takecchi/mnemora/pull/1562)、ADR 0456）。
   落ちる入力は増えない（以前も落ちていた）。例外の文面に頼っていた呼び出し側は見直すこと。
-- **`@mnemora/postgres`: `MemoryStore` の書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶のとき、例外（`PostgresMemoryStore: memory not found for tenant: <id>`）で断る**（[PR #1562](https://github.com/takecchi/mnemora/pull/1562)、ADR 0456 の H4。[ADR 0436](./decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)・[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md) の続き）。
-  以前は、別テナントの記憶を指すイベントが `ctx` のテナントの行として書けた。`Runtime` は常に自分の行を指すので、`Runtime` 経由の呼び出しは1つも断られない。`MemoryStore` を直に呼び、別テナントの id をイベントに入れていた呼び出しだけが落ちる。
-  ⚠ **直したのは `@mnemora/postgres` だけ**（testkit のインメモリ実装が同じ入力を断るかは確かめていない。ADR 0456 の M7）。修正前に書かれた食い違うイベントの行は消さない。
+- **`@mnemora/postgres`: 別テナントの記憶を指す `NewMemoryEvent.memoryId` を断る**（PR #1562、ADR 0456 の H4）は、本物の adapter が新しく断る変更なので、この節ではなく 🔴 の **項目52** に載せた（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 - **`@mnemora/postgres`: `reinforceMany`（`observe({ kind: "memory_usage" })` の強化を含む）と `searchMany` が、件数が多くても PG のバインドパラメータの上限で落ちなくなった**（[PR #1552](https://github.com/takecchi/mnemora/pull/1552)、ADR 0443 決定2）。
   以前は `reinforceMany` が 13107 件、`searchMany` が 32767 件で、message が数 MB の例外で落ちた。
 - **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えたとき、書き込む前に `RangeError` で落ちる**（[PR #1554](https://github.com/takecchi/mnemora/pull/1554)、[ADR 0446](./decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）。
@@ -2499,6 +2525,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   - `DeterministicEmbeddingProvider`: `dimensions` が正の整数でなければ、構築で落ちる（`0` を含む。以前は `embed` で `RangeError` になるか、`0` は空のベクトルを返した）。
   振る舞いが変わるもの: Seeded\*・Recording\* は `opts`（AbortOptions）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
   触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）と conformance suite。
+  ⚠ **これらを 🔴 ではなくここに置いたのは、「公開の fixture が新しく例外を投げる変更は破壊的と数えない」というオーナーの回答（ask_human `3f3411c5`）の延長として読んだ判断で、覆す余地がある**（回答が直接名指したのは `@mnemora/testkit/fixtures` の InMemory 一式で、provider の fake・カセットまで含むかは確かめていない。[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 
 ### この節に載せなかったもの（理由つき）
 

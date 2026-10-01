@@ -471,5 +471,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0457](./0457-round29-precedent-sweep-confirmations-and-doc-measurements.md) | 29巡目（前例の横展開）の確認の結果を残す——当てた形・入力・コマンド・結果、陽性対照、文書の「実測していない」を1つ測る | 採用 (2026-10) |
 | [0458](./0458-round31-memory-store-promise-teeth-outside-conformance.md) | 31巡目——MemoryStore の port の約束のうち、conformance suite にも既存の歯にも見当たらなかったものに、同じ本文の歯を2実装へ足す | 採用 (2026-10) |
 | [0459](./0459-round32-doc-drift-after-1550-1563.md) | 穴探し32巡目 — 今日（2026-10-01）マージされた PR（#1550〜#1563）のあとの文書のずれを直す（文書だけ） | 採用 (2026-10) |
+| [0461](./0461-v1-2-0-release-prep-inspection.md) | 穴探し34巡目 — v1.2.0 を出すための準備の点検（更新経路の fixture・CHANGELOG・migration の順序・migration-v1 の 🔴） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
