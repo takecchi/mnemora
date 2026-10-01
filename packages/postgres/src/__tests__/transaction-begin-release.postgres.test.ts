@@ -34,6 +34,15 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
     await Promise.race([closePostgresClient(c), sleep(2000)]);
   };
   const checkedOut = (pool: Pool): number => pool.totalCount - pool.idleCount;
+  /** cause の連鎖のどこかに、接続が切られた印（SQLSTATE `57P01`、または pg の切断の文面）があるか。 */
+  const isTerminatedConnectionError = (error: unknown): boolean => {
+    let depth = 0;
+    for (let e: unknown = error; e instanceof Error && depth < 5; e = e.cause, depth += 1) {
+      if ((e as Error & { code?: unknown }).code === "57P01") return true;
+      if (/terminating connection|Connection terminated/i.test(e.message)) return true;
+    }
+    return false;
+  };
 
   it("begin の直前に接続を殺しても、借りられたままの接続は 0 になる（繰り返しても枯れない）", async () => {
     const client = createPostgresClient(requireDatabaseUrl(), {
@@ -167,9 +176,27 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
       ]);
       expect(finished, "worker が終わらない（pool が枯れて待ち続けている）").toBe(true);
       expect(checkedOut(client.pool)).toBe(0);
-      await client.db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT 1`);
-      });
+      // ⚠ 最後の `pg_terminate_backend` は、pool で待機中の接続の backend も切る。pg-pool が待機中の接続の
+      // 死に気づくのは socket のイベントが届いてからなので、直後に借りると死んだ接続を掴み、`begin` が
+      // `57P01`（terminating connection due to administrator command）で落ちうる（ADR 0462。CI の UTF8・
+      // SQL_ASCII の両方の脚で1回ずつ、手元の PostgreSQL 17 で 40 回中 3 回、この形で落ちた）。
+      // 待機中の接続が死んでいることは使って初めて分かる（`packages/postgres/README.md` の「例外の見分け方」）。
+      // ⟹ 死んだ待機中の接続は高々 `max`（3）本なので、切断の種類の失敗だけを `max` 回まで受け入れ、
+      // そのたびに借りられたままが 0 に戻ること（BG-1）を確かめ、最後には新しい transaction が通ることを縛る。
+      let terminatedFailures = 0;
+      for (;;) {
+        try {
+          await client.db.transaction(async (tx) => {
+            await tx.execute(sql`SELECT 1`);
+          });
+          break;
+        } catch (error) {
+          if (!isTerminatedConnectionError(error) || terminatedFailures >= 3) throw error;
+          terminatedFailures += 1;
+          expect(checkedOut(client.pool), `切断の失敗 ${terminatedFailures} 回目の後`).toBe(0);
+        }
+      }
+      expect(checkedOut(client.pool)).toBe(0);
     } finally {
       stop = true;
       await closeWithin(client);
