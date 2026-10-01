@@ -459,6 +459,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/postgres`: 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作ると `deadlock detected`（40P01）で片方が落ちたのを直した。**`upsertProposedLabels` が `labels` の行を触る順を、`tags` の並びではなく名前の順に固定した。`Memory.tags` の並び・重複と `proposedCount` は変わらない（[ADR 0476](./docs/decisions/0476-label-upsert-lock-order-and-taxonomy-probes.md)）
 
+- **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` が、`event.memoryId` が大文字の uuid でも、`PostgresEventStore.append` と同じく小文字にそろえて受けるようになった**（[ADR 0475](./docs/decisions/0475-eventstore-append-uuid-case.md)。[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` は小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、新しく断る入力は無い。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が大文字の uuid でも、`@mnemora/postgres` と同じく小文字にそろえて受けるようになった**（[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)。[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、操作の対象の `id` の大文字小文字は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
 
 - **`@mnemora/openai`: `completeStructured` が、応答の余分な `"__proto__"` の欄を、継承された値として zod に読ませていたのを直した。**`null` を省略へ戻す写しが `JSON.parse` の `"__proto__"` をプロトタイプの差し替えにしていた（抽出の候補の `subjectId` が `{"__proto__":{"subjectId":"…"}}` で埋まった）。`@mnemora/anthropic` と同じく無視する。（[ADR 0468](./docs/decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)）
@@ -666,6 +668,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 今は、store の結果を自前のキーだけ・有限の数だけ読み、組み立てる側は prototype の無いオブジェクトにする。`plain` な subjectId の結果は変わらない。公開の型（`SubjectActivitySeqs`・`getSubjectActivitySeqs?` の戻り型）は変えていない。
   - 同じ形の `intersectAttributes`（consolidate・reflect の `attributes` の積集合）も直した: 全件が持つ `__proto__` の属性が統合先の記憶から消えていた。
   - 非破壊と数える（以前は意味のある値を返さなかった入力だけが変わる）。⚠ `attributes` のキーが `__proto__` だと zod の record が黙って落とす件（recall の絞り込みが効かなくなる向き）は直していない（新しく断るか仕様を変える側。ADR 0472 の負債1）。
+
+- **`@mnemora/core`: `RecallQuery.tags` の重複の数え方と、`normalizeClaimKeyPart` のべき等が破れる入力を文書にした。実装は変えていない**（[ADR 0474](./docs/decisions/0474-recall-query-tags-duplicates-claim-key-normalize-idempotent.md)、穴探し45巡目）
+  - `RecallQuery.tags`（TSDoc と `docs/recall.md` §7）: `tagMatch = 1 + 0.1 × m` の `m` は、クエリの `tags` の要素ごとに記憶の `tags` との完全一致を数える。**クエリ側の重複は重複のまま数える**（`["a","a"]` は 1.2、`["a"]` は 1.1）。記憶側の重複は 1 回。以前から同じ挙動を、書いて歯（`tag-match-query-duplicates.test.ts`）で縛った。
+  - `normalizeClaimKeyPart` の TSDoc は「べき等。常に成り立つ」と書いていたが、「大文字 + 結合文字」の一部の入力（ギリシャ文字の大文字 + U+0342、`H` + U+0331 など。総当たりで 253 組）では 1 回目と 2 回目の結果が変わる。TSDoc を「ほとんどの入力で」に改め、例外を `it.fails` の歯で記録した。**直していない**: 直すと保存済みの鍵と新しい鍵が食い違い、contested の検出を新しく逃す。直し案と選択肢は ADR 0474。
+  - 非破壊と数える（文書と歯だけ）。
+
+- **`@mnemora/bullmq`: `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` が検査されないこと、不正値で何が起きるかを、実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測って README と TSDoc に書いた。実装は変えていない**（[ADR 0477](./docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md)、穴探し48巡目）
+  - `everyMs` が `0`・`NaN`・`null`・`Infinity` なら `start()` が reject する。**負の値・`1` 未満の小数・`1e21` と、空文字の `jobName` では、`start()` が成功したまま tick が数回（1回）で黙って止まる**（`onTickError` にも届かない）。`queueName` の空文字・`:` は `createBullmqTickDriver(...)` が同期的に投げる。止まったことの見分け方は README の節に書いた。
+  - 構築時に検査して断るのは新しく断る入力なので、直していない（ADR 0477 の材料）。「そのまま渡す」を縛る歯（`tick-driver.option-passthrough.test.ts`、Redis 不要）を足した。
+  - 非破壊と数える（文書と歯だけ）。
 
 ---
 

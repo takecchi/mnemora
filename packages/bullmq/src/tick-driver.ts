@@ -95,14 +95,30 @@ export interface CreateBullmqTickDriverOptions {
    * throw する（【実測】bullmq 6.3.8、ADR 0449）。インスタンスは `stop()` の後も閉じられない（呼び出し側が閉じる）。
    */
   connection: ConnectionOptions;
-  /** BullMQ の queue 名。同じ queue を複数プロセスで共有してよい（上の doc 参照）。 */
+  /**
+   * BullMQ の queue 名。同じ queue を複数プロセスで共有してよい（上の doc 参照）。
+   *
+   * ⚠ ADR 0477: **driver は検査せず BullMQ に渡す。** 空文字と `:` を含む名前は、BullMQ が
+   * `createBullmqTickDriver(...)` の中で同期的に投げる（`Queue name must be provided`・`Queue name cannot contain :`。
+   * 投げる前に Redis へは繋がない）。空白だけ・日本語・300 文字の名前は動く（【実測】redis-server 7.4.7・bullmq 6.3.8）。
+   */
   queueName: string;
   /** `tick()` を持つだけの最小限の Runtime（テストでは `Pick<Runtime, "tick">` で足りる）。 */
   runtime: Pick<Runtime, "tick">;
   ctx: Ctx;
   /** `runtime.tick(ctx, tick)` へそのまま渡す。`leaseMs` は必須（`TickOptions` 自身の契約）。 */
   tick: TickOptions;
-  /** 発火間隔（ミリ秒）。BullMQ の `repeat.every` にそのまま渡す。 */
+  /**
+   * 発火間隔（ミリ秒）。BullMQ の `repeat.every` にそのまま渡す。
+   *
+   * ⚠ ADR 0477: **driver は検査しない。正の整数（ミリ秒）を渡すこと。** それ以外は BullMQ 任せで、
+   * 【実測】（redis-server 7.4.7・bullmq 6.3.8）`0`・`NaN`・`null` は `start()` が
+   * `Either .pattern or .every options must be defined…` で reject、`Infinity` は Lua の
+   * `Cannot serialise number…` で reject する。**一方、負の値・`1` 未満の小数・`1e21` は `start()` が成功し、
+   * tick が数回（1e21 は1回）で黙って止まる**（`onTickError` にも届かない）。`1` 超の小数は切り捨てた間隔で動く
+   * （`1.5` は `1` ms）。数値の文字列（`"50"`）は動く。止まった scheduler は Redis に残り、正しい `everyMs` の
+   * driver が `start()` すると上書きされて直る。数字は ADR 0477。
+   */
   everyMs: number;
   /**
    * この Worker が同時に処理する tick ジョブの最大数。既定 `1`。
@@ -110,7 +126,13 @@ export interface CreateBullmqTickDriverOptions {
    * 起こりうる（上の doc 参照）——`concurrency` はあくまで「このプロセス内」の上限。
    */
   concurrency?: number | undefined;
-  /** 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。 */
+  /**
+   * 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。
+   *
+   * ⚠ ADR 0477: **driver は検査しない。空文字を渡さないこと。** 空文字は `??` で既定に倒れず、そのまま scheduler の id に
+   * なる。【実測】（redis-server 7.4.7・bullmq 6.3.8）`start()` は成功するが、tick は1回で黙って止まる。`:` を含む名前
+   * （`a:b`・`repeat:x`）・空白・日本語・300 文字は動く。
+   */
   jobName?: string | undefined;
   /**
    * `runtime.tick()` が返るたびに呼ばれる（観測用。省略可）。

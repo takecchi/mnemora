@@ -2557,7 +2557,10 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   例外は素の `Error`（`kind`・`code` は無い）で、message は `InMemoryMemoryStore: memory not found for tenant: <id>`。公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない（`MemoryStore` を自前実装して suite に当てている利用者に、新しい約束は課さない）。自前のテストで `InMemoryMemoryStore` に別テナントの id を指すイベントを渡していた人だけが落ちる。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `NewMemoryEvent.memoryId` が大文字の uuid でも、小文字にそろえて受ける**（[ADR 0469](./decisions/0469-fake-event-target-and-uuid-case.md)。上の項目（ADR 0466）と 🔴 の項目52 の続き）。
   `@mnemora/postgres` は uuid を小文字にそろえて比べるので、大文字の uuid を自テナントの記憶として受ける。`InMemoryMemoryStore` は、ADR 0466 の時点では完全一致で引き、自テナントの記憶の id を大文字にしたものも断っていた。いまは `@mnemora/postgres` と同じく小文字にそろえて受け、積むイベントの `memoryId` も小文字の正規形にする。別テナントの記憶は、大文字でも断る。
-  **落ちる入力が減る変更**（新しく断る入力は無い）。操作の対象の `id`（`updateStatusWithEvent(ctx, id, …)` の `id` など）の大文字小文字は変えていない（fixture は完全一致のまま。ADR 0438・0446 の範囲）。`InMemoryEventStore.append` の `memoryId` の大文字は、まだ断る（`PostgresEventStore.append` は通す。ADR 0469 の「引き受けた負債」）。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。操作の対象の `id`（`updateStatusWithEvent(ctx, id, …)` の `id` など）の大文字小文字は変えていない（fixture は完全一致のまま。ADR 0438・0446 の範囲）。`InMemoryEventStore.append` の `memoryId` の大文字は、[ADR 0475](./decisions/0475-eventstore-append-uuid-case.md) で揃えた（下の項目）。ADR 0469 の「引き受けた負債」）。
+- **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append`: `event.memoryId` が大文字の uuid でも、小文字にそろえて受ける**（[ADR 0475](./decisions/0475-eventstore-append-uuid-case.md)。上の項目（ADR 0466・0469）と 🔴 の項目49・52 の続き）。
+  `PostgresEventStore.append` は uuid を小文字にそろえて比べるので、大文字の uuid を自テナントの記憶として受ける。`InMemoryEventStore.append` は、ADR 0469 の時点では完全一致で引き、自テナントの記憶の id を大文字にしたものも断っていた。いまは `@mnemora/postgres` と同じく小文字にそろえて受け、積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。`null`（`events_purged`）は検査しない。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。core のテスト専用の `FakeEventStore.append`（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
 ### この節に載せなかったもの（理由つき）
 
