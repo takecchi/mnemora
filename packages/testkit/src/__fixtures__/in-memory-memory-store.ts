@@ -766,6 +766,24 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
   }
 
+  /**
+   * ADR 0466（ADR 0456 の H4 の InMemory 版）: 呼び出し側が渡した `NewMemoryEvent.memoryId` の記憶が `ctx` のテナントに
+   * 在ることを、イベントを積む前に確かめる。実在しない・別テナントは区別せず `memory not found for tenant`
+   * （`PostgresMemoryStore` の `assertEventTargetInTenant` と同じ判定・同じ message の形）。`null`・`undefined`
+   * （記憶を指さないイベント）は確かめない。`knownInTenant` は、この呼び出しが今まさに更新・作成した行の id
+   * （`ctx` のテナントの行と分かっている）で、それを指すイベントは問い合わせない。
+   * **書く前に呼ぶ**（断ったら、status の更新も news もイベントも、何も書かれない）。
+   */
+  private assertEventTargetOwn(
+    ctx: Ctx,
+    memoryId: MemoryId | null | undefined,
+    knownInTenant: readonly MemoryId[] = [],
+  ): void {
+    if (memoryId === null || memoryId === undefined) return;
+    if (knownInTenant.includes(memoryId)) return;
+    this.assertOwnMemoryRef(ctx, memoryId);
+  }
+
   private assertOwnObservationRef(ctx: Ctx, id: string | null | undefined): void {
     if (id === null || id === undefined) return;
     const observation = this.observations.get(id);
@@ -1061,7 +1079,10 @@ export class InMemoryMemoryStore implements MemoryStore {
         if (!created) {
           continue;
         }
-        this.events.push(buildStoredMemoryEvent(ctx, buildCreatedEvent(snapshot(memory), dropped)));
+        const createdEvent = buildCreatedEvent(snapshot(memory), dropped);
+        // ADR 0466: イベントが指す記憶が、今作った行でなければ `ctx` のテナントの行か（外れたら全体を戻す）。
+        this.assertEventTargetOwn(ctx, createdEvent.memoryId, [memory.id]);
+        this.events.push(buildStoredMemoryEvent(ctx, createdEvent));
       }
     } catch (error) {
       restoreAll();
@@ -1261,6 +1282,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryColumn("status", status);
     assertStorableMemoryEvent(event);
     assertCloneableMemoryEvent(event);
+    // ADR 0466: イベントが指す記憶は `ctx` のテナントの行（`PostgresMemoryStore` は UPDATE の後、同じトランザクションの中で確かめる）。
+    this.assertEventTargetOwn(ctx, event.memoryId, [id]);
     memory.status = status;
     if (opts.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -1382,6 +1405,9 @@ export class InMemoryMemoryStore implements MemoryStore {
         continue;
       }
       assertCloneableMemoryEvent(target.event);
+      // ADR 0466: CAS を通ってイベントを書く対象だけ、そのイベントが指す記憶が `ctx` のテナントの行かを確かめる
+      // （弾かれる対象はイベントを書かないので確かめない。`PostgresMemoryStore` と同じ）。
+      this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
       willSupersede.add(target.id);
     }
     // ADR 0420: 見直し。何も書く前（news の作成より前）に投げる。
@@ -1422,9 +1448,10 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (buildCreatedEvent !== undefined) {
         for (const [index, entry] of created.entries()) {
           if (entry.created) {
-            this.events.push(
-              buildStoredMemoryEvent(ctx, buildCreatedEvent(snapshot(entry.memory), index)),
-            );
+            const createdEvent = buildCreatedEvent(snapshot(entry.memory), index);
+            // ADR 0466: 今作った行でなければ `ctx` のテナントの行か（外れたら news の書き込みごと戻す）。
+            this.assertEventTargetOwn(ctx, createdEvent.memoryId, [entry.memory.id]);
+            this.events.push(buildStoredMemoryEvent(ctx, createdEvent));
           }
         }
       }
@@ -2504,6 +2531,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     assertStorableMemoryEvent(event);
     assertCloneableMemoryEvent(event);
+    // ADR 0466: イベントが指す記憶は `ctx` のテナントの行（墓石を書く前に確かめる）。
+    this.assertEventTargetOwn(ctx, event.memoryId, [id]);
     // Issue #1237: `purgedAt` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
     // 2回読んで別の値になることがないよう、ここで一度だけ決める（`@mnemora/postgres` と同じ規律）。
     const at = event.at ?? new Date();
@@ -2636,6 +2665,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryEvent(second.event);
     assertCloneableMemoryEvent(first.event);
     assertCloneableMemoryEvent(second.event);
+    // ADR 0466: 2つのイベントが指す記憶は、`ctx` のテナントの行（この呼び出しで更新する2行を含む）。
+    this.assertEventTargetOwn(ctx, first.event.memoryId, [first.id, second.id]);
+    this.assertEventTargetOwn(ctx, second.event.memoryId, [first.id, second.id]);
     firstMemory.status = "contested";
     firstMemory.contestedWithId = second.id;
     firstMemory.updatedAt = new Date();
@@ -2709,6 +2741,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryEvent(second.event);
     assertCloneableMemoryEvent(first.event);
     assertCloneableMemoryEvent(second.event);
+    // ADR 0466: `markContestedPair` と同じ。
+    this.assertEventTargetOwn(ctx, first.event.memoryId, [first.id, second.id]);
+    this.assertEventTargetOwn(ctx, second.event.memoryId, [first.id, second.id]);
     firstMemory.status = first.status;
     firstMemory.contestedWithId = null;
     if (first.supersededById !== undefined) {
@@ -2780,6 +2815,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     const unchanged = memories.map(
       (memory) => memory.status === "contested" && (memory.contestedWithId ?? null) === null,
     );
+    // ADR 0466: イベントを積むメンバーだけ、そのイベントが指す記憶が `ctx` のテナントの行かを確かめる
+    // （積まないメンバーは確かめない。`PostgresMemoryStore` と同じ）。書き換える前に。
+    members.forEach((m, i) => {
+      if (!unchanged[i]) this.assertEventTargetOwn(ctx, m.event.memoryId, ids);
+    });
     for (const memory of memories) {
       memory.status = "contested";
       memory.contestedWithId = null;
@@ -2934,6 +2974,10 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertStorableMemoryEvent(asJsonSerializedSizeBeforeBytes(m.event));
       assertCloneableMemoryEvent(m.event);
     }
+    // ADR 0466: 全メンバーのイベントが指す記憶は、`ctx` のテナントの行。書き換える前に。
+    for (const m of members) {
+      this.assertEventTargetOwn(ctx, m.event.memoryId, ids);
+    }
 
     for (let i = 0; i < members.length; i++) {
       const m = members[i]!;
@@ -2991,6 +3035,8 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     assertStorableMemoryEvent(survivor.event);
     assertCloneableMemoryEvent(survivor.event);
+    // ADR 0466: イベントが指す記憶は `ctx` のテナントの行。
+    this.assertEventTargetOwn(ctx, survivor.event.memoryId, [survivor.id]);
     memory.status = "active";
     memory.contestedWithId = null;
     memory.updatedAt = new Date();
