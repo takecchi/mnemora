@@ -40,6 +40,9 @@ export interface FindCorrectionCandidatesInput {
    * 自己除外に使う——`recall()` は「訂正の発話から作られたばかりの Memory」自身を
    * 候補として返しうるため、それを候補集合から落としたい呼び出し側のための欄。
    *
+   * 大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を小文字で返すので、大文字で
+   * 渡した id でも除外される）。
+   *
    * ⚠ **順位（`CorrectionCandidate.recallRank`）は詰め直さない。**除外は
    * `recall()` が返した並びに対する後処理であり、順位という「recall の何位だったか」
    * という事実そのものは変えない（{@link CorrectionCandidate.recallRank} の doc参照）。
