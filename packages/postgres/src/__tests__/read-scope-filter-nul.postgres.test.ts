@@ -2,7 +2,10 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
-import { PostgresTrigramLexicalStore } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  probeTrigramLexicalSupport,
+} from "../trigram-lexical-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import {
   closeTestClient,
@@ -56,14 +59,14 @@ describe("PostgresMemoryStore", () => {
     await expect(
       store.aggregateScope(A, { labels: ["x"], attributes: { k: "v" } }),
     ).resolves.toBeDefined();
-    await rejectsNamed(() => store.aggregateScope(A, { labels: ["ok", NUL] }), "scope.labels[1]");
+    await rejectsNamed(() => store.aggregateScope(A, { labels: ["ok", NUL] }), "scope.labels");
     await rejectsNamed(
       () => store.aggregateScope(A, { attributes: { k: NUL } }),
-      "scope.attributes (value)",
+      "scope.attributes",
     );
     await rejectsNamed(
       () => store.aggregateScope(A, { attributes: { [NUL]: "v" } }),
-      "scope.attributes (key)",
+      "scope.attributes",
     );
   });
 
@@ -109,18 +112,21 @@ describe("検索の絞り（filter）", () => {
     const store = new PostgresLexicalStore(db);
     const run = (extra: object) => store.search(A, "hello", { limit: 3, filter: filter(extra) });
     await expect(run({ labels: ["x"], attributes: { k: "v" } })).resolves.toEqual([]);
-    await rejectsNamed(() => run({ labels: [NUL] }), "opts.filter.labels[0]");
-    await rejectsNamed(() => run({ attributes: { k: NUL } }), "opts.filter.attributes (value)");
-    await rejectsNamed(() => run({ attributes: { [NUL]: "v" } }), "opts.filter.attributes (key)");
+    await rejectsNamed(() => run({ labels: [NUL] }), "opts.filter.labels");
+    await rejectsNamed(() => run({ attributes: { k: NUL } }), "opts.filter.attributes");
+    await rejectsNamed(() => run({ attributes: { [NUL]: "v" } }), "opts.filter.attributes");
   });
 
-  it("PostgresTrigramLexicalStore.search: 同じ", async () => {
+  it("PostgresTrigramLexicalStore.search: 同じ（server_encoding が UTF8 でない DB では、store が作れないので飛ばす）", async (ctx) => {
     const { db } = await getTestClient();
+    if (!(await probeTrigramLexicalSupport(db)).ok) {
+      ctx.skip();
+    }
     const store = await PostgresTrigramLexicalStore.create(db);
     const run = (extra: object) => store.search(A, "hello", { limit: 3, filter: filter(extra) });
     await expect(run({ labels: ["x"], attributes: { k: "v" } })).resolves.toEqual([]);
-    await rejectsNamed(() => run({ labels: [NUL] }), "opts.filter.labels[0]");
-    await rejectsNamed(() => run({ attributes: { k: NUL } }), "opts.filter.attributes (value)");
+    await rejectsNamed(() => run({ labels: [NUL] }), "opts.filter.labels");
+    await rejectsNamed(() => run({ attributes: { k: NUL } }), "opts.filter.attributes");
   });
 
   it("PostgresVectorStore.search・searchMany: 同じ", async () => {
@@ -135,12 +141,9 @@ describe("検索の絞り（filter）", () => {
       });
     await expect(search({ labels: ["x"], attributes: { k: "v" } })).resolves.toEqual([]);
     await expect(searchMany({ labels: ["x"], attributes: { k: "v" } })).resolves.toBeDefined();
-    await rejectsNamed(() => search({ labels: [NUL] }), "opts.filter.labels[0]");
-    await rejectsNamed(() => search({ attributes: { k: NUL } }), "opts.filter.attributes (value)");
-    await rejectsNamed(() => searchMany({ labels: [NUL] }), "opts.filter.labels[0]");
-    await rejectsNamed(
-      () => searchMany({ attributes: { [NUL]: "v" } }),
-      "opts.filter.attributes (key)",
-    );
+    await rejectsNamed(() => search({ labels: [NUL] }), "opts.filter.labels");
+    await rejectsNamed(() => search({ attributes: { k: NUL } }), "opts.filter.attributes");
+    await rejectsNamed(() => searchMany({ labels: [NUL] }), "opts.filter.labels");
+    await rejectsNamed(() => searchMany({ attributes: { [NUL]: "v" } }), "opts.filter.attributes");
   });
 });

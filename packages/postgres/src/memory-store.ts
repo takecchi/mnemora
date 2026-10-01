@@ -2306,7 +2306,11 @@ export class PostgresMemoryStore implements MemoryStore {
   ): Promise<ScopeAggregate> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
-    assertNoNulInScopeFilter("PostgresMemoryStore.aggregateScope", scope, "scope");
+    // testkit のインメモリ実装と同じ条件（ADR 0434）: `scopeAggregate: "skip"` で `digestBand` も無いとき、
+    // Postgres は集計も目次帯も引かずにクエリを1本も発行しない。その入力は、今までどおり NUL を見ない。
+    if (!(opts?.scopeAggregate === "skip" && opts.digestBand === undefined)) {
+      assertNoNulInScopeFilter("PostgresMemoryStore.aggregateScope", scope, "scope");
+    }
     // Issue #608 項目③(b) / ADR 0286: 段1（ANN・語彙）の押し下げと同じ opt-in。
     // `scope.subjectId` が無ければこの欄自体を見ない——「テナント全体」は定義上すでに
     // 主題なしを含む上位集合であり、広げる余地が無い。

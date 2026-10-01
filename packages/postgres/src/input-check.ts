@@ -53,12 +53,12 @@ export function assertNoNulInScopeFilter(
   if (typeof filter !== "object" || filter === null) {
     return;
   }
-  filter.labels?.forEach((label, i) => assertNoNul(owner, `${field}.labels[${i}]`, label));
+  filter.labels?.forEach((label) => assertNoNul(owner, `${field}.labels`, label));
   if (filter.attributes !== undefined) {
     for (const [key, value] of Object.entries(filter.attributes)) {
-      assertNoNul(owner, `${field}.attributes (key)`, key);
+      assertNoNul(owner, `${field}.attributes`, key);
       if (typeof value === "string") {
-        assertNoNul(owner, `${field}.attributes (value)`, value);
+        assertNoNul(owner, `${field}.attributes`, value);
       }
     }
   }
