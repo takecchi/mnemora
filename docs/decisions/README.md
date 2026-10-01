@@ -491,6 +491,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0477](./0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) | 穴探し48巡目 — `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` は検査されない。不正値で何が起きるかを実 Redis で測り、README と TSDoc に書く | 採用 (2026-10) |
 | [0478](./0478-example-chat-readme-flags-env-coverage.md) | 穴探し49巡目 — `examples/chat/README.md` が載せていなかったフラグと環境変数を、利用者向けと内部用に分けて一覧にする。文書のコード片と散文の数値は突き合わせてずれなし | 採用 (2026-10) |
 | [0479](./0479-tenant-settings-write-fake-alignment.md) | 穴探し50巡目 — `TenantSettingsStore` の書き込み口。core の `FakeTenantSettingsStore` だけが、他の2実装が拒む値を受けていたので揃える | 採用 (2026-10) |
+| [0480](./0480-recall-record-createdat-invalid-date-fake-aliasing.md) | 穴探し51巡目 — 想起の記録の往復。`createRecall` の Invalid Date の `createdAt` を InMemory と Fake が受けていた。Fake の記録は呼び出し側と同じオブジェクトを共有していた | 採用 (2026-10) |
 | [0483](./0483-token-counter-broken-values.md) | 穴探し54巡目 — 差し替えた `TokenCounter` が約束を破る値を返すと、recall はトークン予算を黙って外す。今の振る舞いを文書に書き、歯で縛る | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
