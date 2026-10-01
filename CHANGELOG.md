@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶（実在しない id も同じ）のとき、書かずに `memory not found for tenant` で断るようになった**（[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md)。`@mnemora/postgres` の H4（ADR 0456）と同じ口・同じ判定・同じ message の形で、接頭辞だけが `InMemoryMemoryStore:`）。以前は別テナントを指すイベントが積まれた。公開の fixture が新しく例外を投げる変更は破壊的と数えない（オーナーの回答 `3f3411c5`）。conformance suite は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡 と項目52。
+
 - **`@mnemora/postgres`: `registerEmbeddingSpace` が `max: 1` の `Pool` で返らなかったのを直した。呼んだあと、`registerEmbeddingSpace`・`runMigrations` が接続の `lock_timeout` を `0` に書き換えるのもやめた。**（[ADR 0460](./docs/decisions/0460-multi-process-multi-pool-round33.md)）。advisory lock を握った接続の中で DDL を打つ形にした（`BEGIN` は開かない。文ごとの暗黙のトランザクションは以前と同じ）。以前は DDL に別の接続が要り、`max: 1` では借り切られた接続の返却を待って止まった（`lock_timeout` は効かず、`connectionTimeoutMillis` を渡していなければ返らない）。`lock_timeout` は advisory lock を取っている間だけ敷き、取れたら `RESET` する（`lockTimeoutMs` が DDL の表ロック待ちに効かないのは以前と同じ）。呼び終えたあとは `RESET lock_timeout` で、接続側（`options`・ロール・DB）で渡した値に戻る（以前は `0` を書いていて、その接続は以後ロック待ちに上限が無かった）。**断る入力は増えない。**
 
 - **`@mnemora/testkit` の provider の fake・カセットを、interface の約束と本物の provider に揃えた。`recall()` は `Float32Array` などの数値の型付き配列のクエリ埋め込みも受ける。**（[ADR 0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）
