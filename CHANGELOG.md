@@ -665,6 +665,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 同じ形の `intersectAttributes`（consolidate・reflect の `attributes` の積集合）も直した: 全件が持つ `__proto__` の属性が統合先の記憶から消えていた。
   - 非破壊と数える（以前は意味のある値を返さなかった入力だけが変わる）。⚠ `attributes` のキーが `__proto__` だと zod の record が黙って落とす件（recall の絞り込みが効かなくなる向き）は直していない（新しく断るか仕様を変える側。ADR 0472 の負債1）。
 
+- **`@mnemora/core`: `RecallQuery.tags` の重複の数え方と、`normalizeClaimKeyPart` のべき等が破れる入力を文書にした。実装は変えていない**（[ADR 0474](./docs/decisions/0474-recall-query-tags-duplicates-claim-key-normalize-idempotent.md)、穴探し45巡目）
+  - `RecallQuery.tags`（TSDoc と `docs/recall.md` §7）: `tagMatch = 1 + 0.1 × m` の `m` は、クエリの `tags` の要素ごとに記憶の `tags` との完全一致を数える。**クエリ側の重複は重複のまま数える**（`["a","a"]` は 1.2、`["a"]` は 1.1）。記憶側の重複は 1 回。以前から同じ挙動を、書いて歯（`tag-match-query-duplicates.test.ts`）で縛った。
+  - `normalizeClaimKeyPart` の TSDoc は「べき等。常に成り立つ」と書いていたが、「大文字 + 結合文字」の一部の入力（ギリシャ文字の大文字 + U+0342、`H` + U+0331 など。総当たりで 253 組）では 1 回目と 2 回目の結果が変わる。TSDoc を「ほとんどの入力で」に改め、例外を `it.fails` の歯で記録した。**直していない**: 直すと保存済みの鍵と新しい鍵が食い違い、contested の検出を新しく逃す。直し案と選択肢は ADR 0474。
+  - 非破壊と数える（文書と歯だけ）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

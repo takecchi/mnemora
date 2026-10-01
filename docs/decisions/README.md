@@ -485,5 +485,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0471](./0471-structured-output-zod-shapes-recorded-in-readme.md) | 穴探し42巡目 — 構造化出力の、README の表に無い zod の形5つの今の振る舞いを、2つの provider の README と歯に記録する（文書の直し） | 採用 (2026-10) |
 | [0472](./0472-subject-activity-seqs-object-prototype-keys.md) | 穴探し43巡目 — subjectId が `Object.prototype` のキー名（`constructor`・`valueOf`・`__proto__` など）のとき、subject 別の活動カウンタの読みが壊れるのを直す | 採用 (2026-10) |
 | [0473](./0473-validity-empty-inverted-interval-no-overlap.md) | 空の区間・逆転した区間の記憶を、claim key の「有効期間が重なる」から外す・有効期間と見る口の境界を当てた記録（穴探し44巡目） | 採用 (2026-10) |
+| [0474](./0474-recall-query-tags-duplicates-claim-key-normalize-idempotent.md) | 穴探し45巡目 — `RecallQuery.tags` の重複の数え方を文書と歯に書く・`normalizeClaimKeyPart` のべき等が破れる入力を記録して直さない | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
