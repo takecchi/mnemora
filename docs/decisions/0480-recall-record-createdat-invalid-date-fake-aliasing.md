@@ -31,5 +31,5 @@
   - 【現物】観点4: 記録は `recalls` の jsonb で自己完結しており、指す記憶が `forget`・`purge` されても `getRecall` は同じ記録を返す（読み直さない）。`purgeExpiredRecalls` で消えた `recallId` への `recordUsage` は例外になる（ADR 0404、`recall-purge-race.postgres.test.ts`）。`observe` は使用の Observation を先に書いてから `recordUsage` を呼ぶので、その例外のあとも Observation の行は残る。これは ADR 0404 が書いた今の振る舞いであり、変えていない。【未確認】この巡では観点4を新しく実走していない。
 
 - **材料（直していない。決めるのはクローンまたはオーナー）**:
-  - Fake の `createRecall` は、InMemory が拒む NUL を含む `subjectId`・`query` や、JSON にならない値を拒まず、`assertWellFormedCtx` も呼ばない。Fake 全体の方針（ADR 0479 の材料と同じ）なので触っていない。
+  - Fake の `createRecall` は、InMemory が拒む NUL を含む `subjectId`・`query` や、JSON にならない値を拒まず、`assertWellFormedCtx` も呼ばない。Fake 全体の方針なので触っていない。
   - 消えた `recallId` に対する `observe({ kind: "memory_usage" })` が、使用の Observation を残したまま例外になること（上の観点4）。順序を入れ替える・先に検査する、は新しく断る入力の増減に当たるので、決めていない。
