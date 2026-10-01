@@ -653,7 +653,7 @@ export async function readSubjectActivitySeqs(
     return {};
   }
   if (store.getSubjectActivitySeqs === undefined) {
-    const zeros: SubjectActivitySeqs = {};
+    const zeros = Object.create(null) as SubjectActivitySeqs;
     for (const id of subjectIds) {
       zeros[id] = 0;
     }
@@ -662,9 +662,16 @@ export async function readSubjectActivitySeqs(
   const result = await omittingParams(() => store.getSubjectActivitySeqs!(ctx, [...subjectIds]));
   // 未実装/未使用の subjectId は 0 へ倒す——adapter が「行が無い＝キーを省略」して
   // 返しても、呼び出し側は毎回 `?? 0` を書かずに済む。
-  const filled: SubjectActivitySeqs = {};
+  //
+  // ⭐ ADR 0472: subjectId は利用者が決める文字列で、`constructor`・`toString`・`valueOf`・
+  // `hasOwnProperty`・`__proto__` も入る。`result[id] ?? 0` はこれらで `Object.prototype` 側の
+  // 関数や prototype を返し（`?? 0` が効かず、`T + S_x` が文字列連結になる）、プレーンな `{}` への
+  // `filled["__proto__"] = ...` は黙って捨てられる。だから、store の結果は**自前のキーだけ**・
+  // **有限の数だけ**読み、組み立てる側は prototype の無いオブジェクトにする（`__proto__` も普通のキーになる）。
+  const filled = Object.create(null) as SubjectActivitySeqs;
   for (const id of subjectIds) {
-    filled[id] = result[id] ?? 0;
+    const value = Object.hasOwn(result, id) ? result[id] : undefined;
+    filled[id] = typeof value === "number" && Number.isFinite(value) ? value : 0;
   }
   return filled;
 }

@@ -645,6 +645,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **これから書く digest だけが変わる。保存済みの digest は書き換えない。** digest は `contentHash`・冪等キー・既定の埋め込み入力（`content`）に入らない。公開の型・既定値は変えていない。非破壊と数える。
     ⚠ 新旧の digest が混在する（区別する欄は無い。`reextract` で書き直された記憶から新しい形になる）。`embeddingInput` で digest を埋め込む構成では、これから書く記憶の埋め込み入力が数文字変わる。
 
+- **`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`: `subjectId` が `constructor`・`toString`・`valueOf`・`hasOwnProperty`・`__proto__` のとき、subject 別の活動カウンタの読みが壊れて、活動時計の起点（`decayBaseSeq`）に関数や `[object Object]` の混ざった文字列が書かれる（実 Postgres では `observe` が落ちる）のを直した**（[ADR 0472](./docs/decisions/0472-subject-activity-seqs-object-prototype-keys.md)、穴探し43巡目）
+  - 原因: `readSubjectActivitySeqs` が store の結果を `result[id] ?? 0` で引いていた。行が無い subject（adapter はキーを省略する）では、`Object.prototype` 側の関数が返って `?? 0` が効かず、`T + S_x` が文字列連結になった。`__proto__` は、プレーンな `{}` への代入が黙って捨てられ、行があっても値が効かなかった。Postgres・InMemory・core のテスト用 fake の `getSubjectActivitySeqs` も同じ形で `__proto__` の行を落としていた。
+  - 今は、store の結果を自前のキーだけ・有限の数だけ読み、組み立てる側は prototype の無いオブジェクトにする。`plain` な subjectId の結果は変わらない。公開の型（`SubjectActivitySeqs`・`getSubjectActivitySeqs?` の戻り型）は変えていない。
+  - 同じ形の `intersectAttributes`（consolidate・reflect の `attributes` の積集合）も直した: 全件が持つ `__proto__` の属性が統合先の記憶から消えていた。
+  - 非破壊と数える（以前は意味のある値を返さなかった入力だけが変わる）。⚠ `attributes` のキーが `__proto__` だと zod の record が黙って落とす件（recall の絞り込みが効かなくなる向き）は直していない（新しく断るか仕様を変える側。ADR 0472 の負債1）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
