@@ -157,7 +157,8 @@ export interface CorrectionReasonInput {
  * - `resolution === null` → `"pending"`——`markContested` だけを呼ぶ時点ではまだ勝者が無い。
  * - `resolution.kind === "both_active"` → `"both_active"`——どちらも正しかった。
  * - `resolution.kind === "supersede"` → `winnerId === correctingId` なら `"correcting"`、
- *   そうでなければ `"corrected"`。
+ *   そうでなければ `"corrected"`。ただし `winnerId` がどちらの id とも文字列では一致せず、大文字小文字を
+ *   無視すると `correctingId` だけに一致するときも `"correcting"`（ADR 0446）。
  *
  * ⚠ **`score.total` は載せない**（ADR 0238「score.total は載せない」と同じ理由——スコアの閾値は ADR 0232 が
  * 実測した通り「訂正すべき」と「訂正してはいけない」を分離しない。生スコアを載せると
@@ -170,13 +171,31 @@ export function buildCorrectionReason(input: CorrectionReasonInput): string {
       ? "pending"
       : input.resolution.kind === "both_active"
         ? "both_active"
-        : input.resolution.winnerId === input.correctingId
-          ? "correcting"
-          : "corrected";
+        : supersedeWinnerLabel(input.resolution.winnerId, input.correctedId, input.correctingId);
   return (
     `chosenRecallRank=${input.chosenRecallRank} / candidates=${input.discovery.candidates.length} / ` +
     `recallId=${input.discovery.recallId} / winner=${winner}`
   );
+}
+
+/**
+ * `supersede` の勝者が訂正する側か訂正される側か。文字列がそのまま一致する側を採る。どちらとも一致しないときだけ、
+ * 大文字小文字を無視して**どちらか一方だけ**に一致する側を採る（ADR 0446。`@mnemora/postgres` は uuid を大文字小文字を
+ * 区別せずに比べ、`resolveContested` は大文字の `winnerId` を勝者として受け付ける。完全一致だけで比べると、
+ * 実際には訂正する側が勝っているのに `winner=corrected` と書いてしまい、監査の記録が実際と逆になる）。
+ * それでも決まらない（どちらとも合わない・両方に合う）ときは、今までどおり `"corrected"`。
+ */
+function supersedeWinnerLabel(
+  winnerId: MemoryId,
+  correctedId: MemoryId,
+  correctingId: MemoryId,
+): "correcting" | "corrected" {
+  if (winnerId === correctingId) return "correcting";
+  if (winnerId === correctedId) return "corrected";
+  const lower = winnerId.toLowerCase();
+  const isCorrecting = correctingId.toLowerCase() === lower;
+  const isCorrected = correctedId.toLowerCase() === lower;
+  return isCorrecting && !isCorrected ? "correcting" : "corrected";
 }
 
 /**
