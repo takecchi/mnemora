@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Pool } from "pg";
+import { createMigrateCliPool } from "./cli-pool.js";
 import { runAnalyzeMemories, runMigrations } from "../migrate.js";
 import { formatMigrateCliUsage, parseMigrateCliOptions } from "./cli-options.js";
 
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   }
 
   const { schema, extensionSchema, extensionMode, analyzeMemories } = parsed.options;
-  const pool = new Pool({ connectionString });
+  const pool = createMigrateCliPool(connectionString);
   try {
     const { applied } = await runMigrations(pool, undefined, {
       schema,
