@@ -498,6 +498,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0484](./0484-recall-channel-merge-on-real-postgres.md) | 穴探し55巡目 — `recall` の `channels`（ANN・lexical）の候補の合流を、実 Postgres の2つの語彙 store で ADR 0084 の表に照らして縛る（ずれは見つからなかった） | 採用 (2026-10) |
 | [0485](./0485-find-correction-candidates-exclude-ids.md) | 穴探し56巡目 — 訂正の候補を探す `findCorrectionCandidates`。`excludeMemoryIds` は大文字の uuid を除外せず、反復できない値では recall の記録を書いた後に落ちていた | 採用 (2026-10) |
 | [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（ずれは見つからなかった） | 採用 (2026-10) |
-| [0492](./0492-fuzz-profile-fields.md) | 穴探し — recall の不変条件 fuzz に、これまで一度も振っていない欄（`timeWeighting`・`digestBandLimit`・`relationMaxCount`・クエリの `tags`・`occurredAt`）を足す（草稿・作業中） | **草稿 (2026-10)** |
+| [0492](./0492-fuzz-profile-fields.md) | 穴探し — recall の不変条件 fuzz に、これまで一度も振っていない欄（`timeWeighting`・`digestBandLimit`・クエリの `tags`・`occurredAt`）を足す（割れは見つからなかった） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
