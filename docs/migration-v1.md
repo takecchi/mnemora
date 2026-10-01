@@ -1719,8 +1719,8 @@ PR #1437・Issue #1425（ADR 0382）) になった。**
 
 **何が変わったか**:
 
-- `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を
-  足した。`@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`
+- `@mnemora/core` に新しい interface `RelationStore`（`link`/`unlink`/`listRelated`と、任意の
+  `listRelatedMany?`）を足した。`@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`
   （`InMemoryRelationStore`）が実装する。`packages/testkit` に新設の conformance suite
   `describeRelationStoreConformance` ができた——`packages/testkit`
   （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
@@ -2015,7 +2015,9 @@ migration を数えていない。**この節（`v1.1.0` より後）で足さ�
 
 **なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に当たる。型検査は壊れないが、テナントの条件を持たない自前の実装は、suite を当てると新しく実行時に落ちる（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412) の規律。オーナーの回答 `6911db12` により、`v1.X.0` で出してよい）。項目23・24・27 と同じ判断である。
 
-**誰が影響を受けるか**: 自前の `RelationStore`・`OutboxStore`・`TenantSettingsStore` を上の suite に当てている利用者のうち、別テナントの行に触れる実装。`@mnemora/postgres` とインメモリの実装は通る。フラグを渡す・渡さないでは避けられない（新しい `it` はフラグ無しで走る）。
+**誰が影響を受けるか**: 自前の `RelationStore`・`OutboxStore`・`TenantSettingsStore` を上の suite に当てている利用者のうち、別テナントの行に触れる実装。`@mnemora/postgres` とインメモリの実装は通る。
+新しい `it` のうち、`RelationStore` の `unlink` と kind 付きの `listRelated`、`OutboxStore` の `complete`・`fail`、`TenantSettingsStore` の `getDefaultHalfLifeHours` の分は**フラグ無しで走る**ので、フラグでは避けられない。
+`OutboxStore`・`TenantSettingsStore` の `eraseTenant?`（`dryRun`）の分は `supportsEraseTenant: true` の枝の内側、`OutboxStore.purgeCompletedJobs?` の分は `supportsPurgeCompletedJobs: true` の枝の内側、`hasSubjectActivityCounters?` の分は任意のフック `advanceSubjectActivitySeq` を渡したときの枝の内側にあり、その口を持たない（フラグを渡していない）実装には当たらない（ADR 0463 の照合）。
 
 **どう直すか**: 落ちた `it` の名前が指す口（`unlink`・`listRelated`・`complete`・`fail` など）に、`ctx.tenantId` の条件を足す。
 
