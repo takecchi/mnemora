@@ -26,4 +26,30 @@ describe("closePostgresClient は冪等（本物の Postgres）", () => {
       Promise.all([closePostgresClient(client), closePostgresClient(client)]),
     ).resolves.toBeDefined();
   });
+
+  /**
+   * ADR 0444 BH(c): 上の冪等は `closePostgresClient` を通った呼び出しだけを覚えている。
+   * 利用者が `client.pool.end()` を**直接**呼んでいた場合（`db.$client.end()` も同じ）、
+   * そのあとの `closePostgresClient` は `pool.end()` をもう一度呼んで
+   * `Called end on pool more than once` で reject していた。pool 自身の `ending`/`ended` を見る。
+   */
+  it("pool.end() が既に直接呼ばれて終わっていても、closePostgresClient は reject しない", async () => {
+    const client = createPostgresClient(requireDatabaseUrl());
+    await client.pool.end();
+    expect(client.pool.ended).toBe(true);
+
+    await expect(closePostgresClient(client)).resolves.toBeUndefined();
+    await expect(closePostgresClient(client)).resolves.toBeUndefined();
+  });
+
+  it("pool.end() を待たずに呼んだ直後（終わる途中）でも、closePostgresClient は reject せず、終わるのを待つ", async () => {
+    const client = createPostgresClient(requireDatabaseUrl());
+    await client.pool.query("SELECT 1");
+    const ending = client.pool.end();
+    expect(client.pool.ending).toBe(true);
+
+    await expect(closePostgresClient(client)).resolves.toBeUndefined();
+    expect(client.pool.ended).toBe(true);
+    await ending;
+  });
 });

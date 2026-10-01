@@ -22,6 +22,8 @@ import {
 const SERIAL_TEST_FILES = [
   "src/__tests__/archive-decayed-concurrency.postgres.test.ts",
   "src/__tests__/db-transaction-connection-loss.test.ts",
+  "src/__tests__/transaction-begin-release.postgres.test.ts",
+  "src/__tests__/transaction-rollback-error.postgres.test.ts",
   "src/__tests__/drizzle-pool-proxy.test.ts",
   "src/__tests__/migrate-cli-pool-idle-loss.test.ts",
   "src/__tests__/migrate-connection-loss.test.ts",

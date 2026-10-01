@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient, type PoolConfig } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema.js";
@@ -134,6 +135,7 @@ export function createPostgresClient(
     }
   });
   const db = drizzle(poolWithCheckoutErrorListener(pool), { schema });
+  transactionPreservingOriginalError(db);
   return { pool, db };
 }
 
@@ -147,19 +149,122 @@ export function createPostgresClient(
 const NOOP_CHECKOUT_ERROR_HANDLER = (): void => {};
 
 /**
+ * `db.transaction()` 1回ぶんの記録。drizzle は `rollback` が投げると元のエラーを捨てるので
+ * （BG-2）、`rollback` の失敗をここへ退避し、`db.transaction()` を包んだ側が元のエラーへ添える
+ * （{@link transactionPreservingOriginalError}）。`AsyncLocalStorage` で、`connect()` を呼んだ
+ * 文脈から引く（drizzle の内部（`session.client` など）には依らない）。
+ */
+interface TransactionRecord {
+  rollbackError?: unknown;
+}
+const currentTransaction = new AsyncLocalStorage<TransactionRecord>();
+
+/** `client.query` の第1引数（文字列か `{ text }`）から SQL 文を読む。読めなければ `undefined`。 */
+function queryText(arg: unknown): string | undefined {
+  if (typeof arg === "string") return arg;
+  const text = (arg as { text?: unknown } | null | undefined)?.text;
+  return typeof text === "string" ? text : undefined;
+}
+
+const BEGIN_STATEMENT = /^\s*begin\b/i;
+const ROLLBACK_STATEMENT = /^\s*rollback\s*;?\s*$/i;
+
+/**
  * `pool.connect()`（promise 形）で借りた接続に {@link NOOP_CHECKOUT_ERROR_HANDLER} を付け、
  * `release()` のときに外す。pg-pool は借りるたびに `client.release` を付け直すので、
  * ここで差し替えた `release` は、この1回の貸し出しにしか効かない。
+ *
+ * ## drizzle-orm 0.45.2 の `NodePgSession.transaction` の2つの穴をここで包む（ADR 0444）
+ *
+ * drizzle のこの関数は `begin` を `try`/`finally` の**外**で実行するため、`begin` が reject
+ * すると `finally` の `release()` に届かず、借りた接続が pool へ戻らない（BG-1。Postgres の
+ * 再起動を数回挟むと pool が枯れて全呼び出しが止まる）。また `catch { await rollback; throw error }`
+ * は、`rollback` が投げると元のエラーを消す（BG-2）。上流の不具合だが、ここで包んで直す。
+ *
+ * - **`begin` が reject したら `release(err)` する**（接続は pool から捨てられる）。
+ * - **`release` は冪等にする**——`begin` の失敗で返したあと、drizzle が `finally` で
+ *   もう一度呼んでも、pg-pool の「Release called on client which has already been released」を
+ *   出さない（2回目以降は何もしない）。
+ * - **`rollback` の失敗は握る**。drizzle は元のエラーをそのまま投げ直す。握った失敗は
+ *   {@link TransactionRecord} へ退避し、接続は `release(err)` で捨てる（壊れた接続を pool へ戻さない）。
  */
 async function connectWithErrorListener(pool: Pool): Promise<PoolClient> {
-  const client = await pool.connect();
-  client.on("error", NOOP_CHECKOUT_ERROR_HANDLER);
+  const record = currentTransaction.getStore();
+  // 🔴 callback 形で借りる（pg-pool は callback を同期で呼ぶ）。promise 形だと、借りた直後の
+  // microtask まで `error` リスナーが1つも無い窓ができる: 接続を張った直後に切られると、
+  // 「接続完了」と「切断の `error`」が同じ socket の読み出しで続けて届き、リスナーを付ける前に
+  // 後者が出て、プロセスごと落ちる（ADR 0444。全接続を切る反復の歯で実測した）。
+  const client = await new Promise<PoolClient>((resolve, reject) => {
+    pool.connect((error, borrowed) => {
+      if (error !== undefined || borrowed === undefined) {
+        reject(error ?? new Error("pool.connect() が接続を返さなかった"));
+        return;
+      }
+      borrowed.on("error", NOOP_CHECKOUT_ERROR_HANDLER);
+      resolve(borrowed);
+    });
+  });
   const release = client.release;
+  const query = client.query as (...args: unknown[]) => unknown;
+  let released = false;
+  let discardWith: Error | undefined;
+  client.query = ((...args: unknown[]) => {
+    const text = queryText(args[0]);
+    const result = query.apply(client, args);
+    const isPromiseForm = typeof args[args.length - 1] !== "function";
+    if (text === undefined || !isPromiseForm || !(result instanceof Promise)) return result;
+    if (BEGIN_STATEMENT.test(text)) {
+      return result.catch((error: unknown) => {
+        client.release(error instanceof Error ? error : new Error(String(error)));
+        throw error;
+      });
+    }
+    if (record !== undefined && ROLLBACK_STATEMENT.test(text)) {
+      return result.catch((error: unknown) => {
+        record.rollbackError = error;
+        discardWith = error instanceof Error ? error : new Error(String(error));
+        return { command: "ROLLBACK", rowCount: null, oid: 0, rows: [], fields: [] };
+      });
+    }
+    return result;
+  }) as PoolClient["query"];
   client.release = (err?: Error | boolean) => {
-    client.removeListener("error", NOOP_CHECKOUT_ERROR_HANDLER);
-    release.call(client, err);
+    if (released) return;
+    released = true;
+    const discarding = err !== undefined && err !== false ? true : discardWith !== undefined;
+    // 捨てる接続（`release(err)`）のリスナーは外さない。pool が捨てるとき、切断の `error`
+    // （57P01 など）が release の後に届くことがあり、リスナーが無いとプロセスごと落ちる。
+    // 二度と使い回さない接続なので、積み上がる心配も無い。
+    if (!discarding) client.removeListener("error", NOOP_CHECKOUT_ERROR_HANDLER);
+    // pool は接続を使い回す。差し替えた `query` を次の貸し出しへ持ち越さない。
+    delete (client as { query?: unknown }).query;
+    release.call(client, err ?? discardWith);
   };
   return client;
+}
+
+/**
+ * `db.transaction()` を包み、`rollback` が失敗しても**元のエラーを優先して投げる**（BG-2）。
+ * `rollback` の失敗は握り（{@link connectWithErrorListener}）、元のエラーの `cause`（空いていれば）
+ * か `rollbackError` に残す。新しい例外の型は作らない。
+ */
+function transactionPreservingOriginalError(db: Db): void {
+  const transaction = db.transaction.bind(db) as (...args: unknown[]) => Promise<unknown>;
+  (db as { transaction: unknown }).transaction = async (...args: unknown[]) => {
+    const record: TransactionRecord = {};
+    try {
+      return await currentTransaction.run(record, () => transaction(...args));
+    } catch (error) {
+      if (record.rollbackError !== undefined && error instanceof Error) {
+        if ((error as { cause?: unknown }).cause === undefined) {
+          (error as { cause?: unknown }).cause = record.rollbackError;
+        } else {
+          (error as { rollbackError?: unknown }).rollbackError = record.rollbackError;
+        }
+      }
+      throw error;
+    }
+  };
 }
 
 /** drizzle に渡す Proxy を作る（{@link createPostgresClient} の「drizzle に渡すのは…」参照）。 */
@@ -195,6 +300,10 @@ const closingPromises = new WeakMap<PostgresClient, Promise<void>>();
  * 使い回す——**2回目以降は `pool.end()` を呼び直さず、何もせずに resolve する**
  * （並行に2回呼ばれた場合も、どちらも同じ `Promise` を待つだけで reject しない）。
  *
+ * ⚠ **`client.pool.end()`（`db.$client.end()` も）が、この関数を通らずに既に呼ばれていても reject しない**
+ * （ADR 0444 BH(c)）。覚えているのはこの関数の呼び出しだけなので、pool 自身の `ending`/`ended` も見る:
+ * `ended` なら何もせず resolve、`ending`（終わる途中）なら `ended` になるまで待つ。`pool.end()` は呼び直さない。
+ *
  * `close()` 後にクエリを投げたときの振る舞い（`pg` 側がどう reject するか）は
  * 変えていない——冪等にしたのは「閉じる」という操作そのものだけである。
  */
@@ -203,7 +312,18 @@ export async function closePostgresClient(client: PostgresClient): Promise<void>
   if (existing !== undefined) {
     return existing;
   }
-  const closing = client.pool.end();
+  // pool.end() が、この関数を通らずに（直接）既に呼ばれていることがある（BH(c)）。そのまま
+  // end() を呼ぶと `Called end on pool more than once` で reject するので、pool 自身の印を見る。
+  // `ended`: 終わっている。`ending`: 終わるのを待っている最中（終わるまで待ってから resolve する）。
+  const closing =
+    client.pool.ending || client.pool.ended ? waitUntilPoolEnded(client.pool) : client.pool.end();
   closingPromises.set(client, closing);
   return closing;
+}
+
+/** 既に `end()` が呼ばれた pool が、終わる（`ended`）のを待つ。`end()` は二度と呼ばない。 */
+async function waitUntilPoolEnded(pool: Pool): Promise<void> {
+  while (!pool.ended) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
