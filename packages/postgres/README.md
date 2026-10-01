@@ -847,6 +847,8 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
   上流への報告はしていない。[ADR 0444](../../docs/decisions/0444-pool-begin-release-rollback-error-preserved.md)）。
   `rollback` の失敗は、元のエラーの **`cause`**（空いていれば）か **`rollbackError`**（drizzle が包んだ `DrizzleQueryError` は
   `cause` が埋まっているので、こちらになる）に残る。新しい例外の型は作っていない。
+- **`observe` の抽出の候補ごとの savepoint（`rollback to savepoint`）が失敗したときも同じ**: 続けず、落とした候補にも積まず、**元のエラー**（`code` 付き）が投げられる。
+  巻き戻しの失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る（[ADR 0451](../../docs/decisions/0451-savepoint-rollback-failure-keeps-original-error.md)。上流への報告はしていない）。
 - **`db.transaction()` の `begin` が失敗した接続は pool へ戻らず捨てられる**（以前は借りたまま戻らず、再起動を数回挟むと pool が枯れて
   すべての呼び出しが止まった。同上）。
 - ③ が出たら、pool が枯れている（借りた接続が戻っていない）か、`max` が負荷に足りないかを疑うこと。
