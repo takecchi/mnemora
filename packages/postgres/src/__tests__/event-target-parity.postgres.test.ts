@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import type { Ctx, MemoryId, MemoryStore, NewMemoryEvent } from "@mnemora/core";
+import type { Ctx, EventStore, MemoryId, MemoryStore, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
-import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
+import { InMemoryEventStore, InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
+import { PostgresEventStore } from "../event-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -335,4 +336,82 @@ describe("PostgresMemoryStore と InMemoryMemoryStore は、NewMemoryEvent.memor
       }
     });
   }
+});
+
+// ADR 0475: `EventStore.append` の `event.memoryId` も、2実装で同じ入力を同じように断る・通す（大文字小文字を含む）。
+// （`FakeEventStore` は同じ表を `packages/core/src/__tests__/fake-event-target-belongs-to-ctx-tenant.test.ts` が縛る。）
+describe("PostgresEventStore.append と InMemoryEventStore.append は、event.memoryId で同じ入力を同じように断る・通す", () => {
+  async function appendRun(kind: "pg" | "mem", target: string) {
+    let store: MemoryStore;
+    let events: EventStore;
+    let eventsAt: (id: MemoryId) => Promise<number>;
+    if (kind === "pg") {
+      const { db } = await getTestClient();
+      await resetTestDatabase();
+      store = new PostgresMemoryStore(db);
+      events = new PostgresEventStore(db);
+      eventsAt = async (id) =>
+        Number(
+          (
+            await db.execute(
+              sql`SELECT count(*)::int AS c FROM memory_events WHERE memory_id = ${id}`,
+            )
+          ).rows[0]!.c,
+        );
+    } else {
+      const mem = new InMemoryMemoryStore();
+      store = mem;
+      events = new InMemoryEventStore(mem, mem.events);
+      eventsAt = async (id) => mem.events.filter((e) => e.memoryId === id).length;
+    }
+    const a = await memory(store, A);
+    const b = await memory(store, B);
+    const memoryId = (
+      {
+        own: a.id,
+        ownUpper: a.id.toUpperCase(),
+        foreign: b.id,
+        foreignUpper: b.id.toUpperCase(),
+        malformed: "not-a-uuid",
+        empty: "",
+        null: null,
+      } as Record<string, string | null>
+    )[target]!;
+    let outcome = "ok";
+    let stored: string | null | undefined;
+    try {
+      const result = await events.append(A, {
+        ...event(memoryId),
+        kind: memoryId === null ? "events_purged" : "updated",
+      });
+      stored = result.memoryId === a.id ? "own(lower)" : result.memoryId;
+    } catch (error) {
+      outcome = outcomeOf(error);
+    }
+    return { outcome, stored, eventsAtForeign: await eventsAt(b.id) };
+  }
+
+  it("自テナント（小文字・大文字）は通り小文字で積む。別テナント（小文字・大文字）・uuid でない id・空文字は断る。null は検査しない", async () => {
+    for (const target of [
+      "own",
+      "ownUpper",
+      "foreign",
+      "foreignUpper",
+      "malformed",
+      "empty",
+      "null",
+    ]) {
+      const pg = await appendRun("pg", target);
+      const mem = await appendRun("mem", target);
+      expect(mem, target).toEqual(pg);
+      if (target === "own" || target === "ownUpper") {
+        expect(pg, target).toEqual({ outcome: "ok", stored: "own(lower)", eventsAtForeign: 0 });
+      } else if (target === "null") {
+        expect(pg.outcome).toBe("ok");
+      } else {
+        expect(pg.outcome, target).toMatch(/memory not found for tenant: <id>/);
+        expect(pg.eventsAtForeign).toBe(0);
+      }
+    }
+  });
 });
