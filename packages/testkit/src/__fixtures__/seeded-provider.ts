@@ -1,4 +1,5 @@
 import type {
+  AbortOptions,
   Ctx,
   EmbeddingProvider,
   EmbeddingSpaceId,
@@ -97,7 +98,7 @@ export class SeededLLMProvider implements LLMProvider {
     return this.entries[llmCassetteKey(prompt)];
   }
 
-  async complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
+  async complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
     const entry = this.lookup(req);
     if (entry !== undefined) {
       if (typeof entry.value !== "object" || entry.value === null || !("content" in entry.value)) {
@@ -110,10 +111,14 @@ export class SeededLLMProvider implements LLMProvider {
       return entry.value as LLMResponse;
     }
     this.realCalls += 1;
-    return this.delegate.complete(ctx, req);
+    return this.delegate.complete(ctx, req, opts);
   }
 
-  async completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
+  async completeStructured<T>(
+    ctx: Ctx,
+    req: StructuredRequest<T>,
+    opts?: AbortOptions,
+  ): Promise<T> {
     const entry = this.lookup(req.prompt);
     if (entry !== undefined) {
       // `RecordedLLMProvider.completeStructured` と同じ規律——鍵にスキーマを
@@ -130,7 +135,7 @@ export class SeededLLMProvider implements LLMProvider {
       return parsed.data;
     }
     this.realCalls += 1;
-    return this.delegate.completeStructured(ctx, req);
+    return this.delegate.completeStructured(ctx, req, opts);
   }
 }
 
@@ -149,7 +154,8 @@ export interface SeededEmbeddingProviderOptions {
  * 種カセットに在る入力は記録済みのベクトルを返し、無い入力だけを `delegate`（実 API）へ流す `EmbeddingProvider`。
  * 規律はこのファイルの冒頭の doc を見ること。`space` は `delegate.space` になる。
  *
- * 構築時: 種の空間が `expectedSpace` と食い違えば `Error` を投げる。
+ * 構築時: 種の空間が `expectedSpace` または `delegate.space` と食い違えば `Error` を投げる（ADR 0452）。
+ * `opts`（`AbortOptions`）は委譲先を呼ぶときにそのまま渡す。
  */
 export class SeededEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
@@ -172,6 +178,17 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
           "黙って混ぜない——同じ空間の種を渡すか、種を外すこと。",
       );
     }
+    // ADR 0452: 種の空間と委譲先の空間が食い違ったまま混ぜない。種のベクトルを、別の空間を名乗る `space` の下で返してしまう
+    // （`expectedSpace` との照合は、委譲先の空間を見ていなかった）。
+    const d = delegate.space;
+    if (a.provider !== d.provider || a.model !== d.model || a.dimensions !== d.dimensions) {
+      throw new Error(
+        "SeededEmbeddingProvider: 種カセットの埋め込み空間が、委譲先（delegate）の空間と違う。" +
+          `種: ${a.provider}/${a.model}/${a.dimensions}次元、` +
+          `委譲先: ${d.provider}/${d.model}/${d.dimensions}次元。` +
+          "黙って混ぜない——同じ空間の委譲先を渡すか、種を外すこと。",
+      );
+    }
     this.entries = seed.entries;
     this.space = delegate.space;
   }
@@ -181,7 +198,7 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
     return { seeded: this.seededCalls, real: this.realCalls };
   }
 
-  async embed(ctx: Ctx, texts: string[]): Promise<number[][]> {
+  async embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
     const results: number[][] = new Array(texts.length);
     const missingIndices: number[] = [];
     const missingTexts: string[] = [];
@@ -201,11 +218,12 @@ export class SeededEmbeddingProvider implements EmbeddingProvider {
         );
       }
       this.seededCalls += 1;
-      results[i] = entry.vector;
+      // 種の配列そのものは返さない（呼び出し側が書き換えても種に漏れない）。
+      results[i] = [...entry.vector];
     });
 
     if (missingTexts.length > 0) {
-      const vectors = await this.delegate.embed(ctx, missingTexts);
+      const vectors = await this.delegate.embed(ctx, missingTexts, opts);
       if (vectors.length !== missingTexts.length) {
         throw new Error(
           "SeededEmbeddingProvider: 委譲先が入力と違う件数を返した" +

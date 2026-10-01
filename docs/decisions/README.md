@@ -464,9 +464,12 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0449](./0449-bullmq-tick-driver-measured-against-real-redis.md) | bullmq の tick-driver を実 Redis（redis-server 7.4.7）に当てた——文書の「未実測」7件を測り、ずれた所だけ文書を直す・README の片に型検査の印を付ける | 採用 (2026-10) |
 | [0450](./0450-contested-group-operation-state-matrix-round26.md) | contested の群（`markContestedGroup`・`resolveContestedGroup`）の「操作 × 状態」の行列を当てた（穴探し26巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
 | [0451](./0451-savepoint-rollback-failure-keeps-original-error.md) | `createMemoriesWithOutboxAndEvents` の候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーを消さない（`dropped` に積まず、続けず、元のエラーを投げる） | 採用 (2026-10) |
+| [0452](./0452-testkit-provider-fakes-align-with-contract.md) | testkit の provider の fake・カセットを `EmbeddingProvider`・`LLMProvider` の約束と本物に揃える・`recall()` のクエリ埋め込みが数値の型付き配列も受ける | 採用 (2026-10) |
 | [0453](./0453-embed-job-and-reinforce-state-matrix-round27.md) | embed ジョブと reinforce の「操作 × 状態」の行列を当てた（穴探し27巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
+| [0454](./0454-reextract-anchor-observe-consolidate-state-matrix-round30.md) | observe・consolidate・reextract の「操作 × 状態」の行列を当て、reextract の置き換えた側が active でない行になる穴を直した（穴探し30巡目） | 採用 (2026-10) |
 | [0456](./0456-llm-returned-values-malformed-read-filter-nul-named.md) | LLM が返した値の保存できない形（NUL・孤立サロゲート）で observe・consolidate・reflect が落ちないようにする・読み取りの絞りの NUL を名指しの例外で断る（穴探し29巡目、前例の横展開） | 採用 (2026-10) |
 | [0457](./0457-round29-precedent-sweep-confirmations-and-doc-measurements.md) | 29巡目（前例の横展開）の確認の結果を残す——当てた形・入力・コマンド・結果、陽性対照、文書の「実測していない」を1つ測る | 採用 (2026-10) |
 | [0458](./0458-round31-memory-store-promise-teeth-outside-conformance.md) | 31巡目——MemoryStore の port の約束のうち、conformance suite にも既存の歯にも見当たらなかったものに、同じ本文の歯を2実装へ足す | 採用 (2026-10) |
+| [0459](./0459-round32-doc-drift-after-1550-1563.md) | 穴探し32巡目 — 今日（2026-10-01）マージされた PR（#1550〜#1563）のあとの文書のずれを直す（文書だけ） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

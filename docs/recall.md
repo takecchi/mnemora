@@ -168,6 +168,9 @@ throw するので `embedding_provider_unavailable`）。**呼び出し側が `R
 ベクトルの有限性も検査せず、`NaN`/`Infinity` は今も store の側が比較不能として扱う。一方、provider が返した
 問い合わせベクトルが `NaN`/`Infinity` を含むときは、次元違いと同じく `embedding_provider_unavailable` になる。
 
+**⚠ 2026-10-01 追記（[ADR 0452](./decisions/0452-testkit-provider-fakes-align-with-contract.md) の「決めたこと」8番）**: provider が返したクエリ埋め込みが `Float32Array` などの数値の型付き配列でも、配列と同じく受ける（普通の `number[]` に直してから、上の長さ・有限性の検査をかけ、`VectorStore.search` へは配列で渡す）。
+以前は「ベクトルを返さなかった」と同じ `embedding_provider_unavailable`（`no_vector`）になっていた（embed ジョブ側は型付き配列を保存できた）。配列でないもの（`DataView`・文字列など）は今までどおり。
+
 **原因の種類は `cause`（任意）で読める**（PR #1504）。`reason: 'embedding_provider_unavailable'` の `stage_skipped` にだけ付きうる欄で、
 `cause.kind` は `'provider_threw'`（`embed` が throw / reject）・`'no_vector'`（ベクトルを返さなかった）・
 `'dimension_mismatch'`（次元違い）・`'non_finite'`（`NaN`/`Infinity` を含む）の4つ。`provider_threw` のときだけ、

@@ -1103,7 +1103,11 @@ async function runRecallBody(
         // embedding_provider_unavailable として記録する」）。以前は `queryVector` が
         // `undefined` のまま ANN の段を黙って飛ばしていた。歯は
         // `__tests__/recall-query-embedding-missing-vector.test.ts`。
-        if (!Array.isArray(vector)) {
+        // ADR 0452: `Float32Array` などの数値の型付き配列も、配列と同じく受ける（embed ジョブ `processEmbedJob` は
+        // 型付き配列を受けて保存していたので、ingest は通るのに recall だけ「ベクトルを返さなかった」になっていた）。
+        // 以降は普通の `number[]` として扱う（vectorStore へは配列で渡す）。
+        const plainVector = toPlainVector(vector);
+        if (plainVector === undefined) {
           throw new QueryEmbeddingFailure(
             "no_vector",
             "embedding provider returned no vector for the query",
@@ -1113,21 +1117,21 @@ async function runRecallBody(
         // `embedding_provider_unavailable` に丸める。以前は vectorStore まで届き、Postgres では
         // `toComparableQuery` が全 0 に差し替えて `score_not_comparable` と記録され、理由の名前が
         // provider によって違っていた。
-        if (vector.length !== deps.embeddingProvider.space.dimensions) {
+        if (plainVector.length !== deps.embeddingProvider.space.dimensions) {
           throw new QueryEmbeddingFailure(
             "dimension_mismatch",
-            `embedding provider returned a query vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
+            `embedding provider returned a query vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${plainVector.length}`,
           );
         }
         // 有限性も同じ形で確かめる（ADR 0393）。次元違いと同じく `embedding_provider_unavailable` に丸める。
-        const badIndex = vector.findIndex((x) => !Number.isFinite(x));
+        const badIndex = plainVector.findIndex((x) => !Number.isFinite(x));
         if (badIndex !== -1) {
           throw new QueryEmbeddingFailure(
             "non_finite",
-            `embedding provider returned a query vector containing a non-finite value at index ${badIndex} (${String(vector[badIndex])})`,
+            `embedding provider returned a query vector containing a non-finite value at index ${badIndex} (${String(plainVector[badIndex])})`,
           );
         }
-        queryVector = vector;
+        queryVector = plainVector;
       } catch (err) {
         // 2026-09-29 追記（Issue #1200、ADR 0359）: abort による reject は
         // `embedding_provider_unavailable` に丸めず、そのまま投げ直す。
@@ -3437,4 +3441,18 @@ async function runRecallBody(
   return outputValidationReport === undefined
     ? draft
     : { ...draft, outputValidation: outputValidationReport };
+}
+
+/**
+ * provider が返したベクトルを普通の `number[]` にする。配列、または数値の型付き配列（`Float32Array` など。`DataView` は除く）なら
+ * 配列にして返し、それ以外（`undefined`・オブジェクト・文字列など）は `undefined`（ADR 0452）。要素の検査（次元・有限性）は呼び出し側。
+ */
+function toPlainVector(value: unknown): number[] | undefined {
+  if (Array.isArray(value)) {
+    return value as number[];
+  }
+  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+    return Array.from(value as unknown as ArrayLike<number>);
+  }
+  return undefined;
 }

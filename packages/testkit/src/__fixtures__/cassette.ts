@@ -136,6 +136,10 @@ export function assertCassette(value: unknown, source: string): asserts value is
   ) {
     throw fail("embedding.space が EmbeddingSpaceId の形をしていない");
   }
+  // ADR 0452: `dimensions` は正の整数（`EmbeddingProvider` の約束。本物の provider の `space` と同じ）。
+  if (!Number.isInteger(space.dimensions) || space.dimensions <= 0) {
+    throw fail(`embedding.space.dimensions が正の整数でない（${String(space.dimensions)}）`);
+  }
   if (typeof c.embedding.entries !== "object" || c.embedding.entries === null) {
     throw fail("embedding.entries が無い");
   }
@@ -154,11 +158,28 @@ export function assertCassette(value: unknown, source: string): asserts value is
     if (typeof e?.text !== "string" || !Array.isArray(e.vector)) {
       throw fail(`embedding.entries[${key}] が {text, vector} の形をしていない`);
     }
+    // ADR 0452: `text` は鍵の元になった入力（{@link EmbeddingCassetteEntry.text} の約束）。食い違えば、手で書き換えたか古い。
+    if (embeddingCassetteKey(e.text) !== key) {
+      throw fail(`embedding.entries[${key}] の鍵が text の SHA-256 と一致しない`);
+    }
+    // ADR 0452: 成分は有限の数（JSON は `NaN`/`Infinity` を `null` に化かすので、壊れたカセットはここで落ちる）。
+    const bad = e.vector.findIndex((x) => typeof x !== "number" || !Number.isFinite(x));
+    if (bad !== -1) {
+      throw fail(
+        `embedding.entries[${key}].vector の ${bad} 番目が有限の数でない（${String(e.vector[bad])}）`,
+      );
+    }
   }
   for (const [key, entry] of Object.entries(c.llm.entries)) {
     const e = entry as Partial<LLMCassetteEntry> | null;
     if (typeof e?.prompt !== "object" || e.prompt === null || !("messages" in e.prompt)) {
       throw fail(`llm.entries[${key}] の prompt が PromptSpec の形をしていない`);
+    }
+    if (
+      !Array.isArray((e.prompt as PromptSpec).messages) ||
+      llmCassetteKey(e.prompt as PromptSpec) !== key
+    ) {
+      throw fail(`llm.entries[${key}] の鍵が prompt から導いた値と一致しない`);
     }
     if (!("value" in (e as object))) {
       throw fail(`llm.entries[${key}] に value が無い`);
