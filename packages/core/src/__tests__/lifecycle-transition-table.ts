@@ -770,14 +770,102 @@ export const DOC_ROW_LINKS: Array<{ row: number; state: LifecycleState; op: Life
   { row: 15, state: "superseded", op: "restoreSuperseded" },
 ];
 
+/**
+ * §11 の表の行のうち、{@link DOC_ROW_LINKS}（「出発状態 × 操作」のマス）では結べない行を、
+ * **別の観測**で結ぶ（ADR 0444 BI。今の振る舞いを縛るだけで、振る舞いは変えていない）。
+ *
+ * 結べる行（この表）:
+ * - 行2（`observe` の抽出 → 新しい Memory が `active` で `created`）、
+ *   行12（`consolidate` が作る統合先）、行13（`reflect` が作る内省）——**新しく作られた Memory** の
+ *   状態とイベントを見る。マスは「出発状態の x」の行き先と積まれたイベントしか持たないので、
+ *   新しい Memory（x ではない）の `created` は、マスの外に在った。
+ * - 行11（`purgeExpiredEvents` の掃除）——状態の遷移ではなく、`events_purged` が1行積まれることだけを見る。
+ *
+ * **結べない行（理由）**——どれも「出発状態 × 操作」のどちらも持たず、結ぶ先の観測が無い:
+ * - 行1（`(なし) → observed`）: `observed` は `memories.status` の値ではなく（§11 の注記）、
+ *   書き換わるのは `observations` への INSERT だけで、イベントも積まれない（「なし」）。
+ *   `LifecycleState` に `observed` が無く、結ぶ先のマスが無い。
+ * - 行3（embedding 反映）と行4（reinforced）: `active → active` で状態が動かず、
+ *   イベントも積まれない（「なし」）。状態もイベントも変わらない操作は、
+ *   「文書の遷移・イベントと表の食い違い」を見るこの結び目では何も検出できない
+ *   （`embeddingStatus`・`lastReinforcedAt` は `LifecycleState` の外の列）。
+ *
+ * `run` は新しく作られた Memory（行11 は無し）の状態と、積まれたイベント（`kind` だけ）を返す。
+ */
+export interface DocRowObservation {
+  row: number;
+  /** `null` は「Memory の状態を持たない行」（行11）。 */
+  run(kit: LifecycleKit): Promise<{ state: LifecycleState | null; events: string[] }>;
+}
+
+/** 抽出（`observe`）には1件を返し、それ以外（consolidate・reflect）は {@link lifecycleLlm} と同じ。 */
+const observeThenLifecycleLlm: LLMProvider = {
+  complete: async () => ({ content: "unused" }),
+  completeStructured: async (c, req) =>
+    (req.schema as unknown) === ExtractionResultSchema
+      ? req.schema.parse({ memories: [{ content: "抽出した事実", provenanceKind: "stated" }] })
+      : lifecycleLlm.completeStructured(c, req),
+};
+
+async function kindsOf(kit: LifecycleKit, id: MemoryId): Promise<string[]> {
+  return (await eventsOf(kit, id)).map((e) => e.kind);
+}
+
+export const DOC_ROW_OBSERVATIONS: DocRowObservation[] = [
+  {
+    row: 2,
+    run: async (kit) => {
+      const rt = kit.makeRuntime(observeThenLifecycleLlm);
+      const o = await rt.observe(LIFECYCLE_CTX, { kind: "utterance", text: "元の発話" });
+      const id = o.memoryIds[0]!;
+      return { state: (await stateOf(kit, id)) as LifecycleState, events: await kindsOf(kit, id) };
+    },
+  },
+  {
+    row: 11,
+    run: async (kit) => {
+      const rt = kit.makeRuntime(lifecycleLlm);
+      const x = await createMemory(kit, false);
+      await rt.forget(LIFECYCLE_CTX, { memoryId: x.id });
+      await kit.memoryStore.purgeExpiredEvents!(LIFECYCLE_CTX, {
+        olderThan: SWEEP_ALL_NOW,
+        limit: 100,
+      });
+      const purged = await kit.eventStore.list(LIFECYCLE_CTX, { kind: "events_purged" });
+      return { state: null, events: purged.map((e) => e.kind) };
+    },
+  },
+  {
+    row: 12,
+    run: async (kit) => {
+      const rt = kit.makeRuntime(lifecycleLlm);
+      const a = await createMemory(kit, false);
+      const b = await createMemory(kit, false);
+      const r = await rt.consolidate(LIFECYCLE_CTX, { target: { memoryIds: [a.id, b.id] } });
+      const id = r.consolidatedMemoryId!;
+      return { state: (await stateOf(kit, id)) as LifecycleState, events: await kindsOf(kit, id) };
+    },
+  },
+  {
+    row: 13,
+    run: async (kit) => {
+      const rt = kit.makeRuntime(lifecycleLlm);
+      const seed = await createMemory(kit, false);
+      const r = await rt.reflect(LIFECYCLE_CTX, { target: { seedMemoryId: seed.id } });
+      const id = r.reflectedMemoryId!;
+      return { state: (await stateOf(kit, id)) as LifecycleState, events: await kindsOf(kit, id) };
+    },
+  },
+];
+
 /** 表のセルの中の `\\|`（エスケープした縦棒）を、列の区切りと区別するための一時的な置き換え先（私用領域の文字）。 */
 const ESCAPED_PIPE = "\uE000";
 
 /** §11 の表から、行番号 → { from, to[], event } を読む（`\|` のエスケープを解く）。 */
 export function parseLifecycleTable(
   markdown: string,
-): Map<number, { from: string; to: string[]; events: string[] }> {
-  const rows = new Map<number, { from: string; to: string[]; events: string[] }>();
+): Map<number, { from: string; to: string[]; final: string[]; events: string[] }> {
+  const rows = new Map<number, { from: string; to: string[]; final: string[]; events: string[] }>();
   const section = markdown.split("## 11. Memory lifecycle")[1] ?? "";
   for (const line of section.split("\n")) {
     const m = /^\| (\d+) \|/.exec(line);
@@ -793,8 +881,18 @@ export function parseLifecycleTable(
       .split("|")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+    // `a → b → c` の最後（行2の `observed → extracted → active` なら `active`）。矢印が無ければ空。
+    const arrows = transition.split("→").map((t) => t.trim());
+    const final =
+      arrows.length < 2
+        ? []
+        : (arrows[arrows.length - 1] ?? "")
+            .replace(/（.*$/, "")
+            .split("|")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0);
     const events = [...(cells[6] ?? "").matchAll(/`([a-z_]+)`/g)].map((mm) => mm[1]!);
-    rows.set(Number(m[1]), { from: (fromRaw ?? "").trim(), to, events });
+    rows.set(Number(m[1]), { from: (fromRaw ?? "").trim(), to, final, events });
   }
   return rows;
 }

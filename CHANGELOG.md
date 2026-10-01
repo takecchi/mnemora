@@ -588,6 +588,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/local-embedding` の `embed()` が、件数が `maxBatchSize`（既定128）を超えて分割されたとき、チャンクの合間で `signal` の abort を見るようになった**（[ADR 0445](./docs/decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。以前は abort の後も残りのチャンクをすべて推論してから reject していた。動いている1チャンクは今までどおり止まらない。reject の値（`signal.reason`）は変わらない。件数が `maxBatchSize` 以下の呼び出しは1バイトも変わらない。
   - 文書: `@mnemora/anthropic` の README に、`maxTokens` を約21,333より上げると SDK が streaming を求めて素の例外で落ちること（`client` に `timeout` を明示すれば通る）を、openai・anthropic の README に、SDK の `timeout` が試行ごとに効くこと・本文が途中で切れた失敗は再送されないこと・再送に冪等キーが付かないことを、`@mnemora/local-embedding` の README に「`lib`・`target` は ES2022 以上」を足した。
 
+- **`@mnemora/postgres`: Postgres の再起動を数回挟むと pool が枯れて全呼び出しが止まる穴を塞いだ。`db.transaction()` の `rollback` が失敗しても、元のエラーが消えなくなった。**（[ADR 0444](./docs/decisions/0444-pool-begin-release-rollback-error-preserved.md)）
+  - **穴（pool の枯渇）**: drizzle-orm 0.45.2 の `NodePgSession.transaction` は `begin` を `try`/`finally` の外で実行するので、`begin` が reject すると借りた接続が pool へ戻らなかった。`pg_ctl restart -m fast` を繰り返すと pool が枯れ、全呼び出しが止まった（手元の実測では10回目の再起動の後）。上流の不具合で、`createPostgresClient` が drizzle へ渡す pool の `connect` の包みで直した（`begin` が失敗したら `release(err)` して接続を捨てる。`release` は冪等）。
+  - **穴（エラーの消失）**: drizzle は `rollback` が投げると元のエラーを捨てるので、接続ごと切れたとき、呼び出し側に `Failed query: rollback` しか残らなかった（`forget`・`purge` の `outcomes[].error` も）。いまは **元のエラー（`57P01` など。`code` は `err.cause.code` か `err.code`）が投げられる**。`rollback` の失敗は、元のエラーの `cause`（空いていれば）か `rollbackError` に残る。新しい例外の型は無い。
+  - `closePostgresClient` は、`client.pool.end()` が既に直接呼ばれていても reject しない（以前は `Called end on pool more than once`）。
+  - 文書: `packages/postgres/README.md` の「例外の見分け方」に、pool の枯渇時と再起動の最中に出る例外の形（`err.code` と `err.cause?.code` の3つの形）を書いた。形は揃えていない。
+
 ---
 
 ## [1.1.0] - 2026-09-30
