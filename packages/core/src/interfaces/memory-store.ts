@@ -1975,7 +1975,8 @@ export interface MemoryStore {
    *   こと。`supersedeWithNewMemories` が `status` を `'superseded'` に固定するのと
    *   同じ形の専用化）。
    * - 🔴 **`first.id === second.id` は呼び出し前の programmer error として扱う。**
-   *   実装は `RangeError`（メッセージ: `markContestedPair: first.id and second.id must differ`）
+   *   実装は `RangeError`（メッセージ: `<実装のクラス名>: first.id and second.id must differ`。
+   *   例: `PostgresMemoryStore: …`・`InMemoryMemoryStore: …`）
    *   を、書き込みを一切行う前に投げる——`supersedeWithNewMemories` の
    *   `supersededByIndex out of range` と同じ「開く前に落とす」位置。
    * - **両側どちらかの id がそのテナントに存在しない場合、`updateStatusWithEvent` と同じ
@@ -2032,8 +2033,8 @@ export interface MemoryStore {
    *   `updateStatus`/`updateStatusWithEvent` を使うこと。
    * - 🔴 **`first.id === second.id` は呼び出し前の programmer error として扱う。**
    *   実装は `RangeError`（メッセージ:
-   *   `resolveContestedPair: first.id and second.id must differ`）を、書き込みを一切
-   *   行う前に投げる。
+   *   `<実装のクラス名>: first.id and second.id must differ`。例: `PostgresMemoryStore: …`・
+   *   `InMemoryMemoryStore: …`）を、書き込みを一切行う前に投げる。
    * - **両側どちらかの id がそのテナントに存在しない場合、`updateStatusWithEvent` と同じ
    *   「memory not found」の `Error` を投げる。**書き込みは一切行われない。
    * - **CAS が破れた場合（存在はするが `status !== 'contested'`、または `contested` では
