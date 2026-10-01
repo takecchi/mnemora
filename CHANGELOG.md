@@ -457,6 +457,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`runtime.reextract`: 置き換えた側（`supersededById`）が `active` でない行になり、循環・active 0件ができる穴を直した。あわせて `Runtime.observe` の TSDoc 2か所を実装に合わせた。**（穴探し30巡目、[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md)。`@mnemora/core` の `runtime.ts` だけの変更。store・migration・公開の型は変えていない）
+  - **穴**: 抽出の冪等キーは status を問わないので、候補が同じ Observation・同じ版の `superseded`／`archived` な既存行にぶつかると、store がその行を返す。以前は候補列の先頭を置き換えた側にしたため、`reextract` の出力が X → Y → X と往復すると Y と X が互いを置き換えて active が0件になった（Postgres・testkit とも、口あり・口なしの両経路）。先頭が archived な行にぶつかると、別の active な記憶がその archived な行に置き換えられた。
+  - **いまの振る舞い**: 置き換えた側は、候補列のうち非 active の既存行にぶつからない先頭。全候補がぶつかるときは何も supersede しない（`supersededMemoryIds: []`。ぶつかった行は `skipped` の `status_not_active` に載る）。**変わる呼び出しは、直す前に壊れた結果になっていた入力だけ**（上の2形）。例外は増えていない。
+  - **文書だけの直し**: `Runtime.observe` の TSDoc が「abort した sync の observe の extract ジョブは claim もされていないまま残る」と書いていたのを、observe が claim したまま残る（`leaseMs` の内側の `tick` は拾わない）に直した（ADR 0407 以降の振る舞い）。`ObserveResult` の `rejectedSubjectIds`・`claimKeyFailure`・`contestedDetection` の TSDoc に、冪等な再送では渡していても無いことを足した。
+  - **直していない点**: `reextract` の LLM を待つ間に記憶が contested になっても、新しい版は active で書かれる（ADR 0406 の負債、実測した）。ほか5件は ADR 0454 の負債の表。
+
 - **`@mnemora/bullmq`: README・TSDoc の「コードからの読み」を実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測り、ずれていた所を直した。**（[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md)。コードの振る舞いは変えていない）
   - **文書に無かったこと（実測）**: Redis が落ちている間の `start()` は reject せず pending のまま／Redis が永続化なしで再起動すると scheduler が消え、tick は再開せず `onTickError` も鳴らない（永続化ありなら再開）／`everyMs` を変えて別の driver が `start()` すると共有の scheduler の間隔が置き換わる／ioredis のインスタンスを `connection` に渡すなら `maxRetriesPerRequest: null` が要り、無いと `createBullmqTickDriver` が同期的に throw する。
   - **裏づいたこと**: 1台の `stop()` が全プロセスの発火を止める（新を `start()` してから旧を `stop()` する rolling deploy でも。直していない。被害の形と回避は README・ADR 0449）／完了・失敗ジョブが Redis に残り続ける（数字を追記）／stalled で `onTickResult` の後に `onTickError` が2回届く（ADR 0440 の【未実測】が【実測】になった）。

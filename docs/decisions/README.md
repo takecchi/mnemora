@@ -464,5 +464,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0449](./0449-bullmq-tick-driver-measured-against-real-redis.md) | bullmq の tick-driver を実 Redis（redis-server 7.4.7）に当てた——文書の「未実測」7件を測り、ずれた所だけ文書を直す・README の片に型検査の印を付ける | 採用 (2026-10) |
 | [0450](./0450-contested-group-operation-state-matrix-round26.md) | contested の群（`markContestedGroup`・`resolveContestedGroup`）の「操作 × 状態」の行列を当てた（穴探し26巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
 | [0453](./0453-embed-job-and-reinforce-state-matrix-round27.md) | embed ジョブと reinforce の「操作 × 状態」の行列を当てた（穴探し27巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
+| [0454](./0454-reextract-anchor-observe-consolidate-state-matrix-round30.md) | observe・consolidate・reextract の「操作 × 状態」の行列を当て、reextract の置き換えた側が active でない行になる穴を直した（穴探し30巡目） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
