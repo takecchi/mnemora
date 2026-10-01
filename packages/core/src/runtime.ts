@@ -352,6 +352,13 @@ export interface RuntimeDeps {
    * フックが例外を投げた場合、`processEmbedJob` は今までどおり
    * `embeddingStatus` を `'failed'` にしてから再送出する——このフックのために
    * 新しい throw の経路を既定側へ作らない。
+   *
+   * ⚠ ADR 0489（今の振る舞いを書くだけ）: **戻り値は検査も変換もしない。**空文字・NUL・孤立サロゲート・
+   * 巨大な文字列、型の外の値（`undefined`・数・オブジェクト・`null`）も、そのまま `embed()` に渡る。
+   * 受け入れるかどうかは provider が決める——落ちれば `embeddingStatus: 'failed'`（job も failed）、
+   * 受け入れれば `'ready'`。`OpenAIEmbeddingProvider` は空文字を含む呼び出しを API の 400 で落とす
+   * （packages/openai/README.md）。Runtime が先回りして断る経路は無い（新しく断る入力は足していない）。
+   * `reembed()` で `failed` を戻した後の `tick` では、このフックがもう一度呼ばれる。
    */
   embeddingInput?: ((memory: Memory) => string) | undefined;
 }
