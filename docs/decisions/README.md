@@ -474,5 +474,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0460](./0460-multi-process-multi-pool-round33.md) | 「同じ Pool／別の Pool／別のプロセス」から 23・26・27・30 巡目の操作を同時に当て、`registerEmbeddingSpace` が `max: 1` で返らない穴と `lock_timeout` を 0 に書き換える穴を直した（穴探し33巡目） | 採用 (2026-10) |
 | [0461](./0461-v1-2-0-release-prep-inspection.md) | 穴探し34巡目 — v1.2.0 を出すための準備の点検（更新経路の fixture・CHANGELOG・migration の順序・migration-v1 の 🔴） | 採用 (2026-10) |
 | [0463](./0463-migration-v1-red-items-checked-against-code.md) | 穴探し35巡目 — `docs/migration-v1.md` の 🔴（v1.1.0 → 次の版）の各項目を、現物の実装と歯に突き合わせた記録 | 採用 (2026-10) |
+| [0465](./0465-gate-red-tooth-sees-db-test-file-not-vitest-summary.md) | 門が赤くなる歯は、「DB テストが本当に走って落ちた」を vitest の集計の行ではなく、落ちた DB テストのファイルの名前で見る | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
