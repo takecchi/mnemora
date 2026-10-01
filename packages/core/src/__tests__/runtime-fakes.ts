@@ -71,7 +71,18 @@ import type { EmbeddingSpaceId } from "../embedding.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "../strategies/decay.js";
 import { resolveIdempotentCreate } from "../idempotent-create.js";
+import { assertWellFormedFilter } from "../identifier.js";
 import type { IdempotentCreateResult } from "../idempotent-create.js";
+
+/**
+ * 読みの口の条件の日時が Invalid Date なら断る（ADR 0493。`packages/testkit` の `assertQueryDate` と同じ判定・同じ文面）。
+ * Postgres はクエリの時点で `timestamptz` への変換を拒む。省略（`undefined`/`null`）は検査しない。
+ */
+function assertFakeQueryDate(method: string, field: string, value: Date | null | undefined): void {
+  if (value != null && Number.isNaN(value.getTime())) {
+    throw new Error(`${method}: ${field} must be a valid Date (got Invalid Date)`);
+  }
+}
 
 // `packages/testkit` の `in-memory-memory-store.ts` の同名の関数と同じ判定（Issue #816 の NUL 側の残り）。
 /**
@@ -2755,6 +2766,10 @@ export class FakeOutboxStore implements OutboxStore {
   // `runtime.test.ts` が「今日の姿」を検査しているつもりで、実は直った後の姿を
   // 検査してしまう食い違いが起きる。
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
+    // ADR 0493: `claimedBy` は `text` 列に入る。NUL は Postgres が拒み、`InMemoryOutboxStore` も同じ文面で拒む。
+    if (typeof opts.claimedBy === "string" && opts.claimedBy.includes("\u0000")) {
+      throw new Error("claimBatch: claimedBy must not contain NUL characters (U+0000)");
+    }
     // `PostgresOutboxStore.claimBatch` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる
     // （実測）。ここで検査せず `eligible.slice(0, opts.limit)` へ渡すと
@@ -2818,6 +2833,9 @@ export class FakeOutboxStore implements OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void> {
+    // ADR 0493: `OutboxStore.complete` の TSDoc が約束する（`opts.at` が Invalid Date なら、行には触れずに断る）。
+    // `InMemoryOutboxStore` と同じく、行を探す前に見る。
+    assertFakeQueryDate("complete", "opts.at", opts?.at);
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -2841,6 +2859,7 @@ export class FakeOutboxStore implements OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void> {
+    assertFakeQueryDate("fail", "opts.at", opts?.at);
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -2891,6 +2910,7 @@ export class FakeOutboxStore implements OutboxStore {
     ctx: Ctx,
     opts: PurgeCompletedJobsOptions,
   ): Promise<PurgeCompletedJobsResult> {
+    assertFakeQueryDate("purgeCompletedJobs", "olderThan", opts.olderThan);
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeCompletedJobs: limit must be an integer (got ${opts.limit})`);
     }
@@ -3036,6 +3056,12 @@ export class FakeVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    // ADR 0493: 絞りの識別子（`tenantId`・`subjectId`）の NUL と、絞りの日時の Invalid Date を、
+    // `InMemoryVectorStore`・`PostgresVectorStore` と同じく断る。
+    assertWellFormedFilter(opts.filter, "opts.filter");
+    assertFakeQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertFakeQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertFakeQueryDate("search", "filter.validAt", opts.filter.validAt);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる
     // （実測）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと
@@ -3523,6 +3549,14 @@ export class FakeLexicalStore implements LexicalStore {
     if (query.includes("\u0000")) {
       throw new Error("FakeLexicalStore.search: query must not contain NUL characters (U+0000)");
     }
+    // ADR 0493: 絞りの識別子の NUL・日時の Invalid Date・`attributes` の NUL を、`InMemoryLexicalStore` と同じく断る。
+    assertWellFormedFilter(opts.filter, "opts.filter");
+    assertFakeQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertFakeQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertFakeQueryDate("search", "filter.validAt", opts.filter.validAt);
+    if (opts.filter.attributes !== undefined && jsonContainsNul(opts.filter.attributes)) {
+      throw new Error("search: filter.attributes must not contain NUL characters (U+0000)");
+    }
     // `PostgresLexicalStore.search`/`PostgresTrigramLexicalStore.search` は `opts.limit` を
     // 生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・
     // 非整数は例外になる（実測、両実装とも同じ）。ここで検査せず
@@ -3702,6 +3736,8 @@ export class FakeEventStore implements EventStore {
     if (filter.limit !== undefined && filter.limit >= 2 ** 63) {
       throw new Error(`list: limit must fit in a Postgres bigint (got ${filter.limit})`);
     }
+    assertFakeQueryDate("list", "since", filter.since);
+    assertFakeQueryDate("list", "until", filter.until);
     const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
       if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
