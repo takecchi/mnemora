@@ -199,7 +199,7 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       error: new Error(INJECTED),
     });
     let error: unknown;
-    let seen: unknown[] = [];
+    let seen: unknown[] | undefined;
     try {
       const w = write([good("a"), contestedWithoutCompanion("b")]);
       seen = w.seen;
