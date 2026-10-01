@@ -108,9 +108,12 @@ export interface FindCorrectionCandidatesResult {
   /**
    * `"candidates"` — `candidates` が1件以上。
    * `"no_candidates"` — `candidates` が0件（`recall()` が0件を返した、または
-   * `excludeMemoryIds` が全件を落とした）。**「探していない」という第3の状態は無い**
-   * ——この口は必ず `recall()` を1回呼ぶ（`Runtime.findCorrectionCandidates` の
-   * doc コメント参照）。
+   * `excludeMemoryIds` が全件を落とした）。**`outcome` に「探していない」という第3の値は無い**
+   * ——この口は必ず `recall()` を1回呼ぶ。ただし `text` が `undefined`（JavaScript や `as` で
+   * 型を外したとき。`""` は `recall()` の検証で例外になる）だと、`recall()` は例外にならず、
+   * 埋め込みを呼ばずに候補の生成を飛ばして `no_candidates` を返す。**「探していない」は `outcome`
+   * ではなく `omitted` に出る**（`{ kind: "stage_skipped", stage: "candidate_generation",
+   * reason: "empty_query_content" }`）。`Runtime.findCorrectionCandidates` の doc コメントも参照。
    */
   outcome: "candidates" | "no_candidates";
   /** `recall()` が返した件数（`excludeMemoryIds` の除外・`limit` の適用より前）。 */

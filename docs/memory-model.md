@@ -1983,6 +1983,7 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   `'tags'`（NUL を含む要素だけを捨てる。`count` と、捨てた要素の添字 `tagIndexes`（先頭から20個まで））・`'claimKey'`（`null` になる）。値そのものは写さない）。
   `index` は抽出では `droppedCandidates` と同じ数え方。統合・内省は1件しか作らないので、`index` は 0 で、その1件の記憶の `created` に付く。落とした欄が無ければ、このキーは無い（`meta` の形は変わらない）。
   本文（`content`）の NUL は落とせないので、従来どおり候補ごと落ちる（抽出）か例外（統合・内省）になる。
+- 行2（`reextract` が作り直す行を含む）の `created` の `meta.languageMismatch`（2026-09-30 から。[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[ADR 0391](./decisions/0391-language-mismatch-mark-on-created-event.md)）: 日本語の観測（かな・漢字が4字以上あり、かな・漢字 ÷（かな・漢字 + ラテン文字）が 0.3 以上）から、かな・漢字が1文字も無く、ラテン文字の文字が大半の本文が出たとき（言語の取り違えの疑い）だけ付く。値は `{ rule: 'cjk_observation_latin_content', contentLatinLetters, contentLatinShare }`。**印を付けるだけ**で、Memory は今までどおり作られ、再試行も書き換えもしない。検査するのは抽出の経路（sync・deferred・`reextract`）の本文だけで、全文フォールバックの本文と、行12・行13（統合・内省）の `created` は検査しない（付かない）。疑いが無ければ、このキーは無い（`meta` の形は変わらない）。取りこぼす側・余計に拾う側の例と、偽陽性率を測っていないことは ADR 0391。
 - 行4・行14・行15の強化は、`at` が起点（`last_reinforced_at ?? recorded_at`）より狭義に新しいときだけ書く。そうで
   なければ、活動時計の欄も含めて何も書かない（Issue #1093、[ADR 0048](./decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)
   の追記）。
