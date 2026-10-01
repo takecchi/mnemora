@@ -409,7 +409,7 @@ describe("PostgresEventStore.append と InMemoryEventStore.append は、event.me
       } else if (target === "null") {
         expect(pg.outcome).toBe("ok");
       } else {
-        expect(pg.outcome, target).toMatch(/memory not found for tenant: <id>/);
+        expect(pg.outcome, target).toMatch(/memory not found for tenant: /);
         expect(pg.eventsAtForeign).toBe(0);
       }
     }

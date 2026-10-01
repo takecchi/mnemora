@@ -3652,7 +3652,8 @@ export class FakeEventStore implements EventStore {
     // ADR 0436: `ctx.tenantId` の記憶であることも確かめる（別のテナントの記憶は、実在しない id と同じく拒む）。
     if (
       event.memoryId !== null &&
-      this.backing.memories.get(event.memoryId)?.tenantId !== ctx.tenantId
+      // ADR 0475: 大文字小文字は区別しない（`PostgresEventStore.append` は uuid を小文字にそろえて比べる）。message は渡された id のまま。
+      this.backing.memories.get(event.memoryId.toLowerCase())?.tenantId !== ctx.tenantId
     ) {
       throw new Error(`FakeEventStore: memory not found for tenant: ${event.memoryId}`);
     }
