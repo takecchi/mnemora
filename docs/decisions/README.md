@@ -500,5 +500,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0487](./0487-usage-counter-label.md) | `usage.counter` の印は連結の計測の印であり、段4の予算の判定に使った印とは食い違いうる。今の振る舞いを文書に書く | 採用 (2026-10) |
 | [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（ずれは見つからなかった） | 採用 (2026-10) |
 | [0492](./0492-fuzz-profile-fields.md) | 穴探し — recall の不変条件 fuzz に、これまで一度も振っていない欄（`timeWeighting`・`digestBandLimit`・クエリの `tags`・`occurredAt`）を足す（割れは見つからなかった） | 採用 (2026-10) |
+| [0494](./0494-fuzz-relations-and-argument-mutation.md) | 穴探し — recall の fuzz を、`relationStore`（多者間の群と `relationMaxCount`）と、引数の変形（大文字の id・消した記憶の id）へ広げる（草稿・作業中） | **草稿 (2026-10)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
