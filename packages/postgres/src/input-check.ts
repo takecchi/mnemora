@@ -32,3 +32,34 @@ export function assertFloat4Vector(owner: string, vector: readonly number[]): vo
 export function fitsFloat4(vector: readonly number[]): boolean {
   return vector.every((x) => Number.isFinite(Math.fround(x)));
 }
+
+/**
+ * ADR 0456: 読み取りの絞り（`labels`・`attributes`）の NUL を、DB に触れる前に名指しして断る。
+ * 以前は、`labels` の NUL が `invalid byte sequence for encoding "UTF8": 0x00`、`attributes` の NUL が
+ * `unsupported Unicode escape sequence` という DB の生の例外（`Failed query: …`）になっていた。
+ * 断る入力は増やさない（以前も同じ入力で落ちていた）。`attributes` は key と value の両方を見る。
+ */
+export function assertNoNulInScopeFilter(
+  owner: string,
+  filter:
+    | {
+        labels?: readonly string[] | undefined;
+        attributes?: Readonly<Record<string, string>> | undefined;
+      }
+    | null
+    | undefined,
+  field = "filter",
+): void {
+  if (typeof filter !== "object" || filter === null) {
+    return;
+  }
+  filter.labels?.forEach((label, i) => assertNoNul(owner, `${field}.labels[${i}]`, label));
+  if (filter.attributes !== undefined) {
+    for (const [key, value] of Object.entries(filter.attributes)) {
+      assertNoNul(owner, `${field}.attributes (key)`, key);
+      if (typeof value === "string") {
+        assertNoNul(owner, `${field}.attributes (value)`, value);
+      }
+    }
+  }
+}

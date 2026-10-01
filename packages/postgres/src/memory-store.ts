@@ -62,7 +62,7 @@ import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { translateClaimKeyIndexLimit } from "./claim-key-index-limit.js";
-import { assertNoNul } from "./input-check.js";
+import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
@@ -982,6 +982,13 @@ export class PostgresMemoryStore implements MemoryStore {
     // （mapping.ts の isUuidLike の doc参照）。
     if (!isUuidLike(observationId)) {
       return [];
+    }
+    if (extractorVersion !== null) {
+      assertNoNul(
+        "PostgresMemoryStore.listBySourceObservation",
+        "extractorVersion",
+        extractorVersion,
+      );
     }
     const result = await this.db.execute(sql`
       SELECT * FROM memories
@@ -2196,6 +2203,7 @@ export class PostgresMemoryStore implements MemoryStore {
   ): Promise<ScopeAggregate> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
+    assertNoNulInScopeFilter("PostgresMemoryStore.aggregateScope", scope, "scope");
     // Issue #608 項目③(b) / ADR 0286: 段1（ANN・語彙）の押し下げと同じ opt-in。
     // `scope.subjectId` が無ければこの欄自体を見ない——「テナント全体」は定義上すでに
     // 主題なしを含む上位集合であり、広げる余地が無い。
@@ -3303,6 +3311,16 @@ export class PostgresMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
+    assertNoNul(
+      "PostgresMemoryStore.findActiveByClaimKey",
+      "claimKey.subject",
+      query.claimKey.subject,
+    );
+    assertNoNul(
+      "PostgresMemoryStore.findActiveByClaimKey",
+      "claimKey.predicate",
+      query.claimKey.predicate,
+    );
     // 入口の正規化（`normalizeUuidCase`）。下の除外は JS で比べるので、DB が返す小文字の id に揃える
     // ——以前は大文字の UUID を渡すと自分自身が返っていた（`get` は同じ行を返すのに）。
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
@@ -3352,6 +3370,16 @@ export class PostgresMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
+    assertNoNul(
+      "PostgresMemoryStore.findContestedByClaimKey",
+      "claimKey.subject",
+      query.claimKey.subject,
+    );
+    assertNoNul(
+      "PostgresMemoryStore.findContestedByClaimKey",
+      "claimKey.predicate",
+      query.claimKey.predicate,
+    );
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
     const validFrom = toPgTimestamp(query.validFrom);
     const validUntil = toPgTimestamp(query.validUntil);

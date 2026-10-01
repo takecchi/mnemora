@@ -15,7 +15,12 @@
  * 「断る・落とす入力を今より増やさない」）。圧縮が効かない長い tag は、今までどおり例外で候補ごと落ちる。
  * `digest` の長さも見ない（索引が無い）。
  */
-import type { ExtractedMemoryCandidate } from "./extraction.js";
+
+/** 補助の欄（`digest`・`tags`）を持つ、LLM が返した値の最小の形。抽出の候補・統合・内省の結果が当てはまる。 */
+export interface AuxFieldCarrier {
+  digest?: string | undefined;
+  tags?: string[] | undefined;
+}
 
 /**
  * 保存できないために落とした補助の欄1つの記録。`created` イベントの `meta.droppedFields` に入る
@@ -46,9 +51,9 @@ export function containsNul(value: string): boolean {
 }
 
 /** {@link sanitizeCandidateAuxFields} の戻り値（`index`・`contentHash` を持たない下書き）。 */
-export interface SanitizedCandidateAuxFields {
+export interface SanitizedCandidateAuxFields<T extends AuxFieldCarrier = AuxFieldCarrier> {
   /** 保存できない補助の欄を落とした候補。落とす欄が無ければ、渡した候補そのもの。 */
-  candidate: ExtractedMemoryCandidate;
+  candidate: T;
   /** 落とした欄（`index`・`contentHash` は呼び出し側が足す）。 */
   dropped: Array<Pick<DroppedAuxField, "field" | "reason" | "count" | "tagIndexes">>;
 }
@@ -62,14 +67,14 @@ export interface SanitizedCandidateAuxFields {
  *
  * 空白だけの要素は、ここでは扱わない（従来どおり `dropBlankTags` が捨てる）。
  */
-export function sanitizeCandidateAuxFields(
-  candidate: ExtractedMemoryCandidate,
-): SanitizedCandidateAuxFields {
-  const dropped: SanitizedCandidateAuxFields["dropped"] = [];
+export function sanitizeCandidateAuxFields<T extends AuxFieldCarrier>(
+  candidate: T,
+): SanitizedCandidateAuxFields<T> {
+  const dropped: SanitizedCandidateAuxFields<T>["dropped"] = [];
   let next = candidate;
   if (candidate.digest !== undefined && containsNul(candidate.digest)) {
     const { digest: _digest, ...rest } = next;
-    next = rest;
+    next = rest as T;
     dropped.push({ field: "digest", reason: "nul_character" });
   }
   const tags = candidate.tags;
