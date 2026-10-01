@@ -13,7 +13,7 @@ import { ExtractionContextSchema } from "./observation.js";
 import { assertLLMContentNotBlank } from "./llm-content.js";
 import type { Provenance } from "./provenance.js";
 import { dropBlankTags } from "./llm-tags.js";
-import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
+import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 
 /**
  * 基本の Memory Extraction（roadmap.md 段階3、docs/architecture.md §3.8）。
@@ -326,6 +326,11 @@ export function buildExtractionPrompt(
  * `content` は生成の成否に関わらず常に保持される前提で、`digest` だけをこの関数で埋める。
  *
  * 負の `maxLength` は `0` として扱う（本文が空のときも。空なら `"（内容なし）"`、空でなければ `"…"`）。
+ * `NaN` も本文を残さない（`"…"` だけ。`RuntimeConfig.digestFallbackLength` の doc）。
+ *
+ * 切るのは書記素の境界（ADR 0467。ADR 0424 O-5 が `packDigestBand` に入れた `sliceAtGraphemeBoundary`）。
+ * `maxLength` が結合文字や ZWJ 絵文字・国旗の途中に落ちたら、その書記素の手前で止める。**これから書く digest だけが
+ * 変わる**（保存済みの digest は書き換えない）。
  */
 export function truncateForFallbackDigest(content: string, maxLength: number): string {
   const trimmed = content.trim();
@@ -338,10 +343,11 @@ export function truncateForFallbackDigest(content: string, maxLength: number): s
   // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
   // 別の意味になる（先頭からの切り詰めにならない）。maxLength は「安全弁」
   // （docs/memory-model.md §4）として本文の長さを抑える欄であり、負数は上限0
-  // （本文を残さない）の下限として扱う。サロゲートペアの内側で切って孤立サロゲートを
-  // 作らないための丸めも `sliceWithoutSplittingSurrogatePair` に集約してある
-  // （`text-truncation.ts` の doc コメント参照）。
-  return `${sliceWithoutSplittingSurrogatePair(trimmed, limit)}…`;
+  // （本文を残さない）の下限として扱う。サロゲートペア・書記素の内側で切らないための
+  // 丸めは `sliceAtGraphemeBoundary` に集約してある（`text-truncation.ts` の doc コメント参照）。
+  // `sliceAtGraphemeBoundary` は NaN の長さで全文を返してしまう（`next > NaN` が常に偽）。NaN は今までどおり本文を残さない。
+  const kept = Number.isNaN(limit) ? "" : sliceAtGraphemeBoundary(trimmed, limit);
+  return `${kept}…`;
 }
 
 /** {@link resolveDigest} の戻り値。 */

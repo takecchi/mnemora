@@ -633,6 +633,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/postgres`: `MemoryStore` の書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶でも、イベントが書けた穴を塞いだ**（ADR 0456 の H4。ADR 0436・0439 の続き）。`updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`・`markContestedGroup`・`resolveContestedGroup`・`createMemoriesWithOutboxAndEvents` が、書く前に `event.memoryId` が `ctx` のテナントの記憶かを確かめ、違えば `memory not found for tenant` で断る（status の更新ごと戻る）。`Runtime` は常に自分の行を指すので、正規の呼び出しは影響を受けない。**破壊的か**: 型・シグネチャは変わらない。以前は通っていた、別テナントの記憶を指すイベントを新しく断る（自前の呼び出しでそのような `event.memoryId` を渡していた場合だけ）。**移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目52（[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md) で、🔴 の一覧に足した）。
 
+- **`@mnemora/core`: `compareWithFullLog` が NaN の入力で結論を出さなくなり、`calibrateRecallFootprint` が非有限の標本・合計のオーバーフローで NaN・Infinity の係数を『較正済み』の顔で返さなくなり、標本が約12万件を超えても `RangeError` にならなくなった**（[ADR 0467](./docs/decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md)、穴探し38巡目）。
+  - `compareWithFullLog`: `shape` の `memoryCountInScope`・`limit`・`digestBandLimit`・`associationCount`、または `fullLogChars` が NaN のとき、以前は `verdict: "full_log_smaller"`（`estimatedShare` は NaN か `Infinity`）を返していた。今は `verdict: "too_close_to_call"`・`estimatedShare: NaN`・`reasons` に `within_tolerance` なし。この状態を名乗る `reasons` の code は無い（足すと公開の型が変わる。ADR 0467 の材料）。有限な入力の結果は変わらない。
+  - `calibrateRecallFootprint`: `totalChars`・`memoryCount` が有限でない標本は使える標本に数えない（`sampleCount` は使った分）。傾き・切片が有限にならないとき（合計のオーバーフロー）は、既定値から借りて `borrowedFromDefault` に名前で出す。標本の `memoryCount` の最小・最大の求め方を、スプレッド引数を使わない形に替えた。
+  - 公開の型・既定値は変えていない。非破壊と数える（NaN・Infinity・巨大な標本という、以前は意味のある値を返さなかった入力の結果だけが変わる）。
+
+- **`@mnemora/core`: LLM が digest を返さないとき（または抽出が失敗したとき）の機械的な digest（`digestFallbackLength` で切る先頭の文字列）が、書記素の途中で切れなくなった**（[ADR 0467](./docs/decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md)、ADR 0424 O-5 の続き）。
+  - 長さの境界が NFD の結合文字（「が」を `か` + 結合濁点で書いた文字列）・ZWJ で繋いだ絵文字・国旗の途中に落ちると、以前はその途中で切って「か」や ZWJ の片割れが残った。今はその書記素の手前で止める。長さちょうどに収まるなら残す。NaN・0・負・小数・`Infinity` の長さの結果は変えていない。
+  - **これから書く digest だけが変わる。保存済みの digest は書き換えない。** digest は `contentHash`・冪等キー・既定の埋め込み入力（`content`）に入らない。公開の型・既定値は変えていない。非破壊と数える。
+    ⚠ 新旧の digest が混在する（区別する欄は無い。`reextract` で書き直された記憶から新しい形になる）。`embeddingInput` で digest を埋め込む構成では、これから書く記憶の埋め込み入力が数文字変わる。
+
 ---
 
 ## [1.1.0] - 2026-09-30

@@ -138,6 +138,8 @@ export interface RuntimeConfig {
    * digest フォールバック（機械的な先頭文字列切り出し）の最大文字数。既定 200。
    * ⚠ 値は検査しない（今の振る舞い）。0・負の数・`NaN` を渡すと、本文が収まらない限り
    * digest は `"…"` だけになる（本文は `content` にそのまま残る）。
+   * 切るのは書記素の境界で、長さが結合文字・ZWJ 絵文字・国旗の途中に落ちたら、その書記素の手前で止める（ADR 0467。
+   * これから書く digest だけが変わる。保存済みの digest は書き換えない）。
    */
   digestFallbackLength?: number | undefined;
   /**
