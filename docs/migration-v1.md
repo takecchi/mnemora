@@ -2387,13 +2387,13 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 - 専用のエラー型・`kind` は無い（素の `Error`、メッセージは `PostgresMemoryStore:` で始まり、`memory not found for tenant` を含む）。
 - 自前の `MemoryStore` 実装は、イベントを書く口の入口で同じ確かめを足す（適合テストは検査しない）。
 
-**確かめたこと（[ADR 0463](./decisions/0463-migration-v1-red-items-checked-against-code.md)）**: testkit のインメモリ実装 `InMemoryMemoryStore` は、同じ入力（別テナントの記憶を指す `event.memoryId`）を**断らない**（`updateStatusWithEvent` で実測。ADR 0456 の M7 の答え。直していない）。インメモリで通ったことは、`@mnemora/postgres` でも通ることを意味しない。
+**確かめたこと**: testkit のインメモリ実装 `InMemoryMemoryStore` は、以前は同じ入力（別テナントの記憶を指す `event.memoryId`）を断らなかった（[ADR 0463](./decisions/0463-migration-v1-red-items-checked-against-code.md) の実測。ADR 0456 の M7 の答え）。[ADR 0466](./decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) で揃え、いまは同じ口で同じように断る（例外は素の `Error`、message は `InMemoryMemoryStore: memory not found for tenant: <id>`——接頭辞だけが違う）。fixture が新しく例外を投げる変更は破壊的と数えないので、🟡 の節に載せた（そちらの「`InMemoryMemoryStore`」の項目と相互に指す）。2実装の一致は `packages/postgres/src/__tests__/event-target-parity.postgres.test.ts` が縛る。
 
 **DB マイグレーション**: 要らない。修正前に書かれた、別テナントの記憶を指す `memory_events` の行が在れば、指された記憶のテナントの後始末（`purge`・`eraseTenant`）を止めうる形である（項目49 と同じ。ADR 0456 の S2 では、止まることまでは測っていない）。**既存の行は消さない**（データの書き換えはオーナーの判断が要る）。調べる SQL は項目49 の ADR 0436 に在る（`memory_events` の `tenant_id` と、指された記憶の `tenant_id` の食い違いを数える、読み取りだけ）。
 
 ### 53. `@mnemora/openai` の `completeStructured` が、応答の `"__proto__"` の欄の中身を継承された値として読まなくなり、それで通っていた応答が例外になるようになった
 
-[ADR 0468](./decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)（[PR #1576](https://github.com/takecchi/mnemora/pull/1576)。クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0434](./decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)・[PR #1574](https://github.com/takecchi/mnemora/pull/1574)（testkit の InMemory が別テナントを指すイベントを Postgres と同じく断る直し。この項目を書いた時点では未マージ）と同じ「同じ port の緩いほうの実装を、もう一方に揃える」直し）。
+[ADR 0468](./decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)（[PR #1576](https://github.com/takecchi/mnemora/pull/1576)。クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0434](./decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)・[ADR 0466](./decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md)（testkit の InMemory が別テナントを指すイベントを Postgres と同じく断る直し）と同じ「同じ port の緩いほうの実装を、もう一方に揃える」直し）。
 
 ⚠ **未リリース**。**番号は 53 である**——項目52 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
@@ -2550,6 +2550,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   振る舞いが変わるもの: Seeded\*・Recording\* は `opts`（AbortOptions）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
   触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）と conformance suite。
   ⚠ **これらを 🔴 ではなくここに置いたのは、「公開の fixture が新しく例外を投げる変更は破壊的と数えない」というオーナーの回答（ask_human `3f3411c5`）の延長として読んだ判断で、覆す余地がある**（回答が直接名指したのは `@mnemora/testkit/fixtures` の InMemory 一式で、provider の fake・カセットまで含むかは確かめていない。[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: 書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶（実在しない id も同じ）のとき、`memory not found for tenant` で断る**（ADR 0466。[ADR 0456](./decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の H4 の InMemory 版。🔴 の項目52 と相互に指す）。
+  対象の口は `@mnemora/postgres` の H4 と同じ集合: `updateStatusWithEvent`・`supersedeWithNewMemories?`（`supersede[i].event` と `buildCreatedEvent`）・`purgeMemory?`・`markContestedPair?`・`resolveContestedPair?`・`resolveOrphanedContested?`・`markContestedGroup?`・`resolveContestedGroup?`・`createMemoriesWithOutboxAndEvents?`。
+  以前は、別テナントの記憶を指すイベントが `ctx` のテナントの行として積まれた。いまは書く前に断り、何も書かない（status の更新も news も先に積んだイベントも）。`null` のイベント、今更新・作成した行や同じ呼び出しの別のメンバーを指すイベント、CAS に弾かれる対象や状態が変わらないメンバーのイベント（積まれない）は、`@mnemora/postgres` と同じく検査しない。
+  例外は素の `Error`（`kind`・`code` は無い）で、message は `InMemoryMemoryStore: memory not found for tenant: <id>`。公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない（`MemoryStore` を自前実装して suite に当てている利用者に、新しい約束は課さない）。自前のテストで `InMemoryMemoryStore` に別テナントの id を指すイベントを渡していた人だけが落ちる。
 
 ### この節に載せなかったもの（理由つき）
 
