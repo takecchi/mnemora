@@ -462,6 +462,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **直した振る舞い**: Seeded\*・Recording\* は `opts`（`AbortOptions`）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する（失敗は memo に残さない）。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
   - **`recall()`**: 型付き配列のクエリ埋め込みが、ingest（embed ジョブ）と同じく通る（以前は `embedding_provider_unavailable`）。
   - 触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）、conformance suite。
+- **`runtime.reextract`: 置き換えた側（`supersededById`）が `active` でない行になり、循環・active 0件ができる穴を直した。あわせて `Runtime.observe` の TSDoc 2か所を実装に合わせた。**（穴探し30巡目、[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md)。`@mnemora/core` の `runtime.ts` だけの変更。store・migration・公開の型は変えていない）
+  - **穴**: 抽出の冪等キーは status を問わないので、候補が同じ Observation・同じ版の `superseded`／`archived` な既存行にぶつかると、store がその行を返す。以前は候補列の先頭を置き換えた側にしたため、`reextract` の出力が X → Y → X と往復すると Y と X が互いを置き換えて active が0件になった（Postgres・testkit とも、口あり・口なしの両経路）。先頭が archived な行にぶつかると、別の active な記憶がその archived な行に置き換えられた。
+  - **いまの振る舞い**: 置き換えた側は、候補列のうち非 active の既存行にぶつからない先頭。全候補がぶつかるときは何も supersede しない（`supersededMemoryIds: []`。ぶつかった行は `skipped` の `status_not_active` に載る）。**返り値が変わる入力は2つだけ**: (1) 全部の候補がぶつかる入力（例: 子 `[X, Z]` で X が archived、出力 `[X]`）は `supersededMemoryIds` が `[Z]` から `[]` になり、Z は active のまま残る。(2) 先頭の候補だけがぶつかる入力（出力 `[X, W]`）は `supersededById` が X から後ろの新しい W に変わる。例外は増えていない。
+  - **文書だけの直し**: `Runtime.observe` の TSDoc が「abort した sync の observe の extract ジョブは claim もされていないまま残る」と書いていたのを、observe が claim したまま残る（`leaseMs` の内側の `tick` は拾わない）に直した（ADR 0407 以降の振る舞い）。
+  - **冪等な再送の戻り値**: `subjectCandidates`・`claimKey` を渡した再送にも、`rejectedSubjectIds: []`・`claimKeyFailure: null`・`contestedDetection: []` が付くようにした（以前は欄が無く、TSDoc の「渡したら常に」と食い違っていた）。欄が増えるだけで、型・書き込みは変えていない。
+  - **直していない点**: `reextract` の LLM を待つ間に記憶が contested になっても、新しい版は active で書かれる（ADR 0406 の負債、実測した）。ほか5件は ADR 0454 の負債の表。
 
 - **`@mnemora/postgres`: `observe` の抽出で、候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーが消えなくなった。**接続が切れたときなどに、呼び出し側へ届くのが `Failed query: rollback to savepoint …` や 25P02 だったのを、元のエラー（22021 など）にした。巻き戻しの失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。新しい例外の型は作っていない。トランザクションの状態が分からないので、続けず、落とした候補（`dropped`）にも積まない。巻き戻しが成功する悪い候補は従来どおり落として他を書く。上流（drizzle-orm）の不具合で、ここで包んで直した（上流への報告はしていない）。（[ADR 0451](./docs/decisions/0451-savepoint-rollback-failure-keeps-original-error.md)、[ADR 0444](./docs/decisions/0444-pool-begin-release-rollback-error-preserved.md) の続き）
 
