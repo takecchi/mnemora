@@ -11,7 +11,10 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
-import { PostgresTrigramLexicalStore } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX,
+} from "../trigram-lexical-store.js";
 import {
   closeTestClient,
   getTestClient,
@@ -57,10 +60,20 @@ async function setup(kind: StoreKind) {
   const { db } = await getTestClient();
   const memoryStore = new PostgresMemoryStore(db);
   const vectorStore = new PostgresVectorStore(db);
-  const lexicalStore =
-    kind === "tsvector"
-      ? new PostgresLexicalStore(db)
-      : await PostgresTrigramLexicalStore.create(db);
+  let lexicalStore: PostgresLexicalStore | PostgresTrigramLexicalStore;
+  if (kind === "tsvector") {
+    lexicalStore = new PostgresLexicalStore(db);
+  } else {
+    try {
+      lexicalStore = await PostgresTrigramLexicalStore.create(db);
+    } catch (error) {
+      // ADR 0103: この環境（SQL_ASCII の脚など）では pg_trgm を使えない。skip ではなく、使えないことを主張する。
+      expect(String((error as Error).message)).toContain(
+        TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX,
+      );
+      return null;
+    }
+  }
   const runtime = createRuntime({
     memoryStore,
     vectorStore,
@@ -123,7 +136,9 @@ describe.each<StoreKind>(["tsvector", "trigram"])(
     };
 
     it("同じ記憶は1件にまとまり、retrievedVia と score の欄が出どころに合う", async () => {
-      const { runtime, a, b, c } = await setup(kind);
+      const s = await setup(kind);
+      if (s === null) return;
+      const { runtime, a, b, c } = s;
       const result = await runtime.recall(ctx, QUERY);
       const ids = result.memories.map((m) => m.memoryId);
       expect(new Set(ids).size).toBe(ids.length);
@@ -150,7 +165,9 @@ describe.each<StoreKind>(["tsvector", "trigram"])(
     });
 
     it("explain.stages の candidate_generation は channel ごとに1つ（ann、lexical の順）", async () => {
-      const { runtime } = await setup(kind);
+      const s = await setup(kind);
+      if (s === null) return;
+      const { runtime } = s;
       const result = await runtime.recall(ctx, QUERY);
       const generation = result.explain.stages.filter((s) => s.stage === "candidate_generation");
       expect(
@@ -160,7 +177,9 @@ describe.each<StoreKind>(["tsvector", "trigram"])(
     });
 
     it("affinity は similarity と lexicalMatch の大きいほう（total = affinity × 他の項）", async () => {
-      const { runtime, a } = await setup(kind);
+      const s = await setup(kind);
+      if (s === null) return;
+      const { runtime, a } = s;
       const result = await runtime.recall(ctx, QUERY);
       const both = byId(result.memories).get(a.id)!;
       const affinity = Math.max(measured(both).similarity!, measured(both).lexicalMatch!);
@@ -173,7 +192,9 @@ describe.each<StoreKind>(["tsvector", "trigram"])(
     });
 
     it("同じ query を繰り返すと、順序まで同じ（同点の並びが揺れない）", async () => {
-      const { runtime } = await setup(kind);
+      const s = await setup(kind);
+      if (s === null) return;
+      const { runtime } = s;
       const first = (await runtime.recall(ctx, QUERY)).memories.map((m) => m.memoryId);
       for (let i = 0; i < 4; i += 1) {
         expect((await runtime.recall(ctx, QUERY)).memories.map((m) => m.memoryId)).toEqual(first);
@@ -181,7 +202,9 @@ describe.each<StoreKind>(["tsvector", "trigram"])(
     });
 
     it("limit を絞っても、重複せず、lexical_truncated が出る（語彙チャンネルが窓を埋めた）", async () => {
-      const { runtime } = await setup(kind);
+      const s = await setup(kind);
+      if (s === null) return;
+      const { runtime } = s;
       const result = await runtime.recall(ctx, { ...QUERY, limit: 1, overFetchFactor: 1 });
       const ids = result.memories.map((m) => m.memoryId);
       expect(ids).toHaveLength(1);
@@ -189,7 +212,9 @@ describe.each<StoreKind>(["tsvector", "trigram"])(
     });
 
     it("陽性対照: channels: ['ann']（既定）では、語彙だけが当てる C は入らず、lexicalMatch も付かない", async () => {
-      const { runtime, a, c } = await setup(kind);
+      const s = await setup(kind);
+      if (s === null) return;
+      const { runtime, a, c } = s;
       const result = await runtime.recall(ctx, { ...QUERY, channels: ["ann"] });
       const ids = result.memories.map((m) => m.memoryId);
       expect(ids).toContain(a.id);
