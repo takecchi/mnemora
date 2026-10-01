@@ -475,6 +475,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0461](./0461-v1-2-0-release-prep-inspection.md) | 穴探し34巡目 — v1.2.0 を出すための準備の点検（更新経路の fixture・CHANGELOG・migration の順序・migration-v1 の 🔴） | 採用 (2026-10) |
 | [0463](./0463-migration-v1-red-items-checked-against-code.md) | 穴探し35巡目 — `docs/migration-v1.md` の 🔴（v1.1.0 → 次の版）の各項目を、現物の実装と歯に突き合わせた記録 | 採用 (2026-10) |
 | [0464](./0464-register-embedding-space-absorbs-migration-index-race.md) | `registerEmbeddingSpace` の索引作りが migration（0022・0027）と重なって `23505` で落ちるのを、1回の打ち直しで吸収する（穴探し36巡目、ADR 0460 の D1） | 採用 (2026-10) |
+| [0465](./0465-gate-red-tooth-sees-db-test-file-not-vitest-summary.md) | 門が赤くなる歯は、「DB テストが本当に走って落ちた」を vitest の集計の行ではなく、落ちた DB テストのファイルの名前で見る | 採用 (2026-10) |
 | [0466](./0466-inmemory-event-target-belongs-to-ctx-tenant.md) | `InMemoryMemoryStore` も、`NewMemoryEvent.memoryId` が `ctx` のテナントの記憶でなければ書かずに断る（ADR 0456 の H4 の InMemory 版） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
