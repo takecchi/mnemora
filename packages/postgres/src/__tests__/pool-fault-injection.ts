@@ -47,3 +47,44 @@ export function killConnectionBeforeStatement(options: {
     (Client.prototype as unknown as { query: unknown }).query = original;
   };
 }
+
+/**
+ * 「ある文を、サーバーへ送らずに reject させる」ための注入（ADR 0451）。`Client.prototype.query` を差し替え、
+ * `applicationName` が一致する接続が `matches` に当たる文を投げようとしたら、その文は送らずに `error` で
+ * reject する（接続は生きたまま。トランザクションの中なら、サーバー側の状態は変わらない）。
+ * 「savepoint の `rollback to savepoint` だけが失敗し、接続もトランザクションも生きている」形を作るのに使う。
+ *
+ * 戻り値の関数で元に戻す（`finally` で必ず呼ぶこと）。promise 形の `query` だけを扱う。
+ */
+export function rejectStatement(options: {
+  applicationName: string;
+  matches: (text: string) => boolean;
+  error: Error;
+  /** 何回まで reject するか。既定は無制限。 */
+  times?: number;
+}): () => void {
+  const original = Client.prototype.query;
+  let remaining = options.times ?? Number.POSITIVE_INFINITY;
+  (Client.prototype as unknown as { query: unknown }).query = function (
+    this: Client & { connectionParameters?: { application_name?: string } },
+    ...args: unknown[]
+  ) {
+    const first = args[0];
+    const text = typeof first === "string" ? first : (first as { text?: string } | undefined)?.text;
+    const promiseForm = typeof args[args.length - 1] !== "function";
+    if (
+      remaining > 0 &&
+      promiseForm &&
+      typeof text === "string" &&
+      this.connectionParameters?.application_name === options.applicationName &&
+      options.matches(text)
+    ) {
+      remaining -= 1;
+      return Promise.reject(options.error);
+    }
+    return (original as (...a: unknown[]) => unknown).apply(this, args);
+  };
+  return () => {
+    (Client.prototype as unknown as { query: unknown }).query = original;
+  };
+}
