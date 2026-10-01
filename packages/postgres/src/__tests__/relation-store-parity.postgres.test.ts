@@ -103,14 +103,14 @@ describe.each(kits)("RelationStore の入力と冪等（ADR 0488）: %s", (_name
 });
 
 describe.each(kits)(
-  "listRelated の kind が undefined 以外の偽の値（今の割れ。ADR 0488 の材料）: %s",
-  (name, build) => {
+  "listRelated・listRelatedMany の kind が偽の値（''・null・0）のときは、絞り込まずに全件を返す（ADR 0488）: %s",
+  (_name, build) => {
     it.each(["", null, 0])("kind=%j", async (kind) => {
       const kit = await build();
       const a = await memory(kit, "a");
       const b = await memory(kit, "b");
       await kit.relationStore.link(ctx, "contradicts", a, b);
-      const expected = name === "postgres" ? 1 : 0;
+      const expected = 1; // 絞り込むのは kind が undefined 以外の「正しい」値のときだけ（陽性対照は下）。
       expect(await kit.relationStore.listRelated(ctx, a, kind as never)).toHaveLength(expected);
       expect((await kit.relationStore.listRelatedMany!(ctx, [a], kind as never))[0]).toHaveLength(
         expected,
@@ -118,3 +118,14 @@ describe.each(kits)(
     });
   },
 );
+
+describe.each(kits)("正しい kind では絞り込む（陽性対照。ADR 0488）: %s", (_name, build) => {
+  it("contradicts は一致する行を返し、範囲外の文字列は 0 件", async () => {
+    const kit = await build();
+    const a = await memory(kit, "a");
+    const b = await memory(kit, "b");
+    await kit.relationStore.link(ctx, "contradicts", a, b);
+    expect(await kit.relationStore.listRelated(ctx, a, "contradicts")).toHaveLength(1);
+    expect(await kit.relationStore.listRelated(ctx, a, "bogus" as never)).toHaveLength(0);
+  });
+});

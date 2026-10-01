@@ -557,3 +557,17 @@ describe("FakeRelationStore.link / listRelated の入力（ADR 0488。InMemory�
     expect(second[0]!.createdAt.getTime()).toBe(original);
   });
 });
+
+describe("FakeRelationStore.listRelated の kind が偽の値のとき、絞り込まずに全件を返す（ADR 0488。Postgres と同じ）", () => {
+  it.each(["", null, 0])("kind=%j", async (kind) => {
+    const stores = createFakeRuntimeStores();
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ contentHash: "rel-a" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ contentHash: "rel-b" }));
+    await stores.relationStore.link(ctx, "contradicts", a.id, b.id);
+    expect(
+      await stores.relationStore.listRelated(ctx, a.id, kind as unknown as RelationKind),
+    ).toHaveLength(1);
+    expect(await stores.relationStore.listRelated(ctx, a.id, "bogus" as never)).toHaveLength(0);
+    expect(await stores.relationStore.listRelated(ctx, a.id, "contradicts")).toHaveLength(1);
+  });
+});
