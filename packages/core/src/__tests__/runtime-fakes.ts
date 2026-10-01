@@ -174,7 +174,8 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
   return {
     id: nextId("evt"),
     tenantId: ctx.tenantId,
-    memoryId: event.memoryId,
+    // ADR 0469: uuid の列は小文字の正規形で読み戻る（`@mnemora/postgres`）。大文字で渡された `memoryId` も小文字にそろえて積む。
+    memoryId: event.memoryId === null ? null : event.memoryId.toLowerCase(),
     kind: event.kind,
     at: event.at ?? new Date(),
     actor: event.actor,
@@ -524,6 +525,38 @@ export class FakeMemoryStore implements MemoryStore {
     if (!memory || memory.tenantId !== ctx.tenantId) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
+  }
+
+  /**
+   * ADR 0469（ADR 0456 の H4 の Fake 版）: 呼び出し側が渡した `NewMemoryEvent.memoryId` の記憶が `ctx` のテナントに在ることを、
+   * イベントを積む前に確かめる。実在しない・別テナントは区別せず `memory not found for tenant`
+   * （`PostgresMemoryStore.assertEventTargetInTenant`・testkit の `InMemoryMemoryStore` と同じ判定・同じ message の形）。
+   * `null`・`undefined`（記憶を指さないイベント）は確かめない。**空文字は参照として扱い、断る**（Postgres の uuid の形でない id と同じ）。
+   * `knownInTenant` は、この呼び出しが今まさに更新・作成した行の id で、それを指すイベントは問い合わせない。
+   * 大文字小文字は区別しない（`@mnemora/postgres` は uuid を小文字にそろえて比べる。この Fake の id は小文字の `mem-N`）。
+   */
+  private assertEventTargetOwn(
+    ctx: Ctx,
+    memoryId: MemoryId | null | undefined,
+    knownInTenant: readonly MemoryId[] = [],
+  ): void {
+    if (memoryId === null || memoryId === undefined) return;
+    const id = memoryId.toLowerCase();
+    if (knownInTenant.some((known) => known.toLowerCase() === id)) return;
+    const memory = this.backing.memories.get(id);
+    if (!memory || memory.tenantId !== ctx.tenantId) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${memoryId}`);
+    }
+  }
+
+  /** イベントを組み立てる前に {@link assertEventTargetOwn} を通す（イベントを先に組み立てる口の合流点）。 */
+  private buildOwnedEvent(
+    ctx: Ctx,
+    event: NewMemoryEvent,
+    knownInTenant: readonly MemoryId[],
+  ): MemoryEvent {
+    this.assertEventTargetOwn(ctx, event.memoryId, knownInTenant);
+    return buildStoredEvent(ctx, event);
   }
 
   private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
@@ -1068,7 +1101,7 @@ export class FakeMemoryStore implements MemoryStore {
     // 9回目の棚卸し: イベントを先に組み立てる（検査もここで走る）。以前は状態を書き換えた後に組み立てていたので、
     // イベントが書けない（Invalid Date の `at` など）と、状態だけが書き換わったまま投げていた——Postgres は
     // 1トランザクションで巻き戻り、fixture は状態を書き換える前に検査するので、どちらもそうはならない。
-    const storedEvent = buildStoredEvent(ctx, event);
+    const storedEvent = this.buildOwnedEvent(ctx, event, [id]);
     memory.status = status;
     if (opts.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -1125,6 +1158,17 @@ export class FakeMemoryStore implements MemoryStore {
       // ——以前は news を作り、先の対象を superseded にした後で投げていた。`meta.supersededById` は作った記憶の
       // id で埋めるので、ここでは組み立てずに検査だけを走らせる（`assertBuildableFakeEvent`）。
       assertBuildableFakeEvent(target.event);
+    }
+    // ADR 0469: CAS を通ってイベントを書く対象だけ、そのイベントが指す記憶が `ctx` のテナントの行かを、news を作る前に確かめる
+    // （弾かれる対象はイベントを書かないので確かめない。`PostgresMemoryStore`・`InMemoryMemoryStore` と同じ）。
+    const willSupersede = new Set<MemoryId>();
+    for (const target of supersede) {
+      const status = willSupersede.has(target.id)
+        ? "superseded"
+        : this.backing.memories.get(target.id)!.status;
+      if (target.expectedStatus !== undefined && status !== target.expectedStatus) continue;
+      this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
+      willSupersede.add(target.id);
     }
     // ⚠ Issue #768: `InMemoryMemoryStore.supersedeWithNewMemories` は news 側にも
     // ADR 0140 の制約を課すが、この Fake は意図して課さない（`createMemoryIdempotent`
@@ -1962,7 +2006,7 @@ export class FakeMemoryStore implements MemoryStore {
     }
     // イベントを先に組み立てる（検査もここで走る）。書けないイベントなら、状態を書き換える前に投げる——
     // `updateStatusWithEvent`（#1368）と同じ形。Postgres は1トランザクションで巻き戻り、fixture は書き換える前に検査する。
-    const storedEvent = buildStoredEvent(ctx, event);
+    const storedEvent = this.buildOwnedEvent(ctx, event, [id]);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.tags = [];
@@ -2052,8 +2096,8 @@ export class FakeMemoryStore implements MemoryStore {
 
     // 3. イベントを2件とも先に組み立てる（検査もここで走る）。書けないイベントなら、どちらの状態も書き換える前に
     // 投げる——`updateStatusWithEvent`（#1368）と同じ形。
-    const firstEvent = buildStoredEvent(ctx, first.event);
-    const secondEvent = buildStoredEvent(ctx, second.event);
+    const firstEvent = this.buildOwnedEvent(ctx, first.event, [first.id, second.id]);
+    const secondEvent = this.buildOwnedEvent(ctx, second.event, [first.id, second.id]);
 
     // 4. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
     firstMemory.status = "contested";
@@ -2122,8 +2166,8 @@ export class FakeMemoryStore implements MemoryStore {
 
     // 3. イベントを2件とも先に組み立てる（検査もここで走る）。書けないイベントなら、どちらの状態も書き換える前に
     // 投げる——`updateStatusWithEvent`（#1368）と同じ形。
-    const firstEvent = buildStoredEvent(ctx, first.event);
-    const secondEvent = buildStoredEvent(ctx, second.event);
+    const firstEvent = this.buildOwnedEvent(ctx, first.event, [first.id, second.id]);
+    const secondEvent = this.buildOwnedEvent(ctx, second.event, [first.id, second.id]);
 
     // 4. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
     firstMemory.status = first.status;
@@ -2189,7 +2233,7 @@ export class FakeMemoryStore implements MemoryStore {
     // 変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
     const events = members
       .filter((_, i) => !isUnchangedGroupMember(memories[i]!))
-      .map((m) => buildStoredEvent(ctx, m.event));
+      .map((m) => this.buildOwnedEvent(ctx, m.event, ids));
 
     // 4. ここから先は全部成功する。
     for (const memory of memories) {
@@ -2330,7 +2374,7 @@ export class FakeMemoryStore implements MemoryStore {
       this.assertOwnMemoryRef(ctx, m.supersededById);
     }
 
-    const events = members.map((m) => buildStoredEvent(ctx, m.event));
+    const events = members.map((m) => this.buildOwnedEvent(ctx, m.event, ids));
 
     for (let i = 0; i < members.length; i++) {
       const m = members[i]!;
@@ -2378,7 +2422,7 @@ export class FakeMemoryStore implements MemoryStore {
 
     // イベントを先に組み立てる（検査もここで走る）。書けないイベントなら、状態を書き換える前に投げる——
     // `updateStatusWithEvent`（#1368）と同じ形。
-    const storedEvent = buildStoredEvent(ctx, survivor.event);
+    const storedEvent = this.buildOwnedEvent(ctx, survivor.event, [survivor.id]);
     memory.status = "active";
     memory.contestedWithId = null;
     memory.updatedAt = new Date();
