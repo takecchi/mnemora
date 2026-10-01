@@ -497,6 +497,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0483](./0483-token-counter-broken-values.md) | 穴探し54巡目 — 差し替えた `TokenCounter` が約束を破る値を返すと、recall はトークン予算を黙って外す。今の振る舞いを文書に書き、歯で縛る | 採用 (2026-10) |
 | [0484](./0484-recall-channel-merge-on-real-postgres.md) | 穴探し55巡目 — `recall` の `channels`（ANN・lexical）の候補の合流を、実 Postgres の2つの語彙 store で ADR 0084 の表に照らして縛る（ずれは見つからなかった） | 採用 (2026-10) |
 | [0485](./0485-find-correction-candidates-exclude-ids.md) | 穴探し56巡目 — 訂正の候補を探す `findCorrectionCandidates`。`excludeMemoryIds` は大文字の uuid を除外せず、反復できない値では recall の記録を書いた後に落ちていた | 採用 (2026-10) |
+| [0487](./0487-usage-counter-label.md) | `usage.counter` の印は連結の計測の印であり、段4の予算の判定に使った印とは食い違いうる。今の振る舞いを文書に書く | 採用 (2026-10) |
 | [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（ずれは見つからなかった） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
