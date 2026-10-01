@@ -2307,6 +2307,11 @@ export interface RecallAssociationQuery {
    * `limit:40 / anchorCount:3` → 3。
    * すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
    *
+   * **⚠ 計算量は O(`anchorCount` × `limit`)。**アンカー 1 つごとに `kPrime`（= `limit × overFetchFactor`）件まで
+   * ANN 検索で引く（`overFetchFactor` は定数）ので、引く件数の合計は最大でアンカー数 × `kPrime`、並べ替えも同じ件数に掛かる。
+   * `anchorCount` と `limit` を両方上げると積で増える。アンカーごとの件数を席に要る分まで絞ることは、
+   * 結果（`memories` の順序・score と `omitted` の件数）が変わるので、しなかった（docs/recall.md §9.2、ADR 0443 決定3）。
+   *
    * **⚠ 既定の 3 は固定で、テナントの規模に追随しない**（[Issue #377](https://github.com/takecchi/mnemora/issues/377)。
    * 今の振る舞いを書くだけで、既定値は変えていない）。記憶が増えるほど、連想の起点になれる候補の
    * 割合は下がる。【実測】`examples/chat` の連想 probe 12件を1万行の合成テナントに入れると、

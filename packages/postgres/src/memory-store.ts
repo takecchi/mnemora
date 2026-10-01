@@ -1952,13 +1952,13 @@ export class PostgresMemoryStore implements MemoryStore {
       };
     });
 
-    const inputRows = sql.join(
-      rows.map(
-        (r) =>
-          sql`(${r.id}::uuid, ${toPgTimestamp(r.decayFloorAt)}::timestamptz, ${r.hasActivity}::boolean, ${r.activityBaseSeq}::bigint, ${r.activityFloorSeq}::bigint)`,
-      ),
-      sql`, `,
-    );
+    // ADR 0443: 行ごとに 5 個のバインドパラメータを `VALUES` に並べると、13107 件目で PG の上限（65535）を超える。
+    // 列ごとの配列 5 個（`unnest`）で渡し、件数によらずパラメータを 5 個に固定する。
+    const inputIds = sql.param(rows.map((r) => r.id));
+    const inputDecayFloorAts = sql.param(rows.map((r) => toPgTimestamp(r.decayFloorAt)));
+    const inputHasActivities = sql.param(rows.map((r) => r.hasActivity));
+    const inputActivityBaseSeqs = sql.param(rows.map((r) => r.activityBaseSeq));
+    const inputActivityFloorSeqs = sql.param(rows.map((r) => r.activityFloorSeq));
 
     // ADR 0394: `addOwnSubjectSeq` のときだけ、起点・床を行ごとに UPDATE の中で組む
     // （`input.activity_base_seq` は `T`、`input.activity_floor_seq` は床までの相対 offset）。
@@ -1976,7 +1976,10 @@ export class PostgresMemoryStore implements MemoryStore {
 
     const result = await exec.execute(sql`
       WITH input(id, decay_floor_at, has_activity, activity_base_seq, activity_floor_seq) AS (
-        VALUES ${inputRows}
+        SELECT * FROM unnest(
+          ${inputIds}::uuid[], ${inputDecayFloorAts}::timestamptz[], ${inputHasActivities}::boolean[],
+          ${inputActivityBaseSeqs}::bigint[], ${inputActivityFloorSeqs}::bigint[]
+        )
       ),
       updated AS (
         UPDATE memories m
