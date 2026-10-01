@@ -478,5 +478,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0464](./0464-register-embedding-space-absorbs-migration-index-race.md) | `registerEmbeddingSpace` の索引作りが migration（0022・0027）と重なって `23505` で落ちるのを、1回の打ち直しで吸収する（穴探し36巡目、ADR 0460 の D1） | 採用 (2026-10) |
 | [0465](./0465-gate-red-tooth-sees-db-test-file-not-vitest-summary.md) | 門が赤くなる歯は、「DB テストが本当に走って落ちた」を vitest の集計の行ではなく、落ちた DB テストのファイルの名前で見る | 採用 (2026-10) |
 | [0467](./0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) | 穴探し38巡目 — recall footprint の見積もり関数が非有限の入力で結論を出さない・フォールバック digest を書記素の境界で切る | 採用 (2026-10) |
+| [0470](./0470-footprint-digits-failure-description-grapheme.md) | 穴探し41巡目 — ADR 0467 の材料のうち、線の内側のものを直す（footprint の桁の数え・失敗の説明の書記素切り）。`estimateRecallFootprint` の NaN は材料のまま | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
