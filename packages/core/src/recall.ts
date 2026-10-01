@@ -1780,7 +1780,14 @@ export interface RecallQuery {
    * の経路）。
    */
   vector?: number[] | undefined;
-  /** クエリのタグ。スコアの `tagMatch` にだけ効く（絞り込みではない）。 */
+  /**
+   * クエリのタグ。スコアの `tagMatch` にだけ効く（絞り込みではない）。
+   *
+   * ⚠ ADR 0474（今の振る舞いを書くだけ）: `tagMatch = 1 + 0.1 × m` の `m` は、この配列の**要素ごと**に、
+   * 記憶の `tags` に完全一致で含まれるかを数える。**この配列の重複は重複のまま数える**
+   * （`["a", "a"]` は `a` を持つ記憶に 1.2、`["a"]` は 1.1）。記憶側の `tags` の重複は1回に数える。
+   * `"a"` と `"A"`、前後の空白は別の語（正規化しない）。
+   */
   tags?: string[] | undefined;
   /**
    * **母集合を段1（候補生成）で減らす、AND 等値の絞り込み**（Issue #152/#153、ADR 0312）。
@@ -2096,6 +2103,12 @@ export interface RecallQuery {
    * 常に恒真になる。**既定を on にしても、この PR の時点で挙動は1バイトも
    * 変わらない**（歯: `packages/core/src/__tests__/recall-validity.test.ts` の
    * 「両方 null の既存データでは絞りが恒真になる」)。
+   *
+   * ⚠ **上の「実質非破壊」は、この欄を足した PR の時点の話である。**今は `observe()` の
+   * `validFrom`/`validUntil` が `Memory` に非 `null` を書く（ADR 0164 決定4）ので、
+   * **`validUntil` を過ぎた記憶・`validFrom` が未来の記憶は、`validAt` を省略しても既定（`now`）で
+   * 落ちる**（`omitted` の `filtered(expired)`/`filtered(not_yet_valid)`）。両方 `null` の記憶
+   * だけが、今も「いつでも真」のまま恒真になる。
    *
    * **段1（ANN・語彙の両チャンネル）へ押し下げる**（`VectorFilter.validAt`/
    * `LexicalFilter.validAt`。`period`/ADR 0059 と同じ形——`includeFullyDecayed` とは

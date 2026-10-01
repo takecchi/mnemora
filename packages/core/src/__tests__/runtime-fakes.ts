@@ -2464,7 +2464,13 @@ export class FakeMemoryStore implements MemoryStore {
       if (m.contentHash === query.contentHash) return false;
       const otherFrom = m.validFrom ?? null;
       const otherUntil = m.validUntil ?? null;
+      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
+      // （ADR 0473。`packages/postgres` の実装と同じ）。
+      const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
+        from !== null && until !== null && from >= until;
       const overlaps =
+        !isEmptyInterval(targetFrom, targetUntil) &&
+        !isEmptyInterval(otherFrom, otherUntil) &&
         (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
         (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
       return overlaps;
@@ -2505,7 +2511,13 @@ export class FakeMemoryStore implements MemoryStore {
       if (m.contentHash === query.contentHash) return false;
       const otherFrom = m.validFrom ?? null;
       const otherUntil = m.validUntil ?? null;
+      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
+      // （ADR 0473。`packages/postgres` の実装と同じ）。
+      const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
+        from !== null && until !== null && from >= until;
       const overlaps =
+        !isEmptyInterval(targetFrom, targetUntil) &&
+        !isEmptyInterval(otherFrom, otherUntil) &&
         (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
         (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
       return overlaps;

@@ -657,11 +657,20 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 失敗の説明は、境目が NFD の結合文字・ZWJ の絵文字・国旗の途中に落ちると、その途中で切っていた。今はその書記素の手前で止める。`… (truncated by mnemora, original length N chars)` の書き方、`N`（UTF-16 の長さ）、上限を超えないことは変えていない。⚠ **これから書く値だけが変わる。保存済みの `last_error` は書き換えない**——同じ失敗でも、直す前に書いた値と後に書いた値で、切り口が数文字違うことがある。
   - 公開の型・既定値は変えていない。非破壊と数える。
 
+- **`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`: claim key の矛盾検出（`findActiveByClaimKey?`・`findContestedByClaimKey?`）が、空の区間（`validFrom === validUntil`）・逆転した区間（`validFrom > validUntil`）の記憶を、有効期間が重なるものとして返さなくなった**（[ADR 0473](./docs/decisions/0473-validity-empty-inverted-interval-no-overlap.md)）。どの時点でも真でない記憶が、同じ claim key の有効な記憶を `contested` にしていた。入力は拒まない。
+  - 問い合わせ側が空・逆転した区間のときは何も返らない。保存済みの行がそうなら、どの問い合わせにも返らない（3実装とも）。`markContestedGroup?` の組の判定は変えていない。
+  - 公開の型・既定値は変えていない。非破壊と数える（断る入力は増えない。`contested` になる組が減る）。
+
 - **`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`: `subjectId` が `constructor`・`toString`・`valueOf`・`hasOwnProperty`・`__proto__` のとき、subject 別の活動カウンタの読みが壊れて、活動時計の起点（`decayBaseSeq`）に関数や `[object Object]` の混ざった文字列が書かれる（実 Postgres では `observe` が落ちる）のを直した**（[ADR 0472](./docs/decisions/0472-subject-activity-seqs-object-prototype-keys.md)、穴探し43巡目）
   - 原因: `readSubjectActivitySeqs` が store の結果を `result[id] ?? 0` で引いていた。行が無い subject（adapter はキーを省略する）では、`Object.prototype` 側の関数が返って `?? 0` が効かず、`T + S_x` が文字列連結になった。`__proto__` は、プレーンな `{}` への代入が黙って捨てられ、行があっても値が効かなかった。Postgres・InMemory・core のテスト用 fake の `getSubjectActivitySeqs` も同じ形で `__proto__` の行を落としていた。
   - 今は、store の結果を自前のキーだけ・有限の数だけ読み、組み立てる側は prototype の無いオブジェクトにする。`plain` な subjectId の結果は変わらない。公開の型（`SubjectActivitySeqs`・`getSubjectActivitySeqs?` の戻り型）は変えていない。
   - 同じ形の `intersectAttributes`（consolidate・reflect の `attributes` の積集合）も直した: 全件が持つ `__proto__` の属性が統合先の記憶から消えていた。
   - 非破壊と数える（以前は意味のある値を返さなかった入力だけが変わる）。⚠ `attributes` のキーが `__proto__` だと zod の record が黙って落とす件（recall の絞り込みが効かなくなる向き）は直していない（新しく断るか仕様を変える側。ADR 0472 の負債1）。
+
+- **`@mnemora/core`: `RecallQuery.tags` の重複の数え方と、`normalizeClaimKeyPart` のべき等が破れる入力を文書にした。実装は変えていない**（[ADR 0474](./docs/decisions/0474-recall-query-tags-duplicates-claim-key-normalize-idempotent.md)、穴探し45巡目）
+  - `RecallQuery.tags`（TSDoc と `docs/recall.md` §7）: `tagMatch = 1 + 0.1 × m` の `m` は、クエリの `tags` の要素ごとに記憶の `tags` との完全一致を数える。**クエリ側の重複は重複のまま数える**（`["a","a"]` は 1.2、`["a"]` は 1.1）。記憶側の重複は 1 回。以前から同じ挙動を、書いて歯（`tag-match-query-duplicates.test.ts`）で縛った。
+  - `normalizeClaimKeyPart` の TSDoc は「べき等。常に成り立つ」と書いていたが、「大文字 + 結合文字」の一部の入力（ギリシャ文字の大文字 + U+0342、`H` + U+0331 など。総当たりで 253 組）では 1 回目と 2 回目の結果が変わる。TSDoc を「ほとんどの入力で」に改め、例外を `it.fails` の歯で記録した。**直していない**: 直すと保存済みの鍵と新しい鍵が食い違い、contested の検出を新しく逃す。直し案と選択肢は ADR 0474。
+  - 非破壊と数える（文書と歯だけ）。
 
 ---
 
