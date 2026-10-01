@@ -36,6 +36,7 @@ export interface RecordedEmbeddingProviderOptions {
  * `space` はカセットの記録元の空間になる。
  *
  * 投げるもの: 構築時に `expectedSpace` が記録元と食い違えば `Error`。`embed` で記録に無い入力が1つでもあれば `Error`。
+ * 記録されたベクトルの次元が空間と違う、または成分が有限の数でないときも `Error`（ADR 0452）。
  */
 export class RecordedEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
@@ -55,7 +56,8 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
         );
       }
     }
-    this.space = section.space;
+    // ADR 0452: カセットの `space` オブジェクトそのものは持たない（`provider.space` を書き換えても、カセットや他の provider に漏れない）。
+    this.space = Object.freeze({ ...section.space });
     this.entries = section.entries;
   }
 
@@ -77,7 +79,16 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
             "カセットが壊れている。",
         );
       }
-      return entry.vector;
+      // 本物の provider（`@mnemora/openai`・`@mnemora/local-embedding`）と同じく、成分が有限の数であることを確かめる（ADR 0452）。
+      const bad = entry.vector.findIndex((x) => typeof x !== "number" || !Number.isFinite(x));
+      if (bad !== -1) {
+        throw new Error(
+          "RecordedEmbeddingProvider: 記録されたベクトルに有限でない成分がある" +
+            `（${bad} 番目: ${String(entry.vector[bad])}）。カセットが壊れている。`,
+        );
+      }
+      // 記録の配列そのものは返さない（呼び出し側が書き換えても、次の再生に漏れない）。
+      return [...entry.vector];
     });
   }
 }

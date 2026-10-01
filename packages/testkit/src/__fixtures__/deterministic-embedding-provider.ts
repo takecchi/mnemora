@@ -14,7 +14,16 @@ export class DeterministicEmbeddingProvider implements EmbeddingProvider {
   constructor(
     space: EmbeddingSpaceId = { provider: "testkit", model: "deterministic", dimensions: 8 },
   ) {
-    this.space = space;
+    // ADR 0452: 本物の provider と同じく、`space.dimensions` は正の整数でなければならない（以前は `embed` の時点で
+    // `RangeError: Invalid array length` になるか、`0` なら空のベクトルを返していた）。構築時に断る。
+    if (!Number.isInteger(space.dimensions) || space.dimensions <= 0) {
+      throw new Error(
+        "DeterministicEmbeddingProvider: space.dimensions は正の整数でなければならない" +
+          `（${String(space.dimensions)}）。`,
+      );
+    }
+    // 渡されたオブジェクトそのものは持たない（構築後に呼び出し側が書き換えても、`space` は動かない）。
+    this.space = Object.freeze({ ...space });
   }
 
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
