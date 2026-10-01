@@ -514,7 +514,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       prefixed.length <= this.#maxBatchSize
         ? await pipeline.embed(prefixed)
         : await this.#embedInChunks(pipeline, prefixed, opts?.signal);
-    // 推論は最後まで走らせた（分割していても、上の doc コメントの追記のとおり）。
+    // 推論は走り終えた（分割したときは、abort 済みなら残りのチャンクを始めずに `#embedInChunks` が投げている——ADR 0445）。
     // ここで abort 済みなら、出来上がったベクトルを返さずに投げ直す。
     opts?.signal?.throwIfAborted();
 
