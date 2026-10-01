@@ -457,6 +457,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/testkit` の provider の fake・カセットを、interface の約束と本物の provider に揃えた。`recall()` は `Float32Array` などの数値の型付き配列のクエリ埋め込みも受ける。**（[ADR 0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）
+  - **落ちる入力が増える**: `SeededEmbeddingProvider` は種と delegate の空間が違えば構築で落ちる。`CassetteRecorder` は違う空間・モデルの2回目以降の記録で落ちる。`assertCassette` は、成分が有限でない・`dimensions` が正の整数でない・鍵が入力と一致しないカセットを読んだ時点で落とす。`RecordedEmbeddingProvider` は有限でない記録を返さずに落ちる。`RecordingEmbeddingProvider` は delegate の壊れた戻り（次元違い・有限でない成分）を記録せずに落ちる。`DeterministicEmbeddingProvider` は `dimensions` が正の整数でなければ構築で落ちる（以前は `embed` で落ちるか、`0` は空のベクトルを返した）。
+  - **直した振る舞い**: Seeded\*・Recording\* は `opts`（`AbortOptions`）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する（失敗は memo に残さない）。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
+  - **`recall()`**: 型付き配列のクエリ埋め込みが、ingest（embed ジョブ）と同じく通る（以前は `embedding_provider_unavailable`）。
+  - 触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）、conformance suite。
+
 - **`@mnemora/bullmq`: README・TSDoc の「コードからの読み」を実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測り、ずれていた所を直した。**（[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md)。コードの振る舞いは変えていない）
   - **文書に無かったこと（実測）**: Redis が落ちている間の `start()` は reject せず pending のまま／Redis が永続化なしで再起動すると scheduler が消え、tick は再開せず `onTickError` も鳴らない（永続化ありなら再開）／`everyMs` を変えて別の driver が `start()` すると共有の scheduler の間隔が置き換わる／ioredis のインスタンスを `connection` に渡すなら `maxRetriesPerRequest: null` が要り、無いと `createBullmqTickDriver` が同期的に throw する。
   - **裏づいたこと**: 1台の `stop()` が全プロセスの発火を止める（新を `start()` してから旧を `stop()` する rolling deploy でも。直していない。被害の形と回避は README・ADR 0449）／完了・失敗ジョブが Redis に残り続ける（数字を追記）／stalled で `onTickResult` の後に `onTickError` が2回届く（ADR 0440 の【未実測】が【実測】になった）。

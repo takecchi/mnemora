@@ -211,7 +211,9 @@ export class RecordingEmbeddingProvider implements EmbeddingProvider {
 
 function assertRecordableVector(vector: unknown, dimensions: number): asserts vector is number[] {
   if (!Array.isArray(vector)) {
-    throw new Error("RecordingEmbeddingProvider: 委譲先がベクトル（配列）を返さなかった。記録できない。");
+    throw new Error(
+      "RecordingEmbeddingProvider: 委譲先がベクトル（配列）を返さなかった。記録できない。",
+    );
   }
   if (vector.length !== dimensions) {
     throw new Error(
