@@ -457,6 +457,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/openai`: `completeStructured` が、応答の余分な `"__proto__"` の欄を、継承された値として zod に読ませていたのを直した。**`null` を省略へ戻す写しが `JSON.parse` の `"__proto__"` をプロトタイプの差し替えにしていた（抽出の候補の `subjectId` が `{"__proto__":{"subjectId":"…"}}` で埋まった）。`@mnemora/anthropic` と同じく無視する。（[ADR 0468](./docs/decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)）
+  - ⚠ **以前は通っていた応答が、新しく `ZodError` になる形がある**（必須の欄が `"__proto__"` の中にしか無い応答・利用者の `z.strictObject` に `"__proto__"` の欄がある応答。`@mnemora/anthropic` は以前から同じ応答を断っていた）。影響を受けるのは、strict モードを守らない OpenAI 互換サーバを `client` に差している利用者だけ。破壊的と数え、移行の手順は [docs/migration-v1.md](./docs/migration-v1.md) の項目53。
+
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶（実在しない id も同じ）のとき、書かずに `memory not found for tenant` で断るようになった**（[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md)。`@mnemora/postgres` の H4（ADR 0456）と同じ口・同じ判定・同じ message の形で、接頭辞だけが `InMemoryMemoryStore:`）。以前は別テナントを指すイベントが積まれた。公開の fixture が新しく例外を投げる変更は破壊的と数えない（オーナーの回答 `3f3411c5`）。conformance suite は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡 と項目52。
 
 - **`@mnemora/postgres`: `registerEmbeddingSpace` が、migration（0022・0027）が同じ名前の索引を作っている最中と重なって `23505` で落ちるのを直した。**（[ADR 0464](./docs/decisions/0464-register-embedding-space-absorbs-migration-index-race.md)）。零ノルムの部分索引と `memory_id` の索引の `CREATE INDEX IF NOT EXISTS` が、自分の索引名の `23505`（`pg_class_relname_nsp_index`）で落ちたら、同じ文を1回だけ打ち直す（別の名前・別の制約の `23505` は今までどおり投げる）。**落ちる入力が減るだけで、断る入力は増えない。**逆向き（`registerEmbeddingSpace` の索引作りの最中に `runMigrations` が `23505` で落ち、そのファイルが巻き戻る。呼び直せば通る）は直していない（ADR 0464 の負債）。
