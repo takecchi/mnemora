@@ -1,5 +1,5 @@
 // ===== dist/__fixtures__/cassette-recorder.d.ts =====
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import type { Cassette, EmbeddingCassetteEntry } from "./cassette.js";
 export declare class CassetteRecorder {
     private readonly embeddingEntries;
@@ -21,16 +21,19 @@ export declare class RecordingEmbeddingProvider implements EmbeddingProvider {
     private readonly delegate;
     private readonly recorder;
     readonly space: EmbeddingSpaceId;
+    private readonly pending;
     constructor(delegate: EmbeddingProvider, recorder: CassetteRecorder);
-    embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
+    embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 export declare class RecordingLLMProvider implements LLMProvider {
     private readonly delegate;
     private readonly recorder;
     private readonly model;
+    private readonly pendingComplete;
+    private readonly pendingStructured;
     constructor(delegate: LLMProvider, recorder: CassetteRecorder, model: string);
-    complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+    complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }
 
 // ===== dist/__fixtures__/cassette.d.ts =====
@@ -469,7 +472,7 @@ export declare class RecordedLLMProvider implements LLMProvider {
 }
 
 // ===== dist/__fixtures__/seeded-provider.d.ts =====
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import type { EmbeddingCassetteSection, LLMCassetteSection } from "./cassette.js";
 export interface SeedUsageCounts {
     seeded: number;
@@ -487,8 +490,8 @@ export declare class SeededLLMProvider implements LLMProvider {
     constructor(delegate: LLMProvider, options: SeededLLMProviderOptions);
     get usage(): SeedUsageCounts;
     private lookup;
-    complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+    complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }
 export interface SeededEmbeddingProviderOptions {
     seed: EmbeddingCassetteSection;
@@ -502,7 +505,7 @@ export declare class SeededEmbeddingProvider implements EmbeddingProvider {
     private realCalls;
     constructor(delegate: EmbeddingProvider, options: SeededEmbeddingProviderOptions);
     get usage(): SeedUsageCounts;
-    embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
+    embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 
 // ===== dist/embedding-provider-conformance.d.ts =====
