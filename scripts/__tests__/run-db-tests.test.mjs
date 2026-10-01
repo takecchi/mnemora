@@ -77,10 +77,17 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
     expect(output).toContain("DB テストを実行します");
     expect(output).toContain("DB テストが落ちました");
 
-    // DB テスト（`vitest run`）が本当に走って落ちたこと——門が自分の文言だけを出す形では通らない。
+    // DB テストが本当に走って、届かない接続先へ実際に繋ぎに行って落ちたこと——門が自分の文言だけを出す形では通らない。
+    // ⚠ vitest の集計の行（`Test Files … failed`）では見ない。`--bail=1` で打ち切る時機によって、集計の行は
+    // `Test Files   (296)` のように落ちた数を出さないことがある（main e4e27fd の CI で観測。ADR 0465）。
+    // 代わりに、落ちた DB テストのファイルの名前（`src/__tests__/….test.ts`）が出力に在ることを見る。
+    // 門は `test:db` を `stdio: "inherit"` で起動するので、子が落ちたテストを報告する行・スタックはここに届く。
+    // 門が自分で出すのはパッケージ名と `test:db` だけで、ファイルの名前は出さない。
+    // ⚠ `ECONNREFUSED 127.0.0.1:1` では見ない——門の接続先の告知（「版を取得できませんでした: connect ECONNREFUSED …」）が
+    // 同じ文字列を出すので、門が DB テストを起動しなくても通ってしまう（ADR 0465 の変異で確かめた）。
     // vitest は色の指定（CI の FORCE_COLOR など）で文字の間に ANSI の色の符号を挟むので、外してから見る。
     // eslint-disable-next-line no-control-regex
-    expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/Test Files\s+\d+ failed/);
+    expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/src\/__tests__\/[\w.-]+\.test\.ts/);
 
     // 未実行の告知と取り違えられないこと。
     expect(output).not.toContain("DB テストは実行していません");
