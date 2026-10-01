@@ -47,7 +47,9 @@ export interface LanguageMismatch {
 }
 
 const CJK = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/gu;
-const LATIN = /\p{Script=Latin}/gu;
+// ラテン文字の「文字」だけを数える。`Script=Latin` にはローマ数字（U+2160〜2188、Nl）や結合する小さな
+// ラテン文字（U+0363〜036F、Mn）のような文字でないものも入り、そのまま数えると割合が1を超える。
+const LATIN = /(?=\p{L})\p{Script=Latin}/gu;
 const LETTER = /\p{L}/gu;
 const URL_PATTERN = /https?:\/\/\S+/gi;
 // バッククォート・括弧の記号・パイプ・`&&`・`=>`・`--flag`・パス（`./x`・`/usr/bin`）。
