@@ -3708,6 +3708,13 @@ export interface Runtime {
    * 2. `input.discovery.candidates` から `memoryId === input.correctedId` を探す。
    *    見つからなければ、何も呼ばずに
    *    `{ kind: "not_a_candidate", correctedId: input.correctedId }` を返す。
+   *    ⚠ 完全一致が無くても、大文字小文字を無視してちょうど1件の候補に一致し、かつ store の `get` が両者を同じ記憶と
+   *    言えば（`@mnemora/postgres` は uuid を大文字小文字を区別せずに比べる）、その候補として扱う（ADR 0446。
+   *    `resolveContested` の `winnerId` と同じ形）。言わなければ今どおり `not_a_candidate`。
+   * 2.5. `input.resolution` が `supersede` なら、`winnerId` が `correctedId`・`correctingId` のどちらかであるかを、
+   *    **書き込む前に** `resolveContested` と同じ規則で検査する。どちらでもなければ `RangeError`（`resolveContested` が
+   *    投げるのと同じ型と文言）で、`markContested` は呼ばれず何も書かれない（ADR 0446。以前は `markContested` の
+   *    書き込みのあとに投げ、例外で終わったのに対だけが残っていた）。
    * 3. 見つかれば `markContested(ctx, input.correctedId, input.correctingId, {
    *    actor: input.actor, reason: input.reason })` を呼ぶ。
    * 4. `input.resolution` が `undefined` なら、ここで止まり
@@ -7137,21 +7144,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `Runtime.resolveContested` の実装（Issue #197、ADR 0150）。doc コメントは interface 側
-   * （`resolveContested` の JSDoc）にある——ここはアルゴリズムそのものだけ。`markContested`
-   * の実装と対称に書いてある（読み方も同じ順で追える）。
+   * `resolveContested` が `supersede` の `winnerId` を、渡された 2 つの id のどちらの側かに決める（`both_active` は
+   * `undefined`）。どちらの側でもなければ `RangeError`。`applyCorrection` が **書き込む前に** 同じ検査を通すために、
+   * `resolveContested` の中から切り出してある（ADR 0446）。
    */
-  async function resolveContested(
+  async function resolveWinnerSideId(
     ctx: Ctx,
     firstId: MemoryId,
     secondId: MemoryId,
     resolution: ContestedResolution,
-    opts?: ResolveContestedOptions,
-  ): Promise<ResolveContestedResult> {
-    if (firstId === secondId) {
-      throw new RangeError("Runtime.resolveContested: firstId and secondId must differ");
-    }
-    // 勝者がどちらの側か（渡された `firstId`/`secondId` のどちらか）。`both_active` では使わない。
+  ): Promise<MemoryId | undefined> {
     let winnerSideId: MemoryId | undefined;
     if (resolution.kind === "supersede") {
       if (resolution.winnerId === firstId || resolution.winnerId === secondId) {
@@ -7181,6 +7183,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     }
+
+    return winnerSideId;
+  }
+
+  /**
+   * `Runtime.resolveContested` の実装（Issue #197、ADR 0150）。doc コメントは interface 側
+   * （`resolveContested` の JSDoc）にある——ここはアルゴリズムそのものだけ。`markContested`
+   * の実装と対称に書いてある（読み方も同じ順で追える）。
+   */
+  async function resolveContested(
+    ctx: Ctx,
+    firstId: MemoryId,
+    secondId: MemoryId,
+    resolution: ContestedResolution,
+    opts?: ResolveContestedOptions,
+  ): Promise<ResolveContestedResult> {
+    if (firstId === secondId) {
+      throw new RangeError("Runtime.resolveContested: firstId and secondId must differ");
+    }
+    // 勝者がどちらの側か（渡された `firstId`/`secondId` のどちらか）。`both_active` では使わない。
+    const winnerSideId = await resolveWinnerSideId(ctx, firstId, secondId, resolution);
 
     // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`markContested` と同じ作法。
     // 分割代入したメソッドは `this` を失う）。
@@ -7751,9 +7774,36 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     // ⛔ 相手を選ばない: discovery.candidates[0] は一切見ない。ここでやっているのは
     // 「呼び出し側が指名した correctedId が候補一覧に居るかどうか」の照合だけである。
-    const candidate = input.discovery.candidates.find((c) => c.memoryId === correctedId);
+    let candidate = input.discovery.candidates.find((c) => c.memoryId === correctedId);
+    if (candidate === undefined) {
+      // ADR 0446: `correctedId` が候補の id と大文字小文字だけ違うときは、同じ記憶かを store に聞く（`resolveContested` の
+      // `winnerId` と同じ形。`@mnemora/postgres` は uuid を大文字小文字を区別せずに比べ、`markContested` は大文字の id を
+      // 受け付けるのに、ここだけ文字列の完全一致で `not_a_candidate` にしていた）。store が同じ記憶と言えば候補として扱い、
+      // 言わなければ今どおり `not_a_candidate`（大文字小文字を区別する store では今どおり）。大文字小文字を無視して
+      // 一致する候補が 2 件以上あるときは、どれと決められないので今どおり候補外。
+      const lower = correctedId.toLowerCase();
+      const sameSpelling = input.discovery.candidates.filter(
+        (c) => c.memoryId.toLowerCase() === lower,
+      );
+      if (sameSpelling.length === 1) {
+        const [given, listed] = await Promise.all([
+          deps.memoryStore.get(ctx, correctedId),
+          deps.memoryStore.get(ctx, sameSpelling[0]!.memoryId),
+        ]);
+        if (given !== null && listed !== null && given.id === listed.id) {
+          candidate = sameSpelling[0];
+        }
+      }
+    }
     if (candidate === undefined) {
       return { kind: "not_a_candidate", correctedId };
+    }
+
+    // ADR 0446: `supersede` の `winnerId` が 2 つの id のどちらでもなければ、`resolveContested` は `RangeError` を投げる。
+    // それを `markContested` が書いた**後**に投げると、例外で終わったのに対（`contested` の 2 件と `updated` の 2 件）だけが
+    // 残る。書き込む前に同じ検査を通す（例外の型と文言は変えない）。
+    if (input.resolution !== undefined) {
+      await resolveWinnerSideId(ctx, correctedId, input.correctingId, input.resolution);
     }
 
     const markResult = await markContested(ctx, correctedId, input.correctingId, {

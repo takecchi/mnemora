@@ -37,7 +37,8 @@ import type { Runtime } from "../runtime.js";
  * - **`applyCorrection` の候補の突き合わせ**——`apply-correction.ts` の実装・
  *   `Runtime.applyCorrection` の doc コメント（手順2）が `memoryId === correctedId` の
  *   完全一致で候補を探すと約束しているので、ここも実装と同じ完全一致で確かめる
- *   （下の `checkApplyCorrectionContract` 参照）。
+ *   （下の `checkApplyCorrectionContract` 参照）。ADR 0446 で足した例外が1つ: 完全一致が無く、大文字小文字を
+ *   無視してちょうど1件に一致する候補が在るときだけ、store が同じ記憶と言えば候補として扱う。
  */
 
 function normId(id: string): string {
@@ -674,7 +675,8 @@ type ApplyCorrectionReturn = Awaited<ReturnType<Runtime["applyCorrection"]>>;
  * `Runtime.applyCorrection` の doc コメントの手順1〜5）:
  * - `correctedId` 省略 ⟺ `kind === "awaiting_choice"`。
  * - `correctedId` が `discovery.candidates` に居ない ⟺ `kind === "not_a_candidate"`
- *   （突き合わせは実装と同じ `memoryId === correctedId` の完全一致。ファイル冒頭のコメント参照）。
+ *   （突き合わせは実装と同じ `memoryId === correctedId` の完全一致。ただし大文字小文字だけが違う候補が
+ *   ちょうど1件在るときは、store が同じ記憶と言えば候補として扱う——ADR 0446）。
  * - `kind` が `"contested"`/`"resolved"` のとき: `chosenRecallRank` は候補の `recallRank` と
  *   一致し、`correctingId` は入力と一致する（大文字小文字は無視）。
  * - `resolution` を渡さなければ `"contested"` で止まる。渡せば `"resolved"` まで進む。
@@ -693,13 +695,23 @@ export function checkApplyCorrectionContract(
     return p;
   }
 
-  const hit = input.discovery.candidates.find((c) => c.memoryId === corrected);
-  if (hit === undefined) {
+  const exact = input.discovery.candidates.find((c) => c.memoryId === corrected);
+  // ADR 0446: 完全一致する候補が無くても、大文字小文字を無視して**ちょうど1件**に一致するなら、store が同じ記憶と
+  // 言ったときだけ候補として扱う（`resolveContested` の `winnerId` と同じ形）。store の答えはここからは見えないので、
+  // その場合は `not_a_candidate` も `contested`/`resolved` も許す（後者のときは、その1件の `recallRank` を運ぶこと）。
+  const lowered = corrected.toLowerCase();
+  const sameSpelling = input.discovery.candidates.filter(
+    (c) => c.memoryId.toLowerCase() === lowered,
+  );
+  const hit = exact ?? (sameSpelling.length === 1 ? sameSpelling[0] : undefined);
+  if (exact === undefined && hit === undefined) {
     if (result.kind !== "not_a_candidate") {
       p.push(`applyCorrection: 候補に居ない correctedId で kind=${result.kind}`);
     }
     return p;
   }
+  if (hit === undefined) return p;
+  if (exact === undefined && result.kind === "not_a_candidate") return p;
   if (result.kind === "not_a_candidate") p.push("applyCorrection: 候補に居るのに not_a_candidate");
   if (
     (result.kind === "contested" || result.kind === "resolved") &&

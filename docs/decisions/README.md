@@ -457,6 +457,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0442](./0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md) | migration `0027` の deadlock・LLM が返す `subjectId` の注入・DDL のロック待ちを、文書に書く | 採用 (2026-10) |
 | [0443](./0443-aux-field-drop-bind-limit-association-fetch.md) | LLM の補助の欄が保存できないときはその欄だけを落とす・id と検索クエリの件数によるバインド上限の崖を無くす・連想枠のアンカーごとの取得件数は絞らない | 採用 (2026-10) |
 | [0445](./0445-local-embedding-chunk-abort-chat-drain-provider-docs.md) | local-embedding の分割推論でチャンクの合間に abort を見る・`chat` が embed の失敗を言う・provider の再試行と timeout の文書を足す | 採用 (2026-10) |
+| [0446](./0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md) | applyCorrection は勝者の検査を書き込みの前に通す・大文字小文字だけ違う correctedId を store に従って候補にする・buildCorrectionReason の winner を大文字小文字だけ違う id でも実際の勝者に合わせる | 採用 (2026-10) |
 | [0448](./0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) | migrate の CLI の Pool に `error` のリスナーを付ける・`migrationsDir` が読めない／空のときの扱い・セッション設定（`statement_timeout` など）が本体に効くことを文書に書く | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
