@@ -18,6 +18,12 @@ const DELIBERATELY_VIOLATING_TESTS: readonly string[] = [
   "T1: 契約を破った出力（usage.estimatedTokens が非整数）を検出する",
   'T4: "off" では欄そのものが無い（未検証と通過を潰さない）。値は素通りする',
   "T6: モードを渡さないとき、検証に落ちても recall() は投げない（既定は report）",
+  // ADR 0483: 約束を破る値を返す TokenCounter を差し、recall() の今の振る舞い（予算を外す・全件落とす・usage に素通し）を縛る歯。
+  "NaN を返す counter は、予算を黙って外して全件を返し、usage の検証で知らされる",
+  "負の数 を返す counter は、予算を黙って外して全件を返し、usage の検証で知らされる",
+  "Infinity を返す counter は、1件目から収まらず全件を落とす",
+  "counter の欄が無い: 値はそのまま usage.counter に出て、検証で知らされる（正しい値に直さない）",
+  "counter が範囲外の文字列: 値はそのまま usage.counter に出て、検証で知らされる（正しい値に直さない）",
 ];
 
 vi.mock("../runtime.js", async (importOriginal) => {
