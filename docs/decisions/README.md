@@ -494,6 +494,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0480](./0480-recall-record-createdat-invalid-date-fake-aliasing.md) | 穴探し51巡目 — 想起の記録の往復。`createRecall` の Invalid Date の `createdAt` を InMemory と Fake が受けていた。Fake の記録は呼び出し側と同じオブジェクトを共有していた | 採用 (2026-10) |
 | [0481](./0481-recall-output-validation-on-real-postgres.md) | 穴探し52巡目 — 実 Postgres のテストが一度も渡していない `RecallQuery` の欄を、`outputValidation: "throw"` で当てる（ずれは見つからなかった） | 採用 (2026-10) |
 | [0482](./0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) | 穴探し53巡目 — `observe()` の入力の種類ごとの扱い。`event.data` の「JSON で往復しない値」の表に歯が無く、関数・`Symbol`・`toJSON` の3行も載っていなかった | 採用 (2026-10) |
-| [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（草稿・作業中） | **草稿 (2026-10)** |
+| [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（ずれは見つからなかった） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
