@@ -1256,6 +1256,7 @@ interface TokenCounter {
   ⚠ **精度が上がっても `'heuristic'` のままである。**CJK 以外の非ラテン文字（キリル・タイ・
   アラビア文字）は依然として過小評価し、`cl100k_base` に対しては日本語を約12%過小評価する。
 - **⚠ 2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0483](./decisions/0483-token-counter-broken-values.md)）: 差し替えた実装の戻り値は実行時には検査されない。**`tokens` が `NaN`・負の数なら `recall()` は段4のトークン予算を黙って外して全件を返し、`Infinity` なら全件を落とし、`counter` の欄の欠落・範囲外はそのまま `usage.counter` に出る。落ちたことは `RecallResult.outputValidation`（既定 `"report"`）が知らせる。例外はそのまま `recall()` の失敗になる。
+- **⚠ 2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0487](./decisions/0487-usage-counter-label.md)）:** `usage.counter` の印は、返した digest を連結し目次帯の JSON を足した文字列を1回数えた値の `counter` で、段4の予算の判定（digest ごと）に使った印とは、テキストによって印を変える実装では食い違いうる。
 
 ### 5.10 Clock — Phase 1
 
