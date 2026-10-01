@@ -688,6 +688,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 載せると決めた名前が README に在り、ソースが読んでいることを縛る歯（`scripts/__tests__/example-chat-readme-flags-env.test.mjs`）を足した。`docs/` と README のコード片・散文の数値を型・定数と突き合わせた結果（ずれなし）は ADR 0478。
   - 非破壊と数える（文書と歯だけ）。
 
+- **`@mnemora/core`: `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値は検査も変換もされない、という今の振る舞いを TSDoc に書き、歯で縛った。実装は変えていない**（[ADR 0489](./docs/decisions/0489-embedding-input-hook-return-values.md)、穴探し58巡目）
+  - 空文字・NUL・孤立サロゲート・巨大な文字列、型の外の値（`undefined`・数・オブジェクト・`null`）も、そのまま `embed()` に渡る。落ちれば `embeddingStatus: 'failed'`、受け入れれば `'ready'`。`reembed()` の後の `tick` でフックはもう一度呼ばれる。静かな破損も、TSDoc の約束との食い違いも見つからなかった。
+  - 非破壊と数える（文書と歯だけ）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
