@@ -489,5 +489,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0475](./0475-eventstore-append-uuid-case.md) | `InMemoryEventStore.append`・`FakeEventStore.append` も、`event.memoryId` の大文字小文字を区別しない（ADR 0469 の残りを揃える） | 採用 (2026-10) |
 | [0477](./0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) | 穴探し48巡目 — `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` は検査されない。不正値で何が起きるかを実 Redis で測り、README と TSDoc に書く | 採用 (2026-10) |
 | [0479](./0479-tenant-settings-write-fake-alignment.md) | 穴探し50巡目 — `TenantSettingsStore` の書き込み口。core の `FakeTenantSettingsStore` だけが、他の2実装が拒む値を受けていたので揃える | 採用 (2026-10) |
+| [0481](./0481-recall-output-validation-on-real-postgres.md) | 穴探し52巡目 — 実 Postgres の `recall` の出力が自分の `RecallResultSchema` を満たすかを `outputValidation` で当てる（草稿・作業中） | **草稿 (2026-10)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
