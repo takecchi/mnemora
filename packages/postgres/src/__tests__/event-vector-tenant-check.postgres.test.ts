@@ -154,6 +154,20 @@ FROM ${table} e
 JOIN memories m ON m.id = e.memory_id
 WHERE e.tenant_id <> m.tenant_id`;
 
+// ADR 0475: `PostgresEventStore.append` は uuid を小文字にそろえて比べる（基準）。大文字の自テナントの記憶は通り、小文字で読み戻る。
+// 大文字の別テナントの記憶は、大文字でも断る。3実装（InMemory・Fake）はこれに揃える。
+describe("PostgresEventStore.append は event.memoryId の大文字小文字を区別しない（ADR 0475）", () => {
+  it("大文字の自テナントの記憶は通り（小文字で読み戻る）、大文字の別テナントは断る", async () => {
+    const { pool, eventStore, a, b } = await setup();
+    const upper = await eventStore.append(ctxA, newEvent(a.id.toUpperCase()));
+    expect(upper.memoryId).toBe(a.id);
+    await expect(eventStore.append(ctxA, newEvent(b.id.toUpperCase()))).rejects.toThrow(
+      /PostgresEventStore: memory not found for tenant/,
+    );
+    expect(await countRows(pool, "memory_events", TA)).toBe(1);
+  });
+});
+
 describe("ADR 0436 の検出 SQL（既に書かれた、テナントの食い違う行を見つける）", () => {
   it("食い違いが無ければ0行、生 SQL で1行仕込めば各表で1行を数える", async () => {
     const { pool, eventStore, vectorStore, a, b } = await setup();

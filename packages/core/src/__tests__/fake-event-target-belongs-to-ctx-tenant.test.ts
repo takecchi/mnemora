@@ -290,4 +290,35 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(result.conflicted).toHaveLength(1);
     expect(eventCount(b.id)).toBe(0);
   });
+
+  // ADR 0475（ADR 0469 の続き）: `FakeEventStore.append` も、`event.memoryId` の大文字小文字を区別しない
+  // （`PostgresEventStore.append` は uuid を小文字にそろえて通す）。断るときの message は渡された id のまま。
+  it("FakeEventStore.append: 大文字の自テナントの記憶は通り（小文字で積む）、大文字の別テナントは断る。null は検査しない", async () => {
+    const stores = createFakeRuntimeStores();
+    const a = await stores.memoryStore.createMemory(A, newMemory(A));
+    const b = await stores.memoryStore.createMemory(B, newMemory(B));
+    const base = {
+      tenantId: "ignored",
+      kind: "updated" as const,
+      actor: { type: "system" as const },
+      meta: {},
+    };
+    const lower = await stores.eventStore.append(A, { ...base, memoryId: a.id });
+    const upper = await stores.eventStore.append(A, { ...base, memoryId: a.id.toUpperCase() });
+    expect(lower.memoryId).toBe(a.id);
+    expect(upper.memoryId).toBe(a.id);
+    expect(stores.eventStore.events.some((e) => e.memoryId === a.id.toUpperCase())).toBe(false);
+    const total = stores.eventStore.events.length;
+    for (const target of [b.id, b.id.toUpperCase(), "NOT-A-MEMORY", ""]) {
+      const error = await stores.eventStore
+        .append(A, { ...base, memoryId: target })
+        .catch((e: unknown) => e as Error);
+      expect((error as Error).message).toBe(
+        `FakeEventStore: memory not found for tenant: ${target}`,
+      );
+    }
+    expect(stores.eventStore.events.length).toBe(total);
+    await stores.eventStore.append(A, { ...base, kind: "events_purged", memoryId: null });
+    expect(stores.eventStore.events.length).toBe(total + 1);
+  });
 });
