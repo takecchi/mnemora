@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres`: `observe` の抽出で、候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーが消えなくなった。**接続が切れたときなどに、呼び出し側へ届くのが `Failed query: rollback to savepoint …` や 25P02 だったのを、元のエラー（22021 など）にした。巻き戻しの失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。新しい例外の型は作っていない。トランザクションの状態が分からないので、続けず、落とした候補（`dropped`）にも積まない。巻き戻しが成功する悪い候補は従来どおり落として他を書く。上流（drizzle-orm）の不具合で、ここで包んで直した（上流への報告はしていない）。（[ADR 0451](./docs/decisions/0451-savepoint-rollback-failure-keeps-original-error.md)、[ADR 0444](./docs/decisions/0444-pool-begin-release-rollback-error-preserved.md) の続き）
+
 - **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えると、`RangeError` で終わるのに対（両側 `contested`）が残っていたのを、書き込む前に落とすようにした。大文字の `correctedId` は、store が同じ記憶と言えば候補として扱う。`buildCorrectionReason` の `winner` は、大文字小文字だけ違う `winnerId` でも実際の勝者を指す。**（[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）
   - **穴**: (1) `winnerId` がどちらの id でもないと、`markContested` が書いたあとに `resolveContested` が `RangeError` を投げ、対だけが残った。(2) `@mnemora/postgres` で候補の id を大文字にして `correctedId` に渡すと、`markContested` は受け付けるのに `not_a_candidate` になった。(3) 大文字の `winnerId` で訂正する側が勝っても、`buildCorrectionReason` は `winner=corrected` と書いた。
   - **いまの振る舞い**: (1) 例外の型と文言は同じで、何も書かれない。(2) 大文字小文字だけの違いは store に従う（大文字小文字を区別する store は今どおり `not_a_candidate`）。(3) これから書く `meta.note` だけが変わる（保存済みの `note` は書き換えない）。断る入力は増えていない。

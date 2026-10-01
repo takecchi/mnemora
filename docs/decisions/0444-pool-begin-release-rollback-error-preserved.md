@@ -110,3 +110,11 @@
   - **BG-3 の実測**（`pg_ctl stop`/`start`・`pg_terminate_backend`・`max: 1` の pool を借り切って）: README の表のとおり。起動の最中の `57P03` は、起動の直後に撃ち続けて確かめた。
   - **測っていないこと**（未測定）: 入れ子の `transaction` の `rollback to savepoint` の失敗。Postgres 17 以外・`pg` の別の版での注入の当たり方。
     `commit` が失敗したときの「実際にはコミットされていたか」。
+
+## 追記（2026-10-01、[ADR 0451](./0451-savepoint-rollback-failure-keeps-original-error.md)）: 入れ子の `transaction` を store は使っている
+
+⛔ **上の本文は書き換えていない。**当時の記録として残す。
+
+上の「引き受けた負債」の「`@mnemora/postgres` の store は入れ子の `transaction` を使っていないことを確かめていない【未確認】」と、「測っていないこと」の入れ子の `rollback to savepoint` の失敗は、
+穴探し24巡目で確かめた【現物・実測】。**使っている**——`createMemoriesWithOutboxAndEvents` の候補ごとの savepoint（`memory-store.ts`）の1か所だけ。この包みは `rollback to savepoint` に合致しないので、そこでは元のエラーが消えていた。
+`createMemoriesWithOutboxAndEvents` の側で、元のエラーを控えて判定し、元のエラーを投げるよう直した（ADR 0451。上流の不具合で、ここで包んで直した）。この包み（`client.ts`）は変えていない。

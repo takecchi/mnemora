@@ -460,5 +460,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0445](./0445-local-embedding-chunk-abort-chat-drain-provider-docs.md) | local-embedding の分割推論でチャンクの合間に abort を見る・`chat` が embed の失敗を言う・provider の再試行と timeout の文書を足す | 採用 (2026-10) |
 | [0446](./0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md) | applyCorrection は勝者の検査を書き込みの前に通す・大文字小文字だけ違う correctedId を store に従って候補にする・buildCorrectionReason の winner を大文字小文字だけ違う id でも実際の勝者に合わせる | 採用 (2026-10) |
 | [0448](./0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) | migrate の CLI の Pool に `error` のリスナーを付ける・`migrationsDir` が読めない／空のときの扱い・セッション設定（`statement_timeout` など）が本体に効くことを文書に書く | 採用 (2026-10) |
+| [0451](./0451-savepoint-rollback-failure-keeps-original-error.md) | `createMemoriesWithOutboxAndEvents` の候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーを消さない（`dropped` に積まず、続けず、元のエラーを投げる） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
