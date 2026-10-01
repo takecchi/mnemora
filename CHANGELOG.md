@@ -670,6 +670,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `normalizeClaimKeyPart` の TSDoc は「べき等。常に成り立つ」と書いていたが、「大文字 + 結合文字」の一部の入力（ギリシャ文字の大文字 + U+0342、`H` + U+0331 など。総当たりで 253 組）では 1 回目と 2 回目の結果が変わる。TSDoc を「ほとんどの入力で」に改め、例外を `it.fails` の歯で記録した。**直していない**: 直すと保存済みの鍵と新しい鍵が食い違い、contested の検出を新しく逃す。直し案と選択肢は ADR 0474。
   - 非破壊と数える（文書と歯だけ）。
 
+- **`@mnemora/bullmq`: `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` が検査されないこと、不正値で何が起きるかを、実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測って README と TSDoc に書いた。実装は変えていない**（[ADR 0477](./docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md)、穴探し48巡目）
+  - `everyMs` が `0`・`NaN`・`null`・`Infinity` なら `start()` が reject する。**負の値・`1` 未満の小数・`1e21` と、空文字の `jobName` では、`start()` が成功したまま tick が数回（1回）で黙って止まる**（`onTickError` にも届かない）。`queueName` の空文字・`:` は `createBullmqTickDriver(...)` が同期的に投げる。止まったことの見分け方は README の節に書いた。
+  - 構築時に検査して断るのは新しく断る入力なので、直していない（ADR 0477 の材料）。「そのまま渡す」を縛る歯（`tick-driver.option-passthrough.test.ts`、Redis 不要）を足した。
+  - 非破壊と数える（文書と歯だけ）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

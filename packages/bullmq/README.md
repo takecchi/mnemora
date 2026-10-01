@@ -151,6 +151,25 @@ await queue.close();
 （【実測】redis-server 7.4.7・bullmq 6.3.8。この形の `queue.clean` は、上の driver が溜めた完了42件・失敗13件を、`grace: 0`・`limit: 0`（無制限）で全部消した。`limit` を付けたときは
 その件数までである。）保持の既定値を driver に入れるかどうかは決まっていない。
 
+## ⚠ `everyMs`・`jobName`・`queueName` は検査しない（正の整数・空でない名前を渡すこと）
+
+driver が構築時に検査するのは `concurrency`（正の整数）だけである。`everyMs`・`jobName`・`queueName` は検査せず BullMQ にそのまま渡す
+（[ADR 0477](../../docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md)）。
+
+| 入力 | 結果（【実測】redis-server 7.4.7・bullmq 6.3.8） |
+|---|---|
+| `everyMs` が `0`・`NaN`・`null` | `start()` が `Either .pattern or .every options must be defined…` で reject |
+| `everyMs` が `Infinity` | `start()` が Lua の `Cannot serialise number…` で reject |
+| `everyMs` が負の値・`1` 未満の小数・`1e21` | **`start()` は成功し、tick が数回（`1e21` は1回）で黙って止まる。`onTickError` にも届かない。** 止まった scheduler は Redis に残り、正しい `everyMs` の driver が `start()` すると上書きされて直る |
+| `everyMs` が `1.5` | `1` ms に切り捨てて動く（1.8 秒で 360 回以上 tick が走った） |
+| `everyMs` が数値の文字列（`"50"`） | 動く |
+| `jobName` が空文字 | **`start()` は成功し、tick が1回で黙って止まる**（`??` で既定に倒れない） |
+| `jobName` が `:` を含む・空白・日本語・300 文字 | 動く |
+| `queueName` が空文字・`:` を含む | `createBullmqTickDriver(...)` が同期的に投げる（Redis には繋がない） |
+| `queueName` が空白・日本語・300 文字 | 動く |
+
+⚠ **止まっても `onTickError` は鳴らず、`start()` も成功する**（`stop()` すると scheduler は消えるが、同じ値で `start()` し直すとまた数回で止まる。正しい `everyMs` の driver を `start()` すると再開する。`1e21` は遠い未来に発火する `delayed` のジョブが Redis に残る）。「止まった」ことを見分けるには、`onTickResult` が呼ばれ続けているか、`Queue#getJobSchedulers()` の `every` が期待どおりかを見ること。
+
 ## ⚠ エラーの通知先（`onTickError`）
 
 - **`onTickError` を渡さないと、tick 自体の失敗は誰にも知らされない。**`runtime.tick()` の throw（BullMQ の `'failed'`）も、
