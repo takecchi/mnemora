@@ -1970,6 +1970,13 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   候補があったときだけ付く。要素は `{ index, contentHash, code, message }`（`index` は LLM が返した順の 0 起点。候補の本文は写さない）。
   残った候補の `created` のすべてに同じ配列が付く。落とした候補が無ければ、このキーは無い（`meta` の形は変わらない）。
   全件が落ちた抽出は例外になり、`created` は1件も積まれない。
+- 行2（`reextract` が作り直す行を含む）・行12・行13の `created` の `meta.droppedFields`（2026-10-01 から。[ADR 0443](./decisions/0443-aux-field-drop-bind-limit-association-fetch.md)（抽出）・
+  [ADR 0456](./decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md)（統合・内省）。`droppedCandidates` が「候補ごと落とした」記録なのに対し、これは
+  「候補は残し、保存できない補助の欄だけ落とした」記録）: LLM が返した `digest`・`tags` の要素・claim key が NUL（U+0000）を含んだときだけ付く。要素は
+  `{ index, contentHash, field, reason: 'nul_character', count?, tagIndexes? }`（`field` は `'digest'`（本文の先頭を切り出したフォールバックの digest になる）・
+  `'tags'`（NUL を含む要素だけを捨てる。`count` と、捨てた要素の添字 `tagIndexes`（先頭から20個まで））・`'claimKey'`（`null` になる）。値そのものは写さない）。
+  `index` は抽出では `droppedCandidates` と同じ数え方。統合・内省は1件しか作らないので、`index` は 0 で、その1件の記憶の `created` に付く。落とした欄が無ければ、このキーは無い（`meta` の形は変わらない）。
+  本文（`content`）の NUL は落とせないので、従来どおり候補ごと落ちる（抽出）か例外（統合・内省）になる。
 - 行4・行14・行15の強化は、`at` が起点（`last_reinforced_at ?? recorded_at`）より狭義に新しいときだけ書く。そうで
   なければ、活動時計の欄も含めて何も書かない（Issue #1093、[ADR 0048](./decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)
   の追記）。

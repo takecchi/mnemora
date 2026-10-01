@@ -1073,6 +1073,11 @@ interface LLMProvider {
 provider の Promise の解決を待たずに reject する（provider がこの引数を無視しても、
 runtime 自身が provider の Promise と abort を競わせる）。既定の時間の上限は今回も無い。
 
+⚠ **2026-10-01 追記（文書と実装の照合、[ADR 0459](./decisions/0459-round32-doc-drift-after-1550-1563.md)。[ADR 0428](./decisions/0428-provider-abort-reason-and-error-guards.md)・[ADR 0445](./decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md) の結果）**:
+上の 2026-09-29 追記は「runtime が競わせる」側だけを書いている。`@mnemora/openai`・`@mnemora/anthropic` を**直に**呼んだときは、SDK 呼び出しを core の `runAbortable` で包むので、
+abort の reject の値は `signal.reason`（SDK の `APIUserAbortError` ではない）で、呼ぶ前に abort 済みなら SDK を呼ばずに reject し、SDK の再試行待ち（429 の `retry-after` 等）の最中でも abort の時点で返る。
+正本は `packages/core/src/interfaces/llm-provider.ts` の 2026-10-01 追記と、各 README の `signal` の節。
+
 ### 5.5 EmbeddingProvider — Phase 1
 
 ```ts
@@ -1135,6 +1140,16 @@ interface EmbeddingProvider {
 `embed` は任意の第3引数 `opts?: AbortOptions` を受け取る。挙動は `LLMProvider`（§5.4 同日付
 追記）と同じ——`packages/local-embedding` は推論の前後で abort 済みかどうかを確認するだけで、
 推論の途中では中断できない。
+
+⚠ **2026-10-01 追記（文書と実装の照合、[ADR 0459](./decisions/0459-round32-doc-drift-after-1550-1563.md)）**: 上の記述の2点が古い。
+(1) 冒頭近くの「**この interface の適合テストは `packages/testkit` に存在しない**」は、今は成り立たない。`describeEmbeddingProviderConformance`
+（Issue #116・[ADR 0095](./decisions/0095-embedding-provider-conformance.md)）があり、`@mnemora/openai`・`@mnemora/local-embedding`・testkit の
+`DeterministicEmbeddingProvider`/`RecordedEmbeddingProvider` に当てている（LLM 側は `describeLLMProviderConformance`、[ADR 0266](./decisions/0266-llm-provider-conformance.md)）。
+suite が縛らないことのうち、テキストとベクトルの対応は [docs/conformance.md](./conformance.md) §5 の Issue #1000 の追記、abort は [ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md) を見ること。
+(2) 上の「推論の前後で abort 済みかどうかを確認するだけ」は、[ADR 0428](./decisions/0428-provider-abort-reason-and-error-guards.md)・[ADR 0445](./decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md) より前の記述である。
+`@mnemora/local-embedding` は、モデルの読み込み待ち・読み込みの再試行の待ちも `signal` ごとに切り（共有の読み込みそのものは止まらない）、件数が `maxBatchSize`（既定 128）を超えて分割されたときは、
+チャンクの合間でも abort を見る（動いている1チャンクは止まらない）。`@mnemora/openai` は `runAbortable` で包み、abort 済みなら空配列でも `[]` を返さず `signal.reason` で reject する。
+正本は `packages/core/src/interfaces/embedding-provider.ts` の 2026-10-01 追記。
 
 ### 5.6 Scheduler — interface は Phase 1（既定 `InlineScheduler`）、BullMQ 実装は後続フェーズ
 

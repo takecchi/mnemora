@@ -2449,6 +2449,50 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ⚠ **`v0.5.0` で出荷済みである。**⟹ ⛔ **「`v1.0.0` で初めて効く」と読まないこと。**
 
+## 🟡 v1.1.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
+
+この節は、2026-10-01 に着地した変更（[PR #1550](https://github.com/takecchi/mnemora/pull/1550)〜[#1563](https://github.com/takecchi/mnemora/pull/1563)）のうち、
+**利用者が気づいておくとよい振る舞いの変更**を載せる（[ADR 0459](./decisions/0459-round32-doc-drift-after-1550-1563.md)）。**いずれも利用者側の手順は要らない**（型・DB は変わらない）。
+⚠ **それより前に `main` へ入った `[1.2.0]` の変更を、この節はまだ棚卸ししていない**（⛔ ここに件数を書かない）。中身と根拠 ADR は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` の `### Changed`・`### Fixed` を見ること——**ここには複製しない。**
+**落ちる入力が増える変更は🔴（番号付きの一覧）に載せる**——この節は、直したあとに「例外の形・場所が変わる」「以前は落ちていた入力が通る」「以前は静かに通っていた入力が落ちる」ものを短く挙げる。
+
+- **`@mnemora/postgres`: トランザクションの `rollback` が失敗したとき、投げられるのが元のエラー（`code` 付き）になった**（[PR #1555](https://github.com/takecchi/mnemora/pull/1555)、[ADR 0444](./decisions/0444-pool-begin-release-rollback-error-preserved.md)）。
+  以前は `Failed query: rollback` が投げられ、元のエラーが消えていた（接続ごと切れたときに起きる）。`rollback` の失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。
+  `Failed query: rollback` の文面や、`err.cause` がその失敗であることに頼っていた呼び出し側は見直すこと。あわせて、`begin` が失敗した接続は pool へ戻らず捨てられるようになり（以前は借りたまま戻らず、Postgres の再起動を数回挟むと pool が枯れた）、
+  `closePostgresClient` は `client.pool.end()` が既に直接呼ばれていても reject しない。
+- **`@mnemora/postgres`: `observe` の抽出の候補ごとの savepoint の `rollback to savepoint` が失敗したときも、元のエラーが投げられる**（[PR #1561](https://github.com/takecchi/mnemora/pull/1561)、[ADR 0451](./decisions/0451-savepoint-rollback-failure-keeps-original-error.md)）。
+  以前は、候補が落ちた理由が「rollback の失敗」にすり替わり、全候補が落ちたときは `Failed query: rollback to savepoint …`（または 25P02）が投げられ、一部が成功したときは `created` の `meta.droppedCandidates` にそのすり替わった理由が載って正常終了した。
+  いまは巻き戻しの失敗を信用できない状態と見て、続けず、元のエラーを投げる（記憶も `created` も残らない）。巻き戻しが成功する悪い候補は、従来どおり落として他を書く。
+- **`@mnemora/postgres`: `runMigrations` に読めない `migrationsDir`（存在しない・ディレクトリでない）を渡すと、DB に触れる前に `migrationsDir を読めない（<パス>）` で落ちる。`.sql` が1本も無いときは警告を出す**
+  （[PR #1556](https://github.com/takecchi/mnemora/pull/1556)、[ADR 0448](./decisions/0448-migrate-cli-pool-error-unreadable-dir-session-settings.md)）。以前は、ロック・`CREATE SCHEMA`・`CREATE EXTENSION`・台帳の作成が済んだあとに生の `ENOENT` で落ち、副作用が残った。
+  落ちる入力は増えない（以前も同じ入力で落ちていた）。⚠ **`mnemora-postgres-migrate`（CLI）は同梱の既定のディレクトリしか使えないので、この変更は CLI の利用者には届かない。**CLI の側の変更は、接続プールに `error` のリスナーを付けたこと
+  （待機中の接続が DB 側から切られても、プロセスは落ちず、警告を出して続行する）。
+- **`observe`・`reextract`・`consolidate`・`reflect`: LLM が返した保存できない値（NUL）は、その欄だけを落として記憶を作る**（[PR #1552](https://github.com/takecchi/mnemora/pull/1552)・[#1562](https://github.com/takecchi/mnemora/pull/1562)、[ADR 0443](./decisions/0443-aux-field-drop-bind-limit-association-fetch.md)・[ADR 0456](./decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md)）。
+  以前は、本文が正しくても `digest`・`tags` の要素・claim key に NUL が1つあるだけで、抽出ではその候補が丸ごと落ち、統合・内省は例外で終わった。落とした欄は `created` の `meta.droppedFields` に残る（[docs/memory-model.md](./memory-model.md) §11）。本文の NUL は従来どおり。
+- **`@mnemora/postgres`: 読み取りの絞り（`labels`・`attributes` の key・value）・claim key・`extractorVersion` に NUL を渡すと、DB の生の例外（`Failed query: …`）ではなく、DB に触れる前の名指しの例外で断る**（[PR #1562](https://github.com/takecchi/mnemora/pull/1562)、ADR 0456）。
+  落ちる入力は増えない（以前も落ちていた）。例外の文面に頼っていた呼び出し側は見直すこと。
+- **`@mnemora/postgres`: `MemoryStore` の書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶のとき、例外（`PostgresMemoryStore: memory not found for tenant: <id>`）で断る**（[PR #1562](https://github.com/takecchi/mnemora/pull/1562)、ADR 0456 の H4。[ADR 0436](./decisions/0436-event-vector-write-checks-memory-belongs-to-ctx-tenant.md)・[ADR 0439](./decisions/0439-memory-store-reference-writes-check-target-belongs-to-ctx-tenant.md) の続き）。
+  以前は、別テナントの記憶を指すイベントが `ctx` のテナントの行として書けた。`Runtime` は常に自分の行を指すので、`Runtime` 経由の呼び出しは1つも断られない。`MemoryStore` を直に呼び、別テナントの id をイベントに入れていた呼び出しだけが落ちる。
+  ⚠ **直したのは `@mnemora/postgres` だけ**（testkit のインメモリ実装が同じ入力を断るかは確かめていない。ADR 0456 の M7）。修正前に書かれた食い違うイベントの行は消さない。
+- **`@mnemora/postgres`: `reinforceMany`（`observe({ kind: "memory_usage" })` の強化を含む）と `searchMany` が、件数が多くても PG のバインドパラメータの上限で落ちなくなった**（[PR #1552](https://github.com/takecchi/mnemora/pull/1552)、ADR 0443 決定2）。
+  以前は `reinforceMany` が 13107 件、`searchMany` が 32767 件で、message が数 MB の例外で落ちた。
+- **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えたとき、書き込む前に `RangeError` で落ちる**（[PR #1554](https://github.com/takecchi/mnemora/pull/1554)、[ADR 0446](./decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）。
+  例外の型・文言は同じ。以前は `markContested` が書いたあとに落ち、両側が `contested` のまま残った。`@mnemora/postgres` で候補の id を大文字にした `correctedId` は、store が同じ記憶と言えば候補として扱う。
+- **`@mnemora/local-embedding`: 件数が `maxBatchSize`（既定 128）を超えて分割されたとき、チャンクの合間で `signal` の abort を見る**（[PR #1553](https://github.com/takecchi/mnemora/pull/1553)、[ADR 0445](./decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。
+  以前は abort の後も残りのチャンクをすべて推論してから reject していた（動いている1チャンクは今も止まらない）。128 件以下の呼び出しは変わらない。
+
+### この節に載せなかったもの（理由つき）
+
+- **[PR #1550](https://github.com/takecchi/mnemora/pull/1550)（ADR 0441）**: CHANGELOG・この文書の参照の食い違いと、consumer-install の検査の名前の修正。`@mnemora/core`・`@mnemora/postgres` の README に「TypeScript の `lib`・`target` は ES2022 以上」を書いたのは**既存の要件を文書に書いただけ**で、振る舞いは変わらない。
+- **[PR #1551](https://github.com/takecchi/mnemora/pull/1551)（ADR 0442）**: 文書だけ（migration `0027` の deadlock は項目31の追記に書いてある）。
+- **[PR #1557](https://github.com/takecchi/mnemora/pull/1557)・[#1559](https://github.com/takecchi/mnemora/pull/1559)・[#1560](https://github.com/takecchi/mnemora/pull/1560)（ADR 0447・0450・0453）**: 穴探しの確認（操作×状態の行列）の記録。直す線の穴は0件で、振る舞いは変えていない。
+- **[PR #1558](https://github.com/takecchi/mnemora/pull/1558)（ADR 0449）**: bullmq の README・TSDoc を実 Redis で測り直した。コードの振る舞いは変えていない。
+- **[PR #1563](https://github.com/takecchi/mnemora/pull/1563)（ADR 0457）**: README の `ANALYZE` の説明の実測による訂正。振る舞いは変えていない。
+- **[PR #1564](https://github.com/takecchi/mnemora/pull/1564)・[#1565](https://github.com/takecchi/mnemora/pull/1565)（reextract・testkit の fake と Float32Array）**: この PR の時点では未着地。着地したら、利用者が気づくものを足す。
+
+---
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
