@@ -51,6 +51,9 @@
 
   `0` は「待ちに上限が無い」。被害は、**`registerEmbeddingSpace`・`runMigrations` を呼んだ `Pool` の 1 本だけ**、以後のアプリのクエリがロック待ちで止まる時間の上限が外れること（[ADR 0442](./0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md) が書いた「待っている DDL の後ろに並んで止まる」の上限を、アプリ側から外してしまう）。同じ `Pool` の中にだけ漏れる（別の `Pool`・別のプロセスには出ない）。
 
+  **この直しが入った経緯**: 穴 B は、クローン miku が事前に渡した直し方の線（「`max: 1` の件を (b) で直してよい」）の外で、**担い手（作業者）の判断で直した**。直した後でクローン miku が確かめ、残すと決めた。
+  残す理由（クローン miku の判断）: 呼び出しが終わったあとに接続へ `lock_timeout=0`（待ち時間の上限なし）が残るのは、ライブラリが利用者の接続の設定を黙って書き換えている状態である。接続の既定値へ戻すのは**約束に実装を戻す直し**（README の「上限は接続側で」「戻すのはセッションの既定値」に実装を合わせる）にあたり、プールの状態漏れという点で [ADR 0444](./0444-pool-begin-release-rollback-error-preserved.md) と同じ種類の穴である。断る入力は増えない。
+
 - **決めたこと**:
 
   1. **`registerEmbeddingSpace` は、DDL を advisory lock を握った接続（`lockClient`）の中で打つ**（`pool.query` をやめる）。`recordOrCheckEmbeddingSpace` も `lockClient` を受ける。必要な接続は 2 本から 1 本になる。`max: 1` の穴（A）が閉じる。
