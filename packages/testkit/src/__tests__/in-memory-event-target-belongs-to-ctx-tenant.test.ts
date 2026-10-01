@@ -87,6 +87,32 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(await statusOf(A, a.id)).toBe("active");
   });
 
+  it("大文字小文字は区別しない（Postgres は uuid を小文字にそろえる）。小文字の正規形で積む。別テナントは大文字でも断る。操作の対象の id は変えない", async () => {
+    const { store, make, ev, eventCount } = setup();
+    const a = await make(A);
+    const other = await make(A);
+    const b = await make(B);
+    await store.updateStatusWithEvent(A, a.id, "archived", {}, ev(a.id.toUpperCase())); // 今更新した行
+    await store.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id.toUpperCase())); // 同じテナントの別の記憶
+    expect(eventCount(a.id)).toBe(2);
+    expect(store.events.some((e) => e.memoryId === a.id.toUpperCase())).toBe(false);
+    const c = await make(A);
+    await expect(
+      store.updateStatusWithEvent(A, c.id, "archived", {}, ev(b.id.toUpperCase())),
+    ).rejects.toThrow(NOT_FOUND);
+    expect(eventCount(b.id)).toBe(0);
+    // 操作の対象の id は完全一致のまま（ADR 0438・0446。fixture は id の大文字小文字を区別する）。
+    const d = await make(A);
+    await expect(
+      store.updateStatusWithEvent(A, d.id.toUpperCase(), "archived", {}, ev(d.id)),
+    ).rejects.toThrow(NOT_FOUND);
+    // 断るときの message は、渡された id のまま。
+    const error = await store
+      .updateStatusWithEvent(A, c.id, "archived", {}, ev(b.id.toUpperCase()))
+      .catch((e: unknown) => e as Error);
+    expect((error as Error).message).toContain(b.id.toUpperCase());
+  });
+
   it("purgeMemory: 墓石も書かない", async () => {
     const { store, make, ev, eventCount } = setup();
     const b = await make(B);

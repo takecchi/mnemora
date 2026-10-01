@@ -23,8 +23,17 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-type Target = "foreign" | "malformed" | "own" | "sameTenantOther" | "null";
-const TARGETS: Target[] = ["foreign", "malformed", "own", "sameTenantOther", "null"];
+type Target =
+  "foreign" | "malformed" | "own" | "sameTenantOther" | "null" | "ownUpper" | "otherUpper";
+const TARGETS: Target[] = [
+  "foreign",
+  "malformed",
+  "own",
+  "sameTenantOther",
+  "null",
+  "ownUpper",
+  "otherUpper",
+];
 
 interface Kit {
   store: MemoryStore;
@@ -273,7 +282,15 @@ const OPS: Record<string, Op> = {
 async function run(kit: Kit, opName: string, target: Target): Promise<Run> {
   const b = await memory(kit.store, B);
   const pick = (own: MemoryId, other: MemoryId): string | null =>
-    ({ foreign: b.id, malformed: "not-a-uuid", own, sameTenantOther: other, null: null })[target];
+    ({
+      foreign: b.id,
+      malformed: "not-a-uuid",
+      own,
+      sameTenantOther: other,
+      null: null,
+      ownUpper: own.toUpperCase(),
+      otherUpper: other.toUpperCase(),
+    })[target];
   let statuses: () => Promise<string[]> = async () => [];
   let outcome = "ok";
   try {
