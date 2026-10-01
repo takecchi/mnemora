@@ -2731,9 +2731,7 @@ export class FakeRelationStore implements RelationStore {
     return this.backing.relations
       .filter(
         (r) =>
-          r.tenantId === ctx.tenantId &&
-          r.fromMemoryId === memoryId &&
-          (kind === undefined || r.kind === kind),
+          r.tenantId === ctx.tenantId && r.fromMemoryId === memoryId && (!kind || r.kind === kind),
       )
       .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: new Date(r.createdAt) })); // ADR 0488: 複製して返す
   }
