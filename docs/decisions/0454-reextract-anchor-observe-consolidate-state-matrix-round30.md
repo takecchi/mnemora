@@ -20,7 +20,7 @@
   `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents` を隠した store（口なしの2段の経路）も、reextract・consolidate・reflect の該当セルで当てた。
   id と時刻を伏せた diff は **173セル × 2実装で、違いは2点だけ**だった: (a) 同点の近傍の並び（`recall` の同点の順。並びを伏せると一致）、(b) NUL を含む本文で `observe` が投げる例外の型（Postgres は `DrizzleQueryError`、インメモリは `Error`。どちらも投げ、書き込みは0件）。
 
-  **結論: 約束がはっきり書かれているのに外れたセルが1件（Postgres・インメモリの両方、口あり・口なしの両経路で同じ）。直した。** あわせて、文書が実装と食い違う所が2つあり、文書だけを直した（約束を実装に合わせた）。ほかは負債（下の表）。
+  **結論: 穴が1件（Postgres・インメモリの両方、口あり・口なしの両経路で同じ）。直した。** ただし約束は明文ではなく、次の文からの読みで「約束に実装を戻す直し」と判断して直した（下の「判断の根拠」）。あわせて、文書と実装が食い違う所が2つあり、1つは文書を実装に合わせ（C）、1つは実装を文書に合わせた（D2）。ほかは負債（下の表）。
 
   ### 穴（直した）: `reextract` の「置き換えた側」が `active` でない行になり、循環・active 0件ができる
 
@@ -46,6 +46,16 @@
   逆向きの文もある（直す案を縛るものではない）: `interfaces/memory-store.ts:1387`「`supersededByIndex` が指すのは `news[i]` に対応する Memory であって、今回作られたか既に在ったかは問わない」、`runtime.ts:1676-1679`・ADR 0230 訂正4「`reextract` のアンカーも冪等な `ON CONFLICT` 経由で前から在る Memory に解決されうる」。
   どちらも「前から在る Memory」としか言わず、status には触れていない。**【判断】約束はあると読む（直す線の内）。** この読みが弱いと見るなら、下の「これが覆るとしたら」1を見ること。
 
+  ### 判断の根拠（A の直しを残す理由）
+
+  **明記された約束ではない。** 上の引用はどれも「置き換えた側が active である」「循環しない」とは書いていない。**次の文から、約束に実装を戻す直しと読める。判断で直した。覆すなら、材料に戻す**（歯12本を循環を許す期待に書き換え、`anchorIndex` を外す。「これが覆るとしたら」1）。
+  - 前提にしていると読む文: ADR 0447:45（循環は store を直接呼んだときだけの壊れた状態で、Runtime は作らない）、`memory.ts:11`（「別の Memory に置き換えられた」は、置き換え先が生きていることを前提にする）、`docs/recall.md:523`（置き換え先を辿る）、ADR 0028:60-61・:96、`docs/memory-model.md:1886`（行5。新 Memory の作成と一体）。
+  - **逆向きの文**: `interfaces/memory-store.ts:1387`（`supersededByIndex` は今回作られたか既に在ったかを問わない）、ADR 0230 訂正4（reextract の anchor は前から在る Memory に解決されうる）。**どちらも status には触れていない**（「既に在った行」を許すだけで、非 active の行が anchor でよいとは言っていない）。
+  - 直す側に倒した理由: active が0件になる（循環）のはデータ損失に近い壊れ方で、LLM の出力が往復するだけで起きる。直しは断る入力を増やさず、例外も増やさない（呼び出しは今までどおり成功する）。store と公開の型は変えない。
+  - **返り値が変わる入力は2つだけ**（ADR 0454 の決定2。【実測】両実装）:
+    1. **全部の候補がぶつかる**入力。例: 子 `[X, Z]` で X が archived、出力が `[X]`。`supersededMemoryIds` が `[Z]` から `[]` になり、Z は active のまま残る（往復 `X → Y → X` の2回目は `[Y]` から `[]`）。
+    2. **先頭の候補だけがぶつかる**入力。例: 子 `[X, Z]` で X が archived（または consolidate 済み）、出力が `[X, W]`。`supersededById` が先頭の X から、後ろの新しい行 W に変わる（`supersededMemoryIds` の件数は同じ）。
+
 - **決めたこと**:
 
   1. **置き換えた側は、今回の抽出で `active` になる行にする。** `reextract` は、`existingBefore`（LLM の後に読んだ、この版の全 status の行）のうち非 `active` の行の `contentHash` を集め、候補列のうちそれにぶつからない**先頭**をアンカーにする（`supersededByIndex` に、その索引を渡す。口なしの経路も同じ候補の id）。ぶつからない候補が無ければ（候補が全部、非 active の既存行にぶつかる）、何も supersede しない。ぶつかった行は、既存の `classifyReextractTargets` が `skipped` に `status_not_active` として載せている（新しい `ReextractSkip` の種類は足さない）。ぶつかる候補が無いとき（今までの通常の場合）は、アンカーは今までどおり先頭で、**何も変わらない**。変更は `packages/core/src/runtime.ts` の `reextract` の数行だけで、store には手を入れていない（Postgres・testkit の実装は同じ口を同じように呼ぶ）。
@@ -54,11 +64,13 @@
      - 先頭がぶつかり、後ろの候補が新しい（または active な）行になる入力（`[X, W]` で X が archived／consolidate 済み）は、`supersededById` が先頭の非 active な行から W に変わる。`memoryIds`・`supersededMemoryIds` の件数・`skipped` は変わらない。
      - 上のどちらでもない入力（R の行列の残り53セル）は、返り値も書かれる行も変わらない（直す前後の diff で確かめた）。**断る入力・落とす入力は増えていない**（例外は増えていない。呼び出しは今までどおり成功する）。
   3. **`Runtime.observe` の TSDoc の「claim もされていないまま残る」を直した**（文書だけ）。ADR 0407 以降、`extract: 'sync'` の observe が積む extract ジョブは、observe が claim 済み（`claimed_by: "runtime.observe:sync"`・`attempts: 1`）で作られ、abort（と抽出中の例外）の後もその claim のまま残る。`leaseMs` の内側の `tick` は拾わず（`processed: 0`）、切れた後の `tick` が取り直す（`attempts: 2`）。【実測】両実装。その間の同じ `externalId` の再送は `skipped`（#897 と同じ分岐）。TSDoc に、この3点を書いた。
-  4. **冪等な再送の戻り値には、`subjectCandidates`・`claimKey` を渡していても `rejectedSubjectIds`・`claimKeyFailure`・`contestedDetection` が無い**（`created: false` の分岐は、抽出も検出も走らせずに返す。`extractMode` を見る前）。3つの欄の TSDoc は「渡したら常に値／配列」と書いていた。【実測】両実装。**実装ではなく文書を直した**（3欄の TSDoc に「冪等な再送では無い」を足した）。理由: 再送で `[]`／`null` を返すと「検出したが0件」と「検出していない」の区別（欄の有無）が崩れる。返り値が変わる直しは採らない。
-     あわせて `packages/core/src/__tests__/runtime-return-contract.ts` の `checkObserveContract`（全 Runtime の呼び出しに掛かる出力の契約の検査）が、`extraction: "skipped"` のとき3欄の有無を検査しないようにした——この検査は、再送に `claimKey` を渡す呼び出しを「契約違反」として赤にしていた（探り棒がこの赤で見つけた）。
+  4. **冪等な再送の戻り値にも、渡していれば `rejectedSubjectIds: []`・`claimKeyFailure: null`・`contestedDetection: []` を付ける**（実装を TSDoc に合わせた）。`created: false` の分岐は、抽出も検出も走らせずに返す（`extractMode` を見る前）ため、以前は渡していても3欄が無く、3欄の TSDoc の「渡したら常に値／配列」と食い違っていた。【実測】両実装。
+     **自然な値が決まると判断した理由**: 3欄の既存の TSDoc が値の意味を決めている。`rejectedSubjectIds` は「弾いた候補が無ければ `[]`」、`claimKeyFailure` は「成功なら `null`」（失敗の理由を持つ欄で、`null` は失敗なし）、`contestedDetection` は「付いた鍵の数だけ要素がある。0件なら `[]`」（欄の有無が区別するのは、`detectContested` を**渡したか**）。再送は新しい記憶を作らず、候補も鍵も無いので、3つとも既存の型・意味の範囲の値（`[]`・`null`・`[]`）になる。型は変えていない（既存の任意欄に値を入れるだけ）。断る入力は増えない。渡していない再送には、今までどおり3欄は付かない（歯で対照にした）。
+     **返り値が変わる入力**: `subjectCandidates`（空でない）か `claimKey`（`enabled: true`・`detectContested: true`）を渡した、冪等な再送だけ。欄が増えるだけで、既存の欄の値・書き込みは変わらない。再送を `contestedDetection === undefined` で見分けていた呼び出し側がいれば影響を受ける（再送の印は `extraction: "skipped"` と `memoryIds: []`）。
+     最初の実装は、`checkObserveContract`（全 Runtime の呼び出しに掛かる出力の契約の検査。再送に `claimKey` を渡す呼び出しを「契約違反」として赤にしていた。探り棒がこの赤で見つけた）を「再送のときは見ない」に緩めて、TSDoc を「再送では無い」に書き換えていた。**黙って歯を弱めるので戻した**（`runtime-return-contract.ts` は main と同じ）。
   5. **ほかの探り棒は歯にしない**（ADR 0447・0453 と同じ。測った振る舞いは既存の歯と重なる）。歯として足したのは、直した穴（決定1）と、決定3・4 の2点だけ:
      - `packages/postgres/src/__tests__/reextract-anchor-must-be-active.postgres.test.ts`（20本 = 5本 × 2実装 × 口あり／なし。直す前の実装で**12本が赤、対照の8本が緑**。赤の出力は下の「測ったこと」）。
-     - `packages/postgres/src/__tests__/observe-abort-extract-job-and-resend.postgres.test.ts`（4本 = 2本 × 2実装）。
+     - `packages/postgres/src/__tests__/observe-abort-extract-job-and-resend.postgres.test.ts`（4本 = 2本 × 2実装。決定3と、決定4の再送の3欄）。
 
 - **検討した代替案**:
 
@@ -86,11 +98,11 @@
 
   1. 「置き換えた側は active な行」を約束とは読まない、と決めたとき（上の約束の引用はどれも明文でなく、`interfaces/memory-store.ts:1387` と ADR 0230 は「既に在った行でもよい」と書いている）。そのときは決定1を戻す（`runtime.ts` の `anchorIndex` を外し、歯 `reextract-anchor-must-be-active.postgres.test.ts` の12本を、循環を許す期待に書き換える）。
   2. `ReextractSkip` に新しい種類を足すと決めたとき（負債2）。決定1の「何も supersede しない」枝で、置き換えられなかった記憶を名指しできる。
-  3. 冪等な再送の戻り値に3欄を持たせると決めたとき（決定4）。`ObserveResult` の型に再送の内訳を足す案（負債4）と一緒に決めるのがよい。
+  3. 冪等な再送に3欄を付けるのをやめ、「無いこと」を約束にすると決めたとき（決定4。そのときは `checkObserveContract` が再送を見分ける形にする）。`ObserveResult` の型に再送の内訳を足す案（負債4）と一緒に決めるのがよい。
 
 - **測ったこと**（【実測】2026-10-01、Postgres 17、UTF8（`C.UTF-8`）、testkit のインメモリ実装、vitest 1ファイルずつ指名）:
 
-  **セルの数（各2実装）**: `reextract` 66（R1 32、R2 30、R3 4）＋ B 12、`observe` 31（O1 16、O2 5、O3 10）、`consolidate` 36（C1 8、C2 8、C3 20）、`reflect` 28（C1r 8、C3r 20）＝ **173**。穴: **1**（直した。13セル）。文書の食い違い: **2**（直した）。負債: 6（上の表）。
+  **セルの数（各2実装）**: `reextract` 66（R1 32、R2 30、R3 4）＋ B 12、`observe` 31（O1 16、O2 5、O3 10）、`consolidate` 36（C1 8、C2 8、C3 20）、`reflect` 28（C1r 8、C3r 20）＝ **173**。穴: **1**（直した。13セル）。文書と実装の食い違い: **2**（C は文書を、D2 は実装を直した）。負債: 6（上の表）。
 
   **変異試験**（`cp` で退避→変異→探り棒が変わることを確認→戻す。`git status --short` は戻した後に変更が無いことを確認）:
 
@@ -104,9 +116,10 @@
   | M6 | `consolidate` の `abortIfAllConflicted: true` を `false` | 探り棒（待ちの最中の割り込み）は**変わらなかった**（runtime の読み直しが先に止める）。既存の歯 `consolidate-reflect-superseded-race.postgres.test.ts` の「store 側の窓」2本が赤。戻して28本緑 |
   | M7 | Postgres `findActiveByClaimKey` の `status = 'active'` に `archived` を足す | O3 の `other-archived` が変わった（`unresolved_conflict/1` になり、新しい記憶に `claim_key_conflict_unresolved` が積まれた） |
   | M8 | 決定1の直しを入れる前の実装（歯だけの commit） | 歯 20本中12本が赤、対照8本が緑。赤の出力: `X → Y → X`、`[X, W]`（archived な X）、`[X]`（archived な X）の3つが、4通り（InMemory・Postgres × 口あり・口なし）で `AssertionError: expected { …(2) } to deeply equal { …(2) }`（循環の `Y: { status: "superseded", by: "X" }` と期待の `Y: { status: "active", by: null }`、Z の `by: "X"` と期待の `by: "W"`／`active`）。直した後は 113本（reextract 系9ファイル）・core 266本が緑 |
+  | M10 | 決定4の直す前の実装（歯だけの commit） | `observe-abort-extract-job-and-resend` の新しい1本が両実装で赤（`toMatchObject` が `rejectedSubjectIds: []` などを満たさない）。Postgres 側は出力の契約の検査も5件で赤（「`claimKey.enabled=true と claimKeyFailure の有無が食い違う`」など。赤の出力は `.hunt-r30/d2-red.txt`）。直した後は4本緑 |
   | M9 | 決定3の歯: `createObservationWithOutbox` の `claimedBy` を渡さない | `observe-abort-extract-job-and-resend` の1本が両実装で赤（ジョブが未 claim で積まれる）。戻して緑 |
 
-  **走らせたテスト（ファイル名指し）**: `packages/postgres/src/__tests__/` の `reextract-anchor-must-be-active`・`observe-abort-extract-job-and-resend`・`reextract-archived-memory`・`reextract-carryover`・`reextract-concurrent-extract`・`reextract-forget-race`・`reextract-source-forgotten-for-update-race`・`reextract-withdrawn-memories`・`runtime-reextract-created-at-and-meta`・`reflect-reextract-inheritance`・`consolidate-reflect-superseded-race`（各 `.postgres.test.ts`）。`packages/core/src/__tests__/` の `reextract`・`runtime`・`restore-superseded`・`superseded-operation-grouping`・`lifecycle-transition-table`・`superseded-reason-writer-consistency`・`reextract-usage-observation`・`fake-memory-store-supersede-with-new-memories`（各 `.test.ts`）。全テストは走らせていない。
+  **走らせたテスト（ファイル名指し）**: `packages/postgres/src/__tests__/` の `reextract-anchor-must-be-active`・`observe-abort-extract-job-and-resend`・`reextract-archived-memory`・`reextract-carryover`・`reextract-concurrent-extract`・`reextract-forget-race`・`reextract-source-forgotten-for-update-race`・`reextract-withdrawn-memories`・`runtime-reextract-created-at-and-meta`・`reflect-reextract-inheritance`・`consolidate-reflect-superseded-race`・`observe-aux-field-drop`・`store-boundary-diff`・`testkit-fixtures-nul-numeric-purged-at-alignment`（各 `.postgres.test.ts`）。決定4の後に、`checkObserveContract` を使う影響範囲（再送と claimKey・subjectCandidates を扱うテスト）として、core の `extraction`・`observation`・`runtime`、testkit の `in-memory-return-snapshots`・`in-memory-nul-numeric-purged-at-postgres-alignment` も名指しで走らせた。`packages/core/src/__tests__/` の `reextract`・`runtime`・`restore-superseded`・`superseded-operation-grouping`・`lifecycle-transition-table`・`superseded-reason-writer-consistency`・`reextract-usage-observation`・`fake-memory-store-supersede-with-new-memories`（各 `.test.ts`）。全テストは走らせていない。
 
   - **測っていないこと**（未測定。次の巡の入口）:
     - `tick` の `consolidate`・`reflect` ジョブの再配達（`autoQueueConsolidateReflectOnExtract: true` の自動経路。memory-model.md が「reflect は再配達で2件になる」と書いている点の実測）。

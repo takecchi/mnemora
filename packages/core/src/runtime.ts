@@ -433,9 +433,9 @@ export interface ObserveResult {
    *   （`undefined`）——「候補一覧を渡していないので判定していない」ことと「渡したが
    *   0件だった」ことを、キーの有無で区別する。
    * - **渡した場合は常に配列**（弾いた候補が無ければ `[]`）。
-   * - ⚠ **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）では、渡していても
-   *   この欄は無い**（ADR 0454。【実測】両 adapter）。再送は抽出も検出も走らせないので、「検出していない」を
-   *   キーの無さで名乗る（`extraction: 'skipped'` と `memoryIds: []` が同じ分岐の印）。
+   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
+   *   付く**（値は `[]`：弾いた候補なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
+   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   rejectedSubjectIds?: string[];
   /**
@@ -448,9 +448,9 @@ export interface ObserveResult {
    * - **`claimKey.enabled` を渡さなかった（省略、または `enabled: false`）呼び出しでは、
    *   この欄は無い**（`undefined`）。
    * - **`claimKey.enabled: true` を渡した場合は常に値を持つ**（成功なら `null`）。
-   * - ⚠ **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）では、渡していても
-   *   この欄は無い**（ADR 0454。【実測】両 adapter）。再送は抽出も検出も走らせないので、「検出していない」を
-   *   キーの無さで名乗る（`extraction: 'skipped'` と `memoryIds: []` が同じ分岐の印）。
+   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
+   *   付く**（値は `null`：鍵の導出の失敗なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
+   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   claimKeyFailure?: ExtractionFailure | null;
   /**
@@ -466,9 +466,9 @@ export interface ObserveResult {
    * - **`detectContested: true` を渡した場合は常に配列**（`claimKey` が付かなかった
    *   候補——鍵の導出自体が失敗した／実行しなかった——は含まれない。付いた鍵の数だけ
    *   要素がある。0件なら `[]`）。
-   * - ⚠ **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）では、渡していても
-   *   この欄は無い**（ADR 0454。【実測】両 adapter）。再送は抽出も検出も走らせないので、「検出していない」を
-   *   キーの無さで名乗る（`extraction: 'skipped'` と `memoryIds: []` が同じ分岐の印）。
+   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
+   *   付く**（値は `[]`：検出の対象の候補なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
+   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   contestedDetection?: ContestedDetectionOutcome[];
 }
@@ -5756,11 +5756,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // 冪等な再送（docs/architecture.md §3.5）。extract ジョブは積まれておらず、
       // sync/deferred のどちらであっても、ここで新たに抽出をやり直す必要はない
       // （最初の呼び出しで既に処理済みのはず）。
+      // ADR 0454: 渡した欄は再送でも付ける（`ObserveResult` の各欄の「渡したら常に」）。値は「再送は抽出も検出も
+      // 走らせなかった」から決まる自然な値——弾いた候補なし（[]）・鍵の導出の失敗なし（null）・検出の対象の候補なし（[]）。
       return {
         observationId: observation.id,
         memoryIds: [],
         extraction: "skipped",
         extractionFailure: null,
+        ...(input.subjectCandidates !== undefined && input.subjectCandidates.length > 0
+          ? { rejectedSubjectIds: [] }
+          : {}),
+        ...(input.claimKey?.enabled === true ? { claimKeyFailure: null } : {}),
+        ...(input.claimKey?.detectContested === true ? { contestedDetection: [] } : {}),
       };
     }
 
