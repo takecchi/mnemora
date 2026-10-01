@@ -1119,7 +1119,13 @@ export interface RecallUsage {
   chars: number;
   /** 返した全量のトークン数（`RuntimeDeps.tokenCounter` で数えた値）。 */
   estimatedTokens: number;
-  /** `estimatedTokens` が推定（`"heuristic"`）か実測（`"exact"`）か。 */
+  /**
+   * `estimatedTokens` が推定（`"heuristic"`）か実測（`"exact"`）か。
+   *
+   * ⚠ これは `estimatedTokens` を出した1回の計測（返した digest を連結し、目次帯の JSON を足した文字列を
+   * `tokenCounter.count()` に1回渡したもの）の `counter` の印である。段4の予算の判定は digest ごとに数えるので、
+   * テキストによって印を変える `TokenCounter` では、予算の判定に使った印とは食い違いうる（ADR 0487。今の振る舞いを書いたもの）。
+   */
   counter: "heuristic" | "exact";
   /** 返した量の段ごとの内訳（文字数）。 */
   byTier: {
