@@ -1773,12 +1773,17 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
+    // ADR 0480: InMemory・Postgres と同じく Invalid Date の createdAt は書かずに拒む（活動時計も進めない）。
+    if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
+      throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
+    }
     const id = nextId("rcl");
     // ADR 0404: 実装（`InMemoryMemoryStore`・`PostgresMemoryStore`）と同じく、`record.createdAt` を渡せばそれを使う。
+    // ADR 0480: 呼び出し側の入力と共有しない（InMemory は structuredClone、Postgres は jsonb で往復する）。
     this.backing.recalls.set(id, {
-      ...record,
+      ...structuredClone(record),
       tenantId: ctx.tenantId,
-      createdAt: record.createdAt ?? new Date(),
+      createdAt: record.createdAt !== undefined ? new Date(record.createdAt) : new Date(),
     });
     // ADR 0165 決めたこと5: `recalls` への INSERT と「同一トランザクション」で
     // `activity_seq` を +1 する。フェイクには本物のトランザクションが無いので、
@@ -1815,7 +1820,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (!row || row.tenantId !== ctx.tenantId) {
       return null;
     }
-    return {
+    return structuredClone({
       recallId: id,
       tenantId: row.tenantId,
       subjectId: row.subjectId ?? null,
@@ -1827,7 +1832,7 @@ export class FakeMemoryStore implements MemoryStore {
       explain: row.explain,
       returnedMemories: { breakdownCaptured: true, memories: row.returnedMemories },
       createdAt: row.createdAt,
-    };
+    });
   }
 
   /**
