@@ -20,7 +20,9 @@ describe("FakeTenantSettingsStore.setEventRetention の入力検査（ADR 0479�
   it("kind が範囲外なら拒み、何も書かない（無期限として書かない）", async () => {
     const { tenantSettingsStore } = createFakeRuntimeStores();
     await expect(
-      tenantSettingsStore.setEventRetention(ctx, { kind: "bogus" } as unknown as EventRetentionSetting),
+      tenantSettingsStore.setEventRetention(ctx, {
+        kind: "bogus",
+      } as unknown as EventRetentionSetting),
     ).rejects.toThrow();
     expect(await tenantSettingsStore.getEventRetention(ctx)).toEqual({ kind: "unset" });
   });
