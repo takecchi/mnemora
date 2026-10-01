@@ -148,3 +148,33 @@ describe("FakeOutboxStore.purgeCompletedJobs（ADR 0404）", () => {
     expect(remaining).toHaveLength(3);
   });
 });
+
+describe("FakeMemoryStore.createRecall / getRecall（ADR 0480）", () => {
+  it("createdAt が Invalid Date なら拒む（InMemory・Postgres と同じ）。活動時計も進めない", async () => {
+    const { memoryStore, tenantSettingsStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createRecall(ctx, {
+        ...NEW_RECALL,
+        createdAt: new Date(Number.NaN),
+        advanceActivityClock: true,
+      }),
+    ).rejects.toThrow(/createdAt must be a valid Date/);
+    expect(await tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
+  });
+
+  it("書いた後に入力を、読んだ後に戻り値を書き換えても、記録は変わらない（Postgres は往復で別物になる）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const input = { ...NEW_RECALL, query: { text: "q" }, explain: { stages: [] as never[] } };
+    const id = await memoryStore.createRecall(ctx, input);
+    (input.query as { text: string }).text = "changed";
+    input.explain.stages.push({ stage: "x" } as never);
+    const first = await memoryStore.getRecall(ctx, id);
+    expect(first?.query).toEqual({ text: "q" });
+    expect(first?.explain.stages).toEqual([]);
+    (first!.query as { text: string }).text = "changed-again";
+    first!.createdAt.setFullYear(1999);
+    const second = await memoryStore.getRecall(ctx, id);
+    expect(second?.query).toEqual({ text: "q" });
+    expect(second!.createdAt.getFullYear()).not.toBe(1999);
+  });
+});

@@ -86,3 +86,19 @@ describe("testkit の fixture は claimBatch で NUL を含む claimedBy を拒�
     expect(claimed.map((j) => [j.kind, j.attempts, j.claimedBy])).toEqual([["embed", 1, "w"]]);
   });
 });
+
+describe("testkit の fixture は createRecall で Invalid Date の createdAt を拒む（ADR 0480）", () => {
+  it("拒み、記録も活動時計も進めない。有効な日付は受ける（陽性対照）", async () => {
+    const memoryStore = new InMemoryMemoryStore();
+    const settings = new InMemoryTenantSettingsStore(memoryStore.activitySeq);
+    await expect(
+      memoryStore.createRecall(ctx, record({ createdAt: new Date(Number.NaN) })),
+    ).rejects.toThrow(/^createRecall: createdAt must be a valid Date \(got Invalid Date\)/);
+    expect(await settings.getActivitySeq(ctx)).toBe(0);
+    const id = await memoryStore.createRecall(
+      ctx,
+      record({ createdAt: new Date("2026-01-01T00:00:00.000Z") }),
+    );
+    expect(await memoryStore.getRecall(ctx, id)).not.toBeNull();
+  });
+});
