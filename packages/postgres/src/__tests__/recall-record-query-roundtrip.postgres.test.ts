@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx, MemoryStore, RecallRecord, Runtime } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
@@ -121,5 +122,64 @@ describe("getRecall が読み戻す query の、JSON で往復しない値（今
     expect(query.occurredBefore).toBe(OCCURRED_BEFORE.toISOString());
     expect(query.validAt).toBe(VALID_AT.toISOString());
     expect(Object.is((query.vector as number[])[0], 0)).toBe(true);
+  });
+});
+
+const NEW_RECALL = {
+  tenantId: ctx.tenantId,
+  subjectId: null,
+  query: { text: "q" },
+  budget: null,
+  omitted: [],
+  usage: {
+    chars: 0,
+    estimatedTokens: 0,
+    counter: "heuristic" as const,
+    byTier: { full: 0, digest: 0, index: 0 },
+    indexChars: 0,
+  },
+  indexBand: { groups: [], totalInScope: 0, countKind: "exact" as const },
+  explain: { stages: [] },
+  returnedMemories: [],
+};
+
+describe("createRecall の createdAt が Invalid Date（ADR 0480）", () => {
+  it("Postgres は拒む（timestamptz に入らない）。何も書かない", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    await expect(
+      store.createRecall(ctx, { ...NEW_RECALL, createdAt: new Date(Number.NaN) }),
+    ).rejects.toThrow();
+    const count = await db.execute(sql`SELECT count(*)::int AS n FROM recalls`);
+    expect((count.rows[0] as unknown as { n: number }).n).toBe(0);
+  });
+
+  it("testkit の fixture も拒み、何も書かない。有効な日付は受ける（陽性対照）", async () => {
+    const store = new InMemoryMemoryStore();
+    await expect(
+      store.createRecall(ctx, { ...NEW_RECALL, createdAt: new Date(Number.NaN) }),
+    ).rejects.toThrow(/createdAt must be a valid Date/);
+    const id = await store.createRecall(ctx, {
+      ...NEW_RECALL,
+      createdAt: new Date("2026-01-01T00:00:00.123Z"),
+    });
+    expect((await store.getRecall(ctx, id))?.createdAt.toISOString()).toBe(
+      "2026-01-01T00:00:00.123Z",
+    );
+  });
+});
+
+describe("getRecall の id（ADR 0480 の照合。今の振る舞い）", () => {
+  it("Postgres: 大文字は同じ行を引き、小文字の recallId を返す。壊れた形・別テナントは null", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const id = await store.createRecall(ctx, NEW_RECALL);
+    expect((await store.getRecall(ctx, id.toUpperCase()))?.recallId).toBe(id);
+    for (const bad of [` ${id} `, `{${id}}`, id.replace(/-/g, ""), `${id}\u0000`, ""]) {
+      expect(await store.getRecall(ctx, bad)).toBeNull();
+    }
+    expect(await store.getRecall({ tenantId: "other" }, id)).toBeNull();
   });
 });

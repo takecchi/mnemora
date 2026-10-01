@@ -559,7 +559,10 @@ export class PostgresMemoryStore implements MemoryStore {
     memoryId: MemoryId,
     tags: readonly string[],
   ): Promise<void> {
-    const uniqueNames = Array.from(new Set(tags));
+    // ADR 0476: `labels` の行ロックを取る順を、`tags` の並び（LLM が返した順）ではなく名前の順に固定する。
+    // 並びのままだと、同じ語彙を逆の順で持つ2つの作成が互いの行を待って 40P01（deadlock detected）で落ちる。
+    // 並べ替えるのはロックの順だけで、`Memory.tags` の並び・重複は変えない。
+    const uniqueNames = Array.from(new Set(tags)).sort();
     for (const name of uniqueNames) {
       const labelResult = await exec.execute(sql`
         INSERT INTO labels (id, tenant_id, name, status, proposed_count)
