@@ -367,13 +367,25 @@ export function calibrateRecallFootprint(
   fallback: RecallFootprintProfile = BUILTIN_RECALL_FOOTPRINT_PROFILE,
 ): RecallFootprintProfile {
   const usable = samples
-    .filter((s) => s.bandEntryCount === 0 && s.memoryCount > 0)
+    // ADR 0467: 件数・総量が有限でない標本は、何も語っていない。最小二乗の和に混ぜると、係数が NaN・Infinity に
+    // なっても『較正済み』の顔で返ってしまう。使える標本に数えない（`sampleCount` は使った分）。
+    .filter(
+      (s) =>
+        s.bandEntryCount === 0 &&
+        s.memoryCount > 0 &&
+        Number.isFinite(s.memoryCount) &&
+        Number.isFinite(s.totalChars),
+    )
     .map((s) => ({ ...s, totalChars: s.totalChars - structuralCarryForSample(s) }));
   const counts = usable.map((s) => s.memoryCount);
-  const observedMemoryCount = {
-    min: counts.length > 0 ? Math.min(...counts) : 0,
-    max: counts.length > 0 ? Math.max(...counts) : 0,
-  };
+  // ADR 0467: `Math.min(...counts)` は、標本が約12万件を超えるとスプレッド引数の上限で RangeError になる。
+  let observedMin = 0;
+  let observedMax = 0;
+  for (const [i, c] of counts.entries()) {
+    if (i === 0 || c < observedMin) observedMin = c;
+    if (i === 0 || c > observedMax) observedMax = c;
+  }
+  const observedMemoryCount = { min: observedMin, max: observedMax };
 
   const borrowed: FootprintCoefficientName[] = [];
   let charsPerDigest = fallback.charsPerDigest;
@@ -389,7 +401,8 @@ export function calibrateRecallFootprint(
     const sxy = usable.reduce((a, s) => a + s.memoryCount * s.totalChars, 0);
     const denominator = n * sxx - sx * sx;
     const slope = (n * sxy - sx * sy) / denominator;
-    if (slope > 0) {
+    // ADR 0467: 有限でない傾き（合計のオーバーフローなど）も、0以下と同じく採らない。
+    if (Number.isFinite(slope) && slope > 0) {
       charsPerDigest = slope;
     } else {
       // ⚠ 下の `distinct === 1` の枝と同じ規律——**digest の平均長が0以下であることはありえない。**
@@ -398,7 +411,13 @@ export function calibrateRecallFootprint(
       // ⟹ 傾きは既定値から借りて名前で出し、切片は借りた傾きのもとで標本の平均を通るように決める。
       borrowed.push("charsPerDigest");
     }
-    fixedIndexChars = (sy - charsPerDigest * sx) / n;
+    const intercept = (sy - charsPerDigest * sx) / n;
+    if (Number.isFinite(intercept)) {
+      fixedIndexChars = intercept;
+    } else {
+      // ADR 0467: 切片が数にならない（合計のオーバーフロー）。傾きと同じ形で既定値から借りて名前で出す。
+      borrowed.push("fixedIndexChars");
+    }
   } else if (distinct === 1) {
     // `memoryCount` が1種類しかない ⟹ 切片は決まらない。切片を既定値から借りて、
     // 傾きだけを決める。**借りたことは名前で出す。**
@@ -406,7 +425,7 @@ export function calibrateRecallFootprint(
     const n = usable.length;
     const meanY = usable.reduce((a, s) => a + s.totalChars, 0) / n;
     const derived = (meanY - fixedIndexChars) / usable[0]!.memoryCount;
-    if (derived > 0) {
+    if (Number.isFinite(derived) && derived > 0) {
       charsPerDigest = derived;
     } else {
       // ⚠ 借りた切片のほうが標本の総量より大きい ⟹ 傾きが 0 以下になる。
@@ -865,6 +884,13 @@ export interface FullLogComparison {
  * この関数は答えない（`examples/chat/README.md`「⭐ 削減率だけでは意味を持たない」）。
  * **量で負けていても想起のために mnemora を使う、という判断はありうる**——
  * その判断の材料として量を出すのが、この関数の役目である。
+ *
+ * ⚠ **入力が NaN で見積もりが数にならないとき**（`shape` の `memoryCountInScope`・`limit`・`digestBandLimit`・
+ * `associationCount`、または `fullLogChars` が NaN）は、`verdict` は `"too_close_to_call"`、`estimatedShare` は
+ * `NaN`、`reasons` に `within_tolerance` は無い（ADR 0467。以前は `"full_log_smaller"` を返していた）。
+ * **この状態を名乗る `reasons` の code は無い**——`estimatedShare` が NaN であることで見分けること。
+ * `shape` の負・小数の値は検査しない（そのまま計算に入る）。`tolerance` が NaN のときは `too_close_to_call` に
+ * ならない（許容誤差の内側に入る場合が無くなる）。
  */
 export function compareWithFullLog(input: FullLogComparisonInput): FullLogComparison {
   const profile = input.profile ?? BUILTIN_RECALL_FOOTPRINT_PROFILE;
@@ -931,11 +957,22 @@ export function compareWithFullLog(input: FullLogComparisonInput): FullLogCompar
   // --- 結論 ---
   // `fullLogChars === 0` は「会話ログが空」であり、比が定義できない。
   // **0除算の結果（Infinity / NaN）を結論の顔で返さない。**
-  const estimatedShare =
-    fullLogChars > 0 ? estimate.chars / fullLogChars : Number.POSITIVE_INFINITY;
+  //
+  // ADR 0467: 入力が NaN で、見積もりか会話ログの量が数にならないときも同じ。比較がすべて偽になって
+  // `full_log_smaller` へ落ちる（あるいは `Infinity` の share で断言する）代わりに、`estimatedShare` を NaN にして
+  // `too_close_to_call`（「どちらとも言えない」）で返す。`within_tolerance` の札は立てない（許容誤差の内側に
+  // 入ったわけではない）。この状態を名乗る札の code は無い——足すと公開の型が変わる（ADR 0467 の材料）。
+  const undecidable = Number.isNaN(fullLogChars) || !Number.isFinite(estimate.chars);
+  const estimatedShare = undecidable
+    ? Number.NaN
+    : fullLogChars > 0
+      ? estimate.chars / fullLogChars
+      : Number.POSITIVE_INFINITY;
 
   let verdict: FullLogVerdict;
-  if (Math.abs(estimatedShare - 1) <= tolerance) {
+  if (undecidable) {
+    verdict = "too_close_to_call";
+  } else if (Math.abs(estimatedShare - 1) <= tolerance) {
     verdict = "too_close_to_call";
     reasons.push({ code: "within_tolerance", tolerance, estimatedShare });
   } else if (estimatedShare < 1) {
