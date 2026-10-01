@@ -14,6 +14,7 @@ import type { OutboxJobKind } from "../interfaces/scheduler.js";
 import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
+  assertValidEventRetentionKind,
   assertValidHalfLifeRecalls,
   assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
@@ -3785,8 +3786,15 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    // ADR 0479: InMemoryTenantSettingsStore・Postgres と同じ検査（kind は Issue #1168、days の上限は int4 列）。
+    assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
       assertValidEventRetentionDays(retention.days);
+      if (retention.days > 2 ** 31 - 1) {
+        throw new Error(
+          `setEventRetention: days does not fit in a Postgres "integer" (int4) column (got ${retention.days})`,
+        );
+      }
     }
     this.eventRetentionDays.set(ctx.tenantId, retention.kind === "days" ? retention.days : null);
   }
@@ -3836,7 +3844,8 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
     assertValidHalfLifeRecalls(recalls);
-    if (!Number.isFinite(Math.fround(recalls))) {
+    const rounded = Math.fround(recalls);
+    if (!Number.isFinite(rounded) || rounded === 0) {
       throw new Error(
         `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
       );

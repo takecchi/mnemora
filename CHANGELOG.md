@@ -677,6 +677,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 構築時に検査して断るのは新しく断る入力なので、直していない（ADR 0477 の材料）。「そのまま渡す」を縛る歯（`tick-driver.option-passthrough.test.ts`、Redis 不要）を足した。
   - 非破壊と数える（文書と歯だけ）。
 
+- **`examples/chat`: README に、ソースが読むのに載っていなかったフラグと環境変数の一覧を足した。実装は変えていない**（[ADR 0478](./docs/decisions/0478-example-chat-readme-flags-env-coverage.md)、穴探し49巡目）
+  - `answer-time-weighting` の `--trials=N`・`--temperature=N`、`MNEMORA_BENCH_CHANNELS`・`MNEMORA_LEXICAL_STORE`・各サブコマンドの `MNEMORA_*_JSON`・`consolidation-cost`／`archive-sweep-cost` の調整用変数など、`cli.ts` のサブコマンドが読む変数を、新しい節「フラグと環境変数の一覧」に表にした。既定値の数は書き写さず、持っている定数・関数を指した。`src/scripts/*`・`src/bench/*` の単発の測定スクリプト専用の変数は載せない基準を節の冒頭に書いた。
+  - 載せると決めた名前が README に在り、ソースが読んでいることを縛る歯（`scripts/__tests__/example-chat-readme-flags-env.test.mjs`）を足した。`docs/` と README のコード片・散文の数値を型・定数と突き合わせた結果（ずれなし）は ADR 0478。
+  - 非破壊と数える（文書と歯だけ）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

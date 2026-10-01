@@ -130,6 +130,44 @@ pnpm --filter @mnemora/example-chat run test:db
 
 ---
 
+## フラグと環境変数の一覧（サブコマンドごと。`--help` が正）
+
+**この節は「利用者が `pnpm run <サブコマンド>` で渡す想定のもの」の一覧である。**正は `src/cli.ts` の usage（`--help` の出力）と、各ファイルが読む環境変数の定義である。
+既定値の数はここに書き写さない（ずれるため。ADR 0234）——どの定数・どの関数が既定を持つかを指す。
+（[ADR 0478](../../docs/decisions/0478-example-chat-readme-flags-env-coverage.md)。2026-10-02 に、ソースが読むのに README に無かったものを足した。）
+
+**載せないもの（基準）**: `src/scripts/*`・`src/bench/*` の単発の測定スクリプトだけが読む変数（`MEASURE_*`・`MNEMORA_ASSOC_*`・
+`MNEMORA_ASSOCIATION_DEFAULT_ON_MEASURE_*`・`MNEMORA_OPENAI_FP_CEILING_*`・`MNEMORA_MARGIN_CANDIDATE_ROUNDS`・`MNEMORA_1430_CONDITION`・
+`MNEMORA_CANDIDATE4_CONDITION`・`MNEMORA_RECORD_CASSETTE_PATH`・`MNEMORA_RECORD_CONDITION`・`MNEMORA_ANSWER_CASE_SET`・`MNEMORA_RANK_LISTING_JSON`）は、
+その ADR・スクリプトの冒頭のコメントが説明するもので、この README は網羅しない。一覧は
+`rg 'process\.env\.' examples/chat/src/scripts examples/chat/src/bench` で出せる。
+
+| 対象 | 渡し方 | 意味・既定の出所 |
+|---|---|---|
+| `answer-time-weighting` | `-- --trials=N` | 試行回数。1 以上の整数で、省略時の値は `cli.ts` の `parseTimeWeightingTrials`。評価に使うときは呼び出し側が明示する（既定の値は `cli.ts` を見ること） |
+| `answer-time-weighting` | `-- --temperature=N` | 回答 LLM の temperature。省略時は渡さない（`MNEMORA_LLM=openai` のときだけ効き、それ以外は無視される）。`cli.ts` の `parseTimeWeightingTemperature` |
+| `answer-time-weighting`・`correction-candidates` | `-- --dev` | 開発用のケース集合だけに絞る（既定は dev と eval の両方） |
+| `answer-time-weighting` | `MNEMORA_TIME_WEIGHTING_JSON=<path>` | 機械可読な結果の書き先。設定されたときだけ書く |
+| `compare` | `MNEMORA_COMPARE_JSON=<path>` | 同上（設定されたときだけ書く。未設定なら出力は1バイトも変わらない） |
+| `retrieval` | `MNEMORA_RETRIEVAL_JSON=<path>` | 同上 |
+| `retrieval` | `MNEMORA_BENCH_CHANNELS=ann,lexical` | `recall()` に渡す `channels`。カンマ区切りで、値は `RECALL_CHANNELS`（`packages/core`）のもの。未指定・空は既定のまま（`channels` を渡さない）。未知の値は例外（[ADR 0148](../../docs/decisions/0148-bench-lexical-channel-selectable-default-unchanged.md)） |
+| 全サブコマンド（`createExampleRuntime` を使うもの） | `MNEMORA_LEXICAL_STORE=trigram` | 語彙 store を `PostgresTrigramLexicalStore`（opt-in、pg_trgm）に差し替える。未指定・空・`default` は従来どおり `PostgresLexicalStore`。それ以外は例外（[ADR 0319](../../docs/decisions/0319-optional-trigram-lexical-store.md)） |
+| `numeral-token-probes` | `MNEMORA_NUMERAL_TOKEN_OPENAI_JSON=<path>` | OpenAI 実埋め込みの追加 arm の結果の書き先（本体の `MNEMORA_NUMERAL_TOKEN_JSON` はこのサブコマンドの節に書いてある） |
+| `association-probes` | `MNEMORA_ASSOCIATION_JSON=<path>` | 機械可読な結果の書き先 |
+| `consolidation-cost` | `MNEMORA_CONSOLIDATION_JSON=<path>` | 機械可読な結果の書き先 |
+| `consolidation-cost` | `MNEMORA_CONSOLIDATION_GROUP_SIZE`・`MNEMORA_CONSOLIDATION_BUDGET_LADDER`・`MNEMORA_CONSOLIDATION_RECALL_LIMIT` | 束ねる filler の件数・予算の段・各段の `recall()` の `limit`。既定は `src/consolidation-cost-options.ts` の `DEFAULT_GROUP_SIZE`・`DEFAULT_BUDGET_LADDER`・`DEFAULT_RECALL_LIMIT`。不正な値は例外（黙って既定へ倒れない） |
+| `archive-sweep-cost` | `MNEMORA_ARCHIVE_SWEEP_JSON=<path>` | 機械可読な結果の書き先 |
+| `archive-sweep-cost` | `MNEMORA_ARCHIVE_SWEEP_MARGIN_HOURS`・`MNEMORA_ARCHIVE_SWEEP_LIMIT`・`MNEMORA_ARCHIVE_SWEEP_BUDGET_LADDER`・`MNEMORA_ARCHIVE_SWEEP_RECALL_LIMIT` | 余白の時間・1回の掃引で archived にする上限・予算の段・各段の `limit`。既定は `src/archive-sweep-options.ts`（`DEFAULT_MARGIN_HOURS`・`DEFAULT_SWEEP_LIMIT`、予算の段と `limit` は `consolidation-cost` と同じ定数） |
+| `answer` | `MNEMORA_ANSWER_CLAIM_KEY=detect` | `answer` の経路だけで claim key の検出を opt-in する。専用カセットを使う（`src/answer-claim-key-options.ts`、[ADR 0326](../../docs/decisions/0326-answer-path-claim-key-contested-opt-in-measurement.md)） |
+| `answer-trials` | `MNEMORA_ANSWER_TRIALS_RENDERS=recorded,digest-only` | 描画の種類（カンマ区切り）。未指定の既定は `src/answer-trials.ts` |
+| `embedding-fingerprint` | `MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON=<path>` | 生ベクトルを含む中間形式の書き先 |
+| `embedding-fingerprint` | `MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS=N` | 推論のスレッド数（正の整数。不正は例外）。`src/embedding-fingerprint.ts` |
+
+（`MNEMORA_TIME_TERM_JSON`・`MNEMORA_VALIDITY_JSON`・`MNEMORA_ANSWER_JSON`・`MNEMORA_ANSWER_TRIALS_JSON`・`MNEMORA_IDENTIFIER_PROBE_JSON`・`MNEMORA_NUMERAL_TOKEN_JSON`・
+`MNEMORA_CORRECTION_CANDIDATE_JSON`・`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON`・`MNEMORA_ANSWER_TRIALS_N` は、それぞれのサブコマンドの節に既に書いてある。）
+
+---
+
 ## `chat`: observe/recall の往復・omitted・usage・budget
 
 固定の合成会話（後述）を `observe()` で取り込み、終盤の質問を `recall()` する。
