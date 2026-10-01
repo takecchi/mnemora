@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { escapeLiteral } from "pg";
 import type { EmbeddingSpaceId } from "@mnemora/core";
 import {
@@ -53,19 +53,19 @@ function embeddingSpaceComment(space: EmbeddingSpaceId): string {
  * advisory lock の内側で呼ぶこと（読んでから書くまでに、別の登録が割り込まないため）。
  */
 async function recordOrCheckEmbeddingSpace(
-  pool: Pool,
+  db: Pick<PoolClient, "query">,
   schema: string | undefined,
   table: string,
   space: EmbeddingSpaceId,
 ): Promise<void> {
-  const result = await pool.query<{ comment: string | null }>(
+  const result = await db.query<{ comment: string | null }>(
     `SELECT obj_description(to_regclass($1), 'pg_class') AS comment`,
     [qualifiedLiteral(schema, table)],
   );
   const recorded = result.rows[0]?.comment ?? null;
   const expected = embeddingSpaceComment(space);
   if (recorded === null) {
-    await pool.query(`COMMENT ON TABLE ${qualify(schema, table)} IS ${escapeLiteral(expected)}`);
+    await db.query(`COMMENT ON TABLE ${qualify(schema, table)} IS ${escapeLiteral(expected)}`);
     return;
   }
   if (!recorded.startsWith(EMBEDDING_SPACE_COMMENT_PREFIX) || recorded === expected) {
@@ -276,9 +276,9 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  * `qualify(schema, ...)` で完全修飾し、`vector` / `vector_cosine_ops` の型・operator
  * class を `qualify(extensionSchema, ...)` で修飾する（`extensionSchema` 省略時は
  * {@link DEFAULT_EXTENSION_SCHEMA}）。**`search_path` は一切触らない**——`migrate.ts`
- * の `SET LOCAL` と違い、`registerEmbeddingSpace` は `pool.query` を直接使う
- * （専用コネクションを保持しない）ため、`SET LOCAL` で守れる範囲のトランザクションを
- * 持たない。完全修飾すれば `search_path` に依存する必要が無く、pool のコネクションに
+ * の `SET LOCAL` と違い、`registerEmbeddingSpace` は、advisory lock を握った
+ * 専用コネクションの上で、`BEGIN` を開かずに DDL を打つ（ADR 0460。以前は別の接続の `pool.query`）ため、
+ * `SET LOCAL` で守れる範囲のトランザクションを持たない。完全修飾すれば `search_path` に依存する必要が無く、pool のコネクションに
  * session 状態を残す心配も無くなる。
  *
  * **索引名は修飾しない**——索引は常にテーブルと同じスキーマに作られるので、
@@ -344,11 +344,20 @@ export async function registerEmbeddingSpace(
     REGISTER_EMBEDDING_SPACE_LOCK_ERRORS,
   );
   try {
+    // ADR 0460: DDL は、advisory lock を握った接続（`lockClient`）の中で打つ。以前は `pool.query` で
+    // 別の接続を使っていたので、`max: 1` の Pool では、借り切られた接続の返却を待って止まった
+    // （`lock_timeout` は advisory lock の待ちにしか効かない）。`lockClient.query` は `BEGIN` を
+    // 開かないので、文ごとの暗黙のトランザクションという境界は `pool.query` のときと同じである。
+    // 変わるのはセッションの設定だけで、`acquireAdvisoryLock` が敷いた `lock_timeout`（advisory lock を
+    // 待つ上限）がこの接続に残っている——DDL の表ロック待ちにまで効いてしまうので、ここで戻す
+    // （`runMigrations` が同じ形で `RESET lock_timeout` している）。
+    await lockClient.query("RESET lock_timeout");
+
     // dimensions は上で正整数であることを確認済みなので、そのまま埋め込んでよい
     // （パラメータ化できない — vector(N) の N は SQL の識別子/型修飾子の位置にある）。
     // `"public"."vector"(1536)` は正しい型構文である（`qualify` が schema 未指定なら
     // 素通しするので、schema 未指定時は今日と同じ `vector(1536)` になる）。
-    await pool.query(`
+    await lockClient.query(`
       CREATE TABLE IF NOT EXISTS ${qualify(schema, table)} (
         tenant_id   text         NOT NULL,
         memory_id   uuid         NOT NULL REFERENCES ${qualify(schema, "memories")}(id) ON DELETE CASCADE,
@@ -361,12 +370,12 @@ export async function registerEmbeddingSpace(
 
     // Issue #1151: このテーブルを別の空間の組が既に使っていないかを、コメントの記録で見張る。
     // 索引の作成より前に置く——衝突なら、既存のテーブルに何も足さずに拒む。
-    await recordOrCheckEmbeddingSpace(pool, schema, table, space);
+    await recordOrCheckEmbeddingSpace(lockClient, schema, table, space);
 
     // HNSW 索引。operator class を明示する（cosine 距離を採用する。
     // docs/memory-model.md §10 の例と同じ形）。索引名は修飾しない（索引は
     // テーブルと同じスキーマに作られる）。
-    await pool.query(`
+    await lockClient.query(`
       CREATE INDEX IF NOT EXISTS ${index}
         ON ${qualify(schema, table)}
         USING hnsw (embedding ${qualify(extensionSchema, "vector_cosine_ops")});
@@ -410,7 +419,7 @@ export async function registerEmbeddingSpace(
     // advisory lock で直列化しており、`CONCURRENTLY` は別の理由（索引が2本同時に
     // 作られる競合を pgvector 側で検査していない）で見送っている——詳細は ADR 0343
     // 「引き受けた負債」）。実測した構築時間は同 ADR を参照。
-    await pool.query(`
+    await lockClient.query(`
       CREATE INDEX IF NOT EXISTS ${zeroNormIndex}
         ON ${qualify(schema, table)} (tenant_id, memory_id)
         WHERE ${qualify(extensionSchema, "vector_norm")}(embedding) = 0;
@@ -434,7 +443,7 @@ export async function registerEmbeddingSpace(
     //
     // `CONCURRENTLY` は使わない——`zeroNormIndex` と同じ理由（advisory lock による
     // 直列化、pgvector 側の競合未検査）。実測した構築時間は ADR 0383「実測」節参照。
-    await pool.query(`
+    await lockClient.query(`
       CREATE INDEX IF NOT EXISTS ${memoryIdIndex}
         ON ${qualify(schema, table)} (memory_id);
     `);

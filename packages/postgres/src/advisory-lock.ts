@@ -13,7 +13,7 @@ import type { Pool, PoolClient } from "pg";
  * **切り出したのは機構だけ**——「待って取れた／時間切れ／ロック機構自体が使えなかった」の
  * 3状態を呼び出し側が `instanceof` で見分けられるという性質、専用コネクションを
  * pool から借り切る・`set_config('lock_timeout', ...)` を session に敷く・失敗時は必ず
- * release してから投げる・終了時に `lock_timeout` を `'0'` へ戻す、という個々の理由は
+ * release してから投げる・終了時に `RESET lock_timeout` で接続の既定値へ戻す（ADR 0460。以前は `'0'` を書いていて、利用者が接続側で渡した値を消していた）、という個々の理由は
  * `migrate.ts` の元のコメントからそのまま運んである。
  *
  * **呼び出し元ごとに別のロックキーを使うこと。** `pg_advisory_lock` のキー空間は
@@ -122,7 +122,7 @@ export async function acquireAdvisoryLock(
     // SET だとプレースホルダを使えないため set_config() 経由にする
     // （文字列結合で SQL を組み立てない）。false = セッションスコープ
     // （このコネクションが pool へ戻った後に他の用途で再利用されても
-    // 悪影響が残らないよう、後で必ず '0' に戻す）。
+    // 悪影響が残らないよう、後で必ず `RESET lock_timeout` で接続の既定値に戻す。ADR 0460）。
     await client.query("SELECT set_config('lock_timeout', $1, false)", [String(lockTimeoutMs)]);
   } catch (err) {
     client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
@@ -134,7 +134,7 @@ export async function acquireAdvisoryLock(
   try {
     waitedMs = await acquireAdvisoryLockOnClient(client, lockKey, errors);
   } catch (err) {
-    await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
+    await client.query("RESET lock_timeout").catch(() => {});
     client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
     client.release();
     throw err;
@@ -248,7 +248,7 @@ export async function releaseAdvisoryLock(client: PoolClient, lockKey: bigint): 
   try {
     await releaseAdvisoryLockOnClient(client, lockKey);
   } finally {
-    await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
+    await client.query("RESET lock_timeout").catch(() => {});
     // `acquireAdvisoryLock` が付けた {@link NOOP_CLIENT_ERROR_HANDLER} を、pool へ返す前に
     // 外す（外し忘れるとリスナーが積み上がる。同コメント参照）。
     client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
