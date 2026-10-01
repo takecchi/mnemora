@@ -500,5 +500,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0487](./0487-usage-counter-label.md) | `usage.counter` の印は連結の計測の印であり、段4の予算の判定に使った印とは食い違いうる。今の振る舞いを文書に書く | 採用 (2026-10) |
 | [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（ずれは見つからなかった） | 採用 (2026-10) |
 | [0491](./0491-claim-key-relative-period-across-observations.md) | Issue #1436 — 別々の observation に分かれた、相対的な期間（去年／今年）だけが違う正しい2主張が contested になる限界を、今の振る舞いとして `detectContested` の TSDoc に書き、歯で縛る | 採用 (2026-10) |
+| [0495](./0495-doc-code-drift-sweep.md) | 文書とコードのずれを横に掃く — パッケージの README・約束の文書・公開の型の TSDoc を、今の main の型と実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
