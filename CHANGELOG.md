@@ -684,6 +684,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 載せると決めた名前が README に在り、ソースが読んでいることを縛る歯（`scripts/__tests__/example-chat-readme-flags-env.test.mjs`）を足した。`docs/` と README のコード片・散文の数値を型・定数と突き合わせた結果（ずれなし）は ADR 0478。
   - 非破壊と数える（文書と歯だけ）。
 
+- **`@mnemora/core`: `detectContested` の TSDoc に、別々の observation に分かれた、相対的な期間（去年／今年）だけが違う正しい 2 主張も contested になる、という今の限界を書き、歯で縛った。実装・プロンプトは変えていない**（[ADR 0491](./docs/decisions/0491-claim-key-relative-period-across-observations.md)、Issue #1436）
+  - 相対的な期間は `validFrom`/`validUntil` に入らないので、有効期間の重なり判定が「重なる」と答える。同じ発話の兄弟は ADR 0377 で除かれるが、別 observation は除かれない。呼び出し側は `observe()` に期間を明示すれば、重ならない対は contested にならない。直し方（抽出で期間を入れる／claim key のプロンプトで別の predicate にする）は既定の経路の文言を変えるのでオーナーの判断待ち。
+  - 非破壊と数える（文書と歯だけ）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
