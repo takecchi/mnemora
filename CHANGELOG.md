@@ -457,6 +457,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えると、`RangeError` で終わるのに対（両側 `contested`）が残っていたのを、書き込む前に落とすようにした。大文字の `correctedId` は、store が同じ記憶と言えば候補として扱う。`buildCorrectionReason` の `winner` は、大文字小文字だけ違う `winnerId` でも実際の勝者を指す。**（[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）
+  - **穴**: (1) `winnerId` がどちらの id でもないと、`markContested` が書いたあとに `resolveContested` が `RangeError` を投げ、対だけが残った。(2) `@mnemora/postgres` で候補の id を大文字にして `correctedId` に渡すと、`markContested` は受け付けるのに `not_a_candidate` になった。(3) 大文字の `winnerId` で訂正する側が勝っても、`buildCorrectionReason` は `winner=corrected` と書いた。
+  - **いまの振る舞い**: (1) 例外の型と文言は同じで、何も書かれない。(2) 大文字小文字だけの違いは store に従う（大文字小文字を区別する store は今どおり `not_a_candidate`）。(3) これから書く `meta.note` だけが変わる（保存済みの `note` は書き換えない）。断る入力は増えていない。
+  - **直していない点**: 未知の `resolution.kind`（型を外した呼び出し）は `supersede` として扱われ、両側が `superseded` になる。`reason` の NUL・孤立サロゲートは今までどおり例外（Postgres と fixture で例外の型が違う）。ADR 0446 の「引き受けた負債」。
+
 - **v1.1.0 より前（v1.0.0〜v1.0.2）に purge した行に残っていた `tags`・`attributes`・claim key・`memory_labels` が、purge をかけ直すと消えるようになった。**（[ADR 0437](./docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3・4、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)・[ADR 0382](./docs/decisions/0382-vector-store-delete-across-spaces.md) の続き）
   - **穴**: v1.0.x の `purgeMemory` は `content`・`digest`・`purged_at` しか書き換えなかった。v1.1.0（ADR 0375）からは、purge はそれらも消すが、**既に purge 済みの行には効かない**（migration は遡らない。purge をかけ直しても `already_purged` が返るだけだった）。
   - **いまの振る舞い**: **v1.1.0 より前に purge した行は、purge をかけ直すと消える。かけ直すまでは残る。** `runtime.purge` が `already_purged` を返すとき（`dryRun` でないとき）、`MemoryStore.scrubPurged` が呼ばれ、`tags`・`attributes`・claim key・`memory_labels` を消し、`proposed` な label の `proposedCount` を外した本数だけ減らす。今のコードで purge した行を、二重に数え減らさない（べき等）。**migration で遡って一括で消すことは、していない**（オーナーの領分）。
