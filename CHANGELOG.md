@@ -457,6 +457,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/testkit` の provider の fake・カセットを、interface の約束と本物の provider に揃えた。`recall()` は `Float32Array` などの数値の型付き配列のクエリ埋め込みも受ける。**（[ADR 0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）
+  - **落ちる入力が増える**: `SeededEmbeddingProvider` は種と delegate の空間が違えば構築で落ちる。`CassetteRecorder` は違う空間・モデルの2回目以降の記録で落ちる。`assertCassette` は、成分が有限でない・`dimensions` が正の整数でない・鍵が入力と一致しないカセットを読んだ時点で落とす。`RecordedEmbeddingProvider` は有限でない記録を返さずに落ちる。`RecordingEmbeddingProvider` は delegate の壊れた戻り（次元違い・有限でない成分）を記録せずに落ちる。`DeterministicEmbeddingProvider` は `dimensions` が正の整数でなければ構築で落ちる（以前は `embed` で落ちるか、`0` は空のベクトルを返した）。
+  - **直した振る舞い**: Seeded\*・Recording\* は `opts`（`AbortOptions`）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する（失敗は memo に残さない）。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
+  - **`recall()`**: 型付き配列のクエリ埋め込みが、ingest（embed ジョブ）と同じく通る（以前は `embedding_provider_unavailable`）。
+  - 触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）、conformance suite。
+
 - **`@mnemora/postgres`: `observe` の抽出で、候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーが消えなくなった。**接続が切れたときなどに、呼び出し側へ届くのが `Failed query: rollback to savepoint …` や 25P02 だったのを、元のエラー（22021 など）にした。巻き戻しの失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。新しい例外の型は作っていない。トランザクションの状態が分からないので、続けず、落とした候補（`dropped`）にも積まない。巻き戻しが成功する悪い候補は従来どおり落として他を書く。上流（drizzle-orm）の不具合で、ここで包んで直した（上流への報告はしていない）。（[ADR 0451](./docs/decisions/0451-savepoint-rollback-failure-keeps-original-error.md)、[ADR 0444](./docs/decisions/0444-pool-begin-release-rollback-error-preserved.md) の続き）
 
 - **`@mnemora/bullmq`: README・TSDoc の「コードからの読み」を実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測り、ずれていた所を直した。**（[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md)。コードの振る舞いは変えていない）
