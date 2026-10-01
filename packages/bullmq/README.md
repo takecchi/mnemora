@@ -52,7 +52,7 @@ Redis サーバを同梱・起動しない。
 
 ## 動く最小の例（Redis が無いため未実行——型のみ確認）
 
-```ts
+```ts check
 import { createBullmqTickDriver } from "@mnemora/bullmq";
 import type { Runtime } from "@mnemora/core";
 
@@ -99,14 +99,26 @@ tick のジョブがもう発火しない。エラーにもならない。動い
 何もしない（冪等）ので、登録はし直されない。新しく作った driver の `start()` が `upsertJobScheduler` で登録し直すと、
 再び発火する。⟹ rolling deploy や台数の縮小で1台を止めるときは、残りのプロセスのどれかを再起動する
 （新しい driver で `start()` する）こと。
-（今の振る舞いを書いたもの。コードを読んで確かめた。Redis が無いため走らせてはいない。）
+（【実測】redis-server 7.4.7・bullmq 6.3.8。同じ `queueName`・`jobName` の driver を2つ `start()` し、一方を `stop()` すると、`getJobSchedulers()` が空になり、
+動いたままの他方の Worker は、その後3秒間 tick を1回も呼ばなかった。`onTickError` も鳴らない。新しい driver の `start()` で再び発火した。
+⚠ **rolling deploy で「新しいプロセスを `start()` してから古いプロセスを `stop()` する」順だと、古い方の `stop()` が新しい方の登録を消す**——
+上の実測と同じ形なので、新しいプロセスが動いていても tick は止まる。次に `start()` する driver が現れるまで、outbox に積まれた行は処理されないまま溜まる
+（データは消えないが、embed・extract が止まったように見える）。**止めるプロセスを `stop()` する代わりに、`stop()` を呼ばずにプロセスごと終わらせる**
+（Worker の lock が切れるまでは、その Worker が掴んだ最後のジョブが stalled になりうる）、または `stop()` の後に残るプロセスのどれかで新しい driver を `start()` し直すこと。）
 
 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること。**Worker はジョブの中身を見ずに、
 自分に渡された `ctx` で `runtime.tick(ctx, tick)` を呼ぶ。テナントの違う driver が同じ `queueName` と
 同じ `jobName`（既定は `"mnemora-tick"`）を使うと、scheduler は1つに上書きされ（`everyMs` は最後に
 `start()` した driver の値になる）、1回の発火はどれか1つの Worker、つまりどれか1つのテナントの tick に
 しかならない。どのテナントが何回 tick されるかは決まらない。上の `stop()` も、全テナントの予定を止める。
-（コードからの読み。走らせてはいない。）
+（【実測】redis-server 7.4.7・bullmq 6.3.8。同じ `queueName`・`jobName` で `everyMs: 100`（テナントA）と `everyMs: 1000`（テナントB、後から `start()`）を動かすと、scheduler は1つ
+（`every: 1000`）になり、6秒間の7回の tick は A に4回・B に3回と、どちらの Worker が拾うかで振り分けられた。A は 100ms ごとには ticks されない。
+`jobName` をテナントごとに分けると、200ms・3秒で A も B も15回ずつ tick され、scheduler は2つになった。）
+
+**同じ `queueName` に、`everyMs` を変えて `start()` し直しても同じである。**`start()` は `upsertJobScheduler` で登録するので、**後から `start()` した
+driver の `everyMs` で共有の scheduler が置き換わり**、先に動いていた driver の間隔も変わる（【実測】1000ms で動いていたものが、別の driver の `start()` で 200ms になり、
+さらに 1000ms の driver の `start()` で 1000ms に戻った）。同じ driver の `start()` を重ねて呼んでも何も変わらない。`everyMs` を後から変える口は無いので、
+変えたいときは新しい driver を作って `start()` する（古い driver の `stop()` は、上のとおり新しい登録を消すので、呼ぶ順に注意）。
 
 詳しい API（`CreateBullmqTickDriverOptions` の各フィールド）は
 [`src/tick-driver.ts`](./src/tick-driver.ts) の doc コメントを見ること。
@@ -117,13 +129,16 @@ tick のジョブがもう発火しない。エラーにもならない。動い
 どちらも指定が無いとき、完了したジョブも失敗したジョブも**全部残す**（`redis-queue-backend.js` の `getKeepJobs` が
 `{ count: -1 }` を返す）。⟹ `everyMs` ごとに1件ずつ、`runtime.tick()` の戻り値（`TickResult`）を持った完了ジョブが
 Redis に溜まる（`everyMs: 5_000` なら1日に 17,280 件）。`runtime.tick()` が throw した回は、失敗の理由と stack を
-持った失敗ジョブとして残る。（コードを読んで確かめた。Redis が無いため、溜まる量は測っていない。）
+持った失敗ジョブとして残る。（【実測】redis-server 7.4.7・bullmq 6.3.8。`everyMs: 50` で5秒走らせると、`getJobCounts` が完了41・失敗13（tick を4回に1回 throw させた）、
+その queue のキーが66個、`MEMORY USAGE` の合計が約83.5KB（1ジョブあたり約1.5KB。戻り値が `{}` の最小の場合で、実際の `TickResult` や失敗ジョブの stack では
+これより大きい）だった。`removeOnComplete: { count: 5 }` を付けた素の BullMQ の Worker では、同じ条件で完了は5件で頭打ちになった。
+`everyMs: 5_000` の1日 17,280 件を 1.5KB と置くと約 26MB。件数は上の読みどおりで、バイト数は戻り値の大きさ次第である。）
 
 driver には保持の設定を渡す口が無い。Queue の側で掃除するには、同じ `queueName` の `Queue` を自分で作り、
 BullMQ の `queue.clean(grace, limit, type)` を定期的に呼ぶ（`grace` ミリ秒より古いジョブを、`type` ごとに
 最大 `limit` 件消す）。
 
-```ts
+```ts check
 import { Queue } from "bullmq";
 
 const queue = new Queue("mnemora-tick", { connection: { host: "127.0.0.1", port: 6379 } });
@@ -133,7 +148,8 @@ await queue.clean(24 * 60 * 60 * 1000, 1000, "failed");
 await queue.close();
 ```
 
-（この例は Redis が無いため走らせていない。）保持の既定値を driver に入れるかどうかは決まっていない。
+（【実測】redis-server 7.4.7・bullmq 6.3.8。この形の `queue.clean` は、上の driver が溜めた完了42件・失敗13件を、`grace: 0`・`limit: 0`（無制限）で全部消した。`limit` を付けたときは
+その件数までである。）保持の既定値を driver に入れるかどうかは決まっていない。
 
 ## ⚠ エラーの通知先（`onTickError`）
 
@@ -141,9 +157,14 @@ await queue.close();
   Worker の `'error'`（接続エラーなど）も、driver は `opts.onTickError?.(err)` へ渡すだけで、
   渡していなければ何も出さない（[`src/tick-driver.ts`](./src/tick-driver.ts)）。ログにも例外にもならず、
   tick が動かないまま見た目は静かである。**本番で使うなら渡すこと**（ログに出す・メトリクスに積むなど）。
-  ```ts
+  ```ts check
+  import { createBullmqTickDriver } from "@mnemora/bullmq";
+  import type { CreateBullmqTickDriverOptions } from "@mnemora/bullmq";
+
+  declare const base: CreateBullmqTickDriverOptions; // 必須の項目（connection・queueName・runtime など）
+
   createBullmqTickDriver({
-    // ...
+    ...base,
     onTickError: (error) => console.error("mnemora tick failed", error),
   });
   ```
@@ -154,9 +175,14 @@ await queue.close();
     リース競合で弾かれなかった件数、`TickResult.unsupported` は `failed` の内訳のうち「`tick` がその kind を処理する分岐を
     持っていなかった」ジョブの配列である（`unsupported` に入ったジョブも `failed` に数える。
     フィールドの定義は `packages/core` の `TickResult`）。
-    ```ts
+    ```ts check
+    import { createBullmqTickDriver } from "@mnemora/bullmq";
+    import type { CreateBullmqTickDriverOptions } from "@mnemora/bullmq";
+
+    declare const base: CreateBullmqTickDriverOptions; // 必須の項目（connection・queueName・runtime など）
+
     createBullmqTickDriver({
-      // ...
+      ...base,
       onTickResult: (result) => {
         if (result.failed > 0) {
           console.warn("mnemora tick: jobs failed", {
@@ -187,10 +213,33 @@ await queue.close();
   - 【実測】Redis が居ないポートを指した `Queue` と `Worker` は、それぞれ `ECONNREFUSED` を emit した
     （bullmq 6.3.8、Redis 無しで確かめた）。**Redis が在る状態での `Queue` の失敗は測っていない**
     （歯は fake の `Queue` が emit する形で縛っている）。
+  - 【実測】redis-server 7.4.7・bullmq 6.3.8。**Redis が在る状態で、動いている driver の Redis を止める**と、6秒間で `onTickError` が30回（すべて `ECONNREFUSED`。Queue と Worker の2接続で、再接続のたびに）届いた。
+    Redis を **永続化あり（`appendonly yes`）で再起動すると、tick は自動で再開した**（5秒で25回）。**永続化なしで再起動すると、scheduler が Redis ごと消えるので、tick は再開せず、
+    `onTickError` も鳴らない**（driver は `start()` のときにしか登録しない）。キャッシュ用途の Redis（永続化なし）を使うなら、再起動のあとに `start()` し直す仕組み
+    （新しい driver を作り直す）が要る。
+  - 【実測】redis-server 7.4.7・bullmq 6.3.8。**Redis が落ちている間の `start()` は、reject せず、少なくとも15秒 pending のままだった**（`maxRetriesPerRequest: null` でも、指定しなくても。その間 `onTickError` には
+    ECONNREFUSED が届く）。Redis が戻ると resolve した。「失敗したら reject し、もう一度 `start()` すればやり直す」（Issue #963）は、接続が拒まれる間は効かない。
+    `start()` に自分でタイムアウトを掛けるなら、その後の `stop()` で後始末すること。
+  - 【実測】redis-server 7.4.7・bullmq 6.3.8。`connection` に **ioredis のインスタンス**を渡すとき、`maxRetriesPerRequest: null` を指定していないインスタンス（ioredis の既定は 20）だと、
+    `createBullmqTickDriver(...)` が `BullMQ: Your redis options maxRetriesPerRequest must be null.` で**同期的に throw** する（`start()` ではなく構築の時点）。`null` を指定したインスタンスは動き、
+    `stop()` の後もそのインスタンスは閉じられない（`status` は `ready` のまま。呼び出し側が閉じる）。オプションのオブジェクトを渡した場合は、BullMQ が警告を出して上書きする。
+  - 【実測】redis-server 7.4.7・bullmq 6.3.8。**Redis が在る状態で、動いている driver の Redis を止める**と、6秒間で `onTickError` が30回（すべて `ECONNREFUSED`。Queue と Worker の2接続で、再接続のたびに）届いた。
+    Redis を **永続化あり（`appendonly yes`）で再起動すると、tick は自動で再開した**（5秒で25回）。**永続化なしで再起動すると、scheduler が Redis ごと消えるので、tick は再開せず、
+    `onTickError` も鳴らない**（driver は `start()` のときにしか登録しない）。キャッシュ用途の Redis（永続化なし）を使うなら、再起動のあとに `start()` し直す仕組み
+    （新しい driver を作り直す）が要る。
+  - 【実測】redis-server 7.4.7・bullmq 6.3.8。**Redis が落ちている間の `start()` は、reject せず、少なくとも15秒 pending のままだった**（`maxRetriesPerRequest: null` でも、指定しなくても。その間 `onTickError` には
+    ECONNREFUSED が届く）。Redis が戻ると resolve した。「失敗したら reject し、もう一度 `start()` すればやり直す」（Issue #963）は、接続が拒まれる間は効かない。
+    `start()` に自分でタイムアウトを掛けるなら、その後の `stop()` で後始末すること。
+  - 【実測】redis-server 7.4.7・bullmq 6.3.8。`connection` に **ioredis のインスタンス**を渡すとき、`maxRetriesPerRequest: null` を指定していないインスタンス（ioredis の既定は 20）だと、
+    `createBullmqTickDriver(...)` が `BullMQ: Your redis options maxRetriesPerRequest must be null.` で**同期的に throw** する（`start()` ではなく構築の時点）。`null` を指定したインスタンスは動き、
+    `stop()` の後もそのインスタンスは閉じられない（`status` は `ready` のまま。呼び出し側が閉じる）。オプションのオブジェクトを渡した場合は、BullMQ が警告を出して上書きする。
 
 ## ⚠ lock の期限切れ（stalled）で、1回の tick に `onTickResult` と `onTickError` の両方が届きうる
 
-🔴 **【未実測】BullMQ 6.3.8 のソース（`dist/cjs/classes/worker.js` の `processJob`・`retryIfFailed`）を読んだだけで、Redis で走らせて確かめてはいない。** 以下は読みからの推定である。
+🔴 **【実測】redis-server 7.4.7・bullmq 6.3.8（ADR 0449）。** ソースの読み（`dist/cjs/classes/worker.js` の `processJob`・`retryIfFailed`、ADR 0440）のとおりだった。
+2つの OS プロセスが同じ `queueName` で動き、一方の `runtime.tick()` がイベントループを45秒塞ぐ（lock を延長できない）と、**もう一方の Worker が約60秒後（lock の期限30秒の後、次の stalled checker の周期）に
+同じジョブの2本目の tick を走らせ**、塞いでいた1本目は45.8秒で戻ってから `onTickResult` を呼び、**直後に `onTickError` が2回**（`Missing lock for job ... moveToFinished`、0.1秒以内）届いた。
+最終のジョブは完了1件・失敗0件で、`attemptsStarted: 2`・`stalledCounter: 1`。（以下の箇条書きの「読み」は、この実測で裏づいた。`lockDuration` 既定30000ms の値は `worker.js` の読みのまま。）
 
 - BullMQ は、Worker が処理中のジョブの lock を `lockDuration`（既定 30000 ms）で持ち、その半分の間隔で延長する。**この driver は `lockDuration` を設定しない**（`CreateBullmqTickDriverOptions` に口が無い。`Worker` には bullmq の既定値が渡る）。`runtime.tick()` がイベントループを長く塞ぐ・Redis との接続が途切れるなどで lock の延長が間に合わずに期限が切れると、stalled checker（既定 `stalledInterval` 30000 ms）がそのジョブを wait へ戻し、**別の Worker が2本目の tick を走らせうる**（同じジョブの再実行）。
 - **データは壊れない。** 2本の tick が重なっても、outbox の行は `claimBatch` の行ロック・リース・CAS（`attempts`）で二重に処理されない（「複数プロセスで動かすとき」と同じ守り）。driver も同じジョブを二重に数えない。
@@ -200,7 +249,7 @@ await queue.close();
 ## 確かめていないこと
 
 - BullMQ の Job Scheduler が実運用のワークロードでどの程度「重なる」かは測っていない。
-- BullMQ 自身の可用性・再接続・Redis 障害時の挙動は検査していない。
+- BullMQ 自身の可用性・再接続・Redis 障害時の挙動は、「エラーの通知先」の実測（Redis を止めて再起動、`start()` が pending のまま）の範囲だけ測った。Redis Cluster・Sentinel・フェイルオーバーは測っていない。
 - 複数マシン・ネットワーク越しの複数 OS プロセスからの同時 tick は測っていない
   （同一ホスト上の複数 OS プロセスまでは ADR 0325 の歯が測っている）。
 

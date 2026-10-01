@@ -457,6 +457,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/bullmq`: README・TSDoc の「コードからの読み」を実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測り、ずれていた所を直した。**（[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md)。コードの振る舞いは変えていない）
+  - **文書に無かったこと（実測）**: Redis が落ちている間の `start()` は reject せず pending のまま／Redis が永続化なしで再起動すると scheduler が消え、tick は再開せず `onTickError` も鳴らない（永続化ありなら再開）／`everyMs` を変えて別の driver が `start()` すると共有の scheduler の間隔が置き換わる／ioredis のインスタンスを `connection` に渡すなら `maxRetriesPerRequest: null` が要り、無いと `createBullmqTickDriver` が同期的に throw する。
+  - **裏づいたこと**: 1台の `stop()` が全プロセスの発火を止める（新を `start()` してから旧を `stop()` する rolling deploy でも。直していない。被害の形と回避は README・ADR 0449）／完了・失敗ジョブが Redis に残り続ける（数字を追記）／stalled で `onTickResult` の後に `onTickError` が2回届く（ADR 0440 の【未実測】が【実測】になった）。
+  - README の `ts` の片（bullmq・openai・anthropic）を `ts check` の門に入れた。
+
 - **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えると、`RangeError` で終わるのに対（両側 `contested`）が残っていたのを、書き込む前に落とすようにした。大文字の `correctedId` は、store が同じ記憶と言えば候補として扱う。`buildCorrectionReason` の `winner` は、大文字小文字だけ違う `winnerId` でも実際の勝者を指す。**（[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）
   - **穴**: (1) `winnerId` がどちらの id でもないと、`markContested` が書いたあとに `resolveContested` が `RangeError` を投げ、対だけが残った。(2) `@mnemora/postgres` で候補の id を大文字にして `correctedId` に渡すと、`markContested` は受け付けるのに `not_a_candidate` になった。(3) 大文字の `winnerId` で訂正する側が勝っても、`buildCorrectionReason` は `winner=corrected` と書いた。
   - **いまの振る舞い**: (1) 例外の型と文言は同じで、何も書かれない。(2) 大文字小文字だけの違いは store に従う（大文字小文字を区別する store は今どおり `not_a_candidate`）。(3) これから書く `meta.note` だけが変わる（保存済みの `note` は書き換えない）。断る入力は増えていない。
