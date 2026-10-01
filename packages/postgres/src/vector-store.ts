@@ -28,7 +28,7 @@ import {
   type PgvectorCapabilityRow,
   assertPgvectorCapabilityRow,
 } from "./pgvector-capability.js";
-import { assertFloat4Vector, fitsFloat4 } from "./input-check.js";
+import { assertFloat4Vector, assertNoNulInScopeFilter, fitsFloat4 } from "./input-check.js";
 
 function memoryNotFound(id: string): Error {
   return new Error(`PostgresVectorStore: memory not found for tenant: ${id}`);
@@ -605,6 +605,7 @@ export class PostgresVectorStore implements VectorStore {
   ): Promise<VectorHit[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
+    assertNoNulInScopeFilter("PostgresVectorStore.search", opts.filter, "opts.filter");
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
     // Issue #857: `query` が空配列だと `toVectorLiteral([])` が `"[]"` を作り、下の
@@ -796,6 +797,7 @@ export class PostgresVectorStore implements VectorStore {
   ): Promise<Map<string, VectorHit[]>> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
+    assertNoNulInScopeFilter("PostgresVectorStore.searchMany", opts.filter, "opts.filter");
     const resultMap = new Map<string, VectorHit[]>();
     // 契約（`VectorStore.searchMany?` の doc コメント）: `queries` の `key` の集合は
     // 返り値の `Map` にそのまま現れる——結果が0件の key も欠落させない。
