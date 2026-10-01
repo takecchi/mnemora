@@ -457,6 +457,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/testkit` の provider の fake・カセットを、interface の約束と本物の provider に揃えた。`recall()` は `Float32Array` などの数値の型付き配列のクエリ埋め込みも受ける。**（[ADR 0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）
+  - **落ちる入力が増える**: `SeededEmbeddingProvider` は種と delegate の空間が違えば構築で落ちる。`CassetteRecorder` は違う空間・モデルの2回目以降の記録で落ちる。`assertCassette` は、成分が有限でない・`dimensions` が正の整数でない・鍵が入力と一致しないカセットを読んだ時点で落とす。`RecordedEmbeddingProvider` は有限でない記録を返さずに落ちる。`RecordingEmbeddingProvider` は delegate の壊れた戻り（次元違い・有限でない成分）を記録せずに落ちる。`DeterministicEmbeddingProvider` は `dimensions` が正の整数でなければ構築で落ちる（以前は `embed` で落ちるか、`0` は空のベクトルを返した）。
+  - **直した振る舞い**: Seeded\*・Recording\* は `opts`（`AbortOptions`）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する（失敗は memo に残さない）。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
+  - **`recall()`**: 型付き配列のクエリ埋め込みが、ingest（embed ジョブ）と同じく通る（以前は `embedding_provider_unavailable`）。
+  - 触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）、conformance suite。
 - **`runtime.reextract`: 置き換えた側（`supersededById`）が `active` でない行になり、循環・active 0件ができる穴を直した。あわせて `Runtime.observe` の TSDoc 2か所を実装に合わせた。**（穴探し30巡目、[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md)。`@mnemora/core` の `runtime.ts` だけの変更。store・migration・公開の型は変えていない）
   - **穴**: 抽出の冪等キーは status を問わないので、候補が同じ Observation・同じ版の `superseded`／`archived` な既存行にぶつかると、store がその行を返す。以前は候補列の先頭を置き換えた側にしたため、`reextract` の出力が X → Y → X と往復すると Y と X が互いを置き換えて active が0件になった（Postgres・testkit とも、口あり・口なしの両経路）。先頭が archived な行にぶつかると、別の active な記憶がその archived な行に置き換えられた。
   - **いまの振る舞い**: 置き換えた側は、候補列のうち非 active の既存行にぶつからない先頭。全候補がぶつかるときは何も supersede しない（`supersededMemoryIds: []`。ぶつかった行は `skipped` の `status_not_active` に載る）。**返り値が変わる入力は2つだけ**: (1) 全部の候補がぶつかる入力（例: 子 `[X, Z]` で X が archived、出力 `[X]`）は `supersededMemoryIds` が `[Z]` から `[]` になり、Z は active のまま残る。(2) 先頭の候補だけがぶつかる入力（出力 `[X, W]`）は `supersededById` が X から後ろの新しい W に変わる。例外は増えていない。
