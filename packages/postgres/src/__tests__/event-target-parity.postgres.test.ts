@@ -23,8 +23,25 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-type Target = "foreign" | "malformed" | "own" | "sameTenantOther" | "null";
-const TARGETS: Target[] = ["foreign", "malformed", "own", "sameTenantOther", "null"];
+type Target =
+  | "foreign"
+  | "malformed"
+  | "own"
+  | "sameTenantOther"
+  | "null"
+  | "ownUpper"
+  | "otherUpper"
+  | "foreignUpper";
+const TARGETS: Target[] = [
+  "foreign",
+  "malformed",
+  "own",
+  "sameTenantOther",
+  "null",
+  "ownUpper",
+  "otherUpper",
+  "foreignUpper",
+];
 
 interface Kit {
   store: MemoryStore;
@@ -273,7 +290,16 @@ const OPS: Record<string, Op> = {
 async function run(kit: Kit, opName: string, target: Target): Promise<Run> {
   const b = await memory(kit.store, B);
   const pick = (own: MemoryId, other: MemoryId): string | null =>
-    ({ foreign: b.id, malformed: "not-a-uuid", own, sameTenantOther: other, null: null })[target];
+    ({
+      foreign: b.id,
+      malformed: "not-a-uuid",
+      own,
+      sameTenantOther: other,
+      null: null,
+      ownUpper: own.toUpperCase(),
+      otherUpper: other.toUpperCase(),
+      foreignUpper: b.id.toUpperCase(),
+    })[target];
   let statuses: () => Promise<string[]> = async () => [];
   let outcome = "ok";
   try {
@@ -300,7 +326,7 @@ describe("PostgresMemoryStore と InMemoryMemoryStore は、NewMemoryEvent.memor
       }
       for (const { target, pg, mem } of results) {
         expect(mem, `${opName} / ${target}`).toEqual(pg);
-        if (target === "foreign" || target === "malformed") {
+        if (target === "foreign" || target === "malformed" || target === "foreignUpper") {
           expect(pg.outcome, `${opName} / ${target}`).toMatch(/memory not found for tenant: <id>/);
           expect(pg.eventsAtForeign).toBe(0);
         } else {
