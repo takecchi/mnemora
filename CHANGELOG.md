@@ -577,6 +577,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`OutboxStore.complete`/`fail` を、同じリース（同じ `attempts`）での2回目の呼び出しで、1回目の終端の値を保つ（先勝ち）ようにした**（[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) 決定2）。以前は complete×2 で `completedAt` が2回目の `at` に、fail×2 で `failedAt`・`lastError` が2回目の値に上書きされ、`purgeCompletedJobs` の `olderThan` の境界も後ろにずれた。`@mnemora/postgres` は `UPDATE` の `WHERE` を `completed_at IS NULL AND failed_at IS NULL` の両方にし、`@mnemora/testkit/fixtures` のインメモリ実装も揃えた。**戻り値（`void`）と例外は変えていない**（`attempts` 不一致は `OutboxLeaseConflictError`、行が無ければ no-op、終端後の `claimBatch` は0件）。
 
+- **LLM が返した `digest`・`tags`・claim key が保存できない値のとき、候補ごと捨てずに、その欄だけを落とすようにした**（[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) 決定1）。以前は、本文が正しくても NUL を含む `digest`・`tags` の要素が1つあるだけで、その候補が `createMemoryWithOutbox` に拒まれて捨てられた。いまは `digest` が NUL を含めば本文の先頭を切り出したフォールバックに、`tags` は NUL を含む要素だけを捨て、claim key は NUL を含めば `null` になる。`observe`（sync・deferred）と `reextract` が対象。落とした `digest`・`tags` は `created` イベントの `meta.droppedFields` に残る（値は写さない。落とさなければ `meta` は変わらない）。長さでは落とさない（既知の限界: 圧縮が効かない長い tag は、今までどおり GIN 索引 `idx_memories_tags` の上限で落ちうる）。本文の NUL は従来どおり候補ごと落ちる。`consolidate`・`reflect` は対象外。
+- **`@mnemora/postgres` の `reinforceMany`（`observe({ kind: "memory_usage" })` の強化を含む）と `searchMany` が、id・クエリの件数が多いと PG のバインドパラメータの上限（65535）で落ちる崖を無くした**（ADR 0443 決定2）。以前は `reinforceMany`・`memory_usage` が 13107 件で、`searchMany` が 32767 件で、message が何 MB にもなる例外で落ちた。`reinforceMany` は列ごとの配列を `unnest` で渡す（1文のまま）、`searchMany` は 16384 件ずつの文に分けて同じトランザクションで撃つ。結果は変わらない。
+- **連想枠（`anchorCount`）の計算量を文書に書いた**（ADR 0443 決定3。コードは変えていない）。アンカーごとに引く件数は `kPrime` のまま、O(`anchorCount` × `limit`)。絞ると `recall()` の結果（`memories` と `omitted` の件数）が変わることを差分試験で確かめたので、絞っていない。
+
 ---
 
 ## [1.1.0] - 2026-09-30

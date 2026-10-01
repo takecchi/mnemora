@@ -9,6 +9,7 @@ import type { Ctx } from "./ctx.js";
 // できてしまう——`import type` は TypeScript の出力から完全に消えるため、この経路は
 // 型だけの参照に留める（`describeClaimKeyFailure` は下で自前に複製する）。
 import type { ExtractionFailure } from "./extraction.js";
+import { containsNul } from "./llm-aux-fields.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
 
 /**
@@ -270,7 +271,10 @@ export async function deriveClaimKeys(
         return normalized.subject === "" ||
           normalized.predicate === "" ||
           exceedsClaimKeyPartLimit(normalized.subject) ||
-          exceedsClaimKeyPartLimit(normalized.predicate)
+          exceedsClaimKeyPartLimit(normalized.predicate) ||
+          // ADR 0443 決定1: NUL を含む要素も同じ形で `null` にする（text 列に入らず INSERT が落ちる）。
+          containsNul(normalized.subject) ||
+          containsNul(normalized.predicate)
           ? null
           : normalized;
       }),

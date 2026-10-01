@@ -1516,6 +1516,11 @@ Issue #200 は**2つの読み方**を挙げていた。
 ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`（= `limit × overFetchFactor`、§3）も一緒に広がる
 ——費用は連想枠だけの話では済まない。
 
+**⚠ 連想枠の計算量は O(anchorCount × limit) である**（2026-10-01 追記、[ADR 0443](./decisions/0443-aux-field-drop-bind-limit-association-fetch.md) 決定4。今の振る舞いを書くだけで、コードは変えていない）。
+アンカー 1 つごとに、段0と同じ filter で `kPrime`（= `limit × overFetchFactor`、§3）件まで ANN 検索で引く（`searchMany` が在れば1往復、無ければアンカーの数だけの往復）。
+実際のアンカー数は上の `min(anchorCount, limit, 段2を通った候補数)` なので、引く件数の合計は最大で **アンカー数 × `kPrime`**（`overFetchFactor` は定数なので O(anchorCount × limit)）、その後の並べ替えは同じ件数の `sort`（O(anchorCount × limit × log(…))）である。`anchorCount` と `limit` を**両方**上げると、この積で増える（`anchorCount` が `limit` で頭打ちになるので、上げ切ると `limit` の 2 乗）。
+**アンカーごとに引く件数を「席に要る分」まで絞ることは、しなかった**——絞ると結果が変わる。【実測 2026-10-01、乱数の種を固定した 900 通り × 2 通りの `VectorStore`（`search` のみ・`searchMany` あり）で、絞る前と後の `recall()` の結果を比べた。使い捨ての差分試験で CI には載せていない】絞った形（1アンカーあたり `min(kPrime, 席の過取得数 + 除外集合の大きさ)`）では、`memories`（順序・同点の並び・score）が食い違ったのが 57 通りと 64 通り、`memories` は同じで `omitted` の `over_limit(stage: 'association')` の `count`（`exact` と名乗る件数）だけが食い違ったのが 98 通りと 122 通りだった。後ろのアンカーの「先に当たったアンカーが取る」重複除外が、前のアンカーの切り落とされた分に依存するため、切ると取る側のアンカーが変わる。
+
 **⚠ 「走らせて0件だった」と「走らせなかった」を同じ顔にしない。**
 走らせて0件のときは `stage_skipped` を積まない——本文書全体を貫く原則3
 （結果は、そこから漏れたものと必ず同時に提示する）の、この段への適用である。

@@ -140,6 +140,12 @@ async function withRelaxedOrderScan<T>(
   });
 }
 /**
+ * `searchMany` が1文に入れるクエリの数（ADR 0443）。1クエリあたり 2 個のバインドパラメータを使うので、
+ * 16384 × 2 = 32768 個と、ほかの固定のパラメータ（tenant・filter・limit）で、PG の上限 65535 に収まる。
+ */
+const SEARCH_MANY_CHUNK_SIZE = 16_384;
+
+/**
  * `search()`/`searchMany()` の両方が使う、`m.*`（memories 側）だけの `WHERE` 条件の
  * 組み立て（ADR 0362、Issue #1181 の直しで `buildFilterConditions` から括り出した）。
  * **`filter` の翻訳ロジックはこの1箇所だけに置く**——`e.tenant_id` 由来の条件（e 側）は
@@ -839,24 +845,34 @@ export class PostgresVectorStore implements VectorStore {
       return sql`(${index}::int, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
 
-    const result = await translateUnregisteredSpace(space, () =>
-      withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
-        tx.execute(sql`
-          SELECT q.query_idx AS query_idx, hit.memory_id AS memory_id, hit.distance AS distance
-          FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_idx, qvec)
-          CROSS JOIN LATERAL (
-            SELECT combined.memory_id AS memory_id, combined.distance AS distance
-            FROM (
-              ${branches}
-            ) AS combined
-            ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
-            LIMIT ${opts.limit}
-          ) AS hit
-        `),
-      ),
+    // ADR 0443: `VALUES` は1クエリあたり 2 個のバインドパラメータを使うので、クエリを
+    // `SEARCH_MANY_CHUNK_SIZE` 件ずつに分けて、同じトランザクションの中で1文ずつ撃つ（PG の上限 65535 に
+    // 件数で届かないように）。クエリごとの結果は他のクエリに依存しない（`LATERAL` の各行は独立）ので、
+    // 分けても集合・順序は変わらない。添字は全体の通し番号のまま送る。
+    const rows = await translateUnregisteredSpace(space, () =>
+      withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, async (tx) => {
+        const collected: unknown[] = [];
+        for (let start = 0; start < valuesRows.length; start += SEARCH_MANY_CHUNK_SIZE) {
+          const chunk = valuesRows.slice(start, start + SEARCH_MANY_CHUNK_SIZE);
+          const result = await tx.execute(sql`
+            SELECT q.query_idx AS query_idx, hit.memory_id AS memory_id, hit.distance AS distance
+            FROM (VALUES ${sql.join(chunk, sql`, `)}) AS q(query_idx, qvec)
+            CROSS JOIN LATERAL (
+              SELECT combined.memory_id AS memory_id, combined.distance AS distance
+              FROM (
+                ${branches}
+              ) AS combined
+              ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
+              LIMIT ${opts.limit}
+            ) AS hit
+          `);
+          collected.push(...result.rows);
+        }
+        return collected;
+      }),
     );
-    for (const row of result.rows) {
-      const r = row as unknown as { query_idx: number; memory_id: string; distance: number };
+    for (const row of rows) {
+      const r = row as { query_idx: number; memory_id: string; distance: number };
       resultMap
         .get(effectiveQueries[r.query_idx]!.key)
         ?.push({ memoryId: r.memory_id, distance: r.distance });
