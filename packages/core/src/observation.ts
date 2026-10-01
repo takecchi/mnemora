@@ -351,11 +351,18 @@ export interface ObserveEventInput {
    * | `Date` | ISO 8601 の文字列に変わる | `Date` のまま保持する |
    * | 値が `undefined` の欄 | 欄ごと消える | 欄が残る |
    * | `BigInt` | 例外（`JSON.stringify` が投げる） | 同じ |
+   * | 関数・`Symbol` の値（欄の値として） | 欄ごと消える | 例外（`DataCloneError`。行は書かない） |
+   * | `toJSON` を持つ値 | `toJSON` の戻り値で保存する（`data` 自体が `toJSON` を持てば、`1` のような object でない値で読み戻る） | 例外（`DataCloneError`。行は書かない） |
+   *
+   * （この表の全行の歯は `packages/postgres/src/__tests__/observation-payload-json-roundtrip.postgres.test.ts`。
+   * 関数・`Symbol`・`toJSON` の2行は、53巡目で表に足した今の振る舞いである。）
    *
    * どちらも例外にならない値では、書き込みは成功する。その後の `getObservation`・
    * `reextract`・監査の読み返しは、adapter によって違う値を見る。**`extractData: true` の
    * プロンプトへ入るのは、この JSON 往復を経た後の `data`（`extractObservationPayload` が
-   * `payload` へ書いた値）である**——adapter によって `JSON.stringify(data)` の中身が変わりうる。
+   * `payload` へ書いた値）である**——adapter によって `JSON.stringify(data)` の中身が変わりうる
+   * （値が `undefined` の欄だけの `data` は、Postgres では欄が消えて本文が `name` だけになり、
+   * fixture では欄が残って `name` の後に `{}` が続く）。
    */
   data?: Record<string, unknown> | undefined;
   /**
