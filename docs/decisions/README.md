@@ -487,5 +487,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0473](./0473-validity-empty-inverted-interval-no-overlap.md) | 空の区間・逆転した区間の記憶を、claim key の「有効期間が重なる」から外す・有効期間と見る口の境界を当てた記録（穴探し44巡目） | 採用 (2026-10) |
 | [0474](./0474-recall-query-tags-duplicates-claim-key-normalize-idempotent.md) | 穴探し45巡目 — `RecallQuery.tags` の重複の数え方を文書と歯に書く・`normalizeClaimKeyPart` のべき等が破れる入力を記録して直さない | 採用 (2026-10) |
 | [0477](./0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) | 穴探し48巡目 — `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` は検査されない。不正値で何が起きるかを実 Redis で測り、README と TSDoc に書く | 採用 (2026-10) |
+| [0478](./0478-example-chat-readme-flags-env-coverage.md) | 穴探し49巡目 — `examples/chat/README.md` が載せていなかったフラグと環境変数を、利用者向けと内部用に分けて一覧にする。文書のコード片と散文の数値は突き合わせてずれなし | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
