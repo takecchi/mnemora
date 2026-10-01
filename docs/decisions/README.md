@@ -463,5 +463,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0448](./0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) | migrate の CLI の Pool に `error` のリスナーを付ける・`migrationsDir` が読めない／空のときの扱い・セッション設定（`statement_timeout` など）が本体に効くことを文書に書く | 採用 (2026-10) |
 | [0449](./0449-bullmq-tick-driver-measured-against-real-redis.md) | bullmq の tick-driver を実 Redis（redis-server 7.4.7）に当てた——文書の「未実測」7件を測り、ずれた所だけ文書を直す・README の片に型検査の印を付ける | 採用 (2026-10) |
 | [0450](./0450-contested-group-operation-state-matrix-round26.md) | contested の群（`markContestedGroup`・`resolveContestedGroup`）の「操作 × 状態」の行列を当てた（穴探し26巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
+| [0457](./0457-round29-precedent-sweep-confirmations-and-doc-measurements.md) | 29巡目（前例の横展開）の確認の結果を残す——当てた形・入力・コマンド・結果、陽性対照、文書の「実測していない」を1つ測る | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
