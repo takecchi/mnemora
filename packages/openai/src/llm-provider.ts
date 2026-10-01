@@ -19,6 +19,7 @@ import { OpenAILLMProviderError } from "./errors.js";
 import type { OpenAIJsonSchemaFormat } from "./json-schema.js";
 import { translateForOpenAIStructuredOutput } from "./json-schema.js";
 import { needsRootWrap, toBaseJsonSchema, unwrapRootValue } from "./structured-root.js";
+import { setOwn } from "./own-property.js";
 
 /**
  * `packages/openai` の `LLMProvider` 実装（docs/architecture.md §5.4・§3.8）。
@@ -118,7 +119,7 @@ function stripNulls(value: unknown): unknown {
     for (const [key, child] of Object.entries(value)) {
       const stripped = stripNulls(child);
       if (stripped !== undefined) {
-        result[key] = stripped;
+        setOwn(result, key, stripped);
       }
     }
     return result;
@@ -215,7 +216,7 @@ function keepSchemaNulls(value: unknown, node: unknown, root: JsonSchemaNode): u
               admitsNull(propertyOf(branch), root),
           );
         if (keep) {
-          result[key] = null;
+          setOwn(result, key, null);
         }
         continue;
       }
@@ -225,7 +226,7 @@ function keepSchemaNulls(value: unknown, node: unknown, root: JsonSchemaNode): u
           : { anyOf: candidates.map(propertyOf) };
       const kept = keepSchemaNulls(child, childNode, root);
       if (kept !== undefined) {
-        result[key] = kept;
+        setOwn(result, key, kept);
       }
     }
     return result;
