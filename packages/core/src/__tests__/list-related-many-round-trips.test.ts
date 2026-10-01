@@ -520,3 +520,40 @@ describe("claim key の群の検出: listRelatedMany があると、合併の探
     );
   });
 });
+
+describe("FakeRelationStore.link / listRelated の入力（ADR 0488。InMemory・Postgres と同じ）", () => {
+  async function twoMemories() {
+    const stores = createFakeRuntimeStores();
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ contentHash: "rel-a" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ contentHash: "rel-b" }));
+    return { stores, a: a.id, b: b.id };
+  }
+
+  it.each(["", null, "Contradicts", "bogus", "__proto__", "toString", 0])(
+    "link は範囲外の kind (%j) を unknown relation kind で断り、何も書かない",
+    async (kind) => {
+      const { stores, a, b } = await twoMemories();
+      await expect(
+        stores.relationStore.link(ctx, kind as unknown as RelationKind, a, b),
+      ).rejects.toThrow(/unknown relation kind/);
+      expect(await stores.relationStore.listRelated(ctx, a)).toEqual([]);
+    },
+  );
+
+  it("陽性対照: contradicts は書ける。同じ組をもう一度 link しても1行のまま", async () => {
+    const { stores, a, b } = await twoMemories();
+    await stores.relationStore.link(ctx, "contradicts", a, b);
+    await stores.relationStore.link(ctx, "contradicts", a, b);
+    expect((await stores.relationStore.listRelated(ctx, a)).map((r) => r.memoryId)).toEqual([b]);
+  });
+
+  it("listRelated が返す createdAt を書き換えても、store の中の行は変わらない", async () => {
+    const { stores, a, b } = await twoMemories();
+    await stores.relationStore.link(ctx, "contradicts", a, b);
+    const first = await stores.relationStore.listRelated(ctx, a);
+    const original = first[0]!.createdAt.getTime();
+    first[0]!.createdAt.setFullYear(1999);
+    const second = await stores.relationStore.listRelated(ctx, a);
+    expect(second[0]!.createdAt.getTime()).toBe(original);
+  });
+});
