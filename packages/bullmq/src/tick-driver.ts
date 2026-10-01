@@ -68,13 +68,13 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * ない。**その主張を複数 OS プロセス・複数 `pg.Pool` に対して実測したのが
  * `src/__tests__/concurrent-tick.redis.test.ts`（ADR 0325「測ったこと」）。
  *
- * 🔴 **1台の `stop()` が、全プロセスの予定を止める**（今の振る舞い。コードからの読みで、Redis では走らせていない）。
+ * 🔴 **1台の `stop()` が、全プロセスの予定を止める**（今の振る舞い。【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。新しい driver を `start()` した後に古い driver を `stop()` する rolling deploy の順でも消える）。
  * `stop()` は共有の scheduler を `queue.removeJobScheduler(jobName)` で消すので、他のプロセスの Worker は
  * 動いたままでも tick のジョブが発火しなくなる。エラーにもならない。動いている driver の `start()` は冪等で
  * 登録し直さないので、残りのどれかで新しい driver を作って `start()` すると再び登録される。
  * {@link BullmqTickDriver.stop} の doc 参照。
  *
- * 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること**（コードからの読みで、走らせていない）。
+ * 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること**（【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。後から `start()` した driver の `everyMs` で scheduler が置き換わり、先に動いていた driver の間隔も変わる）。
  * Worker はジョブの中身を見ずに、自分の `ctx` で `runtime.tick()` を呼ぶ。テナントの違う driver が同じ
  * `queueName` と同じ `jobName`（既定 `"mnemora-tick"`）を使うと、scheduler は1つに上書きされ（`everyMs` は最後に
  * `start()` した driver の値）、1回の発火はどれか1つのテナントの tick にしかならない。
@@ -89,7 +89,11 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * 保持の既定値を driver に入れるかどうかは決まっていない。
  */
 export interface CreateBullmqTickDriverOptions {
-  /** BullMQ の Redis 接続先。`bullmq` 自身の `ConnectionOptions`（ioredis 互換）をそのまま使う。 */
+  /**
+   * BullMQ の Redis 接続先。`bullmq` 自身の `ConnectionOptions`（ioredis 互換）をそのまま使う。
+   * ⚠ ioredis のインスタンスを渡すなら `maxRetriesPerRequest: null` が要る。無いと `createBullmqTickDriver` が同期的に
+   * throw する（【実測】bullmq 6.3.8、ADR 0449）。インスタンスは `stop()` の後も閉じられない（呼び出し側が閉じる）。
+   */
   connection: ConnectionOptions;
   /** BullMQ の queue 名。同じ queue を複数プロセスで共有してよい（上の doc 参照）。 */
   queueName: string;
@@ -146,12 +150,13 @@ export interface CreateBullmqTickDriverOptions {
    * 壊れたときに見えなくなる）。【実測】Redis が居ないポートを指すと、Queue と Worker がそれぞれ
    * ECONNREFUSED を emit した（bullmq 6.3.8）。
    *
-   * ⚠ **【未実測】lock の期限切れ（stalled）で、1回の tick に `onTickResult` の後で `onTickError` が届きうる**
-   * （bullmq 6.3.8 の `worker.js` の `processJob`・`retryIfFailed` を読んだだけで、Redis では走らせていない）。
+   * ⚠ **lock の期限切れ（stalled）で、1回の tick に `onTickResult` の後で `onTickError` が届く**
+   * 【実測】redis-server 7.4.7・bullmq 6.3.8（ADR 0449）: 2つの OS プロセスの一方の `tick()` がイベントループを45秒塞ぐと、もう一方の Worker が約60秒後に
+   * 2本目の tick を走らせ、塞いでいた1本目は `onTickResult` の後に `onTickError` を0.1秒以内に2回（`Missing lock ... moveToFinished`）鳴らした。
    * lock（`lockDuration`、bullmq の既定 30000 ms。この driver からは設定できない）が切れると、stalled checker が
-   * ジョブを戻して別の Worker が2本目の tick を走らせうる。outbox の CAS でジョブは二重に処理されず、データは壊れない。
+   * ジョブを戻して別の Worker が2本目の tick を走らせる。outbox の CAS でジョブは二重に処理されず、データは壊れない。
    * 遅れて終わった1本目は `onTickResult` を呼んだ後、`moveToCompleted` が `Missing lock` で失敗し、`error` 経由で
-   * `onTickError` に届きうる。詳しくは README の「lock の期限切れ（stalled）」。
+   * `onTickError` に届く。詳しくは README の「lock の期限切れ（stalled）」。
    */
   onTickError?: ((error: unknown) => void) | undefined;
 }
@@ -162,6 +167,9 @@ export interface BullmqTickDriver {
    * （Issue #890）。`stop()` の前に複数回呼んでも冪等（2回目以降は何もしない）。
    * **起動が途中で失敗して reject した後の `start()` は、登録と起動をやり直す**（Issue #963）
    * ——失敗した時点では Worker を走らせていない。同時に呼んだ `start()` は同じ起動を待つ。
+   * ⚠ **Redis に繋がらない間の `start()` は reject せず、pending のまま待ち続ける**（【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。15秒待っても未決。その間 `onTickError` に
+   * ECONNREFUSED が届き、Redis が戻ると resolve した）。接続が拒まれる間は #963 の「reject したらやり直す」は働かない。
+   * ⚠ 登録は `start()` の1回だけで、Redis が永続化なしで再起動して scheduler を失っても自動では戻らない（永続化ありなら再開する。README「エラーの通知先」）。
    * ⛔ **`stop()` の後に呼ぶと Error を投げる**（Issue #891）——この driver は使い捨てであり、
    * 再開したい場合は `createBullmqTickDriver(...)` を呼び直すこと。
    */

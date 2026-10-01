@@ -29,7 +29,7 @@ npm i @mnemora/openai @mnemora/core zod
 
 ## 動く最小の例（型検査のみ確認・OPENAI_API_KEY が無いため未実行）
 
-```ts
+```ts check
 import { OpenAIEmbeddingProvider, OpenAILLMProvider } from "@mnemora/openai";
 import { z } from "zod";
 
@@ -118,7 +118,7 @@ README にある。
 再試行の回数・timeout を変えたい場合は、自分で作った `OpenAI` インスタンスを `client` に
 渡す:
 
-```ts
+```ts check
 import OpenAI from "openai";
 import { OpenAILLMProvider } from "@mnemora/openai";
 

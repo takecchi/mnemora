@@ -15,15 +15,19 @@
 ⟹ **`@mnemora/anthropic` 単独では runtime を組めない。** 埋め込みが要る構成では、
 `@mnemora/openai` 等の別 provider を embeddingProvider として併用すること。
 
-```ts
+```ts check
 import { createRuntime } from "@mnemora/core";
 import { AnthropicLLMProvider } from "@mnemora/anthropic";
 import { OpenAIEmbeddingProvider } from "@mnemora/openai";
+import type { RuntimeDeps } from "@mnemora/core";
+
+// 省略した部品（memoryStore / vectorStore / eventStore / outboxStore / tenantSettingsStore / hashContent）。
+declare const stores: Omit<RuntimeDeps, "llmProvider" | "embeddingProvider">;
 
 // LLM は Anthropic、埋め込みは OpenAI ——LLMProvider と EmbeddingProvider は
 // 独立した interface なので、provider を混在させて runtime を組める。
 const runtime = createRuntime({
-  // ...memoryStore / vectorStore / eventStore / outboxStore / tenantSettingsStore / hashContent は省略
+  ...stores,
   llmProvider: new AnthropicLLMProvider({ model: "claude-opus-5" }),
   embeddingProvider: new OpenAIEmbeddingProvider({
     model: "text-embedding-3-small",
@@ -65,7 +69,7 @@ pnpm add @mnemora/openai zod
 
 ## 動く最小の例（型検査のみ確認・ANTHROPIC_API_KEY が無いため未実行）
 
-```ts
+```ts check
 import { AnthropicLLMProvider } from "@mnemora/anthropic";
 import { z } from "zod";
 
@@ -114,8 +118,12 @@ SDK は例外を投げず、`content` にはテキストブロックが1つも�
 実 API がこの形を実際に返すかは確認していない（詳細は
 [ADR 0072](../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記）。
 
-```ts
-import { AnthropicLLMProviderError } from "@mnemora/anthropic";
+```ts check
+import type { AnthropicLLMProvider, AnthropicLLMProviderError } from "@mnemora/anthropic";
+
+declare const llmProvider: AnthropicLLMProvider;
+declare const prompt: Parameters<AnthropicLLMProvider["completeStructured"]>[1]["prompt"];
+declare const schema: Parameters<AnthropicLLMProvider["completeStructured"]>[1]["schema"];
 
 try {
   await llmProvider.completeStructured(ctx, { prompt, schema });
@@ -195,7 +203,7 @@ try {
 SDK の既定値であり mnemora の契約ではないので、SDK の版が上がれば変わりうる。再試行の
 回数・timeout を変えたい場合は、自分で作った `Anthropic` インスタンスを `client` に渡す:
 
-```ts
+```ts check
 import Anthropic from "@anthropic-ai/sdk";
 import { AnthropicLLMProvider } from "@mnemora/anthropic";
 
