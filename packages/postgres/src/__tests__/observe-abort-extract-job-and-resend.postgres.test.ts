@@ -29,8 +29,9 @@ import {
  *    （`claimed_by: "runtime.observe:sync"`・`attempts: 1`）残る（ADR 0407）。`leaseMs` の内側の `tick` は拾わず、
  *    リースが切れた後の `tick` が取り直して処理する。`Runtime.observe` の TSDoc は以前「claim もされていないまま」と書いていた。
  * 2. その間に同じ `externalId` で再送しても抽出はやり直されない（`skipped`・`memoryIds: []`。#897 と同じ分岐）。
- * 3. 冪等な再送の戻り値には、`subjectCandidates`・`claimKey` を渡していても `rejectedSubjectIds`・`claimKeyFailure`・
- *    `contestedDetection` の欄が無い（`ObserveResult` の各欄の doc）。
+ * 3. 冪等な再送の戻り値にも、`subjectCandidates`・`claimKey` を渡していれば `rejectedSubjectIds: []`・
+ *    `claimKeyFailure: null`・`contestedDetection: []` が付く（`ObserveResult` の各欄の doc の「渡したら常に」。
+ *    以前は欄が無く、全 Runtime 呼び出しに掛かる出力契約の検査が赤になっていた）。
  *
  * testkit の InMemory と Postgres の両方に同じ入力を当てる。
  */
@@ -198,33 +199,40 @@ for (const [name, makeKit] of KITS) {
       ).toHaveLength(1);
     });
 
-    it("冪等な再送の戻り値には、claimKey・subjectCandidates を渡していても claimKeyFailure・contestedDetection・rejectedSubjectIds の欄が無い", async () => {
+    it("冪等な再送の戻り値にも、claimKey・subjectCandidates を渡していれば rejectedSubjectIds: []・claimKeyFailure: null・contestedDetection: [] が付く", async () => {
       contents = ["X"];
       const kit = await makeKit();
-      const first = await kit.runtime.observe(ctx, {
-        kind: "utterance",
+      const input = {
+        kind: "utterance" as const,
         text: "u",
         externalId: "e2",
         subjectCandidates: ["alice"],
         claimKey: { enabled: true, detectContested: true },
-      });
+      };
+      const first = await kit.runtime.observe(ctx, input);
       // 対照: 最初の呼び出しは3つの欄を持つ。
       expect(first).toHaveProperty("claimKeyFailure");
       expect(first).toHaveProperty("contestedDetection");
       expect(first).toHaveProperty("rejectedSubjectIds");
 
-      const resend = await kit.runtime.observe(ctx, {
+      const resend = await kit.runtime.observe(ctx, input);
+
+      expect(resend).toMatchObject({
+        memoryIds: [],
+        extraction: "skipped",
+        rejectedSubjectIds: [],
+        claimKeyFailure: null,
+        contestedDetection: [],
+      });
+      // 対照: 渡していない再送には、この3欄は付かない。
+      const plain = await kit.runtime.observe(ctx, {
         kind: "utterance",
         text: "u",
         externalId: "e2",
-        subjectCandidates: ["alice"],
-        claimKey: { enabled: true, detectContested: true },
       });
-
-      expect(resend).toMatchObject({ memoryIds: [], extraction: "skipped" });
-      expect(resend).not.toHaveProperty("claimKeyFailure");
-      expect(resend).not.toHaveProperty("contestedDetection");
-      expect(resend).not.toHaveProperty("rejectedSubjectIds");
+      expect(plain).not.toHaveProperty("claimKeyFailure");
+      expect(plain).not.toHaveProperty("contestedDetection");
+      expect(plain).not.toHaveProperty("rejectedSubjectIds");
     });
   });
 }

@@ -122,8 +122,6 @@ type ObserveReturn = Awaited<ReturnType<Runtime["observe"]>>;
  * - `subjectCandidates`（空でない）を渡したときだけ `rejectedSubjectIds` を持ち、常に配列。
  * - `claimKey.enabled: true` を渡したときだけ `claimKeyFailure` を持つ。
  * - `claimKey.detectContested: true` を渡したときだけ `contestedDetection` を持ち、常に配列。
- * - ただし **`extraction === "skipped"`（冪等な再送。`deferred` は上の3つを渡せない）では、上の3つの欄は渡していても無い**
- *   （ADR 0454。`ObserveResult` の各欄の doc）。再送は抽出も検出も走らせない。
  */
 export function checkObserveContract(args: ObserveArgs, result: ObserveReturn): string[] {
   const p: string[] = [];
@@ -140,9 +138,6 @@ export function checkObserveContract(args: ObserveArgs, result: ObserveReturn): 
   if (extract === "deferred" && result.memoryIds.length > 0) {
     p.push("observe: extract:'deferred' なのに memoryIds が空でない");
   }
-
-  // ADR 0454: 冪等な再送は抽出も検出も走らせないので、渡した欄は付かない。
-  if (result.extraction === "skipped") return p;
 
   const subjectCandidates = "subjectCandidates" in input ? input.subjectCandidates : undefined;
   const passedSubjectCandidates = Array.isArray(subjectCandidates) && subjectCandidates.length > 0;
