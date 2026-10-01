@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { sql } from "drizzle-orm";
-import { Pool, type PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closePostgresClient, createPostgresClient, type PostgresClient } from "../client.js";
 import { killConnectionBeforeStatement } from "./pool-fault-injection.js";
