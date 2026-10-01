@@ -94,6 +94,13 @@ export interface StructuredRequest<T> {
  *   `@mnemora/openai`・`@mnemora/anthropic` は `opts.signal` を SDK 呼び出しの request options
  *   （`{ signal }`）へ渡す。`@mnemora/local-embedding`（`EmbeddingProvider`）は推論の前後で
  *   `signal` を確かめるだけで、推論の途中では止まらない（`embedding-provider.ts` の追記）。
+ *
+ * ⚠ **2026-10-01 追記（[ADR 0445](../../../../docs/decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)。上の「SDK の
+ * request options へ渡す」は [ADR 0428](../../../../docs/decisions/0428-provider-abort-reason-and-error-guards.md) より前の記述で、不完全だった）:**
+ * `@mnemora/openai`・`@mnemora/anthropic` は SDK 呼び出しを core の `runAbortable` で包む。**provider を直に呼んだときも**、
+ * abort の reject の値は `signal.reason`（SDK の `APIUserAbortError` ではない）で、呼ぶ前に abort 済みなら SDK を呼ばずに reject し、
+ * SDK の再試行待ち（429 の `retry-after` 等）の最中でも abort の時点で返る。`signal` は SDK にも渡すので裏のリクエストも切れる。
+ * 読み込み待ち（`@mnemora/local-embedding`）の扱いは `embedding-provider.ts` の同日付の追記を見ること。
  */
 export interface LLMProvider {
   /** `req` を送り、応答の本文を返す。失敗は例外で返す（上の契約。リトライは内蔵しない）。`opts.signal` は上の2026-09-29追記を参照。 */

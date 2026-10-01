@@ -377,9 +377,20 @@ async function runChat(): Promise<void> {
     );
 
     console.log("\n=== 経路B（mnemora）: observe() → tick() ===");
-    await ingestConversation(handle.runtime, ctx, conversation);
+    const ingestDrain = await ingestConversation(handle.runtime, ctx, conversation);
+    if (ingestDrain.totalFailed > 0) {
+      // ADR 0445: `correction-candidates`（下の `report.ingestDrain.totalFailed`）と同じ形——標準エラーへ 🔴 と、
+      // `process.exitCode = 1`。ただし `chat` は実演なので、以降の recall の表示（`omitted` の
+      // `not_indexed`・`embedding_provider_unavailable`）は止めずに出す（何が起きたかを画面で読めるように）。
+      console.error(
+        `\n🔴 embed に失敗した件がある(${String(ingestDrain.totalFailed)}件)。⛔ 以降の recall の結果は使えない。` +
+          "（embedding provider の鍵・接続・上限を確かめること。失敗の理由は recall の omitted に出る）",
+      );
+      process.exitCode = 1;
+    }
     console.log(
-      `${conversation.userUtterances.length} 件の user 発話を observe() し、tick() で embed を処理した。`,
+      `${conversation.userUtterances.length} 件の user 発話を observe() し、tick() で embed を処理した` +
+        `（成功 ${String(ingestDrain.totalProcessed)} 件 / 失敗 ${String(ingestDrain.totalFailed)} 件）。`,
     );
 
     // デモ本体は budget-demo.ts に切り出してある（Issue #306）——`__tests__` から

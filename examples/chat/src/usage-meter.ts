@@ -194,6 +194,7 @@ export function createUsageMeter(options: UsageMeterOptions): UsageMeter {
     const usd = (n: number) => `$${n.toFixed(6)}`;
     return [
       "--- OpenAI API 実測（usage-meter） ---",
+      "（成功して応答が返った呼び出しだけを数える。失敗した呼び出し——SDK の再送を含む——は数えない。ADR 0445）",
       `chat.completions.create: 呼び出し ${t.chatCalls} 回 / ` +
         `prompt_tokens=${t.chatPromptTokens} / completion_tokens=${t.chatCompletionTokens}`,
       `embeddings.create      : 呼び出し ${t.embeddingCalls} 回 / prompt_tokens=${t.embeddingPromptTokens}`,

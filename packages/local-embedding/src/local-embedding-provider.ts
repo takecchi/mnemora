@@ -447,6 +447,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * `signal.throwIfAborted()` 相当を確かめるだけであり、推論そのものは最後まで走る
    * ——`signal` が途中で abort されても、推論が終わるまでは待ち、終わった時点で abort
    * 済みなら、ベクトルを**返さずに**投げ直す（reject の値は `signal.reason`）。
+   * ⚠ **2026-10-01 追記（ADR 0445）: 件数が `maxBatchSize` を超えて分割されたときは、チャンクの合間で abort を見る**——
+   * 動いている1チャンクは止まらないが、abort 済みなら残りのチャンクは推論しない（以前は全チャンクを推論してから投げ直していた）。
    * `packages/core` 側は runtime 自身が provider の Promise と abort を競わせる
    * （`runAbortable`）ため、runtime 経由の呼び出しはこの提供元の対応と無関係に中断が
    * 効く——この対応が意味を持つのは、この provider を `packages/core` を介さず直接呼ぶ
@@ -511,8 +513,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     const vectors =
       prefixed.length <= this.#maxBatchSize
         ? await pipeline.embed(prefixed)
-        : await this.#embedInChunks(pipeline, prefixed);
-    // 推論は最後まで走らせた（分割していても、上の doc コメントの追記のとおり）。
+        : await this.#embedInChunks(pipeline, prefixed, opts?.signal);
+    // 推論は走り終えた（分割したときは、abort 済みなら残りのチャンクを始めずに `#embedInChunks` が投げている——ADR 0445）。
     // ここで abort 済みなら、出来上がったベクトルを返さずに投げ直す。
     opts?.signal?.throwIfAborted();
 
@@ -584,9 +586,16 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * 2個目以降のチャンクで「バッチ内の位置」が返り、`embed(ctx, texts)` の契約
    * （「渡した配列全体での位置」）と食い違う。
    */
-  async #embedInChunks(pipeline: LocalEmbeddingPipeline, prefixed: string[]): Promise<number[][]> {
+  async #embedInChunks(
+    pipeline: LocalEmbeddingPipeline,
+    prefixed: string[],
+    signal: AbortSignal | undefined,
+  ): Promise<number[][]> {
     const vectors: number[][] = [];
     for (let offset = 0; offset < prefixed.length; offset += this.#maxBatchSize) {
+      // ADR 0445: チャンクの**合間**で abort を見る。1回の `pipeline.embed` は止められない（ADR 0359・0428）が、
+      // abort 済みなら次のチャンクは始めない（reject の値は `signal.reason`）。
+      signal?.throwIfAborted();
       const chunk = prefixed.slice(offset, offset + this.#maxBatchSize);
       let chunkVectors: number[][];
       try {
