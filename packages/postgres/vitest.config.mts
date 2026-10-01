@@ -37,6 +37,8 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/temp-database.test.ts",
   "src/__tests__/analyze-memories-lock.postgres.test.ts",
   "src/__tests__/advisory-lock-cleanup.postgres.test.ts",
+  // ADR 0464。pg_locks を読むので直列群（ADR 0371 の規約）。
+  "src/__tests__/vector-space-migration-index-race.postgres.test.ts",
   // Issue #760 / ADR 0059・0062 の 2026-09-29 追記の決め手。pg_locks を読むので、
   // ADR 0371 と同じ機械的な規約（この4語に当たるファイルは直列群）に合わせて足した
   // （PR 本文に理由を書く）。
