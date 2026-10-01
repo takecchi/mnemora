@@ -463,6 +463,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0448](./0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) | migrate の CLI の Pool に `error` のリスナーを付ける・`migrationsDir` が読めない／空のときの扱い・セッション設定（`statement_timeout` など）が本体に効くことを文書に書く | 採用 (2026-10) |
 | [0449](./0449-bullmq-tick-driver-measured-against-real-redis.md) | bullmq の tick-driver を実 Redis（redis-server 7.4.7）に当てた——文書の「未実測」7件を測り、ずれた所だけ文書を直す・README の片に型検査の印を付ける | 採用 (2026-10) |
 | [0450](./0450-contested-group-operation-state-matrix-round26.md) | contested の群（`markContestedGroup`・`resolveContestedGroup`）の「操作 × 状態」の行列を当てた（穴探し26巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
+| [0451](./0451-savepoint-rollback-failure-keeps-original-error.md) | `createMemoriesWithOutboxAndEvents` の候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーを消さない（`dropped` に積まず、続けず、元のエラーを投げる） | 採用 (2026-10) |
+| [0453](./0453-embed-job-and-reinforce-state-matrix-round27.md) | embed ジョブと reinforce の「操作 × 状態」の行列を当てた（穴探し27巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
 | [0456](./0456-llm-returned-values-malformed-read-filter-nul-named.md) | LLM が返した値の保存できない形（NUL・孤立サロゲート）で observe・consolidate・reflect が落ちないようにする・読み取りの絞りの NUL を名指しの例外で断る（穴探し29巡目、前例の横展開） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

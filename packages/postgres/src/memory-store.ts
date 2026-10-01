@@ -240,6 +240,22 @@ async function insertCreatedEventRow(
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /**
+ * ADR 0451: 候補ごとの savepoint の `rollback to savepoint` が失敗したとき、その失敗を元のエラーへ添える。
+ * ADR 0444 と同じ作法——元のエラーの `cause` が空いていれば `cause` に、空いていなければ `rollbackError` に置く。
+ * `Error` でないもの（投げられた値が文字列など）には添えない。新しい例外の型は作らない。
+ */
+function attachSavepointRollbackError(original: unknown, rollbackFailure: unknown): void {
+  if (!(original instanceof Error)) {
+    return;
+  }
+  if ((original as { cause?: unknown }).cause === undefined) {
+    (original as { cause?: unknown }).cause = rollbackFailure;
+  } else {
+    (original as { rollbackError?: unknown }).rollbackError = rollbackFailure;
+  }
+}
+
+/**
  * `markContestedGroup` / `resolveContestedGroup` の UPDATE が期待より少ない行数しか返さなかった
  * とき、旧実装（メンバーごとの UPDATE）が投げていたものと同じエラーを作る
  * （Issue #1449 PR1、ADR 0401）。呼び出し側は「入力順で最初に更新されなかった id」を渡す。
@@ -893,6 +909,10 @@ export class PostgresMemoryStore implements MemoryStore {
    *   `dropped` に積む。残りは書く。**SAVEPOINT が要る理由**: Postgres は文が失敗するとトランザクション全体が
    *   aborted になり、外側で握りつぶしても以後の文が全部落ちる。
    * - 全候補が落ちたら最初の例外を投げる（外側のトランザクションごと rollback。何も書かない）。
+   * - ADR 0451: 本体が失敗したあとの `ROLLBACK TO SAVEPOINT` 自体が失敗したとき（接続切れ・キャンセルなど）は、続けず、`dropped` にも
+   *   積まず、**本体の元のエラー**を投げる（外側ごと rollback）。巻き戻しの失敗は元のエラーの `cause`（空いていれば）か
+   *   `rollbackError` に残す（ADR 0444 と同じ作法）。`RELEASE SAVEPOINT` の失敗も、候補を落とさずその失敗を投げる。
+   *   巻き戻しが成功する悪い候補は、従来どおり `dropped` に積んで他を書く。
    * - 全候補の成否が確定したあと、書けた候補のうち `created: true` のものだけ、`buildCreatedEvent(memory, dropped)` の
    *   イベントを **同じトランザクションで** `memory_events` へ INSERT する（`EventStore.append` は経由しない——
    *   `supersedeWithNewMemories` と同じ形）。この INSERT が失敗したら、Memory も outbox も含めて全部巻き戻る。
@@ -954,22 +974,43 @@ export class PostgresMemoryStore implements MemoryStore {
       }> = [];
       const dropped: Array<{ index: number; error: unknown }> = [];
       for (const [index, { input, jobKinds }] of news.entries()) {
+        // ADR 0451: drizzle の入れ子の `transaction` は、本体が投げたあとの `rollback to savepoint` が
+        // 失敗すると、元のエラーを捨ててその失敗を投げる（`release savepoint` の失敗も同じ形）。
+        // 本体が投げたエラーを控えておき、外へ出てきたものと見比べて「巻き戻しそのものが失敗した」を見分ける。
+        let bodyError: { error: unknown } | undefined;
         try {
-          const one = await tx.transaction((savepoint) => {
-            if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
-              throw new ContestedWithoutCompanionError("createMemoriesWithOutboxAndEvents", null);
+          const one = await tx.transaction(async (savepoint) => {
+            try {
+              if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+                throw new ContestedWithoutCompanionError("createMemoriesWithOutboxAndEvents", null);
+              }
+              return await this.insertMemoryWithOutboxRows(
+                savepoint,
+                ctx,
+                input,
+                jobKinds,
+                outboxNow,
+                "createMemoriesWithOutboxAndEvents",
+              );
+            } catch (error) {
+              bodyError = { error };
+              throw error;
             }
-            return this.insertMemoryWithOutboxRows(
-              savepoint,
-              ctx,
-              input,
-              jobKinds,
-              outboxNow,
-              "createMemoriesWithOutboxAndEvents",
-            );
           });
           written.push({ index, ...one });
         } catch (error) {
+          if (bodyError === undefined) {
+            // 本体は成功したのに投げられた: `release savepoint`（または、その後の `rollback to savepoint`）の失敗。
+            // この savepoint の中の書き込みが残るか戻るか分からないので、候補を落とさずに投げる。
+            throw error;
+          }
+          if (error !== bodyError.error) {
+            // 本体の失敗のあと、`rollback to savepoint` 自体が失敗した（接続切れ・キャンセルなど）。
+            // トランザクションの状態が分からないので、続けず、`dropped` にも積まず、元のエラーを投げる。
+            // 失敗は `cause`（空いていれば）か `rollbackError` に残す（ADR 0444 と同じ作法。新しい型は作らない）。
+            attachSavepointRollbackError(bodyError.error, error);
+            throw bodyError.error;
+          }
           dropped.push({ index, error });
         }
       }
