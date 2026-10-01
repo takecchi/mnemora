@@ -3,7 +3,7 @@ import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { assertNoNul } from "./input-check.js";
+import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
 import { capLexicalQueryWords } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
 
@@ -321,6 +321,7 @@ export class PostgresLexicalStore implements LexicalStore {
     assertWellFormedFilter(opts.filter, "opts.filter");
     // 穴 O-6-1（ADR 0424）: 検索語の NUL は、DB に触れる前に明示の例外で断る。
     assertNoNul("PostgresLexicalStore.search", "query", query);
+    assertNoNulInScopeFilter("PostgresLexicalStore.search", opts.filter, "opts.filter");
     const select = buildLexicalSearchSelect(query, { ...opts, ctxTenantId: ctx.tenantId });
     const result = await this.db.execute(select);
     return result.rows.map((row) => {

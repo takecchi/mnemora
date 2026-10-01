@@ -433,6 +433,9 @@ export interface ObserveResult {
    *   （`undefined`）——「候補一覧を渡していないので判定していない」ことと「渡したが
    *   0件だった」ことを、キーの有無で区別する。
    * - **渡した場合は常に配列**（弾いた候補が無ければ `[]`）。
+   * - **（ADR 0456）識別子として保存できない `subjectId`（NUL・孤立サロゲートを含むもの）は、一覧を渡して
+   *   いなくても弾き、observation の `subjectId` へフォールバックする。** 一覧を渡していない呼び出しでは、
+   *   その記録はこの欄に載らない（上の1つ目のとおり、欄そのものが無い）。
    */
   rejectedSubjectIds?: string[];
   /**
@@ -8041,6 +8044,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     // 5. LLM を1回呼ぶ。失敗したら1件も書かず、eligible だったものは not_attempted に落とす。
     let llmResult: ConsolidationLLMResult;
+    // ADR 0456: LLM が返した補助の欄（digest・tags）のうち保存できない値（NUL）を落とした記録。
+    let consolidateDroppedFields: DroppedAuxField[] = [];
     try {
       llmResult = await runAbortable(opts.signal, (raced) =>
         deps.llmProvider.completeStructured(
@@ -8053,6 +8058,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         ),
       );
       assertLLMContentNotBlank(llmResult.content, "consolidate");
+      const aux = sanitizeCandidateAuxFields(llmResult);
+      if (aux.dropped.length > 0) {
+        llmResult = aux.candidate;
+        const contentHash = deps.hashContent(llmResult.content);
+        consolidateDroppedFields = aux.dropped.map((entry) => ({
+          index: 0,
+          contentHash,
+          ...entry,
+        }));
+      }
     } catch (error) {
       // Issue #1200 / ADR 0359: abort による reject は `"llm_failed"` に丸めず、
       // そのまま投げ直す——この時点ではまだ何も書いていない（下の手順6より前）。
@@ -8188,6 +8203,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           reason: "consolidated",
           sources: eligibleIds,
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
+          ...(consolidateDroppedFields.length > 0
+            ? { droppedFields: consolidateDroppedFields }
+            : {}),
         },
       }) satisfies NewMemoryEvent;
     const buildConsolidateSupersedeEvent = (source: Memory, supersededById?: MemoryId) =>
@@ -8632,6 +8650,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     // 5. LLM を1回呼ぶ。失敗したら1件も書かない。
     let llmResult: ReflectionLLMResult;
+    // ADR 0456: consolidate と同じ。落とした補助の欄の記録。
+    let reflectDroppedFields: DroppedAuxField[] = [];
     try {
       llmResult = await runAbortable(opts.signal, (raced) =>
         deps.llmProvider.completeStructured(
@@ -8645,6 +8665,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       if (llmResult.outcome === "reflected") {
         assertLLMContentNotBlank(llmResult.content, "reflect");
+        const aux = sanitizeCandidateAuxFields(llmResult);
+        if (aux.dropped.length > 0) {
+          llmResult = aux.candidate;
+          const contentHash = deps.hashContent(llmResult.content);
+          reflectDroppedFields = aux.dropped.map((entry) => ({ index: 0, contentHash, ...entry }));
+        }
       }
     } catch (error) {
       // Issue #1200 / ADR 0359: abort による reject は `"llm_failed"` に丸めず、
@@ -8773,6 +8799,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           reason: "reflected",
           sources: eligibleIds,
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
+          ...(reflectDroppedFields.length > 0 ? { droppedFields: reflectDroppedFields } : {}),
         },
       }) satisfies NewMemoryEvent;
     const createBatch = deps.memoryStore.createMemoriesWithOutboxAndEvents;

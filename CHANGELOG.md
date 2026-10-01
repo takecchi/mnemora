@@ -616,6 +616,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `closePostgresClient` は、`client.pool.end()` が既に直接呼ばれていても reject しない（以前は `Called end on pool more than once`）。
   - 文書: `packages/postgres/README.md` の「例外の見分け方」に、pool の枯渇時と再起動の最中に出る例外の形（`err.code` と `err.cause?.code` の3つの形）を書いた。形は揃えていない。
 
+- **LLM が返した値に、保存できない形（NUL・孤立サロゲート）が入っていても、`observe`・`consolidate`・`reflect` が例外で終わらないようにした**（[ADR 0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md)）。
+  - 抽出の候補の `subjectId`（`subjectCandidates` を渡さない経路）が NUL・孤立サロゲートを含むと、保存の口が `MalformedIdentifierError` を投げて同期の `observe` が例外で終わり、observation だけが残って記憶は0件だった。その `subjectId` を弾き、observation の `subjectId` で記憶を作る（`sanitizeCandidateSubjectId`）。
+  - 統合・内省の LLM が返した `digest`・`tags` が NUL を含むと、`DrizzleQueryError` で例外になった（統合元・材料は `active` のまま）。ADR 0443 が抽出にしたのと同じく、その欄だけを落として記憶を作る（落とした欄は `created` イベントの `meta.droppedFields`）。
+- **`@mnemora/postgres`: 読み取りの絞り（`labels`・`attributes` の key と value）・claim key・`extractorVersion` に NUL を渡したとき、DB の生の例外（`Failed query: …`）ではなく、DB に触れる前の名指しの例外（`<口>: <欄> must not contain NUL characters (U+0000)`）で断る**（ADR 0456。ADR 0424 O-6-1 の続き）。対象は `aggregateScope`・`findActiveByClaimKey`・`findContestedByClaimKey`・`listBySourceObservation`・`PostgresLexicalStore`/`PostgresTrigramLexicalStore`/`PostgresVectorStore` の `search`（と `searchMany`）。断る入力は増えていない（以前も同じ入力で例外だった）。
+
+- **`@mnemora/postgres`: `MemoryStore` の書き込み口に渡した `NewMemoryEvent.memoryId` が別テナントの記憶でも、イベントが書けた穴を塞いだ**（ADR 0456 の H4。ADR 0436・0439 の続き）。`updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`・`markContestedGroup`・`resolveContestedGroup`・`createMemoriesWithOutboxAndEvents` が、書く前に `event.memoryId` が `ctx` のテナントの記憶かを確かめ、違えば `memory not found for tenant` で断る（status の更新ごと戻る）。`Runtime` は常に自分の行を指すので、正規の呼び出しは影響を受けない。**破壊的か**: 型・シグネチャは変わらない。以前は通っていた、別テナントの記憶を指すイベントを新しく断る（自前の呼び出しでそのような `event.memoryId` を渡していた場合だけ）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
