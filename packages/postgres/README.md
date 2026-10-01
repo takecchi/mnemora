@@ -167,6 +167,9 @@ create extension "vector"` で始まる文言で終わる。その次の行に�
   接続側で `lock_timeout=3s` を渡すと、migrate が3秒で `lock timeout` の失敗になり、アプリが止まるのも3秒までで済んだ（アプリ側のエラーは0件）。
   ⟹ 上の `lock_timeout` は、migrate の待ちだけでなく、**アプリが止まる時間の上限**にもなる。
 
+- **`registerEmbeddingSpace` も同じ線である**（[ADR 0460](../../docs/decisions/0460-multi-process-multi-pool-round33.md)）。`lockTimeoutMs` が効くのは advisory lock の待ちだけで、DDL（`CREATE TABLE` / `CREATE INDEX`）の表ロック待ちには効かない。
+  advisory lock を握った接続の中で DDL を打つので、`max: 1` の Pool でも止まらない（以前は DDL に別の接続が要り、`max: 1` では返らなかった）。呼び終えたあとの接続の `lock_timeout` は、接続側で渡した値のまま（以前は `0` に書き換えていた。`runMigrations` も同じ）。
+
 ### ⚠ 接続・ロール・DB の `statement_timeout` などは、migration の本体にも効く
 
 `runMigrations` が戻すのは `lock_timeout` だけである（上の節）。接続文字列の `options`・`PGOPTIONS`・`ALTER ROLE … SET`・`ALTER DATABASE … SET` で渡した

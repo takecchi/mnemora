@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres`: `registerEmbeddingSpace` が `max: 1` の `Pool` で返らなかったのを直した。呼んだあと、`registerEmbeddingSpace`・`runMigrations` が接続の `lock_timeout` を `0` に書き換えるのもやめた。**（[ADR 0460](./docs/decisions/0460-multi-process-multi-pool-round33.md)）。advisory lock を握った接続の中で DDL を打つ形にした（`BEGIN` は開かない。文ごとの暗黙のトランザクションは以前と同じ）。以前は DDL に別の接続が要り、`max: 1` では借り切られた接続の返却を待って止まった（`lock_timeout` は効かず、`connectionTimeoutMillis` を渡していなければ返らない）。`lock_timeout` は advisory lock を取っている間だけ敷き、取れたら `RESET` する（`lockTimeoutMs` が DDL の表ロック待ちに効かないのは以前と同じ）。呼び終えたあとは `RESET lock_timeout` で、接続側（`options`・ロール・DB）で渡した値に戻る（以前は `0` を書いていて、その接続は以後ロック待ちに上限が無かった）。**断る入力は増えない。**
+
 - **`@mnemora/testkit` の provider の fake・カセットを、interface の約束と本物の provider に揃えた。`recall()` は `Float32Array` などの数値の型付き配列のクエリ埋め込みも受ける。**（[ADR 0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）
   - **落ちる入力が増える**: `SeededEmbeddingProvider` は種と delegate の空間が違えば構築で落ちる。`CassetteRecorder` は違う空間・モデルの2回目以降の記録で落ちる。`assertCassette` は、成分が有限でない・`dimensions` が正の整数でない・鍵が入力と一致しないカセットを読んだ時点で落とす。`RecordedEmbeddingProvider` は有限でない記録を返さずに落ちる。`RecordingEmbeddingProvider` は delegate の壊れた戻り（次元違い・有限でない成分）を記録せずに落ちる。`DeterministicEmbeddingProvider` は `dimensions` が正の整数でなければ構築で落ちる（以前は `embed` で落ちるか、`0` は空のベクトルを返した）。
   - **直した振る舞い**: Seeded\*・Recording\* は `opts`（`AbortOptions`）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する（失敗は memo に残さない）。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
