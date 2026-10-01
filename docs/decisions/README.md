@@ -460,5 +460,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0445](./0445-local-embedding-chunk-abort-chat-drain-provider-docs.md) | local-embedding の分割推論でチャンクの合間に abort を見る・`chat` が embed の失敗を言う・provider の再試行と timeout の文書を足す | 採用 (2026-10) |
 | [0446](./0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md) | applyCorrection は勝者の検査を書き込みの前に通す・大文字小文字だけ違う correctedId を store に従って候補にする・buildCorrectionReason の winner を大文字小文字だけ違う id でも実際の勝者に合わせる | 採用 (2026-10) |
 | [0448](./0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) | migrate の CLI の Pool に `error` のリスナーを付ける・`migrationsDir` が読めない／空のときの扱い・セッション設定（`statement_timeout` など）が本体に効くことを文書に書く | 採用 (2026-10) |
+| [0450](./0450-contested-group-operation-state-matrix-round26.md) | contested の群（`markContestedGroup`・`resolveContestedGroup`）の「操作 × 状態」の行列を当てた（穴探し26巡目。直す線に当たる穴は0件） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
