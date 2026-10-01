@@ -7,7 +7,7 @@
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元（PostgreSQL 17）や名指しのテストで走らせた結果、【判断】は担い手の判定。**コードとテストは変えていない（文書だけ）。**
 
 - **文脈**: v1.2.0 を出す前に、利用者が読む移行の手引き（`docs/migration-v1.md` の 🔴「破壊的変更（v1.1.0 → 次の版）—— 未リリース」）が現物と合っているかを、項目 29・31〜51 について、中身（「何が変わったか」「誰が影響を受けるか」「どう直すか」と、そこに書かれた型・例外・フラグ・手順・SQL）まで突き合わせた。
-  項目 30 は出荷済みの節にあるので対象外。項目 52 は #1569（ADR 0461）にしか無く、この時点で main に無い。#1569 の枝で読み、下に記録した。前回の ADR 0461 の「項目 29〜51 は識別子・ADR・PR・リンクの実在までの照合」という負債に応える仕事である。
+  項目 30 は出荷済みの節にあるので対象外。項目 52 は #1569（ADR 0461）で足された（この ADR の作業中に main に入った）。前回の ADR 0461 の「項目 29〜51 は識別子・ADR・PR・リンクの実在までの照合」という負債に応える仕事である。
 
 - **照合の方法**（陽性対照つき）:
 
@@ -43,9 +43,9 @@
   | 49 | `EventStore.append`・`VectorStore.upsert` の検査、メッセージの接頭辞、`prepareMemoryId(ctx)`、`events_purged`（`memoryId` null）は検査しない、`eraseTenant` の `blocked_by_foreign_reference` | ADR 0436、`erase-tenant.ts:44-47`、snippets の `prepareMemoryId`（`EventStoreConformanceOptions`・`VectorStoreConformanceOptions`）が通った | 合っていた |
   | 50 | `subjectIds[i]`・`record.advanceActivityClock.subjectId` の `MalformedIdentifierError`、公開ヘルパー9本の `params:` 落とし、`scrubPurged?`、`purge` が `already_purged` で呼ぶ、`runtime.purge(ctx, { memoryIds })`、SQL | `postgres/src/tenant-settings-store.ts:211`、`memory-store.ts:2821`、`runtime.ts:2021-2047`、snapshot（`purge(ctx, target: PurgeTarget)`。`{ memoryId }`・`{ memoryIds }` の両方を受ける `runtime.ts:6880`）、SQL を実行（上の方法 3） | 合っていた（SQL は実走。陽性・陰性の対照） |
   | 51 | 口 × 欄 × 主語の表、`prepareRecallId`、9本の `it` | `postgres/src/memory-store.ts:287-296`（`${kind} not found for tenant`）、`memory-store-conformance.ts` の ADR 0439 の `it` 9本（12338〜12784）、snippets の `prepareRecallId` | 合っていた |
-  | 52（#1569） | H4 の9つの口が書く前に `event.memoryId` を確かめる、一致なら問い合わせない、`null`/`undefined` は確かめない、断るメッセージは `PostgresMemoryStore: memory not found for tenant: <id>`、uuid でない id は以前も落ちていた、conformance は変えていない | `postgres/src/memory-store.ts:319-340`（`assertEventTargetInTenant`）、呼び出し 223・1239・1460・3117・3349・3694・3779、群は `insertMemoryEventsBatch`（464〜）が1文で確認 | 合っていた。**確かめていないこと**とした `InMemoryMemoryStore` について、下の「実装の側で気になったこと」の測定結果を得た |
+  | 52（#1569。作業中に main に入った） | H4 の9つの口が書く前に `event.memoryId` を確かめる、一致なら問い合わせない、`null`/`undefined` は確かめない、断るメッセージは `PostgresMemoryStore: memory not found for tenant: <id>`、uuid でない id は以前も落ちていた、conformance は変えていない | `postgres/src/memory-store.ts:319-340`（`assertEventTargetInTenant`）、呼び出し 223・1239・1460・3117・3349・3694・3779、群は `insertMemoryEventsBatch`（464〜）が1文で確認 | 合っていた。「確かめていないこと」としていた `InMemoryMemoryStore` について、下の測定結果を得て、項目 52 の該当の行を「確かめたこと」に直した |
 
-- **直した文書**（`docs/migration-v1.md` の 2 か所だけ）: 項目 29（`listRelatedMany?` を足した）、項目 36（影響範囲の記述を、フラグ無しで走る `it` と、フラグ・フックの枝の内側の `it` に分けた）。
+- **直した文書**（`docs/migration-v1.md` の 3 か所だけ）: 項目 29（`listRelatedMany?` を足した）、項目 36（影響範囲の記述を、フラグ無しで走る `it` と、フラグ・フックの枝の内側の `it` に分けた）、項目 52（インメモリ実装は断らない、と測った結果に直した）。
 
 - **実装の側で気になったこと**（直していない）:
 
@@ -55,7 +55,7 @@
 - **検討した代替案**:
 
   1. **項目 36 の「避けられない」の記述をそのまま残し、注記だけ足す。** 採らなかった。影響範囲の記述が過大だと、フラグを渡していない利用者が不要に身構える。
-  2. **項目 52 を直す。** 直す点が無かった。測定結果（InMemory は断らない）を、#1569 のマージ後に項目 52 の「確かめていないこと」へ反映するかは、マネージャーの指示を待つ。
+  2. **項目 52 の記述そのものを直す。** 直す点は無かった（9つの口・メッセージ・conformance を変えていない、は合っていた）。測定結果だけを「確かめたこと」に反映した。
 
 - **引き受けた負債**:
 
