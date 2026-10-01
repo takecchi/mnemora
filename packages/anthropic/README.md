@@ -262,6 +262,22 @@ const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client })
 - 検出は zod v4 の内部表現（`_zod.def.type === "record"`、`zod ^4.5.4`）に依存する。歯は
   `src/__tests__/structured-output-zod-shapes.test.ts`・`provider-parity.test.ts`。
 
+### 上の表に無い形の、今の振る舞い（2026-10-01 追記、[ADR 0471](../../docs/decisions/0471-structured-output-zod-shapes-recorded-in-readme.md)）
+
+穴探し39巡目（[PR #1576](https://github.com/takecchi/mnemora/pull/1576) の ADR の材料1〜5）で、擬似の `client` に当てて確かめた。
+**今の振る舞いの記録であって、約束ではない**（変えるかどうかはオーナーの判断が要る。どれも、変えると断る入力が増えるか、送る形が変わる）。
+**射程は送る形と、返った値の検査まで**——Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない。core が渡す4つのスキーマは、下のどの形も使っていない。
+
+| zod の形 | 送る JSON Schema | 返った値の扱い | `@mnemora/openai` |
+| --- | --- | --- | --- |
+| `z.any()`・`z.unknown()` | **送る前に** `AnthropicLLMProviderError`（`kind: "schema_unsupported"`）——SDK が `JSON schema must have a type defined …` で投げる | — | 型の無い `{}` で送り、どんな値でも通す（割れる） |
+| `.nullable().optional()` | `type: ["string", "null"]` | — | `null` が2回入る `anyOf` で送る |
+| `.catchall(T)` | `additionalProperties: false`（`T` は送らない） | Anthropic が制約どおりに出力すれば、`T` の値は来ない。来れば `T` で検査して残る | 同じ |
+| `.nullable().default(v)` | `type: [..., "null"]`（`default` は `description` に降格） | **`null` が返ると `null` のまま** | `v` になる（割れる） |
+| 入力と出力の型が違う `pipe`（例: `z.string().pipe(z.coerce.number())`） | **出力側の型**（`number`）で送る | 検査は入力側（`string`）なので、**モデルが送った形どおりに `number` を返すと `ZodError`** | 同じ |
+
+歯は `src/__tests__/structured-output-zod-shapes.test.ts` の「上の表に無い形の、今の振る舞い」。
+
 **core が渡す4つのスキーマは、送る前の変換を通る**【2026-09-27、偽の `client` で確かめた。**射程は送る前の変換まで**——
 Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない】（歯: `src/__tests__/core-schemas-send-shape.test.ts`）。
 

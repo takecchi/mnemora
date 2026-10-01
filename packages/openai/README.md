@@ -220,6 +220,23 @@ strict への翻訳は `.optional()` の欄を「必須 + `null` 許容」にし
 `ZodError` を投げる）。union の枝ごとに扱いが割れる欄の `null` は消す側に倒す。`@mnemora/anthropic` は `null` をそのまま検査する。
 歯は `src/__tests__/structured-nullable-roundtrip.test.ts`。
 
+### 上の表に無い形の、今の振る舞い（2026-10-01 追記、[ADR 0471](../../docs/decisions/0471-structured-output-zod-shapes-recorded-in-readme.md)）
+
+穴探し39巡目（[PR #1576](https://github.com/takecchi/mnemora/pull/1576) の ADR の材料1〜5）で、擬似の `client` に当てて確かめた。
+**今の振る舞いの記録であって、約束ではない**（変えるかどうかはオーナーの判断が要る。どれも、変えると断る入力が増えるか、送る形が変わる）。
+**射程は送る形と、返った値の検査まで**——OpenAI の実 API が、送った JSON Schema を受けるかは確かめていない。core が渡す4つのスキーマは、下のどの形も使っていない。
+
+| zod の形 | 送る JSON Schema | 返った値の扱い | `@mnemora/anthropic` |
+| --- | --- | --- | --- |
+| `z.any()`・`z.unknown()` | 型の無い `{}`（`toStrictJsonSchema` を通り、送る） | どんな値でも通る | 送る前に `schema_unsupported` で落ちる（割れる） |
+| `.nullable().optional()` | `anyOf: [{ type: ["string", "null"] }, { type: "null" }]`（`null` が2回入る） | — | `type: ["string", "null"]`（重ならない） |
+| `z.null().optional()` | `type: ["null", "null"]`（JSON Schema の `type` の配列は重複を許さない） | — | `type: "null"` |
+| `.catchall(T)` | `additionalProperties: false`（`T` は送らない） | strict を守るサーバからは余分な欄は返らないので、`T` の値は来ない。来れば `T` で検査して残る | 同じ |
+| `.nullable().default(v)` | `type: [..., "null"]` と `default` | **`null` が返ると `v` になる**（`null` を省略へ戻してから検査するので、`default` が働く） | `null` のまま返る（割れる） |
+| 入力と出力の型が違う `pipe`（例: `z.string().pipe(z.coerce.number())`） | **出力側の型**（`number`）で送る | 検査は入力側（`string`）なので、**モデルが送った形どおりに `number` を返すと `ZodError`** | 同じ |
+
+歯は `src/__tests__/structured-output-zod-shapes.test.ts` の「上の表に無い形の、今の振る舞い」。
+
 ## ⚠ 2026-09-30 追記（ADR 0428）: `signal`（abort）を直に渡したときの振る舞い
 
 `complete` / `completeStructured` / `embed` の `opts.signal` を、provider を**直に**呼んで abort すると、reject する値は
