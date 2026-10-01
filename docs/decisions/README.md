@@ -473,5 +473,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0459](./0459-round32-doc-drift-after-1550-1563.md) | 穴探し32巡目 — 今日（2026-10-01）マージされた PR（#1550〜#1563）のあとの文書のずれを直す（文書だけ） | 採用 (2026-10) |
 | [0460](./0460-multi-process-multi-pool-round33.md) | 「同じ Pool／別の Pool／別のプロセス」から 23・26・27・30 巡目の操作を同時に当て、`registerEmbeddingSpace` が `max: 1` で返らない穴と `lock_timeout` を 0 に書き換える穴を直した（穴探し33巡目） | 採用 (2026-10) |
 | [0461](./0461-v1-2-0-release-prep-inspection.md) | 穴探し34巡目 — v1.2.0 を出すための準備の点検（更新経路の fixture・CHANGELOG・migration の順序・migration-v1 の 🔴） | 採用 (2026-10) |
+| [0462](./0462-churn-test-tolerates-dead-idle-connection-after-terminate.md) | 全接続を切る反復の歯は、切った直後に死んだ待機中の接続を掴む `57P01` を、`max` 回まで受け入れてから「新しい transaction が通る」を縛る | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
