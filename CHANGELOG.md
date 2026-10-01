@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres`: `registerEmbeddingSpace` が、migration（0022・0027）が同じ名前の索引を作っている最中と重なって `23505` で落ちるのを直した。**（[ADR 0464](./docs/decisions/0464-register-embedding-space-absorbs-migration-index-race.md)）。零ノルムの部分索引と `memory_id` の索引の `CREATE INDEX IF NOT EXISTS` が、自分の索引名の `23505`（`pg_class_relname_nsp_index`）で落ちたら、同じ文を1回だけ打ち直す（別の名前・別の制約の `23505` は今までどおり投げる）。**落ちる入力が減るだけで、断る入力は増えない。**逆向き（`registerEmbeddingSpace` の索引作りの最中に `runMigrations` が `23505` で落ち、そのファイルが巻き戻る。呼び直せば通る）は直していない（ADR 0464 の負債）。
+
 - **`@mnemora/postgres`: `registerEmbeddingSpace` が `max: 1` の `Pool` で返らなかったのを直した。呼んだあと、`registerEmbeddingSpace`・`runMigrations` が接続の `lock_timeout` を `0` に書き換えるのもやめた。**（[ADR 0460](./docs/decisions/0460-multi-process-multi-pool-round33.md)）。advisory lock を握った接続の中で DDL を打つ形にした（`BEGIN` は開かない。文ごとの暗黙のトランザクションは以前と同じ）。以前は DDL に別の接続が要り、`max: 1` では借り切られた接続の返却を待って止まった（`lock_timeout` は効かず、`connectionTimeoutMillis` を渡していなければ返らない）。`lock_timeout` は advisory lock を取っている間だけ敷き、取れたら `RESET` する（`lockTimeoutMs` が DDL の表ロック待ちに効かないのは以前と同じ）。呼び終えたあとは `RESET lock_timeout` で、接続側（`options`・ロール・DB）で渡した値に戻る（以前は `0` を書いていて、その接続は以後ロック待ちに上限が無かった）。**断る入力は増えない。**
 
 - **`@mnemora/testkit` の provider の fake・カセットを、interface の約束と本物の provider に揃えた。`recall()` は `Float32Array` などの数値の型付き配列のクエリ埋め込みも受ける。**（[ADR 0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）
