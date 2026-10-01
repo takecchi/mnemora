@@ -17,6 +17,10 @@
  * - 例外を投げる: `recall()` の失敗になる（予算が無くても `usage` の計測で呼ばれる）。
  * 壊れた値が `usage` に出たことは、`RecallResult.outputValidation`（`RuntimeDeps.outputValidation`、
  * 既定 `"report"`、ADR 0098）が知らせる。`"off"` では知らされない。
+ *
+ * ⚠ `RecallResult.usage.counter` の印は、返した digest を連結し目次帯の JSON を足した文字列を1回数えた値の `counter` である。
+ * 段4の予算の判定は digest ごとに `count()` を呼ぶので、テキストによって `counter` を変える実装では、
+ * `usage.counter` の印と予算の判定に使った印が食い違いうる（ADR 0487。今の振る舞いを書いたもの）。
  */
 export interface TokenCounter {
   /** `text` のトークン数を数える。推定なら `counter: "heuristic"`、実測なら `"exact"` を必ず返す。 */

@@ -1242,6 +1242,8 @@ core はモデル固有のトークナイザに依存しない。`TokenCounter` 
 
 **⚠ 2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0483](./decisions/0483-token-counter-broken-values.md)）: 差し替えた `TokenCounter` の戻り値（`tokens` は 0 以上の整数、`counter` は `heuristic`/`exact`）は実行時には検査されない。** `tokens` が `NaN`・負の数だと段4のトークン予算が黙って外れて全件が返り（`budget_dropped` も出ない）、`Infinity` だと全件が落ち、`counter` の欠落・範囲外はそのまま `usage.counter` に出る。落ちたことは `RecallResult.outputValidation`（既定 `"report"`、`"off"` では知らされない）が知らせる。例外はそのまま `recall()` の失敗になる。
 
+**⚠ 2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0487](./decisions/0487-usage-counter-label.md)）: `usage.counter` の印は、返した digest を連結し目次帯の JSON を足した文字列を1回数えた値の `counter` である。** 段4の予算の判定は digest ごとに `count()` を呼ぶので、テキストによって `counter` を変える `TokenCounter` では、`usage.counter` の印と予算の判定に使った印が食い違いうる。
+
 ---
 
 ## 7. スコア内訳と説明
