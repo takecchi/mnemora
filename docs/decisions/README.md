@@ -488,5 +488,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0474](./0474-recall-query-tags-duplicates-claim-key-normalize-idempotent.md) | 穴探し45巡目 — `RecallQuery.tags` の重複の数え方を文書と歯に書く・`normalizeClaimKeyPart` のべき等が破れる入力を記録して直さない | 採用 (2026-10) |
 | [0475](./0475-eventstore-append-uuid-case.md) | `InMemoryEventStore.append`・`FakeEventStore.append` も、`event.memoryId` の大文字小文字を区別しない（ADR 0469 の残りを揃える） | 採用 (2026-10) |
 | [0477](./0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) | 穴探し48巡目 — `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` は検査されない。不正値で何が起きるかを実 Redis で測り、README と TSDoc に書く | 採用 (2026-10) |
+| [0480](./0480-recall-record-createdat-invalid-date-fake-aliasing.md) | 穴探し51巡目 — 想起の記録の往復。`createRecall` の Invalid Date の `createdAt` を InMemory と Fake が受けていた。Fake の記録は呼び出し側と同じオブジェクトを共有していた | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
