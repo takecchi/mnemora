@@ -216,7 +216,11 @@ async function insertCreatedEventRow(
   tx: SqlExecutor,
   ctx: Ctx,
   event: NewMemoryEvent,
+  createdMemoryId: string,
 ): Promise<void> {
+  // ADR 0456: イベントが指す記憶が、今作った行でなければ（呼び出し側の `buildCreatedEvent` が別の id を返したとき）、
+  // `ctx` のテナントの行かを確かめる。
+  await assertEventTargetInTenant(tx, ctx, event.memoryId, [createdMemoryId]);
   await tx.execute(sql`
     INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
     VALUES (
@@ -286,6 +290,36 @@ function refExists(table: "memories" | "observations" | "recalls", tenantId: str
   return sql`(${id}::uuid IS NULL OR EXISTS (
     SELECT 1 FROM ${sql.raw(table)} rf WHERE rf.tenant_id = ${tenantId} AND rf.id = ${id}::uuid
   ))`;
+}
+
+/**
+ * ADR 0456（ADR 0436・0439 の続き）: 呼び出し側が渡した `NewMemoryEvent.memoryId` の記憶が `ctx` のテナントに在ることを、
+ * イベントを書く前に確かめる。`memory_events.memory_id` の外部キーは `tenant_id` を含まないので、確かめないと
+ * 別テナントの記憶を指すイベントが `ctx` のテナントの行として書けた。実在しない・別テナントは区別せず
+ * `memory not found for tenant`（uuid の形でない id も同じ文面。以前は生の `DrizzleQueryError`）。
+ * `null`・`undefined`（記憶を指さないイベント）は確かめない。**書き込みと同じトランザクションの中で呼ぶ**
+ * （投げれば、同じトランザクションの status 更新も戻る）。
+ */
+async function assertEventTargetInTenant(
+  exec: SqlExecutor,
+  ctx: Ctx,
+  memoryId: string | null | undefined,
+  knownInTenant: readonly string[] = [],
+): Promise<void> {
+  const id = checkedRef("memory", memoryId);
+  if (id === null) {
+    return;
+  }
+  // この呼び出しが今まさに更新・作成した行の id（`ctx` のテナントの行と分かっている）なら、問い合わせない。
+  if (knownInTenant.some((known) => known.toLowerCase() === id)) {
+    return;
+  }
+  const found = await exec.execute(
+    sql`SELECT 1 AS ok FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1`,
+  );
+  if (found.rows.length === 0) {
+    throw refNotFound("memory", memoryId as string);
+  }
 }
 
 /**
@@ -415,7 +449,28 @@ async function insertMemoryEventsBatch(
   tx: Tx,
   ctx: Ctx,
   events: ReadonlyArray<NewMemoryEvent>,
+  knownInTenant: readonly string[],
 ): Promise<MemoryEvent[]> {
+  // ADR 0456: 群の操作が更新した行（`knownInTenant`）以外を指すイベントは、`ctx` のテナントの行かを1文で確かめる。
+  const known = new Set(knownInTenant.map((id) => id.toLowerCase()));
+  const unknownTargets = new Set<string>();
+  for (const e of events) {
+    const id = checkedRef("memory", e.memoryId);
+    if (id !== null && !known.has(id)) {
+      unknownTargets.add(id);
+    }
+  }
+  if (unknownTargets.size > 0) {
+    const found = await tx.execute(
+      sql`SELECT id FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param([...unknownTargets])}::uuid[])`,
+    );
+    const foundIds = new Set(found.rows.map((r) => String((r as { id: string }).id).toLowerCase()));
+    for (const id of unknownTargets) {
+      if (!foundIds.has(id)) {
+        throw refNotFound("memory", id);
+      }
+    }
+  }
   const eventIds = events.map(() => randomUUID());
   // 1つの JSON 配列（jsonb）で渡し、`jsonb_to_recordset` で列へ開く。`meta` は群の大きさに比例して
   // 大きくなりうる（多者間の検出は全メンバーの id を載せる）ので、列ごとの `text[]` に JSON 文字列を
@@ -925,7 +980,7 @@ export class PostgresMemoryStore implements MemoryStore {
         if (!created) {
           continue;
         }
-        await insertCreatedEventRow(tx, ctx, buildCreatedEvent(memory, dropped));
+        await insertCreatedEventRow(tx, ctx, buildCreatedEvent(memory, dropped), memory.id);
       }
       return { written, dropped };
     });
@@ -1140,6 +1195,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
 
+      await assertEventTargetInTenant(tx, ctx, event.memoryId, [id]);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -1314,7 +1370,12 @@ export class PostgresMemoryStore implements MemoryStore {
       if (buildCreatedEvent !== undefined) {
         for (const [index, entry] of created.entries()) {
           if (entry.created) {
-            await insertCreatedEventRow(tx, ctx, buildCreatedEvent(entry.memory, index));
+            await insertCreatedEventRow(
+              tx,
+              ctx,
+              buildCreatedEvent(entry.memory, index),
+              entry.memory.id,
+            );
           }
         }
       }
@@ -1355,6 +1416,7 @@ export class PostgresMemoryStore implements MemoryStore {
           continue;
         }
 
+        await assertEventTargetInTenant(tx, ctx, target.event.memoryId, [target.id]);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3007,6 +3069,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
 
+      await assertEventTargetInTenant(tx, ctx, event.memoryId, [id]);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -3238,6 +3301,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const secondMemory = await updateSide(second.id, first.id);
 
       const insertEvent = async (event: NewMemoryEvent) => {
+        await assertEventTargetInTenant(tx, ctx, event.memoryId, [first.id, second.id]);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3582,6 +3646,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const secondMemory = await updateSide(second, first.id);
 
       const insertEvent = async (event: NewMemoryEvent) => {
+        await assertEventTargetInTenant(tx, ctx, event.memoryId, [first.id, second.id]);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3666,6 +3731,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       const memory = rowToMemory(updatedRows[0] as unknown as MemoryRow);
 
+      await assertEventTargetInTenant(tx, ctx, survivor.event.memoryId, [survivor.id]);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -3821,6 +3887,7 @@ export class PostgresMemoryStore implements MemoryStore {
             return !(before.status === "contested" && (before.contestedWithId ?? null) === null);
           })
           .map((m) => m.event),
+        ids,
       );
 
       return { members: ids.map((id) => updatedById.get(id)!), events };
@@ -3990,6 +4057,7 @@ export class PostgresMemoryStore implements MemoryStore {
         tx,
         ctx,
         normalized.map((m) => m.event),
+        ids,
       );
 
       return { members: ids.map((id) => updatedById.get(id)!), events };
