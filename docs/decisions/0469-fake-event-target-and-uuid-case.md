@@ -63,3 +63,7 @@
 - **これが覆るとしたら**: オーナーが、fixture は大文字の uuid を断ってよい（postgres とは違ってよい）と決めたとき。その場合は Fake・InMemory の小文字化と歯を外す。
 
 - **測っていないこと**: 大文字の `id` で操作の対象を指したときの3実装の差（範囲外）。実 API。
+
+## 追記（2026-10-02、[ADR 0475](./0475-eventstore-append-uuid-case.md)）: `EventStore.append` の大文字は揃えた
+
+⛔ 上の本文は書き換えていない。上の「引き受けた負債」の「`InMemoryEventStore.append` は大文字の `memoryId` を断る」は、ADR 0475 で解消した。`InMemoryEventStore.append` と `FakeEventStore.append` も、`event.memoryId` を小文字にして記憶を引き、`PostgresEventStore.append` と同じく大文字の自テナントの記憶 id を通す（別テナントは大文字でも断る。`null` は検査しない）。

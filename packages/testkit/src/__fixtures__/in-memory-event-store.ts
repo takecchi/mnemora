@@ -90,7 +90,9 @@ export class InMemoryEventStore implements EventStore {
     // （0001_init.sql の CHECK 制約が禁じるのは「events_purged なのに非 NULL」の
     // 向きだけであり、その逆は禁じていない）。
     if (event.memoryId !== null) {
-      const memory = await this.memoryStore.get(ctx, event.memoryId);
+      // ADR 0475: 大文字小文字は区別しない（`PostgresEventStore.append` は uuid を小文字にそろえて比べる。この fixture の id は小文字の `mem-N`）。
+      // 断るときの message は渡された id のまま。
+      const memory = await this.memoryStore.get(ctx, event.memoryId.toLowerCase());
       if (!memory) {
         throw new Error(`InMemoryEventStore: memory not found for tenant: ${event.memoryId}`);
       }

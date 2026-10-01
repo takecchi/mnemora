@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
+import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
 const A: Ctx = { tenantId: "event-target-a" };
@@ -341,5 +342,37 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     );
     expect(ok.written).toHaveLength(1);
     expect(eventCount(ok.written[0]!.memory.id)).toBe(1);
+  });
+
+  // ADR 0475（ADR 0469 の続き）: `EventStore.append` も、`event.memoryId` の大文字小文字を区別しない（`PostgresEventStore.append` は
+  // uuid を小文字にそろえて通す）。断るときの message は渡された id のまま。`null`（`events_purged`）は検査しない。
+  it("InMemoryEventStore.append: 大文字の自テナントの記憶は通り（小文字で積む）、大文字の別テナントは断る。null は検査しない", async () => {
+    const { store, make } = setup();
+    const eventStore = new InMemoryEventStore(store, store.events);
+    const a = await make(A);
+    const b = await make(B);
+    const base = {
+      tenantId: "ignored",
+      kind: "updated" as const,
+      actor: { type: "system" as const },
+      meta: {},
+    };
+    const lower = await eventStore.append(A, { ...base, memoryId: a.id });
+    const upper = await eventStore.append(A, { ...base, memoryId: a.id.toUpperCase() });
+    expect(lower.memoryId).toBe(a.id);
+    expect(upper.memoryId).toBe(a.id);
+    expect(store.events.some((e) => e.memoryId === a.id.toUpperCase())).toBe(false);
+    const total = store.events.length;
+    for (const target of [b.id, b.id.toUpperCase(), "NOT-A-MEMORY", ""]) {
+      const error = await eventStore
+        .append(A, { ...base, memoryId: target })
+        .catch((e: unknown) => e as Error);
+      expect((error as Error).message).toBe(
+        `InMemoryEventStore: memory not found for tenant: ${target}`,
+      );
+    }
+    expect(store.events.length).toBe(total);
+    await eventStore.append(A, { ...base, kind: "events_purged", memoryId: null });
+    expect(store.events.length).toBe(total + 1);
   });
 });
