@@ -153,3 +153,7 @@
   - `eraseTenant` どうしの陽性対照（S8）。
   - 別ホスト・ネットワーク越し（ADR 0206・0325 が同じ範囲を未測定と書いている）。
   - SQL_ASCII の DB（この巡は当てていない）、実モデル・実 LLM。
+
+## 追記（2026-10-01）: D1 は ADR 0464 で解いた（正方向）
+
+負債 D1（`runMigrations`(0022) × `registerEmbeddingSpace` で後者が `23505`）は、[ADR 0464](./0464-register-embedding-space-absorbs-migration-index-race.md) で、`registerEmbeddingSpace` の側が自分の索引名の衝突を 1 回だけ打ち直す形で直した。0027 の組も同じ形で起きることを確かめた。逆向き（migration の側が `23505` で落ちる）は 0464 の負債 D1b に移した。

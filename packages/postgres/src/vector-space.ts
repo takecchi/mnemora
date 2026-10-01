@@ -16,6 +16,7 @@ import {
   deriveAdvisoryLockKey,
   releaseAdvisoryLock,
 } from "./advisory-lock.js";
+import { createIndexIfNotExistsAbsorbingRace } from "./create-index-race.js";
 import { resolveCurrentSchema } from "./resolve-current-schema.js";
 import {
   DEFAULT_EXTENSION_SCHEMA,
@@ -419,11 +420,16 @@ export async function registerEmbeddingSpace(
     // advisory lock で直列化しており、`CONCURRENTLY` は別の理由（索引が2本同時に
     // 作られる競合を pgvector 側で検査していない）で見送っている——詳細は ADR 0343
     // 「引き受けた負債」）。実測した構築時間は同 ADR を参照。
-    await lockClient.query(`
+    // ADR 0464: migration（0022）が同じ名前の索引を作っている最中と重なって `23505` になったら、1回だけ打ち直す。
+    await createIndexIfNotExistsAbsorbingRace(
+      lockClient,
+      `
       CREATE INDEX IF NOT EXISTS ${zeroNormIndex}
         ON ${qualify(schema, table)} (tenant_id, memory_id)
         WHERE ${qualify(extensionSchema, "vector_norm")}(embedding) = 0;
-    `);
+    `,
+      zeroNormIndex,
+    );
 
     // Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): `(memory_id)`
     // 単一列索引。主キー `(tenant_id, memory_id)` は `tenant_id` 先頭の複合索引であり、
@@ -443,10 +449,15 @@ export async function registerEmbeddingSpace(
     //
     // `CONCURRENTLY` は使わない——`zeroNormIndex` と同じ理由（advisory lock による
     // 直列化、pgvector 側の競合未検査）。実測した構築時間は ADR 0383「実測」節参照。
-    await lockClient.query(`
+    // ADR 0464: migration（0027）と重なったときも同じ。
+    await createIndexIfNotExistsAbsorbingRace(
+      lockClient,
+      `
       CREATE INDEX IF NOT EXISTS ${memoryIdIndex}
         ON ${qualify(schema, table)} (memory_id);
-    `);
+    `,
+      memoryIdIndex,
+    );
   } finally {
     await releaseAdvisoryLock(lockClient, lockKey);
   }
