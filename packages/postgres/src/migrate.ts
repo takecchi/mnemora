@@ -545,6 +545,30 @@ export function listMigrationFiles(migrationsDir: string): string[] {
     .sort();
 }
 
+/**
+ * {@link listMigrationFiles} を、`runMigrations` の入口（DB に触れる前）で呼ぶ版（ADR 0448）。
+ *
+ * `migrationsDir` を読めないとき（存在しない・ディレクトリでない・権限が無い）、以前は **ロックの取得・
+ * `CREATE SCHEMA`・`CREATE EXTENSION`・台帳の作成が済んだ後**に、fs の生の例外（`ENOENT: no such file or
+ * directory, scandir …`）で落ちていた。いまは DB に触れる前に、どの引数が読めなかったかを言う `Error`
+ * （`cause` に元の例外、`code` は元のものをそのまま持つ）で落ちる。**落ちる入力は増えていない**
+ * （以前も落ちていた）。新しい例外のクラスは作らない。
+ */
+function listMigrationFilesOrExplain(migrationsDir: string): string[] {
+  try {
+    return listMigrationFiles(migrationsDir);
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    throw Object.assign(
+      new Error(
+        `runMigrations: migrationsDir を読めない（${migrationsDir}）: ${(err as Error).message}`,
+        { cause: err },
+      ),
+      typeof code === "string" ? { code } : {},
+    );
+  }
+}
+
 /** ファイル名の先頭の数字（`0011_x.sql` → `11n`）。先頭が数字でなければ `undefined`。 */
 function migrationNumber(name: string): bigint | undefined {
   const m = /^(\d+)/.exec(name);
@@ -560,12 +584,22 @@ function migrationNumber(name: string): bigint | undefined {
  *
  * - (a) 未適用のファイルのうち、台帳の最大の番号より番号が小さいものが在る。
  * - (b) 台帳にある名前が、手元のファイルに無い。
+ * - (c) 手元のファイルが1本も無い（ADR 0448）。
  */
 function describeLedgerDrift(
   alreadyApplied: ReadonlySet<string>,
   files: readonly string[],
 ): string[] {
   const messages: string[] = [];
+
+  // (c) ADR 0448: `.sql` が1本も無い。`migrationsDir` の指定違い・パッケージの展開の欠けを疑う。
+  // 止めない（以前も、台帳に名前が無ければ `applied: []` で成功していた）。
+  if (files.length === 0) {
+    messages.push(
+      `${POOL_ERROR_WARNING_PREFIX} migrate: migrationsDir に .sql が1本も無い。何も適用しない。` +
+        `migrationsDir の指定、またはパッケージの migrations/ が欠けていないかを確かめること。`,
+    );
+  }
 
   let maxName: string | undefined;
   let maxNumber: bigint | undefined;
@@ -726,6 +760,8 @@ export async function runMigrations(
     assertSafeSchemaName(extensionSchema);
   }
   const extensionMode: ExtensionMode = options.extensionMode ?? "create";
+  // ADR 0448: migrationsDir を読めないなら、DB に触れる前（ロック・CREATE SCHEMA・台帳の作成の前）に落ちる。
+  const migrationFiles = listMigrationFilesOrExplain(migrationsDir);
 
   // `extensionMode: "verify"` はロック取得より前に決着させる（`assertSafeSchemaName` と
   // 同じ理由——不正/不足のためにロックを取って他プロセスを待たせる意味が無い。
@@ -803,7 +839,6 @@ export async function runMigrations(
     const alreadyApplied = new Set(rows.map((row) => row.name));
 
     const applied: string[] = [];
-    const migrationFiles = listMigrationFiles(migrationsDir);
     // 台帳と手元のファイルのずれは警告して続行する（ADR 0425）。止めない・順序も中身も変えない。
     for (const message of describeLedgerDrift(alreadyApplied, migrationFiles)) {
       console.warn(message);

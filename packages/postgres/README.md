@@ -131,7 +131,17 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
   - **台帳に、手元の `migrations/` に無い名前がある**。**手元の版が DB より古い可能性がある**（新しい版で上げた DB に、古い版から流している。
     警告が無かった頃は「すべて適用済み」とだけ出た）。出たら、この DB を使っているアプリ・CLI の版を揃える。ファイル名を自分で変えたのなら、
     この警告は想定内である。
+  - **`migrationsDir`（ライブラリとして呼ぶときの第2引数。CLI は同梱の既定のみ）に `.sql` が1本も無い**（[ADR 0448](../../docs/decisions/0448-migrate-cli-pool-error-unreadable-dir-session-settings.md)）。
+    `migrate: migrationsDir に .sql が1本も無い。何も適用しない。` と出て、`applied: []` で成功する（以前も成功していた。止めない）。
+    指定違い・パッケージの `migrations/` の欠けを疑うこと。専用スキーマを指定していると、スキーマと拡張はこの時点で作られる。
+    ⚠ 専用スキーマを指定しない新規インストールでは、この後の pgvector の確認が `type "vector" does not exist` で落ちる（`0001_init.sql` が当たっていないので拡張が無い）。
+    その場合も警告が先に出ている。
+  - **`migrationsDir` が読めない**（存在しない・ディレクトリでない）。`migrationsDir を読めない（<パス>）: ENOENT: …` の `Error` で、**DB に触れる前に**落ちる
+    （`cause` に元の例外、`code` は元のまま）。以前は、ロックの取得・`CREATE SCHEMA`・`CREATE EXTENSION`・台帳の作成が済んだ後に、生の `ENOENT` で落ちていた。
+    `src/__tests__/migrate-dir-unreadable-empty.postgres.test.ts` が縛っている。
   - 警告を出さないための公開オプションは無い。止めたい運用は、標準エラーの出力を見て判断すること。
+- **台帳は、適用済みの migration の内容を覚えていない**（列は `name` と `applied_at` だけ）。出荷済みのファイルの中身を書き換えても、適用済みの DB では再実行されず、
+  警告も出ない（ファイルを置き換えた側の DB と、新規に作った DB で、中身がずれる）。内容の食い違いを見つける仕組みは無い（[ADR 0448](../../docs/decisions/0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) の材料）。
 
 ### ⚠ `lockTimeoutMs` は DDL の表ロック待ちには効かない（上限を付けるなら接続側で）
 
@@ -149,13 +159,34 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
   `ALTER TABLE … ADD COLUMN` するマイグレーション1本を `runMigrations(pool, dir, { lockTimeoutMs: 100 })` で流した:
   接続文字列の `options`・`PoolConfig.options`・`ALTER ROLE … SET lock_timeout='2s'` の3通りは、いずれも約2秒で失敗した。
   何も渡さない場合は、握っている側が手放す（約8秒後）まで待って成功した（`lockTimeoutMs: 100` は効かなかった）。
-  **測っていないもの**: `ALTER DATABASE … SET`、`PGOPTIONS` 環境変数、pgbouncer などの接続プール越し（起動パラメータが落ちる構成がありうる）。
+  **測っていないもの**: `lock_timeout` を `ALTER DATABASE … SET`・`PGOPTIONS` で渡した場合（`statement_timeout` はこの3通りとも測った。下の節）、pgbouncer などの接続プール越し（起動パラメータが落ちる構成がありうる）。
 - ⚠ **DDL がロックを待っている間は、その後ろに並んだアプリの操作も止まる**（[ADR 0442](../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
   PostgreSQL は、待っている DDL より後から来たロックの要求を、その DDL の後ろに並べる。【実測】2026-10-01、PostgreSQL 17・ローカル。
   8秒続くアプリのトランザクションが `memories` に書いている裏で、`CREATE INDEX`（`ShareLock`）を当てると、後から来た `observe()` の書き込みが
   約8秒止まった（索引の構築そのものは約0.15秒。読み取りは止まらなかった）。`ALTER TABLE … ADD COLUMN`（`ACCESS EXCLUSIVE`）では、`recall()` も約8秒止まった。
   接続側で `lock_timeout=3s` を渡すと、migrate が3秒で `lock timeout` の失敗になり、アプリが止まるのも3秒までで済んだ（アプリ側のエラーは0件）。
   ⟹ 上の `lock_timeout` は、migrate の待ちだけでなく、**アプリが止まる時間の上限**にもなる。
+
+### ⚠ 接続・ロール・DB の `statement_timeout` などは、migration の本体にも効く
+
+`runMigrations` が戻すのは `lock_timeout` だけである（上の節）。接続文字列の `options`・`PGOPTIONS`・`ALTER ROLE … SET`・`ALTER DATABASE … SET` で渡した
+`statement_timeout`・`default_transaction_read_only` などのセッション設定は、migration の本体（`BEGIN` の中の DDL）にそのまま効く。
+特に **`statement_timeout` が短いと、時間のかかる DDL（大きい表への `CREATE INDEX` など）が毎回同じところで落ちる**。
+
+- 落ちたときの状態は安全である。【実測】2026-10-01、PostgreSQL 17・ローカル。`CREATE TABLE` のあとに `pg_sleep(2)` を置いた migration 1本を `runMigrations` で流した:
+  `statement_timeout=500ms` を `ALTER ROLE`・`ALTER DATABASE`・`PGOPTIONS`・接続文字列の `options` のどれで渡しても、約0.5秒で
+  `migration 9001_slow.sql failed: canceling statement due to statement timeout` になり、そのファイルの `CREATE TABLE` は巻き戻り、台帳に行は載らず、
+  `idle in transaction` の接続も advisory lock も残らなかった（打ち直せばそのファイルから当たる）。文言は原因が設定であることを言わない。
+- **migrate を流す接続だけ、無効にする**（`0` は上限なし）。接続文字列の `options`（CLI もこれで効く）か `PGOPTIONS` で渡すと、ロールの設定より優先される
+  （【実測】同じ条件で、`ALTER ROLE … SET statement_timeout='500ms'` のロールに `PGOPTIONS="-c statement_timeout=0"` と `?options=-c%20statement_timeout%3D0` のどちらを
+  渡しても、約2秒の migration は成功した）。
+  `DATABASE_URL=postgresql://user:pass@host:5432/mydb?options=-c%20statement_timeout%3D0 npx mnemora-postgres-migrate`
+  アプリ用の接続のロール・DB に `statement_timeout` を掛けているなら、migrate 専用のロールを別に用意して、そちらには掛けない運用もある。
+- `ALTER ROLE … SET lock_timeout` で短い値を掛けたロールで流すと、`RESET lock_timeout` がその値へ戻るので、本体の DDL の表ロック待ちもその値で切れる
+  （【実測】別セッションが表を握っている間に流すと、約0.1秒で `canceling statement due to lock timeout`）。上の節の「上限を付ける」と同じ仕組みである。
+- `default_transaction_read_only=on` のロールで流すと、台帳の作成（`BEGIN` の外）が `cannot execute CREATE TABLE in a read-only transaction` で落ちる。
+  この場合の文言は `migration <file> failed:` で始まらない（本体に入る前に落ちる）。
+- **runner が `statement_timeout` を上書きすることはしていない**（既定の振る舞いが変わるため。[ADR 0448](../../docs/decisions/0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) の材料）。
 
 ### ⚠ 複数の表を1トランザクションで触る migration（`0027` など）は、アプリの書き込みを止めてから当てる
 
