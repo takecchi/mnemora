@@ -23,9 +23,18 @@
 - **決めたこと**:
 
   1. **写しを `Object.defineProperty`（自分自身の欄として足す）にした**（`packages/openai/src/own-property.ts` の `setOwn`、`stripNulls`・`keepSchemaNulls` の3か所）。
-     余分な `__proto__` の欄は、ほかの余分な欄と同じく zod が無視する。受ける値・断る値は増減しない（応答に `__proto__` が無ければ、結果は1バイトも変わらない）。
+     余分な `__proto__` の欄は、ほかの余分な欄と同じく zod が無視する。応答に `__proto__` が無ければ、結果は1バイトも変わらない。
+     ⚠ **2026-10-01 追記（訂正）**: 書いた当初は「受ける値・断る値は増減しない」としていたが、誤りだった。下の「追記: 断る入力が増える形とクローンの判断」を見ること。
   2. 歯は `packages/openai/src/__tests__/structured-proto-key.test.ts`（3 it）。
   3. 公開 API・送る JSON Schema・既定のプロンプトは変えていない（カセットの鍵は動かない）。
+
+- **追記: 断る入力が増える形とクローンの判断**（2026-10-01。マネージャー mgr-3a4ae979 が確かめ、クローン miku が決めた。オーナーの判断ではない）:
+  【実測】擬似の client で、直す前（main の `llm-provider.ts`）と直した後に同じ応答を当てると、**以前は通っていた応答が新しく `ZodError` になる形が4つ**あった——
+  必須の欄（候補の `content`・根の `memories`）が `"__proto__"` の中にしか無い応答の2つ（以前は継承された値で埋まって通った）と、利用者が `z.strictObject` を渡し、応答に `"__proto__"` の欄（object・文字列）がある応答の2つ（以前は欄として見えず通った）。
+  `"__proto__"` が文字列・配列・`null`・空の object でほかの欄が揃っている応答と、`"__proto__"` の無い応答は、結果が変わらない。4つとも、`@mnemora/anthropic` の経路（`JSON.parse` の結果をそのまま zod で検査する）は今の main でも既に断る。
+  **クローンは、これをマージに回すと決めた。**理由: 4つの形はどれも、応答の JSON の中身ではスキーマを満たしていないのに、継承された値を読む不具合で通っていたもので、「応答をスキーマで検査する」という約束に実装を戻す直しである。
+  同じ port（構造化出力の provider）の2つの実装のうち緩いほうを anthropic に揃える形で、**クローンは [ADR 0434](./0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)（testkit の InMemory を Postgres に揃えた）と ADR 0466（PR #1574、InMemory が別テナントを指すイベントを Postgres と同じく断る）を前例に当てた**（store と provider の違いはこの判断を変えない、と読んだ）。届くのは strict モードを守らない OpenAI 互換サーバを `client` に差したときだけである。
+  形の上では落ちる入力が増えるので、[docs/migration-v1.md](../migration-v1.md) の 🔴 に項目53 を足し、CHANGELOG の `[1.2.0]` の該当の箇条にも1行足した（🟡 の節の規則「落ちる入力が増える変更は🔴」に従う）。
 
 - **測ったこと**（【実測】。退避と復元は `cp`。`pnpm --filter` ではなく `packages/openai` で `npx vitest run src/__tests__/structured-proto-key.test.ts`）:
 
