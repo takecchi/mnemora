@@ -645,6 +645,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **これから書く digest だけが変わる。保存済みの digest は書き換えない。** digest は `contentHash`・冪等キー・既定の埋め込み入力（`content`）に入らない。公開の型・既定値は変えていない。非破壊と数える。
     ⚠ 新旧の digest が混在する（区別する欄は無い。`reextract` で書き直された記憶から新しい形になる）。`embeddingInput` で digest を埋め込む構成では、これから書く記憶の埋め込み入力が数文字変わる。
 
+- **`@mnemora/core`: recall footprint の見積もりの桁の数えが 1e21 以上の件数でも正しくなり（`estimateRecallFootprint` の `chars`）、失敗の説明（outbox の `last_error` などに入る文字列）を上限（4096字）で切るとき、書記素の途中で切れなくなった**（[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md)、ADR 0467 の材料の続き）。
+  - 件数が 1e21 以上のとき、桁数を指数表記（`"1e+21"`）の文字数で数えていた。10進の桁数で数える。1e21 未満と、`Infinity`・`NaN` の結果は変えていない。
+  - 失敗の説明は、境目が NFD の結合文字・ZWJ の絵文字・国旗の途中に落ちると、その途中で切っていた。今はその書記素の手前で止める。`… (truncated by mnemora, original length N chars)` の書き方、`N`（UTF-16 の長さ）、上限を超えないことは変えていない。⚠ **これから書く値だけが変わる。保存済みの `last_error` は書き換えない**——同じ失敗でも、直す前に書いた値と後に書いた値で、切り口が数文字違うことがある。
+  - 公開の型・既定値は変えていない。非破壊と数える。
+
 ---
 
 ## [1.1.0] - 2026-09-30
