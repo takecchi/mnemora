@@ -573,6 +573,7 @@ function bandEntryChars(charsPerDigest: number): number {
 
 /**
  * 非負整数 `n` を10進表記したときの桁数が、1桁（0〜9）からいくつ増えたか。
+ * `Infinity` は "Infinity"（8字）、`NaN` は "NaN"（3字）として数える（今までの結果を変えない）。
  *
  * `BUILTIN_RECALL_FOOTPRINT_PROFILE` の較正標本（hold-in 7行）は `totalInScope`・
  * `digestBandCoverage.shown`・`digestBandCoverage.eligible` のいずれも1桁だった
@@ -580,7 +581,13 @@ function bandEntryChars(charsPerDigest: number): number {
  */
 function extraDigitsBeyondOne(n: number): number {
   const normalized = Math.max(0, Math.trunc(n));
-  return Math.max(0, String(normalized).length - 1);
+  // ADR 0470: `String(1e21)` は `"1e+21"` と指数表記になり、桁数が21桁でなく4桁と数えられていた。1e21 以上の
+  // 有限の値は `BigInt` で10進に直して数える（非有限の値は `BigInt` が投げるので、今までどおり `String` で数える）。
+  const text =
+    Number.isFinite(normalized) && normalized >= 1e21
+      ? BigInt(normalized).toString()
+      : String(normalized);
+  return Math.max(0, text.length - 1);
 }
 
 /**
@@ -719,6 +726,12 @@ function indexBandStructuralTerms(
  * （`bandEligible > digestBandLimit`）では、昇格した候補はどのみち帯に表示されて
  * いなかった（表示されるのは先頭 `digestBandLimit` 件だけ）ので、帯の費用は
  * 変わらず、本体側の費用だけが純増する。
+ *
+ * ⚠ **入力が NaN のとき（`shape` の `memoryCountInScope`・`limit`・`digestBandLimit`・`associationCount`）、
+ * `chars` と、NaN から計算した欄（`returnedMemories`・`bandEntries`・`byTier`）は NaN のまま返る**
+ * （ADR 0470。検査しない今の振る舞い）。返り値の型には「見積もれなかった」を表す欄が無い——`chars` が NaN
+ * であることで見分けること。`compareWithFullLog` はこれを受けて結論を出さない（`too_close_to_call`・
+ * `estimatedShare: NaN`、ADR 0467）。欄や値を足すと公開の型が変わるので、ここでは足していない。
  */
 export function estimateRecallFootprint(
   shape: RecallFootprintShape,

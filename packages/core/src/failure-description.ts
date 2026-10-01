@@ -1,4 +1,4 @@
-import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
+import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 
 /**
  * 失敗（例外）を、利用者に返す・outbox に残す文字列へ整形する共有の関数群（内部。公開 API ではない）。
@@ -115,7 +115,8 @@ const DESCRIBE_JOB_FAILURE_MAX_CHARS = 4096;
 /**
  * Issue #1064（2026-09-29、ADR 0363）: `describeJobFailure` の戻り値全体に
  * {@link DESCRIBE_JOB_FAILURE_MAX_CHARS} の上限を掛ける。上限を超えたら
- * `sliceWithoutSplittingSurrogatePair`（サロゲートペアの内側で切らない、`text-truncation.ts`）
+ * `sliceAtGraphemeBoundary`（書記素の内側で切らない。結合文字・ZWJ の絵文字・国旗・サロゲートペアを割らない。
+ * `text-truncation.ts`、ADR 0470。2026-10-01 までは `sliceWithoutSplittingSurrogatePair` でサロゲートペアだけを避けていた）
  * で切り、末尾に「切ったこと」と「元の長さ」が読める印を付ける。
  *
  * `omitDrizzleParams` だけでは塞がらない経路（ADR 0363「塞がらない経路」）——
@@ -127,7 +128,7 @@ function capDescribeJobFailureLength(message: string): string {
     return message;
   }
   const originalLength = message.length;
-  const sliced = sliceWithoutSplittingSurrogatePair(message, DESCRIBE_JOB_FAILURE_MAX_CHARS);
+  const sliced = sliceAtGraphemeBoundary(message, DESCRIBE_JOB_FAILURE_MAX_CHARS);
   return `${sliced}… (truncated by mnemora, original length ${originalLength} chars)`;
 }
 
