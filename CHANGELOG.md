@@ -641,6 +641,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/core`: LLM が digest を返さないとき（または抽出が失敗したとき）の機械的な digest（`digestFallbackLength` で切る先頭の文字列）が、書記素の途中で切れなくなった**（[ADR 0467](./docs/decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md)、ADR 0424 O-5 の続き）。
   - 長さの境界が NFD の結合文字（「が」を `か` + 結合濁点で書いた文字列）・ZWJ で繋いだ絵文字・国旗の途中に落ちると、以前はその途中で切って「か」や ZWJ の片割れが残った。今はその書記素の手前で止める。長さちょうどに収まるなら残す。NaN・0・負・小数・`Infinity` の長さの結果は変えていない。
   - **これから書く digest だけが変わる。保存済みの digest は書き換えない。** digest は `contentHash`・冪等キー・既定の埋め込み入力（`content`）に入らない。公開の型・既定値は変えていない。非破壊と数える。
+    ⚠ 新旧の digest が混在する（区別する欄は無い。`reextract` で書き直された記憶から新しい形になる）。`embeddingInput` で digest を埋め込む構成では、これから書く記憶の埋め込み入力が数文字変わる。
 
 ---
 
