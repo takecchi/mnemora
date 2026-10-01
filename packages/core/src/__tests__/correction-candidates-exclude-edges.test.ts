@@ -9,7 +9,6 @@ import type {
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { NewMemory } from "../memory.js";
-import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "../correction-candidates.js";
 import type { MemoryId } from "../ids.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
