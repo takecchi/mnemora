@@ -169,6 +169,10 @@ describe("heuristicTokenCounter の境界（ADR 0483、今の振る舞い）", (
     expect(tokens("a".repeat(10))).toBe(3);
   });
 
+  it("サロゲートペアの漢字（SIP）は1コードポイントの CJK として数える（コード単位ではない）", () => {
+    expect(tokens("\u{20000}".repeat(10))).toBe(9);
+  });
+
   it("ごく長い文字列も整数で数える（整数比なので丸め差が出ない）", () => {
     expect(tokens("a".repeat(1_000_000))).toBe(250_000);
     expect(Number.isInteger(tokens("あ".repeat(1_000_001)))).toBe(true);
