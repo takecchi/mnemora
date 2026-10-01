@@ -433,6 +433,9 @@ export interface ObserveResult {
    *   （`undefined`）——「候補一覧を渡していないので判定していない」ことと「渡したが
    *   0件だった」ことを、キーの有無で区別する。
    * - **渡した場合は常に配列**（弾いた候補が無ければ `[]`）。
+   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
+   *   付く**（値は `[]`：弾いた候補なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
+   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    * - **（ADR 0456）識別子として保存できない `subjectId`（NUL・孤立サロゲートを含むもの）は、一覧を渡して
    *   いなくても弾き、observation の `subjectId` へフォールバックする。** 一覧を渡していない呼び出しでは、
    *   その記録はこの欄に載らない（上の1つ目のとおり、欄そのものが無い）。
@@ -448,6 +451,9 @@ export interface ObserveResult {
    * - **`claimKey.enabled` を渡さなかった（省略、または `enabled: false`）呼び出しでは、
    *   この欄は無い**（`undefined`）。
    * - **`claimKey.enabled: true` を渡した場合は常に値を持つ**（成功なら `null`）。
+   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
+   *   付く**（値は `null`：鍵の導出の失敗なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
+   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   claimKeyFailure?: ExtractionFailure | null;
   /**
@@ -463,6 +469,9 @@ export interface ObserveResult {
    * - **`detectContested: true` を渡した場合は常に配列**（`claimKey` が付かなかった
    *   候補——鍵の導出自体が失敗した／実行しなかった——は含まれない。付いた鍵の数だけ
    *   要素がある。0件なら `[]`）。
+   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
+   *   付く**（値は `[]`：検出の対象の候補なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
+   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   contestedDetection?: ContestedDetectionOutcome[];
 }
@@ -611,6 +620,12 @@ export interface ReextractResult {
    *   compare-and-swap で呼ぶ。読み（`listBySourceObservation`）と書き（`updateStatus`）の
    *   間に他の書き込みで status が変わっていた Memory は、ここには**入らない**
    *   （`skipped` に `status_changed_concurrently` として出る）。
+   * - 🔴 **置き換えた側（`supersededById`）は、今回の抽出で `active` になる行である**（ADR 0454）。
+   *   冪等キーは status を問わないので、候補が同じ版の `superseded`／`archived` な既存行にぶつかると、
+   *   その行が `memoryIds` に載る。ぶつからない先頭の候補（新しく作る行・既に active な行）を置き換えた側にする。
+   *   **候補が全部、非 `active` の既存行にぶつかるときは、何も supersede せず、この配列は空**——
+   *   ぶつかった行は `skipped` に `status_not_active` で載る。以前は、その行が置き換えた側になり、
+   *   X → Y → X と出力が往復すると Y と X が互いを置き換えて active が0件になっていた。
    */
   supersededMemoryIds: MemoryId[];
   /**
@@ -1715,8 +1730,8 @@ export type RestoreSupersededTarget = {
    *   複数回勝った別々の操作を、1回の呼び出しで混ぜて戻すことになる。
    * - 🔴 `supersededReason === "reextract_superseded"` と `null`
    *   （由来不明）: **既存の情報だけでは操作単位に分割できないことがある。
-   *   ⛔ 割れるという顔をしない。**`reextract` のアンカーは候補列の先頭
-   *   （`memoryIds[0]`）を位置で選ぶだけであり、その候補が冪等な
+   *   ⛔ 割れるという顔をしない。**`reextract` のアンカーは候補列のうち、非 `active` の既存行に
+   *   ぶつからない先頭（ADR 0454。ぶつかる候補が無ければ `memoryIds[0]`）を位置で選ぶだけであり、その候補が冪等な
    *   `ON CONFLICT` 経由で既存の Memory に解決されると、複数回の別々の
    *   `reextract` 呼び出しが同じアンカーを共有しうる——このとき
    *   `meta.reason`/`sourceObservationId`/`extractorVersion` は複数回の
@@ -2603,8 +2618,15 @@ export interface Runtime {
    *   **上の「LLM の呼び出しの失敗は投げない。全文フォールバックへ倒す」には倒さない**
    *   ——中断と LLM の失敗を同じ顔にしない。
    * - 全文フォールバックの Memory は作られない。抽出候補も1件も書かれない。
-   * - `extract` ジョブは `complete()` されず、claim もされていないまま残る——後の `tick()`
-   *   がそのジョブを処理する（`processExtractJob`）。ただし、この observe 呼び出しにだけ渡した
+   * - `extract` ジョブは `complete()` されない。⚠ **2026-10-01 訂正（[ADR 0454](../../../docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md)）:
+   *   以前は「claim もされていないまま残る」と書いていたが、[ADR 0407](../../../docs/decisions/0407-sync-observe-extract-job-lease.md)
+   *   以降は違う。** `extract: 'sync'` の observe が積むジョブは、observe が claim 済み（`claimed_by: "runtime.observe:sync"`・
+   *   `attempts: 1`）の状態で作られ、abort（と、抽出中に投げた例外）の後もその claim のまま残る。`tick()` は**リースが切れるまで**
+   *   そのジョブを拾わない（`leaseMs` の内側の `tick()` は `processed: 0`）。リースが切れた後の `tick()` が取り直し
+   *   （`attempts` は 2）、そのジョブを処理する（`processExtractJob`）。【実測 2026-10-01】`@mnemora/postgres` と
+   *   testkit の fixture で同じ。⚠ **その間に同じ `externalId` で `observe()` を再送しても、抽出はやり直されない**——
+   *   Observation は既に在るので `{ memoryIds: [], extraction: 'skipped' }` が返る（上の #897 と同じ分岐）。
+   *   ただし、この observe 呼び出しにだけ渡した
    *   `subjectCandidates`・`claimKey` は永続化されないため、後の `tick()` からの再抽出には
    *   **届かない**（`runExtraction` の doc コメントの「`processExtractJob` は渡さない」と同じ理由）。
    * - `claimKey.enabled: true` を渡していた場合、claim key の LLM 呼び出し
@@ -2773,7 +2795,9 @@ export interface Runtime {
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
    * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
-   * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする。
+   * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする
+   * （置き換えた側は `active` な行。非 `active` の既存行にぶつかる候補は選ばない。ADR 0454、
+   * `ReextractResult.supersededMemoryIds` の doc）。
    * 安全弁3つ（LLM がまた失敗したら何もしない・候補0件なら何もしない・compare-and-swap で
    * TOCTOU の競合を検知する）は `ReextractResult` の doc コメントを参照。
    *
@@ -5348,7 +5372,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // ADR 0029: 判定そのものは純関数（`classifyReextractTargets`）に切り出してある——
     // ここでは判定結果（`toSupersede`・`skipped`）を受け取って I/O するだけ。
     // supersede する対象・順序・イベントの中身は ADR 0028 からミリも変えていない。
-    const { toSupersede, skipped } = classifyReextractTargets(existingBefore, contentHashes);
+    const { toSupersede: classifiedToSupersede, skipped } = classifyReextractTargets(
+      existingBefore,
+      contentHashes,
+    );
+
+    // ADR 0454: 置き換えた側（アンカー）は、今回の抽出で **`active` になる行**でなければならない。
+    // 冪等キー `(sourceObservationId, extractorVersion, contentHash)` は status を問わないので、候補が
+    // 同じ版の `superseded`／`archived` な既存行にぶつかると、store はその行を `created: false` で返す。
+    // 候補列の先頭を位置で選ぶと、その行が置き換えた側になる（X → Y → X と出力が往復すると、Y は X に
+    // 置き換えられ、X は Y に置き換えられたまま——循環で active が0件）。ぶつかる行は `existingBefore`
+    // （LLM の後に読んだ、この版の全 status の行）に居る。ぶつからない先頭の候補をアンカーにし、無ければ
+    // （候補が全部、非 active の既存行にぶつかる）何も supersede しない。ぶつかった行は、上の分類が
+    // `status_not_active` として `skipped` に載せている。
+    const nonActiveHashes = new Set(
+      existingBefore.filter((m) => m.status !== "active").map((m) => m.contentHash),
+    );
+    const anchorIndex = newMemories.findIndex((m) => !nonActiveHashes.has(m.contentHash));
+    const toSupersede = anchorIndex === -1 ? [] : classifiedToSupersede;
 
     // `supersededById` を省略すると `meta` からその欄を落とす——ADR 0100 の口を使う経路では
     // アンカーの id が呼び出し前に存在しないため、store が解決した id で埋める契約になって
@@ -5385,9 +5426,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // ------------------------------------------------------------------
     const supersedeWithNewMemories = deps.memoryStore.supersedeWithNewMemories;
     if (supersedeWithNewMemories !== undefined) {
-      // `supersededByIndex: 0` は「この呼び出しの news[0]」——今日の
-      // `const supersededById = memoryIds[0]!` と同じ対象を指す（ADR 0028 の
-      // 「今回作った Memory の1件」）。
+      // `supersededByIndex: anchorIndex` は「この呼び出しの news[anchorIndex]」——ぶつからない先頭の候補
+      // （上の ADR 0454 のコメント。ぶつかる候補が無ければ今までどおり news[0]）。
       let result: Awaited<ReturnType<typeof supersedeWithNewMemories>>;
       try {
         result = await supersedeWithNewMemories.call(
@@ -5396,7 +5436,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           newMemories.map((input) => ({ input, jobKinds: ["embed"] as OutboxJobKind[] })),
           toSupersede.map((existing) => ({
             id: existing.id,
-            supersededByIndex: 0,
+            supersededByIndex: anchorIndex,
             expectedStatus: "active" as MemoryStatus,
             // `meta.supersededById` は store が解決した id で埋める（上のコメント参照）。
             event: buildSupersedeEventFor(existing),
@@ -5516,7 +5556,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // `candidates.length === 0` を上で早期リターンしている以上 `memoryIds` は非空
     // ——ここは構造的に保証されている（防御的な二重チェックをあえて置かない。
     // ADR 0028「変異A」参照）。
-    const supersededById = memoryIds[0]!;
+    // ADR 0454: 口ありの経路と同じ候補（ぶつからない先頭）。`toSupersede` が空なら使わない。
+    const supersededById = memoryIds[Math.max(anchorIndex, 0)]!;
 
     const supersededMemoryIds: MemoryId[] = [];
     for (const existing of toSupersede) {
@@ -5718,11 +5759,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // 冪等な再送（docs/architecture.md §3.5）。extract ジョブは積まれておらず、
       // sync/deferred のどちらであっても、ここで新たに抽出をやり直す必要はない
       // （最初の呼び出しで既に処理済みのはず）。
+      // ADR 0454: 渡した欄は再送でも付ける（`ObserveResult` の各欄の「渡したら常に」）。値は「再送は抽出も検出も
+      // 走らせなかった」から決まる自然な値——弾いた候補なし（[]）・鍵の導出の失敗なし（null）・検出の対象の候補なし（[]）。
       return {
         observationId: observation.id,
         memoryIds: [],
         extraction: "skipped",
         extractionFailure: null,
+        ...(input.subjectCandidates !== undefined && input.subjectCandidates.length > 0
+          ? { rejectedSubjectIds: [] }
+          : {}),
+        ...(input.claimKey?.enabled === true ? { claimKeyFailure: null } : {}),
+        ...(input.claimKey?.detectContested === true ? { contestedDetection: [] } : {}),
       };
     }
 
