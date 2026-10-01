@@ -2387,7 +2387,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 - 専用のエラー型・`kind` は無い（素の `Error`、メッセージは `PostgresMemoryStore:` で始まり、`memory not found for tenant` を含む）。
 - 自前の `MemoryStore` 実装は、イベントを書く口の入口で同じ確かめを足す（適合テストは検査しない）。
 
-**確かめたこと**: testkit のインメモリ実装 `InMemoryMemoryStore` は、以前は同じ入力（別テナントの記憶を指す `event.memoryId`）を断らなかった（[ADR 0463](./decisions/0463-migration-v1-red-items-checked-against-code.md) の実測。ADR 0456 の M7 の答え）。[ADR 0466](./decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) で揃え、いまは同じ口で同じように断る（例外は素の `Error`、message は `InMemoryMemoryStore: memory not found for tenant: <id>`——接頭辞だけが違う）。fixture が新しく例外を投げる変更は破壊的と数えないので、🟡 の節に載せた（そちらの「`InMemoryMemoryStore`」の項目と相互に指す）。2実装の一致は `packages/postgres/src/__tests__/event-target-parity.postgres.test.ts` が縛る。
+**確かめたこと**: testkit のインメモリ実装 `InMemoryMemoryStore` は、以前は同じ入力（別テナントの記憶を指す `event.memoryId`）を断らなかった（[ADR 0463](./decisions/0463-migration-v1-red-items-checked-against-code.md) の実測。ADR 0456 の M7 の答え）。[ADR 0466](./decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) で揃え、いまは同じ口で同じように断る（例外は素の `Error`、message は `InMemoryMemoryStore: memory not found for tenant: <id>`——接頭辞だけが違う）。fixture が新しく例外を投げる変更は破壊的と数えないので、🟡 の節に載せた（そちらの「`InMemoryMemoryStore`」の項目と相互に指す。大文字の uuid の扱いは [ADR 0469](./decisions/0469-fake-event-target-and-uuid-case.md) で `@mnemora/postgres` に揃えた）。2実装の一致は `packages/postgres/src/__tests__/event-target-parity.postgres.test.ts` が縛る。
 
 **DB マイグレーション**: 要らない。修正前に書かれた、別テナントの記憶を指す `memory_events` の行が在れば、指された記憶のテナントの後始末（`purge`・`eraseTenant`）を止めうる形である（項目49 と同じ。ADR 0456 の S2 では、止まることまでは測っていない）。**既存の行は消さない**（データの書き換えはオーナーの判断が要る）。調べる SQL は項目49 の ADR 0436 に在る（`memory_events` の `tenant_id` と、指された記憶の `tenant_id` の食い違いを数える、読み取りだけ）。
 
@@ -2533,6 +2533,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   対象の口は `@mnemora/postgres` の H4 と同じ集合: `updateStatusWithEvent`・`supersedeWithNewMemories?`（`supersede[i].event` と `buildCreatedEvent`）・`purgeMemory?`・`markContestedPair?`・`resolveContestedPair?`・`resolveOrphanedContested?`・`markContestedGroup?`・`resolveContestedGroup?`・`createMemoriesWithOutboxAndEvents?`。
   以前は、別テナントの記憶を指すイベントが `ctx` のテナントの行として積まれた。いまは書く前に断り、何も書かない（status の更新も news も先に積んだイベントも）。`null` のイベント、今更新・作成した行や同じ呼び出しの別のメンバーを指すイベント、CAS に弾かれる対象や状態が変わらないメンバーのイベント（積まれない）は、`@mnemora/postgres` と同じく検査しない。
   例外は素の `Error`（`kind`・`code` は無い）で、message は `InMemoryMemoryStore: memory not found for tenant: <id>`。公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない（`MemoryStore` を自前実装して suite に当てている利用者に、新しい約束は課さない）。自前のテストで `InMemoryMemoryStore` に別テナントの id を指すイベントを渡していた人だけが落ちる。
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `NewMemoryEvent.memoryId` が大文字の uuid でも、小文字にそろえて受ける**（[ADR 0469](./decisions/0469-fake-event-target-and-uuid-case.md)。上の項目（ADR 0466）と 🔴 の項目52 の続き）。
+  `@mnemora/postgres` は uuid を小文字にそろえて比べるので、大文字の uuid を自テナントの記憶として受ける。`InMemoryMemoryStore` は、ADR 0466 の時点では完全一致で引き、自テナントの記憶の id を大文字にしたものも断っていた。いまは `@mnemora/postgres` と同じく小文字にそろえて受け、積むイベントの `memoryId` も小文字の正規形にする。別テナントの記憶は、大文字でも断る。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。操作の対象の `id`（`updateStatusWithEvent(ctx, id, …)` の `id` など）の大文字小文字は変えていない（fixture は完全一致のまま。ADR 0438・0446 の範囲）。`InMemoryEventStore.append` の `memoryId` の大文字は、まだ断る（`PostgresEventStore.append` は通す。ADR 0469 の「引き受けた負債」）。
 
 ### この節に載せなかったもの（理由つき）
 

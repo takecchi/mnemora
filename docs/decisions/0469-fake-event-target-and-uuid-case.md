@@ -31,7 +31,8 @@
      - **空文字は参照として扱い断る**（Postgres の uuid でない id と同じ）。Fake の既存の `assertOwnMemoryRef`（ADR 0439）は空文字を「参照しない」として通すが、イベントの指し先では通さない（今回の検査は `assertEventTargetOwn` で別に持つ）。
   2. **大文字小文字は区別しない側に揃える（落ちる入力が減る側）**【判断】。Fake は、`event.memoryId` を小文字にして記憶を引き、積むイベントの `memoryId` も小文字にそろえる（Postgres は uuid 列の正規形＝小文字で読み戻る）。Fake の id は小文字の `mem-N` だけなので、大文字を小文字にそろえても別の id と混ざらない。
      - **落ちる入力は増えない／減る**: 以前の Fake は検査が無かったので、大文字は通っていた。検査を足したあとも通る。
-     - **InMemory（testkit の公開の fixture）の同じ直し**——`assertEventTargetOwn` で小文字にそろえて引き、積むイベントの `memoryId` を小文字にそろえる——は、**#1574 がマージされてから**同じ PR に足す（この ADR の時点で #1574 は未マージ）。落ちる入力が減る変更なので、入れる場合は CHANGELOG の `[1.2.0]` に1行と migration-v1 の 🟡 に載せる（落ちる入力が増える変更ではない）。
+     - **InMemory（testkit の公開の fixture）の同じ直しも入れた**（#1574 のマージ後、同じ PR）: `assertEventTargetOwn` が `event.memoryId` を小文字にして記憶を引き（断るときの message は渡された id のまま）、`buildStoredMemoryEvent` が積むイベントの `memoryId` を小文字にそろえる。操作の対象の `id`（`rawGet`）は変えない。落ちる入力が減る変更なので、CHANGELOG の `[1.2.0]` と migration-v1 の 🟡 に載せた（ADR 0466 の項目と 🔴 の項目52 のそばに置き、相互に指す）。2実装の一致は `event-target-parity.postgres.test.ts` に大文字の指し先（今更新した行・同じテナントの別の記憶・別テナントの記憶の大文字）を足して縛った。
+     - **Fake の小文字化は、頼まれた範囲（8口の検査）より広い**: Fake は積むイベントの `memoryId` の小文字化を `buildStoredEvent`（イベントを積む全経路の合流点）に置いたので、`FakeEventStore.append` を含む全経路で効く。理由は、Postgres の `memory_events.memory_id` が uuid 型で、読み出すと小文字の正規形になること（Fake を Postgres の読み戻しに揃えた）。InMemory 側も同じく `buildStoredMemoryEvent`（`InMemoryEventStore.append` も通る）で小文字にそろえる。
   3. **ADR 0438・0446 との整合**: ADR 0438 は `purgeMemory` 以外の `isUuidLike` だけの入口に `normalizeUuidCase` を足さなかった（uuid 型の列との比較だけで、大文字でも結果が変わらない）。ADR 0446 は `correctedId` の大文字を「store に従って」扱い、大文字小文字を区別する store は今どおり `not_a_candidate` のままとした。この ADR が変えるのは **`event.memoryId`（イベントの指し先）の検査だけ**で、操作の対象の id（`updateStatusWithEvent(ctx, id, …)` の `id` など）の大文字小文字は変えていない（fixture は完全一致のまま。ADR 0446 の「store に従う」を覆さない）。これは Postgres が大文字の `id` を受けて fixture が受けない、という既存の違いを残す（下の「残ったこと」）。
   4. **歯は新しいファイルに置き、conformance suite には足さない**（ADR 0434 決定5）。
      - `packages/core/src/__tests__/fake-event-target-belongs-to-ctx-tenant.test.ts`（10本。口ごとの断る／通す、空文字、大文字小文字、CAS に弾かれる対象、状態が変わらない群のメンバー）。
@@ -43,7 +44,7 @@
   - **やりすぎで赤**: `null` まで断る(2)・今更新した行以外は同じテナントの記憶でも断る(2)・今更新した行まで断る(8)・CAS に弾かれる対象まで検査する(1)・状態が変わらない群のメンバーまで検査する(1)。
   - **足りなくて赤**: 大文字小文字を区別する(1)・積むイベントの `memoryId` を小文字にそろえない(1)・空文字を「参照しない」として通す(1)。
 
-- **走らせたテスト**（名指し）: 新しい `fake-event-target-belongs-to-ctx-tenant.test.ts`。core の回帰として、`fake-referential-integrity`・`fake-event-write-atomicity`・`fake-memory-store-supersede-with-new-memories`・`mark-contested`・`resolve-contested`・`mark-contested-group`・`resolve-contested-group`・`resolve-orphaned-contested`・`purge`・`apply-correction`・`consolidate`・`reflect`・`runtime-branch-teeth` の13本（253 本が緑）。postgres の `event-target-belongs-to-ctx-tenant.postgres.test.ts`（8 本が緑）。
+- **走らせたテスト**（名指し）: 新しい `fake-event-target-belongs-to-ctx-tenant.test.ts`。InMemory の直し（#1574 のマージ後）では、`in-memory-event-target-belongs-to-ctx-tenant.test.ts`（11本）と `event-target-parity.postgres.test.ts`（10本。大文字の指し先を足した）が緑。core の回帰として、`fake-referential-integrity`・`fake-event-write-atomicity`・`fake-memory-store-supersede-with-new-memories`・`mark-contested`・`resolve-contested`・`mark-contested-group`・`resolve-contested-group`・`resolve-orphaned-contested`・`purge`・`apply-correction`・`consolidate`・`reflect`・`runtime-branch-teeth` の13本（253 本が緑）。postgres の `event-target-belongs-to-ctx-tenant.postgres.test.ts`（8 本が緑）。
 
 - **検討した代替案**:
 
@@ -53,10 +54,12 @@
 
 - **引き受けた負債**:
 
-  - InMemory の大文字の扱いは、#1574 のマージ後に足す（上の決定2）。それまで postgres と InMemory は大文字で割れたまま。
+  - `InMemoryEventStore.append`（ADR 0436 の検査。`memoryStore.get(ctx, event.memoryId)` の完全一致）は、大文字の `memoryId` を断る（`PostgresEventStore.append` は uuid を小文字にそろえて通す）。`EventStore.append` は 9 口の外なので、この ADR では揃えていない。`FakeEventStore.append` は Fake の `buildStoredEvent` で小文字にそろえて積むが、検査は元から Fake に無い。
   - 操作の対象の `id`（`updateStatusWithEvent(ctx, id, …)` の `id` など）の大文字小文字は、Postgres が受け、fixture（InMemory・Fake）は受けない（ADR 0446 の既存の違い）。
   - Fake が積む `memoryId` の小文字化は、`FakeEventStore.append` を含む全経路（`buildStoredEvent`）に効く。`append` で別の大文字の id を使う既存のテストは見当たらなかったが、網羅の証明ではない。
 
-- **これが覆るとしたら**: オーナーが、fixture は大文字の uuid を断ってよい（postgres とは違ってよい）と決めたとき。その場合は Fake の小文字化と歯を外す。
+- **変異試験（InMemory の大文字小文字）**【実測。`.mgr-notes/mutations-0469-inmemory.txt`・`red-before-0469-inmemory.txt`・`red-before-0469-parity.txt`】: 直す前で、InMemory の歯 11 本中 1 本、2実装の一致の歯 10 本とも赤。やりすぎで赤: 大文字で渡された id なら別テナントの記憶でも通す（InMemory の歯 1・一致の歯 10 本）、操作の対象の id（`rawGet`）まで小文字にそろえる（1）。足りなくて赤: 小文字にそろえない（1 と一致の歯 10 本）、積む `memoryId` を小文字にそろえない（1）、message に小文字にした id を載せる（1）。
+
+- **これが覆るとしたら**: オーナーが、fixture は大文字の uuid を断ってよい（postgres とは違ってよい）と決めたとき。その場合は Fake・InMemory の小文字化と歯を外す。
 
 - **測っていないこと**: 大文字の `id` で操作の対象を指したときの3実装の差（範囲外）。実 API。
