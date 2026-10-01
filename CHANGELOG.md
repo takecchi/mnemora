@@ -650,6 +650,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 失敗の説明は、境目が NFD の結合文字・ZWJ の絵文字・国旗の途中に落ちると、その途中で切っていた。今はその書記素の手前で止める。`… (truncated by mnemora, original length N chars)` の書き方、`N`（UTF-16 の長さ）、上限を超えないことは変えていない。⚠ **これから書く値だけが変わる。保存済みの `last_error` は書き換えない**——同じ失敗でも、直す前に書いた値と後に書いた値で、切り口が数文字違うことがある。
   - 公開の型・既定値は変えていない。非破壊と数える。
 
+- **`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`: claim key の矛盾検出（`findActiveByClaimKey?`・`findContestedByClaimKey?`）が、空の区間（`validFrom === validUntil`）・逆転した区間（`validFrom > validUntil`）の記憶を、有効期間が重なるものとして返さなくなった**（[ADR 0473](./docs/decisions/0473-validity-empty-inverted-interval-no-overlap.md)）。どの時点でも真でない記憶が、同じ claim key の有効な記憶を `contested` にしていた。入力は拒まない。
+  - 問い合わせ側が空・逆転した区間のときは何も返らない。保存済みの行がそうなら、どの問い合わせにも返らない（3実装とも）。`markContestedGroup?` の組の判定は変えていない。
+  - 公開の型・既定値は変えていない。非破壊と数える（断る入力は増えない。`contested` になる組が減る）。
+
 ---
 
 ## [1.1.0] - 2026-09-30

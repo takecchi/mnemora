@@ -184,6 +184,12 @@ fixture で同じである。`filtered` の件数は「その条件に当たる�
 入力の段で拒む案（入力を狭める）は採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
 書き分けは `Observation.validFrom` の TSDoc。
 
+**⚠ 2026-10-01 追記（ADR 0473）: 空の区間（`valid_from = valid_until`）と逆転した区間は、claim key の重なりの判定でも何とも重ならない。**
+上の2つの区間は、どの時点でも真でない（`validAt` ゲートを通らない）。`findActiveByClaimKey?`・`findContestedByClaimKey?` の
+「有効期間が重なる」は半開区間 `[valid_from, valid_until)` の重なりで、点を1つも含まない区間は問い合わせ側でも保存済みの行の側でも
+返さない。以前は `a1 < b2 AND a2 < b1` の式がそのまま当たり、そうした記憶が同じ claim key の有効な記憶を `contested` にしていた
+（3実装とも同じ）。入力は拒まない（Issue #1042 のまま）。`markContestedGroup?` が群の中の組に行を張る判定（ADR 0381）は変えていない。
+
 ---
 
 ## 4. Digest（要旨）

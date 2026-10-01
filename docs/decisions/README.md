@@ -480,5 +480,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0466](./0466-inmemory-event-target-belongs-to-ctx-tenant.md) | `InMemoryMemoryStore` も、`NewMemoryEvent.memoryId` が `ctx` のテナントの記憶でなければ書かずに断る（ADR 0456 の H4 の InMemory 版） | 採用 (2026-10) |
 | [0467](./0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) | 穴探し38巡目 — recall footprint の見積もり関数が非有限の入力で結論を出さない・フォールバック digest を書記素の境界で切る | 採用 (2026-10) |
 | [0470](./0470-footprint-digits-failure-description-grapheme.md) | 穴探し41巡目 — ADR 0467 の材料のうち、線の内側のものを直す（footprint の桁の数え・失敗の説明の書記素切り）。`estimateRecallFootprint` の NaN は材料のまま | 採用 (2026-10) |
+| [0473](./0473-validity-empty-inverted-interval-no-overlap.md) | 空の区間・逆転した区間の記憶を、claim key の「有効期間が重なる」から外す・有効期間と見る口の境界を当てた記録（穴探し44巡目） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

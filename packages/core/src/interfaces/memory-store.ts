@@ -2286,7 +2286,10 @@ export interface MemoryStore {
    * - **有効期間が重ならない行は返さない。**半開区間 `[validFrom, validUntil)` として
    *   扱い、`validFrom` が `null` なら `-∞`、`validUntil` が `null` なら `+∞` として扱う
    *   （`aggregateScope` の `validAt` ゲートと同じ NULL の読み方——ただしこちらは「1点」
-   *   ではなく「区間の重なり」を判定する）。
+   *   ではなく「区間の重なり」を判定する）。**空の区間（`validFrom === validUntil`）と逆転した
+   *   区間（`validFrom > validUntil`）は点を1つも含まないので、何とも重ならない**——問い合わせ側
+   *   （`query.validFrom`/`validUntil`）でも、保存済みの行の側でも（ADR 0473。`recall()` の
+   *   `validAt` ゲートをどの時点でも通らない記憶が、有効な記憶を `contested` にしないため）。
    * - **返す順序は規定しない。**呼び出し側（`Runtime`）は件数（0/1/2件以上）で分岐する
    *   だけで、順序に依存する判断をしない。
    * - **LLM を一度も呼ばない。**列の等値比較・範囲比較・索引アクセスだけで完結する
@@ -2345,7 +2348,7 @@ export interface MemoryStore {
    * - **`query.excludeMemoryId` に一致する行は返さない。**
    * - **`query.contentHash` と一致する行は返さない。**
    * - **有効期間が重ならない行は返さない**（半開区間 `[validFrom, validUntil)`、`NULL` は
-   *   `-∞`/`+∞`。`findActiveByClaimKey?` と同じ判定式）。
+   *   `-∞`/`+∞`。`findActiveByClaimKey?` と同じ判定式。空の区間・逆転した区間は何とも重ならない）。
    * - **返す順序は規定しない。**
    * - **LLM を一度も呼ばない。**
    *
