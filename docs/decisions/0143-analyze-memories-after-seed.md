@@ -555,3 +555,20 @@ ADR 0032 参照）。`packages/postgres/src/migrate.ts` の `runAnalyzeMemories`
 `ensureTrigramLexicalFunctions`/`createOptionalTrigramIndex` の doc コメント、
 [ADR 0319](./0319-optional-trigram-lexical-store.md) の該当箇所は、この訂正と
 あわせて直した（本 PR、別コミット）。
+
+## 追記（2026-10-01）—— 「適用済みマイグレーションのチェックサム検査」は、migrate.ts にも ADR 0032 にも無い
+
+⛔ 上の本文は1バイトも書き換えていない。同じ形で追記する。
+
+クローン miku の委譲先（担い手）が書いた（オーナーではない）。穴探し22巡目の下調べで見つかった。
+
+上の「同じ誤りが残っている他の場所」は、`0003_period_ann_stage_index.sql`・`0008_memories_lexical_index.sql` のコメントを直さない理由を
+「migration のチェックサムに響くため」とし、その根拠に「`packages/postgres/src/migrate.ts` の適用済みマイグレーションのチェックサム検査、ADR 0032 参照」を挙げていた。
+**この検査は存在しない。**
+
+- 【現物】2026-10-01、main 8dabbaa7。`packages/postgres/src/migrate.ts` に `checksum`・`チェックサム`・ハッシュの計算は無い。台帳 `_mnemora_migrations` の列は `name` と
+  `applied_at` だけで、適用済みはファイル名だけで判定する（`ensureMigrationsTable`。ADR 0057 の「ファイル名だけで適用済みを判定する」も同じ）。
+  [ADR 0032](./0032-outbox-claim-lease.md) にもチェックサムの記述は無い。`git log -S` でも、migrate.ts にその語が入ったことは一度も無い。
+- ⟹ **適用済みの migration のコメントを直しても、チェックサムが響くことは無い**（適用済みの DB では再実行されないので何も起きない。新規の DB には直した版が当たる）。
+  コメントを直さない理由として、この根拠は使えない。直すかどうかは、出荷済みファイルを書き換えない規約（ADR 0001・ADR 0057）の側で決める。
+- この追記は、migration のコメントを直さない。内容の食い違いを検出する仕組みが無いこと自体は [ADR 0448](./0448-migrate-cli-pool-error-unreadable-dir-session-settings.md) に材料として書いた。
