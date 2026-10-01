@@ -110,6 +110,10 @@ export interface StoredRelation {
  * sequence`）、JSON にならない値（`undefined` など）は `NOT NULL` の列で拒む。
  */
 function assertRecallRecordStorable(record: NewRecallRecord): void {
+  // `created_at` は `timestamptz`——Invalid Date は Postgres が書けずに拒む（ADR 0480）。省略は壁時計を使うので検査しない。
+  if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
+    throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
+  }
   if (record.subjectId != null && record.subjectId.includes("\u0000")) {
     throw new Error("createRecall: subjectId must not contain NUL characters (U+0000)");
   }

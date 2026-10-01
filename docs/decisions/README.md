@@ -491,6 +491,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0477](./0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) | 穴探し48巡目 — `createBullmqTickDriver` の `everyMs`・`jobName`・`queueName` は検査されない。不正値で何が起きるかを実 Redis で測り、README と TSDoc に書く | 採用 (2026-10) |
 | [0478](./0478-example-chat-readme-flags-env-coverage.md) | 穴探し49巡目 — `examples/chat/README.md` が載せていなかったフラグと環境変数を、利用者向けと内部用に分けて一覧にする。文書のコード片と散文の数値は突き合わせてずれなし | 採用 (2026-10) |
 | [0479](./0479-tenant-settings-write-fake-alignment.md) | 穴探し50巡目 — `TenantSettingsStore` の書き込み口。core の `FakeTenantSettingsStore` だけが、他の2実装が拒む値を受けていたので揃える | 採用 (2026-10) |
+| [0480](./0480-recall-record-createdat-invalid-date-fake-aliasing.md) | 穴探し51巡目 — 想起の記録の往復。`createRecall` の Invalid Date の `createdAt` を InMemory と Fake が受けていた。Fake の記録は呼び出し側と同じオブジェクトを共有していた | 採用 (2026-10) |
 | [0482](./0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) | 穴探し53巡目 — `observe()` の入力の種類ごとの扱い。`event.data` の「JSON で往復しない値」の表に歯が無く、関数・`Symbol`・`toJSON` の3行も載っていなかった | 採用 (2026-10) |
 | [0486](./0486-fixture-event-data-align-and-context-text-unit.md) | 穴探し53巡目の続き — testkit の fixture が関数・`Symbol`・`toJSON` を含む `event.data` を `DataCloneError` で断っていたのを Postgres に揃える。`extractionContext` の `text` の上限の単位を書く | 採用 (2026-10) |
 
