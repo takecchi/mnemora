@@ -32,7 +32,8 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
   return structuredClone({
     id: nextId("evt"),
     tenantId: ctx.tenantId,
-    memoryId: event.memoryId,
+    // ADR 0469: uuid の列は小文字の正規形で読み戻る（`@mnemora/postgres`）。大文字で渡された `memoryId` も小文字にそろえて積む。
+    memoryId: event.memoryId === null ? null : event.memoryId.toLowerCase(),
     kind: event.kind,
     at: event.at ?? new Date(),
     actor: event.actor,

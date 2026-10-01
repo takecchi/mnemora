@@ -33,13 +33,12 @@ export function intersectAttributes(
     return {};
   }
   const [first, ...rest] = eligible;
-  const result: Attributes = {};
-  for (const [key, value] of Object.entries(first!.attributes ?? {})) {
-    if (rest.every((m) => (m.attributes ?? {})[key] === value)) {
-      result[key] = value;
-    }
-  }
-  return result;
+  // ADR 0472: `result[key] = value` は key が `__proto__` のとき黙って捨てられる（キーの文字種の検査
+  // `ATTRIBUTE_KEY_PATTERN` は `__proto__` を通す）。`Object.fromEntries` は自前のキーとして作る。
+  const entries = Object.entries(first!.attributes ?? {}).filter(([key, value]) =>
+    rest.every((m) => (m.attributes ?? {})[key] === value),
+  );
+  return Object.fromEntries(entries);
 }
 
 /**

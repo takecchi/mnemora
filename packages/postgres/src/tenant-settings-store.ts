@@ -216,7 +216,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       SELECT subject_id, activity_seq FROM tenant_subject_activity
       WHERE tenant_id = ${ctx.tenantId} AND subject_id = ANY(${sql.param(subjectIds)}::text[])
     `);
-    const out: Record<string, number> = {};
+    const out = Object.create(null) as Record<string, number>;
     for (const row of result.rows as unknown as {
       subject_id: string;
       activity_seq: string | number;
