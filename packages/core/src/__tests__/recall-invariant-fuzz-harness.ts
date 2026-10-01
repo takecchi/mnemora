@@ -79,6 +79,8 @@ export type Op =
       zero: boolean;
       subj: boolean;
       hl: number;
+      /** `fields` profile だけ: `occurredAt` を「いまから何時間前か」（負なら未来）で振る。無ければ null。 */
+      occ?: number | null;
     }
   | {
       k: "recall";
@@ -89,6 +91,8 @@ export type Op =
       budget: number;
       thr: number;
       lex: boolean;
+      /** `fields` profile だけ: これまで一度も振っていなかった `RecallQuery` の欄（ADR 0492）。 */
+      x?: { tw: boolean; dbl: number; qt: string[] };
     }
   | { k: "bulk"; n: number; seed: number }
   | { k: "usage"; pick: number }
@@ -119,10 +123,14 @@ const VECS = [
  *   `ann_unreached`（info）がほぼ常に立ち、I10 の下限がほとんど効かない。`wide` は
  *   索引（HNSW）を通る規模と、k' ≧ 候補数の recall（I10 の下限が効く）の両方を作る。
  */
-export type FuzzProfile = "default" | "wide";
+export type FuzzProfile = "default" | "wide" | "fields";
 
 export function genOps(seed: number, n: number, profile: FuzzProfile = "default"): Op[] {
   const r = rng(seed);
+  // `fields` の追加の欄は別の乱数の流れから引く——`r` の引き方は `default` と同じに保ち、
+  // 同じシードの操作列の骨格（どの操作が何番目か）を変えない（ADR 0492）。
+  const r2 = rng((seed ^ 0x5bd1e995) >>> 0);
+  const fields = profile === "fields";
   const pick = <T>(xs: T[]): T => xs[Math.floor(r() * xs.length)]!;
   const idx = () => Math.floor(r() * 1000);
   const ops: Op[] = [];
@@ -141,6 +149,7 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
         zero: r() < 0.05,
         subj: r() < 0.3,
         hl: pick([1, 24, 24 * 365]),
+        ...(fields ? { occ: r2() < 0.5 ? null : Math.floor(r2() * 24 * 400) - 24 * 10 } : {}),
       });
     } else if (x < 0.6) {
       ops.push({
@@ -152,6 +161,15 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
         budget: pick([0, 0, 5, 12, 25]),
         thr: pick([-1, 0, 0.3, 0.6]),
         lex: r() < 0.2,
+        ...(fields
+          ? {
+              x: {
+                tw: r2() < 0.5,
+                dbl: [0, 0, 1, 2, 3, 5][Math.floor(r2() * 6)]!,
+                qt: ["a", "b", "c", "a"].filter(() => r2() < 0.4),
+              },
+            }
+          : {}),
       });
     } else if (x < 0.68) ops.push({ k: "usage", pick: idx() });
     else if (x < 0.74) ops.push({ k: "forget", i: idx() });
@@ -438,7 +456,7 @@ export async function runOps(
   };
 
   const createOne = async (
-    op: { tags: string[]; ready: boolean; subj: boolean; hl: number },
+    op: { tags: string[]; ready: boolean; subj: boolean; hl: number; occ?: number | null },
     vector: number[],
   ) => {
     const at = new Date(now);
@@ -453,7 +471,7 @@ export async function runOps(
       digestSource: "llm",
       provenance: { kind: "imported", batchId: "fuzz" },
       tags: op.tags,
-      occurredAt: null,
+      occurredAt: op.occ == null ? null : new Date(now - op.occ * 3_600_000),
       recordedAt: at,
       lastReinforcedAt: null,
       strength: 1,
@@ -515,6 +533,13 @@ export async function runOps(
             ...(op.budget ? { budget: { maxMemoryChars: op.budget } } : {}),
             ...(op.thr >= 0 ? { scoreThreshold: op.thr } : {}),
             ...(op.lex ? { channels: ["ann", "lexical"], text: "a b" } : {}),
+            ...(op.x
+              ? {
+                  ...(op.x.tw ? { timeWeighting: "eventAwareFreshness" } : {}),
+                  ...(op.x.dbl > 0 ? { digestBandLimit: op.x.dbl } : {}),
+                  ...(op.x.qt.length > 0 ? { tags: op.x.qt } : {}),
+                }
+              : {}),
           } as RecallQuery;
           const r = await (op.lex ? rtLex : rt).recall(ctx, q);
           lastRecall = r;
@@ -680,7 +705,7 @@ export async function fuzzSeeds(backend: FuzzBackend, opts: FuzzSeedsOptions): P
     const minimal = v0.inv === "I9-determinism" ? ops : await minimize(backend, ops, v0.inv);
     reports.push(
       [
-        `seed=${seed}${opts.profile === "wide" ? "（wide）" : ""} ${v0.inv}（op ${v0.op}）: ${v0.detail}`,
+        `seed=${seed}${opts.profile === undefined || opts.profile === "default" ? "" : `（${opts.profile}）`} ${v0.inv}（op ${v0.op}）: ${v0.detail}`,
         `  ほかの違反: ${
           violations
             .slice(1)

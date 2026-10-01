@@ -14,6 +14,8 @@ import { type FuzzBackend, fuzzSeeds } from "./recall-invariant-fuzz-harness.js"
 
 const SEEDS = Number(process.env.RECALL_FUZZ_SEEDS ?? 40);
 const LEN = Number(process.env.RECALL_FUZZ_LEN ?? 60);
+// ADR 0492: これまで振っていなかった recall の欄を振る profile。本数は小さく絞る。
+const FIELDS_SEEDS = Number(process.env.RECALL_FUZZ_FIELDS_SEEDS ?? 20);
 
 const fakeBackend: FuzzBackend = {
   // I9: Fake の id はモジュール単位の続き番号で振られるので、実行ごとに読み直して揃える。
@@ -32,6 +34,16 @@ describe("recall の不変条件（シードつきのランダムな操作列、
       seeds: SEEDS,
       len: LEN,
       checkDeterminism: true,
+    });
+    expect(report).toBe("");
+  }, 600_000);
+
+  it(`fields: ${FIELDS_SEEDS} シード × ${LEN} 操作で、I1〜I12 の違反が無い（\`timeWeighting\`・\`digestBandLimit\`・クエリの \`tags\`・\`occurredAt\`、ADR 0492）`, async () => {
+    const report = await fuzzSeeds(fakeBackend, {
+      seeds: FIELDS_SEEDS,
+      len: LEN,
+      checkDeterminism: true,
+      profile: "fields",
     });
     expect(report).toBe("");
   }, 600_000);
