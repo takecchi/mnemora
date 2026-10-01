@@ -480,5 +480,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0466](./0466-inmemory-event-target-belongs-to-ctx-tenant.md) | `InMemoryMemoryStore` も、`NewMemoryEvent.memoryId` が `ctx` のテナントの記憶でなければ書かずに断る（ADR 0456 の H4 の InMemory 版） | 採用 (2026-10) |
 | [0467](./0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) | 穴探し38巡目 — recall footprint の見積もり関数が非有限の入力で結論を出さない・フォールバック digest を書記素の境界で切る | 採用 (2026-10) |
 | [0468](./0468-openai-null-strip-copies-own-proto-key-as-own-property.md) | 穴探し39巡目 — provider の構造化出力の往復を当て、`@mnemora/openai` が応答の `"__proto__"` を継承された値として読ませていたのを直す | 採用 (2026-10) |
+| [0470](./0470-footprint-digits-failure-description-grapheme.md) | 穴探し41巡目 — ADR 0467 の材料のうち、線の内側のものを直す（footprint の桁の数え・失敗の説明の書記素切り）。`estimateRecallFootprint` の NaN は材料のまま | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
