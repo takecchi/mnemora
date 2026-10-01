@@ -470,5 +470,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0456](./0456-llm-returned-values-malformed-read-filter-nul-named.md) | LLM が返した値の保存できない形（NUL・孤立サロゲート）で observe・consolidate・reflect が落ちないようにする・読み取りの絞りの NUL を名指しの例外で断る（穴探し29巡目、前例の横展開） | 採用 (2026-10) |
 | [0457](./0457-round29-precedent-sweep-confirmations-and-doc-measurements.md) | 29巡目（前例の横展開）の確認の結果を残す——当てた形・入力・コマンド・結果、陽性対照、文書の「実測していない」を1つ測る | 採用 (2026-10) |
 | [0459](./0459-round32-doc-drift-after-1550-1563.md) | 穴探し32巡目 — 今日（2026-10-01）マージされた PR（#1550〜#1563）のあとの文書のずれを直す（文書だけ） | 採用 (2026-10) |
+| [0461](./0461-v1-2-0-release-prep-inspection.md) | 穴探し34巡目 — v1.2.0 を出すための準備の点検（更新経路の fixture・CHANGELOG・migration の順序・migration-v1 の 🔴） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
