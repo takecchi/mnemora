@@ -2391,6 +2391,28 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。修正前に書かれた、別テナントの記憶を指す `memory_events` の行が在れば、指された記憶のテナントの後始末（`purge`・`eraseTenant`）を止めうる形である（項目49 と同じ。ADR 0456 の S2 では、止まることまでは測っていない）。**既存の行は消さない**（データの書き換えはオーナーの判断が要る）。調べる SQL は項目49 の ADR 0436 に在る（`memory_events` の `tenant_id` と、指された記憶の `tenant_id` の食い違いを数える、読み取りだけ）。
 
+### 53. `@mnemora/openai` の `completeStructured` が、応答の `"__proto__"` の欄の中身を継承された値として読まなくなり、それで通っていた応答が例外になるようになった
+
+[ADR 0468](./decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)（[PR #1576](https://github.com/takecchi/mnemora/pull/1576)。クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0434](./decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)・[ADR 0466](./decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md)（testkit の InMemory が別テナントを指すイベントを Postgres と同じく断る直し）と同じ「同じ port の緩いほうの実装を、もう一方に揃える」直し）。
+
+⚠ **未リリース**。**番号は 53 である**——項目52 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `OpenAILLMProvider.completeStructured` は、応答の JSON を `null` を省略へ戻す写し（`stripNulls`・`keepSchemaNulls`）に通してから zod で検査する。この写しが `JSON.parse` の作った `"__proto__"` の欄を代入で写していたため、欄ではなく**プロトタイプの差し替え**になり、zod の `object` がその中身を**継承された値**として読んでいた。今は自分自身の欄として写すので、`"__proto__"` の欄は、ほかの余分な欄と同じく無視される（`@mnemora/anthropic` は `JSON.parse` の結果をそのまま検査するので、以前からこの扱いだった）。
+型・シグネチャ・送る JSON Schema・既定のプロンプトは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Fixed` の「`completeStructured` が、応答の余分な `"__proto__"` の欄を」の箇条を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた応答が、新しく `ZodError` になる**（【実測】ADR 0468、擬似の client で直す前と後を比べた）。項目21・23・24・27・34・49・51・52 と同じ扱い。
+- 必須の欄が `"__proto__"` の中にしか無い応答（例: `{"memories":[{"provenanceKind":"stated","__proto__":{"content":"x"}}]}`。根の必須の欄でも同じ）。以前は継承された値で埋まって通っていた。
+- 利用者が `z.strictObject(...)` を渡し、応答に `"__proto__"` の欄がある応答（中身が object でも文字列でも）。以前は欄として見えず通っていた。今は `unrecognized_keys` になる。
+- 上の2つ以外（`"__proto__"` が文字列・配列・`null`・空の object で、ほかの必須の欄が揃っている応答、`"__proto__"` の無い応答）は、直す前と結果が変わらない。core の4つのスキーマは strict ではないので、余分な `"__proto__"` は無視される。
+
+**誰が影響を受けるか**: strict モードを守らない OpenAI 互換サーバを `client` に差している利用者だけ。本物の OpenAI の strict モードでは、スキーマの外の欄（`"__proto__"`）は応答に出ない。スキーマ自体に `__proto__` という名前の欄がある場合は、送る前に `schema_unsupported` で落ちるので、この変更は届かない（ADR 0468 の材料8）。
+
+**どう直すか**:
+- サーバ側で strict モード（`response_format` の `json_schema` の `strict: true`）を守る。
+- 守れないサーバなら、`client` に渡す前の層で、応答の JSON から `"__proto__"` の欄を除く（必須の欄は、`"__proto__"` の中ではなく応答の欄として返させる）。
+
+**DB マイグレーション**: 要らない。保存済みの記憶は変わらない（以前に継承された値で作られた記憶が在っても、書き換えない）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
