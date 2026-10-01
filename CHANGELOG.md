@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が大文字の uuid でも、`@mnemora/postgres` と同じく小文字にそろえて受けるようになった**（[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)。[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、操作の対象の `id` の大文字小文字は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+
 - **`@mnemora/openai`: `completeStructured` が、応答の余分な `"__proto__"` の欄を、継承された値として zod に読ませていたのを直した。**`null` を省略へ戻す写しが `JSON.parse` の `"__proto__"` をプロトタイプの差し替えにしていた（抽出の候補の `subjectId` が `{"__proto__":{"subjectId":"…"}}` で埋まった）。`@mnemora/anthropic` と同じく無視する。（[ADR 0468](./docs/decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)）
   - ⚠ **以前は通っていた応答が、新しく `ZodError` になる形がある**（必須の欄が `"__proto__"` の中にしか無い応答・利用者の `z.strictObject` に `"__proto__"` の欄がある応答。`@mnemora/anthropic` は以前から同じ応答を断っていた）。影響を受けるのは、strict モードを守らない OpenAI 互換サーバを `client` に差している利用者だけ。破壊的と数え、移行の手順は [docs/migration-v1.md](./docs/migration-v1.md) の項目53。
 

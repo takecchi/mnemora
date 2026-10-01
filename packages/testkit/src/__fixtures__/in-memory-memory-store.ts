@@ -780,8 +780,14 @@ export class InMemoryMemoryStore implements MemoryStore {
     knownInTenant: readonly MemoryId[] = [],
   ): void {
     if (memoryId === null || memoryId === undefined) return;
-    if (knownInTenant.includes(memoryId)) return;
-    this.assertOwnMemoryRef(ctx, memoryId);
+    // ADR 0469: 大文字小文字は区別しない（`@mnemora/postgres` は uuid を小文字にそろえて比べる。この fixture の id は小文字の `mem-N`）。
+    // 断るときの message は、渡された id のまま。操作の対象の id（`updateStatusWithEvent(ctx, id, …)` の `id` など）は変えない。
+    const id = memoryId.toLowerCase();
+    if (knownInTenant.some((known) => known.toLowerCase() === id)) return;
+    const memory = this.memories.get(id);
+    if (!memory || memory.tenantId !== ctx.tenantId) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${memoryId}`);
+    }
   }
 
   private assertOwnObservationRef(ctx: Ctx, id: string | null | undefined): void {
