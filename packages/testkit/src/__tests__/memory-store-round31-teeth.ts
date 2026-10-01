@@ -596,8 +596,8 @@ export function describeRound31Teeth(
       const { store } = await makeKit();
       const x = await mk(store, A);
       const side = { id: x.id, event: ev(A, x.id, "updated") };
-      // ⚠ TSDoc は「メッセージ: `markContestedPair: first.id and second.id must differ`」と書くが、2実装とも
-      // 接頭辞は実装のクラス名（`InMemoryMemoryStore: …`・`PostgresMemoryStore: …`）である（ADR 0458 の材料）。
+      // TSDoc はメッセージを「`<実装のクラス名>: first.id and second.id must differ`」と書く（接頭辞は
+      // `InMemoryMemoryStore: …`・`PostgresMemoryStore: …` のように実装ごとに違う。ADR 0458 で TSDoc を実装に合わせた）。
       // ここで縛るのは「RangeError で、`first.id and second.id must differ` で終わる」こと。
       for (const call of [
         () => store.markContestedPair!(A, side, side),
@@ -941,6 +941,10 @@ export function describeRound31Teeth(
     );
 
     // ---------------------------------------------------------------- B3 / B4
+    // ⚠ B3・B4 は、インメモリと Postgres の**今の振る舞いの記録であって、約束ではない**（ADR 0458 の材料4）。
+    // 2実装の差（`flags.loneSurrogateText`・`flags.jsonbRejectsLoneSurrogate`・`flags.claimKeyIndexLimit`）を
+    // そのまま縛っている。揃えるかどうかは決めていない（B3 の孤立サロゲートの扱いはオーナーへの問いと重なる）。
+    // 揃えると決まったら、フラグごと書き換えること。
     it("B3: 孤立サロゲートを本文の欄へ渡したときは、PG は U+FFFD に置換・IM はそのまま保持／jsonb の欄は PG だけが例外（今の振る舞い。createMemory の TSDoc）", async () => {
       const { store } = await makeKit();
       const lone = "a\uD800b";

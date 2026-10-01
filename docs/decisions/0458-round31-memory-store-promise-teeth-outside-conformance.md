@@ -131,6 +131,7 @@
 - **材料**（オーナーの領分・クローンが決めること。この PR は決めていない）:
 
   1. **TSDoc と実装のメッセージのずれ（A15）**: port は `markContestedPair`/`resolveContestedPair` の `RangeError` のメッセージを「`markContestedPair: first.id and second.id must differ`」「`resolveContestedPair: first.id and second.id must differ`」と書くが、2実装とも接頭辞は実装のクラス名（`InMemoryMemoryStore: …`・`PostgresMemoryStore: …`）。`markContestedGroup`/`resolveContestedGroup` の4種は TSDoc どおり。直すなら TSDoc を実装に合わせる（コメントだけ）か、実装のメッセージを TSDoc に合わせる（挙動が変わる）。この PR は歯を「`: first.id and second.id must differ` で終わる」に留めた。
+     - **追記（2026-10-01）: クローン（miku）の判断で、TSDoc を実装に合わせた**（コメントだけの直し。実装のメッセージは変えていない）。port の2か所は、メッセージを「`<実装のクラス名>: first.id and second.id must differ`」（例: `PostgresMemoryStore: …`・`InMemoryMemoryStore: …`）と書く。
   2. **suite に入れるべきと見るもの**: A2・A3（`abortIfSuperseded`・`abortIfAllConflicted` は suite に語が0件）、A10（`purgeExpiredEventsByRetention` は suite に語が0件）、A8（インメモリが計測フックを名乗らない）、PC6 の「接するだけの区間は重ならない」（suite の `findActiveByClaimKey` は離れた区間しか縛っていない）。suite への追加はオーナーの領分で、この PR は suite を変えていない。
   3. **新しい約束を足す形になるもの**: PE8、B16。
   4. **歯が実装の違いをそのまま縛っているもの**: B3（PG が U+FFFD に置換・jsonb は例外、IM は保持）と B4（IM は長い claimKey を投げない）は、TSDoc が「今の振る舞いの記録であり、揃えるかは決めていない」と書く差を、それぞれの実装が書いた通りであることとして縛った。揃えると決まったら、フラグごと書き換える。
