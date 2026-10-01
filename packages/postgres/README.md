@@ -794,6 +794,33 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 だけである（`packages/testkit/src/fixtures.ts` の冒頭）。`cause.code` を見る処理のテストを fixture で
 書くと、Postgres とは別の枝を通る。
 
+### pool が枯れたとき・Postgres の再起動の最中に出る例外の形（ADR 0444）
+
+**接続を借りる段階で失敗する例外と、文の実行中に失敗する例外とで、`code` の在り処が違う。**
+**この版は形を揃えていない**（揃えるには例外の包み方を変える必要があり、公開の約束が動くため）。
+**判定するなら、両方を見ること**: `err.code ?? err.cause?.code`。
+
+【実測 2026-10-01、`pg_ctl stop`/`start`・`pg_terminate_backend`・`max: 1` の pool を借り切って確かめた】
+
+| 形 | どこに `code` が在るか | 出る場面（実測） |
+|---|---|---|
+| ① 包まれていない `pg` の例外 | **`err.code`**（`err.cause` は無い） | **`db.transaction()` が接続を借りる段階**の失敗: 止まっている間の `ECONNREFUSED`、起動の最中の `57P03`（`the database system is starting up`）。`client.pool.query()` を直接呼んだときも同じ形。 |
+| ② drizzle が包んだ `DrizzleQueryError`（`message` は `Failed query: …`） | **`err.cause.code`**（`err.code` は無い） | **文を実行している最中**の失敗: 実行中に接続が切られた `57P01`（`terminating connection due to administrator command`）。`db.transaction()` の中の文の失敗もこの形。`db.transaction()` を使わない drizzle の呼び出し（`db.execute` など）が接続を借りる段階で失敗した `ECONNREFUSED`・`57P03` もこの形。 |
+| ③ `code` を持たない例外 | **どこにも無い**。文面（`message`）でしか分からない（約束しない） | **pool の枯渇**: `timeout exceeded when trying to connect`（`connectionTimeoutMillis` を超えても、借りる順番が回ってこなかった）。`db.transaction()`・`client.pool.query()` では ① と同じく包まれず、`db.execute` では ② と同じく `DrizzleQueryError` の `cause` に入る。 |
+
+- **どの呼び出しがどの形になるかは、公開の API からは読み取れない**（store の中で `db.transaction()` を使うか、`db.execute` を使うかで変わる）。
+  `forget`・`purge` などの `outcomes[].error` は、`cause` の連鎖の各段の `message` と `code` を連結した文字列である
+  （`code` は `(code: 57P01)` の形で載る）。
+- **`rollback` が失敗したとき**（接続ごと切れたときに起きる）: 以前は `Failed query: rollback` が投げられ、元のエラー（上の `57P01` など）が消えていた。
+  **いまは元のエラーが投げられる**（drizzle-orm 0.45.2 が `rollback` の失敗で元のエラーを捨てる不具合を、`createPostgresClient` が包んで直した。
+  上流への報告はしていない。[ADR 0444](../../docs/decisions/0444-pool-begin-release-rollback-error-preserved.md)）。
+  `rollback` の失敗は、元のエラーの **`cause`**（空いていれば）か **`rollbackError`**（drizzle が包んだ `DrizzleQueryError` は
+  `cause` が埋まっているので、こちらになる）に残る。新しい例外の型は作っていない。
+- **`db.transaction()` の `begin` が失敗した接続は pool へ戻らず捨てられる**（以前は借りたまま戻らず、再起動を数回挟むと pool が枯れて
+  すべての呼び出しが止まった。同上）。
+- ③ が出たら、pool が枯れている（借りた接続が戻っていない）か、`max` が負荷に足りないかを疑うこと。
+  `client.pool.totalCount - client.pool.idleCount` が、借りられたままの接続の数である。
+
 ## 運用: 語彙検索と `statement_timeout`
 
 `PostgresLexicalStore`/`PostgresTrigramLexicalStore` は、検索クエリの語数・1語の文字数・
