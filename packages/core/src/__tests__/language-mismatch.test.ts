@@ -124,6 +124,29 @@ describe("detectLanguageMismatch: 陰性（印を付けない）", () => {
   });
 });
 
+describe("ラテン文字は「ラテン文字の文字（\\p{L}）」だけを数える（ローマ数字は数えない）", () => {
+  // `Script=Latin` には文字でないもの（ローマ数字 U+2160〜2188 は Nl）も入る。
+  // これを数えると「割合」が1を超え、20字の下限もすり抜ける。
+  const ROMAN = "ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ";
+
+  it("本文: 割合は1を超えず、ラテン文字の数は実際の文字の数と一致する", () => {
+    const content = "Chapter Ⅳ and Chapter Ⅶ: the user works hard at the bakery";
+    const mark = detectLanguageMismatch(JA_OBSERVATION, content);
+    expect(mark).not.toBeNull();
+    expect(mark?.contentLatinShare).toBeLessThanOrEqual(1);
+    expect(mark?.contentLatinLetters).toBe(content.match(/[A-Za-z]/g)?.length);
+  });
+
+  it("本文: ローマ数字で20字の下限を満たしても、文字が足りなければ陰性", () => {
+    expect(detectLanguageMismatch(JA_OBSERVATION, `the user works ${ROMAN}`)).toBeNull();
+  });
+
+  it("観測: ローマ数字は「ラテン文字」に数えない（日本語の割合を薄めない）", () => {
+    const observation = `第一章の概要${ROMAN}${ROMAN}`;
+    expect(detectLanguageMismatch(observation, EN_CONTENT)).not.toBeNull();
+  });
+});
+
 describe("閾値の定数", () => {
   it("名前付きで、意味のある値である", () => {
     expect(LANGUAGE_MISMATCH_MIN_CONTENT_LATIN_LETTERS).toBeGreaterThan(16); // "Tokyo Disneyland" は15字
