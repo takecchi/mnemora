@@ -1240,6 +1240,8 @@ core はモデル固有のトークナイザに依存しない。`TokenCounter` 
 
 既定実装は**文字種で重み付けする**（CJK 0.9トークン/コードポイント・非CJK 0.25。[ADR 0083](./decisions/0083-cjk-aware-heuristic-token-counter.md)）。以前の「4文字 ≒ 1トークン」は日本語の合計を実測の **0.353倍**しか数えず、`maxMemoryTokens` はこの値で判定されるため**予算が静かに超過していた**。⚠ **精度が上がっても推定は推定である**——`counter` は `'heuristic'` のままであり、CJK 以外の非ラテン文字（キリル・タイ・アラビア文字）は依然として過小評価する。**日本語主体でも厳密さが要る用途では `TokenCounter` を実測トークナイザに差し替えること。**
 
+**⚠ 2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0483](./decisions/0483-token-counter-broken-values.md)）: 差し替えた `TokenCounter` の戻り値（`tokens` は 0 以上の整数、`counter` は `heuristic`/`exact`）は実行時には検査されない。** `tokens` が `NaN`・負の数だと段4のトークン予算が黙って外れて全件が返り（`budget_dropped` も出ない）、`Infinity` だと全件が落ち、`counter` の欠落・範囲外はそのまま `usage.counter` に出る。落ちたことは `RecallResult.outputValidation`（既定 `"report"`、`"off"` では知らされない）が知らせる。例外はそのまま `recall()` の失敗になる。
+
 ---
 
 ## 7. スコア内訳と説明
