@@ -139,9 +139,12 @@ const embeddingProvider = new DeterministicEmbeddingProvider(); // 既定で 8�
   **記録に無い入力は例外にする。**録る側は `CassetteRecorder` と、実 provider を包む
   `RecordingLLMProvider`・`RecordingEmbeddingProvider`。カセットの形の検査は `assertCassette`
   （`CASSETTE_FORMAT_VERSION`）、鍵は `llmCassetteKey`・`embeddingCassetteKey`。
+  **壊れたカセットは読んだ時点で落ちる**（成分が有限でない・`embedding.space.dimensions` が正の整数でない・鍵が `text`／`prompt` から導いた値と一致しない。
+  [ADR 0452](../../docs/decisions/0452-testkit-provider-fakes-align-with-contract.md)）。`CassetteRecorder` は、違う埋め込み空間・モデル名の2回目以降の記録を断る。
+  `RecordingEmbeddingProvider` は、delegate の壊れた戻り（次元違い・有限でない成分）を記録せずに落ち、同じ入力の並列の呼びでも delegate を1回だけ呼ぶ。
 - **種カセットから返す provider**: `SeededLLMProvider`・`SeededEmbeddingProvider`。種に在る入力は種から返し、
   **種に無い入力だけ実 provider（`delegate`）へ流す**（`Recorded*` とは逆の規律）。種のモデル名・埋め込み空間が
-  `expectedModel`・`expectedSpace`（必須）と食い違えば構築時に落ちる。
+  `expectedModel`・`expectedSpace`（必須）と食い違えば構築時に落ちる（埋め込みは `delegate.space` とも照合する。ADR 0452）。
 - **テストデータのひな型**: `buildNewMemoryFixture`・`buildNewObservationFixture`・`buildNewMemoryEventFixture`・
   `buildProvenanceFixture`。⚠ 実時計で `recall()` を通すなら、`recordedAt`（必要なら `decayFloorAt`）を明示して
   渡すこと（既定値のままだと減衰の床を越えて0件になる。`buildNewMemoryFixture` の TSDoc）。

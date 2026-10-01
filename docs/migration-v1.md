@@ -2451,7 +2451,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ## 🟡 v1.1.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
 
-この節は、2026-10-01 に着地した変更（[PR #1550](https://github.com/takecchi/mnemora/pull/1550)〜[#1563](https://github.com/takecchi/mnemora/pull/1563)）のうち、
+この節は、2026-10-01 に着地した変更（[PR #1550](https://github.com/takecchi/mnemora/pull/1550)〜[#1565](https://github.com/takecchi/mnemora/pull/1565)）のうち、
 **利用者が気づいておくとよい振る舞いの変更**を載せる（[ADR 0459](./decisions/0459-round32-doc-drift-after-1550-1563.md)）。**いずれも利用者側の手順は要らない**（型・DB は変わらない）。
 ⚠ **それより前に `main` へ入った `[1.2.0]` の変更を、この節はまだ棚卸ししていない**（⛔ ここに件数を書かない）。中身と根拠 ADR は
 [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` の `### Changed`・`### Fixed` を見ること——**ここには複製しない。**
@@ -2482,14 +2482,32 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/local-embedding`: 件数が `maxBatchSize`（既定 128）を超えて分割されたとき、チャンクの合間で `signal` の abort を見る**（[PR #1553](https://github.com/takecchi/mnemora/pull/1553)、[ADR 0445](./decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。
   以前は abort の後も残りのチャンクをすべて推論してから reject していた（動いている1チャンクは今も止まらない）。128 件以下の呼び出しは変わらない。
 
+- **`runtime.reextract`: 置き換えた側（`supersededById`）が、今回の抽出で `active` になる行になる**（[PR #1564](https://github.com/takecchi/mnemora/pull/1564)、[ADR 0454](./decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md)）。
+  以前は候補列の先頭を置き換えた側にしたので、先頭が同じ Observation・同じ版の `superseded`／`archived` な既存行にぶつかると、置き換えた側が非 active の行になり、循環や active 0件ができた。
+  いまは非 active の既存行にぶつからない先頭を選び、全候補がぶつかるときは何も supersede しない（`supersededMemoryIds: []`。ぶつかった行は `skipped` の `status_not_active`）。
+  返り値が変わるのは、直す前の結果が壊れていた入力だけ（`supersededMemoryIds` が `[]` になる、`supersededById` が先頭の非 active な行から後ろの候補に変わる）。例外は増えていない。
+- **`runtime.observe`: 冪等な再送（`extraction: "skipped"`・`memoryIds: []`）の戻り値にも、渡していれば `rejectedSubjectIds: []`・`claimKeyFailure: null`・`contestedDetection: []` が付く**（PR #1564、ADR 0454 決定4）。
+  以前は欄が無く、TSDoc の「渡したら常に値／配列」と食い違っていた。再送かどうかを `contestedDetection === undefined` で見分けていた呼び出し側は、`extraction: "skipped"` と `memoryIds: []` で見分けること。
+- **`recall()`: provider が `Float32Array` などの数値の型付き配列をクエリ埋め込みとして返しても受ける**（[PR #1565](https://github.com/takecchi/mnemora/pull/1565)、[ADR 0452](./decisions/0452-testkit-provider-fakes-align-with-contract.md) の「決めたこと」8番）。
+  以前は embed ジョブ（ingest）は型付き配列を保存できるのに、recall だけが `embedding_provider_unavailable` になっていた。次元違い・有限でない成分・配列でないものは、今までどおり `embedding_provider_unavailable`。落ちる入力が減るだけの変更。
+- **`@mnemora/testkit` の provider の fake・カセットが、約束に反する入力を新しく断る**（PR #1565、ADR 0452）。公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 ではなくここに載せる。
+  自前のテストでこれらを組み立てている人は、次を見直すこと。
+  - `SeededEmbeddingProvider`: 種の空間と `delegate.space` が違えば、構築で落ちる。
+  - `CassetteRecorder`: 2回目以降の記録で、埋め込み空間・モデル名が最初と違えば落ちる（以前は後勝ちで上書きし、混ざったカセットができた）。
+  - `assertCassette`: 成分が有限でない・`embedding.space.dimensions` が正の整数でない・埋め込みの鍵が `text` の SHA-256 と、LLM の鍵が `prompt` から導いた値と一致しないカセットを、読んだ時点で落とす。`RecordedEmbeddingProvider.embed` は有限でない記録を返さずに落ちる。
+  - `RecordingEmbeddingProvider`: delegate の壊れた戻り（次元違い・有限でない成分・配列でない）を、記録せずに落ちる。
+  - `DeterministicEmbeddingProvider`: `dimensions` が正の整数でなければ、構築で落ちる（`0` を含む。以前は `embed` で `RangeError` になるか、`0` は空のベクトルを返した）。
+  振る舞いが変わるもの: Seeded\*・Recording\* は `opts`（AbortOptions）を delegate へ渡す。Recording\* は同じ入力の並列の呼びでも delegate を1回だけ呼び、見た値と記録が一致する。返すベクトルと `space` は、記録・構築時の引数と参照を共有しない。
+  触っていない: カセットの鍵の導出（孤立サロゲート・`system` の空文字）と conformance suite。
+
 ### この節に載せなかったもの（理由つき）
 
 - **[PR #1550](https://github.com/takecchi/mnemora/pull/1550)（ADR 0441）**: CHANGELOG・この文書の参照の食い違いと、consumer-install の検査の名前の修正。`@mnemora/core`・`@mnemora/postgres` の README に「TypeScript の `lib`・`target` は ES2022 以上」を書いたのは**既存の要件を文書に書いただけ**で、振る舞いは変わらない。
 - **[PR #1551](https://github.com/takecchi/mnemora/pull/1551)（ADR 0442）**: 文書だけ（migration `0027` の deadlock は項目31の追記に書いてある）。
 - **[PR #1557](https://github.com/takecchi/mnemora/pull/1557)・[#1559](https://github.com/takecchi/mnemora/pull/1559)・[#1560](https://github.com/takecchi/mnemora/pull/1560)（ADR 0447・0450・0453）**: 穴探しの確認（操作×状態の行列）の記録。直す線の穴は0件で、振る舞いは変えていない。
+- **[PR #1564](https://github.com/takecchi/mnemora/pull/1564) の残り（ADR 0454）**: 穴探し30巡目の操作×状態の行列の記録と、`Runtime.observe` の TSDoc の訂正（abort した sync の observe の extract ジョブは、observe が claim したまま残る。文書だけ）。上の2件以外の探り棒は歯にしておらず、振る舞いは変えていない。
 - **[PR #1558](https://github.com/takecchi/mnemora/pull/1558)（ADR 0449）**: bullmq の README・TSDoc を実 Redis で測り直した。コードの振る舞いは変えていない。
 - **[PR #1563](https://github.com/takecchi/mnemora/pull/1563)（ADR 0457）**: README の `ANALYZE` の説明の実測による訂正。振る舞いは変えていない。
-- **[PR #1564](https://github.com/takecchi/mnemora/pull/1564)・[#1565](https://github.com/takecchi/mnemora/pull/1565)（reextract・testkit の fake と Float32Array）**: この PR の時点では未着地。着地したら、利用者が気づくものを足す。
 
 ---
 

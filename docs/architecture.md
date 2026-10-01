@@ -1150,6 +1150,9 @@ suite が縛らないことのうち、テキストとベクトルの対応は [
 `@mnemora/local-embedding` は、モデルの読み込み待ち・読み込みの再試行の待ちも `signal` ごとに切り（共有の読み込みそのものは止まらない）、件数が `maxBatchSize`（既定 128）を超えて分割されたときは、
 チャンクの合間でも abort を見る（動いている1チャンクは止まらない）。`@mnemora/openai` は `runAbortable` で包み、abort 済みなら空配列でも `[]` を返さず `signal.reason` で reject する。
 正本は `packages/core/src/interfaces/embedding-provider.ts` の 2026-10-01 追記。
+(3) **`recall()` のクエリ埋め込みは、`Float32Array` などの数値の型付き配列も受ける**（[ADR 0452](./decisions/0452-testkit-provider-fakes-align-with-contract.md) の「決めたこと」8番）。
+上の 2026-09-30 追記の検査（長さ・有限性）は、型付き配列を普通の `number[]` に直してからかける。以前は embed ジョブ（ingest）が型付き配列を保存できるのに、recall だけが `embedding_provider_unavailable`（`no_vector`）になっていた。
+配列でないもの（`DataView`・文字列など）は今までどおり `embedding_provider_unavailable`。`EmbeddingProvider.embed` の型は `number[][]` のままで、型付き配列を契約として認めたわけではない（conformance suite にも足していない）。
 
 ### 5.6 Scheduler — interface は Phase 1（既定 `InlineScheduler`）、BullMQ 実装は後続フェーズ
 

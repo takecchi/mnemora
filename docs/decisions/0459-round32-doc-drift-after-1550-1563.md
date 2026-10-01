@@ -53,3 +53,20 @@
   - CHANGELOG の「何を載せるか」が、docs のみの PR を載せる方針に変わったとき（ADR 0442・0447・0450・0453・0457 を載せる）。
 
 - **測っていないこと**: `@mnemora/testkit` のインメモリ実装が、H4 の入力（別テナントを指すイベント）を断るか。#1564・#1565 の着地後の文書。
+
+## 追記（2026-10-01、#1564・#1565 の着地後）: 除いていた2本を、同じ PR で当てた
+
+上の本文は、#1564（ADR 0454、reextract）と #1565（ADR 0452、testkit の fake・カセットと Float32Array）が未着地の時点の記録である。2本とも main に入ったので、origin/main を取り込み（衝突なし。索引は生成器で「最新」と確認）、1〜4 を同じように点検して当てた。
+
+- **1. architecture.md §5**: #1565 は testkit の公開の署名（`RecordingEmbeddingProvider`・`RecordingLLMProvider`・`SeededEmbeddingProvider`・`SeededLLMProvider` の `opts?: AbortOptions`）を足したが、`docs/`・README・`examples/chat/README.md` に、これらのクラスの**署名の写しは無かった**【現物。クラス名を grep】。`interfaces/*` の署名も #1564・#1565 は変えていない。
+  ずれていたのは §5.5・`docs/recall.md` の文章で、`recall()` が型付き配列のクエリ埋め込みを受けるようになったこと（ADR 0452 決定8）が書かれていなかった。追記で足した（§5.5 の 2026-10-01 追記の (3)、recall.md の 2026-10-01 追記）。
+- **2. README**: `packages/testkit/README.md` の「ほかに export しているもの」が、新しく断る入力（壊れたカセット・違う空間／モデルの記録・delegate の壊れた戻り・Seeded の `delegate.space` との照合）を書いていなかったので足した。core・postgres の README には、reextract・Float32Array・testkit の fake に関わる記述が無く、ずれは無かった。
+  reextract（ADR 0454）は、#1564 自身が `docs/memory-model.md` と TSDoc を直しており、`docs/architecture.md` の reextract の記述（§3.4・§5.1 の写し）は置き換えた側の選び方に触れていないので、ずれは無かった。
+- **3. CHANGELOG `[1.2.0]`**: #1564（ADR 0454）・#1565（ADR 0452）とも載っていた。**漏れなし、変更なし。**
+- **4. migration-v1 の 🟡**: 次を足した。
+  - 載せたもの: reextract の置き換えた側が active になる行になる（#1564）、冪等な再送の戻り値に3欄が付く（#1564 決定4。再送を `contestedDetection === undefined` で見分けていた呼び出し側に影響）、recall が型付き配列を受ける（#1565）、testkit の fake・カセットが新しく断る入力（空間・モデルの混在、壊れたカセット、`text` と鍵の不一致、不正な `dimensions`（`0` を含む）、delegate の壊れた戻り、Seeded の delegate 空間の食い違い）と、振る舞いの変更（opts の転送・並列の memo・参照の非共有）。
+    **testkit のこれらは🟡に載せ、🔴 には数えない**（「公開の fixture が新しく例外を投げる変更は破壊的と数えない」。オーナーの回答（ask_human `3f3411c5`）。`@mnemora/testkit` の provider の fake・カセットはその「fixture」の延長と読んだ【判断】）。
+  - 載せなかったもの: #1564 の残り（行列の記録・`Runtime.observe` の TSDoc の訂正。文書だけ）は、節の末尾の一覧に理由つきで書いた。
+  - 節の末尾の「着地したら足す」の項目は片付けた。
+- **doc-reference の言い回し**: 前回、未着地の ADR 0454 への参照が赤になるので「reextract・testkit の fake と Float32Array」と書いた箇所は、#1564・#1565 の項目に置き換わったので、ADR 0452・0454 を指す形（実在する）になっている。
+- **確かめたこと**: `Float32Array` を返す provider で、ingest（`processEmbedJob` → `toVectorLiteral`）から recall まで、main の上で通した【実測】（手元の確認。コミットしていない）。
