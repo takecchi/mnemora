@@ -495,5 +495,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0481](./0481-recall-output-validation-on-real-postgres.md) | 穴探し52巡目 — 実 Postgres のテストが一度も渡していない `RecallQuery` の欄を、`outputValidation: "throw"` で当てる（ずれは見つからなかった） | 採用 (2026-10) |
 | [0482](./0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) | 穴探し53巡目 — `observe()` の入力の種類ごとの扱い。`event.data` の「JSON で往復しない値」の表に歯が無く、関数・`Symbol`・`toJSON` の3行も載っていなかった | 採用 (2026-10) |
 | [0483](./0483-token-counter-broken-values.md) | 穴探し54巡目 — 差し替えた `TokenCounter` が約束を破る値を返すと、recall はトークン予算を黙って外す。今の振る舞いを文書に書き、歯で縛る | 採用 (2026-10) |
+| [0487](./0487-usage-counter-label.md) | `usage.counter` の印は連結の計測の印であり、段4の予算の判定に使った印とは食い違いうる。今の振る舞いを文書に書く | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

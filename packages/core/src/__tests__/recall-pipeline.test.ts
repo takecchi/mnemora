@@ -3009,3 +3009,24 @@ describe("recall() — TokenCounter が約束を破る値を返したとき（AD
     },
   );
 });
+
+describe("recall() — usage.counter の印は連結の計測の印（ADR 0487、今の振る舞い）", () => {
+  it("長さで印を変える counter: 予算の判定（digest ごと）は exact、usage.counter は連結の計測の heuristic", async () => {
+    const lengthDependent: TokenCounter = {
+      count: (text) => ({ tokens: 3, counter: text.length > 10 ? "heuristic" : "exact" }),
+    };
+    const { runtime, stores } = buildRuntime({ tokenCounter: lengthDependent });
+    for (const digest of ["aaaaaaaaaa", "bbbbbbbbbb"]) {
+      await createEmbeddedMemory(stores, [1, 0], { digest, contentHash: digest });
+    }
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      budget: { maxMemoryTokens: 4 },
+    });
+    // digest 1件（10文字）は "exact" で数えられ、3 <= 4 なので1件残る。
+    expect(result.memories).toHaveLength(1);
+    // usage は連結 + 目次帯の JSON（10文字超）を1回数えた値なので "heuristic"。
+    expect(result.usage.counter).toBe("heuristic");
+    expect(result.outputValidation).toEqual({ ok: true, issues: [] });
+  });
+});
