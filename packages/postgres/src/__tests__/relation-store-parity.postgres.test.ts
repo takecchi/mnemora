@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, MemoryId, MemoryStore, RelationKind, RelationStore } from "@mnemora/core";
+import type { Ctx, MemoryId, MemoryStore, RelationStore } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { InMemoryMemoryStore, InMemoryRelationStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
