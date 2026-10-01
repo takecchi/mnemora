@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isAbort, runAbortable } from "./abort.js";
 import type { ClaimKey } from "./claim-key.js";
 import type { Ctx } from "./ctx.js";
+import { findMalformedIdentifierPart } from "./identifier.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./strategies/decay.js";
 import { resolveCandidateSubjectId } from "./memory-subject.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
@@ -474,6 +475,9 @@ export interface ExtractCandidatesResult {
  *   常に有効（`SubjectCandidatesInput` の「空配列＝渡していないと同じ」規約、
  *   observation.ts 参照）。**この分岐により `reextract`（候補一覧を持たない）や
  *   ①だけの既存呼び出しは、この関数を通しても1バイトも挙動が変わらない。**
+ * - **（ADR 0456）`subjectId` が識別子として保存できない値（NUL・孤立サロゲートを含む）なら、一覧の有無に
+ *   関わらず弾く**（`undefined` を返し、`rejected: true`）。以前は一覧が無いとそのまま通り、保存の口が
+ *   `MalformedIdentifierError` を投げて `observe` が例外で終わった。
  * - それ以外（一覧が渡されていて、`subjectId` が非 null 文字列）は、一覧に含まれるかを
  *   検査する。含まれていれば有効。**含まれていなければ弾き、`undefined`（未指定）を返す**
  *   ——①の「省略」経路と同じ着地点で、`buildNewMemoryFromCandidate` が
@@ -496,6 +500,12 @@ export function sanitizeCandidateSubjectId(
 ): { subjectId: string | null | undefined; rejected: boolean } {
   if (subjectId === undefined || subjectId === null) {
     return { subjectId, rejected: false };
+  }
+  // ADR 0456: 識別子として保存できない値（NUL・孤立サロゲート）は、一覧の有無に関わらず弾く。
+  // 弾かないと `createMemoryWithOutbox` が `MalformedIdentifierError` で拒み、本文が正しくても
+  // `observe`（同期の抽出）が例外で終わり、記憶が1件も作られない。
+  if (findMalformedIdentifierPart(subjectId) !== null) {
+    return { subjectId: undefined, rejected: true };
   }
   if (allowedSubjectCandidates === undefined || allowedSubjectCandidates.length === 0) {
     return { subjectId, rejected: false };
