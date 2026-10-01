@@ -3454,6 +3454,10 @@ export class PostgresMemoryStore implements MemoryStore {
           valid_from IS NULL OR ${validUntil}::timestamptz IS NULL
           OR valid_from < ${validUntil}::timestamptz
         )
+        -- 空の区間・逆転した区間（from >= until）は点を1つも含まないので、何とも重ならない（ADR 0473）
+        AND (${validFrom}::timestamptz IS NULL OR ${validUntil}::timestamptz IS NULL
+          OR ${validFrom}::timestamptz < ${validUntil}::timestamptz)
+        AND (valid_from IS NULL OR valid_until IS NULL OR valid_from < valid_until)
     `);
     return result.rows
       .map((row) => rowToMemory(row as unknown as MemoryRow))
@@ -3511,6 +3515,10 @@ export class PostgresMemoryStore implements MemoryStore {
           valid_from IS NULL OR ${validUntil}::timestamptz IS NULL
           OR valid_from < ${validUntil}::timestamptz
         )
+        -- 空の区間・逆転した区間（from >= until）は点を1つも含まないので、何とも重ならない（ADR 0473）
+        AND (${validFrom}::timestamptz IS NULL OR ${validUntil}::timestamptz IS NULL
+          OR ${validFrom}::timestamptz < ${validUntil}::timestamptz)
+        AND (valid_from IS NULL OR valid_until IS NULL OR valid_from < valid_until)
     `);
     return result.rows
       .map((row) => rowToMemory(row as unknown as MemoryRow))

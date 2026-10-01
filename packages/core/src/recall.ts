@@ -2097,6 +2097,12 @@ export interface RecallQuery {
    * 変わらない**（歯: `packages/core/src/__tests__/recall-validity.test.ts` の
    * 「両方 null の既存データでは絞りが恒真になる」)。
    *
+   * ⚠ **上の「実質非破壊」は、この欄を足した PR の時点の話である。**今は `observe()` の
+   * `validFrom`/`validUntil` が `Memory` に非 `null` を書く（ADR 0164 決定4）ので、
+   * **`validUntil` を過ぎた記憶・`validFrom` が未来の記憶は、`validAt` を省略しても既定（`now`）で
+   * 落ちる**（`omitted` の `filtered(expired)`/`filtered(not_yet_valid)`）。両方 `null` の記憶
+   * だけが、今も「いつでも真」のまま恒真になる。
+   *
    * **段1（ANN・語彙の両チャンネル）へ押し下げる**（`VectorFilter.validAt`/
    * `LexicalFilter.validAt`。`period`/ADR 0059 と同じ形——`includeFullyDecayed` とは
    * 違い、語彙チャンネルも SQL の `WHERE` で絞る。理由は `VectorFilter.validAt` の
