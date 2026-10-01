@@ -6333,6 +6333,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
     }
     const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
+    // 除外の集合は `recall()` を呼ぶ前に作る——`excludeMemoryIds` が反復できない値だと
+    // `new Set` が TypeError を投げるが、後ろで作ると recall の記録を1件書いた後に落ちていた
+    // （穴探し56巡目）。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
+    // 小文字で返す。`forget` と同じ扱い）。大文字で渡した自己除外が黙って効かないのを防ぐ。
+    const excludeSet = new Set<unknown>();
+    for (const id of new Set(input.excludeMemoryIds ?? [])) {
+      excludeSet.add(typeof id === "string" ? id.toLowerCase() : id);
+    }
 
     // `text`/`activityCounting` 以外のフィールドを一切渡さない——閾値・limit・
     // channels・overFetchFactor はすべて recall() の既定に委ねる（interface 側の
@@ -6348,13 +6356,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts,
     );
 
-    const excludeSet = new Set(input.excludeMemoryIds ?? []);
     // recallRank は「recall() が返した並びでの、1始まりの順位」——除外の前に固定する。
     const ranked = recallResult.memories.map((memory, index) => ({
       memory,
       recallRank: index + 1,
     }));
-    const remaining = ranked.filter(({ memory }) => !excludeSet.has(memory.memoryId));
+    const remaining = ranked.filter(({ memory }) => !excludeSet.has(memory.memoryId.toLowerCase()));
     const excludedCount = ranked.length - remaining.length;
 
     const candidates: CorrectionCandidate[] = remaining

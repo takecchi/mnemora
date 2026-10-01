@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`Runtime.findCorrectionCandidates` の `excludeMemoryIds` が、大文字の uuid でも除外するようになった（`@mnemora/postgres` は小文字で返すので、大文字で渡した自己除外が黙って効かなかった）。反復できない値を渡したときは、`recall()` を呼ぶ前に `TypeError` になる（以前は recall の記録を1件書いた後に落ちた）。**（[ADR 0485](./docs/decisions/0485-find-correction-candidates-exclude-ids.md)）
+
 - **`@mnemora/postgres`: 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作ると `deadlock detected`（40P01）で片方が落ちたのを直した。**`upsertProposedLabels` が `labels` の行を触る順を、`tags` の並びではなく名前の順に固定した。`Memory.tags` の並び・重複と `proposedCount` は変わらない（[ADR 0476](./docs/decisions/0476-label-upsert-lock-order-and-taxonomy-probes.md)）
 
 - **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` が、`event.memoryId` が大文字の uuid でも、`PostgresEventStore.append` と同じく小文字にそろえて受けるようになった**（[ADR 0475](./docs/decisions/0475-eventstore-append-uuid-case.md)。[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` は小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、新しく断る入力は無い。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
