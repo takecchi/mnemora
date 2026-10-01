@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres`: `observe` の抽出で、候補ごとの savepoint の `rollback to savepoint` が失敗しても、元のエラーが消えなくなった。**接続が切れたときなどに、呼び出し側へ届くのが `Failed query: rollback to savepoint …` や 25P02 だったのを、元のエラー（22021 など）にした。巻き戻しの失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。新しい例外の型は作っていない。トランザクションの状態が分からないので、続けず、落とした候補（`dropped`）にも積まない。巻き戻しが成功する悪い候補は従来どおり落として他を書く。上流（drizzle-orm）の不具合で、ここで包んで直した（上流への報告はしていない）。（[ADR 0451](./docs/decisions/0451-savepoint-rollback-failure-keeps-original-error.md)、[ADR 0444](./docs/decisions/0444-pool-begin-release-rollback-error-preserved.md) の続き）
+
 - **`@mnemora/bullmq`: README・TSDoc の「コードからの読み」を実 Redis（redis-server 7.4.7・bullmq 6.3.8）で測り、ずれていた所を直した。**（[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md)。コードの振る舞いは変えていない）
   - **文書に無かったこと（実測）**: Redis が落ちている間の `start()` は reject せず pending のまま／Redis が永続化なしで再起動すると scheduler が消え、tick は再開せず `onTickError` も鳴らない（永続化ありなら再開）／`everyMs` を変えて別の driver が `start()` すると共有の scheduler の間隔が置き換わる／ioredis のインスタンスを `connection` に渡すなら `maxRetriesPerRequest: null` が要り、無いと `createBullmqTickDriver` が同期的に throw する。
   - **裏づいたこと**: 1台の `stop()` が全プロセスの発火を止める（新を `start()` してから旧を `stop()` する rolling deploy でも。直していない。被害の形と回避は README・ADR 0449）／完了・失敗ジョブが Redis に残り続ける（数字を追記）／stalled で `onTickResult` の後に `onTickError` が2回届く（ADR 0440 の【未実測】が【実測】になった）。
