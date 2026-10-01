@@ -211,4 +211,21 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る"
     expect(ok.written).toHaveLength(1);
     expect(await eventCount(ok.written[0]!.memory.id)).toBe(1);
   });
+
+  // ADR 0469: uuid の大文字小文字。`checkedRef` が小文字にそろえて比べるので、大文字の uuid は自テナントの記憶として通り、
+  // 積まれたイベントは uuid 列の正規形（小文字）で読み戻る。別テナントの記憶なら、大文字でも断る。
+  it("event.memoryId が大文字の uuid でも、自テナントの記憶なら通り（小文字で読み戻る）、別テナントなら断る", async () => {
+    const { mem, make, ev, eventCount } = await setup();
+    const b = await make(B);
+    const a = await make(A);
+    const other = await make(A);
+    await mem.updateStatusWithEvent(A, a.id, "archived", {}, ev(a.id.toUpperCase()));
+    await mem.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id.toUpperCase()));
+    expect(await eventCount(a.id)).toBe(2);
+    const c = await make(A);
+    await expect(
+      mem.updateStatusWithEvent(A, c.id, "archived", {}, ev(b.id.toUpperCase())),
+    ).rejects.toThrow(NOT_FOUND);
+    expect(await eventCount(b.id)).toBe(0);
+  });
 });
