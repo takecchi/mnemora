@@ -62,6 +62,25 @@ function count(text: string, pattern: RegExp): number {
 }
 
 /**
+ * 観測の本文の文字種の数（かな・漢字、ラテン文字）。**観測ごとに1回**数えて、候補ごとの判定
+ * （`detectLanguageMismatchFromProfile`）へ使い回す（ADR 0507）。数えるのは観測の本文だけで、
+ * 候補（本文）には依らない。
+ */
+export interface ObservationLanguageProfile {
+  readonly cjk: number;
+  readonly latin: number;
+}
+
+/** 観測の本文を数える。本文の長さに比例する（33万字で数十 ms）ので、観測ごとに1回だけ呼ぶこと。 */
+export function profileObservationLanguage(observationText: string): ObservationLanguageProfile {
+  const cjk = count(observationText, CJK);
+  // かな・漢字が下限に満たなければ、ラテン文字は判定に使われない（数えない）。
+  const latin =
+    cjk < LANGUAGE_MISMATCH_MIN_OBSERVATION_CJK_CHARS ? 0 : count(observationText, LATIN);
+  return { cjk, latin };
+}
+
+/**
  * 観測の本文（`observationText`）と、抽出された記憶の本文（`content`）から、
  * 言語の取り違えの疑いを返す。疑いが無ければ `null`。
  */
@@ -69,9 +88,17 @@ export function detectLanguageMismatch(
   observationText: string,
   content: string,
 ): LanguageMismatch | null {
-  const observationCjk = count(observationText, CJK);
+  return detectLanguageMismatchFromProfile(profileObservationLanguage(observationText), content);
+}
+
+/** `detectLanguageMismatch` の、観測の数えを済ませた版（結果は同じ）。 */
+export function detectLanguageMismatchFromProfile(
+  observation: ObservationLanguageProfile,
+  content: string,
+): LanguageMismatch | null {
+  const observationCjk = observation.cjk;
   if (observationCjk < LANGUAGE_MISMATCH_MIN_OBSERVATION_CJK_CHARS) return null;
-  const observationLatin = count(observationText, LATIN);
+  const observationLatin = observation.latin;
   if (
     observationCjk / (observationCjk + observationLatin) <
     LANGUAGE_MISMATCH_MIN_OBSERVATION_CJK_SHARE

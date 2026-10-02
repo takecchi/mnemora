@@ -56,6 +56,7 @@ import {
  * - I12 `filtered`（`outside_scope`）の `archived`・`superseded`・`forgotten` の件数は、その status の
  *   記憶の件数に等しい（`docs/recall.md` §5 の表の甲群）。
  * - I13 `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して除外する（ADR 0485、`fcc` 操作。ADR 0494）。
+ * - I15 `consolidate` が積む `created` の `meta.sources` は小文字（ADR 0527、`argupper` の `consolidate` で届く）。
  * - I14 群の同伴の数は、返った owner の数 × `relationMaxCount` 以下（ADR 0381・0396、`relations` profile。ADR 0494）。
  *
  * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で操作列を最小化し、シードと最小の
@@ -814,6 +815,17 @@ export async function runOps(
           if (a && b && a !== b) {
             const res = await rt.consolidate(ctx, { target: { memoryIds: [a, b] } });
             if (res.consolidatedMemoryId) allIds.push(res.consolidatedMemoryId);
+            if (res.consolidatedMemoryId) {
+              // I15（ADR 0527）: `created` の `meta.sources` は、渡された綴り（大文字でも）ではなく store の行の id（小文字）。
+              const created = (
+                await stores.eventStore.list(ctx, { memoryId: res.consolidatedMemoryId })
+              ).find((e) => e.kind === "created");
+              const srcs = (created?.meta as { sources?: unknown } | undefined)?.sources;
+              if (Array.isArray(srcs))
+                for (const sid of srcs)
+                  if (typeof sid === "string" && sid !== sid.toLowerCase())
+                    violations.push({ inv: "I15-sources-lowercase", detail: sid, op: oi });
+            }
           }
           break;
         }
