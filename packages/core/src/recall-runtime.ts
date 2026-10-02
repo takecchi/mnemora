@@ -1,3 +1,4 @@
+import { assertNoProtoAttributesKey } from "./attributes-guard.js";
 import { isAbort, runAbortable } from "./abort.js";
 import type { Clock } from "./interfaces/clock.js";
 import type { Ctx } from "./ctx.js";
@@ -599,6 +600,8 @@ async function runRecallBody(
   deps: RecallRuntimeDeps,
   signal?: AbortSignal,
 ): Promise<RecallResult> {
+  // ADR 0496: `attributes` のキー `__proto__` は zod が黙って落とす（絞り込みが外れる）ので、parse の前に断る。
+  assertNoProtoAttributesKey((query as { attributes?: unknown } | null | undefined)?.attributes);
   const validatedQuery = RecallQuerySchema.parse(query);
   const now = deps.clock.now();
   const stages: StageTrace[] = [];
