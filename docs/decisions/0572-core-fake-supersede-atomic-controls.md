@@ -44,9 +44,8 @@
 | O3: 成功後に `extractionIndex` を巻き戻す                         | 1                  | O3                | 7/7      |
 | O5a: `setTaxonomyMode` の `ensureRow` を検査の前へ                | 1                  | O5（不正な mode） | 7/7      |
 | O5b: `setDefaultHalfLifeRecalls` の float4 検査の前に `ensureRow` | 1                  | O5（float4）      | 7/7      |
+| O5c: `setDecayClock` の `ensureRow` を検査の前へ                  | 1                  | O5（decay clock） | 7/7      |
 | O6: `setDefaultHalfLifeRecallsForTest` に `ensureRow`             | 1                  | O6                | 7/7      |
-
-O5 で `setDecayClock` の検査の前に `ensureRow` を移した変異は試していない【未確認】（その歯は入れたが、赤になることは測っていない）。
 
 ## 走らせたもの【実測】
 
