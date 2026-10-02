@@ -294,7 +294,7 @@ export interface ObserveUtteranceInput {
   claimKey?: ClaimKeyOptions | undefined;
   /** 話者（例: `"user"`）。抽出に渡し、`stated` の Memory の出所にも残る。 */
   speaker?: string | undefined;
-  /** 発話の本文。抽出（LLM）に渡し、LLM が失敗したときの全文フォールバックの Memory の本文にもなる。 */
+  /** 発話の本文。抽出（LLM）に渡し、LLM が失敗したときの全文フォールバックの Memory の本文にもなる。⚠ 空文字と、`trim` で空になる値（空白・改行・タブ・U+3000 だけ）は `ZodError`（ADR 0502）。 */
   text: string;
 }
 
@@ -328,6 +328,7 @@ export interface ObserveEventInput {
    * 出来事の名前。**`extractData`（下記）を渡さない既定の呼び出しでは、抽出（LLM）に渡すのは
    * この欄だけである**（今の振る舞い。下の `data` の doc 参照）。LLM 呼び出しが失敗したときの
    * 全文フォールバックの Memory も、既定ではこの欄の文字列だけを本文にする。
+   * ⚠ 空文字と、`trim` で空になる値（空白・改行・タブ・U+3000 だけ）は `ZodError`（ADR 0502）。
    */
   name: string;
   /**
@@ -430,7 +431,7 @@ export interface ObserveDocumentInput {
    * にする）。
    */
   title?: string | undefined;
-  /** 抽出（LLM）に渡す本文。既定ではこの欄だけを本文にする（全文フォールバックの Memory も同じ）。 */
+  /** 抽出（LLM）に渡す本文。既定ではこの欄だけを本文にする（全文フォールバックの Memory も同じ）。⚠ 空文字と、`trim` で空になる値（空白・改行・タブ・U+3000 だけ）は `ZodError`（ADR 0502）。 */
   content: string;
   /**
    * Issue #1185: `title` を抽出（LLM）に渡すかどうかの opt-in。**既定は `false`（渡さない、
@@ -515,6 +516,19 @@ export type ObserveInput =
  */
 const SubjectCandidatesInputSchema = z.array(z.string().min(1)).optional();
 
+/**
+ * 本文になる欄（`utterance.text`・`event.name`・`document.content`）の検査。`min(1)` に加えて、
+ * `String.prototype.trim` で空になる値（空白・改行・タブ・U+3000 など、JS の `trim` が落とす文字だけの値）を
+ * 断る（ADR 0502）。エラーの `path`・`message` は `min(1)` が空文字に返すものに合わせる。
+ * 前後や内側に空白のある普通の文は通す。他の `min(1)` 欄（`speaker`・`title` など）は対象外。
+ */
+const NonBlankTextSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0, {
+    message: "Too small: expected string to have >=1 characters",
+  });
+
 const ObserveUtteranceInputSchema = z.object({
   extractionContext: ExtractionContextSchema.optional(),
   kind: z.literal("utterance"),
@@ -528,7 +542,7 @@ const ObserveUtteranceInputSchema = z.object({
   attributes: AttributesSchema.optional(),
   claimKey: ClaimKeyOptionsSchema.optional(),
   speaker: z.string().min(1).optional(),
-  text: z.string().min(1),
+  text: NonBlankTextSchema,
 }) satisfies z.ZodType<ObserveUtteranceInput>;
 
 const ObserveEventInputSchema = z.object({
@@ -543,7 +557,7 @@ const ObserveEventInputSchema = z.object({
   subjectCandidates: SubjectCandidatesInputSchema,
   attributes: AttributesSchema.optional(),
   claimKey: ClaimKeyOptionsSchema.optional(),
-  name: z.string().min(1),
+  name: NonBlankTextSchema,
   data: z.record(z.string(), z.unknown()).optional(),
   extractData: z.boolean().optional(),
 }) satisfies z.ZodType<ObserveEventInput>;
@@ -561,7 +575,7 @@ const ObserveDocumentInputSchema = z.object({
   attributes: AttributesSchema.optional(),
   claimKey: ClaimKeyOptionsSchema.optional(),
   title: z.string().min(1).optional(),
-  content: z.string().min(1),
+  content: NonBlankTextSchema,
   extractTitle: z.boolean().optional(),
 }) satisfies z.ZodType<ObserveDocumentInput>;
 
