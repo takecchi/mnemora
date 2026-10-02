@@ -43,7 +43,7 @@ Redis サーバを同梱・起動しない。
   `require(esm)` で読み込める（TypeScript は `module`/`moduleResolution` を `nodenext` にし、
   TypeScript 5.8 以降を使うこと。5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる）
 - **Redis（または互換サーバ）が要る。** `test`（`pnpm --filter @mnemora/bullmq run test`）は
-  純関数（`resolveConcurrency`）だけを検査し Redis を要らないが、`test:redis`
+  純関数（`resolveConcurrency`）と、`bullmq` を差し替えた検査（`vi.mock`）だけを走らせ Redis を要らないが、`test:redis`
   （`pnpm --filter @mnemora/bullmq run test:redis`）は実際に BullMQ の `Queue`/`Worker` を
   構築するため Redis を要る（`.github/workflows/ci.yml` の `bullmq` job は
   `redis:7` の service container を使う）
