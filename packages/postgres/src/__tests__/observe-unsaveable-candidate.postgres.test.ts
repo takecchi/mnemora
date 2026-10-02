@@ -158,8 +158,16 @@ for (const [name, makeKit] of KITS) {
         expect(dropped).toHaveLength(1);
         expect(dropped[0]).toMatchObject({ index: 1, contentHash: hashContent(NUL) });
         expect(typeof dropped[0]!.message).toBe("string");
-        // 理由は最も内側の原因から取る: Postgres は pg のエラー（SQLSTATE 22021）、fixture は code を名乗らない。
-        expect(dropped[0]!.code).toBe(name === "Postgres" ? "22021" : null);
+        // 理由は最も内側の原因から取る。ADR 0499: 本文の NUL は、2実装とも DB に触れる前の名指しの例外（code を名乗らない）で
+        // 断る。以前の Postgres は pg のエラー（SQLSTATE 22021・pg の文面）だった。fixture は以前から同じ形。
+        // 本文が NUL を含めば、本文から作る digest も含む——説明は digest でなく本文を名指しする（検査の順）。
+        expect(dropped[0]!.code).toBeNull();
+        expect(dropped[0]!.message).toMatch(
+          /^(Postgres|InMemory)MemoryStore: content must not contain NUL characters \(U\+0000\)$/,
+        );
+        expect(dropped[0]!.message).toContain(
+          name === "Postgres" ? "PostgresMemoryStore" : "InMemoryMemoryStore",
+        );
         // 保存できない値（NUL）そのものは写さない。
         expect(JSON.stringify(dropped[0])).not.toContain("\\u0000");
       }
