@@ -112,7 +112,7 @@ export interface CreateBullmqTickDriverOptions {
    * 発火間隔（ミリ秒）。BullMQ の `repeat.every` にそのまま渡す。
    *
    * ⚠ ADR 0498: **構築時に検査し、数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下でなければ
-   * `createBullmqTickDriver(...)` が投げる**（`Queue`・`Worker` は作らない）。小数（`1.5`）は通る（BullMQ が
+   * `createBullmqTickDriver(...)` が投げる**（ADR 0525: 数でなければ `TypeError`、数として不正なら `RangeError`）（`Queue`・`Worker` は作らない）。小数（`1.5`）は通る（BullMQ が
    * 切り捨てた間隔で動く）。数値の文字列（`"50"`）は断る。以前は検査せず、【実測】（ADR 0477。redis-server 7.4.7・
    * bullmq 6.3.8）負の値・`1` 未満の小数・`1e21` では `start()` が成功したまま tick が数回で黙って止まった
    * （`onTickError` にも届かない）ので、その入力を構築時に断る。
@@ -122,12 +122,14 @@ export interface CreateBullmqTickDriverOptions {
    * この Worker が同時に処理する tick ジョブの最大数。既定 `1`。
    * 複数プロセス・複数 Worker が同じ queue に付くと、プロセスをまたいだ同時実行も
    * 起こりうる（上の doc 参照）——`concurrency` はあくまで「このプロセス内」の上限。
+   *
+   * 正の整数でなければ構築時に投げる（ADR 0525: 数でなければ `TypeError`、小数・`NaN`・`1` 未満なら `RangeError`）。
    */
   concurrency?: number | undefined;
   /**
    * 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。
    *
-   * ⚠ ADR 0498: **省略（`undefined`）なら既定。渡すなら空でない文字列でなければ、構築時に投げる。** 以前は空文字が
+   * ⚠ ADR 0498: **省略（`undefined`）なら既定。渡すなら空でない文字列でなければ、構築時に投げる。**（ADR 0525: 文字列でなければ `TypeError`、空文字なら `RangeError`） 以前は空文字が
    * `??` で既定に倒れずそのまま scheduler の id になり、【実測】（ADR 0477）`start()` が成功したまま tick が
    * 1回で黙って止まった。`:` を含む名前・空白・日本語・300 文字は動くので断らない。
    */
@@ -219,10 +221,13 @@ export function resolveConcurrency(concurrency?: number): number {
   if (concurrency === undefined) {
     return 1;
   }
+  const message = `createBullmqTickDriver: concurrency must be a positive integer, got ${String(concurrency)}`;
+  // ADR 0525: 型の誤りは TypeError、範囲の誤り（小数・`NaN`・`1` 未満）は RangeError。message は同じ。
+  if (typeof concurrency !== "number") {
+    throw new TypeError(message);
+  }
   if (!Number.isInteger(concurrency) || concurrency < 1) {
-    throw new Error(
-      `createBullmqTickDriver: concurrency must be a positive integer, got ${String(concurrency)}`,
-    );
+    throw new RangeError(message);
   }
   return concurrency;
 }
@@ -233,15 +238,13 @@ export function resolveConcurrency(concurrency?: number): number {
  * `start()` が成功したまま tick が黙って止まる。
  */
 function assertEveryMs(everyMs: unknown): asserts everyMs is number {
-  if (
-    typeof everyMs !== "number" ||
-    !Number.isFinite(everyMs) ||
-    everyMs < 1 ||
-    everyMs > Number.MAX_SAFE_INTEGER
-  ) {
-    throw new Error(
-      `createBullmqTickDriver: everyMs must be a finite number between 1 and Number.MAX_SAFE_INTEGER (milliseconds), got ${String(everyMs)}`,
-    );
+  const message = `createBullmqTickDriver: everyMs must be a finite number between 1 and Number.MAX_SAFE_INTEGER (milliseconds), got ${String(everyMs)}`;
+  // ADR 0525: 数でなければ TypeError、数として不正（非有限・`1` 未満・上限超）は RangeError。message は同じ。
+  if (typeof everyMs !== "number") {
+    throw new TypeError(message);
+  }
+  if (!Number.isFinite(everyMs) || everyMs < 1 || everyMs > Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(message);
   }
 }
 
@@ -250,10 +253,13 @@ function resolveJobName(jobName: unknown): string {
   if (jobName === undefined) {
     return DEFAULT_JOB_NAME;
   }
-  if (typeof jobName !== "string" || jobName.length === 0) {
-    throw new Error(
-      `createBullmqTickDriver: jobName must be a non-empty string when given, got ${String(jobName)}`,
-    );
+  const message = `createBullmqTickDriver: jobName must be a non-empty string when given, got ${String(jobName)}`;
+  // ADR 0525: 文字列でなければ TypeError、空文字は RangeError。message は同じ。
+  if (typeof jobName !== "string") {
+    throw new TypeError(message);
+  }
+  if (jobName.length === 0) {
+    throw new RangeError(message);
   }
   return jobName;
 }
