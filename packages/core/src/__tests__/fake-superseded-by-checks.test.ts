@@ -369,6 +369,18 @@ describe("Fake: resolveContestedGroup の supersededById（ADR 0503）", () => {
       { status: "superseded", by: ms[0]!.id },
     ]);
     expect(r.members[1]!.supersededById).toBe(archived.id);
+    // 輪にならない鎖（members[2] → members[1] → members[0]）は断らない（InMemory・Postgres と同じ）。
+    ms = await s.group();
+    r = await s.resolveGroup(ms, [
+      { status: "active" },
+      { status: "superseded", by: ms[0]!.id },
+      { status: "superseded", by: ms[1]!.id },
+    ]);
+    expect(r.members.map((m) => [m.status, m.supersededById ?? null])).toEqual([
+      ["active", null],
+      ["superseded", ms[0]!.id],
+      ["superseded", ms[1]!.id],
+    ]);
     ms = await s.group();
     r = await s.resolveGroup(ms, [
       { status: "active" },
