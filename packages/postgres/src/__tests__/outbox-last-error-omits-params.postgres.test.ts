@@ -28,15 +28,25 @@ import {
  * 含む」今の振る舞いを縛っていた歯を、ADR 0363 の決定に合わせて書き換えたもの
  * （ファイル名も変更）。
  *
- * 書き込みを失敗させるのには、`outbox-fail-nul-last-error.postgres.test.ts` と同じく、
- * 抽出結果の本文に NUL を入れる（Postgres の `text` は NUL を保存できない）。本文は
- * 合成したもの（目印の uuid を含む）で、実データではない。
+ * 書き込みを失敗させるのには、抽出結果の tag に圧縮の効かない1万字の値を入れる
+ * （GIN 索引 `idx_memories_tags` の行の上限を超えて INSERT が `54000` で落ちる。
+ * claim key が無いので `ClaimKeyIndexLimitError` には包まれない——ADR 0435・0443 決定1）。
+ * 本文は合成したもの（目印の uuid を含む）で、実データではない。
  *
- * `hashContent` は本文の sha256 の16進（NUL を含まない）にしてある。`contentHash` に NUL が
- * 入ると、`PostgresMemoryStore` が DB に触れる前に明示の例外で断る（ADR 0424 の O-6）ため、
- * DB の失敗（drizzle の `Failed query` と `params:`）が起きない。本文の NUL は入口で断られず、
- * DB の INSERT まで届いて `22021` で落ちる。
+ * ⚠ 2026-10-02 までは本文に NUL を入れて `22021` で落としていた。ADR 0499 で
+ * `PostgresMemoryStore` が本文の NUL を DB に触れる前に名指しの例外で断るようになり、
+ * DB の失敗（drizzle の `Failed query` と `params:`）が起きなくなったため、落とし方を差し替えた。
+ * params に本文が載るのは、どの値で落ちても INSERT の全値が params に入るからである。
  */
+
+/** 圧縮が効かない長い hex。⚠ `"ab".repeat(n)` のような繰り返しは圧縮されて通る（実測、claim-key-index-limit-error の歯と同じ）。 */
+function incompressibleHex(seed: string, length: number): string {
+  let out = "";
+  for (let i = 0; out.length < length; i++) {
+    out += createHash("sha256").update(`${seed}:${i}`).digest("hex");
+  }
+  return out.slice(0, length);
+}
 
 const ctx: Ctx = { tenantId: `outbox-last-error-body-${randomUUID()}` };
 
@@ -52,13 +62,17 @@ describe("OutboxJob.lastError は、失敗したクエリの params（利用者�
   it("extract ジョブの書き込みが失敗しても、lastError に合成の本文は載らず、SQL の形と印だけが残る", async () => {
     const { db, pool } = await getTestClient();
     const marker = `合成の本文の目印-${randomUUID()}`;
-    const body = `${marker} ${"あ".repeat(2000)}\u0000末尾`;
+    const body = `${marker} ${"あ".repeat(2000)}末尾`;
     const llmProvider: LLMProvider = {
       complete: async () => {
         throw new Error("not used");
       },
       completeStructured: async (_ctx, req) =>
-        req.schema.parse({ memories: [{ content: body, provenanceKind: "stated" }] }),
+        req.schema.parse({
+          memories: [
+            { content: body, provenanceKind: "stated", tags: [incompressibleHex("g", 10000)] },
+          ],
+        }),
     };
     const runtime = createRuntime({
       memoryStore: new PostgresMemoryStore(db),
@@ -89,8 +103,8 @@ describe("OutboxJob.lastError は、失敗したクエリの params（利用者�
     // params の中身は「印」に置き換わり、値そのものはもう無い。
     expect(lastError).toContain("params: (omitted by mnemora,");
     expect(lastError).toMatch(/params: \(omitted by mnemora, \d+ chars\)/);
-    // pg 側の cause（invalid byte sequence、NUL が原因）の SQLSTATE は残る。
-    expect(lastError).toContain("(code: 22021)");
+    // pg 側の cause（index row size、長い tag が原因）の SQLSTATE は残る。
+    expect(lastError).toContain("(code: 54000)");
 
     // 合成の本文の目印・繰り返し文字は、もうどこにも無い。
     expect(lastError).not.toContain(marker);

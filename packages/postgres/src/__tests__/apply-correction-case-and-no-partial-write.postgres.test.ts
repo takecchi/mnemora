@@ -40,7 +40,8 @@ import {
  *    大文字の `winnerId`（`@mnemora/postgres` の `resolveContested` は勝者として受け付ける）では、実際に勝ったのが訂正する側でも
  *    `winner=corrected` と書いていた。
  *
- * testkit の fixture の id は大文字小文字を区別するので、2 は fixture では今どおり `not_a_candidate`。
+ * testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、2 は fixture では `not_a_candidate` だった。
+ * fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -73,7 +74,7 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore,
-        caseInsensitive: false,
+        caseInsensitive: true, // ADR 0521: fixture も大文字小文字を区別しない（以前は false）
         runtime: createRuntime({
           ...shared,
           memoryStore,
