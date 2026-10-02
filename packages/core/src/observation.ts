@@ -43,7 +43,8 @@ export interface Observation {
    * （先発グレゴリオ暦の紀元前4714年11月24日、UTC）より前を表せず、この欄・`validFrom`・
    * `validUntil` にそれより前の日時を渡すと書き込みが例外（`timestamp out of range`）になり、
    * `observe()` は reject する。上側は Postgres のほうが広い（西暦294276年まで）ので分かれない。
-   * `@mnemora/testkit` の fixture は JS の `Date` をそのまま受け入れ、同じ値で返す。
+   * `@mnemora/testkit` の fixture は、この欄では JS の `Date` をそのまま受け入れ、同じ値で返す
+   * （読みの口の日時の条件・`opts.now`・`opts.at` は、ADR 0500 から下限より前を `RangeError` で断る）。
    * **保証するのは、上の日時以降の値だけである。**
    */
   occurredAt?: Date | null;
@@ -424,7 +425,7 @@ export interface ObserveDocumentInput {
    * 全文フォールバックの本文の両方に、`title` が空でない文字列のときだけ `${title}\n\n${content}`
    * の形で入る。`title` を渡さない・空文字のときは `extractTitle: true` でも今の既定と同じ
    * （`content` だけ）になる。**例外: `extractTitle: true` かつ `content` が空文字（`observe()` の
-   * 入力としては `content` は必須で空文字を拒むため、通常はこの型から作った Observation でしか
+   * 入力としては `content` は必須で、空文字も空白だけの値も拒む（ADR 0502）ため、通常はこの型から作った Observation でしか
    * 起こらない。`reextract` が読み直す既存データ等）で `title` が空でないときは、`title` だけを
    * 本文にする**（末尾の区切りが浮かないよう、`${title}\n\n${content}` の代わりに `title` 単体
    * にする）。

@@ -64,6 +64,7 @@ import {
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
   assertQueryBigint,
+  seqSumOverflowsBigint,
   jsonContainsNul,
   stringHasNul,
 } from "./query-check.js";
@@ -381,6 +382,25 @@ function isDecayedForScope(
       : scope.decayFloorSeqUsesSubjectCounters === true && memory.subjectId != null
         ? decayFloorSeqAfter + (subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0)
         : decayFloorSeqAfter;
+  // ADR 0505: `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は `22003` で文ごと失敗する。失敗するのは、
+  // その式が評価されるときだけ（実測）: `decay_floor_seq` が非 NULL（`IS NULL OR …` の短絡）で、subject を持つ行
+  // （`S_x` を引く）。2軸のときは壁時計が左なので、既定（`NOT wall OR NOT activity`）は壁時計が生きているとき、
+  // `decayFloorAnyAxis`（`NOT wall AND NOT activity`）は壁時計が生きていないときだけ、活動時計の式まで行く。
+  if (
+    decayFloorSeqAfter !== undefined &&
+    scope.decayFloorSeqUsesSubjectCounters === true &&
+    memory.subjectId != null &&
+    memory.decayFloorSeq != null &&
+    (wallAlive === undefined || (scope.decayFloorAnyAxis === true ? !wallAlive : wallAlive)) &&
+    seqSumOverflowsBigint(
+      decayFloorSeqAfter,
+      subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0,
+    )
+  ) {
+    throw new Error(
+      `aggregateScope: decayFloorSeqAfter + own subject seq must fit in a Postgres bigint (got ${decayFloorSeqAfter} + ${subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0})`,
+    );
+  }
   const activityAlive =
     effectiveDecayFloorSeqAfter === undefined
       ? undefined
@@ -2145,7 +2165,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertQueryTimestamptz("aggregateScope", "occurredBefore", scope.occurredBefore);
     assertQueryTimestamptz("aggregateScope", "validAt", scope.validAt);
     assertQueryTimestamptz("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
-    assertQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
+    // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
+    assertQueryBigint("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
     // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
     // 時点で拒まれる（`22P05`・`22021`）。`scopeAggregate: "skip"` で `digestBand` も無いときだけ、Postgres は
     // 集計も目次帯も引かずにクエリを1本も発行しないので、見ない。
@@ -2601,6 +2622,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryTimestamptz("archiveDecayed", "now", opts.now);
     assertQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
+    // ADR 0505: `nowSeq` は `bigint` の引数。範囲外なら、行が無くても Postgres はクエリの時点で拒む。ただし壁時計の clock は
+    // `nowSeq` を SQL に入れない（`wall` は `decay_floor_at` だけ）ので、見ない。
+    if ((opts.clock ?? "wall") !== "wall") {
+      assertQueryBigint("archiveDecayed", "nowSeq", opts.nowSeq);
+    }
     // `PostgresMemoryStore.archiveDecayed`（`buildArchiveDecayedTargetSelect`）は
     // `opts.limit` を生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・
     // `NaN`・`Infinity`・非整数を渡すと Postgres 自身が例外を投げる（実測:
@@ -2642,6 +2668,17 @@ export class InMemoryMemoryStore implements MemoryStore {
         opts.usesSubjectActivityCounters === true && m.subjectId != null
           ? opts.nowSeq + (subjectActivitySeqByTenant?.get(m.subjectId) ?? 0)
           : opts.nowSeq;
+      // ADR 0505: `nowSeq + S_x` が `bigint` を溢れる行で、式が評価されたなら Postgres は `22003` で失敗する
+      // （`decay_floor_seq IS NOT NULL AND …` の短絡で、非 NULL の行。subject なしの行は `S_x` を引かない）。
+      if (
+        opts.usesSubjectActivityCounters === true &&
+        m.subjectId != null &&
+        seqSumOverflowsBigint(opts.nowSeq, subjectActivitySeqByTenant?.get(m.subjectId) ?? 0)
+      ) {
+        throw new Error(
+          `archiveDecayed: nowSeq + own subject seq must fit in a Postgres bigint (got ${opts.nowSeq} + ${subjectActivitySeqByTenant?.get(m.subjectId) ?? 0})`,
+        );
+      }
       return decayFloorSeq <= effectiveNowSeq;
     };
     const passesClock = (m: Memory): boolean => {
