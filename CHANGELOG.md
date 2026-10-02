@@ -85,6 +85,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない。conformance suite に `it` は足していない（既存の `updateStatus*` の歯が、置き換えた側なしで `superseded` を書いていたので、別の記憶を指すよう直した）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目59。DB マイグレーションは無い。
 
+- **`@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（ADR 0456 の M4）が「変えなかったこと」に残した分）。
+
+  - **何が変わるか**: `kind`・`payload`・`attributes`（key も値も、入れ子の中も）、`createRecall` の `query`・`budget`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` に NUL を含む入力は、以前も落ちた（`DrizzleQueryError`。`cause.code` は `22021`・`22P05`）。いまは INSERT の前に、`PostgresMemoryStore: <欄> must not contain NUL characters (U+0000)`（`createRecall` は `createRecall: <欄> …`）の素の `Error` で断る。何も書かれず、活動時計も進まない。testkit の `InMemoryMemoryStore` と同じ文面。
+  - **破壊的と数える理由**: 断る入力は増えないが、**例外の形が `DrizzleQueryError` から素の `Error` に変わる**。`cause.code` や `Failed query:` の message で分岐していた呼び出し側が影響を受ける（項目57と同じ数え方）。
+  - **誰が影響を受けるか**: `@mnemora/postgres` の上の3口を直接呼び、NUL を含みうる値を渡し、例外の形で分岐しているもの。`Runtime` 経由（`observe()`・`recall()`）は、型の中の値しか渡さないので、通常は変わらない。`observe()` に NUL を含む発話を渡したときの例外の形は変わる。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目60。DB マイグレーションは無い。
+  - 【確かめていないこと】`createObservation` の `subjectId`・`externalId` の NUL（`assertWellFormedIdentifier` が先に断るので、新しい検査は見ない。以前から同じ）。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
@@ -102,6 +110,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
 
 - **`@mnemora/testkit/fixtures` の `InMemory*` が、操作の対象の id（記憶・observation・recall・outbox のジョブ）が大文字の uuid でも、`@mnemora/postgres` と同じ記憶・同じ行として扱うようになった**（[ADR 0521](./docs/decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md)。[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)・[0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)・[0475](./docs/decisions/0475-eventstore-append-uuid-case.md) が「既存の違い」として残していた点）。`forget`・`purge`・`restoreArchived`・`markContested`・`resolveContested`・`consolidate`・群の操作・使用報告のほか、`MemoryStore.get`・`getMany`・`updateStatus`・`reinforce`・`recordUsage`、`VectorStore.upsert`・`delete`、`RelationStore.link`・`unlink`、`EventStore.list`、`OutboxStore.complete`・`fail` などが対象。以前は、大文字の id を渡すと、黙って何もしない（`not_found`）か `memory not found for tenant` を投げていた。いまは小文字の id と同じに動き、持つ id・積むイベントの `memoryId` も小文字。**落ちる入力が減る変更**で、新しく断る入力は無い。ただし、以前は黙って何もしなかった呼び出し（`forget` など）が、状態を変えるようになる。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+
+- **`@mnemora/testkit/fixtures` の InMemory が、`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` の bigint の溢れを、Postgres と同じ条件で断る**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) の負債の返済）。本物の adapter は変えていない。
+  - **新しく断る入力**（Postgres が今拒むものだけ）: `nowSeq + S_x`（`archiveDecayed`、`usesSubjectActivityCounters: true`）・`decayFloorSeqAfter + S_x`（`aggregateScope`・`VectorStore.search`、`decayFloorSeqUsesSubjectCounters: true`）が 2^63 以上になるとき。Postgres がその式を評価する行（subject を持ち、`decay_floor_seq` が非 NULL で、ほかの条件を通り、2軸のときは左で決まらない行）があるときだけ。`nowSeq`（`decayFloorSeqAfter`）そのものが 2^63 以上のときは行が無くても（`archiveDecayed` は `clock: 'wall'` を除く）。
+  - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
+
+- **`PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md) の負債の返済）。
+  - 落とすのは message・`stack`・`cause` の連鎖の `params:` より後ろ（`(omitted by mnemora, N chars)`）。例外は新しく作らず、`kind`・`name`・`code`・`cause` は残る。
+  - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504 と同じ扱い）。
+  - **変えなかったこと**: `EventStore.get`・`list`、`PostgresTrigramLexicalStore` など、ほかの store の直接呼び。
 
 ## [1.2.0] - 2026-10-02
 

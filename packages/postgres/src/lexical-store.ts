@@ -4,6 +4,7 @@ import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
+import { omittingParams } from "./omit-params.js";
 import { capLexicalQueryWords } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
 
@@ -323,7 +324,8 @@ export class PostgresLexicalStore implements LexicalStore {
     assertNoNul("PostgresLexicalStore.search", "query", query);
     assertNoNulInScopeFilter("PostgresLexicalStore.search", opts.filter, "opts.filter");
     const select = buildLexicalSearchSelect(query, { ...opts, ctxTenantId: ctx.tenantId });
-    const result = await this.db.execute(select);
+    // ADR 0505: 例外の message（`cause` の連鎖を含む）から、SQL に付けた値（params。検索語・`filter.attributes` など）を落とす。
+    const result = await omittingParams(() => this.db.execute(select));
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; coverage: number; rank: number };
       return { memoryId: r.memory_id, coverage: r.coverage, rank: r.rank };
