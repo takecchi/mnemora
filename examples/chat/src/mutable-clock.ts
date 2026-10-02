@@ -16,12 +16,11 @@ import type { Clock } from "@mnemora/core";
  * あり `occurredAt` を読まない(`packages/core/src/strategies/scoring.ts` の docstring)ため、
  * これで `freshness` を動かさずに `decay` だけを動かせる。
  *
- * ⚠ **`packages/postgres` の `outbox.available_at` はこの `Clock` を読まない**——
- * `packages/postgres/src/memory-store.ts` の `INSERT INTO outbox (...)` は Postgres の
- * SQL `now()` を直接使っており(アプリ側から渡した `Date` パラメータではない)、この
- * `Clock` を過去に設定しても `available_at` は常に実際の DB サーバ時刻のままになる
- * (コードを読んで確認した——実行して確かめた実測ではない。`time-term-arm.ts` の
- * `runOneProbe` の docstring 参照)。
+ * `packages/postgres` の `outbox.available_at` も、この `Clock` に従う——runtime が
+ * `clock.now()` 由来の `now` を store に渡し、store は `opts?.now ?? new Date()` を入れる
+ * (ADR 0355、記述の訂正は ADR 0559。SQL の `now()` は使わない)。ADR 0355 より前は
+ * SQL の `now()` で入っていたため、この `Clock` を過去に置くと embed ジョブが claim
+ * できなかった。呼び出し側に残る「tick の前に実時刻へ戻す」処理はその名残である。
  */
 export interface MutableClock extends Clock {
   set(at: Date): void;

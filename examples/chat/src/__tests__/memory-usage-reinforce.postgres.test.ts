@@ -58,15 +58,14 @@ describe("examples/chat: reportMemoryUsage → reinforce が本物の Postgres �
     await resetTestDatabase();
     await getTestClient();
 
-    // `t0` は実時刻より60秒先を初期値にする。**過去に固定してはいけない**——
-    // `outbox.available_at` は Postgres の SQL `now()`（本物の壁時計時刻）で入るが、
-    // `tick()` の claim 条件 `available_at <= opts.now` の `opts.now` は
-    // アプリ側の `Clock`（ここでは固定された `t0`）から来る
-    // （`packages/postgres/src/outbox-store.ts`、`mutable-clock.ts` のdocstring、
-    // `time-term-arm.ts` の「⭐⚠」節が実測で踏んだのと同じ罠）。`t0` を過去や
-    // 現在時刻ちょうどにすると、`ingestConversation` 内の `drainEmbedTicks` が
-    // 1件も claim できず、embed が永久に `pending` のまま残る
-    // （実際にこの罠を踏んで確認した——後述「確かめたこと」参照）。
+    // `t0` は実時刻より60秒先を初期値にする。歴史的な理由で残している——ADR 0355 より前は
+    // `outbox.available_at` が Postgres の SQL `now()`（本物の壁時計時刻）で入り、
+    // `tick()` の claim 条件 `available_at <= opts.now` の `opts.now` はアプリ側の `Clock`
+    // （ここでは固定された `t0`）から来たので、`t0` を過去や現在時刻ちょうどにすると
+    // `ingestConversation` 内の `drainEmbedTicks` が 1件も claim できず、embed が永久に
+    // `pending` のまま残った（`time-term-arm.ts` の「⭐⚠」節が実測で踏んだのと同じ罠。
+    // 後述「確かめたこと」参照）。いまは runtime が `clock.now()` 由来の `now` を渡すので、
+    // `available_at` も注入した時計に従う（ADR 0559）。
     const t0 = new Date(Date.now() + 60_000);
     const clock = createMutableClock(t0);
     const handle = await createExampleRuntime(requireDatabaseUrl(), {}, {}, clock);

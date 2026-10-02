@@ -96,7 +96,7 @@ const shared = {
     embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
   },
   hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
-  // outbox の `available_at` は Postgres では DB の now() で決まるので、積んだジョブが claim できるよう先の時刻にする。
+  // 先の時刻にしているのは歴史的な理由で、今は outbox の `available_at` も注入した時計に従う（ADR 0559）。
   clock: { now: () => new Date(NOW_MS) },
 };
 
