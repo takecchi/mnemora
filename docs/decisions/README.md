@@ -526,6 +526,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0508](./0508-recall-channels-undecidable-japanese-labels-on-real-postgres.md) | `recall` の `channels` の合流のうち、`ann_truncated`（undecidable）・日本語の語彙・`labels` との組を、Fake と実 Postgres に同じ問いを当てて縛る（割れは見つからなかった。日本語だけ既知の非対称を歯にした） | 採用 (2026-10) |
 | [0510](./0510-doc-forms-not-yet-swept.md) | 文書とコードのずれの掃きが「見ていない形」として残した、表の中の数値・定数と、既定値・振る舞いの散文を、コードの定数に名指しで照らす | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
+| [0514](./0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md) | `Runtime.tick` の `opts.kinds`・`limit`・`claimedBy` と、保存できない巨大な `leaseMs` を、claim の前に名指しで断る（ADR 0496「引き受けた負債」の5と1） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |

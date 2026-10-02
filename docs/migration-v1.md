@@ -2606,6 +2606,36 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
 
+### 61. `tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と、保存できない巨大な `leaseMs` を、claim する前に断るようになった（`@mnemora/core`）
+
+[ADR 0514](./decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0496](./decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1。項目54と同じ数え方）。
+
+⚠ **未リリース**。**番号は 61 である**——項目60 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない。
+
+| 欄 | 断る入力 | 例外 | 以前 |
+| --- | --- | --- | --- |
+| `kinds` | 配列でない（裸の文字列・`null`・object・数）／文字列でない要素を含む | `TypeError` | 裸の文字列は Fake・InMemory で部分文字列の照合になり通る。`null`・数の要素は通る。object・数は store ごとの例外 |
+| `limit` | 0 以上 2^63 未満の整数でない（文字列・`null`・`NaN`・`±Infinity`・負・小数） | `RangeError` | `"5"`・`null` は Postgres で通る。ほかは store ごとの例外（`DrizzleQueryError`・名前の無い `Error`） |
+| `claimedBy` | 文字列でない（`null`・数・object） | `TypeError` | Fake・Postgres では通り、数は text 列に入る |
+| 同上 | NUL（U+0000）を含む | `RangeError` | store ごとの例外（Postgres は 22021） |
+| `leaseMs` | 有限でも、`now - leaseMs` が `Date` の範囲外、または 4714-11-24 BC より前（`1e20`・`-1e20`・`3e14` など） | `RangeError` | `1e20` は store ごとの例外。`3e14` は Fake・InMemory で通り（何も claim しない）、Postgres だけが落ちる |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく例外になる**。以前も落ちた入力は、例外の種類が変わる。項目54と同じ扱い。
+
+**誰が影響を受けるか**: `as`・JavaScript・外部の設定から `tick` の `opts` を組み立てている呼び出し側。例: 環境変数の `TICK_LIMIT` を文字列のまま `limit` に渡している（以前は Postgres で通った）、`kinds` に種類を1つ裸の文字列で渡している、`claimedBy` にワーカー番号を数のまま渡している。`cause.code`（22P02 など）や `claimBatch: limit must …` の message で分岐していた呼び出し側。`claimBatch` を直接呼ぶ人は変わらない。
+
+**どう直すか**:
+- `limit` は `Number(...)` などで整数にして渡す（`0` は今までどおり「claim しない」）。
+- `kinds: ["extract"]` と配列にする。
+- `claimedBy` は `String(...)` で文字列にし、NUL を含めない。
+- `leaseMs` は、現実のリース長（ミリ秒）にする。0 以下は今までどおり通る（重複 claim を許すので、意図した場合だけ）。
+- 例外で分岐していた箇所は、`TypeError`・`RangeError` と、`Runtime.tick: opts.<欄> …` の message で分岐する。
+
+**確かめたこと**: Fake・InMemory・Postgres に同じ入力を流す歯を、`packages/core/src/__tests__/tick-opts-validation.test.ts` と `packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts` に足した（直す前は断る21件が3者で赤）。
+
+**DB マイグレーション**: 要らない。claim の前に落ちるので、outbox の行は変わらない。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

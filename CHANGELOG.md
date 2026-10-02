@@ -93,6 +93,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目60。DB マイグレーションは無い。
   - 【確かめていないこと】`createObservation` の `subjectId`・`externalId` の NUL（`assertWellFormedIdentifier` が先に断るので、新しい検査は見ない。以前から同じ）。
 
+- **`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と、保存できない巨大な `leaseMs` を、claim する前に名指しの例外で断るようになった**（[ADR 0514](./docs/decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)、[ADR 0496](./docs/decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1、`@mnemora/core`）。
+
+  以前は、これらの値は `OutboxStore.claimBatch` へそのまま渡り、store ごとに顔が違った（Postgres は `DrizzleQueryError`、testkit の InMemory・core の Fake は名前の無い `Error`）。さらに、**例外にならず黙って別の結果になる入力**があった（裸の文字列の `kinds` は Fake・InMemory で部分文字列として照合される、`claimedBy: 5`、`limit: "5"` は Postgres で通る、`leaseMs: 3e14` は Fake・InMemory で通って何も claim せず Postgres だけが落ちる）。今は入口で、3者が同じ種類・同じ message で断る。
+  - **断る入力**: `kinds` が配列でない・文字列でない要素を含む（`TypeError`、`Runtime.tick: opts.kinds must be an array of strings`）。`limit` が 0 以上 2^63 未満の整数でない（`RangeError`、`Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63`）。`claimedBy` が文字列でない（`TypeError`）・NUL を含む（`RangeError`）。`leaseMs` が有限でも、`now - leaseMs` が `Date` の範囲外か Postgres の `timestamptz` の下限（4714-11-24 BC）より前になる（`RangeError`、`Runtime.tick: opts.leaseMs is out of range …`）。`undefined` は省略と同じ。
+  - **断らないもの（変えない）**: `limit: 0`（何も claim しない）、`kinds: []`、`claimedBy: ""`、0 以下の `leaseMs`（TSDoc が今の振る舞いとして書いている）、下限ちょうどの `leaseMs`。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力（裸の文字列の `kinds`、数の `claimedBy`、`"5"` の `limit`、`3e14` の `leaseMs` など）が、新しく例外になる**。以前も落ちた入力は、例外の種類が変わる（`DrizzleQueryError`・名前の無い `Error` から `TypeError`・`RangeError`）ので、`cause.code` や message で分岐していた呼び出し側は見直すこと。新しい例外クラスは増やしていない。
+  - **誰が影響を受けるか**: `as`・JavaScript・外部の設定（環境変数・JSON）から `tick` の `opts` を組み立てている呼び出し側。型どおりに呼んでいる限り変わらない。`claimBatch` を直接呼ぶ人の顔は変えていない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目61。DB マイグレーションは無い。
+  - 【確かめていないこと】SQL_ASCII の脚。`@mnemora/bullmq`・`examples/` のテスト。NUL を含む `kinds` の要素。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
