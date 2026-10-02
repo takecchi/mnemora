@@ -259,7 +259,7 @@ eventCase("supersedeWithNewMemories（supersede の event）", {
   prepare: async (kit) => {
     const old = await mem(kit);
     return async (patch) => {
-      await kit.store.supersedeWithNewMemories(
+      await kit.store.supersedeWithNewMemories!(
         A,
         [{ input: newMemory(), jobKinds: [] }],
         [{ id: old.id, supersededByIndex: 0, event: ev(old.id, patch, "superseded") }],
@@ -269,7 +269,7 @@ eventCase("supersedeWithNewMemories（supersede の event）", {
 });
 eventCase("supersedeWithNewMemories（buildCreatedEvent）", {
   prepare: async (kit) => async (patch) => {
-    await kit.store.supersedeWithNewMemories(A, [{ input: newMemory(), jobKinds: [] }], [], {
+    await kit.store.supersedeWithNewMemories!(A, [{ input: newMemory(), jobKinds: [] }], [], {
       buildCreatedEvent: (memory) => ev(memory.id, patch, "created"),
     });
   },
@@ -290,7 +290,7 @@ const POISON: Array<[string, Partial<NewMemoryEvent>, RegExp]> = [
   ["meta の key の NUL", { meta: { [NUL]: "v" } }, /memory_events\.meta/],
   ["meta の入れ子の NUL", { meta: { a: [{ b: NUL }] } }, /memory_events\.meta/],
   ["meta の孤立サロゲート", { meta: { reason: LONE } }, /memory_events\.meta/],
-  ["actor.id の NUL", { actor: { type: "user", id: NUL } }, /memory_events\.actor/],
+  ["actor.id の NUL", { actor: { type: "human", id: NUL } }, /memory_events\.actor/],
 ];
 
 for (const [kitName, makeKit] of KITS) {
@@ -377,7 +377,7 @@ const MEMORY_ENTRIES: Record<string, (kit: Kit, input: NewMemory) => Promise<unk
   createMemory: (kit, input) => kit.store.createMemory(A, input),
   createMemoryWithOutbox: (kit, input) => kit.store.createMemoryWithOutbox(A, input, ["embed"]),
   supersedeWithNewMemories: (kit, input) =>
-    kit.store.supersedeWithNewMemories(A, [{ input, jobKinds: ["embed"] }], []),
+    kit.store.supersedeWithNewMemories!(A, [{ input, jobKinds: ["embed"] }], []),
   // 全候補が保存できないとき、最初の例外がそのまま投げられる。
   createMemoriesWithOutboxAndEvents: (kit, input) =>
     kit.store.createMemoriesWithOutboxAndEvents!(A, [{ input, jobKinds: ["embed"] }], (memory) =>
@@ -455,7 +455,7 @@ for (const [kitName, makeKit] of KITS) {
 
     it.each([
       ["reason", { reason: NUL }, /memory_events\.meta/],
-      ["actor.id", { actor: { type: "user" as const, id: NUL } }, /memory_events\.actor/],
+      ["actor.id", { actor: { type: "human" as const, id: NUL } }, /memory_events\.actor/],
     ])("restoreSupersededBy: %s の NUL は名指しで断り、戻さない", async (_l, patch, field) => {
       const kit = await makeKit();
       const { anchor, old } = await restoreSetup(kit);

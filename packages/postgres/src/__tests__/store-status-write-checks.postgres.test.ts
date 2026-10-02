@@ -244,7 +244,7 @@ for (const [kitName, makeKit] of KITS) {
       const kit = await makeKit();
       const t = await purged(kit);
       const before = await kit.eventCount();
-      const result = await kit.store.supersedeWithNewMemories(
+      const result = await kit.store.supersedeWithNewMemories!(
         A,
         [
           {
@@ -269,6 +269,40 @@ for (const [kitName, makeKit] of KITS) {
       expect(result.conflicted.map((c) => c.id)).toEqual([t.id]);
       expect(result.superseded).toEqual([]);
       expect((await kit.store.get(A, t.id))!.status).toBe("forgotten");
+      expect(await kit.eventCount()).toBe(before);
+    });
+
+    it("supersedeWithNewMemories の abortIfAllConflicted: purge 済みの対象だけなら、全部弾かれたとして、何も書かずに断る", async () => {
+      const kit = await makeKit();
+      const t = await purged(kit);
+      const before = await kit.eventCount();
+      const error = await caught(() =>
+        kit.store.supersedeWithNewMemories!(
+          A,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: A.tenantId,
+                content: "n2",
+                digest: "n2",
+                contentHash: "n2-hash",
+              }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: t.id,
+              supersededByIndex: 0,
+              expectedStatus: "forgotten",
+              event: ev(t.id, "superseded"),
+            },
+          ],
+          { abortIfAllConflicted: true },
+        ),
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).name).toBe("SourceMemoryStatusChangedError");
       expect(await kit.eventCount()).toBe(before);
     });
 

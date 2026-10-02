@@ -2413,6 +2413,33 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。保存済みの記憶は変わらない（以前に継承された値で作られた記憶が在っても、書き換えない）。
 
+### 57. `@mnemora/postgres` の書き込み口が NUL を名指しの `Error` で断り、型の外の `status`（`resolveContestedGroup?`・`resolveContestedPair?`）と purge 済みの記憶への `expectedStatus` 付きの更新を断り、`setEventRetention` の日数の上限が共有の検査になった（`@mnemora/core`・`@mnemora/postgres`）
+
+[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。ADR 0456 の M4、ADR 0450・0447・0446・0479 の材料。オーナーが v1.X.0 で破壊的変更を許した、という前提の上の判断）。
+
+⚠ **未リリース**。**番号は 57 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` の「`@mnemora/postgres` の `MemoryStore`・`EventStore` の書き込み口が、NUL…」の箇条を見ること。**ここには複製しない。**
+型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`・`RangeError`、既存の `MemoryStatusConflictError`）。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**（型の外の `status`、purge 済みの記憶への `expectedStatus` 付き更新）。NUL・日数の上限は、以前も落ちた入力で、例外の形が `DrizzleQueryError`（`cause.code` が `22021`・`22003`）から素の `Error` に変わる。項目34・49・51・52 と同じ扱い。conformance スイートは変えていない（約束を足すのはオーナーの判断）。
+
+**誰が影響を受けるか**:
+- `PostgresMemoryStore`・`PostgresEventStore`・`PostgresTenantSettingsStore` の口を直接呼ぶ利用者のうち、(a) NUL を含みうる値（`reason`・`actor.id`・`digestSnapshot`・`tags`・`attributes`・claim key など）を渡しているもの、(b) `resolveContestedGroup?`・`resolveContestedPair?` に型の外の `status` を渡しているもの、(c) purge 済みの記憶へ `updateStatus*`・`supersedeWithNewMemories?` を `expectedStatus` 付きで呼んでいるもの（`forgotten → active` に戻そうとしていたもの）、(d) `setEventRetention` に `2^31 - 1` を超える日数を渡しているもの。
+- `observe()` の抽出の `created` イベントの `meta.droppedCandidates[].code` を読んでいるもの。本文に NUL を含む候補の説明が、`code: "22021"`・pg の文面から、`code: null`・`PostgresMemoryStore: content must not contain NUL characters (U+0000)` に変わる（落とす候補の集合は変わらない。`@mnemora/testkit` の InMemory は以前からこの形）。
+- `Runtime` 経由の通常の呼び出し（`observe()`・`forget()`・`purge()`・`resolveContested()` など）は、型の中の値しか渡さないので変わらない。
+
+**どう直すか**:
+- (a) NUL を含む値は、書く前に取り除くか、その入力を断る。message は `PostgresMemoryStore: <欄> must not contain NUL characters (U+0000)`・`PostgresEventStore: memory_events.<actor|meta|digestSnapshot> must not contain NUL …`。`DrizzleQueryError` の `cause.code === "22021"` で分岐していた箇所は、message か、`Error` かどうかで分岐する。専用の `kind` は無い。
+- (b) `status` は `"active"` か `"superseded"` にする。`"forgotten"` などへ動かしたかったなら、`updateStatus`・`forget` を使う（この口は `contested → active | superseded` 専用）。
+- (c) purge 済みの記憶は戻せない（`Runtime.purge` は不可逆）。戻す前に `Memory.purgedAt` を見る。`MemoryStatusConflictError` で受ける（`expectedStatus` と `observedStatus` がどちらも `"forgotten"` になる）。
+- (d) 日数は `2^31 - 1` 以下にする（受け入れる値は変わらない）。
+- 自前の `MemoryStore`・`TenantSettingsStore` 実装は、共有の `assertValidEventRetentionDays` を呼べば、日数の上限が付いてくる。ほかは適合テストが検査しないので、必要なら自前で足す。
+
+**確かめたこと**: 2実装（`PostgresMemoryStore` と testkit の `InMemoryMemoryStore`）に同じ入力を流し、結果を比べる歯を足した。InMemory は NUL を以前から名指しで断っていたので、NUL の歯は直す前から InMemory が緑・Postgres が赤だった。status と purge 済みの CAS は、両実装とも赤だった（fixture も同じ穴を持っていた——🟡 の節に載せた）。
+
+**DB マイグレーション**: 要らない。purge 済みで、直す前の `updateStatusWithEvent` によって active に戻された行が在れば、その行の `content`・`digest` は墓石の固定の文字列のまま `active` になっている。調べる SQL は ADR 0499 に在る（読み取りだけ）。**既存の行は書き換えない**（データの書き換えはオーナーの判断が要る）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
@@ -2575,6 +2602,10 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **[PR #1563](https://github.com/takecchi/mnemora/pull/1563)（ADR 0457）**: README の `ANALYZE` の説明の実測による訂正。振る舞いは変えていない。
 
 ---
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
+  `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
+  公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
 
 ## この文書が確かめていないこと
 
