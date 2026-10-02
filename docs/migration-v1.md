@@ -2413,6 +2413,39 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。保存済みの記憶は変わらない（以前に継承された値で作られた記憶が在っても、書き換えない）。
 
+### 56. provider のコンストラクタと `createBullmqTickDriver` が、壊れた数値オプションを構築時に例外で断るようになった（`@mnemora/bullmq`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）
+
+[ADR 0498](./decisions/0498-constructor-config-checks.md)（クローン miku の決定。担い手が書いた。オーナーではない。[ADR 0477](./decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) の案1・[ADR 0467](./decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) の面C。オーナーが v1.X.0 での破壊的変更を許した）。
+
+⚠ **未リリース**。**番号は 56 である**。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 次の数値（と名前）のオプションを、構築時に検査する。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message は `<クラス名>: <欄> must be …, got <値>` の形で、値が入る。**省略時の既定は変えない。**
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+| パッケージ | 欄 | 通る値 |
+|---|---|---|
+| `@mnemora/bullmq` | `everyMs` | 数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下（小数 `1.5` は通る。`"50"` は断る） |
+| `@mnemora/bullmq` | `jobName` | 省略、または空でない文字列 |
+| `@mnemora/openai` | `OpenAIEmbeddingProvider` の `dimensions` | 正の安全な整数 |
+| `@mnemora/openai` | `OpenAILLMProvider` の `temperature` | 省略、または有限で `0` 以上（上限は見ない） |
+| `@mnemora/anthropic` | `AnthropicLLMProvider` の `maxTokens` | 省略、または正の安全な整数 |
+| `@mnemora/local-embedding` | `dimensions`・`numThreads` | 省略、または正の安全な整数 |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は構築できた入力が、新しく例外になる**。項目21・23・24・27・34・49 と同じ扱い。
+- `@mnemora/bullmq`: 以前は、負・`1` 未満の小数・`1e21` 以上の `everyMs`、空文字の `jobName` で `start()` が成功したまま tick が黙って止まった（ADR 0477）。`0`・`NaN`・`null`・`Infinity` は `start()` が reject した。`"50"`（文字列）は動いていたが、今は断る。`MAX_SAFE_INTEGER` 超（`2^53` など）は動いていたが次の発火が何万年も先だった。
+- `@mnemora/openai`・`@mnemora/local-embedding`: 壊れた `dimensions` は `space.dimensions` にそのまま入り、API の 400 か、初回 `embed()` の次元の食い違いで初めて失敗した。`numThreads`・`maxTokens`・`temperature` の壊れた値は、onnxruntime・API が後で断った（または黙って受けた）。
+
+**誰が影響を受けるか**: これらの欄に、設定ファイル・環境変数から読んだ値をそのまま（文字列のまま・`NaN` のまま・負のまま）渡している利用者。`Number(process.env.X)` が `NaN` になる、`"50"` を渡している、など。`Runtime` が渡す値ではないので、`observe()`・`recall()`・`tick()` の挙動は変わらない。
+
+**どう直すか**:
+- `everyMs`・`dimensions`・`maxTokens`・`numThreads` は、`Number(...)` で数にしてから、範囲を確かめて渡す（`Number.parseInt(value, 10)` など）。文字列のまま渡さない。
+- `temperature` は `0` 以上の有限の数にする。上限（OpenAI は 2 まで、など）は API ごとに違い、ここでは見ない。
+- `jobName` は、空文字を渡さず、既定にしたいなら欄ごと省略する（`undefined` は既定）。空文字は以前は tick が止まる設定だったので、実際に動いていた構成は影響を受けない。
+- `createBullmqTickDriver` の構築を `try` で囲んでいない構成は、構築時に投げるようになるので、起動時に落ちる。起動時の検査として扱えばよい。
+
+**DB マイグレーション**: 要らない。ただし `everyMs` が負・`1e21` で止まった scheduler・`delayed` のジョブが Redis に残っていることがある（ADR 0477）。正しい `everyMs` の driver が `start()` すれば scheduler は上書きされる。
+
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
