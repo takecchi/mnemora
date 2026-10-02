@@ -69,6 +69,8 @@ Fake は、入力で受け取った配列・オブジェクト・Date をその�
 
 ### 既存テストの書き換え【現物・実測】
 
+**`liveRowForTest` を足した理由**: 決定3で `get`・`createMemory` の戻り値を写しにしたので、戻り値を書き換えても store の中の行は変わらなくなった。一方、既存のテストの一部は、戻り値を書き換えることで store の中の行を直接いじり、壊れた状態や競合を作っていた。それらのテストには、行そのものに届く別の口が要る。その口として、テスト専用の `FakeMemoryStore.liveRowForTest(ctx, id)` を足した（決定5）。`runtime-fakes.ts` は core の `__tests__` の中にあって出荷物ではないので、公開 API は増えない。
+
 `get`・`createMemory` の戻り値が行そのものであることを前提にしたテストが、決定3で赤くなった。**いずれも「別の誰かが読んでから書くまでの間に状態を変えた」を決定的に作る手口で、書き換える対象は変わらず、取る口だけを `liveRowForTest` に替えた**。
 
 `createMemory` の返り値を写しにしたときに赤くなった 22 本（9 ファイル。`beforeUpdateStatus` や `updateStatusWithEvent` の差し替えの中で、`createMemory` の返り値の `status`・`purgedAt`・`content`・`digest` を書き換えていた）: `foreign-realm-store-errors.test.ts`・`forget.test.ts`・`mark-contested-group.test.ts`・`mark-contested.test.ts`・`outcome-error-format.test.ts`・`purge.test.ts`・`resolve-contested.test.ts`・`resolve-orphaned-contested.test.ts`・`restore-archived.test.ts`。最初の直しで 19 本、残り 3 本（`m2` を書き換える「2件目の再読」）を足して全部緑。
