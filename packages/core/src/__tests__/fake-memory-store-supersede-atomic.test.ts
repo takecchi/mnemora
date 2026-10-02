@@ -173,7 +173,7 @@ describe("FakeMemoryStore.supersedeWithNewMemories は news の途中で失敗�
     ).rejects.toThrow();
 
     expect(snapshotOf(stores)).toEqual(before);
-    expect(await stores.memoryStore.get(ctx, keep.value.id)).not.toBeNull();
+    expect(await stores.memoryStore.get(ctx, keep.memory.id)).not.toBeNull();
     const labels = await stores.memoryStore.listLabels!(ctx);
     expect(labels.map((l) => l.name)).toEqual(["keep-tag"]);
     expect(labels[0]?.proposedCount).toBe(1);
