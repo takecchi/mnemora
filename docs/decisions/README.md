@@ -25,6 +25,10 @@ ADR が持つ**（例: [ADR 0222](./0222-compare-gate-judges-only-when-turncount
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
+**ADR のファイル名は `NNNN-slug.md` の形にする**（`NNNN` は4桁の番号、`slug` は小文字の英数字とハイフンだけ。**ドット `.` や大文字・アンダースコアは使えない**）。4桁の番号で始まる `.md` がこの形から外れていると、`node scripts/generate-adr-index.mjs` と索引の歯は、無視せず例外で落ちる（[ADR 0537](./0537-adr-index-rejects-malformed-adr-filename.md)）。
+
+**`docs/decisions/` の直下に置いてよい ADR ではない `.md` は `README.md` と `TEMPLATE.md` だけ**である。これ以外の `.md`（`adr-0538-x.md`・`538-x.md`・`0538_x.md`・`notes.md` など、ADR の形でないもの）は、番号で始まらなくても同じく例外で落ちる。`.md` 以外のファイルとサブディレクトリの中は対象外。`scripts/adr-renumber.mjs` も同じ規則で、書き換え・改名の前に落ちる（[ADR 0540](./0540-adr-filename-rule-shared-allowlist.md)）。許す一覧を増やすときは `scripts/generate-adr-index-lib.mjs` の `ALLOWED_NON_ADR_MARKDOWN` とここを一緒に直すこと。
+
 ## 一覧
 
 **この表は手で編集しない。** `docs/decisions/*.md` の1行目の見出しと状態欄から `node scripts/generate-adr-index.mjs` が生成する（[ADR 0137](./0137-adr-index-generated-from-source.md)）。ADR を追加する PR の側で上のコマンドを実行して索引も一緒にコミットし、`adr-index-freshness` の歯を PR 上で緑にしてからマージする。ほかの ADR の PR と索引の行が衝突したら、`main` を merge で取り込み、生成器で作り直す（ADR 0137「決定」2番は「作成者は触らない」と読めるが、実際の運用はこちら。同 ADR 末尾の 2026-09-30 の追記）。
@@ -539,5 +543,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0532](./0532-tick-job-sources-lowercase.md) | 穴探し — ADR 0527「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブでも、`created` の `meta.sources` は小文字（割れなし。大文字の id がジョブに入る入口は無い。歯を足した） | 採用 (2026-10) |
 | [0533](./0533-doc-code-drift-sweep-0526-0527.md) | 文書とコードのずれを横に掃く（第4弾の1回目）— ADR 0526・0527 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0534](./0534-changelog-reconcile-after-v1-2-0-tag.md) | CHANGELOG と migration-v1 の帳尻 — `v1.2.0` の tag より後に着地した #1615（ADR 0521）・#1616（ADR 0525）の項目を `[1.3.0]` 側へ移し、`[1.3.0]` の冒頭の「まだ何も棚卸ししていない」を直す | 採用 (2026-10) |
+| [0536](./0536-parity-inventory-and-activity-clock.md) | 穴探し — 公開メソッドごとの「3者（Fake・InMemory・Postgres）を突き合わせる歯」の棚卸しと、その1つ目（活動時計 `decay_clock = "activity"` の経路。3者一致、割れは見つからなかった） | 採用 (2026-10) |
+| [0537](./0537-adr-index-rejects-malformed-adr-filename.md) | ADR 索引の生成器は、番号で始まるのに ADR のファイル名の形から外れた `.md` を、無視せず例外で落とす | 採用 (2026-10) |
+| [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
