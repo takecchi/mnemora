@@ -6103,19 +6103,30 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             expectedStatus: "active" as const,
             event: buildSupersedeEvent(ctx, memory.id, memory.digest),
           });
+          // news は抽出キー（sourceObservationId + extractorVersion）を持つ——書かれたかどうかを
+          // `listBySourceObservation` で読め、巻き戻さずに残った news は再送で `created: false` になる。
+          const observation = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId }),
+          );
           const news = (contentHash: string) => [
             {
-              input: buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash }),
-              jobKinds: [] as string[],
+              input: buildNewMemoryFixture({
+                tenantId: ctx.tenantId,
+                contentHash,
+                sourceObservationId: observation.id,
+                extractorVersion: "v1",
+              }),
+              jobKinds: ["embed" as const],
             },
           ];
-          return { archivedA, archivedB, live, supersede, news };
+          return { archivedA, archivedB, live, observation, supersede, news };
         };
 
         it("supersedeWithNewMemories は abortIfAllConflicted: true で、supersede の対象が全部 CAS に弾かれたら news ごと巻き戻して SourceMemoryStatusChangedError を投げる", async () => {
           const store = await createStore();
           const ctx: Ctx = { tenantId: "tenant-1" };
-          const { archivedA, archivedB, live, supersede, news } = await casCases(
+          const { archivedA, archivedB, live, observation, supersede, news } = await casCases(
             store,
             ctx,
             "abort-all-conflicted",
@@ -6142,7 +6153,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             ].sort(),
           );
 
-          // news は残っていない: 同じ news をもう一度（今度は通る supersede を混ぜて）書くと、新規に作られる。
+          // news は残っていない（Memory も outbox のジョブも）。
+          expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(0);
+          expect(await claimEmbedJobs(ctx, new Date("2030-01-01T00:00:00.000Z"))).toEqual([]);
+          // 同じ news をもう一度（今度は通る supersede を混ぜて）書くと、新規に作られる（再送の `created: false` にならない）。
           const retry = await store.supersedeWithNewMemories!(
             ctx,
             newsInput,

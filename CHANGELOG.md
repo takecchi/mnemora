@@ -102,6 +102,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目60。DB マイグレーションは無い。
   - 【確かめていないこと】`createObservation` の `subjectId`・`externalId` の NUL（`assertWellFormedIdentifier` が先に断るので、新しい検査は見ない。以前から同じ）。
 
+- **conformance suite に約束を足した——`MemoryStore` の `abortIfSuperseded`・`abortIfAllConflicted`・`purgeExpiredEventsByRetention`・`findActiveByClaimKey` の半開区間と、`EmbeddingProvider.embed` の重複件数**（[ADR 0546](./docs/decisions/0546-conformance-suite-adds-round31-promises.md)。クローンの委譲先が、オーナーの問い 374f6f88 の問1の判断が出る前に用意した Draft で、**オーナーの判断ではない**）。`@mnemora/testkit` の `describeMemoryStoreConformance`・`describeEmbeddingProviderConformance` に、`it` が増えた。ADR 0458 の歯（suite の外にあった）を、suite の公開の口だけで書き直したもの。
+
+  - **新しい公開 API（`MemoryStoreConformanceOptions`）**: `supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?`（どれも `supportsAbortIfForgotten?` と同じ3状態: `true` は歯を走らせる／`false` は口・option が無いことを assert／省略は「⚠ 未検査」の it を1本）と、`setEventRetention?`（テナントの保持期間を設定するフック。`supportsPurgeExpiredEventsByRetention: true` のとき要る）。**省略すれば、増えるのは「未検査」の it だけである。**
+  - **既存のフラグの枝への追加（新しく赤になりうる）**: `supportsFindActiveByClaimKey: true` の枝に、**有効期間は半開区間——接するだけの区間（一方の `validUntil` と他方の `validFrom` が同じ時刻）は重ならない**ことを検査する `it` が1本増えた。`findActiveByClaimKey` の境界が `<=` の自前の実装は落ちる。
+  - **無条件の追加（新しく赤になりうる）**: `describeEmbeddingProviderConformance` に、**同じテキストを重複して渡しても、`embed` が入力と同じ件数を返す**ことを検査する `it` が、フラグ無しで1本増えた。契約（`EmbeddingProvider` の TSDoc）は元から「同じ件数・同じ順序」で、重複を畳んでよいとは書いていない——その実装は、契約に反していたのを suite が初めて検査するだけだが、外部の実装から見れば、通っていたものが落ちる。`@mnemora/openai`・`@mnemora/local-embedding`・`@mnemora/testkit` の実装は、記録の再生では緑（実 API・実モデルは走らせていない）。
+  - **足した約束は外せない**（外すのも破壊的変更）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目62。DB マイグレーションは無い。
+  - 【確かめていないこと】外部の adapter が実際に赤くなるか。実 API・実モデルが重複で件数を保つか。新しい3つのフラグだけを足した変更を破壊的と数えるか（`[1.2.0]` の 2026-10-01 の数え直しの判定なら非破壊。PC6 と重複件数が破壊的と数える根拠）。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。

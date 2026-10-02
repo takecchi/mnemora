@@ -538,6 +538,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-09-30 追記（`countScopeAggregateQueries?` を縛った）**: 直前の追記が「この歯の対象外のまま」とした `MemoryStoreConformanceOptions.countScopeAggregateQueries?`（関数フックの2状態）も、`conformance-omitted-flags-named-it.test.ts` が縛るようになった。省略すると「⚠ 未検査: countScopeAggregateQueries が指定されていない — …」の named it が1本登録されること（`it.skip` ではなく常に実行される it であること）を検査する。2状態でも「省いたら named it が出る」という約束はフラグの3状態と同じ、というオーナーの判断による。上の「対象外のまま」は当時の記録であり、いまは成り立たない。`supportsRealConcurrency?`（省略で `it.skip`）と `supportsTaxonomyMode?`（省略で何も登録されない）は、形が違うので対象外のままである。
 
+**⚠ 2026-10-03 追記（[ADR 0546](./decisions/0546-conformance-suite-adds-round31-promises.md)。オーナーの判断が出る前に用意した Draft）**: `MemoryStoreConformanceOptions` に `supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?` が増えた——それぞれ `opts.abortIfSuperseded`（3つの書き込み口）・`opts.abortIfAllConflicted`・`purgeExpiredEventsByRetention?` を検査する。上の `supportsAbortIfForgotten?` と同じ3状態（`true` は歯を走らせる／`false` は option を渡しても無視されて今日どおり書く・メソッドが無いことを assert する／省略は「⚠ 未検査」の named it を1本）。`purgeExpiredEventsByRetention` の歯は、テナントの保持期間を設定するフック `setEventRetention?` を要る（`MemoryStore` にその口は無いため。`supportsPurgeExpiredEventsByRetention: true` で渡さないと、各 `it` が説明つきの例外で赤くなる）。`supportsFindActiveByClaimKey: true` の枝には、フラグを増やさず、有効期間の半開区間（接するだけの区間は重ならない）の `it` が増えた。`describeEmbeddingProviderConformance` には、**フラグ無しで**、重複したテキストを渡しても入力と同じ件数を返す `it` が増えた。足した約束は、ADR 0458 の歯（suite の外）を suite の公開の口だけで書き直したもの。**足さなかったもの**（0458 の A8・`ClaimKeyIndexLimitError`・NUL の文面ほか）と、その理由は ADR 0546。
+
 ---
 
 ## 出所について

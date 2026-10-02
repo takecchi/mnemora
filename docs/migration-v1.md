@@ -2627,6 +2627,34 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。既存の行は書き換えない。
 
+### 62. conformance suite に約束が増えた——`abortIfSuperseded`・`abortIfAllConflicted`・`purgeExpiredEventsByRetention`・`findActiveByClaimKey` の半開区間・`embed` の重複件数（`@mnemora/testkit`）
+
+[ADR 0546](./decisions/0546-conformance-suite-adds-round31-promises.md)（クローンの委譲先が、オーナーの問い 374f6f88 の問1の判断が出る前に用意した Draft。決めたのはオーナーではない）。
+
+⚠ **未リリース**。**番号は 62 である**——項目61 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「conformance suite に約束を足した…」の箇条を見ること。**ここには複製しない。**型・シグネチャは、新しい任意の欄（`supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?`・`setEventRetention?`）が増えただけで、既存の呼び出しは1行も直さずに型検査を通る。
+
+**なぜ破壊的と数えるか**: 次の2つは、**以前は通っていた自前の実装が、新しく落ちる**。足した約束は外せない。
+- **`supportsFindActiveByClaimKey: true` の枝**に、接するだけの有効期間は重ならない、を検査する `it` が増えた（フラグは増えていない）。
+- **`describeEmbeddingProviderConformance`**（フラグ無し）に、重複したテキストを渡しても入力と同じ件数を返す、を検査する `it` が増えた。
+
+新しい3つのフラグは、省略すれば「⚠ 未検査」の `it` が1本ずつ増えるだけで、新しい約束は課さない（`[1.2.0]` の数え直しの判定なら非破壊。ここに書くのは、公開 API の追加だから）。
+
+**誰が影響を受けるか**:
+- 自前の `MemoryStore` 実装を suite に当て、`supportsFindActiveByClaimKey: true` を渡している利用者のうち、`findActiveByClaimKey` の有効期間の判定が閉区間（`<=`）の実装。
+- 自前の `EmbeddingProvider` 実装を suite に当てている利用者のうち、重複したテキストを畳んで（重複排除して）入力より少ない件数を返す実装。`EmbeddingProvider` の契約は元から「`texts` と同じ件数・同じ順序」なので、その実装は契約にも反している。
+- 新しい3つのフラグを `true` で渡す利用者は、その口を実装していなければ落ちる。`purgeExpiredEventsByRetention` は `setEventRetention`（保持期間を設定するフック）も要る。
+
+**どう直すか**:
+- `findActiveByClaimKey`: 有効期間を半開区間 `[validFrom, validUntil)` で比べる（`validUntil` と相手の `validFrom` が同じ時刻なら重ならない）。
+- `embed`: 重複を畳まず、入力と同じ件数・同じ順序で返す（下層への問い合わせを畳むのはよいが、返す配列は入力の件数に戻す）。
+- 新しいフラグ: 実装しているなら `true`（`purgeExpiredEventsByRetention` は `setEventRetention` も渡す）、実装していないなら `false`、決めないなら省略。**`@mnemora/postgres`・`@mnemora/testkit` の in-memory はこの版で対応済み**（`true`）。
+
+**確かめたこと**: 足した `it` ごとに、`InMemoryMemoryStore`・`PostgresMemoryStore`（embedding は testkit の fake）を壊して赤、戻して緑（ADR 0546 の表）。**確かめていないこと**: 外部の adapter・実 API・実モデル。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
