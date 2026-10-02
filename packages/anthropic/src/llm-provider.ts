@@ -191,6 +191,7 @@ function assertNotRefusedOrTruncated(response: {
  * 埋め込みは別の provider を併用する）。設定は {@link AnthropicLLMProviderOptions} を見ること。
  *
  * 構築時: キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ * `maxTokens` を渡すとき、正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498。`AnthropicLLMProviderOptions.maxTokens` の doc）。
  * ⚠ キーが見つからなくても構築は通る——`complete()` などを呼んだ時点で、SDK の素の `Error`
  * （`Could not resolve authentication method`）が伝わる（`kind` を持たない。【実測 2026-09-27】）。
  *
