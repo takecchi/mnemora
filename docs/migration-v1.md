@@ -2630,7 +2630,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 [ADR 0514](./decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0496](./decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1。項目54と同じ数え方）。
 
-⚠ **未リリース**。**番号は 61 である**——項目60 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+⚠ **未リリース**。**番号は 62 である**——項目61 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
 **何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない。
 
@@ -2837,7 +2837,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 ⚠ **2026-10-02 追記2**: 下の、ADR 0525（PR #1616）と ADR 0521（PR #1615）の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。🔴 の項目56（ADR 0498）に ADR 0525 が足していた注記は、出荷された本文に戻した（ADR 0534）。
 
 - **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
-  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落ちるようになった。下の項目）。
+  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で、`PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` は ADR 0516 で、落ちるようになった。下の項目）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
