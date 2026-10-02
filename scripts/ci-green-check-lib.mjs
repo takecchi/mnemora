@@ -1,7 +1,9 @@
 /**
  * `scripts/ci-green-check.mjs`（CI が緑かどうかを判定する CLI）の純関数の側。
  * ファイル I/O・`gh` の起動・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/adr-index-completeness-lib.mjs` と同じ分担・同じ理由。
+ * ——`scripts/generate-adr-index-lib.mjs` と同じ分担・同じ理由。
+ * （2026-10-03 訂正）この行は以前 `scripts/adr-index-completeness-lib.mjs` を指していた。
+ * そのファイルは ADR 0137 で索引を機械生成にしたとき消えている。
  *
  * ここでの「check run」は GitHub の Checks API
  * （`GET /repos/{owner}/{repo}/commits/{ref}/check-runs` の `check_runs[]`）の要素で、

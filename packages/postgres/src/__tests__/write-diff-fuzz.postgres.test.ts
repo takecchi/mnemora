@@ -62,8 +62,8 @@ const SEEDS = Number(process.env.WRITE_FUZZ_PG_SEEDS ?? 20);
 const LEN = Number(process.env.WRITE_FUZZ_LEN ?? 60);
 const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.WRITE_FUZZ_PG_FIRST_SEED ?? 1);
-// outbox の `available_at` は `now()` で埋まるので、時計はそれより後から始める
-// （そうしないと tick が何も claim しない）。1回の実行の中では両方の backend で同じ値を使う。
+// 時計は実時刻より先から始める。歴史的な理由で残しているが、今は `available_at` も注入した時計に
+// 従う（ADR 0559）。1回の実行の中では両方の backend で同じ値を使う。
 const T0 = Date.now() + 86_400_000;
 // Postgres の側の実行結果は、seed・`T0`・`LEN` が同じなら同じなので、4本の it で使い回す
 // （Postgres を seed ごとに1回しか流さない）。

@@ -689,10 +689,11 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewObservation,
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
-    assertObservationHasNoNul("FakeMemoryStore", input);
-    // ADR 0493: `subjectId`・`externalId` の孤立サロゲートも Postgres・InMemory は断る（`MalformedIdentifierError`）。
+    // ADR 0493・0563: `subjectId`・`externalId` の孤立サロゲートと NUL は、Postgres・InMemory と同じ `MalformedIdentifierError`
+    // （`kind: "malformed_identifier"`）で断る。素の `Error` を投げる NUL の検査（`assertObservationHasNoNul`）より先に見ること。
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    assertObservationHasNoNul("FakeMemoryStore", input);
     // 9回目の棚卸し: testkit の fixture と `@mnemora/postgres`（`timestamptz` 列）と同じく、Invalid Date の日時を拒む。
     for (const [field, value] of [
       ["recordedAt", input.recordedAt],
@@ -1033,14 +1034,12 @@ export class FakeMemoryStore implements MemoryStore {
       //
       // `ctx.tenantId` の NUL・孤立サロゲートは、ADR 0493 で各公開メソッドの冒頭の `assertWellFormedCtx(ctx)` が断る
       // （以前はここに「共通の入口が無いので扱わない」と書いていた。InMemory が先に揃い、Fake も各メソッドで明示した）。
+      // ADR 0493・0563: `subjectId` の孤立サロゲートと NUL は、InMemory・Postgres と同じ `MalformedIdentifierError`
+      // （`kind: "malformed_identifier"`）で断る。素の `Error` を投げる NUL の検査より先に見る。
+      assertWellFormedIdentifier(input.subjectId, "input.subjectId");
       if (input.content.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: content must not contain NUL characters (U+0000)`);
       }
-      if (input.subjectId != null && input.subjectId.includes("\u0000")) {
-        throw new Error(`FakeMemoryStore: subjectId must not contain NUL characters (U+0000)`);
-      }
-      // ADR 0493: `subjectId` の孤立サロゲート（InMemory・Postgres は `MalformedIdentifierError`）と、`extractorVersion` の NUL。
-      assertWellFormedIdentifier(input.subjectId, "input.subjectId");
       if (input.extractorVersion != null && input.extractorVersion.includes("\u0000")) {
         throw new Error(
           `FakeMemoryStore: extractorVersion must not contain NUL characters (U+0000)`,
@@ -1607,18 +1606,41 @@ export class FakeMemoryStore implements MemoryStore {
     // の doc コメント参照）。
 
     // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
+    // ADR 0564（Issue #768）: news[i] の作成が途中で投げたら（実在しない `sourceObservationId` など）、それまでに作った
+    // 記憶・冪等キーの索引・ラベル・outbox の行を巻き戻して投げ直す（`InMemoryMemoryStore` は書き込みの前に全部の検査を
+    // 済ませ、Postgres は1トランザクション。この Fake は検査と書き込みが `createMemoryIdempotent` に同居しているので巻き戻す）。
+    // 巻き戻すのは news の作成が触る Map と outbox だけ——`supersede` の書き込みはこの後ろで、投げない。
+    const memoriesBefore = new Map(this.backing.memories);
+    const extractionIndexBefore = new Map(this.backing.extractionIndex);
+    const labelsBefore = new Map(this.backing.labels);
+    const memoryLabelsBefore = new Map(this.backing.memoryLabels);
+    const outboxLengthBefore = this.backing.outboxJobs.length;
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
-    for (const { input, jobKinds } of news) {
-      const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
-      if (!wasCreated) {
-        created.push({ memory: fakeSnapshot(memory), created: false, jobs: [] });
-        continue;
+    try {
+      for (const { input, jobKinds } of news) {
+        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
+        if (!wasCreated) {
+          created.push({ memory: fakeSnapshot(memory), created: false, jobs: [] });
+          continue;
+        }
+        const jobs = jobKinds.map((kind) =>
+          this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
+        );
+        // ADR 0562: 返す `memory` は store の中の行ではなく写し（この後 supersede が行を書き換えても、返した値は動かない）。
+        created.push({ memory: fakeSnapshot(memory), created: true, jobs });
       }
-      const jobs = jobKinds.map((kind) =>
-        this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
-      );
-      // ADR 0562: 返す `memory` は store の中の行ではなく写し（この後 supersede が行を書き換えても、返した値は動かない）。
-      created.push({ memory: fakeSnapshot(memory), created: true, jobs });
+    } catch (error) {
+      this.backing.memories.clear();
+      for (const [key, value] of memoriesBefore) this.backing.memories.set(key, value);
+      this.backing.extractionIndex.clear();
+      for (const [key, value] of extractionIndexBefore)
+        this.backing.extractionIndex.set(key, value);
+      this.backing.labels.clear();
+      for (const [key, value] of labelsBefore) this.backing.labels.set(key, value);
+      this.backing.memoryLabels.clear();
+      for (const [key, value] of memoryLabelsBefore) this.backing.memoryLabels.set(key, value);
+      this.backing.outboxJobs.length = outboxLengthBefore;
+      throw error;
     }
 
     // 3. supersede を1件ずつ CAS で処理する。弾かれても conflicted に積んで続行する。
@@ -2481,6 +2503,8 @@ export class FakeMemoryStore implements MemoryStore {
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "archived",
+        // ADR 0563: `archived` の `at` は `opts.now`（`InMemoryMemoryStore`・`@mnemora/postgres` と同じ）。壁時計ではない。
+        at: new Date(opts.now),
         actor: { type: "system" },
         digestSnapshot,
         sizeBeforeBytes: null,
@@ -2528,13 +2552,16 @@ export class FakeMemoryStore implements MemoryStore {
     }
     // イベントを先に組み立てる（検査もここで走る）。書けないイベントなら、状態を書き換える前に投げる——
     // `updateStatusWithEvent`（#1368）と同じ形。Postgres は1トランザクションで巻き戻り、fixture は書き換える前に検査する。
-    const storedEvent = this.buildOwnedEvent(ctx, event, [id]);
+    // ADR 0563: `purgedAt` と `memory_events.at` は同じ値（`event.at`、省略時は壁時計を1回だけ読んだ値）。
+    // 2回読むと別の値になる（`InMemoryMemoryStore`・`@mnemora/postgres` は割れない）。
+    const at = event.at ?? new Date();
+    const storedEvent = this.buildOwnedEvent(ctx, { ...event, at }, [id]);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.tags = [];
     memory.attributes = {};
     memory.claimKey = null;
-    memory.purgedAt = new Date();
+    memory.purgedAt = new Date(at);
     memory.updatedAt = new Date();
 
     // ADR 0375 決定2: label の紐付けを外し、proposed な label の proposedCount を減らす。
@@ -3150,7 +3177,9 @@ export class FakeMemoryStore implements MemoryStore {
       if (m.tenantId !== ctx.tenantId) continue;
       if ((m.subjectId ?? null) !== query.subjectId) continue;
       if (m.status !== "active") continue;
-      if (!m.claimKey) continue;
+      // ADR 0563: `subject` か `predicate` の片方しか無い claim key は数えない（`InMemoryMemoryStore` は両方 `null` でないことを、
+      // Postgres は `claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL` を課す）。空文字は `null` ではないので数える。
+      if (!m.claimKey || m.claimKey.subject == null || m.claimKey.predicate == null) continue;
       const predicate = m.claimKey.predicate;
       const createdAtMs = m.createdAt.getTime();
       const existing = latestByPredicate.get(predicate);
@@ -3476,7 +3505,9 @@ export class FakeOutboxStore implements OutboxStore {
       return;
     }
     job.failedAt = fakeCopyDate(opts?.at) ?? new Date(); // ADR 0562: 呼び手の Date を行に入れない
-    job.lastError = error;
+    // ADR 0563: Postgres の `text` は NUL を保存できない（22021）。`PostgresOutboxStore.fail`・`InMemoryOutboxStore.fail` は
+    // 目に見える6文字の `\u0000` へ置き換えて残す。NUL 以外は変えない。
+    job.lastError = error.replaceAll("\u0000", "\\u0000");
   }
 
   /**
@@ -4483,6 +4514,19 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
     return this.backing?.eventRetentionDays ?? this.ownEventRetentionDays;
   }
 
+  /**
+   * ADR 0564（Issue #768）: `tenant_settings` の行が無いテナントに何かを書くと行ができ、`event_retention_days` は
+   * `NULL` ⟹ `unlimited` になる（Postgres の upsert。`InMemoryTenantSettingsStore.ensureRow` と同じ）。この Fake は
+   * 設定ごとに Map を分けているので、書く側が行の代わりにここで保持期間のキーを（無ければ）`null` で立てる。
+   * 既に行（`days`・`unlimited`）があるテナントの保持期間は変えない。検査を通ったあと、書く直前に呼ぶこと
+   * （断られた書き込みは行を作らない）。
+   */
+  private ensureRow(tenantId: string): void {
+    if (!this.eventRetentionDays.has(tenantId)) {
+      this.eventRetentionDays.set(tenantId, null);
+    }
+  }
+
   async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
     assertWellFormedCtx(_ctx);
     return this.halfLifeHours;
@@ -4523,6 +4567,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
+    this.ensureRow(ctx.tenantId);
     this.decayClockByTenant.set(ctx.tenantId, clock);
   }
 
@@ -4572,6 +4617,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
     }
     // ADR 0500（ADR 0479 の引き受けた負債）: 列は float4 なので、読み戻す値は float4 に丸めたものの最短表記
     // （`Math.fround(720.1)` ではなく `720.1`。`16777217` は `16777216`）。
+    this.ensureRow(ctx.tenantId);
     this.halfLifeRecallsByTenant.set(ctx.tenantId, float4Readback(recalls));
   }
 
@@ -4630,6 +4676,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
+    this.ensureRow(ctx.tenantId);
     this.taxonomyModeByTenant.set(ctx.tenantId, mode);
   }
 

@@ -401,6 +401,29 @@ const cases: Case[] = [
         eventFor(e.ids[0]!, "superseded"),
       ),
   },
+  // superseded 以外の status に自分自身を supersededById に付ける（ADR 0558 の歯の穴）。断る文面は
+  // 「must not be set unless status is "superseded"」で、自己置換の文面にならない（Postgres と揃える）。
+  {
+    name: "edge.updateStatus(active + self supersededById lo)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, e.ids[0], "active", { supersededById: e.ids[0] }),
+  },
+  {
+    name: "edge.updateStatus(active + self supersededById UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, e.ids[0], "active", { supersededById: up(e.ids[0]) }),
+  },
+  {
+    name: "edge.updateStatusWithEvent(active + self supersededById UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatusWithEvent(
+        ctx,
+        e.ids[0],
+        "active",
+        { supersededById: up(e.ids[0]) },
+        eventFor(e.ids[0]!, "updated"),
+      ),
+  },
   {
     name: "edge.restoreArchived([lo, UP])",
     pre: arch,

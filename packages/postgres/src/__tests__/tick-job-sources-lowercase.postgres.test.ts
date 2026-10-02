@@ -216,7 +216,8 @@ async function viaTick(be: string, kind: "consolidate" | "reflect", payloadUpper
         if (j.kind === kind) j.payload = { memoryId: String(j.payload.memoryId).toUpperCase() };
     }
   }
-  // ジョブの available_at は壁時計（`RuntimeDeps.clock` の TSDoc の注意、ADR 0526）。runtime の時計を壁時計より先へ進める。
+  // runtime の時計を壁時計より先へ進める。歴史的な理由で残している（ADR 0526 は `RuntimeDeps.clock` の古い TSDoc を
+  // 根拠に「available_at は壁時計」と書いたが、今は available_at も注入した時計に従う。ADR 0559）。
   e.setNow(Date.now() + 60_000);
   const t = await e.rt.tick(ctx, { leaseMs: 1000, kinds: [kind] });
   const evs = await e.st.eventStore.list(ctx, { limit: 1000 });

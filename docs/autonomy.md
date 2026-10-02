@@ -223,7 +223,7 @@ success なら緑になる。⛔ **「required でない check は見なくて�
 関わらず要求し続ける（旧来どおり）——required でない check が `failure` なら `red` になる。
 
 **⭐ 8. `total === 0`（check-runs が0件）の *理由* を、`mergeable_state` で切り分ける**
-（Issue #615・ADR 0281〔仮番号。マージ時に確定〕）。🔴 **これは判定を緩める話ではない**
+（Issue #615・ADR 0281。〔仮番号〕と書いていたが、番号は確定している）。🔴 **これは判定を緩める話ではない**
 ——`total === 0` はこれまでどおり常に `pending` である。変わるのは添えられる**理由の文言**
 だけであり、緑の*根拠*には一切使わない（3番「`mergeStateStatus` を判定に使わない」は
 そのまま——ここで使うのは根拠ではなく「0件の理由」の切り分けである。**この2つを混ぜないこと**
@@ -251,7 +251,7 @@ success なら緑になる。⛔ **「required でない check は見なくて�
 ⚠ **`mergeable_state` と「run が作られない」の対応は n=2 の観測でしか裏づけられていない。**
 経緯・確かめたこと・引き受けた負債・この決定が覆るとしたら何が起きたときかは
 [ADR 0281](./decisions/0281-ci-green-check-empty-check-runs-reason-dirty.md)
-（⚠ ファイル名・番号は仮。マージ時に `adr-renumber.mjs` が確定する）。
+（番号・ファイル名は確定している。以前は「仮。マージ時に `adr-renumber.mjs` が確定する」と書いていた）。
 
 ### 2.1.1 いつ引き直すか（Issue #294）
 
@@ -427,7 +427,7 @@ success なら緑になる。⛔ **「required でない check は見なくて�
 |---|---|---|
 | **ADR 番号の衝突** | 並行 PR が同じ番号を取る。**1つのセッションで3回起きた実績があり**（Issue #295 では2026-09-16に `0146` を4本の PR が同時に主張していた）、`docs/decisions/README.md` が生成物になった後も（ADR 0137）採番そのものは各 PR の作成者が手で選ぶままだった | **最初の1本は `node scripts/adr-renumber.mjs --next` で楽観的に取る**（`origin/main` + 他のリモートブランチ + open な PR の主張を見て、まだ誰も取っていない次の番号を返す）。**確定させるのはこれではない**——`main` へのマージは直列化されているため、**マージする側がマージ直前に PR ブランチ上で `node scripts/adr-renumber.mjs`（引数無し）を走らせる**と、その時点で他の ADR が同時に着地することは構造的に無い。衝突していれば、ファイル名・見出し・このブランチが追加した参照箇所を機械的に付け替える。設計と検討した代替案は ADR 0179 |
 | **`git checkout <file>` で変異を戻す** | **未コミットの編集も一緒に消える。**実際に3ファイル失われた（ADR 0066 測ったこと7） | 変異試験の前に**退避コピー**を取り、そこから戻す |
-| **手元の `pnpm run test` が緑** | **DB 段を実行していない。**`DATABASE_URL` が無いと「実行していません」と告知して緑のまま通る（ADR 0015） | 出力を読むこと。DB 側は CI の3ジョブで見届ける。⭐ **そもそも手元の全体テストは止まる条件ではない**（§2・ADR 0195）——走らせるなら、それは短い輪のためであって、マージの根拠のためではない |
+| **手元の `pnpm run test` が緑** | **DB 段を実行していない。**`DATABASE_URL` が無いと「実行していません」と告知して緑のまま通る（ADR 0015） | 出力を読むこと。DB 側は CI の DB を要するジョブ（`.github/workflows/ci.yml` で `DATABASE_URL` を渡しているもの。本数はここに写さない）で見届ける。⭐ **そもそも手元の全体テストは止まる条件ではない**（§2・ADR 0195）——走らせるなら、それは短い輪のためであって、マージの根拠のためではない |
 | **手元の `pnpm run pack:check` が赤い** | `dist/` に古い `.map` が居残る（`tsc` は `outDir` を掃除しない）。**CI では起きない**——理由は **fresh checkout だから**である（`dist/` は `.gitignore` されており、CI は毎回まっさらな checkout から始まり、**同じ commit のソース**に対して `tsc` を打つ。⟹ 残骸が積み上がる条件＝**異なるソース状態を同じ `outDir` に重ねること**が原理的に生じない。[ADR 0138](./decisions/0138-pack-check-in-ci.md)「決定」3番で実測）。⚠ **この行が書かれた当時は、`pack:check` が `ci.yml` で一度も走っていなかった**（[Issue #241](https://github.com/takecchi/mnemora/issues/241)）——⟹ 当時は「**検査していないから起きない**」という**別の理由でも真**であり、この1行はその2つを書き分けていなかった。**現在は `ci.yml` が毎 PR で `pack:check` を走らせている**（ADR 0138。`.github/workflows/ci.yml` の「publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）」ステップ）⟹ **いま「CI では起きない」が真なのは、fresh checkout という理由だけによる。** | `rm -rf packages/*/dist && pnpm run build` |
 | **擬似 provider の数字を「性能」と読む** | arm A（擬似埋め込み）の **MRR は 0.018**＝実質ランダム（出所は [ADR 0033](./decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) の arm 表の実測。この表の他の行と違い出所が抜けていたので 2026-09-17 に足した） | 想起の質を測るなら `recorded`（ADR 0051）。`deterministic` は配線と契約の検査用 |
 | **`npm view` で publish の成否を判断する** | registry の読み取り側は書き込みに数分遅れ、**CDN を迂回する `?write=true` でも 404 を返す**（ADR 0066 測ったこと8） | `npm publish` の出力で判断する |
