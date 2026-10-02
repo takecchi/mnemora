@@ -927,6 +927,12 @@ export interface MemoryStore {
    * `memory not found for tenant: <supersededById>` の `Error` を投げる（実在しない・別テナント・uuid の形でない、を区別しない）。
    * 対象の `id` が無いとき、`supersededById` が無いとき、`expectedStatus` が違うとき（{@link MemoryStatusConflictError}）は、
    * この順で判定する。
+   *
+   * 🔴 **ADR 0499: purge 済みの Memory（`purgedAt` が非 `null`。`status` は `"forgotten"` のまま）は、どの `expectedStatus`
+   * にも一致しない**として扱い、{@link MemoryStatusConflictError} を投げる（`Runtime.purge` の「不可逆」の約束。以前は
+   * `updateStatus(id, "active", { expectedStatus: "forgotten" })` が墓石を active に戻せた）。`expectedStatus` を渡さない
+   * 呼び出しは、無条件の書き込みのまま（CAS ではないので、purge 済みでも通る。この条件は CAS の約束だけを直す）。
+   * `updateStatusWithEvent`・`supersedeWithNewMemories` の `supersede[].expectedStatus`（弾かれた対象は `conflicted` に載る）も同じ。
    */
   updateStatus(
     ctx: Ctx,
@@ -949,6 +955,8 @@ export interface MemoryStore {
    *   一致しなければ {@link MemoryStatusConflictError} を投げ、**status の更新もイベントの
    *   追記も一切起きない**（両方とも起きないか、両方とも起きるかのどちらかであり、
    *   片方だけ起きることはない）。
+   * - 🔴 ADR 0499: purge 済みの Memory（`purgedAt` が非 `null`）は、どの `expectedStatus` にも一致しない
+   *   （`updateStatus` の doc コメント参照）。{@link MemoryStatusConflictError} を投げ、status もイベントも動かない。
    * - `opts.expectedStatus` を省略すると、`updateStatus` の省略時と同じく status を条件に
    *   せず常に更新し、イベントを追記する。
    * - 対象の Memory がそもそも存在しない場合は、`expectedStatus` の有無に関わらず今日と
@@ -2035,6 +2043,10 @@ export interface MemoryStore {
    *   実装は `RangeError`（メッセージ:
    *   `<実装のクラス名>: first.id and second.id must differ`。例: `PostgresMemoryStore: …`・
    *   `InMemoryMemoryStore: …`）を、書き込みを一切行う前に投げる。
+   * - 🔴 **ADR 0499: `first.status`/`second.status` が型の外（`"active"`・`"superseded"` 以外。`"forgotten"`・
+   *   `"contested"`・`"archived"` など）なら、何も書かずに `RangeError`**（メッセージ:
+   *   `resolveContestedPair: first.status must be "active" or "superseded"`〔`second` も同じ形〕。値は message に入れない）を
+   *   投げる。以前は通って、行をその status にしていた。`first.id === second.id` の検査のあと、id の存在確認より前。
    * - **両側どちらかの id がそのテナントに存在しない場合、`updateStatusWithEvent` と同じ
    *   「memory not found」の `Error` を投げる。**書き込みは一切行われない。
    * - **CAS が破れた場合（存在はするが `status !== 'contested'`、または `contested` では
@@ -2203,6 +2215,10 @@ export interface MemoryStore {
    *   メッセージ: `resolveContestedGroup: members must have at least 3 entries`）。
    * - 🔴 **重複 `id` も programmer error**（`RangeError`。メッセージ:
    *   `resolveContestedGroup: member ids must be unique`）。
+   * - 🔴 **ADR 0499: `members[i].status` が型の外（`"active"`・`"superseded"` 以外）も programmer error**
+   *   （`RangeError`。メッセージ: `resolveContestedGroup: members[<i>].status must be "active" or "superseded"`。
+   *   値は message に入れない）。何も書かない。以前は通って、行をその status にしていた。重複 `id` の検査のあと、
+   *   id の存在確認より前。
    * - **各メンバーが呼び出し時点で `status === 'contested'` であること**（CAS）。
    *   群のメンバーは `contestedWithId` を持たない設計（`markContestedGroup` 契約）
    *   なので、`resolveContestedPair` の「相互参照が成立していること」に相当する検査は
