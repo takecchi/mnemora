@@ -72,8 +72,9 @@ export interface DrainEmbedTicksOptions {
   /**
    * 既定 `true`。`expectedProcessed` を満たさなかったとき、実時計が1ms以上進むのを
    * 待って drain し直す——`packages/core` の既定 `systemClock`(`new Date()`、
-   * `packages/core/src/clock.ts`)を使う呼び出し元向け。`available_at`(Postgres の
-   * `now()`、マイクロ秒精度)と同じ ms 内で claim を試みてしまった取りこぼしを、
+   * `packages/core/src/clock.ts`)を使う呼び出し元向け。かつて `available_at`(Postgres の
+   * `now()`、マイクロ秒精度。いまは runtime が渡す JS の時刻で、ミリ秒。ADR 0559)と
+   * 同じ ms 内で claim を試みてしまった取りこぼしを、
    * 実時刻が先へ進んだ次の drain で拾い直す(`clockPastRecentDbWrites` と同じ理屈を、
    * 「先に +1ms する」のではなく「進むまで待つ」形で満たす)。
    *
@@ -89,10 +90,15 @@ export interface DrainEmbedTicksOptions {
 }
 
 /**
- * 直近に書いた outbox ジョブの `available_at`（Postgres の `now()`、マイクロ秒精度）を
- * **確実に追い越す**、ミリ秒精度の `Date` を返す（Issue #719）。
+ * 直近に書いた outbox ジョブの `available_at` を**確実に追い越す**、ミリ秒精度の `Date` を返す
+ * （Issue #719）。
  *
- * **背景**: `packages/postgres` の `claimBatch`（`outbox-store.ts`）は
+ * ⚠ **歴史的な理由で残している（ADR 0559）。**以下の「背景」は ADR 0355 より前の事実で、
+ * `available_at` が SQL の `now()`（マイクロ秒精度）で書かれていた。いまは runtime が
+ * `clock.now()` 由来の `now`（JS の `Date`、ミリ秒）を store に渡すので、`available_at` も
+ * 注入した時計に従い、この食い違いの機構は無い。関数の中身は変えていない。
+ *
+ * **背景**（当時）: `packages/postgres` の `claimBatch`（`outbox-store.ts`）は
  * `available_at <= opts.now` で claim 可能かを判定する。`available_at` は SQL の
  * `now()` で書かれるためマイクロ秒精度を持つが、`opts.now` は呼び出し側が渡す JS の
  * `Date` であり、**ミリ秒精度——小数点以下は切り捨て（floor）**である。
@@ -145,8 +151,8 @@ export function clockPastRecentDbWrites(nowMs: number = Date.now()): Date {
  * こちら側にある(ADR 0021「採らなかった案」参照)。
  *
  * **Issue #719 の歯**: `processed === 0` は「claim できるジョブがもう無い」ことの
- * 証拠にならない——`available_at`(Postgres `now()`、us精度)と `opts.now`(呼び出し側の
- * `Clock`、ms精度で切り捨て)が同じ ms に収まると、実際にはジョブが残っているのに
+ * 証拠にならない——(当時の事実。ADR 0559)`available_at`(Postgres `now()`、us精度)と
+ * `opts.now`(呼び出し側の `Clock`、ms精度で切り捨て)が同じ ms に収まると、実際にはジョブが残っているのに
  * `processed === 0` になる(`clockPastRecentDbWrites` の docstring 参照)。
  * `options.expectedProcessed` を渡すと、この関数自身がそれを検査する
  * ——渡さない呼び出し元は従来どおり `processed === 0` だけで「干上がった」と判定する

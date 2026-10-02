@@ -85,7 +85,7 @@ async function setup(llmProvider: LLMProvider) {
       embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
     },
     hashContent: (content: string) => `sha256(${content})`,
-    // outbox の available_at は DB の now()。runtime の時計を少し先にして、積んだ直後の tick が claim できるようにする。
+    // runtime の時計を少し先にする。歴史的な理由で残している（今は outbox の available_at も注入した時計に従う。ADR 0559）。
     clock: { now: () => new Date(Date.now() + 1_000) },
   });
   await tenantSettingsStore.setDecayClock(tenantCtx, "activity");

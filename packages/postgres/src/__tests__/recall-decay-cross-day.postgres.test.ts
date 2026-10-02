@@ -35,16 +35,17 @@ import {
  * と同じ形——別パッケージなのでここに複製する）を注入し、実時間を待たずに
  * 「日をまたいだ」「忘却ゲートの既定余裕を跨いだ」状態を作って測る。
  *
- * ⚠ `packages/postgres` の `outbox.available_at` はアプリの `Clock` を読まず、
- * Postgres 側の SQL `now()` で入る（`memory-store.ts` の `INSERT INTO outbox` /
- * `examples/chat/src/mutable-clock.ts` の docstring）。⟹ `runtime.tick()`（embed の消化）は
- * **必ずクロックを実時刻付近に置いた状態で呼ぶ**——過去や未来へ振った直後に
- * `tick()` を呼ぶと `available_at <= opts.now` が成り立たず embed ジョブを claim できない
- * （`outbox-store.ts` の `claimBatch`）。**ローカル Postgres で実際にこの失敗を再現した**
- * （`observe()` の直前に取った `t0` をそのまま `tick()` に渡すと、`observe()` の INSERT が
- * 実際にコミットされる実時刻のほうがわずかに後になり、`available_at > opts.now` で
- * 0件しか claim できなかった）。⟹ このファイルでは `tick()` の**直前**に必ず
- * `clock.set(new Date())` で取り直す（`archive-sweep-cost.ts` と同じ対処）。
+ * ⚠ このファイルが `tick()` の直前に `clock.set(new Date())` で取り直すのは、歴史的な理由で
+ * 残している対処である。ADR 0355 より前は、`packages/postgres` の `outbox.available_at` が
+ * アプリの `Clock` を読まず、Postgres 側の SQL `now()` で入っていた。そのため `tick()`
+ * （embed の消化）は**必ずクロックを実時刻付近に置いた状態で呼ぶ**必要があり、
+ * 過去や未来へ振った直後に呼ぶと `available_at <= opts.now` が成り立たず embed ジョブを
+ * claim できなかった（`outbox-store.ts` の `claimBatch`）。**当時、ローカル Postgres で
+ * 実際にこの失敗を再現した**（`observe()` の直前に取った `t0` をそのまま `tick()` に渡すと、
+ * `observe()` の INSERT が実際にコミットされる実時刻のほうがわずかに後になり、
+ * `available_at > opts.now` で 0件しか claim できなかった）。いまは `available_at` も
+ * 注入した時計に従う（ADR 0559、`examples/chat/src/mutable-clock.ts` の docstring）。
+ * 取り直す処理は `archive-sweep-cost.ts` と同じで、変えていない。
  *
  * ⭐ **実測で分かった、忘却ゲート（`decayGateActive`）と段2のスコア減衰は別物である**
  * （`(乙)` の歯で検算した）。`decayGateActive` は段1・SQL 側の**硬い**除外だが、
@@ -107,12 +108,12 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const memoryId = observed.memoryIds[0]!;
 
     // embed を消化する直前に、クロックを実時刻へ**取り直す**（`t0` のまま使い回さない）。
-    // ⚠ 実測で踏んだ罠: `outbox.available_at` は Postgres 側の SQL `now()` で入るため、
-    // `observe()` の INSERT が実際にコミットされる時刻は `t0` よりわずかに後になる。
-    // `opts.now`（`claimBatch` の `available_at <= opts.now` 判定に使われる）を `t0` の
-    // ままにしておくと `available_at > opts.now` になり、embed ジョブを1件も claim
-    // できない（`tickResult.processed` が 0 のまま）——実際にローカル Postgres でこの
-    // 失敗を再現した。`archive-sweep-cost.ts` が `tick()` の直前に必ず
+    // ⚠ 歴史的な理由で残している（ADR 0559）。ADR 0355 より前に実測で踏んだ罠: `outbox.available_at` が
+    // Postgres 側の SQL `now()` で入っていたため、`observe()` の INSERT が実際にコミットされる時刻は
+    // `t0` よりわずかに後になった。`opts.now`（`claimBatch` の `available_at <= opts.now` 判定に
+    // 使われる）を `t0` のままにしておくと `available_at > opts.now` になり、embed ジョブを1件も
+    // claim できなかった（`tickResult.processed` が 0 のまま）——当時、実際にローカル Postgres で
+    // この失敗を再現した。`archive-sweep-cost.ts` が `tick()` の直前に必ず
     // `clock.set(new Date())` で取り直しているのと同じ理由・同じ対処。
     clock.set(new Date());
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
