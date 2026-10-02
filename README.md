@@ -90,9 +90,11 @@ Phase 1 の範囲と、そこに入れなかったものは [docs/roadmap.md](./
 [docs/decisions/](./docs/decisions/) から辿れる。**
 
 **⚠ 2026-09-29 追記**: 上の「破壊的変更は major を上げる」は、少なくとも1件で実際には
-そうならなかった——`v1.1.0`（minor）に破壊的変更が1件入っている
+そうならなかった——`v1.1.0`（minor）に破壊的変更が入っている
 （[Issue #548](https://github.com/takecchi/mnemora/issues/548) 方向2、
-[ADR 0352](./docs/decisions/0352-association-score-without-total.md)）。根拠は
+[ADR 0352](./docs/decisions/0352-association-score-without-total.md) はそのうちの1件。
+この追記を書いた時点では「1件」と数えていたが、CHANGELOG の「v1.1.0 の記載の訂正」の
+数え直しで複数件と分かっている。`v1.2.0`（minor）にも `### Breaking` がある）。根拠は
 オーナーへの問い（ask_human `6911db12` 問6、2026-09-28）への回答——逐語
 「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」。⟹ **この一文は
 「`v1.0.0` 以降、破壊的変更は必ず major を上げる」という無条件の規律ではない**——
