@@ -17,6 +17,7 @@
     "correction": "tsx src/cli.ts correction",
     "retrieval": "tsx src/cli.ts retrieval",
     "retrieval-rank-listing": "tsx src/scripts/retrieval-rank-listing.ts",
+    "language-mismatch-measure": "tsx src/scripts/language-mismatch-false-positive-measure.ts",
     "time-term": "tsx src/cli.ts time-term",
     "validity": "tsx src/cli.ts validity",
     "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
