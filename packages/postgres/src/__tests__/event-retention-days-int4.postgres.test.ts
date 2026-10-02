@@ -12,7 +12,8 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  */
 
 const ctx: Ctx = { tenantId: "event-retention-int4" };
-const OVER = /^setEventRetention: days does not fit in a Postgres "integer" \(int4\) column \(got \d+\)$/;
+const OVER =
+  /^setEventRetention: days does not fit in a Postgres "integer" \(int4\) column \(got \d+\)$/;
 
 const KITS: Array<[string, () => Promise<TenantSettingsStore>]> = [
   ["testkit の InMemory", async () => new InMemoryTenantSettingsStore()],

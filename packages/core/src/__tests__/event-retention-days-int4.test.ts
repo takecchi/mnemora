@@ -26,7 +26,9 @@ describe("assertValidEventRetentionDays（ADR 0499）", () => {
   it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
     "%d は、今までの文面（正の整数でない）で断る",
     (days) => {
-      expect(() => assertValidEventRetentionDays(days)).toThrow(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
+      expect(() => assertValidEventRetentionDays(days)).toThrow(
+        EVENT_RETENTION_DAYS_INVALID_MESSAGE,
+      );
     },
   );
 });

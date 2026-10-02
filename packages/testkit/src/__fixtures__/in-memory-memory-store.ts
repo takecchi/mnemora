@@ -75,7 +75,6 @@ import {
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
 
-
 /**
  * ADR 0499（ADR 0447 の材料）: `expectedStatus` を渡された status 更新の CAS が破れるか。**purge 済みの行（`purgedAt` が
  * 非 null。`status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない**（`PostgresMemoryStore` の
@@ -2999,7 +2998,9 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new RangeError("resolveContestedGroup: member ids must be unique");
     }
     // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
-    members.forEach((m, i) => assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status));
+    members.forEach((m, i) =>
+      assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
+    );
 
     const memories = members.map((m) => {
       const memory = this.rawGet(ctx, m.id);
