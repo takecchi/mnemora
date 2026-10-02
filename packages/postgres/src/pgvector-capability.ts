@@ -149,7 +149,7 @@ export function assertPgvectorCapabilityRow(row: PgvectorCapabilityRow | undefin
  * `migrate.ts`（`runMigrations` の `create`/`verify` 両モード）専用。
  *
  * `vector-store.ts` は drizzle 経由（`db.execute`）で同じクエリ文字列を発行するため、
- * こちらのヘルパーは使わない（`PostgresVectorStore` 内の `assertPgvectorCapability` 参照）
+ * こちらのヘルパーは使わない（`vector-store.ts` の `PgvectorCapabilityGate` 参照）
  * ——`.query`/`.execute` のインターフェースの違いを、この2つの薄い呼び出し元にだけ
  * 閉じ込め、判定ロジック（{@link assertPgvectorCapabilityRow}）と SQL 文
  * （{@link PGVECTOR_CAPABILITY_QUERY}）は完全に共有する。

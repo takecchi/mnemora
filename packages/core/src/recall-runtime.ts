@@ -113,7 +113,7 @@ export interface RecallRuntimeDeps {
    * `RuntimeDeps.tenantSettingsStore`（`getDefaultHalfLifeHours` 用に必須）を持っており、
    * `recall` の配線（`runtime.ts` の `recall` 関数）がそれをここへそのまま渡す。
    *
-   * **省略可能**（ADR 0165 決めたこと13）。`createRecallRuntime` を直接呼ぶ外部の
+   * **省略可能**（ADR 0165 決めたこと13）。`runRecall` を直接呼ぶ外部の
    * 呼び出し側を壊さないため——省略すると `decay_clock` は `'wall'` 固定として動く
    * （＝本 ADR 以前とまったく同じ挙動）。
    */
