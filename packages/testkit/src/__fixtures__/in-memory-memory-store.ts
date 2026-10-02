@@ -75,6 +75,29 @@ import {
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
 
+
+/**
+ * ADR 0499（ADR 0447 の材料）: `expectedStatus` を渡された status 更新の CAS が破れるか。**purge 済みの行（`purgedAt` が
+ * 非 null。`status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない**（`PostgresMemoryStore` の
+ * `expectedStatusCondition` と同じ。`Runtime.purge` の「不可逆」の約束）。
+ */
+function casMismatch(
+  memory: { status: MemoryStatus; purgedAt?: Date | null | undefined },
+  expectedStatus: MemoryStatus,
+): boolean {
+  return memory.status !== expectedStatus || (memory.purgedAt ?? null) !== null;
+}
+
+/**
+ * ADR 0499（ADR 0450 の材料）: `resolveContestedPair`・`resolveContestedGroup` の `status` は型が `"active" | "superseded"`。
+ * 型の外の値は、書く前に `RangeError` で断る（`PostgresMemoryStore` と同じ文面。値は message に入れない）。
+ */
+function assertResolvedStatus(method: string, field: string, status: unknown): void {
+  if (status !== "active" && status !== "superseded") {
+    throw new RangeError(`${method}: ${field}.status must be "active" or "superseded"`);
+  }
+}
+
 /**
  * Issue #1108: `MemoryStore` の口が返す値（Memory と、それを含む返り値のオブジェクト）を、
  * **返す時点の複製**にする。以前は内部に持っている Memory の実体そのものを返していたため、
@@ -1248,7 +1271,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ならない（`memories.superseded_by_id → memories(id)`）。ADR 0439: `ctx` のテナントの Memory であること。
     // 検査の順は `PostgresMemoryStore` と同じ（対象の行、`supersededById`、`expectedStatus`）。
     this.assertOwnMemoryRef(ctx, opts?.supersededById);
-    if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+    if (opts?.expectedStatus !== undefined && casMismatch(memory, opts.expectedStatus)) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
     assertStorableMemoryColumn("status", status);
@@ -1286,7 +1309,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // 外部キー相当（ADR 0047）・ADR 0439: updateStatus と同じ理由・同じ検査・同じ順。
     this.assertOwnMemoryRef(ctx, opts.supersededById);
-    if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+    if (opts.expectedStatus !== undefined && casMismatch(memory, opts.expectedStatus)) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
     assertStorableMemoryColumn("status", status);
@@ -1407,10 +1430,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     const wouldConflict: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
     const willSupersede = new Set<MemoryId>();
     for (const target of supersede) {
-      const status = willSupersede.has(target.id)
-        ? "superseded"
-        : this.memories.get(target.id)!.status;
-      if (target.expectedStatus !== undefined && status !== target.expectedStatus) {
+      const row = this.memories.get(target.id)!;
+      const status = willSupersede.has(target.id) ? "superseded" : row.status;
+      if (
+        target.expectedStatus !== undefined &&
+        (status !== target.expectedStatus || (row.purgedAt ?? null) !== null)
+      ) {
         wouldConflict.push({ id: target.id, observedStatus: status });
         continue;
       }
@@ -1479,7 +1504,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       // 1. で存在を確認済み。news の作成（2.）は既存 Memory の status を変えないため、
       // ここで読む status は 1. の検証時点から変わっていない（同期区間、await 無し）。
       const memory = this.memories.get(target.id)!;
-      if (target.expectedStatus !== undefined && memory.status !== target.expectedStatus) {
+      if (target.expectedStatus !== undefined && casMismatch(memory, target.expectedStatus)) {
         conflicted.push({ id: target.id, observedStatus: memory.status });
         continue;
       }
@@ -2726,6 +2751,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (first.id === second.id) {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
+    // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
+    assertResolvedStatus("resolveContestedPair", "first", first.status);
+    assertResolvedStatus("resolveContestedPair", "second", second.status);
 
     const firstMemory = this.rawGet(ctx, first.id);
     if (!firstMemory) {
@@ -2926,6 +2954,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (new Set(ids).size !== ids.length) {
       throw new RangeError("resolveContestedGroup: member ids must be unique");
     }
+    // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
+    members.forEach((m, i) => assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status));
 
     const memories = members.map((m) => {
       const memory = this.rawGet(ctx, m.id);

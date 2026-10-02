@@ -345,6 +345,30 @@ async function assertEventTargetInTenant(
 }
 
 /**
+ * ADR 0499（ADR 0447 の材料）: `expectedStatus` を渡された status 更新の CAS 条件。**purge 済みの行（`purged_at` が入った行。
+ * `status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない**——`Runtime.purge` の「不可逆」の約束どおり、
+ * 墓石を `updateStatusWithEvent(T, "active", { expectedStatus: "forgotten" })` が active へ戻せない（以前は `purged_at` を
+ * 見ず、戻せた）。0行になった理由の切り分け（`explainEmptyStatusUpdate`）は、通常の CAS 違反と同じ `MemoryStatusConflictError`
+ * にする。`expectedStatus` を渡さない更新は、無条件の書き込みのまま（CAS ではないので、この条件は付けない）。
+ */
+function expectedStatusCondition(expectedStatus: MemoryStatus | undefined): SQL {
+  return expectedStatus !== undefined
+    ? sql`AND status = ${expectedStatus} AND purged_at IS NULL`
+    : sql``;
+}
+
+/**
+ * ADR 0499（ADR 0450 の材料）: `resolveContestedPair`・`resolveContestedGroup` の `status` は型が `"active" | "superseded"`。
+ * 型の外の値（`"forgotten"`・`"contested"`・`"archived"` など）は、以前は通って行をその status にしていた。
+ * 書く前に `RangeError` で断る（値は message に入れない）。
+ */
+function assertResolvedStatus(method: string, field: string, status: unknown): void {
+  if (status !== "active" && status !== "superseded") {
+    throw new RangeError(`${method}: ${field}.status must be "active" or "superseded"`);
+  }
+}
+
+/**
  * `UPDATE memories SET superseded_by_id = …` が0行だったときの切り分け（ADR 0439）。対象の行が無い・`supersededById` が
  * `ctx` のテナントの記憶でない・`expectedStatus` が違う、の3つを、この順で別々の例外にする。
  */
@@ -1168,8 +1192,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの記憶を指すこと。形が壊れていれば DB へ投げる前に弾く。
     const supersededById = checkedRef("memory", opts?.supersededById);
     const expectedStatus = opts?.expectedStatus;
-    const statusCondition =
-      expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+    const statusCondition = expectedStatusCondition(expectedStatus);
     const result = await this.db.execute(sql`
       UPDATE memories
       SET status = ${status},
@@ -1226,8 +1249,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // ADR 0439: `updateStatus` と同じ（`supersededById` は `ctx` のテナントの記憶を指すこと）。
     const supersededById = checkedRef("memory", opts.supersededById);
     const expectedStatus = opts.expectedStatus;
-    const statusCondition =
-      expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+    const statusCondition = expectedStatusCondition(expectedStatus);
 
     return this.db.transaction(async (tx) => {
       const result = await tx.execute(sql`
@@ -1441,8 +1463,7 @@ export class PostgresMemoryStore implements MemoryStore {
           throw new Error(`PostgresMemoryStore: memory not found for tenant: ${target.id}`);
         }
         const expectedStatus = target.expectedStatus;
-        const statusCondition =
-          expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+        const statusCondition = expectedStatusCondition(expectedStatus);
 
         const anchorId = created[target.supersededByIndex]!.memory.id;
         const result = await tx.execute(sql`
@@ -3634,6 +3655,9 @@ export class PostgresMemoryStore implements MemoryStore {
     if (first.id === second.id) {
       throw new RangeError("PostgresMemoryStore: first.id and second.id must differ");
     }
+    // ADR 0499: 型の外の status は、書く前に断る。
+    assertResolvedStatus("resolveContestedPair", "first", first.status);
+    assertResolvedStatus("resolveContestedPair", "second", second.status);
     if (!isUuidLike(first.id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
     }
@@ -3996,6 +4020,8 @@ export class PostgresMemoryStore implements MemoryStore {
     if (new Set(ids).size !== ids.length) {
       throw new RangeError("resolveContestedGroup: member ids must be unique");
     }
+    // ADR 0499: 型の外の status は、書く前に断る。
+    normalized.forEach((m, i) => assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status));
     for (const id of ids) {
       if (!isUuidLike(id)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
