@@ -285,4 +285,44 @@ describe("purgeMemory・scrubPurged の UPDATE labels FROM counted の更新順�
     ]);
     expect(failureCodes(results)).toEqual([]);
   }, 60_000);
+
+  it("purgeMemory の先取りは無関係なラベルを塞がない（やりすぎ防止）: purge の間に別の語彙の作成が待たされない", async () => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const ctx: Ctx = { tenantId: "adr0511-purge-unrelated" };
+    const old = await seedForgottenWithAllLabels(store, ctx);
+    await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "unrelated-seed",
+        content: "unrelated-seed",
+        tags: ["z00001"],
+      }),
+    );
+    await installSleepTrigger();
+    // purge は 6 行 x 0.2 秒眠る（1 秒超）。無関係な語彙（purge の対象外の既存ラベル）の作成は、
+    // その間に待たされず、purge が眠っている間に終わる。
+    const purge = store.purgeMemory(
+      ctx,
+      old.id,
+      { content: "[p]", digest: "[p]" },
+      buildNewMemoryEventFixture({ tenantId: ctx.tenantId, memoryId: old.id, kind: "purged" }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const started = Date.now();
+    await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "unrelated",
+        content: "unrelated",
+        tags: ["z00002"],
+      }),
+    );
+    const elapsedMs = Date.now() - started;
+    await purge;
+    // 眠るトリガは z00002 の更新でも 0.2 秒眠るので、待たされなければ 0.2 秒台で終わる。
+    expect(elapsedMs).toBeLessThan(700);
+  }, 60_000);
 });

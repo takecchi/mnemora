@@ -519,7 +519,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0505](./0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md) | fixture の `S_x` の bigint 溢れ（`archiveDecayed`・`aggregateScope`・`VectorStore.search`）、Observation・Recall の NUL を名指しで断る、`EventStore.append`・`LexicalStore.search` の例外から params を落とす | 採用 (2026-10) |
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0507](./0507-language-mismatch-observation-counted-once-per-observation.md) | 言語の事後検査（ADR 0391）の観測側の数えを、観測ごとに1回へ畳む（判定は変えない） | 採用 (2026-10) |
-| [0511](./0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md) | 記憶をまたぐ `upsertProposedLabels` の順と、purge/scrub の `UPDATE labels … FROM counted` の更新順が、並行する書き込みと 40P01 になる（ADR 0476 の負債1・2）。再現と直し方の草案 | **未決 (2026-10)** |
+| [0511](./0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md) | 記憶をまたぐ `upsertProposedLabels` の順と、purge/scrub の `UPDATE labels … FROM counted` の更新順が、並行する書き込みと 40P01 になる（ADR 0476 の負債1・2）。再現と直し | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
