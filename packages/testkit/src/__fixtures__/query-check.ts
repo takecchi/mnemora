@@ -17,6 +17,34 @@ export function assertQueryDate(
 }
 
 /**
+ * Postgres の `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。これより前の日時は、Postgres では
+ * 値が渡された時点で `22008 timestamp out of range` になる（`packages/postgres/src/memory-store.ts` の同名の定数と同じ値）。
+ */
+export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
+
+/**
+ * `assertQueryDate` に、`timestamptz` の下限（ADR 0500）を足したもの。Postgres が日時を `timestamptz` として **クエリに渡す口**
+ * （検索・集約・claim key の条件、`opts.now`・`opts.at` など）で使う。下限より前（紀元前4713年11月24日より前）は、Postgres では
+ * `22008` になる。
+ *
+ * ⚠ **全部の口で使うわけではない。**`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
+ * Postgres が下限より前を「対象 0 件」として返す（問い合わせない）ので、`assertQueryDate`（`NaN` だけ）のまま。
+ * 口ごとの実測の表は ADR 0500。
+ */
+export function assertQueryTimestamptz(
+  method: string,
+  field: string,
+  value: Date | null | undefined,
+): void {
+  assertQueryDate(method, field, value);
+  if (value != null && value.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+    throw new RangeError(
+      `${method}: ${field} must not be earlier than 4714-11-24 BC (the lower bound of a Postgres timestamptz)`,
+    );
+  }
+}
+
+/**
  * 読みの口の条件の通し番号（活動時計の `activity_seq` など）が、Postgres の `bigint` へ変換できる整数かを確かめる。
  * `1.5`・`NaN`・`Infinity` は、Postgres ではクエリの時点で `22P02` になる。省略は検査しない。
  */
@@ -38,6 +66,23 @@ export function assertQueryInteger(
 export function assertQueryTextWithoutNul(method: string, field: string, value: string): void {
   if (value.includes("\u0000")) {
     throw new Error(`${method}: ${field} must not contain NUL characters (U+0000)`);
+  }
+}
+
+/**
+ * 読みの口の `labels`（`text[]` の引数）の要素に NUL が入っていないかを確かめる（ADR 0456 H3、ADR 0500）。Postgres は
+ * `invalid byte sequence for encoding "UTF8": 0x00` で、クエリの時点で拒む。`assertQueryTextWithoutNul` と同じ文面にする。
+ * 省略（`undefined`/`null`）は検査しない。文字列でない要素（型を外した呼び出し）は見ない。
+ */
+export function assertQueryLabelsWithoutNul(
+  method: string,
+  field: string,
+  labels: readonly unknown[] | null | undefined,
+): void {
+  for (const label of labels ?? []) {
+    if (stringHasNul(label)) {
+      throw new Error(`${method}: ${field} must not contain NUL characters (U+0000)`);
+    }
   }
 }
 

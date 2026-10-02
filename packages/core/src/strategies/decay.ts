@@ -79,8 +79,24 @@ export function decayFactor(elapsed: number, halfLife: number): number {
  * `strength <= threshold`（既に閾値以下）のときは `0` を返す——`floorAt`（時刻側・活動時計側の両方）で
  * 「base をそのまま返す」という既存の分岐（`strength <= threshold` → 経過していない）に
  * 対応する、オフセット版の表現。
+ *
+ * **入力の検査（ADR 0496）**: `threshold` が有限かつ `0` 超でない、`strength`・`halfLife` が有限かつ `0` 以上でない、
+ * のどれかなら `RangeError`（以前は `NaN`・`Infinity`・負がそのまま式に入り、`NaN` なら `floorAt` が Invalid Date を返した）。
+ * `floorAt`（壁時計・活動時計の両方）はこの関数を通るので、同じ検査が掛かる。message に入力値は入れない。
+ * ⚠ **`strength`・`halfLife` の `0` は断らない**——`halfLife: 0` は「壊れた」記憶を作るテストの fixture が使っており
+ * （`FakeMemoryStore` などは `halfLifeHours: 0` を受ける）、戻り値は `0`（有限）で、壊れた値を作らない。`(0, ∞)` の値域
+ * （ADR 0125）まで締めるかは決めていない。上限（`MAX_STRENGTH`）も検査しない。
  */
 export function decayFloorOffset(strength: number, halfLife: number, threshold: number): number {
+  if (!Number.isFinite(threshold) || threshold <= 0) {
+    throw new RangeError("decayFloorOffset: threshold must be a finite number greater than 0");
+  }
+  if (!Number.isFinite(strength) || strength < 0) {
+    throw new RangeError("decayFloorOffset: strength must be a finite number, 0 or greater");
+  }
+  if (!Number.isFinite(halfLife) || halfLife < 0) {
+    throw new RangeError("decayFloorOffset: halfLife must be a finite number, 0 or greater");
+  }
   if (strength <= threshold) {
     return 0;
   }
