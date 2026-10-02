@@ -98,7 +98,7 @@ export interface CreateBullmqTickDriverOptions {
   /**
    * BullMQ の queue 名。同じ queue を複数プロセスで共有してよい（上の doc 参照）。
    *
-   * ⚠ ADR 0477: **driver は検査せず BullMQ に渡す。** 空文字と `:` を含む名前は、BullMQ が
+   * ⚠ ADR 0477: **driver はこの値を検査せず BullMQ に渡す。** 空文字と `:` を含む名前は、BullMQ が
    * `createBullmqTickDriver(...)` の中で同期的に投げる（`Queue name must be provided`・`Queue name cannot contain :`。
    * 投げる前に Redis へは繋がない）。空白だけ・日本語・300 文字の名前は動く（【実測】redis-server 7.4.7・bullmq 6.3.8）。
    */
@@ -111,13 +111,11 @@ export interface CreateBullmqTickDriverOptions {
   /**
    * 発火間隔（ミリ秒）。BullMQ の `repeat.every` にそのまま渡す。
    *
-   * ⚠ ADR 0477: **driver は検査しない。正の整数（ミリ秒）を渡すこと。** それ以外は BullMQ 任せで、
-   * 【実測】（redis-server 7.4.7・bullmq 6.3.8）`0`・`NaN`・`null` は `start()` が
-   * `Either .pattern or .every options must be defined…` で reject、`Infinity` は Lua の
-   * `Cannot serialise number…` で reject する。**一方、負の値・`1` 未満の小数・`1e21` は `start()` が成功し、
-   * tick が数回（1e21 は1回）で黙って止まる**（`onTickError` にも届かない）。`1` 超の小数は切り捨てた間隔で動く
-   * （`1.5` は `1` ms）。数値の文字列（`"50"`）は動く。止まった scheduler は Redis に残り、正しい `everyMs` の
-   * driver が `start()` すると上書きされて直る。数字は ADR 0477。
+   * ⚠ ADR 0498: **構築時に検査し、数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下でなければ
+   * `createBullmqTickDriver(...)` が投げる**（`Queue`・`Worker` は作らない）。小数（`1.5`）は通る（BullMQ が
+   * 切り捨てた間隔で動く）。数値の文字列（`"50"`）は断る。以前は検査せず、【実測】（ADR 0477。redis-server 7.4.7・
+   * bullmq 6.3.8）負の値・`1` 未満の小数・`1e21` では `start()` が成功したまま tick が数回で黙って止まった
+   * （`onTickError` にも届かない）ので、その入力を構築時に断る。
    */
   everyMs: number;
   /**
@@ -129,9 +127,9 @@ export interface CreateBullmqTickDriverOptions {
   /**
    * 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。
    *
-   * ⚠ ADR 0477: **driver は検査しない。空文字を渡さないこと。** 空文字は `??` で既定に倒れず、そのまま scheduler の id に
-   * なる。【実測】（redis-server 7.4.7・bullmq 6.3.8）`start()` は成功するが、tick は1回で黙って止まる。`:` を含む名前
-   * （`a:b`・`repeat:x`）・空白・日本語・300 文字は動く。
+   * ⚠ ADR 0498: **省略（`undefined`）なら既定。渡すなら空でない文字列でなければ、構築時に投げる。** 以前は空文字が
+   * `??` で既定に倒れずそのまま scheduler の id になり、【実測】（ADR 0477）`start()` が成功したまま tick が
+   * 1回で黙って止まった。`:` を含む名前・空白・日本語・300 文字は動くので断らない。
    */
   jobName?: string | undefined;
   /**
@@ -229,8 +227,40 @@ export function resolveConcurrency(concurrency?: number): number {
   return concurrency;
 }
 
+/**
+ * `everyMs` の入力を検証する（ADR 0498）。数値で、有限で、`1` 以上、`Number.MAX_SAFE_INTEGER` 以下。
+ * 小数は通す（`1.5` は BullMQ が切り捨てて動く。ADR 0477）。負・`1` 未満・`1e21` 以上は、検査しないと
+ * `start()` が成功したまま tick が黙って止まる。
+ */
+function assertEveryMs(everyMs: unknown): asserts everyMs is number {
+  if (
+    typeof everyMs !== "number" ||
+    !Number.isFinite(everyMs) ||
+    everyMs < 1 ||
+    everyMs > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new Error(
+      `createBullmqTickDriver: everyMs must be a finite number between 1 and Number.MAX_SAFE_INTEGER (milliseconds), got ${String(everyMs)}`,
+    );
+  }
+}
+
+/** `jobName` の入力を検証して既定値を補う（ADR 0498）。省略（`undefined`）は既定、渡すなら空でない文字列。 */
+function resolveJobName(jobName: unknown): string {
+  if (jobName === undefined) {
+    return DEFAULT_JOB_NAME;
+  }
+  if (typeof jobName !== "string" || jobName.length === 0) {
+    throw new Error(
+      `createBullmqTickDriver: jobName must be a non-empty string when given, got ${String(jobName)}`,
+    );
+  }
+  return jobName;
+}
+
 export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): BullmqTickDriver {
-  const jobName = opts.jobName ?? DEFAULT_JOB_NAME;
+  assertEveryMs(opts.everyMs);
+  const jobName = resolveJobName(opts.jobName);
   const concurrency = resolveConcurrency(opts.concurrency);
 
   const queue = new Queue(opts.queueName, { connection: opts.connection });

@@ -1081,6 +1081,17 @@ export interface MemoryStore {
    *   段1の索引・段5の集計はいずれも `forgotten` の `decayFloorAt`/`decayBaseSeq` を
    *   読まないため、**`recall()` の結果には影響しない**——値が見えるのは `get()` で
    *   直接読んだときだけ（監査・エクスポート時のノイズ）。
+   * - **purged**（`forget` → `purge` 済み。`status` は `forgotten` のまま、`purgedAt` が入り、
+   *   `content` はトゥームストーン）: `forgotten` と同じ形で、`reinforce`・`reinforceMany`・
+   *   `recordUsageAndReinforce`・`Runtime.observe({ kind: 'memory_usage' })` のどの口でも
+   *   `lastReinforcedAt`（と `decayFloorAt`）が書き換わる。`status`・`purgedAt`・`content` は
+   *   動かず、`memory_events` も書かない。`forgotten` と同じ理由で **`recall()` の結果には
+   *   影響しない**（`get()` で直接読んだときだけ見える）。弾く・拒否する経路は無い
+   *   （[ADR 0453](../../../../docs/decisions/0453-embed-job-and-reinforce-state-matrix-round27.md)
+   *   負債3で実測。`PostgresMemoryStore` の歯は
+   *   `packages/postgres/src/__tests__/reinforce-purged-memory.postgres.test.ts`、
+   *   [ADR 0501](../../../../docs/decisions/0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md)。
+   *   InMemory 側は測っていない）。
    *
    * `reinforce` の対象を `active`/`contested` に絞るかどうかは、Issue #840 と ADR 0303
    * 追記節で扱った——**この doc の時点では絞っていない**。呼び出し側が
