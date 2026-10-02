@@ -566,5 +566,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0558](./0558-inmemory-self-supersede-check-folds-both-sides.md) | testkit の InMemory の自己置換の検査は、`supersededById` と対象の id の両側を畳んで比べる | 採用 (2026-10) |
 | [0559](./0559-clock-reaches-outbox-available-at.md) | 注入した時計は outbox の `available_at` と監査ログの `at` に届く——古い「届かない」「DB の `now()` で書かれる」記述を、いまの実装に合わせて直す（コメントと doc だけ） | 採用 (2026-10) |
 | [0560](./0560-doc-code-drift-sweep-readmes.md) | 文書とコードのずれを横に掃く（第8弾）— README 4つ（ルート・core・openai・local-embedding）を、今の main の実装に照らす | 採用 (2026-10) |
+| [0566](./0566-fake-outbox-opts-now-controls.md) | ADR 0555 の歯の穴を塞ぐ——Fake の outbox 行の時刻を「やりすぎ」「外す」側からも縛り、0555 の文面のずれを訂正する | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
