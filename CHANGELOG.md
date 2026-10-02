@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`created` イベントの `meta.languageMismatch`（ADR 0391）の判定が、ローマ数字（`Ⅳ` など）を「ラテン文字」に数えていたのを、文字（`\p{L}`）だけを数えるように直した。**`contentLatinShare` が1を超える値（例: 2.5）になり、20字の下限もローマ数字ですり抜けていた。閾値と `rule` は変えていない。変わるのはローマ数字を含む本文・観測の判定だけで、保存済みの印は書き換えない（[PR #1597](https://github.com/takecchi/mnemora/pull/1597)）。
+
 - **`Runtime.findCorrectionCandidates` の `excludeMemoryIds` が、大文字の uuid でも除外するようになった（`@mnemora/postgres` は小文字で返すので、大文字で渡した自己除外が黙って効かなかった）。反復できない値を渡したときは、`recall()` を呼ぶ前に `TypeError` になる（以前は recall の記録を1件書いた後に落ちた）。**（[ADR 0485](./docs/decisions/0485-find-correction-candidates-exclude-ids.md)）
 
 - **`@mnemora/postgres`: 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作ると `deadlock detected`（40P01）で片方が落ちたのを直した。**`upsertProposedLabels` が `labels` の行を触る順を、`tags` の並びではなく名前の順に固定した。`Memory.tags` の並び・重複と `proposedCount` は変わらない（[ADR 0476](./docs/decisions/0476-label-upsert-lock-order-and-taxonomy-probes.md)）
@@ -689,6 +691,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/core`: `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値は検査も変換もされない、という今の振る舞いを TSDoc に書き、歯で縛った。実装は変えていない**（[ADR 0489](./docs/decisions/0489-embedding-input-hook-return-values.md)、穴探し58巡目）
   - 空文字・NUL・孤立サロゲート・巨大な文字列、型の外の値（`undefined`・数・オブジェクト・`null`）も、そのまま `embed()` に渡る。落ちれば `embeddingStatus: 'failed'`、受け入れれば `'ready'`。`reembed()` の後の `tick` でフックはもう一度呼ばれる。静かな破損も、TSDoc の約束との食い違いも見つからなかった。
+  - 非破壊と数える（文書と歯だけ）。
+
+- **`@mnemora/core`: `detectContested` の TSDoc に、別々の observation に分かれた、相対的な期間（去年／今年）だけが違う正しい 2 主張も contested になる、という今の限界を書き、歯で縛った。実装・プロンプトは変えていない**（[ADR 0491](./docs/decisions/0491-claim-key-relative-period-across-observations.md)、Issue #1436）
+  - 相対的な期間は `validFrom`/`validUntil` に入らないので、有効期間の重なり判定が「重なる」と答える。同じ発話の兄弟は ADR 0377 で除かれるが、別 observation は除かれない。呼び出し側は `observe()` に期間を明示すれば、重ならない対は contested にならない。直し方（抽出で期間を入れる／claim key のプロンプトで別の predicate にする）は既定の経路の文言を変えるのでオーナーの判断待ち。
   - 非破壊と数える（文書と歯だけ）。
 
 ---
