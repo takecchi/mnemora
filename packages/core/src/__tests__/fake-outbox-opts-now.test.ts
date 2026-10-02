@@ -287,3 +287,35 @@ describe("FakeMemoryStore: opts を受けた検査（ADR 0434・0493・0555）",
     expect(outboxStore.listJobs(ctx)).toEqual([]);
   });
 });
+
+// testkit の適合テスト（`memory-store-conformance.ts` の「createObservationWithOutbox / createMemoryWithOutbox は
+// opts.now を渡すと、outbox 行の availableAt・createdAt にその値を使う」）は、*戻り値の* `jobs` を見る。
+// Fake は適合テストを通らない（Issue #768）ので、同じ形を戻り値で当てる（上の歯は `listJobs` を見る）。
+describe("FakeMemoryStore: 戻り値の jobs も opts.now を使う（適合テストの opts.now のケースに相当。ADR 0555）", () => {
+  it("createObservationWithOutbox の戻り値の jobs", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const { jobs } = await memoryStore.createObservationWithOutbox(
+      ctx,
+      {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: "ext-1",
+        kind: "utterance",
+        payload: {},
+      },
+      ["extract"],
+      { now: PAST },
+    );
+    expect(jobs[0]?.availableAt).toEqual(PAST);
+    expect(jobs[0]?.createdAt).toEqual(PAST);
+  });
+
+  it("createMemoryWithOutbox の戻り値の jobs", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const { jobs } = await memoryStore.createMemoryWithOutbox(ctx, newMemory(), ["embed"], {
+      now: PAST,
+    });
+    expect(jobs[0]?.availableAt).toEqual(PAST);
+    expect(jobs[0]?.createdAt).toEqual(PAST);
+  });
+});
