@@ -62,7 +62,12 @@ import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { translateClaimKeyIndexLimit } from "./claim-key-index-limit.js";
-import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
+import {
+  assertNoNul,
+  assertNoNulInNewMemory,
+  assertNoNulInNewMemoryEvent,
+  assertNoNulInScopeFilter,
+} from "./input-check.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
@@ -221,6 +226,7 @@ async function insertCreatedEventRow(
   // ADR 0456: イベントが指す記憶が、今作った行でなければ（呼び出し側の `buildCreatedEvent` が別の id を返したとき）、
   // `ctx` のテナントの行かを確かめる。
   await assertEventTargetInTenant(tx, ctx, event.memoryId, [createdMemoryId]);
+  assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
   await tx.execute(sql`
     INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
     VALUES (
@@ -487,6 +493,8 @@ async function insertMemoryEventsBatch(
       }
     }
   }
+  // ADR 0499: NUL は DB の生の例外でなく、名指しの例外で断る（イベントを書く文の直前）。
+  events.forEach((e) => assertNoNulInNewMemoryEvent("PostgresMemoryStore", e));
   const eventIds = events.map(() => randomUUID());
   // 1つの JSON 配列（jsonb）で渡し、`jsonb_to_recordset` で列へ開く。`meta` は群の大きさに比例して
   // 大きくなりうる（多者間の検出は全メンバーの id を載せる）ので、列ごとの `text[]` に JSON 文字列を
@@ -732,7 +740,7 @@ export class PostgresMemoryStore implements MemoryStore {
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
-    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
+    assertNoNulInNewMemory("PostgresMemoryStore", input);
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
@@ -796,7 +804,7 @@ export class PostgresMemoryStore implements MemoryStore {
     method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents",
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
-    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
+    assertNoNulInNewMemory("PostgresMemoryStore", input);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const insertedRow = await insertMemoryRow(tx, ctx, input, method);
@@ -1240,6 +1248,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
 
       await assertEventTargetInTenant(tx, ctx, event.memoryId, [id]);
+      assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -1342,7 +1351,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
       // 穴 O-6-3（ADR 0424）: contentHash の NUL も、トランザクションを開く前に落とす。
-      assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
+      assertNoNulInNewMemory("PostgresMemoryStore", input);
     }
 
     const result = await this.db.transaction(async (tx) => {
@@ -1461,6 +1470,7 @@ export class PostgresMemoryStore implements MemoryStore {
         }
 
         await assertEventTargetInTenant(tx, ctx, target.event.memoryId, [target.id]);
+        assertNoNulInNewMemoryEvent("PostgresMemoryStore", target.event);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3078,6 +3088,9 @@ export class PostgresMemoryStore implements MemoryStore {
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
+    // ADR 0499: 墓石の NUL は、UPDATE（対象の状態によらず、パラメータの時点で DB が拒む）の前に名指しで断る。
+    assertNoNul("PostgresMemoryStore", "tombstone.content", tombstone.content);
+    assertNoNul("PostgresMemoryStore", "tombstone.digest", tombstone.digest);
 
     // Issue #1237: `purged_at` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
     // 2回読んで別の値になることがないよう、ここで一度だけ決める。
@@ -3118,6 +3131,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
 
       await assertEventTargetInTenant(tx, ctx, event.memoryId, [id]);
+      assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -3350,6 +3364,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
       const insertEvent = async (event: NewMemoryEvent) => {
         await assertEventTargetInTenant(tx, ctx, event.memoryId, [first.id, second.id]);
+        assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3703,6 +3718,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
       const insertEvent = async (event: NewMemoryEvent) => {
         await assertEventTargetInTenant(tx, ctx, event.memoryId, [first.id, second.id]);
+        assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3788,6 +3804,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const memory = rowToMemory(updatedRows[0] as unknown as MemoryRow);
 
       await assertEventTargetInTenant(tx, ctx, survivor.event.memoryId, [survivor.id]);
+      assertNoNulInNewMemoryEvent("PostgresMemoryStore", survivor.event);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -4203,6 +4220,8 @@ export class PostgresMemoryStore implements MemoryStore {
       }
     }
 
+    // ADR 0499: 下の1文が走る直前（Invalid Date の早期 return のあと）。`reason`・`actor` の NUL を名指しで断る。
+    assertNoNulInNewMemoryEvent("PostgresMemoryStore", { actor, meta });
     const result = await this.db.execute(sql`
       WITH target AS (
         SELECT id FROM memories
