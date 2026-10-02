@@ -130,6 +130,16 @@ async function scenario(env: Env): Promise<Result> {
     claimKey: key("User", "address"),
     subjectId: "s1",
   });
+  await add("a29 predicate trailing space", ctx, {
+    claimKey: key("user", "address "),
+    subjectId: "s1",
+  });
+  await add("a30 predicate differs only by case", ctx, {
+    claimKey: key("user", "Address"),
+    subjectId: "s1",
+  });
+  await add("a31 predicate NFC", ctx, { claimKey: key("user", "café"), subjectId: "s1" });
+  await add("a32 predicate NFD", ctx, { claimKey: key("user", "café"), subjectId: "s1" });
   await add("a25 contested empty [2035,2035) x", ctx, {
     claimKey: K,
     subjectId: "s1",
@@ -263,6 +273,10 @@ async function scenario(env: Env): Promise<Result> {
       "[2032,null): touches the end of the contested pair",
       { validFrom: D("2032-01-01T00:00:00Z") },
     ],
+    ["predicate trailing space is a different key", { claimKey: key("user", "address ") }],
+    ["predicate differs only by case", { claimKey: key("user", "Address") }],
+    ["predicate NFC", { claimKey: key("user", "café") }],
+    ["predicate NFD", { claimKey: key("user", "café") }],
     ["subject differs only by case", { claimKey: key("User", "address") }],
     [
       "[null,2030): touches the start of the contested pair",
@@ -556,6 +570,14 @@ const EXPECTED: Result = {
     "a19 contested x",
     "a20 contested y",
   ],
+  "active: predicate trailing space is a different key": ["a29 predicate trailing space"],
+  "contested: predicate trailing space is a different key": [],
+  "active: predicate differs only by case": ["a30 predicate differs only by case"],
+  "contested: predicate differs only by case": [],
+  "active: predicate NFC": ["a31 predicate NFC"],
+  "contested: predicate NFC": [],
+  "active: predicate NFD": ["a32 predicate NFD"],
+  "contested: predicate NFD": [],
   "active: subject differs only by case": ["a24 subject differs only by case"],
   "contested: subject differs only by case": [],
   "active: [null,2030): touches the start of the contested pair": [
