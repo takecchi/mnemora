@@ -141,6 +141,70 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
     },
   );
 
+  // ADR 0525: 型の誤りは TypeError、範囲の誤りは RangeError（message は変えない）。
+  // `toThrow(TypeError)` は `RangeError` を通さず、`toThrow(RangeError)` は `TypeError` を通さない
+  // （どちらも `Error` の子だが、互いの子ではない）。
+  it.each([
+    ["文字列 '50'", "50"],
+    ["null", null],
+    ["undefined", undefined],
+    ["bigint", 50n],
+  ])("⭐ ADR 0525: everyMs が %s（数でない）なら TypeError", (_label, value) => {
+    expect(() => make({ everyMs: value })).toThrow(TypeError);
+    expect(() => make({ everyMs: value })).not.toThrow(RangeError);
+  });
+
+  it.each([
+    ["負", -1],
+    ["0", 0],
+    ["0.5", 0.5],
+    ["1e21", 1e21],
+    ["MAX_SAFE_INTEGER + 1", Number.MAX_SAFE_INTEGER + 1],
+    ["Infinity", Infinity],
+    ["NaN", Number.NaN],
+  ])("⭐ ADR 0525: everyMs が %s（数だが範囲外）なら RangeError", (_label, value) => {
+    expect(() => make({ everyMs: value })).toThrow(RangeError);
+    expect(() => make({ everyMs: value })).not.toThrow(TypeError);
+  });
+
+  it.each([
+    ["数値", 1],
+    ["null", null],
+    ["オブジェクト", {}],
+  ])("⭐ ADR 0525: jobName が %s（文字列でない）なら TypeError", (_label, value) => {
+    expect(() => make({ jobName: value })).toThrow(TypeError);
+    expect(() => make({ jobName: value })).not.toThrow(RangeError);
+  });
+
+  it("⭐ ADR 0525: jobName が空文字なら RangeError", () => {
+    expect(() => make({ jobName: "" })).toThrow(RangeError);
+    expect(() => make({ jobName: "" })).not.toThrow(TypeError);
+  });
+
+  it("⭐ ADR 0525: 型を変えても message は変わらない（文言を縛る）", () => {
+    expect(() => make({ everyMs: "50" })).toThrow(
+      "createBullmqTickDriver: everyMs must be a finite number between 1 and Number.MAX_SAFE_INTEGER (milliseconds), got 50",
+    );
+    expect(() => make({ everyMs: -1 })).toThrow(
+      "createBullmqTickDriver: everyMs must be a finite number between 1 and Number.MAX_SAFE_INTEGER (milliseconds), got -1",
+    );
+    expect(() => make({ jobName: "" })).toThrow(
+      "createBullmqTickDriver: jobName must be a non-empty string when given, got ",
+    );
+    expect(() => make({ jobName: 1 })).toThrow(
+      "createBullmqTickDriver: jobName must be a non-empty string when given, got 1",
+    );
+  });
+
+  it("⭐ ADR 0525: concurrency は、数でなければ TypeError、範囲外・小数なら RangeError", () => {
+    expect(() => make({ concurrency: "2" as unknown as number })).toThrow(TypeError);
+    expect(() => make({ concurrency: null as unknown as number })).toThrow(TypeError);
+    expect(() => make({ concurrency: 0 })).toThrow(RangeError);
+    expect(() => make({ concurrency: 1.5 })).toThrow(RangeError);
+    expect(() => make({ concurrency: Number.NaN })).toThrow(RangeError);
+    expect(queueCtorArgs).toHaveLength(0);
+  });
+
   it("対照: concurrency も構築時に検査して投げる（Queue も Worker も作らない）", () => {
     expect(() => make({ concurrency: 0 })).toThrow(/concurrency must be a positive integer/);
     expect(queueCtorArgs).toHaveLength(0);

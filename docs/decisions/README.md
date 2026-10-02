@@ -510,11 +510,18 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0496](./0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) | 型の外の入力を、新しく例外で断る5つの口 — `findCorrectionCandidates`・`resolveContested(Group)`・`tick`・`decayFloorOffset`/`floorAt`・`attributes` の `__proto__`（ADR 0446・0445・0472・0474・0485・0490 が「オーナーの領分」に残したもの） | 採用 (2026-10) |
 | [0497](./0497-recall-rejects-broken-token-counter.md) | 差し替えた `TokenCounter` が有限で 0 以上でない `tokens` を返したら、`recall()` は `RangeError` で断る（ADR 0483 の材料を直す） | 採用 (2026-10) |
 | [0498](./0498-constructor-config-checks.md) | 壊れた構成値を構築時に断る — `createBullmqTickDriver` の `everyMs`・`jobName`、provider のコンストラクタの数値オプション | 採用 (2026-10) |
+| [0499](./0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md) | 書き込み口の NUL を名指しで断る・`resolveContested*` の型の外の `status` を断る・purge 済みの行を CAS に一致させない・`setEventRetention` の日数の上限を共有の検査へ | 採用 (2026-10) |
 | [0500](./0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) | testkit の fixture を Postgres に揃える（`findContestedByClaimKey`・検索の `labels` の NUL、`timestamptz` の下限、`reinforce` の bigint 溢れ、LLM 応答の参照、core Fake の float4 読み戻し） | 採用 (2026-10) |
 | [0501](./0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md) | 文書の負債3件を返す — `--help` の環境変数（ADR 0478 負債1）・ANALYZE の数えがプロセスごと（ADR 0460 D5）・purged への強化の TSDoc（ADR 0453 負債3） | 採用 (2026-10) |
+| [0502](./0502-observe-rejects-whitespace-only-input.md) | `observe()` が、本文が空白だけの入力（`utterance.text`・`event.name`・`document.content`）を入口で断る | 採用 (2026-10) |
+| [0504](./0504-vector-store-omits-params-from-thrown-errors.md) | `PostgresVectorStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
+| [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0524](./0524-uppercase-and-after-delete-llm-paths.md) | 穴探し — ADR 0522「測っていないこと」の実測。`observe`・`reextract`・`consolidate`・`reflect` の「大文字の id」と「消した後の参照」（小文字では3者一致。大文字は既知の形に加えて、Postgres の `created` イベントの `meta.sources` に呼び出し側の綴りが残る形を1つ見つけた） | 採用 (2026-10) |
+| [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
 | [0526](./0526-tick-jobs-after-delete-and-reextract-after-correction.md) | 穴探し — ADR 0524「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブの消した後の参照と、訂正の経路で負けた記憶がある状態での `reextract`（3者一致。割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

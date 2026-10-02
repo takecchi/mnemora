@@ -152,8 +152,8 @@ const VECS = [
  *   `resolveContestedGroup`）・`RelationStore.link`／`unlink`（`contradicts` の1行、実在の2件）を振る
  *   （ADR 0494）。範囲外の `kind` や `kind` が偽の値の読み（ADR 0488 が縛った面）は渡さない。
  * - `argdead`／`argupper`: 操作に渡す id を、消した（forget・purge 済みの）記憶の id に差し替える／大文字にする
- *   （ADR 0494）。大文字の id は、`FuzzBackend.acceptsUpperCaseIds` が偽の backend（fixture）では断りを違反にしない。
- *   3 実装の差分に載せるのは `argdead` だけ。
+ *   （ADR 0494）。大文字の id は、ADR 0494 の時点では fixture が受けず（ADR 0446 の既存の違い）、3 実装の差分に載せられなかった。
+ *   ADR 0521 で fixture を Postgres に揃えたので、`argdead`・`argupper` とも 3 実装の差分に載せる。
  * - どの profile も、追加の乱数は別の流れ（`r2`）から引き、`default`／`wide`／`fields` の同じシードの操作列を変えない。
  */
 export type FuzzProfile = "default" | "wide" | "fields" | "relations" | "argdead" | "argupper";
@@ -256,12 +256,6 @@ export interface FuzzBackend {
   setup(): Promise<{ stores: FuzzStores; createRuntime: typeof CreateRuntime }>;
   /** `VECS` の2次元ベクトルを、`stores.embeddingProvider.space` の次元へ写す。 */
   vector(v: readonly number[]): number[];
-  /**
-   * 操作の対象の id を大文字にしても受けるか（`upper` の変形、ADR 0494）。`@mnemora/postgres` は受ける。
-   * fixture（InMemory・Fake）は「実在しない記憶」と同じ扱いで断る（ADR 0446 の既存の違い）。省略は `false`。
-   * `false` の backend では、大文字にした id への `memory not found for tenant` だけは違反にしない。
-   */
-  acceptsUpperCaseIds?: boolean;
 }
 
 export interface Violation {
@@ -846,15 +840,7 @@ export async function runOps(
           break;
       }
     } catch (e) {
-      // 大文字にした id（`upper`）は、fixture（InMemory・Fake）では「実在しない記憶」と同じ扱いで断られる
-      // （ADR 0446 の既存の違い）。その断りだけは違反にしない。ほかの例外は違反のまま。
-      const upperRejected =
-        backend.acceptsUpperCaseIds !== true &&
-        "mu" in op &&
-        op.mu === "upper" &&
-        /memory not found for tenant/.test((e as Error).message ?? "");
-      if (!upperRejected)
-        violations.push({ inv: "EXCEPTION", detail: `${op.k}: ${(e as Error).message}`, op: oi });
+      violations.push({ inv: "EXCEPTION", detail: `${op.k}: ${(e as Error).message}`, op: oi });
     }
     now += step();
   }

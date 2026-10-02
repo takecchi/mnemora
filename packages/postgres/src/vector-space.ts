@@ -290,8 +290,16 @@ export async function registerEmbeddingSpace(
   space: EmbeddingSpaceId,
   options: RegisterEmbeddingSpaceOptions = {},
 ): Promise<RegisterEmbeddingSpaceResult> {
+  // ADR 0525: 型の誤り（数でない）は TypeError、範囲の誤り（正の整数でない・上限超）は
+  // RangeError。message は変えていない。
+  if (typeof space.dimensions !== "number") {
+    throw new TypeError(
+      `invalid embedding space dimensions: ${space.dimensions} ` +
+        "(正の整数である必要がある。テーブルは作成していない)",
+    );
+  }
   if (!Number.isInteger(space.dimensions) || space.dimensions <= 0) {
-    throw new Error(
+    throw new RangeError(
       `invalid embedding space dimensions: ${space.dimensions} ` +
         "(正の整数である必要がある。テーブルは作成していない)",
     );
@@ -301,7 +309,7 @@ export async function registerEmbeddingSpace(
   // ロック取得より前で検査して拒否する——検査しないと、テーブルだけ作られて索引作成が
   // `54000` で落ち、テーブルが残ったまま失敗する（ADR 0018 C-2 が N=1 で実測済み）。
   if (space.dimensions > HNSW_VECTOR_INDEX_MAX_DIMENSIONS) {
-    throw new Error(
+    throw new RangeError(
       `invalid embedding space dimensions: ${space.dimensions} ` +
         `(pgvector の hnsw 索引は vector 型に対して最大 ${HNSW_VECTOR_INDEX_MAX_DIMENSIONS} ` +
         `次元までしか受け付けない。テーブルは作成していない)`,
