@@ -2606,7 +2606,6 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
 
-
 ### 61. `resolveContestedPair?` が対の外の `forgotten` を指す `supersededById` を、`updateStatus`・`updateStatusWithEvent` が `superseded` 以外の status への `supersededById` を、`RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
 
 [ADR 0515](./decisions/0515-superseded-by-remaining-checks.md)（担い手が書いた。決めたのはクローンの線の内側で、オーナーではない。[ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md) の「引き受けた負債」の1・2。項目59と同じ数え方）。
@@ -2627,11 +2626,42 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。既存の行は書き換えない。
 
-### 62. conformance suite に約束が増えた——`abortIfSuperseded`・`abortIfAllConflicted`・`purgeExpiredEventsByRetention`・`findActiveByClaimKey` の半開区間・`embed` の重複件数（`@mnemora/testkit`）
+### 62. `tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と、保存できない巨大な `leaseMs` を、claim する前に断るようになった（`@mnemora/core`）
+
+[ADR 0514](./decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0496](./decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1。項目54と同じ数え方）。
+
+⚠ **未リリース**。**番号は 62 である**——項目61 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない。
+
+| 欄 | 断る入力 | 例外 | 以前 |
+| --- | --- | --- | --- |
+| `kinds` | 配列でない（裸の文字列・`null`・object・数）／文字列でない要素を含む | `TypeError` | 裸の文字列は Fake・InMemory で部分文字列の照合になり通る。`null`・数の要素は通る。object・数は store ごとの例外 |
+| `limit` | 0 以上 2^63 未満の整数でない（文字列・`null`・`NaN`・`±Infinity`・負・小数） | `RangeError` | `"5"`・`null` は Postgres で通る。ほかは store ごとの例外（`DrizzleQueryError`・名前の無い `Error`） |
+| `claimedBy` | 文字列でない（`null`・数・object） | `TypeError` | Fake・Postgres では通り、数は text 列に入る |
+| 同上 | NUL（U+0000）を含む | `RangeError` | store ごとの例外（Postgres は 22021） |
+| `leaseMs` | 有限でも、`now - leaseMs` が `Date` の範囲外、または 4714-11-24 BC より前（`1e20`・`-1e20`・`3e14` など） | `RangeError` | `1e20` は store ごとの例外。`3e14` は Fake・InMemory で通り（何も claim しない）、Postgres だけが落ちる |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく例外になる**。以前も落ちた入力は、例外の種類が変わる。項目54と同じ扱い。
+
+**誰が影響を受けるか**: `as`・JavaScript・外部の設定から `tick` の `opts` を組み立てている呼び出し側。例: 環境変数の `TICK_LIMIT` を文字列のまま `limit` に渡している（以前は Postgres で通った）、`kinds` に種類を1つ裸の文字列で渡している、`claimedBy` にワーカー番号を数のまま渡している。`cause.code`（22P02 など）や `claimBatch: limit must …` の message で分岐していた呼び出し側。`claimBatch` を直接呼ぶ人は変わらない。
+
+**どう直すか**:
+- `limit` は `Number(...)` などで整数にして渡す（`0` は今までどおり「claim しない」）。
+- `kinds: ["extract"]` と配列にする。
+- `claimedBy` は `String(...)` で文字列にし、NUL を含めない。
+- `leaseMs` は、現実のリース長（ミリ秒）にする。0 以下は今までどおり通る（重複 claim を許すので、意図した場合だけ）。
+- 例外で分岐していた箇所は、`TypeError`・`RangeError` と、`Runtime.tick: opts.<欄> …` の message で分岐する。
+
+**確かめたこと**: Fake・InMemory・Postgres に同じ入力を流す歯を、`packages/core/src/__tests__/tick-opts-validation.test.ts` と `packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts` に足した（直す前は断る21件が3者で赤）。
+
+**DB マイグレーション**: 要らない。claim の前に落ちるので、outbox の行は変わらない。
+
+### 63. conformance suite に約束が増えた——`abortIfSuperseded`・`abortIfAllConflicted`・`purgeExpiredEventsByRetention`・`findActiveByClaimKey` の半開区間・`embed` の重複件数（`@mnemora/testkit`）
 
 [ADR 0546](./decisions/0546-conformance-suite-adds-round31-promises.md)（クローンの委譲先が、オーナーの問い 374f6f88 の問1の判断が出る前に用意した Draft。決めたのはオーナーではない）。
 
-⚠ **未リリース**。**番号は 62 である**——項目61 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+⚠ **未リリース**。**番号は 63 である**——項目62 の続き（main の取り込みで項目62 が `tick` の項目と重なったので振り直した）。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
 **何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「conformance suite に約束を足した…」の箇条を見ること。**ここには複製しない。**型・シグネチャは、新しい任意の欄（`supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?`・`setEventRetention?`）が増えただけで、既存の呼び出しは1行も直さずに型検査を通る。
 
@@ -2641,17 +2671,24 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 新しい3つのフラグは、省略すれば「⚠ 未検査」の `it` が1本ずつ増えるだけで、新しい約束は課さない（`[1.2.0]` の数え直しの判定なら非破壊。ここに書くのは、公開 API の追加だから）。
 
+**追記（ADR 0546 の追記。変異試験の穴を塞いだ分）**: 新しい3つのフラグを `true` で渡したときの約束に、*輪郭*を縛る `it` が増えた。`true` を渡す実装は、次を満たさなければ落ちる。足した約束は外せない。
+- `abortIfSuperseded` が断るのは、`ctx` のテナントで `superseded` の id だけ。active・archived・forgotten の id と、他テナントの id では断らずに今日どおり書く（S1・S2。3つの口とも）。
+- 断るときの `SourceMemoryStatusChangedError` の `changed` には、断る原因になった id を全件載せる（S4。順序は保証しない）。
+- `supersedeWithNewMemories` の `abortIfAllConflicted: true` は、`supersede` が空配列なら断らずに news を書く（S6）。
+- `purgeExpiredEventsByRetention` の cutoff は、`now` から `days` × 24 時間遡った時刻（S11。日単位でずらさない）。
+
 **誰が影響を受けるか**:
 - 自前の `MemoryStore` 実装を suite に当て、`supportsFindActiveByClaimKey: true` を渡している利用者のうち、`findActiveByClaimKey` の有効期間の判定が閉区間（`<=`）の実装。
 - 自前の `EmbeddingProvider` 実装を suite に当てている利用者のうち、重複したテキストを畳んで（重複排除して）入力より少ない件数を返す実装。`EmbeddingProvider` の契約は元から「`texts` と同じ件数・同じ順序」なので、その実装は契約にも反している。
-- 新しい3つのフラグを `true` で渡す利用者は、その口を実装していなければ落ちる。`purgeExpiredEventsByRetention` は `setEventRetention`（保持期間を設定するフック）も要る。
+- 新しい3つのフラグを `true` で渡す利用者は、その口を実装していなければ落ちる。`purgeExpiredEventsByRetention` は `setEventRetention`（保持期間を設定するフック）も要る。実装していても、上の追記の4点のどれかを外れていれば落ちる。
 
 **どう直すか**:
 - `findActiveByClaimKey`: 有効期間を半開区間 `[validFrom, validUntil)` で比べる（`validUntil` と相手の `validFrom` が同じ時刻なら重ならない）。
 - `embed`: 重複を畳まず、入力と同じ件数・同じ順序で返す（下層への問い合わせを畳むのはよいが、返す配列は入力の件数に戻す）。
 - 新しいフラグ: 実装しているなら `true`（`purgeExpiredEventsByRetention` は `setEventRetention` も渡す）、実装していないなら `false`、決めないなら省略。**`@mnemora/postgres`・`@mnemora/testkit` の in-memory はこの版で対応済み**（`true`）。
+- 追記の4点: `abortIfSuperseded` の判定は `tenantId` と `status === "superseded"` の両方で絞り、見つけた id を全件集めてから投げる。`abortIfAllConflicted` は対象が1件以上のときだけ判定する。保持期間の cutoff は `now - days × 24h` とし、`days ± 1` にしない。
 
-**確かめたこと**: 足した `it` ごとに、`InMemoryMemoryStore`・`PostgresMemoryStore`（embedding は testkit の fake）を壊して赤、戻して緑（ADR 0546 の表）。**確かめていないこと**: 外部の adapter・実 API・実モデル。
+**確かめたこと**: 足した `it` ごとに、`InMemoryMemoryStore`・`PostgresMemoryStore`（embedding は testkit の fake）を壊して赤、戻して緑（ADR 0546 の表と追記の表）。**確かめていないこと**: 外部の adapter・実 API・実モデル。
 
 **DB マイグレーション**: 要らない。
 
@@ -2835,7 +2872,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 ⚠ **2026-10-02 追記2**: 下の、ADR 0525（PR #1616）と ADR 0521（PR #1615）の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。🔴 の項目56（ADR 0498）に ADR 0525 が足していた注記は、出荷された本文に戻した（ADR 0534）。
 
 - **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
-  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落ちるようになった。下の項目）。
+  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で、`PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` は ADR 0516 で、落ちるようになった。下の項目）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。

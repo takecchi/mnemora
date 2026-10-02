@@ -102,13 +102,24 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目60。DB マイグレーションは無い。
   - 【確かめていないこと】`createObservation` の `subjectId`・`externalId` の NUL（`assertWellFormedIdentifier` が先に断るので、新しい検査は見ない。以前から同じ）。
 
+- **`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と、保存できない巨大な `leaseMs` を、claim する前に名指しの例外で断るようになった**（[ADR 0514](./docs/decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)、[ADR 0496](./docs/decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1、`@mnemora/core`）。
+
+  以前は、これらの値は `OutboxStore.claimBatch` へそのまま渡り、store ごとに顔が違った（Postgres は `DrizzleQueryError`、testkit の InMemory・core の Fake は名前の無い `Error`）。さらに、**例外にならず黙って別の結果になる入力**があった（裸の文字列の `kinds` は Fake・InMemory で部分文字列として照合される、`claimedBy: 5`、`limit: "5"` は Postgres で通る、`leaseMs: 3e14` は Fake・InMemory で通って何も claim せず Postgres だけが落ちる）。今は入口で、3者が同じ種類・同じ message で断る。
+  - **断る入力**: `kinds` が配列でない・文字列でない要素を含む（`TypeError`、`Runtime.tick: opts.kinds must be an array of strings`）。`limit` が 0 以上 2^63 未満の整数でない（`RangeError`、`Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63`）。`claimedBy` が文字列でない（`TypeError`）・NUL を含む（`RangeError`）。`leaseMs` が有限でも、`now - leaseMs` が `Date` の範囲外か Postgres の `timestamptz` の下限（4714-11-24 BC）より前になる（`RangeError`、`Runtime.tick: opts.leaseMs is out of range …`）。`undefined` は省略と同じ。
+  - **断らないもの（変えない）**: `limit: 0`（何も claim しない）、`kinds: []`、`claimedBy: ""`、0 以下の `leaseMs`（TSDoc が今の振る舞いとして書いている）、下限ちょうどの `leaseMs`。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力（裸の文字列の `kinds`、数の `claimedBy`、`"5"` の `limit`、`3e14` の `leaseMs` など）が、新しく例外になる**。以前も落ちた入力は、例外の種類が変わる（`DrizzleQueryError`・名前の無い `Error` から `TypeError`・`RangeError`）ので、`cause.code` や message で分岐していた呼び出し側は見直すこと。新しい例外クラスは増やしていない。
+  - **誰が影響を受けるか**: `as`・JavaScript・外部の設定（環境変数・JSON）から `tick` の `opts` を組み立てている呼び出し側。型どおりに呼んでいる限り変わらない。`claimBatch` を直接呼ぶ人の顔は変えていない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目62。DB マイグレーションは無い。
+  - 【確かめていないこと】SQL_ASCII の脚。`@mnemora/bullmq`・`examples/` のテスト。NUL を含む `kinds` の要素。
+
 - **conformance suite に約束を足した——`MemoryStore` の `abortIfSuperseded`・`abortIfAllConflicted`・`purgeExpiredEventsByRetention`・`findActiveByClaimKey` の半開区間と、`EmbeddingProvider.embed` の重複件数**（[ADR 0546](./docs/decisions/0546-conformance-suite-adds-round31-promises.md)。クローンの委譲先が、オーナーの問い 374f6f88 の問1の判断が出る前に用意した Draft で、**オーナーの判断ではない**）。`@mnemora/testkit` の `describeMemoryStoreConformance`・`describeEmbeddingProviderConformance` に、`it` が増えた。ADR 0458 の歯（suite の外にあった）を、suite の公開の口だけで書き直したもの。
 
   - **新しい公開 API（`MemoryStoreConformanceOptions`）**: `supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?`（どれも `supportsAbortIfForgotten?` と同じ3状態: `true` は歯を走らせる／`false` は口・option が無いことを assert／省略は「⚠ 未検査」の it を1本）と、`setEventRetention?`（テナントの保持期間を設定するフック。`supportsPurgeExpiredEventsByRetention: true` のとき要る）。**省略すれば、増えるのは「未検査」の it だけである。**
   - **既存のフラグの枝への追加（新しく赤になりうる）**: `supportsFindActiveByClaimKey: true` の枝に、**有効期間は半開区間——接するだけの区間（一方の `validUntil` と他方の `validFrom` が同じ時刻）は重ならない**ことを検査する `it` が1本増えた。`findActiveByClaimKey` の境界が `<=` の自前の実装は落ちる。
   - **無条件の追加（新しく赤になりうる）**: `describeEmbeddingProviderConformance` に、**同じテキストを重複して渡しても、`embed` が入力と同じ件数を返す**ことを検査する `it` が、フラグ無しで1本増えた。契約（`EmbeddingProvider` の TSDoc）は元から「同じ件数・同じ順序」で、重複を畳んでよいとは書いていない——その実装は、契約に反していたのを suite が初めて検査するだけだが、外部の実装から見れば、通っていたものが落ちる。`@mnemora/openai`・`@mnemora/local-embedding`・`@mnemora/testkit` の実装は、記録の再生では緑（実 API・実モデルは走らせていない）。
+  - **新しいフラグの枝の輪郭（新しく赤になりうる。ADR 0546 の追記）**: 新しい3つのフラグを `true` で渡す実装に、次の約束を縛る `it` が増えた。`abortIfSuperseded` が断るのは `ctx` のテナントで `superseded` の id だけで、active・archived・forgotten・他テナントの id では断らずに今日どおり書く（S1・S2。3つの口とも）。断るときの `changed` は原因の id の全件（S4）。`supersedeWithNewMemories` の `abortIfAllConflicted: true` は、`supersede` が空配列なら断らない（S6）。`purgeExpiredEventsByRetention` の cutoff は `now` から `days` × 24 時間遡った時刻（S11）。あわせて `supersedeWithNewMemories` に `supportsAbortIfSuperseded: false` の `it` を1本足した（ほかの2口に揃えた）。フラグを省略する実装には影響しない。
   - **足した約束は外せない**（外すのも破壊的変更）。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目62。DB マイグレーションは無い。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目63。DB マイグレーションは無い。
   - 【確かめていないこと】外部の adapter が実際に赤くなるか。実 API・実モデルが重複で件数を保つか。新しい3つのフラグだけを足した変更を破壊的と数えるか（`[1.2.0]` の 2026-10-01 の数え直しの判定なら非破壊。PC6 と重複件数が破壊的と数える根拠）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
@@ -118,7 +129,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `upsert`・`search`・`searchMany`・`delete`・`getVectors`・`deleteAcrossSpaces`・`eraseTenant` が投げる例外の `message`（と `stack`・`cause` の連鎖）の `params:` より後ろを、`Runtime` と同じ形（`(omitted by mnemora, N chars)`）に落とす。`searchMany` は 1 文に最大 16384 件のベクトルが params に載っていた。例外は新しく作らず、その場で書き換えるので、`kind`・`name`・`code`・`cause` は残る。
 
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
-  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債。そのうち `PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落とすようにした）。
+  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債。そのうち `PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で、`PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` は ADR 0516 で、落とすようにした）。
 
 - **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
 - **`@mnemora/bullmq` の `createBullmqTickDriver` 、`@mnemora/postgres` の `registerEmbeddingSpace`、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider` が、壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）に変わった**（[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md)。provider の数値オプション（ADR 0498）の形に揃えた）。対象は `everyMs`・`jobName`・`concurrency`（`resolveConcurrency` を含む）と、`DeterministicEmbeddingProvider` の `space.dimensions`（数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`）、`registerEmbeddingSpace` の `space.dimensions`（数でなければ `TypeError`、正の整数でない・pgvector hnsw の上限 2000 超なら `RangeError`）。数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。**message は変えていない。** どちらも `Error` の子なので `instanceof Error` は変わらない。`err.name`・`err.constructor` を `"Error"`・`Error` と比べていた呼び出し側は見直すこと。手順は要らない。公開 API・既定値は変えていない。⭕ 非破壊と数える。
