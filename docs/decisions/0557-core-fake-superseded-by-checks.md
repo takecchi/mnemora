@@ -92,13 +92,19 @@ Fake が断るようになったので、`superseded` に置き換えた側を�
 
 名指しで走らせた 39 ファイル・577 本、すべて緑。全テストは走らせていない（CI が全部を走らせる）。
 
-引き継ぎ後（main の ADR 0556 を取り込んだ後。`runtime-fakes.ts` は自動で合わさり、衝突は ADR 索引だけで、生成器で作り直した）: fake-superseded-by-checks・fake-memory-store-tsdoc-edges-round3・recall-companion-status-gate・fake-uppercase-target-id・fake-cas-purged-row・fake-input-checks-round2・fake-referential-integrity・fake-store-postgres-parity・dependency-boundary を名指しで走らせて緑。core・postgres の型検査も通った。
-
 fake-superseded-by-checks・fake-memory-store-tsdoc-edges-round3・recall-companion-status-gate・fake-input-checks-round2・fake-referential-integrity・fake-event-write-atomicity・fake-event-target-belongs-to-ctx-tenant・fake-claim-key-parity・fake-uppercase-target-id・fake-cas-purged-row・fake-memory-store-supersede-with-new-memories・fake-store-postgres-parity・fake-runtime-tick-jobs-and-correction-reextract-parity・contested-pair-invariant・contested-group-event-growth・contested-unresolved-note-growth・mark-contested・mark-contested-group・resolve-contested・resolve-contested-group・resolve-contested-loser-invariant・resolve-contested-unknown-kind・resolve-orphaned-contested・reextract 系・consolidate 系・forget 系・restore-archived・restore-superseded 系・superseded-operation-grouping・superseded-reason-writer-consistency・is-contested-without-companion・recall-association-contested-companion（vitest の名前一致で拾うため、`reextract`・`consolidate`・`forget`・`restore-superseded`・`resolve-contested`・`mark-contested` は前方一致する別ファイルも含む）。
+
+引き継ぎ後（main の ADR 0555・0556・0558 を取り込んだ後。`runtime-fakes.ts` は自動で合わさり、衝突は ADR 索引だけで、生成器で作り直した）: fake-superseded-by-checks・fake-memory-store-tsdoc-edges-round3・recall-companion-status-gate・fake-uppercase-target-id・fake-cas-purged-row・fake-input-checks-round2・fake-referential-integrity・fake-store-postgres-parity・dependency-boundary・fake-outbox 系を名指しで走らせて緑。core・postgres の型検査も通った。
 
 ## 保険（Postgres の歯）
 
 `packages/postgres/src/__tests__/store-superseded-by-checks.postgres.test.ts` の `KITS` に「core の Fake」を足した（`store-input-current-behaviour.postgres.test.ts` の `createFakeRuntimeStores` の相対 import と同じ形。イベント数は Fake の裏の `events` を読む）。これで同じ入力を testkit の InMemory・Postgres・core の Fake に流し、message まで同じであることが見張られる。DB が要るので手元では走らせていない。CI の Postgres ジョブで確かめる【未確認】。
+
+引き継ぎ後【実測】: 手元に専用の Postgres 17 + pgvector（UTF8・`C.UTF-8`）を立て、この歯と `uppercase-target-id-parity.postgres.test.ts` を走らせて 2 ファイル 124 本緑。
+
+## ADR 0558 の `SKIP_FAKE` を外す【実測】
+
+ADR 0558（#1669）は `uppercase-target-id-parity.postgres.test.ts` に大小違いの自己置換の4件（`updateStatus`・`updateStatusWithEvent` × id と `supersededById` のどちらを大文字にするか）を足し、Fake が断れないので `SKIP_FAKE` に入れていた。この ADR で Fake が両側を `normId` で畳んで断るので、4件を `SKIP_FAKE` から外した。`runtime-fakes.ts` だけを main の版に戻すとちょうどこの4件が赤（59 本中 4 本）、戻すと 59 本緑。
 
 ## CHANGELOG・migration-v1 を変えない理由
 
@@ -111,6 +117,7 @@ Fake の pair・group には [ADR 0499](./0499-store-write-checks-nul-named-stat
 ## 【判断・未確認】InMemory の大文字小文字
 
 testkit の InMemory の `updateStatus*` は `opts.supersededById` の大文字小文字を畳まずに自己置換と比べるので、大小違いの自己置換を断れない可能性がある（コードを読んだだけで、走らせていない）。この PR では直さない。Fake・Postgres は畳む。
+（追記: [ADR 0558](./0558-inmemory-self-supersede-check-folds-both-sides.md)（#1669）が InMemory の両側を畳むよう直し、main に入った。）
 
 ## 採らなかった案
 
