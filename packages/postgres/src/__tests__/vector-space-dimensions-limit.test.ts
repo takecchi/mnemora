@@ -19,8 +19,8 @@ import { dropTempDatabase } from "./temp-database.js";
  * - `dimensions=2000` は通る（テーブル・索引の両方が作られる。ADR 0018 の実測どおり、
  *   2000 は pgvector hnsw の有効な境界）。
  * - `dimensions=2001` は拒否され、テーブルが1つも残らない（`to_regclass` で不在を確認）。
- * - 拒否時のエラーはロック取得より前の入力検証と同じ流儀（`Error`、"invalid embedding
- *   space dimensions" を含むメッセージ）で投げられる。
+ * - 拒否時のエラーはロック取得より前の入力検証と同じ流儀（"invalid embedding
+ *   space dimensions" を含むメッセージ）で投げられる。型は `RangeError`（ADR 0525）。
  *
  * `runMigrations` を先に通してから使い捨ての DB へ対して実行する構造は
  * `vector-space-concurrency.test.ts` と同じ（`registerEmbeddingSpace` の FK 先である
@@ -105,6 +105,8 @@ describe("registerEmbeddingSpace の dimensions 上限検査（pgvector hnsw、A
     await expect(registerEmbeddingSpace(pool, SPACE_OVER_LIMIT)).rejects.toThrow(
       /invalid embedding space dimensions: 2001/,
     );
+    // ADR 0525: 範囲の誤りなので RangeError（型は DB の要らない vector-space-dimensions-error-types.test.ts が固定）
+    await expect(registerEmbeddingSpace(pool, SPACE_OVER_LIMIT)).rejects.toThrow(RangeError);
 
     expect(await regclassExists(pool, table)).toBe(false);
     expect(await regclassExists(pool, index)).toBe(false);

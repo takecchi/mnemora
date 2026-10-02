@@ -9,6 +9,7 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { assertNoNulInNewMemoryEvent } from "./input-check.js";
 import {
   isUuidLike,
   normalizeUuidCase,
@@ -39,7 +40,10 @@ export class PostgresEventStore implements EventStore {
    */
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
     assertWellFormedCtx(ctx);
+    // ADR 0499: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前。memoryId の形の検査より後ろ——
+    // 形の壊れた memoryId は、今までどおり「memory not found」が先）。
     if (event.memoryId === null) {
+      assertNoNulInNewMemoryEvent("PostgresEventStore", event);
       const result = await this.db.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -61,6 +65,7 @@ export class PostgresEventStore implements EventStore {
     if (!isUuidLike(memoryId)) {
       throw memoryNotFound(memoryId);
     }
+    assertNoNulInNewMemoryEvent("PostgresEventStore", event);
     // 検査で落ちたかは、戻り値の `tenant_check_ok`（検査の結果そのもの）で見る（ADR 0398 決定2 と同じ作法）。
     const result = await this.db.execute(sql`
       WITH mem AS (

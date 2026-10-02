@@ -415,4 +415,31 @@ describe("A-8: DeterministicEmbeddingProvider は dimensions が正の整数で�
   it("既定は8次元", () => {
     expect(new DeterministicEmbeddingProvider().space.dimensions).toBe(8);
   });
+
+  // ADR 0525: 型の誤りは TypeError、範囲の誤りは RangeError。message は同じ。
+  const construct = (dimensions: unknown) => () =>
+    new DeterministicEmbeddingProvider({
+      provider: "p",
+      model: "m",
+      dimensions: dimensions as number,
+    });
+  it.each(["8", null, undefined, 8n])("⭐ ADR 0525: dimensions=%s（数でない）は TypeError", (v) => {
+    expect(construct(v)).toThrow(TypeError);
+    expect(construct(v)).not.toThrow(RangeError);
+  });
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "⭐ ADR 0525: dimensions=%s（数だが正の整数でない）は RangeError",
+    (v) => {
+      expect(construct(v)).toThrow(RangeError);
+      expect(construct(v)).not.toThrow(TypeError);
+    },
+  );
+  it("⭐ ADR 0525: 型を変えても message は変わらない", () => {
+    expect(construct("8")).toThrow(
+      "DeterministicEmbeddingProvider: space.dimensions は正の整数でなければならない（8）。",
+    );
+    expect(construct(1.5)).toThrow(
+      "DeterministicEmbeddingProvider: space.dimensions は正の整数でなければならない（1.5）。",
+    );
+  });
 });

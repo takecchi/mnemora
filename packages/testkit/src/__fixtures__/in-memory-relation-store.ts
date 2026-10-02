@@ -39,6 +39,9 @@ export class InMemoryRelationStore implements RelationStore {
     assertWellFormedCtx(ctx);
     // 列挙の外の kind は、Postgres の CHECK（`0026_memory_relations.sql`）の違反を漏らさず、INSERT の前に断る。
     assertKnownRelationKind("InMemoryRelationStore", kind);
+    // ADR 0521: 大文字の id も同じ記憶として受け、小文字（この fixture の id の綴り）で持つ。
+    fromId = fromId.toLowerCase() as MemoryId;
+    toId = toId.toLowerCase() as MemoryId;
     for (const id of [fromId, toId]) {
       if ((await this.memoryStore.get(ctx, id)) === null) {
         throw new Error(`InMemoryRelationStore: memory not found for tenant: ${id}`);
@@ -64,6 +67,8 @@ export class InMemoryRelationStore implements RelationStore {
 
   async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
     assertWellFormedCtx(ctx);
+    fromId = fromId.toLowerCase() as MemoryId;
+    toId = toId.toLowerCase() as MemoryId;
     for (let i = this.relations.length - 1; i >= 0; i--) {
       const r = this.relations[i]!;
       if (
@@ -93,6 +98,7 @@ export class InMemoryRelationStore implements RelationStore {
   }
 
   private relatedOf(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Relation[] {
+    memoryId = memoryId.toLowerCase() as MemoryId;
     // ADR 0488: `PostgresRelationStore` と同じく、`kind` が偽の値（`undefined`・`""`・`null`・`0`）なら絞り込まない。
     return (
       this.relations

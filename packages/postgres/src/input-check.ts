@@ -63,3 +63,125 @@ export function assertNoNulInScopeFilter(
     }
   }
 }
+
+/** `value`（JSON にする値）の中の文字列（オブジェクトの key も）のどれかが `pred` を満たすか。循環は辿り直さない。 */
+function jsonStringsSome(
+  value: unknown,
+  pred: (text: string) => boolean,
+  seen: Set<object> = new Set(),
+): boolean {
+  if (typeof value === "string") {
+    return pred(value);
+  }
+  if (typeof value !== "object" || value === null || seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.some((v) => jsonStringsSome(v, pred, seen));
+  }
+  return Object.entries(value).some(([k, v]) => pred(k) || jsonStringsSome(v, pred, seen));
+}
+
+const hasNul = (text: string): boolean => text.includes("\u0000");
+
+/** 対をなさない UTF-16 サロゲートコードユニット（`JSON.stringify` は `\udXXX` に直し、`jsonb` はそれを拒む）を含むか。 */
+const hasLoneSurrogate = (text: string): boolean =>
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
+
+/**
+ * ADR 0499（ADR 0456 M4）: `memories` へ書く値の NUL を、DB に触れる前に名指しして断る。
+ * 以前は `contentHash` 以外は DB の生の例外（`DrizzleQueryError`。`text` 列は `invalid byte sequence for
+ * encoding "UTF8": 0x00`、`jsonb` 列は `unsupported Unicode escape sequence`）だった。断る入力は増やさない。
+ * 欄名・検査の順・文面は testkit の `InMemoryMemoryStore` と同じ（`<owner>: <欄> must not contain NUL characters (U+0000)`）。
+ *
+ * 型を外れた値（文字列でない・欠けている欄）はここでは見ない——以前と同じ経路（DB の検査）に任せる。
+ * 断るのは「文字列で、NUL を含む」ものだけ。
+ *
+ * 🔴 `content` も見る。抽出の候補の `digest` は、LLM が `digest` を返さないとき本文から作られる（本文に NUL があれば
+ * `digest` にも入る）ので、`digest` だけ見ると、本文の NUL を「digest が悪い」と説明してしまう。保存できない候補を落とすとき
+ * （ADR 0347）、落とした候補の説明（`describeDroppedCandidate`）は、以前の DB の例外（`code: "22021"`・pg の文面）から、
+ * この名指しの例外（`code: null`・`content must not contain NUL …`）に変わる——testkit の fixture と同じ形。
+ */
+export function assertNoNulInNewMemory(
+  owner: string,
+  input: {
+    content: string;
+    contentHash: string;
+    digest: string;
+    tags: readonly string[];
+    extractorVersion?: string | null | undefined;
+    claimKey?: { subject: string; predicate: string } | null | undefined;
+    attributes?: unknown;
+    provenance: unknown;
+  },
+): void {
+  const text = (field: string, value: unknown): void => {
+    if (typeof value === "string") {
+      assertNoNul(owner, field, value);
+    }
+  };
+  text("content", input.content);
+  if (Array.isArray(input.tags)) {
+    input.tags.forEach((tag) => text("tags", tag));
+  }
+  text("digest", input.digest);
+  text("contentHash", input.contentHash);
+  text("extractorVersion", input.extractorVersion);
+  text("claimKey.subject", input.claimKey?.subject);
+  text("claimKey.predicate", input.claimKey?.predicate);
+  if (jsonStringsSome(input.attributes ?? {}, hasNul)) {
+    throw new Error(`${owner}: attributes must not contain NUL characters (U+0000)`);
+  }
+  if (jsonStringsSome(input.provenance, hasNul)) {
+    throw new Error(`${owner}: provenance must not contain NUL characters (U+0000)`);
+  }
+}
+
+/** `value`（JSON にする値）の中に BigInt が在るか。`JSON.stringify` は BigInt を `TypeError` で拒む。 */
+function jsonHasBigInt(value: unknown, seen: Set<object> = new Set()): boolean {
+  if (typeof value === "bigint") {
+    return true;
+  }
+  if (typeof value !== "object" || value === null || seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+  return Object.values(value).some((v) => jsonHasBigInt(v, seen));
+}
+
+/**
+ * ADR 0499（ADR 0456 M4・ADR 0446 の材料）: `memory_events` へ書くイベントの NUL を、DB に触れる前に名指しして断る。
+ * 以前は `digestSnapshot`（`text` 列）・`meta`・`actor`（`jsonb` 列）の NUL が DB の生の例外になっていた
+ * （`Runtime` の口に渡す `reason` は `meta.reason`/`meta.note` に、`actor.id` は `actor` に入る）。
+ * `meta`・`actor` は、対をなさない UTF-16 サロゲートも断る（`jsonb` が拒む——以前から同じ入力で落ちていた）。
+ * 文面は testkit の `assertStorableMemoryEvent` と同じ欄名（`memory_events.<欄> must not contain NUL …`）。
+ *
+ * - **イベントを書く文の直前で呼ぶ**（事前の検査より前に置かない）——ほかの理由で先に落ちる入力（status の CAS 違反・
+ *   対象が無いなど）は、今までどおりその例外になる。
+ * - **BigInt は NUL より先**に `TypeError`（`JSON.stringify` と同じ文言）で断る。以前は INSERT の引数を JS で組む時点で
+ *   `JSON.stringify` が投げ、NUL を DB が見る機会が無かった（`event-meta-roundtrip.postgres.test.ts` が縛る）。
+ */
+export function assertNoNulInNewMemoryEvent(
+  owner: string,
+  event: { actor: unknown; meta: unknown; digestSnapshot?: string | null | undefined },
+): void {
+  if (jsonHasBigInt(event.actor) || jsonHasBigInt(event.meta)) {
+    throw new TypeError("Do not know how to serialize a BigInt");
+  }
+  if (jsonStringsSome(event.actor, (t) => hasNul(t) || hasLoneSurrogate(t))) {
+    throw new Error(
+      `${owner}: memory_events.actor must not contain NUL (U+0000) or a lone surrogate code unit`,
+    );
+  }
+  if (jsonStringsSome(event.meta, (t) => hasNul(t) || hasLoneSurrogate(t))) {
+    throw new Error(
+      `${owner}: memory_events.meta must not contain NUL (U+0000) or a lone surrogate code unit`,
+    );
+  }
+  if (typeof event.digestSnapshot === "string" && hasNul(event.digestSnapshot)) {
+    throw new Error(
+      `${owner}: memory_events.digestSnapshot must not contain NUL characters (U+0000)`,
+    );
+  }
+}
