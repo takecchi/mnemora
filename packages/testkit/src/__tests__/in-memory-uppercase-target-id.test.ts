@@ -231,7 +231,7 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
   });
 
   it("EventStore.get: 大文字のイベント id でも同じイベントが当たる（ADR 0556。Postgres は uuid 型の列で比べる）", async () => {
-    const { make, up, stores } = setup();
+    const { make, stores } = setup();
     const a = await make();
     const stored = await stores.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
@@ -242,9 +242,9 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
       meta: {},
     });
     expect((await stores.eventStore.get(ctx, stored.id))?.id).toBe(stored.id);
-    expect(
-      (await stores.eventStore.get(ctx, stored.id.toUpperCase() as never))?.id,
-    ).toBe(stored.id);
+    expect((await stores.eventStore.get(ctx, stored.id.toUpperCase() as never))?.id).toBe(
+      stored.id,
+    );
   });
 
   it("abortIfSuperseded: 大文字の id でも superseded を見落とさず、何も書かない。changed[].id は Postgres と同じ小文字（ADR 0556）", async () => {
@@ -278,7 +278,7 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
         sourceObservationId: obs.id,
         extractorVersion: "v1",
       }),
-      jobKinds: ["embed"] as const,
+      jobKinds: ["embed" as const],
     });
     const ev = (memoryId: MemoryId, kind: "created" | "superseded") => ({
       tenantId: ctx.tenantId,

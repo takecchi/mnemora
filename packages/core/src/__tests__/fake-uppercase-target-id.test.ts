@@ -237,7 +237,7 @@ describe("FakeMemoryStore: 大文字の対象 id を同じ記憶として受け�
   });
 
   it("EventStore.get: 大文字のイベント id でも同じイベントが当たる（ADR 0556。Postgres は uuid 型の列で比べる）", async () => {
-    const { make, up, stores } = setup();
+    const { make, stores } = setup();
     const a = await make();
     const stored = await stores.eventStore.append(ctx, {
       tenantId: ctx.tenantId,

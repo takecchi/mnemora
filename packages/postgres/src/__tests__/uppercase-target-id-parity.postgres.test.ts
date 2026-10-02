@@ -838,7 +838,8 @@ const eventFor = (memoryId: string, kind: string): any => ({
 /** 大文字の id を abortIfSuperseded に渡して投げられた SourceMemoryStatusChangedError の中身（id の綴りは生のまま）と、書き込まれたものの有無。 */
 async function observeAbortIfSuperseded(
   be: string,
-  entry: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+  entry:
+    "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
   variant: "lo" | "UP",
 ): Promise<string> {
   const e = await mkEnv(be);
@@ -882,7 +883,11 @@ async function observeAbortIfSuperseded(
     }
     outcome = "NO THROW";
   } catch (err) {
-    const x = err as { name?: string; method?: string; changed?: Array<{ id: string; observedStatus: string }> };
+    const x = err as {
+      name?: string;
+      method?: string;
+      changed?: Array<{ id: string; observedStatus: string }>;
+    };
     outcome = `THROW ${x.name} ${x.method} ${JSON.stringify(
       (x.changed ?? []).map((c) => ({
         // 綴りを生で比べる（<src> は「渡した id と同じ綴り」「小文字」「大文字」のどれか）。
