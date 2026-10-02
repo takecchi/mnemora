@@ -529,6 +529,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0511](./0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md) | 記憶をまたぐ `upsertProposedLabels` の順と、purge/scrub の `UPDATE labels … FROM counted` の更新順が、並行する書き込みと 40P01 になる（ADR 0476 の負債1・2）。再現と直し | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
 | [0513](./0513-lexical-match-fixtures-aligned-to-postgres.md) | 語彙検索の fixture を Postgres に揃える（core の Fake は部分一致をやめて語の一致に、testkit の InMemory は `PROJ-12` を空白区切りの 1 語として数える） | 採用 (2026-10) |
+| [0514](./0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md) | `Runtime.tick` の `opts.kinds`・`limit`・`claimedBy` と、保存できない巨大な `leaseMs` を、claim の前に名指しで断る（ADR 0496「引き受けた負債」の5と1） | 採用 (2026-10) |
 | [0515](./0515-superseded-by-remaining-checks.md) | `supersededById` の残りの断り（`resolveContestedPair` の対の外の `forgotten`、`updateStatus*` の `superseded` 以外への付与） | 採用 (2026-10) |
 | [0516](./0516-omit-params-trigram-outbox-tenant-settings-stores.md) | `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0517](./0517-blank-title-is-not-prefixed-when-extract-title.md) | `extractTitle: true` のとき、空白だけの `document.title` を本文の前置きにしない（断らず、無視する） | 採用 (2026-10) |
