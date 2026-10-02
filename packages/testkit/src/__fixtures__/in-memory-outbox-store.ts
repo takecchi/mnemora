@@ -10,7 +10,7 @@ import {
   type PurgeCompletedJobsResult,
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
-import { assertQueryDate } from "./query-check.js";
+import { assertQueryBigint, assertQueryDate } from "./query-check.js";
 
 /**
  * `OutboxStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3）。
@@ -196,6 +196,8 @@ export class InMemoryOutboxStore implements OutboxStore {
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
+    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
+    assertQueryBigint("eraseTenant", "limit", opts.limit);
     const matchingIndexes: number[] = [];
     for (let i = 0; i < this.jobs.length && matchingIndexes.length < opts.limit; i++) {
       if (this.jobs[i]!.tenantId === ctx.tenantId) {

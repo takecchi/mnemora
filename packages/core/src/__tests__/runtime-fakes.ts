@@ -4288,8 +4288,6 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
-    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
-    assertFakeEraseLimit(opts.limit);
     const existed =
       this.eventRetentionDays.has(ctx.tenantId) ||
       this.decayClockByTenant.has(ctx.tenantId) ||
