@@ -381,4 +381,53 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
       "createBullmqTickDriver: completedJobsToKeep must be a non-negative integer, got -1",
     );
   });
+
+  // 変異試験の穴を塞ぐ歯（ADR 0548）。opts を丸ごと `toEqual` で固定し、余計なキーが増えたら赤にする。
+  // 特に `removeOnFail`（Worker にも Queue の defaultJobOptions にも）が入ると、失敗したジョブが消えうる。
+  const CONNECTION = { host: "127.0.0.1", port: 1 };
+
+  it("⭐ Worker の opts は丸ごと固定（lockDuration あり）。removeOnComplete・removeOnFail・stalledInterval などの余計なキーを許さない", () => {
+    make({ lockDuration: 120_000 });
+    expect(workerOpts()).toEqual({
+      connection: CONNECTION,
+      concurrency: 1,
+      autorun: false,
+      lockDuration: 120_000,
+    });
+  });
+
+  it("⭐ Worker の opts は丸ごと固定（lockDuration なし）。lockDuration のキーも出さない", () => {
+    make({});
+    expect(workerOpts()).toEqual({
+      connection: CONNECTION,
+      concurrency: 1,
+      autorun: false,
+    });
+  });
+
+  it("⭐ Queue の opts は { connection } だけ。defaultJobOptions（removeOnFail・removeOnComplete）も lockDuration も載せない", () => {
+    make({ lockDuration: 120_000, completedJobsToKeep: 50 });
+    expect(queueCtorArgs[0]?.[1]).toEqual({ connection: CONNECTION });
+    queueCtorArgs.length = 0;
+    make({});
+    expect(queueCtorArgs[0]?.[1]).toEqual({ connection: CONNECTION });
+  });
+
+  it("⭐ lockDuration と completedJobsToKeep を同時に渡すと、それぞれの行き先にだけ届く", async () => {
+    await make({ lockDuration: 90_000, completedJobsToKeep: 7, concurrency: 2 }).start();
+    expect(workerOpts()).toEqual({
+      connection: CONNECTION,
+      concurrency: 2,
+      autorun: false,
+      lockDuration: 90_000,
+    });
+    expect(queueCtorArgs[0]?.[1]).toEqual({ connection: CONNECTION });
+    expect(upsertCalls).toEqual([
+      [
+        "mnemora-tick",
+        { every: 100 },
+        { name: "mnemora-tick", opts: { removeOnComplete: { count: 7 } } },
+      ],
+    ]);
+  });
 });
