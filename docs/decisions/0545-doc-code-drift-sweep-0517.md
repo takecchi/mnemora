@@ -55,3 +55,22 @@
 
 - **引き受けた負債**: この ADR の結果は `main` の `6e71ffb4` に対して測った記録で、`main` が進めば古くなる。照合の道具は repo に入れていない（ADR 0495 の代替案1のとおり）。0517・0511 の歯・変異試験を再実行していない。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文の中で `title` の前置きや `labels` のロック順を言い換えた文）の古さが見つかったとき。
+
+## 追い足し（基準 main `0cfe277c`、ADR 0518 の分）
+
+0518（#1647、`0cfe277c`）が main に入ったので掃いた（`git diff 6e71ffb4 0cfe277c`。この枝は `origin/main` を merge した。衝突なし。ADR 索引は `node scripts/generate-adr-index.mjs` で再生成しても差分なし）。この節もマネージャーが書いた。
+
+- **0518 の中身**【現物】: 差は ADR 0518・`packages/core/src/interfaces/memory-store.ts` の `MemoryStatusConflictError` の TSDoc（purge 済みの行では `expectedStatus: "forgotten"` のとき `expectedStatus` と `observedStatus` が両方 `"forgotten"` になる、例外だけでは purge 済みと分からない、`Memory.purgedAt` を読む、`purge` の CAS 違反は `MemoryPurgeConflictError`）・Postgres の歯 `store-status-write-checks.postgres.test.ts` に assertion 2か所・索引だけ。実装は変わっていない。
+- **3実装**【現物】:
+  - Postgres（`packages/postgres/src/memory-store.ts`）: `expectedStatusCondition` が `AND status = … AND purged_at IS NULL` を付け、0行のとき `explainEmptyStatusUpdate` が `row.status` を読み直して `new MemoryStatusConflictError(id, expectedStatus, row.status)` を作る。purge 済みなら `row.status` は `"forgotten"` なので TSDoc のとおり。`conflictAfterEmptyUpdate`（`markContestedGroup`・`resolveContestedGroup` 系）も同じく読み直した `status` を詰める。TSDoc と一致した。
+  - testkit の InMemory（`__fixtures__/in-memory-memory-store.ts`）: `casMismatch(memory, expected)` が `memory.status !== expected || purgedAt != null`。`updateStatus`・`updateStatusWithEvent` は `new MemoryStatusConflictError(id, opts.expectedStatus, memory.status)`、`supersedeWithNewMemories` は同じ `casMismatch` で `conflicted` に積む。purge 済みなら両方 `"forgotten"`。TSDoc と一致した。
+  - **core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）: TSDoc の約束と食い違う**【現物】。`FakeMemoryStore.updateStatus`（1351 行目）・`updateStatusWithEvent`（1389 行目）の CAS は `memory.status !== opts.expectedStatus` だけで `purgedAt` を見ない。`supersedeWithNewMemories` の2か所（1468・1494 行目）も同じ。purge 済みの行（`status` が `"forgotten"`、`purgedAt` が非 null）に `expectedStatus: "forgotten"` を渡すと、例外にならず `active` へ戻してしまう（`purgedAt` は残ったまま）。TSDoc の「purge 済みの記憶への、`expectedStatus` 付きの更新は、この例外で断られる」と合わない。Postgres・InMemory は ADR 0499 で揃えたが、Fake だけ取り残されている。0518 の【未確認】も 0499 の「確かめていないこと」も Fake を未確認と書いていたので、新しく見つかったというより、未確認だった所を読んで割れが確かめられた形【判断】。読んだだけで、Fake に対して走らせてはいない。
+- **文書の突き合わせ**【現物】:
+  - 関連する interface の TSDoc: `MemoryStatusConflictError` の既存の段落（`observedStatus` は読み直した値で正確な相手ではない）は 0518 の追記と矛盾しない。`MemoryPurgeConflictError`・`MemoryStore.updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の TSDoc に、purge 済みの行の CAS を逆の向きに言う文は無い。
+  - 適合スイート `packages/testkit/src/memory-store-conformance.ts`: `MemoryStatusConflictError` の検査（4522・4669 行目付近）は `observedStatus` が `"archived"` の通常の競合だけで、purge 済みの行の CAS の検査は無い（ADR 0499 が「conformance suite は変えない」と決めたとおり）。0518 の TSDoc の約束は Postgres・InMemory の歯だけが持つ。Fake が約束を破っていても、スイートでは捕まらない。
+  - CHANGELOG `[1.3.0]`（Breaking の「purge 済みの記憶」の項、58 行目）と `docs/migration-v1.md` 項目57（2532 行目「`expectedStatus` と `observedStatus` がどちらも `"forgotten"` になる」）・2791 行目の InMemory の項: 0518 の TSDoc・実装（Postgres・InMemory）と一致した。
+  - `[1.3.0]` の「【確かめていないこと】」（65 行目）は「`expectedStatus`・`observedStatus` が purge 済みの行で両方 `"forgotten"` になること」を未確認として挙げている。0518 が Postgres・InMemory で実測したので、その1項は今は確かめ済み。ただし 0518 は CHANGELOG に書かない（TSDoc だけの変更は載せない）と決めており、この行は出荷時点の記録として残るため、**触らなかった**【判断】（`MemoryPurgeConflictError` を使うべきかを決めていない、という後半は今も本当）。
+  - README（ルート・`packages/*/README.md`）・`docs/*.md`（`architecture.md`・`conformance.md`・`memory-model.md`）: purge 済みの行の `MemoryStatusConflictError` の中身を述べた所は無く（grep: `MemoryStatusConflictError|purge 済み|purgedAt|observedStatus`）、0518 と食い違う主張は無かった。`[1.2.0]` と migration-v1 の v1.2.0 の節には触っていない。
+- **直したもの**: なし（文書の側にずれは無かった）。
+- **コードの側を直すべき食い違い（材料）**【判断】: 上の core の Fake。`purgedAt` が非 null の行の CAS（`updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories`）を、InMemory の `casMismatch` と同じにすれば揃う。Fake は `packages/core/src/__tests__/` の中で公開されない面で、0518 が「ほかの担当が触っている」として触らなかった。直す前に、Fake を使う core の歯が purge 済みの行の CAS に依っていないか見る必要がある。ここでは直さない。
+- **【未確認】**: 0518 の歯（`store-status-write-checks.postgres.test.ts` の14本）と変異試験を走らせていない（DB が要る）。Fake の振る舞いを実際に呼んで確かめていない（読んだだけ）。SQL_ASCII の DB。
