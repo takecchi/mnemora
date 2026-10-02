@@ -1,10 +1,10 @@
-# ADR 0512: v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる——下書き
+# ADR 0512: v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる
 
-- **状態**: 提案 (2026-10)（下書き。実装は未着手）
+- **状態**: 採用 (2026-10)
 - **日付**: 2026-10-02
 
-クローン miku の決定の下書きである。書いたのは担い手で、オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
-**この PR（前半）は再現の歯と本 ADR の下書きまでで、`packages/postgres/src/memory-store.ts` は編集していない**（別の PR #1625 のマージ待ち）。直しは #1625 のマージ後に、同じ PR に積む。
+クローン miku の決定である。書いたのは担い手で、オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+この PR は前半（再現の歯と ADR の下書き）のあと、#1625 のマージ後に直しを積んだ。
 出所の区別: 【現物】は読んだコード、【実測】は手元で走らせた結果、【判断】は担い手の判定。
 
 - **文脈**:
@@ -19,7 +19,7 @@
   - **既存の fixture の限界**: `upgrade-from-v1.0.x.sql` は purge の**後**に recall を撃つ作りで、帯に purge 済みの記憶が載らない。fixture は作り直していない（遡った書き換えではないが、fixture の再生成は別の判断）。
   - **歯**: `packages/postgres/src/__tests__/repurge-legacy-index-band.postgres.test.ts`。v1.0.x の purge の状態は、今の purge のあとで `index_band` だけを purge 前へ SQL で戻して作る。【実測】直す前: 陽性対照（今の purge は伏せる）は緑、`Runtime.purge` のかけ直しの歯は「帯の digest が `[purged]` にならない」で赤（dryRun が書かないことの確認までは通る）。
 
-- **決めたこと（下書き）**:
+- **決めたこと**:
 
   1. **`scrubPurged` は、渡された id のうち `status = 'forgotten' AND purged_at IS NOT NULL` の行について、そのテナントの `recalls.index_band` の `digestBand` のエントリを伏せる**（ADR 0375 決定3 の SQL を、`scrubPurged` の同じトランザクションの3文目として呼ぶ）。エントリは残し `digest` だけを置き換える（ADR 0375 代替案3 のとおり。`digestBandCoverage` の件数を保つ）。
   2. **置き換える値は、その行の `memories.digest`（purge が書いたトゥームストーン、既定 `[purged]`）にする。**`scrubPurged` には `tombstone` が渡らないので、purge 時に使われた値を行から読む（v1.0.x の purge も `digest` にトゥームストーンを書いている。【現物】）。
@@ -43,7 +43,7 @@
                     AND m.status = 'forgotten' AND m.purged_at IS NOT NULL
                    WHERE e->>'digest' IS DISTINCT FROM m.digest)
      ```
-     最後の `IS DISTINCT FROM` で、既に伏せた行は更新しない（べき等）。【判断】細部は実装時に歯に合わせる。
+     最後の `IS DISTINCT FROM`（と `truncated` の有無）で、既に伏せた行は更新しない（べき等）。実装は `PostgresMemoryStore.scrubPurged` の3文目で、上の SQL を `jsonb_array_elements` の LEFT JOIN で書いた形（`labels` の文は変えていない）。
   4. **`InMemoryMemoryStore`（testkit）にも同じ範囲を実装する**。適合テスト（conformance）に `it` は足さない。`scrubPurged` の doc の契約（「`recalls` は書かない」）は書き換える。
 
 - **問い（オーナーの領分になりうる）**:
@@ -65,4 +65,8 @@
 
 - **これが覆るとしたら**: オーナーが migration での一括処理を選んだとき（上の SQL がそのまま本体になる）。`recalls.query` の扱いが決まったとき（同じ口に足す）。
 
-- **測っていないこと**: 本番規模での時間。v1.0.0・v1.0.1 の実物での再現（`UPDATE recalls` が無いことをコードで確認しただけで、v1.0.2 だけ走らせた）。SQL_ASCII の DB での歯。上の SQL の実行（下書きで、実行していない）。
+- **直した後の実測**（【実測】2026-10-02）: 歯は 2+1 本とも緑（Postgres の歯 2 本、InMemory の歯 1 本 `packages/testkit/src/__tests__/in-memory-scrub-purged-index-band.test.ts`）。既存の `repurge-legacy-residue`・`upgrade-from-released`・conformance の purge／scrubPurged（Postgres・InMemory）・core の `purge.test.ts` も緑。
+  - 変異（Postgres）: 書き換えを無効にする（`WHEN false`）は赤。やりすぎ（purge 済みかの条件を外し、全 id を `[x]` に置き換える）は赤。
+  - 変異（InMemory）: 他テナントの検査を外す、は赤。対象 id 以外のエントリも書き換える、は赤。`truncated` を残したまま書く、は赤。
+  - **検出できない変異**: Postgres の「テナントの条件を外す」は、memoryId が全テナントで一意なので、歯では検出できない（他テナントの帯に同じ memoryId を置けない）。防御のための条件として残した。
+  - **測っていないこと**: 本番規模での時間。v1.0.0・v1.0.1 の実物での再現（`UPDATE recalls` が無いことをコードで確認しただけで、v1.0.2 だけ走らせた）。SQL_ASCII の DB での歯。

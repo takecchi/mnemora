@@ -104,6 +104,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
+  - **何が変わるか**: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの目次帯のうち、渡された id の purge 済み（`forgotten` かつ `purgedAt` が非 `null`）の行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ置き換える。エントリは残し `truncated` は落とす。未 purge の行・他のエントリ・他テナントは触らない。べき等。
+  - **変えなかったこと**: `recalls.query`・`explain` は残る（`memoryId` で特定できない。何を消すかはオーナーの判断待ち）。migration での一括処理はしない。自動では走らず、利用者が purge をかけ直した行だけに効く。
+  - **破壊的と数えない理由**: 断る入力は増えない。`scrubPurged` の約束（purge の残骸を消す）に実装を戻す直しで、公開 API は変えていない。
+
 - **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
 
 - **`@mnemora/testkit/fixtures` の InMemory が、`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` の bigint の溢れを、Postgres と同じ条件で断る**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) の負債の返済）。本物の adapter は変えていない。
