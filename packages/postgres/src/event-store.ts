@@ -10,6 +10,7 @@ import type {
 import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertNoNulInNewMemoryEvent } from "./input-check.js";
+import { omittingParams } from "./omit-params.js";
 import {
   isUuidLike,
   normalizeUuidCase,
@@ -44,7 +45,9 @@ export class PostgresEventStore implements EventStore {
     // 形の壊れた memoryId は、今までどおり「memory not found」が先）。
     if (event.memoryId === null) {
       assertNoNulInNewMemoryEvent("PostgresEventStore", event);
-      const result = await this.db.execute(sql`
+      // ADR 0505: 例外の message（`cause` の連鎖を含む）から、SQL に付けた値（params。meta・digestSnapshot）を落とす。
+      const result = await omittingParams(() =>
+        this.db.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
           gen_random_uuid(),
@@ -58,7 +61,8 @@ export class PostgresEventStore implements EventStore {
           ${JSON.stringify(event.meta)}::jsonb
         )
         RETURNING *
-      `);
+      `),
+      );
       return rowToMemoryEvent(result.rows[0] as unknown as MemoryEventRow);
     }
     const memoryId = normalizeUuidCase(event.memoryId);
@@ -67,7 +71,8 @@ export class PostgresEventStore implements EventStore {
     }
     assertNoNulInNewMemoryEvent("PostgresEventStore", event);
     // 検査で落ちたかは、戻り値の `tenant_check_ok`（検査の結果そのもの）で見る（ADR 0398 決定2 と同じ作法）。
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       WITH mem AS (
         SELECT EXISTS (
           SELECT 1 FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${memoryId}
@@ -92,7 +97,8 @@ export class PostgresEventStore implements EventStore {
       SELECT mem.ok AS tenant_check_ok, ins.*
       FROM mem
       LEFT JOIN ins ON true
-    `);
+    `),
+    );
     const row = result.rows[0] as unknown as
       (MemoryEventRow & { tenant_check_ok: boolean }) | undefined;
     if (!row?.tenant_check_ok) {
