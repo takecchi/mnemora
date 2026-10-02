@@ -165,6 +165,50 @@ function assertOutboxRowsWritable(
 }
 
 /**
+ * ADR 0486: Observation の `payload` を、Postgres が `JSON.stringify` して `jsonb` に入れるときの規則のうち、
+ * `structuredClone` が断る値（関数・`Symbol`）と `toJSON` だけを先に当てる。残りの値（`NaN`・`-0`・`Date`・値が
+ * `undefined` の欄など）は、`ObserveEventInput.data` の TSDoc の表どおり、fixture はそのまま保持する。
+ * - `toJSON` を持つ値（`Date` を除く。`Date` は表どおり `Date` のまま保つ）→ `toJSON(欄の名前)` の戻り値に置き換える
+ *   （戻り値にも同じ規則を当てる。`data` 自体が持てば、object でない値になる）。
+ * - 関数・`Symbol` → 欄の値なら欄ごと消す、配列の要素なら `null`（`JSON.stringify` と同じ）。
+ * 入力は書き換えない（新しい値を返す）。循環参照・`BigInt` は、先に `jsonContainsNul` が `JSON.stringify` で断る。
+ */
+function toStorablePayload(value: unknown, key = ""): unknown {
+  let current = value;
+  if (
+    current !== null &&
+    typeof current === "object" &&
+    !(current instanceof Date) &&
+    typeof (current as { toJSON?: unknown }).toJSON === "function"
+  ) {
+    current = (current as { toJSON: (key: string) => unknown }).toJSON(key);
+  }
+  if (current === null || typeof current !== "object" || current instanceof Date) {
+    return current;
+  }
+  if (Array.isArray(current)) {
+    return current.map((element, index) => {
+      const next = toStorablePayload(element, String(index));
+      return typeof next === "function" || typeof next === "symbol" ? null : next;
+    });
+  }
+  if (
+    Object.getPrototypeOf(current) !== Object.prototype &&
+    Object.getPrototypeOf(current) !== null
+  ) {
+    return current; // Map・Set・型付き配列・クラスのインスタンスなどは、これまでどおり structuredClone に任せる。
+  }
+  const result: Record<string, unknown> = {};
+  for (const [name, element] of Object.entries(current)) {
+    const next = toStorablePayload(element, name);
+    if (typeof next !== "function" && typeof next !== "symbol") {
+      result[name] = next;
+    }
+  }
+  return result;
+}
+
+/**
  * Observation を書く口（`createObservation` / `createObservationWithOutbox`）で、Postgres が
  * NUL を拒む欄を先に検査する（Issue #816 の NUL 側の残り）。`subjectId`・`externalId`・
  * `kind` は `text` 列（`invalid byte sequence for encoding "UTF8": 0x00`）、`payload`・
@@ -678,7 +722,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         subjectId: input.subjectId ?? null,
         externalId: input.externalId ?? null,
         kind: input.kind,
-        payload: input.payload,
+        payload: toStorablePayload(input.payload),
         occurredAt: input.occurredAt ?? null,
         recordedAt: input.recordedAt ?? new Date(),
         // Issue #280: `occurredAt` と同じ経路。

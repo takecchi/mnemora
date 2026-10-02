@@ -36,6 +36,8 @@ Fake だけが通していた。InMemory・Postgres はどちらも断る【実�
 
 **触っていないもの**【判断】: `halfLifeHours` の範囲（`(0, ∞)`。Fake は意図して見ない。`recall-pipeline.test.ts` が `halfLifeHours: 0` の「壊れた」記憶を作る。上の E6 の対照の歯が、通ることを縛る）。**E6 で `decayFloorSeq` の負を断ると、`recall-decay-gate.test.ts` の2本が落ちた**（「活動時計では既に沈んでいる値」として `-1` を書いていた）。同じ意味（`nowSeq` ちょうどで沈む）になる `0` に、その2本のデータを替えた（Postgres の CHECK `memories_decay_seq_non_negative` は負を拒むので、`-1` は本番に無い形だった）。
 
+**E1 と ADR 0488 の検査の順**: `FakeRelationStore.link` では、`ctx` の検査が先で、ADR 0488 の `kind` の検査が後（main を取り込んだとき両方を残した）。`ctx.tenantId` と `kind` の両方が壊れた入力では、`MalformedIdentifierError` が出る。
+
 ### 1c. 当てた形 — 形 D（InMemory。testkit は公開なので、落ちる入力が増える）
 
 InMemory も Fake も通し、Postgres だけが断っていた入力【実測】。
@@ -78,6 +80,8 @@ InMemory も Fake も通し、Postgres だけが断っていた入力【実測�
 操作の対象の `id` を大文字にすると、Postgres は同じ行として扱い（`normalizeUuidCase`）、Fake・InMemory は別 id として不在扱いにする。fixture の id は小文字の `mem-N` で uuid ではない。ADR 0469 が「操作の対象の `id` の大文字小文字は変えない（ADR 0446 の既存の違い）」と引き受けた。ここでは**揃えない**（下の材料1）。
 
 ## 3. 材料（オーナーの領分。直していない）
+
+- **形 B は ADR 0521（別の担当が進めている、InMemory・Fake の大文字 id を Postgres に揃える直し）で扱う。** #1603 では手を付けない。
 
 1. **形 B を揃えるか**【判断】: Fake・InMemory の id は小文字の `mem-N` なので、入口で小文字化しても別 id と混ざらず、落ちる入力は減る側（🟡）。ただし ADR 0469 の決定3が範囲を絞った判断で、広げるなら1本の ADR になる。**エラーではなく、黙って結果が変わる口**があるので、揃えるなら先にここから:
    - `aggregateScope` の `digestBand.excludeMemoryIds` に大文字: Postgres は除外し、Fake・InMemory は除外しない（digest が1件多い）。ADR 0485 は runtime 層の `findCorrectionCandidates` だけ直した。

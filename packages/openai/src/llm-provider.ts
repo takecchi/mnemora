@@ -14,6 +14,7 @@ import type {
 } from "@mnemora/core";
 import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
+import { assertFiniteNonNegative } from "./option-check.js";
 import type { OpenAIChatClient } from "./client-types.js";
 import { OpenAILLMProviderError } from "./errors.js";
 import type { OpenAIJsonSchemaFormat } from "./json-schema.js";
@@ -71,6 +72,9 @@ export interface OpenAILLMProviderOptions {
    * `answer-time-weighting` ベンチが、temperature を固定して非決定性を切り分けるために
    * `CreateProvidersOptions.llmTemperature`（`providers.ts`）経由でのみ使う——
    * 他のベンチ・呼び出し元はこの欄を渡さない。
+   *
+   * ⚠ ADR 0498: **渡すなら有限で `0` 以上の数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら
+   * `RangeError`。message に値が入る）。上限は API・モデルごとに違うので見ない（超えた値は API が断る）。
    */
   temperature?: number | undefined;
 }
@@ -380,6 +384,10 @@ export class OpenAILLMProvider implements LLMProvider {
   private readonly temperature?: number;
 
   constructor(options: OpenAILLMProviderOptions) {
+    // ADR 0498: 省略（`undefined`）は渡さない（API の既定のまま）。渡すなら有限で 0 以上。上限は API・モデルごとに違うので見ない。
+    if (options.temperature !== undefined) {
+      assertFiniteNonNegative("OpenAILLMProvider", "temperature", options.temperature);
+    }
     if (options.client !== undefined) {
       this.client = options.client;
     } else {

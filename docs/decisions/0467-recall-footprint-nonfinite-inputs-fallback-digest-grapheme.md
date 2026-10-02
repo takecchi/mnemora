@@ -88,3 +88,5 @@
 - **これが覆るとしたら**: `FootprintReason` の union に入力不正の札を足すと決まったとき（面Aの `too_close_to_call` を札つきに替える）。フォールバック digest の保存値を書記素で切ることが、利用者の期待（`digestFallbackLength` は UTF-16 コードユニット数）とずれると分かったとき（面B。長さの単位は変えていない）。
 
 - **測っていないこと**: 実 Postgres と実 API（どちらも使っていない。面A・Bとも純関数）。`reextract` で digest が新しい形に替わる経路の実走。`embeddingInput` で digest を埋め込む構成での近傍の順位の動き。`Intl.Segmenter` の書記素の規則が Node の版で変わったときの境界の差（ADR 0424 と同じ未確認）。
+
+- **追記（ADR 0498、2026-10-02）**: 面C（provider のコンストラクタの数値オプション）は、オーナーが v1.X.0 での破壊的変更を許したので、構築時に断る形で直した（`dimensions`・`maxTokens`・`numThreads` は正の安全な整数、`temperature` は有限で 0 以上）。

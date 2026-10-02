@@ -93,6 +93,8 @@ export interface RelationStore {
    *
    * - `kind` を省略すると、すべての `kind` を対象にする（今日は `'contradicts'`
    *   の1種類しか無いので実質差は無いが、将来 `kind` が増えたときのため型を残す）。
+   *   （型の外の偽の値——`""`・`null`・`0`——が実行時に渡ったときも、`PostgresRelationStore`・`InMemoryRelationStore`・
+   *   core の Fake は同じく絞り込まずに全件を返す。ADR 0488 で揃えた今の振る舞いで、省略として約束する形ではない。）
    * - 返す順序は規定しない——呼び出し側（`Runtime`）が必要な順（例:
    *   `validFrom` の新しい順）に並べ替える。
    * - テナント分離: `ctx.tenantId` と異なるテナントの行は返さない。

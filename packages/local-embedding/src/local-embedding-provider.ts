@@ -8,6 +8,7 @@ import type {
 } from "./pipeline.js";
 import { createLocalEmbeddingPipeline } from "./pipeline.js";
 import { LocalEmbeddingProviderError, isLocalEmbeddingProviderError } from "./errors.js";
+import { assertPositiveSafeInteger } from "./option-check.js";
 import { lastTransformersCacheDir, revisionCacheRoot } from "./transformers-cache-place.js";
 
 /**
@@ -149,7 +150,12 @@ export interface LocalEmbeddingProviderOptions {
   repo?: string | undefined;
   /** 量子化の別。既定 `"q8"`。 */
   dtype?: LocalEmbeddingDtype | undefined;
-  /** 宣言する次元数。既定 `256`。**実物と食い違えば初回 `embed()` で例外になる。** */
+  /**
+   * 宣言する次元数。既定 `256`。**実物と食い違えば初回 `embed()` で例外になる。**
+   *
+   * ⚠ ADR 0498: **渡すなら正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら
+   * `RangeError`。message に値が入る）。
+   */
   dimensions?: number | undefined;
   /**
    * `space.model` に載せる文字列。既定 `"ruri-v3-30m/sym"`。
@@ -180,7 +186,12 @@ export interface LocalEmbeddingProviderOptions {
    * `node_modules` を消す・入れ直すと一緒に消える。
    */
   cacheDir?: string | undefined;
-  /** onnxruntime の intra-op スレッド数。既定 `4`。 */
+  /**
+   * onnxruntime の intra-op スレッド数。既定 `4`。
+   *
+   * ⚠ ADR 0498: **渡すなら正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら
+   * `RangeError`。message に値が入る）。
+   */
   numThreads?: number | undefined;
   /**
    * `embed(ctx, texts)` を1回の推論に渡す最大件数。既定
@@ -279,6 +290,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly #inflight = new Set<Promise<unknown>>();
 
   constructor(options: LocalEmbeddingProviderOptions = {}) {
+    // ADR 0498: 省略（`undefined`）は既定。渡すなら正の安全な整数。
+    if (options.dimensions !== undefined) {
+      assertPositiveSafeInteger("LocalEmbeddingProvider", "dimensions", options.dimensions);
+    }
+    if (options.numThreads !== undefined) {
+      assertPositiveSafeInteger("LocalEmbeddingProvider", "numThreads", options.numThreads);
+    }
     // ⭐ **宣言（repo と modelId）が食い違ったまま space が確定するのを、ここで落とす。**
     //
     // `embed()` の次元検査（このファイル下部、`vector.length !== this.space.dimensions`）は
