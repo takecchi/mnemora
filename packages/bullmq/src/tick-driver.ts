@@ -80,15 +80,15 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * `start()` した driver の値）、1回の発火はどれか1つのテナントの tick にしかならない。
  *
  * ## 完了したジョブは直近 1000 件だけ残る（失敗したジョブは全部残る）
-
-ADR 0548: この driver は繰り返しジョブの template（`upsertJobScheduler` の第3引数）に `removeOnComplete: { count: 1000 }`
-を既定で入れる。完了したジョブは新しい順に 1000 件だけ Redis に残り、それより古いものは BullMQ が消す
-（`completedJobsToKeep` で件数を変えられる）。以前（ADR 0449 まで）は指定が無く、完了したジョブも全部残った
-（`everyMs` ごとに1件ずつ溜まった）。
-**`removeOnFail` は指定していない。** BullMQ 6.3.8 は指定が無いと失敗したジョブを全部残す
-（`redis-queue-backend.js` の `getKeepJobs` が `{ count: -1 }` を返す）。失敗は調べる材料なので残し、消す口は足していない。
-溜まるのが気になるなら、同じ `queueName` の `Queue` を自分で作り、`queue.clean(grace, limit, "failed")` を定期的に呼ぶ
-（README「完了したジョブは直近 1000 件だけ残る」）。
+ *
+ * ADR 0548: この driver は繰り返しジョブの template（`upsertJobScheduler` の第3引数）に `removeOnComplete: { count: 1000 }`
+ * を既定で入れる。完了したジョブは新しい順に 1000 件だけ Redis に残り、それより古いものは BullMQ が消す
+ * （`completedJobsToKeep` で件数を変えられる）。以前（ADR 0449 まで）は指定が無く、完了したジョブも全部残った
+ * （`everyMs` ごとに1件ずつ溜まった）。
+ * **`removeOnFail` は指定していない。** BullMQ 6.3.8 は指定が無いと失敗したジョブを全部残す
+ * （`redis-queue-backend.js` の `getKeepJobs` が `{ count: -1 }` を返す）。失敗は調べる材料なので残し、消す口は足していない。
+ * 溜まるのが気になるなら、同じ `queueName` の `Queue` を自分で作り、`queue.clean(grace, limit, "failed")` を定期的に呼ぶ
+ * （README「完了したジョブは直近 1000 件だけ残る」）。
  */
 export interface CreateBullmqTickDriverOptions {
   /**
