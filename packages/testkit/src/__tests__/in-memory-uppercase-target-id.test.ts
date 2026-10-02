@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createRuntime } from "@mnemora/core";
+import { createRuntime, isSourceMemoryStatusChangedError } from "@mnemora/core";
 import type { Ctx, LLMProvider, MemoryId } from "@mnemora/core";
-import { buildNewMemoryFixture } from "../test-data.js";
+import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
@@ -228,5 +228,106 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
     const a = await make();
     const m = await rt.markContested(ctx, a, up(a));
     expect(m.outcome.kind).toBe("ineligible");
+  });
+
+  it("EventStore.get: 大文字のイベント id でも同じイベントが当たる（ADR 0556。Postgres は uuid 型の列で比べる）", async () => {
+    const { make, stores } = setup();
+    const a = await make();
+    const stored = await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: a,
+      kind: "updated",
+      actor: { type: "system" },
+      digestSnapshot: "d",
+      meta: {},
+    });
+    expect((await stores.eventStore.get(ctx, stored.id))?.id).toBe(stored.id);
+    expect((await stores.eventStore.get(ctx, stored.id.toUpperCase() as never))?.id).toBe(
+      stored.id,
+    );
+  });
+
+  it("abortIfSuperseded: 大文字の id でも superseded を見落とさず、何も書かない。changed[].id は Postgres と同じ小文字（ADR 0556）", async () => {
+    const { stores, up } = setup();
+    const store = stores.memoryStore;
+    const anchor = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "anchor" }),
+    );
+    const src = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: "src",
+        status: "superseded",
+        supersededById: anchor.id,
+      }),
+    );
+    const target = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "target" }),
+    );
+    const obs = await store.createObservation(
+      ctx,
+      buildNewObservationFixture({ tenantId: ctx.tenantId }),
+    );
+    const keyed = (hash: string) => ({
+      input: buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: hash,
+        sourceObservationId: obs.id,
+        extractorVersion: "v1",
+      }),
+      jobKinds: ["embed" as const],
+    });
+    const ev = (memoryId: MemoryId, kind: "created" | "superseded") => ({
+      tenantId: ctx.tenantId,
+      memoryId,
+      kind,
+      actor: { type: "system" as const },
+      digestSnapshot: "d",
+      meta: {},
+    });
+    const opts = { abortIfSuperseded: [up(src.id)] };
+    const entries: Array<[string, () => Promise<unknown>]> = [
+      [
+        "createMemoryWithOutbox",
+        () => store.createMemoryWithOutbox(ctx, keyed("w1").input, ["embed"], opts),
+      ],
+      [
+        "createMemoriesWithOutboxAndEvents",
+        () =>
+          store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            [keyed("w2")],
+            (m) => ev(m.id, "created"),
+            opts,
+          ),
+      ],
+      [
+        "supersedeWithNewMemories",
+        () =>
+          store.supersedeWithNewMemories!(
+            ctx,
+            [keyed("w3")],
+            [{ id: target.id, supersededByIndex: 0, event: ev(target.id, "superseded") }],
+            opts,
+          ),
+      ],
+    ];
+    for (const [method, call] of entries) {
+      let err: unknown;
+      try {
+        await call();
+      } catch (e) {
+        err = e;
+      }
+      expect(isSourceMemoryStatusChangedError(err), method).toBe(true);
+      const e = err as { method: string; changed: Array<{ id: string; observedStatus: string }> };
+      expect(e.method).toBe(method);
+      expect(e.changed).toEqual([{ id: src.id, observedStatus: "superseded" }]);
+      expect(await store.listBySourceObservation(ctx, obs.id, "v1")).toEqual([]);
+    }
+    expect((await store.get(ctx, target.id))?.status).toBe("active");
   });
 });

@@ -4214,7 +4214,9 @@ export class FakeEventStore implements EventStore {
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
     assertWellFormedCtx(ctx);
-    return this.backing.events.find((e) => e.id === id && e.tenantId === ctx.tenantId) ?? null;
+    // ADR 0556: 大文字小文字は区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。この Fake の id は小文字の `evt-N` だけ。
+    const lowered = id.toLowerCase();
+    return this.backing.events.find((e) => e.id === lowered && e.tenantId === ctx.tenantId) ?? null;
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {

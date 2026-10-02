@@ -1140,7 +1140,9 @@ export class InMemoryMemoryStore implements MemoryStore {
       return;
     }
     const changed: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
-    for (const id of ids) {
+    for (const raw of ids) {
+      // ADR 0556: 大文字小文字は区別しない。`changed[].id` は小文字（`@mnemora/postgres` は行の uuid を読み戻すので小文字）。
+      const id = normId(raw);
       const memory = this.memories.get(id);
       if (
         memory !== undefined &&
