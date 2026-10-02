@@ -141,3 +141,17 @@
 - **突き合わせの結果**【判断】: 文書・TSDoc・CHANGELOG・migration-v1 に変更が無いので、この ADR の照合の入力は変わらない。0510 の照らした範囲（`main` の `0bdc0e27`）と、この ADR とそれ以前の掃き（0528・0533）が直した所は重ならない（0510 は数値・定数、こちらは識別子・例外・振る舞いの記述）。0510 が「本文の側が追記で自分の古さを書いている」として直さなかった3件（`docs/conformance.md` §2.1 の6 suite、`docs/memory-model.md` 行12・13 の `tick()`、`docs/release-v1.md` の当時の実測）は、この ADR でも同じ理由で直さない。
 - **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。
 - **【未確認】**: 0510 の「一致した」の各行を当て直していない。機械照合と陽性対照もこの回は取っていない（差に文書の変更が無いため）。
+
+## 追い足し（基準 main `1d4218a0`、ADR 0512 の分）
+
+0512（#1634、`1d4218a0`）が main に入ったので掃いた（`git diff 77053aa4 1d4218a0`。merge は衝突なし）。この節もマネージャーが書いた。
+
+- **0512 の中身**【現物】: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの `recalls.index_band` の `digestBand` のうち、渡された id の purge 済みの行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ伏せるようになった（`truncated` は落とす。`recalls.query`・`explain` は書かない）。`MemoryStore.scrubPurged?` の TSDoc・CHANGELOG `[1.3.0]`・migration-v1 の「🟡 v1.2.0 → 次の版」は 0512 自身が書いている。
+- **探した場所**【現物】: `grep -rn scrubPurged` を `docs/*.md`・`packages/*/README.md`・`packages/core/src/runtime.ts`・`packages/core/src/interfaces/*.ts` に。`index_band|indexBand|目次帯` に `purge|伏せ|残` を重ねて `docs/memory-model.md`・`packages/postgres/README.md` に。
+- **直したもの**（TSDoc だけ。実装は変えていない）: `packages/core/src/runtime.ts` の
+  1. `PurgeResidueCleanup` の TSDoc: 後始末の中身を「`tags`・`attributes`・claim key・label の紐付けの掃除」とだけ書いていたので、ADR 0512 から目次帯の digest を伏せることも含む、と足した。
+  2. `PurgeOutcome` の `"already_purged"` の説明: 同じく `scrubPurged` が伏せるものに目次帯の digest を足した。あわせて、同じ段落の「**`MemoryStore` への書き込みは一切起きていない**」が、同じ段落の後半（`scrubPurged` をベストエフォートで試みる。ADR 0437 から）と食い違っていたので、「下の `scrubPurged` の後始末を除く」と限定した（この食い違いは 0512 より前、ADR 0437 からのもの）。
+- **触っていないもの**: `docs/migration-v1.md` の「🔴 v1.1.0 → v1.2.0」の節の `scrubPurged?` の項（「`tags`… が消える」の列挙）は、v1.2.0 の節なので触らない（クローンの決定）。`docs/memory-model.md` の `recalls` の行（ADR 0375 の追記）は `purge()` の時点の振る舞いの記述で、`scrubPurged` の射程を書いていないので、0512 のあとも成り立つ。
+- **コードの側を直すべき食い違い**: 見つからなかった。
+- **【未確認】**: 0512 の歯（実 Postgres・InMemory）を走らせていない。機械照合と陽性対照はこの回は取っていない（直したのは TSDoc の文だけで、新しい識別子を書いていない）。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、上の grep、`packages/core` の `tsc --noEmit`、`node scripts/generate-adr-index.mjs`。
