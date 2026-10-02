@@ -281,13 +281,14 @@ async function runOneProbe(
   // 過去の時刻で評価されてしまう。
   //
   // ⭐⚠ **戻す先は `realNow` ではなく、いま取り直した実時刻でなければならない。**
-  // `outbox.available_at` は Postgres の SQL `now()` で入り、アプリ側の `Clock` を
-  // 読まない(`packages/postgres/src/memory-store.ts` の `INSERT INTO outbox`)。
-  // 一方 `tick()` の claim 条件は `available_at <= clock.now()` を**アプリ側の
-  // `Clock` で**評価する(`packages/core/src/runtime.ts`)。⟹ `clock` を取り込み開始
-  // より前の時刻(= `realNow`)に戻すと、`available_at`(取り込み中の DB 時刻)のほうが
-  // 後になり、**embed ジョブが1件も claim されずに ANN 候補が空になる。**
-  // **実測でこれを踏んだ**——8 probe すべてが「この項を持つ候補が無い」になった。
+  // (歴史的な理由で残している。ADR 0355 より前は `outbox.available_at` が Postgres の
+  // SQL `now()` で入り、アプリ側の `Clock` を読まなかった。いまは runtime が `clock.now()`
+  // 由来の `now` を store に渡すので、`available_at` も注入した時計に従う。ADR 0559。)
+  // 当時は `tick()` の claim 条件 `available_at <= clock.now()` を**アプリ側の
+  // `Clock` で**評価していたので、`clock` を取り込み開始より前の時刻(= `realNow`)に
+  // 戻すと、`available_at`(取り込み中の DB 時刻)のほうが後になり、
+  // **embed ジョブが1件も claim されずに ANN 候補が空になった。**
+  // **実測でこれを踏んだ**——8 probe すべてが「この項を持つ候補が無い」になった(ADR 0355 より前)。
   //
   // 🔴 Issue #719: 素の `new Date()` を渡すだけでは足りない——`available_at`
   // (Postgres の `now()`、us精度)と同じ ms 内でこの時刻を読むと claim が1件も
