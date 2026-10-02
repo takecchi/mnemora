@@ -309,10 +309,11 @@ export interface RuntimeDeps {
   embeddingProvider: EmbeddingProvider;
   /**
    * 省略時は `systemClock`。
-   * ⚠ 注入した時計は、store が埋める時刻（監査ログの `at`・outbox の `availableAt` など）には届かず、
-   * 壁時計より過去の時計では `tick` がジョブを取らない。reinforce は注入した時計に従うが、監査ログの `at` は
-   * `restoreSuperseded` の `unsuperseded` だけが注入した時計で、`restoreArchived` の `restored`・`sweepArchive` の
-   * `archived` は壁時計——{@link Clock} の doc 参照（Issue #1237）。
+   * 注入した時計は、runtime が積む outbox 行の `availableAt`・`createdAt` と、監査ログの `at` にも届く
+   * （runtime は `clock.now()` 由来の `now` を store に渡す。ADR 0355、記述の訂正は ADR 0559）。
+   * 壁時計より過去の時計でも、`tick` は積んだジョブを取れる。`restoreArchived` の `restored` の `at` も
+   * 注入した時計で、`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now` を使う。
+   * 今も壁時計のままの列は {@link Clock} の doc 参照（Issue #1237）。
    */
   clock?: Clock | undefined;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
