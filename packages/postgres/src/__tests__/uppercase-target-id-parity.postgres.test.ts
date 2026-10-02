@@ -339,30 +339,30 @@ const cases: Case[] = [
   },
   {
     name: "edge.markContested(a, A)",
-    run: (e, f) => e.rt.markContested(ctx, e.ids[0], up(e.ids[0])),
+    run: (e) => e.rt.markContested(ctx, e.ids[0], up(e.ids[0])),
   },
   {
     name: "edge.forget([a, A])",
-    run: (e, f) => e.rt.forget(ctx, { memoryIds: [e.ids[0], up(e.ids[0])] }),
+    run: (e) => e.rt.forget(ctx, { memoryIds: [e.ids[0], up(e.ids[0])] }),
   },
   {
     name: "edge.markContestedGroup([a, A, b])",
-    run: (e, f) => e.rt.markContestedGroup(ctx, [e.ids[0], up(e.ids[0]), e.ids[1]]),
+    run: (e) => e.rt.markContestedGroup(ctx, [e.ids[0], up(e.ids[0]), e.ids[1]]),
   },
   {
     name: "edge.resolveContested(winner=UP, ids lo)",
     pre: (e) => e.rt.markContested(ctx, e.ids[0], e.ids[1]),
-    run: (e, f) =>
+    run: (e) =>
       e.rt.resolveContested(ctx, e.ids[0], e.ids[1], { kind: "supersede", winnerId: up(e.ids[0]) }),
   },
   {
     name: "edge.resolveContested(second=UP only)",
     pre: (e) => e.rt.markContested(ctx, e.ids[0], e.ids[1]),
-    run: (e, f) => e.rt.resolveContested(ctx, e.ids[0], up(e.ids[1]), { kind: "both_active" }),
+    run: (e) => e.rt.resolveContested(ctx, e.ids[0], up(e.ids[1]), { kind: "both_active" }),
   },
   {
     name: "edge.markContested(supersededById UP via updateStatus)",
-    run: (e, f) =>
+    run: (e) =>
       e.st.memoryStore
         .updateStatus(ctx, e.ids[0], "superseded", { supersededById: up(e.ids[1]) })
         .then((m: any) => ({ id: m.id, by: m.supersededById })),
@@ -370,7 +370,7 @@ const cases: Case[] = [
   {
     name: "edge.restoreArchived([lo, UP])",
     pre: arch,
-    run: (e, f) => e.rt.restoreArchived(ctx, { memoryIds: [e.ids[3], up(e.ids[3])] }),
+    run: (e) => e.rt.restoreArchived(ctx, { memoryIds: [e.ids[3], up(e.ids[3])] }),
   },
   {
     name: "edge.purge twice (lo then UP)",
@@ -378,7 +378,7 @@ const cases: Case[] = [
       await e.rt.forget(ctx, { memoryId: e.ids[0] });
       await e.rt.purge(ctx, { memoryId: e.ids[0] });
     },
-    run: (e, f) => e.rt.purge(ctx, { memoryId: up(e.ids[0]) }),
+    run: (e) => e.rt.purge(ctx, { memoryId: up(e.ids[0]) }),
   },
   {
     name: "m5.aggregateScope(digestBand.excludeMemoryIds)",
@@ -497,7 +497,7 @@ const cases: Case[] = [
       );
       (e as any).job = r.jobs[0];
     },
-    run: async (e, f) => {
+    run: async (e) => {
       const claimed = await e.st.outboxStore.claimBatch(ctx, {
         limit: 10,
         now: new Date(Date.now() + 3600e3),
@@ -545,7 +545,7 @@ const cases: Case[] = [
       );
       (e as any).job = r.jobs[0];
     },
-    run: async (e, f) => {
+    run: async (e) => {
       const claimed = await e.st.outboxStore.claimBatch(ctx, {
         limit: 10,
         now: new Date(Date.now() + 3600e3),
@@ -646,7 +646,7 @@ const cases: Case[] = [
     pre: async (e) => {
       (e as any).rec = await e.rt.recall(ctx, { vector: [1, 0, 0], limit: 10 });
     },
-    run: (e, f) => {
+    run: (e) => {
       const id = (e as any).rec.recallId;
       return e.st.memoryStore
         .getRecall(ctx, (e as any).variantUP ? id.toUpperCase() : id)
@@ -658,7 +658,7 @@ const cases: Case[] = [
     pre: async (e) => {
       (e as any).rec = await e.rt.recall(ctx, { vector: [1, 0, 0], limit: 10 });
     },
-    run: (e, f) => {
+    run: (e) => {
       const id = (e as any).rec.recallId;
       return e.st.memoryStore.recordUsage(ctx, (e as any).variantUP ? id.toUpperCase() : id, [
         e.ids[0],
