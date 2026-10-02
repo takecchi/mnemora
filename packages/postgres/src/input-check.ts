@@ -185,3 +185,59 @@ export function assertNoNulInNewMemoryEvent(
     );
   }
 }
+
+/**
+ * ADR 0505（ADR 0456 M4 の残り）: `observations` へ書く値の NUL を、DB に触れる前に名指しして断る
+ * （`createObservation`・`createObservationWithOutbox`）。以前は DB の生の例外（`DrizzleQueryError`。`kind` は
+ * `invalid byte sequence for encoding "UTF8": 0x00`、`payload`・`attributes`（`jsonb`）は `unsupported Unicode escape
+ * sequence`）だった。断る入力は増やさない。欄名・検査の順・文面は testkit の `InMemoryMemoryStore` と同じ
+ * （`<owner>: <欄> must not contain NUL characters (U+0000)`）。
+ *
+ * `subjectId`・`externalId` は、`assertWellFormedIdentifier`（ADR 0423）が先に断る（NUL を含む識別子）ので、ここでは見ない。
+ * 型を外れた値（文字列でない `kind`）は見ない——以前と同じ経路（DB の検査）に任せる。
+ */
+export function assertNoNulInNewObservation(
+  owner: string,
+  input: { kind: unknown; payload: unknown; attributes?: unknown },
+): void {
+  if (typeof input.kind === "string") {
+    assertNoNul(owner, "kind", input.kind);
+  }
+  if (jsonStringsSome(input.payload, hasNul)) {
+    throw new Error(`${owner}: payload must not contain NUL characters (U+0000)`);
+  }
+  if (jsonStringsSome(input.attributes ?? {}, hasNul)) {
+    throw new Error(`${owner}: attributes must not contain NUL characters (U+0000)`);
+  }
+}
+
+/**
+ * ADR 0505（ADR 0456 M4 の残り）: `recalls` へ書く値（`jsonb` 列）の NUL を、DB に触れる前に名指しして断る
+ * （`createRecall`）。以前は `unsupported Unicode escape sequence` の生の例外だった。断る入力は増やさない。
+ * 文面は testkit の `InMemoryMemoryStore.createRecall` と同じ（`createRecall: <欄> must not contain NUL characters (U+0000)`）。
+ * 欄の順も同じ。`subjectId` は `assertWellFormedIdentifier` が先に断る。JSON にならない値（`undefined` など）は
+ * ここでは見ない（以前と同じ経路——`NOT NULL` の列が拒む）。
+ */
+export function assertNoNulInNewRecall(record: {
+  query: unknown;
+  budget?: unknown;
+  omitted: unknown;
+  usage: unknown;
+  indexBand: unknown;
+  explain: unknown;
+  returnedMemories: unknown;
+}): void {
+  for (const [field, value] of [
+    ["query", record.query],
+    ["budget", record.budget],
+    ["omitted", record.omitted],
+    ["usage", record.usage],
+    ["indexBand", record.indexBand],
+    ["explain", record.explain],
+    ["returnedMemories", record.returnedMemories],
+  ] as const) {
+    if (jsonStringsSome(value, hasNul)) {
+      throw new Error(`createRecall: ${field} must not contain NUL characters (U+0000)`);
+    }
+  }
+}
