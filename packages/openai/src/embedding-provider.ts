@@ -67,6 +67,7 @@ export interface OpenAIEmbeddingProviderOptions {
  *
  * 構築時: `client` を省き、キーが見つからなければ OpenAI の SDK が `OpenAIError`（`Missing credentials`）を投げる。
  * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ * `dimensions` が正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498。`OpenAIEmbeddingProviderOptions.dimensions` の doc）。
  *
  * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
  * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
