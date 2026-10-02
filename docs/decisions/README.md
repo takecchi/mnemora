@@ -529,5 +529,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0528](./0528-doc-code-drift-sweep-0496-0500-0522-0523.md) | 文書とコードのずれを横に掃く（第3弾）— ADR 0496・0500・0522・0523 と、追い足した 0504・0499・0502・0506・0525・0521・0524 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0529](./0529-tick-mixed-kinds-concurrency-and-lease.md) | 穴探し — ADR 0526「測っていないこと」の実測。`tick` が種類を混ぜて回るとき・並行する複数の `tick`・リースが切れた後の再取得（Runtime の層。3者一致。割れは見つからなかった。決定的にできる部分だけ歯にした） | 採用 (2026-10) |
 | [0530](./0530-batch-exceeds-lease-double-processing-per-kind.md) | 穴探し — 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごとに3者で実測する（TSDoc どおりで一致。`consolidate` の結末だけ TSDoc に書いていなかったので書いた） | 採用 (2026-10) |
+| [0535](./0535-doc-code-drift-sweep-0530.md) | 文書とコードのずれを横に掃く（第5弾の1回目）— ADR 0530 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
