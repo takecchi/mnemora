@@ -145,6 +145,8 @@ export class InMemoryVectorStore implements VectorStore {
     vector: number[],
   ): Promise<void> {
     assertWellFormedCtx(ctx);
+    // ADR 0521: 大文字の id も同じ記憶として受け、小文字（この fixture の id の綴り）で持つ。
+    memoryId = memoryId.toLowerCase() as MemoryId;
     // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
     // `search` は既に `this.memoryStore.get(...)` を真実の源として引いている
     // （クラス doc 参照）——書き込み側（upsert）でも同じ非対称を強制する。
@@ -406,7 +408,7 @@ export class InMemoryVectorStore implements VectorStore {
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
     assertWellFormedCtx(ctx);
-    this.entries.delete(this.key(space, ctx.tenantId, memoryId));
+    this.entries.delete(this.key(space, ctx.tenantId, memoryId.toLowerCase() as MemoryId));
   }
 
   /**
@@ -422,7 +424,7 @@ export class InMemoryVectorStore implements VectorStore {
     if (memoryIds.length === 0) {
       return;
     }
-    const idSet = new Set<MemoryId>(memoryIds);
+    const idSet = new Set<MemoryId>(memoryIds.map((id) => id.toLowerCase() as MemoryId));
     for (const [key, entry] of this.entries) {
       if (entry.tenantId === ctx.tenantId && idSet.has(entry.memoryId)) {
         this.entries.delete(key);
@@ -474,7 +476,8 @@ export class InMemoryVectorStore implements VectorStore {
     // スキップし、Postgres の集合演算と同じ「一意な id の集合」に揃える。
     const seen = new Set<MemoryId>();
     const results: VectorEntry[] = [];
-    for (const memoryId of memoryIds) {
+    for (const rawMemoryId of memoryIds) {
+      const memoryId = rawMemoryId.toLowerCase() as MemoryId;
       if (seen.has(memoryId)) {
         continue;
       }

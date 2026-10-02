@@ -35,7 +35,8 @@ import {
  * - `resolveOrphanedContested`: 生存側も対向も store から読んだ値だけを使い、渡された id と比べる箇所は無い
  *   （確かめの歯。直す前から緑）。
  *
- * testkit の fixture の id は大文字小文字を区別するので、fixture では大文字は今どおり `not_found`・`RangeError`。
+ * testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、大文字は `not_found`・`RangeError` だった。
+ * fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -68,7 +69,7 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore,
-        caseInsensitive: false,
+        caseInsensitive: true, // ADR 0521: fixture も大文字小文字を区別しない（以前は false）
         runtime: createRuntime({
           ...shared,
           memoryStore,
