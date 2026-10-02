@@ -1565,17 +1565,40 @@ export class FakeMemoryStore implements MemoryStore {
     // の doc コメント参照）。
 
     // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
+    // ADR 0564（Issue #768）: news[i] の作成が途中で投げたら（実在しない `sourceObservationId` など）、それまでに作った
+    // 記憶・冪等キーの索引・ラベル・outbox の行を巻き戻して投げ直す（`InMemoryMemoryStore` は書き込みの前に全部の検査を
+    // 済ませ、Postgres は1トランザクション。この Fake は検査と書き込みが `createMemoryIdempotent` に同居しているので巻き戻す）。
+    // 巻き戻すのは news の作成が触る Map と outbox だけ——`supersede` の書き込みはこの後ろで、投げない。
+    const memoriesBefore = new Map(this.backing.memories);
+    const extractionIndexBefore = new Map(this.backing.extractionIndex);
+    const labelsBefore = new Map(this.backing.labels);
+    const memoryLabelsBefore = new Map(this.backing.memoryLabels);
+    const outboxLengthBefore = this.backing.outboxJobs.length;
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
-    for (const { input, jobKinds } of news) {
-      const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
-      if (!wasCreated) {
-        created.push({ memory, created: false, jobs: [] });
-        continue;
+    try {
+      for (const { input, jobKinds } of news) {
+        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
+        if (!wasCreated) {
+          created.push({ memory, created: false, jobs: [] });
+          continue;
+        }
+        const jobs = jobKinds.map((kind) =>
+          this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
+        );
+        created.push({ memory, created: true, jobs });
       }
-      const jobs = jobKinds.map((kind) =>
-        this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
-      );
-      created.push({ memory, created: true, jobs });
+    } catch (error) {
+      this.backing.memories.clear();
+      for (const [key, value] of memoriesBefore) this.backing.memories.set(key, value);
+      this.backing.extractionIndex.clear();
+      for (const [key, value] of extractionIndexBefore)
+        this.backing.extractionIndex.set(key, value);
+      this.backing.labels.clear();
+      for (const [key, value] of labelsBefore) this.backing.labels.set(key, value);
+      this.backing.memoryLabels.clear();
+      for (const [key, value] of memoryLabelsBefore) this.backing.memoryLabels.set(key, value);
+      this.backing.outboxJobs.length = outboxLengthBefore;
+      throw error;
     }
 
     // 3. supersede を1件ずつ CAS で処理する。弾かれても conflicted に積んで続行する。
@@ -4437,6 +4460,19 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
     return this.backing?.eventRetentionDays ?? this.ownEventRetentionDays;
   }
 
+  /**
+   * ADR 0564（Issue #768）: `tenant_settings` の行が無いテナントに何かを書くと行ができ、`event_retention_days` は
+   * `NULL` ⟹ `unlimited` になる（Postgres の upsert。`InMemoryTenantSettingsStore.ensureRow` と同じ）。この Fake は
+   * 設定ごとに Map を分けているので、書く側が行の代わりにここで保持期間のキーを（無ければ）`null` で立てる。
+   * 既に行（`days`・`unlimited`）があるテナントの保持期間は変えない。検査を通ったあと、書く直前に呼ぶこと
+   * （断られた書き込みは行を作らない）。
+   */
+  private ensureRow(tenantId: string): void {
+    if (!this.eventRetentionDays.has(tenantId)) {
+      this.eventRetentionDays.set(tenantId, null);
+    }
+  }
+
   async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
     assertWellFormedCtx(_ctx);
     return this.halfLifeHours;
@@ -4477,6 +4513,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
+    this.ensureRow(ctx.tenantId);
     this.decayClockByTenant.set(ctx.tenantId, clock);
   }
 
@@ -4526,6 +4563,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
     }
     // ADR 0500（ADR 0479 の引き受けた負債）: 列は float4 なので、読み戻す値は float4 に丸めたものの最短表記
     // （`Math.fround(720.1)` ではなく `720.1`。`16777217` は `16777216`）。
+    this.ensureRow(ctx.tenantId);
     this.halfLifeRecallsByTenant.set(ctx.tenantId, float4Readback(recalls));
   }
 
@@ -4584,6 +4622,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
+    this.ensureRow(ctx.tenantId);
     this.taxonomyModeByTenant.set(ctx.tenantId, mode);
   }
 
