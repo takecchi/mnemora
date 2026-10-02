@@ -88,7 +88,11 @@ import type { OutboxJobRecord } from "./outbox.js";
 import { runRecall } from "./recall-runtime.js";
 import type { RecallQuery, RecallRecord, RecallResult } from "./recall.js";
 import type { RecallOutputValidationMode } from "./recall-output-validation.js";
-import { detectLanguageMismatch } from "./language-mismatch.js";
+import {
+  detectLanguageMismatchFromProfile,
+  profileObservationLanguage,
+  type ObservationLanguageProfile,
+} from "./language-mismatch.js";
 import { observationPayloadText } from "./observation-text.js";
 import { classifyReextractTargets, classifySupersedeFailure } from "./strategies/reextract.js";
 import type { ReextractSkip } from "./strategies/reextract.js";
@@ -4463,6 +4467,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * ADR 0507: 言語の事後検査の、観測側の数え（本文の合成と文字種の数え。長さに比例する）を、観測ごとに1回へ畳む。
+   * 同じ抽出の候補はどれも同じ Observation のオブジェクトを渡してくるので、それを鍵にする（弱参照。
+   * 観測が捨てられれば消える）。候補ごとに変わるのは本文の側だけで、そちらは候補ごとに数える。
+   */
+  const observationLanguageProfiles = new WeakMap<Observation, ObservationLanguageProfile>();
+  function observationLanguageProfileOf(observation: Observation): ObservationLanguageProfile {
+    let profile = observationLanguageProfiles.get(observation);
+    if (profile === undefined) {
+      profile = profileObservationLanguage(observationPayloadText(observation));
+      observationLanguageProfiles.set(observation, profile);
+    }
+    return profile;
+  }
+
+  /**
    * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
    * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
    * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
@@ -4489,7 +4508,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
         ? null
-        : detectLanguageMismatch(observationPayloadText(observation), memory.content);
+        : detectLanguageMismatchFromProfile(
+            observationLanguageProfileOf(observation),
+            memory.content,
+          );
     return {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
