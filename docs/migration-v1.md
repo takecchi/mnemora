@@ -2413,6 +2413,41 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。保存済みの記憶は変わらない（以前に継承された値で作られた記憶が在っても、書き換えない）。
 
+### 54. 型の外の入力を、新しく例外で断る5つの口（`findCorrectionCandidates`・`resolveContested`/`resolveContestedGroup`/`applyCorrection`・`tick`・`decayFloorOffset`/`floorAt`・`observe`/`recall` の `attributes`）（`@mnemora/core`）
+
+[ADR 0496](./decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。オーナーが v1.X.0 で破壊的変更を許したので、ADR 0446・0445・0472・0474・0485・0490 が「オーナーの領分」として材料に残した5つを直した）。
+
+⚠ **未リリース**。**番号は 54 である**——項目53 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 次の入力は、以前は通っていた（黙って別の結果になった）が、今は **書き込みより前に** 例外になる。型どおりに呼んでいる限り、何も変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+| 口 | 断る入力 | 例外 | 以前 |
+| --- | --- | --- | --- |
+| `findCorrectionCandidates` | `text` が文字列でない（`undefined`・欄なし・数・`null`） | `TypeError` | `no_candidates`（埋め込み 0 回） |
+| 同上 | `excludeMemoryIds` が配列でない（裸の文字列・`null`・`Set` など）／文字列でない要素を含む | `TypeError` | 裸の文字列は1文字ずつの集合で何も除外されない／要素は黙って通る |
+| `resolveContested`・`resolveContestedGroup`・`applyCorrection`（`resolution` ありのとき） | `resolution.kind` が `"supersede"`・`"both_active"` 以外 | `RangeError` | `supersede` の分岐へ倒れ、勝者の無いまま両側とも `superseded` |
+| `tick` | `opts` が object でない（`tick(ctx)`） | `TypeError` | 素の `TypeError`（「Cannot read properties」） |
+| 同上 | `opts.leaseMs` が有限の数でない（省略・文字列・`NaN`・`±Infinity`） | `RangeError` | store ごとに違う `Error`（Postgres: SQLSTATE `22007`、testkit: `claimBatch: now - leaseMs must be a valid Date`） |
+| `decayFloorOffset`・`floorAt`（壁時計・活動時計） | `threshold` が有限かつ 0 超でない／`strength`・`halfLife` が有限かつ 0 以上でない | `RangeError` | `NaN`・`Infinity`・負がそのまま式に入る（`NaN` の `floorAt` は Invalid Date） |
+| `observe`・`recall` の `attributes` | キーに自前の `__proto__`（`JSON.parse` が作る） | `ZodError`（`invalid_key`、path `attributes.__proto__`） | zod の record が黙って落とす（`recall` の絞り込みが外れる・`observe` の属性が消える） |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が、新しく例外になる**。項目21・23・24・27・34・49・51・52・53 と同じ扱い。
+
+**誰が影響を受けるか**: `as`・JavaScript・外部の JSON から、型の外の値を上の口へ渡している呼び出し側。特に、(a) `excludeMemoryIds` に id 1つを裸の文字列で渡していた（以前は自己除外が黙って効かなかった）、(b) `findCorrectionCandidates` に `text` の無い入力を渡していた（以前は `no_candidates`）、(c) `resolution` を型を外して組み立てていた、(d) `tick` を `leaseMs` 無しで呼び、例外を捕まえていた（`err.cause.code === "22007"` など）、(e) 減衰の関数を自前で `NaN` 付きで呼んでいた、(f) `attributes` のキーを外部入力のまま渡していた。
+
+**どう直すか**:
+- (a) `excludeMemoryIds: [id]` と配列にする（呼び出し側で包む。この口は包まない）。要素は文字列にする。
+- (b) `text` に本文の文字列を渡す。「探さない」ことを表したいなら、呼ばない。
+- (c) `resolution` は `{ kind: "supersede", winnerId }` か `{ kind: "both_active" }` にする。
+- (d) `tick(ctx, { leaseMs })` に有限の数（運用で決めたリース長。ミリ秒）を必ず渡す。例外を捕まえているコードは、`RangeError`（`leaseMs`）・`TypeError`（`opts`）に変える。**0 以下の `leaseMs` は今までどおり通る**（重複 claim の防ぎは効かなくなる。`TickOptions.leaseMs` の TSDoc）。
+- (e) `decayFloorOffset(strength, halfLife, threshold)` と `floorAt(params, threshold)` には、有限の数を渡す（`threshold` は 0 超）。`strength`・`halfLife` の 0 は通る。`runtime` が内部で呼ぶ分は変わらない。
+- (f) `attributes` のキーから `__proto__` を除く（`constructor`・`prototype` などは通る）。
+- 専用のエラー型・`kind` は無い（素の `TypeError`・`RangeError`、`attributes` だけ `ZodError`）。message に入力値は入らない。
+
+**testkit の変更**: `buildNewMemoryFixture` は、`decayFloorAt` を上書きで渡したときは `floorAt` を呼ばなくなった（`strength` に `NaN` を渡す値域の歯が、fixture の中で落ちないように。結果は同じ）。conformance suite の `it` は足していない。
+
+**DB マイグレーション**: 要らない。
+
 ### 55. 差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた（`@mnemora/core`）
 
 [ADR 0497](./decisions/0497-recall-rejects-broken-token-counter.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。材料は [ADR 0483](./decisions/0483-token-counter-broken-values.md)）。
@@ -2467,7 +2502,6 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 - `createBullmqTickDriver` の構築を `try` で囲んでいない構成は、構築時に投げるようになるので、起動時に落ちる。起動時の検査として扱えばよい。
 
 **DB マイグレーション**: 要らない。ただし `everyMs` が負・`1e21` で止まった scheduler・`delayed` のジョブが Redis に残っていることがある（ADR 0477）。正しい `everyMs` の driver が `start()` すれば scheduler は上書きされる。
-
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
