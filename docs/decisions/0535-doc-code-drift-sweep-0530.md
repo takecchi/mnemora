@@ -190,4 +190,5 @@
 - **0509 の中身**【現物】: 差は ADR 0509・recall の不変条件の fuzz の harness と歯（`recall-invariant-fuzz-harness.ts`・`recall-invariant-fuzz.test.ts`・`recall-invariant-fuzz.postgres.test.ts`）・索引だけ。実装・TSDoc・README・約束の文書・CHANGELOG・migration-v1 は変わっていない。
 - **突き合わせの結果**【判断】: 文書の側の入力が変わらないので、この ADR の照合の結果も変わらない。
 - **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。
-- **【未確認】**: 0509 の fuzz を走らせていない。0509 が見つけたもの（あれば）と文書の行ごとの突き合わせはしていない。
+- **0509 が直さずに残した2つの割れと文書**【現物】: (1) core の Fake の `FakeLexicalStore` は部分一致で、Postgres（tsvector）は語一致——Fake は `packages/core/src/__tests__/` の中で公開されない面なので、README・約束の文書には記述が無く、古くなった記述も無い。(2) testkit の `InMemoryLexicalStore` はハイフンで語を割り、Postgres は `PROJ-12` を1語と数える——`in-memory-lexical-store.ts` の TSDoc の「違う・確認していないこと」が、ハイフンで結んだ識別子を2語に割ること・数字とハイフンのトークン化規則を再現していないことを、既に書いている。どちらも文書の側で直す所は無い。直すかどうか（fixture を Postgres に揃える線に載るか）は 0509 がオーナー側の判断として残している。
+- **【未確認】**: 0509 の fuzz を走らせていない。
