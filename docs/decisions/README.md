@@ -519,6 +519,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0505](./0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md) | fixture の `S_x` の bigint 溢れ（`archiveDecayed`・`aggregateScope`・`VectorStore.search`）、Observation・Recall の NUL を名指しで断る、`EventStore.append`・`LexicalStore.search` の例外から params を落とす | 採用 (2026-10) |
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0507](./0507-language-mismatch-observation-counted-once-per-observation.md) | 言語の事後検査（ADR 0391）の観測側の数えを、観測ごとに1回へ畳む（判定は変えない） | 採用 (2026-10) |
+| [0508](./0508-recall-channels-undecidable-japanese-labels-on-real-postgres.md) | `recall` の `channels` の合流のうち、`ann_truncated`（undecidable）・日本語の語彙・`labels` との組を、Fake と実 Postgres に同じ問いを当てて縛る（割れは見つからなかった。日本語だけ既知の非対称を歯にした） | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
@@ -531,5 +532,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0528](./0528-doc-code-drift-sweep-0496-0500-0522-0523.md) | 文書とコードのずれを横に掃く（第3弾）— ADR 0496・0500・0522・0523 と、追い足した 0504・0499・0502・0506・0525・0521・0524 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0529](./0529-tick-mixed-kinds-concurrency-and-lease.md) | 穴探し — ADR 0526「測っていないこと」の実測。`tick` が種類を混ぜて回るとき・並行する複数の `tick`・リースが切れた後の再取得（Runtime の層。3者一致。割れは見つからなかった。決定的にできる部分だけ歯にした） | 採用 (2026-10) |
 | [0530](./0530-batch-exceeds-lease-double-processing-per-kind.md) | 穴探し — 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごとに3者で実測する（TSDoc どおりで一致。`consolidate` の結末だけ TSDoc に書いていなかったので書いた） | 採用 (2026-10) |
+| [0533](./0533-doc-code-drift-sweep-0526-0527.md) | 文書とコードのずれを横に掃く（第4弾の1回目）— ADR 0526・0527 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0534](./0534-changelog-reconcile-after-v1-2-0-tag.md) | CHANGELOG と migration-v1 の帳尻 — `v1.2.0` の tag より後に着地した #1615（ADR 0521）・#1616（ADR 0525）の項目を `[1.3.0]` 側へ移し、`[1.3.0]` の冒頭の「まだ何も棚卸ししていない」を直す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
