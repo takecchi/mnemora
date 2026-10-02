@@ -223,6 +223,9 @@ for (const [kitName, makeKit] of KITS) {
       );
       expect(error).toBeInstanceOf(MemoryStatusConflictError);
       expect((error as MemoryStatusConflictError).expectedStatus).toBe("forgotten");
+      // ADR 0518: purge 済みの行では observedStatus も "forgotten" になる（例外だけでは purge 済みと分からない。
+      // TSDoc `MemoryStatusConflictError` に書いた振る舞いの歯）。
+      expect((error as MemoryStatusConflictError).observedStatus).toBe("forgotten");
       const after = (await kit.store.get(A, t.id))!;
       expect(after.status).toBe("forgotten");
       expect(after.purgedAt).not.toBeNull();
@@ -237,6 +240,8 @@ for (const [kitName, makeKit] of KITS) {
         kit.store.updateStatus(A, t.id, "active", { expectedStatus: "forgotten" }),
       );
       expect(error).toBeInstanceOf(MemoryStatusConflictError);
+      expect((error as MemoryStatusConflictError).expectedStatus).toBe("forgotten");
+      expect((error as MemoryStatusConflictError).observedStatus).toBe("forgotten");
       expect((await kit.store.get(A, t.id))!.status).toBe("forgotten");
     });
 

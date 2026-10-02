@@ -30,6 +30,14 @@ import type { DecayClock } from "./tenant-settings-store.js";
  * ときに追加の `SELECT` で読み直して詰めるため、その `SELECT` と実際に条件が破れた瞬間の
  * 間にも別の書き込みが割り込む余地がある。「衝突があったこと」は確実だが、「衝突した
  * 相手が何だったか」の正確な値としては読まないこと。
+ *
+ * **purge 済みの記憶（`status` が `"forgotten"` のまま `purgedAt` が入った行）への、`expectedStatus` 付きの
+ * 更新は、この例外で断られる**（ADR 0499）。そのとき `observedStatus` は `"forgotten"` である。
+ * `expectedStatus: "forgotten"`（`forgotten` から戻そうとした更新）なら、`expectedStatus` と `observedStatus`
+ * が**どちらも `"forgotten"` になる**——普通の競合（期待と違う値を観測した）とは読み方が違い、
+ * **例外を見ただけでは「purge 済みだから断られた」とは分からない**。purge 済みかどうかは、記憶を
+ * 読み直して `Memory.purgedAt` を見ること（purge は不可逆で、戻せない）。
+ * （`purge` 自身の CAS 違反は別の型 {@link MemoryPurgeConflictError} である。）
  */
 export class MemoryStatusConflictError extends Error {
   /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isMemoryStatusConflictError} で行う。 */
@@ -940,6 +948,8 @@ export interface MemoryStore {
    * `updateStatus: opts.supersededById must not be the memory itself`。値は message に入れない）を投げる。以前は通って、戻せない
    * `superseded`（`restoreSuperseded` の群に入らない）や自己参照の行ができた。`contested` の検査のあと、対象の存在確認・
    * `supersededById` のテナント照合・`expectedStatus` の判定より前。`superseded` 以外の status は、`supersededById` が無くてよい。
+   * 🔴 **ADR 0515: `superseded` 以外の status（`active`・`archived`・`forgotten`）に `opts.supersededById` を付けるのも、何も書かずに `RangeError`**
+   * （`updateStatus: opts.supersededById must not be set unless status is "superseded"`。以前は通り、`COALESCE` で `superseded_by_id` が残った）。同じ位置。
    * `Runtime` は、`superseded` を書くとき常に別の記憶（`reextract` の新しい行・`consolidate` の統合先）を渡す。
    */
   updateStatus(
@@ -980,6 +990,7 @@ export interface MemoryStore {
    *
    * 🔴 **ADR 0503: `status === "superseded"` の更新は、`opts.supersededById` を伴い、それは `id` 自身でないこと**（`updateStatus` と同じ。
    * 満たさなければ、状態もイベントも書かずに `RangeError`。メッセージの接頭辞は `updateStatusWithEvent:`）。
+   * 🔴 **ADR 0515: `superseded` 以外の status に `opts.supersededById` を付けるのも、状態もイベントも書かずに `RangeError`**（`updateStatus` と同じ）。
    *
    * 🔴 **買わない不変条件**（呼び出し側の `reextract` ループが対象1件ごとにこのメソッドを
    * 呼ぶ場合）: 「複数回の呼び出しをまとめて全部成功させるか全部失敗させるか」は買わない。
@@ -2078,6 +2089,8 @@ export interface MemoryStore {
    *   （`… must not be the memory itself`）。(3) `status: "active"` に `supersededById` を付ける（`… must not be set unless status is "superseded"`）。
    *   (4) 互いを指す循環（`resolveContestedPair: supersededById must not form a cycle among the members`）。勝者を指す `superseded`・
    *   `both_active`・対の外の記憶を指す `superseded` は断らない。`Runtime.resolveContested` は敗者にだけ勝者の id を渡す。
+   *   (5) 🔴 **ADR 0515: 対の外の `forgotten` な記憶を指す**（`resolveContestedPair: <first|second>.supersededById must not be a forgotten memory outside the pair`。
+   *   対の相手を指すのは、この検査では断らない。対の外の `archived`・`superseded`・`active` も断らない）。テナントの照合（ADR 0439）のあと、書く前。
    * - 🔴 **ADR 0499: `first.status`/`second.status` が型の外（`"active"`・`"superseded"` 以外。`"forgotten"`・
    *   `"contested"`・`"archived"` など）なら、何も書かずに `RangeError`**（メッセージ:
    *   `resolveContestedPair: first.status must be "active" or "superseded"`〔`second` も同じ形〕。値は message に入れない）を
