@@ -2662,6 +2662,12 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   `@mnemora/postgres` は同じ入力を元から断る（Postgres の `timestamptz`・`text`・`bigint` の変換が拒む）。InMemory は以前、通していた: Invalid Date はそのまま保持して `createMemory` が成功し、NUL の `claimedBy` は outbox の行に入り、`eraseTenant` は `limit: NaN` でも成功した（`MemoryStore`・`VectorStore`・`OutboxStore` の3つ）。いまは、書く前に断る（何も書かない）。
   **落ちる入力が増える変更**。ただし、本物の adapter（`@mnemora/postgres`）に流したら元から落ちる入力なので、InMemory を本番の代わりに使っているだけのテストが、本番と同じ振る舞いになる。行を書かないとき（`jobKinds` が空・冪等の既存の行に当たる）の `claimedBy` は、Postgres と同じく見ない。`@mnemora/core` の独立関数 `eraseTenant` は元から `limit` を正の整数に限るので、影響を受けるのは port を直接呼ぶ呼び出しだけ。公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。core のテスト専用の Fake（公開されていない）も、同じ入力と、ほかの入力（`ctx.tenantId` の NUL ほか）を断るように揃えた。
 
+- **`@mnemora/testkit/fixtures`・provider の fake: Postgres が拒む入力を新しく断り、LLM 応答を複製して返す**（[ADR 0500](./decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md)。🟡。[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md) の判断に従い、fixture が新しく例外を投げる変更は 🔴 に数えない）。
+  自前のテストで InMemory 一式・`RecordedLLMProvider` などを使っている人は、次を見直すこと。
+  - 新しく断る入力（どれも Postgres は以前から拒む）: `InMemoryMemoryStore.findContestedByClaimKey` の claimKey の NUL。`InMemoryLexicalStore.search` の `filter.labels`、`InMemoryVectorStore.search`・`searchMany` の `filter.labels`・`filter.attributes` の NUL。紀元前4713年11月24日 00:00:00 UTC より前の日時（`EventStore.list` の `since`/`until`、検索・`aggregateScope` の日時の条件、`archiveDecayed`・`requeueEmbedJobs` の `now`、claim key の `validFrom`/`validUntil`、outbox の行を書く口の `opts.now`、`OutboxStore.complete`/`fail` の `opts.at`）。`purge*` の `olderThan` は、下限より前でも通す（Postgres も0件で返す）。`reinforce({ addOwnSubjectSeq: true })` で `nowSeq + S_x`（と床）が 2^63 以上になる入力。
+  - 振る舞いが変わるもの: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` が返す応答は、記録の参照ではなく複製になった。返り値を書き換えてから次の再生を読んでいた呼び出し側（書き換えが次の再生に見えていた）は、見え方が変わる。core のテスト専用 Fake（公開されていない）の `setDefaultHalfLifeRecalls` も、float4 の読み戻しの形で保存する。
+  触っていない: `@mnemora/postgres` などの本物の adapter、conformance suite。
+
 ### この節に載せなかったもの（理由つき）
 
 - **[PR #1550](https://github.com/takecchi/mnemora/pull/1550)（ADR 0441）**: CHANGELOG・この文書の参照の食い違いと、consumer-install の検査の名前の修正。`@mnemora/core`・`@mnemora/postgres` の README に「TypeScript の `lib`・`target` は ES2022 以上」を書いたのは**既存の要件を文書に書いただけ**で、振る舞いは変わらない。

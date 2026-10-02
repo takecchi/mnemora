@@ -108,7 +108,8 @@ export class SeededLLMProvider implements LLMProvider {
         );
       }
       this.seededCalls += 1;
-      return entry.value as LLMResponse;
+      // ADR 0500: 種の参照を返さない（`RecordedLLMProvider` と同じ）。
+      return structuredClone(entry.value) as LLMResponse;
     }
     this.realCalls += 1;
     return this.delegate.complete(ctx, req, opts);
@@ -123,7 +124,8 @@ export class SeededLLMProvider implements LLMProvider {
     if (entry !== undefined) {
       // `RecordedLLMProvider.completeStructured` と同じ規律——鍵にスキーマを
       // 含めていないため、記録以降にスキーマが変わっていないかをここで検証し直す。
-      const parsed = req.schema.safeParse(entry.value);
+      // ADR 0500: 複製を検証する（`RecordedLLMProvider` と同じ理由）。
+      const parsed = req.schema.safeParse(structuredClone(entry.value));
       if (!parsed.success) {
         throw new Error(
           "SeededLLMProvider: 種の記録が、いまのスキーマを満たさない。" +

@@ -269,23 +269,25 @@ export class RecordingLLMProvider implements LLMProvider {
   ) {}
 
   async complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
+    // ADR 0500: 記録の参照を返さず、記録にも呼び出し側が持つ参照を入れない（どちらを書き換えても、もう一方に漏れない）。
     const recorded = this.recorder.lookupLLM(req);
     if (recorded !== undefined) {
-      return recorded.value as LLMResponse;
+      return structuredClone(recorded.value) as LLMResponse;
     }
     const key = llmCassetteKey(req);
     const waiting = this.pendingComplete.get(key);
     if (waiting !== undefined) {
-      return waiting;
+      return structuredClone(await waiting);
     }
     const running = (async () => {
       const response = await this.delegate.complete(ctx, req, opts);
-      this.recorder.recordLLM(this.model, req, response);
-      return response;
+      this.recorder.recordLLM(this.model, req, structuredClone(response));
+      // 待っている側と最初の呼び出し側が、同時に同じ参照を受け取らない。誰も触らない写しを、全員が複製して受け取る。
+      return structuredClone(response);
     })();
     this.pendingComplete.set(key, running);
     try {
-      return await running;
+      return structuredClone(await running);
     } finally {
       this.pendingComplete.delete(key);
     }
@@ -300,24 +302,24 @@ export class RecordingLLMProvider implements LLMProvider {
     if (recorded !== undefined) {
       // 記録済みの値も、呼び出し側の `schema` で検証し直す——`RecordedLLMProvider`
       // と同じ規律（鍵にスキーマを含めていないため）。
-      return req.schema.parse(recorded.value);
+      return req.schema.parse(structuredClone(recorded.value));
     }
     const key = llmCassetteKey(req.prompt);
     const waiting = this.pendingStructured.get(key);
     if (waiting !== undefined) {
       // 並列に待っていた側も、記録済みの値と同じく自分の `schema` で検証し直す。
-      return req.schema.parse(await waiting);
+      return req.schema.parse(structuredClone(await waiting));
     }
     const running = (async () => {
       const value = await this.delegate.completeStructured(ctx, req, opts);
       // **検証後の値を記録する。**再生側も同じ `schema` で検証し直すため、
       // ここで検証前の生 JSON を持っても意味が無く、むしろ形が二重になる。
-      this.recorder.recordLLM(this.model, req.prompt, value);
-      return value;
+      this.recorder.recordLLM(this.model, req.prompt, structuredClone(value));
+      return structuredClone(value);
     })();
     this.pendingStructured.set(key, running);
     try {
-      return await running;
+      return structuredClone(await running) as T;
     } finally {
       this.pendingStructured.delete(key);
     }
