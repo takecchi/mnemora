@@ -25,6 +25,8 @@ ADR が持つ**（例: [ADR 0222](./0222-compare-gate-judges-only-when-turncount
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
+**ADR のファイル名は `NNNN-slug.md` の形にする**（`NNNN` は4桁の番号、`slug` は小文字の英数字とハイフンだけ。**ドット `.` や大文字・アンダースコアは使えない**）。4桁の番号で始まる `.md` がこの形から外れていると、`node scripts/generate-adr-index.mjs` と索引の歯は、無視せず例外で落ちる（[ADR 0537](./0537-adr-index-rejects-malformed-adr-filename.md)）。
+
 ## 一覧
 
 **この表は手で編集しない。** `docs/decisions/*.md` の1行目の見出しと状態欄から `node scripts/generate-adr-index.mjs` が生成する（[ADR 0137](./0137-adr-index-generated-from-source.md)）。ADR を追加する PR の側で上のコマンドを実行して索引も一緒にコミットし、`adr-index-freshness` の歯を PR 上で緑にしてからマージする。ほかの ADR の PR と索引の行が衝突したら、`main` を merge で取り込み、生成器で作り直す（ADR 0137「決定」2番は「作成者は触らない」と読めるが、実際の運用はこちら。同 ADR 末尾の 2026-09-30 の追記）。
@@ -532,5 +534,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0529](./0529-tick-mixed-kinds-concurrency-and-lease.md) | 穴探し — ADR 0526「測っていないこと」の実測。`tick` が種類を混ぜて回るとき・並行する複数の `tick`・リースが切れた後の再取得（Runtime の層。3者一致。割れは見つからなかった。決定的にできる部分だけ歯にした） | 採用 (2026-10) |
 | [0530](./0530-batch-exceeds-lease-double-processing-per-kind.md) | 穴探し — 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごとに3者で実測する（TSDoc どおりで一致。`consolidate` の結末だけ TSDoc に書いていなかったので書いた） | 採用 (2026-10) |
 | [0533](./0533-doc-code-drift-sweep-0526-0527.md) | 文書とコードのずれを横に掃く（第4弾の1回目）— ADR 0526・0527 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0537](./0537-adr-index-rejects-malformed-adr-filename.md) | ADR 索引の生成器は、番号で始まるのに ADR のファイル名の形から外れた `.md` を、無視せず例外で落とす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

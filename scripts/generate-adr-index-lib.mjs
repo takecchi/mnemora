@@ -56,6 +56,12 @@
 /** ADR ファイル名の形（4桁の番号 + ハイフン区切りの slug + `.md`）。ADR 0128 と同じ形。 */
 const ADR_FILENAME_RE = /^(\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
 
+/**
+ * 「ADR のつもりのファイル名」: 4桁の数字で始まる `.md`。これに当たるのに `ADR_FILENAME_RE` に当たらないものは、
+ * 形の間違いとして `buildAdrEntries` が落とす（ADR 0537）。
+ */
+const MALFORMED_ADR_PREFIX_RE = /^\d{4}.*\.md$/i;
+
 /** ADR 本文1行目の見出し（`# ADR 0001: ORM は Drizzle`）。 */
 const TITLE_HEADING_RE = /^# ADR (\d{4}): (.+)\r?$/;
 
@@ -172,6 +178,18 @@ export function parseAdrEntry(filename, content) {
  * @returns {ReturnType<typeof parseAdrEntry>[]}
  */
 export function buildAdrEntries(files) {
+  // ADR 0537: 4桁の番号で始まる `.md` なのに ADR のファイル名の形（`ADR_FILENAME_RE`）から外れているものは、
+  // 黙って無視せず落とす。以前は `0534-changelog-1.3.0-….md`（slug にドット）が ADR として数えられず、索引に載らず、
+  // 番号の重複の検査からも漏れたまま、生成器も歯も緑だった。番号で始まらない名前（`README.md`・`TEMPLATE.md` など）は、
+  // ADR 0128 の判断どおり、今までどおり無視する。
+  const malformed = files
+    .map((f) => f.filename)
+    .filter((name) => MALFORMED_ADR_PREFIX_RE.test(name) && !isAdrFilename(name));
+  if (malformed.length > 0) {
+    throw new Error(
+      `ADR のファイル名の形から外れています（\`NNNN-slug.md\`。slug は小文字の英数字とハイフンだけ。ドットは使えません）: ${malformed.join(", ")}`,
+    );
+  }
   const entries = files
     .filter((f) => isAdrFilename(f.filename))
     .map((f) => parseAdrEntry(f.filename, f.content))
