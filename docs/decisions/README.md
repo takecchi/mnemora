@@ -514,6 +514,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0500](./0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) | testkit の fixture を Postgres に揃える（`findContestedByClaimKey`・検索の `labels` の NUL、`timestamptz` の下限、`reinforce` の bigint 溢れ、LLM 応答の参照、core Fake の float4 読み戻し） | 採用 (2026-10) |
 | [0501](./0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md) | 文書の負債3件を返す — `--help` の環境変数（ADR 0478 負債1）・ANALYZE の数えがプロセスごと（ADR 0460 D5）・purged への強化の TSDoc（ADR 0453 負債3） | 採用 (2026-10) |
 | [0502](./0502-observe-rejects-whitespace-only-input.md) | `observe()` が、本文が空白だけの入力（`utterance.text`・`event.name`・`document.content`）を入口で断る | 採用 (2026-10) |
+| [0503](./0503-superseded-by-checks-resolve-contested-update-status.md) | `supersededById` の約束を壊す入力を断る（`resolveContestedPair`・`resolveContestedGroup`・`updateStatus`・`updateStatusWithEvent`） | 採用 (2026-10) |
 | [0504](./0504-vector-store-omits-params-from-thrown-errors.md) | `PostgresVectorStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0507](./0507-language-mismatch-observation-counted-once-per-observation.md) | 言語の事後検査（ADR 0391）の観測側の数えを、観測ごとに1回へ畳む（判定は変えない） | 採用 (2026-10) |
