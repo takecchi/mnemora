@@ -62,7 +62,12 @@ import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { translateClaimKeyIndexLimit } from "./claim-key-index-limit.js";
-import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
+import {
+  assertNoNul,
+  assertNoNulInNewMemory,
+  assertNoNulInNewMemoryEvent,
+  assertNoNulInScopeFilter,
+} from "./input-check.js";
 import {
   activityFloorSeqAliveCondition,
   activityFloorSeqDeadCondition,
@@ -221,6 +226,7 @@ async function insertCreatedEventRow(
   // ADR 0456: イベントが指す記憶が、今作った行でなければ（呼び出し側の `buildCreatedEvent` が別の id を返したとき）、
   // `ctx` のテナントの行かを確かめる。
   await assertEventTargetInTenant(tx, ctx, event.memoryId, [createdMemoryId]);
+  assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
   await tx.execute(sql`
     INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
     VALUES (
@@ -335,6 +341,30 @@ async function assertEventTargetInTenant(
   );
   if (found.rows.length === 0) {
     throw refNotFound("memory", memoryId as string);
+  }
+}
+
+/**
+ * ADR 0499（ADR 0447 の材料）: `expectedStatus` を渡された status 更新の CAS 条件。**purge 済みの行（`purged_at` が入った行。
+ * `status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない**——`Runtime.purge` の「不可逆」の約束どおり、
+ * 墓石を `updateStatusWithEvent(T, "active", { expectedStatus: "forgotten" })` が active へ戻せない（以前は `purged_at` を
+ * 見ず、戻せた）。0行になった理由の切り分け（`explainEmptyStatusUpdate`）は、通常の CAS 違反と同じ `MemoryStatusConflictError`
+ * にする。`expectedStatus` を渡さない更新は、無条件の書き込みのまま（CAS ではないので、この条件は付けない）。
+ */
+function expectedStatusCondition(expectedStatus: MemoryStatus | undefined): SQL {
+  return expectedStatus !== undefined
+    ? sql`AND status = ${expectedStatus} AND purged_at IS NULL`
+    : sql``;
+}
+
+/**
+ * ADR 0499（ADR 0450 の材料）: `resolveContestedPair`・`resolveContestedGroup` の `status` は型が `"active" | "superseded"`。
+ * 型の外の値（`"forgotten"`・`"contested"`・`"archived"` など）は、以前は通って行をその status にしていた。
+ * 書く前に `RangeError` で断る（値は message に入れない）。
+ */
+function assertResolvedStatus(method: string, field: string, status: unknown): void {
+  if (status !== "active" && status !== "superseded") {
+    throw new RangeError(`${method}: ${field}.status must be "active" or "superseded"`);
   }
 }
 
@@ -487,6 +517,8 @@ async function insertMemoryEventsBatch(
       }
     }
   }
+  // ADR 0499: NUL は DB の生の例外でなく、名指しの例外で断る（イベントを書く文の直前）。
+  events.forEach((e) => assertNoNulInNewMemoryEvent("PostgresMemoryStore", e));
   const eventIds = events.map(() => randomUUID());
   // 1つの JSON 配列（jsonb）で渡し、`jsonb_to_recordset` で列へ開く。`meta` は群の大きさに比例して
   // 大きくなりうる（多者間の検出は全メンバーの id を載せる）ので、列ごとの `text[]` に JSON 文字列を
@@ -732,7 +764,7 @@ export class PostgresMemoryStore implements MemoryStore {
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
-    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
+    assertNoNulInNewMemory("PostgresMemoryStore", input);
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
@@ -796,7 +828,7 @@ export class PostgresMemoryStore implements MemoryStore {
     method: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents",
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
-    assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
+    assertNoNulInNewMemory("PostgresMemoryStore", input);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const insertedRow = await insertMemoryRow(tx, ctx, input, method);
@@ -1160,8 +1192,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの記憶を指すこと。形が壊れていれば DB へ投げる前に弾く。
     const supersededById = checkedRef("memory", opts?.supersededById);
     const expectedStatus = opts?.expectedStatus;
-    const statusCondition =
-      expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+    const statusCondition = expectedStatusCondition(expectedStatus);
     const result = await this.db.execute(sql`
       UPDATE memories
       SET status = ${status},
@@ -1218,8 +1249,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // ADR 0439: `updateStatus` と同じ（`supersededById` は `ctx` のテナントの記憶を指すこと）。
     const supersededById = checkedRef("memory", opts.supersededById);
     const expectedStatus = opts.expectedStatus;
-    const statusCondition =
-      expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+    const statusCondition = expectedStatusCondition(expectedStatus);
 
     return this.db.transaction(async (tx) => {
       const result = await tx.execute(sql`
@@ -1240,6 +1270,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
 
       await assertEventTargetInTenant(tx, ctx, event.memoryId, [id]);
+      assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -1342,7 +1373,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
       // 穴 O-6-3（ADR 0424）: contentHash の NUL も、トランザクションを開く前に落とす。
-      assertNoNul("PostgresMemoryStore", "contentHash", input.contentHash);
+      assertNoNulInNewMemory("PostgresMemoryStore", input);
     }
 
     const result = await this.db.transaction(async (tx) => {
@@ -1432,8 +1463,7 @@ export class PostgresMemoryStore implements MemoryStore {
           throw new Error(`PostgresMemoryStore: memory not found for tenant: ${target.id}`);
         }
         const expectedStatus = target.expectedStatus;
-        const statusCondition =
-          expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+        const statusCondition = expectedStatusCondition(expectedStatus);
 
         const anchorId = created[target.supersededByIndex]!.memory.id;
         const result = await tx.execute(sql`
@@ -1461,6 +1491,7 @@ export class PostgresMemoryStore implements MemoryStore {
         }
 
         await assertEventTargetInTenant(tx, ctx, target.event.memoryId, [target.id]);
+        assertNoNulInNewMemoryEvent("PostgresMemoryStore", target.event);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3078,6 +3109,9 @@ export class PostgresMemoryStore implements MemoryStore {
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
+    // ADR 0499: 墓石の NUL は、UPDATE（対象の状態によらず、パラメータの時点で DB が拒む）の前に名指しで断る。
+    assertNoNul("PostgresMemoryStore", "tombstone.content", tombstone.content);
+    assertNoNul("PostgresMemoryStore", "tombstone.digest", tombstone.digest);
 
     // Issue #1237: `purged_at` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
     // 2回読んで別の値になることがないよう、ここで一度だけ決める。
@@ -3118,6 +3152,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
 
       await assertEventTargetInTenant(tx, ctx, event.memoryId, [id]);
+      assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -3350,6 +3385,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
       const insertEvent = async (event: NewMemoryEvent) => {
         await assertEventTargetInTenant(tx, ctx, event.memoryId, [first.id, second.id]);
+        assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3619,6 +3655,9 @@ export class PostgresMemoryStore implements MemoryStore {
     if (first.id === second.id) {
       throw new RangeError("PostgresMemoryStore: first.id and second.id must differ");
     }
+    // ADR 0499: 型の外の status は、書く前に断る。
+    assertResolvedStatus("resolveContestedPair", "first", first.status);
+    assertResolvedStatus("resolveContestedPair", "second", second.status);
     if (!isUuidLike(first.id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
     }
@@ -3703,6 +3742,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
       const insertEvent = async (event: NewMemoryEvent) => {
         await assertEventTargetInTenant(tx, ctx, event.memoryId, [first.id, second.id]);
+        assertNoNulInNewMemoryEvent("PostgresMemoryStore", event);
         const eventResult = await tx.execute(sql`
           INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
           VALUES (
@@ -3788,6 +3828,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const memory = rowToMemory(updatedRows[0] as unknown as MemoryRow);
 
       await assertEventTargetInTenant(tx, ctx, survivor.event.memoryId, [survivor.id]);
+      assertNoNulInNewMemoryEvent("PostgresMemoryStore", survivor.event);
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         VALUES (
@@ -3979,6 +4020,10 @@ export class PostgresMemoryStore implements MemoryStore {
     if (new Set(ids).size !== ids.length) {
       throw new RangeError("resolveContestedGroup: member ids must be unique");
     }
+    // ADR 0499: 型の外の status は、書く前に断る。
+    normalized.forEach((m, i) =>
+      assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
+    );
     for (const id of ids) {
       if (!isUuidLike(id)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
@@ -4203,6 +4248,8 @@ export class PostgresMemoryStore implements MemoryStore {
       }
     }
 
+    // ADR 0499: 下の1文が走る直前（Invalid Date の早期 return のあと）。`reason`・`actor` の NUL を名指しで断る。
+    assertNoNulInNewMemoryEvent("PostgresMemoryStore", { actor, meta });
     const result = await this.db.execute(sql`
       WITH target AS (
         SELECT id FROM memories
