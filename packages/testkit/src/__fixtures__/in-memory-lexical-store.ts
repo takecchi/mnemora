@@ -42,16 +42,17 @@ import {
  *   ここでも同じ形で語彙を0個にし、0件を返す）。
  *
  * **違う・確認していないこと**:
- * - `websearch_to_tsquery` の `"..."`（フレーズ）/ `OR` / `-`（NOT）はここでは一切解釈しない。
- *   空白区切りではなく Unicode の英数字境界で割った語の集合としてしか読まない
- *   （各語を独立に OR で見る）。**この違いは、ハイフンで結んだ識別子（`PROJ-1234` 等）を
- *   `proj`/`1234` の2語に割ってしまうことを意味する**——postgres 側は
- *   `websearch_to_tsquery` のフレーズ演算子（`<->`、隣接必須）で識別子を1単位として
- *   扱うが、ここでは2語の OR 一致になるため、同じ接頭辞を持つ別の識別子
- *   （`PROJ-5678` 等）にも部分一致（`coverage` 0.5）してしまいうる。**⚠ ADR 0092 で
- *   postgres 側も各語を `"..."` で囲むようになり、生クエリ中の websearch 演算子を
- *   解釈しなくなった**——演算子解釈が無くなった点自体は差が縮む方向だが、
- *   フレーズによる隣接必須という性質までは再現していない。
+ * - `websearch_to_tsquery` の `OR` / `-`（NOT）はここでは一切解釈しない（ADR 0092 で postgres 側も
+ *   各語を `"..."` で囲み、生クエリ中の websearch 演算子を解釈しなくなった）。
+ * - **クエリの単位は空白区切りの語で、語の中の token は隣接して並ぶことを要る**（ADR 0513）。
+ *   postgres は `PROJ-12` を 1 語（分母 1）として数え、`'proj' <-> '-12'` のフレーズにする。
+ *   以前はここで `proj`・`12` の 2 語に割っていて、coverage の分母が postgres とずれた（ADR 0509 の割れ 2）。
+ *   **それでも違うところ**（ADR 0513 の実測。再現していない）: postgres の text search parser は
+ *   `-12`・`+12`・`-1.5` を符号付きの 1 token にし（`PROJ-12` は `proj`・`-12`）、`a.b`・`user@example.com`・
+ *   `x.com/a-b` を 1 token にし、ハイフンで結んだ語（`abc-def`）を結合形と部品の両方の token にする。
+ *   ここは英数字境界で割るだけなので、content `proj 12` がクエリ `PROJ-12` に当たる（postgres は当たらない）、
+ *   クエリ `12` が content `PROJ-12` に当たる（postgres は当たらない）、content `a.b` がクエリ `a` に当たる
+ *   （postgres は当たらない）。
  * - CJK（分かち書きの無い日本語・中国語等）自体の分かち書きはしない
  *   （`'simple'` dictionary・既定の text search parser に形態素解析が無いのと同じ
  *   立場）。ASCII/非ASCII の境界で割ることで CJK に埋め込まれた ASCII の語
@@ -148,31 +149,54 @@ function capQueryTotalChars(query: string): string {
 }
 
 /**
- * `tokenize(query)` の結果から、1語が {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える
- * 場合は先頭からその文字数に切り詰め、そのうえで異なる語を先頭からの出現順に
- * {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個まで残した `Set` を返す。
- * どちらの上限にも触れない限り、全ての語を含む `Set` をそのまま返す
- * （1件も切り捨てない）。**呼び出し側が、`tokenize` に渡す前の `query` に
- * {@link capQueryTotalChars} をあらかじめ通しておくこと**（`search` 参照）。
+ * クエリを **空白区切りの語**（Postgres の `mnemora_lexical_query_tsqueries` と同じ単位）に割り、
+ * 語ごとに `tokenize()` した token の列（= その語のフレーズ）の配列を返す（ADR 0513）。
+ *
+ * - 1 語が {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超えたら先頭からその文字数に切り詰め、
+ *   大文字小文字を区別せず異なる語を先頭からの出現順に {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個まで残す
+ *   （`capLexicalQueryWords` と同じ。上限は **語** に当たる。token ではない）。
+ * - token が 1 つも取れない語（`---` など）は捨てる（Postgres は空の tsquery を捨てる。分母に数えない）。
+ * - 同じ token 列になる語（`PROJ-12` と `proj-12`）は 1 つにまとめる（Postgres は tsquery の `DISTINCT`）。
+ *
+ * **`PROJ-12` は 1 語（= 分母 1）で、中の `proj`・`12` は隣接して並ぶことを要る**——Postgres の
+ * `websearch_to_tsquery('simple', '"PROJ-12"')` は `'proj' <-> '-12'`（フレーズ）になる（ADR 0513 の実測）。
+ * 以前は `proj`・`12` の 2 語に割っていて、分母が Postgres とずれた（ADR 0509 の割れ 2）。
+ * **呼び出し側が、`dropNonAsciiRuns(capQueryTotalChars(query))` を渡すこと**（`search` 参照）。
  */
-function capQueryTerms(tokens: string[]): Set<string> {
-  const truncatedTokens = tokens.map((token) =>
-    token.length > LEXICAL_QUERY_MAX_WORD_CHARS
-      ? token.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS)
-      : token,
-  );
-  const distinctInFirstSeenOrder: string[] = [];
-  const seen = new Set<string>();
-  for (const token of truncatedTokens) {
-    if (!seen.has(token)) {
-      seen.add(token);
-      distinctInFirstSeenOrder.push(token);
+function queryPhrases(asciiOnlyQuery: string): string[][] {
+  const rawWords = asciiOnlyQuery.split(/\s+/).filter((w) => w.length > 0);
+  const seenLowercased = new Set<string>();
+  const words: string[] = [];
+  for (const raw of rawWords) {
+    const word =
+      raw.length > LEXICAL_QUERY_MAX_WORD_CHARS ? raw.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS) : raw;
+    const key = word.toLowerCase();
+    if (!seenLowercased.has(key)) {
+      seenLowercased.add(key);
+      words.push(word);
     }
   }
-  if (distinctInFirstSeenOrder.length <= LEXICAL_QUERY_MAX_DISTINCT_WORDS) {
-    return seen;
+  const seenPhrases = new Set<string>();
+  const phrases: string[][] = [];
+  for (const word of words.slice(0, LEXICAL_QUERY_MAX_DISTINCT_WORDS)) {
+    const phrase = tokenize(word);
+    if (phrase.length === 0) continue;
+    const key = phrase.join(" ");
+    if (!seenPhrases.has(key)) {
+      seenPhrases.add(key);
+      phrases.push(phrase);
+    }
   }
-  return new Set(distinctInFirstSeenOrder.slice(0, LEXICAL_QUERY_MAX_DISTINCT_WORDS));
+  return phrases;
+}
+
+/** `phrase` が `tokens` の中に隣接してこの順で現れる回数（`<->` のフレーズ一致）。 */
+function countPhrase(tokens: string[], phrase: string[]): number {
+  let count = 0;
+  for (let i = 0; i + phrase.length <= tokens.length; i++) {
+    if (phrase.every((p, j) => tokens[i + j] === p)) count += 1;
+  }
+  return count;
 }
 
 /**
@@ -184,12 +208,10 @@ function capQueryTerms(tokens: string[]): Set<string> {
  * 「頻度が高いほど大きい値になる」という向きだけを postgres 実装と共有する、
  * この in-memory 実装だけのローカルな規則である。
  */
-function computeRank(contentTokens: string[], queryTerms: Set<string>): number {
+function computeRank(contentTokens: string[], phrases: string[][]): number {
   let rank = 0;
-  for (const token of contentTokens) {
-    if (queryTerms.has(token)) {
-      rank += 1;
-    }
+  for (const phrase of phrases) {
+    rank += countPhrase(contentTokens, phrase);
   }
   return rank;
 }
@@ -265,11 +287,11 @@ export class InMemoryLexicalStore implements LexicalStore {
       throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
-    // （capQueryTotalChars/capQueryTerms の doc 参照）。全体の文字数を最初に適用する。
+    // （capQueryTotalChars/queryPhrases の doc 参照）。全体の文字数を最初に適用する。
     // Issue #951: `mnemora_lexical_query_terms` と同じ向きで、非 ASCII の連なりを
     // 空白に落としてから分割する（このファイル冒頭の `tokenize()` doc 参照）。
-    const queryTerms = capQueryTerms(tokenize(dropNonAsciiRuns(capQueryTotalChars(query))));
-    if (queryTerms.size === 0) {
+    const phrases = queryPhrases(dropNonAsciiRuns(capQueryTotalChars(query)));
+    if (phrases.length === 0) {
       // 契約: 語彙が1つも取れないクエリは0件（`lexical-store-conformance.ts` の歯）。
       return [];
     }
@@ -346,12 +368,11 @@ export class InMemoryLexicalStore implements LexicalStore {
       }
 
       const contentTokens = tokenize(memory.content);
-      // OR 意味論（ADR 0092）: クエリの語のうち、content に含まれるものを数える。
+      // OR 意味論（ADR 0092）: クエリの語（空白区切り）のうち、content にフレーズとして現れるものを数える。
       // 1つも一致しなければ返さない——`matched === 0` は「一致した候補」ではない。
-      const contentTokenSet = new Set(contentTokens);
       let matched = 0;
-      for (const term of queryTerms) {
-        if (contentTokenSet.has(term)) {
+      for (const phrase of phrases) {
+        if (countPhrase(contentTokens, phrase) > 0) {
           matched += 1;
         }
       }
@@ -359,11 +380,11 @@ export class InMemoryLexicalStore implements LexicalStore {
         continue;
       }
 
-      const coverage = matched / queryTerms.size;
+      const coverage = matched / phrases.length;
       hits.push({
         memoryId: memory.id,
         coverage,
-        rank: computeRank(contentTokens, queryTerms),
+        rank: computeRank(contentTokens, phrases),
         recordedAt: memory.recordedAt,
       });
     }
