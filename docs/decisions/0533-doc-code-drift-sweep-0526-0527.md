@@ -81,3 +81,29 @@
 - **陽性対照**【実測】: 一時の md に存在しない識別子 `profileObservationLanguageX` を書いて識別子の照合に通し、拾った（実在する `profileObservationLanguage` は拾わなかった）。一時ファイルは削除した。「数え方を書いた古い記述が無い」ことは grep の形（`languageMismatch` 系のヒットが上の範囲だけ）で見た。実装と文書の突き合わせには機械の陽性対照が無い（手で読んだ）。
 - **【未確認】**: 0507 の歯（`language-mismatch-count-once.test.ts`）を走らせていない。CHANGELOG の実測値（約 4.9 秒 → 約 0.06 秒）を測り直していない。`Observation` が呼び出しの途中で書き換わる経路が無いこと（ADR 0507 も全経路の確認はしていないと書く）。
 - **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
+
+## 追い足し（基準 main `f3e44794`、ADR 0503 の分）
+
+0503（#1621）が main に入ったので掃いた（`git diff 1fde1b30 f3e44794`）。この枝は `origin/main` を merge した（衝突なし）。0505・0508・0530・0531・0532 などは、まだ追い足していない。
+
+- **0503 の中身**【現物】: `MemoryStore` の `resolveContestedPair?`・`resolveContestedGroup?`・`updateStatus`・`updateStatusWithEvent` が、置き換えた側（`supersededById`）の約束を壊す入力を、書く前に `RangeError` で断る（`@mnemora/postgres` の `assertSupersededByShape`・`assertNoSupersededCycle` と、testkit の InMemory）。断るのは、(1) `status: "superseded"` に `supersededById` が無い、(2) 自己置換、(3) `resolveContested*` で `active` に `supersededById` を付ける、(4) 同じ呼び出しのメンバーの中の循環（2者は互いを指す、群は輪になる）、(5) `resolveContestedGroup` で群の外の `forgotten` な記憶を指す。`updateStatus*` は (1)(2) だけ（`active` などに `supersededById` を付けても断らない）。CHANGELOG `[1.3.0]` の `### Breaking` と migration-v1 の項目59は 0503 自身が足している。
+- **探した場所**【現物】:
+  - 語の grep: `supersededById|superseded_by_id` に `省略|無く|通る|黙|断|検査` を重ねたもの（`docs/memory-model.md`・`docs/architecture.md`・README・`packages/*/README.md`）。`packages/core/src/interfaces/memory-store.ts` の `supersededById` を全部読んだ。
+  - 読んだ所: `MemoryStore.updateStatus`・`updateStatusWithEvent`・`resolveContestedPair?`・`resolveContestedGroup?` の TSDoc、`docs/memory-model.md` の「⚠ 2026-09-26 追記（Issue #854）」と、その ADR 0439 の追記、`docs/architecture.md` §5 の port の写し。
+  - 差の確認: `git diff 1fde1b30 f3e44794 -- CHANGELOG.md docs/migration-v1.md packages/core/src/interfaces/memory-store.ts packages/postgres/src/memory-store.ts packages/testkit/src`。
+  - `docs/migration-v1.md` の 🔴 の番号の並び（54・55・56・57・58・59）と、項目57〜59の「中身は CHANGELOG の…を見ること」の指す節。
+  - 機械照合を、前回と同じ文書の集合に再度通した。CHANGELOG・migration-v1 は、0503 の項の行に識別子・文言の照合を当てた。
+- **突き合わせの結果**【現物】:
+  - 実装の条件・例外の型・message・断る位置は、TSDoc と CHANGELOG と一致した。型は素の `RangeError`、message は `<口>: <欄>.supersededById is required when status is "superseded"`・`… must not be the memory itself`・`… must not be set unless status is "superseded"`（`resolveContested*` だけ）・`<口>: supersededById must not form a cycle among the members`・`resolveContestedGroup: members[<i>].supersededById must not be a forgotten memory outside the group`。値は message に入らない。断る位置は、status の検査（ADR 0499）のあと・id の存在確認より前（(5) だけはテナントの照合のあと）。`updateStatus*` は `contested` の検査のあと、対象の存在確認・テナント照合・`expectedStatus` の判定より前。
+  - 「断らないもの」（勝者を指す `superseded`・`both_active`・群の外の `active` を指す `superseded`・`updateStatus*` で別の記憶を指す `superseded`・`superseded` 以外で `supersededById` 無し）も、実装の `forbidWhenNotSuperseded` と一致した。
+  - migration-v1 の 🔴 の番号は 54〜59 と続き、飛び・重複は無い。
+  - `docs/architecture.md` §5 の port の写しに、`supersededById` の検査を書いた所は無かった（型の写しだけ）。
+- **直したもの（文書の側だけ）**:
+  1. `docs/migration-v1.md` の項目57・58・59（「🔴 破壊的変更（v1.2.0 → 次の版）」。未リリースの節）の「何が変わったか」: 「[CHANGELOG.md] の `[1.2.0]` 節 `### Breaking` を見ること」→ `[1.3.0]` 節。0499・0502・0503 の項は #1619 で CHANGELOG の `[1.3.0]` の `### Breaking` へ移ったが、migration の指す先が `[1.2.0]` のままで、そこには該当の箇条が無い（棚卸しで `[1.2.0]` が `d49c46c` までに区切られた）。項目54〜56（v1.2.0 の節）は `[1.2.0]` を指していて正しいので触っていない。
+  2. `docs/memory-model.md`（「⚠ 2026-09-26 追記（Issue #854）」のあとの ADR 0439 の追記）: 「アプリ側の唯一の検査（`isContestedWithoutCompanion`）は…」と書いた #854 の節が、ADR 0503 からさらに成り立たなくなったので、追記に ADR 0503 の一文を足した（`supersededById` の約束を壊す入力の5つを `RangeError` で断る）。#854 の本文は当時の記録として書き換えていない。
+  3. CHANGELOG `[1.2.0]`・migration-v1 の v1.2.0 の節には触っていない。
+- **コードの側を直すべき食い違い**: 見つからなかった。材料として残す【判断】: (a) 0503 は conformance suite に `it` を足していない（約束を足すのはオーナーの判断、と CHANGELOG・migration が書く）ので、自前の `MemoryStore` 実装には検査が付いてこない（migration に「必要なら自前で足す」と書いてある）。(b) migration 項目59の「DB マイグレーション」の欄に、直す前に書かれた `superseded_by_id` が NULL の行（戻せない敗者）や自己参照の行を調べる SQL を載せていない（【未】必要なら足す、と 0503 自身が書く）。
+- **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回（0507 の追い足しのあと）と、行番号を除いて同じだった。migration の項目59の行の識別子の照合は、何も出さなかった。
+- **陽性対照**【実測】: 一時の md に存在しない識別子 `assertSupersededByShapeX` を書いて識別子の照合に通し、拾った（実在する `assertSupersededByShape` は拾わなかった）。一時ファイルは削除した。migration の指す節のずれは、CHANGELOG の見出し（`## [1.3.0]` の下の `### Breaking` に 0499・0502・0503 の3項がある）と、migration の項の位置を数えて見つけた。message・条件の突き合わせには機械の陽性対照が無い（手で読んだ）。
+- **【未確認】**: 0503 の歯（`in-memory-superseded-by-checks.test.ts`・`store-superseded-by-checks.postgres.test.ts` と、既存の歯の直し）を走らせていない。(5) 群の外の `forgotten` な記憶の判定が、本物の Postgres で同じ message になること。0503 が足さなかった conformance の `it`。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
