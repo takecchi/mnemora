@@ -1964,6 +1964,7 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
 - 行11の `events_purged` の meta の日時（`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）は ISO 8601 の文字列である。
   `@mnemora/postgres` は meta を JSON で保存するので文字列で読み戻り、`@mnemora/testkit` の fixture も 2026-09-27 から
   同じく文字列で持つ（それまでは `Date` のまま持っていた）。
+  core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`。非公開）も、[ADR 0538](./decisions/0538-retention-and-purge-parity.md) から同じく文字列で持つ。
 
 **⚠ 2026-09-27 追記2（今日入った変更の後に、表の各行を Runtime で起こして当て直した）**: `@mnemora/postgres` と
 `@mnemora/testkit` の fixture の両方で、各行の操作が積むイベントの `kind`・`meta` の欄・状態の遷移を並べた。

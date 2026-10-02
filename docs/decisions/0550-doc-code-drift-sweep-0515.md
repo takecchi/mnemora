@@ -65,3 +65,23 @@
 - **走らせたコマンド**: `git fetch`・`git diff`・`grep`・`node scripts/generate-adr-index.mjs`（差分なし）。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは通していない【未確認】（読んで突き合わせた）。
 - **引き受けた負債**: この ADR の結果は `main` の `8c2519ca` に対して測った記録で、`main` が進めば古くなる。0515・0516 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文で `supersededById` の扱いや store の例外の message を言い換えた文）の古さが見つかったとき。Fake を直す PR で Fake の振る舞いが割れていないと分かったとき（材料1が消える）。
+
+## 追い足し（基準 main `d480131c`、ADR 0538・0535 の分）
+
+0538（#1643、`fd8b5aea`）と 0535（#1637、`d480131c`）が main に入ったので、マージされた順（0538 → 0535）に掃いた。この枝は `origin/main` を merge した（衝突なし。ADR 索引は `node scripts/generate-adr-index.mjs` で再生成しても差分なし）。この節は担い手が書いた。
+
+### 0538（`fd8b5aea`、差は `git diff 8c2519ca fd8b5aea`）
+
+- **0538 の中身**【現物】: 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）を Fake・InMemory・Postgres の3者で突き合わせる歯を足した。割れていたのは1点で、Fake の `events_purged` の `meta`（`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）が `Date` のままだった。差は ADR 0538・歯2ファイル（`fake-retention-purge-parity.test.ts`・`retention-purge-parity.postgres.test.ts`）・索引・`packages/core/src/__tests__/runtime-fakes.ts` の9行だけ。TSDoc・CHANGELOG・migration-v1 は変えていない（ADR 0538 決定1）。
+- **3実装**【現物】:
+  - Postgres（`memory-store.ts` 1756 行目付近）: `JSON.stringify({ purgedCount, oldestPurgedAt, newestPurgedAt, olderThan })` を `jsonb` へ。`Date` は JSON で ISO 8601 の文字列になる。
+  - testkit の InMemory（`in-memory-memory-store.ts` 1790 行目付近）: `toISOString()` で文字列、`null` は `null`。
+  - core の Fake: `purgeExpiredEventsSync`（`purgeExpiredEvents`〔1604 行目〕と `purgeExpiredEventsByRetention`〔1687 行目〕が共有する本体）が、いま `toISOString()` で文字列にしている。`events_purged` を積む本番の書き手はこの3つだけ（`grep` の `events_purged`）。3者が揃った。Fake の `scrubPurged` は無い（0538 の言うとおり）。
+- **突き合わせの結果**【現物】:
+  - `packages/core/src/interfaces/memory-store.ts` の `purgeExpiredEvents` の TSDoc（1665 行目）は「`meta` は `{ purgedCount, oldestPurgedAt, newestPurgedAt, olderThan }` の4欄のみ」で、型を書かない。0538 の「型は TSDoc に書いていない」と一致した。矛盾は無い。
+  - 型を言う文書は2つ在る。適合スイートの A10（`memory-store-conformance.ts` 5828 行目、`docs/conformance.md` 48 行目）は ISO 8601 の文字列を検査し、これは InMemory と Postgres を縛る。Fake は適合スイートを通らないので、これまで Fake だけが割れても捕まらなかった（0538 が歯で縛った）。`docs/memory-model.md` 1964 行目は「`@mnemora/postgres` と `@mnemora/testkit` の fixture が文字列」と書き、Fake を挙げていなかった（嘘ではないが、Fake が割れていた間の空白がそのまま残っていた）。
+  - Fake の `events_purged` の `meta` を `Date` として読むテストは見つからなかった（`grep` で `oldestPurgedAt` を `toEqual(new Date`・`toBeInstanceOf(Date)` で比べる所は、いずれも返り値の側で、`meta` ではない）。0538 の「名指しの14本が緑」を再実行はしていない【未確認】。
+  - ルートと各パッケージの README・ほかの `docs/*.md`: `events_purged` の `meta` の型を述べた所は上の2つだけ（grep: `events_purged`）。
+- **直したもの**: `docs/memory-model.md` 1964 行目の箇条に、「core の Fake（非公開）も ADR 0538 から同じく文字列で持つ」の1文を足した。ほかは無い。
+- **コードの側を直すべき食い違い**: 見つからなかった。0538 自身が残した材料（`scrubPurged` を3者で比べる歯は、`createMemory` が `purgedAt` を受けないので足せていない。`purgeExpiredEventsByRetention` の並行は Postgres 固有の歯だけ）は、そのまま残る。変更なし。
+- **【未確認】**: 0538 の歯2本（Postgres は DB が要る）と変異試験 19 件を走らせていない。Fake の `purgeExpiredEvents` を実際に呼んで `meta` の型を見ていない（読んだだけ）。
