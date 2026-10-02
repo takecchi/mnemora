@@ -2068,7 +2068,8 @@ function embeddingCleanupFailed(error: unknown): PurgeEmbeddingCleanup {
 
 /**
  * `"already_purged"` の後始末（`MemoryStore.scrubPurged`、v1.1.0 より前に purge した行の
- * `tags`・`attributes`・claim key・label の紐付けの掃除。ADR 0437 決定3）が失敗したことの知らせ。
+ * `tags`・`attributes`・claim key・label の紐付けの掃除。ADR 0437 決定3。ADR 0512 から、
+ * `recalls.index_band` の目次帯に残った digest を伏せることも含む）が失敗したことの知らせ。
  * {@link PurgeEmbeddingCleanup} と同じ形・同じ規律（失敗したときだけ付く。`kind` は変わらない）。
  */
 export type PurgeResidueCleanup = { status: "failed"; error: string };
@@ -2092,7 +2093,7 @@ function residueCleanupFailed(error: unknown): PurgeResidueCleanup {
  *   未 purge（`purgedAt` が `null`）であり、`dryRun: false` で呼べば `"purged"` に
  *   なったはずであることを示す。**書き込みは一切起きていない。**
  * - `"already_purged"`: 対象は既に purge 済み（`purgedAt` が非 `null`）だった。
- *   **`MemoryStore` への書き込みは一切起きていない**（`dryRun` の有無に関わらず同じ
+ *   **`MemoryStore` への書き込みは一切起きていない**（下の `scrubPurged` の後始末を除く。`dryRun` の有無に関わらず同じ
  *   kind——「何も起きない」という結論自体は `dryRun` で変わらない）。**`dryRun` が
  *   `false`（省略時を含む）なら、`VectorStore.deleteAcrossSpaces` をベストエフォートで
  *   試みる**（Issue #1425、ADR 0382——埋め込みモデルを移した後に purge を再実行すると、
@@ -2100,7 +2101,8 @@ function residueCleanupFailed(error: unknown): PurgeResidueCleanup {
  *   呼ばない。失敗したときだけ `embeddingCleanup` が付く（`"purged"` と同じ）。
  *   **同じく `dryRun` が `false` なら、`MemoryStore.scrubPurged`（任意メソッド）もベストエフォートで
  *   試みる**（ADR 0437——v1.1.0 より前の `purge` は `tags`・`attributes`・claim key・label の
- *   紐付けを残していたので、purge をかけ直すとそれらが消える）。失敗したときだけ `residueCleanup` が付く。
+ *   紐付けを残していたので、purge をかけ直すとそれらが消える。ADR 0512 から、v1.0.x の `purge` が
+ *   `recalls.index_band` の目次帯に残した digest も伏せる）。失敗したときだけ `residueCleanup` が付く。
  * - `"status_not_forgotten"`: 対象の `status` が `"forgotten"` ではなかった
  *   （`purge` は `forgotten` からのみ遷移できる、ADR 0124 決定1）。`status` に現在値が入る。
  *   **書き込みは一切起きていない。**
