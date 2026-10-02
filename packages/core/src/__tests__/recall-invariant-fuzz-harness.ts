@@ -119,6 +119,10 @@ export type Op =
   | { k: "group"; i: number; j: number; l: number }
   /** `relations` profile だけ: 作った群を解決する（`resolveContestedGroup`）。 */
   | { k: "resolveGroup"; g: number; sup: boolean }
+  /** `relations` profile だけ: `RelationStore.link` を直接呼ぶ（`contradicts` の1行、片方向。ADR 0494）。 */
+  | { k: "link"; i: number; j: number }
+  /** `relations` profile だけ: `RelationStore.unlink` を直接呼ぶ。 */
+  | { k: "unlink"; i: number; j: number }
   | { k: "sweep" }
   | { k: "advance"; hours: number };
 
@@ -201,7 +205,10 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
     else if (x < 0.87) {
       const i = idx();
       const j = idx();
-      if (rel && r2() < 0.6) ops.push({ k: "group", i, j, l: Math.floor(r2() * 1000) });
+      const u = rel ? r2() : 1;
+      if (u < 0.45) ops.push({ k: "group", i, j, l: Math.floor(r2() * 1000) });
+      else if (u < 0.65) ops.push({ k: "link", i, j });
+      else if (u < 0.75) ops.push({ k: "unlink", i, j });
       else ops.push({ k: "mark", i, j, ...mu() });
     } else if (x < 0.91) {
       const i = idx();
@@ -688,6 +695,17 @@ export async function runOps(
           }
           break;
         }
+        case "link":
+        case "unlink": {
+          const a = nth(op.i);
+          const b = nth(op.j);
+          if (a && b && a !== b) {
+            const rs = stores.relationStore!;
+            if (op.k === "link") await rs.link(ctx, "contradicts", a, b);
+            else await rs.unlink(ctx, "contradicts", a, b);
+          }
+          break;
+        }
         case "resolveGroup": {
           const members = groups.length > 0 ? groups[op.g % groups.length] : undefined;
           if (members) {
@@ -735,7 +753,14 @@ export async function runOps(
           break;
       }
     } catch (e) {
-      violations.push({ inv: "EXCEPTION", detail: `${op.k}: ${(e as Error).message}`, op: oi });
+      // 大文字にした id（`upper`）は、fixture（InMemory・Fake）では「実在しない記憶」と同じ扱いで断られる
+      // （ADR 0446 の既存の違い）。その断りだけは違反にしない。ほかの例外は違反のまま。
+      const upperRejected =
+        "mu" in op &&
+        op.mu === "upper" &&
+        /memory not found for tenant/.test((e as Error).message ?? "");
+      if (!upperRejected)
+        violations.push({ inv: "EXCEPTION", detail: `${op.k}: ${(e as Error).message}`, op: oi });
     }
     now += step();
   }
