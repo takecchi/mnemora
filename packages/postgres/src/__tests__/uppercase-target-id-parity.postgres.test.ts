@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- 3 実装の store を同じ形で突き合わせる試験で、口ごとの戻り値の型を写さない */
 import { describe, expect, it } from "vitest";
 import { createRuntime } from "@mnemora/core";
 import {
@@ -216,6 +217,39 @@ const mkObs = async (e: Env) => {
   (e as any).obsId = o.id;
   e.ids.push(o.id);
 };
+const mkClaims = async (e: Env) => {
+  for (let i = 0; i < 2; i++) {
+    const m = await e.st.memoryStore.createMemory(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: `claim ${i}`,
+      contentHash: `ch${i}`,
+      digest: `c${i}`,
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "m" },
+      claimKey: { subject: "s", predicate: "p" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date(e.getNow()),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 8760,
+      decayFloorAt: new Date(e.getNow() + 1e9),
+      embeddingStatus: "pending",
+    } as any);
+    e.ids.push(m.id);
+  }
+};
+const claimQuery = (e: Env, exclude: string) => ({
+  subjectId: null,
+  claimKey: { subject: "s", predicate: "p" },
+  excludeMemoryId: exclude,
+  contentHash: "zz",
+  validFrom: null,
+  validUntil: null,
+});
 type Case = {
   name: string;
   pre?: (e: Env) => Promise<any>;
@@ -529,6 +563,25 @@ const cases: Case[] = [
       });
       return { remaining: left.length };
     },
+  },
+  {
+    name: "m5.findActiveByClaimKey(excludeMemoryId)",
+    pre: mkClaims,
+    run: (e, f) =>
+      e.st.memoryStore
+        .findActiveByClaimKey(ctx, claimQuery(e, f(4)))
+        .then((x: any[]) => x.map((m) => m.id)),
+  },
+  {
+    name: "m5.findContestedByClaimKey(excludeMemoryId)",
+    pre: async (e) => {
+      await mkClaims(e);
+      await e.rt.markContested(ctx, e.ids[4], e.ids[5]);
+    },
+    run: (e, f) =>
+      e.st.memoryStore
+        .findContestedByClaimKey(ctx, claimQuery(e, f(4)))
+        .then((x: any[]) => x.map((m) => m.id)),
   },
   {
     name: "o6.getObservation(UP)",

@@ -558,7 +558,9 @@ function normOptId<T extends string>(id: T | null | undefined): T | null | undef
   return id === null || id === undefined ? id : normId(id);
 }
 
-function normPairSide<T extends { id: MemoryId; supersededById?: MemoryId | undefined }>(side: T): T {
+function normPairSide<T extends { id: MemoryId; supersededById?: MemoryId | undefined }>(
+  side: T,
+): T {
   return {
     ...side,
     id: normId(side.id),
@@ -2430,7 +2432,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertQueryDate("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
     }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
-    const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds.map(normId));
+    const idFilter =
+      opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds.map(normId));
     const targets = [...this.memories.values()]
       .filter(
         (m) =>

@@ -1894,7 +1894,8 @@ export class FakeMemoryStore implements MemoryStore {
       throw new Error(`requeueEmbedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
-    const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds.map(normId));
+    const idFilter =
+      opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds.map(normId));
     const targets = [...this.backing.memories.values()]
       .filter(
         (m) =>
