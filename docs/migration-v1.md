@@ -2607,6 +2607,26 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 **DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
 
 
+### 61. `resolveContestedPair?` が対の外の `forgotten` を指す `supersededById` を、`updateStatus`・`updateStatusWithEvent` が `superseded` 以外の status への `supersededById` を、`RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0515](./decisions/0515-superseded-by-remaining-checks.md)（担い手が書いた。決めたのはクローンの線の内側で、オーナーではない。[ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md) の「引き受けた負債」の1・2。項目59と同じ数え方）。
+
+⚠ **未リリース**。**番号は 61 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`resolveContestedPair?` が、対の外の `forgotten`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `RangeError`）。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**（項目59と同じ）。conformance スイートに `it` は足していない。
+
+**誰が影響を受けるか**: `PostgresMemoryStore`・testkit の `InMemoryMemoryStore` を直接呼ぶ利用者のうち、(a) `resolveContestedPair` で、書く時点で既に `forgotten` な記憶を置き換えた側に指しているもの、(b) `updateStatus*` で `active`・`archived`・`forgotten` に `supersededById` を付けているもの（以前は `superseded_by_id` が残った）。`Runtime` 経由の通常の呼び出しは変わらない。
+
+**どう直すか**:
+- (a) 置き換え先を `active` な記憶にする。
+- (b) `superseded` 以外の status には `supersededById` を渡さない。`superseded_by_id` を外したいなら、`restoreSuperseded` を使う。
+
+**確かめたこと**: 2実装に同じ入力を流す歯で、直す前は赤・直した後は緑、変異（検査を外す・やりすぎる）で赤（ADR 0515）。
+
+**DB マイグレーション**: 要らない。既存の行は書き換えない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
@@ -2801,6 +2821,12 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の InMemory: `archiveDecayed`・`aggregateScope`・`VectorStore.search` の `nowSeq + S_x`（`decayFloorSeqAfter + S_x`）が 2^63 以上になる入力を断る**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。🟡。ADR 0500 の負債）。Postgres は以前から `22003 bigint out of range` で拒む。断るのは、その式が評価される行（カウンタを使い、subject を持ち、`decay_floor_seq` が非 NULL で、ほかの条件を通る行。2軸は左で決まれば右は評価されない）があるときと、`nowSeq`（`decayFloorSeqAfter`）そのものが 2^63 以上のとき。実際の `nowSeq` は小さい整数なので、到達しない入力。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 - **`@mnemora/postgres`: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。ADR 0504 と同じ作法）。SQL の文・SQLSTATE・`cause` は残る。落ちる入力は増えない。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。
 - **`@mnemora/postgres`・`@mnemora/testkit/fixtures`: v1.0.x で purge した記憶は、`Runtime.purge` をかけ直す（`scrubPurged`）と、`recalls.index_band` の目次帯に残った digest も伏せられる**（[ADR 0512](./decisions/0512-scrub-purged-index-band.md)）。v1.0.0〜v1.0.2 の purge は `recalls` を書き換えなかった。手順は要らない（かけ直したときだけ効く。自動では走らない。migration では消さない）。`recalls.query` は残る。
+- **`@mnemora/core`: `extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`trim` で空になる値）なら、本文の前置きにしない**（[ADR 0517](./decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1）。
+  以前は抽出（LLM）に渡る本文と全文フォールバックの Memory の本文が `"  \n\nC"` のように空白の前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）になる。実質のある `title` は変わらない（前後の空白もそのまま）。手順は要らない。落ちる入力は増えも減りもしない（`ObserveInputSchema` は変えていない）。空白だけの `title` を `extractTitle: true` で渡していた呼び出し側の、抽出プロンプトの入力と、全文フォールバックの Memory の `content` が変わる。`reextract`・`deferred` の読み直しは、新しい規則で本文を作る。保存済みの Memory は書き換えない。
+
+- **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
+  以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
+
 - **`Runtime.tick` の `embed` ジョブ: forget した記憶・purge した記憶では、embedding provider を呼ばずにジョブを終える**（[ADR 0541](./decisions/0541-embed-job-skips-withdrawn-memory.md)）。
   以前は、forget の前に積まれた埋め込みジョブが後から走ると、`forgotten` の記憶の本文（purge 済みなら墓標）を `embeddingProvider.embed` に送り、ベクトルを書いていた。今は、`forgotten` か purge 済みの記憶なら provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する。`embeddingProvider` の呼び出し回数を数えているテストや、forget した記憶のベクトルが存在することに頼っているコードは見直すこと。新しく断る入力は無く、他の状態（`active`・`archived`・`superseded`・`contested`）は変わらない。すでに送られた分は取り消せない。
 
