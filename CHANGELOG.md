@@ -390,7 +390,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   drizzle が包んだ失敗（`Failed query: <SQL>\nparams: <値>`）の message には、SQL に渡した値（本文を含む）がそのまま入っていた。`Runtime` の全メソッド（`observe`・`recall` など）が、store などが投げた例外の message を、SQL の文を残したまま `params:` の値だけを落とした形（`(omitted by mnemora, N chars)`）にしてから投げ直す。**例外は新しく作らず、その場で書き換える**ので、`kind`・`name`・`cause`・独自の欄は残る。`stack` の先頭の message も同じく書き換える。
 
   - **破壊的と数えない理由**: 型・例外の種類は変わらない。変わるのは message の文字列の後半だけである。message の `params:` 以降を読んで処理している呼び出し側は、値を読めなくなる。
-  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。store を `Runtime` を通さずに直接呼んだときの例外。
+  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。store を `Runtime` を通さずに直接呼んだときの例外（この PR の時点では。`PostgresVectorStore` だけは、次の ADR 0504 の項で落とすようにした）。
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
 
   `upsert`・`search`・`searchMany`・`delete`・`getVectors`・`deleteAcrossSpaces`・`eraseTenant` が投げる例外の `message`（と `stack`・`cause` の連鎖）の `params:` より後ろを、`Runtime` と同じ形（`(omitted by mnemora, N chars)`）に落とす。`searchMany` は 1 文に最大 16384 件のベクトルが params に載っていた。例外は新しく作らず、その場で書き換えるので、`kind`・`name`・`code`・`cause` は残る。
