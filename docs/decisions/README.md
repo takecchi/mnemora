@@ -513,10 +513,14 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0499](./0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md) | 書き込み口の NUL を名指しで断る・`resolveContested*` の型の外の `status` を断る・purge 済みの行を CAS に一致させない・`setEventRetention` の日数の上限を共有の検査へ | 採用 (2026-10) |
 | [0500](./0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) | testkit の fixture を Postgres に揃える（`findContestedByClaimKey`・検索の `labels` の NUL、`timestamptz` の下限、`reinforce` の bigint 溢れ、LLM 応答の参照、core Fake の float4 読み戻し） | 採用 (2026-10) |
 | [0501](./0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md) | 文書の負債3件を返す — `--help` の環境変数（ADR 0478 負債1）・ANALYZE の数えがプロセスごと（ADR 0460 D5）・purged への強化の TSDoc（ADR 0453 負債3） | 採用 (2026-10) |
+| [0502](./0502-observe-rejects-whitespace-only-input.md) | `observe()` が、本文が空白だけの入力（`utterance.text`・`event.name`・`document.content`）を入口で断る | 採用 (2026-10) |
 | [0504](./0504-vector-store-omits-params-from-thrown-errors.md) | `PostgresVectorStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0505](./0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md) | fixture の `S_x` の bigint 溢れ（`archiveDecayed`・`aggregateScope`・`VectorStore.search`）、Observation・Recall の NUL を名指しで断る、`EventStore.append`・`LexicalStore.search` の例外から params を落とす | 採用 (2026-10) |
+| [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
