@@ -100,6 +100,61 @@ function assertResolvedStatus(method: string, field: string, status: unknown): v
 }
 
 /**
+ * ADR 0503（ADR 0447 材料3〜5・ADR 0450 材料1・2）: `status: "superseded"` の更新は、置き換えた側（`supersededById`）を
+ * 必ず伴い、それは自分自身でないこと。`resolveContested*` の `"active"` に `supersededById` を付けることも断る
+ * （active なのに `superseded_by_id` が残る行になる）。書く前に `RangeError` で断る（値は message に入れない）。
+ * `PostgresMemoryStore` と同じ文面。
+ */
+function assertSupersededByShape(
+  method: string,
+  field: string,
+  selfId: string,
+  status: string,
+  supersededById: string | undefined,
+  opts: { forbidWhenNotSuperseded: boolean },
+): void {
+  if (status === "superseded") {
+    if (supersededById === undefined) {
+      throw new RangeError(
+        `${method}: ${field}.supersededById is required when status is "superseded"`,
+      );
+    }
+    if (supersededById === selfId) {
+      throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
+    }
+  } else if (opts.forbidWhenNotSuperseded && supersededById !== undefined) {
+    throw new RangeError(
+      `${method}: ${field}.supersededById must not be set unless status is "superseded"`,
+    );
+  }
+}
+
+/**
+ * ADR 0503: `supersededById` の鎖が、同じ呼び出しで `superseded` になるメンバーの中で輪になっていないこと
+ * （2者版の「互いを指す」、群版の A→B→A など）。輪になっていれば `RangeError`。
+ */
+function assertNoSupersededCycle(
+  method: string,
+  members: ReadonlyArray<{ id: string; status: string; supersededById?: string | undefined }>,
+): void {
+  const next = new Map<string, string>();
+  for (const m of members) {
+    if (m.status === "superseded" && m.supersededById !== undefined) {
+      next.set(m.id, m.supersededById);
+    }
+  }
+  for (const start of next.keys()) {
+    let cur = next.get(start);
+    for (let hops = 0; cur !== undefined && hops <= next.size; hops += 1) {
+      if (cur === start) {
+        throw new RangeError(`${method}: supersededById must not form a cycle among the members`);
+      }
+      cur = next.get(cur);
+    }
+  }
+}
+
+/**
  * Issue #1108: `MemoryStore` の口が返す値（Memory と、それを含む返り値のオブジェクト）を、
  * **返す時点の複製**にする。以前は内部に持っている Memory の実体そのものを返していたため、
  * 呼び手が一度受け取った値が後の別の操作で遡って変わり、呼び手が受け取った値を書き換えると
@@ -1366,6 +1421,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
     }
+    // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
+    assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
+      forbidWhenNotSuperseded: false,
+    });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -1407,6 +1466,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
     }
+    // ADR 0503: updateStatus と同じ。
+    assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
+      forbidWhenNotSuperseded: false,
+    });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -2907,6 +2970,28 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
     assertResolvedStatus("resolveContestedPair", "first", first.status);
     assertResolvedStatus("resolveContestedPair", "second", second.status);
+    // ADR 0503: 置き換えた側を伴わない superseded・自己置換・active への supersededById・互いを指す循環は、書く前に断る。
+    assertSupersededByShape(
+      "resolveContestedPair",
+      "first",
+      first.id,
+      first.status,
+      first.supersededById,
+      {
+        forbidWhenNotSuperseded: true,
+      },
+    );
+    assertSupersededByShape(
+      "resolveContestedPair",
+      "second",
+      second.id,
+      second.status,
+      second.supersededById,
+      {
+        forbidWhenNotSuperseded: true,
+      },
+    );
+    assertNoSupersededCycle("resolveContestedPair", [first, second]);
 
     const firstMemory = this.rawGet(ctx, first.id);
     if (!firstMemory) {
@@ -3113,6 +3198,20 @@ export class InMemoryMemoryStore implements MemoryStore {
     members.forEach((m, i) =>
       assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
     );
+    // ADR 0503: 2者版と同じ（置き換えた側の欠落・自己置換・active への supersededById・循環）。
+    members.forEach((m, i) =>
+      assertSupersededByShape(
+        "resolveContestedGroup",
+        `members[${i}]`,
+        m.id,
+        m.status,
+        m.supersededById,
+        {
+          forbidWhenNotSuperseded: true,
+        },
+      ),
+    );
+    assertNoSupersededCycle("resolveContestedGroup", members);
 
     const memories = members.map((m) => {
       const memory = this.rawGet(ctx, m.id);
@@ -3164,6 +3263,19 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること。
     for (const m of members) {
       this.assertOwnMemoryRef(ctx, m.supersededById);
+    }
+    // ADR 0503: 群の外の `forgotten` な記憶を置き換えた側にしない（敗者が、もう戻らない勝者に置き換えられた行になる）。
+    // 群の中を指すのは、メンバーの status に関わらず断らない。
+    {
+      const memberIds = new Set<string>(ids);
+      members.forEach((m, i) => {
+        if (m.supersededById === undefined || memberIds.has(m.supersededById)) return;
+        if (this.rawGet(ctx, m.supersededById)?.status === "forgotten") {
+          throw new RangeError(
+            `resolveContestedGroup: members[${i}].supersededById must not be a forgotten memory outside the group`,
+          );
+        }
+      });
     }
 
     for (const m of members) {

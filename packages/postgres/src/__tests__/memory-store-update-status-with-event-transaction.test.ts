@@ -57,6 +57,11 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
       buildNewMemoryFixture({ tenantId: "tenant-1" }),
     );
     expect(memory.status).toBe("active");
+    // ADR 0503: 自己置換は断られるので、置き換えた側は別の記憶にする。
+    const winner = await seedStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+    );
 
     // 4本の「プロセス」相当。同一 Pool を共有しない理由は本ファイル冒頭のコメント参照。
     const N = 4;
@@ -70,7 +75,7 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
           ctx,
           memory.id,
           "superseded",
-          { supersededById: memory.id, expectedStatus: "active" },
+          { supersededById: winner.id, expectedStatus: "active" },
           {
             tenantId: ctx.tenantId,
             memoryId: memory.id,
@@ -119,13 +124,18 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
     const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
     // 現在の status を archived にしておき、期待する expectedStatus: 'active' と食い違わせる。
     await store.updateStatus(ctx, memory.id, "archived");
+    // ADR 0503: superseded は置き換えた側を伴う（この歯の関心事ではない）。
+    const winner = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+    );
 
     await expect(
       store.updateStatusWithEvent(
         ctx,
         memory.id,
         "superseded",
-        { expectedStatus: "active" },
+        { expectedStatus: "active", supersededById: winner.id },
         {
           tenantId: ctx.tenantId,
           memoryId: memory.id,
