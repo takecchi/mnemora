@@ -150,7 +150,7 @@
 // 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。
 // ADR 0434 が実測して、Postgres は拒むが fixture は通したままだったもの（`findContestedByClaimKey` の `claimKey` の NUL、
 // `InMemoryLexicalStore.search` の `filter.labels` の NUL、紀元前4714年より前の `opts.now`、`VectorStore.search` の filter の NUL）は、
-// ADR 0500 で揃えた。`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` を足す式の bigint 溢れは、まだ揃えていない（ADR 0500 の材料）。
+// ADR 0500 で揃えた。`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` を足す式の bigint 溢れも、ADR 0505 で揃えた（Postgres がその式を評価する行があるとき、と `nowSeq`・`decayFloorSeqAfter` そのものが 2^63 以上のとき）。
 
 export { InMemoryMemoryStore } from "./__fixtures__/in-memory-memory-store.js";
 export { InMemoryRelationStore } from "./__fixtures__/in-memory-relation-store.js";

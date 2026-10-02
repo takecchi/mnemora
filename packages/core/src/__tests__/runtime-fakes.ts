@@ -169,6 +169,18 @@ function fakeContainsBigInt(value: unknown): boolean {
   return false;
 }
 
+/**
+ * ADR 0549（ADR 0499 の `casMismatch` の Fake 版。`packages/testkit` の `InMemoryMemoryStore` と同じ式）: `expectedStatus` を渡された
+ * status 更新の CAS が破れるか。**purge 済みの行（`purgedAt` が非 null。`status` は `forgotten` のまま）は、どの `expectedStatus` にも
+ * 一致しない**（`PostgresMemoryStore` の `expectedStatusCondition` と同じ。`Runtime.purge` の「不可逆」の約束）。
+ */
+function casMismatch(
+  memory: { status: MemoryStatus; purgedAt?: Date | null | undefined },
+  expectedStatus: MemoryStatus,
+): boolean {
+  return memory.status !== expectedStatus || (memory.purgedAt ?? null) !== null;
+}
+
 /** 列挙の列（`memories.status` など）へ書けない値を断る（ADR 0493。testkit の `assertStorableMemoryColumn` と同じ文面）。 */
 function assertFakeMemoryColumn(
   column: "status" | "digest_source" | "embedding_status",
@@ -1348,7 +1360,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts?.supersededById !== undefined) {
       this.assertOwnMemoryRef(ctx, opts.supersededById);
     }
-    if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+    if (opts?.expectedStatus !== undefined && casMismatch(memory, opts.expectedStatus)) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
     assertFakeMemoryColumn("status", status);
@@ -1386,7 +1398,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts.supersededById !== undefined) {
       this.assertOwnMemoryRef(ctx, opts.supersededById);
     }
-    if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+    if (opts.expectedStatus !== undefined && casMismatch(memory, opts.expectedStatus)) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
     assertFakeMemoryColumn("status", status);
@@ -1462,10 +1474,12 @@ export class FakeMemoryStore implements MemoryStore {
     // （弾かれる対象はイベントを書かないので確かめない。`PostgresMemoryStore`・`InMemoryMemoryStore` と同じ）。
     const willSupersede = new Set<MemoryId>();
     for (const target of supersede) {
-      const status = willSupersede.has(target.id)
-        ? "superseded"
-        : this.backing.memories.get(target.id)!.status;
-      if (target.expectedStatus !== undefined && status !== target.expectedStatus) continue;
+      // purge 済みの行（`status` は forgotten のまま、`purgedAt` が非 null）は、どの `expectedStatus` にも一致しない（ADR 0549）。
+      // 同じ呼び出しで先に superseded にする対象は、purge 済みではあり得ない（CAS を通ったものだけが入る）。
+      const memory = this.backing.memories.get(target.id)!;
+      const observed = willSupersede.has(target.id) ? { status: "superseded" as const } : memory;
+      if (target.expectedStatus !== undefined && casMismatch(observed, target.expectedStatus))
+        continue;
       this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
       willSupersede.add(target.id);
     }
@@ -1491,7 +1505,7 @@ export class FakeMemoryStore implements MemoryStore {
     for (const target of supersede) {
       this.beforeUpdateStatus?.(target.id);
       const memory = this.backing.memories.get(target.id)!;
-      if (target.expectedStatus !== undefined && memory.status !== target.expectedStatus) {
+      if (target.expectedStatus !== undefined && casMismatch(memory, target.expectedStatus)) {
         conflicted.push({ id: target.id, observedStatus: memory.status });
         continue;
       }
@@ -1578,7 +1592,14 @@ export class FakeMemoryStore implements MemoryStore {
       memoryId: null,
       kind: "events_purged",
       actor: { type: "system" },
-      meta: { purgedCount: purged, oldestPurgedAt, newestPurgedAt, olderThan: opts.olderThan },
+      // ADR 0538: `@mnemora/postgres`（`jsonb`）と `InMemoryMemoryStore` は日時を ISO 8601 の文字列で持つ。この Fake は `Date` のまま持っていた
+      // （`meta` を読み戻すと型が違った）ので、文字列にそろえる。
+      meta: {
+        purgedCount: purged,
+        oldestPurgedAt: oldestPurgedAt?.toISOString() ?? null,
+        newestPurgedAt: newestPurgedAt?.toISOString() ?? null,
+        olderThan: opts.olderThan.toISOString(),
+      },
     });
     this.backing.events.push(storedEvent);
 

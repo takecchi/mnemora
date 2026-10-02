@@ -1423,7 +1423,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
     assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
@@ -1468,7 +1468,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // ADR 0503: updateStatus と同じ。
     assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
@@ -3030,6 +3030,19 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（`PostgresMemoryStore` は UPDATE の中で確かめる）。
     this.assertOwnMemoryRef(ctx, first.supersededById);
     this.assertOwnMemoryRef(ctx, second.supersededById);
+    // ADR 0515: 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ）。対の相手を指すのは断らない。
+    for (const [field, side] of [
+      ["first", first],
+      ["second", second],
+    ] as const) {
+      const ref = side.supersededById;
+      if (ref === undefined || ref === first.id || ref === second.id) continue;
+      if (this.rawGet(ctx, ref)?.status === "forgotten") {
+        throw new RangeError(
+          `resolveContestedPair: ${field}.supersededById must not be a forgotten memory outside the pair`,
+        );
+      }
+    }
 
     assertStorableMemoryColumn("status", first.status);
     assertStorableMemoryColumn("status", second.status);

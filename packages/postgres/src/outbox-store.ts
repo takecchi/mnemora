@@ -12,6 +12,7 @@ import {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { omittingParams } from "./omit-params.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import {
   isUuidLike,
@@ -120,7 +121,8 @@ export class PostgresOutboxStore implements OutboxStore {
     // 行に書く値（`claimed_at`・`available_at`）も同じ寄せた値にする——寄せずに書くと、比べる側が通した行の UPDATE が `22008` になる。
     const nowParam = toPgTimestampClamped(opts.now);
 
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       WITH claimable AS (
         SELECT id FROM outbox
         WHERE tenant_id = ${ctx.tenantId}
@@ -139,7 +141,8 @@ export class PostgresOutboxStore implements OutboxStore {
       FROM claimable c
       WHERE o.id = c.id
       RETURNING o.*
-    `);
+    `),
+    );
     return result.rows.map((row) => rowToOutboxJob(row as unknown as OutboxJobRow));
   }
 
@@ -162,13 +165,15 @@ export class PostgresOutboxStore implements OutboxStore {
     // 何も書かない（`failed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     // ADR 0440: 同種の終端（complete）が既に付いていても同じ（`completed_at IS NULL` ——先勝ち。
     // 2回目の `at` で `completed_at` を上書きしない）。
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       UPDATE outbox
       SET completed_at = ${toPgTimestamp(completedAt)}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
         AND failed_at IS NULL AND completed_at IS NULL
       RETURNING id
-    `);
+    `),
+    );
     if (result.rows.length > 0) {
       return;
     }
@@ -198,13 +203,15 @@ export class PostgresOutboxStore implements OutboxStore {
     // 何も書かない（`completed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     // ADR 0440: 同種の終端（fail）が既に付いていても同じ（`failed_at IS NULL` ——先勝ち。
     // 2回目の `at`・`error` で `failed_at`・`last_error` を上書きしない）。
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       UPDATE outbox
       SET failed_at = ${toPgTimestamp(failedAt)}, last_error = ${storableError}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
         AND completed_at IS NULL AND failed_at IS NULL
       RETURNING id
-    `);
+    `),
+    );
     if (result.rows.length > 0) {
       return;
     }
@@ -235,9 +242,11 @@ export class PostgresOutboxStore implements OutboxStore {
     jobId: string,
     expectedAttempts: number,
   ): Promise<void> {
-    const current = await this.db.execute(sql`
+    const current = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT attempts FROM outbox WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId}
-    `);
+    `),
+    );
     const row = current.rows[0] as { attempts: number } | undefined;
     if (row === undefined) {
       // 行が無い（既に存在しない/最初から無い）。べき等な no-op のまま、例外にしない。
@@ -259,18 +268,21 @@ export class PostgresOutboxStore implements OutboxStore {
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
     if (opts.dryRun === true) {
-      const result = await this.db.execute(sql`
+      const result = await omittingParams(() =>
+        this.db.execute(sql`
         SELECT count(*)::int AS count FROM (
           SELECT 1 FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
         ) s
-      `);
+      `),
+      );
       const deleted = (result.rows[0] as unknown as { count: number }).count;
       return { deleted, reachedLimit: deleted === opts.limit };
     }
     // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする（lock を取るためにトランザクションで包む）。
-    const deleted = await this.db.transaction(async (tx) => {
-      await lockTenantForErase(tx, ctx.tenantId);
-      const result = await tx.execute(sql`
+    const deleted = await omittingParams(() =>
+      this.db.transaction(async (tx) => {
+        await lockTenantForErase(tx, ctx.tenantId);
+        const result = await tx.execute(sql`
         WITH victims AS (
           SELECT id FROM outbox WHERE tenant_id = ${ctx.tenantId} LIMIT ${opts.limit}
         )
@@ -279,8 +291,9 @@ export class PostgresOutboxStore implements OutboxStore {
         WHERE o.tenant_id = ${ctx.tenantId} AND o.id = v.id
         RETURNING o.id
       `);
-      return result.rows.length;
-    });
+        return result.rows.length;
+      }),
+    );
     return { deleted, reachedLimit: deleted === opts.limit };
   }
 
@@ -303,8 +316,8 @@ export class PostgresOutboxStore implements OutboxStore {
     }
     const olderThan = toPgTimestamp(opts.olderThan);
     if (dryRun) {
-      const candidates = await this.db.execute(
-        buildPurgeCompletedJobsTargetSelect(ctx, opts, false),
+      const candidates = await omittingParams(() =>
+        this.db.execute(buildPurgeCompletedJobsTargetSelect(ctx, opts, false)),
       );
       const rows = candidates.rows as unknown as { completed_at: string }[];
       const victims = rows.slice(0, opts.limit);
@@ -317,33 +330,35 @@ export class PostgresOutboxStore implements OutboxStore {
         dryRun,
       };
     }
-    return this.db.transaction(async (tx) => {
-      const candidates = await tx.execute(buildPurgeCompletedJobsTargetSelect(ctx, opts, true));
-      const rows = candidates.rows as unknown as { id: string; completed_at: string }[];
-      const reachedLimit = rows.length > opts.limit;
-      const victimIds = rows.slice(0, opts.limit).map((row) => row.id);
-      if (victimIds.length === 0) {
-        return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
-      }
-      // 述語をもう一度書く: 消すのは、確定した id のうち今も完了済みの行だけ。
-      const deleted = await tx.execute(sql`
+    return omittingParams(() =>
+      this.db.transaction(async (tx) => {
+        const candidates = await tx.execute(buildPurgeCompletedJobsTargetSelect(ctx, opts, true));
+        const rows = candidates.rows as unknown as { id: string; completed_at: string }[];
+        const reachedLimit = rows.length > opts.limit;
+        const victimIds = rows.slice(0, opts.limit).map((row) => row.id);
+        if (victimIds.length === 0) {
+          return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+        }
+        // 述語をもう一度書く: 消すのは、確定した id のうち今も完了済みの行だけ。
+        const deleted = await tx.execute(sql`
         DELETE FROM outbox
         WHERE tenant_id = ${ctx.tenantId}
           AND id = ANY(${sql.param(victimIds)}::uuid[])
           AND completed_at IS NOT NULL AND completed_at < ${olderThan}
         RETURNING completed_at
       `);
-      const completedAts = (deleted.rows as unknown as { completed_at: string }[])
-        .map((row) => parsePgTimestamp(row.completed_at))
-        .sort((a, b) => a.getTime() - b.getTime());
-      return {
-        purged: completedAts.length,
-        reachedLimit,
-        oldestPurgedAt: completedAts.length > 0 ? completedAts[0]! : null,
-        newestPurgedAt: completedAts.length > 0 ? completedAts[completedAts.length - 1]! : null,
-        dryRun,
-      };
-    });
+        const completedAts = (deleted.rows as unknown as { completed_at: string }[])
+          .map((row) => parsePgTimestamp(row.completed_at))
+          .sort((a, b) => a.getTime() - b.getTime());
+        return {
+          purged: completedAts.length,
+          reachedLimit,
+          oldestPurgedAt: completedAts.length > 0 ? completedAts[0]! : null,
+          newestPurgedAt: completedAts.length > 0 ? completedAts[completedAts.length - 1]! : null,
+          dryRun,
+        };
+      }),
+    );
   }
 }
 

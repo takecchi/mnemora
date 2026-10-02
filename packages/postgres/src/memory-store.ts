@@ -1302,7 +1302,7 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
     assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる——ドライバの
@@ -1363,7 +1363,7 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     // ADR 0503: updateStatus と同じ。
     assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力は
     // トランザクションを開く前に同じ「memory not found」の Error へ寄せる——
@@ -3936,6 +3936,26 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       if (secondExisting.status !== "contested" || secondExisting.contested_with_id !== first.id) {
         throw new MemoryStatusConflictError(second.id, "contested", secondExisting.status);
+      }
+
+      // ADR 0515: 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ。ADR 0503 の負債の解消）。
+      // 対の相手を指すのは断らない（ここまでで両方 contested と確かめ済み）。別テナント・実在しない id は、下の UPDATE の切り分け（ADR 0439）に任せる。
+      for (const [field, side] of [
+        ["first", first],
+        ["second", second],
+      ] as const) {
+        const ref = side.supersededById;
+        if (ref === undefined || ref === first.id || ref === second.id) continue;
+        const forgotten = await tx.execute(sql`
+          SELECT 1 FROM memories
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${checkedRef("memory", ref)}::uuid
+            AND status = 'forgotten'
+        `);
+        if (forgotten.rows.length > 0) {
+          throw new RangeError(
+            `resolveContestedPair: ${field}.supersededById must not be a forgotten memory outside the pair`,
+          );
+        }
       }
 
       const updateSide = async (
