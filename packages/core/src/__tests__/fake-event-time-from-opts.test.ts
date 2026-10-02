@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
-import type { NewMemoryEvent } from "../interfaces/event-store.js";
+import type { NewMemoryEvent } from "../event.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
