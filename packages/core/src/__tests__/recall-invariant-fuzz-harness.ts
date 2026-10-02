@@ -196,15 +196,18 @@ export type FuzzProfile =
 
 /**
  * `channels` profile が content と query の text に使う語（ADR 0509）。ASCII の語・識別子と、日本語（trigram 側）を含む。
- * ⚠ 次の2つは**入れていない**（Fake・testkit の語彙検索が Postgres と食い違う既知の割れ。ADR 0509「割れ」。
- * 固定の操作列は `recall-invariant-fuzz.postgres.test.ts` が持つ）: ハイフンを含む識別子（`PROJ-12`。testkit は `proj`・`12` の
- * 2 語に割る）、ほかの語の部分文字列になる語（Fake は部分一致）。語どうしが部分文字列にならないこと、ハイフンを含まないことを保つ。
+ * ADR 0509 は Fake・testkit が Postgres と食い違う 2 つの語（ハイフンを含む識別子 `PROJ-12`、ほかの語の部分文字列になる語）を
+ * 外していた。ADR 0513 で fixture を Postgres に揃えたので戻した（`PROJ-12`・`alp`。`alp` は `alpha` の部分文字列）。
+ * ⚠ ADR 0513 が揃えていない parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）を踏む語は
+ * 入れないこと（`12` 単独、`a.b`、`abc-def` など）。入れると Fake・testkit と Postgres が割れる。
  */
 const CHANNEL_WORDS = [
   "alpha",
   "beta",
   "gamma",
   "PROJ12",
+  "PROJ-12",
+  "alp",
   "東京",
   "大阪",
   "東京タワー",
