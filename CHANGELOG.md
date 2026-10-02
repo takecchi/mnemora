@@ -346,6 +346,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は構築できた入力が、新しく例外になる**。公開の型・export は増えない（検査は各パッケージの内部）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目56。DB マイグレーションは無い。
 
+- **`observe()` が、`utterance.text`・`event.name`・`document.content` が空白だけ（`String.prototype.trim` で空になる値）の入力を、`ZodError` で断るようになった——空白だけの本文を送っている呼び出し側へ**（[ADR 0502](./docs/decisions/0502-observe-rejects-whitespace-only-input.md)、[ADR 0482](./docs/decisions/0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) の材料1、`@mnemora/core`）。
+
+  以前は `z.string().min(1)` だけだったので、空白・改行・タブだけの本文が通り、LLM に空白だけが渡り、LLM が失敗すると `content` が空白だけの active な Memory が残った。今は入口（`ObserveInputSchema`）で、`trim` して空になる値を、空文字と同じ形（`path` は欄名、message は `min(1)` と同じ）の `ZodError` で断る。**何も書く前・LLM を呼ぶ前に落ちる。** `@mnemora/postgres` と testkit の fixture で同じ。
+  - **「空白」の定義**: JS の `String.prototype.trim` が落とす文字（半角空白・タブ・改行・垂直タブ・改ページ・U+00A0・U+FEFF・U+2028/2029・U+3000 を含む Unicode の空白）。U+200B（ZERO WIDTH SPACE）は `trim` が落とさないので通る。
+  - **変わらないこと**: 前後・内側に空白のある普通の文は通る（値は trim しないで、そのまま保存する）。`document.title`・`utterance.speaker`・その他の `min(1)` の欄は今回は変えない。`extractionContext` の中身、抽出（LLM）の出力側の検査も変えない。型・シグネチャ・公開 API は変わらない。
+  - **破壊的と数える理由**: 型は変わらないが、**以前は通っていた入力が、新しく例外になる**（項目21・23・24・27・34・49 と同じ扱い）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目58。DB マイグレーションは無い。
+  - 【確かめていないこと】呼び出し側が実際に空白だけを送っている頻度。すでに保存された空白だけの Memory の有無（消さない）。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
