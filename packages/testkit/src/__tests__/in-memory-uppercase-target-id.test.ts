@@ -331,7 +331,7 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
     expect((await store.get(ctx, target.id))?.status).toBe("active");
   });
 
-  it("abortIfSuperseded: 綴り違いの同じ id は1件、changed は id の昇順（ADR 0565）", async () => {
+  it("abortIfSuperseded: 綴り違いの同じ id は1件、changed は id の昇順（ADR 0567）", async () => {
     const { stores, up } = setup();
     const store = stores.memoryStore;
     const anchor = await store.createMemory(

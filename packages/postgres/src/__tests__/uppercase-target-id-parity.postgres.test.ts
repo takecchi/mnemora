@@ -976,7 +976,7 @@ describe("EventStore.get に大文字のイベント id を渡したとき、3 �
   });
 });
 
-// ADR 0565: ADR 0556 の歯が通した変異（テナントの検査の緩め・畳み・status の広げ）と、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
+// ADR 0567: ADR 0556 の歯が通した変異（テナントの検査の緩め・畳み・status の広げ）と、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
 // どれも、Postgres の現物を基準に testkit（と、`EventStore.get` は Fake）が同じになることを見る。基準は走らせて確かめた値で、推測ではない。
 type AbortEntry =
   "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
@@ -1044,39 +1044,43 @@ function describeChanged(changed: string[], srcIds: string[]): string {
   );
 }
 
-describe("abortIfSuperseded: 別テナントの superseded な記憶は、大文字の id でも見ない（ADR 0565・M2）", () => {
+describe("abortIfSuperseded: 別テナントの superseded な記憶は、大文字の id でも見ない（ADR 0567・M2）", () => {
   for (const entry of ABORT_ENTRIES) {
-    it(entry, async () => {
-      const seen: Record<string, string> = {};
-      for (const be of ["pg", "testkit"]) {
-        const e = await mkEnv(be);
-        const other = { tenantId: "tenant-2" };
-        // 別テナントに、superseded な記憶を作る（置き換えた側も同じテナントに要る）。
-        const by = await e.st.memoryStore.createMemory(other, {
-          ...newMemoryInput(e, "x-by"),
-          tenantId: other.tenantId,
-        });
-        const src = await e.st.memoryStore.createMemory(other, {
-          ...newMemoryInput(e, "x-src"),
-          tenantId: other.tenantId,
-          status: "superseded",
-          supersededById: by.id,
-        });
-        for (const v of ["lo", "UP"]) {
-          const r = await callAbort(e, entry, [v === "UP" ? up(src.id) : src.id]);
-          seen[`${be}.${v}`] = r.outcome;
+    it(
+      entry,
+      async () => {
+        const seen: Record<string, string> = {};
+        for (const be of ["pg", "testkit"]) {
+          const e = await mkEnv(be);
+          const other = { tenantId: "tenant-2" };
+          // 別テナントに、superseded な記憶を作る（置き換えた側も同じテナントに要る）。
+          const by = await e.st.memoryStore.createMemory(other, {
+            ...newMemoryInput(e, "x-by"),
+            tenantId: other.tenantId,
+          });
+          const src = await e.st.memoryStore.createMemory(other, {
+            ...newMemoryInput(e, "x-src"),
+            tenantId: other.tenantId,
+            status: "superseded",
+            supersededById: by.id,
+          });
+          for (const v of ["lo", "UP"]) {
+            const r = await callAbort(e, entry, [v === "UP" ? up(src.id) : src.id]);
+            seen[`${be}.${v}`] = r.outcome;
+          }
         }
-      }
-      // 基準: Postgres は、自分のテナントの行だけを見るので、別テナントの記憶は断らず書く。
-      expect(seen["pg.lo"]).toMatch(/^NO THROW/);
-      expect(seen["pg.UP"]).toBe(seen["pg.lo"]);
-      expect(seen["testkit.lo"]).toBe(seen["pg.lo"]);
-      expect(seen["testkit.UP"]).toBe(seen["pg.UP"]);
-    }, 120_000);
+        // 基準: Postgres は、自分のテナントの行だけを見るので、別テナントの記憶は断らず書く。
+        expect(seen["pg.lo"]).toMatch(/^NO THROW/);
+        expect(seen["pg.UP"]).toBe(seen["pg.lo"]);
+        expect(seen["testkit.lo"]).toBe(seen["pg.lo"]);
+        expect(seen["testkit.UP"]).toBe(seen["pg.UP"]);
+      },
+      120_000,
+    );
   }
 });
 
-describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは大文字小文字を区別する（ADR 0565・M3・M4）", () => {
+describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは大文字小文字を区別する（ADR 0567・M3・M4）", () => {
   it("abortIfSuperseded は、綴りの違うテナントの記憶を、自分の記憶として見ない", async () => {
     for (const entry of ["createMemoryWithOutbox", "createMemoriesWithOutboxAndEvents"] as const) {
       const seen: Record<string, string> = {};
@@ -1116,41 +1120,45 @@ describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは�
   }, 120_000);
 });
 
-describe("abortIfSuperseded: superseded 以外の status は、大文字の id でも断らない（ADR 0565・M5）", () => {
+describe("abortIfSuperseded: superseded 以外の status は、大文字の id でも断らない（ADR 0567・M5）", () => {
   for (const status of ["active", "forgotten", "contested", "archived"] as const) {
-    it(status, async () => {
-      const seen: Record<string, string> = {};
-      for (const be of ["pg", "testkit"]) {
-        for (const entry of ABORT_ENTRIES) {
-          const e = await mkEnv(be);
-          // ids[3] は半減期が短く、arch で archived になる。ids[0]・ids[1] は forget・markContested の相手。
-          let src = e.ids[0]!;
-          if (status === "forgotten") await e.rt.forget(ctx, { memoryId: src });
-          if (status === "contested") await e.rt.markContested(ctx, src, e.ids[1]);
-          if (status === "archived") {
-            await arch(e);
-            src = e.ids[3]!;
-          }
-          const got = await e.st.memoryStore.get(ctx, src);
-          expect(got.status).toBe(status);
-          for (const v of ["lo", "UP"]) {
-            const r = await callAbort(e, entry, [v === "UP" ? up(src) : src]);
-            seen[`${be}.${entry}.${v}`] = r.outcome;
+    it(
+      status,
+      async () => {
+        const seen: Record<string, string> = {};
+        for (const be of ["pg", "testkit"]) {
+          for (const entry of ABORT_ENTRIES) {
+            const e = await mkEnv(be);
+            // ids[3] は半減期が短く、arch で archived になる。ids[0]・ids[1] は forget・markContested の相手。
+            let src = e.ids[0]!;
+            if (status === "forgotten") await e.rt.forget(ctx, { memoryId: src });
+            if (status === "contested") await e.rt.markContested(ctx, src, e.ids[1]);
+            if (status === "archived") {
+              await arch(e);
+              src = e.ids[3]!;
+            }
+            const got = await e.st.memoryStore.get(ctx, src);
+            expect(got.status).toBe(status);
+            for (const v of ["lo", "UP"]) {
+              const r = await callAbort(e, entry, [v === "UP" ? up(src) : src]);
+              seen[`${be}.${entry}.${v}`] = r.outcome;
+            }
           }
         }
-      }
-      for (const entry of ABORT_ENTRIES) {
-        // 基準: Postgres は superseded の行だけを断る。
-        expect(seen[`pg.${entry}.lo`]).toMatch(/^NO THROW/);
-        expect(seen[`pg.${entry}.UP`]).toBe(seen[`pg.${entry}.lo`]);
-        expect(seen[`testkit.${entry}.lo`]).toBe(seen[`pg.${entry}.lo`]);
-        expect(seen[`testkit.${entry}.UP`]).toBe(seen[`pg.${entry}.lo`]);
-      }
-    }, 120_000);
+        for (const entry of ABORT_ENTRIES) {
+          // 基準: Postgres は superseded の行だけを断る。
+          expect(seen[`pg.${entry}.lo`]).toMatch(/^NO THROW/);
+          expect(seen[`pg.${entry}.UP`]).toBe(seen[`pg.${entry}.lo`]);
+          expect(seen[`testkit.${entry}.lo`]).toBe(seen[`pg.${entry}.lo`]);
+          expect(seen[`testkit.${entry}.UP`]).toBe(seen[`pg.${entry}.lo`]);
+        }
+      },
+      120_000,
+    );
   }
 });
 
-describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`changed` は Postgres と同じ（ADR 0565）", () => {
+describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`changed` は Postgres と同じ（ADR 0567）", () => {
   for (const entry of ABORT_ENTRIES) {
     it(`${entry}: [x, X] は1件`, async () => {
       const seen: Record<string, string> = {};
