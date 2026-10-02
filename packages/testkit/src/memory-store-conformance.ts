@@ -3755,16 +3755,17 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         ["Infinity", Number.POSITIVE_INFINITY],
       ];
 
-      // 🔴 **`decayFloorAt` を明示的に上書きする。**`buildNewMemoryFixture` は
+      // 🔴 **`decayFloorAt` を明示的に上書きする。**`buildNewMemoryFixture` は上書きが無いとき
       // `defaultDecayStrategy.floorAt()` で `decayFloorAt` を計算するが、`strength` が
-      // `NaN` / `Infinity` のとき **`floorAt` は `Invalid Date` を返す**（`NaN` は
-      // `strength <= threshold` の比較を素通りするため。実測）。それをそのまま渡すと
-      // `packages/postgres` は **`timestamptz` 列のほうで**落ちる:
+      // `NaN` / `±Infinity` / 負だと、**`floorAt` は `RangeError` を投げる**（ADR 0496。それ以前は、`NaN` が
+      // `strength <= threshold` の比較を素通りして **`Invalid Date` を返した**）。Invalid Date をそのまま渡すと
+      // `packages/postgres` は **`timestamptz` 列のほうで**落ちた:
       //
       //   invalid input syntax for type timestamp with time zone: "0NaN-NaN-..."
       //
-      // ⟹ **値域の歯が無くても赤くなる。**それでは「値域を検査した」ことにならないので、
-      // ここでは妥当な `decayFloorAt` を与え、**落ちる理由を `strength` だけに絞る。**
+      // ⟹ **値域の歯が無くても赤くなる**（今は fixture の組み立てが `RangeError` で落ちる）。それでは「値域を
+      // 検査した」ことにならないので、ここでは妥当な `decayFloorAt` を与え（与えれば `floorAt` は呼ばれない）、
+      // **落ちる理由を `strength` だけに絞る。**
       const validFloorAt = new Date("2026-06-01T00:00:00.000Z");
 
       for (const [label, strength] of outOfRange) {
@@ -3811,12 +3812,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         ["-Infinity", Number.NEGATIVE_INFINITY],
       ];
 
-      // 🔴 `decayFloorAt` を明示的に上書きする。`buildNewMemoryFixture` は
+      // 🔴 `decayFloorAt` を明示的に上書きする。`buildNewMemoryFixture` は上書きが無いとき
       // `defaultDecayStrategy.floorAt()` で `decayFloorAt` を計算するが、
-      // `halfLifeHours` が `NaN`/`Infinity` のとき `floorAt` は `Invalid Date` を返す
-      // （strength 版のテスト（ADR 0078）と同じ形の実測）。それをそのまま渡すと
-      // `packages/postgres` は `timestamptz` 列のほうで落ち、「値域の歯が無くても赤く
-      // なる」状態になる。ここでは妥当な `decayFloorAt` を与え、落ちる理由を
+      // `halfLifeHours` が `NaN`/`±Infinity`/負だと `floorAt` は `RangeError` を投げる（ADR 0496。それ以前は
+      // `NaN`/`Infinity` で `Invalid Date` を返した。strength 版のテスト（ADR 0078）と同じ形）。
+      // Invalid Date をそのまま渡すと `packages/postgres` は `timestamptz` 列のほうで落ち、「値域の歯が無くても
+      // 赤くなる」状態になる。ここでは妥当な `decayFloorAt` を与え、落ちる理由を
       // `halfLifeHours` だけに絞る。
       const validFloorAt = new Date("2026-06-01T00:00:00.000Z");
 

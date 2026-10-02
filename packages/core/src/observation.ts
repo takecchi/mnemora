@@ -43,7 +43,8 @@ export interface Observation {
    * （先発グレゴリオ暦の紀元前4714年11月24日、UTC）より前を表せず、この欄・`validFrom`・
    * `validUntil` にそれより前の日時を渡すと書き込みが例外（`timestamp out of range`）になり、
    * `observe()` は reject する。上側は Postgres のほうが広い（西暦294276年まで）ので分かれない。
-   * `@mnemora/testkit` の fixture は JS の `Date` をそのまま受け入れ、同じ値で返す。
+   * `@mnemora/testkit` の fixture は、この欄では JS の `Date` をそのまま受け入れ、同じ値で返す
+   * （読みの口の日時の条件・`opts.now`・`opts.at` は、ADR 0500 から下限より前を `RangeError` で断る）。
    * **保証するのは、上の日時以降の値だけである。**
    */
   occurredAt?: Date | null;

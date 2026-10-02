@@ -2798,7 +2798,8 @@ export interface Runtime {
    *
    * 実装（`createRuntime` 内）: `input.limit` が指定されていて整数でない・`1` 未満なら
    * `RangeError` を投げる（`markContested` の `firstId === secondId` と同じ位置づけ——
-   * 書き込みも `recall()` も試みる前に落とす）。そうでなければ
+   * 書き込みも `recall()` も試みる前に落とす）。続けて `input.text`・`input.excludeMemoryIds` の型も
+   * 確かめ、外れていれば `TypeError`（下の「入力の検査」）。どれにも当たらなければ
    * `recall(ctx, { text: input.text })` を1回呼び、`excludeMemoryIds` を `Set` にして
    * 除外し、`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切って返す。
    *
@@ -6380,9 +6381,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     }
-    // 除外の集合は `recall()` を呼ぶ前に作る——`excludeMemoryIds` が反復できない値だと
-    // `new Set` が TypeError を投げるが、後ろで作ると recall の記録を1件書いた後に落ちていた
-    // （穴探し56巡目）。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
+    // 除外の集合は `recall()` を呼ぶ前に作る——以前は `excludeMemoryIds` が反復できない値だと
+    // `new Set` が TypeError を投げ、後ろで作ると recall の記録を1件書いた後に落ちていた
+    // （穴探し56巡目）。今は上の検査が、配列でない値をここへ届く前に断る。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
     // 小文字で返す。`forget` と同じ扱い）。大文字で渡した自己除外が黙って効かないのを防ぐ。
     const excludeSet = new Set<unknown>();
     for (const id of new Set(input.excludeMemoryIds ?? [])) {

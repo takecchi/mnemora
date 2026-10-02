@@ -78,7 +78,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     // `leaseMs` が `NaN`・`±Infinity`・`Date` の範囲を超える値）では Postgres が例外を投げる
     // （実測: `invalid input syntax for type timestamp with time zone`）。ここで検査せず数の
     // まま比べると、未 claim のジョブを claim してしまう。クエリを投げる前に弾く Postgres 側に
-    // 揃える。⚠ `Date` としては有効でも Postgres の範囲（紀元前4713年より前）を外れる値は
+    // 揃える。⚠ `Date` としては有効でも Postgres の範囲（紀元前4714年より前）を外れる値は
     // 揃えていない（Issue #1041 の論点）。`now` が Invalid Date なら `now - leaseMs` も
     // Invalid Date になるので、1つの検査で両方を見る。
     if (Number.isNaN(new Date(opts.now.getTime() - opts.leaseMs).getTime())) {
