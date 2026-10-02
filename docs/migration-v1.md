@@ -2800,6 +2800,8 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/testkit/fixtures` の InMemory: `archiveDecayed`・`aggregateScope`・`VectorStore.search` の `nowSeq + S_x`（`decayFloorSeqAfter + S_x`）が 2^63 以上になる入力を断る**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。🟡。ADR 0500 の負債）。Postgres は以前から `22003 bigint out of range` で拒む。断るのは、その式が評価される行（カウンタを使い、subject を持ち、`decay_floor_seq` が非 NULL で、ほかの条件を通る行。2軸は左で決まれば右は評価されない）があるときと、`nowSeq`（`decayFloorSeqAfter`）そのものが 2^63 以上のとき。実際の `nowSeq` は小さい整数なので、到達しない入力。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 - **`@mnemora/postgres`: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。ADR 0504 と同じ作法）。SQL の文・SQLSTATE・`cause` は残る。落ちる入力は増えない。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。
+- **`Runtime.tick` の `embed` ジョブ: forget した記憶・purge した記憶では、embedding provider を呼ばずにジョブを終える**（[ADR 0541](./decisions/0541-embed-job-skips-withdrawn-memory.md)）。
+  以前は、forget の前に積まれた埋め込みジョブが後から走ると、`forgotten` の記憶の本文（purge 済みなら墓標）を `embeddingProvider.embed` に送り、ベクトルを書いていた。今は、`forgotten` か purge 済みの記憶なら provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する。`embeddingProvider` の呼び出し回数を数えているテストや、forget した記憶のベクトルが存在することに頼っているコードは見直すこと。新しく断る入力は無く、他の状態（`active`・`archived`・`superseded`・`contested`）は変わらない。すでに送られた分は取り消せない。
 
 ## この文書が確かめていないこと
 
