@@ -801,3 +801,137 @@ describe("操作の対象の id を大文字で渡したとき、3 実装が同�
     );
   }
 });
+
+// ADR 0556: ADR 0521 が残した 2 点。(1) `abortIfSuperseded` に大文字の id を渡したとき（testkit の InMemory が見落としていた）、
+// (2) `EventStore.get` に大文字のイベント id を渡したとき（testkit・Fake が null を返していた）。
+// Fake は `abortIf*` を持たない（ADR 0493。`createFakeRuntimeStores().memoryStore` は渡された opts を見ない）ので、(1) は pg と testkit だけで比べる。
+function newMemoryInput(e: Env, hash: string): any {
+  return {
+    tenantId: ctx.tenantId,
+    subjectId: null,
+    sourceObservationId: null,
+    extractorVersion: null,
+    content: `c-${hash}`,
+    contentHash: hash,
+    digest: `d-${hash}`,
+    digestSource: "llm",
+    provenance: { kind: "imported", batchId: "m" },
+    tags: [],
+    occurredAt: null,
+    recordedAt: new Date(e.getNow()),
+    lastReinforcedAt: null,
+    strength: 1,
+    halfLifeHours: 8760,
+    decayFloorAt: new Date(e.getNow() + 1e9),
+    embeddingStatus: "pending",
+  };
+}
+const eventFor = (memoryId: string, kind: string): any => ({
+  tenantId: ctx.tenantId,
+  memoryId,
+  kind,
+  actor: { type: "system" },
+  digestSnapshot: "d",
+  meta: {},
+});
+
+/** 大文字の id を abortIfSuperseded に渡して投げられた SourceMemoryStatusChangedError の中身（id の綴りは生のまま）と、書き込まれたものの有無。 */
+async function observeAbortIfSuperseded(
+  be: string,
+  entry: "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+  variant: "lo" | "UP",
+): Promise<string> {
+  const e = await mkEnv(be);
+  const store = e.st.memoryStore;
+  const src = await store.createMemory(ctx, {
+    ...newMemoryInput(e, "src"),
+    status: "superseded",
+    supersededById: e.ids[0],
+  });
+  const id = variant === "UP" ? up(src.id) : src.id;
+  // 書かれたかどうかは、観測値に紐づく抽出キー付きの記憶と、積まれたイベントの数で見る。
+  await mkObs(e);
+  const keyed = (hash: string) => ({
+    ...newMemoryInput(e, hash),
+    sourceObservationId: (e as any).obsId,
+    extractorVersion: "v1",
+  });
+  const writtenCount = async () =>
+    (await store.listBySourceObservation(ctx, (e as any).obsId, "v1")).length;
+  const eventsBefore = (await e.st.eventStore.list(ctx, { limit: 1000 })).length;
+  let outcome: string;
+  try {
+    if (entry === "createMemoryWithOutbox") {
+      await store.createMemoryWithOutbox(ctx, keyed("w1"), ["embed"], {
+        abortIfSuperseded: [id],
+      });
+    } else if (entry === "createMemoriesWithOutboxAndEvents") {
+      await store.createMemoriesWithOutboxAndEvents(
+        ctx,
+        [{ input: keyed("w2"), jobKinds: ["embed"] }],
+        (m: { id: string }) => eventFor(m.id, "created"),
+        { abortIfSuperseded: [id] },
+      );
+    } else {
+      await store.supersedeWithNewMemories(
+        ctx,
+        [{ input: keyed("w3"), jobKinds: ["embed"] }],
+        [{ id: e.ids[1], supersededByIndex: 0, event: eventFor(e.ids[1]!, "superseded") }],
+        { abortIfSuperseded: [id] },
+      );
+    }
+    outcome = "NO THROW";
+  } catch (err) {
+    const x = err as { name?: string; method?: string; changed?: Array<{ id: string; observedStatus: string }> };
+    outcome = `THROW ${x.name} ${x.method} ${JSON.stringify(
+      (x.changed ?? []).map((c) => ({
+        // 綴りを生で比べる（<src> は「渡した id と同じ綴り」「小文字」「大文字」のどれか）。
+        id: c.id === src.id ? "<lower>" : c.id === up(src.id) ? "<UPPER>" : "<other>",
+        observedStatus: c.observedStatus,
+      })),
+    )}`;
+  }
+  const eventsAfter = (await e.st.eventStore.list(ctx, { limit: 1000 })).length;
+  const wrote = eventsAfter !== eventsBefore || (await writtenCount()) !== 0;
+  // 失敗したなら何も書かれていないこと（Postgres は同じトランザクションを rollback する）。
+  return `${outcome} || wrote=${wrote}`;
+}
+
+describe("abortIfSuperseded に大文字の id を渡したとき、testkit が Postgres と同じになる（ADR 0556）", () => {
+  for (const entry of [
+    "createMemoryWithOutbox",
+    "createMemoriesWithOutboxAndEvents",
+    "supersedeWithNewMemories",
+  ] as const) {
+    it(
+      entry,
+      async () => {
+        const pgLo = await observeAbortIfSuperseded("pg", entry, "lo");
+        const pgUp = await observeAbortIfSuperseded("pg", entry, "UP");
+        // 基準: Postgres は大文字でも superseded を見つけて断り、何も書かない。
+        expect(pgLo).toMatch(/^THROW SourceMemoryStatusChangedError /);
+        expect(pgLo).toMatch(/wrote=false$/);
+        expect(pgUp).toBe(pgLo);
+        expect(await observeAbortIfSuperseded("testkit", entry, "lo")).toBe(pgLo);
+        expect(await observeAbortIfSuperseded("testkit", entry, "UP")).toBe(pgUp);
+      },
+      120_000,
+    );
+  }
+});
+
+describe("EventStore.get に大文字のイベント id を渡したとき、3 実装が同じになる（ADR 0556）", () => {
+  it("大文字でも小文字と同じイベントが当たる", async () => {
+    const seen: Record<string, string> = {};
+    for (const be of ["pg", "testkit", "fake"]) {
+      const e = await mkEnv(be);
+      const stored = await e.st.eventStore.append(ctx, eventFor(e.ids[0]!, "updated"));
+      const lo = await e.st.eventStore.get(ctx, stored.id);
+      const upper = await e.st.eventStore.get(ctx, up(stored.id));
+      seen[be] = `lo=${lo?.id === stored.id} UP=${upper?.id === stored.id} kind=${upper?.kind}`;
+    }
+    expect(seen.pg).toBe("lo=true UP=true kind=updated");
+    expect(seen.testkit).toBe(seen.pg);
+    expect(seen.fake).toBe(seen.pg);
+  });
+});
