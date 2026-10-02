@@ -425,7 +425,7 @@ export interface ObserveDocumentInput {
    * 全文フォールバックの本文の両方に、`title` が空でない文字列のときだけ `${title}\n\n${content}`
    * の形で入る。`title` を渡さない・空文字のときは `extractTitle: true` でも今の既定と同じ
    * （`content` だけ）になる。**例外: `extractTitle: true` かつ `content` が空文字（`observe()` の
-   * 入力としては `content` は必須で空文字を拒むため、通常はこの型から作った Observation でしか
+   * 入力としては `content` は必須で、空文字も空白だけの値も拒む（ADR 0502）ため、通常はこの型から作った Observation でしか
    * 起こらない。`reextract` が読み直す既存データ等）で `title` が空でないときは、`title` だけを
    * 本文にする**（末尾の区切りが浮かないよう、`${title}\n\n${content}` の代わりに `title` 単体
    * にする）。

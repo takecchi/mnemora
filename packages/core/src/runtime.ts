@@ -2597,7 +2597,8 @@ export interface Runtime {
    *
    * 投げる例外（現状の振る舞いを約束として書く）:
    * - `input` を `ObserveInputSchema` で検証し、合わなければ zod の `ZodError` を投げる
-   *   （何も書く前）。
+   *   （何も書く前）。`utterance.text`・`event.name`・`document.content` は、空文字に加えて、`trim` で空になる値
+   *   （空白・改行・タブ・U+3000 だけ）も断る（ADR 0502。`path` は欄名。U+200B は `trim` が落とさないので通る）。
    * - `extract: "deferred"` と `subjectCandidates`（空でない）、または `claimKey` を同時に
    *   渡すと、{@link SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} /
    *   {@link CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} で始まる `Error` を投げる（何も書く前）。
