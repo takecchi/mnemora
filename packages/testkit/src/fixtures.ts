@@ -52,9 +52,10 @@
 //   （`memory_events.digestSnapshot must not contain NUL characters (U+0000)`）、`purgeMemory` の墓石の `content`・`digest`
 //   （`tombstone.content must not contain NUL…`。対象の行が無くても・CAS に弾かれる状態でも先に拒む）。`jobKinds` の要素
 //   （`jobKinds must not contain NUL…`。**outbox の行を実際に書くときだけ**——`jobKinds` が空・冪等の既存の行に当たるときは見ない）。
-//   （読み取り）: `findActiveByClaimKey` の `claimKey.subject`・`claimKey.predicate`、`listBySourceObservation` の `extractorVersion`、
+//   （読み取り）: `findActiveByClaimKey`・`findContestedByClaimKey` の `claimKey.subject`・`claimKey.predicate`、`listBySourceObservation` の `extractorVersion`、
 //   `aggregateScope` の `attributes`・`labels`（`scopeAggregate: "skip"` で `digestBand` が無いときは、Postgres がクエリを発行しないので見ない）、
-//   `InMemoryLexicalStore.search` の `filter.attributes`、`InMemoryTenantSettingsStore.getSubjectActivitySeqs` の `subjectId`。
+//   `InMemoryLexicalStore.search` の `filter.labels`・`filter.attributes`、`InMemoryVectorStore.search`・`searchMany` の `filter.labels`・
+//   `filter.attributes`（ADR 0500）、`InMemoryTenantSettingsStore.getSubjectActivitySeqs` の `subjectId`。
 //   ⚠ `listBySourceObservation` は、`observationId` が uuid の形でないとき Postgres がクエリを発行せずに `[]` を返して NUL を見ない。
 //   この fixture の id は uuid の形ではないので、その入力だけは揃えていない。
 // - Invalid Date（ADR 0434 で足した口）→ `<口>: opts.now must be a valid Date (got Invalid Date)`（`requeueEmbedJobs` は
@@ -98,6 +99,13 @@
 //   `decayFloorSeqAfter`、`findActiveByClaimKey` の `validFrom`・`validUntil`、`InMemoryEventStore.list` の `since`・`until`、
 //   `InMemoryVectorStore.search`・`InMemoryLexicalStore.search` の filter の日時と `decayFloorSeqAfter`（Postgres はクエリの
 //   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
+// - 紀元前4713年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
+//   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——上の読みの口の日時の条件・`opts.now`・`opts.at`（`EventStore.list`、
+//   `OutboxStore.complete`/`fail`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。`purgeExpiredEvents`・`purgeExpiredRecalls`・
+//   `purgeCompletedJobs` の `olderThan` は、Postgres が下限より前を「0件」で返すので掛けない。
+// - `reinforce({ addOwnSubjectSeq: true })` の `nowSeq + S_x`（と床）が 2^63 以上 → `reinforce: decayBaseSeq + own subject seq must fit in a
+//   Postgres bigint`（Postgres は `22003`。ADR 0500）。
+// - `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製（ADR 0500）。
 // - `InMemoryTenantSettingsStore.setEventRetention` の `days` が Postgres の `integer`（int4）に収まらない（2^31 以上）→
 //   `setEventRetention: days does not fit in a Postgres "integer" (int4) column`。
 // - `createRecall` の `subjectId` に NUL → `createRecall: subjectId must not contain NUL characters (U+0000)`。`query`・`budget`・
@@ -133,11 +141,13 @@
 //   const relationStore = new InMemoryRelationStore(memoryStore, memoryStore.relations);
 //
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
-// 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4713年より前の日時（#1041）、
+// 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4713年より前の日時のうち、行に日時を書く口（`createMemory` の
+// `occurredAt` など。読みの口・`opts.now` は ADR 0500 で揃えた。#1041）、
 // 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
 // 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。
-// ADR 0434 が実測して、Postgres は拒むが fixture は通したままのもの: `findContestedByClaimKey` の `claimKey` の NUL、
-// `InMemoryLexicalStore.search` の `filter.labels` の NUL、紀元前4713年より前の `opts.now`。`VectorStore.search` の filter の NUL は確かめていない。
+// ADR 0434 が実測して、Postgres は拒むが fixture は通したままだったもの（`findContestedByClaimKey` の `claimKey` の NUL、
+// `InMemoryLexicalStore.search` の `filter.labels` の NUL、紀元前4713年より前の `opts.now`、`VectorStore.search` の filter の NUL）は、
+// ADR 0500 で揃えた。`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` を足す式の bigint 溢れは、まだ揃えていない（ADR 0500 の材料）。
 
 export { InMemoryMemoryStore } from "./__fixtures__/in-memory-memory-store.js";
 export { InMemoryRelationStore } from "./__fixtures__/in-memory-relation-store.js";

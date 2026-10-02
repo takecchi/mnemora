@@ -63,7 +63,8 @@ export class RecordedLLMProvider implements LLMProvider {
         "RecordedLLMProvider: complete() の記録が LLMResponse の形をしていない。カセットが壊れている。",
       );
     }
-    return entry.value as LLMResponse;
+    // ADR 0500: 記録の参照を返さない（呼び出し側が書き換えても、次の再生に漏れない。本物の provider は呼び出しごとに新しい値を返す）。
+    return structuredClone(entry.value) as LLMResponse;
   }
 
   /**
@@ -77,7 +78,8 @@ export class RecordedLLMProvider implements LLMProvider {
    */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const entry = this.lookup(req.prompt);
-    const parsed = req.schema.safeParse(entry.value);
+    // ADR 0500: 複製を検証する。schema が値を作り直さない欄（`z.unknown()` など）は、記録の参照のまま通り抜けるため。
+    const parsed = req.schema.safeParse(structuredClone(entry.value));
     if (!parsed.success) {
       throw new Error(
         "RecordedLLMProvider: 記録した応答が、いまのスキーマを満たさない。" +
