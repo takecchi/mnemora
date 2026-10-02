@@ -16,6 +16,7 @@ import {
   EmbeddingSpaceNotRegisteredError,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { omitParamsFromError, omittingParams } from "./omit-params.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import { listEmbeddingSpaceTables } from "./embedding-space-catalog.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
@@ -472,9 +473,10 @@ async function translateUnregisteredSpace<T>(
     return await run();
   } catch (error) {
     if (isUndefinedTableError(error, embeddingSpaceTableName(space))) {
-      throw new EmbeddingSpaceNotRegisteredError(space, { cause: error });
+      // ADR 0504: `cause` に残る drizzle の例外から、params の値（ベクトルなど）を落とす。
+      throw new EmbeddingSpaceNotRegisteredError(space, { cause: omitParamsFromError(error) });
     }
-    throw error;
+    throw omitParamsFromError(error);
   }
 }
 
@@ -966,22 +968,24 @@ export class PostgresVectorStore implements VectorStore {
     if (validIds.length === 0) {
       return;
     }
-    await this.db.transaction(async (tx) => {
-      // Issue #1207 / ADR 0383: 列挙は `listEmbeddingSpaceTables`（`embedding-space-catalog.ts`）
-      // に切り出した——`eraseTenant`（下）と同じ条件を共有する。
-      const tables = await listEmbeddingSpaceTables(tx);
-      for (const { table, schema } of tables) {
-        // `pg_class.relname`/`pg_namespace.nspname` は既に有効な PostgreSQL 識別子だが、
-        // `assertSafeIdentifier`/`assertSafeSchemaName` を通す——他のメソッドと同じ
-        // 「SQL 注入対策の最後の砦」の規律をここでも揃える。
-        assertSafeIdentifier(table);
-        assertSafeSchemaName(schema);
-        await tx.execute(sql`
+    await omittingParams(() =>
+      this.db.transaction(async (tx) => {
+        // Issue #1207 / ADR 0383: 列挙は `listEmbeddingSpaceTables`（`embedding-space-catalog.ts`）
+        // に切り出した——`eraseTenant`（下）と同じ条件を共有する。
+        const tables = await listEmbeddingSpaceTables(tx);
+        for (const { table, schema } of tables) {
+          // `pg_class.relname`/`pg_namespace.nspname` は既に有効な PostgreSQL 識別子だが、
+          // `assertSafeIdentifier`/`assertSafeSchemaName` を通す——他のメソッドと同じ
+          // 「SQL 注入対策の最後の砦」の規律をここでも揃える。
+          assertSafeIdentifier(table);
+          assertSafeSchemaName(schema);
+          await tx.execute(sql`
           DELETE FROM ${sql.identifier(schema)}.${sql.identifier(table)}
           WHERE tenant_id = ${ctx.tenantId} AND memory_id = ANY(${sql.param(validIds)}::uuid[])
         `);
-      }
-    });
+        }
+      }),
+    );
   }
 
   /**
@@ -997,32 +1001,33 @@ export class PostgresVectorStore implements VectorStore {
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun === true;
-    return this.db.transaction(async (tx) => {
-      // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする。
-      await lockTenantForErase(tx, ctx.tenantId);
-      const tables = await listEmbeddingSpaceTables(tx);
-      let remaining = opts.limit;
-      let total = 0;
-      let reachedLimit = false;
-      for (const { table, schema } of tables) {
-        if (remaining <= 0) {
-          reachedLimit = true;
-          break;
-        }
-        assertSafeIdentifier(table);
-        assertSafeSchemaName(schema);
-        const budget = remaining;
-        let deleted: number;
-        if (dryRun) {
-          const result = await tx.execute(sql`
+    return omittingParams(() =>
+      this.db.transaction(async (tx) => {
+        // ADR 0430 決定2: 同じテナントへの同時呼び出しを直列にする。
+        await lockTenantForErase(tx, ctx.tenantId);
+        const tables = await listEmbeddingSpaceTables(tx);
+        let remaining = opts.limit;
+        let total = 0;
+        let reachedLimit = false;
+        for (const { table, schema } of tables) {
+          if (remaining <= 0) {
+            reachedLimit = true;
+            break;
+          }
+          assertSafeIdentifier(table);
+          assertSafeSchemaName(schema);
+          const budget = remaining;
+          let deleted: number;
+          if (dryRun) {
+            const result = await tx.execute(sql`
             SELECT count(*)::int AS count FROM (
               SELECT 1 FROM ${sql.identifier(schema)}.${sql.identifier(table)}
               WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
             ) s
           `);
-          deleted = (result.rows[0] as unknown as { count: number }).count;
-        } else {
-          const result = await tx.execute(sql`
+            deleted = (result.rows[0] as unknown as { count: number }).count;
+          } else {
+            const result = await tx.execute(sql`
             WITH victims AS (
               SELECT tenant_id, memory_id FROM ${sql.identifier(schema)}.${sql.identifier(table)}
               WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
@@ -1032,17 +1037,18 @@ export class PostgresVectorStore implements VectorStore {
             WHERE t.tenant_id = v.tenant_id AND t.memory_id = v.memory_id
             RETURNING t.memory_id
           `);
-          deleted = result.rows.length;
+            deleted = result.rows.length;
+          }
+          total += deleted;
+          remaining -= deleted;
+          if (deleted === budget && deleted > 0) {
+            reachedLimit = true;
+            break;
+          }
         }
-        total += deleted;
-        remaining -= deleted;
-        if (deleted === budget && deleted > 0) {
-          reachedLimit = true;
-          break;
-        }
-      }
-      return { deleted: total, reachedLimit };
-    });
+        return { deleted: total, reachedLimit };
+      }),
+    );
   }
 
   async getVectors(
