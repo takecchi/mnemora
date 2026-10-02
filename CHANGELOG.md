@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createObservation`・`createObservationWithOutbox` が、関数・`Symbol` を欄の値に持つ値や `toJSON` を持つ値を含む `payload`（`observe({ kind: "event", data })` の `data`）を、`DataCloneError` で断らずに、`@mnemora/postgres` と同じ規則で保存するようになった。**（[ADR 0486](./docs/decisions/0486-fixture-event-data-align-and-context-text-unit.md)）関数・`Symbol` の欄は消え（配列の要素なら `null`）、`toJSON` はその戻り値で保存する。`NaN`・`-0`・`Date`・値が `undefined` の欄の扱いは変えていない。断る入力が減るだけで、非破壊。
+
 - **`created` イベントの `meta.languageMismatch`（ADR 0391）の判定が、ローマ数字（`Ⅳ` など）を「ラテン文字」に数えていたのを、文字（`\p{L}`）だけを数えるように直した。**`contentLatinShare` が1を超える値（例: 2.5）になり、20字の下限もローマ数字ですり抜けていた。閾値と `rule` は変えていない。変わるのはローマ数字を含む本文・観測の判定だけで、保存済みの印は書き換えない（[PR #1597](https://github.com/takecchi/mnemora/pull/1597)）。
 
 - **`Runtime.findCorrectionCandidates` の `excludeMemoryIds` が、大文字の uuid でも除外するようになった（`@mnemora/postgres` は小文字で返すので、大文字で渡した自己除外が黙って効かなかった）。反復できない値を渡したときは、`recall()` を呼ぶ前に `TypeError` になる（以前は recall の記録を1件書いた後に落ちた）。**（[ADR 0485](./docs/decisions/0485-find-correction-candidates-exclude-ids.md)）
@@ -464,6 +466,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/postgres`: 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作ると `deadlock detected`（40P01）で片方が落ちたのを直した。**`upsertProposedLabels` が `labels` の行を触る順を、`tags` の並びではなく名前の順に固定した。`Memory.tags` の並び・重複と `proposedCount` は変わらない（[ADR 0476](./docs/decisions/0476-label-upsert-lock-order-and-taxonomy-probes.md)）
 
 - **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` が、`event.memoryId` が大文字の uuid でも、`PostgresEventStore.append` と同じく小文字にそろえて受けるようになった**（[ADR 0475](./docs/decisions/0475-eventstore-append-uuid-case.md)。[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` は小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、新しく断る入力は無い。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+- **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany` が、`kind` が偽の値（`""`・`null`・`0`）のとき、`PostgresRelationStore` と同じく絞り込まずに全件を返すようになった**（[ADR 0488](./docs/decisions/0488-relation-store-fake-alignment.md)）。以前は 0 件を返した。型の外の入力で、`undefined`（省略）と正しい `kind`（`"contradicts"`）の返りは変えていない。`@mnemora/postgres` の返りは変えていない。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が大文字の uuid でも、`@mnemora/postgres` と同じく小文字にそろえて受けるようになった**（[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)。[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、操作の対象の `id` の大文字小文字は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
 
