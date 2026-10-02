@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingSpaceId, VectorFilter } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
@@ -9,6 +10,10 @@ import { PostgresEventStore } from "../event-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  probeTrigramLexicalSupport,
+} from "../trigram-lexical-store.js";
 import {
   closeTestClient,
   getTestClient,
@@ -332,4 +337,174 @@ describe("PostgresEventStore.append・PostgresLexicalStore.search を直接呼�
       } as never),
     ).resolves.toMatchObject({ kind: "events_purged" });
   });
+});
+
+/**
+ * ADR 0516（ADR 0504・0505 の負債の返済）: `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・
+ * `PostgresTenantSettingsStore` を直接呼んだときも、投げる例外の message（`cause` の連鎖を含む）から
+ * params の値を落とす。`PostgresMemoryStore`・`PostgresRelationStore` は今回の範囲外（ADR の負債）。
+ *
+ * 例外の起こし方は、本物の DB が拒む入力:
+ * - `PostgresTrigramLexicalStore.search`: `filter.attributes` の孤立サロゲート（`jsonb` が拒む。22P02）。
+ * - `PostgresOutboxStore`: `LIMIT` に負の数（2201W）、`attempts`（int4）に収まらない数（22003）。
+ * - `PostgresTenantSettingsStore`: 入口の検査を通る入力では DB が拒まないので、トランザクションの中で
+ *   `search_path` を空にして `tenant_settings` を見えなくする（42P01）。そのトランザクションの `tx` を store に渡す。
+ */
+const OBX_MARKER = "obx-marker-5a93";
+const obxCtx: Ctx = { tenantId: `omit-params-${OBX_MARKER}` };
+const TRI_MARKER = "tri-marker-c07d";
+const TS_MARKER = "ts-marker-e418";
+const JOB_ID = "22222222-2222-4222-8222-222222222222";
+
+function expectNoMarkers2(error: unknown, markers: string[]): void {
+  const texts = chainTexts(error);
+  for (const text of texts) {
+    for (const marker of markers) {
+      expect(text).not.toContain(marker);
+    }
+  }
+  // やりすぎていない: SQL の文と、落としたことの印は残る
+  expect(texts.some((t) => t.includes("Failed query:") && t.includes("(omitted by mnemora,"))).toBe(
+    true,
+  );
+}
+
+function sqlstateOf(error: unknown): string | undefined {
+  let code: string | undefined;
+  let cursor: unknown = error;
+  while (typeof cursor === "object" && cursor !== null) {
+    code = (cursor as { code?: string }).code ?? code;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return code;
+}
+
+describe("PostgresTrigramLexicalStore.search を直接呼んだ例外から、params の値を落とす（ADR 0516）", () => {
+  it("filter.attributes の孤立サロゲートの例外に値が無く、SQL の文・SQLSTATE は残る", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const probe = await probeTrigramLexicalSupport(db);
+    if (!probe.ok) return; // SQL_ASCII の脚などでは create() が拒む（別の歯が見る）
+    const store = await PostgresTrigramLexicalStore.create(db);
+    const error = await thrown(
+      store.search(obxCtx, `東京${TRI_MARKER}`, {
+        limit: 5,
+        filter: { tenantId: obxCtx.tenantId, attributes: { k: `${TRI_MARKER}\uD83D` } },
+      }),
+    );
+    expectNoMarkers2(error, [TRI_MARKER, OBX_MARKER]);
+    expect(sqlstateOf(error)).toBe("22P02");
+  });
+});
+
+describe("PostgresOutboxStore を直接呼んだ例外から、params の値を落とす（ADR 0516）", () => {
+  const mouths: Array<[string, string, (s: PostgresOutboxStore) => Promise<unknown>]> = [
+    [
+      "claimBatch",
+      "2201W",
+      (s) =>
+        s.claimBatch(obxCtx, {
+          limit: -1,
+          now: new Date(),
+          leaseMs: 1000,
+          claimedBy: OBX_MARKER,
+        } as never),
+    ],
+    ["complete", "22003", (s) => s.complete(obxCtx, JOB_ID, 2 ** 40)],
+    ["fail", "22003", (s) => s.fail(obxCtx, JOB_ID, OBX_MARKER, 2 ** 40)],
+    ["eraseTenant", "2201W", (s) => s.eraseTenant(obxCtx, { limit: -1 })],
+    ["eraseTenant（dryRun）", "2201W", (s) => s.eraseTenant(obxCtx, { limit: -1, dryRun: true })],
+    [
+      "purgeCompletedJobs",
+      "2201W",
+      (s) => s.purgeCompletedJobs(obxCtx, { olderThan: new Date(), limit: -2 }),
+    ],
+    [
+      "purgeCompletedJobs（dryRun）",
+      "2201W",
+      (s) => s.purgeCompletedJobs(obxCtx, { olderThan: new Date(), limit: -2, dryRun: true }),
+    ],
+  ];
+  for (const [name, code, run] of mouths) {
+    it(`${name}: 例外に params の値が無く、SQL の文・SQLSTATE は残る`, async () => {
+      await resetTestDatabase();
+      const { db } = await getTestClient();
+      const error = await thrown(run(new PostgresOutboxStore(db)));
+      expectNoMarkers2(error, [OBX_MARKER]);
+      expect(sqlstateOf(error)).toBe(code);
+    });
+  }
+
+  it("complete・fail が CAS の読み直し（raiseIfLeaseConflict）で落ちたときも、params の値を落とす", async () => {
+    for (const run of [
+      (s: PostgresOutboxStore) => s.complete(obxCtx, JOB_ID, 1),
+      (s: PostgresOutboxStore) => s.fail(obxCtx, JOB_ID, "e", 1),
+    ]) {
+      let calls = 0;
+      const drizzleLike = Object.assign(
+        new Error(`Failed query: SELECT attempts FROM outbox\nparams: ${OBX_MARKER},${JOB_ID}`),
+        { cause: Object.assign(new Error("boom"), { code: "57014" }) },
+      );
+      const db = {
+        execute: async () => {
+          calls += 1;
+          if (calls === 1) return { rows: [] };
+          throw drizzleLike;
+        },
+      } as unknown as ConstructorParameters<typeof PostgresOutboxStore>[0];
+      const error = await thrown(run(new PostgresOutboxStore(db)));
+      expect(calls).toBe(2);
+      expect(error).toBe(drizzleLike);
+      expectNoMarkers2(error, [OBX_MARKER]);
+    }
+  });
+
+  it("やりすぎていない: 正常な呼び出しは、これまでどおり結果を返す", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    await expect(
+      new PostgresOutboxStore(db).claimBatch(obxCtx, {
+        limit: 5,
+        now: new Date(),
+        leaseMs: 1000,
+        claimedBy: "w",
+      } as never),
+    ).resolves.toEqual([]);
+  });
+});
+
+describe("PostgresTenantSettingsStore を直接呼んだ例外から、params の値を落とす（ADR 0516）", () => {
+  const tsCtx: Ctx = { tenantId: `omit-params-${TS_MARKER}` };
+  const mouths: Array<[string, (s: PostgresTenantSettingsStore) => Promise<unknown>]> = [
+    ["getDefaultHalfLifeHours", (s) => s.getDefaultHalfLifeHours(tsCtx)],
+    ["getEventRetention", (s) => s.getEventRetention(tsCtx)],
+    ["setEventRetention", (s) => s.setEventRetention(tsCtx, { kind: "days", days: 30 })],
+    ["getDecayClock", (s) => s.getDecayClock(tsCtx)],
+    ["setDecayClock", (s) => s.setDecayClock(tsCtx, "wall")],
+    ["getDefaultHalfLifeRecalls", (s) => s.getDefaultHalfLifeRecalls(tsCtx)],
+    ["setDefaultHalfLifeRecalls", (s) => s.setDefaultHalfLifeRecalls(tsCtx, 100)],
+    ["getActivitySeq", (s) => s.getActivitySeq(tsCtx)],
+    ["hasSubjectActivityCounters", (s) => s.hasSubjectActivityCounters(tsCtx)],
+    ["getSubjectActivitySeqs", (s) => s.getSubjectActivitySeqs(tsCtx, ["subject-1"])],
+    ["getTaxonomyMode", (s) => s.getTaxonomyMode(tsCtx)],
+    ["setTaxonomyMode", (s) => s.setTaxonomyMode(tsCtx, "open")],
+    ["eraseTenant", (s) => s.eraseTenant(tsCtx, { limit: 10 })],
+    ["eraseTenant（dryRun）", (s) => s.eraseTenant(tsCtx, { limit: 10, dryRun: true })],
+  ];
+  for (const [name, run] of mouths) {
+    it(`${name}: 例外に params の値が無く、SQL の文・SQLSTATE（42P01）は残る`, async () => {
+      await resetTestDatabase();
+      const { db } = await getTestClient();
+      let error: Error | undefined;
+      await db
+        .transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL search_path = pg_catalog`);
+          error = await thrown(run(new PostgresTenantSettingsStore(tx as never)));
+          throw new Error("rollback");
+        })
+        .catch(() => undefined);
+      expectNoMarkers2(error, [TS_MARKER]);
+      expect(sqlstateOf(error)).toBe("42P01");
+    });
+  }
 });
