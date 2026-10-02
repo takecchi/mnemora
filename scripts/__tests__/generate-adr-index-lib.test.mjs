@@ -28,6 +28,45 @@ describe("isAdrFilename", () => {
   });
 });
 
+describe("buildAdrEntries: 形の外れた ADR のファイル名（ADR 0537）", () => {
+  const body = (n) => `# ADR ${n}: 題\n\n- **状態**: 採用 (2026-10)\n- **日付**: 2026-10-02\n`;
+
+  it("slug にドットを含むファイル名は、黙って無視せず例外で落とす", () => {
+    expect(() =>
+      buildAdrEntries([
+        { filename: "0001-ok.md", content: body("0001") },
+        { filename: "0534-changelog-1.3.0-reconcile.md", content: body("0534") },
+      ]),
+    ).toThrow(/0534-changelog-1\.3\.0-reconcile\.md/);
+  });
+
+  it("番号の重複を名乗るドット入りの名前も、無視されず例外になる（重複の検査から漏れない）", () => {
+    expect(() =>
+      buildAdrEntries([
+        { filename: "0001-ok.md", content: body("0001") },
+        { filename: "0001-dup.v2.md", content: body("0001") },
+      ]),
+    ).toThrow(/0001-dup\.v2\.md/);
+  });
+
+  it("大文字の slug・アンダースコア・番号の後のハイフン無しも、形の間違いとして落とす", () => {
+    for (const name of ["0002-Upper.md", "0003-under_score.md", "0004.md", "0005_x.md"]) {
+      expect(() => buildAdrEntries([{ filename: name, content: body("0001") }])).toThrow(name);
+    }
+  });
+
+  it("番号で始まらない名前（README.md・TEMPLATE.md・notes.txt・番号で始まる .md 以外）は、今までどおり無視する（陰性対照）", () => {
+    const entries = buildAdrEntries([
+      { filename: "0001-ok.md", content: body("0001") },
+      { filename: "README.md", content: "x" },
+      { filename: "TEMPLATE.md", content: "x" },
+      { filename: "notes.txt", content: "x" },
+      { filename: "0002-x.txt", content: "x" },
+    ]);
+    expect(entries.map((e) => e.number)).toEqual(["0001"]);
+  });
+});
+
 describe("formatStateCell", () => {
   it("採用 + 状態欄に埋め込まれた日付 は無装飾のまま返す", () => {
     expect(formatStateCell("採用 (2026-09)", undefined)).toBe("採用 (2026-09)");
