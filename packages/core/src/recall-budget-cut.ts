@@ -109,3 +109,39 @@ export function findBudgetCut(
     (k) => charsOk(k) && !(tokenPrefix[k]! > maxTokens),
   );
 }
+
+/** 壊れた `tokens` の値の種類。**値そのものと、数えた文字列は message に入れない**（ADR 0497）。 */
+function describeBrokenTokens(tokens: unknown): string {
+  if (typeof tokens !== "number")
+    return `a non-number (${tokens === null ? "null" : typeof tokens})`;
+  if (Number.isNaN(tokens)) return "NaN";
+  if (tokens === Infinity) return "Infinity";
+  if (tokens === -Infinity) return "-Infinity";
+  return "a negative number";
+}
+
+/**
+ * `recall()` が1回の呼び出しの頭で `deps.tokenCounter` を包む（ADR 0497）。戻り値の `tokens` が
+ * 「有限で 0 以上の number」でなければ、その呼び出しで `RangeError` を投げる——**最初の壊れた値で止まる**
+ * ので、`count()` の呼び出し元（段4の `findBudgetCut`・Issue #829 の測り直し・`usage` の計測）は
+ * 壊れた値を一度も見ない。検査は数値判定のみ（文字列を走査しない・割り当てない）。
+ *
+ * - `counter`（`"heuristic" | "exact"`）の欄は検査しない（ADR 0483・0487 のまま。`outputValidation` が知らせる）。
+ * - `count()` が投げた例外は包まず素通しする（`tick()` の embed ジョブも provider の例外を包まず投げ直す）。
+ * - 小数は通す（`tokens` は整数と書いてあるが、有限で 0 以上なら足し算は成り立つ。ADR 0483 のまま）。
+ * - ライブラリ内部の関数であり、`index.ts` からは出さない。
+ */
+export function checkedTokenCounter(inner: TokenCounter): TokenCounter {
+  return {
+    count(text: string) {
+      const result = inner.count(text);
+      const tokens: unknown = (result as { tokens?: unknown } | null | undefined)?.tokens;
+      if (typeof tokens !== "number" || !(tokens >= 0 && tokens < Infinity)) {
+        throw new RangeError(
+          `recall: tokenCounter.count() must return { tokens } as a finite number >= 0, got ${describeBrokenTokens(tokens)}`,
+        );
+      }
+      return result;
+    },
+  };
+}

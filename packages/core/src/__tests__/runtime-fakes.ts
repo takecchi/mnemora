@@ -2686,6 +2686,10 @@ export class FakeRelationStore implements RelationStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    // ADR 0488: InMemory・Postgres と同じく、範囲外の kind は両端の検査より前に断る。
+    if (!Object.hasOwn({ contradicts: true } satisfies Record<RelationKind, true>, kind)) {
+      throw new Error(`FakeRelationStore: unknown relation kind: ${String(kind)}`);
+    }
     // ADR 0398: 両端の記憶が ctx のテナントに在ることを確かめてから書く（本物の store と同じ）。
     for (const id of [fromId, toId]) {
       const memory = this.backing.memories.get(id);
@@ -2727,11 +2731,9 @@ export class FakeRelationStore implements RelationStore {
     return this.backing.relations
       .filter(
         (r) =>
-          r.tenantId === ctx.tenantId &&
-          r.fromMemoryId === memoryId &&
-          (kind === undefined || r.kind === kind),
+          r.tenantId === ctx.tenantId && r.fromMemoryId === memoryId && (!kind || r.kind === kind),
       )
-      .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: r.createdAt }));
+      .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: new Date(r.createdAt) })); // ADR 0488: 複製して返す
   }
 }
 

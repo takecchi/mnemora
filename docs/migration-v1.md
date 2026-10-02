@@ -2413,6 +2413,29 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。保存済みの記憶は変わらない（以前に継承された値で作られた記憶が在っても、書き換えない）。
 
+### 55. 差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた（`@mnemora/core`）
+
+[ADR 0497](./decisions/0497-recall-rejects-broken-token-counter.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。材料は [ADR 0483](./decisions/0483-token-counter-broken-values.md)）。
+
+⚠ **未リリース**。**番号は 55 である**——項目53 の続き（54 はマネージャーの採番で別の変更が使う番号。番号が衝突したら merge のときに振り直すこと）。
+
+**何が変わったか**: `recall()` は、利用者が `RuntimeDeps.tokenCounter` に渡した `TokenCounter` の `count()` の戻りごとに、`tokens` が有限で 0 以上の number かを確かめる。違えば `RangeError`（message は `NaN`・`Infinity`・`-Infinity`・`a negative number`・`a non-number (...)` のどれか。入力テキストは載せない）。最初の壊れた値で止まる。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた呼び出しが、新しく例外になる**。項目21・23・24・27・34・49・51・52 と同じ扱い。以前は、`NaN`・負の数を返す counter では `maxMemoryTokens` が黙って外れて全件が返り、`Infinity` では全件が落ちて、`outputValidation: "off"` では何も知らされなかった（ADR 0483 の実測）。
+
+**誰が影響を受けるか**: 自前の `TokenCounter` を `createRuntime({ tokenCounter })` に渡していて、それが `NaN`・負の数・`Infinity`・number でない値を返す（または `undefined` を返す）ことがある人だけ。既定の `heuristicTokenCounter` を使う人、`count()` が常に有限で 0 以上の数を返す人は、何も変わらない。小数を返す counter も変わらない。
+
+**どう直すか**:
+- 外部のトークナイザ（`tiktoken` 系など）の結果を返しているなら、`count()` の中で `Math.max(0, n)` にし、`Number.isFinite(n)` でなければ**自分で**扱いを決める（例外にする、または `heuristicTokenCounter.count(text)` に落とす。落とすなら `counter: "heuristic"` を返して、実測の顔をしないこと）。
+- 「トークナイザが失敗したら `NaN` を返して予算を外す」ことに頼っていたなら、その挙動は無くなった。予算を外したいなら、`budget` を渡さないこと（それでも `usage` の計測で `count()` は呼ばれるので、戻り値は有限で 0 以上でなければならない）。
+- 例外を投げる counter の扱いは変わらない（包まずそのまま `recall()` の失敗になる）。
+- 壊れた counter が本番で動いていたかを確かめるには、`count()` の戻りを一時的に包み、有限で 0 以上でない値をログに出す（入力テキストは出さないこと）。
+
+**DB マイグレーション**: 要らない。
+
+⟹ **この項目（ADR 0497）も、この節が数える破壊的変更である。**
+⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
@@ -2561,6 +2584,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append`: `event.memoryId` が大文字の uuid でも、小文字にそろえて受ける**（[ADR 0475](./decisions/0475-eventstore-append-uuid-case.md)。上の項目（ADR 0466・0469）と 🔴 の項目49・52 の続き）。
   `PostgresEventStore.append` は uuid を小文字にそろえて比べるので、大文字の uuid を自テナントの記憶として受ける。`InMemoryEventStore.append` は、ADR 0469 の時点では完全一致で引き、自テナントの記憶の id を大文字にしたものも断っていた。いまは `@mnemora/postgres` と同じく小文字にそろえて受け、積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。`null`（`events_purged`）は検査しない。
   **落ちる入力が減る変更**（新しく断る入力は無い）。core のテスト専用の `FakeEventStore.append`（公開されていない）も同じに揃えた。conformance suite は変えていない。
+- **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany`: `kind` が偽の値（`""`・`null`・`0`）のときは、絞り込まずに全件を返す**（[ADR 0488](./decisions/0488-relation-store-fake-alignment.md)。上の項目（ADR 0466・0469・0475）の続き）。
+  `PostgresRelationStore` は `kind` の真偽で絞り込みの有無を決めるので、偽の値なら全件を返す。`InMemoryRelationStore` は `kind === undefined` で決めていたため、同じ入力で 0 件を返していた。いまは `@mnemora/postgres` と同じく全件を返す。`undefined` と、正しい `kind`・範囲外の文字列（`"bogus"` は 0 件）の返りは変えていない。
+  **落ちる入力が減る変更**（新しく断る入力は無い。型の外の入力の返りが、本物に揃う）。core のテスト専用の `FakeRelationStore`（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
 ### この節に載せなかったもの（理由つき）
 

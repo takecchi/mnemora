@@ -299,6 +299,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目51。**DB マイグレーションは無い。**修正前に書かれた、別テナントを指す行（`recall_usages`・`memories.source_observation_id`・`contested_with_id`・`superseded_by_id`）が在るかを調べる SQL は ADR 0439 に在る（読み取りだけ）。
   - 【確かめていないこと】`memory_events` への INSERT 11箇所（ADR 0436 から変わらず、1つずつは確かめていない）。検査と書き込みの間に並行して参照先が消えた場合の、外部キー違反の生のエラーの見え方。`FakeMemoryStore`（core）の検査を縛る歯（適合テストに当てられていない）。手元以外の環境・既存データでの食い違う行の有無。
 
+- **差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か、壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた——自前の `TokenCounter` を `createRuntime` に渡している人へ**（[ADR 0497](./docs/decisions/0497-recall-rejects-broken-token-counter.md)、`@mnemora/core`）。
+
+  以前は、`NaN`・負の数を返す counter では段4のトークン予算（`maxMemoryTokens`・`promptBudgetTokens`）が**黙って外れて全件が返り**（`budget_dropped` も出ない）、`Infinity` では全件が落ちた（[ADR 0483](./docs/decisions/0483-token-counter-broken-values.md)）。`RuntimeDeps.outputValidation: "off"` では何も知らされなかった。今は、`count()` の戻り値の `tokens` が有限で 0 以上の number でなければ（`NaN`・負の数・`±Infinity`・number でない値・戻り値の欠落）、`recall()` は `RangeError` で断る。message は値の種類だけを載せ、入力テキストは載せない。最初の壊れた値で止まる。予算が無くても（`usage` の計測で `count()` が呼ばれる）、`outputValidation` の値にかかわらず断る。
+
+  - **変わらないこと**: 小数（`0.5`）は通る。`count()` が投げた例外は、これまでどおり包まずそのまま `recall()` の失敗になる。`counter` の欄の欠落・範囲外は断らず、これまでどおり `usage.counter` に出て `outputValidation` が知らせる。既定の `heuristicTokenCounter` は必ず通り、既定の挙動は変わらない。型・シグネチャ・公開 API は変わらない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目55。**DB マイグレーションは無い。**
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
@@ -457,7 +464,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+<<<<<<< HEAD
 - **`recall()` の多者間の群（`RelationStore`）まわりの 2 つの割れを直した。**(1) `relationMaxCount` を超えて切った群のメンバーを、連想の `unit_assembly_dropped`・`over_limit`、または段2の `below_threshold` などでもう一度数えていた（`omitted` の件数の和が `totalInScope` を超えた）。切ったメンバーは連想の候補から外し、段2の件数から取り下げる（連想の席が、どうせ落ちる群のメンバーに取られなくなる）。(2) `RelationStore.link` で `active` な記憶へ辺を張ると、その記憶が結果に 2 回返っていた。群のメンバー（`contested` で `contestedWithId` なし）でない候補は、辺があっても群に入れない。新しく断る入力は無い（[ADR 0494](./docs/decisions/0494-fuzz-relations-and-argument-mutation.md)）
+=======
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createObservation`・`createObservationWithOutbox` が、関数・`Symbol` を欄の値に持つ値や `toJSON` を持つ値を含む `payload`（`observe({ kind: "event", data })` の `data`）を、`DataCloneError` で断らずに、`@mnemora/postgres` と同じ規則で保存するようになった。**（[ADR 0486](./docs/decisions/0486-fixture-event-data-align-and-context-text-unit.md)）関数・`Symbol` の欄は消え（配列の要素なら `null`）、`toJSON` はその戻り値で保存する。`NaN`・`-0`・`Date`・値が `undefined` の欄の扱いは変えていない。断る入力が減るだけで、非破壊。
+>>>>>>> origin/main
 
 - **`created` イベントの `meta.languageMismatch`（ADR 0391）の判定が、ローマ数字（`Ⅳ` など）を「ラテン文字」に数えていたのを、文字（`\p{L}`）だけを数えるように直した。**`contentLatinShare` が1を超える値（例: 2.5）になり、20字の下限もローマ数字ですり抜けていた。閾値と `rule` は変えていない。変わるのはローマ数字を含む本文・観測の判定だけで、保存済みの印は書き換えない（[PR #1597](https://github.com/takecchi/mnemora/pull/1597)）。
 
@@ -466,6 +477,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/postgres`: 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作ると `deadlock detected`（40P01）で片方が落ちたのを直した。**`upsertProposedLabels` が `labels` の行を触る順を、`tags` の並びではなく名前の順に固定した。`Memory.tags` の並び・重複と `proposedCount` は変わらない（[ADR 0476](./docs/decisions/0476-label-upsert-lock-order-and-taxonomy-probes.md)）
 
 - **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` が、`event.memoryId` が大文字の uuid でも、`PostgresEventStore.append` と同じく小文字にそろえて受けるようになった**（[ADR 0475](./docs/decisions/0475-eventstore-append-uuid-case.md)。[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` は小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、新しく断る入力は無い。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+- **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany` が、`kind` が偽の値（`""`・`null`・`0`）のとき、`PostgresRelationStore` と同じく絞り込まずに全件を返すようになった**（[ADR 0488](./docs/decisions/0488-relation-store-fake-alignment.md)）。以前は 0 件を返した。型の外の入力で、`undefined`（省略）と正しい `kind`（`"contradicts"`）の返りは変えていない。`@mnemora/postgres` の返りは変えていない。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が大文字の uuid でも、`@mnemora/postgres` と同じく小文字にそろえて受けるようになった**（[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)。[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、操作の対象の `id` の大文字小文字は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
 

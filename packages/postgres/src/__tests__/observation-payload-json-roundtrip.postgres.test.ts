@@ -124,43 +124,36 @@ describe.each(KITS)("%s: payload（event の data）の JSON で往復しない�
     expect(retried.created).toBe(true);
   });
 
-  // TSDoc の表に無かった行（53巡目で足した）。
-  it("関数・Symbol の値: Postgres は欄ごと消える、fixture は DataCloneError で拒み、行を書かない", async () => {
+  // TSDoc の表に無かった行（53巡目で足し、ADR 0486 で fixture を Postgres に揃えた。どちらも同じ結果）。
+  it("関数・Symbol の値: どちらも欄ごと消える（配列の中なら null）", async () => {
     const kit = await makeKit();
     for (const value of [() => 1, Symbol("s")]) {
-      const input = eventObservation({ a: value, b: 1 });
-      if (kitName === "Postgres") {
-        const data = await roundtrip(kit, { a: value, b: 1 });
-        expect(data).toEqual({ b: 1 });
-      } else {
-        await expect(kit.ms.createObservation(ctx, input)).rejects.toMatchObject({
-          name: "DataCloneError",
-        });
-        const retried = await kit.ms.createObservationWithOutbox(
-          ctx,
-          { ...input, payload: { name: "n", data: {} } },
-          [],
-        );
-        expect(retried.created).toBe(true);
-      }
+      expect(await roundtrip(kit, { a: value, b: 1 })).toEqual({ b: 1 });
+      expect(await roundtrip(kit, { a: [value, 2] })).toEqual({ a: [null, 2] });
     }
   });
 
-  it("toJSON を持つ値: Postgres は toJSON の戻り値で保存する（data そのものが object でなくなりうる）、fixture は DataCloneError", async () => {
+  it("toJSON を持つ値: どちらも toJSON の戻り値で保存する（data そのものが object でなくなりうる）", async () => {
     const kit = await makeKit();
-    const nested = { a: { toJSON: () => "z" } };
-    const top = { toJSON: () => 1 };
-    if (kitName === "Postgres") {
-      expect(await roundtrip(kit, nested)).toEqual({ a: "z" });
-      expect(await roundtrip(kit, top)).toBe(1);
-    } else {
-      await expect(kit.ms.createObservation(ctx, eventObservation(nested))).rejects.toMatchObject({
-        name: "DataCloneError",
-      });
-      await expect(kit.ms.createObservation(ctx, eventObservation(top))).rejects.toMatchObject({
-        name: "DataCloneError",
-      });
-    }
+    expect(await roundtrip(kit, { a: { toJSON: () => "z" } })).toEqual({ a: "z" });
+    expect(await roundtrip(kit, { toJSON: () => 1 })).toBe(1);
+    // toJSON には欄の名前が渡る（JSON.stringify と同じ）。
+    expect(await roundtrip(kit, { k: { toJSON: (key: string) => key } })).toEqual({ k: "k" });
+    // toJSON の戻り値の中の関数・Symbol・NaN も、同じ規則で扱う。
+    expect(await roundtrip(kit, { a: { toJSON: () => ({ f: () => 1, b: 2 }) } })).toEqual({
+      a: { b: 2 },
+    });
+  });
+
+  it("createObservationWithOutbox も同じ（関数の欄・toJSON）", async () => {
+    const kit = await makeKit();
+    const { observation } = await kit.ms.createObservationWithOutbox(
+      ctx,
+      eventObservation({ a: () => 1, b: { toJSON: () => 5 } }),
+      [],
+    );
+    const read = await kit.ms.getObservation(ctx, observation.id);
+    expect((read?.payload as { data: unknown }).data).toEqual({ b: 5 });
   });
 });
 

@@ -59,7 +59,7 @@ import type {
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
 import { listRelatedManyIfSupported } from "./relation-level.js";
-import { findBudgetCut } from "./recall-budget-cut.js";
+import { checkedTokenCounter, findBudgetCut } from "./recall-budget-cut.js";
 import {
   DEFAULT_RECALL_OUTPUT_VALIDATION,
   validateRecallOutput,
@@ -113,7 +113,7 @@ export interface RecallRuntimeDeps {
    * `RuntimeDeps.tenantSettingsStore`（`getDefaultHalfLifeHours` 用に必須）を持っており、
    * `recall` の配線（`runtime.ts` の `recall` 関数）がそれをここへそのまま渡す。
    *
-   * **省略可能**（ADR 0165 決めたこと13）。`createRecallRuntime` を直接呼ぶ外部の
+   * **省略可能**（ADR 0165 決めたこと13）。`runRecall` を直接呼ぶ外部の
    * 呼び出し側を壊さないため——省略すると `decay_clock` は `'wall'` 固定として動く
    * （＝本 ADR 以前とまったく同じ挙動）。
    */
@@ -599,7 +599,13 @@ export async function runRecall(
   signal?: AbortSignal,
 ): Promise<RecallResult> {
   try {
-    return await runRecallBody(ctx, query, deps, signal);
+    // ADR 0497: 壊れた `tokens`（NaN・負・Infinity・数でない）を返す counter は、最初の呼び出しで断る。
+    return await runRecallBody(
+      ctx,
+      query,
+      { ...deps, tokenCounter: checkedTokenCounter(deps.tokenCounter) },
+      signal,
+    );
   } catch (error) {
     // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:`（問いの本文）を落とす。
     throw omitParamsFromError(error);

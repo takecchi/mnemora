@@ -2942,18 +2942,21 @@ describe("recall() — ann_unreached × excludeProvenanceKinds（ADR 0390）", (
 });
 
 /**
- * 差し替えた `TokenCounter` が約束を破る値を返したときの、`recall()` の今の振る舞い（ADR 0483）。
- *
- * 振る舞いは変えていない。`TokenCounter` の戻り値（`tokens` は 0 以上の整数、`counter` は
- * `"heuristic" | "exact"`）は実行時には検査されない。NaN・負の数は段4の切り詰めを黙って外し
- * （累積和が NaN になる・小さくなるので、どの prefix も予算に収まる）、Infinity は全件を落とし、
- * 例外はそのまま呼び出し側へ出る。壊れた値が返す `usage` に出たことは `outputValidation`
- * （ADR 0098、既定 "report"）が知らせる。
+ * 差し替えた `TokenCounter` が約束（`tokens` は有限で 0 以上の number）を破る値を返したとき、
+ * `recall()` は `RangeError` で断る（ADR 0497。ADR 0483 が書いた「予算を黙って外す」振る舞いを断る形に変えた）。
  */
-describe("recall() — TokenCounter が約束を破る値を返したとき（ADR 0483、今の振る舞い）", () => {
-  async function run(tokenCounter: TokenCounter, budget: { maxMemoryTokens: number } | undefined) {
-    const { runtime, stores } = buildRuntime({ tokenCounter });
-    for (const digest of ["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"]) {
+describe("recall() — TokenCounter が約束を破る値を返したとき（ADR 0497）", () => {
+  const digests = ["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"];
+  async function run(
+    tokenCounter: TokenCounter | undefined,
+    budget: { maxMemoryTokens: number } | undefined,
+    outputValidation?: RecallOutputValidationMode,
+  ) {
+    const { runtime, stores } = buildRuntime({
+      ...(tokenCounter ? { tokenCounter } : {}),
+      ...(outputValidation ? { outputValidation } : {}),
+    });
+    for (const digest of digests) {
       await createEmbeddedMemory(stores, [1, 0], { digest, contentHash: digest });
     }
     return runtime.recall(ctx, { vector: [1, 0], ...(budget ? { budget } : {}) });
@@ -2968,40 +2971,126 @@ describe("recall() — TokenCounter が約束を破る値を返したとき（AD
   });
 
   it.each([
-    ["NaN", NaN],
-    ["負の数", -5],
+    ["NaN", NaN, /NaN/],
+    ["負の数", -5, /negative/],
+    ["負の無限大", -Infinity, /-Infinity/],
+    ["Infinity", Infinity, /Infinity/],
   ])(
-    "%s を返す counter は、予算を黙って外して全件を返し、usage の検証で知らされる",
-    async (_n, tokens) => {
-      const result = await run({ count: () => ({ tokens, counter: "exact" }) }, budget);
-      expect(result.memories).toHaveLength(3);
-      expect(result.omitted.map((o) => o.kind)).not.toContain("budget_dropped");
-      expect(result.outputValidation?.ok).toBe(false);
-      expect(result.outputValidation?.issues.map((i) => i.path)).toContain("usage.estimatedTokens");
+    "%s を返す counter は、予算の有無・outputValidation の値にかかわらず RangeError で断る",
+    async (_n, tokens, pattern) => {
+      const counter: TokenCounter = { count: () => ({ tokens, counter: "exact" }) };
+      await expect(run(counter, budget)).rejects.toThrow(RangeError);
+      await expect(run(counter, budget)).rejects.toThrow(pattern);
+      await expect(run(counter, undefined)).rejects.toThrow(RangeError);
+      await expect(run(counter, budget, "off")).rejects.toThrow(RangeError);
     },
   );
 
-  it("Infinity を返す counter は、1件目から収まらず全件を落とす", async () => {
-    const result = await run({ count: () => ({ tokens: Infinity, counter: "exact" }) }, budget);
-    expect(result.memories).toHaveLength(0);
-    expect(result.omitted.map((o) => o.kind)).toContain("budget_dropped");
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["数でない tokens（文字列）", { tokens: "3", counter: "exact" }],
+    ["tokens の欄が無い", { counter: "exact" }],
+    ["tokens が null", { tokens: null, counter: "exact" }],
+  ])("戻り値が壊れている（%s）counter も RangeError で断る", async (_n, value) => {
+    const counter = { count: () => value } as unknown as TokenCounter;
+    await expect(run(counter, budget)).rejects.toThrow(RangeError);
+    await expect(run(counter, undefined)).rejects.toThrow(RangeError);
   });
 
-  it("例外を投げる counter の例外は、そのまま recall() の失敗になる（予算が無くても usage の計測で呼ばれる）", async () => {
-    const boom: TokenCounter = {
+  it("message には値の種類が入り、入力テキスト（digest）は入らない", async () => {
+    const counter: TokenCounter = { count: () => ({ tokens: NaN, counter: "exact" }) };
+    const error = await run(counter, budget).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RangeError);
+    const message = (error as RangeError).message;
+    expect(message).toMatch(/tokenCounter/);
+    for (const digest of digests) expect(message).not.toContain(digest);
+  });
+
+  it("最初の壊れた値で止まる: 壊れた値を返した呼び出しの後で、counter はもう呼ばれない", async () => {
+    let calls = 0;
+    const counter: TokenCounter = {
       count: () => {
-        throw new Error("boom");
+        calls += 1;
+        return { tokens: calls === 2 ? NaN : 1, counter: "exact" };
       },
     };
-    await expect(run(boom, budget)).rejects.toThrow("boom");
-    await expect(run(boom, undefined)).rejects.toThrow("boom");
+    await expect(run(counter, { maxMemoryTokens: 100 })).rejects.toThrow(RangeError);
+    expect(calls).toBe(2);
+  });
+
+  it("段4の2件目以降の digest で壊れた値が出ても断る（1件目だけを検査して終わらない）", async () => {
+    let calls = 0;
+    const counter: TokenCounter = {
+      count: () => {
+        calls += 1;
+        return { tokens: calls >= 3 ? -1 : 1, counter: "exact" };
+      },
+    };
+    await expect(run(counter, { maxMemoryTokens: 100 })).rejects.toThrow(RangeError);
+  });
+
+  it("usage の計測（連結した文字列）でだけ壊れた値を返す counter も、予算が無くても断る", async () => {
+    // digest 1件（10文字）は正常、連結（>10文字）で NaN。予算なしなので usage の計測でしか呼ばれない。
+    const counter: TokenCounter = {
+      count: (text) => ({ tokens: text.length > 10 ? NaN : 1, counter: "exact" }),
+    };
+    await expect(run(counter, undefined)).rejects.toThrow(RangeError);
+  });
+
+  it("段4で落ちたときの連結の測り直し（Issue #829）の壊れた値も断る", async () => {
+    // 段4は digest ごと（10文字）で数えて落とす。連結の測り直しでは長い文字列に NaN を返す。
+    const counter: TokenCounter = {
+      count: (text) => ({ tokens: text.length > 10 ? NaN : 3, counter: "exact" }),
+    };
+    await expect(run(counter, budget)).rejects.toThrow(RangeError);
+  });
+
+  it("例外を投げる counter の例外は、包まずそのまま recall() の失敗になる（予算が無くても usage の計測で呼ばれる）", async () => {
+    const boom = new Error("boom");
+    const counter: TokenCounter = {
+      count: () => {
+        throw boom;
+      },
+    };
+    await expect(run(counter, budget)).rejects.toBe(boom);
+    await expect(run(counter, undefined)).rejects.toBe(boom);
+  });
+
+  it.each([
+    ["0", 0],
+    ["小数 0.5", 0.5],
+    ["大きな有限値", 1e12],
+  ])(
+    "やりすぎない: %s を返す counter は通る（有限で 0 以上なら整数でなくてよい）",
+    async (_n, tokens) => {
+      const result = await run({ count: () => ({ tokens, counter: "exact" }) }, undefined);
+      expect(result.memories).toHaveLength(3);
+      expect(result.usage.estimatedTokens).toBe(tokens);
+    },
+  );
+
+  it("既定の heuristicTokenCounter は断られない（空・CJK・絵文字・孤立サロゲート・長い digest でも、予算ありで通る）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const odd = ["", "日本語のダイジェスト", "emoji \u{1F600} \uD800 é", "x".repeat(5000)];
+    for (const [i, digest] of odd.entries()) {
+      await createEmbeddedMemory(stores, [1, 0], { digest, contentHash: `h${i}` });
+    }
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      budget: { maxMemoryTokens: 100000 },
+    });
+    expect(result.memories.length).toBeGreaterThan(0);
+    expect(Number.isFinite(result.usage.estimatedTokens)).toBe(true);
+    expect(result.usage.counter).toBe("heuristic");
+    expect(result.outputValidation).toEqual({ ok: true, issues: [] });
   });
 
   it.each([
     ["counter の欄が無い", undefined],
     ["counter が範囲外の文字列", "bogus"],
   ])(
-    "%s: 値はそのまま usage.counter に出て、検証で知らされる（正しい値に直さない）",
+    "%s: tokens が正常なら通り、値はそのまま usage.counter に出て、検証で知らされる（ADR 0483 のまま。ADR 0497 の対象外）",
     async (_n, counter) => {
       const result = await run({ count: () => ({ tokens: 3, counter }) as never }, undefined);
       expect(result.usage.counter).toBe(counter);
