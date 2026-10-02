@@ -24,7 +24,7 @@ export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
 /**
  * `assertQueryDate` に、`timestamptz` の下限（ADR 0500）を足したもの。Postgres が日時を `timestamptz` として **クエリに渡す口**
- * （検索・集約・claim key の条件、`opts.now`・`opts.at` など）で使う。下限より前（紀元前4713年11月24日より前）は、Postgres では
+ * （検索・集約・claim key の条件、`opts.now`・`opts.at` など）で使う。下限より前（紀元前4714年11月24日より前）は、Postgres では
  * `22008` になる。
  *
  * ⚠ **全部の口で使うわけではない。**`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
@@ -187,4 +187,16 @@ export function assertInt4Column(method: string, field: string, value: unknown):
       `${method}: ${field} does not fit in a Postgres "integer" (int4) column (got ${value})`,
     );
   }
+}
+
+/**
+ * ADR 0505: 活動時計の「いま」に subject 単位のカウンタ `S_x` を足す式（`archiveDecayed` の `nowSeq + S_x`、
+ * `aggregateScope`・`VectorStore.search` の `decayFloorSeqAfter + S_x`）の和が、Postgres の `bigint` を溢れるか
+ * （2^63 以上。溢れれば `22003 bigint out of range` で文ごと失敗する）。足すのは、ドライバが `base` を文字にした値
+ * （`String(2**63 - 1024)` は `"9223372036854775000"`）なので、float64 の和ではなく BigInt で同じ値を足す。
+ * `base` が `bigint` の範囲に収まること（`assertQueryBigint`）を先に確かめてから呼ぶこと。
+ * 溢れを**投げるかどうか**は、Postgres がその式を実際に評価する行かどうかで決まる——呼び出し側が見る。
+ */
+export function seqSumOverflowsBigint(base: number, ownSeq: number): boolean {
+  return BigInt(String(base)) + BigInt(ownSeq) >= 2n ** 63n;
 }

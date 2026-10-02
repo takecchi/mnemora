@@ -159,7 +159,7 @@ export interface MemoryEvent {
    *
    * NUL・孤立サロゲートの行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
    * `@mnemora/postgres` では、状態の書き換えとイベントが同じトランザクションにあるので、両方とも取り消され、
-   * 途中まで書かれたものは残らない（`forget` は `{ kind: "failed" }` を返し、`markContested` は DB の例外を投げる）。
+   * 途中まで書かれたものは残らない（`forget` は `{ kind: "failed" }` を返し、`markContested` は例外を投げる——ADR 0499 から、DB に触れる前の名指しの `Error`。以前は DB の生の例外）。
    * **testkit の fixture も、2026-09-29 から同じ入力を拒むようになった**（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、
    * オーナーの回答 ask_human `3f3411c5` を受けて。以前は状態を書き換え、文字列をそのまま監査ログに残していた）
    * ——`assertStorableMemoryEvent`（`packages/testkit/src/__fixtures__/memory-event-check.ts`）が状態を書き換える前に

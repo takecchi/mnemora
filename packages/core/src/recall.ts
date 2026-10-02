@@ -1829,6 +1829,8 @@ export interface RecallQuery {
    *
    * **渡したキー数・キー長・値長には上限がある**（`AttributesSchema`、`attributes.ts`）。
    * 上限超過は `parse()` の時点で例外になる——`ObserveXxxInput.attributes` と同じ検査。
+   * キーが自前の `__proto__`（`JSON.parse` が作る）なら、`parse()` の前に `ZodError` で断る
+   * （ADR 0496。zod の record は黙って落とし、絞り込みが外れていた）。
    */
   attributes?: Attributes | undefined;
   /**
