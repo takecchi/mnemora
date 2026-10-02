@@ -63,7 +63,11 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
     await driver.start();
     // ADR 0548: job template の opts に removeOnComplete の既定（count: 1000）が入る。removeOnFail は触らない。
     expect(upsertCalls).toEqual([
-      ["mnemora-tick", { every: 100 }, { name: "mnemora-tick", opts: { removeOnComplete: { count: 1000 } } }],
+      [
+        "mnemora-tick",
+        { every: 100 },
+        { name: "mnemora-tick", opts: { removeOnComplete: { count: 1000 } } },
+      ],
     ]);
     expect(queueCtorArgs[0]?.[0]).toBe("q");
     expect(workerCtorArgs[0]?.[0]).toBe("q");
@@ -253,13 +257,18 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     ["null", null],
     ["bigint", 30000n],
     ["オブジェクト", {}],
-  ])("⭐ lockDuration が %s（数でない）なら TypeError。Queue も Worker も作らない", (_label, value) => {
-    expect(() => make({ lockDuration: value })).toThrow(TypeError);
-    expect(() => make({ lockDuration: value })).not.toThrow(RangeError);
-    expect(() => make({ lockDuration: value })).toThrow(/lockDuration must be a positive integer/);
-    expect(queueCtorArgs).toHaveLength(0);
-    expect(workerCtorArgs).toHaveLength(0);
-  });
+  ])(
+    "⭐ lockDuration が %s（数でない）なら TypeError。Queue も Worker も作らない",
+    (_label, value) => {
+      expect(() => make({ lockDuration: value })).toThrow(TypeError);
+      expect(() => make({ lockDuration: value })).not.toThrow(RangeError);
+      expect(() => make({ lockDuration: value })).toThrow(
+        /lockDuration must be a positive integer/,
+      );
+      expect(queueCtorArgs).toHaveLength(0);
+      expect(workerCtorArgs).toHaveLength(0);
+    },
+  );
 
   it.each([
     ["0", 0],
@@ -270,13 +279,18 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     ["Infinity", Infinity],
     ["-Infinity", -Infinity],
     ["MAX_SAFE_INTEGER + 1", Number.MAX_SAFE_INTEGER + 1],
-  ])("⭐ lockDuration が %s（数だが範囲外）なら RangeError。Queue も Worker も作らない", (_label, value) => {
-    expect(() => make({ lockDuration: value })).toThrow(RangeError);
-    expect(() => make({ lockDuration: value })).not.toThrow(TypeError);
-    expect(() => make({ lockDuration: value })).toThrow(/lockDuration must be a positive integer/);
-    expect(queueCtorArgs).toHaveLength(0);
-    expect(workerCtorArgs).toHaveLength(0);
-  });
+  ])(
+    "⭐ lockDuration が %s（数だが範囲外）なら RangeError。Queue も Worker も作らない",
+    (_label, value) => {
+      expect(() => make({ lockDuration: value })).toThrow(RangeError);
+      expect(() => make({ lockDuration: value })).not.toThrow(TypeError);
+      expect(() => make({ lockDuration: value })).toThrow(
+        /lockDuration must be a positive integer/,
+      );
+      expect(queueCtorArgs).toHaveLength(0);
+      expect(workerCtorArgs).toHaveLength(0);
+    },
+  );
 
   it("⭐ lockDuration の message は ADR 0525 の形（`createBullmqTickDriver: <欄> must be …, got <値>`）", () => {
     expect(() => make({ lockDuration: 0 })).toThrow(
@@ -288,14 +302,18 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
   });
 
   it("⭐ 検査の順序: everyMs → jobName → concurrency → lockDuration → completedJobsToKeep（先の誤りが先に出る）", () => {
-    expect(() => make({ everyMs: -1, jobName: "", concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(
-      /everyMs must be/,
+    expect(() =>
+      make({ everyMs: -1, jobName: "", concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 }),
+    ).toThrow(/everyMs must be/);
+    expect(() =>
+      make({ jobName: "", concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 }),
+    ).toThrow(/jobName must be/);
+    expect(() => make({ concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(
+      /concurrency must be/,
     );
-    expect(() => make({ jobName: "", concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(
-      /jobName must be/,
+    expect(() => make({ lockDuration: 0, completedJobsToKeep: -1 })).toThrow(
+      /lockDuration must be/,
     );
-    expect(() => make({ concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(/concurrency must be/);
-    expect(() => make({ lockDuration: 0, completedJobsToKeep: -1 })).toThrow(/lockDuration must be/);
     expect(() => make({ completedJobsToKeep: -1 })).toThrow(/completedJobsToKeep must be/);
   });
 
@@ -332,12 +350,15 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     ["null", null],
     ["bigint", 10n],
     ["真偽値", true],
-  ])("⭐ completedJobsToKeep が %s（数でない）なら TypeError。Queue も Worker も作らない", (_label, value) => {
-    expect(() => make({ completedJobsToKeep: value })).toThrow(TypeError);
-    expect(() => make({ completedJobsToKeep: value })).not.toThrow(RangeError);
-    expect(queueCtorArgs).toHaveLength(0);
-    expect(workerCtorArgs).toHaveLength(0);
-  });
+  ])(
+    "⭐ completedJobsToKeep が %s（数でない）なら TypeError。Queue も Worker も作らない",
+    (_label, value) => {
+      expect(() => make({ completedJobsToKeep: value })).toThrow(TypeError);
+      expect(() => make({ completedJobsToKeep: value })).not.toThrow(RangeError);
+      expect(queueCtorArgs).toHaveLength(0);
+      expect(workerCtorArgs).toHaveLength(0);
+    },
+  );
 
   it.each([
     ["負", -1],
@@ -345,12 +366,15 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     ["NaN", Number.NaN],
     ["Infinity", Infinity],
     ["MAX_SAFE_INTEGER + 1", Number.MAX_SAFE_INTEGER + 1],
-  ])("⭐ completedJobsToKeep が %s（数だが範囲外）なら RangeError。Queue も Worker も作らない", (_label, value) => {
-    expect(() => make({ completedJobsToKeep: value })).toThrow(RangeError);
-    expect(() => make({ completedJobsToKeep: value })).not.toThrow(TypeError);
-    expect(queueCtorArgs).toHaveLength(0);
-    expect(workerCtorArgs).toHaveLength(0);
-  });
+  ])(
+    "⭐ completedJobsToKeep が %s（数だが範囲外）なら RangeError。Queue も Worker も作らない",
+    (_label, value) => {
+      expect(() => make({ completedJobsToKeep: value })).toThrow(RangeError);
+      expect(() => make({ completedJobsToKeep: value })).not.toThrow(TypeError);
+      expect(queueCtorArgs).toHaveLength(0);
+      expect(workerCtorArgs).toHaveLength(0);
+    },
+  );
 
   it("⭐ completedJobsToKeep の message は ADR 0525 の形", () => {
     expect(() => make({ completedJobsToKeep: -1 })).toThrow(

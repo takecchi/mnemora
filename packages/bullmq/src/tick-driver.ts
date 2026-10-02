@@ -299,7 +299,11 @@ function resolveLockDuration(lockDuration: unknown): number | undefined {
   if (typeof lockDuration !== "number") {
     throw new TypeError(message);
   }
-  if (!Number.isInteger(lockDuration) || lockDuration < 1 || lockDuration > Number.MAX_SAFE_INTEGER) {
+  if (
+    !Number.isInteger(lockDuration) ||
+    lockDuration < 1 ||
+    lockDuration > Number.MAX_SAFE_INTEGER
+  ) {
     throw new RangeError(message);
   }
   return lockDuration;

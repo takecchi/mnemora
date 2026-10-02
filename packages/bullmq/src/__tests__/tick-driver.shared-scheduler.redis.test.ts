@@ -143,5 +143,4 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     expect(counts.completed).toBeLessThanOrEqual(3);
     expect(counts.completed).toBeGreaterThanOrEqual(1);
   });
-
 });
