@@ -99,7 +99,7 @@
 //   `decayFloorSeqAfter`、`findActiveByClaimKey` の `validFrom`・`validUntil`、`InMemoryEventStore.list` の `since`・`until`、
 //   `InMemoryVectorStore.search`・`InMemoryLexicalStore.search` の filter の日時と `decayFloorSeqAfter`（Postgres はクエリの
 //   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
-// - 紀元前4713年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
+// - 紀元前4714年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
 //   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——上の読みの口の日時の条件・`opts.now`・`opts.at`（`EventStore.list`、
 //   `OutboxStore.complete`/`fail`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。`purgeExpiredEvents`・`purgeExpiredRecalls`・
 //   `purgeCompletedJobs` の `olderThan` は、Postgres が下限より前を「0件」で返すので掛けない。
@@ -141,12 +141,12 @@
 //   const relationStore = new InMemoryRelationStore(memoryStore, memoryStore.relations);
 //
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
-// 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4713年より前の日時のうち、行に日時を書く口（`createMemory` の
+// 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4714年より前の日時のうち、行に日時を書く口（`createMemory` の
 // `occurredAt` など。読みの口・`opts.now` は ADR 0500 で揃えた。#1041）、
 // 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
 // 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。
 // ADR 0434 が実測して、Postgres は拒むが fixture は通したままだったもの（`findContestedByClaimKey` の `claimKey` の NUL、
-// `InMemoryLexicalStore.search` の `filter.labels` の NUL、紀元前4713年より前の `opts.now`、`VectorStore.search` の filter の NUL）は、
+// `InMemoryLexicalStore.search` の `filter.labels` の NUL、紀元前4714年より前の `opts.now`、`VectorStore.search` の filter の NUL）は、
 // ADR 0500 で揃えた。`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` を足す式の bigint 溢れは、まだ揃えていない（ADR 0500 の材料）。
 
 export { InMemoryMemoryStore } from "./__fixtures__/in-memory-memory-store.js";
