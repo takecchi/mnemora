@@ -2263,7 +2263,7 @@ export interface MemoryStore {
   /**
    * Issue #372（(B) 第2段。`docs/decisions/`「主張キーの衝突を検出する」ADR、ADR 0185
    * 決定4・ADR 0320 決定7・決定8 の続き）: 「同じ tenant・同じ `subjectId`・同じ claim key
-   * （`claimKeySubject`/`claimKeyPredicate`）・有効期間が重なる・`contentHash` が違う、
+   * （`claimKey.subject`/`claimKey.predicate`。列は `claim_key_subject`/`claim_key_predicate`）・有効期間が重なる・`contentHash` が違う、
    * 他の `active` Memory」を**列と索引だけで**（LLM を一度も呼ばずに）見つける読み取り
    * 専用の口。`idx_memories_claim_key`
    * （`packages/postgres/migrations/0021_memories_claim_key.sql`、ADR 0320 決定7）が
