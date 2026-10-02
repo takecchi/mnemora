@@ -3,6 +3,7 @@ import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { omittingParams } from "./omit-params.js";
 import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
 import {
   TRIGRAM_JAPANESE_QUERY_MAX_CHARS,
@@ -944,20 +945,22 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     // 残らない）。同一トランザクション・同一接続で、設定と本体の SELECT を発行する必要がある
     // ——`db.transaction` はコールバックの間ずっと同じ接続を使うことを drizzle-orm が保証する
     // （`memory-store.ts` の各 `db.transaction` 呼び出しと同じ前提）。
-    return this.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT set_config('pg_trgm.word_similarity_threshold', ${String(threshold)}, true)`,
-      );
-      const select = buildTrigramLexicalSearchSelect(query, {
-        ...opts,
-        threshold,
-        ctxTenantId: ctx.tenantId,
-      });
-      const result = await tx.execute(select);
-      return result.rows.map((row) => {
-        const r = row as unknown as { memory_id: string; coverage: number; rank: number };
-        return { memoryId: r.memory_id, coverage: r.coverage, rank: r.rank };
-      });
-    });
+    return omittingParams(() =>
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('pg_trgm.word_similarity_threshold', ${String(threshold)}, true)`,
+        );
+        const select = buildTrigramLexicalSearchSelect(query, {
+          ...opts,
+          threshold,
+          ctxTenantId: ctx.tenantId,
+        });
+        const result = await tx.execute(select);
+        return result.rows.map((row) => {
+          const r = row as unknown as { memory_id: string; coverage: number; rank: number };
+          return { memoryId: r.memory_id, coverage: r.coverage, rank: r.rank };
+        });
+      }),
+    );
   }
 }
