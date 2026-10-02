@@ -727,8 +727,8 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
   /**
    * `consolidate.test.ts` の `buildRuntimeWithRealClock` と同じ理由——この describe は
    * `tick()` の `claimBatch` を経由するため、outbox 行の `availableAt`
-   * （`FakeOutboxStore.enqueueJob` が `new Date()` ＝実時刻で刻む）より前の固定 clock を
-   * 使うと、`availableAt <= now` が成り立たず1件も claim されない。⟹ ここだけ実時計
+   * （以前の Fake は `enqueueJob` が `new Date()` ＝実時刻で刻んだ。今は `opts.now` に従う。ADR 0555）より前の固定 clock を
+   * 使うと、以前は `availableAt <= now` が成り立たず1件も claim されなかった。⟹ ここだけ実時計
    * （既定の `systemClock`）を使う。
    */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
@@ -1238,8 +1238,8 @@ describe("buildReflectedMemory（純関数） — validFrom/validUntil は eligi
  * describe 参照）ため、種1件だけで LLM 呼び出しの直前まで到達する。
  *
  * `tick()` を経由するため、`consolidate.test.ts` の `buildRuntimeWithRealClock` と同じ理由
- * （`FakeOutboxStore.enqueueJob` が `availableAt` を実時刻で刻むため、固定 clock だと
- * `availableAt <= now` が成り立たず claim されない）で実時計を使う。
+ * （以前の Fake は `enqueueJob` が `availableAt` を実時刻で刻み、固定 clock だと
+ * `availableAt <= now` が成り立たず claim されなかった。今は `opts.now` に従う（ADR 0555）が組み替えていない）で実時計を使う。
  */
 describe("runtime.tick — reflect ジョブで LLM が実際に失敗すると、tick は failed に数える（Issue #849 / ADR 0157 決定2 追記）", () => {
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
