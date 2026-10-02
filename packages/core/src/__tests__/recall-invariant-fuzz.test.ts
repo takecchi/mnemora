@@ -19,6 +19,8 @@ const FIELDS_SEEDS = Number(process.env.RECALL_FUZZ_FIELDS_SEEDS ?? 20);
 // ADR 0494: relationStore をつなぐ profile と、引数を変形する profile。
 const RELATIONS_SEEDS = Number(process.env.RECALL_FUZZ_RELATIONS_SEEDS ?? 20);
 const ARG_SEEDS = Number(process.env.RECALL_FUZZ_ARG_SEEDS ?? 20);
+// ADR 0509: `channels`（`ann`／`lexical` の組と `text`）を振る profile。
+const CHANNELS_SEEDS = Number(process.env.RECALL_FUZZ_CHANNELS_SEEDS ?? 20);
 
 const fakeBackend: FuzzBackend = {
   // I9: Fake の id はモジュール単位の続き番号で振られるので、実行ごとに読み直して揃える。
@@ -62,4 +64,14 @@ describe("recall の不変条件（シードつきのランダムな操作列、
       expect(report).toBe("");
     }, 600_000);
   }
+
+  it(`channels: ${CHANNELS_SEEDS} シード × ${LEN} 操作で、I1〜I12・I16 の違反が無い（\`channels\` の組と語彙の \`text\`、ADR 0509）`, async () => {
+    const report = await fuzzSeeds(fakeBackend, {
+      seeds: CHANNELS_SEEDS,
+      len: LEN,
+      checkDeterminism: true,
+      profile: "channels",
+    });
+    expect(report).toBe("");
+  }, 600_000);
 });
