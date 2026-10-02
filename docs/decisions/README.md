@@ -530,6 +530,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
 | [0513](./0513-lexical-match-fixtures-aligned-to-postgres.md) | 語彙検索の fixture を Postgres に揃える（core の Fake は部分一致をやめて語の一致に、testkit の InMemory は `PROJ-12` を空白区切りの 1 語として数える） | 採用 (2026-10) |
 | [0515](./0515-superseded-by-remaining-checks.md) | `supersededById` の残りの断り（`resolveContestedPair` の対の外の `forgotten`、`updateStatus*` の `superseded` 以外への付与） | 採用 (2026-10) |
+| [0516](./0516-omit-params-trigram-outbox-tenant-settings-stores.md) | `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0517](./0517-blank-title-is-not-prefixed-when-extract-title.md) | `extractTitle: true` のとき、空白だけの `document.title` を本文の前置きにしない（断らず、無視する） | 採用 (2026-10) |
 | [0518](./0518-status-conflict-error-purged-row-doc.md) | `MemoryStatusConflictError` の TSDoc に、purge 済みの行では `expectedStatus` と `observedStatus` が両方とも `"forgotten"` になることを書く（文書だけ） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
@@ -547,8 +548,10 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0532](./0532-tick-job-sources-lowercase.md) | 穴探し — ADR 0527「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブでも、`created` の `meta.sources` は小文字（割れなし。大文字の id がジョブに入る入口は無い。歯を足した） | 採用 (2026-10) |
 | [0533](./0533-doc-code-drift-sweep-0526-0527.md) | 文書とコードのずれを横に掃く（第4弾の1回目）— ADR 0526・0527 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0534](./0534-changelog-reconcile-after-v1-2-0-tag.md) | CHANGELOG と migration-v1 の帳尻 — `v1.2.0` の tag より後に着地した #1615（ADR 0521）・#1616（ADR 0525）の項目を `[1.3.0]` 側へ移し、`[1.3.0]` の冒頭の「まだ何も棚卸ししていない」を直す | 採用 (2026-10) |
+| [0535](./0535-doc-code-drift-sweep-0530.md) | 文書とコードのずれを横に掃く（第5弾の1回目）— ADR 0530 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0536](./0536-parity-inventory-and-activity-clock.md) | 穴探し — 公開メソッドごとの「3者（Fake・InMemory・Postgres）を突き合わせる歯」の棚卸しと、その1つ目（活動時計 `decay_clock = "activity"` の経路。3者一致、割れは見つからなかった） | 採用 (2026-10) |
 | [0537](./0537-adr-index-rejects-malformed-adr-filename.md) | ADR 索引の生成器は、番号で始まるのに ADR のファイル名の形から外れた `.md` を、無視せず例外で落とす | 採用 (2026-10) |
+| [0538](./0538-retention-and-purge-parity.md) | 穴探し — 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）を3者（Fake・InMemory・Postgres）で突き合わせる。Fake の `events_purged` の `meta` だけ、日時が `Date` のままで割れていた（直した） | 採用 (2026-10) |
 | [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
 | [0546](./0546-conformance-suite-adds-round31-promises.md) | conformance suite に約束を足す——ADR 0458 の A2・A3・A10・PC6 と、`embed` の重複件数（オーナーの判断が出る前に用意した Draft） | 採用 (2026-10) |
