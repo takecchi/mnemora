@@ -95,6 +95,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`reextract`・`consolidate`・`reflect` が、LLM を待つ間に元の記憶が `contested`（`reextract` はさらに、訂正の解決で負けた `superseded`）になっていたら、書かずに打ち切る**（[ADR 0544](./docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)、`@mnemora/core`。🟡。[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) の負債1・[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md) の部分成功・[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md) の負債1・5 を置き換える）。
+
+  以前は、待つ間に訂正の対（`contested`）に入った記憶の本文から作った言い換え・統合先・内省が `active` で書かれていた。いまは、LLM の前の門と同じ判定を LLM の後にもう一度当てる。公開の型は増やしていない。
+  - **見え方が変わるもの**: 待つ間に `contested` になった呼び出しの結果。`reextract` は `extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に `status_not_active`（`status` は `contested` か `superseded`）、`consolidate`・`reflect` は `outcome: "aborted_source_status_changed"`（`observedStatus: "contested"`）。以前はどれも成功していた。待つ間に何も変わらなければ従来どおり。
+  - **変えなかったこと**: `archived`（`reextract` は LLM の前の門も通す。`consolidate`・`reflect` は ADR 0420 の部分成功のまま）。世代の往復（`X → Y → X`）の扱い（ADR 0454 負債6）。`MemoryStore` の引数・例外。読み直しと書き込みの間の窓は `contested` についてはまだ残る（ADR 0544 負債1）。
+
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
 
   `upsert`・`search`・`searchMany`・`delete`・`getVectors`・`deleteAcrossSpaces`・`eraseTenant` が投げる例外の `message`（と `stack`・`cause` の連鎖）の `params:` より後ろを、`Runtime` と同じ形（`(omitted by mnemora, N chars)`）に落とす。`searchMany` は 1 文に最大 16384 件のベクトルが params に載っていた。例外は新しく作らず、その場で書き換えるので、`kind`・`name`・`code`・`cause` は残る。
