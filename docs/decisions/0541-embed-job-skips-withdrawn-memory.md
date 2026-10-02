@@ -35,7 +35,7 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 | 経路 | provider | forgotten・purged の記憶の本文を渡すか | 直したか |
 |---|---|---|---|
 | `tick` の `embed` ジョブ（`processEmbedJob`） | embedding | **渡していた** | **直した（この ADR）** |
-| `reembed`（`requeueEmbedJobs`）で積み直したジョブ | embedding（上の経路） | 同じ経路。`embeddingStatus` だけで選ぶので forgotten も積まれるが、走らせるとき上の判定で止まる | 上で止まる（積み直し自体は変えていない。材料1） |
+| `reembed`（`requeueEmbedJobs`）で積み直したジョブ | embedding（上の経路） | 積まれない。3実装とも `status` が `active`・`contested` の記憶だけを選ぶ（forgotten・purge 済みは選ばれない）【現物・実測。ADR 0542】 | 不要（⚠ 訂正: 当初は「`embeddingStatus` だけで選ぶので forgotten も積まれる」と書いていたが、現物の読み違いだった。材料1を見ること） |
 | `recall` のクエリ埋め込み（`recall-runtime.ts`） | embedding | 渡さない（クエリの文字列。記憶の本文ではない） | 不要 |
 | `consolidate`（`memoryIds`・`seedMemoryId`・`query`） | LLM | 渡さない。forgotten・purged の元は `status_not_active` で材料から外れ、prompt に載らない。種が forgotten・purged なら LLM を呼ばない【実測】 | 不要（歯で今の振る舞いを縛った） |
 | `reflect`（同上） | LLM | 同上 | 不要（同上） |
@@ -68,7 +68,7 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 
 ## 材料（直していない）
 
-1. **`reembed` が forgotten・purged の記憶を積み直す**: 選ぶのは `embeddingStatus` だけで、status では絞らない。積み直されても走らせるとき止まる（この ADR）ので送信は起きないが、無駄なジョブが積まれる。選ぶ側で除くと、`reembed` の対象が変わる（公開の振る舞い）。オーナーの領分。
+1. ~~**`reembed` が forgotten・purged の記憶を積み直す**~~ ⚠ **訂正（2026-10-02）: 事実と違った。** 当初は「選ぶのは `embeddingStatus` だけで、status では絞らない」と書いたが、現物の読み違いだった。`reembed` が選ぶのは3実装とも `status` が `active`・`contested` の記憶だけで（Postgres は `buildRequeueEmbedTargetSelect` の `status IN ('active', 'contested')`、InMemory・Fake は同じ述語）、forgotten・purge 済みの記憶のジョブは元から積まれない。ADR 0542（PR #1645。この ADR を書いた時点では未マージ）が実測と歯で確かめた。番号は、他の ADR が材料2・3を番号で指すので詰めずに残す。
 2. **窓**: `get` の後・provider を呼ぶ前に forget されると本文が送られる。塞ぐなら、provider 呼び出しを forget と直列にする（記憶ごとのロック）か、送信後に forget を検出して通知する形になるが、どちらも大きな設計で、送信は取り消せない。
 3. **`consolidate`・`reflect` の同じ窓**: 材料の一覧を `get` で読んでから LLM を呼ぶまでの間に forget されると、本文が prompt に載る（書く前の読み直し〔ADR 0420〕は LLM の後なので、送信は防げない）。新しい断りにはならないが、大きな設計になる。
 4. 問28の ✕ 側（残った行の遡っての掃除）。
@@ -82,7 +82,7 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 
 ## 引き受けた負債
 
-材料1〜3。
+材料2・3（材料1は訂正で消えた）。
 
 ## これが覆るとしたら
 
