@@ -5,7 +5,7 @@
 
 クローン miku の指示で、マネージャー mgr-b9b6a409 とその委譲先（担い手）が書いた。
 
-**照合の基準は main `21fda201`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519 の6つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
+**照合の基準は main `e987150b`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）・0545（#1653、`e987150b`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519・0545 の7つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
 
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手の判定、【未確認】は確かめていないこと。
 
@@ -56,14 +56,14 @@
 
 ## まとめ
 
-- **直したもの**: 0515・0538・0535 の分で文書を直した（0516・0539・0519 の分に文書のずれは無かった）。0538 は `docs/memory-model.md` 1964 行目に Fake の1文、0535 は CHANGELOG `[1.3.0]` と migration-v1（v1.2.0 → 次の版の節）の ADR 0504 の項に、ADR 0516 で落とす store を足した（追い足しの節）。0515 の分は: `docs/memory-model.md`（ADR 0503 の追記の直後に、ADR 0515 の2つの断りを足した）と、`packages/core/src/interfaces/memory-store.ts` の TSDoc 2語句（`updateStatus` の「`supersededById` が無くてよい」と `resolveContestedPair` の「対の外の記憶を指す `superseded` は断らない」を、0515 のあとの約束と矛盾しない形に）。0516 の分に文書のずれは無かった。型・実装・振る舞いは変えていない。
+- **直したもの**: 0515・0538・0535 の分で文書を直した（0516・0539・0519・0545 の分に文書のずれは無かった）。0538 は `docs/memory-model.md` 1964 行目に Fake の1文、0535 は CHANGELOG `[1.3.0]` と migration-v1（v1.2.0 → 次の版の節）の ADR 0504 の項に、ADR 0516 で落とす store を足した（追い足しの節）。0515 の分は: `docs/memory-model.md`（ADR 0503 の追記の直後に、ADR 0515 の2つの断りを足した）と、`packages/core/src/interfaces/memory-store.ts` の TSDoc 2語句（`updateStatus` の「`supersededById` が無くてよい」と `resolveContestedPair` の「対の外の記憶を指す `superseded` は断らない」を、0515 のあとの約束と矛盾しない形に）。0516 の分に文書のずれは無かった。型・実装・振る舞いは変えていない。
 - **コードの側を直すべき食い違い（材料）**:
   1. 0515 の分: core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）が、`superseded` 以外への `supersededById`・`resolveContestedPair` の対の外の `forgotten`・ADR 0503 の `superseded` の形の検査（無い・自己置換・循環）を断らない。Postgres・InMemory と挙動が割れる。ADR 0515 自身が負債に書いていた件の確認。
   2. 0516 の分: `trigram-lexical-store.ts` の `search` 以外の DB 呼び出し（`create`・索引づくり）に `omittingParams` が無い。約束の違反ではなく、ADR 0516 の負債の一覧への補足。
   - どちらも別の PR で直す（担当はクローンが配る）。
 - **照らした範囲**【現物】: 上の各節に書いた。追い足しの分（0538・0535）は、`runtime-fakes.ts` の `purgeExpiredEventsSync`、Postgres・InMemory の `events_purged` の書き手、`memory-store.ts`（interface）の `purgeExpiredEvents` の TSDoc、適合スイートの A10、`docs/conformance.md`・`docs/memory-model.md`、`runtime.ts` の `already_purged` の TSDoc と呼び出し、`query-check.ts` と InMemory の `seqSumOverflowsBigint`、`event-store.ts`・`relation-store.ts`・`memory-store.ts` の `omittingParams` の有無、CHANGELOG `[1.3.0]` 97・112 行目、migration-v1 の項目60・2810 行目。読んだファイルは、`packages/postgres/src/memory-store.ts`（`assertSupersededByShape` の呼び出し・`resolveContestedPair` の先取り）、`outbox-store.ts`・`tenant-settings-store.ts`・`trigram-lexical-store.ts`・`event-store.ts`・`relation-store.ts`・`omit-params.ts`、`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`、`packages/core/src/__tests__/runtime-fakes.ts`、`packages/core/src/interfaces/memory-store.ts`・`tenant-settings-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `*conformance*` 全体の grep、`error-message-omits-params.postgres.test.ts` の構成、ルートと各パッケージの README、`docs/*.md`（`memory-model.md`・`architecture.md`・`release-notes-v1.1.0.md`・`release-notes-v1.2.0.md`）、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`（項目59・61 と 2803 行目以降）。grep の語は `supersededById`・`forbidWhenNotSuperseded`・`assertSupersededByShape`・`COALESCE`・`omittingParams`・`omitParams`・`params:`・`omitted by mnemora`・`updateStatusWithEvent(`・`this.db`。
 - **走らせたコマンド**: `git fetch`・`git diff`・`grep`・`node scripts/generate-adr-index.mjs`（差分なし）。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは通していない【未確認】（読んで突き合わせた）。
-- **引き受けた負債**: この ADR の結果は `main` の `21fda201` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
+- **引き受けた負債**: この ADR の結果は `main` の `e987150b` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文で `supersededById` の扱いや store の例外の message を言い換えた文）の古さが見つかったとき。Fake を直す PR で Fake の振る舞いが割れていないと分かったとき（材料1が消える）。
 
 ## 追い足し（基準 main `d480131c`、ADR 0538・0535 の分）
@@ -141,3 +141,14 @@
 - **直したもの**: なし（文書の側にずれは無かった）。
 - **コードの側を直すべき食い違い**: 見つからなかった。ADR 0519 が残した材料は、いまも成り立つ【現物】: 負債1（`Runtime.observe({ kind: 'memory_usage' })` 経由の purge 済みへの強化を InMemory で測っていない。TSDoc も同じく書いている）、負債2（Postgres の単体 `reinforce` を弾く変異を撃っていない）。測っていない範囲（別テナントの purge 済み、`halfLifeRecalls` を持つ記憶への `nowSeq`）も変わらない。これに「Fake は読んだだけ」を加える。
 - **【未確認】**: 0519 の歯（8 本。DB が要る）と変異試験を走らせていない。Fake の `reinforce` 系を実際に purge 済みの記憶へ呼んでいない。
+
+## 追い足し（基準 main `e987150b`、ADR 0545 の分）
+
+0545（#1653、`e987150b`）が main に入ったので掃いた（`git diff 21fda201 e987150b`。この枝は `origin/main` を merge した。ADR 索引だけが衝突し、`node scripts/generate-adr-index.mjs` で作り直した）。この節はマネージャーが書いた。
+
+- **0545 の中身**【現物】: 差は ADR 0545 と索引の1行だけ（`docs/decisions/0545-doc-code-drift-sweep-0517.md`・`docs/decisions/README.md`）。0545 は文書の横掃きで、0517・0511・0518 の分に文書のずれが無かったため、コード・TSDoc・CHANGELOG・migration-v1・README・`docs/*.md` のどれも変えていない。
+- **3実装・文書の突き合わせ**: 0545 は振る舞いも文書も変えていないので、照らす新しい約束は無い。0545 の各節の結論（0517・0511・0518 の文書は実装と一致）は、その後の 0515・0516・0538・0535・0539・0519 の差（この ADR の上の節）が 0517・0511・0518 の触った所（`observation-text.ts`、`labels` の行ロック、`MemoryStatusConflictError` の TSDoc）に届いていないので、今も成り立つ【判断】（差のファイル一覧で見た。行ごとには当て直していない）。
+- **0545 が残した材料**【現物】: core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）の `updateStatus`（1351 行目）・`updateStatusWithEvent`（1389 行目）の CAS は、main `e987150b` でも `memory.status !== opts.expectedStatus` だけで `purgedAt` を見ない。まだ残っている。これを直す PR は #1656（ADR 0549、Draft、head `ce6dc300`）として開いている（中身は読んでいない）。
+- **直したもの**: なし。
+- **コードの側を直すべき食い違い**: 新しいものは無い。上の Fake の件は 0545 の材料のままで、#1656 が受けている。
+- **【未確認】**: #1656 の中身と、それが 0545 の材料をすべて（`supersedeWithNewMemories` の2か所を含めて）覆うか。
