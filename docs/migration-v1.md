@@ -2552,7 +2552,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 - 群で、`forgotten` な記憶に置き換えたかったなら、置き換え先を `active` な記憶にする。
 - 自前の `MemoryStore` 実装は、適合テストが検査しないので、必要なら同じ検査を自前で足す。
 
-**確かめたこと**: 2実装に同じ入力を流す歯と、InMemory だけの DB 無しの歯を足した。陽性対照（勝者を指す `superseded`・`both_active`・群の外の `active` を指す `superseded` など）は通る。**【未】Postgres 側の実装は、PR #1610 のマージ後。**
+**確かめたこと**: 2実装に同じ入力を流す歯と、InMemory だけの DB 無しの歯を足した。陽性対照（勝者を指す `superseded`・`both_active`・群の外の `active` を指す `superseded` など）は通る。Postgres 側も同じ歯で緑（変異も測った。ADR 0503）。
 
 **DB マイグレーション**: 要らない。直す前に書かれた `superseded_by_id` が NULL の `superseded` の行（戻せない敗者）や、自己参照の行を調べる読み取りの SQL は ADR 0503 には載せていない（【未】必要なら足す）。**既存の行は書き換えない**。
 

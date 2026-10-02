@@ -1,6 +1,6 @@
 # ADR 0503: `supersededById` の約束を壊す入力を断る（`resolveContestedPair`・`resolveContestedGroup`・`updateStatus`・`updateStatusWithEvent`）
 
-- **状態**: 採用 (2026-10)（⚠ 下書き。Postgres 側の実装は [PR #1610](https://github.com/takecchi/mnemora/pull/1610)〔ADR 0499〕のマージ後。「測ったこと」の【未】を見ること）
+- **状態**: 採用 (2026-10)
 - **日付**: 2026-10-02
 
 クローン miku の決定（2026-10-02）。担い手が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
@@ -21,7 +21,7 @@
      - 循環（同じ呼び出しで `superseded` になるメンバーの `supersededById` の鎖が輪になる。2者の互い、群の A→B→A など）: `<口>: supersededById must not form a cycle among the members`。
      - 群で、群の外の `forgotten` な記憶を指す: `resolveContestedGroup: members[i].supersededById must not be a forgotten memory outside the group`。
   2. **位置**: 形だけで決まる検査（欠落・自己・active への付与・循環）は、`status` の範囲の検査（ADR 0499）のあと、id の存在確認・CAS より前。`updateStatus*` では `contested` の検査のあと、対象の存在確認より前。群の外の `forgotten` は状態を読むので、テナントの照合（ADR 0439）のあと、書く前。
-  3. **自己置換は id の大文字小文字を畳んで比べる**（Postgres の入口は uuid を小文字に畳む。【未】実装済みの Postgres 側で確かめる）。InMemory は綴りどおり。
+  3. **自己置換は id の大文字小文字を畳んで比べる**（Postgres の入口は uuid を小文字に畳む。【実測】大文字の id で自己置換・循環を渡す歯が両方赤→緑）。InMemory は綴りどおり。
   4. **正当な用途は断らない**（陽性対照を歯にした）: 勝者を指す `superseded`、`both_active`、群の外の `active` な記憶を指す `superseded`（2者版・群版）、群のメンバーが別のメンバーに置き換えられる鎖（輪にならない限り）、`updateStatus*` で別の記憶を指す `superseded`、`supersededById` なしの `superseded` 以外の status。
   5. **「群の外の `forgotten` を指す」を断ってよいかを確かめた**【判断】: TSDoc（`resolveContestedGroup` の契約・`restoreSuperseded` の doc）に、書き込み時に `forgotten` な記憶を置き換えた側にする用途は書かれていない。`restoreSuperseded` が「置き換えた側が `forgotten` でも群を戻す」のは、書いたあとで置き換えた側が忘れられた場合の話で、この検査（書く時点で既に `forgotten`）とは別。ADR 0150・0381・0421 にも、`forgotten` を勝者にする記述は無い。正当な用途は見つからなかったので断る。**群の外の `archived`・`superseded`・`contested` を指すのは、断らない**（依頼の範囲外。置き換え先がそれらのとき、それは正当かもしれない）。
   6. **`Runtime` が常に正しく渡していることを確かめた**【現物】:
@@ -55,6 +55,6 @@
   - `Runtime` が `supersededById` を省略する経路を足す設計変更があれば、その経路は断られて壊れる。
 
 - **測ったこと**（【実測】。手元の PostgreSQL 17。件数は書かない）:
-  - **testkit の InMemory（DB 無し）**: 歯を書いてから直した。直す前は新しい歯がすべて赤（陽性対照は緑）、直した後はすべて緑。変異（InMemory）: 循環の検査を外す → 循環の2件が赤。群の外の `forgotten` の検査を外す → その1件が赤。自己置換の検査を外す → 自己置換の4件が赤。欠落の検査を外す → 欠落の4件が赤。`active` への付与の検査を外す → 2件が赤。**やりすぎ**: 群の外の記憶を何でも断る → 陽性対照が赤、循環の検査が鎖の1歩目から断る → 陽性対照が赤。戻して緑。
-  - **Postgres の歯**（InMemory と同じ入力）: 実装の前の赤を実測した。**【未】Postgres の実装（#1610 のマージ後）と、その変異・既存の歯への影響は、まだ測っていない。**
-  - 既存の歯への影響: testkit の `in-memory-fixtures.conformance.test.ts`・InMemory を使う名指しの歯を走らせ、赤になった conformance の `updateStatus*` の歯と tsdoc-edges の歯を直した（上の8）。Postgres 側の既存の歯（`store-boundary-diff` の `updateStatus(self,superseded,{supersededById:self})` など）は、実装後に走らせる。
+  - **testkit の InMemory（DB 無し）**: 歯を書いてから直した。直す前は新しい歯がすべて赤（陽性対照は緑）、直した後はすべて緑。変異（InMemory）: 循環の検査を外す → 循環の歯が赤。群の外の `forgotten` の検査を外す → 赤。自己置換の検査を外す → 自己置換の歯が赤。欠落の検査を外す → 欠落の歯が赤。`active` への付与の検査を外す → 赤。**やりすぎ**: 群の外の記憶を何でも断る → 陽性対照が赤、循環の検査が鎖の1歩目から断る → 陽性対照が赤。戻して緑。
+  - **Postgres の歯**（InMemory と同じ入力。`store-superseded-by-checks.postgres.test.ts`）: 実装の前は Postgres 側が全部赤（InMemory 側は緑）、実装後は全部緑。変異（Postgres）: 循環の検査を外す → 赤。自己置換の検査を外す → 赤。大文字小文字を畳まない比較にする → 大文字の自己置換の1件が赤。欠落の検査を外す → 赤。`active` への付与の検査を外す → 赤。群の外の `forgotten` の SELECT を外す → 赤。**やりすぎ**: 群の外の記憶を何でも断る → 陽性対照が赤、循環の検査が1歩目から断る → 赤（陽性対照・群の外の forgotten の歯を含む）、`superseded` に `supersededById` があれば何でも断る → 赤。戻して緑。
+  - 既存の歯への影響: testkit の `in-memory-fixtures.conformance`（緑）と InMemory を使う名指しの歯を走らせ、赤になった conformance の `updateStatus*` の歯と tsdoc-edges の歯を直した（上の8）。Postgres 側は、`supersededById` を渡す・`updateStatus*`／`resolveContested*` を呼ぶ既存の歯を名指しで走らせ、すべて緑（`store-boundary-diff` の `updateStatus(self,superseded,{supersededById:self})` は、2実装とも `RangeError` で揃い、差分なし）。`conformance.postgres` も緑。全部は走らせていない。
