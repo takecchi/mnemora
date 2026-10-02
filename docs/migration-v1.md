@@ -2413,6 +2413,29 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。保存済みの記憶は変わらない（以前に継承された値で作られた記憶が在っても、書き換えない）。
 
+### 55. 差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた（`@mnemora/core`）
+
+[ADR 0497](./decisions/0497-recall-rejects-broken-token-counter.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。材料は [ADR 0483](./decisions/0483-token-counter-broken-values.md)）。
+
+⚠ **未リリース**。**番号は 55 である**——項目53 の続き（54 はマネージャーの採番で別の変更が使う番号。番号が衝突したら merge のときに振り直すこと）。
+
+**何が変わったか**: `recall()` は、利用者が `RuntimeDeps.tokenCounter` に渡した `TokenCounter` の `count()` の戻りごとに、`tokens` が有限で 0 以上の number かを確かめる。違えば `RangeError`（message は `NaN`・`Infinity`・`-Infinity`・`a negative number`・`a non-number (...)` のどれか。入力テキストは載せない）。最初の壊れた値で止まる。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた呼び出しが、新しく例外になる**。項目21・23・24・27・34・49・51・52 と同じ扱い。以前は、`NaN`・負の数を返す counter では `maxMemoryTokens` が黙って外れて全件が返り、`Infinity` では全件が落ちて、`outputValidation: "off"` では何も知らされなかった（ADR 0483 の実測）。
+
+**誰が影響を受けるか**: 自前の `TokenCounter` を `createRuntime({ tokenCounter })` に渡していて、それが `NaN`・負の数・`Infinity`・number でない値を返す（または `undefined` を返す）ことがある人だけ。既定の `heuristicTokenCounter` を使う人、`count()` が常に有限で 0 以上の数を返す人は、何も変わらない。小数を返す counter も変わらない。
+
+**どう直すか**:
+- 外部のトークナイザ（`tiktoken` 系など）の結果を返しているなら、`count()` の中で `Math.max(0, n)` にし、`Number.isFinite(n)` でなければ**自分で**扱いを決める（例外にする、または `heuristicTokenCounter.count(text)` に落とす。落とすなら `counter: "heuristic"` を返して、実測の顔をしないこと）。
+- 「トークナイザが失敗したら `NaN` を返して予算を外す」ことに頼っていたなら、その挙動は無くなった。予算を外したいなら、`budget` を渡さないこと（それでも `usage` の計測で `count()` は呼ばれるので、戻り値は有限で 0 以上でなければならない）。
+- 例外を投げる counter の扱いは変わらない（包まずそのまま `recall()` の失敗になる）。
+- 壊れた counter が本番で動いていたかを確かめるには、`count()` の戻りを一時的に包み、有限で 0 以上でない値をログに出す（入力テキストは出さないこと）。
+
+**DB マイグレーション**: 要らない。
+
+⟹ **この項目（ADR 0497）も、この節が数える破壊的変更である。**
+⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
 ### 56. provider のコンストラクタと `createBullmqTickDriver` が、壊れた数値オプションを構築時に例外で断るようになった（`@mnemora/bullmq`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）
 
 [ADR 0498](./decisions/0498-constructor-config-checks.md)（クローン miku の決定。担い手が書いた。オーナーではない。[ADR 0477](./decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) の案1・[ADR 0467](./decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) の面C。オーナーが v1.X.0 での破壊的変更を許した）。
