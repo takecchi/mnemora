@@ -55,11 +55,13 @@
  * どれも I/O を持たない。ファイルの読み書き・`git mv`・`git diff` の実行は
  * 呼び出し側（`scripts/adr-renumber.mjs`）が行う。
  */
+import { ADR_FILENAME_RE } from "./generate-adr-index-lib.mjs";
+
 /**
- * ADR ファイル名から4桁番号と slug を取り出す正規表現
- * （`generate-adr-index-lib.mjs` の `isAdrFilename` が使う形と同じ）。
+ * ADR ファイル名から4桁番号と slug を取り出す正規表現。
+ * `generate-adr-index-lib.mjs` の `ADR_FILENAME_RE` をそのまま使う（ADR 0540。別々に持つとずれていく）。
  */
-const FILENAME_RE = /^(\d{4})-([a-z0-9][a-z0-9-]*)\.md$/;
+const FILENAME_RE = ADR_FILENAME_RE;
 
 /**
  * ADR ファイル名を `{ number, slug }` に分解する。ADR ファイルの形でなければ
