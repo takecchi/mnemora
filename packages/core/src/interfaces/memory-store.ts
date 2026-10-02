@@ -670,8 +670,9 @@ export interface MemoryStore {
    *   `kind: "malformed_identifier"`。正規化はしない）。`PostgresMemoryStore` と `InMemoryMemoryStore` は同じ判定
    *   （`assertWellFormedIdentifier`）を入口で掛ける。**以前は**、`PostgresMemoryStore` は U+FFFD に置き換えて保存し、
    *   `InMemoryMemoryStore` は入力をそのまま保持していた。
-   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、本文の欄:
-   *   例外を投げず、入力をそのまま保持する（本文の欄の話。`FakeMemoryStore` も、識別子の欄 `subjectId`・`externalId` の孤立サロゲート・NUL は `MalformedIdentifierError` で断る——ADR 0493。core の `Runtime` の入口も先に断る）。
+   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、`jsonb` 列の欄（`payload`・`attributes`）:
+   *   例外を投げず、入力をそのまま保持する。⭐ `text` 列の欄（`kind` など）は、[ADR 0543](../../../../docs/decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md) から
+   *   U+FFFD に置き換える（`PostgresMemoryStore` と同じ）（本文の欄の話。`FakeMemoryStore` も、識別子の欄 `subjectId`・`externalId` の孤立サロゲート・NUL は `MalformedIdentifierError` で断る——ADR 0493。core の `Runtime` の入口も先に断る）。
    *
    * `createObservationWithOutbox` も同じである。今の振る舞いは
    * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
@@ -749,13 +750,16 @@ export interface MemoryStore {
    * - `PostgresMemoryStore`、`jsonb` 列の欄（`attributes`/`provenance`）: **例外を投げる**
    *   （`invalid input syntax for type json`）。`JSON.stringify` が孤立サロゲートを
    *   `\ud800` のエスケープにし、Postgres の `jsonb` がそれを受け付けないため。
-   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の
-   *   `FakeMemoryStore`: どの欄でも例外を投げず、入力をそのまま保持する（JS の文字列は
-   *   UTF-16 コードユニット列であり、孤立サロゲートを持つことに制約が無いため）。
+   * - ⭐ `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、`text` 列に当たる欄
+   *   （`content`/`digest`/`tags`/`contentHash`/`extractorVersion`/`claimKey` の主語と述語）: **Postgres と同じく U+FFFD に置き換えて保存する**
+   *   （[ADR 0543](../../../../docs/decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。以前は、入力をそのまま保持していた）。
+   *   読み取りの引数（`findActiveByClaimKey` の `claimKey`、`listBySourceObservation` の `extractorVersion`、`labels` の絞りなど）も同じく置き換わって比べられる。
+   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、`jsonb` 列の欄（`attributes`/`provenance`）:
+   *   例外を投げず、入力をそのまま保持する（Postgres は例外を投げる。ADR 0543 の対象外で、この差は残っている）。
    *
    * ⟹ 呼び出し側は「成功した」ことだけでは、書き込んだ値と読み返した値が一致するとは
-   * 限らない——Postgres 経由では、`text` 列の欄の孤立サロゲートは静かに書き換わり、
-   * `jsonb` 列の欄では書き込みそのものが失敗する。
+   * 限らない——どの実装でも、`text` 列の欄の孤立サロゲートは静かに書き換わり、
+   * Postgres では `jsonb` 列の欄で書き込みそのものが失敗する。
    *
    * ⚠ **`input.provenance` の中身は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と
    * `@mnemora/testkit` の fixture へ同じ入力を当てて確かめた）。型（`Provenance`、`provenance.ts`）の欄が欠けている・
@@ -2716,8 +2720,9 @@ export interface MemoryStore {
    * （`@mnemora/postgres`・testkit とも。`tags` の要素と同じく完全一致の語彙で、正規化もしない。
    * `docs/memory-model.md` §8 の 2026-09-27 追記）。`@mnemora/postgres` では、NUL を含む名前は
    * 例外になり、孤立サロゲートは U+FFFD に置き換わり、索引の1行の上限を超える長い名前は例外に
-   * なる（`Ctx` の doc、Issue #1074）。testkit は置き換えも長さの上限も持たず、そのまま受け入れる
-   * （NUL を Postgres に揃えて拒むのは PR #1135）。
+   * なる（`Ctx` の doc、Issue #1074）。testkit は長さの上限を持たず、そのまま受け入れる
+   * （NUL を Postgres に揃えて拒むのは PR #1135）。孤立サロゲートの U+FFFD への置き換えは、testkit も同じにした
+   * （[ADR 0543](../../../../docs/decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)）。
    */
   registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
 

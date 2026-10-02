@@ -46,11 +46,10 @@ export interface Round31Flags {
   /** この実装が `opts.abortIfForgotten` を実装している（IM は実装せず、渡されても無視する）。 */
   implementsAbortIfForgotten: boolean;
   /**
-   * 孤立サロゲートを Memory の本文の欄（content/digest/tags）へ渡したときの今の振る舞い（`createMemory` の TSDoc）。
-   * `"replace"`: U+FFFD に置き換えて保存する（PG）。`"keep"`: そのまま保持する（IM）。
-   * jsonb 列の欄（attributes/provenance）は PG だけが例外にする（`jsonbRejectsLoneSurrogate`）。
+   * jsonb 列の欄（attributes/provenance）に孤立サロゲートを渡したときに例外を投げる（PG）。IM は投げずにそのまま保持する。
+   * ⚠ ADR 0543 で、`text` 列の欄（content/digest/tags）は全実装が U+FFFD に置き換える形に揃えた——以前ここにあった
+   * フラグ `loneSurrogateText`（`"replace"` か `"keep"`）は無くなった。jsonb の欄の差は ADR 0543 の対象外で、今も残る。
    */
-  loneSurrogateText: "replace" | "keep";
   jsonbRejectsLoneSurrogate: boolean;
   /** 索引の1行の上限を超える claimKey を断る（PG: `ClaimKeyIndexLimitError`）。IM はどの長さも受け入れて投げない。 */
   claimKeyIndexLimit: boolean;
@@ -941,15 +940,15 @@ export function describeRound31Teeth(
     );
 
     // ---------------------------------------------------------------- B3 / B4
-    // ⚠ B3・B4 は、インメモリと Postgres の**今の振る舞いの記録であって、約束ではない**（ADR 0458 の材料4）。
-    // 2実装の差（`flags.loneSurrogateText`・`flags.jsonbRejectsLoneSurrogate`・`flags.claimKeyIndexLimit`）を
-    // そのまま縛っている。揃えるかどうかは決めていない（B3 の孤立サロゲートの扱いはオーナーへの問いと重なる）。
-    // 揃えると決まったら、フラグごと書き換えること。
-    it("B3: 孤立サロゲートを本文の欄へ渡したときは、PG は U+FFFD に置換・IM はそのまま保持／jsonb の欄は PG だけが例外（今の振る舞い。createMemory の TSDoc）", async () => {
+    // ⚠ B4 は、インメモリと Postgres の**今の振る舞いの記録であって、約束ではない**（ADR 0458 の材料4）。
+    // 差（`flags.claimKeyIndexLimit`）をそのまま縛っている。B3 のうち `text` 列の欄は、ADR 0543 で
+    // 「全実装が U+FFFD に置き換える」に揃えた（B3 の歯を書き換えた。全欄・3実装の突き合わせは
+    // `lone-surrogate-fffd-teeth.ts`）。jsonb の欄の差（PG だけが例外）は `flags.jsonbRejectsLoneSurrogate` が今も縛る。
+    it("B3: 孤立サロゲートを本文の欄へ渡したときは、PG・IM とも U+FFFD に置換（ADR 0543。ADR 0458 の旧 B3 は『IM は保持』を縛っていた）／jsonb の欄は PG だけが例外", async () => {
       const { store } = await makeKit();
       const lone = "a\uD800b";
       const m = await mk(store, A, { content: lone, digest: lone, tags: [lone] });
-      const expected = flags.loneSurrogateText === "replace" ? "a\uFFFDb" : lone;
+      const expected = "a\uFFFDb";
       expect(m.content).toBe(expected);
       expect(m.digest).toBe(expected);
       expect(m.tags).toEqual([expected]);

@@ -11,6 +11,7 @@ import {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import { assertQueryBigint, assertQueryDate, assertQueryTimestamptz } from "./query-check.js";
+import { replaceLoneSurrogates } from "./well-formed-text.js";
 
 /**
  * `OutboxStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3）。
@@ -91,13 +92,16 @@ export class InMemoryOutboxStore implements OutboxStore {
     if (opts.claimedBy.includes("\u0000")) {
       throw new Error("claimBatch: claimedBy must not contain NUL characters (U+0000)");
     }
+    // ADR 0543: `claimed_by`（`text`）・`kinds`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わる。
+    const claimedByStored = replaceLoneSurrogates(opts.claimedBy);
+    const kindsFilter = opts.kinds?.map((kind) => replaceLoneSurrogates(kind));
     // リースが切れたとみなす境界時刻。`PostgresOutboxStore` と同じ `<=`（両端含む）。
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.jobs.filter((job) => {
       const claimedAt = job.claimedAt ?? null;
       return (
         job.tenantId === ctx.tenantId &&
-        (opts.kinds === undefined || opts.kinds.includes(job.kind)) &&
+        (kindsFilter === undefined || kindsFilter.includes(job.kind)) &&
         (job.completedAt ?? null) === null &&
         (job.failedAt ?? null) === null &&
         job.availableAt <= opts.now &&
@@ -120,7 +124,7 @@ export class InMemoryOutboxStore implements OutboxStore {
       }
       // Issue #1108: 呼び手の `now` と同じ Date を保存しない。
       job.claimedAt = new Date(opts.now);
-      job.claimedBy = opts.claimedBy;
+      job.claimedBy = claimedByStored;
       job.attempts += 1;
     }
     return claimed.map((job) => structuredClone(job));

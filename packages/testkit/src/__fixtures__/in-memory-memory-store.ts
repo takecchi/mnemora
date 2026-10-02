@@ -58,6 +58,12 @@ import type {
 import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import {
+  replaceLoneSurrogates,
+  replaceLoneSurrogatesInClaimKey,
+  replaceLoneSurrogatesInNewMemory,
+  replaceLoneSurrogatesInNewObservation,
+} from "./well-formed-text.js";
+import {
   assertQueryDate,
   assertQueryTimestamptz,
   assertQueryInteger,
@@ -642,11 +648,9 @@ function assertStorableNewMemory(input: NewMemory): void {
   assertStorableMemoryColumn("digest_source", input.digestSource);
   assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
   assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
-  // 孤立サロゲート（Issue #816、実測）: この関数は検査しない。入力をそのまま
-  // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ
-  // 置換するため異なる値になる。この非対称は現状の契約として
-  // `MemoryStore.createMemory` の interface doc コメントに記録してある
-  // （`packages/core/src/interfaces/memory-store.ts`）。挙動は変えない。
+  // 孤立サロゲート（Issue #816、実測）: この関数は検査しない。`text` 列の欄の孤立サロゲートは、ADR 0543 から
+  // `createMemoryIdempotent` の入口で U+FFFD に置き換えて保存する（`PostgresMemoryStore` と同じ。以前は入力をそのまま保持していた）。
+  // `jsonb` 列の欄（`attributes`・`provenance`）は、今も置き換えも拒みもしない（Postgres は拒む。ADR 0543 の対象外）。
 }
 
 /**
@@ -828,6 +832,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる（ADR 0434）。
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
+    // ADR 0543: `kind`（`text` 列。識別子ではない）の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。
+    input = replaceLoneSurrogatesInNewObservation(input);
     assertObservationHasNoNul("InMemoryMemoryStore", input);
     assertObservationDatesValid("InMemoryMemoryStore", input);
     // Postgres の一意制約は `external_id IS NOT NULL` の行に効く——空文字も鍵である（`null`/`undefined` だけが鍵無し）。
@@ -886,6 +892,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0407: 渡されたら「その名前で claim 済み」（`attempts: 1`）で作る。
     claimedBy?: string,
   ): OutboxJobRecord {
+    // ADR 0543: `outbox.kind`・`outbox.claimed_by` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する。
+    kind = replaceLoneSurrogates(kind);
+    claimedBy = replaceLoneSurrogates(claimedBy);
     const job: OutboxJobRecord = {
       id: nextId("job"),
       tenantId: ctx.tenantId,
@@ -993,6 +1002,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 新しい行を実際に作るとき（冪等の既存の行が無いとき）にだけ、書く前に呼ばれる（ADR 0434）。
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Memory> {
+    // ADR 0543: `text` 列に入る欄の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。冪等の鍵
+    // （`contentHash`・`extractorVersion`）も置き換えた後の値で比べる（Postgres は置き換わった値で一意制約に当たる）。
+    input = replaceLoneSurrogatesInNewMemory(input);
     // ADR 0140: createMemory/createMemoryWithOutbox 共通の入口。PostgresMemoryStore の
     // createMemory と同じ位置（何も書く前）で落とす——冪等衝突の判定より前に見る。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
@@ -1365,6 +1377,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     extractorVersion: string | null,
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    // ADR 0543: 検索語も、Postgres が引数を UTF-8 に変換するときに置き換わる。
+    extractorVersion = replaceLoneSurrogates(extractorVersion);
     // ADR 0434: `extractor_version` は `text` 列。検索語の NUL は Postgres ではクエリの時点で拒まれる。
     // （`observationId` が uuid の形でないとき、Postgres はクエリを発行せずに `[]` を返して NUL を見ない。この
     // fixture の id は uuid の形ではないので、その入力だけは揃えていない。）
@@ -2170,6 +2184,21 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
     // 時点で拒まれる（`22P05`・`22021`）。`scopeAggregate: "skip"` で `digestBand` も無いときだけ、Postgres は
     // 集計も目次帯も引かずにクエリを1本も発行しないので、見ない。
+    // ADR 0543: `labels`・`taxonomyGroupCandidates`（`text[]` の引数）の孤立サロゲートは、Postgres が引数を UTF-8 に変換するときに
+    // U+FFFD に置き換わる。保存側（`tags`）が置き換わっているので、引数側も同じにしないと一致しない。
+    scope = {
+      ...scope,
+      ...(scope.labels === undefined
+        ? {}
+        : { labels: scope.labels.map((label) => replaceLoneSurrogates(label)) }),
+      ...(scope.taxonomyGroupCandidates === undefined
+        ? {}
+        : {
+            taxonomyGroupCandidates: scope.taxonomyGroupCandidates.map((label) =>
+              replaceLoneSurrogates(label),
+            ),
+          }),
+    };
     if (!(opts?.scopeAggregate === "skip" && opts.digestBand === undefined)) {
       assertQueryJsonWithoutNul("aggregateScope", "attributes", scope.attributes);
       for (const label of scope.labels ?? []) {
@@ -2767,6 +2796,11 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: tombstone.digest must not contain NUL characters (U+0000)`,
       );
     }
+    // ADR 0543: 墓石の `content`・`digest` は `text` 列へ書く値。孤立サロゲートは U+FFFD に置き換えて保存する。
+    tombstone = {
+      content: replaceLoneSurrogates(tombstone.content),
+      digest: replaceLoneSurrogates(tombstone.digest),
+    };
     id = normId(id);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
@@ -3399,6 +3433,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
+    // ADR 0543: 検索値（`text` 列の引数）の孤立サロゲートも、Postgres では U+FFFD に置き換わって比べられる。
+    query = { ...query, claimKey: replaceLoneSurrogatesInClaimKey(query.claimKey) };
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
     assertQueryTimestamptz("findActiveByClaimKey", "validFrom", query.validFrom);
     assertQueryTimestamptz("findActiveByClaimKey", "validUntil", query.validUntil);
@@ -3460,6 +3496,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
+    // ADR 0543: `findActiveByClaimKey` と同じ。
+    query = { ...query, claimKey: replaceLoneSurrogatesInClaimKey(query.claimKey) };
     assertQueryTimestamptz("findContestedByClaimKey", "validFrom", query.validFrom);
     assertQueryTimestamptz("findContestedByClaimKey", "validUntil", query.validUntil);
     // ADR 0434 の負債（ADR 0500）: 兄弟の `findActiveByClaimKey` と同じ。`claim_key_subject`・`claim_key_predicate` は `text` 列で、
@@ -3714,6 +3752,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (name.includes("\u0000")) {
       throw new Error(`InMemoryMemoryStore: label name must not contain NUL characters (U+0000)`);
     }
+    // ADR 0543: `labels.name` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する（`tags` の要素と同じ）。
+    name = replaceLoneSurrogates(name);
     const key = this.labelKey(ctx.tenantId, name);
     const existing = this.labels.get(key);
     const registered: LabelSummary = {

@@ -112,6 +112,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **揃えていないもの**: Postgres の text search parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）。ADR 0513 に実測を書いた。
   - 本物の adapter（`@mnemora/postgres`）は変えていない。conformance suite は変えていない。
 
+- **`@mnemora/testkit/fixtures` の `InMemory*` が、`text` 列に入る欄の孤立サロゲート（対をなさない UTF-16 のサロゲートコードユニット）を、`@mnemora/postgres` と同じく U+FFFD に置き換えて保存するようになった**（[ADR 0543](./docs/decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。オーナーの決定。ADR 0423 決定5 の「インメモリは保持」と、ADR 0458 の B3 の歯を置き換える。🟡）。
+
+  以前の `InMemoryMemoryStore` は、孤立サロゲートを含む `content`・`digest`・`tags` などをそのまま保持して読み返した。`@mnemora/postgres` は node-postgres が UTF-8 に変換するときに 1 単位ずつ U+FFFD に置き換えるので、同じ入力で書いて読み返した値が実装ごとに違った。いまは InMemory（と core のテスト用 `FakeMemoryStore`）も同じに置き換える。
+  - **置き換える欄**（Postgres で実際に置き換わると実測した欄）: `createMemory` 系の `content`・`digest`・`contentHash`・`tags` の各要素・`extractorVersion`・`claimKey` の主語と述語（冪等の鍵も置き換えた後の値で比べる）、`createObservation` 系の `kind`、`registerLabel` の `name`、`purgeMemory` の墓石、イベントの `digestSnapshot`、outbox の `kind`・`claimedBy`。読み取りの引数（`findActiveByClaimKey`・`findContestedByClaimKey` の `claimKey`、`listBySourceObservation` の `extractorVersion`、`labels` の絞り、`OutboxStore.claimBatch` の `kinds`・`claimedBy`）も同じ規則で置き換えて比べる。
+  - **変わらないもの**: 対をなすサロゲート（絵文字）・普通の文字列・U+FFFD そのもの。識別子（`tenantId`・`subjectId`・`externalId`）は ADR 0423 のまま入口で断る。`@mnemora/postgres` と conformance suite、公開の型・関数は変えていない。
+  - **まだ揃っていないもの**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す（`observe` の `text` などは `payload` に入る）。ADR 0543 の対象外。
+  - **破壊的と数えない理由**: 断る入力は増えない。公開の fixture の振る舞いの変更で、型・DB・`@mnemora/postgres` は変わらない（[docs/migration-v1.md](./docs/migration-v1.md) の 🟡「v1.2.0 → 次の版」）。孤立サロゲートの保持に頼ったテストだけが影響を受ける。
+
 ### Fixed
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。

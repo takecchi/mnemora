@@ -2805,6 +2805,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
   以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
 
+- **`@mnemora/testkit/fixtures` の `InMemory*`: `text` 列に入る欄の孤立サロゲートを、`@mnemora/postgres` と同じく U+FFFD に置き換えて保存する**（[ADR 0543](./decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。🟡。オーナーの決定で、ADR 0423 決定5 の「インメモリは保持」を置き換えた）。
+  以前の fixture は、孤立サロゲート（`"a\uD800b"` など）を含む `content`・`digest`・`tags`・claim key・ラベル名などをそのまま保持して読み返した。いまは `"a\uFFFDb"` で返る（Postgres と同じ）。**対をなす絵文字・普通の文字列は変わらない。** 読み取りの引数（`claimKey`・`extractorVersion`・`labels`）も同じく置き換わるので、書いた値と同じ入力で引けば当たる。
+  🔴 でなく 🟡 に置いた理由【判断】: 新しく断る入力は無く（上の「数え方の規律への追記（2026-09-28）」の2 の線の内側）、公開の型・DB・`@mnemora/postgres`・conformance suite は変えていない。変わるのは公開の fixture が返す値だけで、本物の adapter に近づく向きの変更である。ただし、**以前は保持された値が書き換わる**——孤立サロゲートの保持をテストが前提にしていた人は、値が変わって落ちる。そう読んで 🔴 に数え直すのはオーナーの判断（CHANGELOG の `[1.3.0]` 側も同じ分類）。手順は要らない。
+  **まだ揃っていない**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`。`observe` の `text` などは `payload` に入る）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
