@@ -109,7 +109,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `upsert`・`search`・`searchMany`・`delete`・`getVectors`・`deleteAcrossSpaces`・`eraseTenant` が投げる例外の `message`（と `stack`・`cause` の連鎖）の `params:` より後ろを、`Runtime` と同じ形（`(omitted by mnemora, N chars)`）に落とす。`searchMany` は 1 文に最大 16384 件のベクトルが params に載っていた。例外は新しく作らず、その場で書き換えるので、`kind`・`name`・`code`・`cause` は残る。
 
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
-  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債）。
+  - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債。そのうち `PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落とすようにした）。
 
 - **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
 - **`@mnemora/bullmq` の `createBullmqTickDriver` 、`@mnemora/postgres` の `registerEmbeddingSpace`、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider` が、壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）に変わった**（[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md)。provider の数値オプション（ADR 0498）の形に揃えた）。対象は `everyMs`・`jobName`・`concurrency`（`resolveConcurrency` を含む）と、`DeterministicEmbeddingProvider` の `space.dimensions`（数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`）、`registerEmbeddingSpace` の `space.dimensions`（数でなければ `TypeError`、正の整数でない・pgvector hnsw の上限 2000 超なら `RangeError`）。数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。**message は変えていない。** どちらも `Error` の子なので `instanceof Error` は変わらない。`err.name`・`err.constructor` を `"Error"`・`Error` と比べていた呼び出し側は見直すこと。手順は要らない。公開 API・既定値は変えていない。⭕ 非破壊と数える。
@@ -150,6 +150,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/postgres` の `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`・`purgeMemory`・`scrubPurged` が、同じラベルを逆の順で触る並行する書き込みと、生の 40P01（`deadlock detected`）で衝突しなくなった**（[ADR 0511](./docs/decisions/0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md)、ADR 0476 の負債1・2）。`labels` の行ロックを、どの経路でも名前のコードポイント順で取る。`createMemoriesWithOutboxAndEvents` は、衝突した候補が例外にならず `dropped` に黙って積まれていた。
   - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。公開 API・DB・`Memory.tags`・`proposedCount` は変えない。
   - **残ること**: まだ無いラベルを同時に新規作成する競合は、先取りできないので残る（ADR 0511 の負債）。
+
+- **`PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0516](./docs/decisions/0516-omit-params-trigram-outbox-tenant-settings-stores.md)、`@mnemora/postgres`。[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)・[0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md) の負債の返済）。
+  - 落とすのは message・`stack`・`cause` の連鎖の `params:` より後ろ（`(omitted by mnemora, N chars)`）。例外は新しく作らず、`kind`・`name`・`code`・`cause` は残る。
+  - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504・0505 と同じ扱い）。
+  - **変えなかったこと**: `PostgresMemoryStore`・`PostgresRelationStore`・`EventStore.get`・`list` の直接呼び（ADR 0516 の負債）。
 
 ## [1.2.0] - 2026-10-02
 
