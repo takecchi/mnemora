@@ -81,7 +81,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isAdrFilename } from "./generate-adr-index-lib.mjs";
+import { assertWellFormedAdrFilenames, isAdrFilename } from "./generate-adr-index-lib.mjs";
 import {
   addedLineNumbers,
   findUnrewrittenAdrReferences,
@@ -118,16 +118,26 @@ function tryRun(cmd, args, options = {}) {
   }
 }
 
-function adrNumbersFromRef(ref) {
+function adrNumbersFromRef(ref, { strict = false } = {}) {
   const out = tryRun("git", ["ls-tree", "-r", "--name-only", ref, "--", "docs/decisions/"]);
   if (out === null) return [];
-  return out
+  const paths = out
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+    .filter((line) => line.length > 0);
+  // ADR 0540: 形の外れた名前は、黙って数えずに落とす（`origin/main` の分。他のブランチの分は、その枝の持ち主の責任なので strict にしない）。
+  if (strict) assertWellFormedAdrFilenames(directChildNames(paths));
+  return paths
     .map((path) => basename(path))
     .filter((filename) => isAdrFilename(filename))
     .map((filename) => parseAdrFilename(filename).number);
+}
+
+/** `docs/decisions/` の直下（サブディレクトリの中を除く）のファイル名だけを取り出す。 */
+function directChildNames(paths) {
+  return paths
+    .filter((p) => p.startsWith(decisionsPrefix) && !p.slice(decisionsPrefix.length).includes("/"))
+    .map((p) => p.slice(decisionsPrefix.length));
 }
 
 function parseArgs(argv) {
@@ -154,17 +164,20 @@ function loadAddedAdrFiles() {
     "--",
     "docs/decisions/",
   ]);
-  return diffOut
+  const addedPaths = diffOut
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && line.startsWith(decisionsPrefix))
+    .filter((line) => line.length > 0 && line.startsWith(decisionsPrefix));
+  // ADR 0540: 書き換えや改名の前に、形の外れた名前で落とす（ADR 0537 の生成器と同じ規則）。
+  assertWellFormedAdrFilenames(directChildNames(addedPaths));
+  return addedPaths
     .map((path) => basename(path))
     .filter((filename) => isAdrFilename(filename))
     .map((filename) => ({ filename }));
 }
 
 function buildPlan() {
-  const mainNumbers = adrNumbersFromRef("origin/main");
+  const mainNumbers = adrNumbersFromRef("origin/main", { strict: true });
   const addedFiles = loadAddedAdrFiles();
   const plan = planRenumbering(mainNumbers, addedFiles);
   return { plan, addedCount: addedFiles.length };

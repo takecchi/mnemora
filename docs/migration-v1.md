@@ -2804,6 +2804,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/core`: `extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`trim` で空になる値）なら、本文の前置きにしない**（[ADR 0517](./decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1）。
   以前は抽出（LLM）に渡る本文と全文フォールバックの Memory の本文が `"  \n\nC"` のように空白の前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）になる。実質のある `title` は変わらない（前後の空白もそのまま）。手順は要らない。落ちる入力は増えも減りもしない（`ObserveInputSchema` は変えていない）。空白だけの `title` を `extractTitle: true` で渡していた呼び出し側の、抽出プロンプトの入力と、全文フォールバックの Memory の `content` が変わる。`reextract`・`deferred` の読み直しは、新しい規則で本文を作る。保存済みの Memory は書き換えない。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
+  以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
