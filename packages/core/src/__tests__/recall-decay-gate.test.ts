@@ -475,7 +475,7 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
       digest: "wall-alive-activity-dead",
       decayFloorAt: FAR_FUTURE,
       decayBaseSeq: 0,
-      decayFloorSeq: -1, // 活動時計では既に沈んでいる値
+      decayFloorSeq: 0, // 活動時計では既に沈んでいる値（nowSeq=0 ちょうど。負数は Postgres の CHECK が拒むので使わない。ADR 0493）
     });
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
@@ -682,7 +682,7 @@ describe("recall() — 非破壊性: RecallRuntimeDeps.tenantSettingsStore を�
         digest: "no-tenant-settings-store",
         decayFloorAt: FAR_FUTURE,
         decayBaseSeq: 0,
-        decayFloorSeq: -1, // 活動時計では沈んでいる値(読まれれば除外されるはず)
+        decayFloorSeq: 0, // 活動時計では沈んでいる値（nowSeq=0 ちょうど。負数は Postgres の CHECK が拒む。ADR 0493）(読まれれば除外されるはず)
       }),
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
