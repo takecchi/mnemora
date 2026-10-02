@@ -73,10 +73,12 @@ describe("purged の記憶への強化（ADR 0501 / ADR 0453 負債3、本物の
     let prev = purged.lastReinforcedAt?.getTime() ?? Number.NEGATIVE_INFINITY;
     const expectAdvanced = async (label: string, expectedAt?: Date) => {
       const m = (await store.get(ctx, memoryId))!;
-      expect(m.lastReinforcedAt?.getTime(), `${label}: lastReinforcedAt が進んでいない`).toBeGreaterThan(
-        prev,
-      );
-      if (expectedAt !== undefined) expect(m.lastReinforcedAt?.getTime()).toBe(expectedAt.getTime());
+      expect(
+        m.lastReinforcedAt?.getTime(),
+        `${label}: lastReinforcedAt が進んでいない`,
+      ).toBeGreaterThan(prev);
+      if (expectedAt !== undefined)
+        expect(m.lastReinforcedAt?.getTime()).toBe(expectedAt.getTime());
       expect(m.status).toBe("forgotten");
       expect(m.purgedAt?.getTime()).toBe(purged.purgedAt?.getTime());
       expect(m.content).toBe("[purged]");
@@ -120,7 +122,9 @@ describe("purged の記憶への強化（ADR 0501 / ADR 0453 負債3、本物の
     expect(r.insertedMemoryIds).toEqual([memoryId]);
     const m = (await store.get(ctx, memoryId))!;
     expect(m.lastReinforcedAt?.getTime()).toBe(at.getTime());
-    expect(before.lastReinforcedAt?.getTime() ?? Number.NEGATIVE_INFINITY).toBeLessThan(at.getTime());
+    expect(before.lastReinforcedAt?.getTime() ?? Number.NEGATIVE_INFINITY).toBeLessThan(
+      at.getTime(),
+    );
     expect(m.status).toBe("forgotten");
     expect(m.content).toBe("[purged]");
   });
