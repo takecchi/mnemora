@@ -465,7 +465,8 @@ function assertStorableNewMemory(input: NewMemory): void {
     throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
   }
   // ADR 0493: `decayFloorAt`（必須）・`lastReinforcedAt`（省略可）も `timestamptz` 列。Postgres は Invalid Date を拒む。
-  if (Number.isNaN(input.decayFloorAt.getTime())) {
+  // 型の外の `null` は今までどおり通す（Invalid Date だけを断る。ADR 0493）。
+  if (input.decayFloorAt != null && Number.isNaN(input.decayFloorAt.getTime())) {
     throw new Error(`InMemoryMemoryStore: decayFloorAt must be a valid Date (got Invalid Date)`);
   }
   for (const [field, value] of [

@@ -835,7 +835,8 @@ export class FakeMemoryStore implements MemoryStore {
         throw new Error(`FakeMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
       }
       // ADR 0493: `decayFloorAt`・`lastReinforcedAt` も `timestamptz` 列。Postgres は Invalid Date を拒む。
-      if (Number.isNaN(input.decayFloorAt.getTime())) {
+      // 型の外の `null` は今までどおり通す（Invalid Date だけを断る。`fake-aggregate-scope-exclude-provenance.test.ts` が null で作る）。
+      if (input.decayFloorAt != null && Number.isNaN(input.decayFloorAt.getTime())) {
         throw new Error(`FakeMemoryStore: decayFloorAt must be a valid Date (got Invalid Date)`);
       }
       // ADR 0493: 列挙の列（`status`・`digest_source`・`embedding_status`）。`provenance_kind` は上で見ている。
