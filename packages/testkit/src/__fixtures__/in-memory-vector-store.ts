@@ -14,7 +14,6 @@ import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 import {
   assertFloat4Vector,
   assertQueryBigint,
-  assertQueryInteger,
   assertQueryJsonWithoutNul,
   assertQueryLabelsWithoutNul,
   assertQueryTimestamptz,
@@ -308,7 +307,7 @@ export class InMemoryVectorStore implements VectorStore {
       // 落ちる行は、式まで行かない（活動時計の条件は最後に評価される）。ここでは印だけ付け、下の最後で
       // （活動時計の条件の結果で落ちる行も、ほかの条件を通ったなら）投げる。
       let seqSumOverflows = false;
-      let rejectedBySeqCondition = false;
+      let rejectedBySeqCondition: boolean;
       const markSeqSumOverflow = (): void => {
         if (
           opts.filter.decayFloorSeqAfter !== undefined &&
