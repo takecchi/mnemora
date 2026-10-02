@@ -66,6 +66,8 @@ import {
   assertNoNul,
   assertNoNulInNewMemory,
   assertNoNulInNewMemoryEvent,
+  assertNoNulInNewObservation,
+  assertNoNulInNewRecall,
   assertNoNulInScopeFilter,
 } from "./input-check.js";
 import {
@@ -672,6 +674,8 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前）。
+    assertNoNulInNewObservation("PostgresMemoryStore", input);
     const externalId = input.externalId ?? null;
     const inserted = await this.db.execute(sql`
       INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -737,6 +741,8 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前）。
+    assertNoNulInNewObservation("PostgresMemoryStore", input);
     const externalId = input.externalId ?? null;
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
@@ -2919,6 +2925,8 @@ export class PostgresMemoryStore implements MemoryStore {
         "record.advanceActivityClock.subjectId",
       );
     }
+    // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前。活動時計も進めない）。
+    assertNoNulInNewRecall(record);
     // Issue #298 / ADR 0155: 新しく書く行は常に breakdownCaptured: true。「内訳を持たない
     // 新規行」は無い（recall-runtime.ts が finalMemories から毎回内訳を計算しているため）。
     const returnedMemories: RecallRecordReturnedMemories = {
