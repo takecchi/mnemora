@@ -112,6 +112,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **揃えていないもの**: Postgres の text search parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）。ADR 0513 に実測を書いた。
   - 本物の adapter（`@mnemora/postgres`）は変えていない。conformance suite は変えていない。
 
+- **`extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`String.prototype.trim` で空になる値）のとき、抽出（LLM）に渡す本文と全文フォールバックの Memory の本文の前置きにしなくなった**（[ADR 0517](./docs/decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./docs/decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1、`@mnemora/core`）。
+
+  以前は `"  \n\nC"` のように空白が前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）。実質のある `title` は、前後の空白もそのまま前置きになる。
+
+  - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
+
 ### Fixed
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
