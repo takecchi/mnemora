@@ -132,7 +132,7 @@ describe("多数のテナントを1つの Runtime で並行に回しても、テ
         },
       } as never,
       hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
-      // outbox の available_at（DB の now()）より runtime の時計を先に進める（operation-roundtrip-shape と同じ理由）。
+      // runtime の時計を先に進める。歴史的な理由で残している（今は available_at も注入した時計に従う。ADR 0559。operation-roundtrip-shape も見ること）。
       clock: { now: () => new Date(Date.now() + 60_000) },
       config: { autoQueueConsolidateReflectOnExtract: true },
     } as never);

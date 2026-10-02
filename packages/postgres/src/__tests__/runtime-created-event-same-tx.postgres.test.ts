@@ -82,8 +82,8 @@ const llm: LLMProvider = {
 
 /**
  * tick のジョブはリース・backoff を経て再配達される。実時間は待たず、時計を進める。
- * 時計は実時刻より1秒だけ未来を返す（outbox の `available_at` は DB の `now()` で書かれるため。
- * `consolidate-reflect-carryover.postgres.test.ts` の同じ注記を見ること）。
+ * 時計は実時刻より1秒だけ未来を返す（歴史的な理由で残している。今は outbox の `available_at` も
+ * 注入した時計に従う。ADR 0559。`consolidate-reflect-carryover.postgres.test.ts` の同じ注記を見ること）。
  */
 let nowMs = Date.now();
 const clock = { now: () => new Date(nowMs + 1_000) };
