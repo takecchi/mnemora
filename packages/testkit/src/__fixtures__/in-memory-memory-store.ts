@@ -582,6 +582,28 @@ function assertStorableNewMemory(input: NewMemory): void {
  * status を書く口が投げる名前の付いたエラー（`MemoryStatusConflictError`・`ContestedWithoutCompanionError`）は、
  * 各メソッドの doc に書いてある。
  */
+/**
+ * ADR 0521: 操作の対象の id を小文字にそろえる（`@mnemora/postgres` は uuid 型の列で比べる・入口で
+ * `normalizeUuidCase` を掛けるので、大文字の uuid を同じ記憶として受ける）。この fixture の id は小文字の
+ * `mem-N` だけなので、小文字にそろえても別の id と混ざらない。
+ */
+function normId<T extends string>(id: T): T {
+  return id.toLowerCase() as T;
+}
+function normOptId<T extends string>(id: T | null | undefined): T | null | undefined {
+  return id === null || id === undefined ? id : normId(id);
+}
+
+function normPairSide<T extends { id: MemoryId; supersededById?: MemoryId | undefined }>(
+  side: T,
+): T {
+  return {
+    ...side,
+    id: normId(side.id),
+    ...(side.supersededById === undefined ? {} : { supersededById: normId(side.supersededById) }),
+  };
+}
+
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly observations = new Map<string, Observation>();
   private readonly memories = new Map<string, Memory>();
@@ -773,7 +795,7 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
     assertWellFormedCtx(ctx);
-    const observation = this.observations.get(id);
+    const observation = this.observations.get(normId(id));
     if (!observation || observation.tenantId !== ctx.tenantId) {
       return null;
     }
@@ -844,7 +866,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   private assertOwnMemoryRef(ctx: Ctx, id: MemoryId | null | undefined): void {
     if (id === null || id === undefined) return;
-    const memory = this.memories.get(id);
+    const memory = this.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -876,7 +898,7 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   private assertOwnObservationRef(ctx: Ctx, id: string | null | undefined): void {
     if (id === null || id === undefined) return;
-    const observation = this.observations.get(id);
+    const observation = this.observations.get(normId(id));
     if (!observation || observation.tenantId !== ctx.tenantId) {
       throw new Error(`InMemoryMemoryStore: observation not found for tenant: ${id}`);
     }
@@ -908,6 +930,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0439: 参照先は `ctx` のテナントの行であること（別テナントの行を指す行は書けない）。検査の順は
     // `PostgresMemoryStore` と同じ（observation、superseded-by、contested-with）。`PostgresMemoryStore` は検査と書き込みを
     // 1つの文にするので、冪等の衝突で既存の行を返す呼び出しでも検査は当たる——ここも衝突の判定より前に置く。
+    // ADR 0521: 参照する observation の id も大文字小文字を区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。
+    input = { ...input, sourceObservationId: normOptId(input.sourceObservationId) } as typeof input;
     this.assertOwnObservationRef(ctx, input.sourceObservationId);
     this.assertOwnMemoryRef(ctx, input.supersededById);
     this.assertOwnMemoryRef(ctx, input.contestedWithId);
@@ -944,8 +968,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         digestSource: input.digestSource,
         provenance: input.provenance,
         status: input.status ?? "active",
-        supersededById: input.supersededById ?? null,
-        contestedWithId: input.contestedWithId ?? null,
+        supersededById: normOptId(input.supersededById) ?? null,
+        contestedWithId: normOptId(input.contestedWithId) ?? null,
         tags: input.tags,
         occurredAt: input.occurredAt ?? null,
         recordedAt: input.recordedAt,
@@ -1198,7 +1222,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * オブジェクトを返すのと同じにするため。
    */
   private rawGet(ctx: Ctx, id: MemoryId): Memory | null {
-    const memory = this.memories.get(id);
+    const memory = this.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
       return null;
     }
@@ -1216,7 +1240,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 同じ「一意な id の集合」に揃える。
     const seen = new Set<MemoryId>();
     const results: Memory[] = [];
-    for (const id of ids) {
+    for (const rawId of ids) {
+      const id = normId(rawId);
       if (seen.has(id)) {
         continue;
       }
@@ -1276,7 +1301,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const results: Memory[] = [];
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
-      if (memory.sourceObservationId !== observationId) continue;
+      if (memory.sourceObservationId !== normId(observationId)) continue;
       if ((memory.extractorVersion ?? null) !== (extractorVersion ?? null)) continue;
       results.push(snapshot(memory));
     }
@@ -1295,7 +1320,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const results: Memory[] = [];
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
-      if (memory.sourceObservationId !== observationId) continue;
+      if (memory.sourceObservationId !== normId(observationId)) continue;
       results.push(snapshot(memory));
     }
     return results;
@@ -1317,6 +1342,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
     // 書き込みは常に単独になる。PostgresMemoryStore と同じ位置（対象の存在確認より前）で
     // 落とす。
+    id = normId(id);
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
     }
@@ -1334,7 +1360,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryColumn("status", status);
     memory.status = status;
     if (opts?.supersededById !== undefined) {
-      memory.supersededById = opts.supersededById;
+      memory.supersededById = normId(opts.supersededById);
     }
     memory.updatedAt = new Date();
     return snapshot(memory);
@@ -1357,6 +1383,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
     // ADR 0140: updateStatus と同じ理由・同じ位置。
+    id = normId(id);
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
     }
@@ -1376,7 +1403,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.assertEventTargetOwn(ctx, event.memoryId, [id]);
     memory.status = status;
     if (opts.supersededById !== undefined) {
-      memory.supersededById = opts.supersededById;
+      memory.supersededById = normId(opts.supersededById);
     }
     memory.updatedAt = new Date();
     const storedEvent = buildStoredMemoryEvent(ctx, event);
@@ -1447,6 +1474,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     createdEventsWritten?: true;
   }> {
     assertWellFormedCtx(ctx);
+    supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
     news.forEach((entry, i) =>
       assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
     );
@@ -1814,6 +1842,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -1851,6 +1880,7 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -1970,6 +2000,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     opts?: ReinforceOptions,
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
     assertWellFormedCtx(ctx);
+    recallId = normId(recallId);
     const result = await this.recordUsage(ctx, recallId, memoryIds);
     if (result.insertedMemoryIds.length === 0) {
       return result;
@@ -2004,6 +2035,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       return { insertedMemoryIds: [] };
     }
     // ADR 0439: recall も memory も `ctx` のテナントの行であること（`PostgresMemoryStore` と同じ順・同じ message）。
+    recallId = normId(recallId);
     const recall = this.recalls.get(recallId);
     if (!recall || recall.tenantId !== ctx.tenantId) {
       throw new Error(`InMemoryMemoryStore: recall not found for tenant: ${recallId}`);
@@ -2013,7 +2045,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
 
     const insertedMemoryIds: MemoryId[] = [];
-    for (const memoryId of memoryIds) {
+    for (const rawMemoryId of memoryIds) {
+      const memoryId = normId(rawMemoryId);
       const key = `${ctx.tenantId}:${recallId}:${memoryId}`;
       if (!this.usages.has(key)) {
         this.usages.add(key);
@@ -2270,7 +2303,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           `aggregateScope: digestBand.limit must fit in a Postgres bigint (got ${opts.digestBand.limit})`,
         );
       }
-      const exclude = new Set(opts.digestBand.excludeMemoryIds);
+      const exclude = new Set(opts.digestBand.excludeMemoryIds.map(normId));
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順
       // （ADR 0073、`FakeMemoryStore.aggregateScope` と同じ規則）。
@@ -2385,6 +2418,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     const row = this.recalls.get(id);
     if (!row || row.tenantId !== ctx.tenantId) {
       return null;
@@ -2454,7 +2488,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertQueryTimestamptz("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
     }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
-    const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds);
+    const idFilter =
+      opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds.map(normId));
     const targets = [...this.memories.values()]
       .filter(
         (m) =>
@@ -2632,6 +2667,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: tombstone.digest must not contain NUL characters (U+0000)`,
       );
     }
+    id = normId(id);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -2703,7 +2739,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
     assertWellFormedCtx(ctx);
-    for (const id of memoryIds) {
+    for (const rawId of memoryIds) {
+      const id = normId(rawId);
       const memory = this.rawGet(ctx, id);
       if (!memory || memory.status !== "forgotten" || (memory.purgedAt ?? null) === null) {
         continue;
@@ -2752,6 +2789,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
     assertWellFormedCtx(ctx);
+    first = { ...first, id: normId(first.id) };
+    second = { ...second, id: normId(second.id) };
     if (first.id === second.id) {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
@@ -2823,6 +2862,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
     assertWellFormedCtx(ctx);
+    first = normPairSide(first);
+    second = normPairSide(second);
     if (first.id === second.id) {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
@@ -2892,6 +2933,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
     assertWellFormedCtx(ctx);
+    members = members.map((m) => ({ ...m, id: normId(m.id) }));
     if (members.length < 3) {
       throw new RangeError("markContestedGroup: members must have at least 3 entries");
     }
@@ -3022,6 +3064,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
     assertWellFormedCtx(ctx);
+    members = members.map(normPairSide);
     if (members.length < 3) {
       throw new RangeError("resolveContestedGroup: members must have at least 3 entries");
     }
@@ -3142,6 +3185,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
+    survivor = {
+      ...survivor,
+      id: normId(survivor.id),
+      contestedWithId: normId(survivor.contestedWithId),
+    };
     const memory = this.rawGet(ctx, survivor.id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${survivor.id}`);
@@ -3198,7 +3246,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const targetUntil = query.validUntil ?? null;
     const matches = [...this.memories.values()].filter((m) => {
       if (m.tenantId !== ctx.tenantId) return false;
-      if (m.id === query.excludeMemoryId) return false;
+      if (m.id === normId(query.excludeMemoryId)) return false;
       if ((m.subjectId ?? null) !== query.subjectId) return false;
       if (!m.claimKey) return false;
       if (
@@ -3263,7 +3311,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const targetUntil = query.validUntil ?? null;
     const matches = [...this.memories.values()].filter((m) => {
       if (m.tenantId !== ctx.tenantId) return false;
-      if (m.id === query.excludeMemoryId) return false;
+      if (m.id === normId(query.excludeMemoryId)) return false;
       if ((m.subjectId ?? null) !== query.subjectId) return false;
       if (!m.claimKey) return false;
       if (
@@ -3362,7 +3410,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     filter?: { onlyMemoryIds?: MemoryId[] | undefined },
   ): Promise<{ restored: Memory[] }> {
     assertWellFormedCtx(ctx);
-    const onlyMemoryIds = filter?.onlyMemoryIds;
+    supersededById = normId(supersededById);
+    const onlyMemoryIds = filter?.onlyMemoryIds?.map(normId);
     const targets = [...this.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
@@ -3431,7 +3480,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     filter?: { onlyMemoryIds?: MemoryId[] | undefined },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
     assertWellFormedCtx(ctx);
-    const onlyMemoryIds = filter?.onlyMemoryIds;
+    supersededById = normId(supersededById);
+    const onlyMemoryIds = filter?.onlyMemoryIds?.map(normId);
     const targets = [...this.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
