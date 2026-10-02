@@ -143,7 +143,7 @@ export class InMemoryEventStore implements EventStore {
       if (event.tenantId !== ctx.tenantId) {
         return false;
       }
-      if (filter.memoryId !== undefined && event.memoryId !== filter.memoryId) {
+      if (filter.memoryId !== undefined && event.memoryId !== filter.memoryId.toLowerCase()) {
         return false;
       }
       if (filter.kind !== undefined && event.kind !== filter.kind) {
