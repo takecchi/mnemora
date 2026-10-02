@@ -4,6 +4,11 @@ import type { NewMemory } from "../memory.js";
 import type { RecallQuery, RecallResult } from "../recall.js";
 import type { createRuntime as CreateRuntime, RuntimeDeps } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
+import {
+  isContestedGroupMembershipMismatchError,
+  isContestedWithoutCompanionError,
+  isMemoryStatusConflictError,
+} from "../interfaces/memory-store.js";
 
 /**
  * recall の不変条件を、シードつきのランダムな操作列で検査する検査器の本体（Issue #1019・#1020・
@@ -50,6 +55,8 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
  *   膨らむ）ので、膨らみはここで捕まえる。
  * - I12 `filtered`（`outside_scope`）の `archived`・`superseded`・`forgotten` の件数は、その status の
  *   記憶の件数に等しい（`docs/recall.md` §5 の表の甲群）。
+ * - I13 `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して除外する（ADR 0485、`fcc` 操作。ADR 0494）。
+ * - I14 群の同伴の数は、返った owner の数 × `relationMaxCount` 以下（ADR 0381・0396、`relations` profile。ADR 0494）。
  *
  * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で操作列を最小化し、シードと最小の
  * 操作列を出力に出す。
@@ -69,6 +76,14 @@ function rng(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/**
+ * 操作に渡す id の変形（ADR 0494、`argdead`／`argupper` profile だけ）。
+ * - `upper`: 大文字にする。操作の対象の `id` の大文字小文字は Postgres が受け、fixture（InMemory・Fake）は受けない
+ *   （ADR 0446 の既存の違い）ので、3 実装の差分の検査には載せない。
+ * - `dead`: 消した（forget・purge 済みの）記憶の id を狙って渡す。
+ */
+export type ArgMutation = "upper" | "dead";
 
 export type Op =
   | {
@@ -92,16 +107,26 @@ export type Op =
       thr: number;
       lex: boolean;
       /** `fields` profile だけ: これまで一度も振っていなかった `RecallQuery` の欄（ADR 0492）。 */
-      x?: { tw: boolean; dbl: number; qt: string[] };
+      x?: { tw: boolean; dbl: number; qt: string[]; rmc?: number };
     }
   | { k: "bulk"; n: number; seed: number }
-  | { k: "usage"; pick: number }
-  | { k: "forget"; i: number }
-  | { k: "purge"; i: number }
-  | { k: "restore"; i: number }
-  | { k: "mark"; i: number; j: number }
-  | { k: "resolve"; i: number; sup: boolean }
-  | { k: "consolidate"; i: number; j: number }
+  | { k: "usage"; pick: number; mu?: ArgMutation }
+  | { k: "forget"; i: number; mu?: ArgMutation }
+  | { k: "purge"; i: number; mu?: ArgMutation }
+  | { k: "restore"; i: number; mu?: ArgMutation }
+  | { k: "mark"; i: number; j: number; mu?: ArgMutation }
+  | { k: "resolve"; i: number; sup: boolean; mu?: ArgMutation }
+  | { k: "consolidate"; i: number; j: number; mu?: ArgMutation }
+  /** `relations` profile だけ（ADR 0494）: 3 件の多者間の群を作る（`markContestedGroup`）。 */
+  | { k: "group"; i: number; j: number; l: number }
+  /** `relations` profile だけ: 作った群を解決する（`resolveContestedGroup`）。 */
+  | { k: "resolveGroup"; g: number; sup: boolean }
+  /** `relations` profile だけ: `RelationStore.link` を直接呼ぶ（`contradicts` の1行、片方向。ADR 0494）。 */
+  | { k: "link"; i: number; j: number }
+  /** `relations` profile だけ: `RelationStore.unlink` を直接呼ぶ。 */
+  | { k: "unlink"; i: number; j: number }
+  /** `argdead`／`argupper` profile だけ: `findCorrectionCandidates` に `excludeMemoryIds` を渡す（ADR 0485・0494）。 */
+  | { k: "fcc"; i: number; mu?: ArgMutation }
   | { k: "sweep" }
   | { k: "advance"; hours: number };
 
@@ -122,8 +147,16 @@ const VECS = [
  *   広げる。`default` は1シードの記憶が高々二十数件で、窓 k' が scope の候補より小さいため
  *   `ann_unreached`（info）がほぼ常に立ち、I10 の下限がほとんど効かない。`wide` は
  *   索引（HNSW）を通る規模と、k' ≧ 候補数の recall（I10 の下限が効く）の両方を作る。
+ * - `fields`: これまで振っていなかった `RecallQuery` の欄（ADR 0492）。
+ * - `relations`: `relationStore` を配線し、`relationMaxCount`・多者間の群（`markContestedGroup`／
+ *   `resolveContestedGroup`）・`RelationStore.link`／`unlink`（`contradicts` の1行、実在の2件）を振る
+ *   （ADR 0494）。範囲外の `kind` や `kind` が偽の値の読み（ADR 0488 が縛った面）は渡さない。
+ * - `argdead`／`argupper`: 操作に渡す id を、消した（forget・purge 済みの）記憶の id に差し替える／大文字にする
+ *   （ADR 0494）。大文字の id は、`FuzzBackend.acceptsUpperCaseIds` が偽の backend（fixture）では断りを違反にしない。
+ *   3 実装の差分に載せるのは `argdead` だけ。
+ * - どの profile も、追加の乱数は別の流れ（`r2`）から引き、`default`／`wide`／`fields` の同じシードの操作列を変えない。
  */
-export type FuzzProfile = "default" | "wide" | "fields";
+export type FuzzProfile = "default" | "wide" | "fields" | "relations" | "argdead" | "argupper";
 
 export function genOps(seed: number, n: number, profile: FuzzProfile = "default"): Op[] {
   const r = rng(seed);
@@ -131,6 +164,10 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
   // 同じシードの操作列の骨格（どの操作が何番目か）を変えない（ADR 0492）。
   const r2 = rng((seed ^ 0x5bd1e995) >>> 0);
   const fields = profile === "fields";
+  const rel = profile === "relations";
+  const argMu: ArgMutation | null =
+    profile === "argdead" ? "dead" : profile === "argupper" ? "upper" : null;
+  const mu = (): { mu?: ArgMutation } => (argMu !== null && r2() < 0.5 ? { mu: argMu } : {});
   const pick = <T>(xs: T[]): T => xs[Math.floor(r() * xs.length)]!;
   const idx = () => Math.floor(r() * 1000);
   const ops: Op[] = [];
@@ -169,17 +206,32 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
                 qt: ["a", "b", "c", "a"].filter(() => r2() < 0.4),
               },
             }
-          : {}),
+          : rel
+            ? { x: { tw: false, dbl: 0, qt: [], rmc: [0, 0, 1, 2, 3][Math.floor(r2() * 5)]! } }
+            : {}),
       });
-    } else if (x < 0.68) ops.push({ k: "usage", pick: idx() });
-    else if (x < 0.74) ops.push({ k: "forget", i: idx() });
-    else if (x < 0.78) ops.push({ k: "purge", i: idx() });
-    else if (x < 0.8) ops.push({ k: "restore", i: idx() });
-    else if (x < 0.87) ops.push({ k: "mark", i: idx(), j: idx() });
-    else if (x < 0.91) ops.push({ k: "resolve", i: idx(), sup: r() < 0.5 });
-    else if (x < 0.94) ops.push({ k: "consolidate", i: idx(), j: idx() });
-    else if (x < 0.96) ops.push({ k: "sweep" });
-    else ops.push({ k: "advance", hours: pick([1, 24, 24 * 30, 24 * 400]) });
+    } else if (x < 0.68) ops.push({ k: "usage", pick: idx(), ...mu() });
+    else if (x < 0.74) ops.push({ k: "forget", i: idx(), ...mu() });
+    else if (x < 0.78) ops.push({ k: "purge", i: idx(), ...mu() });
+    else if (x < 0.8) ops.push({ k: "restore", i: idx(), ...mu() });
+    else if (x < 0.87) {
+      const i = idx();
+      const j = idx();
+      const u = rel ? r2() : 1;
+      if (u < 0.45) ops.push({ k: "group", i, j, l: Math.floor(r2() * 1000) });
+      else if (u < 0.65) ops.push({ k: "link", i, j });
+      else if (u < 0.75) ops.push({ k: "unlink", i, j });
+      else ops.push({ k: "mark", i, j, ...mu() });
+    } else if (x < 0.91) {
+      const i = idx();
+      const sup = r() < 0.5;
+      if (rel && r2() < 0.5) ops.push({ k: "resolveGroup", g: Math.floor(r2() * 1000), sup });
+      else ops.push({ k: "resolve", i, sup, ...mu() });
+    } else if (x < 0.94) ops.push({ k: "consolidate", i: idx(), j: idx(), ...mu() });
+    else if (x < 0.96) {
+      if (argMu !== null && r2() < 0.5) ops.push({ k: "fcc", i: idx(), ...mu() });
+      else ops.push({ k: "sweep" });
+    } else ops.push({ k: "advance", hours: pick([1, 24, 24 * 30, 24 * 400]) });
   }
   return ops;
 }
@@ -191,6 +243,8 @@ export type FuzzStores = Pick<
 > & {
   lexicalStore: NonNullable<RuntimeDeps["lexicalStore"]>;
   embeddingProvider: RuntimeDeps["embeddingProvider"];
+  /** `relations` profile だけが配線する（ADR 0494）。 */
+  relationStore?: RuntimeDeps["relationStore"];
 };
 
 export interface FuzzBackend {
@@ -202,6 +256,12 @@ export interface FuzzBackend {
   setup(): Promise<{ stores: FuzzStores; createRuntime: typeof CreateRuntime }>;
   /** `VECS` の2次元ベクトルを、`stores.embeddingProvider.space` の次元へ写す。 */
   vector(v: readonly number[]): number[];
+  /**
+   * 操作の対象の id を大文字にしても受けるか（`upper` の変形、ADR 0494）。`@mnemora/postgres` は受ける。
+   * fixture（InMemory・Fake）は「実在しない記憶」と同じ扱いで断る（ADR 0446 の既存の違い）。省略は `false`。
+   * `false` の backend では、大文字にした id への `memory not found for tenant` だけは違反にしない。
+   */
+  acceptsUpperCaseIds?: boolean;
 }
 
 export interface Violation {
@@ -212,6 +272,10 @@ export interface Violation {
 
 export interface RunOutcome {
   violations: Violation[];
+  /** ADR 0494: 変形した引数の形の数え上げ（`操作:変形:狙った記憶の状態` → 回数）。実際に何を渡したかを報告に載せる。 */
+  shapes: Record<string, number>;
+  /** 終わった時点の、作った記憶の状態（作成順。`status` と、purge 済みなら `+purged`）。 */
+  finalStates: string[];
   trace: string[];
   /**
    * recall ごとの、backend に依らない形の結果（`RunOptions.snapshot` を立てたときだけ）。
@@ -247,6 +311,8 @@ export interface RunOptions {
   /** `VECS` の代わりに `DIFF_VECS` を使う。 */
   diffVectors?: boolean;
   snapshot?: boolean;
+  /** `relationStore` を runtime に配線する（`relations` profile、ADR 0494）。配線すると recall の段3が変わる。 */
+  relations?: boolean;
 }
 
 export async function runOps(
@@ -284,6 +350,7 @@ export async function runOps(
       outboxStore: stores.outboxStore,
       vectorStore: stores.vectorStore,
       lexicalStore: lexical ? stores.lexicalStore : undefined,
+      relationStore: runOpts.relations ? stores.relationStore : undefined,
       eventStore: stores.eventStore,
       tenantSettingsStore: stores.tenantSettingsStore,
       llmProvider: llm as never,
@@ -293,6 +360,8 @@ export async function runOps(
     });
   const rt = makeRuntime(false);
   const rtLex = makeRuntime(true);
+  /** 群の操作（`group`／`resolveGroup`）と、`relations` profile の recall。配線は `runOpts.relations` で決まる。 */
+  const rtRel = rt;
   const ids: MemoryId[] = [];
   /** I11・I12 の数え上げ用。`ids` と違い、consolidate が作った記憶も入れる（`nth` の意味は変えない）。 */
   const allIds: MemoryId[] = [];
@@ -340,11 +409,71 @@ export async function runOps(
     return value;
   };
   const nth = (i: number) => (ids.length > 0 ? ids[i % ids.length] : undefined);
+  /**
+   * ADR 0494: 消した記憶の id。forget 済み（`purgedAt` なし）と purge 済み（`purgedAt` あり。行は墓標として残る）を
+   * 別々に集め、`i` の偶奇で交互に狙う（片方が無ければ、もう片方）。どちらも無ければ undefined。
+   */
+  const deadNth = async (i: number): Promise<MemoryId | undefined> => {
+    const forgotten: MemoryId[] = [];
+    const purged: MemoryId[] = [];
+    for (const id of ids) {
+      const m = await stores.memoryStore.get(ctx, id);
+      if (m?.status !== "forgotten") continue;
+      (m.purgedAt ? purged : forgotten).push(id);
+    }
+    const pool =
+      (i & 1) === 1 && purged.length > 0 ? purged : forgotten.length > 0 ? forgotten : purged;
+    return pool.length > 0 ? pool[Math.floor(i / 2) % pool.length] : undefined;
+  };
+  /** ADR 0494: 操作に渡す id を変形する（`upper`: 大文字、`dead`: 消した記憶を狙う。無ければ元の id）。 */
+  const shapes: Record<string, number> = {};
+  const countShape = async (op: string, id: MemoryId | undefined, mu?: ArgMutation) => {
+    if (mu === undefined || id === undefined) return;
+    const m = await stores.memoryStore.get(ctx, id.toLowerCase() as MemoryId);
+    const state = m === null || m === undefined ? "missing" : m.purgedAt ? "purged" : m.status;
+    const key = `${op}:${mu}:${state}`;
+    shapes[key] = (shapes[key] ?? 0) + 1;
+  };
+  const target = async (op: string, i: number, mu?: ArgMutation): Promise<MemoryId | undefined> => {
+    const id = mu === "dead" ? ((await deadNth(i)) ?? nth(i)) : nth(i);
+    await countShape(op, id, mu);
+    return id !== undefined && mu === "upper" ? (id.toUpperCase() as MemoryId) : id;
+  };
+  /** `relations` profile で作った群のメンバー（`resolveGroup` が使う）。 */
+  const groups: MemoryId[][] = [];
+  /** 群の操作で起きうる、設計どおりの競合（メンバーの状態が変わった等）。違反にしない。 */
+  const isExpectedGroupConflict = (e: unknown) =>
+    isMemoryStatusConflictError(e) ||
+    isContestedGroupMembershipMismatchError(e) ||
+    isContestedWithoutCompanionError(e);
 
   const check = async (r: RecallResult, q: RecallQuery, oi: number) => {
     const v = (inv: string, detail: string) => violations.push({ inv, detail, op: oi });
     const returned = new Set(r.memories.map((m) => m.memoryId));
     if (returned.size !== r.memories.length) v("I2-unique", JSON.stringify([...returned]));
+    // I14（ADR 0494）: 群の同伴（`contestedWithId` を持たない `contested` から辿った `mandatory_companion`）は、
+    // 群ごとに `relationMaxCount` 件まで（`RecallQuery.relationMaxCount`）。単位は丸ごと返る（owner を含む）ので、
+    // 返った owner（同伴でなく、`contested` で `contestedWithId` なし）の数 × 上限が、同伴の総数の上限になる。
+    if (q.relationMaxCount !== undefined && q.relationMaxCount > 0) {
+      const rows = new Map(
+        (await stores.memoryStore.getMany(ctx, [...returned])).map((m) => [m.id, m]),
+      );
+      const isGroupMember = (id: MemoryId | undefined) => {
+        const m = id === undefined ? undefined : rows.get(id);
+        return m?.status === "contested" && (m.contestedWithId ?? null) === null;
+      };
+      const owners = r.memories.filter(
+        (m) => m.retrievedVia !== "mandatory_companion" && isGroupMember(m.memoryId),
+      ).length;
+      const companions = r.memories.filter(
+        (m) => m.retrievedVia === "mandatory_companion" && isGroupMember(m.companionOf),
+      ).length;
+      if (companions > owners * q.relationMaxCount)
+        v(
+          "I14-relationMaxCount",
+          `companions ${companions} > owners ${owners} × ${q.relationMaxCount}`,
+        );
+    }
     let returnedInScope = 0;
     for (const rm of r.memories) {
       const m = await stores.memoryStore.get(ctx, rm.memoryId);
@@ -483,6 +612,10 @@ export async function runOps(
         halfLifeHours: op.hl,
       }),
       embeddingStatus: op.ready ? "ready" : "pending",
+      // ADR 0494: 群の同伴の並び・切り捨ては `validFrom` の新しい順→id の順。`validFrom` が全員 null だと id で決まり、
+      // id が作成順の `mem-N`（Fake・InMemory）か乱数の uuid（Postgres）かで並びが割れる（約束の外）ので、
+      // `relations` の実行では作成ごとに別の `validFrom` を付けて、id の比較に落ちないようにする。
+      ...(runOpts.relations ? { validFrom: at } : {}),
     };
     const m = await stores.memoryStore.createMemory(ctx, n);
     alias.set(m.id, `c${ids.length}`);
@@ -538,6 +671,7 @@ export async function runOps(
                   ...(op.x.tw ? { timeWeighting: "eventAwareFreshness" } : {}),
                   ...(op.x.dbl > 0 ? { digestBandLimit: op.x.dbl } : {}),
                   ...(op.x.qt.length > 0 ? { tags: op.x.qt } : {}),
+                  ...(op.x.rmc ? { relationMaxCount: op.x.rmc } : {}),
                 }
               : {}),
           } as RecallQuery;
@@ -573,9 +707,17 @@ export async function runOps(
         }
         case "usage": {
           if (lastRecall && lastRecall.memories.length > 0) {
-            const used = lastRecall.memories
+            const used: MemoryId[] = lastRecall.memories
               .filter((_, i) => (op.pick >> i) & 1)
               .map((m) => m.memoryId);
+            if (op.mu === "upper") {
+              await countShape("usage", used[0], "upper");
+              for (let u = 0; u < used.length; u++) used[u] = used[u]!.toUpperCase() as MemoryId;
+            } else if (op.mu === "dead") {
+              const dead = await deadNth(op.pick);
+              if (dead !== undefined) used.push(dead);
+              await countShape("usage", dead, "dead");
+            }
             if (used.length > 0) {
               await rt.observe(ctx, {
                 kind: "memory_usage",
@@ -587,29 +729,79 @@ export async function runOps(
           break;
         }
         case "forget": {
-          const id = nth(op.i);
+          const id = await target(op.k, op.i, op.mu);
           if (id) await rt.forget(ctx, { memoryId: id });
           break;
         }
         case "purge": {
-          const id = nth(op.i);
+          const id = await target(op.k, op.i, op.mu);
           if (id) await rt.purge(ctx, { memoryId: id });
           break;
         }
         case "restore": {
-          const id = nth(op.i);
+          const id = await target(op.k, op.i, op.mu);
           if (id) await rt.restoreArchived(ctx, { memoryId: id });
           break;
         }
         case "mark": {
-          const a = nth(op.i);
-          const b = nth(op.j);
+          const a = await target(op.k, op.i, op.mu);
+          const b = await target(op.k, op.j, op.mu);
           if (a && b && a !== b) await rt.markContested(ctx, a, b);
           break;
         }
-        case "resolve": {
+        case "group": {
+          const members = [...new Set([nth(op.i), nth(op.j), nth(op.l)])].filter(
+            (m): m is MemoryId => m !== undefined,
+          );
+          if (members.length >= 3) {
+            try {
+              const res = await rtRel.markContestedGroup!(ctx, members);
+              if (res.outcome.kind === "contested_group") groups.push(members);
+            } catch (e) {
+              if (!isExpectedGroupConflict(e)) throw e;
+            }
+          }
+          break;
+        }
+        case "link":
+        case "unlink": {
           const a = nth(op.i);
-          if (a) {
+          const b = nth(op.j);
+          if (a && b && a !== b) {
+            const rs = stores.relationStore!;
+            if (op.k === "link") await rs.link(ctx, "contradicts", a, b);
+            else await rs.unlink(ctx, "contradicts", a, b);
+          }
+          break;
+        }
+        case "resolveGroup": {
+          const members = groups.length > 0 ? groups[op.g % groups.length] : undefined;
+          if (members) {
+            try {
+              await rtRel.resolveContestedGroup!(
+                ctx,
+                members,
+                op.sup ? { kind: "supersede", winnerId: members[0]! } : { kind: "both_active" },
+              );
+            } catch (e) {
+              if (!isExpectedGroupConflict(e)) throw e;
+            }
+          }
+          break;
+        }
+        case "resolve": {
+          const a = await target(op.k, op.i, op.mu);
+          if (a && op.mu === "dead") {
+            // 消した記憶を、対として解決しようとする（`contested` でないので、何も起きないはず）。
+            const other = nth(op.i + 1);
+            if (other && other !== a)
+              await rt.resolveContested(
+                ctx,
+                a,
+                other,
+                op.sup ? { kind: "supersede", winnerId: a } : { kind: "both_active" },
+              );
+          } else if (a) {
             const m = await stores.memoryStore.get(ctx, a);
             if (m?.status === "contested" && m.contestedWithId) {
               await rt.resolveContested(
@@ -623,11 +815,26 @@ export async function runOps(
           break;
         }
         case "consolidate": {
-          const a = nth(op.i);
-          const b = nth(op.j);
+          const a = await target(op.k, op.i, op.mu);
+          const b = await target(op.k, op.j, op.mu);
           if (a && b && a !== b) {
             const res = await rt.consolidate(ctx, { target: { memoryIds: [a, b] } });
             if (res.consolidatedMemoryId) allIds.push(res.consolidatedMemoryId);
+          }
+          break;
+        }
+        case "fcc": {
+          const id = await target(op.k, op.i, op.mu);
+          if (id) {
+            const res = await rt.findCorrectionCandidates(ctx, {
+              text: "a b",
+              limit: 20,
+              excludeMemoryIds: [id],
+            });
+            // ADR 0485: 除外の突き合わせは大文字小文字を無視する。
+            for (const c of res.candidates)
+              if (c.memoryId.toLowerCase() === id.toLowerCase())
+                violations.push({ inv: "I13-exclude", detail: `${id} が除外されていない`, op: oi });
           }
           break;
         }
@@ -639,11 +846,24 @@ export async function runOps(
           break;
       }
     } catch (e) {
-      violations.push({ inv: "EXCEPTION", detail: `${op.k}: ${(e as Error).message}`, op: oi });
+      // 大文字にした id（`upper`）は、fixture（InMemory・Fake）では「実在しない記憶」と同じ扱いで断られる
+      // （ADR 0446 の既存の違い）。その断りだけは違反にしない。ほかの例外は違反のまま。
+      const upperRejected =
+        backend.acceptsUpperCaseIds !== true &&
+        "mu" in op &&
+        op.mu === "upper" &&
+        /memory not found for tenant/.test((e as Error).message ?? "");
+      if (!upperRejected)
+        violations.push({ inv: "EXCEPTION", detail: `${op.k}: ${(e as Error).message}`, op: oi });
     }
     now += step();
   }
-  return { violations, trace, snapshots };
+  const finalStates: string[] = [];
+  for (const id of allIds) {
+    const m = await stores.memoryStore.get(ctx, id);
+    finalStates.push(m ? `${m.status}${m.purgedAt ? "+purged" : ""}` : "missing");
+  }
+  return { violations, shapes, finalStates, trace, snapshots };
 }
 
 /** 違反の種類 `inv` が残る限り、操作を1つずつ抜いて短くする。 */
@@ -651,6 +871,7 @@ export async function minimize(
   backend: FuzzBackend,
   ops: readonly Op[],
   inv: string,
+  runOpts: RunOptions = {},
 ): Promise<Op[]> {
   let current = [...ops];
   let changed = true;
@@ -658,7 +879,7 @@ export async function minimize(
     changed = false;
     for (let i = current.length - 1; i >= 0; i--) {
       const candidate = current.filter((_, j) => j !== i);
-      const { violations } = await runOps(backend, candidate);
+      const { violations } = await runOps(backend, candidate, runOpts);
       if (violations.some((x) => x.inv === inv)) {
         current = candidate;
         changed = true;
@@ -687,10 +908,11 @@ export async function fuzzSeeds(backend: FuzzBackend, opts: FuzzSeedsOptions): P
   const first = opts.firstSeed ?? 1;
   for (let seed = first; seed < first + opts.seeds; seed++) {
     const ops = genOps(seed, opts.len, opts.profile);
-    const firstRun = await runOps(backend, ops);
+    const runOpts: RunOptions = { relations: opts.profile === "relations" };
+    const firstRun = await runOps(backend, ops, runOpts);
     const violations = [...firstRun.violations];
     if (opts.checkDeterminism) {
-      const second = await runOps(backend, ops);
+      const second = await runOps(backend, ops, runOpts);
       const k = firstRun.trace.findIndex((t, i) => t !== second.trace[i]);
       if (k !== -1 || firstRun.trace.length !== second.trace.length) {
         violations.push({
@@ -702,7 +924,8 @@ export async function fuzzSeeds(backend: FuzzBackend, opts: FuzzSeedsOptions): P
     }
     if (violations.length === 0) continue;
     const v0 = violations[0]!;
-    const minimal = v0.inv === "I9-determinism" ? ops : await minimize(backend, ops, v0.inv);
+    const minimal =
+      v0.inv === "I9-determinism" ? ops : await minimize(backend, ops, v0.inv, runOpts);
     reports.push(
       [
         `seed=${seed}${opts.profile === undefined || opts.profile === "default" ? "" : `（${opts.profile}）`} ${v0.inv}（op ${v0.op}）: ${v0.detail}`,
@@ -775,8 +998,9 @@ export function runForDiff(
   backend: FuzzBackend,
   ops: readonly Op[],
   jitterSeed: number,
+  relations = false,
 ): Promise<RunOutcome> {
-  return runOps(backend, ops, { jitterSeed, diffVectors: true, snapshot: true });
+  return runOps(backend, ops, { jitterSeed, diffVectors: true, snapshot: true, relations });
 }
 
 /**
