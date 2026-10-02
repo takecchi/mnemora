@@ -233,6 +233,11 @@ export type SubjectCandidatesInput = string[];
  * `JST` は `Asia/Tokyo` に揃えない。`EST` を `Intl` は `America/Panama` と解決するが、保存されるのは `EST` のまま）。
  * 観測日時の暦日（`observedLocalDate`）は、渡された値を `Intl.DateTimeFormat` に渡して計算する。
  * 検査を IANA の名前だけに絞ると、今は通る入力が例外になる（破壊的）ので、締めていない（クローン miku の判断）。
+ *
+ * ⚠ **`messages[].text` の `max(2000)`（`speaker` の `max(200)` も同じ）が数える単位は Unicode のコードポイントである**
+ * （UTF-16 のコード単位でも、書記素でも、バイトでもない）。【実測 2026-10-02、zod 4.5.4】`😀`（コード単位2つ）を2000個は通り2001個は断る。
+ * 結合文字つきの `e\u0301`（2コードポイント・1書記素）は1000個で通り1001個で断り、ZWJ 絵文字 `👨‍👩‍👧`（5コードポイント・1書記素）は
+ * 400個で通り401個で断る。孤立サロゲートも1つを1コードポイントと数える。歯は `extraction-context-text-length-unit.test.ts`。
  */
 export const ExtractionContextSchema = z.object({
   messages: z
@@ -351,11 +356,11 @@ export interface ObserveEventInput {
    * | `Date` | ISO 8601 の文字列に変わる | `Date` のまま保持する |
    * | 値が `undefined` の欄 | 欄ごと消える | 欄が残る |
    * | `BigInt` | 例外（`JSON.stringify` が投げる） | 同じ |
-   * | 関数・`Symbol` の値（欄の値として） | 欄ごと消える | 例外（`DataCloneError`。行は書かない） |
-   * | `toJSON` を持つ値 | `toJSON` の戻り値で保存する（`data` 自体が `toJSON` を持てば、`1` のような object でない値で読み戻る） | 例外（`DataCloneError`。行は書かない） |
+   * | 関数・`Symbol` の値（欄の値として） | 欄ごと消える（配列の要素なら `null`） | 同じ（ADR 0486 から。それ以前は `DataCloneError` で断っていた） |
+   * | `toJSON` を持つ値 | `toJSON` の戻り値で保存する（`data` 自体が `toJSON` を持てば、`1` のような object でない値で読み戻る） | 同じ（ADR 0486 から。`toJSON` には欄の名前を渡す。`Date` は `toJSON` を呼ばず `Date` のまま保つ） |
    *
    * （この表の全行の歯は `packages/postgres/src/__tests__/observation-payload-json-roundtrip.postgres.test.ts`。
-   * 関数・`Symbol`・`toJSON` の2行は、53巡目で表に足した今の振る舞いである。）
+   * 関数・`Symbol`・`toJSON` の2行は、53巡目で表に足した。fixture はその後（ADR 0486）Postgres に揃えた。）
    *
    * どちらも例外にならない値では、書き込みは成功する。その後の `getObservation`・
    * `reextract`・監査の読み返しは、adapter によって違う値を見る。**`extractData: true` の

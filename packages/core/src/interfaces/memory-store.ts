@@ -1073,6 +1073,17 @@ export interface MemoryStore {
    *   段1の索引・段5の集計はいずれも `forgotten` の `decayFloorAt`/`decayBaseSeq` を
    *   読まないため、**`recall()` の結果には影響しない**——値が見えるのは `get()` で
    *   直接読んだときだけ（監査・エクスポート時のノイズ）。
+   * - **purged**（`forget` → `purge` 済み。`status` は `forgotten` のまま、`purgedAt` が入り、
+   *   `content` はトゥームストーン）: `forgotten` と同じ形で、`reinforce`・`reinforceMany`・
+   *   `recordUsageAndReinforce`・`Runtime.observe({ kind: 'memory_usage' })` のどの口でも
+   *   `lastReinforcedAt`（と `decayFloorAt`）が書き換わる。`status`・`purgedAt`・`content` は
+   *   動かず、`memory_events` も書かない。`forgotten` と同じ理由で **`recall()` の結果には
+   *   影響しない**（`get()` で直接読んだときだけ見える）。弾く・拒否する経路は無い
+   *   （[ADR 0453](../../../../docs/decisions/0453-embed-job-and-reinforce-state-matrix-round27.md)
+   *   負債3で実測。`PostgresMemoryStore` の歯は
+   *   `packages/postgres/src/__tests__/reinforce-purged-memory.postgres.test.ts`、
+   *   [ADR 0501](../../../../docs/decisions/0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md)。
+   *   InMemory 側は測っていない）。
    *
    * `reinforce` の対象を `active`/`contested` に絞るかどうかは、Issue #840 と ADR 0303
    * 追記節で扱った——**この doc の時点では絞っていない**。呼び出し側が
@@ -2252,7 +2263,7 @@ export interface MemoryStore {
   /**
    * Issue #372（(B) 第2段。`docs/decisions/`「主張キーの衝突を検出する」ADR、ADR 0185
    * 決定4・ADR 0320 決定7・決定8 の続き）: 「同じ tenant・同じ `subjectId`・同じ claim key
-   * （`claimKeySubject`/`claimKeyPredicate`）・有効期間が重なる・`contentHash` が違う、
+   * （`claimKey.subject`/`claimKey.predicate`。列は `claim_key_subject`/`claim_key_predicate`）・有効期間が重なる・`contentHash` が違う、
    * 他の `active` Memory」を**列と索引だけで**（LLM を一度も呼ばずに）見つける読み取り
    * 専用の口。`idx_memories_claim_key`
    * （`packages/postgres/migrations/0021_memories_claim_key.sql`、ADR 0320 決定7）が

@@ -83,3 +83,5 @@
 - **これが覆るとしたら**: 構築時の検査を足すと決まったとき（歯が赤になり、README の節を書き直す）。bullmq の版が上がって不正値の扱いが変わったとき（README の【実測】の版と表を直す）。
 
 - **測っていないこと**: redis-server 7.4.7 以外・bullmq 6.3.8 以外。Cluster・Sentinel。`everyMs` が小さい値（`1`〜`10` ms）での負荷。`start()` を呼ばない driver。`stop()` 後の scheduler の残り（ADR 0449 が測った）。止まった scheduler を Redis から消す手順（`removeJobScheduler`）の実走。
+
+- **追記（ADR 0498、2026-10-02）**: 「これが覆るとしたら」の条件が満たされた。オーナーが v1.X.0 での破壊的変更を許したので、案1を採り、`everyMs`・`jobName` を構築時に断る形にした（`queueName` は BullMQ が投げるので触らない）。上の「決定」の3（歯）と README の節は書き換わっている。この ADR の本文（測定値・案の比較）はそのまま残す。

@@ -59,7 +59,7 @@ import type {
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
 import { listRelatedManyIfSupported } from "./relation-level.js";
-import { findBudgetCut } from "./recall-budget-cut.js";
+import { checkedTokenCounter, findBudgetCut } from "./recall-budget-cut.js";
 import {
   DEFAULT_RECALL_OUTPUT_VALIDATION,
   validateRecallOutput,
@@ -113,7 +113,7 @@ export interface RecallRuntimeDeps {
    * `RuntimeDeps.tenantSettingsStore`（`getDefaultHalfLifeHours` 用に必須）を持っており、
    * `recall` の配線（`runtime.ts` の `recall` 関数）がそれをここへそのまま渡す。
    *
-   * **省略可能**（ADR 0165 決めたこと13）。`createRecallRuntime` を直接呼ぶ外部の
+   * **省略可能**（ADR 0165 決めたこと13）。`runRecall` を直接呼ぶ外部の
    * 呼び出し側を壊さないため——省略すると `decay_clock` は `'wall'` 固定として動く
    * （＝本 ADR 以前とまったく同じ挙動）。
    */
@@ -386,6 +386,19 @@ function collectGroupComponent(
     }
     for (const neighbor of edges.get(current) ?? []) {
       if (!visited.has(neighbor)) {
+        // ADR 0494: この recall の候補に居て、群のメンバー（`contested` かつ `contestedWithId` なし）でない記憶は、
+        // 辺が張ってあっても群に入れず、そこから先も辿らない。入れると、同じ記憶が別の単位と群の両方に入り、
+        // 結果に2回返る（`RelationStore.link` を直接呼んで `active` な記憶へ辺を張ると起きる）。
+        const candidate = byId.get(neighbor);
+        if (
+          candidate !== undefined &&
+          !(
+            candidate.memory.status === "contested" &&
+            (candidate.memory.contestedWithId ?? null) === null
+          )
+        ) {
+          continue;
+        }
         visited.add(neighbor);
         queue.push(neighbor);
       }
@@ -586,7 +599,13 @@ export async function runRecall(
   signal?: AbortSignal,
 ): Promise<RecallResult> {
   try {
-    return await runRecallBody(ctx, query, deps, signal);
+    // ADR 0497: 壊れた `tokens`（NaN・負・Infinity・数でない）を返す counter は、最初の呼び出しで断る。
+    return await runRecallBody(
+      ctx,
+      query,
+      { ...deps, tokenCounter: checkedTokenCounter(deps.tokenCounter) },
+      signal,
+    );
   } catch (error) {
     // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:`（問いの本文）を落とす。
     throw omitParamsFromError(error);
@@ -1626,6 +1645,9 @@ async function runRecallBody(
     relationEdges.get(b)!.add(a);
   };
   const groupCompanions: ScoredCandidate[] = [];
+  // ADR 0494: `relationMaxCount` を超えて切った（`over_limit { stage: "relation" }` に数えた）群のメンバーの id。
+  // 段3.5 の連想の候補から外す（同じ記憶を連想の `unit_assembly_dropped`・`over_limit` でもう一度数えない）。
+  const relationOverLimitIds = new Set<MemoryId>();
   if (groupOwners.length > 0) {
     if (deps.relationStore === undefined) {
       omitted.push({
@@ -1728,6 +1750,7 @@ async function runRecallBody(
         const sorted = [...eligible].sort(compareByValidFromDescThenId);
         const capped = sorted.slice(0, relationMaxCount);
         const overLimitRelationCount = sorted.length - capped.length;
+        for (const cut of sorted.slice(relationMaxCount)) relationOverLimitIds.add(cut.id);
         if (overLimitRelationCount > 0) {
           omitted.push({
             kind: "over_limit",
@@ -1976,6 +1999,7 @@ async function runRecallBody(
         const excludeIds = new Set<MemoryId>([
           ...withinLimit.map((c) => c.memory.id),
           ...allCompanions.map((c) => c.memory.id),
+          ...relationOverLimitIds,
           ...anchorIds,
         ]);
         // 複数アンカーから同じ記憶が浮上しても、associationOf は最初に当たった
@@ -2677,7 +2701,8 @@ async function runRecallBody(
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
       overLimitAssociationSeatlessIds.has(c.memory.id) ||
-      associationAssemblyDroppedIds.has(c.memory.id),
+      associationAssemblyDroppedIds.has(c.memory.id) ||
+      relationOverLimitIds.has(c.memory.id),
   );
   if (promotedFromBelowThreshold.length > 0) {
     const promotedIds = new Set(promotedFromBelowThreshold.map((c) => c.memory.id));
@@ -2714,7 +2739,8 @@ async function runRecallBody(
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      associationAssemblyDroppedIds.has(c.memory.id),
+      associationAssemblyDroppedIds.has(c.memory.id) ||
+      relationOverLimitIds.has(c.memory.id),
   );
   if (promotedFromNotComparable.length > 0) {
     const notComparableIndex = omitted.findIndex((o) => o.kind === "score_not_comparable");
@@ -2793,7 +2819,8 @@ async function runRecallBody(
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
       overLimitAssociationSeatlessIds.has(c.memory.id) ||
-      associationAssemblyDroppedIds.has(c.memory.id),
+      associationAssemblyDroppedIds.has(c.memory.id) ||
+      relationOverLimitIds.has(c.memory.id),
   );
   if (promotedFromOverLimit.length > 0) {
     const overLimitRescoreIndex = omitted.findIndex(

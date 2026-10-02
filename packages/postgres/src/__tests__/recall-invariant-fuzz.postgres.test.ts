@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createRuntime } from "@mnemora/core";
 import {
   InMemoryEventStore,
+  InMemoryRelationStore,
   InMemoryLexicalStore,
   InMemoryMemoryStore,
   InMemoryOutboxStore,
@@ -27,6 +28,7 @@ import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { PostgresRelationStore } from "../relation-store.js";
 import {
   closeTestClient,
   getTestClient,
@@ -72,6 +74,11 @@ const DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_DIFF_SEEDS ?? 40);
 // create の `occurredAt`）を振る profile。CI の所要時間を延ばさないよう、本数は小さく絞る。
 const FIELDS_SEEDS = Number(process.env.RECALL_FUZZ_PG_FIELDS_SEEDS ?? 10);
 const FIELDS_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_FIELDS_DIFF_SEEDS ?? 10);
+// ADR 0494: `relationStore` をつなぐ profile（`relations`）と、引数を変形する profile（`argdead`・`argupper`）。
+const RELATIONS_SEEDS = Number(process.env.RECALL_FUZZ_PG_RELATIONS_SEEDS ?? 10);
+const RELATIONS_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_RELATIONS_DIFF_SEEDS ?? 10);
+const ARG_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARG_SEEDS ?? 10);
+const ARGDEAD_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARGDEAD_DIFF_SEEDS ?? 10);
 const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.RECALL_FUZZ_PG_FIRST_SEED ?? 1);
 
@@ -108,6 +115,7 @@ function postgresBackend(mode: ConnectionMode): FuzzBackend {
           lexicalStore: new PostgresLexicalStore(db),
           eventStore: new PostgresEventStore(db),
           tenantSettingsStore: new PostgresTenantSettingsStore(db),
+          relationStore: new PostgresRelationStore(db),
           embeddingProvider: {
             space: TEST_EMBEDDING_SPACE,
             embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
@@ -117,6 +125,8 @@ function postgresBackend(mode: ConnectionMode): FuzzBackend {
       };
     },
     vector: (v) => [...v, 0],
+    // 操作の対象の id を大文字にしても受ける（ADR 0446 の既存の違い。fixture は受けない）。
+    acceptsUpperCaseIds: true,
   };
 }
 
@@ -144,6 +154,7 @@ function testkitBackend(
           lexicalStore: new InMemoryLexicalStore(memoryStore),
           eventStore: new InMemoryEventStore(memoryStore, memoryStore.events),
           tenantSettingsStore: new InMemoryTenantSettingsStore(),
+          relationStore: new InMemoryRelationStore(memoryStore, memoryStore.relations),
           embeddingProvider: {
             space: TEST_EMBEDDING_SPACE,
             embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
@@ -163,7 +174,12 @@ async function postgresRun(seed: number, profile: FuzzProfile = "default"): Prom
   const key = `${profile}:${seed}`;
   let run = postgresRuns.get(key);
   if (!run) {
-    run = await runForDiff(postgresBackend("indexscan_off"), genOps(seed, LEN, profile), seed);
+    run = await runForDiff(
+      postgresBackend("indexscan_off"),
+      genOps(seed, LEN, profile),
+      seed,
+      profile === "relations",
+    );
     postgresRuns.set(key, run);
   }
   return run;
@@ -180,7 +196,7 @@ async function diffAgainstPostgres(
   let compared = 0;
   for (let seed = FIRST_SEED; seed < FIRST_SEED + seeds; seed++) {
     const outcome = diffRuns(
-      await runForDiff(other, genOps(seed, LEN, profile), seed),
+      await runForDiff(other, genOps(seed, LEN, profile), seed, profile === "relations"),
       await postgresRun(seed, profile),
     );
     compared += outcome.compared;
@@ -201,6 +217,9 @@ const INVARIANT_LEGS: { profile: FuzzProfile; seeds: number; mode: ConnectionMod
   { profile: "default", seeds: DEFAULT_SEEDS, mode: "planner" },
   { profile: "wide", seeds: WIDE_SEEDS, mode: "seqscan_off" },
   { profile: "fields", seeds: FIELDS_SEEDS, mode: "planner" },
+  { profile: "relations", seeds: RELATIONS_SEEDS, mode: "planner" },
+  { profile: "argdead", seeds: ARG_SEEDS, mode: "planner" },
+  { profile: "argupper", seeds: ARG_SEEDS, mode: "planner" },
 ];
 
 describe("recall の不変条件（シードつきのランダムな操作列、本物の Postgres + pgvector）", () => {
@@ -257,6 +276,22 @@ describe("recall の不変条件（シードつきのランダムな操作列、
     expect(report).toBe("");
     expect(compared).toBeGreaterThan(0);
   }, 1_800_000);
+
+  for (const [profile, seeds] of [
+    ["relations", RELATIONS_DIFF_SEEDS],
+    ["argdead", ARGDEAD_DIFF_SEEDS],
+  ] as const) {
+    it(`差分（${profile}、indexscan_off）: ${seeds} シード × ${LEN} 操作で、Fake・testkit の InMemory と recall の結果が食い違わない`, async () => {
+      for (const [name, backend] of [
+        ["Fake", fakeBackend],
+        ["testkit", testkitBackend()],
+      ] as const) {
+        const { report, compared } = await diffAgainstPostgres(name, backend, seeds, profile);
+        expect(report).toBe("");
+        expect(compared).toBeGreaterThan(0);
+      }
+    }, 1_800_000);
+  }
 
   it("陽性対照: testkit の InMemory の aggregateScope を壊すと、食い違いが報告される", async () => {
     // 食い違いが1つ見えれば足りるので、本数は絞る。
