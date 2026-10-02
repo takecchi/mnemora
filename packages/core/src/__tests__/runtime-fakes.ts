@@ -243,6 +243,38 @@ function jsonContainsNul(value: unknown): boolean {
 }
 
 /**
+ * ADR 0506: `createRecall` で、Postgres が `recalls` の行を書けずに拒む入力を、何も書く前に断る
+ * （testkit の `InMemoryMemoryStore` の `assertRecallRecordStorable` と同じ判定。ADR 0480 の `createdAt` は呼び出し側）。
+ * `subjectId` は `text` 列（NUL を拒む）。`query`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` は
+ * `NOT NULL` の `jsonb` 列、`budget` は `jsonb` 列で、`packages/postgres` は `JSON.stringify` した値を送る——
+ * NUL を含めば拒み、JSON にならない値（`undefined`）は `NOT NULL` の列で拒む。
+ */
+function assertFakeRecallRecordStorable(record: NewRecallRecord): void {
+  if (record.subjectId != null && record.subjectId.includes("\u0000")) {
+    throw new Error("createRecall: subjectId must not contain NUL characters (U+0000)");
+  }
+  const jsonColumns: Array<[string, unknown, boolean]> = [
+    ["query", record.query, true],
+    ["budget", record.budget, false],
+    ["omitted", record.omitted, true],
+    ["usage", record.usage, true],
+    ["indexBand", record.indexBand, true],
+    ["explain", record.explain, true],
+    ["returnedMemories", record.returnedMemories, true],
+  ];
+  for (const [field, value, required] of jsonColumns) {
+    if (required && JSON.stringify(value) === undefined) {
+      throw new Error(
+        `createRecall: ${field} must be JSON-serializable (Postgres "jsonb" column is NOT NULL)`,
+      );
+    }
+    if (jsonContainsNul(value)) {
+      throw new Error(`createRecall: ${field} must not contain NUL characters (U+0000)`);
+    }
+  }
+}
+
+/**
  * Observation を書く口（`createObservation` / `createObservationWithOutbox`）で、Postgres が
  * NUL を拒む欄を先に検査する（Issue #816 の NUL 側の残り）。`subjectId`・`externalId`・
  * `kind` は `text` 列（`invalid byte sequence for encoding "UTF8": 0x00`）、`payload`・
@@ -2057,10 +2089,19 @@ export class FakeMemoryStore implements MemoryStore {
 
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertWellFormedCtx(ctx);
+    // ADR 0506: InMemory と同じ順（識別子 → 書けない値）。`recalls.subject_id`・`tenant_subject_activity.subject_id` は `text`。
+    assertWellFormedIdentifier(record.subjectId, "record.subjectId");
+    if (typeof record.advanceActivityClock === "object" && record.advanceActivityClock !== null) {
+      assertWellFormedIdentifier(
+        record.advanceActivityClock.subjectId,
+        "record.advanceActivityClock.subjectId",
+      );
+    }
     // ADR 0480: InMemory・Postgres と同じく Invalid Date の createdAt は書かずに拒む（活動時計も進めない）。
     if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
       throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
     }
+    assertFakeRecallRecordStorable(record);
     const id = nextId("rcl");
     // ADR 0404: 実装（`InMemoryMemoryStore`・`PostgresMemoryStore`）と同じく、`record.createdAt` を渡せばそれを使う。
     // ADR 0480: 呼び出し側の入力と共有しない（InMemory は structuredClone、Postgres は jsonb で往復する）。
@@ -2759,6 +2800,7 @@ export class FakeMemoryStore implements MemoryStore {
     },
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()].filter((m) => {
@@ -2807,6 +2849,7 @@ export class FakeMemoryStore implements MemoryStore {
     },
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()].filter((m) => {
@@ -2847,6 +2890,7 @@ export class FakeMemoryStore implements MemoryStore {
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
     assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     // `PostgresMemoryStore.listActiveClaimPredicates` は `query.limit` を生 SQL の `LIMIT`（bigint の
     // パラメータ）へそのまま渡すので、負数・`NaN`・`Infinity`・非整数・2^63 以上では Postgres が
     // 例外を投げる。検査せず `slice(0, limit)` へ渡すと違う件数を黙って返すので、他の `limit` を
@@ -4266,6 +4310,8 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     assertWellFormedCtx(ctx);
+    // ADR 0506: InMemory と同じく、`subjectIds` の各要素も読む前に断る。
+    subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
     const out = Object.create(null) as Record<string, number>;
     if (this.backing === undefined) return out;
     const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
