@@ -139,7 +139,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
-- **`RuntimeDeps.clock` の TSDoc が「注入した時計は outbox の `availableAt` や監査ログの `at` には届かない」と書いていたのを、実装に合わせて直した**（[ADR 0559](./docs/decisions/0559-clock-reaches-outbox-available-at.md)）。ドキュメントとコメントだけの変更で、実装・値・公開 API は変えていない（`pnpm api:check` の対象の TSDoc 以外は動かない）。注入した時計は outbox 行の `availableAt`・`createdAt` と監査ログの `at` に届く（`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now`）。同じ主張を写していたテスト・example のコメントも直した。
+- **`RuntimeDeps.clock` の TSDoc が「注入した時計は outbox の `availableAt` や監査ログの `at` には届かない」と書いていたのを、実装に合わせて直した**（[ADR 0559](./docs/decisions/0559-clock-reaches-outbox-available-at.md)）。ドキュメントとコメントだけの変更で、実装・値・公開 API の表面（`pnpm api:check` は差分なし）は変えていない。注入した時計は outbox 行の `availableAt`・`createdAt` と監査ログの `at` に届く（`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now`）。同じ主張を写していたテスト・example のコメントも直した。
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
   - **何が変わるか**: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの目次帯のうち、渡された id の purge 済み（`forgotten` かつ `purgedAt` が非 `null`）の行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ置き換える。エントリは残し `truncated` は落とす。未 purge の行・他のエントリ・他テナントは触らない。べき等。
