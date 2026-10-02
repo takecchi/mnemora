@@ -2478,7 +2478,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ⚠ **未リリース**。**番号は 56 である**。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
-**何が変わったか**: 次の数値（と名前）のオプションを、構築時に検査する。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` の `everyMs`・`jobName`・`concurrency` も同じ。ADR 0525 で揃えた。揃える前は素の `Error`）。message は `<クラス名>: <欄> must be …, got <値>` の形で、値が入る。**省略時の既定は変えない。**
+**何が変わったか**: 次の数値（と名前）のオプションを、構築時に検査する。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message は `<クラス名>: <欄> must be …, got <値>` の形で、値が入る。**省略時の既定は変えない。**
 型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
 
 | パッケージ | 欄 | 通る値 |
@@ -2685,9 +2685,6 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` の `### Changed`・`### Fixed` を見ること——**ここには複製しない。**
 **落ちる入力が増える変更は🔴（番号付きの一覧）に載せる**——この節は、直したあとに「例外の形・場所が変わる」「以前は落ちていた入力が通る」「以前は静かに通っていた入力が落ちる」ものを短く挙げる。
 
-- **`@mnemora/bullmq` の `createBullmqTickDriver`（`everyMs`・`jobName`・`concurrency`）、`@mnemora/postgres` の `registerEmbeddingSpace`（`space.dimensions`。数でなければ `TypeError`、正の整数でない・hnsw の上限 2000 超なら `RangeError`）、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider`（`space.dimensions`）: 壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）になった**（[ADR 0525](./decisions/0525-config-error-types-align-with-provider.md)。🔴 の項目56（ADR 0498）の続き。provider の数値オプションの形に揃えた）。
-  数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。`DeterministicEmbeddingProvider` の `space.dimensions` も、数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`。**message は変えていない。**
-  どちらも `Error` の子なので `instanceof Error` で捕まえている呼び出し側は変わらない。`err.name === "Error"`・`err.constructor === Error` で比べていた呼び出し側だけが、見直しの対象になる。**落ちる入力は増えも減りもしない**（投げる型だけが変わる）。公開 API・既定値は変えていない。
 - **`@mnemora/postgres`: トランザクションの `rollback` が失敗したとき、投げられるのが元のエラー（`code` 付き）になった**（[PR #1555](https://github.com/takecchi/mnemora/pull/1555)、[ADR 0444](./decisions/0444-pool-begin-release-rollback-error-preserved.md)）。
   以前は `Failed query: rollback` が投げられ、元のエラーが消えていた（接続ごと切れたときに起きる）。`rollback` の失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。
   `Failed query: rollback` の文面や、`err.cause` がその失敗であることに頼っていた呼び出し側は見直すこと。あわせて、`begin` が失敗した接続は pool へ戻らず捨てられるようになり（以前は借りたまま戻らず、Postgres の再起動を数回挟むと pool が枯れた）、
@@ -2743,9 +2740,6 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany`: `kind` が偽の値（`""`・`null`・`0`）のときは、絞り込まずに全件を返す**（[ADR 0488](./decisions/0488-relation-store-fake-alignment.md)。上の項目（ADR 0466・0469・0475）の続き）。
   `PostgresRelationStore` は `kind` の真偽で絞り込みの有無を決めるので、偽の値なら全件を返す。`InMemoryRelationStore` は `kind === undefined` で決めていたため、同じ入力で 0 件を返していた。いまは `@mnemora/postgres` と同じく全件を返す。`undefined` と、正しい `kind`・範囲外の文字列（`"bogus"` は 0 件）の返りは変えていない。
   **落ちる入力が減る変更**（新しく断る入力は無い。型の外の入力の返りが、本物に揃う）。core のテスト専用の `FakeRelationStore`（公開されていない）も同じに揃えた。conformance suite は変えていない。
-- **`@mnemora/testkit/fixtures` の `InMemory*`: 操作の対象の id（記憶・observation・recall・outbox のジョブ）が大文字の uuid でも、小文字と同じ記憶・同じ行として扱う**（[ADR 0521](./decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md)。上の項目（ADR 0466・0469・0475・0488）の続き）。
-  `@mnemora/postgres` は uuid 型の列で比べる・入口で小文字にそろえるので、大文字の id を同じ行として受ける。`InMemoryMemoryStore`・`InMemoryVectorStore`・`InMemoryRelationStore`・`InMemoryEventStore`・`InMemoryOutboxStore` は、ADR 0469・0475 の時点ではイベントの指し先（`NewMemoryEvent.memoryId`）だけを小文字にそろえ、操作の対象の `id` は完全一致で引いていた。そのため、大文字の id を `forget`・`purge`・`restoreArchived`・`markContested`・`resolveContested`・`consolidate`・群の操作・`get`・`getMany`・`VectorStore.delete`・`RelationStore.unlink`・`OutboxStore.complete` などに渡すと、黙って何もしないか（`not_found`、ベクトル・関係の行・ジョブが残る）、`memory not found for tenant` を投げていた（`updateStatus`・`reinforce`・`recordUsage`・`VectorStore.upsert`・`RelationStore.link`・使用報告など）。いまは `@mnemora/postgres` と同じく小文字の id と同じに動き、持つ id・積むイベントの `memoryId`・読み戻す id も小文字。
-  **落ちる入力が減る変更**（新しく断る入力は無い）。ただし、**以前は黙って何もしなかった呼び出しが、状態を変えるようになる**。大文字の id を渡して「何も起きないこと」に頼っていたテストは、結果が変わる。core のテスト専用の `FakeMemoryStore` ほか（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
 - **`@mnemora/testkit/fixtures` の InMemory: `decayFloorAt`・`lastReinforcedAt` の Invalid Date、`createObservationWithOutbox` の `opts.claimedBy` の NUL、`eraseTenant` の `limit`（NaN・非整数・Infinity・2^63 以上）を断る**（[ADR 0493](./decisions/0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)）。
   `@mnemora/postgres` は同じ入力を元から断る（Postgres の `timestamptz`・`text`・`bigint` の変換が拒む）。InMemory は以前、通していた: Invalid Date はそのまま保持して `createMemory` が成功し、NUL の `claimedBy` は outbox の行に入り、`eraseTenant` は `limit: NaN` でも成功した（`MemoryStore`・`VectorStore`・`OutboxStore` の3つ）。いまは、書く前に断る（何も書かない）。
@@ -2770,13 +2764,19 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ## 🟡 v1.2.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
 
-⚠ **2026-10-02 追記**: 下の2項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR（#1610・#1612）が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。
+⚠ **2026-10-02 追記**: 下の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR（#1610・#1612、のちに #1616・#1615 の分も）が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。
 
 - **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
   `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
+- **`@mnemora/bullmq` の `createBullmqTickDriver`（`everyMs`・`jobName`・`concurrency`）、`@mnemora/postgres` の `registerEmbeddingSpace`（`space.dimensions`。数でなければ `TypeError`、正の整数でない・hnsw の上限 2000 超なら `RangeError`）、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider`（`space.dimensions`）: 壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）になった**（[ADR 0525](./decisions/0525-config-error-types-align-with-provider.md)。🔴 の項目56（ADR 0498）の続き。provider の数値オプションの形に揃えた）。
+  数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。`DeterministicEmbeddingProvider` の `space.dimensions` も、数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`。**message は変えていない。**
+  どちらも `Error` の子なので `instanceof Error` で捕まえている呼び出し側は変わらない。`err.name === "Error"`・`err.constructor === Error` で比べていた呼び出し側だけが、見直しの対象になる。**落ちる入力は増えも減りもしない**（投げる型だけが変わる）。公開 API・既定値は変えていない。
+- **`@mnemora/testkit/fixtures` の `InMemory*`: 操作の対象の id（記憶・observation・recall・outbox のジョブ）が大文字の uuid でも、小文字と同じ記憶・同じ行として扱う**（[ADR 0521](./decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md)。上の項目（ADR 0466・0469・0475・0488）の続き）。
+  `@mnemora/postgres` は uuid 型の列で比べる・入口で小文字にそろえるので、大文字の id を同じ行として受ける。`InMemoryMemoryStore`・`InMemoryVectorStore`・`InMemoryRelationStore`・`InMemoryEventStore`・`InMemoryOutboxStore` は、ADR 0469・0475 の時点ではイベントの指し先（`NewMemoryEvent.memoryId`）だけを小文字にそろえ、操作の対象の `id` は完全一致で引いていた。そのため、大文字の id を `forget`・`purge`・`restoreArchived`・`markContested`・`resolveContested`・`consolidate`・群の操作・`get`・`getMany`・`VectorStore.delete`・`RelationStore.unlink`・`OutboxStore.complete` などに渡すと、黙って何もしないか（`not_found`、ベクトル・関係の行・ジョブが残る）、`memory not found for tenant` を投げていた（`updateStatus`・`reinforce`・`recordUsage`・`VectorStore.upsert`・`RelationStore.link`・使用報告など）。いまは `@mnemora/postgres` と同じく小文字の id と同じに動き、持つ id・積むイベントの `memoryId`・読み戻す id も小文字。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。ただし、**以前は黙って何もしなかった呼び出しが、状態を変えるようになる**。大文字の id を渡して「何も起きないこと」に頼っていたテストは、結果が変わる。core のテスト専用の `FakeMemoryStore` ほか（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
 ## この文書が確かめていないこと
 
