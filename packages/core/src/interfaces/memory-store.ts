@@ -1113,7 +1113,9 @@ export interface MemoryStore {
    *   負債3で実測。`PostgresMemoryStore` の歯は
    *   `packages/postgres/src/__tests__/reinforce-purged-memory.postgres.test.ts`、
    *   [ADR 0501](../../../../docs/decisions/0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md)。
-   *   InMemory 側は測っていない）。
+   *   testkit の InMemory も同じ（`reinforce`・`reinforceMany`・`recordUsageAndReinforce` を2者に同じ入力で流して一致を実測。
+   *   `packages/postgres/src/__tests__/store-reinforce-purged-checks.postgres.test.ts`、
+   *   [ADR 0519](../../../../docs/decisions/0519-inmemory-reinforce-purged-matches-postgres.md)）。`Runtime.observe` 経由は InMemory では測っていない）。
    *
    * `reinforce` の対象を `active`/`contested` に絞るかどうかは、Issue #840 と ADR 0303
    * 追記節で扱った——**この doc の時点では絞っていない**。呼び出し側が
