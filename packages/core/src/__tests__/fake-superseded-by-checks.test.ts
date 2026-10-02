@@ -470,6 +470,15 @@ describe("Fake: updateStatus / updateStatusWithEvent の supersededById（ADR 05
       const u = await s.mem();
       await call(s, u.id, "archived");
       expect(await s.store.get(A, u.id)).toMatchObject({ status: "archived" });
+      // forgotten を指すのを断るのは resolveContested* だけ（ADR 0503・0515）。updateStatus* は断らない（InMemory・Postgres と同じ）。
+      const v = await s.mem();
+      const gone = await s.mem();
+      await s.store.updateStatus(A, gone.id, "forgotten");
+      await call(s, v.id, "superseded", { supersededById: gone.id });
+      expect(await s.store.get(A, v.id)).toMatchObject({
+        status: "superseded",
+        supersededById: gone.id,
+      });
     });
   }
 });
