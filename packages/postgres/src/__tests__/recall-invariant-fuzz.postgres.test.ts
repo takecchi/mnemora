@@ -125,6 +125,8 @@ function postgresBackend(mode: ConnectionMode): FuzzBackend {
       };
     },
     vector: (v) => [...v, 0],
+    // 操作の対象の id を大文字にしても受ける（ADR 0446 の既存の違い。fixture は受けない）。
+    acceptsUpperCaseIds: true,
   };
 }
 
@@ -162,6 +164,8 @@ function testkitBackend(
       };
     },
     vector: (v) => [...v, 0],
+    // 操作の対象の id を大文字にしても受ける（ADR 0446 の既存の違い。fixture は受けない）。
+    acceptsUpperCaseIds: true,
   };
 }
 
