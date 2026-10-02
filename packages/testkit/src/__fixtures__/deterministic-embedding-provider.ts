@@ -16,11 +16,15 @@ export class DeterministicEmbeddingProvider implements EmbeddingProvider {
   ) {
     // ADR 0452: 本物の provider と同じく、`space.dimensions` は正の整数でなければならない（以前は `embed` の時点で
     // `RangeError: Invalid array length` になるか、`0` なら空のベクトルを返していた）。構築時に断る。
+    // ADR 0525: 数でなければ TypeError、数として不正（小数・非有限・`0` 以下）は RangeError。message は同じ。
+    const dimensionsMessage =
+      "DeterministicEmbeddingProvider: space.dimensions は正の整数でなければならない" +
+      `（${String(space.dimensions)}）。`;
+    if (typeof space.dimensions !== "number") {
+      throw new TypeError(dimensionsMessage);
+    }
     if (!Number.isInteger(space.dimensions) || space.dimensions <= 0) {
-      throw new Error(
-        "DeterministicEmbeddingProvider: space.dimensions は正の整数でなければならない" +
-          `（${String(space.dimensions)}）。`,
-      );
+      throw new RangeError(dimensionsMessage);
     }
     // 渡されたオブジェクトそのものは持たない（構築後に呼び出し側が書き換えても、`space` は動かない）。
     this.space = Object.freeze({ ...space });

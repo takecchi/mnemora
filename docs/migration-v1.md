@@ -2477,7 +2477,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ⚠ **未リリース**。**番号は 56 である**。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
-**何が変わったか**: 次の数値（と名前）のオプションを、構築時に検査する。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message は `<クラス名>: <欄> must be …, got <値>` の形で、値が入る。**省略時の既定は変えない。**
+**何が変わったか**: 次の数値（と名前）のオプションを、構築時に検査する。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` の `everyMs`・`jobName`・`concurrency` も同じ。ADR 0525 で揃えた。揃える前は素の `Error`）。message は `<クラス名>: <欄> must be …, got <値>` の形で、値が入る。**省略時の既定は変えない。**
 型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
 
 | パッケージ | 欄 | 通る値 |
@@ -2652,6 +2652,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` の `### Changed`・`### Fixed` を見ること——**ここには複製しない。**
 **落ちる入力が増える変更は🔴（番号付きの一覧）に載せる**——この節は、直したあとに「例外の形・場所が変わる」「以前は落ちていた入力が通る」「以前は静かに通っていた入力が落ちる」ものを短く挙げる。
 
+- **`@mnemora/bullmq` の `createBullmqTickDriver`（`everyMs`・`jobName`・`concurrency`）、`@mnemora/postgres` の `registerEmbeddingSpace`（`space.dimensions`。数でなければ `TypeError`、正の整数でない・hnsw の上限 2000 超なら `RangeError`）、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider`（`space.dimensions`）: 壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）になった**（[ADR 0525](./decisions/0525-config-error-types-align-with-provider.md)。🔴 の項目56（ADR 0498）の続き。provider の数値オプションの形に揃えた）。
+  数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。`DeterministicEmbeddingProvider` の `space.dimensions` も、数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`。**message は変えていない。**
+  どちらも `Error` の子なので `instanceof Error` で捕まえている呼び出し側は変わらない。`err.name === "Error"`・`err.constructor === Error` で比べていた呼び出し側だけが、見直しの対象になる。**落ちる入力は増えも減りもしない**（投げる型だけが変わる）。公開 API・既定値は変えていない。
 - **`@mnemora/postgres`: トランザクションの `rollback` が失敗したとき、投げられるのが元のエラー（`code` 付き）になった**（[PR #1555](https://github.com/takecchi/mnemora/pull/1555)、[ADR 0444](./decisions/0444-pool-begin-release-rollback-error-preserved.md)）。
   以前は `Failed query: rollback` が投げられ、元のエラーが消えていた（接続ごと切れたときに起きる）。`rollback` の失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残る。
   `Failed query: rollback` の文面や、`err.cause` がその失敗であることに頼っていた呼び出し側は見直すこと。あわせて、`begin` が失敗した接続は pool へ戻らず捨てられるようになり（以前は借りたまま戻らず、Postgres の再起動を数回挟むと pool が枯れた）、
