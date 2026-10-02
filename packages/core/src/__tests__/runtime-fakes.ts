@@ -674,10 +674,11 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewObservation,
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
-    assertObservationHasNoNul("FakeMemoryStore", input);
-    // ADR 0493: `subjectId`・`externalId` の孤立サロゲートも Postgres・InMemory は断る（`MalformedIdentifierError`）。
+    // ADR 0493・0563: `subjectId`・`externalId` の孤立サロゲートと NUL は、Postgres・InMemory と同じ `MalformedIdentifierError`
+    // （`kind: "malformed_identifier"`）で断る。素の `Error` を投げる NUL の検査（`assertObservationHasNoNul`）より先に見ること。
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    assertObservationHasNoNul("FakeMemoryStore", input);
     // 9回目の棚卸し: testkit の fixture と `@mnemora/postgres`（`timestamptz` 列）と同じく、Invalid Date の日時を拒む。
     for (const [field, value] of [
       ["recordedAt", input.recordedAt],
@@ -1018,14 +1019,12 @@ export class FakeMemoryStore implements MemoryStore {
       //
       // `ctx.tenantId` の NUL・孤立サロゲートは、ADR 0493 で各公開メソッドの冒頭の `assertWellFormedCtx(ctx)` が断る
       // （以前はここに「共通の入口が無いので扱わない」と書いていた。InMemory が先に揃い、Fake も各メソッドで明示した）。
+      // ADR 0493・0563: `subjectId` の孤立サロゲートと NUL は、InMemory・Postgres と同じ `MalformedIdentifierError`
+      // （`kind: "malformed_identifier"`）で断る。素の `Error` を投げる NUL の検査より先に見る。
+      assertWellFormedIdentifier(input.subjectId, "input.subjectId");
       if (input.content.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: content must not contain NUL characters (U+0000)`);
       }
-      if (input.subjectId != null && input.subjectId.includes("\u0000")) {
-        throw new Error(`FakeMemoryStore: subjectId must not contain NUL characters (U+0000)`);
-      }
-      // ADR 0493: `subjectId` の孤立サロゲート（InMemory・Postgres は `MalformedIdentifierError`）と、`extractorVersion` の NUL。
-      assertWellFormedIdentifier(input.subjectId, "input.subjectId");
       if (input.extractorVersion != null && input.extractorVersion.includes("\u0000")) {
         throw new Error(
           `FakeMemoryStore: extractorVersion must not contain NUL characters (U+0000)`,
@@ -2461,6 +2460,8 @@ export class FakeMemoryStore implements MemoryStore {
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "archived",
+        // ADR 0563: `archived` の `at` は `opts.now`（`InMemoryMemoryStore`・`@mnemora/postgres` と同じ）。壁時計ではない。
+        at: new Date(opts.now),
         actor: { type: "system" },
         digestSnapshot,
         sizeBeforeBytes: null,
@@ -2508,13 +2509,16 @@ export class FakeMemoryStore implements MemoryStore {
     }
     // イベントを先に組み立てる（検査もここで走る）。書けないイベントなら、状態を書き換える前に投げる——
     // `updateStatusWithEvent`（#1368）と同じ形。Postgres は1トランザクションで巻き戻り、fixture は書き換える前に検査する。
-    const storedEvent = this.buildOwnedEvent(ctx, event, [id]);
+    // ADR 0563: `purgedAt` と `memory_events.at` は同じ値（`event.at`、省略時は壁時計を1回だけ読んだ値）。
+    // 2回読むと別の値になる（`InMemoryMemoryStore`・`@mnemora/postgres` は割れない）。
+    const at = event.at ?? new Date();
+    const storedEvent = this.buildOwnedEvent(ctx, { ...event, at }, [id]);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.tags = [];
     memory.attributes = {};
     memory.claimKey = null;
-    memory.purgedAt = new Date();
+    memory.purgedAt = new Date(at);
     memory.updatedAt = new Date();
 
     // ADR 0375 決定2: label の紐付けを外し、proposed な label の proposedCount を減らす。
@@ -3130,7 +3134,9 @@ export class FakeMemoryStore implements MemoryStore {
       if (m.tenantId !== ctx.tenantId) continue;
       if ((m.subjectId ?? null) !== query.subjectId) continue;
       if (m.status !== "active") continue;
-      if (!m.claimKey) continue;
+      // ADR 0563: `subject` か `predicate` の片方しか無い claim key は数えない（`InMemoryMemoryStore` は両方 `null` でないことを、
+      // Postgres は `claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL` を課す）。空文字は `null` ではないので数える。
+      if (!m.claimKey || m.claimKey.subject == null || m.claimKey.predicate == null) continue;
       const predicate = m.claimKey.predicate;
       const createdAtMs = m.createdAt.getTime();
       const existing = latestByPredicate.get(predicate);
@@ -3455,7 +3461,9 @@ export class FakeOutboxStore implements OutboxStore {
       return;
     }
     job.failedAt = opts?.at ?? new Date();
-    job.lastError = error;
+    // ADR 0563: Postgres の `text` は NUL を保存できない（22021）。`PostgresOutboxStore.fail`・`InMemoryOutboxStore.fail` は
+    // 目に見える6文字の `\u0000` へ置き換えて残す。NUL 以外は変えない。
+    job.lastError = error.replaceAll("\u0000", "\\u0000");
   }
 
   /**
