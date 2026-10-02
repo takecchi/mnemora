@@ -567,6 +567,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0559](./0559-clock-reaches-outbox-available-at.md) | 注入した時計は outbox の `available_at` と監査ログの `at` に届く——古い「届かない」「DB の `now()` で書かれる」記述を、いまの実装に合わせて直す（コメントと doc だけ） | 採用 (2026-10) |
 | [0560](./0560-doc-code-drift-sweep-readmes.md) | 文書とコードのずれを横に掃く（第8弾）— README 4つ（ルート・core・openai・local-embedding）を、今の main の実装に照らす | 採用 (2026-10) |
 | [0561](./0561-doc-code-drift-sweep-recall-testkit.md) | 文書とコードのずれを横に掃く（第9弾）— `docs/recall.md`・`packages/testkit/README.md`・`docs/north-star-paths.md`・`docs/README.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0562](./0562-core-fake-isolates-caller-mutation.md) | core の Fake も、呼び手の書き換えから自分の中身を守る（Issue #1412 A8 の9本と、同じ原因の1本） | 採用 (2026-10) |
 | [0563](./0563-core-fake-event-time-nul-and-claim-predicates.md) | core の Fake の `archived`・`purgedAt` の時刻、識別子と `lastError` の NUL、片側だけの claim key を、InMemory・Postgres に揃える | 採用 (2026-10) |
 | [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
 | [0566](./0566-fake-outbox-opts-now-controls.md) | ADR 0555 の歯の穴を塞ぐ——Fake の outbox 行の時刻を「やりすぎ」「外す」側からも縛り、0555 の文面のずれを訂正する | 採用 (2026-10) |

@@ -2436,10 +2436,9 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       // forgotten に変えたことにする。N には介入しない——フィクスチャを非対称にする
       // ことで「件数は合っているが対応が崩れている」変異も捕まえられるようにする。
       //
-      // `FakeMemoryStore.get` は backing.memories に入っている Memory オブジェクトへの
-      // 参照をそのまま返す実装（コピーを作らない）なので、事前に取得した参照の
-      // `status` を書き換えるだけで「割り込み」を再現できる。
-      const mBeforeIntervention = await stores.memoryStore.get(ctx, mId);
+      // ADR 0562: `FakeMemoryStore.get` は写しを返す（以前は backing.memories の行そのものだった）ので、
+      // 行そのものを引く `liveRowForTest` で取った参照の `status` を書き換えて「割り込み」を再現する。
+      const mBeforeIntervention = stores.memoryStore.liveRowForTest(ctx, mId);
       let intervened = false;
       stores.memoryStore.beforeUpdateStatus = (id) => {
         if (!intervened && id === mId) {
