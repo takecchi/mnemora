@@ -41,6 +41,8 @@
 - (d) `observe()` を通して `event.data` の往復を見る: `observe()` は抽出（LLM）と `tick()` を通る。いまの harness は `createMemory` を直接呼び、LLM を使わない（`consolidate` の固定応答だけ）。往復の不変条件（入力 `data` を JSON にして読み戻した値と、`event.data` が等しい。往復できない値は断る）を決めるには、`data` の値の生成器（`undefined`・`NaN`・`Date`・巨大な数・循環など）と、`observe` が書く行と断る行の仕様の整理が要る。**設計が要るので、不変条件の定義を先に書く別の仕事にする。**
 - (e) スコープを絞る欄（`validAt`・`labels`・`attributes`・`excludeProvenanceKinds`）: I11 の前提を壊す。必要な不変条件の骨子だけ書く: 検査器が各記憶に `validFrom/Until`・`labels`・`attributes`・`provenance.kind` を持たせ、クエリの絞りから期待の集合（`totalInScope` = 絞りに合う active/contested の数、`filtered` の `outside_scope` の内訳）を独立に数え、I11・I12 をその期待と突き合わせる。記憶側の欄を create に足す必要があり、既存 profile の create の乱数列を変えないよう `r2` から引く。**まだ書いていない**。
 
+**trigram の脚は `server_encoding` が UTF8 でない環境では skip する。** `PostgresTrigramLexicalStore.create` は SQL_ASCII の Postgres で `server_encoding_not_utf8` を投げて断る（ADR 0103・0319。仕様どおりで、製品コードの欠陥ではない）。CI の `packages/postgres` ジョブは UTF8 脚と SQL_ASCII 脚の2本あり、`channels`（planner、trigram）の脚は SQL_ASCII 脚でこの断りに当たって落ちた。そこで `probeTrigramLexicalSupport` が「使えない」と答えたとき、この1脚だけ `context.skip()` する（`trigram-lexical-store.conformance.postgres.test.ts` と同じ書き方）。skip は vitest の出力に残り、UTF8 脚は同じ脚をそのまま走らせる。ほかの脚（tsvector）は encoding を問わず走る。
+
 ## 割れ（直していない）
 
 どちらも `docs/decisions/0493` が揃えた「入力の断り」ではなく、語彙検索の一致の意味の食い違いである。固定の操作列を `recall-invariant-fuzz.postgres.test.ts` の「既知の割れ（ADR 0509）」2 本に留めた（直ったら期待を反転させる）。

@@ -26,7 +26,10 @@ import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
-import { PostgresTrigramLexicalStore } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  probeTrigramLexicalSupport,
+} from "../trigram-lexical-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
@@ -254,7 +257,15 @@ describe("recall の不変条件（シードつきのランダムな操作列、
   });
 
   for (const leg of INVARIANT_LEGS) {
-    it(`${leg.profile}（${leg.mode}${leg.lexical ? `、${leg.lexical}` : ""}）: ${leg.seeds} シード × ${LEN} 操作で、I1〜I8・I10〜I12・I16 の違反が無い`, async () => {
+    it(`${leg.profile}（${leg.mode}${leg.lexical ? `、${leg.lexical}` : ""}）: ${leg.seeds} シード × ${LEN} 操作で、I1〜I8・I10〜I12・I16 の違反が無い`, async (context) => {
+      // trigram の store は UTF8 の `server_encoding` を前提とする（ADR 0103・0319。`create` が
+      // `server_encoding_not_utf8` で断るのは仕様）。満たさない環境（CI の SQL_ASCII の job）では
+      // この脚だけ skip する（skip は vitest の出力に残る）。UTF8 の job が同じ脚を走らせる。
+      if (leg.lexical === "trigram") {
+        const { db } = await getClient(leg.mode);
+        const probe = await probeTrigramLexicalSupport(db);
+        if (!probe.ok) context.skip();
+      }
       const report = await fuzzSeeds(postgresBackend(leg.mode, leg.lexical), {
         seeds: leg.seeds,
         len: LEN,
