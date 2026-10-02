@@ -95,7 +95,24 @@ async function scenario(env: Env): Promise<Result> {
       ...(counting ? { activityCounting: counting } : {}),
     });
     const alias = aliasOf(ids);
-    return { ids: r.memories.map((m) => alias(m.memoryId)).sort(), recallId: r.recallId };
+    return {
+      ids: r.memories.map((m) => alias(m.memoryId)).sort(),
+      recallId: r.recallId,
+      // aggregateScope の結果（忘却ゲートの件数・範囲内の数・目次帯）
+      omitted: JSON.stringify(
+        r.omitted.map((o) => {
+          const x = o as unknown as Record<string, unknown>;
+          return [
+            x["kind"],
+            x["reason"] ?? x["condition"] ?? null,
+            x["scopeRelation"] ?? null,
+            x["count"],
+          ];
+        }),
+      ),
+      totalInScope: r.index.totalInScope,
+      band: (r.index.digestBand ?? []).map((d) => alias(d.memoryId)).sort(),
+    };
   };
 
   // 1. 活動時計のテナントで、subject なし・alice・bob の記憶を作る（半減期 3 回）
@@ -128,7 +145,7 @@ async function scenario(env: Env): Promise<Result> {
 
   // 3. recall を重ねて活動の数を進める。各回の結果（忘却ゲートの後）と、カウンタの進み方を見る
   const steps: unknown[] = [];
-  for (let i = 0; i < 7; i += 1) {
+  for (let i = 0; i < 18; i += 1) {
     const kind = i % 3;
     const c = kind === 1 ? ctxA : kind === 2 ? ctxB : ctx;
     const counting = kind === 0 ? undefined : "subject";
@@ -136,6 +153,9 @@ async function scenario(env: Env): Promise<Result> {
     steps.push([
       kind === 0 ? "tenant" : kind === 1 ? "alice(subject)" : "bob(subject)",
       r.ids,
+      r.omitted,
+      r.totalInScope,
+      r.band,
       await counters(ctx, ["alice", "bob"]),
     ]);
   }
@@ -230,6 +250,39 @@ async function scenario(env: Env): Promise<Result> {
     sw.archived.map((x) => alias2(x.memoryId)).sort(),
     await seqOf(ctx2, ids2),
   ];
+
+  // 8. 床とちょうど同じ値（境界）: 沈むのは `床 <= 今`（掃引）・`床 > 今` でなくなる（recall のゲート）。subject ありは今 = T + S_x
+  const ctx3 = fresh();
+  const ctx3A: Ctx = { ...ctx3, subjectId: "alice" };
+  await ts.setDecayClock!(ctx3, "activity");
+  await ts.setDefaultHalfLifeRecalls!(ctx3, 1);
+  for (let i = 0; i < 2; i += 1)
+    await runtime.recall(ctx3A, {
+      text: "fact",
+      limit: 5,
+      association: null,
+      activityCounting: "subject",
+    });
+  const ids3: Record<string, string> = {};
+  ids3["b0"] = await observeOne(ctx3, "fact boundary zero");
+  ids3["bA"] = await observeOne(ctx3A, "fact boundary alice");
+  await settle(ctx3);
+  const boundary: unknown[] = [await seqOf(ctx3, ids3), await counters(ctx3, ["alice"])];
+  const alias3 = aliasOf(ids3);
+  for (let i = 0; i < 6; i += 1) {
+    const r = await recallAliases(ctx3, ids3);
+    const sw = await runtime.sweepArchive(ctx3, { now: new Date(), limit: 10, clock: "activity" });
+    boundary.push([
+      r.ids,
+      r.omitted,
+      r.totalInScope,
+      sw.archived.map((x) => alias3(x.memoryId)).sort(),
+      (await counters(ctx3, ["alice"])).T,
+    ]);
+  }
+  out[
+    "8 boundary: sunk exactly when floor <= now (sweep) and gone from the gate when floor <= now"
+  ] = boundary;
   return out;
 }
 
@@ -290,6 +343,9 @@ const EXPECTED: Result = {
     [
       "tenant",
       ["m0", "mA", "mB", "q0", "qA"],
+      "[]",
+      5,
+      [],
       {
         T: 3,
         hasS: true,
@@ -301,6 +357,9 @@ const EXPECTED: Result = {
     [
       "alice(subject)",
       ["mA", "qA"],
+      "[]",
+      2,
+      [],
       {
         T: 3,
         hasS: true,
@@ -312,6 +371,9 @@ const EXPECTED: Result = {
     [
       "bob(subject)",
       ["mB"],
+      "[]",
+      1,
+      [],
       {
         T: 3,
         hasS: true,
@@ -324,6 +386,9 @@ const EXPECTED: Result = {
     [
       "tenant",
       ["m0", "mA", "mB", "q0", "qA"],
+      "[]",
+      5,
+      [],
       {
         T: 4,
         hasS: true,
@@ -336,6 +401,9 @@ const EXPECTED: Result = {
     [
       "alice(subject)",
       ["mA", "qA"],
+      "[]",
+      2,
+      [],
       {
         T: 4,
         hasS: true,
@@ -348,6 +416,9 @@ const EXPECTED: Result = {
     [
       "bob(subject)",
       ["mB"],
+      "[]",
+      1,
+      [],
       {
         T: 4,
         hasS: true,
@@ -360,12 +431,180 @@ const EXPECTED: Result = {
     [
       "tenant",
       ["m0", "mA", "mB", "q0"],
+      '[["below_threshold",null,null,1]]',
+      5,
+      ["qA"],
       {
         T: 5,
         hasS: true,
         S: {
           alice: 4,
           bob: 2,
+        },
+      },
+    ],
+    [
+      "alice(subject)",
+      ["mA"],
+      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      2,
+      ["qA"],
+      {
+        T: 5,
+        hasS: true,
+        S: {
+          alice: 5,
+          bob: 2,
+        },
+      },
+    ],
+    [
+      "bob(subject)",
+      ["mB"],
+      "[]",
+      1,
+      [],
+      {
+        T: 5,
+        hasS: true,
+        S: {
+          alice: 5,
+          bob: 3,
+        },
+      },
+    ],
+    [
+      "tenant",
+      ["m0", "mB", "q0"],
+      '[["below_threshold",null,null,1],["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      5,
+      ["mA", "qA"],
+      {
+        T: 6,
+        hasS: true,
+        S: {
+          alice: 5,
+          bob: 3,
+        },
+      },
+    ],
+    [
+      "alice(subject)",
+      [],
+      '[["below_threshold",null,null,1],["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      2,
+      ["mA", "qA"],
+      {
+        T: 6,
+        hasS: true,
+        S: {
+          alice: 6,
+          bob: 3,
+        },
+      },
+    ],
+    [
+      "bob(subject)",
+      ["mB"],
+      "[]",
+      1,
+      [],
+      {
+        T: 6,
+        hasS: true,
+        S: {
+          alice: 6,
+          bob: 4,
+        },
+      },
+    ],
+    [
+      "tenant",
+      ["m0"],
+      '[["below_threshold",null,null,3],["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      5,
+      ["mA", "mB", "q0", "qA"],
+      {
+        T: 7,
+        hasS: true,
+        S: {
+          alice: 6,
+          bob: 4,
+        },
+      },
+    ],
+    [
+      "alice(subject)",
+      [],
+      '[["filtered","decayed","within_scope",2],["ann_unreached",null,null,null]]',
+      2,
+      ["mA", "qA"],
+      {
+        T: 7,
+        hasS: true,
+        S: {
+          alice: 7,
+          bob: 4,
+        },
+      },
+    ],
+    [
+      "bob(subject)",
+      [],
+      '[["below_threshold",null,null,1]]',
+      1,
+      ["mB"],
+      {
+        T: 7,
+        hasS: true,
+        S: {
+          alice: 7,
+          bob: 5,
+        },
+      },
+    ],
+    [
+      "tenant",
+      ["m0"],
+      '[["below_threshold",null,null,1],["filtered","decayed","within_scope",3],["ann_unreached",null,null,null]]',
+      5,
+      ["mA", "mB", "q0", "qA"],
+      {
+        T: 8,
+        hasS: true,
+        S: {
+          alice: 7,
+          bob: 5,
+        },
+      },
+    ],
+    [
+      "alice(subject)",
+      [],
+      '[["filtered","decayed","within_scope",2],["ann_unreached",null,null,null]]',
+      2,
+      ["mA", "qA"],
+      {
+        T: 8,
+        hasS: true,
+        S: {
+          alice: 8,
+          bob: 5,
+        },
+      },
+    ],
+    [
+      "bob(subject)",
+      [],
+      '[["filtered","decayed","within_scope",1],["ann_unreached",null,null,null]]',
+      1,
+      ["mB"],
+      {
+        T: 8,
+        hasS: true,
+        S: {
+          alice: 8,
+          bob: 6,
         },
       },
     ],
@@ -379,18 +618,18 @@ const EXPECTED: Result = {
   },
   "4 usage reinforce (subjectless and alice)": [
     {
-      m0: ["active", 6, 19, 3],
-      mA: ["active", 10, 23, 3],
+      m0: ["active", 9, 22, 3],
+      mA: ["active", 17, 30, 3],
       mB: ["active", 0, 13, 3],
       q0: ["active", 2, 7, 1],
       qA: ["active", 4, 9, 1],
     },
     {
-      T: 6,
+      T: 9,
       hasS: true,
       S: {
-        alice: 4,
-        bob: 2,
+        alice: 8,
+        bob: 6,
       },
     },
   ],
@@ -398,68 +637,68 @@ const EXPECTED: Result = {
     "consolidated",
     "reflected",
     {
-      consolidated: ["active", 10, 15, 1],
-      reflected: ["active", 10, 15, 1],
+      consolidated: ["active", 17, 22, 1],
+      reflected: ["active", 17, 22, 1],
     },
     {
-      T: 6,
+      T: 9,
       hasS: true,
       S: {
-        alice: 4,
-        bob: 2,
+        alice: 8,
+        bob: 6,
       },
     },
   ],
   "6 sweepArchive clock activity, now=today: only qA has sunk": [
-    ["qA"],
+    ["mB", "q0", "qA"],
     false,
     {
-      m0: ["active", 6, 19, 3],
-      mA: ["active", 10, 23, 3],
-      mB: ["active", 0, 13, 3],
-      q0: ["active", 2, 7, 1],
+      m0: ["active", 9, 22, 3],
+      mA: ["active", 17, 30, 3],
+      mB: ["archived", 0, 13, 3],
+      q0: ["archived", 2, 7, 1],
       qA: ["archived", 4, 9, 1],
-      consolidated: ["active", 10, 15, 1],
-      reflected: ["active", 10, 15, 1],
+      consolidated: ["active", 17, 22, 1],
+      reflected: ["active", 17, 22, 1],
     },
   ],
   "6 sweepArchive clock either, now=today: wall axis alive, nothing": [
     [],
     false,
     {
-      m0: ["active", 6, 19, 3],
-      mA: ["active", 10, 23, 3],
-      mB: ["active", 0, 13, 3],
-      q0: ["active", 2, 7, 1],
+      m0: ["active", 9, 22, 3],
+      mA: ["active", 17, 30, 3],
+      mB: ["archived", 0, 13, 3],
+      q0: ["archived", 2, 7, 1],
       qA: ["archived", 4, 9, 1],
-      consolidated: ["active", 10, 15, 1],
-      reflected: ["active", 10, 15, 1],
+      consolidated: ["active", 17, 22, 1],
+      reflected: ["active", 17, 22, 1],
     },
   ],
   "6 sweepArchive clock wall, now=today: wall axis alive, nothing": [
     [],
     false,
     {
-      m0: ["active", 6, 19, 3],
-      mA: ["active", 10, 23, 3],
-      mB: ["active", 0, 13, 3],
-      q0: ["active", 2, 7, 1],
+      m0: ["active", 9, 22, 3],
+      mA: ["active", 17, 30, 3],
+      mB: ["archived", 0, 13, 3],
+      q0: ["archived", 2, 7, 1],
       qA: ["archived", 4, 9, 1],
-      consolidated: ["active", 10, 15, 1],
-      reflected: ["active", 10, 15, 1],
+      consolidated: ["active", 17, 22, 1],
+      reflected: ["active", 17, 22, 1],
     },
   ],
   "6 sweepArchive clock either, now=FAR: both axes sunk, q0 only": [
-    ["q0"],
+    [],
     false,
     {
-      m0: ["active", 6, 19, 3],
-      mA: ["active", 10, 23, 3],
-      mB: ["active", 0, 13, 3],
+      m0: ["active", 9, 22, 3],
+      mA: ["active", 17, 30, 3],
+      mB: ["archived", 0, 13, 3],
       q0: ["archived", 2, 7, 1],
       qA: ["archived", 4, 9, 1],
-      consolidated: ["active", 10, 15, 1],
-      reflected: ["active", 10, 15, 1],
+      consolidated: ["active", 17, 22, 1],
+      reflected: ["active", 17, 22, 1],
     },
   ],
   "6b recall after the clock has run far (the gate drops what sank)": [],
@@ -467,26 +706,26 @@ const EXPECTED: Result = {
     [],
     false,
     {
-      m0: ["active", 6, 19, 3],
-      mA: ["active", 10, 23, 3],
-      mB: ["active", 0, 13, 3],
-      q0: ["archived", 2, 7, 1],
-      qA: ["archived", 4, 9, 1],
-      consolidated: ["active", 10, 15, 1],
-      reflected: ["active", 10, 15, 1],
-    },
-  ],
-  "6 sweepArchive tenant default (activity), now=today: everything that sank": [
-    ["consolidated", "m0", "mA", "mB", "reflected"],
-    false,
-    {
-      m0: ["archived", 6, 19, 3],
-      mA: ["archived", 10, 23, 3],
+      m0: ["active", 9, 22, 3],
+      mA: ["active", 17, 30, 3],
       mB: ["archived", 0, 13, 3],
       q0: ["archived", 2, 7, 1],
       qA: ["archived", 4, 9, 1],
-      consolidated: ["archived", 10, 15, 1],
-      reflected: ["archived", 10, 15, 1],
+      consolidated: ["active", 17, 22, 1],
+      reflected: ["active", 17, 22, 1],
+    },
+  ],
+  "6 sweepArchive tenant default (activity), now=today: everything that sank": [
+    ["consolidated", "m0", "mA", "reflected"],
+    false,
+    {
+      m0: ["archived", 9, 22, 3],
+      mA: ["archived", 17, 30, 3],
+      mB: ["archived", 0, 13, 3],
+      q0: ["archived", 2, 7, 1],
+      qA: ["archived", 4, 9, 1],
+      consolidated: ["archived", 17, 22, 1],
+      reflected: ["archived", 17, 22, 1],
     },
   ],
   "6c recall after the sweeps": [],
@@ -506,6 +745,25 @@ const EXPECTED: Result = {
       wall0: ["active", null, null, null],
       act0: ["archived", 0, 5, 1],
     },
+  ],
+  "8 boundary: sunk exactly when floor <= now (sweep) and gone from the gate when floor <= now": [
+    {
+      b0: ["active", 0, 5, 1],
+      bA: ["active", 2, 7, 1],
+    },
+    {
+      T: 0,
+      hasS: true,
+      S: {
+        alice: 2,
+      },
+    },
+    [["b0", "bA"], "[]", 2, [], 1],
+    [["b0", "bA"], "[]", 2, [], 2],
+    [["b0", "bA"], "[]", 2, [], 3],
+    [["b0", "bA"], "[]", 2, [], 4],
+    [[], '[["below_threshold",null,null,2]]', 2, ["b0", "bA"], 5],
+    [[], '[["filtered","archived","outside_scope",2]]', 0, [], 6],
   ],
 };
 const space = TEST_EMBEDDING_SPACE;
