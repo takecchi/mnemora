@@ -8,7 +8,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0571（ADR 0557 の歯の穴）: `store-superseded-by-checks.postgres.test.ts` に足りなかった期待を、3実装
+ * ADR 0574（ADR 0557 の歯の穴）: `store-superseded-by-checks.postgres.test.ts` に足りなかった期待を、3実装
  * （testkit の InMemory・core の Fake・Postgres）に同じ入力で流して縛る。core 側の歯は
  * `fake-superseded-by-checks-controls.test.ts`（Fake だけの変異試験の対象）。
  *
@@ -82,7 +82,7 @@ const ev = (memoryId: string, kind: NewMemoryEvent["kind"] = "updated"): NewMemo
 type Side = { status: "active" | "superseded"; by?: string };
 
 for (const [kitName, makeKit] of KITS) {
-  describe(`${kitName}: supersededById の陽性対照・循環の走査・検査の位置（ADR 0557・0571）`, () => {
+  describe(`${kitName}: supersededById の陽性対照・循環の走査・検査の位置（ADR 0557・0574）`, () => {
     const pair = async (kit: Kit) => {
       const [a, b] = [await mem(kit), await mem(kit)];
       await kit.store.markContestedPair!(

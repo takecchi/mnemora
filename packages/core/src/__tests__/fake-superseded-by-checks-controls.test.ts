@@ -5,7 +5,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0571（ADR 0557 の歯の穴）: `fake-superseded-by-checks.test.ts` の変異試験で生き残った5つを塞ぐ。
+ * ADR 0574（ADR 0557 の歯の穴）: `fake-superseded-by-checks.test.ts` の変異試験で生き残った5つを塞ぐ。
  *
  * - 陽性対照: 対・群の外の `superseded`・`contested` を指す `superseded` は通る（外の `active`・`archived` だけでは、
  *   「外の `superseded`・`contested` まで断る」やりすぎが緑のままだった）。
