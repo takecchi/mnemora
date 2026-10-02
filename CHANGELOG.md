@@ -120,6 +120,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **まだ揃っていないもの**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す（`observe` の `text` などは `payload` に入る）。ADR 0543 の対象外。
   - **破壊的と数えない理由**: 断る入力は増えない。公開の fixture の振る舞いの変更で、型・DB・`@mnemora/postgres` は変わらない（[docs/migration-v1.md](./docs/migration-v1.md) の 🟡「v1.2.0 → 次の版」）。孤立サロゲートの保持に頼ったテストだけが影響を受ける。
 
+- **`extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`String.prototype.trim` で空になる値）のとき、抽出（LLM）に渡す本文と全文フォールバックの Memory の本文の前置きにしなくなった**（[ADR 0517](./docs/decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./docs/decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1、`@mnemora/core`）。
+
+  以前は `"  \n\nC"` のように空白が前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）。実質のある `title` は、前後の空白もそのまま前置きになる。
+
+  - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
+
 ### Fixed
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
@@ -139,6 +145,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 落とすのは message・`stack`・`cause` の連鎖の `params:` より後ろ（`(omitted by mnemora, N chars)`）。例外は新しく作らず、`kind`・`name`・`code`・`cause` は残る。
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504 と同じ扱い）。
   - **変えなかったこと**: `EventStore.get`・`list`、`PostgresTrigramLexicalStore` など、ほかの store の直接呼び。
+
+- **`@mnemora/postgres` の `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`・`purgeMemory`・`scrubPurged` が、同じラベルを逆の順で触る並行する書き込みと、生の 40P01（`deadlock detected`）で衝突しなくなった**（[ADR 0511](./docs/decisions/0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md)、ADR 0476 の負債1・2）。`labels` の行ロックを、どの経路でも名前のコードポイント順で取る。`createMemoriesWithOutboxAndEvents` は、衝突した候補が例外にならず `dropped` に黙って積まれていた。
+  - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。公開 API・DB・`Memory.tags`・`proposedCount` は変えない。
+  - **残ること**: まだ無いラベルを同時に新規作成する競合は、先取りできないので残る（ADR 0511 の負債）。
 
 ## [1.2.0] - 2026-10-02
 

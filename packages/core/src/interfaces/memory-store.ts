@@ -30,6 +30,14 @@ import type { DecayClock } from "./tenant-settings-store.js";
  * ときに追加の `SELECT` で読み直して詰めるため、その `SELECT` と実際に条件が破れた瞬間の
  * 間にも別の書き込みが割り込む余地がある。「衝突があったこと」は確実だが、「衝突した
  * 相手が何だったか」の正確な値としては読まないこと。
+ *
+ * **purge 済みの記憶（`status` が `"forgotten"` のまま `purgedAt` が入った行）への、`expectedStatus` 付きの
+ * 更新は、この例外で断られる**（ADR 0499）。そのとき `observedStatus` は `"forgotten"` である。
+ * `expectedStatus: "forgotten"`（`forgotten` から戻そうとした更新）なら、`expectedStatus` と `observedStatus`
+ * が**どちらも `"forgotten"` になる**——普通の競合（期待と違う値を観測した）とは読み方が違い、
+ * **例外を見ただけでは「purge 済みだから断られた」とは分からない**。purge 済みかどうかは、記憶を
+ * 読み直して `Memory.purgedAt` を見ること（purge は不可逆で、戻せない）。
+ * （`purge` 自身の CAS 違反は別の型 {@link MemoryPurgeConflictError} である。）
  */
 export class MemoryStatusConflictError extends Error {
   /** 判別子。クラスが2つの版に分かれても読める値（ADR 0418）。分岐は `instanceof` ではなく {@link isMemoryStatusConflictError} で行う。 */
