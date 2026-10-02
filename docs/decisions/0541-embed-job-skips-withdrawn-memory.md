@@ -55,6 +55,32 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 - 既存の歯: core の embed・tick・reembed・forget・purge・requeue 系 29 ファイル（183 本）、postgres の同系 36 ファイル（423 本）は緑のまま。
 - conformance suite には何も足していない（ADR 0434 決定5）。
 
+### 確かめ直し【実測】（2026-10-03。別の担い手が、自分専用の PostgreSQL 17 + pgvector〔ポート 55433〕で、head `446734c6` を取り直した）
+
+- **直す前の赤**: `packages/core/src/runtime.ts` だけを `origin/main` の形に戻し、core を build し直して歯を走らせた。postgres の歯は **6 本赤・19 本緑**（赤は pg・testkit・fake の各 forgotten・purged。渡った入力は forgotten が `secret-body-XYZ`、purged が `[purged]`）、core の歯は **2 本赤・2 本緑**。対照（active・archived・superseded・contested）と残る窓は緑のまま。上の「6 本」「2 本」と一致した。戻すと postgres 25 本・core 4 本（当時）とも緑。
+- **3実装に当たっているか**: postgres の歯は pg（`PostgresMemoryStore` ほか）・testkit（InMemory）・fake（`createFakeRuntimeStores`）の3つに、同じ `scenario` を当てる（上の赤の 6 本がそれぞれ 2 本ずつ）。ただし判定そのものは3実装に共通の `processEmbedJob` の 1 か所で、store ごとに違うのは `get` が返す `status`・`purgedAt` の写し方だけ。
+- **変異試験**（`runtime.ts` の早期 return に 1 か所ずつ。赤の本数は postgres の歯 / core の歯。戻した後は毎回、全部緑）。足した歯を入れる前の値は〔前〕、入れた後は〔後〕:
+
+| 変異 | postgres | core |
+|---|---|---|
+| (a) forgotten の判定を外す（`purgedAt` だけ見る） | 3 赤 | 1 赤 |
+| (b) `purgedAt` の判定を外す（`status === "forgotten"` だけ見る） | 〔前〕0 赤（**生き残った**）〔後〕0 赤 | 〔前〕0 赤〔後〕1 赤 |
+| (c) 判定を provider 呼び出しの後へ移す（本文は送られる） | 6 赤 | 2 赤〔前〕／3 赤〔後〕 |
+| (c2) provider は呼ぶがベクトルは書かない | 6 赤 | 2 赤〔前〕／3 赤〔後〕 |
+| (d) 打ち切りで `embeddingStatus` を `ready` にする | 6 赤 | 〔前〕0 赤〔後〕3 赤 |
+| (d2) 打ち切りで `embeddingStatus` を `failed` にする | 6 赤 | 〔前〕0 赤〔後〕3 赤 |
+| (e) 打ち切りを throw（`fail`）にする | 6 赤 | 2 赤〔前〕/ 3 赤〔後〕 |
+| (e2) `failed` を書いてから throw | 6 赤 | 2 赤〔前〕/ 3 赤〔後〕 |
+| (f1) contested も止める | 3 赤 | 0 赤（core の歯に contested は無い） |
+| (f2) archived も止める | 3 赤 | 1 赤（前後同じ） |
+| (f3) superseded も止める | 3 赤 | 0 赤（同上） |
+| (f4) `active` 以外を全部止める | 9 赤 | 1 赤〔前〕/ 2 赤〔後〕 |
+| (g) 打ち切りの代わりに provider を別の入力で呼ぶ | 6 赤 | 2 赤〔前〕/ 3 赤〔後〕 |
+| (k) `embeddingInput` フックを判定の前に呼ぶ | 〔前〕0 赤（**生き残った**）〔後〕0 赤 | 〔前〕0 赤〔後〕5 赤 |
+
+- **生き残った変異と塞いだ歯**: (b)、(k)、core 側の (d)・(d2)。(b) は、purge が `forgotten` の記憶にしか通らず（`status` が `forgotten` でない行に `purgedAt` が立つ経路が runtime に無い）、どの歯も `purgedAt` 側を独立には縛っていなかった。(k) は決定1の「`embeddingInput` のフックも呼ばない」を縛る歯が無かった。`packages/core/src/__tests__/fake-embed-job-skips-withdrawn.test.ts` に、(1) `get` が `status: active`・`purgedAt` ありの行を返す `purgedOnly` の場合（provider 0 回）、(2) フックの呼び出し回数（forgotten・purged では 0、active・archived では 1）、(3) `embeddingStatus` が `pending`（打ち切り）／`ready`（埋め込み）のまま、を足した（4 本 → 5 本。**実装は変えていない**）。足した後、(b)・(k)・(d)・(d2) は赤、戻して緑。postgres の歯は足していない（判定は3実装共通の 1 か所で、(b)・(k) は core の歯が受ける。(d) は postgres の歯が元から受けている）。
+- **残る限界**: (f1)・(f3) は core の歯だけでは生き残る（Fake の歯に contested・superseded が無い）が、postgres の歯が 3 実装すべてで赤にする。
+
 ## CHANGELOG・migration
 
 - CHANGELOG: `[1.3.0]` の `### Fixed` に書いた。この repo の CHANGELOG に `### Security` の見出しは無い（使われたことが無い）ので、Fixed。`[1.2.0]` は触っていない。
