@@ -99,3 +99,24 @@
 - **陽性対照**【実測】: 「migration の未リリースの節に、`[1.2.0]` 節の `### Breaking` を指す参照が残っていない」ことを、grep の形（`` `[1.2.0]` 節 `### Breaking` ``）で見た。いまは 0 件で、0508 の取り込み後（`3136a062` の `migration-v1.md`）は同じ形が1件（項目60。この枝で直した）だった。この grep が拾えることの対照になる。0525・0521 の項の位置は、`ADR 0525`・`ADR 0521` の grep の行番号と節の見出しの行番号を突き合わせて見た（機械の陽性対照は無い）。
 - **【未確認】**: 0534 が書く「#1615・#1616 以外で、`d49c46c` より後に `[1.2.0]` へ足された項目が無い」ことの網羅（0528 と 0533 の追い足しで、`ADR 0499|0502|0504|0506|0521|0523|0525|0524` の語の grep をしたが、`d49c46c` より後の全 PR を1本ずつ当ててはいない）。
 - **走らせたコマンド**: `git fetch origin && git merge origin/main`、`git ls-remote --tags origin v1.2.0`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
+
+## 追い足し（基準 main `28f98bee`、ADR 0532 の分）
+
+0532（#1632）が main に入ったので掃いた（`git diff e0a48aca 28f98bee`）。この枝は `origin/main` を merge した（衝突なし。索引は再生成して変更なし）。0531・0510 などは、まだ追い足していない。
+
+- **0532 の中身**【現物】: 差は ADR 0532 と1つの歯（`packages/postgres/src/__tests__/tick-job-sources-lowercase.postgres.test.ts`）と索引だけ。実装・TSDoc・README・約束の文書・CHANGELOG・migration-v1 は変わっていない（0532 も、変えていないと書く）。`tick` 経由の `consolidate`・`reflect` ジョブの `created` の `meta.sources` が小文字になること（ADR 0527 の続き）を測った。ジョブの payload の `memoryId` に大文字が入る入口は無い（payload は store が組み、`OutboxStore` に積む口は無い）。入口が仮に開いていても（payload を直接書き換えた行）、0527 の直しで `meta.sources` は小文字になる。Postgres と InMemory は一致、Fake は近傍が取れず `created` が積まれない（0521 の注と同じ）。
+- **探した場所**【現物】:
+  - 差の確認: `git diff e0a48aca 28f98bee`。
+  - `Runtime.reflect` の手順8（`runtime.ts`。ADR 0533 で書いた「`meta.sources` は store が返した行の id＝小文字」）と、`tick` が `consolidate`・`reflect` のジョブを処理する経路（`readSeedMemoryIdFromPayload` が payload の `memoryId` をそのまま種にする）、`docs/memory-model.md` 行13付近の「ジョブの `payload.memoryId` を種にして `consolidate()`/`reflect()` を呼ぶ」、`interfaces/outbox-store.ts`（`enqueue` の有無）、`docs/architecture.md` の `OutboxStore` の写し。
+  - 語の grep: `meta.sources` を `runtime.ts` に。`enqueue` を `interfaces/outbox-store.ts` と `docs/architecture.md` の `OutboxStore` の節に。`payload` に `consolidate|reflect` を重ねたもの（`docs/memory-model.md`）。
+  - 機械照合を、前回（0534 の分）と同じ文書の集合に再度通した。
+- **突き合わせの結果**【現物】:
+  - ADR 0532 が確かめた入口（`OutboxStore` に `enqueue` が無い。ジョブを積むのは `jobKinds` を渡す記憶の作成だけ。`tick` は payload の綴りを直さない）は、`interfaces/outbox-store.ts` の口の一覧、`runtime.ts` の `readSeedMemoryIdFromPayload` と一致した。
+  - `Runtime.reflect` の手順8の TSDoc（`meta.sources` は store が返した行の id＝小文字の正規形で、渡された綴りではない）は、`tick` 経由でも成り立つ（`tick` は同じ `consolidate`・`reflect` の本体を呼ぶ）。`docs/memory-model.md` の「ジョブの `payload.memoryId` を種にして…呼ぶ」は、0532 のあとも正しい。`meta.sources` に呼び出し側の綴りが残ると現在形で書いた所は、ADR 0527・0533 のとおり無い。
+  - CHANGELOG `[1.3.0]` の ADR 0527 の項（`meta.sources` を小文字に）は、`tick` 経由の経路を書いていない。0532 は割れが無く、挙動を変えていないので、足す必要は無い。migration に項目は無く、不要。
+- **直したもの**: なし（文書の側に古い記述が無かった）。
+- **コードの側を直すべき食い違い**: 見つからなかった。材料として残す【判断】: ADR 0532 の負債（Fake の `tick` 経由の `meta.sources` の中身は、近傍が取れないので見ていない。書き換えた payload の大文字が `consolidate` の返り値や `tick` の他の欄にどう出るかは見ていない）。`OutboxStore` に payload を渡して積む口を足す、または `createMemoryWithOutbox` が呼び出し側の id を payload に載せる形に変わるときは、0532 の歯の前提が崩れる（0532 の「これが覆るとしたら」）。
+- **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回と、行番号を除いて同じだった。
+- **陽性対照**【実測】: 一時の md に存在しない識別子 `readSeedMemoryIdFromPayloadX` を書いて識別子の照合に通し、拾った（実在する `readSeedMemoryIdFromPayload` は拾わなかった）。一時ファイルは削除した。`OutboxStore` に `enqueue` が無いことは grep の無ヒットで見た（`claimBatch` が同じ節でヒットすることで、grep が当たる場所を見ていることは確かめた）。入口の突き合わせには機械の陽性対照が無い（手で読んだ）。
+- **【未確認】**: 0532 の歯（実 Postgres・InMemory・Fake の4本）を走らせていない。ADR 0532 の変異試験（0527 の直しを外すと「書き換えた payload」の2本だけが赤になる）の結果。0532 が測っていない範囲（並行する複数の `tick`、`extract` ジョブ経由の `created`、実 API）。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
