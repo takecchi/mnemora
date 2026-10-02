@@ -66,6 +66,18 @@ function readSources() {
 }
 const sources = readSources();
 
+/**
+ * `cli.ts` の `printHelp` の本文（usage = `--help` の出力の元）。
+ * `cli.ts` は末尾で `main()` を無条件に実行するので import できない。ソースの文字列として切り出す。
+ */
+function readUsageSource() {
+  const cli = readFileSync(join(repoRoot, "examples/chat/src/cli.ts"), "utf8");
+  const start = cli.indexOf("function printHelp(");
+  const end = cli.indexOf("const HELP_COMMANDS");
+  return start < 0 || end < start ? "" : cli.slice(start, end);
+}
+const usage = readUsageSource();
+
 describe("examples/chat/README.md の節「フラグと環境変数の一覧」（ADR 0478）", () => {
   const body = section();
 
@@ -84,5 +96,21 @@ describe("examples/chat/README.md の節「フラグと環境変数の一覧」�
   it("陽性対照: 内部の測定スクリプト専用の変数（MEASURE_N）は節に載せていない（載せない基準どおり）", () => {
     expect(body).not.toMatch(/`MEASURE_N`/);
     expect(sources).toContain("MEASURE_N");
+  });
+
+  // ADR 0501（ADR 0478 負債1）: README の節に載せた利用者向けのものは、usage（--help）にも出ていること。
+  // 内部用（MEASURE_N など）は usage に載せない。
+  it("陽性対照: usage の本文を切り出せている（既に usage にある変数と、サブコマンド名が在る）", () => {
+    expect(usage.length).toBeGreaterThan(500);
+    expect(usage).toContain("MNEMORA_ANSWER_TRIALS_N");
+    expect(usage).toContain("answer-time-weighting");
+  });
+
+  it.each([...FLAGS, ...ENV_VARS])("%s は usage（--help）にも出ている", (token) => {
+    expect(usage, `${token} が cli.ts の usage に無い（README の節にはある）`).toContain(token);
+  });
+
+  it("陽性対照: 内部の測定スクリプト専用の変数（MEASURE_N）は usage に載せていない", () => {
+    expect(usage).not.toContain("MEASURE_N");
   });
 });

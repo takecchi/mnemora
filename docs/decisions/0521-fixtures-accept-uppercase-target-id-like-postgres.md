@@ -92,7 +92,7 @@
   - `checkedRef`（0469 の Postgres 側）: fuzz の `group`／`resolveGroup` の操作は、メンバーの id を変形しない（ADR 0494 の `mu` は `group`・`resolveGroup` に無い）。この変異は `markContestedGroup`・`resolveContestedGroup` に大文字のメンバーを渡したときだけ結果が変わる（固定の歯が実測で赤）。**等価な変異ではない**。`group` に `mu` を足せば届く（下の「残ったこと」）。
   - `FakeEventStore.append`（0475 の Fake 側）: Runtime が `EventStore.append` を呼ぶのは `created` などで、渡す `memoryId` は store が返した小文字の id。操作の引数の綴りが `EventStore.append` まで届かない。**等価ではない**（固定の歯が赤）が、fuzz の操作からは届かない。
   - `PostgresEventStore.append`（0475 の Postgres 側）: **結果が変わらない変異（等価）**【実測】。`normalizeUuidCase` を外しても、`isUuidLike` は大文字小文字を区別せず、`memory_events.memory_id` は uuid 型の列なので、書き込みも返り値も小文字の正規形のまま（固定の歯が、大文字の `memoryId` で `append` したときの保存・返りの小文字を縛っていて、変異を入れても緑）。
-- **この ADR で揃えた5つの口**（#1603〔ADR 0493。この ADR の時点で未マージなのでリンクしない〕が材料に挙げた `excludeMemoryIds`・`vec.delete`・`requeueEmbedJobs`・`restoreSupersededBy`・`outbox.complete`）の変異【実測。InMemory 側の小文字化を1つずつ外した】: いずれも **`uppercase-target-id-parity` が赤**（`digestBand.excludeMemoryIds`・`vs.delete`・`requeueEmbedJobs`・`restoreSupersededBy` 系3本・`outbox.complete`/`fail`）で、**fuzz の `argupper`（leg・差分）は緑のまま**。理由: Runtime が `digestBand.excludeMemoryIds` に渡すのは `recall()` が返した小文字の id、`restoreSupersededBy`・`requeueEmbedJobs`・`outbox.complete` は fuzz の操作に無い、`vec.delete` は `forget`・`purge` が呼ぶが、消えたベクトルは status のゲートで recall に出ないので結果から見えない。claim key の `excludeMemoryId` も同じ（変異で `uppercase-target-id-parity` の2本が赤、fuzz は緑）。
+- **この ADR で揃えた5つの口**（#1603〔[ADR 0493](./0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)〕が材料に挙げた `excludeMemoryIds`・`vec.delete`・`requeueEmbedJobs`・`restoreSupersededBy`・`outbox.complete`）の変異【実測。InMemory 側の小文字化を1つずつ外した】: いずれも **`uppercase-target-id-parity` が赤**（`digestBand.excludeMemoryIds`・`vs.delete`・`requeueEmbedJobs`・`restoreSupersededBy` 系3本・`outbox.complete`/`fail`）で、**fuzz の `argupper`（leg・差分）は緑のまま**。理由: Runtime が `digestBand.excludeMemoryIds` に渡すのは `recall()` が返した小文字の id、`restoreSupersededBy`・`requeueEmbedJobs`・`outbox.complete` は fuzz の操作に無い、`vec.delete` は `forget`・`purge` が呼ぶが、消えたベクトルは status のゲートで recall に出ないので結果から見えない。claim key の `excludeMemoryId` も同じ（変異で `uppercase-target-id-parity` の2本が赤、fuzz は緑）。
 
 ## 足した分の実行時間
 
@@ -118,6 +118,17 @@
 3. **`group`／`resolveGroup` の操作が id を変形しない**（fuzz。ADR 0494 の `mu` は `mark`・`forget` などにだけ付く）。大文字のメンバーを渡す形は固定の歯（`uppercase-target-id-parity`・`event-target-parity`）が見ているが、fuzz の操作の列では見ていない。`group` に `mu` を足すと `relations` か `argupper` の操作列が変わるので、足していない。
 4. **既存の4つの歯の `caseInsensitive: false` の側の分岐が、通らないまま残っている**（`uppercase-uuid-lookup`・`uppercase-uuid-store-entry`・`uppercase-uuid-contested-runtime`・`apply-correction-case-and-no-partial-write`）。削除すると各ファイルが大きく変わるので、この ADR では `true` に替えるだけにした。
 5. **conformance suite に足せば、外部の adapter 作者にも「大文字の対象 id を同じ記憶として受けるか」を約束させられる**が、約束を足すことはオーナーの領分（ADR 0434 決定5）。この ADR は suite に足していない。個別の歯だけで縛っている。**suite を足さないと縛れない点は無かった**（3実装の突き合わせを、postgres package の個別の試験に置けた）。
+
+## ADR 0493 の材料のうち、どれをこの ADR で閉じたか
+
+ADR 0493（#1603。main に入った）は、形 B（大文字の対象 id）を「ADR 0521 で扱う」として手を付けず、材料1〜5を残した【現物】。**0493 の文書は直していない。**main を取り込んだ後（#1603・#1608 などとの衝突を、`runtime-fakes.ts` の19か所で手で解いた。順序は「`assertWellFormedCtx(ctx)` で不正な ctx を断る → 対象の id を小文字にそろえる → 各口の検査」。Postgres も識別子の検査を入口で行ってから id を扱う）【判断】、上の表が崩れていないことを確かめた【実測】: `uppercase-target-id-parity.postgres.test.ts`（51本）・`fake-uppercase-target-id`・`in-memory-uppercase-target-id`・0493 の歯（`fake-input-checks-round2`・`fake-read-and-claim-input-checks`・`in-memory-input-checks-adr0493`・`input-checks-parity-0493.postgres`）はすべて緑。
+
+| 0493 の材料 | この ADR |
+|---|---|
+| 1: 形 B を揃えるか（`digestBand.excludeMemoryIds`・`VectorStore.delete`・`deleteAcrossSpaces`・`requeueEmbedJobs`・`restoreSupersededBy`・`previewRestoreSupersededBy`・`onlyMemoryIds`・outbox `complete`・`get`・`getMany`・`updateStatus`・`setEmbeddingStatus`・`reinforce`・`recordUsage`・`createMemory.sourceObservationId`・`VectorStore.upsert` ほか） | **閉じた**（上の表）。`markContestedPair`・`resolveOrphanedContested` は Runtime 経由の間接の確認まで |
+| 1 の一部: `markContestedGroup` に同じ id の大文字と小文字が混在 | store の入口でそろえてから重複を比べる形にしたので、store を直接呼ぶと重複を断る（Postgres と同じ形【現物】）。Runtime 経由は3実装とも `ineligible`（下の材料1）。store を直接呼んだ Postgres との突き合わせは未測定 |
+| 1 の一部: `EventStore.get` | イベントの id を取る口で、記憶の id ではないので触っていない |
+| 2: E13（`filter.status: null`）・3: E14（`FakeLexicalStore` の語）・4: D4（型の外の入力）・5: E4 の `sizeBeforeBytes: NaN` | **閉じていない**（この ADR の範囲外。0493 の判断のまま） |
 
 ## 検討した代替案
 

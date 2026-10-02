@@ -299,12 +299,37 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目51。**DB マイグレーションは無い。**修正前に書かれた、別テナントを指す行（`recall_usages`・`memories.source_observation_id`・`contested_with_id`・`superseded_by_id`）が在るかを調べる SQL は ADR 0439 に在る（読み取りだけ）。
   - 【確かめていないこと】`memory_events` への INSERT 11箇所（ADR 0436 から変わらず、1つずつは確かめていない）。検査と書き込みの間に並行して参照先が消えた場合の、外部キー違反の生のエラーの見え方。`FakeMemoryStore`（core）の検査を縛る歯（適合テストに当てられていない）。手元以外の環境・既存データでの食い違う行の有無。
 
+- **型の外の入力を、新しく例外で断る5つの口: `findCorrectionCandidates`（`text`・`excludeMemoryIds`）、`resolveContested`・`resolveContestedGroup`・`applyCorrection`（未知の `resolution.kind`）、`tick`（`opts`・`leaseMs`）、`decayFloorOffset` と `floorAt`（壊れた数値）、`observe`・`recall` の `attributes`（キー `__proto__`）**（[ADR 0496](./docs/decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md)、`@mnemora/core`。TypeScript の型どおりに呼んでいる限り、何も変わらない）
+
+  各 ADR が「オーナーの領分」として材料に残した、型の外の入力を黙って通す口を、オーナーが v1.X.0 で破壊的変更を許したので、クローンの判断で断るようにした。**どれも、書き込みより前に**断る。例外の message に入力値は入らない。
+
+  - **`findCorrectionCandidates`**（ADR 0485・ADR 0490 穴3）: `input.text` が文字列でない（`undefined` を含む）と `TypeError`（以前は `no_candidates` を返し、`omitted` に `candidate_generation` の `stage_skipped` が出た）。`input.excludeMemoryIds` が配列でない（裸の文字列を含む。以前は1文字ずつの集合になり何も除外されなかった）、または文字列でない要素を含む（以前は黙って通った）と `TypeError`。省略（`undefined`）は今までどおり。**文字列を配列に包んで通す案は採っていない**（ADR の「採らなかった案」）。`null` も配列でないので断る。空文字の `text` は今までどおり `recall()` の検証が断る。
+  - **`resolveContested`・`resolveContestedGroup`・`applyCorrection`（`resolution` を渡したとき）**（ADR 0446）: `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもないと `RangeError`（以前は `supersede` の分岐へ倒れ、勝者の無いまま**両側とも `superseded`** になった）。`applyCorrection` は `markContested` の前に断るので、`contested` の印も event も残らない。
+  - **`tick`**（ADR 0445 BK-2）: `opts` が object でない（`tick(ctx)` を含む）と `TypeError`、`opts.leaseMs` が有限の数でない（省略・文字列・`NaN`・`±Infinity`）と `RangeError`。claim する前に断る。以前は素の `TypeError`、`@mnemora/postgres` では drizzle が包んだ `Error`（SQLSTATE `22007`）、testkit の fixture では名前の無い `Error` だった。**`leaseMs` が 0 以下の有限の数は、今までどおり通す**（`TickOptions.leaseMs` の TSDoc が書いている今の振る舞い。正の数に絞るかは決めていない）。
+  - **`decayFloorOffset`（と、これを通る `defaultDecayStrategy.floorAt`・`defaultActivityDecayStrategy.floorAt`）**（ADR 0474 材料3）: `threshold` が有限かつ 0 超でない、`strength`・`halfLife` が有限かつ 0 以上でない、のどれかなら `RangeError`（以前は `NaN`・`Infinity`・負がそのまま式に入り、`NaN` の `floorAt` は Invalid Date を返した）。`strength: 0`・`halfLife: 0` は断らない（`halfLifeHours: 0` の「壊れた」記憶を作る既存の fixture が使う）。内部の呼び出し（既定の閾値・検査済みの値）は変わらない。
+  - **`observe`・`recall` の `attributes`**（ADR 0472 材料1）: キーに自前の `__proto__`（`JSON.parse` が作る）が在ると、zod の `ZodError`（`invalid_key`、path は `attributes.__proto__`。ほかのキーの検査エラーと同じ形）で断る（以前は zod の record が黙って落とし、`recall` の絞り込みが外れた・`observe` の属性が消えた）。`constructor`・`prototype` などは落ちないので、今までどおり通す。`AttributesSchema` を直接 `parse` する呼び出しは変わらない（`Runtime` の入口が `parse` の前に断る）。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。ただし、どれも型の外の入力だけである。
+  - **誰が影響を受けるか**: `as`・JavaScript・外部の JSON で、型の外の値（裸の文字列の `excludeMemoryIds`、`text` の無い `findCorrectionCandidates`、未知の `resolution.kind`、`leaseMs` の無い `tick`、`NaN` などの減衰の引数、`__proto__` の属性キー）を渡している呼び出し側。
+  - **変えなかったこと**: 既定値・`tick` の `leaseMs` の 0 以下・`strength`/`halfLife` の 0・`excludeMemoryIds` の省略・公開 API の面（`pnpm api:check` は変わらない）。testkit の `buildNewMemoryFixture` は、`decayFloorAt` を上書きで渡したときは `floorAt` を呼ばなくなった（値域の歯が `strength` に壊れた値を渡す形を保つため。結果は同じ）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目54。DB マイグレーションは無い。
+  - 【確かめていないこと】本物の OpenAI・Anthropic の LLM を通した経路。全テストは走らせていない（関連するファイルだけ）。
+
 - **差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か、壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた——自前の `TokenCounter` を `createRuntime` に渡している人へ**（[ADR 0497](./docs/decisions/0497-recall-rejects-broken-token-counter.md)、`@mnemora/core`）。
 
   以前は、`NaN`・負の数を返す counter では段4のトークン予算（`maxMemoryTokens`・`promptBudgetTokens`）が**黙って外れて全件が返り**（`budget_dropped` も出ない）、`Infinity` では全件が落ちた（[ADR 0483](./docs/decisions/0483-token-counter-broken-values.md)）。`RuntimeDeps.outputValidation: "off"` では何も知らされなかった。今は、`count()` の戻り値の `tokens` が有限で 0 以上の number でなければ（`NaN`・負の数・`±Infinity`・number でない値・戻り値の欠落）、`recall()` は `RangeError` で断る。message は値の種類だけを載せ、入力テキストは載せない。最初の壊れた値で止まる。予算が無くても（`usage` の計測で `count()` が呼ばれる）、`outputValidation` の値にかかわらず断る。
 
   - **変わらないこと**: 小数（`0.5`）は通る。`count()` が投げた例外は、これまでどおり包まずそのまま `recall()` の失敗になる。`counter` の欄の欠落・範囲外は断らず、これまでどおり `usage.counter` に出て `outputValidation` が知らせる。既定の `heuristicTokenCounter` は必ず通り、既定の挙動は変わらない。型・シグネチャ・公開 API は変わらない。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目55。**DB マイグレーションは無い。**
+
+- **provider のコンストラクタと `createBullmqTickDriver` が、壊れた数値オプションを構築時に例外で断るようになった（`@mnemora/bullmq`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）**（[ADR 0498](./docs/decisions/0498-constructor-config-checks.md)。[ADR 0477](./docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) の案1・[ADR 0467](./docs/decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) の面C を、オーナーが v1.X.0 での破壊的変更を許したので採った）
+
+  以前は壊れた値が黙って通り、API・BullMQ に渡ってから失敗する（または静かに止まる）か、`space.dimensions` に壊れた値が入った。今は構築時（`new`・`createBullmqTickDriver(...)`）に断る。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message に値が入る（数値・名前で、秘密ではない）。**省略時の既定は変えない。**
+  - **`@mnemora/bullmq`**: `everyMs` は数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下でなければ投げる（小数 `1.5` は通す。数値の文字列 `"50"` は断る）。`jobName` は省略（既定 `"mnemora-tick"`）か空でない文字列でなければ投げる。**以前は、負・`1` 未満の小数・`1e21` 以上の `everyMs` と空文字の `jobName` で、`start()` が成功したまま tick が数回（1回）で黙って止まり、`onTickError` も鳴らなかった**（ADR 0477 の実測）。`queueName` は BullMQ が同期的に投げるので触らない。
+  - **`@mnemora/openai`**: `OpenAIEmbeddingProvider` の `dimensions` は正の安全な整数、`OpenAILLMProvider` の `temperature`（渡すなら）は有限で `0` 以上でなければ投げる（上限は API ごとに違うので見ない）。
+  - **`@mnemora/anthropic`**: `AnthropicLLMProvider` の `maxTokens`（渡すなら）は正の安全な整数でなければ投げる。この provider に `temperature` の欄は無い。
+  - **`@mnemora/local-embedding`**: `LocalEmbeddingProvider` の `dimensions`・`numThreads`（渡すなら）は正の安全な整数でなければ投げる。`maxBatchSize`・`retry.attempts` は、今までどおり丸める（投げない）。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は構築できた入力が、新しく例外になる**。公開の型・export は増えない（検査は各パッケージの内部）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目56。DB マイグレーションは無い。
 
 ### Added
 
@@ -479,6 +504,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany` が、`kind` が偽の値（`""`・`null`・`0`）のとき、`PostgresRelationStore` と同じく絞り込まずに全件を返すようになった**（[ADR 0488](./docs/decisions/0488-relation-store-fake-alignment.md)）。以前は 0 件を返した。型の外の入力で、`undefined`（省略）と正しい `kind`（`"contradicts"`）の返りは変えていない。`@mnemora/postgres` の返りは変えていない。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、書き込み口に渡した `NewMemoryEvent.memoryId` が大文字の uuid でも、`@mnemora/postgres` と同じく小文字にそろえて受けるようになった**（[ADR 0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)。[ADR 0466](./docs/decisions/0466-inmemory-event-target-belongs-to-ctx-tenant.md) の続き）。自テナントの記憶の id を大文字にしたものは、以前は「記憶が無い」と断られた。積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。落ちる入力が減る変更で、操作の対象の `id` の大文字小文字は変えていない。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+
+- **`@mnemora/testkit/fixtures` の InMemory が、`@mnemora/postgres` が断る入力を3つ、新しく断るようになった**（[ADR 0493](./docs/decisions/0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)）。(1) `InMemoryMemoryStore.createMemory`（とそれを通る `createMemoryWithOutbox` など）の `NewMemory.decayFloorAt`・`lastReinforcedAt` が Invalid Date（`timestamptz` 列。以前は Invalid Date のまま保持して成功した）。(2) `InMemoryMemoryStore.createObservationWithOutbox` の `opts.claimedBy` に NUL（`outbox.claimed_by` は `text` 列。行を実際に書くときだけ。`jobKinds` が空・冪等の既存の行に当たるときは今までどおり見ない）。(3) `InMemoryMemoryStore`・`InMemoryVectorStore`・`InMemoryOutboxStore` の `eraseTenant` を直接呼んだとき、`limit` が NaN・非整数・Infinity・2^63 以上（`bigint` の引数。以前は `reachedLimit: false` で成功した。`erase-tenant.ts` の独立関数 `eraseTenant` は元から `limit` を正の整数に限る）。落ちる入力が増える変更だが、Postgres は元から同じ入力で断るので、本物の adapter で動く呼び出しは影響を受けない。公開の fixture が新しく例外を投げる変更は破壊的と数えない（[docs/migration-v1.md](./docs/migration-v1.md) の数え方の規律）ので、移行ガイドの 🟡 に載せた。conformance suite は変えていない。
 
 - **`@mnemora/openai`: `completeStructured` が、応答の余分な `"__proto__"` の欄を、継承された値として zod に読ませていたのを直した。**`null` を省略へ戻す写しが `JSON.parse` の `"__proto__"` をプロトタイプの差し替えにしていた（抽出の候補の `subjectId` が `{"__proto__":{"subjectId":"…"}}` で埋まった）。`@mnemora/anthropic` と同じく無視する。（[ADR 0468](./docs/decisions/0468-openai-null-strip-copies-own-proto-key-as-own-property.md)）
   - ⚠ **以前は通っていた応答が、新しく `ZodError` になる形がある**（必須の欄が `"__proto__"` の中にしか無い応答・利用者の `z.strictObject` に `"__proto__"` の欄がある応答。`@mnemora/anthropic` は以前から同じ応答を断っていた）。影響を受けるのは、strict モードを守らない OpenAI 互換サーバを `client` に差している利用者だけ。破壊的と数え、移行の手順は [docs/migration-v1.md](./docs/migration-v1.md) の項目53。
@@ -695,6 +722,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `everyMs` が `0`・`NaN`・`null`・`Infinity` なら `start()` が reject する。**負の値・`1` 未満の小数・`1e21` と、空文字の `jobName` では、`start()` が成功したまま tick が数回（1回）で黙って止まる**（`onTickError` にも届かない）。`queueName` の空文字・`:` は `createBullmqTickDriver(...)` が同期的に投げる。止まったことの見分け方は README の節に書いた。
   - 構築時に検査して断るのは新しく断る入力なので、直していない（ADR 0477 の材料）。「そのまま渡す」を縛る歯（`tick-driver.option-passthrough.test.ts`、Redis 不要）を足した。
   - 非破壊と数える（文書と歯だけ）。
+  - ⚠ **後日の追記（ADR 0498）**: 上の「直していない」は、オーナーが v1.X.0 での破壊的変更を許したので、`everyMs`・`jobName` を構築時に断る形に替えた。`### Breaking` の「provider のコンストラクタと `createBullmqTickDriver`」の箇条を見ること。
 
 - **`examples/chat`: README に、ソースが読むのに載っていなかったフラグと環境変数の一覧を足した。実装は変えていない**（[ADR 0478](./docs/decisions/0478-example-chat-readme-flags-env-coverage.md)、穴探し49巡目）
   - `answer-time-weighting` の `--trials=N`・`--temperature=N`、`MNEMORA_BENCH_CHANNELS`・`MNEMORA_LEXICAL_STORE`・各サブコマンドの `MNEMORA_*_JSON`・`consolidation-cost`／`archive-sweep-cost` の調整用変数など、`cli.ts` のサブコマンドが読む変数を、新しい節「フラグと環境変数の一覧」に表にした。既定値の数は書き写さず、持っている定数・関数を指した。`src/scripts/*`・`src/bench/*` の単発の測定スクリプト専用の変数は載せない基準を節の冒頭に書いた。

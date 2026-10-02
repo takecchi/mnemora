@@ -267,6 +267,18 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
 > 安全なので、デプロイの手順やデプロイ後フックに入れておけば、どの経路で投入したかを
 > 気にしなくてよい（例示は下の `scripts` と、[`examples/chat`](../../examples/chat/README.md)
 > の導入手順）。
+>
+> **⚠ 多プロセスで動かすとき**: この自動 `ANALYZE` の「書いた行数」の数えは、**プロセスごと**
+> （モジュールスコープの `Map`。`memories` も `memory_embeddings_*` も同じ）で、プロセス間で
+> 共有しない。閾値（1,000 / 2,000 / 4,000 / …）に届くのは「そのプロセスが書いた累計」であって、
+> テーブル全体の行数ではない。⟹ 書き込みを N プロセスに散らすと累計が N 個に割れ、全体では
+> 閾値の数倍の行を書いても、どのプロセスも閾値に届かず、自動の `ANALYZE` が打たれないことがある
+> （プロセスの寿命が短い運用——ジョブごとに起動して数百件だけ書く、など——は特にそう）。
+> 逆に、各プロセスが自分の閾値で `pg_class.reltuples` を読むので、同じ頃に複数のプロセスが
+> `ANALYZE` を打つこともありうる。**多プロセス運用では自動の `ANALYZE` に頼り切らず、上の
+> `--analyze-memories` を投入後・デプロイ後に打つこと。**【現物】【未確認】: コードを読んでの記述で、
+> 複数プロセスで打たれる頻度は測っていない（[ADR 0460](../../docs/decisions/0460-multi-process-multi-pool-round33.md)
+> D5）。
 
 > **⚠ 追記（2026-09-27、[Issue #1181](https://github.com/takecchi/mnemora/issues/1181)）— 入れ始めの小さい DB では、連想枠（既定 on）の recall も遅くなる**:
 >
