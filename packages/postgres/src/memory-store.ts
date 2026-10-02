@@ -4021,7 +4021,9 @@ export class PostgresMemoryStore implements MemoryStore {
       throw new RangeError("resolveContestedGroup: member ids must be unique");
     }
     // ADR 0499: 型の外の status は、書く前に断る。
-    normalized.forEach((m, i) => assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status));
+    normalized.forEach((m, i) =>
+      assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
+    );
     for (const id of ids) {
       if (!isUuidLike(id)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);

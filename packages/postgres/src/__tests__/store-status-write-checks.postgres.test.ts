@@ -41,8 +41,7 @@ async function postgresKit(): Promise<Kit> {
     eventStore: new PostgresEventStore(db),
     eventCount: async () =>
       Number(
-        (await db.execute(sql`SELECT count(*)::int AS c FROM memory_events`)).rows[0]!
-          .c as number,
+        (await db.execute(sql`SELECT count(*)::int AS c FROM memory_events`)).rows[0]!.c as number,
       ),
   };
 }
@@ -105,7 +104,11 @@ for (const [kitName, makeKit] of KITS) {
     };
     const contestedPair = async (kit: Kit) => {
       const [a, b] = [await mem(kit), await mem(kit)];
-      await kit.store.markContestedPair!(A, { id: a.id, event: ev(a.id) }, { id: b.id, event: ev(b.id) });
+      await kit.store.markContestedPair!(
+        A,
+        { id: a.id, event: ev(a.id) },
+        { id: b.id, event: ev(b.id) },
+      );
       return [a, b] as const;
     };
 
@@ -158,8 +161,16 @@ for (const [kitName, makeKit] of KITS) {
           const error = await caught(() =>
             kit.store.resolveContestedPair!(
               A,
-              { id: a.id, status: (side === "first" ? bad : "active") as "active", event: ev(a.id) },
-              { id: b.id, status: (side === "second" ? bad : "active") as "active", event: ev(b.id) },
+              {
+                id: a.id,
+                status: (side === "first" ? bad : "active") as "active",
+                event: ev(a.id),
+              },
+              {
+                id: b.id,
+                status: (side === "second" ? bad : "active") as "active",
+                event: ev(b.id),
+              },
             ),
           );
           expect(error).toBeInstanceOf(RangeError);
@@ -202,7 +213,13 @@ for (const [kitName, makeKit] of KITS) {
       const t = await purged(kit);
       const before = await kit.eventCount();
       const error = await caught(() =>
-        kit.store.updateStatusWithEvent(A, t.id, "active", { expectedStatus: "forgotten" }, ev(t.id)),
+        kit.store.updateStatusWithEvent(
+          A,
+          t.id,
+          "active",
+          { expectedStatus: "forgotten" },
+          ev(t.id),
+        ),
       );
       expect(error).toBeInstanceOf(MemoryStatusConflictError);
       expect((error as MemoryStatusConflictError).expectedStatus).toBe("forgotten");
@@ -229,8 +246,25 @@ for (const [kitName, makeKit] of KITS) {
       const before = await kit.eventCount();
       const result = await kit.store.supersedeWithNewMemories(
         A,
-        [{ input: buildNewMemoryFixture({ tenantId: A.tenantId, content: "n", digest: "n", contentHash: "n-hash" }), jobKinds: [] }],
-        [{ id: t.id, supersededByIndex: 0, expectedStatus: "forgotten", event: ev(t.id, "superseded") }],
+        [
+          {
+            input: buildNewMemoryFixture({
+              tenantId: A.tenantId,
+              content: "n",
+              digest: "n",
+              contentHash: "n-hash",
+            }),
+            jobKinds: [],
+          },
+        ],
+        [
+          {
+            id: t.id,
+            supersededByIndex: 0,
+            expectedStatus: "forgotten",
+            event: ev(t.id, "superseded"),
+          },
+        ],
       );
       expect(result.conflicted.map((c) => c.id)).toEqual([t.id]);
       expect(result.superseded).toEqual([]);
@@ -253,7 +287,9 @@ for (const [kitName, makeKit] of KITS) {
         ev(x.id),
       );
       expect(viaEvent.memory.status).toBe("active");
-      const plain = await kit.store.updateStatus(A, y.id, "active", { expectedStatus: "forgotten" });
+      const plain = await kit.store.updateStatus(A, y.id, "active", {
+        expectedStatus: "forgotten",
+      });
       expect(plain.status).toBe("active");
     });
 

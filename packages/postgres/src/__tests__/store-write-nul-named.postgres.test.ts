@@ -24,8 +24,9 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * 各口を testkit の InMemory にも同じ入力で流し、2実装が同じ欄名で断ることを縛る。
  * 各 it は、陽性対照（NUL を含まない・対になったサロゲートを含む同じ形の入力が通る）も持つ。
  *
- * `content` の NUL は、この歯の対象外（今までどおり DB が拒む。`observe-unsaveable-candidate.postgres.test.ts` が、
- * 保存できない候補を落とすときの `code: "22021"` を縛っている）。
+ * `content` の NUL も対象（`digest` は、LLM が返さないとき本文から作られるので、本文の NUL は digest にも入る。`digest` だけ
+ * 名指しにすると、本文の NUL を「digest が悪い」と説明してしまう）。保存できない候補を落とすときの説明
+ * （`droppedCandidates`）が変わることは、`observe-unsaveable-candidate.postgres.test.ts` が縛っている。
  */
 
 const A: Ctx = { tenantId: "write-nul-a" };
@@ -341,10 +342,16 @@ async function listAll(kit: Kit): Promise<MemoryId[]> {
 // ---- memories に書く口（digest・tags・attributes・claim key・extractorVersion・provenance）----
 
 const MEMORY_POISON: Array<[string, Partial<NewMemory>, RegExp, Partial<NewMemory>]> = [
+  ["content", { content: NUL }, /content/, { content: PAIR }],
   ["digest", { digest: NUL }, /digest/, { digest: PAIR }],
   ["tags", { tags: ["ok", NUL] }, /tags/, { tags: ["ok", PAIR] }],
   ["attributes の値", { attributes: { k: NUL } }, /attributes/, { attributes: { k: PAIR } }],
-  ["attributes の key", { attributes: { [NUL]: "v" } }, /attributes/, { attributes: { [PAIR]: "v" } }],
+  [
+    "attributes の key",
+    { attributes: { [NUL]: "v" } },
+    /attributes/,
+    { attributes: { [PAIR]: "v" } },
+  ],
   [
     "claimKey.subject",
     { claimKey: { subject: NUL, predicate: "p" } },
@@ -357,12 +364,7 @@ const MEMORY_POISON: Array<[string, Partial<NewMemory>, RegExp, Partial<NewMemor
     /claimKey\.predicate/,
     { claimKey: { subject: "s", predicate: PAIR } },
   ],
-  [
-    "extractorVersion",
-    { extractorVersion: NUL },
-    /extractorVersion/,
-    { extractorVersion: PAIR },
-  ],
+  ["extractorVersion", { extractorVersion: NUL }, /extractorVersion/, { extractorVersion: PAIR }],
   [
     "provenance",
     { provenance: { kind: "imported", batchId: NUL } },
@@ -378,10 +380,8 @@ const MEMORY_ENTRIES: Record<string, (kit: Kit, input: NewMemory) => Promise<unk
     kit.store.supersedeWithNewMemories(A, [{ input, jobKinds: ["embed"] }], []),
   // 全候補が保存できないとき、最初の例外がそのまま投げられる。
   createMemoriesWithOutboxAndEvents: (kit, input) =>
-    kit.store.createMemoriesWithOutboxAndEvents!(
-      A,
-      [{ input, jobKinds: ["embed"] }],
-      (memory) => ev(memory.id, {}, "created"),
+    kit.store.createMemoriesWithOutboxAndEvents!(A, [{ input, jobKinds: ["embed"] }], (memory) =>
+      ev(memory.id, {}, "created"),
     ),
 };
 
@@ -399,6 +399,13 @@ for (const [kitName, makeKit] of KITS) {
         });
       }
     }
+
+    it("型を外れた欄（claimKey の片方・tags が空）は、今までどおり NUL の検査では断らない（やりすぎない）", async () => {
+      const kit = await makeKit();
+      await expect(
+        kit.store.createMemory(A, newMemory({ claimKey: { subject: "u" } as never, tags: [] })),
+      ).resolves.toBeDefined();
+    });
 
     it("createMemoriesWithOutboxAndEvents: NUL の候補だけを落とし、ほかの候補は書く（落とした候補の例外は名指し）", async () => {
       const kit = await makeKit();
