@@ -155,3 +155,12 @@
 - **コードの側を直すべき食い違い**: 見つからなかった。
 - **【未確認】**: 0512 の歯（実 Postgres・InMemory）を走らせていない。機械照合と陽性対照はこの回は取っていない（直したのは TSDoc の文だけで、新しい識別子を書いていない）。
 - **走らせたコマンド**: `git fetch origin && git merge origin/main`、上の grep、`packages/core` の `tsc --noEmit`、`node scripts/generate-adr-index.mjs`。
+
+## 追い足し（基準 main `21afd276`、ADR 0536 の分）
+
+0536（#1640、`21afd276`）が main に入ったので取り込んだ（`git diff 1d4218a0 21afd276`。衝突なし）。この節もマネージャーが書いた。
+
+- **0536 の中身**【現物】: 差は ADR 0536（3者の歯の棚卸しと、活動時計の経路の歯）・2つの歯（`fake-decay-activity-clock-parity.test.ts`・`decay-activity-clock-parity.postgres.test.ts`）・索引だけ。0536 の決定1も、割れが無かったので実装・公開 API・既定値・CHANGELOG・migration-v1 は変えていないと書く。
+- **突き合わせの結果**【判断】: 文書・TSDoc・CHANGELOG・migration-v1 に変更が無いので、この ADR の照合の入力は変わらない。0536 が縛った活動時計の振る舞いは、今の実装の「一致している振る舞い」であり、それを書いた文書（`docs/memory-model.md` §9 の活動時計の節、`strategies/decay.ts` の TSDoc）の記述を変える差ではない。
+- **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。
+- **【未確認】**: 0536 の歯を走らせていない。§9 の記述と 0536 の結果の行ごとの突き合わせはしていない。機械照合と陽性対照はこの回は取っていない。
