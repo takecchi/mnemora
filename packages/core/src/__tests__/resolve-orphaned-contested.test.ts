@@ -265,7 +265,8 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
     // ADR 0140 以前の壊れたデータ（書き込み側では今日作れない状態）を、fake 内部の行を
     // 直接いじって模す——`resolveContestedPair` の変異試験と同じ「テスト側だけで壊れた
     // 状態を作る」作法。
-    const stored = await stores.memoryStore.get(ctx, a.id);
+    // ADR 0562: `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
+    const stored = stores.memoryStore.liveRowForTest(ctx, a.id);
     if (stored) stored.contestedWithId = null;
 
     const result = await runtime.resolveOrphanedContested!(ctx, a.id);
@@ -303,7 +304,8 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
     // a を負けさせて superseded にし、a の contestedWithId だけを直接 b へ戻す
     // （「決着後の対向を、なお contestedWithId が指している」という壊れ方をテスト側で作る）。
     await runtime.resolveContested(ctx, a.id, b.id, { kind: "supersede", winnerId: b.id });
-    const stored = await stores.memoryStore.get(ctx, a.id);
+    // ADR 0562: `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
+    const stored = stores.memoryStore.liveRowForTest(ctx, a.id);
     if (stored) {
       stored.status = "contested";
       stored.contestedWithId = b.id;
