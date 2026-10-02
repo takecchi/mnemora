@@ -524,5 +524,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
 | [0526](./0526-tick-jobs-after-delete-and-reextract-after-correction.md) | 穴探し — ADR 0524「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブの消した後の参照と、訂正の経路で負けた記憶がある状態での `reextract`（3者一致。割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0527](./0527-consolidate-reflect-created-sources-lowercase.md) | 穴探し — `consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、渡された綴りではなく store の行の id（小文字）で書く | 採用 (2026-10) |
+| [0532](./0532-tick-job-sources-lowercase.md) | 穴探し — ADR 0527「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブでも、`created` の `meta.sources` は小文字（割れなし。大文字の id がジョブに入る入口は無い。歯を足した） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
