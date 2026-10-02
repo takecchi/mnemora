@@ -1106,7 +1106,9 @@ describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは�
       const upper = await e.st.eventStore.get({ tenantId: "TENANT-1" }, stored.id);
       const upperId = await e.st.eventStore.get({ tenantId: "TENANT-1" }, up(stored.id));
       const other = await e.st.eventStore.get({ tenantId: "tenant-2" }, stored.id);
-      seen[be] = `same=${same?.id === stored.id} upper=${upper} upperId=${upperId} other=${other}`;
+      const show = (x: unknown) => (x === null ? "null" : "found");
+      seen[be] =
+        `same=${same?.id === stored.id} upper=${show(upper)} upperId=${show(upperId)} other=${show(other)}`;
     }
     expect(seen.pg).toBe("same=true upper=null upperId=null other=null");
     expect(seen.testkit).toBe(seen.pg);
