@@ -25,6 +25,8 @@
  * 🔴 **`--baseline` は省略できる。**この PR では
  * `examples/chat/archive-sweep-baseline.json` を作っていない(この作業環境に DB が無く、
  * 捏造した数値を基準値として残さないため——初回 CI の artifact を後続 PR で基準値にする)。
+ * （2026-10-03 訂正）`examples/chat/archive-sweep-baseline.json` は、いまは在る。`ci.yml` の
+ * `archive-sweep-cost` ジョブはそれを `--baseline` に渡している。
  */
 import { readFileSync } from "node:fs";
 import {
