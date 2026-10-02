@@ -5800,6 +5800,50 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         }),
       );
     };
+    /**
+     * `abortIfSuperseded` が**断ってはいけない** id の見本（ADR 0546 追記）。active・archived・forgotten
+     * （superseded 以外の status）と、**他テナントの** superseded。断ってよいのは「`ctx` のテナントの、
+     * superseded な行」だけである。
+     */
+    const createNotAbortingSources = async (store: MemoryStore, ctx: Ctx, tag: string) => {
+      const otherCtx: Ctx = { tenantId: "tenant-2" };
+      const active = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: `${tag}-active` }),
+      );
+      const archived = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: `${tag}-archived`,
+          status: "archived",
+        }),
+      );
+      const forgotten = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: `${tag}-forgotten`,
+          status: "forgotten",
+        }),
+      );
+      const otherTenantSuperseded = await createSupersededSource(
+        store,
+        otherCtx,
+        `${tag}-other-tenant`,
+      );
+      return { active, archived, forgotten, otherTenantSuperseded };
+    };
+    /** 同じテナントの superseded な記憶を2件（`changed` に全件載ることを見る歯が使う）。 */
+    const createTwoSupersededSources = async (store: MemoryStore, ctx: Ctx, tag: string) => {
+      const first = await createSupersededSource(store, ctx, `${tag}-1`);
+      const second = await createSupersededSource(store, ctx, `${tag}-2`);
+      return [first, second] as const;
+    };
+    const sortedChanged = (error: unknown) =>
+      (error as { changed: Array<{ id: string; observedStatus: string }> }).changed
+        .map((c) => [c.id, c.observedStatus] as const)
+        .sort((a, b) => a[0].localeCompare(b[0]));
     const abortBatchCreatedEvent = (ctx: Ctx, memory: Memory): NewMemoryEvent => ({
       tenantId: ctx.tenantId,
       memoryId: memory.id,
@@ -5894,6 +5938,90 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect((await store.get(ctx, supersededSource.id))?.status).toBe("superseded");
       });
 
+      it("createMemoryWithOutbox は abortIfSuperseded に archived・forgotten な id が在っても断らず、今日どおり書く（断るのは superseded だけ）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const { archived, forgotten } = await createNotAbortingSources(
+          store,
+          ctx,
+          "abort-if-superseded-not-forgotten",
+        );
+
+        // forgotten は `abortIfForgotten` の領分であり、`abortIfSuperseded` は断らない。
+        const result = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-superseded-not-forgotten-new",
+          }),
+          ["embed"],
+          { abortIfSuperseded: [archived.id, forgotten.id] },
+        );
+        expect(result.created).toBe(true);
+        expect(result.jobs).toHaveLength(1);
+      });
+
+      it("createMemoryWithOutbox は abortIfSuperseded に他テナントの superseded な id が在っても見ず、今日どおり書く", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const { active, otherTenantSuperseded } = await createNotAbortingSources(
+          store,
+          ctx,
+          "abort-if-superseded-other-tenant",
+        );
+
+        const result = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-superseded-other-tenant-new",
+          }),
+          ["embed"],
+          { abortIfSuperseded: [active.id, otherTenantSuperseded.id] },
+        );
+        expect(result.created).toBe(true);
+        // 他テナントの記憶は動いていない。
+        expect(
+          (await store.get({ tenantId: "tenant-2" }, otherTenantSuperseded.id))?.status,
+        ).toBe("superseded");
+      });
+
+      it("createMemoryWithOutbox は abortIfSuperseded に superseded な id が複数在れば、changed にその全件を載せる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const [first, second] = await createTwoSupersededSources(
+          store,
+          ctx,
+          "abort-if-superseded-changed-all",
+        );
+        const active = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-superseded-changed-all-active",
+          }),
+        );
+
+        const rejection = store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-superseded-changed-all-new",
+          }),
+          ["embed"],
+          { abortIfSuperseded: [first.id, active.id, second.id] },
+        );
+        await expect(rejection).rejects.toMatchObject({
+          name: "SourceMemoryStatusChangedError",
+        });
+        expect(sortedChanged(await rejection.catch((e: unknown) => e))).toEqual(
+          [
+            [first.id, "superseded"],
+            [second.id, "superseded"],
+          ].sort((a, b) => a[0]!.localeCompare(b[0]!)),
+        );
+      });
+
       if (supportsSupersedeWithNewMemories) {
         it("supersedeWithNewMemories は abortIfSuperseded に superseded な id を含むと SourceMemoryStatusChangedError を投げ、news も supersede も一切書かない", async () => {
           const store = await createStore();
@@ -5957,9 +6085,165 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           expect(ok.created[0]?.created).toBe(true);
           expect((await store.get(ctx, target.id))?.status).toBe("superseded");
         });
+
+        /** `abortIfSuperseded` の歯（supersedeWithNewMemories の口）が使う、target 1件を superseded にする news・supersede の組。 */
+        const supersedeCase = async (store: MemoryStore, ctx: Ctx, tag: string) => {
+          const target = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: `${tag}-target` }),
+          );
+          const observation = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId }),
+          );
+          const news = [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: ctx.tenantId,
+                contentHash: `${tag}-new`,
+                sourceObservationId: observation.id,
+                extractorVersion: "v1",
+              }),
+              jobKinds: [] as string[],
+            },
+          ];
+          const supersede = [
+            {
+              id: target.id,
+              supersededByIndex: 0,
+              expectedStatus: "active" as const,
+              event: buildSupersedeEvent(ctx, target.id, target.digest),
+            },
+          ];
+          return { target, observation, news, supersede };
+        };
+
+        it("supersedeWithNewMemories は abortIfSuperseded の id が active・archived・forgotten・他テナントの superseded だけなら断らず、今日どおり書く", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const { active, archived, forgotten, otherTenantSuperseded } =
+            await createNotAbortingSources(store, ctx, "abort-if-superseded-sup-ok");
+          const { target, observation, news, supersede } = await supersedeCase(
+            store,
+            ctx,
+            "abort-if-superseded-sup-ok",
+          );
+
+          const result = await store.supersedeWithNewMemories!(ctx, news, supersede, {
+            abortIfSuperseded: [active.id, archived.id, forgotten.id, otherTenantSuperseded.id],
+          });
+
+          expect(result.created[0]?.created).toBe(true);
+          expect(result.conflicted).toEqual([]);
+          expect((await store.get(ctx, target.id))?.status).toBe("superseded");
+          expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(1);
+        });
+
+        it("supersedeWithNewMemories は abortIfSuperseded に superseded な id が複数在れば、changed にその全件を載せる", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const [first, second] = await createTwoSupersededSources(
+            store,
+            ctx,
+            "abort-if-superseded-sup-all",
+          );
+          const { target, news, supersede } = await supersedeCase(
+            store,
+            ctx,
+            "abort-if-superseded-sup-all",
+          );
+
+          const rejection = store.supersedeWithNewMemories!(ctx, news, supersede, {
+            abortIfSuperseded: [first.id, target.id, second.id],
+          });
+          await expect(rejection).rejects.toMatchObject({
+            name: "SourceMemoryStatusChangedError",
+            method: "supersedeWithNewMemories",
+          });
+          expect(sortedChanged(await rejection.catch((e: unknown) => e))).toEqual(
+            [
+              [first.id, "superseded"],
+              [second.id, "superseded"],
+            ].sort((a, b) => a[0]!.localeCompare(b[0]!)),
+          );
+        });
       }
 
       if (supportsCreateMemoriesWithOutboxAndEvents === true) {
+        it("createMemoriesWithOutboxAndEvents は abortIfSuperseded の id が active・archived・forgotten・他テナントの superseded だけなら断らず、今日どおり書く（created も積む）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const { active, archived, forgotten, otherTenantSuperseded } =
+            await createNotAbortingSources(store, ctx, "abort-if-superseded-batch-ok");
+          const observation = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: "tenant-1" }),
+          );
+          const news = ["abort-if-superseded-batch-ok-a", "abort-if-superseded-batch-ok-b"].map(
+            (contentHash) => ({
+              input: buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                sourceObservationId: observation.id,
+                extractorVersion: "v1",
+                contentHash,
+              }),
+              jobKinds: ["embed" as const],
+            }),
+          );
+
+          const result = await store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            news,
+            (memory) => abortBatchCreatedEvent(ctx, memory),
+            {
+              abortIfSuperseded: [active.id, archived.id, forgotten.id, otherTenantSuperseded.id],
+            },
+          );
+
+          expect(result.written.map((w) => w.created)).toEqual([true, true]);
+          expect(result.dropped).toEqual([]);
+          expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(2);
+          const createdEvents = (
+            await listEventsForMemory(ctx, result.written[0]!.memory.id)
+          ).filter((e) => e.kind === "created");
+          expect(createdEvents).toHaveLength(1);
+        });
+
+        it("createMemoriesWithOutboxAndEvents は abortIfSuperseded に superseded な id が複数在れば、changed にその全件を載せる", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const [first, second] = await createTwoSupersededSources(
+            store,
+            ctx,
+            "abort-if-superseded-batch-all",
+          );
+
+          const rejection = store.createMemoriesWithOutboxAndEvents!(
+            ctx,
+            [
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  contentHash: "abort-if-superseded-batch-all-new",
+                }),
+                jobKinds: ["embed"],
+              },
+            ],
+            (memory) => abortBatchCreatedEvent(ctx, memory),
+            { abortIfSuperseded: [first.id, second.id] },
+          );
+          await expect(rejection).rejects.toMatchObject({
+            name: "SourceMemoryStatusChangedError",
+            method: "createMemoriesWithOutboxAndEvents",
+          });
+          expect(sortedChanged(await rejection.catch((e: unknown) => e))).toEqual(
+            [
+              [first.id, "superseded"],
+              [second.id, "superseded"],
+            ].sort((a, b) => a[0]!.localeCompare(b[0]!)),
+          );
+        });
+
         it("createMemoriesWithOutboxAndEvents は abortIfSuperseded に superseded な id を含むと SourceMemoryStatusChangedError を投げ、何も書かない（Memory も outbox も created も残らない）", async () => {
           const store = await createStore();
           const ctx: Ctx = { tenantId: "tenant-1" };
@@ -6037,6 +6321,49 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         );
         expect(result.created).toBe(true);
       });
+
+      if (supportsSupersedeWithNewMemories) {
+        it("supersedeWithNewMemories は abortIfSuperseded を渡しても無視し、superseded な id があっても今日どおり書く", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const supersededSource = await createSupersededSource(
+            store,
+            ctx,
+            "abort-if-superseded-sup-ignored",
+          );
+          const target = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "abort-if-superseded-sup-ignored-target",
+            }),
+          );
+
+          const result = await store.supersedeWithNewMemories!(
+            ctx,
+            [
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  contentHash: "abort-if-superseded-sup-ignored-new",
+                }),
+                jobKinds: [],
+              },
+            ],
+            [
+              {
+                id: target.id,
+                supersededByIndex: 0,
+                expectedStatus: "active",
+                event: buildSupersedeEvent(ctx, target.id, target.digest),
+              },
+            ],
+            { abortIfSuperseded: [supersededSource.id] },
+          );
+          expect(result.created[0]?.created).toBe(true);
+          expect((await store.get(ctx, target.id))?.status).toBe("superseded");
+        });
+      }
 
       if (supportsCreateMemoriesWithOutboxAndEvents === true) {
         it("createMemoriesWithOutboxAndEvents は abortIfSuperseded を渡しても無視し、superseded な id があっても今日どおり書く", async () => {
@@ -6212,6 +6539,24 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           );
           expect(explicitFalse.conflicted.map((c) => c.id)).toEqual([archivedB.id]);
           expect(explicitFalse.created[0]?.created).toBe(true);
+        });
+
+        it("supersedeWithNewMemories は abortIfAllConflicted: true でも、supersede が空配列なら断らず news を書く（「全部弾かれた」は対象が1件以上のときだけ）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const { observation, news } = await casCases(store, ctx, "abort-all-conflicted-empty");
+
+          const result = await store.supersedeWithNewMemories!(
+            ctx,
+            news("abort-all-conflicted-empty-new"),
+            [],
+            { abortIfAllConflicted: true },
+          );
+
+          expect(result.created[0]?.created).toBe(true);
+          expect(result.superseded).toEqual([]);
+          expect(result.conflicted).toEqual([]);
+          expect(await store.listBySourceObservation(ctx, observation.id, "v1")).toHaveLength(1);
         });
       } else {
         it("abortIfAllConflicted は supersedeWithNewMemories の opts であり、この adapter は supersedeWithNewMemories を実装していない（検査する口が無い）", async () => {
@@ -6819,6 +7164,39 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(
           (await listEventsForMemory(ctx, memory.id)).filter((e) => e.kind === "forgotten"),
         ).toHaveLength(0);
+      });
+
+      it("purgeExpiredEventsByRetention は日数の境界を日単位でずらさない（days: 30 なら 30 日より新しいものは残し、30 日より古いものは消す）", async () => {
+        const store = await createStore();
+        expect(typeof store.purgeExpiredEventsByRetention).toBe("function");
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await seedForgottenEvent(store, ctx, "retention-boundary");
+        await retentionHook()(ctx, { kind: "days", days: 30 });
+        const forgottenEvent = (await listEventsForMemory(ctx, memory.id)).find(
+          (e) => e.kind === "forgotten",
+        );
+        expect(forgottenEvent).toBeDefined();
+        const at = forgottenEvent!.at.getTime();
+        const hour = 3_600_000;
+
+        // 書いてから 30 日に1時間足りない: 保持期間の内側なので消さない（cutoff が +1 日側へずれると消してしまう）。
+        const inside = await store.purgeExpiredEventsByRetention!(ctx, {
+          now: new Date(at + 30 * 86_400_000 - hour),
+          limit: 10,
+          dryRun: true,
+        });
+        expect(inside).toMatchObject({ kind: "executed", result: { purged: 0, dryRun: true } });
+
+        // 書いてから 30 日を1時間超えた: 保持期間の外なので消す（cutoff が -1 日側へずれると消し損ねる）。
+        const outside = await store.purgeExpiredEventsByRetention!(ctx, {
+          now: new Date(at + 30 * 86_400_000 + hour),
+          limit: 10,
+          dryRun: true,
+        });
+        expect(outside).toMatchObject({ kind: "executed", result: { purged: 1, dryRun: true } });
+        expect(
+          (await listEventsForMemory(ctx, memory.id)).filter((e) => e.kind === "forgotten"),
+        ).toHaveLength(1);
       });
 
       it("purgeExpiredEventsByRetention は他テナントの保持期間の設定を読まない（設定していないテナントは unset のまま）", async () => {
