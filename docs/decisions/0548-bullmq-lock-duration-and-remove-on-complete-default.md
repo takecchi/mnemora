@@ -72,6 +72,10 @@
   - 既定の count を 1000→999（3）／`lockDuration` を Worker に渡さない（2）／`lockDuration` の `typeof` 検査を外す（4）／`lockDuration` の下限を `<1`→`<0`（3）／整数検査を外す（2）／`MAX_SAFE_INTEGER` の上限検査を外す（1）／`lockDuration` の `RangeError` を `Error` に（8）
   - `completedJobsToKeep` の下限を `<0`→`<=0`（`0` を断つ。1）／上書きを無視して常に既定（2）／`removeOnFail` も template に入れる（5）／`typeof` 検査を外す（4）／整数検査を外す（2）／`removeOnComplete` を template から外す（5）
   - 検査の順序を入れ替える（`lockDuration` を `concurrency` の前に。1）
+- **後から見つけた穴と、塞いだ歯**（上の変異では赤にならなかった6つ。`Worker`・`Queue` に渡す opts を丸ごと見る歯が無かった）。`tick-driver.option-passthrough.test.ts` に4本足した（計84本）: Worker の opts を `toEqual` で固定（`lockDuration` あり／なし）、Queue の opts を `toEqual({ connection })` で固定、`lockDuration` と `completedJobsToKeep` を同時に渡す歯。1つずつ入れて名指しで走らせ、すべて赤、戻すと84本緑:
+  - Worker の opts に `removeOnComplete: { count: 1 }`（3）／Worker の opts に `removeOnFail: { count: 1 }`（3）／Worker の opts に `stalledInterval: 1`（3）
+  - Queue の `defaultJobOptions` に `removeOnFail: true`（2）／Queue の `defaultJobOptions` に `removeOnComplete: true`（2）／Queue の opts に `lockDuration`（2）
+  - とくに `removeOnFail` の2つは、失敗したジョブが消えうる変異だった。
 
 ## 測っていないこと
 
