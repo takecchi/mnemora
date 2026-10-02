@@ -36,7 +36,8 @@ import {
  *   （TSDoc は `MemoryStatusConflictError` を約束する。core の Fake はそうなっている）。
  *
  * Runtime の `consolidate`・`reflect` の `{ memoryIds }`・`{ seedMemoryId }` は、`#1324` の `forget` と同じ形で
- * 鍵をそろえる。testkit の fixture の id は大文字小文字を区別するので、fixture では大文字は今どおり `not_found`。
+ * 鍵をそろえる。testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、大文字は `not_found` だった。
+ * fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -235,7 +236,7 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore,
-        caseInsensitive: false,
+        caseInsensitive: true, // ADR 0521: fixture も大文字小文字を区別しない（以前は false）
         embed: async (ctx, id) => {
           await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, id, [1, 0, 0]);
           await memoryStore.setEmbeddingStatus(ctx, id, "ready");

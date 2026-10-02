@@ -243,6 +243,38 @@ function jsonContainsNul(value: unknown): boolean {
 }
 
 /**
+ * ADR 0506: `createRecall` で、Postgres が `recalls` の行を書けずに拒む入力を、何も書く前に断る
+ * （testkit の `InMemoryMemoryStore` の `assertRecallRecordStorable` と同じ判定。ADR 0480 の `createdAt` は呼び出し側）。
+ * `subjectId` は `text` 列（NUL を拒む）。`query`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` は
+ * `NOT NULL` の `jsonb` 列、`budget` は `jsonb` 列で、`packages/postgres` は `JSON.stringify` した値を送る——
+ * NUL を含めば拒み、JSON にならない値（`undefined`）は `NOT NULL` の列で拒む。
+ */
+function assertFakeRecallRecordStorable(record: NewRecallRecord): void {
+  if (record.subjectId != null && record.subjectId.includes("\u0000")) {
+    throw new Error("createRecall: subjectId must not contain NUL characters (U+0000)");
+  }
+  const jsonColumns: Array<[string, unknown, boolean]> = [
+    ["query", record.query, true],
+    ["budget", record.budget, false],
+    ["omitted", record.omitted, true],
+    ["usage", record.usage, true],
+    ["indexBand", record.indexBand, true],
+    ["explain", record.explain, true],
+    ["returnedMemories", record.returnedMemories, true],
+  ];
+  for (const [field, value, required] of jsonColumns) {
+    if (required && JSON.stringify(value) === undefined) {
+      throw new Error(
+        `createRecall: ${field} must be JSON-serializable (Postgres "jsonb" column is NOT NULL)`,
+      );
+    }
+    if (jsonContainsNul(value)) {
+      throw new Error(`createRecall: ${field} must not contain NUL characters (U+0000)`);
+    }
+  }
+}
+
+/**
  * Observation を書く口（`createObservation` / `createObservationWithOutbox`）で、Postgres が
  * NUL を拒む欄を先に検査する（Issue #816 の NUL 側の残り）。`subjectId`・`externalId`・
  * `kind` は `text` 列（`invalid byte sequence for encoding "UTF8": 0x00`）、`payload`・
@@ -544,6 +576,25 @@ function compareLabelName(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * ADR 0521: 操作の対象の id を小文字にそろえる（`@mnemora/postgres` は uuid 型の列で比べる・入口で
+ * `normalizeUuidCase` を掛けるので、大文字の uuid を同じ記憶として受ける）。この Fake の id は小文字の
+ * `mem-N` だけなので、小文字にそろえても別の id と混ざらない。
+ */
+function normId<T extends string>(id: T): T {
+  return id.toLowerCase() as T;
+}
+function normOptId<T extends string>(id: T | null | undefined): T | null | undefined {
+  return id === null || id === undefined ? id : normId(id);
+}
+function normPairSide<T extends { id: MemoryId; supersededById?: MemoryId }>(side: T): T {
+  return {
+    ...side,
+    id: normId(side.id),
+    ...(side.supersededById === undefined ? {} : { supersededById: normId(side.supersededById) }),
+  };
+}
+
 export class FakeMemoryStore implements MemoryStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
@@ -605,7 +656,7 @@ export class FakeMemoryStore implements MemoryStore {
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
     assertWellFormedCtx(ctx);
-    const observation = this.backing.observations.get(id);
+    const observation = this.backing.observations.get(normId(id));
     if (!observation || observation.tenantId !== ctx.tenantId) {
       return null;
     }
@@ -693,7 +744,7 @@ export class FakeMemoryStore implements MemoryStore {
   /** ADR 0439: 別の行への参照は `ctx` のテナントの記憶を指すこと（`null`・`undefined`・空文字は「参照しない」——この Fake の従来の扱い）。 */
   private assertOwnMemoryRef(ctx: Ctx, id: MemoryId | null | undefined): void {
     if (!id) return;
-    const memory = this.backing.memories.get(id);
+    const memory = this.backing.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -752,6 +803,8 @@ export class FakeMemoryStore implements MemoryStore {
         `FakeMemoryStore: memories.provenance_kind must be one of ${ProvenanceKindSchema.options.join(", ")} (got ${JSON.stringify(provenanceKind)})`,
       );
     }
+    // ADR 0521: 参照する observation の id も大文字小文字を区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。
+    input = { ...input, sourceObservationId: normOptId(input.sourceObservationId) } as typeof input;
     const idemKey = this.backing.extractionKey(
       ctx.tenantId,
       input.sourceObservationId ?? null,
@@ -941,8 +994,8 @@ export class FakeMemoryStore implements MemoryStore {
         digestSource: input.digestSource,
         provenance: input.provenance,
         status: input.status ?? "active",
-        supersededById: input.supersededById ?? null,
-        contestedWithId: input.contestedWithId ?? null,
+        supersededById: normOptId(input.supersededById) ?? null,
+        contestedWithId: normOptId(input.contestedWithId) ?? null,
         tags: input.tags,
         occurredAt: input.occurredAt ?? null,
         recordedAt: input.recordedAt,
@@ -1198,7 +1251,7 @@ export class FakeMemoryStore implements MemoryStore {
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
     assertWellFormedCtx(ctx);
-    const memory = this.backing.memories.get(id);
+    const memory = this.backing.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
       return null;
     }
@@ -1215,7 +1268,8 @@ export class FakeMemoryStore implements MemoryStore {
     // スキップし、Postgres の集合演算と同じ「一意な id の集合」に揃える。
     const seen = new Set<MemoryId>();
     const results: Memory[] = [];
-    for (const id of ids) {
+    for (const rawId of ids) {
+      const id = normId(rawId);
       if (seen.has(id)) {
         continue;
       }
@@ -1238,7 +1292,7 @@ export class FakeMemoryStore implements MemoryStore {
     const results: Memory[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
-      if (memory.sourceObservationId !== observationId) continue;
+      if (memory.sourceObservationId !== normId(observationId)) continue;
       if ((memory.extractorVersion ?? null) !== (extractorVersion ?? null)) continue;
       results.push(memory);
     }
@@ -1254,7 +1308,7 @@ export class FakeMemoryStore implements MemoryStore {
     const results: Memory[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
-      if (memory.sourceObservationId !== observationId) continue;
+      if (memory.sourceObservationId !== normId(observationId)) continue;
       results.push(memory);
     }
     return results;
@@ -1283,6 +1337,7 @@ export class FakeMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     // ⚠ Issue #768: ADR 0140 の `status: 'contested'` ガードは、この Fake には意図して
     // 持たない（`createMemoryIdempotent` の doc コメント参照——ADR 0140 決定2）。
+    id = normId(id);
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -1299,7 +1354,7 @@ export class FakeMemoryStore implements MemoryStore {
     assertFakeMemoryColumn("status", status);
     memory.status = status;
     if (opts?.supersededById !== undefined) {
-      memory.supersededById = opts.supersededById;
+      memory.supersededById = normId(opts.supersededById);
     }
     memory.updatedAt = new Date();
     return memory;
@@ -1321,6 +1376,7 @@ export class FakeMemoryStore implements MemoryStore {
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
     // ⚠ Issue #768: updateStatus と同じ理由——ADR 0140 のガードは意図して持たない。
+    id = normId(id);
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -1340,7 +1396,7 @@ export class FakeMemoryStore implements MemoryStore {
     const storedEvent = this.buildOwnedEvent(ctx, event, [id]);
     memory.status = status;
     if (opts.supersededById !== undefined) {
-      memory.supersededById = opts.supersededById;
+      memory.supersededById = normId(opts.supersededById);
     }
     memory.updatedAt = new Date();
     this.backing.events.push(storedEvent);
@@ -1382,6 +1438,7 @@ export class FakeMemoryStore implements MemoryStore {
       assertFakeQueryDate("supersedeWithNewMemories", "opts.now", opts?.now);
     }
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
+    supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
     for (const target of supersede) {
       if (
         !Number.isInteger(target.supersededByIndex) ||
@@ -1639,6 +1696,7 @@ export class FakeMemoryStore implements MemoryStore {
    */
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
@@ -1666,6 +1724,7 @@ export class FakeMemoryStore implements MemoryStore {
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
@@ -1768,6 +1827,7 @@ export class FakeMemoryStore implements MemoryStore {
     opts?: ReinforceOptions,
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
     assertWellFormedCtx(ctx);
+    recallId = normId(recallId);
     const result = await this.recordUsage(ctx, recallId, memoryIds);
     if (result.insertedMemoryIds.length === 0) {
       return result;
@@ -1798,6 +1858,7 @@ export class FakeMemoryStore implements MemoryStore {
       return { insertedMemoryIds: [] };
     }
     // ADR 0439: recall も memory も `ctx` のテナントの行であること。
+    recallId = normId(recallId);
     const recall = this.backing.recalls.get(recallId);
     if (!recall || recall.tenantId !== ctx.tenantId) {
       throw new Error(`FakeMemoryStore: recall not found for tenant: ${recallId}`);
@@ -1807,7 +1868,8 @@ export class FakeMemoryStore implements MemoryStore {
     }
 
     const insertedMemoryIds: MemoryId[] = [];
-    for (const memoryId of memoryIds) {
+    for (const rawMemoryId of memoryIds) {
+      const memoryId = normId(rawMemoryId);
       const key = `${ctx.tenantId}:${recallId}:${memoryId}`;
       if (!this.backing.usages.has(key)) {
         this.backing.usages.add(key);
@@ -2013,7 +2075,7 @@ export class FakeMemoryStore implements MemoryStore {
           `aggregateScope: digestBand.limit must fit in a Postgres bigint (got ${opts.digestBand.limit})`,
         );
       }
-      const exclude = new Set(opts.digestBand.excludeMemoryIds);
+      const exclude = new Set(opts.digestBand.excludeMemoryIds.map(normId));
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順（本 PR）。
       eligibleMemories.sort((a, b) => {
@@ -2057,10 +2119,19 @@ export class FakeMemoryStore implements MemoryStore {
 
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertWellFormedCtx(ctx);
+    // ADR 0506: InMemory と同じ順（識別子 → 書けない値）。`recalls.subject_id`・`tenant_subject_activity.subject_id` は `text`。
+    assertWellFormedIdentifier(record.subjectId, "record.subjectId");
+    if (typeof record.advanceActivityClock === "object" && record.advanceActivityClock !== null) {
+      assertWellFormedIdentifier(
+        record.advanceActivityClock.subjectId,
+        "record.advanceActivityClock.subjectId",
+      );
+    }
     // ADR 0480: InMemory・Postgres と同じく Invalid Date の createdAt は書かずに拒む（活動時計も進めない）。
     if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
       throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
     }
+    assertFakeRecallRecordStorable(record);
     const id = nextId("rcl");
     // ADR 0404: 実装（`InMemoryMemoryStore`・`PostgresMemoryStore`）と同じく、`record.createdAt` を渡せばそれを使う。
     // ADR 0480: 呼び出し側の入力と共有しない（InMemory は structuredClone、Postgres は jsonb で往復する）。
@@ -2101,6 +2172,7 @@ export class FakeMemoryStore implements MemoryStore {
    */
   async getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     const row = this.backing.recalls.get(id);
     if (!row || row.tenantId !== ctx.tenantId) {
       return null;
@@ -2154,7 +2226,8 @@ export class FakeMemoryStore implements MemoryStore {
       throw new Error(`requeueEmbedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
-    const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds);
+    const idFilter =
+      opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds.map(normId));
     const targets = [...this.backing.memories.values()]
       .filter(
         (m) =>
@@ -2299,6 +2372,7 @@ export class FakeMemoryStore implements MemoryStore {
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
+    id = normId(id);
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -2374,6 +2448,8 @@ export class FakeMemoryStore implements MemoryStore {
     second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
     assertWellFormedCtx(ctx);
+    first = { ...first, id: normId(first.id) };
+    second = { ...second, id: normId(second.id) };
     if (first.id === second.id) {
       throw new RangeError("FakeMemoryStore: first.id and second.id must differ");
     }
@@ -2441,6 +2517,8 @@ export class FakeMemoryStore implements MemoryStore {
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
     assertWellFormedCtx(ctx);
+    first = normPairSide(first);
+    second = normPairSide(second);
     assertFakeMemoryColumn("status", first.status);
     assertFakeMemoryColumn("status", second.status);
     if (first.id === second.id) {
@@ -2504,6 +2582,7 @@ export class FakeMemoryStore implements MemoryStore {
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
     assertWellFormedCtx(ctx);
+    members = members.map((m) => ({ ...m, id: normId(m.id) }));
     if (members.length < 3) {
       throw new RangeError("FakeMemoryStore: members must have at least 3 entries");
     }
@@ -2620,6 +2699,7 @@ export class FakeMemoryStore implements MemoryStore {
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
     assertWellFormedCtx(ctx);
+    members = members.map(normPairSide);
     for (const m of members) assertFakeMemoryColumn("status", m.status);
     if (members.length < 3) {
       throw new RangeError("FakeMemoryStore: members must have at least 3 entries");
@@ -2722,6 +2802,11 @@ export class FakeMemoryStore implements MemoryStore {
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
+    survivor = {
+      ...survivor,
+      id: normId(survivor.id),
+      contestedWithId: normId(survivor.contestedWithId),
+    };
     const memory = await this.get(ctx, survivor.id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${survivor.id}`);
@@ -2759,11 +2844,12 @@ export class FakeMemoryStore implements MemoryStore {
     },
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()].filter((m) => {
       if (m.tenantId !== ctx.tenantId) return false;
-      if (m.id === query.excludeMemoryId) return false;
+      if (m.id === normId(query.excludeMemoryId)) return false;
       if ((m.subjectId ?? null) !== query.subjectId) return false;
       if (!m.claimKey) return false;
       if (
@@ -2807,11 +2893,12 @@ export class FakeMemoryStore implements MemoryStore {
     },
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()].filter((m) => {
       if (m.tenantId !== ctx.tenantId) return false;
-      if (m.id === query.excludeMemoryId) return false;
+      if (m.id === normId(query.excludeMemoryId)) return false;
       if ((m.subjectId ?? null) !== query.subjectId) return false;
       if (!m.claimKey) return false;
       if (
@@ -2847,6 +2934,7 @@ export class FakeMemoryStore implements MemoryStore {
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
     assertWellFormedCtx(ctx);
+    assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     // `PostgresMemoryStore.listActiveClaimPredicates` は `query.limit` を生 SQL の `LIMIT`（bigint の
     // パラメータ）へそのまま渡すので、負数・`NaN`・`Infinity`・非整数・2^63 以上では Postgres が
     // 例外を投げる。検査せず `slice(0, limit)` へ渡すと違う件数を黙って返すので、他の `limit` を
@@ -2900,7 +2988,8 @@ export class FakeMemoryStore implements MemoryStore {
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
     assertWellFormedCtx(ctx);
-    const onlyMemoryIds = filter?.onlyMemoryIds;
+    supersededById = normId(supersededById);
+    const onlyMemoryIds = filter?.onlyMemoryIds?.map(normId);
     const targets = [...this.backing.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
@@ -2955,7 +3044,8 @@ export class FakeMemoryStore implements MemoryStore {
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
     assertWellFormedCtx(ctx);
-    const onlyMemoryIds = filter?.onlyMemoryIds;
+    supersededById = normId(supersededById);
+    const onlyMemoryIds = filter?.onlyMemoryIds?.map(normId);
     const targets = [...this.backing.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
@@ -3001,6 +3091,9 @@ export class FakeRelationStore implements RelationStore {
     if (!Object.hasOwn({ contradicts: true } satisfies Record<RelationKind, true>, kind)) {
       throw new Error(`FakeRelationStore: unknown relation kind: ${String(kind)}`);
     }
+    // ADR 0521: 大文字の id も同じ記憶として受け、小文字（この Fake の id の綴り）で持つ。
+    fromId = normId(fromId);
+    toId = normId(toId);
     // ADR 0398: 両端の記憶が ctx のテナントに在ることを確かめてから書く（本物の store と同じ）。
     for (const id of [fromId, toId]) {
       const memory = this.backing.memories.get(id);
@@ -3028,6 +3121,8 @@ export class FakeRelationStore implements RelationStore {
 
   async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
     assertWellFormedCtx(ctx);
+    fromId = normId(fromId);
+    toId = normId(toId);
     this.backing.relations = this.backing.relations.filter(
       (r) =>
         !(
@@ -3041,6 +3136,7 @@ export class FakeRelationStore implements RelationStore {
 
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
     assertWellFormedCtx(ctx);
+    memoryId = normId(memoryId);
     return this.backing.relations
       .filter(
         (r) =>
@@ -3142,7 +3238,9 @@ export class FakeOutboxStore implements OutboxStore {
     // ADR 0493: `OutboxStore.complete` の TSDoc が約束する（`opts.at` が Invalid Date なら、行には触れずに断る）。
     // `InMemoryOutboxStore` と同じく、行を探す前に見る。
     assertFakeQueryDate("complete", "opts.at", opts?.at);
-    const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
+    const job = this.backing.outboxJobs.find(
+      (j) => j.id === normId(jobId) && j.tenantId === ctx.tenantId,
+    );
     if (!job) {
       return;
     }
@@ -3167,7 +3265,9 @@ export class FakeOutboxStore implements OutboxStore {
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     assertFakeQueryDate("fail", "opts.at", opts?.at);
-    const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
+    const job = this.backing.outboxJobs.find(
+      (j) => j.id === normId(jobId) && j.tenantId === ctx.tenantId,
+    );
     if (!job) {
       return;
     }
@@ -3343,6 +3443,8 @@ export class FakeVectorStore implements VectorStore {
     // `search` は同じ `backing.memories` を真実の源として引いており（クラス doc 参照）、
     // 書き込み側（upsert）でも同じ非対称を強制する——ADR 0034 が実装した「MemoryStore が
     // 真実の源」を、書き込み時点でも成り立たせる。
+    // ADR 0521: 大文字の id も同じ記憶として受け、小文字（この Fake の id の綴り）で持つ。
+    memoryId = normId(memoryId);
     // ADR 0436: `ctx.tenantId` の記憶であることも確かめる（別のテナントの記憶は、実在しない id と同じく拒む）。
     if (this.backing.memories.get(memoryId)?.tenantId !== ctx.tenantId) {
       throw new Error(`FakeVectorStore: memory not found for tenant: ${memoryId}`);
@@ -3556,7 +3658,7 @@ export class FakeVectorStore implements VectorStore {
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
     assertWellFormedCtx(ctx);
-    this.entries.delete(this.key(space, ctx.tenantId, memoryId));
+    this.entries.delete(this.key(space, ctx.tenantId, normId(memoryId)));
   }
 
   /**
@@ -3570,7 +3672,7 @@ export class FakeVectorStore implements VectorStore {
     if (memoryIds.length === 0) {
       return;
     }
-    const idSet = new Set<MemoryId>(memoryIds);
+    const idSet = new Set<MemoryId>(memoryIds.map(normId));
     for (const [key, entry] of this.entries) {
       if (entry.tenantId === ctx.tenantId && idSet.has(entry.memoryId)) {
         this.entries.delete(key);
@@ -3596,7 +3698,8 @@ export class FakeVectorStore implements VectorStore {
     // （`fake-store-postgres-parity.test.ts` が歯）。`seen` で2回目以降をスキップする。
     const seen = new Set<MemoryId>();
     const results: { memoryId: MemoryId; vector: number[] }[] = [];
-    for (const memoryId of memoryIds) {
+    for (const rawMemoryId of memoryIds) {
+      const memoryId = normId(rawMemoryId);
       if (seen.has(memoryId)) {
         continue;
       }
@@ -4068,7 +4171,7 @@ export class FakeEventStore implements EventStore {
     assertFakeQueryDate("list", "until", filter.until);
     const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
-      if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
+      if (filter.memoryId !== undefined && e.memoryId !== normId(filter.memoryId)) return false;
       if (filter.kind !== undefined && e.kind !== filter.kind) return false;
       if (filter.since !== undefined && e.at < filter.since) return false;
       if (filter.until !== undefined && e.at > filter.until) return false;
@@ -4266,6 +4369,8 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     assertWellFormedCtx(ctx);
+    // ADR 0506: InMemory と同じく、`subjectIds` の各要素も読む前に断る。
+    subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
     const out = Object.create(null) as Record<string, number>;
     if (this.backing === undefined) return out;
     const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);

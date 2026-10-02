@@ -97,7 +97,7 @@ export const EVENT_RETENTION_DAYS_INVALID_MESSAGE =
   "event retention days must be a positive integer";
 
 /**
- * `days` が正の整数であることを検査する。不正なら `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
+ * `days` が正の整数で、int4 に収まる（`2^31 - 1` 以下。ADR 0499）ことを検査する。不正なら `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
  * を含む `Error` を投げる。`packages/postgres`・`packages/testkit` の両方の
  * `setEventRetention` 実装がこの関数を呼ぶことで、検査の種類を1箇所に固定する
  * （実装ごとに条件式を書き直すと、境界（`>= 1` か `>= 0` か）が実装間でずれる余地を作る）。
@@ -110,7 +110,18 @@ export function assertValidEventRetentionDays(days: number): void {
   if (!Number.isInteger(days) || days < 1) {
     throw new Error(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
   }
+  // ADR 0499: `tenant_settings.event_retention_days` は `integer`（int4）列で、`2^31` 以上は Postgres が `22003` で拒む。
+  // 以前は `PostgresTenantSettingsStore` だけが DB の生の例外を投げ、testkit の fixture だけがこの検査を別に持っていた。
+  // 受け入れる値は変わらない——共有の検査へ寄せて、2実装が同じ文面で断る。
+  if (days > EVENT_RETENTION_DAYS_MAX) {
+    throw new Error(
+      `setEventRetention: days does not fit in a Postgres "integer" (int4) column (got ${days})`,
+    );
+  }
 }
+
+/** `event_retention_days`（`integer`、int4）列に収まる最大の日数（`2^31 - 1`）。 */
+const EVENT_RETENTION_DAYS_MAX = 2 ** 31 - 1;
 
 /**
  * `setEventRetention` に型の外の `kind`（`EventRetentionSetting` の `"unlimited"`・`"days"` の
@@ -287,6 +298,9 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * - `setEventRetention` は `{ kind: "unset" }` を受け付けない
  *   （`EventRetentionSetting` 型がそもそも許さない）。「まだ設定していない」状態への
  *   巻き戻し（行の削除）は、この interface の対象外である。
+ * - `setEventRetention` の `days` は、正の整数で、**`2^31 - 1` 以下**でなければならない（`assertValidEventRetentionDays`。
+ *   ADR 0499）。超えれば何も書かずに `Error` を投げる——Postgres の `integer` 列に収まらない値で、以前は
+ *   `@mnemora/postgres` だけが DB の生の例外を投げていた。受け入れる値は変わらない。
  *
  * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13で
  * `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/`getActivitySeq` を足した。

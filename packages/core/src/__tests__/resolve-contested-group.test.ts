@@ -279,9 +279,8 @@ describe("runtime.resolveContestedGroup — MemoryStore.resolveContestedGroup �
 
 /**
  * Issue #1449 項目6: 群版の winnerId の大文字小文字の救済（2者版 `resolveContested` と同じ規則）。
- * Fake の `get` は大文字小文字を区別する——`@mnemora/postgres` のように区別しない store は
- * `get` だけを小文字にそろえる差し替えで表す（救済が使うのは `get` だけで、書き込み側には
- * 元の memberIds の綴りを渡すため）。Postgres の本物の歯は
+ * （ADR 0521 以前の記述）Fake の `get` は大文字小文字を区別した。いまは Fake も区別しないが、この歯は救済が使う `get` だけを
+ * 小文字にそろえる差し替えで表す形のまま（救済が使うのは `get` だけで、書き込み側には元の memberIds の綴りを渡すため）。Postgres の本物の歯は
  * `packages/postgres/src/__tests__/uppercase-uuid-contested-runtime.postgres.test.ts`。
  */
 describe("runtime.resolveContestedGroup — winnerId の大文字小文字の救済（Issue #1449 項目6）", () => {

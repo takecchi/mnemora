@@ -79,6 +79,8 @@ const RELATIONS_SEEDS = Number(process.env.RECALL_FUZZ_PG_RELATIONS_SEEDS ?? 10)
 const RELATIONS_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_RELATIONS_DIFF_SEEDS ?? 10);
 const ARG_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARG_SEEDS ?? 10);
 const ARGDEAD_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARGDEAD_DIFF_SEEDS ?? 10);
+// ADR 0521: fixture が大文字の対象 id を Postgres と同じに受けるようになったので、`argupper` も差分に載せる。
+const ARGUPPER_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARGUPPER_DIFF_SEEDS ?? 10);
 const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.RECALL_FUZZ_PG_FIRST_SEED ?? 1);
 
@@ -125,8 +127,6 @@ function postgresBackend(mode: ConnectionMode): FuzzBackend {
       };
     },
     vector: (v) => [...v, 0],
-    // 操作の対象の id を大文字にしても受ける（ADR 0446 の既存の違い。fixture は受けない）。
-    acceptsUpperCaseIds: true,
   };
 }
 
@@ -280,6 +280,7 @@ describe("recall の不変条件（シードつきのランダムな操作列、
   for (const [profile, seeds] of [
     ["relations", RELATIONS_DIFF_SEEDS],
     ["argdead", ARGDEAD_DIFF_SEEDS],
+    ["argupper", ARGUPPER_DIFF_SEEDS],
   ] as const) {
     it(`差分（${profile}、indexscan_off）: ${seeds} シード × ${LEN} 操作で、Fake・testkit の InMemory と recall の結果が食い違わない`, async () => {
       for (const [name, backend] of [
