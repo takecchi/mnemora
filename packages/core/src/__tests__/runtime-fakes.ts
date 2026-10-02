@@ -1318,7 +1318,8 @@ export class FakeMemoryStore implements MemoryStore {
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
-    return this.createMemoryIdempotent(ctx, input).value;
+    // ADR 0562: 返す Memory は store の中の行ではなく写し（行を後から書き換える purge などで、呼び手が持つ値が動かない）。
+    return fakeSnapshot(this.createMemoryIdempotent(ctx, input).value);
   }
 
   async createMemoryWithOutbox(

@@ -333,7 +333,8 @@ describe("runtime.resolveOrphanedContested — 並行（MemoryStatusConflictErro
     const { a } = await createOrphanedPair(runtime, stores);
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === a.id) {
-        a.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, a.id)!.status = "archived";
       }
     };
 

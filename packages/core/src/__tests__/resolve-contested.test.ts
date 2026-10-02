@@ -411,7 +411,8 @@ describe("runtime.resolveContested — 並行（resolveContestedPair が MemoryS
     const { a, b } = await createContestedPair(runtime, stores);
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === b.id) {
-        b.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, b.id)!.status = "archived";
       }
     };
 

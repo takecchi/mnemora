@@ -97,6 +97,26 @@ describe("FakeMemoryStore は呼び手の書き換えから Memory を守る（A
     expect(reread?.recordedAt.toISOString()).toBe(T0);
   });
 
+  it("createMemory: 返した Memory が、後の purge（行の書き換え）で動かない／書き換えても store に届かない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const created = await memoryStore.createMemory(ctx, newMemory({ digest: "元の要旨" }));
+    await memoryStore.updateStatus(ctx, created.id, "forgotten");
+    await memoryStore.purgeMemory(
+      ctx,
+      created.id,
+      { content: "[purged]", digest: "[purged]" },
+      eventInput(created.id, { kind: "purged" }),
+    );
+    // 適合テスト（purgeMemory は recalls.index_band の digestBand から digest を伏せる）の期待値は
+    // createMemory が返した値の digest である。行の書き換えで動くと、期待値が `[purged]` になってしまう。
+    expect(created.digest).toBe("元の要旨");
+    expect(created.status).toBe("active");
+
+    const other = await memoryStore.createMemory(ctx, newMemory({ tags: ["t"] }));
+    other.tags.push("mutated-by-caller");
+    expect((await memoryStore.get(ctx, other.id))?.tags).toEqual(["t"]);
+  });
+
   it("get: 返した Memory を書き換えても、次の get は影響を受けない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, newMemory({ tags: ["original-tag"] }));
