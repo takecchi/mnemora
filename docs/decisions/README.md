@@ -507,5 +507,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0494](./0494-fuzz-relations-and-argument-mutation.md) | 穴探し — recall の fuzz に `relationStore`（多者間の群・`relationMaxCount`・`link`/`unlink`）と引数の変形（大文字の id・消した記憶の id）を足した。core の recall に 2 つの割れが出たので直した | 採用 (2026-10) |
 | [0495](./0495-doc-code-drift-sweep.md) | 文書とコードのずれを横に掃く — パッケージの README・約束の文書・公開の型の TSDoc を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0497](./0497-recall-rejects-broken-token-counter.md) | 差し替えた `TokenCounter` が有限で 0 以上でない `tokens` を返したら、`recall()` は `RangeError` で断る（ADR 0483 の材料を直す） | 採用 (2026-10) |
+| [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

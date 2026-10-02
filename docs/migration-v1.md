@@ -2587,6 +2587,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryRelationStore.listRelated` / `listRelatedMany`: `kind` が偽の値（`""`・`null`・`0`）のときは、絞り込まずに全件を返す**（[ADR 0488](./decisions/0488-relation-store-fake-alignment.md)。上の項目（ADR 0466・0469・0475）の続き）。
   `PostgresRelationStore` は `kind` の真偽で絞り込みの有無を決めるので、偽の値なら全件を返す。`InMemoryRelationStore` は `kind === undefined` で決めていたため、同じ入力で 0 件を返していた。いまは `@mnemora/postgres` と同じく全件を返す。`undefined` と、正しい `kind`・範囲外の文字列（`"bogus"` は 0 件）の返りは変えていない。
   **落ちる入力が減る変更**（新しく断る入力は無い。型の外の入力の返りが、本物に揃う）。core のテスト専用の `FakeRelationStore`（公開されていない）も同じに揃えた。conformance suite は変えていない。
+- **`@mnemora/testkit/fixtures` の `InMemory*`: 操作の対象の id（記憶・observation・recall・outbox のジョブ）が大文字の uuid でも、小文字と同じ記憶・同じ行として扱う**（[ADR 0521](./decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md)。上の項目（ADR 0466・0469・0475・0488）の続き）。
+  `@mnemora/postgres` は uuid 型の列で比べる・入口で小文字にそろえるので、大文字の id を同じ行として受ける。`InMemoryMemoryStore`・`InMemoryVectorStore`・`InMemoryRelationStore`・`InMemoryEventStore`・`InMemoryOutboxStore` は、ADR 0469・0475 の時点ではイベントの指し先（`NewMemoryEvent.memoryId`）だけを小文字にそろえ、操作の対象の `id` は完全一致で引いていた。そのため、大文字の id を `forget`・`purge`・`restoreArchived`・`markContested`・`resolveContested`・`consolidate`・群の操作・`get`・`getMany`・`VectorStore.delete`・`RelationStore.unlink`・`OutboxStore.complete` などに渡すと、黙って何もしないか（`not_found`、ベクトル・関係の行・ジョブが残る）、`memory not found for tenant` を投げていた（`updateStatus`・`reinforce`・`recordUsage`・`VectorStore.upsert`・`RelationStore.link`・使用報告など）。いまは `@mnemora/postgres` と同じく小文字の id と同じに動き、持つ id・積むイベントの `memoryId`・読み戻す id も小文字。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。ただし、**以前は黙って何もしなかった呼び出しが、状態を変えるようになる**。大文字の id を渡して「何も起きないこと」に頼っていたテストは、結果が変わる。core のテスト専用の `FakeMemoryStore` ほか（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
 ### この節に載せなかったもの（理由つき）
 
