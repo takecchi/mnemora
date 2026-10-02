@@ -517,10 +517,15 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0503](./0503-superseded-by-checks-resolve-contested-update-status.md) | `supersededById` の約束を壊す入力を断る（`resolveContestedPair`・`resolveContestedGroup`・`updateStatus`・`updateStatusWithEvent`） | 採用 (2026-10) |
 | [0504](./0504-vector-store-omits-params-from-thrown-errors.md) | `PostgresVectorStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
+| [0507](./0507-language-mismatch-observation-counted-once-per-observation.md) | 言語の事後検査（ADR 0391）の観測側の数えを、観測ごとに1回へ畳む（判定は変えない） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0524](./0524-uppercase-and-after-delete-llm-paths.md) | 穴探し — ADR 0522「測っていないこと」の実測。`observe`・`reextract`・`consolidate`・`reflect` の「大文字の id」と「消した後の参照」（小文字では3者一致。大文字は既知の形に加えて、Postgres の `created` イベントの `meta.sources` に呼び出し側の綴りが残る形を1つ見つけた） | 採用 (2026-10) |
 | [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
+| [0526](./0526-tick-jobs-after-delete-and-reextract-after-correction.md) | 穴探し — ADR 0524「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブの消した後の参照と、訂正の経路で負けた記憶がある状態での `reextract`（3者一致。割れは見つからなかった。歯を足した） | 採用 (2026-10) |
+| [0527](./0527-consolidate-reflect-created-sources-lowercase.md) | 穴探し — `consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、渡された綴りではなく store の行の id（小文字）で書く | 採用 (2026-10) |
+| [0529](./0529-tick-mixed-kinds-concurrency-and-lease.md) | 穴探し — ADR 0526「測っていないこと」の実測。`tick` が種類を混ぜて回るとき・並行する複数の `tick`・リースが切れた後の再取得（Runtime の層。3者一致。割れは見つからなかった。決定的にできる部分だけ歯にした） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
