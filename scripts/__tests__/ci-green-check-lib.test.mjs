@@ -11,7 +11,7 @@ import {
  * `scripts/ci-green-check-lib.mjs`（判定そのものの集合演算）の歯。
  *
  * ⚠ このファイルは `gh` を1度も呼ばない。実際の check-runs は合成した入力で表現する
- * ——`adr-index-completeness-lib.test.mjs` が実ファイルを読まないのと同じ役割分担。
+ * ——`generate-adr-index-lib.test.mjs` が実ファイルを読まないのと同じ役割分担。
  */
 
 describe("summarizeCheckRuns", () => {

@@ -76,7 +76,8 @@ repos/takecchi/mnemora/branches/main/protection/required_status_checks` の
 ジョブ名の直上のコメントに積んである**（同ファイル、`example-chat:` の直下）。
 経緯は [ADR 0274](./docs/decisions/0274-required-check-context-name-is-frozen-annotate-dont-rename.md)。
 
-**required status check（上の6件）が branch protection の側で実際に何を指しているかは、
+**required status check（件数と名前は `.github/required-status-checks.json` の `contexts` が正。
+ここには写さない）が branch protection の側で実際に何を指しているかは、
 `.github/required-status-checks.json` に宣言（写し）として在り、
 `pnpm check:required-status-checks` が突き合わせる**
 （[ADR 0279](./docs/decisions/0279-required-status-checks-declaration-and-check.md)）。

@@ -12,11 +12,13 @@
  *    ../cross-runner-embedding-fingerprint-lib.mjs} の `sha256HexOfFloat32Vectors` /
  *    `vectorsToFloat32Hex`）——`measure-embedding-output-fingerprint-lib.mjs` の
  *    `sha256HexOfVectors` は float64 表現である（別の値。混同しないこと）。
- * 2. **`--runner-label` / `--num-threads` / `--rep` を必須で受け取る**——matrix の脚を
- *    識別する軸そのものであり、`--raw` の中身（`embedding-fingerprint.ts` が書いた
- *    `numThreads` フィールドと重複するが、`--num-threads` は「matrix が指定した値」、
- *    `--raw` の `numThreads` は「provider が実際に使った値」——通常は一致するはずだが、
- *    ここでは配線側の値（matrix）を脚の識別に使う。⚠ 食い違えば `note` に残す）。
+ * 2. **`--runner-label` / `--rep` を必須で受け取る**（`--runner-name` は任意）——matrix の脚を
+ *    識別する軸そのものである。`numThreads` は引数では受け取らず、`--raw` の中身
+ *    （`embedding-fingerprint.ts` が書いた、provider が実際に使った値）をそのまま測定 JSON へ
+ *    転記する。
+ *    （2026-10-03 訂正）この項は以前 `--num-threads`（matrix が指定する値）も必須で受け取り、
+ *    `--raw` の `numThreads` と食い違えば `note` に残す、と書いていた。現物の CLI には
+ *    `--num-threads` の引数も、食い違いを `note` に残す処理も無い。
  * 3. `--raw` が既に持つ `runtimeVersions` / `weightsDigest` / `numThreads` をそのまま
  *    測定 JSON へ転記する（embed() を呼んだ側でしか取れない情報であり、ここでは
  *    再取得しない）。
