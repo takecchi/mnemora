@@ -2531,6 +2531,32 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 **DB マイグレーション**: 要らない。purge 済みで、直す前の `updateStatusWithEvent` によって active に戻された行が在れば、その行の `content`・`digest` は墓石の固定の文字列のまま `active` になっている。調べる SQL は ADR 0499 に在る（読み取りだけ）。**既存の行は書き換えない**（データの書き換えはオーナーの判断が要る）。
 
 
+### 59. `MemoryStore` の `resolveContestedPair?`・`resolveContestedGroup?`・`updateStatus`・`updateStatusWithEvent` が、置き換えた側（`supersededById`）の約束を壊す入力を `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md)（クローン miku の決定。担い手が書いた。オーナーではない。ADR 0447 の材料3〜5・ADR 0450 の材料1・2。「型の中でも約束を壊す入力を新しく断るのはクローンの線の内側」という判断）。
+
+⚠ **未リリース**。**番号は 59 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` の「`MemoryStore` の `resolveContestedPair?`…が、置き換えた側…」の箇条を見ること。**ここには複製しない。**
+型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `RangeError`、値は message に入れない）。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**。項目54・57 と同じ扱い。conformance スイートに `it` は足していない（約束を足すのはオーナーの判断）。
+
+**誰が影響を受けるか**:
+- `PostgresMemoryStore`・testkit の `InMemoryMemoryStore` の `resolveContestedPair?`・`resolveContestedGroup?`・`updateStatus`・`updateStatusWithEvent` を直接呼ぶ利用者のうち、`status: "superseded"` を `supersededById` なしで書いているもの、対象自身を `supersededById` に渡しているもの、`resolveContested*` で `active` に `supersededById` を付けているもの、互いを指す（輪になる）組を渡しているもの、`resolveContestedGroup` で群の外の `forgotten` な記憶を指しているもの。
+- `Runtime` 経由の通常の呼び出し（`resolveContested()`・`resolveContestedGroup()`・`reextract`・`consolidate`・`forget()` など）は、常に勝者（または統合先）の id を渡すので変わらない。
+
+**どう直すか**:
+- `superseded` には、置き換えた側の記憶（対象とは別の、同じテナントの記憶）の id を `supersededById` に渡す。戻せない敗者は、置き換えた側が無いと `restoreSuperseded` で戻せない。
+- `resolveContested*` の `active`（勝者・`both_active`）には `supersededById` を付けない。
+- 群で、`forgotten` な記憶に置き換えたかったなら、置き換え先を `active` な記憶にする。
+- 自前の `MemoryStore` 実装は、適合テストが検査しないので、必要なら同じ検査を自前で足す。
+
+**確かめたこと**: 2実装に同じ入力を流す歯と、InMemory だけの DB 無しの歯を足した。陽性対照（勝者を指す `superseded`・`both_active`・群の外の `active` を指す `superseded` など）は通る。**【未】Postgres 側の実装は、PR #1610 のマージ後。**
+
+**DB マイグレーション**: 要らない。直す前に書かれた `superseded_by_id` が NULL の `superseded` の行（戻せない敗者）や、自己参照の行を調べる読み取りの SQL は ADR 0503 には載せていない（【未】必要なら足す）。**既存の行は書き換えない**。
+
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

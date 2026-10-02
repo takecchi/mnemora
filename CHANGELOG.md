@@ -346,6 +346,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は構築できた入力が、新しく例外になる**。公開の型・export は増えない（検査は各パッケージの内部）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目56。DB マイグレーションは無い。
 
+- **`MemoryStore` の `resolveContestedPair?`・`resolveContestedGroup?`・`updateStatus`・`updateStatusWithEvent` が、置き換えた側（`supersededById`）の約束を壊す入力を、書く前に `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit` の InMemory）**（[ADR 0503](./docs/decisions/0503-superseded-by-checks-resolve-contested-update-status.md)。[ADR 0447](./docs/decisions/0447-lifecycle-operation-state-matrix-round23.md) の材料3〜5・[ADR 0450](./docs/decisions/0450-contested-group-operation-state-matrix-round26.md) の材料1・2）。
+
+  以前は、型は通るが約束を壊す入力が黙って通り、戻せない敗者（`restoreSuperseded` の群に入らない `superseded`）や、自己置換・循環の行ができた。
+  - **`status: "superseded"` に `supersededById` が無い**（`resolveContestedPair` の `first`/`second`・`resolveContestedGroup` の `members[i]`・`updateStatus`/`updateStatusWithEvent` の `opts`）。
+  - **自己置換**（`supersededById` が対象自身）。
+  - **循環**（`resolveContestedPair` で互いを指す、`resolveContestedGroup` でメンバー同士が輪になる）。
+  - **`resolveContestedPair`・`resolveContestedGroup` で `status: "active"` に `supersededById` を付ける。**
+  - **`resolveContestedGroup` で、群の外の `forgotten` な記憶を指す。**
+  - **断らないもの**: 勝者を指す `superseded`、`both_active`、群の外の `active` などを指す `superseded`、`updateStatus*` で別の記憶を指す `superseded`、`superseded` 以外の status（`supersededById` 無し）。`Runtime`（`resolveContested`・`resolveContestedGroup`・`reextract`・`consolidate`）は常に正しく渡すので、`Runtime` 経由の挙動は変わらない。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない。conformance suite に `it` は足していない（既存の `updateStatus*` の歯が、置き換えた側なしで `superseded` を書いていたので、別の記憶を指すよう直した）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目59。DB マイグレーションは無い。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
