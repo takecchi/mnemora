@@ -571,5 +571,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
 | [0567](./0567-doc-code-drift-sweep-scripts.md) | 文書とコードのずれを横に掃く（第10弾）— `scripts/` のコメント・`AGENTS.md`・`docs/autonomy.md` を、今の main の実装に照らす | 採用 (2026-10) |
 | [0569](./0569-doc-code-drift-sweep-roadmap-vision-chat.md) | 文書とコードのずれを横に掃く（第11弾）— `docs/roadmap.md`・`docs/vision.md`・`docs/alteroid-findings.md` と `examples/chat` のデモ本体のコメントを、今の main の実装に照らす | 採用 (2026-10) |
+| [0573](./0573-fake-event-time-nul-claim-controls.md) | ADR 0563 の歯が通した4つの変異（`updatedAt` の時刻・`extractorVersion` の NUL・claim predicate の並び）を塞ぐ | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
