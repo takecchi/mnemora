@@ -2594,7 +2594,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ⚠ **未リリース**。**番号は 60 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
-**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` の「`createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`）。
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`）。
 
 **なぜ破壊的と数えるか**: 断る入力は増えない（以前も落ちた）が、例外が `DrizzleQueryError`（`cause.code` が `22021`・`22P05`）から素の `Error` に変わる（項目57と同じ）。
 
@@ -2606,6 +2606,56 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
 
+### 62. `tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と、保存できない巨大な `leaseMs` を、claim する前に断るようになった（`@mnemora/core`）
+
+[ADR 0514](./decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0496](./decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1。項目54と同じ数え方）。
+
+⚠ **未リリース**。**番号は 61 である**——項目60 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない。
+
+| 欄 | 断る入力 | 例外 | 以前 |
+| --- | --- | --- | --- |
+| `kinds` | 配列でない（裸の文字列・`null`・object・数）／文字列でない要素を含む | `TypeError` | 裸の文字列は Fake・InMemory で部分文字列の照合になり通る。`null`・数の要素は通る。object・数は store ごとの例外 |
+| `limit` | 0 以上 2^63 未満の整数でない（文字列・`null`・`NaN`・`±Infinity`・負・小数） | `RangeError` | `"5"`・`null` は Postgres で通る。ほかは store ごとの例外（`DrizzleQueryError`・名前の無い `Error`） |
+| `claimedBy` | 文字列でない（`null`・数・object） | `TypeError` | Fake・Postgres では通り、数は text 列に入る |
+| 同上 | NUL（U+0000）を含む | `RangeError` | store ごとの例外（Postgres は 22021） |
+| `leaseMs` | 有限でも、`now - leaseMs` が `Date` の範囲外、または 4714-11-24 BC より前（`1e20`・`-1e20`・`3e14` など） | `RangeError` | `1e20` は store ごとの例外。`3e14` は Fake・InMemory で通り（何も claim しない）、Postgres だけが落ちる |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく例外になる**。以前も落ちた入力は、例外の種類が変わる。項目54と同じ扱い。
+
+**誰が影響を受けるか**: `as`・JavaScript・外部の設定から `tick` の `opts` を組み立てている呼び出し側。例: 環境変数の `TICK_LIMIT` を文字列のまま `limit` に渡している（以前は Postgres で通った）、`kinds` に種類を1つ裸の文字列で渡している、`claimedBy` にワーカー番号を数のまま渡している。`cause.code`（22P02 など）や `claimBatch: limit must …` の message で分岐していた呼び出し側。`claimBatch` を直接呼ぶ人は変わらない。
+
+**どう直すか**:
+- `limit` は `Number(...)` などで整数にして渡す（`0` は今までどおり「claim しない」）。
+- `kinds: ["extract"]` と配列にする。
+- `claimedBy` は `String(...)` で文字列にし、NUL を含めない。
+- `leaseMs` は、現実のリース長（ミリ秒）にする。0 以下は今までどおり通る（重複 claim を許すので、意図した場合だけ）。
+- 例外で分岐していた箇所は、`TypeError`・`RangeError` と、`Runtime.tick: opts.<欄> …` の message で分岐する。
+
+**確かめたこと**: Fake・InMemory・Postgres に同じ入力を流す歯を、`packages/core/src/__tests__/tick-opts-validation.test.ts` と `packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts` に足した（直す前は断る21件が3者で赤）。
+
+**DB マイグレーション**: 要らない。claim の前に落ちるので、outbox の行は変わらない。
+
+### 61. `resolveContestedPair?` が対の外の `forgotten` を指す `supersededById` を、`updateStatus`・`updateStatusWithEvent` が `superseded` 以外の status への `supersededById` を、`RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0515](./decisions/0515-superseded-by-remaining-checks.md)（担い手が書いた。決めたのはクローンの線の内側で、オーナーではない。[ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md) の「引き受けた負債」の1・2。項目59と同じ数え方）。
+
+⚠ **未リリース**。**番号は 61 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`resolveContestedPair?` が、対の外の `forgotten`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `RangeError`）。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**（項目59と同じ）。conformance スイートに `it` は足していない。
+
+**誰が影響を受けるか**: `PostgresMemoryStore`・testkit の `InMemoryMemoryStore` を直接呼ぶ利用者のうち、(a) `resolveContestedPair` で、書く時点で既に `forgotten` な記憶を置き換えた側に指しているもの、(b) `updateStatus*` で `active`・`archived`・`forgotten` に `supersededById` を付けているもの（以前は `superseded_by_id` が残った）。`Runtime` 経由の通常の呼び出しは変わらない。
+
+**どう直すか**:
+- (a) 置き換え先を `active` な記憶にする。
+- (b) `superseded` 以外の status には `supersededById` を渡さない。`superseded_by_id` を外したいなら、`restoreSuperseded` を使う。
+
+**確かめたこと**: 2実装に同じ入力を流す歯で、直す前は赤・直した後は緑、変異（検査を外す・やりすぎる）で赤（ADR 0515）。
+
+**DB マイグレーション**: 要らない。既存の行は書き換えない。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
@@ -2789,7 +2839,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/bullmq` の `createBullmqTickDriver`: 完了したジョブを直近 1000 件だけ Redis に残す（`removeOnComplete: { count: 1000 }` が既定）。`lockDuration`・`completedJobsToKeep` のオプションが増えた**（[ADR 0548](./decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)）。
   以前は完了したジョブが全部残った。いまは古い完了ジョブを BullMQ が消す。`queue.getJobs(["completed"])` や `getJobCounts("completed")` で完了ジョブの `returnvalue`・件数を後から読んでいた人、完了ジョブが残り続けることに頼っていた人だけが見直す。以前に近づけるなら `completedJobsToKeep: Number.MAX_SAFE_INTEGER`。`removeOnFail` は触っていないので、失敗したジョブは従来どおり全部残る。手順は要らない（既存の Redis のジョブは、次に完了するジョブから古い分が順に消える【未確認】）。`lockDuration` と `completedJobsToKeep` は任意の追加で、渡さなければ `lockDuration` は BullMQ の既定のまま。型は互換。数でない値は `TypeError`、範囲外は `RangeError`。内容は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節を見ること。
 - **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
-  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表）。
+  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落ちるようになった。下の項目）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
@@ -2802,6 +2852,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/testkit/fixtures` の InMemory: `archiveDecayed`・`aggregateScope`・`VectorStore.search` の `nowSeq + S_x`（`decayFloorSeqAfter + S_x`）が 2^63 以上になる入力を断る**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。🟡。ADR 0500 の負債）。Postgres は以前から `22003 bigint out of range` で拒む。断るのは、その式が評価される行（カウンタを使い、subject を持ち、`decay_floor_seq` が非 NULL で、ほかの条件を通る行。2軸は左で決まれば右は評価されない）があるときと、`nowSeq`（`decayFloorSeqAfter`）そのものが 2^63 以上のとき。実際の `nowSeq` は小さい整数なので、到達しない入力。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 - **`@mnemora/postgres`: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。ADR 0504 と同じ作法）。SQL の文・SQLSTATE・`cause` は残る。落ちる入力は増えない。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。
+- **`@mnemora/postgres`: `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0516](./decisions/0516-omit-params-trigram-outbox-tenant-settings-stores.md)。ADR 0504・0505 と同じ作法）。SQL の文・SQLSTATE・`cause` は残る。落ちる入力は増えない。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`PostgresMemoryStore`・`PostgresRelationStore` は今回の対象外。
 - **`@mnemora/postgres`・`@mnemora/testkit/fixtures`: v1.0.x で purge した記憶は、`Runtime.purge` をかけ直す（`scrubPurged`）と、`recalls.index_band` の目次帯に残った digest も伏せられる**（[ADR 0512](./decisions/0512-scrub-purged-index-band.md)）。v1.0.0〜v1.0.2 の purge は `recalls` を書き換えなかった。手順は要らない（かけ直したときだけ効く。自動では走らない。migration では消さない）。`recalls.query` は残る。
 - **`@mnemora/core`: `extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`trim` で空になる値）なら、本文の前置きにしない**（[ADR 0517](./decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1）。
   以前は抽出（LLM）に渡る本文と全文フォールバックの Memory の本文が `"  \n\nC"` のように空白の前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）になる。実質のある `title` は変わらない（前後の空白もそのまま）。手順は要らない。落ちる入力は増えも減りもしない（`ObserveInputSchema` は変えていない）。空白だけの `title` を `extractTitle: true` で渡していた呼び出し側の、抽出プロンプトの入力と、全文フォールバックの Memory の `content` が変わる。`reextract`・`deferred` の読み直しは、新しい規則で本文を作る。保存済みの Memory は書き換えない。
