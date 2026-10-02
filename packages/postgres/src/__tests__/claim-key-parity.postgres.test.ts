@@ -126,6 +126,34 @@ async function scenario(env: Env): Promise<Result> {
     validFrom: D("2030-01-01T00:00:00Z"),
     validUntil: D("2032-01-01T00:00:00Z"),
   });
+  await add("a24 subject differs only by case", ctx, {
+    claimKey: key("User", "address"),
+    subjectId: "s1",
+  });
+  await add("a25 contested empty [2035,2035) x", ctx, {
+    claimKey: K,
+    subjectId: "s1",
+    validFrom: D("2035-01-01T00:00:00Z"),
+    validUntil: D("2035-01-01T00:00:00Z"),
+  });
+  await add("a26 contested empty [2035,2035) y", ctx, {
+    claimKey: K,
+    subjectId: "s1",
+    validFrom: D("2035-01-01T00:00:00Z"),
+    validUntil: D("2035-01-01T00:00:00Z"),
+  });
+  await add("a27 contested inverted [2038,2037) x", ctx, {
+    claimKey: K,
+    subjectId: "s1",
+    validFrom: D("2038-01-01T00:00:00Z"),
+    validUntil: D("2037-01-01T00:00:00Z"),
+  });
+  await add("a28 contested inverted [2038,2037) y", ctx, {
+    claimKey: K,
+    subjectId: "s1",
+    validFrom: D("2038-01-01T00:00:00Z"),
+    validUntil: D("2037-01-01T00:00:00Z"),
+  });
   await add("z other tenant", other, { claimKey: K, subjectId: "s1" });
   await mem.updateStatus(ctx, ids["a16 forgotten"]!, "forgotten");
   await mem.updateStatus(ctx, ids["a17 archived"]!, "archived");
@@ -150,6 +178,28 @@ async function scenario(env: Env): Promise<Result> {
     ctx,
     { id: ids["a22 contested [2030,2032) x"]!, event: event(ids["a22 contested [2030,2032) x"]!) },
     { id: ids["a23 contested [2030,2032) y"]!, event: event(ids["a23 contested [2030,2032) y"]!) },
+  );
+  await mem.markContestedPair!(
+    ctx,
+    {
+      id: ids["a25 contested empty [2035,2035) x"]!,
+      event: event(ids["a25 contested empty [2035,2035) x"]!),
+    },
+    {
+      id: ids["a26 contested empty [2035,2035) y"]!,
+      event: event(ids["a26 contested empty [2035,2035) y"]!),
+    },
+  );
+  await mem.markContestedPair!(
+    ctx,
+    {
+      id: ids["a27 contested inverted [2038,2037) x"]!,
+      event: event(ids["a27 contested inverted [2038,2037) x"]!),
+    },
+    {
+      id: ids["a28 contested inverted [2038,2037) y"]!,
+      event: event(ids["a28 contested inverted [2038,2037) y"]!),
+    },
   );
   const alias = (id: string) => Object.entries(ids).find(([, v]) => v === id)?.[0] ?? "?";
   const names = (ms: Memory[]) => ms.map((m) => alias(m.id)).sort();
@@ -213,6 +263,20 @@ async function scenario(env: Env): Promise<Result> {
       "[2032,null): touches the end of the contested pair",
       { validFrom: D("2032-01-01T00:00:00Z") },
     ],
+    ["subject differs only by case", { claimKey: key("User", "address") }],
+    [
+      "[null,2030): touches the start of the contested pair",
+      { validUntil: D("2030-01-01T00:00:00Z") },
+    ],
+    [
+      "[2034,2036): the empty contested pair is never overlapped",
+      { validFrom: D("2034-01-01T00:00:00Z"), validUntil: D("2036-01-01T00:00:00Z") },
+    ],
+    [
+      "[2036,2039): the inverted contested pair is never overlapped",
+      { validFrom: D("2036-01-01T00:00:00Z"), validUntil: D("2039-01-01T00:00:00Z") },
+    ],
+    ["contentHash equal to a19's (contested)", { contentHash: "hash-a19 contested x" }],
     ["excludeMemoryId a1", { excludeMemoryId: ids["a1 open"]! }],
     [
       "excludeMemoryId a22 (a contested one)",
@@ -491,6 +555,45 @@ const EXPECTED: Result = {
   "contested: [2032,null): touches the end of the contested pair": [
     "a19 contested x",
     "a20 contested y",
+  ],
+  "active: subject differs only by case": ["a24 subject differs only by case"],
+  "contested: subject differs only by case": [],
+  "active: [null,2030): touches the start of the contested pair": [
+    "a1 open",
+    "a2 [2020,2022)",
+    "a21 plain active",
+    "a3 [2022,2024) touches a2",
+  ],
+  "contested: [null,2030): touches the start of the contested pair": [
+    "a19 contested x",
+    "a20 contested y",
+  ],
+  "active: [2034,2036): the empty contested pair is never overlapped": [
+    "a1 open",
+    "a21 plain active",
+  ],
+  "contested: [2034,2036): the empty contested pair is never overlapped": [
+    "a19 contested x",
+    "a20 contested y",
+  ],
+  "active: [2036,2039): the inverted contested pair is never overlapped": [
+    "a1 open",
+    "a21 plain active",
+  ],
+  "contested: [2036,2039): the inverted contested pair is never overlapped": [
+    "a19 contested x",
+    "a20 contested y",
+  ],
+  "active: contentHash equal to a19's (contested)": [
+    "a1 open",
+    "a2 [2020,2022)",
+    "a21 plain active",
+    "a3 [2022,2024) touches a2",
+  ],
+  "contested: contentHash equal to a19's (contested)": [
+    "a20 contested y",
+    "a22 contested [2030,2032) x",
+    "a23 contested [2030,2032) y",
   ],
   "active: excludeMemoryId a1": ["a2 [2020,2022)", "a21 plain active", "a3 [2022,2024) touches a2"],
   "contested: excludeMemoryId a1": [
