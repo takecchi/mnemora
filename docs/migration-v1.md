@@ -2617,6 +2617,8 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/postgres`: 別テナントの記憶を指す `NewMemoryEvent.memoryId` を断る**（PR #1562、ADR 0456 の H4）は、本物の adapter が新しく断る変更なので、この節ではなく 🔴 の **項目52** に載せた（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 - **`@mnemora/postgres`: `reinforceMany`（`observe({ kind: "memory_usage" })` の強化を含む）と `searchMany` が、件数が多くても PG のバインドパラメータの上限で落ちなくなった**（[PR #1552](https://github.com/takecchi/mnemora/pull/1552)、ADR 0443 決定2）。
   以前は `reinforceMany` が 13107 件、`searchMany` が 32767 件で、message が数 MB の例外で落ちた。
+- **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
+  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表）。
 - **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えたとき、書き込む前に `RangeError` で落ちる**（[PR #1554](https://github.com/takecchi/mnemora/pull/1554)、[ADR 0446](./decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）。
   例外の型・文言は同じ。以前は `markContested` が書いたあとに落ち、両側が `contested` のまま残った。`@mnemora/postgres` で候補の id を大文字にした `correctedId` は、store が同じ記憶と言えば候補として扱う。
 - **`@mnemora/local-embedding`: 件数が `maxBatchSize`（既定 128）を超えて分割されたとき、チャンクの合間で `signal` の abort を見る**（[PR #1553](https://github.com/takecchi/mnemora/pull/1553)、[ADR 0445](./decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。
