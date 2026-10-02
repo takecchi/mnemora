@@ -41,16 +41,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ## [1.3.0] - 未リリース
 
-**この節は `v1.2.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.2.1` になりうる。版を決めるのはオーナーである。起点は `v1.2.0` の tag が指す commit であり、それより後に `main` へ入った PR がこの節の対象になる。この節はまだ何も棚卸ししていない。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+**この節は `v1.2.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.2.1` になりうる。版を決めるのはオーナーである。起点は `v1.2.0` の tag が指す commit であり、それより後に `main` へ入った PR がこの節の対象になる。この節は `d49c46c`..`3c90e3b7`（棚卸しした時点の `main` の先端）を棚卸し済みである（基準は `[1.2.0]` の追記1と同じ。下の追記2）。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 ⚠ **2026-10-02 追記**: 下の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR（#1610・#1611・#1612）が、まだ未リリースだった `[1.2.0]` 節へ足したものを、この節へ移した（本文は書き換えていない）。`v1.2.0` には入っていない。migration の項目57・58 も同じ理由で `docs/migration-v1.md` の「v1.2.0 → 次の版」へ移した。
+
+⚠ **2026-10-02 追記2（棚卸し。`d49c46c`..`3c90e3b7` まで数えた）**: `d49c46c` から `3c90e3b7` までに `main` へ入った PR を first-parent で全部当てた。基準は `[1.2.0]` の追記1と同じ（出荷されるファイル〔`packages/*/src` のテスト以外・`packages/*/migrations`・`packages/*/package.json`・`packages/*/README.md`〕に触れた PR を、PR 番号・ADR 番号で節の項目と突き合わせ、当たらなかったものを1本ずつ差分を読んで分けた。コメント・TSDoc・README だけの PR と、テスト・文書だけの PR は、慣例どおり項目にしていない）。これらの PR のうち、#1620（ADR 0507）・#1621（ADR 0503）・#1624（ADR 0527）は、着地した時点で自分で `[1.3.0]` に足していた。**#1615（ADR 0521）・#1616（ADR 0525）は、`v1.2.0` の区切る点より後に着地したのに `[1.2.0]` 節へ項目を足していた**（`v1.2.0` は `d49c46c` で tag 済み、Release は公開済み）ので、下の `### Changed`（ADR 0525）と `### Fixed`（ADR 0521）へ移した（本文は書き換えていない）。`[1.2.0]` の `### Breaking` の項目56（ADR 0498、PR #1606）に ADR 0525 が足していた注記は、出荷された本文（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）に戻した。ADR 0525 の内容は、下の `### Changed` の項目に在る。migration の移し先は `docs/migration-v1.md` の「v1.2.0 → 次の版」の 🟡。この判断はクローンの判断であり、オーナーの判断ではない（ADR 0534）。
 
 ### Breaking
 
 - **`@mnemora/postgres` の `MemoryStore`・`EventStore` の書き込み口が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになり、`resolveContestedGroup?`・`resolveContestedPair?` が型の外の `status` を `RangeError` で断り、purge 済みの記憶を `expectedStatus` に一致しない行として扱い（`updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories?` の `supersede[].expectedStatus`）、`setEventRetention` の日数の int4 の上限が共有の検査になった**（[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。[ADR 0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の M4、[ADR 0450](./docs/decisions/0450-contested-group-operation-state-matrix-round26.md)・[ADR 0447](./docs/decisions/0447-lifecycle-operation-state-matrix-round23.md)・[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)・[ADR 0479](./docs/decisions/0479-tenant-settings-write-fake-alignment.md) の材料）。
 
   いずれも、「型の外の入力、または約束に反する入力が、DB の生の例外になる・黙って通る」のを、約束どおりに直した。
-  - **NUL**: `memory_events` に書く値（`digestSnapshot`・`meta`・`actor`。`Runtime` の口に渡す `reason` は `meta.reason`/`meta.note` に、`actor.id` は `actor` に入る）と、`memories` に書く値（`content`・`digest`・`tags`・`attributes`・`provenance`・claim key・`extractorVersion`・`contentHash`）、`purgeMemory?` の墓石の `content`・`digest` が NUL を含むとき、`<口>: <欄> must not contain NUL characters (U+0000)` の `Error` を、DB に触れる前に投げる。読み取りの口（ADR 0456）と同じ形。以前は `DrizzleQueryError`（message に `Failed query: … params: …`）だった。`meta`・`actor` は、対をなさないサロゲートも同じ文面で断る（以前から `jsonb` が拒んでいた）。**断る入力は増えない**（以前も同じ入力で落ちていた。例外の形だけが変わる。何も書かれないことも変わらない）。
+  - **NUL**: `memory_events` に書く値（`digestSnapshot`・`meta`・`actor`。`Runtime` の口に渡す `reason` は `meta.reason`/`meta.note` に、`actor.id` は `actor` に入る）と、`memories` に書く値（`content`・`digest`・`tags`・`attributes`・`provenance`・claim key・`extractorVersion`・`contentHash`）、`purgeMemory?` の墓石の `content`・`digest` が NUL を含むとき、`<口>: <欄> must not contain NUL characters (U+0000)` の `Error` を、DB に触れる前に投げる。読み取りの口（ADR 0456）と同じ形。以前は `DrizzleQueryError`（message に `Failed query: … params: …`）だった。`meta`・`actor` は、対をなさないサロゲートも断る（以前から `jsonb` が拒んでいた）。文面だけは違い、`<口>: memory_events.<actor|meta> must not contain NUL (U+0000) or a lone surrogate code unit`。`digestSnapshot` は `memory_events.digestSnapshot must not contain NUL characters (U+0000)`。BigInt は NUL より先に、以前と同じ `TypeError`。**断る入力は増えない**（以前も同じ入力で落ちていた。例外の形だけが変わる。何も書かれないことも変わらない）。
   - **落とした候補の説明が変わる**: `observe()` の抽出が、保存できない候補だけを落として残りを書くとき（ADR 0347）、`created` イベントの `meta.droppedCandidates` に載る説明が、本文に NUL を含む候補について、`code: "22021"`・pg の文面から、`code: null`・`PostgresMemoryStore: content must not contain NUL characters (U+0000)` に変わる（`@mnemora/testkit` の InMemory は以前からこの形）。落とす候補の集合は変わらない。
   - **`resolveContestedGroup?`・`resolveContestedPair?` の `status`**: 型は `"active" | "superseded"`。型の外の値（`"forgotten"`・`"contested"`・`"archived"` など）は、以前は通って行をその status にした。いまは `RangeError`（`resolveContestedGroup: members[<i>].status must be "active" or "superseded"`・`resolveContestedPair: first.status …`）を、何も書く前に投げる。`@mnemora/testkit` の InMemory も同じ。
   - **purge 済みの記憶**: `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories?` の `supersede[].expectedStatus` を渡した更新で、purge 済みの行（`purged_at` が入った行。`status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない。以前は `updateStatusWithEvent(id, "active", { expectedStatus: "forgotten" })` が、purge 済みの墓石を active に戻した（`Runtime.purge` の「不可逆」の約束の外）。いまは `MemoryStatusConflictError`（`supersede` は `conflicted` に載る）。`expectedStatus` を渡さない更新は、以前どおり無条件（この直しは CAS の約束だけを直す）。`@mnemora/testkit` の InMemory も同じ。
@@ -64,12 +66,32 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`observe()` が、`utterance.text`・`event.name`・`document.content` が空白だけ（`String.prototype.trim` で空になる値）の入力を、`ZodError` で断るようになった——空白だけの本文を送っている呼び出し側へ**（[ADR 0502](./docs/decisions/0502-observe-rejects-whitespace-only-input.md)、[ADR 0482](./docs/decisions/0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) の材料1、`@mnemora/core`）。
 
-  以前は `z.string().min(1)` だけだったので、空白・改行・タブだけの本文が通り、LLM に空白だけが渡り、LLM が失敗すると `content` が空白だけの active な Memory が残った。今は入口（`ObserveInputSchema`）で、`trim` して空になる値を、空文字と同じ形（`path` は欄名、message は `min(1)` と同じ）の `ZodError` で断る。**何も書く前・LLM を呼ぶ前に落ちる。** `@mnemora/postgres` と testkit の fixture で同じ。
+  以前は `z.string().min(1)` だけだったので、空白・改行・タブだけの本文が通り、LLM に空白だけが渡り、LLM が失敗すると `content` が空白だけの active な Memory が残った。今は入口（`ObserveInputSchema`）で、`trim` して空になる値を、空文字と同じ `path`（欄名）・message の `ZodError` で断る（zod の issue の `code` は、空文字が `too_small`、空白だけが `custom`。`code` で分岐している呼び出し側は見直すこと）。**何も書く前・LLM を呼ぶ前に落ちる。** `@mnemora/postgres` と testkit の fixture で同じ。
   - **「空白」の定義**: JS の `String.prototype.trim` が落とす文字（半角空白・タブ・改行・垂直タブ・改ページ・U+00A0・U+FEFF・U+2028/2029・U+3000 を含む Unicode の空白）。U+200B（ZERO WIDTH SPACE）は `trim` が落とさないので通る。
   - **変わらないこと**: 前後・内側に空白のある普通の文は通る（値は trim しないで、そのまま保存する）。`document.title`・`utterance.speaker`・その他の `min(1)` の欄は今回は変えない。`extractionContext` の中身、抽出（LLM）の出力側の検査も変えない。型・シグネチャ・公開 API は変わらない。
   - **破壊的と数える理由**: 型は変わらないが、**以前は通っていた入力が、新しく例外になる**（項目21・23・24・27・34・49 と同じ扱い）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目58。DB マイグレーションは無い。
   - 【確かめていないこと】呼び出し側が実際に空白だけを送っている頻度。すでに保存された空白だけの Memory の有無（消さない）。
+
+- **`MemoryStore` の `resolveContestedPair?`・`resolveContestedGroup?`・`updateStatus`・`updateStatusWithEvent` が、置き換えた側（`supersededById`）の約束を壊す入力を、書く前に `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit` の InMemory）**（[ADR 0503](./docs/decisions/0503-superseded-by-checks-resolve-contested-update-status.md)。[ADR 0447](./docs/decisions/0447-lifecycle-operation-state-matrix-round23.md) の材料3〜5・[ADR 0450](./docs/decisions/0450-contested-group-operation-state-matrix-round26.md) の材料1・2）。
+
+  以前は、型は通るが約束を壊す入力が黙って通り、戻せない敗者（`restoreSuperseded` の群に入らない `superseded`）や、自己置換・循環の行ができた。
+  - **`status: "superseded"` に `supersededById` が無い**（`resolveContestedPair` の `first`/`second`・`resolveContestedGroup` の `members[i]`・`updateStatus`/`updateStatusWithEvent` の `opts`）。
+  - **自己置換**（`supersededById` が対象自身）。
+  - **循環**（`resolveContestedPair` で互いを指す、`resolveContestedGroup` でメンバー同士が輪になる）。
+  - **`resolveContestedPair`・`resolveContestedGroup` で `status: "active"` に `supersededById` を付ける。**
+  - **`resolveContestedGroup` で、群の外の `forgotten` な記憶を指す。**
+  - **断らないもの**: 勝者を指す `superseded`、`both_active`、群の外の `active` などを指す `superseded`、`updateStatus*` で別の記憶を指す `superseded`、`superseded` 以外の status（`supersededById` 無し）。`Runtime`（`resolveContested`・`resolveContestedGroup`・`reextract`・`consolidate`）は常に正しく渡すので、`Runtime` 経由の挙動は変わらない。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない。conformance suite に `it` は足していない（既存の `updateStatus*` の歯が、置き換えた側なしで `superseded` を書いていたので、別の記憶を指すよう直した）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目59。DB マイグレーションは無い。
+
+- **`@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（ADR 0456 の M4）が「変えなかったこと」に残した分）。
+
+  - **何が変わるか**: `kind`・`payload`・`attributes`（key も値も、入れ子の中も）、`createRecall` の `query`・`budget`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` に NUL を含む入力は、以前も落ちた（`DrizzleQueryError`。`cause.code` は `22021`・`22P05`）。いまは INSERT の前に、`PostgresMemoryStore: <欄> must not contain NUL characters (U+0000)`（`createRecall` は `createRecall: <欄> …`）の素の `Error` で断る。何も書かれず、活動時計も進まない。testkit の `InMemoryMemoryStore` と同じ文面。
+  - **破壊的と数える理由**: 断る入力は増えないが、**例外の形が `DrizzleQueryError` から素の `Error` に変わる**。`cause.code` や `Failed query:` の message で分岐していた呼び出し側が影響を受ける（項目57と同じ数え方）。
+  - **誰が影響を受けるか**: `@mnemora/postgres` の上の3口を直接呼び、NUL を含みうる値を渡し、例外の形で分岐しているもの。`Runtime` 経由（`observe()`・`recall()`）は、型の中の値しか渡さないので、通常は変わらない。`observe()` に NUL を含む発話を渡したときの例外の形は変わる。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目60。DB マイグレーションは無い。
+  - 【確かめていないこと】`createObservation` の `subjectId`・`externalId` の NUL（`assertWellFormedIdentifier` が先に断るので、新しい検査は見ない。以前から同じ）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -79,6 +101,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
   - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債）。
+
+- **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
+- **`@mnemora/bullmq` の `createBullmqTickDriver` 、`@mnemora/postgres` の `registerEmbeddingSpace`、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider` が、壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）に変わった**（[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md)。provider の数値オプション（ADR 0498）の形に揃えた）。対象は `everyMs`・`jobName`・`concurrency`（`resolveConcurrency` を含む）と、`DeterministicEmbeddingProvider` の `space.dimensions`（数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`）、`registerEmbeddingSpace` の `space.dimensions`（数でなければ `TypeError`、正の整数でない・pgvector hnsw の上限 2000 超なら `RangeError`）。数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。**message は変えていない。** どちらも `Error` の子なので `instanceof Error` は変わらない。`err.name`・`err.constructor` を `"Error"`・`Error` と比べていた呼び出し側は見直すこと。手順は要らない。公開 API・既定値は変えていない。⭕ 非破壊と数える。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore` の語の数え方を、`@mnemora/postgres`（tsvector の `simple`）に揃えた——ハイフン入りの識別子（`PROJ-12`）が空白区切りの 1 語になる**（[ADR 0513](./docs/decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md) の判断どおり、fixture だけの変更）。
 
@@ -90,6 +115,17 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ### Fixed
 
 - **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
+
+- **`@mnemora/testkit/fixtures` の `InMemory*` が、操作の対象の id（記憶・observation・recall・outbox のジョブ）が大文字の uuid でも、`@mnemora/postgres` と同じ記憶・同じ行として扱うようになった**（[ADR 0521](./docs/decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md)。[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)・[0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)・[0475](./docs/decisions/0475-eventstore-append-uuid-case.md) が「既存の違い」として残していた点）。`forget`・`purge`・`restoreArchived`・`markContested`・`resolveContested`・`consolidate`・群の操作・使用報告のほか、`MemoryStore.get`・`getMany`・`updateStatus`・`reinforce`・`recordUsage`、`VectorStore.upsert`・`delete`、`RelationStore.link`・`unlink`、`EventStore.list`、`OutboxStore.complete`・`fail` などが対象。以前は、大文字の id を渡すと、黙って何もしない（`not_found`）か `memory not found for tenant` を投げていた。いまは小文字の id と同じに動き、持つ id・積むイベントの `memoryId` も小文字。**落ちる入力が減る変更**で、新しく断る入力は無い。ただし、以前は黙って何もしなかった呼び出し（`forget` など）が、状態を変えるようになる。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
+
+- **`@mnemora/testkit/fixtures` の InMemory が、`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` の bigint の溢れを、Postgres と同じ条件で断る**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) の負債の返済）。本物の adapter は変えていない。
+  - **新しく断る入力**（Postgres が今拒むものだけ）: `nowSeq + S_x`（`archiveDecayed`、`usesSubjectActivityCounters: true`）・`decayFloorSeqAfter + S_x`（`aggregateScope`・`VectorStore.search`、`decayFloorSeqUsesSubjectCounters: true`）が 2^63 以上になるとき。Postgres がその式を評価する行（subject を持ち、`decay_floor_seq` が非 NULL で、ほかの条件を通り、2軸のときは左で決まらない行）があるときだけ。`nowSeq`（`decayFloorSeqAfter`）そのものが 2^63 以上のときは行が無くても（`archiveDecayed` は `clock: 'wall'` を除く）。
+  - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
+
+- **`PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md) の負債の返済）。
+  - 落とすのは message・`stack`・`cause` の連鎖の `params:` より後ろ（`(omitted by mnemora, N chars)`）。例外は新しく作らず、`kind`・`name`・`code`・`cause` は残る。
+  - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504 と同じ扱い）。
+  - **変えなかったこと**: `EventStore.get`・`list`、`PostgresTrigramLexicalStore` など、ほかの store の直接呼び。
 
 ## [1.2.0] - 2026-10-02
 
@@ -383,7 +419,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **provider のコンストラクタと `createBullmqTickDriver` が、壊れた数値オプションを構築時に例外で断るようになった（`@mnemora/bullmq`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）**（[PR #1606](https://github.com/takecchi/mnemora/pull/1606)、[ADR 0498](./docs/decisions/0498-constructor-config-checks.md)。[ADR 0477](./docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) の案1・[ADR 0467](./docs/decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) の面C を、オーナーが v1.X.0 での破壊的変更を許したので採った）
 
-  以前は壊れた値が黙って通り、API・BullMQ に渡ってから失敗する（または静かに止まる）か、`space.dimensions` に壊れた値が入った。今は構築時（`new`・`createBullmqTickDriver(...)`）に断る。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` の `everyMs`・`jobName`・`concurrency` も同じ。ADR 0525 で揃えた。揃える前は素の `Error`）。message に値が入る（数値・名前で、秘密ではない）。**省略時の既定は変えない。**
+  以前は壊れた値が黙って通り、API・BullMQ に渡ってから失敗する（または静かに止まる）か、`space.dimensions` に壊れた値が入った。今は構築時（`new`・`createBullmqTickDriver(...)`）に断る。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message に値が入る（数値・名前で、秘密ではない）。**省略時の既定は変えない。**
   - **`@mnemora/bullmq`**: `everyMs` は数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下でなければ投げる（小数 `1.5` は通す。数値の文字列 `"50"` は断る）。`jobName` は省略（既定 `"mnemora-tick"`）か空でない文字列でなければ投げる。**以前は、負・`1` 未満の小数・`1e21` 以上の `everyMs` と空文字の `jobName` で、`start()` が成功したまま tick が数回（1回）で黙って止まり、`onTickError` も鳴らなかった**（ADR 0477 の実測）。`queueName` は BullMQ が同期的に投げるので触らない。
   - **`@mnemora/openai`**: `OpenAIEmbeddingProvider` の `dimensions` は正の安全な整数、`OpenAILLMProvider` の `temperature`（渡すなら）は有限で `0` 以上でなければ投げる（上限は API ごとに違うので見ない）。
   - **`@mnemora/anthropic`**: `AnthropicLLMProvider` の `maxTokens`（渡すなら）は正の安全な整数でなければ投げる。この provider に `temperature` の欄は無い。
@@ -445,7 +481,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
-- **`@mnemora/bullmq` の `createBullmqTickDriver` 、`@mnemora/postgres` の `registerEmbeddingSpace`、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider` が、壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）に変わった**（[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md)。provider の数値オプション（ADR 0498）の形に揃えた）。対象は `everyMs`・`jobName`・`concurrency`（`resolveConcurrency` を含む）と、`DeterministicEmbeddingProvider` の `space.dimensions`（数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`）、`registerEmbeddingSpace` の `space.dimensions`（数でなければ `TypeError`、正の整数でない・pgvector hnsw の上限 2000 超なら `RangeError`）。数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。**message は変えていない。** どちらも `Error` の子なので `instanceof Error` は変わらない。`err.name`・`err.constructor` を `"Error"`・`Error` と比べていた呼び出し側は見直すこと。手順は要らない。公開 API・既定値は変えていない。⭕ 非破壊と数える。
 - **`@mnemora/core`・`@mnemora/postgres` の README に「TypeScript の `lib`・`target` は ES2022 以上」を書いた**（[ADR 0441](./docs/decisions/0441-changelog-migration-refs-consumer-smoke-names.md)）。公開の `.d.ts` が `ErrorOptions`（ES2022 の lib）を使うため、ES2021 以下だと `skipLibCheck: false` で `TS2304`、`skipLibCheck: true` で `cause` の型が失われる。コードは変えていない。
   ⭕ 非破壊と数える（文書の追記のみ）。
 - **`Runtime` が投げ直す例外の message から、SQL に付けた値（params）を落とすようになった**（[ADR 0423](./docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md)、`@mnemora/core`。[ADR 0363](./docs/decisions/0363-outbox-last-error-omit-params-and-cap-length.md)・[Issue #1064](https://github.com/takecchi/mnemora/issues/1064) と同じ作法）。
@@ -556,8 +591,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
 
 ### Fixed
-
-- **`@mnemora/testkit/fixtures` の `InMemory*` が、操作の対象の id（記憶・observation・recall・outbox のジョブ）が大文字の uuid でも、`@mnemora/postgres` と同じ記憶・同じ行として扱うようになった**（[ADR 0521](./docs/decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md)。[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)・[0469](./docs/decisions/0469-fake-event-target-and-uuid-case.md)・[0475](./docs/decisions/0475-eventstore-append-uuid-case.md) が「既存の違い」として残していた点）。`forget`・`purge`・`restoreArchived`・`markContested`・`resolveContested`・`consolidate`・群の操作・使用報告のほか、`MemoryStore.get`・`getMany`・`updateStatus`・`reinforce`・`recordUsage`、`VectorStore.upsert`・`delete`、`RelationStore.link`・`unlink`、`EventStore.list`、`OutboxStore.complete`・`fail` などが対象。以前は、大文字の id を渡すと、黙って何もしない（`not_found`）か `memory not found for tenant` を投げていた。いまは小文字の id と同じに動き、持つ id・積むイベントの `memoryId` も小文字。**落ちる入力が減る変更**で、新しく断る入力は無い。ただし、以前は黙って何もしなかった呼び出し（`forget` など）が、状態を変えるようになる。移行ガイドは [docs/migration-v1.md](./docs/migration-v1.md) の 🟡。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createObservation`・`createObservationWithOutbox` が、関数・`Symbol` を欄の値に持つ値や `toJSON` を持つ値を含む `payload`（`observe({ kind: "event", data })` の `data`）を、`DataCloneError` で断らずに、`@mnemora/postgres` と同じ規則で保存するようになった。**（[ADR 0486](./docs/decisions/0486-fixture-event-data-align-and-context-text-unit.md)）関数・`Symbol` の欄は消え（配列の要素なら `null`）、`toJSON` はその戻り値で保存する。`NaN`・`-0`・`Date`・値が `undefined` の欄の扱いは変えていない。断る入力が減るだけで、非破壊。
 - **`recall()` の多者間の群（`RelationStore`）まわりの 2 つの割れを直した。**(1) `relationMaxCount` を超えて切った群のメンバーを、連想の `unit_assembly_dropped`・`over_limit`、または段2の `below_threshold` などでもう一度数えていた（`omitted` の件数の和が `totalInScope` を超えた）。切ったメンバーは連想の候補から外し、段2の件数から取り下げる（連想の席が、どうせ落ちる群のメンバーに取られなくなる）。(2) `RelationStore.link` で `active` な記憶へ辺を張ると、その記憶が結果に 2 回返っていた。群のメンバー（`contested` で `contestedWithId` なし）でない候補は、辺があっても群に入れない。新しく断る入力は無い（[ADR 0494](./docs/decisions/0494-fuzz-relations-and-argument-mutation.md)）

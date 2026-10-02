@@ -66,6 +66,8 @@ import {
   assertNoNul,
   assertNoNulInNewMemory,
   assertNoNulInNewMemoryEvent,
+  assertNoNulInNewObservation,
+  assertNoNulInNewRecall,
   assertNoNulInScopeFilter,
 } from "./input-check.js";
 import {
@@ -369,6 +371,61 @@ function assertResolvedStatus(method: string, field: string, status: unknown): v
 }
 
 /**
+ * ADR 0503（ADR 0447 材料3〜5・ADR 0450 材料1・2）: `status: "superseded"` の更新は、置き換えた側（`supersededById`）を
+ * 必ず伴い、それは自分自身でないこと。`resolveContested*` の `"active"` に `supersededById` を付けることも断る
+ * （active なのに `superseded_by_id` が残る行になる）。書く前に `RangeError` で断る（値は message に入れない）。
+ * testkit の `InMemoryMemoryStore` と同じ文面。id は uuid の大文字小文字を畳んで比べる。
+ */
+function assertSupersededByShape(
+  method: string,
+  field: string,
+  selfId: string,
+  status: string,
+  supersededById: string | undefined,
+  opts: { forbidWhenNotSuperseded: boolean },
+): void {
+  if (status === "superseded") {
+    if (supersededById === undefined) {
+      throw new RangeError(
+        `${method}: ${field}.supersededById is required when status is "superseded"`,
+      );
+    }
+    if (normalizeUuidCase(supersededById) === normalizeUuidCase(selfId)) {
+      throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
+    }
+  } else if (opts.forbidWhenNotSuperseded && supersededById !== undefined) {
+    throw new RangeError(
+      `${method}: ${field}.supersededById must not be set unless status is "superseded"`,
+    );
+  }
+}
+
+/**
+ * ADR 0503: `supersededById` の鎖が、同じ呼び出しで `superseded` になるメンバーの中で輪になっていないこと
+ * （2者版の「互いを指す」、群版の A→B→A など）。輪になっていれば `RangeError`。
+ */
+function assertNoSupersededCycle(
+  method: string,
+  members: ReadonlyArray<{ id: string; status: string; supersededById?: string | undefined }>,
+): void {
+  const next = new Map<string, string>();
+  for (const m of members) {
+    if (m.status === "superseded" && m.supersededById !== undefined) {
+      next.set(normalizeUuidCase(m.id), normalizeUuidCase(m.supersededById));
+    }
+  }
+  for (const start of next.keys()) {
+    let cur = next.get(start);
+    for (let hops = 0; cur !== undefined && hops <= next.size; hops += 1) {
+      if (cur === start) {
+        throw new RangeError(`${method}: supersededById must not form a cycle among the members`);
+      }
+      cur = next.get(cur);
+    }
+  }
+}
+
+/**
  * `UPDATE memories SET superseded_by_id = …` が0行だったときの切り分け（ADR 0439）。対象の行が無い・`supersededById` が
  * `ctx` のテナントの記憶でない・`expectedStatus` が違う、の3つを、この順で別々の例外にする。
  */
@@ -617,6 +674,8 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前）。
+    assertNoNulInNewObservation("PostgresMemoryStore", input);
     const externalId = input.externalId ?? null;
     const inserted = await this.db.execute(sql`
       INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -682,6 +741,8 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前）。
+    assertNoNulInNewObservation("PostgresMemoryStore", input);
     const externalId = input.externalId ?? null;
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
@@ -1182,6 +1243,10 @@ export class PostgresMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
     }
+    // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
+    assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
+      forbidWhenNotSuperseded: false,
+    });
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる——ドライバの
     // invalid input syntax for type uuid を呼び出し側に漏らさない
@@ -1239,6 +1304,10 @@ export class PostgresMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
     }
+    // ADR 0503: updateStatus と同じ。
+    assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
+      forbidWhenNotSuperseded: false,
+    });
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力は
     // トランザクションを開く前に同じ「memory not found」の Error へ寄せる——
     // トランザクション内で投げても結果（イベントが積まれない）は同じだが、そもそも
@@ -2856,6 +2925,8 @@ export class PostgresMemoryStore implements MemoryStore {
         "record.advanceActivityClock.subjectId",
       );
     }
+    // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前。活動時計も進めない）。
+    assertNoNulInNewRecall(record);
     // Issue #298 / ADR 0155: 新しく書く行は常に breakdownCaptured: true。「内訳を持たない
     // 新規行」は無い（recall-runtime.ts が finalMemories から毎回内訳を計算しているため）。
     const returnedMemories: RecallRecordReturnedMemories = {
@@ -3658,6 +3729,24 @@ export class PostgresMemoryStore implements MemoryStore {
     // ADR 0499: 型の外の status は、書く前に断る。
     assertResolvedStatus("resolveContestedPair", "first", first.status);
     assertResolvedStatus("resolveContestedPair", "second", second.status);
+    // ADR 0503: 置き換えた側を伴わない superseded・自己置換・active への supersededById・互いを指す循環は、書く前に断る。
+    assertSupersededByShape(
+      "resolveContestedPair",
+      "first",
+      first.id,
+      first.status,
+      first.supersededById,
+      { forbidWhenNotSuperseded: true },
+    );
+    assertSupersededByShape(
+      "resolveContestedPair",
+      "second",
+      second.id,
+      second.status,
+      second.supersededById,
+      { forbidWhenNotSuperseded: true },
+    );
+    assertNoSupersededCycle("resolveContestedPair", [first, second]);
     if (!isUuidLike(first.id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
     }
@@ -4024,6 +4113,18 @@ export class PostgresMemoryStore implements MemoryStore {
     normalized.forEach((m, i) =>
       assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
     );
+    // ADR 0503: 2者版と同じ（置き換えた側の欠落・自己置換・active への supersededById・循環）。
+    normalized.forEach((m, i) =>
+      assertSupersededByShape(
+        "resolveContestedGroup",
+        `members[${i}]`,
+        m.id,
+        m.status,
+        m.supersededById,
+        { forbidWhenNotSuperseded: true },
+      ),
+    );
+    assertNoSupersededCycle("resolveContestedGroup", normalized);
     for (const id of ids) {
       if (!isUuidLike(id)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
@@ -4096,6 +4197,29 @@ export class PostgresMemoryStore implements MemoryStore {
         // （2026-09-30 のさらなる直し、ADR 0381 §7 解消——
         // MemoryStatusConflictError の再利用をやめた）。
         throw new ContestedGroupMembershipMismatchError(missing[0] as MemoryId);
+      }
+
+      // ADR 0503: 群の外の `forgotten` な記憶を置き換えた側にしない。群の中を指すのは、メンバーの status に関わらず断らない
+      // （メンバーはここまでで全員 contested と確かめ済み）。別テナント・実在しない id は、下の UPDATE の切り分け（ADR 0439）に任せる。
+      const outsideRefs = supersededRefs.filter((ref) => !idSetForCheck.has(ref));
+      if (outsideRefs.length > 0) {
+        const forgotten = await tx.execute(sql`
+          SELECT id FROM memories
+          WHERE tenant_id = ${ctx.tenantId}
+            AND id = ANY(${sql.param(outsideRefs)}::uuid[])
+            AND status = 'forgotten'
+        `);
+        const forgottenIds = new Set(
+          forgotten.rows.map((row) => (row as unknown as { id: string }).id),
+        );
+        const badIndex = normalized.findIndex(
+          (m) => m.supersededById !== undefined && forgottenIds.has(m.supersededById),
+        );
+        if (badIndex >= 0) {
+          throw new RangeError(
+            `resolveContestedGroup: members[${badIndex}].supersededById must not be a forgotten memory outside the group`,
+          );
+        }
       }
 
       // Issue #1449 PR1（ADR 0401）: メンバーごとの UPDATE を `UPDATE ... FROM unnest(...)` の1文に
