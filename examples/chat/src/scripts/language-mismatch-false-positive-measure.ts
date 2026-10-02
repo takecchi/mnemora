@@ -1,5 +1,5 @@
 /**
- * ADR 0553（問24「基準は測ってから」）: 言語の事後検査（`packages/core/src/language-mismatch.ts`、ADR 0391・0490）の測定。
+ * ADR 0554（問24「基準は測ってから」）: 言語の事後検査（`packages/core/src/language-mismatch.ts`、ADR 0391・0490）の測定。
  *
  * ⛔ **門ではない。**CI にも、package.json の `test` にも載せない。**終了コードは測定結果を見ない**
  * （常に 0。落ちるのは、記録が読めない・例外のときだけ）。件数・割合はファイルに保存せず、
@@ -261,7 +261,7 @@ function printDistribution(materials: Material[]): void {
     "観測は、カセットでは `prompt.messages` の user の content、フィクスチャでは `observation.payload`",
   );
   console.log(
-    "（`observationPayloadText`）。⚠ カセットの観測は近似（ADR 0553 の「近似の誤差」）。\n",
+    "（`observationPayloadText`）。⚠ カセットの観測は近似（ADR 0554 の「近似の誤差」）。\n",
   );
   const header = ["材料", "N", ...STAGES.slice(0, 7).map((s) => `${s}で落ちた`), "印あり"];
   console.log(row(header));
@@ -447,7 +447,7 @@ function main(): void {
   printSensitivity(materials);
   console.log = log;
 
-  console.log("# 言語の事後検査（ADR 0391・0490）の測定 — ADR 0553");
+  console.log("# 言語の事後検査（ADR 0391・0490）の測定 — ADR 0554");
   console.log(`測った commit: ${commit ?? "取れなかった"}`);
   console.log("⛔ 門ではない。終了コードは結果を見ない。数えた記録は下に名乗る。\n");
   if (disagreements.length > 0) {

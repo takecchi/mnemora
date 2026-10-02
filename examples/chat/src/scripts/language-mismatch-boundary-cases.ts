@@ -1,8 +1,8 @@
 /**
- * ADR 0553: 言語の事後検査（`packages/core/src/language-mismatch.ts`）の「境界の例」。
+ * ADR 0554: 言語の事後検査（`packages/core/src/language-mismatch.ts`）の「境界の例」。
  * `language-mismatch-false-positive-measure.ts` が読む。⛔ テストではない（門にしない）。
  *
- * 各入力の `label` は、**検査の結果を見る前に**、ADR 0553 の「ラベルの基準」だけで目視で付けた。
+ * 各入力の `label` は、**検査の結果を見る前に**、ADR 0554 の「ラベルの基準」だけで目視で付けた。
  * 検査の結果に合わせて直していない。
  * - `should`    : 印が付くべき（日本語・中国語の観測から、その言語で書くべき記憶が、別の言語の散文で書かれた）
  * - `shouldNot` : 印が付くべきでない（固有名詞・コード・識別子・URL・書名など、言語を持たないもの。
