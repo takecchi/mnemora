@@ -11,7 +11,13 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
-import { assertFloat4Vector, assertQueryDate, assertQueryInteger } from "./query-check.js";
+import {
+  assertFloat4Vector,
+  assertQueryInteger,
+  assertQueryJsonWithoutNul,
+  assertQueryLabelsWithoutNul,
+  assertQueryTimestamptz,
+} from "./query-check.js";
 
 interface Entry {
   tenantId: string;
@@ -164,11 +170,14 @@ export class InMemoryVectorStore implements VectorStore {
   ): Promise<VectorHit[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
+    // ADR 0456 H3・ADR 0500: `labels`（`text[]`）・`attributes`（`jsonb`）の NUL は、Postgres ではクエリの時点で拒まれる。
+    assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
+    assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
-    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
-    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
-    assertQueryDate("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
+    assertQueryTimestamptz("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryTimestamptz("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryTimestamptz("search", "filter.validAt", opts.filter.validAt);
+    assertQueryTimestamptz("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
     assertQueryInteger("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
     // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
@@ -382,6 +391,9 @@ export class InMemoryVectorStore implements VectorStore {
   ): Promise<Map<string, VectorHit[]>> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
+    // `queries` が空でも、Postgres は往復の前に絞りの NUL を断る（ADR 0500）。
+    assertQueryLabelsWithoutNul("searchMany", "filter.labels", opts.filter.labels);
+    assertQueryJsonWithoutNul("searchMany", "filter.attributes", opts.filter.attributes);
     const result = new Map<string, VectorHit[]>();
     // `queries` が空なら `search()` を一度も呼ばないので、`limit` が不正でも投げない
     // （`PostgresVectorStore.searchMany` も空配列は往復せず空の Map を返す）。

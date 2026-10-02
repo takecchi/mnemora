@@ -3722,6 +3722,22 @@ export class FakeEventStore implements EventStore {
   }
 }
 
+/**
+ * Postgres の `real`（float4）の列に書いた number が、読み戻されるときの値。Postgres は float4 を「float4 として一意に決まる
+ * 最短の10進表記」で文字列にし、ドライバが float64 として読む。呼ぶ前に、`Math.fround` が有限で 0 でないことを確かめてあること。
+ * `packages/testkit` の `toFloat4Readback` と同じ式（core は testkit に依存しないので、ここに持つ）。
+ */
+function float4Readback(value: number): number {
+  const rounded = Math.fround(value);
+  for (let digits = 1; digits <= 9; digits++) {
+    const candidate = Number(rounded.toPrecision(digits));
+    if (Math.fround(candidate) === rounded) {
+      return candidate;
+    }
+  }
+  return rounded;
+}
+
 // `getEventRetention`/`setEventRetention` は `TenantSettingsStore` interface が必須にした
 // ため（ADR 0050）、型を満たすためだけに足した最小実装。⚠ 当初は「これら2メソッドを呼ぶ
 // 既存テストは無い」と書いていたが、その後 `event-retention-purge.test.ts`（ADR 0115）が
@@ -3852,7 +3868,9 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
         `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
       );
     }
-    this.halfLifeRecallsByTenant.set(ctx.tenantId, recalls);
+    // ADR 0500（ADR 0479 の引き受けた負債）: 列は float4 なので、読み戻す値は float4 に丸めたものの最短表記
+    // （`Math.fround(720.1)` ではなく `720.1`。`16777217` は `16777216`）。
+    this.halfLifeRecallsByTenant.set(ctx.tenantId, float4Readback(recalls));
   }
 
   async getActivitySeq(ctx: Ctx): Promise<number> {

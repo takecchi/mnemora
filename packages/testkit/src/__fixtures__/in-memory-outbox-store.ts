@@ -10,7 +10,7 @@ import {
   type PurgeCompletedJobsResult,
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
-import { assertQueryDate } from "./query-check.js";
+import { assertQueryDate, assertQueryTimestamptz } from "./query-check.js";
 
 /**
  * `OutboxStore` のインメモリ・プレースホルダ実装（roadmap.md 段階3）。
@@ -135,7 +135,7 @@ export class InMemoryOutboxStore implements OutboxStore {
     assertWellFormedCtx(ctx);
     // `PostgresOutboxStore.complete` は `at` を `timestamptz` として送るため、Invalid Date は行の有無に
     // 関わらずクエリの時点で拒まれる（`22007`）。同じ入力を、探す前に拒む。
-    assertQueryDate("complete", "opts.at", opts?.at);
+    assertQueryTimestamptz("complete", "opts.at", opts?.at);
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -162,7 +162,7 @@ export class InMemoryOutboxStore implements OutboxStore {
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     // `complete` と同じ理由（Invalid Date は Postgres が `22007` で拒む）。
-    assertQueryDate("fail", "opts.at", opts?.at);
+    assertQueryTimestamptz("fail", "opts.at", opts?.at);
     const job = this.jobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
