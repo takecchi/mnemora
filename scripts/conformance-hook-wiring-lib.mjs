@@ -30,6 +30,8 @@
  *
  * ⛔ **しかし `@mnemora/testkit` は npm に公開済み**（`private` は立っておらず
  * `publishConfig.access: "public"`、registry の `dist-tags.latest` は `0.1.5`）。
+ * （2026-10-03 訂正）`0.1.5` は書いた当時の値である。いまの版は `npm view @mnemora/testkit version`
+ * で引くこと（ここには写さない）。
  * ⟹ 必須化は**実在する公開パッケージへの破壊的変更**であり、**版を上げる判断は
  * オーナーの領域**である。
  *

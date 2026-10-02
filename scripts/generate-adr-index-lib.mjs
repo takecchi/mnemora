@@ -30,6 +30,10 @@
  * 担っていた役割を引き継ぐ（ただし PR を塞ぐ門ではなく、上の手順が実際に
  * 守られたかを見る `main` の安全網としてのみ働く——手順が守られている限り
  * routine では鳴らない。理由は ADR 0137 の「決定」2番・3番）。
+ * （2026-10-03 訂正）この括弧の中身は ADR 0137 の当時の設計である。ADR 0192 以降、この歯は
+ * `main` の push だけでなく CI の `pull_request` でも有効で、`typecheck / lint / test / build`
+ * は required status check なので、索引が陳腐化した PR は GitHub がマージを拒む
+ * （`adr-index-freshness-branch-lib.mjs` の docstring、`docs/autonomy.md` §4.0）。
  *
  * ## ソースにするもの
  *
