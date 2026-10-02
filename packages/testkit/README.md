@@ -1,15 +1,15 @@
 # @mnemora/testkit
 
-adapter（`MemoryStore` / `VectorStore` / `EventStore` / `OutboxStore` /
-`TenantSettingsStore` の実装）が満たすべき適合テスト一式（conformance suite）と、
+adapter（`MemoryStore` / `VectorStore` / `LexicalStore` / `RelationStore` / `EventStore` /
+`OutboxStore` / `TenantSettingsStore` の実装）が満たすべき適合テスト一式（conformance suite）と、
 決定的な擬似 `LLMProvider` / `EmbeddingProvider`。
 
 ## インストール
 
 ```bash
-pnpm add -D @mnemora/testkit @mnemora/core vitest
+pnpm add -D @mnemora/testkit @mnemora/core vitest zod
 # または
-npm i -D @mnemora/testkit @mnemora/core vitest
+npm i -D @mnemora/testkit @mnemora/core vitest zod
 ```
 
 `@mnemora/testkit` は `vitest` に依存している（`describe`/`it`/`expect` を内部で呼ぶ）ため、
@@ -19,6 +19,12 @@ npm i -D @mnemora/testkit @mnemora/core vitest
 **使う側が入れた vitest をそのまま使う。**そうしないと、使う側の vitest と
 このパッケージが引き込む vitest の2つが `node_modules` に並び、`describe` の実体が
 食い違って「テストが1本も見つからない」形の壊れ方をしうる。
+
+**`zod` も `peerDependencies` である**（範囲は `@mnemora/core` と同じ `^4.5.4`。`package.json` の
+`peerDependencies` が正）。公開の型 `LLMProviderConformanceOptions` が `zod` の型を d.ts に持つためで、
+実行時の import ではなく型だけである。`dependencies` にしていないのは、使う側の `zod` と二重に入ると
+`z.ZodType` の型が噛み合わなくなるため。上のインストールのコマンドに `zod` を含めてある
+（[ADR 0561](../../docs/decisions/0561-doc-code-drift-sweep-recall-testkit.md)）。
 
 ## 前提
 
