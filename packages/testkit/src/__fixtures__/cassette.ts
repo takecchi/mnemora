@@ -4,10 +4,12 @@ import type { EmbeddingSpaceId, PromptSpec } from "@mnemora/core";
 /**
  * 記録した実 API の入出力（カセット）の型と、その鍵の導出（ADR 0051）。
  *
- * **これは擬似 provider の置き換えではなく、二層のうちの上の層である。**
+ * **これは擬似 provider の置き換えではなく、擬似 provider とは別の層である**
+ * （AGENTS.md の「provider は4層ある」の `recorded` の行）。
  * 配線・契約・適合テストは従来どおり `DeterministicLLMProvider` /
  * `DeterministicEmbeddingProvider`（意味を持たない stub）で走る。カセットを使うのは
- * 北極星の物差しを測る経路（`examples/chat` の `retrieval`）だけである。
+ * 北極星の物差しを測る経路（`examples/chat` の `retrieval`・`compare` など。どの経路が
+ * どの層かは AGENTS.md の表を見ること）だけである。
  * 理由と、採らなかった案は [ADR 0051](../../../../docs/decisions/0051-recorded-provider-cassette.md)。
  *
  * **鍵は入力そのものの SHA-256 にする。**入力文字列をそのまま JSON のキーにしないのは、
