@@ -55,7 +55,7 @@ InMemory が `MalformedIdentifierError`・`Error` で断り、Fake が通して�
 
 ## 7. 歯と測ったこと【実測】
 
-- 歯: `packages/core/src/__tests__/fake-recall-and-subject-input-checks.test.ts`（28本）。断る側（R1〜R3、`ctx` の代表の口）と、やりすぎの対照（本物が通す ctx・`subjectId`・JSON 値）。
+- 歯: `packages/core/src/__tests__/fake-recall-and-subject-input-checks.test.ts`。断る側（R1〜R3、`ctx` の代表の口）と、やりすぎの対照（本物が通す ctx・`subjectId`・JSON 値）。
 - 直す前: 28本中 24本が赤（4本は対照・順序に依らない口）。直した後: 28本緑。
 - 変異（1つずつ前景で）: 足りない側 — `createRecall` の `subjectId` の識別子検査を外す（2本赤）・`advanceActivityClock.subjectId` を外す（2）・`assertFakeRecallRecordStorable` の呼び出しを外す（16）・NUL 検査を外す（8）・JSON の必須検査を外す（7）・`findActiveByClaimKey` の `subjectId` 検査を外す（2）・`getSubjectActivitySeqs` の検査を外す（2）・`get` の `ctx` 検査を外す（1）。やりすぎ側 — `budget` を必須にする（1）・`createRecall` で空・大文字・長い tenantId を断る（1）・非 ASCII の `subjectId` を断る（1）・`subjectIds` の非 ASCII を断る（2）・`get` で空の tenantId を断る（1）。全て赤、戻して緑。
 - 走らせたテスト（名指し。core。全て緑）: 新規 + `createRecall`・`getSubjectActivitySeqs`・`findActiveByClaimKey` 等を参照する既存 23 本 + `recall-pipeline`・`fake-store-postgres-parity`・`fake-input-checks-round2`・`fake-read-and-claim-input-checks` + `fake-*` の残り・`runtime-fakes-filter-labels-subjectless`・`extract-redelivery-unsaveable-fake`（計 33 本）。`pnpm --filter @mnemora/core typecheck`・eslint・prettier（ts）は通した。
