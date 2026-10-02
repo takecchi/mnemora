@@ -1498,7 +1498,7 @@ CREATE INDEX idx_observations_by_subject ON observations (tenant_id, subject_id,
 `@mnemora/postgres` は `payload` を `JSON.stringify` して `jsonb` に入れるので、`observe({ kind: "event", data })` の
 `data` に JSON で往復しない値を渡すと、形が変わって読み戻る（`NaN`・`±Infinity` は `null`、`-0` は `0`、
 `Date` は ISO 8601 の文字列、値が `undefined` の欄は消える）。`@mnemora/testkit` の fixture は JS の値を
-そのまま保持する。保証するのは、JSON の値が同じ値で読み戻ることだけである。クローン miku の判断で、
+そのまま保持する（ただし関数・`Symbol` の値と `toJSON` を持つ値は、[ADR 0486](./decisions/0486-fixture-event-data-align-and-context-text-unit.md) から Postgres と同じ規則で変える——関数・`Symbol` の欄は消え〔配列の要素なら `null`〕、`toJSON` はその戻り値で保存する。`Date` は `toJSON` を呼ばず `Date` のまま）。保証するのは、JSON の値が同じ値で読み戻ることだけである。クローン miku の判断で、
 入力を JSON の値に限る案・fixture を揃える案は採らず、今の振る舞いを記録した（選び直す余地は Issue に
 残してある）。書き分けは `ObserveEventInput.data` の TSDoc。
 

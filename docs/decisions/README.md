@@ -507,5 +507,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0494](./0494-fuzz-relations-and-argument-mutation.md) | 穴探し — recall の fuzz に `relationStore`（多者間の群・`relationMaxCount`・`link`/`unlink`）と引数の変形（大文字の id・消した記憶の id）を足した。core の recall に 2 つの割れが出たので直した | 採用 (2026-10) |
 | [0495](./0495-doc-code-drift-sweep.md) | 文書とコードのずれを横に掃く — パッケージの README・約束の文書・公開の型の TSDoc を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0497](./0497-recall-rejects-broken-token-counter.md) | 差し替えた `TokenCounter` が有限で 0 以上でない `tokens` を返したら、`recall()` は `RangeError` で断る（ADR 0483 の材料を直す） | 採用 (2026-10) |
+| [0498](./0498-constructor-config-checks.md) | 壊れた構成値を構築時に断る — `createBullmqTickDriver` の `everyMs`・`jobName`、provider のコンストラクタの数値オプション | 採用 (2026-10) |
+| [0501](./0501-doc-debts-usage-env-analyze-per-process-reinforce-purged.md) | 文書の負債3件を返す — `--help` の環境変数（ADR 0478 負債1）・ANALYZE の数えがプロセスごと（ADR 0460 D5）・purged への強化の TSDoc（ADR 0453 負債3） | 採用 (2026-10) |
+| [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
