@@ -402,6 +402,20 @@ export interface ClaimKeyOptions {
    * （ADR 0377「失うもの」）。**別の observation（別ターン）どうしの対（訂正の典型形）は
    * 今までどおり contested になる**——`negation-moved-city`・`schedule-change-deadline`
    * 等（ADR 0329 の測定ケース）を見ること。
+   *
+   * ⚠ **【Issue #1436、ADR 0491】同じ向きは、訂正ではない正しい 2 主張にも働く。**別々の
+   * observation（別ターン）に分かれた、**相対的な期間だけが違う**正しい 2 主張——例: ある日の
+   * 「去年は札幌で働いていた」と、別の日の「今年は福岡で働いている」——も、今は contested になる。
+   * 「去年」「今年」のような相対的な期間は、どちらの抽出でも `validFrom`/`validUntil` に入らず
+   * （どちらも null）、有効期間の重なり判定（ADR 0324 決定4）が「重なる」と答えるため、同じ
+   * claim key・`contentHash` が違う 2 件が一致する。同じ発話の中の兄弟なら上の修正で除かれるが、
+   * 別 observation は除かれない。直し方 — (a) 抽出で相対時期を `validFrom`/`validUntil` に入れる、
+   * (b) 既定の claim key のプロンプトに「期間が違う主張は別の predicate にする」を足す — は、どちらも
+   * 既定の経路の文言を変える（カセットの録り直しと実 API が要り、(a) は誤った期間が本物の訂正を
+   * 弾きうる、(b) は「言い換えを統合する」指示と衝突して訂正を取りこぼしうる）ので、**オーナーの判断待ち**
+   * （Issue #1436）。今の振る舞いは `__tests__/claim-key-relative-period-across-observations.test.ts`
+   * が縛っている。呼び出し側は、`observe()` に期間（`validFrom`/`validUntil`）を明示すれば、重ならない
+   * 対は contested にならない。
    */
   detectContested?: boolean | undefined;
   /**
