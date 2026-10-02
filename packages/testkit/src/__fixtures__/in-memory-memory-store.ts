@@ -1141,7 +1141,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       return;
     }
     const changed: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
-    // ADR 0567: 綴り違いの同じ id（`[x, X]`）は1行として数え、`changed` は id の昇順にする
+    // ADR 0568: 綴り違いの同じ id（`[x, X]`）は1行として数え、`changed` は id の昇順にする
     // （`@mnemora/postgres` は `id = ANY(...) ORDER BY id ASC` で行を選ぶので、1行につき1件・昇順）。
     const seen = new Set<MemoryId>();
     for (const raw of ids) {

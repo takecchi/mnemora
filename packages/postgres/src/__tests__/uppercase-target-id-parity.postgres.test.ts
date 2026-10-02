@@ -976,7 +976,7 @@ describe("EventStore.get に大文字のイベント id を渡したとき、3 �
   });
 });
 
-// ADR 0567: ADR 0556 の歯が通した変異（テナントの検査の緩め・畳み・status の広げ）と、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
+// ADR 0568: ADR 0556 の歯が通した変異（テナントの検査の緩め・畳み・status の広げ）と、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
 // どれも、Postgres の現物を基準に testkit（と、`EventStore.get` は Fake）が同じになることを見る。基準は走らせて確かめた値で、推測ではない。
 type AbortEntry =
   "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
@@ -1044,7 +1044,7 @@ function describeChanged(changed: string[], srcIds: string[]): string {
   );
 }
 
-describe("abortIfSuperseded: 別テナントの superseded な記憶は、大文字の id でも見ない（ADR 0567・M2）", () => {
+describe("abortIfSuperseded: 別テナントの superseded な記憶は、大文字の id でも見ない（ADR 0568・M2）", () => {
   for (const entry of ABORT_ENTRIES) {
     it(
       entry,
@@ -1080,7 +1080,7 @@ describe("abortIfSuperseded: 別テナントの superseded な記憶は、大文
   }
 });
 
-describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは大文字小文字を区別する（ADR 0567・M3・M4）", () => {
+describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは大文字小文字を区別する（ADR 0568・M3・M4）", () => {
   it("abortIfSuperseded は、綴りの違うテナントの記憶を、自分の記憶として見ない", async () => {
     for (const entry of ["createMemoryWithOutbox", "createMemoriesWithOutboxAndEvents"] as const) {
       const seen: Record<string, string> = {};
@@ -1120,7 +1120,7 @@ describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは�
   }, 120_000);
 });
 
-describe("abortIfSuperseded: superseded 以外の status は、大文字の id でも断らない（ADR 0567・M5）", () => {
+describe("abortIfSuperseded: superseded 以外の status は、大文字の id でも断らない（ADR 0568・M5）", () => {
   for (const status of ["active", "forgotten", "contested", "archived"] as const) {
     it(
       status,
@@ -1158,7 +1158,7 @@ describe("abortIfSuperseded: superseded 以外の status は、大文字の id �
   }
 });
 
-describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`changed` は Postgres と同じ（ADR 0567）", () => {
+describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`changed` は Postgres と同じ（ADR 0568）", () => {
   for (const entry of ABORT_ENTRIES) {
     it(`${entry}: [x, X] は1件`, async () => {
       const seen: Record<string, string> = {};
