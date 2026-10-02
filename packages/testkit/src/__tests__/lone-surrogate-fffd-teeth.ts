@@ -32,7 +32,22 @@ export interface LoneSurrogateKit {
   listEvents(ctx: Ctx): Promise<MemoryEvent[]>;
   /** `OutboxStore.claimBatch`（`kinds`・`claimedBy` の引数が `text[]`・`text` の列に当たる口）。 */
   claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
+  /**
+   * `VectorStore.search`・`LexicalStore.search` の `filter.labels`（`text[]` の引数）。`memoryId` の記憶（`tags` に孤立サロゲートの入ったもの）を
+   * 埋め込み済み・語彙一致する状態にしてから、`labels` で絞った検索の当たった memoryId を返す。
+   */
+  searchByLabels?(
+    ctx: Ctx,
+    memoryId: string,
+    labels: string[],
+  ): Promise<{ vector: string[]; lexical: string[] }>;
 }
+
+/** `searchByLabels` の記憶が語彙一致するための本文と問い。 */
+export const LEXICAL_PROBE = {
+  content: "obsidian shards glimmer in the cave",
+  query: "obsidian shards",
+};
 
 const CTX: Ctx = { tenantId: "lone-fffd" };
 
@@ -254,6 +269,54 @@ export function describeLoneSurrogateFffd(
           expect(agg.totalInScope, `labels probe=${JSON.stringify(probe)}`).toBe(1);
         }
       });
+      it("読み取りの引数も同じく置き換わる（続き）: claimKey（findContestedByClaimKey）・taxonomyGroupCandidates（aggregateScope）", async () => {
+        const { store } = await makeKit();
+        const other = await store.createMemory(CTX, mem());
+        const m = await store.createMemory(
+          CTX,
+          mem({
+            status: "contested",
+            contestedWithId: other.id,
+            tags: [input],
+            claimKey: { subject: input, predicate: input },
+          }),
+        );
+        for (const probe of [input, expected]) {
+          if (store.findContestedByClaimKey !== undefined) {
+            const hits = await store.findContestedByClaimKey(CTX, {
+              subjectId: null,
+              claimKey: { subject: probe, predicate: probe },
+              excludeMemoryId: "00000000-0000-4000-8000-000000000000",
+              contentHash: "no-such-hash",
+              validFrom: null,
+              validUntil: null,
+            });
+            expect(
+              hits.map((h) => h.id),
+              `findContestedByClaimKey probe=${JSON.stringify(probe)}`,
+            ).toEqual([m.id]);
+          }
+          const agg = await store.aggregateScope(CTX, { taxonomyGroupCandidates: [probe] });
+          const tax = agg.groups.filter((g) => g.axis === "taxonomy" && g.key !== null);
+          expect(
+            tax.map((g) => [g.key, g.count]),
+            `taxonomyGroupCandidates probe=${JSON.stringify(probe)}`,
+          ).toEqual([[expected, 1]]);
+        }
+      });
+      it("VectorStore.search・LexicalStore.search の filter.labels も置き換わる（保存側の tags と同じ規則）", async () => {
+        const { store, searchByLabels } = await makeKit();
+        if (searchByLabels === undefined) return;
+        const m = await store.createMemory(
+          CTX,
+          mem({ content: LEXICAL_PROBE.content, tags: [input] }),
+        );
+        for (const probe of [input, expected]) {
+          const hits = await searchByLabels(CTX, m.id, [probe]);
+          expect(hits.vector, `vector labels probe=${JSON.stringify(probe)}`).toEqual([m.id]);
+          expect(hits.lexical, `lexical labels probe=${JSON.stringify(probe)}`).toEqual([m.id]);
+        }
+      });
     });
 
     describe.each(UNCHANGED_CASES)("対照: %s", (_label, value) => {
@@ -286,6 +349,25 @@ export function describeLoneSurrogateFffd(
       const { store } = await makeKit();
       const m = await store.createMemory(CTX, mem({ tags: ["a\uD800b", "a\uDC00b"] }));
       expect(m.tags).toEqual(["a�b", "a�b"]);
+    });
+
+    it("対照（対象外）: jsonb 列の欄（attributes・provenance）は置き換えない——断る（Postgres）か、そのまま保持する（IM・Fake）かのどちらかで、U+FFFD にはならない", async () => {
+      const { store } = await makeKit();
+      const lone = "a\uD800b";
+      const viaAttributes = await store.createMemory(CTX, mem({ attributes: { k: lone } })).then(
+        (m) => m,
+        () => undefined,
+      );
+      if (viaAttributes !== undefined) expect(viaAttributes.attributes).toEqual({ k: lone });
+      const viaProvenance = await store
+        .createMemory(CTX, mem({ provenance: { kind: "imported", batchId: lone } }))
+        .then(
+          (m) => m,
+          () => undefined,
+        );
+      if (viaProvenance !== undefined) {
+        expect(viaProvenance.provenance).toEqual({ kind: "imported", batchId: lone });
+      }
     });
 
     it("入力のオブジェクトは書き換えない（置き換えは保存する値だけ）", async () => {
