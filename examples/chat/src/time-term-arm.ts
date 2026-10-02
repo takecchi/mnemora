@@ -290,9 +290,9 @@ async function runOneProbe(
   // **embed ジョブが1件も claim されずに ANN 候補が空になった。**
   // **実測でこれを踏んだ**——8 probe すべてが「この項を持つ候補が無い」になった(ADR 0355 より前)。
   //
-  // 🔴 Issue #719: 素の `new Date()` を渡すだけでは足りない——`available_at`
-  // (Postgres の `now()`、us精度)と同じ ms 内でこの時刻を読むと claim が1件も
-  // 進まない(`clockPastRecentDbWrites` の docstring 参照)。`options.clock` が
+  // 🔴 Issue #719: 素の `new Date()` を渡すだけでは足りなかった(当時の事実。ADR 0559)——
+  // `available_at`(当時は Postgres の `now()`、us精度)と同じ ms 内でこの時刻を読むと
+  // claim が1件も進まなかった(`clockPastRecentDbWrites` の docstring 参照)。`options.clock` が
   // 在る(`decay-*` probe、止まった `MutableClock`)場合は、`.set()` するまで
   // 動かないので `drainEmbedTicks` の `waitForClockToAdvance`(実時計が進むのを
   // 待つ既定の再試行)は無意味——ここで先に +1ms して確実に追い越しておき、
