@@ -177,6 +177,40 @@ for (const [kitName, makeKit] of KITS) {
       );
     });
 
+    it("対の外の forgotten な記憶を supersededById に指すのは RangeError で、何も書かない（ADR 0515）", async () => {
+      const kit = await makeKit();
+      const [a, b] = await pair(kit);
+      const gone = await mem(kit);
+      await kit.store.updateStatus(A, gone.id, "forgotten");
+      await expectRefused(
+        kit,
+        [a.id, b.id, gone.id],
+        /^resolveContestedPair: first\.supersededById must not be a forgotten memory outside the pair$/,
+        () => resolve(kit, a, b, { status: "superseded", by: gone.id }, { status: "active" }),
+      );
+      await expectRefused(
+        kit,
+        [a.id, b.id, gone.id],
+        /^resolveContestedPair: second\.supersededById must not be a forgotten memory outside the pair$/,
+        () => resolve(kit, a, b, { status: "active" }, { status: "superseded", by: gone.id }),
+      );
+    });
+
+    it("陽性対照: 対の外の archived な記憶を指す superseded は通る（forgotten だけを断る。ADR 0515）", async () => {
+      const kit = await makeKit();
+      const [a, b] = await pair(kit);
+      const archived = await mem(kit);
+      await kit.store.updateStatus(A, archived.id, "archived");
+      const r = await resolve(
+        kit,
+        a,
+        b,
+        { status: "active" },
+        { status: "superseded", by: archived.id },
+      );
+      expect(r.second.supersededById).toBe(archived.id);
+    });
+
     it("陽性対照: 勝者を指す superseded・both_active・群の外の active を指す superseded は通る", async () => {
       const kit = await makeKit();
       let [a, b] = await pair(kit);
@@ -371,6 +405,26 @@ for (const [kitName, makeKit] of KITS) {
         await expectRefused(kit, [t.id], /supersededById must not be the memory itself/, () =>
           call(kit, t.id, { supersededById: t.id }),
         );
+      });
+
+      it(`${name}: superseded 以外の status に supersededById を付けるのは RangeError で、何も書かない（ADR 0515）`, async () => {
+        const kit = await makeKit();
+        const t = await mem(kit);
+        const w = await mem(kit);
+        const run = (status: "active" | "archived" | "forgotten") =>
+          name === "updateStatus"
+            ? kit.store.updateStatus(A, t.id, status, { supersededById: w.id })
+            : kit.store.updateStatusWithEvent(A, t.id, status, { supersededById: w.id }, ev(t.id));
+        for (const status of ["active", "archived", "forgotten"] as const) {
+          await expectRefused(
+            kit,
+            [t.id, w.id],
+            new RegExp(
+              `^${name}: opts\\.supersededById must not be set unless status is "superseded"$`,
+            ),
+            () => run(status),
+          );
+        }
       });
 
       it(`${name}: 陽性対照 — 別の記憶を指す superseded、superseded 以外の status（supersededById 無し）は通る`, async () => {
