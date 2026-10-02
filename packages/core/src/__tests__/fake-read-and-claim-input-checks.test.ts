@@ -69,8 +69,16 @@ const claimOpts = (extra: Record<string, unknown> = {}) => ({
 
 describe("Fake の読み取り・claim の口の入力の検査（InMemory・Postgres と同じ側に断る）", () => {
   const filters: Array<[string, Record<string, unknown>, RegExp | "malformed"]> = [
-    ["occurredAfter が Invalid Date", { occurredAfter: bad }, /filter\.occurredAfter must be a valid Date/],
-    ["occurredBefore が Invalid Date", { occurredBefore: bad }, /filter\.occurredBefore must be a valid Date/],
+    [
+      "occurredAfter が Invalid Date",
+      { occurredAfter: bad },
+      /filter\.occurredAfter must be a valid Date/,
+    ],
+    [
+      "occurredBefore が Invalid Date",
+      { occurredBefore: bad },
+      /filter\.occurredBefore must be a valid Date/,
+    ],
     ["validAt が Invalid Date", { validAt: bad }, /filter\.validAt must be a valid Date/],
     ["subjectId に NUL", { subjectId: "a\u0000b" }, "malformed"],
     ["tenantId に NUL", { tenantId: "a\u0000b" }, "malformed"],
