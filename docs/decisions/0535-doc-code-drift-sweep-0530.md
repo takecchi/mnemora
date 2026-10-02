@@ -24,7 +24,7 @@
 - **直したもの**: なし（文書の側に古い記述が無かった）。
 - **コードの側を直すべき食い違い**: 見つからなかった。オーナーの領分の材料として、ADR 0530 が挙げる3点（`limit` の既定と `leaseMs` の関係、`OutboxStore` にリースを延ばす口を足すか、`reflect` の二重を許すか）が残る。変更なし。
 - **前回との比較**【実測】: 識別子・パス・リンク・`Type.member`・import の照合は、前回の最後の出力と、行番号を除いて同じ。TSDoc の2つの照合も同じ。文言の照合は、ADR 0528（#1622）が `docs/architecture.md` に足した `setEventRetention` の int4 の文面の1行が、この基準（`3c90e3b7`）には入っているので、1行多い。それ以外は同じ。
-- **陽性対照**【実測】: 一時の md に存在しないパス `docs/decisions/0530-nope.md` を書いてパスの照合に通し、拾った（実在する歯のパスは拾わなかった）。一時ファイルは削除した。種類ごとの結末と実装の突き合わせには機械の陽性対照が無い（手で読んだ）。
+- **陽性対照**【実測】: 一時の md に存在しない ADR のパス（番号 0530 を名乗る架空のファイル名。ここには書かない）を書いてパスの照合に通し、拾った（実在する歯のパスは拾わなかった）。一時ファイルは削除した。種類ごとの結末と実装の突き合わせには機械の陽性対照が無い（手で読んだ）。
 - **【未確認】**: 0530 の2つの歯（Fake・InMemory・実 Postgres）を走らせていない。ADR 0530 が書く4種類の結末の12項目そのもの。0530 が測っていないと書く範囲（複数プロセス・複数の接続プール、`reflect` の材料が処理の途中で `superseded` になる場合）。
 - **走らせたコマンド**: `node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
 
@@ -56,4 +56,26 @@
 - **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回（0530 の分）と、行番号を除いて同じだった。
 - **陽性対照**【実測】: 一時の md に存在しない識別子 `seqSumOverflowsBigintX` を書いて識別子の照合に通し、拾った（実在する `seqSumOverflowsBigint` は拾わなかった）。一時ファイルは削除した。migration の指す節のずれは、CHANGELOG の見出しの位置（`## [1.3.0]` の `### Breaking` に 0505 の NUL の項が在る）と migration の項の位置を数えて見つけた。条件・文面の突き合わせには機械の陽性対照が無い（手で読んだ）。
 - **【未確認】**: 0505 の歯（`in-memory-fixtures-seq-sum-overflow.test.ts`・`testkit-fixture-seq-sum-overflow.postgres.test.ts`・`store-write-nul-named.postgres.test.ts` と `error-message-omits-params.postgres.test.ts` の追加分）を走らせていない。2軸の組み合わせ（`decayFloorAnyAxis` ほか）の条件が Postgres と同じ結果になること（0505 は実測したと書くが、再実行していない）。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
+
+## 追い足し（基準 main `3136a062`、ADR 0508 の分）
+
+0508（#1629）が main に入ったので掃いた（`git diff 7453e1a7 3136a062`）。その手前の #1630（ADR 0533、`7453e1a7`）は掃きの ADR 自身なので掃かず、取り込んだだけ。この枝は `origin/main` を merge した（衝突は `docs/decisions/README.md` の索引だけ。`generate-adr-index.mjs` で作り直した。`docs/migration-v1.md` は自動で入り、衝突マーカーは 0 件）。0531・0532・0510・0534 などは、まだ追い足していない。
+
+- **0508 の中身**【現物】: 差は ADR 0508 と1つの歯（`packages/postgres/src/__tests__/recall-channels-undecidable-japanese-labels-parity.postgres.test.ts`）と索引だけ。実装・TSDoc・README・約束の文書・CHANGELOG・migration-v1 は変わっていない。`recall` の `channels` の合流のうち、(1) `ann_truncated` の `undecidable`（窓が埋まり、かつ語彙が走ったとき。窓が埋まらない・ANN が走らないときは出ない）、(2) 日本語の語彙（trigram は当て、tsvector と Fake は当てない。既知の非対称〔ADR 0084 §3.2・0319〕）、(3) `labels` との組（絞りが語彙 store へ降りていること）を、Fake・実 Postgres（tsvector・trigram）に同じ問いを当てて縛った。割れは日本語の既知の非対称だけ。
+- **ADR 0533 への参照**: ADR 0535 の冒頭は ADR 0533 を番号だけで書き、リンクにしていない（`](./0533` の形は無い）。そのため、リンク切れの心配は元から無い。main には `docs/decisions/0533-doc-code-drift-sweep-0526-0527.md` が入っていて、番号で名指しした先が実在する。
+- **探した場所**【現物】:
+  - 差の確認: `git diff 7453e1a7 3136a062`。
+  - `docs/recall.md` の語彙チャンネルの記述（§2 段1の「1チャンネルのみ」の追記、ADR 0319 の trigram の追記、`ann_truncated` の `certainty` の説明）、`packages/core/src/recall-runtime.ts` の `annWindowFilled`・`lexicalExecuted` の判定、`testkit` の `InMemoryLexicalStore` の TSDoc（CJK を語単位に割らない）を読み、0508 の結果と照らした。
+  - 語の grep: `UNDECIDABLE_LEXICAL_ACTIVE|undecidable` を `docs/recall.md` に。`日本語|CJK|trigram` を `docs/recall.md`・`packages/testkit/README.md`・`in-memory-lexical-store.ts` に。
+  - 機械照合を、前回（0505 の分）と同じ文書の集合に再度通した。
+- **突き合わせの結果**【現物】:
+  - `docs/recall.md` の「語彙チャンネルは日本語の文に埋もれた日本語の語を引けない」「`PostgresTrigramLexicalStore` は opt-in の代替で、日本語を引ける」は、0508 の結果（trigram は当て、tsvector と Fake は当てない。`ann+lexical` の合流でも同じ）と一致した。`InMemoryLexicalStore` の TSDoc（CJK 自体の分かち書きをしない。Fake は tsvector 側に合わせてある）とも一致する。
+  - `ann_truncated` の `undecidable`（`certainty` の説明「たとえば語彙チャンネルを併用しているとき」）は、0508 が縛った条件（窓が埋まり、かつ語彙が走ったとき。実装は `annWindowFilled && lexicalExecuted`）の一般的な言い方で、矛盾しない。窓が埋まらない・語彙だけ・ANN だけのときに出ないことを書いた文書は無い（0508 は歯にしただけで、約束を足していない）。
+  - `labels` を語彙 store へ降ろす絞りと後置の `survivesLabelsFilter` の関係（0508 の変異試験が示す、`kPrime` が窓を絞る形では降ろしが効く）は、文書には書かれていない。古くなった記述は無い。
+- **直したもの**: なし（文書の側に古い記述が無かった）。上の ADR 0535 本文の1か所（陽性対照の説明に、実在しないパスの字面が入っていて、パスの照合が拾う形になっていた）だけ、字面を書かない言い方に直した。
+- **コードの側を直すべき食い違い**: 見つからなかった。材料として残す【判断】: ADR 0508 が歯で縛った日本語の非対称（Fake が日本語を引けない）は、`recall.md`・Fake の TSDoc が書く既知の設計で、直す対象ではない。Fake が trigram 側へ寄る、または tsvector が日本語を引けるようになったときは、0508 の歯の期待を直す（0508 の「これが覆るとしたら」）。
+- **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回と、行番号を除いて同じだった。
+- **陽性対照**【実測】: 一時の md に存在しない識別子 `ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVEX` を書いて識別子の照合に通し、拾った（実在する `ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE` は拾わなかった）。一時ファイルは削除した。0508 の結果と文書の突き合わせには機械の陽性対照が無い（手で読んだ）。
+- **【未確認】**: 0508 の歯（Fake・実 Postgres の tsvector と trigram）を走らせていない。ADR 0508 の変異試験（4種類）の結果。SQL_ASCII の DB で trigram の歯が「使えないこと」を主張して終わること（0508 自身も走らせていない）。
 - **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
