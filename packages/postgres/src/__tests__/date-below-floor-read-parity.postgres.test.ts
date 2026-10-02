@@ -25,7 +25,10 @@ import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { PostgresTrigramLexicalStore } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  TrigramLexicalStoreUnavailableError,
+} from "../trigram-lexical-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import {
   TEST_EMBEDDING_SPACE,
@@ -68,6 +71,22 @@ interface Kit {
 let tenantSeq = 0;
 const nextCtx = (): Ctx => ({ tenantId: `date-floor-${++tenantSeq}` });
 
+/**
+ * trigram 版は、server_encoding が UTF8 でない DB（CI の SQL_ASCII の脚）では `create` が
+ * `TrigramLexicalStoreUnavailableError` を投げる（日本語の語彙照合に使えない。この歯の本文は ASCII だが、store の前提が満たされない）。
+ * そのときは trigram 版の比較を外す（`undefined`。tsvector 版は SQL_ASCII でも走る）。それ以外の例外は握りつぶさない。
+ */
+async function createTrigramIfAvailable(
+  db: Awaited<ReturnType<typeof getTestClient>>["db"],
+): Promise<LexicalStore | undefined> {
+  try {
+    return await PostgresTrigramLexicalStore.create(db);
+  } catch (e) {
+    if (e instanceof TrigramLexicalStoreUnavailableError) return undefined;
+    throw e;
+  }
+}
+
 async function kits(): Promise<Kit[]> {
   const { db } = await getTestClient();
   const inMem = new InMemoryMemoryStore();
@@ -78,7 +97,7 @@ async function kits(): Promise<Kit[]> {
       mem: new PostgresMemoryStore(db),
       vec: new PostgresVectorStore(db),
       lex: new PostgresLexicalStore(db),
-      trigram: await PostgresTrigramLexicalStore.create(db),
+      trigram: await createTrigramIfAvailable(db),
       ev: new PostgresEventStore(db),
       ob: new PostgresOutboxStore(db),
       settings: new PostgresTenantSettingsStore(db),
@@ -318,6 +337,7 @@ const cases: Case[] = [
     {
       name: `LexicalStore.search（trigram 版）${field}`,
       expected,
+      // trigram 版が使えない DB（SQL_ASCII）では tsvector 版で代用する（比較の意味は変わらず、trigram 固有の確認だけが外れる）。
       run: (k, s, d) => lexSearch(k.trigram ?? k.lex, s, { [field]: d }),
     },
   ]),
