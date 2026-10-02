@@ -25,14 +25,15 @@ import {
 
 /**
  * Runtime の入口が不正な入力に投げる例外の種類を、今のまま縛る（Issue #1184 の案1「今のまま（口ごとの種類を
- * doc に書く）」）。振る舞いは変えていない。
+ * doc に書く）」）。ADR 0496 で `findCorrectionCandidates`・`resolveContested(Group)`・`tick` の型の外の入力を断る例外を足した（下）。
  *
- * 種類は口ごとに違い、揃えていない。揃える（`RangeError`・`TypeError` に寄せる、名前付きの class を足す、
- * `tick` に `leaseMs` の検査を足す、など）と、catch している利用者を壊しうるので、どれかが変わればここが赤くなる。
- * 揃えるかどうかは #1184 で決めていない。
+ * 種類は口ごとに違い、揃えていない。揃える（`RangeError`・`TypeError` に寄せる、名前付きの class を足す、など）と、catch している利用者を壊しうるので、
+ * どれかが変わればここが赤くなる。揃えるかどうかは #1184 で決めていない。
  *
- * `tick` だけは Runtime が検査せず、`leaseMs` を `OutboxStore.claimBatch` へそのまま渡すので、顔が store で違う。
- * その実測を `TickOptions.leaseMs` の TSDoc に書いてあり、TSDoc の記述とここで測った顔を突き合わせる。
+ * `tick` は、ADR 0496 で入口の検査を足した（`leaseMs` の省略・非有限は `RangeError`、`opts` が object でなければ `TypeError`）。
+ * 以前は Runtime が検査せず、`leaseMs` を `OutboxStore.claimBatch` へそのまま渡していたので、顔が store で違った
+ * （Postgres は drizzle が包んだ `Error`、fixture は名前の無い `Error`）。いまは store の種類によらず同じ顔になる。
+ * その記述を `TickOptions.leaseMs` の TSDoc に書いてあり、TSDoc の記述とここで測った顔を突き合わせる。
  *
  * `registerEmbeddingSpace` のテーブルの衝突（`name` だけの `Error`）は
  * `embedding-space-table-conflict.postgres.test.ts` が縛っている。
@@ -52,8 +53,6 @@ function leaseMsDoc(): string {
   if (start < 0 || at < 0) throw new Error("TickOptions.leaseMs が見つからない");
   return block.slice(block.lastIndexOf("/**", at), at);
 }
-
-const FIXTURE_CLAIM_MESSAGE_PREFIX = "claimBatch: now - leaseMs must be a valid Date";
 
 const shared = {
   llmProvider: {
@@ -127,7 +126,7 @@ function expectNotBuiltinTyped(err: Error): void {
   expect(err).not.toBeInstanceOf(TypeError);
 }
 
-for (const [kind, name, makeRuntime] of KITS) {
+for (const [, name, makeRuntime] of KITS) {
   describe(`${name}: Runtime の入口の例外の種類（今の振る舞い。#1184 で揃えていない）`, () => {
     it("recall の入力スキーマに合わない limit は ZodError", async () => {
       const runtime = await makeRuntime();
@@ -152,6 +151,33 @@ for (const [kind, name, makeRuntime] of KITS) {
       );
     });
 
+    it("findCorrectionCandidates の text が文字列でない・excludeMemoryIds が配列でないは TypeError（ADR 0496）", async () => {
+      const runtime = await makeRuntime();
+      const e1 = await caught(runtime.findCorrectionCandidates(ctx, {} as never));
+      expect(e1.constructor).toBe(TypeError);
+      expect(e1.message).toBe("Runtime.findCorrectionCandidates: text must be a string");
+      const e2 = await caught(
+        runtime.findCorrectionCandidates(ctx, { text: "x", excludeMemoryIds: "abc" } as never),
+      );
+      expect(e2.constructor).toBe(TypeError);
+      expect(e2.message).toBe(
+        "Runtime.findCorrectionCandidates: excludeMemoryIds must be an array",
+      );
+    });
+
+    it("resolveContested の未知の resolution.kind は RangeError（ADR 0496）", async () => {
+      const runtime = await makeRuntime();
+      const a = "00000000-0000-4000-8000-000000000001";
+      const b = "00000000-0000-4000-8000-000000000002";
+      const err = await caught(
+        runtime.resolveContested(ctx, a as never, b as never, { kind: "weird" } as never),
+      );
+      expect(err.constructor).toBe(RangeError);
+      expect(err.message).toBe(
+        'Runtime.resolveContested: resolution.kind must be "supersede" or "both_active"',
+      );
+    });
+
     it("markContested の同じ id の組は RangeError", async () => {
       const runtime = await makeRuntime();
       const id = "00000000-0000-4000-8000-000000000001";
@@ -168,7 +194,7 @@ for (const [kind, name, makeRuntime] of KITS) {
       expect(err.message).toBe(`runtime.reextract: observation not found: ${id}`);
     });
 
-    it("tick の leaseMs を省略すると、Runtime は検査せず store の顔で落ち、ジョブは claim されない", async () => {
+    it("tick の leaseMs を省略すると、Runtime が検査して RangeError。store の種類によらず同じ顔で、ジョブは claim されない（ADR 0496）", async () => {
       const runtime = await makeRuntime();
       await runtime.observe(ctx, {
         kind: "utterance",
@@ -178,25 +204,20 @@ for (const [kind, name, makeRuntime] of KITS) {
       });
 
       const err = await caught(runtime.tick(ctx, {} as never));
-      expectNotBuiltinTyped(err);
-      expect(err.name).toBe("Error");
-      if (kind === "postgres") {
-        expect(err.cause?.code).toBe("22007");
-      } else {
-        expect(err.constructor).toBe(Error);
-        expect(err.cause).toBeUndefined();
-        expect(err.message.startsWith(FIXTURE_CLAIM_MESSAGE_PREFIX)).toBe(true);
-      }
+      expect(err.constructor).toBe(RangeError);
+      expect(err.message).toBe("Runtime.tick: opts.leaseMs must be a finite number");
+      expect(err.cause).toBeUndefined();
 
       // 落ちた tick が claim していれば、同じ時刻の正しい tick はリース中の行を取れず 0 件になる。
       const after = await runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 });
       expect(after.processed + after.failed).toBe(1);
     });
 
-    it("tick の第2引数ごと省略すると TypeError", async () => {
+    it("tick の第2引数ごと省略すると TypeError（Runtime が名指しする。素の「Cannot read properties」ではない）", async () => {
       const runtime = await makeRuntime();
       const err = await caught((runtime.tick as (c: Ctx) => Promise<unknown>)(ctx));
       expect(err.constructor).toBe(TypeError);
+      expect(err.message).toBe("Runtime.tick: opts must be an object");
     });
   });
 }
@@ -204,15 +225,14 @@ for (const [kind, name, makeRuntime] of KITS) {
 describe("TickOptions.leaseMs の TSDoc は、上で測った tick の顔を書いている", () => {
   const doc = leaseMsDoc();
 
-  it("省略したとき Runtime が検査しないこと・store ごとの顔・claim しないこと", () => {
-    expect(doc).toMatch(/`leaseMs` を省略/);
-    expect(doc).toMatch(/Runtime は検査せず/);
-    expect(doc).toContain("`22007`");
-    expect(doc).toContain("`err.cause.code`");
-    expect(doc).toContain(FIXTURE_CLAIM_MESSAGE_PREFIX);
-    expect(doc).toMatch(/`RangeError`・`TypeError` ではない/);
+  it("Runtime が入口で検査すること・例外の種類・claim しないこと", () => {
+    expect(doc).toMatch(/Runtime が入口で検査する/);
+    expect(doc).toContain("`opts` が object でない");
+    expect(doc).toMatch(/`TypeError`/);
+    expect(doc).toMatch(/有限の数でない/);
+    expect(doc).toMatch(/`RangeError`/);
+    expect(doc).toContain("Runtime.tick: opts.leaseMs must be a finite number");
     expect(doc).toMatch(/ジョブは claim されない/);
-    expect(doc).toMatch(/`tick\(ctx\)`[^。]*`TypeError`/);
     expect(doc).toContain("runtime-entry-exception-kinds.postgres.test.ts");
   });
 });
