@@ -1694,11 +1694,12 @@ PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決�
 2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380）、
 PR #1437・Issue #1425（ADR 0382）) になった。**
 
-## 🔴 破壊的変更（v1.1.0 → 次の版）—— **未リリース**
+## 🔴 破壊的変更（v1.1.0 → v1.2.0）—— **`v1.2.0` で出す。確定は CHANGELOG の `### Breaking` で22件（番号付きの項目では 31〜56 の26件。項目29 は破壊的と数えない）**
 
-この節は、`v1.1.0`（tag が指す `5eb6e9d`）より後に `main` へ入った変更を数える。まだ棚卸しはしておらず、
-下の項目は、着地に先立って変更を作った本人が足したものである。⛔ ここに件数を書かないこと
-（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+この節は、`v1.1.0`（tag が指す `5eb6e9d`）… `d49c46c`（PR #1609）の範囲の変更を数えたものである。
+（⚠ 2026-10-02 訂正: ここまでこの段落は「まだ棚卸しはしておらず、下の項目は、着地に先立って変更を作った本人が足したものである」と書いていた。）
+
+⚠ **2026-10-02 追記（1回目の棚卸し。[CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節の追記1 と同じ範囲）**: 範囲の PR を first-parent で全部当てた。下の番号付きの項目は、着地に先立って変更を作った本人が足したものであり、この棚卸しで足した項目は無い。食い違いは CHANGELOG 側を直した——項目52（PR #1562）・項目53（PR #1576）は、ここでは破壊的と数えているのに CHANGELOG の `### Breaking` に無かったので、CHANGELOG に足した。CHANGELOG の項目と、ここの番号付きの項目は1対1ではない（CHANGELOG の1項目がここの項目37〜40、44・45 をまとめて受けている）。⟹ 見出しの件数は、CHANGELOG の `### Breaking` の項目の数と、ここの番号付きの項目の数を両方書いた。各項目の「⚠ 未リリース / 番号は振り直すこと」の注記は、書いた時点の記録として書き換えていない——**番号は 31〜56 のまま確定した。**この判断はクローンの判断であり、オーナーの判断ではない。
 
 ⚠ **項目の番号について**: 番号は `v1.0.2 → v1.1.0` の節から通しで振っている。項目29 は、
 上の節の項目30 の後ろの注記が「[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2 が使う予定の欠番」として
@@ -2503,6 +2504,12 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。ただし `everyMs` が負・`1e21` で止まった scheduler・`delayed` のジョブが Redis に残っていることがある（ADR 0477）。正しい `everyMs` の driver が `start()` すれば scheduler は上書きされる。
 
+## 🔴 破壊的変更（v1.2.0 → 次の版）—— **未リリース**
+
+この節は、`v1.2.0` の区切る点（`d49c46c`）より後に `main` へ入った変更を数える。まだ棚卸しはしておらず、下の項目は、着地に先立って変更を作った本人が足したものである。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+⚠ **2026-10-02 追記**: 下の項目57・58 は、PR #1610・#1611 が着地時に上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。番号は振り直していない。
+
 ### 57. `@mnemora/postgres` の書き込み口が NUL を名指しの `Error` で断り、型の外の `status`（`resolveContestedGroup?`・`resolveContestedPair?`）と purge 済みの記憶への `expectedStatus` 付きの更新を断り、`setEventRetention` の日数の上限が共有の検査になった（`@mnemora/core`・`@mnemora/postgres`）
 
 [ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。ADR 0456 の M4、ADR 0450・0447・0446・0479 の材料。オーナーが v1.X.0 で破壊的変更を許した、という前提の上の判断）。
@@ -2644,7 +2651,7 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ⚠ **`v0.5.0` で出荷済みである。**⟹ ⛔ **「`v1.0.0` で初めて効く」と読まないこと。**
 
-## 🟡 v1.1.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
+## 🟡 v1.1.0 → v1.2.0 で、挙動が変わるが手順は要らないもの —— **`v1.2.0` で出す**
 
 この節は、2026-10-01 に着地した変更（[PR #1550](https://github.com/takecchi/mnemora/pull/1550)〜[#1565](https://github.com/takecchi/mnemora/pull/1565)）のうち、
 **利用者が気づいておくとよい振る舞いの変更**を載せる（[ADR 0459](./decisions/0459-round32-doc-drift-after-1550-1563.md)）。**いずれも利用者側の手順は要らない**（型・DB は変わらない）。
@@ -2670,8 +2677,6 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/postgres`: 別テナントの記憶を指す `NewMemoryEvent.memoryId` を断る**（PR #1562、ADR 0456 の H4）は、本物の adapter が新しく断る変更なので、この節ではなく 🔴 の **項目52** に載せた（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
 - **`@mnemora/postgres`: `reinforceMany`（`observe({ kind: "memory_usage" })` の強化を含む）と `searchMany` が、件数が多くても PG のバインドパラメータの上限で落ちなくなった**（[PR #1552](https://github.com/takecchi/mnemora/pull/1552)、ADR 0443 決定2）。
   以前は `reinforceMany` が 13107 件、`searchMany` が 32767 件で、message が数 MB の例外で落ちた。
-- **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
-  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表）。
 - **`runtime.applyCorrection`: `supersede` の `winnerId` を取り違えたとき、書き込む前に `RangeError` で落ちる**（[PR #1554](https://github.com/takecchi/mnemora/pull/1554)、[ADR 0446](./decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)）。
   例外の型・文言は同じ。以前は `markContested` が書いたあとに落ち、両側が `contested` のまま残った。`@mnemora/postgres` で候補の id を大文字にした `correctedId` は、store が同じ記憶と言えば候補として扱う。
 - **`@mnemora/local-embedding`: 件数が `maxBatchSize`（既定 128）を超えて分割されたとき、チャンクの合間で `signal` の abort を見る**（[PR #1553](https://github.com/takecchi/mnemora/pull/1553)、[ADR 0445](./decisions/0445-local-embedding-chunk-abort-chat-drain-provider-docs.md)）。
@@ -2731,6 +2736,12 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ---
 
+## 🟡 v1.2.0 → 次の版で、挙動が変わるが手順は要らないもの —— **未リリース**
+
+⚠ **2026-10-02 追記**: 下の2項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR（#1610・#1612）が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。
+
+- **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
+  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
