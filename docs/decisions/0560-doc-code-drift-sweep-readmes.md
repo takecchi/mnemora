@@ -21,7 +21,8 @@ ADR 0550（#1659）の続き。0550 は ADR 単位で掃いた。今回は文書
 ## 直したもの
 
 - **ルート `README.md`「いまの状態」**: パッケージの列挙に `packages/bullmq` が無かった（`packages/` には anthropic・bullmq・core・local-embedding・openai・postgres・testkit の7つが在り、同じ README の後半は bullmq の README にリンクしている）。`packages/bullmq`（`runtime.tick()` を BullMQ で駆動する）を足した。
-- **ルート `README.md`「版の付け方」の 2026-09-29 追記**: 「`v1.1.0`（minor）に破壊的変更が1件入っている」と書いていたが、CHANGELOG の「v1.1.0 の記載の訂正」で数え直されており、`v1.1.0` の破壊的変更は複数件である（`v1.2.0` にも `### Breaking` がある）。「1件」を「入っている」に直し、ADR 0352 は「そのうちの1件」と言い直し、数え直しの在りかを指す1文を足した（数は写していない）。
+- **ルート `README.md`「版の付け方」の 2026-09-29 追記**: 「`v1.1.0`（minor）に破壊的変更が1件入っている」と書いていたが、CHANGELOG の「v1.1.0 の記載の訂正」で数え直されており、`v1.1.0` の破壊的変更は複数件である（`v1.2.0` にも `### Breaking` がある）。日付の付いた追記は、その日に書いた記録として読まれる。本文を書き換えると、その日に何と書いたかが分からなくなる。そのため、追記の本文は1字も変えていない。その段落の直後に「（2026-10-02 訂正）」を足し、次の3点を書いた: ADR 0352 は CHANGELOG の「v1.1.0 の記載の訂正」(a) で数え直した破壊的変更のうちの1件であること、数え直しの在りかは CHANGELOG であること、`v1.2.0`（minor）にも `### Breaking` があること。数は写していない。
+- **`packages/openai/README.md`「🔴 2026-09-29 訂正」の節**: 187 行目の「上の「送る前には検査しない」」は、上の節の文面と逐語では一致しない。これも日付の付いた節の本文なので、1字も変えていない。その段落の直後に「（2026-10-02 訂正）」を足し、指しているのが上の「⚠ 2026-09-27 追記」の節の「送る前に「OpenAI が受け付ける形か」を検査していなかった」であることを、逐語で書いた。
 - **`packages/local-embedding/README.md`**:
   - 破損キャッシュの節で、失敗のメッセージが名指す場所を `<cacheDir>/<repo>` とだけ書いていた。`revision` を渡すと根が `<cacheDir>/<encodeURIComponent(revision)>` に変わり、名指す場所も `<その根>/<repo>` になる（`local-embedding-provider.ts` の `describeLoadFailure` が `revisionCacheRoot` を通す。【現物】）。この注記を足した。
   - 「修正済み」と書くはずの所にキリル文字の誤字（「патched」）が混ざっていた。「修正済み（patched）」に直した。
@@ -33,7 +34,7 @@ ADR 0550（#1659）の続き。0550 は ADR 単位で掃いた。今回は文書
 
 ## ずれなしと確かめたもの
 
-- **`packages/openai/README.md`**【現物】: `OpenAILLMProviderError` の `kind` の4種、`isOpenAILLMProviderError`（`instanceof` を使わない判定）、zod `^4.5.4`・`openai` 7.10.0 固定、`dimensions`・`temperature` の構築時検査（`TypeError`／`RangeError`、ADR 0498）、`embed()` の応答検査（件数・`index`・次元・有限性。メッセージは `OpenAIEmbeddingProvider:` で始まる）、空配列と abort 済みの扱い、`content_filter` を `refusal` に数える扱い、根が union のときの `result` の包み、`toStrictJsonSchema` を送る前に通す経路。参照先の ADR 12本、歯のテスト4本、`docs/architecture.md` の §3.8・§5.4・§5.5 は実在する。ずれなし。軽微なメモ: 187 行目の「上の『送る前には検査しない』」は、上の節（当時の振る舞いの節）の文面と逐語では一致しない。当時の記述を指す言い方なので直していない。
+- **`packages/openai/README.md`**【現物】: `OpenAILLMProviderError` の `kind` の4種、`isOpenAILLMProviderError`（`instanceof` を使わない判定）、zod `^4.5.4`・`openai` 7.10.0 固定、`dimensions`・`temperature` の構築時検査（`TypeError`／`RangeError`、ADR 0498）、`embed()` の応答検査（件数・`index`・次元・有限性。メッセージは `OpenAIEmbeddingProvider:` で始まる）、空配列と abort 済みの扱い、`content_filter` を `refusal` に数える扱い、根が union のときの `result` の包み、`toStrictJsonSchema` を送る前に通す経路。参照先の ADR 12本、歯のテスト4本、`docs/architecture.md` の §3.8・§5.4・§5.5 は実在する。コードとのずれは無い。187 行目の引用の不一致は、上の「直したもの」に書いた。
 - **`packages/core/README.md`**【現物】: 末尾の表に並べた名前はすべて公開面（`scripts/__snapshots__/public-api/core.d.ts`）に在る。既定値（`DEFAULT_RECALL_ASSOCIATION = { maxCount: 10 }`、アンカー数 3、類似度の下限 0.5、目次帯 50）、`tick` の `leaseMs` が必須、`createRuntime` の7つの依存と `hashContent`、`ExtractionContextSchema` の形、`heuristicTokenCounter` の係数（CJK 0.9・非 CJK 0.25）、`ErrorOptions` を使う例外クラス、参照先の ADR と `docs/recall.md` の節。ずれなし。
 - **ルート `README.md`**【現物】: probe の件数（想起の質 7、識別子 30、数詞 18、訂正の相手探しは A群 21・B群 32）、カセット `retrieval.json` の 152 件・`text-embedding-3-small`・256 次元、`ci.yml` のジョブ名（`retrieval-quality`・`identifier-probes`・`numeral-token-probes`・`correction-candidate-probes`・`consolidation-cost`・`association-probes`・`archive-sweep-cost`・`time-term`・`validity`）、再計測スクリプトの既定 59 回と `cost.totalUsd`、`Runtime` のメソッド名（3層の列挙のうち markContestedGroup・resolveContestedGroup・resolveOrphanedContested を含む）、`applyCorrection` の引数と4つの `kind`、`eraseTenant` の `deps`・`opts`・戻りの名前、`compareWithFullLog` の戻り、適合テストの文言3本、`pnpm ... run correction`／`correction-candidates` の script、参照先のファイル・ADR・節。ずれなし。「ADR 0232 の A群15件・B群8件」の表は、ADR 0232 の時点の実測として書いてある（今の評価集合の件数とは別）ので、そのままにした。
 
@@ -54,7 +55,7 @@ ADR 0550（#1659）の続き。0550 は ADR 単位で掃いた。今回は文書
 ## 引き受けた負債
 
 - この ADR の結果は `main` の `e14e8d3b` に対して測った記録で、`main` が進めば古くなる。
-- README の日付つき追記（「2026-09-27 追記」など）は、当時の記述と明示してあるものは直していない。
+- README の日付つき追記（「2026-09-27 追記」など）は、当時の記述と明示してあるものは直していない。誤りを直すときも本文は変えず、直後に日付つきの訂正を足す（上のルート README と openai README の2か所）。
 
 ## これが覆るとしたら
 
