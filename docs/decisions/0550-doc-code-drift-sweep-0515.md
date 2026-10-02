@@ -5,7 +5,7 @@
 
 クローン miku の指示で、マネージャー mgr-b9b6a409 とその委譲先（担い手）が書いた。
 
-**照合の基準は main `e987150b`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）・0545（#1653、`e987150b`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519・0545 の7つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
+**照合の基準は main `fb17ef28`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）・0545（#1653、`e987150b`）・0549（#1656、`fb17ef28`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519・0545・0549 の8つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
 
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手の判定、【未確認】は確かめていないこと。
 
@@ -63,7 +63,7 @@
   - どちらも別の PR で直す（担当はクローンが配る）。
 - **照らした範囲**【現物】: 上の各節に書いた。追い足しの分（0538・0535）は、`runtime-fakes.ts` の `purgeExpiredEventsSync`、Postgres・InMemory の `events_purged` の書き手、`memory-store.ts`（interface）の `purgeExpiredEvents` の TSDoc、適合スイートの A10、`docs/conformance.md`・`docs/memory-model.md`、`runtime.ts` の `already_purged` の TSDoc と呼び出し、`query-check.ts` と InMemory の `seqSumOverflowsBigint`、`event-store.ts`・`relation-store.ts`・`memory-store.ts` の `omittingParams` の有無、CHANGELOG `[1.3.0]` 97・112 行目、migration-v1 の項目60・2810 行目。読んだファイルは、`packages/postgres/src/memory-store.ts`（`assertSupersededByShape` の呼び出し・`resolveContestedPair` の先取り）、`outbox-store.ts`・`tenant-settings-store.ts`・`trigram-lexical-store.ts`・`event-store.ts`・`relation-store.ts`・`omit-params.ts`、`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`、`packages/core/src/__tests__/runtime-fakes.ts`、`packages/core/src/interfaces/memory-store.ts`・`tenant-settings-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `*conformance*` 全体の grep、`error-message-omits-params.postgres.test.ts` の構成、ルートと各パッケージの README、`docs/*.md`（`memory-model.md`・`architecture.md`・`release-notes-v1.1.0.md`・`release-notes-v1.2.0.md`）、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`（項目59・61 と 2803 行目以降）。grep の語は `supersededById`・`forbidWhenNotSuperseded`・`assertSupersededByShape`・`COALESCE`・`omittingParams`・`omitParams`・`params:`・`omitted by mnemora`・`updateStatusWithEvent(`・`this.db`。
 - **走らせたコマンド**: `git fetch`・`git diff`・`grep`・`node scripts/generate-adr-index.mjs`（差分なし）。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは通していない【未確認】（読んで突き合わせた）。
-- **引き受けた負債**: この ADR の結果は `main` の `e987150b` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
+- **引き受けた負債**: この ADR の結果は `main` の `fb17ef28` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519・0549 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文で `supersededById` の扱いや store の例外の message を言い換えた文）の古さが見つかったとき。Fake を直す PR で Fake の振る舞いが割れていないと分かったとき（材料1が消える）。
 
 ## 追い足し（基準 main `d480131c`、ADR 0538・0535 の分）
@@ -152,3 +152,22 @@
 - **直したもの**: なし。
 - **コードの側を直すべき食い違い**: 新しいものは無い。上の Fake の件は 0545 の材料のままで、#1656 が受けている。
 - **【未確認】**: #1656 の中身と、それが 0545 の材料をすべて（`supersedeWithNewMemories` の2か所を含めて）覆うか。
+
+## 追い足し（基準 main `fb17ef28`、ADR 0549 の分）
+
+0549（#1656、`fb17ef28`）が main に入ったので掃いた（`git diff e987150b fb17ef28`。この枝は `origin/main` を merge した。衝突なし。ADR 索引は再生成しても差分なし）。この節は担い手が書いた。0545 の節は書き換えず、その【未確認】への答えはここに書く。
+
+### 0549（`fb17ef28`）
+
+- **0549 の中身**【現物】: 差は ADR 0549・索引・歯 `packages/core/src/__tests__/fake-cas-purged-row.test.ts`（5 本）と、`packages/core/src/__tests__/runtime-fakes.ts` の直し。Fake に `casMismatch(memory, expectedStatus)`（`status !== expectedStatus || (purgedAt ?? null) !== null`）を置き、`expectedStatus` を見る4か所に当てた。CHANGELOG・migration-v1 は変えない決め（Fake は非公開、ADR 0549 決定4）。
+- **3実装の揃い**【現物】:
+  - Fake: `expectedStatus` を見る所は `grep` で全部数えて4か所で、すべて `casMismatch` を通る（`updateStatus` 1363 行目、`updateStatusWithEvent` 1401 行目、`supersedeWithNewMemories` の事前判定 1481 行目〔willSupersede の走査。同じ呼び出しで先に `superseded` にした対象は `{ status: "superseded" }` として比べる〕、同 本処理 1508 行目〔弾かれたら `conflicted` に `observedStatus: memory.status` で積む〕）。例外は `MemoryStatusConflictError(id, expectedStatus, memory.status)`。ほかに Fake で `expectedStatus` を見る口は無い。
+  - testkit の InMemory: `casMismatch`（85 行目。同じ式）を `updateStatus`（1436）・`updateStatusWithEvent`（1479）・`supersedeWithNewMemories` の本処理（1675）が使い、事前判定（1604 行目）は同じ条件を式で書いている。Fake と同じ4か所。
+  - Postgres: `expectedStatusCondition`（403 行目、`AND status = … AND purged_at IS NULL`）が3つの口（1315・1376・1596 行目。`supersedeWithNewMemories` は1か所の SQL）で使われ、0行なら `explainEmptyStatusUpdate` が `row.status` を読み直して同じ例外を作る。
+  - **3者が揃った。** 式・例外の中身（`observedStatus` は `forgotten` のまま）・`conflicted` の形が同じ。
+- **突き合わせの結果**【現物】: interface の TSDoc は Fake と食い違わない。`MemoryStatusConflictError`（34〜38 行目。purge 済みの行では `expectedStatus: "forgotten"` のとき両方 `"forgotten"` になる、例外だけでは purge 済みと分からない）、`updateStatus`（939 行目）、`updateStatusWithEvent`・`supersedeWithNewMemories`（976 行目）の「purge 済みはどの `expectedStatus` にも一致しない」は、3者とも成り立つ。`expectedStatus` を渡さない呼び出しは無条件の書き込みのまま、という TSDoc の但し書きも、Fake は `expectedStatus` が `undefined` のとき `casMismatch` を呼ばないので成り立つ。適合スイートは purge 済みの行の CAS を検査しない（ADR 0499 の決定のまま）。CHANGELOG `[1.3.0]`・migration-v1・README・`docs/*.md` に、Fake の CAS を言う文は無い。
+- **0545 の【未確認】への答え**【現物】: 「#1656 が 0545 の材料（Fake の CAS が `purgedAt` を見ない）を、`supersedeWithNewMemories` の2か所を含めて覆うか」は、**覆う**。直したのは `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の事前判定と本処理の4か所で、Fake の `expectedStatus` を見る所はこれで全部。0545 の節にあった行番号（`updateStatus` 1351・`updateStatusWithEvent` 1389）は、この直しで動いている。0545 の節の「材料」は、解消済みになった。
+- **0515 の材料1（Fake が `supersededById` の断りを持たない）は別件で、残っている**【現物】: Fake に `assertSupersededByShape` 相当は無く（`grep`）、`superseded` 以外への `supersededById`・対の外の `forgotten`・`superseded` の形の検査（無い・自己置換・循環）は、0549 の差に入っていない。これは別の PR で直す（担当はクローンが配る）。
+- **直したもの**: なし（文書の側にずれは無かった）。
+- **コードの側を直すべき食い違い**: 0549 の分は見つからなかった。ADR 0549 の負債（`casMismatch` の式の写しが Fake と testkit の2つになる）は残る。
+- **【未確認】**: 歯 `fake-cas-purged-row.test.ts` を走らせていない（この clone に `node_modules` が無い）。0549 の変異試験・名指しの 21 ファイル（411 本）を再実行していない。
