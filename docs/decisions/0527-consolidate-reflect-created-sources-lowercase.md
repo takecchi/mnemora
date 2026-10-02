@@ -8,7 +8,7 @@
 
 ## 要点
 
-- **材料**: PR #1617 の ADR 0524（mgr-2c9f30d0）が見つけた形【現物】。`consolidate`・`reflect` に大文字の `memoryIds` を渡すと、Postgres の `created` イベントの `meta.sources` に、呼び出し側の大文字の綴りがそのまま残る。#1617 は未マージで、その文書・歯は直していない。
+- **材料**: PR #1617 の [ADR 0524](./0524-uppercase-and-after-delete-llm-paths.md)（mgr-2c9f30d0）が見つけた形【現物】。`consolidate`・`reflect` に大文字の `memoryIds` を渡すと、Postgres の `created` イベントの `meta.sources` に、呼び出し側の大文字の綴りがそのまま残る。#1617 は未マージで、その文書・歯は直していない。
 - **直した**: core の `Runtime`（`packages/core/src/runtime.ts`）の2か所。`consolidate` の `created`・`reflect` の `created` の `meta.sources` を、渡された `eligibleIds` ではなく、store が返した記憶の id（`eligibleMemories.map((m) => m.id)`）から組む。**3実装に同じに効く**（store 側は変えていない）。
 - **遡らない**: すでに書かれた行は書き換えない。**既存の行を書き換える migration・バックフィルは作っていない**。
 - ADR 0521（[0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md)）が testkit の InMemory・core の Fake を Postgres に揃えたので、大文字の `memoryIds` は3実装とも `consolidate`・`reflect` が最後まで進む。0521 の前は Fake・InMemory が不在扱いにしていたため、この割れは Postgres にだけ見えていた。
