@@ -516,6 +516,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0502](./0502-observe-rejects-whitespace-only-input.md) | `observe()` が、本文が空白だけの入力（`utterance.text`・`event.name`・`document.content`）を入口で断る | 採用 (2026-10) |
 | [0503](./0503-superseded-by-checks-resolve-contested-update-status.md) | `supersededById` の約束を壊す入力を断る（`resolveContestedPair`・`resolveContestedGroup`・`updateStatus`・`updateStatusWithEvent`） | 採用 (2026-10) |
 | [0504](./0504-vector-store-omits-params-from-thrown-errors.md) | `PostgresVectorStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
+| [0505](./0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md) | fixture の `S_x` の bigint 溢れ（`archiveDecayed`・`aggregateScope`・`VectorStore.search`）、Observation・Recall の NUL を名指しで断る、`EventStore.append`・`LexicalStore.search` の例外から params を落とす | 採用 (2026-10) |
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0507](./0507-language-mismatch-observation-counted-once-per-observation.md) | 言語の事後検査（ADR 0391）の観測側の数えを、観測ごとに1回へ畳む（判定は変えない） | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる——下書き | **提案 (2026-10)** |
@@ -527,6 +528,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
 | [0526](./0526-tick-jobs-after-delete-and-reextract-after-correction.md) | 穴探し — ADR 0524「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブの消した後の参照と、訂正の経路で負けた記憶がある状態での `reextract`（3者一致。割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0527](./0527-consolidate-reflect-created-sources-lowercase.md) | 穴探し — `consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、渡された綴りではなく store の行の id（小文字）で書く | 採用 (2026-10) |
+| [0528](./0528-doc-code-drift-sweep-0496-0500-0522-0523.md) | 文書とコードのずれを横に掃く（第3弾）— ADR 0496・0500・0522・0523 と、追い足した 0504・0499・0502・0506・0525・0521・0524 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0529](./0529-tick-mixed-kinds-concurrency-and-lease.md) | 穴探し — ADR 0526「測っていないこと」の実測。`tick` が種類を混ぜて回るとき・並行する複数の `tick`・リースが切れた後の再取得（Runtime の層。3者一致。割れは見つからなかった。決定的にできる部分だけ歯にした） | 採用 (2026-10) |
+| [0530](./0530-batch-exceeds-lease-double-processing-per-kind.md) | 穴探し — 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごとに3者で実測する（TSDoc どおりで一致。`consolidate` の結末だけ TSDoc に書いていなかったので書いた） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

@@ -170,8 +170,9 @@ core の schema は `Date` であることしか検査しない（JS の `Date` 
 `timestamptz` は `new Date("-004713-11-24T00:00:00.000Z")`（先発グレゴリオ暦の紀元前4714年11月24日、UTC）より
 前を表せず、`occurred_at`・`valid_from`・`valid_until` にそれより前の日時を渡すと、書き込みが例外
 （`timestamp out of range`）になり `observe()` は reject する。上側は Postgres のほうが広い（西暦294276年まで）
-ので分かれない。`@mnemora/testkit` の fixture は JS の `Date` をそのまま受け入れ、同じ値で返す。保証するのは、
-上の日時以降の値だけである。クローン miku の判断で、範囲を契約にして拒む案・端に丸める案は採らず、
+ので分かれない。`@mnemora/testkit` の fixture は、この書き込みの欄（`occurredAt`・`validFrom`・`validUntil`）では JS の `Date` を
+そのまま受け入れ、同じ値で返す（読みの口の日時の条件・`opts.now`・`opts.at` は、ADR 0500 から下限より前を `RangeError` で断る）。
+保証するのは、上の日時以降の値だけである。クローン miku の判断で、範囲を契約にして拒む案・端に丸める案は採らず、
 今の振る舞いを記録した（選び直す余地は Issue に残してある）。書き分けは `Observation.occurredAt` の TSDoc。
 
 **⚠ 2026-09-27 追記（[Issue #1042](https://github.com/takecchi/mnemora/issues/1042)）: 逆転した区間（`valid_from > valid_until`）も拒まない。**

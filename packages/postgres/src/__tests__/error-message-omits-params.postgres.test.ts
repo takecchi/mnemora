@@ -6,6 +6,7 @@ import { createRuntime, isEmbeddingSpaceNotRegisteredError } from "@mnemora/core
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
+import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import {
@@ -202,4 +203,133 @@ describe("PostgresVectorStore を直接呼んだ例外から、params の値を�
       expect((drizzleLike.cause as { code?: string }).code).toBe("57014");
     });
   }
+});
+
+/**
+ * ADR 0505（ADR 0504 の負債の返済）: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときも、
+ * 投げる例外の message（`cause` の連鎖を含む）から params の値を落とす。
+ * 例外の起こし方は、本物の DB が拒む入力:
+ * - `append`: `kind` が CHECK 制約（`memory_events_kind_check`）を外れる（`memoryId` が null の経路と、記憶を指す経路の2つ。
+ *   INSERT が別の文）。`meta` の孤立サロゲートは、ADR 0499 の入口の検査が先に名指しで断る（値は載らない）ので、
+ *   DB に届かない——その入力の message に値が無いことも縛る。
+ * - `LexicalStore.search`: `filter.attributes` の孤立サロゲート（`jsonb` が拒む）。
+ */
+const EVENT_MARKER = "event-marker-7b2e";
+const LEX_MARKER = "lex-marker-91c4";
+
+describe("PostgresEventStore.append・PostgresLexicalStore.search を直接呼んだ例外から、params の値を落とす（ADR 0505）", () => {
+  const markers = [EVENT_MARKER, LEX_MARKER, TENANT_MARKER];
+  function expectNoMarkers(error: unknown): void {
+    for (const text of chainTexts(error)) {
+      for (const marker of markers) {
+        expect(text).not.toContain(marker);
+      }
+    }
+  }
+  function expectSqlAndMark(error: unknown): void {
+    // やりすぎていない: SQL の文と、落としたことの印は残る
+    expect(
+      chainTexts(error).some(
+        (t) => t.includes("Failed query:") && t.includes("(omitted by mnemora,"),
+      ),
+    ).toBe(true);
+  }
+
+  async function sqlstate(error: unknown): Promise<string | undefined> {
+    let code: string | undefined;
+    let cursor: unknown = error;
+    while (typeof cursor === "object" && cursor !== null) {
+      code = (cursor as { code?: string }).code ?? code;
+      cursor = (cursor as { cause?: unknown }).cause;
+    }
+    return code;
+  }
+
+  const badKind = { kind: "no_such_kind" } as const;
+
+  it("append（memoryId が null の経路）: 制約違反の例外に meta・digestSnapshot の値が無く、SQLSTATE は残る", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const error = await thrown(
+      new PostgresEventStore(db).append(storeCtx, {
+        memoryId: null,
+        ...badKind,
+        actor: { type: "system" },
+        digestSnapshot: EVENT_MARKER,
+        meta: { note: EVENT_MARKER },
+      } as never),
+    );
+    expectNoMarkers(error);
+    expectSqlAndMark(error);
+    expect(await sqlstate(error)).toBe("23514");
+  });
+
+  it("append（記憶を指す経路）: 制約違反の例外に meta・digestSnapshot の値が無く、SQLSTATE は残る", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const memory = await new PostgresMemoryStore(db).createMemory(
+      storeCtx,
+      buildNewMemoryFixture({ tenantId: storeCtx.tenantId, contentHash: "omit-params-0505" }),
+    );
+    const error = await thrown(
+      new PostgresEventStore(db).append(storeCtx, {
+        memoryId: memory.id,
+        ...badKind,
+        actor: { type: "system" },
+        digestSnapshot: EVENT_MARKER,
+        meta: { note: EVENT_MARKER },
+      } as never),
+    );
+    expectNoMarkers(error);
+    expectSqlAndMark(error);
+    expect(await sqlstate(error)).toBe("23514");
+  });
+
+  it("append: meta の孤立サロゲートは、入口の検査が名指しで断る（値は message に載らない）", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const error = await thrown(
+      new PostgresEventStore(db).append(storeCtx, {
+        memoryId: null,
+        kind: "events_purged",
+        actor: { type: "system" },
+        meta: { note: `${EVENT_MARKER}\uD83D` },
+      } as never),
+    );
+    expect(error.message).toMatch(/memory_events\.meta must not contain NUL/);
+    expectNoMarkers(error);
+  });
+
+  it("LexicalStore.search: filter.attributes の孤立サロゲートの例外に値が無く、SQL の文・SQLSTATE は残る", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const error = await thrown(
+      new PostgresLexicalStore(db).search(storeCtx, "hello", {
+        limit: 5,
+        filter: { tenantId: storeCtx.tenantId, attributes: { k: `${LEX_MARKER}\uD83D` } },
+      }),
+    );
+    expectNoMarkers(error);
+    expectSqlAndMark(error);
+    expect(await sqlstate(error)).toBe("22P02");
+  });
+
+  it("やりすぎていない: 正常な呼び出しは、これまでどおり結果を返す", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    await expect(
+      new PostgresLexicalStore(db).search(storeCtx, "hello", {
+        limit: 5,
+        filter: { tenantId: storeCtx.tenantId },
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      new PostgresEventStore(db).append(storeCtx, {
+        memoryId: null,
+        kind: "events_purged",
+        actor: { type: "system" },
+        meta: { note: "ok" },
+      } as never),
+    ).resolves.toMatchObject({ kind: "events_purged" });
+  });
 });

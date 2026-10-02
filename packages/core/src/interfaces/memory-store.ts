@@ -671,7 +671,7 @@ export interface MemoryStore {
    *   （`assertWellFormedIdentifier`）を入口で掛ける。**以前は**、`PostgresMemoryStore` は U+FFFD に置き換えて保存し、
    *   `InMemoryMemoryStore` は入力をそのまま保持していた。
    * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、本文の欄:
-   *   例外を投げず、入力をそのまま保持する（`FakeMemoryStore` は識別子の欄も断らない。core の `Runtime` の入口が先に断る）。
+   *   例外を投げず、入力をそのまま保持する（本文の欄の話。`FakeMemoryStore` も、識別子の欄 `subjectId`・`externalId` の孤立サロゲート・NUL は `MalformedIdentifierError` で断る——ADR 0493。core の `Runtime` の入口も先に断る）。
    *
    * `createObservationWithOutbox` も同じである。今の振る舞いは
    * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
