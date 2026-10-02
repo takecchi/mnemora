@@ -152,7 +152,9 @@ describe("testkit の fixture は memories の列挙の列に無い値を拒む"
         { id: a.id, status: "active", event: event(a.id) },
         { id: b.id, status: BOGUS, event: event(b.id) },
       ),
-    ).rejects.toThrow(/^memories\.status must be one of /);
+      // ADR 0499 で、列挙の検査より手前に resolveContestedPair 固有の検査（"active" か
+      // "superseded" か）が入った。列挙の外の値はそちらで先に断られる。
+    ).rejects.toThrow(/^resolveContestedPair: second\.status must be "active" or "superseded"/);
 
     expect((await memoryStore.get(ctx, a.id))?.status).toBe("contested");
     expect((await memoryStore.get(ctx, b.id))?.status).toBe("contested");

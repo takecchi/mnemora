@@ -367,6 +367,7 @@ function toOpenAIMessages(
  *
  * 構築時: `client` を省き、キーが見つからなければ OpenAI の SDK が `OpenAIError`（`Missing credentials`）を投げる。
  * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ * `temperature` を渡すとき、有限で `0` 以上の数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498。`OpenAILLMProviderOptions.temperature` の doc）。
  *
  * 拒否・切り詰め・空応答は {@link OpenAILLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
  * HTTP の失敗・認証の失敗・400 などは、SDK の例外がそのまま伝わる。

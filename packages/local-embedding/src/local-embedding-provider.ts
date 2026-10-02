@@ -244,6 +244,7 @@ export interface LocalEmbeddingProviderOptions {
  *
  * `new` はモデルを読まない。読むのは最初の `embed()`（または `warmup()`）で、初回だけネットワークが要る。
  * 構築時: `repo` だけを差し替えて `modelId` を省くと例外を投げる（宣言の食い違い。Issue #142 / ADR 0247）。
+ * `dimensions`・`numThreads` を渡すとき、正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498）。
  */
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   /**

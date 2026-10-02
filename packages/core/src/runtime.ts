@@ -316,6 +316,9 @@ export interface RuntimeDeps {
   /**
    * roadmap.md 段階4: `usage`（docs/recall.md §6）の計測に使う。省略時は
    * `heuristicTokenCounter`（文字数ベースの推定、`counter: 'heuristic'`）。
+   *
+   * ⚠ ADR 0497: 差し替えた実装の `count()` が返す `tokens` が有限で 0 以上の number でなければ、`recall()` は
+   * `RangeError` で断る（契約は {@link TokenCounter}）。
    */
   tokenCounter?: TokenCounter | undefined;
   /**
