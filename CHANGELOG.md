@@ -80,6 +80,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
   - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債）。
 
+- **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
+
 ## [1.2.0] - 2026-10-02
 
 **この節は `v1.1.0`（tag が指す `5eb6e9d`、[PR #1443](https://github.com/takecchi/mnemora/pull/1443) がその commit の中身）… の差分である。**オーナーが 2026-09-30 に tag `v1.1.0` を `5eb6e9d` で publish し、npm にも `1.1.0` が出た。⟹ **これにより、下の `[1.1.0]` 節は出荷済みになった。**この節は、`5eb6e9d` より後に `main` へ入った PR を数える。
@@ -544,7 +546,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **返り値が変わる**: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製になった（呼び出し側が書き換えても、次の再生・記録に漏れない）。
   - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
 
-- **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
 
 ### Fixed
 
