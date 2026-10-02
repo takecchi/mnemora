@@ -499,7 +499,9 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0485](./0485-find-correction-candidates-exclude-ids.md) | 穴探し56巡目 — 訂正の候補を探す `findCorrectionCandidates`。`excludeMemoryIds` は大文字の uuid を除外せず、反復できない値では recall の記録を書いた後に落ちていた | 採用 (2026-10) |
 | [0487](./0487-usage-counter-label.md) | `usage.counter` の印は連結の計測の印であり、段4の予算の判定に使った印とは食い違いうる。今の振る舞いを文書に書く | 採用 (2026-10) |
 | [0489](./0489-embedding-input-hook-return-values.md) | 穴探し58巡目 — `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値が `string` でないとき・端の値のときの `processEmbedJob`（ずれは見つからなかった） | 採用 (2026-10) |
+| [0490](./0490-language-mismatch-latin-letters-only.md) | 穴探し59巡目 — 言語の事後検査（ADR 0391）が「ラテン文字」にローマ数字を数えていた。文字だけを数える直しと、`created` の印を実 adapter で縛る歯 | 採用 (2026-10) |
 | [0491](./0491-claim-key-relative-period-across-observations.md) | Issue #1436 — 別々の observation に分かれた、相対的な期間（去年／今年）だけが違う正しい2主張が contested になる限界を、今の振る舞いとして `detectContested` の TSDoc に書き、歯で縛る | 採用 (2026-10) |
+| [0492](./0492-fuzz-profile-fields.md) | 穴探し — recall の不変条件 fuzz に、これまで一度も振っていない欄（`timeWeighting`・`digestBandLimit`・クエリの `tags`・`occurredAt`）を足す（割れは見つからなかった） | 採用 (2026-10) |
 | [0495](./0495-doc-code-drift-sweep.md) | 文書とコードのずれを横に掃く — パッケージの README・約束の文書・公開の型の TSDoc を、今の main の型と実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

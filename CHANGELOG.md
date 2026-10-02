@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`created` イベントの `meta.languageMismatch`（ADR 0391）の判定が、ローマ数字（`Ⅳ` など）を「ラテン文字」に数えていたのを、文字（`\p{L}`）だけを数えるように直した。**`contentLatinShare` が1を超える値（例: 2.5）になり、20字の下限もローマ数字ですり抜けていた。閾値と `rule` は変えていない。変わるのはローマ数字を含む本文・観測の判定だけで、保存済みの印は書き換えない（[PR #1597](https://github.com/takecchi/mnemora/pull/1597)）。
+
 - **`Runtime.findCorrectionCandidates` の `excludeMemoryIds` が、大文字の uuid でも除外するようになった（`@mnemora/postgres` は小文字で返すので、大文字で渡した自己除外が黙って効かなかった）。反復できない値を渡したときは、`recall()` を呼ぶ前に `TypeError` になる（以前は recall の記録を1件書いた後に落ちた）。**（[ADR 0485](./docs/decisions/0485-find-correction-candidates-exclude-ids.md)）
 
 - **`@mnemora/postgres`: 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作ると `deadlock detected`（40P01）で片方が落ちたのを直した。**`upsertProposedLabels` が `labels` の行を触る順を、`tags` の並びではなく名前の順に固定した。`Memory.tags` の並び・重複と `proposedCount` は変わらない（[ADR 0476](./docs/decisions/0476-label-upsert-lock-order-and-taxonomy-probes.md)）

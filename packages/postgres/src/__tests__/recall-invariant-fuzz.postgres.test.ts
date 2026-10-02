@@ -68,6 +68,10 @@ const LEN = Number(process.env.RECALL_FUZZ_LEN ?? 60);
 const DEFAULT_SEEDS = Number(process.env.RECALL_FUZZ_PG_SEEDS ?? 40);
 const WIDE_SEEDS = Number(process.env.RECALL_FUZZ_PG_WIDE_SEEDS ?? 10);
 const DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_DIFF_SEEDS ?? 40);
+// ADR 0492: これまで一度も振っていなかった recall の欄（`timeWeighting`・`digestBandLimit`・クエリの `tags`・
+// create の `occurredAt`）を振る profile。CI の所要時間を延ばさないよう、本数は小さく絞る。
+const FIELDS_SEEDS = Number(process.env.RECALL_FUZZ_PG_FIELDS_SEEDS ?? 10);
+const FIELDS_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_FIELDS_DIFF_SEEDS ?? 10);
 const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.RECALL_FUZZ_PG_FIRST_SEED ?? 1);
 
@@ -154,12 +158,13 @@ function testkitBackend(
 
 // Postgres の側の実行結果は seed が同じなら同じなので、差分の it どうしで使い回す
 // （Postgres を seed ごとに1回しか流さない）。
-const postgresRuns = new Map<number, RunOutcome>();
-async function postgresRun(seed: number): Promise<RunOutcome> {
-  let run = postgresRuns.get(seed);
+const postgresRuns = new Map<string, RunOutcome>();
+async function postgresRun(seed: number, profile: FuzzProfile = "default"): Promise<RunOutcome> {
+  const key = `${profile}:${seed}`;
+  let run = postgresRuns.get(key);
   if (!run) {
-    run = await runForDiff(postgresBackend("indexscan_off"), genOps(seed, LEN), seed);
-    postgresRuns.set(seed, run);
+    run = await runForDiff(postgresBackend("indexscan_off"), genOps(seed, LEN, profile), seed);
+    postgresRuns.set(key, run);
   }
   return run;
 }
@@ -169,19 +174,20 @@ async function diffAgainstPostgres(
   name: string,
   other: FuzzBackend,
   seeds: number,
+  profile: FuzzProfile = "default",
 ): Promise<{ report: string; compared: number }> {
   const reports: string[] = [];
   let compared = 0;
   for (let seed = FIRST_SEED; seed < FIRST_SEED + seeds; seed++) {
     const outcome = diffRuns(
-      await runForDiff(other, genOps(seed, LEN), seed),
-      await postgresRun(seed),
+      await runForDiff(other, genOps(seed, LEN, profile), seed),
+      await postgresRun(seed, profile),
     );
     compared += outcome.compared;
     if (outcome.diff) {
       reports.push(
         [
-          `seed=${seed} recall #${outcome.diff.recall} の ${outcome.diff.path} が食い違った`,
+          `seed=${seed}${profile === "default" ? "" : `（${profile}）`} recall #${outcome.diff.recall} の ${outcome.diff.path} が食い違った`,
           `  ${name}: ${outcome.diff.a}`,
           `  Postgres: ${outcome.diff.b}`,
         ].join("\n"),
@@ -194,6 +200,7 @@ async function diffAgainstPostgres(
 const INVARIANT_LEGS: { profile: FuzzProfile; seeds: number; mode: ConnectionMode }[] = [
   { profile: "default", seeds: DEFAULT_SEEDS, mode: "planner" },
   { profile: "wide", seeds: WIDE_SEEDS, mode: "seqscan_off" },
+  { profile: "fields", seeds: FIELDS_SEEDS, mode: "planner" },
 ];
 
 describe("recall の不変条件（シードつきのランダムな操作列、本物の Postgres + pgvector）", () => {
@@ -225,6 +232,28 @@ describe("recall の不変条件（シードつきのランダムな操作列、
 
   it(`差分（indexscan_off）: ${DIFF_SEEDS} シード × ${LEN} 操作で、testkit の InMemory と recall の結果が食い違わない`, async () => {
     const { report, compared } = await diffAgainstPostgres("testkit", testkitBackend(), DIFF_SEEDS);
+    expect(report).toBe("");
+    expect(compared).toBeGreaterThan(0);
+  }, 1_800_000);
+
+  it(`差分（fields、indexscan_off）: ${FIELDS_DIFF_SEEDS} シード × ${LEN} 操作で、Fake と recall の結果が食い違わない`, async () => {
+    const { report, compared } = await diffAgainstPostgres(
+      "Fake",
+      fakeBackend,
+      FIELDS_DIFF_SEEDS,
+      "fields",
+    );
+    expect(report).toBe("");
+    expect(compared).toBeGreaterThan(0);
+  }, 1_800_000);
+
+  it(`差分（fields、indexscan_off）: ${FIELDS_DIFF_SEEDS} シード × ${LEN} 操作で、testkit の InMemory と recall の結果が食い違わない`, async () => {
+    const { report, compared } = await diffAgainstPostgres(
+      "testkit",
+      testkitBackend(),
+      FIELDS_DIFF_SEEDS,
+      "fields",
+    );
     expect(report).toBe("");
     expect(compared).toBeGreaterThan(0);
   }, 1_800_000);
