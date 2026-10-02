@@ -12,7 +12,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * - O1: 失敗時の巻き戻しが、無関係な既存イベントまで消す。
  * - O3: 成功したときにも冪等キーの索引を巻き戻す。
  * - O5: 断られた書き込み（`setTaxonomyMode`・`setDefaultHalfLifeRecalls`）も、行（保持期間のキー）を作る。
- * - O6: テスト専用の `setDefaultHalfLifeRecallsForTest` が行を作る（ADR 0564 決定3「変えていない」）。
+ * - O6: テスト専用の `setDefaultHalfLifeRecallsForTest` が行を作る（ADR 0564 の決定3「変えていない」）。
  *
  * core の Fake は testkit の conformance に通さない（Issue #768 コメント2）。
  */
@@ -177,7 +177,7 @@ describe("ADR 0564 の歯の穴: 行を作る条件（O5・O6）", () => {
     expect(await tenantSettingsStore.getEventRetention(ctxA)).toEqual({ kind: "unset" });
   });
 
-  it("O6: テスト専用の setDefaultHalfLifeRecallsForTest は値を返すが、行は作らない（ADR 0564 決定3）", async () => {
+  it("O6: テスト専用の setDefaultHalfLifeRecallsForTest は値を返すが、行は作らない（ADR 0564 の決定3）", async () => {
     const stores = createFakeRuntimeStores();
     const settings = stores.tenantSettingsStore as unknown as {
       setDefaultHalfLifeRecallsForTest(tenantId: string, value: number): void;
