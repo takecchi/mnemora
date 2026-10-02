@@ -51,6 +51,11 @@ describe("PostgresMemoryStore.updateStatus の expectedStatus（compare-and-swap
       buildNewMemoryFixture({ tenantId: "tenant-1" }),
     );
     expect(memory.status).toBe("active");
+    // ADR 0503: 自己置換は断られるので、置き換えた側は別の記憶にする。
+    const winner = await seedStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+    );
 
     // 4本の「プロセス」相当。同一 Pool を共有しない理由は本ファイル冒頭のコメント参照。
     const N = 4;
@@ -61,7 +66,7 @@ describe("PostgresMemoryStore.updateStatus の expectedStatus（compare-and-swap
     const results = await Promise.allSettled(
       stores.map((store) =>
         store.updateStatus(ctx, memory.id, "superseded", {
-          supersededById: memory.id,
+          supersededById: winner.id,
           expectedStatus: "active",
         }),
       ),

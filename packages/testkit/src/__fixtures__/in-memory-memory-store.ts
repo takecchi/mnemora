@@ -64,6 +64,7 @@ import {
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
   assertQueryBigint,
+  seqSumOverflowsBigint,
   jsonContainsNul,
   stringHasNul,
 } from "./query-check.js";
@@ -95,6 +96,61 @@ function casMismatch(
 function assertResolvedStatus(method: string, field: string, status: unknown): void {
   if (status !== "active" && status !== "superseded") {
     throw new RangeError(`${method}: ${field}.status must be "active" or "superseded"`);
+  }
+}
+
+/**
+ * ADR 0503（ADR 0447 材料3〜5・ADR 0450 材料1・2）: `status: "superseded"` の更新は、置き換えた側（`supersededById`）を
+ * 必ず伴い、それは自分自身でないこと。`resolveContested*` の `"active"` に `supersededById` を付けることも断る
+ * （active なのに `superseded_by_id` が残る行になる）。書く前に `RangeError` で断る（値は message に入れない）。
+ * `PostgresMemoryStore` と同じ文面。
+ */
+function assertSupersededByShape(
+  method: string,
+  field: string,
+  selfId: string,
+  status: string,
+  supersededById: string | undefined,
+  opts: { forbidWhenNotSuperseded: boolean },
+): void {
+  if (status === "superseded") {
+    if (supersededById === undefined) {
+      throw new RangeError(
+        `${method}: ${field}.supersededById is required when status is "superseded"`,
+      );
+    }
+    if (supersededById === selfId) {
+      throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
+    }
+  } else if (opts.forbidWhenNotSuperseded && supersededById !== undefined) {
+    throw new RangeError(
+      `${method}: ${field}.supersededById must not be set unless status is "superseded"`,
+    );
+  }
+}
+
+/**
+ * ADR 0503: `supersededById` の鎖が、同じ呼び出しで `superseded` になるメンバーの中で輪になっていないこと
+ * （2者版の「互いを指す」、群版の A→B→A など）。輪になっていれば `RangeError`。
+ */
+function assertNoSupersededCycle(
+  method: string,
+  members: ReadonlyArray<{ id: string; status: string; supersededById?: string | undefined }>,
+): void {
+  const next = new Map<string, string>();
+  for (const m of members) {
+    if (m.status === "superseded" && m.supersededById !== undefined) {
+      next.set(m.id, m.supersededById);
+    }
+  }
+  for (const start of next.keys()) {
+    let cur = next.get(start);
+    for (let hops = 0; cur !== undefined && hops <= next.size; hops += 1) {
+      if (cur === start) {
+        throw new RangeError(`${method}: supersededById must not form a cycle among the members`);
+      }
+      cur = next.get(cur);
+    }
   }
 }
 
@@ -326,6 +382,25 @@ function isDecayedForScope(
       : scope.decayFloorSeqUsesSubjectCounters === true && memory.subjectId != null
         ? decayFloorSeqAfter + (subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0)
         : decayFloorSeqAfter;
+  // ADR 0505: `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は `22003` で文ごと失敗する。失敗するのは、
+  // その式が評価されるときだけ（実測）: `decay_floor_seq` が非 NULL（`IS NULL OR …` の短絡）で、subject を持つ行
+  // （`S_x` を引く）。2軸のときは壁時計が左なので、既定（`NOT wall OR NOT activity`）は壁時計が生きているとき、
+  // `decayFloorAnyAxis`（`NOT wall AND NOT activity`）は壁時計が生きていないときだけ、活動時計の式まで行く。
+  if (
+    decayFloorSeqAfter !== undefined &&
+    scope.decayFloorSeqUsesSubjectCounters === true &&
+    memory.subjectId != null &&
+    memory.decayFloorSeq != null &&
+    (wallAlive === undefined || (scope.decayFloorAnyAxis === true ? !wallAlive : wallAlive)) &&
+    seqSumOverflowsBigint(
+      decayFloorSeqAfter,
+      subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0,
+    )
+  ) {
+    throw new Error(
+      `aggregateScope: decayFloorSeqAfter + own subject seq must fit in a Postgres bigint (got ${decayFloorSeqAfter} + ${subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0})`,
+    );
+  }
   const activityAlive =
     effectiveDecayFloorSeqAfter === undefined
       ? undefined
@@ -1346,6 +1421,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
     }
+    // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
+    assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
+      forbidWhenNotSuperseded: false,
+    });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -1387,6 +1466,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
     }
+    // ADR 0503: updateStatus と同じ。
+    assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
+      forbidWhenNotSuperseded: false,
+    });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -2082,7 +2165,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertQueryTimestamptz("aggregateScope", "occurredBefore", scope.occurredBefore);
     assertQueryTimestamptz("aggregateScope", "validAt", scope.validAt);
     assertQueryTimestamptz("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
-    assertQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
+    // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
+    assertQueryBigint("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
     // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
     // 時点で拒まれる（`22P05`・`22021`）。`scopeAggregate: "skip"` で `digestBand` も無いときだけ、Postgres は
     // 集計も目次帯も引かずにクエリを1本も発行しないので、見ない。
@@ -2538,6 +2622,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryTimestamptz("archiveDecayed", "now", opts.now);
     assertQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
+    // ADR 0505: `nowSeq` は `bigint` の引数。範囲外なら、行が無くても Postgres はクエリの時点で拒む。ただし壁時計の clock は
+    // `nowSeq` を SQL に入れない（`wall` は `decay_floor_at` だけ）ので、見ない。
+    if ((opts.clock ?? "wall") !== "wall") {
+      assertQueryBigint("archiveDecayed", "nowSeq", opts.nowSeq);
+    }
     // `PostgresMemoryStore.archiveDecayed`（`buildArchiveDecayedTargetSelect`）は
     // `opts.limit` を生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・
     // `NaN`・`Infinity`・非整数を渡すと Postgres 自身が例外を投げる（実測:
@@ -2579,6 +2668,17 @@ export class InMemoryMemoryStore implements MemoryStore {
         opts.usesSubjectActivityCounters === true && m.subjectId != null
           ? opts.nowSeq + (subjectActivitySeqByTenant?.get(m.subjectId) ?? 0)
           : opts.nowSeq;
+      // ADR 0505: `nowSeq + S_x` が `bigint` を溢れる行で、式が評価されたなら Postgres は `22003` で失敗する
+      // （`decay_floor_seq IS NOT NULL AND …` の短絡で、非 NULL の行。subject なしの行は `S_x` を引かない）。
+      if (
+        opts.usesSubjectActivityCounters === true &&
+        m.subjectId != null &&
+        seqSumOverflowsBigint(opts.nowSeq, subjectActivitySeqByTenant?.get(m.subjectId) ?? 0)
+      ) {
+        throw new Error(
+          `archiveDecayed: nowSeq + own subject seq must fit in a Postgres bigint (got ${opts.nowSeq} + ${subjectActivitySeqByTenant?.get(m.subjectId) ?? 0})`,
+        );
+      }
       return decayFloorSeq <= effectiveNowSeq;
     };
     const passesClock = (m: Memory): boolean => {
@@ -2870,6 +2970,28 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
     assertResolvedStatus("resolveContestedPair", "first", first.status);
     assertResolvedStatus("resolveContestedPair", "second", second.status);
+    // ADR 0503: 置き換えた側を伴わない superseded・自己置換・active への supersededById・互いを指す循環は、書く前に断る。
+    assertSupersededByShape(
+      "resolveContestedPair",
+      "first",
+      first.id,
+      first.status,
+      first.supersededById,
+      {
+        forbidWhenNotSuperseded: true,
+      },
+    );
+    assertSupersededByShape(
+      "resolveContestedPair",
+      "second",
+      second.id,
+      second.status,
+      second.supersededById,
+      {
+        forbidWhenNotSuperseded: true,
+      },
+    );
+    assertNoSupersededCycle("resolveContestedPair", [first, second]);
 
     const firstMemory = this.rawGet(ctx, first.id);
     if (!firstMemory) {
@@ -3076,6 +3198,20 @@ export class InMemoryMemoryStore implements MemoryStore {
     members.forEach((m, i) =>
       assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
     );
+    // ADR 0503: 2者版と同じ（置き換えた側の欠落・自己置換・active への supersededById・循環）。
+    members.forEach((m, i) =>
+      assertSupersededByShape(
+        "resolveContestedGroup",
+        `members[${i}]`,
+        m.id,
+        m.status,
+        m.supersededById,
+        {
+          forbidWhenNotSuperseded: true,
+        },
+      ),
+    );
+    assertNoSupersededCycle("resolveContestedGroup", members);
 
     const memories = members.map((m) => {
       const memory = this.rawGet(ctx, m.id);
@@ -3127,6 +3263,19 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること。
     for (const m of members) {
       this.assertOwnMemoryRef(ctx, m.supersededById);
+    }
+    // ADR 0503: 群の外の `forgotten` な記憶を置き換えた側にしない（敗者が、もう戻らない勝者に置き換えられた行になる）。
+    // 群の中を指すのは、メンバーの status に関わらず断らない。
+    {
+      const memberIds = new Set<string>(ids);
+      members.forEach((m, i) => {
+        if (m.supersededById === undefined || memberIds.has(m.supersededById)) return;
+        if (this.rawGet(ctx, m.supersededById)?.status === "forgotten") {
+          throw new RangeError(
+            `resolveContestedGroup: members[${i}].supersededById must not be a forgotten memory outside the group`,
+          );
+        }
+      });
     }
 
     for (const m of members) {
