@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import type { Ctx, Memory, MemoryId, MemoryStore, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
+import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fakes.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -48,8 +49,16 @@ async function inMemoryKit(): Promise<Kit> {
   return { store, eventCount: async () => store.events.length };
 }
 
+/** ADR 0557: core の Fake（`FakeMemoryStore`）。イベント数は Fake の裏の events を読む（`fake-cas-purged-row.test.ts` と同じ）。 */
+async function fakeKit(): Promise<Kit> {
+  const store = createFakeRuntimeStores().memoryStore;
+  const backing = (store as unknown as { backing: { events: unknown[] } }).backing;
+  return { store, eventCount: async () => backing.events.length };
+}
+
 const KITS: Array<[string, () => Promise<Kit>]> = [
   ["testkit の InMemory", inMemoryKit],
+  ["core の Fake", fakeKit],
   ["Postgres", postgresKit],
 ];
 
