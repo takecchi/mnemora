@@ -12,7 +12,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * （testkit の InMemory・core の Fake・Postgres）に同じ入力で流して縛る。core 側の歯は
  * `fake-superseded-by-checks-controls.test.ts`（Fake だけの変異試験の対象）。
  *
- * - 対・群の外の `superseded`・`contested` を指す `superseded` は通る（ADR 0557 決定3）。
+ * - 対・群の外の `superseded`・`contested` を指す `superseded` は通る（ADR 0557 の決定3）。
  * - 輪が先頭に絡まない循環（先頭が群の外を指す・尾が輪に入る）も RangeError。
  * - 形・循環の検査は、存在確認・CAS より前（存在しない id・contested でない行でも RangeError）。
  */

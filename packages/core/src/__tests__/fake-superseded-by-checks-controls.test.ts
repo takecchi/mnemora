@@ -146,7 +146,7 @@ function setup() {
   };
 }
 
-describe("Fake: 陽性対照 — 対・群の外の superseded・contested を指す superseded は通る（ADR 0557 決定3）", () => {
+describe("Fake: 陽性対照 — 対・群の外の superseded・contested を指す superseded は通る（ADR 0557 の決定3）", () => {
   for (const kind of ["superseded", "contested"] as const) {
     it(`pair: 対の外の ${kind} を指す superseded は通る`, async () => {
       const s = setup();
