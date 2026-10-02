@@ -31,7 +31,7 @@
 | `updateStatus` | (1) |
 | `updateStatusWithEvent` | (2) |
 | `supersedeWithNewMemories` の事前判定 | (4) |
-| `supersedeWithNewMemories` の本処理 | (3)・(4)（本処理だけ外すと、purge 済みの対象が事前判定で検査に回り、(4) も赤） |
+| `supersedeWithNewMemories` の本処理 | (3)・(4)（(4) も `conflicted` に purge 済みの対象が入ることを確かめているので、本処理だけ外しても赤になる。事前判定は直したままなので、イベント先の検査は走らない） |
 
 - 既存の歯: core の歯に、Fake が purge 済みの行の `expectedStatus` を通すことへ頼るものは無かった。名指しで走らせた 21 ファイル（fake-event-target-belongs-to-ctx-tenant・purge・outcome-error-format・recall-basis-lost・runtime-branch-teeth・fake-uppercase-target-id・forget・fake-memory-store-supersede-with-new-memories・fake-store-postgres-parity・tsdoc-edges 系・Fake の conformance 系など）は 411 本とも緑。全テストは走らせていない。
 
