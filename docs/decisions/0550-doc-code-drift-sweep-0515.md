@@ -5,7 +5,7 @@
 
 クローン miku の指示で、マネージャー mgr-b9b6a409 とその委譲先（担い手）が書いた。
 
-**照合の基準は main `fb17ef28`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）・0545（#1653、`e987150b`）・0549（#1656、`fb17ef28`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519・0545・0549 の8つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
+**照合の基準は main `a956adf5`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）・0545（#1653、`e987150b`）・0549（#1656、`fb17ef28`）・0514（#1650、`a956adf5`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519・0545・0549・0514 の9つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
 
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手の判定、【未確認】は確かめていないこと。
 
@@ -63,7 +63,7 @@
   - どちらも別の PR で直す（担当はクローンが配る）。
 - **照らした範囲**【現物】: 上の各節に書いた。追い足しの分（0538・0535）は、`runtime-fakes.ts` の `purgeExpiredEventsSync`、Postgres・InMemory の `events_purged` の書き手、`memory-store.ts`（interface）の `purgeExpiredEvents` の TSDoc、適合スイートの A10、`docs/conformance.md`・`docs/memory-model.md`、`runtime.ts` の `already_purged` の TSDoc と呼び出し、`query-check.ts` と InMemory の `seqSumOverflowsBigint`、`event-store.ts`・`relation-store.ts`・`memory-store.ts` の `omittingParams` の有無、CHANGELOG `[1.3.0]` 97・112 行目、migration-v1 の項目60・2810 行目。読んだファイルは、`packages/postgres/src/memory-store.ts`（`assertSupersededByShape` の呼び出し・`resolveContestedPair` の先取り）、`outbox-store.ts`・`tenant-settings-store.ts`・`trigram-lexical-store.ts`・`event-store.ts`・`relation-store.ts`・`omit-params.ts`、`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`、`packages/core/src/__tests__/runtime-fakes.ts`、`packages/core/src/interfaces/memory-store.ts`・`tenant-settings-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `*conformance*` 全体の grep、`error-message-omits-params.postgres.test.ts` の構成、ルートと各パッケージの README、`docs/*.md`（`memory-model.md`・`architecture.md`・`release-notes-v1.1.0.md`・`release-notes-v1.2.0.md`）、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`（項目59・61 と 2803 行目以降）。grep の語は `supersededById`・`forbidWhenNotSuperseded`・`assertSupersededByShape`・`COALESCE`・`omittingParams`・`omitParams`・`params:`・`omitted by mnemora`・`updateStatusWithEvent(`・`this.db`。
 - **走らせたコマンド**: `git fetch`・`git diff`・`grep`・`node scripts/generate-adr-index.mjs`（差分なし）。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは通していない【未確認】（読んで突き合わせた）。
-- **引き受けた負債**: この ADR の結果は `main` の `fb17ef28` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519・0549 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
+- **引き受けた負債**: この ADR の結果は `main` の `a956adf5` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519・0549・0514 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文で `supersededById` の扱いや store の例外の message を言い換えた文）の古さが見つかったとき。Fake を直す PR で Fake の振る舞いが割れていないと分かったとき（材料1が消える）。
 
 ## 追い足し（基準 main `d480131c`、ADR 0538・0535 の分）
@@ -171,3 +171,23 @@
 - **直したもの**: なし（文書の側にずれは無かった）。
 - **コードの側を直すべき食い違い**: 0549 の分は見つからなかった。ADR 0549 の負債（`casMismatch` の式の写しが Fake と testkit の2つになる）は残る。
 - **【未確認】**: 歯 `fake-cas-purged-row.test.ts` を走らせていない（この clone に `node_modules` が無い）。0549 の変異試験・名指しの 21 ファイル（411 本）を再実行していない。
+
+## 追い足し（基準 main `a956adf5`、ADR 0514 の分）
+
+0514（#1650、`a956adf5`）が main に入ったので掃いた（`git diff fb17ef28 a956adf5`。この枝は `origin/main` を merge した。衝突なし。ADR 索引は再生成しても差分なし）。この節は担い手が書いた。
+
+### 0514（`a956adf5`）
+
+- **0514 の中身**【現物】: `packages/core/src/runtime.ts` の `tick` の入口が、claim の前に `kinds`（配列でない・文字列でない要素 → `TypeError`）・`limit`（0 以上 2^63 未満の整数でない → `RangeError`）・`claimedBy`（文字列でない → `TypeError`、NUL → `RangeError`）・巨大な `leaseMs`（`now - leaseMs` が `Date` の範囲外か 4714-11-24 BC〔`MIN_STORABLE_TIMESTAMP_MS` = -210866803200000〕より前 → `RangeError`）を断る。`undefined` は省略と同じ。`TickOptions` の TSDoc 4か所、CHANGELOG `[1.3.0]` の Breaking に1項目、migration-v1 の項目62、歯2本。store の実装は変えていない。
+- **3実装との関係**【現物】:
+  - claim 側の検査は変わらず残る。Fake（`runtime-fakes.ts` 3189 行目）と InMemory（`in-memory-outbox-store.ts` 66〜86 行目）の `claimBatch` は、`limit` が整数・非負・2^63 未満、`claimedBy` に NUL なし（Fake）、`now - leaseMs` が有効な `Date`、を見る。Postgres の `claimBatch`（`outbox-store.ts` 113 行目）は SQL の `LIMIT`・`timestamptz`・`text` 列が拒む。
+  - 食い違う上限は無い。`limit` の上限は Runtime も Fake・InMemory も 2^63 で同じ。`leaseMs` の下限は、store 側が見ない `timestamptz` の下限を Runtime だけが持つ（0514 の負債2）。Runtime が先に断るので、`Runtime.tick` 経由では store の検査に当たらず、二重に断ることも例外の顔が割れることも無い。直接 `claimBatch` を呼ぶ人の顔は 3者で違うまま（0514 の負債4。CHANGELOG も「変えていない」と書く）。
+  - Fake・InMemory の `claimBatch` の中のコメント（「Postgres の範囲を外れる値は揃えていない」、Issue #1041）は、store を直接呼ぶ場合については今も本当で、`tick` 経由では 0514 が塞いだ。コメントは store の話なので触らなかった。
+- **突き合わせの結果**【現物】:
+  - 例外の種類と message（`Runtime.tick: opts.kinds must be an array of strings`・`… opts.limit must be an integer from 0 up to (not including) 2^63`・`… opts.claimedBy must be a string`・`… must not contain NUL characters (U+0000)`・`… opts.leaseMs is out of range …`）、断らないもの（`limit: 0`・`kinds: []`・`claimedBy: ""`・0 以下の `leaseMs`・下限ちょうど）、順序（`opts` が object → `leaseMs` が有限 → `kinds` → `limit` → `claimedBy` → `leaseMs` の範囲 → claim）は、runtime.ts の実装・`TickOptions` の TSDoc・CHANGELOG・migration-v1 の表・ADR 0514 の決定で一致した。TSDoc の古い文（`leaseMs` の「ここでは断らない。store の側で落ちる」「`1e20` は断らない」、`limit` の「負数・非整数は例外になる（`claimBatch` がそのまま受け取る）」）は、0514 が書き換え済み。
+  - `leaseMs` の下限の境界は、`now` が壊れた Date のときは見ない（store が断る。コードのコメントと同じ）。TSDoc・CHANGELOG はこの但し書きを書かないが、`RuntimeConfig.clock` が壊れた Date を返す入力は 0496 以来の別の話で、ずれとは数えなかった【判断】。
+  - README・`docs/*.md`・`packages/bullmq` の README: `tick` の `limit`・`kinds`・`claimedBy`・巨大な `leaseMs` の扱いを述べた所は無い（grep: `1e20`・`store の側で落ち`・`leaseMs`・`claimedBy`）。`@mnemora/bullmq` は `opts.tick` を `runtime.tick(ctx, opts.tick)` へそのまま渡す（`tick-driver.ts` 109・284 行目）ので、型の外の値は、これまでの store 経由の例外の代わりに、入口の `TypeError`・`RangeError` として `onTickError` に届く。bullmq の README・TSDoc にこれと食い違う文は無かった。
+  - 適合スイート: `tick` の `opts` を検査する項目は無い（ADR 0434 決定5）。
+- **直したもの**: `docs/migration-v1.md` の項目62について2点（コードは変えていない）。(a) 本文の「**番号は 61 である**——項目60 の続き」を、実際の番号に合わせて「**番号は 62 である**——項目61 の続き」にした（0515 が先に項目61 を使っていた）。(b) 項目62 が項目61 の前に置かれていたので、項目61 のあとへ移した（見出しの並びが 60・61・62 になる）。`[1.2.0]` と migration-v1 の v1.2.0 の節には触っていない。
+- **コードの側を直すべき食い違い**: 見つからなかった。0514 が残した材料は、いまも成り立つ【現物】: 0 以下の `leaseMs` は通る（負債1）、`MIN_STORABLE_TIMESTAMP_MS` を core に写している（負債2）、`kinds` の要素の中身は見ない（負債3）、`claimBatch` を直接呼ぶ人の顔は 3者で違う（負債4）。
+- **【未確認】**: 0514 の歯2本（Postgres のほうは DB が要る）と変異試験を走らせていない。SQL_ASCII の脚。`@mnemora/bullmq`・`examples/` のテスト。NUL を含む `kinds` の要素。`tick` の入口の検査の順序を、実行して確かめていない（読んだだけ）。
