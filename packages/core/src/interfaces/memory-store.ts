@@ -1968,7 +1968,12 @@ export interface MemoryStore {
    *   ——2回目以降は外す紐付けが無いので減らない（二重に数え減らさない）。
    * - 存在しない・形式不正な id は「無い」の一種として扱い、例外を投げない（`VectorStore.deleteAcrossSpaces`
    *   と同じ）。空配列は何もしない。
-   * - `content`/`digest`/`purgedAt`/`status`・`memory_events`・`recalls` は書かない（`purgeMemory` の
+   * - [ADR 0512](../../../../docs/decisions/0512-scrub-purged-index-band.md): **このテナントの `recalls` の
+   *   目次帯（`IndexBand.digestBand`）のうち、対象の行のエントリの `digest` を、その行の `digest`
+   *   （purge が書いたトゥームストーン）へ伏せる**（`purgeMemory` が purge 時にやるのと同じ範囲。エントリは残し、
+   *   `truncated` は落とす）。他のエントリ・未 purge の行・他テナントの帯は触らない。べき等。
+   *   `recalls.query`・`explain` は書かない（`memoryId` で特定できない。ADR 0375 決定4）。
+   * - `content`/`digest`/`purgedAt`/`status`・`memory_events` は書かない（`purgeMemory` の
    *   仕事であり、ここは「その後の派生物」だけ）。**監査イベントは積まない**（新しい `kind` を足さない）。
    * - 返り値は無い（`void`）。
    */
