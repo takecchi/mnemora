@@ -3295,7 +3295,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`status = 'forgotten' AND purged_at IS NOT NULL`）について消し、`labels.proposed_count`
    * （`status = 'proposed'` のもの）を外した紐付けの本数だけ減らす（`GREATEST(…, 0)`）。
    *
-   * - **1トランザクション。**3文とも `purged_at IS NOT NULL` の行だけを対象にするので、
+   * - **1トランザクション。**3文とも（ADR 0512 で `recalls.index_band` の1文を足した）`purged_at IS NOT NULL` の行だけを対象にするので、
    *   未 purge の行・他テナントの行は、渡された id に含まれていても触らない。
    * - **べき等。**`memories` の UPDATE は「残骸が在る行」だけを更新する（`updated_at` も、残骸の無い行では
    *   動かさない）。`memory_labels` の DELETE は `RETURNING` した本数だけ `proposed_count` を減らすので、
@@ -3303,7 +3303,10 @@ export class PostgresMemoryStore implements MemoryStore {
    *   同じ行を消しにきても、後から来た DELETE は先の DELETE の確定後に行を見直すので、二重には数えない
    *   （`READ COMMITTED`）。
    * - 形式不正な id は、`deleteAcrossSpaces` と同じく「無い」として落とす（クエリを投げる前に）。
-   * - `content`/`digest`/`purged_at`・`memory_events`・`recalls` は書かない（監査イベントも積まない）。
+   * - [ADR 0512](../../../docs/decisions/0512-scrub-purged-index-band.md): このテナントの `recalls.index_band` の
+   *   `digestBand` のうち、purge 済みの行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ伏せる。
+   *   `recalls.query`・`explain` は書かない。
+   * - `content`/`digest`/`purged_at`・`memory_events` は書かない（監査イベントも積まない）。
    */
   async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
     assertWellFormedCtx(ctx);
@@ -3348,6 +3351,45 @@ export class PostgresMemoryStore implements MemoryStore {
         WHERE labels.tenant_id = ${ctx.tenantId}
           AND labels.id = counted.label_id
           AND labels.status = 'proposed'
+      `);
+      // ADR 0512: v1.0.x の purge は recalls.index_band を書き換えなかった。このテナントの
+      // digestBand から、渡された id のうち purge 済みの行のエントリだけを、その行の
+      // memories.digest（purge が書いたトゥームストーン）へ書き換える（ADR 0375 決定3 と同じ形。
+      // truncated は落とす）。既に同じ digest のエントリしか無い行は更新しない（べき等）。
+      await tx.execute(sql`
+        UPDATE recalls r
+        SET index_band = jsonb_set(
+          r.index_band,
+          '{digestBand}',
+          (
+            SELECT coalesce(jsonb_agg(
+              CASE
+                WHEN p.digest IS NOT NULL
+                THEN jsonb_build_object('memoryId', t.elem->'memoryId', 'digest', p.digest)
+                ELSE t.elem
+              END
+              ORDER BY t.ord
+            ), '[]'::jsonb)
+            FROM jsonb_array_elements(r.index_band->'digestBand') WITH ORDINALITY AS t(elem, ord)
+            LEFT JOIN (
+              SELECT id::text AS id, digest FROM memories
+              WHERE tenant_id = ${ctx.tenantId}
+                AND id = ANY(${sql.param(validIds)}::uuid[])
+                AND status = 'forgotten' AND purged_at IS NOT NULL
+            ) p ON p.id = t.elem->>'memoryId'
+          )
+        )
+        WHERE r.tenant_id = ${ctx.tenantId}
+          AND r.index_band ? 'digestBand'
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(r.index_band->'digestBand') AS e
+            JOIN memories m ON m.id::text = e->>'memoryId'
+            WHERE m.tenant_id = ${ctx.tenantId}
+              AND m.id = ANY(${sql.param(validIds)}::uuid[])
+              AND m.status = 'forgotten' AND m.purged_at IS NOT NULL
+              AND (e->>'digest' IS DISTINCT FROM m.digest OR e ? 'truncated')
+          )
       `);
     });
   }
