@@ -565,5 +565,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0557](./0557-core-fake-superseded-by-checks.md) | core の Fake も `supersededById` の断り（ADR 0503・0515）を持つ（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0558](./0558-inmemory-self-supersede-check-folds-both-sides.md) | testkit の InMemory の自己置換の検査は、`supersededById` と対象の id の両側を畳んで比べる | 採用 (2026-10) |
 | [0560](./0560-doc-code-drift-sweep-readmes.md) | 文書とコードのずれを横に掃く（第8弾）— README 4つ（ルート・core・openai・local-embedding）を、今の main の実装に照らす | 採用 (2026-10) |
+| [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
