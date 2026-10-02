@@ -492,6 +492,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **返り値が変わる**: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製になった（呼び出し側が書き換えても、次の再生・記録に漏れない）。
   - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
 
+- **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
+
 ### Fixed
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createObservation`・`createObservationWithOutbox` が、関数・`Symbol` を欄の値に持つ値や `toJSON` を持つ値を含む `payload`（`observe({ kind: "event", data })` の `data`）を、`DataCloneError` で断らずに、`@mnemora/postgres` と同じ規則で保存するようになった。**（[ADR 0486](./docs/decisions/0486-fixture-event-data-align-and-context-text-unit.md)）関数・`Symbol` の欄は消え（配列の要素なら `null`）、`toJSON` はその戻り値で保存する。`NaN`・`-0`・`Date`・値が `undefined` の欄の扱いは変えていない。断る入力が減るだけで、非破壊。
