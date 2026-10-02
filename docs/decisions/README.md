@@ -516,6 +516,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0502](./0502-observe-rejects-whitespace-only-input.md) | `observe()` が、本文が空白だけの入力（`utterance.text`・`event.name`・`document.content`）を入口で断る | 採用 (2026-10) |
 | [0504](./0504-vector-store-omits-params-from-thrown-errors.md) | `PostgresVectorStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
+| [0509](./0509-fuzz-uncovered-fields-channels-hnsw-recall-record.md) | 穴探し — recall の fuzz に `channels`（tsvector・trigram）・HNSW 上の `fields`・`getRecall` の読み戻しを足した（Fake と testkit の語彙検索の食い違いが 2 つ出た。直していない） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |

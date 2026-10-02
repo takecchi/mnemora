@@ -17,6 +17,7 @@ import {
   type FuzzStores,
   fuzzSeeds,
   genOps,
+  type Op,
   runForDiff,
   type RunOutcome,
 } from "../../../core/src/__tests__/recall-invariant-fuzz-harness.js";
@@ -25,6 +26,7 @@ import { createPostgresClient, type PostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
+import { PostgresTrigramLexicalStore } from "../trigram-lexical-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
@@ -81,6 +83,12 @@ const ARG_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARG_SEEDS ?? 10);
 const ARGDEAD_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARGDEAD_DIFF_SEEDS ?? 10);
 // ADR 0521: fixture が大文字の対象 id を Postgres と同じに受けるようになったので、`argupper` も差分に載せる。
 const ARGUPPER_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_ARGUPPER_DIFF_SEEDS ?? 10);
+// ADR 0509: `channels`（`ann`／`lexical` の組）を振る profile（tsvector の store と trigram の store で別々に）、
+// `fields` の欄を HNSW の経路（`seqscan_off`）に載せる脚 `fieldswide`（`wide` と同じ規模）。小さい `fields` は `seqscan_off` でも HNSW を通らない（ADR 0509 の EXPLAIN）。
+const CHANNELS_SEEDS = Number(process.env.RECALL_FUZZ_PG_CHANNELS_SEEDS ?? 10);
+const CHANNELS_DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_CHANNELS_DIFF_SEEDS ?? 10);
+// `fieldswide` は記憶が数十〜数百件になる（`wide` と同じ規模）ので、本数を半分にする。
+const FIELDS_WIDE_SEEDS = Number(process.env.RECALL_FUZZ_PG_FIELDS_WIDE_SEEDS ?? 5);
 const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.RECALL_FUZZ_PG_FIRST_SEED ?? 1);
 
@@ -104,17 +112,25 @@ async function getClient(mode: ConnectionMode): Promise<PostgresClient> {
   return client;
 }
 
-function postgresBackend(mode: ConnectionMode): FuzzBackend {
+function postgresBackend(
+  mode: ConnectionMode,
+  lexical: "tsvector" | "trigram" = "tsvector",
+): FuzzBackend {
   return {
     async setup() {
       await resetTestDatabase();
       const { db } = await getClient(mode);
+      // trigram の store は `create` が `pg_trgm` の前提を確かめて SQL 関数を入れる（ADR 0319）。
+      const lexicalStore =
+        lexical === "trigram"
+          ? await PostgresTrigramLexicalStore.create(db)
+          : new PostgresLexicalStore(db);
       return {
         stores: {
           memoryStore: new PostgresMemoryStore(db),
           outboxStore: new PostgresOutboxStore(db),
           vectorStore: new PostgresVectorStore(db),
-          lexicalStore: new PostgresLexicalStore(db),
+          lexicalStore,
           eventStore: new PostgresEventStore(db),
           tenantSettingsStore: new PostgresTenantSettingsStore(db),
           relationStore: new PostgresRelationStore(db),
@@ -213,13 +229,21 @@ async function diffAgainstPostgres(
   return { report: reports.join("\n\n"), compared };
 }
 
-const INVARIANT_LEGS: { profile: FuzzProfile; seeds: number; mode: ConnectionMode }[] = [
+const INVARIANT_LEGS: {
+  profile: FuzzProfile;
+  seeds: number;
+  mode: ConnectionMode;
+  lexical?: "trigram";
+}[] = [
   { profile: "default", seeds: DEFAULT_SEEDS, mode: "planner" },
   { profile: "wide", seeds: WIDE_SEEDS, mode: "seqscan_off" },
   { profile: "fields", seeds: FIELDS_SEEDS, mode: "planner" },
   { profile: "relations", seeds: RELATIONS_SEEDS, mode: "planner" },
   { profile: "argdead", seeds: ARG_SEEDS, mode: "planner" },
   { profile: "argupper", seeds: ARG_SEEDS, mode: "planner" },
+  { profile: "channels", seeds: CHANNELS_SEEDS, mode: "planner" },
+  { profile: "channels", seeds: CHANNELS_SEEDS, mode: "planner", lexical: "trigram" },
+  { profile: "fieldswide", seeds: FIELDS_WIDE_SEEDS, mode: "seqscan_off" },
 ];
 
 describe("recall の不変条件（シードつきのランダムな操作列、本物の Postgres + pgvector）", () => {
@@ -230,8 +254,8 @@ describe("recall の不変条件（シードつきのランダムな操作列、
   });
 
   for (const leg of INVARIANT_LEGS) {
-    it(`${leg.profile}（${leg.mode}）: ${leg.seeds} シード × ${LEN} 操作で、I1〜I8・I10〜I12 の違反が無い`, async () => {
-      const report = await fuzzSeeds(postgresBackend(leg.mode), {
+    it(`${leg.profile}（${leg.mode}${leg.lexical ? `、${leg.lexical}` : ""}）: ${leg.seeds} シード × ${LEN} 操作で、I1〜I8・I10〜I12・I16 の違反が無い`, async () => {
+      const report = await fuzzSeeds(postgresBackend(leg.mode, leg.lexical), {
         seeds: leg.seeds,
         len: LEN,
         checkDeterminism: false,
@@ -281,6 +305,7 @@ describe("recall の不変条件（シードつきのランダムな操作列、
     ["relations", RELATIONS_DIFF_SEEDS],
     ["argdead", ARGDEAD_DIFF_SEEDS],
     ["argupper", ARGUPPER_DIFF_SEEDS],
+    ["channels", CHANNELS_DIFF_SEEDS],
   ] as const) {
     it(`差分（${profile}、indexscan_off）: ${seeds} シード × ${LEN} 操作で、Fake・testkit の InMemory と recall の結果が食い違わない`, async () => {
       for (const [name, backend] of [
@@ -293,6 +318,42 @@ describe("recall の不変条件（シードつきのランダムな操作列、
       }
     }, 1_800_000);
   }
+
+  // ADR 0509「割れ」: `channels` を振って見つかった、語彙検索の食い違い 2 つ。直さずに、固定の操作列で「いまは食い違う」ことを留める
+  // （`channels` の語彙には入れていない。`CHANNEL_WORDS` の doc）。直したら、この 2 つの期待を「食い違わない」に反転すること。
+  const lexicalOps = (word: string, text: string): Op[] => [
+    { k: "create", v: 0, tags: [], ready: true, zero: false, subj: false, hl: 24, w: word },
+    {
+      k: "recall",
+      v: 0,
+      limit: 3,
+      off: 2,
+      assoc: 0,
+      budget: 0,
+      thr: -1,
+      lex: false,
+      ch: { c: ["lexical"], text },
+    },
+  ];
+  const pinnedDiff = async (backend: FuzzBackend, ops: Op[]) =>
+    diffRuns(
+      await runForDiff(backend, ops, 1),
+      await runForDiff(postgresBackend("indexscan_off"), ops, 1),
+    ).diff;
+
+  it("既知の割れ（ADR 0509）: Fake の語彙検索は部分一致で、Postgres は語（token）一致。query の語 `a` が `alpha` に当たる", async () => {
+    const ops = lexicalOps("alpha", "a");
+    expect(await pinnedDiff(fakeBackend, ops)).not.toBeNull();
+    // testkit の InMemory は語で数えるので、Postgres と揃っている。
+    expect(await pinnedDiff(testkitBackend(), ops)).toBeNull();
+  }, 1_800_000);
+
+  it("既知の割れ（ADR 0509）: testkit の語彙検索はハイフンで語を割り、Postgres は `PROJ-12` を1語と数える（coverage の分母が違う）", async () => {
+    const ops = lexicalOps("gamma", "gamma PROJ-12");
+    expect(await pinnedDiff(testkitBackend(), ops)).not.toBeNull();
+    // Fake は空白で割るので、Postgres と揃っている。
+    expect(await pinnedDiff(fakeBackend, ops)).toBeNull();
+  }, 1_800_000);
 
   it("陽性対照: testkit の InMemory の aggregateScope を壊すと、食い違いが報告される", async () => {
     // 食い違いが1つ見えれば足りるので、本数は絞る。

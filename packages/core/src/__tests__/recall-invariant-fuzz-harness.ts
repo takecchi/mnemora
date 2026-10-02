@@ -1,7 +1,7 @@
 import type { Ctx } from "../ctx.js";
 import type { MemoryId } from "../ids.js";
 import type { NewMemory } from "../memory.js";
-import type { RecallQuery, RecallResult } from "../recall.js";
+import type { RecallQuery, RecallRecord, RecallResult } from "../recall.js";
 import type { createRuntime as CreateRuntime, RuntimeDeps } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import {
@@ -47,6 +47,7 @@ import {
  *     候補にならなかったスコープ内の記憶は、埋め込みが無いか減衰しきっているかのどちらかであり、
  *     それは集約の層の札が数えている。`docs/recall.md` 冒頭の原則3（結果は、そこから漏れたものと
  *     必ず同時に提示する）から導ける。
+ *   下限は `channels` に `"ann"` を含む recall にだけ当てる（ADR 0509）。
  * - I11 集約の件数を、検査器が作った記憶の現在の状態から独立に数えた値と突き合わせる。この検査器の
  *   recall は scope を絞らない（subject・期間・`validAt` の外に出る記憶・taxonomy を持たない）ので、
  *   `totalInScope` は status が active/contested の記憶の件数（`docs/recall.md` §5「`totalInScope` が
@@ -57,11 +58,37 @@ import {
  *   記憶の件数に等しい（`docs/recall.md` §5 の表の甲群）。
  * - I13 `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して除外する（ADR 0485、`fcc` 操作。ADR 0494）。
  * - I15 `consolidate` が積む `created` の `meta.sources` は小文字（ADR 0527、`argupper` の `consolidate` で届く）。
+ * - I16 `getRecall(recallId)` が読み戻す `RecallRecord` は、その recall の戻り値と同じ内容を持つ（`returnedMemories` の
+ *   `memoryId`・`retrievedVia`・`score`・`companionOf`・`associationOf`、`omitted`、`usage`。ADR 0155・0480・0509）。
  * - I14 群の同伴の数は、返った owner の数 × `relationMaxCount` 以下（ADR 0381・0396、`relations` profile。ADR 0494）。
  *
  * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で操作列を最小化し、シードと最小の
  * 操作列を出力に出す。
  */
+
+/** キーの順に依らない JSON（`undefined` の欄は落ちる）。`getRecall` の読み戻し（jsonb）と、その場の値を比べるのに使う。 */
+function canon(value: unknown): string {
+  return JSON.stringify(value, (_k, v: unknown) =>
+    v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
+/**
+ * 差分の突き合わせ用に、`RecallRecord` から backend の違いで値が変わる欄を落とす。
+ * - `query.vector`: backend の空間の次元で書かれる（Fake は 2 次元、Postgres は 3 次元に 0 を足したもの。`FuzzBackend.vector`）。
+ * - `usage.chars`・`estimatedTokens`・`indexChars`・`byTier.index`: 目次帯の JSON（`JSON.stringify(indexBand)`、memoryId を含む）の
+ *   長さから出る。id の長さが backend で違う（Fake は `mem-N`、Postgres は uuid の 36 字）ので揃わない。
+ * ほかの欄は比べる。
+ */
+function withoutBackendDependentFields<T extends RecallRecord | null>(rec: T): T {
+  if (rec === null) return rec;
+  const { vector: _vector, ...query } = (rec.query ?? {}) as Record<string, unknown>;
+  const { chars: _c, estimatedTokens: _e, indexChars: _i, byTier, ...usage } = rec.usage;
+  const { index: _idx, ...tier } = byTier;
+  return { ...rec, query, usage: { ...usage, byTier: tier } };
+}
 
 export const FUZZ_CTX: Ctx = { tenantId: "tenant-1" };
 const ctx = FUZZ_CTX;
@@ -97,6 +124,8 @@ export type Op =
       hl: number;
       /** `fields` profile だけ: `occurredAt` を「いまから何時間前か」（負なら未来）で振る。無ければ null。 */
       occ?: number | null;
+      /** `channels` profile だけ: content に足す語（ADR 0509。日本語・識別子を含む）。 */
+      w?: string;
     }
   | {
       k: "recall";
@@ -109,6 +138,8 @@ export type Op =
       lex: boolean;
       /** `fields` profile だけ: これまで一度も振っていなかった `RecallQuery` の欄（ADR 0492）。 */
       x?: { tw: boolean; dbl: number; qt: string[]; rmc?: number };
+      /** `channels` profile だけ: 渡す `channels` と `text`（ADR 0509）。あれば `lex` より優先する。 */
+      ch?: { c: ("ann" | "lexical")[]; text: string };
     }
   | { k: "bulk"; n: number; seed: number }
   | { k: "usage"; pick: number; mu?: ArgMutation }
@@ -155,16 +186,45 @@ const VECS = [
  * - `argdead`／`argupper`: 操作に渡す id を、消した（forget・purge 済みの）記憶の id に差し替える／大文字にする
  *   （ADR 0494）。大文字の id は、ADR 0494 の時点では fixture が受けず（ADR 0446 の既存の違い）、3 実装の差分に載せられなかった。
  *   ADR 0521 で fixture を Postgres に揃えたので、`argdead`・`argupper` とも 3 実装の差分に載せる。
+ * - `channels`: `channels`（`["ann","lexical"]`・`["lexical"]` だけ・`["ann"]` だけ）と `text` を乱択し、記憶の content に
+ *   語（ASCII の識別子・日本語）を足す。語彙チャンネルの store（tsvector／trigram）との合流を振る（ADR 0509）。
+ * - `fieldswide`: `wide` と `fields` を合わせる（近似索引 HNSW を通る規模に `fields` の欄を載せる。ADR 0509）。
  * - どの profile も、追加の乱数は別の流れ（`r2`）から引き、`default`／`wide`／`fields` の同じシードの操作列を変えない。
  */
-export type FuzzProfile = "default" | "wide" | "fields" | "relations" | "argdead" | "argupper";
+export type FuzzProfile =
+  "default" | "wide" | "fields" | "relations" | "argdead" | "argupper" | "channels" | "fieldswide";
+
+/**
+ * `channels` profile が content と query の text に使う語（ADR 0509）。ASCII の語・識別子と、日本語（trigram 側）を含む。
+ * ⚠ 次の2つは**入れていない**（Fake・testkit の語彙検索が Postgres と食い違う既知の割れ。ADR 0509「割れ」。
+ * 固定の操作列は `recall-invariant-fuzz.postgres.test.ts` が持つ）: ハイフンを含む識別子（`PROJ-12`。testkit は `proj`・`12` の
+ * 2 語に割る）、ほかの語の部分文字列になる語（Fake は部分一致）。語どうしが部分文字列にならないこと、ハイフンを含まないことを保つ。
+ */
+const CHANNEL_WORDS = [
+  "alpha",
+  "beta",
+  "gamma",
+  "PROJ12",
+  "東京",
+  "大阪",
+  "東京タワー",
+  "alpha beta",
+];
+const CHANNEL_SETS: ("ann" | "lexical")[][] = [
+  ["ann", "lexical"],
+  ["lexical"],
+  ["lexical", "ann"],
+  ["ann"],
+];
 
 export function genOps(seed: number, n: number, profile: FuzzProfile = "default"): Op[] {
   const r = rng(seed);
   // `fields` の追加の欄は別の乱数の流れから引く——`r` の引き方は `default` と同じに保ち、
   // 同じシードの操作列の骨格（どの操作が何番目か）を変えない（ADR 0492）。
   const r2 = rng((seed ^ 0x5bd1e995) >>> 0);
-  const fields = profile === "fields";
+  const fields = profile === "fields" || profile === "fieldswide";
+  const wide = profile === "wide" || profile === "fieldswide";
+  const chan = profile === "channels";
   const rel = profile === "relations";
   const argMu: ArgMutation | null =
     profile === "argdead" ? "dead" : profile === "argupper" ? "upper" : null;
@@ -174,7 +234,7 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
   const ops: Op[] = [];
   for (let i = 0; i < n; i++) {
     const x = r();
-    if (profile === "wide" && (i === 0 || r() < 0.04)) {
+    if (wide && (i === 0 || r() < 0.04)) {
       ops.push({ k: "bulk", n: pick([20, 60, 150]), seed: Math.floor(r() * 2 ** 31) });
       continue;
     }
@@ -188,13 +248,16 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
         subj: r() < 0.3,
         hl: pick([1, 24, 24 * 365]),
         ...(fields ? { occ: r2() < 0.5 ? null : Math.floor(r2() * 24 * 400) - 24 * 10 } : {}),
+        ...(chan && r2() < 0.8
+          ? { w: CHANNEL_WORDS[Math.floor(r2() * CHANNEL_WORDS.length)]! }
+          : {}),
       });
     } else if (x < 0.6) {
       ops.push({
         k: "recall",
         v: Math.floor(r() * VECS.length),
-        limit: 1 + Math.floor(r() * (profile === "wide" ? 20 : 4)),
-        off: 1 + Math.floor(r() * (profile === "wide" ? 5 : 3)),
+        limit: 1 + Math.floor(r() * (wide ? 20 : 4)),
+        off: 1 + Math.floor(r() * (wide ? 5 : 3)),
         assoc: Math.floor(r() * 3),
         budget: pick([0, 0, 5, 12, 25]),
         thr: pick([-1, 0, 0.3, 0.6]),
@@ -209,7 +272,14 @@ export function genOps(seed: number, n: number, profile: FuzzProfile = "default"
             }
           : rel
             ? { x: { tw: false, dbl: 0, qt: [], rmc: [0, 0, 1, 2, 3][Math.floor(r2() * 5)]! } }
-            : {}),
+            : chan
+              ? {
+                  ch: {
+                    c: CHANNEL_SETS[Math.floor(r2() * CHANNEL_SETS.length)]!,
+                    text: CHANNEL_WORDS.filter(() => r2() < 0.25).join(" ") || "alpha",
+                  },
+                }
+              : {}),
       });
     } else if (x < 0.68) ops.push({ k: "usage", pick: idx(), ...mu() });
     else if (x < 0.74) ops.push({ k: "forget", i: idx(), ...mu() });
@@ -446,6 +516,34 @@ export async function runOps(
     const v = (inv: string, detail: string) => violations.push({ inv, detail, op: oi });
     const returned = new Set(r.memories.map((m) => m.memoryId));
     if (returned.size !== r.memories.length) v("I2-unique", JSON.stringify([...returned]));
+    // I16（ADR 0509）: 書いた `recalls` の行を `getRecall` で読み戻すと、返した内容と一致する。
+    {
+      const rec = await rt.getRecall(ctx, r.recallId);
+      if (rec === null) v("I16-record-missing", String(r.recallId));
+      else {
+        if (rec.tenantId !== ctx.tenantId) v("I16-record-tenant", rec.tenantId);
+        if (!rec.returnedMemories.breakdownCaptured)
+          v("I16-record-breakdown", "breakdownCaptured: false");
+        const proj = (m: {
+          memoryId: unknown;
+          retrievedVia: unknown;
+          score: unknown;
+          companionOf?: unknown;
+          associationOf?: unknown;
+        }) => ({
+          memoryId: m.memoryId,
+          retrievedVia: m.retrievedVia,
+          score: m.score,
+          companionOf: m.companionOf,
+          associationOf: m.associationOf,
+        });
+        const want = canon(r.memories.map(proj));
+        const got = canon(rec.returnedMemories.memories.map((m) => proj(m as never)));
+        if (want !== got) v("I16-record-returned", `${want} vs ${got}`);
+        if (canon(rec.omitted) !== canon(r.omitted)) v("I16-record-omitted", "omitted が食い違う");
+        if (canon(rec.usage) !== canon(r.usage)) v("I16-record-usage", "usage が食い違う");
+      }
+    }
     // I14（ADR 0494）: 群の同伴（`contestedWithId` を持たない `contested` から辿った `mandatory_companion`）は、
     // 群ごとに `relationMaxCount` 件まで（`RecallQuery.relationMaxCount`）。単位は丸ごと返る（owner を含む）ので、
     // 返った owner（同伴でなく、`contested` で `contestedWithId` なし）の数 × 上限が、同伴の総数の上限になる。
@@ -550,6 +648,10 @@ export async function runOps(
           break;
       }
     }
+    // ADR 0509: `channels` に `"ann"` が無い recall（`["lexical"]` だけ）の候補は語彙に当たった記憶だけで、当たらなかった
+    // スコープ内の記憶は、どの札にも数えられない（埋め込みが有っても候補にならない）。下限は「ann が eligible を全部候補にする」
+    // ことに依っているので、ann を含まない recall には当てない（上限は当てる）。
+    if (q.channels !== undefined && !q.channels.includes("ann")) allExact = false;
     const summary = () =>
       `returned ${returnedInScope}, counted ${counted}, aggregate-layer ${aggregateSlack}, total ${r.index.totalInScope} :: ${JSON.stringify(r.omitted)}`;
     if (counted > r.index.totalInScope) v("I10-upper", summary());
@@ -580,7 +682,14 @@ export async function runOps(
   };
 
   const createOne = async (
-    op: { tags: string[]; ready: boolean; subj: boolean; hl: number; occ?: number | null },
+    op: {
+      tags: string[];
+      ready: boolean;
+      subj: boolean;
+      hl: number;
+      occ?: number | null;
+      w?: string;
+    },
     vector: number[],
   ) => {
     const at = new Date(now);
@@ -589,7 +698,7 @@ export async function runOps(
       subjectId: op.subj ? "s1" : null,
       sourceObservationId: null,
       extractorVersion: null,
-      content: `content ${ids.length} ${op.tags.join(" ")}`,
+      content: `content ${ids.length} ${op.tags.join(" ")}${op.w ? ` ${op.w}` : ""}`,
       contentHash: `h${ids.length}`,
       digest: `d${ids.length}`,
       digestSource: "llm",
@@ -660,7 +769,11 @@ export async function runOps(
                   : { maxCount: 1, anchorCount: 2, minSimilarity: 0.3 },
             ...(op.budget ? { budget: { maxMemoryChars: op.budget } } : {}),
             ...(op.thr >= 0 ? { scoreThreshold: op.thr } : {}),
-            ...(op.lex ? { channels: ["ann", "lexical"], text: "a b" } : {}),
+            ...(op.ch
+              ? { channels: op.ch.c, text: op.ch.text }
+              : op.lex
+                ? { channels: ["ann", "lexical"], text: "a b" }
+                : {}),
             ...(op.x
               ? {
                   ...(op.x.tw ? { timeWeighting: "eventAwareFreshness" } : {}),
@@ -670,7 +783,7 @@ export async function runOps(
                 }
               : {}),
           } as RecallQuery;
-          const r = await (op.lex ? rtLex : rt).recall(ctx, q);
+          const r = await (op.ch || op.lex ? rtLex : rt).recall(ctx, q);
           lastRecall = r;
           trace.push(
             JSON.stringify({
@@ -694,6 +807,8 @@ export async function runOps(
                   memories: r.memories,
                   omitted: r.omitted,
                   index: r.index,
+                  // ADR 0509: `getRecall` で読み戻した `RecallRecord`（`recallId` は normalize が落とす）。
+                  record: withoutBackendDependentFields(await rt.getRecall(ctx, r.recallId)),
                 }),
               ),
             );
