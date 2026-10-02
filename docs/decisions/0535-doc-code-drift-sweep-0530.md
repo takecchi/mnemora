@@ -120,3 +120,15 @@
 - **陽性対照**【実測】: 一時の md に存在しない識別子 `readSeedMemoryIdFromPayloadX` を書いて識別子の照合に通し、拾った（実在する `readSeedMemoryIdFromPayload` は拾わなかった）。一時ファイルは削除した。`OutboxStore` に `enqueue` が無いことは grep の無ヒットで見た（`claimBatch` が同じ節でヒットすることで、grep が当たる場所を見ていることは確かめた）。入口の突き合わせには機械の陽性対照が無い（手で読んだ）。
 - **【未確認】**: 0532 の歯（実 Postgres・InMemory・Fake の4本）を走らせていない。ADR 0532 の変異試験（0527 の直しを外すと「書き換えた payload」の2本だけが赤になる）の結果。0532 が測っていない範囲（並行する複数の `tick`、`extract` ジョブ経由の `created`、実 API）。
 - **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
+
+## 追い足し（基準 main `09516d1e`、ADR 0531 の分）
+
+0531（#1633）が main に入ったので掃いた（`git diff 28f98bee 09516d1e`）。この節はマネージャーが書いた（担い手のセッションが利用上限で止まったため）。この枝は `origin/main` を merge した（衝突なし）。
+
+- **0531 の中身**【現物】: 差は ADR 0531・1つの歯（`packages/postgres/src/__tests__/tick-multi-pool-concurrency.postgres.test.ts`）・索引だけ。実装・TSDoc・README・約束の文書・CHANGELOG・migration-v1 は変わっていない（0531 の決定1も、変えていないと書く）。
+- **探した場所**【現物】: `interfaces/outbox-store.ts` の `claimBatch`・`complete`/`fail` の TSDoc（`FOR UPDATE SKIP LOCKED`・`attempts` の CAS）、`docs/architecture.md` の `OutboxStore` の並行の追記（ADR 0206・0325 の追記）、`grep -n 'SKIP LOCKED|複数のプロセス|複数プロセス|接続プール'` を `docs/architecture.md`・`docs/memory-model.md`・`packages/postgres/README.md`・`packages/core/src/runtime.ts` に当てた。
+- **突き合わせの結果**【現物】: 0531 が測った「別々の接続プールからの `tick` でも二重 claim が起きない」「`attempts` の CAS は接続をまたいで効く」は、`outbox-store.ts` の TSDoc の約束と一致する。`docs/architecture.md` の「単一プロセス内の複数接続までであり」「別ホストの複数マシンが同じ Postgres に対して撃つ状況は、依然として測っていない」は、0531（1つのプロセスの中の別々のプール）のあとも成り立つ。古くなった記述は無かった。
+- **直したもの**: なし。
+- **コードの側を直すべき食い違い**: 見つからなかった。
+- **【未確認】**: 0531 の歯（実 Postgres）を走らせていない。この回は、担い手の機械照合（識別子・パス・リンク・`Type.member`・import・文言・TSDoc）を当て直していない（差が ADR と歯だけで、文書・TSDoc に変更が無いため、前回の出力から変わる入力が無いと判断した【判断】）。陽性対照も取っていない。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、上の grep、`node scripts/generate-adr-index.mjs`。
