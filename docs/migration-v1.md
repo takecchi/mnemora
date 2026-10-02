@@ -1304,7 +1304,7 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 
 **誰が影響を受けるか**: 自前の `MemoryStore`/`OutboxStore` 実装を、`packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に対して走らせている利用者のうち、上の新しい欄を守っていない（省略時に壁時計 `new Date()` を使うのではなく、渡された値を無視し続ける）場合。**適合テストを走らせていない・自前実装を持たない利用者は影響を受けない。**
 
-**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（自分の実装が渡された値を無視し続ける間、その実装が書く欄は壁時計のまま。`Runtime` 自身は、注入した時計の値をこれらの欄へ渡している——[ADR 0559](./decisions/0559-clock-reaches-outbox-available-at.md)）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
 
 **DB マイグレーション**: 不要（スキーマは変えていない）。
 
@@ -2860,6 +2860,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `updateStatus`・`updateStatusWithEvent` が、`supersededById` に大文字小文字だけが違う自分自身の id（id が `mem-1`・`supersededById` が `MEM-1` など）を渡されると `RangeError`（`supersededById must not be the memory itself`）で断る**（[ADR 0558](./decisions/0558-inmemory-self-supersede-check-folds-both-sides.md)。🟡。項目59（ADR 0503）の自己置換の検査の取りこぼし）。
   `@mnemora/postgres` は以前から両側を畳んで断る。以前の fixture は `supersededById` を畳まずに比べたので通り、自分を指す `superseded` の行を書いた。新しく断るのはこの綴り違いの自己置換だけ（Postgres が今断るものだけ）。別の記憶を大文字で渡す呼び出しは従来どおり通り、小文字で保存される。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `abortIfSuperseded` に大文字の uuid の superseded な記憶の id を渡すと、書かずに `SourceMemoryStatusChangedError` を投げる。綴り違いの同じ id（`[x, X]`）は `changed` に1件、`changed` は id の昇順**（[ADR 0568](./decisions/0568-abort-if-superseded-controls-and-duplicate-id-changed.md)。🟡。[ADR 0556](./decisions/0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) の「新しく断る入力は無い」の訂正）。
+  `createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `abortIfSuperseded` が対象。`@mnemora/postgres` は以前から、大文字でも同じ行として見つけて断る（`id = ANY(...)`、1行につき1件、`ORDER BY id ASC`）。以前の fixture は、大文字の id では superseded を見落として書き込み（ADR 0556 が直した）、ADR 0556 の後も、綴り違いの同じ id を渡すと同じ id を `changed` に2回積み、渡した順に並べていた。**新しく断る入力は、大文字の id の superseded な記憶**（Postgres が今断るものだけ。ADR 0556 は、これを「新しく断る入力は無い」と書いていた）。`abortIfSuperseded` に大文字の id を渡して、書き込みが通ることに頼っていたテストは、いまは `SourceMemoryStatusChangedError` になる。`changed` の件数や並びを読んでいたテストも、見直しの対象になる。他のテナントの記憶・superseded 以外の status は、大文字の id でも断らない（Postgres と同じ）。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
 
 ## この文書が確かめていないこと
 

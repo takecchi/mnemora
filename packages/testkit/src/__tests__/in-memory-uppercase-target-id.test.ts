@@ -330,4 +330,41 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
     }
     expect((await store.get(ctx, target.id))?.status).toBe("active");
   });
+
+  it("abortIfSuperseded: 綴り違いの同じ id は1件、changed は id の昇順（ADR 0568）", async () => {
+    const { stores, up } = setup();
+    const store = stores.memoryStore;
+    const anchor = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "anchor" }),
+    );
+    const srcs: MemoryId[] = [];
+    for (let i = 0; i < 3; i++) {
+      const s = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: `s${i}`,
+          status: "superseded",
+          supersededById: anchor.id,
+        }),
+      );
+      srcs.push(s.id);
+    }
+    const asc = [...srcs].sort();
+    const passed = [asc[2]!, up(asc[2]!), asc[0]!, up(asc[1]!), asc[1]!];
+    let err: unknown;
+    try {
+      await store.createMemoryWithOutbox(
+        ctx,
+        buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "w" }),
+        ["embed"],
+        { abortIfSuperseded: passed },
+      );
+    } catch (e) {
+      err = e;
+    }
+    expect(isSourceMemoryStatusChangedError(err)).toBe(true);
+    expect((err as { changed: Array<{ id: string }> }).changed.map((c) => c.id)).toEqual(asc);
+  });
 });
