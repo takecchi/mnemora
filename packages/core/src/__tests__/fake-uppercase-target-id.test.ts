@@ -235,4 +235,21 @@ describe("FakeMemoryStore: 大文字の対象 id を同じ記憶として受け�
     const m = await rt.markContested(ctx, a, up(a));
     expect(m.outcome.kind).toBe("ineligible");
   });
+
+  it("EventStore.get: 大文字のイベント id でも同じイベントが当たる（ADR 0556。Postgres は uuid 型の列で比べる）", async () => {
+    const { make, up, stores } = setup();
+    const a = await make();
+    const stored = await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: a,
+      kind: "updated",
+      actor: { type: "system" },
+      digestSnapshot: "d",
+      meta: {},
+    });
+    expect((await stores.eventStore.get(ctx, stored.id))?.id).toBe(stored.id);
+    expect((await stores.eventStore.get(ctx, stored.id.toUpperCase() as never))?.id).toBe(
+      stored.id,
+    );
+  });
 });
