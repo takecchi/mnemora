@@ -80,6 +80,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
   - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債）。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore` の語の数え方を、`@mnemora/postgres`（tsvector の `simple`）に揃えた——ハイフン入りの識別子（`PROJ-12`）が空白区切りの 1 語になる**（[ADR 0513](./docs/decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md) の判断どおり、fixture だけの変更）。
+
+  以前の `InMemoryLexicalStore` は、クエリを Unicode の英数字境界で割って語の集合にしていたので、`PROJ-12` が `proj`・`12` の 2 語になり、`coverage` の分母が Postgres とずれた（クエリ `gamma PROJ-12`、content `gamma` で、Postgres は 1/2、fixture は 1/3）。いまはクエリの単位が空白区切りの語で、語の中の token（`proj`・`12`）が content の token の列に隣接して並ぶときに、その語が一致したと数える（Postgres の `websearch_to_tsquery` の `"..."` のフレーズ）。
+  - **見え方が変わるもの**: `coverage` の値と、それが入る `ScoreBreakdown.lexicalMatch`。ハイフン・アンダースコア・ピリオドなどで区切った語を含むクエリ。content `proj x 12` はクエリ `PROJ-12` に当たらなくなる（Postgres も当たらない）。
+  - **揃えていないもの**: Postgres の text search parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）。ADR 0513 に実測を書いた。
+  - 本物の adapter（`@mnemora/postgres`）は変えていない。conformance suite は変えていない。
+
 ### Fixed
 
 - **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）

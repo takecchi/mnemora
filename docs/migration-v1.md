@@ -2752,6 +2752,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
+  以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**

@@ -319,8 +319,9 @@ describe("recall の不変条件（シードつきのランダムな操作列、
     }, 1_800_000);
   }
 
-  // ADR 0509「割れ」: `channels` を振って見つかった、語彙検索の食い違い 2 つ。直さずに、固定の操作列で「いまは食い違う」ことを留める
-  // （`channels` の語彙には入れていない。`CHANNEL_WORDS` の doc）。直したら、この 2 つの期待を「食い違わない」に反転すること。
+  // ADR 0509「割れ」→ ADR 0513 で fixture を Postgres に揃えた: `channels` を振って見つかった語彙検索の食い違い 2 つを、
+  // 固定の操作列で「食い違わない」ことを留める（ADR 0509 の時点では「いまは食い違う」を留めていた）。
+  // どちらも `CHANNEL_WORDS` に戻してある（`alp`・`PROJ-12`）ので、`channels` の脚も同じ語を踏む。
   const lexicalOps = (word: string, text: string): Op[] => [
     { k: "create", v: 0, tags: [], ready: true, zero: false, subj: false, hl: 24, w: word },
     {
@@ -341,17 +342,15 @@ describe("recall の不変条件（シードつきのランダムな操作列、
       await runForDiff(postgresBackend("indexscan_off"), ops, 1),
     ).diff;
 
-  it("既知の割れ（ADR 0509）: Fake の語彙検索は部分一致で、Postgres は語（token）一致。query の語 `a` が `alpha` に当たる", async () => {
+  it("ADR 0509 の割れ 1（ADR 0513 で解消）: query の語 `a` は content `alpha` に当たらない（Postgres は語（token）一致）。Fake・testkit とも Postgres と食い違わない", async () => {
     const ops = lexicalOps("alpha", "a");
-    expect(await pinnedDiff(fakeBackend, ops)).not.toBeNull();
-    // testkit の InMemory は語で数えるので、Postgres と揃っている。
+    expect(await pinnedDiff(fakeBackend, ops)).toBeNull();
     expect(await pinnedDiff(testkitBackend(), ops)).toBeNull();
   }, 1_800_000);
 
-  it("既知の割れ（ADR 0509）: testkit の語彙検索はハイフンで語を割り、Postgres は `PROJ-12` を1語と数える（coverage の分母が違う）", async () => {
+  it("ADR 0509 の割れ 2（ADR 0513 で解消）: `PROJ-12` は空白区切りの 1 語で、coverage の分母は 2（`gamma` と `PROJ-12`）。Fake・testkit とも Postgres と食い違わない", async () => {
     const ops = lexicalOps("gamma", "gamma PROJ-12");
-    expect(await pinnedDiff(testkitBackend(), ops)).not.toBeNull();
-    // Fake は空白で割るので、Postgres と揃っている。
+    expect(await pinnedDiff(testkitBackend(), ops)).toBeNull();
     expect(await pinnedDiff(fakeBackend, ops)).toBeNull();
   }, 1_800_000);
 
