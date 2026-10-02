@@ -234,19 +234,23 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
 }
 
 /**
- * `tenant_settings.taxonomy_mode` が取りうる値（`migrations/0001_init.sql:223`、
- * Issue #201、[ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)）。
+ * `tenant_settings.taxonomy_mode` が取りうる値（`packages/postgres/migrations/0001_init.sql` の
+ * `tenant_settings` の CHECK、Issue #201、[ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)）。
  *
  * `docs/memory-model.md` §8「二つのモードを二つの経路にしない。『ラベルの状態』一つで
  * 表す」——`strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できる
  * か」だけであり、書き込みは `open`/`strict` に関わらず常に自由である。**この2値が
  * recall のフィルタ・加点へ実際に反映される経路（PR-B）は、この型を追加した時点では
  * まだ実装されていない**——この型と読み書きの口だけを先に用意する。
+ *
+ * （2026-10-03 訂正）上の「まだ実装されていない」は今は成り立たない。`recall()` は `getTaxonomyMode?` を
+ * 読み、`open` なら `registered`・`proposed` の両方、`strict` なら `registered` だけを
+ * ラベルの絞り込みの参加資格にする（`recall-runtime.ts` の `taxonomyMode`、`RecallQuery.labels` の doc）。
  */
 export type TaxonomyMode = "open" | "strict";
 
 /**
- * `tenant_settings.taxonomy_mode` の DB 側デフォルト（`migrations/0001_init.sql:223`
+ * `tenant_settings.taxonomy_mode` の DB 側デフォルト（`packages/postgres/migrations/0001_init.sql`
  * の `DEFAULT 'open'`）と一致させる、テナント設定行が存在しない場合のフォールバック値。
  * `DEFAULT_DECAY_CLOCK` と同じ規律。
  */
@@ -282,9 +286,10 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * （roadmap.md 段階3）が必要とする「Memory 作成時の既定 half-life」の読み出しと、
  * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
  *
- * ⚠ **上の段落の「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」は
+ * ⚠ **下の「`taxonomy_mode`（interface に出していない）」は
  * [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)（Issue #201）で古くなった。**
- * 本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
+ * （2026-10-03 訂正）この追記は以前、いまは本文に無い「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」
+ * を指していた。指す先を、今の本文の該当箇所に直した。本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
  * `decay_clock` と同じ「4メソッドは省略可能」の形でこの interface に加わった。
  *
  * 契約:
@@ -398,11 +403,15 @@ export interface TenantSettingsStore {
    * `EVENT_RETENTION_DAYS_INVALID_MESSAGE` を含む `Error` で失敗する
    * （`assertValidEventRetentionDays` 参照）。
    *
-   * ⚠ **`days` の上限は約束しない。** 実装によって受け付ける範囲が違う（今の振る舞いを
-   * 書いたもの。上限を新設して入力を狭めることはしていない）:
-   * - `@mnemora/postgres`: 列が `integer` なので、`2^31 − 1` を超えると DB の例外で失敗する
-   *   （`EVENT_RETENTION_DAYS_INVALID_MESSAGE` の失敗ではない）。
-   * - `@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore`: 正の整数なら上限なく受け付ける。
+   * ⚠ **`days` の上限は `2^31 − 1`**（`assertValidEventRetentionDays`、ADR 0499）。超えれば
+   * `@mnemora/postgres` も `@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore` も、何も書かずに
+   * 同じ文面の `Error` で断る（メッセージは `EVENT_RETENTION_DAYS_INVALID_MESSAGE` ではなく、
+   * `setEventRetention: days does not fit in a Postgres "integer" (int4) column` で始まる）。
+   * （2026-10-03 訂正）この段落は以前「上限は約束しない・testkit は上限なく受け付ける・
+   * Postgres は DB の例外」と書いていた。ADR 0499 より前の記述で、今は成り立たない。
+   *
+   * `retention.kind` が `"unlimited"`・`"days"` のどちらでもなければ、`EVENT_RETENTION_KIND_INVALID_MESSAGE` を
+   * 含む `Error` で失敗する（`assertValidEventRetentionKind`、型の外の値が実行時に渡ったとき）。
    *
    * 受け付けた値なら、どれほど大きくても `purgeExpiredEventsForTenant` は例外にならない
    * ——cutoff が表せる最も古い時刻より前になる日数では、それより古い行が無いので0件の削除になる。
@@ -516,6 +525,10 @@ export interface TenantSettingsStore {
    * 決めたこと13）。既定 `'open'` は「未実装の adapter でも今日と同じ挙動」に一致する
    * （`taxonomy_mode` を読む側自体がまだ存在しないため、`open`/`strict` のどちらであっても
    * PR-A の時点では観測できる違いが無い——ADR 0318「決めたこと」参照）。
+   *
+   * （2026-10-03 訂正）上の「読む側自体がまだ存在しない」は今は成り立たない。`recall()` が
+   * `readTaxonomyMode` 経由で呼び出しの始めに読み、`strict` では `proposed` のラベルを参加させない。
+   * 未実装の adapter が `'open'` に倒れる点は変わらない。
    */
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
 
@@ -564,7 +577,7 @@ export const DECAY_CLOCK_UNSUPPORTED_MESSAGE =
 
 /**
  * [ADR 0437](../../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定1:
- * 下の公開ヘルパー9本（`read*` / `write*`）は、store が投げた例外に `omitParamsFromError` を
+ * 下の公開ヘルパー（`read*` / `write*`）は、store が投げた例外に `omitParamsFromError` を
  * 掛けてから投げ直す（[ADR 0430](../../../../docs/decisions/0430-concurrent-create-erase-and-standalone-params.md)
  * 決定3と同じ作法）。drizzle の `Failed query: <SQL>\nparams: <値>` の `params:` より後ろを落とす。
  * 例外そのものを返す（新しい例外を作らない。`kind`・`cause` は変わらない）。
@@ -621,7 +634,7 @@ export async function readDefaultHalfLifeRecalls(
 /**
  * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
  * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
- * はできない？」）: テナット単位の活動カウンタ `T`（`tenant_activity.activity_seq`、
+ * はできない？」）: テナント単位の活動カウンタ `T`（`tenant_activity.activity_seq`、
  * `getActivitySeq?` が返す既存の値）に加え、subject 単位のカウンタ `S_x`
  * （新テーブル `tenant_subject_activity`）を持つ。ある Memory（subject `x`）の
  * 「有効ないま」は常に `T + S_x`（`x` が無い＝主題なしの記憶は `T` のみ）——

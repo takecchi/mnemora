@@ -5,7 +5,7 @@ import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.
 import type { OutboxJobKind } from "./scheduler.js";
 
 /**
- * OutboxStore — Phase 1（本 PR で追加。docs/architecture.md §3.4・ADR 0005 の
+ * OutboxStore — Phase 1（docs/architecture.md §3.4・ADR 0005 の
  * transactional outbox パターンの「運搬役」側）。
  *
  * `MemoryStore.createObservationWithOutbox` / `createMemoryWithOutbox` が
@@ -144,7 +144,7 @@ import type { OutboxJobKind } from "./scheduler.js";
 export interface ClaimOutboxJobsOptions {
   /** この種別のジョブだけを取る。省略なら種別で絞らない。 */
   kinds?: OutboxJobKind[] | undefined;
-  /** 1回に取る上限の本数。 */
+  /** 1回に取る上限の本数。0以上の整数を渡す前提（負数・非整数の結果は未定義。今は testkit の fixture が `Error` で断る）。 */
   limit: number;
   /** 「今」の時刻。`available_at <= now` とリースの切れ目の判定に使う。 */
   now: Date;

@@ -18,18 +18,21 @@ import type { ProvenanceKind } from "../provenance.js";
  * `decayFloorAtAfter` 以前のものは返らない・`excludeProvenanceKinds` に在る kind は
  * 返らない、を同一の適合テストで postgres / in-memory 両方に対して走らせる）。
  *
- * **⚠ 後段の多層防御は、ここの全フィールドを覆ってはいない。**
- * `packages/core/src/recall-runtime.ts` は段1のあとに `subjectId`・`excludeProvenanceKinds`・
+ * **⚠ 後段の多層防御は「段1で絞らなくてよい」ことの根拠ではない。**
+ * `packages/core/src/recall-runtime.ts` は、段1（ANN）と段3.5（連想枠）が `search()` から
+ * 受け取った候補に、`subjectId`・`excludeProvenanceKinds`・
  * `period`（`occurredAfter`/`occurredBefore`。ADR 0059 で本 interface に加わった）・
- * `validAt`（Issue #280。下記）を改めて見るが、**`status` と `decayFloorAtAfter` は
- * 見ない**。⟹ `status` と `decayFloorAtAfter` については、ここの契約を adapter が
- * 守ることが**唯一の防衛線**である
- * （実測: `FakeVectorStore` の `status` の絞りを落とす変異で、`recall-pipeline.test.ts` の
- * 既存の歯が実際に赤くなる。`subjectId` を落とす変異では赤くならない——後段が救うため）。
- * `subjectId`・`excludeProvenanceKinds`・`period`・`validAt` は後段にも同じ絞りが残るので、
- * adapter がこの契約を落としても後段が結果の正しさを救う（`subjectId`/
- * `excludeProvenanceKinds` は ADR 0056、`period` は ADR 0059、`validAt` は Issue #280）
+ * `validAt`（Issue #280。下記）・`status`（`active`/`contested` だけを残す。ADR 0432 AL-1）・
+ * 忘却ゲート（`decayFloorAtAfter` の述語と活動時計の軸。ゲートが有効なとき。ADR 0153）を
+ * 改めて掛ける。落とす方向にだけ働くので、adapter がこの契約を落としても、
+ * 混入は後段が救い、返る件数が減るだけである
+ * （`subjectId`/`excludeProvenanceKinds` は ADR 0056、`period` は ADR 0059、
+ * `validAt` は Issue #280、`status` は ADR 0432、忘却ゲートは ADR 0153）
  * ——ただしこれは「段1で絞らなくてよい」ことの根拠ではない。
+ * （2026-10-03 訂正）この段落は以前、「後段は `status` と `decayFloorAtAfter` を見ないので、
+ * ここの契約を adapter が守ることが唯一の防衛線である」と書いていた。ADR 0432 AL-1 の
+ * `survivesStatusGate` と、ADR 0153 の `survivesDecayGate`（`recall-runtime.ts`）で、どちらも
+ * 後段が見るようになったため、今は成り立たない。
  * 段1の絞りは over-fetch の窓（k'）を無駄にしないための最適化であり、後段フィルタが
  * 在ることは、どの場合も「filter を無視してよい」ことの根拠ではない。
  */
@@ -86,7 +89,7 @@ export interface VectorFilter {
    * 「この配列に*在る*ものを落とす」除外の列挙。`RecallQuery.excludeProvenanceKinds`
    * （`packages/core/src/recall.ts`）と同じ語彙・同じ向きに揃えてある。
    *
-   * `ProvenanceKind` は5値の閉じた離散値であり、`provenance_kind` は独立の列
+   * `ProvenanceKind` は閉じた離散値であり、`provenance_kind` は独立の列
    * （`packages/postgres/migrations/0001_init.sql`）なので等値比較で足りる——
    * 上のクラス doc の「索引で表現できる形」にそのまま当たる。`period` のような
    * 連続値の範囲比較とは事情が異なる（ADR 0023 が `period` を段1に降ろさなかった理由は
