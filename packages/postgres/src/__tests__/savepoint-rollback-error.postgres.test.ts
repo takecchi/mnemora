@@ -44,13 +44,19 @@ function good(hash: string): NewMemory {
     digest: hash,
   });
 }
-/** 本文に NUL（Postgres が 22021 で拒み、トランザクションが aborted になる）。 */
+/**
+ * DB の CHECK 制約（`memories_strength_range`: `strength` は `(0, 1]`）が拒む（SQLSTATE 23514。トランザクションが aborted になる）。
+ * ADR 0499 より前は、本文の NUL（22021）をここに使っていた。いまは NUL を DB に触れる前の名指しの例外で断る
+ * （トランザクションは aborted にならない）ので、「DB の失敗でトランザクションが aborted になる」候補は別の値で作る。
+ * 関数名の `nul` は、この歯の各 it の名前（悪い候補）を変えないために残した。
+ */
 function nul(hash: string): NewMemory {
   return buildNewMemoryFixture({
     tenantId: ctx.tenantId,
-    content: `nul\u0000 ${hash}`,
+    content: `bad ${hash}`,
     contentHash: hash,
     digest: hash,
+    strength: 2,
   });
 }
 /** `status: "contested"` で相手が無い（SQL を撃つ前に `ContestedWithoutCompanionError`）。 */
@@ -150,7 +156,7 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
     return code;
   };
 
-  it("S1 全候補が悪く、rollback to savepoint も失敗: 投げられるのは元の 22021。失敗は rollbackError に残り、何も書かれない", async () => {
+  it("S1 全候補が悪く、rollback to savepoint も失敗: 投げられるのは元の 23514。失敗は rollbackError に残り、何も書かれない", async () => {
     await fresh();
     const restore = rejectStatement({
       applicationName: APP,
@@ -164,14 +170,14 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       restore();
     }
     expect(error).toBeInstanceOf(Error);
-    expect(innermostCode(error)).toBe("22021");
+    expect(innermostCode(error)).toBe("23514");
     expect((error as Error).message).not.toMatch(/rollback to savepoint/i);
     // drizzle の DrizzleQueryError は cause が埋まっているので、巻き戻しの失敗は rollbackError に置く。
     expect(chain((error as { rollbackError?: unknown }).rollbackError)).toContain(INJECTED);
     expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
   });
 
-  it("S2 良い→悪い、rollback to savepoint も失敗: 25P02（aborted）ではなく元の 22021 が投げられ、良い候補も残らない", async () => {
+  it("S2 良い→悪い、rollback to savepoint も失敗: 25P02（aborted）ではなく元の 23514 が投げられ、良い候補も残らない", async () => {
     await fresh();
     const restore = rejectStatement({
       applicationName: APP,
@@ -185,7 +191,7 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       restore();
     }
     expect(error).toBeInstanceOf(Error);
-    expect(innermostCode(error)).toBe("22021");
+    expect(innermostCode(error)).toBe("23514");
     expect(innermostCode(error)).not.toBe("25P02");
     expect(chain((error as { rollbackError?: unknown }).rollbackError)).toContain(INJECTED);
     expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
@@ -270,7 +276,7 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
     expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
   });
 
-  it("接続ごと切られた（実際の kill）: 元の 22021 が投げられ、pool は枯れない", async () => {
+  it("接続ごと切られた（実際の kill）: 元の 23514 が投げられ、pool は枯れない", async () => {
     await fresh();
     const restore = killConnectionBeforeStatement({
       admin: admin.pool,
@@ -284,21 +290,21 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       restore();
     }
     expect(error).toBeInstanceOf(Error);
-    expect(innermostCode(error)).toBe("22021");
+    expect(innermostCode(error)).toBe("23514");
     expect((error as Error).message).not.toMatch(/rollback to savepoint/i);
     expect(victimClient.pool.totalCount - victimClient.pool.idleCount).toBe(0);
     expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
   });
 
   describe("やりすぎの歯: rollback が成功する悪い候補は、従来どおり dropped に積んで他を書く", () => {
-    it("悪い（NUL）候補: dropped に 22021、良い候補は書かれ created の meta に落とした数。rollbackError・cause の足しは無い", async () => {
+    it("悪い（DB が拒む）候補: dropped に 23514、良い候補は書かれ created の meta に落とした数。rollbackError・cause の足しは無い", async () => {
       await fresh();
       const w = write([good("a"), nul("b"), good("c")]);
       const result = await w.promise;
       expect(result.written.map((e) => e.index)).toEqual([0, 2]);
       expect(result.dropped.map((d) => d.index)).toEqual([1]);
       const droppedError = result.dropped[0]!.error;
-      expect(innermostCode(droppedError)).toBe("22021");
+      expect(innermostCode(droppedError)).toBe("23514");
       expect("rollbackError" in (droppedError as object)).toBe(false);
       expect(w.seen.every((d) => d.length === 1)).toBe(true);
       const c = await ghostCount();
@@ -319,7 +325,7 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
     it("全候補が悪く rollback は成功: 最初の候補のエラーがそのまま投げられる（今までどおり）", async () => {
       await fresh();
       const error: unknown = await write([nul("a"), nul("b")]).promise.catch((e: unknown) => e);
-      expect(innermostCode(error)).toBe("22021");
+      expect(innermostCode(error)).toBe("23514");
       expect("rollbackError" in (error as object)).toBe(false);
       expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
     });
@@ -339,35 +345,41 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
                   tags: [],
                   provenanceKind: "stated",
                 }
-              : { content: "悪い\u0000事実", digest: "悪い", tags: [], provenanceKind: "stated" },
+              : { content: "悪い事実", digest: "悪い", tags: [], provenanceKind: "stated" },
           ],
         })) as LLMProvider["completeStructured"],
       };
       const realStore = new PostgresMemoryStore(client.db);
-      // JS 側で落ちる候補（`status: "contested"` で相手なし）を、runtime が store に渡す2件目へ差し込む。
-      // runtime 自身は `contested` の候補を作らないので、store の手前で書き換える。
-      const memoryStore = jsSideFailure
-        ? new Proxy(realStore, {
-            get(target, prop, receiver) {
-              if (prop === "createMemoriesWithOutboxAndEvents") {
-                return (
-                  c: Ctx,
-                  news: Parameters<PostgresMemoryStore["createMemoriesWithOutboxAndEvents"]>[1],
-                  ...rest: unknown[]
-                ) =>
-                  (target.createMemoriesWithOutboxAndEvents as (...a: unknown[]) => unknown)(
-                    c,
-                    news.map((n, i) =>
-                      i === 1 ? { ...n, input: { ...n.input, status: "contested" as const } } : n,
-                    ),
-                    ...rest,
-                  );
-              }
-              const v = Reflect.get(target, prop, receiver) as unknown;
-              return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
-            },
-          })
-        : realStore;
+      // 落ちる候補を、runtime が store に渡す2件目へ差し込む。runtime 自身はそういう候補を作らないので、store の手前で書き換える。
+      // JS 側で落ちる候補は `status: "contested"` で相手なし。DB が拒む候補は `strength: 2`（CHECK 制約 23514。ADR 0499 より前は
+      // 本文の NUL を LLM に返させていたが、NUL は DB に触れる前の名指しの例外になり、トランザクションが aborted にならない）。
+      const memoryStore = new Proxy(realStore, {
+        get(target, prop, receiver) {
+          if (prop === "createMemoriesWithOutboxAndEvents") {
+            return (
+              c: Ctx,
+              news: Parameters<PostgresMemoryStore["createMemoriesWithOutboxAndEvents"]>[1],
+              ...rest: unknown[]
+            ) =>
+              (target.createMemoriesWithOutboxAndEvents as (...a: unknown[]) => unknown)(
+                c,
+                news.map((n, i) =>
+                  i === 1
+                    ? {
+                        ...n,
+                        input: jsSideFailure
+                          ? { ...n.input, status: "contested" as const }
+                          : { ...n.input, strength: 2 },
+                      }
+                    : n,
+                ),
+                ...rest,
+              );
+          }
+          const v = Reflect.get(target, prop, receiver) as unknown;
+          return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+        },
+      });
       return createRuntime({
         memoryStore,
         vectorStore: new PostgresVectorStore(client.db),
@@ -398,10 +410,10 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
           [ctx.tenantId],
         )
       ).rows as Array<{ meta: { droppedCandidates?: Array<{ code: string | null }> } }>;
-      expect(events[0]!.meta.droppedCandidates?.[0]?.code).toBe("22021");
+      expect(events[0]!.meta.droppedCandidates?.[0]?.code).toBe("23514");
     });
 
-    it("rollback to savepoint も失敗: 25P02 でも『rollback の失敗』でもなく、元の 22021 が呼び出し側へ届き、何も残らない", async () => {
+    it("rollback to savepoint も失敗: 25P02 でも『rollback の失敗』でもなく、元の 23514 が呼び出し側へ届き、何も残らない", async () => {
       await fresh();
       const runtime = runtimeOn(victimClient);
       const restore = rejectStatement({
@@ -428,10 +440,10 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       ).rows;
       expect(JSON.stringify(metas)).not.toContain("rollback to savepoint");
       expect(JSON.stringify(metas)).not.toContain(INJECTED);
-      // 全体が戻り、呼び出し側へ届くのは元の失敗（22021）。巻き戻しの失敗は rollbackError に残る。
+      // 全体が戻り、呼び出し側へ届くのは元の失敗（23514）。巻き戻しの失敗は rollbackError に残る。
       const thrown = (outcome as { threw?: unknown }).threw;
       expect(thrown).toBeInstanceOf(Error);
-      expect(innermostCode(thrown)).toBe("22021");
+      expect(innermostCode(thrown)).toBe("23514");
       expect(chain((thrown as { rollbackError?: unknown }).rollbackError)).toContain(INJECTED);
       // 記憶と created は残らない（outbox には、観測そのものの抽出ジョブが別のトランザクションで1件ある）。
       const left = await ghostCount();
