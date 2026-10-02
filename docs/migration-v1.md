@@ -2516,7 +2516,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ⚠ **未リリース**。**番号は 57 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
-**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` の「`@mnemora/postgres` の `MemoryStore`・`EventStore` の書き込み口が、NUL…」の箇条を見ること。**ここには複製しない。**
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`@mnemora/postgres` の `MemoryStore`・`EventStore` の書き込み口が、NUL…」の箇条を見ること。**ここには複製しない。**
 型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`・`RangeError`、既存の `MemoryStatusConflictError`）。
 
 **なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**（型の外の `status`、purge 済みの記憶への `expectedStatus` 付き更新）。NUL・日数の上限は、以前も落ちた入力で、例外の形が `DrizzleQueryError`（`cause.code` が `22021`・`22003`）から素の `Error` に変わる。項目34・49・51・52 と同じ扱い。conformance スイートは変えていない（約束を足すのはオーナーの判断）。
@@ -2543,7 +2543,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ⚠ **未リリース**。**番号は 58 である**。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
-**何が変わったか**: `ObserveInputSchema` が、`utterance.text`・`event.name`・`document.content` について、空文字に加えて、`String.prototype.trim` で空になる値（半角空白・タブ・改行・U+00A0・U+3000 など、JS の `trim` が落とす文字だけの値）を `ZodError` で断る。エラーの `path`（欄名）と message は、空文字を断ったときと同じ。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+**何が変わったか**: `ObserveInputSchema` が、`utterance.text`・`event.name`・`document.content` について、空文字に加えて、`String.prototype.trim` で空になる値（半角空白・タブ・改行・U+00A0・U+3000 など、JS の `trim` が落とす文字だけの値）を `ZodError` で断る。エラーの `path`（欄名）と message は、空文字を断ったときと同じ。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
 
 **なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた呼び出しが、新しく例外になる**。項目21・23・24・27・34・49 と同じ扱い。以前は、空白だけの本文が LLM にそのまま渡り、LLM が失敗すると `content` が空白だけの active な Memory が残った（ADR 0482 の実測）。
 
@@ -2568,7 +2568,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ⚠ **未リリース**。**番号は 59 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
-**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` の「`MemoryStore` の `resolveContestedPair?`…が、置き換えた側…」の箇条を見ること。**ここには複製しない。**
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`MemoryStore` の `resolveContestedPair?`…が、置き換えた側…」の箇条を見ること。**ここには複製しない。**
 型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `RangeError`、値は message に入れない）。
 
 **なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**。項目54・57 と同じ扱い。conformance スイートに `it` は足していない（約束を足すのはオーナーの判断）。
