@@ -169,7 +169,7 @@ function requireDatabaseUrl(): string {
 }
 
 /**
- * **3層すべてを名指しする**（ADR 0051）。
+ * **`ProviderMode` のすべての値を名指しする**（ADR 0051 / ADR 0085）。
  *
  * ⚠ ここは一度壊れていた——`ProviderMode` に `"recorded"` を足したとき、この関数は
  * 「`openai` でなければ擬似 provider」のままだった。その結果、記録を再生している run が
@@ -540,7 +540,7 @@ async function runBackfill(): Promise<void> {
  * （dispatch 行を消しても、あのテストは落ちない）。CI の `example-chat` ジョブに
  * `pnpm --filter @mnemora/example-chat run correction` を足すことで、初めて
  * dispatch 行そのものが CI の歯になる。そのうえで、`checkCorrectionDemo()`
- * の7欄 + `checkCorrectionOmission()` の1欄を全部 assert し、1つでも false なら
+ * と `checkCorrectionOmission()` の全欄を assert し、1つでも false なら
  * `process.exitCode = 1` にする——`formatCorrectionDemo()` の出力を画面に印字する
  * だけでは、段3（矛盾の解決と必須の同伴取得）が壊れても CI は緑のままだった。
  *
@@ -693,12 +693,13 @@ async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
 
 /**
  * Issue #340 フォローアップ（ADR 0314）: `recall-footprint` 較正の補助標本
- * （`CALIBRATION_SAMPLE_DESIGN`、8点）を、`compare` と同じ recorded カセット
+ * （`CALIBRATION_SAMPLE_DESIGN`）を、`compare` と同じ recorded カセット
  * （`examples/chat/cassettes/compare.json`）に対して生成する。
  *
  * ⚠ **`compare` の代わりではない。** `compare-baseline.json`（⭐門）の `rows`
  * には混ぜない——`examples/chat/README.md`
- * 「recall-footprint-calibration-samples.dev.json」節・ADR 0314 §2 参照。
+ * 「`recall-footprint-calibration-samples-baseline.json`」節・ADR 0314 §2 参照
+ * （⚠ 当初の `.dev.json` は削除した。README の同節に経緯がある）。
  * この関数は CI の `example-chat` ジョブに、`compare` ステップと並ぶ独立のステップとして
  * 配線される（`.github/workflows/ci.yml`）。
  *
@@ -768,8 +769,9 @@ async function runRecallFootprintCalibrationSamples(): Promise<void> {
  * `buildArmTenantId()`（`retrieval-quality.ts`）を経由することで、通常利用では
  * 毎回新しいテナントを使い、2回目も1回目と同じ結論を出す。
  *
- * B・C は本物の OpenAI(embedding、C はさらに LLM も)を叩く。**CI には載せていない**——
- * `.github/**` は変更していない。本物の API を叩く実行はこのコマンドを手動で叩いたときだけ。
+ * B・C は、実 API を選んだ実行では本物の OpenAI(embedding、C はさらに LLM も)を叩く。
+ * **CI は実 API を叩かない**——CI の `retrieval-quality` ジョブは `recorded`(記録した実 API
+ * 応答の再生)で走る(ADR 0088)。本物の API を叩く実行は、手動で叩いたときだけ。
  */
 /**
  * arm の定義（ADR 0051 で `source` を足した）。
@@ -961,7 +963,8 @@ async function recordRetrieval(
  * `compare` の全会話長を実 API で走らせて記録する（ADR 0052）。
  *
  * **`retrieval` より1桁高い。**`DEFAULT_COMPARE_SEQUENCE` の合計 = Σ(fillerPairs+1) 回の
- * LLM 呼び出しが要る（ADR 0019 §3 の見積もりで657回・約8〜15分・約 $0.023）。
+ * LLM 呼び出しが要る（回数・所要時間・費用の見積もりは ADR 0019 §3、実測は同 §7.8。
+ * 数はここに写さない。⚠ §7.8 は見積もりの費用を外していた）。
  * だからこそ `record` は対象を明示させる（`parseCassetteTarget`）。
  */
 async function recordCompare(
@@ -1021,7 +1024,7 @@ function loadRecordSeedCassette(): Cassette | undefined {
  * **再生する当のもの（`runAnswer` と同じ実行経路）をそのまま走らせて録る。**
  * 「必要そうな入力を列挙する」形は採らない——`runRecord` docstring と同じ規律。
  * ここでは `createAnswerBenchRuntime` に `MNEMORA_LLM=openai`/`MNEMORA_EMBEDDING=openai`
- * を明示で渡し、`ANSWER_CASE_SET_DEV` + `ANSWER_CASE_SET_EVAL` の全12件を
+ * を明示で渡し、`ANSWER_CASE_SET_DEV` + `ANSWER_CASE_SET_EVAL` の全ケースを
  * `runAnswerBench` に通す（judge の呼び出しも同じ経路で記録される）。
  *
  * ⚠ **tenantPrefix に `runId` を含め、毎回新しいテナントにする。** `observe()` は
@@ -1119,7 +1122,7 @@ async function recordAnswer(
  *
  * ⚠ **trial は1回だけ記録する。** カセットは「プロンプトのハッシュ→応答」の連想配列
  * なので、同じ質問・同じ記憶状態に対する複数 trial はどのみち同じ鍵に畳まれる
- * （`answer-time-weighting-bench.ts` の docstring・マネージャー指示「trial 間で
+ * （`time-weighting-bench.ts` の docstring・マネージャー指示「trial 間で
  * プロンプトが同じなら LLM 値もキャッシュ再生で同じになる」）——記録時に trial を
  * 増やしても記録される内容は増えない。
  */
@@ -1429,8 +1432,8 @@ async function runValidity(): Promise<void> {
 }
 
 /**
- * Issue #109(#106 由来): `retrieval` の probe 7件は**すべて日本語の query**で、
- * ASCII の識別子・固有名詞を含む query が0件だった——#106 の報告者の用途
+ * Issue #109(#106 由来): 当時の `retrieval` の probe は**すべて日本語の query**で、
+ * ASCII の識別子・固有名詞を含む query が1件も無かった——#106 の報告者の用途
  * (人名・チャンネル名・社内システム名・案件コード・チケット番号)を、
  * 既存ベンチは1件も測っていなかった。
  *
@@ -1440,17 +1443,21 @@ async function runValidity(): Promise<void> {
  * `@mnemora/local-embedding` の README が「確かめていないこと」として名指しした
  * 「`@mnemora/openai` と比べて想起の質がどうなるか」を、ここで初めて測る。
  *
- * **3群を別々に集計する。**⛔ 混ぜた単一の MRR を主たる数字にしない。
- *   1. 既存の日本語意味 probe 7件(`./probe-set.js`、変更していない)を、この arm の
+ * **群を別々に集計する(群1〜5の5群。内訳・件数は `examples/chat/README.md` の
+ * 「5群を別々に集計する」節と各 probe set が持つ。ここには件数を写さない)。**
+ * ⛔ 混ぜた単一の MRR を主たる数字にしない。
+ *   1. 既存の日本語意味 probe(`./probe-set.js`、変更していない)を、この arm の
  *      embedding(local)で走らせた結果——arm B(embedding=recorded、実質 openai 由来)
  *      との直接比較になる。
- *   2. ASCII 識別子 probe 30件(`./identifier-probe-set.js`)・**識別子が薄い haystack**
+ *   2. ASCII 識別子 probe(`./identifier-probe-set.js`)・**識別子が薄い haystack**
  *      (`sparse`。識別子を1件も含まない既定 haystack)。
- *   3. 同じ30 probe を、**識別子が密な haystack**(`dense`。probe と同じ書式ファミリーの
- *      識別子を計60件含む)で走らせた結果——マネージャー指示(#106 の逐語「同じ形式の
+ *   3. 同じ識別子 probe を、**識別子が密な haystack**(`dense`。probe と同じ書式ファミリーの
+ *      識別子を含む)で走らせた結果——マネージャー指示(#106 の逐語「同じ形式の
  *      別の識別子が近傍に来て埋もれる」の再点検)。
+ *   4・5. 日本語の固有名詞 probe(`./japanese-name-probe-set.js`)の sparse / dense。
+ *      後から足した群(上の3群はこの2群より先に在った)。
  *
- * ⛔ **群2(sparse)は消さない。**当初12 probe 全件が hit@1 だった実測(`identifier-probe-
+ * ⛔ **群2(sparse)は消さない。**当初の識別子 probe が全件 hit@1 だった実測(`identifier-probe-
  * baseline.json`)自体が発見であり、群3(dense)は「難しくして失敗させる」ためではなく
  * 「#106 が報告した状況(同じ書式の識別子が"多数"居る)を表す」ために足す
  * (`./identifier-probe-set.js` の `DENSE_IDENTIFIER_FAMILIES` の docstring 参照)。
@@ -1726,7 +1733,7 @@ async function runIdentifierProbesOpenAiArm(
  * **2群を別々に集計する。**⛔ 混ぜた単一の MRR を主たる数字にしない
  * (`identifier-probes` と同じ規律)。
  *   1. sparse: 数詞・記号索引を1件も含まない既定 haystack。
- *   2. dense: 同じ9セルの索引が密な haystack(計90件)。
+ *   2. dense: 同じセルの索引が密な haystack(件数は `numeral-token-probe-set.ts` が持つ)。
  *
  * **margin(ADR 0135 §5.5)を、hit@1/hit@10 と併記する。**`runIdentifierProbeArm` が
  * 共有の arm として計算する(`./identifier-arm.js` の `marginStats`)——この集合の
@@ -1930,17 +1937,19 @@ async function runNumeralTokenProbesOpenAiArm(
  *
  * ⚠ **テナントを分けても、埋め込みのテーブルは分かれていない**(Issue #363)。
  * 4つの arm は同じ埋め込み空間(同じ `memory_embeddings_*` テーブル)へ同じ会話を
- * ingest する。抽出は1:1(`packages/core/src/extraction.ts:84-97` の
- * `buildExtractionPrompt` / `packages/testkit/src/__fixtures__/deterministic-llm-provider.ts:26-41` の
- * 決定的な抽出)で、embed job は `memory.content` から決定的に埋め込む
- * (`packages/core/src/runtime.ts:2818`)。この arm は `MNEMORA_LLM=deterministic` /
+ * ingest する。抽出は1:1(`packages/testkit/src/__fixtures__/deterministic-llm-provider.ts` の
+ * `DeterministicLLMProvider.completeStructured` の決定的な抽出)で、embed job は
+ * `memory.content` から決定的に埋め込む(`packages/core/src/runtime.ts` の
+ * `resolveEmbeddingInput`。`embeddingInput` フックが無ければ `memory.content` をそのまま
+ * 使う)。この arm は `MNEMORA_LLM=deterministic` /
  * `MNEMORA_EMBEDDING=local` 固定(下の `createExampleRuntime` 呼び出し)で、
  * local embedding の決定性(同じ入力に同じベクトル)自体は本物のモデルに対して
- * 実測されている(`packages/local-embedding/src/__tests__/live.local-embedding.test.ts:358-365`。
+ * 実測されている(`packages/local-embedding/src/__tests__/live.local-embedding.test.ts` の
+ * 「`deterministic: true` の根拠は実測である」の節。
  * ⚠ CI では走らない実測であり、別のハードウェア・別の onnxruntime 版での再現は
  * 保証されない)。⟹ **4つの arm の埋め込みは、互いにビット単位で同じになる**
- * (推測ではなく上の経路をたどって確認した。1 arm は98行——`ASSOCIATION_HAYSTACK`
- * 62行 + 12 probe × 3、`association-probe-set.ts`)。
+ * (推測ではなく上の経路をたどって確認した。1 arm の行数は `ASSOCIATION_HAYSTACK` と
+ * 各 probe の発話の合計——`association-probe-set.ts`。数はここに写さない)。
  *
  * **起こりうる機構そのものは Issue #671 / PR #673(ADR 0284)が実測で確かめている**:
  * プランナが HNSW の索引スキャンを選んだ場合、`tenant_id` の絞り込みは索引スキャンの
@@ -1968,8 +1977,8 @@ async function runNumeralTokenProbesOpenAiArm(
  * (目安1万〜10万行)に近づいたとき、(b) #337 の測定で同じベクトルでの取りこぼしが
  * 実際に見えたとき、(c) `search()` から `relaxed_order` が外れたとき(ADR 0284 が
  * 覆ったとき)、(d) CI の `association-probes` ジョブがコンテナを使い回す形に
- * 変わったとき(今は `.github/workflows/ci.yml:1116-1130` のジョブ専用の使い捨て
- * Postgres コンテナを毎回作り直しており、同 `:1161` で毎回マイグレーションを
+ * 変わったとき(今は `.github/workflows/ci.yml` の `association-probes` ジョブ専用の
+ * 使い捨て Postgres コンテナを毎回作り直しており、同ジョブ内のステップで毎回マイグレーションを
  * 流している——他の測定との同居や、削除した行が VACUUM まで候補枠を食う交絡
  * (Issue #671)は今の形では当たらない)。詳細と出典は ADR 0158 の
  * 「追記(Issue #671 / PR #673 の実測を受けての整理)」を見ること。
@@ -2267,7 +2276,8 @@ async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): P
  *
  * 🔴 **これは配線の検査であって、回答品質の測定ではない。** 同じ会話・同じ質問・
  * 同じ回答モデル・同じ採点基準で、naive(全文経路)と mnemora(記憶経路)の最終回答と
- * 入力量を対で出す——着地しても回答品質は未評価のままである(`AGENTS.md` 冒頭)。
+ * 入力量を対で出す——着地しても回答品質は未評価のままである
+ * (`examples/chat/README.md` の `answer` 節)。
  *
  * **provider は `compare`/`retrieval` と同じ規律である**——`resolveRecordedRun` が
  * 名乗り（画面表示）と env の倒し（`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を `"recorded"`
@@ -2303,7 +2313,8 @@ async function runAnswer(): Promise<void> {
   // 擬似 provider で走っていた）。
   const plan = resolveRecordedRun("answer");
   const handle = await createAnswerBenchRuntime(databaseUrl, plan.env, plan.providerOptions);
-  // ⭐ 品質を主張できないモードでは、stdout の先頭で目立たせる(AGENTS.md §5)。
+  // ⭐ 品質を主張できないモードでは、stdout の先頭で目立たせる
+  // (AGENTS.md「`deterministic` で測った想起の質は、性能について何も言っていない」)。
   const banner = formatAnswerQualityBanner(handle.llmMode);
   if (banner) {
     console.log(banner);
@@ -2459,8 +2470,8 @@ async function runTimeWeighting(): Promise<void> {
 /**
  * `answer-trials` サブコマンド（Issue #705、ADR 0301）。
  *
- * 🔴 **`answer` とは別の器である。** `answer` は12ケースを1回ずつ回して naive/mnemora の
- * 最終回答・入力量を対で出す（配線の検査）。**この器は dev 6件だけを、`examples/chat/cassettes/answer.json`
+ * 🔴 **`answer` とは別の器である。** `answer` は dev + eval の全ケースを1回ずつ回して naive/mnemora の
+ * 最終回答・入力量を対で出す（配線の検査）。**この器は dev ケースだけを、`examples/chat/cassettes/answer.json`
  * に記録済みの mnemora 経路プロンプトから読んだ**同じ記憶集合**の上で、描画 A（recorded）/
  * B（digest-only）ごとに n 回ずつ答えさせ、正答数（`gradeAnswer` の pass/fail/indeterminate）
  * で見る（ADR 0295 追記2 が見つけた「1回の試行では揺れが見えない」ことへの対応）。
@@ -2521,7 +2532,7 @@ async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
  * `recorded` provider は記録に無い入力を例外にする（ADR 0051）。
  *
  * ⚠ **順位を決めているのは埋め込み（`local` ＝ 実推論）であり、`deterministic` が
- * 掛かるのは抽出側である。**`docs/autonomy.md` §2.2 決定3 の「意味的品質を測るときに
+ * 掛かるのは抽出側である。**`docs/autonomy.md` §2.2 の3番の「意味的品質を測るときに
  * `deterministic` stub へ置き換えない」は、この配線では埋め込み側に掛かる
  * （`identifier-probes`/`association-probes`/`consolidation-cost` と同じ前提）。
  *
@@ -2529,7 +2540,7 @@ async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
  * ——「重みを取得できなかった」が「相手探しの精度が低い」に見えてはならない。
  *
  * `-- --dev` を付けると開発用ケース集合で走る（⛔ その結果を「未使用の評価」として
- * 報告しないこと。`docs/autonomy.md` §2.2 決定5）。
+ * 報告しないこと。`docs/autonomy.md` §2.2 の5番）。
  */
 async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
