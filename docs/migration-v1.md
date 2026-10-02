@@ -2607,6 +2607,26 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 **DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
 
 
+### 61. `resolveContestedPair?` が対の外の `forgotten` を指す `supersededById` を、`updateStatus`・`updateStatusWithEvent` が `superseded` 以外の status への `supersededById` を、`RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0515](./decisions/0515-superseded-by-remaining-checks.md)（担い手が書いた。決めたのはクローンの線の内側で、オーナーではない。[ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md) の「引き受けた負債」の1・2。項目59と同じ数え方）。
+
+⚠ **未リリース**。**番号は 61 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`resolveContestedPair?` が、対の外の `forgotten`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `RangeError`）。
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく断られる**（項目59と同じ）。conformance スイートに `it` は足していない。
+
+**誰が影響を受けるか**: `PostgresMemoryStore`・testkit の `InMemoryMemoryStore` を直接呼ぶ利用者のうち、(a) `resolveContestedPair` で、書く時点で既に `forgotten` な記憶を置き換えた側に指しているもの、(b) `updateStatus*` で `active`・`archived`・`forgotten` に `supersededById` を付けているもの（以前は `superseded_by_id` が残った）。`Runtime` 経由の通常の呼び出しは変わらない。
+
+**どう直すか**:
+- (a) 置き換え先を `active` な記憶にする。
+- (b) `superseded` 以外の status には `supersededById` を渡さない。`superseded_by_id` を外したいなら、`restoreSuperseded` を使う。
+
+**確かめたこと**: 2実装に同じ入力を流す歯で、直す前は赤・直した後は緑、変異（検査を外す・やりすぎる）で赤（ADR 0515）。
+
+**DB マイグレーション**: 要らない。既存の行は書き換えない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

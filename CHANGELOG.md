@@ -85,6 +85,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない。conformance suite に `it` は足していない（既存の `updateStatus*` の歯が、置き換えた側なしで `superseded` を書いていたので、別の記憶を指すよう直した）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目59。DB マイグレーションは無い。
 
+- **`MemoryStore` の `resolveContestedPair?` が、対の外の `forgotten` な記憶を指す `supersededById` を、`updateStatus`・`updateStatusWithEvent` が、`superseded` 以外の status への `supersededById` を、書く前に `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit` の InMemory）**（[ADR 0515](./docs/decisions/0515-superseded-by-remaining-checks.md)。[ADR 0503](./docs/decisions/0503-superseded-by-checks-resolve-contested-update-status.md) の「引き受けた負債」の1・2のうち、断ってよいと確かめたもの）。
+
+  - **`resolveContestedPair`**: `first`/`second` の `supersededById` が、対の外の `forgotten` な記憶を指す。message は `resolveContestedPair: first.supersededById must not be a forgotten memory outside the pair`（`second` も同じ形）。対の相手を指す、対の外の `active`・`archived` などを指すのは断らない。
+  - **`updateStatus`・`updateStatusWithEvent`**: `status` が `active`・`archived`・`forgotten` なのに `opts.supersededById` がある。message は `<口>: opts.supersededById must not be set unless status is "superseded"`。以前は通り、`COALESCE` で `superseded_by_id` が残る行になった。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない（素の `RangeError`、値は message に入れない）。
+  - **`Runtime` 経由は変わらない**: `updateStatusWithEvent` の呼び出し4か所のうち、`supersededById` を渡すのは `superseded` を書く2か所だけで、`restoreArchived`・`forget` は渡さない。`resolveContested` の `supersededById` は常に対の勝者。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目61。DB マイグレーションは無い。
+  - 【確かめていないこと】core の `FakeMemoryStore`（`runtime-fakes.ts`）は揃えていない（別の PR が触っているため）。第三者の adapter は、conformance が検査しないので断りを持たない。
+
 - **`@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（ADR 0456 の M4）が「変えなかったこと」に残した分）。
 
   - **何が変わるか**: `kind`・`payload`・`attributes`（key も値も、入れ子の中も）、`createRecall` の `query`・`budget`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` に NUL を含む入力は、以前も落ちた（`DrizzleQueryError`。`cause.code` は `22021`・`22P05`）。いまは INSERT の前に、`PostgresMemoryStore: <欄> must not contain NUL characters (U+0000)`（`createRecall` は `createRecall: <欄> …`）の素の `Error` で断る。何も書かれず、活動時計も進まない。testkit の `InMemoryMemoryStore` と同じ文面。
