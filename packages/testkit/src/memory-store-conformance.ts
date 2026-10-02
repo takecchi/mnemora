@@ -5981,9 +5981,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         );
         expect(result.created).toBe(true);
         // 他テナントの記憶は動いていない。
-        expect(
-          (await store.get({ tenantId: "tenant-2" }, otherTenantSuperseded.id))?.status,
-        ).toBe("superseded");
+        expect((await store.get({ tenantId: "tenant-2" }, otherTenantSuperseded.id))?.status).toBe(
+          "superseded",
+        );
       });
 
       it("createMemoryWithOutbox は abortIfSuperseded に superseded な id が複数在れば、changed にその全件を載せる", async () => {
