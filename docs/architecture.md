@@ -1432,7 +1432,9 @@ type TaxonomyMode = 'open' | 'strict';
   共有の検査を呼ぶ）。型の外の `kind`（`'unlimited'`・`'days'` のどちらでもない値。型を外した呼び出し・JavaScript から
   届く）は `assertValidEventRetentionKind` が `EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` で拒み、`kind: 'days'`
   の `days` が正の整数でなければ `assertValidEventRetentionDays` が `EVENT_RETENTION_DAYS_INVALID_MESSAGE` を含む `Error`
-  で拒む（Issue #1168・PR #1171。以前は型の外の `kind` を無期限として黙って書いていた）。
+  で拒む（Issue #1168・PR #1171。以前は型の外の `kind` を無期限として黙って書いていた）。`days` が `2^31 - 1` を超えると、同じ共有の検査が
+  `setEventRetention: days does not fit in a Postgres "integer" (int4) column (got <days>)` の `Error` で拒む（ADR 0499。
+  以前は `@mnemora/postgres` だけが DB の生の例外を投げた。受け入れる値は変わらない）。
 - `getDecayClock?`/`setDecayClock?`/`getDefaultHalfLifeRecalls?`/`setDefaultHalfLifeRecalls?`/
   `getActivitySeq?` は**任意**メソッドである。省略時のフォールバック（`readDecayClock`/
   `readActivitySeq`/`readDefaultHalfLifeRecalls`）は `packages/core` 側の1箇所に閉じ込めてあり、

@@ -841,7 +841,7 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 | DB が拒んだ例外           | 負や整数でない `limit`、型の列挙に無い値（CHECK 制約）、Invalid Date、範囲外の `strength`                                                                                                                                                                                                                                             | drizzle が包んだ `Error`（`err.name === "Error"`）。SQLSTATE は **`err.cause.code`** に在る（`err.code` には無い）。例: `23514`（CHECK 制約）・`2201W`（負の `LIMIT`）・`22P02`（形の崩れた値）・`22007`（日時）。 |
 
 ⚠ **`@mnemora/testkit/fixtures` は、DB が拒む入力を同じく拒むが、例外の顔は違う**（名前の無い
-`Error`。`cause.code` を持たない）。揃えてあるのは「拒むかどうか」と「拒んだときに何も書かないこと」
+`Error`。`cause.code` を持たない。`timestamptz` の下限より前の日時だけは `RangeError`——ADR 0500）。揃えてあるのは「拒むかどうか」と「拒んだときに何も書かないこと」
 だけである（`packages/testkit/src/fixtures.ts` の冒頭）。`cause.code` を見る処理のテストを fixture で
 書くと、Postgres とは別の枝を通る。
 
