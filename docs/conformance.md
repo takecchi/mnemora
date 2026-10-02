@@ -540,6 +540,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 
 **⚠ 2026-10-03 追記（[ADR 0546](./decisions/0546-conformance-suite-adds-round31-promises.md)。オーナーの判断が出る前に用意した Draft）**: `MemoryStoreConformanceOptions` に `supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?` が増えた——それぞれ `opts.abortIfSuperseded`（3つの書き込み口）・`opts.abortIfAllConflicted`・`purgeExpiredEventsByRetention?` を検査する。上の `supportsAbortIfForgotten?` と同じ3状態（`true` は歯を走らせる／`false` は option を渡しても無視されて今日どおり書く・メソッドが無いことを assert する／省略は「⚠ 未検査」の named it を1本）。`purgeExpiredEventsByRetention` の歯は、テナントの保持期間を設定するフック `setEventRetention?` を要る（`MemoryStore` にその口は無いため。`supportsPurgeExpiredEventsByRetention: true` で渡さないと、各 `it` が説明つきの例外で赤くなる）。`supportsFindActiveByClaimKey: true` の枝には、フラグを増やさず、有効期間の半開区間（接するだけの区間は重ならない）の `it` が増えた。`describeEmbeddingProviderConformance` には、**フラグ無しで**、重複したテキストを渡しても入力と同じ件数を返す `it` が増えた。足した約束は、ADR 0458 の歯（suite の外）を suite の公開の口だけで書き直したもの。**足さなかったもの**（0458 の A8・`ClaimKeyIndexLimitError`・NUL の文面ほか）と、その理由は ADR 0546。
 
+**⚠ 2026-10-03 追記の追記（ADR 0546 の追記の節）**: 上の 3 つのフラグの内側に、約束の輪郭を縛る `it` を足した（フラグは増えていない）。`abortIfSuperseded` が断るのは `ctx` のテナントの superseded だけ（archived・forgotten・他テナントの superseded は断らない）で、`changed` には断る原因になった id が全件載る。`abortIfAllConflicted: true` でも supersede が空配列なら断らない。`purgeExpiredEventsByRetention` の cutoff は `now` から `days` × 24 時間遡った時刻（日単位のずれを検出する。境界ちょうどは縛らない）。`supportsAbortIfSuperseded: false` の枝には `supersedeWithNewMemories` の `it` も増えた。変異試験の結果は ADR 0546。
+
 ---
 
 ## 出所について

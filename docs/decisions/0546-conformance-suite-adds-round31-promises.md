@@ -114,3 +114,34 @@
   - 「重複件数」が、`embed` の重複入力ではなく別の件だったと分かったとき。
   - 外部の adapter の事情で、`embed` が重複を畳むことを許すと決めたとき（契約の文面を変える話になる）。
 - **測っていないこと**: 実 API・実モデル（上）。CI の `SQL_ASCII` の脚。外部の adapter。`findContestedByClaimKey` の半開区間（足していない）。
+
+- **追記（2026-10-03）: 変異試験で見つかった穴を塞ぐ `it` を足した**。上の本文は書き換えていない。
+
+  上の変異試験の表（#1〜#17）の変異は塞がれていたが、次の5つの変異は、足した `it` をすり抜けた。**「`abortIfSuperseded` が断るのは何か」「`abortIfAllConflicted` が断らないのは何か」「保持期間の日数の境界はどこか」という、約束の*輪郭*が縛られていなかった**。輪郭を縛る `it` を足した。これらも**外せない約束**であり、外部の adapter から見れば新しく赤になりうる（フラグ `supportsAbortIfSuperseded` などが `true` のときだけ走る。フラグは増やしていない）。
+
+  | 穴 | 変異 | 足した `it`（`memory-store-conformance.ts`）と、それが縛る約束 |
+  |---|---|---|
+  | S1 | `abortIfSuperseded` が forgotten の id まで断る | `createMemoryWithOutbox` は `abortIfSuperseded` に archived・forgotten な id が在っても断らず今日どおり書く。`supersedeWithNewMemories`／`createMemoriesWithOutboxAndEvents` の「active・archived・forgotten・他テナントの superseded だけなら断らず、今日どおり書く」。**約束: 断るのは superseded だけ。forgotten は `abortIfForgotten` の領分であり、`abortIfSuperseded` は断らない** |
+  | S2 | 他テナントの superseded の id まで見る | `createMemoryWithOutbox` は `abortIfSuperseded` に他テナントの superseded な id が在っても見ず今日どおり書く。上の2口の「…他テナントの superseded だけなら…」。**約束: 見るのは `ctx` のテナントの行だけ** |
+  | S4 | 例外の `changed` に最初の1件しか載せない | 3つの口それぞれの「`abortIfSuperseded` に superseded な id が複数在れば、`changed` にその全件を載せる」。**約束: `changed` は断る原因になった id の全件**（`SourceMemoryStatusChangedError` の TSDoc が既に書いている。順序は保証しない） |
+  | S6 | supersede が空配列でも `abortIfAllConflicted: true` で断る | `supersedeWithNewMemories` は `abortIfAllConflicted: true` でも supersede が空配列なら断らず news を書く。**約束: 「全件が弾かれた」は対象が1件以上のときだけ成り立つ（0 件は 0 件に等しいが、弾かれたことにならない）** |
+  | S11 | 保持期間の日数の境界を ±1 日ずらす | `purgeExpiredEventsByRetention` は日数の境界を日単位でずらさない。書いたイベントの `at` から `days` 日に 1 時間足りない `now` では消さず、1 時間超えた `now` では消す（どちらも `dryRun`）。**約束: cutoff は `now` から `days` × 24 時間遡った時刻**。境界ちょうど（`at` と cutoff が等しい）は縛らない（1 時間の余裕を取った。半開区間と同じ種類の話で、足さない） |
+
+  あわせて、次の 2 つの `it` を足した（上の本文の「ほかの口にある同じ形の `it`」に揃える穴埋め）。
+
+  - `supersedeWithNewMemories` は `abortIfSuperseded` を渡しても無視し、superseded な id があっても今日どおり書く（`supportsAbortIfSuperseded: false` の枝。`supportsSupersedeWithNewMemories` のとき）。`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents` に既にあった同じ形のものに揃えた。
+  - 「active なら今日どおり書く」の歯が `createMemoryWithOutbox` にしか無かったので、`supersedeWithNewMemories` と `createMemoriesWithOutboxAndEvents` にも足した（上の S1・S2 の行の「…だけなら断らず、今日どおり書く」がそれ。`createMemoriesWithOutboxAndEvents` は `created` イベントも積まれることまで見る）。
+
+  **足さなかったもの**（ADR が足さないと決めたまま）: PC6 の半開区間の*境界ちょうど*にあたる S14c と、重複入力の位置ごとのベクトルが一致することを縛る S16。
+
+  **変異試験**【実測】2026-10-03、PostgreSQL 17 + pgvector（`initdb`、`C.UTF-8`、自分専用のポート）。実装は `InMemoryMemoryStore`（`in-memory-memory-store.ts`）と `PostgresMemoryStore`（`memory-store.ts`）。変異を入れ、赤になった `it` を控え、`git checkout` で戻し、緑に戻ることを確かめた。IM・PG とも同じ `it` が赤になった。
+
+  | 変異 | 赤になった `it`（名前の頭） |
+  |---|---|
+  | S1 | `createMemoryWithOutbox は abortIfSuperseded に archived・forgotten な id が在っても断らず…`／`supersedeWithNewMemories は abortIfSuperseded の id が active・archived・forgotten・他テナントの superseded だけなら…`／`createMemoriesWithOutboxAndEvents は abortIfSuperseded の id が active・archived・…` |
+  | S2 | `createMemoryWithOutbox は abortIfSuperseded に他テナントの superseded な id が在っても見ず…`／上と同じ `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents` の2本 |
+  | S4 | 3つの口の `…abortIfSuperseded に superseded な id が複数在れば、changed にその全件を載せる`（3本） |
+  | S6 | `supersedeWithNewMemories は abortIfAllConflicted: true でも、supersede が空配列なら断らず news を書く…` |
+  | S11（`days + 1`・`days - 1` の両方） | `purgeExpiredEventsByRetention は日数の境界を日単位でずらさない…` |
+
+  `supportsAbortIfSuperseded: false` の枝の新しい 1 本は、`abortIfSuperseded` を実装している `InMemoryMemoryStore` に `false` を渡すと赤になる（一時の試験で確かめた。コミットしていない）。
