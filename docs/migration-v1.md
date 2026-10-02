@@ -1304,7 +1304,7 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 
 **誰が影響を受けるか**: 自前の `MemoryStore`/`OutboxStore` 実装を、`packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に対して走らせている利用者のうち、上の新しい欄を守っていない（省略時に壁時計 `new Date()` を使うのではなく、渡された値を無視し続ける）場合。**適合テストを走らせていない・自前実装を持たない利用者は影響を受けない。**
 
-**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（自分の実装が渡された値を無視し続ける間、その実装が書く欄は壁時計のまま。`Runtime` 自身は、注入した時計の値をこれらの欄へ渡している——[ADR 0559](./decisions/0559-clock-reaches-outbox-available-at.md)）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
 
 **DB マイグレーション**: 不要（スキーマは変えていない）。
 
