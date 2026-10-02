@@ -8348,7 +8348,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         sizeBeforeBytes: null,
         meta: {
           reason: "consolidated",
-          sources: eligibleIds,
+          sources: eligibleMemories.map((m) => m.id),
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
           ...(consolidateDroppedFields.length > 0
             ? { droppedFields: consolidateDroppedFields }
@@ -8944,7 +8944,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         sizeBeforeBytes: null,
         meta: {
           reason: "reflected",
-          sources: eligibleIds,
+          sources: eligibleMemories.map((m) => m.id),
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
           ...(reflectDroppedFields.length > 0 ? { droppedFields: reflectDroppedFields } : {}),
         },
