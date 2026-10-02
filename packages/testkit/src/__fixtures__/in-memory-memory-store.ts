@@ -142,7 +142,8 @@ function assertRecallRecordStorable(record: NewRecallRecord): void {
 /**
  * outbox の行を**実際に書く**ときに Postgres が拒む入力（ADR 0434）を、何も書く前に検査する。
  * `jobKinds` の要素は `outbox.kind`（`text` 列）に入るので NUL を拒み、`now` は `available_at`・`created_at`
- * （`timestamptz`）に入るので Invalid Date を拒む（`22021`・`22007`）。**行を書かないときは拒まない**——
+ * （`timestamptz`）に入るので Invalid Date を拒む（`22021`・`22007`）。`claimedBy`（`createObservationWithOutbox` の
+ * `opts`。`outbox.claimed_by` は `text` 列）も NUL を拒む（ADR 0493）。**行を書かないときは拒まない**——
  * `jobKinds` が空・冪等の既存の行が在って新しい行を作らないとき、Postgres は outbox へ INSERT せず、
  * どちらも値を見ない（実測）。呼び出し側は、新しい行を実際に作る分岐の中（`beforeInsert`）で呼ぶ。
  */
@@ -418,6 +419,7 @@ function assertStorableNewMemory(input: NewMemory): void {
   // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
   // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
   // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
+  // ADR 0493: `decayFloorAt`（必須）・`lastReinforcedAt`（省略可能）も同じ `timestamptz` 列で、同じく検査する（下）。
   // #1183 の外側の CHECK 制約（Postgres の `memories_check`）: 由来が `stated`/`inferred` なら、その元の観測が要る。
   if (
     (input.provenance.kind === "stated" || input.provenance.kind === "inferred") &&
