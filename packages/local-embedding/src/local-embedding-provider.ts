@@ -110,8 +110,8 @@ export const DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS = 3;
 /**
  * 既定のリトライ間隔（指数バックオフ + full jitter）。
  *
- * **なぜ jitter を掛けるか**: CI の5ジョブは同じ Hugging Face repo を同じ瞬間に
- * 取りに行きうる（`ci.yml` が5ジョブとも同じ cache key を共有している——本 ADR の
+ * **なぜ jitter を掛けるか**: CI の複数のジョブは同じ Hugging Face repo を同じ瞬間に
+ * 取りに行きうる（`ci.yml` が各ジョブで同じ cache key を共有している——本 ADR の
  * 「測ったこと」参照）。jitter が無いと、揃って失敗した複数ジョブが**揃って
  * 同じ瞬間に再試行し**、再び渋滞を起こしうる。`Math.random() * upper` の
  * full jitter（AWS の backoff の記事で知られる形）でそれをずらす。
@@ -213,10 +213,13 @@ export interface LocalEmbeddingProviderOptions {
    * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら transformers.js の既定
    * （`"main"`）のままで、この option を足す前と同じ呼び出しになる**（Issue #597）。
    *
-   * ⚠ **渡したときの実挙動は、本物のモデルを落として確かめていない。**
-   * ⚠ **キャッシュ鍵（ADR 0263）と、読み込んだ重みの指紋の照合（ADR 0253）が、固定した
-   * revision をどう扱うかは決めていない**（Issue #597 の「先に決めるべきこと」のうち、
-   * 決めたのは「既定値は変えない」だけである）。
+   * 渡したときは、既定の `createPipeline` が `revision` を `pipeline()` へ渡さず、`env.remotePathTemplate`
+   * に埋め込み、キャッシュの根を `<根>/<encodeURIComponent(revision)>` に分ける（Issue #1403・ADR 0365。
+   * {@link createLocalEmbeddingPipeline} の doc）。`createPipeline` を差し替えたときは、
+   * `spec.revision` がそのまま渡るだけで、扱いはその実装による。
+   *
+   * ⚠ **読み込んだ重みの指紋の照合（ADR 0253）が、固定した revision をどう扱うかは決めていない**
+   * （Issue #597 の「先に決めるべきこと」のうち、決めたのは「既定値は変えない」だけである）。
    */
   revision?: string | undefined;
   /**
@@ -390,6 +393,8 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * 再変換の手がかりをメッセージに載せる）になる。種類の付いた失敗
    * （`LocalEmbeddingProviderError`。例: `kind: "unknown_input_limit"`）は、リトライも包みも
    * せずにそのまま投げる。
+   *
+   * {@link LocalEmbeddingProvider.dispose} の後に呼ぶと、素の `Error` で reject する（ADR 0419）。
    */
   async warmup(): Promise<void> {
     this.#assertNotDisposed("warmup");
