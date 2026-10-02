@@ -88,7 +88,11 @@ import type { OutboxJobRecord } from "./outbox.js";
 import { runRecall } from "./recall-runtime.js";
 import type { RecallQuery, RecallRecord, RecallResult } from "./recall.js";
 import type { RecallOutputValidationMode } from "./recall-output-validation.js";
-import { detectLanguageMismatch } from "./language-mismatch.js";
+import {
+  detectLanguageMismatchFromProfile,
+  profileObservationLanguage,
+  type ObservationLanguageProfile,
+} from "./language-mismatch.js";
 import { observationPayloadText } from "./observation-text.js";
 import { classifyReextractTargets, classifySupersedeFailure } from "./strategies/reextract.js";
 import type { ReextractSkip } from "./strategies/reextract.js";
@@ -1414,6 +1418,12 @@ export interface TickOptions {
    * `extract` は再配達の確認（`OutboxStore` の doc）、`reflect` は再配達で2件になりうる（`Runtime.reflect` の doc）。
    * 避けるには、`leaseMs` を「`limit` 件を最後まで処理する時間」より長く取るか、`limit` を小さくする。
    * `tick` はジョブの所要時間を知らないので、この関係を検査しない。各ジョブの前にリースを延ばす口も `OutboxStore` には無い。
+   * ⚠ **2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0530](../../../docs/decisions/0530-batch-exceeds-lease-double-processing-per-kind.md)）: 二重に走った結末は種類で違う。**
+   * `embed` は同じベクトルを上書きするだけで、記憶は壊れない。`extract` は、先に走った側がまだ書いていなければ事前の確認（ADR 0347）が効かず、同じ候補なら冪等の鍵で1件、
+   * 違う候補なら両方が `active` で残る（遅れた側の LLM が落ちると全文のフォールバックの記憶も残る）。`reflect` は、材料の記憶を `superseded` にしないので、二重に走ると内省の記憶が2件できる。
+   * `consolidate` は、書く前の読み直し（ADR 0420）で、先に統合された元の記憶が `superseded` になっているのを見て、何も書かずに打ち切る（LLM は二重に呼ぶ。統合先は1件のまま）。
+   * どの種類でも、遅れた側の `complete`/`fail` は `leaseConflicts` に載り、行は先に完了した側のまま。【実測 2026-10-02】Fake・testkit の fixture・`@mnemora/postgres` で同じ
+   * （`packages/core/src/__tests__/fake-tick-batch-exceeds-lease-parity.test.ts`・`packages/postgres/src/__tests__/tick-batch-exceeds-lease-parity.postgres.test.ts`）。
    * 【実測 2026-09-30】`packages/core/src/__tests__/tick-batch-lease-expiry.test.ts`（fake の store で、A が2件を claim →
    * 2件目の処理中に時計を進めて別の `tick` B が2件目を再 claim → A の `complete` は `leaseConflicts`、provider 呼び出しは3回）。
    */
@@ -4465,6 +4475,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * ADR 0507: 言語の事後検査の、観測側の数え（本文の合成と文字種の数え。長さに比例する）を、観測ごとに1回へ畳む。
+   * 同じ抽出の候補はどれも同じ Observation のオブジェクトを渡してくるので、それを鍵にする（弱参照。
+   * 観測が捨てられれば消える）。候補ごとに変わるのは本文の側だけで、そちらは候補ごとに数える。
+   */
+  const observationLanguageProfiles = new WeakMap<Observation, ObservationLanguageProfile>();
+  function observationLanguageProfileOf(observation: Observation): ObservationLanguageProfile {
+    let profile = observationLanguageProfiles.get(observation);
+    if (profile === undefined) {
+      profile = profileObservationLanguage(observationPayloadText(observation));
+      observationLanguageProfiles.set(observation, profile);
+    }
+    return profile;
+  }
+
+  /**
    * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
    * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
    * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
@@ -4491,7 +4516,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const languageMismatch =
       outcome === "llm_failed_whole_observation"
         ? null
-        : detectLanguageMismatch(observationPayloadText(observation), memory.content);
+        : detectLanguageMismatchFromProfile(
+            observationLanguageProfileOf(observation),
+            memory.content,
+          );
     return {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
@@ -8328,7 +8356,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         sizeBeforeBytes: null,
         meta: {
           reason: "consolidated",
-          sources: eligibleIds,
+          sources: eligibleMemories.map((m) => m.id),
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
           ...(consolidateDroppedFields.length > 0
             ? { droppedFields: consolidateDroppedFields }
@@ -8924,7 +8952,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         sizeBeforeBytes: null,
         meta: {
           reason: "reflected",
-          sources: eligibleIds,
+          sources: eligibleMemories.map((m) => m.id),
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
           ...(reflectDroppedFields.length > 0 ? { droppedFields: reflectDroppedFields } : {}),
         },
