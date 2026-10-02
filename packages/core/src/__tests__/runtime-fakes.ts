@@ -181,6 +181,61 @@ function casMismatch(
   return memory.status !== expectedStatus || (memory.purgedAt ?? null) !== null;
 }
 
+/**
+ * ADR 0557（ADR 0503・0515 の Fake 版。`packages/testkit` の `InMemoryMemoryStore` の `assertSupersededByShape` と同じ文面）:
+ * `status: "superseded"` の更新は、置き換えた側（`supersededById`）を必ず伴い、それは自分自身でないこと。`superseded` 以外
+ * （`resolveContested*` では `active`）に `supersededById` を付けることも断る（`forbidWhenNotSuperseded`）。書く前に `RangeError`
+ * で断る（値は message に入れない）。id は `normId` で畳んで比べる（`PostgresMemoryStore` と同じ）。
+ */
+function assertFakeSupersededByShape(
+  method: string,
+  field: string,
+  selfId: string,
+  status: string,
+  supersededById: string | undefined,
+  opts: { forbidWhenNotSuperseded: boolean },
+): void {
+  if (status === "superseded") {
+    if (supersededById === undefined) {
+      throw new RangeError(
+        `${method}: ${field}.supersededById is required when status is "superseded"`,
+      );
+    }
+    if (normId(supersededById) === normId(selfId)) {
+      throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
+    }
+  } else if (opts.forbidWhenNotSuperseded && supersededById !== undefined) {
+    throw new RangeError(
+      `${method}: ${field}.supersededById must not be set unless status is "superseded"`,
+    );
+  }
+}
+
+/**
+ * ADR 0557（ADR 0503 の Fake 版。testkit の `assertNoSupersededCycle` と同じ文面）: `supersededById` の鎖が、同じ呼び出しで
+ * `superseded` になるメンバーの中で輪になっていないこと。両側を `normId` で畳んで比べる（`PostgresMemoryStore` と同じ）。
+ */
+function assertFakeNoSupersededCycle(
+  method: string,
+  members: ReadonlyArray<{ id: string; status: string; supersededById?: string | undefined }>,
+): void {
+  const next = new Map<string, string>();
+  for (const m of members) {
+    if (m.status === "superseded" && m.supersededById !== undefined) {
+      next.set(normId(m.id), normId(m.supersededById));
+    }
+  }
+  for (const start of next.keys()) {
+    let cur = next.get(start);
+    for (let hops = 0; cur !== undefined && hops <= next.size; hops += 1) {
+      if (cur === start) {
+        throw new RangeError(`${method}: supersededById must not form a cycle among the members`);
+      }
+      cur = next.get(cur);
+    }
+  }
+}
+
 /** 列挙の列（`memories.status` など）へ書けない値を断る（ADR 0493。testkit の `assertStorableMemoryColumn` と同じ文面）。 */
 function assertFakeMemoryColumn(
   column: "status" | "digest_source" | "embedding_status",
@@ -1350,6 +1405,10 @@ export class FakeMemoryStore implements MemoryStore {
     // ⚠ Issue #768: ADR 0140 の `status: 'contested'` ガードは、この Fake には意図して
     // 持たない（`createMemoryIdempotent` の doc コメント参照——ADR 0140 決定2）。
     id = normId(id);
+    // ADR 0557（ADR 0503）: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
+    assertFakeSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
+      forbidWhenNotSuperseded: true,
+    });
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -1389,6 +1448,10 @@ export class FakeMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     // ⚠ Issue #768: updateStatus と同じ理由——ADR 0140 のガードは意図して持たない。
     id = normId(id);
+    // ADR 0557（ADR 0503）: updateStatus と同じ位置・同じ検査。
+    assertFakeSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
+      forbidWhenNotSuperseded: true,
+    });
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -2545,6 +2608,22 @@ export class FakeMemoryStore implements MemoryStore {
     if (first.id === second.id) {
       throw new RangeError("FakeMemoryStore: first.id and second.id must differ");
     }
+    // ADR 0557（ADR 0503）: 置き換えた側を伴わない superseded・自己置換・active への supersededById・互いを指す循環は、
+    // 存在確認より前（書く前）に断る。
+    for (const [field, side] of [
+      ["first", first],
+      ["second", second],
+    ] as const) {
+      assertFakeSupersededByShape(
+        "resolveContestedPair",
+        field,
+        side.id,
+        side.status,
+        side.supersededById,
+        { forbidWhenNotSuperseded: true },
+      );
+    }
+    assertFakeNoSupersededCycle("resolveContestedPair", [first, second]);
 
     // 1. 事前検証——存在確認。まだ何も書いていない。
     const firstMemory = await this.get(ctx, first.id);
@@ -2569,6 +2648,19 @@ export class FakeMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（何も書く前）。
     this.assertOwnMemoryRef(ctx, first.supersededById);
     this.assertOwnMemoryRef(ctx, second.supersededById);
+    // ADR 0557（ADR 0515）: 対の外の `forgotten` な記憶を置き換えた側にしない。対の相手を指すのは断らない。
+    for (const [field, side] of [
+      ["first", first],
+      ["second", second],
+    ] as const) {
+      const ref = side.supersededById;
+      if (ref === undefined || ref === first.id || ref === second.id) continue;
+      if (this.backing.memories.get(ref)?.status === "forgotten") {
+        throw new RangeError(
+          `resolveContestedPair: ${field}.supersededById must not be a forgotten memory outside the pair`,
+        );
+      }
+    }
 
     // 3. イベントを2件とも先に組み立てる（検査もここで走る）。書けないイベントなら、どちらの状態も書き換える前に
     // 投げる——`updateStatusWithEvent`（#1368）と同じ形。
@@ -2729,6 +2821,18 @@ export class FakeMemoryStore implements MemoryStore {
     if (new Set(ids).size !== ids.length) {
       throw new RangeError("FakeMemoryStore: member ids must be unique");
     }
+    // ADR 0557（ADR 0503）: 2者版と同じ（置き換えた側の欠落・自己置換・active への supersededById・循環）。存在確認より前に断る。
+    members.forEach((m, i) =>
+      assertFakeSupersededByShape(
+        "resolveContestedGroup",
+        `members[${i}]`,
+        m.id,
+        m.status,
+        m.supersededById,
+        { forbidWhenNotSuperseded: true },
+      ),
+    );
+    assertFakeNoSupersededCycle("resolveContestedGroup", members);
 
     const memories: Memory[] = [];
     for (const m of members) {
@@ -2784,6 +2888,15 @@ export class FakeMemoryStore implements MemoryStore {
     for (const m of members) {
       this.assertOwnMemoryRef(ctx, m.supersededById);
     }
+    // ADR 0557（ADR 0503）: 群の外の `forgotten` な記憶を置き換えた側にしない。群の中を指すのは、メンバーの status に関わらず断らない。
+    members.forEach((m, i) => {
+      if (m.supersededById === undefined || ids.includes(m.supersededById)) return;
+      if (this.backing.memories.get(m.supersededById)?.status === "forgotten") {
+        throw new RangeError(
+          `resolveContestedGroup: members[${i}].supersededById must not be a forgotten memory outside the group`,
+        );
+      }
+    });
 
     const events = members.map((m) => this.buildOwnedEvent(ctx, m.event, ids));
 
