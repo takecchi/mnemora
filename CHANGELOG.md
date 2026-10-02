@@ -138,6 +138,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504 と同じ扱い）。
   - **変えなかったこと**: `EventStore.get`・`list`、`PostgresTrigramLexicalStore` など、ほかの store の直接呼び。
 
+- **`@mnemora/postgres` の `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`・`purgeMemory`・`scrubPurged` が、同じラベルを逆の順で触る並行する書き込みと、生の 40P01（`deadlock detected`）で衝突しなくなった**（[ADR 0511](./docs/decisions/0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md)、ADR 0476 の負債1・2）。`labels` の行ロックを、どの経路でも名前のコードポイント順で取る。`createMemoriesWithOutboxAndEvents` は、衝突した候補が例外にならず `dropped` に黙って積まれていた。
+  - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。公開 API・DB・`Memory.tags`・`proposedCount` は変えない。
+  - **残ること**: まだ無いラベルを同時に新規作成する競合は、先取りできないので残る（ADR 0511 の負債）。
+
 ## [1.2.0] - 2026-10-02
 
 **この節は `v1.1.0`（tag が指す `5eb6e9d`、[PR #1443](https://github.com/takecchi/mnemora/pull/1443) がその commit の中身）… の差分である。**オーナーが 2026-09-30 に tag `v1.1.0` を `5eb6e9d` で publish し、npm にも `1.1.0` が出た。⟹ **これにより、下の `[1.1.0]` 節は出荷済みになった。**この節は、`5eb6e9d` より後に `main` へ入った PR を数える。

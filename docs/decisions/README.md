@@ -526,6 +526,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0508](./0508-recall-channels-undecidable-japanese-labels-on-real-postgres.md) | `recall` の `channels` の合流のうち、`ann_truncated`（undecidable）・日本語の語彙・`labels` との組を、Fake と実 Postgres に同じ問いを当てて縛る（割れは見つからなかった。日本語だけ既知の非対称を歯にした） | 採用 (2026-10) |
 | [0509](./0509-fuzz-uncovered-fields-channels-hnsw-recall-record.md) | 穴探し — recall の fuzz に `channels`（tsvector・trigram）・HNSW 上の `fields`・`getRecall` の読み戻しを足した（Fake と testkit の語彙検索の食い違いが 2 つ出た。直していない） | 採用 (2026-10) |
 | [0510](./0510-doc-forms-not-yet-swept.md) | 文書とコードのずれの掃きが「見ていない形」として残した、表の中の数値・定数と、既定値・振る舞いの散文を、コードの定数に名指しで照らす | 採用 (2026-10) |
+| [0511](./0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md) | 記憶をまたぐ `upsertProposedLabels` の順と、purge/scrub の `UPDATE labels … FROM counted` の更新順が、並行する書き込みと 40P01 になる（ADR 0476 の負債1・2）。再現と直し | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
 | [0513](./0513-lexical-match-fixtures-aligned-to-postgres.md) | 語彙検索の fixture を Postgres に揃える（core の Fake は部分一致をやめて語の一致に、testkit の InMemory は `PROJ-12` を空白区切りの 1 語として数える） | 採用 (2026-10) |
 | [0517](./0517-blank-title-is-not-prefixed-when-extract-title.md) | `extractTitle: true` のとき、空白だけの `document.title` を本文の前置きにしない（断らず、無視する） | 採用 (2026-10) |
