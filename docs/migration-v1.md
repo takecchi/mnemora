@@ -2807,6 +2807,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
   以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
 
+- **`@mnemora/postgres`・`@mnemora/testkit/fixtures`: 読みの口の日時の条件が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前でも、例外にならず、下限へ寄せて比べた答えを返す**（[ADR 0547](./decisions/0547-pg-out-of-range-date-reads-clamp-to-floor.md)。🟡。ADR 0456 の M2、ADR 0500 の決めたこと2のうち読みの口の部分を置き換える）。
+  対象: `EventStore.list` の `since`・`until`、`VectorStore.search`・`searchMany`・`LexicalStore.search`（tsvector 版・trigram 版）・`MemoryStore.aggregateScope` の日時の絞り込み、`findActiveByClaimKey`・`findContestedByClaimKey` の `validFrom`・`validUntil`、`OutboxStore.claimBatch` の `opts.now`、これらを通る `Runtime.recall`。以前は `@mnemora/postgres` が `DrizzleQueryError`（`cause.code` が `22008`）で落ち、InMemory は `RangeError`（`… must not be earlier than 4714-11-24 BC …`）で断った。いまはどちらも成功する。`since`・`occurredAfter`・`decayFloorAtAfter` は全件、`until`・`occurredBefore` は0件になる。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。手順は要らない。ただし、**`22008` や `RangeError` を捕まえて「日付が範囲外」と扱っていた呼び出し側**（読みの口に限る）は、その分岐に入らなくなる。行に日時を書く口（`createMemory` の `occurredAt` など、`opts.now`・`opts.at`）は変えていない——下限より前は `22008`（InMemory は `opts.now`・`opts.at` で `RangeError`）のまま。
+  既知の限界: 下限ちょうどの時刻に行があるとき、`until` 系を下限より前にすると `@mnemora/postgres` はその行を返す（InMemory と core の Fake は0件）。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**

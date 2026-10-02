@@ -652,3 +652,26 @@ describe("OutboxStore.claimBatch: 下限ちょうどに available な job（Post
     ]);
   });
 });
+
+describe("purge の olderThan が下限より前（0件。以前から同じ）", () => {
+  for (const [label, date] of BELOW) {
+    it(`purgeExpiredEvents・purgeExpiredRecalls・purgeCompletedJobs は、3実装とも例外にならず0件（${label}）`, async () => {
+      const answers: Record<string, unknown> = {};
+      for (const kit of await kits()) {
+        const ctx = nextCtx();
+        const run = (f: () => Promise<{ purged: number }> | undefined) =>
+          (f() ?? Promise.resolve({ purged: -1 })).then(
+            (r) => r.purged,
+            (e: unknown) => ({ threw: describeThrown(e) }),
+          );
+        answers[kit.name] = [
+          await run(() => kit.mem.purgeExpiredEvents?.(ctx, { olderThan: date, limit: 5 })),
+          await run(() => kit.mem.purgeExpiredRecalls?.(ctx, { olderThan: date, limit: 5 })),
+          await run(() => kit.ob.purgeCompletedJobs?.(ctx, { olderThan: date, limit: 5 })),
+        ];
+      }
+      const expected = [0, 0, 0];
+      expect(answers).toEqual({ postgres: expected, "in-memory": expected, fake: expected });
+    });
+  }
+});
