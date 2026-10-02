@@ -187,7 +187,7 @@ describe("FakeMemoryStore.supersedeWithNewMemories: 冪等な再送の news は 
   );
 });
 
-describe("FakeMemoryStore.supersedeWithNewMemories: 先頭以外の news も検査する（ADR 0555 決定3。変異 D）", () => {
+describe("FakeMemoryStore.supersedeWithNewMemories: 先頭以外の news も検査する（ADR 0555。変異 D）", () => {
   it("2件目の jobKinds に NUL があれば、1件目も書かずに断る", async () => {
     const { memoryStore, outboxStore } = createFakeRuntimeStores();
     const first = newMemory();
@@ -307,7 +307,7 @@ const ports: Array<{
 ];
 
 describe.each(ports)(
-  "FakeMemoryStore.$name: 行ごとに Date の複製を持つ（ADR 0555 決定1。変異 H）",
+  "FakeMemoryStore.$name: 行ごとに Date の複製を持つ（ADR 0555。変異 H）",
   ({ run }) => {
     it("availableAt・createdAt は、opts.now とも、互いにも、他の行とも別の Date である", async () => {
       const now = new Date(PAST.getTime());
