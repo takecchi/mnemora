@@ -1418,6 +1418,12 @@ export interface TickOptions {
    * `extract` は再配達の確認（`OutboxStore` の doc）、`reflect` は再配達で2件になりうる（`Runtime.reflect` の doc）。
    * 避けるには、`leaseMs` を「`limit` 件を最後まで処理する時間」より長く取るか、`limit` を小さくする。
    * `tick` はジョブの所要時間を知らないので、この関係を検査しない。各ジョブの前にリースを延ばす口も `OutboxStore` には無い。
+   * ⚠ **2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0530](../../../docs/decisions/0530-batch-exceeds-lease-double-processing-per-kind.md)）: 二重に走った結末は種類で違う。**
+   * `embed` は同じベクトルを上書きするだけで、記憶は壊れない。`extract` は、先に走った側がまだ書いていなければ事前の確認（ADR 0347）が効かず、同じ候補なら冪等の鍵で1件、
+   * 違う候補なら両方が `active` で残る（遅れた側の LLM が落ちると全文のフォールバックの記憶も残る）。`reflect` は、材料の記憶を `superseded` にしないので、二重に走ると内省の記憶が2件できる。
+   * `consolidate` は、書く前の読み直し（ADR 0420）で、先に統合された元の記憶が `superseded` になっているのを見て、何も書かずに打ち切る（LLM は二重に呼ぶ。統合先は1件のまま）。
+   * どの種類でも、遅れた側の `complete`/`fail` は `leaseConflicts` に載り、行は先に完了した側のまま。【実測 2026-10-02】Fake・testkit の fixture・`@mnemora/postgres` で同じ
+   * （`packages/core/src/__tests__/fake-tick-batch-exceeds-lease-parity.test.ts`・`packages/postgres/src/__tests__/tick-batch-exceeds-lease-parity.postgres.test.ts`）。
    * 【実測 2026-09-30】`packages/core/src/__tests__/tick-batch-lease-expiry.test.ts`（fake の store で、A が2件を claim →
    * 2件目の処理中に時計を進めて別の `tick` B が2件目を再 claim → A の `complete` は `leaseConflicts`、provider 呼び出しは3回）。
    */
@@ -2601,7 +2607,8 @@ export interface Runtime {
    *
    * 投げる例外（現状の振る舞いを約束として書く）:
    * - `input` を `ObserveInputSchema` で検証し、合わなければ zod の `ZodError` を投げる
-   *   （何も書く前）。
+   *   （何も書く前）。`utterance.text`・`event.name`・`document.content` は、空文字に加えて、`trim` で空になる値
+   *   （空白・改行・タブ・U+3000 だけ）も断る（ADR 0502。`path` は欄名。U+200B は `trim` が落とさないので通る）。
    * - `extract: "deferred"` と `subjectCandidates`（空でない）、または `claimKey` を同時に
    *   渡すと、{@link SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} /
    *   {@link CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} で始まる `Error` を投げる（何も書く前）。
@@ -2802,7 +2809,8 @@ export interface Runtime {
    *
    * 実装（`createRuntime` 内）: `input.limit` が指定されていて整数でない・`1` 未満なら
    * `RangeError` を投げる（`markContested` の `firstId === secondId` と同じ位置づけ——
-   * 書き込みも `recall()` も試みる前に落とす）。そうでなければ
+   * 書き込みも `recall()` も試みる前に落とす）。続けて `input.text`・`input.excludeMemoryIds` の型も
+   * 確かめ、外れていれば `TypeError`（下の「入力の検査」）。どれにも当たらなければ
    * `recall(ctx, { text: input.text })` を1回呼び、`excludeMemoryIds` を `Set` にして
    * 除外し、`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切って返す。
    *
@@ -4036,7 +4044,7 @@ export interface Runtime {
    *    `@mnemora/postgres` と testkit の fixture で確認（歯は
    *    `consolidate-reflect-forget-race.postgres.test.ts`）。
    * 8. `created` イベントを1件積む。`meta.reason: 'reflected'`、`meta.sources: <eligible の
-   *    id>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
+   *    id。store が返した行の id＝小文字の正規形で、渡された綴りではない（ADR 0527。以前は渡された綴りで、直す前に書かれた行は書き換えない）>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
    *    イベントと同じ形）。
    * 9. `outcome: 'reflected'`、`reflectedMemoryId`、eligible を `'used'` にして返す。
    *
@@ -6402,9 +6410,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     }
-    // 除外の集合は `recall()` を呼ぶ前に作る——`excludeMemoryIds` が反復できない値だと
-    // `new Set` が TypeError を投げるが、後ろで作ると recall の記録を1件書いた後に落ちていた
-    // （穴探し56巡目）。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
+    // 除外の集合は `recall()` を呼ぶ前に作る——以前は `excludeMemoryIds` が反復できない値だと
+    // `new Set` が TypeError を投げ、後ろで作ると recall の記録を1件書いた後に落ちていた
+    // （穴探し56巡目）。今は上の検査が、配列でない値をここへ届く前に断る。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
     // 小文字で返す。`forget` と同じ扱い）。大文字で渡した自己除外が黙って効かないのを防ぐ。
     const excludeSet = new Set<unknown>();
     for (const id of new Set(input.excludeMemoryIds ?? [])) {
