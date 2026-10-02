@@ -533,6 +533,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0516](./0516-omit-params-trigram-outbox-tenant-settings-stores.md) | `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0517](./0517-blank-title-is-not-prefixed-when-extract-title.md) | `extractTitle: true` のとき、空白だけの `document.title` を本文の前置きにしない（断らず、無視する） | 採用 (2026-10) |
 | [0518](./0518-status-conflict-error-purged-row-doc.md) | `MemoryStatusConflictError` の TSDoc に、purge 済みの行では `expectedStatus` と `observedStatus` が両方とも `"forgotten"` になることを書く（文書だけ） | 採用 (2026-10) |
+| [0519](./0519-inmemory-reinforce-purged-matches-postgres.md) | testkit の InMemory の `reinforce` が purge 済みの記憶をどう扱うかを実測した — Postgres と同じだった（割れなし。歯を足し、TSDoc の「測っていない」を書き換えた） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
@@ -552,8 +553,11 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0536](./0536-parity-inventory-and-activity-clock.md) | 穴探し — 公開メソッドごとの「3者（Fake・InMemory・Postgres）を突き合わせる歯」の棚卸しと、その1つ目（活動時計 `decay_clock = "activity"` の経路。3者一致、割れは見つからなかった） | 採用 (2026-10) |
 | [0537](./0537-adr-index-rejects-malformed-adr-filename.md) | ADR 索引の生成器は、番号で始まるのに ADR のファイル名の形から外れた `.md` を、無視せず例外で落とす | 採用 (2026-10) |
 | [0538](./0538-retention-and-purge-parity.md) | 穴探し — 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）を3者（Fake・InMemory・Postgres）で突き合わせる。Fake の `events_purged` の `meta` だけ、日時が `Date` のままで割れていた（直した） | 採用 (2026-10) |
+| [0539](./0539-claim-key-read-parity.md) | 穴探し — claim key と矛盾の検出の読み口（`findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`）と、`observe` の `claimKey` 有効経路を3者（Fake・InMemory・Postgres）に流す歯（3者一致、割れは見つからなかった） | 採用 (2026-10) |
 | [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 | [0541](./0541-embed-job-skips-withdrawn-memory.md) | 埋め込みジョブは、forget・purge した記憶の本文を外部の embedding provider に送らない（オーナーへの問28） | 採用 (2026-10) |
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
+| [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
