@@ -504,5 +504,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0490](./0490-language-mismatch-latin-letters-only.md) | 穴探し59巡目 — 言語の事後検査（ADR 0391）が「ラテン文字」にローマ数字を数えていた。文字だけを数える直しと、`created` の印を実 adapter で縛る歯 | 採用 (2026-10) |
 | [0491](./0491-claim-key-relative-period-across-observations.md) | Issue #1436 — 別々の observation に分かれた、相対的な期間（去年／今年）だけが違う正しい2主張が contested になる限界を、今の振る舞いとして `detectContested` の TSDoc に書き、歯で縛る | 採用 (2026-10) |
 | [0492](./0492-fuzz-profile-fields.md) | 穴探し — recall の不変条件 fuzz に、これまで一度も振っていない欄（`timeWeighting`・`digestBandLimit`・クエリの `tags`・`occurredAt`）を足す（割れは見つからなかった） | 採用 (2026-10) |
+| [0495](./0495-doc-code-drift-sweep.md) | 文書とコードのずれを横に掃く — パッケージの README・約束の文書・公開の型の TSDoc を、今の main の型と実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
