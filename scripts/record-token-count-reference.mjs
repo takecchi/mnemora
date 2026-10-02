@@ -5,7 +5,7 @@
  *
  * **これはどの門にも入っていない**（`pnpm run test` からも CI からも呼ばれない）。
  * `js-tiktoken` を `package.json` / `pnpm-lock.yaml` に足さない判断
- * （依存の追加方針の変更はオーナー専権。`docs/autonomy.md:115`）をしたため、
+ * （依存の追加方針の変更はオーナー専権。`docs/autonomy.md` §3 の表）をしたため、
  * 実行するたびに手で用意してもらう形にしてある。
  *
  * 使い方:
@@ -46,7 +46,7 @@ async function loadJsTiktoken() {
         "  npm i --no-save js-tiktoken\n" +
         "（--no-save なので package.json / pnpm-lock.yaml は変わらない。\n" +
         " 依存を増やさない方針のため、このリポジトリの devDependencies には入れていない。\n" +
-        " docs/autonomy.md:115 参照。)",
+        " docs/autonomy.md §3 参照。)",
       { cause: err },
     );
   }
