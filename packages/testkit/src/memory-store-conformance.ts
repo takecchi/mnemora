@@ -4477,11 +4477,17 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatus は expectedStatus が現在の status と一致すれば更新する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       expect(memory.status).toBe("active");
 
       const updated = await store.updateStatus(ctx, memory.id, "superseded", {
         expectedStatus: "active",
+        supersededById: winner.id,
       });
 
       expect(updated.status).toBe("superseded");
@@ -4490,11 +4496,19 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatus は expectedStatus が現在の status と不一致なら MemoryStatusConflictError を投げ、行を一切変えない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       await store.updateStatus(ctx, memory.id, "archived"); // 現在の status を archived にしておく
 
       await expectRejectsWithStoreError(
-        store.updateStatus(ctx, memory.id, "superseded", { expectedStatus: "active" }),
+        store.updateStatus(ctx, memory.id, "superseded", {
+          expectedStatus: "active",
+          supersededById: winner.id,
+        }),
         isMemoryStatusConflictError,
         "MemoryStatusConflictError",
       );
@@ -4507,12 +4521,20 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatus は expectedStatus を渡しても、投げる MemoryStatusConflictError の observedStatus に現在の status が入る", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       await store.updateStatus(ctx, memory.id, "archived");
 
       let caught: unknown;
       await store
-        .updateStatus(ctx, memory.id, "superseded", { expectedStatus: "active" })
+        .updateStatus(ctx, memory.id, "superseded", {
+          expectedStatus: "active",
+          supersededById: winner.id,
+        })
         .catch((error: unknown) => {
           caught = error;
         });
@@ -4538,6 +4560,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatus は存在しない id に expectedStatus を渡しても、競合ではなく『対象が無い』の例外になる", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
 
       // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
       // 「MemoryStatusConflictError ではない」を確かめるだけでは
@@ -4547,6 +4574,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 押さえるため、メッセージも NOT_FOUND_ERROR_MESSAGE に固定する。
       const rejection = store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "superseded", {
         expectedStatus: "active",
+        supersededById: winner.id,
       });
       await expectRejectsWithoutStoreError(
         rejection,
@@ -4580,6 +4608,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatusWithEvent は成功時、Memory を更新し、かつイベントを1件積む", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       expect(memory.status).toBe("active");
 
@@ -4587,7 +4620,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         ctx,
         memory.id,
         "superseded",
-        { expectedStatus: "active" },
+        { expectedStatus: "active", supersededById: winner.id },
         buildSupersedeEvent(ctx, memory.id, memory.digest),
       );
 
@@ -4603,6 +4636,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatusWithEvent は CAS に弾かれたら MemoryStatusConflictError を投げ、Memory は一切変わらず、イベントも1件も積まれない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       await store.updateStatus(ctx, memory.id, "archived"); // 現在の status を archived にしておく
 
@@ -4611,7 +4649,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           ctx,
           memory.id,
           "superseded",
-          { expectedStatus: "active" },
+          { expectedStatus: "active", supersededById: winner.id },
           buildSupersedeEvent(ctx, memory.id, memory.digest),
         ),
         isMemoryStatusConflictError,
@@ -4634,6 +4672,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 弾かれた瞬間の値と一致する保証は無い。
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
       await store.updateStatus(ctx, memory.id, "archived");
 
@@ -4643,7 +4686,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           ctx,
           memory.id,
           "superseded",
-          { expectedStatus: "active" },
+          { expectedStatus: "active", supersededById: winner.id },
           buildSupersedeEvent(ctx, memory.id, memory.digest),
         )
         .catch((error: unknown) => {
@@ -4660,6 +4703,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatusWithEvent は対象が無ければ『memory not found』の例外を投げ、イベントも積まれない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       // 別 PR が直した既存の "does-not-exist" 検査とは別に、well-formed だが実在しない
       // UUID を使う（`randomUUID()`）——`.rejects.toThrow()` を引数無しで使うと TypeError
       // でも通ってしまうため、メッセージまで固定する。
@@ -4670,7 +4718,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           ctx,
           missingId,
           "superseded",
-          {},
+          { supersededById: winner.id },
           buildSupersedeEvent(ctx, missingId, "digest"),
         ),
       ).rejects.toThrow(/memory not found for tenant/);
@@ -4688,6 +4736,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatusWithEvent は形式不正な id に対しても『memory not found』と同じ例外を投げ、イベントも積まれない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0503: superseded は置き換えた側（別の記憶）を伴う。この歯の関心事ではないので、勝者を1件用意して渡す。
+      const winner = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
+      );
       const malformedId = "does-not-exist";
 
       await expect(
@@ -4695,7 +4748,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           ctx,
           malformedId,
           "superseded",
-          {},
+          { supersededById: winner.id },
           buildSupersedeEvent(ctx, malformedId, "digest"),
         ),
       ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
@@ -8059,7 +8112,13 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           // `contestedWithId` が残ったままの status だけ動く——これは
           // `resolveContestedPair` の CAS 検査対象を作るためだけの下ごしらえであり、
           // その残留自体は本歯の主題ではない）。
-          await store.updateStatus(ctx, b, status);
+          // ADR 0503: superseded は置き換えた側を伴う（この歯の関心事ではないので a を渡す）。
+          await store.updateStatus(
+            ctx,
+            b,
+            status,
+            status === "superseded" ? { supersededById: a } : undefined,
+          );
 
           await expectRejectsWithStoreError(
             store.resolveContestedPair!(

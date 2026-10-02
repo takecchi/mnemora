@@ -71,6 +71,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目58。DB マイグレーションは無い。
   - 【確かめていないこと】呼び出し側が実際に空白だけを送っている頻度。すでに保存された空白だけの Memory の有無（消さない）。
 
+- **`MemoryStore` の `resolveContestedPair?`・`resolveContestedGroup?`・`updateStatus`・`updateStatusWithEvent` が、置き換えた側（`supersededById`）の約束を壊す入力を、書く前に `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit` の InMemory）**（[ADR 0503](./docs/decisions/0503-superseded-by-checks-resolve-contested-update-status.md)。[ADR 0447](./docs/decisions/0447-lifecycle-operation-state-matrix-round23.md) の材料3〜5・[ADR 0450](./docs/decisions/0450-contested-group-operation-state-matrix-round26.md) の材料1・2）。
+
+  以前は、型は通るが約束を壊す入力が黙って通り、戻せない敗者（`restoreSuperseded` の群に入らない `superseded`）や、自己置換・循環の行ができた。
+  - **`status: "superseded"` に `supersededById` が無い**（`resolveContestedPair` の `first`/`second`・`resolveContestedGroup` の `members[i]`・`updateStatus`/`updateStatusWithEvent` の `opts`）。
+  - **自己置換**（`supersededById` が対象自身）。
+  - **循環**（`resolveContestedPair` で互いを指す、`resolveContestedGroup` でメンバー同士が輪になる）。
+  - **`resolveContestedPair`・`resolveContestedGroup` で `status: "active"` に `supersededById` を付ける。**
+  - **`resolveContestedGroup` で、群の外の `forgotten` な記憶を指す。**
+  - **断らないもの**: 勝者を指す `superseded`、`both_active`、群の外の `active` などを指す `superseded`、`updateStatus*` で別の記憶を指す `superseded`、`superseded` 以外の status（`supersededById` 無し）。`Runtime`（`resolveContested`・`resolveContestedGroup`・`reextract`・`consolidate`）は常に正しく渡すので、`Runtime` 経由の挙動は変わらない。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない。conformance suite に `it` は足していない（既存の `updateStatus*` の歯が、置き換えた側なしで `superseded` を書いていたので、別の記憶を指すよう直した）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目59。DB マイグレーションは無い。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
@@ -79,6 +91,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
   - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債）。
+
+- **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
+
+### Fixed
+
+- **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
 
 ## [1.2.0] - 2026-10-02
 
