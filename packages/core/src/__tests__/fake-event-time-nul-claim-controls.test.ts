@@ -132,31 +132,31 @@ describe("listActiveClaimPredicates の並び（新しい順、同着は predica
     vi.useFakeTimers({ toFake: ["Date"] });
     const { memoryStore } = createFakeRuntimeStores();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
-    await memoryStore.createMemory(ctx, memory(claim("older")));
+    await memoryStore.createMemory(ctx, memory(claim("a_older")));
     vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
-    await memoryStore.createMemory(ctx, memory(claim("newer")));
+    await memoryStore.createMemory(ctx, memory(claim("b_newer")));
 
     await expect(
       memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
-    ).resolves.toEqual(["newer", "older"]);
+    ).resolves.toEqual(["b_newer", "a_older"]);
     await expect(
       memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 1 }),
-    ).resolves.toEqual(["newer"]);
+    ).resolves.toEqual(["b_newer"]);
   });
 
   it("同じ predicate の複数行は、いちばん新しい行の時刻で並ぶ", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { memoryStore } = createFakeRuntimeStores();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
-    await memoryStore.createMemory(ctx, memory(claim("x")));
-    vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
     await memoryStore.createMemory(ctx, memory(claim("y")));
-    vi.setSystemTime(new Date("2030-01-03T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
     await memoryStore.createMemory(ctx, memory(claim("x")));
+    vi.setSystemTime(new Date("2030-01-03T00:00:00.000Z"));
+    await memoryStore.createMemory(ctx, memory(claim("y")));
 
     await expect(
       memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
-    ).resolves.toEqual(["x", "y"]);
+    ).resolves.toEqual(["y", "x"]);
   });
 
   it("作成時刻が同じなら、predicate のコードポイント順（挿入の順ではない）", async () => {

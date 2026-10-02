@@ -49,8 +49,12 @@ InMemory・Postgres・Fake の食い違いは無かった。
 | P2: `purgeMemory` の `updatedAt = new Date(at)`                                 | 1（`purgeMemory` の `updatedAt`）           | 7 本緑   |
 | N5: `createMemory` に `assertWellFormedIdentifier(input.extractorVersion, ...)` | 1（`extractorVersion` の NUL）              | 7 本緑   |
 | C6: `listActiveClaimPredicates` の並びを古い順に                                | 2（2行の新しい順、同じ predicate の複数行） | 7 本緑   |
+| C6 の2: 同着のときの predicate の比較を外す（挿入の順のまま）                   | 1（同着は predicate の順）                  | 7 本緑   |
+| C6 の3: 時刻の比較を落とし、predicate の順だけで並べる                          | 2（2行の新しい順、同じ predicate の複数行） | 7 本緑   |
 
-C6 で同着の歯が赤にならないのは意図どおり（同着は時刻の向きに依らない）。同着の歯は、時刻の比較を落とす変異（predicate の順だけで並べる実装）と、挿入の順で並べる実装を縛る。この2つの変異は入れていない（【未確認】）。
+C6 の古い順の変異で同着の歯が赤にならないのは意図どおり（同着は時刻の向きに依らない）。
+
+**最初の版では、C6 の3（predicate の順だけで並べる）が生き残った**（赤0本）。2行の歯の predicate が `older`/`newer`・`x`/`y` で、新しい順と predicate の順が偶然一致していたため。predicate の順が新しい順と逆になる綴り（`a_older`/`b_newer`、`y` が最新の行を持つ `y`/`x`）に直して測り直した。直した版で C6 の古い順・C6 の2・C6 の3 を測り、上の表の結果になった。
 
 ## 採らなかった案
 
