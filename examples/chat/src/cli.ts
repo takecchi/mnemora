@@ -43,12 +43,14 @@ import {
 import { formatChatSummary, formatRecall } from "./format.js";
 import { tryGitRevParseHead } from "./git-info.js";
 import { formatIdentifierArmReport, runIdentifierProbeArm } from "./identifier-arm.js";
-import { JAPANESE_NAME_PROBE_SET_SPEC } from "./japanese-name-probe-set.js";
+import { IDENTIFIER_PROBES } from "./identifier-probe-set.js";
+import { JAPANESE_NAME_PROBES, JAPANESE_NAME_PROBE_SET_SPEC } from "./japanese-name-probe-set.js";
+import { PROBES } from "./probe-set.js";
 import {
   buildMeasuredIdentifierProbeJson,
   buildWeightsUnavailableIdentifierProbeJson,
 } from "./identifier-json.js";
-import { NUMERAL_TOKEN_PROBE_SET_SPEC } from "./numeral-token-probe-set.js";
+import { NUMERAL_TOKEN_PROBES, NUMERAL_TOKEN_PROBE_SET_SPEC } from "./numeral-token-probe-set.js";
 import {
   buildMeasuredNumeralTokenProbeJson,
   buildWeightsUnavailableNumeralTokenProbeJson,
@@ -595,7 +597,7 @@ async function runCorrection(): Promise<void> {
     }
     console.log(
       `\n✔ correction デモの検査が全て通った(${Object.keys(allChecks).length}件。` +
-        "checkCorrectionDemo() の7欄 + checkCorrectionOmission() の1欄、Issue #374)。",
+        "checkCorrectionDemo() と checkCorrectionOmission() の全欄、Issue #374)。",
     );
   } finally {
     await handle.close();
@@ -713,7 +715,7 @@ async function runRecallFootprintCalibrationSamples(): Promise<void> {
   printProviderMode(handle, plan.plannedSource);
   try {
     console.log(
-      "\nrecall-footprint の較正標本（目次帯が空のまま件数10〜20件、limit=20固定の8点）を生成する。\n",
+      "\nrecall-footprint の較正標本（目次帯が空のまま、件数と limit を固定した CALIBRATION_SAMPLE_DESIGN の各点）を生成する。\n",
     );
     const rows = await generateCalibrationSamples(handle.runtime);
     for (const row of rows) {
@@ -1209,7 +1211,7 @@ async function runRecord(target: CassetteTarget): Promise<void> {
   console.log(`  ${describeCassette(cassette)}`);
   console.log(
     "  ⚠ これはこの時点の API の姿の記録である。モデルが更新されても記録は変わらない——" +
-      "乖離は `verify` で確かめること（ADR 0051 の「引き受ける負債」）。",
+      "乖離は `verify` で確かめること（ADR 0051 の「引き受けた負債」）。",
   );
 }
 
@@ -1505,7 +1507,9 @@ async function runIdentifierProbes(): Promise<void> {
         `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}`,
     );
 
-    console.log("\n=== 群1: 既存の日本語意味 probe 7件(./probe-set.js、変更していない) ===");
+    console.log(
+      `\n=== 群1: 既存の日本語意味 probe ${PROBES.length}件(./probe-set.js、変更していない) ===`,
+    );
     const japaneseReport = await runRetrievalQualityArm({
       // ⚠ **`haystack=sparse` を label に含める**（他の2群と同じ書式にする）。
       // この群は識別子密度という軸を持たないが、JSON の `haystackKind` は
@@ -1523,7 +1527,7 @@ async function runIdentifierProbes(): Promise<void> {
     console.log(formatArmDetail(japaneseReport));
 
     console.log(
-      "\n=== 群2: ASCII 識別子 probe 30件(./identifier-probe-set.js、haystack=sparse) ===",
+      `\n=== 群2: ASCII 識別子 probe ${IDENTIFIER_PROBES.length}件(./identifier-probe-set.js、haystack=sparse) ===`,
     );
     const identifierSparseReport = await runIdentifierProbeArm({
       armLabel: `identifier-probes/identifiers-sparse(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=sparse)`,
@@ -1537,7 +1541,7 @@ async function runIdentifierProbes(): Promise<void> {
     console.log(formatIdentifierArmReport(identifierSparseReport));
 
     console.log(
-      "\n=== 群3: ASCII 識別子 probe 30件(./identifier-probe-set.js、haystack=dense) ===",
+      `\n=== 群3: ASCII 識別子 probe ${IDENTIFIER_PROBES.length}件(./identifier-probe-set.js、haystack=dense) ===`,
     );
     const identifierDenseReport = await runIdentifierProbeArm({
       armLabel: `identifier-probes/identifiers-dense(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=dense)`,
@@ -1551,7 +1555,7 @@ async function runIdentifierProbes(): Promise<void> {
     console.log(formatIdentifierArmReport(identifierDenseReport));
 
     console.log(
-      "\n=== 群4: 日本語の固有名詞 probe 12件(./japanese-name-probe-set.js、haystack=sparse) ===",
+      `\n=== 群4: 日本語の固有名詞 probe ${JAPANESE_NAME_PROBES.length}件(./japanese-name-probe-set.js、haystack=sparse) ===`,
     );
     const japaneseNameSparseReport = await runIdentifierProbeArm({
       armLabel: `identifier-probes/japanese-names-sparse(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=sparse)`,
@@ -1566,7 +1570,7 @@ async function runIdentifierProbes(): Promise<void> {
     console.log(formatIdentifierArmReport(japaneseNameSparseReport));
 
     console.log(
-      "\n=== 群5: 日本語の固有名詞 probe 12件(./japanese-name-probe-set.js、haystack=dense) ===",
+      `\n=== 群5: 日本語の固有名詞 probe ${JAPANESE_NAME_PROBES.length}件(./japanese-name-probe-set.js、haystack=dense) ===`,
     );
     const japaneseNameDenseReport = await runIdentifierProbeArm({
       armLabel: `identifier-probes/japanese-names-dense(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=dense)`,
@@ -1780,7 +1784,7 @@ async function runNumeralTokenProbes(): Promise<void> {
     );
 
     console.log(
-      "\n=== 群1: 数詞・記号索引 probe 18件(./numeral-token-probe-set.js、haystack=sparse) ===",
+      `\n=== 群1: 数詞・記号索引 probe ${NUMERAL_TOKEN_PROBES.length}件(./numeral-token-probe-set.js、haystack=sparse) ===`,
     );
     const sparseReport = await runIdentifierProbeArm({
       armLabel: `numeral-token-probes/sparse(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=sparse)`,
@@ -1795,7 +1799,7 @@ async function runNumeralTokenProbes(): Promise<void> {
     console.log(formatIdentifierArmReport(sparseReport));
 
     console.log(
-      "\n=== 群2: 数詞・記号索引 probe 18件(./numeral-token-probe-set.js、haystack=dense) ===",
+      `\n=== 群2: 数詞・記号索引 probe ${NUMERAL_TOKEN_PROBES.length}件(./numeral-token-probe-set.js、haystack=dense) ===`,
     );
     const denseReport = await runIdentifierProbeArm({
       armLabel: `numeral-token-probes/dense(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=dense)`,
@@ -2630,7 +2634,7 @@ function printHelp(write: (text: string) => void = console.log): void {
       "                                                                      #   MNEMORA_COMPARE_JSON で機械可読出力",
       "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples",
-      "                                                                      # recall-footprint 較正の補助標本(limit=20の8点、Issue #340・ADR 0314)を生成する",
+      "                                                                      # recall-footprint 較正の補助標本(CALIBRATION_SAMPLE_DESIGN の各点、Issue #340・ADR 0314)を生成する",
       "                                                                      #   compare と同じ recorded カセットを再生。MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run explain    # recallId から Runtime.getRecall() で内訳を後から読み戻す(Issue #312)",
@@ -2648,13 +2652,13 @@ function printHelp(write: (text: string) => void = console.log): void {
       "                                                                      #   MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON で機械可読出力、MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS=N で推論スレッド数(sha256/lscpuの合成は scripts/measure-embedding-output-fingerprint.mjs が別途行う)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes",
       "                                                                      # ASCII識別子・固有名詞を含む probe(Issue #109)を@mnemora/local-embeddingで測る",
-      "                                                                      #   鍵・カセット不要。日本語意味probe7件・識別子probe30件(sparse/dense haystack)を別々に集計する",
+      "                                                                      #   鍵・カセット不要。日本語意味probe・ASCII識別子probe・日本語固有名詞probeを、群ごと(sparse/dense haystack)に別々に集計する",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run numeral-token-probes",
       "                                                                      # 単独トークンの数詞・記号インデックス(文字種×共有前置長の行列)を@mnemora/local-embeddingで測る(ADR 0135、Issue #109)",
       "                                                                      #   鍵・カセット不要。sparse/dense haystackを別々に集計し、margin(gold-distractor similarity差)の分布も記録する。MNEMORA_NUMERAL_TOKEN_JSON で機械可読出力",
       "                                                                      #   MNEMORA_NUMERAL_TOKEN_OPENAI_JSON は OpenAI 実埋め込みの追加 arm の結果の書き先",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run association-probes",
-      "                                                                      # 連想枠(段3.5、ADR 0151、Issue #291)が想起の質を動かすかを、off/on(maxCount=3)/on(maxCount=5)の3armで比較",
+      "                                                                      # 連想枠(段3.5、ADR 0151、Issue #291)が想起の質を動かすかを、off と on(maxCount を変えた複数 arm)で比較",
       "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_ASSOCIATION_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run consolidation-cost",
       "                                                                      # Runtime.consolidate() の統合が「載る量」をどう動かすかをラウンド制で実測する(Issue #136)",
@@ -2677,7 +2681,7 @@ function printHelp(write: (text: string) => void = console.log): void {
       "                                                                      #   -- --trials=N(既定1)・-- --temperature=N(既定は未指定)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
       "  pnpm --filter @mnemora/example-chat run answer-trials",
       "                                                                      # 同じ記憶集合(examples/chat/cassettes/answer.json の記録済みプロンプト)で",
-      "                                                                      #   dev 6件 × 描画A(recorded)/B(digest-only) × n回の正答数を見る(Issue #705、ADR 0301)",
+      "                                                                      #   dev ケース × 描画A(recorded)/B(digest-only) × n回の正答数を見る(Issue #705、ADR 0301)",
       "                                                                      #   DB 不要。OPENAI_API_KEY が無ければ実 API を叩かず『未評価』と明示して exit 0",
       "                                                                      #   MNEMORA_ANSWER_TRIALS_N(既定5)・MNEMORA_ANSWER_TRIALS_RENDERS(既定 recorded,digest-only)・MNEMORA_ANSWER_TRIALS_JSON",
       "  pnpm --filter @mnemora/example-chat run answer-trials-compare -- a.json b.json",
@@ -2686,7 +2690,7 @@ function printHelp(write: (text: string) => void = console.log): void {
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
       "                                                                      # retrieval の応答を記録する(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",
-      "                                                                      # compare の応答を記録する(ADR 0052。657回・8〜15分・約$0.023)",
+      "                                                                      # compare の応答を記録する(ADR 0052。LLM 呼び出し回数・所要時間・費用の見積もりは ADR 0019 §3、実測は §7.8)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer",
       "                                                                      # answer(naive/mnemora の最終回答 + judge)の応答を記録する(Issue #506。MNEMORA_ANSWER_JSON も書ける)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer-time-weighting",
@@ -2699,7 +2703,7 @@ function printHelp(write: (text: string) => void = console.log): void {
       "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer-time-weighting",
       "                                                                      # answer-time-weighting の記録と実 API の乖離を測る",
       "",
-      "  MNEMORA_PROVIDER_SOURCE=recorded|openai  # retrieval/compare で「キーがあれば実API」を明示的に上書きする(ADR 0068)",
+      "  MNEMORA_PROVIDER_SOURCE=recorded|openai  # retrieval/compare/answer/answer-time-weighting/recall-footprint-calibration-samples で「キーがあれば実API」を明示的に上書きする(ADR 0068)",
       "                                                                      #   recorded: キーが在ってもカセットを再生する(誤って課金しない)",
       "                                                                      #   openai  : カセットが在っても実 API を叩く(キーが無ければ落ちる。擬似物へは倒れない)",
       "                                                                      #   未指定なら従来通りキーの有無だけで決まる",
