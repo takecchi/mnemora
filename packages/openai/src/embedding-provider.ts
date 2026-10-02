@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
+import { assertPositiveSafeInteger } from "./option-check.js";
 import type { OpenAIEmbeddingsClient } from "./client-types.js";
 
 /**
@@ -42,6 +43,9 @@ export interface OpenAIEmbeddingProviderOptions {
   /**
    * 返すベクトルの次元。API の `dimensions` にそのまま渡し、`space.dimensions` にも入る。
    * 返ったベクトルの次元がこれと違えば `embed` は例外を投げる（下の `embed` の doc）。
+   *
+   * ⚠ ADR 0498: **正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら `RangeError`。
+   * message に値が入る）。以前は検査せず、`space.dimensions` に壊れた値が入ったまま構築できた。
    */
   dimensions: number;
   /**
@@ -76,6 +80,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private readonly model: string;
 
   constructor(options: OpenAIEmbeddingProviderOptions) {
+    assertPositiveSafeInteger("OpenAIEmbeddingProvider", "dimensions", options.dimensions);
     if (options.client !== undefined) {
       this.client = options.client;
     } else {

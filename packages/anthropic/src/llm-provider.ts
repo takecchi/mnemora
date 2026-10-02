@@ -9,6 +9,7 @@ import type {
 } from "@mnemora/core";
 import { runAbortable } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
+import { assertPositiveSafeInteger } from "./option-check.js";
 import type {
   AnthropicContentBlock,
   AnthropicMessageParam,
@@ -65,7 +66,12 @@ export interface AnthropicLLMProviderOptions {
   /** ⚠ 必須。既定値を持たない（`@mnemora/openai` の `OpenAILLMProviderOptions.model` と
    * 同じ規律——どのモデルを使うかは呼び出し側が決める）。 */
   model: string;
-  /** 省略時 {@link DEFAULT_MAX_TOKENS}。 */
+  /**
+   * 省略時 {@link DEFAULT_MAX_TOKENS}。
+   *
+   * ⚠ ADR 0498: **渡すなら正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら
+   * `RangeError`。message に値が入る）。
+   */
   maxTokens?: number | undefined;
   /**
    * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
@@ -203,6 +209,10 @@ export class AnthropicLLMProvider implements LLMProvider {
   private readonly maxTokens: number;
 
   constructor(options: AnthropicLLMProviderOptions) {
+    // ADR 0498: 省略（`undefined`）は既定。渡すなら正の安全な整数。
+    if (options.maxTokens !== undefined) {
+      assertPositiveSafeInteger("AnthropicLLMProvider", "maxTokens", options.maxTokens);
+    }
     if (options.client !== undefined) {
       this.client = options.client;
     } else {

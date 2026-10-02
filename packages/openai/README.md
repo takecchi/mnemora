@@ -25,6 +25,7 @@ npm i @mnemora/openai @mnemora/core zod
 - **`OPENAI_API_KEY` 環境変数**（または `apiKey` オプション）が要る。無いと、**呼び出す前に、`new OpenAIEmbeddingProvider(...)`・
   `new OpenAILLMProvider(...)` の時点で** OpenAI SDK が `OpenAIError: Missing credentials. ...` を投げる
   （`OpenAILLMProviderError` ではなく、`kind` も持たない）【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】
+- ⚠ **数値オプションは構築時に検査する**（[ADR 0498](../../docs/decisions/0498-constructor-config-checks.md)）。`OpenAIEmbeddingProvider` の `dimensions` は正の安全な整数、`OpenAILLMProvider` の `temperature`（渡すなら）は有限で `0` 以上でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる。`temperature` の上限は API ごとに違うので見ない。省略時の既定は変わらない。
 - 1つの `OpenAIEmbeddingProvider` インスタンスは1つの埋め込み空間（`provider`/`model`/`dimensions`の組）に固定される。次元をモデルに応じて動的に変える使い方はできない
 
 ## 動く最小の例（型検査のみ確認・OPENAI_API_KEY が無いため未実行）
