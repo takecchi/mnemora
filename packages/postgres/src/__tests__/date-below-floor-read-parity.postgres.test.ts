@@ -414,6 +414,85 @@ describe("下限より前の日時でも、読みの口は3実装で同じ答え
   });
 });
 
+describe("下限ちょうどに行がある場合", () => {
+  /** occurredAt と事象の時刻が下限ちょうどの行を1件だけ入れる（書く口は下限ちょうどを通す）。 */
+  async function seedEdge(kit: Kit): Promise<Seeded> {
+    const ctx = nextCtx();
+    const m = await kit.mem.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        content: "zulu hello",
+        contentHash: "h-zulu",
+        occurredAt: EDGE,
+        embeddingStatus: "ready",
+        halfLifeHours: 1e6,
+        decayFloorAt: new Date("2100-01-01T00:00:00.000Z"),
+      }),
+    );
+    await kit.vec.upsert(ctx, TEST_EMBEDDING_SPACE, m.id, [1, 0, 0]);
+    await kit.ev.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: null,
+      kind: "created",
+      at: EDGE,
+      actor: { type: "system" },
+      digestSnapshot: null,
+      sizeBeforeBytes: null,
+      meta: {},
+    });
+    return { ctx, idToName: new Map([[m.id, "zulu"]]) };
+  }
+
+  it("下限ちょうどの日時で比べると、3実装とも下限ちょうどの行を since 系・until 系の両方に含める（境界を含む）", async () => {
+    const answers: Record<string, unknown> = {};
+    for (const kit of await kits()) {
+      const s = await seedEdge(kit);
+      answers[kit.name] = {
+        eventsSinceEdge: (await kit.ev.list(s.ctx, { since: EDGE })).length,
+        eventsUntilEdge: (await kit.ev.list(s.ctx, { until: EDGE })).length,
+        afterEdge: await vecSearch(kit, s, { occurredAfter: EDGE }),
+        beforeEdge: await vecSearch(kit, s, { occurredBefore: EDGE }),
+      };
+    }
+    const expected = {
+      eventsSinceEdge: 1,
+      eventsUntilEdge: 1,
+      afterEdge: ["zulu"],
+      beforeEdge: ["zulu"],
+    };
+    expect(answers).toEqual({ postgres: expected, "in-memory": expected, fake: expected });
+  });
+
+  it("下限より前の since 系は、下限ちょうどの行も返す（全件）", async () => {
+    for (const [, date] of BELOW) {
+      for (const kit of await kits()) {
+        const s = await seedEdge(kit);
+        expect((await kit.ev.list(s.ctx, { since: date })).length).toBe(1);
+        expect(await vecSearch(kit, s, { occurredAfter: date })).toEqual(["zulu"]);
+      }
+    }
+  });
+
+  // 既知の限界（ADR 0547「引き受けた負債」）: 下限へ寄せると、下限ちょうどの行が until 系（<=）に当たってしまう。
+  // 意味どおりなら 0件（InMemory・Fake はそう答える）。下限ちょうどに行が無ければ起きない。
+  it("既知の限界: 下限より前の until 系は、下限ちょうどの行があるとき Postgres だけがその行を返す", async () => {
+    const answers: Record<string, unknown> = {};
+    for (const kit of await kits()) {
+      const s = await seedEdge(kit);
+      answers[kit.name] = {
+        eventsUntilEarly: (await kit.ev.list(s.ctx, { until: EARLY })).length,
+        beforeEarly: await vecSearch(kit, s, { occurredBefore: EARLY }),
+      };
+    }
+    expect(answers).toEqual({
+      postgres: { eventsUntilEarly: 1, beforeEarly: ["zulu"] },
+      "in-memory": { eventsUntilEarly: 0, beforeEarly: [] },
+      fake: { eventsUntilEarly: 0, beforeEarly: [] },
+    });
+  });
+});
+
 // 約9500年のリース。now が 2100 年でも、now - leaseMs は紀元前7000年台になる（下限より前）。
 const HUGE_LEASE_MS = 3e14;
 const LATER = new Date("2100-01-01T00:00:00.000Z");
@@ -546,4 +625,30 @@ describe("Runtime.recall の日時の絞り込み", () => {
       });
     }
   }
+});
+
+describe("OutboxStore.claimBatch: 下限ちょうどに available な job（Postgres だけ）", () => {
+  // 既知の限界（ADR 0547）と同じ形: now を下限へ寄せると、available_at が下限ちょうどの行が claim できる。
+  // そのとき行に書く claimed_at・available_at も寄せた値でなければならない（寄せずに書くと UPDATE が 22008 になる）。
+  it("now が下限より前でも、下限ちょうどに available な job の claim は 22008 にならず、claimed_at は下限になる", async () => {
+    const { db } = await getTestClient();
+    const memory = new PostgresMemoryStore(db);
+    const outbox = new PostgresOutboxStore(db);
+    const ctx = nextCtx();
+    await memory.createObservationWithOutbox(
+      ctx,
+      buildNewObservationFixture({ tenantId: ctx.tenantId }),
+      ["extract"],
+      { now: EDGE },
+    );
+    const claimed = await outbox.claimBatch(ctx, {
+      limit: 5,
+      now: FAR,
+      claimedBy: "w",
+      leaseMs: 60_000,
+    });
+    expect(claimed.map((j) => [j.kind, j.attempts, j.claimedAt?.getTime()])).toEqual([
+      ["extract", 1, FLOOR_MS],
+    ]);
+  });
 });
