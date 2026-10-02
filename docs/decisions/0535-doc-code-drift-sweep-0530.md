@@ -30,3 +30,30 @@
 
 - **引き受けた負債**: この ADR の結果は `main` の `3c90e3b7` に対して測った記録で、`main` が進めば古くなる。照合の道具は repo に入れていない（ADR 0495 の代替案1のとおり）。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文の中で二重処理の結末を言い換えた文）の古さが見つかったとき。
+
+## 追い足し（基準 main `2963235e`、ADR 0505 の分）
+
+0505（#1625）が main に入ったので掃いた（`git diff 3c90e3b7 2963235e`）。この枝は `origin/main` を merge した（衝突なし）。0508・0531・0532・0510・0534 などは、まだ追い足していない。
+
+- **0505 の中身**【現物】: (1) `@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL を DB の生の例外でなく名指しの `Error` で断る（`input-check.ts` の `assertNoNulInNewObservation`・`assertNoNulInNewRecall`）。(2) testkit の InMemory が、`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `nowSeq + S_x`（`decayFloorSeqAfter + S_x`）の bigint の溢れを、Postgres がその式を評価する行があるときに断る（`seqSumOverflowsBigint`）。`nowSeq`・`decayFloorSeqAfter` そのものが 2^63 以上のときは `assertQueryBigint` で断る。(3) `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外から params の値を落とす（`omittingParams`）。CHANGELOG `[1.3.0]` と migration-v1（🔴 項目60、🟡 の2項目）は 0505 自身が足している。
+- **探した場所**【現物】:
+  - 差の確認: `git diff 3c90e3b7 2963235e`（`CHANGELOG.md`・`docs/migration-v1.md`・`event-store.ts`・`lexical-store.ts`・`memory-store.ts`・`input-check.ts`・testkit の `in-memory-memory-store.ts`・`in-memory-vector-store.ts`・`query-check.ts`）。
+  - 語の grep: `まだ揃えていない|bigint の溢れ|S_x` を `packages/testkit/src/fixtures.ts` に。`生の例外|DrizzleQueryError` に `NUL|createObservation|createRecall` を重ねたもの（`memory-store.ts` の TSDoc・testkit/postgres の README・`docs/conformance.md`）。`NUL` を `memory-store.ts` の TSDoc 全部。`まだ落ちない` と `PostgresMemoryStore\`・\`PostgresEventStore\`・\`PostgresLexicalStore\`` を CHANGELOG・migration-v1 に。
+  - 読んだ所: `fixtures.ts` の冒頭の「揃えていないもの」、CHANGELOG `[1.3.0]` の 0504 の項（「変えなかったこと」）、migration-v1 の 🟡「v1.2.0 → 次の版」の 0504 の項、🔴 項目57・60、`MemoryStore.createObservation`・`createRecall` の TSDoc。
+  - 機械照合を、前回の最後（0530 の分）と同じ文書の集合に再度通した。
+- **突き合わせの結果**【現物】:
+  - (1) CHANGELOG・migration 項目60の欄の列挙（`kind`・`payload`・`attributes`〔key も値も入れ子も〕、`createRecall` の7欄）、例外の型（素の `Error`）、文面（`PostgresMemoryStore: <欄> must not contain NUL characters (U+0000)`・`createRecall: <欄> …`）、`subjectId`・`externalId` は先に `assertWellFormedIdentifier` が断るので新しい検査は見ない、は実装と一致した。
+  - (2) `nowSeq + S_x`（`archiveDecayed`、`usesSubjectActivityCounters: true`）・`decayFloorSeqAfter + S_x`（`aggregateScope`・`VectorStore.search`、`decayFloorSeqUsesSubjectCounters: true`）が 2^63 以上になるとき、subject を持ち `decay_floor_seq` が非 NULL の行があるときだけ断る、2軸は左（壁時計）で決まれば右は評価されない、`nowSeq`（`decayFloorSeqAfter`）そのものは行が無くても断る（`archiveDecayed` は `clock: 'wall'` を除く）は、実装（`seqSumOverflowsBigint`・`assertQueryBigint`・`markSeqSumOverflow`）と一致した。message は `archiveDecayed: nowSeq + own subject seq must fit in a Postgres bigint …` などで、CHANGELOG は文面を書いていない。
+  - (3) 落とすのは `append`・`search` の2口だけで、CHANGELOG の「変えなかったこと」（`EventStore.get`・`list`、`PostgresTrigramLexicalStore` ほか）と一致した。
+  - `memory-store.ts` の TSDoc には、`createObservation`・`createRecall` の NUL を「Postgres は DB の生の例外」と書いた所は無かった（「拒む」とだけ書く）。
+- **直したもの（文書の側だけ）**:
+  1. `packages/testkit/src/fixtures.ts`（冒頭の「揃えていないもの」）: 「`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` を足す式の bigint 溢れは、まだ揃えていない（ADR 0500 の材料）」→ 0505 で揃えた（条件つき）。0505 が実装を揃えたのに、この一覧が残っていた。
+  2. `docs/migration-v1.md` 項目60（未リリースの節）の「何が変わったか」: 「CHANGELOG の `[1.2.0]` 節 `### Breaking` を見ること」→ `[1.3.0]` 節。前回（ADR 0533）と同じ種類のずれ（項目57〜59を直した続き。0505 はそのあとに足された項目で、書いた時点の指す先が古い）。
+  3. CHANGELOG `[1.3.0]` の 0504 の項の「変えなかったこと」: 「`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など…の直接呼びの例外」に、そのうち `PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落とすようにした、と足した。0505 のあとは「`PostgresEventStore`・`PostgresLexicalStore` を直接呼んだときの例外は変えなかった」が成り立たない。
+  4. `docs/migration-v1.md` の 🟡「v1.2.0 → 次の版」の 0504 の項の「ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表）」に、同じ注を足した（`append`・`search` は ADR 0505 で落ちるようになった。下の項目）。
+  5. CHANGELOG `[1.2.0]` と migration-v1 の v1.2.0 の節には触っていない。
+- **コードの側を直すべき食い違い**: 見つからなかった。材料として残す【判断】: 0504 の表のうち、`PostgresMemoryStore` ほか params を落としていない store の口は、0505 のあとも「負債」のまま（0505 は 2 口だけ）。0505 の実測の「実際の `nowSeq` は小さい整数なので、到達しない入力」（migration の 🟡）は、利用者への注意として足りている。
+- **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回（0530 の分）と、行番号を除いて同じだった。
+- **陽性対照**【実測】: 一時の md に存在しない識別子 `seqSumOverflowsBigintX` を書いて識別子の照合に通し、拾った（実在する `seqSumOverflowsBigint` は拾わなかった）。一時ファイルは削除した。migration の指す節のずれは、CHANGELOG の見出しの位置（`## [1.3.0]` の `### Breaking` に 0505 の NUL の項が在る）と migration の項の位置を数えて見つけた。条件・文面の突き合わせには機械の陽性対照が無い（手で読んだ）。
+- **【未確認】**: 0505 の歯（`in-memory-fixtures-seq-sum-overflow.test.ts`・`testkit-fixture-seq-sum-overflow.postgres.test.ts`・`store-write-nul-named.postgres.test.ts` と `error-message-omits-params.postgres.test.ts` の追加分）を走らせていない。2軸の組み合わせ（`decayFloorAnyAxis` ほか）の条件が Postgres と同じ結果になること（0505 は実測したと書くが、再実行していない）。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
