@@ -562,6 +562,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0555](./0555-core-fake-outbox-rows-honor-opts-now.md) | core の Fake が積む outbox 行の時刻も、`opts.now` に従う（`availableAt`・`createdAt`。InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0556](./0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) | testkit の InMemory の `abortIfSuperseded` と、testkit・core の Fake の `EventStore.get` も、大文字の id を Postgres と同じに扱う | 採用 (2026-10) |
+| [0557](./0557-core-fake-superseded-by-checks.md) | core の Fake も `supersededById` の断り（ADR 0503・0515）を持つ（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0558](./0558-inmemory-self-supersede-check-folds-both-sides.md) | testkit の InMemory の自己置換の検査は、`supersededById` と対象の id の両側を畳んで比べる | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
