@@ -76,6 +76,7 @@ await runtime.forget(ctx, { memoryIds: [] });
 
 **Phase 1（MVP）の実装が一巡した。**`packages/core`（型・interface・runtime）、`packages/postgres`、
 `packages/openai`、`packages/anthropic`、`packages/local-embedding`、
+`packages/bullmq`（`runtime.tick()` を BullMQ で駆動する）、
 `packages/testkit`（適合テスト）、`examples/chat`（サンプル CLI）がある。
 Phase 1 の範囲と、そこに入れなかったものは [docs/roadmap.md](./docs/roadmap.md) を参照。
 
