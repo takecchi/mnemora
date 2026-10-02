@@ -80,6 +80,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・`kind`・SQLSTATE も変わらず、変わるのは message の `params:` 以降の文字列だけ（ADR 0423 と同じ扱い）。
   - **変えなかったこと**: `DrizzleQueryError` の `params` プロパティ、`cause`（pg のエラー）の `message`・`detail`。`PostgresVectorStore` 以外の store（`PostgresMemoryStore`・`PostgresEventStore`・`PostgresLexicalStore` など）を `Runtime` を通さずに直接呼んだときの例外（ADR 0504 の表。負債）。
 
+### Fixed
+
+- **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
+
 ## [1.2.0] - 2026-10-02
 
 **この節は `v1.1.0`（tag が指す `5eb6e9d`、[PR #1443](https://github.com/takecchi/mnemora/pull/1443) がその commit の中身）… の差分である。**オーナーが 2026-09-30 に tag `v1.1.0` を `5eb6e9d` で publish し、npm にも `1.1.0` が出た。⟹ **これにより、下の `[1.1.0]` 節は出荷済みになった。**この節は、`5eb6e9d` より後に `main` へ入った PR を数える。
