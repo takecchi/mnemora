@@ -2448,6 +2448,61 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。
 
+### 55. 差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた（`@mnemora/core`）
+
+[ADR 0497](./decisions/0497-recall-rejects-broken-token-counter.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。材料は [ADR 0483](./decisions/0483-token-counter-broken-values.md)）。
+
+⚠ **未リリース**。**番号は 55 である**——項目53 の続き（54 はマネージャーの採番で別の変更が使う番号。番号が衝突したら merge のときに振り直すこと）。
+
+**何が変わったか**: `recall()` は、利用者が `RuntimeDeps.tokenCounter` に渡した `TokenCounter` の `count()` の戻りごとに、`tokens` が有限で 0 以上の number かを確かめる。違えば `RangeError`（message は `NaN`・`Infinity`・`-Infinity`・`a negative number`・`a non-number (...)` のどれか。入力テキストは載せない）。最初の壊れた値で止まる。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた呼び出しが、新しく例外になる**。項目21・23・24・27・34・49・51・52 と同じ扱い。以前は、`NaN`・負の数を返す counter では `maxMemoryTokens` が黙って外れて全件が返り、`Infinity` では全件が落ちて、`outputValidation: "off"` では何も知らされなかった（ADR 0483 の実測）。
+
+**誰が影響を受けるか**: 自前の `TokenCounter` を `createRuntime({ tokenCounter })` に渡していて、それが `NaN`・負の数・`Infinity`・number でない値を返す（または `undefined` を返す）ことがある人だけ。既定の `heuristicTokenCounter` を使う人、`count()` が常に有限で 0 以上の数を返す人は、何も変わらない。小数を返す counter も変わらない。
+
+**どう直すか**:
+- 外部のトークナイザ（`tiktoken` 系など）の結果を返しているなら、`count()` の中で `Math.max(0, n)` にし、`Number.isFinite(n)` でなければ**自分で**扱いを決める（例外にする、または `heuristicTokenCounter.count(text)` に落とす。落とすなら `counter: "heuristic"` を返して、実測の顔をしないこと）。
+- 「トークナイザが失敗したら `NaN` を返して予算を外す」ことに頼っていたなら、その挙動は無くなった。予算を外したいなら、`budget` を渡さないこと（それでも `usage` の計測で `count()` は呼ばれるので、戻り値は有限で 0 以上でなければならない）。
+- 例外を投げる counter の扱いは変わらない（包まずそのまま `recall()` の失敗になる）。
+- 壊れた counter が本番で動いていたかを確かめるには、`count()` の戻りを一時的に包み、有限で 0 以上でない値をログに出す（入力テキストは出さないこと）。
+
+**DB マイグレーション**: 要らない。
+
+⟹ **この項目（ADR 0497）も、この節が数える破壊的変更である。**
+⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+### 56. provider のコンストラクタと `createBullmqTickDriver` が、壊れた数値オプションを構築時に例外で断るようになった（`@mnemora/bullmq`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）
+
+[ADR 0498](./decisions/0498-constructor-config-checks.md)（クローン miku の決定。担い手が書いた。オーナーではない。[ADR 0477](./decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) の案1・[ADR 0467](./decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) の面C。オーナーが v1.X.0 での破壊的変更を許した）。
+
+⚠ **未リリース**。**番号は 56 である**。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 次の数値（と名前）のオプションを、構築時に検査する。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message は `<クラス名>: <欄> must be …, got <値>` の形で、値が入る。**省略時の既定は変えない。**
+型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+| パッケージ | 欄 | 通る値 |
+|---|---|---|
+| `@mnemora/bullmq` | `everyMs` | 数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下（小数 `1.5` は通る。`"50"` は断る） |
+| `@mnemora/bullmq` | `jobName` | 省略、または空でない文字列 |
+| `@mnemora/openai` | `OpenAIEmbeddingProvider` の `dimensions` | 正の安全な整数 |
+| `@mnemora/openai` | `OpenAILLMProvider` の `temperature` | 省略、または有限で `0` 以上（上限は見ない） |
+| `@mnemora/anthropic` | `AnthropicLLMProvider` の `maxTokens` | 省略、または正の安全な整数 |
+| `@mnemora/local-embedding` | `dimensions`・`numThreads` | 省略、または正の安全な整数 |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は構築できた入力が、新しく例外になる**。項目21・23・24・27・34・49 と同じ扱い。
+- `@mnemora/bullmq`: 以前は、負・`1` 未満の小数・`1e21` 以上の `everyMs`、空文字の `jobName` で `start()` が成功したまま tick が黙って止まった（ADR 0477）。`0`・`NaN`・`null`・`Infinity` は `start()` が reject した。`"50"`（文字列）は動いていたが、今は断る。`MAX_SAFE_INTEGER` 超（`2^53` など）は動いていたが次の発火が何万年も先だった。
+- `@mnemora/openai`・`@mnemora/local-embedding`: 壊れた `dimensions` は `space.dimensions` にそのまま入り、API の 400 か、初回 `embed()` の次元の食い違いで初めて失敗した。`numThreads`・`maxTokens`・`temperature` の壊れた値は、onnxruntime・API が後で断った（または黙って受けた）。
+
+**誰が影響を受けるか**: これらの欄に、設定ファイル・環境変数から読んだ値をそのまま（文字列のまま・`NaN` のまま・負のまま）渡している利用者。`Number(process.env.X)` が `NaN` になる、`"50"` を渡している、など。`Runtime` が渡す値ではないので、`observe()`・`recall()`・`tick()` の挙動は変わらない。
+
+**どう直すか**:
+- `everyMs`・`dimensions`・`maxTokens`・`numThreads` は、`Number(...)` で数にしてから、範囲を確かめて渡す（`Number.parseInt(value, 10)` など）。文字列のまま渡さない。
+- `temperature` は `0` 以上の有限の数にする。上限（OpenAI は 2 まで、など）は API ごとに違い、ここでは見ない。
+- `jobName` は、空文字を渡さず、既定にしたいなら欄ごと省略する（`undefined` は既定）。空文字は以前は tick が止まる設定だったので、実際に動いていた構成は影響を受けない。
+- `createBullmqTickDriver` の構築を `try` で囲んでいない構成は、構築時に投げるようになるので、起動時に落ちる。起動時の検査として扱えばよい。
+
+**DB マイグレーション**: 要らない。ただし `everyMs` が負・`1e21` で止まった scheduler・`delayed` のジョブが Redis に残っていることがある（ADR 0477）。正しい `everyMs` の driver が `start()` すれば scheduler は上書きされる。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

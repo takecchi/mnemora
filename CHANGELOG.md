@@ -314,6 +314,23 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目54。DB マイグレーションは無い。
   - 【確かめていないこと】本物の OpenAI・Anthropic の LLM を通した経路。全テストは走らせていない（関連するファイルだけ）。
 
+- **差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か、壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた——自前の `TokenCounter` を `createRuntime` に渡している人へ**（[ADR 0497](./docs/decisions/0497-recall-rejects-broken-token-counter.md)、`@mnemora/core`）。
+
+  以前は、`NaN`・負の数を返す counter では段4のトークン予算（`maxMemoryTokens`・`promptBudgetTokens`）が**黙って外れて全件が返り**（`budget_dropped` も出ない）、`Infinity` では全件が落ちた（[ADR 0483](./docs/decisions/0483-token-counter-broken-values.md)）。`RuntimeDeps.outputValidation: "off"` では何も知らされなかった。今は、`count()` の戻り値の `tokens` が有限で 0 以上の number でなければ（`NaN`・負の数・`±Infinity`・number でない値・戻り値の欠落）、`recall()` は `RangeError` で断る。message は値の種類だけを載せ、入力テキストは載せない。最初の壊れた値で止まる。予算が無くても（`usage` の計測で `count()` が呼ばれる）、`outputValidation` の値にかかわらず断る。
+
+  - **変わらないこと**: 小数（`0.5`）は通る。`count()` が投げた例外は、これまでどおり包まずそのまま `recall()` の失敗になる。`counter` の欄の欠落・範囲外は断らず、これまでどおり `usage.counter` に出て `outputValidation` が知らせる。既定の `heuristicTokenCounter` は必ず通り、既定の挙動は変わらない。型・シグネチャ・公開 API は変わらない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目55。**DB マイグレーションは無い。**
+
+- **provider のコンストラクタと `createBullmqTickDriver` が、壊れた数値オプションを構築時に例外で断るようになった（`@mnemora/bullmq`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）**（[ADR 0498](./docs/decisions/0498-constructor-config-checks.md)。[ADR 0477](./docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) の案1・[ADR 0467](./docs/decisions/0467-recall-footprint-nonfinite-inputs-fallback-digest-grapheme.md) の面C を、オーナーが v1.X.0 での破壊的変更を許したので採った）
+
+  以前は壊れた値が黙って通り、API・BullMQ に渡ってから失敗する（または静かに止まる）か、`space.dimensions` に壊れた値が入った。今は構築時（`new`・`createBullmqTickDriver(...)`）に断る。型が違えば `TypeError`、数として不正なら `RangeError`（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）。message に値が入る（数値・名前で、秘密ではない）。**省略時の既定は変えない。**
+  - **`@mnemora/bullmq`**: `everyMs` は数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下でなければ投げる（小数 `1.5` は通す。数値の文字列 `"50"` は断る）。`jobName` は省略（既定 `"mnemora-tick"`）か空でない文字列でなければ投げる。**以前は、負・`1` 未満の小数・`1e21` 以上の `everyMs` と空文字の `jobName` で、`start()` が成功したまま tick が数回（1回）で黙って止まり、`onTickError` も鳴らなかった**（ADR 0477 の実測）。`queueName` は BullMQ が同期的に投げるので触らない。
+  - **`@mnemora/openai`**: `OpenAIEmbeddingProvider` の `dimensions` は正の安全な整数、`OpenAILLMProvider` の `temperature`（渡すなら）は有限で `0` 以上でなければ投げる（上限は API ごとに違うので見ない）。
+  - **`@mnemora/anthropic`**: `AnthropicLLMProvider` の `maxTokens`（渡すなら）は正の安全な整数でなければ投げる。この provider に `temperature` の欄は無い。
+  - **`@mnemora/local-embedding`**: `LocalEmbeddingProvider` の `dimensions`・`numThreads`（渡すなら）は正の安全な整数でなければ投げる。`maxBatchSize`・`retry.attempts` は、今までどおり丸める（投げない）。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は構築できた入力が、新しく例外になる**。公開の型・export は増えない（検査は各パッケージの内部）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目56。DB マイグレーションは無い。
+
 ### Added
 
 - **recall の埋め込みが失敗したとき、`stage_skipped(candidate_generation, embedding_provider_unavailable)` に、原因の種類を返す任意の欄 `cause` を足した**（[PR #1504](https://github.com/takecchi/mnemora/pull/1504)）。`cause.kind` は `provider_threw`・`no_vector`・`dimension_mismatch`・`non_finite`。`provider_threw` のときだけ、投げられた値の文字列の `kind` を `providerErrorKind`、`Error` の `name` を `errorName` に載せる。**error の message・ベクトルの値は載せない。**既存の欄・値と、語彙検索へ劣化して続ける振る舞いは変えていない。
@@ -471,6 +488,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 公開の型・DB は変えていない。非破壊と数える（`meta.note` は型の付かない JSON 文字列で、中身のキーは契約の型ではない。理由は ADR 0431）。
 
 ### Fixed
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createObservation`・`createObservationWithOutbox` が、関数・`Symbol` を欄の値に持つ値や `toJSON` を持つ値を含む `payload`（`observe({ kind: "event", data })` の `data`）を、`DataCloneError` で断らずに、`@mnemora/postgres` と同じ規則で保存するようになった。**（[ADR 0486](./docs/decisions/0486-fixture-event-data-align-and-context-text-unit.md)）関数・`Symbol` の欄は消え（配列の要素なら `null`）、`toJSON` はその戻り値で保存する。`NaN`・`-0`・`Date`・値が `undefined` の欄の扱いは変えていない。断る入力が減るだけで、非破壊。
+- **`recall()` の多者間の群（`RelationStore`）まわりの 2 つの割れを直した。**(1) `relationMaxCount` を超えて切った群のメンバーを、連想の `unit_assembly_dropped`・`over_limit`、または段2の `below_threshold` などでもう一度数えていた（`omitted` の件数の和が `totalInScope` を超えた）。切ったメンバーは連想の候補から外し、段2の件数から取り下げる（連想の席が、どうせ落ちる群のメンバーに取られなくなる）。(2) `RelationStore.link` で `active` な記憶へ辺を張ると、その記憶が結果に 2 回返っていた。群のメンバー（`contested` で `contestedWithId` なし）でない候補は、辺があっても群に入れない。新しく断る入力は無い（[ADR 0494](./docs/decisions/0494-fuzz-relations-and-argument-mutation.md)）
 
 - **`created` イベントの `meta.languageMismatch`（ADR 0391）の判定が、ローマ数字（`Ⅳ` など）を「ラテン文字」に数えていたのを、文字（`\p{L}`）だけを数えるように直した。**`contentLatinShare` が1を超える値（例: 2.5）になり、20字の下限もローマ数字ですり抜けていた。閾値と `rule` は変えていない。変わるのはローマ数字を含む本文・観測の判定だけで、保存済みの印は書き換えない（[PR #1597](https://github.com/takecchi/mnemora/pull/1597)）。
 
@@ -698,6 +718,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `everyMs` が `0`・`NaN`・`null`・`Infinity` なら `start()` が reject する。**負の値・`1` 未満の小数・`1e21` と、空文字の `jobName` では、`start()` が成功したまま tick が数回（1回）で黙って止まる**（`onTickError` にも届かない）。`queueName` の空文字・`:` は `createBullmqTickDriver(...)` が同期的に投げる。止まったことの見分け方は README の節に書いた。
   - 構築時に検査して断るのは新しく断る入力なので、直していない（ADR 0477 の材料）。「そのまま渡す」を縛る歯（`tick-driver.option-passthrough.test.ts`、Redis 不要）を足した。
   - 非破壊と数える（文書と歯だけ）。
+  - ⚠ **後日の追記（ADR 0498）**: 上の「直していない」は、オーナーが v1.X.0 での破壊的変更を許したので、`everyMs`・`jobName` を構築時に断る形に替えた。`### Breaking` の「provider のコンストラクタと `createBullmqTickDriver`」の箇条を見ること。
 
 - **`examples/chat`: README に、ソースが読むのに載っていなかったフラグと環境変数の一覧を足した。実装は変えていない**（[ADR 0478](./docs/decisions/0478-example-chat-readme-flags-env-coverage.md)、穴探し49巡目）
   - `answer-time-weighting` の `--trials=N`・`--temperature=N`、`MNEMORA_BENCH_CHANNELS`・`MNEMORA_LEXICAL_STORE`・各サブコマンドの `MNEMORA_*_JSON`・`consolidation-cost`／`archive-sweep-cost` の調整用変数など、`cli.ts` のサブコマンドが読む変数を、新しい節「フラグと環境変数の一覧」に表にした。既定値の数は書き写さず、持っている定数・関数を指した。`src/scripts/*`・`src/bench/*` の単発の測定スクリプト専用の変数は載せない基準を節の冒頭に書いた。

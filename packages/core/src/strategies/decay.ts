@@ -55,8 +55,8 @@ function decayBase(params: DecayParams): Date {
 /**
  * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと7:
  * 単位を持たない数値核。`elapsed` と `halfLife` が「時間」の単位であろうと「recall 回数」の
- * 単位であろうと、この式自体は変わらない——`floorAt`/`floorSeqAt`（活動時計側は
- * `defaultActivityDecayStrategy.floorAt`）は、この核を「時刻」または「通し番号」で
+ * 単位であろうと、この式自体は変わらない——`defaultDecayStrategy.floorAt`（時刻）と
+ * `defaultActivityDecayStrategy.floorAt`（活動時計側。通し番号）は、この核を「時刻」または「通し番号」で
  * 包むだけの薄いラッパーになる。
  *
  * `strengthAt(now, params) = strength * decayFactor(elapsed, halfLife)` の `elapsed`/`halfLife`
@@ -76,7 +76,7 @@ export function decayFactor(elapsed: number, halfLife: number): number {
  * `decayFactor` の逆関数側——「`strength` が `threshold` をちょうど下回るまでの `elapsed`」を
  * 返す、単位を持たない数値核（ADR 0165 決めたこと7）。
  *
- * `strength <= threshold`（既に閾値以下）のときは `0` を返す——`floorAt`/`floorSeqAt` 側で
+ * `strength <= threshold`（既に閾値以下）のときは `0` を返す——`floorAt`（時刻側・活動時計側の両方）で
  * 「base をそのまま返す」という既存の分岐（`strength <= threshold` → 経過していない）に
  * 対応する、オフセット版の表現。
  *
