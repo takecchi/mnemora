@@ -73,4 +73,5 @@
   - README（ルート・`packages/*/README.md`）・`docs/*.md`（`architecture.md`・`conformance.md`・`memory-model.md`）: purge 済みの行の `MemoryStatusConflictError` の中身を述べた所は無く（grep: `MemoryStatusConflictError|purge 済み|purgedAt|observedStatus`）、0518 と食い違う主張は無かった。`[1.2.0]` と migration-v1 の v1.2.0 の節には触っていない。
 - **直したもの**: なし（文書の側にずれは無かった）。
 - **コードの側を直すべき食い違い（材料）**【判断】: 上の core の Fake。`purgedAt` が非 null の行の CAS（`updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories`）を、InMemory の `casMismatch` と同じにすれば揃う。Fake は `packages/core/src/__tests__/` の中で公開されない面で、0518 が「ほかの担当が触っている」として触らなかった。直す前に、Fake を使う core の歯が purge 済みの行の CAS に依っていないか見る必要がある。ここでは直さない。
+  - 別の PR で直す（担当はクローンが配る）。
 - **【未確認】**: 0518 の歯（`store-status-write-checks.postgres.test.ts` の14本）と変異試験を走らせていない（DB が要る）。Fake の振る舞いを実際に呼んで確かめていない（読んだだけ）。SQL_ASCII の DB。
