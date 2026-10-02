@@ -671,7 +671,7 @@ export interface MemoryStore {
    *   （`assertWellFormedIdentifier`）を入口で掛ける。**以前は**、`PostgresMemoryStore` は U+FFFD に置き換えて保存し、
    *   `InMemoryMemoryStore` は入力をそのまま保持していた。
    * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`、本文の欄:
-   *   例外を投げず、入力をそのまま保持する（`FakeMemoryStore` は識別子の欄も断らない。core の `Runtime` の入口が先に断る）。
+   *   例外を投げず、入力をそのまま保持する（本文の欄の話。`FakeMemoryStore` も、識別子の欄 `subjectId`・`externalId` の孤立サロゲート・NUL は `MalformedIdentifierError` で断る——ADR 0493。core の `Runtime` の入口も先に断る）。
    *
    * `createObservationWithOutbox` も同じである。今の振る舞いは
    * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
@@ -933,6 +933,14 @@ export interface MemoryStore {
    * `updateStatus(id, "active", { expectedStatus: "forgotten" })` が墓石を active に戻せた）。`expectedStatus` を渡さない
    * 呼び出しは、無条件の書き込みのまま（CAS ではないので、purge 済みでも通る。この条件は CAS の約束だけを直す）。
    * `updateStatusWithEvent`・`supersedeWithNewMemories` の `supersede[].expectedStatus`（弾かれた対象は `conflicted` に載る）も同じ。
+   *
+   * 🔴 **ADR 0503: `status === "superseded"` の更新は、置き換えた側を伴い、それは自分自身でないこと。** `opts.supersededById` が
+   * 無い（省略・`opts` 無し・`expectedStatus` だけ）、または `id` と同じ（自己置換）なら、何も書かずに `RangeError`
+   * （メッセージ: `updateStatus: opts.supersededById is required when status is "superseded"`・
+   * `updateStatus: opts.supersededById must not be the memory itself`。値は message に入れない）を投げる。以前は通って、戻せない
+   * `superseded`（`restoreSuperseded` の群に入らない）や自己参照の行ができた。`contested` の検査のあと、対象の存在確認・
+   * `supersededById` のテナント照合・`expectedStatus` の判定より前。`superseded` 以外の status は、`supersededById` が無くてよい。
+   * `Runtime` は、`superseded` を書くとき常に別の記憶（`reextract` の新しい行・`consolidate` の統合先）を渡す。
    */
   updateStatus(
     ctx: Ctx,
@@ -969,6 +977,9 @@ export interface MemoryStore {
    *
    * 🔴 `opts.supersededById` のテナント一致は `updateStatus` と同じく検査する（ADR 0439。`ctx.tenantId` の記憶でなければ、
    * 状態もイベントも書かずに `memory not found for tenant`）。
+   *
+   * 🔴 **ADR 0503: `status === "superseded"` の更新は、`opts.supersededById` を伴い、それは `id` 自身でないこと**（`updateStatus` と同じ。
+   * 満たさなければ、状態もイベントも書かずに `RangeError`。メッセージの接頭辞は `updateStatusWithEvent:`）。
    *
    * 🔴 **買わない不変条件**（呼び出し側の `reextract` ループが対象1件ごとにこのメソッドを
    * 呼ぶ場合）: 「複数回の呼び出しをまとめて全部成功させるか全部失敗させるか」は買わない。
@@ -2054,6 +2065,12 @@ export interface MemoryStore {
    *   実装は `RangeError`（メッセージ:
    *   `<実装のクラス名>: first.id and second.id must differ`。例: `PostgresMemoryStore: …`・
    *   `InMemoryMemoryStore: …`）を、書き込みを一切行う前に投げる。
+   * - 🔴 **ADR 0503: `supersededById` の約束を壊す入力は、何も書かずに `RangeError`**（値は message に入れない。`first.status`/`second.status`
+   *   の検査〔ADR 0499〕のあと、id の存在確認より前）。(1) `status: "superseded"` なのに `supersededById` が無い
+   *   （`resolveContestedPair: first.supersededById is required when status is "superseded"`。戻せない敗者になる）。(2) 自己置換
+   *   （`… must not be the memory itself`）。(3) `status: "active"` に `supersededById` を付ける（`… must not be set unless status is "superseded"`）。
+   *   (4) 互いを指す循環（`resolveContestedPair: supersededById must not form a cycle among the members`）。勝者を指す `superseded`・
+   *   `both_active`・対の外の記憶を指す `superseded` は断らない。`Runtime.resolveContested` は敗者にだけ勝者の id を渡す。
    * - 🔴 **ADR 0499: `first.status`/`second.status` が型の外（`"active"`・`"superseded"` 以外。`"forgotten"`・
    *   `"contested"`・`"archived"` など）なら、何も書かずに `RangeError`**（メッセージ:
    *   `resolveContestedPair: first.status must be "active" or "superseded"`〔`second` も同じ形〕。値は message に入れない）を
@@ -2247,6 +2264,13 @@ export interface MemoryStore {
    *   ADR 0381 §7 解消——当初は `MemoryStatusConflictError(missingId, "contested",
    *   "contested")` という `expectedStatus`/`observedStatus` が同じ値になる特別な
    *   使い方だったが、専用の型に切り出した）を投げ、何も書き込まない。
+   * - 🔴 **ADR 0503: `supersededById` の約束を壊す入力は、何も書かずに `RangeError`**（値は message に入れない。status の検査〔ADR 0499〕のあと、
+   *   id の存在確認より前）。(1) `status: "superseded"` のメンバーに `supersededById` が無い
+   *   （`resolveContestedGroup: members[<i>].supersededById is required when status is "superseded"`）。(2) 自己置換。
+   *   (3) `status: "active"` のメンバーに `supersededById` を付ける。(4) メンバー同士で輪になる `supersededById`
+   *   （`resolveContestedGroup: supersededById must not form a cycle among the members`）。(5) **群の外の `forgotten` な記憶を指す**
+   *   （`… must not be a forgotten memory outside the group`。テナントの照合のあと、書く前に判定する。群の外の `active` などを指す
+   *   `superseded`、群のメンバーを指す `superseded` は断らない）。`Runtime.resolveContestedGroup` は敗者にだけ、群の一員の勝者の id を渡す。
    * - 存在しない id は「memory not found」の `Error`。それ以外の CAS 違反は
    *   {@link MemoryStatusConflictError}（`expectedStatus` は常に `'contested'`）。
    *   全部成功するか全部失敗するかのどちらか。

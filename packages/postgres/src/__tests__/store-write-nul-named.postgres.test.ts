@@ -7,8 +7,10 @@ import type {
   MemoryStore,
   NewMemory,
   NewMemoryEvent,
+  NewObservation,
+  NewRecallRecord,
 } from "@mnemora/core";
-import { buildNewMemoryFixture } from "@mnemora/testkit";
+import { buildNewMemoryFixture, buildNewObservationFixture } from "@mnemora/testkit";
 import { InMemoryEventStore, InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -475,6 +477,117 @@ for (const [kitName, makeKit] of KITS) {
         at: new Date(),
       });
       expect(restored.map((m) => m.id)).toEqual([old.id]);
+    });
+  });
+}
+
+// ---- observations・recalls に書く口（ADR 0505。ADR 0456 M4 の残り）----
+
+const OBSERVATION_NUL_CASES: Array<[string, Partial<NewObservation>, RegExp]> = [
+  ["payload の値", { payload: { text: NUL } }, /payload/],
+  ["payload の key", { payload: { [NUL]: "v" } }, /payload/],
+  ["payload の入れ子", { payload: { a: [{ b: NUL }] } }, /payload/],
+  ["attributes の値", { attributes: { k: NUL } }, /attributes/],
+  ["attributes の key", { attributes: { [NUL]: "v" } }, /attributes/],
+  ["kind", { kind: NUL }, /kind/],
+];
+
+const RECALL_RECORD: NewRecallRecord = {
+  tenantId: A.tenantId,
+  subjectId: null,
+  query: { text: "q" },
+  budget: null,
+  omitted: [],
+  usage: {
+    chars: 0,
+    estimatedTokens: 0,
+    counter: "heuristic",
+    byTier: { full: 0, digest: 0, index: 0 },
+    indexChars: 0,
+  },
+  indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+  explain: { stages: [] },
+  returnedMemories: [],
+};
+
+const RECALL_NUL_CASES: Array<[string, Partial<NewRecallRecord>, RegExp]> = [
+  ["query", { query: { text: NUL } }, /query/],
+  ["query の key", { query: { [NUL]: "x" } }, /query/],
+  ["budget", { budget: { chars: 1, x: NUL } as never }, /budget/],
+  ["omitted", { omitted: [{ reason: NUL }] as never }, /omitted/],
+  ["usage", { usage: { ...RECALL_RECORD.usage, counter: NUL } as never }, /usage/],
+  ["indexBand", { indexBand: { groups: [NUL], totalInScope: 0 } as never }, /indexBand/],
+  ["explain", { explain: { stages: [{ stage: NUL }] } as never }, /explain/],
+  ["returnedMemories", { returnedMemories: [{ memoryId: NUL }] as never }, /returnedMemories/],
+];
+
+for (const [kitName, makeKit] of KITS) {
+  describe(`${kitName}: Observation・Recall の記録の NUL を名指しで断る（ADR 0505）`, () => {
+    const observationMouths: Array<
+      [string, (kit: Kit, input: NewObservation) => Promise<unknown>]
+    > = [
+      ["createObservation", (kit, input) => kit.store.createObservation(A, input)],
+      [
+        "createObservationWithOutbox",
+        (kit, input) => kit.store.createObservationWithOutbox!(A, input, []),
+      ],
+    ];
+    for (const [mouth, write] of observationMouths) {
+      it.each(OBSERVATION_NUL_CASES)(
+        `${mouth}: %s の NUL は名指しで断る`,
+        async (_label, patch, field) => {
+          const kit = await makeKit();
+          const input = buildNewObservationFixture({
+            tenantId: A.tenantId,
+            externalId: `ext-${mouth}`,
+            ...patch,
+          });
+          const error = await caught(() => write(kit, input));
+          expectNamed(error, field);
+          expect((error as Error).message).toMatch(/^(Postgres|InMemory)MemoryStore: /);
+          // 何も書かれていない: 同じ externalId で NUL を除いた入力が、新しい行として書ける
+          const clean = buildNewObservationFixture({
+            tenantId: A.tenantId,
+            externalId: `ext-${mouth}`,
+          });
+          const written = (await write(kit, clean)) as { created?: boolean };
+          if (mouth === "createObservationWithOutbox") {
+            expect(written.created).toBe(true);
+          }
+        },
+      );
+
+      it(`${mouth}: 陽性対照（NUL を含まない・NUL に似た文字・対になったサロゲート）は通る`, async () => {
+        const kit = await makeKit();
+        await expect(
+          write(
+            kit,
+            buildNewObservationFixture({
+              tenantId: A.tenantId,
+              kind: "utterance\u0001",
+              payload: { text: PAIR, literal: "a\\u0000b", [PAIR]: [LONE.length] },
+              attributes: { k: PAIR },
+            }),
+          ),
+        ).resolves.toBeDefined();
+      });
+    }
+
+    it.each(RECALL_NUL_CASES)(
+      "createRecall: %s の NUL は名指しで断る",
+      async (_label, patch, field) => {
+        const kit = await makeKit();
+        const error = await caught(() => kit.store.createRecall(A, { ...RECALL_RECORD, ...patch }));
+        expectNamed(error, field);
+        expect((error as Error).message).toMatch(/^createRecall: /);
+      },
+    );
+
+    it("createRecall: 陽性対照（NUL を含まない・対になったサロゲート）は通る", async () => {
+      const kit = await makeKit();
+      await expect(
+        kit.store.createRecall(A, { ...RECALL_RECORD, query: { text: PAIR, [PAIR]: "a\\u0000b" } }),
+      ).resolves.toBeDefined();
     });
   });
 }
