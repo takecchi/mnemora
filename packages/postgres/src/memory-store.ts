@@ -158,7 +158,9 @@ async function lockExistingLabelsInNameOrder(
   ctx: Ctx,
   tagLists: ReadonlyArray<readonly string[]>,
 ): Promise<void> {
-  const names = Array.from(new Set(tagLists.flat()));
+  // NUL（U+0000）を含む名前は問い合わせに載せない: DB が生の例外で断るので、後の名指しの検査
+  // （ADR 0499 の `assertNoNulInNewMemory`）より前に例外の形が変わってしまう。その候補は後で名指しで断られる。
+  const names = Array.from(new Set(tagLists.flat())).filter((name) => !name.includes("\u0000"));
   if (names.length === 0) {
     return;
   }
