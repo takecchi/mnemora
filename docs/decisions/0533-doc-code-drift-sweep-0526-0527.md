@@ -57,3 +57,27 @@
 - **陽性対照**【実測】: 一時の md に存在しない識別子 `DEFAULT_TICK_LIMITX` を書いて識別子の照合に通し、拾った（実在する `DEFAULT_TICK_LIMIT` は拾わなかった）。一時ファイルは削除した。「文書・TSDoc と 0529 の結果の一致」には機械の陽性対照が無い（手で読んだ）。
 - **【未確認】**: 0529 の2つの歯（Fake・InMemory・実 Postgres）を走らせていない。ADR 0529 が書く Postgres の並行の分かれ方（160 回の観測）と、変異試験の結果。0529 が測っていないと書く範囲（`tick` 以外の層の並行）。
 - **走らせたコマンド**: `git fetch origin && git merge origin/main`、`git checkout --theirs docs/decisions/README.md`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
+
+## 追い足し（基準 main `1fde1b30`、ADR 0507 の分）
+
+0507（#1620）が main に入ったので掃いた（`git diff afb3bd90 1fde1b30`）。この枝は `origin/main` を merge した（衝突なし）。0503・0505・0508・0530・0531・0532 などは、まだ追い足していない。
+
+- **0507 の中身**【現物】: `created` の `meta.languageMismatch`（言語の事後検査）の、観測側の数え（本文の合成と、かな・漢字・ラテン文字の数）を、候補ごとから観測ごとに1回へ畳んだ（perf）。`language-mismatch.ts` に `profileObservationLanguage`・`detectLanguageMismatchFromProfile` を足し、`detectLanguageMismatch` は両者の合成にした。`runtime.ts` の `observationLanguageProfileOf` が `Observation` のオブジェクトを鍵にした `WeakMap` で畳む。観測のかな・漢字が下限に満たないときはラテン文字を数えない（結果は同じ）。判定の結果・`rule`・印の形・閾値は変えていない。
+- **探した場所**【現物】:
+  - 語の grep: `languageMismatch|detectLanguageMismatch|language-mismatch` を `README.md`・`docs/*.md`・`packages/*/README.md`・`packages/core/src/*.ts`・`interfaces/*.ts`（`docs/decisions/`・`__tests__`・`CHANGELOG`・`migration-v1` を除く）に。`33万字|62 ms|約6秒|数え直` を同じ範囲に。ヒットは `docs/memory-model.md` の行2の `created` の `meta.languageMismatch` の説明と、`language-mismatch.ts`・`runtime.ts` の TSDoc・コメントだけだった（「数え直し」の他のヒットは、別の話の「散文で数え直さない」の類）。
+  - 読んだ所: `docs/memory-model.md`（§11 の行2の `meta.languageMismatch`）、`language-mismatch.ts` の冒頭の TSDoc（閾値の根拠・コード片と URL の扱い）、`runtime.ts` の `buildCreatedEventFor` とその直前のコメント。
+  - 差の確認: `git diff afb3bd90 1fde1b30 -- CHANGELOG.md packages/core/src`。CHANGELOG `[1.3.0]`（`### Changed` の項）は 0507 自身が足している。`docs/migration-v1.md` に項目は無い。
+  - 機械照合を、前回（0529 の追い足しのあと）と同じ文書の集合に再度通した。
+- **突き合わせの結果**【現物】:
+  - `memory-model.md` の説明は、判定の条件（観測のかな・漢字が4字以上で、かな・漢字 ÷（かな・漢字 + ラテン文字）が 0.3 以上、本文にかな・漢字が無くラテン文字が大半）、値の形（`{ rule: 'cjk_observation_latin_content', contentLatinLetters, contentLatinShare }`）、検査する経路（sync・deferred・`reextract`。全文フォールバックと行12・13は付かない）を書く。0507 はこのどれも変えておらず、数え方（観測ごとか候補ごとか）を書いた記述はもともと無い。**観測ごと・候補ごとに数えると書いた古い記述は見つからなかった。**
+  - CHANGELOG の項（判定の結果・`rule`・印の形・公開 API は変えない。100 候補で約 4.9 秒 → 約 0.06 秒の手元の1回の実測。門にしていない）は、ADR 0507 の【実測】（4.7〜5.0 秒 → 54〜73 ms）の範囲に入る。実装と矛盾しない。
+  - `language-mismatch.ts` の新しい TSDoc（観測ごとに1回数えて使い回す・数えるのは観測の本文だけで候補には依らない・`detectLanguageMismatchFromProfile` は結果が同じ）は、実装と一致した。`runtime.ts` の `observationLanguageProfileOf` のコメント（同じ抽出の候補は同じ `Observation` のオブジェクトを渡す・弱参照）は、ADR 0507 決定3の【現物】と同じ。
+- **直したもの**: なし（文書の側に古い記述が無かった）。
+- **材料として残す【判断】**（直していない）:
+  - `language-mismatch.ts` の `profileObservationLanguage` の TSDoc に「33万字で数十 ms」という測った値が書かれている。実測の記録としての注記だが、`main` の実装や半減期の変更で動く値で、AGENTS.md の「数を、道具と生成物に焼き込まない」の線に近い（コードのコメントは対象の道具・生成物ではないので、規律の外とも読める）。直すかはクローンの判断。
+  - ADR 0507 の負債: `WeakMap` は「同じ観測なら同じオブジェクトが渡る」ことに頼る（別のオブジェクトが渡れば畳みが効かないだけで、結果は正しい）。文書には書かれていない。
+- **コードの側を直すべき食い違い**: 見つからなかった。
+- **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回と、行番号を除いて同じだった。
+- **陽性対照**【実測】: 一時の md に存在しない識別子 `profileObservationLanguageX` を書いて識別子の照合に通し、拾った（実在する `profileObservationLanguage` は拾わなかった）。一時ファイルは削除した。「数え方を書いた古い記述が無い」ことは grep の形（`languageMismatch` 系のヒットが上の範囲だけ）で見た。実装と文書の突き合わせには機械の陽性対照が無い（手で読んだ）。
+- **【未確認】**: 0507 の歯（`language-mismatch-count-once.test.ts`）を走らせていない。CHANGELOG の実測値（約 4.9 秒 → 約 0.06 秒）を測り直していない。`Observation` が呼び出しの途中で書き換わる経路が無いこと（ADR 0507 も全経路の確認はしていないと書く）。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
