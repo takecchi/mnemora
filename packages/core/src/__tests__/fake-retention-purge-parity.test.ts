@@ -75,6 +75,17 @@ async function scenario(env: Env): Promise<Result> {
     const ctx = fresh();
     // cutoff の前後（1ms・ミリ秒の端数）と、ちょうど。at は cutoff + n ms
     for (const [i, n] of [-1000, -1, 0, 1, 999, 1000].entries()) await appendAt(ctx, eventAt(n), i);
+    // 古い `events_purged`（掃除の記録）は、掃除の対象にならない（記録を消し続けない）
+    await ev.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: null,
+      kind: "events_purged",
+      actor: { type: "system" },
+      digestSnapshot: null,
+      sizeBeforeBytes: null,
+      meta: { purgedCount: 0, oldestPurgedAt: null, newestPurgedAt: null, olderThan: "old record" },
+      at: eventAt(-2000),
+    });
     out["retention: no setting"] = [
       await mem.purgeExpiredEventsByRetention!(ctx, { now: NOW, limit: 100 }),
       (await eventsOf(ctx)).length,
@@ -293,29 +304,38 @@ async function scenario(env: Env): Promise<Result> {
   }
   return out;
 }
-
 const EXPECTED: Result = {
   "retention: no setting": [
     {
       kind: "unset",
     },
-    6,
+    7,
   ],
   "retention: unlimited": [
     {
       kind: "unlimited",
     },
-    6,
+    7,
   ],
   "retention: 30 days, dryRun": [
     "executed",
     [2, false, "2026-05-01T23:59:59.000Z", "2026-05-01T23:59:59.999Z", true],
-    6,
+    7,
   ],
   "retention: 30 days, limit 1 (the oldest goes first)": [
     "executed",
     [1, true, "2026-05-01T23:59:59.000Z", "2026-05-01T23:59:59.000Z", false],
     [
+      [
+        "events_purged",
+        null,
+        {
+          newestPurgedAt: null,
+          olderThan: "old record",
+          oldestPurgedAt: null,
+          purgedCount: 0,
+        },
+      ],
       ["updated", "2026-05-01T23:59:59.999Z", 1],
       ["updated", "2026-05-02T00:00:00.000Z", 2],
       ["updated", "2026-05-02T00:00:00.001Z", 3],
@@ -337,6 +357,16 @@ const EXPECTED: Result = {
     "executed",
     [1, false, "2026-05-01T23:59:59.999Z", "2026-05-01T23:59:59.999Z", false],
     [
+      [
+        "events_purged",
+        null,
+        {
+          newestPurgedAt: null,
+          olderThan: "old record",
+          oldestPurgedAt: null,
+          purgedCount: 0,
+        },
+      ],
       ["updated", "2026-05-02T00:00:00.000Z", 2],
       ["updated", "2026-05-02T00:00:00.001Z", 3],
       ["updated", "2026-05-02T00:00:00.999Z", 4],
@@ -368,6 +398,16 @@ const EXPECTED: Result = {
     "executed",
     [4, false, "2026-05-02T00:00:00.000Z", "2026-05-02T00:00:01.000Z", false],
     [
+      [
+        "events_purged",
+        null,
+        {
+          newestPurgedAt: null,
+          olderThan: "old record",
+          oldestPurgedAt: null,
+          purgedCount: 0,
+        },
+      ],
       [
         "events_purged",
         null,
