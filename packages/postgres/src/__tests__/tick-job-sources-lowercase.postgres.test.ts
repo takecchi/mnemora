@@ -139,7 +139,6 @@ async function mkEnv(be: string): Promise<Env> {
   return { st, rt, ids, setNow: (n) => (now = n), getNow: () => now };
 }
 
-
 const lowerOnly = (xs: unknown, e: Env) =>
   (xs as string[]).map((id) =>
     e.ids.includes(id) || id === e.seed
