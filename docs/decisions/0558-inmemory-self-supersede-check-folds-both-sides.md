@@ -36,7 +36,7 @@
 | M2a `supersededById` だけ畳む | 赤にならない（等価変異。対象の id は呼び出し側が畳み済みなので、`normId(selfId)` を外しても入力が変わらない。決定1の「冗長」の根拠） |
 | M2b `selfId` だけ畳む | M1 と同じ（単体2本・突き合わせ2本） |
 | M3a 粗すぎる比べ（数字を落として比べる） | 単体11本（別の記憶を指す正当な呼び出し・ADR 0503 の循環・forgotten の検査など。うち今回足した対照は2口分） |
-| M3b `supersededById` が小文字でなければ常に断る | 今回足した対照2本（`updateStatus`・`updateStatusWithEvent` の「別の記憶を大文字で渡すと通る」）だけ。【未確認】突き合わせ側では走らせていない |
+| M3b `supersededById` が小文字でなければ常に断る | 今回足した対照2本（`updateStatus`・`updateStatusWithEvent` の「別の記憶を大文字で渡すと通る」）だけ。突き合わせは59本中1本赤（既存の `edge.markContested(supersededById UP via updateStatus)`。Postgres は通し InMemory が断る）。PostgreSQL 17.11・port 55471 で実測、戻した後は59本緑 |
 | M4 自己置換の検査ごと消す | 単体8本（既存の自己置換4本＋今回の4本）。突き合わせ4本 |
 
 ## 直さないもの【判断】
@@ -46,7 +46,7 @@
 
 ## CHANGELOG【判断】
 
-`@mnemora/testkit` は公開物で `./fixtures` を出しているので、`[1.3.0]` の `### Fixed` に1項目足した（ADR 0521・0556 と同じ理由）。`[1.2.0]` には触らない。綴り違いの自己置換が新しく断られる点は、Postgres が今断る入力だけなので、項目にそう書いた。
+`@mnemora/testkit` は公開物で `./fixtures` を出しているので、`[1.3.0]` の `### Fixed` に1項目足した（ADR 0521・0556 と同じ理由）。`[1.2.0]` には触らない。綴り違いの自己置換が新しく断られる点は、Postgres が今断る入力だけなので、項目にそう書いた。公開の fixture が新しく例外を投げる変更なので、`docs/migration-v1.md` の「🟡 v1.2.0 → 次の版」にも1項目載せた（ADR 0505・0499 と同じ扱い。破壊的とは数えない）。
 
 ## 採らなかった案
 
