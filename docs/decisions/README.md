@@ -515,5 +515,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0526](./0526-tick-jobs-after-delete-and-reextract-after-correction.md) | 穴探し — ADR 0524「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブの消した後の参照と、訂正の経路で負けた記憶がある状態での `reextract`（3者一致。割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
