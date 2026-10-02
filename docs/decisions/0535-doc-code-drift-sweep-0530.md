@@ -192,3 +192,13 @@
 - **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。
 - **0509 が直さずに残した2つの割れと文書**【現物】: (1) core の Fake の `FakeLexicalStore` は部分一致で、Postgres（tsvector）は語一致——Fake は `packages/core/src/__tests__/` の中で公開されない面なので、README・約束の文書には記述が無く、古くなった記述も無い。(2) testkit の `InMemoryLexicalStore` はハイフンで語を割り、Postgres は `PROJ-12` を1語と数える——`in-memory-lexical-store.ts` の TSDoc の「違う・確認していないこと」が、ハイフンで結んだ識別子を2語に割ること・数字とハイフンのトークン化規則を再現していないことを、既に書いている。どちらも文書の側で直す所は無い。直すかどうか（fixture を Postgres に揃える線に載るか）は 0509 がオーナー側の判断として残している。
 - **【未確認】**: 0509 の fuzz を走らせていない。
+
+## 追い足し（基準 main `517d8bb6`、ADR 0513 の分）
+
+0513（#1639、`517d8bb6`）が main に入ったので掃いた（`git diff b86af25b 517d8bb6`。merge は衝突なし）。この節もマネージャーが書いた。
+
+- **0513 の中身**【現物】: ADR 0509 が残した語彙検索の割れ2つを、fixture の側を Postgres に揃えて直した。testkit の `InMemoryLexicalStore` はクエリを空白区切りの語に割り、語の中の token は隣接して並ぶことを要る（`PROJ-12` が1語）。core の Fake の `FakeLexicalStore` も語一致にした。`in-memory-lexical-store.ts` の TSDoc（「違う・確認していないこと」と `tokenize` まわり）、CHANGELOG `[1.3.0]`、migration-v1 の「🟡 v1.2.0 → 次の版」は 0513 自身が書いている（置き場所はどちらも未リリースの節であることを、見出しの行番号で確かめた）。
+- **この ADR の前の節との関係**: 上の「ADR 0509 の分」の節は、2つの割れを「直すかはオーナー側の判断として残っている」と書いた。**0513 でどちらも直った**（その節は当時の記録として残す）。割れ2について「TSDoc が既に書いている」と引いた段落は、0513 が書き直した。
+- **探した場所**【現物】: `grep -rn '英数字境界|部分一致|includes('` と `FakeLexicalStore` を `docs/recall.md`・`docs/conformance.md`・`docs/memory-model.md`・`docs/architecture.md`・`packages/{testkit,postgres,core}/README.md` に。出たのは `docs/recall.md` の alteroid の `ILIKE` の話と、`docs/architecture.md` の語彙の上限（`LEXICAL_QUERY_*`）の追記だけで、どちらも語の数え方の主張ではない。
+- **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。0513 が「揃えていないもの」に挙げた Postgres の text search parser の細部（符号付き token・`a.b`・ハイフン結合語）は、TSDoc と CHANGELOG に書いてある。
+- **【未確認】**: 0513 の歯を走らせていない。TSDoc の「それでも違うところ」の各例を実際に当ててはいない。
