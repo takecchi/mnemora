@@ -2530,6 +2530,31 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。purge 済みで、直す前の `updateStatusWithEvent` によって active に戻された行が在れば、その行の `content`・`digest` は墓石の固定の文字列のまま `active` になっている。調べる SQL は ADR 0499 に在る（読み取りだけ）。**既存の行は書き換えない**（データの書き換えはオーナーの判断が要る）。
 
+### 58. `observe()` が、`utterance.text`・`event.name`・`document.content` が空白だけの入力を `ZodError` で断るようになった（`@mnemora/core`）
+
+[ADR 0502](./decisions/0502-observe-rejects-whitespace-only-input.md)（クローン miku の決定。担い手が書いた。オーナーではない。材料は [ADR 0482](./decisions/0482-observe-input-kinds-event-data-roundtrip-table-tooth.md) の材料1）。
+
+⚠ **未リリース**。**番号は 58 である**。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: `ObserveInputSchema` が、`utterance.text`・`event.name`・`document.content` について、空文字に加えて、`String.prototype.trim` で空になる値（半角空白・タブ・改行・U+00A0・U+3000 など、JS の `trim` が落とす文字だけの値）を `ZodError` で断る。エラーの `path`（欄名）と message は、空文字を断ったときと同じ。型・シグネチャは変わらない。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた呼び出しが、新しく例外になる**。項目21・23・24・27・34・49 と同じ扱い。以前は、空白だけの本文が LLM にそのまま渡り、LLM が失敗すると `content` が空白だけの active な Memory が残った（ADR 0482 の実測）。
+
+**誰が影響を受けるか**: `observe()` の `text`・`name`・`content` に、ユーザー入力・外部システムの値をそのまま渡していて、それが空白・改行だけになりうる人（空の送信、前処理で中身が消えた文書、整形後に空になった発話など）。前後に空白のある普通の文は、これまでどおり通る（値はそのまま保存され、trim されない）。
+
+**どう直すか**:
+- 本文が空白だけのときは、**`observe()` を呼ばない**（何も観測していない）。呼び出し側で `if (text.trim() === "") return;` のように読み飛ばす。
+- `ZodError` を握りつぶして続けている呼び出し側は、握りつぶす対象を「本文が空白だけ」に絞るか、上のように呼ばない形にする。
+- 「空」の目印として何かを残したいなら、`event`（`name` に出来事の名前、`data` に詳細）を使う。`name` には意味のある文字列を渡すこと。
+- `trim` が落とさない文字（U+200B ZERO WIDTH SPACE など）だけの本文は、これまでどおり通る。断りたいなら呼び出し側で除く。
+- 変えていないもの: `document.title`・`utterance.speaker` など他の欄は、空白だけでも通る（空文字は元から断る）。抽出（LLM）が返す候補の本文の検査も変えていない。
+- すでに保存された空白だけの Memory は消えない。探すなら `content` が `^\s*$` に当たる active な Memory を読み取りで調べる（消すかどうかは利用者の判断）。
+
+**DB マイグレーション**: 要らない。
+
+⟹ **この項目（ADR 0502）も、この節が数える破壊的変更である。**
+⛔ ここに件数を書かない（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
