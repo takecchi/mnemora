@@ -1957,9 +1957,9 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
 describe("runtime.tick — リース競合は他のジョブの処理を止めない（ADR 0142 決定3）", () => {
   it("⭐ 1件が complete 時にリース競合しても、同じ tick 内の他のジョブは処理される", async () => {
     // fakeNow は実時刻より確実に先の、この describe 内で完全に制御する時刻。
-    // ジョブの availableAt は FakeBackingStore.enqueueJob が実時刻 `new Date()` で
-    // 打つため、fakeNow を実時刻より先に置くことで available_at <= now が
-    // 常に成立するようにする(実時刻とfakeNowの同期を取る必要を無くす)。
+    // 以前の Fake は、ジョブの availableAt を FakeBackingStore.enqueueJob が実時刻 `new Date()` で
+    // 打ったため、fakeNow を実時刻より先に置いて available_at <= now を常に成立させていた。
+    // 今の Fake は `opts.now` に従う(ADR 0555)が、この置き方は組み替えていない(ADR 0555 の「残り」)。
     let fakeNow = new Date(Date.now() + 1000);
     const fakeClock = { now: () => fakeNow };
     const leaseMs = 10;
