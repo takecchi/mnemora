@@ -522,6 +522,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0524](./0524-uppercase-and-after-delete-llm-paths.md) | 穴探し — ADR 0522「測っていないこと」の実測。`observe`・`reextract`・`consolidate`・`reflect` の「大文字の id」と「消した後の参照」（小文字では3者一致。大文字は既知の形に加えて、Postgres の `created` イベントの `meta.sources` に呼び出し側の綴りが残る形を1つ見つけた） | 採用 (2026-10) |
 | [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
-| [0528](./0528-doc-code-drift-sweep-0496-0500-0522-0523.md) | 文書とコードのずれを横に掃く（第3弾の1回目）— ADR 0496・0500・0522・0523 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0526](./0526-tick-jobs-after-delete-and-reextract-after-correction.md) | 穴探し — ADR 0524「測っていないこと」の実測。`tick` 経由の `consolidate`・`reflect` ジョブの消した後の参照と、訂正の経路で負けた記憶がある状態での `reextract`（3者一致。割れは見つからなかった。歯を足した） | 採用 (2026-10) |
+| [0528](./0528-doc-code-drift-sweep-0496-0500-0522-0523.md) | 文書とコードのずれを横に掃く（第3弾）— ADR 0496・0500・0522・0523 と、追い足した 0504・0499・0502・0506・0525・0521・0524 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
