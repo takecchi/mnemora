@@ -127,6 +127,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
 
+- **`lexicalMatch`（`LexicalStore` が返す `coverage`）の尺度を、3つの store（`PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`）で測り、文書と歯にした**（[ADR 0553](./docs/decisions/0553-lexical-coverage-scale-across-stores.md)。[ADR 0484](./docs/decisions/0484-recall-channel-merge-on-real-postgres.md) の負債1。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` を足し、各 store と `LexicalHit.coverage` の TSDoc に尺度と ADR への参照を足した）。
+  - 測ったのは、tsvector 版と InMemory が「一致した語数 ÷ 語の総数」の 1/n 刻みで同じ式であること、pg_trgm 版の日本語側が `word_similarity` の閾値による 0/1 の二値で（値は `rank` の側に入る）`GREATEST` で ASCII 側と合成されること。尺度は揃えていない（揃えるかはオーナーの判断）。
+  - ⭕ 非破壊と数える（文書と歯の追加のみ）。コードの振る舞い・公開 API・DB は変えていない。
+
 ### Fixed
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。

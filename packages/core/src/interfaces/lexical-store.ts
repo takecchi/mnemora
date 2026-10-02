@@ -83,6 +83,12 @@ export interface LexicalHit {
    * 常に `1` の二値）は ADR 0092 で置き換わった。**旧仕様はクエリ語彙を AND で結ぶ契約の
    * 上に立っており、英語の自然文（`what did we say about PROJ-1234`）のような複数語の
    * クエリでは「全語を含む記憶しか返らない」という負債を抱えていた（ADR 0084 §2.1.1・§8）。
+   *
+   * **⚠ 尺度は store ごとに同じではない。** tsvector 版・InMemory は上の式どおりの 1/n 刻み。
+   * pg_trgm 版は、ASCII 側は同じ式だが、日本語側は `word_similarity` が閾値以上なら 1、
+   * そうでなければ 0 の二値で、`GREATEST` で合成する（`word_similarity` の値は `coverage` ではなく
+   * `rank` に入る）。測った値と、尺度を揃えるなら何が動くかは
+   * [ADR 0553](../../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
    */
   coverage: number;
   /**
