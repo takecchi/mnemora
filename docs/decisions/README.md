@@ -520,6 +520,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
+| [0524](./0524-uppercase-and-after-delete-llm-paths.md) | 穴探し — ADR 0522「測っていないこと」の実測。`observe`・`reextract`・`consolidate`・`reflect` の「大文字の id」と「消した後の参照」（小文字では3者一致。大文字は既知の形に加えて、Postgres の `created` イベントの `meta.sources` に呼び出し側の綴りが残る形を1つ見つけた） | 採用 (2026-10) |
 | [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
 | [0528](./0528-doc-code-drift-sweep-0496-0500-0522-0523.md) | 文書とコードのずれを横に掃く（第3弾の1回目）— ADR 0496・0500・0522・0523 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 
