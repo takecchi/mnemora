@@ -61,7 +61,10 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
   it("陽性対照: 普通の値はそのまま渡る（jobName の既定は mnemora-tick）", async () => {
     const driver = make({});
     await driver.start();
-    expect(upsertCalls).toEqual([["mnemora-tick", { every: 100 }, { name: "mnemora-tick" }]]);
+    // ADR 0548: job template の opts に removeOnComplete の既定（count: 1000）が入る。removeOnFail は触らない。
+    expect(upsertCalls).toEqual([
+      ["mnemora-tick", { every: 100 }, { name: "mnemora-tick", opts: { removeOnComplete: { count: 1000 } } }],
+    ]);
     expect(queueCtorArgs[0]?.[0]).toBe("q");
     expect(workerCtorArgs[0]?.[0]).toBe("q");
   });
@@ -119,7 +122,7 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
     const driver = make({ jobName: value });
     await driver.start();
     expect(upsertCalls[0]?.[0]).toBe(value);
-    expect(upsertCalls[0]?.[2]).toEqual({ name: value });
+    expect((upsertCalls[0]?.[2] as { name: string }).name).toBe(value);
   });
 
   it("jobName が undefined なら既定の mnemora-tick になる", async () => {
@@ -209,5 +212,149 @@ describe("createBullmqTickDriver: everyMs・jobName は構築時に検査し、q
     expect(() => make({ concurrency: 0 })).toThrow(/concurrency must be a positive integer/);
     expect(queueCtorArgs).toHaveLength(0);
     expect(workerCtorArgs).toHaveLength(0);
+  });
+});
+
+// ADR 0548: lockDuration を Worker へ渡す口と、完了ジョブの保持（removeOnComplete）の既定・上書き。
+describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
+  function workerOpts(): Record<string, unknown> {
+    return workerCtorArgs[0]?.[2] as Record<string, unknown>;
+  }
+  function template(): { name: string; opts: Record<string, unknown> } {
+    return upsertCalls[0]?.[2] as { name: string; opts: Record<string, unknown> };
+  }
+
+  it("lockDuration を渡すと、Worker の opts にそのまま渡る（既存の opts は保つ）", () => {
+    make({ lockDuration: 120_000, concurrency: 3 });
+    expect(workerOpts().lockDuration).toBe(120_000);
+    expect(workerOpts().concurrency).toBe(3);
+    expect(workerOpts().autorun).toBe(false);
+    expect(workerOpts().connection).toEqual({ host: "127.0.0.1", port: 1 });
+  });
+
+  it("lockDuration を省略（undefined も）すると、Worker の opts に lockDuration のキーを出さない（BullMQ の既定に任せる）", () => {
+    make({});
+    expect("lockDuration" in workerOpts()).toBe(false);
+    workerCtorArgs.length = 0;
+    make({ lockDuration: undefined });
+    expect("lockDuration" in workerOpts()).toBe(false);
+  });
+
+  it("lockDuration: 1（下限）と MAX_SAFE_INTEGER（上限）は通る", () => {
+    make({ lockDuration: 1 });
+    expect(workerOpts().lockDuration).toBe(1);
+    workerCtorArgs.length = 0;
+    make({ lockDuration: Number.MAX_SAFE_INTEGER });
+    expect(workerOpts().lockDuration).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it.each([
+    ["文字列 '30000'", "30000"],
+    ["null", null],
+    ["bigint", 30000n],
+    ["オブジェクト", {}],
+  ])("⭐ lockDuration が %s（数でない）なら TypeError。Queue も Worker も作らない", (_label, value) => {
+    expect(() => make({ lockDuration: value })).toThrow(TypeError);
+    expect(() => make({ lockDuration: value })).not.toThrow(RangeError);
+    expect(() => make({ lockDuration: value })).toThrow(/lockDuration must be a positive integer/);
+    expect(queueCtorArgs).toHaveLength(0);
+    expect(workerCtorArgs).toHaveLength(0);
+  });
+
+  it.each([
+    ["0", 0],
+    ["負", -1],
+    ["1.5（小数）", 1.5],
+    ["0.5", 0.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Infinity],
+    ["-Infinity", -Infinity],
+    ["MAX_SAFE_INTEGER + 1", Number.MAX_SAFE_INTEGER + 1],
+  ])("⭐ lockDuration が %s（数だが範囲外）なら RangeError。Queue も Worker も作らない", (_label, value) => {
+    expect(() => make({ lockDuration: value })).toThrow(RangeError);
+    expect(() => make({ lockDuration: value })).not.toThrow(TypeError);
+    expect(() => make({ lockDuration: value })).toThrow(/lockDuration must be a positive integer/);
+    expect(queueCtorArgs).toHaveLength(0);
+    expect(workerCtorArgs).toHaveLength(0);
+  });
+
+  it("⭐ lockDuration の message は ADR 0525 の形（`createBullmqTickDriver: <欄> must be …, got <値>`）", () => {
+    expect(() => make({ lockDuration: 0 })).toThrow(
+      "createBullmqTickDriver: lockDuration must be a positive integer (milliseconds), got 0",
+    );
+    expect(() => make({ lockDuration: "30000" })).toThrow(
+      "createBullmqTickDriver: lockDuration must be a positive integer (milliseconds), got 30000",
+    );
+  });
+
+  it("⭐ 検査の順序: everyMs → jobName → concurrency → lockDuration → completedJobsToKeep（先の誤りが先に出る）", () => {
+    expect(() => make({ everyMs: -1, jobName: "", concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(
+      /everyMs must be/,
+    );
+    expect(() => make({ jobName: "", concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(
+      /jobName must be/,
+    );
+    expect(() => make({ concurrency: 0, lockDuration: 0, completedJobsToKeep: -1 })).toThrow(/concurrency must be/);
+    expect(() => make({ lockDuration: 0, completedJobsToKeep: -1 })).toThrow(/lockDuration must be/);
+    expect(() => make({ completedJobsToKeep: -1 })).toThrow(/completedJobsToKeep must be/);
+  });
+
+  it("⭐ 完了ジョブの保持の既定は removeOnComplete: { count: 1000 }。removeOnFail は触らない", async () => {
+    const driver = make({});
+    await driver.start();
+    expect(template().opts).toEqual({ removeOnComplete: { count: 1000 } });
+    expect("removeOnFail" in template().opts).toBe(false);
+  });
+
+  it("completedJobsToKeep で既定を上書きできる（removeOnFail は触らない）", async () => {
+    const driver = make({ completedJobsToKeep: 50 });
+    await driver.start();
+    expect(template().name).toBe("mnemora-tick");
+    expect(template().opts).toEqual({ removeOnComplete: { count: 50 } });
+    expect("removeOnFail" in template().opts).toBe(false);
+  });
+
+  it("completedJobsToKeep: 0（完了したらすぐ消す）と MAX_SAFE_INTEGER（実質すべて残す）は通る", async () => {
+    await make({ completedJobsToKeep: 0 }).start();
+    expect(template().opts).toEqual({ removeOnComplete: { count: 0 } });
+    upsertCalls.length = 0;
+    await make({ completedJobsToKeep: Number.MAX_SAFE_INTEGER }).start();
+    expect(template().opts).toEqual({ removeOnComplete: { count: Number.MAX_SAFE_INTEGER } });
+  });
+
+  it("completedJobsToKeep が undefined なら既定（1000）", async () => {
+    await make({ completedJobsToKeep: undefined }).start();
+    expect(template().opts).toEqual({ removeOnComplete: { count: 1000 } });
+  });
+
+  it.each([
+    ["文字列 '10'", "10"],
+    ["null", null],
+    ["bigint", 10n],
+    ["真偽値", true],
+  ])("⭐ completedJobsToKeep が %s（数でない）なら TypeError。Queue も Worker も作らない", (_label, value) => {
+    expect(() => make({ completedJobsToKeep: value })).toThrow(TypeError);
+    expect(() => make({ completedJobsToKeep: value })).not.toThrow(RangeError);
+    expect(queueCtorArgs).toHaveLength(0);
+    expect(workerCtorArgs).toHaveLength(0);
+  });
+
+  it.each([
+    ["負", -1],
+    ["1.5（小数）", 1.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Infinity],
+    ["MAX_SAFE_INTEGER + 1", Number.MAX_SAFE_INTEGER + 1],
+  ])("⭐ completedJobsToKeep が %s（数だが範囲外）なら RangeError。Queue も Worker も作らない", (_label, value) => {
+    expect(() => make({ completedJobsToKeep: value })).toThrow(RangeError);
+    expect(() => make({ completedJobsToKeep: value })).not.toThrow(TypeError);
+    expect(queueCtorArgs).toHaveLength(0);
+    expect(workerCtorArgs).toHaveLength(0);
+  });
+
+  it("⭐ completedJobsToKeep の message は ADR 0525 の形", () => {
+    expect(() => make({ completedJobsToKeep: -1 })).toThrow(
+      "createBullmqTickDriver: completedJobsToKeep must be a non-negative integer, got -1",
+    );
   });
 });
