@@ -533,6 +533,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0516](./0516-omit-params-trigram-outbox-tenant-settings-stores.md) | `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0517](./0517-blank-title-is-not-prefixed-when-extract-title.md) | `extractTitle: true` のとき、空白だけの `document.title` を本文の前置きにしない（断らず、無視する） | 採用 (2026-10) |
 | [0518](./0518-status-conflict-error-purged-row-doc.md) | `MemoryStatusConflictError` の TSDoc に、purge 済みの行では `expectedStatus` と `observedStatus` が両方とも `"forgotten"` になることを書く（文書だけ） | 採用 (2026-10) |
+| [0519](./0519-inmemory-reinforce-purged-matches-postgres.md) | testkit の InMemory の `reinforce` が purge 済みの記憶をどう扱うかを実測した — Postgres と同じだった（割れなし。歯を足し、TSDoc の「測っていない」を書き換えた） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
