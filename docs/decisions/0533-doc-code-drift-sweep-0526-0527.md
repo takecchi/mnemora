@@ -36,3 +36,24 @@
 
 - **引き受けた負債**: この ADR の結果は `main` の `0bdc0e27` に対して測った記録で、`main` が進めば古くなる。照合の道具は repo に入れていない（ADR 0495 の代替案1のとおり）。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文の中で `created` の `meta` の id の綴りを言い換えた文）の古さが見つかったとき。
+
+## 追い足し（基準 main `afb3bd90`、ADR 0529 の分）
+
+0529（`afb3bd90`）が main に入ったので掃いた（`git diff 0bdc0e27 afb3bd90`）。この枝は `origin/main` を merge した（衝突は `docs/decisions/README.md` の索引だけ。`checkout --theirs` のあと `generate-adr-index.mjs` で作り直した）。0503・0505・0507・0508・0530・0531・0532 などは、まだ追い足していない。
+
+- **0529 の中身**【現物】: 差は ADR 0529 と、2つの歯（`packages/core/src/__tests__/fake-tick-mixed-kinds-concurrency-lease-parity.test.ts`・`packages/postgres/src/__tests__/tick-mixed-kinds-concurrency-lease-parity.postgres.test.ts`）だけ。実装・TSDoc・README・約束の文書・CHANGELOG・migration-v1 は変わっていない（ADR 0529 決定1も、割れは見つからず、CHANGELOG・migration は変えないと書く）。
+- **探した場所**【現物】:
+  - `git diff 0bdc0e27 afb3bd90`（`CHANGELOG.md`・`docs/migration-v1.md`・README・`docs/*.md` の差は空）。
+  - `tick`・リース・再取得を書いた TSDoc を読み、ADR 0529 の結果と照らした: `runtime.ts` の `TickOptions.leaseMs`（0 以下・入口の検査・処理がリースより長いとき・バッチの claim 時点から数えること）、`TickOptions.kinds`（claim の順は種類に関わらず `available_at` の古い順。既定の `kinds` の外は claim されず、名指しで渡すと `unsupported` として `fail`）、`Runtime.tick`、`UNSUPPORTED_KIND_ERROR_PREFIX`、`outbox-store.ts` の `claimBatch`（`claimed_at <= now - leaseMs`、古い順、同じ `available_at` の並びは約束しない）、`docs/architecture.md` §5.2・§5.11。
+  - 語の grep: `available_at|availableAt|古い順|同じ \`tick\`|次の \`tick\`|unsupported outbox job kind|claimed_at <=|leaseMs 以上` を `runtime.ts`・`interfaces/outbox-store.ts`・`docs/architecture.md` に、`同じ \`tick\`|次の \`tick\`|後続の` を `runtime.ts`・`architecture.md`・`memory-model.md`・`core/README.md`・ルートの README に。
+  - 機械照合を、前回（0526・0527 の分）と同じ文書の集合に再度通した。
+- **突き合わせの結果**【現物】: 文書・TSDoc の側で古くなった記述は無かった。ADR 0529 が3者一致と測った振る舞いは、既存の TSDoc の約束と矛盾しない。
+  - 種類を混ぜた `tick`: 4種類を1回で処理し、処理中に積まれた後続のジョブ（`extract` が作った記憶の `embed` など）は次の `tick`——`limit` が種類を問わず古い順で、claim は先頭で一括、という `TickOptions.kinds`・`leaseMs`（「バッチの claim 時点から数える」）の記述と一致する。
+  - 知らない種類: 既定では claim されず終端にならない・名指しで渡すと `unsupported` で `fail`（`lastError: runtime.tick: unsupported outbox job kind: custom-kind`）は、`TickOptions.kinds`・`Runtime.tick`・`UNSUPPORTED_KIND_ERROR_PREFIX` と一致する。
+  - リースが切れた後の再取得: 遅れた `complete`/`fail` が `leaseConflicts` に載る・provider が二重に走る・行は後から完了した側のまま・`claimedAt + leaseMs` ちょうどで再 claim できる（`claimed_at <= now - leaseMs` と一致）は、`TickOptions.leaseMs` の追記（Issue #1200・2026-09-30）と `claimBatch` の記述と一致する。
+  - 並行する複数の `tick`: 二重 claim が無い・全件が高々1回（不変条件）は、`claimBatch` の `FOR UPDATE SKIP LOCKED` の記述と矛盾しない。誰が何件取るかは文書が約束していない（ADR 0529 も歯にしていない）。
+- **コードの側を直すべき食い違い**: 見つからなかった。
+- **前回との比較**【実測】: 機械照合の出力（識別子・パス・リンク・`Type.member`・import・文言・TSDoc の2つの照合）は、前回（0526・0527 の分）と、行番号を除いて同じだった。
+- **陽性対照**【実測】: 一時の md に存在しない識別子 `DEFAULT_TICK_LIMITX` を書いて識別子の照合に通し、拾った（実在する `DEFAULT_TICK_LIMIT` は拾わなかった）。一時ファイルは削除した。「文書・TSDoc と 0529 の結果の一致」には機械の陽性対照が無い（手で読んだ）。
+- **【未確認】**: 0529 の2つの歯（Fake・InMemory・実 Postgres）を走らせていない。ADR 0529 が書く Postgres の並行の分かれ方（160 回の観測）と、変異試験の結果。0529 が測っていないと書く範囲（`tick` 以外の層の並行）。
+- **走らせたコマンド**: `git fetch origin && git merge origin/main`、`git checkout --theirs docs/decisions/README.md`、`node scripts/generate-adr-index.mjs`、機械照合のスクリプト（repo の外）。ビルド・全テスト・DB の要るテストは走らせていない。
