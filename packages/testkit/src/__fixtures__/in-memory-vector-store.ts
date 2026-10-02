@@ -13,6 +13,7 @@ import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 import {
   assertFloat4Vector,
+  assertQueryBigint,
   assertQueryInteger,
   assertQueryJsonWithoutNul,
   assertQueryLabelsWithoutNul,
@@ -436,6 +437,8 @@ export class InMemoryVectorStore implements VectorStore {
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
+    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
+    assertQueryBigint("eraseTenant", "limit", opts.limit);
     const matchingKeys: string[] = [];
     for (const [key, entry] of this.entries) {
       if (matchingKeys.length >= opts.limit) {
