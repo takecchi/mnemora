@@ -2858,6 +2858,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
   以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `updateStatus`・`updateStatusWithEvent` が、`supersededById` に大文字小文字だけが違う自分自身の id（id が `mem-1`・`supersededById` が `MEM-1` など）を渡されると `RangeError`（`supersededById must not be the memory itself`）で断る**（[ADR 0558](./decisions/0558-inmemory-self-supersede-check-folds-both-sides.md)。🟡。項目59（ADR 0503）の自己置換の検査の取りこぼし）。
+  `@mnemora/postgres` は以前から両側を畳んで断る。以前の fixture は `supersededById` を畳まずに比べたので通り、自分を指す `superseded` の行を書いた。新しく断るのはこの綴り違いの自己置換だけ（Postgres が今断るものだけ）。別の記憶を大文字で渡す呼び出しは従来どおり通り、小文字で保存される。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
