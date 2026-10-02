@@ -5,7 +5,7 @@
 
 クローン miku の指示で、マネージャー mgr-b9b6a409 とその委譲先（担い手）が書いた。
 
-**照合の基準は main `d480131c`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）と 0535（#1637、`d480131c`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535 の4つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
+**照合の基準は main `bfb865a6`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）と 0535（#1637、`d480131c`）は、末尾の追い足しの節で掃いた、さらに 0539（#1652、`bfb865a6`）も追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539 の5つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
 
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手の判定、【未確認】は確かめていないこと。
 
@@ -56,14 +56,14 @@
 
 ## まとめ
 
-- **直したもの**: 0515・0538・0535 の分で文書を直した（0516 の分に文書のずれは無かった）。0538 は `docs/memory-model.md` 1964 行目に Fake の1文、0535 は CHANGELOG `[1.3.0]` と migration-v1（v1.2.0 → 次の版の節）の ADR 0504 の項に、ADR 0516 で落とす store を足した（追い足しの節）。0515 の分は: `docs/memory-model.md`（ADR 0503 の追記の直後に、ADR 0515 の2つの断りを足した）と、`packages/core/src/interfaces/memory-store.ts` の TSDoc 2語句（`updateStatus` の「`supersededById` が無くてよい」と `resolveContestedPair` の「対の外の記憶を指す `superseded` は断らない」を、0515 のあとの約束と矛盾しない形に）。0516 の分に文書のずれは無かった。型・実装・振る舞いは変えていない。
+- **直したもの**: 0515・0538・0535 の分で文書を直した（0516・0539 の分に文書のずれは無かった）。0538 は `docs/memory-model.md` 1964 行目に Fake の1文、0535 は CHANGELOG `[1.3.0]` と migration-v1（v1.2.0 → 次の版の節）の ADR 0504 の項に、ADR 0516 で落とす store を足した（追い足しの節）。0515 の分は: `docs/memory-model.md`（ADR 0503 の追記の直後に、ADR 0515 の2つの断りを足した）と、`packages/core/src/interfaces/memory-store.ts` の TSDoc 2語句（`updateStatus` の「`supersededById` が無くてよい」と `resolveContestedPair` の「対の外の記憶を指す `superseded` は断らない」を、0515 のあとの約束と矛盾しない形に）。0516 の分に文書のずれは無かった。型・実装・振る舞いは変えていない。
 - **コードの側を直すべき食い違い（材料）**:
   1. 0515 の分: core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）が、`superseded` 以外への `supersededById`・`resolveContestedPair` の対の外の `forgotten`・ADR 0503 の `superseded` の形の検査（無い・自己置換・循環）を断らない。Postgres・InMemory と挙動が割れる。ADR 0515 自身が負債に書いていた件の確認。
   2. 0516 の分: `trigram-lexical-store.ts` の `search` 以外の DB 呼び出し（`create`・索引づくり）に `omittingParams` が無い。約束の違反ではなく、ADR 0516 の負債の一覧への補足。
   - どちらも別の PR で直す（担当はクローンが配る）。
 - **照らした範囲**【現物】: 上の各節に書いた。追い足しの分（0538・0535）は、`runtime-fakes.ts` の `purgeExpiredEventsSync`、Postgres・InMemory の `events_purged` の書き手、`memory-store.ts`（interface）の `purgeExpiredEvents` の TSDoc、適合スイートの A10、`docs/conformance.md`・`docs/memory-model.md`、`runtime.ts` の `already_purged` の TSDoc と呼び出し、`query-check.ts` と InMemory の `seqSumOverflowsBigint`、`event-store.ts`・`relation-store.ts`・`memory-store.ts` の `omittingParams` の有無、CHANGELOG `[1.3.0]` 97・112 行目、migration-v1 の項目60・2810 行目。読んだファイルは、`packages/postgres/src/memory-store.ts`（`assertSupersededByShape` の呼び出し・`resolveContestedPair` の先取り）、`outbox-store.ts`・`tenant-settings-store.ts`・`trigram-lexical-store.ts`・`event-store.ts`・`relation-store.ts`・`omit-params.ts`、`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`、`packages/core/src/__tests__/runtime-fakes.ts`、`packages/core/src/interfaces/memory-store.ts`・`tenant-settings-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `*conformance*` 全体の grep、`error-message-omits-params.postgres.test.ts` の構成、ルートと各パッケージの README、`docs/*.md`（`memory-model.md`・`architecture.md`・`release-notes-v1.1.0.md`・`release-notes-v1.2.0.md`）、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`（項目59・61 と 2803 行目以降）。grep の語は `supersededById`・`forbidWhenNotSuperseded`・`assertSupersededByShape`・`COALESCE`・`omittingParams`・`omitParams`・`params:`・`omitted by mnemora`・`updateStatusWithEvent(`・`this.db`。
 - **走らせたコマンド**: `git fetch`・`git diff`・`grep`・`node scripts/generate-adr-index.mjs`（差分なし）。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは通していない【未確認】（読んで突き合わせた）。
-- **引き受けた負債**: この ADR の結果は `main` の `d480131c` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
+- **引き受けた負債**: この ADR の結果は `main` の `bfb865a6` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文で `supersededById` の扱いや store の例外の message を言い換えた文）の古さが見つかったとき。Fake を直す PR で Fake の振る舞いが割れていないと分かったとき（材料1が消える）。
 
 ## 追い足し（基準 main `d480131c`、ADR 0538・0535 の分）
@@ -101,3 +101,24 @@
   - 0535 が「ADR 0541 は未マージでこの枝の tree に無いので照らせていない」と書いた件: いまも `docs/decisions` に 0541 が無い（0542 だけ在る）。状況は変わらない。
 - **【未確認】**: 0535 が「一致した」と書いた各行を当て直していない（上は、直した4か所とその言い分だけ）。0535 のあとで入った PR の文書への影響は、0515・0516・0538 の節で見た範囲だけ。
 
+
+## 追い足し（基準 main `bfb865a6`、ADR 0539 の分）
+
+0539（#1652、`bfb865a6`）が main に入ったので掃いた（`git diff d480131c bfb865a6`。この枝は `origin/main` を merge した。衝突なし。ADR 索引は `node scripts/generate-adr-index.mjs` で再生成しても差分なし）。この節も担い手が書いた。
+
+### 0539（`bfb865a6`）
+
+- **0539 の中身**【現物】: 差は ADR 0539・索引・歯2本（`fake-claim-key-parity.test.ts`、`claim-key-parity.postgres.test.ts`）だけで、コード・TSDoc・CHANGELOG・migration-v1 の変更は無い。claim key の読み口（`findActiveByClaimKey?`・`findContestedByClaimKey?`・`listActiveClaimPredicates?`）と `observe` の `claimKey` 有効経路を3者に流して、割れは無かったという記録。
+- **3実装**【現物】: コードの変更が無いので、ADR 0539 が「3者で揃っている」と言う契約を、いまのコードと TSDoc で確かめた。
+  - Postgres（`memory-store.ts` 3647・3710 行目）: `content_hash <>`・半開区間の重なり（`valid_from < …`・`… < valid_until`）・保存済みの行の側の空・逆転の除外（`valid_from < valid_until`）が SQL に在り、`LIMIT` は無い（ADR 0539 §6 の「LIMIT が無い」と一致）。
+  - testkit の InMemory・core の Fake: 実装を読み直していない。ADR 0539 の `EXPECTED`（73 項目）が3者一致という実測を信じた【未確認】。
+- **突き合わせの結果**【現物】:
+  - `packages/core/src/interfaces/memory-store.ts` の TSDoc（`findActiveByClaimKey?` 2330〜2380 行目、`findContestedByClaimKey?` 2409〜2424 行目）: `subjectId` は NULL 同士も一致、鍵は正規化済みの文字列をそのまま等値比較（口自体は正規化しない）、`status` の絞り（active／contested）、`excludeMemoryId`・`contentHash` の除外、半開区間 `[validFrom, validUntil)`・空区間と逆転区間は問い合わせ側も保存済みの行側も何とも重ならない、順序は規定しない。ADR 0539 §1 の「契約」の段と一字ずつ一致した。
+  - `listActiveClaimPredicates?` の TSDoc（2470〜2510 行目）: 述語が非 NULL の行だけ、重複を除き最も新しい行で代表、新しい順、同着はコードポイント順、`limit` を超えない、`claim_key_subject` は返さない。ADR 0539 §1 と一致した。同着の並びは適合スイート（`memory-store-conformance.ts` 2848 行目）が縛っていて、§6 の「測っていない」の言い分と一致する。
+  - `docs/memory-model.md` 189 行目（空・逆転の区間を何とも重ねない、「3実装とも同じ」）、504 行目（片方欠落の claim key は `findActiveByClaimKey` に一致せず `listActiveClaimPredicates` にも数えられない）、521〜575 行目（検出の流れ、相手 0・1・2件以上）、`docs/conformance.md` 35 行目: 0539 と食い違う主張は無かった。鍵の正規化・大文字小文字・空白を畳む、と store の口について言う文は無い（grep: `findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`・`正規化`・`NFC`）。
+  - CHANGELOG `[1.3.0]`・migration-v1 の v1.2.0 → 次の版の節: claim key の読み口の振る舞いを述べた項は無い（NUL の項だけ。別の話）。ルートと各パッケージの README: 該当の記述は無い。
+  - 適合スイート: claim key の項目は在り、0539 は「conformance に足さない」（ADR 0434 決定5）で、スイートは変わっていない。
+  - ADR 0539 §6 が「既存の歯が縛る」と挙げたファイルは在る（`fake-list-claim-predicates-limit.test.ts`・`claim-key-oversized-part.test.ts`・`claim-key-oversized-part.postgres.test.ts`・`claim-key-index.postgres.test.ts`・`claim-key-index-limit-error.postgres.test.ts`）。
+- **直したもの**: なし（文書の側にずれは無かった）。
+- **コードの側を直すべき食い違い**: 見つからなかった。ADR 0539 が残した材料は、いまも成り立つ【現物】: 同着の並びを3者で比べていない（適合スイートが縛る）、`observe` の検出ロジック自体への変異は測っていない、`findActiveByClaimKey` に `LIMIT` が無い（Postgres の SQL で確認）。オーナーの領分の材料は無し。
+- **【未確認】**: 0539 の歯2本（Postgres は DB が要る）と変異試験 85 件を走らせていない。Fake・InMemory の読み口を読み直していない。ADR 0539 の「3者一致」を、この回は当て直していない。
