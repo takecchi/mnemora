@@ -202,3 +202,14 @@
 - **探した場所**【現物】: `grep -rn '英数字境界|部分一致|includes('` と `FakeLexicalStore` を `docs/recall.md`・`docs/conformance.md`・`docs/memory-model.md`・`docs/architecture.md`・`packages/{testkit,postgres,core}/README.md` に。出たのは `docs/recall.md` の alteroid の `ILIKE` の話と、`docs/architecture.md` の語彙の上限（`LEXICAL_QUERY_*`）の追記だけで、どちらも語の数え方の主張ではない。
 - **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。0513 が「揃えていないもの」に挙げた Postgres の text search parser の細部（符号付き token・`a.b`・ハイフン結合語）は、TSDoc と CHANGELOG に書いてある。
 - **【未確認】**: 0513 の歯を走らせていない。TSDoc の「それでも違うところ」の各例を実際に当ててはいない。
+
+## 追い足し（基準 main `eb614e16`、ADR 0542 の分）
+
+0542（#1645、`eb614e16`）が main に入ったので掃いた（`git diff 517d8bb6 eb614e16`。merge は衝突なし。ADR 索引は `node scripts/generate-adr-index.mjs` で作り直しても差分なし）。この節もマネージャーが書いた。
+
+- **0542 の中身**【現物】: `reembed` が積み直す対象は元から `active`・`contested` だけで、forgotten・purge 済み・archived・superseded は積まない（0541 の材料1「status で絞らない」は読み違いだった）。実装は変えず、歯（`packages/postgres/src/__tests__/reembed-skips-withdrawn.postgres.test.ts`）だけ足した。CHANGELOG・migration-v1 は書いていない（出荷物の振る舞いが変わらないため）。
+- **照らしたもの（コード）**【現物】: Postgres の `buildRequeueEmbedTargetSelect`（`packages/postgres/src/memory-store.ts`）の `WHERE` に `status IN ('active', 'contested')` があり、`embedding_status = ANY(...)`・`memoryIds` の絞り込みと並んで `ORDER BY updated_at ASC, id ASC LIMIT` より先に効く。testkit の `InMemoryMemoryStore.requeueEmbedJobs`（`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`）と core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）は、どちらも `(m.status === "active" || m.status === "contested")` で絞ってから `.sort(...).slice(0, opts.limit)`。0542 の主張（3実装で同じ・limit より先に外す・`memoryIds` の名指しでも積まない）と一致した。
+- **照らしたもの（文書）**【現物】: `MemoryStore.requeueEmbedJobs` の TSDoc（`packages/core/src/interfaces/memory-store.ts`）は「対象は `status IN ('active','contested')` かつ `embeddingStatus` が `opts.statuses` のいずれか」「`memoryIds` を渡しても `statuses` の条件は外れない」「`opts.limit` で切られた後の集合」と、既に 0542 と同じことを書いている。`RequeueEmbedJobsOptions`・`RequeueEmbedJobsResult` の TSDoc、`Runtime.reembed` の TSDoc（`packages/core/src/runtime.ts`）、`buildRequeueEmbedTargetSelect` の TSDoc、両 fixture の TSDoc も、status で絞らないとは書いていない。適合スイート（`packages/testkit/src/memory-store-conformance.ts`、「requeueEmbedJobs は archived / superseded / forgotten を対象にしない」）にも同じ約束の検査が既に在る。`README.md`・`docs/architecture.md`（port の署名）・`docs/memory-model.md`（§10 の空間切り替えの追記）・`docs/recall.md`・`docs/vision.md`・`CHANGELOG.md`・`docs/migration-v1.md` の `reembed`/`requeueEmbedJobs` の記述も、積み直す status の範囲に触れるものは無く、0542 と食い違う主張は無かった。
+- **直したもの**: なし。**コードの側を直すべき食い違い**: 見つからなかった。
+- **ADR 0541 について**: 0542 が訂正を要すると書いた 0541 の材料1・経路の表の1行は、0541 が未マージ（#1644、Draft）でこの枝の tree に無いため照らせていない。0541 側で直す（0542 の負債表の1）。
+- **【未確認】**: 0542 の歯（24 本）と変異試験を走らせていない。
