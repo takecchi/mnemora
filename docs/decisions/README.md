@@ -570,5 +570,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0563](./0563-core-fake-event-time-nul-and-claim-predicates.md) | core の Fake の `archived`・`purgedAt` の時刻、識別子と `lastError` の NUL、片側だけの claim key を、InMemory・Postgres に揃える | 採用 (2026-10) |
 | [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
 | [0567](./0567-doc-code-drift-sweep-scripts.md) | 文書とコードのずれを横に掃く（第10弾）— `scripts/` のコメント・`AGENTS.md`・`docs/autonomy.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0570](./0570-chat-cli-output-strings-match-implementation.md) | `examples/chat` の CLI の help と出力の文言を実装に合わせ、数の写しを外す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
