@@ -188,3 +188,15 @@ export function assertInt4Column(method: string, field: string, value: unknown):
     );
   }
 }
+
+/**
+ * ADR 0505: 活動時計の「いま」に subject 単位のカウンタ `S_x` を足す式（`archiveDecayed` の `nowSeq + S_x`、
+ * `aggregateScope`・`VectorStore.search` の `decayFloorSeqAfter + S_x`）の和が、Postgres の `bigint` を溢れるか
+ * （2^63 以上。溢れれば `22003 bigint out of range` で文ごと失敗する）。足すのは、ドライバが `base` を文字にした値
+ * （`String(2**63 - 1024)` は `"9223372036854775000"`）なので、float64 の和ではなく BigInt で同じ値を足す。
+ * `base` が `bigint` の範囲に収まること（`assertQueryBigint`）を先に確かめてから呼ぶこと。
+ * 溢れを**投げるかどうか**は、Postgres がその式を実際に評価する行かどうかで決まる——呼び出し側が見る。
+ */
+export function seqSumOverflowsBigint(base: number, ownSeq: number): boolean {
+  return BigInt(String(base)) + BigInt(ownSeq) >= 2n ** 63n;
+}

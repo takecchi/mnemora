@@ -18,6 +18,7 @@ import {
   assertQueryJsonWithoutNul,
   assertQueryLabelsWithoutNul,
   assertQueryTimestamptz,
+  seqSumOverflowsBigint,
 } from "./query-check.js";
 
 interface Entry {
@@ -179,7 +180,8 @@ export class InMemoryVectorStore implements VectorStore {
     assertQueryTimestamptz("search", "filter.occurredBefore", opts.filter.occurredBefore);
     assertQueryTimestamptz("search", "filter.validAt", opts.filter.validAt);
     assertQueryTimestamptz("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
-    assertQueryInteger("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
+    // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
+    assertQueryBigint("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
     // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
     // （実測済み）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
@@ -299,21 +301,43 @@ export class InMemoryVectorStore implements VectorStore {
         (memory.decayFloorSeq ?? null) === null ||
         memory.decayFloorSeq! > effectiveDecayFloorSeqAfter;
 
+      // ADR 0505: `decayFloorSeqAfter + S_x` が `bigint` を溢れるとき、Postgres は `22003` で文ごと失敗する。
+      // 失敗するのは、その式が**評価される行**があるときだけ（実測）: `decay_floor_seq` が非 NULL（`IS NULL OR …` の短絡）で、
+      // subject を持つ行（持たなければ `S_x` は 0）。2軸のときは壁時計が左なので、AND（別々の条件）なら壁時計で
+      // 落ちない行だけ、OR（`decayFloorAnyAxis`）なら壁時計が通さない行だけが、活動時計の式まで行く。ほかの条件で
+      // 落ちる行は、式まで行かない（活動時計の条件は最後に評価される）。ここでは印だけ付け、下の最後で
+      // （活動時計の条件の結果で落ちる行も、ほかの条件を通ったなら）投げる。
+      let seqSumOverflows = false;
+      let rejectedBySeqCondition = false;
+      const markSeqSumOverflow = (): void => {
+        if (
+          opts.filter.decayFloorSeqAfter !== undefined &&
+          opts.filter.decayFloorSeqUsesSubjectCounters === true &&
+          memory.subjectId != null &&
+          (memory.decayFloorSeq ?? null) !== null &&
+          seqSumOverflowsBigint(
+            opts.filter.decayFloorSeqAfter,
+            this.memoryStore.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0,
+          )
+        ) {
+          seqSumOverflows = true;
+        }
+      };
       if (
         opts.filter.decayFloorAnyAxis === true &&
         opts.filter.decayFloorAtAfter !== undefined &&
         opts.filter.decayFloorSeqAfter !== undefined
       ) {
-        if (!(passesDecayFloorAt || passesDecayFloorSeq)) {
-          continue;
+        if (!passesDecayFloorAt) {
+          markSeqSumOverflow();
         }
+        rejectedBySeqCondition = !(passesDecayFloorAt || passesDecayFloorSeq);
       } else {
         if (!passesDecayFloorAt) {
           continue;
         }
-        if (!passesDecayFloorSeq) {
-          continue;
-        }
+        markSeqSumOverflow();
+        rejectedBySeqCondition = !passesDecayFloorSeq;
       }
       // ADR 0056: 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op
       // （`VectorFilter.excludeProvenanceKinds` の doc 参照）。
@@ -349,6 +373,14 @@ export class InMemoryVectorStore implements VectorStore {
         if (memory.validUntil != null && memory.validUntil <= opts.filter.validAt) {
           continue;
         }
+      }
+      if (seqSumOverflows) {
+        throw new Error(
+          `search: filter.decayFloorSeqAfter + own subject seq must fit in a Postgres bigint (got ${opts.filter.decayFloorSeqAfter} + ${this.memoryStore.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId!) ?? 0})`,
+        );
+      }
+      if (rejectedBySeqCondition) {
+        continue;
       }
       hits.push({
         memoryId: entry.memoryId,
