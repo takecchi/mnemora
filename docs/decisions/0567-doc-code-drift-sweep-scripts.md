@@ -1,4 +1,4 @@
-# ADR 0565: 文書とコードのずれを横に掃く（第10弾）— `scripts/` のコメント・`AGENTS.md`・`docs/autonomy.md` を、今の main の実装に照らす
+# ADR 0567: 文書とコードのずれを横に掃く（第10弾）— `scripts/` のコメント・`AGENTS.md`・`docs/autonomy.md` を、今の main の実装に照らす
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03
