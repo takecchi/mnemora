@@ -154,7 +154,7 @@ describe("NUL を含む読みの条件は、2実装とも名指しで断る", ()
   });
 });
 
-describe("下限（4714-11-24 BC 00:00:00 UTC）より前の日時は、2実装とも同じ口で断る", () => {
+describe("下限（4714-11-24 BC 00:00:00 UTC）より前の日時は、書く口では2実装とも断り、読みの口では断らない", () => {
   const cases: Array<[string, (d: Date) => (s: Stores) => Promise<unknown>]> = [
     ["EventStore.list since", (d) => (s) => s.ev.list(ctx, { since: d } as never)],
     ["EventStore.list until", (d) => (s) => s.ev.list(ctx, { until: d } as never)],
@@ -261,8 +261,23 @@ describe("下限（4714-11-24 BC 00:00:00 UTC）より前の日時は、2実装�
     ],
   ];
 
-  it.each(cases)(
-    "%s: 下限より前（1ms 前・紀元前9001年）は断り、下限ちょうどは日時の検査では落ちない",
+  // ADR 0547: 読みの口の条件は、Postgres が下限へ寄せてから比べる（落ちない）。fixture も断らない。書く口だけが、下限より前で断る。
+  const READ_PORT =
+    /^(EventStore\.list|VectorStore\.|MemoryStore\.aggregateScope|LexicalStore\.|find(Active|Contested)ByClaimKey)/;
+  const readCases = cases.filter(([name]) => READ_PORT.test(name));
+  const writeCases = cases.filter(([name]) => !READ_PORT.test(name));
+
+  it.each(readCases)(
+    "%s（読みの口）: 下限より前（1ms 前・紀元前9001年）でも、2実装とも断らない（ADR 0547）",
+    async (_name, make) => {
+      await both("ok", make(EARLY));
+      await both("ok", make(FAR));
+      await both("ok", make(EDGE));
+    },
+  );
+
+  it.each(writeCases)(
+    "%s（書く口）: 下限より前（1ms 前・紀元前9001年）は断り、下限ちょうどは日時の検査では落ちない",
     async (_name, make) => {
       await both("range", make(EARLY));
       await both("range", make(FAR));

@@ -3,7 +3,7 @@ import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 import {
   assertQueryLabelsWithoutNul,
-  assertQueryTimestamptz,
+  assertQueryDate,
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
 } from "./query-check.js";
@@ -256,9 +256,11 @@ export class InMemoryLexicalStore implements LexicalStore {
     // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない。
     assertQueryTextWithoutNul("InMemoryLexicalStore.search", "query", query);
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("search", "filter.occurredAfter", opts.filter.occurredAfter);
-    assertQueryTimestamptz("search", "filter.occurredBefore", opts.filter.occurredBefore);
-    assertQueryTimestamptz("search", "filter.validAt", opts.filter.validAt);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
     // ADR 0456 H3・ADR 0500: `labels` は `text[]` の引数。要素の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
     // ADR 0434: `attributes` は `jsonb` の包含判定の引数。NUL は Postgres ではクエリの時点で `22P05` になる。

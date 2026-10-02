@@ -17,12 +17,11 @@ import {
   isUuidLike,
   parsePgTimestamp,
   rowToOutboxJob,
+  isBeforePgTimestamptzMin,
   toPgTimestamp,
+  toPgTimestampClamped,
   type OutboxJobRow,
 } from "./mapping.js";
-
-/** PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC）。これより前に完了した行は存在しえない。 */
-const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
 /**
  * `OutboxStore` の Postgres 実装（roadmap.md 段階3、ADR 0005 の transactional outbox
@@ -117,6 +116,9 @@ export class PostgresOutboxStore implements OutboxStore {
     // 「十分前に claim されたまま完了していない」＝止まったワーカーの行とみなす。
     // 境界は `available_at <= opts.now` と同じ `<=`（両端含む）に揃えてある。
     const leaseExpiresBefore = new Date(opts.now.getTime() - opts.leaseMs);
+    // ADR 0547: `now` と `now - leaseMs` は、`timestamptz` の下限より前でも落ちないよう、下限へ寄せてから比べる。
+    // 行に書く値（`claimed_at`・`available_at`）も同じ寄せた値にする——寄せずに書くと、比べる側が通した行の UPDATE が `22008` になる。
+    const nowParam = toPgTimestampClamped(opts.now);
 
     const result = await this.db.execute(sql`
       WITH claimable AS (
@@ -124,16 +126,16 @@ export class PostgresOutboxStore implements OutboxStore {
         WHERE tenant_id = ${ctx.tenantId}
           AND completed_at IS NULL
           AND failed_at IS NULL
-          AND available_at <= ${toPgTimestamp(opts.now)}
-          AND (claimed_at IS NULL OR claimed_at <= ${toPgTimestamp(leaseExpiresBefore)})
+          AND available_at <= ${nowParam}
+          AND (claimed_at IS NULL OR claimed_at <= ${toPgTimestampClamped(leaseExpiresBefore)})
           ${kindsFilter}
         ORDER BY available_at ASC
         LIMIT ${opts.limit}
         FOR UPDATE SKIP LOCKED
       )
       UPDATE outbox o
-      SET claimed_at = ${toPgTimestamp(opts.now)}, claimed_by = ${opts.claimedBy}, attempts = attempts + 1,
-        available_at = CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE ${toPgTimestamp(opts.now)} END
+      SET claimed_at = ${nowParam}, claimed_by = ${opts.claimedBy}, attempts = attempts + 1,
+        available_at = CASE WHEN o.claimed_at IS NULL THEN o.available_at ELSE ${nowParam} END
       FROM claimable c
       WHERE o.id = c.id
       RETURNING o.*
@@ -296,7 +298,7 @@ export class PostgresOutboxStore implements OutboxStore {
   ): Promise<PurgeCompletedJobsResult> {
     assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun ?? false;
-    if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+    if (isBeforePgTimestamptzMin(opts.olderThan)) {
       return { purged: 0, reachedLimit: false, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
     }
     const olderThan = toPgTimestamp(opts.olderThan);

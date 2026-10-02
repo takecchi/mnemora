@@ -156,6 +156,8 @@ async function seed(kit: Kit): Promise<Seeded> {
     claimKey: { subject: "s", predicate: "p" },
     validFrom: new Date("2026-01-01T00:00:00.000Z"),
   });
+  // 有効期間なしの鍵つき記憶（開始・終了とも無限）。両端が下限より前の区間とも重なる。
+  await make("golf", { claimKey: { subject: "s", predicate: "p" } });
   const echo = await make("echo", {
     claimKey: { subject: "s", predicate: "p" },
     validFrom: new Date("2026-01-01T00:00:00.000Z"),
@@ -200,7 +202,7 @@ async function seed(kit: Kit): Promise<Seeded> {
 
 const names = (seeded: Seeded, ids: string[]): string[] =>
   ids.map((id) => seeded.idToName.get(id) ?? `?${id}`).sort();
-const ALL = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
+const ALL = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"];
 const CLAIM = (validFrom: Date | null, validUntil: Date | null) => ({
   subjectId: null,
   claimKey: { subject: "s", predicate: "p" },
@@ -260,7 +262,7 @@ const lexSearch = async (lex: LexicalStore, s: Seeded, extra: object) =>
   );
 
 // validAt が下限より前: 開始が無く（valid_from なし）終了が将来か無い行だけが有効（alpha・charlie・delta/echo は validFrom 2026 なので外れる）。
-const VALID_AT_BELOW = ["alpha", "charlie"];
+const VALID_AT_BELOW = ["alpha", "charlie", "golf"];
 
 const cases: Case[] = [
   {
@@ -322,7 +324,7 @@ const cases: Case[] = [
   // 空の区間は何とも重ならない。validFrom だけが下限より前なら、delta（validFrom 2026・validUntil なし）と重なる。
   {
     name: "findActiveByClaimKey validFrom のみ",
-    expected: ["delta"],
+    expected: ["delta", "golf"],
     run: async (k, s, d) =>
       names(
         s,
@@ -332,7 +334,7 @@ const cases: Case[] = [
   // validUntil だけが下限より前: delta の validFrom（2026）は validUntil より後なので重ならない。
   {
     name: "findActiveByClaimKey validUntil のみ",
-    expected: [],
+    expected: ["golf"],
     run: async (k, s, d) =>
       names(
         s,
@@ -355,6 +357,29 @@ const cases: Case[] = [
       names(
         s,
         (await k.mem.findContestedByClaimKey!(s.ctx, CLAIM(null, d))).map((m) => m.id),
+      ),
+  },
+  // 両端が下限より前で、from < until（空でない区間）。寄せた値は等しくなるが、空の区間にしない（開始も終了も無い golf と重なる）。
+  {
+    name: "findActiveByClaimKey 両端とも下限より前（空でない区間）",
+    expected: ["golf"],
+    run: async (k, s, d) =>
+      names(
+        s,
+        (await k.mem.findActiveByClaimKey!(s.ctx, CLAIM(new Date(d.getTime() - 1000), d))).map(
+          (m) => m.id,
+        ),
+      ),
+  },
+  {
+    name: "findActiveByClaimKey 両端とも下限より前（逆転した区間）",
+    expected: [],
+    run: async (k, s, d) =>
+      names(
+        s,
+        (await k.mem.findActiveByClaimKey!(s.ctx, CLAIM(d, new Date(d.getTime() - 1000)))).map(
+          (m) => m.id,
+        ),
       ),
   },
 ];

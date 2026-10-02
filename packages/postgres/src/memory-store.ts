@@ -85,7 +85,9 @@ import {
   rowToObservation,
   rowToOutboxJob,
   rowToRecallRecord,
+  isBeforePgTimestamptzMin,
   toPgTimestamp,
+  toPgTimestampClamped,
   type LabelRow,
   type MemoryEventRow,
   type MemoryRow,
@@ -1695,7 +1697,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // cutoff が timestamptz の下限（4714-11-24 BC）より前なら、それより古い行は存在しえない。
     // 問い合わせると `timestamp out of range` で落ちるので、0件の削除として返す
     // （保持日数が約247万日を超えると `computeEventRetentionCutoff` がこの cutoff を作る）。
-    if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+    if (isBeforePgTimestamptzMin(opts.olderThan)) {
       return { purged: 0, reachedLimit: false, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
     }
     const target = buildPurgeExpiredEventsTargetSelect(ctx, opts);
@@ -1846,7 +1848,7 @@ export class PostgresMemoryStore implements MemoryStore {
   ): Promise<PurgeExpiredRecallsResult> {
     assertWellFormedCtx(ctx);
     const dryRun = opts.dryRun ?? false;
-    if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+    if (isBeforePgTimestamptzMin(opts.olderThan)) {
       return {
         purged: 0,
         purgedUsages: 0,
@@ -2505,8 +2507,8 @@ export class PostgresMemoryStore implements MemoryStore {
     // だけで判定できる。
     const hasQualifyingLabel =
       scope.labels !== undefined ? sql`(tags && ${sql.param(scope.labels)}::text[])` : sql`true`;
-    const occurredAfter = toPgTimestamp(scope.occurredAfter);
-    const occurredBefore = toPgTimestamp(scope.occurredBefore);
+    const occurredAfter = toPgTimestampClamped(scope.occurredAfter);
+    const occurredBefore = toPgTimestampClamped(scope.occurredBefore);
 
     // period 条件: 未指定側は常に真になる（フィルタなしを表す）。
     // occurred_at が NULL の Memory は recorded_at を代替の実効時刻として扱う
@@ -2520,7 +2522,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // Issue #280（Issue #202 第2弾）: validAt ゲート。`scope.validAt` が無ければ常に真
     // （`RecallQuery.includeOutsideValidity: true` のときと同じ「絞りなし」）。
     // 両端とも NULL は「いつでも真」（`RecallQuery.validAt` の doc 参照）。
-    const validAt = toPgTimestamp(scope.validAt);
+    const validAt = toPgTimestampClamped(scope.validAt);
     const isValid = sql`(
       ${validAt}::timestamptz IS NULL OR (
         (valid_from IS NULL OR valid_from <= ${validAt}::timestamptz)
@@ -2553,7 +2555,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const decayFloorSeqAfter = scope.decayFloorSeqAfter;
     const wallAxisAlive =
       decayFloorAtAfter !== undefined
-        ? sql`(decay_floor_at > ${toPgTimestamp(decayFloorAtAfter)}::timestamptz)`
+        ? sql`(decay_floor_at > ${toPgTimestampClamped(decayFloorAtAfter)}::timestamptz)`
         : undefined;
     // ADR 0353（Issue #338）: `scope.decayFloorSeqUsesSubjectCounters` が true の
     // ときだけ相関サブクエリで subject 単位のカウンタを足す（段1の `buildFilterConditions`
@@ -3670,8 +3672,12 @@ export class PostgresMemoryStore implements MemoryStore {
     // 入口の正規化（`normalizeUuidCase`）。下の除外は JS で比べるので、DB が返す小文字の id に揃える
     // ——以前は大文字の UUID を渡すと自分自身が返っていた（`get` は同じ行を返すのに）。
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
-    const validFrom = toPgTimestamp(query.validFrom);
-    const validUntil = toPgTimestamp(query.validUntil);
+    const validFrom = toPgTimestampClamped(query.validFrom);
+    const validUntil = toPgTimestampClamped(query.validUntil);
+    const emptyInterval =
+      query.validFrom != null &&
+      query.validUntil != null &&
+      query.validFrom.getTime() >= query.validUntil.getTime();
     const result = await this.db.execute(sql`
       SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId}
@@ -3689,8 +3695,8 @@ export class PostgresMemoryStore implements MemoryStore {
           OR valid_from < ${validUntil}::timestamptz
         )
         -- 空の区間・逆転した区間（from >= until）は点を1つも含まないので、何とも重ならない（ADR 0473）
-        AND (${validFrom}::timestamptz IS NULL OR ${validUntil}::timestamptz IS NULL
-          OR ${validFrom}::timestamptz < ${validUntil}::timestamptz)
+        -- ⚠ 両端が下限より前のとき、寄せた値は等しくなる。空かどうかは寄せる前の値で JS が決める（ADR 0547）
+        AND NOT ${emptyInterval}::boolean
         AND (valid_from IS NULL OR valid_until IS NULL OR valid_from < valid_until)
     `);
     return result.rows
@@ -3731,8 +3737,12 @@ export class PostgresMemoryStore implements MemoryStore {
       query.claimKey.predicate,
     );
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
-    const validFrom = toPgTimestamp(query.validFrom);
-    const validUntil = toPgTimestamp(query.validUntil);
+    const validFrom = toPgTimestampClamped(query.validFrom);
+    const validUntil = toPgTimestampClamped(query.validUntil);
+    const emptyInterval =
+      query.validFrom != null &&
+      query.validUntil != null &&
+      query.validFrom.getTime() >= query.validUntil.getTime();
     const result = await this.db.execute(sql`
       SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId}
@@ -3750,8 +3760,8 @@ export class PostgresMemoryStore implements MemoryStore {
           OR valid_from < ${validUntil}::timestamptz
         )
         -- 空の区間・逆転した区間（from >= until）は点を1つも含まないので、何とも重ならない（ADR 0473）
-        AND (${validFrom}::timestamptz IS NULL OR ${validUntil}::timestamptz IS NULL
-          OR ${validFrom}::timestamptz < ${validUntil}::timestamptz)
+        -- ⚠ 両端が下限より前のとき、寄せた値は等しくなる。空かどうかは寄せる前の値で JS が決める（ADR 0547）
+        AND NOT ${emptyInterval}::boolean
         AND (valid_from IS NULL OR valid_until IS NULL OR valid_from < valid_until)
     `);
     return result.rows
@@ -5080,12 +5090,9 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
  * あり、行数の大半を削る述語ではないため、部分索引にする動機が薄い。実測は
  * `memory-events-retention-index.test.ts` 参照）。
  */
-/** PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。 */
-const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
-
 /**
  * `purgeExpiredEvents` が消す対象の `memory_events` の行を選ぶ SELECT を組み立てる（`kind <> 'events_purged'`、
- * `at < opts.olderThan`、古い順に `opts.limit + 1` 件——上限に届いたかを判定するために1件多く取る）。詳しい理由は、すぐ上の `PG_TIMESTAMPTZ_MIN_MS` の直前にある説明を見ること。
+ * `at < opts.olderThan`、古い順に `opts.limit + 1` 件——上限に届いたかを判定するために1件多く取る）。詳しい理由は、すぐ上の説明を見ること。
  */
 export function buildPurgeExpiredEventsTargetSelect(
   ctx: Ctx,

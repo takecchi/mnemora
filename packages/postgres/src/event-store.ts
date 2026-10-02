@@ -16,6 +16,7 @@ import {
   normalizeUuidCase,
   rowToMemoryEvent,
   toPgTimestamp,
+  toPgTimestampClamped,
   type MemoryEventRow,
 } from "./mapping.js";
 
@@ -139,10 +140,10 @@ export class PostgresEventStore implements EventStore {
       conditions.push(sql`kind = ${filter.kind}`);
     }
     if (filter.since !== undefined) {
-      conditions.push(sql`at >= ${toPgTimestamp(filter.since)}`);
+      conditions.push(sql`at >= ${toPgTimestampClamped(filter.since)}`);
     }
     if (filter.until !== undefined) {
-      conditions.push(sql`at <= ${toPgTimestamp(filter.until)}`);
+      conditions.push(sql`at <= ${toPgTimestampClamped(filter.until)}`);
     }
     const whereClause = sql.join(conditions, sql` AND `);
     const limitClause = filter.limit !== undefined ? sql`LIMIT ${filter.limit}` : sql``;

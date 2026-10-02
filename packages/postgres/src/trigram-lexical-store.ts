@@ -9,7 +9,7 @@ import {
   capLexicalQueryTotalChars,
   capLexicalQueryWords,
 } from "./lexical-query-cap.js";
-import { toPgTimestamp } from "./mapping.js";
+import { toPgTimestampClamped } from "./mapping.js";
 import { isCreateExtensionPermissionDenied } from "./migration-failure-message.js";
 import { EXTENSION_LOCK_KEY } from "./migrate.js";
 
@@ -764,17 +764,17 @@ export function buildTrigramLexicalSearchSelect(
   }
   if (opts.filter.occurredAfter !== undefined) {
     conditions.push(
-      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestamp(opts.filter.occurredAfter)}`,
+      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestampClamped(opts.filter.occurredAfter)}`,
     );
   }
   if (opts.filter.occurredBefore !== undefined) {
     conditions.push(
-      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestamp(opts.filter.occurredBefore)}`,
+      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestampClamped(opts.filter.occurredBefore)}`,
     );
   }
   if (opts.filter.validAt !== undefined) {
     conditions.push(
-      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestamp(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestamp(opts.filter.validAt)})`,
+      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestampClamped(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestampClamped(opts.filter.validAt)})`,
     );
   }
   if (
