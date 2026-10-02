@@ -488,6 +488,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `kind: "claim_key_conflict_unresolved"` の `note` の `matches` も、同じく id の昇順の先頭10件に切り、`matchesTruncated`（新設）を付けた（全体の件数は既存の `matchCount`、全員の id は `observe()` の戻り値の `matchMemoryIds`）。
   - 公開の型・DB は変えていない。非破壊と数える（`meta.note` は型の付かない JSON 文字列で、中身のキーは契約の型ではない。理由は ADR 0431）。
 
+- **`@mnemora/testkit/fixtures` の InMemory と provider の fake を、Postgres の振る舞いに揃えた（NUL・`timestamptz` の下限・`reinforce` の bigint 溢れ・LLM 応答の参照）。core のテスト専用 Fake の float4 の読み戻しも揃えた**（[ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md)。[ADR 0434](./docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)・[0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md)・[0479](./docs/decisions/0479-tenant-settings-write-fake-alignment.md)・[0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md) の負債・材料）。本物の adapter（`@mnemora/postgres` など）は変えていない。
+  - **新しく断る入力**（Postgres が今拒むものだけ）: `InMemoryMemoryStore.findContestedByClaimKey` の claimKey の NUL、`InMemoryLexicalStore.search` の `filter.labels`・`InMemoryVectorStore.search`/`searchMany` の `filter.labels`・`filter.attributes` の NUL。紀元前4713年11月24日（`timestamptz` の下限）より前の日時を、Postgres が `22008` にする口の条件・`opts.now`・`opts.at` で（`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、Postgres も通すので通す）。`reinforce` の `addOwnSubjectSeq` で `nowSeq + S_x`（と床）が bigint を溢れるとき。
+  - **返り値が変わる**: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製になった（呼び出し側が書き換えても、次の再生・記録に漏れない）。
+  - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
+
 ### Fixed
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createObservation`・`createObservationWithOutbox` が、関数・`Symbol` を欄の値に持つ値や `toJSON` を持つ値を含む `payload`（`observe({ kind: "event", data })` の `data`）を、`DataCloneError` で断らずに、`@mnemora/postgres` と同じ規則で保存するようになった。**（[ADR 0486](./docs/decisions/0486-fixture-event-data-align-and-context-text-unit.md)）関数・`Symbol` の欄は消え（配列の要素なら `null`）、`toJSON` はその戻り値で保存する。`NaN`・`-0`・`Date`・値が `undefined` の欄の扱いは変えていない。断る入力が減るだけで、非破壊。
