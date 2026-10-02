@@ -72,6 +72,13 @@
 
 Postgres の側には変異を入れていない（置き換えは node-postgres というドライバの振る舞いで、リポジトリの実装の行ではない。Postgres の歯は「置き換えの出所」を実測で固定する役）。
 
+**追記【実測】（2026-10-02、別の担い手が確かめ直したとき）**:
+
+- **生き残った変異**: 上の表に無い口を1か所ずつ外すと、歯が緑のままだった。`InMemoryMemoryStore`・`FakeMemoryStore` の `findContestedByClaimKey` の `claimKey`、`aggregateScope` の `taxonomyGroupCandidates`、`InMemoryVectorStore`・`InMemoryLexicalStore`・`FakeVectorStore`・`FakeLexicalStore` の `filter.labels`。決定2 はこれらの引数も置き換えると書いていたが、歯が当たっていなかった。
+- **塞ぐために足した歯**（コミット `0fd908c3`、`lone-surrogate-fffd-teeth.ts`）: (1) `findContestedByClaimKey` と `taxonomyGroupCandidates` を、孤立サロゲートの入力と置き換え後の入力の両方で引く歯。(2) Vector・Lexical の `filter.labels` を同じく両方で引く歯。そのために `LoneSurrogateKit` に任意の口 `searchByLabels` を足し、3つのテストファイル（InMemory・Fake・Postgres）が実装を持つ。(3) 対照の歯: `jsonb` 列の欄（`attributes`・`provenance`）は置き換えない（Postgres は断り、InMemory・Fake はそのまま保持する。U+FFFD にはならない）。旧 B3 は断ったかどうかしか見ておらず、InMemory が `attributes` を置き換える過剰な変異は生き残っていた。
+- **足した後**: 歯は InMemory 68・Fake 68・Postgres 68 本、すべて緑（Postgres が `taxonomyGroupCandidates`・`findContestedByClaimKey`・Vector/Lexical の `filter.labels` も置き換えることを実測で確かめた）。上の生き残った変異は、InMemory・Fake とも各 5 本赤になり、戻すと緑に戻った。`attributes` を置き換える変異は 1 本赤（戻して緑）。
+- **表の本数との食い違い**: M1・M2 の「21 本赤」は、確かめ直した取り方では再現しなかった。InMemory の `createMemoryIdempotent` 呼び出し（`replaceLoneSurrogatesInNewMemory`）を丸ごと外すと 22 本赤（InMemory の歯と B3 の合計）、`tags` だけ外すと 17 本、`digest` だけ 11 本、`contentHash` だけ 5 本、claimKey の述語だけ 10 本だった。どの変異も赤になる点は表と同じで、本数だけが合わない（数え方・変異の入れ方の違いによる。どちらの取り方だったかは確かめていない）。
+
 ## 検討した代替案
 
 1. **(a) 揃えない。** オーナーが採らなかった。
