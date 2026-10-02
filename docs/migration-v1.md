@@ -2565,6 +2565,12 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   `PostgresRelationStore` は `kind` の真偽で絞り込みの有無を決めるので、偽の値なら全件を返す。`InMemoryRelationStore` は `kind === undefined` で決めていたため、同じ入力で 0 件を返していた。いまは `@mnemora/postgres` と同じく全件を返す。`undefined` と、正しい `kind`・範囲外の文字列（`"bogus"` は 0 件）の返りは変えていない。
   **落ちる入力が減る変更**（新しく断る入力は無い。型の外の入力の返りが、本物に揃う）。core のテスト専用の `FakeRelationStore`（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
+- **`@mnemora/testkit/fixtures`・provider の fake: Postgres が拒む入力を新しく断り、LLM 応答を複製して返す**（[ADR 0500](./decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md)。🟡。[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md) の判断に従い、fixture が新しく例外を投げる変更は 🔴 に数えない）。
+  自前のテストで InMemory 一式・`RecordedLLMProvider` などを使っている人は、次を見直すこと。
+  - 新しく断る入力（どれも Postgres は以前から拒む）: `InMemoryMemoryStore.findContestedByClaimKey` の claimKey の NUL。`InMemoryLexicalStore.search` の `filter.labels`、`InMemoryVectorStore.search`・`searchMany` の `filter.labels`・`filter.attributes` の NUL。紀元前4713年11月24日 00:00:00 UTC より前の日時（`EventStore.list` の `since`/`until`、検索・`aggregateScope` の日時の条件、`archiveDecayed`・`requeueEmbedJobs` の `now`、claim key の `validFrom`/`validUntil`、outbox の行を書く口の `opts.now`、`OutboxStore.complete`/`fail` の `opts.at`）。`purge*` の `olderThan` は、下限より前でも通す（Postgres も0件で返す）。`reinforce({ addOwnSubjectSeq: true })` で `nowSeq + S_x`（と床）が 2^63 以上になる入力。
+  - 振る舞いが変わるもの: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` が返す応答は、記録の参照ではなく複製になった。返り値を書き換えてから次の再生を読んでいた呼び出し側（書き換えが次の再生に見えていた）は、見え方が変わる。core のテスト専用 Fake（公開されていない）の `setDefaultHalfLifeRecalls` も、float4 の読み戻しの形で保存する。
+  触っていない: `@mnemora/postgres` などの本物の adapter、conformance suite。
+
 ### この節に載せなかったもの（理由つき）
 
 - **[PR #1550](https://github.com/takecchi/mnemora/pull/1550)（ADR 0441）**: CHANGELOG・この文書の参照の食い違いと、consumer-install の検査の名前の修正。`@mnemora/core`・`@mnemora/postgres` の README に「TypeScript の `lib`・`target` は ES2022 以上」を書いたのは**既存の要件を文書に書いただけ**で、振る舞いは変わらない。
