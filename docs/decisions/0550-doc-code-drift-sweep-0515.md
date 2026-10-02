@@ -5,7 +5,7 @@
 
 クローン miku の指示で、マネージャー mgr-b9b6a409 とその委譲先（担い手）が書いた。
 
-**照合の基準は main `bfb865a6`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539 の5つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
+**照合の基準は main `21fda201`。** ADR 0545（#1653）の続きで、0545 を締めたあとに main へ入った 0515（#1648、`575042a2`）と 0516（#1649、`8c2519ca`）から掃く。そのあとに main へ入った 0538（#1643、`fd8b5aea`）・0535（#1637、`d480131c`）・0539（#1652、`bfb865a6`）・0519（#1651、`21fda201`）は、末尾の追い足しの節で掃いた（照らしたのは 0515・0516・0538・0535・0539・0519 の6つ）。**このあとマージされるものは、マージされた順に追い足す。**1時間ほどマージが入らなかったら、そこまでで締める。
 
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手の判定、【未確認】は確かめていないこと。
 
@@ -56,14 +56,14 @@
 
 ## まとめ
 
-- **直したもの**: 0515・0538・0535 の分で文書を直した（0516・0539 の分に文書のずれは無かった）。0538 は `docs/memory-model.md` 1964 行目に Fake の1文、0535 は CHANGELOG `[1.3.0]` と migration-v1（v1.2.0 → 次の版の節）の ADR 0504 の項に、ADR 0516 で落とす store を足した（追い足しの節）。0515 の分は: `docs/memory-model.md`（ADR 0503 の追記の直後に、ADR 0515 の2つの断りを足した）と、`packages/core/src/interfaces/memory-store.ts` の TSDoc 2語句（`updateStatus` の「`supersededById` が無くてよい」と `resolveContestedPair` の「対の外の記憶を指す `superseded` は断らない」を、0515 のあとの約束と矛盾しない形に）。0516 の分に文書のずれは無かった。型・実装・振る舞いは変えていない。
+- **直したもの**: 0515・0538・0535 の分で文書を直した（0516・0539・0519 の分に文書のずれは無かった）。0538 は `docs/memory-model.md` 1964 行目に Fake の1文、0535 は CHANGELOG `[1.3.0]` と migration-v1（v1.2.0 → 次の版の節）の ADR 0504 の項に、ADR 0516 で落とす store を足した（追い足しの節）。0515 の分は: `docs/memory-model.md`（ADR 0503 の追記の直後に、ADR 0515 の2つの断りを足した）と、`packages/core/src/interfaces/memory-store.ts` の TSDoc 2語句（`updateStatus` の「`supersededById` が無くてよい」と `resolveContestedPair` の「対の外の記憶を指す `superseded` は断らない」を、0515 のあとの約束と矛盾しない形に）。0516 の分に文書のずれは無かった。型・実装・振る舞いは変えていない。
 - **コードの側を直すべき食い違い（材料）**:
   1. 0515 の分: core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）が、`superseded` 以外への `supersededById`・`resolveContestedPair` の対の外の `forgotten`・ADR 0503 の `superseded` の形の検査（無い・自己置換・循環）を断らない。Postgres・InMemory と挙動が割れる。ADR 0515 自身が負債に書いていた件の確認。
   2. 0516 の分: `trigram-lexical-store.ts` の `search` 以外の DB 呼び出し（`create`・索引づくり）に `omittingParams` が無い。約束の違反ではなく、ADR 0516 の負債の一覧への補足。
   - どちらも別の PR で直す（担当はクローンが配る）。
 - **照らした範囲**【現物】: 上の各節に書いた。追い足しの分（0538・0535）は、`runtime-fakes.ts` の `purgeExpiredEventsSync`、Postgres・InMemory の `events_purged` の書き手、`memory-store.ts`（interface）の `purgeExpiredEvents` の TSDoc、適合スイートの A10、`docs/conformance.md`・`docs/memory-model.md`、`runtime.ts` の `already_purged` の TSDoc と呼び出し、`query-check.ts` と InMemory の `seqSumOverflowsBigint`、`event-store.ts`・`relation-store.ts`・`memory-store.ts` の `omittingParams` の有無、CHANGELOG `[1.3.0]` 97・112 行目、migration-v1 の項目60・2810 行目。読んだファイルは、`packages/postgres/src/memory-store.ts`（`assertSupersededByShape` の呼び出し・`resolveContestedPair` の先取り）、`outbox-store.ts`・`tenant-settings-store.ts`・`trigram-lexical-store.ts`・`event-store.ts`・`relation-store.ts`・`omit-params.ts`、`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`、`packages/core/src/__tests__/runtime-fakes.ts`、`packages/core/src/interfaces/memory-store.ts`・`tenant-settings-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `*conformance*` 全体の grep、`error-message-omits-params.postgres.test.ts` の構成、ルートと各パッケージの README、`docs/*.md`（`memory-model.md`・`architecture.md`・`release-notes-v1.1.0.md`・`release-notes-v1.2.0.md`）、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`（項目59・61 と 2803 行目以降）。grep の語は `supersededById`・`forbidWhenNotSuperseded`・`assertSupersededByShape`・`COALESCE`・`omittingParams`・`omitParams`・`params:`・`omitted by mnemora`・`updateStatusWithEvent(`・`this.db`。
 - **走らせたコマンド**: `git fetch`・`git diff`・`grep`・`node scripts/generate-adr-index.mjs`（差分なし）。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは通していない【未確認】（読んで突き合わせた）。
-- **引き受けた負債**: この ADR の結果は `main` の `bfb865a6` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
+- **引き受けた負債**: この ADR の結果は `main` の `21fda201` に対して測った記録で、`main` が進めば古くなる。0515・0516・0538・0539・0519 の歯・変異試験を再実行していない。Fake・trigram の材料は、この ADR では直していない。TSDoc の2語句の直しに対して、TSDoc を検査する歯（`tsdoc` 系）を走らせていない【未確認】。
 - **これが覆るとしたら**: 上の探し方が拾わない種類（散文で `supersededById` の扱いや store の例外の message を言い換えた文）の古さが見つかったとき。Fake を直す PR で Fake の振る舞いが割れていないと分かったとき（材料1が消える）。
 
 ## 追い足し（基準 main `d480131c`、ADR 0538・0535 の分）
@@ -122,3 +122,22 @@
 - **直したもの**: なし（文書の側にずれは無かった）。
 - **コードの側を直すべき食い違い**: 見つからなかった。ADR 0539 が残した材料は、いまも成り立つ【現物】: 同着の並びを3者で比べていない（適合スイートが縛る）、`observe` の検出ロジック自体への変異は測っていない、`findActiveByClaimKey` に `LIMIT` が無い（Postgres の SQL で確認）。オーナーの領分の材料は無し。
 - **【未確認】**: 0539 の歯2本（Postgres は DB が要る）と変異試験 85 件を走らせていない。Fake・InMemory の読み口を読み直していない。ADR 0539 の「3者一致」を、この回は当て直していない。
+
+## 追い足し（基準 main `21fda201`、ADR 0519 の分）
+
+0519（#1651、`21fda201`）が main に入ったので掃いた（`git diff bfb865a6 21fda201`。この枝は `origin/main` を merge した。衝突なし。ADR 索引は再生成しても差分なし）。この節も担い手が書いた。
+
+### 0519（`21fda201`）
+
+- **0519 の中身**【現物】: 差は ADR 0519・索引・Postgres の歯1本（`store-reinforce-purged-checks.postgres.test.ts`）と、`packages/core/src/interfaces/memory-store.ts` の `reinforce` の TSDoc の4行（purged の箇条の末尾の「InMemory 側は測っていない」を「InMemory も同じ…」に書き換え）。実装は変えていない。主張は、purge 済みの記憶に対して、InMemory も Postgres も `reinforce`・`reinforceMany`・`recordUsageAndReinforce` が弾かず `lastReinforcedAt`・`decayFloorAt` を書き換える（`status`・`purgedAt`・`content`・`memory_events` は不変）。
+- **3実装**【現物】:
+  - Postgres（`memory-store.ts` の `reinforce` 2008 行目、`reinforceManyOn` 2163 行目、`recordUsageAndReinforce` 2305 行目付近）: 各メソッドの範囲に `purged_at`・`purgedAt` を条件にする所は無い。
+  - testkit の InMemory（`in-memory-memory-store.ts` の `reinforce` 1964 行目、`reinforceMany` 2057 行目、`recordUsageAndReinforce` 2078 行目付近）: 各範囲に `purgedAt`・`status` を見る所は無い。no-op（起点以前の `at`）は現在の行を返す。0519 の言い分と一致した。
+  - core の Fake（`runtime-fakes.ts` の `reinforce` 1732 行目、`reinforceMany` 1808 行目、`recordUsageAndReinforce` 1829 行目付近）: 0519 は Fake を見ていない。読むと、`purgedAt`・`status`・`forgotten` を見る所は無く、no-op（起点以前の `at`）も現在の行を返す。形は InMemory・Postgres と同じで、purge 済みでも書き換わる。**割れは見つからなかった**（読んだだけ。Fake に対して走らせていない【未確認】）。
+- **突き合わせの結果**【現物】:
+  - 書き換えた TSDoc の文は、上の3実装と一致する。参照先（`reinforce-purged-memory.postgres.test.ts`・`store-reinforce-purged-checks.postgres.test.ts`・ADR 0453・0501・0519）はすべて在る。TSDoc は Fake に触れておらず、嘘ではない。
+  - 適合スイート `memory-store-conformance.ts`: purge 済みの記憶への `reinforce` を検査する項目は無い（grep）。0519 は「conformance に足さない」（ADR 0434 決定5）で、スイートは変えていない。
+  - CHANGELOG `[1.3.0]`・migration-v1・README・`docs/*.md`: purge 済みの記憶への強化を述べた所は無い（grep: `reinforce` と `purge`・`forgotten` の同居）。0519 は CHANGELOG・migration-v1 を変えない決め（fixture を変える直しではない）で、それで足りる。
+- **直したもの**: なし（文書の側にずれは無かった）。
+- **コードの側を直すべき食い違い**: 見つからなかった。ADR 0519 が残した材料は、いまも成り立つ【現物】: 負債1（`Runtime.observe({ kind: 'memory_usage' })` 経由の purge 済みへの強化を InMemory で測っていない。TSDoc も同じく書いている）、負債2（Postgres の単体 `reinforce` を弾く変異を撃っていない）。測っていない範囲（別テナントの purge 済み、`halfLifeRecalls` を持つ記憶への `nowSeq`）も変わらない。これに「Fake は読んだだけ」を加える。
+- **【未確認】**: 0519 の歯（8 本。DB が要る）と変異試験を走らせていない。Fake の `reinforce` 系を実際に purge 済みの記憶へ呼んでいない。
