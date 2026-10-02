@@ -22,4 +22,30 @@ describe("resolveConcurrency", () => {
   it("整数でなければ投げる", () => {
     expect(() => resolveConcurrency(1.5)).toThrow(/positive integer/);
   });
+
+  // ADR 0525: 型の誤りは TypeError、範囲の誤りは RangeError。message は同じ。
+  it("⭐ 数でなければ TypeError（RangeError ではない）", () => {
+    for (const value of ["2", null, 2n, {}]) {
+      const call = () => resolveConcurrency(value as unknown as number);
+      expect(call).toThrow(TypeError);
+      expect(call).not.toThrow(RangeError);
+    }
+  });
+
+  it("⭐ 数だが 1 以上の整数でなければ RangeError（TypeError ではない）", () => {
+    for (const value of [0, -1, 1.5, Number.NaN, Infinity]) {
+      const call = () => resolveConcurrency(value);
+      expect(call).toThrow(RangeError);
+      expect(call).not.toThrow(TypeError);
+    }
+  });
+
+  it("⭐ 型を変えても message は変わらない", () => {
+    expect(() => resolveConcurrency("2" as unknown as number)).toThrow(
+      "createBullmqTickDriver: concurrency must be a positive integer, got 2",
+    );
+    expect(() => resolveConcurrency(1.5)).toThrow(
+      "createBullmqTickDriver: concurrency must be a positive integer, got 1.5",
+    );
+  });
 });
