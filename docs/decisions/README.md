@@ -522,5 +522,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0523](./0523-doc-code-drift-sweep-0493-0494-0497-0498-0501.md) | 文書とコードのずれを横に掃く（続き）— ADR 0493・0494・0497・0498・0501 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0524](./0524-uppercase-and-after-delete-llm-paths.md) | 穴探し — ADR 0522「測っていないこと」の実測。`observe`・`reextract`・`consolidate`・`reflect` の「大文字の id」と「消した後の参照」（小文字では3者一致。大文字は既知の形に加えて、Postgres の `created` イベントの `meta.sources` に呼び出し側の綴りが残る形を1つ見つけた） | 採用 (2026-10) |
 | [0525](./0525-config-error-types-align-with-provider.md) | 構成値の検査の例外の型を揃える — `createBullmqTickDriver`・`registerEmbeddingSpace`・`DeterministicEmbeddingProvider` を、型の誤りは `TypeError`・範囲の誤りは `RangeError` にする | 採用 (2026-10) |
+| [0530](./0530-batch-exceeds-lease-double-processing-per-kind.md) | 穴探し — 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごとに3者で実測する（TSDoc どおりで一致。`consolidate` の結末だけ TSDoc に書いていなかったので書いた） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
