@@ -1,11 +1,11 @@
-# ADR 0545: 文書とコードのずれを横に掃く（第6弾の1回目）— ADR 0517・0511 の分の文書を、今の main の実装に照らす
+# ADR 0545: 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-02
 
-クローン miku の委譲先（担い手。マネージャー mgr-d1d64a4a の指示による）が書いた。文書の側の直しは無かった。コードの側が約束を破っていそうな食い違いも見つからなかった。
+クローン miku の委譲先（担い手。マネージャー mgr-d1d64a4a の指示による）が書いた。0518 の追い足しはマネージャーが書き、締めはマネージャー mgr-b9b6a409 が引き継いだ。文書の側の直しは無かった。コードの側が約束を破っていそうな食い違いは、0518 の分の core の Fake の1件だけ（材料として残し、別の PR で直す）。
 
-**照合の基準は main `6e71ffb4`。** ADR 0535（#1637）の続きで、0517（#1646、`bc4452cc`）と 0511（#1636、`6e71ffb4`）の分を掃く。0535 は 0542 までで締め、それ以降をこの ADR で掃く。**このあとマージされるものは、マージされた順に追い足す。**（0543・0544 は枝 `fix/adr-0543-*`・`fix/adr-0544-*` が在るが、main にまだ無いので掃いていない。）
+**照合の基準は main `6e71ffb4`。** ADR 0535（#1637）の続きで、0517（#1646、`bc4452cc`）と 0511（#1636、`6e71ffb4`）の分を掃く。0535 は 0542 までで締め、それ以降をこの ADR で掃く。**このあとマージされるものは、マージされた順に追い足す。**（締めの注: 0518 を追い足したあと、1時間あまり main にマージが入らなかったので、main `0cfe277c` までで締めた。照らしたのは 0517・0511・0518 の3つ。締めの判断のあとに入った 0515（#1648、`575042a2`）は掃いておらず、次の弾に回す。）（0543・0544 は枝 `fix/adr-0543-*`・`fix/adr-0544-*` が在るが、main にまだ無いので掃いていない。）
 
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手の判定、【未確認】は確かめていないこと。
 
@@ -49,8 +49,9 @@
 
 ## まとめ
 
-- **直したもの**: なし（0517・0511 とも、文書にずれは無かった）。
-- **照らした範囲**【現物】: 上の各節に書いた。`packages/core/src/observation-text.ts`・`observation.ts`・`runtime.ts`・`extraction.ts`、`packages/postgres/src/memory-store.ts`、`packages/core/src/interfaces/memory-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `__fixtures__/in-memory-memory-store.ts`、ルートと各パッケージの README、`docs/*.md`、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`、公開 API の snapshot。
+- **直したもの**: なし（0517・0511・0518 とも、文書にずれは無かった）。
+- **コードの側を直すべき食い違い（材料）**: 0518 の分の core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）が、purge 済みの行への `expectedStatus` 付きの CAS を断らない（下の追い足しの節）。別の PR で直す（担当はクローンが配る）。0517・0511 の分には無い。
+- **照らした範囲**【現物】: 上の各節に書いた（0518 の分は下の追い足しの節）。`packages/core/src/observation-text.ts`・`observation.ts`・`runtime.ts`・`extraction.ts`、`packages/postgres/src/memory-store.ts`、`packages/core/src/interfaces/memory-store.ts`、`packages/testkit/src/memory-store-conformance.ts` と `__fixtures__/in-memory-memory-store.ts`、ルートと各パッケージの README、`docs/*.md`、CHANGELOG `[1.3.0]`、`docs/migration-v1.md`、公開 API の snapshot。
 - **走らせたコマンド**: `git diff`・`grep` と `node scripts/generate-adr-index.mjs`。ビルド・テスト・DB の要るテストは走らせていない。機械照合のスクリプトは、この回は通していない【未確認】（読んで突き合わせた）。
 
 - **引き受けた負債**: この ADR の結果は `main` の `6e71ffb4` に対して測った記録で、`main` が進めば古くなる。照合の道具は repo に入れていない（ADR 0495 の代替案1のとおり）。0517・0511 の歯・変異試験を再実行していない。
