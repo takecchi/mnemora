@@ -524,6 +524,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0506](./0506-core-fake-ctx-and-recall-record-checks.md) | core の Fake の残りの入力検査を InMemory・Postgres に揃える（`createRecall` の書けない値、`subjectId` を取る読み口、`ctx` の表） | 採用 (2026-10) |
 | [0507](./0507-language-mismatch-observation-counted-once-per-observation.md) | 言語の事後検査（ADR 0391）の観測側の数えを、観測ごとに1回へ畳む（判定は変えない） | 採用 (2026-10) |
 | [0508](./0508-recall-channels-undecidable-japanese-labels-on-real-postgres.md) | `recall` の `channels` の合流のうち、`ann_truncated`（undecidable）・日本語の語彙・`labels` との組を、Fake と実 Postgres に同じ問いを当てて縛る（割れは見つからなかった。日本語だけ既知の非対称を歯にした） | 採用 (2026-10) |
+| [0509](./0509-fuzz-uncovered-fields-channels-hnsw-recall-record.md) | 穴探し — recall の fuzz に `channels`（tsvector・trigram）・HNSW 上の `fields`・`getRecall` の読み戻しを足した（Fake と testkit の語彙検索の食い違いが 2 つ出た。直していない） | 採用 (2026-10) |
 | [0510](./0510-doc-forms-not-yet-swept.md) | 文書とコードのずれの掃きが「見ていない形」として残した、表の中の数値・定数と、既定値・振る舞いの散文を、コードの定数に名指しで照らす | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
