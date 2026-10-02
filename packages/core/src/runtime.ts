@@ -4032,7 +4032,7 @@ export interface Runtime {
    *    `@mnemora/postgres` と testkit の fixture で確認（歯は
    *    `consolidate-reflect-forget-race.postgres.test.ts`）。
    * 8. `created` イベントを1件積む。`meta.reason: 'reflected'`、`meta.sources: <eligible の
-   *    id>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
+   *    id。store が返した行の id＝小文字の正規形で、渡された綴りではない（ADR 0527。以前は渡された綴りで、直す前に書かれた行は書き換えない）>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
    *    イベントと同じ形）。
    * 9. `outcome: 'reflected'`、`reflectedMemoryId`、eligible を `'used'` にして返す。
    *
