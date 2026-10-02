@@ -2562,6 +2562,10 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   `PostgresEventStore.append` は uuid を小文字にそろえて比べるので、大文字の uuid を自テナントの記憶として受ける。`InMemoryEventStore.append` は、ADR 0469 の時点では完全一致で引き、自テナントの記憶の id を大文字にしたものも断っていた。いまは `@mnemora/postgres` と同じく小文字にそろえて受け、積むイベントの `memoryId` も小文字の正規形になる。別テナントの記憶は、大文字でも断る。`null`（`events_purged`）は検査しない。
   **落ちる入力が減る変更**（新しく断る入力は無い）。core のテスト専用の `FakeEventStore.append`（公開されていない）も同じに揃えた。conformance suite は変えていない。
 
+- **`@mnemora/testkit/fixtures` の InMemory: `decayFloorAt`・`lastReinforcedAt` の Invalid Date、`createObservationWithOutbox` の `opts.claimedBy` の NUL、`eraseTenant` の `limit`（NaN・非整数・Infinity・2^63 以上）を断る**（[ADR 0493](./decisions/0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)）。
+  `@mnemora/postgres` は同じ入力を元から断る（Postgres の `timestamptz`・`text`・`bigint` の変換が拒む）。InMemory は以前、通していた: Invalid Date はそのまま保持して `createMemory` が成功し、NUL の `claimedBy` は outbox の行に入り、`eraseTenant` は `limit: NaN` でも成功した（`MemoryStore`・`VectorStore`・`OutboxStore` の3つ）。いまは、書く前に断る（何も書かない）。
+  **落ちる入力が増える変更**。ただし、本物の adapter（`@mnemora/postgres`）に流したら元から落ちる入力なので、InMemory を本番の代わりに使っているだけのテストが、本番と同じ振る舞いになる。行を書かないとき（`jobKinds` が空・冪等の既存の行に当たる）の `claimedBy` は、Postgres と同じく見ない。`@mnemora/core` の独立関数 `eraseTenant` は元から `limit` を正の整数に限るので、影響を受けるのは port を直接呼ぶ呼び出しだけ。公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。core のテスト専用の Fake（公開されていない）も、同じ入力と、ほかの入力（`ctx.tenantId` の NUL ほか）を断るように揃えた。
+
 ### この節に載せなかったもの（理由つき）
 
 - **[PR #1550](https://github.com/takecchi/mnemora/pull/1550)（ADR 0441）**: CHANGELOG・この文書の参照の食い違いと、consumer-install の検査の名前の修正。`@mnemora/core`・`@mnemora/postgres` の README に「TypeScript の `lib`・`target` は ES2022 以上」を書いたのは**既存の要件を文書に書いただけ**で、振る舞いは変わらない。
