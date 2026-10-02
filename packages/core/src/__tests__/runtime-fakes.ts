@@ -1578,7 +1578,14 @@ export class FakeMemoryStore implements MemoryStore {
       memoryId: null,
       kind: "events_purged",
       actor: { type: "system" },
-      meta: { purgedCount: purged, oldestPurgedAt, newestPurgedAt, olderThan: opts.olderThan },
+      // ADR 0538: `@mnemora/postgres`（`jsonb`）と `InMemoryMemoryStore` は日時を ISO 8601 の文字列で持つ。この Fake は `Date` のまま持っていた
+      // （`meta` を読み戻すと型が違った）ので、文字列にそろえる。
+      meta: {
+        purgedCount: purged,
+        oldestPurgedAt: oldestPurgedAt?.toISOString() ?? null,
+        newestPurgedAt: newestPurgedAt?.toISOString() ?? null,
+        olderThan: opts.olderThan.toISOString(),
+      },
     });
     this.backing.events.push(storedEvent);
 
