@@ -23,6 +23,7 @@ import type {
 import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { assertHalfLifeRecallsFitsFloat4 } from "./half-life-float4.js";
 import type { Db } from "./client.js";
+import { omittingParams } from "./omit-params.js";
 
 /**
  * `TenantSettingsStore` の Postgres 実装（roadmap.md 段階3。`getEventRetention`/
@@ -38,9 +39,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
 
   async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT default_half_life_hours FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     if (result.rows.length === 0) {
       return DEFAULT_HALF_LIFE_HOURS;
     }
@@ -50,9 +53,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT event_retention_days FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     if (result.rows.length === 0) {
       return { kind: "unset" };
     }
@@ -74,12 +79,14 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     // `default_half_life_hours`/`taxonomy_mode` は指定しない——行が無い場合は DB 側の
     // DEFAULT（720 / 'open'）に任せる（マイグレーションを足さないため、この列にだけ
     // 値を書く UPSERT にする）。
-    await this.db.execute(sql`
+    await omittingParams(() =>
+      this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, event_retention_days, updated_at)
       VALUES (${ctx.tenantId}, ${days}, now())
       ON CONFLICT (tenant_id) DO UPDATE
         SET event_retention_days = EXCLUDED.event_retention_days, updated_at = now()
-    `);
+    `),
+    );
   }
 
   /**
@@ -88,9 +95,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT decay_clock FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     if (result.rows.length === 0) {
       return DEFAULT_DECAY_CLOCK;
     }
@@ -110,12 +119,14 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
-    await this.db.execute(sql`
+    await omittingParams(() =>
+      this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, decay_clock, updated_at)
       VALUES (${ctx.tenantId}, ${clock}, now())
       ON CONFLICT (tenant_id) DO UPDATE
         SET decay_clock = EXCLUDED.decay_clock, updated_at = now()
-    `);
+    `),
+    );
   }
 
   /**
@@ -124,9 +135,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT default_half_life_recalls FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     if (result.rows.length === 0) {
       return DEFAULT_HALF_LIFE_RECALLS;
     }
@@ -151,12 +164,14 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     assertValidHalfLifeRecalls(recalls);
     // 列は `real`（float4）。収まらない値は DB の生の例外でなく明示の例外で断る（testkit と同じ判定）。
     assertHalfLifeRecallsFitsFloat4("PostgresTenantSettingsStore", recalls);
-    await this.db.execute(sql`
+    await omittingParams(() =>
+      this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, default_half_life_recalls, updated_at)
       VALUES (${ctx.tenantId}, ${recalls}, now())
       ON CONFLICT (tenant_id) DO UPDATE
         SET default_half_life_recalls = EXCLUDED.default_half_life_recalls, updated_at = now()
-    `);
+    `),
+    );
   }
 
   /**
@@ -172,9 +187,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async getActivitySeq(ctx: Ctx): Promise<number> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT activity_seq FROM tenant_activity WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     if (result.rows.length === 0) {
       return 0;
     }
@@ -191,9 +208,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT 1 FROM tenant_subject_activity WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     return result.rows.length > 0;
   }
 
@@ -212,10 +231,12 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     if (subjectIds.length === 0) {
       return {};
     }
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT subject_id, activity_seq FROM tenant_subject_activity
       WHERE tenant_id = ${ctx.tenantId} AND subject_id = ANY(${sql.param(subjectIds)}::text[])
-    `);
+    `),
+    );
     const out = Object.create(null) as Record<string, number>;
     for (const row of result.rows as unknown as {
       subject_id: string;
@@ -232,9 +253,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
     assertWellFormedCtx(ctx);
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       SELECT taxonomy_mode FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-    `);
+    `),
+    );
     if (result.rows.length === 0) {
       return DEFAULT_TAXONOMY_MODE;
     }
@@ -255,12 +278,14 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
-    await this.db.execute(sql`
+    await omittingParams(() =>
+      this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, taxonomy_mode, updated_at)
       VALUES (${ctx.tenantId}, ${mode}, now())
       ON CONFLICT (tenant_id) DO UPDATE
         SET taxonomy_mode = EXCLUDED.taxonomy_mode, updated_at = now()
-    `);
+    `),
+    );
   }
 
   /**
@@ -271,14 +296,18 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
     if (opts.dryRun === true) {
-      const result = await this.db.execute(sql`
+      const result = await omittingParams(() =>
+        this.db.execute(sql`
         SELECT 1 FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
-      `);
+      `),
+      );
       return { deleted: result.rows.length, reachedLimit: false };
     }
-    const result = await this.db.execute(sql`
+    const result = await omittingParams(() =>
+      this.db.execute(sql`
       DELETE FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} RETURNING tenant_id
-    `);
+    `),
+    );
     return { deleted: result.rows.length, reachedLimit: false };
   }
 }
