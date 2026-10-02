@@ -560,5 +560,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0557](./0557-core-fake-superseded-by-checks.md) | core の Fake も `supersededById` の断り（ADR 0503・0515）を持つ（InMemory・Postgres と揃える） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
