@@ -64,9 +64,8 @@ function setup() {
     hashContent: (content: string) => `sha256(${content})`,
     clock: { now: () => NOW },
   });
-  const backing = (
-    store as unknown as { backing: { events: Array<{ memoryId: string | null }> } }
-  ).backing;
+  const backing = (store as unknown as { backing: { events: Array<{ memoryId: string | null }> } })
+    .backing;
   const ev = (memoryId: string | null): NewMemoryEvent => ({
     tenantId: "ignored",
     memoryId,
