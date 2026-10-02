@@ -532,6 +532,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0529](./0529-tick-mixed-kinds-concurrency-and-lease.md) | 穴探し — ADR 0526「測っていないこと」の実測。`tick` が種類を混ぜて回るとき・並行する複数の `tick`・リースが切れた後の再取得（Runtime の層。3者一致。割れは見つからなかった。決定的にできる部分だけ歯にした） | 採用 (2026-10) |
 | [0530](./0530-batch-exceeds-lease-double-processing-per-kind.md) | 穴探し — 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごとに3者で実測する（TSDoc どおりで一致。`consolidate` の結末だけ TSDoc に書いていなかったので書いた） | 採用 (2026-10) |
 | [0533](./0533-doc-code-drift-sweep-0526-0527.md) | 文書とコードのずれを横に掃く（第4弾の1回目）— ADR 0526・0527 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0534](./0534-changelog-reconcile-after-v1-2-0-tag.md) | CHANGELOG と migration-v1 の帳尻 — `v1.2.0` の tag より後に着地した #1615（ADR 0521）・#1616（ADR 0525）の項目を `[1.3.0]` 側へ移し、`[1.3.0]` の冒頭の「まだ何も棚卸ししていない」を直す | 採用 (2026-10) |
 | [0535](./0535-doc-code-drift-sweep-0530.md) | 文書とコードのずれを横に掃く（第5弾の1回目）— ADR 0530 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
