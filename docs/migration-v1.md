@@ -2802,6 +2802,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/postgres`: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。ADR 0504 と同じ作法）。SQL の文・SQLSTATE・`cause` は残る。落ちる入力は増えない。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。
 - **`@mnemora/postgres`・`@mnemora/testkit/fixtures`: v1.0.x で purge した記憶は、`Runtime.purge` をかけ直す（`scrubPurged`）と、`recalls.index_band` の目次帯に残った digest も伏せられる**（[ADR 0512](./decisions/0512-scrub-purged-index-band.md)）。v1.0.0〜v1.0.2 の purge は `recalls` を書き換えなかった。手順は要らない（かけ直したときだけ効く。自動では走らない。migration では消さない）。`recalls.query` は残る。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
+  以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
