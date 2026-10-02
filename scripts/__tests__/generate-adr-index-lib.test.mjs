@@ -8,10 +8,13 @@ import {
   extractIndexedNumbers,
   formatStateCell,
   isAdrFilename,
+  findMalformedAdrFilenames,
+  assertWellFormedAdrFilenames,
   parseAdrEntry,
   spliceGeneratedIndex,
 } from "../generate-adr-index-lib.mjs";
 
+import { parseAdrFilename } from "../adr-renumber-lib.mjs";
 /**
  * `scripts/generate-adr-index-lib.mjs`（生成器の純関数側）の歯（ADR 0137）。
  *
@@ -55,15 +58,55 @@ describe("buildAdrEntries: 形の外れた ADR のファイル名（ADR 0537）"
     }
   });
 
-  it("番号で始まらない名前（README.md・TEMPLATE.md・notes.txt・番号で始まる .md 以外）は、今までどおり無視する（陰性対照）", () => {
+  it("ADR らしく見えるのに 4桁の番号で始まらない名前（ADR 0540）も落とす", () => {
+    for (const name of [
+      "adr-0538-x.md",
+      "ADR-0538-x.md",
+      "538-x.md",
+      "05380-x.md",
+      "0538_x.md",
+      "0538.md",
+      "0538-X.md",
+      "notes.md",
+      "README.MD",
+    ]) {
+      expect(() => buildAdrEntries([{ filename: name, content: body("0001") }])).toThrow(name);
+    }
+  });
+
+  it("許す一覧（README.md・TEMPLATE.md）と、.md 以外は、今までどおり無視する（陰性対照）", () => {
     const entries = buildAdrEntries([
       { filename: "0001-ok.md", content: body("0001") },
       { filename: "README.md", content: "x" },
       { filename: "TEMPLATE.md", content: "x" },
       { filename: "notes.txt", content: "x" },
       { filename: "0002-x.txt", content: "x" },
+      { filename: "adr-0538-x.txt", content: "x" },
+      { filename: "diagram.png", content: "x" },
     ]);
     expect(entries.map((e) => e.number)).toEqual(["0001"]);
+  });
+
+  it("findMalformedAdrFilenames・assertWellFormedAdrFilenames: 拾う形と拾わない形", () => {
+    const ok = ["0001-ok.md", "0534-a-b-1.md", "README.md", "TEMPLATE.md", "x.txt", "a.png", "img"];
+    const bad = ["adr-0538-x.md", "538-x.md", "0538_x.md", "0534-a.1.0.md", "0538.md", "other.md"];
+    expect(findMalformedAdrFilenames(ok)).toEqual([]);
+    expect(findMalformedAdrFilenames([...ok, ...bad])).toEqual(bad);
+    expect(() => assertWellFormedAdrFilenames(ok)).not.toThrow();
+    expect(() => assertWellFormedAdrFilenames(bad)).toThrow(/adr-0538-x\.md/);
+  });
+
+  it("adr-renumber-lib の parseAdrFilename は、isAdrFilename と同じ形を同じ正規表現で受ける（共有、ADR 0540）", () => {
+    for (const name of [
+      "0001-a.md",
+      "0534-a-b-1.md",
+      "0534-a.1.md",
+      "adr-0538-x.md",
+      "0538_x.md",
+      "README.md",
+    ]) {
+      expect(parseAdrFilename(name) !== null).toBe(isAdrFilename(name));
+    }
   });
 });
 

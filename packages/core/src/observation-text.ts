@@ -12,7 +12,7 @@ import type { Observation } from "./observation.js";
  * 永続化されるため、`extract: 'deferred'`（`processExtractJob` が `getObservation` で読み直す）・
  * `reextract`（同じく `getObservation` で読み直す）のどちらでも、sync 経路と同じ形で再現される。
  *
- * - `document`（`extractTitle: true` かつ `title` が空でない文字列）: `content` が空でなければ
+ * - `document`（`extractTitle: true` かつ `title` が空でない文字列。`trim` で空になる値は空とみなす。ADR 0517）: `content` が空でなければ
  *   `${title}\n\n${content}`。`content` が空文字なら `title` だけ（区切りの後に何も続かない
  *   `${title}\n\n` を避ける）。**`observe()` の入力 schema は `title`/`content` どちらも
  *   `min(1)` を課すため、`content` が空文字になるのは `reextract` 等が payload を直接読む
@@ -29,7 +29,9 @@ export function observationPayloadText(observation: Observation): string {
     const record = payload as Record<string, unknown>;
     if (record.extractTitle === true) {
       const title = typeof record.title === "string" ? record.title : "";
-      if (title.length > 0) {
+      // ADR 0517: `trim` で空になる title（空白・改行・タブ・U+3000 だけ）は空とみなし、前置きにしない
+      // （断るのではなく無視する。「空白」の定義は ADR 0502 と同じ `trim`）。値は trim して使わない。
+      if (title.trim().length > 0) {
         const content = typeof record.content === "string" ? record.content : "";
         return content.length > 0 ? `${title}\n\n${content}` : title;
       }

@@ -114,6 +114,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **言語の事後検査（`created` の `meta.languageMismatch`）の、観測の本文の数え直しを、候補ごとから観測ごとに1回へ畳んだ**（[ADR 0507](./docs/decisions/0507-language-mismatch-observation-counted-once-per-observation.md)）。判定の結果・`rule`・印の形・公開 API は変えていない。大きな観測（33万字）から候補が多く出るとき、同期 CPU が減る（手元の1回の実測で100候補 約4.9秒 → 約0.06秒。門にしていない）。
 - **`@mnemora/bullmq` の `createBullmqTickDriver` 、`@mnemora/postgres` の `registerEmbeddingSpace`、`@mnemora/testkit/fixtures` の `DeterministicEmbeddingProvider` が、壊れた構成値で投げる例外が、素の `Error` から `TypeError`（型の誤り）・`RangeError`（範囲の誤り）に変わった**（[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md)。provider の数値オプション（ADR 0498）の形に揃えた）。対象は `everyMs`・`jobName`・`concurrency`（`resolveConcurrency` を含む）と、`DeterministicEmbeddingProvider` の `space.dimensions`（数でなければ `TypeError`、小数・非有限・`0` 以下なら `RangeError`）、`registerEmbeddingSpace` の `space.dimensions`（数でなければ `TypeError`、正の整数でない・pgvector hnsw の上限 2000 超なら `RangeError`）。数でない `everyMs`・文字列でない `jobName`・数でない `concurrency` は `TypeError`、数だが範囲外（`everyMs` の非有限・`1` 未満・`MAX_SAFE_INTEGER` 超、空文字の `jobName`、`concurrency` の小数・`NaN`・`1` 未満）は `RangeError`。**message は変えていない。** どちらも `Error` の子なので `instanceof Error` は変わらない。`err.name`・`err.constructor` を `"Error"`・`Error` と比べていた呼び出し側は見直すこと。手順は要らない。公開 API・既定値は変えていない。⭕ 非破壊と数える。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore` の語の数え方を、`@mnemora/postgres`（tsvector の `simple`）に揃えた——ハイフン入りの識別子（`PROJ-12`）が空白区切りの 1 語になる**（[ADR 0513](./docs/decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md) の判断どおり、fixture だけの変更）。
+
+  以前の `InMemoryLexicalStore` は、クエリを Unicode の英数字境界で割って語の集合にしていたので、`PROJ-12` が `proj`・`12` の 2 語になり、`coverage` の分母が Postgres とずれた（クエリ `gamma PROJ-12`、content `gamma` で、Postgres は 1/2、fixture は 1/3）。いまはクエリの単位が空白区切りの語で、語の中の token（`proj`・`12`）が content の token の列に隣接して並ぶときに、その語が一致したと数える（Postgres の `websearch_to_tsquery` の `"..."` のフレーズ）。
+  - **見え方が変わるもの**: `coverage` の値と、それが入る `ScoreBreakdown.lexicalMatch`。ハイフン・アンダースコア・ピリオドなどで区切った語を含むクエリ。content `proj x 12` はクエリ `PROJ-12` に当たらなくなる（Postgres も当たらない）。
+  - **揃えていないもの**: Postgres の text search parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）。ADR 0513 に実測を書いた。
+  - 本物の adapter（`@mnemora/postgres`）は変えていない。conformance suite は変えていない。
+
+- **`extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`String.prototype.trim` で空になる値）のとき、抽出（LLM）に渡す本文と全文フォールバックの Memory の本文の前置きにしなくなった**（[ADR 0517](./docs/decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./docs/decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1、`@mnemora/core`）。
+
+  以前は `"  \n\nC"` のように空白が前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）。実質のある `title` は、前後の空白もそのまま前置きになる。
+
+  - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
+
 ### Fixed
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
@@ -133,6 +146,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - 落とすのは message・`stack`・`cause` の連鎖の `params:` より後ろ（`(omitted by mnemora, N chars)`）。例外は新しく作らず、`kind`・`name`・`code`・`cause` は残る。
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504 と同じ扱い）。
   - **変えなかったこと**: `EventStore.get`・`list`、`PostgresTrigramLexicalStore` など、ほかの store の直接呼び。
+
+- **`@mnemora/postgres` の `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`・`purgeMemory`・`scrubPurged` が、同じラベルを逆の順で触る並行する書き込みと、生の 40P01（`deadlock detected`）で衝突しなくなった**（[ADR 0511](./docs/decisions/0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md)、ADR 0476 の負債1・2）。`labels` の行ロックを、どの経路でも名前のコードポイント順で取る。`createMemoriesWithOutboxAndEvents` は、衝突した候補が例外にならず `dropped` に黙って積まれていた。
+  - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。公開 API・DB・`Memory.tags`・`proposedCount` は変えない。
+  - **残ること**: まだ無いラベルを同時に新規作成する競合は、先取りできないので残る（ADR 0511 の負債）。
 
 ## [1.2.0] - 2026-10-02
 
