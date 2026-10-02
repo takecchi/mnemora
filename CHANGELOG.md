@@ -457,6 +457,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`recall()` の多者間の群（`RelationStore`）まわりの 2 つの割れを直した。**(1) `relationMaxCount` を超えて切った群のメンバーを、連想の `unit_assembly_dropped`・`over_limit`、または段2の `below_threshold` などでもう一度数えていた（`omitted` の件数の和が `totalInScope` を超えた）。切ったメンバーは連想の候補から外し、段2の件数から取り下げる（連想の席が、どうせ落ちる群のメンバーに取られなくなる）。(2) `RelationStore.link` で `active` な記憶へ辺を張ると、その記憶が結果に 2 回返っていた。群のメンバー（`contested` で `contestedWithId` なし）でない候補は、辺があっても群に入れない。新しく断る入力は無い（[ADR 0494](./docs/decisions/0494-fuzz-relations-and-argument-mutation.md)）
+
 - **`created` イベントの `meta.languageMismatch`（ADR 0391）の判定が、ローマ数字（`Ⅳ` など）を「ラテン文字」に数えていたのを、文字（`\p{L}`）だけを数えるように直した。**`contentLatinShare` が1を超える値（例: 2.5）になり、20字の下限もローマ数字ですり抜けていた。閾値と `rule` は変えていない。変わるのはローマ数字を含む本文・観測の判定だけで、保存済みの印は書き換えない（[PR #1597](https://github.com/takecchi/mnemora/pull/1597)）。
 
 - **`Runtime.findCorrectionCandidates` の `excludeMemoryIds` が、大文字の uuid でも除外するようになった（`@mnemora/postgres` は小文字で返すので、大文字で渡した自己除外が黙って効かなかった）。反復できない値を渡したときは、`recall()` を呼ぶ前に `TypeError` になる（以前は recall の記録を1件書いた後に落ちた）。**（[ADR 0485](./docs/decisions/0485-find-correction-candidates-exclude-ids.md)）
