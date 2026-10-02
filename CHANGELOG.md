@@ -299,6 +299,21 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目51。**DB マイグレーションは無い。**修正前に書かれた、別テナントを指す行（`recall_usages`・`memories.source_observation_id`・`contested_with_id`・`superseded_by_id`）が在るかを調べる SQL は ADR 0439 に在る（読み取りだけ）。
   - 【確かめていないこと】`memory_events` への INSERT 11箇所（ADR 0436 から変わらず、1つずつは確かめていない）。検査と書き込みの間に並行して参照先が消えた場合の、外部キー違反の生のエラーの見え方。`FakeMemoryStore`（core）の検査を縛る歯（適合テストに当てられていない）。手元以外の環境・既存データでの食い違う行の有無。
 
+- **型の外の入力を、新しく例外で断る5つの口: `findCorrectionCandidates`（`text`・`excludeMemoryIds`）、`resolveContested`・`resolveContestedGroup`・`applyCorrection`（未知の `resolution.kind`）、`tick`（`opts`・`leaseMs`）、`decayFloorOffset` と `floorAt`（壊れた数値）、`observe`・`recall` の `attributes`（キー `__proto__`）**（[ADR 0496](./docs/decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md)、`@mnemora/core`。TypeScript の型どおりに呼んでいる限り、何も変わらない）
+
+  各 ADR が「オーナーの領分」として材料に残した、型の外の入力を黙って通す口を、オーナーが v1.X.0 で破壊的変更を許したので、クローンの判断で断るようにした。**どれも、書き込みより前に**断る。例外の message に入力値は入らない。
+
+  - **`findCorrectionCandidates`**（ADR 0485・ADR 0490 穴3）: `input.text` が文字列でない（`undefined` を含む）と `TypeError`（以前は `no_candidates` を返し、`omitted` に `candidate_generation` の `stage_skipped` が出た）。`input.excludeMemoryIds` が配列でない（裸の文字列を含む。以前は1文字ずつの集合になり何も除外されなかった）、または文字列でない要素を含む（以前は黙って通った）と `TypeError`。省略（`undefined`）は今までどおり。**文字列を配列に包んで通す案は採っていない**（ADR の「採らなかった案」）。`null` も配列でないので断る。空文字の `text` は今までどおり `recall()` の検証が断る。
+  - **`resolveContested`・`resolveContestedGroup`・`applyCorrection`（`resolution` を渡したとき）**（ADR 0446）: `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもないと `RangeError`（以前は `supersede` の分岐へ倒れ、勝者の無いまま**両側とも `superseded`** になった）。`applyCorrection` は `markContested` の前に断るので、`contested` の印も event も残らない。
+  - **`tick`**（ADR 0445 BK-2）: `opts` が object でない（`tick(ctx)` を含む）と `TypeError`、`opts.leaseMs` が有限の数でない（省略・文字列・`NaN`・`±Infinity`）と `RangeError`。claim する前に断る。以前は素の `TypeError`、`@mnemora/postgres` では drizzle が包んだ `Error`（SQLSTATE `22007`）、testkit の fixture では名前の無い `Error` だった。**`leaseMs` が 0 以下の有限の数は、今までどおり通す**（`TickOptions.leaseMs` の TSDoc が書いている今の振る舞い。正の数に絞るかは決めていない）。
+  - **`decayFloorOffset`（と、これを通る `defaultDecayStrategy.floorAt`・`defaultActivityDecayStrategy.floorAt`）**（ADR 0474 材料3）: `threshold` が有限かつ 0 超でない、`strength`・`halfLife` が有限かつ 0 以上でない、のどれかなら `RangeError`（以前は `NaN`・`Infinity`・負がそのまま式に入り、`NaN` の `floorAt` は Invalid Date を返した）。`strength: 0`・`halfLife: 0` は断らない（`halfLifeHours: 0` の「壊れた」記憶を作る既存の fixture が使う）。内部の呼び出し（既定の閾値・検査済みの値）は変わらない。
+  - **`observe`・`recall` の `attributes`**（ADR 0472 材料1）: キーに自前の `__proto__`（`JSON.parse` が作る）が在ると、zod の `ZodError`（`invalid_key`、path は `attributes.__proto__`。ほかのキーの検査エラーと同じ形）で断る（以前は zod の record が黙って落とし、`recall` の絞り込みが外れた・`observe` の属性が消えた）。`constructor`・`prototype` などは落ちないので、今までどおり通す。`AttributesSchema` を直接 `parse` する呼び出しは変わらない（`Runtime` の入口が `parse` の前に断る）。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。ただし、どれも型の外の入力だけである。
+  - **誰が影響を受けるか**: `as`・JavaScript・外部の JSON で、型の外の値（裸の文字列の `excludeMemoryIds`、`text` の無い `findCorrectionCandidates`、未知の `resolution.kind`、`leaseMs` の無い `tick`、`NaN` などの減衰の引数、`__proto__` の属性キー）を渡している呼び出し側。
+  - **変えなかったこと**: 既定値・`tick` の `leaseMs` の 0 以下・`strength`/`halfLife` の 0・`excludeMemoryIds` の省略・公開 API の面（`pnpm api:check` は変わらない）。testkit の `buildNewMemoryFixture` は、`decayFloorAt` を上書きで渡したときは `floorAt` を呼ばなくなった（値域の歯が `strength` に壊れた値を渡す形を保つため。結果は同じ）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目54。DB マイグレーションは無い。
+  - 【確かめていないこと】本物の OpenAI・Anthropic の LLM を通した経路。全テストは走らせていない（関連するファイルだけ）。
+
 - **差し替えた `TokenCounter` が、有限で 0 以上でない `tokens`（`NaN`・負の数・`Infinity`）か、壊れた戻り値を返すと、`recall()` が `RangeError` で断るようになった。以前は予算が黙って外れていた——自前の `TokenCounter` を `createRuntime` に渡している人へ**（[ADR 0497](./docs/decisions/0497-recall-rejects-broken-token-counter.md)、`@mnemora/core`）。
 
   以前は、`NaN`・負の数を返す counter では段4のトークン予算（`maxMemoryTokens`・`promptBudgetTokens`）が**黙って外れて全件が返り**（`budget_dropped` も出ない）、`Infinity` では全件が落ちた（[ADR 0483](./docs/decisions/0483-token-counter-broken-values.md)）。`RuntimeDeps.outputValidation: "off"` では何も知らされなかった。今は、`count()` の戻り値の `tokens` が有限で 0 以上の number でなければ（`NaN`・負の数・`±Infinity`・number でない値・戻り値の欠落）、`recall()` は `RangeError` で断る。message は値の種類だけを載せ、入力テキストは載せない。最初の壊れた値で止まる。予算が無くても（`usage` の計測で `count()` が呼ばれる）、`outputValidation` の値にかかわらず断る。
@@ -471,6 +486,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **(b)** `meta.note`（JSON 文字列）の `kind: "claim_key_conflict_group"` は、`memberIds` と `matches` に**先頭10件だけ**（id の昇順。`matches` は id 昇順の先頭）を入れ、全体の件数を `memberCount`（新設）・`matchCount` に、切ったかどうかを `memberIdsTruncated`・`matchesTruncated`（どちらも新設の真偽値）に持つ。`Runtime.observe` の戻り値の `contestedDetection[].result.memberIds` は全員のまま。**解消後の群の全メンバーを `note` から辿る手段は、11件以上の群では無くなる**（`memory_relations` の行は解消時に消える、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md) 決定3）。
   - `kind: "claim_key_conflict_unresolved"` の `note` の `matches` も、同じく id の昇順の先頭10件に切り、`matchesTruncated`（新設）を付けた（全体の件数は既存の `matchCount`、全員の id は `observe()` の戻り値の `matchMemoryIds`）。
   - 公開の型・DB は変えていない。非破壊と数える（`meta.note` は型の付かない JSON 文字列で、中身のキーは契約の型ではない。理由は ADR 0431）。
+
+- **`@mnemora/testkit/fixtures` の InMemory と provider の fake を、Postgres の振る舞いに揃えた（NUL・`timestamptz` の下限・`reinforce` の bigint 溢れ・LLM 応答の参照）。core のテスト専用 Fake の float4 の読み戻しも揃えた**（[ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md)。[ADR 0434](./docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)・[0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md)・[0479](./docs/decisions/0479-tenant-settings-write-fake-alignment.md)・[0452](./docs/decisions/0452-testkit-provider-fakes-align-with-contract.md) の負債・材料）。本物の adapter（`@mnemora/postgres` など）は変えていない。
+  - **新しく断る入力**（Postgres が今拒むものだけ）: `InMemoryMemoryStore.findContestedByClaimKey` の claimKey の NUL、`InMemoryLexicalStore.search` の `filter.labels`・`InMemoryVectorStore.search`/`searchMany` の `filter.labels`・`filter.attributes` の NUL。紀元前4713年11月24日（`timestamptz` の下限）より前の日時を、Postgres が `22008` にする口の条件・`opts.now`・`opts.at` で（`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、Postgres も通すので通す）。`reinforce` の `addOwnSubjectSeq` で `nowSeq + S_x`（と床）が bigint を溢れるとき。
+  - **返り値が変わる**: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製になった（呼び出し側が書き換えても、次の再生・記録に漏れない）。
+  - 手順は要らない。公開 API・DB は変えていない。⭕ 非破壊と数える（公開の fixture が新しく例外を投げる変更は破壊的と数えない。[ADR 0461](./docs/decisions/0461-v1-2-0-release-prep-inspection.md)。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた）。
 
 ### Fixed
 

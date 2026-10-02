@@ -57,12 +57,16 @@ export function buildNewMemoryFixture(overrides: Partial<NewMemory> = {}): NewMe
     lastReinforcedAt: null,
     strength,
     halfLifeHours,
-    decayFloorAt: defaultDecayStrategy.floorAt({
-      recordedAt,
-      lastReinforcedAt: null,
-      strength,
-      halfLifeHours,
-    }),
+    // ADR 0496: `decayFloorOffset` は `strength`（NaN・±Infinity・負）を断るようになった。値域の歯が `strength` に壊れた値を
+    // 渡し、`decayFloorAt` は妥当な値で上書きする形（`memory-store-conformance.ts`）を壊さないよう、上書きがあるときは計算しない。
+    decayFloorAt:
+      overrides.decayFloorAt ??
+      defaultDecayStrategy.floorAt({
+        recordedAt,
+        lastReinforcedAt: null,
+        strength,
+        halfLifeHours,
+      }),
     embeddingStatus: "pending",
   };
   return { ...base, ...overrides };

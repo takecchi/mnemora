@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { abortReason, isAbort, runAbortable } from "./abort.js";
 import type { AbortOptions } from "./abort.js";
+import { assertNoProtoAttributesKey } from "./attributes-guard.js";
 import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
 import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "./correction-candidates.js";
@@ -1378,23 +1379,23 @@ export interface TickOptions {
    * 運用方針であり、`packages/core` が決めてよい値ではなく呼び出し側が決める。
    * これにより `tick(ctx)` を引数無しで呼ぶことはできない（意図した破壊的変更、ADR 0032）。
    *
-   * ⚠ **0 以下も受け付ける（検査しない）。今の振る舞い:** 0 以下では、claim した行が
+   * ⚠ **0 以下も受け付ける（`leaseMs` が有限の数でありさえすれば検査しない）。今の振る舞い:** 0 以下では、claim した行が
    * その時点で既にリース切れとして扱われる。同時に走る別の `tick` が同じ行を claim して
    * handler をもう一度走らせ、遅れて `complete`/`fail` した側は {@link TickResult.leaseConflicts}
    * に載る（Postgres と testkit の fixture の両方で実測）。重複の防ぎは、正の `leaseMs` が
    * 処理時間より長いときにだけ効く。
-   * `now - leaseMs` が `Date` の範囲を外れる値（`NaN` を含む）は、どちらの実装でも例外になる。
+   * `now - leaseMs` が `Date` の範囲を外れる有限の値（例 `1e20`）は、どちらの実装でも例外になる（ここでは断らない。store の側で落ちる）。
    *
-   * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの、Issue #1184）: `leaseMs` を省略して呼ぶと**（JavaScript からの
-   * 呼び出し・`as` を経由した呼び出し）、Runtime は検査せず、`undefined` のまま `OutboxStore.claimBatch` へ渡す。
-   * 例外は store の側で起きるので、**例外の顔は store で違う**（どちらも `RangeError`・`TypeError` ではない）:
-   * - `@mnemora/postgres`: DB が拒んだ例外（drizzle が包んだ `Error`。SQLSTATE は `err.cause.code` の `22007`）。
-   * - testkit の fixture: 名前の無い `Error`（文面は `claimBatch: now - leaseMs must be a valid Date` で始まる。
-   *   `cause.code` は持たない）。
-   * どちらも claim する前に落ちるので、ジョブは claim されない（同じ時刻の次の `tick` で取れる）。
-   * `leaseMs` に `NaN` を渡したときも同じ顔になる。第2引数ごと省略した `tick(ctx)` は、どちらの実装でも
-   * `opts` を読むところで `TypeError` になる。種類を揃えるかは #1184 で決めていない。
-   * 【実測 2026-09-28】`packages/postgres/src/__tests__/runtime-entry-exception-kinds.postgres.test.ts`。
+   * ⚠ **2026-10-02 追記（ADR 0496。Issue #1184 の「今の振る舞い」の追記を置き換えた）: Runtime が入口で検査する。**
+   * `tick` は、claim する前に `opts` を確かめる。`opts` が object でない（`tick(ctx)` で第2引数ごと省略した場合を含む）と
+   * `TypeError`、`opts.leaseMs` が有限の数でない（省略・`undefined`・文字列・`NaN`・`±Infinity`）と `RangeError`。
+   * どちらも名指しの例外で（`Runtime.tick: opts.leaseMs must be a finite number` など。入力値は入れない）、store ごとに違う例外には
+   * ならず、ジョブは claim されない（同じ時刻の次の `tick` で取れる）。以前は、省略すると Runtime は検査せず `undefined` のまま
+   * `OutboxStore.claimBatch` へ渡し、`@mnemora/postgres` は drizzle が包んだ `Error`（`err.cause.code` が `22007`）、testkit の fixture は
+   * 名前の無い `Error`（`claimBatch: now - leaseMs must be a valid Date`）で落ち、第2引数ごと省略すると素の `TypeError` だった。
+   * 0 以下・`1e20` のような有限の値は、ここでは断らない（上の ⚠）。
+   * 【実測 2026-10-02】`packages/postgres/src/__tests__/runtime-entry-exception-kinds.postgres.test.ts`・
+   * `packages/core/src/__tests__/tick-lease-ms-validation.test.ts`。
    *
    * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、Issue #1200）: ジョブの処理がリースより長く掛かっても、
    * その間に別の `tick` が同じジョブを取らなければ、完了は通り、`TickResult` には何も出ない**
@@ -2657,8 +2658,9 @@ export interface Runtime {
    *
    * `opts.leaseMs` は必須（ADR 0032）。`tick(ctx)` を引数無しで呼ぶことはできない
    * ——`claimBatch` の claim リース長は運用方針であり、`packages/core` が既定値を
-   * 発明せず呼び出し側に決めさせるための意図した破壊的変更。`leaseMs` を省略したとき（型を外した呼び出し）の
-   * 例外は、Runtime ではなく store が投げ、顔が store で違う（{@link TickOptions.leaseMs}）。
+   * 発明せず呼び出し側に決めさせるための意図した破壊的変更。`leaseMs` を省略したとき（型を外した呼び出し）や
+   * `opts` が object でないときは、Runtime が claim する前に名指しの例外（`TypeError`・`RangeError`）で断る
+   * （ADR 0496。{@link TickOptions.leaseMs}）。
    *
    * 🔴 **処理する kind は {@link TICK_SUPPORTED_JOB_KINDS} が唯一の出所である**
    * （ADR 0082、issue #105）。`opts.kinds` の既定値もそこを指す。そこに無い kind を
@@ -2774,13 +2776,16 @@ export interface Runtime {
    * `recallRank` は「2」のままである。
    *
    * ⛔ **`outcome` に「探していない」という値は無い。** `findCorrectionCandidates` を呼んだら
-   * 必ず `recall()` を1回呼ぶ——`limit` の検証で早期に `RangeError` を投げる場合を除き、
-   * `recall()` を呼ばない経路は無い。⚠ ただし `input.text` が `undefined`（JavaScript や `as` で
-   * 型を外したとき。型の上は必須。`""` は `recall()` の検証で例外になる）だと、`recall()` は例外に
-   * ならず、**埋め込みを呼ばずに候補の生成を飛ばして** `no_candidates` を返す（候補の生成の段が
-   * 飛ばされたことは `omitted` の `{ kind: "stage_skipped", stage: "candidate_generation",
-   * reason: "empty_query_content" }` に出る）。「探していない」は `outcome` ではなく `omitted` で
-   * 読む。「見つからなかった」は
+   * 必ず `recall()` を1回呼ぶ——入力の検査（下）で早期に例外を投げる場合を除き、
+   * `recall()` を呼ばない経路は無い。
+   *
+   * ⚠ **入力の検査（ADR 0496。`recall()` も書き込みも試みる前に落ちる）**: `input.text` が文字列でない
+   * （JavaScript や `as` で型を外したとき。`undefined` を含む）と `TypeError`、`input.excludeMemoryIds` が配列でない
+   * （裸の文字列を含む。省略の `undefined` は通る）か、文字列でない要素を含むと `TypeError`。以前は `text` が `undefined`
+   * だと `recall()` が例外にならず、埋め込みを呼ばずに `no_candidates`（`omitted` に `candidate_generation` の
+   * `stage_skipped`）を返し、裸の文字列の `excludeMemoryIds` は1文字ずつの集合になって何も除外しなかった。`""` は今までどおり
+   * `recall()` の検証で例外になる。裸の文字列を配列に包んで通すことはしない（呼び出し側の取り違えを黙って直さない）。
+   * 「見つからなかった」は
    * `FindCorrectionCandidatesResult.outcome: "no_candidates"` と、`recall()` から
    * そのまま運ばれる `omitted`（「候補はあったが除外条件で落ちた」等の内訳）の
    * **両方**で説明される——`ConsolidateOutcome`/`ReflectOutcome` と同じ「無い」の
@@ -3446,6 +3451,9 @@ export interface Runtime {
    * 1. `firstId === secondId` は呼び出し前の programmer error として扱い、`RangeError`
    *    （`Runtime.resolveContested: firstId and secondId must differ`）を投げる。書き込みは
    *    一切試みない（`markContested` と同じ「開く前に落とす」位置）。
+   * 1b. `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ（型を外した呼び出し）、同じく書き込み前に
+   *    `RangeError`（`Runtime.resolveContested: resolution.kind must be "supersede" or "both_active"`。ADR 0496。以前は
+   *    `supersede` の分岐へ倒れ、勝者の無いまま両側とも `superseded` になった）。
    * 2. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `firstId`/`secondId`
    *    のどちらでもなければ、同じく書き込み前に `RangeError`
    *    （`Runtime.resolveContested: resolution.winnerId must be firstId or secondId`）を
@@ -3661,6 +3669,8 @@ export interface Runtime {
    *    （`Runtime.resolveContestedGroup: memberIds must have at least 3 entries`）。
    * 2. `memberIds` の id 重複は `RangeError`
    *    （`Runtime.resolveContestedGroup: memberIds must be unique`）。
+   * 2b. `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ `RangeError`
+   *    （`Runtime.resolveContestedGroup: resolution.kind must be "supersede" or "both_active"`。ADR 0496。2者版と同じ）。
    * 3. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `memberIds` の
    *    どの id とも一致しなければ `RangeError`
    *    （`Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds`）。
@@ -5850,6 +5860,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     input: ObserveInput,
     opts?: AbortOptions,
   ): Promise<ObserveResult> {
+    // ADR 0496: `attributes` のキー `__proto__` は zod が黙って落とす（属性が消える）ので、parse の前に断る。
+    assertNoProtoAttributesKey((input as { attributes?: unknown } | null | undefined)?.attributes);
     const parsed = ObserveInputSchema.parse(input);
     if (parsed.kind === "memory_usage") {
       return handleMemoryUsage(ctx, parsed);
@@ -6184,6 +6196,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   async function tick(ctx: Ctx, opts: TickOptions): Promise<TickResult> {
     // Issue #1200 / ADR 0359（クローン miku の判断）: `signal` を1変数に固定しておく——
     // 下の分岐が何度も `opts.signal` を読み直さない（`opts` を再代入しないので値は動かない）。
+    // ADR 0496: `leaseMs` は claim する前に、名指しの例外で断る（以前は素の `TypeError` か、store ごとに違う例外だった）。
+    // 0 以下は今までどおり通す（`TickOptions.leaseMs` の doc）。
+    if (typeof opts !== "object" || opts === null) {
+      throw new TypeError("Runtime.tick: opts must be an object");
+    }
+    if (typeof opts.leaseMs !== "number" || !Number.isFinite(opts.leaseMs)) {
+      throw new RangeError("Runtime.tick: opts.leaseMs must be a finite number");
+    }
     const signal = opts.signal;
     const claimOpts: ClaimOutboxJobsOptions = {
       // 既定は「tick が処理できる kind だけ」——ここを広げると、処理できない kind を
@@ -6341,6 +6361,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
     }
     const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
+    // ADR 0496: `text` は文字列でなければ、`recall()` を呼ぶ前に断る（以前は `undefined` が `no_candidates` になった）。
+    // 空文字は今までどおり `recall()` の検証が断る。
+    if (typeof input.text !== "string") {
+      throw new TypeError("Runtime.findCorrectionCandidates: text must be a string");
+    }
+    // ADR 0496: `excludeMemoryIds` は文字列の配列でなければ断る（以前は裸の文字列が1文字ずつの集合になり、
+    // 何も除外されずに通った。文字列でない要素も黙って通った）。省略（`undefined`）は今までどおり。
+    if (input.excludeMemoryIds !== undefined) {
+      if (!Array.isArray(input.excludeMemoryIds)) {
+        throw new TypeError("Runtime.findCorrectionCandidates: excludeMemoryIds must be an array");
+      }
+      for (const id of input.excludeMemoryIds as unknown[]) {
+        if (typeof id !== "string") {
+          throw new TypeError(
+            "Runtime.findCorrectionCandidates: excludeMemoryIds must contain only strings",
+          );
+        }
+      }
+    }
     // 除外の集合は `recall()` を呼ぶ前に作る——`excludeMemoryIds` が反復できない値だと
     // `new Set` が TypeError を投げるが、後ろで作ると recall の記録を1件書いた後に落ちていた
     // （穴探し56巡目）。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
@@ -7219,6 +7258,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ、**書き込む前に** `RangeError`（ADR 0496。
+   * 既存の `winnerId` の `RangeError` と同じ作法）。以前は未知の `kind`（型を外した呼び出し）が `supersede` の分岐へ倒れ、
+   * 勝者の無いまま両側とも `superseded` になった（ADR 0446 の「見つけたが直していない点」）。message に入力値は入れない。
+   */
+  function assertKnownResolutionKind(caller: string, resolution: ContestedResolution): void {
+    const kind = (resolution as { kind?: unknown } | null | undefined)?.kind;
+    if (kind !== "supersede" && kind !== "both_active") {
+      throw new RangeError(`${caller}: resolution.kind must be "supersede" or "both_active"`);
+    }
+  }
+
+  /**
    * `resolveContested` が `supersede` の `winnerId` を、渡された 2 つの id のどちらの側かに決める（`both_active` は
    * `undefined`）。どちらの側でもなければ `RangeError`。`applyCorrection` が **書き込む前に** 同じ検査を通すために、
    * `resolveContested` の中から切り出してある（ADR 0446）。
@@ -7229,6 +7280,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     secondId: MemoryId,
     resolution: ContestedResolution,
   ): Promise<MemoryId | undefined> {
+    assertKnownResolutionKind("Runtime.resolveContested", resolution);
     let winnerSideId: MemoryId | undefined;
     if (resolution.kind === "supersede") {
       if (resolution.winnerId === firstId || resolution.winnerId === secondId) {
@@ -7657,6 +7709,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       idSet.add(id);
     }
+    assertKnownResolutionKind("Runtime.resolveContestedGroup", resolution);
     let winnerId: MemoryId | undefined;
     if (resolution.kind === "supersede") {
       if (memberIds.includes(resolution.winnerId)) {
