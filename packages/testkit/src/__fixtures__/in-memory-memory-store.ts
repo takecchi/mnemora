@@ -119,7 +119,8 @@ function assertSupersededByShape(
         `${method}: ${field}.supersededById is required when status is "superseded"`,
       );
     }
-    if (supersededById === selfId) {
+    // Postgres は `normalizeUuidCase` で両側を畳んで比べる。呼び出し側は id だけ畳むので、ここで両側を畳む。
+    if (normId(supersededById) === normId(selfId)) {
       throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
     }
   } else if (opts.forbidWhenNotSuperseded && supersededById !== undefined) {

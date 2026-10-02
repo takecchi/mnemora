@@ -552,8 +552,8 @@ describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 
   /**
    * この describe だけ `tick()` を経由して `embed` ジョブを claim する。ファイル共通の
    * `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を注入しているが、
-   * `FakeOutboxStore.enqueueJob` は `availableAt` を `new Date()`（実時刻）で刻むため、
-   * 固定 clock だと `availableAt <= now` が成り立たず1件も claim されない——下の
+   * 以前の Fake は `enqueueJob` が `availableAt` を `new Date()`（実時刻）で刻んだため（今は `opts.now` に従う。ADR 0555）、
+   * 固定 clock だと `availableAt <= now` が成り立たず1件も claim されなかった——下の
    * 「`runtime.tick — consolidate ジョブは種の subjectId...」describe が同じ理由で
    * 既に `buildRuntimeWithRealClock` を使っている（そちらのコメント参照）。ここでも
    * 同じ回避を踏む。
@@ -831,9 +831,9 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
    * 上のファイル共通の `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を
    * 注入している——`runtime.consolidate()` を直接呼ぶ既存の歯はこれで問題ない（`tick`
    * 自体を経由しないため）。この describe は `tick()` の `claimBatch` を経由する
-   * ため、outbox 行の `availableAt`（`FakeOutboxStore.enqueueJob` が `new Date()`＝
-   * 実時刻で刻む）より前の固定 clock を使うと、`availableAt <= now` が成り立たず
-   * 1件も claim されない。⟹ ここだけ実時計（既定の `systemClock`）を使う。
+   * ため、outbox 行の `availableAt`（以前の Fake は `enqueueJob` が `new Date()`＝
+   * 実時刻で刻んだ。今は `opts.now` に従う。ADR 0555）より前の固定 clock を使うと、以前は `availableAt <= now` が成り立たず
+   * 1件も claim されなかった。⟹ ここだけ実時計（既定の `systemClock`）を使う。
    */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();

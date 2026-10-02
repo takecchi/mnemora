@@ -744,8 +744,10 @@ export class FakeMemoryStore implements MemoryStore {
     if (!created) {
       return { observation, created: false, jobs: [] };
     }
+    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（積む全部の行が同じ時刻になる）。
+    const rowOpts = { ...opts, now: opts?.now ?? new Date() };
     const jobs = jobKinds.map((kind) =>
-      this.enqueueJob(ctx, kind, { observationId: observation.id }, opts),
+      this.enqueueJob(ctx, kind, { observationId: observation.id }, rowOpts),
     );
     // Postgres は INSERT ... RETURNING で行の複製を返す。生の参照を返すと、後の claim が
     // 返した job の `attempts` を書き換え、CAS（ADR 0142）の食い違いが隠れる（ADR 0407）。
@@ -759,20 +761,24 @@ export class FakeMemoryStore implements MemoryStore {
     opts?: { now?: Date; claimedBy?: string },
   ): OutboxJobRecord {
     const claimedBy = opts?.claimedBy;
+    // ADR 0555: `availableAt`・`createdAt`・`claimedAt` は同じ `now`（`opts.now`、省略時は壁時計を1回だけ読んだ値）。
+    // `PostgresMemoryStore`・`InMemoryMemoryStore` の `const outboxNow = opts?.now ?? new Date()` と同じ。
+    // 複数の行を積む口は、呼び出しの中で1回だけ読んだ `now` を渡し続ける（行ごとに読み直すと値が割れる）。
+    const now = opts?.now ?? new Date();
     const job: OutboxJobMutable = {
       id: nextId("job"),
       tenantId: ctx.tenantId,
       kind,
       payload,
-      availableAt: new Date(),
+      availableAt: new Date(now.getTime()),
       // ADR 0407: `claimedBy` を渡されたら「その名前で claim 済み」（`attempts: 1`）で作る。
-      claimedAt: claimedBy === undefined ? null : (opts?.now ?? new Date()),
+      claimedAt: claimedBy === undefined ? null : new Date(now.getTime()),
       claimedBy: claimedBy ?? null,
       attempts: claimedBy === undefined ? 0 : 1,
       completedAt: null,
       failedAt: null,
       lastError: null,
-      createdAt: new Date(),
+      createdAt: new Date(now.getTime()),
     };
     this.backing.outboxJobs.push(job);
     return job;
@@ -1303,16 +1309,21 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertWellFormedCtx(ctx);
-    // ADR 0493: 行を実際に書くときだけ `jobKinds` の NUL を、何も書く前に見る（testkit の `assertOutboxRowsWritable` と同じ）。
+    // ADR 0493: 行を実際に書くときだけ `jobKinds` の NUL と `opts.now` を、何も書く前に見る（testkit の `assertOutboxRowsWritable` と同じ）。
     const { value: memory, created } = this.createMemoryIdempotent(ctx, input, () =>
-      assertFakeOutboxRowsWritable("createMemoryWithOutbox", jobKinds, undefined),
+      assertFakeOutboxRowsWritable("createMemoryWithOutbox", jobKinds, opts),
     );
     if (!created) {
       return { memory, created: false, jobs: [] };
     }
-    const jobs = jobKinds.map((kind) => this.enqueueJob(ctx, kind, { memoryId: memory.id }));
+    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む。
+    const rowOpts = { now: opts?.now ?? new Date() };
+    const jobs = jobKinds.map((kind) =>
+      this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
+    );
     return { memory, created: true, jobs };
   }
 
@@ -1501,7 +1512,8 @@ export class FakeMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
-    // ADR 0493: この Fake は `opts` を使わない（`abortIf*` 等は未実装）。`now` の Invalid Date だけは、行を書く前に断る。
+    // ADR 0493・0555: この Fake が使う `opts` は `now` だけ（`abortIf*` 等は未実装）。`now` は積む outbox 行の
+    // `availableAt`・`createdAt` に使う。Invalid Date と `jobKinds` の NUL は、行を書く前に断る。
     opts?: { now?: Date },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
@@ -1509,9 +1521,11 @@ export class FakeMemoryStore implements MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
     assertWellFormedCtx(ctx);
-    if (news.some((n) => n.jobKinds.length > 0)) {
-      assertFakeQueryDate("supersedeWithNewMemories", "opts.now", opts?.now);
+    for (const { jobKinds } of news) {
+      assertFakeOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts);
     }
+    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（作る全部の記憶の行が同じ時刻になる）。
+    const rowOpts = { now: opts?.now ?? new Date() };
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
     for (const target of supersede) {
@@ -1558,7 +1572,9 @@ export class FakeMemoryStore implements MemoryStore {
         created.push({ memory, created: false, jobs: [] });
         continue;
       }
-      const jobs = jobKinds.map((kind) => this.enqueueJob(ctx, kind, { memoryId: memory.id }));
+      const jobs = jobKinds.map((kind) =>
+        this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
+      );
       created.push({ memory, created: true, jobs });
     }
 
@@ -2326,11 +2342,13 @@ export class FakeMemoryStore implements MemoryStore {
       )
       .slice(0, opts.limit);
 
+    // ADR 0555: `writeOpts.now` を積む outbox 行の `availableAt`・`createdAt` に使う。省略時は壁時計を1回だけ読む。
+    const rowOpts = { now: writeOpts?.now ?? new Date() };
     const memoryIds: MemoryId[] = [];
     for (const memory of targets) {
       memory.embeddingStatus = "pending";
       memory.updatedAt = new Date();
-      this.enqueueJob(ctx, "embed", { memoryId: memory.id });
+      this.enqueueJob(ctx, "embed", { memoryId: memory.id }, rowOpts);
       memoryIds.push(memory.id);
     }
     return { requeued: memoryIds.length, memoryIds };

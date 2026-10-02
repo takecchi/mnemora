@@ -22,7 +22,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
-const T0 = Date.now() + 60_000; // Fake の outbox 行の `availableAt` は実時刻で付く
+const T0 = Date.now() + 60_000; // 以前の Fake は outbox 行の `availableAt` を実時刻で付けた名残（今の Fake は `opts.now` に従う。ADR 0555。組み替えは「残り」）
 const LEASE_MS = 1000;
 
 const notUsedLlm: LLMProvider = {
