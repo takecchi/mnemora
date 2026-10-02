@@ -24,7 +24,7 @@ export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
 /**
  * `assertQueryDate` に、`timestamptz` の下限（ADR 0500）を足したもの。Postgres が日時を `timestamptz` として **クエリに渡す口**
- * （検索・集約・claim key の条件、`opts.now`・`opts.at` など）で使う。下限より前（紀元前4713年11月24日より前）は、Postgres では
+ * （検索・集約・claim key の条件、`opts.now`・`opts.at` など）で使う。下限より前（紀元前4714年11月24日より前）は、Postgres では
  * `22008` になる。
  *
  * ⚠ **全部の口で使うわけではない。**`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
