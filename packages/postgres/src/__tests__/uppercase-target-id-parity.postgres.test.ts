@@ -367,6 +367,40 @@ const cases: Case[] = [
         .updateStatus(ctx, e.ids[0], "superseded", { supersededById: up(e.ids[1]) })
         .then((m: any) => ({ id: m.id, by: m.supersededById })),
   },
+  // 大文字小文字だけが違う自己置換（ADR 0558）。Postgres は断る（`normalizeUuidCase` で両側を畳む）。
+  // core の Fake は ADR 0503 の検査を持たず通してしまうので SKIP_FAKE（下）。
+  {
+    name: "edge.updateStatus(self supersededById UP, id lo)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, e.ids[0], "superseded", { supersededById: up(e.ids[0]) }),
+  },
+  {
+    name: "edge.updateStatus(self supersededById lo, id UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, up(e.ids[0]), "superseded", { supersededById: e.ids[0] }),
+  },
+  {
+    name: "edge.updateStatusWithEvent(self supersededById UP, id lo)",
+    run: (e) =>
+      e.st.memoryStore.updateStatusWithEvent(
+        ctx,
+        e.ids[0],
+        "superseded",
+        { supersededById: up(e.ids[0]) },
+        eventFor(e.ids[0]!, "superseded"),
+      ),
+  },
+  {
+    name: "edge.updateStatusWithEvent(self supersededById lo, id UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatusWithEvent(
+        ctx,
+        up(e.ids[0]),
+        "superseded",
+        { supersededById: e.ids[0] },
+        eventFor(e.ids[0]!, "superseded"),
+      ),
+  },
   {
     name: "edge.restoreArchived([lo, UP])",
     pre: arch,
@@ -780,7 +814,16 @@ async function observe(be: string, c: Case, variant: "lo" | "UP"): Promise<strin
 }
 
 // Fake は全文の語彙一致を持たず、text だけの recall は候補を返さない（ADR 0492 の fuzz も `fcc` は `excludeMemoryIds` の除外だけを見る）。
-const SKIP_FAKE = new Set(["rt.findCorrectionCandidates(exclude)", "rt.applyCorrection"]);
+// 自己置換の 4 件（ADR 0558）: core の Fake は ADR 0503 の検査（自己置換を断る）を持たない（別担当が ADR 0557 で直し中）ので、
+// 通ってしまい食い違う。Fake が直ったらここから外す。
+const SKIP_FAKE = new Set([
+  "rt.findCorrectionCandidates(exclude)",
+  "rt.applyCorrection",
+  "edge.updateStatus(self supersededById UP, id lo)",
+  "edge.updateStatus(self supersededById lo, id UP)",
+  "edge.updateStatusWithEvent(self supersededById UP, id lo)",
+  "edge.updateStatusWithEvent(self supersededById lo, id UP)",
+]);
 
 describe("操作の対象の id を大文字で渡したとき、3 実装が同じになる（ADR 0521）", () => {
   for (const c of cases) {
