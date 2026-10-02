@@ -2530,6 +2530,24 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。purge 済みで、直す前の `updateStatusWithEvent` によって active に戻された行が在れば、その行の `content`・`digest` は墓石の固定の文字列のまま `active` になっている。調べる SQL は ADR 0499 に在る（読み取りだけ）。**既存の行は書き換えない**（データの書き換えはオーナーの判断が要る）。
 
+### 60. `@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL を名指しの `Error` で断るようになった（`@mnemora/postgres`）
+
+[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)・ADR 0456 の M4 の残り。項目57と同じ数え方）。
+
+⚠ **未リリース**。**番号は 60 である**——別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` の「`createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`）。
+
+**なぜ破壊的と数えるか**: 断る入力は増えない（以前も落ちた）が、例外が `DrizzleQueryError`（`cause.code` が `22021`・`22P05`）から素の `Error` に変わる（項目57と同じ）。
+
+**誰が影響を受けるか**: `PostgresMemoryStore` の上の3口を直接呼び、NUL を含みうる値（`kind`・`payload`・`attributes`、`createRecall` の `query` など）を渡し、例外の形（`cause.code`・`Failed query:`）で分岐しているもの。`Runtime` 経由は、`observe()` に NUL を含む発話を渡したときの例外の形が変わる。
+
+**どう直すか**: NUL を含む値は、書く前に取り除くか、その入力を断る。message は `PostgresMemoryStore: <欄> must not contain NUL characters (U+0000)`（`createRecall` は `createRecall: <欄> …`）。`cause.code` で分岐していた箇所は、message か、`Error` かどうかで分岐する。
+
+**確かめたこと**: 2実装（`PostgresMemoryStore` と testkit の `InMemoryMemoryStore`）に同じ入力を流す歯を `store-write-nul-named.postgres.test.ts` に足した。InMemory は以前から名指しで断っていたので、直す前は InMemory が緑・Postgres が赤だった。
+
+**DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
+
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
@@ -2694,6 +2712,8 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   - 新しく断る入力（どれも Postgres は以前から拒む）: `InMemoryMemoryStore.findContestedByClaimKey` の claimKey の NUL。`InMemoryLexicalStore.search` の `filter.labels`、`InMemoryVectorStore.search`・`searchMany` の `filter.labels`・`filter.attributes` の NUL。紀元前4713年11月24日 00:00:00 UTC より前の日時（`EventStore.list` の `since`/`until`、検索・`aggregateScope` の日時の条件、`archiveDecayed`・`requeueEmbedJobs` の `now`、claim key の `validFrom`/`validUntil`、outbox の行を書く口の `opts.now`、`OutboxStore.complete`/`fail` の `opts.at`）。`purge*` の `olderThan` は、下限より前でも通す（Postgres も0件で返す）。`reinforce({ addOwnSubjectSeq: true })` で `nowSeq + S_x`（と床）が 2^63 以上になる入力。
   - 振る舞いが変わるもの: `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` が返す応答は、記録の参照ではなく複製になった。返り値を書き換えてから次の再生を読んでいた呼び出し側（書き換えが次の再生に見えていた）は、見え方が変わる。core のテスト専用 Fake（公開されていない）の `setDefaultHalfLifeRecalls` も、float4 の読み戻しの形で保存する。
   触っていない: `@mnemora/postgres` などの本物の adapter、conformance suite。
+- **`@mnemora/testkit/fixtures` の InMemory: `archiveDecayed`・`aggregateScope`・`VectorStore.search` の `nowSeq + S_x`（`decayFloorSeqAfter + S_x`）が 2^63 以上になる入力を断る**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。🟡。ADR 0500 の負債）。Postgres は以前から `22003 bigint out of range` で拒む。断るのは、その式が評価される行（カウンタを使い、subject を持ち、`decay_floor_seq` が非 NULL で、ほかの条件を通る行。2軸は左で決まれば右は評価されない）があるときと、`nowSeq`（`decayFloorSeqAfter`）そのものが 2^63 以上のとき。実際の `nowSeq` は小さい整数なので、到達しない入力。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。
+- **`@mnemora/postgres`: `PostgresEventStore.append`・`PostgresLexicalStore.search` を直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0505](./decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。ADR 0504 と同じ作法）。SQL の文・SQLSTATE・`cause` は残る。落ちる入力は増えない。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。
 
 ### この節に載せなかったもの（理由つき）
 
