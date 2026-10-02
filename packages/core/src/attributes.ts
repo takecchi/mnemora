@@ -45,6 +45,12 @@ export const ATTRIBUTE_VALUE_MAX_LENGTH = 256;
  * 制御文字・空白・記号を許すと事故（誤った空白の混入に気づかない、ログ出力で改行が壊れる等）
  * の元になる。**Unicode のキーを禁じる強い理由は無い**——実運用でその要望が出たら緩める
  * （このリストは締めるより緩める方が安全な変更である）。
+ *
+ * ⚠ **この文字種はキー `__proto__` を通すが、`Runtime.observe`・`Runtime.recall`（`runRecall`）の入口が断る**（ADR 0496、
+ * `attributes-guard.ts`）。zod の record は `__proto__` を**キーの検査より前に**読み飛ばして黙って落とすので、この schema の
+ * 中（キーの `.regex`・`.refine`）では断れない（`recall` の絞り込みが外れ、`observe` の属性が消えていた）。
+ * `AttributesSchema` を直接 `parse` する呼び出しは、今までどおり `__proto__` を落として通す。`constructor`・`prototype` などは
+ * 落ちないので断らない。
  */
 const ATTRIBUTE_KEY_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 

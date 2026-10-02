@@ -59,6 +59,7 @@ import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import {
   assertQueryDate,
+  assertQueryTimestamptz,
   assertQueryInteger,
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
@@ -171,13 +172,18 @@ function assertOutboxRowsWritable(
   method: string,
   jobKinds: ReadonlyArray<OutboxJobKind>,
   now: Date | undefined,
+  claimedBy?: string | undefined,
 ): void {
   if (jobKinds.length === 0) {
     return;
   }
-  assertQueryDate(method, "opts.now", now);
+  assertQueryTimestamptz(method, "opts.now", now);
   if (jobKinds.some((kind) => stringHasNul(kind))) {
     throw new Error(`${method}: jobKinds must not contain NUL characters (U+0000)`);
+  }
+  // ADR 0493: `claimedBy`（`createObservationWithOutbox` の `opts`）は `outbox.claimed_by`（`text` 列）に入るので NUL を拒む。
+  if (stringHasNul(claimedBy)) {
+    throw new Error(`${method}: claimedBy must not contain NUL characters (U+0000)`);
   }
 }
 
@@ -481,8 +487,14 @@ function assertStorableNewMemory(input: NewMemory): void {
   if (Number.isNaN(input.recordedAt.getTime())) {
     throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
   }
+  // ADR 0493: `decayFloorAt`（必須）・`lastReinforcedAt`（省略可）も `timestamptz` 列。Postgres は Invalid Date を拒む。
+  // 型の外の `null` は今までどおり通す（Invalid Date だけを断る。ADR 0493）。
+  if (input.decayFloorAt != null && Number.isNaN(input.decayFloorAt.getTime())) {
+    throw new Error(`InMemoryMemoryStore: decayFloorAt must be a valid Date (got Invalid Date)`);
+  }
   for (const [field, value] of [
     ["occurredAt", input.occurredAt],
+    ["lastReinforcedAt", input.lastReinforcedAt],
     ["validFrom", input.validFrom],
     ["validUntil", input.validUntil],
   ] as const) {
@@ -806,7 +818,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
     const outboxNow = opts?.now ?? new Date();
     const { value: observation, created } = this.createObservationIdempotent(ctx, input, () =>
-      assertOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts?.now),
+      assertOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts?.now, opts?.claimedBy),
     );
     if (!created) {
       return { observation: snapshot(observation), created: false, jobs: [] };
@@ -1881,6 +1893,24 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (activityBaseSeq < 0) {
         throw new Error(`reinforce: decayBaseSeq must not be negative (got ${activityBaseSeq})`);
       }
+      // ADR 0500: `addOwnSubjectSeq` のとき Postgres は `nowSeq + S_x`（`decay_base_seq`）と、床 `nowSeq + S_x + offset`
+      // （`decay_floor_seq = LEAST(… + offset::bigint, MAX_SAFE_INTEGER)`）を `bigint` で足し、どちらかが 2^63 以上なら
+      // `22003 bigint out of range` で UPDATE ごと失敗する（実測）。足すのは、ドライバが `nowSeq` を文字にした値
+      // （`String(2**63 - 1024)` は `"9223372036854775000"`）なので、float64 の和ではなく BigInt で同じ値を足す。
+      if (opts.addOwnSubjectSeq === true && memory.subjectId != null) {
+        const ownSeq = this.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0;
+        const baseSeq = BigInt(String(opts.nowSeq)) + BigInt(ownSeq);
+        const offset = defaultActivityDecayStrategy.floorAt({
+          baseSeq: 0,
+          strength: memory.strength,
+          halfLifeRecalls: memory.halfLifeRecalls,
+        });
+        if (baseSeq + BigInt(offset) >= 2n ** 63n) {
+          throw new Error(
+            `reinforce: decayBaseSeq + own subject seq must fit in a Postgres bigint (got nowSeq ${opts.nowSeq} + ${ownSeq})`,
+          );
+        }
+      }
     }
     memory.lastReinforcedAt = new Date(at);
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
@@ -2013,10 +2043,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    assertQueryDate("aggregateScope", "occurredAfter", scope.occurredAfter);
-    assertQueryDate("aggregateScope", "occurredBefore", scope.occurredBefore);
-    assertQueryDate("aggregateScope", "validAt", scope.validAt);
-    assertQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
+    assertQueryTimestamptz("aggregateScope", "occurredAfter", scope.occurredAfter);
+    assertQueryTimestamptz("aggregateScope", "occurredBefore", scope.occurredBefore);
+    assertQueryTimestamptz("aggregateScope", "validAt", scope.validAt);
+    assertQueryTimestamptz("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
     assertQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
     // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
     // 時点で拒まれる（`22P05`・`22021`）。`scopeAggregate: "skip"` で `digestBand` も無いときだけ、Postgres は
@@ -2419,7 +2449,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 0件でも Invalid Date を `22007` で拒む（実測）。`memoryIds` が空配列のときだけ、Postgres はクエリを
     // 発行せずに `{ requeued: 0 }` を返す（`buildRequeueEmbedTargetSelect` が `null`）ので、見ない。
     if (opts.memoryIds === undefined || opts.memoryIds.length > 0) {
-      assertQueryDate("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
+      assertQueryTimestamptz("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
     }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
     const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds);
@@ -2469,7 +2499,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
     assertWellFormedCtx(ctx);
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    assertQueryDate("archiveDecayed", "now", opts.now);
+    assertQueryTimestamptz("archiveDecayed", "now", opts.now);
     assertQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
     // `PostgresMemoryStore.archiveDecayed`（`buildArchiveDecayedTargetSelect`）は
     // `opts.limit` を生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・
@@ -3153,8 +3183,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    assertQueryDate("findActiveByClaimKey", "validFrom", query.validFrom);
-    assertQueryDate("findActiveByClaimKey", "validUntil", query.validUntil);
+    assertQueryTimestamptz("findActiveByClaimKey", "validFrom", query.validFrom);
+    assertQueryTimestamptz("findActiveByClaimKey", "validUntil", query.validUntil);
     // ADR 0434: `claim_key_subject`・`claim_key_predicate` は `text` 列。検索値の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryTextWithoutNul("findActiveByClaimKey", "claimKey.subject", query.claimKey.subject);
     assertQueryTextWithoutNul(
@@ -3213,8 +3243,20 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
-    assertQueryDate("findContestedByClaimKey", "validFrom", query.validFrom);
-    assertQueryDate("findContestedByClaimKey", "validUntil", query.validUntil);
+    assertQueryTimestamptz("findContestedByClaimKey", "validFrom", query.validFrom);
+    assertQueryTimestamptz("findContestedByClaimKey", "validUntil", query.validUntil);
+    // ADR 0434 の負債（ADR 0500）: 兄弟の `findActiveByClaimKey` と同じ。`claim_key_subject`・`claim_key_predicate` は `text` 列で、
+    // 検索値の NUL は Postgres ではクエリの時点で拒まれる。
+    assertQueryTextWithoutNul(
+      "findContestedByClaimKey",
+      "claimKey.subject",
+      query.claimKey.subject,
+    );
+    assertQueryTextWithoutNul(
+      "findContestedByClaimKey",
+      "claimKey.predicate",
+      query.claimKey.predicate,
+    );
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     const matches = [...this.memories.values()].filter((m) => {
@@ -3491,6 +3533,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
     assertWellFormedCtx(ctx);
+    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む（負数そのものは拒まない）。
+    assertQueryBigint("eraseTenant", "limit", opts.limit);
     const limit = opts.limit;
     const dryRun = opts.dryRun === true;
     let remaining = limit;

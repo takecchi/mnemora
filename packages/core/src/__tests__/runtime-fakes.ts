@@ -33,7 +33,14 @@ import type { LexicalStore, LexicalFilter, LexicalHit } from "../interfaces/lexi
 import type { NotIndexedReason, RecallResult, RecalledScore, ScoreBreakdown } from "../recall.js";
 import { FILTERED_CONDITION_SCOPE_RELATION, RecallResultSchema } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
-import { isStrengthInRange, MAX_STRENGTH } from "../memory.js";
+import { isHalfLifeRecallsInRange } from "../interfaces/tenant-settings-store.js";
+import {
+  DigestSourceSchema,
+  EmbeddingStatusSchema,
+  isStrengthInRange,
+  MAX_STRENGTH,
+  MemoryStatusSchema,
+} from "../memory.js";
 import { ProvenanceKindSchema } from "../provenance.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
@@ -71,7 +78,139 @@ import type { EmbeddingSpaceId } from "../embedding.js";
 import type { OutboxJobRecord } from "../outbox.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "../strategies/decay.js";
 import { resolveIdempotentCreate } from "../idempotent-create.js";
+import {
+  assertWellFormedCtx,
+  assertWellFormedFilter,
+  assertWellFormedIdentifier,
+} from "../identifier.js";
 import type { IdempotentCreateResult } from "../idempotent-create.js";
+
+/**
+ * 読みの口の条件の日時が Invalid Date なら断る（ADR 0493。`packages/testkit` の `assertQueryDate` と同じ判定・同じ文面）。
+ * Postgres はクエリの時点で `timestamptz` への変換を拒む。省略（`undefined`/`null`）は検査しない。
+ */
+function assertFakeQueryDate(method: string, field: string, value: Date | null | undefined): void {
+  if (value != null && Number.isNaN(value.getTime())) {
+    throw new Error(`${method}: ${field} must be a valid Date (got Invalid Date)`);
+  }
+}
+
+/** 読みの口の条件の整数（通し番号）が `bigint` へ渡せる整数でなければ断る（ADR 0493。testkit の `assertQueryInteger` と同じ文面）。省略は検査しない。 */
+function assertFakeQueryInteger(
+  method: string,
+  field: string,
+  value: number | null | undefined,
+): void {
+  if (value != null && !Number.isInteger(value)) {
+    throw new Error(`${method}: ${field} must be an integer (got ${value})`);
+  }
+}
+
+/** `bigint` の範囲まで見る版（ADR 0493。testkit の `assertQueryBigint` と同じ判定）。 */
+function assertFakeQueryBigint(
+  method: string,
+  field: string,
+  value: number | null | undefined,
+): void {
+  assertFakeQueryInteger(method, field, value);
+  if (value != null && (value >= 2 ** 63 || value < -(2 ** 63))) {
+    throw new Error(`${method}: ${field} must fit in a Postgres bigint (got ${value})`);
+  }
+}
+
+/** `memory_events.size_before_bytes`（int4）へ書けない数を断る（ADR 0493。testkit の `assertInt4Column` と同じ判定）。数でない値は見ない。 */
+function assertFakeInt4Column(method: string, field: string, value: unknown): void {
+  if (typeof value !== "number") return;
+  if (!Number.isInteger(value)) {
+    throw new Error(`${method}: ${field} must be an integer (got ${value})`);
+  }
+  if (value < -(2 ** 31) || value > 2 ** 31 - 1) {
+    throw new Error(
+      `${method}: ${field} does not fit in a Postgres "integer" (int4) column (got ${value})`,
+    );
+  }
+}
+
+/** 文字列が NUL か孤立サロゲートを含むか（testkit の `memory-event-check.ts` の `hasNulOrLoneSurrogate` と同じ判定）。 */
+function fakeHasNulOrLoneSurrogate(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code === 0) return true;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i += 1;
+        continue;
+      }
+      return true;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) return true;
+  }
+  return false;
+}
+
+function fakeContainsNulOrLoneSurrogate(value: unknown): boolean {
+  if (typeof value === "string") return fakeHasNulOrLoneSurrogate(value);
+  if (Array.isArray(value)) return value.some((v) => fakeContainsNulOrLoneSurrogate(v));
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).some(
+      ([k, v]) => fakeHasNulOrLoneSurrogate(k) || fakeContainsNulOrLoneSurrogate(v),
+    );
+  }
+  return false;
+}
+
+function fakeContainsBigInt(value: unknown): boolean {
+  if (typeof value === "bigint") return true;
+  if (Array.isArray(value)) return value.some((v) => fakeContainsBigInt(v));
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).some((v) => fakeContainsBigInt(v));
+  }
+  return false;
+}
+
+/** 列挙の列（`memories.status` など）へ書けない値を断る（ADR 0493。testkit の `assertStorableMemoryColumn` と同じ文面）。 */
+function assertFakeMemoryColumn(
+  column: "status" | "digest_source" | "embedding_status",
+  value: unknown,
+): void {
+  const schema =
+    column === "status"
+      ? MemoryStatusSchema
+      : column === "digest_source"
+        ? DigestSourceSchema
+        : EmbeddingStatusSchema;
+  if (!schema.safeParse(value).success) {
+    throw new Error(
+      `memories.${column} must be one of ${schema.options.join(", ")} (got ${JSON.stringify(value)})`,
+    );
+  }
+}
+
+/** `eraseTenant` の `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む（ADR 0493。負数そのものは拒まない）。 */
+function assertFakeEraseLimit(limit: number): void {
+  assertFakeQueryBigint("eraseTenant", "limit", limit);
+}
+
+/**
+ * outbox の行を**実際に書く**ときに Postgres が拒む入力を、何も書く前に断る（ADR 0493。testkit の `assertOutboxRowsWritable` と同じ判定）。
+ * `jobKinds` の要素は `text` 列なので NUL を、`opts.now` は `timestamptz` なので Invalid Date を、`opts.claimedBy` は `text` 列なので NUL を断る。
+ * 行を書かない（`jobKinds` が空・冪等の既存の行に当たる）ときは見ない。
+ */
+function assertFakeOutboxRowsWritable(
+  method: string,
+  jobKinds: ReadonlyArray<string>,
+  opts: { now?: Date | undefined; claimedBy?: string | undefined } | undefined,
+): void {
+  if (jobKinds.length === 0) return;
+  assertFakeQueryDate(method, "opts.now", opts?.now);
+  if (jobKinds.some((kind) => typeof kind === "string" && kind.includes("\u0000"))) {
+    throw new Error(`${method}: jobKinds must not contain NUL characters (U+0000)`);
+  }
+  if (typeof opts?.claimedBy === "string" && opts.claimedBy.includes("\u0000")) {
+    throw new Error(`${method}: claimedBy must not contain NUL characters (U+0000)`);
+  }
+}
 
 // `packages/testkit` の `in-memory-memory-store.ts` の同名の関数と同じ判定（Issue #816 の NUL 側の残り）。
 /**
@@ -193,6 +332,11 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
  * （testkit の fixture が同じ段で `assertStorableMemoryEvent` を呼ぶのと同じ形）。
  */
 function assertBuildableFakeEvent(event: NewMemoryEvent): void {
+  // ADR 0493: testkit の `assertStorableMemoryEvent`（`memory-event-check.ts`）と同じ判定。BigInt は他のどれより先に断る
+  // （Postgres は `JSON.stringify` の時点で `TypeError` になり、問い合わせを送らない）。
+  if (fakeContainsBigInt(event.actor) || fakeContainsBigInt(event.meta)) {
+    throw new TypeError(`Do not know how to serialize a BigInt`);
+  }
   // Issue #807: `memory_events.at` は Postgres の `timestamptz` 列であり、Invalid Date
   // （`.getTime()` が `NaN`）を渡すと `PostgresEventStore.append` はクエリ実行時に
   // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
@@ -205,6 +349,22 @@ function assertBuildableFakeEvent(event: NewMemoryEvent): void {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
   }
   assertStorableFakeEvent(event);
+  if (fakeContainsNulOrLoneSurrogate(event.actor)) {
+    throw new Error(
+      `memory_events.actor must not contain NUL (U+0000) or a lone surrogate code unit`,
+    );
+  }
+  if (fakeContainsNulOrLoneSurrogate(event.meta)) {
+    throw new Error(
+      `memory_events.meta must not contain NUL (U+0000) or a lone surrogate code unit`,
+    );
+  }
+  if (typeof event.digestSnapshot === "string" && event.digestSnapshot.includes("\u0000")) {
+    throw new Error(`memory_events.digestSnapshot must not contain NUL characters (U+0000)`);
+  }
+  // `size_before_bytes` は int4。`markContestedGroup`・`resolveContestedGroup` だけは Postgres が `jsonb` の配列で渡すので
+  // `NaN`・`±Infinity` が `null` になって通る（testkit の `asJsonSerializedSizeBeforeBytes`）。この Fake はそこまで写さず、全口で断る。
+  assertFakeInt4Column("memory_events", "sizeBeforeBytes", event.sizeBeforeBytes);
 }
 
 /**
@@ -394,8 +554,12 @@ export class FakeMemoryStore implements MemoryStore {
   private createObservationIdempotent(
     ctx: Ctx,
     input: NewObservation,
+    beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("FakeMemoryStore", input);
+    // ADR 0493: `subjectId`・`externalId` の孤立サロゲートも Postgres・InMemory は断る（`MalformedIdentifierError`）。
+    assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+    assertWellFormedIdentifier(input.externalId, "input.externalId");
     // 9回目の棚卸し: testkit の fixture と `@mnemora/postgres`（`timestamptz` 列）と同じく、Invalid Date の日時を拒む。
     for (const [field, value] of [
       ["recordedAt", input.recordedAt],
@@ -413,6 +577,7 @@ export class FakeMemoryStore implements MemoryStore {
         )
       : undefined;
     return resolveIdempotentCreate(existing, () => {
+      beforeInsert?.();
       const observation: Observation = {
         id: nextId("obs"),
         tenantId: ctx.tenantId,
@@ -434,10 +599,12 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
+    assertWellFormedCtx(ctx);
     return this.createObservationIdempotent(ctx, input).value;
   }
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
+    assertWellFormedCtx(ctx);
     const observation = this.backing.observations.get(id);
     if (!observation || observation.tenantId !== ctx.tenantId) {
       return null;
@@ -451,7 +618,11 @@ export class FakeMemoryStore implements MemoryStore {
     jobKinds: OutboxJobKind[],
     opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
-    const { value: observation, created } = this.createObservationIdempotent(ctx, input);
+    assertWellFormedCtx(ctx);
+    // ADR 0493: 行を実際に書くときだけ、outbox の行が書けるか（`jobKinds`・`opts.now`・`opts.claimedBy`）を、何も書く前に見る。
+    const { value: observation, created } = this.createObservationIdempotent(ctx, input, () =>
+      assertFakeOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts),
+    );
     if (!created) {
       return { observation, created: false, jobs: [] };
     }
@@ -560,7 +731,11 @@ export class FakeMemoryStore implements MemoryStore {
     return buildStoredEvent(ctx, event);
   }
 
-  private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
+  private createMemoryIdempotent(
+    ctx: Ctx,
+    input: NewMemory,
+    beforeInsert?: () => void,
+  ): IdempotentCreateResult<Memory> {
     // 8回目の TSDoc の棚卸し: testkit の fixture（`InMemoryMemoryStore.createMemoryIdempotent`）と
     // `@mnemora/postgres` が拒む `provenance` の形のうち、2つをこの Fake も同じく拒む（冪等の衝突の判定より前。
     // fixture と同じ位置）——`provenance.kind` が列挙に無いとき、と `provenance` が `null` のとき（次の行が
@@ -589,6 +764,7 @@ export class FakeMemoryStore implements MemoryStore {
     const existing = existingId !== undefined ? this.backing.memories.get(existingId) : undefined;
 
     return resolveIdempotentCreate(existing, () => {
+      beforeInsert?.();
       // 外部キー相当（ADR 0047、`packages/testkit` の `InMemoryMemoryStore.createMemory` と
       // 同じ理由・同じ検査）: `sourceObservationId`/`supersededById`/`contestedWithId` は
       // 非 null なら実在する行を指さなければならない。**「存在」だけを見る**——一対一等の
@@ -658,8 +834,46 @@ export class FakeMemoryStore implements MemoryStore {
       if (Number.isNaN(input.recordedAt.getTime())) {
         throw new Error(`FakeMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
       }
+      // ADR 0493: `decayFloorAt`・`lastReinforcedAt` も `timestamptz` 列。Postgres は Invalid Date を拒む。
+      // 型の外の `null` は今までどおり通す（Invalid Date だけを断る。`fake-aggregate-scope-exclude-provenance.test.ts` が null で作る）。
+      if (input.decayFloorAt != null && Number.isNaN(input.decayFloorAt.getTime())) {
+        throw new Error(`FakeMemoryStore: decayFloorAt must be a valid Date (got Invalid Date)`);
+      }
+      // ADR 0493: 列挙の列（`status`・`digest_source`・`embedding_status`）。`provenance_kind` は上で見ている。
+      if (input.status !== undefined) assertFakeMemoryColumn("status", input.status);
+      assertFakeMemoryColumn("digest_source", input.digestSource);
+      assertFakeMemoryColumn("embedding_status", input.embeddingStatus);
+      // ADR 0493: 活動時計の起点と床は `bigint` 列で `memories_decay_seq_non_negative` が負を拒む。`halfLifeRecalls` は float4 で (0, ∞)。
+      // ⚠ `halfLifeHours` の範囲（`(0, ∞)`）は、この Fake が意図して見ない（上の doc コメント）。`halfLifeRecalls` は見る。
+      for (const [field, value] of [
+        ["decayBaseSeq", input.decayBaseSeq],
+        ["decayFloorSeq", input.decayFloorSeq],
+      ] as const) {
+        if (value == null) continue;
+        if (!Number.isInteger(value)) {
+          throw new Error(`FakeMemoryStore: ${field} must be an integer (got ${value})`);
+        }
+        if (value < 0) {
+          throw new Error(`FakeMemoryStore: ${field} must not be negative (got ${value})`);
+        }
+        if (value >= 2 ** 63) {
+          throw new Error(`FakeMemoryStore: ${field} must fit in a Postgres bigint (got ${value})`);
+        }
+      }
+      if (input.halfLifeRecalls != null) {
+        const recalls = input.halfLifeRecalls;
+        if (!isHalfLifeRecallsInRange(recalls)) {
+          throw new Error(`FakeMemoryStore: halfLifeRecalls out of range (0, ∞): ${recalls}`);
+        }
+        if (!Number.isFinite(Math.fround(recalls)) || Math.fround(recalls) === 0) {
+          throw new Error(
+            `FakeMemoryStore: halfLifeRecalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
+          );
+        }
+      }
       for (const [field, value] of [
         ["occurredAt", input.occurredAt],
+        ["lastReinforcedAt", input.lastReinforcedAt],
         ["validFrom", input.validFrom],
         ["validUntil", input.validUntil],
       ] as const) {
@@ -676,17 +890,20 @@ export class FakeMemoryStore implements MemoryStore {
       // 実測するとこの4欄は対称な入力面だったため、本 PR（Issue #816 の残り）で揃えた
       // （`packages/testkit` の `InMemoryMemoryStore.createMemory` と同じ範囲）。
       //
-      // ⚠ `tenantId` はここに含めない——`ctx.tenantId` は `createMemory` 以外の
-      // ほぼ全メソッドが個別に直接読む横断的な値であり、`FakeMemoryStore`/
-      // `InMemoryMemoryStore` のどちらも `ctx` を受ける共通の入口を持たない。ここで検査を
-      // 足しても `get`/`reinforce` 等の他メソッドでは素通りのままで一貫せず、全メソッドへ
-      // 検査を広げる横展開は本 PR の範囲を超えるため扱わない（実測: `tenantId` に NUL を
-      // 含めても Postgres は同じ理由で例外を投げる。Issue #816 本文と同じ）。
+      // `ctx.tenantId` の NUL・孤立サロゲートは、ADR 0493 で各公開メソッドの冒頭の `assertWellFormedCtx(ctx)` が断る
+      // （以前はここに「共通の入口が無いので扱わない」と書いていた。InMemory が先に揃い、Fake も各メソッドで明示した）。
       if (input.content.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: content must not contain NUL characters (U+0000)`);
       }
       if (input.subjectId != null && input.subjectId.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: subjectId must not contain NUL characters (U+0000)`);
+      }
+      // ADR 0493: `subjectId` の孤立サロゲート（InMemory・Postgres は `MalformedIdentifierError`）と、`extractorVersion` の NUL。
+      assertWellFormedIdentifier(input.subjectId, "input.subjectId");
+      if (input.extractorVersion != null && input.extractorVersion.includes("\u0000")) {
+        throw new Error(
+          `FakeMemoryStore: extractorVersion must not contain NUL characters (U+0000)`,
+        );
       }
       if (input.tags.some((tag) => tag.includes("\u0000"))) {
         throw new Error(`FakeMemoryStore: tags must not contain NUL characters (U+0000)`);
@@ -818,6 +1035,7 @@ export class FakeMemoryStore implements MemoryStore {
    * 契約とずれるため使わない。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
+    assertWellFormedCtx(ctx);
     const results: LabelSummary[] = [];
     for (const [key, label] of this.backing.labels) {
       if ((JSON.parse(key) as [string, string])[0] === ctx.tenantId) {
@@ -833,6 +1051,7 @@ export class FakeMemoryStore implements MemoryStore {
    * 同じ契約）。
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    assertWellFormedCtx(ctx);
     const key = this.labelKey(ctx.tenantId, name);
     const existing = this.backing.labels.get(key);
     const registered: LabelSummary = {
@@ -850,6 +1069,9 @@ export class FakeMemoryStore implements MemoryStore {
    * 同じ実装（`this.backing.*` を使う点だけが違う）。詳細な doc コメントはそちらを参照。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
+    assertFakeEraseLimit(opts.limit);
     const dryRun = opts.dryRun === true;
     let remaining = opts.limit;
     let total = 0;
@@ -953,6 +1175,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     return this.createMemoryIdempotent(ctx, input).value;
   }
 
@@ -961,7 +1184,11 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
-    const { value: memory, created } = this.createMemoryIdempotent(ctx, input);
+    assertWellFormedCtx(ctx);
+    // ADR 0493: 行を実際に書くときだけ `jobKinds` の NUL を、何も書く前に見る（testkit の `assertOutboxRowsWritable` と同じ）。
+    const { value: memory, created } = this.createMemoryIdempotent(ctx, input, () =>
+      assertFakeOutboxRowsWritable("createMemoryWithOutbox", jobKinds, undefined),
+    );
     if (!created) {
       return { memory, created: false, jobs: [] };
     }
@@ -970,6 +1197,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
+    assertWellFormedCtx(ctx);
     const memory = this.backing.memories.get(id);
     if (!memory || memory.tenantId !== ctx.tenantId) {
       return null;
@@ -978,6 +1206,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引くため
     // （実測）、同じ id が `ids` に複数回含まれていても一致する行は主キーの性質上1回しか
     // 無い。ここで検査せず単純にループで push すると同じ Memory を重複して返してしまう
@@ -1005,6 +1234,7 @@ export class FakeMemoryStore implements MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const results: Memory[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
@@ -1020,6 +1250,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     observationId: ObservationId,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const results: Memory[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
@@ -1049,6 +1280,7 @@ export class FakeMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     // ⚠ Issue #768: ADR 0140 の `status: 'contested'` ガードは、この Fake には意図して
     // 持たない（`createMemoryIdempotent` の doc コメント参照——ADR 0140 決定2）。
     this.beforeUpdateStatus?.(id);
@@ -1064,6 +1296,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
+    assertFakeMemoryColumn("status", status);
     memory.status = status;
     if (opts?.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -1086,6 +1319,7 @@ export class FakeMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     // ⚠ Issue #768: updateStatus と同じ理由——ADR 0140 のガードは意図して持たない。
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
@@ -1099,6 +1333,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
+    assertFakeMemoryColumn("status", status);
     // 9回目の棚卸し: イベントを先に組み立てる（検査もここで走る）。以前は状態を書き換えた後に組み立てていたので、
     // イベントが書けない（Invalid Date の `at` など）と、状態だけが書き換わったまま投げていた——Postgres は
     // 1トランザクションで巻き戻り、fixture は状態を書き換える前に検査するので、どちらもそうはならない。
@@ -1135,11 +1370,17 @@ export class FakeMemoryStore implements MemoryStore {
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
+    // ADR 0493: この Fake は `opts` を使わない（`abortIf*` 等は未実装）。`now` の Invalid Date だけは、行を書く前に断る。
+    opts?: { now?: Date },
   ): Promise<{
     created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
+    assertWellFormedCtx(ctx);
+    if (news.some((n) => n.jobKinds.length > 0)) {
+      assertFakeQueryDate("supersedeWithNewMemories", "opts.now", opts?.now);
+    }
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     for (const target of supersede) {
       if (
@@ -1295,6 +1536,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    assertWellFormedCtx(ctx);
     return this.purgeExpiredEventsSync(ctx, opts);
   }
 
@@ -1308,6 +1550,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredRecallsOptions,
   ): Promise<PurgeExpiredRecallsResult> {
+    assertWellFormedCtx(ctx);
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeExpiredRecalls: limit must be an integer (got ${opts.limit})`);
     }
@@ -1368,6 +1611,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsByRetentionOptions,
   ): Promise<PurgeExpiredEventsByRetentionOutcome> {
+    assertWellFormedCtx(ctx);
     if (!this.backing.eventRetentionDays.has(ctx.tenantId)) {
       return { kind: "unset" };
     }
@@ -1394,10 +1638,12 @@ export class FakeMemoryStore implements MemoryStore {
    * `failed → ready` は妨げない（片側だけの規則）。
    */
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
+    assertFakeMemoryColumn("embedding_status", status);
     if (isEmbeddingStatusRollback(memory.embeddingStatus, status)) {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
       return memory;
@@ -1419,6 +1665,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
+    assertWellFormedCtx(ctx);
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
@@ -1436,8 +1683,25 @@ export class FakeMemoryStore implements MemoryStore {
     }
     // 起点（lastReinforcedAt ?? recordedAt）より新しい at のときだけ書く（Issue #1093）。未強化の
     // 記憶では作成時刻が起点なので、それより前・ちょうどの at は、活動時計の欄も含めて何も書かない。
+    // ADR 0493: `opts.nowSeq` は `bigint` の引数へ書く値。この Memory が `halfLifeRecalls` を持つときだけ見る
+    // （持たなければ使われない）。no-op の判定より前（Postgres は no-op でも同じ UPDATE を発行する）。
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      assertFakeQueryBigint("reinforce", "nowSeq", opts.nowSeq);
+    }
     if ((memory.lastReinforcedAt ?? memory.recordedAt).getTime() >= at.getTime()) {
       return memory;
+    }
+    // 書く値（`nowSeq` か `nowSeq + S_x`）が負なら `memories_decay_seq_non_negative` が拒む。何かを書き換える前に決めて見る。
+    let plannedBaseSeq: number | undefined;
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      plannedBaseSeq =
+        opts.addOwnSubjectSeq === true && memory.subjectId != null
+          ? opts.nowSeq +
+            (this.backing.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+          : opts.nowSeq;
+      if (plannedBaseSeq < 0) {
+        throw new Error(`reinforce: decayBaseSeq must not be negative (got ${plannedBaseSeq})`);
+      }
     }
     memory.lastReinforcedAt = at;
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
@@ -1453,13 +1717,9 @@ export class FakeMemoryStore implements MemoryStore {
     // ——壁時計側の「等しい/古い at は no-op」の分岐（上）を通り抜けたあとでだけ動かす
     // ことで、Issue #730 の「同じ at の2回目は活動時計側も動かさない」を1バイトも
     // 変えずに保つ。
-    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
-      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す。
-      const baseSeq =
-        opts.addOwnSubjectSeq === true && memory.subjectId != null
-          ? opts.nowSeq +
-            (this.backing.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
-          : opts.nowSeq;
+    if (plannedBaseSeq !== undefined && memory.halfLifeRecalls != null) {
+      // ADR 0394: `addOwnSubjectSeq` が true なら、`nowSeq`（T）に Memory 自身の subject の S_x を足す（上で計算済み）。
+      const baseSeq = plannedBaseSeq;
       memory.decayBaseSeq = baseSeq;
       memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
         baseSeq,
@@ -1485,6 +1745,7 @@ export class FakeMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const results: Memory[] = [];
     for (const id of ids) {
       results.push(await this.reinforce(ctx, id, at, opts));
@@ -1506,6 +1767,7 @@ export class FakeMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    assertWellFormedCtx(ctx);
     const result = await this.recordUsage(ctx, recallId, memoryIds);
     if (result.insertedMemoryIds.length === 0) {
       return result;
@@ -1526,6 +1788,7 @@ export class FakeMemoryStore implements MemoryStore {
     recallId: string,
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    assertWellFormedCtx(ctx);
     // 外部キー相当（ADR 0047、`packages/testkit` の `InMemoryMemoryStore.recordUsage` と
     // 同じ理由・同じ検査）: `recall_usages.recall_id → recalls(id)` /
     // `recall_usages.memory_id → memories(id)`。`memoryIds` が空配列なら Postgres 実装は
@@ -1559,6 +1822,25 @@ export class FakeMemoryStore implements MemoryStore {
     scope: RecallScope,
     opts?: AggregateScopeOptions,
   ): Promise<ScopeAggregate> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `InMemoryMemoryStore.aggregateScope` と同じ検査。条件の識別子・日時・通し番号は Postgres の型へ変換できなければならない。
+    assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
+    assertFakeQueryDate("aggregateScope", "occurredAfter", scope.occurredAfter);
+    assertFakeQueryDate("aggregateScope", "occurredBefore", scope.occurredBefore);
+    assertFakeQueryDate("aggregateScope", "validAt", scope.validAt);
+    assertFakeQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
+    assertFakeQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
+    // `attributes`・`labels` の NUL は、集計も目次帯も引かない（`scopeAggregate: "skip"` で `digestBand` 無し）ときだけ Postgres は見ない。
+    if (!(opts?.scopeAggregate === "skip" && opts.digestBand === undefined)) {
+      if (scope.attributes !== undefined && jsonContainsNul(scope.attributes)) {
+        throw new Error("aggregateScope: attributes must not contain NUL characters (U+0000)");
+      }
+      for (const label of scope.labels ?? []) {
+        if (label.includes("\u0000")) {
+          throw new Error("aggregateScope: labels must not contain NUL characters (U+0000)");
+        }
+      }
+    }
     const inScopeBySubject = new Map<string | null, number>();
     let totalInScope = 0;
     const notIndexed: Record<NotIndexedReason, number> = { pending: 0, failed: 0, skipped: 0 };
@@ -1774,6 +2056,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
+    assertWellFormedCtx(ctx);
     // ADR 0480: InMemory・Postgres と同じく Invalid Date の createdAt は書かずに拒む（活動時計も進めない）。
     if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
       throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
@@ -1817,6 +2100,7 @@ export class FakeMemoryStore implements MemoryStore {
    * `breakdownCaptured: true` で固定する。
    */
   async getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null> {
+    assertWellFormedCtx(ctx);
     const row = this.backing.recalls.get(id);
     if (!row || row.tenantId !== ctx.tenantId) {
       return null;
@@ -1842,7 +2126,14 @@ export class FakeMemoryStore implements MemoryStore {
    * Postgres 側の単一文（＝同一トランザクション）と同じく「片方だけ起きた中間状態」を
    * 外から観測させない（ADR 0054 と同じ形）。
    */
-  async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+  async requeueEmbedJobs(
+    ctx: Ctx,
+    opts: RequeueEmbedJobsOptions,
+    writeOpts?: { now?: Date },
+  ): Promise<RequeueEmbedJobsResult> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `writeOpts.now` は `available_at`・`created_at`（`timestamptz`）に入る。Invalid Date は Postgres・InMemory が断る。
+    assertFakeQueryDate("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
     // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
     // 自身が例外を投げる（実測: `LIMIT must not be negative` / `invalid input syntax for
@@ -1895,6 +2186,10 @@ export class FakeMemoryStore implements MemoryStore {
    * 挟まない同期区間で行う（postgres 実装の単一トランザクションを模す）。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `now`（`timestamptz`）の Invalid Date と、`nowSeq`（`bigint`）の整数でない値を、クエリの前に断る（`InMemoryMemoryStore` と同じ）。
+    assertFakeQueryDate("archiveDecayed", "now", opts.now);
+    assertFakeQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
     // `PostgresMemoryStore.archiveDecayed` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
     // 自身が例外を投げる（実測。Issue #880。`packages/testkit` の
@@ -1981,7 +2276,8 @@ export class FakeMemoryStore implements MemoryStore {
         a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
         (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
     );
-    return { archived, reachedLimit: archived.length === opts.limit };
+    // ADR 0493: `limit: 0` は何も選ばないので「上限に届いた」とは言わない（`InMemoryMemoryStore`・Postgres は `false`）。
+    return { archived, reachedLimit: opts.limit > 0 && archived.length === opts.limit };
   }
 
   /**
@@ -2002,6 +2298,7 @@ export class FakeMemoryStore implements MemoryStore {
     tombstone: { content: string; digest: string },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -2076,6 +2373,7 @@ export class FakeMemoryStore implements MemoryStore {
     first: { id: MemoryId; event: NewMemoryEvent },
     second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    assertWellFormedCtx(ctx);
     if (first.id === second.id) {
       throw new RangeError("FakeMemoryStore: first.id and second.id must differ");
     }
@@ -2142,6 +2440,9 @@ export class FakeMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    assertWellFormedCtx(ctx);
+    assertFakeMemoryColumn("status", first.status);
+    assertFakeMemoryColumn("status", second.status);
     if (first.id === second.id) {
       throw new RangeError("FakeMemoryStore: first.id and second.id must differ");
     }
@@ -2202,6 +2503,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    assertWellFormedCtx(ctx);
     if (members.length < 3) {
       throw new RangeError("FakeMemoryStore: members must have at least 3 entries");
     }
@@ -2317,6 +2619,8 @@ export class FakeMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     }>,
   ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    assertWellFormedCtx(ctx);
+    for (const m of members) assertFakeMemoryColumn("status", m.status);
     if (members.length < 3) {
       throw new RangeError("FakeMemoryStore: members must have at least 3 entries");
     }
@@ -2417,6 +2721,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    assertWellFormedCtx(ctx);
     const memory = await this.get(ctx, survivor.id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${survivor.id}`);
@@ -2453,6 +2758,7 @@ export class FakeMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()].filter((m) => {
@@ -2500,6 +2806,7 @@ export class FakeMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    assertWellFormedCtx(ctx);
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()].filter((m) => {
@@ -2539,6 +2846,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
+    assertWellFormedCtx(ctx);
     // `PostgresMemoryStore.listActiveClaimPredicates` は `query.limit` を生 SQL の `LIMIT`（bigint の
     // パラメータ）へそのまま渡すので、負数・`NaN`・`Infinity`・非整数・2^63 以上では Postgres が
     // 例外を投げる。検査せず `slice(0, limit)` へ渡すと違う件数を黙って返すので、他の `limit` を
@@ -2591,6 +2899,7 @@ export class FakeMemoryStore implements MemoryStore {
     event: { reason?: string; actor?: EventActor; at: Date },
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
+    assertWellFormedCtx(ctx);
     const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.backing.memories.values()].filter(
       (m) =>
@@ -2645,6 +2954,7 @@ export class FakeMemoryStore implements MemoryStore {
     supersededById: MemoryId,
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    assertWellFormedCtx(ctx);
     const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.backing.memories.values()].filter(
       (m) =>
@@ -2686,6 +2996,7 @@ export class FakeRelationStore implements RelationStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
   async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     // ADR 0488: InMemory・Postgres と同じく、範囲外の kind は両端の検査より前に断る。
     if (!Object.hasOwn({ contradicts: true } satisfies Record<RelationKind, true>, kind)) {
       throw new Error(`FakeRelationStore: unknown relation kind: ${String(kind)}`);
@@ -2716,6 +3027,7 @@ export class FakeRelationStore implements RelationStore {
   }
 
   async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     this.backing.relations = this.backing.relations.filter(
       (r) =>
         !(
@@ -2728,6 +3040,7 @@ export class FakeRelationStore implements RelationStore {
   }
 
   async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
+    assertWellFormedCtx(ctx);
     return this.backing.relations
       .filter(
         (r) =>
@@ -2757,6 +3070,11 @@ export class FakeOutboxStore implements OutboxStore {
   // `runtime.test.ts` が「今日の姿」を検査しているつもりで、実は直った後の姿を
   // 検査してしまう食い違いが起きる。
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `claimedBy` は `text` 列に入る。NUL は Postgres が拒み、`InMemoryOutboxStore` も同じ文面で拒む。
+    if (typeof opts.claimedBy === "string" && opts.claimedBy.includes("\u0000")) {
+      throw new Error("claimBatch: claimedBy must not contain NUL characters (U+0000)");
+    }
     // `PostgresOutboxStore.claimBatch` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる
     // （実測）。ここで検査せず `eligible.slice(0, opts.limit)` へ渡すと
@@ -2820,6 +3138,10 @@ export class FakeOutboxStore implements OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `OutboxStore.complete` の TSDoc が約束する（`opts.at` が Invalid Date なら、行には触れずに断る）。
+    // `InMemoryOutboxStore` と同じく、行を探す前に見る。
+    assertFakeQueryDate("complete", "opts.at", opts?.at);
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -2843,6 +3165,8 @@ export class FakeOutboxStore implements OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
+    assertFakeQueryDate("fail", "opts.at", opts?.at);
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
       return;
@@ -2864,6 +3188,9 @@ export class FakeOutboxStore implements OutboxStore {
    * 同じ実装（`this.backing.outboxJobs` を使う点だけが違う）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
+    assertFakeEraseLimit(opts.limit);
     const dryRun = opts.dryRun === true;
     const matchingIndexes: number[] = [];
     for (
@@ -2893,6 +3220,8 @@ export class FakeOutboxStore implements OutboxStore {
     ctx: Ctx,
     opts: PurgeCompletedJobsOptions,
   ): Promise<PurgeCompletedJobsResult> {
+    assertWellFormedCtx(ctx);
+    assertFakeQueryDate("purgeCompletedJobs", "olderThan", opts.olderThan);
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeCompletedJobs: limit must be an integer (got ${opts.limit})`);
     }
@@ -3009,6 +3338,7 @@ export class FakeVectorStore implements VectorStore {
     memoryId: MemoryId,
     vector: number[],
   ): Promise<void> {
+    assertWellFormedCtx(ctx);
     // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
     // `search` は同じ `backing.memories` を真実の源として引いており（クラス doc 参照）、
     // 書き込み側（upsert）でも同じ非対称を強制する——ADR 0034 が実装した「MemoryStore が
@@ -3025,10 +3355,11 @@ export class FakeVectorStore implements VectorStore {
         );
       }
     }
+    // ADR 0493: pgvector は成分を float4 で持つ（`InMemoryVectorStore` と同じ。Issue #1268）。1e-50 は 0 に丸まる。
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,
-      vector,
+      vector: vector.map(Math.fround),
     });
   }
 
@@ -3038,6 +3369,15 @@ export class FakeVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: 絞りの識別子（`tenantId`・`subjectId`）の NUL と、絞りの日時の Invalid Date を、
+    // `InMemoryVectorStore`・`PostgresVectorStore` と同じく断る。
+    assertWellFormedFilter(opts.filter, "opts.filter");
+    assertFakeQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertFakeQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertFakeQueryDate("search", "filter.validAt", opts.filter.validAt);
+    assertFakeQueryDate("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
+    assertFakeQueryInteger("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT`（bigint
     // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる
     // （実測）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと
@@ -3060,6 +3400,8 @@ export class FakeVectorStore implements VectorStore {
     // `space` を一度も参照しておらず（引数名も `_space` だった）、異なる space の vector を
     // 混同して返していた——`key()` が space を含む prefix を作っているのに、`search` だけが
     // それを見ていなかった。
+    // ADR 0493: 問い合わせのベクトルも float4 に丸める（`InMemoryVectorStore` と同じ。1e39 は Infinity になり距離が NaN になる）。
+    const float4Query = query.map(Math.fround);
     const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
       // 空間は `key()` の組の先頭3つを完全一致で比べる（前方一致にしない）。
@@ -3188,7 +3530,7 @@ export class FakeVectorStore implements VectorStore {
       }
       hits.push({
         memoryId: entry.memoryId,
-        distance: cosineDistance(query, entry.vector),
+        distance: cosineDistance(float4Query, entry.vector),
         recordedAt: memory.recordedAt,
       });
     }
@@ -3213,6 +3555,7 @@ export class FakeVectorStore implements VectorStore {
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
+    assertWellFormedCtx(ctx);
     this.entries.delete(this.key(space, ctx.tenantId, memoryId));
   }
 
@@ -3223,6 +3566,7 @@ export class FakeVectorStore implements VectorStore {
    * space（key の先頭3要素）は問わない。
    */
   async deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    assertWellFormedCtx(ctx);
     if (memoryIds.length === 0) {
       return;
     }
@@ -3244,6 +3588,7 @@ export class FakeVectorStore implements VectorStore {
     space: EmbeddingSpaceId,
     memoryIds: MemoryId[],
   ): Promise<{ memoryId: MemoryId; vector: number[] }[]> {
+    assertWellFormedCtx(ctx);
     // `PostgresVectorStore.getVectors` は `memory_id = ANY(...)` という集合演算で引くため
     // （実測）、同じ id を複数回渡しても一致する行は主キーの性質上1回しか無い。ここで
     // 検査せず `memoryIds` をそのまま for-of すると重複して返してしまう——
@@ -3269,6 +3614,9 @@ export class FakeVectorStore implements VectorStore {
    * 同じ実装。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
+    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む。
+    assertFakeEraseLimit(opts.limit);
     const dryRun = opts.dryRun === true;
     const matchingKeys: string[] = [];
     for (const [key, entry] of this.entries) {
@@ -3517,6 +3865,7 @@ export class FakeLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    assertWellFormedCtx(ctx);
     this.calls.push({ ctx, query, opts });
     if (this.shouldThrow) {
       throw new Error("FakeLexicalStore: simulated search failure");
@@ -3524,6 +3873,14 @@ export class FakeLexicalStore implements LexicalStore {
     // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない（`InMemoryLexicalStore` と同じ）。
     if (query.includes("\u0000")) {
       throw new Error("FakeLexicalStore.search: query must not contain NUL characters (U+0000)");
+    }
+    // ADR 0493: 絞りの識別子の NUL・日時の Invalid Date・`attributes` の NUL を、`InMemoryLexicalStore` と同じく断る。
+    assertWellFormedFilter(opts.filter, "opts.filter");
+    assertFakeQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertFakeQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertFakeQueryDate("search", "filter.validAt", opts.filter.validAt);
+    if (opts.filter.attributes !== undefined && jsonContainsNul(opts.filter.attributes)) {
+      throw new Error("search: filter.attributes must not contain NUL characters (U+0000)");
     }
     // `PostgresLexicalStore.search`/`PostgresTrigramLexicalStore.search` は `opts.limit` を
     // 生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・
@@ -3666,6 +4023,7 @@ export class FakeEventStore implements EventStore {
   }
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
+    assertWellFormedCtx(ctx);
     // 外部キー相当（ADR 0047）: `memory_events.memory_id → memories(id)`（nullable。
     // `kind = 'events_purged'` の場合のみ NULL が正当）。**NULL は拒まない**——kind を
     // 問わず、`memoryId` が非 null のときだけ実在を要求する。
@@ -3683,10 +4041,12 @@ export class FakeEventStore implements EventStore {
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
+    assertWellFormedCtx(ctx);
     return this.backing.events.find((e) => e.id === id && e.tenantId === ctx.tenantId) ?? null;
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    assertWellFormedCtx(ctx);
     // `PostgresEventStore.list` は `filter.limit` を生 SQL の `LIMIT`（bigint パラメータ）
     // にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる（実測）。ここで
     // 検査せず `sorted.slice(0, filter.limit)` へ渡すと `Array.prototype.slice` の
@@ -3704,6 +4064,8 @@ export class FakeEventStore implements EventStore {
     if (filter.limit !== undefined && filter.limit >= 2 ** 63) {
       throw new Error(`list: limit must fit in a Postgres bigint (got ${filter.limit})`);
     }
+    assertFakeQueryDate("list", "since", filter.since);
+    assertFakeQueryDate("list", "until", filter.until);
     const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
       if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
@@ -3720,6 +4082,22 @@ export class FakeEventStore implements EventStore {
     const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime());
     return filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted;
   }
+}
+
+/**
+ * Postgres の `real`（float4）の列に書いた number が、読み戻されるときの値。Postgres は float4 を「float4 として一意に決まる
+ * 最短の10進表記」で文字列にし、ドライバが float64 として読む。呼ぶ前に、`Math.fround` が有限で 0 でないことを確かめてあること。
+ * `packages/testkit` の `toFloat4Readback` と同じ式（core は testkit に依存しないので、ここに持つ）。
+ */
+function float4Readback(value: number): number {
+  const rounded = Math.fround(value);
+  for (let digits = 1; digits <= 9; digits++) {
+    const candidate = Number(rounded.toPrecision(digits));
+    if (Math.fround(candidate) === rounded) {
+      return candidate;
+    }
+  }
+  return rounded;
 }
 
 // `getEventRetention`/`setEventRetention` は `TenantSettingsStore` interface が必須にした
@@ -3773,10 +4151,12 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(_ctx);
     return this.halfLifeHours;
   }
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
+    assertWellFormedCtx(ctx);
     if (!this.eventRetentionDays.has(ctx.tenantId)) {
       return { kind: "unset" };
     }
@@ -3788,6 +4168,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    assertWellFormedCtx(ctx);
     // ADR 0479: InMemoryTenantSettingsStore・Postgres と同じ検査（kind は Issue #1168、days の上限は int4 列）。
     assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
@@ -3802,15 +4183,18 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
+    assertWellFormedCtx(ctx);
     return this.decayClockByTenant.get(ctx.tenantId) ?? DEFAULT_DECAY_CLOCK;
   }
 
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
     this.decayClockByTenant.set(ctx.tenantId, clock);
   }
 
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     return this.halfLifeRecallsByTenant.get(ctx.tenantId) ?? DEFAULT_HALF_LIFE_RECALLS;
   }
 
@@ -3845,6 +4229,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * と同じ形・同じ `Math.fround` の境界判定）。
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidHalfLifeRecalls(recalls);
     const rounded = Math.fround(recalls);
     if (!Number.isFinite(rounded) || rounded === 0) {
@@ -3852,10 +4237,13 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
         `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
       );
     }
-    this.halfLifeRecallsByTenant.set(ctx.tenantId, recalls);
+    // ADR 0500（ADR 0479 の引き受けた負債）: 列は float4 なので、読み戻す値は float4 に丸めたものの最短表記
+    // （`Math.fround(720.1)` ではなく `720.1`。`16777217` は `16777216`）。
+    this.halfLifeRecallsByTenant.set(ctx.tenantId, float4Readback(recalls));
   }
 
   async getActivitySeq(ctx: Ctx): Promise<number> {
+    assertWellFormedCtx(ctx);
     if (this.backing === undefined) return 0;
     return this.backing.activitySeq.get(ctx.tenantId) ?? 0;
   }
@@ -3865,6 +4253,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * （Issue #338）: `backing.subjectActivitySeq` に、このテナントの行が1本でもあるか。
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
+    assertWellFormedCtx(ctx);
     if (this.backing === undefined) return false;
     const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
     return bySubject !== undefined && bySubject.size > 0;
@@ -3876,6 +4265,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * まとめて読む。行が無い `subjectId` はキーを省略する。
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
+    assertWellFormedCtx(ctx);
     const out = Object.create(null) as Record<string, number>;
     if (this.backing === undefined) return out;
     const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
@@ -3894,6 +4284,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * 同じ契約）。未設定のテナントは `DEFAULT_TAXONOMY_MODE`（`'open'`）。
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
+    assertWellFormedCtx(ctx);
     return this.taxonomyModeByTenant.get(ctx.tenantId) ?? DEFAULT_TAXONOMY_MODE;
   }
 
@@ -3902,6 +4293,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * 同じ契約）。
    */
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+    assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
     this.taxonomyModeByTenant.set(ctx.tenantId, mode);
   }
@@ -3916,6 +4308,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * ない固定値）はこのメソッドの対象外——テナントごとの状態ではないため。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    assertWellFormedCtx(ctx);
     const existed =
       this.eventRetentionDays.has(ctx.tenantId) ||
       this.decayClockByTenant.has(ctx.tenantId) ||
