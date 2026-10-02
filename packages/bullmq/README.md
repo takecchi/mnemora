@@ -160,14 +160,16 @@ await queue.close();
 | 入力 | 結果 |
 |---|---|
 | `everyMs` が数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下 | 通る。小数（`1.5`）も通り、BullMQ が切り捨てた間隔（`1` ms）で動く |
-| `everyMs` が負・`0`・`1` 未満の小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超（`1e21` を含む）・数値の文字列（`"50"`）・`null`・`undefined` | **構築時に投げる** |
+| `everyMs` が負・`0`・`1` 未満の小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超（`1e21` を含む）・数値の文字列（`"50"`）・`null`・`undefined` | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`） |
 | `jobName` を省略 | 既定 `"mnemora-tick"` |
 | `jobName` が空でない文字列（`:` を含む・空白・日本語・300 文字も） | 通る |
-| `jobName` が空文字・文字列でない | **構築時に投げる** |
+| `jobName` が空文字・文字列でない | **構築時に投げる**（文字列でなければ `TypeError`、空文字なら `RangeError`） |
 | `queueName` が空文字・`:` を含む | BullMQ が `createBullmqTickDriver(...)` の中で同期的に投げる（driver は検査しない） |
 | `queueName` が空白・日本語・300 文字 | 動く |
 
 （検査を足す前の測定【実測】redis-server 7.4.7・bullmq 6.3.8: 負の `everyMs`・`1` 未満の小数・`1e21`・空文字の `jobName` は `start()` が成功し、tick が数回（`1e21`・空文字は1回）で止まり `onTickError` も鳴らなかった。`0`・`NaN`・`null` は `start()` が reject、`Infinity` は Lua のエラーで reject した。数字は ADR 0477。）
+
+`concurrency` が正の整数でないときも同じ形で投げる（数でなければ `TypeError`、小数・`NaN`・`1` 未満なら `RangeError`）。message は [ADR 0525](../../docs/decisions/0525-config-error-types-align-with-provider.md) の前後で変わらない（型だけが素の `Error` から変わった）。
 
 ⚠ **利用側は、不正な設定のまま既に動かしていたコードが、更新後は構築時に投げる。** 移行は [migration-v1](../../docs/migration-v1.md) の 🔴 56。
 
