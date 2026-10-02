@@ -54,7 +54,41 @@
  */
 
 /** ADR ファイル名の形（4桁の番号 + ハイフン区切りの slug + `.md`）。ADR 0128 と同じ形。 */
-const ADR_FILENAME_RE = /^(\d{4})-[a-z0-9][a-z0-9-]*\.md$/;
+export const ADR_FILENAME_RE = /^(\d{4})-([a-z0-9][a-z0-9-]*)\.md$/;
+
+/**
+ * `docs/decisions/` の直下に置いてよい、ADR ではない `.md`（ADR 0540）。これと ADR のファイル名の形
+ * （`ADR_FILENAME_RE`）のどちらでもない `.md` は、形の間違い（`adr-0538-x.md`・`538-x.md`・`0538_x.md`・
+ * `ADR-0538-x.md` など）として落とす。`.md` 以外のファイルは対象外。ここに足すときは README の手引きも直すこと。
+ */
+export const ALLOWED_NON_ADR_MARKDOWN = ["README.md", "TEMPLATE.md"];
+
+/**
+ * ファイル名の配列から、「`.md` なのに、ADR のファイル名の形でも、許す一覧（`ALLOWED_NON_ADR_MARKDOWN`）でもない」ものを返す。
+ * 生成器（`buildAdrEntries`）と `adr-renumber.mjs` が同じ規則を使う（ADR 0540。2つの正規表現がずれていくのを防ぐ）。
+ *
+ * @param {string[]} filenames `docs/decisions/` 直下のファイル名（サブディレクトリの中は渡さない）
+ * @returns {string[]}
+ */
+export function findMalformedAdrFilenames(filenames) {
+  return filenames.filter(
+    (name) =>
+      /\.md$/i.test(name) && !isAdrFilename(name) && !ALLOWED_NON_ADR_MARKDOWN.includes(name),
+  );
+}
+
+/**
+ * 形の外れたファイル名があれば、並べた例外を投げる。書き込み・改名の前に呼ぶこと。
+ * @param {string[]} filenames
+ */
+export function assertWellFormedAdrFilenames(filenames) {
+  const malformed = findMalformedAdrFilenames(filenames);
+  if (malformed.length > 0) {
+    throw new Error(
+      `ADR のファイル名の形から外れています（\`NNNN-slug.md\`。slug は小文字の英数字とハイフンだけで、ドットは使えません。ADR ではない \`.md\` は ${ALLOWED_NON_ADR_MARKDOWN.join("・")} だけ）: ${malformed.join(", ")}`,
+    );
+  }
+}
 
 /** ADR 本文1行目の見出し（`# ADR 0001: ORM は Drizzle`）。 */
 const TITLE_HEADING_RE = /^# ADR (\d{4}): (.+)\r?$/;
@@ -172,6 +206,9 @@ export function parseAdrEntry(filename, content) {
  * @returns {ReturnType<typeof parseAdrEntry>[]}
  */
 export function buildAdrEntries(files) {
+  // ADR 0537・0540: 形の外れた `.md`（ドット入り・`adr-0538-x.md`・`538-x.md` など）は、黙って無視せず落とす。
+  // `README.md`・`TEMPLATE.md` は許す一覧（`ALLOWED_NON_ADR_MARKDOWN`）、`.md` 以外は対象外。
+  assertWellFormedAdrFilenames(files.map((f) => f.filename));
   const entries = files
     .filter((f) => isAdrFilename(f.filename))
     .map((f) => parseAdrEntry(f.filename, f.content))

@@ -1423,7 +1423,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
     assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
@@ -1468,7 +1468,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // ADR 0503: updateStatus と同じ。
     assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
@@ -2835,6 +2835,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `packages/postgres` の `scrubPurged` と同じ契約。`forgotten` かつ `purgedAt` が非 `null` の
    * 行だけを対象に、`tags`・`attributes`・`claimKey` を空にし、label の紐付けを外して
    * `proposedCount` を外した本数だけ減らす。残骸の無い行は書き換えない（`updatedAt` も動かさない）。
+   * ADR 0512: `recalls.indexBand.digestBand` の、この行のエントリの digest も行の `digest` へ伏せる。
    * in-memory は同期区間で完結する（`await` を挟まない）ので、同時呼び出しでも二重には数えない。
    */
   async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
@@ -2869,6 +2870,23 @@ export class InMemoryMemoryStore implements MemoryStore {
           }
         }
         this.memoryLabels.delete(linkKey);
+      }
+      // ADR 0512: このテナントの recalls.indexBand.digestBand の、この行のエントリを、行の digest
+      // （トゥームストーン）へ伏せる（truncated は落とす。同じ digest のエントリは書き換えない）。
+      for (const row of this.recalls.values()) {
+        if (row.tenantId !== ctx.tenantId) continue;
+        const digestBand = row.indexBand?.digestBand;
+        if (!digestBand) continue;
+        let changed = false;
+        const nextDigestBand = digestBand.map((entry) => {
+          if (entry.memoryId !== id) return entry;
+          if (entry.digest === memory.digest && !("truncated" in entry)) return entry;
+          changed = true;
+          return { memoryId: entry.memoryId, digest: memory.digest };
+        });
+        if (changed) {
+          row.indexBand = { ...row.indexBand, digestBand: nextDigestBand };
+        }
       }
     }
   }
@@ -3010,6 +3028,19 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（`PostgresMemoryStore` は UPDATE の中で確かめる）。
     this.assertOwnMemoryRef(ctx, first.supersededById);
     this.assertOwnMemoryRef(ctx, second.supersededById);
+    // ADR 0515: 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ）。対の相手を指すのは断らない。
+    for (const [field, side] of [
+      ["first", first],
+      ["second", second],
+    ] as const) {
+      const ref = side.supersededById;
+      if (ref === undefined || ref === first.id || ref === second.id) continue;
+      if (this.rawGet(ctx, ref)?.status === "forgotten") {
+        throw new RangeError(
+          `resolveContestedPair: ${field}.supersededById must not be a forgotten memory outside the pair`,
+        );
+      }
+    }
 
     assertStorableMemoryColumn("status", first.status);
     assertStorableMemoryColumn("status", second.status);

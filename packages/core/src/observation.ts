@@ -423,7 +423,8 @@ export interface ObserveDocumentInput {
    *
    * **`extractTitle: true` を渡すと opt-in できる**（下記）——抽出のプロンプトと LLM 失敗時の
    * 全文フォールバックの本文の両方に、`title` が空でない文字列のときだけ `${title}\n\n${content}`
-   * の形で入る。`title` を渡さない・空文字のときは `extractTitle: true` でも今の既定と同じ
+   * の形で入る（`trim` で空になる値——空白・改行・タブ・U+3000 だけ——は空とみなして前置きにしない。
+   * 断らず無視する。ADR 0517）。`title` を渡さない・空文字・空白だけのときは `extractTitle: true` でも今の既定と同じ
    * （`content` だけ）になる。**例外: `extractTitle: true` かつ `content` が空文字（`observe()` の
    * 入力としては `content` は必須で、空文字も空白だけの値も拒む（ADR 0502）ため、通常はこの型から作った Observation でしか
    * 起こらない。`reextract` が読み直す既存データ等）で `title` が空でないときは、`title` だけを

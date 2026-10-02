@@ -126,6 +126,53 @@ function subjectIdMatches(subjectId: string | null): SQL {
 }
 
 /**
+ * ADR 0511: コードポイント順の比較。SQL の `ORDER BY name COLLATE "C"`（UTF-8 のバイト順）と同じ並びになる
+ * （JS 既定の `sort()` は UTF-16 のコード単位順で、BMP の上位と補助面の文字で食い違う）。
+ * `labels` の行ロックを取る順を、どの経路でもこの順にそろえる。
+ */
+function compareCodePoints(a: string, b: string): number {
+  const ia = a[Symbol.iterator]();
+  const ib = b[Symbol.iterator]();
+  for (;;) {
+    const x = ia.next();
+    const y = ib.next();
+    if (x.done === true || y.done === true) {
+      return x.done === true && y.done === true ? 0 : x.done === true ? -1 : 1;
+    }
+    const cx = x.value.codePointAt(0)!;
+    const cy = y.value.codePointAt(0)!;
+    if (cx !== cy) return cx < cy ? -1 : 1;
+  }
+}
+
+/**
+ * ADR 0511: 既に在る `labels` の行を、名前のコードポイント順に `FOR UPDATE` で先に取る。
+ * `supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents` が、候補ごとの `upsertProposedLabels`
+ * （候補の中では名前順）の前に、全候補の語彙をまとめて呼ぶ。候補をまたぐ順が揃わないと、同じ語彙を
+ * 逆の候補順で持つ2つの呼び出しが互いの行を待って 40P01 になる。
+ * ⚠ まだ無い名前の行は取れない（新しい行どうしの競合は残る。ADR 0511 の負債）。
+ * `Memory.tags`・`proposedCount` は変えない（ロックを取るだけ）。
+ */
+async function lockExistingLabelsInNameOrder(
+  exec: SqlExecutor,
+  ctx: Ctx,
+  tagLists: ReadonlyArray<readonly string[]>,
+): Promise<void> {
+  // NUL（U+0000）を含む名前は問い合わせに載せない: DB が生の例外で断るので、後の名指しの検査
+  // （ADR 0499 の `assertNoNulInNewMemory`）より前に例外の形が変わってしまう。その候補は後で名指しで断られる。
+  const names = Array.from(new Set(tagLists.flat())).filter((name) => !name.includes("\u0000"));
+  if (names.length === 0) {
+    return;
+  }
+  await exec.execute(sql`
+    SELECT l.id FROM labels l
+    WHERE l.tenant_id = ${ctx.tenantId} AND l.name = ANY(${sql.param(names)}::text[])
+    ORDER BY l.name COLLATE "C" ASC
+    FOR UPDATE OF l
+  `);
+}
+
+/**
  * Issue #1226 / ADR 0375 決定7: `createMemoryWithOutbox`/`supersedeWithNewMemories` の
  * `opts.abortIfForgotten` を実装する共通部分。**呼び出し元のトランザクション（`tx`）の中で、
  * まだ何も書く前に**呼ぶこと——`SELECT … FOR UPDATE` で対象行をロックしたうえで
@@ -651,7 +698,9 @@ export class PostgresMemoryStore implements MemoryStore {
     // ADR 0476: `labels` の行ロックを取る順を、`tags` の並び（LLM が返した順）ではなく名前の順に固定する。
     // 並びのままだと、同じ語彙を逆の順で持つ2つの作成が互いの行を待って 40P01（deadlock detected）で落ちる。
     // 並べ替えるのはロックの順だけで、`Memory.tags` の並び・重複は変えない。
-    const uniqueNames = Array.from(new Set(tags)).sort();
+    // ADR 0511: 順は SQL の `ORDER BY name COLLATE "C"`（コードポイント順）と同じ `compareCodePoints`。
+    // `lockExistingLabelsInNameOrder`・purge/scrub の先取りと同じ順でないと、経路どうしで循環待ちになる。
+    const uniqueNames = Array.from(new Set(tags)).sort(compareCodePoints);
     for (const name of uniqueNames) {
       const labelResult = await exec.execute(sql`
         INSERT INTO labels (id, tenant_id, name, status, proposed_count)
@@ -1062,6 +1111,12 @@ export class PostgresMemoryStore implements MemoryStore {
         opts?.abortIfSuperseded,
         "createMemoriesWithOutboxAndEvents",
       );
+      // ADR 0511: 候補ごとの SAVEPOINT に入る前に、全候補の語彙の既存行を名前順に取る。
+      await lockExistingLabelsInNameOrder(
+        tx,
+        ctx,
+        news.map((entry) => entry.input.tags),
+      );
       const written: Array<{
         index: number;
         memory: Memory;
@@ -1245,7 +1300,7 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     // ADR 0503: `superseded` は置き換えた側を伴い、自分自身ではない（書く前・対象の存在確認より前に断る）。
     assertSupersededByShape("updateStatus", "opts", id, status, opts?.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる——ドライバの
@@ -1306,7 +1361,7 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     // ADR 0503: updateStatus と同じ。
     assertSupersededByShape("updateStatusWithEvent", "opts", id, status, opts.supersededById, {
-      forbidWhenNotSuperseded: false,
+      forbidWhenNotSuperseded: true,
     });
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力は
     // トランザクションを開く前に同じ「memory not found」の Error へ寄せる——
@@ -1460,6 +1515,12 @@ export class PostgresMemoryStore implements MemoryStore {
       );
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
+      // ADR 0511: 候補ごとの upsert の前に、全候補の語彙の既存行を名前順に取る。
+      await lockExistingLabelsInNameOrder(
+        tx,
+        ctx,
+        news.map((entry) => entry.input.tags),
+      );
       for (const { input, jobKinds } of news) {
         const sourceObservationId = input.sourceObservationId ?? null;
         const extractorVersion = input.extractorVersion ?? null;
@@ -3241,6 +3302,18 @@ export class PostgresMemoryStore implements MemoryStore {
       `);
       const storedEvent = rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
 
+      // ADR 0511: 減らす前に、このメモリのラベルの行を名前順に `FOR UPDATE` で取る
+      // （下の `UPDATE … FROM counted` の更新順は計画次第で、作成の名前順とずれて 40P01 になりうる）。
+      await tx.execute(sql`
+        SELECT l.id FROM labels l
+        WHERE l.tenant_id = ${ctx.tenantId}
+          AND l.id IN (
+            SELECT ml.label_id FROM memory_labels ml
+            WHERE ml.tenant_id = ${ctx.tenantId} AND ml.memory_id = ${id}
+          )
+        ORDER BY l.name COLLATE "C" ASC
+        FOR UPDATE OF l
+      `);
       // ADR 0375 決定2: memory_labels を外し、proposed な labels.proposed_count を減らす。
       await tx.execute(sql`
         WITH removed_labels AS (
@@ -3295,7 +3368,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`status = 'forgotten' AND purged_at IS NOT NULL`）について消し、`labels.proposed_count`
    * （`status = 'proposed'` のもの）を外した紐付けの本数だけ減らす（`GREATEST(…, 0)`）。
    *
-   * - **1トランザクション。**3文とも `purged_at IS NOT NULL` の行だけを対象にするので、
+   * - **1トランザクション。**3文とも（ADR 0512 で `recalls.index_band` の1文を足した）`purged_at IS NOT NULL` の行だけを対象にするので、
    *   未 purge の行・他テナントの行は、渡された id に含まれていても触らない。
    * - **べき等。**`memories` の UPDATE は「残骸が在る行」だけを更新する（`updated_at` も、残骸の無い行では
    *   動かさない）。`memory_labels` の DELETE は `RETURNING` した本数だけ `proposed_count` を減らすので、
@@ -3303,7 +3376,10 @@ export class PostgresMemoryStore implements MemoryStore {
    *   同じ行を消しにきても、後から来た DELETE は先の DELETE の確定後に行を見直すので、二重には数えない
    *   （`READ COMMITTED`）。
    * - 形式不正な id は、`deleteAcrossSpaces` と同じく「無い」として落とす（クエリを投げる前に）。
-   * - `content`/`digest`/`purged_at`・`memory_events`・`recalls` は書かない（監査イベントも積まない）。
+   * - [ADR 0512](../../../docs/decisions/0512-scrub-purged-index-band.md): このテナントの `recalls.index_band` の
+   *   `digestBand` のうち、purge 済みの行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ伏せる。
+   *   `recalls.query`・`explain` は書かない。
+   * - `content`/`digest`/`purged_at`・`memory_events` は書かない（監査イベントも積まない）。
    */
   async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
     assertWellFormedCtx(ctx);
@@ -3329,6 +3405,18 @@ export class PostgresMemoryStore implements MemoryStore {
             OR claim_key_predicate IS NOT NULL
           )
       `);
+      // ADR 0511: purgeMemory と同じ。減らす前に、対象のラベルの行を名前順に取る。
+      await tx.execute(sql`
+        SELECT l.id FROM labels l
+        WHERE l.tenant_id = ${ctx.tenantId}
+          AND l.id IN (
+            SELECT ml.label_id FROM memory_labels ml
+            WHERE ml.tenant_id = ${ctx.tenantId}
+              AND ml.memory_id = ANY(${sql.param(validIds)}::uuid[])
+          )
+        ORDER BY l.name COLLATE "C" ASC
+        FOR UPDATE OF l
+      `);
       await tx.execute(sql`
         WITH removed_labels AS (
           DELETE FROM memory_labels ml
@@ -3348,6 +3436,45 @@ export class PostgresMemoryStore implements MemoryStore {
         WHERE labels.tenant_id = ${ctx.tenantId}
           AND labels.id = counted.label_id
           AND labels.status = 'proposed'
+      `);
+      // ADR 0512: v1.0.x の purge は recalls.index_band を書き換えなかった。このテナントの
+      // digestBand から、渡された id のうち purge 済みの行のエントリだけを、その行の
+      // memories.digest（purge が書いたトゥームストーン）へ書き換える（ADR 0375 決定3 と同じ形。
+      // truncated は落とす）。既に同じ digest のエントリしか無い行は更新しない（べき等）。
+      await tx.execute(sql`
+        UPDATE recalls r
+        SET index_band = jsonb_set(
+          r.index_band,
+          '{digestBand}',
+          (
+            SELECT coalesce(jsonb_agg(
+              CASE
+                WHEN p.digest IS NOT NULL
+                THEN jsonb_build_object('memoryId', t.elem->'memoryId', 'digest', p.digest)
+                ELSE t.elem
+              END
+              ORDER BY t.ord
+            ), '[]'::jsonb)
+            FROM jsonb_array_elements(r.index_band->'digestBand') WITH ORDINALITY AS t(elem, ord)
+            LEFT JOIN (
+              SELECT id::text AS id, digest FROM memories
+              WHERE tenant_id = ${ctx.tenantId}
+                AND id = ANY(${sql.param(validIds)}::uuid[])
+                AND status = 'forgotten' AND purged_at IS NOT NULL
+            ) p ON p.id = t.elem->>'memoryId'
+          )
+        )
+        WHERE r.tenant_id = ${ctx.tenantId}
+          AND r.index_band ? 'digestBand'
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(r.index_band->'digestBand') AS e
+            JOIN memories m ON m.id::text = e->>'memoryId'
+            WHERE m.tenant_id = ${ctx.tenantId}
+              AND m.id = ANY(${sql.param(validIds)}::uuid[])
+              AND m.status = 'forgotten' AND m.purged_at IS NOT NULL
+              AND (e->>'digest' IS DISTINCT FROM m.digest OR e ? 'truncated')
+          )
       `);
     });
   }
@@ -3799,6 +3926,26 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       if (secondExisting.status !== "contested" || secondExisting.contested_with_id !== first.id) {
         throw new MemoryStatusConflictError(second.id, "contested", secondExisting.status);
+      }
+
+      // ADR 0515: 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ。ADR 0503 の負債の解消）。
+      // 対の相手を指すのは断らない（ここまでで両方 contested と確かめ済み）。別テナント・実在しない id は、下の UPDATE の切り分け（ADR 0439）に任せる。
+      for (const [field, side] of [
+        ["first", first],
+        ["second", second],
+      ] as const) {
+        const ref = side.supersededById;
+        if (ref === undefined || ref === first.id || ref === second.id) continue;
+        const forgotten = await tx.execute(sql`
+          SELECT 1 FROM memories
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${checkedRef("memory", ref)}::uuid
+            AND status = 'forgotten'
+        `);
+        if (forgotten.rows.length > 0) {
+          throw new RangeError(
+            `resolveContestedPair: ${field}.supersededById must not be a forgotten memory outside the pair`,
+          );
+        }
       }
 
       const updateSide = async (

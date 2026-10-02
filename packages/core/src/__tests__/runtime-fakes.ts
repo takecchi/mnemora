@@ -3847,10 +3847,11 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  *
  * **一致判定（Issue #951、PostgresLexicalStore に揃えた点・揃えていない点）**:
  *
- * `search` の一致判定は（`InMemoryLexicalStore` のようなトークン単位の完全一致ではなく）
- * 「クエリ語を、ASCII の連なりの前後に空白を入れてから小文字化した `content` に対して
- * 部分文字列として含むか」という、より粗い判定である
- * （`fake-lexical-store-query-cap.test.ts` の注記も参照）。**同じだと確認したこと**:
+ * `search` の一致判定は `InMemoryLexicalStore` と同じ語（token）の一致である（ADR 0513。以前は
+ * `content.includes(語)` の部分文字列一致で、query `a` が content `alpha` に当たった。ADR 0509 の割れ 1）。
+ * クエリは空白区切りの語を 1 単位（coverage の分母）とし、語の中の token（英数字境界で割る）が content の token の列に
+ * 隣接して現れたときに、その語が一致したと数える（Postgres の `websearch_to_tsquery('"..."')` のフレーズ）。
+ * **同じだと確認したこと**:
  * - 大文字・小文字を区別しない（`PostgresLexicalStore`/`to_tsvector('simple', …)` と同じ
  *   向き。以前はここに大文字小文字の区別があり、`PROJ-1234`/`proj-1234` を別語として
  *   扱っていた）。
@@ -3864,11 +3865,10 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  *   0件を返す——本物の Postgres でも同じく0件）。
  *
  * **揃えていない・確認していないこと**（`InMemoryLexicalStore` と共通の限界。同ファイルの
- * doc 参照）: クエリは Unicode の英数字境界ではなく**空白区切り**で語に割る
- * （`InMemoryLexicalStore` とは違う形）ため、`PROJ-1234` のようなハイフン入り識別子は
- * 1語のまま残り、`websearch_to_tsquery` のフレーズ演算子（隣接必須）と同じ効果を
- * たまたま部分文字列一致で得ている——これは意図した設計ではなく、たまたま同じ結果に
- * なっているだけである。語幹処理・`word`/`numword`/`hword` 等の細かいトークン化規則、
+ * doc 参照）: postgres の text search parser は `-12`・`+12` を符号付きの 1 token にし、`a.b`・メールアドレスを
+ * 1 token にし、ハイフンで結んだ語を結合形と部品の両方の token にする。ここは英数字境界で割るだけなので、
+ * content `proj 12` がクエリ `PROJ-12` に当たる・クエリ `12` が content `PROJ-12` に当たる（どちらも postgres は当たらない）。
+ * 語幹処理・`word`/`numword`/`hword` 等の細かいトークン化規則、
  * ギリシャ語の語末シグマのような locale 依存の小文字化規則は再現していない。
  *
  * `calls` / `shouldThrow` は `FakeEmbeddingProvider.shouldFail` と同じ形の診断・注入口——
@@ -3889,8 +3889,8 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  * 側の歯 `lexical-query-cap-values-match.test.ts` が、3ファイルのソースを読んで
  * 突き合わせる）。
  *
- * `search` が使う `query.split(/\s+/)`（空白区切り）の分割は
- * `InMemoryLexicalStore`（非文字・非数字の連なりで割る）とは違う形である。
+ * `search` の語の数え方は `InMemoryLexicalStore` と同じ（ADR 0513: 空白区切りの語を 1 単位とし、語の中の
+ * token は隣接を要る）。
  *
  * このファイルは `tsconfig.build.json` の `exclude`（`src/**\/__tests__/**`）に含まれ、
  * `@mnemora/core` の公開ビルド（`dist/`）には一切含まれない——ここでの export は
@@ -3944,22 +3944,59 @@ function dropNonAsciiRuns(text: string): string {
   return text.replace(/[^\x00-\x7f]+/g, " ");
 }
 
-function capFakeLexicalQueryTerms(rawTerms: string[]): Set<string> {
-  const truncated = rawTerms.map((term) =>
-    term.length > LEXICAL_QUERY_MAX_WORD_CHARS ? term.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS) : term,
-  );
-  const distinctInFirstSeenOrder: string[] = [];
-  const seen = new Set<string>();
-  for (const term of truncated) {
-    if (!seen.has(term)) {
-      seen.add(term);
-      distinctInFirstSeenOrder.push(term);
+/**
+ * ADR 0513: 本文を token の列にする（`InMemoryLexicalStore` の `tokenize` と同じ。ASCII の連なりの前後に
+ * 空白を入れ、小文字化し、Unicode の英数字境界で割る）。`includes` の部分文字列一致ではなく、
+ * Postgres（tsvector）と同じ「語（token）の一致」を見るために使う。
+ */
+function fakeLexicalTokenize(text: string): string[] {
+  return insertAsciiBoundaries(text)
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0);
+}
+
+/**
+ * ADR 0513: クエリを空白区切りの語に割り、語ごとの token の列（フレーズ）の配列にする
+ * （`InMemoryLexicalStore` の `queryPhrases` と同じ。doc はそちら）。語の上限は語に当たる
+ * （1 語 {@link LEXICAL_QUERY_MAX_WORD_CHARS} 文字、大文字小文字を区別しない異なる語 {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個）。
+ * token が取れない語は捨て、同じ token 列は 1 つにまとめる（Postgres の空の tsquery の除外と `DISTINCT`）。
+ * 呼び出し側が `dropNonAsciiRuns(capFakeLexicalQueryTotalChars(query))` を渡すこと。
+ */
+function fakeLexicalQueryPhrases(asciiOnlyQuery: string): string[][] {
+  const rawWords = asciiOnlyQuery.split(/\s+/).filter((w) => w.length > 0);
+  const seenLowercased = new Set<string>();
+  const words: string[] = [];
+  for (const raw of rawWords) {
+    const word =
+      raw.length > LEXICAL_QUERY_MAX_WORD_CHARS ? raw.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS) : raw;
+    const key = word.toLowerCase();
+    if (!seenLowercased.has(key)) {
+      seenLowercased.add(key);
+      words.push(word);
     }
   }
-  if (distinctInFirstSeenOrder.length <= LEXICAL_QUERY_MAX_DISTINCT_WORDS) {
-    return seen;
+  const seenPhrases = new Set<string>();
+  const phrases: string[][] = [];
+  for (const word of words.slice(0, LEXICAL_QUERY_MAX_DISTINCT_WORDS)) {
+    const phrase = fakeLexicalTokenize(word);
+    if (phrase.length === 0) continue;
+    const key = phrase.join(" ");
+    if (!seenPhrases.has(key)) {
+      seenPhrases.add(key);
+      phrases.push(phrase);
+    }
   }
-  return new Set(distinctInFirstSeenOrder.slice(0, LEXICAL_QUERY_MAX_DISTINCT_WORDS));
+  return phrases;
+}
+
+/** `phrase` が `tokens` の中に隣接してこの順で現れる回数（`<->` のフレーズ一致）。 */
+function countFakeLexicalPhrase(tokens: string[], phrase: string[]): number {
+  let count = 0;
+  for (let i = 0; i + phrase.length <= tokens.length; i++) {
+    if (phrase.every((p, j) => tokens[i + j] === p)) count += 1;
+  }
+  return count;
 }
 
 export class FakeLexicalStore implements LexicalStore {
@@ -4016,12 +4053,7 @@ export class FakeLexicalStore implements LexicalStore {
     // 空白に落としてから分割する。`PostgresLexicalStore`/`to_tsvector('simple', …)` と
     // 同じく大文字小文字を区別しないため、ここで小文字化する（`FakeLexicalStore` の
     // doc 参照）。
-    const termSet = capFakeLexicalQueryTerms(
-      dropNonAsciiRuns(capFakeLexicalQueryTotalChars(query))
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((t) => t.length > 0),
-    );
+    const phrases = fakeLexicalQueryPhrases(dropNonAsciiRuns(capFakeLexicalQueryTotalChars(query)));
     const hits: (LexicalHit & { recordedAt: Date })[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== opts.filter.tenantId || memory.tenantId !== ctx.tenantId) continue;
@@ -4084,19 +4116,17 @@ export class FakeLexicalStore implements LexicalStore {
       }
       // 🔴 契約（ADR 0092）: クエリの語彙が0個なら何も返さない。1個以上一致すれば返す
       // （OR 意味論）——AND（すべて含む候補しか返さない）ではない。
-      if (termSet.size === 0) continue;
-      // Issue #951: `mnemora_lexical_normalize` と同じ順序（ASCII の連なりの前後に
-      // 空白を入れてから小文字化する）で `content` を正規化してから部分文字列一致を
-      // 見る（`FakeLexicalStore` の doc 参照）。
-      const normalizedContent = insertAsciiBoundaries(memory.content).toLowerCase();
-      const matchedTerms = [...termSet].filter((t) => normalizedContent.includes(t));
-      if (matchedTerms.length === 0) continue;
+      if (phrases.length === 0) continue;
+      // ADR 0513: `includes` の部分文字列一致ではなく、Postgres（tsvector）と同じ語（token）の一致。
+      // `mnemora_lexical_normalize` と同じ順序（ASCII の連なりの前後に空白を入れてから小文字化）で割った
+      // token の列に、クエリの語（空白区切り）の token 列が隣接して現れるかを見る。
+      const contentTokens = fakeLexicalTokenize(memory.content);
+      const counts = phrases.map((p) => countFakeLexicalPhrase(contentTokens, p));
+      const matchedCount = counts.filter((n) => n > 0).length;
+      if (matchedCount === 0) continue;
 
-      const coverage = matchedTerms.length / termSet.size;
-      const rank = matchedTerms.reduce(
-        (sum, t) => sum + (normalizedContent.split(t).length - 1),
-        0,
-      );
+      const coverage = matchedCount / phrases.length;
+      const rank = counts.reduce((sum, n) => sum + n, 0);
       hits.push({ memoryId: memory.id, coverage, rank, recordedAt: memory.recordedAt });
     }
     // `PostgresLexicalStore.search`（`interfaces/lexical-store.ts` の `LexicalStore.search`
