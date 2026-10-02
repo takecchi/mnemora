@@ -145,3 +145,36 @@ describe("heuristicTokenCounter", () => {
     expect(ratio).toBeLessThan(0.4);
   });
 });
+
+describe("heuristicTokenCounter の境界（ADR 0483、今の振る舞い）", () => {
+  const tokens = (text: string) => heuristicTokenCounter.count(text).tokens;
+
+  it("孤立サロゲートは1コードポイントの非CJKとして数える（例外にしない）", () => {
+    expect(tokens("\ud800")).toBe(1);
+    expect(tokens("\udc00")).toBe(1);
+    expect(tokens("a\ud800b")).toBe(1);
+  });
+
+  it("結合文字・ZWJ は1コードポイントずつ数える（見た目の1文字ではない）", () => {
+    // "e" + U+0301（2コードポイント）→ ceil(10/20) = 1。
+    expect(tokens("é")).toBe(1);
+    // 👨‍👩‍👧 = 5 コードポイント（絵文字3 + ZWJ 2）→ ceil(25/20) = 2。
+    expect(tokens("\u{1F468}‍\u{1F469}‍\u{1F467}")).toBe(2);
+  });
+
+  it("CJK は 0.9、範囲の端: U+4E00 は CJK、U+D7FF までのハングルも CJK、U+D800 以降は非CJK", () => {
+    expect(tokens("一")).toBe(1);
+    expect(tokens("一".repeat(10))).toBe(9);
+    expect(tokens("퟿".repeat(10))).toBe(9);
+    expect(tokens("a".repeat(10))).toBe(3);
+  });
+
+  it("サロゲートペアの漢字（SIP）は1コードポイントの CJK として数える（コード単位ではない）", () => {
+    expect(tokens("\u{20000}".repeat(10))).toBe(9);
+  });
+
+  it("ごく長い文字列も整数で数える（整数比なので丸め差が出ない）", () => {
+    expect(tokens("a".repeat(1_000_000))).toBe(250_000);
+    expect(Number.isInteger(tokens("あ".repeat(1_000_001)))).toBe(true);
+  });
+});

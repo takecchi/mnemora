@@ -93,13 +93,14 @@ export class InMemoryRelationStore implements RelationStore {
   }
 
   private relatedOf(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Relation[] {
+    // ADR 0488: `PostgresRelationStore` と同じく、`kind` が偽の値（`undefined`・`""`・`null`・`0`）なら絞り込まない。
     return (
       this.relations
         .filter(
           (r) =>
             r.tenantId === ctx.tenantId &&
             r.fromMemoryId === memoryId &&
-            (kind === undefined || r.kind === kind),
+            (!kind || r.kind === kind),
         )
         // Issue #1108: 保存している Date をそのまま返さない（呼び手が書き換えても行は変わらない）。
         .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: new Date(r.createdAt) }))

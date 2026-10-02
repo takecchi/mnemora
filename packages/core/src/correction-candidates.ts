@@ -40,6 +40,9 @@ export interface FindCorrectionCandidatesInput {
    * 自己除外に使う——`recall()` は「訂正の発話から作られたばかりの Memory」自身を
    * 候補として返しうるため、それを候補集合から落としたい呼び出し側のための欄。
    *
+   * 大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を小文字で返すので、大文字で
+   * 渡した id でも除外される）。
+   *
    * ⚠ **順位（`CorrectionCandidate.recallRank`）は詰め直さない。**除外は
    * `recall()` が返した並びに対する後処理であり、順位という「recall の何位だったか」
    * という事実そのものは変えない（{@link CorrectionCandidate.recallRank} の doc参照）。
@@ -105,9 +108,12 @@ export interface FindCorrectionCandidatesResult {
   /**
    * `"candidates"` — `candidates` が1件以上。
    * `"no_candidates"` — `candidates` が0件（`recall()` が0件を返した、または
-   * `excludeMemoryIds` が全件を落とした）。**「探していない」という第3の状態は無い**
-   * ——この口は必ず `recall()` を1回呼ぶ（`Runtime.findCorrectionCandidates` の
-   * doc コメント参照）。
+   * `excludeMemoryIds` が全件を落とした）。**`outcome` に「探していない」という第3の値は無い**
+   * ——この口は必ず `recall()` を1回呼ぶ。ただし `text` が `undefined`（JavaScript や `as` で
+   * 型を外したとき。`""` は `recall()` の検証で例外になる）だと、`recall()` は例外にならず、
+   * 埋め込みを呼ばずに候補の生成を飛ばして `no_candidates` を返す。**「探していない」は `outcome`
+   * ではなく `omitted` に出る**（`{ kind: "stage_skipped", stage: "candidate_generation",
+   * reason: "empty_query_content" }`）。`Runtime.findCorrectionCandidates` の doc コメントも参照。
    */
   outcome: "candidates" | "no_candidates";
   /** `recall()` が返した件数（`excludeMemoryIds` の除外・`limit` の適用より前）。 */

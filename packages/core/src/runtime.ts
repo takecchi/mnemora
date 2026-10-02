@@ -352,6 +352,13 @@ export interface RuntimeDeps {
    * フックが例外を投げた場合、`processEmbedJob` は今までどおり
    * `embeddingStatus` を `'failed'` にしてから再送出する——このフックのために
    * 新しい throw の経路を既定側へ作らない。
+   *
+   * ⚠ ADR 0489（今の振る舞いを書くだけ）: **戻り値は検査も変換もしない。**空文字・NUL・孤立サロゲート・
+   * 巨大な文字列、型の外の値（`undefined`・数・オブジェクト・`null`）も、そのまま `embed()` に渡る。
+   * 受け入れるかどうかは provider が決める——落ちれば `embeddingStatus: 'failed'`（job も failed）、
+   * 受け入れれば `'ready'`。`OpenAIEmbeddingProvider` は空文字を含む呼び出しを API の 400 で落とす
+   * （packages/openai/README.md）。Runtime が先回りして断る経路は無い（新しく断る入力は足していない）。
+   * `reembed()` で `failed` を戻した後の `tick` では、このフックがもう一度呼ばれる。
    */
   embeddingInput?: ((memory: Memory) => string) | undefined;
 }
@@ -2763,9 +2770,14 @@ export interface Runtime {
    * ようにするため（北極星の問い3）。1位を自己除外で落としても、次に残る候補の
    * `recallRank` は「2」のままである。
    *
-   * ⛔ **この口には「探していない」状態が無い。** `findCorrectionCandidates` を呼んだら
+   * ⛔ **`outcome` に「探していない」という値は無い。** `findCorrectionCandidates` を呼んだら
    * 必ず `recall()` を1回呼ぶ——`limit` の検証で早期に `RangeError` を投げる場合を除き、
-   * 呼び出しが成立した以上、探索そのものをスキップする経路は無い。「見つからなかった」は
+   * `recall()` を呼ばない経路は無い。⚠ ただし `input.text` が `undefined`（JavaScript や `as` で
+   * 型を外したとき。型の上は必須。`""` は `recall()` の検証で例外になる）だと、`recall()` は例外に
+   * ならず、**埋め込みを呼ばずに候補の生成を飛ばして** `no_candidates` を返す（候補の生成の段が
+   * 飛ばされたことは `omitted` の `{ kind: "stage_skipped", stage: "candidate_generation",
+   * reason: "empty_query_content" }` に出る）。「探していない」は `outcome` ではなく `omitted` で
+   * 読む。「見つからなかった」は
    * `FindCorrectionCandidatesResult.outcome: "no_candidates"` と、`recall()` から
    * そのまま運ばれる `omitted`（「候補はあったが除外条件で落ちた」等の内訳）の
    * **両方**で説明される——`ConsolidateOutcome`/`ReflectOutcome` と同じ「無い」の
@@ -6326,6 +6338,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
     }
     const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
+    // 除外の集合は `recall()` を呼ぶ前に作る——`excludeMemoryIds` が反復できない値だと
+    // `new Set` が TypeError を投げるが、後ろで作ると recall の記録を1件書いた後に落ちていた
+    // （穴探し56巡目）。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
+    // 小文字で返す。`forget` と同じ扱い）。大文字で渡した自己除外が黙って効かないのを防ぐ。
+    const excludeSet = new Set<unknown>();
+    for (const id of new Set(input.excludeMemoryIds ?? [])) {
+      excludeSet.add(typeof id === "string" ? id.toLowerCase() : id);
+    }
 
     // `text`/`activityCounting` 以外のフィールドを一切渡さない——閾値・limit・
     // channels・overFetchFactor はすべて recall() の既定に委ねる（interface 側の
@@ -6341,13 +6361,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts,
     );
 
-    const excludeSet = new Set(input.excludeMemoryIds ?? []);
     // recallRank は「recall() が返した並びでの、1始まりの順位」——除外の前に固定する。
     const ranked = recallResult.memories.map((memory, index) => ({
       memory,
       recallRank: index + 1,
     }));
-    const remaining = ranked.filter(({ memory }) => !excludeSet.has(memory.memoryId));
+    const remaining = ranked.filter(({ memory }) => !excludeSet.has(memory.memoryId.toLowerCase()));
     const excludedCount = ranked.length - remaining.length;
 
     const candidates: CorrectionCandidate[] = remaining
