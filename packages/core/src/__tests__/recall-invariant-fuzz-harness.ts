@@ -55,6 +55,8 @@ import {
  *   膨らむ）ので、膨らみはここで捕まえる。
  * - I12 `filtered`（`outside_scope`）の `archived`・`superseded`・`forgotten` の件数は、その status の
  *   記憶の件数に等しい（`docs/recall.md` §5 の表の甲群）。
+ * - I13 `findCorrectionCandidates` の `excludeMemoryIds` は、大文字小文字を無視して除外する（ADR 0485、`fcc` 操作。ADR 0494）。
+ * - I14 群の同伴の数は、返った owner の数 × `relationMaxCount` 以下（ADR 0381・0396、`relations` profile。ADR 0494）。
  *
  * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で操作列を最小化し、シードと最小の
  * 操作列を出力に出す。
@@ -270,6 +272,10 @@ export interface Violation {
 
 export interface RunOutcome {
   violations: Violation[];
+  /** ADR 0494: 変形した引数の形の数え上げ（`操作:変形:狙った記憶の状態` → 回数）。実際に何を渡したかを報告に載せる。 */
+  shapes: Record<string, number>;
+  /** 終わった時点の、作った記憶の状態（作成順。`status` と、purge 済みなら `+purged`）。 */
+  finalStates: string[];
   trace: string[];
   /**
    * recall ごとの、backend に依らない形の結果（`RunOptions.snapshot` を立てたときだけ）。
@@ -403,19 +409,34 @@ export async function runOps(
     return value;
   };
   const nth = (i: number) => (ids.length > 0 ? ids[i % ids.length] : undefined);
-  /** ADR 0494: 消した（forget 済み）記憶の id。無ければ undefined。 */
+  /**
+   * ADR 0494: 消した記憶の id。forget 済み（`purgedAt` なし）と purge 済み（`purgedAt` あり。行は墓標として残る）を
+   * 別々に集め、`i` の偶奇で交互に狙う（片方が無ければ、もう片方）。どちらも無ければ undefined。
+   */
   const deadNth = async (i: number): Promise<MemoryId | undefined> => {
-    const dead: MemoryId[] = [];
+    const forgotten: MemoryId[] = [];
+    const purged: MemoryId[] = [];
     for (const id of ids) {
       const m = await stores.memoryStore.get(ctx, id);
-      if (m?.status === "forgotten") dead.push(id);
+      if (m?.status !== "forgotten") continue;
+      (m.purgedAt ? purged : forgotten).push(id);
     }
-    return dead.length > 0 ? dead[i % dead.length] : undefined;
+    const pool =
+      (i & 1) === 1 && purged.length > 0 ? purged : forgotten.length > 0 ? forgotten : purged;
+    return pool.length > 0 ? pool[Math.floor(i / 2) % pool.length] : undefined;
   };
   /** ADR 0494: 操作に渡す id を変形する（`upper`: 大文字、`dead`: 消した記憶を狙う。無ければ元の id）。 */
-  const target = async (i: number, mu?: ArgMutation): Promise<MemoryId | undefined> => {
-    if (mu === "dead") return (await deadNth(i)) ?? nth(i);
-    const id = nth(i);
+  const shapes: Record<string, number> = {};
+  const countShape = async (op: string, id: MemoryId | undefined, mu?: ArgMutation) => {
+    if (mu === undefined || id === undefined) return;
+    const m = await stores.memoryStore.get(ctx, id.toLowerCase() as MemoryId);
+    const state = m === null || m === undefined ? "missing" : m.purgedAt ? "purged" : m.status;
+    const key = `${op}:${mu}:${state}`;
+    shapes[key] = (shapes[key] ?? 0) + 1;
+  };
+  const target = async (op: string, i: number, mu?: ArgMutation): Promise<MemoryId | undefined> => {
+    const id = mu === "dead" ? ((await deadNth(i)) ?? nth(i)) : nth(i);
+    await countShape(op, id, mu);
     return id !== undefined && mu === "upper" ? (id.toUpperCase() as MemoryId) : id;
   };
   /** `relations` profile で作った群のメンバー（`resolveGroup` が使う）。 */
@@ -430,6 +451,29 @@ export async function runOps(
     const v = (inv: string, detail: string) => violations.push({ inv, detail, op: oi });
     const returned = new Set(r.memories.map((m) => m.memoryId));
     if (returned.size !== r.memories.length) v("I2-unique", JSON.stringify([...returned]));
+    // I14（ADR 0494）: 群の同伴（`contestedWithId` を持たない `contested` から辿った `mandatory_companion`）は、
+    // 群ごとに `relationMaxCount` 件まで（`RecallQuery.relationMaxCount`）。単位は丸ごと返る（owner を含む）ので、
+    // 返った owner（同伴でなく、`contested` で `contestedWithId` なし）の数 × 上限が、同伴の総数の上限になる。
+    if (q.relationMaxCount !== undefined && q.relationMaxCount > 0) {
+      const rows = new Map(
+        (await stores.memoryStore.getMany(ctx, [...returned])).map((m) => [m.id, m]),
+      );
+      const isGroupMember = (id: MemoryId | undefined) => {
+        const m = id === undefined ? undefined : rows.get(id);
+        return m?.status === "contested" && (m.contestedWithId ?? null) === null;
+      };
+      const owners = r.memories.filter(
+        (m) => m.retrievedVia !== "mandatory_companion" && isGroupMember(m.memoryId),
+      ).length;
+      const companions = r.memories.filter(
+        (m) => m.retrievedVia === "mandatory_companion" && isGroupMember(m.companionOf),
+      ).length;
+      if (companions > owners * q.relationMaxCount)
+        v(
+          "I14-relationMaxCount",
+          `companions ${companions} > owners ${owners} × ${q.relationMaxCount}`,
+        );
+    }
     let returnedInScope = 0;
     for (const rm of r.memories) {
       const m = await stores.memoryStore.get(ctx, rm.memoryId);
@@ -568,6 +612,10 @@ export async function runOps(
         halfLifeHours: op.hl,
       }),
       embeddingStatus: op.ready ? "ready" : "pending",
+      // ADR 0494: 群の同伴の並び・切り捨ては `validFrom` の新しい順→id の順。`validFrom` が全員 null だと id で決まり、
+      // id が作成順の `mem-N`（Fake・InMemory）か乱数の uuid（Postgres）かで並びが割れる（約束の外）ので、
+      // `relations` の実行では作成ごとに別の `validFrom` を付けて、id の比較に落ちないようにする。
+      ...(runOpts.relations ? { validFrom: at } : {}),
     };
     const m = await stores.memoryStore.createMemory(ctx, n);
     alias.set(m.id, `c${ids.length}`);
@@ -663,10 +711,12 @@ export async function runOps(
               .filter((_, i) => (op.pick >> i) & 1)
               .map((m) => m.memoryId);
             if (op.mu === "upper") {
+              await countShape("usage", used[0], "upper");
               for (let u = 0; u < used.length; u++) used[u] = used[u]!.toUpperCase() as MemoryId;
             } else if (op.mu === "dead") {
               const dead = await deadNth(op.pick);
               if (dead !== undefined) used.push(dead);
+              await countShape("usage", dead, "dead");
             }
             if (used.length > 0) {
               await rt.observe(ctx, {
@@ -679,23 +729,23 @@ export async function runOps(
           break;
         }
         case "forget": {
-          const id = await target(op.i, op.mu);
+          const id = await target(op.k, op.i, op.mu);
           if (id) await rt.forget(ctx, { memoryId: id });
           break;
         }
         case "purge": {
-          const id = await target(op.i, op.mu);
+          const id = await target(op.k, op.i, op.mu);
           if (id) await rt.purge(ctx, { memoryId: id });
           break;
         }
         case "restore": {
-          const id = await target(op.i, op.mu);
+          const id = await target(op.k, op.i, op.mu);
           if (id) await rt.restoreArchived(ctx, { memoryId: id });
           break;
         }
         case "mark": {
-          const a = await target(op.i, op.mu);
-          const b = await target(op.j, op.mu);
+          const a = await target(op.k, op.i, op.mu);
+          const b = await target(op.k, op.j, op.mu);
           if (a && b && a !== b) await rt.markContested(ctx, a, b);
           break;
         }
@@ -740,8 +790,18 @@ export async function runOps(
           break;
         }
         case "resolve": {
-          const a = await target(op.i, op.mu);
-          if (a) {
+          const a = await target(op.k, op.i, op.mu);
+          if (a && op.mu === "dead") {
+            // 消した記憶を、対として解決しようとする（`contested` でないので、何も起きないはず）。
+            const other = nth(op.i + 1);
+            if (other && other !== a)
+              await rt.resolveContested(
+                ctx,
+                a,
+                other,
+                op.sup ? { kind: "supersede", winnerId: a } : { kind: "both_active" },
+              );
+          } else if (a) {
             const m = await stores.memoryStore.get(ctx, a);
             if (m?.status === "contested" && m.contestedWithId) {
               await rt.resolveContested(
@@ -755,8 +815,8 @@ export async function runOps(
           break;
         }
         case "consolidate": {
-          const a = await target(op.i, op.mu);
-          const b = await target(op.j, op.mu);
+          const a = await target(op.k, op.i, op.mu);
+          const b = await target(op.k, op.j, op.mu);
           if (a && b && a !== b) {
             const res = await rt.consolidate(ctx, { target: { memoryIds: [a, b] } });
             if (res.consolidatedMemoryId) allIds.push(res.consolidatedMemoryId);
@@ -764,7 +824,7 @@ export async function runOps(
           break;
         }
         case "fcc": {
-          const id = await target(op.i, op.mu);
+          const id = await target(op.k, op.i, op.mu);
           if (id) {
             const res = await rt.findCorrectionCandidates(ctx, {
               text: "a b",
@@ -798,7 +858,12 @@ export async function runOps(
     }
     now += step();
   }
-  return { violations, trace, snapshots };
+  const finalStates: string[] = [];
+  for (const id of allIds) {
+    const m = await stores.memoryStore.get(ctx, id);
+    finalStates.push(m ? `${m.status}${m.purgedAt ? "+purged" : ""}` : "missing");
+  }
+  return { violations, shapes, finalStates, trace, snapshots };
 }
 
 /** 違反の種類 `inv` が残る限り、操作を1つずつ抜いて短くする。 */
