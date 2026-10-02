@@ -64,7 +64,14 @@
 
 ## 赤→緑・変異【実測。mock のテストはファイルを名指しして走らせた】
 
-（担い手の報告に表で書き、PR 本文にも載せる。ここには数字を写さない。）
+対象は `packages/bullmq/src/__tests__/tick-driver.option-passthrough.test.ts`（80本。うち ADR 0548 の分は新しい `describe` と、既存の「陽性対照」の期待の更新）。
+
+- **直す前**（テストだけを先に commit。`add42804`）: 80本中31本が赤、49本が緑。赤は新しい `lockDuration`・`completedJobsToKeep`・既定の `removeOnComplete` の歯と、更新した「陽性対照」の期待（`upsertJobScheduler` の第3引数に `opts` が無い）。緑の49本は、既存の検査（`everyMs`・`jobName`・`concurrency`）と、新しい欄を渡さない側の対照。
+- **直した後**: 80本とも緑。あわせて `tick-driver.test.ts`・`tick-driver.queue-error.test.ts`・`tick-driver.failed.test.ts`・`tick-driver.lifecycle.test.ts`・`tick-driver.stop-cleanup.test.ts` を名指しで走らせ、計108本が緑。
+- **変異**（`tick-driver.ts` を `cp` で退避し、1つずつ入れて名指しで走らせた。赤の本数を括弧に）。14本すべて赤。戻すと80本緑:
+  - 既定の count を 1000→999（3）／`lockDuration` を Worker に渡さない（2）／`lockDuration` の `typeof` 検査を外す（4）／`lockDuration` の下限を `<1`→`<0`（3）／整数検査を外す（2）／`MAX_SAFE_INTEGER` の上限検査を外す（1）／`lockDuration` の `RangeError` を `Error` に（8）
+  - `completedJobsToKeep` の下限を `<0`→`<=0`（`0` を断つ。1）／上書きを無視して常に既定（2）／`removeOnFail` も template に入れる（5）／`typeof` 検査を外す（4）／整数検査を外す（2）／`removeOnComplete` を template から外す（5）
+  - 検査の順序を入れ替える（`lockDuration` を `concurrency` の前に。1）
 
 ## 測っていないこと
 
