@@ -32,8 +32,9 @@ import {
  * - `Runtime.forget`・`restoreArchived`・`purge`・`markContested` は、`getMany` の戻りを
  *   渡された id でそのまま引いていたので、`@mnemora/postgres` では記憶が在るのに `not_found` を返していた。
  *   直した後は、store が返した id と渡された id を小文字にして突き合わせる。store へ渡す id は変えない。
- * - testkit の fixture の id は大文字小文字を区別する（`get("MEM-1")` は `null`）。⟹ fixture では大文字は
- *   今どおり `not_found` のまま（やりすぎの歯）。store ごとの差は store の `get` の差であり、Runtime はそれに従う。
+ * - testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、`get("MEM-1")` は `null`、
+ *   大文字は `not_found` だった。fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
+ *   store ごとの差は store の `get` の差であり、Runtime はそれに従う。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -211,7 +212,7 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore,
-        caseInsensitive: false,
+        caseInsensitive: true, // ADR 0521: fixture も大文字小文字を区別しない（以前は false）
         runtime: createRuntime({
           ...shared,
           memoryStore,
