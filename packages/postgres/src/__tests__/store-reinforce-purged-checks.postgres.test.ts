@@ -95,14 +95,6 @@ const shape = (m: Memory) => ({
   decayFloorAt: m.decayFloorAt.getTime(),
 });
 
-async function caught(run: () => Promise<unknown>): Promise<unknown> {
-  let thrown: unknown;
-  await run().catch((e: unknown) => {
-    thrown = e;
-  });
-  return thrown;
-}
-
 for (const [kitName, makeKit] of KITS) {
   describe(`${kitName}: purge 済みの記憶への reinforce（ADR 0519）`, () => {
     it("reinforce は例外を投げず、lastReinforcedAt と decayFloorAt を書き換える。status・purgedAt・content・digest・events は動かない", async () => {
