@@ -13,6 +13,8 @@ export interface CreateBullmqTickDriverOptions {
     tick: TickOptions;
     everyMs: number;
     concurrency?: number | undefined;
+    lockDuration?: number | undefined;
+    completedJobsToKeep?: number | undefined;
     jobName?: string | undefined;
     onTickResult?: ((result: TickResult) => void) | undefined;
     onTickError?: ((error: unknown) => void) | undefined;

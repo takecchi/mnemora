@@ -79,14 +79,16 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * `queueName` と同じ `jobName`（既定 `"mnemora-tick"`）を使うと、scheduler は1つに上書きされ（`everyMs` は最後に
  * `start()` した driver の値）、1回の発火はどれか1つのテナントの tick にしかならない。
  *
- * ## 完了したジョブ・失敗したジョブは Redis に残り続ける
- *
- * この driver は Worker にもジョブにも `removeOnComplete`・`removeOnFail` を指定していない。BullMQ 6.3.8 は、
- * どちらも指定が無いと完了したジョブも失敗したジョブも全部残す（`redis-queue-backend.js` の `getKeepJobs` が
- * `{ count: -1 }` を返す）。⟹ `everyMs` ごとに1件ずつ、`TickResult` を戻り値に持った完了ジョブが溜まる。
- * driver に保持を設定する口は無い。同じ `queueName` の `Queue` を自分で作り、`queue.clean(grace, limit, type)`
- * を定期的に呼んで掃除する（README「完了したジョブ・失敗したジョブは Redis に残り続ける」）。
- * 保持の既定値を driver に入れるかどうかは決まっていない。
+ * ## 完了したジョブは直近 1000 件だけ残る（失敗したジョブは全部残る）
+
+ADR 0548: この driver は繰り返しジョブの template（`upsertJobScheduler` の第3引数）に `removeOnComplete: { count: 1000 }`
+を既定で入れる。完了したジョブは新しい順に 1000 件だけ Redis に残り、それより古いものは BullMQ が消す
+（`completedJobsToKeep` で件数を変えられる）。以前（ADR 0449 まで）は指定が無く、完了したジョブも全部残った
+（`everyMs` ごとに1件ずつ溜まった）。
+**`removeOnFail` は指定していない。** BullMQ 6.3.8 は指定が無いと失敗したジョブを全部残す
+（`redis-queue-backend.js` の `getKeepJobs` が `{ count: -1 }` を返す）。失敗は調べる材料なので残し、消す口は足していない。
+溜まるのが気になるなら、同じ `queueName` の `Queue` を自分で作り、`queue.clean(grace, limit, "failed")` を定期的に呼ぶ
+（README「完了したジョブは直近 1000 件だけ残る」）。
  */
 export interface CreateBullmqTickDriverOptions {
   /**
@@ -126,6 +128,27 @@ export interface CreateBullmqTickDriverOptions {
    * 正の整数でなければ構築時に投げる（ADR 0525: 数でなければ `TypeError`、小数・`NaN`・`1` 未満なら `RangeError`）。
    */
   concurrency?: number | undefined;
+  /**
+   * Worker が処理中のジョブの lock の期限（ミリ秒）。BullMQ の `WorkerOptions.lockDuration` にそのまま渡す。
+   * 省略（`undefined`）なら Worker に渡さず、BullMQ の既定（30000 ms。bullmq 6.3.8）になる。
+   *
+   * ADR 0548: **正の整数（`1` 以上、`Number.MAX_SAFE_INTEGER` 以下）でなければ構築時に投げる**（ADR 0525: 数でなければ `TypeError`、
+   * 小数・`NaN`・`Infinity`・`1` 未満・上限超なら `RangeError`。`Queue`・`Worker` は作らない）。
+   * `runtime.tick()` がイベントループを長く塞ぐ、または 1 回の tick が 30 秒より長くかかる環境で、lock の期限切れ
+   * （stalled）による同じ tick の再実行を減らすために長くする。BullMQ は lock をこの値の半分の間隔で延ばす。
+   * 長くしすぎると、プロセスが落ちたときに別の Worker が引き継ぐまでの時間が伸びる。
+   * ⚠ 上限（`Number.MAX_SAFE_INTEGER`）を超える値を断るのは `everyMs` に合わせた安全側の線で、Redis に渡して測った境目ではない。
+   */
+  lockDuration?: number | undefined;
+  /**
+   * 完了したジョブを Redis に残す件数（新しい順）。既定 `1000`。BullMQ の `removeOnComplete: { count }` として、
+   * 繰り返しジョブの template に入る。ADR 0548: 以前は指定が無く、完了したジョブが全部残った。
+   *
+   * `0` 以上の整数でなければ構築時に投げる（ADR 0525: 数でなければ `TypeError`、小数・`NaN`・`Infinity`・負・
+   * `Number.MAX_SAFE_INTEGER` 超なら `RangeError`）。`0` は完了したらすぐ消す。以前の「全部残す」に近づけるなら
+   * `Number.MAX_SAFE_INTEGER` を渡す。失敗したジョブ（`removeOnFail`）は、この欄では変わらない（全部残る）。
+   */
+  completedJobsToKeep?: number | undefined;
   /**
    * 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。
    *
@@ -175,7 +198,7 @@ export interface CreateBullmqTickDriverOptions {
    * ⚠ **lock の期限切れ（stalled）で、1回の tick に `onTickResult` の後で `onTickError` が届く**
    * 【実測】redis-server 7.4.7・bullmq 6.3.8（ADR 0449）: 2つの OS プロセスの一方の `tick()` がイベントループを45秒塞ぐと、もう一方の Worker が約60秒後に
    * 2本目の tick を走らせ、塞いでいた1本目は `onTickResult` の後に `onTickError` を0.1秒以内に2回（`Missing lock ... moveToFinished`）鳴らした。
-   * lock（`lockDuration`、bullmq の既定 30000 ms。この driver からは設定できない）が切れると、stalled checker が
+   * lock（`lockDuration`、bullmq の既定 30000 ms。ADR 0548 以降は `CreateBullmqTickDriverOptions.lockDuration` で変えられる）が切れると、stalled checker が
    * ジョブを戻して別の Worker が2本目の tick を走らせる。outbox の CAS でジョブは二重に処理されず、データは壊れない。
    * 遅れて終わった1本目は `onTickResult` を呼んだ後、`moveToCompleted` が `Missing lock` で失敗し、`error` 経由で
    * `onTickError` に届く。詳しくは README の「lock の期限切れ（stalled）」。
@@ -210,6 +233,8 @@ export interface BullmqTickDriver {
 }
 
 const DEFAULT_JOB_NAME = "mnemora-tick";
+/** ADR 0548: 完了したジョブを残す件数の既定。 */
+const DEFAULT_COMPLETED_JOBS_TO_KEEP = 1000;
 
 /**
  * `concurrency` の入力を検証して既定値を補う純関数（Redis 接続を持たない——
@@ -264,10 +289,48 @@ function resolveJobName(jobName: unknown): string {
   return jobName;
 }
 
+/** `lockDuration` の入力を検証する（ADR 0548）。省略（`undefined`）は BullMQ の既定に任せる。渡すなら `1` 以上 `MAX_SAFE_INTEGER` 以下の整数。 */
+function resolveLockDuration(lockDuration: unknown): number | undefined {
+  if (lockDuration === undefined) {
+    return undefined;
+  }
+  const message = `createBullmqTickDriver: lockDuration must be a positive integer (milliseconds), got ${String(lockDuration)}`;
+  // ADR 0525: 数でなければ TypeError、数として不正（小数・非有限・`1` 未満・上限超）は RangeError。message は同じ。
+  if (typeof lockDuration !== "number") {
+    throw new TypeError(message);
+  }
+  if (!Number.isInteger(lockDuration) || lockDuration < 1 || lockDuration > Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(message);
+  }
+  return lockDuration;
+}
+
+/** `completedJobsToKeep` の入力を検証して既定値を補う（ADR 0548）。省略（`undefined`）は既定、渡すなら `0` 以上の整数。 */
+function resolveCompletedJobsToKeep(completedJobsToKeep: unknown): number {
+  if (completedJobsToKeep === undefined) {
+    return DEFAULT_COMPLETED_JOBS_TO_KEEP;
+  }
+  const message = `createBullmqTickDriver: completedJobsToKeep must be a non-negative integer, got ${String(completedJobsToKeep)}`;
+  // ADR 0525: 数でなければ TypeError、数として不正（小数・非有限・負・上限超）は RangeError。message は同じ。
+  if (typeof completedJobsToKeep !== "number") {
+    throw new TypeError(message);
+  }
+  if (
+    !Number.isInteger(completedJobsToKeep) ||
+    completedJobsToKeep < 0 ||
+    completedJobsToKeep > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new RangeError(message);
+  }
+  return completedJobsToKeep;
+}
+
 export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): BullmqTickDriver {
   assertEveryMs(opts.everyMs);
   const jobName = resolveJobName(opts.jobName);
   const concurrency = resolveConcurrency(opts.concurrency);
+  const lockDuration = resolveLockDuration(opts.lockDuration);
+  const completedJobsToKeep = resolveCompletedJobsToKeep(opts.completedJobsToKeep);
 
   const queue = new Queue(opts.queueName, { connection: opts.connection });
   // `onTickError` があるときだけ Queue の `'error'` を拾う。無いときに listener を付けると、bullmq の既定の
@@ -290,7 +353,13 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
     // 一度も呼んでいない時点で Worker が Redis に繋ぎ、既にキューにあるジョブを
     // 処理し始めてしまう——上の doc コメント「使い方」の読み方と食い違う。
     // `autorun: false` で構築し、`start()` の中で明示的に `worker.run()` を呼ぶ。
-    { connection: opts.connection, concurrency, autorun: false },
+    // ADR 0548: `lockDuration` は渡されたときだけ載せる（省略なら BullMQ の既定）。
+    {
+      connection: opts.connection,
+      concurrency,
+      autorun: false,
+      ...(lockDuration === undefined ? {} : { lockDuration }),
+    },
   );
   worker.on("error", (err) => {
     opts.onTickError?.(err);
@@ -337,7 +406,13 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
         // 置き換わった。`jobSchedulerId` を固定値にすることで、複数プロセスが同じ
         // `queueName` に対して `start()` を呼んでも冪等に同じスケジュールを指す
         // （上の doc コメント「複数プロセスで動かすとき」参照）。
-        await queue.upsertJobScheduler(jobName, { every: opts.everyMs }, { name: jobName });
+        // ADR 0548: 完了したジョブは直近 `completedJobsToKeep` 件だけ残す（`removeOnComplete`）。
+        // `removeOnFail` は指定しない（失敗したジョブは従来どおり全部残る）。
+        await queue.upsertJobScheduler(
+          jobName,
+          { every: opts.everyMs },
+          { name: jobName, opts: { removeOnComplete: { count: completedJobsToKeep } } },
+        );
         // 登録を待つ間に `stop()` された場合は、閉じた Worker を走らせない。
         if (stopped) {
           return;

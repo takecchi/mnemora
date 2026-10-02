@@ -9,7 +9,8 @@ import type { BullmqTickDriver } from "../tick-driver.js";
  *
  * - 同じ `queueName`・`jobName` の scheduler は1つで、後から `start()` した driver の `everyMs` が勝つ。
  * - 1台の `stop()` は共有の scheduler を消し、動いたままの別の driver の tick も止める（エラーにならない）。
- * - 完了したジョブは Redis に残り続ける（driver は `removeOnComplete` を指定しない）。
+ * - 完了したジョブは、既定では直近 1000 件まで、`completedJobsToKeep` を渡せばその件数だけ残る
+ *   （ADR 0548。以前は `removeOnComplete` を指定せず、全部残った）。
  *
  * ⚠ 2つ目は「望ましい振る舞い」として縛っているのではない。今の振る舞いの記録であり、直したら
  * この歯の期待を変えること（ADR 0449 の「材料」）。
@@ -42,7 +43,13 @@ async function waitFor(cond: () => boolean, timeoutMs: number): Promise<void> {
   }
 }
 
-function make(queueName: string, everyMs: number, onTick: () => void, jobName?: string) {
+function make(
+  queueName: string,
+  everyMs: number,
+  onTick: () => void,
+  jobName?: string,
+  extra: { completedJobsToKeep?: number } = {},
+) {
   const d = createBullmqTickDriver({
     connection,
     queueName,
@@ -56,6 +63,7 @@ function make(queueName: string, everyMs: number, onTick: () => void, jobName?: 
     tick: { leaseMs: 1000 },
     everyMs,
     ...(jobName === undefined ? {} : { jobName }),
+    ...extra,
   });
   drivers.push(d);
   return d;
@@ -107,7 +115,7 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     await waitFor(() => ticksA > settled, 10_000);
   });
 
-  it("完了したジョブは Redis に残り続ける（removeOnComplete を指定していない）", async () => {
+  it("ADR 0548: 既定（直近 1000 件）の範囲では、完了したジョブは Redis に残る（以前の「残り続ける」と同じ見え方）", async () => {
     const name = `mnemora-tick-shared-keep-${Date.now()}`;
     const q = queueFor(name);
     let ticks = 0;
@@ -116,8 +124,24 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     await waitFor(() => ticks >= 8, 15_000);
     await a.stop();
     const counts = await q.getJobCounts("completed");
-    // 少なくとも、走った tick のぶん（最後の1回は完了の記録が間に合わないことがある）は残っている。
+    // 1000 件には遠いので、走った tick のぶん（最後の1回は完了の記録が間に合わないことがある）は残っている。
     expect(counts.completed).toBeGreaterThanOrEqual(ticks - 1);
     expect(counts.completed).toBeGreaterThanOrEqual(7);
   });
+
+  it("ADR 0548: completedJobsToKeep を渡すと、完了したジョブはその件数で頭打ちになる（removeOnComplete: { count } が job に効く）", async () => {
+    const name = `mnemora-tick-shared-cap-${Date.now()}`;
+    const q = queueFor(name);
+    let ticks = 0;
+    const a = make(name, 50, () => (ticks += 1), undefined, { completedJobsToKeep: 3 });
+    await a.start();
+    // 陽性対照: 上限の 3 件より多く tick が走ったうえで、残りが 3 件以下に収まる。
+    await waitFor(() => ticks >= 12, 15_000);
+    await a.stop();
+    const counts = await q.getJobCounts("completed");
+    expect(ticks).toBeGreaterThan(3);
+    expect(counts.completed).toBeLessThanOrEqual(3);
+    expect(counts.completed).toBeGreaterThanOrEqual(1);
+  });
+
 });
