@@ -59,7 +59,7 @@ import type {
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
 import { listRelatedManyIfSupported } from "./relation-level.js";
-import { findBudgetCut } from "./recall-budget-cut.js";
+import { checkedTokenCounter, findBudgetCut } from "./recall-budget-cut.js";
 import {
   DEFAULT_RECALL_OUTPUT_VALIDATION,
   validateRecallOutput,
@@ -586,7 +586,13 @@ export async function runRecall(
   signal?: AbortSignal,
 ): Promise<RecallResult> {
   try {
-    return await runRecallBody(ctx, query, deps, signal);
+    // ADR 0497: 壊れた `tokens`（NaN・負・Infinity・数でない）を返す counter は、最初の呼び出しで断る。
+    return await runRecallBody(
+      ctx,
+      query,
+      { ...deps, tokenCounter: checkedTokenCounter(deps.tokenCounter) },
+      signal,
+    );
   } catch (error) {
     // ADR 0430 決定3: 公開の独立関数が投げる例外も、drizzle の `params:`（問いの本文）を落とす。
     throw omitParamsFromError(error);
