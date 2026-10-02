@@ -107,6 +107,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
+  - **何が変わるか**: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの目次帯のうち、渡された id の purge 済み（`forgotten` かつ `purgedAt` が非 `null`）の行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ置き換える。エントリは残し `truncated` は落とす。未 purge の行・他のエントリ・他テナントは触らない。べき等。
+  - **変えなかったこと**: `recalls.query`・`explain` は残る（`memoryId` で特定できない。何を消すかはオーナーの判断待ち）。migration での一括処理はしない。自動では走らず、利用者が purge をかけ直した行だけに効く。
+  - **破壊的と数えない理由**: 断る入力は増えない。`scrubPurged` の約束（purge の残骸を消す）に実装を戻す直しで、公開 API は変えていない。
+
 - **forget した記憶・purge した記憶の本文を、埋め込みジョブ（`tick` の `embed`）が外部の embedding provider に送らないようになった。**forget の前に積まれた埋め込みジョブが後から走ると、以前は `forgotten` の記憶の本文（purge 済みなら墓標 `[purged]`）を `embeddingProvider.embed` に送っていた。今は、`forgotten` か purge 済み（`purgedAt` あり）の記憶なら、provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する（再試行で回り続けない）。`active`・`archived`・`superseded`・`contested` は今までどおり埋め込む。**すでに送られた分は取り消せない**。読んでから provider を呼ぶまでの間に forget された場合の窓は塞げない。`consolidate`・`reflect`・`extract` は元から forgotten・purged の記憶の本文を LLM に送っていない（実測）。（[ADR 0541](./docs/decisions/0541-embed-job-skips-withdrawn-memory.md)）
 
 - **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
