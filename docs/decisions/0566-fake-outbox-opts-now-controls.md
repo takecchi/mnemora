@@ -10,14 +10,14 @@
 
 [ADR 0555](./0555-core-fake-outbox-rows-honor-opts-now.md)（PR #1666）の歯 `packages/core/src/__tests__/fake-outbox-opts-now.test.ts`（25 本）は、「`opts.now` を渡したら outbox 行の時刻がその値になる」側と、ADR 0555 が直した箇所を戻す変異だけを見ていた。やりすぎる変異と、検査の置き場所を外す変異は、確かめ直しでいくつも生き残った。
 
-| 記号 | 生き残った変異                                                                                                                                                  | 約束（現物）                                                                                                                                     |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A    | `requeueEmbedJobs` で `memory.updatedAt = new Date(rowOpts.now.getTime())`                                                                                      | `updatedAt` は壁時計のまま（`interfaces/clock.ts`。Postgres は `now()`）                                                                         |
-| I    | `createObservationWithOutbox` で `input.recordedAt` が無いとき `observation.recordedAt` を `opts.now` に。`createMemoryWithOutbox` の記憶の `recordedAt` も同様 | 約束が `opts.now` に従わせるのは outbox 行の時刻だけ（Postgres は `input.recordedAt ?? new Date()`）                                             |
-| F    | `createMemoryWithOutbox`・`createObservationWithOutbox` の冒頭で `assertFakeOutboxRowsWritable` を呼ぶ                                                          | 行を実際に書くときだけ見る（[ADR 0493](./0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)）。冪等な再送（`created: false`）は断らない |
-| D    | `supersedeWithNewMemories` の検査 loop を `news.slice(0, 1)` に                                                                                                 | 全部の news を、何も書く前に検査する（ADR 0555 決定3）                                                                                           |
-| H    | `enqueueJob` の `availableAt`・`createdAt` を `new Date(now.getTime())` でなく `now` 自身に                                                                     | 行ごとに `Date` の複製を持つ（ADR 0555 決定1）。歯が全部 `toEqual` で、参照の共有を見分けなかった                                                |
-| C    | `jobKinds` が空なら見ない、の歯が `createMemoryWithOutbox` にしか無い                                                                                           | 3つの口とも、行を積まないなら `opts` を見ない                                                                                                    |
+| 記号 | 生き残った変異 | 約束（現物） |
+|---|---|---|
+| A | `requeueEmbedJobs` で `memory.updatedAt = new Date(rowOpts.now.getTime())` | `updatedAt` は壁時計のまま（`interfaces/clock.ts`。Postgres は `now()`） |
+| I | `createObservationWithOutbox` で `input.recordedAt` が無いとき `observation.recordedAt` を `opts.now` に。`createMemoryWithOutbox` の記憶の `recordedAt` も同様 | 約束が `opts.now` に従わせるのは outbox 行の時刻だけ（Postgres は `input.recordedAt ?? new Date()`） |
+| F | `createMemoryWithOutbox`・`createObservationWithOutbox` の冒頭で `assertFakeOutboxRowsWritable` を呼ぶ | 行を実際に書くときだけ見る（[ADR 0493](./0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)）。冪等な再送（`created: false`）は断らない |
+| D | `supersedeWithNewMemories` の検査 loop を `news.slice(0, 1)` に | 全部の news を、何も書く前に検査する（ADR 0555 決定3） |
+| H | `enqueueJob` の `availableAt`・`createdAt` を `new Date(now.getTime())` でなく `now` 自身に | 行ごとに `Date` の複製を持つ（ADR 0555 決定1）。歯が全部 `toEqual` で、参照の共有を見分けなかった |
+| C | `jobKinds` が空なら見ない、の歯が `createMemoryWithOutbox` にしか無い | 3つの口とも、行を積まないなら `opts` を見ない |
 
 ## 足した歯【実測】
 
@@ -35,17 +35,17 @@
 
 変異を1つずつ `runtime-fakes.ts` に入れ、`fake-outbox-opts-now-controls.test.ts`（と、本文が数える欄は `fake-outbox-opts-now.test.ts`）を走らせ、`git checkout` で戻した。戻した後は 2 ファイルで 45 本緑・1 todo。
 
-| 変異                                                                             | 赤になった it                                                                                                     | 戻すと |
-| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------ |
-| A: `requeueEmbedJobs` の `updatedAt` を `opts.now` に                            | 1（`updatedAt` を壁時計のままにする）                                                                             | 緑     |
-| I: `createObservationWithOutbox` の `recordedAt` の既定を `opts.now` に          | 1（壁時計を使う）                                                                                                 | 緑     |
-| I: `createMemoryWithOutbox` の記憶の `recordedAt` を `opts.now` に               | 1（`recordedAt` に `opts.now` を使わない）                                                                        | 緑     |
-| F: `createMemoryWithOutbox` の冒頭で検査                                         | 2（Invalid Date・NUL の再送）                                                                                     | 緑     |
-| F: `createObservationWithOutbox` の冒頭で検査                                    | 1（再送）                                                                                                         | 緑     |
-| D: `news.slice(0, 1)`                                                            | 2（2件目の NUL・1件目が空のときの Invalid Date）                                                                  | 緑     |
-| H: `availableAt` を `now` 自身に                                                 | 8（4口×2）                                                                                                        | 緑     |
-| H: `createdAt` を `now` 自身に                                                   | 8（4口×2）                                                                                                        | 緑     |
-| C: `assertFakeOutboxRowsWritable` の `if (jobKinds.length === 0) return;` を外す | 3（`createMemoryWithOutbox` の既存の1本、新しい `createObservationWithOutbox`・`supersedeWithNewMemories` の2本） | 緑     |
+| 変異 | 赤になった it | 戻すと |
+|---|---|---|
+| A: `requeueEmbedJobs` の `updatedAt` を `opts.now` に | 1（`updatedAt` を壁時計のままにする） | 緑 |
+| I: `createObservationWithOutbox` の `recordedAt` の既定を `opts.now` に | 1（壁時計を使う） | 緑 |
+| I: `createMemoryWithOutbox` の記憶の `recordedAt` を `opts.now` に | 1（`recordedAt` に `opts.now` を使わない） | 緑 |
+| F: `createMemoryWithOutbox` の冒頭で検査 | 2（Invalid Date・NUL の再送） | 緑 |
+| F: `createObservationWithOutbox` の冒頭で検査 | 1（再送） | 緑 |
+| D: `news.slice(0, 1)` | 2（2件目の NUL・1件目が空のときの Invalid Date） | 緑 |
+| H: `availableAt` を `now` 自身に | 8（4口×2） | 緑 |
+| H: `createdAt` を `now` 自身に | 8（4口×2） | 緑 |
+| C: `assertFakeOutboxRowsWritable` の `if (jobKinds.length === 0) return;` を外す | 3（`createMemoryWithOutbox` の既存の1本、新しい `createObservationWithOutbox`・`supersedeWithNewMemories` の2本） | 緑 |
 
 - **F の supersede の変異は入れていない。**今の `supersedeWithNewMemories` は最初から、news を作る前に全部の news を検査している（「冒頭に置く」形が現状）ので、変異になる余地が無い。逆向きの食い違いは下の【未解決】を見ること。
 - I の `supersedeWithNewMemories` の歯（記憶の `recordedAt`）については、対応する変異を入れていない。
@@ -56,15 +56,14 @@
 
 1. **変異表の赤の本数が現物とずれている。**0555 の表を作った後に、戻り値の `jobs` を見る2本が足されたため（0555 の歯の節にも「2本」と書いてある）。現物の `fake-outbox-opts-now.test.ts` で再実測した:
 
-   | 変異                                              | 0555 の表 | 現物 |
-   | ------------------------------------------------- | --------- | ---- |
-   | `enqueueJob` の `availableAt` を `new Date()` に  | 14        | 16   |
-   | `enqueueJob` の `createdAt` を `new Date()` に    | 10        | 12   |
-   | `createObservationWithOutbox` が `now` を渡さない | 3         | 6    |
-   | `supersedeWithNewMemories` が `now` を渡さない    | 2         | 3    |
+   | 変異 | 0555 の表 | 現物 |
+   |---|---|---|
+   | `enqueueJob` の `availableAt` を `new Date()` に | 14 | 16 |
+   | `enqueueJob` の `createdAt` を `new Date()` に | 10 | 12 |
+   | `createObservationWithOutbox` が `now` を渡さない | 3 | 6 |
+   | `supersedeWithNewMemories` が `now` を渡さない | 2 | 3 |
 
    他の行は再実測していない。`createObservationWithOutbox` の「渡さない」は `{ claimedBy: rowOpts.claimedBy }` だけを渡す形で入れた（`claimedAt` も壁時計になるので、本数は変異の入れ方に依る）。
-
 2. **名前の誤り。**`enqueueJob` は、現物では `FakeMemoryStore.enqueueJob`（`runtime-fakes.ts` の private メソッド）。`FakeBackingStore`（共有の保管庫）にも `FakeOutboxStore` にも `enqueueJob` は無い。0555 の本文は `enqueueJob` とだけ書いていて、この誤った名前は出てこない（`grep` で確認）。誤った名前は、0555 が書き換えたコメントの2か所にある: `abort-signal.test.ts` の「以前の Fake は `availableAt` を `FakeBackingStore.enqueueJob` が…」と `runtime.test.ts` の同趣旨の1か所。どちらも既存のテストファイルの中のコメントで、この PR では直していない（衝突を避けるため。読むときは `FakeMemoryStore.enqueueJob` と読み替えること）。
 
 ## 【未解決】supersede の冪等な再送を、Fake は先に断る
