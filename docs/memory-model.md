@@ -425,6 +425,7 @@ FK すら持たないため、存在しない id を渡しても素通る。
 上の「それでも読み取り漏洩・書き込み漏洩には繋がらない」は、`eraseTenant` と `purgeExpiredRecalls` を見落としていた——別テナントの id を指す行が1本在ると、
 指された側の `eraseTenant` が `blocked_by_foreign_reference` で止まる（ADR 0439 の「文脈」）。読みの漏洩が無いことは今も変わらない。
 さらに [ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md) から、`supersededById` の**約束を壊す入力**も、書く前に `RangeError` で断る（`status: "superseded"` なのに無い・自己置換・`resolveContested*` の `active` に付ける・互いを指す循環・`resolveContestedGroup` で群の外の `forgotten` な記憶を指す。`@mnemora/postgres`・`@mnemora/testkit` の fixture とも。上の「アプリ側の唯一の検査」も、もう成り立たない）。
+[ADR 0515](./decisions/0515-superseded-by-remaining-checks.md) から、`resolveContestedPair` が対の外の `forgotten` な記憶を指す `supersededById` と、`updateStatus`・`updateStatusWithEvent` が `superseded` 以外の status（`active`・`archived`・`forgotten`）に付けた `supersededById` も、同じく書く前に `RangeError` で断る（上の括弧の列挙は ADR 0503 の時点のもの）。
 上の本文は、当時の記録として書き換えていない。
 
 ### ⚠ 2026-09-27 追記（Issue #1051）: ほかの書き込みの口も、参照の id のテナント一致を検査しない
@@ -1963,6 +1964,7 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
 - 行11の `events_purged` の meta の日時（`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）は ISO 8601 の文字列である。
   `@mnemora/postgres` は meta を JSON で保存するので文字列で読み戻り、`@mnemora/testkit` の fixture も 2026-09-27 から
   同じく文字列で持つ（それまでは `Date` のまま持っていた）。
+  core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`。非公開）も、[ADR 0538](./decisions/0538-retention-and-purge-parity.md) から同じく文字列で持つ。
 
 **⚠ 2026-09-27 追記2（今日入った変更の後に、表の各行を Runtime で起こして当て直した）**: `@mnemora/postgres` と
 `@mnemora/testkit` の fixture の両方で、各行の操作が積むイベントの `kind`・`meta` の欄・状態の遷移を並べた。

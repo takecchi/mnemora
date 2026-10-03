@@ -57,6 +57,12 @@ export interface AnthropicJsonSchemaFormat {
  * アサーション無しで通った**（zod 4.5.4 では `"zod"` のトップレベル export と `"zod/v4"` は
  * 同じ v4 実装を指しており、`ZodType` は構造的に同一のため）。よってここでは
  * 型アサーションを入れていない——「合わなければ入れる」という前提が、今回は成立しなかった。
+ *
+ * 投げるもの: `z.record` を含むスキーマは、送る前に素の `Error`（message は
+ * `z.record cannot be sent to Anthropic structured output: ...` で始まる。専用の `kind` は無い。
+ * `assertNoRecord`、ADR 0360 の 2026-09-30 追記）。`z.tuple`・`z.date`・`transform` は
+ * `zodOutputFormat` 自身の例外がそのまま伝わる。戻りは `{ type: "json_schema", schema }` だけで、
+ * `zodOutputFormat` が持つ `parse` 関数は落としてある。
  */
 export function translateForAnthropicStructuredOutput<T>(
   schema: z.ZodType<T>,

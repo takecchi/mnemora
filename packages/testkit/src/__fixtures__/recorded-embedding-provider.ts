@@ -7,7 +7,7 @@ import { embeddingCassetteKey } from "./cassette.js";
  *
  * **`DeterministicEmbeddingProvider` の代わりではない。**あちらは文字コードから
  * 機械的にベクトルを作る stub であり、意味的な類似度を一切表現しない（配線の検査用）。
- * こちらは**本物の `text-embedding-3-small` が実際に返したベクトルをそのまま返す**ため、
+ * こちらは**記録元の本物のモデル（同梱のカセットでは `text-embedding-3-small`）が実際に返したベクトルをそのまま返す**ため、
  * 記録済みの入力に対しては本物と同じ順位が出る。
  *
  * **記録に無い入力に対しては例外を投げる。**黙って stub のベクトルへ倒れたり、

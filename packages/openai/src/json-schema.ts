@@ -129,6 +129,11 @@ function hardenForStrictMode(node: unknown): unknown {
 /**
  * `StructuredRequest.schema`（core の `z.ZodType<T>`）を OpenAI の
  * `response_format.json_schema` の形へ翻訳する。
+ *
+ * 返す `schema` は、`$schema` を落とし、根が object でなければ1つの欄を持つ object に包んだもの
+ * （`structured-root.ts`）。`strict` は常に `true`。`name` は渡された値がそのまま入る。
+ * zod が JSON Schema で表せない形（`z.date()`・`transform` など）は、zod の既定どおりここで投げる
+ * （`OpenAILLMProvider.completeStructured` が `kind: "schema_unsupported"` に包む）。
  */
 export function translateForOpenAIStructuredOutput<T>(
   name: string,

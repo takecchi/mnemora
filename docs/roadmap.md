@@ -25,6 +25,7 @@
 - `packages/bullmq`（Scheduler の実装）
   - **⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: `packages/bullmq` はその後できたが、`Scheduler` を実装していない。BullMQ のジョブで `runtime.tick()` を駆動するものである（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)、[architecture.md](./architecture.md) §5.6 の追記）。`private: true` で、npm には公開していない。
   - **⚠ 2026-09-29 追記（Issue #205、オーナー回答 2026-09-28「公開する準備をお願い」）**: `private: true` はもう正しくない——`private` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾へ加える PR が出ている。⛔ **publish・tag・Release・version の bump はまだしていない**（オーナーの手。version は `0.0.0` のまま、ADR 0070）。詳細は ADR 0325 の追記と `docs/release-v1.md` の該当節。
+  - （2026-10-03 訂正）上の 2026-09-29 追記の「PR が出ている」「version は `0.0.0` のまま」は、いまは成り立たない。`packages/bullmq/package.json` に `private` は無く、`@mnemora/bullmq` は `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` に入っている。npm に出ていることはルート [README.md](../README.md) が書いている。version は `packages/bullmq/package.json` の `version` が正本で、ここには写さない。なお、下の「Phase 3」の 2026-09-29 追記が「直前の「Phase 3」節の同日追記」と指しているのは、この 2026-09-29 追記のことである。
 - HTTP server（`packages/server`）
 
 これらは Phase 1 の範囲外だが、土台となる列・テーブルは 1.2 の通り Phase 1 に含める。（⚠ 2026-09-29 追記: 参照先の §1.2 は削除した（#762）。当時の本文は上の墓標のリンク先。列・テーブルはすべて main に在る。）
@@ -102,6 +103,8 @@ Phase 2 のまま**——PR-B が実装したのは「絞り込み」と「第3�
 カウント」であり、digest 帯（1件1行の要旨、`IndexBand.digestBand`）自体は ADR 0073 が
 前倒しした形（taxonomy を要さない）のまま変わっていない。
 
+**（2026-10-03 訂正）** 上の 2026-09-16 追記（Issue #282）の「前倒しされていないままなのは「関係グラフ本体」の1行だけである」は、いまは成り立たない。表の「関係グラフ本体（`contradicts` / `supersedes` を辿る探索）」の行も、**`contradicts` の多者間の群に限って**前倒しで実装済みである。`memory_relations` 表（`packages/postgres/migrations/0026_memory_relations.sql`、[docs/memory-model.md](./memory-model.md) §10）と `RelationStore`（`packages/core/src/interfaces/relation-store.ts`）が在り、`recall()` の段3は `RelationStore.listRelated` を幅優先で辿って群の全員を必須の同伴として取る（`packages/core/src/recall-runtime.ts`、[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)・[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)）。**ただし `supersedes` を辿る探索は無い**——`RelationKind` は `contradicts` だけである（`relation-store.ts`）。⟹ この行も「部分的に前倒し」である。
+
 ### Phase 3
 
 | 項目 | Phase 1 の何が効いているか |
@@ -151,7 +154,7 @@ outbox は今日どおり Postgres が正本のままで、`InlineScheduler` か
 | 抽出 LLM の品質が全体の質を決めてしまう（garbage in） | digest が空虚・的外れになる、抽出される Memory の件数が異常に多い／少ない、`extractorVersion` を上げた途端に既存 Memory との整合性が崩れる | `extractorVersion` ごとの冪等性を保ったまま並行比較できるようにする。抽出結果のサンプルレビューを運用に組み込む。alteroid の「分類に失敗したら厚い側（安全側）に倒す」という安全弁を抽出にも取り入れる。⚠ **2026-09-26 追記（Issue #873）: `runtime.reextract()` は今日、`extractorVersion` を跨いだ旧い版の Memory を supersede しない**（同じ版の中でしか比較しない、`docs/decisions/0028-reextract-superseded-cleanup.md` 追記）——新旧の並行比較はこの制約の上で運用側が明示的に退役させる前提で成り立っている。 |
 | 埋め込みモデル移行のコスト（全件再 embed） | 新しい embedding モデルを使いたくなる、または既存モデルが非推奨化される | 埋め込み空間ごとにテーブルを分ける設計（`memory_embeddings_<space>`）を維持する。移行は新しい空間の追加であって、既存空間の置換ではない。 |
 | `decay_floor_at` の設計が、half-life をテナントごとに変えたくなった瞬間に再計算全件を要求する | 「このテナントだけ忘却を早く／遅くしたい」という要望が来る | half-life は Memory 単位の列として持ち、テナント設定はあくまでデフォルト値としてのみ使う。既存行の全件再計算は発生させない。 |
-| 監査ログの量 | `memory_events` テーブルのサイズが MemoryStore 本体を上回るペースで伸びる | テナント単位の保持期間設定と、期限切れ削除を `purged` イベントとして残す仕組みを Phase 3 で実装する。スキーマは Phase 1 から仕込んである。 |
+| 監査ログの量 | `memory_events` テーブルのサイズが MemoryStore 本体を上回るペースで伸びる | テナント単位の保持期間設定と、期限切れ削除を `purged` イベントとして残す仕組みを Phase 3 で実装する。スキーマは Phase 1 から仕込んである。（2026-10-03 訂正）この対処は Phase 3 を待たずに実装済みである（§3 Phase 3 の表の下の 2026-09-16 追記のとおり）。積まれるイベントは `purged` ではなく `events_purged` である（`packages/core/src/event.ts`）。 |
 | multi-tenant での ANN 索引の効き（テナントごとの偏り） | 特定テナントだけ recall のレイテンシが悪化する、`EXPLAIN` で想定外の Seq Scan が出る | `tenant_id` を索引の先頭に置く設計を維持する。テナントごとの件数分布を監視し、必要ならパーティショニングを検討する（Phase 3 以降の課題として明示する）。 |
 | 「認知レイヤー」という位置づけが、実際には利用側のプロンプト構築と密結合になる | 呼び出し側が mnemora の返り値を丸ごとプロンプトに焼き込む実装になり、`budget` / `omitted` / `usage` を無視し始める | サンプルアプリで `budget` と `omitted` の扱いを模範として示す。「載せるかどうかを決めるのは呼び出し側の責任」であることをドキュメントで明記する。 |
 | Drizzle 公式ガイドの例（`1 - cosineDistance(...)` を降順で並べる書き方）では HNSW 索引が効かない可能性がある | `EXPLAIN` で Seq Scan が出る、recall のレイテンシがデータ量に比例して悪化する | 規約として、`ORDER BY` には距離演算子の結果をそのまま昇順で書き、式にしない。`testkit` に `EXPLAIN` で索引が使われることを確認する検査を含める（段階2の完了条件と同じもの）。 **⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: この検査は `testkit` ではなく `packages/postgres` のテストに置かれている——生の SQL と `EXPLAIN` を扱うため（`packages/testkit/src/vector-store-conformance.ts` の冒頭の doc がそう書いている）。`testkit` の適合テストには `EXPLAIN` の検査は無い。 **⚠ 2026-09-29 追記**: 参照先の「段階2」（§2）は削除した（#762）。当時の本文は §2 の墓標のリンク先にある。 |
@@ -342,6 +345,8 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 **推奨**: **いまは 3。** 理由は §5.7 の推奨がかつて挙げていたのと同じ費用構造である——[Issue #204](https://github.com/takecchi/mnemora/issues/204) がまだ着地しておらず、事象駆動（種を都度渡す）で当面の需要が満たせるかどうかがまだ見えていない。事象駆動だけで足りるなら (a) は永久に不要になりうる——先に決め切る理由が無い。
 
 **⚠ 確かめていないこと**: (a) を「要る」にしたときの優先順位の候補（使用頻度・作成日時・タグの重複度など）を具体的に検討していない。⟹ 「要る」を選んだときの設計費用は見積もられていない。
+
+**（2026-10-03 訂正）** 上の「[Issue #204](https://github.com/takecchi/mnemora/issues/204) がまだ着地しておらず」「#204 の着手を止めない」は、いまは古い。#204 は閉じており、`tick()` は事象駆動で `consolidate`/`reflect` のジョブを処理する（[ADR 0157](./decisions/0157-tick-drives-consolidate-and-reflect.md)。`TICK_SUPPORTED_JOB_KINDS`、`packages/core/src/runtime.ts`）。**本項目（起点の選定）そのものは、ADR 0157 も解いておらず、開いたままである**（ADR 0157 の「依然未解決」の項）。推奨の理由のうち「#204 が未着地」の部分だけが消え、「事象駆動だけで足りるかがまだ見えない」の部分は残る。
 
 ### 5.9 「聞かれていないことを、自分から思い出す」の形（[Issue #200](https://github.com/takecchi/mnemora/issues/200) の分岐）— **解決済み**
 

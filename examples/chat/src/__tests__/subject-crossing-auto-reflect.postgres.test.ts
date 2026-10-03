@@ -47,10 +47,10 @@ describe("processReflectJob は tick() 経由で種の subjectId に近傍探索
   it("ctx.subjectId 無しで tick を呼んでも、別 subject の高affinity近傍は混ざらない（混在 0%）", async () => {
     await resetTestDatabase();
     await getTestClient();
-    // 🔴 `clock` は実時刻より 1 秒だけ未来を返す。outbox の `available_at` は DB 側の `now()`（マイクロ秒）で
-    // 書かれるが、既定の `systemClock` は JavaScript の `Date`（ミリ秒で切り捨て）なので、書いた直後の
-    // `tick()` が同じミリ秒に入ると、積んだばかりの行が `available_at <= now` を満たさず claim できない
-    // （Issue #719・#1002・PR #834 と同じ穴。runtime の時計を数 ms 遅らせると、この it は確実に赤になる）。
+    // `clock` は実時刻より 1 秒だけ未来を返す。これは歴史的な理由で残している。かつて outbox の
+    // `available_at` が DB 側の `now()`（マイクロ秒）で書かれていたころ（Issue #719・#1002・PR #834）は、
+    // 書いた直後の `tick()` が同じミリ秒に入ると積んだ行を claim できなかった。今は runtime が
+    // `clock.now()` 由来の `now` を渡すので `available_at` も注入した時計に従う（ADR 0355・0559）。
     // 1 秒は `leaseMs` よりずっと小さいので、claim 済みの行がリース切れとして取り直されることはない。
     const handle = await createExampleRuntime(
       requireDatabaseUrl(),
