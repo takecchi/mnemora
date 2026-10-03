@@ -393,3 +393,112 @@ describe("claim key の検出: relationStore が配線されていなければ�
     expect(stored?.status).toBe("active");
   });
 });
+
+describe("claim key の検出: relationStore 配線時、群を離れた記憶は合併に足さず、広げた結果の人数で群の成否が決まる", () => {
+  /** g1a が広い窓で g1b・g1c と重なる3件の群（g1b・g1c 同士は重ならない）を作る。 */
+  async function buildTrioGroup(stores: ReturnType<typeof buildRuntimeWithStores>["stores"]) {
+    const g1a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "g1a",
+        claimKey: ADDRESS_CLAIM_KEY,
+        validFrom: new Date("2019-01-01T00:00:00Z"),
+        validUntil: new Date("2026-01-01T00:00:00Z"),
+      }),
+    );
+    const g1b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "g1b",
+        claimKey: ADDRESS_CLAIM_KEY,
+        validFrom: new Date("2019-01-01T00:00:00Z"),
+        validUntil: new Date("2019-06-01T00:00:00Z"),
+      }),
+    );
+    const g1c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "g1c",
+        claimKey: ADDRESS_CLAIM_KEY,
+        validFrom: new Date("2023-01-01T00:00:00Z"),
+        validUntil: new Date("2023-06-01T00:00:00Z"),
+      }),
+    );
+    await stores.memoryStore.markContestedGroup!(
+      ctx,
+      [g1a, g1b, g1c].map((m) => ({
+        id: m.id,
+        event: {
+          tenantId: ctx.tenantId,
+          memoryId: m.id,
+          kind: "updated" as const,
+          actor: { type: "system" as const },
+          digestSnapshot: "digest",
+          meta: {},
+        },
+      })),
+    );
+    return { g1a, g1b, g1c };
+  }
+
+  it("群のうち1件が群を離れていても（関係の行は残る）、残り2件と重なる新しい記憶で群が成立する", async () => {
+    const { runtime, stores } = buildRuntimeWithStores(["新しい記憶"], {
+      withRelationStore: true,
+    });
+    const { g1a, g1b, g1c } = await buildTrioGroup(stores);
+    // g1c を archived にして群から離す。g1a→g1c の関係の行は残るので、探索はそこへ届く。
+    await stores.memoryStore.updateStatus(ctx, g1c.id, "archived");
+
+    // g1a・g1b の両方と直接重なる。
+    const triggering = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "新しい記憶",
+      claimKey: { enabled: true, detectContested: true },
+      validFrom: new Date("2019-02-01T00:00:00Z"),
+      validUntil: new Date("2019-03-01T00:00:00Z"),
+    });
+
+    expect(triggering.contestedDetection).toEqual([
+      expect.objectContaining({
+        matchCount: 2,
+        result: expect.objectContaining({ kind: "contested_group" }),
+      }),
+    ]);
+    const detection = triggering.contestedDetection![0]!;
+    if (detection.result.kind === "contested_group") {
+      expect(detection.result.memberIds.sort()).toEqual(
+        [triggering.memoryIds[0]!, g1a.id, g1b.id].sort(),
+      );
+    }
+    for (const id of [triggering.memoryIds[0]!, g1a.id, g1b.id]) {
+      expect((await stores.memoryStore.get(ctx, id))?.status).toBe("contested");
+    }
+    expect((await stores.memoryStore.get(ctx, g1c.id))?.status).toBe("archived");
+  });
+
+  it("残りが contested 1件だけで、広げた結果が新しい記憶と合わせて2件で終わるときは、例外を投げず unresolved_conflict になる", async () => {
+    const { runtime, stores } = buildRuntimeWithStores(["新しい記憶"], {
+      withRelationStore: true,
+    });
+    const { g1a, g1b, g1c } = await buildTrioGroup(stores);
+    await stores.memoryStore.updateStatus(ctx, g1b.id, "archived");
+    await stores.memoryStore.updateStatus(ctx, g1c.id, "archived");
+
+    const triggering = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "新しい記憶",
+      claimKey: { enabled: true, detectContested: true },
+      validFrom: new Date("2020-01-01T00:00:00Z"),
+      validUntil: new Date("2020-02-01T00:00:00Z"),
+    });
+
+    expect(triggering.contestedDetection).toEqual([
+      expect.objectContaining({
+        matchCount: 1,
+        result: expect.objectContaining({ kind: "unresolved_conflict" }),
+      }),
+    ]);
+    expect((await stores.memoryStore.get(ctx, triggering.memoryIds[0]!))?.status).toBe("active");
+    expect((await stores.memoryStore.get(ctx, g1a.id))?.status).toBe("contested");
+  });
+});

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
+import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
 import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
@@ -309,5 +310,42 @@ describe("runtime.markContestedGroup — tick()/observe() から呼ばれない"
 
     const stored = await stores.memoryStore.get(ctx, a.id);
     expect(stored?.status).toBe("active");
+  });
+});
+
+describe("runtime.markContestedGroup — 群の外の対の片割れ", () => {
+  it("対 A-B の A と C・D の3件を渡すと conflict で、B は contested のまま。A・B・C の3件なら通る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
+    const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
+    const d = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "D" }));
+    await runtime.markContested(ctx, a.id, b.id);
+
+    // Runtime は先に ineligible で弾くので、store の CAS には直に当てる。
+    const members = (ms: { id: string }[]) =>
+      ms.map((m) => ({
+        id: m.id,
+        event: {
+          tenantId: ctx.tenantId,
+          memoryId: m.id,
+          kind: "updated" as const,
+          actor: { type: "system" as const },
+          digestSnapshot: "digest",
+          meta: {},
+        },
+      }));
+    await expect(
+      stores.memoryStore.markContestedGroup!(ctx, members([a, c, d])),
+    ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+    expect((await stores.memoryStore.get(ctx, b.id))?.status).toBe("contested");
+    expect((await stores.memoryStore.get(ctx, c.id))?.status).toBe("active");
+    expect((await stores.memoryStore.get(ctx, d.id))?.status).toBe("active");
+
+    // 対の両方を含めれば（片割れが群の中を指す）通る。断る条件を締めすぎていないこと。
+    await stores.memoryStore.markContestedGroup!(ctx, members([a, b, c]));
+    for (const m of [a, b, c]) {
+      expect((await stores.memoryStore.get(ctx, m.id))?.status).toBe("contested");
+    }
   });
 });
