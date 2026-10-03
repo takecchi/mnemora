@@ -243,6 +243,72 @@ describe("recall() — 段3が多者間の contested 群も同伴として拾う
     const stage = result.explain.stages.find((s) => s.stage === "contradiction_resolution");
     expect(stage?.detail).toEqual({ companionsAdded: 2 });
   });
+
+  it("鎖 a-b-c の真ん中の b が（archived で）群を離れていれば、a を引いても b の先の c は同伴に入らない", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: true });
+    // b は無期限（null-null、誰とでも重なる）、a は今も有効な窓、c は a と重ならない過去の窓——
+    // a-b・b-c の辺だけが張られ、a-c には辺が無い。c へ届く道は b を通る道だけになる。
+    const a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "A",
+        validFrom: new Date("2026-01-01T00:00:00Z"),
+        validUntil: null,
+      }),
+    );
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "B", validFrom: null, validUntil: null }),
+    );
+    const c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "C",
+        validFrom: new Date("2020-01-01T00:00:00Z"),
+        validUntil: new Date("2021-01-01T00:00:00Z"),
+      }),
+    );
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const related = await stores.relationStore.listRelated(ctx, a.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([b.id]); // 前提: a は b とだけ直接つながる。
+
+    // forget 済みの記憶は getMany が返さない（そもそも探索に入らない）ので、status の門に当たるのは
+    // 「まだ読める記憶が contested でなくなった」場合——ここでは archived にして群を離れさせる。
+    await stores.memoryStore.updateStatus(ctx, b.id, "archived");
+    expect((await stores.memoryStore.get(ctx, b.id))?.status).toBe("archived");
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    expect(ids).not.toContain(b.id);
+    expect(ids).not.toContain(c.id);
+  });
+
+  it("attributes で絞った recall では、群の同伴のうち attributes が絞りの外の1件は入らない（subjectId・period は見ない設計）", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: true });
+    const a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "A", attributes: { team: "x" } }),
+    );
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "B", attributes: { team: "y" } }),
+    );
+    const c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "C", attributes: { team: "x" } }),
+    );
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], attributes: { team: "x" } });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(c.id);
+    expect(ids).not.toContain(b.id);
+  });
 });
 
 describe("recall() — relationStore が配線されていなければ、群のメンバーは今までどおり単独で出ない", () => {

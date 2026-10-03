@@ -461,4 +461,80 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
       expect(byId.get(c.id)?.companionOf).toBe(o.id);
     },
   );
+
+  it("鎖 a-b-c の真ん中の b が（archived で）群を離れていれば、a を引いても b の先の c は同伴に入らない", async () => {
+    const { runtime, memoryStore, vectorStore, relationStore } = await buildTestRuntime({
+      withRelationStore: true,
+    });
+    const ctx: Ctx = { tenantId: TENANT };
+    // b は無期限（誰とでも重なる）、a は今も有効な窓、c は a と重ならない過去の窓——
+    // a-b・b-c の辺だけが張られ、a-c には辺が無い。
+    const a = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      validFrom: new Date("2025-06-01T00:00:00Z"),
+      validUntil: null,
+    });
+    const b = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: null,
+        validUntil: null,
+      }),
+    );
+    const c = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        validFrom: new Date("2020-01-01T00:00:00Z"),
+        validUntil: new Date("2021-01-01T00:00:00Z"),
+      }),
+    );
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+    const related = await relationStore.listRelated(ctx, a.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([b.id]); // 前提: a は b とだけ直接つながる。
+
+    await memoryStore.updateStatus(ctx, b.id, "archived");
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    expect(ids).not.toContain(b.id);
+    expect(ids).not.toContain(c.id);
+  });
+
+  it("attributes で絞った recall では、群の同伴のうち attributes が絞りの外の1件は入らない", async () => {
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime({
+      withRelationStore: true,
+    });
+    const ctx: Ctx = { tenantId: TENANT };
+    const a = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      attributes: { team: "x" },
+    });
+    const b = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        attributes: { team: "y" },
+      }),
+    );
+    const c = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        embeddingStatus: "pending",
+        attributes: { team: "x" },
+      }),
+    );
+    await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0], attributes: { team: "x" } });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(c.id);
+    expect(ids).not.toContain(b.id);
+  });
 });

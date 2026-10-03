@@ -23,6 +23,7 @@ async function makeKit(): Promise<Round31Kit> {
         (e) => e.tenantId === ctx.tenantId && (memoryId === undefined || e.memoryId === memoryId),
       ),
     relatedIds: async (ctx, id) => (await relations.listRelated(ctx, id)).map((r) => r.memoryId),
+    linkContradicts: (ctx, fromId, toId) => relations.link(ctx, "contradicts", fromId, toId),
     setRetention: async (ctx, days) =>
       settings.setEventRetention(
         ctx,
