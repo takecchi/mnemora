@@ -176,6 +176,7 @@ interface Kit {
   memoryHang: ReturnType<typeof hangableMemory>["state"];
   upsertVector: (ctx: Ctx, memoryId: string) => Promise<void>;
   countVectors: (ctx: Ctx, memoryIds: string[]) => Promise<number>;
+  listMemoryIds: (ctx: Ctx) => Promise<string[]>;
   listMemories: (
     ctx: Ctx,
   ) => Promise<
@@ -200,6 +201,7 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
         upsertVector: (ctx, id) => vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, id, [1, 0, 0]),
         countVectors: async (ctx, ids) =>
           (await vectorStore.getVectors(ctx, TEST_EMBEDDING_SPACE, ids)).length,
+        listMemoryIds: async (ctx) => memoryStore.listByTenant(ctx).map((m) => m.id),
         listMemories: async (ctx) =>
           memoryStore.listByTenant(ctx).map((m) => ({
             status: m.status,
@@ -236,6 +238,10 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
         upsertVector: (ctx, id) => vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, id, [1, 0, 0]),
         countVectors: async (ctx, ids) =>
           (await vectorStore.getVectors!(ctx, TEST_EMBEDDING_SPACE, ids)).length,
+        listMemoryIds: async (ctx) =>
+          (
+            await pool.query("SELECT id FROM memories WHERE tenant_id = $1", [ctx.tenantId])
+          ).rows.map((r) => r.id as string),
         listMemories: async (ctx) =>
           (
             await pool.query(
@@ -376,6 +382,43 @@ for (const [name, makeKit] of KITS) {
         expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(
           expectedContents.length,
         );
+      });
+    }
+
+    // ---- forget・purge した記憶が在る Observation への再配達（#1318） ----
+
+    for (const how of ["forget", "purge"] as const) {
+      it(`extract: 1回目が書いた記憶を ${how} した後の再配達でも、LLM を呼ばず、active は増えず、忘れさせた内容は蘇らない（#1318）`, async () => {
+        nowMs = Date.parse("2030-01-01T00:00:00.000Z");
+        const kit = await makeKit();
+        // 2回目の LLM が別の本文を返す形にする（呼ばれて書かれたら、B が active で現れて赤くなる）。
+        extractOutputs = ["候補A", "候補B"];
+        await kit.runtime.observe(ctx, { kind: "utterance", text: "発話", extract: "deferred" });
+        nowMs += 1000;
+        // 1回目: 書いた後・complete の前で止まる。
+        kit.crash.crash = true;
+        await expect(
+          kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS }),
+        ).rejects.toThrow(/ワーカーが止まった/);
+        kit.crash.crash = false;
+        const [written] = await kit.listMemoryIds(ctx);
+        expect(written).toBeDefined();
+        // 止まっている間に、書かれた記憶を忘れさせる（purge なら物理削除まで）。
+        await kit.runtime.forget(ctx, { memoryId: written! });
+        if (how === "purge") await kit.runtime.purge(ctx, { memoryId: written! });
+        // 2回目: リースが切れて再配達される。
+        nowMs += LEASE_MS * 2;
+        const redelivered = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
+        expect({ processed: redelivered.processed, failed: redelivered.failed }).toEqual({
+          processed: 1,
+          failed: 0,
+        });
+        // LLM を呼んでいない（2回目の出力が手つかずで残る）。
+        expect(extractOutputs).toEqual(["候補B"]);
+        const memories = await kit.listMemories(ctx);
+        expect(memories.map((m) => m.status)).toEqual(["forgotten"]);
+        expect(memories.some((m) => m.content === "候補B")).toBe(false);
+        expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(1);
       });
     }
 

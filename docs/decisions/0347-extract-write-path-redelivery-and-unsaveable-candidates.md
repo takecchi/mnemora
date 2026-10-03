@@ -206,3 +206,19 @@ fixture）で縛っていた。
 
 上の並行の実測は tick どうしだけだった。`reextract` どうし、`reextract` と tick の抽出でも、同じ Observation から2件が `active` になる窓を
 Postgres で実測して歯で縛った（`reextract-concurrent-extract.postgres.test.ts`）。塞いでいない。表と理由は ADR 0421。
+
+---
+
+## 追記（2026-10-04）: `reextract` は本 ADR の確認は通らないが、後に入った別の確認は通る（[ADR 0028](./0028-reextract-superseded-cleanup.md) の 2026-09-28 の追記・[ADR 0380](./0380-reextract-withdrawn-across-extractor-versions.md)）
+
+本文は書き換えていない。決定1の「`Runtime.reextract` はこの確認を通らない」は、今も正しい——`reextract` は、`listBySourceObservation` で
+何か在れば返す、という本 ADR の確認（`processExtractJob` の `existing.length > 0`）を通らない。ただし、本文だけを読むと
+「`reextract` には、抽出をやり直さない確認が何も無い」と読めるので、あとから入った別の確認を書き足す。
+
+- `reextract` は、本 ADR より後に入った「退けた記憶があれば、抽出をやり直さずに飛ばす」確認を通る。Issue #1079・#1149 で入り（ADR 0028 の 2026-09-28 の追記）、
+  ADR 0380 が版を跨ぐ形に広げた。`listBySourceObservationAllVersions` で全版の記憶を読み、`runtime.ts` の `listWithdrawnAmong` が
+  `forgotten`（purge 済みを含む）・`contested`・訂正の解決で負けた `superseded` を数え、1件でも在れば LLM を呼ばず何も書かずに
+  `extraction: "skipped"` を返す（今の `Runtime.reextract` の実装を読んで確かめた）。
+- 本 ADR の確認と数える範囲が違う。本 ADR の確認は status を絞らず、同じ版の記憶が1件でも在れば返す（`active` も数える）。
+  `reextract` の確認は「退けた」ものだけを数え、`active` だけが在る Observation はやり直す（やり直すのが `reextract` の目的）。
+- 本文の決定1の、forget・purge した記憶が再配達で蘇らないという約束を縛る歯は、[ADR 0608](./0608-merged-0928-recheck-teeth-a.md) が足した。

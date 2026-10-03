@@ -621,5 +621,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0604](./0604-fixture-erase-tenant-usages-exact-tenant.md) | testkit の InMemory と core の Fake の `eraseTenant` が `recall_usages` を tenantId の完全一致で消す（あわせて Fake の `tenant_subject_activity` を subject ごとの行で数える） | 採用 (2026-10) |
 | [0605](./0605-outbox-complete-fail-at-bounds-teeth.md) | OutboxStore.complete・fail の `opts.at` の境界の確かめ直し（ADR 0597）で見つかった穴を塞ぐ（Postgres の例外の型・西暦10000年・紀元前100年） | 採用 (2026-10) |
 | [0606](./0606-merged-pr-1002-recheck-teeth.md) | 10/02 にマージされた #1646・#1649・#1650・#1643・#1636 の確かめ直しで見つかった穴を塞ぐ（空白だけの title・例外の同一性と params・tick の opts の通る側・reachedLimit の境目・labels の語彙と並び） | 採用 (2026-10) |
+| [0608](./0608-merged-0928-recheck-teeth-a.md) | 09/28 前後にマージされた #1318・#1366・#1378 の確かめ直しで見つかった穴に歯を足す（forget・purge 後の extract 再配達・restoreSupersededBy の Invalid Date・生きた接続の release(err)） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
