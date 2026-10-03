@@ -2913,6 +2913,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`Runtime.tick` の `embed` ジョブ: forget した記憶・purge した記憶では、embedding provider を呼ばずにジョブを終える**（[ADR 0541](./decisions/0541-embed-job-skips-withdrawn-memory.md)）。
   以前は、forget の前に積まれた埋め込みジョブが後から走ると、`forgotten` の記憶の本文（purge 済みなら墓標）を `embeddingProvider.embed` に送り、ベクトルを書いていた。今は、`forgotten` か purge 済みの記憶なら provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する。`embeddingProvider` の呼び出し回数を数えているテストや、forget した記憶のベクトルが存在することに頼っているコードは見直すこと。新しく断る入力は無く、他の状態（`active`・`archived`・`superseded`・`contested`）は変わらない。すでに送られた分は取り消せない。
 
+- **`@mnemora/testkit/fixtures` の `InMemory*`: `text` 列に入る欄の孤立サロゲートを、`@mnemora/postgres` と同じく U+FFFD に置き換えて保存する**（[ADR 0543](./decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。🟡。オーナーの決定で、ADR 0423 決定5 の「インメモリは保持」を置き換えた）。
+  以前の fixture は、孤立サロゲート（`"a\uD800b"` など）を含む `content`・`digest`・`tags`・claim key・ラベル名などをそのまま保持して読み返した。いまは `"a\uFFFDb"` で返る（Postgres と同じ）。**対をなす絵文字・普通の文字列は変わらない。** 読み取りの引数（`claimKey`・`extractorVersion`・`labels`）も同じく置き換わるので、書いた値と同じ入力で引けば当たる。
+  🔴 でなく 🟡 に置いた理由【判断】: 新しく断る入力は無く（上の「数え方の規律への追記（2026-09-28）」の2 の線の内側）、公開の型・DB・`@mnemora/postgres`・conformance suite は変えていない。変わるのは公開の fixture が返す値だけで、本物の adapter に近づく向きの変更である。ただし、**以前は保持された値が書き換わる**——孤立サロゲートの保持をテストが前提にしていた人は、値が変わって落ちる。そう読んで 🔴 に数え直すのはオーナーの判断（CHANGELOG の `[1.3.0]` 側も同じ分類）。手順は要らない。
+  **まだ揃っていない**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`。`observe` の `text` などは `payload` に入る）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**

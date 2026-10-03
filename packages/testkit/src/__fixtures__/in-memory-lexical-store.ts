@@ -1,6 +1,7 @@
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
+import { replaceLoneSurrogates } from "./well-formed-text.js";
 import {
   assertQueryLabelsWithoutNul,
   assertQueryDate,
@@ -269,6 +270,16 @@ export class InMemoryLexicalStore implements LexicalStore {
     assertQueryDate("search", "filter.validAt", opts.filter.validAt);
     // ADR 0456 H3・ADR 0500: `labels` は `text[]` の引数。要素の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
+    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    opts = {
+      ...opts,
+      filter: {
+        ...opts.filter,
+        ...(opts.filter.labels === undefined
+          ? {}
+          : { labels: opts.filter.labels.map((label) => replaceLoneSurrogates(label)) }),
+      },
+    };
     // ADR 0434: `attributes` は `jsonb` の包含判定の引数。NUL は Postgres ではクエリの時点で `22P05` になる。
     assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
     // `PostgresLexicalStore.search`（`buildLexicalSearchSelect`）は `opts.limit` を

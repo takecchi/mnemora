@@ -144,7 +144,8 @@
 //   const relationStore = new InMemoryRelationStore(memoryStore, memoryStore.relations);
 //
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
-// 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4714年より前の日時のうち、行に日時を書く口（`createMemory` の
+// `jsonb` 列の欄（`payload`・`attributes`・`provenance`）に入る孤立サロゲート（Postgres は拒み、fixture は保持する。`MemoryStore.createMemory` の doc、#1075。
+// `text` 列の欄の孤立サロゲートは、ADR 0543 で fixture も Postgres と同じく U+FFFD に置き換えるようにした）、紀元前4714年より前の日時のうち、行に日時を書く口（`createMemory` の
 // `occurredAt` など。読みの口・`opts.now` は ADR 0500 で揃えた。#1041）、
 // 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
 // 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。

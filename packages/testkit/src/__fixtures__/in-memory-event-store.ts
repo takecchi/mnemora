@@ -10,6 +10,7 @@ import { assertWellFormedCtx } from "@mnemora/core";
 import { nextId } from "./id.js";
 import { assertQueryDate } from "./query-check.js";
 import { assertStorableMemoryEvent } from "./memory-event-check.js";
+import { replaceLoneSurrogates } from "./well-formed-text.js";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 
 /**
@@ -37,7 +38,8 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
     kind: event.kind,
     at: event.at ?? new Date(),
     actor: event.actor,
-    digestSnapshot: event.digestSnapshot ?? null,
+    // ADR 0543: `memory_events.digest_snapshot` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する。
+    digestSnapshot: replaceLoneSurrogates(event.digestSnapshot) ?? null,
     sizeBeforeBytes: event.sizeBeforeBytes ?? null,
     meta: event.meta,
   });
