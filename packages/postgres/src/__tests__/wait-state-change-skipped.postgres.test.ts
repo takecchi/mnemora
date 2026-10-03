@@ -291,6 +291,64 @@ for (const [name, makeKit] of KITS) {
     });
   });
 
+  describe(`${name}: reextract の止めない状態・複数件の列挙（ADR 0544 決定1・2）`, () => {
+    it("対照: 待つ間に X が機構で置き換えた superseded（contested_resolved ではない）になっても止めず、従来どおり書かれる", async () => {
+      const kit = await makeKit();
+      extractContents = ["猫は3匹"];
+      const first = await kit.runtime.observe(ctx, { kind: "utterance", text: "猫は3匹いる" });
+      const x = first.memoryIds[0]!;
+      const y = (await createActive(kit, "猫は3匹（別の記憶）")).id;
+      extractContents = ["猫を3匹飼っている"];
+      const hold = holdNextCall();
+      const pending = kit.runtime.reextract(ctx, first.observationId);
+      await hold.stopped;
+      await kit.memoryStore.updateStatus(ctx, x, "superseded", {
+        expectedStatus: "active",
+        supersededById: y,
+      });
+      hold.resume();
+      const result = await pending;
+
+      expect(result.extraction).toBe("ok");
+      expect(result.memoryIds).toHaveLength(1);
+      expect(await statusOf(kit, x)).toBe("superseded");
+    });
+
+    it("待つ間に X と Z の2件が退けられたら、skipped に止めた記憶ごと（実際の status）が並び、何も書かれない", async () => {
+      const kit = await makeKit();
+      extractContents = ["猫は3匹", "犬は1匹"];
+      const first = await kit.runtime.observe(ctx, { kind: "utterance", text: "猫は3匹、犬は1匹" });
+      const [x, z] = first.memoryIds as [string, string];
+      const y = (await createActive(kit, "猫は2匹")).id;
+      const w = (await createActive(kit, "犬は2匹")).id;
+      extractContents = ["猫を3匹飼っている", "犬を1匹飼っている"];
+      const hold = holdNextCall();
+      const pending = kit.runtime.reextract(ctx, first.observationId);
+      await hold.stopped;
+      await kit.runtime.markContested(ctx, x, y);
+      await kit.runtime.markContested(ctx, z, w);
+      await kit.runtime.resolveContested(ctx, z, w, { kind: "supersede", winnerId: w });
+      hold.resume();
+      const result = await pending;
+
+      expect(result.memoryIds).toEqual([]);
+      expect(result.supersededMemoryIds).toEqual([]);
+      expect(result.extraction).toBe("skipped");
+      expect(result.skipped).toHaveLength(2);
+      expect(result.skipped).toEqual(
+        expect.arrayContaining([
+          { kind: "status_not_active", memoryId: x, status: "contested" },
+          { kind: "status_not_active", memoryId: z, status: "superseded" },
+        ]),
+      );
+      const all = await kit.memoryStore.listBySourceObservationAllVersions(
+        ctx,
+        first.observationId,
+      );
+      expect(all).toHaveLength(2);
+    });
+  });
+
   describe(`${name}: consolidate・reflect が LLM を待つ間に、元の記憶が contested になったとき（ADR 0544）`, () => {
     it("consolidate: A が contested になったら、統合先を作らず aborted_source_status_changed で打ち切る（B は active のまま）", async () => {
       const kit = await makeKit();

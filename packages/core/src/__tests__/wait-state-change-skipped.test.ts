@@ -162,6 +162,52 @@ for (const hidePort of [false, true]) {
       }
     });
 
+    it("対照 reextract: 待つ間に X が機構で置き換えた superseded（contested_resolved ではない）になっても止めず、従来どおり書かれる", async () => {
+      const { runtime, stores, phase } = setup(hidePort);
+      phase.extract = ["猫は3匹"];
+      const first = await runtime.observe(ctx, { kind: "utterance", text: "猫は3匹いる" });
+      const x = first.memoryIds[0]!;
+      const y = (await stores.memoryStore.createMemory(ctx, newMemory("猫は3匹（別）"))).id;
+      phase.extract = ["猫を3匹飼っている"];
+      phase.beforeReturn = async () => {
+        await stores.memoryStore.updateStatus(ctx, x, "superseded", {
+          expectedStatus: "active",
+          supersededById: y,
+        });
+      };
+      const result = await runtime.reextract(ctx, first.observationId);
+      expect(result.extraction).toBe("ok");
+      expect(result.memoryIds).toHaveLength(1);
+    });
+
+    it("reextract: 待つ間に X と Z の2件が退けられたら、skipped に止めた記憶ごと（実際の status）が並ぶ", async () => {
+      const { stores, runtime, phase } = setup(hidePort);
+      phase.extract = ["猫は3匹", "犬は1匹"];
+      const first = await runtime.observe(ctx, { kind: "utterance", text: "猫は3匹、犬は1匹" });
+      const [x, z] = first.memoryIds as [string, string];
+      const y = (await stores.memoryStore.createMemory(ctx, newMemory("猫は2匹"))).id;
+      const w = (await stores.memoryStore.createMemory(ctx, newMemory("犬は2匹"))).id;
+      phase.extract = ["猫を3匹飼っている", "犬を1匹飼っている"];
+      phase.beforeReturn = async () => {
+        await runtime.markContested(ctx, x, y);
+        await runtime.markContested(ctx, z, w);
+        await runtime.resolveContested(ctx, z, w, { kind: "supersede", winnerId: w });
+      };
+      const result = await runtime.reextract(ctx, first.observationId);
+      expect(result).toMatchObject({
+        memoryIds: [],
+        supersededMemoryIds: [],
+        extraction: "skipped",
+      });
+      expect(result.skipped).toHaveLength(2);
+      expect(result.skipped).toEqual(
+        expect.arrayContaining([
+          { kind: "status_not_active", memoryId: x, status: "contested" },
+          { kind: "status_not_active", memoryId: z, status: "superseded" },
+        ]),
+      );
+    });
+
     it("consolidate: A が contested になったら aborted_source_status_changed。対照: 変化なしなら統合される", async () => {
       const { stores, runtime, phase } = setup(hidePort);
       const a = await stores.memoryStore.createMemory(ctx, newMemory("A"));

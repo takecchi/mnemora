@@ -74,6 +74,7 @@
   歯だけを先に置いて、直す前の main の実装（`eb614e16`）で走らせた: Postgres 側 44本中20本が赤（目的の歯のすべて）、対照の24本は緑。core 側 10本中8本が赤、対照の2本は緑。直して 44本・10本とも緑。
   変異試験（`runtime.ts` を1か所ずつ変え、歯の両ファイルを走らせ、`cp` で戻して緑を確かめた）: (M1) `reextract` の読み直しを `forgotten` だけに戻す → Postgres 側 12本・core 側 4本が赤。(M2) `consolidate` から `contested` を外す → 4本・2本が赤。(M3) `reflect` から `contested` を外す → 4本・2本が赤。(M4) `reextract` が `archived` も止める → 対照の `archived` の歯だけ 4本・2本が赤。(M5) `listWithdrawnAmong` が `contested_resolved` を見ない → 訂正で負けた `superseded` の歯だけ 4本・2本が赤。
   既存の歯（ADR 0406・0420・0454 の歯、`reextract.test.ts`・`consolidate.test.ts`・`reflect.test.ts`・`runtime.test.ts` ほか）は、書き換えず緑のまま。
+  追加の歯（独立の変異検査で、上の M1〜M5 では赤にならない変異が2つすり抜けたため、同じ2ファイルに足した。Postgres 側 52本・core 側 14本）: (T1) 待つ間に X が機構で置き換えた `superseded`（`contested_resolved` ではない）になっても、`reextract` は止めずに言い換えを書く（決定1の「止めない」の縛り。変異「`active`・`archived` 以外は全部止める」で赤）。(T2) 待つ間に2件（`contested` と、訂正で負けた `superseded`）が退けられたら、`skipped` に止めた記憶ごとの `status_not_active` が、読み直した実際の `status` で並び、何も書かれない（決定2の縛り。変異「`skipped` を先頭1件だけにする」で赤）。`llmCalls` を打ち切り時に変える変異は、この ADR の約束の範囲外として縛っていない。
 
 - **確かめていないこと**:
 
