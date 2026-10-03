@@ -144,6 +144,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`reextract`・`consolidate`・`reflect` が、LLM を待つ間に元の記憶が `contested`（`reextract` はさらに、訂正の解決で負けた `superseded`）になっていたら、書かずに打ち切る**（[ADR 0544](./docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)、`@mnemora/core`。🟡。[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) の負債1・[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md) の部分成功・[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md) の負債1・5 を置き換える）。
+
+  以前は、待つ間に訂正の対（`contested`）に入った記憶の本文から作った言い換え・統合先・内省が `active` で書かれていた。いまは、LLM の前の門と同じ判定を LLM の後にもう一度当てる。公開の型は増やしていない。
+  - **見え方が変わるもの**: 待つ間に `contested` になった呼び出しの結果。`reextract` は `extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に `status_not_active`（`status` は `contested` か `superseded`）、`consolidate`・`reflect` は `outcome: "aborted_source_status_changed"`（`observedStatus: "contested"`）。以前はどれも成功していた。待つ間に何も変わらなければ従来どおり。
+  - **変えなかったこと**: `archived`（`reextract` は LLM の前の門も通す。`consolidate`・`reflect` は ADR 0420 の部分成功のまま）。世代の往復（`X → Y → X`）の扱い（ADR 0454 負債6）。`MemoryStore` の引数・例外。読み直しと書き込みの間の窓は `contested` についてはまだ残る（ADR 0544 負債1）。
+
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
 
   `upsert`・`search`・`searchMany`・`delete`・`getVectors`・`deleteAcrossSpaces`・`eraseTenant` が投げる例外の `message`（と `stack`・`cause` の連鎖）の `params:` より後ろを、`Runtime` と同じ形（`(omitted by mnemora, N chars)`）に落とす。`searchMany` は 1 文に最大 16384 件のベクトルが params に載っていた。例外は新しく作らず、その場で書き換えるので、`kind`・`name`・`code`・`cause` は残る。
@@ -161,11 +167,27 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **揃えていないもの**: Postgres の text search parser の細部（`-12` の符号付き token、`a.b`・メールアドレスの 1 token、ハイフン結合語）。ADR 0513 に実測を書いた。
   - 本物の adapter（`@mnemora/postgres`）は変えていない。conformance suite は変えていない。
 
+- **`@mnemora/testkit/fixtures` の `InMemory*` が、`text` 列に入る欄の孤立サロゲート（対をなさない UTF-16 のサロゲートコードユニット）を、`@mnemora/postgres` と同じく U+FFFD に置き換えて保存するようになった**（[ADR 0543](./docs/decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。オーナーの決定。ADR 0423 決定5 の「インメモリは保持」と、ADR 0458 の B3 の歯を置き換える。🟡）。
+
+  以前の `InMemoryMemoryStore` は、孤立サロゲートを含む `content`・`digest`・`tags` などをそのまま保持して読み返した。`@mnemora/postgres` は node-postgres が UTF-8 に変換するときに 1 単位ずつ U+FFFD に置き換えるので、同じ入力で書いて読み返した値が実装ごとに違った。いまは InMemory（と core のテスト用 `FakeMemoryStore`）も同じに置き換える。
+  - **置き換える欄**（Postgres で実際に置き換わると実測した欄）: `createMemory` 系の `content`・`digest`・`contentHash`・`tags` の各要素・`extractorVersion`・`claimKey` の主語と述語（冪等の鍵も置き換えた後の値で比べる）、`createObservation` 系の `kind`、`registerLabel` の `name`、`purgeMemory` の墓石、イベントの `digestSnapshot`、outbox の `kind`・`claimedBy`。読み取りの引数（`findActiveByClaimKey`・`findContestedByClaimKey` の `claimKey`、`listBySourceObservation` の `extractorVersion`、`labels` の絞り、`OutboxStore.claimBatch` の `kinds`・`claimedBy`）も同じ規則で置き換えて比べる。
+  - **変わらないもの**: 対をなすサロゲート（絵文字）・普通の文字列・U+FFFD そのもの。識別子（`tenantId`・`subjectId`・`externalId`）は ADR 0423 のまま入口で断る。`@mnemora/postgres` と conformance suite、公開の型・関数は変えていない。
+  - **まだ揃っていないもの**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す（`observe` の `text` などは `payload` に入る）。ADR 0543 の対象外。
+  - **破壊的と数えない理由**: 断る入力は増えない。公開の fixture の振る舞いの変更で、型・DB・`@mnemora/postgres` は変わらない（[docs/migration-v1.md](./docs/migration-v1.md) の 🟡「v1.2.0 → 次の版」）。孤立サロゲートの保持に頼ったテストだけが影響を受ける。
+
 - **`extractTitle: true` の `observe()`（`document`）で、`title` が空白だけ（`String.prototype.trim` で空になる値）のとき、抽出（LLM）に渡す本文と全文フォールバックの Memory の本文の前置きにしなくなった**（[ADR 0517](./docs/decisions/0517-blank-title-is-not-prefixed-when-extract-title.md)。[ADR 0502](./docs/decisions/0502-observe-rejects-whitespace-only-input.md) の負債 1、`@mnemora/core`）。
 
   以前は `"  \n\nC"` のように空白が前置きになった。今は `title` を渡さなかったときと同じ（`content` だけ）。実質のある `title` は、前後の空白もそのまま前置きになる。
 
   - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
+
+- **読みの口の日時の条件が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前でも、`@mnemora/postgres` が生の `DrizzleQueryError`（`22008 timestamp out of range`）で落ちず、下限へ寄せてから比べる。`@mnemora/testkit/fixtures` の InMemory も、同じ入力を `RangeError` で断らず、意味どおりに答える**（[ADR 0547](./docs/decisions/0547-pg-out-of-range-date-reads-clamp-to-floor.md)。🟡。[ADR 0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の M2 と [ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) の決めたこと2のうち、読みの口の部分を置き換える）。
+
+  - **何が変わるか**: 対象は `EventStore.list` の `since`・`until`、`VectorStore.search`・`searchMany` の `occurredAfter`・`occurredBefore`・`validAt`・`decayFloorAtAfter`、`LexicalStore.search`（tsvector 版・trigram 版）の `occurredAfter`・`occurredBefore`・`validAt`、`MemoryStore.aggregateScope` の同じ4欄、`findActiveByClaimKey`・`findContestedByClaimKey` の `validFrom`・`validUntil`、`OutboxStore.claimBatch` の `opts.now`（`now - leaseMs` を含む）、これらを通る `Runtime.recall`。以前は生の例外で終わった入力が、成功する。`since`・`occurredAfter`・`decayFloorAtAfter` は全件、`until`・`occurredBefore` は0件になる（列の値はすべて下限以後）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は以前から0件で返す——判定を1つの補助関数に集めただけで、結果は変わらない。
+  - **破壊的と数えない理由**: 断る入力が減る（例外が成功に変わる）。型・シグネチャ・公開 API は変えていない。`@mnemora/testkit` の InMemory が `RangeError` を投げなくなる（ADR 0500 で足した口のうち読みの口）が、断る入力が減る側の変更である。
+  - **変えなかったこと**: 行に日時を書く口（記憶・observation・イベント・outbox・recall の INSERT／UPDATE。下限より前は `22008` のまま）、`Invalid Date`（`22007`）、InMemory の書く口の `RangeError`。
+  - **既知の限界**: 下限ちょうどの時刻に行がある場合、`until` 系を下限より前にすると、`@mnemora/postgres` はその行を返す（意味どおりなら0件。InMemory と core の Fake は0件）。ADR 0547 の「引き受けた負債」。
+  - 手順は要らない。DB マイグレーションは無い。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた。
 
 - **`lexicalMatch`（`LexicalStore` が返す `coverage`）の尺度を、3つの store（`PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`）で測り、文書と歯にした**（[ADR 0553](./docs/decisions/0553-lexical-coverage-scale-across-stores.md)。[ADR 0484](./docs/decisions/0484-recall-channel-merge-on-real-postgres.md) の負債1。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` を足し、各 store と `LexicalHit.coverage` の TSDoc に尺度と ADR への参照を足した）。
   - 測ったのは、tsvector 版と InMemory が「一致した語数 ÷ 語の総数」の 1/n 刻みで同じ式であること、pg_trgm 版の日本語側が `word_similarity` の閾値による 0/1 の二値で（値は `rank` の側に入る）`GREATEST` で ASCII 側と合成されること。尺度は揃えていない（揃えるかはオーナーの判断）。
@@ -194,6 +216,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **何が変わるか**: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの目次帯のうち、渡された id の purge 済み（`forgotten` かつ `purgedAt` が非 `null`）の行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ置き換える。エントリは残し `truncated` は落とす。未 purge の行・他のエントリ・他テナントは触らない。べき等。
   - **変えなかったこと**: `recalls.query`・`explain` は残る（`memoryId` で特定できない。何を消すかはオーナーの判断待ち）。migration での一括処理はしない。自動では走らず、利用者が purge をかけ直した行だけに効く。
   - **破壊的と数えない理由**: 断る入力は増えない。`scrubPurged` の約束（purge の残骸を消す）に実装を戻す直しで、公開 API は変えていない。
+
+- **forget した記憶・purge した記憶の本文を、埋め込みジョブ（`tick` の `embed`）が外部の embedding provider に送らないようになった。**forget の前に積まれた埋め込みジョブが後から走ると、以前は `forgotten` の記憶の本文（purge 済みなら墓標 `[purged]`）を `embeddingProvider.embed` に送っていた。今は、`forgotten` か purge 済み（`purgedAt` あり）の記憶なら、provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する（再試行で回り続けない）。`active`・`archived`・`superseded`・`contested` は今までどおり埋め込む。**すでに送られた分は取り消せない**。読んでから provider を呼ぶまでの間に forget された場合の窓は塞げない。`consolidate`・`reflect`・`extract` は元から forgotten・purged の記憶の本文を LLM に送っていない（実測）。（[ADR 0541](./docs/decisions/0541-embed-job-skips-withdrawn-memory.md)）
 
 - **`Runtime.consolidate`・`reflect` が積む `created` イベントの `meta.sources` を、呼び出し側が渡した綴りではなく、store が返した記憶の id（小文字）で書くようにした。**大文字の uuid の `memoryIds`（`seedMemoryId`）を渡すと、`@mnemora/postgres` の `created` の `meta.sources` に大文字の綴りが残っていた（作られた記憶の `provenance.sources`・`superseded` イベントの `memoryId` は元から小文字）。小文字で渡したときの値は変わらない。すでに書かれた行は書き換えない。（[ADR 0527](./docs/decisions/0527-consolidate-reflect-created-sources-lowercase.md)）
 

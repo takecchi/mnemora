@@ -56,7 +56,6 @@ async function makeKit(): Promise<Round31Kit> {
 
 describeRound31Teeth("InMemoryMemoryStore", makeKit, {
   implementsAbortIfForgotten: false,
-  loneSurrogateText: "keep",
   jsonbRejectsLoneSurrogate: false,
   claimKeyIndexLimit: false,
 });

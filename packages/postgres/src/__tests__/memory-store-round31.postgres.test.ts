@@ -52,7 +52,6 @@ async function makeKit(): Promise<Round31Kit> {
 
 describeRound31Teeth("PostgresMemoryStore", makeKit, {
   implementsAbortIfForgotten: true,
-  loneSurrogateText: "replace",
   jsonbRejectsLoneSurrogate: true,
   claimKeyIndexLimit: true,
 });
