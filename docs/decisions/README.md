@@ -558,6 +558,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
 | [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0546](./0546-conformance-suite-adds-round31-promises.md) | conformance suite に約束を足す——ADR 0458 の A2・A3・A10・PC6 と、`embed` の重複件数（オーナーの判断が出る前に用意した Draft） | 採用 (2026-10) |
 | [0548](./0548-bullmq-lock-duration-and-remove-on-complete-default.md) | `createBullmqTickDriver` に `lockDuration` の口と完了ジョブの保持の既定（`removeOnComplete: { count: 1000 }`）を足す — ADR 0440 の決定4、ADR 0449 の決定5・材料1・材料6 を置き換える | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
