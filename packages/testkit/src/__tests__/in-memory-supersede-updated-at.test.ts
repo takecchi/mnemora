@@ -53,3 +53,45 @@ describe("InMemoryMemoryStore.supersedeWithNewMemories: 古い記憶の updatedA
     expect(result.created[0]!.jobs[0]!.createdAt).toEqual(PAST);
   });
 });
+
+describe("InMemoryMemoryStore.supersedeWithNewMemories: 古い記憶の createdAt は変わらない（core の Fake と同じ不変条件）", () => {
+  it("置き換えで updatedAt は壁時計へ進むが、createdAt は作ったときのまま（後から書き換わらない）", async () => {
+    const CREATED = new Date("2026-05-01T00:00:00.000Z");
+    const store = new InMemoryMemoryStore();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(CREATED);
+    const old = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "old-hash-created-at" }),
+    );
+    expect(old.createdAt).toEqual(CREATED);
+    vi.setSystemTime(WALL);
+    const event: NewMemoryEvent = {
+      tenantId: ctx.tenantId,
+      memoryId: old.id as MemoryId,
+      kind: "superseded",
+      actor: { type: "system" },
+      meta: { reason: "test" },
+    };
+
+    const result = await store.supersedeWithNewMemories(
+      ctx,
+      [
+        {
+          input: buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: "new-hash-created-at",
+          }),
+          jobKinds: ["embed"],
+        },
+      ],
+      [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event }],
+    );
+
+    expect(result.superseded).toHaveLength(1);
+    const after = (await store.get(ctx, old.id))!;
+    expect(after.status).toBe("superseded");
+    expect(after.updatedAt).toEqual(WALL); // 陽性対照
+    expect(after.createdAt).toEqual(CREATED);
+  });
+});

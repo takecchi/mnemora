@@ -1,3 +1,4 @@
+import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { omitParamsFromError } from "../omit-params.js";
 
@@ -96,5 +97,61 @@ describe("omitParamsFromError: 先に読まれていた stack も書き換える
 
     expect(top.stack ?? "").not.toContain(SECRET);
     expect(inner.stack ?? "").not.toContain(SECRET);
+  });
+});
+
+/**
+ * ADR 0592（ADR 0586 の歯の穴、確かめ直し）: 上の歯がどれも捕まえなかった3つ。
+ *
+ * - 循環する `cause` でも止まる（`seen` の歯止め。外すと無限ループ）。無限ループは同期なので vitest の
+ *   時間切れでは止まらない。`node:vm` の `timeout` で打ち切り、赤として観測できる形にする。
+ * - 書き換えられない（凍結された）例外は、投げずにそのまま返す（`catch` で握る）。
+ * - 冪等——2回掛けても1回と同じ（印済みの検査。外すと、印の中の文字数が毎回書き変わる）。
+ */
+describe("omitParamsFromError: 取りこぼしていた3つ（ADR 0592）", () => {
+  it("cause が循環していても止まり、輪の全員の params が消える", () => {
+    const a = drizzleLikeError("cycleA");
+    const b = drizzleLikeError("cycleB", a);
+    (a as { cause?: unknown }).cause = b; // a -> b -> a
+    const sandbox = { omitParamsFromError, a };
+    let returned: unknown;
+    expect(() => {
+      returned = vm.runInNewContext("omitParamsFromError(a)", sandbox, { timeout: 2000 });
+    }).not.toThrow();
+    expect(returned).toBe(a);
+    expect(a.message).not.toContain(SECRET);
+    expect(b.message).not.toContain(SECRET);
+    expect(a.message).toContain(SQL);
+  });
+
+  it("凍結された例外は、投げずにそのまま返す（message は変わらない）", () => {
+    const frozen = Object.freeze(drizzleLikeError("frozen"));
+    const before = frozen.message;
+    let returned: unknown;
+    expect(() => {
+      returned = omitParamsFromError(frozen);
+    }).not.toThrow();
+    expect(returned).toBe(frozen);
+    expect(frozen.message).toBe(before);
+  });
+
+  it("凍結された例外の cause の段は、書き換えられるなら書き換える（途中で止まらない）", () => {
+    const inner = drizzleLikeError("inner");
+    const frozen = Object.freeze(drizzleLikeError("frozenOuter", inner));
+    expect(() => omitParamsFromError(frozen)).not.toThrow();
+    expect(inner.message).not.toContain(SECRET);
+  });
+
+  it("冪等: 2回掛けても1回と同じ（message も stack の中の message も）", () => {
+    const once = drizzleLikeError("idem");
+    omitParamsFromError(once);
+    const twice = drizzleLikeError("idem");
+    omitParamsFromError(twice);
+    omitParamsFromError(twice);
+    expect(once.message).toMatch(/\nparams: \(omitted by mnemora, \d+ chars\)$/);
+    expect(twice.message).toBe(once.message);
+    // stack には呼び出し位置が入るので全体は比べない。先頭（message を含む行）が1回のときと同じであること。
+    expect(once.stack ?? "").toContain(once.message);
+    expect(twice.stack ?? "").toContain(once.message);
   });
 });

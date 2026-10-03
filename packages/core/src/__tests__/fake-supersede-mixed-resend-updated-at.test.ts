@@ -128,3 +128,36 @@ describe("FakeMemoryStore.supersedeWithNewMemories: 古い記憶の updatedAt �
     expect(result.created[0]!.jobs[0]!.createdAt).toEqual(PAST);
   });
 });
+
+describe("FakeMemoryStore.supersedeWithNewMemories: 古い記憶の createdAt は変わらない（ADR 0592。オーナー側の判断で不変条件として縛る）", () => {
+  it("置き換えで updatedAt は壁時計へ進むが、createdAt は作ったときのまま（後から書き換わらない）", async () => {
+    // 明文の約束は無いが、作成時刻が後から書き換わらないのは当然の不変条件として縛る（オーナー側の判断）。
+    // `updatedAt` と一緒に `createdAt` も `new Date()` で書き換える実装は、他の歯では捕まらなかった。
+    const CREATED = new Date("2026-05-01T00:00:00.000Z");
+    const { memoryStore } = createFakeRuntimeStores();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(CREATED);
+    const old = await memoryStore.createMemory(ctx, newMemory());
+    expect(old.createdAt).toEqual(CREATED);
+    vi.setSystemTime(WALL);
+
+    const result = await memoryStore.supersedeWithNewMemories(
+      ctx,
+      [{ input: newMemory(), jobKinds: ["embed"] }],
+      [
+        {
+          id: old.id,
+          supersededByIndex: 0,
+          expectedStatus: "active",
+          event: supersedeEvent(old.id),
+        },
+      ],
+    );
+
+    expect(result.superseded).toHaveLength(1);
+    const after = (await memoryStore.get(ctx, old.id))!;
+    expect(after.status).toBe("superseded");
+    expect(after.updatedAt).toEqual(WALL); // 陽性対照: 置き換えは updatedAt を進める
+    expect(after.createdAt).toEqual(CREATED);
+  });
+});
