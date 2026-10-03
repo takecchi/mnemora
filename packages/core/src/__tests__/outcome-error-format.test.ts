@@ -197,9 +197,11 @@ describe("runtime.purge — 競合後の再読で already_purged になる枝の
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.purgedAt = new Date();
-        memory.content = "[purged]";
-        memory.digest = "[purged]";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+        live.purgedAt = new Date();
+        live.content = "[purged]";
+        live.digest = "[purged]";
       }
     };
     stores.vectorStore.deleteAcrossSpaces = async () => {
@@ -222,9 +224,11 @@ describe("runtime.purge — 競合後の再読で already_purged になる枝の
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.purgedAt = new Date();
-        memory.content = "[purged]";
-        memory.digest = "[purged]";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+        live.purgedAt = new Date();
+        live.content = "[purged]";
+        live.digest = "[purged]";
       }
     };
 

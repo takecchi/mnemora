@@ -34,7 +34,7 @@ export interface OutboxJob {
 /**
  * Scheduler — interface は Phase 1、既定実装は `InlineScheduler`
  * （docs/architecture.md §5.6）。**この interface の実装は、今も `InlineScheduler` だけである。**
- * BullMQ は `Scheduler` の実装としては来なかった——`@mnemora/bullmq`（npm には未公開）は
+ * BullMQ は `Scheduler` の実装としては来なかった——`@mnemora/bullmq`（npm に公開済み。版・経緯は AGENTS.md の表）は
  * この interface を実装せず、BullMQ のジョブで `runtime.tick()` を駆動する
  * （[ADR 0325](../../../../docs/decisions/0325-bullmq-tick-driver.md)）。
  *

@@ -34,8 +34,8 @@
  * - `updated_at` 列（`memories`/`outbox` 等）と `memories.created_at`。
  * - `recall_usages.used_at`（公開の口からは読まれない）。
  * - `vector_embeddings.created_at`。
- * - `registered_at`（`TenantSettingsStore` 系）。
- * - `tenant_settings` の補助的な列（`tenant_activity.updated_at` 等）。
+ * - `labels.registered_at`（`MemoryStore.registerLabel?` が書く。`TenantSettingsStore` の列ではない）。
+ * - `tenant_settings`・`tenant_activity` の `updated_at`（`TenantSettingsStore` の書き込みが SQL の `now()` で書く）。
  * - `packages/core/src/event-retention-purge.ts` の `purgeExpiredEventsForTenant` の
  *   `opts.now`（既定 `new Date()`）——`Runtime` のメソッドではなく
  *   `{ memoryStore, tenantSettingsStore }` だけを受け取る独立した部品であり、

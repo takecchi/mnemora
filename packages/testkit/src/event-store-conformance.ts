@@ -17,9 +17,13 @@ export interface EventStoreConformanceOptions {
    * `memory_id` に実在の Memory を要求するためのフック。**必須。**
    *
    * `memory_events.memory_id → memories(id)` は外部キー（`kind = 'events_purged'` の
-   * 場合のみ NULL）。`docs/testkit` の既定フィクスチャ（`buildNewMemoryEventFixture`）は
+   * 場合のみ NULL）。既定フィクスチャ（`buildNewMemoryEventFixture`、`test-data.ts`）は
    * `memoryId: null` を既定にしているため、`memoryId` を伴うテスト（list の memoryId
-   * フィルタ・並び順・limit・since/until 等）でのみ使う。
+   * フィルタ・並び順・limit・since/until・append の外部キーとテナントの一致等）でのみ使う。
+   *
+   * ⚠ 返す id は、`createStore()` が返した store から見て実在する Memory で、かつ**渡した `ctx` の
+   * テナントの Memory** であること（ADR 0436: `append` は `memoryId` の Memory が `ctx.tenantId` の
+   * ものでなければ拒む。テナントが違う2つの `ctx` で呼ばれる歯がある）。
    *
    * **ADR 0047 より前は省略可で、省略時は `mem-fixture-N` という実体を作らない固定文字列を
    * 使っていた**——当時は「外部キーを持たない in-memory 実装向け」の既定として正当だったが、
@@ -51,13 +55,19 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  * 検査する契約:
  * - append-only（型・実行時オブジェクトの両方で update/delete が存在しない）
  * - append した event が get/list で取得できる
+ * - `get` は、形式不正な id・well-formed だが実在しない id に例外を投げず `null` を返す
  * - テナント分離（get/list とも他テナントの行を返さない）
- * - list の kind フィルタ・memoryId フィルタ
+ * - list の kind フィルタ・memoryId フィルタ（形式不正・実在しない memoryId は空配列）
  * - list の並び順（`at` 昇順）・`limit`（並べ替えた後に適用）・`since`/`until`（両端含む）
  *   （docs/decisions/0042、`packages/core/src/interfaces/event-store.ts` の doc コメント）
  * - `meta`/`actor` が、core が入れる形（文字列・id・id の配列）だけのまま読み戻る
  *   （Issue #1238 A9、#1211 の表の外の値——Date・NaN・-0・undefined・BigInt・NUL・
  *   孤立サロゲート・関数——は adapter によって往復が違うため対象外）
+ * - `append` の外部キー相当（実在しない `memoryId` は失敗、`memoryId: null` は通る。ADR 0047）と、
+ *   `memoryId` の Memory が `ctx.tenantId` のものでなければ `memory not found for tenant` で拒み
+ *   行を書かないこと（ADR 0436）
+ * - 入力 `meta`・`get` が返した `meta` を呼び手が書き換えても、保存した値が変わらないこと（Issue #1412 A8）
+ * - `ctx.tenantId`・`ctx.subjectId` の形式不正な識別子の拒否（ADR 0423）
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
   const { name, createStore, prepareMemoryId } = options;

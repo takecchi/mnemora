@@ -27,6 +27,8 @@
  * `examples/chat/time-term-baseline.json` はまだ存在しない——値を捏造しないため、
  * 最初の CI 実行の artifact を後続 PR で基準値にする。それまでは `--baseline` を
  * 渡さずに呼ぶ(このスクリプトはそれでも動く)。
+ * （2026-10-03 訂正）`examples/chat/time-term-baseline.json` は、いまは在る。`ci.yml` の
+ * `time-term` ジョブはそれを `--baseline` に渡している。
  */
 import { readFileSync } from "node:fs";
 import {
