@@ -21,7 +21,8 @@ import type { DecayClock } from "../interfaces/tenant-settings-store.js";
  * - `tagMatch` はクエリタグが無ければ中立の 1、あれば `1 + 0.1 * 一致数` とし、
  *   タグが一致しないことで total を 0 に落とさない（タグは加点要素であり除外条件では
  *   ない、という recall.md §2 の位置づけ——段1のフィルタではなく段2の再スコアである
- *   ことに合わせた）。
+ *   ことに合わせた）。一致は `Set` の完全一致（大文字小文字・正規化を区別する）で、
+ *   数えるのは `queryTags` の要素ごと（`queryTags` に同じタグが重複していれば重複して数える）。
  * - `similarity` は ANN 経由でない候補では存在しないため、中立の 1 として扱う。
  * - `lexicalMatch` は**語彙チャンネルが引き当てた候補にのみ**在る
  *   （[ADR 0084](../../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
@@ -407,7 +408,7 @@ const scoreWithDefaultStrategy: ScoringStrategy = (input) => {
  * | `freshness` | `MAX_FRESHNESS`（= 1） | **保証** — `Math.min` が式の中に在る（ADR 0036） |
  * | `tagMatch` | `1 + 0.1 × queryTags.length` | **保証** — `computeTagMatch` の形そのもの。**候補側を見ずにクエリだけで決まる** |
  * | `decay` | 1 | **🔴 前提** — clamp が無い（`DEFAULT_STRATEGY_BOUND_ASSUMPTIONS`） |
- * | `strength` | 1 | **🔴 前提** — 型も DB 列も保証していない（同上） |
+ * | `strength` | 1 | **🔴 前提** — 型は保証しない。同梱の実装は書き込み時に拒む（ADR 0078）が、適合テストを通していない adapter では前提のまま（同上） |
  *
  * **⚠ `tagMatch` の上界に候補側の `tags` を使わない。**使えば上界は縮むが、
  * それには「窓の外の候補の tags」を知る必要があり、**窓の外は見えないというのが前提そのもの**である。

@@ -51,7 +51,7 @@ export function intersectAttributes(
 export const ConsolidationLLMResultSchema = z.object({
   content: z.string().min(1),
   /**
-   * 省略・空文字は「LLM 側の digest 生成が失敗した」ものとして扱い、機械的な先頭文字列
+   * 省略・空文字・空白だけは「LLM 側の digest 生成が失敗した」ものとして扱い、機械的な先頭文字列
    * 切り出しへフォールバックする（`resolveDigest`、extraction.ts と同じ規律）。
    */
   digest: z.string().optional(),
@@ -98,7 +98,8 @@ export interface BuildConsolidatedMemoryParams {
   ctx: Ctx;
   /**
    * 統合される側（`status: 'active'` の eligible）。**入力の順序をそのまま使う**——
-   * `occurredAt` の最新判定・`subjectId` の一致判定・タグの和集合はこの並びに従う。
+   * タグの和集合の並びと `provenance.sources` の並びはこの並びに従う
+   * （`occurredAt` の最新判定・`subjectId` の一致判定は順序に依らない）。
    */
   eligible: Memory[];
   /** 統合の LLM が返した値（本文・digest・tags）。 */
@@ -132,7 +133,8 @@ export interface BuildConsolidatedMemoryParams {
  *
  * - `subjectId`: eligible 全件の `subjectId` が一致すればその値、割れていれば `null`。
  * - `provenance`: `{ kind: 'consolidated', sources: <eligible の memoryId> }`。
- * - `tags`: LLM が返した `tags` があればそれを使い、無ければ eligible の `tags` の和集合。
+ * - `tags`: LLM が返した `tags` があればそれ（空文字・空白だけの要素は `dropBlankTags` で捨てる）を使い、
+ *   無ければ eligible の `tags` の和集合（重複は除く）。
  * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0312 決定4）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
  * - `validFrom` / `validUntil`: eligible 全件の**区間の積**（`intersectValidity`、`validity.ts`。
