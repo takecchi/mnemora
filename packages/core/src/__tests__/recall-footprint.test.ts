@@ -413,6 +413,84 @@ describe("calibrateRecallFootprint — 3階建て", () => {
     expect(profile.charsPerDigest).toBeCloseTo(0.5, 9);
   });
 
+  it("(d) 標本が3件以上でも、借りた傾きのもとでの切片は『標本の平均を通る』（分母は標本の件数）", () => {
+    const fallback = BUILTIN_RECALL_FOOTPRINT_PROFILE;
+    const samples: RecallFootprintSample[] = [
+      { totalChars: 2000, memoryCount: 1, bandEntryCount: 0 },
+      { totalChars: 1200, memoryCount: 2, bandEntryCount: 0 },
+      { totalChars: 700, memoryCount: 6, bandEntryCount: 0 },
+    ];
+    const profile = calibrateRecallFootprint(samples, fallback);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual(["charsPerDigest"]);
+    expect(profile.origin.sampleCount).toBe(3);
+    const meanX = (1 + 2 + 6) / 3;
+    const meanY = (2000 + 1200 + 700) / 3;
+    expect(profile.fixedIndexChars).toBeCloseTo(meanY - fallback.charsPerDigest * meanX, 9);
+  });
+
+  describe("借り元は、引数の fallback である（同梱の既定ではない）", () => {
+    const fallback: RecallFootprintProfile = {
+      ...BUILTIN_RECALL_FOOTPRINT_PROFILE,
+      charsPerDigest: 7,
+      fixedIndexChars: 123,
+    };
+
+    it("最小二乗の傾きが0以下: 傾きを fallback から借り、切片はその傾きのもとで平均を通る", () => {
+      const profile = calibrateRecallFootprint(
+        [
+          { totalChars: 2000, memoryCount: 1, bandEntryCount: 0 },
+          { totalChars: 500, memoryCount: 3, bandEntryCount: 0 },
+        ],
+        fallback,
+      );
+      expect(profile.charsPerDigest).toBe(7);
+      expect(profile.fixedIndexChars).toBeCloseTo((2500 - 7 * 4) / 2, 9);
+    });
+
+    it("memoryCount が1種類: 切片を fallback から借り、傾きはその切片のもとで決まる", () => {
+      const profile = calibrateRecallFootprint(
+        [
+          { totalChars: 500, memoryCount: 10, bandEntryCount: 0 },
+          { totalChars: 520, memoryCount: 10, bandEntryCount: 0 },
+        ],
+        fallback,
+      );
+      expect(profile.fixedIndexChars).toBe(123);
+      expect(profile.charsPerDigest).toBeCloseTo((510 - 123) / 10, 9);
+    });
+
+    it("使える標本が無い: 両方の係数を fallback から借りる", () => {
+      const profile = calibrateRecallFootprint(
+        [{ totalChars: 900, memoryCount: 10, bandEntryCount: 3 }],
+        fallback,
+      );
+      expect(profile.charsPerDigest).toBe(7);
+      expect(profile.fixedIndexChars).toBe(123);
+    });
+  });
+
+  it("(d) totalInScope 付きの標本: 構造項を差し引いたあとの傾きが0以下なら借りる（差し引く前は正でも）", () => {
+    // memoryCount = totalInScope = n（帯は空）。桁上がりは 5 → 0、50 → 2、500 → 4 の構造項になる。
+    // 差し引いたあとの総量は 100 で一定（傾きちょうど0）。差し引く前は 100・102・104 で、傾きは正。
+    const fallback: RecallFootprintProfile = {
+      ...BUILTIN_RECALL_FOOTPRINT_PROFILE,
+      charsPerDigest: 0.1,
+    };
+    const samples: RecallFootprintSample[] = [
+      { totalChars: 100, memoryCount: 5, bandEntryCount: 0, totalInScope: 5 },
+      { totalChars: 102, memoryCount: 50, bandEntryCount: 0, totalInScope: 50 },
+      { totalChars: 104, memoryCount: 500, bandEntryCount: 0, totalInScope: 500 },
+    ];
+
+    const profile = calibrateRecallFootprint(samples, fallback);
+
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual(["charsPerDigest"]);
+    expect(profile.charsPerDigest).toBe(0.1);
+    expect(profile.fixedIndexChars).toBeCloseTo((300 - 0.1 * 555) / 3, 9);
+  });
+
   it("⭐ (a) と (c) は origin.kind だけでは区別できないが、borrowedFromDefault で分岐できる", () => {
     const allDataDriven = calibrateRecallFootprint([
       { totalChars: 300, memoryCount: 5, bandEntryCount: 0 },
