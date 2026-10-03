@@ -496,6 +496,34 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(hitsB.map((hit) => hit.memoryId)).not.toContain(memoryId);
     });
 
+    it("deleteAcrossSpaces: 渡していない memoryId の行は、同じテナント・同じ space でも残る", async () => {
+      // 消すのは渡した memoryId の行だけ（ADR 0601）。上の歯は記憶を1件しか置かないので、
+      // テナントの行を全部消す実装でも通ってしまう。
+      const store = await createStore();
+      await prepareEmbeddingSpace(spaceB);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const target = await prepareMemoryId(ctx);
+      const keep = await prepareMemoryId(ctx);
+
+      await store.upsert(ctx, space, target, [1, 0, 0]);
+      await store.upsert(ctx, spaceB, target, [0, 0, 1]);
+      await store.upsert(ctx, space, keep, [1, 0, 0]);
+      await store.upsert(ctx, spaceB, keep, [0, 0, 1]);
+
+      await store.deleteAcrossSpaces(ctx, [target]);
+
+      const hitsA = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      const hitsB = await store.search(ctx, spaceB, [0, 0, 1], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hitsA.map((hit) => hit.memoryId)).toEqual([keep]);
+      expect(hitsB.map((hit) => hit.memoryId)).toEqual([keep]);
+    });
+
     it("deleteAcrossSpaces: 他テナントに属する memoryId を渡しても、その行は消えない（tenant 境界）", async () => {
       const store = await createStore();
       await prepareEmbeddingSpace(spaceB);

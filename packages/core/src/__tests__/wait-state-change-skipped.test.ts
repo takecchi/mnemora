@@ -253,3 +253,46 @@ for (const hidePort of [false, true]) {
     });
   });
 }
+
+describe("reextract: 退けたかは、最新の superseded イベントの理由で決める（ADR 0601）", () => {
+  // superseded のイベントが2つ以上ある記憶では、`EventStore.list` の昇順の最後の1件が今の理由である。
+  // 最初の1件で決める実装は、訂正で負けた記憶を見落とす（または、機構で置き換えた記憶で打ち切る）。
+  async function supersededWithTwoReasons(order: "contested_resolved_last" | "mechanism_last") {
+    const { stores, runtime, phase } = setup(false);
+    phase.extract = ["猫は3匹"];
+    const first = await runtime.observe(ctx, { kind: "utterance", text: "猫は3匹いる" });
+    const x = first.memoryIds[0]!;
+    const y = (await stores.memoryStore.createMemory(ctx, newMemory("猫は2匹"))).id;
+    // 訂正の解決で x が負ける（今の時刻で `contested_resolved` の superseded イベントが積まれる）。
+    await runtime.markContested(ctx, x, y);
+    await runtime.resolveContested(ctx, x, y, { kind: "supersede", winnerId: y });
+    // 機構で置き換えた superseded イベントを、それより前（または後）の時刻で足す。
+    const mechanismAt =
+      order === "contested_resolved_last"
+        ? new Date("2020-01-01T00:00:00.000Z")
+        : new Date("2099-01-01T00:00:00.000Z");
+    await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: x,
+      kind: "superseded",
+      at: mechanismAt,
+      actor: { type: "system" },
+      digestSnapshot: "猫は3匹",
+      meta: { reason: "consolidated" },
+    });
+    phase.extract = ["猫を3匹飼っている"];
+    return runtime.reextract(ctx, first.observationId);
+  }
+
+  it("最新が contested_resolved なら、古い superseded の理由が機構でも、打ち切る", async () => {
+    const result = await supersededWithTwoReasons("contested_resolved_last");
+    expect(result.extraction).toBe("skipped");
+    expect(result.memoryIds).toEqual([]);
+  });
+
+  it("最新が機構の置き換えなら、古い superseded の理由が contested_resolved でも、打ち切らない", async () => {
+    const result = await supersededWithTwoReasons("mechanism_last");
+    expect(result.extraction).toBe("ok");
+    expect(result.memoryIds).toHaveLength(1);
+  });
+});
