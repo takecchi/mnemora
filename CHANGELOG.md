@@ -92,7 +92,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない（素の `RangeError`、値は message に入れない）。
   - **`Runtime` 経由は変わらない**: `updateStatusWithEvent` の呼び出し4か所のうち、`supersededById` を渡すのは `superseded` を書く2か所だけで、`restoreArchived`・`forget` は渡さない。`resolveContested` の `supersededById` は常に対の勝者。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目61。DB マイグレーションは無い。
-  - 【確かめていないこと】core の `FakeMemoryStore`（`runtime-fakes.ts`）は揃えていない（別の PR が触っているため）。第三者の adapter は、conformance が検査しないので断りを持たない。
+  - core の `FakeMemoryStore`（`runtime-fakes.ts`）も同じ断りを持つ（[ADR 0557](./docs/decisions/0557-core-fake-superseded-by-checks.md)、#1668。テスト用の非公開の実装で、利用者に見える振る舞いは変わらない）。
+  - 【確かめていないこと】第三者の adapter は、conformance が検査しないので断りを持たない。
 
 - **`@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（ADR 0456 の M4）が「変えなかったこと」に残した分）。
 
@@ -140,6 +141,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ### Fixed
 
 - **`RuntimeDeps.clock` の TSDoc が「注入した時計は outbox の `availableAt` や監査ログの `at` には届かない」と書いていたのを、実装に合わせて直した**（[ADR 0559](./docs/decisions/0559-clock-reaches-outbox-available-at.md)）。ドキュメントとコメントだけの変更で、実装・値・公開 API の表面（`pnpm api:check` は差分なし）は変えていない。注入した時計は outbox 行の `availableAt`・`createdAt` と監査ログの `at` に届く（`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now`）。同じ主張を写していたテスト・example のコメントも直した。
+
+- **`@mnemora/postgres`・`@mnemora/testkit`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding` の公開 TSDoc のうち、実装と食い違っていた記述を実装に合わせて直した**（[ADR 0571](./docs/decisions/0571-doc-code-drift-sweep-public-tsdoc.md)）。
+  - **主なもの**: `PostgresRelationStore.link` の戻り値と投げる条件、`acquireAdvisoryLock` の失敗の振り分け、`registerEmbeddingSpace` が投げる例外の型、`OpenAILLMFailureKind` の `"no_content"` を投げるのが `completeStructured` だけであること、`LocalEmbeddingProviderOptions.revision` の実際の扱い（ADR 0365）、testkit の `describe*Conformance` が検査すると書いていた項目の不足。一覧は ADR 0571。
+  - **破壊的と数えない理由**: コメントだけの変更で、型・振る舞い・公開 API の表面は変えていない。
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
   - **何が変わるか**: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの目次帯のうち、渡された id の purge 済み（`forgotten` かつ `purgedAt` が非 `null`）の行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ置き換える。エントリは残し `truncated` は落とす。未 purge の行・他のエントリ・他テナントは触らない。べき等。

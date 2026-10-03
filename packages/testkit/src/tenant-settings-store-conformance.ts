@@ -15,13 +15,13 @@ import {
   WELL_FORMED_NON_BMP_IDENTIFIER,
 } from "./malformed-identifier-cases.js";
 
+/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
+const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 /**
  * `setEventRetention` に不正な `days` を渡したときのメッセージが `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
  * を含むことを見る。`TypeError` のような別種の失敗と区別するため、`.toThrow()` は引数なしで
  * 使わない（`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由・同じ形）。
  */
-/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
-const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
 /**
  * `setDecayClock` に不正な値を渡したときのメッセージが `DECAY_CLOCK_INVALID_MESSAGE` を
@@ -50,11 +50,12 @@ export interface TenantSettingsStoreConformanceOptions {
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13
    * （Issue #305）: `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/
-   * `getActivitySeq` の4メソッドを検査するかどうか。
+   * `getActivitySeq`（と、ADR 0353 が足した `hasSubjectActivityCounters`/`getSubjectActivitySeqs`。
+   * フック `setDefaultHalfLifeRecalls` を渡せば `setDefaultHalfLifeRecalls` も）を検査するかどうか。
    *
    * ⭐ **省略可にしない**——`packages/testkit/src/memory-store-conformance.ts` の
    * `supportsArchiveDecayed`/`supportsPurgeMemory` 等（任意メソッドを検査するかどうかの
-   * 明示フラグ、いずれも「省略可にしない」という同じ規律）に倣う。4メソッドは
+   * 明示フラグ、いずれも「省略可にしない」という同じ規律）に倣う。これらのメソッドは
    * `TenantSettingsStore` interface 上は任意（`?`、外部 adapter が壊れないための配慮、
    * ADR 0165 決めたこと13）だが、**この repo に同梱される2実装
    * （`PostgresTenantSettingsStore`/`InMemoryTenantSettingsStore`）はどちらも実装している**
@@ -149,6 +150,13 @@ export interface TenantSettingsStoreConformanceOptions {
  * `TenantSettingsStore` の適合テスト（roadmap.md 段階3、`decayFloorAt` 計算に使う
  * テナント既定値の読み出し契約。`getEventRetention`/`setEventRetention` は
  * `docs/decisions/0050-tenant-event-retention.md` で追加）。
+ *
+ * 検査する範囲: `getDefaultHalfLifeHours`（行が無ければ `DEFAULT_HALF_LIFE_HOURS`。値域の外の
+ * 設定の拒否は `setDefaultHalfLifeHours` フックを渡したときだけ）、`getEventRetention`/
+ * `setEventRetention`（`unset`/`unlimited`/`days` の3状態と、`days` の検証）、
+ * `supportsDecayClock: true` のときの活動時計まわり、`supportsTaxonomyMode: true` のときの
+ * taxonomy mode、`supportsEraseTenant` に応じた `eraseTenant`、`ctx.tenantId`・`ctx.subjectId`
+ * （と `getSubjectActivitySeqs` の `subjectIds`）の形式不正な識別子の拒否（ADR 0423・0437）。
  */
 export function describeTenantSettingsStoreConformance(
   options: TenantSettingsStoreConformanceOptions,

@@ -357,7 +357,8 @@ describe("runtime.resolveContested — ineligible（存在しない・contested 
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
     // b の相互参照を壊す——a.contestedWithId は依然 b.id を指すが、
     // b.contestedWithId は c.id を指すようにする（a 側からは片方だけが壊れて見える）。
-    const storedB = await stores.memoryStore.get(ctx, b.id);
+    // ADR 0562: `get` は写しを返す。store の中の行そのものを書き換えるので `liveRowForTest` を使う。
+    const storedB = stores.memoryStore.liveRowForTest(ctx, b.id);
     storedB!.contestedWithId = c.id;
 
     const result = await runtime.resolveContested(ctx, a.id, b.id, { kind: "both_active" });
@@ -410,7 +411,8 @@ describe("runtime.resolveContested — 並行（resolveContestedPair が MemoryS
     const { a, b } = await createContestedPair(runtime, stores);
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === b.id) {
-        b.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, b.id)!.status = "archived";
       }
     };
 
