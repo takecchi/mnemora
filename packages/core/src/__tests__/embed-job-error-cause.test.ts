@@ -14,7 +14,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
-// Fake の outbox 行の `availableAt` は実時刻で付くので、runtime の時計はそれより後にする。
+// 以前の Fake は outbox 行の `availableAt` を実時刻で付けたため、runtime の時計を実時刻より後にしている。今の Fake は `opts.now` に従う（ADR 0555）ので、この置き方は必須ではない（組み替えは ADR 0555 の「残り」）。
 const LATER = new Date(Date.now() + 60_000);
 
 function newMemory(): NewMemory {

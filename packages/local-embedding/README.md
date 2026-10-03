@@ -272,7 +272,7 @@ postinstall を拒否しており、その状態で動いていることは測�
 > - ⚠ **上の「上流に修正版が無い」は、`fixAvailable: false` からは出てこない。**
 >   `npm audit` の `fixAvailable: false` は「**いまの依存木の制約の中では修正版へ上げられない**」であって、
 >   「上流に修正版が無い」ではない。**【実測 2026-09-17】** 上流 `sharp` には修正版が在る——
->   libvips 側は **`0.35.0`**、libheif 側は **`0.35.4`** で патched と advisory に書かれている。
+>   libvips 側は **`0.35.0`**、libheif 側は **`0.35.4`** で修正済み（patched）と advisory に書かれている。
 >   この repo の `pnpm-lock.yaml` が解決しているのは **`sharp@0.34.5`**（`@huggingface/transformers@4.2.0` 経由）であり、
 >   **上げられないのは上流ではなく、依存木の制約の側である。**
 >   ⛔ **だからどうしろ、とはここでは書かない。** ⭐ **測った結果を書いただけである。**
@@ -325,6 +325,7 @@ abort しても読み込みは終わりまで走り、成功すればモデル�
 の呼び出し自体を中断する口が無いので、推論が終わるまで待ち、終わった時点で abort 済みならベクトルを返さずに reject する。
 ⚠ **2026-10-01 追記（ADR 0445）: 件数が `maxBatchSize`（既定 128）を超えて分割されたときは、チャンクの合間で abort を見る**——動いている1チャンクは止まらないが、abort 済みなら残りのチャンクは推論せずに `signal.reason` で reject する（以前は全チャンクを推論してから reject していた）。
 `warmup()` は `signal` を取らない。
+
 ### モデルは**最初の `embed()` まで読み込まれない**
 
 `new` はモデルを読まない。読むのは最初の `embed()` である。
@@ -382,7 +383,7 @@ const provider = new LocalEmbeddingProvider({
 - **壊れたファイルは消さない。**失敗の後もそのまま残るので、次のプロセス（新しい `LocalEmbeddingProvider`）でも
   同じく失敗する。
 - 失敗のメッセージは、原因の候補にキャッシュのファイルの破損を挙げ、消す場所（`<cacheDir>/<repo>`、`cacheDir` が
-  未指定なら既定の置き場）を名指す（PR #1134）。原因そのものは `cause` にある（例: `Protobuf parsing failed`、
+  未指定なら既定の置き場）を名指す（PR #1134。`revision` を渡していれば根が `<cacheDir>/<encodeURIComponent(revision)>` に変わり、名指す場所も `<その根>/<repo>` になる）。原因そのものは `cause` にある（例: `Protobuf parsing failed`、
   `Unexpected end of JSON input`）。
 
 ⟹ 直すには、名指された場所（そのモデルの repo のディレクトリ）を**自分で消して**、取り直させること

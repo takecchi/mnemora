@@ -14028,15 +14028,18 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     /**
      * 🔴 **`new Date()` をそのまま `now` に渡さないこと。**
      *
-     * `claimBatch` は `available_at <= now` で絞る。`requeueEmbedJobs` が積んだ行の
-     * `available_at` は **DB 側の `now()`（マイクロ秒精度）**で書かれるのに対し、
-     * JavaScript の `Date` は**ミリ秒までしか持たない**——同じミリ秒の中で
+     * `claimBatch` は `available_at <= now` で絞る。かつて `requeueEmbedJobs` が積んだ行の
+     * `available_at` は **DB 側の `now()`（マイクロ秒精度）**で書かれ、
+     * JavaScript の `Date` は**ミリ秒までしか持たない**ので、同じミリ秒の中で
      * `available_at = 12:00:00.123456`、`new Date()` = `12:00:00.123`（切り捨て）に
-     * なると、**積んだばかりの行が `available_at <= now` を満たさず claim できない。**
+     * なると、積んだばかりの行が `available_at <= now` を満たさず claim できなかった。
+     * 今は `requeueEmbedJobs` も `writeOpts.now ?? new Date()`（JS の時刻・ミリ秒）を
+     * `available_at` に入れるので、この食い違いの機構は無い（ADR 0355・0559）。
      *
-     * ⚠ **これは実際に CI で踏んだ。**同じ検査が `packages/postgres` のジョブでは緑、
+     * ⚠ **これは当時 CI で実際に踏んだ。**同じ検査が `packages/postgres` のジョブでは緑、
      * ルートの test 門の DB 段では赤という**割れ方**をした（ADR 0079「測ったこと」）。
-     * ミリ秒の端数次第で結果が変わるので、**再実行すれば直るように見える種類の赤**である。
+     * ミリ秒の端数次第で結果が変わるので、再実行すれば直るように見える種類の赤だった。
+     * 下の値は歴史的な理由で残している。
      *
      * ⟹ 少しだけ未来を渡す。`leaseMs`（60秒）よりずっと小さいので、**既に claim 済みの
      * 行がリース切れとして再取得されることはない**（`claimed_at <= now - leaseMs` は

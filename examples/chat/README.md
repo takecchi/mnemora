@@ -530,6 +530,13 @@ ADR 0232「引き受けた負債」3番が名指しした「CI ジョブを足�
 ここで見せたいのは「切り詰めずに、そのままだと何文字になるか」であり、強制ではなく
 計測の比較だからである（budget が実際に切り詰めることは `chat` サブコマンドの方で見せる）。
 
+### 出力検査の違反件数（`outputValidationIssueCount`、[ADR 0551](../../docs/decisions/0551-compare-counts-output-validation-issues.md)）
+
+各行の `recall()` の `outputValidation.issues.length` を、JSON の `rows[].outputValidationIssueCount` と、
+「冒頭の事実の出典に到達したか」の表の末尾の列に出す。**数えるだけ**で、mode は既定の `"report"` のまま（落とさない）。
+`outputValidation` が無い（`"off"`・未検証）行は、JSON では欄が無く、表では `—`（0 とは別）。
+⛔ 門・基準値・`compare-summary` の比較欄には入れていない。vitest の `setupFiles` への検査は別の話で、この列では閉じない。
+
 ### 基準値（`compare-baseline.json`）を更新する手順（⭐ 2回以上の run で一致を確かめてから採る）
 
 **`compare` は⭐門である**（[ADR 0133](../../docs/decisions/0133-compare-baseline-and-gate.md)）。

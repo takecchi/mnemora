@@ -190,6 +190,10 @@ core の4つのスキーマはこの形を使わない。歯は `src/__tests__/s
 省略＝ throw）で行うようになった（以前は `unrepresentable: "any"` を渡し、`z.date()`・`transform` を型の無いスキーマとして黙って
 送っていた）。
 
+**（2026-10-02 訂正）**: 上の段落の「上の「送る前には検査しない」」は、逐語の引用ではない。指しているのは、上の
+「⚠ 2026-09-27 追記」の節の「送る前に「OpenAI が受け付ける形か」を検査していなかった」である
+（[ADR 0560](../../docs/decisions/0560-doc-code-drift-sweep-readmes.md)）。
+
 | zod の形 | いまの結果（2026-09-29 以降） |
 | --- | --- |
 | `z.object`・`z.array`・`z.enum`・`optional`・`nullable`（core が使う形） | 通る（変わらない） |

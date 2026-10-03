@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { gateExitCode, summarizeStages } from "../publish-gates.mjs";
 
 /**
- * `scripts/publish-gates.mjs` の歯（純関数のみ）。`scripts/root-test-gate.test.mjs`
+ * `scripts/publish-gates.mjs` の歯（純関数のみ）。`scripts/__tests__/root-test-gate.test.mjs`
  * と同じ形（Issue #476、ADR 0210 追記）。
  *
  * `scripts/__tests__/run-publish-gates.test.mjs` が CLI 全体（子プロセス起動）を
