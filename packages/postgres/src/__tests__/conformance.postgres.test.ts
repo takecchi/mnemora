@@ -82,10 +82,21 @@ describeMemoryStoreConformance({
   // supersedeWithNewMemories の opts.abortIfForgotten（SELECT … FOR UPDATE による見直し）を
   // 実装している。
   supportsAbortIfForgotten: true,
+  // ADR 0420 / ADR 0546: PostgresMemoryStore は opts.abortIfSuperseded・opts.abortIfAllConflicted
+  // （`createMemoryWithOutbox`・`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`）を実装している。
+  supportsAbortIfSuperseded: true,
+  supportsAbortIfAllConflicted: true,
   // Issue #210 / ADR 0115: PostgresMemoryStore は purgeExpiredEvents を実装している。
   supportsPurgeExpiredEvents: true,
   // ADR 0404: PostgresMemoryStore は purgeExpiredRecalls を実装している。
   supportsPurgeExpiredRecalls: true,
+  // ADR 0354 / ADR 0546: PostgresMemoryStore は purgeExpiredEventsByRetention を実装している。保持期間は
+  // PostgresTenantSettingsStore.setEventRetention（`tenant_settings` の行）で設定する。
+  supportsPurgeExpiredEventsByRetention: true,
+  setEventRetention: async (ctx: Ctx, retention) => {
+    const { db } = await getTestClient();
+    await new PostgresTenantSettingsStore(db).setEventRetention(ctx, retention);
+  },
   listPurgedEvents: async (ctx: Ctx) => {
     const { db } = await getTestClient();
     return new PostgresEventStore(db).list(ctx, { kind: "events_purged" });

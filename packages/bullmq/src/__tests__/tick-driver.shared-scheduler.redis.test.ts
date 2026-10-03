@@ -143,4 +143,17 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     expect(counts.completed).toBeLessThanOrEqual(3);
     expect(counts.completed).toBeGreaterThanOrEqual(1);
   });
+
+  it("ADR 0548: 頭打ちの件数は completedJobsToKeep ちょうどで、それより少なく消さない", async () => {
+    const name = `mnemora-tick-shared-cap-exact-${Date.now()}`;
+    const q = queueFor(name);
+    let ticks = 0;
+    const a = make(name, 50, () => (ticks += 1), undefined, { completedJobsToKeep: 3 });
+    await a.start();
+    // 3 件より十分多く完了させてから止める（最後の1回が完了を記録できなくても、11 件以上は完了している）。
+    await waitFor(() => ticks >= 12, 15_000);
+    await a.stop();
+    const counts = await q.getJobCounts("completed");
+    expect(counts.completed).toBe(3);
+  });
 });

@@ -8,7 +8,7 @@ import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
 /**
- * ADR 0500: 紀元前4713年より前（Postgres の `timestamptz` の下限 4714-11-24 BC 00:00:00 UTC より前）の日時を、
+ * ADR 0500（読みの口は ADR 0547 で置き換えた）: 紀元前4713年より前（Postgres の `timestamptz` の下限 4714-11-24 BC 00:00:00 UTC より前）の日時を、
  * Postgres は条件・引数に渡された時点で `22008 timestamp out of range` にする。fixture も同じ口で断る。
  * 口ごとの実測の表は ADR 0500 の「測ったこと」。**断らない口**（`purgeExpiredEvents`・`purgeExpiredRecalls`・
  * `purgeCompletedJobs` の `olderThan`。Postgres は下限より前の cutoff を「0件」で返す）は、やりすぎの歯で縛る。
@@ -44,8 +44,8 @@ function build() {
 type K = ReturnType<typeof build>;
 const f = (extra: object) => ({ tenantId: ctx.tenantId, ...extra });
 
-/** 下限より前を断る口。`run(k, date)` は、その口に日時を1つ渡す。 */
-const rejecting: Array<[string, (k: K, d: Date) => Promise<unknown>]> = [
+/** 下限より前を扱う口（読みの口と書く口の両方）。`run(k, date)` は、その口に日時を1つ渡す。 */
+const allPorts: Array<[string, (k: K, d: Date) => Promise<unknown>]> = [
   ["EventStore.list since", (k, d) => k.ev.list(ctx, { since: d } as never)],
   ["EventStore.list until", (k, d) => k.ev.list(ctx, { until: d } as never)],
   ...["occurredAfter", "occurredBefore", "validAt", "decayFloorAtAfter"].flatMap(
@@ -143,7 +143,44 @@ const rejecting: Array<[string, (k: K, d: Date) => Promise<unknown>]> = [
   ],
 ];
 
-describe("下限より前の日時を、Postgres と同じ口で断る", () => {
+// ADR 0547: 読みの口の条件は、Postgres が下限へ寄せてから比べる。fixture は断らない。書く口（行の値になる日時）だけが断る。
+const READ_PORT =
+  /^(EventStore\.list|VectorStore\.|MemoryStore\.aggregateScope|LexicalStore\.|MemoryStore\.find(Active|Contested)ByClaimKey)/;
+const reading = allPorts.filter(([name]) => READ_PORT.test(name));
+const rejecting = allPorts.filter(([name]) => !READ_PORT.test(name));
+
+describe("ADR 0547: 読みの口は、下限より前の日時を断らない（Postgres は下限へ寄せてから比べる）", () => {
+  it.each(reading)("%s", async (_name, run) => {
+    for (const date of [EARLY, FAR, EDGE]) {
+      const error = await run(build(), date).then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+      expect(error?.message ?? "").not.toMatch(RANGE);
+    }
+  });
+
+  it("since 系は全件を返し、until 系は0件を返す（EventStore.list）", async () => {
+    const k = build();
+    await k.mem.createMemory(ctx, buildNewMemoryFixture({ tenantId: ctx.tenantId }));
+    await k.ev.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: null,
+      kind: "created",
+      at: new Date("2026-01-01T00:00:00.000Z"),
+      actor: { type: "system" },
+      digestSnapshot: null,
+      sizeBeforeBytes: null,
+      meta: {},
+    });
+    expect(await k.ev.list(ctx, { since: FAR })).toHaveLength(1);
+    expect(await k.ev.list(ctx, { since: EARLY })).toHaveLength(1);
+    expect(await k.ev.list(ctx, { until: FAR })).toHaveLength(0);
+    expect(await k.ev.list(ctx, { until: EARLY })).toHaveLength(0);
+  });
+});
+
+describe("下限より前の日時を、Postgres と同じ書く口で断る", () => {
   it.each(rejecting)("%s", async (_name, run) => {
     await expect(run(build(), EARLY)).rejects.toThrow(RANGE);
     await expect(run(build(), FAR)).rejects.toThrow(RANGE);
@@ -167,7 +204,7 @@ describe("下限より前の日時を、Postgres と同じ口で断る", () => {
 });
 
 describe("やりすぎ: 下限ちょうど・断らない口は通る", () => {
-  it.each(rejecting.filter(([name]) => !/WithOutbox|AndEvents|supersede/.test(name)))(
+  it.each(allPorts.filter(([name]) => !/WithOutbox|AndEvents|supersede/.test(name)))(
     "下限ちょうど（4714-11-24 BC 00:00:00.000 UTC）は通る: %s",
     async (_name, run) => {
       const error = await run(build(), EDGE).then(
