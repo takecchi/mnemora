@@ -613,9 +613,11 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.purgedAt = new Date();
-        memory.content = "[purged]";
-        memory.digest = "[purged]";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+        live.purgedAt = new Date();
+        live.content = "[purged]";
+        live.digest = "[purged]";
       }
     };
     const result = await runtime.purge(ctx, { memoryId: memory.id });
@@ -696,9 +698,11 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.purgedAt = new Date();
-        memory.content = "[purged]";
-        memory.digest = "[purged]";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+        live.purgedAt = new Date();
+        live.content = "[purged]";
+        live.digest = "[purged]";
       }
     };
 
@@ -714,9 +718,11 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.purgedAt = new Date();
-        memory.content = "[purged]";
-        memory.digest = "[purged]";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+        live.purgedAt = new Date();
+        live.content = "[purged]";
+        live.digest = "[purged]";
       }
     };
 
@@ -731,7 +737,8 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "active";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active";
       }
     };
 
@@ -748,7 +755,8 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "active";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active";
       }
     };
     let getCalls = 0;
@@ -918,7 +926,7 @@ describe("runtime.purge — CAS が破れた後の再読そのものが失敗す
     const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === m2.id) {
-        m2.status = "archived";
+        stores.memoryStore.liveRowForTest(ctx, m2.id)!.status = "archived"; // ADR 0562: 返り値は写し
       }
     };
     // m2 への get の1回目は purgeMemory 内部（CAS 判定用）、2回目が再読。

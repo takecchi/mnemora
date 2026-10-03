@@ -418,10 +418,10 @@ describe("runtime.consolidate — 並行の書き込み（CAS）", () => {
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
 
-    // `FakeMemoryStore.get` は backing.memories に入っている Memory オブジェクトへの参照を
-    // そのまま返す（コピーを作らない）ので、事前に取得した参照の status を書き換えるだけで
-    // 「割り込み」を再現できる（`runtime.test.ts` の reextract の歯と同じ手口）。
-    const aLive = await stores.memoryStore.get(ctx, a.id);
+    // ADR 0562: `FakeMemoryStore.get` は写しを返す（以前は backing.memories の行そのものだった）ので、
+    // 行そのものを引く `liveRowForTest` で取った参照の status を書き換えて「割り込み」を再現する
+    // （`runtime.test.ts` の reextract の歯と同じ手口）。
+    const aLive = stores.memoryStore.liveRowForTest(ctx, a.id);
     let intervened = false;
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (!intervened && id === a.id) {

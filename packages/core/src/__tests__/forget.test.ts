@@ -355,7 +355,8 @@ describe("runtime.forget — 並行（updateStatusWithEvent が MemoryStatusConf
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "forgotten";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "forgotten";
       }
     };
 
@@ -370,7 +371,8 @@ describe("runtime.forget — 並行（updateStatusWithEvent が MemoryStatusConf
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "archived";
       }
     };
 
@@ -391,7 +393,8 @@ describe("runtime.forget — 並行（updateStatusWithEvent が MemoryStatusConf
     // （`runtime.test.ts` が `updateStatusWithEvent` を丸ごと差し替えるのと同じ作法）。
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "archived";
       }
     };
     let getCalls = 0;
@@ -481,7 +484,7 @@ describe("runtime.forget — CAS が破れた後の再読そのものが失敗�
     const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === m2.id) {
-        m2.status = "archived";
+        stores.memoryStore.liveRowForTest(ctx, m2.id)!.status = "archived"; // ADR 0562: 返り値は写し
       }
     };
     // m2 への get の1回目は updateStatusWithEvent 内部（CAS 判定用）、2回目が forget の再読。
