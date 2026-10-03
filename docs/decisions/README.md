@@ -617,5 +617,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0600](./0600-erase-tenant-recheck-teeth.md) | eraseTenant（ADR 0383）の確かめ直しで見つかった穴を塞ぐ（他テナントの自己参照・dryRun・confirmTenantId の完全一致・他テナントからの参照の検査・limit・他テナントの冪等キーなど） | 採用 (2026-10) |
 | [0601](./0601-adr-0434-0435-0437-0438-0440-merged-pr-recheck-teeth.md) | 09/30 にマージされた #1542・#1544・#1545・#1546・#1548 の確かめ直しで見つかった穴を塞ぐ（名前の無い 54000 の冪等の索引の項・全候補が落ちたときの最初の例外・purge の後始末の独立・message を切らない・subject 側の修飾・NUL 以外の制御文字・取り直し後の complete） | 採用 (2026-10) |
 | [0602](./0602-contested-group-recheck-teeth.md) | 多者間 contested の群（ADR 0381）の確かめ直しで見つかった穴を塞ぐ（解消での関係の削除の範囲・段3が抜けたメンバーを越えない・同伴の `attributes` の絞り・claim key の合併と人数の境界・`markContestedGroup` の対の片割れ） | 採用 (2026-10) |
+| [0603](./0603-adr-0382-0380-merged-pr-recheck-teeth.md) | 09/29 にマージされた #1437・#1435 の確かめ直しで見つかった穴を塞ぐ（`deleteAcrossSpaces` が渡していない記憶を残すこと・退けたかを最新の superseded で決めること） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
