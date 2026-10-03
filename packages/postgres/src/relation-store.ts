@@ -44,11 +44,15 @@ export class PostgresRelationStore implements RelationStore {
   /**
    * 両端の記憶が `ctx.tenantId` の `memories` に在ることを確かめてから書く（ADR 0398）。
    * 確かめと書き込みは**1文**（存在検査の CTE と INSERT を同じ文に載せる）——検査と書き込みの間に
-   * 別の文が挟まる窓を作らない。uuid の形でない id は DB へ投げる前に弾く（`isUuidLike` の doc 参照）。
-   * どちらの端も在らなければ、行を書かずに `memory not found for tenant` を投げる
-   * （他の store の同種の例外と同じ形。DB 由来のエラーは利用者に見せない）。
+   * 別の文が挟まる窓を作らない。`fromId`・`toId` は小文字にそろえてから使い、uuid の形でない id は
+   * DB へ投げる前に弾く（`isUuidLike` の doc 参照）。
+   * `kind` が `RelationKind` の列挙の外なら、端の検査・DB への書き込みより前に
+   * `unknown relation kind` を投げる。どちらかの端でも在らなければ（uuid の形でない id・別のテナントの
+   * 記憶を含む）、行を書かずに `memory not found for tenant` を投げる——両方が無いときに報告するのは
+   * `fromId` 側（他の store の同種の例外と同じ形。DB 由来のエラーは利用者に見せない）。
+   * 同じ行が既に在れば何もしない（冪等）。
    *
-   * ⚠ 「行を書いたか」ではなく「両端が在ったか」を返り値の `ok` で見る——既に同じ行が在って
+   * ⚠ 「行を書いたか」ではなく「両端が在ったか」を、文が返す `from_ok`/`to_ok` で見る——既に同じ行が在って
    * `ON CONFLICT DO NOTHING` が0行にした場合（冪等）と、検査で落ちた場合を、書き込みの行数では
    * 区別できないため。
    */
