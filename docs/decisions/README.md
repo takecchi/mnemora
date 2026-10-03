@@ -584,6 +584,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0577](./0577-fake-supersede-idempotent-resend-skips-opts-checks.md) | Fake の `supersedeWithNewMemories` は、全部の news が既存の行に当たる冪等な再送で opts・jobKinds を断らない（ADR 0566 の未解決を解く） | 採用 (2026-10) |
 | [0578](./0578-core-fake-returns-copies-for-remaining-writers.md) | core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き） | 採用 (2026-10) |
 | [0579](./0579-gate-red-tooth-names-one-db-test-file-instead-of-bail.md) | 門が赤くなる歯は、`--bail=1` で打ち切らず、DB テストのファイルを1本だけ名指しして走らせる | 採用 (2026-10) |
-| [0585](./0585-digest-band-max-entry-chars-nan.md) | `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す（無制限へ化けていた） | 採用 (2026-10) |
+| [0585](./0585-digest-band-max-entry-chars-nan.md) | `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
