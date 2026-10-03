@@ -305,7 +305,7 @@ describe("Fake: resolveContestedGroup の supersededById（ADR 0503）", () => {
         { status: "superseded", by: ms[0]!.id },
       ]),
     );
-    // 大文字の supersededById で輪になる形も、同じ RangeError（ADR 0557 決定4。2者版の歯と揃える。ADR 0595）。
+    // 大文字の supersededById で輪になる形も、同じ RangeError（ADR 0557 の「循環は両側を畳んで比べる」。2者版の歯と揃える。ADR 0595）。
     await s.expectRefused(
       ids,
       /^resolveContestedGroup: supersededById must not form a cycle among the members$/,

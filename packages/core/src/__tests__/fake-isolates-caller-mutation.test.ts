@@ -97,7 +97,7 @@ describe("FakeMemoryStore は呼び手の書き換えから Memory を守る（A
     expect(reread?.recordedAt.toISOString()).toBe(T0);
   });
 
-  it("createMemory: 入力の decayFloorAt・occurredAt・validUntil も保存時に切り離される（ADR 0562 決定2、ADR 0595）", async () => {
+  it("createMemory: 入力の decayFloorAt・occurredAt・validUntil も保存時に切り離される（ADR 0562 の「入力は保存するときに写す」、ADR 0595）", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const decayFloorAt = new Date("2026-06-01T00:00:00.000Z");
     const occurredAt = new Date(T0);
@@ -287,7 +287,7 @@ describe("FakeEventStore は呼び手の書き換えから meta を守る（ADR 
     expect(appended.meta).toEqual(expected);
   });
 
-  it("append: 入力の at・actor を後から書き換えても、保存した値は変わらない（ADR 0562 決定2、ADR 0595）", async () => {
+  it("append: 入力の at・actor を後から書き換えても、保存した値は変わらない（ADR 0562 の「入力は保存するときに写す」、ADR 0595）", async () => {
     const { memoryStore, eventStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, newMemory());
     const at = new Date(T0);
