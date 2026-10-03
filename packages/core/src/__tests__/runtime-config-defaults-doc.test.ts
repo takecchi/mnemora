@@ -134,4 +134,45 @@ describe("RuntimeConfig の既定値は TSDoc の値と一致する", () => {
 
     expect(claim.mock.calls[0]?.[1].claimedBy).toBe(documentedDefault("defaultClaimedBy"));
   });
+
+  /** `config.defaultClaimedBy` と `tick` の `opts.claimedBy` を渡して、`claimBatch` に渡った `claimedBy` を返す。 */
+  async function claimedByWith(
+    config: { defaultClaimedBy?: string } | undefined,
+    opts: { claimedBy?: string },
+  ) {
+    const stores = createFakeRuntimeStores();
+    const claim = vi.spyOn(stores.outboxStore, "claimBatch");
+    const runtime = createRuntime({
+      ...stores,
+      llmProvider: {
+        complete: async () => ({ content: "unused" }),
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      hashContent: (c: string) => `h:${c}`,
+      ...(config === undefined ? {} : { config }),
+    });
+
+    await runtime.tick(ctx, { leaseMs: 60_000, ...opts });
+
+    return claim.mock.calls[0]?.[1].claimedBy;
+  }
+
+  it("defaultClaimedBy の空文字は既定に倒れず、そのまま claimBatch に渡る", async () => {
+    expect(await claimedByWith({ defaultClaimedBy: "" }, {})).toBe("");
+  });
+
+  it("tick の opts.claimedBy の空文字は、defaultClaimedBy にも既定にも倒れず、そのまま claimBatch に渡る", async () => {
+    expect(await claimedByWith({ defaultClaimedBy: "worker-x" }, { claimedBy: "" })).toBe("");
+    expect(await claimedByWith(undefined, { claimedBy: "" })).toBe("");
+  });
+
+  it("対照: 空でない値は、opts.claimedBy が defaultClaimedBy より、defaultClaimedBy が既定より優先される", async () => {
+    expect(await claimedByWith({ defaultClaimedBy: "worker-x" }, {})).toBe("worker-x");
+    expect(await claimedByWith({ defaultClaimedBy: "worker-x" }, { claimedBy: "worker-y" })).toBe(
+      "worker-y",
+    );
+    expect(await claimedByWith(undefined, { claimedBy: "worker-y" })).toBe("worker-y");
+  });
 });
