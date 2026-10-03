@@ -587,5 +587,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0580](./0580-adr-0568-nonexistent-id-and-event-get-controls.md) | ADR 0568 の歯が通した「存在しない id」と「別のイベント id」の変異を塞ぐ | 採用 (2026-10) |
 | [0581](./0581-adr-0572-index-underflow-getter-controls.md) | ADR 0572 の歯の穴（A4・B4・C6・B8）を塞ぐ——索引の巻き戻し・float4 アンダーフロー・読む側が行を作らない・setDecayClock の検査順 | 採用 (2026-10) |
 | [0582](./0582-adr-0573-teeth-holes-controls.md) | ADR 0573 の歯の穴（updatedAt の同一 ms・UTF-16 順・updatedAt 並び・NUL の「何も書かない」）を塞ぐ | 採用 (2026-10) |
+| [0583](./0583-core-fake-supersede-returns-copies-and-per-mouth-mutations.md) | core の Fake の `supersedeWithNewMemories` も写しを返し、ADR 0578 の【未確認】だった口ごとの変異を入れる | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

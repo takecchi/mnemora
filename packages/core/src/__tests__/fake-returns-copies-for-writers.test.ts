@@ -911,3 +911,76 @@ describe("入力の claimKey も、保存するときに写される（ADR 0578�
     });
   });
 });
+
+describe("supersedeWithNewMemories の created[].jobs と superseded の event も、返り値の書き換えから行を守る（ADR 0583）", () => {
+  async function setup() {
+    const stores = createFakeRuntimeStores();
+    const old = await seed(stores, { content: "old" });
+    const result = await stores.memoryStore.supersedeWithNewMemories!(
+      ctx,
+      [{ input: newMemory({ content: "new", claimKey: null }), jobKinds: ["embed", "extract"] }],
+      [{ id: old.id, supersededByIndex: 0, event: eventInput(old.id) }],
+    );
+    return { stores, old, result };
+  }
+
+  const claimAll = (stores: Stores) =>
+    stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(Date.now() + 1000),
+      claimedBy: "w",
+      leaseMs: 60_000,
+    });
+
+  it("created[].jobs を書き換えても、listJobs・claimBatch は変わらない", async () => {
+    const { stores, result } = await setup();
+    const jobsBaseline = structuredClone(stores.outboxStore.listJobs(ctx));
+    expect(jobsBaseline).toHaveLength(2);
+    scribble(result.created);
+    expect(stores.outboxStore.listJobs(ctx)).toEqual(jobsBaseline);
+    const claimed = await claimAll(stores);
+    expect(claimed.map((j) => j.payload)).toEqual(jobsBaseline.map((j) => j.payload));
+    expect(claimed.map((j) => j.availableAt)).toEqual(jobsBaseline.map((j) => j.availableAt));
+    expect(claimed.every((j) => j.availableAt.getTime() !== 0)).toBe(true);
+  });
+
+  it("superseded の event を書き換えても、eventStore の get・list は変わらない", async () => {
+    const { stores, result } = await setup();
+    expect(result.superseded).toHaveLength(1);
+    const eventId = result.superseded[0]!.id;
+    const baseline = structuredClone((await stores.eventStore.get(ctx, eventId))!);
+    scribble(result.superseded);
+    expect(await stores.eventStore.get(ctx, eventId)).toEqual(baseline);
+    expect(await stores.eventStore.list(ctx, {})).toEqual([baseline]);
+    expect(stores.eventStore.events).toEqual([baseline]);
+  });
+
+  describe("対照", () => {
+    it("jobs は store の job と同じ id・中身で（Date は Date のまま）、claimBatch に見える。凍結されていない", async () => {
+      const { stores, result } = await setup();
+      const jobs = result.created[0]!.jobs;
+      expect(jobs).toHaveLength(2);
+      expect(stores.outboxStore.listJobs(ctx)).toEqual(jobs);
+      expect(jobs[0]?.payload).toEqual({ memoryId: result.created[0]!.memory.id });
+      expect(jobs[0]?.availableAt).toBeInstanceOf(Date);
+      expect(jobs[0]?.createdAt).toBeInstanceOf(Date);
+      expect(Object.isFrozen(jobs[0])).toBe(false);
+      const claimed = await claimAll(stores);
+      expect(claimed.map((j) => j.id).sort()).toEqual(jobs.map((j) => j.id).sort());
+    });
+
+    it("event は eventStore と同じ中身（at は Date のまま、meta.supersededById は作った記憶の id）で、superseded 側の行は get で superseded", async () => {
+      const { stores, old, result } = await setup();
+      const event = result.superseded[0]!;
+      expect(await stores.eventStore.get(ctx, event.id)).toEqual(event);
+      expect(event.at).toBeInstanceOf(Date);
+      expect(event.meta["supersededById"]).toBe(result.created[0]!.memory.id);
+      expect(event.memoryId).toBe(old.id);
+      expect(Object.isFrozen(event)).toBe(false);
+      expect(Object.isFrozen(event.meta)).toBe(false);
+      const oldRow = await stores.memoryStore.get(ctx, old.id);
+      expect(oldRow?.status).toBe("superseded");
+      expect(oldRow?.supersededById).toBe(result.created[0]!.memory.id);
+    });
+  });
+});
