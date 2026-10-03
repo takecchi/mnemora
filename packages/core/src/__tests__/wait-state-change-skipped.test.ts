@@ -254,7 +254,7 @@ for (const hidePort of [false, true]) {
   });
 }
 
-describe("reextract: 退けたかは、最新の superseded イベントの理由で決める（ADR 0601）", () => {
+describe("reextract: 退けたかは、最新の superseded イベントの理由で決める（ADR 0603）", () => {
   // superseded のイベントが2つ以上ある記憶では、`EventStore.list` の昇順の最後の1件が今の理由である。
   // 最初の1件で決める実装は、訂正で負けた記憶を見落とす（または、機構で置き換えた記憶で打ち切る）。
   async function supersededWithTwoReasons(order: "contested_resolved_last" | "mechanism_last") {

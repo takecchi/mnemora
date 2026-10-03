@@ -497,7 +497,7 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     });
 
     it("deleteAcrossSpaces: 渡していない memoryId の行は、同じテナント・同じ space でも残る", async () => {
-      // 消すのは渡した memoryId の行だけ（ADR 0601）。上の歯は記憶を1件しか置かないので、
+      // 消すのは渡した memoryId の行だけ（ADR 0603）。上の歯は記憶を1件しか置かないので、
       // テナントの行を全部消す実装でも通ってしまう。
       const store = await createStore();
       await prepareEmbeddingSpace(spaceB);

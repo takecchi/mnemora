@@ -613,6 +613,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0596](./0596-adr-0571-0573-0574-merged-pr-recheck-teeth-round2.md) | マージ済みの #1683・#1685・#1686（ADR 0571・0573・0574）の確かめ直しで見つかった歯の穴を塞ぐ | 採用 (2026-10) |
 | [0597](./0597-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md) | `OutboxStore.complete`・`fail` は `timestamptz` の下限より前の `opts.at` を、3実装とも `jobId` の形より先に `RangeError` で断る。`requeueEmbedJobs`・`archiveDecayed` の「負の `limit` は Postgres が投げる」コメントを実測に合わせる | 採用 (2026-10) |
 | [0598](./0598-adr-0490-0480-0485-merged-pr-recheck-teeth.md) | 10/01 にマージされた #1582〜#1597 の確かめ直しで見つかった穴を塞ぐ（アクセント付きのラテン文字・`createRecall` の `createdAt` の写し・`excludeMemoryIds` の等しさ） | 採用 (2026-10) |
-| [0601](./0601-adr-0382-0380-merged-pr-recheck-teeth.md) | 09/29 にマージされた #1437・#1435 の確かめ直しで見つかった穴を塞ぐ（`deleteAcrossSpaces` が渡していない記憶を残すこと・退けたかを最新の superseded で決めること） | 採用 (2026-10) |
+| [0603](./0603-adr-0382-0380-merged-pr-recheck-teeth.md) | 09/29 にマージされた #1437・#1435 の確かめ直しで見つかった穴を塞ぐ（`deleteAcrossSpaces` が渡していない記憶を残すこと・退けたかを最新の superseded で決めること） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
