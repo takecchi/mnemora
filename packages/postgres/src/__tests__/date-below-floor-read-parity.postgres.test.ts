@@ -695,3 +695,191 @@ describe("purge の olderThan が下限より前（0件。以前から同じ）"
     });
   }
 });
+
+// ADR 0547 の追記（変異試験の再確認で見つけた穴を塞ぐ歯）。
+// 変異 C2: findContestedByClaimKey の空の区間の判定を、寄せた後の値で決める（findActive は既存の歯が縛っていた）。
+describe("findContestedByClaimKey: 両端とも下限より前でも、空の区間の判定は寄せる前の値で行う（決めたこと3）", () => {
+  /** 有効期間の無い contested のペアを1組入れる（開始も終了も無い行は、どの区間とも重なる）。 */
+  async function seedContestedOpen(kit: Kit): Promise<Seeded> {
+    const ctx = nextCtx();
+    const idToName = new Map<string, string>();
+    const make = async (name: string): Promise<string> => {
+      const m = await kit.mem.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          content: `${name} hello`,
+          contentHash: `h-${name}`,
+          claimKey: { subject: "s", predicate: "p" },
+        }),
+      );
+      idToName.set(m.id, name);
+      return m.id;
+    };
+    const hotel = await make("hotel");
+    const india = await make("india");
+    const event = (memoryId: string) => ({
+      tenantId: ctx.tenantId,
+      memoryId,
+      kind: "updated" as const,
+      at: new Date("2026-04-01T00:00:00.000Z"),
+      actor: { type: "system" as const },
+      digestSnapshot: null,
+      sizeBeforeBytes: null,
+      meta: {},
+    });
+    await kit.mem.markContestedPair!(
+      ctx,
+      { id: hotel, event: event(hotel) },
+      { id: india, event: event(india) },
+    );
+    return { ctx, idToName };
+  }
+
+  for (const [label, date] of BELOW) {
+    it(`両端とも下限より前で from < until（空でない区間）は、開始も終了も無い contested の行と重なる（${label}）`, async () => {
+      const answers: Record<string, unknown> = {};
+      for (const kit of await kits()) {
+        const s = await seedContestedOpen(kit);
+        answers[kit.name] = await kit.mem.findContestedByClaimKey!(
+          s.ctx,
+          CLAIM(new Date(date.getTime() - 1000), date),
+        ).then(
+          (ms) =>
+            names(
+              s,
+              ms.map((m) => m.id),
+            ),
+          (e: unknown) => ({ threw: describeThrown(e) }),
+        );
+      }
+      const expected = ["hotel", "india"];
+      expect(answers).toEqual({ postgres: expected, "in-memory": expected, fake: expected });
+    });
+
+    it(`両端とも下限より前で from > until（逆転した区間）は、何とも重ならない（${label}）`, async () => {
+      const answers: Record<string, unknown> = {};
+      for (const kit of await kits()) {
+        const s = await seedContestedOpen(kit);
+        answers[kit.name] = await kit.mem.findContestedByClaimKey!(
+          s.ctx,
+          CLAIM(date, new Date(date.getTime() - 1000)),
+        ).then(
+          (ms) =>
+            names(
+              s,
+              ms.map((m) => m.id),
+            ),
+          (e: unknown) => ({ threw: describeThrown(e) }),
+        );
+      }
+      expect(answers).toEqual({ postgres: [], "in-memory": [], fake: [] });
+    });
+  }
+});
+
+// 変異 A2・A3: 寄せるのは「下限より前」だけ。下限の直後（+1ms・+1日 未満）の日時は、寄せずにそのまま比べる。
+describe("下限より後の日時は寄せない（下限の直後の行を、その日時を境に比べる）", () => {
+  const DAY_MS = 86_400_000;
+  const AT = [
+    ["m0", new Date(FLOOR_MS)],
+    ["m1", new Date(FLOOR_MS + 1)],
+    ["m2", new Date(FLOOR_MS + DAY_MS)],
+  ] as const;
+
+  /** 下限ちょうど・下限+1ms・下限+1日 に occurredAt（と事象の時刻）がある行を1件ずつ入れる。 */
+  async function seedNear(kit: Kit): Promise<Seeded> {
+    const ctx = nextCtx();
+    const idToName = new Map<string, string>();
+    for (const [name, at] of AT) {
+      const m = await kit.mem.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          content: `${name} hello`,
+          contentHash: `h-${name}`,
+          occurredAt: at,
+          embeddingStatus: "ready",
+          halfLifeHours: 1e6,
+          decayFloorAt: new Date("2100-01-01T00:00:00.000Z"),
+        }),
+      );
+      idToName.set(m.id, name);
+      await kit.vec.upsert(ctx, TEST_EMBEDDING_SPACE, m.id, [1, 0, 0]);
+      await kit.ev.append(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: null,
+        kind: "created",
+        at,
+        actor: { type: "system" },
+        digestSnapshot: null,
+        sizeBeforeBytes: null,
+        meta: {},
+      });
+    }
+    return { ctx, idToName };
+  }
+
+  // 境界の日時（下限+1ms、下限+1日-1ms）と、その答え。since 系は境界以後、until 系は境界以前。
+  const PROBES: Array<[string, Date, { after: string[]; before: string[] }]> = [
+    ["下限+1ms", new Date(FLOOR_MS + 1), { after: ["m1", "m2"], before: ["m0", "m1"] }],
+    ["下限+1日-1ms", new Date(FLOOR_MS + DAY_MS - 1), { after: ["m2"], before: ["m0", "m1"] }],
+  ];
+
+  for (const [label, date, want] of PROBES) {
+    it(`${label}を境にした EventStore.list と VectorStore.search は、3実装とも寄せずに比べる`, async () => {
+      const answers: Record<string, unknown> = {};
+      for (const kit of await kits()) {
+        const s = await seedNear(kit);
+        answers[kit.name] = {
+          eventsSince: (await kit.ev.list(s.ctx, { since: date })).length,
+          eventsUntil: (await kit.ev.list(s.ctx, { until: date })).length,
+          after: await vecSearch(kit, s, { occurredAfter: date }),
+          before: await vecSearch(kit, s, { occurredBefore: date }),
+        };
+      }
+      const expected = {
+        eventsSince: want.after.length,
+        eventsUntil: want.before.length,
+        after: want.after,
+        before: want.before,
+      };
+      expect(answers).toEqual({ postgres: expected, "in-memory": expected, fake: expected });
+    });
+  }
+});
+
+// 変異 D2: purge の早い return は「下限より前」だけ。下限以後の olderThan は問い合わせる（決めたこと4）。
+// 既存の purge の歯（retention-purge-parity・outbox-first-terminal-wins・store-boundary-diff・conformance）は、
+// olderThan が 2026 年前後で、早い return を1990 年未満まで広げる変異を見逃した。
+describe("purgeCompletedJobs: 下限以後の olderThan は、早い return をせず問い合わせる（Postgres）", () => {
+  it("紀元1000年に完了した job は、olderThan が紀元1500年（下限より後）なら消える", async () => {
+    const { db } = await getTestClient();
+    const memory = new PostgresMemoryStore(db);
+    const outbox = new PostgresOutboxStore(db);
+    const ctx = nextCtx();
+    await memory.createObservationWithOutbox(
+      ctx,
+      buildNewObservationFixture({ tenantId: ctx.tenantId }),
+      ["extract"],
+    );
+    const [job] = await outbox.claimBatch(ctx, {
+      limit: 5,
+      now: new Date(Date.now() + 1000),
+      claimedBy: "w",
+      leaseMs: 60_000,
+    });
+    await outbox.complete(ctx, job!.id, job!.attempts, { at: new Date(Date.UTC(1000, 0, 1)) });
+    const dry = await outbox.purgeCompletedJobs(ctx, {
+      olderThan: new Date(Date.UTC(1500, 0, 1)),
+      limit: 5,
+      dryRun: true,
+    });
+    expect(dry.purged).toBe(1);
+    const real = await outbox.purgeCompletedJobs(ctx, {
+      olderThan: new Date(Date.UTC(1500, 0, 1)),
+      limit: 5,
+    });
+    expect(real.purged).toBe(1);
+  });
+});

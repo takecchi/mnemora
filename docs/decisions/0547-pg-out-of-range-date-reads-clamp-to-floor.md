@@ -143,4 +143,9 @@
 - M26・M28 は、下限ちょうどに行がある歯（寄せる先・判定の境界を1ms ずらす）を足して初めて赤になった。M27・M29 は下限の1ms 前（`EARLY`）の歯が、寄せる先・判定を1ms 手前にずらすと全滅する。
 - M34〜M38 は InMemory の読みの口に `RangeError` を戻す変異（testkit を build し直して実行）。
 - 戻した後は `git status` が変異前と同じで、3ファイルが緑に戻ることを確かめた。
+- **追記（別の担い手による独立の変異試験。2026-10-03）**: 次の4件が、上の歯をすり抜けた。`date-below-floor-read-parity.postgres.test.ts` に歯を足して（66本→73本）、いずれも赤になることを3回ずつ確かめた。
+  - findContestedByClaimKey の空の区間の判定を、寄せた後の値で行う変異（findActive にだけ歯があった）: 両端とも下限より前の contested の歯を足した。
+  - 寄せる判定を「下限+2ms 未満」「下限+1日 未満」へ広げる変異: 下限+1ms・下限+1日-1ms を境にした `EventStore.list`・`VectorStore.search` の歯を足した（下限の直後の行を寄せずに比べる）。
+  - purge（`purgeCompletedJobs`）の早い return を、下限以後（1990年未満）まで広げる変異: 既存の purge の歯（retention-purge-parity・outbox-first-terminal-wins・store-boundary-diff・conformance）はどれも緑のまま通ったので、紀元1000年に完了した job を紀元1500年の olderThan で消せる歯を足した。
+  - 足していない: 寄せる処理を上限側（2100年超）にも掛ける変異。ADR は上限側の約束を持たない。InMemory の `until` を下限へ寄せる変異（Postgres の負債1を InMemory に写す形）は、Postgres との突き合わせの歯でだけ赤になり、testkit 単体の歯では緑のまま。
 
