@@ -164,13 +164,22 @@ describe("FakeMemoryStore.createRecall / getRecall（ADR 0480）", () => {
 
   it("書いた後に入力を、読んだ後に戻り値を書き換えても、記録は変わらない（Postgres は往復で別物になる）", async () => {
     const { memoryStore } = createFakeRuntimeStores();
-    const input = { ...NEW_RECALL, query: { text: "q" }, explain: { stages: [] as never[] } };
+    const createdAt = new Date("2026-03-01T00:00:00.000Z");
+    const input = {
+      ...NEW_RECALL,
+      query: { text: "q" },
+      explain: { stages: [] as never[] },
+      createdAt,
+    };
     const id = await memoryStore.createRecall(ctx, input);
     (input.query as { text: string }).text = "changed";
     input.explain.stages.push({ stage: "x" } as never);
+    // 渡した createdAt を後から書き換えても、記録の createdAt は動かない（ADR 0598）。
+    createdAt.setTime(0);
     const first = await memoryStore.getRecall(ctx, id);
     expect(first?.query).toEqual({ text: "q" });
     expect(first?.explain.stages).toEqual([]);
+    expect(first?.createdAt.toISOString()).toBe("2026-03-01T00:00:00.000Z");
     (first!.query as { text: string }).text = "changed-again";
     first!.createdAt.setFullYear(1999);
     const second = await memoryStore.getRecall(ctx, id);

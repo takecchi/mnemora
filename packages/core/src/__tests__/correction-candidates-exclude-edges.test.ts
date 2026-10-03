@@ -139,6 +139,24 @@ describe("runtime.findCorrectionCandidates — excludeMemoryIds の端", () => {
     expect(result.candidates.map((c) => c.memoryId)).not.toContain(near.id);
   });
 
+  it("除外は id の等しさで比べる（`mem-1` を渡しても `mem-10` は残る形。前方一致で除外しない。ADR 0598）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const target = await createCandidate(stores, [8, 0], { digest: "対象" });
+    // Fake の id は通し番号の `mem-N` なので、「別の記憶の id で始まる id」の組を確実には作れない。代わりに、
+    // 実在の id の末尾の1字を落とした文字列（どの記憶の id でもないが、実在の id はこれで始まる）を渡す。
+    const prefix = target.id.slice(0, -1) as typeof target.id;
+    expect(target.id.startsWith(prefix)).toBe(true);
+    expect(prefix).not.toBe(target.id);
+
+    const result = await runtime.findCorrectionCandidates(ctx, {
+      text: QUERY_TEXT,
+      excludeMemoryIds: [prefix],
+    });
+
+    expect(result.excludedCount).toBe(0);
+    expect(result.candidates.map((c) => c.memoryId)).toContain(target.id);
+  });
+
   it.each([5, {}] as const)(
     "反復できない excludeMemoryIds（%j）は recall を呼ぶ前に TypeError で落ちる（recall の記録を書かない）",
     async (bad) => {

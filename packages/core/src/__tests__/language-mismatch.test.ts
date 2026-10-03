@@ -147,6 +147,30 @@ describe("ラテン文字は「ラテン文字の文字（\\p{L}）」だけを�
   });
 });
 
+describe("アクセント付きのラテン文字もラテン文字として数える（ADR 0490 の表「スペイン語の本文は陽性」、ADR 0598）", () => {
+  // 規則は言語を区別しない（ラテン文字の本文に印を付ける）。アクセント付きの文字（`í`・`ñ`・`é`・`è`・`ô` など）も
+  // `\p{L}` かつ `Script=Latin` なので数える。ASCII の英字だけを数えると、印は付いても数が合わない。
+  const ES_CONTENT = "La usuaria trabaja en una panadería y disfruta horneando pan cada mañana.";
+  const FR_CONTENT = "Elle préfère le café crème et déteste les réunions à côté du bureau.";
+
+  it.each([
+    ["スペイン語", ES_CONTENT],
+    ["フランス語", FR_CONTENT],
+  ])(
+    "%s の本文に印が付き、contentLatinLetters はアクセント付きの文字も数えた数",
+    (_label, content) => {
+      const mark = detectLanguageMismatch(JA_OBSERVATION, content);
+      expect(mark).not.toBeNull();
+      const letters = content.match(/\p{L}/gu)!.length;
+      const asciiLetters = content.match(/[A-Za-z]/g)!.length;
+      // 前提: アクセント付きの文字が実際に含まれている（含まれていなければ、この歯は何も縛らない）。
+      expect(letters).toBeGreaterThan(asciiLetters);
+      expect(mark?.contentLatinLetters).toBe(letters);
+      expect(mark?.contentLatinShare).toBe(1);
+    },
+  );
+});
+
 describe("閾値の定数", () => {
   it("名前付きで、意味のある値である", () => {
     expect(LANGUAGE_MISMATCH_MIN_CONTENT_LATIN_LETTERS).toBeGreaterThan(16); // "Tokyo Disneyland" は15字

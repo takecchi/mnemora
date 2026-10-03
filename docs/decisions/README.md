@@ -611,5 +611,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0594](./0594-postgres-outbox-complete-fail-check-at-before-job-id-shape.md) | `PostgresOutboxStore.complete`・`fail` は、`opts.at` の Invalid Date を `jobId` の形より先に断る | 採用 (2026-10) |
 | [0595](./0595-adr-0562-0557-merged-pr-recheck-teeth.md) | 10/02 にマージされた #1666〜#1680 の確かめ直しで見つかった穴を塞ぐ（ADR 0562 の写しの5欄・ADR 0557 の group の大文字の輪） | 採用 (2026-10) |
 | [0596](./0596-adr-0571-0573-0574-merged-pr-recheck-teeth-round2.md) | マージ済みの #1683・#1685・#1686（ADR 0571・0573・0574）の確かめ直しで見つかった歯の穴を塞ぐ | 採用 (2026-10) |
+| [0598](./0598-adr-0490-0480-0485-merged-pr-recheck-teeth.md) | 10/01 にマージされた #1582〜#1597 の確かめ直しで見つかった穴を塞ぐ（アクセント付きのラテン文字・`createRecall` の `createdAt` の写し・`excludeMemoryIds` の等しさ） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
