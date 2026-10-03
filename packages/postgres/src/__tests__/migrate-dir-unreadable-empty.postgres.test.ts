@@ -96,4 +96,19 @@ describe("runMigrations: migrationsDir が読めない・空（ADR 0448）", () 
     expect(w[0]).toContain("[@mnemora/postgres]");
     expect(w[0]).toContain(".sql が1本も無い");
   });
+
+  it(".sql が1本も無くても、専用スキーマと台帳は作られて残る（ADR 0552 が書いた副作用。ADR 0589 の P8）", async () => {
+    await pool.query(`DROP SCHEMA IF EXISTS "${SCHEMA_EMPTY}" CASCADE`);
+    const dir = mkdtempSync(join(tmpdir(), "mnemora-empty-dir-"));
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await runMigrations(pool, dir, { schema: SCHEMA_EMPTY });
+
+    expect(result.applied).toEqual([]);
+    expect(await schemaExists(SCHEMA_EMPTY)).toBe(true);
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM "${SCHEMA_EMPTY}"._mnemora_migrations`,
+    );
+    expect(rows[0].n).toBe(0);
+  });
 });
