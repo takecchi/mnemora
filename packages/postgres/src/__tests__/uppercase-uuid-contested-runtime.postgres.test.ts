@@ -36,7 +36,7 @@ import {
  *   （確かめの歯。直す前から緑）。
  *
  * testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、大文字は `not_found`・`RangeError` だった。
- * fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
+ * そのころは leg ごとに期待を分ける `caseInsensitive` の印があったが、両方の leg が `true` になってから通らない側の分岐ごと取り除いた）。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -48,7 +48,6 @@ interface Kit {
   runtime: Runtime;
   memoryStore: MemoryStore;
   eventStore: EventStore;
-  caseInsensitive: boolean;
 }
 
 const shared = {
@@ -69,7 +68,6 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore,
-        caseInsensitive: true, // ADR 0521: fixture も大文字小文字を区別しない（以前は false）
         runtime: createRuntime({
           ...shared,
           memoryStore,
@@ -91,7 +89,6 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore,
-        caseInsensitive: true,
         runtime: createRuntime({
           ...shared,
           memoryStore,
@@ -133,18 +130,14 @@ describe.each(KITS)(
 
       const result = await kit.runtime.markContested(ctx, upper(a.id), upper(b.id));
 
-      if (kit.caseInsensitive) {
-        expect(result.outcome.kind).toBe("contested");
-        const [after, metaA, metaB] = await Promise.all([
-          kit.memoryStore.get(ctx, a.id),
-          lastEventMeta(kit, a.id),
-          lastEventMeta(kit, b.id),
-        ]);
-        expect(after?.contestedWithId).toBe(b.id);
-        expect([metaA.contestedWithId, metaB.contestedWithId]).toEqual([b.id, a.id]);
-      } else {
-        expect(result.outcome.kind).toBe("ineligible");
-      }
+      expect(result.outcome.kind).toBe("contested");
+      const [after, metaA, metaB] = await Promise.all([
+        kit.memoryStore.get(ctx, a.id),
+        lastEventMeta(kit, a.id),
+        lastEventMeta(kit, b.id),
+      ]);
+      expect(after?.contestedWithId).toBe(b.id);
+      expect([metaA.contestedWithId, metaB.contestedWithId]).toEqual([b.id, a.id]);
     });
 
     it("resolveContested（both_active）: 大文字の id でも、store が在ると言う対を解決し、meta.contestedWithId は相手の列の値", async () => {
@@ -155,22 +148,12 @@ describe.each(KITS)(
         kind: "both_active",
       });
 
-      if (kit.caseInsensitive) {
-        expect(result.outcome.kind).toBe("resolved");
-        const [metaA, metaB] = await Promise.all([
-          lastEventMeta(kit, a.id),
-          lastEventMeta(kit, b.id),
-        ]);
-        expect([metaA.contestedWithId, metaB.contestedWithId]).toEqual([b.id, a.id]);
-      } else {
-        expect(result.outcome).toEqual({
-          kind: "ineligible",
-          sides: [
-            { memoryId: upper(a.id), kind: "not_found" },
-            { memoryId: upper(b.id), kind: "not_found" },
-          ],
-        });
-      }
+      expect(result.outcome.kind).toBe("resolved");
+      const [metaA, metaB] = await Promise.all([
+        lastEventMeta(kit, a.id),
+        lastEventMeta(kit, b.id),
+      ]);
+      expect([metaA.contestedWithId, metaB.contestedWithId]).toEqual([b.id, a.id]);
     });
 
     it("resolveContested（supersede）: 大文字の id と大文字の winnerId でも解決し、敗者の meta は勝者の列の値を持つ", async () => {
@@ -182,33 +165,25 @@ describe.each(KITS)(
         winnerId: upper(a.id),
       });
 
-      if (kit.caseInsensitive) {
-        expect(result.outcome.kind).toBe("resolved");
-        const loser = await kit.memoryStore.get(ctx, b.id);
-        expect([loser?.status, loser?.supersededById]).toEqual(["superseded", a.id]);
-        const metaB = await lastEventMeta(kit, b.id);
-        expect([metaB.contestedWithId, metaB.supersededById]).toEqual([a.id, a.id]);
-      } else {
-        expect(result.outcome.kind).toBe("ineligible");
-      }
+      expect(result.outcome.kind).toBe("resolved");
+      const loser = await kit.memoryStore.get(ctx, b.id);
+      expect([loser?.status, loser?.supersededById]).toEqual(["superseded", a.id]);
+      const metaB = await lastEventMeta(kit, b.id);
+      expect([metaB.contestedWithId, metaB.supersededById]).toEqual([a.id, a.id]);
     });
 
-    it("resolveContested: winnerId が片側と大文字小文字だけ違うとき、store が同じ記憶と言えば勝者として扱う（言わなければ今どおり RangeError）", async () => {
+    it("resolveContested: winnerId が片側と大文字小文字だけ違うとき、store が同じ記憶と言えば勝者として扱う", async () => {
       const kit = await makeKit();
       const { a, b } = await contestedPair(kit, "win");
 
-      const run = () =>
-        kit.runtime.resolveContested(ctx, a.id, b.id, { kind: "supersede", winnerId: upper(a.id) });
+      const result = await kit.runtime.resolveContested(ctx, a.id, b.id, {
+        kind: "supersede",
+        winnerId: upper(a.id),
+      });
 
-      if (kit.caseInsensitive) {
-        const result = await run();
-        expect(result.outcome.kind).toBe("resolved");
-        const loser = await kit.memoryStore.get(ctx, b.id);
-        expect([loser?.status, loser?.supersededById]).toEqual(["superseded", a.id]);
-      } else {
-        await expect(run()).rejects.toBeInstanceOf(RangeError);
-        expect((await kit.memoryStore.get(ctx, a.id))?.status).toBe("contested");
-      }
+      expect(result.outcome.kind).toBe("resolved");
+      const loser = await kit.memoryStore.get(ctx, b.id);
+      expect([loser?.status, loser?.supersededById]).toEqual(["superseded", a.id]);
     });
 
     it("やりすぎの歯: 小文字の入力の結果は変わらない（解決・meta）", async () => {
@@ -295,15 +270,8 @@ describe.each(KITS)(
 
       const result = await kit.runtime.resolveOrphanedContested!(ctx, upper(a.id));
 
-      if (kit.caseInsensitive) {
-        expect(result.outcome.kind).toBe("resolved");
-        expect((await lastEventMeta(kit, a.id)).contestedWithId).toBe(b.id);
-      } else {
-        expect(result.outcome).toEqual({
-          kind: "ineligible",
-          eligibility: { kind: "not_found" },
-        });
-      }
+      expect(result.outcome.kind).toBe("resolved");
+      expect((await lastEventMeta(kit, a.id)).contestedWithId).toBe(b.id);
     });
 
     // Issue #1449 項目6: 群版 `resolveContestedGroup` の winnerId も、2者版と同じ規則で大文字小文字を救済する
@@ -322,32 +290,21 @@ describe.each(KITS)(
       const kit = await makeKit();
       const { a, b, c } = await contestedTrio(kit, "grp-win");
 
-      const run = () =>
-        kit.runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
-          kind: "supersede",
-          winnerId: upper(a.id),
-        });
+      const result = await kit.runtime.resolveContestedGroup!(ctx, [a.id, b.id, c.id], {
+        kind: "supersede",
+        winnerId: upper(a.id),
+      });
 
-      if (kit.caseInsensitive) {
-        const result = await run();
-        expect(result.outcome.kind).toBe("resolved");
-        const [sa, sb, sc] = await Promise.all(
-          [a.id, b.id, c.id].map((id) => kit.memoryStore.get(ctx, id)),
-        );
-        expect([sa?.status, sb?.status, sc?.status]).toEqual([
-          "active",
-          "superseded",
-          "superseded",
-        ]);
-        expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
-        // 敗者のイベントの meta.supersededById も同じ値（ADR 0150 追記・ADR 0421）。
-        const metaB = await lastEventMeta(kit, b.id);
-        const metaC = await lastEventMeta(kit, c.id);
-        expect([metaB.supersededById, metaC.supersededById]).toEqual([a.id, a.id]);
-      } else {
-        await expect(run()).rejects.toBeInstanceOf(RangeError);
-        expect((await kit.memoryStore.get(ctx, a.id))?.status).toBe("contested");
-      }
+      expect(result.outcome.kind).toBe("resolved");
+      const [sa, sb, sc] = await Promise.all(
+        [a.id, b.id, c.id].map((id) => kit.memoryStore.get(ctx, id)),
+      );
+      expect([sa?.status, sb?.status, sc?.status]).toEqual(["active", "superseded", "superseded"]);
+      expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
+      // 敗者のイベントの meta.supersededById も同じ値（ADR 0150 追記・ADR 0421）。
+      const metaB = await lastEventMeta(kit, b.id);
+      const metaC = await lastEventMeta(kit, c.id);
+      expect([metaB.supersededById, metaC.supersededById]).toEqual([a.id, a.id]);
     });
 
     it("やりすぎの歯（群）: 小文字の winnerId の結果は変わらない", async () => {

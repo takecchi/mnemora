@@ -69,6 +69,51 @@ describe("extraction context transport (not a semantic quality test)", () => {
       ).toBe(false);
     }
   });
+  // `timeZone` の検査が問うのは「`Intl.DateTimeFormat` が受け付けるか」だけで、IANA の名前に絞っていない。
+  // 値は正規化せず、渡された文字列のまま保存され、プロンプトにもそのまま入る（`ExtractionContextSchema` の doc）。
+  // 検査を IANA の名前だけに絞る・正規化して保存する、のどちらも、今は通る入力の結果が変わる（破壊的）。
+  // 受け付ける値の集合は実行環境の `Intl` に依存するので、ここで縛るのは Node の既定の ICU で通る3つだけ。
+  it.each(["JST", "+09:00", "asia/tokyo"])(
+    "timeZone %j は受け付け、渡された綴りのまま保存され、プロンプトにもそのまま入り、暦日はその値で計算される",
+    async (timeZone) => {
+      expect(
+        ObserveInputSchema.safeParse({
+          kind: "utterance",
+          text: "ok",
+          extractionContext: { timeZone },
+        }).success,
+      ).toBe(true);
+
+      const prompts: PromptSpec[] = [];
+      const llmProvider: LLMProvider = {
+        complete: async () => {
+          throw new Error("unused");
+        },
+        completeStructured: async (_ctx, req) => {
+          prompts.push(req.prompt);
+          return req.schema.parse({
+            memories: [{ content: "会議室は青葉", provenanceKind: "stated" }],
+          });
+        },
+      };
+      const stores = createFakeRuntimeStores();
+      const runtime = createRuntime({ ...stores, llmProvider, hashContent: (s) => s });
+      const observed = await runtime.observe(ctx, {
+        kind: "utterance",
+        text: "明日は会議室",
+        occurredAt: new Date("2026-01-01T23:00:00Z"),
+        extract: "sync",
+        extractionContext: { timeZone },
+      });
+
+      const saved = await stores.memoryStore.getObservation(ctx, observed.observationId);
+      expect(saved?.payload).toMatchObject({ extractionContext: { timeZone } });
+      const sent = JSON.parse(prompts[0]!.messages[0]!.content);
+      expect(sent.timeZone).toBe(timeZone);
+      // UTC 23:00 は、UTC+9 では翌日。値を `Intl` に渡して計算している。
+      expect(sent.observation.observedLocalDate).toBe("2026-01-02");
+    },
+  );
   it("does not silently substitute recordedAt for unknown occurredAt", () => {
     const prompt = buildExtractionPrompt({
       id: "o",
