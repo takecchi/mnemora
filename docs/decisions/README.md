@@ -603,6 +603,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0586](./0586-omit-params-cause-chain-and-preread-stack-teeth.md) | `omitParamsFromError` の doc が約束する「`cause` の連鎖にも掛ける」と「`stack` も書き換える」を、偽の例外の歯で縛る | 採用 (2026-10) |
 | [0587](./0587-adr-0577-time-stub-mixed-resend-updatedat.md) | ADR 0577 の歯が通した「再送と新規の混在」と「古い記憶の updatedAt」の変異を塞ぎ、壁時計の歯を固定する | 採用 (2026-10) |
 | [0588](./0588-adr-0578-teeth-holes-controls.md) | ADR 0578 の歯の穴（生き残り4本と「たまたま捕まった」2本）を、対照の歯で塞ぐ | 採用 (2026-10) |
+| [0589](./0589-adr-0552-0553-teeth-holes-controls.md) | ADR 0553 の歯が通した閾値の頭打ち（TR2）と、ADR 0552 の歯が無かった runner の2つの振る舞い（P8・P9）を縛る | 採用 (2026-10) |
 | [0591](./0591-adr-0548-real-redis-teeth-holes.md) | ADR 0548 の実 Redis の歯の穴（頭打ちの件数・失敗したジョブの保持・`lockDuration` の期限）を塞ぐ | 採用 (2026-10) |
 | [0595](./0595-adr-0562-0557-merged-pr-recheck-teeth.md) | 10/02 にマージされた #1666〜#1680 の確かめ直しで見つかった穴を塞ぐ（ADR 0562 の写しの5欄・ADR 0557 の group の大文字の輪） | 採用 (2026-10) |
 
