@@ -33,7 +33,7 @@ ADR 0571（#1683）の続き。今回は `packages/core` の公開 TSDoc（入�
 ### interfaces
 
 - **`EventStore.get`・`list`**: UUID 形式の `id`・`filter.memoryId` は大文字小文字を区別しないこと、別のテナントのイベントの `id` は `null` を返すことを足した。【現物】
-- **`ClaimOutboxJobsOptions.limit`・`PurgeCompletedJobsOptions.limit`**: 負数・非整数について、`claimBatch` は何も書いておらず、`purgeCompletedJobs` は「結果は未定義」とだけ書いていた。約束の上では未定義のままとし、今の振る舞いを書き足した。testkit の fixture は `Error` を投げる。`@mnemora/postgres` は多くの場合 Postgres が `LIMIT` を拒むが、実行計画によっては拒まずに0件を返す（ADR 0575〔#1687〕の実測。store には負の `limit` を断る約束が無い〔ADR 0493 D3〕）。`purgeCompletedJobs` は `LIMIT limit + 1` で渡すので、`-1` は0件になる。【現物】
+- **`ClaimOutboxJobsOptions.limit`・`PurgeCompletedJobsOptions.limit`**: 負数・非整数について、`claimBatch` は何も書いておらず、`purgeCompletedJobs` は「結果は未定義」とだけ書いていた。約束の上では未定義のままとし、今の振る舞いを書き足した。testkit の fixture は `Error` を投げる。`@mnemora/postgres` は多くの場合 Postgres が `LIMIT` を拒むが、実行計画によっては拒まずに0件を返す（ADR 0575〔#1687〕の実測。store には負の `limit` を断る約束が無い〔ADR 0493 D3〕）。`purgeCompletedJobs` は `LIMIT limit + 1` で渡すので、`-1` は0件になる。TSDoc では ADR の番号ではなく #1687 を指した（ADR 0575 がまだ main に無く、生きた文書の参照の門〔`doc-reference.test.mjs`〕が届かない参照として断るため）。【現物・実測】
 - **`OutboxStore.complete`**: `opts.at` が Invalid Date のときの例外は、Postgres では `jobId` が UUID の形でないと先に return するので起きない、と注記した。【現物】
 - **`Scheduler`**: `@mnemora/bullmq` を「npm には未公開」と書いていた。今は公開済みなので、AGENTS.md の表を指した。【現物】
 - **`TaxonomyMode`・`getTaxonomyMode?`**: 「`taxonomy_mode` を読む経路はまだ実装されていない」と書いていた。今は、`labels` か `taxonomyGroups` を指定した `recall()` が読む。本文は変えず、後ろに訂正を足した。interface の doc の追記が指す「上の段落」が今の本文に無いことにも、訂正を足した。migration の行番号の参照は外した。【現物】
