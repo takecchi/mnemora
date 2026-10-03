@@ -276,7 +276,8 @@ describe("runtime.markContestedGroup — 並行（markContestedGroup が MemoryS
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === c.id) {
-        c.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, c.id)!.status = "archived";
       }
     };
 
