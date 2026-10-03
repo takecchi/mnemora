@@ -1562,11 +1562,10 @@ export class FakeMemoryStore implements MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
     assertWellFormedCtx(ctx);
-    for (const { jobKinds } of news) {
-      assertFakeOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts);
-    }
-    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（作る全部の記憶の行が同じ時刻になる）。
-    const rowOpts = { now: opts?.now ?? new Date() };
+    // ADR 0577: `opts`・`jobKinds` の検査は、実際に記憶を作る news の中（下の loop。`enqueueJob` の前）でだけ行う
+    // ——全部が既存の行に当たる冪等な再送は、InMemory・Postgres と同じく断らない（行を書くときだけ見る）。
+    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（作る全部の記憶の行が同じ時刻になる）。最初に作るときまで遅らせる。
+    let rowOpts: { now: Date } | undefined;
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
     for (const target of supersede) {
@@ -1623,8 +1622,11 @@ export class FakeMemoryStore implements MemoryStore {
           created.push({ memory: fakeSnapshot(memory), created: false, jobs: [] });
           continue;
         }
+        // 投げたら下の catch が、先に作った news も巻き戻す（2件目の NUL で1件目も書かない。ADR 0555 の変異 D・ADR 0564）。
+        assertFakeOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts);
+        const rowNow = (rowOpts ??= { now: opts?.now ?? new Date() });
         const jobs = jobKinds.map((kind) =>
-          this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
+          this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowNow),
         );
         // ADR 0562: 返す `memory` は store の中の行ではなく写し（この後 supersede が行を書き換えても、返した値は動かない）。
         created.push({ memory: fakeSnapshot(memory), created: true, jobs });
