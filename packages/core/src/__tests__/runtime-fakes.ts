@@ -734,7 +734,8 @@ export class FakeMemoryStore implements MemoryStore {
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
     assertWellFormedCtx(ctx);
-    return this.createObservationIdempotent(ctx, input).value;
+    // ADR 0578: 返す Observation は store の中の行ではなく写し。
+    return fakeSnapshot(this.createObservationIdempotent(ctx, input).value);
   }
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
@@ -743,7 +744,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (!observation || observation.tenantId !== ctx.tenantId) {
       return null;
     }
-    return observation;
+    return fakeSnapshot(observation); // ADR 0578
   }
 
   async createObservationWithOutbox(
@@ -758,7 +759,7 @@ export class FakeMemoryStore implements MemoryStore {
       assertFakeOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts),
     );
     if (!created) {
-      return { observation, created: false, jobs: [] };
+      return { observation: fakeSnapshot(observation), created: false, jobs: [] }; // ADR 0578
     }
     // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（積む全部の行が同じ時刻になる）。
     const rowOpts = { ...opts, now: opts?.now ?? new Date() };
@@ -767,7 +768,12 @@ export class FakeMemoryStore implements MemoryStore {
     );
     // Postgres は INSERT ... RETURNING で行の複製を返す。生の参照を返すと、後の claim が
     // 返した job の `attempts` を書き換え、CAS（ADR 0142）の食い違いが隠れる（ADR 0407）。
-    return { observation, created: true, jobs: jobs.map((job) => ({ ...job })) };
+    // ADR 0578: 浅い `{ ...job }` では `payload`・Date が行と共有のままなので、深い写しにする。
+    return {
+      observation: fakeSnapshot(observation),
+      created: true,
+      jobs: jobs.map((job) => fakeSnapshot(job)),
+    };
   }
 
   private enqueueJob(
@@ -1092,7 +1098,7 @@ export class FakeMemoryStore implements MemoryStore {
         validUntil: fakeCopyDate(input.validUntil) ?? null,
         // Issue #371（ADR 0185/ADR 0315）: `InMemoryMemoryStore`（packages/testkit）と
         // 同じ理由・同じ形——`?? null` で転記しないと `undefined` のまま消える。
-        claimKey: input.claimKey ?? null,
+        claimKey: fakeSnapshot(input.claimKey ?? null), // ADR 0578: 呼び手の claimKey と共有しない
         strength: input.strength,
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: fakeCopyDate(input.decayFloorAt),
@@ -1180,7 +1186,7 @@ export class FakeMemoryStore implements MemoryStore {
     const results: LabelSummary[] = [];
     for (const [key, label] of this.backing.labels) {
       if ((JSON.parse(key) as [string, string])[0] === ctx.tenantId) {
-        results.push(label);
+        results.push(fakeSnapshot(label)); // ADR 0578
       }
     }
     results.sort((a, b) => compareLabelName(a.name, b.name));
@@ -1202,7 +1208,7 @@ export class FakeMemoryStore implements MemoryStore {
       registeredAt: existing?.registeredAt ?? new Date(),
     };
     this.backing.labels.set(key, registered);
-    return registered;
+    return fakeSnapshot(registered); // ADR 0578
   }
 
   /**
@@ -1333,14 +1339,19 @@ export class FakeMemoryStore implements MemoryStore {
       assertFakeOutboxRowsWritable("createMemoryWithOutbox", jobKinds, opts),
     );
     if (!created) {
-      return { memory, created: false, jobs: [] };
+      return { memory: fakeSnapshot(memory), created: false, jobs: [] }; // ADR 0578
     }
     // ADR 0555: 壁時計は呼び出しの中で1回だけ読む。
     const rowOpts = { now: opts?.now ?? new Date() };
     const jobs = jobKinds.map((kind) =>
       this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
     );
-    return { memory, created: true, jobs };
+    // ADR 0578: memory も jobs（`enqueueJob` が backing に積んだ行）も、返すときに写しにする。
+    return {
+      memory: fakeSnapshot(memory),
+      created: true,
+      jobs: jobs.map((job) => fakeSnapshot(job)),
+    };
   }
 
   /**
@@ -1413,7 +1424,7 @@ export class FakeMemoryStore implements MemoryStore {
       if (memory.tenantId !== ctx.tenantId) continue;
       if (memory.sourceObservationId !== normId(observationId)) continue;
       if ((memory.extractorVersion ?? null) !== (extractorVersion ?? null)) continue;
-      results.push(memory);
+      results.push(fakeSnapshot(memory)); // ADR 0578
     }
     return results;
   }
@@ -1428,7 +1439,7 @@ export class FakeMemoryStore implements MemoryStore {
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
       if (memory.sourceObservationId !== normId(observationId)) continue;
-      results.push(memory);
+      results.push(fakeSnapshot(memory)); // ADR 0578
     }
     return results;
   }
@@ -1480,7 +1491,7 @@ export class FakeMemoryStore implements MemoryStore {
       memory.supersededById = normId(opts.supersededById);
     }
     memory.updatedAt = new Date();
-    return memory;
+    return fakeSnapshot(memory); // ADR 0578: 書き終えた行の写しを返す（行そのものは返さない）
   }
 
   /**
@@ -1527,7 +1538,7 @@ export class FakeMemoryStore implements MemoryStore {
     }
     memory.updatedAt = new Date();
     this.backing.events.push(storedEvent);
-    return { memory, event: storedEvent };
+    return { memory: fakeSnapshot(memory), event: fakeSnapshot(storedEvent) }; // ADR 0578
   }
 
   /**
@@ -1562,11 +1573,10 @@ export class FakeMemoryStore implements MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
     assertWellFormedCtx(ctx);
-    for (const { jobKinds } of news) {
-      assertFakeOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts);
-    }
-    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（作る全部の記憶の行が同じ時刻になる）。
-    const rowOpts = { now: opts?.now ?? new Date() };
+    // ADR 0577: `opts`・`jobKinds` の検査は、実際に記憶を作る news の中（下の loop。`enqueueJob` の前）でだけ行う
+    // ——全部が既存の行に当たる冪等な再送は、InMemory・Postgres と同じく断らない（行を書くときだけ見る）。
+    // ADR 0555: 壁時計は呼び出しの中で1回だけ読む（作る全部の記憶の行が同じ時刻になる）。最初に作るときまで遅らせる。
+    let rowOpts: { now: Date } | undefined;
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
     for (const target of supersede) {
@@ -1623,8 +1633,11 @@ export class FakeMemoryStore implements MemoryStore {
           created.push({ memory: fakeSnapshot(memory), created: false, jobs: [] });
           continue;
         }
+        // 投げたら下の catch が、先に作った news も巻き戻す（2件目の NUL で1件目も書かない。ADR 0555 の変異 D・ADR 0564）。
+        assertFakeOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts);
+        const rowNow = (rowOpts ??= { now: opts?.now ?? new Date() });
         const jobs = jobKinds.map((kind) =>
-          this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
+          this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowNow),
         );
         // ADR 0562: 返す `memory` は store の中の行ではなく写し（この後 supersede が行を書き換えても、返した値は動かない）。
         created.push({ memory: fakeSnapshot(memory), created: true, jobs });
@@ -1868,12 +1881,12 @@ export class FakeMemoryStore implements MemoryStore {
     }
     assertFakeMemoryColumn("embedding_status", status);
     if (isEmbeddingStatusRollback(memory.embeddingStatus, status)) {
-      // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
-      return memory;
+      // no-op: 何も書かない。返すのは現在の（更新されなかった）行の写し（ADR 0578）。
+      return fakeSnapshot(memory);
     }
     memory.embeddingStatus = status;
     memory.updatedAt = new Date();
-    return memory;
+    return fakeSnapshot(memory); // ADR 0578
   }
 
   /**
@@ -1913,7 +1926,7 @@ export class FakeMemoryStore implements MemoryStore {
       assertFakeQueryBigint("reinforce", "nowSeq", opts.nowSeq);
     }
     if ((memory.lastReinforcedAt ?? memory.recordedAt).getTime() >= at.getTime()) {
-      return memory;
+      return fakeSnapshot(memory); // ADR 0578
     }
     // 書く値（`nowSeq` か `nowSeq + S_x`）が負なら `memories_decay_seq_non_negative` が拒む。何かを書き換える前に決めて見る。
     let plannedBaseSeq: number | undefined;
@@ -1927,7 +1940,7 @@ export class FakeMemoryStore implements MemoryStore {
         throw new Error(`reinforce: decayBaseSeq must not be negative (got ${plannedBaseSeq})`);
       }
     }
-    memory.lastReinforcedAt = at;
+    memory.lastReinforcedAt = fakeCopyDate(at); // ADR 0578: 呼び手の Date を行に入れない
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
       recordedAt: memory.recordedAt,
       lastReinforcedAt: memory.lastReinforcedAt,
@@ -1952,7 +1965,7 @@ export class FakeMemoryStore implements MemoryStore {
       });
     }
     memory.updatedAt = new Date();
-    return memory;
+    return fakeSnapshot(memory); // ADR 0578
   }
 
   /**
@@ -2600,7 +2613,7 @@ export class FakeMemoryStore implements MemoryStore {
     }
 
     this.backing.events.push(storedEvent);
-    return { memory, event: storedEvent };
+    return { memory: fakeSnapshot(memory), event: fakeSnapshot(storedEvent) }; // ADR 0578
   }
 
   /**
@@ -2660,7 +2673,12 @@ export class FakeMemoryStore implements MemoryStore {
     secondMemory.updatedAt = new Date();
     this.backing.events.push(firstEvent, secondEvent);
 
-    return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+    // ADR 0578: 返すのは行の写し。
+    return {
+      first: fakeSnapshot(firstMemory),
+      second: fakeSnapshot(secondMemory),
+      events: [fakeSnapshot(firstEvent), fakeSnapshot(secondEvent)],
+    };
   }
 
   /**
@@ -2770,7 +2788,12 @@ export class FakeMemoryStore implements MemoryStore {
     secondMemory.updatedAt = new Date();
     this.backing.events.push(firstEvent, secondEvent);
 
-    return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+    // ADR 0578: 返すのは行の写し。
+    return {
+      first: fakeSnapshot(firstMemory),
+      second: fakeSnapshot(secondMemory),
+      events: [fakeSnapshot(firstEvent), fakeSnapshot(secondEvent)],
+    };
   }
 
   /**
@@ -2881,7 +2904,11 @@ export class FakeMemoryStore implements MemoryStore {
     }
     this.backing.events.push(...events);
 
-    return { members: memories, events };
+    // ADR 0578: 返すのは行・イベントの写し。
+    return {
+      members: memories.map((m) => fakeSnapshot(m)),
+      events: events.map((e) => fakeSnapshot(e)),
+    };
   }
 
   /**
@@ -3010,7 +3037,11 @@ export class FakeMemoryStore implements MemoryStore {
     );
     this.backing.events.push(...events);
 
-    return { members: memories, events };
+    // ADR 0578: 返すのは行・イベントの写し。
+    return {
+      members: memories.map((m) => fakeSnapshot(m)),
+      events: events.map((e) => fakeSnapshot(e)),
+    };
   }
 
   /**
@@ -3046,7 +3077,7 @@ export class FakeMemoryStore implements MemoryStore {
     memory.updatedAt = new Date();
     this.backing.events.push(storedEvent);
 
-    return { memory, event: storedEvent };
+    return { memory: fakeSnapshot(memory), event: fakeSnapshot(storedEvent) }; // ADR 0578
   }
 
   /**
@@ -3069,32 +3100,35 @@ export class FakeMemoryStore implements MemoryStore {
     assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
-    return [...this.backing.memories.values()].filter((m) => {
-      if (m.tenantId !== ctx.tenantId) return false;
-      if (m.id === normId(query.excludeMemoryId)) return false;
-      if ((m.subjectId ?? null) !== query.subjectId) return false;
-      if (!m.claimKey) return false;
-      if (
-        m.claimKey.subject !== query.claimKey.subject ||
-        m.claimKey.predicate !== query.claimKey.predicate
-      ) {
-        return false;
-      }
-      if (m.status !== "active") return false;
-      if (m.contentHash === query.contentHash) return false;
-      const otherFrom = m.validFrom ?? null;
-      const otherUntil = m.validUntil ?? null;
-      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
-      // （ADR 0473。`packages/postgres` の実装と同じ）。
-      const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
-        from !== null && until !== null && from >= until;
-      const overlaps =
-        !isEmptyInterval(targetFrom, targetUntil) &&
-        !isEmptyInterval(otherFrom, otherUntil) &&
-        (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
-        (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
-      return overlaps;
-    });
+    // ADR 0578: 絞り込んだあとの行を、写しにして返す（下の `.map(fakeSnapshot)`）。
+    return [...this.backing.memories.values()]
+      .filter((m) => {
+        if (m.tenantId !== ctx.tenantId) return false;
+        if (m.id === normId(query.excludeMemoryId)) return false;
+        if ((m.subjectId ?? null) !== query.subjectId) return false;
+        if (!m.claimKey) return false;
+        if (
+          m.claimKey.subject !== query.claimKey.subject ||
+          m.claimKey.predicate !== query.claimKey.predicate
+        ) {
+          return false;
+        }
+        if (m.status !== "active") return false;
+        if (m.contentHash === query.contentHash) return false;
+        const otherFrom = m.validFrom ?? null;
+        const otherUntil = m.validUntil ?? null;
+        // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
+        // （ADR 0473。`packages/postgres` の実装と同じ）。
+        const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
+          from !== null && until !== null && from >= until;
+        const overlaps =
+          !isEmptyInterval(targetFrom, targetUntil) &&
+          !isEmptyInterval(otherFrom, otherUntil) &&
+          (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
+          (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
+        return overlaps;
+      })
+      .map((m) => fakeSnapshot(m));
   }
 
   /**
@@ -3118,32 +3152,34 @@ export class FakeMemoryStore implements MemoryStore {
     assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
-    return [...this.backing.memories.values()].filter((m) => {
-      if (m.tenantId !== ctx.tenantId) return false;
-      if (m.id === normId(query.excludeMemoryId)) return false;
-      if ((m.subjectId ?? null) !== query.subjectId) return false;
-      if (!m.claimKey) return false;
-      if (
-        m.claimKey.subject !== query.claimKey.subject ||
-        m.claimKey.predicate !== query.claimKey.predicate
-      ) {
-        return false;
-      }
-      if (m.status !== "contested") return false;
-      if (m.contentHash === query.contentHash) return false;
-      const otherFrom = m.validFrom ?? null;
-      const otherUntil = m.validUntil ?? null;
-      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
-      // （ADR 0473。`packages/postgres` の実装と同じ）。
-      const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
-        from !== null && until !== null && from >= until;
-      const overlaps =
-        !isEmptyInterval(targetFrom, targetUntil) &&
-        !isEmptyInterval(otherFrom, otherUntil) &&
-        (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
-        (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
-      return overlaps;
-    });
+    return [...this.backing.memories.values()]
+      .filter((m) => {
+        if (m.tenantId !== ctx.tenantId) return false;
+        if (m.id === normId(query.excludeMemoryId)) return false;
+        if ((m.subjectId ?? null) !== query.subjectId) return false;
+        if (!m.claimKey) return false;
+        if (
+          m.claimKey.subject !== query.claimKey.subject ||
+          m.claimKey.predicate !== query.claimKey.predicate
+        ) {
+          return false;
+        }
+        if (m.status !== "contested") return false;
+        if (m.contentHash === query.contentHash) return false;
+        const otherFrom = m.validFrom ?? null;
+        const otherUntil = m.validUntil ?? null;
+        // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
+        // （ADR 0473。`packages/postgres` の実装と同じ）。
+        const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
+          from !== null && until !== null && from >= until;
+        const overlaps =
+          !isEmptyInterval(targetFrom, targetUntil) &&
+          !isEmptyInterval(otherFrom, otherUntil) &&
+          (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
+          (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
+        return overlaps;
+      })
+      .map((m) => fakeSnapshot(m)); // ADR 0578
   }
 
   /**
@@ -3247,7 +3283,7 @@ export class FakeMemoryStore implements MemoryStore {
       memory.supersededById = null;
       memory.updatedAt = new Date();
       this.backing.events.push(storedEvents[i]!);
-      restored.push(memory);
+      restored.push(fakeSnapshot(memory)); // ADR 0578: 書き終えた行の写し
     });
     return { restored };
   }
@@ -4397,7 +4433,7 @@ export class FakeEventStore implements EventStore {
     }
     const stored = buildStoredEvent(ctx, event);
     this.backing.events.push(stored);
-    return stored;
+    return fakeSnapshot(stored); // ADR 0578
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
@@ -4444,7 +4480,10 @@ export class FakeEventStore implements EventStore {
     // `store.events` getter 経由で runtime.test.ts が直接読む）を in-place で破壊しない
     // （`packages/testkit` の `InMemoryEventStore.list` と同じ形・同じ理由）。
     const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime());
-    return filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted;
+    // ADR 0578: 返すのは行の写し（`events` getter は検査用の口なので行そのもののまま）。
+    return (filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted).map((e) =>
+      fakeSnapshot(e),
+    );
   }
 }
 

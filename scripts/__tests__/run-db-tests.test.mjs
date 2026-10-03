@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -24,6 +24,12 @@ const gate = fileURLToPath(new URL("../run-db-tests.mjs", import.meta.url));
  * ポート 1 は接続が即座に拒否されるので、待たされない。
  */
 const UNREACHABLE_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:1/mnemora_gate_probe";
+
+/**
+ * 「門が赤くなる」歯が門に名指しして渡す、`packages/postgres` の DB テストのファイル（パッケージからの相対）。
+ * 選んだ理由はその歯のコメントにある（ADR 0579）。
+ */
+const DB_TEST_FILE = "src/__tests__/contested-with-index.test.ts";
 
 /** 親の DATABASE_URL を歯に持ち込まない（手元に DB が在るかで結果が変わってはいけない）。 */
 function envWithout(name) {
@@ -61,12 +67,21 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
   });
 
   it("DATABASE_URL が在って DB テストが落ちるとき: 門が赤くなる", () => {
-    // `--bail=1` を門に渡し、各パッケージの `vitest run` を最初に落ちたファイルで止める。届かない DB へ
-    // 全ファイルを走らせると DB テストが増えるほど長くなり（CI で 2026-09-27 の朝 83s → 夕方 118s、
+    // 門に DB テストのファイルを1本だけ名指しして渡し、各パッケージの `vitest run` をそのファイルだけに絞る。
+    // 届かない DB へ全ファイルを走らせると DB テストが増えるほど長くなり（CI で 2026-09-27 の朝 83s → 夕方 118s、
     // `testTimeout` は 180s）、歯の主張には要らない——門は最初に落ちたパッケージで止まるので、
     // 「呼びに行った上で落ちた」「門が赤くなる」を見るには1本落ちれば足りる。
+    // ⚠ 以前は `--bail=1` で絞っていたが、vitest 5.0.0 は打ち切りの合図を落ちた結果の報告より先に親へ届けることがあり、
+    // そのとき落ちたファイルの名前が出力から消えて、この歯が揺れた（#1680・#1684・#1690 の CI。ADR 0579）。
+    // 1ファイルの名指しなら打ち切りが無いので、落ちた結果は必ず報告される。
+    // **名指しするのは、DB が無いと走らない本物の DB テストであること。** DB が無くても通るファイルを選ぶと、
+    // 落ちた理由が DB でなくなり、「届かない DB へ実際に繋ぎに行って落ちた」の印にならない。
+    // `contested-with-index.test.ts` は、どの it も `beforeEach` の `resetTestDatabase()` で DB に触り、
+    // `EXPLAIN` を本物の Postgres に撃つ（DB 在りで3本とも緑、`DATABASE_URL` 無しでは `requireDatabaseUrl` が断る）。
+    // 改名・削除で消えたら、vitest は「No test files found」で落ち、その文言にもファイル名が出る——下の在ることの検査で先に止める。
+    expect(existsSync(`${repoRoot}packages/postgres/${DB_TEST_FILE}`)).toBe(true);
     const result = runGate({ ...process.env, DATABASE_URL: UNREACHABLE_DATABASE_URL }, [
-      "--bail=1",
+      DB_TEST_FILE,
     ]);
     const output = `${result.stdout}${result.stderr}`;
 
@@ -80,14 +95,22 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
     // DB テストが本当に走って、届かない接続先へ実際に繋ぎに行って落ちたこと——門が自分の文言だけを出す形では通らない。
     // ⚠ vitest の集計の行（`Test Files … failed`）では見ない。`--bail=1` で打ち切る時機によって、集計の行は
     // `Test Files   (296)` のように落ちた数を出さないことがある（main e4e27fd の CI で観測。ADR 0465）。
-    // 代わりに、落ちた DB テストのファイルの名前（`src/__tests__/….test.ts`）が出力に在ることを見る。
+    // 代わりに、vitest が名指しした DB テストのファイルを落ちたと報告する行（`FAIL  src/__tests__/….test.ts`）が出力に在ることを見る。
     // 門は `test:db` を `stdio: "inherit"` で起動するので、子が落ちたテストを報告する行・スタックはここに届く。
     // 門が自分で出すのはパッケージ名と `test:db` だけで、ファイルの名前は出さない。
+    // ⚠ ファイルの名前だけでは見ない——名指しした引数は pnpm が `$ vitest run src/__tests__/….test.ts` と書き出すので、
+    // DB テストが走らなくても名前は出力に在る（ADR 0579）。vitest の `FAIL` の印と組で見る。
     // ⚠ `ECONNREFUSED 127.0.0.1:1` では見ない——門の接続先の告知（「版を取得できませんでした: connect ECONNREFUSED …」）が
     // 同じ文字列を出すので、門が DB テストを起動しなくても通ってしまう（ADR 0465 の変異で確かめた）。
     // vitest は色の指定（CI の FORCE_COLOR など）で文字の間に ANSI の色の符号を挟むので、外してから見る。
+    // `FAIL` と名前の間には vitest の project 名（`packages/postgres/vitest.config.ts` の `postgres-db-parallel`）が入る。
+    // 色が無いと `|postgres-db-parallel|`、色が有ると（CI の FORCE_COLOR）色の付いた札になり、色の符号を外すと
+    // ` postgres-db-parallel ` になる——両方の形を許す（ADR 0579。CI の最初の run で `|…|` だけを許す形が落ちた）。
+    const escapedFile = DB_TEST_FILE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     // eslint-disable-next-line no-control-regex
-    expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/src\/__tests__\/[\w.-]+\.test\.ts/);
+    expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(
+      new RegExp(`FAIL\\s+(?:\\|?[\\w-]+\\|?\\s+)?${escapedFile}`),
+    );
 
     // 未実行の告知と取り違えられないこと。
     expect(output).not.toContain("DB テストは実行していません");

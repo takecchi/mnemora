@@ -1,4 +1,4 @@
-# ADR 0579: `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す
+# ADR 0585: `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03
