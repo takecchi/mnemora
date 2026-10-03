@@ -5,7 +5,7 @@ import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0586: ADR 0577（`supersedeWithNewMemories` の冪等な再送は検査しない）の監査で生き残った2つの変異を塞ぐ歯。
+ * ADR 0587: ADR 0577（`supersedeWithNewMemories` の冪等な再送は検査しない）の監査で生き残った2つの変異を塞ぐ歯。
  *
  *  - M7: 再送の news と新規の news が混ざったバッチで、再送の news の `jobKinds`（news ごとの値）は検査しない
  *    （ADR 0577・ADR 0493）。最初に作るときに全部の news の `jobKinds` を見る実装は、再送側の NUL で全体を断ってしまう。

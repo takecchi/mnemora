@@ -4,7 +4,7 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
 /**
- * ADR 0586（M24 の対）: `supersedeWithNewMemories` が置き換える古い記憶の `updatedAt` は壁時計であり、`opts.now` ではない
+ * ADR 0587（M24 の対）: `supersedeWithNewMemories` が置き換える古い記憶の `updatedAt` は壁時計であり、`opts.now` ではない
  * （ADR 0566 A）。core の Fake と同じ約束を、`InMemoryMemoryStore` にも当てる（core のテストは testkit を import できない）。
  */
 
