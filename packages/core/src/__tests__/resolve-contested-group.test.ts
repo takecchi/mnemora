@@ -216,6 +216,32 @@ describe("runtime.resolveContestedGroup — fix2: 群の一部だけを渡すと
       expect(stored?.status).toBe("active");
     }
   });
+
+  it("解消で消す関係の行は群の中だけ——forget で抜けた記憶との行・群の外の記憶と link した行は残る", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: true });
+    const ids: string[] = [];
+    for (const digest of ["A", "B", "C", "D", "E"]) {
+      ids.push((await stores.memoryStore.createMemory(ctx, newMemory({ digest }))).id);
+    }
+    const [a, b, c, d, e] = ids as [string, string, string, string, string];
+    const outside = (await stores.memoryStore.createMemory(ctx, newMemory({ digest: "X" }))).id;
+    await runtime.markContestedGroup!(ctx, ids);
+    await stores.relationStore.link(ctx, "contradicts", a, outside);
+    await stores.relationStore.link(ctx, "contradicts", outside, a);
+    await runtime.forget(ctx, { memoryIds: [e] });
+
+    const result = await runtime.resolveContestedGroup!(ctx, [a, b, c, d], {
+      kind: "both_active",
+    });
+
+    expect(result.outcome.kind).toBe("resolved");
+    const relatedOf = async (id: string) =>
+      (await stores.relationStore.listRelated(ctx, id, "contradicts")).map((r) => r.memoryId);
+    // 群の中どうし（a-b・a-c・a-d）の行は消え、forget 済みの e・群の外の outside との行だけが残る。
+    expect((await relatedOf(a)).sort()).toEqual([e, outside].sort());
+    expect(await relatedOf(b)).toEqual([e]);
+    expect(await relatedOf(outside)).toEqual([a]);
+  });
 });
 
 describe("runtime.resolveContestedGroup — relationStore が配線されていなければ、この読み側の確認は行わない", () => {
