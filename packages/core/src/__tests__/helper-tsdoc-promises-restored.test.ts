@@ -92,6 +92,12 @@ describe("C3 countKindForUnits・unitAssemblyShortfall: 件数ではなく候補
     expect(countKindForUnits(assembled, 3)).toBe("unknown");
     expect(unitAssemblyShortfall(assembled, 3)).toBe(2);
   });
+
+  it("異なる id の数が候補数を超えている（二重は無い）と、'unknown' で、抜けた件数は 0（差の絶対値ではない）", () => {
+    const assembled = units([a], [b, c]);
+    expect(countKindForUnits(assembled, 2)).toBe("unknown");
+    expect(unitAssemblyShortfall(assembled, 2)).toBe(0);
+  });
 });
 
 describe("C4 compareScoredCandidates: Invalid Date の時刻でも NaN を返さず、id のタイブレークで決める", () => {
@@ -102,6 +108,16 @@ describe("C4 compareScoredCandidates: Invalid Date の時刻でも NaN を返さ
     expect(Number.isNaN(compareScoredCandidates(invalid, valid))).toBe(false);
     expect(compareScoredCandidates(valid, invalid)).toBeLessThan(0);
     expect(compareScoredCandidates(invalid, valid)).toBeGreaterThan(0);
+  });
+
+  it("Invalid Date が id の小さいほうに付いていても（逆の組）、id の昇順で決まる（Invalid Date を後ろへ送らない）", () => {
+    const invalidFirstById = candidate("a", new Date(NaN));
+    const validLaterById = candidate("b", new Date(1));
+    expect(compareScoredCandidates(invalidFirstById, validLaterById)).toBeLessThan(0);
+    expect(compareScoredCandidates(validLaterById, invalidFirstById)).toBeGreaterThan(0);
+    expect(
+      [validLaterById, invalidFirstById].sort(compareScoredCandidates).map((x) => x.memory.id),
+    ).toEqual(["a", "b"]);
   });
 
   it("両方 Invalid Date でも id の昇順で決まる", () => {

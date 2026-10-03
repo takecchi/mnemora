@@ -87,6 +87,37 @@ describe("matchCreateExtensionLines / stripCreateExtensionStatements: 0001_init.
     expect(removed).toEqual([]);
     expect(stripped).toBe(sql);
   });
+
+  // 次の3本は、`matchCreateExtensionLines` の doc が書いている今の一致のしかたを縛る。
+  // 正規表現を締めたり広げたりしたときに、どこが変わるかを見えるようにするためで、望ましい形だと決めるものではない。
+  // （`pg_` で始まる名前を通すかどうかは縛らない。`assertSafeSchemaName` の側の話で、将来拒む余地を残してある。）
+
+  it("`;` の後ろにコメントがあっても一致し、取り除くのは `;` までで、コメントは本文に残る", () => {
+    const sql = "CREATE EXTENSION IF NOT EXISTS pgcrypto; -- needed for gen_random_uuid\nSELECT 1;";
+
+    expect(matchCreateExtensionLines(sql)).toEqual([
+      { line: "CREATE EXTENSION IF NOT EXISTS pgcrypto; ", name: "pgcrypto" },
+    ]);
+    const { sql: stripped, removed } = stripCreateExtensionStatements(sql);
+    expect(removed).toEqual(["pgcrypto"]);
+    expect(stripped).toBe("-- needed for gen_random_uuid\nSELECT 1;");
+  });
+
+  it("名前は書かれたとおりの綴りで、二重引用符を外さない", () => {
+    const sql = 'CREATE EXTENSION IF NOT EXISTS "btree_gin";\nSELECT 1;';
+
+    expect(matchCreateExtensionLines(sql).map((m) => m.name)).toEqual(['"btree_gin"']);
+    expect(stripCreateExtensionStatements(sql).removed).toEqual(['"btree_gin"']);
+  });
+
+  it("1行に2つ在るときは、先頭の1つだけが一致し、後ろの1つは本文に残る", () => {
+    const sql = "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pgcrypto;\n";
+
+    expect(matchCreateExtensionLines(sql).map((m) => m.name)).toEqual(["vector"]);
+    const { sql: stripped, removed } = stripCreateExtensionStatements(sql);
+    expect(removed).toEqual(["vector"]);
+    expect(stripped).toBe("CREATE EXTENSION IF NOT EXISTS pgcrypto;\n");
+  });
 });
 
 describe("MissingExtensionsError: メッセージに足りない拡張名と実行すべき SQL が具体的に載る", () => {
