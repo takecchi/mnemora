@@ -23,7 +23,7 @@
 3. **歯**。
    - testkit `in-memory-erase-tenant-postgres-alignment.test.ts` に「acme を消しても、acme:eu の recall_usages は残る」を足す。件数だけでは「usage を数えも消しもしない」実装と見分けられないので、usage の鍵の集合そのものを見る。対照として、`acme:eu` 自身を消せば鍵は消える。
    - core に `fake-erase-tenant-exact-tenant.test.ts` を新しく置き、Fake に対して同じ歯を1本と、`tenant_subject_activity` の歯を2本（subject 3つなら `deleted` が 6、`limit: 5` なら 5 と 1 に分かれる）書く。
-4. **CHANGELOG** の未リリースの節（`[1.3.0]`）の Fixed に1行ずつ足す。Fake は出荷物ではないが、足すと決めたのはクローンの判断である（[ADR 0243](./0243-changelog-lists-publish-targets-only.md) の「publish 対象の変更だけを載せる」とは食い違う。行の中に「出荷物ではない」と書いた）。
+4. **CHANGELOG** の未リリースの節（`[1.3.0]`）の Fixed に、testkit の InMemory の行だけを足す。core の Fake は出荷物ではないので載せない（[ADR 0243](./0243-changelog-lists-publish-targets-only.md) の「publish 対象の変更だけを載せる」。Fake の行は一度足したが、クローンの判断で落とした）。
 
 ## 変異試験【実測】
 

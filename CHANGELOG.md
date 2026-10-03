@@ -209,8 +209,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.eraseTenant` が、`recall_usages` を tenantId の前方一致ではなく完全一致で消すようになった。**以前は `acme` を消すと、`acme:eu` など `acme:` で始まる別テナントの `recall_usages` まで消えていた（[ADR 0604](./docs/decisions/0604-fixture-erase-tenant-usages-exact-tenant.md)。`@mnemora/postgres` は `tenant_id = $1` で、もとから完全一致）。
 
-- **core のテスト用 `FakeMemoryStore.eraseTenant`（出荷物ではない）も、`recall_usages` を完全一致で消し、`tenant_subject_activity` を subject ごとの行で数えるようになった**（testkit の InMemory・`@mnemora/postgres` と同じ。[ADR 0604](./docs/decisions/0604-fixture-erase-tenant-usages-exact-tenant.md)・[ADR 0426](./docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md)）。
-
 - **`packDigestBand` に `maxEntryChars: NaN` を渡すと、digest を切り詰めない（無制限）へ化けていたのを、負数と同じ「digest を空に切る」へ直した**（[ADR 0585](./docs/decisions/0585-digest-band-max-entry-chars-nan.md)）。`length > NaN` は常に false になるためで、同じ関数の `limit`/`maxChars` の `NaN`（Issue #803）や、負数の `maxEntryChars` の扱いと食い違っていた。
   - **何が変わるか**: `maxEntryChars: NaN` のとき、全エントリの `digest` が `""`、`truncated: true` になる（負数と同じ）。`+Infinity` は今までどおり上限なし。TSDoc の `PackDigestBandOptions.maxEntryChars` にも書いた。
   - **破壊的と数えない理由**: 新しく投げる例外は無く、公開 API の型・表面も変えない。影響を受けるのは `packDigestBand` を直接呼んで `NaN` を渡していた呼び出し側だけで、`recall()` が渡すのは定数 `DIGEST_BAND_MAX_ENTRY_CHARS` なので、`recall()` の振る舞いは変わらない。
