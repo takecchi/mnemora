@@ -3,7 +3,7 @@
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03
 
-クローンの委譲先（担い手。マネージャー mgr-587fc473 の指示による）が書いた。決めたのはクローンとマネージャーで、オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。ただし下の「#1699 の `createdAt`」の1点は、オーナー側の判断として伝えられたものを書き写している。
+クローンの委譲先（担い手。マネージャー mgr-587fc473 の指示による）が書いた。決めたのはクローン（オーナーの価値観を写した判断役）とマネージャーで、オーナー本人ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。下の「#1699 の `createdAt`」の不変条件も、クローンの判断である。
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手またはクローンの判定、【未確認】は確かめていないこと。
 
 ## 背景【実測】
@@ -26,13 +26,21 @@
 - **循環の歯は `node:vm` の `timeout` で打ち切る**【判断】。歯止め（`seen`）を外すと無限ループになり、同期のループは vitest の時間切れでは止まらない（テストランナーごと固まる）。`vm.runInNewContext("omitParamsFromError(a)", …, { timeout: 2000 })` なら、同期のループでも約2秒で `ERR_SCRIPT_EXECUTION_TIMEOUT` になり、赤として観測できる【実測: 変異を入れた回は 2007ms・2012ms で落ちた】。
 - T3 の期待は、負数（-5）の現物の挙動に合わせた。空文字でも `0 > -5` が真になり `truncated: true` が立つ。NaN も同じにそろえる【実測】。
 
-## #1699 の `createdAt` は、オーナー側の判断で不変条件として縛る【判断】
+## #1699 の `createdAt` は、クローンの判断で不変条件として縛る【判断】
 
-`supersedeWithNewMemories` が置き換えた古い記憶の `createdAt` が変わらないことには、明文の約束が無い。**オーナー側が「作成時刻が後から書き換わらないのは当然の不変条件として縛ってよい」と判断した**ので、T6 で3実装（core の Fake・testkit の InMemory・Postgres）を縛った。`updatedAt` が進む（壁時計。[ADR 0566](./0566-fake-outbox-opts-now-controls.md) A の約束）ことは陽性対照として同じ歯に置いてある。
+`supersedeWithNewMemories` が置き換えた古い記憶の `createdAt` が変わらないことには、明文の約束が無い。**クローンが「明文の約束はないが、作成時刻が後から書き換わらないのは当然の不変条件として縛る」と判断した**（オーナー本人の決定ではない）ので、T6 で3実装（core の Fake・testkit の InMemory・Postgres）を縛った。`updatedAt` が進む（壁時計。[ADR 0566](./0566-fake-outbox-opts-now-controls.md) A の約束）ことは陽性対照として同じ歯に置いてある。
+
+## T9: CAS で弾かれた行は `updatedAt` も `createdAt` も書き換わらない — クローンの判断で不変条件として縛る【判断】
+
+`supersedeWithNewMemories` で `expectedStatus` が合わず `conflicted` に積まれた対象は、`updatedAt` を含め何も書き換わらない。これにも明文の約束は無いが、**クローンが「当然の不変条件として縛る」と判断した**（オーナー本人の決定ではない）。
+
+- **歯を書く前の現物確認【実測】**: 3実装（core の Fake の `runtime-fakes.ts`、testkit の InMemory の `in-memory-memory-store.ts`、Postgres の `memory-store.ts`）が、弾いた行を書き換えていないことを、コードを読んだうえで、書いた歯を変異なしで走らせて確かめた（3脚とも緑）。振る舞いを変える必要は無かった。
+- **歯**: T6 と同じ3ファイルに、各1 it `expectedStatus が合わず conflicted に積まれた古い記憶は、置き換えの前後で updatedAt・createdAt が同じ` を足した。古い記憶を `archived` にしておき（Fake・InMemory は `updateStatus`、Postgres は `status`・`created_at`・`updated_at` を直接書く）、`expectedStatus: "active"` で置き換えを試みる。`conflicted` が `observedStatus: "archived"` で1件、`superseded` は空、`status`・`updatedAt`・`createdAt` が前と同じ、を見る。`status` が変わらないことは既存の歯も見ている。
+- **変異【実測】**: 弾かれた対象の `updatedAt` まで進める（Fake・InMemory は `conflicted.push` の前に `memory.updatedAt = new Date()`、Postgres は弾いた行に `UPDATE memories SET updated_at = now()`）。3実装に別々の歯で、**赤3回**（各回とも、3ファイルのその it だけが落ちた）、`cp` で戻して `cmp` 一致、**緑3回**（別々のコマンド。core 4本・testkit 3本・postgres 2本）。
 
 ## 足さなかったもの【判断】
 
-- **CAS で弾かれた行の `updatedAt`**: 約束が無く、判断待ち。歯にすると、決まっていない仕様を固めてしまう。
+- ~~CAS で弾かれた行の `updatedAt`~~: 初稿では「約束が無く、判断待ち」として足さなかったが、その後、クローンが「当然の不変条件として縛る」と判断したので、下の T9 で足した（上の初稿の記述は、判断が出る前のもの）。
 - **#1700 の `externalId`**: 既存の歯で捕まる（変異を入れると既存の歯が赤になる）ので、足さない。
 - core 側の `omitParamsFromError` の冪等: 既存の歯（`standalone-functions-omit-params.test.ts`）があるので足さない。
 
@@ -69,4 +77,4 @@ T6 は時刻を比べる歯なので、赤を3回、戻した後の緑を3回、
 
 ## これが覆るとしたら
 
-CAS で弾かれた行の `updatedAt` に約束が決まったとき（別の ADR で縛る）。`createdAt` の不変条件を、オーナーが約束として文書へ書いたときは、本 ADR の「判断」ではなく文書の側が根拠になる。
+`createdAt` の不変条件（T6）と、弾かれた行が書き換わらない不変条件（T9）は、どちらもクローンの判断である。オーナー本人がこれらを約束として文書へ書いたときは、本 ADR の「判断」ではなく文書の側が根拠になる。逆に、オーナー本人が「弾かれた行も `updatedAt` を進めてよい」と決めたときは、T9 の歯を外す。
