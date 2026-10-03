@@ -418,6 +418,16 @@ function nextId(prefix: string): string {
 }
 
 /**
+ * ADR 0604: `recall_usages` の鍵 `${tenantId}:${recallId}:${memoryId}` から tenantId を取り出す
+ * （`packages/testkit` の `InMemoryMemoryStore` と同じ）。tenantId は `:` を含んでよい不透明な文字列なので、
+ * 前から切らずに後ろの2つの `:` を外す（この Fake の `recallId`・`memoryId` は `rec-N`・`mem-N` で `:` を含まない）。
+ */
+function tenantOfUsageKey(key: string): string {
+  const last = key.lastIndexOf(":");
+  return key.slice(0, key.lastIndexOf(":", last - 1));
+}
+
+/**
  * ADR 0562: 呼び手の値と store の中の実体を切り離す（`InMemoryMemoryStore` の `snapshot` と同じく `structuredClone`）。
  * 入力は保存するときに、返り値は返すときに通す——どちらか片方だけでは、呼び手の書き換えが store の中身に届く。
  * Date は Date のまま、配列・オブジェクトは深い複製になる（`JSON` で往復しないので Date を文字列にしない）。
@@ -1324,7 +1334,8 @@ export class FakeMemoryStore implements MemoryStore {
 
     const steps: Array<() => number> = [
       () => drainKeyedMap(this.backing.memoryLabels),
-      () => drainSet(this.backing.usages, (key) => key.startsWith(`${ctx.tenantId}:`)),
+      // ADR 0604: 前方一致ではなく、鍵から取り出した tenantId の完全一致（`acme` を消しても `acme:eu` は残す）。
+      () => drainSet(this.backing.usages, (key) => tenantOfUsageKey(key) === ctx.tenantId),
       () => drainArray(this.backing.events, (event) => event.tenantId),
       // memory_relations（Issue #207/#933 PR2）
       () => drainArray(this.backing.relations, (relation) => relation.tenantId),
@@ -1347,11 +1358,14 @@ export class FakeMemoryStore implements MemoryStore {
         if (!dryRun) this.backing.activitySeq.delete(ctx.tenantId);
         return 1;
       },
+      // tenant_subject_activity（`(tenant_id, subject_id)` が主キー——ADR 0604。testkit の InMemory（ADR 0426）と同じく、
+      // 内側の `Map<subjectId, seq>` の1エントリを1行として数え、budget ぶんだけ消す）
       () => {
-        if (remaining <= 0) return 0;
-        if (!this.backing.subjectActivitySeq.has(ctx.tenantId)) return 0;
-        if (!dryRun) this.backing.subjectActivitySeq.delete(ctx.tenantId);
-        return 1;
+        const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
+        if (bySubject === undefined) return 0;
+        const deleted = drainMap(bySubject, () => ctx.tenantId);
+        if (!dryRun && bySubject.size === 0) this.backing.subjectActivitySeq.delete(ctx.tenantId);
+        return deleted;
       },
     ];
 
