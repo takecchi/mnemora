@@ -3,9 +3,12 @@
 // Issue #880: `InMemoryMemoryStore.archiveDecayed`（packages/testkit/src/__fixtures__/in-memory-memory-store.ts）
 // は `opts.limit` を検査せず `.slice(0, Math.max(0, opts.limit))` へ渡していた。
 // `PostgresMemoryStore.archiveDecayed` は同じ `limit` を生 SQL の `LIMIT`（bigint
-// パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数はすべて例外になる
+// パラメータ）にそのまま渡す。`NaN`・`Infinity`・非整数は、bigint への変換の時点で必ず例外になる
 // （実測: 本物の Postgres 17 + pgvector を手元に立てて確認した——
-// `LIMIT must not be negative` / `invalid input syntax for type bigint: "NaN"` 等）。
+// `invalid input syntax for type bigint: "NaN"` 等）。負数の `LIMIT must not be negative` は、
+// テナントの行が1本も無く `memories` の統計が古い（`reltuples = 0`）と投げずに `{ archived: [] }` で返る
+// （`LIMIT` が CTE の中で `never executed` になる。ADR 0575 と同じ形）。この Fake は常に断る
+// ——このテストは Postgres と突き合わせない。
 //
 // 修正前の Fake は例外を投げず、`Math.max(0, ...)` の丸めに従って実際に書き込みまで
 // 行ってしまっていた——`limit: Infinity` は対象を無条件に全件 `archived` にし、
