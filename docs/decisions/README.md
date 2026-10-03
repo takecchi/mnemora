@@ -607,6 +607,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0590](./0590-adr-0554-language-mismatch-boundary-teeth.md) | 言語の事後検査の規則の境目（4字・20字・3語・直引用符の語）を、すぐ内側と外側の対で縛る（ADR 0554 の歯の穴） | 採用 (2026-10) |
 | [0591](./0591-adr-0548-real-redis-teeth-holes.md) | ADR 0548 の実 Redis の歯の穴（頭打ちの件数・失敗したジョブの保持・`lockDuration` の期限）を塞ぐ | 採用 (2026-10) |
 | [0592](./0592-adr-0583-0588-merged-pr-recheck-teeth.md) | マージ済みの PR（#1696〜#1699）を確かめ直して見つかった歯の穴を、試験だけで塞ぐ | 採用 (2026-10) |
+| [0593](./0593-adr-0576-0580-0582-merged-pr-recheck-teeth.md) | マージ済みの #1688〜#1694 の確かめ直しで見つかった、やりすぎ側の穴4つを塞ぐ（ADR 0576 の TSDoc 2つ・ADR 0580・ADR 0582） | 採用 (2026-10) |
 | [0596](./0596-adr-0571-0573-0574-merged-pr-recheck-teeth-round2.md) | マージ済みの #1683・#1685・#1686（ADR 0571・0573・0574）の確かめ直しで見つかった歯の穴を塞ぐ | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

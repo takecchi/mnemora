@@ -65,6 +65,12 @@ describe("updatedAt は壁時計（Postgres の updated_at = now()）。opts.now
       memory({ decayFloorAt: new Date(now.getTime() - 1_000) }),
     );
     expect(created.updatedAt).toEqual(createdAt);
+    // 対照: 同じテナントの、まだ減衰しきっていない行（archive されない）。Postgres の UPDATE は対象の行だけに当たる
+    // ので、この行の updatedAt は作成時のまま（ADR 0593）。
+    const untouched = await memoryStore.createMemory(
+      ctx,
+      memory({ decayFloorAt: new Date(now.getTime() + 86_400_000) }),
+    );
 
     vi.setSystemTime(archivedAt);
     const result = await memoryStore.archiveDecayed!(ctx, { now, limit: 10 });
@@ -74,6 +80,9 @@ describe("updatedAt は壁時計（Postgres の updated_at = now()）。opts.now
     expect(stored?.status).toBe("archived");
     expect(stored!.updatedAt.getTime()).toBeGreaterThan(createdAt.getTime());
     expect(stored!.updatedAt).toEqual(archivedAt);
+    const control = await memoryStore.get(ctx, untouched.id);
+    expect(control?.status).toBe("active");
+    expect(control!.updatedAt).toEqual(createdAt);
   });
 
   it("purgeMemory: event.at が 2020 年でも、purge した行の updatedAt は呼ぶ前と後の間の壁時計（purgedAt は event.at）", async () => {
@@ -84,6 +93,8 @@ describe("updatedAt は壁時計（Postgres の updated_at = now()）。opts.now
     const purgedWallClock = new Date("2030-01-02T00:00:00.000Z");
     vi.setSystemTime(createdAt);
     const created = await memoryStore.createMemory(ctx, memory({ status: "forgotten" }));
+    // 対照: 同じテナントの別の行（purge しない）。updatedAt は作成時のまま（ADR 0593）。
+    const untouched = await memoryStore.createMemory(ctx, memory({ status: "forgotten" }));
     const at = new Date("2020-01-01T00:00:00.000Z");
     const event: NewMemoryEvent = {
       tenantId: "tenant-1",
@@ -107,6 +118,9 @@ describe("updatedAt は壁時計（Postgres の updated_at = now()）。opts.now
     expect(stored?.purgedAt).toEqual(at);
     expect(stored!.updatedAt.getTime()).toBeGreaterThan(createdAt.getTime());
     expect(stored!.updatedAt).toEqual(purgedWallClock);
+    const control = await memoryStore.get(ctx, untouched.id);
+    expect(control?.purgedAt ?? null).toBeNull();
+    expect(control!.updatedAt).toEqual(createdAt);
   });
 });
 
