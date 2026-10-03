@@ -257,7 +257,7 @@ for (const [kitName, makeKit] of KITS) {
       );
     });
 
-    it("位置（ADR 0574 決定3・ADR 0596）: 存在しない2件・3件が互いを指して輪になる循環は、not found ではなく循環の RangeError", async () => {
+    it("位置（ADR 0574 の決定の3・ADR 0596）: 存在しない2件・3件が互いを指して輪になる循環は、not found ではなく循環の RangeError", async () => {
       const kit = await makeKit();
       await expectCycle(kit, () =>
         resolvePair(
