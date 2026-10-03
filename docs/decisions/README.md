@@ -585,6 +585,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0578](./0578-core-fake-returns-copies-for-remaining-writers.md) | core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き） | 採用 (2026-10) |
 | [0579](./0579-gate-red-tooth-names-one-db-test-file-instead-of-bail.md) | 門が赤くなる歯は、`--bail=1` で打ち切らず、DB テストのファイルを1本だけ名指しして走らせる | 採用 (2026-10) |
 | [0580](./0580-adr-0568-nonexistent-id-and-event-get-controls.md) | ADR 0568 の歯が通した「存在しない id」と「別のイベント id」の変異を塞ぐ | 採用 (2026-10) |
+| [0581](./0581-adr-0572-index-underflow-getter-controls.md) | ADR 0572 の歯の穴（A4・B4・C6・B8）を塞ぐ——索引の巻き戻し・float4 アンダーフロー・読む側が行を作らない・setDecayClock の検査順 | 採用 (2026-10) |
 | [0586](./0586-omit-params-cause-chain-and-preread-stack-teeth.md) | `omitParamsFromError` の doc が約束する「`cause` の連鎖にも掛ける」と「`stack` も書き換える」を、偽の例外の歯で縛る | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
