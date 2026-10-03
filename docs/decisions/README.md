@@ -609,5 +609,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0592](./0592-adr-0583-0588-merged-pr-recheck-teeth.md) | マージ済みの PR（#1696〜#1699）を確かめ直して見つかった歯の穴を、試験だけで塞ぐ | 採用 (2026-10) |
 | [0593](./0593-adr-0576-0580-0582-merged-pr-recheck-teeth.md) | マージ済みの #1688〜#1694 の確かめ直しで見つかった、やりすぎ側の穴4つを塞ぐ（ADR 0576 の TSDoc 2つ・ADR 0580・ADR 0582） | 採用 (2026-10) |
 | [0594](./0594-postgres-outbox-complete-fail-check-at-before-job-id-shape.md) | `PostgresOutboxStore.complete`・`fail` は、`opts.at` の Invalid Date を `jobId` の形より先に断る | 採用 (2026-10) |
+| [0596](./0596-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md) | `OutboxStore.complete`・`fail` は `timestamptz` の下限より前の `opts.at` を、3実装とも `jobId` の形より先に `RangeError` で断る。`requeueEmbedJobs`・`archiveDecayed` の「負の `limit` は Postgres が投げる」コメントを実測に合わせる | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

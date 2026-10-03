@@ -134,7 +134,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **例外の型が変わる**: UUID の形の `jobId` は以前から DB が `22007` で拒んでいたが、その例外は `DrizzleQueryError`（`cause.code` が `22007`）から素の `Error`（`cause` 無し）に変わる（項目57・60 と同じ形）。
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**本物の adapter が新しく例外を投げ**、**conformance の判定が厳しくなる**。[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」の規律2 の ⛔（fixture 以外の本物の adapter・conformance は上の定義で数える）に当たる。クローンが、migration の数え方の規律2 に従って 🔴 に決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目64。DB マイグレーションは無い。
-  - 【確かめていないこと】`timestamptz` の下限より前の日時（形の崩れた `jobId` ＋ 紀元前4714年11月24日より前）の順（ADR 0594「残り」）。
+  - 【確かめていないこと】`timestamptz` の下限より前の日時（形の崩れた `jobId` ＋ 紀元前4714年11月24日より前）の順（ADR 0594「残り」）。⟹ 下の項目が答えた。
+
+- **`@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` と、core の Fake の `complete`・`fail` が、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前なら、`jobId` の形・行の有無を見る前に `RangeError` で断るようになった。`@mnemora/testkit` の `describeOutboxStoreConformance` に歯が8本増えた**（[ADR 0596（仮番号）](./docs/decisions/0596-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md)。クローンの判断で、testkit の `InMemoryOutboxStore`（以前から `RangeError`）に寄せた）。
+
+  以前は、形の崩れた `jobId` では `opts.at` を見る前に静かに返り、UUID の形の `jobId` では DB の `DrizzleQueryError`（`22008`）で、core の Fake は断らず下限より前の日時を書いていた。いまは3実装とも `<method>: opts.at must not be earlier than 4714-11-24 BC (the lower bound of a Postgres timestamptz)` の `RangeError` を、行を探す前に投げる。下限ちょうどは通る。
+
+  - **新しく断る入力**: 形の崩れた `jobId` ＋ 下限より前（Postgres・Fake）、下限より前の `opts.at`（core の Fake。実在の `jobId` でも）。
+  - **例外の型が変わる**: UUID の形の `jobId` は、`DrizzleQueryError`（`cause.code` が `22008`）から `RangeError`（`cause` 無し）に変わる（項目57・60・64 と同じ形）。
+  - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。クローンが 🔴 に決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目65。DB マイグレーションは無い。
 
 ### Added
 

@@ -2718,6 +2718,32 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。
 
+### 65. `PostgresOutboxStore.complete`・`fail` と core の Fake が、`opts.at` が `timestamptz` の下限より前なら `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/core` の Fake・`@mnemora/testkit`）
+
+[ADR 0596（仮番号）](./decisions/0596-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md)（下限を断る側に寄せるのはクローンの判断。🔴 に数えるのも、クローンが migration の数え方の規律2 に従って決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による））。
+
+⚠ **未リリース**。**番号は 65 である**——項目64 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。ADR の番号も仮（push 前に確かめ直す）。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`PostgresOutboxStore.complete`・`fail` と core の Fake が、`opts.at` が `timestamptz` の下限より前…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: 項目64と同じ形（規律2 の ⛔）。
+- 以前は静かに返っていた入力（形の崩れた `jobId` ＋ 下限より前の `opts.at`）が、新しく例外になる。
+- UUID の形の `jobId`（実在・不在とも）では、例外が `DrizzleQueryError`（`cause.code` が `22008`）から `RangeError`（`cause` 無し）に変わる（項目57・60・64 と同じ形）。
+- core の Fake は、以前は下限より前の日時を黙って書いていた。
+- `describeOutboxStoreConformance` に8本の `it` が増えた。
+
+**誰が影響を受けるか**:
+- `PostgresOutboxStore.complete`・`fail` を直接呼び、下限より前の `opts.at`（`new Date(-1e15)` など）を渡して静かに返ることに頼っていた呼び出し側、`cause.code === "22008"` で分岐していた呼び出し側。
+- 自前の `OutboxStore` 実装を `describeOutboxStoreConformance` に当てている利用者のうち、形の崩れた・存在しない `jobId` なら下限より前の日時でも静かに返す実装。
+
+**どう直すか**:
+- 呼び出し側: `opts.at` は省略するか、`Date.UTC(-4713, 10, 24)` 以後の `Date` にする。例外で分岐していたなら `RangeError` の `instanceof` か message で分岐する。
+- 自前の `OutboxStore` 実装: `complete`・`fail` の入口で、`jobId` の形・行の有無を見る前に、`opts.at` が下限より前なら `RangeError` で投げる。下限ちょうどは通す。
+
+**確かめたこと**: 直す前に Postgres で赤（形の崩れた `jobId` の2本）、Fake で赤（6本）、直して緑。直しを外す変異（Postgres・Fake の complete だけ・fail だけ）でそれぞれ赤、下限ちょうども断る変異で下限ちょうどの対照の歯が赤（ADR 0596（仮番号））。**確かめていないこと**: 外部の adapter。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
