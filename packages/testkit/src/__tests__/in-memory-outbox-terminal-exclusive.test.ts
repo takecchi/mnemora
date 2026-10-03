@@ -101,6 +101,22 @@ describe("InMemoryOutboxStore.complete/fail — 相手側の終端が既に付�
     expect(job.lastError).toBe("first-error");
   });
 
+  it("取り直した後（attempts が2以上）の正当な complete・fail は、終端を付ける（黙って返さない）", async () => {
+    const at = new Date("2026-02-01T00:00:00.000Z");
+    const completing = makeJob({ attempts: 2 });
+    const failing = makeJob({ id: "job-2", attempts: 3 });
+    const store = new InMemoryOutboxStore([completing, failing]);
+
+    await store.complete(ctx, completing.id, 2, { at });
+    expect(completing.completedAt).toEqual(at);
+    expect(completing.failedAt).toBeNull();
+
+    await store.fail(ctx, failing.id, "second-claim-error", 3, { at });
+    expect(failing.failedAt).toEqual(at);
+    expect(failing.lastError).toBe("second-claim-error");
+    expect(failing.completedAt).toBeNull();
+  });
+
   it("attempts が不一致なら、相手側の終端の有無に関わらず OutboxLeaseConflictError を投げる（既存契約）", async () => {
     const job = makeJob({ attempts: 2 });
     const store = new InMemoryOutboxStore([job]);
