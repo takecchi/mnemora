@@ -562,6 +562,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0552](./0552-owner-q7-q8-q16-docs-only.md) | オーナーへの問い 374f6f88 の問7・問8・問16 の推奨（どれも「文書に書くだけ」）を、先行して TSDoc・README に書く（コードは変えない） | 採用 (2026-10) |
+| [0553](./0553-lexical-coverage-scale-across-stores.md) | `lexicalMatch`（`LexicalStore` の `coverage`）の尺度を3つの store で測り、式から決まる値と性質だけを歯で縛る（ADR 0484 の負債1。尺度は揃えていない） | 採用 (2026-10) |
 | [0555](./0555-core-fake-outbox-rows-honor-opts-now.md) | core の Fake が積む outbox 行の時刻も、`opts.now` に従う（`availableAt`・`createdAt`。InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0556](./0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) | testkit の InMemory の `abortIfSuperseded` と、testkit・core の Fake の `EventStore.get` も、大文字の id を Postgres と同じに扱う | 採用 (2026-10) |
 | [0557](./0557-core-fake-superseded-by-checks.md) | core の Fake も `supersededById` の断り（ADR 0503・0515）を持つ（InMemory・Postgres と揃える） | 採用 (2026-10) |

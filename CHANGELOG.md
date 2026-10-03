@@ -147,6 +147,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
 
+- **`lexicalMatch`（`LexicalStore` が返す `coverage`）の尺度を、3つの store（`PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`）で測り、文書と歯にした**（[ADR 0553](./docs/decisions/0553-lexical-coverage-scale-across-stores.md)。[ADR 0484](./docs/decisions/0484-recall-channel-merge-on-real-postgres.md) の負債1。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` を足し、各 store と `LexicalHit.coverage` の TSDoc に尺度と ADR への参照を足した）。
+  - 測ったのは、tsvector 版と InMemory が「一致した語数 ÷ 語の総数」の 1/n 刻みで同じ式であること、pg_trgm 版の日本語側が `word_similarity` の閾値による 0/1 の二値で（値は `rank` の側に入る）`GREATEST` で ASCII 側と合成されること。尺度は揃えていない（揃えるかはオーナーの判断）。
+  - ⭕ 非破壊と数える（文書と歯の追加のみ）。コードの振る舞い・公開 API・DB は変えていない。
+
 - **文書: 3つの振る舞いを TSDoc・README に書いた**（[ADR 0552](./docs/decisions/0552-owner-q7-q8-q16-docs-only.md)。コードの振る舞いは変えていない）。(1) `@mnemora/anthropic`: `maxTokens` が 21334 以上で `client` が `timeout` を持たないと、SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を投げる（21333 までは通る。SDK 0.124.0 で実測。`maxTokens`・`client`・`complete`・`completeStructured`・`errors.ts` の TSDoc と README）。(2) `@mnemora/postgres` の `runMigrations`: `.sql` が1本も無いフォルダは警告して `{ applied: [] }` で成功すること、mnemora は `statement_timeout` を設定せず利用者側の設定が本体の DDL に効くこと（`runMigrations`・`listMigrationFiles`・CLI の TSDoc。README は既に書いてあった）。(3) `createPostgresClient`: DB エラーの `code` の在り処の3つの形と判定 `err.code ?? err.cause?.code`（TSDoc。README の表の③に接続タイムアウトの文面を足した）。
   ⭕ 非破壊と数える（文書の追記のみ）。
 
