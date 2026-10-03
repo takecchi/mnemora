@@ -14,7 +14,8 @@ import {
  * （`search` が引き当てるかどうかは `content` の語彙で決まる）であり、ここを adapter の裁量に
  * 委ねると、ほぼ全ての歯が「何を検査しているか分からない」ものになる。
  *
- * `status` / `subjectId` / `provenanceKind` / `occurredAt` / `recordedAt` は
+ * `content` 以外の属性（`status` / `subjectId` / `provenanceKind` / `occurredAt` / `recordedAt` /
+ * `validFrom` / `validUntil` / `attributes` / `tags`）は
  * `PrepareMemoryIdAttrs` と同じ理由（`vector-store-conformance.ts` 参照）で任意——
  * 指定しなかった属性が何になるかは adapter の裁量に委ねる（`buildNewMemoryFixture` 相当の
  * 既定値を想定しているが、この適合テストの `filter` の歯は指定した属性だけを見るため、
@@ -72,8 +73,12 @@ export interface LexicalStoreConformanceOptions {
  * [ADR 0092](../../../docs/decisions/0092-lexical-or-coverage.md)、Issue #106）。
  *
  * ここで検査するのは `interfaces/lexical-store.ts` の doc が定める契約——テナント分離、
- * `filter`（`status`/`subjectId`/`excludeProvenanceKinds`/`occurredAfter`/`occurredBefore`、
- * 境界は ADR 0039 と同じ両端包含）が実際に効くこと、**クエリ語彙は OR で結ばれること**、
+ * `filter`（`status`/`subjectId`/`includeSubjectless`/`excludeProvenanceKinds`/
+ * `occurredAfter`/`occurredBefore`/`validAt`/`attributes`/`labels`、
+ * `occurredAfter`/`occurredBefore` の境界は ADR 0039 と同じ両端包含、`validAt` は
+ * `validFrom` が閉じた左端・`validUntil` が開いた右端、複数同時なら AND）が実際に効くこと、
+ * 検索語に NUL を含めると明示の例外で断ること、`ctx.tenantId`・`ctx.subjectId` の
+ * 形式不正な識別子の拒否（ADR 0423）、**クエリ語彙は OR で結ばれること**、
  * **`coverage`（一致した語彙数 ÷ クエリ語彙の総数）が正しく計算されること**、
  * **返り値が `coverage` の降順（同値なら `rank` の降順）であること**、
  * `limit` がその上位（coverage の高いほう）から切ること、

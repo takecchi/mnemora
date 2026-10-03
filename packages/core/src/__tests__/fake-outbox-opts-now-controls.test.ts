@@ -179,12 +179,29 @@ describe("FakeMemoryStore: 冪等な再送（created: false）は opts を検査
 });
 
 describe("FakeMemoryStore.supersedeWithNewMemories: 冪等な再送の news は opts を検査しない（ADR 0493）", () => {
-  // 実測で、今の Fake は赤（本物のずれ）: 全部の news が既存の行に当たる再送でも、Invalid Date の opts.now・
-  // jobKinds の NUL を先に断る（`InMemoryMemoryStore`・`PostgresMemoryStore` は行を書くときだけ見る）。
-  // 直しは news を作る loop（#1674・ADR 0564 が原子化で書き換えている箇所）に入るので、この PR では直さない（ADR 0566）。
-  it.todo(
-    "全部の news が既存の行に当たるなら、Invalid Date の opts.now・jobKinds の NUL でも断らない（ADR 0566 の未解決）",
-  );
+  // 以前の Fake は、全部の news が既存の行に当たる再送でも、Invalid Date の opts.now・jobKinds の NUL を先に断っていた
+  // （`InMemoryMemoryStore`・`PostgresMemoryStore` は行を書くときだけ見る）。ADR 0566 の未解決で、ADR 0577 で直した
+  // ——検査は news を作る loop の中（`created` が true のとき、`enqueueJob` の前）にある。
+  for (const [label, kinds, opts] of [
+    ["Invalid Date の opts.now", ["embed"], { now: invalid }],
+    ["jobKinds の NUL", [NUL_KIND], undefined],
+  ] as const) {
+    it(`全部の news が既存の行に当たるなら、${label}でも断らず created: false を返す`, async () => {
+      const { memoryStore, outboxStore } = createFakeRuntimeStores();
+      const input = await resendableMemory(memoryStore);
+      await memoryStore.createMemoryWithOutbox(ctx, input, ["embed"], { now: PAST });
+      const r = await memoryStore.supersedeWithNewMemories(
+        ctx,
+        [{ input, jobKinds: [...kinds] }],
+        [],
+        opts,
+      );
+      expect(r.created).toHaveLength(1);
+      expect(r.created[0]!.created).toBe(false);
+      expect(r.created[0]!.jobs).toEqual([]);
+      expect(outboxStore.listJobs(ctx)).toHaveLength(1);
+    });
+  }
 });
 
 describe("FakeMemoryStore.supersedeWithNewMemories: 先頭以外の news も検査する（ADR 0555。変異 D）", () => {

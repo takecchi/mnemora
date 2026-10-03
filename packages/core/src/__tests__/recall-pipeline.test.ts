@@ -1278,9 +1278,10 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
     // ⚠ `FakeMemoryStore.createMemory` 自身が `input.subjectId ?? null` で正規化するため
     // （`runtime-fakes.ts`）、`{ subjectId: undefined }` を渡すだけでは
     // `recall-runtime.ts` 側の `?? null` 防御を通らない（保存済みの Memory は既に `null`）。
-    // 同じ参照を直接書き換えて、Memory.subjectId が本当に `undefined` の状態を作る
-    // （`createMemoryIdempotent` は同じオブジェクト参照を backing map に格納している）。
-    undefinedSubject.subjectId = undefined;
+    // store の中の行そのもの（`liveRowForTest`）を直接書き換えて、Memory.subjectId が本当に `undefined` の
+    // 状態を作る。⚠ `createMemory` の返り値を書き換えても store には届かない（ADR 0562 で返り値は写しになった。
+    // 以前の「返り値を書き換える」手口は届かないまま緑になっていた——ADR 0578）。
+    stores.memoryStore.liveRowForTest(ctx, undefinedSubject.id)!.subjectId = undefined;
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
     const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
@@ -1423,11 +1424,12 @@ describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、
   it("Memory.occurredAt が undefined でも null に揃える（subjectId と同じ防御）", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await createEmbeddedMemory(stores, [1, 0], { digest: "occurredAt undefined" });
-    // ⚠ `FakeMemoryStore` 自身が `occurredAt` を渡した値のまま持つ（`subjectId` と違って
-    // `?? null` 正規化をしない）ため、直接書き換えて Memory.occurredAt を本当に
-    // `undefined` にする（`createMemoryIdempotent` が同じ参照を backing map に格納する
-    // ことを使う。ADR 0289 の subjectId undefined テストと同じ手口）。
-    memory.occurredAt = undefined;
+    // ⚠ `FakeMemoryStore` 自身が `occurredAt` を `?? null` で正規化するため（`subjectId` と同じ）、渡すだけでは
+    // `recall-runtime.ts` 側の防御を通らない。直接書き換えて Memory.occurredAt を本当に
+    // `undefined` にする。store の中の行そのもの（`liveRowForTest`）を書き換える——`createMemory` の
+    // 返り値は写しなので、書き換えても store には届かない（ADR 0562・0578）。ADR 0289 の subjectId
+    // undefined テストと同じ手口。
+    stores.memoryStore.liveRowForTest(ctx, memory.id)!.occurredAt = undefined;
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     const m = result.memories.find((x) => x.memoryId === memory.id);
