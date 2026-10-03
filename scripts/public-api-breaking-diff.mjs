@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * v1.0.0 以降に公開 API へ「静かに」入った破壊的変更の**候補**を、実行時に組んだ2つの
- * 公開 API snapshot（`scripts/__snapshots__/public-api/{anthropic,core,local-embedding,
- * openai,postgres,testkit}.d.ts`）の構造的な diff から一覧にする道具（Issue #818 /
+ * 公開 API snapshot（`scripts/__snapshots__/public-api/<パッケージ dir 名>.d.ts`。
+ * 対象は `PUBLISH_TARGETS` が決める）の構造的な diff から一覧にする道具（Issue #818 /
  * `#811`/`#813`/`#815`）。
  *
  * ## なぜ要るか
@@ -15,7 +15,8 @@
  * （後に PR #827 で任意へ巻き戻された）実例を見つけている。この道具はその「棚卸し」を、
  * 次に同じことが起きたときのために自動化する——ただし**確定はしない**（下記）。
  *
- * ## 数え方の規律（`docs/migration-v1.md` 633〜638行）
+ * ## 数え方の規律（`docs/migration-v1.md` の「v0.2.0 → v0.3.0」の破壊的変更の節、
+ * 「`packages/*\/src` の差分では数えないこと」の段落。行番号で指さない）
  *
  * > ⛔ **`packages/<pkg>/src` の差分では数えないこと**——マイグレーションの追加のように `src` を
  * > 1行も触らない変更を取りこぼす。⟹ **公開 API の実 diff
@@ -27,7 +28,7 @@
  * ファイルをそのまま読む）、期待値や件数を道具・生成物に焼き込まない
  * （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。
  *
- * ## union の入力/出力の判定（`docs/migration-v1.md` 854〜889行、項目17）
+ * ## union の入力/出力の判定（`docs/migration-v1.md` の項目17。行番号で指さない）
  *
  * > 🔴 **だが同じ `[0.2.0]` は…「網羅性検査（`never`）をしているコードは壊れる」と書きながら
  * > …「Changed（後方互換だが挙動が変わりうるもの）」に置いている** ⟹ ⛔ **この repo には、

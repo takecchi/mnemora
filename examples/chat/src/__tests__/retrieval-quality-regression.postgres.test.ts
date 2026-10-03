@@ -45,15 +45,16 @@ import { closeTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-d
  * 順位の変動そのものは検査の対象にせず、**情報が候補集合から丸ごと落ちたときだけ**
  * 赤くなる。
  *
- * ⚠ **`fixedClock` は実行時点より確実に未来の日付にすること。**
- * `packages/postgres/src/outbox-store.ts` の `claimBatch` は
+ * ⚠ **`fixedClock` は実行時点より確実に未来の日付にしてある。歴史的な理由で残している**
+ * (今は `available_at` も注入した時計に従うので、過去でも claim できる。ADR 0559)。
+ * ADR 0355 より前は、`packages/postgres/src/outbox-store.ts` の `claimBatch` が
  * `available_at <= opts.now`(`opts.now` は注入した `Clock.now()`)で embed ジョブを
- * 絞るが、`available_at` の既定値は `packages/postgres/src/memory-store.ts` の
- * `INSERT INTO outbox (...) VALUES (..., now(), ...)` —— **DB 自身の実時刻**である。
+ * 絞る一方、`available_at` の既定値は `packages/postgres/src/memory-store.ts` の
+ * `INSERT INTO outbox (...) VALUES (..., now(), ...)` —— **DB 自身の実時刻**だった。
  * 固定時計を過去(例: 2026-01-01)にすると、`available_at`(実行時の実時刻)が
  * 常に `opts.now`(過去に固定した値)より後になり、`tick()` は `processed: 0` を
- * 返し続けて embed ジョブが一生 claim されない——**例外にならず、`recalledRows` が
- * 全 probe で静かに 0 になる**(実測で踏んだ。2026-01-01 を指定したところ
+ * 返し続けて embed ジョブが一生 claim されなかった——**例外にならず、`recalledRows` が
+ * 全 probe で静かに 0 になる**(当時、実測で踏んだ。2026-01-01 を指定したところ
  * 7 probe すべて `goldRank=null` になった)。この歯自身が「候補が0件でないこと」を
  * 別途確認しないのは、まさにこの踏み間違いが起きれば全 probe が `goldRank=null` で
  * 落ちる(=歯自体が赤くなる)ため、無音の緑を作らないからである。

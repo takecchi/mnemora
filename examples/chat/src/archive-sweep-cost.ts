@@ -310,9 +310,10 @@ export async function runArchiveSweepCost(
     allIds.push(...observed.memoryIds);
   }
 
-  // ⭐ recall/tick の直前に必ず実時刻へ戻す——`outbox.available_at` は Postgres の
-  // 実時刻で入るため、Clock を過去に置いたままだと embed ジョブが1件も claim
-  // されない(`mutable-clock.ts` の docstring、`time-term-arm.ts` で実測済みの罠)。
+  // ⭐ recall/tick の直前に必ず実時刻へ戻す——歴史的な理由で残している。ADR 0355 より前は
+  // `outbox.available_at` が Postgres の実時刻で入り、Clock を過去に置いたままだと embed ジョブが
+  // 1件も claim されなかった(`time-term-arm.ts` で実測済みの罠)。いまは `available_at` も
+  // 注入した時計に従う(ADR 0559)。
   //
   // 🔴 Issue #719: 素の `new Date()` だけでは足りない——`available_at`(Postgres の
   // `now()`、us精度)と同じ ms 内でこの時刻を読むと、claim が1件も進まない

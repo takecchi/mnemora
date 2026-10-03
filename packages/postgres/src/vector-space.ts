@@ -237,6 +237,10 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  *
  * バリデーション（`dimensions` の検査・識別子の安全性チェック）は**ロック取得より前**に
  * 行う——不正な入力のためにロックを取って他プロセスを待たせる意味が無いため。
+ * `space.dimensions` が数でなければ `TypeError`、正の整数でない・pgvector の hnsw 索引の上限を
+ * 超えるときは `RangeError`（どちらもテーブルは作らない）。`schema`・`extensionSchema` が
+ * `assertSafeSchemaName` を通らなければ（`extensionSchema` は `schema` を指定したときだけ検査する）、
+ * 通常の `Error`。
  *
  * 起こりうる3つの状態（`runMigrations` と同じ語彙、オーナーが引いた線1）:
  * - 待って取れた → 通常どおり完了し、戻り値の `lock.waitedMs` に待った時間が載る

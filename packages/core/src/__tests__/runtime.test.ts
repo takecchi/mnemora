@@ -1957,9 +1957,9 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
 describe("runtime.tick — リース競合は他のジョブの処理を止めない（ADR 0142 決定3）", () => {
   it("⭐ 1件が complete 時にリース競合しても、同じ tick 内の他のジョブは処理される", async () => {
     // fakeNow は実時刻より確実に先の、この describe 内で完全に制御する時刻。
-    // ジョブの availableAt は FakeBackingStore.enqueueJob が実時刻 `new Date()` で
-    // 打つため、fakeNow を実時刻より先に置くことで available_at <= now が
-    // 常に成立するようにする(実時刻とfakeNowの同期を取る必要を無くす)。
+    // 以前の Fake は、ジョブの availableAt を FakeBackingStore.enqueueJob が実時刻 `new Date()` で
+    // 打ったため、fakeNow を実時刻より先に置いて available_at <= now を常に成立させていた。
+    // 今の Fake は `opts.now` に従う(ADR 0555)が、この置き方は組み替えていない(ADR 0555 の「残り」)。
     let fakeNow = new Date(Date.now() + 1000);
     const fakeClock = { now: () => fakeNow };
     const leaseMs = 10;
@@ -2436,10 +2436,9 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       // forgotten に変えたことにする。N には介入しない——フィクスチャを非対称にする
       // ことで「件数は合っているが対応が崩れている」変異も捕まえられるようにする。
       //
-      // `FakeMemoryStore.get` は backing.memories に入っている Memory オブジェクトへの
-      // 参照をそのまま返す実装（コピーを作らない）なので、事前に取得した参照の
-      // `status` を書き換えるだけで「割り込み」を再現できる。
-      const mBeforeIntervention = await stores.memoryStore.get(ctx, mId);
+      // ADR 0562: `FakeMemoryStore.get` は写しを返す（以前は backing.memories の行そのものだった）ので、
+      // 行そのものを引く `liveRowForTest` で取った参照の `status` を書き換えて「割り込み」を再現する。
+      const mBeforeIntervention = stores.memoryStore.liveRowForTest(ctx, mId);
       let intervened = false;
       stores.memoryStore.beforeUpdateStatus = (id) => {
         if (!intervened && id === mId) {

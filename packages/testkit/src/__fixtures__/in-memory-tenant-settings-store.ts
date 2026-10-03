@@ -57,9 +57,9 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   >();
 
   /**
-   * `activitySeqBacking`/`subjectActivitySeqBacking` が渡されなかったときのための、
-   * このインスタンス専用の保持期間の Map（`eventRetentionDaysBacking` が渡されなかった
-   * ときのフォールバック）。{@link InMemoryTenantSettingsStore.eventRetentionDays} 参照。
+   * `eventRetentionDaysBacking` が渡されなかったときのための、
+   * このインスタンス専用の保持期間の Map（フォールバック）。
+   * {@link InMemoryTenantSettingsStore.eventRetentionDays} 参照。
    */
   private readonly ownEventRetentionDays = new Map<string, number | null>();
 

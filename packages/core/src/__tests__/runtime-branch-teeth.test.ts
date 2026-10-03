@@ -79,7 +79,7 @@ function buildRuntime(opts: {
       ? opts.embeddingProvider(stores.embeddingProvider)
       : stores.embeddingProvider,
     hashContent: (content: string) => `sha256(${content})`,
-    // Fake の outbox はジョブの availableAt を実時刻で付けるので、tick が claim できるよう
+    // 以前の Fake は outbox のジョブの availableAt を実時刻で付けたため、tick が claim できるよう
     // 実時計で動かす（半減期は10年なので、NOW 起点の記憶が減衰で落ちることはない）。
     clock: { now: () => new Date() },
   });

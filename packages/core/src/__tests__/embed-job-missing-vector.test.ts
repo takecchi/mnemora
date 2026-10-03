@@ -74,7 +74,7 @@ describe("tick の embed ジョブ：provider がベクトルを返さなけれ�
       llmProvider: notUsedLlm,
       embeddingProvider: emptyProvider,
       hashContent: (content: string) => `sha256(${content})`,
-      // Fake の outbox はジョブの availableAt を実時刻で付けるので、tick が claim できるよう
+      // 以前の Fake は outbox のジョブの availableAt を実時刻で付けたため、tick が claim できるよう
       // 実時計で動かす。
       clock: { now: () => new Date() },
     });
