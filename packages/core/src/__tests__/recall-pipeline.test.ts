@@ -181,6 +181,18 @@ describe("recall() — omitted.kind = 'stage_skipped'（候補生成、docs/reca
     expect(trace?.executed).toBe(false);
   });
 
+  it("空白だけの text は ZodError にならず、'empty_query_content' で skip される（RecallQuery.text の TSDoc、ADR 0593）", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0]);
+    const result = await runtime.recall(ctx, { text: "   " });
+    expect(result.omitted).toContainEqual({
+      kind: "stage_skipped",
+      stage: "candidate_generation",
+      reason: "empty_query_content",
+    });
+    expect(result.memories).toEqual([]);
+  });
+
   it("embedding provider が失敗すると 'embedding_provider_unavailable' で skip される", async () => {
     const { runtime, stores } = buildRuntime();
     stores.embeddingProvider.shouldFail = true;
@@ -388,6 +400,15 @@ describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, overFetchFactor: 4 });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(false);
+  });
+
+  it("k' は少なくとも 1——limit × overFetchFactor が 0.5 未満でも候補を1件取り込む（RecallQuery.overFetchFactor の TSDoc、ADR 0593）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await createEmbeddedMemory(stores, [1, 0]);
+
+    // round(1 × 0.1) = 0。下限が無ければ store の search に limit 0 が渡り、何も取り込まない。
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 0.1 });
+    expect(result.memories.map((m) => m.memoryId)).toEqual([memory.id]);
   });
 });
 
