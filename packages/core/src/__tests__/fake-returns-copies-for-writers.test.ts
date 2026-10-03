@@ -175,6 +175,8 @@ describe("Observation の口は、返り値の書き換えから行を守る（A
 
     const again = await memoryStore.createObservationWithOutbox(ctx, newObservation(), ["extract"]);
     expect(again.created).toBe(false);
+    // 再送は最初の Observation を指す（別の id の写しを返さない。Memory 側の createMemoryWithOutbox と揃える。ADR 0586）。
+    expect(again.observation.id).toBe(result.observation.id);
     scribble(result.observation);
     scribble(result.jobs);
     scribble(again.observation);
@@ -431,6 +433,26 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
     ).toBe(T1);
   });
 
+  it("reinforce: ミリ秒を持つ at がそのまま lastReinforcedAt に入り、渡した at を後から書き換えても変わらない（ADR 0586）", async () => {
+    const stores = createFakeRuntimeStores();
+    const created = await seed(stores);
+    const atIso = "2026-02-01T00:00:00.123Z";
+    const at = new Date(atIso);
+    const returned = await stores.memoryStore.reinforce(ctx, created.id, at);
+    // 写しを秒などに丸めると、ここの `.123` が落ちる（T1 は `.000` なので上の歯では見えない）。
+    expect(returned.lastReinforcedAt?.toISOString()).toBe(atIso);
+    expect(stores.memoryStore.liveRowForTest(ctx, created.id)?.lastReinforcedAt?.getTime()).toBe(
+      new Date(atIso).getTime(),
+    );
+    at.setTime(0);
+    expect(
+      stores.memoryStore.liveRowForTest(ctx, created.id)?.lastReinforcedAt?.toISOString(),
+    ).toBe(atIso);
+    expect((await stores.memoryStore.get(ctx, created.id))?.lastReinforcedAt?.toISOString()).toBe(
+      atIso,
+    );
+  });
+
   it("reinforceMany: 返した要素を書き換えても、store は変わらない", async () => {
     const stores = createFakeRuntimeStores();
     const a = await seed(stores);
@@ -508,6 +530,28 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
       expect(got.status).toBe("forgotten");
       expect(got.tags).toEqual(["tag-a", "tag-b", "written-to-live-row"]);
       expect(got.recordedAt.getTime()).toBe(0);
+    });
+
+    it("reinforce の返り値（書いた場合・no-op の両方）は凍結されておらず（入れ子も）、Date は Date のまま（ADR 0586）", async () => {
+      const stores = createFakeRuntimeStores();
+      const created = await seed(stores);
+      const written = await stores.memoryStore.reinforce(ctx, created.id, new Date(T1));
+      const noop = await stores.memoryStore.reinforce(ctx, created.id, new Date(T0));
+      for (const returned of [written, noop]) {
+        // 凍結する実装では、scribble が投げて落ちるだけの「たまたま」だった。ここで直接見る。
+        expect(Object.isFrozen(returned)).toBe(false);
+        expect(Object.isFrozen(returned.tags)).toBe(false);
+        expect(Object.isFrozen(returned.attributes)).toBe(false);
+        expect(Object.isFrozen(returned.claimKey)).toBe(false);
+        expect(Object.isFrozen(returned.provenance)).toBe(false);
+        // JSON 往復にすると Date が文字列になる。
+        expect(returned.lastReinforcedAt).toBeInstanceOf(Date);
+        expect(returned.recordedAt).toBeInstanceOf(Date);
+        expect(returned.validUntil).toBeInstanceOf(Date);
+        expect(returned.decayFloorAt).toBeInstanceOf(Date);
+        expect(returned.tags).toEqual(["tag-a", "tag-b"]);
+      }
+      expect(written.lastReinforcedAt?.toISOString()).toBe(T1);
     });
 
     it("updateStatusWithEvent の event は eventStore の event と同じ中身（at は Date のまま）", async () => {
