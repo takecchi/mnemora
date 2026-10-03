@@ -91,8 +91,8 @@ export interface Observation {
    *
    * **型としては省略可能だが、runtime（`handleExtractableObservation`）は常に `{}` 以上の
    * 値を書く**——`undefined` は「この observe() 呼び出しより前に作られた行」または
-   * 「この型を自前で組み立てた既存の呼び出し元」だけが持ちうる状態であり、本 PR 以降の
-   * 書き込みでは常に値が入る（ADR 0289 が `speaker`/`subjectId` に採った runtime 保証と
+   * 「この型を自前で組み立てた既存の呼び出し元」だけが持ちうる状態であり、この欄を足して以降の
+   * `observe()` の書き込みでは常に値が入る（ADR 0289 が `speaker`/`subjectId` に採った runtime 保証と
    * 同じ規律）。
    */
   attributes?: Attributes;

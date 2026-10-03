@@ -63,7 +63,7 @@ const REEXTRACT_META_KEY = "reextracted";
 const LLM_LATENCY_MS = 5_000;
 
 let nowMs = Date.now();
-/** 実時刻より1秒だけ未来（outbox の `available_at` は DB の `now()` で書かれるため。同種のテストの注記を見ること）。 */
+/** 実時刻より1秒だけ未来（歴史的な理由で残している。今は outbox の `available_at` も注入した時計に従う。ADR 0559）。 */
 const clock = { now: () => new Date(nowMs + 1_000) };
 
 let candidates: string[] = [];

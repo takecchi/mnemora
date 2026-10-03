@@ -120,7 +120,7 @@ function buildKnownPredicateInstruction(knownPredicates: readonly string[]): str
 }
 
 /**
- * Issue #372 負債6（ADR 0324、Issue #691続き）: real-fixture 実測で、誤検出（30%）の
+ * Issue #372 負債6（ADR 0324、Issue #691続き）: real-fixture 実測で、誤検出の
  * ほぼ全量が claim key の `subject` 誤帰属（三人称の発話の主語を `"user"` に誤って
  * 割り当てる）だと分かったことへの対処。`buildKnownPredicateInstruction` と同型の
  * 語彙ヒント——**候補から選ばせるだけ**であり、正規化強化・埋め込み類似度のような
@@ -185,8 +185,10 @@ export interface DeriveClaimKeysResult {
    * 決める方法が無い）。
    *
    * 要素単位でも `null` になる: 正規化のあとで `subject`・`predicate` のどちらかが空文字列
-   * になったとき、または長さが上限（256 コードポイント、ADR 0433 決定1）を超えたとき。
-   * 後者は Postgres の索引の1行の上限を超えて INSERT が落ちるのを防ぐ。印（`failure`）は付かない。
+   * になったとき、長さが上限（コードポイントの数。`MAX_CLAIM_KEY_PART_CODE_POINTS`、ADR 0433 決定1）を
+   * 超えたとき、NUL（U+0000）を含むとき（ADR 0443 決定1）。
+   * 長さの上限は Postgres の索引の1行の上限を超えて INSERT が落ちるのを防ぎ、NUL は text 列に入らず
+   * INSERT が落ちるのを防ぐ。いずれも印（`failure`）は付かない。
    */
   claimKeys: (ClaimKey | null)[];
   /**
@@ -304,10 +306,10 @@ export async function deriveClaimKeys(
  * Issue #691 続き（`docs/decisions/0327-*.md`）: `ClaimKeyOptions.knownPredicatesFromStore`
  * を `true`（オブジェクト形を渡さない場合）にしたときに使う既定の上限。
  *
- * **根拠**（ADR 0329 決定2の逐語）: ADR 0315/0320/0324 の語彙ヒント実験はいずれも
- * 作業者が手で作った 5〜8 件の predicate で語彙ヒントの効果（安定性 74.1%→89.4%、
- * 検出の predicate 弁別も含めて100%一致）を確認している——**この定数は、その実験規模の
- * 2倍強を置くことで、実験で効果が確認された範囲を十分に覆いつつ、主題を持つ1人の
+ * **根拠**（ADR 0329 決定5。実験の件数・測定値は ADR 側が正で、ここには写さない）:
+ * ADR 0315/0320/0324 の語彙ヒント実験はいずれも作業者が手で作った少数の predicate で
+ * 語彙ヒントの効果を確認している——**この定数は、その実験規模を上回る値を置くことで、
+ * 実験で効果が確認された範囲を十分に覆いつつ、主題を持つ1人の
  * 会話が現実的に蓄積する claim key predicate の語彙が数十件規模に増えても
  * `deriveClaimKeys` の system プロンプトへ際限なく積み上がらないよう上限を切る、という
  * 判断である。**「実測でこの値が最適」という測定結果ではない——単体テスト
@@ -456,7 +458,7 @@ export interface ClaimKeyOptions {
    */
   knownPredicatesFromStore?: boolean | { limit?: number | undefined } | undefined;
   /**
-   * Issue #372負債6（ADR 0324「real-fixture 実測で、誤検出（30%）のほぼ全量が claim key
+   * Issue #372負債6（ADR 0324「real-fixture 実測で、誤検出のほぼ全量が claim key
    * の `subject` 誤帰属だと分かった」、ADR 0334）: `knownPredicates` と同型の語彙ヒントを
    * `subject` 側にも用意する。呼び出し側が明示的に渡す一覧——**`knownPredicates` と同じ
    * `readonly` を付けない規約**（`ClaimKeyOptionsSchema` の `z.infer` と型を完全一致させる

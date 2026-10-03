@@ -173,9 +173,14 @@ const spaceB: EmbeddingSpaceId = { provider: "test", model: "fixture-model-b", d
  * ここで検査するのは `VectorStore` の基本契約——upsert/search/delete の往復、
  * テナント分離、**space 分離**（ADR 0065）、`:` を含む space の model でも別の space と
  * 衝突しないこと（Issue #1238 A3、区切り文字）、limit の遵守、そして `filter`
- * （`status`/`subjectId`/`decayFloorAtAfter`/`excludeProvenanceKinds`/`occurredAfter`/
- * `occurredBefore`）が実際に効くこと（ADR 0034、`excludeProvenanceKinds` は ADR 0056、
- * `occurredAfter`/`occurredBefore` は ADR 0059）——である。`EXPLAIN` で HNSW 索引が
+ * （`status`/`subjectId`/`includeSubjectless`/`decayFloorAtAfter`/`decayFloorSeqAfter`/
+ * `decayFloorAnyAxis`/`excludeProvenanceKinds`/`occurredAfter`/`occurredBefore`/`validAt`/
+ * `attributes`/`labels`）が実際に効くこと（ADR 0034、`excludeProvenanceKinds` は ADR 0056、
+ * `occurredAfter`/`occurredBefore` は ADR 0059、活動時計の床は ADR 0165）——である。
+ * このほか `deleteAcrossSpaces`（必須）、`upsert` の外部キー相当とテナントの一致（ADR 0047・0436）、
+ * float4 に収まらない成分の拒否、`ctx.tenantId`・`ctx.subjectId` の形式不正な識別子の拒否（ADR 0423）を検査し、
+ * 任意メソッドの `getVectors`（`supportsGetVectors`）・`searchMany`（`supportsSearchMany`）・
+ * `eraseTenant`（`supportsEraseTenant`）はフラグに応じて検査する。`EXPLAIN` で HNSW 索引が
  * 使われることの検査（roadmap.md 段階2の完了条件）は pgvector 固有の関心事であり、
  * `packages/postgres` 側のテスト（生 SQL・`EXPLAIN` を直接扱う）に置く。
  */
@@ -231,7 +236,7 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       //   ユークリッド距離: A=9, B=1                → 順序は B→A（逆転する）
       // ⟹ A が B より先に返ることは、実装がコサインでありユークリッドでないことの
       // 直接の証拠になる。全成分0のベクトルはコサインが未定義になるため使わない
-      // （packages/postgres/src/bench/scale-bench.ts:667 と同じ注意）。
+      // （packages/postgres/src/bench/scale-bench.ts の `benchVectorSearch` と同じ注意）。
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       const idA = await prepareMemoryId(ctx);

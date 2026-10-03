@@ -135,7 +135,8 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外 — $label", (var
     const memory = await stores.memoryStore.createMemory(ctx, newMemory);
     // 別のワーカーが先に復帰させていた、という状況。store は別の realm の例外で CAS の失敗を知らせる。
     stores.memoryStore.updateStatusWithEvent = async (_c, id, expected) => {
-      memory.status = "active";
+      // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+      stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active";
       throw foreignMemoryStatusConflict(id, expected, "active", variant);
     };
 

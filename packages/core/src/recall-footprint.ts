@@ -19,7 +19,8 @@ import type { RecallResult } from "./recall.js";
  * `docs/north-star.md` の物差しは「**使う側が、会話ログを全部プロンプトへ積むのをやめられたか**」
  * であり、問い1は「**毎回渡す量を減らす方向に働くか**」である。
  * **mnemora 自身が、短い会話ではこの問いに落ちる**——`examples/chat/compare-baseline.json`
- * の実測で、2ターンの会話では mnemora のほうが **4.18倍**大きい（交点は 8〜10 ターンの間）。
+ * の実測で、短い会話では mnemora のほうが大きい（交点がどのターン数かも、倍率も、そのファイルが
+ * 正本である。ここには写さない）。
  *
  * ⟹ 「いつ効くか」を呼び出し側へ答えることは、**物差しそのものを製品の関数にすること**である。
  *
@@ -33,8 +34,9 @@ import type { RecallResult } from "./recall.js";
  *
  * ## ⚠ 「ターン数の閾値」ではないこと
  *
- * 実測の比は**単調に下がらない**——22ターンで 53.4% まで下がった後、162ターンで 84.7% へ
- * **一度悪化してから**また下がる（目次帯が伸び、やがて上限に当たるため）。
+ * 実測の比は**単調に下がらない**——いったん下がった後、**一度悪化してから**また下がる区間が
+ * ある（目次帯が伸び、やがて上限に当たるため。どのターン数でいくつかは
+ * `examples/chat/compare-baseline.json` の `mnemoraShareOfNaiveChars` が正本で、ここには写さない）。
  * ⟹ **「N ターン以上なら得」という形の判定は、この区間で嘘をつく。**
  * だからこのモジュールが入力に取るのは**ターン数ではなく**、
  * 「会話ログ全部だと何文字か」と「スコープ内に Memory が何件あるか」である。
@@ -174,7 +176,8 @@ export interface RecallFootprintProfile {
    * Memory 1件の digest の平均文字数。
    *
    * `memories` tier（返した分）と `index` tier（目次帯に載る分）の**両方**に効く
-   * ——帯の1件の費用は `器(63+1字) + min(charsPerDigest, DIGEST_BAND_MAX_ENTRY_CHARS)` である。
+   * ——帯の1件の費用は `器(DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS +
+   * DIGEST_BAND_ENTRY_SEPARATOR_CHARS) + min(charsPerDigest, DIGEST_BAND_MAX_ENTRY_CHARS)` である。
    */
   charsPerDigest: number;
   /**
@@ -675,11 +678,12 @@ function indexBandStructuralTerms(
  * 返る件数     = 素の返る件数 + 連想の件数
  * 帯の資格件数 = memoryCountInScope - 返る件数
  * 帯の件数     = min(digestBandLimit, 帯の資格件数)
- * 帯の費用(素) = min(帯の件数 × (63 + 1 + min(charsPerDigest, 120)), DIGEST_BAND_MAX_CHARS)
+ * 帯の費用(素) = min(帯の件数 × (DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + DIGEST_BAND_ENTRY_SEPARATOR_CHARS
+ *                              + min(charsPerDigest, DIGEST_BAND_MAX_ENTRY_CHARS)), DIGEST_BAND_MAX_CHARS)
  * 帯の費用     = 帯の費用(素) + (帯の件数 >= 1 ? -1 : 0)                 … 構造項(a)
  * 桁上がり     = 2×extraDigits(memoryCountInScope)                     … 構造項(b)
  *             + extraDigits(帯の件数) + extraDigits(帯の資格件数)        … 構造項(c)
- * limitedBy分 = (帯の資格件数 > 帯の件数 かつ 帯が文字数で飽和していない) ? 26 : 0  … 構造項(d)
+ * limitedBy分 = (帯の資格件数 > 帯の件数 かつ 帯が文字数で飽和していない) ? LIMITED_BY_LABEL_ADDED_CHARS : 0  … 構造項(d)
  * 合計         = fixedIndexChars + 返る件数 × charsPerDigest + 帯の費用 + 桁上がり + limitedBy分
  * ```
  *
@@ -719,10 +723,11 @@ function indexBandStructuralTerms(
  * ⟹ **これが 42〜162ターン行で費用が減り、322〜642ターン行で費用が増えるという
  * 非単調な実測（ADR 0166「なぜ非単調か」）を、この式がそのまま説明する**——
  * 帯が飽和していない領域（`bandEligible <= digestBandLimit`）では、昇格1件ごとに
- * 帯の1件（費用 `63+1+min(charsPerDigest,120)`）が消え、本体の1件
+ * 帯の1件（費用 `DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + DIGEST_BAND_ENTRY_SEPARATOR_CHARS +
+ * min(charsPerDigest, DIGEST_BAND_MAX_ENTRY_CHARS)`）が消え、本体の1件
  * （費用 `charsPerDigest`）に置き換わる。このリポジトリの既定プロファイルでは
- * `charsPerDigest`（≒15.5）が帯の1件の費用（≒79.5）より小さいため、**置き換えは
- * 正味で費用を減らす。**帯が既に `digestBandLimit` で頭打ちの領域
+ * `charsPerDigest` が帯の1件の費用より小さい（帯の費用は `charsPerDigest` に器の分が
+ * 上乗せされたもの）ため、**置き換えは正味で費用を減らす。**帯が既に `digestBandLimit` で頭打ちの領域
  * （`bandEligible > digestBandLimit`）では、昇格した候補はどのみち帯に表示されて
  * いなかった（表示されるのは先頭 `digestBandLimit` 件だけ）ので、帯の費用は
  * 変わらず、本体側の費用だけが純増する。
@@ -859,7 +864,13 @@ export interface FullLogComparisonInput {
 export interface FullLogComparison {
   /** どちらが小さいか（`mnemora_smaller`・`full_log_smaller`・`too_close_to_call`）。 */
   verdict: FullLogVerdict;
-  /** 見積もった `mnemora / 会話ログ全部`（`compare` ベンチの `mnemoraShareOfNaiveChars` に対応）。 */
+  /**
+   * 見積もった `mnemora / 会話ログ全部`（`compare` ベンチの `mnemoraShareOfNaiveChars` に対応）。
+   *
+   * ⚠ `fullLogChars` が 0（以下。負は 0 に丸められる）のときは比が定義できず `Infinity`（このとき
+   * `verdict` は `"full_log_smaller"`）、入力が NaN で見積もりが数にならないときは `NaN`
+   * （`verdict` は `"too_close_to_call"`。{@link compareWithFullLog} の doc）。
+   */
   estimatedShare: number;
   /**
    * **会話ログ全部が何文字を超えたら mnemora のほうが小さくなるか。**
