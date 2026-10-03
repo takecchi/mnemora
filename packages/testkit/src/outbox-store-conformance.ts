@@ -325,7 +325,7 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
     }
 
     /**
-     * 検査の順（オーナーの決定 2026-10-03 02:41Z。ADR 0589）: `opts.at` の Invalid Date は、`jobId` の形・行の有無を見る**前**に断る。
+     * 検査の順（クローンの決定 2026-10-03 02:41Z。ADR 0589）: `opts.at` の Invalid Date は、`jobId` の形・行の有無を見る**前**に断る。
      * 形の崩れた・存在しない `jobId` は「静かに返る（べき等な no-op）」のが約束だが、`opts.at` が Invalid Date の呼び出しは
      * 呼び手のバグなので、その約束より先に例外にする。上の歯は、実在のジョブでしか断ることを縛らない。
      */

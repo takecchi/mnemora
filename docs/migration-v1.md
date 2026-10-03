@@ -2694,7 +2694,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ### 64. `@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` が、`opts.at` が Invalid Date なら `jobId` の形を見る前に `Error` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
 
-[ADR 0589](./decisions/0589-postgres-outbox-complete-fail-check-at-before-job-id-shape.md)（検査の順を InMemory・Fake に寄せるのはオーナーの決定 2026-10-03 02:41Z。🔴 に数えるのもオーナーの決定で、規律2 のとおり）。
+[ADR 0589](./decisions/0589-postgres-outbox-complete-fail-check-at-before-job-id-shape.md)（検査の順を InMemory・Fake に寄せるのはクローンの決定 2026-10-03 02:41Z。🔴 に数えるのも、クローンが migration の数え方の規律2 に従って決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による））。
 
 ⚠ **未リリース**。**番号は 64 である**——項目63 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
