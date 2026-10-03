@@ -609,6 +609,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0592](./0592-adr-0583-0588-merged-pr-recheck-teeth.md) | マージ済みの PR（#1696〜#1699）を確かめ直して見つかった歯の穴を、試験だけで塞ぐ | 採用 (2026-10) |
 | [0593](./0593-adr-0576-0580-0582-merged-pr-recheck-teeth.md) | マージ済みの #1688〜#1694 の確かめ直しで見つかった、やりすぎ側の穴4つを塞ぐ（ADR 0576 の TSDoc 2つ・ADR 0580・ADR 0582） | 採用 (2026-10) |
 | [0594](./0594-postgres-outbox-complete-fail-check-at-before-job-id-shape.md) | `PostgresOutboxStore.complete`・`fail` は、`opts.at` の Invalid Date を `jobId` の形より先に断る | 採用 (2026-10) |
+| [0595](./0595-adr-0562-0557-merged-pr-recheck-teeth.md) | 10/02 にマージされた #1666〜#1680 の確かめ直しで見つかった穴を塞ぐ（ADR 0562 の写しの5欄・ADR 0557 の group の大文字の輪） | 採用 (2026-10) |
 | [0596](./0596-adr-0571-0573-0574-merged-pr-recheck-teeth-round2.md) | マージ済みの #1683・#1685・#1686（ADR 0571・0573・0574）の確かめ直しで見つかった歯の穴を塞ぐ | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

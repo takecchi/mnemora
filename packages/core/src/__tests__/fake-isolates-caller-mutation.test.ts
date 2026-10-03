@@ -97,6 +97,24 @@ describe("FakeMemoryStore は呼び手の書き換えから Memory を守る（A
     expect(reread?.recordedAt.toISOString()).toBe(T0);
   });
 
+  it("createMemory: 入力の decayFloorAt・occurredAt・validUntil も保存時に切り離される（ADR 0562 の「入力は保存するときに写す」、ADR 0595）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const decayFloorAt = new Date("2026-06-01T00:00:00.000Z");
+    const occurredAt = new Date(T0);
+    const validUntil = new Date("2027-01-01T00:00:00.000Z");
+    const input = newMemory({ decayFloorAt, occurredAt, validUntil });
+    const created = await memoryStore.createMemory(ctx, input);
+
+    decayFloorAt.setTime(0);
+    occurredAt.setTime(0);
+    validUntil.setTime(0);
+
+    const reread = await memoryStore.get(ctx, created.id);
+    expect(reread?.decayFloorAt.toISOString()).toBe("2026-06-01T00:00:00.000Z");
+    expect(reread?.occurredAt?.toISOString()).toBe(T0);
+    expect(reread?.validUntil?.toISOString()).toBe("2027-01-01T00:00:00.000Z");
+  });
+
   it("createMemory: 返した Memory が、後の purge（行の書き換え）で動かない／書き換えても store に届かない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const created = await memoryStore.createMemory(ctx, newMemory({ digest: "元の要旨" }));
@@ -267,6 +285,21 @@ describe("FakeEventStore は呼び手の書き換えから meta を守る（ADR 
 
     expect((await eventStore.get(ctx, appended.id))?.meta).toEqual(expected);
     expect(appended.meta).toEqual(expected);
+  });
+
+  it("append: 入力の at・actor を後から書き換えても、保存した値は変わらない（ADR 0562 の「入力は保存するときに写す」、ADR 0595）", async () => {
+    const { memoryStore, eventStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, newMemory());
+    const at = new Date(T0);
+    const actor = { type: "system" } as NewMemoryEvent["actor"];
+
+    const appended = await eventStore.append(ctx, eventInput(memory.id, { at, actor }));
+    at.setTime(0);
+    (actor as { type: string }).type = "mutated-by-caller";
+
+    const reread = await eventStore.get(ctx, appended.id);
+    expect(reread?.at.toISOString()).toBe(T0);
+    expect(reread?.actor).toEqual({ type: "system" });
   });
 
   it("get: 返した meta を書き換えても、次の get は影響を受けない", async () => {
