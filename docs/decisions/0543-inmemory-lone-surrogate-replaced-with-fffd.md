@@ -79,6 +79,20 @@ Postgres の側には変異を入れていない（置き換えは node-postgres
 - **足した後**: 歯は InMemory 68・Fake 68・Postgres 68 本、すべて緑（Postgres が `taxonomyGroupCandidates`・`findContestedByClaimKey`・Vector/Lexical の `filter.labels` も置き換えることを実測で確かめた）。上の生き残った変異は、InMemory・Fake とも各 5 本赤になり、戻すと緑に戻った。`attributes` を置き換える変異は 1 本赤（戻して緑）。
 - **表の本数との食い違い**: M1・M2 の「21 本赤」は、確かめ直した取り方では再現しなかった。InMemory の `createMemoryIdempotent` 呼び出し（`replaceLoneSurrogatesInNewMemory`）を丸ごと外すと 22 本赤（InMemory の歯と B3 の合計）、`tags` だけ外すと 17 本、`digest` だけ 11 本、`contentHash` だけ 5 本、claimKey の述語だけ 10 本だった。どの変異も赤になる点は表と同じで、本数だけが合わない（数え方・変異の入れ方の違いによる。どちらの取り方だったかは確かめていない）。
 
+**追記【実測】（採用前の初稿への追記。S4・S2・S3）**:
+
+- **S4（`findActiveByClaimKey`・`findContestedByClaimKey` の `contentHash` 引数）**: InMemory・Fake は引数の `contentHash` を置き換えずに `m.contentHash === query.contentHash` で比べていた（保存値は置き換え済み）。Postgres は `content_hash <> ${query.contentHash}` で、引数を driver が U+FFFD にしてから比べる。【実測】保存値 `h-a\uD800b`（→ `h-a�b`）の記憶に対して、引数を「置き換え前」「U+FFFD 済み」「別の値」で引いた結果（「当たる」= 除外されず返る。find 2種とも同じ）:
+
+  | 実装 | 置き換え前の引数 | U+FFFD 済みの引数 | 別の値 |
+  |---|---|---|---|
+  | Postgres | 当たらない（除外される） | 当たらない | 当たる |
+  | InMemory（直す前） | **当たる**（食い違い） | 当たらない | 当たる |
+  | Fake（直す前） | **当たる**（食い違い） | 当たらない | 当たる |
+
+  直し: InMemory・Fake の2つの find とも、比べる前に引数の `contentHash` を置き換える（`replaceLoneSurrogates` / `wf`）。歯は `lone-surrogate-fffd-teeth.ts` の「読み取りの引数 contentHash」（5 型 × 3 実装）。直す前は InMemory・Fake が各 5 本赤、Postgres は緑。直すと全部緑。直しを戻す変異（InMemory・Fake それぞれ、active・contested それぞれ）は各 5 本赤、戻すと緑。
+- **S2（Observation の `payload`）**: 【実測】Postgres は `invalid input syntax for type json`（`22P02`）で断る（キーに孤立サロゲートが在っても同じ）。ADR の記述（jsonb は置き換えず断る）と合っている。InMemory・Fake は断らずそのまま保持する。歯: 「対照（対象外・S2）」（`createObservation`・`createObservationWithOutbox`）。`LoneSurrogateKit` に `jsonbRejectsLoneSurrogate` を足し、Postgres は「断る」、InMemory・Fake は「保持して読み戻しても U+FFFD にならない」を縛る。`payload` を置き換える過剰な変異は InMemory・Fake・Postgres それぞれ 1 本赤（戻して緑）。
+- **S3（イベントの `actor`）**: 【実測】Postgres は書く前の検査（`memory_events.actor must not contain NUL (U+0000) or a lone surrogate code unit`）で断る。**InMemory・Fake も同じく断る**（`memory-event-check.ts`・`runtime-fakes.ts`。Issue #1211）。上の決定3 の「InMemory/Fake は今も保持して通す」は `payload`・`attributes`・`provenance` の話で、`actor`・`meta` には当たらない（3実装とも断る）。歯: 「対照（対象外・S3）」（断る・イベントも状態も書かない）。`actor` を置き換えて通してしまう過剰な変異は InMemory・Fake 各 1 本赤（戻して緑）。
+
 ## 検討した代替案
 
 1. **(a) 揃えない。** オーナーが採らなかった。

@@ -28,6 +28,13 @@ import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.
 
 export interface LoneSurrogateKit {
   store: MemoryStore;
+  /**
+   * Observation の `payload`（と Memory の `attributes`/`provenance`。`jsonb` 列）の孤立サロゲートを実装が断るか。
+   * Postgres は断る（`true`。`payload` は `invalid input syntax for type json`）。InMemory・Fake は断らず、
+   * **置き換えもせず**そのまま保持する（`false`）。どちらも U+FFFD にはならない。
+   * （イベントの `actor`/`meta` はこの旗の対象外: 3実装とも書く前に断る。Issue #1211。）
+   */
+  jsonbRejectsLoneSurrogate: boolean;
   /** そのテナントの全イベント。 */
   listEvents(ctx: Ctx): Promise<MemoryEvent[]>;
   /** `OutboxStore.claimBatch`（`kinds`・`claimedBy` の引数が `text[]`・`text` の列に当たる口）。 */
@@ -423,6 +430,64 @@ export function describeLoneSurrogateFffd(
       if (viaProvenance !== undefined) {
         expect(viaProvenance.provenance).toEqual({ kind: "imported", batchId: lone });
       }
+    });
+
+    it("対照（対象外・S2）: Observation の payload（jsonb。observe の口）は置き換えない——Postgres は断り、InMemory・Fake はそのまま保持する", async () => {
+      const kit = await makeKit();
+      const { store } = kit;
+      const lone = "a\uD800b";
+      const viaCreate = await store
+        .createObservation(
+          CTX,
+          buildNewObservationFixture({ tenantId: CTX.tenantId, payload: { text: lone } }),
+        )
+        .then(
+          (o) => o,
+          () => undefined,
+        );
+      const viaOutbox = await store
+        .createObservationWithOutbox(
+          CTX,
+          buildNewObservationFixture({
+            tenantId: CTX.tenantId,
+            payload: { nested: [{ text: lone }] },
+          }),
+          [],
+        )
+        .then(
+          (r) => r.observation,
+          () => undefined,
+        );
+      if (kit.jsonbRejectsLoneSurrogate) {
+        expect(viaCreate).toBeUndefined();
+        expect(viaOutbox).toBeUndefined();
+      } else {
+        expect(viaCreate?.payload).toEqual({ text: lone });
+        expect(viaOutbox?.payload).toEqual({ nested: [{ text: lone }] });
+        // 読み戻しも保持したまま（U+FFFD にならない）。
+        expect((await store.getObservation(CTX, viaCreate!.id))?.payload).toEqual({ text: lone });
+      }
+    });
+
+    it("対照（対象外・S3）: イベントの actor（jsonb）は置き換えない——3実装とも書く前に断り、U+FFFD で通して保存することも、状態を書き換えることもしない", async () => {
+      const { store, listEvents } = await makeKit();
+      const lone = "a\uD800b";
+      const m = await store.createMemory(CTX, mem());
+      const actor = { type: "human", id: lone } as const;
+      await expect(
+        store.updateStatusWithEvent(CTX, m.id, "forgotten", {}, { ...ev(m.id, "x"), actor }),
+      ).rejects.toThrow(/actor/);
+      await expect(
+        store.updateStatusWithEvent(
+          CTX,
+          m.id,
+          "forgotten",
+          {},
+          { ...ev(m.id, "x"), meta: { k: lone } },
+        ),
+      ).rejects.toThrow(/meta/);
+      expect(await listEvents(CTX)).toEqual([]);
+      expect((await store.get(CTX, m.id))?.status).toBe("active");
     });
 
     it("入力のオブジェクトは書き換えない（置き換えは保存する値だけ）", async () => {

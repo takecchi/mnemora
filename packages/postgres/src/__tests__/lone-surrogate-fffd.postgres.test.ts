@@ -28,6 +28,7 @@ async function makeKit(): Promise<LoneSurrogateKit> {
   const events = new PostgresEventStore(db);
   return {
     store: new PostgresMemoryStore(db),
+    jsonbRejectsLoneSurrogate: true,
     listEvents: (ctx: Ctx) => events.list(ctx, {}),
     claimBatch: (ctx, opts) => new PostgresOutboxStore(db).claimBatch(ctx, opts),
     searchByLabels: async (ctx, memoryId, labels) => {
