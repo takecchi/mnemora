@@ -152,3 +152,32 @@ describe("InMemoryMemoryStore.eraseTenant — memories を消すと埋め込み�
     expect(await vectorStore.getVectors(ctx, SPACE, ids)).toEqual([]);
   });
 });
+
+describe("InMemoryMemoryStore.eraseTenant — recall_usages はテナントの完全一致で消す（ADR 0604）", () => {
+  // tenantId は不透明な文字列で `:` を含んでよい。`recall_usages` の鍵 `${tenantId}:${recallId}:${memoryId}` を
+  // 前方一致で消すと、`acme` を消したときに `acme:eu` の行まで消える。Postgres は `tenant_id` の列で比べる。
+  it("acme を消しても、acme:eu の recall_usages は残る", async () => {
+    const memoryStore = new InMemoryMemoryStore();
+    const eu: Ctx = { tenantId: "acme:eu" };
+    const acme: Ctx = { tenantId: "acme" };
+    const memory = await memoryStore.createMemory(
+      eu,
+      buildNewMemoryFixture({ tenantId: eu.tenantId }),
+    );
+    const recallId = await memoryStore.createRecall(eu, subjectRecall(eu, "s1"));
+    await memoryStore.recordUsage(eu, recallId, [memory.id]);
+    // 件数だけでは「usage を数えも消しもしない」実装と見分けられないので、usage の行そのものを見る。
+    const usages = (memoryStore as unknown as { usages: Set<string> }).usages;
+    const euUsageKey = `${eu.tenantId}:${recallId}:${memory.id}`;
+    expect(usages.has(euUsageKey)).toBe(true);
+
+    const erasedAcme = await memoryStore.eraseTenant(acme, { limit: 1000 });
+
+    expect(erasedAcme).toMatchObject({ deleted: 0, reachedLimit: false });
+    expect(usages.has(euUsageKey)).toBe(true);
+
+    // 対照: acme:eu 自身を消すと、その recall_usages は消える。
+    await memoryStore.eraseTenant(eu, { limit: 1000 });
+    expect(usages.has(euUsageKey)).toBe(false);
+  });
+});
