@@ -2902,6 +2902,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `abortIfSuperseded` に大文字の uuid の superseded な記憶の id を渡すと、書かずに `SourceMemoryStatusChangedError` を投げる。綴り違いの同じ id（`[x, X]`）は `changed` に1件、`changed` は id の昇順**（[ADR 0568](./decisions/0568-abort-if-superseded-controls-and-duplicate-id-changed.md)。🟡。[ADR 0556](./decisions/0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) の「新しく断る入力は無い」の訂正）。
   `createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `abortIfSuperseded` が対象。`@mnemora/postgres` は以前から、大文字でも同じ行として見つけて断る（`id = ANY(...)`、1行につき1件、`ORDER BY id ASC`）。以前の fixture は、大文字の id では superseded を見落として書き込み（ADR 0556 が直した）、ADR 0556 の後も、綴り違いの同じ id を渡すと同じ id を `changed` に2回積み、渡した順に並べていた。**新しく断る入力は、大文字の id の superseded な記憶**（Postgres が今断るものだけ。ADR 0556 は、これを「新しく断る入力は無い」と書いていた）。`abortIfSuperseded` に大文字の id を渡して、書き込みが通ることに頼っていたテストは、いまは `SourceMemoryStatusChangedError` になる。`changed` の件数や並びを読んでいたテストも、見直しの対象になる。他のテナントの記憶・superseded 以外の status は、大文字の id でも断らない（Postgres と同じ）。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
 
+- **`Runtime.tick` の `embed` ジョブ: forget した記憶・purge した記憶では、embedding provider を呼ばずにジョブを終える**（[ADR 0541](./decisions/0541-embed-job-skips-withdrawn-memory.md)）。
+  以前は、forget の前に積まれた埋め込みジョブが後から走ると、`forgotten` の記憶の本文（purge 済みなら墓標）を `embeddingProvider.embed` に送り、ベクトルを書いていた。今は、`forgotten` か purge 済みの記憶なら provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する。`embeddingProvider` の呼び出し回数を数えているテストや、forget した記憶のベクトルが存在することに頼っているコードは見直すこと。新しく断る入力は無く、他の状態（`active`・`archived`・`superseded`・`contested`）は変わらない。すでに送られた分は取り消せない。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
