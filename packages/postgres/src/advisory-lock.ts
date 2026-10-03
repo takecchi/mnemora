@@ -83,7 +83,10 @@ export class AdvisoryLockUnavailableError extends Error {
 export interface AdvisoryLockErrorFactories {
   /** 待つ上限を超えたときに投げるエラーを作る。`waitedMs` は実際に待った時間（ミリ秒）。 */
   timeout: (waitedMs: number, cause: unknown) => Error;
-  /** 待つ前に、ロックを取れなかった（接続の失敗など）ときに投げるエラーを作る。 */
+  /**
+   * ロックの取得が `lock_timeout` 超過（SQLSTATE `55P03`）以外の理由で失敗したときに投げるエラーを作る
+   * （`lock_timeout` の設定の失敗、`pg_advisory_lock` の呼び出しの権限不足・接続断など）。
+   */
   unavailable: (cause: unknown) => Error;
 }
 
@@ -95,7 +98,12 @@ export interface AdvisoryLockErrorFactories {
  * 制御できなくなるため）。`lock_timeout` もこのコネクションの session に対して設定する。
  *
  * 失敗時は必ずこのコネクションを pool へ返却してから例外を投げる
- * （呼び出し元がコネクションリークを心配しなくてよいように）。
+ * （呼び出し元がコネクションリークを心配しなくてよいように）。投げるのは `errors.unavailable` /
+ * `errors.timeout` が作ったエラーで、`lock_timeout` の設定に失敗したときは `unavailable`、
+ * `pg_advisory_lock` が `55P03` で中断されたときは `timeout`、それ以外の失敗は `unavailable`。
+ *
+ * 成功時は `{ client, waitedMs }` を返す。`client` は呼び出し側が `releaseAdvisoryLock` で
+ * 解放・返却する責務を持つ（`waitedMs` は `pg_advisory_lock` を待った時間、ミリ秒）。
  */
 export async function acquireAdvisoryLock(
   pool: Pool,

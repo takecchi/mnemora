@@ -381,6 +381,20 @@ function nextId(prefix: string): string {
   return `${prefix}-${idCounter}`;
 }
 
+/**
+ * ADR 0562: 呼び手の値と store の中の実体を切り離す（`InMemoryMemoryStore` の `snapshot` と同じく `structuredClone`）。
+ * 入力は保存するときに、返り値は返すときに通す——どちらか片方だけでは、呼び手の書き換えが store の中身に届く。
+ * Date は Date のまま、配列・オブジェクトは深い複製になる（`JSON` で往復しないので Date を文字列にしない）。
+ */
+function fakeSnapshot<T>(value: T): T {
+  return structuredClone(value);
+}
+
+/** ADR 0562: `Date`（と `null`・`undefined`）の写し。`structuredClone` を通さず、型を保ったまま取る。 */
+function fakeCopyDate<T extends Date | null | undefined>(value: T): T {
+  return value instanceof Date ? (new Date(value.getTime()) as T) : value;
+}
+
 type OutboxJobMutable = OutboxJobRecord;
 
 /**
@@ -416,11 +430,12 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
     // ADR 0469: uuid の列は小文字の正規形で読み戻る（`@mnemora/postgres`）。大文字で渡された `memoryId` も小文字にそろえて積む。
     memoryId: event.memoryId === null ? null : event.memoryId.toLowerCase(),
     kind: event.kind,
-    at: event.at ?? new Date(),
-    actor: event.actor,
+    // ADR 0562: `at`・`actor`・`meta` は呼び手と共有しない（保存時に写しを取る）。
+    at: fakeCopyDate(event.at) ?? new Date(),
+    actor: fakeSnapshot(event.actor),
     digestSnapshot: event.digestSnapshot ?? null,
     sizeBeforeBytes: event.sizeBeforeBytes ?? null,
-    meta: event.meta,
+    meta: fakeSnapshot(event.meta),
   };
 }
 
@@ -1064,22 +1079,23 @@ export class FakeMemoryStore implements MemoryStore {
         contentHash: input.contentHash,
         digest: input.digest,
         digestSource: input.digestSource,
-        provenance: input.provenance,
+        // ADR 0562: 配列・オブジェクト・Date は呼び手と共有しない（保存時に写しを取る）。
+        provenance: fakeSnapshot(input.provenance),
         status: input.status ?? "active",
         supersededById: normOptId(input.supersededById) ?? null,
         contestedWithId: normOptId(input.contestedWithId) ?? null,
-        tags: input.tags,
-        occurredAt: input.occurredAt ?? null,
-        recordedAt: input.recordedAt,
-        lastReinforcedAt: input.lastReinforcedAt ?? null,
-        validFrom: input.validFrom ?? null,
-        validUntil: input.validUntil ?? null,
+        tags: [...input.tags],
+        occurredAt: fakeCopyDate(input.occurredAt) ?? null,
+        recordedAt: fakeCopyDate(input.recordedAt),
+        lastReinforcedAt: fakeCopyDate(input.lastReinforcedAt) ?? null,
+        validFrom: fakeCopyDate(input.validFrom) ?? null,
+        validUntil: fakeCopyDate(input.validUntil) ?? null,
         // Issue #371（ADR 0185/ADR 0315）: `InMemoryMemoryStore`（packages/testkit）と
         // 同じ理由・同じ形——`?? null` で転記しないと `undefined` のまま消える。
         claimKey: input.claimKey ?? null,
         strength: input.strength,
         halfLifeHours: input.halfLifeHours,
-        decayFloorAt: input.decayFloorAt,
+        decayFloorAt: fakeCopyDate(input.decayFloorAt),
         // ADR 0165 決めたこと3: 活動時計の3つ組。以前はここで1つも転記しておらず、
         // `createMemory` で渡した `decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls` が
         // 常に `undefined` になって消えていた——`recall-decay-gate.test.ts` の
@@ -1089,9 +1105,9 @@ export class FakeMemoryStore implements MemoryStore {
         decayFloorSeq: input.decayFloorSeq ?? null,
         halfLifeRecalls: input.halfLifeRecalls ?? null,
         embeddingStatus: input.embeddingStatus,
-        purgedAt: input.purgedAt ?? null,
+        purgedAt: fakeCopyDate(input.purgedAt) ?? null,
         // Issue #152/#153（ADR 0312）: runtime は常に `{}` 以上の値を書く。
-        attributes: input.attributes ?? {},
+        attributes: fakeSnapshot(input.attributes ?? {}),
         createdAt: now,
         updatedAt: now,
       };
@@ -1301,7 +1317,8 @@ export class FakeMemoryStore implements MemoryStore {
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
-    return this.createMemoryIdempotent(ctx, input).value;
+    // ADR 0562: 返す Memory は store の中の行ではなく写し（行を後から書き換える purge などで、呼び手が持つ値が動かない）。
+    return fakeSnapshot(this.createMemoryIdempotent(ctx, input).value);
   }
 
   async createMemoryWithOutbox(
@@ -1326,13 +1343,38 @@ export class FakeMemoryStore implements MemoryStore {
     return { memory, created: true, jobs };
   }
 
+  /**
+   * ADR 0562: 公開の `get` が返した写し（`viewed`）から、store の中の行そのものを引き直す。`updateStatus` など
+   * 行を書き換える口は、読んだ行へ書く必要がある——**写しへ書いても store に届かない。**
+   *
+   * ⚠ 内側の口は今までどおり `this.get` を**呼び**、その結果を `liveOf` に通す（`this.liveOf(await this.get(...))`）。
+   * `store.get` を直接引いて済ませないこと。テストが `stores.memoryStore.get` を差し替えて「再読すると行が
+   * 消えていた」「再読が投げる」を作る（`forget.test.ts` 等）ので、内側の読みもその差し替えを通す必要がある。
+   * `viewed` が `null`（差し替えが消した行）なら `null`。
+   */
+  private liveOf(viewed: Memory | null): Memory | null {
+    return viewed === null ? null : (this.backing.memories.get(viewed.id) ?? null);
+  }
+
+  /**
+   * ADR 0562: **歯が意図して store の中の行そのものを書き換える**ための口（「読んでから書くまでの間に別の誰かが
+   * 状態を変えた」を決定的に再現する、`consolidate.test.ts`・`runtime.test.ts` の reextract 等の手口）。
+   * 公開の `get` は写しを返すので、`get` の戻り値を書き換えてもこの用途には使えない。
+   * ⚠ 本物の adapter には無い、この Fake だけの口。歯の外（`runtime.ts` など）から呼ばないこと。
+   */
+  liveRowForTest(ctx: Ctx, id: MemoryId): Memory | null {
+    const memory = this.backing.memories.get(normId(id));
+    return memory && memory.tenantId === ctx.tenantId ? memory : null;
+  }
+
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
     assertWellFormedCtx(ctx);
     const memory = this.backing.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
       return null;
     }
-    return memory;
+    // ADR 0562: store の中の行ではなく、返す時点の写しを返す。
+    return fakeSnapshot(memory);
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
@@ -1353,7 +1395,7 @@ export class FakeMemoryStore implements MemoryStore {
       seen.add(id);
       const memory = this.backing.memories.get(id);
       if (memory && memory.tenantId === ctx.tenantId) {
-        results.push(memory);
+        results.push(fakeSnapshot(memory)); // ADR 0562
       }
     }
     return results;
@@ -1420,7 +1462,7 @@ export class FakeMemoryStore implements MemoryStore {
       forbidWhenNotSuperseded: true,
     });
     this.beforeUpdateStatus?.(id);
-    const memory = await this.get(ctx, id);
+    const memory = this.liveOf(await this.get(ctx, id));
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -1463,7 +1505,7 @@ export class FakeMemoryStore implements MemoryStore {
       forbidWhenNotSuperseded: true,
     });
     this.beforeUpdateStatus?.(id);
-    const memory = await this.get(ctx, id);
+    const memory = this.liveOf(await this.get(ctx, id));
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -1578,13 +1620,14 @@ export class FakeMemoryStore implements MemoryStore {
       for (const { input, jobKinds } of news) {
         const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
         if (!wasCreated) {
-          created.push({ memory, created: false, jobs: [] });
+          created.push({ memory: fakeSnapshot(memory), created: false, jobs: [] });
           continue;
         }
         const jobs = jobKinds.map((kind) =>
           this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowOpts),
         );
-        created.push({ memory, created: true, jobs });
+        // ADR 0562: 返す `memory` は store の中の行ではなく写し（この後 supersede が行を書き換えても、返した値は動かない）。
+        created.push({ memory: fakeSnapshot(memory), created: true, jobs });
       }
     } catch (error) {
       this.backing.memories.clear();
@@ -1819,7 +1862,7 @@ export class FakeMemoryStore implements MemoryStore {
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
     assertWellFormedCtx(ctx);
     id = normId(id);
-    const memory = await this.get(ctx, id);
+    const memory = this.liveOf(await this.get(ctx, id));
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -1847,7 +1890,7 @@ export class FakeMemoryStore implements MemoryStore {
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     assertWellFormedCtx(ctx);
     id = normId(id);
-    const memory = await this.get(ctx, id);
+    const memory = this.liveOf(await this.get(ctx, id));
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -2500,7 +2543,7 @@ export class FakeMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     id = normId(id);
     this.beforeUpdateStatus?.(id);
-    const memory = await this.get(ctx, id);
+    const memory = this.liveOf(await this.get(ctx, id));
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -2584,11 +2627,11 @@ export class FakeMemoryStore implements MemoryStore {
     }
 
     // 1. 事前検証——存在確認。まだ何も書いていない。
-    const firstMemory = await this.get(ctx, first.id);
+    const firstMemory = this.liveOf(await this.get(ctx, first.id));
     if (!firstMemory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${first.id}`);
     }
-    const secondMemory = await this.get(ctx, second.id);
+    const secondMemory = this.liveOf(await this.get(ctx, second.id));
     if (!secondMemory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${second.id}`);
     }
@@ -2671,11 +2714,11 @@ export class FakeMemoryStore implements MemoryStore {
     assertFakeNoSupersededCycle("resolveContestedPair", [first, second]);
 
     // 1. 事前検証——存在確認。まだ何も書いていない。
-    const firstMemory = await this.get(ctx, first.id);
+    const firstMemory = this.liveOf(await this.get(ctx, first.id));
     if (!firstMemory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${first.id}`);
     }
-    const secondMemory = await this.get(ctx, second.id);
+    const secondMemory = this.liveOf(await this.get(ctx, second.id));
     if (!secondMemory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${second.id}`);
     }
@@ -2752,7 +2795,7 @@ export class FakeMemoryStore implements MemoryStore {
     // 1. 事前検証——存在確認。まだ何も書いていない。
     const memories: Memory[] = [];
     for (const m of members) {
-      const memory = await this.get(ctx, m.id);
+      const memory = this.liveOf(await this.get(ctx, m.id));
       if (!memory) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${m.id}`);
       }
@@ -2881,7 +2924,7 @@ export class FakeMemoryStore implements MemoryStore {
 
     const memories: Memory[] = [];
     for (const m of members) {
-      const memory = await this.get(ctx, m.id);
+      const memory = this.liveOf(await this.get(ctx, m.id));
       if (!memory) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${m.id}`);
       }
@@ -2918,7 +2961,7 @@ export class FakeMemoryStore implements MemoryStore {
       const missing: MemoryId[] = [];
       for (const id of visited) {
         if (idSet.has(id)) continue;
-        const memory = await this.get(ctx, id);
+        const memory = this.liveOf(await this.get(ctx, id));
         if (memory !== null && memory.status === "contested") {
           missing.push(id);
         }
@@ -2986,7 +3029,7 @@ export class FakeMemoryStore implements MemoryStore {
       id: normId(survivor.id),
       contestedWithId: normId(survivor.contestedWithId),
     };
-    const memory = await this.get(ctx, survivor.id);
+    const memory = this.liveOf(await this.get(ctx, survivor.id));
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${survivor.id}`);
     }
@@ -3397,11 +3440,12 @@ export class FakeOutboxStore implements OutboxStore {
     eligible.sort((a, b) => a.availableAt.getTime() - b.availableAt.getTime());
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {
-      job.claimedAt = opts.now;
+      job.claimedAt = fakeCopyDate(opts.now); // ADR 0562: 呼び手の Date を行に入れない
       job.claimedBy = opts.claimedBy;
       job.attempts += 1;
     }
-    return claimed.map((job) => ({ ...job }));
+    // ADR 0562: payload（入れ子）と Date も写す。浅い複製だと、返した payload への書き換えが行に届く。
+    return claimed.map((job) => fakeSnapshot(job));
   }
 
   // CAS 意味論（ADR 0142, Issue #233）も `packages/testkit` の `InMemoryOutboxStore`/
@@ -3434,7 +3478,7 @@ export class FakeOutboxStore implements OutboxStore {
       return;
     }
     // Issue #1237: 実装（`InMemoryOutboxStore`・`PostgresOutboxStore`）と同じく、`opts.at` を渡せばそれを使う。
-    job.completedAt = opts?.at ?? new Date();
+    job.completedAt = fakeCopyDate(opts?.at) ?? new Date(); // ADR 0562: 呼び手の Date を行に入れない
   }
 
   async fail(
@@ -3460,7 +3504,7 @@ export class FakeOutboxStore implements OutboxStore {
     if ((job.completedAt ?? null) !== null) {
       return;
     }
-    job.failedAt = opts?.at ?? new Date();
+    job.failedAt = fakeCopyDate(opts?.at) ?? new Date(); // ADR 0562: 呼び手の Date を行に入れない
     // ADR 0563: Postgres の `text` は NUL を保存できない（22021）。`PostgresOutboxStore.fail`・`InMemoryOutboxStore.fail` は
     // 目に見える6文字の `\u0000` へ置き換えて残す。NUL 以外は変えない。
     job.lastError = error.replaceAll("\u0000", "\\u0000");
@@ -3889,7 +3933,7 @@ export class FakeVectorStore implements VectorStore {
       seen.add(memoryId);
       const entry = this.entries.get(this.key(space, ctx.tenantId, memoryId));
       if (entry !== undefined) {
-        results.push({ memoryId, vector: entry.vector });
+        results.push({ memoryId, vector: [...entry.vector] }); // ADR 0562: 写しを返す
       }
     }
     return results;
@@ -4360,7 +4404,9 @@ export class FakeEventStore implements EventStore {
     assertWellFormedCtx(ctx);
     // ADR 0556: 大文字小文字は区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。この Fake の id は小文字の `evt-N` だけ。
     const lowered = id.toLowerCase();
-    return this.backing.events.find((e) => e.id === lowered && e.tenantId === ctx.tenantId) ?? null;
+    const found = this.backing.events.find((e) => e.id === lowered && e.tenantId === ctx.tenantId);
+    // ADR 0562: store の中の行ではなく、返す時点の写しを返す。
+    return found === undefined ? null : fakeSnapshot(found);
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {

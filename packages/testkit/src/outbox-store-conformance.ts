@@ -40,7 +40,9 @@ export interface OutboxStoreConformanceOptions {
    * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `complete`/`fail`
    * が積む `completedAt`/`failedAt` を検査するための、終端後も読める「生の行を読む」フック
    * （`claimBatch` は `completed_at`/`failed_at` が付いた行を対象から外すため使えない）。
-   * 省略した adapter では、この欄を検査する歯は `it.skip` になる——測っていないことが
+   * 同じ理由で、`fail` が残す `lastError`・`claimBatch` が返した `payload` の複製・
+   * `purgeCompletedJobs` の結果を読み直す歯も、このフックを使う。
+   * 省略した adapter では、これらを検査する歯は `it.skip` になる——測っていないことが
    * 緑ではなく skip として見える。
    */
   peekJob?: ((ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>) | undefined;
@@ -141,11 +143,18 @@ const CONCURRENT_CLAIM_ROUNDS = 10;
  *   この歯は単一プロセス内の複数接続までである。詳細は
  *   docs/architecture.md「確かめていないこと」節、ADR 0032「確かめていないこと」節を見ること。
  * - `complete` / `fail` の後、そのジョブは再び `claimBatch` に現れない
- * - テナント分離: 他テナントの未処理ジョブが `claimBatch` に現れない
+ * - `complete` / `fail` の `opts.at`（`completedAt`/`failedAt` の時刻。省略時は壁時計。
+ *   Invalid Date は例外。時刻の読み戻しは `peekJob` を渡した adapter だけ）、存在しないジョブ id は
+ *   例外にしない冪等な終端更新、`claim` 時の `attempts` と一致しなければ `OutboxLeaseConflictError`
+ *   （ADR 0142）
+ * - テナント分離: 他テナントの未処理ジョブが `claimBatch` に現れない。他テナントの ctx からの
+ *   `complete` / `fail` は行に触れず、存在も知らせない
  * - **claim のリース（ADR 0032）**: リース内で claim 済みの行は再 claim されず、
  *   `ORDER BY available_at ASC LIMIT n` の先頭を占め続けて後続の行を詰まらせない
  *   （オーナーの「先頭詰まり」仮説の検査）。リースが切れた行は再び claim される
  *   （`claimed_at IS NULL` だけにする案を却下した理由そのもの——見えない停止にしない）。
+ * - `eraseTenant`（`supportsEraseTenant` に応じて）・`purgeCompletedJobs`（`supportsPurgeCompletedJobs` の
+ *   3状態に応じて。ADR 0404）、`ctx.tenantId`・`ctx.subjectId` の形式不正な識別子の拒否（ADR 0423）
  */
 export function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void {
   const {

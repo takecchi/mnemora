@@ -567,6 +567,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0559](./0559-clock-reaches-outbox-available-at.md) | 注入した時計は outbox の `available_at` と監査ログの `at` に届く——古い「届かない」「DB の `now()` で書かれる」記述を、いまの実装に合わせて直す（コメントと doc だけ） | 採用 (2026-10) |
 | [0560](./0560-doc-code-drift-sweep-readmes.md) | 文書とコードのずれを横に掃く（第8弾）— README 4つ（ルート・core・openai・local-embedding）を、今の main の実装に照らす | 採用 (2026-10) |
 | [0561](./0561-doc-code-drift-sweep-recall-testkit.md) | 文書とコードのずれを横に掃く（第9弾）— `docs/recall.md`・`packages/testkit/README.md`・`docs/north-star-paths.md`・`docs/README.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0562](./0562-core-fake-isolates-caller-mutation.md) | core の Fake も、呼び手の書き換えから自分の中身を守る（Issue #1412 A8 の9本と、同じ原因の1本） | 採用 (2026-10) |
 | [0563](./0563-core-fake-event-time-nul-and-claim-predicates.md) | core の Fake の `archived`・`purgedAt` の時刻、識別子と `lastError` の NUL、片側だけの claim key を、InMemory・Postgres に揃える | 採用 (2026-10) |
 | [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
 | [0566](./0566-fake-outbox-opts-now-controls.md) | ADR 0555 の歯の穴を塞ぐ——Fake の outbox 行の時刻を「やりすぎ」「外す」側からも縛り、0555 の文面のずれを訂正する | 採用 (2026-10) |
@@ -574,6 +575,10 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0568](./0568-abort-if-superseded-controls-and-duplicate-id-changed.md) | ADR 0556 の歯が通した4つの変異を塞ぎ、`abortIfSuperseded` の綴り違いの同じ id を Postgres と同じ1件にし、0556 の「新しく断る入力は無い」を訂正する | 採用 (2026-10) |
 | [0569](./0569-doc-code-drift-sweep-roadmap-vision-chat.md) | 文書とコードのずれを横に掃く（第11弾）— `docs/roadmap.md`・`docs/vision.md`・`docs/alteroid-findings.md` と `examples/chat` のデモ本体のコメントを、今の main の実装に照らす | 採用 (2026-10) |
 | [0570](./0570-chat-cli-output-strings-match-implementation.md) | `examples/chat` の CLI の help と出力の文言を実装に合わせ、数の写しを外す | 採用 (2026-10) |
+| [0571](./0571-doc-code-drift-sweep-public-tsdoc.md) | 文書とコードのずれを横に掃く（第12弾）— core を除く公開パッケージの TSDoc を、今の main の実装に照らす | 採用 (2026-10) |
 | [0572](./0572-core-fake-supersede-atomic-controls.md) | ADR 0564 の歯の穴（O1・O3・O5・O6）を塞ぎ、ADR 0563 の範囲の記述を訂正する | 採用 (2026-10) |
+| [0573](./0573-fake-event-time-nul-claim-controls.md) | ADR 0563 の歯が通した4つの変異（`updatedAt` の時刻・`extractorVersion` の NUL・claim predicate の並び）を塞ぐ | 採用 (2026-10) |
+| [0574](./0574-adr-0557-superseded-by-controls.md) | ADR 0557 の歯の穴（やりすぎ・循環の走査・検査の位置）を塞ぐ | 採用 (2026-10) |
+| [0575](./0575-outbox-negative-limit-teeth-independent-of-planner-stats.md) | outbox の `eraseTenant`・`claimBatch` の負の `limit` の歯を、プランナの統計によらず reject される入力にする | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
