@@ -35,6 +35,8 @@ export interface Round31Kit {
   listEvents(ctx: Ctx, memoryId?: MemoryId): Promise<MemoryEvent[]>;
   /** `memory_relations` で `memoryId` と結ばれた相手の id（行ごと。重複していれば重複したまま返す）。 */
   relatedIds(ctx: Ctx, memoryId: MemoryId): Promise<string[]>;
+  /** `contradicts` の関係を `fromId`→`toId` の向きで1行足す（`RelationStore.link`。群の外の記憶との行を作るのに使う）。 */
+  linkContradicts(ctx: Ctx, fromId: MemoryId, toId: MemoryId): Promise<void>;
   setRetention(ctx: Ctx, days: number | "unlimited"): Promise<void>;
   activitySeq(ctx: Ctx): Promise<number>;
   claimEmbedJobs(ctx: Ctx, now: Date): Promise<OutboxJobRecord[]>;
@@ -676,6 +678,51 @@ export function describeRound31Teeth(
         })),
       );
       expect(ok.members).toHaveLength(4);
+    });
+
+    it("A17b: resolveContestedGroup が消す関係の行は群の中だけ。forget で抜けた記憶との行・群の外の記憶と link した行は残る", async () => {
+      const { store, relatedIds, linkContradicts } = await makeKit();
+      const [a, b, c, d, e5] = await group(store, A, 5);
+      const outside = await mk(store, A);
+      await linkContradicts(A, a!.id, outside.id);
+      await linkContradicts(A, outside.id, a!.id);
+      await store.updateStatus(A, e5!.id, "forgotten");
+      const ok = await store.resolveContestedGroup!(
+        A,
+        [a!, b!, c!, d!].map((m) => ({
+          id: m.id,
+          status: "active" as const,
+          event: ev(A, m.id, "updated"),
+        })),
+      );
+      expect(ok.members).toHaveLength(4);
+      // 群の中どうし（a-b・a-c・a-d）の行は消え、forget 済みの e5・群の外の outside との行だけが残る。
+      expect([...(await relatedIds(A, a!.id))].sort()).toEqual([e5!.id, outside.id].sort());
+      expect(await relatedIds(A, b!.id)).toEqual([e5!.id]);
+      expect(await relatedIds(A, outside.id)).toEqual([a!.id]);
+    });
+
+    it("A17c: markContestedGroup は、群の外の対の片割れ（A-B の A だけ）を含む渡し方を MemoryStatusConflictError で断り、B は contested のまま", async () => {
+      const { store } = await makeKit();
+      const [pa, pb] = await contestedPair(store, A);
+      const c = await mk(store, A);
+      const d = await mk(store, A);
+      const err = await caught(
+        store.markContestedGroup!(
+          A,
+          [pa, c, d].map((m) => ({ id: m.id, event: ev(A, m.id, "updated") })),
+        ),
+      );
+      expect(isMemoryStatusConflictError(err)).toBe(true);
+      expect((await store.get(A, pb.id))?.status).toBe("contested");
+      expect((await store.get(A, c.id))?.status).toBe("active");
+      expect((await store.get(A, d.id))?.status).toBe("active");
+      // 対の両方を含めれば（片割れが群の中を指す）通る。断る条件を締めすぎていないこと。
+      await store.markContestedGroup!(
+        A,
+        [pa, pb, c].map((m) => ({ id: m.id, event: ev(A, m.id, "updated") })),
+      );
+      for (const m of [pa, pb, c]) expect((await store.get(A, m.id))?.status).toBe("contested");
     });
 
     // ---------------------------------------------------------------- A18 / A19 / A20
