@@ -217,7 +217,7 @@ export interface OutboxStore {
    * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
    * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
    *
-   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。⚠ `@mnemora/postgres` は、`jobId` が UUID の形でないときは `opts.at` を見る前に何もせず返す（testkit の fixture は先に `opts.at` を検査して例外にする）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
+   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。**検査は `jobId` の形・行の有無より先**——形の崩れた・存在しない `jobId` でも、`opts.at` が Invalid Date なら静かに返さず例外にする（ADR 0594。以前の `@mnemora/postgres` は、`jobId` が UUID の形でないときは `opts.at` を見る前に何もせず返していた）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
    */
   complete(
     ctx: Ctx,
