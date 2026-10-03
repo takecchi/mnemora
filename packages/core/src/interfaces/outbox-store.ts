@@ -144,7 +144,7 @@ import type { OutboxJobKind } from "./scheduler.js";
 export interface ClaimOutboxJobsOptions {
   /** この種別のジョブだけを取る。省略なら種別で絞らない。 */
   kinds?: OutboxJobKind[] | undefined;
-  /** 1回に取る上限の本数。0以上の整数を渡す前提。負数・非整数・`bigint` に収まらない値は、何も claim せずに例外を投げる（`@mnemora/postgres` は `LIMIT` の型で Postgres が拒み、testkit の fixture は `Error`）。 */
+  /** 1回に取る上限の本数。0以上の整数を渡す前提。負数・非整数・`bigint` に収まらない値の結果は、約束の上では未定義。testkit の fixture は何も claim せずに `Error` を投げる。`@mnemora/postgres` は多くの場合 Postgres が `LIMIT` を拒むが、実行計画によっては拒まずに0件を返す（ADR 0575）。 */
   limit: number;
   /** 「今」の時刻。`available_at <= now` とリースの切れ目の判定に使う。 */
   now: Date;
@@ -290,7 +290,7 @@ export interface OutboxStore {
 export interface PurgeCompletedJobsOptions {
   /** この日時より前に完了した（`completed_at < olderThan`）ジョブだけが対象。境界値は対象外。**既定値なし。** */
   olderThan: Date;
-  /** 1回の呼び出しで消す行数の上限。**必須・既定値なし。**0以上の整数を渡す前提。testkit の fixture は負数・非整数で `Error` を投げる。`@mnemora/postgres` は `LIMIT limit + 1` で渡すので、`-1` は例外にならず0件になり、`-2` 以下は Postgres が拒む（実装側の食い違い）。 */
+  /** 1回の呼び出しで消す行数の上限。**必須・既定値なし。**0以上の整数を渡す前提。負数・非整数の結果は、約束の上では未定義。testkit の fixture は `Error` を投げる。`@mnemora/postgres` は `LIMIT limit + 1` で渡すので `-1` は0件になり、それより小さい値は多くの場合 Postgres が拒むが、実行計画によっては拒まずに0件を返す（ADR 0575）。 */
   limit: number;
   /** `true` なら何も消さず、消していたら何が起きたかだけを返す。省略時 `false`。 */
   dryRun?: boolean | undefined;

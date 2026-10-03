@@ -33,7 +33,7 @@ ADR 0571（#1683）の続き。今回は `packages/core` の公開 TSDoc（入�
 ### interfaces
 
 - **`EventStore.get`・`list`**: UUID 形式の `id`・`filter.memoryId` は大文字小文字を区別しないこと、別のテナントのイベントの `id` は `null` を返すことを足した。【現物】
-- **`ClaimOutboxJobsOptions.limit`・`PurgeCompletedJobsOptions.limit`**: 負数・非整数の扱いを「未定義」としていた。Postgres・testkit の fixture の実際の扱い（何も claim せずに例外になる、など）を書いた。`purgeCompletedJobs` で adapter の扱いが割れる点は下の「直さなかったもの」に置いた。【現物】
+- **`ClaimOutboxJobsOptions.limit`・`PurgeCompletedJobsOptions.limit`**: 負数・非整数について、`claimBatch` は何も書いておらず、`purgeCompletedJobs` は「結果は未定義」とだけ書いていた。約束の上では未定義のままとし、今の振る舞いを書き足した。testkit の fixture は `Error` を投げる。`@mnemora/postgres` は多くの場合 Postgres が `LIMIT` を拒むが、実行計画によっては拒まずに0件を返す（ADR 0575〔#1687〕の実測。store には負の `limit` を断る約束が無い〔ADR 0493 D3〕）。`purgeCompletedJobs` は `LIMIT limit + 1` で渡すので、`-1` は0件になる。【現物】
 - **`OutboxStore.complete`**: `opts.at` が Invalid Date のときの例外は、Postgres では `jobId` が UUID の形でないと先に return するので起きない、と注記した。【現物】
 - **`Scheduler`**: `@mnemora/bullmq` を「npm には未公開」と書いていた。今は公開済みなので、AGENTS.md の表を指した。【現物】
 - **`TaxonomyMode`・`getTaxonomyMode?`**: 「`taxonomy_mode` を読む経路はまだ実装されていない」と書いていた。今は、`labels` か `taxonomyGroups` を指定した `recall()` が読む。本文は変えず、後ろに訂正を足した。interface の doc の追記が指す「上の段落」が今の本文に無いことにも、訂正を足した。migration の行番号の参照は外した。【現物】
@@ -69,15 +69,16 @@ ADR 0571（#1683）の続き。今回は `packages/core` の公開 TSDoc（入�
 - **`defaultScoringStrategy` の上界の表**: `strength` を「型も DB 列も保証していない」と書いていた。同じファイルの `DEFAULT_STRATEGY_BOUND_ASSUMPTIONS` の doc に揃えた（同梱の実装は書き込み時に拒む。ADR 0078）。`tagMatch` の一致の判定（完全一致で、大文字小文字を区別する。重複は重複して数える）を足した。【現物】
 - **`consolidate`・`reflect`**: `digest` の空白だけの扱い、`tags` の空白要素を捨てて重複を除くこと、並びに従う欄を足した（`occurredAt`・`subjectId` は並びに依らない）。`reflect` では「`decayFloorAt` は呼び出し側が渡す」を、`buildReflectedMemory` 自身が計算する、に直した。【現物】
 - **`eraseTenant`**: テーブル数の写しを外した。見出しにつながっていた行を分けた。関数と `EraseTenantOutcome` に、`confirmTenantId` の完全一致と `limit` の検査（どちらも書き込む前に `RangeError`）、例外の `params:` 以降を落とすこと、を短く足した。【現物】
+- **`isAbort`**: 「catch した時点で `signal.aborted` が真なら、その例外は必ず `abortReason`」と書いていた。`runAbortable` は先に決着した側を返すので、provider のエラーで reject した後、catch に届くまでの間に abort されると成り立たない。「ふつう」に直し、その場合を書き足した。【現物】
 - **`PurgeExpiredEventsForTenantOutcome`**: 最初の読みが `days` でも、読み直した結果の `unset`・`unlimited` が返りうることを足した。日付付きの追記の本文は変えず、後ろに訂正を足した。【現物】
 
 ## 直さなかったもの
 
 ### 実装を変える材料
 
-- **`purgeCompletedJobs` の `limit` が負数のとき、adapter で結果が割れる**: Postgres は `LIMIT limit+1` で渡すので、`-1` は例外にならずに0件、`-2` 以下は Postgres が断る。testkit の fixture は負数をいつも `Error` で断る。Postgres の側で、書く前に検査するのが筋と見る。【現物・判断】
+- **`claimBatch`・`purgeCompletedJobs` の `limit` が負数のとき、adapter で結果が割れる**: testkit の fixture は負数をいつも `Error` で断る。Postgres は、`purgeCompletedJobs` の `-1` を0件にし、それ以外の負数も実行計画によっては断らずに0件を返す（ADR 0575）。TSDoc は「約束の上では未定義」と書いた。揃えるなら、Postgres の側で書く前に検査するのが筋と見る。【現物・判断】
 - **`OutboxStore.complete`・`fail` の検査の順**: `jobId` が UUID の形でないとき、Postgres は `opts.at` の Invalid Date の検査より先に return し、fixture は先に例外にする。TSDoc には今の振る舞いを注記した。順を揃えるのはコードの変更である。【現物】
-- **`isAbort` の doc の「catch した時点で `signal.aborted` なら、その例外は必ず `abortReason`」**: provider 自身のエラーで reject した後、catch までの間に abort されると成り立たない。狭い競合なので、実装もコメントも変えていない。【現物・判断】
+- **`isAbort` が、catch した時点の `signal.aborted` だけを見ること**: provider 自身のエラーで reject した後、catch に届くまでの間に abort されると、`aborted` は真なのに例外は provider のエラーになる。狭い競合なので実装は変えていない。doc の「必ず `abortReason` である」は「ふつう」に直し、この場合を書き足した（上の「直したもの」の strategies・その他）。【現物・判断】
 - **`PackDigestBandOptions.maxEntryChars` が NaN**: 切り詰めが起きない（`length > NaN` が偽）。`limit`・`maxChars` の NaN は doc に書いてあるが、これは書いていない。意図かどうかが分からないので残した。【現物】
 
 ### doc の付き先
