@@ -175,7 +175,7 @@ describe("Observation の口は、返り値の書き換えから行を守る（A
 
     const again = await memoryStore.createObservationWithOutbox(ctx, newObservation(), ["extract"]);
     expect(again.created).toBe(false);
-    // 再送は最初の Observation を指す（別の id の写しを返さない。Memory 側の createMemoryWithOutbox と揃える。ADR 0586）。
+    // 再送は最初の Observation を指す（別の id の写しを返さない。Memory 側の createMemoryWithOutbox と揃える。ADR 0588）。
     expect(again.observation.id).toBe(result.observation.id);
     scribble(result.observation);
     scribble(result.jobs);
@@ -433,7 +433,7 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
     ).toBe(T1);
   });
 
-  it("reinforce: ミリ秒を持つ at がそのまま lastReinforcedAt に入り、渡した at を後から書き換えても変わらない（ADR 0586）", async () => {
+  it("reinforce: ミリ秒を持つ at がそのまま lastReinforcedAt に入り、渡した at を後から書き換えても変わらない（ADR 0588）", async () => {
     const stores = createFakeRuntimeStores();
     const created = await seed(stores);
     const atIso = "2026-02-01T00:00:00.123Z";
@@ -532,7 +532,7 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
       expect(got.recordedAt.getTime()).toBe(0);
     });
 
-    it("reinforce の返り値（書いた場合・no-op の両方）は凍結されておらず（入れ子も）、Date は Date のまま（ADR 0586）", async () => {
+    it("reinforce の返り値（書いた場合・no-op の両方）は凍結されておらず（入れ子も）、Date は Date のまま（ADR 0588）", async () => {
       const stores = createFakeRuntimeStores();
       const created = await seed(stores);
       const written = await stores.memoryStore.reinforce(ctx, created.id, new Date(T1));

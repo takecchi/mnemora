@@ -4,7 +4,7 @@ import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0586: 入力の `claimKey: null` は、保存しても・返しても `null` のまま（`{}` などに化けない）。
+ * ADR 0588: 入力の `claimKey: null` は、保存しても・返しても `null` のまま（`{}` などに化けない）。
  *
  * ADR 0578 の入力の写し（`fakeSnapshot(input.claimKey ?? null)`）の歯は、claimKey が在る値の共有だけを見ていた。
  * 「null を `{}` にする」実装は、そこでは赤にならない。
@@ -44,7 +44,7 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-describe("入力の claimKey: null は、保存・返却のどちらでも null のまま（ADR 0586）", () => {
+describe("入力の claimKey: null は、保存・返却のどちらでも null のまま（ADR 0588）", () => {
   it("createMemory: 返り値・liveRowForTest・get の claimKey が null", async () => {
     const stores = createFakeRuntimeStores();
     const created = await stores.memoryStore.createMemory(ctx, newMemory({ claimKey: null }));
