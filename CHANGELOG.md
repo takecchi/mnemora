@@ -140,6 +140,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`packDigestBand` に `maxEntryChars: NaN` を渡すと、digest を切り詰めない（無制限）へ化けていたのを、負数と同じ「digest を空に切る」へ直した**（[ADR 0585](./docs/decisions/0585-digest-band-max-entry-chars-nan.md)）。`length > NaN` は常に false になるためで、同じ関数の `limit`/`maxChars` の `NaN`（Issue #803）や、負数の `maxEntryChars` の扱いと食い違っていた。
+  - **何が変わるか**: `maxEntryChars: NaN` のとき、全エントリの `digest` が `""`、`truncated: true` になる（負数と同じ）。`+Infinity` は今までどおり上限なし。TSDoc の `PackDigestBandOptions.maxEntryChars` にも書いた。
+  - **破壊的と数えない理由**: 新しく投げる例外は無く、公開 API の型・表面も変えない。影響を受けるのは `packDigestBand` を直接呼んで `NaN` を渡していた呼び出し側だけで、`recall()` が渡すのは定数 `DIGEST_BAND_MAX_ENTRY_CHARS` なので、`recall()` の振る舞いは変わらない。
+
 - **`RuntimeDeps.clock` の TSDoc が「注入した時計は outbox の `availableAt` や監査ログの `at` には届かない」と書いていたのを、実装に合わせて直した**（[ADR 0559](./docs/decisions/0559-clock-reaches-outbox-available-at.md)）。ドキュメントとコメントだけの変更で、実装・値・公開 API の表面（`pnpm api:check` は差分なし）は変えていない。注入した時計は outbox 行の `availableAt`・`createdAt` と監査ログの `at` に届く（`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now`）。同じ主張を写していたテスト・example のコメントも直した。
 
 - **`@mnemora/postgres`・`@mnemora/testkit`・`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding` の公開 TSDoc のうち、実装と食い違っていた記述を実装に合わせて直した**（[ADR 0571](./docs/decisions/0571-doc-code-drift-sweep-public-tsdoc.md)）。
