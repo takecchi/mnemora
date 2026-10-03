@@ -81,7 +81,8 @@ import { omitParamsFromError } from "./failure-description.js";
  * など）では、同時に呼ぶと相手が先に消した行が数えられず、「予算未満なら表は空」と読み違えうる。
  *
  * ⚠ **投げる例外の message から、drizzle の `params:` より後ろを落とす**（ADR 0430 決定3。`Runtime` の全メソッドと
- * 同じ作法、[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md) 決定6）。 *
+ * 同じ作法、[ADR 0423](../../../docs/decisions/0423-identifier-well-formed-and-error-message-without-params.md) 決定6）。
+ *
  * ## 引数の検査（書き込み前）
  *
  * - `opts.confirmTenantId !== ctx.tenantId` なら `RangeError` を投げる——`ctx.tenantId`
@@ -149,7 +150,7 @@ import { omitParamsFromError } from "./failure-description.js";
  * 本番で `deleted.vectorStore` が実数になるのは、`memoryStore` が消し切ったあとになお埋め込みの行が
  * 残っているとき（`VectorStore` の別実装が、CASCADE を持たずに行を残している場合など）だけである
  * ——**確かめていない**（`@mnemora/postgres` では、その行は `memories` の FK に縛られている）。
- * `deleted.memoryStore` も同じで、`memoryStore` が消した全表（`memories` を含む10表。消す表の一覧は
+ * `deleted.memoryStore` も同じで、`memoryStore` が消した全表（`memories` を含む。消す表の一覧は
  * `MemoryStore.eraseTenant` の doc）の行数の合計であり、`memories` だけの行数ではない。
  * 呼び順は [ADR 0383](../../../docs/decisions/0383-erase-tenant.md) 決定5の不変条件のために変えない。
  * 「消えたか」は戻り値の件数ではなく、消去後に表を数えて確かめること。
@@ -171,6 +172,7 @@ import { omitParamsFromError } from "./failure-description.js";
 export type EraseTenantMissingStore =
   "memoryStore" | "vectorStore" | "outboxStore" | "tenantSettingsStore";
 
+/** {@link eraseTenant} の戻り値。各 `kind` の意味は `EraseTenantMissingStore` の直上の doc の「戻り値」節を見ること。 */
 export type EraseTenantOutcome =
   | { kind: "store_unsupported"; missing: EraseTenantMissingStore[] }
   | { kind: "blocked_by_foreign_reference"; count: number }
@@ -210,6 +212,13 @@ export interface EraseTenantDeps {
   tenantSettingsStore: TenantSettingsStore;
 }
 
+/**
+ * テナント1つの全表・全行を消す（詳細は `EraseTenantMissingStore` の直上の doc。ADR 0383）。
+ *
+ * `opts.confirmTenantId !== ctx.tenantId`（完全一致で比べる）、または `opts.limit` が正の整数でないときは、
+ * 書き込みの前に `RangeError` を投げる。port が1つでも `eraseTenant?` を持たなければ何も消さず
+ * `store_unsupported` を返す。投げる例外は drizzle の `params:` 以降を落とした message になる（ADR 0430 決定3）。
+ */
 export async function eraseTenant(
   ctx: Ctx,
   deps: EraseTenantDeps,

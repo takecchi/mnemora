@@ -289,7 +289,7 @@ export interface Memory {
    *
    * **省略可能な新規フィールドとして足した**（`purgedAt`/`validFrom` と同じ理由——
    * `Memory` は `@mnemora/core` の公開型。必須にすると、この型を自分でリテラルとして
-   * 組み立てている既存の呼び出し元・adapter・テストのフィクスチャ（40本以上）すべてに
+   * 組み立てている既存の呼び出し元・adapter・テストのフィクスチャすべてに
    * 新しい必須プロパティを強制する破壊的変更になる）。
    */
   decayBaseSeq?: number | null;
