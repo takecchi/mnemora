@@ -1282,6 +1282,9 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
     // 状態を作る。⚠ `createMemory` の返り値を書き換えても store には届かない（ADR 0562 で返り値は写しになった。
     // 以前の「返り値を書き換える」手口は届かないまま緑になっていた——ADR 0578）。
     stores.memoryStore.liveRowForTest(ctx, undefinedSubject.id)!.subjectId = undefined;
+    // 前提の明示（ADR 0588）: Fake が `get` で undefined を null に揃えていると、下の recall は
+    // `recall-runtime.ts` の `?? null` を通らずに緑になる。読み直した Memory が本当に undefined であることを縛る。
+    expect((await stores.memoryStore.get(ctx, undefinedSubject.id))!.subjectId).toBeUndefined();
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
     const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
@@ -1430,6 +1433,8 @@ describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、
     // 返り値は写しなので、書き換えても store には届かない（ADR 0562・0578）。ADR 0289 の subjectId
     // undefined テストと同じ手口。
     stores.memoryStore.liveRowForTest(ctx, memory.id)!.occurredAt = undefined;
+    // 前提の明示（ADR 0588）: 上の subjectId の歯と同じ。Fake が undefined を null に揃えていないこと。
+    expect((await stores.memoryStore.get(ctx, memory.id))!.occurredAt).toBeUndefined();
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     const m = result.memories.find((x) => x.memoryId === memory.id);
