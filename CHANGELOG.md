@@ -163,6 +163,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
 
+- **読みの口の日時の条件が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前でも、`@mnemora/postgres` が生の `DrizzleQueryError`（`22008 timestamp out of range`）で落ちず、下限へ寄せてから比べる。`@mnemora/testkit/fixtures` の InMemory も、同じ入力を `RangeError` で断らず、意味どおりに答える**（[ADR 0547](./docs/decisions/0547-pg-out-of-range-date-reads-clamp-to-floor.md)。🟡。[ADR 0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の M2 と [ADR 0500](./docs/decisions/0500-testkit-fixture-alignment-claimkey-labels-timestamptz-seq-llm-float4.md) の決めたこと2のうち、読みの口の部分を置き換える）。
+
+  - **何が変わるか**: 対象は `EventStore.list` の `since`・`until`、`VectorStore.search`・`searchMany` の `occurredAfter`・`occurredBefore`・`validAt`・`decayFloorAtAfter`、`LexicalStore.search`（tsvector 版・trigram 版）の `occurredAfter`・`occurredBefore`・`validAt`、`MemoryStore.aggregateScope` の同じ4欄、`findActiveByClaimKey`・`findContestedByClaimKey` の `validFrom`・`validUntil`、`OutboxStore.claimBatch` の `opts.now`（`now - leaseMs` を含む）、これらを通る `Runtime.recall`。以前は生の例外で終わった入力が、成功する。`since`・`occurredAfter`・`decayFloorAtAfter` は全件、`until`・`occurredBefore` は0件になる（列の値はすべて下限以後）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は以前から0件で返す——判定を1つの補助関数に集めただけで、結果は変わらない。
+  - **破壊的と数えない理由**: 断る入力が減る（例外が成功に変わる）。型・シグネチャ・公開 API は変えていない。`@mnemora/testkit` の InMemory が `RangeError` を投げなくなる（ADR 0500 で足した口のうち読みの口）が、断る入力が減る側の変更である。
+  - **変えなかったこと**: 行に日時を書く口（記憶・observation・イベント・outbox・recall の INSERT／UPDATE。下限より前は `22008` のまま）、`Invalid Date`（`22007`）、InMemory の書く口の `RangeError`。
+  - **既知の限界**: 下限ちょうどの時刻に行がある場合、`until` 系を下限より前にすると、`@mnemora/postgres` はその行を返す（意味どおりなら0件。InMemory と core の Fake は0件）。ADR 0547 の「引き受けた負債」。
+  - 手順は要らない。DB マイグレーションは無い。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた。
+
 - **`lexicalMatch`（`LexicalStore` が返す `coverage`）の尺度を、3つの store（`PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`）で測り、文書と歯にした**（[ADR 0553](./docs/decisions/0553-lexical-coverage-scale-across-stores.md)。[ADR 0484](./docs/decisions/0484-recall-channel-merge-on-real-postgres.md) の負債1。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` を足し、各 store と `LexicalHit.coverage` の TSDoc に尺度と ADR への参照を足した）。
   - 測ったのは、tsvector 版と InMemory が「一致した語数 ÷ 語の総数」の 1/n 刻みで同じ式であること、pg_trgm 版の日本語側が `word_similarity` の閾値による 0/1 の二値で（値は `rank` の側に入る）`GREATEST` で ASCII 側と合成されること。尺度は揃えていない（揃えるかはオーナーの判断）。
   - ⭕ 非破壊と数える（文書と歯の追加のみ）。コードの振る舞い・公開 API・DB は変えていない。

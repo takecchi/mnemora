@@ -100,9 +100,12 @@
 //   `InMemoryVectorStore.search`・`InMemoryLexicalStore.search` の filter の日時と `decayFloorSeqAfter`（Postgres はクエリの
 //   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
 // - 紀元前4714年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
-//   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——上の読みの口の日時の条件・`opts.now`・`opts.at`（`EventStore.list`、
-//   `OutboxStore.complete`/`fail`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。`purgeExpiredEvents`・`purgeExpiredRecalls`・
-//   `purgeCompletedJobs` の `olderThan` は、Postgres が下限より前を「0件」で返すので掛けない。
+//   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——行に**書く**日時の `opts.now`・`opts.at`（`OutboxStore.complete`/`fail`、
+//   `archiveDecayed`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。⚠ **ADR 0547 で、読みの口の条件には掛けなくなった**:
+//   `EventStore.list` の `since`・`until`、`VectorStore`・`LexicalStore` の検索、`aggregateScope`、`findActiveByClaimKey`・
+//   `findContestedByClaimKey` の日時は、Postgres が下限へ寄せてから比べるので、下限より前でも断らず、意味どおりに答える
+//   （`since` 系は全件、`until` 系は0件）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
+//   Postgres が下限より前を「0件」で返すので掛けない。
 // - `reinforce({ addOwnSubjectSeq: true })` の `nowSeq + S_x`（と床）が 2^63 以上 → `reinforce: decayBaseSeq + own subject seq must fit in a
 //   Postgres bigint`（Postgres は `22003`。ADR 0500）。
 // - `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製（ADR 0500）。
