@@ -646,6 +646,73 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
     expect(stores.vectorStore.entries.size).toBe(0);
   });
 
+  it("埋め込みの掃除（deleteAcrossSpaces）が失敗しても scrubPurged は走る。両方が失敗すれば、欄は両方付く", async () => {
+    const { runtime, stores } = buildRuntime();
+    const calls: MemoryId[][] = [];
+    installScrub(stores, async (_ctx, ids) => {
+      calls.push([...ids]);
+    });
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await runtime.purge(ctx, { memoryId: memory.id });
+    stores.vectorStore.deleteAcrossSpaces = async () => {
+      throw new Error("simulated embedding outage");
+    };
+
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(calls).toEqual([[memory.id]]);
+    expect(second.outcomes).toEqual([
+      {
+        memoryId: memory.id,
+        kind: "already_purged",
+        embeddingCleanup: { status: "failed", error: "simulated embedding outage" },
+      },
+    ]);
+
+    // 掃除の両方が失敗した。どちらの欄も付き、kind は変わらない。
+    installScrub(stores, async () => {
+      throw new Error("simulated scrub outage");
+    });
+    const third = await runtime.purge(ctx, { memoryId: memory.id });
+    expect(third.outcomes).toEqual([
+      {
+        memoryId: memory.id,
+        kind: "already_purged",
+        embeddingCleanup: { status: "failed", error: "simulated embedding outage" },
+        residueCleanup: { status: "failed", error: "simulated scrub outage" },
+      },
+    ]);
+  });
+
+  it("競合で already_purged になった分岐でも、埋め込みの掃除が失敗して scrubPurged は走る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const calls: MemoryId[][] = [];
+    installScrub(stores, async (_ctx, ids) => {
+      calls.push([...ids]);
+    });
+    stores.vectorStore.deleteAcrossSpaces = async () => {
+      throw new Error("simulated embedding outage");
+    };
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === memory.id) {
+        const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+        live.purgedAt = new Date();
+        live.content = "[purged]";
+        live.digest = "[purged]";
+      }
+    };
+    const result = await runtime.purge(ctx, { memoryId: memory.id });
+    expect(result.outcomes).toEqual([
+      {
+        memoryId: memory.id,
+        kind: "already_purged",
+        embeddingCleanup: { status: "failed", error: "simulated embedding outage" },
+      },
+    ]);
+    expect(calls).toEqual([[memory.id]]);
+  });
+
   it("scrubPurged が無い adapter では飛ばす（残骸の欄も付かない）", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
