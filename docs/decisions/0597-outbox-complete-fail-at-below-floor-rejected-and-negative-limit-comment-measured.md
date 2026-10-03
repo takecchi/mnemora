@@ -1,4 +1,4 @@
-# ADR 0596: `OutboxStore.complete`・`fail` は `timestamptz` の下限より前の `opts.at` を、3実装とも `jobId` の形より先に `RangeError` で断る。`requeueEmbedJobs`・`archiveDecayed` の「負の `limit` は Postgres が投げる」コメントを実測に合わせる
+# ADR 0597: `OutboxStore.complete`・`fail` は `timestamptz` の下限より前の `opts.at` を、3実装とも `jobId` の形より先に `RangeError` で断る。`requeueEmbedJobs`・`archiveDecayed` の「負の `limit` は Postgres が投げる」コメントを実測に合わせる
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03

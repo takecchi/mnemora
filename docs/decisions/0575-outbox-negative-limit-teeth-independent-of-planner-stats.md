@@ -63,7 +63,7 @@
 
 ---
 
-## 追記（2026-10-03・出所: ADR 0596（仮番号）の作業中に、担い手 mgr-d25950ce が実測した。「負の `LIMIT` は評価されなければ投げない」の他の口への広がり）: `requeueEmbedJobs`・`archiveDecayed` も同じ形で投げない
+## 追記（2026-10-03・出所: ADR 0597の作業中に、担い手 mgr-d25950ce が実測した。「負の `LIMIT` は評価されなければ投げない」の他の口への広がり）: `requeueEmbedJobs`・`archiveDecayed` も同じ形で投げない
 
 上の本文と追記は当時のまま残す。outbox 以外の口の `LIMIT` の位置と、空の表（統計が古い）での結果を測った。自前の Postgres 17（`--encoding=UTF8 --locale=C`、専用ポート）で、使い捨てのテストが store を直接呼んだ。【実測】
 
@@ -71,4 +71,4 @@
 - **投げる口**: `EventStore.list`・`VectorStore.search`（統計あり・なしの両経路）・`LexicalStore.search`・`purgeExpiredEvents(-2)`（`-1` は `LIMIT 0` で通る。以前から書いてある）・`aggregateScope` の `digestBand.limit`（GROUP BY の無い集約の副問い合わせなので、必ず1行出て評価される）。どの状態（空で古い・自テナントの行あり・統計なし・他テナントのみ統計あり）でも投げた。最上位の `LIMIT` は `EXPLAIN (ANALYZE)` でも `ERROR: LIMIT must not be negative` になった。
 - **NaN・`1.5`**: `requeueEmbedJobs`・`archiveDecayed` も、どの状態でも `22P02`（bigint への変換）で投げた。bind の時点で決まり、`Limit` の評価に依らない。
 - **Postgres と突き合わせる既存の歯**: `store-boundary-diff`（`claimBatch(limit:-1)`）・`event-filter-actor-schema-vs-store`・`vector-search-many-diff`・`readme-unbound-promises` を、`outbox` に他テナント由来の古い統計（`reltuples = 0`）を残した状態で名指しで走らせた。24本とも通った。`requeueEmbedJobs`・`archiveDecayed` に負の `limit` を撃つ Postgres 側の歯は、grep では見つからなかった（変数経由の渡し方は拾えていない）。【確かめていない】
-- 直したのは、`requeueEmbedJobs`・`archiveDecayed` の fixture・Fake のコメントと、それを引くテスト冒頭のコメントだけ（ADR 0596（仮番号））。
+- 直したのは、`requeueEmbedJobs`・`archiveDecayed` の fixture・Fake のコメントと、それを引くテスト冒頭のコメントだけ（ADR 0597）。

@@ -4,7 +4,7 @@ import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0596（仮番号）: `FakeOutboxStore.complete`・`fail` は、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00 UTC）より
+ * ADR 0597:`FakeOutboxStore.complete`・`fail` は、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00 UTC）より
  * 前なら、`jobId` の形・行の有無を見る前に `RangeError` で断る（`InMemoryOutboxStore` と同じ型・同じ文面）。
  * 以前の Fake は断らず、実在の `jobId` なら下限より前の日時を `completedAt`・`failedAt` へ書いていた
  * （`@mnemora/postgres` は `22008` で書けない値）。下限ちょうどは書ける（対照）。

@@ -32,7 +32,7 @@ export function assertValidDate(
 
 /**
  * 行の値になる日時（`OutboxStore.complete`/`fail` の `opts.at`）が `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前なら、
- * DB に触れる前に `RangeError` で断る（クローンの判断。ADR 0596（仮番号））。Postgres は下限より前を書けず（`22008`）、uuid の形の
+ * DB に触れる前に `RangeError` で断る（クローンの判断。ADR 0597）。Postgres は下限より前を書けず（`22008`）、uuid の形の
  * `jobId` では DB が拒んでいたが、形の崩れた `jobId` では入口が静かに返り、拒まれなかった。型・文面は testkit の `assertQueryTimestamptz`
  * と同じ。下限ちょうどは通す。Invalid Date は見ない（`assertValidDate` が先に見る）。省略（`undefined`/`null`）は検査しない。
  * ⚠ **読みの口の条件には使わない**（ADR 0547: 読みの口は下限へ寄せて比べる）。

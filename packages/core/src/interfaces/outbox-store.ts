@@ -217,7 +217,7 @@ export interface OutboxStore {
    * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
    * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
    *
-   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。**検査は `jobId` の形・行の有無より先**——形の崩れた・存在しない `jobId` でも、`opts.at` が Invalid Date なら静かに返さず例外にする（ADR 0594。以前の `@mnemora/postgres` は、`jobId` が UUID の形でないときは `opts.at` を見る前に何もせず返していた）。**`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC。`Date.UTC(-4713, 10, 24)`）より前なら、同じく `jobId` の形・行の有無より先に `RangeError` を投げ、行には触れない**（下限ちょうどは書ける。Postgres は下限より前を書けない。ADR 0596（仮番号）。以前の `@mnemora/postgres` は、形の崩れた `jobId` では静かに返し、uuid の形の `jobId` では DB の例外（`22008`）だった）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
+   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。**検査は `jobId` の形・行の有無より先**——形の崩れた・存在しない `jobId` でも、`opts.at` が Invalid Date なら静かに返さず例外にする（ADR 0594。以前の `@mnemora/postgres` は、`jobId` が UUID の形でないときは `opts.at` を見る前に何もせず返していた）。**`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC。`Date.UTC(-4713, 10, 24)`）より前なら、同じく `jobId` の形・行の有無より先に `RangeError` を投げ、行には触れない**（下限ちょうどは書ける。Postgres は下限より前を書けない。ADR 0597。以前の `@mnemora/postgres` は、形の崩れた `jobId` では静かに返し、uuid の形の `jobId` では DB の例外（`22008`）だった）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
    */
   complete(
     ctx: Ctx,

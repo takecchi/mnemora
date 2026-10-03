@@ -157,7 +157,7 @@ export class PostgresOutboxStore implements OutboxStore {
     // ADR 0594: `opts.at` の Invalid Date は、`jobId` の形・行の有無より先に断る（testkit の fixture・core の Fake と同じ順）。
     // 下の `jobId` の形の検査は静かに返るので、先に見ないと、呼び手のバグが黙って通る。
     assertValidDate("complete", "opts.at", opts?.at);
-    // ADR 0596（仮番号）: 下限（`timestamptz` の紀元前4714年）より前も、同じく `jobId` の形より先に断る（`RangeError`。testkit の fixture と同じ型・文面）。
+    // ADR 0597: 下限（`timestamptz` の紀元前4714年）より前も、同じく `jobId` の形より先に断る（`RangeError`。testkit の fixture と同じ型・文面）。
     assertNotBelowTimestamptzMin("complete", "opts.at", opts?.at);
     // id 列は uuid 型。べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）
     // という契約のため、UUID の形をしていない入力はここで静かに無視する
@@ -196,7 +196,7 @@ export class PostgresOutboxStore implements OutboxStore {
     assertWellFormedCtx(ctx);
     // ADR 0594: `complete` と同じ（`opts.at` の Invalid Date を、`jobId` の形より先に断る）。
     assertValidDate("fail", "opts.at", opts?.at);
-    // ADR 0596（仮番号）: `complete` と同じ（下限より前を、`jobId` の形より先に断る）。
+    // ADR 0597: `complete` と同じ（下限より前を、`jobId` の形より先に断る）。
     assertNotBelowTimestamptzMin("fail", "opts.at", opts?.at);
     if (!isUuidLike(jobId)) {
       return;

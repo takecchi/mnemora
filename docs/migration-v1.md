@@ -2720,9 +2720,9 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 ### 65. `PostgresOutboxStore.complete`・`fail` と core の Fake が、`opts.at` が `timestamptz` の下限より前なら `RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/core` の Fake・`@mnemora/testkit`）
 
-[ADR 0596（仮番号）](./decisions/0596-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md)（下限を断る側に寄せるのはクローンの判断。🔴 に数えるのも、クローンが migration の数え方の規律2 に従って決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による））。
+[ADR 0597](./decisions/0597-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md)（下限を断る側に寄せるのはクローンの判断。🔴 に数えるのも、クローンが migration の数え方の規律2 に従って決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による））。
 
-⚠ **未リリース**。**番号は 65 である**——項目64 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。ADR の番号も仮（push 前に確かめ直す）。
+⚠ **未リリース**。**番号は 65 である**——項目64 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
 **何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`PostgresOutboxStore.complete`・`fail` と core の Fake が、`opts.at` が `timestamptz` の下限より前…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
 
@@ -2740,7 +2740,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 - 呼び出し側: `opts.at` は省略するか、`Date.UTC(-4713, 10, 24)` 以後の `Date` にする。例外で分岐していたなら `RangeError` の `instanceof` か message で分岐する。
 - 自前の `OutboxStore` 実装: `complete`・`fail` の入口で、`jobId` の形・行の有無を見る前に、`opts.at` が下限より前なら `RangeError` で投げる。下限ちょうどは通す。
 
-**確かめたこと**: 直す前に Postgres で赤（形の崩れた `jobId` の2本）、Fake で赤（6本）、直して緑。直しを外す変異（Postgres・Fake の complete だけ・fail だけ）でそれぞれ赤、下限ちょうども断る変異で下限ちょうどの対照の歯が赤（ADR 0596（仮番号））。**確かめていないこと**: 外部の adapter。
+**確かめたこと**: 直す前に Postgres で赤（形の崩れた `jobId` の2本）、Fake で赤（6本）、直して緑。直しを外す変異（Postgres・Fake の complete だけ・fail だけ）でそれぞれ赤、下限ちょうども断る変異で下限ちょうどの対照の歯が赤（ADR 0597）。**確かめていないこと**: 外部の adapter。
 
 **DB マイグレーション**: 要らない。
 

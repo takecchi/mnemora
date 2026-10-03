@@ -136,7 +136,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目64。DB マイグレーションは無い。
   - 【確かめていないこと】`timestamptz` の下限より前の日時（形の崩れた `jobId` ＋ 紀元前4714年11月24日より前）の順（ADR 0594「残り」）。⟹ 下の項目が答えた。
 
-- **`@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` と、core の Fake の `complete`・`fail` が、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前なら、`jobId` の形・行の有無を見る前に `RangeError` で断るようになった。`@mnemora/testkit` の `describeOutboxStoreConformance` に歯が8本増えた**（[ADR 0596（仮番号）](./docs/decisions/0596-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md)。クローンの判断で、testkit の `InMemoryOutboxStore`（以前から `RangeError`）に寄せた）。
+- **`@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` と、core の Fake の `complete`・`fail` が、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前なら、`jobId` の形・行の有無を見る前に `RangeError` で断るようになった。`@mnemora/testkit` の `describeOutboxStoreConformance` に歯が8本増えた**（[ADR 0597](./docs/decisions/0597-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md)。クローンの判断で、testkit の `InMemoryOutboxStore`（以前から `RangeError`）に寄せた）。
 
   以前は、形の崩れた `jobId` では `opts.at` を見る前に静かに返り、UUID の形の `jobId` では DB の `DrizzleQueryError`（`22008`）で、core の Fake は断らず下限より前の日時を書いていた。いまは3実装とも `<method>: opts.at must not be earlier than 4714-11-24 BC (the lower bound of a Postgres timestamptz)` の `RangeError` を、行を探す前に投げる。下限ちょうどは通る。
 

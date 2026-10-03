@@ -116,7 +116,7 @@ function assertFakeQueryDate(method: string, field: string, value: Date | null |
 
 /**
  * 行の値になる日時（`OutboxStore.complete`/`fail` の `opts.at`）が `timestamptz` の下限（4714-11-24 BC 00:00 UTC）より前なら断る
- * （ADR 0596（仮番号）。`packages/testkit` の `assertQueryTimestamptz` と同じ型（`RangeError`）・同じ文面。下限ちょうどは通す）。
+ * （ADR 0597。`packages/testkit` の `assertQueryTimestamptz` と同じ型（`RangeError`）・同じ文面。下限ちょうどは通す）。
  * ⚠ 読みの口の条件には使わない（ADR 0547: 読みの口は下限へ寄せて比べる）。Invalid Date は `assertFakeQueryDate` が見る。
  */
 function assertFakeTimestamptzNotBelowMin(
@@ -3579,7 +3579,7 @@ export class FakeOutboxStore implements OutboxStore {
     // ADR 0493: `OutboxStore.complete` の TSDoc が約束する（`opts.at` が Invalid Date なら、行には触れずに断る）。
     // `InMemoryOutboxStore` と同じく、行を探す前に見る。
     assertFakeQueryDate("complete", "opts.at", opts?.at);
-    // ADR 0596（仮番号）: 下限（`timestamptz` の紀元前4714年）より前も断る（Postgres は書けない値。`InMemoryOutboxStore` と同じ型・文面）。
+    // ADR 0597: 下限（`timestamptz` の紀元前4714年）より前も断る（Postgres は書けない値。`InMemoryOutboxStore` と同じ型・文面）。
     assertFakeTimestamptzNotBelowMin("complete", "opts.at", opts?.at);
     const job = this.backing.outboxJobs.find(
       (j) => j.id === normId(jobId) && j.tenantId === ctx.tenantId,
@@ -3608,7 +3608,7 @@ export class FakeOutboxStore implements OutboxStore {
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     assertFakeQueryDate("fail", "opts.at", opts?.at);
-    assertFakeTimestamptzNotBelowMin("fail", "opts.at", opts?.at); // ADR 0596（仮番号）: `complete` と同じ
+    assertFakeTimestamptzNotBelowMin("fail", "opts.at", opts?.at); // ADR 0597: `complete` と同じ
     const job = this.backing.outboxJobs.find(
       (j) => j.id === normId(jobId) && j.tenantId === ctx.tenantId,
     );
