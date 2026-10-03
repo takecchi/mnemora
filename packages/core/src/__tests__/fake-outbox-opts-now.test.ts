@@ -153,6 +153,7 @@ function stubTickingWallClock(startMs: number): void {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -179,16 +180,17 @@ describe.each(ports)("FakeMemoryStore.$name: outbox 行の時刻（ADR 0555）",
     expect(claimed.map((j) => j.id).sort()).toEqual(jobs.map((j) => j.id).sort());
   });
 
-  it("省略すると、availableAt・createdAt は呼ぶ前と呼んだ後の間の壁時計になる", async () => {
-    const before = Date.now();
+  it("省略すると、availableAt・createdAt は壁時計そのもの（固定した壁時計と一致する。±1ms もずらさない）", async () => {
+    // 呼ぶ前後の Date.now() で挟む形だと、既定が Date.now() ± 1ms の誤りが同じミリ秒の中に収まって見逃される
+    // （実測: 40回中 32〜37回しか赤くならなかった）。壁時計を固定して、値そのものを比べる。
+    const WALL = new Date("2026-06-01T12:34:56.789Z");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(WALL);
     const jobs = await run(createFakeRuntimeStores(), undefined);
-    const after = Date.now();
     expect(jobs.length).toBeGreaterThanOrEqual(2);
     for (const job of jobs) {
-      for (const at of [job.availableAt, job.createdAt]) {
-        expect(at.getTime()).toBeGreaterThanOrEqual(before);
-        expect(at.getTime()).toBeLessThanOrEqual(after);
-      }
+      expect(job.availableAt).toEqual(WALL);
+      expect(job.createdAt).toEqual(WALL);
     }
   });
 

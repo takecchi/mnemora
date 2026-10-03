@@ -585,5 +585,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0578](./0578-core-fake-returns-copies-for-remaining-writers.md) | core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き） | 採用 (2026-10) |
 | [0579](./0579-gate-red-tooth-names-one-db-test-file-instead-of-bail.md) | 門が赤くなる歯は、`--bail=1` で打ち切らず、DB テストのファイルを1本だけ名指しして走らせる | 採用 (2026-10) |
 | [0580](./0580-adr-0568-nonexistent-id-and-event-get-controls.md) | ADR 0568 の歯が通した「存在しない id」と「別のイベント id」の変異を塞ぐ | 採用 (2026-10) |
+| [0586](./0586-adr-0577-time-stub-mixed-resend-updatedat.md) | ADR 0577 の歯が通した「再送と新規の混在」と「古い記憶の updatedAt」の変異を塞ぎ、壁時計の歯を固定する | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
