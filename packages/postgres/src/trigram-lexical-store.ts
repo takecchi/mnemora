@@ -878,6 +878,14 @@ export function buildTrigramLexicalSearchSelect(
  * （`LexicalHit.rank` の doc、ADR 0084 §5）——ASCII の `ts_rank_cd` と日本語の
  * `word_similarity` を単純に足しているだけであり、両者の尺度が本質的に同じという主張は
  * していない。
+ *
+ * **`coverage` の尺度**: `GREATEST(ASCII 側, 日本語側)`。ASCII 側は `PostgresLexicalStore` と同じ
+ * 1/n 刻み（一致した語の数 ÷ 語の総数）。**日本語側は `word_similarity(日本語の部分, content) >=
+ * threshold` なら 1、そうでなければ 0 の二値**で、日本語の複数語は語ごとに数えない
+ * （非 ASCII の連なり全体が1つの項）。**`word_similarity` の値そのものは `coverage` に入らず、
+ * `rank` に入る。**ASCII の語がいくつあっても、日本語側が当たれば `coverage` は 1 になる。
+ * 3つの store の対応と測った値は
+ * [ADR 0553](../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
  */
 export class PostgresTrigramLexicalStore implements LexicalStore {
   private constructor(

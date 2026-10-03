@@ -49,6 +49,13 @@ export interface CompareRowJson {
    */
   rawIndexJsonLength?: number;
   /**
+   * `ComparisonRow.outputValidationIssueCount` をそのまま写す（ADR 0551）。
+   * **欄が無い行は「検査していない」**（`outputValidation` が `undefined`）——0 とは別。
+   * 省略可能にした理由は `bandEntryCount` と同じ（`schemaVersion` は据え置き）。
+   * 門・基準値・`DIFF_FIELDS` には入れていない。
+   */
+  outputValidationIssueCount?: number;
+  /**
    * 冒頭の事実表明の出典（`sourceObservationId` → `externalId`）に到達したかだけを
    * 測る。情報保持・最終回答の正誤はこの欄に含まれない（`ComparisonRow.factStatementSurvived`
    * の docstring、`docs/autonomy.md` §2.2 の2番、ADR 0226）。
@@ -123,6 +130,9 @@ export function buildCompareJson(options: BuildCompareJsonOptions): CompareRunJs
       annCandidateCount: row.annCandidateCount,
       bandEntryCount: row.bandEntryCount,
       rawIndexJsonLength: row.rawIndexJsonLength,
+      ...(row.outputValidationIssueCount !== undefined
+        ? { outputValidationIssueCount: row.outputValidationIssueCount }
+        : {}),
       factStatementSurvived: row.factStatementSurvived,
     })),
   };

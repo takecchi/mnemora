@@ -2657,6 +2657,41 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。claim の前に落ちるので、outbox の行は変わらない。
 
+### 63. conformance suite に約束が増えた——`abortIfSuperseded`・`abortIfAllConflicted`・`purgeExpiredEventsByRetention`・`findActiveByClaimKey` の半開区間・`embed` の重複件数（`@mnemora/testkit`）
+
+[ADR 0546](./decisions/0546-conformance-suite-adds-round31-promises.md)（クローンの委譲先が、オーナーの問い 374f6f88 の問1の判断が出る前に用意した Draft。決めたのはオーナーではない）。
+
+⚠ **未リリース**。**番号は 63 である**——項目62 の続き（main の取り込みで項目62 が `tick` の項目と重なったので振り直した）。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「conformance suite に約束を足した…」の箇条を見ること。**ここには複製しない。**型・シグネチャは、新しい任意の欄（`supportsAbortIfSuperseded?`・`supportsAbortIfAllConflicted?`・`supportsPurgeExpiredEventsByRetention?`・`setEventRetention?`）が増えただけで、既存の呼び出しは1行も直さずに型検査を通る。
+
+**なぜ破壊的と数えるか**: 次の2つは、**以前は通っていた自前の実装が、新しく落ちる**。足した約束は外せない。
+- **`supportsFindActiveByClaimKey: true` の枝**に、接するだけの有効期間は重ならない、を検査する `it` が増えた（フラグは増えていない）。
+- **`describeEmbeddingProviderConformance`**（フラグ無し）に、重複したテキストを渡しても入力と同じ件数を返す、を検査する `it` が増えた。
+
+新しい3つのフラグは、省略すれば「⚠ 未検査」の `it` が1本ずつ増えるだけで、新しい約束は課さない（`[1.2.0]` の数え直しの判定なら非破壊。ここに書くのは、公開 API の追加だから）。
+
+**追記（ADR 0546 の追記。変異試験の穴を塞いだ分）**: 新しい3つのフラグを `true` で渡したときの約束に、*輪郭*を縛る `it` が増えた。`true` を渡す実装は、次を満たさなければ落ちる。足した約束は外せない。
+- `abortIfSuperseded` が断るのは、`ctx` のテナントで `superseded` の id だけ。active・archived・forgotten の id と、他テナントの id では断らずに今日どおり書く（S1・S2。3つの口とも）。
+- 断るときの `SourceMemoryStatusChangedError` の `changed` には、断る原因になった id を全件載せる（S4。順序は保証しない）。
+- `supersedeWithNewMemories` の `abortIfAllConflicted: true` は、`supersede` が空配列なら断らずに news を書く（S6）。
+- `purgeExpiredEventsByRetention` の cutoff は、`now` から `days` × 24 時間遡った時刻（S11。日単位でずらさない）。
+
+**誰が影響を受けるか**:
+- 自前の `MemoryStore` 実装を suite に当て、`supportsFindActiveByClaimKey: true` を渡している利用者のうち、`findActiveByClaimKey` の有効期間の判定が閉区間（`<=`）の実装。
+- 自前の `EmbeddingProvider` 実装を suite に当てている利用者のうち、重複したテキストを畳んで（重複排除して）入力より少ない件数を返す実装。`EmbeddingProvider` の契約は元から「`texts` と同じ件数・同じ順序」なので、その実装は契約にも反している。
+- 新しい3つのフラグを `true` で渡す利用者は、その口を実装していなければ落ちる。`purgeExpiredEventsByRetention` は `setEventRetention`（保持期間を設定するフック）も要る。実装していても、上の追記の4点のどれかを外れていれば落ちる。
+
+**どう直すか**:
+- `findActiveByClaimKey`: 有効期間を半開区間 `[validFrom, validUntil)` で比べる（`validUntil` と相手の `validFrom` が同じ時刻なら重ならない）。
+- `embed`: 重複を畳まず、入力と同じ件数・同じ順序で返す（下層への問い合わせを畳むのはよいが、返す配列は入力の件数に戻す）。
+- 新しいフラグ: 実装しているなら `true`（`purgeExpiredEventsByRetention` は `setEventRetention` も渡す）、実装していないなら `false`、決めないなら省略。**`@mnemora/postgres`・`@mnemora/testkit` の in-memory はこの版で対応済み**（`true`）。
+- 追記の4点: `abortIfSuperseded` の判定は `tenantId` と `status === "superseded"` の両方で絞り、見つけた id を全件集めてから投げる。`abortIfAllConflicted` は対象が1件以上のときだけ判定する。保持期間の cutoff は `now - days × 24h` とし、`days ± 1` にしない。
+
+**確かめたこと**: 足した `it` ごとに、`InMemoryMemoryStore`・`PostgresMemoryStore`（embedding は testkit の fake）を壊して赤、戻して緑（ADR 0546 の表と追記の表）。**確かめていないこと**: 外部の adapter・実 API・実モデル。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
@@ -2836,6 +2871,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ⚠ **2026-10-02 追記2**: 下の、ADR 0525（PR #1616）と ADR 0521（PR #1615）の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。🔴 の項目56（ADR 0498）に ADR 0525 が足していた注記は、出荷された本文に戻した（ADR 0534）。
 
+- **`@mnemora/bullmq` の `createBullmqTickDriver`: 完了したジョブを直近 1000 件だけ Redis に残す（`removeOnComplete: { count: 1000 }` が既定）。`lockDuration`・`completedJobsToKeep` のオプションが増えた**（[ADR 0548](./decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)）。
+  以前は完了したジョブが全部残った。いまは古い完了ジョブを BullMQ が消す。`queue.getJobs(["completed"])` や `getJobCounts("completed")` で完了ジョブの `returnvalue`・件数を後から読んでいた人、完了ジョブが残り続けることに頼っていた人だけが見直す。以前に近づけるなら `completedJobsToKeep: Number.MAX_SAFE_INTEGER`。`removeOnFail` は触っていないので、失敗したジョブは従来どおり全部残る。手順は要らない（既存の Redis のジョブは、次に完了するジョブから古い分が順に消える【未確認】）。`lockDuration` と `completedJobsToKeep` は任意の追加で、渡さなければ `lockDuration` は BullMQ の既定のまま。型は互換。数でない値は `TypeError`、範囲外は `RangeError`。内容は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節を見ること。
+  影響が出るのは、完了したジョブの `returnvalue`（`runtime.tick()` の結果）を後から読んでいた利用者である。1000 件より古い完了ジョブは消えるので、その `returnvalue` はもう読めない（直近 1000 件の分は読める）。
 - **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
   `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で、`PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` は ADR 0516 で、落ちるようになった。下の項目）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
