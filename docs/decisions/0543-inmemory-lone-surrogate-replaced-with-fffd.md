@@ -26,7 +26,7 @@
 |---|---|---|---|
 | A. B3 の歯の範囲 | ADR 0458 B3 | `content`・`digest`・`tags`（と、jsonb の `attributes`・`provenance` の例外） | claim key・ラベル名・`kind`・`contentHash`・`extractorVersion`・イベントの `digestSnapshot`・outbox の `kind`/`claimedBy`・墓石 |
 | B. M1 の範囲 | ADR 0456 M1 | `content`・`tags`・claim key（主語）・ラベル名 | `digest`・`contentHash`・`extractorVersion`・`kind`・`digestSnapshot`・outbox・墓石・読み取りの引数 |
-| C. Postgres が実際に置き換える範囲 | 【実測】（下） | A と B の和に加え、`contentHash`・`extractorVersion`・claim key の主語と述語・Observation の `kind`・`memory_events.digest_snapshot`・outbox の `kind`・`claimed_by`・`purgeMemory` の墓石の `content`/`digest`・読み取りの引数（`claimKey`・`extractorVersion`・`labels`・`kinds`・`claimedBy`・`taxonomyGroupCandidates`） | `jsonb` 列の欄（`payload`・`attributes`・`provenance`・イベントの `actor`/`meta`。Postgres は**置き換えず断る**）、識別子（ADR 0423 決定1 が入口で断る） |
+| C. Postgres が実際に置き換える範囲 | 【実測】（下） | A と B の和に加え、`contentHash`・`extractorVersion`・claim key の主語と述語・Observation の `kind`・`memory_events.digest_snapshot`・outbox の `kind`・`claimed_by`・`purgeMemory` の墓石の `content`/`digest`・読み取りの引数（`claimKey`・`extractorVersion`・`labels`・`kinds`・`claimedBy`・`taxonomyGroupCandidates`） | `jsonb` 列の欄（`payload`・`attributes`・`provenance`・イベントの `actor`/`meta`。Postgres は**置き換えず断る**。InMemory・Fake は `payload`・`attributes`・`provenance` を保持して通し、`actor`・`meta` は 3 実装とも断る〔Issue #1211〕）、識別子（ADR 0423 決定1 が入口で断る） |
 
 **選んだもの: C。**【判断】理由: オーナーの決定は「Postgres に揃える」であり、揃える先の振る舞いは、ADR の文面（A・B はそれぞれ一部しか書いていない）ではなく、Postgres の現物が決める。A や B で止めると、揃えたはずなのに `contentHash` を置き換えた/置き換えない、の食い違いが InMemory と Postgres の間に新しく残る（冪等の鍵が `contentHash` なので、保存側だけ置き換えて鍵は置き換えない、などの差が値の衝突に出る）。A・B は C の部分集合なので、どちらの文面も破らない。
 
@@ -37,8 +37,12 @@
    - `createMemory` 系（`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の新しい行を含む）: `content`・`digest`・`contentHash`・`tags` の各要素・`extractorVersion`・`claimKey.subject`・`claimKey.predicate`。**冪等の鍵（`contentHash`・`extractorVersion`）も置き換えた後の値で比べる**（Postgres の一意制約が置き換え後の値に当たるため）。
    - `createObservation` 系: `kind`（`subjectId`・`externalId` は識別子なので ADR 0423 のまま断る）。
    - `registerLabel` の `name`。`purgeMemory` の墓石の `content`・`digest`。イベントの `digestSnapshot`。outbox の `kind`（`jobKinds` の要素）・`claimed_by`。
-   - **読み取りの引数も同じ規則で置き換える**: `findActiveByClaimKey`・`findContestedByClaimKey` の `claimKey`、`listBySourceObservation` の `extractorVersion`、`aggregateScope` の `labels`・`taxonomyGroupCandidates`、`VectorStore`/`LexicalStore` の `filter.labels`、`OutboxStore.claimBatch` の `kinds`・`claimedBy`。保存側が置き換わるので、引数側を置き換えないと、同じ入力で書いて引いても当たらなくなる（Postgres は当たる）。
-3. **置き換えないもの（この ADR の対象外）**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`）。Postgres は**断る**（`invalid input syntax for type json`）が、InMemory/Fake は今も保持して通す。「置き換え」と「断る」は別の差で、オーナーの決定の (b) は前者の話である。この差は残る（下の「引き受けた負債」）。識別子は ADR 0423 のまま（入口で断る）。
+   - **読み取りの引数も同じ規則で置き換える**: `findActiveByClaimKey`・`findContestedByClaimKey` の `claimKey`・`contentHash`（`contentHash` は下の「追記【実測】」の S4 で足した）、`listBySourceObservation` の `extractorVersion`、`aggregateScope` の `labels`・`taxonomyGroupCandidates`、`VectorStore`/`LexicalStore` の `filter.labels`、`OutboxStore.claimBatch` の `kinds`・`claimedBy`。保存側が置き換わるので、引数側を置き換えないと、同じ入力で書いて引いても当たらなくなる（Postgres は当たる）。
+3. **置き換えないもの（この ADR の対象外）**: `jsonb` 列の欄。
+   - `payload`・`attributes`・`provenance`: Postgres は**断る**（`invalid input syntax for type json`）が、InMemory/Fake は今も保持して通す。
+   - イベントの `actor`・`meta`: **3 実装とも断る**（Postgres・InMemory・Fake とも、書く前の検査 `memory_events.actor/meta must not contain NUL (U+0000) or a lone surrogate code unit`。Issue #1211）。差は無い。
+
+   「置き換え」と「断る」は別の差で、オーナーの決定の (b) は前者の話である。この差は残る（下の「引き受けた負債」）。識別子は ADR 0423 のまま（入口で断る）。
 4. **共有の道具は testkit の内部に置き、core の公開 API に足さない。** `packages/testkit/src/__fixtures__/well-formed-text.ts`（`replaceLoneSurrogates` ほか、`index.ts`・`fixtures.ts` から export しない）。core の `runtime-fakes.ts` は testkit を import できない（`dependency-boundary.test.ts`）ので、同じ規則の小さな写し（`wf`）を持つ。**公開の型・関数・例外の種類は足していない**（公開 API の snapshot は変えていない）。
 5. **B3 の歯を書き換え、3 実装の突き合わせを足した。** 突き合わせの本体は `packages/testkit/src/__tests__/lone-surrogate-fffd-teeth.ts` で、同じ本文を `PostgresMemoryStore`（`packages/postgres/src/__tests__/lone-surrogate-fffd.postgres.test.ts`）・`InMemoryMemoryStore`（`lone-surrogate-fffd.test.ts`）・`FakeMemoryStore`（`lone-surrogate-fffd-fake.test.ts`）に流す。期待値は 3 実装とも同じ。**conformance suite（`*-conformance.ts`）には足していない**（ADR 0434 決定5: suite に約束を足すのはオーナーの領分）。
 
