@@ -1,5 +1,6 @@
 // 入口の検査（DB に触れる前に、明示の例外で断る）。穴 O-6（ADR 0424）。
 // `packages/testkit` の in-memory 実装が同じ入力を同じ文面で断る（適合テストが両方を縛る）。
+import { isBeforePgTimestamptzMin } from "./mapping.js";
 
 /**
  * Postgres の `text` 型は NUL (U+0000) を構造的に拒む（C 文字列表現に由来する制約）。以前は DB の生の例外
@@ -17,7 +18,7 @@ export function assertNoNul(owner: string, field: string, value: string): void {
  * Postgres は `22007` で拒むが、行を探す前の入口が静かに返る口（`OutboxStore.complete`/`fail` の、形の崩れた `jobId`）では
  * DB まで届かず、拒まれなかった。文面は testkit の `assertQueryDate`・core の Fake と同じ
  * （`<owner>: <欄> must be a valid Date (got Invalid Date)`）。省略（`undefined`/`null`）は検査しない。
- * 下限（`timestamptz` の紀元前4714年）は見ない——届く口では、これまでどおり DB が `22008` で拒む。
+ * 下限（`timestamptz` の紀元前4714年）は、この関数では見ない（`assertNotBelowTimestamptzMin` が見る）。
  */
 export function assertValidDate(
   owner: string,
@@ -26,6 +27,25 @@ export function assertValidDate(
 ): void {
   if (value != null && Number.isNaN(value.getTime())) {
     throw new Error(`${owner}: ${field} must be a valid Date (got Invalid Date)`);
+  }
+}
+
+/**
+ * 行の値になる日時（`OutboxStore.complete`/`fail` の `opts.at`）が `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前なら、
+ * DB に触れる前に `RangeError` で断る（クローンの判断。ADR 0597）。Postgres は下限より前を書けず（`22008`）、uuid の形の
+ * `jobId` では DB が拒んでいたが、形の崩れた `jobId` では入口が静かに返り、拒まれなかった。型・文面は testkit の `assertQueryTimestamptz`
+ * と同じ。下限ちょうどは通す。Invalid Date は見ない（`assertValidDate` が先に見る）。省略（`undefined`/`null`）は検査しない。
+ * ⚠ **読みの口の条件には使わない**（ADR 0547: 読みの口は下限へ寄せて比べる）。
+ */
+export function assertNotBelowTimestamptzMin(
+  owner: string,
+  field: string,
+  value: Date | null | undefined,
+): void {
+  if (value != null && isBeforePgTimestamptzMin(value)) {
+    throw new RangeError(
+      `${owner}: ${field} must not be earlier than 4714-11-24 BC (the lower bound of a Postgres timestamptz)`,
+    );
   }
 }
 

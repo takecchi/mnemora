@@ -4,9 +4,11 @@
 // は `opts.limit` を検査せず `.slice(0, Math.max(0, opts.limit))` へ渡していた——Issue #880
 // で `archiveDecayed` から取り除いたのと同じ形が、この口に残っていた。
 // `PostgresMemoryStore.requeueEmbedJobs` は同じ `limit` を生 SQL の `LIMIT`（bigint
-// パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数はすべて例外になる
-// （実測: 本物の Postgres 17 + pgvector。`LIMIT must not be negative` /
-// `invalid input syntax for type bigint: "NaN"` / `"Infinity"` / `"1.5"`）。
+// パラメータ）にそのまま渡す。`NaN`・`Infinity`・非整数は、bigint への変換の時点で必ず例外になる
+// （実測: 本物の Postgres 17 + pgvector。`invalid input syntax for type bigint: "NaN"` /
+// `"Infinity"` / `"1.5"`）。負数の `LIMIT must not be negative` は、テナントの行が1本も無く
+// `memories` の統計が古い（`reltuples = 0`）と投げずに `{ requeued: 0 }` で返る（`LIMIT` が CTE の中で
+// `never executed` になる。ADR 0575 と同じ形）。この Fake は常に断る——このテストは Postgres と突き合わせない。
 //
 // 修正前の Fake は例外を投げず、`embeddingStatus` を `pending` に戻して embed ジョブを
 // 積む書き込みまで行っていた——`limit: Infinity` は対象を全件、`limit: 1.5` は1件。
