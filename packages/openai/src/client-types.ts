@@ -25,7 +25,9 @@
  * `openai` の import 自体は残る（`new OpenAI(...)` で既定のクライアントを作るため）。
  * だが **公開する `.d.ts` にはこのファイルの型だけが現れ、`openai` パッケージの型は
  * 一切参照しない**（歯は `scripts/check-public-api-surface.mjs` の snapshot と、
- * `__tests__/client-type-compat.test.ts` の grep）。
+ * `__tests__/client-type-compat.test.ts` の `describe("公開する .d.ts に openai パッケージの
+ * import が出ない（grep）")`。後者は `dist` を読まず、build の設定で `.d.ts` をメモリへ出して読む
+ * ——CI は `test` を `build` より前に走らせるため）。
  */
 
 /** `chat.completions.create` の `messages` の要素。`system`/`user`/`assistant` の3種のみ

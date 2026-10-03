@@ -622,5 +622,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0605](./0605-outbox-complete-fail-at-bounds-teeth.md) | OutboxStore.complete・fail の `opts.at` の境界の確かめ直し（ADR 0597）で見つかった穴を塞ぐ（Postgres の例外の型・西暦10000年・紀元前100年） | 採用 (2026-10) |
 | [0606](./0606-merged-pr-1002-recheck-teeth.md) | 10/02 にマージされた #1646・#1649・#1650・#1643・#1636 の確かめ直しで見つかった穴を塞ぐ（空白だけの title・例外の同一性と params・tick の opts の通る側・reachedLimit の境目・labels の語彙と並び） | 採用 (2026-10) |
 | [0607](./0607-merged-pr-0928-recheck-teeth.md) | 09/28 にマージされた #1337・#1324・#1327・#1379 の確かめ直しで見つかった穴を塞ぐ（null を許す枝の見分け・forget が store へ渡す id・normalizeUuidCase の範囲・綴りだけが違う tenant・イベントの孤立サロゲートの境目） | 採用 (2026-10) |
+| [0609](./0609-merged-pr-1377-recheck-teeth.md) | マージ済み #1377（client の型を SDK のクラスから自前の構造型へ切り離した。ADR 0350）の確かめ直しで見つかった穴を塞ぐ（openai の temperature・anthropic の system・公開 .d.ts の SDK import・stop_details の型） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
