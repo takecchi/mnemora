@@ -302,7 +302,21 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       });
     }
 
-    it("投げる入力は増やさない: 戻す対象が無ければ、at が Invalid Date でも今までどおり空で返る（Postgres は拒む）", async () => {
+    it("群が1件だけでも、イベントが書けなければ戻さず、イベントも残らない（at が Invalid Date）", async () => {
+      const store = new InMemoryMemoryStore();
+      const anchor = await memory(store);
+      const m = await memory(store);
+      await store.updateStatus(ctx, m.id, "superseded", { supersededById: anchor.id });
+      const before = await stateOf(store);
+      await expect(
+        store.restoreSupersededBy(ctx, anchor.id, { at: new Date(Number.NaN) }),
+      ).rejects.toThrow();
+      expect(await stateOf(store)).toBe(before);
+      expect((await store.get(ctx, m.id))?.status).toBe("superseded");
+      expect(store.events).toHaveLength(0);
+    });
+
+    it("投げる入力は増やさない: 戻す対象が無ければ、at が Invalid Date でも今までどおり空で返る（Postgres も、対象が無ければ空で返す）", async () => {
       const store = new InMemoryMemoryStore();
       const anchor = await memory(store);
       await expect(

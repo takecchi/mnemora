@@ -102,6 +102,52 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
     }
   });
 
+  /** backend の pid が `pg_stat_activity` に在るか。切った直後は消えるまで少しかかるので、消えるのを最大 2 秒待つ。 */
+  const backendGone = async (pid: number): Promise<boolean> => {
+    for (let i = 0; i < 40; i += 1) {
+      const { rows } = await admin.pool.query("SELECT 1 FROM pg_stat_activity WHERE pid = $1", [
+        pid,
+      ]);
+      if (rows.length === 0) return true;
+      await sleep(50);
+    }
+    return false;
+  };
+
+  it("生きた接続に release(err) すると pool へ戻らず捨てられる（release() では pool に残る）", async () => {
+    const client = createPostgresClient(requireDatabaseUrl(), {
+      max: 2,
+      application_name: "bg1-discard",
+      onPoolError: () => {},
+    });
+    try {
+      const raw = (client.db as typeof client.db & { $client: Pool }).$client;
+      const pidOf = async (c: PoolClient): Promise<number> => {
+        const { rows } = await c.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+        return rows[0]!.pid;
+      };
+
+      // 対照: 普通に返した接続は、pool の待機に残り、backend も生きている。
+      const kept: PoolClient = await raw.connect();
+      const keptPid = await pidOf(kept);
+      expect(client.pool.totalCount).toBe(1);
+      kept.release();
+      expect(client.pool.totalCount).toBe(1);
+      expect(client.pool.idleCount).toBe(1);
+      expect(await backendGone(keptPid)).toBe(false);
+
+      // 同じ接続を借り直して、今度は release(err) する。捨てられる。
+      const doomed: PoolClient = await raw.connect();
+      expect(await pidOf(doomed)).toBe(keptPid);
+      doomed.release(new Error("捨てる"));
+      expect(client.pool.totalCount).toBe(0);
+      expect(client.pool.idleCount).toBe(0);
+      expect(await backendGone(keptPid), "捨てた接続の backend が残っている").toBe(true);
+    } finally {
+      await closeWithin(client);
+    }
+  });
+
   it("begin の失敗で投げられるのは、begin 自身の失敗（二重 release の例外で置き換わらない）", async () => {
     const client = createPostgresClient(requireDatabaseUrl(), {
       max: 2,

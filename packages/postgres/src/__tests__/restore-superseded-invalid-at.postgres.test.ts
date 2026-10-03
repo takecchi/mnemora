@@ -86,6 +86,19 @@ describe("restoreSupersededBy の at が Invalid Date", () => {
       });
     });
 
+    it(`${name}: 別のテナントの群は、対象が無いのと同じ——別のテナントの ctx から Invalid Date の at で呼んでも、例外にせず空で返り、何も戻さない`, async () => {
+      const store = await makeStore();
+      const { anchor, group } = await anchorWithGroup(store, 2);
+      const otherTenant: Ctx = { tenantId: "restore-superseded-invalid-at-other" };
+
+      const result = await store.restoreSupersededBy!(otherTenant, anchor.id, { at: INVALID });
+
+      expect(result).toEqual({ restored: [] });
+      for (const id of group) {
+        expect((await store.get(ctx, id))?.status).toBe("superseded");
+      }
+    });
+
     it(`${name}: 戻す対象が在るときは今どおり例外で、1件も戻さない`, async () => {
       const store = await makeStore();
       const { anchor, group } = await anchorWithGroup(store, 2);

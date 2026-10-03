@@ -255,6 +255,51 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
     });
   }
 
+  // ---- forget・purge した記憶が在る Observation への再配達（#1318） ----
+
+  for (const how of ["forget", "purge"] as const) {
+    it(`1回目が書いた記憶を ${how} した後の再配達でも、LLM を呼ばず、active は増えず、忘れさせた内容は蘇らない`, async () => {
+      const kit = makeKit();
+      // 2回目の LLM が別の本文を返す形にする（呼ばれて書かれたら、B が active で現れて赤くなる）。
+      extractOutputs = ["候補A", "候補B"];
+      const { observationId } = await kit.runtime.observe(ctx, {
+        kind: "utterance",
+        text: "発話",
+        extract: "deferred",
+      });
+      nowMs += 1000;
+      // 1回目: 書いた後・complete の前で止まる。
+      kit.crash.crash = true;
+      await expect(
+        kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS }),
+      ).rejects.toThrow(/ワーカーが止まった/);
+      kit.crash.crash = false;
+      const written = await kit.stores.memoryStore.listBySourceObservation(
+        ctx,
+        observationId,
+        "v1",
+      );
+      expect(written.map((m) => m.status)).toEqual(["active"]);
+      // 止まっている間に、書かれた記憶を忘れさせる（purge なら物理削除まで）。
+      const target = { memoryId: written[0]!.id };
+      await kit.runtime.forget(ctx, target);
+      if (how === "purge") await kit.runtime.purge(ctx, target);
+      // 2回目: リースが切れて再配達される。
+      nowMs += LEASE_MS * 2;
+      const redelivered = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
+      expect({ processed: redelivered.processed, failed: redelivered.failed }).toEqual({
+        processed: 1,
+        failed: 0,
+      });
+      // LLM を呼んでいない（2回目の出力が手つかずで残る）。
+      expect(extractOutputs).toEqual(["候補B"]);
+      const after = await kit.stores.memoryStore.listBySourceObservation(ctx, observationId, "v1");
+      expect(after.map((m) => m.status)).toEqual(["forgotten"]);
+      expect(after.some((m) => m.content === "候補B")).toBe(false);
+      expect(await kit.createdMetas()).toHaveLength(1);
+    });
+  }
+
   // ---- やりすぎを捕まえる歯（#1092 の判定が正当な抽出を塞がないこと） ----
 
   it("1回目の配達は、今どおり抽出して書く", async () => {
