@@ -561,6 +561,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0548](./0548-bullmq-lock-duration-and-remove-on-complete-default.md) | `createBullmqTickDriver` に `lockDuration` の口と完了ジョブの保持の既定（`removeOnComplete: { count: 1000 }`）を足す — ADR 0440 の決定4、ADR 0449 の決定5・材料1・材料6 を置き換える | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0551](./0551-compare-counts-output-validation-issues.md) | `compare` の出力に、出力検査（`outputValidation`）の違反件数を集計する（問32 の (C)。ADR 0481 負債#1 の測定側の半分だけを閉じる） | **提案 (2026-10)** |
 | [0552](./0552-owner-q7-q8-q16-docs-only.md) | オーナーへの問い 374f6f88 の問7・問8・問16 の推奨（どれも「文書に書くだけ」）を、先行して TSDoc・README に書く（コードは変えない） | 採用 (2026-10) |
 | [0553](./0553-lexical-coverage-scale-across-stores.md) | `lexicalMatch`（`LexicalStore` の `coverage`）の尺度を3つの store で測り、式から決まる値と性質だけを歯で縛る（ADR 0484 の負債1。尺度は揃えていない） | 採用 (2026-10) |
 | [0554](./0554-language-mismatch-false-positive-measured-by-replay-and-boundary-cases.md) | 言語の事後検査（0490）の偽陽性を、記録の再生と手で作った境界の入力で測る（問24「基準は測ってから」） | **提案 (2026-10)** |
