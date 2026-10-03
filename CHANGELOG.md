@@ -92,7 +92,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 型・シグネチャは変わらないが、**以前は通っていた入力が、新しく例外になる**。新しい例外クラスは増やしていない（素の `RangeError`、値は message に入れない）。
   - **`Runtime` 経由は変わらない**: `updateStatusWithEvent` の呼び出し4か所のうち、`supersededById` を渡すのは `superseded` を書く2か所だけで、`restoreArchived`・`forget` は渡さない。`resolveContested` の `supersededById` は常に対の勝者。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目61。DB マイグレーションは無い。
-  - 【確かめていないこと】core の `FakeMemoryStore`（`runtime-fakes.ts`）は揃えていない（別の PR が触っているため）。第三者の adapter は、conformance が検査しないので断りを持たない。
+  - core の `FakeMemoryStore`（`runtime-fakes.ts`）も同じ断りを持つ（[ADR 0557](./docs/decisions/0557-core-fake-superseded-by-checks.md)、#1668。テスト用の非公開の実装で、利用者に見える振る舞いは変わらない）。
+  - 【確かめていないこと】第三者の adapter は、conformance が検査しないので断りを持たない。
 
 - **`@mnemora/postgres` の `createObservation`・`createObservationWithOutbox`・`createRecall` が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになった**（[ADR 0505](./docs/decisions/0505-seq-sum-overflow-fixture-observation-recall-nul-event-lexical-params.md)。[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)（ADR 0456 の M4）が「変えなかったこと」に残した分）。
 
