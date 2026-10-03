@@ -6,6 +6,7 @@ import type { MemoryStoreConformanceOptions } from "../memory-store-conformance.
 import type { OutboxStoreConformanceOptions } from "../outbox-store-conformance.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
+import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 
 export function inMemoryMemoryStoreConformanceOptions(
   decorate: (store: MemoryStore) => MemoryStore = (store) => store,
@@ -80,10 +81,28 @@ export function inMemoryMemoryStoreConformanceOptions(
     // Issue #1226 / ADR 0375 決定7: InMemoryMemoryStore は opts.abortIfForgotten を実装
     // しない（渡しても無視される。`SourceMemoryForgottenError` の doc コメント参照）。
     supportsAbortIfForgotten: false,
+    // ADR 0420 / ADR 0546: InMemoryMemoryStore は opts.abortIfSuperseded・opts.abortIfAllConflicted を実装している
+    // （`createMemoryWithOutbox`・`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`）。
+    supportsAbortIfSuperseded: true,
+    supportsAbortIfAllConflicted: true,
     // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
     supportsPurgeExpiredEvents: true,
     // ADR 0404: InMemoryMemoryStore は purgeExpiredRecalls を実装している。
     supportsPurgeExpiredRecalls: true,
+    // ADR 0354 / ADR 0546: InMemoryMemoryStore は purgeExpiredEventsByRetention を実装している。保持期間は
+    // `createStore()` が作った、まさにその instance が持つ `eventRetentionDays` へ、`InMemoryTenantSettingsStore`
+    // 経由で書く（`listEventsForMemory` と同じ理由・同じ形）。
+    supportsPurgeExpiredEventsByRetention: true,
+    setEventRetention: async (ctx, retention) => {
+      if (!latestMemoryStoreForEvents) {
+        throw new Error("setEventRetention より先に createStore() を呼ぶ必要がある");
+      }
+      await new InMemoryTenantSettingsStore(
+        latestMemoryStoreForEvents.activitySeq,
+        latestMemoryStoreForEvents.subjectActivitySeq,
+        latestMemoryStoreForEvents.eventRetentionDays,
+      ).setEventRetention(ctx, retention);
+    },
     listPurgedEvents: (ctx) => {
       if (!latestMemoryStoreForEvents) {
         throw new Error("listPurgedEvents より先に createStore() を呼ぶ必要がある");

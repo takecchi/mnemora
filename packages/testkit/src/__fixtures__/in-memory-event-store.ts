@@ -8,8 +8,9 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import { nextId } from "./id.js";
-import { assertQueryTimestamptz } from "./query-check.js";
+import { assertQueryDate } from "./query-check.js";
 import { assertStorableMemoryEvent } from "./memory-event-check.js";
+import { replaceLoneSurrogates } from "./well-formed-text.js";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 
 /**
@@ -37,7 +38,8 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
     kind: event.kind,
     at: event.at ?? new Date(),
     actor: event.actor,
-    digestSnapshot: event.digestSnapshot ?? null,
+    // ADR 0543: `memory_events.digest_snapshot` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する。
+    digestSnapshot: replaceLoneSurrogates(event.digestSnapshot) ?? null,
     sizeBeforeBytes: event.sizeBeforeBytes ?? null,
     meta: event.meta,
   });
@@ -116,8 +118,10 @@ export class InMemoryEventStore implements EventStore {
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
     assertWellFormedCtx(ctx);
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("list", "since", filter.since);
-    assertQueryTimestamptz("list", "until", filter.until);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    assertQueryDate("list", "since", filter.since);
+    assertQueryDate("list", "until", filter.until);
     // `PostgresEventStore.list` は `filter.limit` を生 SQL の `LIMIT` にそのまま渡すため、
     // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
     // （実測済み。in-memory-vector-store.ts の同種の注記参照）。ここで検査せず
