@@ -398,7 +398,11 @@ describe("PostgresTrigramLexicalStore.search を直接呼んだ例外から、pa
 });
 
 describe("PostgresOutboxStore を直接呼んだ例外から、params の値を落とす（ADR 0516）", () => {
-  const mouths: Array<[string, string, (s: PostgresOutboxStore) => Promise<unknown>]> = [
+  // 4つ目が true の口は、撃つ前に obxCtx のテナントの claim 可能な行を1本入れる。
+  // 表が空のとき、`LIMIT` を含む副問い合わせ・CTE は、プランナの統計の状態によっては結合の
+  // 内側に回り、一度も実行されない（`LIMIT` の検査も走らず、reject されない）。同じテナントの
+  // 行が1本あれば、どの統計でも `LIMIT` が評価される。
+  const mouths: Array<[string, string, (s: PostgresOutboxStore) => Promise<unknown>, boolean?]> = [
     [
       "claimBatch",
       "2201W",
@@ -409,10 +413,11 @@ describe("PostgresOutboxStore を直接呼んだ例外から、params の値を�
           leaseMs: 1000,
           claimedBy: OBX_MARKER,
         } as never),
+      true,
     ],
     ["complete", "22003", (s) => s.complete(obxCtx, JOB_ID, 2 ** 40)],
     ["fail", "22003", (s) => s.fail(obxCtx, JOB_ID, OBX_MARKER, 2 ** 40)],
-    ["eraseTenant", "2201W", (s) => s.eraseTenant(obxCtx, { limit: -1 })],
+    ["eraseTenant", "2201W", (s) => s.eraseTenant(obxCtx, { limit: -1 }), true],
     ["eraseTenant（dryRun）", "2201W", (s) => s.eraseTenant(obxCtx, { limit: -1, dryRun: true })],
     [
       "purgeCompletedJobs",
@@ -425,10 +430,17 @@ describe("PostgresOutboxStore を直接呼んだ例外から、params の値を�
       (s) => s.purgeCompletedJobs(obxCtx, { olderThan: new Date(), limit: -2, dryRun: true }),
     ],
   ];
-  for (const [name, code, run] of mouths) {
+  for (const [name, code, run, seedRow] of mouths) {
     it(`${name}: 例外に params の値が無く、SQL の文・SQLSTATE は残る`, async () => {
       await resetTestDatabase();
-      const { db } = await getTestClient();
+      const { pool, db } = await getTestClient();
+      if (seedRow === true) {
+        await pool.query(
+          `INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
+           VALUES (gen_random_uuid(), $1, 'embed', '{}'::jsonb, now() - interval '1 hour', 0, now())`,
+          [obxCtx.tenantId],
+        );
+      }
       const error = await thrown(run(new PostgresOutboxStore(db)));
       expectNoMarkers2(error, [OBX_MARKER]);
       expect(sqlstateOf(error)).toBe(code);

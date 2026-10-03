@@ -15,10 +15,12 @@ import { omitParamsFromError } from "./failure-description.js";
  * `TenantSettingsStore.getEventRetention` 自体で守った区別を、ここで潰さない）。
  *
  * - `{ kind: "unset" }` — テナントが event retention を一度も設定していない。
- *   **`memoryStore` には一切触れない**（削除しない理由が「無期限」の一種であり、
- *   store 側の対応の有無を問う必要が無いため）。
- * - `{ kind: "unlimited" }` — テナントが明示的に無期限を選んだ。同上、`memoryStore` に
- *   触れない。
+ *   **この関数が最初に読んだ値が `unset` のときは、`memoryStore` には一切触れない**（削除しない理由が
+ *   「無期限」の一種であり、store 側の対応の有無を問う必要が無いため）。
+ *   ⚠ `days` と読んだ後に `memoryStore.purgeExpiredEventsByRetention` が自分の読み直しで `unset` を返した場合も、
+ *   その値がそのまま返る（`PurgeExpiredEventsByRetentionOutcome`）。
+ * - `{ kind: "unlimited" }` — テナントが明示的に無期限を選んだ。同上（最初の読みが `unlimited` なら
+ *   `memoryStore` に触れない。store の読み直しが `unlimited` を返した場合はそのまま返る）。
  * - `{ kind: "store_unsupported" }` — 保持期間は有限日数だが、渡された `MemoryStore`
  *   実装が `purgeExpiredEventsByRetention` を持たない（任意メソッド未実装の adapter）。
  *   [ADR 0100](../../../docs/decisions/0100-supersede-with-new-memories.md) の
@@ -143,6 +145,13 @@ export interface PurgeExpiredEventsForTenantOptions {
  * 【実測 2026-09-29】`@mnemora/postgres` と testkit の fixture で、上と同じ
  * `event-retention-change-during-purge.postgres.test.ts` の4ケースが、いまは
  * 「変えた後の期間を守る」側の期待で緑になることを確かめた。
+ *
+ * ⚠ **2026-10-03 訂正:** 上の「この関数の役目は unset/unlimited/store_unsupported の判定だけ」は、
+ * 戻り値の `unset`/`unlimited` の出どころを狭く書いていた。`days` と読んだ後に、`purgeExpiredEventsByRetention?`
+ * 自身が保持期間を読み直した結果として `unset`/`unlimited` を返すことがあり、この関数はそれをそのまま返す
+ * （`PurgeExpiredEventsByRetentionOutcome`、`MemoryStore.purgeExpiredEventsByRetention`）。
+ * なお、`opts.limit` の検査はこの関数では行わず、`purgeExpiredEventsByRetention?` へそのまま渡す
+ * （`eraseTenant` と違い、この関数自身は `RangeError` を投げない）。
  */
 export async function purgeExpiredEventsForTenant(
   ctx: Ctx,

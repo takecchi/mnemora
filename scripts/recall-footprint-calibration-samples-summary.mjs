@@ -8,7 +8,7 @@
  * 組み立ては `./recall-footprint-calibration-samples-summary-lib.mjs` の純関数に
  * 委ねる(`compare-summary.mjs`/`consolidation-cost-summary.mjs` と同じ分担)。ここは
  *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意、いまのところ実在しない)を読む
+ * 1. `--measured <path>`(必須)・`--baseline <path>`(任意。`examples/chat/recall-footprint-calibration-samples-baseline.json` が在り、`ci.yml` はそれを渡している)を読む
  * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
  * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
  * 4. Markdown を stdout に出す

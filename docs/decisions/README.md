@@ -560,5 +560,39 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0548](./0548-bullmq-lock-duration-and-remove-on-complete-default.md) | `createBullmqTickDriver` に `lockDuration` の口と完了ジョブの保持の既定（`removeOnComplete: { count: 1000 }`）を足す — ADR 0440 の決定4、ADR 0449 の決定5・材料1・材料6 を置き換える | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
+| [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0555](./0555-core-fake-outbox-rows-honor-opts-now.md) | core の Fake が積む outbox 行の時刻も、`opts.now` に従う（`availableAt`・`createdAt`。InMemory・Postgres と揃える） | 採用 (2026-10) |
+| [0556](./0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) | testkit の InMemory の `abortIfSuperseded` と、testkit・core の Fake の `EventStore.get` も、大文字の id を Postgres と同じに扱う | 採用 (2026-10) |
+| [0557](./0557-core-fake-superseded-by-checks.md) | core の Fake も `supersededById` の断り（ADR 0503・0515）を持つ（InMemory・Postgres と揃える） | 採用 (2026-10) |
+| [0558](./0558-inmemory-self-supersede-check-folds-both-sides.md) | testkit の InMemory の自己置換の検査は、`supersededById` と対象の id の両側を畳んで比べる | 採用 (2026-10) |
+| [0559](./0559-clock-reaches-outbox-available-at.md) | 注入した時計は outbox の `available_at` と監査ログの `at` に届く——古い「届かない」「DB の `now()` で書かれる」記述を、いまの実装に合わせて直す（コメントと doc だけ） | 採用 (2026-10) |
+| [0560](./0560-doc-code-drift-sweep-readmes.md) | 文書とコードのずれを横に掃く（第8弾）— README 4つ（ルート・core・openai・local-embedding）を、今の main の実装に照らす | 採用 (2026-10) |
+| [0561](./0561-doc-code-drift-sweep-recall-testkit.md) | 文書とコードのずれを横に掃く（第9弾）— `docs/recall.md`・`packages/testkit/README.md`・`docs/north-star-paths.md`・`docs/README.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0562](./0562-core-fake-isolates-caller-mutation.md) | core の Fake も、呼び手の書き換えから自分の中身を守る（Issue #1412 A8 の9本と、同じ原因の1本） | 採用 (2026-10) |
+| [0563](./0563-core-fake-event-time-nul-and-claim-predicates.md) | core の Fake の `archived`・`purgedAt` の時刻、識別子と `lastError` の NUL、片側だけの claim key を、InMemory・Postgres に揃える | 採用 (2026-10) |
+| [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
+| [0566](./0566-fake-outbox-opts-now-controls.md) | ADR 0555 の歯の穴を塞ぐ——Fake の outbox 行の時刻を「やりすぎ」「外す」側からも縛り、0555 の文面のずれを訂正する | 採用 (2026-10) |
+| [0567](./0567-doc-code-drift-sweep-scripts.md) | 文書とコードのずれを横に掃く（第10弾）— `scripts/` のコメント・`AGENTS.md`・`docs/autonomy.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0568](./0568-abort-if-superseded-controls-and-duplicate-id-changed.md) | ADR 0556 の歯が通した4つの変異を塞ぎ、`abortIfSuperseded` の綴り違いの同じ id を Postgres と同じ1件にし、0556 の「新しく断る入力は無い」を訂正する | 採用 (2026-10) |
+| [0569](./0569-doc-code-drift-sweep-roadmap-vision-chat.md) | 文書とコードのずれを横に掃く（第11弾）— `docs/roadmap.md`・`docs/vision.md`・`docs/alteroid-findings.md` と `examples/chat` のデモ本体のコメントを、今の main の実装に照らす | 採用 (2026-10) |
+| [0570](./0570-chat-cli-output-strings-match-implementation.md) | `examples/chat` の CLI の help と出力の文言を実装に合わせ、数の写しを外す | 採用 (2026-10) |
+| [0571](./0571-doc-code-drift-sweep-public-tsdoc.md) | 文書とコードのずれを横に掃く（第12弾）— core を除く公開パッケージの TSDoc を、今の main の実装に照らす | 採用 (2026-10) |
+| [0572](./0572-core-fake-supersede-atomic-controls.md) | ADR 0564 の歯の穴（O1・O3・O5・O6）を塞ぎ、ADR 0563 の範囲の記述を訂正する | 採用 (2026-10) |
+| [0573](./0573-fake-event-time-nul-claim-controls.md) | ADR 0563 の歯が通した4つの変異（`updatedAt` の時刻・`extractorVersion` の NUL・claim predicate の並び）を塞ぐ | 採用 (2026-10) |
+| [0574](./0574-adr-0557-superseded-by-controls.md) | ADR 0557 の歯の穴（やりすぎ・循環の走査・検査の位置）を塞ぐ | 採用 (2026-10) |
+| [0575](./0575-outbox-negative-limit-teeth-independent-of-planner-stats.md) | outbox の `eraseTenant`・`claimBatch` の負の `limit` の歯を、プランナの統計によらず reject される入力にする | 採用 (2026-10) |
+| [0576](./0576-doc-code-drift-sweep-core-public-tsdoc.md) | 文書とコードのずれを横に掃く（第13弾）— core の公開 TSDoc を、今の main の実装に照らす | 採用 (2026-10) |
+| [0577](./0577-fake-supersede-idempotent-resend-skips-opts-checks.md) | Fake の `supersedeWithNewMemories` は、全部の news が既存の行に当たる冪等な再送で opts・jobKinds を断らない（ADR 0566 の未解決を解く） | 採用 (2026-10) |
+| [0578](./0578-core-fake-returns-copies-for-remaining-writers.md) | core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き） | 採用 (2026-10) |
+| [0579](./0579-gate-red-tooth-names-one-db-test-file-instead-of-bail.md) | 門が赤くなる歯は、`--bail=1` で打ち切らず、DB テストのファイルを1本だけ名指しして走らせる | 採用 (2026-10) |
+| [0580](./0580-adr-0568-nonexistent-id-and-event-get-controls.md) | ADR 0568 の歯が通した「存在しない id」と「別のイベント id」の変異を塞ぐ | 採用 (2026-10) |
+| [0581](./0581-adr-0572-index-underflow-getter-controls.md) | ADR 0572 の歯の穴（A4・B4・C6・B8）を塞ぐ——索引の巻き戻し・float4 アンダーフロー・読む側が行を作らない・setDecayClock の検査順 | 採用 (2026-10) |
+| [0582](./0582-adr-0573-teeth-holes-controls.md) | ADR 0573 の歯の穴（updatedAt の同一 ms・UTF-16 順・updatedAt 並び・NUL の「何も書かない」）を塞ぐ | 採用 (2026-10) |
+| [0583](./0583-core-fake-supersede-returns-copies-and-per-mouth-mutations.md) | core の Fake の `supersedeWithNewMemories` も写しを返し、ADR 0578 の【未確認】だった口ごとの変異を入れる | 採用 (2026-10) |
+| [0584](./0584-adr-0574-teeth-holes-controls.md) | ADR 0574 の歯の穴（外の forgotten と CAS の順・壊れた id と形の違反の順・形の検査の位置）を塞ぐ | 採用 (2026-10) |
+| [0585](./0585-digest-band-max-entry-chars-nan.md) | `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す | 採用 (2026-10) |
+| [0586](./0586-omit-params-cause-chain-and-preread-stack-teeth.md) | `omitParamsFromError` の doc が約束する「`cause` の連鎖にも掛ける」と「`stack` も書き換える」を、偽の例外の歯で縛る | 採用 (2026-10) |
+| [0587](./0587-adr-0577-time-stub-mixed-resend-updatedat.md) | ADR 0577 の歯が通した「再送と新規の混在」と「古い記憶の updatedAt」の変異を塞ぎ、壁時計の歯を固定する | 採用 (2026-10) |
+| [0588](./0588-adr-0578-teeth-holes-controls.md) | ADR 0578 の歯の穴（生き残り4本と「たまたま捕まった」2本）を、対照の歯で塞ぐ | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

@@ -28,7 +28,8 @@ import { createUsageMeter } from "./usage-meter.js";
  * **LLM と Embedding を別々に選べる（本 PR の拡張）。** 理由: retrieval-quality の
  * ベンチで「順位が変わったのは埋め込みのせいか抽出のせいか」を切り分けたい場合、
  * 一方だけを本物に入れ替えられる必要がある。`MNEMORA_LLM` / `MNEMORA_EMBEDDING`
- * （`"openai" | "deterministic"`）で個別に上書きできる——**未指定なら、いままで通り
+ * （受け付ける値は `LLM_MODES` / `EMBEDDING_MODES` が持つ。下の `"recorded"`・`"local"` の
+ * 説明を見ること）で個別に上書きできる——**未指定なら、いままで通り
  * `OPENAI_API_KEY` の有無だけで両方が決まる**（`selectProviderMode` の契約は変えない。
  * 既存テストはこの2つの環境変数を設定しないため、そのまま通る）。
  */
@@ -53,8 +54,9 @@ import { createUsageMeter } from "./usage-meter.js";
  * `LLMProvider` を実装しているが（ADR 0072）、**`examples/chat` には一度も配線されて
  * いない**——`examples/chat/package.json` の依存に `@mnemora/anthropic` は無く、
  * このファイルもそれを一度も import していない。`git log -S 'anthropic' --
- * examples/chat/` は1件もヒットしない（配線してから外したのではなく、そもそも
- * 触られたことが無い）。
+ * examples/chat/package.json` は1件もヒットしない（配線してから外したのではなく、
+ * そもそも触られたことが無い。`examples/chat/` 全体で引くと、この説明自身を書いた側の
+ * コミットが当たるので、依存の履歴としては読まないこと）。
  *
  * **理由は ADR 0072「引き受けた負債」3・4 に逐語で書かれている**
  * （`docs/decisions/0072-anthropic-llm-provider.md`）:
@@ -66,6 +68,9 @@ import { createUsageMeter } from "./usage-meter.js";
  * >    Anthropic では一度も走っていない。カセットも無い。
  * >    ⟹ この PR は「Anthropic で想起の質がどうなるか」について何も言っていない。
  * >    言えるのは「契約が揃っている」ことだけである。
+ *
+ * （⚠ 上の引用の `docs/roadmap.md` 段階6 は 2026-09-29 に削除した（#762）。当時の本文は
+ * 635c93d の版にある。引用は ADR 0072 の当時の文面のまま残してある。）
  *
  * ⚠ **ADR 0072 決定1（`@mnemora/anthropic` が `EmbeddingProvider` を実装しない。理由は同 ADR「設計としては既に決まっていた」の節）
  * と混同しないこと。**あちらは「Anthropic に埋め込み API が無い」というパッケージ内部

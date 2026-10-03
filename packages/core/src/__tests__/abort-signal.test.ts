@@ -458,8 +458,9 @@ describe("AbortSignal — tick(): embed ジョブの処理中に abort", () => {
 
   it("リースが切れた後、次の tick() がそのジョブを取り直して正常に処理できる", async () => {
     const embeddingProvider = new HangingEmbeddingProvider();
-    // `availableAt` は `FakeBackingStore.enqueueJob` が実時刻 `new Date()` で打つため、
-    // `fakeNow` は実時刻より確実に先に置く（`runtime.test.ts` の同種の歯と同じ理由）。
+    // 以前の Fake は `availableAt` を `FakeBackingStore.enqueueJob` が実時刻 `new Date()` で打ったため、
+    // `fakeNow` を実時刻より確実に先に置いている（`runtime.test.ts` の同種の歯と同じ）。今の Fake は
+    // `opts.now` に従う（ADR 0555）が、組み替えていない（ADR 0555 の「残り」）。
     let fakeNow = new Date(Date.now() + 10_000);
     const fakeClock = { now: () => fakeNow };
     const { runtime, stores } = buildRuntime(succeedingLlm(), {

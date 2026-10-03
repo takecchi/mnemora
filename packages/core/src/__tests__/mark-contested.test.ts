@@ -293,7 +293,8 @@ describe("runtime.markContested — 並行（markContestedPair が MemoryStatusC
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === b.id) {
-        b.status = "archived";
+        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        stores.memoryStore.liveRowForTest(ctx, b.id)!.status = "archived";
       }
     };
 

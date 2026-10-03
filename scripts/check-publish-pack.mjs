@@ -8,6 +8,7 @@
  * 載っているもの（git 上の version が `0.0.0` のままでよいもの）は、version 検査（下の検査2）
  * だけ対象外にする（ADR 0070。publish 済みでも載っていることがある——名前と意味のずれを含め、
  * 詳細は `NEVER_PUBLISHED_TARGETS` の doc コメント）。
+ * （2026-10-03 訂正）`NEVER_PUBLISHED_TARGETS` は、いまは空である（仕組みだけを残してある）。
  *
  * **なぜ tarball の中身を見るか（作業ツリーの package.json を見るだけでは足りない理由）**
  *

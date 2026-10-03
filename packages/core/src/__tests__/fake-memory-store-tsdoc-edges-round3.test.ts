@@ -231,7 +231,10 @@ describe(`${IMPL}.listLabels / registerLabel: 行は消えず、名前は検査�
 
     await store.updateStatus(ctx, memories[0]!.id, "forgotten");
     await store.updateStatus(ctx, memories[1]!.id, "archived");
-    await store.updateStatus(ctx, memories[2]!.id, "superseded");
+    // ADR 0557（ADR 0503 決定8 と同じ扱い）: superseded には置き換えた側が要る。勝者になる別の記憶を渡す。
+    await store.updateStatus(ctx, memories[2]!.id, "superseded", {
+      supersededById: memories[1]!.id,
+    });
 
     const after = (await store.listLabels!(ctx)).find((l) => l.name === "kept");
     expect({ before, after }).toEqual({

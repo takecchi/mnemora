@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
- * publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`。現在は
- * `@mnemora/core` / `@mnemora/testkit` / `@mnemora/openai` / `@mnemora/postgres` /
- * `@mnemora/anthropic` / `@mnemora/local-embedding` の6つ、いずれも `"type": "module"`）の
+ * publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`。件数・名前は
+ * そちらが唯一の定義——ここには写さない。いずれも `"type": "module"`）の
  * **ビルド後の配布物**
  * （`packages/<name>/dist` 配下の `.js` / `.cjs` / `.mjs`）を、ts-jest 相当の変換に通してから
  * CommonJS として構文解析できることを検査する門。

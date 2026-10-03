@@ -137,7 +137,11 @@ describe("recall() — 段3の必須同伴取得は、companion 自身が壊れ�
 
       // forget と同じく、b の status だけを contested から動かす
       // （`markContestedPair` 経由で作った相互ペアの b 側を、別の書き込みで壊す想定）。
-      await stores.memoryStore.updateStatus(ctx, b.id, status, { expectedStatus: "contested" });
+      // ADR 0557（ADR 0503 決定8 と同じ扱い）: superseded には置き換えた側が要る（archived には付けない）。
+      await stores.memoryStore.updateStatus(ctx, b.id, status, {
+        expectedStatus: "contested",
+        ...(status === "superseded" ? { supersededById: a.id } : {}),
+      });
 
       const result = await runtime.recall(ctx, { vector: [1, 0] });
       const ids = result.memories.map((m) => m.memoryId);
