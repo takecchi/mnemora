@@ -21,7 +21,10 @@ export interface PackDigestBandOptions {
   limit: number;
   /** 帯全体の文字数予算。`NaN` は打ち切り側（負数と同じ）、`+Infinity` は上限なしとして扱う。 */
   maxChars: number;
-  /** 1件の digest の文字数上限。超えたら切り詰めて `truncated: true` を立てる。 */
+  /**
+   * 1件の digest の文字数上限。超えたら切り詰めて `truncated: true` を立てる。
+   * `NaN` と負数は打ち切り側（上限0＝digest を空に切る）、`+Infinity` は上限なしとして扱う。
+   */
   maxEntryChars: number;
 }
 
@@ -90,7 +93,11 @@ export function packDigestBand(
   let limitedBy: DigestBandLimitedBy | undefined;
 
   for (const candidate of candidates) {
-    const digestTooLong = candidate.digest.length > opts.maxEntryChars;
+    // `length > NaN` は常に false になり、`maxEntryChars: NaN` が「切り詰めなし」へ化ける。
+    // `limit`/`maxChars` の NaN（Issue #803）・負数の `maxEntryChars` と同じく、NaN は
+    // 上限0（digest を空に切る）として扱う。`+Infinity` は通常の比較で「上限なし」になる。
+    const entryCharsIsNaN = Number.isNaN(opts.maxEntryChars);
+    const digestTooLong = entryCharsIsNaN || candidate.digest.length > opts.maxEntryChars;
     // `String.prototype.slice(0, n)` は `n` が負数だと「末尾から `n` 文字を除く」という
     // 別の意味になり、先頭からの切り詰めにならない（負数の `maxEntryChars` を渡すと、
     // 上限より長い文字列がそのまま残っていた）。`maxEntryChars` は「1件の digest の
@@ -98,7 +105,9 @@ export function packDigestBand(
     // 内側で切って孤立サロゲートを作らないための丸めも `sliceAtGraphemeBoundary`
     // に集約してある（`text-truncation.ts` の doc コメント参照）。
     const digest = digestTooLong
-      ? sliceAtGraphemeBoundary(candidate.digest, opts.maxEntryChars)
+      ? // `sliceAtGraphemeBoundary` は NaN を 0 へ丸めない（`Math.max(0, NaN)` は NaN）ので、
+        // NaN はここで 0 を明示して渡す。
+        sliceAtGraphemeBoundary(candidate.digest, entryCharsIsNaN ? 0 : opts.maxEntryChars)
       : candidate.digest;
     const cost =
       DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + digest.length + DIGEST_BAND_ENTRY_SEPARATOR_CHARS;
