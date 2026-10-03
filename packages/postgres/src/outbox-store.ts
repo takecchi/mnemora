@@ -12,6 +12,7 @@ import {
 } from "@mnemora/core";
 import { assertWellFormedCtx } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { assertValidDate } from "./input-check.js";
 import { omittingParams } from "./omit-params.js";
 import { lockTenantForErase } from "./erase-tenant-lock.js";
 import {
@@ -151,6 +152,9 @@ export class PostgresOutboxStore implements OutboxStore {
     opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
+    // ADR 0589: `opts.at` の Invalid Date は、`jobId` の形・行の有無より先に断る（testkit の fixture・core の Fake と同じ順）。
+    // 下の `jobId` の形の検査は静かに返るので、先に見ないと、呼び手のバグが黙って通る。
+    assertValidDate("complete", "opts.at", opts?.at);
     // id 列は uuid 型。べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）
     // という契約のため、UUID の形をしていない入力はここで静かに無視する
     // （実 DB 検査で判明: 素通しすると invalid input syntax for type uuid で例外になる）。
@@ -186,6 +190,8 @@ export class PostgresOutboxStore implements OutboxStore {
     opts?: { at?: Date | undefined },
   ): Promise<void> {
     assertWellFormedCtx(ctx);
+    // ADR 0589: `complete` と同じ（`opts.at` の Invalid Date を、`jobId` の形より先に断る）。
+    assertValidDate("fail", "opts.at", opts?.at);
     if (!isUuidLike(jobId)) {
       return;
     }
