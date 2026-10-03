@@ -53,7 +53,10 @@ function llmReturning(result: Record<string, unknown>): LLMProvider {
   };
 }
 
-async function reflectWith(result: Record<string, unknown>) {
+async function reflectWith(
+  result: Record<string, unknown>,
+  config?: { digestFallbackLength?: number },
+) {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({
     memoryStore: stores.memoryStore,
@@ -65,6 +68,7 @@ async function reflectWith(result: Record<string, unknown>) {
     embeddingProvider: stores.embeddingProvider,
     hashContent: (content: string) => `sha256(${content})`,
     clock: { now: () => NOW },
+    ...(config === undefined ? {} : { config }),
   });
   const basis = await stores.memoryStore.createMemory(ctx, newMemory());
   const reflected = await runtime.reflect(ctx, { target: { memoryIds: [basis.id] } });
@@ -94,6 +98,68 @@ describe("runtime.reflect — LLM の digest が空文字なら機械的な切�
       digestSource: "fallback",
       digest: "内省で得た気づきの本文",
     });
+  });
+});
+
+describe("フォールバックの digest は config.digestFallbackLength に従う（reflect・consolidate）", () => {
+  const longContent = "あ".repeat(30) + "い".repeat(300);
+
+  it("reflect: 空文字の digest のフォールバックは、config の長さで切って … を付ける", async () => {
+    const { memory } = await reflectWith(
+      { outcome: "reflected", content: longContent, digest: "" },
+      { digestFallbackLength: 7 },
+    );
+
+    expect([memory?.digestSource, memory?.digest]).toEqual(["fallback", "あ".repeat(7) + "…"]);
+  });
+
+  it("reflect: config を渡さなければ、既定の200字で切る", async () => {
+    const { memory } = await reflectWith({
+      outcome: "reflected",
+      content: longContent,
+      digest: "",
+    });
+
+    expect([memory?.digestSource, memory?.digest]).toEqual([
+      "fallback",
+      "あ".repeat(30) + "い".repeat(170) + "…",
+    ]);
+  });
+
+  async function consolidateWith(config?: { digestFallbackLength?: number }) {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: llmReturning({ content: longContent }),
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+      ...(config === undefined ? {} : { config }),
+    });
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } });
+    expect(result.outcome).toBe("consolidated");
+    return stores.memoryStore.get(ctx, result.consolidatedMemoryId!);
+  }
+
+  it("consolidate: digest を省いた応答のフォールバックは、config の長さで切って … を付ける", async () => {
+    const memory = await consolidateWith({ digestFallbackLength: 7 });
+
+    expect([memory?.digestSource, memory?.digest]).toEqual(["fallback", "あ".repeat(7) + "…"]);
+  });
+
+  it("consolidate: config を渡さなければ、既定の200字で切る", async () => {
+    const memory = await consolidateWith();
+
+    expect([memory?.digestSource, memory?.digest]).toEqual([
+      "fallback",
+      "あ".repeat(30) + "い".repeat(170) + "…",
+    ]);
   });
 });
 
