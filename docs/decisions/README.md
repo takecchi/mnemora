@@ -558,6 +558,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
 | [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0548](./0548-bullmq-lock-duration-and-remove-on-complete-default.md) | `createBullmqTickDriver` に `lockDuration` の口と完了ジョブの保持の既定（`removeOnComplete: { count: 1000 }`）を足す — ADR 0440 の決定4、ADR 0449 の決定5・材料1・材料6 を置き換える | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0552](./0552-owner-q7-q8-q16-docs-only.md) | オーナーへの問い 374f6f88 の問7・問8・問16 の推奨（どれも「文書に書くだけ」）を、先行して TSDoc・README に書く（コードは変えない） | 採用 (2026-10) |
@@ -593,6 +594,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0584](./0584-adr-0574-teeth-holes-controls.md) | ADR 0574 の歯の穴（外の forgotten と CAS の順・壊れた id と形の違反の順・形の検査の位置）を塞ぐ | 採用 (2026-10) |
 | [0585](./0585-digest-band-max-entry-chars-nan.md) | `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す | 採用 (2026-10) |
 | [0586](./0586-omit-params-cause-chain-and-preread-stack-teeth.md) | `omitParamsFromError` の doc が約束する「`cause` の連鎖にも掛ける」と「`stack` も書き換える」を、偽の例外の歯で縛る | 採用 (2026-10) |
+| [0587](./0587-adr-0577-time-stub-mixed-resend-updatedat.md) | ADR 0577 の歯が通した「再送と新規の混在」と「古い記憶の updatedAt」の変異を塞ぎ、壁時計の歯を固定する | 採用 (2026-10) |
+| [0588](./0588-adr-0578-teeth-holes-controls.md) | ADR 0578 の歯の穴（生き残り4本と「たまたま捕まった」2本）を、対照の歯で塞ぐ | 採用 (2026-10) |
 | [0589](./0589-adr-0552-0553-teeth-holes-controls.md) | ADR 0553 の歯が通した閾値の頭打ち（TR2）と、ADR 0552 の歯が無かった runner の2つの振る舞い（P8・P9）を縛る | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
