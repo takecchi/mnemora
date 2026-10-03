@@ -13,6 +13,23 @@ export function assertNoNul(owner: string, field: string, value: string): void {
 }
 
 /**
+ * ADR 0594: `timestamptz` へ渡す日時が Invalid Date（`getTime()` が `NaN`）なら、DB に触れる前に名指しして断る。
+ * Postgres は `22007` で拒むが、行を探す前の入口が静かに返る口（`OutboxStore.complete`/`fail` の、形の崩れた `jobId`）では
+ * DB まで届かず、拒まれなかった。文面は testkit の `assertQueryDate`・core の Fake と同じ
+ * （`<owner>: <欄> must be a valid Date (got Invalid Date)`）。省略（`undefined`/`null`）は検査しない。
+ * 下限（`timestamptz` の紀元前4714年）は見ない——届く口では、これまでどおり DB が `22008` で拒む。
+ */
+export function assertValidDate(
+  owner: string,
+  field: string,
+  value: Date | null | undefined,
+): void {
+  if (value != null && Number.isNaN(value.getTime())) {
+    throw new Error(`${owner}: ${field} must be a valid Date (got Invalid Date)`);
+  }
+}
+
+/**
  * pgvector の `vector` の成分は float4 で、収まらない値（`1e308` など。有限でない値も含む）は
  * `"1e+308" is out of range for type vector` 等の生の例外になる。DB に触れる前に断る。
  * `Math.fround` が有限に収まるかで見る（pgvector の float4 への変換と同じ丸め）。
