@@ -323,12 +323,12 @@ describe("Fake: 形・循環の検査は存在確認・hook・CAS より前（AD
 });
 
 /**
- * ADR 0583（ADR 0574 の歯の穴）: 前回の確かめ直しで、どの歯にも捕まらなかった変異を塞ぐ。
+ * ADR 0584（ADR 0574 の歯の穴）: 前回の確かめ直しで、どの歯にも捕まらなかった変異を塞ぐ。
  *
  * - F14: 対の外の `forgotten` を指す検査を CAS より前へ動かしても通っていた。
  * - F10・F12: 対・群の形の検査を、存在確認や CAS の後ろへ動かしても 0574 の歯は緑のままだった（0557 の歯1本だけが捕まえた）。
  */
-describe("Fake: 外の forgotten の検査は CAS より後（ADR 0515・0583）", () => {
+describe("Fake: 外の forgotten の検査は CAS より後（ADR 0515・0584）", () => {
   const forgotten = async (s: ReturnType<typeof setup>): Promise<Memory> => {
     const m = await s.mem();
     await s.store.updateStatus(A, m.id, "forgotten");
@@ -398,7 +398,7 @@ describe("Fake: 外の forgotten の検査は CAS より後（ADR 0515・0583）
   });
 });
 
-describe("Fake: pair・group の形の検査は存在確認・CAS より前（ADR 0503・0583）", () => {
+describe("Fake: pair・group の形の検査は存在確認・CAS より前（ADR 0503・0584）", () => {
   const PAIR_SHAPE =
     /^resolveContestedPair: second\.supersededById is required when status is "superseded"$/;
   const GROUP_SHAPE =

@@ -20,7 +20,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * - 輪が先頭に絡まない循環（先頭が群の外を指す・尾が輪に入る）も RangeError。
  * - 形・循環の検査は、存在確認・CAS より前（存在しない id・contested でない行でも RangeError）。
  *
- * ADR 0583（ADR 0574 の歯の穴）: 次を足した。
+ * ADR 0584（ADR 0574 の歯の穴）: 次を足した。
  * - F14・P16: 外の `forgotten` を指す検査は CAS（と群の部分解消の検査）より後（MemoryStatusConflictError が先）。
  * - P12: 壊れた id（`isUuidLike` で弾かれる形）+ 形の違反は、not found ではなく RangeError（決定3）。
  * - F10・F12: pair・group の形の違反は、存在確認・CAS より前（形の違反だけが違う入力で、存在しない・contested でないの両方）。
@@ -257,7 +257,7 @@ for (const [kitName, makeKit] of KITS) {
       );
     });
 
-    // --- ADR 0583（ADR 0574 の歯の穴）---------------------------------------------------------
+    // --- ADR 0584（ADR 0574 の歯の穴）---------------------------------------------------------
     const thrownOf = async (run: () => Promise<unknown>): Promise<unknown> => {
       let thrown: unknown;
       await run().catch((e: unknown) => {
