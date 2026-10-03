@@ -582,5 +582,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0575](./0575-outbox-negative-limit-teeth-independent-of-planner-stats.md) | outbox の `eraseTenant`・`claimBatch` の負の `limit` の歯を、プランナの統計によらず reject される入力にする | 採用 (2026-10) |
 | [0577](./0577-fake-supersede-idempotent-resend-skips-opts-checks.md) | Fake の `supersedeWithNewMemories` は、全部の news が既存の行に当たる冪等な再送で opts・jobKinds を断らない（ADR 0566 の未解決を解く） | 採用 (2026-10) |
 | [0579](./0579-gate-red-tooth-names-one-db-test-file-instead-of-bail.md) | 門が赤くなる歯は、`--bail=1` で打ち切らず、DB テストのファイルを1本だけ名指しして走らせる | 採用 (2026-10) |
+| [0581](./0581-adr-0572-index-underflow-getter-controls.md) | ADR 0572 の歯の穴（A4・B4・C6・B8）を塞ぐ——索引の巻き戻し・float4 アンダーフロー・読む側が行を作らない・setDecayClock の検査順 | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
