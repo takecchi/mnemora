@@ -144,7 +144,7 @@ const CONCURRENT_CLAIM_ROUNDS = 10;
  *   docs/architecture.md「確かめていないこと」節、ADR 0032「確かめていないこと」節を見ること。
  * - `complete` / `fail` の後、そのジョブは再び `claimBatch` に現れない
  * - `complete` / `fail` の `opts.at`（`completedAt`/`failedAt` の時刻。省略時は壁時計。
- *   Invalid Date は、`jobId` の形・行の有無を見る前に例外（ADR 0589）。時刻の読み戻しは `peekJob` を渡した adapter だけ）、存在しないジョブ id は
+ *   Invalid Date は、`jobId` の形・行の有無を見る前に例外（ADR 0594）。時刻の読み戻しは `peekJob` を渡した adapter だけ）、存在しないジョブ id は
  *   例外にしない冪等な終端更新、`claim` 時の `attempts` と一致しなければ `OutboxLeaseConflictError`
  *   （ADR 0142）
  * - テナント分離: 他テナントの未処理ジョブが `claimBatch` に現れない。他テナントの ctx からの
@@ -325,7 +325,7 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
     }
 
     /**
-     * 検査の順（クローンの決定 2026-10-03 02:41Z。ADR 0589）: `opts.at` の Invalid Date は、`jobId` の形・行の有無を見る**前**に断る。
+     * 検査の順（クローンの決定 2026-10-03 02:41Z。ADR 0594）: `opts.at` の Invalid Date は、`jobId` の形・行の有無を見る**前**に断る。
      * 形の崩れた・存在しない `jobId` は「静かに返る（べき等な no-op）」のが約束だが、`opts.at` が Invalid Date の呼び出しは
      * 呼び手のバグなので、その約束より先に例外にする。上の歯は、実在のジョブでしか断ることを縛らない。
      */

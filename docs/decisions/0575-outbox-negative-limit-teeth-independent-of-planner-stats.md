@@ -48,7 +48,7 @@
 
 ---
 
-## 追記（2026-10-03・出所: ADR 0589 の作業中に、担い手 mgr-d25950ce が実測した。上の「残り」の件）: `claimBatch(limit:-1)` は揺れなかった
+## 追記（2026-10-03・出所: ADR 0594 の作業中に、担い手 mgr-d25950ce が実測した。上の「残り」の件）: `claimBatch(limit:-1)` は揺れなかった
 
 上の本文は当時のまま残す。「残り」の `store-boundary-diff.postgres.test.ts` の `claimBatch(limit: -1)` を、実測で答えた。自前の Postgres 17（`--encoding=UTF8 --locale=C`、専用ポート）で測った。【実測】
 

@@ -13,7 +13,7 @@ export function assertNoNul(owner: string, field: string, value: string): void {
 }
 
 /**
- * ADR 0589: `timestamptz` へ渡す日時が Invalid Date（`getTime()` が `NaN`）なら、DB に触れる前に名指しして断る。
+ * ADR 0594: `timestamptz` へ渡す日時が Invalid Date（`getTime()` が `NaN`）なら、DB に触れる前に名指しして断る。
  * Postgres は `22007` で拒むが、行を探す前の入口が静かに返る口（`OutboxStore.complete`/`fail` の、形の崩れた `jobId`）では
  * DB まで届かず、拒まれなかった。文面は testkit の `assertQueryDate`・core の Fake と同じ
  * （`<owner>: <欄> must be a valid Date (got Invalid Date)`）。省略（`undefined`/`null`）は検査しない。

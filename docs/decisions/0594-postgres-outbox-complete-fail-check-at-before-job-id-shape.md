@@ -1,4 +1,4 @@
-# ADR 0589: `PostgresOutboxStore.complete`・`fail` は、`opts.at` の Invalid Date を `jobId` の形より先に断る
+# ADR 0594: `PostgresOutboxStore.complete`・`fail` は、`opts.at` の Invalid Date を `jobId` の形より先に断る
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03
