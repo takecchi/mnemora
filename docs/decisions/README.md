@@ -593,5 +593,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0585](./0585-digest-band-max-entry-chars-nan.md) | `packDigestBand` の `maxEntryChars: NaN` を、負数と同じ「digest を空に切る」へ倒す | 採用 (2026-10) |
 | [0586](./0586-omit-params-cause-chain-and-preread-stack-teeth.md) | `omitParamsFromError` の doc が約束する「`cause` の連鎖にも掛ける」と「`stack` も書き換える」を、偽の例外の歯で縛る | 採用 (2026-10) |
 | [0587](./0587-adr-0577-time-stub-mixed-resend-updatedat.md) | ADR 0577 の歯が通した「再送と新規の混在」と「古い記憶の updatedAt」の変異を塞ぎ、壁時計の歯を固定する | 採用 (2026-10) |
+| [0590](./0590-adr-0554-language-mismatch-boundary-teeth.md) | 言語の事後検査の規則の境目（4字・20字・3語・直引用符の語）を、すぐ内側と外側の対で縛る（ADR 0554 の歯の穴） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
