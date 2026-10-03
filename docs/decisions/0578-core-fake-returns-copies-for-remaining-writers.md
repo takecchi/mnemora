@@ -1,4 +1,4 @@
-# ADR 0576: core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き）
+# ADR 0578: core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き）
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03
@@ -96,7 +96,7 @@
 
 ## 直さないもの【判断】
 
-- **`supersedeWithNewMemories`**（`created[].jobs` と、superseded の `event` がまだ行そのもの）。**別の担当が同じメソッドを直す予定**で、行が重なると衝突するので、本 ADR は1行も触らない。ADR 0562 が直した `created[].memory` もそのまま。直された後に、本 ADR の歯と同じ形（`scribble` で書き換えて `liveRowForTest`・`get`・`eventStore.get` で見る）を当てるのが次の手になる【未確認】。
+- **`supersedeWithNewMemories`**（`created[].jobs` と、superseded の `event` がまだ行そのもの）。**別の担当が同じメソッドを直している**（本 ADR を出す時点で開いている PR #1689）ので、行が重ならないよう本 ADR は1行も触らない。ADR 0562 が直した `created[].memory` もそのまま。直された後に、本 ADR の歯と同じ形（`scribble` で書き換えて `liveRowForTest`・`get`・`eventStore.get` で見る）を当てるのが次の手になる【未確認】。
 - **`FakeEventStore` の `events` getter**・**`FakeOutboxStore.listJobs`**・**`liveRowForTest`**・**`liveOf`**: 検査用・内部の口で、行そのもの（`listJobs` は浅い複製）を返すのが仕事。歯が「store の中で今どうなっているか」を読むのに使う（本 ADR の歯も `listJobs` と `liveRowForTest` を基準の取得に使っている）。
 - **vector / lexical の `search`**: すでに新しいオブジェクト（`memoryId` と数値だけ）を返していて、行を渡していない。
 - **`createObservation` などの入力の側**: Observation の `payload`・Date・`attributes` は、保存するときにまだ呼び手の参照のまま行に入る。本 ADR は返り値の側（と、`claimKey`・`reinforce` の `at` の2つ）だけを直した【未確認】。

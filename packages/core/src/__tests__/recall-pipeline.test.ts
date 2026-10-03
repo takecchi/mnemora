@@ -1280,7 +1280,7 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
     // `recall-runtime.ts` 側の `?? null` 防御を通らない（保存済みの Memory は既に `null`）。
     // store の中の行そのもの（`liveRowForTest`）を直接書き換えて、Memory.subjectId が本当に `undefined` の
     // 状態を作る。⚠ `createMemory` の返り値を書き換えても store には届かない（ADR 0562 で返り値は写しになった。
-    // 以前の「返り値を書き換える」手口は届かないまま緑になっていた——ADR 0576）。
+    // 以前の「返り値を書き換える」手口は届かないまま緑になっていた——ADR 0578）。
     stores.memoryStore.liveRowForTest(ctx, undefinedSubject.id)!.subjectId = undefined;
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
@@ -1427,7 +1427,7 @@ describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、
     // ⚠ `FakeMemoryStore` 自身が `occurredAt` を `?? null` で正規化するため（`subjectId` と同じ）、渡すだけでは
     // `recall-runtime.ts` 側の防御を通らない。直接書き換えて Memory.occurredAt を本当に
     // `undefined` にする。store の中の行そのもの（`liveRowForTest`）を書き換える——`createMemory` の
-    // 返り値は写しなので、書き換えても store には届かない（ADR 0562・0576）。ADR 0289 の subjectId
+    // 返り値は写しなので、書き換えても store には届かない（ADR 0562・0578）。ADR 0289 の subjectId
     // undefined テストと同じ手口。
     stores.memoryStore.liveRowForTest(ctx, memory.id)!.occurredAt = undefined;
 

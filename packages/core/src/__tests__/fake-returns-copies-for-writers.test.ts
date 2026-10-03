@@ -6,7 +6,7 @@ import type { NewObservation } from "../observation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0576: ADR 0562 が「まだ store の行そのものを返す」と書き残した口（`createMemoryWithOutbox`・`list*`・
+ * ADR 0578: ADR 0562 が「まだ store の行そのものを返す」と書き残した口（`createMemoryWithOutbox`・`list*`・
  * `updateStatus` などの返り値）を、写しを返す形に直した歯。
  *
  * 各口について「返り値を（配列・Date・ネストしたオブジェクトまで）書き換えても、その後に store から読み直した値は
@@ -131,7 +131,7 @@ async function seed(stores: Stores, overrides: Partial<NewMemory> = {}) {
   return stores.memoryStore.createMemory(ctx, newMemory(overrides));
 }
 
-describe("Observation の口は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("Observation の口は、返り値の書き換えから行を守る（ADR 0578）", () => {
   it("createObservation: 返り値を書き換えても、getObservation は変わらない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const created = await memoryStore.createObservation(ctx, newObservation());
@@ -218,7 +218,7 @@ describe("Observation の口は、返り値の書き換えから行を守る（A
   });
 });
 
-describe("label の口は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("label の口は、返り値の書き換えから行を守る（ADR 0578）", () => {
   it("listLabels: 返した要素を書き換えても、次の listLabels は変わらない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     await memoryStore.createMemory(ctx, newMemory({ tags: ["proposed-label"] }));
@@ -255,7 +255,7 @@ describe("label の口は、返り値の書き換えから行を守る（ADR 057
   });
 });
 
-describe("createMemoryWithOutbox は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("createMemoryWithOutbox は、返り値の書き換えから行を守る（ADR 0578）", () => {
   it("memory（新規・既存の両方）と jobs を書き換えても、store は変わらない", async () => {
     const stores = createFakeRuntimeStores();
     const { memoryStore, outboxStore } = stores;
@@ -317,7 +317,7 @@ describe("createMemoryWithOutbox は、返り値の書き換えから行を守�
   });
 });
 
-describe("listBySourceObservation(AllVersions) は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("listBySourceObservation(AllVersions) は、返り値の書き換えから行を守る（ADR 0578）", () => {
   async function setup() {
     const stores = createFakeRuntimeStores();
     const obs = await stores.memoryStore.createObservation(ctx, newObservation());
@@ -361,7 +361,7 @@ describe("listBySourceObservation(AllVersions) は、返り値の書き換えか
   });
 });
 
-describe("状態を書く口（updateStatus ほか）は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("状態を書く口（updateStatus ほか）は、返り値の書き換えから行を守る（ADR 0578）", () => {
   it("updateStatus: 返り値を書き換えても、store は変わらない（更新は届いている）", async () => {
     const stores = createFakeRuntimeStores();
     const created = await seed(stores);
@@ -560,7 +560,7 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
   });
 });
 
-describe("contested の口は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("contested の口は、返り値の書き換えから行を守る（ADR 0578）", () => {
   async function pair() {
     const stores = createFakeRuntimeStores();
     const a = await seed(stores);
@@ -831,7 +831,7 @@ describe("contested の口は、返り値の書き換えから行を守る（ADR
   });
 });
 
-describe("FakeEventStore の append・list は、返り値の書き換えから行を守る（ADR 0576）", () => {
+describe("FakeEventStore の append・list は、返り値の書き換えから行を守る（ADR 0578）", () => {
   async function setup() {
     const stores = createFakeRuntimeStores();
     const created = await seed(stores);
@@ -899,7 +899,7 @@ describe("FakeEventStore の append・list は、返り値の書き換えから�
   });
 });
 
-describe("入力の claimKey も、保存するときに写される（ADR 0576）", () => {
+describe("入力の claimKey も、保存するときに写される（ADR 0578）", () => {
   it("createMemory: 渡した claimKey を後から書き換えても、保存した値は変わらない", async () => {
     const stores = createFakeRuntimeStores();
     const claimKey = { subject: "s", predicate: "p" };
