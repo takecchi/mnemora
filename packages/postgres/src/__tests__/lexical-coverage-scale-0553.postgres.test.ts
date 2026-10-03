@@ -370,6 +370,32 @@ describe("trigram: 日本語側の coverage は閾値で決まる 0/1 の二値"
     expectCoverage(rows, { 東京: 1 });
   });
 
+  it("閾値が 0.9 と 1 の間でも、その値で切る（0.9 で頭打ちにしない）", async () => {
+    // 0.9〜1 の間の閾値を縛る歯（ADR 0589 の TR2）。上の HIGH（0.85）と 1 の歯だけでは、
+    // 閾値を 0.9 で頭打ちにしても通っていた。
+    const BAND = 0.97;
+    // 漢字だけの 15 文字。末尾に1文字足した本文の word_similarity は 15/16（PostgreSQL 17 で 0.9375）。
+    const term = "北海道札幌市中央区大通西四丁目";
+    const near = `${term}一`;
+    const mixedNear = `alpha ${near}`;
+    const kit = await makeKit("trigram", BAND);
+    if (kit === null) return;
+    const { db } = await getTestClient();
+    // 前提検査: near の word_similarity は 0.9 と BAND の間にあり、両側から余白をとって離れている。
+    const v = Number(
+      (
+        (await db.execute(sql`SELECT word_similarity(${term}, ${mixedNear}) AS v`)).rows[0] as {
+          v: string;
+        }
+      ).v,
+    );
+    expect(v, `word_similarity = ${v}`).toBeGreaterThan(0.9 + 0.02);
+    expect(v, `word_similarity = ${v}`).toBeLessThan(BAND - 0.02);
+    const rows = await run(kit, [term, near, mixedNear], `alpha beta gamma ${term}`);
+    // near は日本語側が閾値の下なので返らない。mixedNear は ASCII 側の 1/3 で返る（日本語側の 1 にならない）。
+    expectCoverage(rows, { [term]: 1, [mixedNear]: 1 / 3 });
+  });
+
   const MIXED_QUERY = "alpha beta gamma 東京";
   const MIXED_DOCS = ["alpha beta gamma", "alpha 東京タワー", "alpha", "東京"];
 

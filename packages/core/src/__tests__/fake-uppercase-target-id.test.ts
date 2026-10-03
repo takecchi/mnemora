@@ -268,6 +268,12 @@ describe("FakeMemoryStore: 大文字の対象 id を同じ記憶として受け�
     const prefix = stored.id.slice(0, -1) as never;
     expect(prefix).not.toBe(stored.id);
     expect(await stores.eventStore.get(ctx, prefix)).toBeNull();
+    // 先頭の1字を落とした形（`endsWith` なら当たる）と、末尾に1字足した形（保存した id で始まる長い id。
+    // `lowered.startsWith(e.id)` なら当たる）も、等しくないので null（ADR 0593）。
+    const suffix = stored.id.slice(1) as never;
+    const longer = `${stored.id}0` as never;
+    expect(await stores.eventStore.get(ctx, suffix)).toBeNull();
+    expect(await stores.eventStore.get(ctx, longer)).toBeNull();
     expect(await stores.eventStore.get(ctx, stored.id)).not.toBeNull();
   });
 });
