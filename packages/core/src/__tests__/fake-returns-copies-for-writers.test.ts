@@ -40,6 +40,8 @@ function scribble(value: unknown, seen = new Set<unknown>()): void {
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
+    // `id` は書き換えない: 歯が返り値の id で後から読み直すため（返り値が行そのものなら、他の欄の書き換えで赤くなる）。
+    if (key === "id") continue;
     const inner = record[key];
     if (inner !== null && typeof inner === "object") {
       scribble(inner, seen);
@@ -64,7 +66,7 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
     digestSource: "llm",
     provenance: { kind: "imported", batchId: "fixture" },
     tags: ["tag-a", "tag-b"],
-    attributes: { region: "jp", nested: { list: [1, 2] } },
+    attributes: { region: "jp", team: "core" },
     claimKey: { subject: "s", predicate: "p" },
     occurredAt: new Date(T0),
     recordedAt: new Date(T0),
@@ -107,7 +109,7 @@ function newObservation(overrides: Partial<NewObservation> = {}): NewObservation
     recordedAt: new Date(T0),
     validFrom: new Date(T0),
     validUntil: new Date("2027-01-01T00:00:00.000Z"),
-    attributes: { region: "jp", nested: { list: [1] } },
+    attributes: { region: "jp", team: "core" },
     ...overrides,
   };
 }
@@ -165,7 +167,9 @@ describe("Observation の口は、返り値の書き換えから行を守る（A
       "embed",
     ]);
     expect(result.created).toBe(true);
-    const obsBaseline = structuredClone((await memoryStore.getObservation(ctx, result.observation.id))!);
+    const obsBaseline = structuredClone(
+      (await memoryStore.getObservation(ctx, result.observation.id))!,
+    );
     const jobsBaseline = structuredClone(outboxStore.listJobs(ctx));
     expect(jobsBaseline).toHaveLength(2);
 
@@ -255,7 +259,13 @@ describe("createMemoryWithOutbox は、返り値の書き換えから行を守�
   it("memory（新規・既存の両方）と jobs を書き換えても、store は変わらない", async () => {
     const stores = createFakeRuntimeStores();
     const { memoryStore, outboxStore } = stores;
-    const input = newMemory({ contentHash: "same-hash" });
+    // 冪等キーは (sourceObservationId, extractorVersion, contentHash)。sourceObservationId が無いと再送が別の行になる。
+    const obs = await memoryStore.createObservation(ctx, newObservation());
+    const input = newMemory({
+      contentHash: "same-hash",
+      sourceObservationId: obs.id,
+      extractorVersion: "v1",
+    });
     const result = await memoryStore.createMemoryWithOutbox(ctx, input, ["embed", "extract"]);
     expect(result.created).toBe(true);
     const baseline = liveClone(stores, result.memory.id);
@@ -389,7 +399,8 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
     scribble(written);
     await expectRowUnchanged(stores, created.id, baseline);
 
-    const noop = await stores.memoryStore.setEmbeddingStatus(ctx, created.id, "pending");
+    // ready → failed は巻き戻しなので no-op（ADR 0048 と同じ理由）。現在の行の写しが返る。
+    const noop = await stores.memoryStore.setEmbeddingStatus(ctx, created.id, "failed");
     expect(noop.embeddingStatus).toBe("ready");
     scribble(noop);
     await expectRowUnchanged(stores, created.id, baseline);
@@ -415,9 +426,9 @@ describe("状態を書く口（updateStatus ほか）は、返り値の書き換
     const at = new Date(T1);
     await stores.memoryStore.reinforce(ctx, created.id, at);
     at.setTime(0);
-    expect(stores.memoryStore.liveRowForTest(ctx, created.id)?.lastReinforcedAt?.toISOString()).toBe(
-      T1,
-    );
+    expect(
+      stores.memoryStore.liveRowForTest(ctx, created.id)?.lastReinforcedAt?.toISOString(),
+    ).toBe(T1);
   });
 
   it("reinforceMany: 返した要素を書き換えても、store は変わらない", async () => {
