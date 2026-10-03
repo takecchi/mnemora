@@ -50,13 +50,18 @@ export class InMemoryOutboxStore implements OutboxStore {
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
     assertWellFormedCtx(ctx);
     // `PostgresOutboxStore` は `limit` を生 SQL の `LIMIT` にそのまま渡すため、負数を
-    // 渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる（クエリを
-    // 一切実行しない——claim の副作用も起きない）。ここで同じ入力を検査せずに
-    // `eligible.slice(0, opts.limit)` へ渡すと、`Array.prototype.slice` の負数引数は
-    // 「末尾から数えた除外」という別の意味になり、ジョブを黙って claim してしまう
-    // （このクラスの doc が明言する「`PostgresOutboxStore` と一致させてある」という
-    // 意図に反する）。クエリを投げる前に弾く Postgres 側に揃え、副作用が起きる前に
-    // 例外を投げる。
+    // 渡すと、`LIMIT` が評価されたときに Postgres 自身が `LIMIT must not be negative`
+    // （2201W）で例外を投げ、その文は何も書かない。⚠ ただし**評価されなければ投げない**
+    // ——`claimable`（CTE）が結合の内側に回り、外側の `outbox` が0行だと、内側の `LIMIT` は
+    // 一度も評価されない（プランナの統計しだい。空の表を `ANALYZE` して `reltuples = 0`
+    // の状態など。ADR 0575 の実測）。撃つテナントの行が表に1本でもあれば、外側が空に
+    // ならないので、どの統計の状態でも投げた（ADR 0575、`store-boundary-diff` の
+    // `claimBatch(limit:-1)` の実測）。この fixture は、行の有無に関わらず常に断る。
+    // ここで同じ入力を検査せずに `eligible.slice(0, opts.limit)` へ渡すと、
+    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
+    // ジョブを黙って claim してしまう（このクラスの doc が明言する「`PostgresOutboxStore`
+    // と一致させてある」という意図に反する）。Postgres が拒む入力（行があるとき）に
+    // 揃え、副作用が起きる前に例外を投げる。
     //
     // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
     // `Infinity`/非整数を渡すと Postgres は `invalid input syntax for type bigint: "NaN"`
