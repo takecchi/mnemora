@@ -304,6 +304,61 @@ export function describeLoneSurrogateFffd(
           ).toEqual([[expected, 1]]);
         }
       });
+      it("読み取りの引数 contentHash（findActiveByClaimKey・findContestedByClaimKey の `content_hash <>`）も置き換えてから比べる: 保存側と同じ値は除外され、別の値だけが当たる", async () => {
+        const { store } = await makeKit();
+        const claimKey = { subject: "s-hash", predicate: "p-hash" };
+        const other = await store.createMemory(CTX, mem());
+        const active = await store.createMemory(
+          CTX,
+          mem({ contentHash: `h-${input}`, claimKey: { ...claimKey, subject: "s-active" } }),
+        );
+        await store.createMemory(
+          CTX,
+          mem({
+            contentHash: `h-${input}`,
+            status: "contested",
+            contestedWithId: other.id,
+            claimKey: { ...claimKey, subject: "s-contested" },
+          }),
+        );
+        expect(active.contentHash).toBe(`h-${expected}`);
+        const find = async (
+          kind: "active" | "contested",
+          contentHash: string,
+        ): Promise<boolean> => {
+          const q = {
+            subjectId: null,
+            claimKey: { ...claimKey, subject: kind === "active" ? "s-active" : "s-contested" },
+            excludeMemoryId: "00000000-0000-4000-8000-000000000000",
+            contentHash,
+            validFrom: null,
+            validUntil: null,
+          };
+          const hits =
+            kind === "active"
+              ? await store.findActiveByClaimKey!(CTX, q)
+              : await store.findContestedByClaimKey!(CTX, q);
+          return hits.length > 0;
+        };
+        // 当たった（true）か。保存済みの contentHash と「同じ」とみなされる引数は除外される（false）。
+        // Postgres は引数を U+FFFD にしてから比べるので、置き換え前の値も、置き換え後の値も除外される。
+        const observed = {
+          activeRaw: await find("active", `h-${input}`),
+          activeReplaced: await find("active", `h-${expected}`),
+          activeDifferent: await find("active", "h-different"),
+          contestedRaw: await find("contested", `h-${input}`),
+          contestedReplaced: await find("contested", `h-${expected}`),
+          contestedDifferent: await find("contested", "h-different"),
+        };
+        expect(observed).toEqual({
+          activeRaw: false,
+          activeReplaced: false,
+          activeDifferent: true,
+          contestedRaw: false,
+          contestedReplaced: false,
+          contestedDifferent: true,
+        });
+      });
       it("VectorStore.search・LexicalStore.search の filter.labels も置き換わる（保存側の tags と同じ規則）", async () => {
         const { store, searchByLabels } = await makeKit();
         if (searchByLabels === undefined) return;
