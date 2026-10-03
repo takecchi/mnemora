@@ -2692,6 +2692,32 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。
 
+### 64. `@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` が、`opts.at` が Invalid Date なら `jobId` の形を見る前に `Error` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
+
+[ADR 0589](./decisions/0589-postgres-outbox-complete-fail-check-at-before-job-id-shape.md)（検査の順を InMemory・Fake に寄せるのはオーナーの決定 2026-10-03 02:41Z。🔴 に数えるのもオーナーの決定で、規律2 のとおり）。
+
+⚠ **未リリース**。**番号は 64 である**——項目63 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`PostgresOutboxStore.complete`・`fail` が、`opts.at` が Invalid Date のとき…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`、message は `<method>: opts.at must be a valid Date (got Invalid Date)`）。
+
+**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」の規律2 の ⛔ のとおり、fixture 以外の本物の adapter が新しく例外を投げる変更と、conformance の判定を厳しくする変更は数える。
+- 以前は静かに返っていた入力（形の崩れた `jobId` ＋ Invalid Date）が、新しく例外になる。
+- UUID の形の `jobId` では、例外が `DrizzleQueryError`（`cause.code` が `22007`）から素の `Error`（`cause` 無し）に変わる（項目57・60 と同じ形）。
+- `describeOutboxStoreConformance` に4本の `it` が増えた。
+
+**誰が影響を受けるか**:
+- `PostgresOutboxStore.complete`・`fail` を直接呼び、Invalid Date を渡して静かに返ることに頼っていた呼び出し側。
+- 同じ例外を `cause.code === "22007"` や `Failed query:` で分岐していた呼び出し側。
+- 自前の `OutboxStore` 実装を `describeOutboxStoreConformance` に当てている利用者のうち、形の崩れた・存在しない `jobId` なら Invalid Date でも静かに返す実装。
+
+**どう直すか**:
+- 呼び出し側: Invalid Date を渡さない（`opts.at` は省略するか有効な `Date`）。例外で分岐していたなら、`Error` の message か `instanceof Error` で分岐する。
+- 自前の `OutboxStore` 実装: `complete`・`fail` の入口で、`jobId` の形・行の有無を見る前に `opts.at` が Invalid Date なら投げる。
+
+**確かめたこと**: 直す前に Postgres で赤（形の崩れた `jobId` の2本）、直して緑。complete だけ・fail だけ戻す変異で、それぞれ 1 本が赤（ADR 0589）。**確かめていないこと**: 外部の adapter。`timestamptz` の下限より前の日時（ADR 0589「残り」）。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
@@ -2901,10 +2927,6 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `abortIfSuperseded` に大文字の uuid の superseded な記憶の id を渡すと、書かずに `SourceMemoryStatusChangedError` を投げる。綴り違いの同じ id（`[x, X]`）は `changed` に1件、`changed` は id の昇順**（[ADR 0568](./decisions/0568-abort-if-superseded-controls-and-duplicate-id-changed.md)。🟡。[ADR 0556](./decisions/0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) の「新しく断る入力は無い」の訂正）。
   `createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `abortIfSuperseded` が対象。`@mnemora/postgres` は以前から、大文字でも同じ行として見つけて断る（`id = ANY(...)`、1行につき1件、`ORDER BY id ASC`）。以前の fixture は、大文字の id では superseded を見落として書き込み（ADR 0556 が直した）、ADR 0556 の後も、綴り違いの同じ id を渡すと同じ id を `changed` に2回積み、渡した順に並べていた。**新しく断る入力は、大文字の id の superseded な記憶**（Postgres が今断るものだけ。ADR 0556 は、これを「新しく断る入力は無い」と書いていた）。`abortIfSuperseded` に大文字の id を渡して、書き込みが通ることに頼っていたテストは、いまは `SourceMemoryStatusChangedError` になる。`changed` の件数や並びを読んでいたテストも、見直しの対象になる。他のテナントの記憶・superseded 以外の status は、大文字の id でも断らない（Postgres と同じ）。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
-
-- **`@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail`: `opts.at` が Invalid Date なら、`jobId` の形を見る前に `Error`（`<method>: opts.at must be a valid Date (got Invalid Date)`）で断る。conformance に歯を4本足した**（[ADR 0589](./decisions/0589-postgres-outbox-complete-fail-check-at-before-job-id-shape.md)。🟡。オーナーの決定 2026-10-03 02:41Z）。
-  以前は、形の崩れた `jobId`（UUID の形でない文字列）では `opts.at` を見る前に静かに返った（testkit の `InMemoryOutboxStore`・core の Fake は投げていた）。新しく断る入力は、形の崩れた `jobId` ＋ Invalid Date だけ。UUID の形の `jobId` は以前から DB が `22007` で拒んでいたが、例外が `DrizzleQueryError`（`cause.code` が `22007`）から素の `Error`（`cause` 無し）に変わる。影響を受けるのは、Invalid Date を渡して `complete`・`fail` が静かに返ることに頼っていた呼び出し側と、その例外を `cause.code === "22007"` で分岐していた呼び出し側だけ。手順は要らない。DB マイグレーションは無い。外部 adapter が `describeOutboxStoreConformance` を使っているなら、新しい4本（形の崩れた `jobId`・UUID の形の存在しない `jobId` でも、Invalid Date は例外）に合わせる。
-  🟡 に置いた根拠: 型・シグネチャ・既定値は変わらず、実在の `jobId` では以前から例外だった。**ただし**、本物の adapter が新しく例外を投げる変更と、conformance の判定を厳しくする変更は、上の「数え方の規律への追記（2026-09-28）」の規律2 の ⛔ では 🔴 に数える形で、項目57・60（`DrizzleQueryError` から素の `Error` への変更を 🔴 に数えた）と食い違う。🟡 はオーナーの指示で置いた分類であり、数え方の判断は残る。
 
 ## この文書が確かめていないこと
 

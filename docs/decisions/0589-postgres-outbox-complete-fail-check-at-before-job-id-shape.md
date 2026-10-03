@@ -43,8 +43,17 @@ InMemory・Fake が投げるのは、どの組でも素の `Error`・message `co
 
 ## 引き受けた負債
 
-- **`cause.code` が `22007` で分岐していた呼び手**（`jobId` が uuid の形のとき）は、message か `Error` かで分岐し直す必要がある。**🟡 と数える**（CHANGELOG・migration の項）が、本物の adapter が新しく例外を投げる変更と、conformance の判定を厳しくする変更は、migration の「数え方の規律への追記（2026-09-28）」の規律2 の ⛔ では 🔴 に数える側の形である。オーナーが 🟡（Changed）に置くと指示したので従ったが、**数え方が規律と食い違う可能性は残る**。【判断】
+- **`cause.code` が `22007` で分岐していた呼び手**（`jobId` が uuid の形のとき）は、message か `Error` かで分岐し直す必要がある。**🔴（Breaking）と数える**（下の「🟡 か 🔴 か」）。CHANGELOG の `### Breaking`・migration の項目64 に置いた。
 - **testkit の conformance は公開面である**。外部 adapter が `describeOutboxStoreConformance` を使っているなら、「形の崩れた `jobId` でも Invalid Date は投げる」に合わせる必要がある。
+
+## 🟡 か 🔴 か（迷った経緯と、決まったこと）
+
+最初、担い手は CHANGELOG の `Changed`・migration の 🟡 に置いた（オーナーの最初の指示）。迷いは次の2つだった。【判断】
+
+- **🟡 の根拠**: 型・シグネチャ・既定値は変わらない。実在の `jobId` では、Invalid Date は以前から例外だった。新しく断るのは「形の崩れた `jobId` ＋ Invalid Date」という呼び手のバグの組み合わせだけ。
+- **🔴 の根拠**: migration の「数え方の規律への追記（2026-09-28）」の規律2 の ⛔ は、fixture 以外の本物の adapter が新しく例外を投げる変更と、conformance の判定を厳しくする変更を、これまでどおり数えると書く。今回はどちらにも当たる。さらに、uuid の形の `jobId` で例外が `DrizzleQueryError` から素の `Error` に変わる形は、項目57・60 が 🔴 に数えた形と同じである。
+
+**決まったこと（オーナー）**: 規律2 のとおり 🔴（Breaking）に数える。破壊的変更は v1.X.0 で出してよい。⟹ CHANGELOG の `[1.3.0]` の `### Breaking` と、migration の 🔴 の項目64 に置いた。上の決定の中身（検査の順を寄せる）は変わらない。
 
 ## 覆るとしたら
 
@@ -54,3 +63,11 @@ InMemory・Fake が投げるのは、どの組でも素の `Error`・message `co
 
 - 下限より前の日時（`new Date(-1e15)` など）は、InMemory が `RangeError` で（行を探す前に）、Fake は断らず、Postgres は uuid の形の `jobId` では DB が `22008`、形の崩れた `jobId` では静かに返る。同じ形のずれ（形の崩れた `jobId` ＋ 下限より前）が残る。測っていない。【未確認】
 - `store-boundary-diff.postgres.test.ts` には、`complete`/`fail` × Invalid Date の組が無い。conformance の4本が、3実装の差を縛る唯一の歯である。
+- **同じ書き方のコメント（直していない。取り直した grep の結果。`rg`/`grep -rn "LIMIT must not be negative" packages`、`__tests__` 以外）**: 「Postgres 自身が `LIMIT must not be negative` で例外を投げる」と、評価されなければ投げない（ADR 0575）ことに触れずに書いてある場所。それぞれの口の `LIMIT` が結合の内側・CTE にあるか、最上位かは測っていない（ADR 0575 は `EventStore.list(-1)` などを最上位と見て安全としている）。【未確認】
+  - `packages/testkit/src/__fixtures__/in-memory-event-store.ts:122`
+  - `packages/testkit/src/__fixtures__/in-memory-vector-store.ts:187`
+  - `packages/testkit/src/__fixtures__/in-memory-lexical-store.ts:274`
+  - `packages/testkit/src/__fixtures__/in-memory-memory-store.ts:1735`、`:2374`、`:2562`、`:2644`
+  - `__tests__` の中: `packages/core/src/__tests__/runtime-fakes.ts:2394`、`packages/testkit/src/__tests__/in-memory-fixtures-archive-decayed-limit.test.ts`、`in-memory-fixtures-requeue-embed-jobs-limit.test.ts`、`in-memory-fixtures-negative-limit.test.ts`（同じ表現が在る。`runtime-fakes.ts` は core の Fake のコメント）
+  - 直した場所（ADR 0575 を指す）: `in-memory-outbox-store.ts` の `claimBatch`（コミット 99ff3c97）。
+  - `packages/testkit/src/__tests__/` と `runtime-fakes.ts` は、grep の対象外にした `__tests__` の側にも同じ語が在った、という記録で、中身は読んでいない。

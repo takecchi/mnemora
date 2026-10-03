@@ -126,6 +126,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目63。DB マイグレーションは無い。
   - 【確かめていないこと】外部の adapter が実際に赤くなるか。実 API・実モデルが重複で件数を保つか。新しい3つのフラグだけを足した変更を破壊的と数えるか（`[1.2.0]` の 2026-10-01 の数え直しの判定なら非破壊。PC6 と重複件数が破壊的と数える根拠）。
 
+- **`@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` が、`opts.at` が Invalid Date のとき、`jobId` の形を見る前に `Error` で断るようになった——形の崩れた `jobId` ＋ Invalid Date は、静かに返さず投げる。`@mnemora/testkit` の `describeOutboxStoreConformance` に歯が4本増えた**（[ADR 0589](./docs/decisions/0589-postgres-outbox-complete-fail-check-at-before-job-id-shape.md)。オーナーの決定 2026-10-03 02:41Z で、testkit の `InMemoryOutboxStore`・core の Fake の検査の順に寄せた）。
+
+  以前は、形の崩れた `jobId`（UUID の形でない文字列）では `opts.at` を見る前に何もせず返り、InMemory・Fake だけが投げた。いまは3実装とも、行を探す前に `<method>: opts.at must be a valid Date (got Invalid Date)` の `Error` を投げる。conformance に足した歯は、`complete`・`fail` × {形の崩れた `jobId`、UUID の形だが存在しない `jobId`} の4本。
+
+  - **新しく断る入力**: 形の崩れた `jobId` ＋ Invalid Date だけ（呼び手のバグの組み合わせ）。
+  - **例外の型が変わる**: UUID の形の `jobId` は以前から DB が `22007` で拒んでいたが、その例外は `DrizzleQueryError`（`cause.code` が `22007`）から素の `Error`（`cause` 無し）に変わる（項目57・60 と同じ形）。
+  - **破壊的と数える理由**: 型・シグネチャは変わらないが、**本物の adapter が新しく例外を投げ**、**conformance の判定が厳しくなる**。[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」の規律2 の ⛔（fixture 以外の本物の adapter・conformance は上の定義で数える）に当たる。オーナーが 🔴 と決めた（破壊的変更は v1.X.0 で出してよい）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目64。DB マイグレーションは無い。
+  - 【確かめていないこと】`timestamptz` の下限より前の日時（形の崩れた `jobId` ＋ 紀元前4714年11月24日より前）の順（ADR 0589「残り」）。
+
 ### Added
 
 - **`@mnemora/bullmq` の `CreateBullmqTickDriverOptions` に `lockDuration` と `completedJobsToKeep` を足した**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6の判断）。
@@ -163,15 +173,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **文書: 3つの振る舞いを TSDoc・README に書いた**（[ADR 0552](./docs/decisions/0552-owner-q7-q8-q16-docs-only.md)。コードの振る舞いは変えていない）。(1) `@mnemora/anthropic`: `maxTokens` が 21334 以上で `client` が `timeout` を持たないと、SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を投げる（21333 までは通る。SDK 0.124.0 で実測。`maxTokens`・`client`・`complete`・`completeStructured`・`errors.ts` の TSDoc と README）。(2) `@mnemora/postgres` の `runMigrations`: `.sql` が1本も無いフォルダは警告して `{ applied: [] }` で成功すること、mnemora は `statement_timeout` を設定せず利用者側の設定が本体の DDL に効くこと（`runMigrations`・`listMigrationFiles`・CLI の TSDoc。README は既に書いてあった）。(3) `createPostgresClient`: DB エラーの `code` の在り処の3つの形と判定 `err.code ?? err.cause?.code`（TSDoc。README の表の③に接続タイムアウトの文面を足した）。
   ⭕ 非破壊と数える（文書の追記のみ）。
-
-- **`@mnemora/postgres` の `PostgresOutboxStore.complete`・`fail` が、`opts.at` が Invalid Date のとき、`jobId` の形を見る前に断るようになった。形の崩れた `jobId` ＋ Invalid Date は、静かに返さず `Error` を投げる**（[ADR 0589](./docs/decisions/0589-postgres-outbox-complete-fail-check-at-before-job-id-shape.md)。🟡。オーナーの決定 2026-10-03 02:41Z で、testkit の `InMemoryOutboxStore`・core の Fake の検査の順に寄せた）。
-
-  以前は、形の崩れた `jobId`（UUID の形でない文字列）では `opts.at` を見る前に何もせず返り、InMemory・Fake だけが投げた。いまは3実装とも、行を探す前に `<method>: opts.at must be a valid Date (got Invalid Date)` の `Error` を投げる。`@mnemora/testkit` の `describeOutboxStoreConformance` に歯を4本足した（`complete`・`fail` × {形の崩れた `jobId`、UUID の形だが存在しない `jobId`}）。
-
-  - **新しく断る入力**: 形の崩れた `jobId` ＋ Invalid Date だけ（呼び手のバグの組み合わせ）。UUID の形の `jobId` は以前から DB が `22007` で拒んでいたが、その例外は `DrizzleQueryError`（`cause.code` が `22007`）から素の `Error`（`cause` 無し）に変わる。
-  - **🟡 と数える理由**: 型・シグネチャ・既定値は変わらず、`opts.at` に Invalid Date を渡す呼び出しは以前から（実在の `jobId` では）例外だった。ただし本物の adapter が新しく例外を投げ、conformance の判定を厳しくする変更は、[docs/migration-v1.md](./docs/migration-v1.md) の「数え方の規律」の規律2 の ⛔ では 🔴 に数える形である——🟡 はオーナーの指示で置いた分類で、数え方の判断は残る。
-  - **移行**は [docs/migration-v1.md](./docs/migration-v1.md) の 🟡「v1.2.0 → 次の版」の節。DB マイグレーションは無い。
-  - 【確かめていないこと】`timestamptz` の下限より前の日時（形の崩れた `jobId` ＋ 紀元前4714年11月24日より前）の順（ADR 0589「残り」）。
 
 ### Fixed
 

@@ -45,3 +45,18 @@
 ## 残り
 
 - `store-boundary-diff.postgres.test.ts` の `claimBatch(limit: -1)` は、同じ形の文を撃ち、InMemory と例外の有無を比べる。同じ状態で揺れうるが、測っていない。揺れが観測されたら同じ手当てをする。
+
+---
+
+## 追記（2026-10-03・出所: ADR 0589 の作業中に、担い手 mgr-d25950ce が実測した。上の「残り」の件）: `claimBatch(limit:-1)` は揺れなかった
+
+上の本文は当時のまま残す。「残り」の `store-boundary-diff.postgres.test.ts` の `claimBatch(limit: -1)` を、実測で答えた。自前の Postgres 17（`--encoding=UTF8 --locale=C`、専用ポート）で測った。【実測】
+
+- **陽性対照（探り棒が効くか）**: psql で、`outbox` を `TRUNCATE` して `ANALYZE`（`reltuples = 0`。`pg_statistic` には前の他テナント 300 行分が残る）し、`claimBatch` と同じ形の文（CTE `claimable` に `LIMIT -1`）を、行の無いテナントで撃つと、エラーが出ない（拒まれない）。同じ状態で撃つテナントの行を 2 本入れると `LIMIT must not be negative` で拒まれる。EXPLAIN では、CTE が Hash Join の Hash 側（内側）に入り、外側の `outbox o` は行ありだった。
+- **ファイルを名指しで走らせた結果**（毎回 5 本とも通った）:
+  - S0: 統計の無い新品の DB。
+  - S2: 空の `outbox` に `ANALYZE` した状態（`reltuples = 0`、他テナント由来の古い統計が残る）。走らせる前に `reltuples = 0` を確認した。
+  - S4: 他テナント 5000 行を入れて `ANALYZE`（`reltuples = 5000`）。
+- **理由**【判断。実測の EXPLAIN と合っていた】: このファイルの `claimWith` は、`claimBatch` を撃つ前に、同じテナントの行を 2 本（`embed`・`extract`）入れる。`UPDATE … FROM claimable c` の外側 `outbox o` は同じ表なので、その行が見え、外側が空にならない。外側が空にならなければ、内側の CTE（`LIMIT`）は必ず評価され、拒まれる。本文の「同じテナントの行が1本あれば、どの統計の状態でも reject された」と同じ理由である。
+- **測っていないこと**: `SQL_ASCII` の DB（本文は両 encoding で同じ結果と書いている。私は UTF8 だけ）。同じ `for` の他の `limit` の値（`0`・`1`・`2**53`・`1.5`・`NaN`・`2**63`。`1.5`・`NaN`・`2**63` は bind の型変換で決まるのでプランナに依らないはずだが、確かめていない）。本文の「他テナント 300 行 + `ANALYZE`」の状態でこのファイルを走らせること（psql で 300 行・`reltuples = 300` までは作ったが、ファイルは走らせていない。代わりに 5000 行で走らせた）。ファイルの実行中に autovacuum が統計を変える場合。
+- 揺れなかったので、手当てはしない。
