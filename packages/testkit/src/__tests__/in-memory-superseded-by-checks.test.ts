@@ -386,6 +386,59 @@ for (const [kitName, makeKit] of KITS) {
         );
       });
 
+      // 大文字小文字だけが違う自己置換も自己置換（Postgres は `normalizeUuidCase` で両側を畳んで比べる）。
+      for (const [label, flip] of [
+        ["id 小文字・supersededById 大文字", (id: string) => [id, id.toUpperCase()]],
+        ["id 大文字・supersededById 小文字", (id: string) => [id.toUpperCase(), id]],
+      ] as const) {
+        it(`${name}: 自己置換（${label}）は RangeError で、何も書かない`, async () => {
+          const kit = await makeKit();
+          const t = await mem(kit);
+          expect(t.id).toBe(t.id.toLowerCase());
+          const [target, by] = flip(t.id) as [string, string];
+          expect(target === by).toBe(false);
+          await expectRefused(kit, [t.id], /supersededById must not be the memory itself/, () =>
+            call(kit, target, { supersededById: by }),
+          );
+        });
+      }
+
+      it(`${name}: 陽性対照 — 別の記憶を大文字で supersededById に渡すと通り、小文字に畳まれて保存される`, async () => {
+        const kit = await makeKit();
+        const t = await mem(kit);
+        const w = await mem(kit);
+        await call(kit, t.id, { supersededById: w.id.toUpperCase() });
+        expect(await snap(kit, [t.id])).toEqual([["superseded", w.id]]);
+      });
+
+      // 断る文面は、自分自身（大文字でも）を付けても「superseded 以外に付けない」のまま（自己置換の文面にならない）。
+      // Postgres も同じ（`uppercase-target-id-parity.postgres.test.ts` の `edge.updateStatus(active + self ...)`）。
+      it(`${name}: superseded 以外の status に自分自身（大文字でも）を supersededById に付けても、文面は「superseded 以外に付けない」のまま`, async () => {
+        const kit = await makeKit();
+        const t = await mem(kit);
+        for (const status of ["active", "archived", "forgotten"] as const) {
+          for (const by of [t.id, t.id.toUpperCase()]) {
+            await expectRefused(
+              kit,
+              [t.id],
+              new RegExp(
+                `^${name}: opts\\.supersededById must not be set unless status is "superseded"$`,
+              ),
+              () =>
+                name === "updateStatus"
+                  ? kit.store.updateStatus(A, t.id, status, { supersededById: by })
+                  : kit.store.updateStatusWithEvent(
+                      A,
+                      t.id,
+                      status,
+                      { supersededById: by },
+                      ev(t.id),
+                    ),
+            );
+          }
+        }
+      });
+
       it(`${name}: superseded 以外の status に supersededById を付けるのは RangeError で、何も書かない（ADR 0515）`, async () => {
         const kit = await makeKit();
         const t = await mem(kit);

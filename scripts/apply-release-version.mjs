@@ -3,7 +3,7 @@
  * Release の tag の版を、publish 対象パッケージの `package.json` へ**書き込む**段（ADR 0070）。
  *
  * **これがこの repo の版の決め方である。**`v0.1.2` の Release を作れば、この段が
- * 6つの `package.json` を `0.1.2` に書き換えてから `pnpm pack` が走る。
+ * publish 対象（`PUBLISH_TARGETS`。件数はそちらが唯一の定義）の `package.json` を `0.1.2` に書き換えてから `pnpm pack` が走る。
  * ⟹ **版上げのコミットは要らない。**
  *
  * **⚠ だから `packages/<pkg>/package.json` の `version` は、権威ある値ではない。**
@@ -48,7 +48,7 @@ function escapeRegExp(s) {
 }
 
 /**
- * 6つの `package.json` の **`version` の行だけ**を差し替える。
+ * publish 対象すべての `package.json` の **`version` の行だけ**を差し替える。
  *
  * **⚠ JSON として読んで `JSON.stringify` で書き戻してはならない。**実測した:
  * `JSON.stringify(manifest, null, 2)` は短い配列も必ず展開するが、prettier は

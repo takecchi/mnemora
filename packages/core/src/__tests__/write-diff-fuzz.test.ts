@@ -17,8 +17,8 @@ import { breakReinforce, diffWriteSeeds, fakeWriteFuzzBackend } from "./write-di
 const SEEDS = Number(process.env.WRITE_FUZZ_SEEDS ?? 20);
 const LEN = Number(process.env.WRITE_FUZZ_LEN ?? 60);
 const POSITIVE_CONTROL_SEEDS = 5;
-// outbox の `available_at` は store が実時刻で埋めるので、時計はそれより後から始める
-// （そうしないと tick が何も claim しない）。1回の実行の中では両方の backend で同じ値を使う。
+// 時計は実時刻より先から始める。歴史的な理由で残しているが、今は `available_at` も注入した時計に
+// 従う（ADR 0559）。1回の実行の中では両方の backend で同じ値を使う。
 const T0 = Date.now() + 86_400_000;
 
 describe("書き込み側の差分ファズ（Fake 同士）", () => {

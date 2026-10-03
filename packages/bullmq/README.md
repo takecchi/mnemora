@@ -123,33 +123,48 @@ driver の `everyMs` で共有の scheduler が置き換わり**、先に動い�
 詳しい API（`CreateBullmqTickDriverOptions` の各フィールド）は
 [`src/tick-driver.ts`](./src/tick-driver.ts) の doc コメントを見ること。
 
-## ⚠ 完了したジョブ・失敗したジョブは Redis に残り続ける
+## ⚠ 完了したジョブは直近 1000 件だけ残る。失敗したジョブは Redis に残り続ける
 
-この driver は、Worker にもジョブにも `removeOnComplete`・`removeOnFail` を指定していない。BullMQ（6.3.8）は、
-どちらも指定が無いとき、完了したジョブも失敗したジョブも**全部残す**（`redis-queue-backend.js` の `getKeepJobs` が
-`{ count: -1 }` を返す）。⟹ `everyMs` ごとに1件ずつ、`runtime.tick()` の戻り値（`TickResult`）を持った完了ジョブが
-Redis に溜まる（`everyMs: 5_000` なら1日に 17,280 件）。`runtime.tick()` が throw した回は、失敗の理由と stack を
-持った失敗ジョブとして残る。（【実測】redis-server 7.4.7・bullmq 6.3.8。`everyMs: 50` で5秒走らせると、`getJobCounts` が完了41・失敗13（tick を4回に1回 throw させた）、
-その queue のキーが66個、`MEMORY USAGE` の合計が約83.5KB（1ジョブあたり約1.5KB。戻り値が `{}` の最小の場合で、実際の `TickResult` や失敗ジョブの stack では
-これより大きい）だった。`removeOnComplete: { count: 5 }` を付けた素の BullMQ の Worker では、同じ条件で完了は5件で頭打ちになった。
-`everyMs: 5_000` の1日 17,280 件を 1.5KB と置くと約 26MB。件数は上の読みどおりで、バイト数は戻り値の大きさ次第である。）
+[ADR 0548](../../docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md) から、この driver は繰り返しジョブの template に
+`removeOnComplete: { count: 1000 }` を既定で入れる。完了したジョブは新しい順に 1000 件だけ Redis に残り、古いものは BullMQ が消す。
+件数は `completedJobsToKeep`（`0` 以上の整数）で変えられる。
 
-driver には保持の設定を渡す口が無い。Queue の側で掃除するには、同じ `queueName` の `Queue` を自分で作り、
-BullMQ の `queue.clean(grace, limit, type)` を定期的に呼ぶ（`grace` ミリ秒より古いジョブを、`type` ごとに
-最大 `limit` 件消す）。
+```ts check
+import type { CreateBullmqTickDriverOptions } from "@mnemora/bullmq";
+
+declare const base: CreateBullmqTickDriverOptions;
+
+// 完了したジョブを 100 件だけ残す。
+const opts: CreateBullmqTickDriverOptions = { ...base, completedJobsToKeep: 100 };
+void opts;
+```
+
+⚠ **以前（ADR 0548 より前）は `removeOnComplete` の指定が無く、完了したジョブも全部残っていた。** 以前の「全部残す」に近づけたいなら
+`completedJobsToKeep: Number.MAX_SAFE_INTEGER` を渡す。`0` は完了したらすぐ消す。完了ジョブの `returnvalue`（`TickResult`）を後から
+`queue.getJobs(["completed"])` で読んでいた人は、古い分が読めなくなる。
+
+**`removeOnFail` は指定していない。** BullMQ（6.3.8）は、指定が無いとき失敗したジョブを**全部残す**（`redis-queue-backend.js` の `getKeepJobs` が
+`{ count: -1 }` を返す）。`runtime.tick()` が throw した回は、失敗の理由と stack を持った失敗ジョブとして残る。失敗は調べる材料なので、
+消す口は足していない（`completedJobsToKeep` は完了だけに効く）。（【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。ADR 0548 の前の状態。
+`everyMs: 50` で5秒走らせると、`getJobCounts` が完了41・失敗13（tick を4回に1回 throw させた）、その queue のキーが66個、`MEMORY USAGE` の合計が約83.5KB
+（1ジョブあたり約1.5KB。戻り値が `{}` の最小の場合で、実際の `TickResult` や失敗ジョブの stack ではこれより大きい）だった。ADR 0548 の後の完了ジョブの
+頭打ちは、CI の `tick-driver.shared-scheduler.redis.test.ts` が縛る。手元の Redis では測っていない。）
+
+失敗したジョブが溜まるのが気になるなら、Queue の側で掃除する。同じ `queueName` の `Queue` を自分で作り、
+BullMQ の `queue.clean(grace, limit, type)` を定期的に呼ぶ（`grace` ミリ秒より古いジョブを、`type` ごとに最大 `limit` 件消す）。
 
 ```ts check
 import { Queue } from "bullmq";
 
 const queue = new Queue("mnemora-tick", { connection: { host: "127.0.0.1", port: 6379 } });
-// 1時間より古い完了ジョブと、1日より古い失敗ジョブを、それぞれ最大1000件消す。
+// 1時間より古い完了ジョブと、1日より古い失敗ジョブを、それぞれ最大1000件消す（完了ジョブは driver の既定でも 1000 件に頭打ちになる）。
 await queue.clean(60 * 60 * 1000, 1000, "completed");
 await queue.clean(24 * 60 * 60 * 1000, 1000, "failed");
 await queue.close();
 ```
 
 （【実測】redis-server 7.4.7・bullmq 6.3.8。この形の `queue.clean` は、上の driver が溜めた完了42件・失敗13件を、`grace: 0`・`limit: 0`（無制限）で全部消した。`limit` を付けたときは
-その件数までである。）保持の既定値を driver に入れるかどうかは決まっていない。
+その件数までである。ADR 0548 の前の状態での測定。）
 
 ## ⚠ `everyMs`・`jobName` は構築時に検査する（`queueName` は BullMQ が検査する）
 
@@ -164,12 +179,18 @@ await queue.close();
 | `jobName` を省略 | 既定 `"mnemora-tick"` |
 | `jobName` が空でない文字列（`:` を含む・空白・日本語・300 文字も） | 通る |
 | `jobName` が空文字・文字列でない | **構築時に投げる**（文字列でなければ `TypeError`、空文字なら `RangeError`） |
+| `lockDuration` を省略 | Worker に渡さない（BullMQ の既定 30000 ms） |
+| `lockDuration` が `1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数 | 通り、Worker にそのまま渡る（ADR 0548） |
+| `lockDuration` が `0`・負・小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超・数でない（`"30000"`・`null` など） | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`） |
+| `completedJobsToKeep` を省略 | 既定 `1000`（`removeOnComplete: { count: 1000 }`）。ADR 0548 |
+| `completedJobsToKeep` が `0` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数 | 通り、`removeOnComplete: { count }` になる |
+| `completedJobsToKeep` が負・小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超・数でない | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`） |
 | `queueName` が空文字・`:` を含む | BullMQ が `createBullmqTickDriver(...)` の中で同期的に投げる（driver は検査しない） |
 | `queueName` が空白・日本語・300 文字 | 動く |
 
 （検査を足す前の測定【実測】redis-server 7.4.7・bullmq 6.3.8: 負の `everyMs`・`1` 未満の小数・`1e21`・空文字の `jobName` は `start()` が成功し、tick が数回（`1e21`・空文字は1回）で止まり `onTickError` も鳴らなかった。`0`・`NaN`・`null` は `start()` が reject、`Infinity` は Lua のエラーで reject した。数字は ADR 0477。）
 
-`concurrency` が正の整数でないときも同じ形で投げる（数でなければ `TypeError`、小数・`NaN`・`1` 未満なら `RangeError`）。message は [ADR 0525](../../docs/decisions/0525-config-error-types-align-with-provider.md) の前後で変わらない（型だけが素の `Error` から変わった）。
+`concurrency`・`lockDuration`・`completedJobsToKeep` が不正なときも同じ形で投げる（検査の順は `everyMs` → `jobName` → `concurrency` → `lockDuration` → `completedJobsToKeep`。数でなければ `TypeError`、小数・`NaN`・`1` 未満なら `RangeError`）。message は [ADR 0525](../../docs/decisions/0525-config-error-types-align-with-provider.md) の前後で変わらない（型だけが素の `Error` から変わった）。
 
 ⚠ **利用側は、不正な設定のまま既に動かしていたコードが、更新後は構築時に投げる。** 移行は [migration-v1](../../docs/migration-v1.md) の 🔴 56。
 
@@ -263,10 +284,10 @@ await queue.close();
 同じジョブの2本目の tick を走らせ**、塞いでいた1本目は45.8秒で戻ってから `onTickResult` を呼び、**直後に `onTickError` が2回**（`Missing lock for job ... moveToFinished`、0.1秒以内）届いた。
 最終のジョブは完了1件・失敗0件で、`attemptsStarted: 2`・`stalledCounter: 1`。（以下の箇条書きの「読み」は、この実測で裏づいた。`lockDuration` 既定30000ms の値は `worker.js` の読みのまま。）
 
-- BullMQ は、Worker が処理中のジョブの lock を `lockDuration`（既定 30000 ms）で持ち、その半分の間隔で延長する。**この driver は `lockDuration` を設定しない**（`CreateBullmqTickDriverOptions` に口が無い。`Worker` には bullmq の既定値が渡る）。`runtime.tick()` がイベントループを長く塞ぐ・Redis との接続が途切れるなどで lock の延長が間に合わずに期限が切れると、stalled checker（既定 `stalledInterval` 30000 ms）がそのジョブを wait へ戻し、**別の Worker が2本目の tick を走らせうる**（同じジョブの再実行）。
+- BullMQ は、Worker が処理中のジョブの lock を `lockDuration`（既定 30000 ms）で持ち、その半分の間隔で延長する。**この driver は `lockDuration` を渡さない限り設定しない**（ADR 0548 より前は口が無かった。省略すると `Worker` には bullmq の既定値が渡る。`lockDuration` オプションで変えられる）。`runtime.tick()` がイベントループを長く塞ぐ・Redis との接続が途切れるなどで lock の延長が間に合わずに期限が切れると、stalled checker（既定 `stalledInterval` 30000 ms）がそのジョブを wait へ戻し、**別の Worker が2本目の tick を走らせうる**（同じジョブの再実行）。
 - **データは壊れない。** 2本の tick が重なっても、outbox の行は `claimBatch` の行ロック・リース・CAS（`attempts`）で二重に処理されない（「複数プロセスで動かすとき」と同じ守り）。driver も同じジョブを二重に数えない。
 - **ただし通知は素直ではない。** 遅れて終わった1本目は、processor の中で `onTickResult` を呼んだあと、BullMQ が完了を記録する `moveToCompleted` を `Missing lock` で失敗させ、Worker の `'error'` 経由で **`onTickError` に届きうる（2回届く読み）**。つまり**その tick の `onTickResult` が届いたあとに `onTickError` が鳴る**ことがある。`onTickError` を「tick が動かなかった」の意味でだけ扱うと、この場合は誤る。
-- 対処は書いていない（口を足す・driver で束ねる、のどちらも採っていない）。`onTickError` のログには、同じ時刻の `onTickResult` があるかを見ること。`lockDuration` を変える口は、公開 API の追加になるため足していない（[ADR 0440](../../docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md)）。
+- **対処: `lockDuration` を、1回の tick が塞ぎうる時間より長くする**（ADR 0548。ミリ秒の正の整数。例: `lockDuration: 120_000`）。省略すると BullMQ の既定（30000 ms）。長くすると、プロセスが落ちたときに別の Worker が引き継ぐまでの時間も伸びる。`stalledInterval` など、ほかの Worker の設定は通していない。driver で束ねることもしていない。`lockDuration` を足すまでの経緯は [ADR 0440](../../docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](../../docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6・[ADR 0548](../../docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。`onTickError` のログには、同じ時刻の `onTickResult` があるかを見ること。⚠ `lockDuration` を長くして stalled が出なくなることは、実 Redis では測っていない（BullMQ の仕様の読みと、mock で Worker に値が渡ることだけ）。
 
 ## 確かめていないこと
 

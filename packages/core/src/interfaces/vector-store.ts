@@ -18,18 +18,21 @@ import type { ProvenanceKind } from "../provenance.js";
  * `decayFloorAtAfter` 以前のものは返らない・`excludeProvenanceKinds` に在る kind は
  * 返らない、を同一の適合テストで postgres / in-memory 両方に対して走らせる）。
  *
- * **⚠ 後段の多層防御は、ここの全フィールドを覆ってはいない。**
- * `packages/core/src/recall-runtime.ts` は段1のあとに `subjectId`・`excludeProvenanceKinds`・
+ * **⚠ 後段の多層防御は「段1で絞らなくてよい」ことの根拠ではない。**
+ * `packages/core/src/recall-runtime.ts` は、段1（ANN）と段3.5（連想枠）が `search()` から
+ * 受け取った候補に、`subjectId`・`excludeProvenanceKinds`・
  * `period`（`occurredAfter`/`occurredBefore`。ADR 0059 で本 interface に加わった）・
- * `validAt`（Issue #280。下記）を改めて見るが、**`status` と `decayFloorAtAfter` は
- * 見ない**。⟹ `status` と `decayFloorAtAfter` については、ここの契約を adapter が
- * 守ることが**唯一の防衛線**である
- * （実測: `FakeVectorStore` の `status` の絞りを落とす変異で、`recall-pipeline.test.ts` の
- * 既存の歯が実際に赤くなる。`subjectId` を落とす変異では赤くならない——後段が救うため）。
- * `subjectId`・`excludeProvenanceKinds`・`period`・`validAt` は後段にも同じ絞りが残るので、
- * adapter がこの契約を落としても後段が結果の正しさを救う（`subjectId`/
- * `excludeProvenanceKinds` は ADR 0056、`period` は ADR 0059、`validAt` は Issue #280）
+ * `validAt`（Issue #280。下記）・`status`（`active`/`contested` だけを残す。ADR 0432 AL-1）・
+ * 忘却ゲート（`decayFloorAtAfter` の述語と活動時計の軸。ゲートが有効なとき。ADR 0153）を
+ * 改めて掛ける。落とす方向にだけ働くので、adapter がこの契約を落としても、
+ * 混入は後段が救い、返る件数が減るだけである
+ * （`subjectId`/`excludeProvenanceKinds` は ADR 0056、`period` は ADR 0059、
+ * `validAt` は Issue #280、`status` は ADR 0432、忘却ゲートは ADR 0153）
  * ——ただしこれは「段1で絞らなくてよい」ことの根拠ではない。
+ * （2026-10-03 訂正）この段落は以前、「後段は `status` と `decayFloorAtAfter` を見ないので、
+ * ここの契約を adapter が守ることが唯一の防衛線である」と書いていた。ADR 0432 AL-1 の
+ * `survivesStatusGate` と、ADR 0153 の `survivesDecayGate`（`recall-runtime.ts`）で、どちらも
+ * 後段が見るようになったため、今は成り立たない。
  * 段1の絞りは over-fetch の窓（k'）を無駄にしないための最適化であり、後段フィルタが
  * 在ることは、どの場合も「filter を無視してよい」ことの根拠ではない。
  */
@@ -86,7 +89,7 @@ export interface VectorFilter {
    * 「この配列に*在る*ものを落とす」除外の列挙。`RecallQuery.excludeProvenanceKinds`
    * （`packages/core/src/recall.ts`）と同じ語彙・同じ向きに揃えてある。
    *
-   * `ProvenanceKind` は5値の閉じた離散値であり、`provenance_kind` は独立の列
+   * `ProvenanceKind` は閉じた離散値であり、`provenance_kind` は独立の列
    * （`packages/postgres/migrations/0001_init.sql`）なので等値比較で足りる——
    * 上のクラス doc の「索引で表現できる形」にそのまま当たる。`period` のような
    * 連続値の範囲比較とは事情が異なる（ADR 0023 が `period` を段1に降ろさなかった理由は
@@ -103,8 +106,8 @@ export interface VectorFilter {
   excludeProvenanceKinds?: ProvenanceKind[] | undefined;
   /**
    * **期間の下限。両端とも包含（`>=`）（ADR 0059）。** 比較対象は
-   * `COALESCE(occurredAt, recordedAt)`——「実効時刻」の定義（ADR 0039 が4箇所に在ると
-   * 数えた規則。本フィールドの追加でこれが5箇所目になる）。`RecallQuery.occurredAfter`
+   * `COALESCE(occurredAt, recordedAt)`——「実効時刻」の定義（ADR 0039 が複数の箇所に在る
+   * と指摘した規則。本フィールドもその1つである）。`RecallQuery.occurredAfter`
    * （`packages/core/src/recall.ts`）・`packages/postgres/src/memory-store.ts` の
    * `aggregateScope` が既に使っている厳密経路（`COALESCE(occurred_at, recorded_at) >=
    * occurredAfter`）と同じ命名・同じ境界の含み方に揃えてある。
@@ -347,8 +350,8 @@ export interface VectorStore {
    * 結果から落とさず、距離を比較が通らない値（`NaN`）にして返す**——
    * [ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md) の
    * ゼロベクトルと同じ契約の形であり、`recall()` の段2（ADR 0044）がこれを
-   * `omitted.score_not_comparable` に数える。3実装（`packages/postgres` の pgvector 経由の
-   * ゼロベクトル差し替え、`packages/testkit`/`packages/core` の Fake の長さ不一致検査）は
+   * `omitted.score_not_comparable` に数える。`packages/postgres`（pgvector 経由のゼロベクトル
+   * 差し替え）も `packages/testkit`/`packages/core` の Fake（長さ不一致検査）も、
    * 同じ振る舞いをする（実装の詳細である `NaN` という値そのものは揃えない——ADR 0040
    * 決定1と同じ自由度）。**`query` が有限でない成分（`NaN`・`Infinity`）を含むときも
    * 同じく「比較不能」であり、`search` は例外を投げない**（`PostgresVectorStore` は同じゼロベクトルへの
@@ -483,7 +486,7 @@ export interface VectorStore {
    * `deleteAcrossSpaces` が「特定の `memoryId` の集合」を対象にするのに対し、
    * こちらは「このテナントの行全部」が対象——`packages/core/src/erase-tenant.ts` の
    * 独立関数 `eraseTenant` が、`MemoryStore.eraseTenant?`/`OutboxStore.eraseTenant?`/
-   * `TenantSettingsStore.eraseTenant?` と束ねて呼ぶ4つの口の1つ。
+   * `TenantSettingsStore.eraseTenant?` と束ねて呼ぶ口の1つ。
    *
    * 🔴 **任意メソッドである。**必須にすると `VectorStore` を実装する第三者の adapter を
    * 壊す破壊的変更になる——`deleteAcrossSpaces`（決定的に必須にした ADR 0382）とは

@@ -18,6 +18,9 @@
  * 🔴 **この PR では `examples/chat/archive-sweep-baseline.json` を作らない**
  * (この作業環境に DB が無く、捏造した数値を基準値として残さないため。初回 CI の
  * artifact を後続 PR で基準値にする)。⟹ `--baseline` は省略可能でなければならない。
+ * （2026-10-03 訂正）`examples/chat/archive-sweep-baseline.json` は、いまは在る。`ci.yml` の
+ * `archive-sweep-cost` ジョブはそれを `--baseline` に渡している。`--baseline` を省略できる
+ * 作りは、手元実行・単体テストのために今も変えていない。
  *
  * ## 🔴 `before` 段の `usageChars`/`usageEstimatedTokens`/`usageIndexChars` は厳密等価では比べない(ADR 0123 / Issue #223)
  *

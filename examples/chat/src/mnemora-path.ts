@@ -87,12 +87,15 @@ export interface IngestConversationOptions {
  * `externalId` に turn の連番を使う——同じ `conversation` に対してこの関数を
  * 2度呼んでも（例: recall() を budget 有り/無しで2通り試したい呼び出し側が、
  * 誤ってもう一度 ingest してしまっても）Observation が重複して作られない
- * （roadmap.md 段階3の冪等性がそのまま効く）。**呼び出し側は ingest と query を
+ * （`observe()` の `externalId` による冪等性がそのまま効く。⚠ 当初は `docs/roadmap.md`
+ * 段階3 を指していたが、同節は 2026-09-29 に削除した（#762）。当時の本文は 635c93d の版にある）。
+ * **呼び出し側は ingest と query を
  * 混ぜて何度も呼ばない**のが前提だが、それでも壊れないようにしてある。
  *
  * **なぜ `tick()` を1回だけ呼ばないのか（docs/decisions/0019-real-openai-measurement-cost.md
  * §5、docs/decisions/0021-drain-embed-ticks-in-ingest.md）**: `tick()` の既定 `limit` は
- * 50（`DEFAULT_TICK_LIMIT`、`packages/core/src/runtime.ts`）。embed ジョブは
+ * `DEFAULT_TICK_LIMIT`（`packages/core/src/runtime.ts`。下の「50件」はこの欠陥が
+ * 見つかった当時の値）。embed ジョブは
  * `claimBatch` が `ORDER BY available_at ASC` で先着順に claim するため、
  * この関数がかつて `tick()` を1回しか呼んでいなかった頃は、**会話が長くなって
  * observe() された発話が50件を超えると、51件目以降の記憶が埋め込まれないまま

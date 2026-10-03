@@ -9,7 +9,7 @@
  * `examples/chat/src/recall-footprint-calibration-samples-json.ts` の
  * `RecallFootprintCalibrationSamplesRunJson`)を Markdown へ変換する。
  *
- * ## ⛔ 門にしない(いまのところ基準値ファイルも無い)
+ * ## ⛔ 門にしない(基準値ファイルは、書いた当時は無かった。いまは `examples/chat/recall-footprint-calibration-samples-baseline.json` が在り、`ci.yml` が `--baseline` に渡している。それでも門ではない)
  *
  * `compare`(ADR 0133)と違い、この bench はまだ CI で複数回一致することを実測して
  * いない——ADR 0314 §2 の決定どおり、`examples/chat/compare-baseline.json` のような
@@ -110,8 +110,9 @@ export function validateMeasured(data) {
 
 /**
  * 基準値ファイル(パース済み)の形を検査する。実測と同じ必須項目を要求する。
- * ⚠ **いまのところこの形の基準値ファイルは存在しない**(冒頭 docstring)——
- * この関数自体は将来のために用意してある。
+ * ⚠ **書いた当時は、この形の基準値ファイルは存在しなかった**(冒頭 docstring。
+ * （2026-10-03 訂正）いまは `examples/chat/recall-footprint-calibration-samples-baseline.json` が在り、
+ * この関数はそれを検査している)。
  *
  * @param {unknown} data
  * @returns {{ ok: true, value: { rows: Record<string, unknown>[] } } | { ok: false, error: string }}

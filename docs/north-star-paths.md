@@ -60,7 +60,10 @@ ADR 0216 決定7）である。この一覧は、それを置き換えない。
 - テスト: `packages/core/src/__tests__/recall-decay-gate.test.ts` 「既定（includeFullyDecayed 未指定）では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る」
 
 最初の2本は、Postgres と testkit の fixture の両方で走る。
-⚠ 活動時計（`decayClock: 'activity'`）のテナントでは破れうる（#338、未実測）。
+⚠ 活動時計（`decayClock: 'activity'`）のテナントでは、`recall()` の回数が多いと破れうる。境界は本物の Postgres で実測済みである
+（#338、[ADR 0311](./decisions/0311-activity-clock-boundary-measured-soft-and-hard.md)。数はここに写さない）。Issue は閉じており、
+活動を数える単位は呼び出しの引数 `activityCounting` で選べる（[ADR 0353](./decisions/0353-activity-counting-per-call.md)。既定は変わらない）
+（[ADR 0561](./decisions/0561-doc-code-drift-sweep-recall-testkit.md)）。
 
 ### 項目2
 

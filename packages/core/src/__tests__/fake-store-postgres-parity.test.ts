@@ -574,7 +574,7 @@ describe("FakeMemoryStore.createMemory: subjectId に NUL 文字を含むと Pos
     const { memoryStore } = createFakeRuntimeStores();
     await expect(
       memoryStore.createMemory(ctx, fixture({ subjectId: "abc\u0000def" })),
-    ).rejects.toThrow(/subjectId must not contain NUL/);
+    ).rejects.toThrow(/input\.subjectId contains a NUL character/); // ADR 0563: 識別子の NUL は MalformedIdentifierError（InMemory・Postgres と同じ）
   });
 });
 
@@ -630,7 +630,11 @@ describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は�
       const { memoryStore, outboxStore } = createFakeRuntimeStores();
       await expect(
         memoryStore.createObservationWithOutbox(ctx, observation(overrides), ["extract"]),
-      ).rejects.toThrow(/must not contain NUL characters/);
+      ).rejects.toThrow(
+        // ADR 0563: `subjectId`・`externalId` の NUL は MalformedIdentifierError（"input.subjectId contains a NUL character …"）。
+        // それ以外の欄は素の Error（"… must not contain NUL characters"）。
+        /must not contain NUL characters|^input\.(subjectId|externalId) contains a NUL character/,
+      );
       const jobs = await outboxStore.claimBatch(ctx, {
         limit: 10,
         now: new Date("2100-01-01T00:00:00.000Z"),
