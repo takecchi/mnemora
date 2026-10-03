@@ -242,6 +242,12 @@ function computeRank(contentTokens: string[], phrases: string[][]): number {
  * 「Map の行の参照をそのまま返し、呼び出し側の書き換えが store の中身まで変えてしまい、
  * 歯が無力化された」前例があるため（`in-memory-vector-store.ts` の `cosineDistance` の doc、
  * ADR 0040 の周辺で踏まれた同族の穴）。
+ *
+ * **`coverage` の尺度**: 空白で区切ったクエリの語（重複は1語）のうち、本文の token の列に
+ * フレーズとして現れた数 ÷ 語の総数。1/n 刻みで、日本語（非 ASCII）の語は引かない。
+ * `PostgresLexicalStore`（tsvector）と同じ式で、`PostgresTrigramLexicalStore` の日本語側
+ * （閾値で 0/1 の二値）とは違う。3つの store の対応は
+ * [ADR 0553](../../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
  */
 export class InMemoryLexicalStore implements LexicalStore {
   constructor(private readonly memoryStore: InMemoryMemoryStore) {}
