@@ -6,7 +6,7 @@ import type { Db } from "./client.js";
 import { assertNoNul, assertNoNulInScopeFilter } from "./input-check.js";
 import { omittingParams } from "./omit-params.js";
 import { capLexicalQueryWords } from "./lexical-query-cap.js";
-import { toPgTimestamp } from "./mapping.js";
+import { toPgTimestampClamped } from "./mapping.js";
 
 /**
  * `ts_rank_cd` の normalization 引数。PostgreSQL のドキュメント（textsearch-controls）の
@@ -192,19 +192,19 @@ export function buildLexicalSearchSelect(
   // ——`PostgresVectorStore.search`（vector-store.ts）の period 絞りと同じ境界。
   if (opts.filter.occurredAfter !== undefined) {
     conditions.push(
-      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestamp(opts.filter.occurredAfter)}`,
+      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestampClamped(opts.filter.occurredAfter)}`,
     );
   }
   if (opts.filter.occurredBefore !== undefined) {
     conditions.push(
-      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestamp(opts.filter.occurredBefore)}`,
+      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestampClamped(opts.filter.occurredBefore)}`,
     );
   }
   // Issue #280（Issue #202 第2弾）: `validAt` ゲート。`PostgresVectorStore.search`
   // （vector-store.ts）と同じ述語・同じ境界（`valid_until` は狭義の `>`）。
   if (opts.filter.validAt !== undefined) {
     conditions.push(
-      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestamp(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestamp(opts.filter.validAt)})`,
+      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestampClamped(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestampClamped(opts.filter.validAt)})`,
     );
   }
   // ADR 0056: 空配列は no-op。`length > 0` で番わないと `<> ALL('{}')` という常に真の
@@ -309,6 +309,12 @@ export function buildLexicalSearchSelect(
  * 標準搭載しているため（`numeric` とは違い文字列に落とさない）、`row.coverage`/
  * `row.rank` は追加の変換なしに `number` として届く——`vector-store.ts` の
  * `row.distance`（同じく `pg` 経由の `float8`）と同じ扱い。
+ *
+ * **`coverage` の尺度**: クエリを語に分け（重複は1語）、本文の tsvector に当たった語の数 ÷
+ * 語の総数。1/n 刻みで、日本語（非 ASCII）の語は引かない。testkit の `InMemoryLexicalStore`
+ * と同じ式で、`PostgresTrigramLexicalStore` の日本語側（閾値で 0/1 の二値）とは違う。
+ * 3つの store の対応と測った値は
+ * [ADR 0553](../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
  */
 export class PostgresLexicalStore implements LexicalStore {
   constructor(private readonly db: Db) {}

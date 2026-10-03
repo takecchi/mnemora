@@ -17,7 +17,7 @@ import {
   assertQueryBigint,
   assertQueryJsonWithoutNul,
   assertQueryLabelsWithoutNul,
-  assertQueryTimestamptz,
+  assertQueryDate,
   seqSumOverflowsBigint,
 } from "./query-check.js";
 
@@ -188,10 +188,12 @@ export class InMemoryVectorStore implements VectorStore {
     };
     assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("search", "filter.occurredAfter", opts.filter.occurredAfter);
-    assertQueryTimestamptz("search", "filter.occurredBefore", opts.filter.occurredBefore);
-    assertQueryTimestamptz("search", "filter.validAt", opts.filter.validAt);
-    assertQueryTimestamptz("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
+    assertQueryDate("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
     // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
     assertQueryBigint("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、

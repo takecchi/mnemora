@@ -2186,10 +2186,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("aggregateScope", "occurredAfter", scope.occurredAfter);
-    assertQueryTimestamptz("aggregateScope", "occurredBefore", scope.occurredBefore);
-    assertQueryTimestamptz("aggregateScope", "validAt", scope.validAt);
-    assertQueryTimestamptz("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    assertQueryDate("aggregateScope", "occurredAfter", scope.occurredAfter);
+    assertQueryDate("aggregateScope", "occurredBefore", scope.occurredBefore);
+    assertQueryDate("aggregateScope", "validAt", scope.validAt);
+    assertQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
     // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
     assertQueryBigint("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
     // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
@@ -3460,8 +3462,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0543: 検索値（`text` 列の引数）の孤立サロゲートも、Postgres では U+FFFD に置き換わって比べられる。
     query = { ...query, claimKey: replaceLoneSurrogatesInClaimKey(query.claimKey) };
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("findActiveByClaimKey", "validFrom", query.validFrom);
-    assertQueryTimestamptz("findActiveByClaimKey", "validUntil", query.validUntil);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    // 空の区間かどうかも、寄せずに元の値で決める（両端が下限より前でも from < until なら空ではない）。
+    assertQueryDate("findActiveByClaimKey", "validFrom", query.validFrom);
+    assertQueryDate("findActiveByClaimKey", "validUntil", query.validUntil);
     // ADR 0434: `claim_key_subject`・`claim_key_predicate` は `text` 列。検索値の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryTextWithoutNul("findActiveByClaimKey", "claimKey.subject", query.claimKey.subject);
     assertQueryTextWithoutNul(
@@ -3523,8 +3528,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
     // ADR 0543: `findActiveByClaimKey` と同じ。
     query = { ...query, claimKey: replaceLoneSurrogatesInClaimKey(query.claimKey) };
-    assertQueryTimestamptz("findContestedByClaimKey", "validFrom", query.validFrom);
-    assertQueryTimestamptz("findContestedByClaimKey", "validUntil", query.validUntil);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    // 空の区間かどうかも、寄せずに元の値で決める（両端が下限より前でも from < until なら空ではない）。
+    assertQueryDate("findContestedByClaimKey", "validFrom", query.validFrom);
+    assertQueryDate("findContestedByClaimKey", "validUntil", query.validUntil);
     // ADR 0434 の負債（ADR 0500）: 兄弟の `findActiveByClaimKey` と同じ。`claim_key_subject`・`claim_key_predicate` は `text` 列で、
     // 検索値の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryTextWithoutNul(
