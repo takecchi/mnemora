@@ -28,6 +28,13 @@ import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.
 
 export interface LoneSurrogateKit {
   store: MemoryStore;
+  /**
+   * Observation の `payload`（と Memory の `attributes`/`provenance`。`jsonb` 列）の孤立サロゲートを実装が断るか。
+   * Postgres は断る（`true`。`payload` は `invalid input syntax for type json`）。InMemory・Fake は断らず、
+   * **置き換えもせず**そのまま保持する（`false`）。どちらも U+FFFD にはならない。
+   * （イベントの `actor`/`meta` はこの旗の対象外: 3実装とも書く前に断る。Issue #1211。）
+   */
+  jsonbRejectsLoneSurrogate: boolean;
   /** そのテナントの全イベント。 */
   listEvents(ctx: Ctx): Promise<MemoryEvent[]>;
   /** `OutboxStore.claimBatch`（`kinds`・`claimedBy` の引数が `text[]`・`text` の列に当たる口）。 */
@@ -304,6 +311,61 @@ export function describeLoneSurrogateFffd(
           ).toEqual([[expected, 1]]);
         }
       });
+      it("読み取りの引数 contentHash（findActiveByClaimKey・findContestedByClaimKey の `content_hash <>`）も置き換えてから比べる: 保存側と同じ値は除外され、別の値だけが当たる", async () => {
+        const { store } = await makeKit();
+        const claimKey = { subject: "s-hash", predicate: "p-hash" };
+        const other = await store.createMemory(CTX, mem());
+        const active = await store.createMemory(
+          CTX,
+          mem({ contentHash: `h-${input}`, claimKey: { ...claimKey, subject: "s-active" } }),
+        );
+        await store.createMemory(
+          CTX,
+          mem({
+            contentHash: `h-${input}`,
+            status: "contested",
+            contestedWithId: other.id,
+            claimKey: { ...claimKey, subject: "s-contested" },
+          }),
+        );
+        expect(active.contentHash).toBe(`h-${expected}`);
+        const find = async (
+          kind: "active" | "contested",
+          contentHash: string,
+        ): Promise<boolean> => {
+          const q = {
+            subjectId: null,
+            claimKey: { ...claimKey, subject: kind === "active" ? "s-active" : "s-contested" },
+            excludeMemoryId: "00000000-0000-4000-8000-000000000000",
+            contentHash,
+            validFrom: null,
+            validUntil: null,
+          };
+          const hits =
+            kind === "active"
+              ? await store.findActiveByClaimKey!(CTX, q)
+              : await store.findContestedByClaimKey!(CTX, q);
+          return hits.length > 0;
+        };
+        // 当たった（true）か。保存済みの contentHash と「同じ」とみなされる引数は除外される（false）。
+        // Postgres は引数を U+FFFD にしてから比べるので、置き換え前の値も、置き換え後の値も除外される。
+        const observed = {
+          activeRaw: await find("active", `h-${input}`),
+          activeReplaced: await find("active", `h-${expected}`),
+          activeDifferent: await find("active", "h-different"),
+          contestedRaw: await find("contested", `h-${input}`),
+          contestedReplaced: await find("contested", `h-${expected}`),
+          contestedDifferent: await find("contested", "h-different"),
+        };
+        expect(observed).toEqual({
+          activeRaw: false,
+          activeReplaced: false,
+          activeDifferent: true,
+          contestedRaw: false,
+          contestedReplaced: false,
+          contestedDifferent: true,
+        });
+      });
       it("VectorStore.search・LexicalStore.search の filter.labels も置き換わる（保存側の tags と同じ規則）", async () => {
         const { store, searchByLabels } = await makeKit();
         if (searchByLabels === undefined) return;
@@ -368,6 +430,64 @@ export function describeLoneSurrogateFffd(
       if (viaProvenance !== undefined) {
         expect(viaProvenance.provenance).toEqual({ kind: "imported", batchId: lone });
       }
+    });
+
+    it("対照（対象外・S2）: Observation の payload（jsonb。observe の口）は置き換えない——Postgres は断り、InMemory・Fake はそのまま保持する", async () => {
+      const kit = await makeKit();
+      const { store } = kit;
+      const lone = "a\uD800b";
+      const viaCreate = await store
+        .createObservation(
+          CTX,
+          buildNewObservationFixture({ tenantId: CTX.tenantId, payload: { text: lone } }),
+        )
+        .then(
+          (o) => o,
+          () => undefined,
+        );
+      const viaOutbox = await store
+        .createObservationWithOutbox(
+          CTX,
+          buildNewObservationFixture({
+            tenantId: CTX.tenantId,
+            payload: { nested: [{ text: lone }] },
+          }),
+          [],
+        )
+        .then(
+          (r) => r.observation,
+          () => undefined,
+        );
+      if (kit.jsonbRejectsLoneSurrogate) {
+        expect(viaCreate).toBeUndefined();
+        expect(viaOutbox).toBeUndefined();
+      } else {
+        expect(viaCreate?.payload).toEqual({ text: lone });
+        expect(viaOutbox?.payload).toEqual({ nested: [{ text: lone }] });
+        // 読み戻しも保持したまま（U+FFFD にならない）。
+        expect((await store.getObservation(CTX, viaCreate!.id))?.payload).toEqual({ text: lone });
+      }
+    });
+
+    it("対照（対象外・S3）: イベントの actor（jsonb）は置き換えない——3実装とも書く前に断り、U+FFFD で通して保存することも、状態を書き換えることもしない", async () => {
+      const { store, listEvents } = await makeKit();
+      const lone = "a\uD800b";
+      const m = await store.createMemory(CTX, mem());
+      const actor = { type: "human", id: lone } as const;
+      await expect(
+        store.updateStatusWithEvent(CTX, m.id, "forgotten", {}, { ...ev(m.id, "x"), actor }),
+      ).rejects.toThrow(/actor/);
+      await expect(
+        store.updateStatusWithEvent(
+          CTX,
+          m.id,
+          "forgotten",
+          {},
+          { ...ev(m.id, "x"), meta: { k: lone } },
+        ),
+      ).rejects.toThrow(/meta/);
+      expect(await listEvents(CTX)).toEqual([]);
+      expect((await store.get(CTX, m.id))?.status).toBe("active");
     });
 
     it("入力のオブジェクトは書き換えない（置き換えは保存する値だけ）", async () => {

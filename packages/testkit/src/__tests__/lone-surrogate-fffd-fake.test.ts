@@ -17,6 +17,7 @@ async function makeKit(): Promise<LoneSurrogateKit> {
   const stores = createFakeRuntimeStores();
   return {
     store: stores.memoryStore,
+    jsonbRejectsLoneSurrogate: false,
     listEvents: async (ctx: Ctx) =>
       stores.eventStore.events.filter((e: { tenantId: string }) => e.tenantId === ctx.tenantId),
     claimBatch: (ctx, opts) => stores.outboxStore.claimBatch(ctx, opts),

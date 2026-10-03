@@ -3483,7 +3483,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         return false;
       }
       if (m.status !== "active") return false;
-      if (m.contentHash === query.contentHash) return false;
+      // ADR 0543: 保存側の `contentHash` は置き換え済み。Postgres は引数（`content_hash <> $n`）も U+FFFD にしてから比べるので、揃える。
+      if (m.contentHash === replaceLoneSurrogates(query.contentHash)) return false;
       // 半開区間 [validFrom, validUntil) の重なり判定。`null` は -∞/+∞ として扱う
       // （`packages/postgres` の実装と同じ規約）。
       const otherFrom = m.validFrom ?? null;
@@ -3550,7 +3551,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         return false;
       }
       if (m.status !== "contested") return false;
-      if (m.contentHash === query.contentHash) return false;
+      // ADR 0543: `findActiveByClaimKey` と同じ（引数の `contentHash` も置き換えてから比べる）。
+      if (m.contentHash === replaceLoneSurrogates(query.contentHash)) return false;
       const otherFrom = m.validFrom ?? null;
       const otherUntil = m.validUntil ?? null;
       // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない

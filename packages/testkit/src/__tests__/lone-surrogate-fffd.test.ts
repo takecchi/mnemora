@@ -18,6 +18,7 @@ async function makeKit(): Promise<LoneSurrogateKit> {
   const store = new InMemoryMemoryStore();
   return {
     store,
+    jsonbRejectsLoneSurrogate: false,
     listEvents: async (ctx: Ctx) => store.events.filter((e) => e.tenantId === ctx.tenantId),
     claimBatch: (ctx, opts) => new InMemoryOutboxStore(store.outboxJobs).claimBatch(ctx, opts),
     searchByLabels: async (ctx, memoryId, labels) => {
