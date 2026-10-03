@@ -66,6 +66,19 @@ describe("LocalEmbeddingProvider: options の revision が、注入点へ渡る 
     expect(r.specs[0]?.revision).toBe("0123abc");
   });
 
+  it("前後に空白がある revision は trim されず、そのまま spec.revision に載る（ADR 0596・ADR 0571 の D4）", async () => {
+    // options.revision の TSDoc は「そのまま渡る」。整形する実装は spec の値を変え、キャッシュの根（<根>/<revision>）も変わる。
+    const r = recorder();
+    const provider = new LocalEmbeddingProvider({
+      createPipeline: r.createPipeline,
+      revision: "  0123abc\t",
+      retry: { attempts: 1 },
+    });
+    await expect(provider.warmup()).rejects.toThrow();
+    expect(r.specs).toHaveLength(1);
+    expect(r.specs[0]?.revision).toBe("  0123abc\t");
+  });
+
   it("revision を省くと、spec.revision は undefined のまま（既定値を足さない）", async () => {
     const r = recorder();
     const provider = new LocalEmbeddingProvider({
