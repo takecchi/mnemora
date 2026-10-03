@@ -88,5 +88,22 @@ describe("FakeOutboxStore.complete・fail: opts.at が timestamptz の下限よ�
       const [after] = await outboxStore.listJobs(ctx);
       expect(how === "complete" ? after?.completedAt : after?.failedAt).toEqual(FLOOR);
     });
+
+    // 下限より後は、紀元前でも西暦9999年より後でも通る（ADR 0605。断りすぎる実装を縛る。下限ちょうどの1点だけでは縛れない）。
+    for (const [label, at] of [
+      ["紀元前100年", new Date(Date.UTC(-99, 0, 1))],
+      ["西暦10000年", new Date(Date.UTC(10000, 0, 1))],
+    ] as const) {
+      it(`${how}: ${label}（timestamptz の範囲内）は通り、その値を書く`, async () => {
+        const { outboxStore, job } = await seedClaimedJob();
+
+        await (how === "complete"
+          ? outboxStore.complete(ctx, job.id, job.attempts, { at })
+          : outboxStore.fail(ctx, job.id, "boom", job.attempts, { at }));
+
+        const [after] = await outboxStore.listJobs(ctx);
+        expect(how === "complete" ? after?.completedAt : after?.failedAt).toEqual(at);
+      });
+    }
   }
 });
