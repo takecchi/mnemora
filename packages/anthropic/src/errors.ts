@@ -36,6 +36,14 @@
  * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記を
  * 参照。`llm-provider.ts` の `firstTextBlock` にも個別の doc コメントがある。
  *
+ * ⚠ **ADR 0552 追記（ADR 0445 BJ-1）: `kind` の外の例外に、もう1つある。** `maxTokens` が 21334 以上で、
+ * `client` が `timeout` を持たない（`client` を省略したときを含む）と、`complete`・`completeStructured` は
+ * SDK が**送信前に**投げる素の `AnthropicError`（`Streaming is required for operations that may take longer than
+ * 10 minutes…`）をそのまま伝える。`kind` も `cause` も付かず、`AnthropicLLMProviderError` ではない。
+ * 21333 までは通る（SDK 0.124.0 で実測。境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`）。
+ * `timeout` を持たない `client` を自分で渡したときの分岐は、コードを読んだだけで実測していない。
+ * 詳細は `llm-provider.ts` の `AnthropicLLMProviderOptions.maxTokens`・README。
+ *
  * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
  * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
  * `kind: "schema_unsupported"` を足した。** `completeStructured` は、送る前の翻訳

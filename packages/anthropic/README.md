@@ -108,7 +108,9 @@ SDK は例外を投げず、`content` にはテキストブロックが1つも�
 | `"truncated"` | 応答が途中で切れた | `stopReason`（`max_tokens` / `model_context_window_exceeded`）。**`maxTokens` を上げるか、プロンプトを短くする**（⚠ 上げすぎると別の失敗になる。下の注） |
 | `"no_content"` | 上記のどれでもないのに、テキストブロックが無かった | — |
 
-⚠ **2026-10-01 追記（ADR 0445）: `maxTokens` を約 21,333 より大きくすると、SDK が「streaming が要る」と言って、リクエストを1本も送らずに素の例外（`AnthropicError: Streaming is required for operations that may take longer than 10 minutes…`。`kind` は付かない）で落ちる。** 実測（`@anthropic-ai/sdk@0.124.0`、`client` を省略）: 21000 は通り、22000・32000・64000 は落ちた。SDK が非ストリーミングの予想所要時間（`max_tokens` に比例）を 10 分と比べて拒むためである。**`client` に `timeout` を明示すれば通る**（`new Anthropic({ apiKey, timeout: 20 * 60_000 })` で 22000・32000・64000 とも送信された）。この境目は SDK の仕様であり mnemora の契約ではない。provider 側での検査や `kind` は足していない。
+⚠ **2026-10-01 追記（ADR 0445、ADR 0552 で詳しくした）: `maxTokens` は 21333 まで通り、21334 から落ちる。** 21334 以上で SDK が「streaming が要る」と言って、リクエストを1本も送らずに素の例外（`AnthropicError: Streaming is required for operations that may take longer than 10 minutes…`。`kind` も `cause` も付かない）で落ちる。`complete()`・`completeStructured()` のどちらでも同じ。コンストラクタは 21334 以上でも通る（検査するのは正の安全な整数であることだけで、上限は見ない。ADR 0498）。
+- **確かめた範囲**。【実測】`@anthropic-ai/sdk@0.124.0`、`client` を省略したとき: 21000 は通り、22000・32000・64000 は落ちた。`fetch` を stub にした確認では 21333 は送信され、21334 は送信が0回で落ちた。`client` に `timeout` を明示すれば通る（`new Anthropic({ apiKey, timeout: 20 * 60_000 })` で 22000・32000・64000 とも送信された）。【式からの導出】境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`（境目は 128000/6 = 21333.33）で、SDK が非ストリーミングの予想所要時間（`maxTokens` に比例）を 10 分と比べて拒む（`client.js` の `calculateNonstreamingTimeout`、`resources/messages/messages.js` の `create`）。【読んだだけ】`timeout` を持たない `client` を自分で渡したときも同じ分岐に入る（SDK のコードを読んだ範囲。実測していない）。SDK が見るのはコンストラクタに渡した `timeout` の有無なので、`timeout` を持つ `Anthropic` を渡せば避けられる。
+- この境目は SDK の仕様であり mnemora の契約ではない。provider 側での上限の検査や `kind` は足していない。
 
 **⚠ 2026-09-26 追記（Issue #885）: `kind` が表すのはこの3種のどれかである。** HTTP 200 の
 応答オブジェクトそのものの形が壊れている場合——トップレベルの `content` 欄がキーごと

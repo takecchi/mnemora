@@ -881,6 +881,7 @@ interface LexicalStore {
   上位から切る。**⚠ `rank` はスコアに入らない**——尺度が adapter ごとに違い、コサイン類似度と
   比較可能な量ではない（ADR 0084 §5）。スコアに入るのは `ScoreBreakdown.lexicalMatch` であり、
   `coverage`（一致した語彙数 ÷ クエリ語彙の総数）がそのまま入る（ADR 0092）。
+  **⚠ `coverage` の尺度は store ごとに同じではない**——tsvector 版・testkit の InMemory は 1/n 刻みで同じ式、pg_trgm 版の日本語側は `word_similarity` の閾値による 0/1 の二値（[ADR 0553](./decisions/0553-lexical-coverage-scale-across-stores.md)）。
 - `filter` の各フィールドを adapter が実際に適用する（`VectorFilter` と同じ契約、ADR 0034）。
   適合テストは `packages/testkit/src/lexical-store-conformance.ts`。
 - **`query` は正規化前の生の文字列であり、どう分かち書きするかは adapter の責務である。**
