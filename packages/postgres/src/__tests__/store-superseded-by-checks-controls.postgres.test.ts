@@ -30,7 +30,7 @@ const A: Ctx = { tenantId: "superseded-by-controls-a" };
 const ABSENT = "00000000-0000-4000-8000-0000000000aa" as MemoryId;
 const ABSENT2 = "00000000-0000-4000-8000-0000000000ab" as MemoryId;
 const ABSENT3 = "00000000-0000-4000-8000-0000000000ac" as MemoryId;
-/** `isUuidLike` で弾かれる形（uuid ではない）。ADR 0574 決定3: 形・循環の検査は、この not found より先。 */
+/** `isUuidLike` で弾かれる形（uuid ではない）。ADR 0574「決定」3番: 形・循環の検査は、この not found より先。 */
 const BROKEN = "not-a-uuid" as MemoryId;
 const BROKEN2 = "also-not-a-uuid" as MemoryId;
 const BROKEN3 = "still-not-a-uuid" as MemoryId;
