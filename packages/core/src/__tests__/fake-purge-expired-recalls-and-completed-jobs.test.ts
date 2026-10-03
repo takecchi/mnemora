@@ -107,6 +107,19 @@ describe("FakeMemoryStore.purgeExpiredRecalls（ADR 0404）", () => {
     expect(first).toMatchObject({ purged: 2, reachedLimit: true });
     await expect(memoryStore.purgeExpiredRecalls!(ctx, { olderThan, limit: -2 })).rejects.toThrow();
   });
+
+  it("候補がちょうど limit 件のとき reachedLimit は false", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    for (let i = 0; i < 3; i++) {
+      await memoryStore.createRecall(ctx, {
+        ...NEW_RECALL,
+        createdAt: new Date(Date.UTC(2020, 0, 1 + i)),
+      });
+    }
+    const olderThan = new Date("2025-01-01T00:00:00.000Z");
+    const exact = await memoryStore.purgeExpiredRecalls!(ctx, { olderThan, limit: 3 });
+    expect(exact).toMatchObject({ purged: 3, reachedLimit: false });
+  });
 });
 
 describe("FakeOutboxStore.purgeCompletedJobs（ADR 0404）", () => {
@@ -146,6 +159,34 @@ describe("FakeOutboxStore.purgeCompletedJobs（ADR 0404）", () => {
     expect(remaining).toContain(failed!.id);
     expect(remaining).toContain(inFlight!.id);
     expect(remaining).toHaveLength(3);
+  });
+
+  it("候補がちょうど limit 件のとき reachedLimit は false、limit より多いときだけ true", async () => {
+    const { memoryStore, outboxStore } = createFakeRuntimeStores();
+    for (let i = 0; i < 3; i++) {
+      await memoryStore.createObservationWithOutbox(
+        ctx,
+        { tenantId: "tenant-1", subjectId: null, externalId: null, kind: "utterance", payload: {} },
+        ["embed"],
+      );
+    }
+    const claimed = await outboxStore.claimBatch(ctx, {
+      limit: 3,
+      now: new Date(),
+      claimedBy: "w",
+      leaseMs: 60_000,
+    });
+    for (const job of claimed) {
+      await outboxStore.complete(ctx, job.id, job.attempts, {
+        at: new Date("2020-01-01T00:00:00.000Z"),
+      });
+    }
+    const olderThan = new Date("2999-01-01T00:00:00.000Z");
+
+    const over = await outboxStore.purgeCompletedJobs!(ctx, { olderThan, limit: 2, dryRun: true });
+    expect(over).toMatchObject({ purged: 2, reachedLimit: true });
+    const exact = await outboxStore.purgeCompletedJobs!(ctx, { olderThan, limit: 3 });
+    expect(exact).toMatchObject({ purged: 3, reachedLimit: false });
   });
 });
 
