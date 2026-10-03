@@ -27,6 +27,24 @@ beforeEach(async () => {
   await resetTestDatabase();
 });
 
+describe("purgeMemory: uuid の形でない id は、渡された綴りのまま message に出る", () => {
+  it.each(["NOT-A-UUID-ABC", "Mixed-Case-ID", "ABCDEF"])(
+    "%s: 大文字を小文字にそろえず、message はその綴りのまま",
+    async (badId) => {
+      const { db } = await getTestClient();
+      const mem = new PostgresMemoryStore(db);
+      await expect(
+        mem.purgeMemory(ctx, badId as never, { content: "[purged]", digest: "[purged]" }, {
+          memoryId: badId,
+          kind: "purged",
+          actor: { type: "system" },
+          meta: {},
+        } as never),
+      ).rejects.toThrow(new Error(`PostgresMemoryStore: memory not found for tenant: ${badId}`));
+    },
+  );
+});
+
 describe("purgeMemory: 大文字の id でも recall の目次帯の digest を書き換える", () => {
   it("大文字の id で purge すると、digestBand の該当の digest が tombstone になり、ほかの記憶の digest は残る", async () => {
     const { db } = await getTestClient();

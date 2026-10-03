@@ -159,7 +159,168 @@ async function countAll(
   return out;
 }
 
+/** 最小の Memory を1件作る（自己参照・他テナントからの参照の歯が使う）。 */
+async function createBareMemory(
+  memoryStore: PostgresMemoryStore,
+  tenantId: string,
+  contentHash: string,
+) {
+  return memoryStore.createMemory(
+    { tenantId },
+    {
+      tenantId,
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash,
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    },
+  );
+}
+
+/** テナント内に superseded の組と contested の組（どちらも同じテナントの行を指す）を、生 SQL で作る。 */
+async function seedSelfReferencePairs(
+  pool: Awaited<ReturnType<typeof getTestClient>>["pool"],
+  memoryStore: PostgresMemoryStore,
+  tenantId: string,
+) {
+  const supersededNew = await createBareMemory(memoryStore, tenantId, `${tenantId}-sn`);
+  const supersededOld = await createBareMemory(memoryStore, tenantId, `${tenantId}-so`);
+  const contestedFirst = await createBareMemory(memoryStore, tenantId, `${tenantId}-c1`);
+  const contestedSecond = await createBareMemory(memoryStore, tenantId, `${tenantId}-c2`);
+  await pool.query(`UPDATE memories SET superseded_by_id = $1 WHERE id = $2`, [
+    supersededNew.id,
+    supersededOld.id,
+  ]);
+  await pool.query(`UPDATE memories SET contested_with_id = $1 WHERE id = $2`, [
+    contestedSecond.id,
+    contestedFirst.id,
+  ]);
+  await pool.query(`UPDATE memories SET contested_with_id = $1 WHERE id = $2`, [
+    contestedFirst.id,
+    contestedSecond.id,
+  ]);
+  return { supersededNew, supersededOld, contestedFirst, contestedSecond };
+}
+
+/** テナントの `memories` の `superseded_by_id`・`contested_with_id` を、生 SQL で id 順に読む。 */
+async function readSelfReferenceColumns(
+  pool: Awaited<ReturnType<typeof getTestClient>>["pool"],
+  tenantId: string,
+) {
+  const r = await pool.query<{
+    id: string;
+    superseded_by_id: string | null;
+    contested_with_id: string | null;
+  }>(
+    `SELECT id, superseded_by_id, contested_with_id FROM memories WHERE tenant_id = $1 ORDER BY id`,
+    [tenantId],
+  );
+  return r.rows;
+}
+
 describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
+  it("自己参照の NULL 化は対象テナントの行だけに及ぶ（他テナントの superseded_by_id・contested_with_id は消去の前後で変わらない）", async () => {
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const deps = {
+      memoryStore,
+      vectorStore: new PostgresVectorStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+    };
+    const T = "erase-self-ref-target";
+    const OTHER = "erase-self-ref-other";
+    await seedSelfReferencePairs(pool, memoryStore, T);
+    await seedSelfReferencePairs(pool, memoryStore, OTHER);
+
+    const otherBefore = await readSelfReferenceColumns(pool, OTHER);
+    expect(otherBefore.filter((r) => r.superseded_by_id !== null)).toHaveLength(1);
+    expect(otherBefore.filter((r) => r.contested_with_id !== null)).toHaveLength(2);
+
+    const outcome = await eraseTenant({ tenantId: T }, deps, {
+      confirmTenantId: T,
+      limit: 100_000,
+    });
+    expect(outcome.kind).toBe("executed");
+    expect(await readSelfReferenceColumns(pool, T)).toEqual([]);
+    expect(await readSelfReferenceColumns(pool, OTHER)).toEqual(otherBefore);
+  }, 60_000);
+
+  it("dryRun: true は自己参照（superseded_by_id・contested_with_id）を書き換えない", async () => {
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const deps = {
+      memoryStore,
+      vectorStore: new PostgresVectorStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+    };
+    const T = "erase-self-ref-dry-run";
+    await seedSelfReferencePairs(pool, memoryStore, T);
+    const before = await readSelfReferenceColumns(pool, T);
+    expect(before.filter((r) => r.superseded_by_id !== null)).toHaveLength(1);
+    expect(before.filter((r) => r.contested_with_id !== null)).toHaveLength(2);
+
+    const outcome = await eraseTenant({ tenantId: T }, deps, {
+      confirmTenantId: T,
+      limit: 100_000,
+      dryRun: true,
+    });
+    expect(outcome.kind).toBe("executed");
+    expect(await readSelfReferenceColumns(pool, T)).toEqual(before);
+  }, 60_000);
+
+  it("他テナント同士の参照（A が B を参照）は、無関係なテナント C の eraseTenant を止めない", async () => {
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const deps = {
+      memoryStore,
+      vectorStore: new PostgresVectorStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+    };
+    const A = "erase-foreign-ref-a";
+    const B = "erase-foreign-ref-b";
+    const C = "erase-foreign-ref-c";
+    const inA = await createBareMemory(memoryStore, A, "foreign-ref-a");
+    const inB = await createBareMemory(memoryStore, B, "foreign-ref-b");
+    const inC = await createBareMemory(memoryStore, C, "foreign-ref-c");
+    // A の行が B の行を参照する（生 SQL。この状態は mnemora の書き込み経路では作れない）。
+    await pool.query(`UPDATE memories SET superseded_by_id = $1 WHERE id = $2`, [inB.id, inA.id]);
+
+    const outcome = await eraseTenant({ tenantId: C }, deps, {
+      confirmTenantId: C,
+      limit: 100_000,
+    });
+    expect(outcome.kind).toBe("executed");
+    expect(await memoryStore.get({ tenantId: C }, inC.id)).toBeNull();
+    // A・B の行は無傷（A→B の参照も残る）。
+    expect((await memoryStore.get({ tenantId: A }, inA.id))?.supersededById).toBe(inB.id);
+    expect(await memoryStore.get({ tenantId: B }, inB.id)).not.toBeNull();
+
+    // 対照: B を消そうとすると、A の参照のために止まる。
+    const blocked = await eraseTenant({ tenantId: B }, deps, {
+      confirmTenantId: B,
+      limit: 100_000,
+    });
+    expect(blocked).toEqual({ kind: "blocked_by_foreign_reference", count: 1 });
+  }, 60_000);
+
   it("実データで全表が消え、別テナントは変わらない", async () => {
     await resetTestDatabase();
     const { db, pool } = await getTestClient();

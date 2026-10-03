@@ -14661,6 +14661,198 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(after?.id).toBe(memory.id);
       });
 
+      // 自己参照（superseded の組・contested の組）を持つテナントを作る。contested は
+      // `markContestedPair`（任意メソッド）が無い adapter では作れないので、そのときは省く。
+      const seedSelfReferences = async (
+        store: MemoryStore,
+        ctx: Ctx,
+      ): Promise<{
+        supersededOld: MemoryId;
+        supersededNew: MemoryId;
+        contestedFirst: MemoryId | null;
+        contestedSecond: MemoryId | null;
+      }> => {
+        const supersededNew = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: `erase-self-ref-${ctx.tenantId}-new`,
+          }),
+        );
+        const supersededOld = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: `erase-self-ref-${ctx.tenantId}-old`,
+          }),
+        );
+        await store.updateStatus(ctx, supersededOld.id, "superseded", {
+          supersededById: supersededNew.id,
+        });
+        let contestedFirst: MemoryId | null = null;
+        let contestedSecond: MemoryId | null = null;
+        if (store.markContestedPair) {
+          const first = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              contentHash: `erase-self-ref-${ctx.tenantId}-c1`,
+            }),
+          );
+          const second = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              contentHash: `erase-self-ref-${ctx.tenantId}-c2`,
+            }),
+          );
+          await store.markContestedPair(
+            ctx,
+            {
+              id: first.id,
+              event: {
+                tenantId: ctx.tenantId,
+                memoryId: first.id,
+                kind: "updated",
+                actor: { type: "system" },
+                digestSnapshot: first.digest,
+                meta: { reason: "contested" },
+              },
+            },
+            {
+              id: second.id,
+              event: {
+                tenantId: ctx.tenantId,
+                memoryId: second.id,
+                kind: "updated",
+                actor: { type: "system" },
+                digestSnapshot: second.digest,
+                meta: { reason: "contested" },
+              },
+            },
+          );
+          contestedFirst = first.id;
+          contestedSecond = second.id;
+        }
+        return {
+          supersededOld: supersededOld.id,
+          supersededNew: supersededNew.id,
+          contestedFirst,
+          contestedSecond,
+        };
+      };
+
+      const readSelfReferences = async (
+        store: MemoryStore,
+        ctx: Ctx,
+        seeded: Awaited<ReturnType<typeof seedSelfReferences>>,
+      ) => ({
+        oldSupersededBy: (await store.get(ctx, seeded.supersededOld))?.supersededById ?? null,
+        firstContestedWith:
+          seeded.contestedFirst === null
+            ? null
+            : ((await store.get(ctx, seeded.contestedFirst))?.contestedWithId ?? null),
+        secondContestedWith:
+          seeded.contestedSecond === null
+            ? null
+            : ((await store.get(ctx, seeded.contestedSecond))?.contestedWithId ?? null),
+      });
+
+      it("eraseTenant は他テナントの自己参照（supersededById・contestedWithId）を書き換えない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "erase-self-ref-a" };
+        const ctxB: Ctx = { tenantId: "erase-self-ref-b" };
+        const a = await seedSelfReferences(store, ctxA);
+        const b = await seedSelfReferences(store, ctxB);
+        const beforeB = await readSelfReferences(store, ctxB, b);
+        expect(beforeB.oldSupersededBy).toBe(b.supersededNew);
+        if (b.contestedFirst !== null) {
+          expect(beforeB.firstContestedWith).toBe(b.contestedSecond);
+          expect(beforeB.secondContestedWith).toBe(b.contestedFirst);
+        }
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000 });
+        expect(result.kind).toBe("executed");
+        expect(await store.get(ctxA, a.supersededOld)).toBeNull();
+
+        // 他テナント B の2列は、消去の前後で1バイトも変わらない。
+        expect(await readSelfReferences(store, ctxB, b)).toEqual(beforeB);
+        expect((await store.get(ctxB, b.supersededOld))?.status).toBe("superseded");
+      });
+
+      it("eraseTenant は dryRun: true のとき、自己参照（supersededById・contestedWithId）を書き換えない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-self-ref-dry-run" };
+        const seeded = await seedSelfReferences(store, ctx);
+        const before = await readSelfReferences(store, ctx, seeded);
+        expect(before.oldSupersededBy).toBe(seeded.supersededNew);
+
+        const result = await store.eraseTenant!(ctx, { limit: 1000, dryRun: true });
+        expect(result.kind).toBe("executed");
+
+        expect(await readSelfReferences(store, ctx, seeded)).toEqual(before);
+      });
+
+      it("eraseTenant は1回の呼び出しで limit を超えて消さない（limit: k の1回で deleted は k、残りはちょうど n-k）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-exact-limit" };
+        const ids: MemoryId[] = [];
+        for (let i = 0; i < 5; i++) {
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              contentHash: `erase-tenant-exact-limit-${i}`,
+            }),
+          );
+          ids.push(memory.id);
+        }
+
+        const result = await store.eraseTenant!(ctx, { limit: 2 });
+        if (result.kind !== "executed") {
+          throw new Error("unreachable: this test has no cross-tenant reference to block on");
+        }
+        expect(result.deleted).toBeLessThanOrEqual(2);
+        let remaining = 0;
+        for (const id of ids) {
+          if ((await store.get(ctx, id)) !== null) {
+            remaining += 1;
+          }
+        }
+        expect(remaining).toBe(3);
+      });
+
+      it("eraseTenant は他テナントの冪等キーを消さない（他テナントで同じ内容をもう一度書いても、二重には作られない）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "erase-idempotency-a" };
+        const ctxB: Ctx = { tenantId: "erase-idempotency-b" };
+        const seed = async (ctx: Ctx) => {
+          const observation = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId }),
+          );
+          const input = buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash: "erase-idempotency-shared-hash",
+          });
+          const first = await store.createMemoryWithOutbox(ctx, input, []);
+          expect(first.created).toBe(true);
+          return { input, memoryId: first.memory.id };
+        };
+        const a = await seed(ctxA);
+        const b = await seed(ctxB);
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000 });
+        expect(result.kind).toBe("executed");
+        expect(await store.get(ctxA, a.memoryId)).toBeNull();
+
+        const again = await store.createMemoryWithOutbox(ctxB, b.input, []);
+        expect(again.created).toBe(false);
+        expect(again.memory.id).toBe(b.memoryId);
+      });
+
       it("eraseTenant で消去した後、同じ tenantId を再利用して createObservation/createMemory を新規に作り直せる（以前の冪等キーとの衝突が残らない）", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "erase-tenant-reuse" };

@@ -110,6 +110,28 @@ describe("TenantSettingsStore を取る公開ヘルパーが投げる例外に�
     });
   }
 
+  // stack ではなく message を見る。stack は params を落とす前の文面から作られた先頭の行を持つので、message を最初の
+  // 改行で切っても、上のループ（message と stack を連結して見る）は緑のままになる。
+  const MULTILINE_SQL = "Failed query: SELECT 1\n  FROM tenant_settings\n WHERE tenant_id = $1";
+
+  for (const [name, call] of Object.entries(HELPERS)) {
+    it(`${name}: params を落としても message は切られない（複数行の SQL の文が message にそのまま残る）`, async () => {
+      const error = await rejectionOf(
+        call(
+          throwingStore(
+            () =>
+              new Error(`${MULTILINE_SQL}\nparams: ${SECRET}`, {
+                cause: new Error(`${MULTILINE_SQL}\nparams: ${SECRET}`),
+              }),
+          ),
+        ),
+      );
+      const expected = `${MULTILINE_SQL}\nparams: (omitted by mnemora, ${SECRET.length} chars)`;
+      expect((error as Error).message).toBe(expected);
+      expect(((error as Error).cause as Error).message).toBe(expected);
+    });
+  }
+
   it("陽性対照（やりすぎ）: params の無い message・独自の欄は書き換えない（同じ例外オブジェクトのまま）", async () => {
     const original = Object.assign(new Error("connection terminated"), { kind: "custom" });
     const error = await rejectionOf(

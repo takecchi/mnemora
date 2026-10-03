@@ -134,6 +134,8 @@ const createdEvent =
     newEvent({ memoryId: memory.id, kind: "created", ...overrides });
 const embedJobs: OutboxJobKind[] = ["embed"];
 const nulJob = ["em\u0000bed"] as unknown as OutboxJobKind[];
+// NUL 以外の制御文字（SOH）。`text` 列は受け付けるので、Postgres も fixture も通す。
+const controlJob = [`em${String.fromCharCode(1)}bed`] as unknown as OutboxJobKind[];
 const claimKeyOf = (subject: string, predicate: string) => ({ subject, predicate });
 const find = (kit: Kit, claimKey: { subject: string; predicate: string }) =>
   kit.memory.findActiveByClaimKey!(ctx, {
@@ -289,6 +291,21 @@ const CASES: Case[] = [
     name: "createMemoryWithOutbox: NUL の無い jobKinds は通る",
     expect: "accept",
     run: (k) => k.memory.createMemoryWithOutbox(ctx, newMemory(), embedJobs),
+  },
+  {
+    name: "createMemoryWithOutbox: NUL 以外の制御文字（SOH）を含む jobKinds の要素は通る",
+    expect: "accept",
+    run: (k) => k.memory.createMemoryWithOutbox(ctx, newMemory(), controlJob),
+  },
+  {
+    name: "createObservationWithOutbox: NUL 以外の制御文字（SOH）を含む jobKinds の要素は通る",
+    expect: "accept",
+    run: (k) =>
+      k.memory.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: ctx.tenantId }),
+        controlJob,
+      ),
   },
   {
     name: "createObservationWithOutbox: jobKinds の要素に NUL",

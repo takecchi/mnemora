@@ -54,6 +54,56 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     expect(await stores.memoryStore.get(ctx, memory.id)).not.toBeNull();
   });
 
+  it("confirmTenantId は完全一致で比べる（大文字小文字・前後の空白・1文字違いは、書き込み前に RangeError で断る）", async () => {
+    const mixedCtx: Ctx = { tenantId: "Acme" };
+    const stores = createFakeRuntimeStores();
+    const memory = await stores.memoryStore.createMemory(mixedCtx, {
+      tenantId: mixedCtx.tenantId,
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "hash-confirm-exact",
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+    const deps = {
+      memoryStore: stores.memoryStore,
+      vectorStore: stores.vectorStore,
+      outboxStore: stores.outboxStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+    };
+
+    for (const confirmTenantId of [
+      "acme",
+      "ACME",
+      " Acme",
+      "Acme ",
+      "Acme\n",
+      "Acm",
+      "Acmee",
+      "Acne",
+    ]) {
+      await expect(eraseTenant(mixedCtx, deps, { confirmTenantId, limit: 10 })).rejects.toThrow(
+        RangeError,
+      );
+    }
+    expect(await stores.memoryStore.get(mixedCtx, memory.id)).not.toBeNull();
+
+    // 完全一致なら通る（対照）。
+    const outcome = await eraseTenant(mixedCtx, deps, { confirmTenantId: "Acme", limit: 10 });
+    expect(outcome.kind).toBe("executed");
+  });
+
   it("opts.limit が正の整数でないとき、書き込み前に RangeError を投げる（0・負数・非整数のいずれも）", async () => {
     const stores = createFakeRuntimeStores();
     const deps = {
@@ -371,6 +421,90 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     expect(outcome.kind).toBe("executed");
 
     expect(await stores.memoryStore.get(otherCtx, otherMemory.id)).not.toBeNull();
+  });
+
+  it("他テナントの outbox・埋め込み・設定・冪等キーも消えない（対象テナントの分だけが消える）", async () => {
+    const stores = createFakeRuntimeStores();
+    const deps = {
+      memoryStore: stores.memoryStore,
+      vectorStore: stores.vectorStore,
+      outboxStore: stores.outboxStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+    };
+    const otherCtx: Ctx = { tenantId: "tenant-other" };
+    const SPACE = { provider: "fake", model: "fake-model", dimensions: 2 };
+    const outboxJobs = (
+      stores.outboxStore as unknown as {
+        backing: { outboxJobs: { tenantId: string }[] };
+      }
+    ).backing.outboxJobs;
+    const jobsOf = (tenantId: string) => outboxJobs.filter((j) => j.tenantId === tenantId).length;
+
+    // 両テナントに同じ形で、memory（冪等キー付き）・埋め込み・outbox・設定を作る。
+    const seed = async (c: Ctx) => {
+      const { observation } = await stores.memoryStore.createObservationWithOutbox(
+        c,
+        {
+          tenantId: c.tenantId,
+          subjectId: null,
+          externalId: null,
+          kind: "utterance",
+          payload: { text: "x" },
+        },
+        ["extract"],
+      );
+      const input = {
+        tenantId: c.tenantId,
+        subjectId: null,
+        sourceObservationId: observation.id,
+        extractorVersion: "v1",
+        content: "本文",
+        contentHash: "hash-idempotency-shared",
+        digest: "digest",
+        digestSource: "llm" as const,
+        provenance: { kind: "imported" as const, batchId: "fixture" },
+        tags: [],
+        occurredAt: null,
+        recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+        lastReinforcedAt: null,
+        strength: 1,
+        halfLifeHours: 720,
+        decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+        embeddingStatus: "pending" as const,
+      };
+      const created = await stores.memoryStore.createMemoryWithOutbox(c, input, ["embed"]);
+      await stores.vectorStore.upsert(c, SPACE, created.memory.id, [1, 2]);
+      await stores.tenantSettingsStore.setEventRetention(c, { kind: "days", days: 30 });
+      return { input, memoryId: created.memory.id };
+    };
+    const mine = await seed(ctx);
+    const other = await seed(otherCtx);
+    expect(jobsOf(otherCtx.tenantId)).toBe(2);
+    expect(stores.vectorStore.entries.size).toBe(2);
+
+    const outcome = await eraseTenant(ctx, deps, { confirmTenantId: ctx.tenantId, limit: 100 });
+    expect(outcome.kind).toBe("executed");
+
+    // 対象テナントの分は消えている。
+    expect(await stores.memoryStore.get(ctx, mine.memoryId)).toBeNull();
+    expect(jobsOf(ctx.tenantId)).toBe(0);
+    expect(await stores.tenantSettingsStore.getEventRetention(ctx)).toEqual({ kind: "unset" });
+
+    // 他テナントの分は1つも変わらない。
+    expect(await stores.memoryStore.get(otherCtx, other.memoryId)).not.toBeNull();
+    expect(jobsOf(otherCtx.tenantId)).toBe(2);
+    expect(stores.vectorStore.entries.size).toBe(1);
+    expect([...stores.vectorStore.entries.values()].map((e) => e.tenantId)).toEqual([
+      otherCtx.tenantId,
+    ]);
+    expect(await stores.tenantSettingsStore.getEventRetention(otherCtx)).toEqual({
+      kind: "days",
+      days: 30,
+    });
+    // 冪等キー: 他テナントで同じ内容をもう一度書いても、二重には作られない。
+    const again = await stores.memoryStore.createMemoryWithOutbox(otherCtx, other.input, ["embed"]);
+    expect(again.created).toBe(false);
+    expect(again.memory.id).toBe(other.memoryId);
   });
 });
 
