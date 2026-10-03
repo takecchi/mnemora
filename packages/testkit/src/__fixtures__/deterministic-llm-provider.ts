@@ -50,7 +50,7 @@ export class DeterministicLLMProvider implements LLMProvider {
     // ADR 0089 決定8: extraction の形にマッチしなかった場合だけ、統合の形を決定的に試す。
     // 渡された Memory の content を連結した userText を、そのまま統合結果の content として
     // 返す——意味を持たせない決定的な stub である（`deterministic` 層の役割はあくまで
-    // 配線・契約の検査。AGENTS.md「provider は3層ある」参照）。
+    // 配線・契約の検査。AGENTS.md「provider は4層ある」参照）。
     const consolidationCandidate = { content: userText, digest, tags: [] };
     const consolidationParsed = req.schema.safeParse(consolidationCandidate);
     if (consolidationParsed.success) {

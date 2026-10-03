@@ -584,6 +584,10 @@ async function fetchMandatoryCompanions(
 /**
  * `Runtime.recall` の本体。`query` を {@link RecallQuerySchema} で検査し（合わなければ zod の `ZodError`）、段1〜6を走らせ、記録した結果を返す。
  * ⚠ `channels` に `"lexical"` を含むのに `deps.lexicalStore` が無ければ例外を投げる（`RecallRuntimeDeps.lexicalStore` の doc）。
+ * ⚠ `deps.outputValidation` が `"throw"` で戻り値の検証に落ちたときは `RecallOutputValidationError` を投げる。
+ * 検証は段6（記録）の**後**に走るので、このときも `recalls` の行は書かれている（例外の `recallId` で突き合わせる）。
+ * 省略時は `"report"` で投げない（`RecallRuntimeDeps.outputValidation` の doc）。
+ * 「今」は `deps.clock.now()` を1回だけ読んだ値で、減衰・`validAt` の既定・記録の `createdAt` に共通して使う。
  *
  * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
  * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: `signal` が

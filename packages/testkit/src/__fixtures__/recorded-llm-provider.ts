@@ -6,8 +6,8 @@ import { llmCassetteKey } from "./cassette.js";
  * 記録した実 API の応答を再生する `LLMProvider`（ADR 0051）。
  *
  * **`DeterministicLLMProvider` の代わりではない。**あちらは発話をそのまま content にして
- * 40文字で切るだけで、抽出をしていない。こちらは**本物の `gpt-4o-mini` が実際に返した
- * 抽出結果をそのまま返す**。
+ * 40文字で切るだけで、抽出をしていない。こちらは**記録元の本物のモデル（同梱のカセットでは `gpt-4o-mini`）が
+ * 実際に返した抽出結果をそのまま返す**。
  *
  * **記録に無い入力に対しては例外を投げる**（`RecordedEmbeddingProvider` と同じ理由）。
  */

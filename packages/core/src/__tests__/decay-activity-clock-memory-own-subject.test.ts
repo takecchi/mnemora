@@ -208,7 +208,7 @@ describe("作成（抽出）— 起点は記憶自身の subject の T + S_x（A
       text: "発話",
       extract: "deferred",
     });
-    // Fake の outbox 行の availableAt は実時刻で付くので、tick の時計はそれより後にする。
+    // 以前の Fake は outbox 行の availableAt を実時刻で付けたため、tick の時計を後にしている（今の Fake は `opts.now` に従う。ADR 0555。組み替えは「残り」）。
     nowMs = Date.now() + 60_000;
     const tick = await runtime.tick(tenantCtx, { kinds: ["extract"], leaseMs: 60_000 });
     expect(tick.processed).toBe(1);

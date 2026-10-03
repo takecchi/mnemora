@@ -199,13 +199,14 @@ export async function seedTimeWeightingMemories(
     const { memory } = await memoryStore.createMemoryWithOutbox(ctx, input, ["embed"]);
     memoryIdByLocalId.set(seed.localId, memory.id);
   }
-  // 🔴 **埋め込みジョブの `available_at`/`claimed_at` 比較は、DB 側の実時刻
-  // （SQL の `now()`）で書かれる——`RuntimeDeps.clock`（このケースでは `MutableClock`）を
-  // 読まない。一方 `runtime.tick()` の claim クエリは「いま」を `deps.clock.now()` から
-  // 取る（`packages/core/src/runtime.ts`）。⟹ **`clock` を書き込み前の値（構築時点の
+  // (歴史的な理由で残している。ADR 0355 より前は、埋め込みジョブの `available_at` が DB 側の
+  // 実時刻（SQL の `now()`）で書かれ、`RuntimeDeps.clock`（このケースでは `MutableClock`）を
+  // 読まなかった。いまは `available_at` も注入した時計に従う。ADR 0559。)
+  // 当時は `runtime.tick()` の claim クエリが「いま」を `deps.clock.now()` から取る
+  // （`packages/core/src/runtime.ts`）ので、**`clock` を書き込み前の値（構築時点の
   // 実時刻）のまま止めておくと、ジョブ作成の実時刻のほうがわずかに後になり、
-  // `available_at <= now` が常に false になって claim が1件も進まない**
-  // （本 PR で実際に踏んだ——`totalProcessed` が常に0だった）。
+  // `available_at <= now` が常に false になって claim が1件も進まなかった**
+  // （当時、実際に踏んだ——`totalProcessed` が常に0だった）。
   // ⟹ 埋め込みを処理する直前に `clock` を実時刻へ進めてから `drainEmbedTicks` を呼ぶ。
   // 呼び出し側（`runTimeWeightingCase`）がこの後で `recallAt` へ改めて `set()` する。
   //

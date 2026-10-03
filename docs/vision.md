@@ -162,6 +162,8 @@ mnemora が明示的にスコープ外とするもの。
 
 ⟹ テナントで絞るのは、索引の先頭列ではなく、問い合わせの述語（`tenant_id = $1`）である。
 
+（2026-10-03 訂正）上の2つ目の箇条（先頭が `tenant_id` でない索引）の一覧は、2026-09-28 時点のもので、いまは足りない。後から入った分がある。`memory_relations` の主キー `id`（`0026_memory_relations.sql`）。`0027_erase_tenant_fk_indexes.sql` が足した、外部キーの参照列だけを引く索引（`memory_events`・`recall_usages`・`memory_labels`・`memories`・`memory_relations` の `memory_id` などの列と、埋め込み空間ごとの表の `memory_id`）。`0030_recalls_digest_band_index.sql` の `recalls` の式索引。`0031_memory_labels_label_id_index.sql` の `memory_labels (label_id)`。**正本は `packages/postgres/migrations/` の `CREATE INDEX`** で、ここには網羅を写さない。⟹ 結論（テナントで絞るのは述語である）は変わらない。
+
 ## 名前について
 
 **名前は `mnemora`（scoped では `@mnemora/*`）に確定した。** 2026-09-05、オーナーの判断による。
