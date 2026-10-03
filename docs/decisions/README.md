@@ -619,5 +619,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0602](./0602-contested-group-recheck-teeth.md) | 多者間 contested の群（ADR 0381）の確かめ直しで見つかった穴を塞ぐ（解消での関係の削除の範囲・段3が抜けたメンバーを越えない・同伴の `attributes` の絞り・claim key の合併と人数の境界・`markContestedGroup` の対の片割れ） | 採用 (2026-10) |
 | [0603](./0603-adr-0382-0380-merged-pr-recheck-teeth.md) | 09/29 にマージされた #1437・#1435 の確かめ直しで見つかった穴を塞ぐ（`deleteAcrossSpaces` が渡していない記憶を残すこと・退けたかを最新の superseded で決めること） | 採用 (2026-10) |
 | [0604](./0604-fixture-erase-tenant-usages-exact-tenant.md) | testkit の InMemory と core の Fake の `eraseTenant` が `recall_usages` を tenantId の完全一致で消す（あわせて Fake の `tenant_subject_activity` を subject ごとの行で数える） | 採用 (2026-10) |
+| [0605](./0605-outbox-complete-fail-at-bounds-teeth.md) | OutboxStore.complete・fail の `opts.at` の境界の確かめ直し（ADR 0597）で見つかった穴を塞ぐ（Postgres の例外の型・西暦10000年・紀元前100年） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

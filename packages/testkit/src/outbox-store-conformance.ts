@@ -391,6 +391,31 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
           ? store.complete(ctx, job.id, job.attempts, { at: FLOOR_AT })
           : store.fail(ctx, job.id, "simulated failure", job.attempts, { at: FLOOR_AT }));
       });
+
+      /**
+       * 下限は断るが、下限より後の日時は、紀元前でも西暦9999年より後でも通す（クローンの判断。ADR 0605。断りすぎる実装を縛る）。
+       * 下限ちょうどの1点だけでは、「紀元前はすべて断る」「西暦9999年より後は断る」実装を縛れない。どちらも `Date` の範囲内で、
+       * Postgres の `timestamptz`（4714-11-24 BC から 294276 AD）にも収まる。
+       */
+      for (const [label, at] of [
+        ["紀元前100年", new Date(Date.UTC(-99, 0, 1))],
+        ["西暦10000年", new Date(Date.UTC(10000, 0, 1))],
+      ] as const) {
+        it(`${how} は opts.at が ${label}（timestamptz の範囲内）なら、例外にせず通り、その値を書く`, async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const job = await seedJob(ctx, { kind: "extract" });
+
+          await (how === "complete"
+            ? store.complete(ctx, job.id, job.attempts, { at })
+            : store.fail(ctx, job.id, "simulated failure", job.attempts, { at }));
+
+          if (peekJob) {
+            const after = await peekJob(ctx, job.id);
+            expect(how === "complete" ? after?.completedAt : after?.failedAt).toEqual(at);
+          }
+        });
+      }
     }
 
     /** 渡した `at` の Date を、store が参照のまま持たない（後から呼び手が書き換えても行は変わらない）。 */
