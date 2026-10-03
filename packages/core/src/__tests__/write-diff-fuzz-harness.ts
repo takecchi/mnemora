@@ -62,8 +62,8 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  *   `decay_floor_at` と「いま」がちょうど一致する形はまず作れない。【実測】`archiveDecayed` の
  *   `<=` を `<` に壊す変異は、20シード × 60手で捕まらなかった。境界は、それぞれの口の歯が見る。
  * - **並行。** 操作は1本ずつ順に流す。リース切れの二重処理などは #1092 の範囲。
- * - 時計に依らない時刻（outbox の `created_at` / `available_at`、イベントの `at`、
- *   `updated_at`）。Postgres は `now()`、Fake は `new Date()` で埋める。
+ * - 時計に依らない時刻（`updated_at` など、`Runtime`/`Clock` の管轄ではない列）。
+ *   outbox の `created_at` / `available_at` とイベントの `at` は注入した時計に従う（ADR 0559）。
  */
 
 export const WRITE_FUZZ_CTX: Ctx = { tenantId: "tenant-write-fuzz" };
@@ -248,7 +248,7 @@ export interface WriteRunOutcome {
 }
 
 export interface WriteRunOptions {
-  /** 時計の起点。Postgres の outbox は `available_at` を `now()` で埋めるので、それ以降にする。 */
+  /** 時計の起点。歴史的な理由で実時刻より先に置いている（今は `available_at` も注入した時計に従う。ADR 0559）。 */
   t0: number;
   /** `stores.memoryStore` を差し替える（陽性対照が `reinforce` を壊すのに使う）。 */
   wrapMemoryStore?: (store: WriteFuzzStores["memoryStore"]) => WriteFuzzStores["memoryStore"];

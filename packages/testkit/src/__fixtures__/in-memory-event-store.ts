@@ -106,7 +106,9 @@ export class InMemoryEventStore implements EventStore {
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
     assertWellFormedCtx(ctx);
-    const event = this.events.find((e) => e.id === id);
+    // ADR 0556: 大文字小文字は区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。この fixture の id は小文字の `evt-N` だけ。
+    const lowered = id.toLowerCase();
+    const event = this.events.find((e) => e.id === lowered);
     if (!event || event.tenantId !== ctx.tenantId) {
       return null;
     }

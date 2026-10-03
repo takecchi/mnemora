@@ -281,7 +281,7 @@ describe("runtime.restoreArchived — 並行（updateStatusWithEvent が MemoryS
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "active";
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "active"; // ADR 0562: 返り値は写し
       }
     };
 
@@ -298,7 +298,7 @@ describe("runtime.restoreArchived — 並行（updateStatusWithEvent が MemoryS
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "forgotten";
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "forgotten"; // ADR 0562: 返り値は写し
       }
     };
 
@@ -315,7 +315,7 @@ describe("runtime.restoreArchived — 並行（updateStatusWithEvent が MemoryS
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
-        memory.status = "forgotten";
+        stores.memoryStore.liveRowForTest(ctx, memory.id)!.status = "forgotten"; // ADR 0562: 返り値は写し
       }
     };
     let getCalls = 0;
@@ -582,7 +582,7 @@ describe("runtime.restoreArchived — CAS が破れた後の再読そのもの�
     const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === m2.id) {
-        m2.status = "forgotten";
+        stores.memoryStore.liveRowForTest(ctx, m2.id)!.status = "forgotten"; // ADR 0562: 返り値は写し
       }
     };
     // m2 への get の1回目は updateStatusWithEvent 内部（CAS 判定用）、2回目が再読。

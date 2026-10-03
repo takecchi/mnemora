@@ -1304,7 +1304,7 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 
 **誰が影響を受けるか**: 自前の `MemoryStore`/`OutboxStore` 実装を、`packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に対して走らせている利用者のうち、上の新しい欄を守っていない（省略時に壁時計 `new Date()` を使うのではなく、渡された値を無視し続ける）場合。**適合テストを走らせていない・自前実装を持たない利用者は影響を受けない。**
 
-**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（自分の実装が渡された値を無視し続ける間、その実装が書く欄は壁時計のまま。`Runtime` 自身は、注入した時計の値をこれらの欄へ渡している——[ADR 0559](./decisions/0559-clock-reaches-outbox-available-at.md)）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
 
 **DB マイグレーション**: 不要（スキーマは変えていない）。
 
@@ -2606,7 +2606,6 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。何も書かれずに落ちる入力なので、既存の行は変わらない。
 
-
 ### 61. `resolveContestedPair?` が対の外の `forgotten` を指す `supersededById` を、`updateStatus`・`updateStatusWithEvent` が `superseded` 以外の status への `supersededById` を、`RangeError` で断るようになった（`@mnemora/postgres`・`@mnemora/testkit`）
 
 [ADR 0515](./decisions/0515-superseded-by-remaining-checks.md)（担い手が書いた。決めたのはクローンの線の内側で、オーナーではない。[ADR 0503](./decisions/0503-superseded-by-checks-resolve-contested-update-status.md) の「引き受けた負債」の1・2。項目59と同じ数え方）。
@@ -2626,6 +2625,37 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 **確かめたこと**: 2実装に同じ入力を流す歯で、直す前は赤・直した後は緑、変異（検査を外す・やりすぎる）で赤（ADR 0515）。
 
 **DB マイグレーション**: 要らない。既存の行は書き換えない。
+
+### 62. `tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と、保存できない巨大な `leaseMs` を、claim する前に断るようになった（`@mnemora/core`）
+
+[ADR 0514](./decisions/0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md)（クローン miku の委譲先の担い手が書いた。決めたのはクローンで、オーナーではない。[ADR 0496](./decisions/0496-core-entry-rejections-adr-0446-0445-0472-0474-0485.md) の引き受けた負債の5と1。項目54と同じ数え方）。
+
+⚠ **未リリース**。**番号は 62 である**——項目61 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`tick` が、`opts.kinds`・`limit`・`claimedBy` の型の外の値と…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない。
+
+| 欄 | 断る入力 | 例外 | 以前 |
+| --- | --- | --- | --- |
+| `kinds` | 配列でない（裸の文字列・`null`・object・数）／文字列でない要素を含む | `TypeError` | 裸の文字列は Fake・InMemory で部分文字列の照合になり通る。`null`・数の要素は通る。object・数は store ごとの例外 |
+| `limit` | 0 以上 2^63 未満の整数でない（文字列・`null`・`NaN`・`±Infinity`・負・小数） | `RangeError` | `"5"`・`null` は Postgres で通る。ほかは store ごとの例外（`DrizzleQueryError`・名前の無い `Error`） |
+| `claimedBy` | 文字列でない（`null`・数・object） | `TypeError` | Fake・Postgres では通り、数は text 列に入る |
+| 同上 | NUL（U+0000）を含む | `RangeError` | store ごとの例外（Postgres は 22021） |
+| `leaseMs` | 有限でも、`now - leaseMs` が `Date` の範囲外、または 4714-11-24 BC より前（`1e20`・`-1e20`・`3e14` など） | `RangeError` | `1e20` は store ごとの例外。`3e14` は Fake・InMemory で通り（何も claim しない）、Postgres だけが落ちる |
+
+**なぜ破壊的と数えるか**: 型検査は壊れないが、**以前は通っていた入力が新しく例外になる**。以前も落ちた入力は、例外の種類が変わる。項目54と同じ扱い。
+
+**誰が影響を受けるか**: `as`・JavaScript・外部の設定から `tick` の `opts` を組み立てている呼び出し側。例: 環境変数の `TICK_LIMIT` を文字列のまま `limit` に渡している（以前は Postgres で通った）、`kinds` に種類を1つ裸の文字列で渡している、`claimedBy` にワーカー番号を数のまま渡している。`cause.code`（22P02 など）や `claimBatch: limit must …` の message で分岐していた呼び出し側。`claimBatch` を直接呼ぶ人は変わらない。
+
+**どう直すか**:
+- `limit` は `Number(...)` などで整数にして渡す（`0` は今までどおり「claim しない」）。
+- `kinds: ["extract"]` と配列にする。
+- `claimedBy` は `String(...)` で文字列にし、NUL を含めない。
+- `leaseMs` は、現実のリース長（ミリ秒）にする。0 以下は今までどおり通る（重複 claim を許すので、意図した場合だけ）。
+- 例外で分岐していた箇所は、`TypeError`・`RangeError` と、`Runtime.tick: opts.<欄> …` の message で分岐する。
+
+**確かめたこと**: Fake・InMemory・Postgres に同じ入力を流す歯を、`packages/core/src/__tests__/tick-opts-validation.test.ts` と `packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts` に足した（直す前は断る21件が3者で赤）。
+
+**DB マイグレーション**: 要らない。claim の前に落ちるので、outbox の行は変わらない。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
@@ -2806,8 +2836,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 ⚠ **2026-10-02 追記2**: 下の、ADR 0525（PR #1616）と ADR 0521（PR #1615）の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR が上の「v1.1.0 → v1.2.0」の節へ足したものを、`v1.2.0` に入らないのでこの節へ移した（本文は書き換えていない）。🔴 の項目56（ADR 0498）に ADR 0525 が足していた注記は、出荷された本文に戻した（ADR 0534）。
 
+- **`@mnemora/bullmq` の `createBullmqTickDriver`: 完了したジョブを直近 1000 件だけ Redis に残す（`removeOnComplete: { count: 1000 }` が既定）。`lockDuration`・`completedJobsToKeep` のオプションが増えた**（[ADR 0548](./decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)）。
+  以前は完了したジョブが全部残った。いまは古い完了ジョブを BullMQ が消す。`queue.getJobs(["completed"])` や `getJobCounts("completed")` で完了ジョブの `returnvalue`・件数を後から読んでいた人、完了ジョブが残り続けることに頼っていた人だけが見直す。以前に近づけるなら `completedJobsToKeep: Number.MAX_SAFE_INTEGER`。`removeOnFail` は触っていないので、失敗したジョブは従来どおり全部残る。手順は要らない（既存の Redis のジョブは、次に完了するジョブから古い分が順に消える【未確認】）。`lockDuration` と `completedJobsToKeep` は任意の追加で、渡さなければ `lockDuration` は BullMQ の既定のまま。型は互換。数でない値は `TypeError`、範囲外は `RangeError`。内容は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節を見ること。
+  影響が出るのは、完了したジョブの `returnvalue`（`runtime.tick()` の結果）を後から読んでいた利用者である。1000 件より古い完了ジョブは消えるので、その `returnvalue` はもう読めない（直近 1000 件の分は読める）。
 - **`@mnemora/postgres`: `PostgresVectorStore` を `Runtime` を通さずに直接呼んだときの例外の message（`cause` の連鎖を含む）から、SQL に付けた値（`params:` 以降）が落ちる**（[ADR 0504](./decisions/0504-vector-store-omits-params-from-thrown-errors.md)。ADR 0423 と同じ作法）。
-  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で落ちるようになった。下の項目）。
+  `searchMany` では最大 16384 件のベクトルが例外に残っていた。SQL の文・`kind`・SQLSTATE・`cause` は残る。落ちる入力は増えない（例外の種類は変わらない）。message の `params:` 以降を読んで処理していた呼び出し側は、値を読めなくなる。`DrizzleQueryError` の `params` プロパティは残る。ほかの store の直接呼びは、まだ落ちない（ADR 0504 の表。`PostgresEventStore.append`・`PostgresLexicalStore.search` は、のちに ADR 0505 で、`PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` は ADR 0516 で、落ちるようになった。下の項目）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`・`InMemoryTenantSettingsStore`: purge 済みの記憶への `expectedStatus` 付き更新を断り、`resolveContestedGroup`・`resolveContestedPair` の型の外の `status` を `RangeError` で断る。`setEventRetention` の日数の上限は共有の検査に移った**（[ADR 0499](./decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。🔴 の項目57 の InMemory 版）。
   `@mnemora/postgres` を直した（項目57）のに合わせ、fixture も同じ入力で同じ結果にした: purge 済みの記憶（`purgedAt` が非 `null`）は `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の `expectedStatus` に一致しない（以前は fixture も、墓石を `active` に戻せた）。`status` が `"active"`・`"superseded"` 以外なら、`RangeError`（文面は Postgres と同じ）。日数の上限の message は変わらない（検査の置き場所だけが、fixture の中から core の共有の検査に移った）。
   公開の fixture が新しく例外を投げる変更は破壊的と数えない（上の「数え方の規律への追記（2026-09-28）」の2）ので、🔴 には数えない。conformance suite は変えていない。自前のテストで `InMemoryMemoryStore` の purge 済みの行を `expectedStatus` 付きで戻していた人、型の外の `status` を渡していた人だけが落ちる。
@@ -2827,6 +2860,12 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
   以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `updateStatus`・`updateStatusWithEvent` が、`supersededById` に大文字小文字だけが違う自分自身の id（id が `mem-1`・`supersededById` が `MEM-1` など）を渡されると `RangeError`（`supersededById must not be the memory itself`）で断る**（[ADR 0558](./decisions/0558-inmemory-self-supersede-check-folds-both-sides.md)。🟡。項目59（ADR 0503）の自己置換の検査の取りこぼし）。
+  `@mnemora/postgres` は以前から両側を畳んで断る。以前の fixture は `supersededById` を畳まずに比べたので通り、自分を指す `superseded` の行を書いた。新しく断るのはこの綴り違いの自己置換だけ（Postgres が今断るものだけ）。別の記憶を大文字で渡す呼び出しは従来どおり通り、小文字で保存される。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `abortIfSuperseded` に大文字の uuid の superseded な記憶の id を渡すと、書かずに `SourceMemoryStatusChangedError` を投げる。綴り違いの同じ id（`[x, X]`）は `changed` に1件、`changed` は id の昇順**（[ADR 0568](./decisions/0568-abort-if-superseded-controls-and-duplicate-id-changed.md)。🟡。[ADR 0556](./decisions/0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) の「新しく断る入力は無い」の訂正）。
+  `createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `abortIfSuperseded` が対象。`@mnemora/postgres` は以前から、大文字でも同じ行として見つけて断る（`id = ANY(...)`、1行につき1件、`ORDER BY id ASC`）。以前の fixture は、大文字の id では superseded を見落として書き込み（ADR 0556 が直した）、ADR 0556 の後も、綴り違いの同じ id を渡すと同じ id を `changed` に2回積み、渡した順に並べていた。**新しく断る入力は、大文字の id の superseded な記憶**（Postgres が今断るものだけ。ADR 0556 は、これを「新しく断る入力は無い」と書いていた）。`abortIfSuperseded` に大文字の id を渡して、書き込みが通ることに頼っていたテストは、いまは `SourceMemoryStatusChangedError` になる。`changed` の件数や並びを読んでいたテストも、見直しの対象になる。他のテナントの記憶・superseded 以外の status は、大文字の id でも断らない（Postgres と同じ）。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
 
 - **`@mnemora/testkit/fixtures` の `InMemory*`: `text` 列に入る欄の孤立サロゲートを、`@mnemora/postgres` と同じく U+FFFD に置き換えて保存する**（[ADR 0543](./decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。🟡。オーナーの決定で、ADR 0423 決定5 の「インメモリは保持」を置き換えた）。
   以前の fixture は、孤立サロゲート（`"a\uD800b"` など）を含む `content`・`digest`・`tags`・claim key・ラベル名などをそのまま保持して読み返した。いまは `"a\uFFFDb"` で返る（Postgres と同じ）。**対をなす絵文字・普通の文字列は変わらない。** 読み取りの引数（`claimKey`・`extractorVersion`・`labels`）も同じく置き換わるので、書いた値と同じ入力で引けば当たる。

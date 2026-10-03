@@ -68,7 +68,8 @@ export type OpenAILLMFailureKind =
   | "refusal"
   /** `finish_reason === "length"`。応答が max tokens で途中で切れた */
   | "truncated"
-  /** 上記のどちらでもないのに、`content` が空/欠落だった */
+  /** 上記のどちらでもないのに、`content` が空/欠落だった。**`completeStructured` だけが投げる**
+   * （`complete` は同じ場合に例外にせず空文字を返す）。 */
   | "no_content"
   /** 送る前の翻訳・検査（`toBaseJsonSchema`・`toStrictJsonSchema`）が例外を投げた。
    * `chat.completions.create` は呼ばれていない。元の例外は `cause` に載る（#1148）。 */

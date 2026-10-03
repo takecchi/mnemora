@@ -33,8 +33,11 @@ export interface RelationStoreConformanceOptions {
 
 /**
  * `RelationStore`（Issue #207/#933 PR2、ADR 0292 決定1-c、ADR 0381）の adapter 非依存の
- * 適合テスト。`link`/`unlink`/`listRelated` の契約を Postgres・in-memory 両方に対して
- * 走らせる。
+ * 適合テスト。`link`/`unlink`/`listRelated` の契約（片方向・`link` の冪等・`unlink` の冪等・
+ * テナント分離・両端の記憶が `ctx` のテナントに在ること＝ADR 0398・列挙の外の `kind` の拒否・
+ * 返した `createdAt` の複製）を Postgres・in-memory 両方に対して走らせる。任意メソッド
+ * `listRelatedMany` の節は実装した adapter にだけかかる（`implementsListRelatedMany` の doc を見ること）。
+ * `ctx.tenantId`・`ctx.subjectId` の形式不正な識別子の拒否（ADR 0423）も検査する。
  */
 export function describeRelationStoreConformance(options: RelationStoreConformanceOptions): void {
   const { name, createStore, prepareMemoryId, implementsListRelatedMany = false } = options;

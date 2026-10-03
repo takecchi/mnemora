@@ -71,7 +71,7 @@ import { scoreTotalOrNull } from "./recalled-score.js";
  * （`scope.ts`/`backfill.ts` と同じ規律）。
  *
  * **⚠ `recall()` は `limit: 1` を明示して呼ぶ（PR #320 の CI 失敗の修正、ADR 0162 決定5）。**
- * この会話には `original`/`correction` の2件しか Memory が無いため、既定の limit（10件）
+ * この会話には `original`/`correction` の2件しか Memory が無いため、既定の limit（`DEFAULT_RECALL_LIMIT`）
  * では両方が独立に段2（再スコア）の `withinLimit` へ収まってしまい、段3「矛盾の解決と
  * 必須の同伴取得」（`docs/recall.md` §2 段3）の同伴取得（`retrievedVia: 'mandatory_companion'`）
  * が一度も発火しない——両方ともスコアだけで既に出るので、対向を「必ず連れてくる」機構が
@@ -434,7 +434,7 @@ export interface CorrectionDemoCheck {
 }
 
 /**
- * `checkCorrectionDemo()` とは別に持つ、`omitted`（`docs/recall.md` §2「無い」の分類）
+ * `checkCorrectionDemo()` とは別に持つ、`omitted`（`docs/recall.md` §4「「無い」の分類」）
  * 側からの検査（Issue #374）。
  *
  * `CorrectionDemoCheck.afterResolveOriginalAbsent` は「`recall().memories` に居ない」

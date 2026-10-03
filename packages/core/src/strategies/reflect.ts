@@ -30,7 +30,7 @@ export const ReflectionLLMResultSchema = z.discriminatedUnion("outcome", [
     outcome: z.literal("reflected"),
     content: z.string().min(1),
     /**
-     * 省略・空文字は「LLM 側の digest 生成が失敗した」ものとして扱い、機械的な先頭文字列
+     * 省略・空文字・空白だけは「LLM 側の digest 生成が失敗した」ものとして扱い、機械的な先頭文字列
      * 切り出しへフォールバックする（`resolveDigest`、extraction.ts と同じ規律）。
      * ⚠ 2026-09-28 訂正: 以前は `min(1)` を付けていたので、空文字の digest は応答ごと拒まれ、`reflect()` は
      * `llm_failed` になっていた（この doc と食い違っていた）。抽出・consolidate の schema と同じく空文字を受け付ける。
@@ -95,8 +95,8 @@ export interface BuildReflectedMemoryParams {
   ctx: Ctx;
   /**
    * 土台になった側（`status: 'active'` かつ `provenance.kind !== 'reflected'` の eligible）。
-   * **入力の順序をそのまま使う**——`occurredAt` の最新判定・`subjectId` の一致判定・タグの
-   * 和集合はこの並びに従う（`buildConsolidatedMemory` と同じ規律）。
+   * **入力の順序をそのまま使う**——タグの和集合の並びと `provenance.sources` の並びはこの並びに従う
+   * （`occurredAt` の最新判定・`subjectId` の一致判定は順序に依らない。`buildConsolidatedMemory` と同じ規律）。
    */
   eligible: Memory[];
   /** 内省の LLM が返した値のうち、記憶を作る側（`outcome: "nothing"` ではないもの）。 */
@@ -134,7 +134,8 @@ export interface BuildReflectedMemoryParams {
  *   引き継げる）。
  * - `digest`: LLM が返した digest が空・欠落なら機械的フォールバックへ倒す
  *   （`resolveDigest`、extraction.ts / consolidate.ts と同じ安全弁）。
- * - `tags`: LLM が返した `tags` があればそれを使い、無ければ eligible の `tags` の和集合。
+ * - `tags`: LLM が返した `tags` があればそれ（空文字・空白だけの要素は `dropBlankTags` で捨てる）を使い、
+ *   無ければ eligible の `tags` の和集合（重複は除く）。
  * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0312 決定4）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
  * - `validFrom` / `validUntil`: eligible 全件の**区間の積**（`intersectValidity`、
@@ -142,8 +143,9 @@ export interface BuildReflectedMemoryParams {
  *   は最小値。全部 `null` なら両方 `null`（今までの振る舞いのまま）。`consolidate` と
  *   違い、`reflect` は材料を `superseded` にしない——材料が期限切れになっても、材料
  *   自身の行はそのまま `active` で残り続ける（ADR 0368「代償」は `consolidate` 側だけの負債）。
- * - `halfLifeHours` / `decayFloorAt`: 呼び出し側（`runtime.reflect`）がテナント既定値から
- *   計算して渡す。`decayFloorAt` は `strength: 1` を前提に計算する（`consolidate` と同じ）。
+ * - `halfLifeHours`: 呼び出し側（`runtime.reflect`）がテナント既定値から決めて渡す。
+ *   `decayFloorAt`: この関数が `now`・`halfLifeHours` から `defaultDecayStrategy.floorAt` で計算する
+ *   （`strength: 1` を前提。`consolidate` と同じ）。
  * - `strength`: **`1`（`MAX_STRENGTH`）に固定する。`consolidate` と同じ値・同じ書き方**
  *   ——`packages/core/src/provenance.ts` 冒頭の JSDoc が「オーナーの原則7は追加のフラグ
  *   ではなく `kind` の値そのものとして実装される」と明示しており、`strength` を下げると

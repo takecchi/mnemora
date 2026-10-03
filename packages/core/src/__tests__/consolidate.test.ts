@@ -418,10 +418,10 @@ describe("runtime.consolidate — 並行の書き込み（CAS）", () => {
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
 
-    // `FakeMemoryStore.get` は backing.memories に入っている Memory オブジェクトへの参照を
-    // そのまま返す（コピーを作らない）ので、事前に取得した参照の status を書き換えるだけで
-    // 「割り込み」を再現できる（`runtime.test.ts` の reextract の歯と同じ手口）。
-    const aLive = await stores.memoryStore.get(ctx, a.id);
+    // ADR 0562: `FakeMemoryStore.get` は写しを返す（以前は backing.memories の行そのものだった）ので、
+    // 行そのものを引く `liveRowForTest` で取った参照の status を書き換えて「割り込み」を再現する
+    // （`runtime.test.ts` の reextract の歯と同じ手口）。
+    const aLive = stores.memoryStore.liveRowForTest(ctx, a.id);
     let intervened = false;
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (!intervened && id === a.id) {
@@ -552,8 +552,8 @@ describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 
   /**
    * この describe だけ `tick()` を経由して `embed` ジョブを claim する。ファイル共通の
    * `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を注入しているが、
-   * `FakeOutboxStore.enqueueJob` は `availableAt` を `new Date()`（実時刻）で刻むため、
-   * 固定 clock だと `availableAt <= now` が成り立たず1件も claim されない——下の
+   * 以前の Fake は `enqueueJob` が `availableAt` を `new Date()`（実時刻）で刻んだため（今は `opts.now` に従う。ADR 0555）、
+   * 固定 clock だと `availableAt <= now` が成り立たず1件も claim されなかった——下の
    * 「`runtime.tick — consolidate ジョブは種の subjectId...」describe が同じ理由で
    * 既に `buildRuntimeWithRealClock` を使っている（そちらのコメント参照）。ここでも
    * 同じ回避を踏む。
@@ -831,9 +831,9 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
    * 上のファイル共通の `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を
    * 注入している——`runtime.consolidate()` を直接呼ぶ既存の歯はこれで問題ない（`tick`
    * 自体を経由しないため）。この describe は `tick()` の `claimBatch` を経由する
-   * ため、outbox 行の `availableAt`（`FakeOutboxStore.enqueueJob` が `new Date()`＝
-   * 実時刻で刻む）より前の固定 clock を使うと、`availableAt <= now` が成り立たず
-   * 1件も claim されない。⟹ ここだけ実時計（既定の `systemClock`）を使う。
+   * ため、outbox 行の `availableAt`（以前の Fake は `enqueueJob` が `new Date()`＝
+   * 実時刻で刻んだ。今は `opts.now` に従う。ADR 0555）より前の固定 clock を使うと、以前は `availableAt <= now` が成り立たず
+   * 1件も claim されなかった。⟹ ここだけ実時計（既定の `systemClock`）を使う。
    */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();

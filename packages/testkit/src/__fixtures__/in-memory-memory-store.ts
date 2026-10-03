@@ -125,7 +125,8 @@ function assertSupersededByShape(
         `${method}: ${field}.supersededById is required when status is "superseded"`,
       );
     }
-    if (supersededById === selfId) {
+    // Postgres は `normalizeUuidCase` で両側を畳んで比べる。呼び出し側は id だけ畳むので、ここで両側を畳む。
+    if (normId(supersededById) === normId(selfId)) {
       throw new RangeError(`${method}: ${field}.supersededById must not be the memory itself`);
     }
   } else if (opts.forbidWhenNotSuperseded && supersededById !== undefined) {
@@ -1152,7 +1153,16 @@ export class InMemoryMemoryStore implements MemoryStore {
       return;
     }
     const changed: Array<{ id: MemoryId; observedStatus: MemoryStatus }> = [];
-    for (const id of ids) {
+    // ADR 0568: 綴り違いの同じ id（`[x, X]`）は1行として数え、`changed` は id の昇順にする
+    // （`@mnemora/postgres` は `id = ANY(...) ORDER BY id ASC` で行を選ぶので、1行につき1件・昇順）。
+    const seen = new Set<MemoryId>();
+    for (const raw of ids) {
+      // ADR 0556: 大文字小文字は区別しない。`changed[].id` は小文字（`@mnemora/postgres` は行の uuid を読み戻すので小文字）。
+      const id = normId(raw);
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
       const memory = this.memories.get(id);
       if (
         memory !== undefined &&
@@ -1162,6 +1172,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         changed.push({ id, observedStatus: memory.status });
       }
     }
+    changed.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     if (changed.length > 0) {
       throw new SourceMemoryStatusChangedError(method, changed);
     }

@@ -87,8 +87,8 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
 /**
- * 手で進める時計。壁時計より少し先から始める（outbox の `available_at` は壁時計で書かれ、
- * `tick` の claim は注入した時計で読むため、壁時計より過去では embed ジョブが取れない。
+ * 手で進める時計。壁時計より少し先から始める（歴史的な理由で残している。今は outbox の
+ * `available_at` も注入した時計に従うので、壁時計より過去でも embed ジョブは取れる。ADR 0559、
  * `injected-clock-reach.postgres.test.ts` の 2.）。
  */
 function manualClock() {
