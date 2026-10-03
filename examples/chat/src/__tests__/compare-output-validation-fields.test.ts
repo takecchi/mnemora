@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { RecallResult } from "@mnemora/core";
-import { formatRecallQualityTable, outputValidationFieldsFromRecall } from "../compare.js";
+import type { MemoryStore, RecallResult, Runtime } from "@mnemora/core";
+import {
+  formatComparisonTable,
+  formatRecallQualityTable,
+  outputValidationFieldsFromRecall,
+  runComparison,
+} from "../compare.js";
 import type { ComparisonRow } from "../compare.js";
 import { buildCompareJson } from "../compare-json.js";
 
@@ -34,6 +39,48 @@ const ISSUES = [
   { path: "usage.chars", code: "invalid_type", message: "b" },
   { path: "index.totalInScope", code: "too_small", message: "c" },
 ];
+
+// 同じ path に2件の issue が重なる（zod は1つの path に複数の issue を出しうる）。
+// path で畳むと 2 になり、`issues.length` の 3 と割れる（ADR 0551 の追記、変異 A）。
+const ISSUES_SHARING_PATH = [
+  { path: "usage.chars", code: "invalid_type", message: "a" },
+  { path: "usage.chars", code: "too_small", message: "b" },
+  { path: "index.totalInScope", code: "too_small", message: "c" },
+];
+
+/**
+ * `runComparison` を実際に通すための最小の偽 `Runtime`（`compare-decay-clock.test.ts` と同じやり方）。
+ * `recall()` は呼ばれた順に `validations` の要素を `outputValidation` として返す。
+ * `memories: []` なので `memoryStore` は触られない。
+ */
+function buildFakeRuntime(validations: Array<RecallResult["outputValidation"]>): Runtime {
+  let pendingEmbedJobs = 0;
+  let nextObserveId = 0;
+  let recallCalls = 0;
+  const observe: Runtime["observe"] = async () => {
+    nextObserveId += 1;
+    pendingEmbedJobs += 1;
+    return {
+      observationId: `obs-${nextObserveId}`,
+      memoryIds: [`mem-observe-${nextObserveId}`],
+      extraction: "ok",
+      extractionFailure: null,
+    } as unknown as Awaited<ReturnType<Runtime["observe"]>>;
+  };
+  const tick: Runtime["tick"] = async () => {
+    const processed = pendingEmbedJobs;
+    pendingEmbedJobs = 0;
+    return { processed, failed: 0, unsupported: [] } as unknown as Awaited<
+      ReturnType<Runtime["tick"]>
+    >;
+  };
+  const recall: Runtime["recall"] = async () => {
+    const validation = validations[recallCalls];
+    recallCalls += 1;
+    return makeRecallResult(validation) as unknown as Awaited<ReturnType<Runtime["recall"]>>;
+  };
+  return { observe, tick, recall } as unknown as Runtime;
+}
 
 function makeRow(overrides: Partial<ComparisonRow> = {}): ComparisonRow {
   return {
@@ -79,10 +126,49 @@ describe("outputValidationFieldsFromRecall", () => {
     expect(fields).toEqual({ outputValidationIssueCount: 3 });
   });
 
+  it("同じ path に重なる issue も1件ずつ数える（path で畳まない）", () => {
+    const fields = outputValidationFieldsFromRecall(
+      makeRecallResult({ ok: false, issues: ISSUES_SHARING_PATH }),
+    );
+    expect(fields).toEqual({ outputValidationIssueCount: 3 });
+  });
+
   it("outputValidation が undefined（off・未検証）なら欄を出さない（0 にしない）", () => {
     const fields = outputValidationFieldsFromRecall(makeRecallResult(undefined));
     expect(fields).toEqual({});
     expect("outputValidationIssueCount" in fields).toBe(false);
+  });
+});
+
+describe("runComparison — 行に outputValidationIssueCount を写す", () => {
+  it("検査した行には件数（0 を含む）が在り、未検証の行には欄そのものが無い", async () => {
+    const rows = await runComparison(
+      buildFakeRuntime([
+        { ok: false, issues: ISSUES_SHARING_PATH },
+        { ok: true, issues: [] },
+        undefined,
+      ]),
+      { fillerPairsSequence: [0, 1, 2], memoryStore: {} as unknown as MemoryStore },
+    );
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveProperty("outputValidationIssueCount", 3);
+    expect(rows[1]).toHaveProperty("outputValidationIssueCount", 0);
+    expect("outputValidationIssueCount" in rows[2]!).toBe(false);
+  });
+});
+
+describe("formatComparisonTable — 量だけの表には件数の列を足さない", () => {
+  it("件数を持つ行でも、見出しにも本文にも違反件数の列が無い（6列のまま）", () => {
+    const out = formatComparisonTable([
+      makeRow({ turnCount: 11, outputValidationIssueCount: 2 }),
+      makeRow({ turnCount: 12, outputValidationIssueCount: 0 }),
+    ]);
+    const lines = out.split("\n");
+    expect(lines[0]).not.toContain("出力検査");
+    for (const line of lines) {
+      // 両端の `|` で割った空の2つを除いた数 = 列の数
+      expect(line.split("|").length - 2).toBe(6);
+    }
   });
 });
 
