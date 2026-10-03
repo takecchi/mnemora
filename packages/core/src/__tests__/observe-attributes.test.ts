@@ -11,10 +11,10 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * `@mnemora/testkit` には依存しない。DB を要さないため手元で実行できる。
  */
 
-// ⚠ outbox の `available_at` は（fake・本番どちらも）注入した clock ではなく実時刻で
-// 書かれる（`FakeMemoryStore.enqueueJob` / postgres の `now()`）。`runtime.tick` の claim は
-// `available_at <= now`（`clock.now()`）を見るため、`NOW` を実行時点より過去にすると
-// deferred 経路の歯（下）が claim できなくなる。十分未来の固定日時にして避ける。
+// ⚠ 以前の Fake は outbox の `available_at` を、注入した clock ではなく実時刻で書いた
+// （`FakeMemoryStore.enqueueJob`）。今の Fake は `opts.now` に従う（ADR 0555）ので、`NOW` が過去でも
+// deferred 経路の歯（下）は claim できる。ただしこのテストは組み替えておらず、十分未来の固定日時の
+// ままにしている（組み替えは ADR 0555 の「残り」）。
 const NOW = new Date("2099-01-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
 

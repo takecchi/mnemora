@@ -529,10 +529,12 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0511](./0511-label-upsert-cross-memory-and-purge-update-order-deadlocks.md) | 記憶をまたぐ `upsertProposedLabels` の順と、purge/scrub の `UPDATE labels … FROM counted` の更新順が、並行する書き込みと 40P01 になる（ADR 0476 の負債1・2）。再現と直し | 採用 (2026-10) |
 | [0512](./0512-scrub-purged-index-band.md) | v1.0.x の purge が `recalls.index_band` に残した digest を、`scrubPurged`（purge のかけ直し）で伏せる | 採用 (2026-10) |
 | [0513](./0513-lexical-match-fixtures-aligned-to-postgres.md) | 語彙検索の fixture を Postgres に揃える（core の Fake は部分一致をやめて語の一致に、testkit の InMemory は `PROJ-12` を空白区切りの 1 語として数える） | 採用 (2026-10) |
+| [0514](./0514-tick-opts-kinds-limit-claimed-by-and-huge-lease-ms.md) | `Runtime.tick` の `opts.kinds`・`limit`・`claimedBy` と、保存できない巨大な `leaseMs` を、claim の前に名指しで断る（ADR 0496「引き受けた負債」の5と1） | 採用 (2026-10) |
 | [0515](./0515-superseded-by-remaining-checks.md) | `supersededById` の残りの断り（`resolveContestedPair` の対の外の `forgotten`、`updateStatus*` の `superseded` 以外への付与） | 採用 (2026-10) |
 | [0516](./0516-omit-params-trigram-outbox-tenant-settings-stores.md) | `PostgresTrigramLexicalStore.search`・`PostgresOutboxStore`・`PostgresTenantSettingsStore` を直接呼んだときの例外からも、SQL の `params` の値を落とす | 採用 (2026-10) |
 | [0517](./0517-blank-title-is-not-prefixed-when-extract-title.md) | `extractTitle: true` のとき、空白だけの `document.title` を本文の前置きにしない（断らず、無視する） | 採用 (2026-10) |
 | [0518](./0518-status-conflict-error-purged-row-doc.md) | `MemoryStatusConflictError` の TSDoc に、purge 済みの行では `expectedStatus` と `observedStatus` が両方とも `"forgotten"` になることを書く（文書だけ） | 採用 (2026-10) |
+| [0519](./0519-inmemory-reinforce-purged-matches-postgres.md) | testkit の InMemory の `reinforce` が purge 済みの記憶をどう扱うかを実測した — Postgres と同じだった（割れなし。歯を足し、TSDoc の「測っていない」を書き換えた） | 採用 (2026-10) |
 | [0520](./0520-doc-code-drift-sweep-0486-0488.md) | 文書とコードのずれを横に掃く（続き）— ADR 0486・0488 の分の文書を、今の main の型と実装に照らす | 採用 (2026-10) |
 | [0521](./0521-fixtures-accept-uppercase-target-id-like-postgres.md) | 穴探し — testkit の InMemory と core の Fake が、操作の対象の id（記憶・observation・recall・outbox のジョブ）を大文字で渡されても、`@mnemora/postgres` と同じ記憶・同じ行として扱うようにした。fuzz の `argupper` を3実装の差分に載せた | 採用 (2026-10) |
 | [0522](./0522-unmeasured-0493-runtime-lexical-seq-event-purge.md) | 穴探し — ADR 0493 §9「測っていないこと」の実測。Runtime 層の「消した後の参照」・`LexicalFilter` の seq 欄・`purgeExpiredEvents` の後の参照（割れは見つからなかった。歯を足した） | 採用 (2026-10) |
@@ -552,8 +554,28 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0536](./0536-parity-inventory-and-activity-clock.md) | 穴探し — 公開メソッドごとの「3者（Fake・InMemory・Postgres）を突き合わせる歯」の棚卸しと、その1つ目（活動時計 `decay_clock = "activity"` の経路。3者一致、割れは見つからなかった） | 採用 (2026-10) |
 | [0537](./0537-adr-index-rejects-malformed-adr-filename.md) | ADR 索引の生成器は、番号で始まるのに ADR のファイル名の形から外れた `.md` を、無視せず例外で落とす | 採用 (2026-10) |
 | [0538](./0538-retention-and-purge-parity.md) | 穴探し — 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）を3者（Fake・InMemory・Postgres）で突き合わせる。Fake の `events_purged` の `meta` だけ、日時が `Date` のままで割れていた（直した） | 採用 (2026-10) |
+| [0539](./0539-claim-key-read-parity.md) | 穴探し — claim key と矛盾の検出の読み口（`findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`）と、`observe` の `claimKey` 有効経路を3者（Fake・InMemory・Postgres）に流す歯（3者一致、割れは見つからなかった） | 採用 (2026-10) |
 | [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
 | [0544](./0544-llm-wait-state-change-contested-skips-three-paths.md) | LLM を待つ間に元の記憶が contested（と訂正で負けた superseded）になったら、reextract・consolidate・reflect の3経路は書かずに打ち切る（ADR 0406 の負債1・ADR 0420 の部分成功・ADR 0454 の負債1・5 を置き換える。往復は変えない） | 採用 (2026-10) |
+| [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
+| [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
+| [0555](./0555-core-fake-outbox-rows-honor-opts-now.md) | core の Fake が積む outbox 行の時刻も、`opts.now` に従う（`availableAt`・`createdAt`。InMemory・Postgres と揃える） | 採用 (2026-10) |
+| [0556](./0556-fixtures-uppercase-abort-if-superseded-and-event-get.md) | testkit の InMemory の `abortIfSuperseded` と、testkit・core の Fake の `EventStore.get` も、大文字の id を Postgres と同じに扱う | 採用 (2026-10) |
+| [0557](./0557-core-fake-superseded-by-checks.md) | core の Fake も `supersededById` の断り（ADR 0503・0515）を持つ（InMemory・Postgres と揃える） | 採用 (2026-10) |
+| [0558](./0558-inmemory-self-supersede-check-folds-both-sides.md) | testkit の InMemory の自己置換の検査は、`supersededById` と対象の id の両側を畳んで比べる | 採用 (2026-10) |
+| [0559](./0559-clock-reaches-outbox-available-at.md) | 注入した時計は outbox の `available_at` と監査ログの `at` に届く——古い「届かない」「DB の `now()` で書かれる」記述を、いまの実装に合わせて直す（コメントと doc だけ） | 採用 (2026-10) |
+| [0560](./0560-doc-code-drift-sweep-readmes.md) | 文書とコードのずれを横に掃く（第8弾）— README 4つ（ルート・core・openai・local-embedding）を、今の main の実装に照らす | 採用 (2026-10) |
+| [0561](./0561-doc-code-drift-sweep-recall-testkit.md) | 文書とコードのずれを横に掃く（第9弾）— `docs/recall.md`・`packages/testkit/README.md`・`docs/north-star-paths.md`・`docs/README.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0562](./0562-core-fake-isolates-caller-mutation.md) | core の Fake も、呼び手の書き換えから自分の中身を守る（Issue #1412 A8 の9本と、同じ原因の1本） | 採用 (2026-10) |
+| [0563](./0563-core-fake-event-time-nul-and-claim-predicates.md) | core の Fake の `archived`・`purgedAt` の時刻、識別子と `lastError` の NUL、片側だけの claim key を、InMemory・Postgres に揃える | 採用 (2026-10) |
+| [0564](./0564-core-fake-supersede-atomic-and-new-row-retention-default.md) | core の Fake の `supersedeWithNewMemories` を原子的にし、新しいテナント行の保持期間の既定を Postgres に揃える | 採用 (2026-10) |
+| [0566](./0566-fake-outbox-opts-now-controls.md) | ADR 0555 の歯の穴を塞ぐ——Fake の outbox 行の時刻を「やりすぎ」「外す」側からも縛り、0555 の文面のずれを訂正する | 採用 (2026-10) |
+| [0567](./0567-doc-code-drift-sweep-scripts.md) | 文書とコードのずれを横に掃く（第10弾）— `scripts/` のコメント・`AGENTS.md`・`docs/autonomy.md` を、今の main の実装に照らす | 採用 (2026-10) |
+| [0568](./0568-abort-if-superseded-controls-and-duplicate-id-changed.md) | ADR 0556 の歯が通した4つの変異を塞ぎ、`abortIfSuperseded` の綴り違いの同じ id を Postgres と同じ1件にし、0556 の「新しく断る入力は無い」を訂正する | 採用 (2026-10) |
+| [0569](./0569-doc-code-drift-sweep-roadmap-vision-chat.md) | 文書とコードのずれを横に掃く（第11弾）— `docs/roadmap.md`・`docs/vision.md`・`docs/alteroid-findings.md` と `examples/chat` のデモ本体のコメントを、今の main の実装に照らす | 採用 (2026-10) |
+| [0570](./0570-chat-cli-output-strings-match-implementation.md) | `examples/chat` の CLI の help と出力の文言を実装に合わせ、数の写しを外す | 採用 (2026-10) |
+| [0573](./0573-fake-event-time-nul-claim-controls.md) | ADR 0563 の歯が通した4つの変異（`updatedAt` の時刻・`extractorVersion` の NUL・claim predicate の並び）を塞ぐ | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

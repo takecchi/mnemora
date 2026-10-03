@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import type { Ctx, Memory, MemoryId, MemoryStore, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
+import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fakes.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -48,8 +49,16 @@ async function inMemoryKit(): Promise<Kit> {
   return { store, eventCount: async () => store.events.length };
 }
 
+/** ADR 0557: core の Fake（`FakeMemoryStore`）。イベント数は Fake の裏の events を読む（`fake-cas-purged-row.test.ts` と同じ）。 */
+async function fakeKit(): Promise<Kit> {
+  const store = createFakeRuntimeStores().memoryStore;
+  const backing = (store as unknown as { backing: { events: unknown[] } }).backing;
+  return { store, eventCount: async () => backing.events.length };
+}
+
 const KITS: Array<[string, () => Promise<Kit>]> = [
   ["testkit の InMemory", inMemoryKit],
+  ["core の Fake", fakeKit],
   ["Postgres", postgresKit],
 ];
 
@@ -366,6 +375,21 @@ for (const [kitName, makeKit] of KITS) {
       ]);
       expect(r.members.map((m) => m.status)).toEqual(["active", "active", "active"]);
     });
+
+    it("陽性対照: 輪にならない鎖（members[2] → members[1] → members[0]）は通る（断るのは輪だけ）", async () => {
+      const kit = await makeKit();
+      const ms = await group(kit);
+      const r = await resolve(kit, ms, [
+        { status: "active" },
+        { status: "superseded", by: ms[0]!.id },
+        { status: "superseded", by: ms[1]!.id },
+      ]);
+      expect(r.members.map((m) => [m.status, m.supersededById ?? null])).toEqual([
+        ["active", null],
+        ["superseded", ms[0]!.id],
+        ["superseded", ms[1]!.id],
+      ]);
+    });
   });
 
   describe(`${kitName}: updateStatus / updateStatusWithEvent の supersededById（ADR 0503）`, () => {
@@ -440,6 +464,15 @@ for (const [kitName, makeKit] of KITS) {
           await kit.store.updateStatusWithEvent(A, u.id, "archived", {}, ev(u.id));
         }
         expect(await snap(kit, [u.id])).toEqual([["archived", null]]);
+      });
+
+      it(`${name}: 陽性対照 — forgotten な記憶を指す superseded は通る（forgotten を断るのは resolveContested* だけ）`, async () => {
+        const kit = await makeKit();
+        const t = await mem(kit);
+        const gone = await mem(kit);
+        await kit.store.updateStatus(A, gone.id, "forgotten");
+        await call(kit, t.id, { supersededById: gone.id });
+        expect(await snap(kit, [t.id])).toEqual([["superseded", gone.id]]);
       });
     }
   });

@@ -76,6 +76,7 @@ await runtime.forget(ctx, { memoryIds: [] });
 
 **Phase 1（MVP）の実装が一巡した。**`packages/core`（型・interface・runtime）、`packages/postgres`、
 `packages/openai`、`packages/anthropic`、`packages/local-embedding`、
+`packages/bullmq`（`runtime.tick()` を BullMQ で駆動する）、
 `packages/testkit`（適合テスト）、`examples/chat`（サンプル CLI）がある。
 Phase 1 の範囲と、そこに入れなかったものは [docs/roadmap.md](./docs/roadmap.md) を参照。
 
@@ -98,6 +99,11 @@ Phase 1 の範囲と、そこに入れなかったものは [docs/roadmap.md](./
 **ADR を書くことは今も必須のまま**であり、上の一文が指す既定の運用でもある。
 個別にオーナーが minor での破壊的変更を認めた場合はその限りではなく、そのときは
 根拠になった `ask_human` の id と逐語を、変更を入れる ADR に書くこと。
+
+**（2026-10-02 訂正）**: 上の追記の「`v1.1.0`（minor）に破壊的変更が1件入っている」は誤りである。
+[ADR 0352](./docs/decisions/0352-association-score-without-total.md) は、
+[CHANGELOG](./CHANGELOG.md) の「v1.1.0 の記載の訂正」(a) で数え直した破壊的変更のうちの1件である。
+`v1.2.0`（minor）にも `### Breaking` がある（[ADR 0560](./docs/decisions/0560-doc-code-drift-sweep-readmes.md)）。
 
 名前は `mnemora`（`@mnemora/*`）に確定しており、暫定ではない
 （経緯は [docs/vision.md](./docs/vision.md) の「名前について」と

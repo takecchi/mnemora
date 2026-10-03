@@ -199,6 +199,8 @@ const DEFAULT_PROMPT_VERSION = "v1";
 const DEFAULT_DIGEST_FALLBACK_LENGTH = 200;
 const DEFAULT_CLAIMED_BY = "runtime.tick";
 const DEFAULT_TICK_LIMIT = 50;
+/** ADR 0514: `tick` が `now - leaseMs` に許す下限（Postgres の `timestamptz` の下限、4714-11-24 BC）。これより前は、どの store も保存できない。 */
+const MIN_STORABLE_TIMESTAMP_MS = -210_866_803_200_000;
 /**
  * ADR 0431: 群の `updated/contested` イベントの `note` に入れる、`memberIds`・`matches` の先頭の件数。
  * 超えたときは `memberIdsTruncated`・`matchesTruncated` が `true` になり、全体の件数は
@@ -307,10 +309,11 @@ export interface RuntimeDeps {
   embeddingProvider: EmbeddingProvider;
   /**
    * 省略時は `systemClock`。
-   * ⚠ 注入した時計は、store が埋める時刻（監査ログの `at`・outbox の `availableAt` など）には届かず、
-   * 壁時計より過去の時計では `tick` がジョブを取らない。reinforce は注入した時計に従うが、監査ログの `at` は
-   * `restoreSuperseded` の `unsuperseded` だけが注入した時計で、`restoreArchived` の `restored`・`sweepArchive` の
-   * `archived` は壁時計——{@link Clock} の doc 参照（Issue #1237）。
+   * 注入した時計は、runtime が積む outbox 行の `availableAt`・`createdAt` と、監査ログの `at` にも届く
+   * （runtime は `clock.now()` 由来の `now` を store に渡す。ADR 0355、記述の訂正は ADR 0559）。
+   * 壁時計より過去の時計でも、`tick` は積んだジョブを取れる。`restoreArchived` の `restored` の `at` も
+   * 注入した時計で、`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now` を使う。
+   * 今も壁時計のままの列は {@link Clock} の doc 参照（Issue #1237）。
    */
   clock?: Clock | undefined;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
@@ -1389,7 +1392,7 @@ export interface TickOptions {
    * handler をもう一度走らせ、遅れて `complete`/`fail` した側は {@link TickResult.leaseConflicts}
    * に載る（Postgres と testkit の fixture の両方で実測）。重複の防ぎは、正の `leaseMs` が
    * 処理時間より長いときにだけ効く。
-   * `now - leaseMs` が `Date` の範囲を外れる有限の値（例 `1e20`）は、どちらの実装でも例外になる（ここでは断らない。store の側で落ちる）。
+   * `now - leaseMs` が保存できない時刻になる有限の値（例 `1e20`）は断る（下の ADR 0514 の追記）。
    *
    * ⚠ **2026-10-02 追記（ADR 0496。Issue #1184 の「今の振る舞い」の追記を置き換えた）: Runtime が入口で検査する。**
    * `tick` は、claim する前に `opts` を確かめる。`opts` が object でない（`tick(ctx)` で第2引数ごと省略した場合を含む）と
@@ -1398,9 +1401,16 @@ export interface TickOptions {
    * ならず、ジョブは claim されない（同じ時刻の次の `tick` で取れる）。以前は、省略すると Runtime は検査せず `undefined` のまま
    * `OutboxStore.claimBatch` へ渡し、`@mnemora/postgres` は drizzle が包んだ `Error`（`err.cause.code` が `22007`）、testkit の fixture は
    * 名前の無い `Error`（`claimBatch: now - leaseMs must be a valid Date`）で落ち、第2引数ごと省略すると素の `TypeError` だった。
-   * 0 以下・`1e20` のような有限の値は、ここでは断らない（上の ⚠）。
+   * 0 以下の有限の値は、ここでは断らない（上の ⚠）。`1e20` のような巨大な値は、下の ADR 0514 の追記で断るようになった。
    * 【実測 2026-10-02】`packages/postgres/src/__tests__/runtime-entry-exception-kinds.postgres.test.ts`・
    * `packages/core/src/__tests__/tick-lease-ms-validation.test.ts`。
+   *
+   * ⚠ **2026-10-02 追記（ADR 0514）: 巨大な `leaseMs` も、claim する前に `RangeError` で断る。** `now - leaseMs`（`now` は `RuntimeConfig.clock` の今）が
+   * `Date` の範囲を外れる（`1e20`・`-1e20`）か、Postgres の `timestamptz` の下限（4714-11-24 BC、`-210866803200000` ms）より前になる（`3e14` など）と、
+   * `Runtime.tick: opts.leaseMs is out of range (now - leaseMs must be a timestamp every store can hold)`。以前は Postgres が drizzle の `DrizzleQueryError`、
+   * testkit の fixture・core の Fake が名前の無い `Error` で落ち（範囲の内側にある `3e14` は、fixture・Fake では通って何も claim しないのに Postgres は落ちる、という食い違いもあった）、
+   * 3者で顔が違った。下限ちょうどは通る。0 以下の `leaseMs` の振る舞いは変えない。
+   * 【実測 2026-10-02】`packages/core/src/__tests__/tick-opts-validation.test.ts`・`packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts`。
    *
    * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、Issue #1200）: ジョブの処理がリースより長く掛かっても、
    * その間に別の `tick` が同じジョブを取らなければ、完了は通り、`TickResult` には何も出ない**
@@ -1431,9 +1441,10 @@ export interface TickOptions {
   leaseMs: number;
   /**
    * 1回の `tick` で claim する上限。省略時の値は `@mnemora/core` の内部定数（`packages/core/src/runtime.ts` の `DEFAULT_TICK_LIMIT`）。
-   * `0` なら何も claim しない。0 以上の整数を渡す前提であり、負数・非整数は例外になる
-   * （`OutboxStore.claimBatch` がそのまま受け取る。Postgres は DB の例外、testkit の fixture は
-   * 専用のメッセージ）。
+   * `0` なら何も claim しない。
+   * ⚠ **2026-10-02 追記（ADR 0514）: 0 以上 2^63 未満の整数でなければ、claim する前に `RangeError`**
+   * （`Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63`。文字列・`null`・`NaN`・`±Infinity`・負数・小数を含む。`undefined` は省略と同じ）。
+   * 以前は `OutboxStore.claimBatch` へそのまま渡り、Postgres は DB の例外、testkit の fixture・core の Fake は専用のメッセージの `Error` で、文字列の `"5"` は Fake では通った。`0` は今までどおり断らない。
    */
   limit?: number | undefined;
   /**
@@ -1443,6 +1454,8 @@ export interface TickOptions {
    *   （ADR 0082「頼まれていない kind は claim すらしない」）。明示して渡したときだけ claim し、
    *   {@link TickResult.unsupported} として `fail` に落とす。
    * - 空配列は何も claim しない。
+   * - ⚠ **2026-10-02 追記（ADR 0514）: 文字列の配列でなければ、claim する前に `TypeError`**（`Runtime.tick: opts.kinds must be an array of strings`。裸の文字列・`null`・object・文字列でない要素を含む。
+   *   `undefined` は省略と同じ）。以前は、Postgres は DB の例外、testkit の fixture は名前の無い `TypeError`（`includes is not a function`）、裸の文字列は fixture・Fake では部分文字列として照合されて通った。
    * - claim の順は、種類に関わらず `available_at` の古い順である。種類ごとの枠の配分は無い
    *   ——古い job が `limit` を埋めていれば、後から積まれた別の種類の job は次の `tick` に回る。
    */
@@ -1450,6 +1463,8 @@ export interface TickOptions {
   /**
    * claim した worker の名前（outbox の行の `claimed_by`）。省略すると `RuntimeConfig.defaultClaimedBy`、それも無ければ `"runtime.tick"`。
    * ⚠ 空文字は省略と同じにはならず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
+   * ⚠ **2026-10-02 追記（ADR 0514）: 文字列でなければ、claim する前に `TypeError`**（`Runtime.tick: opts.claimedBy must be a string`。`null`・数・object）。
+   * NUL（U+0000）を含む文字列は `RangeError`（`Runtime.tick: opts.claimedBy must not contain NUL characters (U+0000)`。ADR 0493 が store の側で断っていたものを、Runtime の入口で断る）。`undefined` は省略と同じ。
    */
   claimedBy?: string | undefined;
   /**
@@ -6260,13 +6275,52 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (typeof opts.leaseMs !== "number" || !Number.isFinite(opts.leaseMs)) {
       throw new RangeError("Runtime.tick: opts.leaseMs must be a finite number");
     }
+    // ADR 0514: `kinds`・`limit`・`claimedBy`・巨大な `leaseMs` も、claim する前に名指しの例外で断る（`undefined` は省略と同じ）。
+    if (
+      opts.kinds !== undefined &&
+      (!Array.isArray(opts.kinds) || opts.kinds.some((k: unknown) => typeof k !== "string"))
+    ) {
+      throw new TypeError("Runtime.tick: opts.kinds must be an array of strings");
+    }
+    if (
+      opts.limit !== undefined &&
+      // `Number.isInteger` は、数でない値・`NaN`・`±Infinity`・小数をまとめて落とす。
+      (!Number.isInteger(opts.limit) || opts.limit < 0 || opts.limit >= 2 ** 63)
+    ) {
+      throw new RangeError(
+        "Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63",
+      );
+    }
+    if (opts.claimedBy !== undefined) {
+      if (typeof opts.claimedBy !== "string") {
+        throw new TypeError("Runtime.tick: opts.claimedBy must be a string");
+      }
+      if (opts.claimedBy.includes("\u0000")) {
+        throw new RangeError(
+          "Runtime.tick: opts.claimedBy must not contain NUL characters (U+0000)",
+        );
+      }
+    }
+    const now = clock.now();
+    // `now` 自体が壊れた Date のときは、ここでは見ない（今までどおり store が断る）。
+    if (!Number.isNaN(now.getTime())) {
+      const leaseExpiresBeforeMs = now.getTime() - opts.leaseMs;
+      if (
+        Number.isNaN(new Date(leaseExpiresBeforeMs).getTime()) ||
+        leaseExpiresBeforeMs < MIN_STORABLE_TIMESTAMP_MS
+      ) {
+        throw new RangeError(
+          "Runtime.tick: opts.leaseMs is out of range (now - leaseMs must be a timestamp every store can hold)",
+        );
+      }
+    }
     const signal = opts.signal;
     const claimOpts: ClaimOutboxJobsOptions = {
       // 既定は「tick が処理できる kind だけ」——ここを広げると、処理できない kind を
       // 呼び出し側が頼んでもいないのに claim して終端で焼くことになる（ADR 0082）。
       kinds: opts.kinds ?? [...TICK_SUPPORTED_JOB_KINDS],
       limit: opts.limit ?? DEFAULT_TICK_LIMIT,
-      now: clock.now(),
+      now,
       claimedBy: opts.claimedBy ?? defaultClaimedBy,
       leaseMs: opts.leaseMs,
     };

@@ -44,7 +44,9 @@ describe("PostgresOutboxStore.complete/fail — 先勝ち（ADR 0440）", () => 
     );
     const jobId = seeded.rows[0]!.id;
     const store = new PostgresOutboxStore(db);
-    // 行の available_at は DB の now()。Node 側の now を少し先にして claim を確実にする。
+    // 行は上の生の SQL（`now()`）で入れているので、この行の available_at は DB の now()。store の
+    // `claimBatch` は呼び出し側が渡す `now` と比べるので、Node 側の now を少し先にして claim を確実にする
+    // （store が outbox を埋めるときは、`opts.now` を渡さなければ JS の `new Date()`。ADR 0559）。
     const claimed = await store.claimBatch(ctx, {
       limit: 10,
       now: new Date(Date.now() + 5_000),

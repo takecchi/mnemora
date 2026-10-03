@@ -367,6 +367,63 @@ const cases: Case[] = [
         .updateStatus(ctx, e.ids[0], "superseded", { supersededById: up(e.ids[1]) })
         .then((m: any) => ({ id: m.id, by: m.supersededById })),
   },
+  // 大文字小文字だけが違う自己置換（ADR 0558）。Postgres は断る（`normalizeUuidCase` で両側を畳む）。
+  // core の Fake も ADR 0557 で両側を `normId` で畳んで断る（InMemory は ADR 0558）。
+  {
+    name: "edge.updateStatus(self supersededById UP, id lo)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, e.ids[0], "superseded", { supersededById: up(e.ids[0]) }),
+  },
+  {
+    name: "edge.updateStatus(self supersededById lo, id UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, up(e.ids[0]), "superseded", { supersededById: e.ids[0] }),
+  },
+  {
+    name: "edge.updateStatusWithEvent(self supersededById UP, id lo)",
+    run: (e) =>
+      e.st.memoryStore.updateStatusWithEvent(
+        ctx,
+        e.ids[0],
+        "superseded",
+        { supersededById: up(e.ids[0]) },
+        eventFor(e.ids[0]!, "superseded"),
+      ),
+  },
+  {
+    name: "edge.updateStatusWithEvent(self supersededById lo, id UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatusWithEvent(
+        ctx,
+        up(e.ids[0]),
+        "superseded",
+        { supersededById: e.ids[0] },
+        eventFor(e.ids[0]!, "superseded"),
+      ),
+  },
+  // superseded 以外の status に自分自身を supersededById に付ける（ADR 0558 の歯の穴）。断る文面は
+  // 「must not be set unless status is "superseded"」で、自己置換の文面にならない（Postgres と揃える）。
+  {
+    name: "edge.updateStatus(active + self supersededById lo)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, e.ids[0], "active", { supersededById: e.ids[0] }),
+  },
+  {
+    name: "edge.updateStatus(active + self supersededById UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatus(ctx, e.ids[0], "active", { supersededById: up(e.ids[0]) }),
+  },
+  {
+    name: "edge.updateStatusWithEvent(active + self supersededById UP)",
+    run: (e) =>
+      e.st.memoryStore.updateStatusWithEvent(
+        ctx,
+        e.ids[0],
+        "active",
+        { supersededById: up(e.ids[0]) },
+        eventFor(e.ids[0]!, "updated"),
+      ),
+  },
   {
     name: "edge.restoreArchived([lo, UP])",
     pre: arch,
@@ -780,6 +837,7 @@ async function observe(be: string, c: Case, variant: "lo" | "UP"): Promise<strin
 }
 
 // Fake は全文の語彙一致を持たず、text だけの recall は候補を返さない（ADR 0492 の fuzz も `fcc` は `excludeMemoryIds` の除外だけを見る）。
+// 自己置換の 4 件（ADR 0558）は、core の Fake も ADR 0557 で断るようになったので、ここには入れない。
 const SKIP_FAKE = new Set(["rt.findCorrectionCandidates(exclude)", "rt.applyCorrection"]);
 
 describe("操作の対象の id を大文字で渡したとき、3 実装が同じになる（ADR 0521）", () => {
@@ -800,4 +858,372 @@ describe("操作の対象の id を大文字で渡したとき、3 実装が同�
       120_000,
     );
   }
+});
+
+// ADR 0556: ADR 0521 が残した 2 点。(1) `abortIfSuperseded` に大文字の id を渡したとき（testkit の InMemory が見落としていた）、
+// (2) `EventStore.get` に大文字のイベント id を渡したとき（testkit・Fake が null を返していた）。
+// Fake は `abortIf*` を持たない（ADR 0493。`createFakeRuntimeStores().memoryStore` は渡された opts を見ない）ので、(1) は pg と testkit だけで比べる。
+function newMemoryInput(e: Env, hash: string): any {
+  return {
+    tenantId: ctx.tenantId,
+    subjectId: null,
+    sourceObservationId: null,
+    extractorVersion: null,
+    content: `c-${hash}`,
+    contentHash: hash,
+    digest: `d-${hash}`,
+    digestSource: "llm",
+    provenance: { kind: "imported", batchId: "m" },
+    tags: [],
+    occurredAt: null,
+    recordedAt: new Date(e.getNow()),
+    lastReinforcedAt: null,
+    strength: 1,
+    halfLifeHours: 8760,
+    decayFloorAt: new Date(e.getNow() + 1e9),
+    embeddingStatus: "pending",
+  };
+}
+const eventFor = (memoryId: string, kind: string): any => ({
+  tenantId: ctx.tenantId,
+  memoryId,
+  kind,
+  actor: { type: "system" },
+  digestSnapshot: "d",
+  meta: {},
+});
+
+/** 大文字の id を abortIfSuperseded に渡して投げられた SourceMemoryStatusChangedError の中身（id の綴りは生のまま）と、書き込まれたものの有無。 */
+async function observeAbortIfSuperseded(
+  be: string,
+  entry:
+    "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
+  variant: "lo" | "UP",
+): Promise<string> {
+  const e = await mkEnv(be);
+  const store = e.st.memoryStore;
+  const src = await store.createMemory(ctx, {
+    ...newMemoryInput(e, "src"),
+    status: "superseded",
+    supersededById: e.ids[0],
+  });
+  const id = variant === "UP" ? up(src.id) : src.id;
+  // 書かれたかどうかは、観測値に紐づく抽出キー付きの記憶と、積まれたイベントの数で見る。
+  await mkObs(e);
+  const keyed = (hash: string) => ({
+    ...newMemoryInput(e, hash),
+    sourceObservationId: (e as any).obsId,
+    extractorVersion: "v1",
+  });
+  const writtenCount = async () =>
+    (await store.listBySourceObservation(ctx, (e as any).obsId, "v1")).length;
+  const eventsBefore = (await e.st.eventStore.list(ctx, { limit: 1000 })).length;
+  let outcome: string;
+  try {
+    if (entry === "createMemoryWithOutbox") {
+      await store.createMemoryWithOutbox(ctx, keyed("w1"), ["embed"], {
+        abortIfSuperseded: [id],
+      });
+    } else if (entry === "createMemoriesWithOutboxAndEvents") {
+      await store.createMemoriesWithOutboxAndEvents(
+        ctx,
+        [{ input: keyed("w2"), jobKinds: ["embed"] }],
+        (m: { id: string }) => eventFor(m.id, "created"),
+        { abortIfSuperseded: [id] },
+      );
+    } else {
+      await store.supersedeWithNewMemories(
+        ctx,
+        [{ input: keyed("w3"), jobKinds: ["embed"] }],
+        [{ id: e.ids[1], supersededByIndex: 0, event: eventFor(e.ids[1]!, "superseded") }],
+        { abortIfSuperseded: [id] },
+      );
+    }
+    outcome = "NO THROW";
+  } catch (err) {
+    const x = err as {
+      name?: string;
+      method?: string;
+      changed?: Array<{ id: string; observedStatus: string }>;
+    };
+    outcome = `THROW ${x.name} ${x.method} ${JSON.stringify(
+      (x.changed ?? []).map((c) => ({
+        // 綴りを生で比べる（<src> は「渡した id と同じ綴り」「小文字」「大文字」のどれか）。
+        id: c.id === src.id ? "<lower>" : c.id === up(src.id) ? "<UPPER>" : "<other>",
+        observedStatus: c.observedStatus,
+      })),
+    )}`;
+  }
+  const eventsAfter = (await e.st.eventStore.list(ctx, { limit: 1000 })).length;
+  const wrote = eventsAfter !== eventsBefore || (await writtenCount()) !== 0;
+  // 失敗したなら何も書かれていないこと（Postgres は同じトランザクションを rollback する）。
+  return `${outcome} || wrote=${wrote}`;
+}
+
+describe("abortIfSuperseded に大文字の id を渡したとき、testkit が Postgres と同じになる（ADR 0556）", () => {
+  for (const entry of [
+    "createMemoryWithOutbox",
+    "createMemoriesWithOutboxAndEvents",
+    "supersedeWithNewMemories",
+  ] as const) {
+    it(
+      entry,
+      async () => {
+        const pgLo = await observeAbortIfSuperseded("pg", entry, "lo");
+        const pgUp = await observeAbortIfSuperseded("pg", entry, "UP");
+        // 基準: Postgres は大文字でも superseded を見つけて断り、何も書かない。
+        expect(pgLo).toMatch(/^THROW SourceMemoryStatusChangedError /);
+        expect(pgLo).toMatch(/wrote=false$/);
+        expect(pgUp).toBe(pgLo);
+        expect(await observeAbortIfSuperseded("testkit", entry, "lo")).toBe(pgLo);
+        expect(await observeAbortIfSuperseded("testkit", entry, "UP")).toBe(pgUp);
+      },
+      120_000,
+    );
+  }
+});
+
+describe("EventStore.get に大文字のイベント id を渡したとき、3 実装が同じになる（ADR 0556）", () => {
+  it("大文字でも小文字と同じイベントが当たる", async () => {
+    const seen: Record<string, string> = {};
+    for (const be of ["pg", "testkit", "fake"]) {
+      const e = await mkEnv(be);
+      const stored = await e.st.eventStore.append(ctx, eventFor(e.ids[0]!, "updated"));
+      const lo = await e.st.eventStore.get(ctx, stored.id);
+      const upper = await e.st.eventStore.get(ctx, up(stored.id));
+      seen[be] = `lo=${lo?.id === stored.id} UP=${upper?.id === stored.id} kind=${upper?.kind}`;
+    }
+    expect(seen.pg).toBe("lo=true UP=true kind=updated");
+    expect(seen.testkit).toBe(seen.pg);
+    expect(seen.fake).toBe(seen.pg);
+  });
+});
+
+// ADR 0568: ADR 0556 の歯が通した変異（テナントの検査の緩め・畳み・status の広げ）と、綴り違いの同じ id を渡したときの `changed` を塞ぐ陽性対照。
+// どれも、Postgres の現物を基準に testkit（と、`EventStore.get` は Fake）が同じになることを見る。基準は走らせて確かめた値で、推測ではない。
+type AbortEntry =
+  "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories";
+const ABORT_ENTRIES: AbortEntry[] = [
+  "createMemoryWithOutbox",
+  "createMemoriesWithOutboxAndEvents",
+  "supersedeWithNewMemories",
+];
+
+/**
+ * `abortIfSuperseded` に `ids` を渡した結果（投げた例外の種類・method・`changed[]`）。`ctxTenant` を変えると、ctx のテナントの綴りだけを変えて呼ぶ。
+ * `supersedeWithNewMemories` は ctx のテナントが記憶の持ち主と違うと別の理由で投げるので、`ctxTenant` を変えた呼び出しには使わない。
+ */
+async function callAbort(
+  e: Env,
+  entry: AbortEntry,
+  ids: string[],
+  ctxTenant = ctx.tenantId,
+): Promise<{ outcome: string; changed: string[] }> {
+  const store = e.st.memoryStore;
+  const c = { tenantId: ctxTenant };
+  const input = { ...newMemoryInput(e, `w-${entry}`), tenantId: ctxTenant };
+  try {
+    if (entry === "createMemoryWithOutbox") {
+      const r = await store.createMemoryWithOutbox(c, input, ["embed"], { abortIfSuperseded: ids });
+      return { outcome: `NO THROW created=${r.created}`, changed: [] };
+    } else if (entry === "createMemoriesWithOutboxAndEvents") {
+      await store.createMemoriesWithOutboxAndEvents(
+        c,
+        [{ input, jobKinds: ["embed"] }],
+        (m: { id: string }) => ({ ...eventFor(m.id, "created"), tenantId: ctxTenant }),
+        { abortIfSuperseded: ids },
+      );
+    } else {
+      await store.supersedeWithNewMemories(
+        c,
+        [{ input, jobKinds: ["embed"] }],
+        [{ id: e.ids[1], supersededByIndex: 0, event: eventFor(e.ids[1]!, "superseded") }],
+        { abortIfSuperseded: ids },
+      );
+    }
+    return { outcome: "NO THROW", changed: [] };
+  } catch (err) {
+    const x = err as {
+      name?: string;
+      method?: string;
+      changed?: Array<{ id: string; observedStatus: string }>;
+    };
+    return {
+      outcome: `THROW ${x.name} ${x.method}`,
+      changed: (x.changed ?? []).map((ch) => `${ch.id}:${ch.observedStatus}`),
+    };
+  }
+}
+
+/** 渡した記憶の id（`srcIds`）を `<s0>` `<s1>` へ置き、綴りを保ったまま `changed` を比べられる形にする。 */
+function describeChanged(changed: string[], srcIds: string[]): string {
+  return JSON.stringify(
+    changed.map((c) => {
+      const [id, st] = c.split(":");
+      const k = srcIds.findIndex((s) => s === id || up(s) === id);
+      const spelling = id === srcIds[k] ? "lower" : "UPPER";
+      return `<s${k}>(${spelling}):${st}`;
+    }),
+  );
+}
+
+describe("abortIfSuperseded: 別テナントの superseded な記憶は、大文字の id でも見ない（ADR 0568・M2）", () => {
+  for (const entry of ABORT_ENTRIES) {
+    it(
+      entry,
+      async () => {
+        const seen: Record<string, string> = {};
+        for (const be of ["pg", "testkit"]) {
+          const e = await mkEnv(be);
+          const other = { tenantId: "tenant-2" };
+          // 別テナントに、superseded な記憶を作る（置き換えた側も同じテナントに要る）。
+          const by = await e.st.memoryStore.createMemory(other, {
+            ...newMemoryInput(e, "x-by"),
+            tenantId: other.tenantId,
+          });
+          const src = await e.st.memoryStore.createMemory(other, {
+            ...newMemoryInput(e, "x-src"),
+            tenantId: other.tenantId,
+            status: "superseded",
+            supersededById: by.id,
+          });
+          for (const v of ["lo", "UP"]) {
+            const r = await callAbort(e, entry, [v === "UP" ? up(src.id) : src.id]);
+            seen[`${be}.${v}`] = r.outcome;
+          }
+        }
+        // 基準: Postgres は、自分のテナントの行だけを見るので、別テナントの記憶は断らず書く。
+        expect(seen["pg.lo"]).toMatch(/^NO THROW/);
+        expect(seen["pg.UP"]).toBe(seen["pg.lo"]);
+        expect(seen["testkit.lo"]).toBe(seen["pg.lo"]);
+        expect(seen["testkit.UP"]).toBe(seen["pg.UP"]);
+      },
+      120_000,
+    );
+  }
+});
+
+describe("ctx のテナントの綴りだけを変えて呼ぶ: テナントは大文字小文字を区別する（ADR 0568・M3・M4）", () => {
+  it("abortIfSuperseded は、綴りの違うテナントの記憶を、自分の記憶として見ない", async () => {
+    for (const entry of ["createMemoryWithOutbox", "createMemoriesWithOutboxAndEvents"] as const) {
+      const seen: Record<string, string> = {};
+      for (const be of ["pg", "testkit"]) {
+        const e = await mkEnv(be);
+        const src = await e.st.memoryStore.createMemory(ctx, {
+          ...newMemoryInput(e, "t-src"),
+          status: "superseded",
+          supersededById: e.ids[0],
+        });
+        // 同じテナントの綴りで呼ぶと断る（陽性対照）。大文字のテナントで呼ぶと、断らない。
+        const same = await callAbort(e, entry, [src.id], "tenant-1");
+        const upper = await callAbort(e, entry, [src.id], "TENANT-1");
+        seen[be] = `same=${same.outcome} upper=${upper.outcome}`;
+      }
+      expect(seen.pg).toMatch(/^same=THROW SourceMemoryStatusChangedError \w+ upper=NO THROW/);
+      expect(seen.testkit).toBe(seen.pg);
+    }
+  }, 120_000);
+
+  it("EventStore.get は、綴りの違うテナントでは null、同じ綴りなら当たる", async () => {
+    const seen: Record<string, string> = {};
+    for (const be of ["pg", "testkit", "fake"]) {
+      const e = await mkEnv(be);
+      const stored = await e.st.eventStore.append(ctx, eventFor(e.ids[0]!, "updated"));
+      const same = await e.st.eventStore.get({ tenantId: "tenant-1" }, stored.id);
+      const upper = await e.st.eventStore.get({ tenantId: "TENANT-1" }, stored.id);
+      const upperId = await e.st.eventStore.get({ tenantId: "TENANT-1" }, up(stored.id));
+      const other = await e.st.eventStore.get({ tenantId: "tenant-2" }, stored.id);
+      const show = (x: unknown) => (x === null ? "null" : "found");
+      seen[be] =
+        `same=${same?.id === stored.id} upper=${show(upper)} upperId=${show(upperId)} other=${show(other)}`;
+    }
+    expect(seen.pg).toBe("same=true upper=null upperId=null other=null");
+    expect(seen.testkit).toBe(seen.pg);
+    expect(seen.fake).toBe(seen.pg);
+  }, 120_000);
+});
+
+describe("abortIfSuperseded: superseded 以外の status は、大文字の id でも断らない（ADR 0568・M5）", () => {
+  for (const status of ["active", "forgotten", "contested", "archived"] as const) {
+    it(
+      status,
+      async () => {
+        const seen: Record<string, string> = {};
+        for (const be of ["pg", "testkit"]) {
+          for (const entry of ABORT_ENTRIES) {
+            const e = await mkEnv(be);
+            // ids[3] は半減期が短く、arch で archived になる。ids[0]・ids[1] は forget・markContested の相手。
+            let src = e.ids[0]!;
+            if (status === "forgotten") await e.rt.forget(ctx, { memoryId: src });
+            if (status === "contested") await e.rt.markContested(ctx, src, e.ids[1]);
+            if (status === "archived") {
+              await arch(e);
+              src = e.ids[3]!;
+            }
+            const got = await e.st.memoryStore.get(ctx, src);
+            expect(got.status).toBe(status);
+            for (const v of ["lo", "UP"]) {
+              const r = await callAbort(e, entry, [v === "UP" ? up(src) : src]);
+              seen[`${be}.${entry}.${v}`] = r.outcome;
+            }
+          }
+        }
+        for (const entry of ABORT_ENTRIES) {
+          // 基準: Postgres は superseded の行だけを断る。
+          expect(seen[`pg.${entry}.lo`]).toMatch(/^NO THROW/);
+          expect(seen[`pg.${entry}.UP`]).toBe(seen[`pg.${entry}.lo`]);
+          expect(seen[`testkit.${entry}.lo`]).toBe(seen[`pg.${entry}.lo`]);
+          expect(seen[`testkit.${entry}.UP`]).toBe(seen[`pg.${entry}.lo`]);
+        }
+      },
+      120_000,
+    );
+  }
+});
+
+describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`changed` は Postgres と同じ（ADR 0568）", () => {
+  for (const entry of ABORT_ENTRIES) {
+    it(`${entry}: [x, X] は1件`, async () => {
+      const seen: Record<string, string> = {};
+      for (const be of ["pg", "testkit"]) {
+        const e = await mkEnv(be);
+        const src = await e.st.memoryStore.createMemory(ctx, {
+          ...newMemoryInput(e, "dup-src"),
+          status: "superseded",
+          supersededById: e.ids[0],
+        });
+        const r = await callAbort(e, entry, [src.id, up(src.id)]);
+        seen[be] = `${r.outcome} ${r.changed.length} ${describeChanged(r.changed, [src.id])}`;
+      }
+      // 基準: Postgres は `id = ANY(...)` で行を選ぶので、1行につき1件。
+      expect(seen.pg).toBe(
+        `THROW SourceMemoryStatusChangedError ${entry} 1 ["<s0>(lower):superseded"]`,
+      );
+      expect(seen.testkit).toBe(seen.pg);
+    }, 120_000);
+  }
+
+  it("別々の2件は id の昇順（渡した順に依らない）", async () => {
+    const seen: Record<string, string> = {};
+    for (const be of ["pg", "testkit"]) {
+      const e = await mkEnv(be);
+      const srcs: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const s = await e.st.memoryStore.createMemory(ctx, {
+          ...newMemoryInput(e, `ord-${i}`),
+          status: "superseded",
+          supersededById: e.ids[0],
+        });
+        srcs.push(s.id);
+      }
+      const asc = [...srcs].sort();
+      // 昇順の逆に並べ、一部を大文字にして渡す。
+      const passed = [...asc].reverse().map((id, i) => (i === 1 ? up(id) : id));
+      const r = await callAbort(e, "createMemoryWithOutbox", passed);
+      const ids = r.changed.map((c) => c.split(":")[0]!);
+      seen[be] = `${ids.length} sorted=${JSON.stringify(ids) === JSON.stringify(asc)}`;
+    }
+    expect(seen.pg).toBe("3 sorted=true");
+    expect(seen.testkit).toBe(seen.pg);
+  }, 120_000);
 });

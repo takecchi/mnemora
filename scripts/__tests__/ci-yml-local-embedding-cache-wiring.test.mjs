@@ -151,7 +151,7 @@ function extractJob(yaml, jobId) {
 /**
  * ジョブブロックを `steps:` のリストの要素(段)ごとの生テキストへ切り分ける。
  * 各要素は `      - name: ...` の行(6スペース)から、次の同じ形の行の直前まで。
- * `identifier-probes-wiring.test.mjs` の `parseSteps` と違い、この歯は
+ * `ci-yml-identifier-probes-wiring.test.mjs` の `parseSteps` と違い、この歯は
  * `uses`/`with.path`/`with.key` も見る必要があるため、段の中身を name/env/run に
  * 絞らず、生テキストのまま返す(呼び出し側が正規表現で必要な値だけ拾う)。
  *
