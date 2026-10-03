@@ -2,7 +2,7 @@ import type { DigestBandLimitedBy, DigestEntry } from "./recall.js";
 import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 
 /**
- * `packDigestBand` — 目次帯（`IndexBand.digestBand`）を組む純関数（docs/recall.md §5、本 PR）。
+ * `packDigestBand` — 目次帯（`IndexBand.digestBand`）を組む純関数（docs/recall.md §5）。
  *
  * `recall-runtime.ts` の段5から呼ばれるが、埋め込まずここに独立させてある——歯を
  * 当てやすくするため（`MemoryStore` や `Ctx` に依存しない純関数として、DB もフェイクも
@@ -34,7 +34,7 @@ export interface PackedDigestBand {
 }
 
 /**
- * 1件を帯へ積んだときの JSON 上の費用の見積もり——固定部分（本 PR）。
+ * 1件を帯へ積んだときの JSON 上の費用の見積もり——固定部分。
  *
  * `{"memoryId":"<36字uuid>","digest":"..."}` を `JSON.stringify` した際の、digest の
  * 中身そのものを除く固定部分（`"memoryId":"` `"` `,"digest":"` `"` `{` `}` の記号類 と

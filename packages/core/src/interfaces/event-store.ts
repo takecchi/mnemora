@@ -56,6 +56,8 @@ export interface EventStore {
    * ある adapter が主キーに特定の形式（例: UUID）を要求していても、その形式に合わない
    * `id` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
    * `isUuidLike` の doc コメント参照）。
+   * UUID 形式の `id` は大文字小文字を区別しない（`@mnemora/postgres` は `uuid` 列、testkit の fixture は小文字に正規化して比べる。
+   * `list` の `filter.memoryId` も同じ）。別のテナントのイベントの `id` も `null` を返す。
    */
   get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null>;
   /**

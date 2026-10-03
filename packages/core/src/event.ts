@@ -23,7 +23,7 @@ import type { EventId, MemoryId } from "./ids.js";
  * Postgres の書き手（SQL の文字列 `'events_purged'`）を見つけられない。2026-09-26 に棚卸しから外した。
  *
  * **`"restored"`（Issue #195、[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）
- * も、この PR から実際に生成される。**`Runtime.restoreArchived` が
+ * も、実際に生成される。**`Runtime.restoreArchived` が
  * `status='archived'` → `status='active'` の遷移（`docs/memory-model.md` §11 行14）で
  * 積む。既存の網羅的な `switch (event.kind)` は出荷対象パッケージ（`packages/core`・
  * `packages/postgres`・`packages/openai`・`packages/local-embedding`・
@@ -40,8 +40,8 @@ import type { EventId, MemoryId } from "./ids.js";
  * 同じ `kind` だと索引で分けて引けない——ADR 0122 が `"updated"` の再利用を却下して
  * `"restored"` を新設したのと同じ理由で、`"restored"` の再利用も却下し専用の値を足す。
  * 追加が破壊的変更にならないことは、上の `"restored"` を足したときの確認がそのまま
- * 当てはまる（この PR の時点で改めて `rg -n "switch" packages/*\/src` を確認しても、
- * `MemoryEventKind` を分岐する網羅的 `switch` はこの repo のどこにも無い）。
+ * 当てはまる（`unsuperseded` を足した時点で改めて `rg -n "switch" packages/*\/src` を確認しても、
+ * `MemoryEventKind` を分岐する網羅的 `switch` はこの repo のどこにも無かった）。
  */
 export type MemoryEventKind =
   | "created"

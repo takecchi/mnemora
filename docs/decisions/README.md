@@ -580,9 +580,13 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0573](./0573-fake-event-time-nul-claim-controls.md) | ADR 0563 の歯が通した4つの変異（`updatedAt` の時刻・`extractorVersion` の NUL・claim predicate の並び）を塞ぐ | 採用 (2026-10) |
 | [0574](./0574-adr-0557-superseded-by-controls.md) | ADR 0557 の歯の穴（やりすぎ・循環の走査・検査の位置）を塞ぐ | 採用 (2026-10) |
 | [0575](./0575-outbox-negative-limit-teeth-independent-of-planner-stats.md) | outbox の `eraseTenant`・`claimBatch` の負の `limit` の歯を、プランナの統計によらず reject される入力にする | 採用 (2026-10) |
+| [0576](./0576-doc-code-drift-sweep-core-public-tsdoc.md) | 文書とコードのずれを横に掃く（第13弾）— core の公開 TSDoc を、今の main の実装に照らす | 採用 (2026-10) |
 | [0577](./0577-fake-supersede-idempotent-resend-skips-opts-checks.md) | Fake の `supersedeWithNewMemories` は、全部の news が既存の行に当たる冪等な再送で opts・jobKinds を断らない（ADR 0566 の未解決を解く） | 採用 (2026-10) |
 | [0578](./0578-core-fake-returns-copies-for-remaining-writers.md) | core の Fake の残りの口も、store の行そのものではなく写しを返す（ADR 0562 の未確認の続き） | 採用 (2026-10) |
 | [0579](./0579-gate-red-tooth-names-one-db-test-file-instead-of-bail.md) | 門が赤くなる歯は、`--bail=1` で打ち切らず、DB テストのファイルを1本だけ名指しして走らせる | 採用 (2026-10) |
+| [0580](./0580-adr-0568-nonexistent-id-and-event-get-controls.md) | ADR 0568 の歯が通した「存在しない id」と「別のイベント id」の変異を塞ぐ | 採用 (2026-10) |
+| [0581](./0581-adr-0572-index-underflow-getter-controls.md) | ADR 0572 の歯の穴（A4・B4・C6・B8）を塞ぐ——索引の巻き戻し・float4 アンダーフロー・読む側が行を作らない・setDecayClock の検査順 | 採用 (2026-10) |
+| [0582](./0582-adr-0573-teeth-holes-controls.md) | ADR 0573 の歯の穴（updatedAt の同一 ms・UTF-16 順・updatedAt 並び・NUL の「何も書かない」）を塞ぐ | 採用 (2026-10) |
 | [0583](./0583-core-fake-supersede-returns-copies-and-per-mouth-mutations.md) | core の Fake の `supersedeWithNewMemories` も写しを返し、ADR 0578 の【未確認】だった口ごとの変異を入れる | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

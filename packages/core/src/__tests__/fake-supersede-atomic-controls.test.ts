@@ -14,6 +14,8 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * - O5: 断られた書き込み（`setTaxonomyMode`・`setDefaultHalfLifeRecalls`）も、行（保持期間のキー）を作る。
  * - O6: テスト専用の `setDefaultHalfLifeRecallsForTest` が行を作る（ADR 0564 の決定3「変えていない」）。
  *
+ * ADR 0581 は、ADR 0572 の変異監査で生き残った4つ（A4・B4・C6・B8）の歯を足す。
+ *
  * core の Fake は testkit の conformance に通さない（Issue #768 コメント2）。
  */
 
@@ -151,6 +153,32 @@ describe("ADR 0564 の歯の穴: supersedeWithNewMemories の巻き戻しの範�
     expect(retry.memory.id).toBe(result.created[0]!.memory.id);
     expect(retry.jobs).toEqual([]);
   });
+
+  it("A4: 失敗した supersedeWithNewMemories の後でも、先に作った記憶の冪等キーの索引は残る（巻き戻しが索引を空にしない）", async () => {
+    const stores = createFakeRuntimeStores();
+    const observation = await newObservation(stores);
+    const input = newMemory({ sourceObservationId: observation.id, extractorVersion: "ctl-v2" });
+    const first = await stores.memoryStore.createMemoryWithOutbox(ctx, input, ["embed"]);
+    expect(first.created).toBe(true);
+    expect(backingOf(stores).extractionIndex.size).toBe(1);
+
+    await expect(
+      stores.memoryStore.supersedeWithNewMemories(
+        ctx,
+        [
+          { input: newMemory(), jobKinds: ["embed"] },
+          { input: newMemory({ sourceObservationId: randomUUID() }), jobKinds: [] },
+        ],
+        [],
+      ),
+    ).rejects.toThrow(/observation not found/);
+    expect(backingOf(stores).extractionIndex.size).toBe(1);
+
+    const retry = await stores.memoryStore.createMemoryWithOutbox(ctx, input, ["embed"]);
+    expect(retry.created).toBe(false);
+    expect(retry.memory.id).toBe(first.memory.id);
+    expect(retry.jobs).toEqual([]);
+  });
 });
 
 describe("ADR 0564 の歯の穴: 行を作る条件（O5・O6）", () => {
@@ -167,6 +195,34 @@ describe("ADR 0564 の歯の穴: 行を作る条件（O5・O6）", () => {
     const { tenantSettingsStore } = createFakeRuntimeStores();
     await expect(tenantSettingsStore.setDefaultHalfLifeRecalls!(ctxA, 1e39)).rejects.toThrow();
     expect(await tenantSettingsStore.getEventRetention(ctxA)).toEqual({ kind: "unset" });
+  });
+
+  it("B4: float4 で 0 に丸まる値（アンダーフロー 1e-50）の setDefaultHalfLifeRecalls も投げ、行を作らない", async () => {
+    const { tenantSettingsStore } = createFakeRuntimeStores();
+    await expect(tenantSettingsStore.setDefaultHalfLifeRecalls!(ctxA, 1e-50)).rejects.toThrow();
+    expect(await tenantSettingsStore.getEventRetention(ctxA)).toEqual({ kind: "unset" });
+  });
+
+  it("B8: 不正な decay clock の setDecayClock は投げ、読み戻す値は元のまま（検査の前に書かない）", async () => {
+    const { tenantSettingsStore } = createFakeRuntimeStores();
+    const before = await tenantSettingsStore.getDecayClock!(ctxA);
+    await expect(
+      tenantSettingsStore.setDecayClock!(ctxA, "bogus" as unknown as "wall"),
+    ).rejects.toThrow();
+    expect(await tenantSettingsStore.getDecayClock!(ctxA)).toBe(before);
+  });
+
+  it("C6: 読む側（get*）は、新しいテナントの行を作らない", async () => {
+    const { tenantSettingsStore: settings } = createFakeRuntimeStores();
+    await settings.getDefaultHalfLifeHours(ctxA);
+    await settings.getDecayClock!(ctxA);
+    await settings.getDefaultHalfLifeRecalls!(ctxA);
+    await settings.getActivitySeq!(ctxA);
+    await settings.getSubjectActivitySeqs!(ctxA, []);
+    await settings.hasSubjectActivityCounters!(ctxA);
+    await settings.getTaxonomyMode!(ctxA);
+    // 行の有無の観測は最後（getEventRetention 自身も読む側）。
+    expect(await settings.getEventRetention(ctxA)).toEqual({ kind: "unset" });
   });
 
   it("O5: 不正な decay clock の setDecayClock も、行を作らない", async () => {

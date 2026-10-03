@@ -893,12 +893,14 @@ const eventFor = (memoryId: string, kind: string): any => ({
   meta: {},
 });
 
+const ABSENT_ID = "00000000-0000-4000-8000-0000000000aa";
+
 /** 大文字の id を abortIfSuperseded に渡して投げられた SourceMemoryStatusChangedError の中身（id の綴りは生のまま）と、書き込まれたものの有無。 */
 async function observeAbortIfSuperseded(
   be: string,
   entry:
     "createMemoryWithOutbox" | "createMemoriesWithOutboxAndEvents" | "supersedeWithNewMemories",
-  variant: "lo" | "UP",
+  variant: "lo" | "UP" | "ABSENT",
 ): Promise<string> {
   const e = await mkEnv(be);
   const store = e.st.memoryStore;
@@ -907,7 +909,8 @@ async function observeAbortIfSuperseded(
     status: "superseded",
     supersededById: e.ids[0],
   });
-  const id = variant === "UP" ? up(src.id) : src.id;
+  // ADR 0580: "ABSENT" は、どの記憶の id でもない（形は正しい）uuid。`src` は使わない。
+  const id = variant === "ABSENT" ? ABSENT_ID : variant === "UP" ? up(src.id) : src.id;
   // 書かれたかどうかは、観測値に紐づく抽出キー付きの記憶と、積まれたイベントの数で見る。
   await mkObs(e);
   const keyed = (hash: string) => ({
@@ -1226,4 +1229,20 @@ describe("abortIfSuperseded: 綴り違いの同じ id を渡したとき、`chan
     expect(seen.pg).toBe("3 sorted=true");
     expect(seen.testkit).toBe(seen.pg);
   }, 120_000);
+});
+
+// ADR 0580: ADR 0568 の監査（変異試験）で生き残った A19・A19b——testkit の `assertNoneSuperseded` が「存在しない id」を superseded 扱い
+// （投げる・`changed` に積む）にしても、どの歯も赤くならなかった。Postgres は存在しない id では投げず、書く（基準は走らせて確かめた値）。
+describe("abortIfSuperseded: 存在しない id は断らず、書く。testkit は Postgres と同じ（ADR 0580）", () => {
+  for (const entry of ABORT_ENTRIES) {
+    it(
+      entry,
+      async () => {
+        const pg = await observeAbortIfSuperseded("pg", entry, "ABSENT");
+        expect(pg).toBe("NO THROW || wrote=true");
+        expect(await observeAbortIfSuperseded("testkit", entry, "ABSENT")).toBe(pg);
+      },
+      120_000,
+    );
+  }
 });
