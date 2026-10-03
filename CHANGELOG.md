@@ -49,6 +49,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Breaking
 
+- **`@mnemora/bullmq` の `createBullmqTickDriver` が、完了したジョブを直近 1000 件だけ Redis に残すようになった（`removeOnComplete: { count: 1000 }` が既定）**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料1の判断）。
+  以前は `removeOnComplete` の指定が無く、完了したジョブが `everyMs` ごとに1件ずつ全部残った。いまは繰り返しジョブの template に `removeOnComplete: { count: 1000 }` を入れるので、古い完了ジョブは BullMQ が消す。完了ジョブの `returnvalue`（`TickResult`）を `queue.getJobs(["completed"])` などで後から読んでいた人は、古い分が読めなくなる。`completedJobsToKeep`（下の `### Added`）で件数を変えられ、`Number.MAX_SAFE_INTEGER` を渡すと以前に近づく。**`removeOnFail` は触っていない**（失敗したジョブは従来どおり全部残る）。型・シグネチャは変わらない。移行は [migration-v1](./docs/migration-v1.md) の 🟡。
+
 - **`@mnemora/postgres` の `MemoryStore`・`EventStore` の書き込み口が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになり、`resolveContestedGroup?`・`resolveContestedPair?` が型の外の `status` を `RangeError` で断り、purge 済みの記憶を `expectedStatus` に一致しない行として扱い（`updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories?` の `supersede[].expectedStatus`）、`setEventRetention` の日数の int4 の上限が共有の検査になった**（[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。[ADR 0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の M4、[ADR 0450](./docs/decisions/0450-contested-group-operation-state-matrix-round26.md)・[ADR 0447](./docs/decisions/0447-lifecycle-operation-state-matrix-round23.md)・[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)・[ADR 0479](./docs/decisions/0479-tenant-settings-write-fake-alignment.md) の材料）。
 
   いずれも、「型の外の入力、または約束に反する入力が、DB の生の例外になる・黙って通る」のを、約束どおりに直した。
@@ -113,6 +116,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目62。DB マイグレーションは無い。
   - 【確かめていないこと】SQL_ASCII の脚。`@mnemora/bullmq`・`examples/` のテスト。NUL を含む `kinds` の要素。
 
+### Added
+
+- **`@mnemora/bullmq` の `CreateBullmqTickDriverOptions` に `lockDuration` と `completedJobsToKeep` を足した**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6の判断）。
+  - `lockDuration?: number`（ミリ秒）: BullMQ の `Worker` の lock の期限にそのまま渡す。省略なら BullMQ の既定（30000 ms）。1回の tick が lock より長くかかる環境で、stalled による同じ tick の再実行を減らすために使う。`1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数でなければ、構築時に投げる（数でなければ `TypeError`、範囲外・小数・`NaN`・`Infinity` なら `RangeError`。[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md) の形）。
+  - `completedJobsToKeep?: number`: 完了したジョブを Redis に残す件数（既定 `1000`）。`0` 以上の整数でなければ、同じ形で構築時に投げる。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - **`PostgresVectorStore` を直接呼んだときの例外の message（`cause` の連鎖を含む）からも、SQL に付けた値（params）を落とすようになった**（[ADR 0504](./docs/decisions/0504-vector-store-omits-params-from-thrown-errors.md)、`@mnemora/postgres`。[ADR 0443](./docs/decisions/0443-aux-field-drop-bind-limit-association-fetch.md) の負債の返済）。
@@ -138,7 +147,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
   - **破壊的と数えない理由**: 断る入力は増えない（`ObserveInputSchema` は変えない）。TSDoc の「`title` が空でない文字列のときだけ前置きにする」に実装を戻す直しで、公開 API・既定値（`extractTitle` は既定 `false`）も変えない。変わるのは `extractTitle: true` で空白だけの `title` を渡した呼び出しの、抽出プロンプトの入力だけ。
 
+- **`lexicalMatch`（`LexicalStore` が返す `coverage`）の尺度を、3つの store（`PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`）で測り、文書と歯にした**（[ADR 0553](./docs/decisions/0553-lexical-coverage-scale-across-stores.md)。[ADR 0484](./docs/decisions/0484-recall-channel-merge-on-real-postgres.md) の負債1。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` を足し、各 store と `LexicalHit.coverage` の TSDoc に尺度と ADR への参照を足した）。
+  - 測ったのは、tsvector 版と InMemory が「一致した語数 ÷ 語の総数」の 1/n 刻みで同じ式であること、pg_trgm 版の日本語側が `word_similarity` の閾値による 0/1 の二値で（値は `rank` の側に入る）`GREATEST` で ASCII 側と合成されること。尺度は揃えていない（揃えるかはオーナーの判断）。
+  - ⭕ 非破壊と数える（文書と歯の追加のみ）。コードの振る舞い・公開 API・DB は変えていない。
+
+- **文書: 3つの振る舞いを TSDoc・README に書いた**（[ADR 0552](./docs/decisions/0552-owner-q7-q8-q16-docs-only.md)。コードの振る舞いは変えていない）。(1) `@mnemora/anthropic`: `maxTokens` が 21334 以上で `client` が `timeout` を持たないと、SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を投げる（21333 までは通る。SDK 0.124.0 で実測。`maxTokens`・`client`・`complete`・`completeStructured`・`errors.ts` の TSDoc と README）。(2) `@mnemora/postgres` の `runMigrations`: `.sql` が1本も無いフォルダは警告して `{ applied: [] }` で成功すること、mnemora は `statement_timeout` を設定せず利用者側の設定が本体の DDL に効くこと（`runMigrations`・`listMigrationFiles`・CLI の TSDoc。README は既に書いてあった）。(3) `createPostgresClient`: DB エラーの `code` の在り処の3つの形と判定 `err.code ?? err.cause?.code`（TSDoc。README の表の③に接続タイムアウトの文面を足した）。
+  ⭕ 非破壊と数える（文書の追記のみ）。
+
 ### Fixed
+
+- **`packDigestBand` に `maxEntryChars: NaN` を渡すと、digest を切り詰めない（無制限）へ化けていたのを、負数と同じ「digest を空に切る」へ直した**（[ADR 0585](./docs/decisions/0585-digest-band-max-entry-chars-nan.md)）。`length > NaN` は常に false になるためで、同じ関数の `limit`/`maxChars` の `NaN`（Issue #803）や、負数の `maxEntryChars` の扱いと食い違っていた。
+  - **何が変わるか**: `maxEntryChars: NaN` のとき、全エントリの `digest` が `""`、`truncated: true` になる（負数と同じ）。`+Infinity` は今までどおり上限なし。TSDoc の `PackDigestBandOptions.maxEntryChars` にも書いた。
+  - **破壊的と数えない理由**: 新しく投げる例外は無く、公開 API の型・表面も変えない。影響を受けるのは `packDigestBand` を直接呼んで `NaN` を渡していた呼び出し側だけで、`recall()` が渡すのは定数 `DIGEST_BAND_MAX_ENTRY_CHARS` なので、`recall()` の振る舞いは変わらない。
 
 - **`RuntimeDeps.clock` の TSDoc が「注入した時計は outbox の `availableAt` や監査ログの `at` には届かない」と書いていたのを、実装に合わせて直した**（[ADR 0559](./docs/decisions/0559-clock-reaches-outbox-available-at.md)）。ドキュメントとコメントだけの変更で、実装・値・公開 API の表面（`pnpm api:check` は差分なし）は変えていない。注入した時計は outbox 行の `availableAt`・`createdAt` と監査ログの `at` に届く（`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now`）。同じ主張を写していたテスト・example のコメントも直した。
 
