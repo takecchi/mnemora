@@ -18,18 +18,19 @@ export function assertQueryDate(
 
 /**
  * Postgres の `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。これより前の日時は、Postgres では
- * 値が渡された時点で `22008 timestamp out of range` になる（`packages/postgres/src/memory-store.ts` の同名の定数と同じ値）。
+ * 値が渡された時点で `22008 timestamp out of range` になる（`packages/postgres/src/mapping.ts` の同名の定数と同じ値）。
  */
 export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
 /**
- * `assertQueryDate` に、`timestamptz` の下限（ADR 0500）を足したもの。Postgres が日時を `timestamptz` として **クエリに渡す口**
- * （検索・集約・claim key の条件、`opts.now`・`opts.at` など）で使う。下限より前（紀元前4714年11月24日より前）は、Postgres では
- * `22008` になる。
+ * `assertQueryDate` に、`timestamptz` の下限（ADR 0500）を足したもの。Postgres が日時を行に**書く口**（`opts.now`・`opts.at` など、
+ * 行の値になる日時）で使う。下限より前（紀元前4714年11月24日より前）は、Postgres では `22008` になる。
  *
- * ⚠ **全部の口で使うわけではない。**`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
- * Postgres が下限より前を「対象 0 件」として返す（問い合わせない）ので、`assertQueryDate`（`NaN` だけ）のまま。
- * 口ごとの実測の表は ADR 0500。
+ * ⚠ **読みの口の条件には使わない**（ADR 0547）。`EventStore.list` の `since`・`until`、検索（`VectorStore`・`LexicalStore`）と
+ * `aggregateScope` の日時の絞り込み、`findActiveByClaimKey`・`findContestedByClaimKey` の `validFrom`・`validUntil` は、Postgres が下限へ寄せて
+ * から比べるので、下限より前でも断らず、`assertQueryDate`（`NaN` だけ）を使う。列の値はすべて下限以後なので、寄せずにそのまま比べても
+ * 同じ答えになる。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` も同じ（「対象 0 件」）。
+ * 口ごとの実測の表は ADR 0500（当時）と ADR 0547（読みの口の現在）。
  */
 export function assertQueryTimestamptz(
   method: string,

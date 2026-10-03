@@ -474,3 +474,24 @@ describe("Fake: pair・group の形の検査は存在確認・CAS より前（AD
     expect(s.hookCalls).toEqual([]);
   });
 });
+
+describe("Fake: 存在しない id の not found は RangeError ではない（ADR 0584 の約束 D の陽性対照、確かめ直し）", () => {
+  // Postgres 側の陽性対照（store-superseded-by-checks-controls.postgres.test.ts）は DB が要る。
+  // core の Fake の `updateStatus` の not found を RangeError で投げても、他の歯は捕まえなかった。
+  it("updateStatus: 形が正しい存在しない id は、RangeError ではなく memory not found の Error", async () => {
+    const s = setup();
+    const other = await s.mem();
+    for (const run of [
+      () => s.store.updateStatus(A, ABSENT, "archived"),
+      () => s.store.updateStatus(A, ABSENT, "superseded", { supersededById: other.id }),
+    ]) {
+      let thrown: unknown;
+      await run().catch((e: unknown) => {
+        thrown = e;
+      });
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(RangeError);
+      expect((thrown as Error).message).toMatch(/memory not found for tenant/);
+    }
+  });
+});

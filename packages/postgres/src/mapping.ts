@@ -122,6 +122,38 @@ export function toPgTimestamp(date: Date | null | undefined): string | null {
   );
 }
 
+/**
+ * PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。これより前の日時は、パラメータとして
+ * 渡された時点で `22008 timestamp out of range` になる。**行に書く口はこれより前を書けない**（ADR 0547 は書く口を変えない）。
+ */
+export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
+
+/**
+ * `date` が `timestamptz` の下限より前か。Invalid Date（`NaN`）は「前」ではない（`NaN < x` は偽。`22007` のまま DB が断る）。
+ * `purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` が、cutoff が下限より前のとき問い合わせずに「0件」で返す判定に使う
+ * （ADR 0547。下限より前に作られた行は存在しえない）。
+ */
+export function isBeforePgTimestamptzMin(date: Date): boolean {
+  return date.getTime() < PG_TIMESTAMPTZ_MIN_MS;
+}
+
+/**
+ * **読みの口の条件**の日時を、`timestamptz` の下限へ寄せてから `toPgTimestamp` にする（ADR 0547）。下限より前の日時は
+ * 下限（`PG_TIMESTAMPTZ_MIN_MS`）として比べる。列の値はすべて下限以後なので、`>=`・`>` の条件（`since`・`occurredAfter`・
+ * `decayFloorAtAfter`）は全件を返し、`<=`・`<` の条件（`until`・`occurredBefore`）は0件に近い結果になる——どちらも
+ * 日時の意味どおりの答えである。Invalid Date は寄せず、これまでどおり `22007` になる。
+ *
+ * ⚠ **行に書く値には使わない**（寄せると別の日時が保存される）。書く口は `toPgTimestamp` のまま、下限より前なら `22008`。
+ */
+export function toPgTimestampClamped(date: Date): string;
+export function toPgTimestampClamped(date: Date | null | undefined): string | null;
+export function toPgTimestampClamped(date: Date | null | undefined): string | null {
+  if (date === null || date === undefined) {
+    return null;
+  }
+  return toPgTimestamp(isBeforePgTimestamptzMin(date) ? new Date(PG_TIMESTAMPTZ_MIN_MS) : date);
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**

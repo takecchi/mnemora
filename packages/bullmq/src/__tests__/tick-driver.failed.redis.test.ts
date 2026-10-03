@@ -1,3 +1,4 @@
+import { Queue } from "bullmq";
 import { afterEach, describe, expect, it } from "vitest";
 import type { TickResult } from "@mnemora/core";
 import { createBullmqTickDriver } from "../tick-driver.js";
@@ -53,5 +54,37 @@ describe("実 Redis: tick の失敗が onTickError に届く", () => {
     expect(errors[0]).toBeInstanceOf(Error);
     expect((errors[0] as Error).message).toBe("tick boom");
     expect(results).toEqual([]);
+  });
+
+  it("ADR 0548: 失敗したジョブは Redis に残る（removeOnFail を指定しない。onTickError に届いた件数以上ある）", async () => {
+    const queueName = `mnemora-tick-failed-keep-${Date.now()}`;
+    const queue = new Queue(queueName, {
+      connection: { host: REDIS_HOST, port: Number(REDIS_PORT), maxRetriesPerRequest: null },
+    });
+    try {
+      const errors: unknown[] = [];
+      driver = createBullmqTickDriver({
+        connection: { host: REDIS_HOST, port: Number(REDIS_PORT), maxRetriesPerRequest: null },
+        queueName,
+        runtime: {
+          tick: () => Promise.reject(new Error("tick boom")),
+        },
+        ctx: { tenantId: "t1" },
+        tick: { leaseMs: 1000 },
+        everyMs: 50,
+        onTickError: (e) => errors.push(e),
+      });
+      await driver.start();
+      await waitFor(() => errors.length >= 3, 15_000);
+      await driver.stop();
+      driver = undefined;
+      // `'failed'` は job が failed へ移った後に emit される。届いた件数ぶんは、Redis に残っている。
+      const counts = await queue.getJobCounts("failed");
+      expect(counts.failed).toBeGreaterThanOrEqual(errors.length);
+      expect(counts.failed).toBeGreaterThanOrEqual(3);
+    } finally {
+      await queue.obliterate({ force: true }).catch(() => undefined);
+      await queue.close();
+    }
   });
 });

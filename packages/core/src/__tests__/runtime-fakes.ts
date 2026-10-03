@@ -86,6 +86,25 @@ import {
 import type { IdempotentCreateResult } from "../idempotent-create.js";
 
 /**
+ * ADR 0543: 孤立サロゲートを U+FFFD に置き換える（`packages/testkit` の `__fixtures__/well-formed-text.ts` の
+ * `replaceLoneSurrogates` と同じ規則。`@mnemora/postgres` は `text` 列に入る文字列を node-postgres が UTF-8 へ変換するとき、
+ * 孤立サロゲートを 1 単位ずつ U+FFFD に置き換える）。core は testkit を import できない（`dependency-boundary.test.ts`）ので写しを持つ。
+ * 対象は `text` 列に入る欄だけ（識別子は ADR 0423 が断る。`jsonb` 列の欄は触らない）。
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+function wf(value: string): string;
+function wf(value: string | null): string | null;
+function wf(value: string | undefined): string | undefined;
+function wf(value: string | null | undefined): string | null | undefined;
+function wf(value: string | null | undefined): string | null | undefined {
+  return typeof value === "string" ? value.replace(LONE_SURROGATE, "\uFFFD") : value;
+}
+function wfClaimKey<T extends ClaimKey | null | undefined>(claimKey: T): T {
+  if (claimKey === null || claimKey === undefined) return claimKey;
+  return { ...claimKey, subject: wf(claimKey.subject), predicate: wf(claimKey.predicate) } as T;
+}
+
+/**
  * 読みの口の条件の日時が Invalid Date なら断る（ADR 0493。`packages/testkit` の `assertQueryDate` と同じ判定・同じ文面）。
  * Postgres はクエリの時点で `timestamptz` への変換を拒む。省略（`undefined`/`null`）は検査しない。
  */
@@ -433,7 +452,8 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
     // ADR 0562: `at`・`actor`・`meta` は呼び手と共有しない（保存時に写しを取る）。
     at: fakeCopyDate(event.at) ?? new Date(),
     actor: fakeSnapshot(event.actor),
-    digestSnapshot: event.digestSnapshot ?? null,
+    // ADR 0543: `memory_events.digest_snapshot` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する。
+    digestSnapshot: wf(event.digestSnapshot) ?? null,
     sizeBeforeBytes: event.sizeBeforeBytes ?? null,
     meta: fakeSnapshot(event.meta),
   };
@@ -689,6 +709,8 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewObservation,
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Observation> {
+    // ADR 0543: `kind`（`text` 列。識別子ではない）の孤立サロゲートは U+FFFD に置き換えて保存する。
+    input = { ...input, kind: wf(input.kind) };
     // ADR 0493・0563: `subjectId`・`externalId` の孤立サロゲートと NUL は、Postgres・InMemory と同じ `MalformedIdentifierError`
     // （`kind: "malformed_identifier"`）で断る。素の `Error` を投げる NUL の検査（`assertObservationHasNoNul`）より先に見ること。
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
@@ -782,7 +804,9 @@ export class FakeMemoryStore implements MemoryStore {
     payload: Record<string, unknown>,
     opts?: { now?: Date; claimedBy?: string },
   ): OutboxJobRecord {
-    const claimedBy = opts?.claimedBy;
+    // ADR 0543: `outbox.kind`・`outbox.claimed_by` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する。
+    kind = wf(kind);
+    const claimedBy = wf(opts?.claimedBy);
     // ADR 0555: `availableAt`・`createdAt`・`claimedAt` は同じ `now`（`opts.now`、省略時は壁時計を1回だけ読んだ値）。
     // `PostgresMemoryStore`・`InMemoryMemoryStore` の `const outboxNow = opts?.now ?? new Date()` と同じ。
     // 複数の行を積む口は、呼び出しの中で1回だけ読んだ `now` を渡し続ける（行ごとに読み直すと値が割れる）。
@@ -892,6 +916,17 @@ export class FakeMemoryStore implements MemoryStore {
     // `recall-association`・`recall-exclude-provenance-filter`・`runtime` の5ファイル）が、`sourceObservationId: null`
     // の `inferred`・`stated` の Memory をこの Fake に書いて前提にしている。拒むとそれらのデータを書き換えることに
     // なり、各テストが縛っているものが変わりうるので、揃えない（`fake-provenance-rejects.test.ts` が今の振る舞いを縛る）。
+    // ADR 0543: `text` 列に入る欄の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。冪等の鍵
+    // （`contentHash`・`extractorVersion`）も置き換えた後の値で比べる。`jsonb` 列の欄（`attributes`・`provenance`）は触らない。
+    input = {
+      ...input,
+      content: wf(input.content),
+      digest: wf(input.digest),
+      contentHash: wf(input.contentHash),
+      tags: Array.isArray(input.tags) ? input.tags.map((tag) => wf(tag)) : input.tags,
+      extractorVersion: wf(input.extractorVersion),
+      ...(input.claimKey === undefined ? {} : { claimKey: wfClaimKey(input.claimKey) }),
+    };
     const provenanceKind = input.provenance.kind;
     if (!ProvenanceKindSchema.safeParse(provenanceKind).success) {
       throw new Error(
@@ -1069,11 +1104,9 @@ export class FakeMemoryStore implements MemoryStore {
       if (jsonContainsNul(input.provenance)) {
         throw new Error(`FakeMemoryStore: provenance must not contain NUL characters (U+0000)`);
       }
-      // 孤立サロゲート（Issue #816、実測）: このメソッドは検査しない。入力をそのまま
-      // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ
-      // 置換するため異なる値になる。この非対称は現状の契約として
-      // `MemoryStore.createMemory` の interface doc コメントに記録してある
-      // （`../interfaces/memory-store.js`）。挙動は変えない。
+      // 孤立サロゲート（Issue #816、実測）: このメソッドは検査しない。`text` 列の欄の孤立サロゲートは、ADR 0543 から
+      // `createMemoryIdempotent` の入口で U+FFFD に置き換えて保存する（`PostgresMemoryStore` と同じ。以前は入力を
+      // そのまま保持していた）。`jsonb` 列の欄（`attributes`・`provenance`）は触らない（ADR 0543 の対象外）。
       const now = new Date();
       const memory: Memory = {
         id: nextId("mem"),
@@ -1199,6 +1232,8 @@ export class FakeMemoryStore implements MemoryStore {
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
     assertWellFormedCtx(ctx);
+    // ADR 0543: `labels.name` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する（`tags` の要素と同じ）。
+    name = wf(name);
     const key = this.labelKey(ctx.tenantId, name);
     const existing = this.backing.labels.get(key);
     const registered: LabelSummary = {
@@ -1419,6 +1454,8 @@ export class FakeMemoryStore implements MemoryStore {
     extractorVersion: string | null,
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
+    // ADR 0543: 検索語も、Postgres が引数を UTF-8 に変換するときに置き換わる。
+    extractorVersion = wf(extractorVersion);
     const results: Memory[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
@@ -2075,6 +2112,14 @@ export class FakeMemoryStore implements MemoryStore {
     assertFakeQueryDate("aggregateScope", "validAt", scope.validAt);
     assertFakeQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
     assertFakeQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
+    // ADR 0543: `labels`・`taxonomyGroupCandidates`（`text[]` の引数）の孤立サロゲートは U+FFFD に置き換わって比べられる。
+    scope = {
+      ...scope,
+      ...(scope.labels === undefined ? {} : { labels: scope.labels.map((label) => wf(label)) }),
+      ...(scope.taxonomyGroupCandidates === undefined
+        ? {}
+        : { taxonomyGroupCandidates: scope.taxonomyGroupCandidates.map((label) => wf(label)) }),
+    };
     // `attributes`・`labels` の NUL は、集計も目次帯も引かない（`scopeAggregate: "skip"` で `digestBand` 無し）ときだけ Postgres は見ない。
     if (!(opts?.scopeAggregate === "skip" && opts.digestBand === undefined)) {
       if (scope.attributes !== undefined && jsonContainsNul(scope.attributes)) {
@@ -2574,8 +2619,9 @@ export class FakeMemoryStore implements MemoryStore {
     // 2回読むと別の値になる（`InMemoryMemoryStore`・`@mnemora/postgres` は割れない）。
     const at = event.at ?? new Date();
     const storedEvent = this.buildOwnedEvent(ctx, { ...event, at }, [id]);
-    memory.content = tombstone.content;
-    memory.digest = tombstone.digest;
+    // ADR 0543: 墓石の `content`・`digest` は `text` 列へ書く値。孤立サロゲートは U+FFFD に置き換えて保存する。
+    memory.content = wf(tombstone.content);
+    memory.digest = wf(tombstone.digest);
     memory.tags = [];
     memory.attributes = {};
     memory.claimKey = null;
@@ -3103,6 +3149,8 @@ export class FakeMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
+    // ADR 0543: 検索値（`text` 列の引数）の孤立サロゲートも U+FFFD に置き換わって比べられる。
+    query = { ...query, claimKey: wfClaimKey(query.claimKey) };
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     // ADR 0578: 絞り込んだあとの行を、写しにして返す（下の `.map(fakeSnapshot)`）。
@@ -3119,7 +3167,8 @@ export class FakeMemoryStore implements MemoryStore {
           return false;
         }
         if (m.status !== "active") return false;
-        if (m.contentHash === query.contentHash) return false;
+        // ADR 0543: 保存側の `contentHash` は置き換え済み。Postgres は引数（`content_hash <> $n`）も U+FFFD にしてから比べるので、揃える。
+        if (m.contentHash === wf(query.contentHash)) return false;
         const otherFrom = m.validFrom ?? null;
         const otherUntil = m.validUntil ?? null;
         // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
@@ -3155,6 +3204,8 @@ export class FakeMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId"); // ADR 0506
+    // ADR 0543: 検索値（`text` 列の引数）の孤立サロゲートも U+FFFD に置き換わって比べられる。
+    query = { ...query, claimKey: wfClaimKey(query.claimKey) };
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     return [...this.backing.memories.values()]
@@ -3170,7 +3221,8 @@ export class FakeMemoryStore implements MemoryStore {
           return false;
         }
         if (m.status !== "contested") return false;
-        if (m.contentHash === query.contentHash) return false;
+        // ADR 0543: `findActiveByClaimKey` と同じ（引数の `contentHash` も置き換えてから比べる）。
+        if (m.contentHash === wf(query.contentHash)) return false;
         const otherFrom = m.validFrom ?? null;
         const otherUntil = m.validUntil ?? null;
         // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
@@ -3467,11 +3519,13 @@ export class FakeOutboxStore implements OutboxStore {
       );
     }
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
+    // ADR 0543: `claimed_by`（`text`）・`kinds`（`text[]` の引数）の孤立サロゲートは U+FFFD に置き換わる。
+    const kindsFilter = opts.kinds?.map((kind) => wf(kind));
     const eligible = this.backing.outboxJobs.filter((job) => {
       const claimedAt = job.claimedAt ?? null;
       return (
         job.tenantId === ctx.tenantId &&
-        (opts.kinds === undefined || opts.kinds.includes(job.kind)) &&
+        (kindsFilter === undefined || kindsFilter.includes(job.kind)) &&
         job.completedAt === null &&
         job.failedAt === null &&
         job.availableAt <= opts.now &&
@@ -3482,7 +3536,7 @@ export class FakeOutboxStore implements OutboxStore {
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {
       job.claimedAt = fakeCopyDate(opts.now); // ADR 0562: 呼び手の Date を行に入れない
-      job.claimedBy = opts.claimedBy;
+      job.claimedBy = wf(opts.claimedBy);
       job.attempts += 1;
     }
     // ADR 0562: payload（入れ子）と Date も写す。浅い複製だと、返した payload への書き換えが行に届く。
@@ -3743,6 +3797,10 @@ export class FakeVectorStore implements VectorStore {
     // ADR 0493: 絞りの識別子（`tenantId`・`subjectId`）の NUL と、絞りの日時の Invalid Date を、
     // `InMemoryVectorStore`・`PostgresVectorStore` と同じく断る。
     assertWellFormedFilter(opts.filter, "opts.filter");
+    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    if (opts.filter.labels !== undefined) {
+      opts = { ...opts, filter: { ...opts.filter, labels: opts.filter.labels.map((l) => wf(l)) } };
+    }
     assertFakeQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
     assertFakeQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
     assertFakeQueryDate("search", "filter.validAt", opts.filter.validAt);
@@ -4284,6 +4342,10 @@ export class FakeLexicalStore implements LexicalStore {
     }
     // ADR 0493: 絞りの識別子の NUL・日時の Invalid Date・`attributes` の NUL を、`InMemoryLexicalStore` と同じく断る。
     assertWellFormedFilter(opts.filter, "opts.filter");
+    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    if (opts.filter.labels !== undefined) {
+      opts = { ...opts, filter: { ...opts.filter, labels: opts.filter.labels.map((l) => wf(l)) } };
+    }
     assertFakeQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
     assertFakeQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
     assertFakeQueryDate("search", "filter.validAt", opts.filter.validAt);

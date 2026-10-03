@@ -2899,6 +2899,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 - **`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`: クエリの語の単位が空白区切りになり、`PROJ-12` のようなハイフン入りの識別子が 1 語として数えられる**（[ADR 0513](./decisions/0513-lexical-match-fixtures-aligned-to-postgres.md)。🟡）。
   以前は `proj`・`12` の 2 語に割っていたので、`coverage`（`ScoreBreakdown.lexicalMatch`）の分母が `@mnemora/postgres` とずれた。いまは Postgres と同じ値になる。語の中の token は隣接して並ぶことを要る（content `proj x 12` はクエリ `PROJ-12` に当たらない。Postgres も当たらない）。fixture の上で `coverage` の値や、識別子を含むクエリの当たり外れを固定値で検査していた人だけが影響を受ける。手順は要らない。公開 API・conformance suite は変えていない。
 
+- **`@mnemora/postgres`・`@mnemora/testkit/fixtures`: 読みの口の日時の条件が `timestamptz` の下限（紀元前4714年11月24日 00:00:00 UTC）より前でも、例外にならず、下限へ寄せて比べた答えを返す**（[ADR 0547](./decisions/0547-pg-out-of-range-date-reads-clamp-to-floor.md)。🟡。ADR 0456 の M2、ADR 0500 の決めたこと2のうち読みの口の部分を置き換える）。
+  対象: `EventStore.list` の `since`・`until`、`VectorStore.search`・`searchMany`・`LexicalStore.search`（tsvector 版・trigram 版）・`MemoryStore.aggregateScope` の日時の絞り込み、`findActiveByClaimKey`・`findContestedByClaimKey` の `validFrom`・`validUntil`、`OutboxStore.claimBatch` の `opts.now`、これらを通る `Runtime.recall`。以前は `@mnemora/postgres` が `DrizzleQueryError`（`cause.code` が `22008`）で落ち、InMemory は `RangeError`（`… must not be earlier than 4714-11-24 BC …`）で断った。いまはどちらも成功する。`since`・`occurredAfter`・`decayFloorAtAfter` は全件、`until`・`occurredBefore` は0件になる。
+  **落ちる入力が減る変更**（新しく断る入力は無い）。手順は要らない。ただし、**`22008` や `RangeError` を捕まえて「日付が範囲外」と扱っていた呼び出し側**（読みの口に限る）は、その分岐に入らなくなる。行に日時を書く口（`createMemory` の `occurredAt` など、`opts.now`・`opts.at`）は変えていない——下限より前は `22008`（InMemory は `opts.now`・`opts.at` で `RangeError`）のまま。
+  既知の限界: 下限ちょうどの時刻に行があるとき、`until` 系を下限より前にすると `@mnemora/postgres` はその行を返す（InMemory と core の Fake は0件）。
+
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `updateStatus`・`updateStatusWithEvent` が、`supersededById` に大文字小文字だけが違う自分自身の id（id が `mem-1`・`supersededById` が `MEM-1` など）を渡されると `RangeError`（`supersededById must not be the memory itself`）で断る**（[ADR 0558](./decisions/0558-inmemory-self-supersede-check-folds-both-sides.md)。🟡。項目59（ADR 0503）の自己置換の検査の取りこぼし）。
   `@mnemora/postgres` は以前から両側を畳んで断る。以前の fixture は `supersededById` を畳まずに比べたので通り、自分を指す `superseded` の行を書いた。新しく断るのはこの綴り違いの自己置換だけ（Postgres が今断るものだけ）。別の記憶を大文字で渡す呼び出しは従来どおり通り、小文字で保存される。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
 
@@ -2907,6 +2912,11 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
 
 - **`Runtime.tick` の `embed` ジョブ: forget した記憶・purge した記憶では、embedding provider を呼ばずにジョブを終える**（[ADR 0541](./decisions/0541-embed-job-skips-withdrawn-memory.md)）。
   以前は、forget の前に積まれた埋め込みジョブが後から走ると、`forgotten` の記憶の本文（purge 済みなら墓標）を `embeddingProvider.embed` に送り、ベクトルを書いていた。今は、`forgotten` か purge 済みの記憶なら provider を呼ばず、ベクトルも書かず、`embeddingStatus` も触らずにジョブを `complete` する。`embeddingProvider` の呼び出し回数を数えているテストや、forget した記憶のベクトルが存在することに頼っているコードは見直すこと。新しく断る入力は無く、他の状態（`active`・`archived`・`superseded`・`contested`）は変わらない。すでに送られた分は取り消せない。
+
+- **`@mnemora/testkit/fixtures` の `InMemory*`: `text` 列に入る欄の孤立サロゲートを、`@mnemora/postgres` と同じく U+FFFD に置き換えて保存する**（[ADR 0543](./decisions/0543-inmemory-lone-surrogate-replaced-with-fffd.md)。🟡。オーナーの決定で、ADR 0423 決定5 の「インメモリは保持」を置き換えた）。
+  以前の fixture は、孤立サロゲート（`"a\uD800b"` など）を含む `content`・`digest`・`tags`・claim key・ラベル名などをそのまま保持して読み返した。いまは `"a\uFFFDb"` で返る（Postgres と同じ）。**対をなす絵文字・普通の文字列は変わらない。** 読み取りの引数（`claimKey`・`extractorVersion`・`labels`）も同じく置き換わるので、書いた値と同じ入力で引けば当たる。
+  🔴 でなく 🟡 に置いた理由【判断】: 新しく断る入力は無く（上の「数え方の規律への追記（2026-09-28）」の2 の線の内側）、公開の型・DB・`@mnemora/postgres`・conformance suite は変えていない。変わるのは公開の fixture が返す値だけで、本物の adapter に近づく向きの変更である。ただし、**以前は保持された値が書き換わる**——孤立サロゲートの保持をテストが前提にしていた人は、値が変わって落ちる。そう読んで 🔴 に数え直すのはオーナーの判断（CHANGELOG の `[1.3.0]` 側も同じ分類）。手順は要らない。
+  **まだ揃っていない**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`。`observe` の `text` などは `payload` に入る）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す。
 
 ## この文書が確かめていないこと
 
