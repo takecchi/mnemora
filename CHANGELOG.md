@@ -155,6 +155,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **既知の限界**: 下限ちょうどの時刻に行がある場合、`until` 系を下限より前にすると、`@mnemora/postgres` はその行を返す（意味どおりなら0件。InMemory と core の Fake は0件）。ADR 0547 の「引き受けた負債」。
   - 手順は要らない。DB マイグレーションは無い。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた。
 
+- **文書: 3つの振る舞いを TSDoc・README に書いた**（[ADR 0552](./docs/decisions/0552-owner-q7-q8-q16-docs-only.md)。コードの振る舞いは変えていない）。(1) `@mnemora/anthropic`: `maxTokens` が 21334 以上で `client` が `timeout` を持たないと、SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を投げる（21333 までは通る。SDK 0.124.0 で実測。`maxTokens`・`client`・`complete`・`completeStructured`・`errors.ts` の TSDoc と README）。(2) `@mnemora/postgres` の `runMigrations`: `.sql` が1本も無いフォルダは警告して `{ applied: [] }` で成功すること、mnemora は `statement_timeout` を設定せず利用者側の設定が本体の DDL に効くこと（`runMigrations`・`listMigrationFiles`・CLI の TSDoc。README は既に書いてあった）。(3) `createPostgresClient`: DB エラーの `code` の在り処の3つの形と判定 `err.code ?? err.cause?.code`（TSDoc。README の表の③に接続タイムアウトの文面を足した）。
+  ⭕ 非破壊と数える（文書の追記のみ）。
+
 ### Fixed
 
 - **`packDigestBand` に `maxEntryChars: NaN` を渡すと、digest を切り詰めない（無制限）へ化けていたのを、負数と同じ「digest を空に切る」へ直した**（[ADR 0585](./docs/decisions/0585-digest-band-max-entry-chars-nan.md)）。`length > NaN` は常に false になるためで、同じ関数の `limit`/`maxChars` の `NaN`（Issue #803）や、負数の `maxEntryChars` の扱いと食い違っていた。
