@@ -88,3 +88,9 @@
 ## これが覆るとしたら
 
 interface の `opts.now` の約束が変わるとき（0555 と同じ）。【未解決】の件は、#1674 のマージ後に直した時点で、この節を消すのでなく追記で閉じる。
+
+---
+
+## 追記（ADR 0577）: 上の【未解決】は解けた
+
+`supersedeWithNewMemories` の冪等な再送の件は [ADR 0577](./0577-fake-supersede-idempotent-resend-skips-opts-checks.md) で直した（検査を news を作る loop の中へ移し、`it.todo` を歯にした）。上の本文は当時のまま残す。

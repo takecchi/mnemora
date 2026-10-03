@@ -252,4 +252,22 @@ describe("FakeMemoryStore: 大文字の対象 id を同じ記憶として受け�
       stored.id,
     );
   });
+
+  it("EventStore.get: 別のイベント id は、前方一致・部分一致では当たらず null（ADR 0580。Postgres は id の等しさで比べる）", async () => {
+    const { make, stores } = setup();
+    const a = await make();
+    const stored = await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: a,
+      kind: "updated",
+      actor: { type: "system" },
+      digestSnapshot: "d",
+      meta: {},
+    });
+    // 実在の id の末尾の1字を落とした形は、`startsWith`・`includes` なら当たってしまう別の id。
+    const prefix = stored.id.slice(0, -1) as never;
+    expect(prefix).not.toBe(stored.id);
+    expect(await stores.eventStore.get(ctx, prefix)).toBeNull();
+    expect(await stores.eventStore.get(ctx, stored.id)).not.toBeNull();
+  });
 });
