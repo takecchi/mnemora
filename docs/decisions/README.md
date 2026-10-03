@@ -559,6 +559,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
 | [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0547](./0547-pg-out-of-range-date-reads-clamp-to-floor.md) | Postgres の読みの経路は、`timestamptz` の下限より前の日付を下限に寄せてから比べる（オーナーの推奨 (d)「日付は0件扱い」を「寄せてから比べる」と読み替えた。ADR 0456 の M2 と ADR 0500 の決めたこと2のうち、読みの口の部分を置き換える） | 採用 (2026-10) |
+| [0548](./0548-bullmq-lock-duration-and-remove-on-complete-default.md) | `createBullmqTickDriver` に `lockDuration` の口と完了ジョブの保持の既定（`removeOnComplete: { count: 1000 }`）を足す — ADR 0440 の決定4、ADR 0449 の決定5・材料1・材料6 を置き換える | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0555](./0555-core-fake-outbox-rows-honor-opts-now.md) | core の Fake が積む outbox 行の時刻も、`opts.now` に従う（`availableAt`・`createdAt`。InMemory・Postgres と揃える） | 採用 (2026-10) |
