@@ -49,8 +49,12 @@ export function abortReason(signal: AbortSignal): unknown {
  * catch 節で「この例外は abort によるものか、それとも provider が本当に失敗したのか」を
  * 見分けるために使う——`runAbortable` は abort が起きた時点で**同期的に** reject するため
  * （`AbortController.abort()` は `abort` イベントを同期的に発火する）、catch した時点で
- * `signal.aborted` が真なら、その例外は必ず {@link abortReason} である
+ * `signal.aborted` が真なら、その例外はふつう {@link abortReason} である
  * （`runAbortable` の doc コメント参照）。
+ *
+ * ⚠ **「必ず」ではない。**`run` の Promise が abort より先に（provider 自身のエラーで）reject し、
+ * その reject が catch 節に届くまでの間に abort されると、`signal.aborted` は真なのに、
+ * 例外は provider のエラーのままになる（`runAbortable` は先に決着した側を返す）。
  */
 export function isAbort(signal: AbortSignal | undefined): boolean {
   return signal !== undefined && signal.aborted;
