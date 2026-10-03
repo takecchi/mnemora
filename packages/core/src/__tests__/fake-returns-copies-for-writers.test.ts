@@ -912,7 +912,7 @@ describe("入力の claimKey も、保存するときに写される（ADR 0578�
   });
 });
 
-describe("supersedeWithNewMemories の created[].jobs と superseded の event も、返り値の書き換えから行を守る（ADR 0579）", () => {
+describe("supersedeWithNewMemories の created[].jobs と superseded の event も、返り値の書き換えから行を守る（ADR 0583）", () => {
   async function setup() {
     const stores = createFakeRuntimeStores();
     const old = await seed(stores, { content: "old" });

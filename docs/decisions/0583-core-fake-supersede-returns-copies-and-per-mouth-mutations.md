@@ -1,4 +1,4 @@
-# ADR 0579: core の Fake の `supersedeWithNewMemories` も写しを返し、ADR 0578 の【未確認】だった口ごとの変異を入れる
+# ADR 0583: core の Fake の `supersedeWithNewMemories` も写しを返し、ADR 0578 の【未確認】だった口ごとの変異を入れる
 
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-03

@@ -1640,7 +1640,7 @@ export class FakeMemoryStore implements MemoryStore {
           this.enqueueJob(ctx, kind, { memoryId: memory.id }, rowNow),
         );
         // ADR 0562: 返す `memory` は store の中の行ではなく写し（この後 supersede が行を書き換えても、返した値は動かない）。
-        // ADR 0579: jobs（`enqueueJob` が backing に積んだ行）も写しにして返す（`createMemoryWithOutbox` と同じ）。
+        // ADR 0583: jobs（`enqueueJob` が backing に積んだ行）も写しにして返す（`createMemoryWithOutbox` と同じ）。
         created.push({
           memory: fakeSnapshot(memory),
           created: true,
@@ -1681,7 +1681,7 @@ export class FakeMemoryStore implements MemoryStore {
         meta: { ...target.event.meta, supersededById: anchorId },
       });
       this.backing.events.push(storedEvent);
-      superseded.push(fakeSnapshot(storedEvent)); // ADR 0579
+      superseded.push(fakeSnapshot(storedEvent)); // ADR 0583
     }
 
     return { created, superseded, conflicted };
