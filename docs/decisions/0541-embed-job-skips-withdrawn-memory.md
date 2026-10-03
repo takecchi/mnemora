@@ -48,8 +48,8 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 
 ## 歯と変異試験【実測】
 
-- `packages/postgres/src/__tests__/embed-job-skips-withdrawn-memory.postgres.test.ts`（25 本。実 Postgres と InMemory・Fake）: forgotten・purged で provider が 0 回・ジョブが complete・2 回目の tick で拾い直されない・ベクトルが書かれない・`embeddingStatus` が `pending` のまま。active・archived・superseded・contested は今までどおり埋め込む。残る窓（Fake）。consolidate・reflect の prompt に forgotten・purged の本文が載らないこと。
-- `packages/core/src/__tests__/fake-embed-job-skips-withdrawn.test.ts`（4 本。DB を要らない Fake の歯）。
+- `packages/postgres/src/__tests__/embed-job-skips-withdrawn-memory.postgres.test.ts`（43 本。実 Postgres と InMemory・Fake）: forgotten・purged で provider が 0 回・ジョブが complete・2 回目の tick で拾い直されない・ベクトルが書かれない・`embeddingStatus` が `pending` のまま。active・archived・superseded・contested は今までどおり埋め込む。残る窓（Fake）。consolidate・reflect の prompt に forgotten・purged の本文が載らないこと。
+- `packages/core/src/__tests__/fake-embed-job-skips-withdrawn.test.ts`（12 本。DB を要らない Fake の歯。4 本 → 5 本は上の (b)・(k) の追加、5 本 → 12 本は下の独立の変異検査の追加）。
 - 直す前に当てると、postgres の歯は 6 本、core の歯は 2 本が赤。
 - 変異: `processEmbedJob` の `isWithdrawnSeed` の早期 return を外すと、postgres の歯は 6 本、core の歯は 2 本が赤（対照と窓の歯は緑のまま）。戻した後は全部緑。
 - 既存の歯: core の embed・tick・reembed・forget・purge・requeue 系 29 ファイル（183 本）、postgres の同系 36 ファイル（423 本）は緑のまま。
@@ -81,6 +81,16 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 - **生き残った変異と塞いだ歯**: (b)、(k)、core 側の (d)・(d2)。(b) は、purge が `forgotten` の記憶にしか通らず（`status` が `forgotten` でない行に `purgedAt` が立つ経路が runtime に無い）、どの歯も `purgedAt` 側を独立には縛っていなかった。(k) は決定1の「`embeddingInput` のフックも呼ばない」を縛る歯が無かった。`packages/core/src/__tests__/fake-embed-job-skips-withdrawn.test.ts` に、(1) `get` が `status: active`・`purgedAt` ありの行を返す `purgedOnly` の場合（provider 0 回）、(2) フックの呼び出し回数（forgotten・purged では 0、active・archived では 1）、(3) `embeddingStatus` が `pending`（打ち切り）／`ready`（埋め込み）のまま、を足した（4 本 → 5 本。**実装は変えていない**）。足した後、(b)・(k)・(d)・(d2) は赤、戻して緑。postgres の歯は足していない（判定は3実装共通の 1 か所で、(b)・(k) は core の歯が受ける。(d) は postgres の歯が元から受けている）。
 - **残る限界**: (f1)・(f3) は core の歯だけでは生き残る（Fake の歯に contested・superseded が無い）が、postgres の歯が 3 実装すべてで赤にする。
 
+### 別の担い手による独立の変異検査で生き残った 4 件と、塞いだ歯【実測】（2026-10-03。head `9f47d9c2`）
+
+| 生き残った変異 | 何を縛っていなかったか | 足した歯 |
+|---|---|---|
+| (m1) 判定を `signal === undefined` のときだけにする | `tick` に `opts.signal` を渡す経路。決定1は signal の有無で変わらないはずだが、どの歯も signal 付きで走らせていなかった | core の歯: forgotten・purged・purgedOnly で signal 付きの `tick` でも provider・フックが 0 回（3 赤）。active は signal 付きでも埋め込む対照 |
+| (m2) `tick` が embed ジョブを `complete` せず、リースを残す | 決定2「`complete`」。時計が固定でリースが切れなかったので、`complete` せず leased のまま置いても「2回目の tick が 0」になった | core の歯: 1 回目の tick の後で時計を 1 時間進めてから 2 回目を打ち、`processed: 0`（forgotten・purged・active。3 赤、赤・緑とも 3 回ずつ別の実行で安定） |
+| (m3)(m4) `consolidate`・`reflect` の `seedMemoryId` の種の判定（`isWithdrawnSeed`）を外す | 「種が forgotten・purged なら LLM を呼ばない」。以前の歯は近傍が 1 件も無い状況で、判定を外しても結果が同じだった（種の digest を `recall` のクエリとして embedding provider に送る点も数えていなかった） | postgres の歯: ベクトルを持つ active な近傍を置き、種が forgotten・purged のとき embedding provider も LLM も 0 回（pg・testkit・fake × consolidate・reflect で各 6 赤）。種が active の対照は近傍に届いて LLM を呼ぶ |
+
+戻した後は全部緑（実装は変えていない）。
+
 ## CHANGELOG・migration
 
 - CHANGELOG: `[1.3.0]` の `### Fixed` に書いた。この repo の CHANGELOG に `### Security` の見出しは無い（使われたことが無い）ので、Fixed。`[1.2.0]` は触っていない。
@@ -91,6 +101,7 @@ provider（embedding・LLM）に本文を送る経路を、`deps.embeddingProvid
 - すでに送られた分は取り消せない。
 - 残った行（forget の後に書かれたベクトルなど）の遡っての掃除（問いの ✕ 側）。migration・バックフィルも作っていない。
 - conformance suite。
+- **直さないもの（縛っていない）**: `embeddingStatus` が `ready`・`failed` の記憶を `reembed` で積み直す経路は縛っていない。歯はすべて `pending` から始めるので、「`ready` の記憶も止める」変異は生き残る（決定4は状態名で書いており、`embeddingStatus` では縛っていない）。
 
 ## 材料（直していない）
 

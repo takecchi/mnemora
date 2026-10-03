@@ -312,3 +312,87 @@ describe("consolidate・reflect は、forget・purge した記憶の本文を LL
     }
   }
 });
+
+// 種（`seedMemoryId`）が forgotten・purged のとき、近傍（種の digest で recall して集める active な記憶）が居ても、
+// recall（= embedding provider へのクエリ送信）も LLM も呼ばない。上の歯は近傍が無い状況なので、種の判定を外しても
+// 結果が変わらず縛れていなかった（変異 M15・M16）。ベクトルを持つ active な近傍 C・D を置いて見る。
+describe("consolidate・reflect の { seedMemoryId }: 種が forgotten・purged なら、近傍が居ても recall も LLM も呼ばない（ADR 0541）", () => {
+  for (const be of ["pg", "testkit", "fake"]) {
+    for (const op of ["consolidate", "reflect"] as const) {
+      for (const seedState of ["active", "forgotten", "purged"] as const) {
+        const expectsWork = seedState === "active"; // active は対照（近傍に届くことの確認）
+        it(`${be}: ${op}: 種が ${seedState}: ${expectsWork ? "近傍を集めて LLM を呼ぶ（対照）" : "provider も LLM も呼ばない"}`, async () => {
+          const st: any = await backends[be]!();
+          const prompts: string[] = [];
+          const llm: any = {
+            complete: async () => {
+              throw new Error("nu");
+            },
+            completeStructured: async (_c: any, req: any) => {
+              prompts.push(JSON.stringify(req.prompt));
+              for (const cand of [
+                { content: "merged", digest: "merged" },
+                { outcome: "reflected", content: "r", digest: "r" },
+              ]) {
+                const parsed = req.schema.safeParse(cand);
+                if (parsed.success) return parsed.data;
+              }
+              throw new Error("stub");
+            },
+          };
+          const { provider, calls } = countingProvider();
+          const now = Date.now() + 60_000;
+          const rt: any = createRuntime({
+            memoryStore: st.memoryStore,
+            outboxStore: st.outboxStore,
+            vectorStore: st.vectorStore,
+            lexicalStore: st.lexicalStore,
+            relationStore: st.relationStore,
+            eventStore: st.eventStore,
+            tenantSettingsStore: st.tenantSettingsStore,
+            llmProvider: llm,
+            embeddingProvider: provider,
+            hashContent: (c: string) => `sha(${c})`,
+            clock: { now: () => new Date(now) },
+          } as any);
+          const ids: string[] = [];
+          for (const [i, body] of ["seed-S", "near-active-C", "near-active-D"].entries()) {
+            const m = await st.memoryStore.createMemory(ctx, {
+              tenantId: ctx.tenantId,
+              subjectId: null,
+              sourceObservationId: null,
+              extractorVersion: null,
+              content: body,
+              contentHash: `hs${i}`,
+              digest: body,
+              digestSource: "llm",
+              provenance: { kind: "imported", batchId: "m" },
+              tags: [],
+              occurredAt: null,
+              recordedAt: new Date(),
+              lastReinforcedAt: null,
+              strength: 1,
+              halfLifeHours: 8760,
+              decayFloorAt: new Date(Date.now() + 1e12),
+              embeddingStatus: "ready",
+            } as any);
+            await st.vectorStore.upsert(ctx, SPACE, m.id, [1, 0, 0]);
+            ids.push(m.id);
+          }
+          if (seedState !== "active") await rt.forget(ctx, { memoryId: ids[0] });
+          if (seedState === "purged") await rt.purge(ctx, { memoryId: ids[0] });
+          calls.length = 0; // ここまでの準備で数えた呼び出しは除く
+          await rt[op](ctx, { target: { seedMemoryId: ids[0] } } as any);
+          if (expectsWork) {
+            expect(calls.length).toBeGreaterThan(0); // recall のクエリ埋め込み
+            expect(prompts.length).toBe(1);
+            expect(prompts[0]).toContain("near-active-C");
+          } else {
+            expect(calls).toEqual([]); // 種の digest をクエリとして embedding provider に送らない
+            expect(prompts).toEqual([]); // 近傍が居ても LLM を呼ばない
+          }
+        }, 120_000);
+      }
+    }
+  }
+});

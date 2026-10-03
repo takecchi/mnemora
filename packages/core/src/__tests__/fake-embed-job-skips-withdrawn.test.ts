@@ -41,8 +41,13 @@ function withPurgedAtOnly<T extends { get: (c: Ctx, id: string) => Promise<Memor
   });
 }
 
-async function run(state: "active" | "archived" | "forgotten" | "purged" | "purgedOnly") {
+async function run(
+  state: "active" | "archived" | "forgotten" | "purged" | "purgedOnly",
+  opts: { withSignal?: boolean; expireLeaseBetweenTicks?: boolean } = {},
+) {
   const stores = createFakeRuntimeStores();
+  // 時計は、1回目の tick の後に 1 時間進められる（リースが切れた状態を作る。`complete` されていないジョブは取り直される）。
+  let clockOffsetMs = 60_000;
   const calls: string[][] = [];
   const hookCalls: string[] = [];
   const space = stores.embeddingProvider.space;
@@ -67,7 +72,7 @@ async function run(state: "active" | "archived" | "forgotten" | "purged" | "purg
       return m.content;
     },
     hashContent: (c: string) => `sha(${c})`,
-    clock: { now: () => new Date(Date.now() + 60_000) },
+    clock: { now: () => new Date(Date.now() + clockOffsetMs) },
   });
   const created = await stores.memoryStore.createMemoryWithOutbox(
     ctx,
@@ -96,8 +101,15 @@ async function run(state: "active" | "archived" | "forgotten" | "purged" | "purg
   if (state === "forgotten" || state === "purged") await rt.forget(ctx, { memoryId: id });
   if (state === "purged") await rt.purge(ctx, { memoryId: id });
   if (state === "archived") await stores.memoryStore.updateStatus(ctx, id, "archived");
-  const t1 = await rt.tick(ctx, { leaseMs: 1000, kinds: ["embed"] });
-  const t2 = await rt.tick(ctx, { leaseMs: 1000, kinds: ["embed"] });
+  // `signal` を渡す経路（`tick` の `opts.signal`）でも、同じく provider を呼ばない。
+  const tickOpts = {
+    leaseMs: 1000,
+    kinds: ["embed" as const],
+    ...(opts.withSignal ? { signal: new AbortController().signal } : {}),
+  };
+  const t1 = await rt.tick(ctx, tickOpts);
+  if (opts.expireLeaseBetweenTicks) clockOffsetMs += 3_600_000;
+  const t2 = await rt.tick(ctx, tickOpts);
   const vectors = await stores.vectorStore.getVectors!(ctx, space, [id]);
   const after = await stores.memoryStore.get(ctx, id);
   return {
@@ -129,6 +141,33 @@ describe("Fake: 埋め込みジョブは、forget・purge した記憶の本文�
       expect(r.vectors).toBe(1);
       expect(r.hookCalls).toBe(1);
       expect(r.embeddingStatus).toBe("ready");
+    });
+  }
+
+  // `tick` に `signal` を渡す経路でも守る（判定を signal の有無で変えない）。
+  for (const state of ["forgotten", "purged", "purgedOnly"] as const) {
+    it(`${state}: tick に signal を渡しても、provider もフックも呼ばない`, async () => {
+      const r = await run(state, { withSignal: true });
+      expect(r.inputs).toEqual([]);
+      expect(r.hookCalls).toBe(0);
+      expect(r.first).toEqual([1, 0]);
+      expect(r.vectors).toBe(0);
+      expect(r.embeddingStatus).toBe("pending");
+    });
+  }
+  it("active: tick に signal を渡しても、今までどおり埋め込む（対照）", async () => {
+    const r = await run("active", { withSignal: true });
+    expect(r.inputs).toEqual([SECRET]);
+    expect(r.embeddingStatus).toBe("ready");
+  });
+
+  // 時計を進めてリースを切らせても、`complete` 済みのジョブは取り直されない（`complete` せずリースを残しただけなら、ここで取り直される）。
+  for (const state of ["forgotten", "purged", "active"] as const) {
+    it(`${state}: リースが切れる時刻まで時計を進めても、2回目の tick で拾い直されない（complete 済み）`, async () => {
+      const r = await run(state, { expireLeaseBetweenTicks: true });
+      expect(r.first).toEqual([1, 0]);
+      expect(r.second).toEqual([0, 0]);
+      expect(r.inputs).toEqual(state === "active" ? [SECRET] : []);
     });
   }
 });
