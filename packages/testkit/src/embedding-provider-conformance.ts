@@ -228,6 +228,25 @@ export function describeEmbeddingProviderConformance(
       timeout,
     );
 
+    // 重複したテキスト（ADR 0546。出所は ADR 0452 の「重複入力の件数」）。**フラグなしで、すべての実装に走る。**
+    // 契約は「入力と同じ件数・同じ順序で返す」（`embedding-provider.ts`）で、重複を例外にしていない。
+    // 同じテキストを畳んで（重複排除して）件数を減らす実装、重複した分の応答を捨てる実装は、呼び出し側が
+    // `vectors[i]` を `texts[i]` に対応させる前提を壊す。ここで測るのは件数だけ（重複した位置のベクトルが
+    // 一致するかは、決定性に依存するので問わない）。
+    it(
+      "同じテキストを重複して渡しても、入力と同じ件数を返す（畳まない）",
+      async () => {
+        const provider = await createProvider();
+
+        const twice = await provider.embed(ctx, [a, a]);
+        const mixed = await provider.embed(ctx, [a, b, a, a, b]);
+
+        expect(twice).toHaveLength(2);
+        expect(mixed).toHaveLength(5);
+      },
+      timeout,
+    );
+
     // 以下は `deterministic: true` の実装だけに要求する歯。`false` のときは
     // 消さずに `it.skip` として名前を残す——「無い」と「決定的でないので測っていない」を
     // ログ上で区別できるようにするため（`EmbeddingProviderConformanceOptions.deterministic`

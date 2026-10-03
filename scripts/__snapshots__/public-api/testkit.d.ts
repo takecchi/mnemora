@@ -609,6 +609,7 @@ export interface LLMProviderConformanceOptions<T> {
 export declare function describeLLMProviderConformance<T>(options: LLMProviderConformanceOptions<T>): void;
 
 // ===== dist/memory-store-conformance.d.ts =====
+import type { EventRetentionSetting } from "@mnemora/core";
 import type { Ctx, MemoryEvent, MemoryId, MemoryStore, OutboxJobRecord, RecallId } from "@mnemora/core";
 export interface MemoryStoreConformanceOptions {
     name: string;
@@ -623,9 +624,13 @@ export interface MemoryStoreConformanceOptions {
     claimEmbedJobs: (ctx: Ctx, now: Date) => Promise<OutboxJobRecord[]> | OutboxJobRecord[];
     supportsSupersedeWithNewMemories: boolean;
     supportsAbortIfForgotten?: boolean | undefined;
+    supportsAbortIfSuperseded?: boolean | undefined;
+    supportsAbortIfAllConflicted?: boolean | undefined;
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
     supportsPurgeExpiredRecalls?: boolean | undefined;
+    supportsPurgeExpiredEventsByRetention?: boolean | undefined;
+    setEventRetention?: ((ctx: Ctx, retention: EventRetentionSetting) => Promise<void> | void) | undefined;
     supportsScrubPurged?: boolean | undefined;
     seedLegacyPurgedRow?: ((ctx: Ctx, memoryId: string) => Promise<void>) | undefined;
     supportsArchiveDecayed: boolean;

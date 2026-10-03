@@ -41,6 +41,25 @@ export interface PostgresClient {
  * `MemoryStore` / `VectorStore` / `EventStore` を1接続で実装するための唯一の入口
  * （ADR 0001・ADR 0003: リファレンス実装は同一 DB・同一トランザクション）。
  *
+ * ## DB エラーの `code` の在り処は3つの形に分かれる（ADR 0444 決定4・BG-3、ADR 0552）
+ *
+ * **形は揃えていない**（揃えるには例外の包み方を変える必要があり、公開の約束が動く）。
+ * **判定するなら、両方を見ること: `err.code ?? err.cause?.code`**。
+ *
+ * - ① **包まれていない `pg` の例外**（`err.code`）。`db.transaction()` が接続を借りる段と、
+ *   `client.pool.query()`・`client.pool.connect()` を直接呼んだとき。
+ * - ② **`DrizzleQueryError`**（`err.cause.code`、`err.code` は無い）。文を実行している最中と、
+ *   `db.execute` が接続を借りる段。
+ * - ③ **`code` が無いもの**。pool の枯渇（`timeout exceeded when trying to connect`）と、サーバーが応答しないときの
+ *   接続タイムアウト（`Connection terminated due to connection timeout`）。借りる口が `db.transaction`・`pool.*` なら
+ *   包まれず、`db.execute` なら `DrizzleQueryError` の `cause` の中に入る。どちらも `code` が無く、文面でしか分からない（約束しない）。
+ *
+ * 根拠は drizzle-orm 0.45.2 の `node-postgres/session.js`（`transaction` が `this.client.connect()` を `try` の外で呼ぶ）・
+ * `pg-core/session.js`（`queryWithCache` が `DrizzleQueryError` に包む）と、下の `connectWithErrorListener`。
+ * 【実測】接続拒否（`127.0.0.1:1`）と、応答しない TCP サーバー（`max: 1`・`connectionTimeoutMillis: 300`）で確かめた。
+ * 【記録に頼ったもの】`57P01`・`57P03` は、ADR 0444 の実測の記録に頼る（今回は再現していない）。
+ * 表と場面は `packages/postgres/README.md` の「pool が枯れたとき・Postgres の再起動の最中に出る例外の形」節。
+ *
  * ## `config.schema`（feat/dedicated-schema）
  *
  * **`schema` 未指定なら、`PoolConfig` に手を加えない**——`options` に一切触らないため、

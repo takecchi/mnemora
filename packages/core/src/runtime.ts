@@ -6022,6 +6022,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (!memory) {
       throw new Error(`runtime.tick: embed job references missing memory: ${memoryId}`);
     }
+    // ADR 0541: forget した記憶（`forgotten`）・purge 済みの記憶（`purgedAt` あり）は、本文（purge 後は墓標）を外部の
+    // embedding provider に送らない。forget の前に積まれた埋め込みジョブが後から走っても、provider を呼ばず、ベクトルも
+    // 書かず、`embeddingStatus` も触らずに返す（`tick` が `complete` する。`failed` にしないので、再試行で回り続けない）。
+    // 判定は上の `get` で読んだ状態による。読んでから provider を呼ぶまでの間に forget されると、本文は送られる（塞げない窓。
+    // ADR 0541 の「残る窓」）。`active`・`archived`・`superseded`・`contested` は今までどおり埋め込む。
+    if (isWithdrawnSeed(memory)) {
+      return;
+    }
     try {
       const [vector] = await runAbortable(signal, (raced) =>
         deps.embeddingProvider.embed(ctx, [resolveEmbeddingInput(memory)], { signal: raced }),

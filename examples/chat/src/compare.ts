@@ -66,6 +66,26 @@ export function footprintFieldsFromRecall(
 }
 
 /**
+ * `ComparisonRow.outputValidationIssueCount` を `RecallResult` から導く（ADR 0551）。
+ * **純関数——DB もネットワークも使わない。**
+ *
+ * - `recall.outputValidation` が `undefined`（`"off"`・未検証）なら**欄そのものを出さない**
+ *   （`{}` を返す）。未検証を「違反0件」と読ませないため。
+ * - あれば `issues.length`（`ok: true` なら 0）。
+ *
+ * 数えるだけで、runtime の `outputValidation` の mode は変えない（既定の `"report"` のまま）。
+ */
+export function outputValidationFieldsFromRecall(
+  recall: RecallResult,
+): Pick<ComparisonRow, "outputValidationIssueCount"> {
+  const validation = recall.outputValidation;
+  if (validation === undefined) {
+    return {};
+  }
+  return { outputValidationIssueCount: validation.issues.length };
+}
+
+/**
  * `compare` が測る会話の長さ（filler 往復数）の既定の列。
  *
  * **`cli.ts` から移した**（ADR 0052）——カセットの被覆を検査する歯
@@ -132,6 +152,13 @@ export interface ComparisonRow {
    * （`usage.chars` のうち index tier の寄与の下限）。
    */
   rawIndexJsonLength: number;
+  /**
+   * `recall().outputValidation.issues.length`（ADR 0551）。出力検査の違反件数。
+   *
+   * **省略可能**: `outputValidation` が `undefined`（`"off"`・未検証）のときは欄を出さない
+   * （0 と区別するため）。測定の出力に集計するだけで、門・基準値・`DIFF_FIELDS` には入れない。
+   */
+  outputValidationIssueCount?: number;
   /**
    * 冒頭の事実表明（`FACT_STATEMENT`）の出典（`sourceObservationId` → `externalId`）に、
    * `recall().memories` が到達しているか。判定方法は `factStatementSourceReached`
@@ -259,6 +286,7 @@ export async function runComparison(
       returnedCount: recall.memories.length,
       annCandidateCount: recall.index.totalInScope - notIndexedCount(recall.omitted),
       ...footprintFieldsFromRecall(recall),
+      ...outputValidationFieldsFromRecall(recall),
       factStatementSurvived: survived,
       memoryUsageReported: usageReport.reported,
       associationRows: recall.memories.filter((m) => m.retrievedVia === "association").length,
@@ -336,11 +364,14 @@ function formatOmittedSummary(omitted: Omission[]): string {
  */
 export function formatRecallQualityTable(rows: ComparisonRow[]): string {
   const header =
-    "| 会話ターン数 | スコープ内の Memory | ANN の候補になれた件数 | 返った件数 | 冒頭の事実の出典に到達したか | `omitted` の内訳 |";
-  const sep = "|---|---|---|---|---|---|";
+    "| 会話ターン数 | スコープ内の Memory | ANN の候補になれた件数 | 返った件数 | 冒頭の事実の出典に到達したか | `omitted` の内訳 | 出力検査の違反件数 |";
+  const sep = "|---|---|---|---|---|---|---|";
   const body = rows.map((r) => {
     const survived = r.factStatementSurvived ? "✅" : "❌";
-    return `| ${r.turnCount} | ${r.totalInScope} | ${r.annCandidateCount} | ${r.returnedCount} | ${survived} | ${formatOmittedSummary(r.omitted)} |`;
+    // 未検証（欄なし）は「—」。0（検査して違反なし）と区別する（ADR 0551）。
+    const violations =
+      r.outputValidationIssueCount === undefined ? "—" : `${r.outputValidationIssueCount}`;
+    return `| ${r.turnCount} | ${r.totalInScope} | ${r.annCandidateCount} | ${r.returnedCount} | ${survived} | ${formatOmittedSummary(r.omitted)} | ${violations} |`;
   });
   return [header, sep, ...body].join("\n");
 }
