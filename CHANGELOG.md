@@ -49,6 +49,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Breaking
 
+- **`@mnemora/bullmq` の `createBullmqTickDriver` が、完了したジョブを直近 1000 件だけ Redis に残すようになった（`removeOnComplete: { count: 1000 }` が既定）**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料1の判断）。
+  以前は `removeOnComplete` の指定が無く、完了したジョブが `everyMs` ごとに1件ずつ全部残った。いまは繰り返しジョブの template に `removeOnComplete: { count: 1000 }` を入れるので、古い完了ジョブは BullMQ が消す。完了ジョブの `returnvalue`（`TickResult`）を `queue.getJobs(["completed"])` などで後から読んでいた人は、古い分が読めなくなる。`completedJobsToKeep`（下の `### Added`）で件数を変えられ、`Number.MAX_SAFE_INTEGER` を渡すと以前に近づく。**`removeOnFail` は触っていない**（失敗したジョブは従来どおり全部残る）。型・シグネチャは変わらない。移行は [migration-v1](./docs/migration-v1.md) の 🟡。
+
 - **`@mnemora/postgres` の `MemoryStore`・`EventStore` の書き込み口が、NUL（U+0000）を DB の生の例外でなく名指しの `Error` で断るようになり、`resolveContestedGroup?`・`resolveContestedPair?` が型の外の `status` を `RangeError` で断り、purge 済みの記憶を `expectedStatus` に一致しない行として扱い（`updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories?` の `supersede[].expectedStatus`）、`setEventRetention` の日数の int4 の上限が共有の検査になった**（[ADR 0499](./docs/decisions/0499-store-write-checks-nul-named-status-range-purged-cas-int4-days.md)。[ADR 0456](./docs/decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) の M4、[ADR 0450](./docs/decisions/0450-contested-group-operation-state-matrix-round26.md)・[ADR 0447](./docs/decisions/0447-lifecycle-operation-state-matrix-round23.md)・[ADR 0446](./docs/decisions/0446-apply-correction-no-write-before-winner-check-case-insensitive-candidate-reason-winner.md)・[ADR 0479](./docs/decisions/0479-tenant-settings-write-fake-alignment.md) の材料）。
 
   いずれも、「型の外の入力、または約束に反する入力が、DB の生の例外になる・黙って通る」のを、約束どおりに直した。
@@ -112,6 +115,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **誰が影響を受けるか**: `as`・JavaScript・外部の設定（環境変数・JSON）から `tick` の `opts` を組み立てている呼び出し側。型どおりに呼んでいる限り変わらない。`claimBatch` を直接呼ぶ人の顔は変えていない。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目62。DB マイグレーションは無い。
   - 【確かめていないこと】SQL_ASCII の脚。`@mnemora/bullmq`・`examples/` のテスト。NUL を含む `kinds` の要素。
+
+### Added
+
+- **`@mnemora/bullmq` の `CreateBullmqTickDriverOptions` に `lockDuration` と `completedJobsToKeep` を足した**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6の判断）。
+  - `lockDuration?: number`（ミリ秒）: BullMQ の `Worker` の lock の期限にそのまま渡す。省略なら BullMQ の既定（30000 ms）。1回の tick が lock より長くかかる環境で、stalled による同じ tick の再実行を減らすために使う。`1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数でなければ、構築時に投げる（数でなければ `TypeError`、範囲外・小数・`NaN`・`Infinity` なら `RangeError`。[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md) の形）。
+  - `completedJobsToKeep?: number`: 完了したジョブを Redis に残す件数（既定 `1000`）。`0` 以上の整数でなければ、同じ形で構築時に投げる。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
