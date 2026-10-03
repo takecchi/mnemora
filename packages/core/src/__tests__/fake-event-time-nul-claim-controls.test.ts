@@ -52,26 +52,37 @@ afterEach(() => {
 
 describe("updatedAt は壁時計（Postgres の updated_at = now()）。opts.now・event.at ではない", () => {
   it("archiveDecayed: opts.now が 2031 年でも、archive した行の updatedAt は呼ぶ前と後の間の壁時計", async () => {
+    // 時計は Date だけ固定する。作成と archive の間で壁時計を確実に進め、「書かなかった」（作成時の値のまま）と
+    // 「書いた」を区別する（同じ ms になって確率で通る形にしない）。
+    vi.useFakeTimers({ toFake: ["Date"] });
     const { memoryStore } = createFakeRuntimeStores();
     const now = new Date("2031-01-01T00:00:00.000Z");
+    const createdAt = new Date("2030-01-01T00:00:00.000Z");
+    const archivedAt = new Date("2030-01-02T00:00:00.000Z");
+    vi.setSystemTime(createdAt);
     const created = await memoryStore.createMemory(
       ctx,
       memory({ decayFloorAt: new Date(now.getTime() - 1_000) }),
     );
+    expect(created.updatedAt).toEqual(createdAt);
 
-    const before = Date.now();
+    vi.setSystemTime(archivedAt);
     const result = await memoryStore.archiveDecayed!(ctx, { now, limit: 10 });
-    const after = Date.now();
 
     expect(result.archived.map((a) => a.memoryId)).toEqual([created.id]);
     const stored = await memoryStore.get(ctx, created.id);
     expect(stored?.status).toBe("archived");
-    expect(stored!.updatedAt.getTime()).toBeGreaterThanOrEqual(before);
-    expect(stored!.updatedAt.getTime()).toBeLessThanOrEqual(after);
+    expect(stored!.updatedAt.getTime()).toBeGreaterThan(createdAt.getTime());
+    expect(stored!.updatedAt).toEqual(archivedAt);
   });
 
   it("purgeMemory: event.at が 2020 年でも、purge した行の updatedAt は呼ぶ前と後の間の壁時計（purgedAt は event.at）", async () => {
+    // 時計は Date だけ固定する（作成と purge の間で壁時計を確実に進める。同じ ms で通る形にしない）。
+    vi.useFakeTimers({ toFake: ["Date"] });
     const { memoryStore } = createFakeRuntimeStores();
+    const createdAt = new Date("2030-01-01T00:00:00.000Z");
+    const purgedWallClock = new Date("2030-01-02T00:00:00.000Z");
+    vi.setSystemTime(createdAt);
     const created = await memoryStore.createMemory(ctx, memory({ status: "forgotten" }));
     const at = new Date("2020-01-01T00:00:00.000Z");
     const event: NewMemoryEvent = {
@@ -84,24 +95,23 @@ describe("updatedAt は壁時計（Postgres の updated_at = now()）。opts.now
       meta: {},
     };
 
-    const before = Date.now();
+    vi.setSystemTime(purgedWallClock);
     await memoryStore.purgeMemory!(
       ctx,
       created.id,
       { content: "[purged]", digest: "[purged]" },
       event,
     );
-    const after = Date.now();
 
     const stored = await memoryStore.get(ctx, created.id);
     expect(stored?.purgedAt).toEqual(at);
-    expect(stored!.updatedAt.getTime()).toBeGreaterThanOrEqual(before);
-    expect(stored!.updatedAt.getTime()).toBeLessThanOrEqual(after);
+    expect(stored!.updatedAt.getTime()).toBeGreaterThan(createdAt.getTime());
+    expect(stored!.updatedAt).toEqual(purgedWallClock);
   });
 });
 
 describe("createMemory の extractorVersion の NUL は素の Error（識別子ではなく text の欄）", () => {
-  it("MalformedIdentifierError ではなく、extractorVersion must not contain NUL の素の Error で断り、何も書かない", async () => {
+  it("MalformedIdentifierError ではなく、extractorVersion must not contain NUL の素の Error で断る", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const error = await memoryStore.createMemory(ctx, memory({ extractorVersion: "v\u0000" })).then(
       () => undefined,
@@ -111,9 +121,24 @@ describe("createMemory の extractorVersion の NUL は素の Error（識別子�
     expect(error).toBeInstanceOf(Error);
     expect(isMalformedIdentifierError(error)).toBe(false);
     expect((error as Error).message).toMatch(/extractorVersion must not contain NUL/);
+  });
+
+  it("claimKey を持つ行でも、断った後は何も書かれていない（検査を保存の後ろへ移すと、書かれた行が読み口に見える）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const claimKey = { subject: "user", predicate: "nul_refused" };
+    await expect(
+      memoryStore.createMemory(ctx, memory({ claimKey, extractorVersion: "v\u0000" })),
+    ).rejects.toThrow(/extractorVersion must not contain NUL/);
+
     await expect(
       memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
     ).resolves.toEqual([]);
+
+    // 対照: 同じ claimKey で NUL の無い行は、同じ読み口に見える（読み口が常に空を返しているのではない）。
+    await memoryStore.createMemory(ctx, memory({ claimKey, extractorVersion: "v1" }));
+    await expect(
+      memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
+    ).resolves.toEqual(["nul_refused"]);
   });
 
   it("対照: NUL の無い extractorVersion は通る", async () => {
@@ -170,5 +195,43 @@ describe("listActiveClaimPredicates の並び（新しい順、同着は predica
     await expect(
       memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
     ).resolves.toEqual(["a", "b", "c"]);
+  });
+
+  it("同着の並びは UTF-16 コード単位順ではなくコードポイント順（U+FF5E は U+1F600 より前。UTF-16 では逆）", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { memoryStore } = createFakeRuntimeStores();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    // testkit の適合テスト（memory-store-conformance.ts）が Postgres（COLLATE "C"）に当てているのと同じ入力。
+    // 😀 は D83D DE00 なので、UTF-16 順（JS の `<`）では ～（FF5E）より前に来る。
+    const scrambled = ["\u{1F600}", "a", "～", "Z", "é", "_", "B"];
+    for (const predicate of scrambled) {
+      await memoryStore.createMemory(ctx, memory(claim(predicate)));
+    }
+
+    await expect(
+      memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
+    ).resolves.toEqual(["B", "Z", "_", "a", "é", "～", "\u{1F600}"]);
+  });
+
+  it("並びは createdAt に従う（updatedAt ではない）: 作った後に強化して updatedAt が逆転しても変わらない", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { memoryStore } = createFakeRuntimeStores();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const older = await memoryStore.createMemory(ctx, memory(claim("older_created")));
+    vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
+    await memoryStore.createMemory(ctx, memory(claim("newer_created")));
+
+    // older_created を後から強化する（active のまま updatedAt だけ進む。createdAt は変わらない）。
+    const reinforcedAt = new Date("2030-01-03T00:00:00.000Z");
+    vi.setSystemTime(reinforcedAt);
+    await memoryStore.reinforce(ctx, older.id, reinforcedAt);
+    const reinforced = await memoryStore.get(ctx, older.id);
+    expect(reinforced?.status).toBe("active");
+    expect(reinforced!.createdAt).toEqual(new Date("2030-01-01T00:00:00.000Z"));
+    expect(reinforced!.updatedAt).toEqual(reinforcedAt);
+
+    await expect(
+      memoryStore.listActiveClaimPredicates!(ctx, { subjectId: "user-1", limit: 10 }),
+    ).resolves.toEqual(["newer_created", "older_created"]);
   });
 });

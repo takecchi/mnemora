@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { NewMemoryEvent } from "../event.js";
+import {
+  isContestedGroupMembershipMismatchError,
+  isMemoryStatusConflictError,
+} from "../interfaces/memory-store.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
@@ -312,6 +316,159 @@ describe("Fake: 形・循環の検査は存在確認・hook・CAS より前（AD
           { status: "active" },
           { status: "superseded", by: ms[2]!.id },
           { status: "superseded", by: ms[1]!.id },
+        ]),
+    );
+    expect(s.hookCalls).toEqual([]);
+  });
+});
+
+/**
+ * ADR 0584（ADR 0574 の歯の穴）: 前回の確かめ直しで、どの歯にも捕まらなかった変異を塞ぐ。
+ *
+ * - F14: 対の外の `forgotten` を指す検査を CAS より前へ動かしても通っていた。
+ * - F10・F12: 対・群の形の検査を、存在確認や CAS の後ろへ動かしても 0574 の歯は緑のままだった（0557 の歯1本だけが捕まえた）。
+ */
+describe("Fake: 外の forgotten の検査は CAS より後（ADR 0515・0584）", () => {
+  const forgotten = async (s: ReturnType<typeof setup>): Promise<Memory> => {
+    const m = await s.mem();
+    await s.store.updateStatus(A, m.id, "forgotten");
+    return (await s.store.get(A, m.id))!;
+  };
+
+  it("pair: contested でない2件 + 外の forgotten を指す superseded は、RangeError ではなく MemoryStatusConflictError", async () => {
+    const s = setup();
+    const a = await s.mem();
+    const b = await s.mem();
+    const out = await forgotten(s);
+    expect(out.status).toBe("forgotten");
+    const events = (s.store as unknown as { backing: { events: unknown[] } }).backing.events.length;
+    let thrown: unknown;
+    await s
+      .resolvePair(a, b, { status: "active" }, { status: "superseded", by: out.id })
+      .catch((e: unknown) => {
+        thrown = e;
+      });
+    expect(isMemoryStatusConflictError(thrown)).toBe(true);
+    expect(thrown).not.toBeInstanceOf(RangeError);
+    expect((await s.store.get(A, b.id))!.status).toBe("active");
+    expect((s.store as unknown as { backing: { events: unknown[] } }).backing.events.length).toBe(
+      events,
+    );
+  });
+
+  it("group: contested でない3件 + 外の forgotten を指す superseded は、RangeError ではなく MemoryStatusConflictError", async () => {
+    const s = setup();
+    const ms = [await s.mem(), await s.mem(), await s.mem()];
+    const out = await forgotten(s);
+    let thrown: unknown;
+    await s
+      .resolveGroup(ms, [
+        { status: "active" },
+        { status: "superseded", by: out.id },
+        { status: "active" },
+      ])
+      .catch((e: unknown) => {
+        thrown = e;
+      });
+    expect(isMemoryStatusConflictError(thrown)).toBe(true);
+    expect(thrown).not.toBeInstanceOf(RangeError);
+  });
+
+  it("group: 群の一部だけを渡し + 外の forgotten を指す superseded は、RangeError ではなく ContestedGroupMembershipMismatchError", async () => {
+    const s = setup();
+    const four = [await s.mem(), await s.mem(), await s.mem(), await s.mem()];
+    await s.store.markContestedGroup!(
+      A,
+      four.map((m) => ({ id: m.id, event: s.ev(m.id) })),
+    );
+    const out = await forgotten(s);
+    const three = four.slice(0, 3);
+    let thrown: unknown;
+    await s
+      .resolveGroup(three, [
+        { status: "active" },
+        { status: "superseded", by: out.id },
+        { status: "active" },
+      ])
+      .catch((e: unknown) => {
+        thrown = e;
+      });
+    expect(isContestedGroupMembershipMismatchError(thrown)).toBe(true);
+    expect(thrown).not.toBeInstanceOf(RangeError);
+  });
+});
+
+describe("Fake: pair・group の形の検査は存在確認・CAS より前（ADR 0503・0584）", () => {
+  const PAIR_SHAPE =
+    /^resolveContestedPair: second\.supersededById is required when status is "superseded"$/;
+  const GROUP_SHAPE =
+    /^resolveContestedGroup: members\[1\]\.supersededById is required when status is "superseded"$/;
+  const X = "00000000-0000-4000-8000-0000000000c1";
+  const Y = "00000000-0000-4000-8000-0000000000c2";
+  const Z = "00000000-0000-4000-8000-0000000000c3";
+
+  it("pair: 存在しない2件 + supersededById 無しの superseded は、not found ではなく形の RangeError で、hook を呼ばない", async () => {
+    const s = setup();
+    await s.expectRefused([], PAIR_SHAPE, () =>
+      s.resolvePair({ id: X }, { id: Y }, { status: "active" }, { status: "superseded" }),
+    );
+    expect(s.hookCalls).toEqual([]);
+  });
+
+  it("pair: contested でない2件（CAS が外れる）+ supersededById 無しの superseded は、MemoryStatusConflictError ではなく形の RangeError で、hook を呼ばない", async () => {
+    const s = setup();
+    const a = await s.mem();
+    const b = await s.mem();
+    await s.expectRefused([a.id, b.id], PAIR_SHAPE, () =>
+      s.resolvePair(a, b, { status: "active" }, { status: "superseded" }),
+    );
+    expect(s.hookCalls).toEqual([]);
+  });
+
+  it("pair: contested でない2件 + 自己置換は、形の RangeError", async () => {
+    const s = setup();
+    const a = await s.mem();
+    const b = await s.mem();
+    await s.expectRefused([a.id, b.id], /must not be the memory itself$/, () =>
+      s.resolvePair(a, b, { status: "active" }, { status: "superseded", by: b.id }),
+    );
+    expect(s.hookCalls).toEqual([]);
+  });
+
+  it("group: 存在しない3件 + supersededById 無しの superseded は、not found ではなく形の RangeError で、hook を呼ばない", async () => {
+    const s = setup();
+    await s.expectRefused([], GROUP_SHAPE, () =>
+      s.resolveGroup(
+        [{ id: X }, { id: Y }, { id: Z }],
+        [{ status: "active" }, { status: "superseded" }, { status: "active" }],
+      ),
+    );
+    expect(s.hookCalls).toEqual([]);
+  });
+
+  it("group: contested でない3件（CAS が外れる）+ supersededById 無しの superseded は、MemoryStatusConflictError ではなく形の RangeError で、hook を呼ばない", async () => {
+    const s = setup();
+    const ms = [await s.mem(), await s.mem(), await s.mem()];
+    await s.expectRefused(
+      ms.map((m) => m.id),
+      GROUP_SHAPE,
+      () =>
+        s.resolveGroup(ms, [{ status: "active" }, { status: "superseded" }, { status: "active" }]),
+    );
+    expect(s.hookCalls).toEqual([]);
+  });
+
+  it("group: contested でない3件 + 自己置換は、形の RangeError", async () => {
+    const s = setup();
+    const ms = [await s.mem(), await s.mem(), await s.mem()];
+    await s.expectRefused(
+      ms.map((m) => m.id),
+      /must not be the memory itself$/,
+      () =>
+        s.resolveGroup(ms, [
+          { status: "active" },
+          { status: "superseded", by: ms[1]!.id },
+          { status: "active" },
         ]),
     );
     expect(s.hookCalls).toEqual([]);
