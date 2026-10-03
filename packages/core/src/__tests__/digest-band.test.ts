@@ -310,3 +310,44 @@ describe("packDigestBand — 切り詰め位置が書記素の途中（穴 O-5�
     expect(pack("0123456789", 5)).toBe("01234");
   });
 });
+
+describe("packDigestBand — maxEntryChars の +Infinity と NaN の取りこぼし（ADR 0585 の歯の穴、確かめ直し）", () => {
+  const opts = { limit: 10, maxChars: 10_000 };
+
+  it("maxEntryChars: +Infinity は上限なし——digest を切らず、truncated も立てない", () => {
+    // NaN を空に切る判定へ `+Infinity` が巻き込まれると、全件が空文字になる。
+    // 既存の歯は NaN と負数だけで、+Infinity の側は縛っていなかった。
+    const long = "x".repeat(5000);
+    const { band, limitedBy } = packDigestBand([entry("m1", long), entry("m2", "short")], 2, {
+      ...opts,
+      maxEntryChars: Number.POSITIVE_INFINITY,
+    });
+    expect(band).toEqual([
+      { memoryId: "m1", digest: long },
+      { memoryId: "m2", digest: "short" },
+    ]);
+    expect(band[0]).not.toHaveProperty("truncated");
+    expect(band[1]).not.toHaveProperty("truncated");
+    expect(limitedBy).toBeUndefined();
+  });
+
+  it("maxEntryChars: NaN は band の2件目以降でも効く——全件の digest が空になり truncated: true", () => {
+    // NaN の処理が「band の1件目だけ」に限られても、1件候補の既存の歯は緑のままになる。
+    const candidates = [entry("m1", "0123456789"), entry("m2", "abcdefghij"), entry("m3", "XYZ")];
+    const { band } = packDigestBand(candidates, 3, { ...opts, maxEntryChars: NaN });
+    expect(band).toEqual([
+      { memoryId: "m1", digest: "", truncated: true },
+      { memoryId: "m2", digest: "", truncated: true },
+      { memoryId: "m3", digest: "", truncated: true },
+    ]);
+  });
+
+  it("もとの digest が空文字の候補も、NaN は負数（-5）と同じ結果になる（truncated: true）", () => {
+    // 負数では `0 > -5` が真なので、空文字でも truncated が立つ。NaN も同じ結果にそろえる。
+    const candidates = [entry("m1", "")];
+    const nan = packDigestBand(candidates, 1, { ...opts, maxEntryChars: NaN });
+    const negative = packDigestBand(candidates, 1, { ...opts, maxEntryChars: -5 });
+    expect(negative.band).toEqual([{ memoryId: "m1", digest: "", truncated: true }]);
+    expect(nan).toEqual(negative);
+  });
+});
