@@ -17,7 +17,7 @@ export const DEFAULT_HALF_LIFE_HOURS = 720;
  * `tenant_settings.default_half_life_hours`（前者の既定値の元になる）。どちらも
  * `defaultDecayStrategy`（`strategies/decay.ts`）の割り算 `elapsedHours / halfLifeHours` に
  * 直接入るため、値域が同じでなければならない。だからこの関数を1箇所に置き、
- * 両方の adapter（`packages/testkit` の in-memory 実装）がここを呼ぶ。
+ * 両方の adapter（`packages/postgres` と `packages/testkit` の in-memory 実装）がここを呼ぶ。
  *
  * **0 を含めない**: `halfLifeHours = 0` は「即座に消える」を意味するが、それは
  * `strength` を下げる・`status: 'forgotten'` にする、という既存の経路が既に表せる。
@@ -246,6 +246,7 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
  * （2026-10-03 訂正）上の「まだ実装されていない」は今は成り立たない。`recall()` は `getTaxonomyMode?` を
  * 読み、`open` なら `registered`・`proposed` の両方、`strict` なら `registered` だけを
  * ラベルの絞り込みの参加資格にする（`recall-runtime.ts` の `taxonomyMode`、`RecallQuery.labels` の doc）。
+ * 読むのは、`labels` か `taxonomyGroups` を指定した `recall()` だけである。
  */
 export type TaxonomyMode = "open" | "strict";
 
@@ -286,11 +287,13 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * （roadmap.md 段階3）が必要とする「Memory 作成時の既定 half-life」の読み出しと、
  * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
  *
- * ⚠ **下の「`taxonomy_mode`（interface に出していない）」は
+ * ⚠ **上の段落の「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」は
  * [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)（Issue #201）で古くなった。**
- * （2026-10-03 訂正）この追記は以前、いまは本文に無い「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」
- * を指していた。指す先を、今の本文の該当箇所に直した。本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
- * `decay_clock` と同じ「4メソッドは省略可能」の形でこの interface に加わった。
+ * 本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
+ * `decay_clock` と同じ「省略可能」の形でこの interface に加わった。
+ * （2026-10-03 訂正）この追記が指す「上の段落」は、いまの本文には無い（書き換えられて消えた）。
+ * 今の本文で同じことを言っているのは、下の「`taxonomy_mode`（interface に出していない）」の箇所である
+ * ——この追記が言う通り、`taxonomy_mode` は今は `getTaxonomyMode?`/`setTaxonomyMode?` で読み書きできる。
  *
  * 契約:
  * - テナントに `tenant_settings` 行が無い場合、`getDefaultHalfLifeHours` は
@@ -314,7 +317,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * **後者を採る**——`examples/chat` が実際に `decay_clock` を設定できなければ、この機能は
  * 「在る」と数えられない（ADR 0165 決めたこと11）。
  *
- * ⭐ **ただし4メソッドはすべて省略可能（`?` 付き）である。**`getEventRetention`/
+ * ⭐ **ただし、ここで足したメソッドはすべて省略可能（`?` 付き）である。**`getEventRetention`/
  * `setEventRetention` を**必須**にした ADR 0050 とは、ここだけ向きが違う。理由は
  * ADR 0165 決めたこと13 に書いた（要点: `@mnemora/core` は npm 公開済みであり、
  * interface に必須メソッドを足すと**外部の adapter 実装が軒並みコンパイルできなくなる**。
@@ -338,8 +341,8 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * がどちらも対処として名指ししていた「`'activity'` を選ぶ採用者は `half_life_recalls` を
  * 自分の recall 頻度に合わせて上げる必要がある」を、本番コードから呼べる口にする。
  * **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は足していない**——理由は
- * `setDefaultHalfLifeRecalls` の doc コメント、および ADR 0197 を参照。**5メソッド目の
- * 追加も、他の4つと同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
+ * `setDefaultHalfLifeRecalls` の doc コメント、および ADR 0197 を参照。**このメソッドの
+ * 追加も、ほかの省略可能なメソッドと同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
  * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
  * 決めたこと13 と同じ理由）。
  *
@@ -526,8 +529,8 @@ export interface TenantSettingsStore {
    * （`taxonomy_mode` を読む側自体がまだ存在しないため、`open`/`strict` のどちらであっても
    * PR-A の時点では観測できる違いが無い——ADR 0318「決めたこと」参照）。
    *
-   * （2026-10-03 訂正）上の「読む側自体がまだ存在しない」は今は成り立たない。`recall()` が
-   * `readTaxonomyMode` 経由で呼び出しの始めに読み、`strict` では `proposed` のラベルを参加させない。
+   * （2026-10-03 訂正）上の「読む側自体がまだ存在しない」は今は成り立たない。`labels` か `taxonomyGroups` を指定した
+   * `recall()` が `readTaxonomyMode` 経由で読み、`strict` では `proposed` のラベルを参加させない。
    * 未実装の adapter が `'open'` に倒れる点は変わらない。
    */
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
@@ -543,7 +546,7 @@ export interface TenantSettingsStore {
   /**
    * `ctx.tenantId` の `tenant_settings` 行を消す
    * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
-   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ4つの口の
+   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ口の
    * 1つで、**順序は最後**（設定を先に消すと、途中で処理が中断した場合に
    * `getEventRetention` 等が既定値へ静かに戻ってしまい、消去が完了していないことに
    * 気づきにくくなるため）。
@@ -719,7 +722,7 @@ export async function readSubjectActivitySeq(
 
 /**
  * `setDecayClock` を持たない adapter では `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む
- * `Error` で**明示的に失敗する**（ADR 0165 決めたこと13）。読み出し側3つと違い、
+ * `Error` で**明示的に失敗する**（ADR 0165 決めたこと13）。読み出し側と違い、
  * 書き込みは既定へ倒せない——倒すと「設定したのに効かない」が黙って成立する。
  */
 export async function writeDecayClock(

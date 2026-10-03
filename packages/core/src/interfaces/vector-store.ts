@@ -106,8 +106,8 @@ export interface VectorFilter {
   excludeProvenanceKinds?: ProvenanceKind[] | undefined;
   /**
    * **期間の下限。両端とも包含（`>=`）（ADR 0059）。** 比較対象は
-   * `COALESCE(occurredAt, recordedAt)`——「実効時刻」の定義（ADR 0039 が4箇所に在ると
-   * 数えた規則。本フィールドの追加でこれが5箇所目になる）。`RecallQuery.occurredAfter`
+   * `COALESCE(occurredAt, recordedAt)`——「実効時刻」の定義（ADR 0039 が複数の箇所に在る
+   * と指摘した規則。本フィールドもその1つである）。`RecallQuery.occurredAfter`
    * （`packages/core/src/recall.ts`）・`packages/postgres/src/memory-store.ts` の
    * `aggregateScope` が既に使っている厳密経路（`COALESCE(occurred_at, recorded_at) >=
    * occurredAfter`）と同じ命名・同じ境界の含み方に揃えてある。
@@ -350,8 +350,8 @@ export interface VectorStore {
    * 結果から落とさず、距離を比較が通らない値（`NaN`）にして返す**——
    * [ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md) の
    * ゼロベクトルと同じ契約の形であり、`recall()` の段2（ADR 0044）がこれを
-   * `omitted.score_not_comparable` に数える。3実装（`packages/postgres` の pgvector 経由の
-   * ゼロベクトル差し替え、`packages/testkit`/`packages/core` の Fake の長さ不一致検査）は
+   * `omitted.score_not_comparable` に数える。`packages/postgres`（pgvector 経由のゼロベクトル
+   * 差し替え）も `packages/testkit`/`packages/core` の Fake（長さ不一致検査）も、
    * 同じ振る舞いをする（実装の詳細である `NaN` という値そのものは揃えない——ADR 0040
    * 決定1と同じ自由度）。**`query` が有限でない成分（`NaN`・`Infinity`）を含むときも
    * 同じく「比較不能」であり、`search` は例外を投げない**（`PostgresVectorStore` は同じゼロベクトルへの
@@ -486,7 +486,7 @@ export interface VectorStore {
    * `deleteAcrossSpaces` が「特定の `memoryId` の集合」を対象にするのに対し、
    * こちらは「このテナントの行全部」が対象——`packages/core/src/erase-tenant.ts` の
    * 独立関数 `eraseTenant` が、`MemoryStore.eraseTenant?`/`OutboxStore.eraseTenant?`/
-   * `TenantSettingsStore.eraseTenant?` と束ねて呼ぶ4つの口の1つ。
+   * `TenantSettingsStore.eraseTenant?` と束ねて呼ぶ口の1つ。
    *
    * 🔴 **任意メソッドである。**必須にすると `VectorStore` を実装する第三者の adapter を
    * 壊す破壊的変更になる——`deleteAcrossSpaces`（決定的に必須にした ADR 0382）とは

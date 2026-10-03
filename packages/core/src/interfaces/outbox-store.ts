@@ -138,13 +138,13 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   `UPDATE … RETURNING` の順で返す（SQL はこの順を保証しない）。testkit の fixture は古い順に
  *   並べて返す（同じ時刻なら積んだ順）。【実測 2026-09-27】20本の範囲では両方とも積んだ順・古い順に
  *   返ったが、それは約束ではない。
- * - Phase 1 では失敗したジョブの自動リトライを行わない（`fail` は終端状態。本 PR の決定、
- *   PR 本文に記載）。
+ * - Phase 1 では失敗したジョブの自動リトライを行わない（`fail` は終端状態。リースが切れた
+ *   ジョブの再 claim とは別の話。上の「リース」の項を見ること）。
  */
 export interface ClaimOutboxJobsOptions {
   /** この種別のジョブだけを取る。省略なら種別で絞らない。 */
   kinds?: OutboxJobKind[] | undefined;
-  /** 1回に取る上限の本数。0以上の整数を渡す前提（負数・非整数の結果は未定義。今は testkit の fixture が `Error` で断る）。 */
+  /** 1回に取る上限の本数。0以上の整数を渡す前提。負数・非整数・`bigint` に収まらない値は、何も claim せずに例外を投げる（`@mnemora/postgres` は `LIMIT` の型で Postgres が拒み、testkit の fixture は `Error`）。 */
   limit: number;
   /** 「今」の時刻。`available_at <= now` とリースの切れ目の判定に使う。 */
   now: Date;
@@ -217,7 +217,7 @@ export interface OutboxStore {
    * `MemoryStore.createObservationWithOutbox` の `opts` と同じ理由）。**`opts.at` を渡すと
    * `completedAt` にその値を使う。省略時は実装が壁時計を使う。** runtime はこの欄に `clock.now()` を渡す。
    *
-   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
+   * **`opts.at` が Invalid Date（`getTime()` が `NaN`）なら例外を投げ、行には触れない**（Postgres は `timestamptz` への変換で拒む）。⚠ `@mnemora/postgres` は、`jobId` が UUID の形でないときは `opts.at` を見る前に何もせず返す（testkit の fixture は先に `opts.at` を検査して例外にする）。渡された `Date` は参照のまま保存せず、複製して持つ——呼び手が後から書き換えても `completedAt` は変わらない。`fail` も同じ。
    */
   complete(
     ctx: Ctx,
@@ -245,7 +245,7 @@ export interface OutboxStore {
   /**
    * `ctx.tenantId` に属する `outbox` の行を跡形なく消す
    * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
-   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ4つの口の1つ
+   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ口の1つ
    * （`MemoryStore.eraseTenant?`/`VectorStore.eraseTenant?`/`TenantSettingsStore.eraseTenant?`
    * と同じ形）。
    *
@@ -290,7 +290,7 @@ export interface OutboxStore {
 export interface PurgeCompletedJobsOptions {
   /** この日時より前に完了した（`completed_at < olderThan`）ジョブだけが対象。境界値は対象外。**既定値なし。** */
   olderThan: Date;
-  /** 1回の呼び出しで消す行数の上限。**必須・既定値なし。**0以上の整数を渡す前提（負数の結果は未定義）。 */
+  /** 1回の呼び出しで消す行数の上限。**必須・既定値なし。**0以上の整数を渡す前提。testkit の fixture は負数・非整数で `Error` を投げる。`@mnemora/postgres` は `LIMIT limit + 1` で渡すので、`-1` は例外にならず0件になり、`-2` 以下は Postgres が拒む（実装側の食い違い）。 */
   limit: number;
   /** `true` なら何も消さず、消していたら何が起きたかだけを返す。省略時 `false`。 */
   dryRun?: boolean | undefined;
