@@ -558,9 +558,11 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0540](./0540-adr-filename-rule-shared-allowlist.md) | ADR のファイル名の規則を生成器と renumber で共有し、`docs/decisions/` の直下の ADR でない `.md` は許す一覧（README.md・TEMPLATE.md）だけにする | 採用 (2026-10) |
 | [0541](./0541-embed-job-skips-withdrawn-memory.md) | 埋め込みジョブは、forget・purge した記憶の本文を外部の embedding provider に送らない（オーナーへの問28） | 採用 (2026-10) |
 | [0542](./0542-reembed-already-skips-withdrawn-memory.md) | `reembed` は元から forgotten・purge 済みの記憶のジョブを積まない（ADR 0541 の材料1は現物の読み違いだった。割れなし。歯を足した） | 採用 (2026-10) |
+| [0543](./0543-inmemory-lone-surrogate-replaced-with-fffd.md) | 孤立サロゲートは、InMemory・Fake も Postgres と同じく U+FFFD に置き換えて保存する（ADR 0423 決定5 の「インメモリは保持」・ADR 0458 の B3 の歯を置き換える） | 採用 (2026-10) |
 | [0544](./0544-llm-wait-state-change-contested-skips-three-paths.md) | LLM を待つ間に元の記憶が contested（と訂正で負けた superseded）になったら、reextract・consolidate・reflect の3経路は書かずに打ち切る（ADR 0406 の負債1・ADR 0420 の部分成功・ADR 0454 の負債1・5 を置き換える。往復は変えない） | 採用 (2026-10) |
 | [0545](./0545-doc-code-drift-sweep-0517.md) | 文書とコードのずれを横に掃く（第6弾）— ADR 0517・0511・0518 の分の文書を、今の main の実装に照らす | 採用 (2026-10) |
 | [0546](./0546-conformance-suite-adds-round31-promises.md) | conformance suite に約束を足す——ADR 0458 の A2・A3・A10・PC6 と、`embed` の重複件数（オーナーの判断が出る前に用意した Draft） | 採用 (2026-10) |
+| [0547](./0547-pg-out-of-range-date-reads-clamp-to-floor.md) | Postgres の読みの経路は、`timestamptz` の下限より前の日付を下限に寄せてから比べる（オーナーの推奨 (d)「日付は0件扱い」を「寄せてから比べる」と読み替えた。ADR 0456 の M2 と ADR 0500 の決めたこと2のうち、読みの口の部分を置き換える） | 採用 (2026-10) |
 | [0548](./0548-bullmq-lock-duration-and-remove-on-complete-default.md) | `createBullmqTickDriver` に `lockDuration` の口と完了ジョブの保持の既定（`removeOnComplete: { count: 1000 }`）を足す — ADR 0440 の決定4、ADR 0449 の決定5・材料1・材料6 を置き換える | 採用 (2026-10) |
 | [0549](./0549-core-fake-cas-rejects-purged-row.md) | core の Fake の CAS（`expectedStatus`）も、purge 済みの行を弾く（InMemory・Postgres と揃える） | 採用 (2026-10) |
 | [0550](./0550-doc-code-drift-sweep-0515.md) | 文書とコードのずれを横に掃く（第7弾）— ADR 0515・0516 からの分の文書を、今の main の実装に照らす | 採用 (2026-10) |
@@ -601,6 +603,9 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0586](./0586-omit-params-cause-chain-and-preread-stack-teeth.md) | `omitParamsFromError` の doc が約束する「`cause` の連鎖にも掛ける」と「`stack` も書き換える」を、偽の例外の歯で縛る | 採用 (2026-10) |
 | [0587](./0587-adr-0577-time-stub-mixed-resend-updatedat.md) | ADR 0577 の歯が通した「再送と新規の混在」と「古い記憶の updatedAt」の変異を塞ぎ、壁時計の歯を固定する | 採用 (2026-10) |
 | [0588](./0588-adr-0578-teeth-holes-controls.md) | ADR 0578 の歯の穴（生き残り4本と「たまたま捕まった」2本）を、対照の歯で塞ぐ | 採用 (2026-10) |
+| [0589](./0589-adr-0552-0553-teeth-holes-controls.md) | ADR 0553 の歯が通した閾値の頭打ち（TR2）と、ADR 0552 の歯が無かった runner の2つの振る舞い（P8・P9）を縛る | 採用 (2026-10) |
+| [0590](./0590-adr-0554-language-mismatch-boundary-teeth.md) | 言語の事後検査の規則の境目（4字・20字・3語・直引用符の語）を、すぐ内側と外側の対で縛る（ADR 0554 の歯の穴） | 採用 (2026-10) |
+| [0591](./0591-adr-0548-real-redis-teeth-holes.md) | ADR 0548 の実 Redis の歯の穴（頭打ちの件数・失敗したジョブの保持・`lockDuration` の期限）を塞ぐ | 採用 (2026-10) |
 | [0592](./0592-adr-0583-0588-merged-pr-recheck-teeth.md) | マージ済みの PR（#1696〜#1699）を確かめ直して見つかった歯の穴を、試験だけで塞ぐ | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

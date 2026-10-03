@@ -11,12 +11,13 @@ import type {
 } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
+import { replaceLoneSurrogates } from "./well-formed-text.js";
 import {
   assertFloat4Vector,
   assertQueryBigint,
   assertQueryJsonWithoutNul,
   assertQueryLabelsWithoutNul,
-  assertQueryTimestamptz,
+  assertQueryDate,
   seqSumOverflowsBigint,
 } from "./query-check.js";
 
@@ -175,12 +176,24 @@ export class InMemoryVectorStore implements VectorStore {
     assertWellFormedFilter(opts.filter, "opts.filter");
     // ADR 0456 H3・ADR 0500: `labels`（`text[]`）・`attributes`（`jsonb`）の NUL は、Postgres ではクエリの時点で拒まれる。
     assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
+    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    opts = {
+      ...opts,
+      filter: {
+        ...opts.filter,
+        ...(opts.filter.labels === undefined
+          ? {}
+          : { labels: opts.filter.labels.map((label) => replaceLoneSurrogates(label)) }),
+      },
+    };
     assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("search", "filter.occurredAfter", opts.filter.occurredAfter);
-    assertQueryTimestamptz("search", "filter.occurredBefore", opts.filter.occurredBefore);
-    assertQueryTimestamptz("search", "filter.validAt", opts.filter.validAt);
-    assertQueryTimestamptz("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
+    assertQueryDate("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
     // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
     assertQueryBigint("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
@@ -427,6 +440,16 @@ export class InMemoryVectorStore implements VectorStore {
     assertWellFormedFilter(opts.filter, "opts.filter");
     // `queries` が空でも、Postgres は往復の前に絞りの NUL を断る（ADR 0500）。
     assertQueryLabelsWithoutNul("searchMany", "filter.labels", opts.filter.labels);
+    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    opts = {
+      ...opts,
+      filter: {
+        ...opts.filter,
+        ...(opts.filter.labels === undefined
+          ? {}
+          : { labels: opts.filter.labels.map((label) => replaceLoneSurrogates(label)) }),
+      },
+    };
     assertQueryJsonWithoutNul("searchMany", "filter.attributes", opts.filter.attributes);
     const result = new Map<string, VectorHit[]>();
     // `queries` が空なら `search()` を一度も呼ばないので、`limit` が不正でも投げない
