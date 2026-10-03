@@ -13,7 +13,7 @@ import type { Omission, RecalledMemory, RecalledScore, StageTrace } from "./reca
 /**
  * `FindCorrectionCandidatesInput.limit` の既定値。
  *
- * 3件という数字自体に実測の根拠は無い——`DEFAULT_CONSOLIDATE_MIN_AFFINITY`/
+ * この値自体に実測の根拠は無い——`DEFAULT_CONSOLIDATE_MIN_AFFINITY`/
  * `DEFAULT_REFLECT_MIN_AFFINITY`（`runtime.ts`）と同じく、Phase 1 の裁量値である。
  * 採用側は候補を人（または上位の判断ロジック）に見せて選ばせる前提であり、
  * 一覧性を保てる小さな数を既定にした。緩めるかどうかは実測してから判断する。
@@ -29,7 +29,7 @@ export interface FindCorrectionCandidatesInput {
   text: string;
   /**
    * 返す候補の上限。**既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}。**
-   * `recall()` 自身の `RecallQuery.limit`（既定 `DEFAULT_RECALL_LIMIT` = 10）とは
+   * `recall()` 自身の `RecallQuery.limit`（既定 `DEFAULT_RECALL_LIMIT`）とは
    * **別の値**——recall がまず広めに候補を集めた後、この口がさらに絞る。
    * 整数でない、または `1` 未満を渡すと `Runtime.findCorrectionCandidates` は
    * `RangeError` を投げる（書き込みはおろか `recall()` すら呼ばない前に落ちる）。

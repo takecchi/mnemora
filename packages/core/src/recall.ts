@@ -319,7 +319,7 @@ export interface BelowThresholdOmission {
  * - `"relation"`（Issue #207/#933 PR2、ADR 0292 決定3-a、ADR 0381）— 段3。多者間の
  *   `contested` 群（`RelationStore.listRelated` で辿った同伴）が群ごとの上限件数
  *   （{@link RecallQuery.relationMaxCount}、省略時は
- *   {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ10）を超えた分
+ *   {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ値）を超えた分
  *   （`docs/recall.md` §2 段3・§8）。次の一手: `RecallQuery.relationMaxCount` を増やす
  *   （ADR 0396。それまでは呼び出し側から動かす口が無く、群そのものを分割する
  *   〔`resolveContestedGroup` で一部を解消する〕以外に手立てが無かった）。`limit` や
@@ -698,6 +698,9 @@ const UnitAssemblyDroppedOmissionSchema = z.object({
  * という読み手の誤解を防ぐ。`packages/core/src/__tests__/schema-type-equals-parity.test.ts`
  * が、この1行が無くても `Equals<z.infer<typeof OmissionSchema>, Omission>` として
  * 同じ検査をテスト側からも固定している（この行が万一巻き戻っても、あちらの歯が拾う）。
+ *
+ * （2026-10-03 訂正）上の本数・箇所数は当時の数え方であり、`Omission` の種類や `satisfies`
+ * の宣言が増減するたびに変わる。今の数は `Omission` の union と各スキーマの宣言を直接数えること。
  */
 export const OmissionSchema = z.discriminatedUnion("kind", [
   StageSkippedOmissionSchema,
@@ -891,7 +894,7 @@ export const DIGEST_BAND_MAX_CHARS = 4000;
 /**
  * 帯に載せる1件の digest の文字数上限。呼び出し側からは変えられない。
  *
- * **⚠ 暫定値である。** 実 digest の長さの実測がリポジトリに2件しか無く
+ * **⚠ 暫定値である。** 実 digest の長さの実測がリポジトリにごくわずかしか無く
  * （examples/chat の記録済みフィクスチャ程度）、この値を弁別できるだけのデータが無い。
  * 実運用の digest 長が測れたら見直すこと——見直す根拠になるのは「多くの digest が
  * この値の前後で切られている（＝短すぎて情報が削れすぎ、または長すぎて予算を圧迫する）」
@@ -1129,8 +1132,11 @@ export interface RecallUsage {
   counter: "heuristic" | "exact";
   /** 返した量の段ごとの内訳（文字数）。 */
   byTier: {
+    /** `recall-runtime.ts` は現状この欄に常に `0` を入れる（`full` tier を返す経路が無い）。 */
     full: number;
+    /** 返した `memories` の digest の合計文字数。連想枠が返した分も含む。 */
     digest: number;
+    /** 目次帯の JSON の文字数（`indexChars` と同じ値）。 */
     index: number;
     /**
      * **`memories`（連想を含む）のうち、連想枠（Issue #200）が返した digest の
@@ -1170,8 +1176,15 @@ export interface RecallUsage {
    * **⚠ ただし、目次帯を外したことだけでは「この値は 1 を超えない」の根拠として足りない。**
    * **この値は 1 を超えうる。超えたときは `budgetExceeded` が `true` になる。**
    *
-   * 超える理由は、段4の切り詰め（強制）と、この値の計測が**別の数え方**をしているから
-   * である:
+   * **分子・分母は予算の申告のしかたで決まる**（`recall-runtime.ts` の `usageShareNumerator` /
+   * `usageShareDenominator`）:
+   * - `maxMemoryTokens` か `promptBudgetTokens` のどちらかが申告されている ⟹ 分母はその小さいほう、
+   *   分子は返した digest を `"\n"` で連結して `tokenCounter.count()` を1回だけ呼んだトークン数。
+   * - どちらも無く `maxMemoryChars` だけ ⟹ 分母は `maxMemoryChars`、分子は返した digest の合計文字数。
+   *   （この場合は強制側と数え方が同じなので、下の食い違いは起きない。）
+   *
+   * 超える理由は、トークン予算のとき、段4の切り詰め（強制）と、この値の計測が
+   * **別の数え方**をしているからである:
    * - 強制側（段4の `fits`/`unitTokens`）は **digest ごとに** `tokenCounter.count()` を呼び、
    *   その合計で判定する（`heuristicTokenCounter` の `Math.ceil` が digest の件数ぶん掛かる）。
    * - この値の分子は **`digests.join("\n")` を1回だけ** `count()` する（連結後の量。
@@ -1574,7 +1587,7 @@ export interface RecalledMemory {
    *
    * **その Memory 自身の `occurredAt` をそのまま引き継ぐ。**`Memory.occurredAt?: Date | null`
    * が `undefined` のときも `null` に揃える（`undefined` を呼び出し側へ渡さない——
-   * 「述べられていない」を `null` として正直に伝える。`memory.ts:95` 以降の
+   * 「述べられていない」を `null` として正直に伝える。`memory.ts` の
    * `occurredAt`/`recordedAt` の区別、[ADR 0145](../../../docs/decisions/0145-valid-from-until-storage.md)
    * を参照）。
    *
@@ -1755,7 +1768,14 @@ export const StageTraceSchema = z.object({
  * （絞れていなければ `null`）。
  */
 export interface RecallQuery {
-  /** クエリの本文。埋め込み（`vector` を渡さないとき）と語彙チャンネルに使う。空文字は `ZodError` になる。 */
+  /**
+   * クエリの本文。埋め込み（`vector` を渡さないとき）と語彙チャンネルに使う。空文字は `ZodError` になる。
+   *
+   * ⚠ **空白だけの文字列（`"  "` など）は `ZodError` にならない**——`recall()` は前後の空白を
+   * `trim()` してから使い（埋め込みに渡すのも `trim()` 後の文字列）、`trim()` 後に空なら
+   * その本文では何も引けないものとして `stage_skipped(candidate_generation, "empty_query_content")`
+   * を積む（`recall-runtime.ts` の `embeddableText`）。
+   */
   text?: string | undefined;
   /**
    * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と
@@ -1916,14 +1936,15 @@ export interface RecallQuery {
    * 群ごとに1件の `over_limit { stage: "relation" }` に積まれる。**owner（元々候補に居た記憶）は
    * 数えない**（`detail.companionsAdded` と同じ規約）。
    *
-   * **省略すると {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（10）——この欄が無かった時点の
-   * 挙動と1バイトも変わらない**（明示で `10` を渡した呼び出しとも同一。歯:
-   * `recall-relation-max-count.test.ts`）。**正の整数、1〜1000。**
+   * **省略すると {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（`recall-runtime.ts` は
+   * `validatedQuery.relationMaxCount ?? DEFAULT_RECALL_ASSOCIATION.maxCount` で引く）——この欄が
+   * 無かった時点の挙動と1バイトも変わらない**（明示でその値を渡した呼び出しとも同一。歯:
+   * `recall-relation-max-count.test.ts`）。**正の整数、上限1000**（`RecallQuerySchema` が検査する）。
    *
-   * **探索の安全弁（群ごとに訪れた数の上限）はこの欄の10倍に連動する**（既定10なら従来どおり
-   * 100件）。連動させないと、100を超える値を指定しても群の探索が100件で止まり、指定した値が
-   * 効かない（常に `countKind: "lower_bound"` になる）。上限を1000にしたのは、安全弁
-   * （＝`listRelated` を呼ぶ回数の上限）を1万件で頭打ちにするため。
+   * **探索の安全弁（群ごとに訪れた数の上限）はこの欄の10倍に連動する**（`recall-runtime.ts` の
+   * `EXPLORATION_VISIT_LIMIT`）。連動させないと、安全弁を超える値を指定しても群の探索がそこで
+   * 止まり、指定した値が効かない（常に `countKind: "lower_bound"` になる）。この欄の上限を
+   * 1000にしたのは、安全弁（＝`listRelated` を呼ぶ回数の上限）を頭打ちにするため。
    *
    * `association.maxCount`（連想枠）とは別の欄——連想枠には効かず、連想枠の上限もこの欄に
    * 連動しない。
@@ -1936,7 +1957,7 @@ export interface RecallQuery {
   /** 段2で残す上限の件数（正の整数）。省略すると {@link DEFAULT_RECALL_LIMIT}。超えた分は `over_limit` になる。 */
   limit?: number | undefined;
   /**
-   * 段1で取り込む候補数の倍率（`k' = round(limit × overFetchFactor)`、既定は
+   * 段1で取り込む候補数の倍率（`k' = max(1, round(limit × overFetchFactor))`、既定は
    * {@link DEFAULT_OVER_FETCH_FACTOR}。`docs/recall.md` §3）。段3.5（連想枠）の過取得
    * （`maxCount × overFetchFactor`）にも同じ値を使う。
    *
@@ -1958,6 +1979,8 @@ export interface RecallQuery {
    * **省略時は {@link DEFAULT_RECALL_CHANNELS}。**⟹ 既定の挙動は ANN 1本のままであり、
    * **この欄を渡さない呼び出しの結果は1バイトも変わらない**（歯:
    * `packages/core/src/__tests__/recall-channels.test.ts`）。
+   * **空配列 `[]` は `ZodError` になる**（`RecallQuerySchema` が `.min(1)` で検査する。
+   * 「省略」と同じ扱いにはならない）。
    *
    * **🔴 `"lexical"` を渡したのに `RuntimeDeps.lexicalStore` が配線されていないとき、
    * `recall()` は投げる**（{@link LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX}）。
@@ -2429,7 +2452,7 @@ export const DEFAULT_RECALL_ASSOCIATION: RecallAssociationQuery = {
 /** RecallQuery.limit の既定値。 */
 export const DEFAULT_RECALL_LIMIT = 10;
 
-/** RecallQuery.overFetchFactor の既定値（docs/recall.md §3: k' = k × 4）。 */
+/** RecallQuery.overFetchFactor の既定値（docs/recall.md §3: k' = k × overFetchFactor）。 */
 export const DEFAULT_OVER_FETCH_FACTOR = 4;
 
 /** `RecallQuery` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallQuery` と揃えてある）。 */
@@ -2692,8 +2715,8 @@ export interface RecallResult {
    * その memoryId を名指しで含まない（Issue #421 /
    * [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）。
    * ただし memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり、
-   * この契約が**個体単位で（外部から）検証できる**のもそこだけである——他の10種の `kind` は
-   * 件数（`count`）だけを持ち、どの記憶を指しているかを言わない
+   * この契約が**個体単位で（外部から）検証できる**のもそこだけである——他の `kind` は
+   * 件数（`count`）だけを持ち（あるいは件数も持たず）、どの記憶を指しているかを言わない
    * （ADR 0203「引き受けた負債」参照）。
    *
    * **Issue #823（ADR 0203 2026-09-26 追記）**: `over_limit(stage:"rescore")` は

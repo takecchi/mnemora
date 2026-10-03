@@ -19,7 +19,7 @@ import type {
  * ⛔ **この口も「相手を選ぶ」ことは一切しない。** `correctedId` は必ず呼び出し側が渡す
  * ——`discovery.candidates[0]` を自動的に採る経路は無い（`correctedId` が
  * `discovery.candidates` に居るかどうかの**照合**にしか候補を使わない）。ADR 0232 が
- * 実測した危険（B群: 訂正してはいけない8件中、棄権率 0/8・深い誤爆 6/8）への応答は
+ * 実測した危険（B群: 訂正してはいけない発話で棄権できず、深い誤爆も起きる。件数は ADR 側が正）への応答は
  * 「候補を機械的に採らない」という、この口が持たない振る舞いによって保たれる。
  */
 
@@ -49,6 +49,10 @@ export interface ApplyCorrectionInput {
    * 「どちらが正しいか」。**省略すると `markContested` だけを呼んで `contested` で止まる**
    * ——`resolveContested` は一度も呼ばれない。渡せば、`markContested` に続けて
    * `resolveContested` まで呼ぶ。
+   *
+   * ⚠ **`{ kind: "supersede", winnerId }` の `winnerId` が `correctedId`・`correctingId` のどちらとも
+   * 合わないときは、`RangeError` を投げる**（`resolveContested` が投げるのと同じ型と文言）。
+   * 書き込みの前に検査するので、`markContested` は呼ばれず何も書かれない（ADR 0446）。
    *
    * ⭐ **`markContested` した直後に `resolution` を渡さず、後から別の
    * `applyCorrection` 呼び出しで `resolution` を渡す、という2段の使い方もできる。**
@@ -82,7 +86,8 @@ export interface ApplyCorrectionInput {
  *
  * - `"awaiting_choice"` — `correctedId` が渡されなかった。**書き込みは1件もしていない。**
  * - `"not_a_candidate"` — `correctedId` は渡されたが、`discovery.candidates` に居なかった。
- *   **書き込みは1件もしていない。**
+ *   **書き込みは1件もしていない。**（照合は文字列の完全一致が基本。完全一致が無くても、大文字小文字を
+ *   無視してちょうど1件の候補に一致し、store の `get` が両者を同じ記憶と言えば、その候補として扱う。ADR 0446）
  * - `"contested"` — `correctedId` は候補に居た。`markContested` を呼んだ
  *   （{@link MarkContestedResult} 自体が `contested`/`ineligible`/`conflict`/`not_attempted`
  *   のいずれかを持つ——`applyCorrection` はそれを握り潰さずそのまま運ぶ）。**`resolution` が
