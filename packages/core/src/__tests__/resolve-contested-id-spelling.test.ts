@@ -176,7 +176,8 @@ describe("resolveContested（2者版）の競合の読み直しは、store が�
     const asStored = (m: Memory): Memory => ({
       ...m,
       id: upper(m.id),
-      contestedWithId: m.contestedWithId === undefined ? undefined : upper(m.contestedWithId),
+      contestedWithId:
+        typeof m.contestedWithId === "string" ? upper(m.contestedWithId) : m.contestedWithId,
     });
     const { runtime, stores } = buildRuntime((s) => ({
       getMany: (async (c: Ctx, ids: string[]) =>
