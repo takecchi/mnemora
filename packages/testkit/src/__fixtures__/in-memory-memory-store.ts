@@ -684,6 +684,16 @@ function normPairSide<T extends { id: MemoryId; supersededById?: MemoryId | unde
   };
 }
 
+/**
+ * ADR 0604: `recall_usages` の鍵 `${tenantId}:${recallId}:${memoryId}` から tenantId を取り出す。
+ * tenantId は `:` を含んでよい不透明な文字列なので、前から切らずに後ろの2つの `:` を外す
+ * （`recallId`・`memoryId` は uuid で `:` を含まない）。Postgres は `tenant_id` の列で比べる。
+ */
+function tenantOfUsageKey(key: string): string {
+  const last = key.lastIndexOf(":");
+  return key.slice(0, key.lastIndexOf(":", last - 1));
+}
+
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly observations = new Map<string, Observation>();
   private readonly memories = new Map<string, Memory>();
@@ -3920,7 +3930,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       // memory_labels
       () => drainKeyedMap(this.memoryLabels),
       // recall_usages（key: `${tenantId}:${recallId}:${memoryId}`）
-      () => drainSet(this.usages, (key) => key.startsWith(`${ctx.tenantId}:`)),
+      // ADR 0604: 前方一致ではなく、鍵から取り出した tenantId の完全一致（`acme` を消しても `acme:eu` は残す）。
+      () => drainSet(this.usages, (key) => tenantOfUsageKey(key) === ctx.tenantId),
       // memory_events
       () => drainArray(this.events, (event) => event.tenantId),
       // memory_relations（Issue #207/#933 PR2 の `relations`。`InMemoryRelationStore` と共有）
