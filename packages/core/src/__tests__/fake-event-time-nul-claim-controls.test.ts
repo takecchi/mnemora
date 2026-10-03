@@ -160,6 +160,75 @@ describe("createMemory の extractorVersion の NUL は素の Error（識別子�
     const created = await memoryStore.createMemory(ctx, memory({ extractorVersion: "v1" }));
     expect(created.extractorVersion).toBe("v1");
   });
+
+  it("陽性対照（ADR 0596）: 記号を含む extractorVersion（v1.2-rc_3）は断られずに通り、そのまま保存される", async () => {
+    // NUL だけを断る、という約束の陽性対照。英数字以外を断る検査を足すと、この it が落ちる。
+    const { memoryStore } = createFakeRuntimeStores();
+    const created = await memoryStore.createMemory(ctx, memory({ extractorVersion: "v1.2-rc_3" }));
+    expect(created.extractorVersion).toBe("v1.2-rc_3");
+    expect((await memoryStore.get(ctx, created.id))?.extractorVersion).toBe("v1.2-rc_3");
+  });
+});
+
+/**
+ * ADR 0596: `createdAt` は作ったときのまま。`archiveDecayed` の後も `purgeMemory` の後も書き換わらない。
+ * **明文の約束はない**が、作成時刻が後から書き換わらないことを当然の不変条件として縛る、とクローンが判断した
+ * （supersede の `createdAt` を同じ判断で縛った ADR 0592 と同じ線）。Fake は `Date` だけを固定して、作成と操作の間で壁時計を進める。
+ */
+describe("createdAt は archive・purge の後も作成時のまま（ADR 0596）", () => {
+  it("archiveDecayed の後も、createdAt は作成時の値（updatedAt は進む）", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { memoryStore } = createFakeRuntimeStores();
+    const now = new Date("2031-01-01T00:00:00.000Z");
+    const createdAt = new Date("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(createdAt);
+    const created = await memoryStore.createMemory(
+      ctx,
+      memory({ decayFloorAt: new Date(now.getTime() - 1_000) }),
+    );
+    expect(created.createdAt).toEqual(createdAt);
+
+    vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
+    const result = await memoryStore.archiveDecayed!(ctx, { now, limit: 10 });
+
+    expect(result.archived.map((a) => a.memoryId)).toEqual([created.id]);
+    const stored = await memoryStore.get(ctx, created.id);
+    expect(stored?.status).toBe("archived");
+    expect(stored!.updatedAt).toEqual(new Date("2030-01-02T00:00:00.000Z"));
+    expect(stored!.createdAt).toEqual(createdAt);
+  });
+
+  it("purgeMemory の後も、createdAt は作成時の値（purgedAt は event.at、updatedAt は壁時計）", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { memoryStore } = createFakeRuntimeStores();
+    const createdAt = new Date("2030-01-01T00:00:00.000Z");
+    vi.setSystemTime(createdAt);
+    const created = await memoryStore.createMemory(ctx, memory({ status: "forgotten" }));
+    expect(created.createdAt).toEqual(createdAt);
+    const at = new Date("2020-01-01T00:00:00.000Z");
+    const event: NewMemoryEvent = {
+      tenantId: "tenant-1",
+      memoryId: created.id,
+      kind: "purged",
+      at,
+      actor: { type: "system" },
+      digestSnapshot: "要旨",
+      meta: {},
+    };
+
+    vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
+    await memoryStore.purgeMemory!(
+      ctx,
+      created.id,
+      { content: "[purged]", digest: "[purged]" },
+      event,
+    );
+
+    const stored = await memoryStore.get(ctx, created.id);
+    expect(stored?.purgedAt).toEqual(at);
+    expect(stored!.updatedAt).toEqual(new Date("2030-01-02T00:00:00.000Z"));
+    expect(stored!.createdAt).toEqual(createdAt);
+  });
 });
 
 describe("listActiveClaimPredicates の並び（新しい順、同着は predicate の順）", () => {

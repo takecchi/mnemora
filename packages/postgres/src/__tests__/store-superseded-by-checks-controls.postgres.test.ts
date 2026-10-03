@@ -257,6 +257,30 @@ for (const [kitName, makeKit] of KITS) {
       );
     });
 
+    it("位置（ADR 0574 の決定の3・ADR 0596）: 存在しない2件・3件が互いを指して輪になる循環は、not found ではなく循環の RangeError", async () => {
+      const kit = await makeKit();
+      await expectCycle(kit, () =>
+        resolvePair(
+          kit,
+          { id: ABSENT },
+          { id: ABSENT2 },
+          { status: "superseded", by: ABSENT2 },
+          { status: "superseded", by: ABSENT },
+        ),
+      );
+      await expectCycle(kit, () =>
+        resolveGroup(
+          kit,
+          [{ id: ABSENT }, { id: ABSENT2 }, { id: ABSENT3 }],
+          [
+            { status: "active" },
+            { status: "superseded", by: ABSENT3 },
+            { status: "superseded", by: ABSENT2 },
+          ],
+        ),
+      );
+    });
+
     // --- ADR 0584（ADR 0574 の歯の穴）---------------------------------------------------------
     const thrownOf = async (run: () => Promise<unknown>): Promise<unknown> => {
       let thrown: unknown;
