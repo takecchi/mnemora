@@ -1,10 +1,17 @@
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import OpenAI from "openai";
 // `openai-latest` は devDependency のエイリアス（`package.json` の
 // `"openai-latest": "npm:openai@7.23.0"`。下の docstring 参照）。
 import OpenAILatest from "openai-latest";
 import type { Ctx } from "@mnemora/core";
-import type { OpenAIChatClient, OpenAIEmbeddingsClient } from "../client-types.js";
+import type {
+  OpenAIChatClient,
+  OpenAIChatCompletionCreateParams,
+  OpenAIEmbeddingsClient,
+} from "../client-types.js";
 import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
@@ -13,7 +20,7 @@ import { OpenAILLMProvider } from "../llm-provider.js";
  *
  * `OpenAILLMProviderOptions.client` / `OpenAIEmbeddingProviderOptions.client` の型は、
  * `openai` パッケージのクラスを名指ししない自前の構造型（`client-types.ts`）である。
- * この歯は2つを縛る:
+ * この歯は3つを縛る（3つ目は下の `describe("公開する .d.ts に …")`）:
  *
  * 1. **型**: `@mnemora/openai` が依存に固定している版（`openai@7.10.0`、通常の
  *    `import OpenAI from "openai"`）と、利用者が入れうる別の版（devDependency に
@@ -25,6 +32,11 @@ import { OpenAILLMProvider } from "../llm-provider.js";
  * 2. **実際の呼び出し**: 本物の SDK client（`fetch` を差し替えたもの）を provider に
  *    渡し、実際に送られる URL・method・JSON body が変わっていないことを、固定した版・
  *    別の版の両方で確かめる（下の `describe("実際に送られる HTTP …")`）。
+ * 3. **公開 `.d.ts`**: 公開する `.d.ts` に `openai` パッケージの import が出ないこと
+ *    （`import ... from "openai"`・`import("openai")`・`/// <reference types="openai" />`）。
+ *    ⚠ CI は `test` を `build` より前に走らせる（`.github/workflows/ci.yml`）ので `dist` は
+ *    まだ無い。そのためこの歯は `dist` を読まず、`tsconfig.build.json` と同じ設定で
+ *    TypeScript の API が `.d.ts` をメモリへ出したものを読む（`dist` が無くても黙って通らない）。
  *
  * ⚠ **ネットワークは叩かない**——`fetch` を差し替えて呼び出しを捕まえるだけであり、
  * 本物の OpenAI API への到達性は確かめていない（`live.openai.test.ts` の役目）。
@@ -207,4 +219,160 @@ describe("実際に送られる HTTP は、client の型を切り離す前と変
     expect(vector?.[0]).toBeCloseTo(0.4, 5);
     expect(vector?.[1]).toBeCloseTo(0.5, 5);
   });
+});
+
+/** `create` に渡された引数をそのまま積む偽 client（`temperature` の有無を、SDK の
+ * 直列化を挟まずに見る）。 */
+function fakeChatClient(): {
+  client: OpenAIChatClient;
+  bodies: OpenAIChatCompletionCreateParams[];
+} {
+  const bodies: OpenAIChatCompletionCreateParams[] = [];
+  const client: OpenAIChatClient = {
+    chat: {
+      completions: {
+        async create(params) {
+          bodies.push(params);
+          return { choices: [{ message: { content: "ok" } }] };
+        },
+      },
+    },
+  };
+  return { client, bodies };
+}
+
+describe("temperature は指定したときだけ、その値で送られる（call-shape）", () => {
+  it("temperature: 0.2 で作って complete を呼ぶと、client が受け取る body に temperature: 0.2 がある", async () => {
+    const { client, bodies } = fakeChatClient();
+    const provider = new OpenAILLMProvider({ model: "gpt-4o-mini", client, temperature: 0.2 });
+
+    await provider.complete(ctx, { messages: [{ role: "user", content: "hi" }] });
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.temperature).toBe(0.2);
+  });
+
+  it("temperature を指定しなければ、body に temperature の鍵そのものが無い（undefined も既定値も入れない）", async () => {
+    const { client, bodies } = fakeChatClient();
+    const provider = new OpenAILLMProvider({ model: "gpt-4o-mini", client });
+
+    await provider.complete(ctx, { messages: [{ role: "user", content: "hi" }] });
+
+    expect(bodies).toHaveLength(1);
+    const body = bodies[0];
+    expect(body).toBeDefined();
+    expect("temperature" in (body ?? {})).toBe(false);
+  });
+});
+
+/**
+ * 公開する `.d.ts` に SDK の import が出ないこと。
+ *
+ * ⚠ **`dist` を読まない。** CI の `typecheck / lint / test / build` ジョブは `test` を
+ * `build` より前に走らせる（`.github/workflows/ci.yml`）ので、`dist` はまだ無い。`dist` を
+ * 読む形にすると、build 前は「読めるファイルが0本」で黙って通る穴になる。代わりに
+ * `tsconfig.build.json` と同じ設定（テストを除く `src`、`declaration`）で TypeScript の API が
+ * `.d.ts` をメモリへ出したものを読み、**1本も出なければ落とす**。`@mnemora/core` だけは
+ * `dist` が無いので `core/src` を指させる（`import "@mnemora/core"` の綴りは変わらない）。
+ */
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const SDK_SPECIFIER = String.raw`openai(?:-latest)?(?:/[^"']*)?`;
+/** 直前が引用符なので、`"@mnemora/openai"` や `"./openai.js"` には当たらない。 */
+const SDK_REFERENCE_PATTERNS: readonly RegExp[] = [
+  new RegExp(String.raw`\bfrom\s*["']${SDK_SPECIFIER}["']`),
+  new RegExp(String.raw`\bimport\s*["']${SDK_SPECIFIER}["']`),
+  new RegExp(String.raw`\bimport\s*\(\s*["']${SDK_SPECIFIER}["']\s*\)`),
+  new RegExp(String.raw`\brequire\s*\(\s*["']${SDK_SPECIFIER}["']\s*\)`),
+  new RegExp(String.raw`///\s*<reference\s+(?:types|path)\s*=\s*["']${SDK_SPECIFIER}["']`),
+];
+
+function findSdkReferences(declarationText: string): string[] {
+  return declarationText
+    .split("\n")
+    .filter((line) => SDK_REFERENCE_PATTERNS.some((pattern) => pattern.test(line)));
+}
+
+function emitPublicDeclarations(): Map<string, string> {
+  const configPath = join(PACKAGE_ROOT, "tsconfig.build.json");
+  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (config.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
+  }
+  const parsed = ts.parseJsonConfigFileContent(
+    config.config,
+    ts.sys,
+    PACKAGE_ROOT,
+    undefined,
+    configPath,
+  );
+  const srcRoot = join(PACKAGE_ROOT, "src") + sep;
+  const program = ts.createProgram({
+    rootNames: parsed.fileNames,
+    options: {
+      ...parsed.options,
+      noEmit: false,
+      declaration: true,
+      emitDeclarationOnly: true,
+      rootDir: undefined,
+      outDir: join(PACKAGE_ROOT, "dist-in-memory"),
+      baseUrl: PACKAGE_ROOT,
+      paths: { "@mnemora/core": [join(PACKAGE_ROOT, "..", "core", "src", "index.ts")] },
+    },
+  });
+  const emitted = new Map<string, string>();
+  program.emit(undefined, (fileName, text, _bom, _onError, sourceFiles) => {
+    const source = sourceFiles?.[0]?.fileName;
+    if (source !== undefined && resolve(source).startsWith(srcRoot) && fileName.endsWith(".d.ts")) {
+      emitted.set(resolve(source).slice(srcRoot.length).replace(/\.ts$/, ".d.ts"), text);
+    }
+  });
+  return emitted;
+}
+
+describe("公開する .d.ts に openai パッケージの import が出ない（grep）", () => {
+  it("探り棒: SDK の import の綴りには当たり、自パッケージ名・相対パスには当たらない", () => {
+    const shouldMatch = [
+      'import type OpenAI from "openai";',
+      "export type { ChatCompletion } from 'openai/resources/chat/completions';",
+      'import "openai";',
+      'type Leaked = import("openai").OpenAI;',
+      'type Leaked = typeof import("openai/resources");',
+      '/// <reference types="openai" />',
+      'import OpenAI = require("openai");',
+    ];
+    const shouldNotMatch = [
+      'import type { Ctx } from "@mnemora/core";',
+      'import type { X } from "@mnemora/openai";',
+      'type X = import("@mnemora/openai").OpenAILLMProvider;',
+      '/// <reference types="@mnemora/openai" />',
+      'export * from "./client-types.js";',
+      'export { OpenAILLMProvider } from "./llm-provider.js";',
+      'import type { X } from "./openai.js";',
+      'import type { X } from "openai-provider";',
+    ];
+    for (const line of shouldMatch) {
+      expect(findSdkReferences(line), line).toEqual([line]);
+    }
+    for (const line of shouldNotMatch) {
+      expect(findSdkReferences(line), line).toEqual([]);
+    }
+  });
+
+  it("build の設定で出した .d.ts 全部に、openai の import・import()型・reference が無い", () => {
+    const emitted = emitPublicDeclarations();
+
+    // 1本も出ていない・主要なファイルが無いときは、「無かった」を根拠にしない。
+    expect([...emitted.keys()]).toEqual(
+      expect.arrayContaining(["index.d.ts", "client-types.d.ts", "llm-provider.d.ts"]),
+    );
+    expect(emitted.get("client-types.d.ts")).toContain("OpenAIChatClient");
+
+    const found: string[] = [];
+    for (const [file, text] of emitted) {
+      for (const line of findSdkReferences(text)) {
+        found.push(`${file}: ${line.trim()}`);
+      }
+    }
+    expect(found).toEqual([]);
+  }, 120_000);
 });
