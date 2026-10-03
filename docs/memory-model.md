@@ -171,8 +171,8 @@ core の schema は `Date` であることしか検査しない（JS の `Date` 
 前を表せず、`occurred_at`・`valid_from`・`valid_until` にそれより前の日時を渡すと、書き込みが例外
 （`timestamp out of range`）になり `observe()` は reject する。上側は Postgres のほうが広い（西暦294276年まで）
 ので分かれない。`@mnemora/testkit` の fixture は、この書き込みの欄（`occurredAt`・`validFrom`・`validUntil`）では JS の `Date` を
-そのまま受け入れ、同じ値で返す（読みの口の日時の条件・`opts.now`・`opts.at` は、ADR 0500 から下限より前を `RangeError` で断る）。
-保証するのは、上の日時以降の値だけである。クローン miku の判断で、範囲を契約にして拒む案・端に丸める案は採らず、
+そのまま受け入れ、同じ値で返す（行に書く日時の `opts.now`・`opts.at` は、ADR 0500 から下限より前を `RangeError` で断る。⚠ 読みの口の日時の条件は、ADR 0547 から断らず、答えは意味どおりになる）。
+**読みの口の日時の条件**（`EventStore.list` の `since`・`until`、検索と `aggregateScope` の日時の絞り込み、claim key の `validFrom`・`validUntil`、`OutboxStore.claimBatch` の `now`）が下限より前のときは、`@mnemora/postgres` が下限へ寄せてから比べるので例外にならない（[ADR 0547](./decisions/0547-pg-out-of-range-date-reads-clamp-to-floor.md)。`since`・`occurredAfter` は全件、`until`・`occurredBefore` は0件に近い答えになる）。保証するのは、上の日時以降の値だけである。クローン miku の判断で、範囲を契約にして拒む案・端に丸める案は採らず、
 今の振る舞いを記録した（選び直す余地は Issue に残してある）。書き分けは `Observation.occurredAt` の TSDoc。
 
 **⚠ 2026-09-27 追記（[Issue #1042](https://github.com/takecchi/mnemora/issues/1042)）: 逆転した区間（`valid_from > valid_until`）も拒まない。**

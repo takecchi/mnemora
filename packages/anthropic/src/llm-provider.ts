@@ -71,6 +71,16 @@ export interface AnthropicLLMProviderOptions {
    *
    * ⚠ ADR 0498: **渡すなら正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら
    * `RangeError`。message に値が入る）。
+   *
+   * ⚠ **ADR 0552（ADR 0445 BJ-1）: 検査するのは「正の安全な整数」だけで、上限は見ない。** 21334 以上でも構築は通る。
+   * ただし `client` が `timeout` を持たないと（`client` を省略したときを含む）、`complete`・`completeStructured` を
+   * 呼んだ時点で SDK が**送信前に**素の `AnthropicError`（`Streaming is required for operations that may take longer
+   * than 10 minutes…`。`kind` も `cause` も付かない）を投げる。**21333 までは通り、21334 から落ちる。**
+   * 境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`（境目は 128000/6 = 21333.33）で、
+   * `@anthropic-ai/sdk` 0.124.0 の `client.js` の `calculateNonstreamingTimeout`・`resources/messages/messages.js` の
+   * `create` にある。**SDK の仕様であり mnemora の契約ではない**（SDK の版が上がれば変わりうる）。
+   * 避けるには、`timeout` を持つ `Anthropic` を自分で作って `client` へ渡す（{@link AnthropicLLMProviderOptions.client}）。
+   * 【実測】0.124.0・`fetch` を stub にして、21333 は送信され、21334 は送信が0回で落ちた。
    */
   maxTokens?: number | undefined;
   /**
@@ -82,6 +92,13 @@ export interface AnthropicLLMProviderOptions {
    * {@link AnthropicMessagesClient} である（以前は `Pick<Anthropic, "messages">` だった）。
    * **`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している
    * 版と揃える必要が無い**（packages/anthropic/README.md 参照）。
+   *
+   * ⚠ **ADR 0552: `timeout` を持たない `client` では、`maxTokens` が 21334 以上で SDK が送信前に落ちる**
+   * （{@link AnthropicLLMProviderOptions.maxTokens} の注）。SDK が見るのはコンストラクタに渡した `timeout`
+   * （`new Anthropic({ apiKey, timeout })`）の有無で、`client` を省略した既定のクライアントは持たない
+   * 【実測 0.124.0】。`timeout` を持たない `client` を自分で渡したときも同じ分岐に入る（SDK のコードを読んだ範囲。
+   * 実測していない）。mnemora は `complete`・`completeStructured` で `{ signal }` だけを request options に渡し、
+   * 呼び出しごとの `timeout` は渡さない。
    */
   client?: AnthropicMessagesClient | undefined;
 }
@@ -247,6 +264,10 @@ export class AnthropicLLMProvider implements LLMProvider {
    * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
    * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
    * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
+   *
+   * ⚠ **ADR 0552（ADR 0445 BJ-1）: 例外を包まない。** `maxTokens` が 21334 以上で `client` が `timeout` を持たないと、
+   * SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を投げ、そのまま伝わる。
+   * 境目と避け方は {@link AnthropicLLMProviderOptions.maxTokens}。
    */
   async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
     const { system, messages } = toAnthropicRequest(req);
@@ -292,6 +313,10 @@ export class AnthropicLLMProvider implements LLMProvider {
    * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
    * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
    * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
+   *
+   * ⚠ **ADR 0552（ADR 0445 BJ-1）: 送る前に投げるものがもう1つある。** `maxTokens` が 21334 以上で `client` が `timeout` を
+   * 持たないと、`complete` と同じく SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を
+   * 投げ、そのまま伝わる。境目と避け方は {@link AnthropicLLMProviderOptions.maxTokens}。
    */
   async completeStructured<T>(
     _ctx: Ctx,

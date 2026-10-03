@@ -1309,6 +1309,7 @@ export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
  * - `"status_changed_before_write"` — 書き込みの直前（または書き込みのトランザクション内）の見直しで、すでに
  *   `superseded` になっていた（`observedStatus` はそのとき見えた値）。この呼び出し全体が
  *   `outcome: 'aborted_source_status_changed'` で打ち切られる（ADR 0420）。他の eligible は `"eligible"` のまま。
+ *   ⚠ **2026-10-02 変更（ADR 0544）: `contested` になっていた場合も同じ**（`observedStatus: 'contested'`）。
  *
  * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
  * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も材料にして
@@ -2949,7 +2950,11 @@ export interface Runtime {
    *   LLM は呼んだ（この場合 `extraction: "skipped"` でも LLM の呼び出しは起きている）。
    * - `abortIfForgotten` を実装しない adapter（testkit の `InMemoryMemoryStore`・core の fake）では、
    *   読み直しだけが保護になる（`consolidate`/`reflect` と同じ。読み直しと書き込みの間の窓は残る）。
-   * - 見直すのは `forgotten` だけ。待つ間に `contested` になった記憶は見直さない（ADR 0406「引き受けた負債」1）。
+   * - ⚠ **2026-10-02 変更（[ADR 0544](../../../docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)）:
+   *   見直すのは `forgotten` だけではなくなった。** LLM の前の「退けた記憶」の門と同じ判定（`forgotten`・`contested`・
+   *   訂正の解決で負けた `superseded`）を、読み直した記憶にもう一度当てる。待つ間にそうなった記憶が1件でも在れば、
+   *   同じ形で打ち切る（`skipped` の `status` は読み直した実際の値）。`archived`・機構で置き換えた `superseded` は
+   *   LLM の前の門も通すので、止めない。書き込みと同一トランザクションの見直し（`abortIfForgotten`）は `forgotten` のまま。
    * 歯: `packages/postgres/src/__tests__/reextract-forget-race.postgres.test.ts`・
    * `reextract-source-forgotten-for-update-race.postgres.test.ts`。
    *
@@ -3953,8 +3958,13 @@ export interface Runtime {
    *    上の「`superseded` へ動かした」場合は、もう部分成功にならない。eligible の1件でも `superseded` になっていた
    *    ときと、eligible の**すべて**が `active` でなくなっていた（CAS がすべて破れた）ときは、統合先を書かず
    *    `outcome: 'aborted_source_status_changed'` で打ち切る（手順5の直後の読み直しと、
-   *    `supersedeWithNewMemories?` の `opts.abortIfSuperseded`/`opts.abortIfAllConflicted`）。部分成功が残るのは、
-   *    `superseded` 以外の理由（`contested`・`archived` など）で**一部だけ**が破れたときである。
+   *    `supersedeWithNewMemories?` の `opts.abortIfSuperseded`/`opts.abortIfAllConflicted`）。
+   *    ⚠ **2026-10-02 変更（[ADR 0544](../../../docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)）:
+   *    手順5の直後の読み直しは `contested` も見る**（1件でもあれば `superseded` と同じく `aborted_source_status_changed`。
+   *    `sources` は `status_changed_concurrently`・`observedStatus: 'contested'`）。以下の「部分成功が残る」から `contested` は外れた
+   *    （`reflect` の読み直しも同じ）。書き込みと同一トランザクションの見直しは、`contested` についてはまだ無い（ADR 0544 負債1）。
+   *    部分成功が残るのは、
+   *    `superseded` 以外の理由（`archived` など。`contested` は読み直しより後に起きた分だけ）で**一部だけ**が破れたときである。
    *    ⚠ `supersedeWithNewMemories?` を実装しない adapter の2段の経路では、統合先を書いた後で CAS するので、
    *    手順5の直後の読み直しより後に全件が破れた場合は打ち切れない（統合先は残る。ADR 0420 の「引き受けた負債」）。
    * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
@@ -5408,24 +5418,37 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 保護になる。実装する adapter（`@mnemora/postgres`）は、下の書き込み自身が同一
     // トランザクションの `SELECT … FOR UPDATE` で、この読み直しと書き込みの間の窓も閉じる。
     const knownMemoryIds = existingAllVersions.map((memory) => memory.id);
-    const abortedSourceForgotten = (forgottenIds: readonly MemoryId[]): ReextractResult => ({
+    const abortedSourceForgotten = (
+      stopped: ReadonlyArray<{ id: MemoryId; status: Exclude<MemoryStatus, "active"> }>,
+    ): ReextractResult => ({
       observationId,
       memoryIds: [],
       supersededMemoryIds: [],
-      skipped: forgottenIds.map((memoryId) => ({
+      skipped: stopped.map(({ id, status }) => ({
         kind: "status_not_active" as const,
-        memoryId,
-        status: "forgotten" as const,
+        memoryId: id,
+        status,
       })),
       atomicity: "not_attempted",
       extraction: "skipped",
       extractionFailure: null,
     });
+    const forgottenStopped = (ids: readonly MemoryId[]) =>
+      ids.map((id) => ({ id, status: "forgotten" as const }));
     if (knownMemoryIds.length > 0) {
       const rechecked = await deps.memoryStore.getMany(ctx, knownMemoryIds);
-      const forgottenNow = rechecked.filter((memory) => memory.status === "forgotten");
-      if (forgottenNow.length > 0) {
-        return abortedSourceForgotten(forgottenNow.map((memory) => memory.id));
+      // ADR 0544: 見るのは forgotten だけではない。LLM の前の門（上の `listWithdrawnAmong`）が退ける
+      // 状態——forgotten・contested・訂正の解決で負けた superseded——に、待つ間に変わったものも
+      // 「退けた記憶」として打ち切る。archived・機構で置き換えた superseded は LLM の前の門も通すので、
+      // ここでも止めない（待つ前と同じ門を、待った後にもう一度当てる）。
+      const withdrawnNow = await listWithdrawnAmong(ctx, rechecked);
+      if (withdrawnNow.length > 0) {
+        return abortedSourceForgotten(
+          withdrawnNow.map((memory) => ({
+            id: memory.id,
+            status: memory.status as Exclude<MemoryStatus, "active">,
+          })),
+        );
       }
     }
 
@@ -5537,7 +5560,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
           // 作成も supersede も rollback された——書き込みを試みていないのと区別が付かない。
-          return abortedSourceForgotten(error.forgottenIds);
+          return abortedSourceForgotten(forgottenStopped(error.forgottenIds));
         }
         throw error;
       }
@@ -5600,11 +5623,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         });
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
-          if (memoryIds.length === 0) return abortedSourceForgotten(error.forgottenIds);
+          if (memoryIds.length === 0)
+            return abortedSourceForgotten(forgottenStopped(error.forgottenIds));
           // 2件目以降で打ち切られた（この経路は1件ずつ書くため、1件目は既にコミット済み）。
           // 書いた分は隠さず返し、既存の supersede には進まない。
           return {
-            ...abortedSourceForgotten(error.forgottenIds),
+            ...abortedSourceForgotten(forgottenStopped(error.forgottenIds)),
             memoryIds,
             atomicity: "store_unsupported",
             extraction: "ok",
@@ -5997,6 +6021,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const memory = await deps.memoryStore.get(ctx, memoryId);
     if (!memory) {
       throw new Error(`runtime.tick: embed job references missing memory: ${memoryId}`);
+    }
+    // ADR 0541: forget した記憶（`forgotten`）・purge 済みの記憶（`purgedAt` あり）は、本文（purge 後は墓標）を外部の
+    // embedding provider に送らない。forget の前に積まれた埋め込みジョブが後から走っても、provider を呼ばず、ベクトルも
+    // 書かず、`embeddingStatus` も触らずに返す（`tick` が `complete` する。`failed` にしないので、再試行で回り続けない）。
+    // 判定は上の `get` で読んだ状態による。読んでから provider を呼ぶまでの間に forget されると、本文は送られる（塞げない窓。
+    // ADR 0541 の「残る窓」）。`active`・`archived`・`superseded`・`contested` は今までどおり埋め込む。
+    if (isWithdrawnSeed(memory)) {
+      return;
     }
     try {
       const [vector] = await runAbortable(signal, (raced) =>
@@ -8336,7 +8368,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const changedBeforeConsolidateWrite = new Map<MemoryId, MemoryStatus>();
     for (const id of eligibleIds) {
       const status = recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status;
-      if (status === "superseded") {
+      // ADR 0544: contested も superseded と同じに見る（待つ間に訂正の対に入った本文から統合先を作らない）。
+      if (status === "superseded" || status === "contested") {
         changedBeforeConsolidateWrite.set(id, status);
       }
     }
@@ -8945,7 +8978,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const supersededBeforeReflectWrite = new Map<MemoryId, MemoryStatus>();
     for (const id of eligibleIds) {
       const status = recheckedByIdBeforeReflectWrite.get(lookupKey(id))?.status;
-      if (status === "superseded") {
+      // ADR 0544: contested も superseded と同じに見る。
+      if (status === "superseded" || status === "contested") {
         supersededBeforeReflectWrite.set(id, status);
       }
     }

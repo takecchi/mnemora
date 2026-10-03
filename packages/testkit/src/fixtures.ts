@@ -100,9 +100,12 @@
 //   `InMemoryVectorStore.search`・`InMemoryLexicalStore.search` の filter の日時と `decayFloorSeqAfter`（Postgres はクエリの
 //   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
 // - 紀元前4714年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
-//   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——上の読みの口の日時の条件・`opts.now`・`opts.at`（`EventStore.list`、
-//   `OutboxStore.complete`/`fail`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。`purgeExpiredEvents`・`purgeExpiredRecalls`・
-//   `purgeCompletedJobs` の `olderThan` は、Postgres が下限より前を「0件」で返すので掛けない。
+//   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——行に**書く**日時の `opts.now`・`opts.at`（`OutboxStore.complete`/`fail`、
+//   `archiveDecayed`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。⚠ **ADR 0547 で、読みの口の条件には掛けなくなった**:
+//   `EventStore.list` の `since`・`until`、`VectorStore`・`LexicalStore` の検索、`aggregateScope`、`findActiveByClaimKey`・
+//   `findContestedByClaimKey` の日時は、Postgres が下限へ寄せてから比べるので、下限より前でも断らず、意味どおりに答える
+//   （`since` 系は全件、`until` 系は0件）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
+//   Postgres が下限より前を「0件」で返すので掛けない。
 // - `reinforce({ addOwnSubjectSeq: true })` の `nowSeq + S_x`（と床）が 2^63 以上 → `reinforce: decayBaseSeq + own subject seq must fit in a
 //   Postgres bigint`（Postgres は `22003`。ADR 0500）。
 // - `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製（ADR 0500）。
@@ -141,7 +144,8 @@
 //   const relationStore = new InMemoryRelationStore(memoryStore, memoryStore.relations);
 //
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
-// 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4714年より前の日時のうち、行に日時を書く口（`createMemory` の
+// `jsonb` 列の欄（`payload`・`attributes`・`provenance`）に入る孤立サロゲート（Postgres は拒み、fixture は保持する。`MemoryStore.createMemory` の doc、#1075。
+// `text` 列の欄の孤立サロゲートは、ADR 0543 で fixture も Postgres と同じく U+FFFD に置き換えるようにした）、紀元前4714年より前の日時のうち、行に日時を書く口（`createMemory` の
 // `occurredAt` など。読みの口・`opts.now` は ADR 0500 で揃えた。#1041）、
 // 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
 // 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。

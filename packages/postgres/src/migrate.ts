@@ -538,6 +538,10 @@ async function ensureMigrationsTable(client: PoolClient, schema?: string): Promi
  * 実際に本 PR（`0002_outbox_claim_lease_index.sql` の追加）で6本が転んだ。
  * この関数を唯一の真実の源にして、テスト側は `listMigrationFiles(DEFAULT_MIGRATIONS_DIR)`
  * から期待値を導出する。
+ *
+ * **ADR 0552: `.sql` が1本も無ければ空配列を返す**（例外にしない）。`migrationsDir` を読めないとき
+ * （存在しない・ディレクトリでない・権限が無い）は、`readdirSync` の例外がそのまま伝わる。
+ * `runMigrations` が空のときに警告して成功する扱いは、その TSDoc を見ること。
  */
 export function listMigrationFiles(migrationsDir: string): string[] {
   return readdirSync(migrationsDir)
@@ -653,6 +657,13 @@ function describeLedgerDrift(
  * `_mnemora_migrations` に記録されないことを検査するため）。省略時は本番の
  * `migrations/` ディレクトリを使う。
  *
+ * ⚠ **ADR 0552（ADR 0448-2）: `migrationsDir` に `.sql` が1本も無くても、失敗しない。**
+ * `console.warn`（`migrationsDir に .sql が1本も無い。何も適用しない。`）を出して `{ applied: [] }` を返す
+ * （止めない。警告を止める・失敗にする `strict` のようなオプションは無い）。指定違い・パッケージの `migrations/` の
+ * 欠けを疑うこと。専用スキーマ（`options.schema`）を指定していると、スキーマと拡張はこの時点で作られる。
+ * CLI（`mnemora-postgres-migrate`）は同梱の `migrations/` しか使わないので、CLI からは空のフォルダに届かない。
+ * 読めない（存在しない等）ときは別で、DB に触れる前に落ちる（{@link listMigrationFiles} の下の注）。
+ *
  * ## 排他（段階2・ADR 0017）
  *
  * **`handOverLegacyMigrationsTable` の前から、最後のマイグレーションの COMMIT まで**を
@@ -673,6 +684,17 @@ function describeLedgerDrift(
  * ロックを待つために敷く `lock_timeout` は、取った直後に `RESET` して本体の DDL には効かせない
  * （共有の拡張ロックを待つ間だけ敷き直す、{@link acquireExtensionLock}）。
  * 使う接続は1本である。
+ *
+ * ⚠ **ADR 0552（ADR 0448-3）: mnemora は `statement_timeout` を設定しない**（CLI にも、この関数にも無い）。
+ * runner が触るセッション設定は `lock_timeout` だけで、取った直後に `RESET` する。**利用者側の設定**
+ * （`ALTER ROLE … SET`・`ALTER DATABASE … SET`・`PGOPTIONS`・接続文字列の `options`）の `statement_timeout` などは、
+ * 本体の DDL（`BEGIN` の中）にそのまま効く。**runner はそれを上書きしない。** `statement_timeout` が短いと、
+ * 時間のかかる DDL（大きい表への `CREATE INDEX` など）が毎回同じところで
+ * `migration <file> failed: canceling statement due to statement timeout` になる（そのファイルは巻き戻り、
+ * 台帳に載らない。文言は原因が設定であることを言わない）。`ALTER ROLE … SET lock_timeout` も同じで、`RESET` はその値へ戻る。
+ * migrate を流す接続だけ無効にするなら、接続文字列の `options`（`?options=-c%20statement_timeout%3D0`）か
+ * `PGOPTIONS="-c statement_timeout=0"` を使う。測った範囲と手順は `packages/postgres/README.md` の
+ * 「接続・ロール・DB の `statement_timeout` などは、migration の本体にも効く」節。
  *
  * **呼び出し側は何も変える必要が無い。**`runMigrations(pool)` は今まで通り安全な既定値
  * （`lockTimeoutMs` 未指定 = {@link DEFAULT_LOCK_TIMEOUT_MS}）で動く。テストなど、

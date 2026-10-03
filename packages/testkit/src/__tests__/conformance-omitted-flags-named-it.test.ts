@@ -81,9 +81,9 @@ describeMemoryStoreConformance({
   supportsPreviewRestoreSupersededBy: true,
   // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
   supportsEraseTenant: true,
-  // ⭐ 任意の12個（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
+  // ⭐ 任意のフラグ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
   // supportsFindContestedByClaimKey / supportsListActiveClaimPredicates /
-  // supportsResolveOrphanedContested / supportsAbortIfForgotten / supportsMarkContestedGroup /
+  // supportsResolveOrphanedContested / supportsAbortIfForgotten / supportsAbortIfSuperseded / supportsAbortIfAllConflicted / supportsPurgeExpiredEventsByRetention / supportsMarkContestedGroup /
   // supportsResolveContestedGroup / supportsPurgeExpiredRecalls / supportsCreateMemoriesWithOutboxAndEvents / supportsSupersedeCreatedEvents）と、関数フックの countScopeAggregateQueries は意図的に渡さない。
 });
 
@@ -230,7 +230,7 @@ function expectOneUncheckedNamedIt(file: RunnerTask, suiteName: string, flags: s
 }
 
 describe("docs/conformance.md §9: 任意フラグを省略したときに登録される it", () => {
-  it("MemoryStore: 省略した12個のフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
+  it("MemoryStore: 省略した任意フラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
     task,
   }) => {
     const tests = testsUnder(task.file, MEMORY_NAME);
@@ -245,6 +245,9 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
       "supportsListActiveClaimPredicates",
       "supportsResolveOrphanedContested",
       "supportsAbortIfForgotten",
+      "supportsAbortIfSuperseded",
+      "supportsAbortIfAllConflicted",
+      "supportsPurgeExpiredEventsByRetention",
       "supportsMarkContestedGroup",
       "supportsResolveContestedGroup",
       "supportsPurgeExpiredRecalls",

@@ -10,7 +10,7 @@ import {
   capLexicalQueryTotalChars,
   capLexicalQueryWords,
 } from "./lexical-query-cap.js";
-import { toPgTimestamp } from "./mapping.js";
+import { toPgTimestampClamped } from "./mapping.js";
 import { isCreateExtensionPermissionDenied } from "./migration-failure-message.js";
 import { EXTENSION_LOCK_KEY } from "./migrate.js";
 
@@ -765,17 +765,17 @@ export function buildTrigramLexicalSearchSelect(
   }
   if (opts.filter.occurredAfter !== undefined) {
     conditions.push(
-      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestamp(opts.filter.occurredAfter)}`,
+      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestampClamped(opts.filter.occurredAfter)}`,
     );
   }
   if (opts.filter.occurredBefore !== undefined) {
     conditions.push(
-      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestamp(opts.filter.occurredBefore)}`,
+      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestampClamped(opts.filter.occurredBefore)}`,
     );
   }
   if (opts.filter.validAt !== undefined) {
     conditions.push(
-      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestamp(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestamp(opts.filter.validAt)})`,
+      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestampClamped(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestampClamped(opts.filter.validAt)})`,
     );
   }
   if (
@@ -878,6 +878,14 @@ export function buildTrigramLexicalSearchSelect(
  * （`LexicalHit.rank` の doc、ADR 0084 §5）——ASCII の `ts_rank_cd` と日本語の
  * `word_similarity` を単純に足しているだけであり、両者の尺度が本質的に同じという主張は
  * していない。
+ *
+ * **`coverage` の尺度**: `GREATEST(ASCII 側, 日本語側)`。ASCII 側は `PostgresLexicalStore` と同じ
+ * 1/n 刻み（一致した語の数 ÷ 語の総数）。**日本語側は `word_similarity(日本語の部分, content) >=
+ * threshold` なら 1、そうでなければ 0 の二値**で、日本語の複数語は語ごとに数えない
+ * （非 ASCII の連なり全体が1つの項）。**`word_similarity` の値そのものは `coverage` に入らず、
+ * `rank` に入る。**ASCII の語がいくつあっても、日本語側が当たれば `coverage` は 1 になる。
+ * 3つの store の対応と測った値は
+ * [ADR 0553](../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
  */
 export class PostgresTrigramLexicalStore implements LexicalStore {
   private constructor(

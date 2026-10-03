@@ -1,9 +1,10 @@
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import { assertWellFormedCtx, assertWellFormedFilter } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
+import { replaceLoneSurrogates } from "./well-formed-text.js";
 import {
   assertQueryLabelsWithoutNul,
-  assertQueryTimestamptz,
+  assertQueryDate,
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
 } from "./query-check.js";
@@ -242,6 +243,12 @@ function computeRank(contentTokens: string[], phrases: string[][]): number {
  * 「Map の行の参照をそのまま返し、呼び出し側の書き換えが store の中身まで変えてしまい、
  * 歯が無力化された」前例があるため（`in-memory-vector-store.ts` の `cosineDistance` の doc、
  * ADR 0040 の周辺で踏まれた同族の穴）。
+ *
+ * **`coverage` の尺度**: 空白で区切ったクエリの語（重複は1語）のうち、本文の token の列に
+ * フレーズとして現れた数 ÷ 語の総数。1/n 刻みで、日本語（非 ASCII）の語は引かない。
+ * `PostgresLexicalStore`（tsvector）と同じ式で、`PostgresTrigramLexicalStore` の日本語側
+ * （閾値で 0/1 の二値）とは違う。3つの store の対応は
+ * [ADR 0553](../../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
  */
 export class InMemoryLexicalStore implements LexicalStore {
   constructor(private readonly memoryStore: InMemoryMemoryStore) {}
@@ -256,11 +263,23 @@ export class InMemoryLexicalStore implements LexicalStore {
     // 穴 O-6-1（ADR 0424）: 検索語の NUL は Postgres の `text` に渡せない。
     assertQueryTextWithoutNul("InMemoryLexicalStore.search", "query", query);
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    assertQueryTimestamptz("search", "filter.occurredAfter", opts.filter.occurredAfter);
-    assertQueryTimestamptz("search", "filter.occurredBefore", opts.filter.occurredBefore);
-    assertQueryTimestamptz("search", "filter.validAt", opts.filter.validAt);
+    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
+    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
     // ADR 0456 H3・ADR 0500: `labels` は `text[]` の引数。要素の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryLabelsWithoutNul("search", "filter.labels", opts.filter.labels);
+    // ADR 0543: `filter.labels`（`text[]` の引数）の孤立サロゲートは、Postgres では U+FFFD に置き換わって比べられる（保存側の `tags` も置き換わっている）。
+    opts = {
+      ...opts,
+      filter: {
+        ...opts.filter,
+        ...(opts.filter.labels === undefined
+          ? {}
+          : { labels: opts.filter.labels.map((label) => replaceLoneSurrogates(label)) }),
+      },
+    };
     // ADR 0434: `attributes` は `jsonb` の包含判定の引数。NUL は Postgres ではクエリの時点で `22P05` になる。
     assertQueryJsonWithoutNul("search", "filter.attributes", opts.filter.attributes);
     // `PostgresLexicalStore.search`（`buildLexicalSearchSelect`）は `opts.limit` を

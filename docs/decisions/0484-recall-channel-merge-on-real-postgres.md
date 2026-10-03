@@ -60,3 +60,9 @@
 ## 測っていないこと
 
 PostgreSQL 17 以外、大きなデータでの k' の効き方、実際の埋め込み provider での `similarity` の値。
+
+> **追記（2026-10-03）—— 負債1（`lexicalMatch` の尺度が store で違う）は [ADR 0553](./0553-lexical-coverage-scale-across-stores.md) で測った。これはクローン miku の委譲先の判断であり、オーナーの判断ではない。本文は書き換えていない。**
+>
+> - **上の「2つの store」は Postgres の中の tsvector 版と trigram 版で、testkit の `InMemoryLexicalStore` は入っていなかった。** ADR 0553 は InMemory も含めた3つを測った（core の `FakeLexicalStore` は InMemory と同じ式）。
+> - **負債の表の「trigram は word_similarity ベース」は、現物とずれていた。** trigram の日本語側の `coverage` は、`word_similarity` を閾値で 0/1 にした二値で、`word_similarity` の値そのものは `rank` の側に入る。
+> - 測った値（PostgreSQL 17.11・pg_trgm 1.6）と、式から決まる値・性質を縛る歯（`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts`）、尺度を揃えるなら何が動くかの材料は、ADR 0553 にある。**尺度を揃える直しはしていない**（オーナーの判断）。
