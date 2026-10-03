@@ -147,6 +147,20 @@ describe("packDigestBand — maxEntryChars が負数（境界値）", () => {
   });
 });
 
+describe("packDigestBand — maxEntryChars が NaN（境界値）", () => {
+  it("NaN の maxEntryChars は負数と同じ安全側（digest を空に切る）へ倒れ、無制限へ化けない", () => {
+    // `length > NaN` は常に false のため、修正前は切り詰めが一度も起きず「上限」が
+    // 無制限へ化けていた。`limit`/`maxChars` の NaN（Issue #803）・負数の `maxEntryChars`
+    // と同じく、NaN は上限0として扱う。予算の勘定（limitedBy を含む）も負数と一致する。
+    const candidates = [entry("m1", "0123456789")];
+    const opts = { limit: 10, maxChars: 10_000 };
+    const nan = packDigestBand(candidates, 1, { ...opts, maxEntryChars: NaN });
+    const negative = packDigestBand(candidates, 1, { ...opts, maxEntryChars: -5 });
+    expect(nan.band).toEqual([{ memoryId: "m1", digest: "", truncated: true }]);
+    expect(nan).toEqual(negative);
+  });
+});
+
 describe("packDigestBand — 切り詰め位置が UTF-16 サロゲートペアの内側（境界値）", () => {
   it("サロゲートペアの内側で切ると孤立サロゲートを作ってしまうため、1文字手前で止める", () => {
     // "😀" は UTF-16 では2コードユニット（サロゲートペア）。`digest.slice(0, 5)` を
