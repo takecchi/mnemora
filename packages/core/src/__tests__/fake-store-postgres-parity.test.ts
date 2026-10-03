@@ -350,7 +350,8 @@ describe("FakeLexicalStore.search — coverage/rank が完全一致したとき�
  * `LIMIT`（bigint パラメータ）へそのまま渡して例外にする入力（負数・`NaN`・
  * `Infinity`・非整数）を、書き込みの副作用（`status` を `archived` にし、イベントを
  * 積む）付きで静かに通してしまっていた。実測は `in-memory-fixtures-archive-decayed-limit.test.ts`
- * のコメント参照。
+ * のコメント参照。⚠ 負数だけは Postgres も常には例外にならない（テナントの行が無く統計が古いと、
+ * CTE の中の `Limit` が評価されず `{ archived: [] }` で返る）。この Fake は常に断る。
  */
 describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も archived にしない（Issue #880）", () => {
   for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
@@ -416,6 +417,8 @@ describe("FakeOutboxStore.claimBatch: リースの境界時刻が Date になら
  * `PostgresMemoryStore.requeueEmbedJobs` が `LIMIT`（bigint パラメータ）へそのまま渡して
  * 例外にする入力（負数・`NaN`・`Infinity`・非整数）を、書き込みの副作用
  * （`embeddingStatus` を `pending` に戻し、embed ジョブを積む）付きで通していた。
+ * ⚠ 負数だけは Postgres も常には例外にならない（テナントの行が無く統計が古いと、CTE の中の
+ * `Limit` が評価されず `{ requeued: 0 }` で返る）。この Fake は常に断る。
  */
 describe("FakeMemoryStore.requeueEmbedJobs: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も積み直さない", () => {
   for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 2 ** 63, 1e21]) {

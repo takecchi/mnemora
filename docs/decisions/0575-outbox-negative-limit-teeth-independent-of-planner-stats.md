@@ -60,3 +60,15 @@
 - **理由**【判断。実測の EXPLAIN と合っていた】: このファイルの `claimWith` は、`claimBatch` を撃つ前に、同じテナントの行を 2 本（`embed`・`extract`）入れる。`UPDATE … FROM claimable c` の外側 `outbox o` は同じ表なので、その行が見え、外側が空にならない。外側が空にならなければ、内側の CTE（`LIMIT`）は必ず評価され、拒まれる。本文の「同じテナントの行が1本あれば、どの統計の状態でも reject された」と同じ理由である。
 - **測っていないこと**: `SQL_ASCII` の DB（本文は両 encoding で同じ結果と書いている。私は UTF8 だけ）。同じ `for` の他の `limit` の値（`0`・`1`・`2**53`・`1.5`・`NaN`・`2**63`。`1.5`・`NaN`・`2**63` は bind の型変換で決まるのでプランナに依らないはずだが、確かめていない）。本文の「他テナント 300 行 + `ANALYZE`」の状態でこのファイルを走らせること（psql で 300 行・`reltuples = 300` までは作ったが、ファイルは走らせていない。代わりに 5000 行で走らせた）。ファイルの実行中に autovacuum が統計を変える場合。
 - 揺れなかったので、手当てはしない。
+
+---
+
+## 追記（2026-10-03・出所: ADR 0597の作業中に、担い手 mgr-d25950ce が実測した。「負の `LIMIT` は評価されなければ投げない」の他の口への広がり）: `requeueEmbedJobs`・`archiveDecayed` も同じ形で投げない
+
+上の本文と追記は当時のまま残す。outbox 以外の口の `LIMIT` の位置と、空の表（統計が古い）での結果を測った。自前の Postgres 17（`--encoding=UTF8 --locale=C`、専用ポート）で、使い捨てのテストが store を直接呼んだ。【実測】
+
+- **投げない口（本文と同じ形）**: `PostgresMemoryStore.requeueEmbedJobs` と `archiveDecayed`。`LIMIT` が `WITH target AS (SELECT … LIMIT $n FOR UPDATE SKIP LOCKED) … UPDATE memories m … FROM target t WHERE m.id = t.id` の CTE の中にある。他テナントの行を入れて `ANALYZE` → `TRUNCATE` → `ANALYZE`（`reltuples = 0`）した状態で `limit: -1` を撃つと、`{ requeued: 0, memoryIds: [] }`・`{ archived: [], reachedLimit: false }` で返り、何も書かない。EXPLAIN は `CTE target → Limit (never executed) → LockRows (never executed) → …`、`Update on memories m → Nested Loop → Seq Scan on memories m (actual rows=0) / CTE Scan on target t (never executed)`。撃つテナントの行が3本ある状態、統計の無い状態、他テナントだけ統計がある状態では、どちらも `2201W` で投げた。
+- **投げる口**: `EventStore.list`・`VectorStore.search`（統計あり・なしの両経路）・`LexicalStore.search`・`purgeExpiredEvents(-2)`（`-1` は `LIMIT 0` で通る。以前から書いてある）・`aggregateScope` の `digestBand.limit`（GROUP BY の無い集約の副問い合わせなので、必ず1行出て評価される）。どの状態（空で古い・自テナントの行あり・統計なし・他テナントのみ統計あり）でも投げた。最上位の `LIMIT` は `EXPLAIN (ANALYZE)` でも `ERROR: LIMIT must not be negative` になった。
+- **NaN・`1.5`**: `requeueEmbedJobs`・`archiveDecayed` も、どの状態でも `22P02`（bigint への変換）で投げた。bind の時点で決まり、`Limit` の評価に依らない。
+- **Postgres と突き合わせる既存の歯**: `store-boundary-diff`（`claimBatch(limit:-1)`）・`event-filter-actor-schema-vs-store`・`vector-search-many-diff`・`readme-unbound-promises` を、`outbox` に他テナント由来の古い統計（`reltuples = 0`）を残した状態で名指しで走らせた。24本とも通った。`requeueEmbedJobs`・`archiveDecayed` に負の `limit` を撃つ Postgres 側の歯は、grep では見つからなかった（変数経由の渡し方は拾えていない）。【確かめていない】
+- 直したのは、`requeueEmbedJobs`・`archiveDecayed` の fixture・Fake のコメントと、それを引くテスト冒頭のコメントだけ（ADR 0597）。

@@ -348,6 +348,51 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       }
     }
 
+    /**
+     * `opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00 UTC）より前なら、`jobId` の形・行の有無を見る前に断る
+     * （クローンの判断。ADR 0594 の「残り」。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。`complete`・`fail` は
+     * 行の値になる日時を書く口で、Postgres は下限より前を書けない（`22008`）。以前の `@mnemora/postgres` は、形の崩れた `jobId` では
+     * 静かに返していた。下限ちょうどは書ける（対照。断りすぎる実装を縛る）。
+     */
+    const BELOW_FLOOR_AT = new Date(Date.UTC(-4713, 10, 24) - 1);
+    const FLOOR_AT = new Date(Date.UTC(-4713, 10, 24));
+    for (const how of ["complete", "fail"] as const) {
+      for (const [label, jobId] of [
+        ["形の崩れた jobId", "does-not-exist"],
+        ["uuid の形だが存在しない jobId", "11111111-1111-4111-8111-111111111111"],
+        ["実在の jobId", undefined],
+      ] as const) {
+        it(`${how} は ${label} でも、opts.at が timestamptz の下限より前なら例外を投げ、行に触れない`, async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const job = jobId === undefined ? await seedJob(ctx, { kind: "extract" }) : undefined;
+          const id = job?.id ?? jobId!;
+          const attempts = job?.attempts ?? 0;
+
+          const call =
+            how === "complete"
+              ? store.complete(ctx, id, attempts, { at: BELOW_FLOOR_AT })
+              : store.fail(ctx, id, "simulated failure", attempts, { at: BELOW_FLOOR_AT });
+          await expect(call).rejects.toThrow();
+          if (job !== undefined && peekJob) {
+            const after = await peekJob(ctx, job.id);
+            expect(after?.completedAt ?? null).toBeNull();
+            expect(after?.failedAt ?? null).toBeNull();
+          }
+        });
+      }
+
+      it(`${how} は opts.at が timestamptz の下限ちょうどなら、例外にせず通る（実在の jobId）`, async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+
+        await (how === "complete"
+          ? store.complete(ctx, job.id, job.attempts, { at: FLOOR_AT })
+          : store.fail(ctx, job.id, "simulated failure", job.attempts, { at: FLOOR_AT }));
+      });
+    }
+
     /** 渡した `at` の Date を、store が参照のまま持たない（後から呼び手が書き換えても行は変わらない）。 */
     (peekJob ? it : it.skip)(
       "complete/fail に渡した opts.at を、呼び手が後から書き換えても、completedAt/failedAt は変わらない",

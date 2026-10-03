@@ -114,6 +114,23 @@ function assertFakeQueryDate(method: string, field: string, value: Date | null |
   }
 }
 
+/**
+ * 行の値になる日時（`OutboxStore.complete`/`fail` の `opts.at`）が `timestamptz` の下限（4714-11-24 BC 00:00 UTC）より前なら断る
+ * （ADR 0597。`packages/testkit` の `assertQueryTimestamptz` と同じ型（`RangeError`）・同じ文面。下限ちょうどは通す）。
+ * ⚠ 読みの口の条件には使わない（ADR 0547: 読みの口は下限へ寄せて比べる）。Invalid Date は `assertFakeQueryDate` が見る。
+ */
+function assertFakeTimestamptzNotBelowMin(
+  method: string,
+  field: string,
+  value: Date | null | undefined,
+): void {
+  if (value != null && value.getTime() < Date.UTC(-4713, 10, 24)) {
+    throw new RangeError(
+      `${method}: ${field} must not be earlier than 4714-11-24 BC (the lower bound of a Postgres timestamptz)`,
+    );
+  }
+}
+
 /** 読みの口の条件の整数（通し番号）が `bigint` へ渡せる整数でなければ断る（ADR 0493。testkit の `assertQueryInteger` と同じ文面）。省略は検査しない。 */
 function assertFakeQueryInteger(
   method: string,
@@ -2435,9 +2452,13 @@ export class FakeMemoryStore implements MemoryStore {
     // ADR 0493: `writeOpts.now` は `available_at`・`created_at`（`timestamptz`）に入る。Invalid Date は Postgres・InMemory が断る。
     assertFakeQueryDate("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
     // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
-    // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
-    // 自身が例外を投げる（実測: `LIMIT must not be negative` / `invalid input syntax for
-    // type bigint: "NaN"` 等）。ここで検査せず `.slice(0, Math.max(0, opts.limit))` へ
+    // パラメータ）にそのまま渡す。`NaN`・`Infinity`・非整数は、パラメータの bigint への変換の時点で
+    // Postgres 自身が例外を投げる（実測: `invalid input syntax for type bigint: "NaN"` 等）。
+    // 負数の `LIMIT must not be negative` は常には出ない（実測、ADR 0575 と同じ形）: この `LIMIT` は
+    // `WITH target AS (...) UPDATE ... FROM target` の CTE の中にあり、テナントの行が1本も無く、`memories` の
+    // 統計が古い（`reltuples = 0`）と、`Limit` は `never executed` になり、何も書かずに
+    // `{ requeued: 0 }` で返る。対象の行が1本でもあるか、統計が無ければ投げる。Postgres は負数を断る約束ではない
+    // ——この Fake は常に断る。ここで検査せず `.slice(0, Math.max(0, opts.limit))` へ
     // 渡すと、`Infinity` は対象を全件、`1.5` は1件、積み直す書き込みをしてしまう
     // （`archiveDecayed` の Issue #880 と同じ形）。クエリを投げる前に弾く Postgres 側に
     // 揃える（同じ2段の順序: 非整数を先に、次に負数を見る）。
@@ -3558,6 +3579,8 @@ export class FakeOutboxStore implements OutboxStore {
     // ADR 0493: `OutboxStore.complete` の TSDoc が約束する（`opts.at` が Invalid Date なら、行には触れずに断る）。
     // `InMemoryOutboxStore` と同じく、行を探す前に見る。
     assertFakeQueryDate("complete", "opts.at", opts?.at);
+    // ADR 0597: 下限（`timestamptz` の紀元前4714年）より前も断る（Postgres は書けない値。`InMemoryOutboxStore` と同じ型・文面）。
+    assertFakeTimestamptzNotBelowMin("complete", "opts.at", opts?.at);
     const job = this.backing.outboxJobs.find(
       (j) => j.id === normId(jobId) && j.tenantId === ctx.tenantId,
     );
@@ -3585,6 +3608,7 @@ export class FakeOutboxStore implements OutboxStore {
   ): Promise<void> {
     assertWellFormedCtx(ctx);
     assertFakeQueryDate("fail", "opts.at", opts?.at);
+    assertFakeTimestamptzNotBelowMin("fail", "opts.at", opts?.at); // ADR 0597: `complete` と同じ
     const job = this.backing.outboxJobs.find(
       (j) => j.id === normId(jobId) && j.tenantId === ctx.tenantId,
     );
