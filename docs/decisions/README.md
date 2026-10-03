@@ -613,5 +613,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0596](./0596-adr-0571-0573-0574-merged-pr-recheck-teeth-round2.md) | マージ済みの #1683・#1685・#1686（ADR 0571・0573・0574）の確かめ直しで見つかった歯の穴を塞ぐ | 採用 (2026-10) |
 | [0597](./0597-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md) | `OutboxStore.complete`・`fail` は `timestamptz` の下限より前の `opts.at` を、3実装とも `jobId` の形より先に `RangeError` で断る。`requeueEmbedJobs`・`archiveDecayed` の「負の `limit` は Postgres が投げる」コメントを実測に合わせる | 採用 (2026-10) |
 | [0598](./0598-adr-0490-0480-0485-merged-pr-recheck-teeth.md) | 10/01 にマージされた #1582〜#1597 の確かめ直しで見つかった穴を塞ぐ（アクセント付きのラテン文字・`createRecall` の `createdAt` の写し・`excludeMemoryIds` の等しさ） | 採用 (2026-10) |
+| [0600](./0600-contested-group-recheck-teeth.md) | 多者間 contested の群（ADR 0381）の確かめ直しで見つかった穴を塞ぐ（解消での関係の削除の範囲・段3が抜けたメンバーを越えない・同伴の `attributes` の絞り・claim key の合併と人数の境界・`markContestedGroup` の対の片割れ） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
