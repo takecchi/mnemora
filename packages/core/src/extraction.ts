@@ -27,8 +27,9 @@ import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 export const ExtractedMemoryCandidateSchema = z.object({
   content: z.string().min(1),
   /**
-   * 要旨。LLM が生成できなかった場合は省略してよい（省略・空文字は「LLM 側の digest 生成が
-   * 失敗した」ものとして扱い、機械的な先頭文字列切り出しへフォールバックする。
+   * 要旨。LLM が生成できなかった場合は省略してよい（省略・空文字・`trim` で空になる値
+   * （空白だけ）は「LLM 側の digest 生成が失敗した」ものとして扱い、機械的な先頭文字列切り出しへ
+   * フォールバックする（`resolveDigest`）。
    * docs/memory-model.md §4 の安全弁）。
    */
   digest: z.string().optional(),
@@ -73,7 +74,7 @@ export const ExtractedMemoryCandidateSchema = z.object({
    * `stated`（本人が明示的に述べた事実）か `inferred`（LLM の推論）のどちらかを申告する。
    */
   provenanceKind: z.enum(["stated", "inferred"]),
-  /** `provenanceKind: 'inferred'` のときの確信度。`stated` では無視する。 */
+  /** `provenanceKind: 'inferred'` のときの確信度。`stated` では無視する。省略なら `0.5` で `provenance.confidence` に入る（`buildNewMemoryFromCandidate`）。 */
   confidence: z.number().min(0).max(1).optional(),
 });
 /** 抽出の LLM が返す記憶の候補1件（{@link ExtractedMemoryCandidateSchema} の型）。 */
@@ -398,7 +399,9 @@ function fallbackWholeObservationCandidate(observation: Observation): ExtractedM
  *   （`migrations/0025`・ADR 0364、Issue #1222。以前は DB の例外を投げていた——
  *   {@link buildExtractionPrompt} の doc の追記を見ること）。1MBを超える本文は、
  *   本文自体は無傷で残るが、先頭150,000文字（`SQL_ASCII` の DB ではバイト）より後ろの語は語彙チャンネルからは引けない。
- * - `skipped` — この呼び出しでは抽出を実行していない（`deferred`、`memory_usage`、冪等な再送）。
+ * - `skipped` — この呼び出しでは抽出を実行していない（`deferred`、`memory_usage`、冪等な再送。
+ *   `reextract` も、利用者の意思で退けた記憶を持つ Observation では `skipped` を返す。
+ *   条件は `Runtime.reextract` の doc を参照）。
  */
 export type ExtractionOutcome = "ok" | "llm_failed_whole_observation" | "skipped";
 
