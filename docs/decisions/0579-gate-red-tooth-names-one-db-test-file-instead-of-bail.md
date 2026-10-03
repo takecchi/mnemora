@@ -58,9 +58,14 @@
    `resetTestDatabase()` で DB に触り、`EXPLAIN` を本物の Postgres に撃つ。
    【実測】DB 在り（PostgreSQL 17 + pgvector、自分専用のポート 55920）で3本とも緑。`DATABASE_URL` 無しでは `requireDatabaseUrl` が断る。
    選んだ理由は歯のコメントに書いた。
-3. **印を `FAIL` の行に絞った**（`FAIL\s+(?:\|<project>\|\s+)?src/__tests__/contested-with-index\.test\.ts`）。
+3. **印を `FAIL` の行に絞った**（`FAIL\s+(?:\|?<project>\|?\s+)?src/__tests__/contested-with-index\.test\.ts`）。
    名指しした引数は pnpm が `$ vitest run src/__tests__/contested-with-index.test.ts` と書き出すので、0465 の印
    （ファイルの名前だけ）のままでは、DB テストが走らなくても通る（下の M3）。
+   `FAIL` とファイルの名前の間の vitest の project 名（`postgres-db-parallel`）は、色が無いと `|postgres-db-parallel|`、
+   色が有ると（CI の `FORCE_COLOR`）色の付いた札になり、色の符号を外すと ` postgres-db-parallel ` になる。両方の形を許す。
+   【現物】最初に push した形は `|…|` だけを許していて、この PR の CI の最初の run（`37091331864`）で落ちた
+   （ログには `FAIL   postgres-db-parallel  src/__tests__/contested-with-index.test.ts > …` が3行、決まった形で出ていた）。
+   【実測】手元で `FORCE_COLOR=1` を付けると、`|…|` だけの形は赤、両方を許す形は緑（8回とも）。
 4. **名指しするファイルが在ることを、歯の中で先に確かめる。** 消えたら vitest は `No test files found` で exit 1 し、
    その文言（`filter: src/__tests__/….test.ts`）にもファイルの名前が出る。
 5. **門の振る舞いは変えていない。** 変えたのは `run-db-tests.mjs:235-236` のコメント（「歯は `--bail=1` を渡す」の記述）だけ。
@@ -74,10 +79,10 @@
 
 | 門・歯 | 新しい歯 |
 |---|---|
-| 元のまま（8回） | 緑（8回とも。所要 7〜9 秒） |
+| 元のまま（8回） | 緑（8回とも。所要 7〜9 秒。`FORCE_COLOR=1` でも8回とも緑） |
 | M1: 門が `test:db` を起動せず `{ status: 1 }` で「落ちた」とだけ言う | **赤** |
 | M2: `test:db` の代わりに `false` を起動する | **赤** |
-| M3: `test:db` の代わりに、pnpm の書き出し（`$ vitest run <引数>`）だけを真似て exit 1 する | **赤**（同じ出力に、ファイルの名前だけの印は合う） |
+| M3: `test:db` の代わりに、pnpm の書き出し（`$ vitest run <引数>`）だけを真似て exit 1 する | **赤**（同じ出力に、ファイルの名前だけの印は合う。project 名の両方の形を許した後も、`FORCE_COLOR=1` で赤） |
 | M4: 歯の `DB_TEST_FILE` を存在しない名前にする | **赤**（在ることの検査） |
 
 - ファイル全体（8本）は緑。eslint・prettier は通った。
@@ -94,7 +99,7 @@
 
 ## 引き受けた負債
 
-- 歯は、名指ししたファイル1本の名前と、vitest の `FAIL` の行の形（project 名の `|…|` を挟む形を含む）に依る。
+- 歯は、名指ししたファイル1本の名前と、vitest の `FAIL` の行の形（project 名を `|…|` か色の札で挟む形を含む）に依る。
   形が変われば歯は赤い側に倒れるので、黙って弱くはならない。
 - 名指ししたファイルの中身が変わり、DB が無くても通る it が増えても、この歯は気付かない（DB に触る it が1本でも残れば `FAIL` は出る）。
 

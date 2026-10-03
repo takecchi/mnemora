@@ -103,11 +103,13 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
     // ⚠ `ECONNREFUSED 127.0.0.1:1` では見ない——門の接続先の告知（「版を取得できませんでした: connect ECONNREFUSED …」）が
     // 同じ文字列を出すので、門が DB テストを起動しなくても通ってしまう（ADR 0465 の変異で確かめた）。
     // vitest は色の指定（CI の FORCE_COLOR など）で文字の間に ANSI の色の符号を挟むので、外してから見る。
-    // `FAIL` と名前の間の `|postgres-db-parallel|` は vitest の project 名（`packages/postgres/vitest.config.ts`）。
+    // `FAIL` と名前の間には vitest の project 名（`packages/postgres/vitest.config.ts` の `postgres-db-parallel`）が入る。
+    // 色が無いと `|postgres-db-parallel|`、色が有ると（CI の FORCE_COLOR）色の付いた札になり、色の符号を外すと
+    // ` postgres-db-parallel ` になる——両方の形を許す（ADR 0579。CI の最初の run で `|…|` だけを許す形が落ちた）。
     const escapedFile = DB_TEST_FILE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     // eslint-disable-next-line no-control-regex
     expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(
-      new RegExp(`FAIL\\s+(?:\\|[\\w-]+\\|\\s+)?${escapedFile}`),
+      new RegExp(`FAIL\\s+(?:\\|?[\\w-]+\\|?\\s+)?${escapedFile}`),
     );
 
     // 未実行の告知と取り違えられないこと。
