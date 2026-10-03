@@ -11,10 +11,10 @@
 
 2026-09-29（UTC）にマージされ、実装を変えた7本を、いまの main で独立に確かめ直した。このうち #1437・#1435 で、次の変異がどの歯にも捕まらなかった（ほかの5本の穴は別の ADR で塞ぐ）。
 
-| PR・ADR | 約束 | すり抜けた変異 | 通った理由 |
-|---|---|---|---|
-| #1437（[ADR 0382](./0382-vector-store-delete-across-spaces.md)） | `VectorStore.deleteAcrossSpaces(ctx, memoryIds)` は、渡した `memoryIds` の行を全 space から消す | testkit の InMemory・core の Fake が、渡した id 以外も含めてテナントの行を全部消す | 適合テスト（`@mnemora/testkit` の `vector-store-conformance.ts`）の `deleteAcrossSpaces` の歯は、記憶を1件しか置いていなかった。testkit の適合テスト（667件）、testkit の8本、postgres 側で InMemory と突き合わせる3本がすべて緑 |
-| #1435（[ADR 0380](./0380-reextract-withdrawn-across-extractor-versions.md)） | reextract は、訂正の解決で負けた `superseded`（**最新**の `superseded` イベントの `meta.reason === "contested_resolved"`）を「退けた」と数える | 最初の `superseded` イベントの理由で決める | `superseded` のイベントを2つ以上持つ記憶の歯が無かった。reextract を叩く core の24本・postgres 側の4本がすべて緑 |
+| PR・ADR                                                                      | 約束                                                                                                                                           | すり抜けた変異                                                                     | 通った理由                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #1437（[ADR 0382](./0382-vector-store-delete-across-spaces.md)）             | `VectorStore.deleteAcrossSpaces(ctx, memoryIds)` は、渡した `memoryIds` の行を全 space から消す                                                | testkit の InMemory・core の Fake が、渡した id 以外も含めてテナントの行を全部消す | 適合テスト（`@mnemora/testkit` の `vector-store-conformance.ts`）の `deleteAcrossSpaces` の歯は、記憶を1件しか置いていなかった。testkit の適合テスト（667件）、testkit の8本、postgres 側で InMemory と突き合わせる3本がすべて緑 |
+| #1435（[ADR 0380](./0380-reextract-withdrawn-across-extractor-versions.md)） | reextract は、訂正の解決で負けた `superseded`（**最新**の `superseded` イベントの `meta.reason === "contested_resolved"`）を「退けた」と数える | 最初の `superseded` イベントの理由で決める                                         | `superseded` のイベントを2つ以上持つ記憶の歯が無かった。reextract を叩く core の24本・postgres 側の4本がすべて緑                                                                                                                 |
 
 適合テストは、外部の adapter の作者も使う出荷物である。1件の purge でテナントの全部の embedding を消す adapter が通る隙間は、Fake・fixture だけの話より重い【判断】。
 
@@ -29,13 +29,13 @@
 
 実装ファイルを `cp` で退避し、変異を Edit で1つずつ入れ、名指しのファイルを走らせ、`cp` で戻して `cmp` で同一を確かめ、同じファイルを緑に戻した。
 
-| 変異 | 側 | 赤 | 戻して |
-|---|---|---|---|
-| testkit `deleteAcrossSpaces` がテナントの行を全部消す | やりすぎ | 新しい歯（`expected [] to deeply equal [ 'mem-…' ]`） | 適合テスト 668件緑 |
-| testkit `deleteAcrossSpaces` が何も消さない | 足りない | 既存の「複数 space にある同じ memoryId の行が、全部消える」と新しい歯の2本 | 同上 |
-| reextract が最初の superseded イベントの理由で決める | 取り違え | 新しい2本（`expected 'ok' to be 'skipped'`・`expected 'skipped' to be 'ok'`） | 16本緑 |
-| reextract が訂正で負けた superseded も数えない | 足りない | 既存の3本と新しい「最新が contested_resolved なら…打ち切る」 | 16本緑 |
-| reextract が superseded を理由を見ずに全部数える | やりすぎ | 既存の対照2本と新しい「最新が機構の置き換えなら…打ち切らない」 | 16本緑 |
+| 変異                                                  | 側       | 赤                                                                            | 戻して             |
+| ----------------------------------------------------- | -------- | ----------------------------------------------------------------------------- | ------------------ |
+| testkit `deleteAcrossSpaces` がテナントの行を全部消す | やりすぎ | 新しい歯（`expected [] to deeply equal [ 'mem-…' ]`）                         | 適合テスト 668件緑 |
+| testkit `deleteAcrossSpaces` が何も消さない           | 足りない | 既存の「複数 space にある同じ memoryId の行が、全部消える」と新しい歯の2本    | 同上               |
+| reextract が最初の superseded イベントの理由で決める  | 取り違え | 新しい2本（`expected 'ok' to be 'skipped'`・`expected 'skipped' to be 'ok'`） | 16本緑             |
+| reextract が訂正で負けた superseded も数えない        | 足りない | 既存の3本と新しい「最新が contested_resolved なら…打ち切る」                  | 16本緑             |
+| reextract が superseded を理由を見ずに全部数える      | やりすぎ | 既存の対照2本と新しい「最新が機構の置き換えなら…打ち切らない」                | 16本緑             |
 
 新しい適合テストの歯は、`@mnemora/postgres`（PostgreSQL 17、`C.UTF-8`）でも緑であることを確かめた（`conformance.postgres.test.ts` の `deleteAcrossSpaces` の6本）。
 
