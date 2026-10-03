@@ -59,6 +59,9 @@ const EXPECTED: Array<
 const ACCEPTED: Array<[string, Record<string, unknown>]> = [
   ["limit: 0（何も claim しない。TSDoc どおり）", { limit: 0 }],
   ["kinds: []（何も claim しない。TSDoc どおり）", { kinds: [] }],
+  ["kinds: 空文字の要素（文字列なので断らない）", { kinds: [""] }],
+  ["limit: 2^62（2^63 未満なので断らない）", { limit: 2 ** 62 }],
+  ["limit: 2^63 未満で最大級の整数", { limit: 2 ** 63 - 1024 }],
   ["claimedBy: 空文字（今までどおり）", { claimedBy: "" }],
   ["leaseMs: 0（今までどおり）", { leaseMs: 0 }],
   ["leaseMs: -1（今までどおり）", { leaseMs: -1 }],

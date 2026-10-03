@@ -242,6 +242,49 @@ describe("FakeMemoryStore.purgeExpiredEvents（Issue #210 / ADR 0115）", () => 
     expect(remainingOriginal).toHaveLength(0);
   });
 
+  it("候補がちょうど limit 件のとき reachedLimit は false（limit より多いときだけ true）", async () => {
+    const { memoryStore, eventStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "purge-exact-limit-fake",
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+    const base = new Date("2024-01-01T00:00:00.000Z").getTime();
+    for (let i = 0; i < 3; i++) {
+      await eventStore.append(ctx, {
+        tenantId: "tenant-1",
+        memoryId: memory.id,
+        kind: "updated",
+        at: new Date(base + i * 1000),
+        actor: { type: "system" },
+        meta: {},
+      });
+    }
+    const olderThan = new Date(base + 10_000);
+
+    const exact = await memoryStore.purgeExpiredEvents!(ctx, { olderThan, limit: 3, dryRun: true });
+    expect(exact.purged).toBe(3);
+    expect(exact.reachedLimit).toBe(false);
+
+    const over = await memoryStore.purgeExpiredEvents!(ctx, { olderThan, limit: 2, dryRun: true });
+    expect(over.purged).toBe(2);
+    expect(over.reachedLimit).toBe(true);
+  });
+
   it("kind='events_purged' 自身を対象から除外する（無限後退を避ける）", async () => {
     const { memoryStore, eventStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, {

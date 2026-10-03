@@ -25,8 +25,11 @@ const BLANKS: Array<[string, string]> = [
   ["改行", "\n\n"],
   ["タブ", "\t"],
   ["U+3000（全角空白）", "　"],
-  ["U+00A0（NBSP）", " "],
-  ["種類の混在", " \t\n　 "],
+  ["U+00A0（NBSP）", " "],
+  ["垂直タブ（\\v）", "\v"],
+  ["改ページ（\\f）", "\f"],
+  ["U+FEFF（BOM）", "﻿"],
+  ["種類の混在", " \t\n　 \v\f﻿ "],
 ];
 
 describe("observationPayloadText: 空白だけの title は前置きにしない（ADR 0517）", () => {
@@ -54,6 +57,33 @@ describe("observationPayloadText: 空白だけの title は前置きにしない
         documentObservation({ title: " T ", content: "C", extractTitle: true }),
       ),
     ).toBe(" T \n\nC");
+  });
+
+  it("content が空で title に実質があるとき、title は trim されずそのまま返る", () => {
+    expect(
+      observationPayloadText(
+        documentObservation({ title: " T ", content: "", extractTitle: true }),
+      ),
+    ).toBe(" T ");
+  });
+
+  it("前置きの経路で、content の前後の空白は削られない", () => {
+    expect(
+      observationPayloadText(
+        documentObservation({ title: "T", content: "  C  ", extractTitle: true }),
+      ),
+    ).toBe("T\n\n  C  ");
+  });
+
+  it("範囲外（今は変えない）: event の name は空白だけでも前置きになりうる", () => {
+    const text = observationPayloadText({
+      id: "obs-1",
+      tenantId: "t",
+      kind: "event",
+      payload: { name: "  ", data: { a: 1 }, extractData: true },
+      recordedAt: new Date(0),
+    } as unknown as Observation);
+    expect(text).toBe('  \n\n{"a":1}');
   });
 
   it("extractTitle が無ければ、title は今までどおり本文に入らない", () => {
