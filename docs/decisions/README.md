@@ -614,6 +614,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0597](./0597-outbox-complete-fail-at-below-floor-rejected-and-negative-limit-comment-measured.md) | `OutboxStore.complete`・`fail` は `timestamptz` の下限より前の `opts.at` を、3実装とも `jobId` の形より先に `RangeError` で断る。`requeueEmbedJobs`・`archiveDecayed` の「負の `limit` は Postgres が投げる」コメントを実測に合わせる | 採用 (2026-10) |
 | [0598](./0598-adr-0490-0480-0485-merged-pr-recheck-teeth.md) | 10/01 にマージされた #1582〜#1597 の確かめ直しで見つかった穴を塞ぐ（アクセント付きのラテン文字・`createRecall` の `createdAt` の写し・`excludeMemoryIds` の等しさ） | 採用 (2026-10) |
 | [0599](./0599-fake-cross-tenant-ref-message-teeth.md) | core の Fake が別テナントの参照を断る検査に、message まで縛る歯を足す（#1549・#1543） | 採用 (2026-10) |
+| [0600](./0600-erase-tenant-recheck-teeth.md) | eraseTenant（ADR 0383）の確かめ直しで見つかった穴を塞ぐ（他テナントの自己参照・dryRun・confirmTenantId の完全一致・他テナントからの参照の検査・limit・他テナントの冪等キーなど） | 採用 (2026-10) |
 | [0601](./0601-adr-0434-0435-0437-0438-0440-merged-pr-recheck-teeth.md) | 09/30 にマージされた #1542・#1544・#1545・#1546・#1548 の確かめ直しで見つかった穴を塞ぐ（名前の無い 54000 の冪等の索引の項・全候補が落ちたときの最初の例外・purge の後始末の独立・message を切らない・subject 側の修飾・NUL 以外の制御文字・取り直し後の complete） | 採用 (2026-10) |
 | [0602](./0602-contested-group-recheck-teeth.md) | 多者間 contested の群（ADR 0381）の確かめ直しで見つかった穴を塞ぐ（解消での関係の削除の範囲・段3が抜けたメンバーを越えない・同伴の `attributes` の絞り・claim key の合併と人数の境界・`markContestedGroup` の対の片割れ） | 採用 (2026-10) |
 

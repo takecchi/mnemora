@@ -1709,6 +1709,36 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
         expect(hits.map((h) => h.memoryId)).toEqual([]);
       });
 
+      it("eraseTenant の limit は全 space の合計に対する上限である（2 space に2件ずつ、limit: 3 の1回で、deleted は 3・残りはちょうど1件）", async () => {
+        const store = await createStore();
+        await prepareEmbeddingSpace(spaceB);
+        const ctx: Ctx = { tenantId: "erase-tenant-limit-across-spaces" };
+        const inSpace: MemoryId[] = [];
+        const inSpaceB: MemoryId[] = [];
+        for (let i = 0; i < 2; i++) {
+          const a = await prepareMemoryId(ctx);
+          await store.upsert(ctx, space, a, [1, 0, 0]);
+          inSpace.push(a);
+          const b = await prepareMemoryId(ctx);
+          await store.upsert(ctx, spaceB, b, [0, 1, 0]);
+          inSpaceB.push(b);
+        }
+
+        const result = await store.eraseTenant!(ctx, { limit: 3 });
+        expect(result.deleted).toBe(3);
+        expect(result.reachedLimit).toBe(true);
+
+        const hits = await store.search(ctx, space, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId },
+        });
+        const hitsB = await store.search(ctx, spaceB, [0, 1, 0], {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId },
+        });
+        expect(hits.length + hitsB.length).toBe(1);
+      });
+
       it("eraseTenant は dryRun: true のとき、削除件数を返すが実際には何も消さない", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "erase-tenant-dry-run" };
