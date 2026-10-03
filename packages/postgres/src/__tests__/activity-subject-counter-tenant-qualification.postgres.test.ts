@@ -101,6 +101,51 @@ describe("archiveDecayed（subject カウンタ）: カウンタ行をテナン�
   });
 });
 
+describe("subject 側の修飾: 同じテナントに別の subject のカウンタ行がある", () => {
+  // テナントは値で渡し、subject だけを列で修飾する。subject が修飾されていないと、内側の `tenant_subject_activity` の
+  // `subject_id` に解決されて恒真になり、同じテナントの別 subject の行を拾う（1本ならその値を使い、2本以上なら文が落ちる）。
+  it("archiveDecayed: 同じテナントの別 subject のカウンタ行が1本だけでも、その値を使わない", async () => {
+    const { mem, make } = await setup();
+    for (let i = 0; i < 3; i++) await tick(mem, A, "other"); // S_other = 3、subject "s" の行は無い（S_s = 0）
+    const am = await make(A, "a1");
+    // 4 + S_s(0) = 4 < 床 5 なので沈んでいない。other の 3 が混ざると 7 >= 5 で誤って archived になる。
+    const res = await mem.archiveDecayed(A, archiveOpts(4));
+    expect(res.archived).toEqual([]);
+    expect((await mem.get(A, am.id))!.status).toBe("active");
+  });
+
+  it("archiveDecayed: 同じテナントに別 subject の行が並んでいても落ちず、その subject のカウンタだけを使う", async () => {
+    const { mem, make } = await setup();
+    await tick(mem, A, "s"); // S_s = 1
+    for (let i = 0; i < 3; i++) await tick(mem, A, "other"); // S_other = 3
+    const am = await make(A, "a1");
+    // 4 + S_s(1) = 5 >= 床 5 なので沈んでいる。
+    const res = await mem.archiveDecayed(A, archiveOpts(4));
+    expect(res.archived.map((x) => x.memoryId)).toEqual([am.id]);
+  });
+
+  it("aggregateScope: 同じテナントの別 subject のカウンタ行が1本だけでも、その値で忘却ゲートに掛けない", async () => {
+    const { mem, make } = await setup();
+    for (let i = 0; i < 3; i++) await tick(mem, A, "other");
+    await make(A, "a1");
+    // 床 5 > 4 + S_s(0) なので生きている。other の 3 が混ざると 5 > 7 が偽で decayed になる。
+    const agg = await mem.aggregateScope(A, scopeOf(4));
+    expect(agg.totalInScope).toBe(1);
+    expect(agg.filteredDecayed?.count ?? 0).toBe(0);
+  });
+
+  it("aggregateScope: 同じテナントに別 subject の行が並んでいても落ちず、その subject のカウンタだけを使う", async () => {
+    const { mem, make } = await setup();
+    await tick(mem, A, "s"); // S_s = 1
+    for (let i = 0; i < 3; i++) await tick(mem, A, "other"); // S_other = 3
+    await make(A, "a1");
+    // 床 5 > 4 + S_s(1) = 5 は偽なので decayed に数える。
+    const agg = await mem.aggregateScope(A, scopeOf(4));
+    expect(agg.totalInScope).toBe(1);
+    expect(agg.filteredDecayed?.count).toBe(1);
+  });
+});
+
 describe("aggregateScope（subject カウンタ）: カウンタ行をテナント・subject で引く", () => {
   it("A・B が同じ subject のカウンタ行を持っていても落ちない", async () => {
     const { mem, make } = await setup();

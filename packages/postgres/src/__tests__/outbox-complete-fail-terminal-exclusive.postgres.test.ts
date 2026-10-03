@@ -135,6 +135,51 @@ describe("PostgresOutboxStore.complete/fail — 相手側の終端が既に付�
     expect(row.completed_at).toBeNull();
   });
 
+  /** 取り直し（リースが切れた行の再 claim）で attempts を 2 にして、その行の id と attempts を返す。 */
+  async function seedReclaimedJob(ctx: Ctx): Promise<{ jobId: string; attempts: number }> {
+    const first = await seedClaimedJob(ctx);
+    const { db } = await getTestClient();
+    const store = new PostgresOutboxStore(db);
+    const reclaimed = await store.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(Date.now() + 3_600_000),
+      claimedBy: "second-claimer",
+      leaseMs: 60_000,
+    });
+    const job = reclaimed.find((j) => j.id === first.jobId);
+    if (job === undefined) {
+      throw new Error("取り直しに失敗");
+    }
+    expect(job.attempts).toBe(2);
+    return { jobId: first.jobId, attempts: job.attempts };
+  }
+
+  it("取り直した後（attempts が2）の正当な complete は completed_at を付ける（黙って返さない）", async () => {
+    const ctx: Ctx = { tenantId: TENANT };
+    const { jobId, attempts } = await seedReclaimedJob(ctx);
+    const store = new PostgresOutboxStore((await getTestClient()).db);
+
+    await store.complete(ctx, jobId, attempts);
+
+    const row = await readRow(jobId);
+    expect(row.completed_at).not.toBeNull();
+    expect(row.failed_at).toBeNull();
+    expect(row.attempts).toBe(2);
+  });
+
+  it("取り直した後（attempts が2）の正当な fail は failed_at と last_error を付ける（黙って返さない）", async () => {
+    const ctx: Ctx = { tenantId: TENANT };
+    const { jobId, attempts } = await seedReclaimedJob(ctx);
+    const store = new PostgresOutboxStore((await getTestClient()).db);
+
+    await store.fail(ctx, jobId, "second-claim-error", attempts);
+
+    const row = await readRow(jobId);
+    expect(row.failed_at).not.toBeNull();
+    expect(row.last_error).toBe("second-claim-error");
+    expect(row.completed_at).toBeNull();
+  });
+
   it("本物の2接続からの並行 complete+fail（同じ attempts）— 例外は投げず、どちらか一方の終端だけが付く（10ラウンド）", async () => {
     // 【AGENTS.md】「出なかった」を根拠にするなら陽性対照が要る。この歯自体が固定した
     // 修正前の挙動（このファイルの土台にした branch の3本目の it）が陽性対照——
