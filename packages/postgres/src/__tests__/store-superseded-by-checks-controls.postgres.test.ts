@@ -423,6 +423,52 @@ for (const [kitName, makeKit] of KITS) {
       );
     });
 
+    it("位置（P12 の pair・group の陽性対照）: 壊れた id でも形が正しければ、RangeError ではなく memory not found の Error", async () => {
+      // updateStatus / updateStatusWithEvent には上に同じ陽性対照がある。resolveContestedPair /
+      // resolveContestedGroup の `!isUuidLike` の throw を RangeError にしても、他の歯は捕まえなかった。
+      const kit = await makeKit();
+      const notFound = async (run: () => Promise<unknown>) => {
+        const thrown = await thrownOf(run);
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown).not.toBeInstanceOf(RangeError);
+        expect((thrown as Error).message).toMatch(/memory not found for tenant/);
+      };
+      // pair: 先頭が壊れている／先頭は uuid の形で2件目が壊れている
+      await notFound(() =>
+        resolvePair(
+          kit,
+          { id: BROKEN },
+          { id: ABSENT },
+          { status: "active" },
+          { status: "active" },
+        ),
+      );
+      await notFound(() =>
+        resolvePair(
+          kit,
+          { id: ABSENT },
+          { id: BROKEN },
+          { status: "active" },
+          { status: "active" },
+        ),
+      );
+      // group: 先頭が壊れている／末尾だけ壊れている
+      await notFound(() =>
+        resolveGroup(
+          kit,
+          [{ id: BROKEN }, { id: ABSENT }, { id: ABSENT2 }],
+          [{ status: "active" }, { status: "active" }, { status: "active" }],
+        ),
+      );
+      await notFound(() =>
+        resolveGroup(
+          kit,
+          [{ id: ABSENT }, { id: ABSENT2 }, { id: BROKEN }],
+          [{ status: "active" }, { status: "active" }, { status: "active" }],
+        ),
+      );
+    });
+
     it("位置（F10）: pair の形の違反は、存在確認・CAS より前（存在しない2件・contested でない2件のどちらでも RangeError）", async () => {
       const kit = await makeKit();
       await expectRangeError(kit, /^resolveContestedPair: second\.supersededById is required/, () =>
