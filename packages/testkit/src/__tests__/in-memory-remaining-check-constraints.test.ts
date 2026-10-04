@@ -52,6 +52,11 @@ const CASES: Array<[string, Partial<NewMemory>, RegExp]> = [
     /^InMemoryMemoryStore: decayBaseSeq must fit in a Postgres bigint/,
   ],
   [
+    "decayFloorSeq が bigint に収まらない",
+    { ...ACTIVITY, decayFloorSeq: 2 ** 63 },
+    /^InMemoryMemoryStore: decayFloorSeq must fit in a Postgres bigint/,
+  ],
+  [
     "halfLifeRecalls が 0",
     { ...ACTIVITY, halfLifeRecalls: 0 },
     /^InMemoryMemoryStore: halfLifeRecalls out of range \(0, ∞\): 0$/,
@@ -94,6 +99,24 @@ describe("testkit の fixture は #1183 の外側の CHECK 制約を写す", () 
     );
     expect(m.halfLifeRecalls).toBeNull();
   });
+
+  it.each([0.5, 1e-30])(
+    "halfLifeRecalls が 1 未満の正の値（%s）は、float4 に収まるので受け付ける（#1250）",
+    async (halfLifeRecalls) => {
+      const store = new InMemoryMemoryStore();
+      const m = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: `chk-recalls-${halfLifeRecalls}`,
+          ...ACTIVITY,
+          halfLifeRecalls,
+        }),
+      );
+      expect(m.halfLifeRecalls).toBeGreaterThan(0);
+      expect(m.halfLifeRecalls).toBeLessThan(1);
+    },
+  );
 
   it("EventStore.append: memoryId を持つ events_purged を拒み、何も書かない", async () => {
     const store = new InMemoryMemoryStore();

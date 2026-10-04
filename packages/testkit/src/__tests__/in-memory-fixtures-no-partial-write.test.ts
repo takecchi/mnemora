@@ -102,6 +102,87 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       });
     }
 
+    it("ラベルの紐付け（memoryLabels）も残らない（#1231）: eraseTenant の dryRun が数える件数が、呼ぶ前と同じ", async () => {
+      const store = new InMemoryMemoryStore();
+      const old = await memory(store);
+      const countErasable = async () => {
+        const result = await store.eraseTenant(ctx, { limit: 1000, dryRun: true });
+        if (result.kind !== "executed") throw new Error(`unexpected result: ${result.kind}`);
+        return result.deleted;
+      };
+      const before = await countErasable();
+      await expect(
+        store.supersedeWithNewMemories(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                content: "new 1",
+                contentHash: "new-1",
+                tags: ["fresh"],
+              } as never),
+              jobKinds: ["embed"],
+            },
+            {
+              input: buildNewMemoryFixture({ content: "bad\u0000", contentHash: "new-2" } as never),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: event(old.id, "superseded"),
+            },
+          ],
+        ),
+      ).rejects.toThrow();
+      expect(await countErasable()).toBe(before);
+    });
+
+    it("冪等キーの索引（extractionIndex）も残らない（#1231）: 同じ抽出の鍵で createMemoryWithOutbox をもう一度呼ぶと、新しく作られる", async () => {
+      const store = new InMemoryMemoryStore();
+      const old = await memory(store);
+      const observation = await store.createObservation(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: null,
+        kind: "utterance",
+        payload: { text: "発話" },
+        occurredAt: null,
+      } as never);
+      const keyed = buildNewMemoryFixture({
+        content: "keyed",
+        contentHash: "keyed-hash",
+        sourceObservationId: observation.id,
+        extractorVersion: "v1",
+      } as never);
+      await expect(
+        store.supersedeWithNewMemories(
+          ctx,
+          [
+            { input: keyed, jobKinds: ["embed"] },
+            {
+              input: buildNewMemoryFixture({ content: "bad\u0000", contentHash: "new-2" } as never),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: event(old.id, "superseded"),
+            },
+          ],
+        ),
+      ).rejects.toThrow();
+      const retried = await store.createMemoryWithOutbox(ctx, keyed, ["embed"]);
+      expect(retried.created).toBe(true);
+      expect(retried.memory.content).toBe("keyed");
+    });
+
     it("陽性対照: 2件とも書けるなら、両方と outbox・ラベル・イベントが書かれる", async () => {
       const store = new InMemoryMemoryStore();
       const old = await memory(store);

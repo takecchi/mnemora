@@ -41,4 +41,17 @@ describe("testkit の fixture は createObservation 系の Invalid Date を拒�
       expect(store.outboxJobs).toHaveLength(0);
     });
   }
+
+  for (const field of ["occurredAt", "recordedAt", "validFrom", "validUntil"] as const) {
+    it(`${field}: 1970年より前の有効な日付は通り、同じ値で読み戻る（#1243。拒むのは Invalid Date だけ）`, async () => {
+      const store = new InMemoryMemoryStore();
+      const date = new Date("1969-12-31T00:00:00.000Z");
+      const created = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: ctx.tenantId, [field]: date }),
+      );
+      const read = await store.getObservation(ctx, created.id);
+      expect(read?.[field]).toEqual(date);
+    });
+  }
 });
