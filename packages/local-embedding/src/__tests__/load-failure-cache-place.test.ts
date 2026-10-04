@@ -54,4 +54,45 @@ describe("読み込み失敗のメッセージは、実際に解決されたキ�
     expect(error.message).toContain("env.cacheDir");
     expect(error.message).toContain("sirasagi62/ruri-v3-30m-ONNX");
   });
+
+  it("env.cacheDir が空文字でも、特定の場所を断言しない（#1223）", async () => {
+    transformers.env.cacheDir = "";
+    const error = await loadFailure();
+    expect(error.message).toContain("transformers.js の既定: transformers.js の env.cacheDir");
+    expect(error.message).not.toContain("既定: ）");
+    expect(error.message).not.toContain(" /sirasagi62/ruri-v3-30m-ONNX を消すと");
+  });
+
+  it("cacheDir を渡したときは、既定の場所ではなく渡した値を名指す（#1223）", async () => {
+    transformers.env.cacheDir = PNPM_CACHE_DIR;
+    const provider = new LocalEmbeddingProvider({ cacheDir: "/x/", retry: { attempts: 1 } });
+    const error = (await provider.warmup().then(
+      () => null,
+      (e: unknown) => e,
+    )) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain("cacheDir=/x/");
+    expect(error.message).toContain(" /x/sirasagi62/ruri-v3-30m-ONNX を消すと");
+    expect(error.message).not.toContain(PNPM_CACHE_DIR);
+  });
+
+  // 記録はモジュール全体で共有される値なので、先に既定の pipeline を失敗させて記録を作り、
+  // その後で注入した pipeline を失敗させる。古い記録が別の provider のメッセージに漏れてはならない。
+  it("createPipeline を注入したときは、既定の pipeline が記録した場所を名指さない（#1223）", async () => {
+    transformers.env.cacheDir = PNPM_CACHE_DIR;
+    await loadFailure();
+    const provider = new LocalEmbeddingProvider({
+      createPipeline: async () => {
+        throw new Error("injected failure");
+      },
+      retry: { attempts: 1 },
+    });
+    const error = (await provider.warmup().then(
+      () => null,
+      (e: unknown) => e,
+    )) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).not.toContain(PNPM_CACHE_DIR);
+    expect(error.message).toContain("env.cacheDir");
+  });
 });
