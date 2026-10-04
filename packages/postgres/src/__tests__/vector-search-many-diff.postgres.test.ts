@@ -175,6 +175,25 @@ add(
   "queries:同じ key が離れて3回（間に別の key）",
   one([Q[0]!, Q[1]!, { key: "x", vector: [0, 0, 1] }, { key: "x", vector: [1, 0, 1] }]),
 );
+// #1299 M8: 返る Map の key は入力と一字一句同じ（空白・Unicode の正規化・大文字小文字で、key を加工も統合もしない）。
+// key ごとにベクトルを変えてあるので、結果が混ざれば（key の取り違え・統合）並びか中身に出る。
+const KEY_EXACTNESS: Record<string, Query[]> = {
+  "queries:key の前後に空白": [
+    { key: " x ", vector: [1, 0, 0] },
+    { key: "x", vector: [0, 1, 0] },
+    { key: "\ty\n", vector: [0, 0, 1] },
+  ],
+  "queries:key が合成済みの é と分解形の é": [
+    { key: "é", vector: [1, 0, 0] },
+    { key: "é", vector: [0, 1, 0] },
+  ],
+  "queries:key が大文字小文字だけ違う": [
+    { key: "Key", vector: [1, 0, 0] },
+    { key: "key", vector: [0, 1, 0] },
+    { key: "KEY", vector: [0, 0, 1] },
+  ],
+};
+for (const [name, queries] of Object.entries(KEY_EXACTNESS)) add(name, one(queries));
 add("queries:key が空文字", one([{ key: "", vector: [1, 0, 0] }]));
 add("queries:key に NUL", one([{ key: "k\u0000", vector: [1, 0, 0] }]));
 add("queries:次元違い（比較不能）", one([Q[0]!, { key: "short", vector: [1, 0] }]));
@@ -327,6 +346,20 @@ describe("PostgresVectorStore.searchMany は、クエリごとの search を並�
       .filter(([, { raw, many }]) => JSON.stringify(raw.entries) !== JSON.stringify(many.entries))
       .map(([name]) => name);
     expect(changed).toEqual([]);
+  });
+
+  it("🔴 返る Map の key は入力と一字一句同じで、key ごとの結果は混ざらない（#1299 M8）", () => {
+    for (const [name, queries] of Object.entries(KEY_EXACTNESS)) {
+      const run = uniqueKeyRuns.get(name)!;
+      expect(
+        run.many.entries.map(([k]) => k),
+        `${name}: key は入力のまま、同じ並び`,
+      ).toEqual(queries.map((q) => q.key));
+      // key ごとにベクトルが違うので、結果も key ごとに違う（統合・取り違えがあれば減る）。
+      expect(new Set(run.many.entries.map(([, v]) => JSON.stringify(v))).size, name).toBe(
+        queries.length,
+      );
+    }
   });
 
   it("検算: 同点・比較不能・絞り込み・例外が実際に起きている（この歯が何も比べていない、にならないため）", () => {
