@@ -625,5 +625,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0608](./0608-merged-0928-recheck-teeth-a.md) | 09/28 前後にマージされた #1318・#1366・#1378 の確かめ直しで見つかった穴に歯を足す（forget・purge 後の extract 再配達・restoreSupersededBy の Invalid Date・生きた接続の release(err)） | 採用 (2026-10) |
 | [0609](./0609-merged-pr-1377-recheck-teeth.md) | マージ済み #1377（client の型を SDK のクラスから自前の構造型へ切り離した。ADR 0350）の確かめ直しで見つかった穴を塞ぐ（openai の temperature・anthropic の system・公開 .d.ts の SDK import・stop_details の型） | 採用 (2026-10) |
 | [0611](./0611-merged-0928-recheck-teeth-b.md) | 09/28 前後にマージされた #1310・#1329・#1350・#1351・#1354・#1355 の確かめ直しで見つかった軽い穴に歯を足す（案内の code 条件と cause の循環・2者版の勝者の綴り・件数の名乗り・較正の借り元・timeZone の受け入れ・claimedBy の空文字） | 採用 (2026-10) |
+| [0614](./0614-merged-0927-postgres-recheck-teeth.md) | 09/27 にマージされた postgres の #1187・#1299・#1289・#1220・#1195 の確かめ直しで見つかった穴に歯を足す（restoreSuperseded の複数 id・語彙クエリの `.` と `-`・searchMany の key の綴り・共有の拡張ロック） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
