@@ -102,6 +102,13 @@ describe("PostgresMemoryStore", () => {
     await expect(store.listBySourceObservation(A, OBS, null)).resolves.toEqual([]);
     await rejectsNamed(() => store.listBySourceObservation(A, OBS, NUL), "extractorVersion");
   });
+
+  it("listBySourceObservation: observationId が uuid の形でなければ、extractorVersion に NUL があっても今までどおり DB に行かず [] を返す（断る入力は増やさない）", async () => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    await expect(store.listBySourceObservation(A, "not-a-uuid", "v1")).resolves.toEqual([]);
+    await expect(store.listBySourceObservation(A, "not-a-uuid", NUL)).resolves.toEqual([]);
+  });
 });
 
 describe("検索の絞り（filter）", () => {

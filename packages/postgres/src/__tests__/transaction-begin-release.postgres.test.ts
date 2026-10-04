@@ -102,6 +102,59 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
     }
   });
 
+  it("release のあと、差し替えた query は接続に残らない（次の貸し出しへ持ち越して、古い transaction の記録を引きずらない）", async () => {
+    const client = createPostgresClient(requireDatabaseUrl(), {
+      max: 1,
+      application_name: "bg1-query-reset",
+      onPoolError: () => {},
+    });
+    try {
+      const raw = (client.db as typeof client.db & { $client: Pool }).$client;
+      const first: PoolClient = await raw.connect();
+      expect(Object.hasOwn(first, "query")).toBe(true);
+      const prototypeQuery = Object.getPrototypeOf(first).query;
+      first.release();
+      expect(Object.hasOwn(first, "query")).toBe(false);
+      expect(first.query).toBe(prototypeQuery);
+      // 同じ物理接続を借り直しても、包みが二重に積まれない。
+      const second: PoolClient = await raw.connect();
+      expect(second).toBe(first);
+      second.release();
+      expect(Object.hasOwn(second, "query")).toBe(false);
+    } finally {
+      await closeWithin(client);
+    }
+  });
+
+  it("捨てる接続（release(err)）には error リスナーを残し、返す接続（release()）からは外す", async () => {
+    const client = createPostgresClient(requireDatabaseUrl(), {
+      max: 2,
+      application_name: "bg1-listener-on-discard",
+      onPoolError: () => {},
+    });
+    try {
+      const raw = (client.db as typeof client.db & { $client: Pool }).$client;
+      const returned: PoolClient = await raw.connect();
+      // 借りている間に付いている error リスナー（mnemora の何もしないリスナーを含む）。
+      const returnedWhileBorrowed = returned.listeners("error");
+      expect(returnedWhileBorrowed.length).toBeGreaterThan(0);
+      returned.release();
+      // 返したあとは、借りている間のリスナーは1つも残らない（pool 自身の待機用リスナーに替わる）。
+      expect(returned.listeners("error").some((l) => returnedWhileBorrowed.includes(l))).toBe(
+        false,
+      );
+
+      const doomed: PoolClient = await raw.connect();
+      const doomedWhileBorrowed = doomed.listeners("error");
+      expect(doomedWhileBorrowed.length).toBeGreaterThan(0);
+      doomed.release(new Error("捨てる"));
+      // 捨てたあとに届く切断の error を受ける者が残っている（無ければ process が落ちる）。
+      expect(doomed.listeners("error").some((l) => doomedWhileBorrowed.includes(l))).toBe(true);
+    } finally {
+      await closeWithin(client);
+    }
+  });
+
   /** backend の pid が `pg_stat_activity` に在るか。切った直後は消えるまで少しかかるので、消えるのを最大 2 秒待つ。 */
   const backendGone = async (pid: number): Promise<boolean> => {
     for (let i = 0; i < 40; i += 1) {

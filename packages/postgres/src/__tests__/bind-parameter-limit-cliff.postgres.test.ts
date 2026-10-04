@@ -91,7 +91,9 @@ describe("reinforceMany — 件数の崖（ADR 0443）", () => {
 });
 
 describe("observe({ kind: 'memory_usage' }) — 件数の崖（ADR 0443）", () => {
-  for (const n of [13_106, 13_107]) {
+  // 13107 は強化（reinforceMany）の崖。33000 は、使用の記録（recall_usages の INSERT）が id を1件ずつ2か所に
+  // バインドする形に戻ったときの崖（2 × 33000 > 65535）を見る。
+  for (const n of [13_106, 13_107, 33_000]) {
     it(`${n} 件の使用報告: 例外にならず、全件を記録して強化する`, async () => {
       await resetTestDatabase();
       const runtime = createRuntime({

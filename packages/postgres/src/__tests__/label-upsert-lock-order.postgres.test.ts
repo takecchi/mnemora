@@ -48,8 +48,16 @@ describe("PostgresMemoryStore.createMemory は逆順の tags の同時作成で 
         ),
       );
       for (const r of results) {
-        if (r.status === "rejected") failures.push(String((r.reason as Error).message));
+        if (r.status === "rejected") {
+          const reason = r.reason as Error & { cause?: { message?: string; code?: string } };
+          // drizzle は元の例外を `Failed query` で包む。deadlock かどうかは cause の SQLSTATE・文面にある。
+          failures.push(
+            `${reason.message.slice(0, 60)} <-${reason.cause?.code ?? ""} ${reason.cause?.message ?? ""}`,
+          );
+        }
       }
+      // 落ちた作成があれば、ここで理由（deadlock detected・40P01 など）つきで赤くする。
+      expect(failures).toEqual([]);
       const labels = await store.listLabels(ctx);
       expect(labels.map((l) => [l.name, l.proposedCount])).toEqual([
         ["a", 6],

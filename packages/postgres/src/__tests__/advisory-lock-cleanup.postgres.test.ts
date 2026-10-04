@@ -82,6 +82,32 @@ describe("acquireAdvisoryLock・releaseAdvisoryLock の後始末", () => {
   });
 });
 
+describe("接続側で渡した lock_timeout は、待ち時間切れで失敗しても書き換えない（ADR 0460）", () => {
+  it("options で lock_timeout=7s を渡した pool で、取得が時間切れになったあと、どの接続の lock_timeout も 7s のまま（0 にも取得時の値にもしない）", async () => {
+    const pool = new Pool({
+      connectionString: requireDatabaseUrl(),
+      max: 2,
+      options: "-c lock_timeout=7s",
+    });
+    pools.push(pool);
+    const held = await acquireAdvisoryLock(pool, 9_330_003n, 5_000, errors);
+    await expect(acquireAdvisoryLock(pool, 9_330_003n, 100, errors)).rejects.toThrow(
+      /^timeout after/,
+    );
+    await releaseAdvisoryLock(held.client, 9_330_003n);
+
+    const clients = await Promise.all([pool.connect(), pool.connect()]);
+    try {
+      expect(await Promise.all(clients.map((client) => lockTimeoutOf(client)))).toEqual([
+        "7s",
+        "7s",
+      ]);
+    } finally {
+      for (const client of clients) client.release();
+    }
+  });
+});
+
 describe("B4: releaseAdvisoryLockOnClient はロックを外すだけ", () => {
   it("lock_timeout を戻さず、接続も返さない（呼び出し側が続けてその接続を使える）", async () => {
     const pool = newPool(1);
