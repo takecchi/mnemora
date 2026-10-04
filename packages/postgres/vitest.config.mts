@@ -28,6 +28,8 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/drizzle-pool-proxy.test.ts",
   "src/__tests__/migrate-cli-pool-idle-loss.test.ts",
   "src/__tests__/migrate-connection-loss.test.ts",
+  // #1220 の歯。pg_stat_activity・pg_terminate_backend・CREATE ROLE を使うので直列群。
+  "src/__tests__/migrate-extension-lock.test.ts",
   "src/__tests__/outbox-claim-statement-failure-recovery.postgres.test.ts",
   "src/__tests__/pool-error-warning-guard.postgres.test.ts",
   "src/__tests__/pool-idle-connection-loss.test.ts",
