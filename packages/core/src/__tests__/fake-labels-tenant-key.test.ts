@@ -48,4 +48,22 @@ describe("FakeMemoryStore のラベルは `::` を含むテナントでも分か
     expect(await brief(A)).toEqual([["b::x", 1]]);
     expect(await brief(AB)).toEqual([["x", 1]]);
   });
+
+  it("registerLabel が別テナントのラベルを昇格させない（#1135）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await memoryStore.createMemory(AB, newMemory(AB.tenantId, ["x"]));
+    await memoryStore.registerLabel(A, "b::x");
+
+    const brief = async (ctx: Ctx) =>
+      (await memoryStore.listLabels(ctx)).map((l) => [l.name, l.status, l.proposedCount]);
+    expect(await brief(A)).toEqual([["b::x", "registered", 0]]);
+    expect(await brief(AB)).toEqual([["x", "proposed", 1]]);
+  });
+
+  it("前方一致で、テナント `a` の一覧に `a::b` のラベルが出ない（#1135）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await memoryStore.createMemory(AB, newMemory(AB.tenantId, ["y"]));
+
+    expect(await memoryStore.listLabels(A)).toEqual([]);
+  });
 });

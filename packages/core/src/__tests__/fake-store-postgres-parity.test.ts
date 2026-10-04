@@ -554,6 +554,35 @@ describe("FakeMemoryStore.createMemory: float4 で 0 に丸まる値（アンダ
     const b = await memoryStore.createMemory(ctx, fixture({ halfLifeHours: 0 }));
     expect([a.strength, b.halfLifeHours]).toEqual([1e-45, 0]);
   });
+
+  // float4 の最小の非正規数は約 1.4013e-45。その半分（約 7.0065e-46）より小さい値は 0 に丸まり、
+  // 大きい値は最小の非正規数に丸まる（#1095）。境界の両側を見る。
+  it("境界の両側: 7.0e-46（0 に丸まる）は拒み、7.1e-46（最小の非正規数に丸まる）は通す", async () => {
+    expect(Math.fround(7.0e-46)).toBe(0);
+    expect(Math.fround(7.1e-46)).toBe(1.4012984643248171e-45);
+    for (const field of ["halfLifeHours", "strength"] as const) {
+      const { memoryStore } = createFakeRuntimeStores();
+      await expect(
+        memoryStore.createMemory(
+          ctx,
+          fixture({ contentHash: `edge-low-${field}`, [field]: 7.0e-46 }),
+        ),
+      ).rejects.toThrow(/does not fit in a Postgres "real"/);
+      await expect(
+        memoryStore.createMemory(
+          ctx,
+          fixture({ contentHash: `edge-high-${field}`, [field]: 7.1e-46 }),
+        ),
+      ).resolves.toBeDefined();
+    }
+  });
+
+  it("createMemoryWithOutbox も同じ入口で拒む（strength: 1e-46、#1095）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createMemoryWithOutbox(ctx, fixture({ strength: 1e-46 }), []),
+    ).rejects.toThrow(/does not fit in a Postgres "real"/);
+  });
 });
 
 /**
@@ -656,6 +685,46 @@ describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は�
       observation({ payload: { text }, attributes: { k: text } }),
     );
     expect((await memoryStore.getObservation(ctx, created.id))?.payload).toEqual({ text });
+  });
+
+  // jsonb の判定は `JSON.stringify` した結果を辿る（Postgres が受け取る形）ので、`toJSON` による変換も同じ形になる（#1073）。
+  it("toJSON が NUL を返す値は拒む（元の値には NUL が無くても、Postgres が受け取る JSON に NUL がある）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createObservation(
+        ctx,
+        observation({ payload: { toJSON: () => ({ text: "a\u0000b" }) } as never }),
+      ),
+    ).rejects.toThrow(/payload must not contain NUL characters/);
+    await expect(
+      memoryStore.createObservation(
+        ctx,
+        observation({ attributes: { toJSON: () => ({ k: "a\u0000" }) } as never }),
+      ),
+    ).rejects.toThrow(/attributes must not contain NUL characters/);
+  });
+
+  it("元の値に NUL があっても、toJSON が消すなら通す（Postgres が受け取る JSON に NUL が無い）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    // 数えられない（列挙されない）プロパティにする——Fake の複製（structuredClone）が関数を持つ欄で落ちないように。
+    const payload = Object.defineProperty({ text: "a\u0000b" }, "toJSON", {
+      value: () => ({ text: "ok" }),
+      enumerable: false,
+    });
+    await expect(
+      memoryStore.createObservation(ctx, observation({ payload: payload as never })),
+    ).resolves.toBeDefined();
+  });
+
+  it("同じ externalId の Observation が既に在っても、NUL を含む再送は例外になる（#1073）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await memoryStore.createObservation(ctx, observation({ externalId: "ext-1" }));
+    await expect(
+      memoryStore.createObservation(
+        ctx,
+        observation({ externalId: "ext-1", payload: { text: "\u0000" } }),
+      ),
+    ).rejects.toThrow(/must not contain NUL characters/);
   });
 
   it("createMemory: attributes / provenance に NUL → 例外", async () => {

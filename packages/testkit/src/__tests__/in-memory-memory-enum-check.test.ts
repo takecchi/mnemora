@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx, NewMemory, NewMemoryEvent } from "@mnemora/core";
+import {
+  DigestSourceSchema,
+  EmbeddingStatusSchema,
+  MemoryStatusConflictError,
+  MemoryStatusSchema,
+  ProvenanceKindSchema,
+} from "@mnemora/core";
 import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
+import { assertStorableMemoryColumn } from "../__fixtures__/memory-enum-check.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
 /**
@@ -160,4 +168,125 @@ describe("testkit の fixture は memories の列挙の列に無い値を拒む"
     expect((await memoryStore.get(ctx, b.id))?.status).toBe("contested");
     expect(memoryStore.events).toHaveLength(eventsBefore);
   });
+
+  it("updateStatusWithEvent でも、見つからない id・CAS の食い違いは、列挙の検査より先に決まる（#1183）", async () => {
+    const { memoryStore } = build();
+    const m = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "enum-order-with-event" }),
+    );
+
+    await expect(
+      memoryStore.updateStatusWithEvent(ctx, "mem-missing", BOGUS, {}, event("mem-missing")),
+    ).rejects.toThrow(/memory not found/);
+    await expect(
+      memoryStore.updateStatusWithEvent(
+        ctx,
+        m.id,
+        BOGUS,
+        { expectedStatus: "archived" },
+        event(m.id),
+      ),
+    ).rejects.toThrow(MemoryStatusConflictError);
+  });
+
+  describe("supersedeWithNewMemories の news[i] の列挙の外の値を拒み、何も書かない（#1183）", () => {
+    const cases: Array<[string, Partial<NewMemory>, RegExp]> = [
+      ["status", { status: BOGUS }, /^memories\.status must be one of /],
+      ["digestSource", { digestSource: BOGUS }, /^memories\.digest_source must be one of /],
+      [
+        "embeddingStatus",
+        { embeddingStatus: BOGUS },
+        /^memories\.embedding_status must be one of /,
+      ],
+      [
+        "provenance.kind",
+        { provenance: { kind: BOGUS } },
+        /^memories\.provenance_kind must be one of /,
+      ],
+    ];
+    it.each(cases)("%s", async (field, override, message) => {
+      const { memoryStore } = build();
+      const old = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: `enum-super-old-${field}` }),
+      );
+      await expect(
+        memoryStore.supersedeWithNewMemories(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({
+                tenantId: ctx.tenantId,
+                contentHash: `enum-super-ok-${field}`,
+              }),
+              jobKinds: ["embed"],
+            },
+            {
+              input: {
+                ...buildNewMemoryFixture({
+                  tenantId: ctx.tenantId,
+                  contentHash: `enum-super-bad-${field}`,
+                }),
+                ...override,
+              },
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: event(old.id),
+            },
+          ],
+        ),
+      ).rejects.toThrow(message);
+
+      expect((await memoryStore.get(ctx, old.id))?.status).toBe("active");
+      expect(memoryStore.listByTenant(ctx)).toHaveLength(1);
+      expect(memoryStore.outboxJobs).toHaveLength(0);
+      expect(memoryStore.events).toHaveLength(0);
+    });
+  });
+});
+
+describe("assertStorableMemoryColumn は、列ごとに列挙のすべての値を通し、近い綴りを拒む（#1183）", () => {
+  const columns = {
+    status: MemoryStatusSchema.options,
+    digest_source: DigestSourceSchema.options,
+    embedding_status: EmbeddingStatusSchema.options,
+    provenance_kind: ProvenanceKindSchema.options,
+  } as const;
+  const allOptions = new Set<string>(Object.values(columns).flat());
+
+  for (const [column, options] of Object.entries(columns)) {
+    const name = column as keyof typeof columns;
+
+    it(`${column}: 列挙のすべての値（${options.join(", ")}）は通る`, () => {
+      for (const option of options) {
+        expect(() => assertStorableMemoryColumn(name, option)).not.toThrow();
+      }
+    });
+
+    it(`${column}: 近い綴り・ほかの列の値・列挙に無い値は、値の集合を名指しして拒む`, () => {
+      const outside = new Set<unknown>(["", " ", "bogus", "purged", null, undefined, 0]);
+      for (const option of options) {
+        outside.add(option.toUpperCase());
+        outside.add(` ${option}`);
+        outside.add(`${option} `);
+        outside.add(option.slice(0, -1));
+      }
+      for (const other of allOptions) {
+        if (!(options as readonly string[]).includes(other)) outside.add(other);
+      }
+      for (const value of outside) {
+        if ((options as readonly unknown[]).includes(value)) continue;
+        expect(() => assertStorableMemoryColumn(name, value)).toThrow(
+          `memories.${column} must be one of ${options.join(", ")} (got ${JSON.stringify(value)})`,
+        );
+      }
+    });
+  }
 });

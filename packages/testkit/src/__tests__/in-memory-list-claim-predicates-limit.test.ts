@@ -50,6 +50,22 @@ describe("InMemoryMemoryStore.listActiveClaimPredicates: limit を Postgres と�
     ).rejects.toThrow(/limit must not be negative/);
   });
 
+  for (const limit of [-1.5, -Infinity]) {
+    it(`limit=${limit}（負かつ整数でない）は、先頭の検査＝整数の文面で拒む（#1157）`, async () => {
+      const store = await storeWithPredicates();
+      await expect(
+        store.listActiveClaimPredicates(ctx, { subjectId: null, limit }),
+      ).rejects.toThrow(/limit must be an integer/);
+    });
+  }
+
+  it("limit=2^53 は通り、全件を返す（#1157）", async () => {
+    const store = await storeWithPredicates();
+    await expect(
+      store.listActiveClaimPredicates(ctx, { subjectId: null, limit: 2 ** 53 }),
+    ).resolves.toHaveLength(3);
+  });
+
   it("limit が 2^63 以上のとき例外を投げ、2^63 未満で最大の double では投げない", async () => {
     const store = await storeWithPredicates();
     await expect(

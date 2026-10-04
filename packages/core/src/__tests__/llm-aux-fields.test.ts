@@ -40,6 +40,24 @@ describe("sanitizeCandidateAuxFields", () => {
     expect(dropped[0]!.count).toBe(DROPPED_TAG_INDEXES_MAX + 5);
     expect(dropped[0]!.tagIndexes).toHaveLength(DROPPED_TAG_INDEXES_MAX);
   });
+
+  it("NUL の要素を捨てるときも、残す要素の前後の空白・空白だけの要素・重複はそのまま残す", () => {
+    const result = sanitizeCandidateAuxFields({
+      ...base,
+      tags: [" a ", "b\u0000", "  ", "a", " a ", "\t"],
+    });
+    expect(result.candidate.tags).toEqual([" a ", "  ", "a", " a ", "\t"]);
+    expect(result.dropped).toEqual([
+      { field: "tags", reason: "nul_character", count: 1, tagIndexes: [1] },
+    ]);
+  });
+
+  it("空白だけの digest は NUL ではないので落とさない（記録も残さない）", () => {
+    const candidate = { ...base, digest: "  　 ", tags: ["x"] };
+    const result = sanitizeCandidateAuxFields(candidate);
+    expect(result.candidate).toBe(candidate);
+    expect(result.dropped).toEqual([]);
+  });
 });
 
 describe("deriveClaimKeys: NUL を含む要素は null（ADR 0443）", () => {

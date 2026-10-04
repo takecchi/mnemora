@@ -21,6 +21,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const NUL = "ab\u0000cd";
 const LONE = "ab\ud800cd";
+const SECRET = "SECRET\u0000VALUE";
 
 describe("sanitizeCandidateSubjectId: 識別子として保存できない値は一覧が無くても弾く", () => {
   it.each([
@@ -197,6 +198,69 @@ describe("consolidate・reflect: LLM が返した digest・tags の保存でき�
     const events = await stores.eventStore.list(ctx, { memoryId: memory!.id, kind: "created" });
     const dropped = (events[0]?.meta as { droppedFields?: Array<{ field: string }> }).droppedFields;
     expect(dropped?.map((d) => d.field).sort()).toEqual(["digest", "tags"]);
+  });
+
+  it("droppedFields の1件ごとの中身: index は 0、contentHash は統合先・内省の本文のハッシュ、落とした値そのものは写さない", async () => {
+    const cases: Array<{
+      name: string;
+      content: string;
+      response: Record<string, unknown>;
+      run: (
+        runtime: ReturnType<typeof makeRuntime>["runtime"],
+        ctx: Ctx,
+        ids: string[],
+      ) => Promise<string>;
+    }> = [
+      {
+        name: "consolidate",
+        content: "統合した本文",
+        response: { content: "統合した本文", digest: SECRET, tags: [SECRET, "ok"] },
+        run: async (runtime, ctx, ids) =>
+          (await runtime.consolidate(ctx, { target: { memoryIds: ids } as never }))
+            .consolidatedMemoryId!,
+      },
+      {
+        name: "reflect",
+        content: "一般化した本文",
+        response: {
+          outcome: "reflected",
+          content: "一般化した本文",
+          digest: SECRET,
+          tags: [SECRET, "ok"],
+        },
+        run: async (runtime, ctx, ids) =>
+          (await runtime.reflect(ctx, { target: { memoryIds: ids } as never })).reflectedMemoryId!,
+      },
+    ];
+    for (const c of cases) {
+      const llm: LLMProvider = {
+        complete: async () => ({ content: "unused" }),
+        completeStructured: async (_c, req) => req.schema.parse(c.response),
+      };
+      const { runtime, stores } = makeRuntime(llm);
+      const ctx: Ctx = { tenantId: `dropped-shape-${c.name}` };
+      const ids = await seedTwo(stores, ctx);
+      const memoryId = await c.run(runtime, ctx, ids);
+      const events = await stores.eventStore.list(ctx, { memoryId, kind: "created" });
+      const meta = events[0]?.meta as { droppedFields?: unknown[] };
+      expect(meta.droppedFields, c.name).toEqual([
+        {
+          index: 0,
+          contentHash: `sha256(${c.content})`,
+          field: "digest",
+          reason: "nul_character",
+        },
+        {
+          index: 0,
+          contentHash: `sha256(${c.content})`,
+          field: "tags",
+          reason: "nul_character",
+          count: 1,
+          tagIndexes: [0],
+        },
+      ]);
+      expect(JSON.stringify(meta), c.name).not.toContain("SECRET");
+    }
   });
 
   it("陽性対照: 保存できる値だけなら、droppedFields は meta に付かず、digest と tags はそのまま", async () => {
