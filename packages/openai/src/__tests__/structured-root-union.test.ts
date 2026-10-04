@@ -122,6 +122,27 @@ describe("OpenAI の strict が受け付ける形で送る（SDK 自身の stric
     expect(children.items).toEqual({ $ref: "#" });
     expect(sent["$defs"]).toBeUndefined();
   });
+
+  // `wrapRootSchema` の doc: 包むとき `$defs` は根に残す（`#/$defs/...` の参照が指す先を変えないため。#1147）。
+  // 枝が再帰する共有のスキーマを持つと、zod は根に `$defs` を作る。
+  it("$defs を持つ根の union を包むと、$defs は包みの根に残り、result の内側には入らない", () => {
+    type Tree = { label: string; children: Tree[] };
+    const TreeSchema: z.ZodType<Tree> = z.lazy(() =>
+      z.object({ label: z.string(), children: z.array(TreeSchema) }),
+    );
+    const schema = z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("a"), tree: TreeSchema }),
+      z.object({ kind: z.literal("b"), trees: z.array(TreeSchema) }),
+    ]);
+    const { schema: sent } = translateForOpenAIStructuredOutput("x", schema);
+    expect(sent["type"]).toBe("object");
+    const defs = sent["$defs"] as Record<string, unknown> | undefined;
+    expect(defs).toBeDefined();
+    expect(Object.keys(defs!).length).toBeGreaterThan(0);
+    const result = (sent["properties"] as { result: Record<string, unknown> }).result;
+    expect(result["$defs"]).toBeUndefined();
+    expect(() => toStrictJsonSchema(structuredClone(sent))).not.toThrow();
+  });
 });
 
 describe("completeStructured: 根が object でないスキーマの往復", () => {
