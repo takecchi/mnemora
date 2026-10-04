@@ -93,9 +93,12 @@ const ctx: Ctx = { tenantId: "restore-superseded-malformed-only-ids" };
 const MALFORMED = "not-a-uuid" as MemoryId;
 let seq = 0;
 
-async function consolidatedGroup(kit: Kit): Promise<{ winner: MemoryId; losers: MemoryId[] }> {
+async function consolidatedGroup(
+  kit: Kit,
+  size = 2,
+): Promise<{ winner: MemoryId; losers: MemoryId[] }> {
   const losers: MemoryId[] = [];
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < size; i++) {
     seq += 1;
     const memory = await kit.memoryStore.createMemory(
       ctx,
@@ -141,6 +144,71 @@ describe("restoreSuperseded の onlyMemoryIds に形式不正な id が混ざっ
         expect(result.outcomes.map((o) => [o.memoryId, o.kind])).toEqual([[losers[0], "restored"]]);
         expect((await kit.memoryStore.get(ctx, losers[0]!))?.status).toBe("active");
         expect((await kit.memoryStore.get(ctx, losers[1]!))?.status).toBe("superseded");
+      });
+
+      // #1195 B10: 有効な id が複数あるとき、形式不正な id を捨てても有効な id を1件に絞らない。
+      it("dryRun: 有効な id が2件＋形式不正な id なら、有効な2件だけが対象で、残りは入らない", async () => {
+        const kit = await makeKit();
+        const { winner, losers } = await consolidatedGroup(kit, 3);
+        const result = await kit.runtime.restoreSuperseded(
+          ctx,
+          { supersededById: winner, onlyMemoryIds: [losers[0]!, losers[1]!, MALFORMED] },
+          { dryRun: true },
+        );
+        // outcomes の並びは契約でないので、id で並べてから比べる。
+        expect(
+          result.outcomes.map((o) => [o.memoryId, o.kind]).sort(([a], [b]) => (a! < b! ? -1 : 1)),
+        ).toEqual(
+          [
+            [losers[0], "would_restore"],
+            [losers[1], "would_restore"],
+          ].sort(([a], [b]) => (a! < b! ? -1 : 1)),
+        );
+      });
+
+      it("実行: 有効な id が2件＋形式不正な id なら、有効な2件だけが戻り、残りは戻らない", async () => {
+        const kit = await makeKit();
+        const { winner, losers } = await consolidatedGroup(kit, 3);
+        const result = await kit.runtime.restoreSuperseded(ctx, {
+          supersededById: winner,
+          onlyMemoryIds: [losers[0]!, losers[1]!, MALFORMED],
+        });
+        expect(
+          result.outcomes.map((o) => [o.memoryId, o.kind]).sort(([a], [b]) => (a! < b! ? -1 : 1)),
+        ).toEqual(
+          [
+            [losers[0], "restored"],
+            [losers[1], "restored"],
+          ].sort(([a], [b]) => (a! < b! ? -1 : 1)),
+        );
+        expect((await kit.memoryStore.get(ctx, losers[0]!))?.status).toBe("active");
+        expect((await kit.memoryStore.get(ctx, losers[1]!))?.status).toBe("active");
+        expect((await kit.memoryStore.get(ctx, losers[2]!))?.status).toBe("superseded");
+      });
+
+      // #1195 B6': onlyMemoryIds が空配列なら「絞り込みあり・対象0件」であり、群全体を戻さない。
+      it("dryRun: onlyMemoryIds が空配列なら、対象0件", async () => {
+        const kit = await makeKit();
+        const { winner } = await consolidatedGroup(kit, 3);
+        const result = await kit.runtime.restoreSuperseded(
+          ctx,
+          { supersededById: winner, onlyMemoryIds: [] },
+          { dryRun: true },
+        );
+        expect(result.outcomes).toEqual([]);
+      });
+
+      it("実行: onlyMemoryIds が空配列なら、対象0件で、群は戻らない", async () => {
+        const kit = await makeKit();
+        const { winner, losers } = await consolidatedGroup(kit, 3);
+        const result = await kit.runtime.restoreSuperseded(ctx, {
+          supersededById: winner,
+          onlyMemoryIds: [],
+        });
+        expect(result.outcomes).toEqual([]);
+        for (const id of losers) {
+          expect((await kit.memoryStore.get(ctx, id))?.status).toBe("superseded");
+        }
       });
 
       it("形式不正な id だけなら、対象0件", async () => {
