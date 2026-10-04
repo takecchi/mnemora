@@ -11,7 +11,7 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { killConnectionBeforeStatement } from "./pool-fault-injection.js";
+import { killConnectionBeforeStatement, rejectStatement } from "./pool-fault-injection.js";
 import {
   closeTestClient,
   getTestClient,
@@ -126,6 +126,45 @@ describe("db.transaction(): rollback が失敗しても元のエラーを投げ�
       await tx.execute(sql`SELECT 1`);
     });
     expect(client.pool.totalCount).toBe(1);
+  });
+
+  it("接続が生きたまま rollback だけが失敗したときも、その接続は pool に戻らず捨てられる（開いたままのトランザクションを次の借り手へ渡さない）", async () => {
+    const app = "bg2-discard-alive";
+    const client = victim(app);
+    const original = new Error("元のエラー");
+    const rollbackFailure = new Error("INJECTED: rollback failure");
+    let pid = 0;
+    const restore = rejectStatement({
+      applicationName: app,
+      matches: (text) => /^\s*rollback\s*;?\s*$/i.test(text),
+      error: rollbackFailure,
+      times: 1,
+    });
+    let error: unknown;
+    try {
+      error = await client.db
+        .transaction(async (tx) => {
+          const { rows } = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+          pid = (rows[0] as { pid: number }).pid;
+          throw original;
+        })
+        .catch((e: unknown) => e);
+    } finally {
+      restore();
+    }
+    expect(error).toBe(original);
+    expect((error as Error).cause).toBe(rollbackFailure);
+    expect(client.pool.totalCount).toBe(0);
+    expect(client.pool.idleCount).toBe(0);
+    let gone = false;
+    for (let i = 0; i < 40 && !gone; i += 1) {
+      const { rows } = await admin.pool.query("SELECT 1 FROM pg_stat_activity WHERE pid = $1", [
+        pid,
+      ]);
+      gone = rows.length === 0;
+      if (!gone) await sleep(50);
+    }
+    expect(gone, "捨てたはずの接続の backend が残っている").toBe(true);
   });
 
   describe("forget / purge の outcomes[].error にも元のエラーが載る", () => {

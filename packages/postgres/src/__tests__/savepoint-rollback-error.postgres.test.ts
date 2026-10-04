@@ -276,6 +276,31 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
     expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
   });
 
+  it("悪い候補（rollback は成功して dropped）のあとの良い候補で release savepoint が失敗: 前の候補の失敗ではなく、release の失敗を投げる（何も残らない）", async () => {
+    await fresh();
+    const releaseFailure = new Error("INJECTED: release savepoint failure");
+    const restore = rejectStatement({
+      applicationName: APP,
+      matches: (text) => /^\s*release savepoint\b/i.test(text),
+      error: releaseFailure,
+      times: 1,
+    });
+    let error: unknown;
+    try {
+      error = await write([nul("a"), good("b")]).promise.then(
+        () => "RESOLVED",
+        (e: unknown) => e,
+      );
+    } finally {
+      restore();
+    }
+    expect(error).not.toBe("RESOLVED");
+    expect(chain(error)).toContain(releaseFailure.message);
+    // 前の候補（a）の DB の拒否（23514）が、いまの失敗として投げられていない。
+    expect(innermostCode(error)).not.toBe("23514");
+    expect(await ghostCount()).toEqual({ memories: 0, events: 0, outbox: 0 });
+  });
+
   it("接続ごと切られた（実際の kill）: 元の 23514 が投げられ、pool は枯れない", async () => {
     await fresh();
     const restore = killConnectionBeforeStatement({
