@@ -228,6 +228,10 @@ const ID_VALUES: Record<string, (h: Kit, target: Target) => string> = {
   self: (h, target) => ({ m: h.m.id, obs: h.obs.id, ev: h.ev.id })[target],
   missing: () => "00000000-0000-4000-8000-000000000000",
   malformed: () => "not-a-uuid",
+  // #1289 A10・#1195 B8: 長さは uuid と同じ36文字だが、hex でない（長さだけで形を判じる実装を落とす）。
+  nonHex36: () => "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+  // #1289 A11・#1195 B9: 有効な uuid の前後に余分が付いた値（`^`・`$` を欠いた正規表現を落とす）。
+  padded: (h, target) => `xx${ID_VALUES.self!(h, target)}yy`,
   empty: () => "",
   other: (h, target) => ({ m: h.om.id, obs: h.oobs.id, ev: h.oev.id })[target],
 };
@@ -380,6 +384,26 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
   add(`restoreSupersededBy(self,{only:[${idKind}]})`, (h) =>
     h.s.ms.restoreSupersededBy(h.ctx, h.m.id, { at: new Date() }, { onlyMemoryIds: [id(h)] }),
   );
+  // #1195 B2: preview 側にも restore と同じ形の場面（形の崩れた id は群に居ないものとして、投げない）。
+  add(`previewRestoreSupersededBy(self,{only:[${idKind}]})`, (h) =>
+    h.s.ms.previewRestoreSupersededBy(h.ctx, h.m.id, { onlyMemoryIds: [id(h)] }),
+  );
+  // 群が実在する場面（m2 が m に置き換えられている）。上の2つは群が空なので、絞り込みが効いているかは見えない。
+  add(`restoreSupersededBy(group,{only:[self2,${idKind}]})`, async (h) => {
+    await h.s.ms.updateStatus(h.ctx, h.m2.id, "superseded", { supersededById: h.m.id });
+    return h.s.ms.restoreSupersededBy(
+      h.ctx,
+      h.m.id,
+      { at: new Date() },
+      { onlyMemoryIds: [h.m2.id, id(h)] },
+    );
+  });
+  add(`previewRestoreSupersededBy(group,{only:[self2,${idKind}]})`, async (h) => {
+    await h.s.ms.updateStatus(h.ctx, h.m2.id, "superseded", { supersededById: h.m.id });
+    return h.s.ms.previewRestoreSupersededBy(h.ctx, h.m.id, {
+      onlyMemoryIds: [h.m2.id, id(h)],
+    });
+  });
   add(`createMemory(sourceObservationId:${idKind})`, (h) =>
     h.s.ms.createMemory(
       h.ctx,
@@ -423,6 +447,15 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
   add(`outbox.complete(${idKind},1)`, (h) => h.s.os.complete(h.ctx, id(h), 1));
   add(`outbox.fail(${idKind},1)`, (h) => h.s.os.fail(h.ctx, id(h), "e", 1));
 }
+// #1195 B6': onlyMemoryIds が空配列なら絞り込みあり・対象0件（群全体を戻さない）。群が実在する場面で当てる。
+add("restoreSupersededBy(group,{only:[]})", async (h) => {
+  await h.s.ms.updateStatus(h.ctx, h.m2.id, "superseded", { supersededById: h.m.id });
+  return h.s.ms.restoreSupersededBy(h.ctx, h.m.id, { at: new Date() }, { onlyMemoryIds: [] });
+});
+add("previewRestoreSupersededBy(group,{only:[]})", async (h) => {
+  await h.s.ms.updateStatus(h.ctx, h.m2.id, "superseded", { supersededById: h.m.id });
+  return h.s.ms.previewRestoreSupersededBy(h.ctx, h.m.id, { onlyMemoryIds: [] });
+});
 add("getMany([])", (h) => h.s.ms.getMany(h.ctx, []));
 add("reinforceMany([])", (h) => h.s.ms.reinforceMany(h.ctx, [], later()));
 add("reinforceMany([self,self])", (h) => h.s.ms.reinforceMany(h.ctx, [h.m.id, h.m.id], later()));
@@ -565,6 +598,13 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
       digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m"), "not-a-uuid"] },
     }),
   );
+  // #1289 S3: scopeAggregate:"skip" の経路（別の SQL）でも、形の崩れた id は投げず、ほかの除外は効く。
+  add(`aggregateScope(skip,digestBand.excludeMemoryIds:[${idKind},malformed])`, (h) =>
+    h.s.ms.aggregateScope(h.ctx, scope(h), {
+      scopeAggregate: "skip",
+      digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m"), "not-a-uuid"] },
+    }),
+  );
   add(`findActiveByClaimKey(excludeMemoryId:${idKind})`, (h) =>
     h.s.ms.findActiveByClaimKey(h.ctx, {
       subjectId: null,
@@ -680,6 +720,16 @@ add("aggregateScope(taxonomyGroupCandidates:[])", (h) =>
 add("aggregateScope(digestBand.limit:0)", (h) =>
   h.s.ms.aggregateScope(h.ctx, scope(h), { digestBand: { limit: 0, excludeMemoryIds: [] } }),
 );
+// #1289 A6: 有効な id が複数あるときの除外（形の崩れた id を落としても、有効な2件は両方とも除外される）。
+for (const skip of [false, true]) {
+  const mode = skip ? "skip," : "";
+  add(`aggregateScope(${mode}digestBand.excludeMemoryIds:[self,self2,malformed])`, (h) =>
+    h.s.ms.aggregateScope(h.ctx, scope(h), {
+      ...(skip ? { scopeAggregate: "skip" as const } : {}),
+      digestBand: { limit: 10, excludeMemoryIds: [h.m.id, h.m2.id, "not-a-uuid"] },
+    }),
+  );
+}
 add("findActiveByClaimKey(claimKey 空文字)", (h) =>
   h.s.ms.findActiveByClaimKey(h.ctx, {
     subjectId: null,
