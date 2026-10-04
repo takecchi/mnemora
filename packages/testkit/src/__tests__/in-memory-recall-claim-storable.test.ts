@@ -51,12 +51,34 @@ describe("testkit の fixture は createRecall で Postgres が書けない記�
       { budget: { chars: 1, x: "\u0000" } as never },
       /^createRecall: budget must not contain NUL/,
     ],
+    // #1280: jsonb 列の omitted・usage・indexBand・returnedMemories も NUL を拒む。
+    [
+      "omitted に NUL",
+      { omitted: [{ kind: "x\u0000" } as never] },
+      /^createRecall: omitted must not contain NUL/,
+    ],
+    [
+      "usage に NUL",
+      { usage: { ...record().usage, counter: "c\u0000" as never } },
+      /^createRecall: usage must not contain NUL/,
+    ],
+    [
+      "indexBand に NUL",
+      { indexBand: { groups: [], totalInScope: 0, countKind: "exact", x: "\u0000" } as never },
+      /^createRecall: indexBand must not contain NUL/,
+    ],
+    [
+      "returnedMemories に NUL",
+      { returnedMemories: [{ memoryId: "m\u0000" } as never] },
+      /^createRecall: returnedMemories must not contain NUL/,
+    ],
   ];
   it.each(cases)("%s は拒み、記録も活動時計も進めない", async (_name, override, message) => {
     const memoryStore = new InMemoryMemoryStore();
     const settings = new InMemoryTenantSettingsStore(memoryStore.activitySeq);
     await expect(memoryStore.createRecall(ctx, record(override))).rejects.toThrow(message);
     expect(await settings.getActivitySeq(ctx)).toBe(0);
+    expect(memoryStore.recalls.size).toBe(0);
   });
 
   it("文字どおりの \\u0000（バックスラッシュ + u0000）と、budget の省略は受け付ける（陽性対照）", async () => {
@@ -84,6 +106,19 @@ describe("testkit の fixture は claimBatch で NUL を含む claimedBy を拒�
     );
     const claimed = await outbox.claimBatch(ctx, { ...opts, claimedBy: "w" });
     expect(claimed.map((j) => [j.kind, j.attempts, j.claimedBy])).toEqual([["embed", 1, "w"]]);
+  });
+
+  it("ジョブを1件も積んでいない store でも、NUL を含む claimedBy を拒む（#1280）", async () => {
+    const memoryStore = new InMemoryMemoryStore();
+    const outbox = new InMemoryOutboxStore(memoryStore.outboxJobs);
+    await expect(
+      outbox.claimBatch(ctx, {
+        limit: 10,
+        now: new Date(Date.now() + 60_000),
+        leaseMs: 60_000,
+        claimedBy: "w\u0000",
+      }),
+    ).rejects.toThrow(/^claimBatch: claimedBy must not contain NUL characters \(U\+0000\)$/);
   });
 });
 

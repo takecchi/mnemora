@@ -99,4 +99,23 @@ describe("Fake のキーは区切り文字を含む値で衝突しない", () =>
     });
     expect(hits).toEqual([]);
   });
+
+  // #1146: 空間の3欄（provider・model・dimensions）は、どれも完全一致で比べる。
+  it.each<[string, EmbeddingSpaceId]>([
+    ["dimensions だけ違う", { provider: "p", model: "m", dimensions: 4 }],
+    ["provider だけ違う", { provider: "q", model: "m", dimensions: 3 }],
+  ])("ベクトル: %s空間の検索は、別の空間のベクトルを返さない", async (_label, other) => {
+    const stores = createFakeRuntimeStores();
+    const ctx: Ctx = { tenantId: "t" };
+    const own: EmbeddingSpaceId = { provider: "p", model: "m", dimensions: 3 };
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory("t"));
+    const vector = Array.from({ length: other.dimensions }, (_, i) => (i === 0 ? 1 : 0));
+    await stores.vectorStore.upsert(ctx, other, memory.id, vector);
+
+    const hits = await stores.vectorStore.search(ctx, own, [1, 0, 0], {
+      limit: 10,
+      filter: { tenantId: "t" },
+    });
+    expect(hits).toEqual([]);
+  });
 });

@@ -91,6 +91,32 @@ describe("InMemoryMemoryStore: Observation の口は、NUL を含む値を Postg
     expect(got?.payload).toEqual({ text });
     expect(got?.attributes).toEqual({ k: text });
   });
+
+  // jsonb の判定は `JSON.stringify` した結果を辿る（Postgres が受け取る形）ので、`toJSON` による変換も同じ形になる（#1073）。
+  it("toJSON が NUL を返す値は拒む（元の値には NUL が無くても、Postgres が受け取る JSON に NUL がある）", async () => {
+    const store = new InMemoryMemoryStore();
+    await expect(
+      store.createObservation(
+        ctx,
+        observation({ payload: { toJSON: () => ({ text: "a\u0000b" }) } as never }),
+      ),
+    ).rejects.toThrow(/payload must not contain NUL characters/);
+    await expect(
+      store.createObservation(
+        ctx,
+        observation({ attributes: { toJSON: () => ({ k: "a\u0000" }) } as never }),
+      ),
+    ).rejects.toThrow(/attributes must not contain NUL characters/);
+  });
+
+  it("元の値に NUL があっても、toJSON が消すなら通す（Postgres が受け取る JSON に NUL が無い）", async () => {
+    const store = new InMemoryMemoryStore();
+    const created = await store.createObservation(
+      ctx,
+      observation({ payload: { text: "a\u0000b", toJSON: () => ({ text: "ok" }) } as never }),
+    );
+    expect(created.payload).toEqual({ text: "ok" });
+  });
 });
 
 describe("InMemoryMemoryStore.createMemory: jsonb 列（attributes・provenance）の NUL を Postgres と同じく拒む", () => {
