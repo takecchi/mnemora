@@ -302,6 +302,116 @@ const RETURNERS: Array<[string, Returner]> = [
       };
     },
   ],
+  // 以下は、上の17口の別の分岐と、一覧に無かった口（#1114 の歯の足し）。
+  [
+    "createMemoryWithOutbox（冪等の再送。created: false）",
+    async (s) => {
+      const obs = await s.createObservation(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: null,
+        kind: "utterance",
+        payload: { text: "x" },
+        occurredAt: null,
+        recordedAt: new Date(),
+      });
+      const input = () =>
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: "snapshot-resend",
+          tags: ["original-tag"],
+          sourceObservationId: obs.id,
+          extractorVersion: "v1",
+        });
+      await s.createMemoryWithOutbox(ctx, input(), ["embed"]);
+      const resent = await s.createMemoryWithOutbox(ctx, input(), ["embed"]);
+      expect(resent.created).toBe(false);
+      return { returned: [resent.memory] };
+    },
+  ],
+  [
+    "setEmbeddingStatus（何もしない分岐。ready → failed）",
+    async (s) => {
+      const m = await create(s, { embeddingStatus: "ready" });
+      return { returned: [await s.setEmbeddingStatus(ctx, m.id, "failed")] };
+    },
+  ],
+  [
+    "reinforce（何もしない分岐。起点より古い at）",
+    async (s) => ({
+      returned: [await s.reinforce(ctx, (await create(s)).id, new Date(0))],
+    }),
+  ],
+  [
+    "listBySourceObservationAllVersions",
+    async (s) => {
+      const obs = await s.createObservation(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: null,
+        kind: "utterance",
+        payload: { text: "x" },
+        occurredAt: null,
+        recordedAt: new Date(),
+      });
+      await create(s, {
+        sourceObservationId: obs.id,
+        extractorVersion: "v1",
+        provenance: { kind: "stated", observationId: obs.id } as never,
+      });
+      return { returned: await s.listBySourceObservationAllVersions(ctx, obs.id) };
+    },
+  ],
+  [
+    "findContestedByClaimKey",
+    async (s) => {
+      const key = { subject: "user", predicate: `p-contested-${counter}` };
+      const a = await create(s, { claimKey: key });
+      const b = await create(s, { claimKey: key });
+      await s.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id) },
+        { id: b.id, event: event(b.id) },
+      );
+      const probe = await create(s);
+      return {
+        returned: await s.findContestedByClaimKey(ctx, {
+          subjectId: null,
+          claimKey: key,
+          excludeMemoryId: probe.id,
+          contentHash: "no-such-hash",
+          validFrom: null,
+          validUntil: null,
+        }),
+      };
+    },
+  ],
+  [
+    "markContestedGroup",
+    async (s) => {
+      const members = [await create(s), await create(s), await create(s)];
+      const r = await s.markContestedGroup(
+        ctx,
+        members.map((m) => ({ id: m.id, event: event(m.id) })),
+      );
+      return { returned: r.members };
+    },
+  ],
+  [
+    "resolveContestedGroup",
+    async (s) => {
+      const members = [await create(s), await create(s), await create(s)];
+      await s.markContestedGroup(
+        ctx,
+        members.map((m) => ({ id: m.id, event: event(m.id) })),
+      );
+      const r = await s.resolveContestedGroup(
+        ctx,
+        members.map((m) => ({ id: m.id, status: "active" as const, event: event(m.id) })),
+      );
+      return { returned: r.members };
+    },
+  ],
 ];
 
 describe("InMemoryMemoryStore の Memory を返す口は、返した時点の複製を返す（Issue #1108）", () => {

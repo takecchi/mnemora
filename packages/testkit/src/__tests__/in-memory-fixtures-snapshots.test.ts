@@ -424,4 +424,34 @@ describe("(C) 書き込みに渡した入力を後から書き換えても、sto
     });
     expect(early).toBeUndefined();
   });
+
+  it("OutboxStore.claimBatch の now（取り直しのとき availableAt に写る）（#1120）", async () => {
+    const { memoryStore, outboxStore } = kit();
+    await memoryStore.createObservationWithOutbox(ctx, observationInput(), ["extract"]);
+    const firstMs = Date.now() + 60_000;
+    const [first] = await outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(firstMs),
+      claimedBy: "worker",
+      leaseMs: 60_000,
+    });
+    expect(first).toBeDefined();
+
+    // リースが切れたあとの取り直し。availableAt が呼び手の now へ書き直される。
+    const reclaimMs = firstMs + 120_000;
+    const reclaimNow = new Date(reclaimMs);
+    const [reclaimed] = await outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: reclaimNow,
+      claimedBy: "worker",
+      leaseMs: 60_000,
+    });
+    expect(reclaimed).toBeDefined();
+
+    reclaimNow.setTime(0);
+
+    // availableAt が呼び手の now と同じ Date なら、0 に書き換わる。
+    const stored = memoryStore.outboxJobs.find((job) => job.id === first!.id);
+    expect(stored?.availableAt.getTime()).toBe(reclaimMs);
+  });
 });

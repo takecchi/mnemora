@@ -74,4 +74,34 @@ describe("InMemoryMemoryStore.createMemory: float4 で 0 に丸まる値（ア�
     );
     expect([a.strength, b.halfLifeHours, c.halfLifeHours]).toEqual([1e-45, 1e-40, 720]);
   });
+
+  // float4 の最小の非正規数は約 1.4013e-45。その半分（約 7.0065e-46）より小さい値は 0 に丸まり、
+  // 大きい値は最小の非正規数に丸まる（#1095）。境界の両側を見る。
+  it("境界の両側: 7.0e-46（0 に丸まる）は拒み、7.1e-46（最小の非正規数に丸まる）は通す", async () => {
+    expect(Math.fround(7.0e-46)).toBe(0);
+    expect(Math.fround(7.1e-46)).toBe(1.4012984643248171e-45);
+    for (const field of ["halfLifeHours", "strength"] as const) {
+      const store = new InMemoryMemoryStore();
+      await expect(
+        store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: `edge-low-${field}`,
+            [field]: 7.0e-46,
+          }),
+        ),
+      ).rejects.toThrow(REAL);
+      await expect(
+        store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: `edge-high-${field}`,
+            [field]: 7.1e-46,
+          }),
+        ),
+      ).resolves.toBeDefined();
+    }
+  });
 });
