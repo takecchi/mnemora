@@ -43,6 +43,7 @@ import {
 } from "../memory.js";
 import { ProvenanceKindSchema } from "../provenance.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
+import { assertWellFormedNewMemory } from "../new-memory-check.js";
 import type { NewObservation, Observation } from "../observation.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
 import { MemoryEventKindSchema } from "../event.js";
@@ -960,6 +961,10 @@ export class FakeMemoryStore implements MemoryStore {
         `FakeMemoryStore: memories.provenance_kind must be one of ${ProvenanceKindSchema.options.join(", ")} (got ${JSON.stringify(provenanceKind)})`,
       );
     }
+    // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる値（`digest`・`contentHash`・`extractorVersion` の空文字、
+    // `claimKey`・`attributes`・`provenance` の中身の欠け・値域外）は、冪等の衝突の判定より前に（何も書く前に）拒む。
+    // testkit の fixture・`@mnemora/postgres` と同じ検査（`assertWellFormedNewMemory`）。
+    assertWellFormedNewMemory("FakeMemoryStore", input);
     // ADR 0521: 参照する observation の id も大文字小文字を区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。
     input = { ...input, sourceObservationId: normOptId(input.sourceObservationId) } as typeof input;
     const idemKey = this.backing.extractionKey(
