@@ -3043,6 +3043,7 @@ export interface RuntimeConfig {
     digestFallbackLength?: number | undefined;
     defaultClaimedBy?: string | undefined;
     autoQueueConsolidateReflectOnExtract?: boolean | undefined;
+    acceptLlmSubjectIdWithoutCandidates?: boolean | undefined;
 }
 export declare const TICK_SUPPORTED_JOB_KINDS: readonly [
     "extract",

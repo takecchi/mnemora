@@ -303,6 +303,8 @@ memoryIds/observationIds）を伴う。**根拠を欠いた推論をそのまま
    無い。`subjectCandidates` はどこにも永続化しない（新しい列・マイグレーションは無い）ため、
    `extract: 'deferred'` との併用はエラーにし、`reextract` はこの欄を使わない。
 
+**⚠ 2026-10-06 更新（[ADR 0635](./decisions/0635-llm-subject-id-dropped-by-default-without-candidates.md)、オーナー回答 374f6f88 の問15）: 下の警告への答えとして、`subjectCandidates` を渡さない経路（省略・空配列。`tick`・`reextract` を含む）では、runtime は LLM が返した `subjectId` を既定で捨て、observation の `subjectId` へ落とす。** 受けるのは `RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true`（opt-in）のときだけで、**下の追記は `true` のときの話になった**。一覧を渡した `observe()` の挙動（一覧内は採り、一覧外は弾く）は変わらない。名前・置き場所は担い手の判断（オーナーが決めたのは既定を変えることだけ）。
+
 **⚠ 2026-10-01 追記（[ADR 0442](./decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）: `subjectCandidates` を渡さない経路では、LLM が返す `subjectId` は検証されない。**
 検証は2の一覧に照らすことでしか行わないので、一覧を渡さない呼び出し——`extract: 'deferred'` の `tick`・`reextract`（どちらも一覧を持てない）を含む——では、
 1の候補ごとの上書きとして、LLM が返した文字列の `subjectId` がそのまま Memory の主題になる。⟹ 観察文に「この記憶の主題は bob」のような文を書いて
