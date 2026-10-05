@@ -6,64 +6,50 @@ import { describe, expect, it } from "vitest";
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
  *
- * **`Runtime`（`packages/core/src/runtime.ts` の `export interface Runtime`）に生えている
- * メソッドが、README.md / docs/vision.md / docs/architecture.md の3文書すべてで
- * 名指しされていること**（Issue #518、ADR 0244）。
+ * **README.md / docs/vision.md / docs/architecture.md の3文書が、中核5動詞の名前を持っていること
+ * （一次資料 docs/vision.md「中核の5動詞」に逐語で在る）と、`Runtime`
+ * （`packages/core/src/runtime.ts` の `export interface Runtime`）のメソッド名を機械的に数え直せること**
+ * （Issue #518、ADR 0244）。
  *
- * 🔑 **なぜ「件数」ではなく「名前の集合」を検査するか**: Issue #518 が見つけた壊れ方は
- * 「10個」という数字が古くなったことだった。だが同じ Issue の本文が予告したとおり、
- * 方向1（数を消して唯一の出所を指すだけにする、PR #531）だけを実装した翌日には
- * 「数は消えたが、名前の *列挙* のほうが腐る」ことが実際に起きた（`applyCorrection`、
- * ADR 0242 が着地して3文書のどこにも名前が出ない状態になった）。⟹ **この歯は件数を
- * 数え直すのではなく、`Runtime` の各メソッド名が3文書のどこかに `` `name` `` として
- * 実在するかを直接見る。**
+ * ## ⚠ ADR 0633 で、この歯の役目の一部を新しい歯へ移した（2026-10）
+ *
+ * ADR 0244 決定1は「3文書が、中核以外の全メソッド名を `name` の形で並べる」ことを歯で縛っていた
+ * （旧 it 4）。ADR 0633 は、**どのメソッドがどの層かの正本を `runtime.ts` の各メソッドの doc コメントの
+ * `層:` 行に移し、3文書からメソッド名の列挙を外した**。⟹ **旧 it 4 は外した**
+ * （残すと、列挙を外した文書に対して永遠に赤になる）。
+ *
+ * **旧 it 4 の役目——「`Runtime` に口が増えたのに、どこにも名指しされないまま `main` へ入る穴」——は、
+ * `runtime-method-layer-line.test.mjs` が引き継ぐ**: 新しい口は、層の行を持たなければ赤になる
+ * （層の行は `未分類` でもよい）。**ここに残っているのは it 1（中核5動詞の literal の実在）・
+ * 抽出の it（陽性対照を含む）・3文書が空でないことの検査である。**
+ *
+ * 🔑 **なぜ「件数」ではなく「名前の集合」を数え直すか**: Issue #518 が見つけた壊れ方は
+ * 「10個」という数字が古くなったことだった。⟹ 件数は焼き込まず、`Runtime` から毎回数え直す。
  *
  * ## 正典の導出は、コードのパースであってプローズのパースではない
  *
  * `packages/core/src/runtime.ts` を読み、`export interface Runtime {` の行から
  * 列0の `}` までを切り出し、その範囲から行頭2スペースのメソッド宣言
  * （`/^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/`——`?` は TypeScript の任意メソッド構文
- * `name?(`/`name?<` も拾うための追加、2026-09-26、Issue #926）を正規表現で拾う。これは
- * TypeScript の構文を機械的に数え直しているだけであり、`docs/vision.md`「中核を守る
- * 3つの層」のような散文をパースしているわけではない——ADR 0199 が「表現が変わると歯自体が
- * 壊れる」として落とした形（節を切り出してプローズをパースする）とは違う。
+ * `name?(`/`name?<` も拾うための追加、2026-09-26、Issue #926）を正規表現で拾う。
+ * 新しい歯 `runtime-method-layer-line.test.mjs` も同じ規則でメソッド名を拾う。
  *
  * ## literal で持ってよい唯一のもの: 中核5動詞
  *
  * `CORE_VERBS` だけは literal で持つ。正典（`docs/vision.md`「外から見える API: 中核の5動詞」）
  * が逐語で「ここは増やさない」と固定しており、`main` が動いても変わらない側だからである
  * （`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」の「⭐ 線は『main が動くと変わるか』
- * である」）。**`Runtime` の残り（非中核）のメソッド集合は `main` が動けば変わる側なので、
- * literal では持たない**——`export interface Runtime` から毎回数え直す（`it` 2）。
- *
- * ADR 0212（`local-embedding-size-noun-correspondence.test.mjs`）から継いだのは
- * 「literal を持つなら、その literal が一次資料に実在することを別の `it` で検査する」
- * という部分だけである（`it` 1）。「正典値を literal で持つ」という ADR 0212 の型そのものは
- * 継いでいない——ADR 0212 の対象（モデルサイズ）は `main` では動かない側だが、
- * `Runtime` のメソッド集合は動く側であり、前提が違うためである。
+ * である」）。**literal を持つなら、その literal が一次資料に実在することを別の `it` で検査する**
+ * （`it` 1。ADR 0212 から継いだ部分）。
  *
  * ## この歯が縛らないこと
  *
- * ⛔ **3層（保守操作 / 是正・取り消し / 説明）への分類は縛らない。**意味の判定であり、
- * 機械には決まらない（Issue #518 本文、ADR 0223 決定2）。この歯が検査するのは
- * 「名前がどこかに出ているか」だけであり、「正しい節で説明されているか」ではない。
- *
- * ⛔ **⟹ 層を取り違えて書いても、この歯は緑である**（例: `applyCorrection` を誤って
- * 「保守操作」の列に書いても名前は在るので通る）。**この歯が実際に止めるのは1つだけ**——
- * `Runtime` に口が増えたのに、3文書のどれかがそれを一度も名指ししないまま `main` へ
- * 入ること。⭐ **捕まえないもの3つの一覧は ADR 0244「⛔ この歯が捕まえないもの」に在る。**
- *
- * ⛔ **総数はハードコードしない。**`main` が動けば増減する側の数だからである
- * （`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。`it` 2 は下限
- * （`R.length >= 10`）だけを固定する空回り防止であり、正確な総数の代わりにはしない。
+ * ⛔ **層の分類は縛らない**（意味の判定。層の行の有無は `runtime-method-layer-line.test.mjs`）。
+ * ⛔ **総数はハードコードしない。**`it` 2 は下限（`R.length >= 10`）だけを固定する空回り防止である。
  *
  * ## 確かめていないこと
  *
- * - 名前が文書の「どこに」書かれているかは見ていない。3文書のまったく無関係な場所に
- *   名前が1度出ていれば、この歯は通る——保証するのは「名前が落ちていないこと」だけで、
- *   「正しい節で説明されていること」ではない。
- * - `Runtime` 以外の interface（`MemoryStore` 等）に同じ形の焼き込みが在るかは掃いていない
- *   （Issue #518 本文も同じことを「確かめていないこと」に挙げている）。
+ * - `Runtime` 以外の interface（`MemoryStore` 等）に同じ形の焼き込みが在るかは掃いていない。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -190,51 +176,6 @@ describe("Runtime のメソッドが3文書（README/vision/architecture）で�
     ].join("\n");
 
     expect(extractMethodNamesFromBlock(block)).toEqual(["required", "optional", "optionalGeneric"]);
-  });
-
-  it("Runtime のメソッド（中核5動詞を除く）は、README / vision / architecture の3文書すべてで名指しされている", () => {
-    const allNames = extractRuntimeMethodNames();
-    const target = allNames.filter((name) => !CORE_VERBS.includes(name));
-
-    const docTexts = LIVE_DOCS.map((doc) => ({
-      ...doc,
-      text: readFileSync(doc.path, "utf8"),
-    }));
-
-    /** @type {Map<string, string[]>} 文書ラベル -> 見つからなかった名前の配列 */
-    const missingByDoc = new Map();
-    for (const doc of docTexts) {
-      const missing = target.filter((name) => !doc.text.includes(`\`${name}\``));
-      if (missing.length > 0) {
-        missingByDoc.set(doc.label, missing);
-      }
-    }
-
-    if (missingByDoc.size > 0) {
-      const lines = [];
-      for (const [label, names] of missingByDoc) {
-        for (const name of names) {
-          lines.push(`  ${label.padEnd(17)} に無い: ${name}`);
-        }
-      }
-      const message = [
-        "Runtime のメソッドが、生きた文書で名指しされていない:",
-        "",
-        ...lines,
-        "",
-        "⟹ どうすればよいか:",
-        "  packages/core/src/runtime.ts の `export interface Runtime` に口を足したら、",
-        "  上の文書の「中核を守る3つの層」の節に、その名前を `バッククォート付き` で書くこと。",
-        "  ⭐ 3層のどれに分類するかは意味の判定であり、この歯は縛っていない。",
-        "     分類が決まらないなら「どの層にも置かれていない」側に名指しするだけでよい",
-        "     （README.md / docs/vision.md / docs/architecture.md に既にその形が在る）。",
-        "  ⛔ この歯を満たすために、個数を文書へ書き戻さないこと",
-        "     （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。",
-      ].join("\n");
-      expect.fail(message);
-    }
-
-    expect(missingByDoc.size).toBe(0);
   });
 
   it("この歯が読んでいる3文書が、実在して空でない", () => {

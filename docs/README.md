@@ -40,8 +40,9 @@
 `forget()` の5つ。**ここは増やさない。**`Runtime` には他にもメソッドがあるが、⭐ **何が
 在るかの正本は `packages/core/src/runtime.ts` の `export interface Runtime` であり、
 ⛔ ここに個数を写さない**（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。それらは
-保守操作・是正取り消し・説明の3層に分かれる（[docs/vision.md](./vision.md)「外から見える
-API」、[ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md)）。
+保守操作・是正取り消し・説明の3層に分かれ（[docs/vision.md](./vision.md)「外から見える
+API」、[ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md)）、どのメソッドがどの層かの正本は
+各メソッドの doc コメントの `層:` 行である（[ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)）。
 
 ## オーナーの判断を待っている点
 
