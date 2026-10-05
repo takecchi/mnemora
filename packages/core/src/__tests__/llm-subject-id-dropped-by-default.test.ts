@@ -28,8 +28,12 @@ function llm(memories: Cand[]): LLMProvider {
   };
 }
 
-function build(provider: LLMProvider, config?: { acceptLlmSubjectIdWithoutCandidates?: boolean }) {
-  const stores = createFakeRuntimeStores();
+function build(
+  provider: LLMProvider,
+  config?: { acceptLlmSubjectIdWithoutCandidates?: boolean },
+  existingStores?: ReturnType<typeof createFakeRuntimeStores>,
+) {
+  const stores = existingStores ?? createFakeRuntimeStores();
   const runtime = createRuntime({
     memoryStore: stores.memoryStore,
     outboxStore: stores.outboxStore,
@@ -105,13 +109,23 @@ describe("subjectCandidates 無しの抽出は、LLM が返した subjectId を�
   });
 
   it("reextract でも捨てる", async () => {
-    const { runtime, stores } = build(llm([injected]));
-    const r = await runtime.observe(ctx, { kind: "utterance", text: "発話", subjectId: "alice" });
-    const re = await runtime.reextract(ctx, r.observationId);
-    const all = await stores.memoryStore.listBySourceObservationAllVersions(ctx, r.observationId);
+    // 初回は別の本文（同じ本文だと content_hash が同じで、reextract が新しい Memory を作らず、歯が空になる）。
+    const first = build(llm([{ content: "初回の本文", provenanceKind: "stated" }]));
+    const r = await first.runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      subjectId: "alice",
+    });
+    const second = build(llm([injected]), undefined, first.stores);
+    const re = await second.runtime.reextract(ctx, r.observationId);
     expect(re.extraction).toBe("ok");
-    expect(all.length).toBeGreaterThan(0);
-    for (const m of all) expect(m.subjectId).toBe("alice");
+    const all = await first.stores.memoryStore.listBySourceObservationAllVersions(
+      ctx,
+      r.observationId,
+    );
+    const created = all.find((m) => m.content === "注入された主題の記憶");
+    expect(created).toBeDefined();
+    expect(created?.subjectId).toBe("alice");
   });
 });
 
@@ -189,8 +203,16 @@ describe("acceptLlmSubjectIdWithoutCandidates: true（opt-in）なら、従来�
     await runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 });
     const viaTick = await stores.memoryStore.listBySourceObservationAllVersions(ctx, r.observationId);
     expect(viaTick.map((m) => m.subjectId)).toEqual(["victim-subject"]);
-    const re = await runtime.reextract(ctx, r.observationId);
+    // reextract（別の本文を返す LLM、同じ stores）。
+    const other = build(
+      llm([{ content: "やり直した本文", provenanceKind: "stated", subjectId: "victim-2" }]),
+      on,
+      stores,
+    );
+    const re = await other.runtime.reextract(ctx, r.observationId);
     expect(re.extraction).toBe("ok");
+    const all = await stores.memoryStore.listBySourceObservationAllVersions(ctx, r.observationId);
+    expect(all.find((m) => m.content === "やり直した本文")?.subjectId).toBe("victim-2");
   });
 
   it("false を明示しても既定と同じ（捨てる）", async () => {
