@@ -2603,6 +2603,7 @@ export interface ResolveContestedGroupResult {
  */
 export interface Runtime {
   /**
+   * 層: 中核
    * `docs/architecture.md` §3.5 の Observation 冪等キー（`externalId`）は、その Observation
    * から生まれた Memory がその後どうなったかを問わない（2026-09-26 追記、クローン miku の
    * 判断、[Issue #897](https://github.com/takecchi/mnemora/issues/897)）。`forget()` で
@@ -2680,6 +2681,7 @@ export interface Runtime {
    */
   observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
   /**
+   * 層: 未分類
    * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。
    * `extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが
    * 明示的に呼ばない限り抽出・埋め込みは永久に走らない——「キューが無ければ黙って
@@ -2702,6 +2704,7 @@ export interface Runtime {
    */
   tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
   /**
+   * 層: 中核
    * roadmap.md 段階4「想起」・段階5「説明」。docs/recall.md §2 の7段パイプライン
    * （実装は `./recall-runtime.js` の `runRecall`）。
    *
@@ -2729,6 +2732,7 @@ export interface Runtime {
    */
   recall(ctx: Ctx, query: RecallQuery, opts?: AbortOptions): Promise<RecallResult>;
   /**
+   * 層: 説明
    * [Issue #312](https://github.com/takecchi/mnemora/issues/312) /
    * [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
    * `recall()` が返した `RecallId` から、その recall が実際に何を・どの内訳で返したかを
@@ -2761,6 +2765,7 @@ export interface Runtime {
    */
   getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
   /**
+   * 層: 未分類
    * [Issue #369](https://github.com/takecchi/mnemora/issues/369) (C)「訂正の口」:
    * 採用側が「これは訂正だ」と明示的に宣言したとき、mnemora 側が**既存の recall で
    * 相手の候補を探す**ための口。[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)。
@@ -2844,6 +2849,7 @@ export interface Runtime {
     opts?: AbortOptions,
   ): Promise<FindCorrectionCandidatesResult>;
   /**
+   * 層: 未分類
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
    * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
@@ -2973,6 +2979,7 @@ export interface Runtime {
    */
   reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
   /**
+   * 層: 保守操作
    * ADR 0079: 索引に載っていない Memory を**もう一度索引へ載せに行く**。
    *
    * `recall` は `omitted` に `{ kind: 'not_indexed', reason }` を積んで
@@ -3016,6 +3023,7 @@ export interface Runtime {
    */
   reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
   /**
+   * 層: 保守操作
    * [ADR 0114](../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md):
    * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
    * → `status='archived'` + `archived` イベント」を実行する。
@@ -3052,6 +3060,7 @@ export interface Runtime {
    */
   sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult>;
   /**
+   * 層: 是正・取り消し
    * Issue #195（[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）:
    * `archived` な Memory を、呼び出し側が**明示的に**取り戻す。`sweepArchive`
    * （ADR 0114）が閉じる方向（`active` → `archived`）だけを持っていた片道を、
@@ -3151,6 +3160,7 @@ export interface Runtime {
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult>;
   /**
+   * 層: 未分類
    * `docs/memory-model.md` §11 行15「`superseded → active`」を、呼び出し側が
    * **明示的に**取り戻す。`consolidate`/`reextract`/`resolveContested` が閉じる方向
    * （`active` → `superseded`）だけを持っていた片道を、開く方向（`superseded` →
@@ -3278,6 +3288,7 @@ export interface Runtime {
     opts?: RestoreSupersededOptions,
   ): Promise<RestoreSupersededResult>;
   /**
+   * 層: 中核
    * Issue #102: Memory を**論理的に**忘れさせる。
    *
    * **行も `content` も消さない。**`status` を `'forgotten'` へ動かすだけで、
@@ -3326,6 +3337,7 @@ export interface Runtime {
    */
   forget(ctx: Ctx, target: ForgetTarget, opts?: ForgetOptions): Promise<ForgetResult>;
   /**
+   * 層: 是正・取り消し
    * Issue #198（docs/roadmap.md §5.3、[ADR 0124](../../../docs/decisions/0124-purge-physical-delete.md)）:
    * `forgotten` な Memory を**物理削除**する。`forget()` が可逆な論理削除（`status` を
    * 動かすだけ）であるのに対し、`purge()` は不可逆——`content`/`digest` を固定の
@@ -3405,6 +3417,7 @@ export interface Runtime {
    */
   purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
   /**
+   * 層: 是正・取り消し
    * Issue #197（ADR 0134）: `docs/memory-model.md` §11 lifecycle 行6「判定できない対向を
    * 検出 → 両側の `status='contested'`、`contested_with_id` を相互に設定」を実行する
    * **明示的操作**。
@@ -3470,6 +3483,7 @@ export interface Runtime {
     opts?: MarkContestedOptions,
   ): Promise<MarkContestedResult>;
   /**
+   * 層: 是正・取り消し
    * Issue #197（ADR 0150）: `docs/memory-model.md` §11 lifecycle 行7「`contested` →
    * `active | superseded`」を実行する**明示的操作**。`markContested`（`docs/decisions/
    * 0134-mark-contested-explicit-operation.md`）の解決側であり、その形を手本に対称に
@@ -3548,6 +3562,7 @@ export interface Runtime {
     opts?: ResolveContestedOptions,
   ): Promise<ResolveContestedResult>;
   /**
+   * 層: 是正・取り消し
    * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記、
    * 2026-09-26）: `resolveContested`（上）の決定3（CAS「両側とも `contested` かつ
    * 相互参照が成立」）は、対の片側を `forget()` すると満たせなくなる——forget は
@@ -3626,6 +3641,7 @@ export interface Runtime {
     opts?: ResolveOrphanedContestedOptions,
   ): Promise<ResolveOrphanedContestedResult>;
   /**
+   * 層: 是正・取り消し
    * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378、ADR 0381）: `docs/memory-model.md` §11
    * lifecycle 行6「`active → contested`」を、**3件以上**（群）へ書く**明示的操作**。
    * `markContested`（2者専用、ADR 0134）の形を手本にした N者版——「対象が適格だったか」
@@ -3690,6 +3706,7 @@ export interface Runtime {
     opts?: MarkContestedGroupOptions,
   ): Promise<MarkContestedGroupResult>;
   /**
+   * 層: 是正・取り消し
    * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378 決定3、ADR 0381）: `docs/memory-model.md`
    * §11 lifecycle 行7「`contested` → `active | superseded`」を、群へ書く**明示的操作**。
    * `markContestedGroup`（上）の解決側であり、`resolveContested`（2者版）の形を手本に
@@ -3771,6 +3788,7 @@ export interface Runtime {
     opts?: ResolveContestedGroupOptions,
   ): Promise<ResolveContestedGroupResult>;
   /**
+   * 層: 未分類
    * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
    * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
    * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
@@ -3847,6 +3865,7 @@ export interface Runtime {
    */
   applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
   /**
+   * 層: 中核
    * Issue #103（ADR 0089）: 複数の Memory を1件に統合する（docs/vision.md「5動詞」の1つ）。
    *
    * **`forget`/`purge`/減衰のどれでもない、第4の位置——`status: 'superseded'`
@@ -3985,6 +4004,7 @@ export interface Runtime {
    */
   consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
   /**
+   * 層: 中核
    * Issue #104: 複数の Memory から一般化・気づきを1件作る（docs/vision.md「5動詞」の1つ）。
    *
    * **`consolidate` の双子だが、意味論は正反対である。** `consolidate` は N→1 の**置換**
