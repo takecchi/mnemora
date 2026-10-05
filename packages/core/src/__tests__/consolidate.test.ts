@@ -1511,6 +1511,31 @@ describe("buildConsolidatedMemory（純関数）", () => {
       expect(memory.validUntil).toEqual(new Date("2026-08-01T00:00:00.000Z"));
     });
 
+    it("期限の無い材料が、期限の在る材料より後ろに並んでいても、無い側は制限にならない（並びに依らない）", () => {
+      const withBoth = fixtureMemory({
+        id: "m1",
+        validFrom: new Date("2026-02-01T00:00:00.000Z"),
+        validUntil: new Date("2026-06-01T00:00:00.000Z"),
+      });
+      const unbounded = fixtureMemory({ id: "m2" });
+      for (const eligible of [
+        [withBoth, unbounded],
+        [unbounded, withBoth],
+      ]) {
+        const memory = buildConsolidatedMemory({
+          ctx,
+          eligible,
+          llmResult: { content: "統合後" },
+          hashContent: (c) => `hash(${c})`,
+          digestFallbackLength: 200,
+          halfLifeHours: 24,
+          now: NOW,
+        });
+        expect(memory.validFrom).toEqual(new Date("2026-02-01T00:00:00.000Z"));
+        expect(memory.validUntil).toEqual(new Date("2026-06-01T00:00:00.000Z"));
+      }
+    });
+
     it("やりすぎの歯: 全 eligible が両方 null なら、今どおり両方 null", () => {
       const memory = buildConsolidatedMemory({
         ctx,
