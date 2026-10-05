@@ -2902,6 +2902,8 @@ export interface Runtime {
    * - **`subjectCandidates` の口も無い**（`sanitizeCandidateSubjectId` の doc。この行はコードを読んで
    *   確かめただけで、実測はしていない）。LLM が返した候補の
    *   `subjectId` は一覧で検査されず、省略された候補は Observation の `subjectId` へ落ちる。
+   *   ⚠ **2026-10-06（ADR 0635、問15）: 既定では、LLM が返した `subjectId` は捨てられ、Observation の
+   *   `subjectId` へ落ちる**（`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true` のときだけ、上の「検査されず」になる）。
    *
    * ⚠ **2026-09-28 変更（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
    * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
