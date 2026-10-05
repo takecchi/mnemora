@@ -14,11 +14,13 @@ import { describe, expect, it } from "vitest";
  *
  * 行の形は、1行ごとに次の正規表現へ「ちょうど当たる」こと:
  * `^\s*\*\s層: (中核|保守操作|是正・取り消し|説明|未分類)\s*$`
- * ⟹ 全角コロン `層：`・`Layer:`・値が5種以外・値の後ろに文が続く行（`層: 中核 です`）は
- *    「層の行」と数えない（⟹ その行しか無いメソッドは「無い」で赤）。
+ * ⟹ 全角コロン `層：`・値が5種以外・値の後ろに文が続く行（`層: 中核 です`）は「層の行」と数えず、
+ *    `層` + コロンで始まる崩れた行が1行でもあれば「形が違う」で赤（正しい行が隣に在っても赤）。
+ *    `Layer:` のような別の語は層の行のつもりとも見なさない（その行しか無ければ「無い」で赤）。
  *
  * ## 捕まえるもの
- * - 層の行が無い（JSDoc が無い、JSDoc に層の行が無い、表記が違う）
+ * - 層の行が無い（JSDoc が無い、JSDoc に層の行が無い、別の語で書いた）
+ * - 層の行の形が違う（`層` + 半角/全角コロンで始まるが、正しい形に当たらない行が在る）
  * - 層の行が2行以上ある（同じ JSDoc に2行）
  * - 別のメソッドの JSDoc に在る層の行は、当のメソッドの分には数えない（メソッドごとに見る）
  * - JSDoc の外の行コメント（`// 層: 中核`）は数えない
@@ -44,7 +46,10 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const runtimeText = readFileSync(join(repoRoot, "packages/core/src/runtime.ts"), "utf8");
 
 const LAYER_LINE_RE = /^\s*\*\s層: (中核|保守操作|是正・取り消し|説明|未分類)\s*$/;
-const METHOD_RE = /^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/;
+// 「層の行のつもりの行」: JSDoc の行頭（`*` の後）が `層` + 半角/全角コロンで始まるもの。
+// ⛔ `Layer:` のような別の語は拾わない（その行しか無ければ「層の行が無い」で赤になる）。
+const LAYER_LIKE_RE = /^\s*\*\s*層\s*[:：]/;
+const METHOD_RE =/^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/;
 
 /** @param {string} text */
 function extractInterfaceBlock(text, startMarker = "export interface Runtime {") {
@@ -86,8 +91,12 @@ export function checkLayerLines(block) {
     }
     const doc = lines.slice(start, i);
     const layerLines = doc.filter((l) => LAYER_LINE_RE.test(l));
+    // 正しい形の行の隣に崩れた形の行（`層：…`・`層: 不明`）があると、正しい1行だけを数えて
+    // 通ってしまう。崩れた形も「層の行のつもりの行」として拾い、正しい形でなければ赤にする。
+    const malformed = doc.filter((l) => LAYER_LIKE_RE.test(l) && !LAYER_LINE_RE.test(l));
     let problem = null;
-    if (layerLines.length === 0) problem = "層の行が無い";
+    if (malformed.length > 0) problem = `層の行の形が違う: ${malformed.map((l) => l.trim()).join(" / ")}`;
+    else if (layerLines.length === 0) problem = "層の行が無い";
     else if (layerLines.length > 1) problem = `層の行が${layerLines.length}行ある`;
     results.push({ method, layerLines, problem });
   }
@@ -194,21 +203,28 @@ describe("Runtime の各メソッドの直前の JSDoc に `層:` の行がち�
       "層: 中核 です", // 値の後ろに文
       "層: 中核・保守操作", // 値の連結
       "層:中核", // 半角コロンの後ろに空白が無い
-      "Layer: 中核", // 別表記
     ];
-    for (const v of variants) {
-      const block = [
+    const blockOf = (/** @type {string[]} */ docLines) =>
+      [
         "export interface Runtime {",
         "  /**",
-        `   * ${v}`,
+        ...docLines.map((l) => `   * ${l}`),
         "   */",
         "  m(ctx: Ctx): Promise<void>;",
         "}",
       ].join("\n");
-      expect(problemsOf(checkLayerLines(block)), `「${v}」が層の行として通ってしまった`).toEqual([
-        "m: 層の行が無い",
+    for (const v of variants) {
+      expect(problemsOf(checkLayerLines(blockOf([v]))), `「${v}」が層の行として通ってしまった`).toEqual([
+        `m: 層の行の形が違う: * ${v}`,
       ]);
+      // 正しい行が隣に在っても、崩れた行は赤（正しい1行だけを数える実装を落とす）
+      expect(
+        problemsOf(checkLayerLines(blockOf([FIX, v]))),
+        `正しい行の隣の「${v}」が見逃された`,
+      ).toEqual([`m: 層の行の形が違う: * ${v}`]);
     }
+    // 別の語は層の行のつもりとも見なさない（その行しか無ければ「無い」）
+    expect(problemsOf(checkLayerLines(blockOf(["Layer: 中核"])))).toEqual(["m: 層の行が無い"]);
   });
 
   it("陰性対照 (c): JSDoc の外の行コメント `// 層: 中核` は数えない", () => {
