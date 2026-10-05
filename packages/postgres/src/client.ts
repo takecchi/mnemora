@@ -150,7 +150,7 @@ export function createPostgresClient(
     // 二重の警告を抑える: 利用者が自分で `pool.on("error", …)` を付けていれば
     // （付けた順番に依らず）、emit の時点でリスナーは2つ以上になっている。
     if (pool.listenerCount("error") === 1) {
-      console.warn(`${POOL_ERROR_WARNING_HEAD}: ${error.message}`, error);
+      console.warn(POOL_ERROR_WARNING_HEAD, error);
     }
   });
   const db = drizzle(poolWithCheckoutErrorListener(pool), { schema });
