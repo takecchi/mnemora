@@ -1194,6 +1194,19 @@ describe("computeAffinity（純関数、strategies/consolidate.ts）", () => {
     expect(affinity).toBe(-Infinity);
     expect(affinity >= DEFAULT_CONSOLIDATE_MIN_AFFINITY).toBe(false);
   });
+
+  it("affinityMeasured: false（AffinityUnmeasuredScore の形）も -Infinity——どんな有限の minAffinity でも必ず落ちる", () => {
+    const affinity = computeAffinity({
+      affinityMeasured: false,
+      decay: 1,
+      tagMatch: 1,
+      freshness: 1,
+      strength: 1,
+    });
+    expect(affinity).toBe(-Infinity);
+    expect(affinity >= DEFAULT_CONSOLIDATE_MIN_AFFINITY).toBe(false);
+    expect(affinity >= -1e9).toBe(false);
+  });
 });
 
 describe("runtime.consolidate — 空の target", () => {
