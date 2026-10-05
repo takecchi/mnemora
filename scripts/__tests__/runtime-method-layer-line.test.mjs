@@ -49,7 +49,7 @@ const LAYER_LINE_RE = /^\s*\*\s層: (中核|保守操作|是正・取り消し|�
 // 「層の行のつもりの行」: JSDoc の行頭（`*` の後）が `層` + 半角/全角コロンで始まるもの。
 // ⛔ `Layer:` のような別の語は拾わない（その行しか無ければ「層の行が無い」で赤になる）。
 const LAYER_LIKE_RE = /^\s*\*\s*層\s*[:：]/;
-const METHOD_RE =/^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/;
+const METHOD_RE = /^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/;
 
 /** @param {string} text */
 function extractInterfaceBlock(text, startMarker = "export interface Runtime {") {
@@ -95,7 +95,8 @@ export function checkLayerLines(block) {
     // 通ってしまう。崩れた形も「層の行のつもりの行」として拾い、正しい形でなければ赤にする。
     const malformed = doc.filter((l) => LAYER_LIKE_RE.test(l) && !LAYER_LINE_RE.test(l));
     let problem = null;
-    if (malformed.length > 0) problem = `層の行の形が違う: ${malformed.map((l) => l.trim()).join(" / ")}`;
+    if (malformed.length > 0)
+      problem = `層の行の形が違う: ${malformed.map((l) => l.trim()).join(" / ")}`;
     else if (layerLines.length === 0) problem = "層の行が無い";
     else if (layerLines.length > 1) problem = `層の行が${layerLines.length}行ある`;
     results.push({ method, layerLines, problem });
@@ -214,9 +215,10 @@ describe("Runtime の各メソッドの直前の JSDoc に `層:` の行がち�
         "}",
       ].join("\n");
     for (const v of variants) {
-      expect(problemsOf(checkLayerLines(blockOf([v]))), `「${v}」が層の行として通ってしまった`).toEqual([
-        `m: 層の行の形が違う: * ${v}`,
-      ]);
+      expect(
+        problemsOf(checkLayerLines(blockOf([v]))),
+        `「${v}」が層の行として通ってしまった`,
+      ).toEqual([`m: 層の行の形が違う: * ${v}`]);
       // 正しい行が隣に在っても、崩れた行は赤（正しい1行だけを数える実装を落とす）
       expect(
         problemsOf(checkLayerLines(blockOf([FIX, v]))),
