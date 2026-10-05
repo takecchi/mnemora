@@ -55,7 +55,11 @@ import type {
   RequeueEmbedJobsResult,
   ScopeAggregate,
 } from "@mnemora/core";
-import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
+import {
+  assertWellFormedCtx,
+  assertWellFormedIdentifier,
+  assertWellFormedNewMemory,
+} from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import {
   replaceLoneSurrogates,
@@ -649,6 +653,10 @@ function assertStorableNewMemory(input: NewMemory): void {
   assertStorableMemoryColumn("digest_source", input.digestSource);
   assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
   assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
+  // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる値（`digest`・`contentHash`・`extractorVersion` の空文字、
+  // `claimKey`・`attributes`・`provenance` の中身の欠け・値域外）も断る。上の検査（NUL・列挙）の後に置く——それらが先に断る入力の
+  // 文面を変えない。`@mnemora/postgres`・core の Fake と同じ検査（`assertWellFormedNewMemory`）。
+  assertWellFormedNewMemory("InMemoryMemoryStore", input);
   // 孤立サロゲート（Issue #816、実測）: この関数は検査しない。`text` 列の欄の孤立サロゲートは、ADR 0543 から
   // `createMemoryIdempotent` の入口で U+FFFD に置き換えて保存する（`PostgresMemoryStore` と同じ。以前は入力をそのまま保持していた）。
   // `jsonb` 列の欄（`attributes`・`provenance`）は、今も置き換えも拒みもしない（Postgres は拒む。ADR 0543 の対象外）。

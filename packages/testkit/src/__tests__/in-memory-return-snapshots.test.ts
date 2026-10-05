@@ -145,7 +145,7 @@ const RETURNERS: Array<[string, Returner]> = [
       await create(s, {
         sourceObservationId: obs.id,
         extractorVersion: "v1",
-        provenance: { kind: "stated", observationId: obs.id } as never,
+        provenance: { kind: "stated", sourceObservationId: obs.id, at: "2026-01-01T00:00:00Z" },
       });
       return { returned: await s.listBySourceObservation(ctx, obs.id, "v1") };
     },
@@ -357,7 +357,7 @@ const RETURNERS: Array<[string, Returner]> = [
       await create(s, {
         sourceObservationId: obs.id,
         extractorVersion: "v1",
-        provenance: { kind: "stated", observationId: obs.id } as never,
+        provenance: { kind: "stated", sourceObservationId: obs.id, at: "2026-01-01T00:00:00Z" },
       });
       return { returned: await s.listBySourceObservationAllVersions(ctx, obs.id) };
     },
