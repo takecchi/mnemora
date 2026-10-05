@@ -356,3 +356,9 @@ Sample { required(...); optional?(...); optionalGeneric?<T>(...); }` 相当の�
   網羅した grep ではない。**
 - `Runtime` 以外の interface（`MemoryStore` 等）に、同じ形（正規表現ベースの抽出漏れ）が
   無いかは調べていない。
+
+## 追記（2026-10-06）: 決定1は ADR 0633 で一部覆った
+
+[ADR 0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) が、層の正本を `runtime.ts` の各メソッドの doc コメントの
+`層:` 行に移し、3文書からメソッド名の列挙を外した。**決定1のうち「3文書が中核以外の全メソッド名を名指しする」部分は
+覆った**（it4 を外した。その役目は `runtime-method-layer-line.test.mjs` が引き継ぐ）。決定2〜7は覆っていない。本文は直さない。

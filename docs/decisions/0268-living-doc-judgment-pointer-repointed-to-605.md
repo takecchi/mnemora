@@ -252,3 +252,9 @@
 - ⛔ **`packages/postgres` の DB テスト・実 API を通した経路は確認していない**——本 ADR の
   変更は文書3本とテスト1本・本 ADR 自体のみであり、DB・LLM・embedding のいずれにも
   触れていない。
+
+## 追記（2026-10-06）: ポインタ歯は ADR 0633 で削除した
+
+[ADR 0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) が、3文書から #605 への言及とメソッド名の列挙を外した
+（#605 は 2026-09-26 に閉じていた）。ポインタが無くなり `living-doc-judgment-pointer-consistency.test.mjs` は空回りするので
+**削除した**。**この ADR の決定のうち、3文書が #605 を指すこと・その一致を歯で縛ることは覆った。**本文は直さない。

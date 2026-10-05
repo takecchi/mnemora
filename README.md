@@ -344,33 +344,22 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 （写せば `Runtime` にメソッドが1本増えるたびに腐る。`AGENTS.md`「⚠ 数を、道具と生成物に
 焼き込まない」と [ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 それらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ出した口**であり、
-3つに分かれる（詳細と検討過程は
-[ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
+3つに分かれる（詳細と検討過程は [ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
 
-⚠ **下の3層の列挙は、ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
-実際に `findCorrectionCandidates`（[ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)）は
-どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
-（[Issue #605](https://github.com/takecchi/mnemora/issues/605)）。⛔ **書き込まない口**なので、
-少なくとも「是正・取り消し」（**書き込む**口）ではない。
-
-⚠ **`applyCorrection`（[ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)）も、
-どの層にも置かれていない。**ただし `findCorrectionCandidates` と同じ理由では説明できない
-——`applyCorrection` は `markContested`/`resolveContested` を呼んで実際に書き込む口である
-（ADR 0242 決定3）。**「書き込まないから」という除外は使えない**以上、どの層に当たるかは
-依然として意味の判定であり、この一覧はそれを決めていない（Issue #605）。
-
-- **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
-  呼び出し側が決める口。自動では走らない（`sweepArchive` の doc コメント自身が
-  「呼び出し側が明示的にこれを呼んだときだけ走る保守操作である」と書いている）。
-- **是正・取り消し**（`markContested` / `resolveContested` / `markContestedGroup` /
-  `resolveContestedGroup` / `resolveOrphanedContested` /
-  `restoreArchived` / `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・
-  将来の自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
-  書き込む口。どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も、
-  既定では持たない**（既定 off の claim key 衝突検出を除く）——下の
+- **保守操作**——「いつ動かすか」を呼び出し側が決める口。自動では走らない。
+- **是正・取り消し**——呼び出し側（人・上位のアプリケーション層・将来の自動検出）が既に下した判断
+  （矛盾の指摘・決着・復帰・完全削除）を、決められた形で書き込む口。どちらが正しいかを mnemora 自身は
+  判定しない。**⚠ 矛盾を*見つける*処理も、既定では持たない**（既定 off の claim key 衝突検出を除く）——下の
   「⚠ mnemora が保証していないこと」の節を見ること。
-- **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口
-  （`docs/north-star.md`「目指す姿」の3番目）。
+- **説明**——なぜそれが想起されたかを、後から読み戻す口（`docs/north-star.md`「目指す姿」の3番目）。
+
+⭐ **どのメソッドがどの層かの正本は、`packages/core/src/runtime.ts` の各メソッドの doc コメントの
+`層:` 行である**（値は `中核` / `保守操作` / `是正・取り消し` / `説明` / `未分類`。歯
+`scripts/__tests__/runtime-method-layer-line.test.mjs` が、全メソッドにその行がちょうど1行在ることを見ている）。
+⛔ **ここにメソッド名も個数も写さない**——写せば `Runtime` が動くたびに腐る。
+**`未分類` は、判断が割れている（またはまだどの層にも置かれていない）ものの置き場であり、
+1本ずつ決める。**どこへ置くかは意味の判定であり、機械には決まらない。
+経緯と、3文書から列挙を外した理由は [ADR 0633](./docs/decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)。
 
 **この分類の要点は、歯止めが *どこに* 効くかである。**新しく何かを足したくなったとき、
 それが記憶そのものを動かす操作（中核5動詞と同じ性質）なら、足せない。保守・是正・説明の
