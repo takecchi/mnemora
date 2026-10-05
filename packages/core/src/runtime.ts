@@ -191,6 +191,24 @@ export interface RuntimeConfig {
    * （ADR 0310 決定2）。
    */
   autoQueueConsolidateReflectOnExtract?: boolean | undefined;
+  /**
+   * オーナー回答 374f6f88 の問15（全部推奨）による既定の変更。名前・置き場所は担い手が決めた
+   * （`docs/decisions/` の「LLM が返す subjectId は既定で捨てる」の ADR）。
+   *
+   * 🔴 **既定は `false`（捨てる）。** `subjectCandidates` を渡さない（省略・空配列）抽出——`observe()` で
+   * 一覧を渡さなかった呼び出し、`extract: 'deferred'` の `tick`、`reextract`（この2つは一覧を持てない）——
+   * では、LLM が返した候補の `subjectId`（文字列も明示の `null` も）を捨て、Memory の主題は
+   * `observation.subjectId`（無ければ主題なし）になる。観察文に仕込んだ「この記憶の主題は bob」で、
+   * 別の subject に記憶を書かせられる（`ExtractedMemoryCandidateSchema.subjectId` の TSDoc、ADR 0442）のを塞ぐ。
+   *
+   * `true` にすると、以前どおり LLM が返した `subjectId` をそのまま受ける（Issue #608 項目①、ADR 0271 の
+   * 「候補ごとの主題の上書き」を、一覧を渡さない経路でも使う）。**信用できない本文を抽出するなら `true` にしないこと。**
+   *
+   * `subjectCandidates` を渡した `observe()` には効かない——そちらは一覧に照らして検証する
+   * （一覧内は採り、一覧外は弾く。`sanitizeCandidateSubjectId`）。
+   * ⚠ 捨てた値は `ObserveResult` に出ない（`rejectedSubjectIds` は一覧を渡した呼び出しの欄のまま）。
+   */
+  acceptLlmSubjectIdWithoutCandidates?: boolean | undefined;
 }
 
 const DEFAULT_EXTRACTOR_VERSION = "v1";
@@ -4298,6 +4316,32 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const defaultClaimedBy = deps.config?.defaultClaimedBy ?? DEFAULT_CLAIMED_BY;
   const autoQueueConsolidateReflectOnExtract =
     deps.config?.autoQueueConsolidateReflectOnExtract ?? false;
+  const acceptLlmSubjectIdWithoutCandidates =
+    deps.config?.acceptLlmSubjectIdWithoutCandidates ?? false;
+
+  /**
+   * 問15: 一覧（`subjectCandidates`）が無い抽出では、既定で LLM の `subjectId` を捨てる
+   * （`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates`）。キーごと消すので、
+   * `buildNewMemoryFromCandidate` は observation の `subjectId` へ落とす。`subjectId` 以外の欄は触らない。
+   */
+  function dropLlmSubjectIdsWithoutCandidates(
+    candidates: ExtractedMemoryCandidate[],
+    subjectCandidates: readonly string[] | undefined,
+  ): ExtractedMemoryCandidate[] {
+    if (
+      acceptLlmSubjectIdWithoutCandidates ||
+      (subjectCandidates !== undefined && subjectCandidates.length > 0)
+    ) {
+      return candidates;
+    }
+    return candidates.map((candidate) => {
+      if (!("subjectId" in candidate)) {
+        return candidate;
+      }
+      const { subjectId: _dropped, ...rest } = candidate;
+      return rest;
+    });
+  }
 
   /**
    * 抽出候補から Memory を作る核（`runExtraction` と `reextract` の共通経路）。
@@ -5202,7 +5246,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates, signal);
     // ADR 0443: 保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
     const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
-      extractedCandidates,
+      dropLlmSubjectIdsWithoutCandidates(extractedCandidates, subjectCandidates),
       deps.hashContent,
     );
     // `ExtractCandidatesResult.rejectedSubjectIds` は型としては optional
@@ -5376,7 +5420,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     } = await extractCandidates(deps.llmProvider, ctx, observation, undefined, opts?.signal);
     // ADR 0443: observe と同じ。保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
     const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
-      extractedCandidates,
+      dropLlmSubjectIdsWithoutCandidates(extractedCandidates, undefined),
       deps.hashContent,
     );
 
