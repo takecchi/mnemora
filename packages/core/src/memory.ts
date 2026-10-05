@@ -219,22 +219,17 @@ export interface Memory {
    * 強制する破壊的変更になる）。`undefined`（未指定）と `null`（明示的に鍵なし）は
    * 同じ意味で扱ってよい——読み出し側はどちらも「鍵が無い」として扱うこと。
    *
-   * ⚠ **主語か述語の片方だけのオブジェクト（型を破る入力）を、書き込みの口は拒まない**
-   * （[Issue #1109](https://github.com/takecchi/mnemora/issues/1109)）。TypeScript を通さない
-   * 呼び出しやキャストで `{ subject: "user" }` のような値を `MemoryStore.createMemory`・
-   * `createMemoryWithOutbox` に渡すと、adapter によって持ち方が違う:
-   * - `@mnemora/postgres`: 片方の列だけを入れた行を書き、読み出しでは**鍵なし（`null`）**として返す
-   *   （`mapping.ts` の `rowToClaimKey`）。
-   * - `@mnemora/testkit` の fixture: 片方だけのオブジェクトを**そのまま**持って返す。
+   * 🔴 **[ADR 0630](../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md)
+   * から、書き込みの口は、主語か述語の片方だけのオブジェクト・空文字の `subject`・`predicate`（型を破る入力。
+   * 例: `{ subject: "user" }`・`{ subject: "", predicate: "p" }`）を入口で拒む**（`MemoryStore.createMemory`・
+   * `createMemoryWithOutbox`・`supersedeWithNewMemories`。何も書かない。冪等の既存の行が在っても拒む）。
+   * 以前（[Issue #1109](https://github.com/takecchi/mnemora/issues/1109)、2026-09-28 の追記）は拒まず、
+   * adapter によって持ち方が違った（`@mnemora/postgres` は片側だけの行を書いて**鍵なし（`null`）**として返し、空文字はそのまま
+   * 返した。fixture はそのまま返した）。どちらも返った Memory は `MemorySchema`（{@link ClaimKeySchema} は2欄とも `min(1)`）を
+   * 通らなかった。鍵を持たせたいなら、2欄とも空でない文字列で渡すこと。鍵を持たせないなら `null` か省略。
    *
-   * どちらでも、その Memory は `findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` にも
-   * 数えられない（PR #1106 で fixture を Postgres に揃えた）。**片方だけの `claimKey` は鍵なしとして
-   * 扱われうる。**鍵を持たせたいなら、2欄とも埋めて渡すこと。
-   *
-   * ⚠ 2026-09-28 追記: **空文字の `subject`・`predicate`（`{ subject: "", predicate: "p" }` など）も、書き込みの口は
-   * 拒まない。**`@mnemora/postgres` も testkit の fixture も、そのまま書いて、そのまま読み戻す（片方だけのときと違い、
-   * Postgres も鍵なしにはしない）。返った Memory は `MemorySchema`（{@link ClaimKeySchema} は2欄とも `min(1)`）を通らない。
-   */
+   * ⚠ この拒否は**書き込みの口だけ**の話である。それより前に書かれた行（片側だけの列を持つ行など）は読み側に残りうる。
+   * 読み出しの口はそれを**鍵なし**として扱い続ける（`findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` にも数えられない）。
   claimKey?: ClaimKey | null;
 
   /**

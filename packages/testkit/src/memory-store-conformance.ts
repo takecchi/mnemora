@@ -14973,7 +14973,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     //
     // ⚠ 同じ形の表が `packages/core/src/__tests__/malformed-new-memory-cases.ts` にもある（core のテストは testkit を
     // import できない）。形を足すときは両方に足すこと。
-    // ⚠ 外部の adapter にとっては、**この歯が新しく必須になった**（v1.X.0 の破壊的変更。CHANGELOG・ADR 0630）。
+    // ⚠ 外部の adapter にとっては、**この歯が新しく必須になった**（CHANGELOG の `[1.3.0]`（版は仮）の破壊的変更。CHANGELOG・ADR 0630）。
     // -------------------------------------------------------------------
     describe("読み戻すと MemorySchema を通らない NewMemory は、書き込みの口の入口で拒む（ADR 0630）", () => {
       type Case = {

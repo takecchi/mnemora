@@ -769,13 +769,25 @@ export interface MemoryStore {
    * 限らない——どの実装でも、`text` 列の欄の孤立サロゲートは静かに書き換わり、
    * Postgres では `jsonb` 列の欄で書き込みそのものが失敗する。
    *
-   * ⚠ **`input.provenance` の中身は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と
-   * `@mnemora/testkit` の fixture へ同じ入力を当てて確かめた）。型（`Provenance`、`provenance.ts`）の欄が欠けている・
-   * 値域の外にある（例: `stated` の `sourceObservationId`・`at` が無い、`consolidated` の `sources` が空、
-   * `imported` の `batchId` が無い、`inferred` の `confidence` が `2`、`at` が空文字）ものも、そのまま書いて
-   * 返す。**返った Memory は `MemorySchema` を通らないことがある。**`provenance.sourceObservationId` と
-   * `input.sourceObservationId` が食い違っていても検査しない。
-   * 拒むのは次の3つだけで、どちらの adapter でも例外になる（投げる例外の種類は adapter で違う）:
+   * 🔴 **[ADR 0630](../../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md):
+   * 書いたら読み戻したときに {@link MemorySchema} を通らなくなる値は、入口で拒む**（CHANGELOG の `[1.3.0]`（版は仮）の破壊的変更。以前は黙って書いていた）。
+   * 拒むのは次の欄で、判定は `MemorySchema` の同じ欄の schema と同じである（{@link assertWellFormedNewMemory}。3つの実装が共有する）:
+   * - `digest`・`contentHash`・`extractorVersion`（`null`・省略は可）が空文字
+   * - `claimKey`（`null`・省略は可）の `subject`・`predicate` が空文字、または片側だけ・欠けている
+   * - `attributes` の値が文字列でない（数・入れ子・`null`。空のオブジェクト・省略・`null` は可）
+   * - `provenance` の中身の欠け・値域外（例: `stated` の `sourceObservationId`・`at` が無い／`at` が空文字、`consolidated` の
+   *   `sources` が空、`imported` の `batchId` が無い／空、`inferred` の `confidence` が `[0, 1]` の外・`model` が無い）
+   *
+   * 例外は `Error`（`<実装名>: <欄> is malformed (<理由>); …`。欄の名前は `claimKey.subject`・`provenance.confidence` のように
+   * 入れ子を `.` でつなぐ。値は message に載せない）。**何も書かない**（Memory・ラベル・outbox・イベントのどれも進めない）。
+   * **冪等の既存の行が在っても拒む**（既存の行を返さない）。外部の adapter も、これを守ること（適合テストが縛る）。
+   *
+   * ⛔ この検査の範囲外（今までどおり）: `subjectId`（空文字を含む。別の件）・`content`・`tags` の中身・日時・
+   * `strength`・`halfLifeHours`・列挙の欄（それぞれ別の入口の検査）、`validFrom > validUntil`。`provenance.sourceObservationId` と
+   * `input.sourceObservationId` が食い違っていても検査しない（`MemorySchema` は通る）。Observation・Event・`createRecall` の書き込みにも
+   * この検査は掛からない。
+   *
+   * 以前から拒む入力（変えていない）は、どちらの adapter でも例外になる（投げる例外の種類は adapter で違う）:
    * - `provenance.kind` が列挙（`stated`・`inferred`・`consolidated`・`reflected`・`imported`）に無い
    *   ——Postgres は DB の CHECK の例外（drizzle が包んだ `Failed query`）、fixture は
    *   `memories.provenance_kind must be one of …` を投げる。
@@ -799,9 +811,10 @@ export interface MemoryStore {
    * の制約を受ける。🔴 `input.sourceObservationId`・`supersededById`・`contestedWithId` のテナント一致も
    * `createMemory` と同じく検査する（ADR 0439。`ctx.tenantId` の行でなければ何も書かずに `… not found for tenant`）。
    *
-   * ⚠ `input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は `MemorySchema` を
-   * 通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い `stated`/`inferred`・
-   * `null` の3つだけ。`createMemory` の doc 参照）。
+   * 🔴 [ADR 0630](../../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md):
+   * `createMemory` と同じく、読み戻すと `MemorySchema` を通らない `input`（`digest`・`contentHash`・`extractorVersion` の空文字、
+   * `claimKey`・`attributes`・`provenance` の中身の欠け・値域外）は、何も書かずに拒む。冪等の既存の行が在っても拒む
+   * （範囲と例外は `createMemory` の doc 参照）。
    *
    * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
    * `createObservationWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、積む outbox 行の
@@ -1463,9 +1476,10 @@ export interface MemoryStore {
    * `… not found for tenant`）。`supersede[].supersededByIndex` は `news` への索引であり
    * `MemoryId` を直接受け取らないため、この注意は当たらない（上の doc 参照）。
    *
-   * ⚠ `news[i].input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は
-   * `MemorySchema` を通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い
-   * `stated`/`inferred`・`null` の3つだけ。`createMemory` の doc 参照）。
+   * 🔴 [ADR 0630](../../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md):
+   * `news[i].input` にも `createMemory` と同じ検査が掛かる——読み戻すと `MemorySchema` を通らない要素が1件でもあれば、
+   * `news`/`supersede` どちらの書き込みも一切行わずに拒む（2件目以降が壊れていても、先の要素・outbox・ラベル・イベントを残さない。
+   * 範囲と例外は `createMemory` の doc 参照）。
    *
    * ⭐ **`opts` は省略可能な第4引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)、
    * `createMemoryWithOutbox` の同じ欄と同じ理由）。**`opts.now` を渡すと、`news` に積む outbox 行の

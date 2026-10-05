@@ -145,6 +145,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。クローンが 🔴 に決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目65。DB マイグレーションは無い。
 
+- **`MemoryStore` の `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` が、書いたら読み戻したときに `MemorySchema` を通らなくなる値を、入口で `Error` で拒むようになった**（[ADR 0630](./docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md)。`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`。オーナー回答 70449a95 の問2。オーナーが決めたのは「入口で拒む」の採否で、範囲・例外の種類はマネージャーの判断）
+  以前は黙って書き、読み戻した Memory が `MemorySchema` を通らなかった。いまは3実装（`PostgresMemoryStore`・`InMemoryMemoryStore`・core の Fake）とも、何も書かずに `<実装名>: <欄> is malformed (…)` の `Error` を投げる。冪等の既存の行が在っても拒む。
+  - **拒む入力**: `digest`・`contentHash`・`extractorVersion` の空文字／`claimKey` の `subject`・`predicate` の空文字・片側だけ／`attributes` の値が文字列以外／`provenance` の中身の欠け・値域外（`stated` の `sourceObservationId`・`at` が無い・空、`inferred` の `confidence` が `[0, 1]` の外・`model` が無い、`consolidated` の `sources` が空、`imported` の `batchId` が無い・空など）。`confidence` の 0 と 1、`claimKey` 無し、`extractorVersion` が `null`、`attributes` が `{}` は通る。
+  - **範囲外（変わらない）**: `subjectId`、Observation・Event・`createRecall` の書き込み、既に拒んでいる欄、`tags` の中身、`validFrom > validUntil`。
+  - **新しい公開 API**: `assertWellFormedNewMemory(owner, input)`（`@mnemora/core`）。自前の `MemoryStore` 実装が同じ検査を呼べる。
+  - **conformance suite の約束が増えた**: 上の入力を3口とも拒むこと（拒むときは何も書かないこと・冪等の既存行が在っても拒むこと）。**片側だけの `claimKey` を `createMemory` で書いて「`listActiveClaimPredicates` に数えない」ことを縛っていた歯は、「書き込みの口が拒む」に書き換えた**——自前の adapter が片側だけの鍵を受け付けて「鍵なし」として扱っていたなら、拒むように直す。それより前に書かれた行を鍵なしとして読む扱いは変わらない。
+  - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目66。DB マイグレーションは無い（既に書かれた行は直さない）。
+
 ### Added
 
 - **`@mnemora/bullmq` の `CreateBullmqTickDriverOptions` に `lockDuration` と `completedJobsToKeep` を足した**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6の判断）。
