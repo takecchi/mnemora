@@ -44,6 +44,10 @@
    - #1472 の「setupFiles で共有クライアントが閉じていることを見る」: vitest の設定を変えないと書けない。
    - #1501 の値の比較を `==` にする変異: `Attributes` の値は文字列だけ（`Record<string, string>`）なので同値。
    - 方針の判断が要る3件は、この PR に入れずにクローンに聞いている: #1476 の「出荷後も全 migration 名が migration-v1.md に現れる」歯、#1490 の「文の数の上限」の歯（歯の doc が数を固定しないと明記）、#1472 の「並列 project の `isolate: false` を固定する」歯（ADR 0397 を変えるとき一緒に直すことになる）。
+   - ⚠ **2026-10-06 追記（上の3件の決着。クローン（miku）の判断で、オーナーの判断ではない）**:
+     - #1476: migration-v1.md が「全 migration を挙げる」と自分で書いているときだけ縛る、と決まった。【現物】migration-v1.md はそう書いていない（`0001`〜`0011` を名指しせず、版ごとに「追加で適用する N 本」を並べる形）。⟹ **足さない**。
+     - #1490: 歯の doc の「文の数を固定しない」に従い、**足さない**。
+     - #1472: **足す**——`packages/postgres/src/__tests__/vitest-config-isolate.test.ts`。`vitest.config.mts` を import し、並列 project の `isolate` が `false`、直列 project の `isolate` が `false` でない（既定の `true`）ことを見る。落ちたときの文言は「ADR 0397 を変えるなら、この歯も直すこと」。【実測】変異（並列を `isolate: true` にする／直列に `isolate: false` を足す）それぞれで、狙った it だけが1件赤。`cp` で戻して `cmp` 一致の後に2件緑。
 
 ## 引き受けた負債
 
