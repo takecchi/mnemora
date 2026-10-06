@@ -12,6 +12,7 @@ import {
   releaseAdvisoryLock,
   releaseAdvisoryLockOnClient,
 } from "./advisory-lock.js";
+import { isEmbeddingSpaceIndexNameCollision } from "./create-index-race.js";
 import { describeMigrationFailure } from "./migration-failure-message.js";
 import { POOL_ERROR_WARNING_PREFIX } from "./pool-error-warning.js";
 import { assertPgvectorCapabilityViaQuery } from "./pgvector-capability.js";
@@ -907,28 +908,42 @@ export async function runMigrations(
         // `catch` が約束どおり `Error('migration <file> failed: ...')` に包んで投げる
         // （`migrate-connection-loss.test.ts` が実測）。
         const client = lockClient;
-        try {
-          await client.query("BEGIN");
-          if (schema !== undefined) {
+        // ADR 0638: 1ファイルにつき最大2回（1回目＋流し直し1回）。流し直すのは、1回目が
+        // `registerEmbeddingSpace` の索引作りと重なった `23505`（`isEmbeddingSpaceIndexNameCollision`）で落ち、
+        // かつ ROLLBACK が通ったとき**だけ**。台帳の行はこのトランザクションごと巻き戻っているので、
+        // 流し直しは同じファイルを頭から（BEGIN から）やり直すだけで、適用済みの別ファイルには触れない。
+        // 2回目に落ちたら、2回目のエラーをそのまま包んで投げる（3回目は無い）。
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await client.query("BEGIN");
+            if (schema !== undefined) {
+              await client.query(
+                `SET LOCAL search_path TO ${quotedSearchPathFor(schema, extensionSchema!)}`,
+              );
+            }
+            await client.query(sql);
             await client.query(
-              `SET LOCAL search_path TO ${quotedSearchPathFor(schema, extensionSchema!)}`,
+              `INSERT INTO ${qualify(schema, "_mnemora_migrations")} (name) VALUES ($1)`,
+              [file],
             );
+            await client.query("COMMIT");
+            applied.push(file);
+            break;
+          } catch (err) {
+            // 接続が既に失われている等で ROLLBACK 自体が失敗しても、元の失敗（`err`）を
+            // 上書きしない——下の throw は常に `err` を基にする（ROLLBACK 失敗時の
+            // 二次エラーは意図的に握り潰す。ROLLBACK が本当に必要な場面
+            // ——コネクションが生きている通常の DDL エラー——では今日どおり実行される）。
+            let rolledBack = true;
+            await client.query("ROLLBACK").catch(() => {
+              rolledBack = false;
+            });
+            if (attempt === 1 && rolledBack && isEmbeddingSpaceIndexNameCollision(err)) {
+              continue;
+            }
+            // 拡張を作る権限が無いときだけ、文言の後ろに案内が付く（Issue #1212）。先頭は変わらない。
+            throw new Error(describeMigrationFailure(file, err), { cause: err });
           }
-          await client.query(sql);
-          await client.query(
-            `INSERT INTO ${qualify(schema, "_mnemora_migrations")} (name) VALUES ($1)`,
-            [file],
-          );
-          await client.query("COMMIT");
-          applied.push(file);
-        } catch (err) {
-          // 接続が既に失われている等で ROLLBACK 自体が失敗しても、元の失敗（`err`）を
-          // 上書きしない——下の throw は常に `err` を基にする（ROLLBACK 失敗時の
-          // 二次エラーは意図的に握り潰す。ROLLBACK が本当に必要な場面
-          // ——コネクションが生きている通常の DDL エラー——では今日どおり実行される）。
-          await client.query("ROLLBACK").catch(() => {});
-          // 拡張を作る権限が無いときだけ、文言の後ろに案内が付く（Issue #1212）。先頭は変わらない。
-          throw new Error(describeMigrationFailure(file, err), { cause: err });
         }
       } catch (err) {
         fileFailed = true;
