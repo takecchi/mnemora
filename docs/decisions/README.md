@@ -638,5 +638,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0635](./0635-llm-subject-id-dropped-by-default-without-candidates.md) | `subjectCandidates` を渡さない抽出では、LLM が返した `subjectId` を既定で捨てる（`acceptLlmSubjectIdWithoutCandidates` で受ける） | 採用 (2026-10) |
 | [0655](./0655-bullmq-stop-removes-scheduler-only-when-last-worker.md) | `@mnemora/bullmq` の `stop()` は、この queue に自分以外の Worker が居るとき共有 scheduler を消さない（ADR 0449 の材料3の一部を直す） | 採用 (2026-10) |
 | [0656](./0656-activity-clock-advancers-list-is-bound-to-recall-callers.md) | 活動時計を進める入口の一覧は、`recall(` の呼び出し元の集合に縛る（ADR 0394 決定3 の「掃引」の誤記の訂正） | 採用 (2026-10) |
+| [0657](./0657-rejected-subject-ids-order-and-count-teeth.md) | `ObserveResult.rejectedSubjectIds` の件数・順・重複を歯で縛る（Issue #1746） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
