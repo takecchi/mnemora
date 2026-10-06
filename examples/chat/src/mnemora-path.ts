@@ -559,7 +559,11 @@ export function buildMnemoraPromptDetail(recall: RecallResult): MnemoraPromptDet
   const indexLine = `(索引: スコープ内 ${recall.index.totalInScope} 件のうち ${recall.memories.length} 件を提示)`;
   const legendLine = order.size > 0 ? ORDER_LEGEND_LINE : "";
   const body = [legendLine, digestLines, indexLine].filter((s) => s.length > 0).join("\n");
-  return { body, hasContestedCorrectionWording };
+  return {
+    body,
+    hasContestedCorrectionWording:
+      body.includes("（訂正の可能性）") || body.includes("（訂正された可能性）"),
+  };
 }
 
 /**
