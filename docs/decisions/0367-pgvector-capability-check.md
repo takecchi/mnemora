@@ -265,3 +265,34 @@
   の3つ増える（`create` は定常状態でも毎回検査するため、毎回）。
   `vector-store.ts` の検査（`withRelaxedOrderScan` の前）は、`vector` が呼び出し側の接続の
   `search_path` に無いと同じ形で落ちうるが、**手元では確かめていない**（この追記の範囲外）。
+
+## 追記（2026-10-07、[Issue #1780](https://github.com/takecchi/mnemora/issues/1780)）: `vector-store.ts` 側の能力検査は、`extensionSchema` を渡した client で落ちない
+
+**この判断はクローン（miku）の判断であり、オーナーの判断ではない。** 直前の追記が「手元では確かめていない」
+とした負債のうち、`vector-store.ts` 側を本物の Postgres（17 + pgvector）で確かめた。**振る舞いは変えていない。**
+
+- **前提の読み替え**: `PostgresVectorStore` は `db` だけを受け取り、`schema`/`extensionSchema` を知らない
+  （`vector-store.ts` のコンストラクタ）。`PgvectorCapabilityGate.ensure` は、その接続の `search_path` のまま
+  修飾しない `'[0]'::vector` を流す。`schema`/`extensionSchema` は `createPostgresClient`（`client.ts`）が受け取り、
+  接続の起動オプションに `-c search_path=<searchPathFor(schema, extensionSchema)>` として載せる（ADR 0057）。
+  だから「`runMigrations` と同じ条件」とは、`createPostgresClient({ schema, extensionSchema })` で作った db を渡すことである。
+- **主経路の実測（落ちない）**: `vector` を `public` 以外の `extensionSchema` に置き、`runMigrations` /
+  `registerEmbeddingSpace` に同じ `schema`/`extensionSchema` を渡して用意した DB を、
+  `createPostgresClient({ schema, extensionSchema })` の db で引くと、`search` も `searchMany` も能力検査を通って結果を返した
+  （インスタンスごとにキャッシュを持つので、メソッドごとに新しい `PostgresVectorStore` を使った）。
+  `search_path` が効いているのは `client.ts` の起動オプションであり、検査の SQL 自体は変えていない。
+- **対照の実測**: 同じ DB を、`search_path` に手を加えない db（`createPostgresClient(url)`）で引くと、どちらも落ちる。
+  能力検査を外す変異（`ensure` を即 return）を当てて、落ちる場所が検査かを確かめた。
+  - `search`: 検査があると `Failed query: SELECT ext.extversion ... '[0]'::vector ...`（原因は `type "vector" does not exist`、42704）。
+    検査を外すと、`schema` の表（`memory_embeddings_*`）自体が見えず `EmbeddingSpaceNotRegisteredError`
+    （「embedding space ... is not registered」）になる。
+  - `searchMany`: 検査があっても外しても、原因は `type "vector" does not exist`（42704）。
+  - ⟹ 素の接続で落ちるのは、検査のせいだけではない。検索の SQL 本体も、`vector` 型・表が見えないと解決できない。
+    **検査だけを直しても素の接続は救えず、救う必要も無い**（`search_path` を整えるのは `createPostgresClient` の役目）。
+- **結論**: 主経路では落ちない。`vector-store.ts` に直す所は無い。
+- **歯**: `packages/postgres/src/__tests__/vector-store-capability-extension-schema.postgres.test.ts`
+  （主経路が `search`/`searchMany` で結果を返すこと、素の db が落ちること）。`client.ts` で `extensionSchema` を
+  `-c search_path` に載せない変異を当てると赤になる。この歯が無かった間、`extensionSchema` を public 以外にした
+  client で `PostgresVectorStore` を引く歯は無かった（`dedicated-schema.postgres.test.ts` は `extensionSchema` が既定の `public`）。
+- **確かめていないこと**: `extensionSchema` を `public` 以外にした client を、プール接続の再接続・`options` に
+  利用者の `-c search_path` を重ねた場合まで引いていない。pgvector 0.8 未満での挙動。
