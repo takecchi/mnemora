@@ -1198,3 +1198,22 @@ Refs #1021 #1025
 **確かめていないこと**: `relationOverLimitIds`（群の上限で切られた候補）が同じ形で二重に数えられる疑い（Issue #1023 の確かめ直しで挙がった）は、この追記の射程外で、実測していない。本物の Postgres での再現も取っていない（判定は `packages/core` の中で完結する）。
 
 Refs #1788
+
+---
+
+## 2026-10-07 追記11（クローン miku の判断、Issue #1794）—— 群の上限で切られた候補が段3.5 の同伴取得で戻ったときの二重計上を直した
+
+**追記3・7 の「戻った先でだけ数える」は、段3で多者間の群を `relationMaxCount` で切った候補（`over_limit(stage: "relation")` に数えた分）が、段3.5 の連想の必須の同伴取得（Issue #959）で戻る形については、守れていなかった。** 戻った記憶が `memories`（または予算で落ちて `budget_dropped`）と `over_limit(relation)` の両方に数えられていた。
+
+**形**: ペア P–Q の Q に、`RelationStore.link` で群の owner からの `contradicts` の辺を直接張る。Q は群の探索で拾われて切られる。連想が P を選ぶと、同伴取得が `getMany` の id 引きで Q を取り戻す。連想の**候補生成**の除外集合（`relationOverLimitIds`）は id 引きには効かない。`markContested` / `markContestedGroup` だけではこの形は作れない（群のメンバーとペアの組は `ineligible`。`resolveContestedGroup` は辺を消す。Postgres も消す）が、`RelationStore.link` は公開メソッドであり、Runtime から届かないことは穴を残す理由にならない。
+
+**決めたこと**: 連想の Unit（`associationUnits`）に実際に入った id のうち `relationOverLimitIds` に居るものを、**その候補を切った群の** `over_limit(relation)` の count から差し引く。0件になった札は残さない（他の kind と同じ作法）。`countKind` は変えない。公開型・公開 API は変えていない。差し引く集合に「返った id」ではなく「連想の Unit に入った id」を使うのは、戻った候補が段4の予算で落ちる場合（追記7 の `budget_dropped` に1回だけ数える）も同じ処置にするためである。
+
+**採らなかった案**: 同伴取得から `relationOverLimitIds` を除く（案A）。同伴の取り方が変わり、想起の結果が変わりうる。「争われている主張を、争われていない顔で単独で出さない」（段3.5 の同伴取得の判断）にも触れる。
+
+- 歯: `recall-relation-over-limit-association-companion.test.ts`。(a) 返った Q は `memories` にだけ、(b) 同じ群で戻らなかった分は件数だけ減って残る、(c) 連想を切ると残る、(d) 予算で落ちたら `budget_dropped` にだけ、(e) 群が2つのとき Q を切った群の札だけが減る。
+- 実測した、二重計上にならなかった形（Issue #1794 に一覧）: 群を段2の `below_threshold`・比較不能・`over_limit(rescore)` と重ねた形、同じメンバーを2つの owner の群に入れた形（`visitedAll` で1件は1つの群の探索にしか入らない）、別々の2群が同時に切られた形、予算で群ごと落ちた形。
+
+**確かめていないこと**: 属性フィルタ（`survivesAttributesFilter`）との組み合わせ。探索が `lower_bound` で打ち切られた群での count と id の対応。本物の Postgres での実測。
+
+Refs #1794 #1788
