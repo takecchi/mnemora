@@ -91,3 +91,46 @@ describe("tick が駆動する consolidate・reflect のジョブのイベント
     expect(created[0]!.meta).not.toHaveProperty("note");
   });
 });
+
+describe("observe → tick（抽出・埋め込み・consolidate/reflect）が積む全イベントの actor は system（EventActor の doc。Issue #1775 の #764）", () => {
+  it("本番の経路は actor.type が 'human'・'clone' のイベントを1件も作らない", async () => {
+    const stores = createFakeRuntimeStores();
+    const space = { provider: "fake", model: "fake-model", dimensions: 3 };
+    const smartLlm: LLMProvider = {
+      complete: async () => {
+        throw new Error("not used");
+      },
+      completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
+        const extraction = req.schema.safeParse({
+          memories: [
+            { content: "抽出された記憶A", provenanceKind: "stated" },
+            { content: "抽出された記憶B", provenanceKind: "stated" },
+          ],
+        });
+        if (extraction.success) return extraction.data as T;
+        return req.schema.parse({ outcome: "reflected", content: "まとめた本文" }) as T;
+      },
+    };
+    const runtime = createRuntime({
+      ...stores,
+      llmProvider: smartLlm,
+      embeddingProvider: { space, embed: async (_c, texts) => texts.map(() => [1, 0, 0]) },
+      hashContent: (content: string) => `h(${content})`,
+      config: { autoQueueConsolidateReflectOnExtract: true },
+    });
+
+    await runtime.observe(ctx, { kind: "utterance", text: "AとBの話をしました" });
+    for (let i = 0; i < 6; i++) {
+      const tick = await runtime.tick(ctx, { leaseMs: 60_000 });
+      if (tick.processed === 0 && tick.failed === 0) break;
+    }
+
+    const kinds = new Set(stores.eventStore.events.map((e) => e.kind));
+    // 抽出の created は必ず在る。consolidate・reflect まで届いていれば superseded も在る。
+    expect(kinds.has("created")).toBe(true);
+    expect(stores.eventStore.events.length).toBeGreaterThan(2);
+    for (const e of stores.eventStore.events) {
+      expect(e.actor).toEqual({ type: "system" });
+    }
+  });
+});

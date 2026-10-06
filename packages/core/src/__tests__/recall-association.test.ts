@@ -3,6 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { Memory, NewMemory } from "../memory.js";
+import { DEFAULT_RECALL_ASSOCIATION } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import {
   createFakeRuntimeStores,
@@ -368,6 +369,29 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
     expect(memoryIds).toContain(anchor.id);
     expect(memoryIds).toContain(associated.id);
     expect(result.omitted.some((o) => o.kind === "budget_dropped")).toBe(false);
+  });
+});
+
+describe("recall() — 連想枠の既定値（ADR 0337 決定1。Issue #1775 の #838）", () => {
+  it("DEFAULT_RECALL_ASSOCIATION は { maxCount: 10 }", () => {
+    expect(DEFAULT_RECALL_ASSOCIATION).toEqual({ maxCount: 10 });
+  });
+
+  it("association を省略しても、連想でしか届かない記憶が retrievedVia:'association' で結果に入る（既定 on が実際に働く）", async () => {
+    const { runtime, stores } = buildRuntime();
+    // Q = [1,0]。アンカーはクエリに当たる。連想される側はクエリに当たらない（below_threshold）が、
+    // アンカーとの類似度は 0.7071（既定 minSimilarity 0.5 以上）。
+    const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
+      digest: "アンカー本文",
+    });
+    const associated = await createEmbeddedMemory(stores, [0, 1], { digest: "連想本文" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+
+    expect(result.memories.find((m) => m.memoryId === anchor.id)?.retrievedVia).toBe("ann");
+    const assocEntry = result.memories.find((m) => m.memoryId === associated.id);
+    expect(assocEntry?.retrievedVia).toBe("association");
+    expect(assocEntry?.associationOf).toBe(anchor.id);
   });
 });
 

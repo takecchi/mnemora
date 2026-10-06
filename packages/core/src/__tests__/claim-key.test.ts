@@ -105,6 +105,12 @@ describe("buildClaimKeyPrompt（Issue #371）", () => {
     expect(prompt.system).toContain("姉");
   });
 
+  it("既知 subject 一覧を渡すと、第三者の主語は 'user' ではなくその第三者を指す subject にする指示が足される（ADR 0334 の機構。Issue #1775 の #792）", () => {
+    const prompt = buildClaimKeyPrompt(["発話"], undefined, ["user", "姉"]);
+    expect(prompt.system).toContain("第三者");
+    expect(prompt.system).toContain("'user' ではなく");
+  });
+
   it("空配列の既知 subject 一覧は『渡していない』と同じ", () => {
     const withEmpty = buildClaimKeyPrompt(["発話"], undefined, []);
     const withoutAny = buildClaimKeyPrompt(["発話"]);
