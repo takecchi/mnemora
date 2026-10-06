@@ -88,6 +88,24 @@ describe("PostgresMemoryStore.aggregateScope: options.excludeProvenanceKinds（A
     expect(withEmpty.excludedProvenanceIndexedCount).toBeUndefined();
   });
 
+  it("scopeAggregate: 'skip' は excludeProvenanceKinds を渡しても欄を足さない（対照: 'exact' では欄が在る）", async () => {
+    await seed();
+    const exact = await memoryStore.aggregateScope(
+      ctx,
+      {},
+      { scopeAggregate: "exact", excludeProvenanceKinds: ["consolidated"] },
+    );
+    expect(exact.excludedProvenanceIndexedCount).toBe(2);
+
+    const skipped = await memoryStore.aggregateScope(
+      ctx,
+      {},
+      { scopeAggregate: "skip", excludeProvenanceKinds: ["consolidated"] },
+    );
+    expect("excludedProvenanceIndexedCount" in skipped).toBe(false);
+    expect(skipped.countKind).toBe("unknown");
+  });
+
   it("recall を通した問い2: 除外しない候補を全部拾えたら ann_unreached は鳴らない（除外行は分母から引かれる）", async () => {
     const { db } = await getTestClient();
     for (let i = 0; i < 3; i += 1) await put();

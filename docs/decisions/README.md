@@ -646,5 +646,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0656](./0656-activity-clock-advancers-list-is-bound-to-recall-callers.md) | 活動時計を進める入口の一覧は、`recall(` の呼び出し元の集合に縛る（ADR 0394 決定3 の「掃引」の誤記の訂正） | 採用 (2026-10) |
 | [0657](./0657-rejected-subject-ids-order-and-count-teeth.md) | `ObserveResult.rejectedSubjectIds` の件数・順・重複を歯で縛る（Issue #1746） | 採用 (2026-10) |
 | [0658](./0658-merged-1005-1006-recheck-teeth.md) | 10/05〜10/06 にマージされた #1736・#1739・#1741・#1744・#1749 の確かめ直しで見つかった穴に歯を足す（Issue #1752） | 採用 (2026-10) |
+| [0659](./0659-merged-0929-recheck-followups.md) | 09/29 マージ分の確かめ直し（ADR 0645・0646）の後始末——tick のコメントの言い回し・適合テストの穴・ADR 0390 の欄のすり抜け・ADR 0352 と書かれた誤りの訂正 | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

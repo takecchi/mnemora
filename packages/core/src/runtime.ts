@@ -6451,8 +6451,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // このジョブを再 claim して終端まで進めていた場合。良性の競合なので
         // `leaseConflicts` に記録し、`unsupported`/`failed` には数えず次のジョブへ進む。
         //
-        // ⚠ この分岐は provider を一切呼ばないため、abort の対象にしない
-        // （Issue #1200: 中断が効くのは provider を待っている間と呼ぶ前だけでよい）。
+        // ⚠ この分岐は provider を一切呼ばないので、`signal` を渡す先も待つ相手も無い。
+        // ただし abort を無視するわけではない: abort 済みなら、ループ頭の確認（上）で
+        // すでに抜けていて、この分岐へは入らない（どのジョブも `fail()` しない。ADR 0359）。
+        // ここへ入るのは abort されていない間だけで、入ったあとの `fail()` は中断しない。
         try {
           await deps.outboxStore.fail(
             ctx,
