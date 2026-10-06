@@ -36,7 +36,7 @@
 | #1453 | fixture から `long` 空間の埋め込みの行を消す | `upgrade-from-released.postgres.test.ts` の beforeAll（migration の前に各空間の表に行がある） | 赤（スイートが落ちる） |
 | #1489 | `confirmStatsPresence` の ANALYZE を外す／歯2 から確認の呼び出しを外す | `recall-roundtrip-count.postgres.test.ts`（`reltuples >= 0`、確認済みでない vectorStore で測ると投げる） | 4・4・1件 |
 | #1472 | カウンタのリセットを外す／shuffle の修正を取り消す | `process-counters-start-at-zero-{a,b}.postgres.test.ts`（共有の `process-counters-start-at-zero-teeth.ts`）、`embedding-space-table-enumeration-consistency.postgres.test.ts`（空間の表が無い状態から始める形） | 2・1件 |
-| #1496 | Postgres の候補ごとの SAVEPOINT をやめる | `observe-created-event-same-tx.postgres.test.ts`（DB が拒む値を真ん中に置いた候補） | （PR 本文に記す） |
+| #1496 | Postgres の候補ごとの SAVEPOINT をやめる | `observe-created-event-same-tx.postgres.test.ts`（claim key の索引上限 54000 で DB が拒む候補を真ん中に置き、`createMemoriesWithOutboxAndEvents` を直に呼ぶ。前後の候補と、書けた記憶ぶんの `created` が残る） | 1件（SQLSTATE 25P02） |
 
 3. 足さなかったすり抜け【判断】:
    - #1483 の tuple・date・transform の cause の固定: `unrepresentable: "throw"` にしても、date・transform は zod と SDK が同じ message を投げ、tuple は zod が投げない。message で見分けられず、スタックを見る歯は壊れやすい。実質同値として数えない。
