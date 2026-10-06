@@ -373,7 +373,7 @@ function refExists(table: "memories" | "observations" | "recalls", tenantId: str
  * ADR 0456（ADR 0436・0439 の続き）: 呼び出し側が渡した `NewMemoryEvent.memoryId` の記憶が `ctx` のテナントに在ることを、
  * イベントを書く前に確かめる。`memory_events.memory_id` の外部キーは `tenant_id` を含まないので、確かめないと
  * 別テナントの記憶を指すイベントが `ctx` のテナントの行として書けた。実在しない・別テナントは区別せず
- * `memory not found for tenant`（uuid の形でない id も同じ文面。以前は生の `DrizzleQueryError`）。
+ * `memory not found for tenant`（uuid の形でない id も同じ文面）。
  * `null`・`undefined`（記憶を指さないイベント）は確かめない。**書き込みと同じトランザクションの中で呼ぶ**
  * （投げれば、同じトランザクションの status 更新も戻る）。
  */
@@ -402,8 +402,7 @@ async function assertEventTargetInTenant(
 /**
  * ADR 0499（ADR 0447 の材料）: `expectedStatus` を渡された status 更新の CAS 条件。**purge 済みの行（`purged_at` が入った行。
  * `status` は `forgotten` のまま）は、どの `expectedStatus` にも一致しない**——`Runtime.purge` の「不可逆」の約束どおり、
- * 墓石を `updateStatusWithEvent(T, "active", { expectedStatus: "forgotten" })` が active へ戻せない（以前は `purged_at` を
- * 見ず、戻せた）。0行になった理由の切り分け（`explainEmptyStatusUpdate`）は、通常の CAS 違反と同じ `MemoryStatusConflictError`
+ * 墓石を `updateStatusWithEvent(T, "active", { expectedStatus: "forgotten" })` が active へ戻せない。0行になった理由の切り分け（`explainEmptyStatusUpdate`）は、通常の CAS 違反と同じ `MemoryStatusConflictError`
  * にする。`expectedStatus` を渡さない更新は、無条件の書き込みのまま（CAS ではないので、この条件は付けない）。
  */
 function expectedStatusCondition(expectedStatus: MemoryStatus | undefined): SQL {
@@ -414,8 +413,7 @@ function expectedStatusCondition(expectedStatus: MemoryStatus | undefined): SQL 
 
 /**
  * ADR 0499（ADR 0450 の材料）: `resolveContestedPair`・`resolveContestedGroup` の `status` は型が `"active" | "superseded"`。
- * 型の外の値（`"forgotten"`・`"contested"`・`"archived"` など）は、以前は通って行をその status にしていた。
- * 書く前に `RangeError` で断る（値は message に入れない）。
+ * 型の外の値（`"forgotten"`・`"contested"`・`"archived"` など）は、書く前に `RangeError` で断る（値は message に入れない）。
  */
 function assertResolvedStatus(method: string, field: string, status: unknown): void {
   if (status !== "active" && status !== "superseded") {
@@ -875,7 +873,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`@mnemora/core`）。挙動は変えない。
    *
    * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
-   * ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる（以前は生の drizzle の例外）。トランザクションごと戻り、何も残らない。
+   * ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる。トランザクションごと戻り、何も残らない。
    */
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     assertWellFormedCtx(ctx);
@@ -893,12 +891,9 @@ export class PostgresMemoryStore implements MemoryStore {
     const extractorVersion = input.extractorVersion ?? null;
 
     // Issue #201 / ADR 0318: 新しく作った Memory の `tags` から `proposed` ラベルを
-    // 同一トランザクションで作るため、このメソッド自身がトランザクションを開く
-    // ようになった（本 PR 以前は単発の INSERT 文、衝突時は単発の SELECT 文だった——
-    // 返す値は変わらない。`inserted`/`existing`/`rowToMemory` の呼び方は1行も
-    // 変えていない）。Issue #152/#153 / ADR 0312: `attributes` 列を INSERT に足した
-    // （PR #724 の追加をそのまま引き継ぐ）。Issue #371: `claim_key_subject`/
-    // `claim_key_predicate` 列を足した（PR #736 の追加をそのまま引き継ぐ）。
+    // 同一トランザクションで作るため、このメソッド自身がトランザクションを開く。
+    // INSERT は `attributes`（Issue #152/#153 / ADR 0312）と `claim_key_subject`/
+    // `claim_key_predicate`（Issue #371）の列も書く。
     const result = await this.db.transaction(async (tx) => {
       const insertedRow = await insertMemoryRow(tx, ctx, input, "createMemory");
 
@@ -1004,7 +999,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * か、既に埋め込みジョブが積まれているはずの Memory に対して重複ジョブを積まない。
    *
    * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
-   * ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる（以前は生の drizzle の例外）。トランザクションごと戻り、何も残らない。
+   * ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちたら {@link ClaimKeyIndexLimitError} を投げる。トランザクションごと戻り、何も残らない。
    */
   async createMemoryWithOutbox(
     ctx: Ctx,
@@ -1070,7 +1065,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * - ADR 0451: 本体が失敗したあとの `ROLLBACK TO SAVEPOINT` 自体が失敗したとき（接続切れ・キャンセルなど）は、続けず、`dropped` にも
    *   積まず、**本体の元のエラー**を投げる（外側ごと rollback）。巻き戻しの失敗は元のエラーの `cause`（空いていれば）か
    *   `rollbackError` に残す（ADR 0444 と同じ作法）。`RELEASE SAVEPOINT` の失敗も、候補を落とさずその失敗を投げる。
-   *   巻き戻しが成功する悪い候補は、従来どおり `dropped` に積んで他を書く。
+   *   巻き戻しが成功する悪い候補は、`dropped` に積んで他を書く。
    * - 全候補の成否が確定したあと、書けた候補のうち `created: true` のものだけ、`buildCreatedEvent(memory, dropped)` の
    *   イベントを **同じトランザクションで** `memory_events` へ INSERT する（`EventStore.append` は経由しない——
    *   `supersedeWithNewMemories` と同じ形）。この INSERT が失敗したら、Memory も outbox も含めて全部巻き戻る。
@@ -1081,7 +1076,7 @@ export class PostgresMemoryStore implements MemoryStore {
    *   `SELECT … FOR UPDATE` し、forgotten が1件でもあれば {@link SourceMemoryForgottenError} を投げる
    *   （`dropped` に積まずそのまま投げる。何も書かない）。`reflect` がこの口を使う。
    * - ADR 0435: claim key が索引の上限（SQLSTATE 54000）で落ちた候補は、他の保存できない候補と同じく巻き戻して `dropped` に積む。
-   *   `dropped[].error` は {@link ClaimKeyIndexLimitError}（以前は生の drizzle の例外）。ほかの候補は書く。全候補が落ちたときは
+   *   `dropped[].error` は {@link ClaimKeyIndexLimitError}。ほかの候補は書く。全候補が落ちたときは
    *   最初の例外（これかもしれない）をそのまま投げ、何も書かない。この残り方は例外を型付きにする前と変えていない。
    */
   async createMemoriesWithOutboxAndEvents(
@@ -1656,7 +1651,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
 
       // ADR 0420: `supersede` の対象がすべて CAS に弾かれたら、`news`・`created` イベントごと巻き戻す
-      // （tx の中で投げる）。1件でも通ったなら今までどおりの部分成功。
+      // （tx の中で投げる）。1件でも通ったなら部分成功。
       if (
         opts?.abortIfAllConflicted === true &&
         supersede.length > 0 &&
@@ -1669,7 +1664,7 @@ export class PostgresMemoryStore implements MemoryStore {
     });
 
     if (result.created.some((entry) => entry.created)) {
-      // Issue #269（2026-09-17 コメント）: `createMemory` / `createMemoryWithOutbox` と
+      // Issue #269: `createMemory` / `createMemoryWithOutbox` と
       // 同じ理由で ANALYZE の要否を判定する。`news` は複数件渡せるため、`created` 配列の
       // どれか1件でも実際に新しい行を書いていれば呼ぶ——`ON CONFLICT` で既存行を
       // 返しただけの要素（`created: false`）だけの呼び出しでは数えない
@@ -2049,9 +2044,9 @@ export class PostgresMemoryStore implements MemoryStore {
     // 活動時計を一度も使っていない）Memory はそもそも活動時計では沈まないので、
     // ここで列を作らない（`ReinforceOptions.nowSeq` の doc コメント参照）。
     //
-    // ⚠ **壁時計側の SET 句・WHERE 句は1バイトも変えない**——この条件片は同じ SET の
-    // 末尾に追記するだけであり、`opts.nowSeq` が無い呼び出し（既存の全呼び出し）では
-    // 空文字列になって従来の SQL とバイト単位で同じ文になる。
+    // ⚠ **壁時計側の SET 句・WHERE 句には手を入れない**——この条件片は同じ SET の
+    // 末尾に足すだけで、`opts.nowSeq` が無い呼び出しでは空文字列になり、壁時計側だけの SQL と
+    // バイト単位で同じ文になる。
     //
     // [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md):
     // `opts.addOwnSubjectSeq === true` のときは、`opts.nowSeq`（= `T`）にこの行自身の subject の
@@ -2119,7 +2114,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * [Issue #874](https://github.com/takecchi/mnemora/issues/874) / ADR 0303 追記節:
+   * [Issue #874](https://github.com/takecchi/mnemora/issues/874) / ADR 0303:
    * `reinforce` を `ids` の各要素について呼んだのと同じ結果になる一括版（契約は
    * `MemoryStore.reinforceMany` の doc コメント参照）。`reinforce` が呼び出し1回に
    * つき2往復（現在値の SELECT → CAS 付き UPDATE）だったのに対し、この口は
@@ -2224,7 +2219,7 @@ export class PostgresMemoryStore implements MemoryStore {
       const hasActivity = opts?.nowSeq !== undefined && memory.halfLifeRecalls != null;
       // ADR 0394: `addOwnSubjectSeq` のときは、入力の列に「起点」ではなく `T`（`activityBaseSeq`）と
       // 床までの相対（offset。`baseSeq: 0` の `floorAt`）を持ち込み、起点と床は UPDATE の中で
-      // その行自身の subject の `S_x` を足して作る。そうでなければ従来どおり起点と床を持ち込む。
+      // その行自身の subject の `S_x` を足して作る。そうでなければ起点と床をそのまま持ち込む。
       const activityFloorSeq = hasActivity
         ? defaultActivityDecayStrategy.floorAt({
             baseSeq: addOwnSubjectSeq ? 0 : opts!.nowSeq!,
@@ -2251,7 +2246,7 @@ export class PostgresMemoryStore implements MemoryStore {
 
     // ADR 0394: `addOwnSubjectSeq` のときだけ、起点・床を行ごとに UPDATE の中で組む
     // （`input.activity_base_seq` は `T`、`input.activity_floor_seq` は床までの相対 offset）。
-    // そうでなければ従来の文のまま（`tenant_subject_activity` を参照しない）。
+    // そうでなければ `tenant_subject_activity` を参照しない文にする。
     const effectiveNow = ownSubjectActivityNow({
       tenantSeq: sql`input.activity_base_seq`,
       tenantIdExpr: sql`m.tenant_id`,
@@ -2486,7 +2481,7 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
     // testkit のインメモリ実装と同じ条件（ADR 0434）: `scopeAggregate: "skip"` で `digestBand` も無いとき、
-    // Postgres は集計も目次帯も引かずにクエリを1本も発行しない。その入力は、今までどおり NUL を見ない。
+    // Postgres は集計も目次帯も引かずにクエリを1本も発行しない。その入力は NUL を見ない。
     if (!(opts?.scopeAggregate === "skip" && opts.digestBand === undefined)) {
       assertNoNulInScopeFilter("PostgresMemoryStore.aggregateScope", scope, "scope");
     }
@@ -2701,10 +2696,10 @@ export class PostgresMemoryStore implements MemoryStore {
     //
     // ⚠ **1件の Memory は、1つのラベル群に1回だけ数える**（`GroupCount.count` は Memory の件数）。
     // `tags` は作成時の値をそのまま持つので、同じ名前が重なりうる（LLM の `tags` は重複を除かずに
-    // 書かれる）。以前は `unnest(tags)` をそのまま数えていて、重なった名前の群を多く数えていた
+    // 書かれる）。`unnest(tags)` をそのまま数えると、重なった名前の群を多く数えてしまう
     // （testkit の fixture は `Set` で1回に数える）。`array_position(tags, tag) = position` で、その名前が
     // `tags` の中で最初に現れた位置だけを残す——並べ替え（`DISTINCT`）を足さずに済む形を選んだ。
-    // 【実測 2026-09-28】10万行（`tags` に重複を含む行 6,482）の aggregateScope で、中央値は直す前
+    // 【実測】10万行（`tags` に重複を含む行 6,482）の aggregateScope で、中央値は直す前
     // 94〜98ms、この形 98〜107ms、`LATERAL (SELECT DISTINCT unnest(tags))` 106〜115ms、
     // `count(DISTINCT id)` 213〜228ms（PR 本文）。
     const taxonomyGroupCandidates = scope.taxonomyGroupCandidates;
@@ -3641,9 +3636,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * Postgres の `=` は `NULL = NULL` を（真ではなく）`NULL` に評価するため、素の `=` では
    * `subjectId: null` の Memory 同士が一致しない（`docs/memory-model.md` の
    * 「`NULLS NOT DISTINCT` が要る理由」と同じ配慮を、索引ではなく述語の側でやっている）。
-   * ⚠ **`IS NOT DISTINCT FROM` そのものは書かない**——索引で引けない形なので、以前は
-   * `subject_id` が Index Cond に入らず Filter に落ちていた（同じ claim key を持つテナント中の
-   * 全 subject の行を読んでから捨てていた）。同じ意味を、索引で引ける `subject_id = $n` /
+   * ⚠ **`IS NOT DISTINCT FROM` そのものは書かない**——索引で引けない形で、
+   * `subject_id` が Index Cond に入らず Filter に落ちる（同じ claim key を持つテナント中の
+   * 全 subject の行を読んでから捨てる）。同じ意味を、索引で引ける `subject_id = $n` /
    * `subject_id IS NULL` に分けて書く（{@link subjectIdMatches}。歯は
    * `__tests__/claim-key-index.postgres.test.ts`）。
    *
@@ -3683,7 +3678,7 @@ export class PostgresMemoryStore implements MemoryStore {
       query.claimKey.predicate,
     );
     // 入口の正規化（`normalizeUuidCase`）。下の除外は JS で比べるので、DB が返す小文字の id に揃える
-    // ——以前は大文字の UUID を渡すと自分自身が返っていた（`get` は同じ行を返すのに）。
+    // ——揃えないと、大文字の UUID を渡したとき自分自身が返る（`get` は同じ行を返すのに）。
     const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
     const validFrom = toPgTimestampClamped(query.validFrom);
     const validUntil = toPgTimestampClamped(query.validUntil);
@@ -3791,14 +3786,14 @@ export class PostgresMemoryStore implements MemoryStore {
    * を追加の `WHERE` で絞ったうえで `GROUP BY claim_key_predicate` して
    * `MAX(created_at)` で新しい順に並べる。当初は「新しい索引は足さない」（ADR 0329 決定4）だったが、**専用の部分索引
    * `idx_memories_claim_predicates`（`migrations/0029_memories_claim_predicates_index.sql`）を足した**
-   * ——ADR 0329 の 2026-09-30 追記。SQL は変えていない。
+   * ——ADR 0329。
    *
    * `subject_id` は `findActiveByClaimKey` と同じく NULL 同士も一致として扱う
    * （{@link subjectIdMatches}）。
    *
-   * ⚠ **以前はこの SQL が索引を使っていなかった**（上の「先頭2列で絞り込み」は意図であって
-   * 実態ではなかった）。【実測 2026-09-27、1テナント 20,000 行 + 別テナント 5,000 行】
-   * **Seq Scan**（別テナントを含む表全体）だった——`subject_id IS NOT DISTINCT FROM` が
+   * ⚠ **索引を使わせるために WHERE を工夫している**（上の「先頭2列で絞り込み」だけでは使われない）。
+   * 【実測、1テナント 20,000 行 + 別テナント 5,000 行】工夫が無いと
+   * **Seq Scan**（別テナントを含む表全体）になった——`subject_id IS NOT DISTINCT FROM` が
    * 索引で引けない形であることに加え、`idx_memories_claim_key` は部分索引
    * （`WHERE claim_key_subject IS NOT NULL`）なのに、WHERE が `claim_key_predicate IS NOT NULL`
    * だけでは部分索引の述語を導けないため。⟹ `claim_key_subject IS NOT NULL` を足す——
@@ -4032,7 +4027,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記）:
+   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150）:
    * `resolveContestedPair`（上）の解決側 CAS を満たせなくなった生存側1件だけを対象にした
    * 別の任意メソッド。契約は `MemoryStore.resolveOrphanedContested`（`@mnemora/core`）側に
    * ある——ここはクエリの組み立てのみ。`resolveContestedPair` と違い、対象は1件だけであり
@@ -4205,7 +4200,7 @@ export class PostgresMemoryStore implements MemoryStore {
       // 実際に有効期間が重なる組を結ぶ」と読み替える（ADR 0324 決定4——重なりが
       // 矛盾の必要条件——との整合）。重なりの判定は `findActiveByClaimKey`/
       // `findContestedByClaimKey` と**文字どおり同じ SQL の半開区間の式**——JS 側に
-      // 同じ式を二重に持たない（2026-09-30 の直し、ADR 0381 追記）。`memories a` ×
+      // 同じ式を二重に持たない（ADR 0381）。`memories a` ×
       // `memories b`（どちらも `members` の集合、`a.id <> b.id`）の自己結合1本で、
       // 重なる**順序対**（a→b と b→a の両方）を一度に生成する——`WHERE` が対称なので、
       // 一致する各無向対について2行（両方向）が自然に出る。穴A・合併で既に存在する行は
@@ -4334,7 +4329,7 @@ export class PostgresMemoryStore implements MemoryStore {
         }
       }
 
-      // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: 渡された members が、
+      // ADR 0381（段階Bの穴埋め）: 渡された members が、
       // 関係の行でつながった群の「今も contested な」全員と一致することを CAS で
       // 課す——一部だけを渡した解消（部分解消）を拒む。`WITH RECURSIVE` で
       // `members` から `memory_relations`（双方向2行が既に張られているので、
@@ -4364,8 +4359,7 @@ export class PostgresMemoryStore implements MemoryStore {
       if (missing.length > 0) {
         // 群の一部だけを渡した——足りない側（まだ contested のまま群に残っているのに
         // 渡されなかったメンバー）を名指しして、何も書かずに専用のエラーとして扱う
-        // （2026-09-30 のさらなる直し、ADR 0381 §7 解消——
-        // MemoryStatusConflictError の再利用をやめた）。
+        // （ADR 0381 §7。`MemoryStatusConflictError` は再利用しない）。
         throw new ContestedGroupMembershipMismatchError(missing[0] as MemoryId);
       }
 
@@ -4652,8 +4646,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
    * `listLabels?`（`@mnemora/core` の interface doc 参照）。
    *
-   * Issue #881 / ADR 0318 追記（2026-09-26、クローン miku の判断）: `name` の並び順は
-   * **コードポイント順**（バイト順）と決めた。`ORDER BY name`（COLLATE 指定なし）は
+   * Issue #881 / ADR 0318: `name` の並び順は **コードポイント順**（バイト順）。`ORDER BY name`（COLLATE 指定なし）は
    * DB の既定の照合順序に従うため、既定が `C` でない DB（例: `en_US.utf8`）では
    * ロケール依存の自然順になりコードポイント順とずれる——`COLLATE "C"` を明示して
    * DB の既定ロケールに関わらず常にコードポイント順（バイト順）で返す。
@@ -4959,7 +4952,7 @@ export class PostgresMemoryStore implements MemoryStore {
  * （ADR 0079、直上）と同じ理由。テスト側に述語を書き写すと、本体の述語を直したときに
  * 歯だけが古い述語を測り続ける。
  *
- * `opts.clock` で述語を切り替える（省略時は `'wall'`、本 ADR 以前と1バイトも変わらない）:
+ * `opts.clock` で述語を切り替える（省略時は `'wall'`）:
  * - `'wall'`: `decay_floor_at <= opts.now`（既存索引 `idx_memories_recall_gate`
  *   `(tenant_id, status, decay_floor_at)` を使う——**新しい索引は追加しない**。
  *   `status = 'active'` は部分索引の述語 `status IN ('active','contested')` を含意する）。
@@ -5014,7 +5007,7 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
   // **並べる軸は、掃く軸に合わせる。** `clock: 'activity'` のときに `decay_floor_at` で
   // 並べると、`idx_memories_recall_gate_seq`（`(tenant_id, status, decay_floor_seq)`）は
   // **並び替えを満たせないので選ばれず**、プランナは壁時計側の索引を走査して
-  // `decay_floor_seq` を Filter に落とす——【実測】2026-09-16、CI の
+  // `decay_floor_seq` を Filter に落とす——【実測】CI の
   // `archive-decayed-index.test.ts`「適用可能性（活動時計）」が実際にこれで赤くなった
   // （EXPLAIN 逐語: `Filter: ((decay_floor_seq IS NOT NULL) AND (decay_floor_seq <= '20000'::bigint))`）。
   // ⟹ 活動軸で沈んだ行が疎なテナントでは、`limit` 件を見つけるまで壁時計順に大量の行を
@@ -5105,7 +5098,7 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
  *
  * ⚠ **`opts.limit` は0以上の整数を渡す前提であり、負数を渡したときの結果は未定義**
  * （`PurgeExpiredEventsOptions.limit` の doc 参照、Issue #876）。**この `+1` の算術ゆえに
- * `opts.limit === -1` だけは `LIMIT 0` になり例外にならない**——2026-09-26 実測
+ * `opts.limit === -1` だけは `LIMIT 0` になり例外にならない**——実測
  * （PostgreSQL 17.11 + pgvector 0.8.0、`main` cb6d1db）で `purgeExpiredEvents(ctx,
  * { limit: -1, olderThan })` は `{ purged: 0, reachedLimit: true, oldestPurgedAt: null,
  * newestPurgedAt: null, dryRun }` を返した（`dryRun: true`/`false` とも同じ形）。
@@ -5115,7 +5108,7 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
  * `LIMIT` に負数が渡り Postgres 自身が例外を投げる。**この `-1` の折れ方は狙って設計した
  * ものではなく、`+1` の算術が生んだ偶然である**——契約として真似る理由は無い
  * （採らなかった案は [ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)
- * の2026-09-26追記を参照）。
+ * の追記を参照）。
  *
  * `kind <> 'events_purged'` は `memory_events` に `(tenant_id, at)` の索引
  * （`migrations/0010_memory_events_retention_index.sql`）を張ったうえで Filter として
