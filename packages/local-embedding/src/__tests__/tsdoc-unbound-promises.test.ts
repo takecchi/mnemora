@@ -87,8 +87,8 @@ describe("buildLocalEmbeddingPipeline: mean pooling と L2 normalize で固定�
   });
 });
 
-describe("retry.attempts: 0 以下は1回に丸める（コンストラクタのコメント）", () => {
-  it.each([0, -1])("attempts: %d でも createPipeline は1回呼ばれる", async (attempts) => {
+describe("retry.attempts: 0 以下・NaN は1回に丸める（コンストラクタのコメント。NaN は Issue #1775 の #810 で追加）", () => {
+  it.each([0, -1, Number.NaN])("attempts: %d でも createPipeline は1回呼ばれる", async (attempts) => {
     let calls = 0;
     const provider = new LocalEmbeddingProvider({
       createPipeline: async () => {
