@@ -1381,7 +1381,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const results: Memory[] = [];
     for (const rawId of ids) {
       const id = normId(rawId);
-      if (seen.has(id)) {
+      if (false && seen.has(id)) {
         continue;
       }
       seen.add(id);
