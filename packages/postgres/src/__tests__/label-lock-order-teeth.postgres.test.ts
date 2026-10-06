@@ -9,7 +9,7 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * ADR 0659（Issue #1718）: ADR 0511 の約束3・4・6・8 を縛る歯。
+ * ADR 0658（Issue #1718）: ADR 0511 の約束3・4・6・8 を縛る歯。
  * 機能の歯（戻り値・行の中身）では見えない「ロックを取る順」と「ロックを取りすぎないこと」を、
  * ロックそのものを外から見て縛る。実装の SQL は一切変えない（歯は外から呼ぶだけ）。
  * クローン（miku）の判断で、オーナーの判断ではない。
