@@ -3078,6 +3078,15 @@ export interface ObserveResult {
     rejectedSubjectIds?: string[];
     claimKeyFailure?: ExtractionFailure | null;
     contestedDetection?: ContestedDetectionOutcome[];
+    resend?: ObserveResend;
+}
+export interface ObserveResend {
+    memories: ObserveResendMemory[];
+}
+export interface ObserveResendMemory {
+    memoryId: MemoryId;
+    status: MemoryStatus;
+    purged: boolean;
 }
 export interface ContestedDetectionOutcome {
     memoryId: MemoryId;
