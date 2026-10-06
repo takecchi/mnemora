@@ -151,4 +151,31 @@ describe("recall() — 段3.5 で席に着いた後に対向が取れず落ち�
     expect(omittedCount(result, "unit_assembly_dropped")).toBe(1);
     expect(omittedCount(result, "over_limit", "rescore")).toBe(1);
   });
+
+  it("(d) 段2の札が違う2件（over_limit(rescore) と below_threshold）が同時に組み立てで落ちると、2件とも unit_assembly_dropped にだけ数え、拾われなかった1件は残る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
+    // A1 はクエリとの類似度 0.6 で over_limit(rescore)、A2 は 0.05 で below_threshold。どちらも X に近い。
+    const a1 = await createEmbeddedMemory(stores, [0.6, 0.8, 0], { digest: "A1" });
+    const a2 = await createEmbeddedMemory(stores, [0.05, 0.9987, 0], { digest: "A2" });
+    const b1 = await createEmbeddedMemory(stores, [0, 0, 1], { digest: "B1" });
+    const b2 = await createEmbeddedMemory(stores, [0, 0.01, 0.9999], { digest: "B2" });
+    expect((await runtime.markContested(ctx, a1.id, b1.id)).outcome.kind).toBe("contested");
+    expect((await runtime.markContested(ctx, a2.id, b2.id)).outcome.kind).toBe("contested");
+    await runtime.forget(ctx, { memoryId: b1.id });
+    await runtime.forget(ctx, { memoryId: b2.id });
+    // C は over_limit(rescore) のまま連想に拾われない。
+    await createEmbeddedMemory(stores, [0.7, -0.71, 0], { digest: "C" });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 1,
+      association: { maxCount: 2 },
+    });
+
+    expect(result.memories.map((m) => m.memoryId)).toEqual([x.id]);
+    expect(omittedCount(result, "unit_assembly_dropped")).toBe(2);
+    expect(omittedCount(result, "below_threshold")).toBeUndefined();
+    expect(omittedCount(result, "over_limit", "rescore")).toBe(1);
+  });
 });
