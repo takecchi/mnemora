@@ -3545,7 +3545,6 @@ export class PostgresMemoryStore implements MemoryStore {
         SELECT id, status FROM memories
         WHERE tenant_id = ${ctx.tenantId}
           AND id = ANY(${sql.param([first.id, second.id])}::uuid[])
-        ORDER BY id ASC
         FOR UPDATE
       `);
       // id は入口で小文字にそろえてあるので、DB が返す id とそのまま突き合わせられる。
