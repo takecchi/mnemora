@@ -127,6 +127,15 @@ for (const fixture of FIXTURES) {
       const ledger = await q<{ name: string }>("SELECT name FROM _mnemora_migrations");
       const done = new Set(ledger.map((r) => r.name));
       pendingBefore = listMigrationFiles(DEFAULT_MIGRATIONS_DIR).filter((f) => !done.has(f));
+      // fixture 自身が、`SPACES` の全空間のデータを持つこと（migration の前に確かめる）。空の空間があると、
+      // 下の it() のうちその空間の行を読むもの（zero-norm 索引・ゼロベクトル・purge など）が、
+      // 行の無い表に対して黙って空振りしうる（#1453）。
+      for (const [name, space] of Object.entries(SPACES)) {
+        const rows = await q<{ n: number }>(
+          `SELECT count(*)::int AS n FROM "${embeddingSpaceTableName(space)}"`,
+        );
+        expect(rows[0]!.n, `fixture の埋め込み空間 ${name} に行が無い`).toBeGreaterThan(0);
+      }
       // ADR 0437 決定3: v1.0.0〜v1.0.2 の purge は `tags` を消さなかった（v1.1.0 の ADR 0375 から消える）。
       // fixture の purge 済みの行に、その残り方（purged_at があり、tags が残る）を再現する。
       // `attributes`・claim key の列は v1.0.x の DB には無い（migration 0019・0021 が足す）ので、
