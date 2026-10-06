@@ -344,7 +344,10 @@ export function truncateForFallbackDigest(content: string, maxLength: number): s
   const trimmed = content.trim();
   // 負の上限は上限0（本文を残さない）として扱う。以前はここで負のまま比べていたので、本文が空のとき
   // だけ `maxLength: 0` と結果が分かれていた（0 なら "（内容なし）"、負なら "…"）。
-  const limit = maxLength < 0 ? 0 : maxLength;
+  if (maxLength < 0) {
+    return "（内容なし）";
+  }
+  const limit = maxLength;
   if (trimmed.length <= limit) {
     return trimmed.length > 0 ? trimmed : "（内容なし）";
   }
