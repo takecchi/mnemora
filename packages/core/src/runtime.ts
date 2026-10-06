@@ -654,8 +654,9 @@ export interface ReextractResult {
    * - 対象は同じ `(sourceObservationId, extractorVersion)` を持つ **`status: 'active'`** の
    *   Memory のうち、今回作られた content_hash の集合に含まれないものだけ
    *   （`forgotten` は絶対に含めない。`contested` も対象外——理由は ADR 0028 参照）。
-   * - 🔴 安全弁3（ADR 0030）: `updateStatus` を `expectedStatus: "active"` の
-   *   compare-and-swap で呼ぶ。読み（`listBySourceObservation`）と書き（`updateStatus`）の
+   * - 🔴 安全弁3（ADR 0030）: supersede は `expectedStatus: "active"` の compare-and-swap で書く
+   *   （store が `supersedeWithNewMemories` を持てばその `supersede[].expectedStatus`、持たなければ
+   *   `updateStatusWithEvent`）。読み（`listBySourceObservation`）と書きの
    *   間に他の書き込みで status が変わっていた Memory は、ここには**入らない**
    *   （`skipped` に `status_changed_concurrently` として出る）。
    * - 🔴 **置き換えた側（`supersededById`）は、今回の抽出で `active` になる行である**（ADR 0454）。
@@ -5354,9 +5355,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 抽出結果を根拠に既存を消さない（`superseded_by_id` の指す先も無い）。
    * 🔴 安全弁3（ADR 0030）: `classifyReextractTargets` が「今回作る前」に読んだ時点で
    * `active` だった Memory でも、実際に書きに行くまでの間（TOCTOU の窓）に別の書き込みで
-   * status が変わっていることがある。`updateStatus` を `expectedStatus: "active"` の
-   * compare-and-swap で呼び、弾かれたら `classifySupersedeFailure` で判定して `skipped` に
-   * 積む（`supersededMemoryIds` には入れず、`superseded` イベントも積まない）。
+   * status が変わっていることがある。supersede は `expectedStatus: "active"` の compare-and-swap で書き、
+   * 弾かれたものは `skipped` に `status_changed_concurrently` で積む（`supersededMemoryIds` には入れず、
+   * `superseded` イベントも積まない）。store が `supersedeWithNewMemories` を持てば、その
+   * `supersede[].expectedStatus` で書いて `result.conflicted` を写す。持たなければ `updateStatusWithEvent` を
+   * 1件ずつ呼び、投げられた例外を `classifySupersedeFailure` で判定する。
    *
    * supersede 対象は、同じ `(sourceObservationId, extractorVersion)` を持つ既存 Memory のうち
    * **`status: 'active'`** かつ今回作られた content_hash の集合に含まれないものだけ。
