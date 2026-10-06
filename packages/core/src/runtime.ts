@@ -519,7 +519,9 @@ export interface ObserveResult {
    *
    * 読み方（`resend.memories` は、その Observation から作られた記憶の、いまの状態）:
    * - `memories` が空 ＝ まだ抽出されていない。`extract: 'deferred'` で tick 待ち、`extract: 'sync'` の observe が abort された後で
-   *   リースが切れる前、extract ジョブが failed、または抽出が0件だった、のどれか。**ジョブの状態はこの欄では分からない**。
+   *   リースが切れる前、extract ジョブが failed、または抽出が0件だった、のどれか。
+   *   ⚠ **限界: ジョブ（outbox）の状態はこの欄には入れない（決定済み。ADR 0639）。`memories: []` からは「まだ抽出されていない」ことしか
+   *   分からず、tick 待ち・リース中・failed・抽出0件は区別できない。** `OutboxStore` に observation ごとのジョブを読む口は無く、この PR でも足していない。
    * - 全部が `status: 'forgotten'` ＝ forget のために、この再送は何も作り直さなかった。
    * - `purged: true` ＝ purge 済み（`status` は `'forgotten'` のまま）。
    *

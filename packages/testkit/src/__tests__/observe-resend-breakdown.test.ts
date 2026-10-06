@@ -20,8 +20,31 @@ import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
 interface Kit {
   /** 同じ store に繋がった runtime を、`extractorVersion` ごとに作る。 */
-  runtimeFor: (extractorVersion: string) => Runtime;
+  runtimeFor: (
+    extractorVersion: string,
+    wrapMemoryStore?: (store: MemoryStore) => MemoryStore,
+  ) => Runtime;
   memoryStore: MemoryStore;
+}
+
+/**
+ * `listBySourceObservationAllVersions` の返す順を逆にする包み。口は「返す順序は規定しない」ので、
+ * runtime が自分で昇順にしていることを、store の並びに頼らず確かめるために使う。
+ */
+function reverseListed(store: MemoryStore): MemoryStore {
+  return new Proxy(store, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target) as unknown;
+      if (typeof value !== "function") return value;
+      if (prop === "listBySourceObservationAllVersions") {
+        return async (...args: unknown[]) =>
+          ((await (value as (...a: unknown[]) => Promise<unknown[]>).apply(target, args)) ?? [])
+            .slice()
+            .reverse();
+      }
+      return (value as (...a: unknown[]) => unknown).bind(target);
+    },
+  });
 }
 
 let contents: string[] = ["X"];
@@ -44,7 +67,7 @@ function makeInMemoryKit(): Kit {
   const memoryStore = new InMemoryMemoryStore();
   return {
     memoryStore,
-    runtimeFor: (extractorVersion) =>
+    runtimeFor: (extractorVersion, wrapMemoryStore) =>
       createRuntime({
         llmProvider: llm,
         embeddingProvider: {
@@ -52,7 +75,7 @@ function makeInMemoryKit(): Kit {
           embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
         },
         hashContent: (content: string) => `sha256(${content})`,
-        memoryStore,
+        memoryStore: wrapMemoryStore ? wrapMemoryStore(memoryStore) : memoryStore,
         vectorStore: new InMemoryVectorStore(memoryStore),
         eventStore: new InMemoryEventStore(memoryStore, memoryStore.events),
         outboxStore: new InMemoryOutboxStore(memoryStore.outboxJobs),
@@ -210,12 +233,17 @@ function defineTests(label: string, makeKit: () => Promise<Kit> | Kit): void {
 
     it("順序は memoryId の昇順", async () => {
       contents = ["a", "b", "c", "d", "e", "f"];
-      const runtime = (await makeKit()).runtimeFor("v1");
+      const kit = await makeKit();
+      const runtime = kit.runtimeFor("v1");
       const first = await runtime.observe(ctx, input("resend-order"));
       expect(first.memoryIds).toHaveLength(6);
+      const ascending = [...first.memoryIds].sort();
       const resend = await runtime.observe(ctx, input("resend-order"));
-      const ids = resend.resend!.memories.map((m) => m.memoryId);
-      expect(ids).toEqual([...first.memoryIds].sort());
+      expect(resend.resend!.memories.map((m) => m.memoryId)).toEqual(ascending);
+      // store が逆順で返しても、runtime が昇順にする（口は順序を規定しない）。
+      const reversedStore = kit.runtimeFor("v1", reverseListed);
+      const viaReversed = await reversedStore.observe(ctx, input("resend-order"));
+      expect(viaReversed.resend!.memories.map((m) => m.memoryId)).toEqual(ascending);
     });
 
     it("再送は LLM を呼ばず、記憶を書き換えない", async () => {
