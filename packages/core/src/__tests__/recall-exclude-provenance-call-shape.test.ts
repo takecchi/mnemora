@@ -103,14 +103,17 @@ describe("recall() × excludeProvenanceKinds — aggregateScope の呼び出し�
   it.each([
     ["省略", {}],
     ["空配列", { excludeProvenanceKinds: [] as never[] }],
-  ])("除外の指定が%sのとき、aggregateScope の第3引数に excludeProvenanceKinds のキーを足さない", async (_label, extra) => {
-    const stores = await seed();
-    const { memoryStore, calls } = recordAggregateScopeOptions(stores);
-    await buildRuntime(stores, memoryStore).recall(ctx, { vector: [1, 0], ...extra });
+  ])(
+    "除外の指定が%sのとき、aggregateScope の第3引数に excludeProvenanceKinds のキーを足さない",
+    async (_label, extra) => {
+      const stores = await seed();
+      const { memoryStore, calls } = recordAggregateScopeOptions(stores);
+      await buildRuntime(stores, memoryStore).recall(ctx, { vector: [1, 0], ...extra });
 
-    expect(calls).toHaveLength(1);
-    expect("excludeProvenanceKinds" in calls[0]!).toBe(false);
-  });
+      expect(calls).toHaveLength(1);
+      expect("excludeProvenanceKinds" in calls[0]!).toBe(false);
+    },
+  );
 
   it("対照: 除外を指定したときは、そのまま第3引数に渡す", async () => {
     const stores = await seed();
