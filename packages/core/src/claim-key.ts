@@ -418,6 +418,11 @@ export interface ClaimKeyOptions {
    * （Issue #1436）。今の振る舞いは `__tests__/claim-key-relative-period-across-observations.test.ts`
    * が縛っている。呼び出し側は、`observe()` に期間（`validFrom`/`validUntil`）を明示すれば、重ならない
    * 対は contested にならない。
+   *
+   * ⚠ **`knownPredicatesFromStore: true` と組むと、別々の発話どうしが語彙ヒントに吸い寄せられて
+   * 同じ predicate になり、訂正ではない対も contested になる**（Issue #835）。
+   * その対にも `RecalledMemory.contestedWith` が付き、`examples/chat` の回答プロンプトでは訂正と
+   * 同じ「訂正の可能性」の印で届く。測定値と条件は ADR 0335 の追記（2026-10-07、Issue #835）を見ること。
    */
   detectContested?: boolean | undefined;
   /**
@@ -455,6 +460,10 @@ export interface ClaimKeyOptions {
    * 【実測 2026-09-29、修正後】記録の再生（同じ種カセット、seed 1〜3）で、訂正4/4 ×3・
    * 誤検出は `unknown-favorite-number` の1/2 ×3 のみ（`other-period-city-this-year` は
    * 0/2 ×3）——ADR 0377 の「陽性対照」節に実測の詳細がある。
+   *
+   * ⚠ **既知の限界**: 語彙ヒントに吸い寄せられて、無関係な発話どうしが同じ predicate になり、
+   * contested になることがある。その対にも `RecalledMemory.contestedWith` が付き、訂正と区別されずに
+   * 「訂正の可能性」の印が付く。詳しくは ADR 0335 の追記（2026-10-07、Issue #835）を見ること。
    */
   knownPredicatesFromStore?: boolean | { limit?: number | undefined } | undefined;
   /**

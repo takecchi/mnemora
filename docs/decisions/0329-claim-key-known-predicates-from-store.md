@@ -979,3 +979,39 @@ Filter）。一致は1667件で、前後同じ。14往復。
 - ⛔ `subject_id IS NULL` での呼び出し。
 - ⛔ 書き込み負荷のもとでの挙動。
 - 測定用のスクリプトは commit していない。
+
+---
+
+## 追記（2026-10-07）: Issue #835——いま main で何が起きているか（文書だけ。振る舞いは変えていない）
+
+⚠ **これはクローン（miku）の判断で書いた追記であり、オーナーの判断ではない**（ADR 0220）。
+本文と、上の既存の追記は書き換えていない。
+
+### 測ったこと【実測、main `8c8aee58`、実 API 0回、n=3】
+
+`examples/chat/src/scripts/replay-835-candidate3-known-predicates.ts` に
+`answer.claim-key.known-predicates-{1,2,3}.json`（2026-09-25 の記録）を、手直しなしで当てた。
+条件は `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`。
+
+- 訂正の contested は 4/4 ×3。
+- `unknown-favorite-number`（U1）は 3/3 で成立。
+- 誤検出は14件中 3・2・2件（`unknown-favorite-number` は毎回。ほかは `other-person-birthday`・
+  `other-person-favorite-food`・`eval-misattribution-order-swapped`）。
+- `other-period-city-this-year`・`other-period-city-last-year` は 3回とも 0（ADR 0377 の効き目は保たれている）。
+- `claimKey` が既定（off）では contested は 0。
+
+つまり、負債1（語彙の吸い寄せによる誤検出）は、2026-09-30 の追記の時点から変わらず残っている。
+訂正4件も語彙ヒントのおかげで一致しているので（本文。語彙ヒント無しでは 0/4）、語彙の数・predicate の
+出どころ・文言（v1〜v4、案A）・埋め込みの近さでは、訂正と誤検出を分けられない。
+
+### 確かめていないこと
+
+- **実 API での今の挙動。**カセットは 2026-09-25 の記録で、その後の変更が実 API での結果を変えているかは、再生では見えない。
+- **誤検出の印が、回答の質に与える影響。**
+- **`knownPredicatesFromStore` だけを外した条件。**カセットに無い呼び出しが各回21件出て、claim key がほぼすべて null になるだけで、効き目は測れない。測るには実 API で録り直す必要がある。
+- `claimKeyFailure`（記録に無い呼び出し）が各回3件あり、2026-09-30 の2件より増えた経緯。3件とも filler の発話で、訂正4件と U1 の数字には影響しない。
+
+### 次の一手
+
+Issue #835 の案1（issuecomment-5895295948 の案3: 一致した2件の本文を LLM で見比べる）。
+**実 API の鍵（OpenAI）が戻るまで保留**している。コードは変えていない（`claim-key.ts` の TSDoc だけ今の事実に合わせた）。
