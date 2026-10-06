@@ -2760,7 +2760,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 - 信用できる本文だけを抽出していて、従来どおり受けたい: `createRuntime({ ..., config: { acceptLlmSubjectIdWithoutCandidates: true } })`。
 - 信用できない本文を抽出する、または候補を絞りたい: 設定は足さず、`observe()` に `subjectCandidates` を渡して選ばせる（一覧内は採り、一覧外は弾く）。`tick`・`reextract` の経路は、`observation.subjectId` が主題になる。
 
-**確かめたこと**: 直す前に赤（8本）、直して緑。直しを外す・やりすぎる変異で歯が赤（ADR 0635、PR 本文）。**確かめていないこと**: 捨てた値の通知は無い（ADR 0635 の負債）。実際の LLM が一覧なしで `subjectId` を返す頻度。
+**確かめたこと**: 直す前に赤（7本）、直して緑。直しを外す・やりすぎる変異で歯が赤（ADR 0635、PR 本文）。**確かめていないこと**: 捨てた値の通知は無い（ADR 0635 の負債）。実際の LLM が一覧なしで `subjectId` を返す頻度。
 
 **DB マイグレーション**: 要らない。
 

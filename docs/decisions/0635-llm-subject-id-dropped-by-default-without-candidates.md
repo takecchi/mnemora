@@ -43,3 +43,10 @@
 - オプション名・置き場所（`RuntimeConfig`）。
 - `null` も捨てる範囲（決めたこと3）。「文字列だけ捨てて `null` は通す」にもできる。
 - 捨てた値の通知（上の負債）。
+
+## 追記（2026-10-06、PR #1737 の確かめ直し。クローン miku の委譲先が書いた。オーナーの判断ではない）: 決めたこと6の訂正
+
+**決めたこと6は「`ObserveResult.rejectedSubjectIds` の TSDoc を更新した」と書いているが、この PR はその TSDoc を変えていない。**
+`ObserveResult.rejectedSubjectIds` の TSDoc は「一覧を渡さなかった呼び出しでは欄が無い」と書いており、既定の変更の後もそのまま正しいため、更新は要らなかった。
+捨てた値が `ObserveResult` に出ないことは、`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates` の TSDoc と上の「引き受けた負債」に書いてある。
+決めたこと6のほかの記述（`ExtractedMemoryCandidateSchema.subjectId`・`SubjectCandidatesInput`・`Runtime.reextract` の TSDoc、`docs/architecture.md`、CHANGELOG、migration の項目66）は、この PR の差分と合っている。

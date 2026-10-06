@@ -205,7 +205,8 @@ export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "documen
  *   ⚠ **このとき LLM が返す `subjectId` は検証されず、そのまま Memory の主題になる**（opt-in のとき）——観察文の注入で
  *   同じテナントの別の subject に記憶を書かせられ、claim key の検出を併用すると、その subject の既存の
  *   記憶が `contested` になりうる（`ExtractedMemoryCandidateSchema.subjectId` の doc、ADR 0442）。
- *   `extract: 'deferred'` の `tick` と `reextract` は一覧を持てないので、常にこの扱いになる。
+ *   `extract: 'deferred'` の `tick` と `reextract` は一覧を持てないので、opt-in のときは常にこの扱いになる
+ *   （既定では、上のとおり捨てて observation の `subjectId` へ落ちる）。
  * - **空配列（`[]`）**: **「渡していない」と同じ**に扱う——検証しようのない空の一覧を
  *   渡された runtime が「一覧外は全部弾く」という極端な挙動（＝LLM が返す `subjectId` を
  *   常に無効化する）に倒れるのを避けるため。プロンプトも変えず、検証もしない
