@@ -76,6 +76,29 @@ describe("読み込み失敗のメッセージは、実際に解決されたキ�
     expect(error.message).not.toContain(PNPM_CACHE_DIR);
   });
 
+  it("revision を渡したときは、消せば取り直す場所も <根>/<revision> の下を名指す（根を revision ごとに分けるため）", async () => {
+    transformers.env.cacheDir = PNPM_CACHE_DIR;
+    const withCacheDir = new LocalEmbeddingProvider({
+      cacheDir: "/x/",
+      revision: "abc123",
+      retry: { attempts: 1 },
+    });
+    const withCacheDirError = (await withCacheDir.warmup().then(
+      () => null,
+      (e: unknown) => e,
+    )) as Error;
+    expect(withCacheDirError.message).toContain(" /x/abc123/sirasagi62/ruri-v3-30m-ONNX を消すと");
+
+    const withDefault = new LocalEmbeddingProvider({ revision: "abc123", retry: { attempts: 1 } });
+    const withDefaultError = (await withDefault.warmup().then(
+      () => null,
+      (e: unknown) => e,
+    )) as Error;
+    expect(withDefaultError.message).toContain(
+      ` ${PNPM_CACHE_DIR}abc123/sirasagi62/ruri-v3-30m-ONNX を消すと`,
+    );
+  });
+
   // 記録はモジュール全体で共有される値なので、先に既定の pipeline を失敗させて記録を作り、
   // その後で注入した pipeline を失敗させる。古い記録が別の provider のメッセージに漏れてはならない。
   it("createPipeline を注入したときは、既定の pipeline が記録した場所を名指さない（#1223）", async () => {

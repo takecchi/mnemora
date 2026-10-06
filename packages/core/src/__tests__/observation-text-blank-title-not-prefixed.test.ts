@@ -86,6 +86,22 @@ describe("observationPayloadText: 空白だけの title は前置きにしない
     expect(text).toBe('  \n\n{"a":1}');
   });
 
+  // `title` が空でない「文字列」のときだけ前置きになる。文字列でない値を文字列に直して使わない。
+  const NON_STRING_TITLES: Array<[string, unknown]> = [
+    ["数", 42],
+    ["null", null],
+    ["未定義", undefined],
+    ["真偽値", true],
+    ["配列", ["T"]],
+    ["オブジェクト", { t: "T" }],
+  ];
+
+  it.each(NON_STRING_TITLES)("文字列でない title（%s）は前置きにしない", (_name, title) => {
+    expect(
+      observationPayloadText(documentObservation({ title, content: "C", extractTitle: true })),
+    ).toBe("C");
+  });
+
   it("extractTitle が無ければ、title は今までどおり本文に入らない", () => {
     expect(observationPayloadText(documentObservation({ title: "T", content: "C" }))).toBe("C");
   });

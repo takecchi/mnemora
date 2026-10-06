@@ -551,6 +551,19 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       expect(memoryStore.events).toHaveLength(0);
     });
 
+    it("配列の要素が入れ子（オブジェクト・配列）で、その奥に BigInt があっても拒む", async () => {
+      const memoryStore = new InMemoryMemoryStore();
+      const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+      const m = await memory(memoryStore);
+      await expect(
+        eventStore.append(ctx, event(m.id, "updated", { xs: [{ b: 10n }] })),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      await expect(
+        eventStore.append(ctx, event(m.id, "updated", { xs: [[1, [10n]]] })),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(memoryStore.events).toHaveLength(0);
+    });
+
     it('陽性対照: number（123）・数字に見える文字列（"123n"）は引き続き通る', async () => {
       const memoryStore = new InMemoryMemoryStore();
       const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
