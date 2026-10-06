@@ -665,5 +665,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0668](./0668-merged-0930-front-b-recheck-teeth.md) | 09/30 にマージされた PR の前半（B 群）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0669](./0669-merged-0919-recheck-association-rank-and-repo-model-id-guard-teeth.md) | 09/19 にマージされた連想枠の順位キー（#549）と repo/modelId 宣言の検査（#550）の確かめ直しで見つかった穴に歯を足す（Issue #1793） | 採用 (2026-10) |
 | [0670](./0670-merged-0918-recheck-apply-correction-and-publish-gate-shell-teeth.md) | 09/18 にマージされた Runtime.applyCorrection（#537）と publish.yml の門の shell の歯（#546）の確かめ直しで見つかった穴に歯を足す（Issue #1804） | 採用 (2026-10) |
+| [0674](./0674-merged-0926-recheck-teeth.md) | 09/26 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1774） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
