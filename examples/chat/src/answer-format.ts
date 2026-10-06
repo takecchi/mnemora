@@ -145,7 +145,7 @@ export function formatAnswerCostTable(results: readonly AnswerCaseRunResult[]): 
  */
 export function formatAnswerContentPreservation(results: readonly AnswerCaseRunResult[]): string {
   const tally = (pick: (r: AnswerCaseRunResult) => { applicable: boolean; preserved: boolean }) => {
-    const values = results.map(pick).filter((v) => v.applicable);
+    const values = results.map(pick);
     return { applicable: values.length, preserved: values.filter((v) => v.preserved).length };
   };
   const naive = tally((r) => r.naive.contentPreservation);
