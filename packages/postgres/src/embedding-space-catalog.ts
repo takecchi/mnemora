@@ -54,9 +54,6 @@ export async function listEmbeddingSpaceTables(tx: Db): Promise<EmbeddingSpaceCa
       AND n.nspname = current_schema()
       AND starts_with(c.relname, ${EMBEDDING_SPACE_TABLE_PREFIX})
       AND array_length(con.conkey, 1) = 1
-      AND fkatt.attname = 'memory_id'
-      AND refc.relname = 'memories'
-      AND refn.nspname = n.nspname
       AND pkatt.attname = 'id'
   `);
   return result.rows.map((row) => {
