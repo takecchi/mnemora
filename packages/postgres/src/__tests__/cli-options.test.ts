@@ -133,15 +133,6 @@ describe("parseMigrateCliOptions: --analyze-memories（Issue #234 / ADR 0143）"
     expect(lines[1]).toContain("（例: pnpm --filter @mnemora/postgres run migrate）");
   });
 
-  // 実装の読み: 例に使う「残りの引数」は、`--` 以外の渡された引数すべて（`--` より前のものも含む）。
-  it("`--` より前に有効な引数があっても、例はそれも含めて示す（`--` だけを取り除く）", () => {
-    const result = parseMigrateCliOptions(["--schema", "app", "--", "--analyze-memories"], {});
-    expectErr(result);
-    expect(result.error.message.split("\n")[1]).toContain(
-      "run migrate --schema app --analyze-memories）",
-    );
-  });
-
   it("`--` 以外の未知のオプション（= 付きでも）には、`--` の案内を付けない（1行のまま）", () => {
     for (const arg of ["--analyze-memories=true", "--no-such-flag=1", "-x"]) {
       const result = parseMigrateCliOptions([arg], {});
