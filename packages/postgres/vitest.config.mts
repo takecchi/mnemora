@@ -34,6 +34,8 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/pool-error-warning-guard.postgres.test.ts",
   "src/__tests__/pool-idle-connection-loss.test.ts",
   "src/__tests__/purge-expired-events-by-retention-concurrency.postgres.test.ts",
+  // #1129 の M9。pg_stat_activity を読むので直列群（ADR 0371 の規約）。
+  "src/__tests__/purge-expired-events-which-rows.postgres.test.ts",
   "src/__tests__/restore-superseded-concurrent-forget.postgres.test.ts",
   "src/__tests__/scale-bench-close-on-throw.postgres.test.ts",
   "src/__tests__/temp-database.test.ts",
