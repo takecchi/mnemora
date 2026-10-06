@@ -48,7 +48,7 @@ beforeEach(async () => {
   await resetTestDatabase();
 });
 
-async function setup() {
+async function setup(opts: { acceptLlmSubjectId?: boolean } = {}) {
   const { db } = await getTestClient();
   const memoryStore = new PostgresMemoryStore(db);
   const eventStore = new PostgresEventStore(db);
@@ -64,6 +64,8 @@ async function setup() {
     embeddingProvider: new DeterministicEmbeddingProvider(TEST_EMBEDDING_SPACE),
     hashContent,
     clock: { now: () => now },
+    // 問15: LLM の subjectId は既定で捨てられる。ADR 0456 の「保存できない値を弾く」歯を保つため、受ける側で当てる。
+    ...(opts.acceptLlmSubjectId ? { config: { acceptLlmSubjectIdWithoutCandidates: true } } : {}),
   });
   return { runtime, memoryStore, eventStore, now };
 }
@@ -73,7 +75,7 @@ describe("observe: LLM が返した subjectId が保存できない値", () => {
     ["NUL", NUL],
     ["孤立サロゲート", LONE],
   ])("%s: 例外にならず、記憶は observation の subjectId で作られる", async (_name, bad) => {
-    const { runtime, memoryStore } = await setup();
+    const { runtime, memoryStore } = await setup({ acceptLlmSubjectId: true });
     const ctx: Ctx = { tenantId: `malformed-subject-${_name}` };
     extractReturn = {
       memories: [{ content: "猫が好き", provenanceKind: "stated", subjectId: bad }],
@@ -101,6 +103,8 @@ describe("observe: LLM が返した subjectId が保存できない値", () => {
       text: "発話",
       externalId: "e1",
       subjectId: "alice",
+      // 問15: 一覧が無いと LLM の subjectId は既定で捨てられる。一覧に入れた保存できる値は、そのまま使われる。
+      subjectCandidates: ["bob"],
       extract: "sync",
     });
     expect((await memoryStore.get(ctx, result.memoryIds[0]!))?.subjectId).toBe("bob");

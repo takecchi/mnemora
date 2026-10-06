@@ -635,6 +635,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0621](./0621-merged-0930-1465-recheck-teeth.md) | 09/30 にマージされた #1465（活動時計の書き込みが記憶自身の subject の時計を使う）の確かめ直しで見つかった穴に歯を足す（書く側の相関サブクエリのテナントの絞り） | 採用 (2026-10) |
 | [0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) | `Runtime` のメソッドの層の正本を doc コメントの `層:` 行にし、3文書からメソッド名の列挙を外す（Issue #605） | 採用 (2026-10) |
 | [0634](./0634-unclassified-runtime-method-layers-decided.md) | `層: 未分類` だった `Runtime` のメソッドの層を1本ずつ決める（Issue #605 の続き、ADR 0633） | 採用 (2026-10) |
+| [0635](./0635-llm-subject-id-dropped-by-default-without-candidates.md) | `subjectCandidates` を渡さない抽出では、LLM が返した `subjectId` を既定で捨てる（`acceptLlmSubjectIdWithoutCandidates` で受ける） | 採用 (2026-10) |
 | [0655](./0655-bullmq-stop-removes-scheduler-only-when-last-worker.md) | `@mnemora/bullmq` の `stop()` は、この queue に自分以外の Worker が居るとき共有 scheduler を消さない（ADR 0449 の材料3の一部を直す） | 採用 (2026-10) |
 | [0656](./0656-activity-clock-advancers-list-is-bound-to-recall-callers.md) | 活動時計を進める入口の一覧は、`recall(` の呼び出し元の集合に縛る（ADR 0394 決定3 の「掃引」の誤記の訂正） | 採用 (2026-10) |
 
