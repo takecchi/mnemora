@@ -11422,6 +11422,28 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         );
         expect(queryCount).toBe(0);
       });
+
+      it(`aggregateScope: opts.scopeAggregate: 'skip' は digestBand ありでも件数集計のクエリを発行しない（目次帯の SELECT は集計ではないので数えない）（adapter "${name}"）`, async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+        );
+
+        let digestIds: string[] = [];
+        const queryCount = await countScopeAggregateQueries(async () => {
+          const result = await store.aggregateScope(
+            ctx,
+            {},
+            { scopeAggregate: "skip", digestBand: { limit: 10, excludeMemoryIds: [] } },
+          );
+          digestIds = result.digests.map((d) => d.memoryId);
+        });
+        // 目次帯は実際に引かれている（帯を引かない実装が 0 本で通ってしまう偽陽性を防ぐ）。
+        expect(digestIds).toEqual([memory.id]);
+        expect(queryCount).toBe(0);
+      });
     } else {
       // ⚠ 未検査（`docs/autonomy.md` ⛔ に従い it.skip にはしない）: この adapter は
       // `countScopeAggregateQueries` を渡していないため、"skip" が実際に集計の費用を
