@@ -105,4 +105,45 @@ describe("tick() の lastError は cause の連鎖を辿る（Issue #969）", ()
   it("cause が無ければ今までどおり message だけ", async () => {
     expect(await lastErrorFor(new Error("just a message"))).toBe("just a message");
   });
+
+  it("文字列でない code（数値など）は載せない", async () => {
+    const root = Object.assign(new Error("inner"), { code: 42 });
+    const outer = Object.assign(new Error("outer", { cause: root }), { code: { nested: true } });
+    expect(await lastErrorFor(outer)).toBe("outer <- caused by: inner");
+  });
+
+  it("pg のエラーが持つ detail 以外の欄（hint・where・table・schema・column・constraint など）も載せない", async () => {
+    const root = Object.assign(new Error("duplicate key value"), {
+      code: "23505",
+      detail: "Key (email)=(a@example.com) already exists.",
+      hint: "secret-hint",
+      where: "secret-where",
+      table: "secret_table",
+      schema: "secret_schema",
+      column: "secret_column",
+      constraint: "secret_constraint",
+    });
+    expect(await lastErrorFor(new Error("Failed query", { cause: root }))).toBe(
+      "Failed query <- caused by: duplicate key value (code: 23505)",
+    );
+  });
+
+  it("message が同じ別々の例外は、別の段として辿る（同じ例外を2度見たときだけ打ち切る）", async () => {
+    const root = Object.assign(new Error("same message"), { code: "ROOT01" });
+    const outer = new Error("same message", { cause: root });
+    expect(await lastErrorFor(outer)).toBe(
+      "same message <- caused by: same message (code: ROOT01)",
+    );
+  });
+
+  it("連鎖が深くても最後の段まで辿る", async () => {
+    let chain: Error = Object.assign(new Error("level-6"), { code: "DEEP06" });
+    for (let level = 5; level >= 1; level -= 1) {
+      chain = new Error(`level-${level}`, { cause: chain });
+    }
+    expect(await lastErrorFor(chain)).toBe(
+      "level-1 <- caused by: level-2 <- caused by: level-3 <- caused by: level-4" +
+        " <- caused by: level-5 <- caused by: level-6 (code: DEEP06)",
+    );
+  });
 });
