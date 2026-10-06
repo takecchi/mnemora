@@ -117,3 +117,54 @@ describe("renderTieDensityReport", () => {
     expect(notTruncatedLine).toContain("n/a（LIMIT未到達）");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #1776 の #695 のコメント（ADR 0665）: 総候補数がちょうど limit のときの境界と、
+// 最大タイ集団の列（集団が複数あるとき）を見る歯が無く、`<=` → `<`、`max` → 合計、
+// `n/a` の条件 `<=` → `<` の3つの変異が緑だった。
+// ---------------------------------------------------------------------------
+describe("総候補数がちょうど limit のとき（境界）", () => {
+  const rows = [row("a", 1, 0.5), row("b", 1, 0.5), row("c", 0.5, 0.2)];
+
+  it("boundaryGroup は undefined、分断は false（最後の集団を境界と見なさない）", () => {
+    const m = measureTieDensityFromRows("q", "query", 3, rows);
+    expect(m.totalCandidates).toBe(3);
+    expect(m.boundaryGroup).toBeUndefined();
+    expect(m.truncatedWithinTie).toBe(false);
+  });
+
+  it("レポートは `n/a（LIMIT未到達）` を出す（いいえ・はい、とは書かない）", () => {
+    const report = renderTieDensityReport([measureTieDensityFromRows("q", "query", 3, rows)]);
+    expect(report).toContain("n/a（LIMIT未到達）");
+    expect(report).not.toContain("いいえ");
+    expect(report).not.toContain("🔴 はい");
+  });
+
+  it("limit より1件多ければ境界が立つ（対照: 1件の差で n/a が消える）", () => {
+    const report = renderTieDensityReport([measureTieDensityFromRows("q", "query", 2, rows)]);
+    expect(report).not.toContain("n/a（LIMIT未到達）");
+  });
+});
+
+describe("renderTieDensityReport: 最大タイ集団の列は、集団の最大の行数である（合計ではない）", () => {
+  it("2・3・1行の3集団なら、タイ集団数 3・最大タイ集団 3", () => {
+    const rows = [
+      row("a", 1, 0.9),
+      row("b", 1, 0.9),
+      row("c", 0.8, 0.5),
+      row("d", 0.8, 0.5),
+      row("e", 0.8, 0.5),
+      row("f", 0.4, 0.1),
+    ];
+    const report = renderTieDensityReport([measureTieDensityFromRows("lbl", "query", 40, rows)]);
+    const cells = report
+      .split("\n")
+      .find((line) => line.startsWith("| lbl "))!
+      .split("|")
+      .map((cell) => cell.trim());
+    // 列: ["", label, query, 総候補数, タイ集団数, 最大タイ集団, 境界, ""]
+    expect(cells[3]).toBe("6");
+    expect(cells[4]).toBe("3");
+    expect(cells[5]).toBe("3");
+  });
+});

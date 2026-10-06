@@ -201,6 +201,15 @@ describe("print-local-embedding-cache-key.mjs: CLI", () => {
     });
   });
 
+  it("sha が空文字のときも、空の sha で鍵を組み立てず、警告を出して固定の鍵へ落ちる（exit 0）", async () => {
+    await withDeclarationFile(JSON.stringify({ sha: "" }), async (path) => {
+      const r = await runCli(["--declaration-path", path, "--plain"]);
+      expect(PREFIX_IN_WORKFLOW + r.stdout).toBe(KEY_BEFORE_THIS_CHANGE);
+      expect(r.stderr).toContain("::warning::");
+      expect(r.code).toBe(0);
+    });
+  });
+
   it("不明な引数 ⟹ 実行時エラー（exit 3）", async () => {
     const r = await runCli(["--nope"]);
     expect(r.stderr).toContain("不明な引数: --nope");
