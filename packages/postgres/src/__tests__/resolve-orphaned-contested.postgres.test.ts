@@ -171,6 +171,67 @@ describe("PostgresMemoryStore.resolveOrphanedContested — 本物の Postgres（
     expect(storedB?.status).toBe("contested");
     expect(storedB?.contestedWithId).toBe(a.id);
   });
+
+  it("渡された event の kind・actor・digestSnapshot・meta をそのまま積む", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const { a, b } = await createOrphanedPair(store);
+
+    const { event: stored } = await store.resolveOrphanedContested!(ctx, {
+      id: a,
+      contestedWithId: b,
+      event: event(a, {
+        kind: "forgotten",
+        actor: { type: "human", id: "u1" },
+        digestSnapshot: "snap",
+        meta: { custom: 1 },
+      }),
+    });
+
+    expect(stored).toMatchObject({
+      kind: "forgotten",
+      actor: { type: "human", id: "u1" },
+      digestSnapshot: "snap",
+      meta: { custom: 1 },
+    });
+  });
+
+  it("別テナントの行は、contestedWithId が実際の対向と一致していても「memory not found」で、その行は無傷", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const other: Ctx = { tenantId: "tenant-2" };
+    const otherEvent = (memoryId: MemoryId): NewMemoryEvent => ({
+      ...event(memoryId),
+      tenantId: other.tenantId,
+    });
+    const x = await store.createMemory(
+      other,
+      buildNewMemoryFixture({ tenantId: other.tenantId, contentHash: "pg-xt-x" }),
+    );
+    const y = await store.createMemory(
+      other,
+      buildNewMemoryFixture({ tenantId: other.tenantId, contentHash: "pg-xt-y" }),
+    );
+    await store.markContestedPair!(
+      other,
+      { id: x.id, event: otherEvent(x.id) },
+      { id: y.id, event: otherEvent(y.id) },
+    );
+
+    await expect(
+      store.resolveOrphanedContested!(ctx, {
+        id: x.id,
+        contestedWithId: y.id,
+        event: event(x.id),
+      }),
+    ).rejects.toThrow(/memory not found for tenant/);
+
+    const stored = await store.get(other, x.id);
+    expect(stored?.status).toBe("contested");
+    expect(stored?.contestedWithId).toBe(y.id);
+  });
 });
 
 afterAll(async () => {

@@ -372,3 +372,101 @@ describe("runtime.resolveOrphanedContested — tick()/observe() から呼ばれ�
     expect(survivor?.status).toBe("contested");
   });
 });
+
+describe("runtime.resolveOrphanedContested — イベントの meta と並行の細部", () => {
+  it("reason を渡さないとき、meta に note のキー自体が無い", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a, b } = await createOrphanedPair(runtime, stores);
+    const before = await stores.eventStore.list(ctx, { memoryId: a.id });
+
+    await runtime.resolveOrphanedContested!(ctx, a.id);
+
+    const after = await stores.eventStore.list(ctx, { memoryId: a.id });
+    const added = after.filter((e) => !before.some((x) => x.id === e.id));
+    expect(added).toHaveLength(1);
+    const meta = added[0]!.meta as Record<string, unknown>;
+    expect(Object.keys(meta).sort()).toEqual(["contestedWithId", "reason", "resolution"]);
+    expect(meta.contestedWithId).toBe(b.id);
+  });
+
+  it("書き込みが conflict で失敗したとき、store の書き込みは1回しか呼ばれない（再試行しない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a } = await createOrphanedPair(runtime, stores);
+    const original = stores.memoryStore.resolveOrphanedContested.bind(stores.memoryStore);
+    let calls = 0;
+    Object.defineProperty(stores.memoryStore, "resolveOrphanedContested", {
+      value: (...args: Parameters<typeof original>) => {
+        calls += 1;
+        return original(...args);
+      },
+      configurable: true,
+    });
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === a.id) {
+        stores.memoryStore.liveRowForTest(ctx, a.id)!.status = "archived";
+      }
+    };
+
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
+
+    expect(result.outcome).toEqual({ kind: "conflict", observedStatus: "archived" });
+    expect(calls).toBe(1);
+  });
+
+  it("conflict のあと再読して生存側が見つからなければ observedStatus は null", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a } = await createOrphanedPair(runtime, stores);
+    let hidden = false;
+    const proxied = new Proxy(stores.memoryStore, {
+      get(target, prop, receiver) {
+        if (prop === "get") {
+          return async (c: Ctx, id: string) => (hidden && id === a.id ? null : target.get(c, id));
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === a.id) {
+        stores.memoryStore.liveRowForTest(ctx, a.id)!.status = "archived";
+        hidden = true;
+      }
+    };
+    const { runtime: runtimeOnProxy } = buildRuntime(proxied);
+
+    const result = await runtimeOnProxy.resolveOrphanedContested!(ctx, a.id);
+
+    expect(result.outcome).toEqual({ kind: "conflict", observedStatus: null });
+    void runtime;
+  });
+});
+
+describe("FakeMemoryStore.resolveOrphanedContested — 渡された event をそのまま積む", () => {
+  it("kind・actor・digestSnapshot・meta は渡した値のまま返り、eventStore にもその値で入る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { a, b } = await createOrphanedPair(runtime, stores);
+
+    const { event } = await stores.memoryStore.resolveOrphanedContested(ctx, {
+      id: a.id,
+      contestedWithId: b.id,
+      event: {
+        tenantId: ctx.tenantId,
+        memoryId: a.id,
+        kind: "forgotten",
+        actor: { type: "human", id: "u1" },
+        digestSnapshot: "snap",
+        meta: { custom: 1 },
+      },
+    });
+
+    expect(event).toMatchObject({
+      kind: "forgotten",
+      actor: { type: "human", id: "u1" },
+      digestSnapshot: "snap",
+      meta: { custom: 1 },
+    });
+    const listed = await stores.eventStore.list(ctx, { memoryId: a.id });
+    expect(listed.filter((e) => e.id === event.id)).toMatchObject([
+      { kind: "forgotten", actor: { type: "human", id: "u1" }, meta: { custom: 1 } },
+    ]);
+  });
+});
