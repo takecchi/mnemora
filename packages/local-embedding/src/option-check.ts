@@ -15,6 +15,16 @@ export function assertPositiveSafeInteger(owner: string, field: string, value: u
   }
 }
 
+/**
+ * 数なら有限でなければ（`±Infinity` でなければ）投げる（Issue #1785）。`NaN` は対象外（呼び出し側が丸める）。
+ * 「無限」は有限の回数に丸めようがないので、丸める欄でもここだけは断る。
+ */
+export function assertNotInfinite(owner: string, field: string, value: number): void {
+  if (value === Infinity || value === -Infinity) {
+    throw new RangeError(`${owner}: ${field} must not be infinite, got ${describe(value)}`);
+  }
+}
+
 function describe(value: unknown): string {
   return typeof value === "bigint"
     ? `${String(value)}n`

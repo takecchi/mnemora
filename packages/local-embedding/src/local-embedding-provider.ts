@@ -8,7 +8,7 @@ import type {
 } from "./pipeline.js";
 import { createLocalEmbeddingPipeline } from "./pipeline.js";
 import { LocalEmbeddingProviderError, isLocalEmbeddingProviderError } from "./errors.js";
-import { assertPositiveSafeInteger } from "./option-check.js";
+import { assertNotInfinite, assertPositiveSafeInteger } from "./option-check.js";
 import { lastTransformersCacheDir, revisionCacheRoot } from "./transformers-cache-place.js";
 
 /**
@@ -135,7 +135,13 @@ export function defaultLocalEmbeddingRetryDelayMs(attempt: number): number {
  * Hugging Face からの取得に伴うネットワークの失敗である。
  */
 export interface LocalEmbeddingRetryOptions {
-  /** 合計の試行回数（初回を含む）。既定 {@link DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS}。 */
+  /**
+   * 合計の試行回数（初回を含む）。既定 {@link DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS}。
+   *
+   * ⚠ **有限でない値（`Infinity`・`-Infinity`）は、構築時に `RangeError` を投げる**（Issue #1785。message に値が入る）。
+   * 「成功するまで無限に再試行」は約束しない。**`NaN`・0以下は 1 に丸め、小数は切り捨てた回数だけ試す**
+   * （例: `2.5` は2回）。この丸めは今までどおりである。
+   */
   attempts?: number | undefined;
   /**
    * `attempt` 回目（1始まり、今回失敗した試行の番号）の後、次の試行まで待つ時間(ms)を返す。
@@ -248,6 +254,7 @@ export interface LocalEmbeddingProviderOptions {
  * `new` はモデルを読まない。読むのは最初の `embed()`（または `warmup()`）で、初回だけネットワークが要る。
  * 構築時: `repo` だけを差し替えて `modelId` を省くと例外を投げる（宣言の食い違い。Issue #142 / ADR 0247）。
  * `dimensions`・`numThreads` を渡すとき、正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498）。
+ * `retry.attempts` が `±Infinity` のときも `RangeError`（Issue #1785。`NaN`・0以下は 1 に丸め、小数は切り捨てる）。
  */
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   /**
@@ -350,7 +357,10 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     // 「一度も試さない」は #startLoad の for ループの前提を壊すので許さない。
     // ⚠ `NaN` は `Math.max(1, NaN) === NaN` になり同じ前提を壊す（`for (attempt = 1;
     // attempt <= NaN; …)` が一度も回らない）ので、0回以下と同じく1回に丸める。
+    // ⚠ `±Infinity` だけは丸めずに構築時に断る（Issue #1785）。「無限」は有限の回数に丸めようがなく、
+    // 通すと失敗が続くかぎり `warmup()`・`embed()` が返らない（abort しても読み込みは止まらない）。
     const rawRetryAttempts = options.retry?.attempts ?? DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS;
+    assertNotInfinite("LocalEmbeddingProvider", "retry.attempts", rawRetryAttempts);
     this.#retryAttempts = Number.isNaN(rawRetryAttempts) ? 1 : Math.max(1, rawRetryAttempts);
     this.#retryDelayMs = options.retry?.delayMs ?? defaultLocalEmbeddingRetryDelayMs;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));

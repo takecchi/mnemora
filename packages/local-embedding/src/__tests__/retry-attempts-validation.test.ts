@@ -29,24 +29,24 @@ describe("LocalEmbeddingProvider: retry.attempts が有限でない数なら構�
   ])("%s は RangeError で、message に option 名と値が入る", (_l, value) => {
     expect(() => new LocalEmbeddingProvider({ retry: { attempts: value } })).toThrow(RangeError);
     expect(() => new LocalEmbeddingProvider({ retry: { attempts: value } })).toThrow(
-      new RegExp(`LocalEmbeddingProvider: retry\\.attempts must be a finite number, got ${value}`),
+      new RegExp(`LocalEmbeddingProvider: retry\\.attempts must not be infinite, got ${value}`),
     );
   });
 });
 
 describe("LocalEmbeddingProvider: retry.attempts の丸めは変えない", () => {
   it.each([
-    ["NaN", Number.NaN, 1],
-    ["0", 0, 1],
-    ["-1", -1, 1],
-    ["0.5", 0.5, 1],
+    ["NaN", 1, Number.NaN],
+    ["0", 1, 0],
+    ["-1", 1, -1],
+    ["0.5", 1, 0.5],
     ["1", 1, 1],
-    ["2.5", 2.5, 2],
+    ["2.5", 2, 2.5],
     ["3", 3, 3],
-    ["未指定", undefined, 3],
+    ["未指定", 3, undefined],
   ])(
-    "attempts が %s なら createPipeline を %i 回目まで試して失敗する",
-    async (_l, value, expected) => {
+    "attempts が %s のとき、createPipeline の呼び出しは合計 %s 回",
+    async (_label, expected, value) => {
       expect(await attemptsMade(value)).toBe(expected);
     },
   );
