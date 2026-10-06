@@ -155,6 +155,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **`@mnemora/postgres` に `findCrossTenantReferences` を足した**（[ADR 0636](./docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)。オーナー回答 374f6f88 の問27）。`recall_usages`・`memories.source_observation_id`・`memories.contested_with_id`・`memories.superseded_by_id` の4種について、参照先が別のテナントの行である既存行を、種類ごとの件数と先頭の `sampleLimit` 件（既定 20）で返す。**検出だけで、何も書き換えない**（`READ ONLY` のトランザクションの中で読む）。複合外部キーは足していない。既存の振る舞いは変わらない。`CROSS_TENANT_REFERENCE_KINDS` なども同じ入口から出る。
+
 - **`@mnemora/bullmq` の `CreateBullmqTickDriverOptions` に `lockDuration` と `completedJobsToKeep` を足した**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6の判断）。
   - `lockDuration?: number`（ミリ秒）: BullMQ の `Worker` の lock の期限にそのまま渡す。省略なら BullMQ の既定（30000 ms）。1回の tick が lock より長くかかる環境で、stalled による同じ tick の再実行を減らすために使う。`1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数でなければ、構築時に投げる（数でなければ `TypeError`、範囲外・小数・`NaN`・`Infinity` なら `RangeError`。[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md) の形）。
   - `completedJobsToKeep?: number`: 完了したジョブを Redis に残す件数（既定 `1000`）。`0` 以上の整数でなければ、同じ形で構築時に投げる。
