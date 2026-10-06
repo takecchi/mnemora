@@ -22,6 +22,7 @@
     "check:cjs-require-smoke": "node scripts/check-cjs-require-smoke.mjs",
     "check:consumer-install": "node scripts/check-consumer-install.mjs",
     "check:doc-snippets": "node scripts/check-doc-snippets.mjs",
+    "check:migration-checksums": "node scripts/check-migration-checksums.mjs",
     "check:required-status-checks": "node scripts/check-required-status-checks.mjs",
     "ci:green-check": "node scripts/ci-green-check.mjs",
     "north-star:default-probe": "node scripts/north-star-default-probe.mjs",

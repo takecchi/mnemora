@@ -153,6 +153,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **出荷済みの `@mnemora/postgres` の migration が書き換えられていないことを、CI で固定した**（[ADR 0637](./docs/decisions/0637-migration-checksums-pinned-and-0027-deadlock-not-fixable-by-new-migration.md)。オーナー回答 374f6f88 の問29〈全部推奨〉による。決めたのは推奨の採否だけで、設計は担い手のもの）。
+  利用者に見える変化は無い（`packages/postgres/migrations` の中身も `runMigrations` も変えていない。名簿の `migration-checksums.json` は npm に出ない）。既存の migration の書き換え・削除は CI が赤にし、新しい番号の migration の追加は赤にしない。**`0027` の deadlock（止めずに当てると `observe()` と deadlock しうる）は、新しい番号の migration では直せないと判断し、直していない**——手当ては、書き込みを止めてから当てること（[ADR 0442](./docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）のまま。
+
 - **`reextract`・`consolidate`・`reflect` が、LLM を待つ間に元の記憶が `contested`（`reextract` はさらに、訂正の解決で負けた `superseded`）になっていたら、書かずに打ち切る**（[ADR 0544](./docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)、`@mnemora/core`。🟡。[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) の負債1・[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md) の部分成功・[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md) の負債1・5 を置き換える）。
 
   以前は、待つ間に訂正の対（`contested`）に入った記憶の本文から作った言い換え・統合先・内省が `active` で書かれていた。いまは、LLM の前の門と同じ判定を LLM の後にもう一度当てる。公開の型は増やしていない。
