@@ -89,12 +89,11 @@ conformance suite の外から adapter の中に遅延を差し込めず、赤�
 
 `packages/testkit/src/relation-store-conformance.ts` に `describeRelationStoreConformance` が
 新設された（`link`/`unlink`/`listRelated` の基本契約・冪等性・双方向・テナント
-分離を検査する）。
-
-**⚠ 2026-09-30 追記**: この節には、以前は it の数（9）を手で書いていた。現物は12本で食い違っていたので、数を消して出所（`packages/testkit/src/relation-store-conformance.ts`）を指す形にした。数えるなら上の§1の式を当てること（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
-`packages/testkit`
+分離を検査する）。`describeRelationStoreConformance` は `packages/testkit`
 （`in-memory-fixtures.conformance.test.ts`）・`@mnemora/postgres`
 （`conformance.postgres.test.ts`）の両方が当てている——**8 suite → 9 suite になった。**
+
+**⚠ 2026-09-30 追記**: この節には、以前は it の数（9）を手で書いていた。現物は12本で食い違っていたので、数を消して出所（`packages/testkit/src/relation-store-conformance.ts`）を指す形にした。数えるなら上の§1の式を当てること（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 同じ PR で、既存の `MemoryStore` suite（`describeMemoryStoreConformance`）にも、
 `markContestedGroup?`/`resolveContestedGroup?`（任意メソッド、`supportsMarkContestedGroup?`/

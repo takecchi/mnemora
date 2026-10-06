@@ -1758,6 +1758,89 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
   });
 });
 
+describe("recall() — 段3: contestedWith の条件(c)「相手が返却集合に居る」の歯（Issue #1786、ADR 0335 決定2）", () => {
+  /**
+   * 条件(a)(b) が真（`status === "contested"` かつ `contestedWithId` が truthy）で、条件(c)
+   * だけが偽になる入力を作る。**鎖** a→b→c（b の `contestedWithId` が a ではなく c を指す）である。
+   *
+   * - a は query に当たる。a の対向 b は段3の必須の同伴取得で引かれ、[a, b] の Unit になる。
+   * - b は自分の `contestedWithId`（c）を辿られない——`fetchMandatoryCompanions` は owner 側
+   *   （a）の `contestedWithId` だけを辿り、`contestedWithId` の相互参照は検査しない
+   *   （同関数の doc コメント。ADR 0136 と同じ設計）。
+   *
+   * ⟹ b は (a)(b) が真で、相手 c は返却集合に居ないので、`contestedWith` は付かない。
+   *
+   * `Runtime.markContested` は両側 active の CAS で相互参照を書くので、この鎖を作らない。
+   * 既存の歯（上の「active のまま contestedWithId だけが設定されている」）と同じく、
+   * `MemoryStore` を直接叩いて組む。
+   *
+   * ADR 0335 負債3は「budget により片方だけ落ちる状態は作れなかった」と書いていたが、
+   * 「相手が budget で落ちる」以外に、「相手がそもそも返却集合に入らない」経路がこの鎖で在る。
+   */
+  it("🔴 鎖 a→b→c: b は (a)(b) が真でも、相手 c が返却集合に居なければ contestedWith が付かない（条件(c) そのものの歯）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", contestedWithId: c.id, digest: "B" }),
+    );
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: b.id,
+      digest: "A",
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], association: null });
+    const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
+    const returnedB = result.memories.find((m) => m.memoryId === b.id)!;
+
+    // 前提: b は同伴取得で返り、c は返っていない。
+    expect(returnedB.retrievedVia).toBe("mandatory_companion");
+    expect(returnedB.companionOf).toBe(a.id);
+    expect(result.memories.some((m) => m.memoryId === c.id)).toBe(false);
+
+    // a→b は返却集合に b が居るので付く。b→c は c が居ないので付かない。
+    expect(returnedA.contestedWith).toBe(b.id);
+    expect(returnedB.contestedWith).toBeUndefined();
+  });
+
+  /**
+   * 上の鎖の c を、query に当たる（ただし a・b より低スコアの）別の Unit として候補に入れ、
+   * budget の切り詰めで c の Unit だけを落とす。c は切り詰め**前**の Unit 集合には居るが、
+   * **後**の返却集合には居ない——条件(c) が見るのは後のほう、という契約そのものの歯。
+   * 対照として、budget が c も収める場合は b に contestedWith=c が付く（鳴ってはいけない側）。
+   */
+  it("🔴 鎖 a→b→c で c が budget で落ちた Unit に居るとき、b に contestedWith は付かない。budget が足りれば付く", async () => {
+    const { runtime, stores } = buildRuntime();
+    const c = await createEmbeddedMemory(stores, [0.8, 0.6], { digest: "C" });
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", contestedWithId: c.id, digest: "B" }),
+    );
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: b.id,
+      digest: "A",
+    });
+
+    // 対照（予算なし）: c も返る。b→c は返却集合の中に在るので付く。
+    const unlimited = await runtime.recall(ctx, { vector: [1, 0], association: null });
+    expect(unlimited.memories.map((m) => m.memoryId).sort()).toEqual([a.id, b.id, c.id].sort());
+    expect(unlimited.memories.find((m) => m.memoryId === b.id)!.contestedWith).toBe(c.id);
+
+    // 本体: 1文字ずつの digest 3件のうち、2文字までしか入らない。[a,b] の Unit が残り、c が落ちる。
+    const budgeted = await runtime.recall(ctx, {
+      vector: [1, 0],
+      association: null,
+      budget: { maxMemoryChars: 2 },
+    });
+    expect(budgeted.memories.map((m) => m.memoryId).sort()).toEqual([a.id, b.id].sort());
+    expect(budgeted.omitted.some((o) => o.kind === "budget_dropped")).toBe(true);
+    expect(budgeted.memories.find((m) => m.memoryId === a.id)!.contestedWith).toBe(b.id);
+    expect(budgeted.memories.find((m) => m.memoryId === b.id)!.contestedWith).toBeUndefined();
+  });
+});
+
 describe("recall() — 片側だけの contested は単独で出さない（Issue #243 / ADR 0136）", () => {
   it("🔴 contestedWithId が null の contested Memory は recall() に単独で出ない。unit_assembly_dropped に計上される", async () => {
     // `Runtime.markContested`（Issue #197 / ADR 0134）はこの状態を作らない（両側
@@ -3185,5 +3268,36 @@ describe("recall() — usage.counter の印は連結の計測の印（ADR 0487�
     // usage は連結 + 目次帯の JSON（10文字超）を1回数えた値なので "heuristic"。
     expect(result.usage.counter).toBe("heuristic");
     expect(result.outputValidation).toEqual({ ok: true, issues: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ANN が走っていない recall（空クエリ）では、診断キーを足さない（#672 / ADR 0285、約束3:
+// 条件は `candidateGenerationExecuted && kPrime > 0 && ...`）。
+//
+// `wantsAnn` はクエリの中身と関係なく真なので、空クエリ（text も vector も無い）でも ANN の trace は
+// `executed: false` で積まれる。`annWindowUnderfilled` から `candidateGenerationExecuted` を外すと、
+// scope に記憶があるとき `annHits.length (0) < min(kPrime, 下限)` が真になり、走っていない段に
+// `annReturnedFewerThanReachable: true` が付いた。歯は空クエリで `stage_skipped` が出ることしか
+// 見ていなかった（Issue #1776 の #672 のコメント、ADR 0665）。
+// ---------------------------------------------------------------------------
+describe("recall() — ANN が走っていない recall（空クエリ）には annReturnedFewerThanReachable を足さない（ADR 0285 約束3）", () => {
+  it("scope に ready の記憶が3件あっても、空クエリの ANN の trace の detail にキーが無く、ann_unreached も出ない", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(0);
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, {});
+
+    const annTrace = result.explain.stages.find(
+      (s) => s.stage === "candidate_generation" && s.detail?.channel === "ann",
+    );
+    // 検算: ANN の trace は積まれていて、走っていない（この歯が何も見ていない、にならないため）。
+    expect(annTrace).toBeDefined();
+    expect(annTrace?.executed).toBe(false);
+    expect(annTrace?.detail).not.toHaveProperty("annReturnedFewerThanReachable");
+    expect(annTrace?.detail).not.toHaveProperty("annReachableLowerBound");
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
   });
 });

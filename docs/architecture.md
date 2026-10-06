@@ -313,6 +313,11 @@ LLM に言わせる**注入**で、同じテナントの**別の subject** に�
 テナントの境界は越えない。信用できない本文を抽出するなら、`subjectCandidates` を渡して選ばせること。挙動を変えるか（違う値を捨てる等）は
 Issue #608 の設計（1の上書きを許す、ADR 0271）に触れるので、この版では変えていない。
 
+（2026-10-06 訂正）上の追記の「検証されない」は言い過ぎだった。[ADR 0456](./decisions/0456-llm-returned-values-malformed-read-filter-nul-named.md) 以降、
+LLM が返した `subjectId` が NUL・孤立サロゲートを含むときは、一覧の有無に関わらず弾いて未指定（observation の主題）へ戻す
+（`sanitizeCandidateSubjectId`）。**検証されないのは、一覧に照らす検証（別の subject の名前を言わせられるかどうか）である。**
+注入が起きるという主旨は変わらない。
+
 **⚠ 2026-09-27 追記（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）: `@mnemora/openai` では「主題なし」が届かない。**
 OpenAI の strict モードは「省略可能」を「必須かつ `null` 可」に翻訳するので、応答の `null` だけでは
 「未指定」と「主題なし」を区別できない。`OpenAILLMProvider.completeStructured` はすべての `null` を

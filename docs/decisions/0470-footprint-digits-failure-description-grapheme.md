@@ -62,3 +62,20 @@
 ## 測っていないこと
 
 実 Postgres（`outbox_jobs.last_error` への書き込み。`tick-last-error-redacts-params.test.ts` は Fake の outbox で走る）、実 API。最初の書記素だけで 4096 字を超える入力。利用者の `last_error` の集計。
+
+## 追記（2026-10-07、Issue #1779）
+
+代替案3で「テストと将来の呼び出し用に残してある」とした `truncationBoundary` と `sliceWithoutSplittingSurrogatePair`（`packages/core/src/text-truncation.ts`）を、Issue #1779 で消した。クローン miku の判断で、オーナーの判断ではない。
+
+- **理由**【現物】: 製品のコードからもテストからも呼ばれていない。`index.ts` からも出しておらず、`package.json` の `exports` は `"."` だけで、公開の口ではない。呼び出し元3か所は ADR 0424・0467・0470 で `sliceAtGraphemeBoundary` へ移った。
+- **振る舞いは変わらない**: 切り詰めはすでに書記素の境界に揃っている。公開 API も変わらない。
+- 本文は書き換えていない。`failure-description.ts` と `text-truncation.ts` のコメントから、消えた名前への言及を外した。
+
+## 追記（2026-10-07、Issue #1798）
+
+素朴な `slice` のまま残っていた2か所のうち、`packages/core/src/recall-runtime.ts` の `describeQueryEmbeddingFailure`（クエリ埋め込みの失敗の `cause` の `providerErrorKind`・`errorName`。上限 `CAUSE_LABEL_MAX` = 64）を `sliceAtGraphemeBoundary` に直した。クローン miku の判断で、オーナーの判断ではない。
+
+- **単位の約束**【現物】: `docs/recall.md` は「先頭64文字まで」と書く上限で、「ちょうど64」とは約束していない。書記素で切って 64 コードユニットを下回っても約束は破らない。上限の単位はコードユニットのまま。
+- **振る舞い**: 64 コードユニットの位置にサロゲートペア・結合文字が跨るとき、その書記素の手前で切る（以前は孤立サロゲートが残るか、結合文字が落ちた）。64 以下の入力は変わらない。公開の型・API は変わらない。
+- **残したもの**: `packages/postgres/src/lexical-query-cap.ts` の `capLexicalQueryTotalChars`（600）は直していない。`sliceAtGraphemeBoundary` が core の内部関数で公開していないこと、testkit の fixture `in-memory-lexical-store.ts` が同じ切り詰めを写していて、そろえるには fixture の編集が要ることが壁である。fixture の扱いについてのオーナーの答えを待つ（Issue #1798）。
+- 本文は書き換えていない。

@@ -63,7 +63,8 @@ export const ExtractedMemoryCandidateSchema = z.object({
    *
    * ⚠ **`subjectCandidates` を渡さない経路では、LLM が返した文字列の `subjectId` をそのまま受ける**
    * （既定の変更の前の記述。[ADR 0442](../../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
-   * 検証は `subjectCandidates` の一覧に照らすことでしか行わない（{@link sanitizeCandidateSubjectId}）ので、
+   * 検証は `subjectCandidates` の一覧に照らすことでしか行わない（{@link sanitizeCandidateSubjectId}。
+   * ただし NUL・孤立サロゲートを含む識別子だけは、ADR 0456 以降、一覧の有無に関わらず弾く）ので、
    * 一覧を渡さない呼び出し——`extract: 'deferred'` の `tick`・`reextract`（どちらも一覧を持てない）を含む——
    * では、observation や `ctx` の `subjectId` と違う値でも、そのまま Memory の主題になる。
    * ⟹ 観察文に「この記憶の主題は bob」のような文を書いて LLM に言わせる**注入**で、同じテナントの

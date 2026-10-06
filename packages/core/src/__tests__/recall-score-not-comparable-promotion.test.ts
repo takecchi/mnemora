@@ -277,37 +277,28 @@ describe("recall() — 段2で score_not_comparable に数えた候補が後の�
     });
   });
 
-  // ⚠ 既知の未達（Issue #1022 の確かめ直しで見つけた。実装は直していない）。
-  // 段3.5 の連想枠で席に着けなかった（`association.maxCount` を超えた）比較不能の記憶は、
-  // `over_limit(association)` に数えられるのに、`score_not_comparable` からは差し引かれず、
-  // 同じ1件が2つの札に数えられる。比較不能（total が NaN）は席順で最後尾に送られるので、
-  // 席が足りないと真っ先に席に着けない。`promotedFromNotComparable` の判定に
-  // `overLimitAssociationSeatlessIds` が入っていないことが原因（`promotedFromBelowThreshold` と
-  // `promotedFromOverLimit` には入っている）。直ったらこの `it.fails` が赤になるので、
-  // `it` に替えること。
-  it.fails(
-    "(i) [KNOWN UNMET] 段3.5 で席に着けなかった比較不能の記憶は、over_limit(association) にだけ数える",
-    async () => {
-      const { runtime, stores } = buildRuntime();
-      await createEmbeddedMemory(stores, [1, 0], { digest: "AAAA" });
-      await createEmbeddedMemory(stores, [1, 0], { digest: "XXXX" });
-      await createEmbeddedMemory(stores, [1, 0], { digest: "NNNN", halfLifeHours: 0 });
+  it("(i) 段3.5 で席に着けなかった比較不能の記憶は、over_limit(association) にだけ数える", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "AAAA" });
+    await createEmbeddedMemory(stores, [1, 0], { digest: "XXXX" });
+    // N は halfLifeHours: 0 で total が NaN（段2で score_not_comparable）。比較不能は席順で最後尾に
+    // 送られるので、maxCount: 1 では X が席を取り、N が席に着けない。
+    await createEmbeddedMemory(stores, [1, 0], { digest: "NNNN", halfLifeHours: 0 });
 
-      const result = await runtime.recall(ctx, {
-        vector: [1, 0],
-        limit: 1,
-        scoreThreshold: 0,
-        includeFullyDecayed: true,
-        association: { maxCount: 1 },
-      });
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 1,
+      scoreThreshold: 0,
+      includeFullyDecayed: true,
+      association: { maxCount: 1 },
+    });
 
-      expect(result.omitted).toContainEqual({
-        kind: "over_limit",
-        stage: "association",
-        count: 1,
-        countKind: "exact",
-      });
-      expect(sncCount(result)).toBeUndefined();
-    },
-  );
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "association",
+      count: 1,
+      countKind: "exact",
+    });
+    expect(sncCount(result)).toBeUndefined();
+  });
 });

@@ -209,3 +209,35 @@ describe("checkContentPreserved × buildMnemoraPrompt: 同一出典のまま dig
     },
   );
 });
+
+// Issue #1776 の #699 のコメント（ADR 0665）: 正規化（プロンプト側・accept 側）と any-match を
+// 「生のままでも・全部要求しても」同じ結果になる入力でしか見ておらず、3つの変異が緑だった。
+describe("checkContentPreserved: 正規化は両側に掛かり、accept は1つでも見つかれば保持（#699）", () => {
+  it("プロンプト側だけが全角・大文字・句読点を含んでいても、accept（半角・小文字）と一致する", () => {
+    const r = checkContentPreserved("Ｔｅａ、です", {
+      kind: "closed-value",
+      accept: ["tea"],
+      reject: [],
+    });
+    expect(r).toEqual({ applicable: true, preserved: true, matchedAcceptTerms: ["tea"] });
+  });
+
+  it("accept 側だけが全角・大文字・句読点を含んでいても、プロンプト（半角・小文字）と一致する", () => {
+    const r = checkContentPreserved("tea", {
+      kind: "closed-value",
+      accept: ["ＴＥＡ。"],
+      reject: [],
+    });
+    expect(r).toEqual({ applicable: true, preserved: true, matchedAcceptTerms: ["ＴＥＡ。"] });
+  });
+
+  it("accept のうち片方だけがプロンプトにあれば保持で、見つかった1件だけを返す（全部は要求しない）", () => {
+    const r = checkContentPreserved("会議は水曜です", {
+      kind: "closed-value",
+      accept: ["水曜", "金曜以外"],
+      reject: [],
+    });
+    expect(r.preserved).toBe(true);
+    expect(r.matchedAcceptTerms).toEqual(["水曜"]);
+  });
+});

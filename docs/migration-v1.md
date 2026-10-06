@@ -1,4 +1,4 @@
-# 移行ガイド（v0.1.9 → v0.2.0 → v0.3.0 → v0.4.0 → v0.5.0 → v1.0.0 → v1.0.1 → v1.0.2 → v1.1.0 → 次の版）
+# 移行ガイド（v0.1.9 → v0.2.0 → v0.3.0 → v0.4.0 → v0.5.0 → v1.0.0 → v1.0.1 → v1.0.2 → v1.1.0 → v1.2.0 → 次の版）
 
 **この文書は、利用者が版を上げるときに何をどう直すかだけを扱う。**⭐ **5世代を持つ**（⚠ 2026-09-18 に2→3世代、2026-09-19 に3→4世代、**2026-09-21 に4→5世代**へ訂正した。下記）**:**
 
@@ -12,7 +12,8 @@
 | **v1.0.0 → v1.0.1**（🔴 **出荷済み**） | **0件**（計上を保留していたものは、破壊的と数えないと決まった。「数え方の規律への追記（2026-09-28）」） | 「🔴 破壊的変更（v1.0.0 → v1.0.1）」 |
 | **v1.0.1 → v1.0.2**（🔴 **出荷済み**） | **0件**（計上を保留していたものは、破壊的と数えないと決まった。「数え方の規律への追記（2026-09-28）」） | 「🔴 破壊的変更（v1.0.1 → v1.0.2）」 |
 | **v1.0.2 → v1.1.0**（🔴 **出荷済み**） | **12件**（確定。両端が tag で閉じている） | 「🔴 破壊的変更（v1.0.2 → v1.1.0）」 |
-| **v1.1.0 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v1.1.0 → 次の版）」 |
+| **v1.1.0 → v1.2.0**（🔴 **出荷済み**。2026-10-02） | 件数はここに書かない（両端が tag で閉じている。見出しと CHANGELOG `[1.2.0]` の `### Breaking` が持つ。項目29 は破壊的と数えない） | 「🔴 破壊的変更（v1.1.0 → v1.2.0）」 |
+| **v1.2.0 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v1.2.0 → 次の版）」 |
 
 ⭐ **全5世代の件数を書いてよいのは、両端が tag で閉じているからである。**`v0.1.9`→`v0.2.0` も
 `v0.2.0`→`v0.3.0` も `v0.3.0`→`v0.4.0` も `v0.4.0`→`v0.5.0` も `v0.5.0`→`v1.0.0` も、
@@ -1777,6 +1778,15 @@ union 拡張一般の影響であり、この文書が破壊的変更として�
 
 ⟹ **この項目（PR #1442・Issue #207・#933 PR2（ADR 0381））は、この節が数える破壊的変更に入れない。**移行の手順と DB マイグレーションの案内として残す。
 
+（2026-10-06 訂正）上の「**誰が影響を受けるか**」は、上の2つの任意フラグを「`true` で渡しているが実装していない場合だけ」と書いたが、
+言い足りなかった。**`false` を渡している（`supportsMarkContestedGroup: false`、または `supportsResolveContestedGroup: false`）のに、
+その口（`markContestedGroup?`・`resolveContestedGroup?`）を実装している adapter も、新しく落ちる。**
+フラグが `false` のときは、口が無いことを積極的に確かめる `it`（`expect(store.markContestedGroup).toBeUndefined()`、
+`expect(store.resolveContestedGroup).toBeUndefined()`）が走るためである（`packages/testkit/src/memory-store-conformance.ts`）。
+正しくは「`true` で渡して実装が無い場合」と「`false` で渡して実装がある場合」の2つである。ただし `false` を渡すのは、
+この変更で増えたフラグを自分で名指しした利用者だけなので、「破壊的と数えない」という判定そのものは変わらない。
+フラグを渡さない利用者は、これまでどおり影響を受けない。
+
 ### 31. テナント単位で全表から行を消す `eraseTenant` が増え、conformance suite に省略できない `supportsEraseTenant` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
@@ -3025,6 +3035,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   対象: `createMemory`・`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories`（新しい行）の `occurredAt`・`recordedAt`・`lastReinforcedAt`・`validFrom`・`validUntil`・`decayFloorAt`、`createObservation`・`createObservationWithOutbox` の `occurredAt`・`recordedAt`・`validFrom`・`validUntil`、`reinforce`・`reinforceMany`・`recordUsageAndReinforce` の `at`、`createRecall` の `createdAt`、イベントの `at`（`EventStore.append` と、イベントを書く `MemoryStore` の口）。以前は、どれも下限より前の日時をそのまま書いた。`@mnemora/postgres` は以前から `22008` で拒む（本物の adapter は変えていない）。
   **新しく断る入力は、`@mnemora/postgres` が以前から拒む入力だけ**。fixture が新しく例外を投げる変更は破壊的と数えない（数え方の規律2。オーナー回答 `3f3411c5`、[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。ただし、**`@mnemora/testkit/fixtures` に下限より前の日時（`new Date(-1e14)` など）を書いていたテスト**は、`RangeError` で落ちる。下限ちょうど（`new Date(Date.UTC(-4713, 10, 24))`）と、それより後は通る。fixture の例外の型は `RangeError`（`cause.code` は持たない）で、`@mnemora/postgres` の `DrizzleQueryError`（`cause.code` `22008`）とは顔が違う。
   断らないもの: 読みの口の日時の条件（ADR 0547）、`claimBatch` の `now`、Postgres が日時を見ない分岐（CAS に弾かれる対象のイベント、冪等の既存行の `created` イベント、何も強化しない呼び出し）。
+
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: 新しい記憶の `decayFloorAt` が `Date` でない（`null`・`undefined`・キーなし）と `TypeError` で断る。「memory not found for tenant: &lt;id&gt;」の id の綴りを Postgres に揃えた**（🟡。Issue #1759。[ADR 0493](./decisions/0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)・[ADR 0521](./decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md) の末尾の追記）。
+  中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節の同じ箇条を見ること。**新しく断る入力は、`@mnemora/postgres` が以前から拒む入力だけ**（`23502`）。手順は要らない。ただし、fixture の例外の message の綴り（操作の対象が無いときは渡された綴り、参照先が無いときは小文字）を照合していたテストは、書き換えが要る。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `updateStatus`・`updateStatusWithEvent` が、`supersededById` に大文字小文字だけが違う自分自身の id（id が `mem-1`・`supersededById` が `MEM-1` など）を渡されると `RangeError`（`supersededById must not be the memory itself`）で断る**（[ADR 0558](./decisions/0558-inmemory-self-supersede-check-folds-both-sides.md)。🟡。項目59（ADR 0503）の自己置換の検査の取りこぼし）。
   `@mnemora/postgres` は以前から両側を畳んで断る。以前の fixture は `supersededById` を畳まずに比べたので通り、自分を指す `superseded` の行を書いた。新しく断るのはこの綴り違いの自己置換だけ（Postgres が今断るものだけ）。別の記憶を大文字で渡す呼び出しは従来どおり通り、小文字で保存される。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。

@@ -55,3 +55,15 @@
 - **これが覆るとしたら**: 実際に `"50"` や `NaN` の設定で動かしていた利用者が多く、構築時に落ちる害が大きいと分かったとき（文字列の数値を通す緩和を検討する）。`temperature` に API 共通の上限ができたとき。
 
 - **測っていないこと**: 実 Redis での挙動（この変更は構築時に投げるだけで Redis へ繋ぐ前に落ちる。実 Redis の歯 `*.redis.test.ts` は、手元に Redis が無いので走らせていない。それらは正しい `everyMs`・`jobName` だけを使っているので、影響は受けないはず【判断】）。実 API（OpenAI・Anthropic）と実モデル（local-embedding）。`pnpm api:check`（build が要る。`index.ts` の export は変えていない）。examples（`examples/chat`）が壊れた値を渡していないこと（`temperature`・`dimensions` の呼び出しは読んだ範囲では正当な値だが、全部は走らせていない）。
+
+- **追記（Issue #1785、2026-10-07）: `retry.attempts` の `±Infinity` だけを構築時に断る**。クローン miku の判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。本文は書き換えていない。
+  - **決めたこと**: `LocalEmbeddingProvider` の `retry.attempts` は、`Infinity`・`-Infinity` なら構築時に `RangeError`（`LocalEmbeddingProvider: retry.attempts must not be infinite, got Infinity`）。**丸める流儀は残す**——`NaN`・0以下は1回に丸め、小数は `<=` 比較で実質切り捨てる（`2.5` は2回）。ここは今までと同じ。有限でない値だけが、丸めの対象の外に出た。
+  - **理由**【実測】: 構築時の検査が無かった間、`Infinity` は `#startLoad` のループを成功するまで回し続けた（注入した `sleep` を500回目で打ち切るまで、`createPipeline` は500回呼ばれた）。失敗が続くかぎり `warmup()`・`embed()` は返らず、`signal` の abort は呼び出しの「待ち」を切るだけで読み込みは止まらない。`-Infinity` は黙って1回に丸められていた。「無限」は有限の回数に丸めようがないので、丸める欄でもここは丸めの外に置く理由が立つ。
+  - **採らなかった案**:
+    1. **正の整数以外を全部断る**（`dimensions`・`numThreads` と同じ規則に揃える）。採らなかった。この ADR 本文が「丸める流儀のまま残す」と決めたこと、[ADR 0358](./0358-local-embedding-provider-splits-large-batches.md) 決定3が `maxBatchSize` を `retry.attempts` に揃えて丸めると決めたことを覆し、`NaN`・0・負・小数を渡している利用者まで壊す。Issue #1785 が問うているのは `Infinity` だけである。
+    2. **`Infinity` を1回または既定の3回に丸める。** 採らなかった。この ADR の採らなかった案2（正規化する）が退けた「黙って別の値で動く」に当たる。
+    3. **`Infinity` を「成功するまで再試行」という有効な値として約束する。** 採らなかった。失敗が続くと `warmup()` が返らず、abort でも止まらない振る舞いを、約束として引き受けることになる。
+  - **破壊的変更**: 壊れるのは `retry.attempts` に `±Infinity` を渡している利用者だけ（`+Infinity` は構築時の例外になり、`-Infinity` は1回への丸めから例外になる）。オーナーが v1.X.0 での破壊的変更を許している前提は、本文の冒頭と同じ。
+  - **引き受けた負債 #5 との関係**: 「丸める流儀が断る流儀と混在する」は残る。ただし `Infinity` はその外に出た。
+  - **範囲外として残したこと**: `maxBatchSize` の `Infinity`（「分割しない」を表す有効な値。これまでどおり通す）。`retry.delayMs` の戻り値（`NaN`・負・`Infinity` を検証せず `sleep` に渡す。既定の `sleep` では約1msで発火する）と、`delayMs` に関数でない値を渡したときの扱い（構築は通り、失敗後に reject する）。
+  - **測っていないこと**: 本物のモデル・実ネットワークでの挙動（注入した `createPipeline` だけで測った）。外部の利用者が `Infinity` を使っているかどうか。

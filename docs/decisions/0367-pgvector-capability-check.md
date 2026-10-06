@@ -237,3 +237,62 @@
     （決定5）。
   - 0.5.x・0.6〜0.7.x の実物に対する実測が無いまま、代理実測だけで能力ベースの判定を
     採用している。
+
+## 追記（2026-10-07、[Issue #1780](https://github.com/takecchi/mnemora/issues/1780)）: `runMigrations` の能力検査は、`schema`/`extensionSchema` の `search_path` の下で流す
+
+**この判断はクローン（miku）の判断であり、オーナーの判断ではない。**
+
+- **何が起きていたか**: `runMigrations` に `schema` と、`public` 以外の `extensionSchema` を渡し、
+  `vector` がその `extensionSchema` に在ると、検査が `type "vector" does not exist` で落ちた
+  （`create` は末尾の検査、`verify` はロック取得前の検査。**どちらも実測で落ちた**）。
+  検査の SQL は `'[0]'::vector` と型を修飾せずに書き、各ファイルを流すときの
+  `SET LOCAL search_path TO <schema>,<extensionSchema>` の**外**で流れ、接続の既定の
+  `search_path`（`"$user", public`）に `extensionSchema` が入っていないため。
+  決定の文脈は「`vector` は `public` にある」を暗黙に置いていた。
+- **決めたこと**: 検査を流す所で、`schema` を指定した呼び出しに限り、
+  `BEGIN` → `SET LOCAL search_path TO <各ファイルと同じ>` → 検査 → `COMMIT`（失敗したら `ROLLBACK`）で囲む。
+  `SET LOCAL` なので、トランザクションを抜けると接続の `search_path` は元に戻る。
+  `verify` は pool から接続を1本借りて同じことをし、返す。**`schema` 未指定の呼び出しは
+  `search_path` に一切触れない**（発行される SQL は今日と同じ）。
+- **`PGVECTOR_CAPABILITY_QUERY` は変えない**: `vector-store.ts` も同じ文字列を使い、
+  そちらは `extensionSchema` を知らない（検索は呼び出し側の接続の `search_path` に任せている）。
+  `vector-store.ts` の振る舞いは1バイトも変わらない。公開 API の型・export も変わらない
+  （`dist` の `.d.ts` は変更前後で同一）。
+- **採らなかった案**: (a) 検査の SQL で型を `"<extensionSchema>".vector` と修飾する案。
+  共有の定数を、`vector-store.ts`（`extensionSchema` を持たない）と分けるか、引数にする必要があり、
+  `vector-store.ts` の発行 SQL が変わる。(b) は `migrate.ts` の中で閉じる。
+- **引き受けた負債**: `schema` を指定した呼び出しで、検査のために往復が `BEGIN`・`SET LOCAL`・`COMMIT`
+  の3つ増える（`create` は定常状態でも毎回検査するため、毎回）。
+  `vector-store.ts` の検査（`withRelaxedOrderScan` の前）は、`vector` が呼び出し側の接続の
+  `search_path` に無いと同じ形で落ちうるが、**手元では確かめていない**（この追記の範囲外）。
+
+## 追記（2026-10-07、[Issue #1780](https://github.com/takecchi/mnemora/issues/1780)）: `vector-store.ts` 側の能力検査は、`extensionSchema` を渡した client で落ちない
+
+**この判断はクローン（miku）の判断であり、オーナーの判断ではない。** 直前の追記が「手元では確かめていない」
+とした負債のうち、`vector-store.ts` 側を本物の Postgres（17 + pgvector）で確かめた。**振る舞いは変えていない。**
+
+- **前提の読み替え**: `PostgresVectorStore` は `db` だけを受け取り、`schema`/`extensionSchema` を知らない
+  （`vector-store.ts` のコンストラクタ）。`PgvectorCapabilityGate.ensure` は、その接続の `search_path` のまま
+  修飾しない `'[0]'::vector` を流す。`schema`/`extensionSchema` は `createPostgresClient`（`client.ts`）が受け取り、
+  接続の起動オプションに `-c search_path=<searchPathFor(schema, extensionSchema)>` として載せる（ADR 0057）。
+  だから「`runMigrations` と同じ条件」とは、`createPostgresClient({ schema, extensionSchema })` で作った db を渡すことである。
+- **主経路の実測（落ちない）**: `vector` を `public` 以外の `extensionSchema` に置き、`runMigrations` /
+  `registerEmbeddingSpace` に同じ `schema`/`extensionSchema` を渡して用意した DB を、
+  `createPostgresClient({ schema, extensionSchema })` の db で引くと、`search` も `searchMany` も能力検査を通って結果を返した
+  （インスタンスごとにキャッシュを持つので、メソッドごとに新しい `PostgresVectorStore` を使った）。
+  `search_path` が効いているのは `client.ts` の起動オプションであり、検査の SQL 自体は変えていない。
+- **対照の実測**: 同じ DB を、`search_path` に手を加えない db（`createPostgresClient(url)`）で引くと、どちらも落ちる。
+  能力検査を外す変異（`ensure` を即 return）を当てて、落ちる場所が検査かを確かめた。
+  - `search`: 検査があると `Failed query: SELECT ext.extversion ... '[0]'::vector ...`（原因は `type "vector" does not exist`、42704）。
+    検査を外すと、`schema` の表（`memory_embeddings_*`）自体が見えず `EmbeddingSpaceNotRegisteredError`
+    （「embedding space ... is not registered」）になる。
+  - `searchMany`: 検査があっても外しても、原因は `type "vector" does not exist`（42704）。
+  - ⟹ 素の接続で落ちるのは、検査のせいだけではない。検索の SQL 本体も、`vector` 型・表が見えないと解決できない。
+    **検査だけを直しても素の接続は救えず、救う必要も無い**（`search_path` を整えるのは `createPostgresClient` の役目）。
+- **結論**: 主経路では落ちない。`vector-store.ts` に直す所は無い。
+- **歯**: `packages/postgres/src/__tests__/vector-store-capability-extension-schema.postgres.test.ts`
+  （主経路が `search`/`searchMany` で結果を返すこと、素の db が落ちること）。`client.ts` で `extensionSchema` を
+  `-c search_path` に載せない変異を当てると赤になる。この歯が無かった間、`extensionSchema` を public 以外にした
+  client で `PostgresVectorStore` を引く歯は無かった（`dedicated-schema.postgres.test.ts` は `extensionSchema` が既定の `public`）。
+- **確かめていないこと**: `extensionSchema` を `public` 以外にした client を、プール接続の再接続・`options` に
+  利用者の `-c search_path` を重ねた場合まで引いていない。pgvector 0.8 未満での挙動。

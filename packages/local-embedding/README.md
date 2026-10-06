@@ -361,6 +361,8 @@ const provider = new LocalEmbeddingProvider({
 });
 ```
 
+⚠ **`attempts` に有限でない値（`Infinity`・`-Infinity`）を渡すと、構築時に `RangeError` を投げる**（Issue #1785。「成功するまで無限に再試行」は約束しない）。`NaN`・0以下は 1 回（実質リトライ無し）に丸め、小数は切り捨てた回数だけ試す（`2.5` は2回）。
+
 ⚠ **`kind` の付いた失敗（`input_too_long` / `unknown_input_limit`）はリトライしない。**
 入力・設定の問題であり、同じ入力で再試行しても結果は変わらないため
 （README「入力は 8192 トークンまで」節・ADR 0090）。

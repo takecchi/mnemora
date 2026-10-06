@@ -58,3 +58,46 @@ describe("buildMnemoraPrompt: 由来・話者・主題・矛盾関係の描画�
     }
   });
 });
+
+// Issue #1776 の #698 のコメント（ADR 0665）: 「`companionOf` を持つが `retrievedVia` が
+// `mandatory_companion` でない」記憶を与える歯が無く、同伴の印の条件から
+// `retrievedVia === "mandatory_companion"` を外す変異が緑だった。
+describe("buildMnemoraPrompt: 矛盾候補の印は、同伴取得（mandatory_companion）された側にだけ付く（#698）", () => {
+  const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
+  const common = {
+    provenanceKind: "stated" as const,
+    speaker: "太郎",
+    subjectId: "user-1",
+    recordedAt: new Date("2026-09-01T00:00:00Z"),
+    occurredAt: null,
+    score: SCORE,
+  };
+
+  it("companionOf を持つが retrievedVia が ann の行は、その行に矛盾候補の印が出ない", () => {
+    const prompt = buildMnemoraPrompt(
+      recallWith([
+        { ...common, memoryId: "m-a", digest: "行A", retrievedVia: "ann", companionOf: "m-b" },
+        { ...common, memoryId: "m-b", digest: "行B", retrievedVia: "ann" },
+      ]),
+    );
+    const lineA = prompt.split("\n").find((l) => l.includes("行A"))!;
+    expect(lineA).not.toContain("[矛盾候補");
+  });
+
+  it("対照: 同じ組を retrievedVia: mandatory_companion にすると、その行に印が出る", () => {
+    const prompt = buildMnemoraPrompt(
+      recallWith([
+        {
+          ...common,
+          memoryId: "m-a",
+          digest: "行A",
+          retrievedVia: "mandatory_companion",
+          companionOf: "m-b",
+        },
+        { ...common, memoryId: "m-b", digest: "行B", retrievedVia: "ann" },
+      ]),
+    );
+    const lineA = prompt.split("\n").find((l) => l.includes("行A"))!;
+    expect(lineA).toContain("[矛盾候補");
+  });
+});

@@ -646,6 +646,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0639](./0639-observe-resend-breakdown.md) | `Runtime.observe` の冪等な再送の戻り値に、記憶の内訳 `resend` を足す | 採用 (2026-10) |
 | [0640](./0640-fixture-write-ports-reject-below-timestamptz-floor.md) | testkit の fixture と core の Fake は、行に日時を書く口で `timestamptz` の下限より前を、書く前に `RangeError` で断る（ADR 0500 の【未確認】を実測で埋める） | 採用 (2026-10) |
 | [0641](./0641-merged-0930-docs-recheck-teeth.md) | 09/30 にマージされた文書の PR（H 群：#1494・#1503・#1536）の確かめ直しで見つかった「約束の内」の穴7本に歯を足す | 採用 (2026-10) |
+| [0642](./0642-merged-0930-h-docs-recheck-doc-drift.md) | 09/30 にマージされた文書の PR（H 群）の確かめ直しで見つかった、文書と実装の食い違い8件を直し、ADR 0413・0228 に追記する | 採用 (2026-10) |
 | [0645](./0645-merged-0929-recheck-teeth-a.md) | 09/29 にマージされた #1380・#1393・#1394・#1395・#1396・#1405・#1406・#1408・#1410・#1421・#1427・#1437・#1442・#1444・#1455 の確かめ直しで見つかった穴に歯を足す（保守操作の activityCounting の配線・注入した時計の失敗側・pool の警告の形・縮退の幅・テナントの柵・purge の派生物・Fake の deleteAcrossSpaces・scopeAggregate の skip の目次帯・eraseTenant の束ね方ほか） | 採用 (2026-10) |
 | [0646](./0646-merged-0929-recheck-teeth-b.md) | 09/29 にマージされた #1385・#1388・#1389・#1392・#1397・#1398・#1399・#1401・#1402・#1404・#1407・#1411・#1424・#1428・#1431・#1434・#1435 の確かめ直しで見つかった穴に歯を足す（tick の中断・consolidate/reflect の signal の配線・分割推論の並び・期限の積・claim key・材料の forget の見直し・反転の一文の既定ほか） | 採用 (2026-10) |
 | [0655](./0655-bullmq-stop-removes-scheduler-only-when-last-worker.md) | `@mnemora/bullmq` の `stop()` は、この queue に自分以外の Worker が居るとき共有 scheduler を消さない（ADR 0449 の材料3の一部を直す） | 採用 (2026-10) |
@@ -656,5 +657,13 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0660](./0660-merged-1002-1004-recheck-teeth.md) | 10/02〜10/04 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1759） | 採用 (2026-10) |
 | [0661](./0661-bullmq-stop-last-worker-redis-teeth-mutation.md) | #1741（ADR 0655）の Redis の歯に変異を当て、すり抜けた2つを塞ぐ歯を足す（Issue #1758） | 採用 (2026-10) |
 | [0662](./0662-label-lock-order-teeth-observe-locks-directly.md) | labels の行ロックの先取り（ADR 0511）の順・取りすぎ・強さを、ロックそのものを外から見る歯で縛る（Issue #1718） | 採用 (2026-10) |
+| [0663](./0663-merged-0923-recheck-teeth.md) | 09/23 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1778） | 採用 (2026-10) |
+| [0664](./0664-merged-0922-recheck-publish-changelog-gate-stays-withdrawn.md) | 09/22 にマージされた #601（publish の CHANGELOG 門の撤回）の確かめ直しで見つかった穴に歯を足す（Issue #1782） | 採用 (2026-10) |
+| [0665](./0665-merged-0924-recheck-teeth.md) | 09/24 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1776） | 採用 (2026-10) |
+| [0666](./0666-merged-0920-0921-recheck-fingerprint-gate-and-cache-key-teeth.md) | 09/20〜21 にマージされた重みの指紋の門（#563・#588・#590・#592）とモデルキャッシュの鍵（#595）の確かめ直しで見つかった穴に歯を足す（Issue #1784） | 採用 (2026-10) |
+| [0667](./0667-merged-0930-front-a-recheck-teeth.md) | 09/30 にマージされた PR の前半（A 群）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
+| [0668](./0668-merged-0930-front-b-recheck-teeth.md) | 09/30 にマージされた PR の前半（B 群）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
+| [0669](./0669-merged-0919-recheck-association-rank-and-repo-model-id-guard-teeth.md) | 09/19 にマージされた連想枠の順位キー（#549）と repo/modelId 宣言の検査（#550）の確かめ直しで見つかった穴に歯を足す（Issue #1793） | 採用 (2026-10) |
+| [0670](./0670-merged-0918-recheck-apply-correction-and-publish-gate-shell-teeth.md) | 09/18 にマージされた Runtime.applyCorrection（#537）と publish.yml の門の shell の歯（#546）の確かめ直しで見つかった穴に歯を足す（Issue #1804） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

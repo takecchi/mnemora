@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { createAnswerBenchRuntime, runAnswerCase } from "../answer-bench.js";
+import { createAnswerBenchRuntime, runAnswerCase, serializePromptSpec } from "../answer-bench.js";
+import { checkContentPreserved } from "../answer-content-preservation.js";
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { buildAnswerJson } from "../answer-json.js";
 import { formatAnswerTable, formatAnswerQualityBanner } from "../answer-format.js";
@@ -172,6 +173,58 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
       await handle.close();
     }
   });
+  // Issue #1776 の #699 のコメント（ADR 0665）: 層2を、どちらの経路も**自分が実際にモデルへ渡した
+  // 直列化文字列**から計算している（約束6）。mnemora の値を naive の文字列から計算する変異が緑だった
+  // （録音の再生では両方 `preserved: true` で、取り違えても同じ）。ここでは、全ケースで、各経路の値が
+  // 自分の `promptSpec` の直列化から `checkContentPreserved` した値と完全に一致することを見る。
+  it("層2: naive も mnemora も、自分の promptSpec の直列化から計算した値と一致する（全 dev ケース）", async () => {
+    await resetTestDatabase();
+    await getTestClient();
+    const handle = await createAnswerBenchRuntime(requireDatabaseUrl(), {});
+    try {
+      let mnemoraDiffersFromNaive = false;
+      // 全 dev ケースに加え、経路で保持が分かれるケースを1つ足す: naive の全文には残るが、質問に関係が薄く
+      // mnemora が渡さない発話を accept にした派生ケース。
+      const lossy = {
+        ...ANSWER_CASE_SET_DEV[0]!,
+        id: "lossy-derived",
+        expected: {
+          kind: "closed-value" as const,
+          accept: ["そうですね、良い一日になりそうです"],
+          reject: [],
+        },
+      };
+      for (const answerCase of [...ANSWER_CASE_SET_DEV, lossy]) {
+        const result = await runAnswerCase(
+          handle.runtime,
+          handle.llmProvider,
+          handle.embeddingProvider,
+          handle.judgeLLMProvider,
+          answerCase,
+          `answer-bench-test-own-prompt-${answerCase.id}`,
+        );
+        expect(result.naive.contentPreservation).toEqual(
+          checkContentPreserved(serializePromptSpec(result.naive.promptSpec), answerCase.expected),
+        );
+        expect(result.mnemora.contentPreservation).toEqual(
+          checkContentPreserved(
+            serializePromptSpec(result.mnemora.promptSpec),
+            answerCase.expected,
+          ),
+        );
+        if (
+          JSON.stringify(result.mnemora.contentPreservation) !==
+          JSON.stringify(result.naive.contentPreservation)
+        ) {
+          mnemoraDiffersFromNaive = true;
+        }
+      }
+      // 検算: 経路ごとに値が違うケースが1つはある（無ければ、取り違えを区別できない歯になる）。
+      expect(mnemoraDiffersFromNaive).toBe(true);
+    } finally {
+      await handle.close();
+    }
+  }, 120_000);
 });
 
 afterAll(async () => {

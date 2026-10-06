@@ -263,3 +263,20 @@ AssertionError: docs/decisions/README.md が陳腐化している: 索引に無�
 - **ADR を足す PR の頻度が、いまどのくらいかを数え直していない。**Issue #267 の「4回/日」は 2026-09-15 の1日の値であり、本 ADR はその数字に依存しない形で書いた（負債1）。
 - **方向1（bot が PR 枝へ再生成コミットを push する）が実際に動くかを検証していない。**権限が在るという【受】までしか持っていない。⟹ ただし**動いても費用は消えない**ため、本 ADR の結論はこの検証に依存しない。
 - **ADR は本 ADR を含めて217本在り、全文を読んだのは十数本である。**⟹ ⛔ **「同じ問題を扱う ADR は他に無い」とは言えない。**当てたのは `grep -rnE "(#267|issues/267)" docs/decisions/`（4件）と、述語での引き（「受容」「対価」「構え」「もう1周」「周回」）までである。
+
+## 追記（2026-10-06）: 「再生成はマージする側が行う」という前提は、今の運用と逆になっている
+
+クローン（miku）の判断で残す訂正。オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。出所は Issue [#1734](https://github.com/takecchi/mnemora/issues/1734) の #1503 のコメント（確かめ直しの記録）。**本文は書き換えていない。**
+
+- **何がずれたか**: 本文の「問い」は、ADR を足す PR が CI をもう1周する理由を、[ADR 0137](./0137-adr-index-generated-from-source.md)「決定」2番の「索引の再生成は**マージ直前・PR ブランチ上**で、マージする側が行う」に置いた。**今の運用は逆である。** ADR を足す PR の側で `node scripts/generate-adr-index.mjs` を当て、索引も同じ PR で commit し、`adr-index-freshness` を PR 上で緑にしてからマージしている。ほかの ADR の PR と索引の行が衝突したら、`main` を merge で取り込み、生成器で作り直す（ADR 0137 の末尾の 2026-09-30 の追記、[ADR 0192](./0192-adr-index-freshness-enforced-in-pull-request-ci.md) の末尾の追記）。
+- **この ADR の決定への影響**: 決定1（もう1周の費用を受容する）の結論は、この追記では変えない。ただし「マージ直前の再生成のコミットが CI をもう1周させる」という経路は、今の運用では、**PR の側が先に再生成して緑にしてからマージする**ので、マージの直前に1周が増える形ではなくなっている。ほかの ADR の PR との行の衝突を `main` の merge で取り込み直すたびに再生成するので、**1周で済むとは限らない**。1周の費用が今の運用で実際にいくらかは、測り直していない。
+- **今の運用の指し先**: [ADR 0137](./0137-adr-index-generated-from-source.md) の末尾の「追記（2026-09-30）」、[`docs/autonomy.md`](../autonomy.md) の §4 の表（「ADR PR をマージするとき、索引の再生成を忘れる」の行）と §4.0、[`docs/decisions/README.md`](./README.md) の「一覧」節。
+- **同じ前提（再生成・採番をマージする側が行う）を本文に持つ ADR**（追記するのは本 ADR だけ。ほかは一覧にとどめる。**当たった範囲**: `grep -rnE "マージする側(が|は|の)" docs/decisions/` の結果を読んだ。網羅は示さない）:
+  - [ADR 0158](./0158-association-probes-bench.md)（索引は squash merge 直前にマージする側が再生成する）
+  - [ADR 0179](./0179-adr-number-assigned-at-merge.md)（`adr-renumber` を、マージする側が squash merge 直前に PR ブランチ上で実行する。今の運用は、ADR を足す PR の側が実行する。`docs/autonomy.md` §4）
+  - [ADR 0192](./0192-adr-index-freshness-enforced-in-pull-request-ci.md)（決定3・「1. ADR PR は、マージする側が再生成するまで赤いまま」。末尾の追記で既に改めている）
+  - [ADR 0273](./0273-architecture-section5-is-a-copy.md)（索引はマージする側がマージ直前に再生成する前提）
+  - [ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md)（PR 作成時の手順の注記として同じ前提）
+  - [ADR 0379](./0379-contested-tag-asymmetric-wording.md)（索引・番号確定はマージする側の作業）
+  - [ADR 0137](./0137-adr-index-generated-from-source.md)（決定2。末尾の追記で既に改めている）
+- **確かめていないこと**: 上の一覧の各 ADR の本文を、1本ずつ全文は読んでいない（`grep` で当たった行だけを見た）。「今の運用と逆」と読めるかの判定は、行の前後の読みまでである。

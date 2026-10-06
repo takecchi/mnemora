@@ -421,3 +421,31 @@ fixture と共有しているため機能上は検査済みだが、「main chan
 
 詳細（採った案・採らなかった案・確かめていないこと）は
 [ADR 0151](./0151-recall-association-unprompted.md) の 2026-09-27 追記を参照。
+
+## その後（2026-10-07）——条件(c) が偽になる入力は在った（鎖）。負債3の解消（Issue #1786）
+
+Issue #1786 は、#959 以降は条件(c)（相手が budget 切り詰め後の返却集合 `keptMemoryIds` に居る）が
+偽になる入力が存在しない疑いを挙げた。実測した結果、**入力は作れた**——「相手が budget で落ちる」では
+なく、**鎖**（a→b→c。b の `contestedWithId` が a ではなく c を指す）である。
+
+- a は query に当たり、b は段3の必須の同伴取得で引かれて [a, b] の Unit になる。
+  `fetchMandatoryCompanions` は owner 側（a）の `contestedWithId` だけを辿り、相互参照は検査しない
+  （同関数の doc コメント、ADR 0136）ので、b の `contestedWithId`（c）は辿られない。
+- b は条件(a)(b) が真で、相手 c は返却集合に居ない。`contestedWith` は付かない（付かないのが正しい）。
+- c が query に当たる低スコアの別 Unit で、budget により c の Unit だけが落ちる形にすると、
+  c は切り詰め**前**の Unit 集合には居て、**後**の返却集合には居ない。条件(c) が「後」を見ることの歯になる。
+- `Runtime.markContested` は両側 active の CAS で相互参照を書くので、鎖は `Runtime` 経由では作れない。
+  `MemoryStore` を直接叩いたときだけ作れる（既存の「status が active のまま contestedWithId だけが
+  設定されている」歯と同じ前提）。
+
+**負債3は解消した。** 歯は `packages/core/src/__tests__/recall-pipeline.test.ts` の
+「段3: contestedWith の条件(c)…の歯（Issue #1786）」の2本。実装は変えていない。
+
+| 変異（`recall-runtime.ts`） | 既存の38ファイル（784件） | 追加した2本 |
+|---|---|---|
+| 変異11: `keptMemoryIds.has(...)` を外す | 緑（Issue の再現どおり） | 2本とも赤 |
+| 変異2: `keptMemoryIds` を切り詰め前の `allUnits` から作る | 緑 | budget の1本が赤 |
+| 変異2': 同じく切り詰め前の `units` から作る | （未実行） | budget の1本が赤 |
+
+「既存の38ファイル」は、`packages/core/src/__tests__` のうち `recall(` と `contested` の両方を含むもの。
+本文・「測ったこと」・負債3の元の文は書き換えていない。

@@ -169,6 +169,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **conformance suite に約束を足した——`MemoryStore.listBySourceObservationAllVersions` は、purge 済みの行（`status: 'forgotten'` のまま `purgedAt` が入った行）も返す**（[ADR 0639](./docs/decisions/0639-observe-resend-breakdown.md)。ADR 0546 の作法どおり、足す約束は Breaking に数える）。`describeMemoryStoreConformance` の `supportsPurgeMemory: true` の枝に、`it` が1本増えた。口の TSDoc は元から「`status` でも絞らない」で、purge 済みの行を除く実装は契約に反していたが、外部の adapter から見れば、通っていたものが落ちる。足した約束は外せない。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目69。DB マイグレーションは無い。
 
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` は、`retry.attempts` に `Infinity`・`-Infinity` を渡すと、構築時に `RangeError` を投げるようになった**（[Issue #1785](https://github.com/takecchi/mnemora/issues/1785)、[ADR 0498](./docs/decisions/0498-constructor-config-checks.md) の追記）。以前は `+Infinity` が成功するまで無限に再試行し（失敗が続くと `warmup()`・`embed()` が返らず、abort でも読み込みは止まらない）、`-Infinity` は1回に丸められていた。`NaN`・0以下は今までどおり1回に丸め、小数は今までどおり切り捨てた回数だけ試す（`2.5` は2回）。⛔ 壊れるのは `±Infinity` を渡している利用者だけ。クローン miku の判断であり、オーナーの判断ではない。
+
 ### Added
 
 - **`Runtime.observe` の冪等な再送（同じ `externalId` の Observation が既に在った）の戻り値に、`resend`（`ObserveResend`）を足した。その Observation から作られた記憶の `memoryId`・`status`・`purged` が、版も status も問わず `memoryId` の昇順で載る**（[ADR 0639](./docs/decisions/0639-observe-resend-breakdown.md)。オーナーへのまとめ問い 374f6f88 の問10「再送の内訳は足す方向で検討」〈オーナーは推奨どおりと回答〉による。足すと決めたのはクローン miku の判断で、型の形は担い手の設計。オーナーが決めたのは推奨の採否だけ）。`memories` が空なら、まだ抽出されていない（ジョブの状態はこの欄では分からない）。全部が `forgotten` なら forget のために無視された。`purged: true` なら purge 済み。新しく作った呼び出しには欄が無い。`memoryIds`・`extraction`・ADR 0454 決定4 の3欄など、既存の欄の型・値は変わらない（任意の欄の追加）。再送の分岐で読み取りが1回増えるだけで、書き込みも LLM の呼び出しも無い。`ObserveResend`・`ObserveResendMemory` も `@mnemora/core` から出る。
@@ -180,6 +182,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `completedJobsToKeep?: number`: 完了したジョブを Redis に残す件数（既定 `1000`）。`0` 以上の整数でなければ、同じ形で構築時に投げる。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`@mnemora/core` の内部関数 `truncationBoundary`・`sliceWithoutSplittingSurrogatePair` を削除した**（[Issue #1779](https://github.com/takecchi/mnemora/issues/1779)、[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md) の追記）。どこからも呼ばれておらず、公開 API には出していなかった。公開 API・切り詰めの振る舞いは変わらない。
 
 - **出荷済みの `@mnemora/postgres` の migration が書き換えられていないことを、CI で固定した**（[ADR 0637](./docs/decisions/0637-migration-checksums-pinned-and-0027-deadlock-not-fixable-by-new-migration.md)。オーナー回答 374f6f88 の問29〈全部推奨〉による。決めたのは推奨の採否だけで、設計は担い手のもの）。
   利用者に見える変化は無い（`packages/postgres/migrations` の中身も `runMigrations` も変えていない。名簿の `migration-checksums.json` は npm に出ない）。既存の migration の書き換え・削除は CI が赤にし、新しい番号の migration の追加は赤にしない。**`0027` の deadlock（止めずに当てると `observe()` と deadlock しうる）は、新しい番号の migration では直せないと判断し、直していない**——手当ては、書き込みを止めてから当てること（[ADR 0442](./docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）のまま。
@@ -235,6 +239,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: [docs/migration-v1.md](./docs/migration-v1.md) の数え方の規律2（オーナー回答 `3f3411c5`）に従う。公開の fixture が新しく例外を投げる変更だが、型・シグネチャ・公開 API・既定値・保存済みのデータは変えていない。本物の adapter は変えていない。`@mnemora/testkit/fixtures` を直接使い、下限より前の日時を書いていたテストだけが、新しく例外になる（`@mnemora/postgres` ではもともと書けない値）。
   - 手順は要らない。DB マイグレーションは無い。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` を `@mnemora/postgres` に揃えた2点: 新しい記憶の `decayFloorAt` が `Date` でない（`null`・`undefined`・キーなし）と `TypeError` で断り、何も書かない。「memory not found for tenant: &lt;id&gt;」の id の綴りが Postgres と同じになった**（🟡。Issue #1759。クローン miku の判断で、根拠はオーナー回答 374f6f88 の問2・問25。[ADR 0493](./docs/decisions/0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)・[ADR 0521](./docs/decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md) の末尾の追記）。本物の adapter（`@mnemora/postgres`）は変えていない。
+  - **`decayFloorAt`**: 以前は型の外の `null` などを通して書いていた（`@mnemora/postgres` は `23502`）。いまは `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`（新しい行）が、書く前に `InMemoryMemoryStore: decayFloorAt must be a Date (got …)` の `TypeError` で断る。冪等の既存の行が在っても断る（Postgres も断る。実測）。例外の顔は揃えていない（ADR 0640 の前例）。
+  - **message の綴り**: 操作の対象が無いとき（`updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・`reinforce`・`supersedeWithNewMemories` の置き換え対象）は、渡された綴りのまま載せる（以前は小文字）。参照先が無いとき（`createMemory` の `supersededById`・`contestedWithId`、`updateStatus`・`updateStatusWithEvent` の `supersededById`、`recordUsage` の `memoryIds`）は、小文字にそろえる（以前は渡された綴りのまま）。どちらも Postgres の実測に合わせた。例外の種類と、断るかどうかは変わらない。
+  - **破壊的と数えない理由**: ADR 0640 と同じ（数え方の規律2。オーナー回答 `3f3411c5`）。新しく断る入力は、`@mnemora/postgres` が以前から拒む入力だけ。`@mnemora/testkit/fixtures` の例外の message の綴りを照合していたテストは、書き換えが要る。
+  - 手順は要らない。DB マイグレーションは無い。[docs/migration-v1.md](./docs/migration-v1.md) の 🟡 に載せた。
+
 - **`lexicalMatch`（`LexicalStore` が返す `coverage`）の尺度を、3つの store（`PostgresLexicalStore`・`PostgresTrigramLexicalStore`・`@mnemora/testkit/fixtures` の `InMemoryLexicalStore`）で測り、文書と歯にした**（[ADR 0553](./docs/decisions/0553-lexical-coverage-scale-across-stores.md)。[ADR 0484](./docs/decisions/0484-recall-channel-merge-on-real-postgres.md) の負債1。`packages/postgres/src/__tests__/lexical-coverage-scale-0553.postgres.test.ts` を足し、各 store と `LexicalHit.coverage` の TSDoc に尺度と ADR への参照を足した）。
   - 測ったのは、tsvector 版と InMemory が「一致した語数 ÷ 語の総数」の 1/n 刻みで同じ式であること、pg_trgm 版の日本語側が `word_similarity` の閾値による 0/1 の二値で（値は `rank` の側に入る）`GREATEST` で ASCII 側と合成されること。尺度は揃えていない（揃えるかはオーナーの判断）。
   - ⭕ 非破壊と数える（文書と歯の追加のみ）。コードの振る舞い・公開 API・DB は変えていない。
@@ -243,6 +253,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（文書の追記のみ）。
 
 ### Fixed
+
+- **`@mnemora/postgres` の `runMigrations` に `schema` と `public` 以外の `extensionSchema` を渡すと、pgvector の能力検査が `type "vector" does not exist` で落ちていたのを直した**（`extensionMode: "create"` も `"verify"` も。[Issue #1780](https://github.com/takecchi/mnemora/issues/1780)。[ADR 0367](./docs/decisions/0367-pgvector-capability-check.md) 追記）。検査だけを `SET LOCAL search_path` で囲んで流す。`schema` 未指定の呼び出しの発行 SQL と、公開型・公開 API は変えていない。
+
+- **`recall()` の段3.5（連想）で `association.maxCount` を超えて席に着けなかった比較不能（`total` が `NaN`）の記憶が、`over_limit`（stage `association`）と `score_not_comparable` の両方に数えられていたのを、`over_limit(association)` にだけ数えるよう直した**（[Issue #1788](https://github.com/takecchi/mnemora/issues/1788)。[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記10。追記7 の取りこぼし）。公開型・公開 API は変えていない。
+- **`recall()` の段3で多者間の群の上限（`relationMaxCount`）に切られた候補が、段3.5 の連想の必須の同伴取得（`RelationStore.link` で張った辺をたどる形）で `memories`（または予算で落ちて `budget_dropped`）へ戻ったとき、`over_limit`（stage `relation`）の count からも差し引かれず二重に数えられていたのを、戻った先でだけ数えるよう直した**（[Issue #1794](https://github.com/takecchi/mnemora/issues/1794)。[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記11）。公開型・公開 API は変えていない。
 
 - **`@mnemora/postgres` の `runMigrations` が、`registerEmbeddingSpace` と同時に走って埋め込み表の索引の名前がぶつかり（`23505`・`pg_class_relname_nsp_index`・`idx_memory_embeddings_…`）落ちたファイルを、1回だけ流し直すようになった**（逆向きの競合。[ADR 0638](./docs/decisions/0638-run-migrations-reruns-file-once-on-embedding-index-name-race.md)。[ADR 0464](./docs/decisions/0464-register-embedding-space-absorbs-migration-index-race.md) の負債 D1b。オーナーへのまとめ問い 374f6f88 の問30）。
   - 以前は、`registerEmbeddingSpace` が索引を作っている最中に `runMigrations` が同じ名前を作ろうとすると、migration がそのファイルごと巻き戻って失敗し、呼び直さないと進まなかった。いまは、そのファイルを頭から1回だけやり直す（適用済みのファイルは流さない）。2回目も落ちたら、2回目のエラーをそのまま投げる。別の例外は流し直さない。
@@ -265,6 +280,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/core` の公開 TSDoc のうち、実装と食い違っていた記述を実装に合わせて直した**（[ADR 0576](./docs/decisions/0576-doc-code-drift-sweep-core-public-tsdoc.md)）。
   - **主なもの**: `VectorFilter` の「後段は `status` と忘却ゲートを見ない」（今は見る）、`TaxonomyMode` の「読む経路はまだ無い」（今は `recall()` が読む）、`setEventRetention` の `days` の上限、`ClaimOutboxJobsOptions.limit` の負数の扱い、`RecallUsage.share` の分子と分母、`RecallQuery.text` の空白だけの文字列、`ApplyCorrectionInput.resolution` が投げる `RangeError`、`reflect` の `decayFloorAt` の出どころ、写していた数。一覧は ADR 0576。`runtime.ts` など、開いている PR が触るファイルは除いた。
+  - **破壊的と数えない理由**: コメントだけの変更で、型・振る舞い・公開 API の表面は変えていない。
+
+- **`@mnemora/core` の公開 TSDoc のうち、`Ctx` の「空白だけの文字列は受け付ける」（`utterance.text`・`event.name`・`document.content` は今は断る）、抽出の `subjectId` の「検証されない」（NUL・孤立サロゲートは今は弾く）の2か所を、実装に合わせて直した**（[ADR 0642](./docs/decisions/0642-merged-0930-h-docs-recheck-doc-drift.md)）。
   - **破壊的と数えない理由**: コメントだけの変更で、型・振る舞い・公開 API の表面は変えていない。
 
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
@@ -306,6 +324,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`Date` の共有**: `createRecall` の `createdAt` と、`purgeMemory` の `purgedAt`（イベントの `at` から入る）が、呼び手の `Date` をそのまま持っていた。呼び手が後から `setTime` すると、`getRecall`・`get` の値が変わった（Issue #1120 の「書き込む時点の複製」の約束の外だった）。いまは複製して保存する。`purgedAt` とイベントの `at` が同じ値であることは変わらない。
   - **`archiveDecayed` の `nowSeq`**: 以前は、壁時計でも整数でない `nowSeq`（`1.5` など）を断っていた。`@mnemora/postgres` は壁時計では `nowSeq` を SQL に入れないので通す。いまは fixture も通す。活動時計（`"activity"`・`"either"`）では今までどおり断る。
   - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。型・公開 API・既定値・保存済みのデータは変えない。本物の adapter は変えていない。
+
+- **`@mnemora/core` の `recall()` で、クエリ埋め込みの失敗の `cause`（`providerErrorKind`・`errorName`）を、書記素の境界で切るようにした**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md) の追記）。以前は 64 コードユニットの位置にサロゲートペアが跨ると孤立サロゲートが残った。長さは今までどおり 64 コードユニット以下で、公開の型は変わらない。
 
 ## [1.2.0] - 2026-10-02
 

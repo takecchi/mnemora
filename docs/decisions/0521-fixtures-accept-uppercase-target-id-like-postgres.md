@@ -158,3 +158,15 @@ ADR 0493（#1603。main に入った）は、形 B（大文字の対象 id）を
 - `LexicalStore`（id を取る口が無いので触っていない）、`TenantSettingsStore`、`createObservationWithOutbox` の payload の id。
 - fixture を継承した外部の adapter（上の負債4）。
 - 実 API（LLM・埋め込み）。
+
+## 追記（Issue #1759。クローン miku の判断で、根拠はオーナー回答 374f6f88 の問2。オーナーの判断ではない）: 例外の message の id の綴りの訂正
+
+**上の本文の「Postgres の `memoryNotFound` も小文字にそろえた id を載せる」は、口によって違った。**【実測】Postgres 17 + pgvector（`C.UTF-8`）、main `de41711c`。存在しない大文字の id（`AAAAAAAA-…`）を渡すと、次のようになる。
+
+| 口 | `@mnemora/postgres` の message の id |
+| --- | --- |
+| 操作の対象が無い: `updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・`reinforce`・`supersedeWithNewMemories` の置き換え対象 | **渡された綴りのまま** |
+| 操作の対象が無い: `purgeMemory`・`markContestedPair`・`resolveContestedPair`・`markContestedGroup`・`resolveContestedGroup`・`resolveOrphanedContested` | 小文字 |
+| 参照先が無い: `createMemory` の `supersededById`・`contestedWithId`、`updateStatus`・`updateStatusWithEvent` の `supersededById`、`recordUsage` の `memoryIds` | 小文字 |
+
+fixture（`InMemoryMemoryStore`）は、1行目を小文字、3行目を渡された綴りのまま載せていて、Postgres と逆だった。**Postgres の側に揃えた**（fixture の message だけを変えた。例外の種類と、断るかどうかは変えていない）。歯は `packages/postgres/src/__tests__/testkit-fixture-alignment-not-found-spelling-and-decay-floor-null.postgres.test.ts`（同じ入力を2実装へ流す）。core のテスト専用 Fake は変えていない。CHANGELOG `[1.3.0]`・migration-v1 の 🟡。

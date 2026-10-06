@@ -220,6 +220,43 @@ describe(".github/workflows/publish.yml の門ステップが既定シェル（b
     expect(offending, message).toEqual([]);
   });
 
+  it("shell を、キーが行頭でない書き方（`- shell:`・引用符つきのキー・{ } の中）で上書きしても、-e を保つ shell に限られる（Issue #1804）", () => {
+    // 既存の判定（`extractShellOverrides`）は行頭の `shell:` しか見ない。YAML は同じ意味を
+    // `- shell: pwsh`（step の先頭のキー）・`"shell": pwsh`（引用符つきのキー）・
+    // `defaults: { run: { shell: pwsh } }` / `- { shell: pwsh, … }`（フロー形式）でも書ける。
+    // どの書き方でも、`shell` というキーの値は、許す2つ（bash / sh）に限る。
+    const found = [...workflow.matchAll(/(?:^|[\s{,])["']?shell["']?\s*:\s*([^\n,}]+)/g)].map((m) =>
+      m[1].trim().replace(/^(["'])(.*)\1$/, "$2"),
+    );
+    const offending = found.filter((value) => !ALLOWED_SHELLS.has(value));
+    expect(
+      offending,
+      `publish.yml が、-e を失う形で shell を上書きしている（キーの書き方によらず検出）: ${JSON.stringify(offending)}`,
+    ).toEqual([]);
+  });
+
+  it("門ステップは条件で飛ばされない（step に if: を持たず、継続を握り潰すキーも持たない。キーを引用符で囲んでも同じ）（Issue #1804）", () => {
+    expect(gateBlock, "門ステップが無い").toBeDefined();
+    const lines = workflow.split("\n");
+    const dashIndent = gateBlock.indent - 2;
+    let start = gateBlock.startLine - 1;
+    while (start >= 0 && !new RegExp(`^ {${dashIndent}}- `).test(lines[start])) start -= 1;
+    expect(start, "門ステップの先頭（`- `）が見つからない").toBeGreaterThanOrEqual(0);
+    let end = start + 1;
+    while (
+      end < lines.length &&
+      (lines[end].trim() === "" || lines[end].match(/^ */)[0].length > dashIndent)
+    ) {
+      end += 1;
+    }
+    const stepText = lines.slice(start, end).join("\n");
+    // 条件で飛ばされた step は何も走らないので、シェルの意味論を問う前に門ごと無くなる。
+    expect(stepText, "門ステップに if: が付いている").not.toMatch(/(?:^|[\s{,-])["']?if["']?\s*:/);
+    expect(stepText, "門ステップに continue-on-error が付いている").not.toMatch(
+      /["']?continue-on-error["']?\s*:/,
+    );
+  });
+
   it("門ステップが呼ぶ scripts/run-publish-gates.mjs が実在する（パスの書き間違いで静かに空回りしない）", () => {
     expect(
       gateBlock,

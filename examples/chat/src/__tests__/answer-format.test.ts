@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatAnswerContentPreservation,
   formatAnswerInputReduction,
   formatAnswerIntro,
   formatAnswerQualityBanner,
@@ -116,4 +117,23 @@ describe("formatAnswerIntro — 品質を主張できるかで出し分ける", 
       expect(text).toContain("正誤");
     },
   );
+});
+
+// Issue #1776 の #699 のコメント（ADR 0665）: `formatAnswerContentPreservation` を
+// `must-abstain` 入りの結果で見る歯が無く、分母に must-abstain を含める変異が緑だった。
+describe("formatAnswerContentPreservation: 分母は must-abstain 類を除いた件数（#699）", () => {
+  const path = (applicable: boolean, preserved: boolean) =>
+    ({ contentPreservation: { applicable, preserved, matchedAcceptTerms: [] } }) as never;
+  const results = [
+    { naive: path(true, true), mnemora: path(true, false) },
+    { naive: path(true, true), mnemora: path(true, true) },
+    { naive: path(false, true), mnemora: path(false, true) }, // must-abstain
+  ] as never;
+
+  it("naive 2/2・mnemora 1/2（must-abstain の1件は分母にも分子にも入らない）", () => {
+    const line = formatAnswerContentPreservation(results);
+    expect(line).toContain("naive 2/2 件");
+    expect(line).toContain("mnemora 1/2 件");
+    expect(line).toContain("分母は must-abstain 類を除いた 2 件");
+  });
 });

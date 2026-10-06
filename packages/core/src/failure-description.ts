@@ -116,7 +116,7 @@ const DESCRIBE_JOB_FAILURE_MAX_CHARS = 4096;
  * Issue #1064（2026-09-29、ADR 0363）: `describeJobFailure` の戻り値全体に
  * {@link DESCRIBE_JOB_FAILURE_MAX_CHARS} の上限を掛ける。上限を超えたら
  * `sliceAtGraphemeBoundary`（書記素の内側で切らない。結合文字・ZWJ の絵文字・国旗・サロゲートペアを割らない。
- * `text-truncation.ts`、ADR 0470。2026-10-01 までは `sliceWithoutSplittingSurrogatePair` でサロゲートペアだけを避けていた）
+ * `text-truncation.ts`、ADR 0470。以前はサロゲートペアだけを避ける切り詰めだった）
  * で切り、末尾に「切ったこと」と「元の長さ」が読める印を付ける。
  *
  * `omitDrizzleParams` だけでは塞がらない経路（ADR 0363「塞がらない経路」）——
