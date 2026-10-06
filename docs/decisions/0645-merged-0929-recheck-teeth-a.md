@@ -3,7 +3,7 @@
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-06
 
-クローンのマネージャー（mgr-fc93a777・mgr-5d638824・mgr-0495eb46）の依頼で担い手が書いた。歯を書くと決めたのも、範囲を決めたのも、#1435・#1437・#1442・#1444 を先の確かめ直し（ADR 0600・0602・0603・0604）と重ならない約束に限って当てると決めたのもクローンの判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+クローンのマネージャー（mgr-fc93a777・mgr-5d638824・mgr-0495eb46）の依頼で担い手が書いた。歯を書くと決めたのも、範囲を決めたのも、#1437・#1442・#1444 を先の確かめ直し（ADR 0600・0602・0603・0604）と重ならない約束に限って当てると決めたのもクローンの判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手（またはマネージャー）の判定。
 これは試験だけの変更で、実装・CHANGELOG・適合テスト（`*-conformance.ts`）は触らない（ADR 0608・ADR 0613 と同じ）。
 この PR は「PR A」で、PR B は ADR 0646（PR #1748）である。
@@ -85,14 +85,14 @@
 - `packages/core/src/__tests__/erase-tenant-orchestration.test.ts`: 欠ける port を1つずつ名指しし、どの port にも触れない。最後の port の `reachedLimit`・`deleted` の写し。4 port それぞれの例外の素通し。ctx・limit・dryRun が4 port に届く。
 - `packages/postgres/src/__tests__/erase-tenant-foreign-reference-paths.postgres.test.ts`（新規）: 外部キーの11経路を1本ずつ、経路の集合も別の問い合わせで数えて突き合わせる。
 - `erase-tenant-fk-violation-recount.postgres.test.ts`（新規）: `BEFORE DELETE` トリガで止めて別接続で参照を足し、数え直して blocked になる。他テナント由来でない 23503 は元の例外。
-- `erase-tenant-dry-run-matches-real.postgres.test.ts`（新規）: 4 port とも dryRun と本番の `{deleted, reachedLimit}` が一致する。
+- `erase-tenant-dry-run-matches-real.postgres.test.ts`（新規）: 4 port を直接呼び、dryRun と本番の `{deleted, reachedLimit}` が一致する。本番は memoryStore を最後に呼ぶ（core の `eraseTenant` の順では埋め込みが `memories` の CASCADE で先に消え、`deleted.vectorStore` が食い違うことは ADR 0383 の追記が書いている。この歯は port ごとの予告だけを縛る）。
 - `erase-tenant-outbox-all-states.postgres.test.ts`（新規）: 未処理・claim 中・完了・失敗のすべてを消す。
 - `erase-tenant-same-tenant-lock.postgres.test.ts`（新規）: 先に lock を握り、port が終わらないこと・別テナントは待たないこと。
 - `embedding-space-enumeration-decoys.postgres.test.ts`（新規）: 列挙の6条件を1つずつ満たさない decoy を除く。migration 0027 の索引が `memory_id` の単一列であること。
 
 ### 歯を足さなかった PR
 
-#1405・#1408・#1421・#1442 は、すり抜けが無かった（#1421 の変異5は共有そのものを直接見る歯が無く、偶然噛んだ形だった。試しに書いて赤・緑は確かめたが、既に噛んでいるので足していない。足すかどうかはマネージャーの判断に任せた）。
+#1405・#1408・#1421・#1442 は、すり抜けが無かった（#1421 の変異5は共有そのものを直接見る歯が無く、偶然噛んだ形だった。試しに書いて赤・緑は確かめたが、既に噛んでいるので足していない。足さないと決めたのはマネージャー）。
 
 3. ほかの ADR には追記しない。
 
@@ -133,7 +133,7 @@ PostgreSQL 上で、対象ファイルを退避し、変異を1つずつ入れ�
 
 約束が撤回・広がったので当てなかったもの、約束でないので歯にしなかったもの:
 
-- #1455 の InMemory が skip でも `excludedProvenanceIndexedCount: 0` を返す変異はすり抜けたが、ADR 0390 の約束（skip は欄を足さない）で #1455 の約束ではないので歯にしていない。#1390 側の担当が確かめ直すなら、そちらへ。
+- #1455 の InMemory が skip でも `excludedProvenanceIndexedCount: 0` を返す変異はすり抜けたが、ADR 0390 の約束（skip は欄を足さない）で #1455 の約束ではないので歯にしていない。ADR 0390 の実装を確かめ直すときに当てる。
 - #1380 の「決めたこと7」（作成・強化の起点を `ctx.subjectId` 基準で計算する）は ADR 0394 が記憶自身の subject 基準に変えたので当てていない。tick の自動 consolidate・reflect ジョブが `activityCounting` を渡さないことは PR 本文が範囲外としたので歯にしていない。主キーの列順は性能の記述で、振る舞いの歯にならない。
 - #1455 の ADR 0384 決定2「実装しない adapter は `'exact'` を返し続ける」は、ADR 0384 自身の 2026-09-30 の追記が誤りとした。そちらには当てていない。
 - #1410 の One-Time Filter で切り替えること・「往復は増えない」・`search()` を変えないことは、ADR 0374 が置き換えたので当てていない。速さの実測表は環境依存で歯にしない。
@@ -173,8 +173,6 @@ PostgreSQL 上で、対象ファイルを退避し、変異を1つずつ入れ�
 - #1408: 0.7 系以下の実物の pgvector は手元に無く、歯は `pg_settings` の行を模した入力で見ている。
 - #1421 の変異5は、共有そのものを直接見る歯が無い（偶然噛んだ形）。
 - 全テストは走らせていない。名指しのファイルだけである。DB の要る試験は、この仕上げの段では走らせていない。
-
-試験名・コメントに「ADR X 決定N」と書かない決まりは試験の話で、この ADR 本文では ADR を参照してよい。
 
 ## これが覆るとしたら
 
