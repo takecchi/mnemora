@@ -765,6 +765,47 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
     expect(result.memoryIds).toEqual([]);
     expect(reinforceManySpy).not.toHaveBeenCalled();
   });
+
+  it("2段の経路（recordUsageAndReinforce が無い adapter）でも、insertedMemoryIds が空なら reinforceMany を呼ばない", async () => {
+    // 上の歯は、Issue #961 の後は `recordUsageAndReinforce` の経路を通り、2段の経路の
+    // 「空なら呼ばない」分岐には届かない。口を持たない adapter を模して、その分岐を見る。
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memory = await stores.memoryStore.createMemory(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "hash-empty-two-step",
+      digest: "要旨",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "batch-1" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+    (stores.memoryStore as { recordUsageAndReinforce?: unknown }).recordUsageAndReinforce =
+      undefined;
+    const recallId = await createRecallFixture(stores, ctx);
+    await runtime.observe(ctx, { kind: "memory_usage", recallId, usedMemoryIds: [memory.id] });
+
+    const reinforceManySpy = vi.spyOn(stores.memoryStore, "reinforceMany");
+    const reinforceSpy = vi.spyOn(stores.memoryStore, "reinforce");
+    const result = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+
+    expect(result.memoryIds).toEqual([]);
+    expect(reinforceManySpy).not.toHaveBeenCalled();
+    expect(reinforceSpy).not.toHaveBeenCalled();
+  });
 });
 
 /**
