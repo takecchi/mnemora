@@ -517,6 +517,17 @@ describe("🔴 本物の歯1: 生きた文書に ADR への行番号引用が無
     expect(violations).toEqual([]);
   });
 
+  it("⭐ 走査の母集合の確認（Issue #1812 G7）: 生きた文書の集め方が空・狭すぎず、ADR 本体を含まない", () => {
+    // 上の歯は「集めた文書に違反が無い」ことしか見ない。集める側が [] を返す・docs/ の一部しか
+    // 集めない・AGENTS.md / README.md を落とす、のどれでも違反0件で緑になってしまう。
+    const files = collectLivingDocFiles();
+    expect(files).toContain("AGENTS.md");
+    expect(files).toContain("README.md");
+    expect(files).toContain("docs/roadmap.md");
+    expect(files).toContain("docs/release-v1.md");
+    expect(files.filter((file) => file.startsWith("docs/decisions/"))).toEqual([]);
+  });
+
   it("⭐ mutation guard: 検出器は生きていて、ADR 本体（docs/decisions/）の中の行番号引用は実際に見つける", () => {
     // `docs/decisions/0087-runtime-forget-shape.md:57` は「ADR 0030（`:29-37`）」という
     // adr-paren-colon 形の引用を実際に持つ（ADR 本体が別の ADR を行番号で引く実例）。
