@@ -1143,7 +1143,7 @@ export class PostgresMemoryStore implements MemoryStore {
         // 本体が投げたエラーを控えておき、外へ出てきたものと見比べて「巻き戻しそのものが失敗した」を見分ける。
         let bodyError: { error: unknown } | undefined;
         try {
-          const one = await tx.transaction(async (savepoint) => {
+          const one = await (async (savepoint: typeof tx) => {
             try {
               if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
                 throw new ContestedWithoutCompanionError("createMemoriesWithOutboxAndEvents", null);
@@ -1160,7 +1160,7 @@ export class PostgresMemoryStore implements MemoryStore {
               bodyError = { error };
               throw error;
             }
-          });
+          })(tx);
           written.push({ index, ...one });
         } catch (error) {
           if (bodyError === undefined) {
