@@ -156,3 +156,34 @@ describe("recall() — 段3の必須同伴取得は、companion 自身が壊れ�
     },
   );
 });
+
+describe("recall() — 段3の必須同伴取得は decayFloorAt を検査しない（fetchMandatoryCompanions の doc・docs/recall.md §8。Issue #1775 の #824）", () => {
+  it("decayFloorAt が now より前の contested の対向も companion として返り、生存側は単独で消えない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "active", digest: "A" }),
+    );
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        status: "active",
+        digest: "B",
+        // 忘却の床を過ぎている（通常の候補なら忘却ゲートで落ちる）。
+        decayFloorAt: new Date(NOW.getTime() - 1_000),
+      }),
+    );
+    await runtime.markContested(ctx, a.id, b.id);
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+    expect(result.memories.find((m) => m.memoryId === b.id)?.retrievedVia).toBe(
+      "mandatory_companion",
+    );
+    expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);
+  });
+});
