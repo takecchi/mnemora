@@ -170,4 +170,31 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
     expect(text).not.toContain("Seq Scan on memories");
     expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*subject_id/);
   });
+
+  // 上の歯は `subject_id` が Index Cond に入ることまでしか見ない。述語（claim_key_predicate）の比較が
+  // 索引で引けない形に変わると、索引は subject までで止まり、同じ subject の全 claim key の行を読んで
+  // Filter で捨てる（この表では述語が 200 種、subject あたり約 330 行）のに、上の歯は緑のままだった。
+  // `idx_memories_claim_key` でも `idx_memories_claim_predicates` でも、述語の等値は Index Cond に入る。
+  it.each([
+    ["findActiveByClaimKey", "文字列", "s3", findMatcher],
+    ["findActiveByClaimKey", "null", null, findMatcher],
+    ["findContestedByClaimKey", "文字列", "s3", findContestedMatcher],
+    ["findContestedByClaimKey", "null", null, findContestedMatcher],
+  ] as const)(
+    "%s は claim_key_predicate の等値も Index Cond に入れる（subjectId が %s）",
+    async (method, _label, subjectId, matcher) => {
+      const text = await plan(matcher, () =>
+        store[method](ctx, {
+          subjectId,
+          claimKey: { subject: "user", predicate: "p3" },
+          excludeMemoryId: someId,
+          contentHash: "no-such-hash",
+          validFrom: null,
+          validUntil: null,
+        }),
+      );
+      // `claim_key_predicate IS NOT NULL`（部分索引の述語。Recheck Cond に出る）では通らないよう、等値まで見る。
+      expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*claim_key_predicate = 'p3'/);
+    },
+  );
 });

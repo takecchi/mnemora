@@ -115,6 +115,32 @@ describe("parseMigrateCliOptions: --analyze-memories（Issue #234 / ADR 0143）"
     expect(result.error.message.split("\n")[1]).toMatch(/`--` を付けずに/);
   });
 
+  it("`--` の後ろに引数が複数あるとき、例は空白で区切ってそのまま並べ、コマンドの全体（pnpm --filter @mnemora/postgres run migrate）を示す", () => {
+    const result = parseMigrateCliOptions(["--", "--schema", "app", "--analyze-memories"], {});
+    expectErr(result);
+    const lines = result.error.message.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain(
+      "（例: pnpm --filter @mnemora/postgres run migrate --schema app --analyze-memories）",
+    );
+  });
+
+  it("`--` 単体のときの例は、引数の無いコマンドで終わる（余分な空白を残さない）", () => {
+    const result = parseMigrateCliOptions(["--"], {});
+    expectErr(result);
+    const lines = result.error.message.split("\n");
+    expect(lines[0]).toBe("unknown option: --");
+    expect(lines[1]).toContain("（例: pnpm --filter @mnemora/postgres run migrate）");
+  });
+
+  it("`--` 以外の未知のオプション（= 付きでも）には、`--` の案内を付けない（1行のまま）", () => {
+    for (const arg of ["--analyze-memories=true", "--no-such-flag=1", "-x"]) {
+      const result = parseMigrateCliOptions([arg], {});
+      expectErr(result);
+      expect(result.error.message).toBe(`unknown option: ${arg}`);
+    }
+  });
+
   it("ほかの未知のオプションのエラー文は変えない（1行のまま）", () => {
     const result = parseMigrateCliOptions(["--no-such-flag"], {});
     expectErr(result);

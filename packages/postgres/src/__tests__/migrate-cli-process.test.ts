@@ -143,4 +143,14 @@ describe("mnemora-postgres-migrate（子プロセス起動、DB 無し）", () =
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("--nope");
   });
+
+  it("`--` がそのまま渡された（pnpm run migrate -- --analyze-memories）: 終了コード1で、標準エラーに `--` を付けない正しい書き方が2行目に出る", async () => {
+    const result = await runCli(["--", "--analyze-memories"], {});
+
+    expect(result.exitCode).toBe(1);
+    const lines = result.stderr.trimEnd().split("\n");
+    expect(lines[0]).toBe("unknown option: --");
+    expect(lines[1]).toContain("run migrate --analyze-memories");
+    expect(lines[1]).not.toContain("migrate -- --");
+  });
 });
