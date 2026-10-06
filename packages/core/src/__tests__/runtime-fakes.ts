@@ -493,7 +493,7 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
  * イベントを組み立て切れない——そこで、記憶を作る前にこの検査だけを全対象について済ませる
  * （testkit の fixture が同じ段で `assertStorableMemoryEvent` を呼ぶのと同じ形）。
  */
-function assertBuildableFakeEvent(event: NewMemoryEvent): void {
+function assertBuildableFakeEvent(event: NewMemoryEvent, opts?: { skipAtFloor?: boolean }): void {
   // ADR 0493: testkit の `assertStorableMemoryEvent`（`memory-event-check.ts`）と同じ判定。BigInt は他のどれより先に断る
   // （Postgres は `JSON.stringify` の時点で `TypeError` になり、問い合わせを送らない）。
   if (fakeContainsBigInt(event.actor) || fakeContainsBigInt(event.meta)) {
@@ -509,6 +509,12 @@ function assertBuildableFakeEvent(event: NewMemoryEvent): void {
   // 通る単一の合流点であり、ここで検査すればそれらすべてを一度に覆える。
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+  }
+  // ADR 0640: 下限（4714-11-24 BC 00:00 UTC）より前の `at` は、Postgres が行を書くときに `22008` で拒む。testkit の
+  // `assertStorableMemoryEvent` と同じ位置・同じ文面。`skipAtFloor` は、そのイベントを書かないかもしれない呼び手（`supersedeWithNewMemories` の
+  // 事前検査。CAS に弾かれる対象は書かず、Postgres は `at` を見ない）が、下限だけを「書く」分岐へ回すためのもの。
+  if (opts?.skipAtFloor !== true) {
+    assertFakeTimestamptzNotBelowMin("memory_events", "at", event.at);
   }
   assertStorableFakeEvent(event);
   if (fakeContainsNulOrLoneSurrogate(event.actor)) {
@@ -754,6 +760,8 @@ export class FakeMemoryStore implements MemoryStore {
       if (value != null && Number.isNaN(value.getTime())) {
         throw new Error(`FakeMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
       }
+      // ADR 0640: 下限より前は、Postgres が `22008` で書けずに拒む（冪等の既存行が在っても、衝突を見る前に拒む）。
+      assertFakeTimestamptzNotBelowMin("FakeMemoryStore", field, value);
     }
     const existing = input.externalId
       ? [...this.backing.observations.values()].find(
@@ -1095,6 +1103,17 @@ export class FakeMemoryStore implements MemoryStore {
         if (value != null && Number.isNaN(value.getTime())) {
           throw new Error(`FakeMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
         }
+      }
+      // ADR 0640: 上の6欄は、下限（4714-11-24 BC 00:00 UTC）より前を Postgres が `22008` で書けずに拒む（冪等の既存行が在っても拒む）。
+      for (const [field, value] of [
+        ["recordedAt", input.recordedAt],
+        ["decayFloorAt", input.decayFloorAt],
+        ["occurredAt", input.occurredAt],
+        ["lastReinforcedAt", input.lastReinforcedAt],
+        ["validFrom", input.validFrom],
+        ["validUntil", input.validUntil],
+      ] as const) {
+        assertFakeTimestamptzNotBelowMin("FakeMemoryStore", field, value);
       }
       // Issue #816（NUL 側。孤立サロゲート側はここでは扱わない）: Postgres の `text` 型は
       // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
@@ -1676,7 +1695,8 @@ export class FakeMemoryStore implements MemoryStore {
       // 書けないイベント（Invalid Date の `at`、列挙に無い `kind` など）も、記憶を作る前・状態を書き換える前に投げる
       // ——以前は news を作り、先の対象を superseded にした後で投げていた。`meta.supersededById` は作った記憶の
       // id で埋めるので、ここでは組み立てずに検査だけを走らせる（`assertBuildableFakeEvent`）。
-      assertBuildableFakeEvent(target.event);
+      // ADR 0640: 下限より前の `at` はここでは見ない（CAS に弾かれる対象はイベントを書かず、Postgres は `at` を見ない）。下の CAS を通る対象だけが見る。
+      assertBuildableFakeEvent(target.event, { skipAtFloor: true });
     }
     // ADR 0469: CAS を通ってイベントを書く対象だけ、そのイベントが指す記憶が `ctx` のテナントの行かを、news を作る前に確かめる
     // （弾かれる対象はイベントを書かないので確かめない。`PostgresMemoryStore`・`InMemoryMemoryStore` と同じ）。
@@ -1688,6 +1708,7 @@ export class FakeMemoryStore implements MemoryStore {
       const observed = willSupersede.has(target.id) ? { status: "superseded" as const } : memory;
       if (target.expectedStatus !== undefined && casMismatch(observed, target.expectedStatus))
         continue;
+      assertFakeTimestamptzNotBelowMin("memory_events", "at", target.event.at); // ADR 0640: CAS を通る対象だけ
       this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
       willSupersede.add(target.id);
     }
@@ -2003,6 +2024,8 @@ export class FakeMemoryStore implements MemoryStore {
     if (Number.isNaN(at.getTime())) {
       throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
     }
+    // ADR 0640: 下限より前の `at` は、何も書かない呼び出し（下の no-op）でも Postgres が `22008` で拒む（実測）。no-op の判定より前に見る。
+    assertFakeTimestamptzNotBelowMin("reinforce", "at", at);
     // 起点（lastReinforcedAt ?? recordedAt）より新しい at のときだけ書く（Issue #1093）。未強化の
     // 記憶では作成時刻が起点なので、それより前・ちょうどの at は、活動時計の欄も含めて何も書かない。
     // ADR 0493: `opts.nowSeq` は `bigint` の引数へ書く値。この Memory が `halfLifeRecalls` を持つときだけ見る
@@ -2402,6 +2425,7 @@ export class FakeMemoryStore implements MemoryStore {
     if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
       throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
     }
+    assertFakeTimestamptzNotBelowMin("createRecall", "createdAt", record.createdAt); // ADR 0640
     assertFakeRecallRecordStorable(record);
     const id = nextId("rcl");
     // ADR 0404: 実装（`InMemoryMemoryStore`・`PostgresMemoryStore`）と同じく、`record.createdAt` を渡せばそれを使う。
@@ -3364,6 +3388,9 @@ export class FakeMemoryStore implements MemoryStore {
 
     const actor = event.actor ?? { type: "system" };
     const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+
+    // ADR 0640: 下限より前の `at` は、対象が1件も無くても Postgres が `22008` で拒む（実測）。
+    assertFakeTimestamptzNotBelowMin("memory_events", "at", event.at);
 
     // 全対象のイベントを先に組み立てる（検査もここで走る）。書けないイベント（Invalid Date の `at` など）なら、
     // 1件も戻す前に投げる——以前は対象ごとに戻してから組み立てていたので、先の対象だけが `active` に戻ったまま

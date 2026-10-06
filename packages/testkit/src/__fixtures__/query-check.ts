@@ -38,6 +38,25 @@ export function assertQueryTimestamptz(
   value: Date | null | undefined,
 ): void {
   assertQueryDate(method, field, value);
+  assertWrittenTimestamptzFloor(method, field, value);
+}
+
+/**
+ * 日時を行に**書く**欄（`createMemory` の `occurredAt`・`validFrom`・`recordedAt` など、`createRecall` の `createdAt`、
+ * `reinforce` の `at`、イベントの `at`）が、`timestamptz` の下限（{@link PG_TIMESTAMPTZ_MIN_MS}）より前でないかを確かめる
+ * （ADR 0640）。下限より前は、Postgres では値を書く時点で `22008 timestamp out of range` になる。下限ちょうどは通る（実測）。
+ *
+ * ⚠ **下限だけを見る。** Invalid Date（`NaN`）は断らない——その欄の Invalid Date の検査（#807・ADR 0493。文面は口ごと）が別に在る。
+ * 省略（`undefined`/`null`）は「無い」であって下限より前ではない。
+ * ⚠ **読みの口の条件には使わない**（ADR 0547。{@link assertQueryTimestamptz} の TSDoc）。
+ * ⚠ **呼ぶ位置は、Postgres がその値を実際に書く分岐の中**（その値を書かない分岐——CAS に弾かれた対象のイベント・冪等の既存行に
+ * 対する `created` のイベント・何も強化しない `recordUsageAndReinforce` など——では、Postgres は値を見ないので断らない）。
+ */
+export function assertWrittenTimestamptzFloor(
+  method: string,
+  field: string,
+  value: Date | null | undefined,
+): void {
   if (value != null && value.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
     throw new RangeError(
       `${method}: ${field} must not be earlier than 4714-11-24 BC (the lower bound of a Postgres timestamptz)`,
