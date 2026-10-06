@@ -144,6 +144,8 @@ async function setup(llmProvider: LLMProvider) {
     embeddingProvider: stores.embeddingProvider,
     hashContent: (content: string) => `sha256(${content})`,
     clock: { now: () => new Date(nowMs) },
+    // 問15: このファイルは LLM が返す subjectId（記憶自身の subject）の活動時計を縛るので、opt-in で受ける。
+    config: { acceptLlmSubjectIdWithoutCandidates: true },
   });
   await stores.tenantSettingsStore.setDecayClock(tenantCtx, "activity");
   for (let i = 0; i < T; i += 1) {

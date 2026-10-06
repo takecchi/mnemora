@@ -87,6 +87,8 @@ async function setup(llmProvider: LLMProvider) {
     hashContent: (content: string) => `sha256(${content})`,
     // runtime の時計を少し先にする。歴史的な理由で残している（今は outbox の available_at も注入した時計に従う。ADR 0559）。
     clock: { now: () => new Date(Date.now() + 1_000) },
+    // 問15: LLM が返す subjectId（記憶自身の subject）の活動時計を縛るので、opt-in で受ける。
+    config: { acceptLlmSubjectIdWithoutCandidates: true },
   });
   await tenantSettingsStore.setDecayClock(tenantCtx, "activity");
   for (let i = 0; i < 10; i += 1) {
