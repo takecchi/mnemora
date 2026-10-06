@@ -9,10 +9,7 @@ import { describe, expect, it } from "vitest";
  * `sweepArchive` のように本体に呼び出しが無い関数は、集合に入らないので、一覧に載ると赤になる。
  */
 
-const SOURCE = readFileSync(
-  fileURLToPath(new URL("../runtime.ts", import.meta.url)),
-  "utf8",
-);
+const SOURCE = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
 
 /** 改行は保ったまま、ブロックコメントと行コメントを空白にする。 */
 function stripComments(src: string): string {
@@ -45,9 +42,7 @@ function callerFunctions(): Set<string> {
 
 /** TSDoc の `- ADVANCER: 名前` の行から読んだ集合。 */
 function documentedAdvancers(): Set<string> {
-  return new Set(
-    [...SOURCE.matchAll(/^\s*\*\s+- ADVANCER:\s+(\w+)/gm)].map((m) => m[1]!),
-  );
+  return new Set([...SOURCE.matchAll(/^\s*\*\s+- ADVANCER:\s+(\w+)/gm)].map((m) => m[1]!));
 }
 
 describe("活動時計を進める入口の一覧は、recall( の呼び出し元と一致する", () => {
