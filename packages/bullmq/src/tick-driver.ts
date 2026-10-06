@@ -473,7 +473,7 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
         // ときに内部で行っている `this.run().catch(error => this.emit('error', error))`
         // と同じ形で `worker` の `"error"` listener（上で登録済み、`onTickError` へ流す）
         // に載せる。
-        worker.run().catch((error) => worker.emit("error", error));
+        await worker.run().catch((error) => worker.emit("error", error));
       })();
       starting = attempt;
       attempt.catch(() => {
