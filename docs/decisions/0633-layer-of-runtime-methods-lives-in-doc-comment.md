@@ -104,3 +104,10 @@
 **確かめていないこと**:
 - 5種の値を割り振った意味の正しさ（旧3文書の分類を写しただけで、再検算していない）。
 - 各 package の README など、3文書以外に同じ列挙・#605 ポインタがあるかは `grep -rn '605' --include=*.md . | grep -v docs/decisions` の当たった範囲のみ（`docs/release-v1.md` の sha 内の文字列を除き、当たりは3文書だけだった）。
+
+## 追記（2026-10-06）: `未分類` の5本は ADR 0634 で1本ずつ決めた
+
+[ADR 0634](./0634-unclassified-runtime-method-layers-decided.md) が、上の「5本の `未分類`」を決めた
+（`tick`・`reextract` → `保守操作`、`restoreSuperseded`・`applyCorrection` → `是正・取り消し`、
+`findCorrectionCandidates` → `未分類` のまま、置かないと決めた）。決めたのはクローンであり、オーナー本人ではない。
+`未分類` の意味には「置かないと決めたもの」が加わった。本文は直さない。

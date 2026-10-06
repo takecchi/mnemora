@@ -90,7 +90,9 @@ forget(ctx, target)      // -> ForgetResult
 ⛔ **ここにメソッド名も個数も写さない**——写せば `Runtime` が動くたびに腐る。
 **`未分類` は、判断が割れている（またはまだどの層にも置かれていない）ものの置き場であり、
 1本ずつ決める。**どこへ置くかは意味の判定であり、機械には決まらない。
-経緯と、3文書から列挙を外した理由は [ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)。
+**`未分類` には、3つの層の定義のどれにも当たらないと確かめたうえで、置かないと決めたものも入る。**
+経緯と、3文書から列挙を外した理由は [ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)、
+未分類だったものを1本ずつ決めた記録は [ADR 0634](./decisions/0634-unclassified-runtime-method-layers-decided.md)。
 
 **この分類が守っているのは「中核は増やさない」という制約そのものである。**新しく何かを
 足したくなったとき、それが記憶そのものを動かす操作なら中核には足せない。保守・是正・説明の

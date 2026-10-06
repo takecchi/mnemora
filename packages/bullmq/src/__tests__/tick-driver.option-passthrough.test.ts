@@ -391,6 +391,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     expect(workerOpts()).toEqual({
       connection: CONNECTION,
       concurrency: 1,
+      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/), // ADR 0655: stop() が自分を見分ける名前
       autorun: false,
       lockDuration: 120_000,
     });
@@ -401,6 +402,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     expect(workerOpts()).toEqual({
       connection: CONNECTION,
       concurrency: 1,
+      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/), // ADR 0655: stop() が自分を見分ける名前
       autorun: false,
     });
   });
@@ -418,6 +420,7 @@ describe("ADR 0548: lockDuration と完了ジョブの保持", () => {
     expect(workerOpts()).toEqual({
       connection: CONNECTION,
       concurrency: 2,
+      name: expect.stringMatching(/^mnemora-tick-[0-9a-f-]{36}$/), // ADR 0655: stop() が自分を見分ける名前
       autorun: false,
       lockDuration: 90_000,
     });

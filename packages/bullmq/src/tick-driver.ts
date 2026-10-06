@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Queue, Worker } from "bullmq";
 import type { ConnectionOptions, Job } from "bullmq";
 import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
@@ -68,10 +69,10 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * ない。**その主張を複数 OS プロセス・複数 `pg.Pool` に対して実測したのが
  * `src/__tests__/concurrent-tick.redis.test.ts`（ADR 0325「測ったこと」）。
  *
- * 🔴 **1台の `stop()` が、全プロセスの予定を止める**（今の振る舞い。【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。新しい driver を `start()` した後に古い driver を `stop()` する rolling deploy の順でも消える）。
- * `stop()` は共有の scheduler を `queue.removeJobScheduler(jobName)` で消すので、他のプロセスの Worker は
- * 動いたままでも tick のジョブが発火しなくなる。エラーにもならない。動いている driver の `start()` は冪等で
- * 登録し直さないので、残りのどれかで新しい driver を作って `start()` すると再び登録される。
+ * 🔴 **`stop()` は、同じ `queueName` に自分以外の Worker が居るときは共有の scheduler を消さない。最後の1台だけが消す**
+ * （ADR 0655。以前は1台の `stop()` が全プロセスの予定を消した。【実測】redis-server 7.4.7・bullmq 6.3.8）。
+ * ⚠ `queue.getWorkers()`（`CLIENT LIST`）が使えない環境では判別できず、今までどおり消す（1台の `stop()` が全プロセスの予定を止める）。
+ * 2台の同時の `stop()` は互いに相手を見て、scheduler が1件残りうる。永続化なしの Redis の再起動で scheduler が消える件は直っていない。
  * {@link BullmqTickDriver.stop} の doc 参照。
  *
  * 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること**（【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。後から `start()` した driver の `everyMs` で scheduler が置き換わり、先に動いていた driver の間隔も変わる）。
@@ -220,14 +221,19 @@ export interface BullmqTickDriver {
    */
   start(): Promise<void>;
   /**
-   * 繰り返しジョブの登録を外し、Worker と Queue の接続を閉じる。**`start()` を一度も
+   * 繰り返しジョブの登録を（最後の Worker のときだけ）外し、Worker と Queue の接続を閉じる。**`start()` を一度も
    * 呼んでいなくても安全に呼べる。** 一度呼ぶと、この driver は使い捨てになる
    * （以後の `start()` は Error を投げる。Issue #891）。
    *
-   * ⚠ **外す「繰り返しジョブの登録」は、同じ `queueName`・`jobName` の全プロセスで共有しているものである。**
-   * 複数のプロセスで動かしているとき、1台がこれを呼ぶと、残りのプロセスの Worker は動いたままでも tick が
-   * 発火しなくなる（エラーにもならない）。動いている driver の `start()` は冪等で登録し直さないので、
-   * 残りのどれかで新しく `createBullmqTickDriver(...)` を作って `start()` すると、再び登録される。
+   * 外す「繰り返しジョブの登録」は、同じ `queueName`・`jobName` の全プロセスで共有しているものである。
+   * ADR 0655: **この queue に自分以外の Worker が居るとき（`queue.getWorkers()` で見る）は外さない**——残りの
+   * プロセスの tick を止めないため。居ない（最後の1台）ときは、今までどおり外す。
+   *
+   * ⚠ **今までどおり外してしまう場合**: `getWorkers()` が使えない／判別できない環境（`CLIENT LIST` を禁じた
+   * ACL・一部のマネージド Redis など）。そこでは1台の `stop()` が、残りのプロセスの tick を発火させなくする
+   * （エラーにもならない）。残りのどれかで新しく `createBullmqTickDriver(...)` を作って `start()` すると、再び登録される。
+   * ⚠ 2台が同時に `stop()` すると、互いに相手を見てどちらも外さず、scheduler が1件残りうる。
+   * ⚠ 永続化なしの Redis の再起動で scheduler が消える件は、これでは直らない。
    */
   stop(): Promise<void>;
 }
@@ -345,6 +351,12 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       onQueueError(err);
     });
   }
+  // ADR 0655: この driver の Worker を他の Worker と見分けるための、driver ごとに一意な名前。
+  // bullmq 6.3.8 は Worker の blocking 接続に `CLIENT SETNAME <prefix>:<base64(queue)>:w:<name>` を付ける
+  // （`utils/create-backend.js` の `createBlockingConnection`）ので、`queue.getWorkers()`（CLIENT LIST）が返す各行の
+  // `rawname` の末尾に `:w:<この名前>` が付く。`stop()` はそれで「自分」を数えない。
+  const workerName = `mnemora-tick-${randomUUID()}`;
+  const selfSuffix = `:w:${workerName}`;
   const worker = new Worker(
     opts.queueName,
     async (_job: Job) => {
@@ -361,6 +373,7 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
     {
       connection: opts.connection,
       concurrency,
+      name: workerName,
       autorun: false,
       ...(lockDuration === undefined ? {} : { lockDuration }),
     },
@@ -380,6 +393,36 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
   // 起動の後も含む）。同時に呼ばれた `start()` は同じ promise を待つ。
   let starting: Promise<void> | null = null;
   let stopped = false;
+
+  /**
+   * ADR 0655: この queue に、自分以外の Worker（別プロセスでも同じプロセスでもよい）が居るか。
+   *
+   * 根拠（bullmq 6.3.8 を読んだ）: `queue.getWorkers()` は `CLIENT LIST` を読み、接続名が
+   * `<prefix>:<base64(queue)>`（名前なしの Worker）または `<prefix>:<base64(queue)>:w:<name>` で始まる行を返す
+   * （`queue-getters.js`）。各行の `rawname` が接続名そのもの。自分の Worker には上で一意な `name` を付けたので、
+   * `rawname` が `:w:<自分の名前>` で終わる行だけを自分として除く。名前なしの Worker（この driver より古い版）や
+   * 他の driver の Worker は「他」と数える。
+   *
+   * 🔴 **居るかどうか分からないときは「居ない」に倒す＝今までどおり消す**:
+   * - `getWorkers()` が throw した（CLIENT LIST を禁じた環境、接続の失敗など）。
+   * - 行に `rawname` が無い。bullmq は CLIENT コマンドが未対応のとき throw せず `[{ name: "GCP does not support client list" }]`
+   *   という偽の1件を返す（`baseGetClients`）。これを「他の Worker が居る」と読むと、CLIENT の使えない環境で
+   *   scheduler が誰にも消されず残るので、読まない。
+   * 自分の接続名が付かない環境（SETNAME を無視するプロキシなど）では、自分も他も一覧に出ないので、やはり消す。
+   *
+   * ⚠ 2台が同時に `stop()` すると、互いに相手を見てどちらも消さず、scheduler が1件残りうる（ADR 0655 の負債）。
+   */
+  async function hasOtherWorkers(): Promise<boolean> {
+    try {
+      const workers = await queue.getWorkers();
+      if (workers.some((w) => typeof w["rawname"] !== "string")) {
+        return false;
+      }
+      return workers.some((w) => !(w["rawname"] as string).endsWith(selfSuffix));
+    } catch {
+      return false;
+    }
+  }
 
   return {
     async start() {
@@ -447,7 +490,11 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       // 素通りする。bullmq 6.3.8 の `worker.js` を読んで確認済み）。
       stopped = true;
       try {
-        await queue.removeJobScheduler(jobName);
+        // ADR 0655: この queue に自分以外の Worker が居るときは、共有の scheduler を消さない
+        // （残りの Worker の tick を止めないため）。居ない（最後の1台）か、居るかどうか分からないときは、今までどおり消す。
+        if (!(await hasOtherWorkers())) {
+          await queue.removeJobScheduler(jobName);
+        }
       } finally {
         // `worker.close()` と `queue.close()` はそれぞれ独立した資源（Worker 自身の
         // blocking connection と Queue の connection）を閉じる。どちらも await せず

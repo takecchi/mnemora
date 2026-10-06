@@ -359,7 +359,9 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 ⛔ **ここにメソッド名も個数も写さない**——写せば `Runtime` が動くたびに腐る。
 **`未分類` は、判断が割れている（またはまだどの層にも置かれていない）ものの置き場であり、
 1本ずつ決める。**どこへ置くかは意味の判定であり、機械には決まらない。
-経緯と、3文書から列挙を外した理由は [ADR 0633](./docs/decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)。
+**`未分類` には、3つの層の定義のどれにも当たらないと確かめたうえで、置かないと決めたものも入る。**
+経緯と、3文書から列挙を外した理由は [ADR 0633](./docs/decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)、
+未分類だったものを1本ずつ決めた記録は [ADR 0634](./docs/decisions/0634-unclassified-runtime-method-layers-decided.md)。
 
 **この分類の要点は、歯止めが *どこに* 効くかである。**新しく何かを足したくなったとき、
 それが記憶そのものを動かす操作（中核5動詞と同じ性質）なら、足せない。保守・是正・説明の

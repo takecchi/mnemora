@@ -216,6 +216,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/bullmq` の `createBullmqTickDriver` の `stop()` が、同じ `queueName` に自分以外の Worker が居るときは、共有の scheduler を消さなくなった**（最後の1台だけが消す。[ADR 0655](./docs/decisions/0655-bullmq-stop-removes-scheduler-only-when-last-worker.md)。[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料3）。以前は1台の `stop()` が、動いたままの他のプロセスの tick も止めた。`CLIENT LIST` が使えない環境では、従来どおり消す。公開の型・オプション・既定値は変えていない。
+  - **残っていること**: 2台が同時に `stop()` すると scheduler が1件残りうる。永続化なしの Redis の再起動で scheduler が消える件は直っていない。
+
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.eraseTenant` が、`recall_usages` を tenantId の前方一致ではなく完全一致で消すようになった。**以前は `acme` を消すと、`acme:eu` など `acme:` で始まる別テナントの `recall_usages` まで消えていた（[ADR 0604](./docs/decisions/0604-fixture-erase-tenant-usages-exact-tenant.md)。`@mnemora/postgres` は `tenant_id = $1` で、もとから完全一致）。
 
 - **`packDigestBand` に `maxEntryChars: NaN` を渡すと、digest を切り詰めない（無制限）へ化けていたのを、負数と同じ「digest を空に切る」へ直した**（[ADR 0585](./docs/decisions/0585-digest-band-max-entry-chars-nan.md)）。`length > NaN` は常に false になるためで、同じ関数の `limit`/`maxChars` の `NaN`（Issue #803）や、負数の `maxEntryChars` の扱いと食い違っていた。
