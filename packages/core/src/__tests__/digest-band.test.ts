@@ -186,6 +186,17 @@ describe("packDigestBand — 切り詰め位置が UTF-16 サロゲートペア�
     });
     expect(band).toEqual([{ memoryId: "m1", digest: "AAAA😀", truncated: true }]);
   });
+
+  it("文字数の予算は UTF-16 のコードユニットで数える（サロゲートペアは2字、コードポイントの1字ではない）", () => {
+    // 1件のコスト = 63(固定) + digest長(😀×3 = 6コードユニット) + 1(区切り) = 70。
+    // コードポイントで数えると 67 になり、maxChars=68 に収まってしまう。
+    const candidates = [entry("m1", "😀😀😀")];
+    const tooSmall = packDigestBand(candidates, 1, { limit: 10, maxChars: 68, maxEntryChars: 100 });
+    expect(tooSmall.band).toEqual([]);
+    expect(tooSmall.limitedBy).toBe("char_budget");
+    const exact = packDigestBand(candidates, 1, { limit: 10, maxChars: 70, maxEntryChars: 100 });
+    expect(exact.band).toHaveLength(1);
+  });
 });
 
 describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）", () => {
