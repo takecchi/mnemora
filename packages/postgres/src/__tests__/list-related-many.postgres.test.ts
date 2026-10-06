@@ -128,6 +128,24 @@ describe("PostgresRelationStore.listRelatedMany（本物の Postgres）", () => 
     await closeTestClient();
   });
 
+  it("返す createdAt は、同じ関係の listRelated の createdAt と等しい（固定値ではない。#1499）", async () => {
+    const { ids, relationStore } = await createClique(4);
+
+    const many = await relationStore.listRelatedMany(ctx, ids);
+
+    expect(many).toHaveLength(ids.length);
+    for (const [i, id] of ids.entries()) {
+      const expected = new Map(
+        (await relationStore.listRelated(ctx, id)).map((r) => [r.memoryId, r.createdAt.getTime()]),
+      );
+      expect(expected.size).toBeGreaterThan(0);
+      expect(many[i]!).toHaveLength(expected.size);
+      for (const r of many[i]!) {
+        expect(r.createdAt.getTime()).toBe(expected.get(r.memoryId));
+      }
+    }
+  });
+
   it("起点の数に依らず1文で、起点ごとに listRelated と同じ集合を同じ位置に返す（大文字の綴り・重複・存在しない id・uuid の形でない id を含む）", async () => {
     const { ids, relationStore } = await createClique(12);
     const missing = "00000000-0000-4000-8000-000000000000" as MemoryId;
