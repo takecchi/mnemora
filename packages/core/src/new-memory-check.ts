@@ -52,7 +52,7 @@ export function assertWellFormedNewMemory(
   if (
     typeof provenance === "object" &&
     provenance !== null &&
-    ProvenanceKindSchema.safeParse((provenance as { kind?: unknown }).kind).success
+    true
   ) {
     const result = MemorySchema.shape.provenance.safeParse(provenance);
     if (!result.success) {
