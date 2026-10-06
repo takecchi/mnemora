@@ -388,7 +388,7 @@ export function buildPurgeCompletedJobsTargetSelect(
   return sql`
     SELECT id, completed_at FROM outbox
     WHERE tenant_id = ${ctx.tenantId}
-      AND completed_at IS NOT NULL AND completed_at < ${toPgTimestamp(opts.olderThan)}
+      AND completed_at < ${toPgTimestamp(opts.olderThan)}
     ORDER BY completed_at ASC, id ASC
     LIMIT ${opts.limit + 1}${lock ? sql` FOR UPDATE SKIP LOCKED` : sql``}`;
 }
