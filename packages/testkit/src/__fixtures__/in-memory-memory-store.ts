@@ -888,6 +888,9 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
     assertWellFormedCtx(ctx);
+    if (Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) {
+      throw new Error("InMemoryMemoryStore: attributes is malformed (MUTATION)");
+    }
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
     return snapshot(this.createObservationIdempotent(ctx, input).value);
