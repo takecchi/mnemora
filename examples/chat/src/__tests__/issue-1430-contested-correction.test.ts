@@ -79,6 +79,17 @@ describe("buildMnemoraPromptDetail: hasContestedCorrectionWording（構造で見
     expect(detail.hasContestedCorrectionWording).toBe(false);
   });
 
+  it("非対称文面の対と、矛盾関係の無い記憶が同じ recall に混ざっていても true（1行でも出れば true）", () => {
+    const pair = caseById("contested-with-asymmetric-both-recorded").memories;
+    const unrelated = caseById("stated-with-speaker").memories.map((m) => ({
+      ...m,
+      memoryId: `unrelated-${m.memoryId}`,
+    }));
+    const detail = buildMnemoraPromptDetail(recallWith([...pair, ...unrelated]));
+    expect(detail.body).toContain("より後の記録（訂正の可能性）");
+    expect(detail.hasContestedCorrectionWording).toBe(true);
+  });
+
   it("記憶が0件でも false", () => {
     const detail = buildMnemoraPromptDetail(recallWith([]));
     expect(detail.hasContestedCorrectionWording).toBe(false);

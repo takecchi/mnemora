@@ -193,6 +193,51 @@ describe("段3.5（連想枠）は explain.stages に記録される（Issue #86
     });
   });
 
+  it("アンカーは在ったが連想の検索結果が0件の run は、association(executed:true) のまま（探して0件と、探さなかったを混ぜない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 記憶はアンカー1件だけ。アンカー自身は連想の候補にならないので、検索は走るが0件になる。
+    await createEmbeddedMemory(stores, [1, 0], { digest: "アンカー本文" });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      association: { maxCount: 5, anchorCount: 1 },
+    });
+
+    expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);
+    // 探さなかった（no_anchor）の印は出ない
+    expect(result.omitted).not.toContainEqual({
+      kind: "stage_skipped",
+      stage: "association",
+      reason: "no_anchor",
+    });
+    expect(findStage(result, "association")).toEqual({
+      stage: "association",
+      executed: true,
+      detail: { anchors: 1, hits: 0, selected: 0 },
+    });
+  });
+
+  it("detail は件数の書き写し: 連想の候補が席（maxCount）より多いとき、hits は見つけた件数、selected は席に着いた件数", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [0.70710678, 0.70710678], { digest: "アンカー本文" });
+    // クエリ [1, 0] には当たらず（ann の閾値の下）、アンカーには近い候補を3件。
+    await createEmbeddedMemory(stores, [0, 1], { digest: "連想本文1" });
+    await createEmbeddedMemory(stores, [-0.1, 0.995], { digest: "連想本文2" });
+    await createEmbeddedMemory(stores, [-0.2, 0.98], { digest: "連想本文3" });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      association: { maxCount: 1, anchorCount: 1 },
+    });
+
+    expect(result.memories.filter((m) => m.retrievedVia === "association")).toHaveLength(1);
+    expect(findStage(result, "association")).toEqual({
+      stage: "association",
+      executed: true,
+      detail: { anchors: 1, hits: 3, selected: 1 },
+    });
+  });
+
   it("VectorStore.getVectors を持たない adapter では、stages に association(executed:false) が出て omitted の stage_skipped(vector_store_lacks_get_vectors) と対になる", async () => {
     const { runtime, stores } = buildRuntime((s) => withoutGetVectors(s.vectorStore));
     await createEmbeddedMemory(stores, [1, 0]);
