@@ -80,7 +80,6 @@ export class PostgresRelationStore implements RelationStore {
         SELECT gen_random_uuid(), ${ctx.tenantId}, ${from}, ${to}, ${kind}
         FROM ends
         WHERE from_ok AND to_ok
-        ON CONFLICT (tenant_id, from_memory_id, to_memory_id, kind) DO NOTHING
       )
       SELECT from_ok, to_ok FROM ends
     `);
