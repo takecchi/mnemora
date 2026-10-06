@@ -181,6 +181,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`@mnemora/core` の内部関数 `truncationBoundary`・`sliceWithoutSplittingSurrogatePair` を削除した**（[Issue #1779](https://github.com/takecchi/mnemora/issues/1779)、[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md) の追記）。どこからも呼ばれておらず、公開 API には出していなかった。公開 API・切り詰めの振る舞いは変わらない。
+
 - **出荷済みの `@mnemora/postgres` の migration が書き換えられていないことを、CI で固定した**（[ADR 0637](./docs/decisions/0637-migration-checksums-pinned-and-0027-deadlock-not-fixable-by-new-migration.md)。オーナー回答 374f6f88 の問29〈全部推奨〉による。決めたのは推奨の採否だけで、設計は担い手のもの）。
   利用者に見える変化は無い（`packages/postgres/migrations` の中身も `runMigrations` も変えていない。名簿の `migration-checksums.json` は npm に出ない）。既存の migration の書き換え・削除は CI が赤にし、新しい番号の migration の追加は赤にしない。**`0027` の deadlock（止めずに当てると `observe()` と deadlock しうる）は、新しい番号の migration では直せないと判断し、直していない**——手当ては、書き込みを止めてから当てること（[ADR 0442](./docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）のまま。
 

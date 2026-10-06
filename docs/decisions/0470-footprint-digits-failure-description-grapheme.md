@@ -62,3 +62,11 @@
 ## 測っていないこと
 
 実 Postgres（`outbox_jobs.last_error` への書き込み。`tick-last-error-redacts-params.test.ts` は Fake の outbox で走る）、実 API。最初の書記素だけで 4096 字を超える入力。利用者の `last_error` の集計。
+
+## 追記（2026-10-07、Issue #1779）
+
+代替案3で「テストと将来の呼び出し用に残してある」とした `truncationBoundary` と `sliceWithoutSplittingSurrogatePair`（`packages/core/src/text-truncation.ts`）を、Issue #1779 で消した。クローン miku の判断で、オーナーの判断ではない。
+
+- **理由**【現物】: 製品のコードからもテストからも呼ばれていない。`index.ts` からも出しておらず、`package.json` の `exports` は `"."` だけで、公開の口ではない。呼び出し元3か所は ADR 0424・0467・0470 で `sliceAtGraphemeBoundary` へ移った。
+- **振る舞いは変わらない**: 切り詰めはすでに書記素の境界に揃っている。公開 API も変わらない。
+- 本文は書き換えていない。`failure-description.ts` と `text-truncation.ts` のコメントから、消えた名前への言及を外した。
