@@ -82,7 +82,7 @@ describe("claim key の検出: 同じ鍵の主張が1件ずつ届く経路（Iss
       hashContent: (content: string) => `sha256(${content})`,
     });
 
-    const results = [];
+    const results: Awaited<ReturnType<typeof runtime.observe>>[] = [];
     for (const text of CLAIMS) {
       results.push(
         await runtime.observe(ctx, {
