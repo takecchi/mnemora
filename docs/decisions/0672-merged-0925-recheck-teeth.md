@@ -75,6 +75,39 @@
 | #746 | Worker の処理関数が `tick` に `{}` を渡す（`leaseMs` が落ちる） | `Worker` のモックから処理関数を取り出して呼び、`runtime.tick` の引数が設定の `ctx`・`tick` と同一の値、呼び出しは1回、戻り値を返し `onTickResult` に渡る（bullmq 新規 `tick-driver.processor.test.ts`。Redis 不要） | 赤（1） |
 | #746 | 処理関数が `runtime.tick` を2回呼ぶ | 同上 | 赤（1） |
 | #746 | 処理関数が別の `ctx`（`{ tenantId: "other" }`）で `tick` を呼ぶ | 同上 | 赤（1） |
+| #736 | `rowToClaimKey` が片方だけ NULL の行を鍵として返す（`\|\|` を `&&` にする） | 生 SQL で `(subject='user', predicate=NULL)`・`(NULL, 'p')` の行を作り、`getMemory` が `claimKey` を null で返し、`findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` に数えられない（postgres 新規 `claim-key-partial-row-and-index-shape.postgres.test.ts`） | 赤（1） |
+| #736 | migration 0021 に「両方 NULL か両方非 NULL」の CHECK を足す | 同上（生 SQL の INSERT が落ちる）。⚠ migration を当てる変異は、base DB を作り直してから走らせた（globalSetup が migrate 済みの DB を再利用するため） | 赤（1） |
+| #736 | 索引 `idx_memories_claim_key` の列順を入れ替える | カタログ（`pg_index`・`pg_attribute`）から列順が `tenant_id, subject_id, claim_key_subject, claim_key_predicate` | 赤（1） |
+| #736 | 索引を部分索引にしない | 同上（`indpred` が非 NULL） | 赤（1） |
+| #736 | 索引の列に `status` を足す | 同上（列に `status` が無い） | 赤（1） |
+| #717 | migration 0020 の backfill の `labels` の INSERT を落とす | `labels`・`memory_labels` を足す前の版（v1.0.x）の DB で、`memories.tags` から決まる `(tenant, tag)` ごとの `proposed_count` と紐付けが作られている（postgres `upgrade-from-released.postgres.test.ts` に追記。fixture は読むだけ） | 赤（1） |
+| #717 | migration 0020 の backfill の `memory_labels` の INSERT を落とす | 同上 | 赤（2） |
+| #717 | `createMemory` が冪等衝突でも `upsertProposedLabels` を呼ぶ | 同じ `sourceObservationId`・`contentHash` で2回呼んでも `proposedCount` が 1 のまま（postgres `labels-vocabulary-teeth.postgres.test.ts` に追記） | 赤（1） |
+| #717 | `insertMemoryWithOutboxRows`（`createMemoryWithOutbox`）が冪等衝突でも `upsertProposedLabels` を呼ぶ | 同上（`createMemoryWithOutbox`） | 赤（1） |
+| #717 | InMemory `registerLabel` が `registeredAt` を毎回上書きする | `vi.useFakeTimers` で時計を進めてから2回目を呼んでも `registeredAt` が1回目のまま（testkit `in-memory-cross-tenant-failure-no-side-effects.test.ts` に追記。InMemory 固有） | 赤（1） |
+| #717 | `assertValidTaxonomyMode` が大文字小文字・前後の空白・`"closed"` を通す | `"Strict"`・`"OPEN"`・`"closed"`・`" open"`・`"strict "`・`"enforced"` が拒まれる `it.each`（core `tenant-settings-store.test.ts` に追記） | 赤（5） |
+| #738 | `PostgresTrigramLexicalStore.search` の `ORDER BY` から `recorded_at DESC` を外す | 同じ本文の4行（`recorded_at` 3段階・同時刻2行）で順が `recorded_at` の新しい順・同時刻は `id` 昇順。日本語の一致と ASCII の一致の両方（postgres 新規 `trigram-lexical-store-teeth.postgres.test.ts`） | 赤（2） |
+| #738 | `create({ threshold })` の上限（`> 1`）の検査を外す | `1.0000001`・`1.5`・`2`・`-0.1`・`NaN`・`±Infinity` を `RangeError` で拒み、`0`・`1` は通る | 赤（3） |
+| #738 | `create()` が索引 `idx_memories_trigram` も作る | `create()` の後に索引が無く、`createOptionalTrigramIndex` で初めて作られる（陽性対照つき） | 赤（1） |
+| #738 | `rank` から `word_similarity` を外す | `coverage` が同じ2行で、`word_similarity` の高い行が `recorded_at` が古くても先に来て、`rank` が大きい | 赤（1） |
+| #780 | 共有の拡張ロックを、`CREATE EXTENSION` 行の無い未適用ファイルでも取る（`matchCreateExtensionLines` の条件を外す） | 別の接続が `EXTENSION_LOCK_KEY` を握っていても、拡張を作る行の無い未適用ファイルの適用は待たされず完了する。陽性対照は、拡張を作る行を含むファイルが握られている間 `lockTimeoutMs` で時間切れになること（postgres `migrate-extension-lock.test.ts` に追記） | 赤（1） |
+| #780 | `extensionMode: "verify"` でも共有の拡張ロックを取る（`extensionMode === "create"` の条件を外す） | `verify` では、握られていても待たずに適用する | 赤（1） |
+| #782 | `setEmbeddingStatus` の巻き戻しの守りを全 `status` に掛ける | `ready` の行へ `pending` を書くと `pending`、`ready` を書いても例外なく `ready` のまま `updatedAt` が進む。陽性対照は `ready → failed` が弾かれること（postgres 新規 `set-embedding-status-non-rollback-transitions.postgres.test.ts`） | 赤（1。`ready → pending` の本。`ready → ready` の本は守りが全 status でも結果が同じで赤にならない） |
+| #721 | `digest_eligible_count` の引き算から status・period・validAt・label の絞りを外す（範囲外の除外 id も引く） | `digestBand.excludeMemoryIds` に範囲外（archived・period の外・validAt の外）の記憶を混ぜても、`digestEligible` が旧実装のオラクルと一致し、範囲内の1件だけが引かれる（postgres `aggregate-scope-single-pass.postgres.test.ts` に追記） | 赤（1） |
+| #721 | 集計の SQL の前に、別の1文（`SELECT 1`）を発行する | `aggregateScope` の呼び出し中に DB へ流れる文がすべて数えて1本（`digestBand` あり・なし）（postgres `aggregate-scope-single-pass.postgres.test.ts` に追記） | 赤（1） |
+| #838 | chat の `DEFAULT_MNEMORA_PATH_ASSOCIATION` を `{ maxCount: 5 }` にする | `DEFAULT_MNEMORA_PATH_ASSOCIATION` が `{ maxCount: 10 }`（ADR 0337 決定3が維持を明言）（examples/chat `mnemora-path.test.ts` に追記） | 赤（1） |
+| #726 | 測定の集計のグループのキーから `ctxVariant` を外す | `ctxVariant` が `none`・`own`・`mismatched` の試行が別々の3グループに分かれる（examples/chat `subject-crossing-summary-lib.test.ts` に追記） | 赤（1） |
+| #728 | `runComparison` の行で `footprintFieldsFromRecall` を使わず、`bandEntryCount`・`rawIndexJsonLength` を 0 固定にする | 長い会話（`fillerPairsSequence` に 30）は `bandEntryCount > 0`、短い会話は 0、`rawIndexJsonLength` は両方 > 0（examples/chat 新規 `compare-footprint-columns.postgres.test.ts`。DB 要） | 赤（1） |
+| #728 | 較正標本の生成で `limit: point.limit` を渡さない | 設計の全点で `recallLimit` が設計の `limit` と一致し、`bandEntryCount` が 0 | 赤（1） |
+| #738 | `createExampleRuntime` が `default` でも `PostgresTrigramLexicalStore.create()` を呼ぶ（配線の変異） | `MNEMORA_LEXICAL_STORE` 未指定・`default` では `pg_proc` に `mnemora_trigram_hybrid_coverage` が無く、`trigram` では在る（examples/chat 新規 `runtime-factory-lexical-wiring.postgres.test.ts`。DB 要。関数は前後で落とす） | 赤（1） |
+| #808 | `makeNullable` の `const` の枝を文字列の literal だけにする（数値・真偽値は直す前の形に戻る） | 省略可能な `z.literal(1)`・`z.literal(true)` が `anyOf: [{ type, const }, { type: "null" }]`（openai `json-schema.test.ts` に追記） | 赤（2） |
+| #808 | `enum` に `null` を足すのを `type` が `"string"` のときだけにする | 省略可能な `z.literal([1, 2])` が `type: ["number","null"]`・`enum: [1, 2, null]` | 赤（1） |
+| #810 | `retry.attempts` が `NaN` のとき 1 でなく既定（3回）に丸める | 既存の `it.each([0, -1])`（常に失敗する pipeline で呼び出しがちょうど1回）に `NaN` を足す（local-embedding `tsdoc-unbound-promises.test.ts`） | 赤（1） |
+| #713 | `aggregateScope` の `scoped` CTE の WHERE に `AND status <> 'forgotten'` を足す | `scripts/__tests__/decay-floor-owner-premises.test.mjs` の前提(a)の字句検査を、WHERE 句に `status` の語が無いことまで広げる（陽性対照つき） | 赤（1） |
+| #713 | Postgres `updateStatusWithEvent` の UPDATE に `decay_floor_at = now()` を足す | `active → archived`・`forgotten` の後も `decayFloorAt` が入力のまま（ADR 0303 決定1）（postgres 新規 `update-status-with-event-decay-floor.postgres.test.ts`） | 赤（2） |
+| #728 | Job Summary の比較項目から `bandEntryCount` を外す | 比べる6欄のそれぞれについて、基準値とその欄だけが違えば相違として名指しする `it.each`（`scripts/__tests__/recall-footprint-calibration-samples-summary-lib.test.mjs` に追記） | 赤（1） |
+| #728 | 行のキーを `(fillerPairs, recallLimit)` から `fillerPairs` だけにする | 同じ `fillerPairs` で `recallLimit` が違う2行は別の設計点として比べる（同じ値なら ✅、1つだけ違えばその行だけ相違） | 赤（1） |
+| #728 | `cli.ts` のサブコマンド名／`package.json` の scripts 名を、`ci.yml` が呼ぶ名前と食い違わせる | `ci.yml` が `run` で呼ぶ名前が、`package.json` の scripts と `cli.ts` のサブコマンドの両方に字句で在る（`scripts/__tests__/ci-yml-recall-footprint-calibration-samples-wiring.test.mjs` に追記） | 赤（各1） |
 
 ### 入れなかったもの
 

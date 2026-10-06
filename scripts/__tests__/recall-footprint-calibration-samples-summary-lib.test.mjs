@@ -115,6 +115,44 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("mnemoraChars");
   });
 
+  // Issue #1775 の #728（変異15）: 比べる項目はどれも、1つだけ違えば相違として名指しされる
+  // （Job Summary は `DIFF_FIELDS` の各欄を比べる。1欄でも外れると、その欄だけの相違が見えなくなる）。
+  it.each([
+    ["turnCount", 27],
+    ["totalInScope", 10],
+    ["returnedCount", 10],
+    ["mnemoraChars", 999],
+    ["bandEntryCount", 3],
+    ["rawIndexJsonLength", 41],
+  ])("基準値と %s だけが違えば、その欄を相違として名指しする", (field, value) => {
+    const measured = makeMeasured({ rows: [makeRow({ [field]: value })] });
+    const baseline = { rows: [makeRow()] };
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).not.toContain("✅ 基準値と一致");
+    expect(markdown).toContain(field);
+  });
+
+  // Issue #1775 の #728（変異17）: 行のキーは (fillerPairs, recallLimit)。fillerPairs だけをキーにすると、
+  // 同じ fillerPairs で recallLimit が違う2行が基準値の側で同じ設計点に潰れ、実測と同じ値でも相違に見える。
+  it("同じ fillerPairs で recallLimit が違う2行は、別の設計点として比べる（同じ値なら ✅、1つだけ違えばその行だけ相違）", () => {
+    const rows = [
+      makeRow({ recallLimit: 20, mnemoraChars: 300 }),
+      makeRow({ recallLimit: 30, mnemoraChars: 400 }),
+    ];
+    const baseline = { rows };
+    expect(
+      buildSummaryMarkdown({ measured: makeMeasured({ rows, rowCount: 2 }), baseline }),
+    ).toContain("✅ 基準値と一致");
+
+    const changed = makeMeasured({
+      rows: [rows[0], makeRow({ recallLimit: 30, mnemoraChars: 999 })],
+      rowCount: 2,
+    });
+    const markdown = buildSummaryMarkdown({ measured: changed, baseline });
+    expect(markdown).toContain("=12:30: 相違: mnemoraChars");
+    expect(markdown).not.toContain("=12:20:");
+  });
+
   it("基準値にだけある設計点(実測に無い)を報告する", () => {
     const measured = makeMeasured({ rows: [], rowCount: 0 });
     const baseline = { rows: [makeRow({ fillerPairs: 29 })] };
