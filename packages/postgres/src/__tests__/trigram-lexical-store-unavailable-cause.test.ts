@@ -166,3 +166,131 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
     expect(result).toMatchObject({ ok: false, reason: "extension_create_failed" });
   });
 });
+
+type Step = { rows: unknown[] } | Error;
+
+/**
+ * `db.execute` の呼び出し順に、決めた応答（または例外）を返す偽の `Db`。順は
+ * `probeTrigramLexicalSupport` が流す SQL の順：advisory lock・`SHOW server_encoding`・
+ * `pg_available_extensions`・`vector` のスキーマの読み取り・`CREATE EXTENSION`・
+ * `pg_trgm` の見え方・`word_similarity` の自己一致。
+ */
+function createSequencedDb(steps: readonly Step[]): Db {
+  let call = 0;
+  const execute = async (): Promise<{ rows: unknown[] }> => {
+    const step = steps[call];
+    call += 1;
+    if (step === undefined) {
+      throw new Error(`この歯では呼ばれないはずの ${call} 回目の呼び出し`);
+    }
+    if (step instanceof Error) {
+      throw step;
+    }
+    return step;
+  };
+  const db = { execute } as unknown as { execute: typeof execute; transaction: unknown };
+  db.transaction = async (cb: (tx: unknown) => Promise<unknown>) => cb(db);
+  return db as unknown as Db;
+}
+
+const LOCK: Step = { rows: [] };
+const UTF8: Step = { rows: [{ server_encoding: "UTF8" }] };
+const TRGM_AVAILABLE: Step = { rows: [{ present: 1 }] };
+const NO_VECTOR_SCHEMA: Step = { rows: [] };
+const CREATE_OK: Step = { rows: [] };
+
+describe("値ベースの判定で弾かれる理由は、cause を持たない（Issue #892、DB 不要）", () => {
+  async function createAndCatch(db: Db): Promise<TrigramLexicalStoreUnavailableError> {
+    const thrown: unknown = await PostgresTrigramLexicalStore.create(db).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(TrigramLexicalStoreUnavailableError);
+    return thrown as TrigramLexicalStoreUnavailableError;
+  }
+
+  function expectNoCause(err: TrigramLexicalStoreUnavailableError): void {
+    expect(err.cause).toBeUndefined();
+    // 値が `undefined` なだけでなく、`cause` のキー自体が無い（`{ cause: undefined }` を
+    // 渡すと、`in` が真になる）。
+    expect("cause" in err).toBe(false);
+    expect(Object.hasOwn(err, "cause")).toBe(false);
+  }
+
+  it("server_encoding_not_utf8", async () => {
+    const err = await createAndCatch(
+      createSequencedDb([LOCK, { rows: [{ server_encoding: "SQL_ASCII" }] }]),
+    );
+    expect(err.reason).toBe("server_encoding_not_utf8");
+    expectNoCause(err);
+  });
+
+  it("extension_unavailable", async () => {
+    const err = await createAndCatch(createSequencedDb([LOCK, UTF8, { rows: [] }]));
+    expect(err.reason).toBe("extension_unavailable");
+    expectNoCause(err);
+  });
+
+  it("extension_not_visible", async () => {
+    const err = await createAndCatch(
+      createSequencedDb([
+        LOCK,
+        UTF8,
+        TRGM_AVAILABLE,
+        NO_VECTOR_SCHEMA,
+        CREATE_OK,
+        { rows: [{ ext_schema: "other", visible: false }] },
+      ]),
+    );
+    expect(err.reason).toBe("extension_not_visible");
+    expectNoCause(err);
+  });
+
+  it("locale_no_japanese_trigrams", async () => {
+    const err = await createAndCatch(
+      createSequencedDb([
+        LOCK,
+        UTF8,
+        TRGM_AVAILABLE,
+        NO_VECTOR_SCHEMA,
+        CREATE_OK,
+        { rows: [{ ext_schema: "public", visible: true }] },
+        { rows: [{ score: 0 }] },
+      ]),
+    );
+    expect(err.reason).toBe("locale_no_japanese_trigrams");
+    expectNoCause(err);
+  });
+
+  it("コンストラクタを2引数で呼んでも cause のキーは付かず、第3引数の cause はそのまま乗る", () => {
+    const plain = new TrigramLexicalStoreUnavailableError("extension_unavailable", "detail");
+    expect("cause" in plain).toBe(false);
+
+    const original = new Error("元のエラー");
+    const withCause = new TrigramLexicalStoreUnavailableError("extension_create_failed", "d", {
+      cause: original,
+    });
+    expect(withCause.cause).toBe(original);
+    expect(withCause.reason).toBe("extension_create_failed");
+    expect(withCause.detail).toBe("d");
+  });
+});
+
+describe("cause は捕まえたエラーそのものである（Issue #892、DB 不要）", () => {
+  it("drizzle が包んだエラー（code/routine は入れ子の cause 側）でも、cause は包んだ外側のエラーそのもので、入れ子の cause は辿れる", async () => {
+    const pgError = Object.assign(new Error("permission denied to create extension"), {
+      code: "42501",
+      routine: "execute_extension_script",
+    });
+    const wrapped = new Error("Failed query: CREATE EXTENSION IF NOT EXISTS pg_trgm\nparams: ", {
+      cause: pgError,
+    });
+
+    const thrown: unknown = await PostgresTrigramLexicalStore.create(
+      createFakeDb({ extensionCreateError: wrapped }),
+    ).catch((e: unknown) => e);
+
+    expect(thrown).toBeInstanceOf(TrigramLexicalStoreUnavailableError);
+    const err = thrown as TrigramLexicalStoreUnavailableError;
+    expect(err.reason).toBe("extension_create_denied");
+    expect(err.cause).toBe(wrapped);
+    expect((err.cause as Error).cause).toBe(pgError);
+  });
+});

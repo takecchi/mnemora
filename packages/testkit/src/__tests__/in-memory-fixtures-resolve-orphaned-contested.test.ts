@@ -128,4 +128,27 @@ describe("InMemoryMemoryStore.resolveOrphanedContested（Issue #825）", () => {
     expect(storedA?.status).toBe("contested");
     expect(storedA?.contestedWithId).toBe(b.id);
   });
+
+  it("渡された event の kind・actor・digestSnapshot・meta をそのまま積む", async () => {
+    const store = new InMemoryMemoryStore();
+    const { a, b } = await createOrphanedPair(store);
+
+    const { event: stored } = await store.resolveOrphanedContested!(ctx, {
+      id: a.id,
+      contestedWithId: b.id,
+      event: event(a.id, {
+        kind: "forgotten",
+        actor: { type: "human", id: "u1" },
+        digestSnapshot: "snap",
+        meta: { custom: 1 },
+      }),
+    });
+
+    expect(stored).toMatchObject({
+      kind: "forgotten",
+      actor: { type: "human", id: "u1" },
+      digestSnapshot: "snap",
+      meta: { custom: 1 },
+    });
+  });
 });

@@ -143,4 +143,36 @@ describe("recall() — 段3.5 で席に着けなかった候補が同伴とし�
     });
     expect(overLimitAssociationCount(result)).toBe(1);
   });
+
+  it("(d) 席を競り負けた候補が2件同時に同伴として返ったときは、2件ぶん差し引き、残りの1件と countKind（exact）はそのまま残る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const x = await createEmbeddedMemory(stores, [0.8, 0.6, 0], { digest: "X" });
+    // A1・A2 が席に着き、それぞれの対向 B1・B2 は席を競り負けて、同伴として取られる。
+    const a1 = await createEmbeddedMemory(stores, [0.6, 0.8, 0], { digest: "A1" });
+    const a2 = await createEmbeddedMemory(stores, [0.62, 0.78, 0.05], { digest: "A2" });
+    const b1 = await createEmbeddedMemory(stores, [0.5, 0.86, 0], { digest: "B1" });
+    const b2 = await createEmbeddedMemory(stores, [0.45, 0.87, 0.1], { digest: "B2" });
+    expect((await runtime.markContested(ctx, a1.id, b1.id)).outcome.kind).toBe("contested");
+    expect((await runtime.markContested(ctx, a2.id, b2.id)).outcome.kind).toBe("contested");
+    // C は同伴として取られない、席を競り負けただけの候補。
+    await createEmbeddedMemory(stores, [0.4, 0.9, 0], { digest: "C" });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 1,
+      association: { maxCount: 2 },
+      overFetchFactor: 10,
+    });
+
+    const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
+    expect(byId.has(x.id)).toBe(true);
+    expect(byId.get(b1.id)?.retrievedVia).toBe("mandatory_companion");
+    expect(byId.get(b2.id)?.retrievedVia).toBe("mandatory_companion");
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "association",
+      count: 1,
+      countKind: "exact",
+    });
+  });
 });

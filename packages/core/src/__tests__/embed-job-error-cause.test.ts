@@ -84,3 +84,77 @@ describe("processEmbedJob — failed の書き込みが失敗しても元の例�
     expect(job?.lastError).toContain("db connection reset while marking failed");
   });
 });
+
+/**
+ * `lastError` の形を測る。`cause` の連鎖は `describeFailure` が `<- caused by:` でつなぐので、
+ * 公開の口（`tick()` → outbox 行の `lastError`）から `cause` の中身が見える。
+ */
+async function tickWithFailingEmbed(opts: {
+  embedMessage: string;
+  markFailedMessage: string | null;
+}): Promise<string | undefined> {
+  const stores = createFakeRuntimeStores();
+  const runtime = createRuntime({
+    memoryStore: stores.memoryStore,
+    outboxStore: stores.outboxStore,
+    vectorStore: stores.vectorStore,
+    eventStore: stores.eventStore,
+    tenantSettingsStore: stores.tenantSettingsStore,
+    llmProvider: notUsedLlm,
+    embeddingProvider: stores.embeddingProvider,
+    hashContent: (content: string) => `sha256(${content})`,
+    clock: { now: () => LATER },
+  });
+  await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), ["embed"]);
+  stores.embeddingProvider.embed = async () => {
+    throw new Error(opts.embedMessage);
+  };
+  const markFailedMessage = opts.markFailedMessage;
+  if (markFailedMessage !== null) {
+    stores.memoryStore.setEmbeddingStatus = async () => {
+      throw new Error(markFailedMessage);
+    };
+  }
+  const result = await runtime.tick(ctx, { leaseMs: 60_000 });
+  expect(result.failed).toBe(1);
+  return stores.outboxStore.listJobs(ctx)[0]?.lastError ?? undefined;
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+describe("processEmbedJob — lastError の形（Issue #962）", () => {
+  it("failed の書き込みが成功したときは、元の例外をそのまま投げ直す（包まない）", async () => {
+    const lastError = await tickWithFailingEmbed({
+      embedMessage: "embedding provider down",
+      markFailedMessage: null,
+    });
+
+    expect(lastError).toBe("embedding provider down");
+  });
+
+  it("failed の書き込みが失敗したとき、元の例外は cause に残る（二次的な失敗を cause にしない）", async () => {
+    const lastError = await tickWithFailingEmbed({
+      embedMessage: "embedding provider down",
+      markFailedMessage: "db connection reset while marking failed",
+    });
+
+    expect(lastError).toBeDefined();
+    // 連鎖の末尾が元の例外。メッセージ本文に1回、cause として1回、計2回。二次的な失敗は本文に1回だけ。
+    expect(lastError!.endsWith(" <- caused by: embedding provider down")).toBe(true);
+    expect(countOccurrences(lastError!, "embedding provider down")).toBe(2);
+    expect(countOccurrences(lastError!, "db connection reset while marking failed")).toBe(1);
+  });
+
+  it("二次的な失敗の文面が長く、lastError の上限で連鎖の後ろが切れても、元の例外は本文に残る", async () => {
+    const lastError = await tickWithFailingEmbed({
+      embedMessage: "embedding provider down",
+      markFailedMessage: `db connection reset ${"x".repeat(6000)}`,
+    });
+
+    expect(lastError).toBeDefined();
+    expect(lastError).toContain("truncated by mnemora");
+    expect(lastError).toContain("embedding provider down");
+  });
+});

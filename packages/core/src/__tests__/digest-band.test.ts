@@ -186,6 +186,17 @@ describe("packDigestBand — 切り詰め位置が UTF-16 サロゲートペア�
     });
     expect(band).toEqual([{ memoryId: "m1", digest: "AAAA😀", truncated: true }]);
   });
+
+  it("文字数の予算は UTF-16 のコードユニットで数える（サロゲートペアは2字、コードポイントの1字ではない）", () => {
+    // 1件のコスト = 63(固定) + digest長(😀×3 = 6コードユニット) + 1(区切り) = 70。
+    // コードポイントで数えると 67 になり、maxChars=68 に収まってしまう。
+    const candidates = [entry("m1", "😀😀😀")];
+    const tooSmall = packDigestBand(candidates, 1, { limit: 10, maxChars: 68, maxEntryChars: 100 });
+    expect(tooSmall.band).toEqual([]);
+    expect(tooSmall.limitedBy).toBe("char_budget");
+    const exact = packDigestBand(candidates, 1, { limit: 10, maxChars: 70, maxEntryChars: 100 });
+    expect(exact.band).toHaveLength(1);
+  });
 });
 
 describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）", () => {
@@ -223,6 +234,40 @@ describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）"
     });
     expect(result.band).toEqual([]);
     expect(result.limitedBy).toBe("both");
+  });
+
+  // NaN は「負数と同じ安全側」。もう片方の上限が実際に当たっているときの `limitedBy` も、
+  // 負数を渡したときと同じ分岐（'both'）を通る——NaN の側だけで打ち切りを決めない。
+  it("limit が NaN で、maxChars も実際に超えているなら 'both'（負数と同じ）", () => {
+    const options = { maxChars: 0, maxEntryChars: 100 };
+    const withNaN = packDigestBand(candidates, 3, { limit: NaN, ...options });
+    const withNegative = packDigestBand(candidates, 3, { limit: -1, ...options });
+    expect(withNaN).toEqual(withNegative);
+    expect(withNaN.band).toEqual([]);
+    expect(withNaN.limitedBy).toBe("both");
+  });
+
+  it("maxChars が NaN で、limit も実際に超えているなら 'both'（負数と同じ）", () => {
+    const options = { limit: 0, maxEntryChars: 100 };
+    const withNaN = packDigestBand(candidates, 3, { maxChars: NaN, ...options });
+    const withNegative = packDigestBand(candidates, 3, { maxChars: -1, ...options });
+    expect(withNaN).toEqual(withNegative);
+    expect(withNaN.band).toEqual([]);
+    expect(withNaN.limitedBy).toBe("both");
+  });
+
+  // 載せる候補が無いなら、打ち切りは起きていない——NaN でも負数と同じく limitedBy は付かない。
+  it("候補が無く eligible も 0 なら、limit・maxChars が NaN でも limitedBy は付かない（負数と同じ）", () => {
+    for (const opts of [
+      { limit: NaN, maxChars: 10_000, maxEntryChars: 100 },
+      { limit: 10, maxChars: NaN, maxEntryChars: 100 },
+      { limit: NaN, maxChars: NaN, maxEntryChars: 100 },
+    ]) {
+      expect(packDigestBand([], 0, opts)).toEqual({ band: [] });
+    }
+    expect(packDigestBand([], 0, { limit: -1, maxChars: -1, maxEntryChars: 100 })).toEqual({
+      band: [],
+    });
   });
 });
 

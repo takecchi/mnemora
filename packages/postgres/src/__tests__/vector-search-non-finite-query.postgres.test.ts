@@ -59,6 +59,60 @@ const NON_FINITE_QUERIES = [
   ["-Infinity", [0, -Infinity, 0]],
 ] as const;
 
+const MISMATCHED_DIMENSION_QUERIES = [
+  ["短い", [1, 2]],
+  ["長い", [1, 2, 3, 4]],
+  ["空", []],
+] as const;
+
+describe("PostgresVectorStore: 次元の違うクエリは比較不能として扱う（reject しない。Issue #867 の案B）", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+  });
+
+  afterAll(async () => {
+    await closeTestClient();
+  });
+
+  it.each(MISMATCHED_DIMENSION_QUERIES)(
+    "search（%s）: 候補は落とさず、距離が比較の通らない値になる",
+    async (_label, query) => {
+      const { vectorStore, memory } = await seedEmbedded();
+
+      const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [...query], {
+        limit: 10,
+        filter: { tenantId: ctx.tenantId },
+      });
+
+      expect(hits.map((h) => h.memoryId)).toEqual([memory.id]);
+      expect(hits[0]!.distance >= 0).toBe(false);
+      expect(hits[0]!.distance <= 0).toBe(false);
+    },
+  );
+
+  it.each(MISMATCHED_DIMENSION_QUERIES)(
+    "searchMany（%s）: 同じく比較不能になり、正常なクエリは影響を受けない",
+    async (_label, query) => {
+      const { vectorStore, memory } = await seedEmbedded();
+
+      const result = await vectorStore.searchMany(
+        ctx,
+        TEST_EMBEDDING_SPACE,
+        [
+          { key: "bad", vector: [...query] },
+          { key: "good", vector: [1, 0, 0] },
+        ],
+        { limit: 10, filter: { tenantId: ctx.tenantId } },
+      );
+
+      const bad = result.get("bad")!;
+      expect(bad.map((h) => h.memoryId)).toEqual([memory.id]);
+      expect(bad[0]!.distance >= 0).toBe(false);
+      expect(result.get("good")).toEqual([{ memoryId: memory.id, distance: 0 }]);
+    },
+  );
+});
+
 describe("PostgresVectorStore: 有限でない成分を含むクエリは比較不能として扱う（reject しない）", () => {
   beforeEach(async () => {
     await resetTestDatabase();

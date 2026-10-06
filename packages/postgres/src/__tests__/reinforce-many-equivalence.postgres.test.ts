@@ -242,4 +242,28 @@ describe("PostgresMemoryStore.reinforceMany と reinforce の1件ずつループ
     `);
     expect((events.rows[0] as unknown as { n: number }).n).toBe(0);
   });
+
+  it("存在しない id が混ざると「memory not found」を投げるが、存在する id には書いてから投げる（1件ずつのループで末尾に無い id があるときと同じ）", async () => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const ctx = { tenantId: `tenant-rme-missing-${randomUUID()}` };
+    const existing = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: `reinforce-many-missing-${randomUUID()}`,
+        recordedAt: RECORDED_AT,
+        lastReinforcedAt: null,
+        decayFloorAt: RECORDED_AT,
+      }),
+    );
+    const missingId = randomUUID();
+
+    await expect(store.reinforceMany(ctx, [existing.id, missingId], AT)).rejects.toThrow(
+      new RegExp(`memory not found for tenant: ${missingId}`),
+    );
+
+    const after = await store.get(ctx, existing.id);
+    expect(after?.lastReinforcedAt?.getTime()).toBe(AT.getTime());
+  });
 });

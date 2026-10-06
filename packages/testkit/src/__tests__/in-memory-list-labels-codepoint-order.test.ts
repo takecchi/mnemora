@@ -61,4 +61,48 @@ describe("InMemoryMemoryStore.listLabels は name のコードポイント順で
     const labels = await store.listLabels(ctx);
     expect(labels.map((l) => l.name)).toEqual(["！", "😀"]);
   });
+
+  it("別の名前の接頭辞になっている名前は、短い方が先に返る", async () => {
+    // 先頭から全部同じで片方が尽きたとき、尽きた方（短い方）が先。入力は逆順にしてある。
+    const store = new InMemoryMemoryStore();
+    const ctx: Ctx = { tenantId: "tenant-1" };
+
+    await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", tags: ["abc", "ab", "a"] }),
+    );
+
+    const labels = await store.listLabels(ctx);
+    expect(labels.map((l) => l.name)).toEqual(["a", "ab", "abc"]);
+  });
+
+  it("同じサロゲートペアで始まる名前は、その後ろの文字の順で返る", async () => {
+    // 先頭の絵文字（サロゲートペア）が同じ名前同士は、2コード単位を1文字として読み飛ばした
+    // 後ろの文字で決まる。入力は期待の逆順。
+    const store = new InMemoryMemoryStore();
+    const ctx: Ctx = { tenantId: "tenant-1" };
+
+    await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", tags: ["😁a", "😀b", "😀a"] }),
+    );
+
+    const labels = await store.listLabels(ctx);
+    expect(labels.map((l) => l.name)).toEqual(["😀a", "😀b", "😁a"]);
+  });
+
+  it("U+FFFF（BMP の最後の1文字）で始まる名前は、1コード単位として読まれ、後ろの文字の順で返る", async () => {
+    // U+FFFF は BMP 内（コード単位1つ）。サロゲートペア（U+10000 以上）と取り違えて
+    // 2コード単位進めると、後ろの文字を読み飛ばして同じ名前として扱ってしまう。
+    const store = new InMemoryMemoryStore();
+    const ctx: Ctx = { tenantId: "tenant-1" };
+
+    await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", tags: ["￿b", "￿a", "￿"] }),
+    );
+
+    const labels = await store.listLabels(ctx);
+    expect(labels.map((l) => l.name)).toEqual(["￿", "￿a", "￿b"]);
+  });
 });

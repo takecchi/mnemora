@@ -21,11 +21,11 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
-function buildRuntime() {
+function buildRuntime(embed: EmbeddingProvider["embed"] = async () => []) {
   const stores = createFakeRuntimeStores();
   const embeddingProvider: EmbeddingProvider = {
     space: stores.embeddingProvider.space,
-    embed: async () => [],
+    embed,
   };
   const runtime = createRuntime({
     memoryStore: stores.memoryStore,
@@ -95,4 +95,27 @@ describe("recall() — クエリ埋め込みがベクトルを返さなかった
     expect(result.memories).toHaveLength(1);
     expect(result.omitted).toContainEqual(expect.objectContaining(UNAVAILABLE));
   });
+
+  // 変異 R4（`null` を空の配列に読み替える）・R4b（文字列を文字の配列に読み替える）を捕まえる。
+  // 約束: PR 本文「`embed` の結果の先頭が配列でなければ（`[]` で `undefined`、あるいは `null`）、例外のときと
+  // 同じ経路に乗せ、embedding_provider_unavailable を積む」。後の cause（原因の種類）の導入以降は、
+  // 配列でない要素の原因は no_vector（次元違いではない）。以前は null で vectorStore.search が TypeError になった。
+  it.each([
+    ["null", [null]],
+    ["undefined", [undefined]],
+    ["文字列", ["abc"]],
+  ])(
+    "embed が配列でない要素（%s）を返したときも、投げずに embedding_provider_unavailable（cause: no_vector）を名乗る",
+    async (_label, returned) => {
+      const { runtime } = buildRuntime(
+        (async () => returned) as unknown as EmbeddingProvider["embed"],
+      );
+
+      const result = await runtime.recall(ctx, { text: "何かのクエリ" });
+
+      expect(result.omitted).toContainEqual({ ...UNAVAILABLE, cause: { kind: "no_vector" } });
+      const trace = result.explain.stages.find((s) => s.stage === "candidate_generation");
+      expect(trace?.executed).toBe(false);
+    },
+  );
 });

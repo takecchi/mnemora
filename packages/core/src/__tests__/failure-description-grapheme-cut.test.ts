@@ -47,4 +47,22 @@ describe("describeFailure: 上限での切り詰めは書記素の境目で止�
     expect(body(describeText("x".repeat(MAX + 10)))).toBe("x".repeat(MAX));
     expect(body(describeText("a".repeat(MAX - 1) + "😀tail"))).toBe("a".repeat(MAX - 1));
   });
+
+  it("上限は UTF-16 のコードユニットで数える（コードポイントでは上限以下の絵文字の列も、コードユニットで超えるなら切る）", () => {
+    // 😀 は2コードユニット。2100個で 4200 コードユニット（コードポイントは 2100 で上限以下）。
+    const text = "😀".repeat(2100);
+    expect(text.length).toBeGreaterThan(MAX);
+    const out = describeText(text);
+    expect(out).toMatch(MARK);
+    expect(Number(MARK.exec(out)![1])).toBe(text.length);
+    expect(body(out)).toBe("😀".repeat(MAX / 2));
+  });
+
+  it("最初の書記素だけで上限を超える入力は、本体が空になり、印だけが残る（コードユニットで切り直さない）", () => {
+    // e + 結合アクセント5000個は、先頭から1つの書記素。上限（4096）を超える。
+    const text = "e" + String.fromCodePoint(0x0301).repeat(5000);
+    expect(describeText(text)).toBe(
+      `… (truncated by mnemora, original length ${text.length} chars)`,
+    );
+  });
 });
