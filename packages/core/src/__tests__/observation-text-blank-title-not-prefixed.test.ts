@@ -48,6 +48,20 @@ describe("observationPayloadText: 空白だけの title は前置きにしない
     expect(text.trim()).not.toBe("");
   });
 
+  it.each([
+    ["数", 123],
+    ["null", null],
+    ["未定義（欄なし）", undefined],
+    ["真偽値", true],
+    ["配列", ["T"]],
+    ["オブジェクト", { t: "T" }],
+  ])("文字列でない title（%s）は前置きにしない（文字列に直して使わない）", (_name, title) => {
+    const text = observationPayloadText(
+      documentObservation({ title, content: "C", extractTitle: true }),
+    );
+    expect(text).toBe("C");
+  });
+
   it("実質のある title は前置きになり、前後の空白もそのまま残る（trim して使わない）", () => {
     expect(
       observationPayloadText(documentObservation({ title: "T", content: "C", extractTitle: true })),
