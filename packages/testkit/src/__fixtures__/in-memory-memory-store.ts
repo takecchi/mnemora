@@ -1621,9 +1621,17 @@ export class InMemoryMemoryStore implements MemoryStore {
         );
       }
     }
-    // 0b. ADR 0630: 書いたら読み戻したときに MemorySchema を通らなくなる値は、対象の存在の検査より前に拒む。
+    // 0b. news の各要素の入口の検査を、対象の存在の検査より前に、`createMemoryIdempotent` の入口と同じ並び
+    //     （孤立サロゲートの置き換え → ADR 0140 の contested → `assertStorableNewMemory`。ADR 0630 の検査はその末尾）で
+    //     当てる。`@mnemora/postgres` も contested・値の検査・ADR 0630 の検査を、対象の存在より前に当てる。
+    //     ⚠ `assertWellFormedNewMemory` だけを先に呼ばないこと——`digest: null` などで、ほかの口（`TypeError`）と
+    //     例外の種類が割れる。`createMemoryIdempotent` も同じ検査をもう一度当てるが、結果は変わらない。
     for (const { input } of news) {
-      assertWellFormedNewMemory("InMemoryMemoryStore", input);
+      const replaced = replaceLoneSurrogatesInNewMemory(input);
+      if (isContestedWithoutCompanion(replaced.status, replaced.contestedWithId)) {
+        throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
+      }
+      assertStorableNewMemory(replaced);
     }
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
