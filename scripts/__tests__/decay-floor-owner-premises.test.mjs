@@ -61,6 +61,14 @@ describe("🔴 ADR 0303「superseded / contested の decay_floor_at の持ち主
     expect(cte).toContain("FROM memories");
     // 主張本体: status 述語が無い。
     expect(cte).not.toMatch(/status\s*(=|IN)/);
+    // Issue #1775 の #713（変異S1）: 上の正規表現は `=`・`IN` だけを見るので、`status <> 'forgotten'`・
+    // `status != ...`・`status NOT IN (...)`・`status::text ...` を足しても緑だった。射影の列（`SELECT ... status, ...`）
+    // には `status` の語が現れるので、`WHERE` 句だけを切り出して、`status` の語が無いことを見る。
+    const whereStart = cte.indexOf("WHERE");
+    expect(whereStart, "scoped CTE の WHERE 句が見つからない").toBeGreaterThanOrEqual(0);
+    const where = cte.slice(whereStart);
+    expect(where).toContain("tenant_id"); // 陽性対照: WHERE 句の切り出しが空振りでない
+    expect(where).not.toMatch(/\bstatus\b/);
   });
 
   it("(b) restoreArchived は updateStatusWithEvent に supersededById を渡さずに active へ戻す", () => {
