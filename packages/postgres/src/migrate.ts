@@ -53,6 +53,68 @@ function quotedSearchPathFor(schema: string, extensionSchema: string): string {
 }
 
 /**
+ * pgvector の能力検査（ADR 0367、{@link assertPgvectorCapabilityViaQuery}）を、`runMigrations` の
+ * 呼び出し元の `schema`/`extensionSchema` に合わせた `search_path` の下で流す（Issue #1780）。
+ *
+ * 検査の SQL（`PGVECTOR_CAPABILITY_QUERY`）は `'[0]'::vector` と型をスキーマ修飾せずに書く。
+ * 各ファイルを流すときの `SET LOCAL search_path`（本体の `BEGIN` の直後）の外で流すと、
+ * `vector` を `public` 以外の `extensionSchema` に置いた呼び出しでは、接続の既定の
+ * `search_path`（`"$user", public`）に `extensionSchema` が無く `type "vector" does not exist`
+ * で落ちる。
+ *
+ * - `schema` 未指定（`extensionSchema` も未指定）: `search_path` には触れず、今日どおり
+ *   そのまま流す（発行される SQL は1バイトも変わらない）。
+ * - `schema` 指定: `BEGIN` → `SET LOCAL search_path TO <各ファイルと同じ>` → 検査 → `COMMIT`。
+ *   **`SET LOCAL`** なので `COMMIT`/`ROLLBACK` で値が元に戻り、pool の接続に状態が残らない
+ *   （失敗したら `ROLLBACK`——ロックを持つ接続を中断したトランザクションのまま返さない）。
+ *
+ * 共有の `PGVECTOR_CAPABILITY_QUERY` の文字列は変えない（`vector-store.ts` も使っており、
+ * そちらは `extensionSchema` を知らない）。
+ */
+async function assertPgvectorCapabilityUnderSearchPath(
+  client: { query(text: string): Promise<{ rows: unknown[] }> },
+  schema: string | undefined,
+  extensionSchema: string | undefined,
+): Promise<void> {
+  if (schema === undefined || extensionSchema === undefined) {
+    await assertPgvectorCapabilityViaQuery(client);
+    return;
+  }
+  await client.query("BEGIN");
+  try {
+    await client.query(`SET LOCAL search_path TO ${quotedSearchPathFor(schema, extensionSchema)}`);
+    await assertPgvectorCapabilityViaQuery(client);
+    await client.query("COMMIT");
+  } catch (err) {
+    // ROLLBACK 自体の失敗（接続断等）で元の失敗を上書きしない。
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  }
+}
+
+/** `verify` 用: `pool` から接続を1本借りて {@link assertPgvectorCapabilityUnderSearchPath} を流す。 */
+async function assertPgvectorCapabilityOnPool(
+  pool: Pool,
+  schema: string | undefined,
+  extensionSchema: string | undefined,
+): Promise<void> {
+  if (schema === undefined || extensionSchema === undefined) {
+    await assertPgvectorCapabilityViaQuery(pool);
+    return;
+  }
+  const client = await pool.connect();
+  // 借りた接続の `error`（接続断）で Node が落ちないよう、`acquireAdvisoryLock` と同じく空リスナーを付ける。
+  const onError = (): void => {};
+  client.on("error", onError);
+  try {
+    await assertPgvectorCapabilityUnderSearchPath(client, schema, extensionSchema);
+  } finally {
+    client.removeListener("error", onError);
+    client.release();
+  }
+}
+
+/**
  * `packages/postgres` の唯一のマイグレーション実行口（ADR 0001・docs/memory-model.md §10「規約」）。
  *
  * ベクトル索引を含むスキーマ全体の DDL は `migrations/*.sql` に手書きで置き、
@@ -802,7 +864,7 @@ export async function runMigrations(
     // 発行しないだけで、`SELECT`（この検査）は打てる——`pool` は上の
     // `verifyRequiredExtensions` と同じ接続プールで、`vector` 拡張は既に存在が
     // 確認済みなので、この時点でクエリを発行してよい。
-    await assertPgvectorCapabilityViaQuery(pool);
+    await assertPgvectorCapabilityOnPool(pool, schema, extensionSchema);
     extensionCheck = { verified: REQUIRED_EXTENSIONS };
   }
 
@@ -974,7 +1036,7 @@ export async function runMigrations(
     // 既に全マイグレーション適用済みの定常状態（最も多い呼び出し）では、
     // この検査より前に何も新しく適用されない——空振りの往復が1つ増えるだけである。
     if (extensionMode === "create") {
-      await assertPgvectorCapabilityViaQuery(lockClient);
+      await assertPgvectorCapabilityUnderSearchPath(lockClient, schema, extensionSchema);
     }
     return { applied, lock: { waitedMs }, extensionCheck };
   } catch (err) {
