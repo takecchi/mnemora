@@ -9,7 +9,7 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  *
  * 🔴 **この package は `@mnemora/core` の `Scheduler` interface を実装しない。**
  * `Scheduler.enqueue`（`packages/core/src/interfaces/scheduler.ts`）は本番コードの
- * どこからも呼ばれておらず（2026-09-25 時点の調査）、実装しても呼び手が無い。
+ * どこからも呼ばれておらず、実装しても呼び手が無い。
  * ここが実装するのは「BullMQ の Worker が定期的に発火し、その都度 `runtime.tick()` を
  * 呼ぶ」という、それだけの役である。
  *
@@ -44,13 +44,11 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * 個々のジョブの失敗は、`onTickResult` の `TickResult.failed`・`unsupported` と、outbox の `last_error` 列で見る。
  *
  * **`start()` を呼ぶまでジョブは処理しない**（Issue #890）。`createBullmqTickDriver(...)`
- * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
- * `start()` が明示的に `worker.run()` を呼んで初めて始まる。
+ * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る。
  *
- * **`stop()` の後は再開できない**（Issue #891）。`stop()` を呼んだ driver は使い捨てである。
- * その後にもう一度 `start()` を呼ぶと Error を投げる——BullMQ の `Queue`/`Worker` は
- * `close()` した後、同じインスタンスを再利用できないため。もう一度動かしたいときは
- * `createBullmqTickDriver(...)` を新しく呼び直すこと。
+ * **`stop()` の後は再開できない**（Issue #891）。`stop()` した driver は使い捨てで、その後の
+ * `start()` は Error を投げる（BullMQ の `Queue`/`Worker` は `close()` 後に再利用できない）。
+ * 動かし直すときは `createBullmqTickDriver(...)` を呼び直すこと。
  *
  * ## 複数プロセスで動かすとき
  *
@@ -70,10 +68,8 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * `src/__tests__/concurrent-tick.redis.test.ts`（ADR 0325「測ったこと」）。
  *
  * 🔴 **`stop()` は、同じ `queueName` に自分以外の Worker が居るときは共有の scheduler を消さない。最後の1台だけが消す**
- * （ADR 0655。以前は1台の `stop()` が全プロセスの予定を消した。【実測】redis-server 7.4.7・bullmq 6.3.8）。
- * ⚠ `queue.getWorkers()`（`CLIENT LIST`）が使えない環境では判別できず、今までどおり消す（1台の `stop()` が全プロセスの予定を止める）。
- * 2台の同時の `stop()` は互いに相手を見て、scheduler が1件残りうる。永続化なしの Redis の再起動で scheduler が消える件は直っていない。
- * {@link BullmqTickDriver.stop} の doc 参照。
+ * （ADR 0655。【実測】redis-server 7.4.7・bullmq 6.3.8）。`queue.getWorkers()`（`CLIENT LIST`）が使えない環境では
+ * 判別できず消す。例外と残る穴は {@link BullmqTickDriver.stop} の doc 参照。
  *
  * 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること**（【実測】redis-server 7.4.7・bullmq 6.3.8、ADR 0449。後から `start()` した driver の `everyMs` で scheduler が置き換わり、先に動いていた driver の間隔も変わる）。
  * Worker はジョブの中身を見ずに、自分の `ctx` で `runtime.tick()` を呼ぶ。テナントの違う driver が同じ
@@ -84,8 +80,7 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  *
  * ADR 0548: この driver は繰り返しジョブの template（`upsertJobScheduler` の第3引数）に `removeOnComplete: { count: 1000 }`
  * を既定で入れる。完了したジョブは新しい順に 1000 件だけ Redis に残り、それより古いものは BullMQ が消す
- * （`completedJobsToKeep` で件数を変えられる）。以前（ADR 0449 まで）は指定が無く、完了したジョブも全部残った
- * （`everyMs` ごとに1件ずつ溜まった）。
+ * （`completedJobsToKeep` で件数を変えられる）。
  * **`removeOnFail` は指定していない。** BullMQ 6.3.8 は指定が無いと失敗したジョブを全部残す
  * （`redis-queue-backend.js` の `getKeepJobs` が `{ count: -1 }` を返す）。失敗は調べる材料なので残し、消す口は足していない。
  * 溜まるのが気になるなら、同じ `queueName` の `Queue` を自分で作り、`queue.clean(grace, limit, "failed")` を定期的に呼ぶ
@@ -116,9 +111,9 @@ export interface CreateBullmqTickDriverOptions {
    *
    * ⚠ ADR 0498: **構築時に検査し、数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下でなければ
    * `createBullmqTickDriver(...)` が投げる**（ADR 0525: 数でなければ `TypeError`、数として不正なら `RangeError`）（`Queue`・`Worker` は作らない）。小数（`1.5`）は通る（BullMQ が
-   * 切り捨てた間隔で動く）。数値の文字列（`"50"`）は断る。以前は検査せず、【実測】（ADR 0477。redis-server 7.4.7・
-   * bullmq 6.3.8）負の値・`1` 未満の小数・`1e21` では `start()` が成功したまま tick が数回で黙って止まった
-   * （`onTickError` にも届かない）ので、その入力を構築時に断る。
+   * 切り捨てた間隔で動く）。数値の文字列（`"50"`）は断る。【実測】（ADR 0477。redis-server 7.4.7・
+   * bullmq 6.3.8）負の値・`1` 未満の小数・`1e21` では `start()` が成功したまま tick が数回で黙って止まる
+   * （`onTickError` にも届かない）ため、構築時に断る。
    */
   everyMs: number;
   /**
@@ -143,19 +138,18 @@ export interface CreateBullmqTickDriverOptions {
   lockDuration?: number | undefined;
   /**
    * 完了したジョブを Redis に残す件数（新しい順）。既定 `1000`。BullMQ の `removeOnComplete: { count }` として、
-   * 繰り返しジョブの template に入る。ADR 0548: 以前は指定が無く、完了したジョブが全部残った。
+   * 繰り返しジョブの template に入る（ADR 0548）。
    *
    * `0` 以上の整数でなければ構築時に投げる（ADR 0525: 数でなければ `TypeError`、小数・`NaN`・`Infinity`・負・
-   * `Number.MAX_SAFE_INTEGER` 超なら `RangeError`）。`0` は完了したらすぐ消す。以前の「全部残す」に近づけるなら
+   * `Number.MAX_SAFE_INTEGER` 超なら `RangeError`）。`0` は完了したらすぐ消す。ほぼ全部残すなら
    * `Number.MAX_SAFE_INTEGER` を渡す。失敗したジョブ（`removeOnFail`）は、この欄では変わらない（全部残る）。
    */
   completedJobsToKeep?: number | undefined;
   /**
    * 繰り返しジョブの名前・`jobId`。既定 `"mnemora-tick"`。
    *
-   * ⚠ ADR 0498: **省略（`undefined`）なら既定。渡すなら空でない文字列でなければ、構築時に投げる。**（ADR 0525: 文字列でなければ `TypeError`、空文字なら `RangeError`） 以前は空文字が
-   * `??` で既定に倒れずそのまま scheduler の id になり、【実測】（ADR 0477）`start()` が成功したまま tick が
-   * 1回で黙って止まった。`:` を含む名前・空白・日本語・300 文字は動くので断らない。
+   * ⚠ ADR 0498: **省略（`undefined`）なら既定。渡すなら空でない文字列でなければ、構築時に投げる。**（ADR 0525: 文字列でなければ `TypeError`、空文字なら `RangeError`） 空文字は
+   * 【実測】（ADR 0477）`start()` が成功したまま tick が1回で黙って止まる。`:` を含む名前・空白・日本語・300 文字は動くので断らない。
    */
   jobName?: string | undefined;
   /**
@@ -176,18 +170,16 @@ export interface CreateBullmqTickDriverOptions {
    *
    * - **`runtime.tick()`（と `onTickResult`）が throw した** ——BullMQ の Worker は processor の throw を
    *   `'error'` ではなく `'failed'`（job, err）として emit する（bullmq 6.3.8 の実測）ので、driver は
-   *   `'failed'` を拾って **job ではなく error だけ**を渡す。以前はこの経路が届かず、tick の失敗が
-   *   誰にも見えなかった。失敗した tick のジョブは BullMQ 側に failed として残るが、繰り返しジョブは
+   *   `'failed'` を拾って **job ではなく error だけ**を渡す。失敗した tick のジョブは BullMQ 側に failed として残るが、繰り返しジョブは
    *   次の発火でまた tick する（この driver は再試行を足していない）。
    * - Worker が `'error'` を emit した（Redis 接続の異常、`worker.run()` の reject など）。
    *
    * - Queue が `'error'` を emit した（繰り返しジョブの登録に使う Queue の Redis 接続の異常など）。
-   *   以前は Queue に listener が無く、bullmq が `console.error` へ固定で出すだけだった。
    *
    * 🔴 **`onTickError` を渡さないとき、Queue には listener を付けない。** 付けると bullmq（6.3.8 の
    * `QueueBase.emit`。listener の無い `'error'` は EventEmitter が throw し、それを捕まえて `console.error`
-   * へ出す）の既定の出力が消え、Queue の異常が完全に黙る。渡していなければ従来どおり `console.error` に出る。
-   * （Worker は従来から常に listener を付けており、`onTickError` が無ければ Worker の異常は黙る。そこは変えていない。）
+   * へ出す）の既定の出力が消え、Queue の異常が完全に黙る。渡していなければ `console.error` に出る。
+   * （Worker は常に listener を付けており、`onTickError` が無ければ Worker の異常は黙る。）
    *
    * **1回の tick の失敗は `'failed'` の1回だけ**（BullMQ は processor の throw で `'error'` を併せて emit しない）。
    * 一方、Queue と Worker は別々の Redis 接続を持ち、接続ごとに `'error'` を emit する。Redis が落ちると
@@ -364,11 +356,9 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       opts.onTickResult?.(result);
       return result;
     },
-    // 🔴 Issue #890: 既定の `autorun: true`（bullmq 6.3.8、`Worker` コンストラクタ末尾
-    // `if (this.opts.autorun) { this.run().catch(...) }`）のままだと、`start()` を
-    // 一度も呼んでいない時点で Worker が Redis に繋ぎ、既にキューにあるジョブを
-    // 処理し始めてしまう——上の doc コメント「使い方」の読み方と食い違う。
-    // `autorun: false` で構築し、`start()` の中で明示的に `worker.run()` を呼ぶ。
+    // 🔴 Issue #890: bullmq 6.3.8 の既定 `autorun: true` だと、`start()` を呼ぶ前から Worker が
+    // Redis に繋ぎ、キューにあるジョブを処理し始める。`autorun: false` で構築し、
+    // `start()` が明示的に `worker.run()` を呼ぶ。
     // ADR 0548: `lockDuration` は渡されたときだけ載せる（省略なら BullMQ の既定）。
     {
       connection: opts.connection,
@@ -426,11 +416,8 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
 
   return {
     async start() {
-      // 🔴 Issue #891: `stop()` した driver の Queue/Worker は既に `close()` 済みであり、
-      // bullmq はそれらを再利用できない（`node_modules/bullmq` の `queue-base.js`/
-      // `worker.js` は `closing`/`closed` を一方向にしか進めない）。黙って何もせず
-      // resolve すると「再開できた」ように見えてしまうため、理由の分かる Error で
-      // 拒否する——再開したいなら `createBullmqTickDriver(...)` を呼び直すこと。
+      // 🔴 Issue #891: `stop()` 済みの Queue/Worker は `close()` 済みで再利用できない。
+      // 黙って resolve すると「再開できた」ように見えるため、Error で拒否する。
       if (stopped) {
         throw new Error(
           "createBullmqTickDriver: stop() 済みの driver で start() は呼べない（この driver は使い捨てである）。" +
@@ -440,21 +427,16 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       if (starting !== null) {
         return starting;
       }
-      // 🔴 Issue #963: 起動が途中で失敗したら「起動済み」の印を残さない——失敗した
-      // `start()` の後の `start()` が何もせず resolve すると、Worker は動くのに
-      // スケジュールが無く、tick が一度も発火しないまま「起動できた」ように見える。
-      // そのために、失敗しうる登録（`upsertJobScheduler`）を**先に**済ませ、Worker は
-      // 登録が成功した後でだけ走らせる。bullmq の Worker は一度 `run()` / `close()` すると
-      // 再利用できない（Issue #891）ので、失敗しうる手順の前に走らせてしまうと片付け
-      // ようがない。登録が失敗した時点では Worker はまだ走っておらず、片付けるものは無い。
+      // 🔴 Issue #963: 起動が途中で失敗したら「起動済み」の印を残さない（残すと、スケジュールが
+      // 無く tick が発火しないまま「起動できた」ように見える）。そのため失敗しうる登録
+      // （`upsertJobScheduler`）を**先に**済ませ、Worker は登録が成功した後でだけ走らせる。
+      // Worker は一度 `run()` / `close()` すると再利用できない（Issue #891）ので、先に走らせると
+      // 片付けようがない。
       const attempt = (async () => {
-        // BullMQ 6.x の Job Scheduler API（旧 `queue.add(..., { repeat })` /
-        // `queue.removeRepeatable(...)` は 6.x の型に無い——`upsertJobScheduler` に
-        // 置き換わった。`jobSchedulerId` を固定値にすることで、複数プロセスが同じ
-        // `queueName` に対して `start()` を呼んでも冪等に同じスケジュールを指す
-        // （上の doc コメント「複数プロセスで動かすとき」参照）。
+        // `jobSchedulerId` を固定値にすることで、複数プロセスが同じ `queueName` に対して
+        // `start()` を呼んでも冪等に同じスケジュールを指す（上の doc「複数プロセスで動かすとき」参照）。
         // ADR 0548: 完了したジョブは直近 `completedJobsToKeep` 件だけ残す（`removeOnComplete`）。
-        // `removeOnFail` は指定しない（失敗したジョブは従来どおり全部残る）。
+        // `removeOnFail` は指定しない（失敗したジョブは全部残る）。
         await queue.upsertJobScheduler(
           jobName,
           { every: opts.everyMs },
@@ -464,15 +446,11 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
         if (stopped) {
           return;
         }
-        // Worker は上で `autorun: false` で構築したので、ここで明示的に起動する。
         // ⚠ `worker.run()` が返す promise は、Worker が閉じるまで resolve しない
-        // （bullmq 6.3.8 の `mainLoop` は `while ((!this.closing && !this.paused) || ...)`
-        // というループであり、`this.closing` が立つのは `worker.close()` を呼んだ後）。
-        // ここで `await` すると `start()` 自体が `stop()` されるまで返らなくなるため、
-        // 意図的に await しない。reject は握りつぶさず、bullmq 自身が `autorun: true` の
-        // ときに内部で行っている `this.run().catch(error => this.emit('error', error))`
-        // と同じ形で `worker` の `"error"` listener（上で登録済み、`onTickError` へ流す）
-        // に載せる。
+        // （bullmq 6.3.8 の `mainLoop` は `worker.close()` で `closing` が立つまで回る）。
+        // `await` すると `start()` が `stop()` されるまで返らなくなるため、意図的に await しない。
+        // reject は、bullmq 自身が `autorun: true` で行うのと同じ形で `worker` の `"error"`
+        // listener（`onTickError` へ流す）に載せる。
         worker.run().catch((error) => worker.emit("error", error));
       })();
       starting = attempt;
@@ -484,24 +462,18 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       return attempt;
     },
     async stop() {
-      // `start()` を一度も呼んでいなくても安全に呼べる——`worker.close()` は
-      // `run()`/`mainLoop()` が動いていることに依存しない（`whenCurrentJobsFinished`/
-      // `lockManager.close`/`childPool.clean`/`backend.close` の順で、動いていなければ
-      // 素通りする。bullmq 6.3.8 の `worker.js` を読んで確認済み）。
+      // `start()` を一度も呼んでいなくても安全に呼べる（`worker.close()` は `run()` が動いて
+      // いなくても素通りする。bullmq 6.3.8 の `worker.js` を読んで確認済み）。
       stopped = true;
       try {
-        // ADR 0655: この queue に自分以外の Worker が居るときは、共有の scheduler を消さない
-        // （残りの Worker の tick を止めないため）。居ない（最後の1台）か、居るかどうか分からないときは、今までどおり消す。
+        // ADR 0655: 自分以外の Worker が居るときは、共有の scheduler を消さない（残りの tick を止めない）。
+        // 居ない（最後の1台）か、分からないときは消す。
         if (!(await hasOtherWorkers())) {
           await queue.removeJobScheduler(jobName);
         }
       } finally {
-        // `worker.close()` と `queue.close()` はそれぞれ独立した資源（Worker 自身の
-        // blocking connection と Queue の connection）を閉じる。どちらも await せず
-        // 同じ finally に並べて書くと、`worker.close()` が reject したとき
-        // `queue.close()` の行に到達せず、Queue 側の接続が開いたまま残る
-        // （`tick-driver.stop-cleanup.test.ts` が実測）。内側にもう一段 try/finally を
-        // 挟み、`worker.close()` が失敗しても `queue.close()` は必ず試みる。
+        // `worker.close()` が reject しても `queue.close()` は必ず試みる（並べて書くと Queue 側の
+        // 接続が開いたまま残る。`tick-driver.stop-cleanup.test.ts` が実測）。
         try {
           await worker.close();
         } finally {
