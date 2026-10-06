@@ -201,7 +201,10 @@ describe("acceptLlmSubjectIdWithoutCandidates: true（opt-in）なら、従来�
       extract: "deferred",
     });
     await runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 });
-    const viaTick = await stores.memoryStore.listBySourceObservationAllVersions(ctx, r.observationId);
+    const viaTick = await stores.memoryStore.listBySourceObservationAllVersions(
+      ctx,
+      r.observationId,
+    );
     expect(viaTick.map((m) => m.subjectId)).toEqual(["victim-subject"]);
     // reextract（別の本文を返す LLM、同じ stores）。
     const other = build(
