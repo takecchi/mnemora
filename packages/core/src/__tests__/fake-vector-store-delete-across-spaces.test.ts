@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
-import type { EmbeddingSpaceId } from "../interfaces/embedding-provider.js";
-import type { Memory, MemoryId, NewMemory } from "../memory.js";
+import type { EmbeddingSpaceId } from "../embedding.js";
+import type { MemoryId } from "../ids.js";
+import type { Memory, NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
