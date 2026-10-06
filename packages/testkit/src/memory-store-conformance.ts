@@ -11,6 +11,7 @@ import type {
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   MemoryStore,
+  NewMemory,
   NewRecallRecord,
   NewMemoryEvent,
   OutboxJobRecord,
@@ -24,6 +25,7 @@ import {
   isContestedWithoutCompanionError,
   isMemoryPurgeConflictError,
   isMemoryStatusConflictError,
+  MemorySchema,
 } from "@mnemora/core";
 import {
   expectRejectsWithoutStoreError,
@@ -2882,35 +2884,39 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(predicates).toEqual([]);
       });
 
-      // Issue #1238 A7（#1106 の棚卸しが挙げた候補）: `claimKey` は主語・述語の
-      // どちらも必須の型だが、書き込みの口は片方だけの値（型を破る入力）を拒まない
-      // （`Memory.claimKey` の doc コメント、Issue #1109）。片方だけの claim key は
-      // 「鍵なし」として扱われ、findActiveByClaimKey にも listActiveClaimPredicates
-      // にも数えられないことが PR #1106 で fixture 側は固定されていたが、
-      // conformance suite 自体には歯が無かった
-      // （`packages/testkit/src/__tests__/in-memory-list-claim-predicates-incomplete-key.test.ts`
-      // が fixture 単体では既に固定している）。
-      it("subject か predicate の片方しか無い claim key を持つ Memory は数えない（null を混ぜない）", async () => {
+      // Issue #1238 A7（#1106 の棚卸しが挙げた候補）→ ADR 0630 で向きを変えた。
+      // 以前の約束: `claimKey` は主語・述語の両方が必須の型だが、書き込みの口は片方だけの値（型を破る入力）を拒まず、
+      // 片方だけの claim key は「鍵なし」として扱われ、findActiveByClaimKey にも listActiveClaimPredicates にも数えられない
+      // （Issue #1109、PR #1106）。
+      // 今の約束（ADR 0630）: 片方だけ・空文字の claim key は、書き込みの口が**入口で拒む**（読み戻すと `MemorySchema` を
+      // 通らないため）。したがって、それが listActiveClaimPredicates に現れる経路は書き込みの口の外（ADR 0630 より前に
+      // 書かれた行）にしか無く、この適合テストからは作れない——その読み側の扱い（数えない）は、fixture・Fake・Postgres の
+      // 実装ごとの歯が縛る。ここでは、拒まれることと、拒まれた書き込みが一覧を汚さないことを縛る。
+      it("subject か predicate の片方しか無い claim key を持つ Memory は書けず、数えられない（ADR 0630。以前は書けて、数えなかった）", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
-        await store.createMemory(
-          ctx,
-          buildNewMemoryFixture({
-            tenantId: "tenant-1",
-            subjectId: "user-1",
-            contentHash: "list-predicates-subject-only",
-            claimKey: { subject: "user" } as never,
-          }),
-        );
-        await store.createMemory(
-          ctx,
-          buildNewMemoryFixture({
-            tenantId: "tenant-1",
-            subjectId: "user-1",
-            contentHash: "list-predicates-predicate-only",
-            claimKey: { predicate: "home_city" } as never,
-          }),
-        );
+        await expect(
+          store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              subjectId: "user-1",
+              contentHash: "list-predicates-subject-only",
+              claimKey: { subject: "user" } as never,
+            }),
+          ),
+        ).rejects.toThrow(/claimKey/);
+        await expect(
+          store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              subjectId: "user-1",
+              contentHash: "list-predicates-predicate-only",
+              claimKey: { predicate: "home_city" } as never,
+            }),
+          ),
+        ).rejects.toThrow(/claimKey/);
         await store.createMemory(
           ctx,
           buildNewMemoryFixture({
@@ -14957,6 +14963,476 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 陽性対照: NUL を含まない contentHash は今までどおり保存できる。
       const ok = await store.createMemory(ctx, { ...bad, contentHash: "no-nul-hash" });
       expect(ok.contentHash).toBe("no-nul-hash");
+    });
+
+    // -------------------------------------------------------------------
+    // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる `NewMemory` は、書き込みの口の入口で拒む。
+    // 拒むときは何も書かない（冪等の既存の行が在っても拒む）。正しい値（境界のすぐ内側）は通り、読み戻すと
+    // `MemorySchema` を通る。見る欄は `digest`・`contentHash`・`extractorVersion`・`claimKey`・`attributes`・`provenance`。
+    // `subjectId`・`content`・`tags` の中身・日時・`strength`・`halfLifeHours`・列挙の欄は、ここの対象ではない。
+    //
+    // ⚠ 同じ形の表が `packages/core/src/__tests__/malformed-new-memory-cases.ts` にもある（core のテストは testkit を
+    // import できない）。形を足すときは両方に足すこと。
+    // ⚠ 外部の adapter にとっては、**この歯が新しく必須になった**（CHANGELOG の `[1.3.0]`（版は仮）の破壊的変更。CHANGELOG・ADR 0630）。
+    // -------------------------------------------------------------------
+    describe("読み戻すと MemorySchema を通らない NewMemory は、書き込みの口の入口で拒む（ADR 0630）", () => {
+      type Case = {
+        label: string;
+        field: RegExp;
+        over: (obs: string) => Partial<NewMemory>;
+      };
+      const inferred = (obs: string, over: Record<string, unknown>): Partial<NewMemory> => ({
+        sourceObservationId: obs,
+        provenance: {
+          kind: "inferred",
+          model: "m",
+          promptVersion: "p",
+          basis: { memoryIds: [], observationIds: [] },
+          confidence: 0.5,
+          ...over,
+        } as never,
+      });
+      const stated = (obs: string, over: Record<string, unknown>): Partial<NewMemory> => ({
+        sourceObservationId: obs,
+        provenance: {
+          kind: "stated",
+          sourceObservationId: obs,
+          at: "2026-01-01T00:00:00Z",
+          ...over,
+        } as never,
+      });
+      const MALFORMED: ReadonlyArray<Case> = [
+        { label: "digest が空文字", field: /digest/, over: () => ({ digest: "" }) },
+        { label: "contentHash が空文字", field: /contentHash/, over: () => ({ contentHash: "" }) },
+        {
+          label: "extractorVersion が空文字",
+          field: /extractorVersion/,
+          over: () => ({ extractorVersion: "" }),
+        },
+        {
+          label: "claimKey.subject が空文字",
+          field: /claimKey\.subject/,
+          over: () => ({ claimKey: { subject: "", predicate: "p" } }),
+        },
+        {
+          label: "claimKey.predicate が空文字",
+          field: /claimKey\.predicate/,
+          over: () => ({ claimKey: { subject: "s", predicate: "" } }),
+        },
+        {
+          label: "claimKey が subject だけ",
+          field: /claimKey\.predicate/,
+          over: () => ({ claimKey: { subject: "s" } as never }),
+        },
+        {
+          label: "claimKey が predicate だけ",
+          field: /claimKey\.subject/,
+          over: () => ({ claimKey: { predicate: "p" } as never }),
+        },
+        {
+          label: "attributes の値が数",
+          field: /attributes/,
+          over: () => ({ attributes: { a: 1 } as never }),
+        },
+        {
+          label: "attributes の値が入れ子のオブジェクト",
+          field: /attributes/,
+          over: () => ({ attributes: { a: { b: "c" } } as never }),
+        },
+        {
+          label: "attributes の値が null",
+          field: /attributes/,
+          over: () => ({ attributes: { a: null } as never }),
+        },
+        {
+          label: "provenance: stated で sourceObservationId・at が無い",
+          field: /provenance\.sourceObservationId/,
+          over: (obs) => ({ sourceObservationId: obs, provenance: { kind: "stated" } as never }),
+        },
+        {
+          label: "provenance: stated で at が空文字",
+          field: /provenance\.at/,
+          over: (obs) => stated(obs, { at: "" }),
+        },
+        {
+          label: "provenance: stated で speaker が空文字",
+          field: /provenance\.speaker/,
+          over: (obs) => stated(obs, { speaker: "" }),
+        },
+        {
+          label: "provenance: inferred で confidence が 2",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: 2 }),
+        },
+        {
+          label: "provenance: inferred で confidence が負",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: -0.01 }),
+        },
+        {
+          label: "provenance: inferred で model が無い",
+          field: /provenance\.model/,
+          over: (obs) => inferred(obs, { model: undefined }),
+        },
+        {
+          label: "provenance: inferred で basis.memoryIds に空文字",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { memoryIds: [""], observationIds: [] } }),
+        },
+        {
+          label: "provenance: consolidated で sources が空",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "consolidated", sources: [] } }),
+        },
+        {
+          label: "provenance: reflected で sources に空文字",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "reflected", sources: [""] } }),
+        },
+        {
+          label: "provenance: imported で batchId が空文字",
+          field: /provenance\.batchId/,
+          over: () => ({ provenance: { kind: "imported", batchId: "" } }),
+        },
+        {
+          label: "provenance: imported で batchId が無い",
+          field: /provenance\.batchId/,
+          over: () => ({ provenance: { kind: "imported" } as never }),
+        },
+        // 変異試験（2026-10-06）で、欄の検査は残ったまま「その形だけ見逃す」変異が生き残った形（core の表と同じ）。
+        {
+          label: "provenance: stated で sourceObservationId が空文字",
+          field: /provenance\.sourceObservationId/,
+          over: (obs) => stated(obs, { sourceObservationId: "" }),
+        },
+        {
+          label: "provenance: stated で at が無い",
+          field: /provenance\.at/,
+          over: (obs) => stated(obs, { at: undefined }),
+        },
+        {
+          label: "provenance: inferred で confidence が NaN",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: Number.NaN }),
+        },
+        {
+          label: "provenance: inferred で confidence が無い",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: undefined }),
+        },
+        {
+          label: "provenance: inferred で model が空文字",
+          field: /provenance\.model/,
+          over: (obs) => inferred(obs, { model: "" }),
+        },
+        {
+          label: "provenance: inferred で promptVersion が無い",
+          field: /provenance\.promptVersion/,
+          over: (obs) => inferred(obs, { promptVersion: undefined }),
+        },
+        {
+          label: "provenance: inferred で basis.observationIds に空文字",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { memoryIds: [], observationIds: [""] } }),
+        },
+        {
+          label: "provenance: inferred で basis が無い",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: undefined }),
+        },
+        {
+          label: "provenance: consolidated で sources に空文字",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "consolidated", sources: ["m1", ""] } }),
+        },
+        {
+          label: "provenance: consolidated で sources が無い",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "consolidated" } as never }),
+        },
+        {
+          label: "provenance: reflected で sources が配列でない",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "reflected", sources: "m1" } as never }),
+        },
+        {
+          label: "provenance: inferred で confidence が文字列",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: "0.5" }),
+        },
+        {
+          label: "provenance: inferred で promptVersion が空文字",
+          field: /provenance\.promptVersion/,
+          over: (obs) => inferred(obs, { promptVersion: "" }),
+        },
+        {
+          label: "provenance: inferred で basis.memoryIds が無い",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { observationIds: [] } }),
+        },
+        {
+          label: "provenance: inferred で basis.observationIds が無い",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { memoryIds: [] } }),
+        },
+        {
+          label: "attributes が文字列",
+          field: /attributes/,
+          over: () => ({ attributes: "a" as never }),
+        },
+        {
+          label: "attributes が配列",
+          field: /attributes/,
+          over: () => ({ attributes: ["a"] as never }),
+        },
+        {
+          label: "attributes の値が真偽値",
+          field: /attributes/,
+          over: () => ({ attributes: { a: true } as never }),
+        },
+      ];
+      const WELL_FORMED: ReadonlyArray<{
+        label: string;
+        over: (obs: string) => Partial<NewMemory>;
+      }> = [
+        { label: "extractorVersion が空でない", over: () => ({ extractorVersion: "v1" }) },
+        { label: "extractorVersion が null", over: () => ({ extractorVersion: null }) },
+        { label: "claimKey が無い（null）", over: () => ({ claimKey: null }) },
+        { label: "claimKey が無い（undefined）", over: () => ({ claimKey: undefined }) },
+        {
+          label: "claimKey が1文字ずつ",
+          over: () => ({ claimKey: { subject: "s", predicate: "p" } }),
+        },
+        { label: "attributes が空のオブジェクト", over: () => ({ attributes: {} }) },
+        { label: "attributes が省略", over: () => ({ attributes: undefined }) },
+        // `null` の `attributes` は「無い」として扱われ、`{}` で書かれる（ADR 0630 決定2）。
+        { label: "attributes が null", over: () => ({ attributes: null as never }) },
+        { label: "extractorVersion が省略", over: () => ({ extractorVersion: undefined }) },
+        { label: "attributes の値が空文字", over: () => ({ attributes: { a: "" } }) },
+        { label: "attributes が文字列だけ", over: () => ({ attributes: { a: "b", c: "d" } }) },
+        { label: "digest が1文字", over: () => ({ digest: "d" }) },
+        { label: "content が空文字（検査しない欄）", over: () => ({ content: "" }) },
+        {
+          label: "provenance: inferred で confidence が 0",
+          over: (obs) => inferred(obs, { confidence: 0 }),
+        },
+        {
+          label: "provenance: inferred で confidence が 1",
+          over: (obs) => inferred(obs, { confidence: 1 }),
+        },
+        { label: "provenance: stated（speaker 無し）", over: (obs) => stated(obs, {}) },
+        {
+          label: "provenance: stated（speaker 有り）",
+          over: (obs) => stated(obs, { speaker: "u" }),
+        },
+        {
+          label: "provenance: consolidated で sources が1件",
+          over: () => ({ provenance: { kind: "consolidated", sources: ["m1"] } }),
+        },
+        {
+          label: "provenance: reflected で sources が無い",
+          over: () => ({ provenance: { kind: "reflected" } }),
+        },
+        {
+          label: "provenance: reflected で sources が空配列",
+          over: () => ({ provenance: { kind: "reflected", sources: [] } }),
+        },
+        {
+          label: "provenance: imported で batchId が1文字",
+          over: () => ({ provenance: { kind: "imported", batchId: "b" } }),
+        },
+        // ADR 0630 の「拒みすぎない」側（独立確認の指摘）: 今は通る形。`MemorySchema` が拒まない形は、入口も拒まない（core の表と同じ）。
+        {
+          label: "claimKey が空白だけ（subject が半角空白・predicate がタブ）",
+          over: () => ({ claimKey: { subject: " ", predicate: "\t" } }),
+        },
+        // 孤立サロゲートは保存時に U+FFFD へ置き換わる（ADR 0543）。ここは「拒まない」ことと、読み戻しが通ることだけ。
+        {
+          label: "claimKey に孤立サロゲートを含む",
+          over: () => ({ claimKey: { subject: "a\uD800b", predicate: "p\uDC00q" } }),
+        },
+        // `MemorySchema.attributes` はキーの文字種を見ない。入力側 `AttributesSchema` のキーの決まりの外でも拒まない。
+        { label: "attributes のキーが空文字", over: () => ({ attributes: { "": "v" } }) },
+        { label: "attributes のキーに空白を含む", over: () => ({ attributes: { "a b": "v" } }) },
+        { label: "attributes のキーに記号を含む", over: () => ({ attributes: { "a/b": "v" } }) },
+        { label: "attributes のキーが非 ASCII", over: () => ({ attributes: { キー: "v" } }) },
+        // `MemorySchema.provenance` は余分なキーを拒まない（zod の既定）。
+        { label: "provenance: stated に余分なキー", over: (obs) => stated(obs, { extra: "x" }) },
+        {
+          label: "provenance: inferred に余分なキー",
+          over: (obs) => inferred(obs, { extra: "x" }),
+        },
+        {
+          label: "provenance: imported に余分なキー",
+          over: () => ({ provenance: { kind: "imported", batchId: "b", extra: "x" } as never }),
+        },
+      ];
+
+      const ctx: Ctx = { tenantId: "tenant-new-memory-shape" };
+      type Write = (store: MemoryStore, input: NewMemory) => Promise<Memory>;
+      const WRITES: Array<[string, Write]> = [
+        ["createMemory", (store, input) => store.createMemory(ctx, input)],
+        [
+          "createMemoryWithOutbox",
+          async (store, input) =>
+            (await store.createMemoryWithOutbox(ctx, input, ["embed"])).memory,
+        ],
+      ];
+      if (supportsSupersedeWithNewMemories) {
+        WRITES.push([
+          "supersedeWithNewMemories",
+          async (store, input) =>
+            (await store.supersedeWithNewMemories!(ctx, [{ input, jobKinds: ["embed"] }], []))
+              .created[0]!.memory,
+        ]);
+      }
+
+      const setup = async () => {
+        const store = await createStore();
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: ctx.tenantId }),
+        );
+        const obs = observation.id;
+        const input = (over: Partial<NewMemory> = {}): NewMemory =>
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            sourceObservationId: obs,
+            extractorVersion: "v1",
+            contentHash: "shape-h",
+            tags: ["shape-tag"],
+            ...over,
+          });
+        /** 書かれたものの写し（Memory とラベル）。 */
+        const state = async (): Promise<string> =>
+          JSON.stringify({
+            memories: (await store.listBySourceObservationAllVersions(ctx, obs)).map((m) => m.id),
+            labels: supportsLabels ? await store.listLabels!(ctx) : null,
+          });
+        return { store, obs, input, state };
+      };
+
+      describe.each(WRITES)("%s", (_method, write) => {
+        it.each(MALFORMED.map((c) => [c.label, c] as const))(
+          "%s は、欄を名指しした例外で拒み、何も書かない",
+          async (_label, c) => {
+            const { store, obs, input, state } = await setup();
+            const before = await state();
+            await expect(write(store, input(c.over(obs)))).rejects.toThrow(c.field);
+            expect(await state()).toBe(before);
+          },
+        );
+
+        it.each(MALFORMED.map((c) => [c.label, c] as const))(
+          "%s は、冪等の既存の行が在っても拒む",
+          async (_label, c) => {
+            const { store, obs, input, state } = await setup();
+            await write(store, input());
+            const before = await state();
+            await expect(write(store, input(c.over(obs)))).rejects.toThrow(c.field);
+            expect(await state()).toBe(before);
+          },
+        );
+
+        it.each(WELL_FORMED.map((c) => [c.label, c] as const))(
+          "%s は通り、読み戻した Memory は MemorySchema を通る",
+          async (_label, c) => {
+            const { store, obs, input } = await setup();
+            const memory = await write(store, input(c.over(obs)));
+            expect(MemorySchema.safeParse(memory).success).toBe(true);
+            const read = await store.get(ctx, memory.id);
+            expect(MemorySchema.safeParse(read).success).toBe(true);
+          },
+        );
+      });
+
+      if (supportsSupersedeWithNewMemories) {
+        it("supersedeWithNewMemories: news の2件目が壊れていたら、1件目の Memory・ラベルも書かない", async () => {
+          const { store, input, state } = await setup();
+          const before = await state();
+          await expect(
+            store.supersedeWithNewMemories!(
+              ctx,
+              [
+                {
+                  input: input({ contentHash: "first", tags: ["only-first"] }),
+                  jobKinds: ["embed"],
+                },
+                { input: input({ contentHash: "second", digest: "" }), jobKinds: ["embed"] },
+              ],
+              [],
+            ),
+          ).rejects.toThrow(/digest/);
+          expect(await state()).toBe(before);
+        });
+
+        // 変異試験（2026-10-06）: 「先頭と末尾だけ検査する」変異が、3実装すべてで生き残った。途中の要素も検査する。
+        it("supersedeWithNewMemories: news の真ん中（3件中の2件目）が壊れていても、前後の Memory・ラベルも書かない", async () => {
+          const { store, input, state } = await setup();
+          const before = await state();
+          await expect(
+            store.supersedeWithNewMemories!(
+              ctx,
+              [
+                {
+                  input: input({ contentHash: "first", tags: ["only-first"] }),
+                  jobKinds: ["embed"],
+                },
+                { input: input({ contentHash: "middle", digest: "" }), jobKinds: ["embed"] },
+                {
+                  input: input({ contentHash: "last", tags: ["only-last"] }),
+                  jobKinds: ["embed"],
+                },
+              ],
+              [],
+            ),
+          ).rejects.toThrow(/digest/);
+          expect(await state()).toBe(before);
+        });
+      }
+
+      if (supportsSupersedeWithNewMemories) {
+        // 例外の順（ADR 0630）: 壊れた news と存在しない supersede 対象が同時にあれば、壊れた値の例外が先。
+        it("supersedeWithNewMemories: 壊れた news と存在しない対象が同時なら、壊れた値の例外（is malformed）が先に出る", async () => {
+          const { store, input, state } = await setup();
+          const before = await state();
+          const outcome = await store.supersedeWithNewMemories!(
+            ctx,
+            [{ input: input({ digest: "" }), jobKinds: ["embed"] }],
+            [
+              {
+                id: NONEXISTENT_MEMORY_ID,
+                supersededByIndex: 0,
+                event: {
+                  tenantId: ctx.tenantId,
+                  memoryId: NONEXISTENT_MEMORY_ID,
+                  kind: "superseded",
+                  actor: { type: "system" },
+                  digestSnapshot: "d",
+                  sizeBeforeBytes: null,
+                  meta: { reason: "conformance-test" },
+                },
+              },
+            ],
+          ).then(
+            () => null,
+            (err: unknown) => err,
+          );
+          expect(String(outcome)).toMatch(/digest is malformed/);
+          expect(String(outcome)).not.toMatch(NOT_FOUND_ERROR_MESSAGE);
+          expect(await state()).toBe(before);
+        });
+      }
+
+      it("範囲外の欄は拒まない: subjectId の空文字は、この検査の対象ではない（別の担当）", async () => {
+        const { store, input } = await setup();
+        // `subjectId: ""` が書けるか・拒まれるかは、この歯が決めない。**この検査の message で拒まれないこと**だけを見る。
+        const outcome = await store.createMemory(ctx, input({ subjectId: "" })).then(
+          () => null,
+          (err: unknown) => err,
+        );
+        expect(String(outcome)).not.toMatch(/is malformed/);
+      });
     });
 
     // -------------------------------------------------------------------

@@ -3100,10 +3100,16 @@ describe("recall() — TokenCounter が約束を破る値を返したとき（AD
 
   it("既定の heuristicTokenCounter は断られない（空・CJK・絵文字・孤立サロゲート・長い digest でも、予算ありで通る）", async () => {
     const { runtime, stores } = buildRuntime();
-    const odd = ["", "日本語のダイジェスト", "emoji \u{1F600} \uD800 é", "x".repeat(5000)];
+    const odd = ["日本語のダイジェスト", "emoji \u{1F600} \uD800 é", "x".repeat(5000)];
     for (const [i, digest] of odd.entries()) {
       await createEmbeddedMemory(stores, [1, 0], { digest, contentHash: `h${i}` });
     }
+    // 空の digest は、ADR 0630 から書き込みの口が拒む（書けない）。ただし、それより前に書かれた行には残りうるので、
+    // 読み側が断られないことは、書いた後の行を書き換えて縛る（Fake の内部の `backing` を直接書き換える）。
+    const emptyDigest = await createEmbeddedMemory(stores, [1, 0], { contentHash: "h-empty" });
+    (
+      stores.memoryStore as unknown as { backing: { memories: Map<string, Memory> } }
+    ).backing.memories.get(emptyDigest.id)!.digest = "";
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       budget: { maxMemoryTokens: 100000 },

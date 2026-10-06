@@ -16,7 +16,8 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * この Fake に書いて前提にしている。拒むとそれらのデータを書き換えることになり、各テストが縛っているものが変わりうる。
  * 下の歯はこの違いを今の振る舞いとして縛る（揃えるときは、この歯と25件をいっしょに見直すこと）。
  *
- * それ以外の中身の欠け（欄が無い・値域の外）は、Postgres・fixture と同じく検査しない（受け付ける）。
+ * ADR 0630: それ以外の中身の欠け（欄が無い・値域の外。`stated` で `at` が無い、など）は、Postgres・fixture と同じく、
+ * 読み戻すと `MemorySchema` を通らない値として入口で拒む（`fake-new-memory-rejects.test.ts` が全形を縛る。ここは1つだけ）。
  * Postgres と fixture の側の歯は `packages/postgres/src/__tests__/store-input-current-behaviour.postgres.test.ts`。
  */
 
@@ -112,13 +113,14 @@ describe.each(WRITES)(
       await expect(write(store, input({ provenance: null as never }))).rejects.toThrow(TypeError);
     });
 
-    it("それ以外の中身の欠け（stated で at が無い）は、今までどおり受け付ける", async () => {
+    it("それ以外の中身の欠け（stated で at が無い）は、ADR 0630 から拒む（以前は受け付けた）", async () => {
       const { store, observationId, input } = await setup();
-      const memory = await write(
-        store,
-        input({ provenance: { kind: "stated", sourceObservationId: observationId } as never }),
-      );
-      expect(memory.id).toBeDefined();
+      await expect(
+        write(
+          store,
+          input({ provenance: { kind: "stated", sourceObservationId: observationId } as never }),
+        ),
+      ).rejects.toThrow(/provenance\.at/);
     });
 
     it("正しい provenance は、今までどおり受け付ける", async () => {

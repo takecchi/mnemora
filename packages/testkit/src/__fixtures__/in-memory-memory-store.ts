@@ -55,7 +55,11 @@ import type {
   RequeueEmbedJobsResult,
   ScopeAggregate,
 } from "@mnemora/core";
-import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
+import {
+  assertWellFormedCtx,
+  assertWellFormedIdentifier,
+  assertWellFormedNewMemory,
+} from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import {
   replaceLoneSurrogates,
@@ -648,6 +652,10 @@ function assertStorableNewMemory(input: NewMemory): void {
   assertStorableMemoryColumn("digest_source", input.digestSource);
   assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
   assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
+  // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる値（`digest`・`contentHash`・`extractorVersion` の空文字、
+  // `claimKey`・`attributes`・`provenance` の中身の欠け・値域外）も断る。上の検査（NUL・列挙）の後に置く——それらが先に断る入力の
+  // 文面を変えない。`@mnemora/postgres`・core の Fake と同じ検査（`assertWellFormedNewMemory`）。
+  assertWellFormedNewMemory("InMemoryMemoryStore", input);
   // 孤立サロゲート（Issue #816、実測）: この関数は検査しない。`text` 列の欄の孤立サロゲートは、ADR 0543 から
   // `createMemoryIdempotent` の入口で U+FFFD に置き換えて保存する（`PostgresMemoryStore` と同じ。以前は入力をそのまま保持していた）。
   // `jsonb` 列の欄（`attributes`・`provenance`）は、今も置き換えも拒みもしない（Postgres は拒む。ADR 0543 の対象外）。
@@ -1598,11 +1606,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const buildCreatedEvent = opts?.buildCreatedEvent;
-    // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
-    //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
+    // 0. `@mnemora/postgres` と同じ順（RangeError → news の検査 → 対象の存在）。壊れた news と存在しない対象が
+    //    同時にあれば、壊れた値の例外が先に出る。
+    // 0a. 呼び手が壊れた索引を渡した（RangeError。conflicted にも not found にも混ぜない）。
     for (const target of supersede) {
-      assertStorableMemoryEvent(target.event);
-      // 1a. 呼び手が壊れた索引を渡した（RangeError。conflicted にも not found にも混ぜない）。
       if (
         !Number.isInteger(target.supersededByIndex) ||
         target.supersededByIndex < 0 ||
@@ -1612,6 +1619,23 @@ export class InMemoryMemoryStore implements MemoryStore {
           `InMemoryMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
         );
       }
+    }
+    // 0b. news の各要素の入口の検査を、対象の存在の検査より前に、`createMemoryIdempotent` の入口と同じ並び
+    //     （孤立サロゲートの置き換え → ADR 0140 の contested → `assertStorableNewMemory`。ADR 0630 の検査はその末尾）で
+    //     当てる。`@mnemora/postgres` も contested・値の検査・ADR 0630 の検査を、対象の存在より前に当てる。
+    //     ⚠ `assertWellFormedNewMemory` だけを先に呼ばないこと——`digest: null` などで、ほかの口（`TypeError`）と
+    //     例外の種類が割れる。`createMemoryIdempotent` も同じ検査をもう一度当てるが、結果は変わらない。
+    for (const { input } of news) {
+      const replaced = replaceLoneSurrogatesInNewMemory(input);
+      if (isContestedWithoutCompanion(replaced.status, replaced.contestedWithId)) {
+        throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
+      }
+      assertStorableNewMemory(replaced);
+    }
+    // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
+    //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
+    for (const target of supersede) {
+      assertStorableMemoryEvent(target.event);
       // 1b. 対象の行がそもそも無い。
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {

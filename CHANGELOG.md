@@ -153,6 +153,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。クローンが 🔴 に決めた（破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目65。DB マイグレーションは無い。
 
+- **`MemoryStore` の `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` が、書いたら読み戻したときに `MemorySchema` を通らなくなる値を、入口で `Error` で拒むようになった**（[ADR 0630](./docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md)。`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`。オーナー回答 70449a95 の問2。オーナーが決めたのは「入口で拒む」の採否で、範囲・例外の種類はマネージャーの判断）
+  以前は黙って書き、読み戻した Memory が `MemorySchema` を通らなかった。いまは3実装（`PostgresMemoryStore`・`InMemoryMemoryStore`・core の Fake）とも、何も書かずに `<実装名>: <欄> is malformed (…)` の `Error` を投げる。冪等の既存の行が在っても拒む。
+  - **拒む入力**: `digest`・`contentHash`・`extractorVersion` の空文字／`claimKey` の `subject`・`predicate` の空文字・片側だけ／`attributes` の値が文字列以外／`provenance` の中身の欠け・値域外（`stated` の `sourceObservationId`・`at` が無い・空、`inferred` の `confidence` が `[0, 1]` の外・`model` が無い、`consolidated` の `sources` が空、`imported` の `batchId` が無い・空など）。`confidence` の 0 と 1、`claimKey` 無し、`extractorVersion` が `null`、`attributes` が `{}` は通る。
+  - **範囲外（変わらない）**: `subjectId`、Observation・Event・`createRecall` の書き込み、既に拒んでいる欄、`tags` の中身、`validFrom > validUntil`。
+  - **以前から拒まれていた入力で、例外の種類が変わったもの**: `digest` の `null`・省略と `contentHash` の省略。`@mnemora/postgres` は以前の `DrizzleQueryError`（`cause.code` `23502`・`42601`）から、core の Fake は以前の `TypeError` から、上の `Error`（`… digest is malformed …` など）に変わった。testkit の `InMemoryMemoryStore` は以前どおり `TypeError`（実測。ADR 0630 の範囲外の節の表）。
+  - **新しい公開 API**: `assertWellFormedNewMemory(owner, input)`（`@mnemora/core`）。自前の `MemoryStore` 実装が同じ検査を呼べる。
+  - **`createRuntime` が、`RuntimeConfig.extractorVersion` が空文字・空白だけなら、組み立ての時点で `Error` を投げる**（`undefined`・`null` は今どおり既定の `"v1"`）。以前は空文字のまま書いていた。`llmModelId`・`promptVersion` の空文字を既定に寄せる扱いは変わらない。
+  - **`runtime.observe` の経路（3口の外）**: 抽出した候補の保存に使う `createMemoriesWithOutboxAndEvents?` も同じ入口を共有するため、壊れた候補は、保存できない他の候補と同じく `created` イベントの `droppedCandidates` に積まれ、残りの候補は書く。**全候補が壊れていると、observe は最初の例外（この `Error`）をそのまま投げ、Memory は1件も書かない**。`@mnemora/postgres`（`observe-new-memory-well-formed.postgres.test.ts`）と testkit の `InMemoryMemoryStore`（`in-memory-observe-new-memory-malformed-candidate.test.ts`）で実測し、歯が縛る。core の Fake はこの口を持たない。
+  - **`supersedeWithNewMemories` の例外の順**: 壊れた `news` と存在しない `supersede` の対象が同時にあるときは、3実装とも壊れた値の `Error` を先に投げる（testkit の `InMemoryMemoryStore` と core の Fake は、以前は対象の `memory not found` を先に投げていた）。testkit の `InMemoryMemoryStore` では、`contestedWithId` の無い `contested` の `news`（`ContestedWithoutCompanionError`）も、対象の `memory not found` より先になった（Postgres と同じ順）。
+  - **conformance suite の約束が増えた**: 上の入力を3口とも拒むこと（拒むときは何も書かないこと・冪等の既存行が在っても拒むこと）。**片側だけの `claimKey` を `createMemory` で書いて「`listActiveClaimPredicates` に数えない」ことを縛っていた歯は、「書き込みの口が拒む」に書き換えた**——自前の adapter が片側だけの鍵を受け付けて「鍵なし」として扱っていたなら、拒むように直す。それより前に書かれた行を鍵なしとして読む扱いは変わらない。
+  - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目68。DB マイグレーションは無い（既に書かれた行は直さない）。
+
 ### Added
 
 - **`@mnemora/postgres` に `findCrossTenantReferences` を足した**（[ADR 0636](./docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)。オーナー回答 374f6f88 の問27）。`recall_usages`・`memories.source_observation_id`・`memories.contested_with_id`・`memories.superseded_by_id` の4種について、参照先が別のテナントの行である既存行を、種類ごとの件数と先頭の `sampleLimit` 件（既定 20）で返す。**検出だけで、何も書き換えない**（`READ ONLY` のトランザクションの中で読む）。複合外部キーは足していない。既存の振る舞いは変わらない。`CROSS_TENANT_REFERENCE_KINDS` なども同じ入口から出る。

@@ -9,6 +9,7 @@ export * from "./attributes.js";
 export * from "./provenance.js";
 export * from "./observation.js";
 export * from "./memory.js";
+export * from "./new-memory-check.js";
 export * from "./recall.js";
 export * from "./correction-candidates.js";
 export * from "./apply-correction.js";

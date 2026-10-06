@@ -226,8 +226,10 @@ const CASES: Case[] = [
     },
   },
   {
-    name: "createMemory: 空文字の extractorVersion は通る",
-    expect: "accept",
+    // ADR 0630: 以前は通った（書けて、読み戻すと MemorySchema を通らなかった）。今は入口で拒む。
+    name: "createMemory: 空文字の extractorVersion は拒む（ADR 0630。以前は通った）",
+    expect: "reject",
+    message: /extractorVersion is malformed/,
     run: (k) => k.memory.createMemory(ctx, newMemory({ extractorVersion: "" })),
   },
   {

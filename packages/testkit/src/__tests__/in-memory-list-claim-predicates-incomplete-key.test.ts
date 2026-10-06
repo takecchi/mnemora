@@ -13,32 +13,38 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
  * 反する。同じ入力で Postgres は `[]` を返した（片方だけの行は、書き込みの口の後の読み出し側で
  * 「鍵なし」として扱われる。`packages/postgres/src/mapping.ts` の `rowToClaimKey`）。
  *
- * 片方だけの claim key は型（`ClaimKey` は2欄とも必須）を破る入力であり、書き込みの口が
- * それを受け付けてよいかは別に決める（Issue に起票）。ここで縛るのは、読み出しの一覧が
- * Postgres と同じく「両方そろった鍵だけ」を数えることだけである。
+ * 片方だけの claim key は型（`ClaimKey` は2欄とも必須）を破る入力である。ADR 0630 から、書き込みの口はそれを
+ * **入口で拒む**（`in-memory-new-memory-rejects.test.ts`）。ここで縛るのは、**それより前に書かれた行**（読み側に残りうる）を、
+ * 読み出しの一覧が Postgres と同じく「両方そろった鍵だけ」数えることである。片方だけの行は、正しい鍵で書いた後に、
+ * fixture の内部の `memories` の行を書き換えて作る。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
+/** 正しい鍵で書いた行を、書いた後に、別の値へ書き換える（ADR 0630 より前に書かれた行の再現）。 */
+async function seedLegacyClaimKey(
+  store: InMemoryMemoryStore,
+  contentHash: string,
+  claimKey: unknown,
+): Promise<void> {
+  const written = await store.createMemory(
+    ctx,
+    buildNewMemoryFixture({
+      tenantId: ctx.tenantId,
+      contentHash,
+      claimKey: { subject: "tmp", predicate: "tmp" },
+    }),
+  );
+  (store as unknown as { memories: Map<string, { claimKey: unknown }> }).memories.get(
+    written.id,
+  )!.claimKey = claimKey;
+}
+
 describe("InMemoryMemoryStore.listActiveClaimPredicates — 片方が欠けた claim key を数えない", () => {
   it("主語だけ・述語だけの claim key を持つ Memory は数えず、両方そろったものだけを返す（null を混ぜない）", async () => {
     const store = new InMemoryMemoryStore();
-    await store.createMemory(
-      ctx,
-      buildNewMemoryFixture({
-        tenantId: ctx.tenantId,
-        contentHash: "subject-only",
-        claimKey: { subject: "user" } as never,
-      }),
-    );
-    await store.createMemory(
-      ctx,
-      buildNewMemoryFixture({
-        tenantId: ctx.tenantId,
-        contentHash: "predicate-only",
-        claimKey: { predicate: "home_city" } as never,
-      }),
-    );
+    await seedLegacyClaimKey(store, "subject-only", { subject: "user" });
+    await seedLegacyClaimKey(store, "predicate-only", { predicate: "home_city" });
     await store.createMemory(
       ctx,
       buildNewMemoryFixture({

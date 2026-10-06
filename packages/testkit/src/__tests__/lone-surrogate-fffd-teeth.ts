@@ -384,19 +384,23 @@ export function describeLoneSurrogateFffd(
     describe.each(UNCHANGED_CASES)("対照: %s", (_label, value) => {
       it("変わらない（content・digest・tags・claimKey・kind・label name）", async () => {
         const { store } = await makeKit();
+        // ADR 0630: 空文字の digest・claimKey は、書き込みの口が拒む（読み戻すと MemorySchema を通らない）。空文字の対照は、
+        // 書ける欄（content・tags・kind・label name）で見る。
+        const digest = value === "" ? "d" : value;
+        const claimKey = value === "" ? null : { subject: value, predicate: value };
         const m = await store.createMemory(
           CTX,
           mem({
             content: value,
-            digest: value,
+            digest,
             tags: [value],
-            claimKey: { subject: value, predicate: value },
+            claimKey,
           }),
         );
         expect(m.content).toBe(value);
-        expect(m.digest).toBe(value);
+        expect(m.digest).toBe(digest);
         expect(m.tags).toEqual([value]);
-        expect(m.claimKey).toEqual({ subject: value, predicate: value });
+        expect(m.claimKey).toEqual(claimKey);
         const o = await store.createObservation(
           CTX,
           buildNewObservationFixture({ tenantId: CTX.tenantId, kind: value || "k" }),

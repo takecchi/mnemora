@@ -506,6 +506,7 @@ export * from "./attributes.js";
 export * from "./provenance.js";
 export * from "./observation.js";
 export * from "./memory.js";
+export * from "./new-memory-check.js";
 export * from "./recall.js";
 export * from "./correction-candidates.js";
 export * from "./apply-correction.js";
@@ -1430,6 +1431,16 @@ export declare const NewMemorySchema: z.ZodObject<{
     supersededById: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     contestedWithId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$strip>;
+
+// ===== dist/new-memory-check.d.ts =====
+export declare function assertWellFormedNewMemory(owner: string, input: {
+    digest?: unknown;
+    contentHash?: unknown;
+    extractorVersion?: unknown;
+    claimKey?: unknown;
+    attributes?: unknown;
+    provenance?: unknown;
+}): void;
 
 // ===== dist/observation.d.ts =====
 import { z } from "zod";
