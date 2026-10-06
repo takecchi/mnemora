@@ -2623,8 +2623,7 @@ async function runRecallBody(
       // なった・相手が forget 済みで一度も候補に上がらなかった場合は付かない。
       if (
         member.memory.status === "contested" &&
-        member.memory.contestedWithId &&
-        keptMemoryIds.has(member.memory.contestedWithId)
+        member.memory.contestedWithId
       ) {
         recalled.contestedWith = member.memory.contestedWithId;
       }
