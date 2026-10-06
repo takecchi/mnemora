@@ -924,9 +924,12 @@ export interface MemoryStore {
    * `id` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
    * `isUuidLike` の doc コメント参照）。
    *
-   * `expectedStatus` を**単数**にしている理由: 現時点の唯一の呼び出し元
-   * （`runtime.ts` の `reextract`）が要る条件は `"active"` の1つだけであり、
-   * 集合（配列）にする理由が無い。採らなかった案は ADR 0030 参照。
+   * `expectedStatus` を**単数**にしている理由: 1回の呼び出しが条件にする status は1つである。
+   * ADR 0030 の当時、唯一の呼び出し元（`runtime.ts` の `reextract`）が要したのは `"active"` だけだった。
+   * ⚠ `packages/` の本番コードに、この口の呼び出し元は無い。runtime は `updateStatusWithEvent`
+   * （`expectedStatus` に `"active"`・`"archived"`・観測した status のいずれか1つを渡す）と、
+   * `supersedeWithNewMemories` の `supersede[].expectedStatus` を使う。どれも1回に1つの status を
+   * 条件にするので、集合（配列）にする理由は無い。採らなかった案は ADR 0030 参照。
    *
    * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
    * `status === 'contested'` を対象にした呼び出しは**常に** {@link ContestedWithoutCompanionError}
