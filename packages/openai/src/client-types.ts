@@ -2,13 +2,10 @@
  * `OpenAILLMProviderOptions.client` / `OpenAIEmbeddingProviderOptions.client` に渡せる
  * クライアントの、SDK のクラスから独立した構造型（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。
  *
- * **経緯**: 以前はこの欄を `Pick<OpenAI, "chat">` / `Pick<OpenAI, "embeddings">`
- * （`openai` パッケージの実クラスの型をそのまま切り出したもの）にしていた。この形では、
- * 利用者が `@mnemora/openai` の依存に固定した版（`openai@7.10.0`）と違う版の `openai` を
- * 自分の依存として入れて `client` に渡すと、型が食い違って `TS2322` になっていた
- * （2026-09-27 実測。Issue #1221「事実」節）。オーナーの回答（ask_human f259eeb8、
- * 2026-09-28、逐語「型を SDK のクラスから切り離すってのはだめですか？」）に沿い、
- * 公開する型を SDK のクラスを名指ししない自前の構造型へ切り離した。
+ * **なぜ SDK の型を使わないか**: `Pick<OpenAI, "chat">` のように `openai` パッケージの実クラスの型を
+ * 公開すると、利用者が `@mnemora/openai` の依存に固定した版（`openai@7.10.0`）と違う版の `openai` を
+ * 自分の依存として入れて `client` に渡したとき、型が食い違って `TS2322` になる（Issue #1221 で実測）。
+ * そのため、SDK のクラスを名指ししない自前の構造型にした（オーナーの方針）。
  *
  * **持たせるのは、provider が実際に呼ぶメソッドの、実際に送る引数・実際に読む戻り値の
  * フィールドだけ。**SDK が持つ他のメソッド・フィールドは持たない。
