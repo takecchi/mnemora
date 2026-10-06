@@ -68,7 +68,7 @@ describe("CassetteRecorder.toCassette: recordedAt は渡した時刻（省略時
   });
 });
 
-describe("RecordingEmbeddingProvider: 約束違反の戻りは記録せずに落とす（ADR 0452 決定 A-5）", () => {
+describe("RecordingEmbeddingProvider: 約束違反の戻りは記録せずに落とす（ADR 0452）", () => {
   const providerReturning = (vectors: unknown): EmbeddingProvider => ({
     space,
     embed: async () => vectors as number[][],
@@ -153,7 +153,7 @@ describe("RecordingLLMProvider.completeStructured: 記録済みの値も呼び�
   });
 });
 
-describe("RecordingLLMProvider.completeStructured: 失敗した呼び出しは memo に残さない（ADR 0452 決定 A-3）", () => {
+describe("RecordingLLMProvider.completeStructured: 失敗した呼び出しは memo に残さない（ADR 0452）", () => {
   it("1回目が失敗しても、2回目は delegate を呼び直して成功する", async () => {
     let calls = 0;
     const delegate: LLMProvider = {
