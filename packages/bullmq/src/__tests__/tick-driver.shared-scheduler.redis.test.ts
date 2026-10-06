@@ -8,12 +8,10 @@ import type { BullmqTickDriver } from "../tick-driver.js";
  * README と `tick-driver.ts` の doc が「コードからの読み」と書いていた3つの振る舞いを、今の振る舞いとして縛る。
  *
  * - 同じ `queueName`・`jobName` の scheduler は1つで、後から `start()` した driver の `everyMs` が勝つ。
- * - 1台の `stop()` は共有の scheduler を消し、動いたままの別の driver の tick も止める（エラーにならない）。
+ * - 1台の `stop()` は、他の Worker が居れば共有の scheduler を消さず、動いたままの別の driver の tick は続く（ADR 0655。
+ *   ADR 0449 の時点では消えて止まった。詳しい歯は `tick-driver.stop-last-worker.redis.test.ts`）。
  * - 完了したジョブは、既定では直近 1000 件まで、`completedJobsToKeep` を渡せばその件数だけ残る
  *   （ADR 0548。以前は `removeOnComplete` を指定せず、全部残った）。
- *
- * ⚠ 2つ目は「望ましい振る舞い」として縛っているのではない。今の振る舞いの記録であり、直したら
- * この歯の期待を変えること（ADR 0449 の「材料」）。
  */
 const REDIS_PORT = process.env.REDIS_PORT;
 if (!REDIS_PORT) {
@@ -91,7 +89,7 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     expect((await q.getJobSchedulers()).map((s) => s.every)).toEqual([120_000]);
   });
 
-  it("1台の stop() は共有の scheduler を消し、動いたままの別の driver の tick も止める。新しい driver の start() で戻る", async () => {
+  it("1台の stop() は、他の Worker が居れば共有の scheduler を消さず、動いたままの別の driver の tick は続く（ADR 0655）", async () => {
     const name = `mnemora-tick-shared-stop-${Date.now()}`;
     const q = queueFor(name);
     let ticksA = 0;
@@ -103,16 +101,9 @@ describe("実 Redis: 共有の scheduler（ADR 0449）", () => {
     await waitFor(() => ticksA >= 1, 10_000);
 
     await b.stop();
-    expect(await q.getJobSchedulers()).toEqual([]);
-    // 進行中の1回が終わるのを待ってから、a の Worker が生きたまま発火が止まることを見る。
-    await sleep(500);
-    const settled = ticksA;
-    await sleep(1_000);
-    expect(ticksA).toBe(settled);
-
-    const c = make(name, 100, () => undefined);
-    await c.start();
-    await waitFor(() => ticksA > settled, 10_000);
+    expect((await q.getJobSchedulers()).length).toBe(1);
+    const before = ticksA;
+    await waitFor(() => ticksA >= before + 3, 10_000);
   });
 
   it("ADR 0548: 既定（直近 1000 件）の範囲では、完了したジョブは Redis に残る（以前の「残り続ける」と同じ見え方）", async () => {

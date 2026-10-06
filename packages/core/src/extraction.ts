@@ -55,8 +55,14 @@ export const ExtractedMemoryCandidateSchema = z.object({
    * `null` を保つので、主題なしの Memory になる。`subjectCandidates` を渡して「主題なし」を
    * 選ばせる使い方は、今は `@mnemora/anthropic`（か、`null` を保つ自前の provider）でだけ効く。
    *
+   * ⚠ **2026-10-06 更新（[ADR 0635](../../../docs/decisions/0635-llm-subject-id-dropped-by-default-without-candidates.md)、
+   * オーナー回答 374f6f88 の問15）: `subjectCandidates` を渡さない経路（省略・空配列。`tick`・`reextract` を含む）では、
+   * runtime は LLM が返した `subjectId` を既定で捨てる**（observation の `subjectId` へ落ちる）。受けるのは
+   * `RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true`（opt-in）のときだけ。**以下の警告は、`true` にしたときの話である。**
+   * 一覧を渡した `observe()` は、これまでどおり一覧に照らす。この関数（`extractCandidates`）自体は捨てない。
+   *
    * ⚠ **`subjectCandidates` を渡さない経路では、LLM が返した文字列の `subjectId` をそのまま受ける**
-   * （[ADR 0442](../../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
+   * （既定の変更の前の記述。[ADR 0442](../../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
    * 検証は `subjectCandidates` の一覧に照らすことでしか行わない（{@link sanitizeCandidateSubjectId}）ので、
    * 一覧を渡さない呼び出し——`extract: 'deferred'` の `tick`・`reextract`（どちらも一覧を持てない）を含む——
    * では、observation や `ctx` の `subjectId` と違う値でも、そのまま Memory の主題になる。

@@ -518,3 +518,53 @@ mnemora の `subjectId` の **null / 非 null** に1対1で対応する
    採用するなら `docs/roadmap.md` §5 に項目を足すのが本 repo の作法である。
 4. **印象の帰属を「誰が、誰について」の順序対にするか。**
    `Tenant` / `Subject` の非対称（`docs/vision.md`「Tenant と Subject を混同しない」）の芯に触る。
+
+---
+
+## 追記（2026-10-06、main `a2d66667` 時点）: 本文の現物の記述を、今の main と照らした
+
+> **⚠ この追記はクローン（miku）の委譲で動くマネージャーが書いた。オーナーの判断ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **本文と状態欄は書き換えていない。**本文は 2026-09-09 時点の現物で書かれており、ここに並べた食い違いは、その後の変更によるものである。
+
+**照らした方法**: 本文の、mnemora の現物についての主張を、main `a2d66667` の `packages/`・`docs/` に `grep`・`sed`・`awk` で当てた。推奨に効く主張（下の表で ✔ を付けた行）はマネージャーが自分で当て直した。それ以外は委譲先の照合による。**行番号は `a2d66667` 時点のもので、これも腐る。**
+
+**問1** は [ADR 0616](./0616-impression-topic-growth-are-not-emotion-simulation.md) で答えが出た。**問2〜4 は未決**で、[Issue #761](https://github.com/takecchi/mnemora/issues/761) に残っている。この追記はどの問いにも答えない。
+
+### 1. `virchamate` 側の主張は、すべて未確認
+
+§1 の対応づけ（`UserImpressionEntity`・`ConversationTopicEntity`・`PersonaGrowthEntity`・`PersonaEvolutionProposalEntity` とその行）、`virchamate-backend#50` の逐語と「Vector検索ミス」の Issue の本数、§2 の prisma の逐語・`relationships.service.ts`・`dashboard.service.ts`・`persona-growth.service.ts` の振る舞い、`confidence >= 30` のフィルタ、`importance @default(5)`、`GrowthScope` は、**未確認**である。この照合では外部のリポジトリを読んでいない。
+
+### 2. 食い違い（mnemora 側）
+
+| 本文の位置 | 本文の主張 | `a2d66667` の現物 | 何が変えたか |
+|---|---|---|---|
+| §2.3 落2 | `superseded` を書くのは `reextract` の1本だけ。`meta.reason` は `"reextract_superseded"` の1種類だけ | ✔ `consolidate` も `reason: "consolidated"` で `superseded` を書く（`runtime.ts:8483`/`:8501`）。本文が「予言」とした「2つ目の書き手」は、もう入っている | ADR 0089・ADR 0157 |
+| §2.3 落2 | `recall.ts` の doc「機構の都合（より良い抽出に置き換えられた）」 | ✔ 「（より良い抽出への置き換え、または統合）」（`recall.ts:993`） | 同上 |
+| §2.3 落2 | `memory-store.ts` の `updateStatus` の doc「現時点の唯一の呼び出し元（`runtime.ts` の `reextract`）」 | ✔ `packages/` の本番コードに `updateStatus` の呼び出し元は無い。runtime は `updateStatusWithEvent`（`reextract`・`restoreArchived`・`forget`・`consolidate`）と `supersedeWithNewMemories`（`reextract`・`consolidate`）を使う。doc は本追記と同じ PR で直した | ADR 0100 ほか |
+| §2.3 落2 | 統合は型だけで、ジョブハンドラが無い | `Runtime.consolidate`・`reflect` が在り、`tick` が駆動する | ADR 0089・ADR 0091・ADR 0157 |
+| §2.3 落2 | `contested` を作る主体が未実装 | `markContested`・`resolveContested`・`applyCorrection` と、`claimKey` による検出路が在る | ADR 0140・ADR 0185・ADR 0292 ほか |
+| §2.3 落3 | `strength` の値域に制約が無い（`z.number()`・CHECK なし） | ✔ `(0, 1]` に塞がれた（`MAX_STRENGTH = 1`、zod `.gt(0).max(MAX_STRENGTH)`、`0006_strength_value_range.sql` の CHECK）。⟹ 公開の口を開けても `strength` は**下げる向きにしか**使えない | ADR 0078 |
+| §4 案3 | `valid_from`/`valid_until` は DB にだけ在り、core の `Memory` 型には無い | ✔ `Memory.validFrom`/`validUntil` が在る（`memory.ts:195`/`:197`）。recall は `validAt` で絞る | ADR 0145・ADR 0164 |
+| §4 案2・案3・「これが覆るとしたら」 | `memory_relations`・`labels`/`memory_labels` は Phase 2 で未実装 | 実装済み。ただし ✔ `memory_relations.kind` は `'contradicts'` の1値だけ（`0026_memory_relations.sql`）で、`supersedes`・`becomes` などは無い。taxonomy は `0020_taxonomy_labels.sql` | ADR 0292・ADR 0318・ADR 0323 |
+| §2.1 (b) | `GroupCount.axis` は `"subject" \| "taxonomy" \| "time_window"`、実装は `subject` だけ | ✔ `"subject" \| "taxonomy"` の2値（`recall.ts:751`）。`time_window` は落とした。`topic` の軸は無い | ADR 0117・ADR 0318 |
+| §2.3 落1 | `RecallQuery` は全10欄 | 欄は大きく増えた。✔ ただし `superseded` を戻す口は今も無い | ADR 0164 ほか |
+| §3 | 書き込み後に動く列は5つ | `decayFloorAt`・`purgedAt`、purge による `content` の上書きなども動く | ADR 0124・ADR 0165 |
+| §4 案2 | `docs/vision.md:51` 逐語「6つ目は作らない」 | ✔ `:51` は「**記憶そのものを動かす**操作は5つの動詞に限る。ここは増やさない」。「6つ目」は `:78`・`:104` に在る | 未特定 |
+| §2.1 | migrations は5ファイル | ✔ 32ファイル。会話・話題・重要度の列が無い点は当たり | 多数 |
+| 確かめていないこと | `restrictedFromCloud` に当たるものを探していない | ✔ `restrictedFromCloud` は0件。呼び出し側が申告する `attributes` が受け皿として在る | ADR 0312 |
+| 差し戻す問い 1 | `docs/autonomy.md:113` | `:113` は別の内容に変わった。問1 自体は ADR 0616 で答えが出た | ADR 0616 |
+| 全体 | 行番号（例: `extraction.ts:215`/`:232`、`runtime.ts:241`、`recall.ts:382`、`docs/recall.md:505`） | ほぼすべてずれた（例: ✔ `extraction.ts:698`/`:709`/`:744`、✔ `runtime.ts:4494`/`:8444`/`:9039`、✔ `docs/recall.md:1315`）。内容は下の「当たり」のとおり | 後続のコミット |
+
+### 3. 今も当たっているもの
+
+- **§2.2「印象」の落ちるもの**: 帰属は単一の `subjectId` で順序対ではない（✔ `ctx.ts` の doc、`Memory.subjectId?: string | null`）。`mentionCount` に当たる回数の列が無い。✔ `confidence` は recall の返り値に出ない（`docs/recall.md:1315`「持ち出すのは `kind` だけである」）。`confidence` を後から動かす口が無い。
+- **§2.3「成長」の落ちるもの**: ✔ 系譜を recall から引けない。参照用に `superseded_by_id` を逆引きする口も `MemoryStore` に無い。✔ `strength` は抽出で今も無条件に `1`（`extraction.ts` の3箇所）、`halfLifeHours` はテナント既定値。公開の動詞から `strength` を入れる口は無い。`Memory` に `supersededReason` は無い。
+- `InferredProvenance` の5欄、`provenance.kind` が推論と事実の区別そのものであること（`docs/memory-model.md:64-67`）、✔ `importance`/`salience`/`topic` が `packages/core/src` に0件であること、ADR 0041（`reinforce` は `strength` を動かさない）。
+- ✔ 「複雑な感情シミュレーション」は `docs/north-star.md:91` と `docs/vision.md:116` に在る。
+
+### 4. 確かめていないこと
+
+- 「何が変えたか」の欄は、ADR の本文・マイグレーション・コード内コメントからの対応づけである。`git log -S` でコミットまでは特定していない。
+- ADR 0055 の「75件 → 129〜138件」、ADR 0035・0023・0054・0056 の本文、`docs/alteroid-findings.md` の F 節は照らしていない。
+- 本文 §2.3 の `recall.ts:642`（「`subjectId` を省略すると『テナント全体』」）の移動先は特定していない。
+- `reinforce` が `strength` を動かさないことは ADR 0041 の記述で確かめただけで、今のコードでは当て直していない。

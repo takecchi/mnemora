@@ -2744,6 +2744,26 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。
 
+### 66. `subjectCandidates` を渡さない抽出が、LLM が返した `subjectId` を既定で捨てるようになった（`@mnemora/core`）
+
+[ADR 0635](./decisions/0635-llm-subject-id-dropped-by-default-without-candidates.md)（オーナー回答 374f6f88 の問15（全部推奨）による既定の変更。オプション名・置き場所・捨てる範囲は担い手の判断で、オーナーが決めたのではない。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
+
+⚠ **未リリース**。**番号は 66 である**——項目65 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`subjectCandidates` を渡さない抽出が、LLM が返した `subjectId` を既定で捨てる…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない（`RuntimeConfig` に省略可能な欄が1つ増える）。
+
+**なぜ破壊的と数えるか**: 型は変わらないが、以前は Memory の主題になっていた値が、新しく捨てられ、`Memory.subjectId` が変わる（実行時だけの意味変更。項目57・58 と同じ数え方）。
+
+**誰が影響を受けるか**: 一覧（`subjectCandidates`）を渡さずに、LLM が候補ごとに返す `subjectId` に頼っていた呼び出し側。`extract: 'deferred'` の `tick` と `reextract` は一覧を持てないので、そこで頼っていたものも。
+
+**どう直すか**:
+- 信用できる本文だけを抽出していて、従来どおり受けたい: `createRuntime({ ..., config: { acceptLlmSubjectIdWithoutCandidates: true } })`。
+- 信用できない本文を抽出する、または候補を絞りたい: 設定は足さず、`observe()` に `subjectCandidates` を渡して選ばせる（一覧内は採り、一覧外は弾く）。`tick`・`reextract` の経路は、`observation.subjectId` が主題になる。
+
+**確かめたこと**: 直す前に赤（7本）、直して緑。直しを外す・やりすぎる変異で歯が赤（ADR 0635、PR 本文）。**確かめていないこと**: 捨てた値の通知は無い（ADR 0635 の負債）。実際の LLM が一覧なしで `subjectId` を返す頻度。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
