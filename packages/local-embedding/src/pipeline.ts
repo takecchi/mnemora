@@ -54,9 +54,9 @@ export interface LocalEmbeddingModelSpec {
  *
  * 🔴 **なぜ「テキスト→ベクトル」の関数1本ではなく、この形にしたか。**
  *
- * 以前はここが `(texts: string[]) => Promise<number[][]>` という**関数型**だった。
+ * `(texts: string[]) => Promise<number[][]>` という**関数型**だと、
  * `LocalEmbeddingProvider` の `createPipeline` 注入点（`CreateLocalEmbeddingPipeline`）は
- * 外から差し替えられるため、**上限を宣言しない pipeline を注入できてしまっていた**
+ * 外から差し替えられるため、**上限を宣言しない pipeline を注入できてしまう**
  * （ADR 0090 決定4・引き受けた負債1）。宣言が無いまま黙って切り捨てられると、
  * 切られたベクトルと切られていないベクトルが**同じ顔**で返る——
  * `docs/north-star.md` が挙げる「知らないことを、知らないと言える」の裏側、
@@ -332,7 +332,7 @@ function withCacheDirLock<T>(task: () => Promise<T>): Promise<T> {
  * 利用者も）が、意図せずこの `cacheDir` を見てしまう。
  *
  * ⚠ **`spec.cacheDir` が未指定のときは、`env.cacheDir` に触らない。**触らなければ、
- * 今までどおり transformers.js の既定（パッケージ自身の中の `.cache/`）のままになる。
+ * transformers.js の既定（パッケージ自身の中の `.cache/`）のままになる。
  * ⚠ **差し替えるのは `env` を読めたときだけである。**`env` を持たない差し替え
  * （`vi.mock` が `pipeline` だけを返す形）もあるため、読み出しは try/catch で守る——
  * 読めなければ「差し替えられない」として、読み込みそのものは止めない
@@ -352,7 +352,7 @@ function withCacheDirLock<T>(task: () => Promise<T>): Promise<T> {
  *   （`revisionCacheRoot`）。基の根は `spec.cacheDir`、無ければ既定の `env.cacheDir`。
  *
  * ⚠ `env` を読めない・`env.cacheDir` も `spec.cacheDir` も無い・`env.remotePathTemplate` が
- * 文字列でない、のどれかなら、この差し替えはせず、今までどおり `revision` を `pipeline()` へ渡す。
+ * 文字列でない、のどれかなら、この差し替えはせず、`revision` を `pipeline()` へそのまま渡す。
  * `spec.revision` が無いときは、何も変えない。
  *
  * ⛔ **この関数を呼ぶ経路は、上の {@link withCacheDirLock} を必ず通る。**
@@ -380,7 +380,7 @@ async function loadWithCacheDirSwap(
   recordTransformersCacheDir(env?.cacheDir);
 
   // Issue #1403: `revision` を `env.remotePathTemplate` に埋め込めるか。埋め込めるときだけ、キャッシュの根を
-  // revision ごとに分け、`revision` は `pipeline()` へ渡さない。埋め込めないときは今までどおり渡す。
+  // revision ごとに分け、`revision` は `pipeline()` へ渡さない。埋め込めないときは渡す。
   const revisionPin = planRevisionPin(spec, env);
   const cacheDir = revisionPin?.cacheRoot ?? spec.cacheDir;
 
@@ -437,7 +437,7 @@ interface SwappableTransformersEnv {
 
 /**
  * `revision` を `env.remotePathTemplate` に埋め込むときの値（Issue #1403・ADR 0365）。埋め込めないなら
- * `undefined`——そのときは今までどおり `revision` を `pipeline()` へ渡す。
+ * `undefined`——そのときは `revision` を `pipeline()` へそのまま渡す。
  *
  * 埋め込めないのは、`spec.revision` が無い・`env` を読めない・`env.remotePathTemplate` が文字列でない・
  * 基の根（`spec.cacheDir`、無ければ既定の `env.cacheDir`）が無い、のどれかのとき。

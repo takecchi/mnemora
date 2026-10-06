@@ -75,7 +75,7 @@ export const DEFAULT_LOCAL_EMBEDDING_NUM_THREADS = 4;
 /**
  * 既定の最大バッチサイズ。**Issue #1141 / ADR 0358。**
  *
- * `embed(ctx, texts)` は、`texts.length` がこの値以下なら**今までどおり1回**で
+ * `embed(ctx, texts)` は、`texts.length` がこの値以下なら**1回**で
  * 推論する（ビット一致）。超えたときだけ、先頭からこの件数ずつに分けて順に推論し、
  * 結果を順番どおりに連結する。
  *
@@ -91,9 +91,8 @@ export const DEFAULT_LOCAL_EMBEDDING_NUM_THREADS = 4;
  *
  * ⚠ **q8 では、バッチの長さ構成が変わると出力ベクトルがわずかに動く**
  * （ADR 0095 決定5・ADR 0099 追記・ADR 0110 §4 で実測済み）。この既定値**以下**の
- * 件数を渡す既存の呼び出し（`packages/core` の本番経路は常に1件）は、
- * この変更の前後でビット単位で変わらない——1回で推論する経路そのものを
- * 変えていないため。既定値**より多い**件数を直接 `embed()` に渡す呼び出しだけが、
+ * 件数を渡す呼び出し（`packages/core` の本番経路は常に1件）は、分割せず1回で推論するので
+ * ビット単位で変わらない。既定値**より多い**件数を直接 `embed()` に渡す呼び出しだけが、
  * 分割の対象になる。
  */
 export const DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE = 128;
@@ -140,7 +139,7 @@ export interface LocalEmbeddingRetryOptions {
    *
    * ⚠ **有限でない値（`Infinity`・`-Infinity`）は、構築時に `RangeError` を投げる**（Issue #1785。message に値が入る）。
    * 「成功するまで無限に再試行」は約束しない。**`NaN`・0以下は 1 に丸め、小数は切り捨てた回数だけ試す**
-   * （例: `2.5` は2回）。この丸めは今までどおりである。
+   * （例: `2.5` は2回）。
    */
   attempts?: number | undefined;
   /**
@@ -203,7 +202,7 @@ export interface LocalEmbeddingProviderOptions {
    * `embed(ctx, texts)` を1回の推論に渡す最大件数。既定
    * {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}（128）。
    *
-   * `texts.length` がこの値以下なら、今までどおり1回の推論で済ませる
+   * `texts.length` がこの値以下なら、1回の推論で済ませる
    * （ビット一致）。超えたときだけ、先頭からこの件数ずつに分けて順に推論し、
    * 結果を順番どおりに連結する——分割すると、q8 ではベクトルがわずかに動きうる
    * （{@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE} の doc・ADR 0358 参照）。
@@ -473,22 +472,22 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    *   pipeline の `maxInputTokens`・`countTokens` は読まない。差し替えた pipeline では、上限を守るのはその `embed` の責任である。
    * - 返ったベクトルの件数が `texts` と違う・次元が `space.dimensions` と違う・有限でない成分を含むときは、素の `Error`。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: `opts?.signal`
-   * を受け取るが、`@huggingface/transformers` のパイプライン呼び出し自体を中断する口を
+   * ⚠ **`opts?.signal`（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）は
+   * 受け取るが、`@huggingface/transformers` のパイプライン呼び出し自体を中断する口を
    * 持たないため、**推論の途中では止まらない**。** このクラスがすることは、モデルの
    * 読み込みの前後・推論（`pipeline.embed`、下の分割の有無に関わらず）の前後で
    * `signal.throwIfAborted()` 相当を確かめるだけであり、推論そのものは最後まで走る
    * ——`signal` が途中で abort されても、推論が終わるまでは待ち、終わった時点で abort
    * 済みなら、ベクトルを**返さずに**投げ直す（reject の値は `signal.reason`）。
-   * ⚠ **2026-10-01 追記（ADR 0445）: 件数が `maxBatchSize` を超えて分割されたときは、チャンクの合間で abort を見る**——
-   * 動いている1チャンクは止まらないが、abort 済みなら残りのチャンクは推論しない（以前は全チャンクを推論してから投げ直していた）。
+   * ⚠ **件数が `maxBatchSize` を超えて分割されたときは、チャンクの合間で abort を見る**（ADR 0445）——
+   * 動いている1チャンクは止まらないが、abort 済みなら残りのチャンクは推論しない。
    * `packages/core` 側は runtime 自身が provider の Promise と abort を競わせる
    * （`runAbortable`）ため、runtime 経由の呼び出しはこの提供元の対応と無関係に中断が
    * 効く——この対応が意味を持つのは、この provider を `packages/core` を介さず直接呼ぶ
    * 呼び出し側にとってである。
    *
-   * ⚠ **2026-09-30 追記（ADR 0428）: モデルの読み込み中・読み込みの再試行の待ち（`retry` の `sleep` を含む）も、
+   * ⚠ **（ADR 0428）モデルの読み込み中・読み込みの再試行の待ち（`retry` の `sleep` を含む）も、
    * `signal` ごとに切れる。** abort された呼び出しは、読み込みの完了を待たずに `signal.reason`（`abortReason(signal)`）で
    * 即座に reject する。**ただし読み込みそのものは abort で止まらない**——複数の `embed()`・`warmup()` が待つ共有の読み込み
    * （と、その中の再試行）は続き、切れるのは abort された呼び出しの「待ち」だけである。ある呼び出しの abort が、
@@ -496,7 +495,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * 成功すればモデルは保持されて次の `embed()` が使う。`warmup()` は `signal` を取らない（待ちは切れない）。
    *
    * ⭐ **`texts.length` が `maxBatchSize`（既定 {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}）
-   * 以下なら、今までどおり1回の `pipeline.embed()` で済ませる（ビット一致）。**超えたときだけ、
+   * 以下なら、1回の `pipeline.embed()` で済ませる（ビット一致）。**超えたときだけ、
    * 先頭から `maxBatchSize` 件ずつに分けて順に（直列で）推論し、結果を順番どおりに連結する
    * （Issue #1141 / ADR 0358）。prefix の付与・上限トークン数の検査の順序は変わらない
    * ——分割するかどうかを決める前に、まず `texts` 全体に prefix を付ける。
@@ -541,7 +540,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     // 分岐を消して、経路を1本にしてある。`"" + text` は元の文字列そのものなので、
     // 増えるのは配列1本の確保だけで、その費用は推論の前では見えない。
     const prefixed = texts.map((text) => this.#prefix + text);
-    // ⭐ 件数が maxBatchSize 以下なら、今までどおり1回で丸ごと渡す（ビット一致）。
+    // ⭐ 件数が maxBatchSize 以下なら、1回で丸ごと渡す（ビット一致）。
     // 超えたときだけ #embedInChunks に回す——分岐の片方は今日の呼び出しと1バイトも
     // 変わらない（同じ関数を、同じ引数で、同じ経路で呼ぶ）。
     const vectors =
@@ -771,8 +770,8 @@ function rebaseInputTooLongIndex(error: unknown, chunkOffset: number): unknown {
 /**
  * `cacheDir` を省いたとき、実際の置き場所が分からない場合の表記。**特定の場所を断言しない。**
  * 置き場所はパッケージマネージャの配置で変わる（npm と pnpm で違う。`transformers-cache-place.ts`）。
- * 【実測 2026-09-27】以前はここを npm の配置 `node_modules/@huggingface/transformers/.cache/` で
- * 決め打ちしており、pnpm の利用者には無い場所を指していた。
+ * npm の配置 `node_modules/@huggingface/transformers/.cache/` で決め打ちすると、pnpm の利用者には
+ * 無い場所を指す（実測）。
  */
 const UNKNOWN_TRANSFORMERS_CACHE_PLACE =
   "transformers.js の env.cacheDir（`@huggingface/transformers` パッケージの中の `.cache/`。実際の場所はパッケージマネージャの配置による）";
@@ -790,7 +789,7 @@ function describeLoadFailure(
     spec.cacheDir !== undefined
       ? `cacheDir=${spec.cacheDir}`
       : `cacheDir=未指定（transformers.js の既定: ${defaultCacheDir ?? UNKNOWN_TRANSFORMERS_CACHE_PLACE}）`;
-  // 【実測 2026-09-27】キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、
+  // 【実測】キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、
   // 次のプロセスでも同じように落ち続ける。消せば次の読み込みで取り直すので、消す場所を名指す。
   // Issue #1403: `revision` を渡したときは、既定の `createPipeline` が根を `<根>/<revision>` に分ける。
   const baseCacheRoot = spec.cacheDir ?? defaultCacheDir;
