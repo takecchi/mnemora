@@ -499,3 +499,51 @@ describe("recall() — 連想枠（段3.5）専用の後置フィルタが inclu
     expect(ids).not.toContain(subjectlessAssociated.id);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 連想枠（段3.5）の search() に includeSubjectless が載ること（配線の歯、#679 / ADR 0286）。
+//
+// 上の describe は「連想用 search() が欄を無視しても後置フィルタが絞る」形と既定の回帰だけを見ていて、
+// 連想枠の filter から `includeSubjectless` を外す変異（`associationFilter` の1行）が緑だった
+// （Issue #1776 の #679 のコメント、ADR 0665）。欄を尊重する adapter（Postgres）では、連想のアンカーの
+// 近傍にいる主題なしの記憶が adapter の WHERE で落ち、連想で拾えなくなる。
+// ---------------------------------------------------------------------------
+describe("recall() — 連想枠（段3.5）の VectorStore.search にも includeSubjectless が載る（配線の歯）", () => {
+  async function associationFilters(includeSubjectless: boolean | undefined) {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, ANCHOR_VECTOR, {
+      subjectId: "user-a",
+      digest: "アンカー本文",
+    });
+    await createEmbeddedMemory(stores, ASSOCIATED_VECTOR, {
+      subjectId: null,
+      digest: "連想・主題なし",
+    });
+    const captured = captureVectorFilters(stores);
+    await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      ...(includeSubjectless === undefined ? {} : { includeSubjectless }),
+      association: { maxCount: 5, anchorCount: 1 },
+    });
+    return captured;
+  }
+
+  it("includeSubjectless: true を渡すと、段1と連想枠のどちらの search() の filter にも true が載る", async () => {
+    const filters = await associationFilters(true);
+    // 段1（1本目）と、連想枠（2本目以降）。連想枠の search() が1本も無いなら、この歯は何も見ていない。
+    expect(filters.length).toBeGreaterThanOrEqual(2);
+    for (const filter of filters) {
+      expect(filter.subjectId).toBe("user-a");
+      expect(filter.includeSubjectless).toBe(true);
+    }
+  });
+
+  it("includeSubjectless を渡さないと、連想枠の filter にも載らない（undefined のまま）", async () => {
+    const filters = await associationFilters(undefined);
+    expect(filters.length).toBeGreaterThanOrEqual(2);
+    for (const filter of filters) {
+      expect(filter.includeSubjectless).toBeUndefined();
+    }
+  });
+});

@@ -96,3 +96,31 @@ describe("[根拠:失われた] の欄（Issue #972）", () => {
     expect(parsed.lines.map((l) => l.digest)).not.toContainEqual(expect.stringContaining("[根拠"));
   });
 });
+
+// Issue #1776 の #698 のコメント（ADR 0665）: `basisLost: false`（根拠が残っている）を与える歯が無く、
+// `=== true` を外して「`false` でも出す」変異が緑だった。
+describe("[根拠:失われた] は basisLost が true のときだけ出る（#698）", () => {
+  const base = {
+    memoryId: "m-1",
+    digest: "青系を好むと推測される",
+    retrievedVia: "ann" as const,
+    provenanceKind: "inferred" as const,
+    speaker: null,
+    subjectId: "user-1",
+    recordedAt: new Date("2026-09-01T00:00:00Z"),
+    occurredAt: null,
+    score: SCORE,
+  };
+
+  it("basisLost: false の inferred の行には出ない", () => {
+    const body = buildMnemoraPrompt(recallWith([{ ...base, basisLost: false as never }]));
+    expect(body).not.toContain("[根拠");
+  });
+
+  it("basisLost を持たない行にも出ない（対照: true の行にだけ出る）", () => {
+    expect(buildMnemoraPrompt(recallWith([{ ...base }]))).not.toContain("[根拠");
+    expect(buildMnemoraPrompt(recallWith([{ ...base, basisLost: true }]))).toContain(
+      "[根拠:失われた]",
+    );
+  });
+});

@@ -620,6 +620,17 @@ describe("localEmbeddingPinnedRevision — 固定した Hugging Face revision（
     }
   });
 
+  it("sha が空文字なら例外を投げる（空の revision を LocalEmbeddingProvider へ渡さない）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pinned-revision-"));
+    const path = join(dir, "empty-sha.json");
+    writeFileSync(path, JSON.stringify({ sha: "" }));
+    try {
+      expect(() => localEmbeddingPinnedRevision(path)).toThrow(/sha（文字列）が無い/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("sha が無ければ例外を投げる", () => {
     const dir = mkdtempSync(join(tmpdir(), "pinned-revision-"));
     const path = join(dir, "no-sha.json");
