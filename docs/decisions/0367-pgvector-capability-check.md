@@ -237,3 +237,31 @@
     （決定5）。
   - 0.5.x・0.6〜0.7.x の実物に対する実測が無いまま、代理実測だけで能力ベースの判定を
     採用している。
+
+## 追記（2026-10-07、[Issue #1780](https://github.com/takecchi/mnemora/issues/1780)）: `runMigrations` の能力検査は、`schema`/`extensionSchema` の `search_path` の下で流す
+
+**この判断はクローン（miku）の判断であり、オーナーの判断ではない。**
+
+- **何が起きていたか**: `runMigrations` に `schema` と、`public` 以外の `extensionSchema` を渡し、
+  `vector` がその `extensionSchema` に在ると、検査が `type "vector" does not exist` で落ちた
+  （`create` は末尾の検査、`verify` はロック取得前の検査。**どちらも実測で落ちた**）。
+  検査の SQL は `'[0]'::vector` と型を修飾せずに書き、各ファイルを流すときの
+  `SET LOCAL search_path TO <schema>,<extensionSchema>` の**外**で流れ、接続の既定の
+  `search_path`（`"$user", public`）に `extensionSchema` が入っていないため。
+  決定の文脈は「`vector` は `public` にある」を暗黙に置いていた。
+- **決めたこと**: 検査を流す所で、`schema` を指定した呼び出しに限り、
+  `BEGIN` → `SET LOCAL search_path TO <各ファイルと同じ>` → 検査 → `COMMIT`（失敗したら `ROLLBACK`）で囲む。
+  `SET LOCAL` なので、トランザクションを抜けると接続の `search_path` は元に戻る。
+  `verify` は pool から接続を1本借りて同じことをし、返す。**`schema` 未指定の呼び出しは
+  `search_path` に一切触れない**（発行される SQL は今日と同じ）。
+- **`PGVECTOR_CAPABILITY_QUERY` は変えない**: `vector-store.ts` も同じ文字列を使い、
+  そちらは `extensionSchema` を知らない（検索は呼び出し側の接続の `search_path` に任せている）。
+  `vector-store.ts` の振る舞いは1バイトも変わらない。公開 API の型・export も変わらない
+  （`dist` の `.d.ts` は変更前後で同一）。
+- **採らなかった案**: (a) 検査の SQL で型を `"<extensionSchema>".vector` と修飾する案。
+  共有の定数を、`vector-store.ts`（`extensionSchema` を持たない）と分けるか、引数にする必要があり、
+  `vector-store.ts` の発行 SQL が変わる。(b) は `migrate.ts` の中で閉じる。
+- **引き受けた負債**: `schema` を指定した呼び出しで、検査のために往復が `BEGIN`・`SET LOCAL`・`COMMIT`
+  の3つ増える（`create` は定常状態でも毎回検査するため、毎回）。
+  `vector-store.ts` の検査（`withRelaxedOrderScan` の前）は、`vector` が呼び出し側の接続の
+  `search_path` に無いと同じ形で落ちうるが、**手元では確かめていない**（この追記の範囲外）。

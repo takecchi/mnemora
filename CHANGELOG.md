@@ -250,6 +250,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres` の `runMigrations` に `schema` と `public` 以外の `extensionSchema` を渡すと、pgvector の能力検査が `type "vector" does not exist` で落ちていたのを直した**（`extensionMode: "create"` も `"verify"` も。[Issue #1780](https://github.com/takecchi/mnemora/issues/1780)。[ADR 0367](./docs/decisions/0367-pgvector-capability-check.md) 追記）。検査だけを `SET LOCAL search_path` で囲んで流す。`schema` 未指定の呼び出しの発行 SQL と、公開型・公開 API は変えていない。
+
 - **`recall()` の段3.5（連想）で `association.maxCount` を超えて席に着けなかった比較不能（`total` が `NaN`）の記憶が、`over_limit`（stage `association`）と `score_not_comparable` の両方に数えられていたのを、`over_limit(association)` にだけ数えるよう直した**（[Issue #1788](https://github.com/takecchi/mnemora/issues/1788)。[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記10。追記7 の取りこぼし）。公開型・公開 API は変えていない。
 - **`recall()` の段3で多者間の群の上限（`relationMaxCount`）に切られた候補が、段3.5 の連想の必須の同伴取得（`RelationStore.link` で張った辺をたどる形）で `memories`（または予算で落ちて `budget_dropped`）へ戻ったとき、`over_limit`（stage `relation`）の count からも差し引かれず二重に数えられていたのを、戻った先でだけ数えるよう直した**（[Issue #1794](https://github.com/takecchi/mnemora/issues/1794)。[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記11）。公開型・公開 API は変えていない。
 
