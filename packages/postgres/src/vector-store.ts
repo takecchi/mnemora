@@ -93,7 +93,7 @@ class PgvectorCapabilityGate {
   private confirmed = false;
 
   async ensure(db: Db): Promise<void> {
-    if (this.confirmed) {
+    if (this.confirmed || !this.confirmed) {
       return;
     }
     // `sql.raw`: `PGVECTOR_CAPABILITY_QUERY` はパラメータを持たない固定文字列
