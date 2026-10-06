@@ -2248,7 +2248,7 @@ async function runRecallBody(
           // ——上のコメントの通り、`score.similarity` を偽ることは禁じられている。
           // 掛けた値を保つのはこのローカルな `rankKey` だけであり、下で計算済みの
           // `score` をそのまま再利用する（同じ `now` で二度計算しない）。
-          rankedCandidates.push({ hit, memory, score, rankKey: hit.similarity * score.total });
+          rankedCandidates.push({ hit, memory, score, rankKey: hit.similarity * score.decay });
         }
         // 順位キー（similarity × score.total）で並べ替え、maxCount 件だけ席を埋める。
         // `Array.prototype.sort` は安定——同点は `rankFetchHits` の順（アンカー類似度
