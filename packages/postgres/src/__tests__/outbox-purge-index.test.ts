@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import type { Ctx } from "@mnemora/core";
 import { DEFAULT_MIGRATIONS_DIR } from "../migrate.js";
 import { buildPurgeCompletedJobsTargetSelect } from "../outbox-store.js";
@@ -156,6 +157,28 @@ describe("outbox の完了済みジョブ掃除の対象選択（ADR 0404 / ADR 
     expect(tablePages).toBeGreaterThan(500);
     expect(buffers).toBeLessThan(tablePages * 0.02);
   }, 120_000);
+
+  it("索引の定義: idx_outbox_completed は completed_at IS NOT NULL の部分索引（未処理の行に索引の費用を乗せない。ADR 0412 決定1）", async () => {
+    const { pool } = await getTestClient();
+    const result = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'idx_outbox_completed'",
+    );
+    expect(result.rows).toHaveLength(1);
+    const indexdef: string = result.rows[0].indexdef;
+    expect(indexdef).toContain("(tenant_id, completed_at, id)");
+    expect(indexdef).toContain("WHERE (completed_at IS NOT NULL)");
+  });
+
+  it("対象選択の SQL: lock=true のときだけ FOR UPDATE SKIP LOCKED（掴まれた行を待たず飛ばす。ADR 0404）", () => {
+    const dialect = new PgDialect();
+    const locked = dialect.sqlToQuery(buildPurgeCompletedJobsTargetSelect(CTX, WITH_TARGETS, true));
+    const unlocked = dialect.sqlToQuery(
+      buildPurgeCompletedJobsTargetSelect(CTX, WITH_TARGETS, false),
+    );
+    expect(locked.sql).toContain("FOR UPDATE SKIP LOCKED");
+    expect(unlocked.sql).not.toContain("FOR UPDATE");
+    expect(unlocked.sql).not.toContain("SKIP LOCKED");
+  });
 
   it("前（陽性対照）: 索引を落とすと Seq Scan になり、対象 0 件でも表をほぼ全部読む", async () => {
     const { pool } = await getTestClient();

@@ -149,6 +149,94 @@ describe("markContestedGroup: 落ちる id と返り値の並び", () => {
   });
 });
 
+describe("markContestedGroup: メンバーの更新時刻（#1490・旧実装の SET と同じ）", () => {
+  it("mark の前後で、メンバーの updatedAt が進む（返り値も行も）", async () => {
+    const tenantId = "cg-mark-updated-at";
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const ids: MemoryId[] = [];
+    for (let i = 0; i < 3; i++) ids.push(await insertRawMemory(pool, tenantId, `u${i}`, none));
+    // 行を入れた直後の now() と区別できるよう、更新時刻を過去へ固定する。
+    const past = new Date(Date.UTC(2020, 0, 1));
+    await pool.query(`UPDATE memories SET updated_at = $2 WHERE id = ANY($1::uuid[])`, [ids, past]);
+
+    const r = await store.markContestedGroup(
+      { tenantId },
+      ids.map((id) => ({ id, event: newEvent(tenantId, id, "u") })),
+    );
+
+    expect(r.members).toHaveLength(3);
+    for (const m of r.members) {
+      expect(m.updatedAt.getTime()).toBeGreaterThan(past.getTime());
+    }
+    const rows = await pool.query(`SELECT updated_at FROM memories WHERE id = ANY($1::uuid[])`, [
+      ids,
+    ]);
+    expect(rows.rows).toHaveLength(3);
+    for (const row of rows.rows) {
+      expect(new Date(row.updated_at).getTime()).toBeGreaterThan(past.getTime());
+    }
+  });
+});
+
+describe("markContestedGroup / resolveContestedGroup: events の sizeBeforeBytes と at（#1490・旧実装と同じ式）", () => {
+  const fixedAt = new Date("2021-03-04T05:06:07.123Z");
+
+  it.each(["mark", "resolve"] as const)(
+    "%s: 渡した sizeBeforeBytes と過去の固定 at が、返り値と memory_events の行に出る",
+    async (op) => {
+      const tenantId = `cg-events-size-at-${op}`;
+      await resetTestDatabase();
+      const { db, pool } = await getTestClient();
+      const store = new PostgresMemoryStore(db);
+      const ids: MemoryId[] = [];
+      for (let i = 0; i < 3; i++) ids.push(await insertRawMemory(pool, tenantId, `e${i}`, none));
+      const withSizeAt = (id: MemoryId, k: number) => ({
+        ...newEvent(tenantId, id, `e${k}`),
+        sizeBeforeBytes: 1000 + k,
+        at: fixedAt,
+      });
+      if (op === "resolve") {
+        await store.markContestedGroup(
+          { tenantId },
+          ids.map((id) => ({ id, event: newEvent(tenantId, id, "mark") })),
+        );
+        await pool.query(`DELETE FROM memory_events WHERE tenant_id = $1`, [tenantId]);
+      }
+
+      const r =
+        op === "mark"
+          ? await store.markContestedGroup(
+              { tenantId },
+              ids.map((id, k) => ({ id, event: withSizeAt(id, k) })),
+            )
+          : await store.resolveContestedGroup(
+              { tenantId },
+              ids.map((id, k) => ({
+                id,
+                status: "active" as const,
+                event: withSizeAt(id, k),
+              })),
+            );
+
+      expect(r.events.map((e) => e.sizeBeforeBytes)).toEqual([1000, 1001, 1002]);
+      expect(r.events.map((e) => e.at.getTime())).toEqual(ids.map(() => fixedAt.getTime()));
+      const rows = await pool.query(
+        `SELECT memory_id, size_before_bytes, at FROM memory_events WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      expect(rows.rows).toHaveLength(3);
+      const byMemory = new Map(rows.rows.map((x) => [x.memory_id, x]));
+      ids.forEach((id, k) => {
+        const row = byMemory.get(id);
+        expect(row.size_before_bytes).toBe(1000 + k);
+        expect(new Date(row.at).getTime()).toBe(fixedAt.getTime());
+      });
+    },
+  );
+});
+
 describe("resolveContestedGroup: 落ちる id と返り値の並び", () => {
   async function contestedGroup(tenantId: string, n: number): Promise<MemoryId[]> {
     const { db, pool } = await getTestClient();

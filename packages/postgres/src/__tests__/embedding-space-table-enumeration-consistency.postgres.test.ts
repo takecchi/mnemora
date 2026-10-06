@@ -110,7 +110,8 @@ describe("listEmbeddingSpaceTables（TS）と migration 0027 の列挙（SQL）�
     expect(sqlTables).toEqual(tsTables);
   });
 
-  it("両方とも、同じ空間について1バイトも違わない索引名を導く", async () => {
+  /** 下の2つの it が共有する本体（自分で空間を登録するところまでを含む）。 */
+  async function assertIndexNamesAgreeStartingFromAnyState(): Promise<void> {
     const { pool } = await getTestClient();
     // 前の it に頼らず、自分で空間を登録する（`--sequence.shuffle` で it の順が入れ替わると、
     // この it が先に走り、SPACE_A/SPACE_B のテーブルがまだ無くて 0 件で落ちた。Issue #1276 / ADR 0397）。
@@ -131,6 +132,21 @@ describe("listEmbeddingSpaceTables（TS）と migration 0027 の列挙（SQL）�
       );
       expect({ table, found: result.rows.length }).toEqual({ table, found: 1 });
     }
+  }
+
+  it("両方とも、同じ空間について1バイトも違わない索引名を導く", async () => {
+    await assertIndexNamesAgreeStartingFromAnyState();
+  });
+
+  // 上の it と順を入れ替えた形（#1472 A8）: `--sequence.shuffle` で上の it が先に走ったときの状態
+  // （SPACE_A/SPACE_B のテーブルがまだ無い）を、通常の実行順でも作って直接確かめる。上の本体が
+  // 自分で空間を登録していなければ、ここで 0 件になって落ちる（修正の取り消しが通常の順でも赤になる）。
+  it("空間のテーブルがまだ無い状態から始めても、索引名は一致する（it の順を入れ替えた形。Issue #1276 / ADR 0397）", async () => {
+    const { pool } = await getTestClient();
+    await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(SPACE_A)}`);
+    await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(SPACE_B)}`);
+
+    await assertIndexNamesAgreeStartingFromAnyState();
   });
 
   it("3条件のうち「memory_id 列が memories(id) への FK を持つ」を満たさないテーブルは、どちらの列挙にも現れない（decoy）", async () => {

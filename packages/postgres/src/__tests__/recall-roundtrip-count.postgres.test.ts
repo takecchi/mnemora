@@ -274,12 +274,45 @@ async function warmUpPgvectorCapabilityCheck(
  */
 async function confirmStatsPresence(vectorStore: PostgresVectorStore, ctx: Ctx): Promise<void> {
   const { pool } = await getTestClient();
+  const embeddingTable = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
   await pool.query("ANALYZE memories");
-  await pool.query(`ANALYZE ${embeddingSpaceTableName(TEST_EMBEDDING_SPACE)}`);
+  await pool.query(`ANALYZE ${embeddingTable}`);
+  // 事後条件（#1489）: `StatsPresenceGate` が確認済みにする条件（両方の表が `reltuples >= 0`）が、
+  // 実際に成り立っている。`ANALYZE` を外すと、`TRUNCATE` 後の `reltuples` は `-1`（未確認）のままで、
+  // 往復数の比較は「毎回同じ余分な1往復」が乗るだけで等しいまま緑になる——ここで決定的に赤にする。
+  const stats = await pool.query(
+    "SELECT c.relname, c.reltuples::float8 AS reltuples FROM pg_class c WHERE c.oid = ANY(ARRAY['memories'::regclass, $1::regclass])",
+    [embeddingTable],
+  );
+  expect(stats.rows.map((r) => r.relname).sort()).toEqual(["memories", embeddingTable].sort());
+  for (const row of stats.rows) {
+    expect(row.reltuples, `${row.relname} の reltuples`).toBeGreaterThanOrEqual(0);
+  }
   await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
     limit: 1,
     filter: { tenantId: ctx.tenantId },
   });
+  confirmedVectorStores.add(vectorStore);
+}
+
+/** `confirmStatsPresence` を済ませた `vectorStore`（測定の門が見る。#1489）。 */
+const confirmedVectorStores = new WeakSet<PostgresVectorStore>();
+
+/**
+ * 往復数を比較する測定（歯1・2・4・5）の入口。**統計を確認済みにしていない `vectorStore` の runtime では測れない**
+ * ——呼び忘れると、往復数が毎回同じ余分な1往復を払うだけで等しいまま緑になり、「測定の途中で自動 analyze が
+ * 終わる」赤の芽が戻っても決定的には気付けない。歯6（未確認→確認済みの遷移そのものを測る）は使わない。
+ */
+async function countConfirmedQueries(
+  vectorStore: PostgresVectorStore,
+  fn: () => Promise<unknown>,
+): Promise<number> {
+  if (!confirmedVectorStores.has(vectorStore)) {
+    throw new Error(
+      "confirmStatsPresence を呼んでから往復数を測ること（統計が未確認のまま測っている）",
+    );
+  }
+  return countClientQueries(fn);
 }
 
 async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
@@ -318,7 +351,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     let resultSmall: Awaited<ReturnType<typeof runtime.recall>> | undefined;
     let resultLarge: Awaited<ReturnType<typeof runtime.recall>> | undefined;
 
-    const roundtripsSmall = await countClientQueries(async () => {
+    const roundtripsSmall = await countConfirmedQueries(vectorStore, async () => {
       resultSmall = await runtime.recall(ctx, {
         vector: QUERY_VECTOR,
         limit: 1,
@@ -326,7 +359,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
         association: null,
       });
     });
-    const roundtripsLarge = await countClientQueries(async () => {
+    const roundtripsLarge = await countConfirmedQueries(vectorStore, async () => {
       resultLarge = await runtime.recall(ctx, {
         vector: QUERY_VECTOR,
         limit: 50,
@@ -355,7 +388,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
 
     for (const limit of [5, 20, 50]) {
       let result: Awaited<ReturnType<typeof runtime.recall>> | undefined;
-      const roundtrips = await countClientQueries(async () => {
+      const roundtrips = await countConfirmedQueries(vectorStore, async () => {
         // `association` は渡さない — 既定（ADR 0337、DEFAULT_RECALL_ASSOCIATION、
         // anchorCount は DEFAULT_ASSOCIATION_ANCHOR_COUNT=3）のままの経路を測る。
         result = await runtime.recall(ctx, { vector: QUERY_VECTOR, limit, channels: ["ann"] });
@@ -489,7 +522,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       digest: "plain-2",
     });
     await confirmStatsPresence(vectorStore, ctx);
-    const baselineRoundtrips = await countClientQueries(async () => {
+    const baselineRoundtrips = await countConfirmedQueries(vectorStore, async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
 
@@ -499,7 +532,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: "basis" }),
     );
     await createInferredMemory([0.98, 0.02, 0], "inferred-with-1-basis", [basis.id]);
-    const oneBasisRoundtrips = await countClientQueries(async () => {
+    const oneBasisRoundtrips = await countConfirmedQueries(vectorStore, async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
     expect(oneBasisRoundtrips).toBe(baselineRoundtrips + 1);
@@ -522,7 +555,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
         basisIds,
       );
     }
-    const manyBasisRoundtrips = await countClientQueries(async () => {
+    const manyBasisRoundtrips = await countConfirmedQueries(vectorStore, async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
 
@@ -548,7 +581,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
 
     for (const anchorCount of [1, 3, 10]) {
       let result: Awaited<ReturnType<typeof runtime.recall>> | undefined;
-      const roundtrips = await countClientQueries(async () => {
+      const roundtrips = await countConfirmedQueries(vectorStore, async () => {
         result = await runtime.recall(ctx, {
           vector: QUERY_VECTOR,
           limit: 20,

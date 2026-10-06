@@ -635,6 +635,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0621](./0621-merged-0930-1465-recheck-teeth.md) | 09/30 にマージされた #1465（活動時計の書き込みが記憶自身の subject の時計を使う）の確かめ直しで見つかった穴に歯を足す（書く側の相関サブクエリのテナントの絞り） | 採用 (2026-10) |
 | [0622](./0622-merged-0927-rest-recheck-teeth.md) | 09/27 にマージされた #1087・#1086・#1143・#1116 の確かめ直しで見つかった穴に歯を足す（restoreSuperseded の束ねた強化の対象・時刻・設定・戻り値・例外の文面の起きたこと／直し方・claimKey の述語の等値の索引・migrate CLI の `--` の例ほか） | 採用 (2026-10) |
 | [0630](./0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md) | `MemoryStore` の Memory の書き込みの口は、読み戻すと `MemorySchema` を通らない値を入口で拒む | 採用 (2026-10) |
+| [0631](./0631-merged-0930-back-half-recheck-teeth.md) | 09/30 にマージされた PR の後ろ半分（D・E・F・G 群）の確かめ直しで見つかった穴に歯を足す | 採用 (2026-10) |
 | [0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) | `Runtime` のメソッドの層の正本を doc コメントの `層:` 行にし、3文書からメソッド名の列挙を外す（Issue #605） | 採用 (2026-10) |
 | [0634](./0634-unclassified-runtime-method-layers-decided.md) | `層: 未分類` だった `Runtime` のメソッドの層を1本ずつ決める（Issue #605 の続き、ADR 0633） | 採用 (2026-10) |
 | [0635](./0635-llm-subject-id-dropped-by-default-without-candidates.md) | `subjectCandidates` を渡さない抽出では、LLM が返した `subjectId` を既定で捨てる（`acceptLlmSubjectIdWithoutCandidates` で受ける） | 採用 (2026-10) |

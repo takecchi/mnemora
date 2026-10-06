@@ -115,6 +115,17 @@ describe("recalls の保持期間掃除の対象選択（ADR 0404 / ADR 0412）"
     expect(locked).not.toContain("Seq Scan");
   }, 120_000);
 
+  it("索引の定義: idx_recalls_by_created は (tenant_id, created_at, id) で、部分索引ではない（ADR 0412 決定1）", async () => {
+    const { pool } = await getTestClient();
+    const result = await pool.query(
+      "SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'idx_recalls_by_created'",
+    );
+    expect(result.rows).toHaveLength(1);
+    const indexdef: string = result.rows[0].indexdef;
+    expect(indexdef).toContain("(tenant_id, created_at, id)");
+    expect(indexdef).not.toContain("WHERE");
+  });
+
   it("前（陽性対照）: 索引を落とすと ORDER BY created_at, id に Sort が挟まる", async () => {
     const { pool } = await getTestClient();
     await seedRecalls(pool);
