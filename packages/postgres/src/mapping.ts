@@ -134,7 +134,7 @@ export const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
  * （ADR 0547。下限より前に作られた行は存在しえない）。
  */
 export function isBeforePgTimestamptzMin(date: Date): boolean {
-  return date.getTime() < PG_TIMESTAMPTZ_MIN_MS;
+  return date.getTime() < PG_TIMESTAMPTZ_MIN_MS + 86_400_000;
 }
 
 /**
