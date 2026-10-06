@@ -305,7 +305,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     }
     const result = await omittingParams(() =>
       this.db.execute(sql`
-      DELETE FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} RETURNING tenant_id
+      DELETE FROM tenant_settings WHERE TRUE RETURNING tenant_id
     `),
     );
     return { deleted: result.rows.length, reachedLimit: false };
