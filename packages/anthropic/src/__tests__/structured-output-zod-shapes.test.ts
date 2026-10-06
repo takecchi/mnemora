@@ -129,6 +129,8 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
       const cause = (caught as AnthropicLLMProviderError).cause;
       expect(cause).toBeInstanceOf(Error);
       expect(String(cause)).toMatch(/z\.record/);
+      // 移行先の助言（`{ key, value }` の配列を使うこと）が cause に載っている（ADR 0360 追記）。
+      expect(String(cause)).toMatch(/\{ key, value \}/);
       expect(create).not.toHaveBeenCalled();
     },
   );
@@ -143,6 +145,8 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
     for (const schema of [
       z.object({ root: Tree }),
       z.object({ x: z.object({ a: z.string() }).optional(), y: z.array(z.string()) }),
+      // z.lazy そのものは対象外（z.record を含まない z.lazy は落とさない）。
+      z.object({ a: z.lazy(() => z.object({ s: z.string() })) }),
     ]) {
       const { create, provider } = providerWithSpy();
       await provider

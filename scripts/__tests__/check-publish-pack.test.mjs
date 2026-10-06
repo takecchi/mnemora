@@ -172,6 +172,13 @@ describe("publish 対象パッケージの package.json（静的）", () => {
     );
     expect(versions.size).toBe(1);
   });
+
+  // 一覧が空であること自体を縛る。bullmq は publish 済みで、他の対象と同じ version 検査を受ける
+  // （2026-09-30。一覧に戻しても上の2つの it は緑のままなので、ここで直に見る）。
+  // 次に初回 publish 前の対象が増えるときは、この it を意図して書き換えること。
+  it("NEVER_PUBLISHED_TARGETS は空である（@mnemora/bullmq を含め、全対象が version 検査を受ける）", () => {
+    expect([...NEVER_PUBLISHED_TARGETS]).toEqual([]);
+  });
 });
 
 describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに対する変異の歯）", () => {

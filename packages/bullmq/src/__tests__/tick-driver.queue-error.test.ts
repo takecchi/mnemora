@@ -87,6 +87,19 @@ describe("createBullmqTickDriver() — Queue 側の error は onTickError に届
     expect(onTickError).toHaveBeenCalledWith(infra);
   });
 
+  it("同じ Queue が 'error' を続けて2回 emit すると、onTickError に2回とも、それぞれのエラーが順に届く", () => {
+    // Redis が落ちている間は、再接続のたびに error が複数回届く（束ねない・最初の1回で止めない）。
+    const onTickError = vi.fn();
+    create(onTickError);
+    const first = new Error("queue redis down (1)");
+    const second = new Error("queue redis down (2)");
+
+    queues.at(-1)!.emit("error", first);
+    queues.at(-1)!.emit("error", second);
+
+    expect(onTickError.mock.calls).toEqual([[first], [second]]);
+  });
+
   it("Queue の error と Worker の error は別々の接続の事象で、それぞれ1回ずつ届く", () => {
     const onTickError = vi.fn();
     create(onTickError);

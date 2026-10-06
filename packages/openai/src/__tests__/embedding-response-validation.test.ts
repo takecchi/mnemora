@@ -103,12 +103,24 @@ describe("OpenAIEmbeddingProvider.embed の応答検査", () => {
     await expect(p.embed(ctx, ["a", "b"])).rejects.toThrow(RANGE);
   });
 
-  it("次元が違うベクトルを含む応答は例外", async () => {
+  // 次元違いの1件が先頭・中央・最後のどこにあっても断る（「最後だけ検査」「先頭だけ検査」を捕まえる）。
+  it.each([0, 1, 2])("次元が違うベクトルが %i 番目にある応答は例外", async (bad) => {
+    const items: Item[] = [0, 1, 2].map((i) => ({
+      index: i,
+      vector: i === bad ? [1, 2, 3] : [1, 2],
+    }));
+    const p = providerReturning(items);
+    await expect(p.embed(ctx, ["a", "b", "c"])).rejects.toThrow(DIM);
+  });
+
+  // 整数でない index（小数・NaN）は範囲外として断る（`Number.isInteger` を外すと別の経路の例外になる）。
+  // NaN は JSON で null になって届く。それも整数ではない。
+  it.each([0.5, 1.5, Number.NaN])("index が整数でない（%s）応答は範囲外で例外", async (bad) => {
     const p = providerReturning([
       { index: 0, vector: [1, 2] },
-      { index: 1, vector: [1, 2, 3] },
+      { index: bad, vector: [3, 4] },
     ]);
-    await expect(p.embed(ctx, ["a", "b"])).rejects.toThrow(DIM);
+    await expect(p.embed(ctx, ["a", "b"])).rejects.toThrow(RANGE);
   });
 
   it("NaN 成分を含む応答は例外", async () => {
@@ -121,13 +133,23 @@ describe("OpenAIEmbeddingProvider.embed の応答検査", () => {
     await expect(p.embed(ctx, ["a"])).rejects.toThrow(FINITE);
   });
 
-  it("例外メッセージに入力テキスト本文・キーを含めない", async () => {
-    const p = providerReturning([{ index: 0, vector: [1, Number.NaN] }]);
-    const err = await p.embed(ctx, ["SECRET-INPUT-TEXT"]).catch((e: unknown) => e);
+  // どの検査で落ちても、入力本文・キーはメッセージに入らない。
+  const SECRET = "SECRET-INPUT-TEXT";
+  const ok = (index: number): Item => ({ index, vector: [1, 2] });
+  it.each<[string, RegExp, Item[]]>([
+    ["件数", COUNT, [ok(0)]],
+    ["index 範囲外", RANGE, [ok(0), ok(5)]],
+    ["index 非整数", RANGE, [ok(0), ok(0.5)]],
+    ["index 重複", DUP, [ok(0), ok(0)]],
+    ["次元", DIM, [ok(0), { index: 1, vector: [1, 2, 3] }]],
+    ["NaN", FINITE, [ok(0), { index: 1, vector: [1, Number.NaN] }]],
+  ])("例外メッセージに入力テキスト本文・キーを含めない（%s）", async (_name, re, items) => {
+    const p = providerReturning(items);
+    const err = await p.embed(ctx, [SECRET, `${SECRET}-2`]).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     const msg = (err as Error).message;
-    expect(msg).toMatch(FINITE);
-    expect(msg).not.toContain("SECRET-INPUT-TEXT");
+    expect(msg).toMatch(re);
+    expect(msg).not.toContain(SECRET);
     expect(msg).not.toContain("sk-fake");
   });
 });
