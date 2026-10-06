@@ -3460,6 +3460,37 @@ describe("observe: claimKey knownSubjects は subjectCandidates へ暗黙に転�
     expect(claimKeyCall.prompt.system).toContain("既知の subject 候補一覧: user, 姉。");
   });
 
+  it("claimKey.knownSubjects: [] は『渡していない』と同じ——claim key 呼び出しの system が省いた場合と toEqual（ClaimKeyOptions.knownSubjects の doc。Issue #1775 の #792）", async () => {
+    const run = async (claimKey: { enabled: true; knownSubjects?: string[] }) => {
+      const llm = sequencedLlm([
+        { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+        { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+      ]);
+      const { runtime } = buildRuntime(llm);
+      await runtime.observe(ctx, { kind: "utterance", text: "姉は福岡で働いています。", claimKey });
+      return llm.calls[1]!.prompt;
+    };
+    expect(await run({ enabled: true, knownSubjects: [] })).toEqual(await run({ enabled: true }));
+  });
+
+  it("knownPredicates と knownSubjects を併用すると、observe を通した claim key 呼び出しの system に両方が出て、predicate が先（ADR 0334。Issue #1775 の #792）", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      claimKey: { enabled: true, knownPredicates: ["favorite_food"], knownSubjects: ["user"] },
+    });
+    const system = llm.calls[1]!.prompt.system as string;
+    const predicateIndex = system.indexOf("既知の predicate 候補一覧");
+    const subjectIndex = system.indexOf("既知の subject 候補一覧");
+    expect(predicateIndex).toBeGreaterThanOrEqual(0);
+    expect(subjectIndex).toBeGreaterThan(predicateIndex);
+  });
+
   it("regression: enabled: true + subjectCandidates あり + knownSubjects 省略のとき、claim key プロンプトは subjectCandidates を渡さない場合（＝main の既存挙動）と完全に同一——暗黙の転用が復活していないことを固定する", async () => {
     const withCandidatesLlm = sequencedLlm([
       { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },

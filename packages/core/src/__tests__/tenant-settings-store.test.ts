@@ -350,4 +350,12 @@ describe("assertValidTaxonomyMode", () => {
     expect(() => assertValidTaxonomyMode("nonsense")).toThrow(TAXONOMY_MODE_INVALID_MESSAGE);
     expect(() => assertValidTaxonomyMode("")).toThrow(TAXONOMY_MODE_INVALID_MESSAGE);
   });
+
+  // Issue #1775 の #717（変異19）: 2値に近い綴りも通さない（値は 'open'/'strict' の2値だけ。ADR 0318 決定）。
+  it.each(["Strict", "OPEN", "closed", " open", "strict ", "enforced"])(
+    "2値に近い綴り %j も TAXONOMY_MODE_INVALID_MESSAGE を含む Error で失敗する",
+    (value) => {
+      expect(() => assertValidTaxonomyMode(value)).toThrow(TAXONOMY_MODE_INVALID_MESSAGE);
+    },
+  );
 });

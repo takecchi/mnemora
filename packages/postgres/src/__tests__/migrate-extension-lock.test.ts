@@ -76,6 +76,70 @@ async function waitForBackend(like: string, onlyWaitingOnLock = false): Promise<
 }
 
 describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () => {
+  // Issue #1775 の #780（変異M3・M4）: 共有の拡張ロックは「拡張を作る未適用のファイルがあり、
+  // `extensionMode: "create"`」のときだけ取る（PR 本文「未適用に該当ファイルが無ければ取らない」・
+  // 「`"verify"` は一切参照しない」、ADR 0331）。別の接続が拡張ロックを握っていても、取らない経路は
+  // 待たされない。取る経路になると、握られている間 `lockTimeoutMs` で時間切れになる。
+  async function holdExtensionLock(): Promise<Client> {
+    const holder = new Client({ connectionString: connectionStringFor() });
+    await holder.connect();
+    await holder.query("SELECT pg_advisory_lock($1)", [EXTENSION_LOCK_KEY.toString()]);
+    return holder;
+  }
+
+  it("別の接続が拡張ロックを握っていても、CREATE EXTENSION 行の無い未適用ファイルの適用は待たされない", async () => {
+    const dir = dirWith(
+      "9511_ext_lock_scope_first.sql",
+      "CREATE EXTENSION IF NOT EXISTS vector;\nSELECT 1;",
+    );
+    await runMigrations(pool, dir); // 1本目（拡張を作る行を含む）を適用して台帳に載せる
+    writeFileSync(join(dir, "9512_ext_lock_scope_no_extension.sql"), "SELECT 1;");
+    const holder = await holdExtensionLock();
+    try {
+      const result = await runMigrations(pool, dir, { lockTimeoutMs: 300 });
+      expect(result.applied).toEqual(["9512_ext_lock_scope_no_extension.sql"]);
+    } finally {
+      await holder.query("SELECT pg_advisory_unlock($1)", [EXTENSION_LOCK_KEY.toString()]);
+      await holder.end();
+    }
+  }, 20_000);
+
+  it("陽性対照: CREATE EXTENSION 行を含む未適用ファイルは、拡張ロックが握られている間 lockTimeoutMs で時間切れになる", async () => {
+    const dir = dirWith(
+      "9513_ext_lock_scope_control.sql",
+      "CREATE EXTENSION IF NOT EXISTS vector;\nSELECT 1;",
+    );
+    const holder = await holdExtensionLock();
+    try {
+      await expect(runMigrations(pool, dir, { lockTimeoutMs: 300 })).rejects.toThrow();
+    } finally {
+      await holder.query("SELECT pg_advisory_unlock($1)", [EXTENSION_LOCK_KEY.toString()]);
+      await holder.end();
+    }
+  }, 20_000);
+
+  it('extensionMode: "verify" は、別の接続が拡張ロックを握っていても、拡張を作る行を含むファイルを待たずに適用する', async () => {
+    const dir = dirWith(
+      "9514_ext_lock_verify.sql",
+      "CREATE EXTENSION IF NOT EXISTS vector;\nSELECT 1;",
+    );
+    // `verify` は必要な拡張がすべて在ることを確かめる（作らない）。先に、管理ロールで作っておく。
+    for (const ext of ["vector", "btree_gin", "pgcrypto"]) {
+      await pool.query(`CREATE EXTENSION IF NOT EXISTS ${ext}`);
+    }
+    const holder = await holdExtensionLock();
+    try {
+      const result = await runMigrations(pool, dir, {
+        extensionMode: "verify",
+        lockTimeoutMs: 300,
+      });
+      expect(result.applied).toEqual(["9514_ext_lock_verify.sql"]);
+    } finally {
+      await holder.query("SELECT pg_advisory_unlock($1)", [EXTENSION_LOCK_KEY.toString()]);
+      await holder.end();
+    }
+  }, 20_000);
+
   it("拡張ロックを取る経路でも、本体が lockTimeoutMs より長く別のロックを待って時間切れにならない", async () => {
     const heldKey = 7_190_158_676_462_702_001n;
     const dir = dirWith(

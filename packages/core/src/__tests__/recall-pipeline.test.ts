@@ -1675,6 +1675,26 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     expect(returnedB.contestedWith).toBe(a.id);
   });
 
+  it("🔴 同伴取得で来た対にも contestedWith が付く（companionOf を経由しても条件にしない。ADR 0335 決定。Issue #1775 の #832）", async () => {
+    const { runtime, stores } = buildRuntime();
+    // a だけをベクタ検索で拾えるようにし、b は埋め込みを持たない（段3の同伴取得だけが b への経路）。
+    const a = await createEmbeddedMemory(stores, [1, 0], { digest: "休みは月曜" });
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "休みは火曜" }));
+    const markResult = await runtime.markContested(ctx, a.id, b.id);
+    expect(markResult.outcome.kind).toBe("contested");
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
+    const returnedB = result.memories.find((m) => m.memoryId === b.id)!;
+
+    // 前提: b は同伴取得で来ている。
+    expect(returnedB.retrievedVia).toBe("mandatory_companion");
+    expect(returnedB.companionOf).toBe(a.id);
+    // 本体: 同伴取得で来た側にも、そちらを取った側にも contestedWith が付く。
+    expect(returnedB.contestedWith).toBe(a.id);
+    expect(returnedA.contestedWith).toBe(b.id);
+  });
+
   it("active な（contested でない）記憶には contestedWith が付かない", async () => {
     const { runtime, stores } = buildRuntime();
     const active = await createEmbeddedMemory(stores, [1, 0], { digest: "ただの記憶" });
@@ -1682,6 +1702,7 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     const returned = result.memories.find((m) => m.memoryId === active.id)!;
     expect(returned.contestedWith).toBeUndefined();
+    expect(Object.hasOwn(returned, "contestedWith")).toBe(false);
   });
 
   it("🔴 status が active のまま contestedWithId だけが（不整合に）設定されている記憶には contestedWith が付かない（status 検査そのものの歯）", async () => {
@@ -1703,6 +1724,7 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
     expect(returnedA.contestedWith).toBeUndefined();
+    expect(Object.hasOwn(returnedA, "contestedWith")).toBe(false);
   });
 
   it("🔴→✅ 2026-09-27 更新（Issue #959）: 連想枠経由の contested は、対向が取れなければ単独では返らず Unit ごと落ちる", async () => {

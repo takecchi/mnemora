@@ -46,6 +46,25 @@ describe("InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls: float4 (Postgre
     expect(value).toBe(3e38);
   });
 
+  // Issue #1775 の #815: 境界は `Math.fround` と Postgres `real` とで完全に一致する（PR 本文が実測した両端）。
+  // float4 の最大値のすぐ外側（`3.5e38`〜`1e39`）を拒み、最大値と丸めの境界の間は通す。
+  it("実測の境界: 3.4028235677973362e38 は通り、3.4028235677973366e38 は拒まれる", async () => {
+    const store = new InMemoryTenantSettingsStore();
+    await expect(
+      store.setDefaultHalfLifeRecalls(ctx, 3.4028235677973362e38),
+    ).resolves.toBeUndefined();
+    await expect(store.setDefaultHalfLifeRecalls(ctx, 3.4028235677973366e38)).rejects.toThrow(
+      /does not fit in a Postgres "real"/,
+    );
+  });
+
+  it.each([3.5e38, 9e38, 1e39])("float4 の最大値のすぐ外側の %j は拒まれる", async (value) => {
+    const store = new InMemoryTenantSettingsStore();
+    await expect(store.setDefaultHalfLifeRecalls(ctx, value)).rejects.toThrow(
+      /does not fit in a Postgres "real"/,
+    );
+  });
+
   it("既定の720は引き続き成功する（回帰確認）", async () => {
     const store = new InMemoryTenantSettingsStore();
     await store.setDefaultHalfLifeRecalls(ctx, 720);

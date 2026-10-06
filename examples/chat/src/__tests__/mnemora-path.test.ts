@@ -49,6 +49,12 @@ const FAKE_CONVERSATION: Conversation = {
 };
 
 describe("queryRecall（Issue #291 / ADR 0168: 既定で association を渡す）", () => {
+  // Issue #1775 の #838（変異8）: chat の独自既定の値は core の既定と同じ `{ maxCount: 10 }` のまま
+  // （ADR 0337 決定3が維持を明言。値の根拠は ADR 0168）。ベンチの基準線が静かに動かないよう値そのものを縛る。
+  it("DEFAULT_MNEMORA_PATH_ASSOCIATION は { maxCount: 10 }", () => {
+    expect(DEFAULT_MNEMORA_PATH_ASSOCIATION).toEqual({ maxCount: 10 });
+  });
+
   it("opts.association を省略すると DEFAULT_MNEMORA_PATH_ASSOCIATION を渡す", async () => {
     const captured: { query?: RecallQuery } = {};
     const runtime = fakeRuntimeCapturingQuery(captured);
