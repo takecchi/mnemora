@@ -1974,6 +1974,40 @@ describe("recall() — budget_truncation の detail.droppedFitsWhenConcatenated�
     expect(result.omitted.some((o) => o.kind === "budget_dropped")).toBe(false);
     const budgetTruncation = result.explain.stages.find((s) => s.stage === "budget_truncation");
     expect(budgetTruncation?.detail?.droppedFitsWhenConcatenated).toBeUndefined();
+    // 値が undefined なだけでなく、キー自体が無い。
+    expect("droppedFitsWhenConcatenated" in (budgetTruncation?.detail ?? {})).toBe(false);
+  });
+
+  /**
+   * 同じ4件（21文字×4。連結は "\n" 区切りで 87 文字・22 トークン、digest ごとの切り詰めは
+   * 6 トークン×件数）に、予算を変えて当てる。どれも1件落ちる（3件残る）。
+   */
+  async function recallWith(budget: { maxMemoryTokens?: number; maxMemoryChars?: number }) {
+    const { runtime, stores } = buildRuntime();
+    for (let i = 0; i < 4; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], { digest: DIGEST_21_NON_CJK });
+    }
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, budget });
+    expect(result.memories).toHaveLength(3);
+    const stage = result.explain.stages.find((s) => s.stage === "budget_truncation");
+    return stage?.detail?.droppedFitsWhenConcatenated;
+  }
+
+  it("連結は改行区切りで数える: 区切りなしなら21トークンに収まるが、改行込みの22トークンは21に収まらない", async () => {
+    expect(await recallWith({ maxMemoryTokens: 21 })).toBe(false);
+  });
+
+  it("連結のトークン数が予算ちょうど（22）なら収まったとみなす", async () => {
+    expect(await recallWith({ maxMemoryTokens: 22 })).toBe(true);
+  });
+
+  it("トークンが足りていても、連結の文字数（87）が maxMemoryChars を超えれば収まらない", async () => {
+    // digest ごとの文字数の合計は 84 で 85 に収まる（文字数では落ちない）。トークン（23）で1件落ちる。
+    expect(await recallWith({ maxMemoryTokens: 23, maxMemoryChars: 85 })).toBe(false);
+  });
+
+  it("連結の文字数がちょうど maxMemoryChars（87）なら収まったとみなす", async () => {
+    expect(await recallWith({ maxMemoryTokens: 23, maxMemoryChars: 87 })).toBe(true);
   });
 });
 
