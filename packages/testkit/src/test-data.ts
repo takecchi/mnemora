@@ -38,7 +38,7 @@ import type {
  * この関数の既定値のまま床を越え、上の0件が起きる。
  */
 export function buildNewMemoryFixture(overrides: Partial<NewMemory> = {}): NewMemory {
-  const recordedAt = overrides.recordedAt ?? new Date("2026-01-01T00:00:00.000Z");
+  const recordedAt = overrides.recordedAt ?? new Date();
   const strength = overrides.strength ?? 1;
   const halfLifeHours = overrides.halfLifeHours ?? DEFAULT_HALF_LIFE_HOURS;
   const base: NewMemory = {
