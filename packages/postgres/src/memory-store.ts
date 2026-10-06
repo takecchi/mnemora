@@ -3829,7 +3829,7 @@ export class PostgresMemoryStore implements MemoryStore {
         AND claim_key_subject IS NOT NULL
         AND claim_key_predicate IS NOT NULL
       GROUP BY claim_key_predicate
-      ORDER BY MAX(created_at) DESC, claim_key_predicate COLLATE "C" ASC
+      ORDER BY MAX(created_at) ASC, claim_key_predicate COLLATE "C" ASC
       LIMIT ${query.limit}
     `);
     return result.rows.map((row) => (row as unknown as { predicate: string }).predicate);
