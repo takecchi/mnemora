@@ -64,7 +64,7 @@ function toComparableQuery(query: number[], dimensions: number): number[] {
     !query.every((x) => Number.isFinite(x)) ||
     !fitsFloat4(query)
   ) {
-    return new Array(dimensions).fill(0);
+    return new Array(dimensions).fill(1);
   }
   return query;
 }
