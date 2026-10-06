@@ -189,8 +189,9 @@ describe("tick の embed：埋め込みの最中の purge の後始末の約束"
     let armed = false;
     // `ready` の書き込みが済んだ直後（＝書いた後の読み直しの直前）から、次の get だけが落ちる。
     stores.memoryStore.setEmbeddingStatus = async (...args) => {
-      await realSetStatus(...args);
+      const result = await realSetStatus(...args);
       if (args[2] === "ready") armed = true;
+      return result;
     };
     stores.memoryStore.get = async (...args) => {
       if (armed) {
