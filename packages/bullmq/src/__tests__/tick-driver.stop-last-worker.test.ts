@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // ADR 0655 の `stop()` の分岐——`queue.getWorkers()` の返り値から「自分以外の Worker が居るか」を読み、
 // 居なければ（または分からなければ）共有の scheduler を消す——を、返り値の形ごとに縛る（Issue #1752）。
 // 本物の Redis での振る舞いは `tick-driver.stop-last-worker.redis.test.ts`（`test:redis`）が見ている。
-// こちらは Redis の無いジョブでも走り、分岐の取り違え（常に消す・偽の1件を「他」と読む・自分を「他」と読む）を落とす。
+// こちらは Redis の無いジョブでも走り、分岐の取り違え（常に消す・偽の1件を「他」と読む・自分を「他」と読む・
+// 「他が居る」を行の数で読む）を落とす。
 
 interface MockQueueInstance {
   upsertJobScheduler: ReturnType<typeof vi.fn>;
@@ -114,6 +115,17 @@ describe("createBullmqTickDriver().stop() は、getWorkers() の返り値に応�
     queue.getWorkers.mockResolvedValueOnce([
       { name: "a", rawname: selfRawname },
       { name: "b", rawname: `${selfRawname}-2` },
+    ]);
+    await driver.stop();
+    expect(queue.removeJobScheduler).not.toHaveBeenCalled();
+  });
+
+  it("一覧に自分が出ていなくても、他の Worker が1件居れば消さない（「他が居る」は行の数ではなく、自分以外の行の有無で決める）", async () => {
+    const { driver, queue } = makeDriver();
+    // 自分の行が無いのは、自分の blocking 接続が `stop()` の時点で切れている（再接続中など）とき。
+    // 「2行以上なら他が居る」と数で読むと、ここで消して他の driver の tick を止める（Issue #1758 の M05）。
+    queue.getWorkers.mockResolvedValueOnce([
+      { name: "b", rawname: `${BASE}:w:mnemora-tick-other` },
     ]);
     await driver.stop();
     expect(queue.removeJobScheduler).not.toHaveBeenCalled();

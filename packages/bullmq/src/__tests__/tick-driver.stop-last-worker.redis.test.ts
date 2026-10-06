@@ -1,4 +1,4 @@
-import { Queue } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBullmqTickDriver } from "../tick-driver.js";
 import type { BullmqTickDriver } from "../tick-driver.js";
@@ -11,6 +11,8 @@ import type { BullmqTickDriver } from "../tick-driver.js";
  *   発火し続けること（本体）。
  * - 陽性対照: driver が1台だけなら、`stop()` は今までどおり scheduler を消すこと（「自分」を数えて消さない側に倒していない）。
  * - 全員が順に `stop()` したら、最後の1台が scheduler を消すこと（残骸にならない）。
+ * - 名前なしの Worker（ADR 0655 より前の版の driver）も「他」と数えること。本物の CLIENT LIST での接続名が
+ *   `bull:<base64(queue)>`（`:w:` が無い）であることも、ここで確かめる（単体の歯のモックはこの形を前提にしている）。
  * - `queue.getWorkers()`（CLIENT LIST に頼る）が使えない環境（throw する／bullmq が CLIENT 非対応時に返す偽の1件）では、
  *   2台居ても今までどおり消す側に倒れること。注入は `Queue.prototype.getWorkers` の spy で行う（公開 API に注入口は無い）。
  *
@@ -31,9 +33,11 @@ const connection = { host: REDIS_HOST, port: Number(REDIS_PORT), maxRetriesPerRe
 
 const drivers: BullmqTickDriver[] = [];
 const queues: Queue[] = [];
+const rawWorkers: Worker[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const d of drivers.splice(0)) await d.stop().catch(() => undefined);
+  for (const w of rawWorkers.splice(0)) await w.close().catch(() => undefined);
   for (const q of queues.splice(0)) {
     await q.obliterate({ force: true }).catch(() => undefined);
     await q.close();
@@ -142,5 +146,29 @@ describe("実 Redis: 最後の Worker だけが共有 scheduler を消す（ADR 
     ] as never);
     await b.stop();
     expect(await q.getJobSchedulers()).toEqual([]);
+  });
+
+  it("名前なしの Worker（ADR 0655 より前の版の driver の形）が同じ queue に居れば、stop() は scheduler を消さない", async () => {
+    const name = `mnemora-tick-last-unnamed-${Date.now()}`;
+    const q = queueFor(name);
+    // 前の版の driver は Worker に name を付けなかった（autorun: false で作って run() する形は今と同じ）。
+    const old = new Worker(name, async () => undefined, { connection, autorun: false });
+    rawWorkers.push(old);
+    old.run().catch(() => undefined);
+    const b = make(name, () => undefined);
+    await b.start();
+    // 健全性: 名前なしの Worker が、本物の CLIENT LIST に `:w:` の無い接続名で出ている（接続名の設定は非同期なので待つ）。
+    const unnamed = `bull:${Buffer.from(name).toString("base64")}`;
+    let rawnames: unknown[] = [];
+    const start = Date.now();
+    while (!rawnames.includes(unnamed)) {
+      if (Date.now() - start > 10_000)
+        throw new Error(`名前なしの Worker が一覧に出ない: ${JSON.stringify(rawnames)}`);
+      rawnames = (await q.getWorkers()).map((w) => w["rawname"]);
+      await sleep(25);
+    }
+
+    await b.stop();
+    expect((await q.getJobSchedulers()).length).toBe(1);
   });
 });

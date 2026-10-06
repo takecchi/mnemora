@@ -373,7 +373,6 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
     {
       connection: opts.connection,
       concurrency,
-      name: workerName,
       autorun: false,
       ...(lockDuration === undefined ? {} : { lockDuration }),
     },
