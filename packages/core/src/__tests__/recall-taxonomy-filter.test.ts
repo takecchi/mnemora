@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { LexicalFilter } from "../interfaces/lexical-store.js";
+import type { AggregateScopeOptions } from "../interfaces/memory-store.js";
 import type { VectorFilter, VectorHit, VectorStore } from "../interfaces/vector-store.js";
+import type { RecallScope } from "../recall.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
@@ -597,5 +599,145 @@ describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issu
     expect(result.memories).toHaveLength(0);
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).not.toContain(memory.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. 後置フィルタ・同伴・目次帯・群の追加の歯（Issue #1775 の #743 の変異8・13・14・15・17）。
+// ---------------------------------------------------------------------------
+
+describe("recall() — labels の追加の歯（#743）", () => {
+  it("連想枠: 連想用の search() だけが labels を無視して外の記憶を返しても、連想枠に乗らない（変異13）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const originalSearch = stores.vectorStore.search.bind(stores.vectorStore);
+    let calls = 0;
+    // 段1は絞りを守り（外の記憶は段1の候補にも除外集合にも入らない）、2回目以降（連想用）だけ labels を剥がす。
+    stores.vectorStore.search = async (c, space, query, opts) => {
+      calls += 1;
+      if (calls === 1) return originalSearch(c, space, query, opts);
+      const { labels: _labels, ...stripped } = opts.filter;
+      return originalSearch(c, space, query, { ...opts, filter: stripped });
+    };
+    const anchor = await createEmbeddedMemory(stores, ANCHOR_VECTOR, {
+      digest: "アンカー",
+      tags: ["alpha"],
+    });
+    const outside = await createEmbeddedMemory(stores, ASSOCIATED_VECTOR, {
+      digest: "連想（絞りの外）",
+      tags: ["beta"],
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      labels: ["alpha"],
+      association: ASSOCIATION,
+    });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(calls).toBeGreaterThanOrEqual(2); // 前提: 連想用の search() が実際に呼ばれている
+    expect(ids).toContain(anchor.id);
+    expect(ids).not.toContain(outside.id);
+  });
+
+  it("目次帯: scope.labels を無視する aggregateScope から外の digest が返っても、digestBand に乗らず countKind は 'unknown'（変異14）", async () => {
+    const stores = createFakeRuntimeStores();
+    const memoryStore = new Proxy(stores.memoryStore, {
+      get(target, prop, receiver) {
+        if (prop === "aggregateScope") {
+          return async (c: Ctx, scope: RecallScope, opts?: AggregateScopeOptions) => {
+            const { labels: _ignored, ...strippedScope } = scope;
+            return target.aggregateScope(c, strippedScope, opts);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const runtime = createRuntime({
+      memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      lexicalStore: stores.lexicalStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+    });
+    // 目次帯にしか現れないよう、どちらもベクトルを登録しない（段1の候補にはならない）。
+    const matching = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "alpha の要旨", tags: ["alpha"] }),
+    );
+    const outside = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "beta の要旨", tags: ["beta"] }),
+    );
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      labels: ["alpha"],
+      digestBandLimit: 10,
+    });
+
+    const bandIds = (result.index.digestBand ?? []).map((d) => d.memoryId);
+    expect(bandIds).toContain(matching.id);
+    expect(bandIds).not.toContain(outside.id);
+    expect(result.index.digestBandCoverage?.countKind).toBe("unknown");
+  });
+
+  it("同伴: contested の組の片方だけが labels に一致するとき、もう一方も同伴として残る（段3は labels を検査しない。変異15）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const a = await createEmbeddedMemory(stores, [1, 0], { digest: "A", tags: ["alpha"] });
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "B", tags: ["beta"] }),
+    );
+    const markResult = await runtime.markContested(ctx, a.id, b.id);
+    expect(markResult.outcome.kind).toBe("contested");
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, labels: ["alpha"] });
+
+    const returnedB = result.memories.find((m) => m.memoryId === b.id);
+    expect(result.memories.map((m) => m.memoryId)).toContain(a.id);
+    expect(returnedB?.retrievedVia).toBe("mandatory_companion");
+    expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);
+  });
+
+  it("labels だけを渡して taxonomyGroups を渡さなければ、axis: 'taxonomy' の群は載らない（opt-in。変異17）", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { tags: ["alpha"] });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, labels: ["alpha"] });
+
+    expect(result.index.groups.some((g) => g.axis === "taxonomy")).toBe(false);
+  });
+
+  it("後置フィルタ: adapter が labels を無視しても、大文字小文字だけが違う名前は混入しない（完全一致。変異8）", async () => {
+    const { runtime, stores } = buildRuntime((fvs) => new LabelsFilterStrippingVectorStore(fvs));
+    const matching = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "matching",
+      tags: ["project"],
+    });
+    const differentCase = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "different-case",
+      tags: ["Project"],
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, labels: ["project"] });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(matching.id);
+    expect(ids).not.toContain(differentCase.id);
   });
 });

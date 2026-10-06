@@ -391,3 +391,71 @@ describe("recall() — 連想枠（段3.5）にも attributes が掛かる（Iss
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 5. 後置フィルタの追加の歯（Issue #1775 の #724 の変異6・9）。
+//   - 後置フィルタは複数キーの条件で全キー一致（`every`）を要る。単一キーの条件しか通していなかったので、
+//     `some` にしても結果が変わらなかった（adapter の押し下げが正しいと、後置フィルタは何も落とさない）。
+//   - 連想枠（段3.5）の後置フィルタ。連想用の `search()` が `attributes` を無視して外の記憶を返しても、
+//     結果の連想枠に乗らない（ADR 0312 決定9の表が「段3.5：検査あり」と書く。ADR 0172 が踏んだ見落としと同じ形）。
+// ---------------------------------------------------------------------------
+
+describe("recall() — 後置フィルタ（survivesAttributesFilter）の追加の歯（#724）", () => {
+  it("複数キーの条件: adapter が attributes を無視して、片方のキーだけ一致する記憶を返しても、結果に出ない（every）", async () => {
+    const { runtime, stores } = buildRuntime(
+      (fvs) => new AttributesFilterStrippingVectorStore(fvs),
+    );
+    const matching = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "both-match",
+      attributes: { visibility: "internal", team: "a" },
+    });
+    const onlyOne = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "only-one-key",
+      attributes: { visibility: "internal", team: "b" },
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      attributes: { visibility: "internal", team: "a" },
+    });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(matching.id);
+    expect(ids).not.toContain(onlyOne.id);
+  });
+
+  it("連想枠: 連想用の search() だけが attributes を無視して外の記憶を返しても、連想枠に乗らない", async () => {
+    // 段1の search() は絞り込みを守り（外の記憶は段1の候補にも除外集合にも入らない）、
+    // 連想用の2回目以降の search() だけ attributes を無視する adapter。
+    const { runtime, stores } = buildRuntime();
+    const originalSearch = stores.vectorStore.search.bind(stores.vectorStore);
+    let calls = 0;
+    stores.vectorStore.search = async (c, space, query, opts) => {
+      calls += 1;
+      if (calls === 1) return originalSearch(c, space, query, opts);
+      const { attributes: _attributes, ...stripped } = opts.filter;
+      return originalSearch(c, space, query, { ...opts, filter: stripped });
+    };
+    const anchor = await createEmbeddedMemory(stores, ANCHOR_VECTOR, {
+      digest: "アンカー",
+      attributes: { visibility: "internal" },
+    });
+    const outside = await createEmbeddedMemory(stores, ASSOCIATED_VECTOR, {
+      digest: "連想（絞り込みの外）",
+      attributes: { visibility: "public" },
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      association: ASSOCIATION,
+      attributes: { visibility: "internal" },
+    });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(calls).toBeGreaterThanOrEqual(2); // 前提: 連想用の search() が実際に呼ばれている
+    expect(ids).toContain(anchor.id);
+    expect(ids).not.toContain(outside.id);
+  });
+});
