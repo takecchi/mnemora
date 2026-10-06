@@ -8574,7 +8574,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       now,
       ...activityClockInputs,
     });
-    const actor = opts.actor ?? { type: "system" };
+    const actor = opts.actor ?? { type: "human", id: "mutant" };
     // ADR 0416: 口あり経路では store が同じトランザクションで呼ぶ（`supersedeWithNewMemories` の
     // `opts.buildCreatedEvent`）ため、Memory を受け取って `memoryId`/`digestSnapshot` を埋める形にした
     // （以前は `memoryId: ""` のプレースホルダを呼び出し側が上書きしていた）。
