@@ -76,3 +76,16 @@ Postgres の text search parser の細部は再現していない。次は fixtu
 ## 測っていないこと
 
 CI の SQL_ASCII 脚での表の値（手元は UTF8 + C.UTF-8 だけ）。trigram の store の日本語側。`rank` の値（Postgres の `ts_rank_cd` とは尺度が違うので比べない。契約どおり）。fuzz の `channels` を 40 シードより多く回したときの割れ。
+
+## 追記（Issue #1759。クローン miku の判断で見送り。オーナーの判断ではない）: ハイフンで結んだ語は、照合だけでなく coverage の数え方も割れる
+
+上の「揃えていないこと」の3つ目（ハイフンで結んだ語）の差は、照合だけでなく、coverage（分母の数え方）にも出る。【実測】Postgres 17 + pgvector（`C.UTF-8`）、main `de41711c`。本文 `foo bar` と `uses foo-bar here` の2件に対する、`PostgresLexicalStore` と testkit の `InMemoryLexicalStore` の coverage:
+
+| クエリ | Postgres（`foo bar`・`uses foo-bar here`） | fixture（同じ順） |
+| --- | --- | --- |
+| `foo-bar` | 当たらない・1 | 1・1 |
+| `foo_bar foo-bar baz` | 0.33・0.67 | 0.5・0.5 |
+
+Postgres は `foo-bar` を合成語（`foo-bar` と部品の `foo`・`bar`）として扱い、`foo_bar` とは別の tsquery にする（分母は3）。fixture は両方を同じ token 列 `foo bar` と見て1つにまとめる（分母は2）。
+
+**揃えない。**クローン miku の判断（Issue #1759）。この ADR が「採らなかった案」1 で、parser の細部（ハイフン結合語）まで再現する案を採らなかったため。負債 1 に含める。振る舞いは変えていない。
