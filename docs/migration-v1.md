@@ -3036,6 +3036,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   **新しく断る入力は、`@mnemora/postgres` が以前から拒む入力だけ**。fixture が新しく例外を投げる変更は破壊的と数えない（数え方の規律2。オーナー回答 `3f3411c5`、[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。ただし、**`@mnemora/testkit/fixtures` に下限より前の日時（`new Date(-1e14)` など）を書いていたテスト**は、`RangeError` で落ちる。下限ちょうど（`new Date(Date.UTC(-4713, 10, 24))`）と、それより後は通る。fixture の例外の型は `RangeError`（`cause.code` は持たない）で、`@mnemora/postgres` の `DrizzleQueryError`（`cause.code` `22008`）とは顔が違う。
   断らないもの: 読みの口の日時の条件（ADR 0547）、`claimBatch` の `now`、Postgres が日時を見ない分岐（CAS に弾かれる対象のイベント、冪等の既存行の `created` イベント、何も強化しない呼び出し）。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: 新しい記憶の `decayFloorAt` が `Date` でない（`null`・`undefined`・キーなし）と `TypeError` で断る。「memory not found for tenant: &lt;id&gt;」の id の綴りを Postgres に揃えた**（🟡。Issue #1759。[ADR 0493](./decisions/0493-fake-and-inmemory-input-checks-aligned-to-postgres.md)・[ADR 0521](./decisions/0521-fixtures-accept-uppercase-target-id-like-postgres.md) の末尾の追記）。
+  中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節の同じ箇条を見ること。**新しく断る入力は、`@mnemora/postgres` が以前から拒む入力だけ**（`23502`）。手順は要らない。ただし、fixture の例外の message の綴り（操作の対象が無いときは渡された綴り、参照先が無いときは小文字）を照合していたテストは、書き換えが要る。
+
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore`: `updateStatus`・`updateStatusWithEvent` が、`supersededById` に大文字小文字だけが違う自分自身の id（id が `mem-1`・`supersededById` が `MEM-1` など）を渡されると `RangeError`（`supersededById must not be the memory itself`）で断る**（[ADR 0558](./decisions/0558-inmemory-self-supersede-check-folds-both-sides.md)。🟡。項目59（ADR 0503）の自己置換の検査の取りこぼし）。
   `@mnemora/postgres` は以前から両側を畳んで断る。以前の fixture は `supersededById` を畳まずに比べたので通り、自分を指す `superseded` の行を書いた。新しく断るのはこの綴り違いの自己置換だけ（Postgres が今断るものだけ）。別の記憶を大文字で渡す呼び出しは従来どおり通り、小文字で保存される。fixture が新しく例外を投げる変更は破壊的と数えない（[ADR 0461](./decisions/0461-v1-2-0-release-prep-inspection.md)）。手順は要らない。公開 API・conformance suite は変えていない。
 

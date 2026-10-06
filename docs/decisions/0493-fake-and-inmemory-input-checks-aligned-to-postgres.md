@@ -136,3 +136,7 @@ InMemory も Fake も通し、Postgres だけが断っていた入力【実測�
 - 実 API（LLM・埋め込み）。
 - `createMemoriesWithOutboxAndEvents`（Fake は実装していない任意メソッド）。
 - `LexicalStore.search` の `filter` に `decayFloorAtAfter`・`decayFloorSeqAfter` の欄が有るか（E3 は `VectorStore` だけを見た）。
+
+## 追記（Issue #1759。クローン miku の判断で、根拠はオーナー回答 374f6f88 の問2・問25。オーナーの判断ではない）: `decayFloorAt` の `null` も断る
+
+上の本文は、型の外の `decayFloorAt: null` を「今までどおり通す」とした。**いまは testkit の `InMemoryMemoryStore` も断る。**【実測】Postgres 17（`C.UTF-8`）、main `de41711c`: `decayFloorAt` が `null`・`undefined`・キーなしの新しい記憶は、`createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`（新しい行）とも `23502`（NOT NULL 違反）で断られる。冪等の既存の行が在っても断られる。fixture は `assertStorableNewMemory` で、書く前に `TypeError`（`InMemoryMemoryStore: decayFloorAt must be a Date (got …)`）で断る。例外の顔は揃えていない（[ADR 0640](./0640-fixture-write-ports-reject-below-timestamptz-floor.md) の前例）。core のテスト専用 Fake は変えていない。歯は `packages/postgres/src/__tests__/testkit-fixture-alignment-not-found-spelling-and-decay-floor-null.postgres.test.ts`。CHANGELOG `[1.3.0]`・migration-v1 の 🟡。

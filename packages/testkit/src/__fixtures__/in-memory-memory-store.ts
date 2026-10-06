@@ -580,8 +580,15 @@ function assertStorableNewMemory(input: NewMemory): void {
     throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
   }
   // ADR 0493: `decayFloorAt`（必須）・`lastReinforcedAt`（省略可）も `timestamptz` 列。Postgres は Invalid Date を拒む。
-  // 型の外の `null` は今までどおり通す（Invalid Date だけを断る。ADR 0493）。
-  if (input.decayFloorAt != null && Number.isNaN(input.decayFloorAt.getTime())) {
+  // Issue #1759: `decay_floor_at` は NOT NULL で、Postgres は `null`・`undefined`・キーなしを `23502` で拒む（冪等の既存の行が
+  // 在っても。実測）。fixture も書く前に断る。例外の顔は揃えない（ADR 0640 の前例。型の誤りなので `TypeError`、ADR 0525）。
+  // 以前は型の外の `null` を通していた（ADR 0493）。
+  if (!(input.decayFloorAt instanceof Date)) {
+    throw new TypeError(
+      `InMemoryMemoryStore: decayFloorAt must be a Date (got ${input.decayFloorAt === null ? "null" : typeof input.decayFloorAt})`,
+    );
+  }
+  if (Number.isNaN(input.decayFloorAt.getTime())) {
     throw new Error(`InMemoryMemoryStore: decayFloorAt must be a valid Date (got Invalid Date)`);
   }
   for (const [field, value] of [
@@ -986,7 +993,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (id === null || id === undefined) return;
     const memory = this.memories.get(normId(id));
     if (!memory || memory.tenantId !== ctx.tenantId) {
-      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+      // Issue #1759: 参照先が無いときの message は、Postgres と同じく小文字にそろえた id を載せる（ADR 0521 の訂正）。
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${normId(id)}`);
     }
   }
 
@@ -1475,6 +1483,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
     // 書き込みは常に単独になる。PostgresMemoryStore と同じ位置（対象の存在確認より前）で
     // 落とす。
+    // Issue #1759: 対象が無いときの message は、Postgres と同じく渡された綴りのまま載せる（ADR 0521 の訂正）。
+    const requestedId = id;
     id = normId(id);
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
@@ -1485,7 +1495,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
-      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${requestedId}`);
     }
     // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
     // ならない（`memories.superseded_by_id → memories(id)`）。ADR 0439: `ctx` のテナントの Memory であること。
@@ -1520,6 +1530,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
     // ADR 0140: updateStatus と同じ理由・同じ位置。
+    // Issue #1759: updateStatus と同じく、対象が無いときの message は渡された綴りのまま。
+    const requestedId = id;
     id = normId(id);
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
@@ -1530,7 +1542,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     });
     const memory = this.rawGet(ctx, id);
     if (!memory) {
-      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${requestedId}`);
     }
     // 外部キー相当（ADR 0047）・ADR 0439: updateStatus と同じ理由・同じ検査・同じ順。
     this.assertOwnMemoryRef(ctx, opts.supersededById);
@@ -1615,6 +1627,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     createdEventsWritten?: true;
   }> {
     assertWellFormedCtx(ctx);
+    // Issue #1759: 対象が無いときの message は、Postgres と同じく渡された綴りのまま載せる（下の 1b）。
+    const requestedTargetIds = supersede.map((t) => t.id);
     supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
     news.forEach((entry, i) =>
       assertWellFormedIdentifier(entry.input.subjectId, `news[${i}].input.subjectId`),
@@ -1650,14 +1664,16 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
-    for (const target of supersede) {
+    for (const [i, target] of supersede.entries()) {
       // ADR 0640: 下限より前の `at` はここでは見ない——CAS に弾かれる対象はイベントを書かず、Postgres は `at` を見ない（実測）。
       // CAS を通る対象だけ、下の 1d で見る。
       assertStorableMemoryEvent(target.event, { skipAtFloor: true });
       // 1b. 対象の行がそもそも無い。
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
-        throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${target.id}`);
+        throw new Error(
+          `InMemoryMemoryStore: memory not found for tenant: ${requestedTargetIds[i]}`,
+        );
       }
     }
     // 1c. ADR 0140: news の各要素にも createMemory と同じ制約を課す。
@@ -2003,10 +2019,12 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
     assertWellFormedCtx(ctx);
+    // Issue #1759: 対象が無いときの message は、Postgres と同じく渡された綴りのまま。
+    const requestedId = id;
     id = normId(id);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
-      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${requestedId}`);
     }
     assertStorableMemoryColumn("embedding_status", status);
     if (isEmbeddingStatusRollback(memory.embeddingStatus, status)) {
@@ -2041,10 +2059,12 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     assertWellFormedCtx(ctx);
+    // Issue #1759: 対象が無いときの message は、Postgres と同じく渡された綴りのまま。
+    const requestedId = id;
     id = normId(id);
     const memory = this.rawGet(ctx, id);
     if (!memory) {
-      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${requestedId}`);
     }
     // `PostgresMemoryStore.reinforce` は `at` を `timestamptz` 列（`last_reinforced_at`/
     // `decay_floor_at`）へそのまま書き込むため、Invalid Date（`at.getTime()` が `NaN`）を
