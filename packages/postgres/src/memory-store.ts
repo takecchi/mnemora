@@ -2993,7 +2993,7 @@ export class PostgresMemoryStore implements MemoryStore {
    */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertWellFormedCtx(ctx);
-    assertWellFormedIdentifier(record.subjectId, "record.subjectId");
+
     // ADR 0437 決定2: 書き込む先の subject のカウンタ（`tenant_subject_activity.subject_id`）も、書く前に断る。
     if (typeof record.advanceActivityClock === "object" && record.advanceActivityClock !== null) {
       assertWellFormedIdentifier(
