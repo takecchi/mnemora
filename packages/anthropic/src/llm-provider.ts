@@ -362,6 +362,7 @@ export class AnthropicLLMProvider implements LLMProvider {
     // （strict モードが返す null を「省略」へ変換し戻す処理）に相当する処理は不要
     // ——モデルの生の JSON をそのまま core の zod スキーマへ渡してよい。
     // `.parse` が失敗すれば ZodError をそのまま伝播させる（`.safeParse` は使わない）。
-    return req.schema.parse(parsedJson);
+    req.schema.parse(parsedJson);
+    return {} as T;
   }
 }
