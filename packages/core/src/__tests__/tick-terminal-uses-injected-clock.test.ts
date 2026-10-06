@@ -99,9 +99,7 @@ describe("runtime が outbox に書く時刻は、注入した時計の値（tic
 
   it("reembed が積み直した embed ジョブの availableAt・createdAt（終端ではなく、同じ時計の別の口）", async () => {
     const { stores, runtime } = build();
-    const { memory } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), [
-      "embed",
-    ]);
+    const { memory } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), ["embed"]);
     await stores.memoryStore.setEmbeddingStatus(ctx, memory.id, "failed");
     const before = stores.outboxStore.listJobs(ctx).length;
 
