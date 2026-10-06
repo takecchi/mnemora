@@ -161,6 +161,36 @@ describe("consolidate / reflect — 空白だけの本文", () => {
     expect((await stores.memoryStore.get(ctx, a.id))?.status).toBe("active");
   });
 
+  it("consolidate: 前後に空白があっても中身のある本文は、拒まず、そのまま書く（trim しない）", async () => {
+    const padded = "  束ねた本文\n";
+    const { runtime, stores } = buildRuntime(llmReturning({ content: padded }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory("A"));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory("B"));
+
+    const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } });
+
+    expect(result.outcome).toBe("consolidated");
+    expect(result.llmFailure).toBeNull();
+    const created = await stores.memoryStore.get(ctx, result.consolidatedMemoryId!);
+    expect(created?.content).toBe(padded);
+  });
+
+  it("reflect: 前後に空白があっても中身のある本文は、拒まず、そのまま書く（trim しない）", async () => {
+    const padded = "  気づき\n";
+    const { runtime, stores } = buildRuntime(
+      llmReturning({ outcome: "reflected", content: padded }),
+    );
+    const a = await stores.memoryStore.createMemory(ctx, newMemory("A"));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory("B"));
+
+    const result = await runtime.reflect(ctx, { target: { memoryIds: [a.id, b.id] } });
+
+    expect(result.outcome).toBe("reflected");
+    expect(result.llmFailure).toBeNull();
+    const created = await stores.memoryStore.get(ctx, result.reflectedMemoryId!);
+    expect(created?.content).toBe(padded);
+  });
+
   it("reflect: llm_failed で、1件も書かない", async () => {
     const { runtime, stores } = buildRuntime(
       llmReturning({ outcome: "reflected", content: BLANK }),
