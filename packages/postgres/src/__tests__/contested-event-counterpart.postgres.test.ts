@@ -176,6 +176,76 @@ describe("対にまつわるイベントの meta に、対向の id（contestedW
         ]);
       });
 
+      it("opts.reason を渡しても、note と一緒に対向の id が入る（markContested・resolveContested・resolveOrphanedContested）", async () => {
+        const { runtime, memoryStore, eventStore } = await makeKit();
+        const [a, b] = await pair(memoryStore);
+        await runtime.markContested(ctx, a, b, { reason: "mark-note" });
+        expect(await metaOf(eventStore, a, "contested")).toEqual([
+          { reason: "contested", note: "mark-note", contestedWithId: b },
+        ]);
+        expect(await metaOf(eventStore, b, "contested")).toEqual([
+          { reason: "contested", note: "mark-note", contestedWithId: a },
+        ]);
+
+        await runtime.resolveContested(ctx, a, b, { kind: "both_active" }, { reason: "both-note" });
+        expect(await metaOf(eventStore, a, "contested_resolved")).toEqual([
+          {
+            reason: "contested_resolved",
+            resolution: "both_active",
+            note: "both-note",
+            contestedWithId: b,
+          },
+        ]);
+        expect(await metaOf(eventStore, b, "contested_resolved")).toEqual([
+          {
+            reason: "contested_resolved",
+            resolution: "both_active",
+            note: "both-note",
+            contestedWithId: a,
+          },
+        ]);
+
+        const [c, d] = await pair(memoryStore);
+        await runtime.markContested(ctx, c, d);
+        await runtime.resolveContested(
+          ctx,
+          c,
+          d,
+          { kind: "supersede", winnerId: d },
+          { reason: "sup-note" },
+        );
+        expect(await metaOf(eventStore, d, "contested_resolved")).toEqual([
+          {
+            reason: "contested_resolved",
+            resolution: "supersede",
+            note: "sup-note",
+            contestedWithId: c,
+          },
+        ]);
+        expect(await metaOf(eventStore, c, "contested_resolved")).toEqual([
+          {
+            reason: "contested_resolved",
+            resolution: "supersede",
+            note: "sup-note",
+            contestedWithId: d,
+            supersededById: d,
+          },
+        ]);
+
+        const [e, f] = await pair(memoryStore);
+        await runtime.markContested(ctx, e, f);
+        await runtime.forget(ctx, { memoryIds: [e] });
+        await runtime.resolveOrphanedContested!(ctx, f, { reason: "orphan-note" });
+        expect(await metaOf(eventStore, f, "contested_resolved")).toEqual([
+          {
+            reason: "contested_resolved",
+            resolution: "orphan_reclaimed",
+            note: "orphan-note",
+            contestedWithId: e,
+          },
+        ]);
+      });
+
       it("resolveOrphanedContested: 生き残った側のイベントに、forget された対向の id", async () => {
         const { runtime, memoryStore, eventStore } = await makeKit();
         const [a, b] = await pair(memoryStore);
