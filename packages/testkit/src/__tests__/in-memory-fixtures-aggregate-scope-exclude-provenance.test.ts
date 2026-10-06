@@ -57,4 +57,22 @@ describe("InMemoryMemoryStore.aggregateScope: options.excludeProvenanceKinds（A
     expect(withEmpty.totalInScope).toBe(without.totalInScope);
     expect(withEmpty.groups).toEqual(without.groups);
   });
+
+  it("scopeAggregate: 'skip' は excludeProvenanceKinds を渡しても欄を足さない（対照: 'exact' では欄が在る）", async () => {
+    const store = await seed();
+    const exact = await store.aggregateScope(
+      ctx,
+      {},
+      { scopeAggregate: "exact", excludeProvenanceKinds: ["consolidated"] },
+    );
+    expect(exact.excludedProvenanceIndexedCount).toBe(2);
+
+    const skipped = await store.aggregateScope(
+      ctx,
+      {},
+      { scopeAggregate: "skip", excludeProvenanceKinds: ["consolidated"] },
+    );
+    expect("excludedProvenanceIndexedCount" in skipped).toBe(false);
+    expect(skipped.countKind).toBe("unknown");
+  });
 });
