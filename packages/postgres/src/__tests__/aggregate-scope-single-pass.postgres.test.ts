@@ -1,4 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
+import { Client } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type {
   AggregateScopeOptions,
@@ -574,6 +575,70 @@ describe("aggregateScope: 単一パス書き換えの等価性（Issue #355、�
     expect(actual.digests.some((d) => d.memoryId === rows["s1-active-2"]!.id)).toBe(false);
     // tie-a/tie-b は occurred_at が同一 → id の降順で並ぶはず。オラクルと完全一致することで、
     // 新実装が `memories` を直接引いても同じタイブレークを保っていることが分かる。
+  });
+
+  // Issue #1775 の #721 の変異F: `digest_eligible_count` の引き算（除外 id の分）は、範囲内（status・period・
+  // validAt の絞りを通る）の除外 id だけを引く（ADR 0307 決定4「in_scope 条件を満たす件数を引く」）。
+  // 歯の除外 id は範囲内の記憶だけだったので、範囲外（archived・period の外・validAt の外）の除外 id も引く
+  // 変異が緑のままだった。範囲外の id を混ぜて渡し、旧実装のオラクルと一致する（引かれすぎない）ことを見る。
+  it("digestBand の除外 id に範囲外（archived・period の外・validAt の外）の記憶を混ぜても、digestEligible は旧実装と一致する", async () => {
+    const rows = await seedMatrix();
+    const scope: RecallScope = {
+      occurredAfter: new Date("2026-01-01T00:00:00Z"),
+      occurredBefore: new Date("2026-02-01T00:00:00Z"),
+      validAt: new Date("2026-01-15T00:00:00Z"),
+    };
+    const outOfScopeIds = [
+      rows["s3-archived"]!.id,
+      rows["s1-before-window"]!.id,
+      rows["s1-after-window"]!.id,
+      rows["s1-expired"]!.id,
+      rows["s1-not-yet-valid"]!.id,
+    ];
+    const opts: AggregateScopeOptions = {
+      digestBand: {
+        limit: 10,
+        excludeMemoryIds: [rows["s1-active-1"]!.id, ...outOfScopeIds],
+      },
+    };
+    const actual = await memoryStore.aggregateScope(ctx, scope, opts);
+    const oracle = await oracleAggregateScope(db, ctx, scope, opts);
+    expectSameAggregate(actual, oracle);
+    // 範囲内の除外 id（s1-active-1）だけが引かれる: 範囲外の5件を引いていれば、この値は小さくなる。
+    const withoutExclusion = await oracleAggregateScope(db, ctx, scope, {
+      digestBand: { limit: 10, excludeMemoryIds: [] },
+    });
+    expect(actual.digestEligible.count).toBe(withoutExclusion.digestEligible.count - 1);
+  });
+
+  // Issue #1775 の #721 の変異K: 集計は SQL 文が1本（PR 本文・ADR 0307 決定7。同じスナップショットを根拠にする、ADR 0011）。
+  // `recall.postgres.test.ts` の「単一の SQL 往復」の歯は `FROM memories` を含む文だけを数えるので、含まない別の文が
+  // 足されても赤くならない。ここでは `aggregateScope` の呼び出し中に DB へ流れた文を、すべて数える。
+  it("aggregateScope の呼び出し中に DB へ流れる文は1本だけ（digestBand あり・なし）", async () => {
+    await seedMatrix();
+    const count = async (opts?: AggregateScopeOptions) => {
+      const texts: string[] = [];
+      const original = Client.prototype.query;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
+        const [config] = args as [string | { text: string }];
+        texts.push(typeof config === "string" ? config : config.text);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (original as any).apply(this, args);
+      };
+      try {
+        await memoryStore.aggregateScope(ctx, {}, opts);
+      } finally {
+        Client.prototype.query = original;
+      }
+      return texts;
+    };
+
+    const withoutBand = await count();
+    const withBand = await count({ digestBand: { limit: 5, excludeMemoryIds: [] } });
+
+    expect(withoutBand, JSON.stringify(withoutBand)).toHaveLength(1);
+    expect(withBand, JSON.stringify(withBand)).toHaveLength(1);
   });
 
   it("digestBand あり・除外 id 無し（空配列）: 旧実装と完全一致する", async () => {
