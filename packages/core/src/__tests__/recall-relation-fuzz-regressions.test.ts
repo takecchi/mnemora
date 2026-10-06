@@ -80,4 +80,32 @@ describe("fuzz の relations profile が見つけた割れ（ADR 0494）", () =>
     const { violations } = await runOps(fakeBackend, ops, { relations: true });
     expect(violations).toEqual([]);
   });
+
+  it("relationMaxCount で切った群のメンバーを、段2の over_limit（rescore）でも重ねて数えない（seed 545。I10-upper、Issue #1759）", async () => {
+    // ADR 0494 の直しは、切った群のメンバーを3つの数え（below_threshold・score_not_comparable・over_limit）から外す。
+    // 上の seed 10 は1つ目しか踏まず、over_limit の側の除外を外す変異は、既定の本数の fuzz（20 シード）も
+    // Postgres の fuzz も素通りした。relations profile を 2000 シード回して見つけた操作列を最小化したもの。
+    const ops: Op[] = [
+      create(4, [], false, 8760),
+      create(3, [], false, 8760),
+      create(5, ["a"], false, 1),
+      create(3, ["c"], false, 8760),
+      create(1, ["a"], true, 24),
+      { k: "group", i: 293, j: 215, l: 971 },
+      create(4, ["a"], false, 24),
+      {
+        k: "recall",
+        v: 4,
+        limit: 3,
+        off: 3,
+        assoc: 0,
+        budget: 12,
+        thr: 0,
+        lex: false,
+        x: { tw: false, dbl: 0, qt: [], rmc: 1 },
+      },
+    ];
+    const { violations } = await runOps(fakeBackend, ops, { relations: true });
+    expect(violations).toEqual([]);
+  });
 });
