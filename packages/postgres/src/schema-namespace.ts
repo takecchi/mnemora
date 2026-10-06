@@ -84,7 +84,7 @@ const MAX_SCHEMA_NAME_BYTES = 63;
  * ⚠ **見るのは文字種と長さだけで、PostgreSQL がスキーマ名として受け付けるかは見ない**（今の振る舞い）。
  * `pg_` で始まる名前（例: `pg_mnemora`）はこの検査を通るが、PostgreSQL はその接頭辞を予約しているので、
  * `runMigrations` の `CREATE SCHEMA` が DB の例外（`unacceptable schema name "pg_mnemora"`）で失敗する
- * 【実測 2026-09-28、PostgreSQL 17】。この関数はそこで投げない。
+ * 【実測、PostgreSQL 17】。この関数はそこで投げない。
  */
 export function assertSafeSchemaName(schema: string): void {
   assertSafeIdentifier(schema);

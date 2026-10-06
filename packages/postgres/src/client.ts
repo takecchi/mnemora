@@ -19,8 +19,7 @@ export interface PostgresClient {
    * `pg` の接続プール。`runMigrations`・`registerEmbeddingSpace` に渡す。閉じるのは呼び出し側の責任
    * （`closePostgresClient`）。
    *
-   * ⚠ **`error` のリスナーは常に1つ付いている**（Issue #1213。2026-09-29 に反転した——
-   * 以前は付けず、利用者が付けることが前提だった）。**待機中**の接続が DB 側から切られると
+   * ⚠ **`error` のリスナーは常に1つ付いている**（Issue #1213）。**待機中**の接続が DB 側から切られると
    * （Postgres の再起動など）、既定では `console.warn` で名乗って続行する（プロセスは落ちない）。
    * `config.onPoolError` を渡すか、この `pool` に自分で `client.pool.on("error", …)` を付ければ、
    * 既定の警告は出なくなる（packages/postgres/README.md「pool の `error`」）。

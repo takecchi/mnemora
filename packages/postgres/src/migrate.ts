@@ -186,15 +186,12 @@ export const MIGRATION_LOCK_KEY = 7190158676462701299n;
  * セッション**上で、`pg_advisory_lock`/`pg_advisory_unlock` をもう1回撃つだけ
  * （{@link acquireAdvisoryLockOnClient} / {@link releaseAdvisoryLockOnClient}）。
  * 同一セッションが異なるキーの advisory lock を複数同時に保持することは
- * PostgreSQL の仕様上問題ない。**新しい接続を pool から借りる実装を最初に試したが、
- * `runMigrations` が同時に必要とする接続数が2本から3本に増え、`max: 2` で書かれた
- * 既存の並行テスト（`migrate-concurrency.test.ts` 等）が接続を使い切ってデッドロック
- * （3本目の `pool.connect()` が誰にも解決されないまま待ち続ける）することを実測して
- * 差し戻した。**この実装なら `runMigrations` が同時に使う接続数は今日と同じ2本のまま
- * （schema ロック用の `lockClient` 1本 + 個々のクエリ・マイグレーションのトランザクション
- * 用にその都度借りる1本）。
- * （2026-09-27 追記、Issue #1212: いまは個々のクエリ・マイグレーションのトランザクションも
- * `lockClient` で流すので、同時に使う接続は1本である。{@link runMigrations} の「排他」の節を参照。）
+ * PostgreSQL の仕様上問題ない。**新しい接続を pool から借りると、
+ * `runMigrations` が同時に必要とする接続数が増え、`max: 2` で書かれた並行テスト
+ * （`migrate-concurrency.test.ts` 等）が接続を使い切ってデッドロックする**
+ * （追加の `pool.connect()` が誰にも解決されないまま待ち続ける。実測）。
+ * `runMigrations` は個々のクエリ・マイグレーションのトランザクションも `lockClient` で流すので、
+ * 同時に使う接続は1本である（Issue #1212。{@link runMigrations} の「排他」の節を参照）。
  *
  * `extensionMode: "create"`（既定）のときだけ使う。`"verify"` は `CREATE EXTENSION` を
  * 一切発行しないので、このキーも一切参照しない。
@@ -261,7 +258,7 @@ const CREATE_EXTENSION_LINE_PATTERN =
  * 書き方に合わせてある。`WITH SCHEMA` などを伴う書き方は一致せず、複数の `CREATE EXTENSION` を1行に
  * まとめると先頭の1つだけが一致する（そのような行は今のところ存在しない。増えたらこの関数もそのぶん拡張すること）。
  *
- * ⚠ 2026-09-28 追記（今の振る舞い。正規表現は変えていない）:
+ * ⚠ 今の振る舞い:
  * - **`;` の後ろは行末でなくてもよい。**`CREATE EXTENSION IF NOT EXISTS pgcrypto; -- c` のように後ろに
  *   コメントが同居する行も一致する。`line` は `;` とその直後の空白・改行までで、後ろのコメントは含まない
  *   ——`stripCreateExtensionStatements` はその部分だけを取り除くので、`-- c` は本文に残る。
@@ -528,7 +525,7 @@ async function releaseMigrationLock(client: PoolClient, lockKey: bigint): Promis
 async function acquireExtensionLock(lockClient: PoolClient, lockTimeoutMs: number): Promise<void> {
   // `lockClient` の `lock_timeout` は schema ロックを取った直後に既定へ戻してある（本体の DDL に
   // 効かせないため、`runMigrations` の「排他」の節）。この共有ロックを待つ間だけ敷き直し、
-  // 待ち時間の上限を今までどおり schema ロックと同じ `lockTimeoutMs` に保つ。
+  // 待ち時間の上限を schema ロックと同じ `lockTimeoutMs` に保つ。
   await lockClient.query("SELECT set_config('lock_timeout', $1, false)", [String(lockTimeoutMs)]);
   try {
     await acquireAdvisoryLockOnClient(lockClient, EXTENSION_LOCK_KEY, MIGRATION_LOCK_ERRORS);
@@ -615,11 +612,10 @@ export function listMigrationFiles(migrationsDir: string): string[] {
 /**
  * {@link listMigrationFiles} を、`runMigrations` の入口（DB に触れる前）で呼ぶ版（ADR 0448）。
  *
- * `migrationsDir` を読めないとき（存在しない・ディレクトリでない・権限が無い）、以前は **ロックの取得・
- * `CREATE SCHEMA`・`CREATE EXTENSION`・台帳の作成が済んだ後**に、fs の生の例外（`ENOENT: no such file or
- * directory, scandir …`）で落ちていた。いまは DB に触れる前に、どの引数が読めなかったかを言う `Error`
- * （`cause` に元の例外、`code` は元のものをそのまま持つ）で落ちる。**落ちる入力は増えていない**
- * （以前も落ちていた）。新しい例外のクラスは作らない。
+ * `migrationsDir` を読めないとき（存在しない・ディレクトリでない・権限が無い）は、DB に触れる前に、
+ * どの引数が読めなかったかを言う `Error`（`cause` に元の例外、`code` は元のものをそのまま持つ）で落ちる。
+ * ロックの取得・`CREATE SCHEMA`・`CREATE EXTENSION`・台帳の作成が済んだ後に fs の生の例外
+ * （`ENOENT: no such file or directory, scandir …`）で落ちるのを避けるため。新しい例外のクラスは作らない。
  */
 function listMigrationFilesOrExplain(migrationsDir: string): string[] {
   try {
@@ -660,7 +656,7 @@ function describeLedgerDrift(
   const messages: string[] = [];
 
   // (c) ADR 0448: `.sql` が1本も無い。`migrationsDir` の指定違い・パッケージの展開の欠けを疑う。
-  // 止めない（以前も、台帳に名前が無ければ `applied: []` で成功していた）。
+  // 止めない（台帳に名前が無ければ `applied: []` で成功する）。
   if (files.length === 0) {
     messages.push(
       `${POOL_ERROR_WARNING_PREFIX} migrate: migrationsDir に .sql が1本も無い。何も適用しない。` +
@@ -1098,15 +1094,13 @@ export interface AnalyzeMemoriesResult {
  * `SHARE UPDATE EXCLUSIVE` ロックを取る——このロックは通常の `SELECT`/`INSERT`/`UPDATE`/`DELETE` と
  * 競合しない（競合するのは他の `VACUUM`/`ANALYZE`・一部の DDL のみ）。また `ANALYZE` はテーブル全体を
  * 舐めず、`default_statistics_target` に基づく固定サイズのサンプル行だけを読む。
- * ⟹ 素の `CREATE INDEX`（`ShareLock` を取り書き込みだけを止める——ADR 0062 (c) の
- * 2026-09-29追記が実測・訂正済み。本文はまだ `ACCESS EXCLUSIVE` と書いているが、それは
- * 実測に基づかない記述だった）とは性質が異なる。
+ * ⟹ 素の `CREATE INDEX`（`ShareLock` を取り書き込みだけを止める——ADR 0062 (c) の追記が実測済み）
+ * とは性質が異なる。
  *
- * 【実測 2026-09-28、[Issue #1253](https://github.com/takecchi/mnemora/issues/1253)】PostgreSQL 17 で、
+ * 【実測、[Issue #1253](https://github.com/takecchi/mnemora/issues/1253)】PostgreSQL 17 で、
  * `ANALYZE memories` が `memories` に取るロックは `ShareUpdateExclusiveLock` だった（文書どおり）。
  * そのロックを持ったまま（`ANALYZE` のトランザクションを開けたまま）でも、別の接続からの
- * `createMemory` は止まらずに通った（`analyze-memories-lock.postgres.test.ts`）。以前ここに
- * 「この作業環境には Postgres も docker も無く、実測はできない」と書いていたのは、当時の環境の話である。
+ * `createMemory` は止まらずに通った（`analyze-memories-lock.postgres.test.ts`）。
  * **まだ測っていないのは2点**——大きなテーブルでサンプリング自体にどれだけ壁時計時間がかかるか、
  * 統計情報以外の副作用（プランキャッシュの無効化等）が実運用でどう効くか。ADR 0143 の
  * 「確かめていないこと」も参照。

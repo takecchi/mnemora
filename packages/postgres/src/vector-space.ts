@@ -263,11 +263,11 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  * 通す——⚠ 既存のテーブルは、この後で**最初に登録した組**が持ち主になる。mnemora の形ではないコメントは
  * 上書きせずに通す（そのテーブルは見張れない）。見張るのは登録の口だけで、`upsert`・`search` は
  * コメントを見ない。1つの DB で複数の空間を使うなら、正規化の後にも区別が残る provider・model を
- * 選ぶこと（`docs/memory-model.md` §10 の同日付追記）。
+ * 選ぶこと（`docs/memory-model.md` §10）。
  *
- * コメントの記録は `COMMENT ON TABLE` なのでテーブルの所有者の権限が要るが、この関数は以前から
- * `CREATE INDEX IF NOT EXISTS` で同じ所有者の権限を要していた（所有者でないロールは既存の
- * テーブルでも `must be owner of table` で落ちる。2026-09-27 実測）——登録を通せるロールの範囲は変わらない。
+ * コメントの記録は `COMMENT ON TABLE` なのでテーブルの所有者の権限が要るが、この関数は
+ * `CREATE INDEX IF NOT EXISTS` でも同じ所有者の権限を要する（所有者でないロールは既存の
+ * テーブルでも `must be owner of table` で落ちる。実測）——登録を通せるロールの範囲は変わらない。
  *
  * ## `options.schema`（feat/dedicated-schema）
  *
@@ -282,7 +282,7 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  * class を `qualify(extensionSchema, ...)` で修飾する（`extensionSchema` 省略時は
  * {@link DEFAULT_EXTENSION_SCHEMA}）。**`search_path` は一切触らない**——`migrate.ts`
  * の `SET LOCAL` と違い、`registerEmbeddingSpace` は、advisory lock を握った
- * 専用コネクションの上で、`BEGIN` を開かずに DDL を打つ（ADR 0460。以前は別の接続の `pool.query`）ため、
+ * 専用コネクションの上で、`BEGIN` を開かずに DDL を打つ（ADR 0460）ため、
  * `SET LOCAL` で守れる範囲のトランザクションを持たない。完全修飾すれば `search_path` に依存する必要が無く、pool のコネクションに
  * session 状態を残す心配も無くなる。
  *
@@ -357,11 +357,11 @@ export async function registerEmbeddingSpace(
     REGISTER_EMBEDDING_SPACE_LOCK_ERRORS,
   );
   try {
-    // ADR 0460: DDL は、advisory lock を握った接続（`lockClient`）の中で打つ。以前は `pool.query` で
-    // 別の接続を使っていたので、`max: 1` の Pool では、借り切られた接続の返却を待って止まった
+    // ADR 0460: DDL は、advisory lock を握った接続（`lockClient`）の中で打つ。`pool.query` で別の接続を
+    // 使うと、`max: 1` の Pool では、借り切られた接続の返却を待って止まる
     // （`lock_timeout` は advisory lock の待ちにしか効かない）。`lockClient.query` は `BEGIN` を
-    // 開かないので、文ごとの暗黙のトランザクションという境界は `pool.query` のときと同じである。
-    // 変わるのはセッションの設定だけで、`acquireAdvisoryLock` が敷いた `lock_timeout`（advisory lock を
+    // 開かないので、文ごとの暗黙のトランザクションという境界は `pool.query` と同じである。
+    // 違うのはセッションの設定だけで、`acquireAdvisoryLock` が敷いた `lock_timeout`（advisory lock を
     // 待つ上限）がこの接続に残っている——DDL の表ロック待ちにまで効いてしまうので、ここで戻す
     // （`runMigrations` が同じ形で `RESET lock_timeout` している）。
     await lockClient.query("RESET lock_timeout");
