@@ -60,7 +60,8 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 ⭐ **何が在るかの正本は `packages/core/src/runtime.ts` の `export interface Runtime` であり、
 ⛔ ここに個数を写さない**（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 **どのメソッドがどの層かの正本は、同ファイルの各メソッドの doc コメントの `層:` 行である**
-（`未分類` は判断が割れているもので、1本ずつ決める。[ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)）。
+（`未分類` は判断が割れているもの（1本ずつ決める）と、3つの層のどれにも当たらないと確かめて置かないと決めたもの。
+[ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)・[ADR 0634](./decisions/0634-unclassified-runtime-method-layers-decided.md)）。
 
 以下はこの中核5動詞それぞれが Runtime 内部でどの部品を通るかで分類する。
 

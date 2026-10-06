@@ -2681,7 +2681,7 @@ export interface Runtime {
    */
   observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
   /**
-   * 層: 未分類
+   * 層: 保守操作
    * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。
    * `extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが
    * 明示的に呼ばない限り抽出・埋め込みは永久に走らない——「キューが無ければ黙って
@@ -2849,7 +2849,7 @@ export interface Runtime {
     opts?: AbortOptions,
   ): Promise<FindCorrectionCandidatesResult>;
   /**
-   * 層: 未分類
+   * 層: 保守操作
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
    * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
@@ -3160,7 +3160,7 @@ export interface Runtime {
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult>;
   /**
-   * 層: 未分類
+   * 層: 是正・取り消し
    * `docs/memory-model.md` §11 行15「`superseded → active`」を、呼び出し側が
    * **明示的に**取り戻す。`consolidate`/`reextract`/`resolveContested` が閉じる方向
    * （`active` → `superseded`）だけを持っていた片道を、開く方向（`superseded` →
@@ -3788,7 +3788,7 @@ export interface Runtime {
     opts?: ResolveContestedGroupOptions,
   ): Promise<ResolveContestedGroupResult>;
   /**
-   * 層: 未分類
+   * 層: 是正・取り消し
    * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
    * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
    * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
