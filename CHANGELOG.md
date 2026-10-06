@@ -166,7 +166,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目68。DB マイグレーションは無い（既に書かれた行は直さない）。
 
+- **conformance suite に約束を足した——`MemoryStore.listBySourceObservationAllVersions` は、purge 済みの行（`status: 'forgotten'` のまま `purgedAt` が入った行）も返す**（[ADR 0639](./docs/decisions/0639-observe-resend-breakdown.md)。ADR 0546 の作法どおり、足す約束は Breaking に数える）。`describeMemoryStoreConformance` の `supportsPurgeMemory: true` の枝に、`it` が1本増えた。口の TSDoc は元から「`status` でも絞らない」で、purge 済みの行を除く実装は契約に反していたが、外部の adapter から見れば、通っていたものが落ちる。足した約束は外せない。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目69。DB マイグレーションは無い。
+
 ### Added
+
+- **`Runtime.observe` の冪等な再送（同じ `externalId` の Observation が既に在った）の戻り値に、`resend`（`ObserveResend`）を足した。その Observation から作られた記憶の `memoryId`・`status`・`purged` が、版も status も問わず `memoryId` の昇順で載る**（[ADR 0639](./docs/decisions/0639-observe-resend-breakdown.md)。オーナーへのまとめ問い 374f6f88 の問10「再送の内訳は足す方向で検討」〈オーナーは推奨どおりと回答〉による。足すと決めたのはクローン miku の判断で、型の形は担い手の設計。オーナーが決めたのは推奨の採否だけ）。`memories` が空なら、まだ抽出されていない（ジョブの状態はこの欄では分からない）。全部が `forgotten` なら forget のために無視された。`purged: true` なら purge 済み。新しく作った呼び出しには欄が無い。`memoryIds`・`extraction`・ADR 0454 決定4 の3欄など、既存の欄の型・値は変わらない（任意の欄の追加）。再送の分岐で読み取りが1回増えるだけで、書き込みも LLM の呼び出しも無い。`ObserveResend`・`ObserveResendMemory` も `@mnemora/core` から出る。
 
 - **`@mnemora/postgres` に `findCrossTenantReferences` を足した**（[ADR 0636](./docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)。オーナー回答 374f6f88 の問27）。`recall_usages`・`memories.source_observation_id`・`memories.contested_with_id`・`memories.superseded_by_id` の4種について、参照先が別のテナントの行である既存行を、種類ごとの件数と先頭の `sampleLimit` 件（既定 20）で返す。**検出だけで、何も書き換えない**（`READ ONLY` のトランザクションの中で読む）。複合外部キーは足していない。既存の振る舞いは変わらない。`CROSS_TENANT_REFERENCE_KINDS` なども同じ入口から出る。
 

@@ -100,6 +100,12 @@ describe("runtime.observe: forget・purge した記憶の Observation と同じ 
             memoryIds: [],
             extraction: "skipped",
             extractionFailure: null,
+            // ADR 0639: 再送の内訳。forget の後は forgotten・purged: false、purge の後は purged: true。
+            resend: {
+              memories: [
+                { memoryId, status: "forgotten", purged: withdrawal === "forget + purge" },
+              ],
+            },
           },
           llmCallsDuringResend: 0,
           processedByLaterTick: 0,
