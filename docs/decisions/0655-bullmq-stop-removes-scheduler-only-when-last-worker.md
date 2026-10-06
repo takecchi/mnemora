@@ -34,7 +34,7 @@
 - 【現物】`queue.getWorkers()`（`queue-getters.js`）は `CLIENT LIST` を読み、接続名が `<prefix>:<base64(queue)>`（名前なしの Worker）または `<prefix>:<base64(queue)>:w:<name>` で始まる行を返す。各行の `rawname` が接続名そのもので、`name` は queue 名に書き換えられる。
 - 【現物】Worker の blocking 接続の名前は `utils/create-backend.js` の `createBlockingConnection` が決める。Worker の `name` オプションがあれば `:w:<name>` が付く。Worker の `id`（`randomUUID`）は接続名に入らない。
 - ⟹ **driver ごとに一意な Worker 名（`mnemora-tick-<randomUUID>`）を `Worker` の `name` に渡し、`rawname` が `:w:<その名前>` で終わる行だけを自分として除く。** 残った行（名前なしの Worker＝この変更より古い版の driver、他の driver の Worker）は「他」と数える。
-- 【現物】Worker の `name` は `moveToActive` にも渡される（ジョブの処理側の記録）。tick のジョブの処理には影響しない。公開の型には出ない。
+- 【現物】Worker の `name` は `moveToActive` にも渡され、bullmq 6.3.8 の `commands/includes/prepareJobForProcessing.lua` が、処理を始めたジョブのハッシュに `pb`（processedBy）フィールドとしてその名前を書く。テレメトリを有効にしていれば、属性 `WorkerName` にも載る（`classes/worker.js`）。tick のジョブの処理の中身には影響しない。公開の型には出ない。
 - 【実測】同じプロセス内の2つの driver で `getWorkers()` が返した `rawname` は、`bull:<base64(queue)>:w:mnemora-tick-<uuid>` の形で、2台それぞれに違う uuid が付いていた。
 - **自分の接続を判別できない場合**: 自分の接続名が付かない環境（`SETNAME` を無視するプロキシなど）では、自分も他も一覧に出ない。「他が居る」と言えないので、今までどおり消す。⟹ **判別できないときは必ず「消す」側に倒れ、「消さない」側には倒れない。**
 - 【現物】`getWorkers()` が見るのは Redis 上の接続であり、`stop()` の中で自分の `worker.close()` は `getWorkers()` の後に走る。自分の行は一覧に在り、上の規則で除かれる。
@@ -55,6 +55,7 @@
 - **`getWorkers()` は `CLIENT LIST` を全接続ぶん読む。** `stop()` が1回 Redis の往復を増やす（Redis の接続数が多いとき、`CLIENT LIST` は重い）。`stop()` は終了時に1回なので許容した。測っていない。
 - **自分以外の Worker は、止まりかけ（`close()` 中・接続が切れる直前）かもしれない。** 他の Worker が `getWorkers()` の後に落ちると、scheduler は残るが処理する Worker が居なくなる。`stop()` の前後で Worker が居なくなる競合は、同じ形で残る（次に `start()` する driver が引き継ぐ）。
 - **Worker に `name` を付けたので、`CLIENT LIST` の接続名が `:w:mnemora-tick-<uuid>` になる。** 運用側で接続名を見ているなら、見え方が変わる。
+- **この変更の後に処理された tick のジョブのハッシュには、`pb`（processedBy）= `mnemora-tick-<uuid>` が増える**（Redis に書く中身が1フィールド増える。保存済みのジョブには触らない。完了ジョブは既定で 1000 件まで残るので、その分だけ載る）。読むのは bullmq 側の監視（Bull Board など）だけで、mnemora は読まない。
 - **オプション渡しの歯（`tick-driver.option-passthrough.test.ts` の Worker の opts の「丸ごと固定」）に `name` を足した。**
 
 ## これが覆るとしたら
