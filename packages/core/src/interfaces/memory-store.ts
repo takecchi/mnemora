@@ -51,8 +51,7 @@ export class MemoryStatusConflictError extends Error {
       `MemoryStore: expected status "${expectedStatus}" for memory ${memoryId}, ` +
         `but observed ${observedStatus === null ? "(memory disappeared)" : `"${observedStatus}"`}` +
         " — the write was rejected because the memory was not in the expected status" +
-        " (for example, another write changed it first). Re-read the memory and decide again" +
-        " instead of retrying blindly.",
+        " (for example, another write changed it first).",
     );
     this.name = "MemoryStatusConflictError";
   }
