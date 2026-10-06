@@ -69,6 +69,23 @@ describe("🔴 出す版の節の門は publish.yml に配線されていない�
     expect(workflow).not.toContain("RELEASE_PRERELEASE:");
   });
 
+  /**
+   * Issue #1782（#601 の確かめ直し）: 上の3本は、撤回前の配線の文字列だけを探す。⟹ 門を別の書き方で戻すと
+   * （道具を使わず `grep` で `CHANGELOG.md` の節を見て `exit 1` する段など）、どれにも当たらずに素通りした【実測】。
+   * いまの `publish.yml` は、コメントを除くと `CHANGELOG` を1か所も読まない。⟹ 読み始めたら、書き方によらず赤にする。
+   * ⚠ 正当な理由で読むことになったら（門以外の用途でも）、ADR を積んでこの it を直すこと。
+   */
+  it("コメントを除いた publish.yml は、CHANGELOG を1か所も読まない（書き方を変えた門の復活も捕まえる）", () => {
+    const lines = workflow
+      .split("\n")
+      .map((line, i) => `${i + 1}: ${line.trim()}`)
+      .filter((line) => /changelog/i.test(line));
+    expect(
+      lines,
+      "publish.yml が CHANGELOG を読んでいる。出す版の節の門の復活なら ADR 0267 を読むこと。",
+    ).toEqual([]);
+  });
+
   it("⚠ 門の道具そのものが repo に残っていない（残っていると、戻すのが1行で済んでしまう）", async () => {
     const { existsSync } = await import("node:fs");
     const scriptPath = fileURLToPath(new URL(`../../${GATE_SCRIPT}`, import.meta.url));
