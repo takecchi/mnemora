@@ -18,5 +18,5 @@
 import { resetEmbeddingUpsertCountersForTesting } from "../embedding-statistics.js";
 import { resetMemoriesWriteCounterForTesting } from "../memories-statistics.js";
 
-resetMemoriesWriteCounterForTesting();
-resetEmbeddingUpsertCountersForTesting();
+void resetMemoriesWriteCounterForTesting;
+void resetEmbeddingUpsertCountersForTesting;
