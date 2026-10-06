@@ -1,16 +1,11 @@
 /**
- * `AnthropicLLMProvider` が投げる失敗を、**呼び出し側が種類として区別できる形**にする。
+ * `AnthropicLLMProvider` が投げる失敗を、**呼び出し側が種類として区別できる形**にする（ADR 0072）。
  *
- * **なぜ要るか（ADR 0072 の追記「実測で見つかった穴」）**
- *
- * ADR 0072 の初版は「構造化出力が返らなかったら例外を投げる」までしか決めていなかった。
- * その結果、**「モデルが拒否した」と「応答が空だった」が同じ `Error` になっていた。**
- *
- * これはこのリポジトリの固定点——**「無い」の種類を潰さない**（`docs/recall.md`・
- * ADR 0008 / 0013 / 0026 / 0027 / 0044 が一貫して守ってきた線）——に正面から当たる。
+ * **なぜ要るか**: 「モデルが拒否した」と「応答が空だった」が同じ `Error` だと、このリポジトリの固定点
+ * ——**「無い」の種類を潰さない**（`docs/recall.md`・ADR 0008 / 0013 / 0026 / 0027 / 0044）——に当たる。
  * `packages/core/src/extraction.ts` の `extractCandidates` はこの例外を `try/catch` で飲み、
- * **`ExtractionOutcome: "llm_failed_whole_observation"` へ倒す。**⟹ 種類を潰したまま
- * 投げると、「モデルが拒否した」という情報はそこで完全に消える。
+ * **`ExtractionOutcome: "llm_failed_whole_observation"` へ倒す。**⟹ 種類を潰したまま投げると、
+ * 「モデルが拒否した」という情報はそこで完全に消える。
  *
  * **⚠ 拒否は HTTP 200 で返る。** `stop_reason: "refusal"` が付いた成功応答であり、
  * SDK は例外を投げない。**`content` を読む前に `stop_reason` を見ないと、
@@ -20,38 +15,31 @@
  * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
  * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
  *
- * ⚠ **2026-09-27 追記（プロンプトの大きさの軸）:** 入力がモデルのコンテキストを超えたときの顔は2つある（今の振る舞い。実 API では確かめておらず、SDK の例外の形を模した偽のクライアントで確かめた）。成功応答の
- * `stop_reason: "model_context_window_exceeded"` は `kind: "truncated"` になるが、API が
- * リクエストを HTTP 400（`prompt is too long` 等）で拒むと、SDK の例外がそのまま伝播し
- * `kind` は付かない（下の「分類の外」と同じ扱い）。
+ * ## `kind` の外の例外
  *
- * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
- * `kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである。**
- * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——トップレベルの `content`
- * 欄がキーごと丸ごと無い場合（`{}` が返る等）——は、この分類の**外**にある生の例外
- * （`TypeError` 等。壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と同じ
- * 扱い）がそのまま伝播する。`AnthropicLLMProviderError` にはならず、`instanceof` でも
- * `kind` でも捕まえられない。**実 API がこの形（200 応答なのにトップレベルのキーが
- * 丸ごと欠ける）を実際に返すかは確認していない。** 詳細・検討した案は
- * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記を
- * 参照。`llm-provider.ts` の `firstTextBlock` にも個別の doc コメントがある。
+ * 次は `AnthropicLLMProviderError` にならず、`kind` でも `instanceof` でも捕まえられない。
  *
- * ⚠ **ADR 0552 追記（ADR 0445 BJ-1）: `kind` の外の例外に、もう1つある。** `maxTokens` が 21334 以上で、
- * `client` が `timeout` を持たない（`client` を省略したときを含む）と、`complete`・`completeStructured` は
- * SDK が**送信前に**投げる素の `AnthropicError`（`Streaming is required for operations that may take longer than
- * 10 minutes…`）をそのまま伝える。`kind` も `cause` も付かず、`AnthropicLLMProviderError` ではない。
- * 21333 までは通る（SDK 0.124.0 で実測。境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`）。
- * `timeout` を持たない `client` を自分で渡したときの分岐は、コードを読んだだけで実測していない。
- * 詳細は `llm-provider.ts` の `AnthropicLLMProviderOptions.maxTokens`・README。
+ * - **プロンプトがモデルのコンテキストを超えたとき**（実 API では確かめておらず、SDK の例外の形を模した
+ *   偽のクライアントで確かめた）: 成功応答の `stop_reason: "model_context_window_exceeded"` は
+ *   `kind: "truncated"` になるが、API が HTTP 400（`prompt is too long` 等）で拒むと SDK の例外がそのまま伝播する。
+ * - **HTTP 200 の応答オブジェクトの形が壊れているとき**（トップレベルの `content` がキーごと無い、`{}` 等）:
+ *   生の `TypeError` 等が伝播する（壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と同じ扱い）。
+ *   **実 API がこの形を返すかは確認していない。** 検討した案は
+ *   [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) を参照。`llm-provider.ts` の `firstTextBlock` にも個別の doc がある。
+ * - **`maxTokens` が 21334 以上で、`client` が `timeout` を持たない**（`client` を省略したときを含む）とき
+ *   （ADR 0552 / ADR 0445 BJ-1）: `complete`・`completeStructured` は SDK が**送信前に**投げる素の
+ *   `AnthropicError`（`Streaming is required for operations that may take longer than 10 minutes…`）をそのまま伝える。
+ *   21333 までは通る（SDK 0.124.0 で実測。境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`）。
+ *   `timeout` を持たない `client` を自分で渡したときの分岐は、コードを読んだだけで実測していない。
+ *   詳細は `llm-provider.ts` の `AnthropicLLMProviderOptions.maxTokens`・README。
  *
- * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
- * `kind: "schema_unsupported"` を足した。** `completeStructured` は、送る前の翻訳
- * （`json-schema.ts` の `translateForAnthropicStructuredOutput`、SDK の `zodOutputFormat`）
- * が投げた例外を、この `kind` に包んで `messages.create` を呼ぶ前に投げ直す。**元の例外は
- * `cause`（ES2022 の `Error.cause`）に載る**。`z.tuple`・`z.date`・`transform` と、
- * **`z.record`（2026-09-30 から。ADR 0360 の追記）**がこの経路に当たる（README「`completeStructured` に
- * 渡せる zod の形」参照）。
+ * ## `kind: "schema_unsupported"`（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+ * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）
+ *
+ * `completeStructured` は、送る前の翻訳（`json-schema.ts` の `translateForAnthropicStructuredOutput`、
+ * SDK の `zodOutputFormat`）が投げた例外をこの `kind` に包み、`messages.create` を呼ぶ前に投げ直す。
+ * **元の例外は `cause`（ES2022 の `Error.cause`）に載る**。`z.tuple`・`z.date`・`transform`・`z.record`
+ * がこの経路に当たる（README「`completeStructured` に渡せる zod の形」参照）。
  */
 
 /**

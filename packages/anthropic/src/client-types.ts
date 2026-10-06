@@ -3,8 +3,7 @@
  * 独立した構造型（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)。
  * `@mnemora/openai` の `client-types.ts` と同じ理由・同じ形——詳細はそちらの冒頭コメントを見ること）。
  *
- * オーナーの回答（ask_human f259eeb8、2026-09-28、逐語「型を SDK のクラスから切り離すって
- * いうのはだめですか？」）に沿い、`Pick<Anthropic, "messages">` をやめてここへ切り離した。
+ * `Pick<Anthropic, "messages">` ではなく、SDK のクラスから切り離した型にしている（オーナーの方針）。
  *
  * ⚠ **method 記法で書く**（`@mnemora/openai` と同じ理由。双変なパラメータ検査に
  * 意図的に依拠している）。
