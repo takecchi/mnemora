@@ -1,5 +1,5 @@
 import { Client } from "pg";
-import { afterAll, beforeAll, expect } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import type { Ctx } from "@mnemora/core";
 import {
@@ -19,7 +19,7 @@ import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { rowToOutboxJob, type OutboxJobRow } from "../mapping.js";
+import { rowToOutboxJob, toPgTimestamp, type OutboxJobRow } from "../mapping.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -317,7 +317,7 @@ describeOutboxStoreConformance({
         ${ctx.tenantId},
         ${input.kind},
         ${JSON.stringify(input.payload ?? {})}::jsonb,
-        ${input.availableAt ?? new Date()},
+        ${toPgTimestamp(input.availableAt ?? new Date())},
         0,
         now()
       )
@@ -436,27 +436,29 @@ describeTenantSettingsStoreConformance({
  * 素の `Date` が `pg` まで届くと、地方平均時の時代の日時が秒単位でずれて保存される。
  * 個別の口の歯（`timestamp-write-process-tz`）は memory の insert と event の append/list だけを見るので、
  * 適合テストが一巡する間に発行されたすべてのクエリの束縛値を見て、`Date` のインスタンスが1つでも
- * 届いたら、その呼び出し元（`src/` の最初のフレーム）を名指しして落とす。
+ * 届いたら、その SQL の頭を名指しして落とす。
  */
 const rawDateParamSites = new Set<string>();
 const originalClientQuery = Client.prototype.query;
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
-    const [config, params] = args as [string | { values?: unknown[] }, unknown[] | undefined];
-    const values = typeof config === "string" ? params : config.values;
+    const [config, params] = args as [
+      string | { text: string; values?: unknown[] },
+      unknown[] | undefined,
+    ];
+    const values = params ?? (typeof config === "string" ? undefined : config.values);
     if (Array.isArray(values) && values.some((v) => v instanceof Date)) {
-      const frame = (new Error().stack ?? "")
-        .split("\n")
-        .find((line) => /packages\/postgres\/src\/(?!__tests__)/.test(line));
-      rawDateParamSites.add((frame ?? "(src のフレームなし)").trim());
+      const text = typeof config === "string" ? config : config.text;
+      rawDateParamSites.add(text.replace(/\s+/g, " ").trim().slice(0, 100));
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (originalClientQuery as any).apply(this, args);
   };
 });
 
-afterAll(() => {
+// 上の適合テストがすべて終わった後（同じファイルの中では、登録順に直列で走る）に検査する。
+it("適合テストが一巡する間に、素の Date が pg の束縛値へ届いた口は無い（Issue #1040）", () => {
   Client.prototype.query = originalClientQuery;
   expect([...rawDateParamSites]).toEqual([]);
 });
