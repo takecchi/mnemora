@@ -110,7 +110,7 @@ describe("群の note の境界（core Fake）", () => {
 
   it("observe() の戻り値の memberIds は、切らずに全員", async () => {
     const { last } = await observeN(12, true);
-    const result = last.contestedDetection[0]!.result;
+    const result = last.contestedDetection![0]!.result;
     expect(result.kind).toBe("contested_group");
     if (result.kind === "contested_group") {
       expect(result.memberIds).toHaveLength(12);
@@ -129,7 +129,7 @@ describe("claim_key_conflict_unresolved の note の境界（core Fake）", () =
 
   it("observe() の戻り値の matchMemoryIds は、切らずに全員", async () => {
     const { last } = await observeN(13, false);
-    const result = last.contestedDetection[0]!.result;
+    const result = last.contestedDetection![0]!.result;
     expect(result.kind).toBe("unresolved_conflict");
     if (result.kind === "unresolved_conflict") {
       expect(result.matchMemoryIds).toHaveLength(12);

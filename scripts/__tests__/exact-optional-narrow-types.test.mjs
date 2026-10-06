@@ -4,9 +4,8 @@
  * 確かめ直しで足した）。`exact-optional-input-types.test.mjs` は「広げた型が `undefined` を受ける」向きだけを見る。
  * 対象は `scripts/__fixtures__/exact-optional-narrow-types.probe.ts`（`@ts-expect-error` が全部効いていれば診断0件）。
  */
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
@@ -15,7 +14,6 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const probePath = join(root, "scripts", "__fixtures__", "exact-optional-input-types.probe.ts");
 
 const PACKAGES = [
   "core",

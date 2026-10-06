@@ -15,7 +15,6 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100);
-const SUNK = new Date(NOW.getTime() - 1_000);
 const ANCHOR_VECTOR = [0.70710678, 0.70710678];
 const ASSOCIATED_VECTOR = [0, 1];
 const ASSOCIATION = { maxCount: 5, anchorCount: 1 } as const;
@@ -84,22 +83,6 @@ async function embedded(
   const memory = await stores.memoryStore.createMemory(ctx, newMemory(overrides));
   await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, vector);
   return memory;
-}
-
-/** `search` の n 回目（1 始まり）が返った直後に `hook` を1度だけ走らせる。 */
-function interposeAfterSearch(
-  stores: ReturnType<typeof createFakeRuntimeStores>,
-  n: number,
-  hook: () => Promise<unknown>,
-): void {
-  const original = stores.vectorStore.search.bind(stores.vectorStore);
-  let calls = 0;
-  stores.vectorStore.search = async (c, space, query, opts) => {
-    const hits = await original(c, space, query, opts);
-    calls += 1;
-    if (calls === n) await hook();
-    return hits;
-  };
 }
 
 const QUERY: RecallQuery = { vector: [1, 0], limit: 10, includeFullyDecayed: true };

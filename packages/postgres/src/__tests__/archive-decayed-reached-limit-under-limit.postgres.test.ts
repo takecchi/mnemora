@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
-import type { Ctx, MemoryStore } from "@mnemora/core";
+import type { Ctx } from "@mnemora/core";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -16,7 +16,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 const ctx: Ctx = { tenantId: "archive-decayed-reached-limit-under-limit" };
 const now = new Date("2026-06-01T00:00:00.000Z");
 
-const KITS: Array<[string, () => Promise<MemoryStore>]> = [
+const KITS: Array<[string, () => Promise<InMemoryMemoryStore | PostgresMemoryStore>]> = [
   ["testkit の InMemory", async () => new InMemoryMemoryStore()],
   [
     "Postgres",

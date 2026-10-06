@@ -44,14 +44,12 @@ describe.each(STORES)(
             }),
           )
         ).id;
-      const [g0, g1, g2, p1, p2, fresh] = [
-        await create("g0"),
-        await create("g1"),
-        await create("g2"),
-        await create("p1"),
-        await create("p2"),
-        await create("fresh"),
-      ] as MemoryId[];
+      const g0 = await create("g0");
+      const g1 = await create("g1");
+      const g2 = await create("g2");
+      const p1 = await create("p1");
+      const p2 = await create("p2");
+      const fresh = await create("fresh");
       await store.markContestedGroup!(
         ctx,
         [g0, g1, g2].map((id) => ({ id, event: event(id) })),
