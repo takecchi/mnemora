@@ -114,11 +114,10 @@ describe("release-candidates-lib: 信号と母集合の境界", () => {
 });
 
 describe("release-candidates.mjs（実物を一時の git リポジトリで起動する）", () => {
-  /** @type {string | undefined} */
-  let workDir;
+  /** @type {string[]} */
+  const workDirs = [];
   afterEach(() => {
-    if (workDir) rmSync(workDir, { recursive: true, force: true });
-    workDir = undefined;
+    for (const dir of workDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
   const git = (cwd, ...args) =>
@@ -138,7 +137,8 @@ describe("release-candidates.mjs（実物を一時の git リポジトリで起�
 
   /** `fakeGh`: "fail" = gh は常に失敗する。"ok" = repo は o2/r2、最新リリースは v0 を返す。 */
   function setup({ fakeGh = "fail", changelog = "withMarker" } = {}) {
-    workDir = mkdtempSync(join(tmpdir(), "release-candidates-recheck-"));
+    const workDir = mkdtempSync(join(tmpdir(), "release-candidates-recheck-"));
+    workDirs.push(workDir);
     const repo = join(workDir, "repo");
     mkdirSync(join(repo, "scripts"), { recursive: true });
     for (const f of ["release-candidates.mjs", "release-candidates-lib.mjs"]) {

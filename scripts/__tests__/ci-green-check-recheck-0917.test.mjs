@@ -144,11 +144,10 @@ describe("compareCheckRunNameSets: 増えただけ・消えただけでも不安
  * 呼ばれた引数は `calls.log` に1行ずつ残る。
  */
 describe("ci-green-check.mjs（偽の gh で CLI 全体を走らせる。ADR 0215 の【実測】の再現）", () => {
-  /** @type {string | undefined} */
-  let workDir;
+  /** @type {string[]} */
+  const workDirs = [];
   afterEach(() => {
-    if (workDir) rmSync(workDir, { recursive: true, force: true });
-    workDir = undefined;
+    for (const dir of workDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
   const FAKE_GH = [
@@ -200,7 +199,8 @@ describe("ci-green-check.mjs（偽の gh で CLI 全体を走らせる。ADR 021
    * @param {string[]} args
    */
   function runCli(scenario, args) {
-    workDir = mkdtempSync(join(tmpdir(), "ci-green-check-recheck-"));
+    const workDir = mkdtempSync(join(tmpdir(), "ci-green-check-recheck-"));
+    workDirs.push(workDir);
     const bin = join(workDir, "bin");
     mkdirSync(bin);
     writeFileSync(join(workDir, "scenario.json"), JSON.stringify(scenario));

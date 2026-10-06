@@ -27,14 +27,11 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptsDir = join(repoRoot, "scripts");
 
-/** @type {string | undefined} */
-let workDir;
+/** @type {string[]} */
+const workDirs = [];
 
 afterEach(() => {
-  if (workDir) {
-    rmSync(workDir, { recursive: true, force: true });
-    workDir = undefined;
-  }
+  for (const dir of workDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 const names = ["stage-one", "stage-two", "stage-three"];
@@ -83,7 +80,8 @@ describe("summarizeStages / gateExitCode: 失敗を、成功とも未起動と�
  * @param {{ name: string; code: string }[]} fakeStages node -e で走らせる偽の段
  */
 function runGateWithFakeStages(fakeStages) {
-  workDir = mkdtempSync(join(tmpdir(), "root-test-gate-recheck-"));
+  const workDir = mkdtempSync(join(tmpdir(), "root-test-gate-recheck-"));
+  workDirs.push(workDir);
   mkdirSync(join(workDir, "scripts"));
   copyFileSync(
     join(scriptsDir, "run-root-test-gate.mjs"),
