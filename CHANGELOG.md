@@ -169,6 +169,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **conformance suite に約束を足した——`MemoryStore.listBySourceObservationAllVersions` は、purge 済みの行（`status: 'forgotten'` のまま `purgedAt` が入った行）も返す**（[ADR 0639](./docs/decisions/0639-observe-resend-breakdown.md)。ADR 0546 の作法どおり、足す約束は Breaking に数える）。`describeMemoryStoreConformance` の `supportsPurgeMemory: true` の枝に、`it` が1本増えた。口の TSDoc は元から「`status` でも絞らない」で、purge 済みの行を除く実装は契約に反していたが、外部の adapter から見れば、通っていたものが落ちる。足した約束は外せない。
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目69。DB マイグレーションは無い。
 
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` は、`retry.attempts` に `Infinity`・`-Infinity` を渡すと、構築時に `RangeError` を投げるようになった**（[Issue #1785](https://github.com/takecchi/mnemora/issues/1785)、[ADR 0498](./docs/decisions/0498-constructor-config-checks.md) の追記）。以前は `+Infinity` が成功するまで無限に再試行し（失敗が続くと `warmup()`・`embed()` が返らず、abort でも読み込みは止まらない）、`-Infinity` は1回に丸められていた。`NaN`・0以下は今までどおり1回に丸め、小数は今までどおり切り捨てた回数だけ試す（`2.5` は2回）。⛔ 壊れるのは `±Infinity` を渡している利用者だけ。クローン miku の判断であり、オーナーの判断ではない。
+
 ### Added
 
 - **`Runtime.observe` の冪等な再送（同じ `externalId` の Observation が既に在った）の戻り値に、`resend`（`ObserveResend`）を足した。その Observation から作られた記憶の `memoryId`・`status`・`purged` が、版も status も問わず `memoryId` の昇順で載る**（[ADR 0639](./docs/decisions/0639-observe-resend-breakdown.md)。オーナーへのまとめ問い 374f6f88 の問10「再送の内訳は足す方向で検討」〈オーナーは推奨どおりと回答〉による。足すと決めたのはクローン miku の判断で、型の形は担い手の設計。オーナーが決めたのは推奨の採否だけ）。`memories` が空なら、まだ抽出されていない（ジョブの状態はこの欄では分からない）。全部が `forgotten` なら forget のために無視された。`purged: true` なら purge 済み。新しく作った呼び出しには欄が無い。`memoryIds`・`extraction`・ADR 0454 決定4 の3欄など、既存の欄の型・値は変わらない（任意の欄の追加）。再送の分岐で読み取りが1回増えるだけで、書き込みも LLM の呼び出しも無い。`ObserveResend`・`ObserveResendMemory` も `@mnemora/core` から出る。

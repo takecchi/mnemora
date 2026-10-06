@@ -321,3 +321,5 @@ maxBatchSize =
 型には現れないため、この門は拾わない——それは上の決定2と CHANGELOG に書いてある。
 **クローン miku の委譲先の判断であり、オーナーの判断ではない。**
 この判断の後に `node scripts/check-public-api-surface.mjs --write` で snapshot を更新した。
+
+- **追記（Issue #1785、2026-10-07）**: 決定3が `maxBatchSize` の揃え先にした `retry.attempts` は、`±Infinity` だけを構築時に `RangeError` で断るようになった（[ADR 0498](./0498-constructor-config-checks.md) の追記）。`NaN`・0以下を1に丸める点と、小数の扱いは決定3の表のまま。`maxBatchSize` の `Infinity` は「分割しない」を表す有効な値のままで、変えていない。本文は書き換えていない。
