@@ -25,7 +25,7 @@
 3. **読み取りは再送の分岐で1回増えるだけ。** 新規作成の経路は変えない。再送でも書き込みはせず、LLM も呼ばない。
 4. **読み方（TSDoc に書いた）**: `memories` が空 ＝ まだ抽出されていない（deferred で tick 待ち、sync の abort の後でリース中、ジョブが failed、または抽出が0件）。全部が `forgotten` ＝ forget のために無視された。`purged: true` ＝ purge 済み。
 5. **限界（依頼主の確定。TSDoc にも書いた）: ジョブ（outbox）の状態は内訳に入れない。** `memories: []` からは「まだ抽出されていない」ことしか分からず、**tick 待ち・リース中・failed・抽出0件は区別できない**。
-6. **conformance に約束を1本足した**: `listBySourceObservationAllVersions` は purge 済みの行（`status: 'forgotten'` のまま `purgedAt` が入った行）も返す（`supportsPurgeMemory: true` の枝。別テナントを返さない・forgotten を返すは既に在った）。[ADR 0546](./0546-conformance-suite-adds-round31-promises.md) の作法どおり Breaking に数え、CHANGELOG と migration の項目67に書いた。
+6. **conformance に約束を1本足した**: `listBySourceObservationAllVersions` は purge 済みの行（`status: 'forgotten'` のまま `purgedAt` が入った行）も返す（`supportsPurgeMemory: true` の枝。別テナントを返さない・forgotten を返すは既に在った）。[ADR 0546](./0546-conformance-suite-adds-round31-promises.md) の作法どおり Breaking に数え、CHANGELOG と migration の項目69に書いた（はじめ 67 で書いたが、空けておく番号なので 68 の後ろの 69 に振り直した）。
 7. **出力の契約（`checkObserveContract`）を強めた**（緩めていない）: `resend` が在るなら `memoryIds: []`・`extraction: 'skipped'`・`extractionFailure: null`・`memories` は昇順で重複なし・`purged` は真偽値。`memory_usage` に `resend` は付かない。同じ `Runtime` が同じ Observation をもう一度返したのに `resend` が無ければ破れ。「新規には無い」は戻り値だけからは分からないので、`extraction` が `'skipped'` でないのに `resend` が在れば破れ、とする形で縛り、deferred の新規への混入は歯（`observe-resend-breakdown`）が縛る。
 
 ## 採らなかった案

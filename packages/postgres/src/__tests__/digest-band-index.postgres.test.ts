@@ -124,6 +124,19 @@ describe("idx_memories_digest_band（ADR 0384 案A）", () => {
     expect(row.indexdef).toMatch(/id DESC\)?\s*(WHERE|$)/);
   });
 
+  it("形（列の並び）: tenant_id が先頭で、そのあとに実効時刻の降順、id の降順。並びを入れ替えた索引は通さない", async () => {
+    const { pool } = await getTestClient();
+    const result = await pool.query<{ indexdef: string }>(
+      `SELECT pg_get_indexdef('idx_memories_digest_band'::regclass) AS indexdef`,
+    );
+    const def = result.rows[0]!.indexdef;
+    // 先頭が tenant_id でないと、テナントごとに引く LIMIT が他のテナントの行を読み飛ばすことになる。
+    // 3キーの並びを丸ごと見る（キーの有無・DESC の有無だけを見る歯は、並びの入れ替えを通す）。
+    expect(def, def).toMatch(
+      /\(tenant_id, COALESCE\(occurred_at, recorded_at\) DESC, id DESC\) WHERE/,
+    );
+  });
+
   it("本番の SQL: aggregateScope の digestBand サブクエリが、強制なしの自然な計画で idx_memories_digest_band を使う", async () => {
     const { db, pool } = await getTestClient();
     const memoryStore = new PostgresMemoryStore(db);

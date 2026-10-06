@@ -56,7 +56,11 @@ import type {
   RequeueEmbedJobsResult,
   ScopeAggregate,
 } from "@mnemora/core";
-import { assertWellFormedCtx, assertWellFormedIdentifier } from "@mnemora/core";
+import {
+  assertWellFormedCtx,
+  assertWellFormedIdentifier,
+  assertWellFormedNewMemory,
+} from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertNewMemoryHalfLivesFitFloat4 } from "./half-life-float4.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
@@ -877,6 +881,8 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertNoNulInNewMemory("PostgresMemoryStore", input);
+    // ADR 0630: 書いたら読み戻したときに MemorySchema を通らなくなる値は、DB に触れる前に（冪等の既存行の判定より前に）拒む。
+    assertWellFormedNewMemory("PostgresMemoryStore", input);
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
@@ -941,6 +947,11 @@ export class PostgresMemoryStore implements MemoryStore {
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
     assertNoNulInNewMemory("PostgresMemoryStore", input);
+    // ADR 0630: 書いたら読み戻したときに MemorySchema を通らなくなる値は、この行の INSERT より前に（冪等の既存行の判定より前に）拒む。
+    // ⚠ ここは呼び出し元のトランザクションの内側である——「DB に触れる前」ではない。`createMemoryWithOutbox` では
+    // 見直しの行ロック（`assertNotForgottenForUpdate` など）を取った後、`createMemoriesWithOutboxAndEvents` では
+    // 候補ごとの savepoint の中（先の候補の INSERT は済んでいることがある）。投げれば、その `tx`／savepoint の分だけ戻る。
+    assertWellFormedNewMemory("PostgresMemoryStore", input);
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const insertedRow = await insertMemoryRow(tx, ctx, input, method);
@@ -1500,6 +1511,8 @@ export class PostgresMemoryStore implements MemoryStore {
       assertNewMemoryHalfLivesFitFloat4("PostgresMemoryStore", input);
       // 穴 O-6-3（ADR 0424）: contentHash の NUL も、トランザクションを開く前に落とす。
       assertNoNulInNewMemory("PostgresMemoryStore", input);
+      // ADR 0630: 書いたら読み戻したときに MemorySchema を通らなくなる値は、DB に触れる前に（冪等の既存行の判定より前に）拒む。
+      assertWellFormedNewMemory("PostgresMemoryStore", input);
     }
 
     const result = await this.db.transaction(async (tx) => {

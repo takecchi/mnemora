@@ -124,6 +124,23 @@ describe("tick() の lastError は drizzle の params を落とし、長さに�
     expect(lastError).not.toContain(secretBody);
   });
 
+  it("params の値の中に '\\nparams: ' という文字列が含まれていても、最初の出現で切る（値の前半が残らない）", async () => {
+    const paramsValue = "最初の秘密の値\nparams: 次の秘密の値";
+    const lastError = await lastErrorFor(
+      new Error(`Failed query: SELECT 1\nparams: ${paramsValue}`),
+    );
+
+    expect(lastError).toBe(
+      `Failed query: SELECT 1\nparams: (omitted by mnemora, ${paramsValue.length} chars)`,
+    );
+    expect(lastError).not.toContain("最初の秘密の値");
+  });
+
+  it("'params: ' が改行の直後に付いていない文面（SQL の中の文字列など）は、落とさず今までどおり残す", async () => {
+    const message = "Failed query: SELECT 'see params: not a drizzle marker'";
+    expect(await lastErrorFor(new Error(message))).toBe(message);
+  });
+
   it("params: を持たない長大なメッセージ（openai の拒否の文面のような形）は、長さの上限で切られる", async () => {
     // ADR 0075 の refusalMessage のように、モデルが利用者の本文を引用して拒否した体で、
     // "params:" という目印を持たない長い文面を作る（実際の OpenAILLMProviderError と同型ではなく、

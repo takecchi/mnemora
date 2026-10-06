@@ -160,4 +160,23 @@ describe("createLocalEmbeddingPipeline: revision を env.remotePathTemplate に�
     expect(Object.hasOwn(observed[1]!.options, "cache_dir")).toBe(false);
     expect(envMock.cacheDir).toBe(null);
   });
+
+  it("利用者が変えた template に {revision} が複数あっても、すべて置き換える（生の {revision} を残さない）", async () => {
+    const observed = observeCalls();
+    envMock.remotePathTemplate = "{model}/resolve/{revision}/?rev={revision}";
+    await createLocalEmbeddingPipeline(baseSpec({ cacheDir: "/my/cache", revision: "abc123" }));
+    expect(observed[0]!.remotePathTemplate).toBe("{model}/resolve/abc123/?rev=abc123");
+    expect(envMock.remotePathTemplate).toBe("{model}/resolve/{revision}/?rev={revision}");
+  });
+
+  it("既定のキャッシュの値が空文字なら、根が無いのと同じに扱う（'' の下に <revision> を作らない）", async () => {
+    const observed = observeCalls();
+    envMock.cacheDir = "";
+    await createLocalEmbeddingPipeline(baseSpec({ revision: "abc123" }));
+    expect(observed[0]!.options.revision).toBe("abc123");
+    expect(Object.hasOwn(observed[0]!.options, "cache_dir")).toBe(false);
+    expect(observed[0]!.cacheDir).toBe("");
+    expect(observed[0]!.remotePathTemplate).toBe(DEFAULT_TEMPLATE);
+    expect(envMock.cacheDir).toBe("");
+  });
 });

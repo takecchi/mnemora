@@ -10,6 +10,10 @@ import {
 import { buildNewMemoryFixture, buildNewObservationFixture } from "@mnemora/testkit";
 import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fakes.js";
+import {
+  MALFORMED_NEW_MEMORY_CASES,
+  WELL_FORMED_NEW_MEMORY_CASES,
+} from "../../../core/src/__tests__/malformed-new-memory-cases.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
@@ -18,11 +22,12 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  *
  * - `getRecall`: adapter の期待する形式でない id は `null`（`MemoryStore.getRecall` の TSDoc）。3実装で縛る。
  * - `getRecall`: マイグレーション 0013 より前の形の行は `breakdownCaptured: false` で読み戻る（同じ TSDoc）。Postgres で縛る。
- * - `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`: `provenance` の中身は検査しない。拒むのは
- *   列挙に無い `kind`・列の `sourceObservationId` が無い `stated`/`inferred`・`null` の3つだけ（`createMemory` の TSDoc）。
- *   Postgres と testkit の fixture で縛る（core の Fake は `packages/core/src/__tests__/fake-provenance-rejects.test.ts`）。
- *
- * ⚠ 望ましい姿の主張ではない（検査を足すかは決まっていない）。変えるときは、この歯ごと書き換えること。
+ * - `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories`: `provenance` が列挙に無い `kind`・列の
+ *   `sourceObservationId` が無い `stated`/`inferred`・`null` のときは、以前から拒む。
+ *   **ADR 0630 から、`provenance` の中身の欠け・値域外（`MemorySchema` を通らなくなる形）も拒む**（以前は受け付けた。
+ *   下の `REJECTED` に移した）。ほかの欄（`digest` など）の全形と、拒むときに何も書かないことは、この下の
+ *   `MALFORMED_NEW_MEMORY_CASES` の節。Postgres と testkit の fixture で縛る（core の Fake は
+ *   `packages/core/src/__tests__/fake-provenance-rejects.test.ts`・`fake-new-memory-rejects.test.ts`）。
  */
 
 const ctx: Ctx = { tenantId: "store-input-current-behaviour" };
@@ -105,8 +110,11 @@ const WRITES: Array<[string, Write]> = [
   ],
 ];
 
-/** 受け付ける（そのまま書いて返し、返った Memory は MemorySchema を通らない）形。 */
-const ACCEPTED: Array<[string, (obs: string) => Partial<NewMemory>]> = [
+/**
+ * 拒む（例外になる）形——**ADR 0630 から**。以前は「受け付け（そのまま書いて返し）、返った Memory は MemorySchema を
+ * 通らない」形（`ACCEPTED`）として縛っていた。向きを変えただけで、形の一覧は変えていない。
+ */
+const NOW_REJECTED: Array<[string, (obs: string) => Partial<NewMemory>]> = [
   [
     "stated で sourceObservationId・at が無い",
     (obs) => ({ sourceObservationId: obs, provenance: { kind: "stated" } as never }),
@@ -189,15 +197,13 @@ async function freshInput(
   });
 }
 
-describe.each(KITS)("provenance の中身は検査しない（今の振る舞い）: %s", (_name, build) => {
+describe.each(KITS)("provenance の入口の検査: %s", (_name, build) => {
   describe.each(WRITES)("%s", (_method, write) => {
-    it.each(ACCEPTED)(
-      "%s は受け付け、返った Memory は MemorySchema を通らない",
+    it.each(NOW_REJECTED)(
+      "%s は拒む（ADR 0630。以前は受け付け、返った Memory は MemorySchema を通らなかった）",
       async (_label, over) => {
         const store = await build();
-        const memory = await write(store, await freshInput(store, over, 1));
-        expect(memory.id).toBeDefined();
-        expect(MemorySchema.safeParse(memory).success).toBe(false);
+        await expect(write(store, await freshInput(store, over, 1))).rejects.toThrow(/provenance/);
       },
     );
 
@@ -228,5 +234,184 @@ describe.each(KITS)("provenance の中身は検査しない（今の振る舞い
       });
       expect(MemorySchema.safeParse(memory).success).toBe(true);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0630: 読み戻すと MemorySchema を通らない NewMemory を、入口で拒む。拒むときは、何も書かない。
+// ---------------------------------------------------------------------------
+
+describe("Postgres: 拒むとき、Memory・ラベル・outbox・イベントのどれにも書かない（ADR 0630）", () => {
+  async function counts(): Promise<Record<string, number>> {
+    const { pool } = await getTestClient();
+    const out: Record<string, number> = {};
+    for (const table of ["memories", "labels", "outbox", "memory_events"]) {
+      const r = await pool.query(`SELECT count(*)::int AS n FROM ${table}`);
+      out[table] = (r.rows[0] as { n: number }).n;
+    }
+    return out;
+  }
+
+  describe.each(WRITES)("%s", (_method, write) => {
+    it.each(MALFORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
+      "%s は、欄を名指しした例外で拒み、何も書かない（既存の行が無くても、冪等の既存の行が在っても）",
+      async (_label, c) => {
+        const store = await postgresStore();
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: ctx.tenantId } as never),
+        );
+        const base = (over: Partial<NewMemory>) =>
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash: "pg-shape-h",
+            tags: ["shape-tag"],
+            ...over,
+          });
+        // 既存の行が無いとき: 拒み、何も書かない（書いてから検査する実装を赤にする）。
+        const empty = await counts();
+        await expect(write(store, base(c.over(observation.id)))).rejects.toThrow(c.field);
+        expect(await counts()).toEqual(empty);
+        // 既存の行（同じ冪等キー）を先に書く。壊れた入力は、その行が在っても拒まれる。
+        await write(store, base({}));
+        const before = await counts();
+        await expect(write(store, base(c.over(observation.id)))).rejects.toThrow(c.field);
+        expect(await counts()).toEqual(before);
+      },
+    );
+  });
+
+  it("supersedeWithNewMemories: news の2件目が壊れていたら、1件目・supersede の対象・イベントも書かない", async () => {
+    const store = await postgresStore();
+    const old = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: ctx.tenantId }));
+    const before = await counts();
+    await expect(
+      store.supersedeWithNewMemories!(
+        ctx,
+        [
+          {
+            input: buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              contentHash: "n1",
+              tags: ["only-n1"],
+            }),
+            jobKinds: ["embed"],
+          },
+          {
+            input: buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              contentHash: "n2",
+              attributes: { a: 1 } as never,
+            }),
+            jobKinds: ["embed"],
+          },
+        ],
+        [
+          {
+            id: old.id,
+            supersededByIndex: 0,
+            expectedStatus: "active",
+            event: {
+              tenantId: ctx.tenantId,
+              memoryId: old.id,
+              kind: "superseded",
+              actor: { type: "system" },
+              meta: {},
+            } as never,
+          },
+        ],
+      ),
+    ).rejects.toThrow(/attributes/);
+    expect(await counts()).toEqual(before);
+    expect((await store.get(ctx, old.id))?.status).toBe("active");
+  });
+
+  it("createMemoriesWithOutboxAndEvents（3口の外。同じ入口を共有する）: 壊れた候補は dropped に積み、ほかは書く", async () => {
+    const store = await postgresStore();
+    const result = await store.createMemoriesWithOutboxAndEvents!(
+      ctx,
+      [
+        {
+          input: buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "ok-1" }),
+          jobKinds: ["embed"],
+        },
+        {
+          input: buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            contentHash: "bad",
+            extractorVersion: "",
+          }),
+          jobKinds: ["embed"],
+        },
+      ],
+      (memory) =>
+        ({
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "created",
+          actor: { type: "system" },
+          meta: {},
+        }) as never,
+    );
+    expect(result.written.map((w) => w.index)).toEqual([0]);
+    expect(result.dropped.map((d) => d.index)).toEqual([1]);
+    expect(String(result.dropped[0]!.error)).toMatch(/extractorVersion is malformed/);
+  });
+});
+
+describe.each(KITS)(
+  "正しい値（境界のすぐ内側）は通り、読み戻すと MemorySchema を通る: %s",
+  (_name, build) => {
+    describe.each(WRITES)("%s", (_method, write) => {
+      it.each(WELL_FORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
+        "%s",
+        async (_label, c) => {
+          const store = await build();
+          const memory = await write(store, await freshInput(store, c.over, 7));
+          expect(MemorySchema.safeParse(memory).success).toBe(true);
+          expect(MemorySchema.safeParse(await store.get(ctx, memory.id)).success).toBe(true);
+        },
+      );
+    });
+  },
+);
+
+describe.each(KITS)("範囲外は、この検査では拒まない（ADR 0630）: %s", (_name, build) => {
+  it("createObservation: attributes の値が文字列でなくても、この検査では拒まない（Observation は範囲外）", async () => {
+    const store = await build();
+    await expect(
+      store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: ctx.tenantId, attributes: { a: 1 } as never }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  // 変異試験（2026-10-06）: createObservationWithOutbox に「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
+  it("createObservationWithOutbox: attributes の値が文字列でなくても、この検査では拒まない（Observation は範囲外）", async () => {
+    const store = await build();
+    await expect(
+      store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: ctx.tenantId, attributes: { a: 1 } as never }),
+        [],
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it("Memory の subjectId の空文字は、この検査の message では拒まれない（別の担当の件）", async () => {
+    const store = await build();
+    const outcome = await store
+      .createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: ctx.tenantId, subjectId: "", contentHash: "scope-s" }),
+      )
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(String(outcome)).not.toMatch(/is malformed/);
   });
 });

@@ -402,11 +402,17 @@ for (const [kitName, makeKit] of KITS) {
       }
     }
 
-    it("型を外れた欄（claimKey の片方・tags が空）は、今までどおり NUL の検査では断らない（やりすぎない）", async () => {
+    it("型を外れた欄（claimKey の片方）は、NUL の検査ではなく ADR 0630 の検査が断る（NUL の message ではない。tags が空は通る）", async () => {
       const kit = await makeKit();
-      await expect(
-        kit.store.createMemory(A, newMemory({ claimKey: { subject: "u" } as never, tags: [] })),
-      ).resolves.toBeDefined();
+      const err = await kit.store
+        .createMemory(A, newMemory({ claimKey: { subject: "u" } as never, tags: [] }))
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(String(err)).toMatch(/claimKey\.predicate is malformed/);
+      expect(String(err)).not.toMatch(/NUL/);
+      await expect(kit.store.createMemory(A, newMemory({ tags: [] }))).resolves.toBeDefined();
     });
 
     it("createMemoriesWithOutboxAndEvents: NUL の候補だけを落とし、ほかの候補は書く（落とした候補の例外は名指し）", async () => {

@@ -244,6 +244,74 @@ describe("既定値より多い件数（分割して呼ぶ）", () => {
   });
 });
 
+describe("分割しても、prefix・順序・上限超過以外の失敗は崩れない", () => {
+  it("prefix を設定していても、分割した全チャンクの全件に prefix が付いて渡る（付けるのは分割の前）", async () => {
+    const recorder = createRecordingPipeline();
+    const provider = new LocalEmbeddingProvider({
+      createPipeline: recorder.createPipeline,
+      maxBatchSize: 2,
+      prefix: "文書: ",
+    });
+    const texts = ["a", "b", "c", "d", "e"];
+
+    await provider.embed(ctx, texts);
+
+    expect(recorder.embeddedBatches).toEqual([
+      ["文書: a", "文書: b"],
+      ["文書: c", "文書: d"],
+      ["文書: e"],
+    ]);
+    // 呼び出し側の配列は書き換わらない。
+    expect(texts).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  it("返るベクトルの並びは入力の並びのまま（チャンクの結果を入力の順に連結する）", async () => {
+    // 各テキスト（"0"〜"6"）の数字を先頭の成分に写す偽 pipeline。どのベクトルがどの入力のものかを値で見分けられる。
+    const createPipeline: CreateLocalEmbeddingPipeline = async () => ({
+      maxInputTokens: Number.MAX_SAFE_INTEGER,
+      countTokens: (texts: string[]) => texts.map(() => 0),
+      embed: async (texts: string[]) => texts.map((text) => [Number(text), 0, 0, 0]),
+    });
+    const provider = new LocalEmbeddingProvider({ dimensions: 4, createPipeline, maxBatchSize: 3 });
+    const texts = ["0", "1", "2", "3", "4", "5", "6"];
+
+    const vectors = await provider.embed(ctx, texts);
+
+    expect(vectors.map((vector) => vector[0])).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("index を持たない失敗（素の Error・unknown_input_limit）は、チャンクが2つ目以降でも包み直さずそのまま投げる", async () => {
+    const plain = new Error("network down");
+    const unknownLimit = new LocalEmbeddingProviderError(
+      "unknown_input_limit",
+      "LocalEmbeddingProvider: 上限が分からない",
+      null,
+    );
+    for (const failure of [plain, unknownLimit]) {
+      let callIndex = -1;
+      const createPipeline: CreateLocalEmbeddingPipeline = async () => ({
+        maxInputTokens: 999,
+        countTokens: (texts: string[]) => texts.map(() => 1),
+        embed: async (texts: string[]) => {
+          callIndex += 1;
+          if (callIndex === 1) {
+            throw failure;
+          }
+          return expectedVectorsForBatch(texts.length, 256);
+        },
+      });
+      const provider = new LocalEmbeddingProvider({ createPipeline, maxBatchSize: 2 });
+
+      const error = await provider.embed(ctx, ["a", "b", "c", "d", "e"]).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+
+      expect(error).toBe(failure);
+    }
+  });
+});
+
 describe("不正な maxBatchSize", () => {
   /**
    * `retry.attempts`（`local-embedding-provider.ts` のコンストラクタ）と同じ流儀で、

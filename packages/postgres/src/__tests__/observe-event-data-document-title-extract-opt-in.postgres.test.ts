@@ -240,6 +240,40 @@ describe.each(KITS)(
       );
     });
 
+    it("c. false を明示しても、指定しないときと同じ（payload に extractData/extractTitle のキーが増えず、プロンプトにも入らない）", async () => {
+      const { llm, prompts } = recordingLlm("ok");
+      const { runtime, memoryStore } = await build(llm);
+
+      const eventResult = await runtime.observe(ctx, {
+        kind: "event",
+        name: "ログインした",
+        data: { note: "無視されるはずの値" },
+        extractData: false,
+      });
+      const documentResult = await runtime.observe(ctx, {
+        kind: "document",
+        title: "無視されるはずのタイトル",
+        content: "本文",
+        extractTitle: false,
+      });
+
+      const eventObservation = await memoryStore.getObservation(ctx, eventResult.observationId);
+      expect(eventObservation?.payload).toEqual({
+        name: "ログインした",
+        data: { note: "無視されるはずの値" },
+      });
+      const documentObservation = await memoryStore.getObservation(
+        ctx,
+        documentResult.observationId,
+      );
+      expect(documentObservation?.payload).toEqual({
+        title: "無視されるはずのタイトル",
+        content: "本文",
+      });
+      expect(prompts[0]!.messages[0]!.content).toBe("ログインした");
+      expect(prompts[1]!.messages[0]!.content).toBe("本文");
+    });
+
     it("d. extract: 'deferred' と同時に指定しても例外にならず、tick() の処理後のプロンプトに入る", async () => {
       const dataMarker = `data-の目印-${randomUUID()}`;
       const titleMarker = `title-の目印-${randomUUID()}`;

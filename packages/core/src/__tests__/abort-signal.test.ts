@@ -222,6 +222,29 @@ describe("AbortSignal — 呼ぶ前に既に abort 済みの場合（provider �
     expect(embedJob.completedAt).toBeNull();
     expect(embedJob.failedAt).toBeNull();
   });
+
+  it("tick(): 既に abort 済みなら、provider を呼ばない種類（対応していない kind）のジョブも fail() で焼かずに残す", async () => {
+    const { runtime, stores } = buildRuntime(succeedingLlm());
+    const customKind = "gurumi-chan:notify-slack";
+    const { jobs } = await stores.memoryStore.createObservationWithOutbox(
+      ctx,
+      { tenantId: ctx.tenantId, subjectId: null, externalId: null, kind: "utterance", payload: {} },
+      [customKind],
+    );
+    expect(jobs).toHaveLength(1);
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      runtime.tick(ctx, { leaseMs: 60_000, kinds: [customKind], signal: controller.signal }),
+    ).rejects.toBe(controller.signal.reason);
+
+    const row = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobs[0]!.id)!;
+    // claim はされる（claimBatch はループの前に1回だけ呼ぶ）が、終端（failedAt）には焼かない。
+    expect(row.claimedAt).not.toBeNull();
+    expect(row.failedAt).toBeNull();
+    expect(row.completedAt).toBeNull();
+  });
 });
 
 describe("AbortSignal — observe(): 抽出の LLM 呼び出し中に abort", () => {
@@ -642,6 +665,101 @@ describe("AbortSignal — reflect()", () => {
     await expect(promise).rejects.toBe(controller.signal.reason);
     expect(createMemoryWithOutboxSpy).not.toHaveBeenCalled();
   });
+});
+
+describe("AbortSignal — consolidate()・reflect() の土台探索（内部の recall）の { query } 形・reflect の { seedMemoryId } 形", () => {
+  async function expectRejectsWhileEmbeddingQuery(
+    run: (
+      runtime: ReturnType<typeof buildRuntime>["runtime"],
+      seedId: MemoryId,
+      signal: AbortSignal,
+    ) => Promise<unknown>,
+  ): Promise<void> {
+    const embeddingProvider = new HangingEmbeddingProvider();
+    const { runtime } = buildRuntime(succeedingLlm(), { embeddingProvider });
+    const a = await runtime.observe(ctx, { kind: "utterance", text: "発話A" });
+    await runtime.observe(ctx, { kind: "utterance", text: "発話B" });
+
+    const controller = new AbortController();
+    const promise = run(runtime, a.memoryIds[0]!, controller.signal);
+    await flushMicrotasks();
+    // 内部の recall() がクエリの埋め込みを待っている最中（embed に signal が渡っている）。
+    expect(embeddingProvider.calls.length).toBeGreaterThan(0);
+    expect(embeddingProvider.calls.at(-1)!.opts?.signal).toBeDefined();
+    controller.abort();
+    await expect(promise).rejects.toBe(controller.signal.reason);
+  }
+
+  it("consolidate({ query }): クエリの埋め込み待ち中の abort で reject する", async () => {
+    await expectRejectsWhileEmbeddingQuery((runtime, _seedId, signal) =>
+      runtime.consolidate(ctx, { target: { query: { text: "クエリ" } }, signal }),
+    );
+  });
+
+  it("reflect({ query }): クエリの埋め込み待ち中の abort で reject する", async () => {
+    await expectRejectsWhileEmbeddingQuery((runtime, _seedId, signal) =>
+      runtime.reflect(ctx, { target: { query: { text: "クエリ" } }, signal }),
+    );
+  });
+
+  it("reflect({ seedMemoryId }): 種の近傍探索の埋め込み待ち中の abort で reject する", async () => {
+    await expectRejectsWhileEmbeddingQuery((runtime, seedId, signal) =>
+      runtime.reflect(ctx, { target: { seedMemoryId: seedId }, signal }),
+    );
+  });
+});
+
+describe("AbortSignal — tick() の consolidate・reflect ジョブ（signal がジョブの中の consolidate()/reflect() まで届く）", () => {
+  for (const kind of ["consolidate", "reflect"] as const) {
+    it(`${kind} ジョブの処理中（種の近傍探索の埋め込み待ち）に abort すると、tick() が reject し、ジョブは fail() されず claim されたまま残る`, async () => {
+      const embeddingProvider = new HangingEmbeddingProvider();
+      const { runtime, stores } = buildRuntime(succeedingLlm(), { embeddingProvider });
+      const recordedAt = new Date("2026-06-01T00:00:00.000Z");
+      const { memory, jobs } = await stores.memoryStore.createMemoryWithOutbox(
+        ctx,
+        {
+          tenantId: ctx.tenantId,
+          subjectId: null,
+          sourceObservationId: null,
+          extractorVersion: null,
+          content: "種の本文",
+          contentHash: "hash-seed",
+          digest: "種の要旨",
+          digestSource: "llm",
+          provenance: { kind: "imported", batchId: "fixture" },
+          tags: [],
+          occurredAt: null,
+          recordedAt,
+          lastReinforcedAt: null,
+          strength: 1,
+          halfLifeHours: 24 * 365,
+          decayFloorAt: new Date("2030-01-01T00:00:00.000Z"),
+          embeddingStatus: "ready",
+        },
+        [kind],
+      );
+      expect(jobs).toHaveLength(1);
+
+      const controller = new AbortController();
+      const promise = runtime.tick(ctx, {
+        leaseMs: 60_000,
+        kinds: [kind],
+        signal: controller.signal,
+      });
+      await flushMicrotasks();
+      // ジョブの中の consolidate()/reflect() が、種の digest を埋め込んで待っている最中。
+      expect(embeddingProvider.calls.length).toBeGreaterThan(0);
+      expect(embeddingProvider.calls.at(-1)!.opts?.signal).toBeDefined();
+      controller.abort();
+      await expect(promise).rejects.toBe(controller.signal.reason);
+
+      const row = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobs[0]!.id)!;
+      expect(row.claimedAt).not.toBeNull();
+      expect(row.completedAt).toBeNull();
+      expect(row.failedAt).toBeNull();
+      expect((await stores.memoryStore.get(ctx, memory.id))?.status).toBe("active");
+    });
+  }
 });
 
 describe("AbortSignal — reject する値は signal.reason（Node は reason を自動で埋める／明示した reason はそのまま）", () => {

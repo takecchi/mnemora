@@ -43,6 +43,7 @@ import {
 } from "../memory.js";
 import { ProvenanceKindSchema } from "../provenance.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
+import { assertWellFormedNewMemory } from "../new-memory-check.js";
 import type { NewObservation, Observation } from "../observation.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
 import { MemoryEventKindSchema } from "../event.js";
@@ -960,6 +961,10 @@ export class FakeMemoryStore implements MemoryStore {
         `FakeMemoryStore: memories.provenance_kind must be one of ${ProvenanceKindSchema.options.join(", ")} (got ${JSON.stringify(provenanceKind)})`,
       );
     }
+    // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる値（`digest`・`contentHash`・`extractorVersion` の空文字、
+    // `claimKey`・`attributes`・`provenance` の中身の欠け・値域外）は、冪等の衝突の判定より前に（何も書く前に）拒む。
+    // testkit の fixture・`@mnemora/postgres` と同じ検査（`assertWellFormedNewMemory`）。
+    assertWellFormedNewMemory("FakeMemoryStore", input);
     // ADR 0521: 参照する observation の id も大文字小文字を区別しない（`@mnemora/postgres` は uuid 型の列で比べる）。
     input = { ...input, sourceObservationId: normOptId(input.sourceObservationId) } as typeof input;
     const idemKey = this.backing.extractionKey(
@@ -1647,6 +1652,8 @@ export class FakeMemoryStore implements MemoryStore {
     let rowOpts: { now: Date } | undefined;
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
+    // `@mnemora/postgres` と同じ順（RangeError → news の検査 → 対象の存在）。壊れた news と存在しない対象が
+    // 同時にあれば、壊れた値の例外（ADR 0630）が先に出る。
     for (const target of supersede) {
       if (
         !Number.isInteger(target.supersededByIndex) ||
@@ -1657,6 +1664,11 @@ export class FakeMemoryStore implements MemoryStore {
           `FakeMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
         );
       }
+    }
+    for (const { input } of news) {
+      assertWellFormedNewMemory("FakeMemoryStore", input);
+    }
+    for (const target of supersede) {
       const memory = this.backing.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${target.id}`);

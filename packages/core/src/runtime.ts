@@ -126,7 +126,9 @@ import { listRelatedLevel } from "./relation-level.js";
 export interface RuntimeConfig {
   /**
    * 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。
-   * 省略時（`undefined`・`null`）は `"v1"`。空文字は既定に倒れず、空文字のまま書かれる。
+   * 省略時（`undefined`・`null`）は `"v1"`。空文字・空白だけの値は既定に倒れず、`createRuntime` が
+   * 組み立ての時点で `Error` を投げて拒む（書くと、読み戻したときに `MemorySchema` を通らないため。ADR 0630）。
+   * 前後に空白のある値（`" v1 "`）は拒まず、そのまま書く。
    */
   extractorVersion?: string | undefined;
   /**
@@ -692,8 +694,9 @@ export interface ReextractResult {
    * - 対象は同じ `(sourceObservationId, extractorVersion)` を持つ **`status: 'active'`** の
    *   Memory のうち、今回作られた content_hash の集合に含まれないものだけ
    *   （`forgotten` は絶対に含めない。`contested` も対象外——理由は ADR 0028 参照）。
-   * - 🔴 安全弁3（ADR 0030）: `updateStatus` を `expectedStatus: "active"` の
-   *   compare-and-swap で呼ぶ。読み（`listBySourceObservation`）と書き（`updateStatus`）の
+   * - 🔴 安全弁3（ADR 0030）: supersede は `expectedStatus: "active"` の compare-and-swap で書く
+   *   （store が `supersedeWithNewMemories` を持てばその `supersede[].expectedStatus`、持たなければ
+   *   `updateStatusWithEvent`）。読み（`listBySourceObservation`）と書きの
    *   間に他の書き込みで status が変わっていた Memory は、ここには**入らない**
    *   （`skipped` に `status_changed_concurrently` として出る）。
    * - 🔴 **置き換えた側（`supersededById`）は、今回の抽出で `active` になる行である**（ADR 0454）。
@@ -4350,7 +4353,9 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
 /**
  * {@link Runtime} を組み立てる。
  *
- * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。
+ * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。ただし1つだけ例外がある:
+ * `config.extractorVersion` が空文字・空白だけ（`trim()` が空）なら、`createRuntime` が素の `Error`
+ * （`createRuntime: config.extractorVersion must not be empty or whitespace-only`）を投げる。`undefined`・`null` は既定に倒す。
  * 2026-09-27 に Postgres と testkit の fixture の両方で当てた）。省略した欄は各欄の doc にある
  * 既定値に倒れ、足りない依存や型の外の値は、組み立てでは落ちずに最初の呼び出しで現れる:
  * - 必須の store・`hashContent` が無い: それを使う最初の呼び出しが `TypeError` を投げる
@@ -4369,6 +4374,9 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const clock = deps.clock ?? systemClock;
   const extractorVersion = deps.config?.extractorVersion ?? DEFAULT_EXTRACTOR_VERSION;
+  if (typeof extractorVersion === "string" && extractorVersion.trim() === "") {
+    throw new Error("createRuntime: config.extractorVersion must not be empty or whitespace-only");
+  }
   // 空文字は省略と同じに扱う（`RuntimeConfig.llmModelId`・`promptVersion` の TSDoc）。空文字のまま書くと、
   // inferred の provenance が `ProvenanceSchema`（`model`・`promptVersion` は `min(1)`）を通らなくなる。
   const llmModelId = deps.config?.llmModelId || DEFAULT_LLM_MODEL_ID;
@@ -5393,9 +5401,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 抽出結果を根拠に既存を消さない（`superseded_by_id` の指す先も無い）。
    * 🔴 安全弁3（ADR 0030）: `classifyReextractTargets` が「今回作る前」に読んだ時点で
    * `active` だった Memory でも、実際に書きに行くまでの間（TOCTOU の窓）に別の書き込みで
-   * status が変わっていることがある。`updateStatus` を `expectedStatus: "active"` の
-   * compare-and-swap で呼び、弾かれたら `classifySupersedeFailure` で判定して `skipped` に
-   * 積む（`supersededMemoryIds` には入れず、`superseded` イベントも積まない）。
+   * status が変わっていることがある。supersede は `expectedStatus: "active"` の compare-and-swap で書き、
+   * 弾かれたものは `skipped` に `status_changed_concurrently` で積む（`supersededMemoryIds` には入れず、
+   * `superseded` イベントも積まない）。store が `supersedeWithNewMemories` を持てば、その
+   * `supersede[].expectedStatus` で書いて `result.conflicted` を写す。持たなければ `updateStatusWithEvent` を
+   * 1件ずつ呼び、投げられた例外を `classifySupersedeFailure` で判定する。
    *
    * supersede 対象は、同じ `(sourceObservationId, extractorVersion)` を持つ既存 Memory のうち
    * **`status: 'active'`** かつ今回作られた content_hash の集合に含まれないものだけ。
