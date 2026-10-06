@@ -64,6 +64,13 @@ jobs:
         # check の文脈名そのものであり、分けると branch protection の更新が要る）。
         run: pnpm run check:doc-snippets
 
+      - name: "出荷済みの migration が書き換えられていないこと（checksum の固定、ADR 0637）"
+        # packages/postgres/migration-checksums.json の sha256 と突き合わせる。書き換え・削除は赤、
+        # 新しい migration の追加は赤にしない。ビルドに依存しない。別ジョブにしない理由は上の
+        # api:check の段と同じ（ジョブ名が required status check の文脈名そのものである）。
+        # 同じ検査はルートの `pnpm run test`（scripts/__tests__）の中でも走る。
+        run: pnpm run check:migration-checksums
+
       - name: "publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）"
         # 六つの門（docs/autonomy.md §2）のうち pack:check だけが、これまで
         # publish.yml（release / workflow_dispatch 経由）でしか走っていなかった
