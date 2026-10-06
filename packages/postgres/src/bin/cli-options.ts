@@ -184,7 +184,7 @@ export function parseMigrateCliOptions(
       // pnpm が `--` をそのまま渡してくる。受け付ける入力は変えず（`--` は未知のオプションのまま）、
       // エラー文に `--` を付けない正しい書き方を1行足す。例には実際に渡された残りの引数を使う。
       const rest = argv.filter((a) => a !== "--").join(" ");
-      const example = `pnpm --filter @mnemora/postgres run migrate${rest.length > 0 ? ` ${rest}` : ""}`;
+      const example = `pnpm --filter postgres run migrate${rest.length > 0 ? ` ${rest}` : ""}`;
       return {
         ok: false,
         error: {
