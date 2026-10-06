@@ -4357,9 +4357,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * `activityClockInputsFor` が Memory ごとに `T + S_x` を組む。
    *
    * 🔴 **まだ残っている負債**（ADR 0394「引き受けた負債」）: 書く側の subject の取り違えは直したが、
-   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect・
-   * `sweepArchive` 等）の中の `recall()` が活動時計を進めること、(2) `tick` の自動ジョブに
+   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect 等）の
+   * 中の `recall()` が活動時計を進めること（進める入口の正確な一覧は下）、(2) `tick` の自動ジョブに
    * `activityCounting` を届けないこと、(3) recall 側の前進が `T` か `S_ctx` か。
+   *
+   * 活動時計を進めるのは `runRecall`（`recall-runtime.ts` の `advanceActivityClock`。`decayClock` が
+   * `"wall"` のテナントでは進めない）を通る呼び出しすべてである。`runtime.ts` の中で `recall()`/`runRecall()`
+   * を呼ぶ入口は次のとおり（ADR 0394 決定3 の「掃引」は誤り。ADR 0394 末尾の訂正を見ること）。
+   * 行頭の印 `ADVANCER:` の行が機械で読める正本で、`activity-clock-advancers-doc.test.ts` が
+   * 「`recall(`/`runRecall(` の呼び出しを囲む関数の集合」と一致することを縛る:
+   *
+   * - ADVANCER: recall — 公開の `recall()` 自身（`runRecall` を呼ぶ）。
+   * - ADVANCER: findCorrectionCandidates — 内部で `recall()` を1回呼ぶ。
+   * - ADVANCER: consolidate — `{ seedMemoryId }` 形と `{ query }` 形のどちらも内部で `recall()` を呼ぶ。
+   * - ADVANCER: reflect — 同じく `{ seedMemoryId }` 形と `{ query }` 形のどちらも `recall()` を呼ぶ。
+   *
+   * ⚠ `consolidate`/`reflect` は `dryRun` でも進む（打ち切りは `recall()` の後ろにあるため）。
+   * `tick` の consolidate/reflect ジョブは上の `consolidate`/`reflect` を呼ぶので、その経由で進める。
+   * 🔴 `sweepArchive` は `memoryStore.archiveDecayed` を呼ぶだけで `recall()` を呼ばない
+   * ——活動時計を**読む**だけで、進めない。
    */
   async function resolveActivityClockBase(
     ctx: Ctx,

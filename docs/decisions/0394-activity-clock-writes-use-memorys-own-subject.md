@@ -137,3 +137,12 @@ ADR 0353 決めたこと7 と引き受けた負債1 が「対象 Memory 自身�
 - 宣言しない第三者 adapter の実物（負債1）。リポジトリの外の実装は見ていない。宣言の無い store の歯は、フラグを読まずに `nowSeq` だけを使う偽の store で確かめた。
 - 既に書かれてしまった起点（この修正より前に、取り違えた値で書かれた `decay_base_seq`/`decay_floor_seq`）の**遡っての修正は、していない**。強化・再作成で新しい値に置き換わるだけである。
 - `hasSubjectActivityCounters` の追加往復（負債2）の実測。
+
+## 追記（2026-10-06）: 決定3 の「掃引」は誤り。活動時計を進める入口の正しい一覧
+
+決定3（と、それに合わせて書き直した `runtime.ts` の 🔴 負債コメント）は、活動時計を進める保守の操作に「掃引（`sweepArchive`）」を挙げていた。**これは誤りである。**
+
+- 【現物】`sweepArchive` は `memoryStore.archiveDecayed` を呼ぶだけで、`recall()` を呼ばない。活動時計を**読む**だけで、進めない。
+- 【現物】活動時計を進めるのは `recall-runtime.ts` の `advanceActivityClock`（`decayClock` が `"wall"` なら進めない）で、`runRecall` を通る呼び出しすべてである。`runtime.ts` の中で `recall()`/`runRecall()` を呼ぶのは、公開の `recall`・`findCorrectionCandidates`・`consolidate`（`seedMemoryId` 形・`query` 形）・`reflect`（同）。`dryRun` の打ち切りは `recall()` の後ろなので、`dryRun` でも進む。`tick` の consolidate/reflect ジョブはその `consolidate`/`reflect` 経由で進める。
+- 決定3 の「触らない」（オーナーに問い合わせ中）は変わらない。**挙動は変えていない**——直したのは一覧の記述だけである。
+- 一覧の正本は `runtime.ts` の `resolveActivityClockBase` の TSDoc（行頭の印 `ADVANCER:`）であり、`packages/core/src/__tests__/activity-clock-advancers-doc.test.ts` が、ソースの `recall(`/`runRecall(` の呼び出しを囲む関数の集合と一致することを縛っている。この追記の一覧はその時点の写しなので、食い違ったら TSDoc とテストが正しい。
