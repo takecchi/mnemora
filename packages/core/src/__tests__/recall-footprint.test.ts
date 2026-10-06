@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_RECALL_FOOTPRINT_PROFILE,
+  DEFAULT_FOOTPRINT_TOLERANCE,
   FOOTPRINT_STRUCTURAL_CONSTANTS,
   calibrateRecallFootprint,
   compareWithFullLog,
@@ -67,6 +68,15 @@ const shapeTestProfile: RecallFootprintProfile = {
   charsPerDigest: 100,
   fixedIndexChars: 100,
 };
+
+// Issue #1775 の #728（変異2）: 既定の許容誤差は 5%（`DEFAULT_FOOTPRINT_TOLERANCE` の TSDoc「その実測に余裕を見て
+// 5% に置いた」「この既定値自体は変えていない」。ADR 0314 §8）。`compareWithFullLog` が `'too_close_to_call'` を
+// 返す幅なので、動くと判定が静かに変わる。値の根拠（較正後の最大残差 2.023% が内側）が崩れたら、決め直す合図にする。
+describe("DEFAULT_FOOTPRINT_TOLERANCE — 既定の許容誤差は 5%", () => {
+  it("値は 0.05", () => {
+    expect(DEFAULT_FOOTPRINT_TOLERANCE).toBe(0.05);
+  });
+});
 
 describe("estimateRecallFootprint — 境界", () => {
   it("memoryCountInScope が 0 なら、返る件数も帯の件数も 0（chars は固定分だけ）", () => {
