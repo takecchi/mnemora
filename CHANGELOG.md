@@ -207,6 +207,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Fixed
 
+- **`@mnemora/postgres` の `runMigrations` が、`registerEmbeddingSpace` と同時に走って埋め込み表の索引の名前がぶつかり（`23505`・`pg_class_relname_nsp_index`・`idx_memory_embeddings_…`）落ちたファイルを、1回だけ流し直すようになった**（逆向きの競合。[ADR 0638](./docs/decisions/0638-run-migrations-reruns-file-once-on-embedding-index-name-race.md)。[ADR 0464](./docs/decisions/0464-register-embedding-space-absorbs-migration-index-race.md) の負債 D1b。オーナーへのまとめ問い 374f6f88 の問30）。
+  - 以前は、`registerEmbeddingSpace` が索引を作っている最中に `runMigrations` が同じ名前を作ろうとすると、migration がそのファイルごと巻き戻って失敗し、呼び直さないと進まなかった。いまは、そのファイルを頭から1回だけやり直す（適用済みのファイルは流さない）。2回目も落ちたら、2回目のエラーをそのまま投げる。別の例外は流し直さない。
+  - **migration ファイルは変えていない。** 公開 API・既定値も変えない。落ちる入力が減るだけである。
+
 - **`@mnemora/bullmq` の `createBullmqTickDriver` の `stop()` が、同じ `queueName` に自分以外の Worker が居るときは、共有の scheduler を消さなくなった**（最後の1台だけが消す。[ADR 0655](./docs/decisions/0655-bullmq-stop-removes-scheduler-only-when-last-worker.md)。[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料3）。以前は1台の `stop()` が、動いたままの他のプロセスの tick も止めた。`CLIENT LIST` が使えない環境では、従来どおり消す。公開の型・オプション・既定値は変えていない。
   - **残っていること**: 2台が同時に `stop()` すると scheduler が1件残りうる。永続化なしの Redis の再起動で scheduler が消える件は直っていない。
 

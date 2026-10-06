@@ -2970,6 +2970,9 @@ on に変わる（[ADR 0337](./decisions/0337-recall-association-default-on.md)�
   🔴 でなく 🟡 に置いた理由【判断】: 新しく断る入力は無く（上の「数え方の規律への追記（2026-09-28）」の2 の線の内側）、公開の型・DB・`@mnemora/postgres`・conformance suite は変えていない。変わるのは公開の fixture が返す値だけで、本物の adapter に近づく向きの変更である。ただし、**以前は保持された値が書き換わる**——孤立サロゲートの保持をテストが前提にしていた人は、値が変わって落ちる。そう読んで 🔴 に数え直すのはオーナーの判断（CHANGELOG の `[1.3.0]` 側も同じ分類）。手順は要らない。
   **まだ揃っていない**: `jsonb` 列の欄（`payload`・`attributes`・`provenance`。`observe` の `text` などは `payload` に入る）は、Postgres は孤立サロゲートで例外、InMemory は保持して通す。
 
+- **`@mnemora/postgres` の `runMigrations`: `registerEmbeddingSpace` と同時に走って埋め込み表の索引の名前がぶつかり（`23505`・`pg_class_relname_nsp_index`・`idx_memory_embeddings_…`）落ちたファイルを、1回だけ流し直す**（[ADR 0638](./decisions/0638-run-migrations-reruns-file-once-on-embedding-index-name-race.md)。🟡。[ADR 0464](./decisions/0464-register-embedding-space-absorbs-migration-index-race.md) の負債 D1b）。
+  以前は、そのとき `runMigrations` が `migration <file> failed: …`（`cause.code` は `23505`）で落ち、呼び直すと通った。いまは runner が同じファイルを1回だけやり直して通る。2回目も落ちたら、2回目のエラーが今までと同じ形で出る。**落ちる入力が減る変更**で、手順は要らない。DB マイグレーションは足していない（既存の migration ファイルは変えていない）。この失敗を捕まえて呼び直していた呼び出し側は、その分岐に入らなくなる。
+
 ## この文書が確かめていないこと
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
