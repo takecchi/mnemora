@@ -118,3 +118,18 @@ describe("InMemoryMemoryStore — 別テナントの行を対象にした失敗�
     expect((await store.get(ctxA, oldA.id))?.status).toBe("active");
   });
 });
+
+describe("InMemoryMemoryStore.registerLabel — 冪等（registeredAt を上書きしない。ADR 0318 約束4。Issue #1775 の #717 の変異15）", () => {
+  it("2回目の registerLabel は、時計が進んでいても registeredAt を1回目のまま返す", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const store = new InMemoryMemoryStore();
+    const first = await store.registerLabel(ctxA, "alpha");
+
+    vi.setSystemTime(new Date("2026-01-02T00:00:00.000Z"));
+    const second = await store.registerLabel(ctxA, "alpha");
+
+    expect(first.registeredAt?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(second.registeredAt?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
