@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -358,6 +358,34 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
       },
     );
   });
+
+  // Issue #1784（#563 の確かめ直し）: 読めなかったファイルが1本でもあれば、ほかが一致していても赤（exit 1）。
+  // 判定（compareFingerprints）は読めたファイルだけを見るので、最後の「一致かつ読めないもの無し」の条件を
+  // 「一致」だけに緩めても、以前の歯はどれも赤にならなかった【実測】。
+  // ⚠ root は権限 000 のファイルも読めるので、この場面を作れない。root では skip する。
+  it.skipIf(process.getuid?.() === 0)(
+    "200 ＋ 1本は一致・1本は読めない ⟹ 赤（exit 1）。読めなかったファイルを名指しする",
+    async () => {
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n', "tokenizer.json": '{"t":1}\n' },
+          respond: (e) => ({ status: 200, body: e }),
+        },
+        async (f) => {
+          const locked = join(f.cacheDir, repo, "tokenizer.json");
+          chmodSync(locked, 0o000);
+          try {
+            const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+            expect(r.stderr).toContain("読めなかったファイル 1 本:");
+            expect(r.stderr).toContain("tokenizer.json");
+            expect(r.code).toBe(1);
+          } finally {
+            chmodSync(locked, 0o644);
+          }
+        },
+      );
+    },
+  );
 
   it.concurrent(
     "⭐ 404（宣言された repo が存在しない）⟹ **赤（exit 1）**。⛔ 保留にしない（Issue #586 / ADR 0253 追記1）",
