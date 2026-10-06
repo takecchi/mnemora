@@ -339,6 +339,46 @@ describe("(C) 書き込みに渡した入力を後から書き換えても、sto
     expect(json(await memoryStore.getRecall(ctx, id))).toBe(before);
   });
 
+  it("createRecall に渡した createdAt（Issue #1731）", async () => {
+    const { memoryStore } = kit();
+    const input = recallRecord();
+    input.createdAt = new Date(T0);
+    const id = await memoryStore.createRecall(ctx, input);
+
+    input.createdAt.setTime(0);
+
+    expect((await memoryStore.getRecall(ctx, id))!.createdAt.getTime()).toBe(T0.getTime());
+  });
+
+  it("purgeMemory に渡した event.at は purgedAt に写り、後から書き換えても動かない（Issue #1731）", async () => {
+    const { memoryStore, eventStore } = kit();
+    const m = await memory(memoryStore);
+    await memoryStore.updateStatusWithEvent(
+      ctx,
+      m.id,
+      "forgotten",
+      {},
+      buildNewMemoryEventFixture({ tenantId: ctx.tenantId, memoryId: m.id, kind: "forgotten" }),
+    );
+    const at = new Date(T0);
+    await memoryStore.purgeMemory(
+      ctx,
+      m.id,
+      { content: "[purged]", digest: "[purged]" },
+      buildNewMemoryEventFixture({ tenantId: ctx.tenantId, memoryId: m.id, kind: "purged", at }),
+    );
+
+    at.setTime(0);
+
+    const read = (await memoryStore.get(ctx, m.id))!;
+    expect(read.purgedAt!.getTime()).toBe(T0.getTime());
+    const purgedEvents = (await eventStore.list(ctx, { memoryId: m.id })).filter(
+      (e) => e.kind === "purged",
+    );
+    expect(purgedEvents).toHaveLength(1);
+    expect(purgedEvents[0]!.at.getTime()).toBe(T0.getTime());
+  });
+
   it("EventStore.append の meta・at", async () => {
     const { memoryStore, eventStore } = kit();
     const m = await memory(memoryStore);

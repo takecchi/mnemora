@@ -155,11 +155,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Added
 
+- **`@mnemora/postgres` に `findCrossTenantReferences` を足した**（[ADR 0636](./docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)。オーナー回答 374f6f88 の問27）。`recall_usages`・`memories.source_observation_id`・`memories.contested_with_id`・`memories.superseded_by_id` の4種について、参照先が別のテナントの行である既存行を、種類ごとの件数と先頭の `sampleLimit` 件（既定 20）で返す。**検出だけで、何も書き換えない**（`READ ONLY` のトランザクションの中で読む）。複合外部キーは足していない。既存の振る舞いは変わらない。`CROSS_TENANT_REFERENCE_KINDS` なども同じ入口から出る。
+
 - **`@mnemora/bullmq` の `CreateBullmqTickDriverOptions` に `lockDuration` と `completedJobsToKeep` を足した**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0440](./docs/decisions/0440-outbox-first-terminal-wins-extraction-local-date-years-bullmq-stalled.md) の決定4・[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料6の判断）。
   - `lockDuration?: number`（ミリ秒）: BullMQ の `Worker` の lock の期限にそのまま渡す。省略なら BullMQ の既定（30000 ms）。1回の tick が lock より長くかかる環境で、stalled による同じ tick の再実行を減らすために使う。`1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数でなければ、構築時に投げる（数でなければ `TypeError`、範囲外・小数・`NaN`・`Infinity` なら `RangeError`。[ADR 0525](./docs/decisions/0525-config-error-types-align-with-provider.md) の形）。
   - `completedJobsToKeep?: number`: 完了したジョブを Redis に残す件数（既定 `1000`）。`0` 以上の整数でなければ、同じ形で構築時に投げる。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
+
+- **出荷済みの `@mnemora/postgres` の migration が書き換えられていないことを、CI で固定した**（[ADR 0637](./docs/decisions/0637-migration-checksums-pinned-and-0027-deadlock-not-fixable-by-new-migration.md)。オーナー回答 374f6f88 の問29〈全部推奨〉による。決めたのは推奨の採否だけで、設計は担い手のもの）。
+  利用者に見える変化は無い（`packages/postgres/migrations` の中身も `runMigrations` も変えていない。名簿の `migration-checksums.json` は npm に出ない）。既存の migration の書き換え・削除は CI が赤にし、新しい番号の migration の追加は赤にしない。**`0027` の deadlock（止めずに当てると `observe()` と deadlock しうる）は、新しい番号の migration では直せないと判断し、直していない**——手当ては、書き込みを止めてから当てること（[ADR 0442](./docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）のまま。
 
 - **`reextract`・`consolidate`・`reflect` が、LLM を待つ間に元の記憶が `contested`（`reextract` はさらに、訂正の解決で負けた `superseded`）になっていたら、書かずに打ち切る**（[ADR 0544](./docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)、`@mnemora/core`。🟡。[ADR 0406](./docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md) の負債1・[ADR 0420](./docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md) の部分成功・[ADR 0454](./docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md) の負債1・5 を置き換える）。
 
