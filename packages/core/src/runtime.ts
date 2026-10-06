@@ -52,7 +52,7 @@ import type {
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
 } from "./interfaces/memory-store.js";
-import { isOutboxLeaseConflictError } from "./interfaces/outbox-store.js";
+import { isOutboxLeaseConflictError, OutboxLeaseConflictError } from "./interfaces/outbox-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "./interfaces/outbox-store.js";
 import type { OutboxJobKind } from "./interfaces/scheduler.js";
 import {
@@ -6562,7 +6562,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             at: clock.now(),
           });
         } catch (failErr) {
-          if (isOutboxLeaseConflictError(failErr)) {
+          if (failErr instanceof OutboxLeaseConflictError) {
             leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "fail" });
             continue;
           }
