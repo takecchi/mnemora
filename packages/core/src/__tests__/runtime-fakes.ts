@@ -4346,7 +4346,7 @@ function dropNonAsciiRuns(text: string): string {
  * Postgres（tsvector）と同じ「語（token）の一致」を見るために使う。
  */
 function fakeLexicalTokenize(text: string): string[] {
-  return insertAsciiBoundaries(text)
+  return text
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter((token) => token.length > 0);
