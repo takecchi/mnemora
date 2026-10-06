@@ -3,9 +3,8 @@
  *
  * **なぜ要るか**
  *
- * `@mnemora/anthropic` の `errors.ts`（ADR 0072 の追記「実測で見つかった穴」）と同じ穴が
- * `@mnemora/openai` 側にも残っていた。**「モデルが拒否した」と「応答が空だった」が
- * 同じ `Error` になっていた。**
+ * `@mnemora/anthropic` の `errors.ts`（ADR 0072 の追記「実測で見つかった穴」）と同じ理由で、
+ * **「モデルが拒否した」と「応答が空だった」を同じ `Error` にしない。**
  *
  * これはこのリポジトリの固定点——**「無い」の種類を潰さない**（`docs/recall.md`・
  * ADR 0008 / 0013 / 0026 / 0027 / 0044 が一貫して守ってきた線）——に正面から当たる。
@@ -26,13 +25,13 @@
  * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
  * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
  *
- * ⚠ **2026-09-27 追記（プロンプトの大きさの軸）:** 入力がモデルのコンテキストを超えて API がリクエストを HTTP 400
- * （`context_length_exceeded`）で拒むと、SDK の例外がそのまま伝播し `kind` は付かない
- * （今の振る舞い。実 API では確かめておらず、SDK の例外の形を模した偽のクライアントで確かめた。`kind: "truncated"` は `finish_reason: "length"`、つまり出力が途中で
- * 切れた成功応答だけを指す）。
+ * ⚠ **入力がモデルのコンテキストを超えて API がリクエストを HTTP 400
+ * （`context_length_exceeded`）で拒むと、SDK の例外がそのまま伝播し `kind` は付かない**
+ * （実 API では確かめておらず、SDK の例外の形を模した偽のクライアントで確かめた。`kind: "truncated"` は
+ * `finish_reason: "length"`、つまり出力が途中で切れた成功応答だけを指す）。
  *
- * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
- * `kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである。**
+ * ⚠ **`kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである**
+ * （[Issue #885](https://github.com/takecchi/mnemora/issues/885)）。
  * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——`choices`/`data` の
  * トップレベルの欄がキーごと丸ごと無い場合（`{}` が返る等）——は、この分類の**外**にある
  * 生の例外（`TypeError` 等。壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と
@@ -42,16 +41,16 @@
  * 例外がそのまま伝播する形である）。**実 API がこの形
  * （200 応答なのにトップレベルのキーが丸ごと欠ける）を実際に返すかは確認していない。**
  * 詳細・検討した案は
- * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記
+ * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の Issue #885 の追記
  * （主たる記録）を参照。`llm-provider.ts` の `assertNotRefusedOrTruncated` 呼び出し箇所、
  * `embedding-provider.ts` の `embed` にも個別の doc コメントがある。
  *
- * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
- * `kind: "schema_unsupported"` を足した。** `completeStructured` が、送る前の翻訳
+ * ⚠ **`kind: "schema_unsupported"`**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+ * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）**:**
+ * `completeStructured` が、送る前の翻訳
  * （`structured-root.ts` の `toBaseJsonSchema`、zod の既定＝ throw）と、送る直前の検査
  * （`openai` SDK 自身の `lib/transform` の `toStrictJsonSchema` を、実際に送る JSON Schema
- * に通す。戻り値は使わず、送るのは今までどおり mnemora 自身の翻訳結果である）のどちらかで
+ * に通す。戻り値は使わず、送るのは mnemora 自身の翻訳結果である）のどちらかで
  * 投げた例外を、この `kind` に包んで `chat.completions.create` を呼ぶ前に投げ直す。**元の例外は
  * `cause`（ES2022 の `Error.cause`）に載る**。`z.record`・`z.tuple`・`z.date`・`transform` が
  * この経路に当たる（README「`completeStructured` に渡せる zod の形」参照）。

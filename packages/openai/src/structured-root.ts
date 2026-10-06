@@ -23,10 +23,9 @@ type JsonSchemaNode = Record<string, unknown>;
  * zod スキーマから、翻訳の元になる JSON Schema を作る。`translateForOpenAIStructuredOutput` と
  * `OpenAILLMProvider.completeStructured` が、包むかどうかを同じ元から決めるための1か所。
  *
- * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）:
- * `unrepresentable: "any"` は渡さない（zod の既定＝ throw）。** 以前はここで `"any"` を渡しており、
- * `z.date()`・`.transform(...)` のように JSON Schema で表現できない形が、型の無いスキーマ
- * （`{}`＝何でも受ける）として静かに送られていた。**いまは zod 自身が「Date cannot be
+ * ⚠ **`unrepresentable: "any"` は渡さない（zod の既定＝ throw。[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）。**
+ * 渡すと、`z.date()`・`.transform(...)` のように JSON Schema で表現できない形が、型の無いスキーマ
+ * （`{}`＝何でも受ける）として静かに送られる。**zod 自身が「Date cannot be
  * represented in JSON Schema」「Transforms cannot be represented in JSON Schema」で
  * ここで投げる**——呼び出し元（`OpenAILLMProvider.completeStructured`）がこれを
  * `OpenAILLMProviderError`（`kind: "schema_unsupported"`）に包み、`chat.completions.create`

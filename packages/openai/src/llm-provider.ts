@@ -2,7 +2,7 @@ import OpenAI from "openai";
 // `openai/lib/transform` は `openai` パッケージの `exports` には載っているが、README 等で
 // 案内される文書化された入口ではない（ADR 0360「引き受けた負債」）。実際に送る JSON Schema が
 // OpenAI 自身の strict 変換を通るかを、送る前に検査するためだけに使う——戻り値は使わない
-// （送るのは今までどおり mnemora 自身の翻訳結果である）。
+// （送るのは mnemora 自身の翻訳結果である）。
 import { toStrictJsonSchema } from "openai/lib/transform";
 import type {
   AbortOptions,
@@ -32,8 +32,8 @@ import { setOwn } from "./own-property.js";
  *
  * `client` を注入できるようにしてある（`OpenAIEmbeddingProvider` と同じ理由）。
  *
- * ⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）:
- * `client` を省略すると `new OpenAI({ apiKey })` が作る SDK 既定のクライアントが使われる
+ * ⚠ **`client` を省略すると `new OpenAI({ apiKey })` が作る SDK 既定のクライアントが使われる
+ * （[Issue #884](https://github.com/takecchi/mnemora/issues/884)）
  * ——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する（実測:
  * `openai@7.10.0` は既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms。この数値は
  * mnemora の契約ではなく SDK の既定値であり、SDK の版が上がれば変わりうる）。再試行の
@@ -57,9 +57,8 @@ export interface OpenAILLMProviderOptions {
    * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
    * キーの検査もしない。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）:**
-   * この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIChatClient}
-   * である（以前は `Pick<OpenAI, "chat">` だった）。**`openai` を自分の依存として入れる版は、
+   * ⚠ この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIChatClient}
+   * である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。**`openai` を自分の依存として入れる版は、
    * `@mnemora/openai` が固定している版と揃える必要が無い**——`OpenAI` インスタンスは、
    * 版が違ってもこの構造型を満たす限りそのまま渡せる（packages/openai/README.md 参照）。
    */
@@ -95,20 +94,20 @@ export interface OpenAILLMProviderOptions {
  * （`extraction.ts` の `ExtractionResultSchema`）にはそのような区別を要するフィールドが
  * 無いことを確認済み。
  *
- * ⚠ **2026-09-27 追記（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）: 上の「確認済み」は、
- * Issue #608 の後は成り立っていない。**`ExtractedMemoryCandidateSchema.subjectId` は
+ * ⚠ **上の「確認済み」は、Issue #608 の後は成り立っていない**（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）。
+ * `ExtractedMemoryCandidateSchema.subjectId` は
  * `.nullable().optional()` で、省略（未指定）と明示の `null`（主題なし）を区別する。この変換が
  * `null` を消すので、この provider ではモデルが返した「主題なし」が省略として届き、Memory は
  * observation の主題を持つ（`@mnemora/anthropic` は `null` を保つので結果が分かれる）。
  * `null` を保つだけでは直らない——strict モードの翻訳では、`subjectCandidates` を渡さないときの
  * 「未指定」も応答の上では `null` になるので、今度は候補一覧の無い観測のすべてが主題なしになる。
- * クローン miku の判断で、スキーマ・翻訳を変える案は採らず、今の振る舞いを記録した
+ * スキーマ・翻訳を変える案は採らず、今の振る舞いを記録している
  * （選び直す余地は Issue に残してある）。ほかの3つのスキーマ（統合・内省・claim key）には
  * `.nullable()` の欄が無い。
  *
- * ⚠ **2026-09-28 追記:** この変換だけでは、スキーマがもともと `null` を許す位置（必須の `.nullable()`・
- * 配列の要素・根）の `null` まで消して `ZodError` にしていた（README は `nullable` を「通る」としていた）。
- * いまはこの変換を1段目とし、`ZodError` のときだけ {@link keepSchemaNulls} で検査し直す
+ * ⚠ この変換だけでは、スキーマがもともと `null` を許す位置（必須の `.nullable()`・
+ * 配列の要素・根）の `null` まで消して `ZodError` になるため、
+ * この変換を1段目とし、`ZodError` のときだけ {@link keepSchemaNulls} で検査し直す
  * （{@link parseStructuredValue}）。上の #1082 の振る舞い（`.nullable().optional()` の `null` は省略）は変えていない。
  */
 function stripNulls(value: unknown): unknown {
@@ -287,7 +286,7 @@ function parseStructuredValue<T>(
  * **`choices` が空（choice 自体が無い）ときは、この門では投げない。** 既存の
  * `no_content` の経路（`complete` の `?? ""` / `completeStructured` の `if (!raw)`）に任せる。
  *
- * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
+ * ⚠ **（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）
  * 上の「`choices` が空」は `choices: []`（キー自体はある）を指す——`response.choices[0]`
  * が `undefined` になり、この関数はそれを `choice` 引数として受け取って `if (!choice)`
  * で素通しする。**`choices` キー自体が丸ごと無い応答（`{}` が返る等）は、この関数の
@@ -295,7 +294,7 @@ function parseStructuredValue<T>(
  * `response.choices[0]` という式が、`response.choices` が `undefined` であることに
  * より、この関数を呼ぶ前に `TypeError: Cannot read properties of undefined
  * (reading '0')` を投げる。この場合 `OpenAILLMProviderError` の `kind` 分類には
- * 一切載らない。詳細は `errors.ts` 冒頭コメントの同日付追記を参照。
+ * 一切載らない。詳細は `errors.ts` 冒頭コメントを参照。
  */
 function assertNotRefusedOrTruncated(choice?: {
   finish_reason?: string | null;
@@ -372,8 +371,8 @@ function toOpenAIMessages(
  * 拒否・切り詰め・空応答は {@link OpenAILLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
  * HTTP の失敗・認証の失敗・400 などは、SDK の例外がそのまま伝わる。
  *
- * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * ⚠ **（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）
  * `complete`/`completeStructured` の第3引数 `opts?.signal` を、そのまま
  * `chat.completions.create` の request options（`{ signal }`）へ渡す。** SDK が既定で
  * 対応する `AbortSignal` の仕組みに委ねているだけであり、`@mnemora/openai` 自身は
@@ -442,13 +441,12 @@ export class OpenAILLMProvider implements LLMProvider {
   /**
    * zod スキーマを OpenAI の Structured Output へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
-   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
-   * 送る前に検査するようになった。**`z.record`・`z.tuple`・`z.date`・`transform` は、いまは
+   * ⚠ **送る前に検査する**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
+   * `z.record`・`z.tuple`・`z.date`・`transform` は、
    * `chat.completions.create` を呼ぶ前に {@link OpenAILLMProviderError}（`kind:
-   * "schema_unsupported"`、`cause` に元の例外）で落ちる——以前はここで送ってからベンダーに
-   * 拒ませていた（`BadRequestError`、HTTP 400）。`z.lazy`（再帰）・`default`・根が union
-   * （包んで送る）は今までどおり通る。一覧は README。
+   * "schema_unsupported"`、`cause` に元の例外）で落ちる（送ってベンダーに拒ませると `BadRequestError`、HTTP 400 になる）。
+   * `z.lazy`（再帰）・`default`・根が union（包んで送る）は通る。一覧は README。
    *
    * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link OpenAILLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * 本文が空・欠落なら `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、

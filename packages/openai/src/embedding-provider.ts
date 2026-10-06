@@ -19,8 +19,8 @@ import type { OpenAIEmbeddingsClient } from "./client-types.js";
  * ネットワーク呼び出しの往復だけであり、`EmbeddingSpaceId` の固定・入出力の対応付けは
  * 本物のロジックを検査している）。
  *
- * ⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）:
- * `client` を省略すると `new OpenAI({ apiKey })` が作る SDK 既定のクライアントが使われる
+ * ⚠ **`client` を省略すると `new OpenAI({ apiKey })` が作る SDK 既定のクライアントが使われる
+ * （[Issue #884](https://github.com/takecchi/mnemora/issues/884)）
  * ——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する（実測:
  * `openai@7.10.0` は既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms。この数値は
  * mnemora の契約ではなく SDK の既定値であり、SDK の版が上がれば変わりうる）。再試行の
@@ -45,16 +45,15 @@ export interface OpenAIEmbeddingProviderOptions {
    * 返ったベクトルの次元がこれと違えば `embed` は例外を投げる（下の `embed` の doc）。
    *
    * ⚠ ADR 0498: **正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら `RangeError`。
-   * message に値が入る）。以前は検査せず、`space.dimensions` に壊れた値が入ったまま構築できた。
+   * message に値が入る）。壊れた値が `space.dimensions` に入るのを防ぐ。
    */
   dimensions: number;
   /**
-   * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき。上の Issue #884 の追記）。
+   * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき。上の Issue #884 の注記）。
    * 渡すと `apiKey` は使わず、キーの検査もしない。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）:**
-   * この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIEmbeddingsClient}
-   * である（以前は `Pick<OpenAI, "embeddings">` だった）。**`openai` を自分の依存として入れる
+   * ⚠ この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIEmbeddingsClient}
+   * である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。**`openai` を自分の依存として入れる
    * 版は、`@mnemora/openai` が固定している版と揃える必要が無い**（packages/openai/README.md 参照）。
    */
   client?: OpenAIEmbeddingsClient | undefined;
@@ -69,8 +68,8 @@ export interface OpenAIEmbeddingProviderOptions {
  * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
  * `dimensions` が正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498。`OpenAIEmbeddingProviderOptions.dimensions` の doc）。
  *
- * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * ⚠ **（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）
  * `embed` の第3引数 `opts?.signal` を、そのまま `embeddings.create` の request options
  * （`{ signal }`）へ渡す。** SDK が既定で対応する `AbortSignal` の仕組みに委ねているだけ。
  */
@@ -107,27 +106,20 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
    *
    * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。
    *
-   * ⚠ **2026-09-30 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
-   * [ADR 0305](../../../docs/decisions/0305-embedding-provider-input-limit-contract.md) の同日付追記）:
-   * 応答を検査する。** 次のどれかが崩れていれば、素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まる。
+   * ⚠ **応答を検査する**（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
+   * [ADR 0305](../../../docs/decisions/0305-embedding-provider-input-limit-contract.md)）。次のどれかが崩れていれば、素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まる。
    * 専用のエラー型・`kind` は無い）を投げる——(1) `response.data` の件数が `texts.length` と等しい、
    * (2) `index` が 0..n-1 をちょうど1回ずつ（重複・欠落・範囲外が無い）、(3) 各ベクトルの長さが
    * `space.dimensions` と等しい、(4) 成分がすべて有限（`NaN`/`Infinity` が無い）。メッセージには期待値・実際の値・
-   * 何番目かを入れ、入力テキストの本文と API キーは入れない。以前（〜1.1.x）は検査せず、食い違った応答の
-   * 戻り値は未定義だった。これは**新しく例外になる場合が増える変更**であり、CHANGELOG の `[1.2.0]` と
-   * docs/migration-v1.md に破壊的変更として書いてある。
+   * 何番目かを入れ、入力テキストの本文と API キーは入れない。1.2.0 で入った、**新しく例外になる場合が増える変更**
+   * であり、CHANGELOG の `[1.2.0]` と docs/migration-v1.md に破壊的変更として書いてある。
    */
-  // ⚠ 2026-09-26 追記（Issue #885）: `response.data` キー自体が丸ごと無い応答
-  // （`{}` が返る等）が来ると、下の `data.length` は `TypeError`（`Cannot read properties of
-  // undefined`）を投げる。このクラスは専用の
-  // エラー型を持たず（`OpenAILLMProvider` の `kind` 分類に相当するものが埋め込み側には
-  // 無い）、壊れた応答は最初から生の例外がそのまま呼び出し元へ伝播する形である
-  // （`packages/openai/src/errors.ts` 冒頭コメントの同日付追記を参照）。
-  // 2026-09-30: 上の検査は `data` が配列として在ることが前提で、その形の検査は足していない
-  // （`{}` は従来どおり `TypeError` のまま）。
-  //
-  // ⚠ 2026-09-30 追記（Issue #860）: 2026-09-26 に「件数を検査しない・戻り値は未定義」と書いたが、
-  // 上のとおり検査を足した。お手本は `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
+  // ⚠ `response.data` キー自体が丸ごと無い応答（`{}` が返る等、Issue #885）が来ると、下の `data.length` は
+  // `TypeError`（`Cannot read properties of undefined`）を投げる。上の応答の検査は `data` が配列として
+  // 在ることが前提で、その形の検査は足していない。このクラスは専用のエラー型を持たず
+  // （`OpenAILLMProvider` の `kind` 分類に相当するものが埋め込み側には無い）、壊れた応答は生の例外がそのまま
+  // 呼び出し元へ伝播する（`packages/openai/src/errors.ts` 冒頭コメントを参照）。
+  // 応答の検査のお手本は `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
   // （`packages/local-embedding/src/local-embedding-provider.ts`）。
   //
   // ⚠ `opts?.signal`（ADR 0359・ADR 0428）: 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
