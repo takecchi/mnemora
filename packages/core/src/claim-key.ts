@@ -422,7 +422,7 @@ export interface ClaimKeyOptions {
    * ⚠ **【2026-10-07 追記、Issue #835】`knownPredicatesFromStore: true` と組むと、別々の発話どうしが
    * 語彙ヒントに吸い寄せられて同じ predicate になり、訂正ではない対も contested になる**（U1）。
    * その対にも `RecalledMemory.contestedWith` が付き、`examples/chat` の回答プロンプトでは訂正と
-   * 同じ「訂正の可能性」の印で届く。測定値と条件は `knownPredicatesFromStore` の doc を見ること。
+   * 同じ「訂正の可能性」の印で届く。測定値と条件は ADR 0335 の追記（2026-10-07、Issue #835）を見ること。
    */
   detectContested?: boolean | undefined;
   /**
@@ -461,29 +461,9 @@ export interface ClaimKeyOptions {
    * 誤検出は `unknown-favorite-number` の1/2 ×3 のみ（`other-period-city-this-year` は
    * 0/2 ×3）——ADR 0377 の「陽性対照」節に実測の詳細がある。
    *
-   * ⚠ **【2026-10-07 追記、Issue #835】この誤検出は今も残っていて、今は「訂正の可能性」の
-   * 印として回答プロンプトまで届く。**
-   * - **U1（語彙の吸い寄せ）**: 別々の発話どうしが、store の語彙ヒントの「必ずそのまま使い」
-   *   （{@link buildKnownPredicateInstruction}）に吸い寄せられて同じ predicate になり、
-   *   contested になる。代表は `unknown-favorite-number`（「新しい趣味を始めようと思っている」と
-   *   「旅行の計画を立てている」）。
-   * - **誤検出の対にも `RecalledMemory.contestedWith` が付く**（ADR 0335）。`examples/chat` の
-   *   回答プロンプトでは、#1430（ADR 0379）の非対称の文面（「…より後の記録（訂正の可能性）」）の
-   *   `[矛盾候補:]` として届き、system には `CONTESTED_CORRECTION_GUIDANCE` が付く。**誤検出の
-   *   対も、訂正と同じ「訂正の可能性」として届き、区別されない**（U4、未解決）。
-   * - **訂正4件も、この語彙ヒントのおかげで一致している**（ADR 0329。語彙ヒント無しでは 0/4）。
-   *   そのため、語彙の数・predicate の出どころ・文言・埋め込みの近さでは、訂正と誤検出を
-   *   分けられない。
-   *
-   * 【実測 2026-10-07】main `8c8aee58`、`examples/chat/src/scripts/replay-835-candidate3-known-predicates.ts`
-   * に `answer.claim-key.known-predicates-{1,2,3}.json` を当てた記録の再生（実 API 0回、n=3）。
-   * `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`。
-   * 訂正の contested は 4/4 ×3、U1（`unknown-favorite-number`）は 3/3 で成立、誤検出は14件中
-   * 3・2・2件。`claimKey` が既定（off）では contested は 0。
-   * **確かめていないこと**: 実 API での今の挙動（カセットは 2026-09-25 の記録）、誤検出の印が
-   * 回答の質に与える影響、`knownPredicatesFromStore` だけを外した条件（カセットに無い呼び出しが
-   * 出るので、再生では測れない）。次の一手は Issue #835 の案1（一致した2件の本文を LLM で見比べる）
-   * で、実 API の鍵待ち。ADR 0329・0335 の 2026-10-07 の追記を見ること。
+   * ⚠ **既知の限界**: 語彙ヒントに吸い寄せられて、無関係な発話どうしが同じ predicate になり、
+   * contested になることがある。その対にも `RecalledMemory.contestedWith` が付き、訂正と区別されずに
+   * 「訂正の可能性」の印が付く。詳しくは ADR 0335 の追記（2026-10-07、Issue #835）を見ること。
    */
   knownPredicatesFromStore?: boolean | { limit?: number | undefined } | undefined;
   /**
