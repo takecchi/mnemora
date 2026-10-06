@@ -211,4 +211,34 @@ describe("recall() — 段3/段3.5で戻った below_threshold の候補が段4�
     expect(belowThresholdOf(result)).toBeUndefined();
     expect(budgetDroppedCount(result)).toBe(3);
   });
+
+  it("(e) 戻った候補が2件あるとき、below_threshold の count はその2件ぶん減り、戻っていない候補だけが残る", async () => {
+    const { runtime, stores } = buildRuntime();
+
+    const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
+    const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
+    // どちらも類似度 ≈0.05 で段2は below_threshold、アンカーとの類似度 ≈0.83 で連想に拾われる。
+    const b1 = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "BBBBBB" });
+    const b2 = await createEmbeddedMemory(stores, [0.05, 0.01, 0.9986], { digest: "DDDDDD" });
+    const bystander = await createEmbeddedMemory(stores, [0.05, 0.9987, 0], {
+      digest: "BYSTANDER",
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 2,
+      overFetchFactor: 10,
+      budget: { maxMemoryChars: cand1.digest.length + anchor.digest.length },
+    });
+
+    expect(result.memories.some((m) => m.memoryId === b1.id)).toBe(false);
+    expect(result.memories.some((m) => m.memoryId === b2.id)).toBe(false);
+    const below = belowThresholdOf(result);
+    expect(below).toBeDefined();
+    if (below?.kind === "below_threshold") {
+      expect(below.count).toBe(1);
+      expect(below.nearMisses?.map((n) => n.memoryId)).toEqual([bystander.id]);
+    }
+    expect(budgetDroppedCount(result)).toBe(2);
+  });
 });
