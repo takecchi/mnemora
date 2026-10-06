@@ -14,13 +14,12 @@ import type {
  * コメントを見ること——ここには型の形だけを置く。要約: [ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
  * が「候補を返すところまで」に止めた `findCorrectionCandidates` の**続き**——採用側が
  * 候補から指名した相手（`correctedId`）を受け取り、`markContested`/`resolveContested`
- * （両方とも既存の口。ADR 0134/ADR 0150）を呼ぶだけの**薄い orchestration**である。
+ * （ADR 0134/ADR 0150）を呼ぶだけの**薄い orchestration**である。
  *
  * ⛔ **この口も「相手を選ぶ」ことは一切しない。** `correctedId` は必ず呼び出し側が渡す
- * ——`discovery.candidates[0]` を自動的に採る経路は無い（`correctedId` が
- * `discovery.candidates` に居るかどうかの**照合**にしか候補を使わない）。ADR 0232 が
- * 実測した危険（B群: 訂正してはいけない発話で棄権できず、深い誤爆も起きる。件数は ADR 側が正）への応答は
- * 「候補を機械的に採らない」という、この口が持たない振る舞いによって保たれる。
+ * ——`discovery.candidates[0]` を自動的に採る経路は無い（`discovery.candidates` は
+ * `correctedId` が居るかの**照合**にしか使わない）。ADR 0232 が実測した危険（B群: 訂正してはいけない
+ * 発話で棄権できず、深い誤爆も起きる）への応答は、候補を機械的に採らないことで保たれる。
  */
 
 /** `Runtime.applyCorrection` への入力。 */
@@ -57,12 +56,9 @@ export interface ApplyCorrectionInput {
    * ⭐ **`markContested` した直後に `resolution` を渡さず、後から別の
    * `applyCorrection` 呼び出しで `resolution` を渡す、という2段の使い方もできる。**
    * 2回目の呼び出しでも `markContested` は呼ばれる（この口は「1回目で mark 済みかどうか」
-   * を記憶しない、状態を持たない orchestration であるため）が、対象は既に
-   * `status: 'contested'` なので {@link MarkContestedResult} は `ineligible` を返すだけで
-   * 書き込みは起きない——`resolveContested` 側は正常に解決へ進む
-   * （`examples/chat/src/correction-demo.ts` の `runCorrectionDemo` がこの2段呼び出しを
-   * 実際に使い、`markContested` 直後の `recall()` で対（mandatory companion）を見せてから
-   * `resolveContested` へ進む、という Issue #303 由来の実演を保っている）。
+   * を記憶しないため）が、対象は既に `status: 'contested'` なので {@link MarkContestedResult} は
+   * `ineligible` を返すだけで書き込みは起きない——`resolveContested` 側は正常に解決へ進む
+   * （`examples/chat/src/correction-demo.ts` の `runCorrectionDemo` がこの2段呼び出しを使っている）。
    */
   resolution?: ContestedResolution | undefined;
   /**
@@ -148,15 +144,12 @@ export interface CorrectionReasonInput {
 /**
  * 選んだ根拠（`recallId`・順位・候補の数・どちらへ倒したか）を、`memory_events.meta.note`
  * と `RecallResult.explain` の両方から辿れる形の1行にする
- * （Issue #369 チェックボックス、[ADR 0238](../../../docs/decisions/0238-correction-choice-rationale-in-events.md)）。
+ * （Issue #369、[ADR 0238](../../../docs/decisions/0238-correction-choice-rationale-in-events.md)、
+ * [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
  *
- * 元は `examples/chat/src/correction-demo.ts` の非公開関数だった——[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)
- * が `packages/core` の公開 export として持ち上げた。**形式（`key=value / ...` の1行、
- * 4要素、`score.total` は載せない）は ADR 0238 の決定を変えていない。** 変えたのは
- * `winner` の語彙だけ——ADR 0238 はデモの語彙（`original`/`correction`）を使っていたが、
- * `Runtime` レベルには「どちらが元の発話か」という概念が無く、持っているのは
- * `correctedId`（訂正される側）/`correctingId`（訂正する側）だけである。⟹ 汎用語彙
- * （`corrected`/`correcting`/`both_active`/`pending`）に置き換えた（下記 `winner` 参照）。
+ * 形式は `key=value / ...` の1行、4要素で、`score.total` は載せない。`winner` の語彙は
+ * `Runtime` に「どちらが元の発話か」という概念が無いため、`correctedId`（訂正される側）/
+ * `correctingId`（訂正する側）に基づく汎用語彙（`corrected`/`correcting`/`both_active`/`pending`）である。
  *
  * `winner` の値:
  * - `resolution === null` → `"pending"`——`markContested` だけを呼ぶ時点ではまだ勝者が無い。
@@ -165,10 +158,10 @@ export interface CorrectionReasonInput {
  *   そうでなければ `"corrected"`。ただし `winnerId` がどちらの id とも文字列では一致せず、大文字小文字を
  *   無視すると `correctingId` だけに一致するときも `"correcting"`（ADR 0446）。
  *
- * ⚠ **`score.total` は載せない**（ADR 0238「score.total は載せない」と同じ理由——スコアの閾値は ADR 0232 が
- * 実測した通り「訂正すべき」と「訂正してはいけない」を分離しない。生スコアを載せると
- * 「スコアが高かったから選ばれた」という誤った説明を後から読む側に与えてしまう）。
- * スコアの実際の値は `recallId` を辿って `RecallRecord.returnedMemories` から読む。
+ * ⚠ **`score.total` は載せない**（スコアの閾値は ADR 0232 が実測した通り「訂正すべき」と
+ * 「訂正してはいけない」を分離しない。生スコアを載せると「スコアが高かったから選ばれた」という
+ * 誤った説明を後から読む側に与えてしまう）。スコアの実際の値は `recallId` を辿って
+ * `RecallRecord.returnedMemories` から読む。
  */
 export function buildCorrectionReason(input: CorrectionReasonInput): string {
   const winner: string =
@@ -204,9 +197,8 @@ function supersedeWinnerLabel(
 }
 
 /**
- * ⚠ **zod スキーマは置かない。** `correction-candidates.ts` 冒頭の同名の注記と同じ理由
+ * ⚠ **zod スキーマは置かない。** 理由は `correction-candidates.ts` 末尾の同名の注記と同じ
  * ——`Runtime` の操作の結果型（`MarkContestedResult`/`ResolveContestedResult` 等）には
- * もともと schema が無く、`ApplyCorrectionResult` もそれらを運ぶだけの薄い orchestration
- * の結果であるため揃えた。検証する相手が居ないまま schema だけ足さない
- * （ADR 0181 / `__tests__/schema-type-equals-parity.test.ts`）。
+ * もともと schema が無く、`ApplyCorrectionResult` もそれらを運ぶだけの結果であるため。
+ * 検証する相手が居ないまま schema だけ足さない（ADR 0181 / `__tests__/schema-type-equals-parity.test.ts`）。
  */

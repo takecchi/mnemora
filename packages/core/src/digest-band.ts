@@ -66,8 +66,6 @@ export const DIGEST_BAND_ENTRY_SEPARATOR_CHARS = 1;
  * 実装が契約（`digests` は `digestEligible.count` を超えない）を破ったときだけであり、
  * **契約の側で捕まえるべきだから**である——`packages/testkit` の適合テストに
  * `digests.length <= digestEligible.count` を直接主張する歯を置いてある。
- * （かつてここには「不変条件: `band.length <= eligible` を常に守る」と書いてあったが、
- * 実装にその歯止めは無く、誰も検査していなかった。）
  *
  * **この関数自身が保証するのは**「`limit` にどれだけ大きい値を渡されても `candidates` に
  * 無い件数までは返さない」（`band.length <= candidates.length`）のほうである。
@@ -94,16 +92,12 @@ export function packDigestBand(
 
   for (const candidate of candidates) {
     // `length > NaN` は常に false になり、`maxEntryChars: NaN` が「切り詰めなし」へ化ける。
-    // `limit`/`maxChars` の NaN（Issue #803）・負数の `maxEntryChars` と同じく、NaN は
-    // 上限0（digest を空に切る）として扱う。`+Infinity` は通常の比較で「上限なし」になる。
+    // `limit`/`maxChars`（Issue #803）と同じく NaN は上限0（digest を空に切る）として扱う。
     const entryCharsIsNaN = Number.isNaN(opts.maxEntryChars);
     const digestTooLong = entryCharsIsNaN || candidate.digest.length > opts.maxEntryChars;
-    // `String.prototype.slice(0, n)` は `n` が負数だと「末尾から `n` 文字を除く」という
-    // 別の意味になり、先頭からの切り詰めにならない（負数の `maxEntryChars` を渡すと、
-    // 上限より長い文字列がそのまま残っていた）。`maxEntryChars` は「1件の digest の
-    // 文字数上限」であり、負数は上限0（何も残さない）の下限として扱う。サロゲートペアの
-    // 内側で切って孤立サロゲートを作らないための丸めも `sliceAtGraphemeBoundary`
-    // に集約してある（`text-truncation.ts` の doc コメント参照）。
+    // `slice(0, n)` は `n` が負数だと「末尾から `n` 文字を除く」意味になり先頭からの切り詰めに
+    // ならないため、負数は上限0として扱う。サロゲートペアの内側で切らない丸めも
+    // `sliceAtGraphemeBoundary`（`text-truncation.ts`）に集約してある。
     const digest = digestTooLong
       ? // `sliceAtGraphemeBoundary` は NaN を 0 へ丸めない（`Math.max(0, NaN)` は NaN）ので、
         // NaN はここで 0 を明示して渡す。
@@ -112,11 +106,9 @@ export function packDigestBand(
     const cost =
       DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + digest.length + DIGEST_BAND_ENTRY_SEPARATOR_CHARS;
 
-    // `NaN` を含む比較は常に false になるため、`limit`/`maxChars` に `NaN` を渡すと
-    // 打ち切り条件が一度も成立せず「上限」が無制限へ化ける（Issue #803）。`NaN` は
-    // 負数と同じ安全側（既に上限に達している扱い）に倒す。`+Infinity`/`-Infinity` は
-    // 通常の数値比較で意図どおりに振る舞う（`+Infinity`＝上限なし、`-Infinity`＝
-    // 常に超過）ため、ここでは変えない。
+    // `NaN` を含む比較は常に false になり、`limit`/`maxChars` が NaN だと上限が無制限へ化ける
+    // （Issue #803）。NaN は負数と同じ安全側（既に上限に達している扱い）に倒す。
+    // `±Infinity` は通常の比較で意図どおり（`+Infinity`＝上限なし、`-Infinity`＝常に超過）。
     const wouldExceedLimit = Number.isNaN(opts.limit) || band.length >= opts.limit;
     const wouldExceedChars = Number.isNaN(opts.maxChars) || runningChars + cost > opts.maxChars;
 
@@ -142,10 +134,8 @@ export function packDigestBand(
   }
 
   if (limitedBy === undefined && band.length < eligible) {
-    // ここまで来た＝打ち切りは一度も起きなかった（`candidates` を全部消費した）が、
-    // それでも資格件数に届いていない。つまり `candidates` 自体が既に `limit`（またはそれ
-    // 相当）で切られて渡ってきたということであり、その切り詰めもまた entry_limit の一種
-    // として報告する。
+    // 打ち切りは起きなかったのに資格件数に届かない＝`candidates` 自体が既に `limit` 相当で
+    // 切られて渡ってきた。その切り詰めも entry_limit として報告する。
     limitedBy = "entry_limit";
   }
 
