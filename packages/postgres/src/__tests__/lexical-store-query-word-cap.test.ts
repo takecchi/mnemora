@@ -128,4 +128,31 @@ describe("PostgresLexicalStore.search: クエリの異なる語数の上限（Is
     expect(hitsWithManyDuplicates).toEqual(hitsWithoutDuplicates);
     expect(hitsWithoutDuplicates.length).toBeGreaterThan(0);
   });
+
+  it("coverage の分母も上限までの語数である（上限を超えた語は分母にも数えない）", async () => {
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const lexicalStore = new PostgresLexicalStore(db);
+    const ctx: Ctx = { tenantId: TENANT };
+
+    // 先頭の語（上限内）だけを本文に持つ記憶。クエリは上限ちょうど + 1 語。
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        contentHash: "hash-coverage-denominator",
+        content: "記憶の本文に filler0 という語だけを含む",
+      }),
+    );
+    const query = [...fillerWords(LEXICAL_QUERY_MAX_DISTINCT_WORDS), "onlybeyondcap"].join(" ");
+
+    const hits = await lexicalStore.search(ctx, query, {
+      limit: 50,
+      filter: { tenantId: ctx.tenantId },
+    });
+
+    expect(hits).toHaveLength(1);
+    // 使われる語は上限の32語。一致は1語なので 1/32。上限を超えた語まで分母に入れると 1/33 になる。
+    expect(hits[0]!.coverage).toBeCloseTo(1 / LEXICAL_QUERY_MAX_DISTINCT_WORDS, 10);
+  });
 });
