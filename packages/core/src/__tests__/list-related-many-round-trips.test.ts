@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
+import type { MemoryStore } from "../interfaces/memory-store.js";
 import type { Relation, RelationKind, RelationStore } from "../interfaces/relation-store.js";
 import { ExtractionResultSchema } from "../extraction.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
@@ -127,12 +128,15 @@ function sameKeyLlm(contents: string[]): LLMProvider {
 }
 
 /** 同じデータ（`stores`）に、`listRelatedMany` がある／無い2つの Runtime を載せる。 */
-function buildRuntimes(llm: LLMProvider = notUsedLlm) {
+function buildRuntimes(
+  llm: LLMProvider = notUsedLlm,
+  wrapMemoryStore: (inner: MemoryStore) => MemoryStore = (inner) => inner,
+) {
   const stores = createFakeRuntimeStores();
   const make = (withMany: boolean) => {
     const spy = new SpyRelationStore(stores.relationStore, withMany);
     const runtime = createRuntime({
-      memoryStore: stores.memoryStore,
+      memoryStore: wrapMemoryStore(stores.memoryStore),
       outboxStore: stores.outboxStore,
       vectorStore: stores.vectorStore,
       eventStore: stores.eventStore,
@@ -240,6 +244,34 @@ async function buildDiamond(stores: Stores, reversed: boolean) {
   await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, o.id, [1, 0]);
   return { o: o.id, b: b.id, c: c.id, d: d.id };
 }
+
+/**
+ * `getMany` の返す順を id の降順にする包み。`MemoryStore.getMany` の返す順は契約が規定しない
+ * （Postgres は順序なし）ので、Runtime が自前で整列していることを見るための偽物。
+ */
+function descendingGetMany(inner: MemoryStore): MemoryStore {
+  return new Proxy(inner, {
+    get(target, prop, receiver) {
+      const value: unknown = Reflect.get(target, prop, receiver);
+      if (prop === "getMany" && typeof value === "function") {
+        return async (...args: unknown[]) => {
+          const found = (await (value as (...a: unknown[]) => Promise<Array<{ id: string }>>).apply(
+            target,
+            args,
+          )) as Array<{ id: string }>;
+          return [...found].sort((x, y) => (x.id < y.id ? 1 : x.id > y.id ? -1 : 0));
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/** 入力と長さの違う結果を返す `listRelatedMany`（adapter の契約違反）。 */
+const wrongLengthMany = {
+  短い: (ids: readonly MemoryId[]): Relation[][] => ids.slice(1).map(() => []),
+  長い: (ids: readonly MemoryId[]): Relation[][] => [...ids, ...ids].map(() => []),
+};
 
 /** 結果の比較用: 提示順・発見元・省略・段の説明。 */
 function shape(result: Awaited<ReturnType<ReturnType<typeof createRuntime>["recall"]>>) {
@@ -377,6 +409,84 @@ describe("recall 段3: listRelatedMany の返す順に依らず、companionOf �
   );
 });
 
+describe("recall 段3: getMany の返す順が降順の store でも、companionOf は同じ段の id の小さい親に決まる", () => {
+  it.each([false, true])(
+    "菱形（逆順に張る=%s）: 次の frontier を Runtime が id 昇順に整列し直すので、D の発見元は id の小さいほう",
+    async (reversed) => {
+      const { stores, withMany, withoutMany } = buildRuntimes(notUsedLlm, descendingGetMany);
+      const { b, c, d } = await buildDiamond(stores, reversed);
+
+      const a = await withMany.runtime.recall(ctx, { vector: [1, 0] });
+      const s = await withoutMany.runtime.recall(ctx, { vector: [1, 0] });
+
+      expect(withMany.spy.listRelatedManyCalls.length).toBeGreaterThan(0);
+      const smaller = b < c ? b : c;
+      expect(a.memories.find((m) => m.memoryId === d)?.companionOf).toBe(smaller);
+      expect(s.memories.find((m) => m.memoryId === d)?.companionOf).toBe(smaller);
+    },
+  );
+});
+
+describe("recall 段3: 安全弁で止まった後は、listRelatedMany をもう撃たない", () => {
+  it("星 150（owner の段の途中で止まる）: listRelatedMany は owner の1回だけ（葉の段へ進まない）", async () => {
+    const { stores, withMany, withoutMany } = buildRuntimes();
+    await buildStar(stores, 150);
+
+    await withMany.runtime.recall(ctx, { vector: [1, 0] });
+    await withoutMany.runtime.recall(ctx, { vector: [1, 0] });
+
+    expect(withMany.spy.listRelatedManyCalls.map((c) => c.length)).toEqual([1]);
+    expect(withMany.spy.listRelatedCalls).toEqual([]);
+    // 無いときの規則（止まった後は listRelated を呼ばない）と、往復の数が同じ。
+    expect(withoutMany.spy.listRelatedCalls).toHaveLength(1);
+  });
+
+  it("鎖 130（100件目で止まる）: listRelatedMany の回数は、無いときの listRelated の回数と同じ", async () => {
+    const { stores, withMany, withoutMany } = buildRuntimes();
+    await buildChain(stores, 130);
+
+    await withMany.runtime.recall(ctx, { vector: [1, 0] });
+    await withoutMany.runtime.recall(ctx, { vector: [1, 0] });
+
+    expect(withMany.spy.listRelatedManyCalls.length).toBeGreaterThan(1);
+    expect(withMany.spy.listRelatedManyCalls.length).toBe(withoutMany.spy.listRelatedCalls.length);
+    expect(withMany.spy.listRelatedCalls).toEqual([]);
+  });
+
+  it("子孫 60（子の段の途中で止まる）: listRelatedMany は owner の段・子の段の2回だけ", async () => {
+    const { stores, withMany } = buildRuntimes();
+    await buildTwoHop(stores, 60);
+
+    await withMany.runtime.recall(ctx, { vector: [1, 0] });
+
+    expect(withMany.spy.listRelatedManyCalls.map((c) => c.length)).toEqual([1, 60]);
+  });
+});
+
+describe("listRelatedMany が入力と違う長さを返したら、位置をずらさず例外にする（adapter の契約違反）", () => {
+  const lengths = Object.entries(wrongLengthMany);
+
+  it.each(lengths)("recall 段3（%s配列）", async (_name, wrong) => {
+    const { stores, withMany } = buildRuntimes();
+    await buildStar(stores, 6);
+    withMany.spy.listRelatedMany = async (_c, ids) => wrong(ids);
+
+    await expect(withMany.runtime.recall(ctx, { vector: [1, 0] })).rejects.toThrow(
+      /listRelatedMany returned \d+ results for 1 ids/,
+    );
+  });
+
+  it.each(lengths)("resolveContestedGroup の部分解消の確認（%s配列）", async (_name, wrong) => {
+    const { stores, withMany } = buildRuntimes();
+    const ids = await buildComplete(stores, withMany.runtime, 6);
+    withMany.spy.listRelatedMany = async (_c, many) => wrong(many);
+
+    await expect(
+      withMany.runtime.resolveContestedGroup!(ctx, ids, { kind: "both_active" }),
+    ).rejects.toThrow(/listRelatedMany returned \d+ results for 6 ids/);
+  });
+});
+
 describe("resolveContestedGroup: listRelatedMany があると、部分解消の確認が1段1往復になる", () => {
   it("完全グラフ 6件を全員渡して解消: 確認は listRelatedMany 1回（全員を1度に）、listRelated 0回", async () => {
     const { stores, withMany } = buildRuntimes();
@@ -449,7 +559,10 @@ describe("resolveContestedGroup: listRelatedMany が無い store では今と同
 
 describe("claim key の群の検出: listRelatedMany があると、合併の探索が1段1往復になる", () => {
   /** 既存の2群（各3件）を作り、両方と重なる新しい記憶を observe する（合併の歯と同じ形）。 */
-  async function mergeTwoGroups(withMany: boolean) {
+  async function mergeTwoGroups(
+    withMany: boolean,
+    wrong?: (ids: readonly MemoryId[]) => Relation[][],
+  ) {
     const { stores, withMany: m, withoutMany: n } = buildRuntimes(sameKeyLlm(["新しい記憶"]));
     const target = withMany ? m : n;
     const mk = (digest: string, from: string, until: string) =>
@@ -481,6 +594,8 @@ describe("claim key の群の検出: listRelatedMany があると、合併の探
       g2.map((x) => x.id),
     );
     target.spy.reset();
+    // 契約違反の adapter（長さの違う結果を返す）に差し替える。群を作った後なので、検出の探索だけが影響を受ける。
+    if (wrong !== undefined) target.spy.listRelatedMany = async (_c, many) => wrong(many);
     const triggering = await target.runtime.observe(ctx, {
       kind: "utterance",
       text: "新しい記憶",
@@ -507,6 +622,15 @@ describe("claim key の群の検出: listRelatedMany があると、合併の探
     expect(spy.listRelatedCalls).toEqual([]);
     expect(spy.listRelatedManyCalls.map((c) => c.length)).toEqual([2, 4]);
   });
+
+  it.each(Object.entries(wrongLengthMany))(
+    "listRelatedMany が入力と違う長さ（%s配列）を返したら、位置をずらさず例外にする",
+    async (_name, wrong) => {
+      await expect(mergeTwoGroups(true, wrong)).rejects.toThrow(
+        /listRelatedMany returned \d+ results for 2 ids/,
+      );
+    },
+  );
 
   it("listRelatedMany が無い store では今と同じ: 6回、群のメンバーも一致", async () => {
     const withMany = await mergeTwoGroups(true);

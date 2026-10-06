@@ -369,6 +369,34 @@ export function describeRelationStoreConformance(options: RelationStoreConforman
       expect(many[0]![0]?.createdAt).toBeInstanceOf(Date);
     });
 
+    it("listRelatedMany が返す createdAt は、同じ関係の listRelated の createdAt と等しい", async (t) => {
+      const store = await createManyStore(t);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const a = await prepareMemoryId(ctx);
+      const b = await prepareMemoryId(ctx);
+      const c = await prepareMemoryId(ctx);
+      for (const [from, to] of [
+        [a, b],
+        [a, c],
+        [b, a],
+      ] as const) {
+        await store.link(ctx, "contradicts", from, to);
+      }
+
+      const many = await store.listRelatedMany(ctx, [a, b]);
+      for (const [i, id] of [a, b].entries()) {
+        const expected = new Map(
+          (await store.listRelated(ctx, id)).map((r) => [r.memoryId, r.createdAt.getTime()]),
+        );
+        expect(many[i]!).toHaveLength(expected.size);
+        expect(expected.size).toBeGreaterThan(0);
+        for (const r of many[i]!) {
+          // 固定値（epoch など）を返す実装は、ここで落ちる。
+          expect(r.createdAt.getTime()).toBe(expected.get(r.memoryId));
+        }
+      }
+    });
+
     it("listRelatedMany は kind を渡しても省略しても、listRelated と同じ集合を返す", async (t) => {
       const store = await createManyStore(t);
       const ctx: Ctx = { tenantId: "tenant-1" };

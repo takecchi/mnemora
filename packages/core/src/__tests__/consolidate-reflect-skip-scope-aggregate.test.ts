@@ -144,6 +144,19 @@ describe("consolidate / reflect の内部 recall は aggregateScope を skip で
     },
   );
 
+  it.each(["consolidate", "reflect"] as const)(
+    "%s の { query } 形で scopeAggregate: undefined を明示しても '未指定' として扱い、'skip' で呼ぶ",
+    async (method) => {
+      const { runtime, calls } = await build();
+      // `{ scopeAggregate: opts.x }` のように undefined が入るキーつきの query。
+      // スプレッドの順が逆だと、明示 undefined のキーが "skip" を上書きして "exact" に戻る。
+      await runtime[method](ctx, {
+        target: { query: { vector: [4, 0], scopeAggregate: undefined } },
+      });
+      expect(calls.map((c) => c?.scopeAggregate)).toEqual(["skip"]);
+    },
+  );
+
   it("tick の consolidate / reflect ジョブも skip で呼ぶ", async () => {
     const { runtime, calls } = await build({ autoQueueConsolidateReflectOnExtract: true });
     await runtime.observe(ctx, { kind: "utterance", text: "本文" });
