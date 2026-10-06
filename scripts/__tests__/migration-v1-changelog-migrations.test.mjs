@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -52,7 +54,26 @@ function missingFrom(names, doc) {
   return names.filter((n) => !doc.includes(n));
 }
 
+/** `names` のうち、`dir` に実在しないもの。 */
+function missingMigrationFiles(names, dir) {
+  return names.filter((n) => !existsSync(`${dir}/${n}`));
+}
+
 describe("🔴 CHANGELOG 未リリース節が名指した migration は migration-v1.md にも在る", () => {
+  it("部品: 実在の検査は、無い名前だけを返す（合成の名前と一時ディレクトリ。実データが空でも赤・緑を見られる）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "migration-names-"));
+    try {
+      writeFileSync(join(dir, "0100_a_b.sql"), "");
+      expect(missingMigrationFiles(["0100_a_b.sql"], dir)).toEqual([]);
+      expect(missingMigrationFiles(["0100_a_b.sql", "0101_typo.sql"], dir)).toEqual([
+        "0101_typo.sql",
+      ]);
+      expect(missingMigrationFiles([], dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("部品: 未リリース節だけを切り出し、ファイル名を拾い、欠けを返す", () => {
     const cl = [
       "## [2.0.0] - 未リリース",
@@ -84,8 +105,6 @@ describe("🔴 CHANGELOG 未リリース節が名指した migration は migrati
   });
 
   it("名指された migration は packages/postgres/migrations に実在する（綴りの取り違えの検出）", () => {
-    expect(
-      names.filter((n) => !existsSync(`${repoRoot}/packages/postgres/migrations/${n}`)),
-    ).toEqual([]);
+    expect(missingMigrationFiles(names, `${repoRoot}/packages/postgres/migrations`)).toEqual([]);
   });
 });

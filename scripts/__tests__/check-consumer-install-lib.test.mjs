@@ -167,6 +167,29 @@ describe("snapshot から引く値の名前（collectEntryValueNames）", () => 
     expect(names["@mnemora/postgres"]).toContain("DEFAULT_MIGRATIONS_DIR");
     expect(names["@mnemora/core"]).not.toContain("MemoryStore");
   });
+
+  // `export *` を辿った名前を取りこぼさない（取りこぼすと、その名前は実行時の検査から黙って外れる）。
+  // 名前の頭文字・定義元のファイルをばらして名指しする（一覧の全文・本数は焼き込まない）。
+  it("実際の snapshot: `export *` で再 export された名前（core の heuristicTokenCounter など）を含む", () => {
+    const names = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, repoRoot);
+    expect(names["@mnemora/core"]).toEqual(
+      expect.arrayContaining([
+        "heuristicTokenCounter",
+        "DEFAULT_RECALL_LIMIT",
+        "CtxSchema",
+        "AttributesSchema",
+      ]),
+    );
+    expect(names["@mnemora/testkit"]).toEqual(
+      expect.arrayContaining(["describeMemoryStoreConformance", "DeterministicEmbeddingProvider"]),
+    );
+    expect(names["@mnemora/testkit/fixtures"]).toEqual(
+      expect.arrayContaining(["InMemoryMemoryStore", "InMemoryVectorStore"]),
+    );
+    expect(names["@mnemora/postgres"]).toEqual(
+      expect.arrayContaining(["PostgresMemoryStore", "createPostgresClient"]),
+    );
+  });
 });
 
 describe("生成した smoke が、値の名前の欠けを実行時に検出する", () => {

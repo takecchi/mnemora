@@ -45,4 +45,14 @@ describe("isOpenAILLMProviderError", () => {
     // name を持たない素のオブジェクト（二重読み込みを模したもの）は、引き続き kind で見る。
     expect(isOpenAILLMProviderError({ kind: "refusal" })).toBe(true);
   });
+
+  // 相手の name が1つ（"AnthropicLLMProviderError"）だけでなく、どの別の name でも断る
+  // （「相手の名前だけ断る」変異を捕まえる）。
+  it.each(["LocalEmbeddingProviderError", "Error", "SomethingElse"])(
+    "kind を持つが name が %s の値は false",
+    (name) => {
+      const other = Object.assign(new Error("other"), { name, kind: "refusal" });
+      expect(isOpenAILLMProviderError(other)).toBe(false);
+    },
+  );
 });
