@@ -659,5 +659,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0662](./0662-label-lock-order-teeth-observe-locks-directly.md) | labels の行ロックの先取り（ADR 0511）の順・取りすぎ・強さを、ロックそのものを外から見る歯で縛る（Issue #1718） | 採用 (2026-10) |
 | [0663](./0663-merged-0923-recheck-teeth.md) | 09/23 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1778） | 採用 (2026-10) |
 | [0664](./0664-merged-0922-recheck-publish-changelog-gate-stays-withdrawn.md) | 09/22 にマージされた #601（publish の CHANGELOG 門の撤回）の確かめ直しで見つかった穴に歯を足す（Issue #1782） | 採用 (2026-10) |
+| [0666](./0666-merged-0920-0921-recheck-fingerprint-gate-and-cache-key-teeth.md) | 09/20〜21 にマージされた重みの指紋の門（#563・#588・#590・#592）とモデルキャッシュの鍵（#595）の確かめ直しで見つかった穴に歯を足す（Issue #1784） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
