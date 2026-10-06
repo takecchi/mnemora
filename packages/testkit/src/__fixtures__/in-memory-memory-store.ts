@@ -2524,7 +2524,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.recalls.set(id, {
       ...snapshot(record),
       tenantId: ctx.tenantId,
-      createdAt: record.createdAt ?? new Date(),
+      // Issue #1731: 呼び手の Date を共有しない（#1120、書き込む時点の複製）。
+      createdAt: record.createdAt === undefined ? new Date() : snapshot(record.createdAt),
     });
     if (record.advanceActivityClock === true) {
       const current = this.activitySeq.get(ctx.tenantId) ?? 0;
@@ -2677,9 +2678,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryTimestamptz("archiveDecayed", "now", opts.now);
-    assertQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
-    // ADR 0505: `nowSeq` は `bigint` の引数。範囲外なら、行が無くても Postgres はクエリの時点で拒む。ただし壁時計の clock は
-    // `nowSeq` を SQL に入れない（`wall` は `decay_floor_at` だけ）ので、見ない。
+    // ADR 0505・Issue #1731: `nowSeq` は `bigint` の引数。整数でない値（`assertQueryBigint` が整数も見る）も範囲外も、行が無くても Postgres はクエリの時点で拒む。
+    // ただし壁時計の clock は `nowSeq` を SQL に入れない（`wall` は `decay_floor_at` だけ）ので、どちらも見ない。
     if ((opts.clock ?? "wall") !== "wall") {
       assertQueryBigint("archiveDecayed", "nowSeq", opts.nowSeq);
     }
@@ -2846,7 +2846,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.assertEventTargetOwn(ctx, event.memoryId, [id]);
     // Issue #1237: `purgedAt` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
     // 2回読んで別の値になることがないよう、ここで一度だけ決める（`@mnemora/postgres` と同じ規律）。
-    const at = event.at ?? new Date();
+    // Issue #1731: 呼び手の `event.at` を `purgedAt` と共有しない（#1120、書き込む時点の複製）。
+    const at = event.at === undefined ? new Date() : snapshot(event.at);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.tags = [];
