@@ -3153,3 +3153,34 @@ describe("recall() — usage.counter の印は連結の計測の印（ADR 0487�
     expect(result.outputValidation).toEqual({ ok: true, issues: [] });
   });
 });
+
+// ---------------------------------------------------------------------------
+// ANN が走っていない recall（空クエリ）では、診断キーを足さない（#672 / ADR 0285、約束3:
+// 条件は `candidateGenerationExecuted && kPrime > 0 && ...`）。
+//
+// `wantsAnn` はクエリの中身と関係なく真なので、空クエリ（text も vector も無い）でも ANN の trace は
+// `executed: false` で積まれる。`annWindowUnderfilled` から `candidateGenerationExecuted` を外すと、
+// scope に記憶があるとき `annHits.length (0) < min(kPrime, 下限)` が真になり、走っていない段に
+// `annReturnedFewerThanReachable: true` が付いた。歯は空クエリで `stage_skipped` が出ることしか
+// 見ていなかった（Issue #1776 の #672 のコメント、ADR 0665）。
+// ---------------------------------------------------------------------------
+describe("recall() — ANN が走っていない recall（空クエリ）には annReturnedFewerThanReachable を足さない（ADR 0285 約束3）", () => {
+  it("scope に ready の記憶が3件あっても、空クエリの ANN の trace の detail にキーが無く、ann_unreached も出ない", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(0);
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, {});
+
+    const annTrace = result.explain.stages.find(
+      (s) => s.stage === "candidate_generation" && s.detail?.channel === "ann",
+    );
+    // 検算: ANN の trace は積まれていて、走っていない（この歯が何も見ていない、にならないため）。
+    expect(annTrace).toBeDefined();
+    expect(annTrace?.executed).toBe(false);
+    expect(annTrace?.detail).not.toHaveProperty("annReturnedFewerThanReachable");
+    expect(annTrace?.detail).not.toHaveProperty("annReachableLowerBound");
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+  });
+});
