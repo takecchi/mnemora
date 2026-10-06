@@ -73,4 +73,46 @@ describe("repo/modelId 宣言食い違い検査（コンストラクタ、Issue 
     const provider = new LocalEmbeddingProvider({ modelId: OTHER_MODEL_ID });
     expect(provider.space.model).toBe(OTHER_MODEL_ID);
   });
+
+  // ---- Issue #1793（09/19 マージ分の確かめ直し）が足した歯 ----
+  // 変異で素通りした形:
+  //  (1) 既定と同じ modelId を明示した私設ミラー（決定3 の逃げ道そのもの）を、guard が弾く
+  //  (2) repo と同時に別の option（revision / cacheDir / dtype …）が在ると guard が黙る
+  //  (3) repo が空文字のとき（`options.repo &&` の真偽値で見ると素通りする）
+  //  (4) 大文字小文字だけ違う repo（「既定と異なる」は文字列そのままの比較）
+
+  it("repo を差し替えても、既定と同じ modelId を明示すれば通る（私設ミラーの逃げ道。決定3）", () => {
+    const provider = new LocalEmbeddingProvider({
+      repo: OTHER_REPO,
+      modelId: DEFAULT_LOCAL_EMBEDDING_MODEL_ID,
+    });
+    expect(provider.space.model).toBe(DEFAULT_LOCAL_EMBEDDING_MODEL_ID);
+  });
+
+  it.each([
+    ["revision", { revision: "0123456789abcdef0123456789abcdef01234567" }],
+    ["cacheDir", { cacheDir: "/tmp/mnemora-guard-test-cache" }],
+    ["dtype", { dtype: "fp32" as const }],
+    ["numThreads", { numThreads: 1 }],
+    ["dimensions", { dimensions: 128 }],
+    ["prefix", { prefix: "" }],
+    ["maxBatchSize", { maxBatchSize: 8 }],
+    ["retry", { retry: { attempts: 1 } }],
+    ["createPipeline", { createPipeline: async () => ({}) as never }],
+  ])(
+    "repo だけ差し替えて %s を同時に渡しても、modelId が無ければ落ちる（別の option で guard が黙らない）",
+    (_name, extra) => {
+      expect(() => new LocalEmbeddingProvider({ repo: OTHER_REPO, ...extra })).toThrow(OTHER_REPO);
+    },
+  );
+
+  it("repo が空文字でも落ちる（`undefined` でないものは指定されたものとして見る）", () => {
+    expect(() => new LocalEmbeddingProvider({ repo: "" })).toThrow(/modelId/);
+  });
+
+  it("大文字小文字だけ違う repo も、既定とは別の repo として落ちる（文字列そのままの比較）", () => {
+    const shouted = DEFAULT_LOCAL_EMBEDDING_REPO.toUpperCase();
+    expect(shouted).not.toBe(DEFAULT_LOCAL_EMBEDDING_REPO);
+    expect(() => new LocalEmbeddingProvider({ repo: shouted })).toThrow(shouted);
+  });
 });
