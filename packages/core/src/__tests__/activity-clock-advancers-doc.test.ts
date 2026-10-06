@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -53,5 +54,28 @@ describe("活動時計を進める入口の一覧は、recall( の呼び出し�
     expect(actual.size).toBeGreaterThan(0);
     expect(documented.size).toBeGreaterThan(0);
     expect([...documented].sort()).toEqual([...actual].sort());
+  });
+
+  // Issue #1752: 上の一覧は「時計を進めるのは `runRecall` を通る呼び出しすべて」（同じ TSDoc）を前提にしている。
+  // 時計を実際に進めるのは `MemoryStore.createRecall`（`advanceActivityClock`。`TenantSettingsStore` の doc）なので、
+  // `recall(` を通らずに `createRecall(` を呼ぶ口が増えると、一覧は黙って欠ける。core の非テストのソースで
+  // `createRecall` に触れる（呼ぶ・別名で受ける・`.call` する）のが `recall-runtime.ts`（`runRecall` の記録の段）
+  // だけであることを縛る。呼び出しの形ではなく、コメントを除いたコードにこの語が出るかで見る（別名で素通りさせない）。
+  it("core の非テストのソースで createRecall に触れるのは recall-runtime.ts だけ（recall を通らずに時計を進める口が無い）", () => {
+    const srcDir = fileURLToPath(new URL("..", import.meta.url));
+    const files = (readdirSync(srcDir, { recursive: true }) as string[])
+      .filter((p) => p.endsWith(".ts") && !p.split(/[\\/]/).includes("__tests__"))
+      .map((p) => join(srcDir, p));
+    const callers = new Set<string>();
+    for (const file of files) {
+      if (/\bcreateRecall\b/.test(stripComments(readFileSync(file, "utf8")))) {
+        callers.add(relative(srcDir, file).split("\\").join("/"));
+      }
+    }
+    // interface の宣言（`createRecall(ctx: Ctx, ...)`）も字句では同じ形なので、宣言のファイルは除く。
+    callers.delete("interfaces/memory-store.ts");
+    // 健全性: 検査が空振りしていないこと。
+    expect(files.length).toBeGreaterThan(0);
+    expect([...callers]).toEqual(["recall-runtime.ts"]);
   });
 });
