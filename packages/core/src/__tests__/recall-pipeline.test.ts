@@ -1758,6 +1758,78 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
   });
 });
 
+describe("recall() — contestedWith の条件(c)「相手が返却集合に居る」（Issue #1786）", () => {
+  // Issue #959 以降、Runtime が書く（相互参照の）対では、相手は必ず同じ Unit に入るか
+  // Unit ごと落ちるため、条件(c) が偽になる入力は `MemoryStore` を直接叩いた
+  // 壊れたデータ（一方向の参照・鎖）でしか作れない。ここで固定するのは、
+  // そういう入力が来たときに「居ない相手を指す contestedWith」を出さないことだけである。
+  // 前提の contested は `contestedWithId` を持つ（条件(a)(b) は満たす）。
+
+  it("🔴 鎖 A→B→C で C が返らないとき、B は C を指す contestedWith を持たない（A は B を指す）", async () => {
+    const { runtime, stores } = buildRuntime();
+    // C は埋め込みを持たないので候補に入らず、B の同伴取得でも単位に入れない。
+    const c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", digest: "C" }),
+    );
+    const b = await createEmbeddedMemory(stores, [0.9, 0.1], {
+      status: "contested",
+      digest: "B",
+      contestedWithId: c.id,
+    });
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      digest: "A",
+      contestedWithId: b.id,
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+
+    const returnedA = result.memories.find((m) => m.memoryId === a.id);
+    const returnedB = result.memories.find((m) => m.memoryId === b.id);
+    expect(result.memories.some((m) => m.memoryId === c.id)).toBe(false);
+    expect(returnedA?.contestedWith).toBe(b.id);
+    expect(returnedB).toBeDefined();
+    expect(returnedB?.contestedWith).toBeUndefined();
+  });
+
+  it("🔴 相手が budget 切り詰め前の Unit には居るが切り詰めで落ちたとき、contestedWith は付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const digest = "あ".repeat(10); // 既定カウンタで 9 トークン。1 Unit（2件）= 18、2 Unit = 36
+    // D↔E は相互参照の対。クエリから遠いので Unit の順位が低く、予算で落ちる。
+    const d = await createEmbeddedMemory(stores, [0.5, 0.87], { digest });
+    const e = await createEmbeddedMemory(stores, [0.5, 0.86], { digest });
+    const marked = await runtime.markContested(ctx, d.id, e.id);
+    if (marked.outcome.kind !== "contested") {
+      throw new Error(`markContested が failed: ${marked.outcome.kind}`);
+    }
+    // B は D を指す一方向の参照（壊れたデータ）。A↔B の Unit に入り、上位で残る。
+    const b = await createEmbeddedMemory(stores, [0.99, 0.14], {
+      status: "contested",
+      digest,
+      contestedWithId: d.id,
+    });
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      digest,
+      contestedWithId: b.id,
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      budget: { maxMemoryTokens: 20 },
+    });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toEqual([a.id, b.id]);
+    expect(result.omitted).toContainEqual(expect.objectContaining({ kind: "budget_dropped" }));
+    expect(result.memories.find((m) => m.memoryId === a.id)?.contestedWith).toBe(b.id);
+    // D は切り詰め前の Unit には居たが、返却集合には居ない。
+    expect(result.memories.find((m) => m.memoryId === b.id)?.contestedWith).toBeUndefined();
+  });
+});
+
 describe("recall() — 片側だけの contested は単独で出さない（Issue #243 / ADR 0136）", () => {
   it("🔴 contestedWithId が null の contested Memory は recall() に単独で出ない。unit_assembly_dropped に計上される", async () => {
     // `Runtime.markContested`（Issue #197 / ADR 0134）はこの状態を作らない（両側
