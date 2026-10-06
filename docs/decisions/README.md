@@ -661,5 +661,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0664](./0664-merged-0922-recheck-publish-changelog-gate-stays-withdrawn.md) | 09/22 にマージされた #601（publish の CHANGELOG 門の撤回）の確かめ直しで見つかった穴に歯を足す（Issue #1782） | 採用 (2026-10) |
 | [0665](./0665-merged-0924-recheck-teeth.md) | 09/24 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1776） | 採用 (2026-10) |
 | [0666](./0666-merged-0920-0921-recheck-fingerprint-gate-and-cache-key-teeth.md) | 09/20〜21 にマージされた重みの指紋の門（#563・#588・#590・#592）とモデルキャッシュの鍵（#595）の確かめ直しで見つかった穴に歯を足す（Issue #1784） | 採用 (2026-10) |
+| [0667](./0667-merged-0930-front-a-recheck-teeth.md) | 09/30 にマージされた PR の前半（A 群）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
