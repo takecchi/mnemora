@@ -60,7 +60,8 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 ⭐ **何が在るかの正本は `packages/core/src/runtime.ts` の `export interface Runtime` であり、
 ⛔ ここに個数を写さない**（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 **どのメソッドがどの層かの正本は、同ファイルの各メソッドの doc コメントの `層:` 行である**
-（`未分類` は判断が割れているもので、1本ずつ決める。[ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)）。
+（`未分類` は判断が割れているもの（1本ずつ決める）と、3つの層のどれにも当たらないと確かめて置かないと決めたもの。
+[ADR 0633](./decisions/0633-layer-of-runtime-methods-lives-in-doc-comment.md)・[ADR 0634](./decisions/0634-unclassified-runtime-method-layers-decided.md)）。
 
 以下はこの中核5動詞それぞれが Runtime 内部でどの部品を通るかで分類する。
 
@@ -301,6 +302,8 @@ memoryIds/observationIds）を伴う。**根拠を欠いた推論をそのまま
    文面は1バイトも変わらない**——カセット（ADR 0051）の照合鍵がこの欄の有無で動くことは
    無い。`subjectCandidates` はどこにも永続化しない（新しい列・マイグレーションは無い）ため、
    `extract: 'deferred'` との併用はエラーにし、`reextract` はこの欄を使わない。
+
+**⚠ 2026-10-06 更新（[ADR 0635](./decisions/0635-llm-subject-id-dropped-by-default-without-candidates.md)、オーナー回答 374f6f88 の問15）: 下の警告への答えとして、`subjectCandidates` を渡さない経路（省略・空配列。`tick`・`reextract` を含む）では、runtime は LLM が返した `subjectId` を既定で捨て、observation の `subjectId` へ落とす。** 受けるのは `RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true`（opt-in）のときだけで、**下の追記は `true` のときの話になった**。一覧を渡した `observe()` の挙動（一覧内は採り、一覧外は弾く）は変わらない。名前・置き場所は担い手の判断（オーナーが決めたのは既定を変えることだけ）。
 
 **⚠ 2026-10-01 追記（[ADR 0442](./decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）: `subjectCandidates` を渡さない経路では、LLM が返す `subjectId` は検証されない。**
 検証は2の一覧に照らすことでしか行わないので、一覧を渡さない呼び出し——`extract: 'deferred'` の `tick`・`reextract`（どちらも一覧を持てない）を含む——では、

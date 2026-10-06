@@ -2744,11 +2744,31 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。
 
-### 66. `MemoryStore` の Memory の書き込みの口が、読み戻すと `MemorySchema` を通らない値を入口で `Error` で拒むようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+### 66. `subjectCandidates` を渡さない抽出が、LLM が返した `subjectId` を既定で捨てるようになった（`@mnemora/core`）
+
+[ADR 0635](./decisions/0635-llm-subject-id-dropped-by-default-without-candidates.md)（オーナー回答 374f6f88 の問15（全部推奨）による既定の変更。オプション名・置き場所・捨てる範囲は担い手の判断で、オーナーが決めたのではない。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
+
+⚠ **未リリース**。**番号は 66 である**——項目65 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`subjectCandidates` を渡さない抽出が、LLM が返した `subjectId` を既定で捨てる…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない（`RuntimeConfig` に省略可能な欄が1つ増える）。
+
+**なぜ破壊的と数えるか**: 型は変わらないが、以前は Memory の主題になっていた値が、新しく捨てられ、`Memory.subjectId` が変わる（実行時だけの意味変更。項目57・58 と同じ数え方）。
+
+**誰が影響を受けるか**: 一覧（`subjectCandidates`）を渡さずに、LLM が候補ごとに返す `subjectId` に頼っていた呼び出し側。`extract: 'deferred'` の `tick` と `reextract` は一覧を持てないので、そこで頼っていたものも。
+
+**どう直すか**:
+- 信用できる本文だけを抽出していて、従来どおり受けたい: `createRuntime({ ..., config: { acceptLlmSubjectIdWithoutCandidates: true } })`。
+- 信用できない本文を抽出する、または候補を絞りたい: 設定は足さず、`observe()` に `subjectCandidates` を渡して選ばせる（一覧内は採り、一覧外は弾く）。`tick`・`reextract` の経路は、`observation.subjectId` が主題になる。
+
+**確かめたこと**: 直す前に赤（7本）、直して緑。直しを外す・やりすぎる変異で歯が赤（ADR 0635、PR 本文）。**確かめていないこと**: 捨てた値の通知は無い（ADR 0635 の負債）。実際の LLM が一覧なしで `subjectId` を返す頻度。
+
+**DB マイグレーション**: 要らない。
+
+### 68. `MemoryStore` の Memory の書き込みの口が、読み戻すと `MemorySchema` を通らない値を入口で `Error` で拒むようになった（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [ADR 0630](./decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md)（オーナー回答 70449a95 の問2。オーナーが決めたのは「入口で拒む」の採否だけで、範囲・例外の種類はマネージャーの判断。🔴 に数えるのも、migration の数え方の規律2 に従った判断。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による）。
 
-⚠ **未リリース**。**番号は 66 である**——項目65 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+⚠ **未リリース**。**番号は 68 である**——はじめ 66 で書いたが、先にマージされた #1737 が 66 を使ったので振り直した（67 は使わず 68 以降を使う、というオーナーの指示による）。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
 
 **何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「`MemoryStore` の `createMemory`・…が、書いたら読み戻したときに `MemorySchema` を通らなくなる値を、入口で…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。新しい例外クラスは増やしていない（素の `Error`）。公開 API に `assertWellFormedNewMemory` が増えた。
 
@@ -2756,6 +2776,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **誰が影響を受けるか**:
 - `MemoryStore` の3つの口を**直接**呼び、上の形の値を渡していた呼び出し側。`Runtime` 経由は、`digest` が空にならず（本文から作る）、`provenance`・`claimKey` を自分で組み立てるので、ふつうは当たらない。ただし **`RuntimeConfig.extractorVersion` に空文字を渡していた利用者**は、抽出した Memory が書けなくなる（【未確認】実際の落ち方は測っていない）。
+- `runtime.observe` の利用者。抽出した候補の保存は `createMemoriesWithOutboxAndEvents?` を通り、この口も同じ検査を共有する。壊れた候補（例: 空の `extractorVersion`）は、保存できない他の候補と同じく `created` イベントの `droppedCandidates` に積まれ、observe 全体は落ちず、残りの候補は書かれる（`@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts` が根拠）。testkit の `InMemoryMemoryStore` も実装を読んだ限り同じ（ただし全候補が壊れていると最初の例外を投げる。Postgres で同じかは【未確認】）。core の Fake はこの口を持たない。
 - 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者（外部の adapter の作者）。上の形を受け付ける実装は、conformance が赤になる。**片側だけの `claimKey` を受け付けて「鍵なし」として扱っていた実装**も同じ（その扱いを縛っていた歯は、「書き込みの口が拒む」に書き換わった）。
 
 **どう直すか**:

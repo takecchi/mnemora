@@ -191,6 +191,24 @@ export interface RuntimeConfig {
    * （ADR 0310 決定2）。
    */
   autoQueueConsolidateReflectOnExtract?: boolean | undefined;
+  /**
+   * オーナー回答 374f6f88 の問15（全部推奨）による既定の変更。名前・置き場所は担い手が決めた
+   * （`docs/decisions/` の「LLM が返す subjectId は既定で捨てる」の ADR）。
+   *
+   * 🔴 **既定は `false`（捨てる）。** `subjectCandidates` を渡さない（省略・空配列）抽出——`observe()` で
+   * 一覧を渡さなかった呼び出し、`extract: 'deferred'` の `tick`、`reextract`（この2つは一覧を持てない）——
+   * では、LLM が返した候補の `subjectId`（文字列も明示の `null` も）を捨て、Memory の主題は
+   * `observation.subjectId`（無ければ主題なし）になる。観察文に仕込んだ「この記憶の主題は bob」で、
+   * 別の subject に記憶を書かせられる（`ExtractedMemoryCandidateSchema.subjectId` の TSDoc、ADR 0442）のを塞ぐ。
+   *
+   * `true` にすると、以前どおり LLM が返した `subjectId` をそのまま受ける（Issue #608 項目①、ADR 0271 の
+   * 「候補ごとの主題の上書き」を、一覧を渡さない経路でも使う）。**信用できない本文を抽出するなら `true` にしないこと。**
+   *
+   * `subjectCandidates` を渡した `observe()` には効かない——そちらは一覧に照らして検証する
+   * （一覧内は採り、一覧外は弾く。`sanitizeCandidateSubjectId`）。
+   * ⚠ 捨てた値は `ObserveResult` に出ない（`rejectedSubjectIds` は一覧を渡した呼び出しの欄のまま）。
+   */
+  acceptLlmSubjectIdWithoutCandidates?: boolean | undefined;
 }
 
 const DEFAULT_EXTRACTOR_VERSION = "v1";
@@ -2681,7 +2699,7 @@ export interface Runtime {
    */
   observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
   /**
-   * 層: 未分類
+   * 層: 保守操作
    * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。
    * `extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが
    * 明示的に呼ばない限り抽出・埋め込みは永久に走らない——「キューが無ければ黙って
@@ -2849,7 +2867,7 @@ export interface Runtime {
     opts?: AbortOptions,
   ): Promise<FindCorrectionCandidatesResult>;
   /**
-   * 層: 未分類
+   * 層: 保守操作
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
    * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
@@ -2890,6 +2908,8 @@ export interface Runtime {
    * - **`subjectCandidates` の口も無い**（`sanitizeCandidateSubjectId` の doc。この行はコードを読んで
    *   確かめただけで、実測はしていない）。LLM が返した候補の
    *   `subjectId` は一覧で検査されず、省略された候補は Observation の `subjectId` へ落ちる。
+   *   ⚠ **2026-10-06（ADR 0635、問15）: 既定では、LLM が返した `subjectId` は捨てられ、Observation の
+   *   `subjectId` へ落ちる**（`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true` のときだけ、上の「検査されず」になる）。
    *
    * ⚠ **2026-09-28 変更（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
    * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
@@ -3160,7 +3180,7 @@ export interface Runtime {
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult>;
   /**
-   * 層: 未分類
+   * 層: 是正・取り消し
    * `docs/memory-model.md` §11 行15「`superseded → active`」を、呼び出し側が
    * **明示的に**取り戻す。`consolidate`/`reextract`/`resolveContested` が閉じる方向
    * （`active` → `superseded`）だけを持っていた片道を、開く方向（`superseded` →
@@ -3788,7 +3808,7 @@ export interface Runtime {
     opts?: ResolveContestedGroupOptions,
   ): Promise<ResolveContestedGroupResult>;
   /**
-   * 層: 未分類
+   * 層: 是正・取り消し
    * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
    * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
    * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
@@ -4318,6 +4338,32 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const defaultClaimedBy = deps.config?.defaultClaimedBy ?? DEFAULT_CLAIMED_BY;
   const autoQueueConsolidateReflectOnExtract =
     deps.config?.autoQueueConsolidateReflectOnExtract ?? false;
+  const acceptLlmSubjectIdWithoutCandidates =
+    deps.config?.acceptLlmSubjectIdWithoutCandidates ?? false;
+
+  /**
+   * 問15: 一覧（`subjectCandidates`）が無い抽出では、既定で LLM の `subjectId` を捨てる
+   * （`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates`）。キーごと消すので、
+   * `buildNewMemoryFromCandidate` は observation の `subjectId` へ落とす。`subjectId` 以外の欄は触らない。
+   */
+  function dropLlmSubjectIdsWithoutCandidates(
+    candidates: ExtractedMemoryCandidate[],
+    subjectCandidates: readonly string[] | undefined,
+  ): ExtractedMemoryCandidate[] {
+    if (
+      acceptLlmSubjectIdWithoutCandidates ||
+      (subjectCandidates !== undefined && subjectCandidates.length > 0)
+    ) {
+      return candidates;
+    }
+    return candidates.map((candidate) => {
+      if (!("subjectId" in candidate)) {
+        return candidate;
+      }
+      const { subjectId: _dropped, ...rest } = candidate;
+      return rest;
+    });
+  }
 
   /**
    * 抽出候補から Memory を作る核（`runExtraction` と `reextract` の共通経路）。
@@ -4357,9 +4403,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * `activityClockInputsFor` が Memory ごとに `T + S_x` を組む。
    *
    * 🔴 **まだ残っている負債**（ADR 0394「引き受けた負債」）: 書く側の subject の取り違えは直したが、
-   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect・
-   * `sweepArchive` 等）の中の `recall()` が活動時計を進めること、(2) `tick` の自動ジョブに
+   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect 等）の
+   * 中の `recall()` が活動時計を進めること（進める入口の正確な一覧は下）、(2) `tick` の自動ジョブに
    * `activityCounting` を届けないこと、(3) recall 側の前進が `T` か `S_ctx` か。
+   *
+   * 活動時計を進めるのは `runRecall`（`recall-runtime.ts` の `advanceActivityClock`。`decayClock` が
+   * `"wall"` のテナントでは進めない）を通る呼び出しすべてである。`runtime.ts` の中で `recall()`/`runRecall()`
+   * を呼ぶ入口は次のとおり（ADR 0394 決定3 の「掃引」は誤り。ADR 0394 末尾の訂正を見ること）。
+   * 行頭の印 `ADVANCER:` の行が機械で読める正本で、`activity-clock-advancers-doc.test.ts` が
+   * 「`recall(`/`runRecall(` の呼び出しを囲む関数の集合」と一致することを縛る:
+   *
+   * - ADVANCER: recall — 公開の `recall()` 自身（`runRecall` を呼ぶ）。
+   * - ADVANCER: findCorrectionCandidates — 内部で `recall()` を1回呼ぶ。
+   * - ADVANCER: consolidate — `{ seedMemoryId }` 形と `{ query }` 形のどちらも内部で `recall()` を呼ぶ。
+   * - ADVANCER: reflect — 同じく `{ seedMemoryId }` 形と `{ query }` 形のどちらも `recall()` を呼ぶ。
+   *
+   * ⚠ `consolidate`/`reflect` は `dryRun` でも進む（打ち切りは `recall()` の後ろにあるため）。
+   * `tick` の consolidate/reflect ジョブは上の `consolidate`/`reflect` を呼ぶので、その経由で進める。
+   * 🔴 `sweepArchive` は `memoryStore.archiveDecayed` を呼ぶだけで `recall()` を呼ばない
+   * ——活動時計を**読む**だけで、進めない。
    */
   async function resolveActivityClockBase(
     ctx: Ctx,
@@ -5222,7 +5284,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates, signal);
     // ADR 0443: 保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
     const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
-      extractedCandidates,
+      dropLlmSubjectIdsWithoutCandidates(extractedCandidates, subjectCandidates),
       deps.hashContent,
     );
     // `ExtractCandidatesResult.rejectedSubjectIds` は型としては optional
@@ -5396,7 +5458,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     } = await extractCandidates(deps.llmProvider, ctx, observation, undefined, opts?.signal);
     // ADR 0443: observe と同じ。保存できない補助の欄（digest・tags）だけを落とし、候補は残す。
     const { candidates, droppedFields } = sanitizeCandidatesAuxFields(
-      extractedCandidates,
+      dropLlmSubjectIdsWithoutCandidates(extractedCandidates, undefined),
       deps.hashContent,
     );
 

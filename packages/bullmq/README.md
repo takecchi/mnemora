@@ -92,25 +92,28 @@ Queue/Worker を構築するだけで、Worker は `autorun: false` で作る—
 保証しない。** その重なりから outbox の二重処理を防いでいるのは、上に書いたとおり
 `@mnemora/postgres` 側の行ロックである。
 
-🔴 **1台の `stop()` が、全プロセスの予定を止める。**`stop()` は Worker と Queue を閉じる前に
-`queue.removeJobScheduler(jobName)` を呼ぶ。この scheduler は上のとおり全プロセスで共有している
-（同じ `jobSchedulerId`）ので、1つのプロセスが `stop()` すると、他のプロセスの Worker は動いたままでも
-tick のジョブがもう発火しない。エラーにもならない。動いている driver の `start()` をもう一度呼んでも
-何もしない（冪等）ので、登録はし直されない。新しく作った driver の `start()` が `upsertJobScheduler` で登録し直すと、
-再び発火する。⟹ rolling deploy や台数の縮小で1台を止めるときは、残りのプロセスのどれかを再起動する
-（新しい driver で `start()` する）こと。
-（【実測】redis-server 7.4.7・bullmq 6.3.8。同じ `queueName`・`jobName` の driver を2つ `start()` し、一方を `stop()` すると、`getJobSchedulers()` が空になり、
-動いたままの他方の Worker は、その後3秒間 tick を1回も呼ばなかった。`onTickError` も鳴らない。新しい driver の `start()` で再び発火した。
-⚠ **rolling deploy で「新しいプロセスを `start()` してから古いプロセスを `stop()` する」順だと、古い方の `stop()` が新しい方の登録を消す**——
-上の実測と同じ形なので、新しいプロセスが動いていても tick は止まる。次に `start()` する driver が現れるまで、outbox に積まれた行は処理されないまま溜まる
-（データは消えないが、embed・extract が止まったように見える）。**止めるプロセスを `stop()` する代わりに、`stop()` を呼ばずにプロセスごと終わらせる**
-（Worker の lock が切れるまでは、その Worker が掴んだ最後のジョブが stalled になりうる）、または `stop()` の後に残るプロセスのどれかで新しい driver を `start()` し直すこと。）
+🔴 **`stop()` は、同じ `queueName` に自分以外の Worker が居るときは共有の scheduler を消さない。居ない（最後の1台）ときだけ消す**
+（ADR 0655。以前は1台の `stop()` が全プロセスの予定を消した）。`stop()` は Worker と Queue を閉じる前に
+`queue.getWorkers()`（Redis の `CLIENT LIST` を読む）で、この queue に自分以外の Worker が居るかを見る。居れば
+`queue.removeJobScheduler(jobName)` を呼ばず、scheduler は残りの Worker のために残る。自分は、driver ごとに付けた一意な Worker 名で見分ける。
+⟹ rolling deploy（新しいプロセスを `start()` してから古いプロセスを `stop()` する順）や台数の縮小で、残りのプロセスの tick は止まらない。
+（【実測】redis-server 7.4.7・bullmq 6.3.8。同じ `queueName`・`jobName` の driver を2つ `start()` し、一方を `stop()` しても `getJobSchedulers()` は1件残り、
+動いたままの他方の Worker の tick は続いた。driver が1台だけなら、`stop()` で今までどおり `getJobSchedulers()` が空になった。）
+
+⚠ **これが効かない場合（今までの振る舞いのまま）が3つある。**
+
+- **`CLIENT LIST` が使えない環境**（`CLIENT` コマンドを禁じた ACL・一部のマネージド Redis など）。`getWorkers()` が失敗するか、他の Worker が居るかを判別できないので、
+  `stop()` は今までどおり scheduler を消す。つまりそこでは「1台の `stop()` が全プロセスの予定を止める」のままで、rolling deploy では残りのプロセスのどれかを再起動する
+  （新しい driver で `start()` する）こと。
+- **2台が同時に `stop()` する**と、互いに相手を見てどちらも消さず、scheduler が1件残りうる（ADR 0655）。残った scheduler は、Worker が1つも居ないので tick は処理されない。
+  ジョブが溜まり続けないこと（5秒で waiting が1件のまま）は ADR 0449 の調査で受けた観測で、この変更では測り直しておらず、長時間は確かめていない。次に `start()` する driver が `upsertJobScheduler` で引き継ぐ。
+- **Redis が永続化なしで再起動して scheduler を失う**件は直っていない（上の「エラーの通知先」）。
 
 🔴 **`queueName` か `jobName` は、テナント（`ctx`）ごとに分けること。**Worker はジョブの中身を見ずに、
 自分に渡された `ctx` で `runtime.tick(ctx, tick)` を呼ぶ。テナントの違う driver が同じ `queueName` と
 同じ `jobName`（既定は `"mnemora-tick"`）を使うと、scheduler は1つに上書きされ（`everyMs` は最後に
 `start()` した driver の値になる）、1回の発火はどれか1つの Worker、つまりどれか1つのテナントの tick に
-しかならない。どのテナントが何回 tick されるかは決まらない。上の `stop()` も、全テナントの予定を止める。
+しかならない。どのテナントが何回 tick されるかは決まらない。`stop()` も、他の Worker が居なければ（最後の1台なら）全テナントの予定を消す。
 （【実測】redis-server 7.4.7・bullmq 6.3.8。同じ `queueName`・`jobName` で `everyMs: 100`（テナントA）と `everyMs: 1000`（テナントB、後から `start()`）を動かすと、scheduler は1つ
 （`every: 1000`）になり、6秒間の7回の tick は A に4回・B に3回と、どちらの Worker が拾うかで振り分けられた。A は 100ms ごとには ticks されない。
 `jobName` をテナントごとに分けると、200ms・3秒で A も B も15回ずつ tick され、scheduler は2つになった。）
@@ -118,7 +121,7 @@ tick のジョブがもう発火しない。エラーにもならない。動い
 **同じ `queueName` に、`everyMs` を変えて `start()` し直しても同じである。**`start()` は `upsertJobScheduler` で登録するので、**後から `start()` した
 driver の `everyMs` で共有の scheduler が置き換わり**、先に動いていた driver の間隔も変わる（【実測】1000ms で動いていたものが、別の driver の `start()` で 200ms になり、
 さらに 1000ms の driver の `start()` で 1000ms に戻った）。同じ driver の `start()` を重ねて呼んでも何も変わらない。`everyMs` を後から変える口は無いので、
-変えたいときは新しい driver を作って `start()` する（古い driver の `stop()` は、上のとおり新しい登録を消すので、呼ぶ順に注意）。
+変えたいときは新しい driver を作って `start()` する（古い driver の `stop()` は、他の Worker が居れば新しい登録を消さない。居ない環境・`CLIENT LIST` が使えない環境では消すので、呼ぶ順に注意）。
 
 詳しい API（`CreateBullmqTickDriverOptions` の各フィールド）は
 [`src/tick-driver.ts`](./src/tick-driver.ts) の doc コメントを見ること。
@@ -172,21 +175,21 @@ await queue.close();
 [ADR 0477](../../docs/decisions/0477-bullmq-tick-driver-everyms-jobname-queuename-not-checked.md) が測ったとおり、検査しないと `start()` が成功したまま tick が黙って止まる入力があったため
 （[ADR 0498](../../docs/decisions/0498-constructor-config-checks.md)）。
 
-| 入力 | 結果 |
-|---|---|
-| `everyMs` が数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下 | 通る。小数（`1.5`）も通り、BullMQ が切り捨てた間隔（`1` ms）で動く |
-| `everyMs` が負・`0`・`1` 未満の小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超（`1e21` を含む）・数値の文字列（`"50"`）・`null`・`undefined` | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`） |
-| `jobName` を省略 | 既定 `"mnemora-tick"` |
-| `jobName` が空でない文字列（`:` を含む・空白・日本語・300 文字も） | 通る |
-| `jobName` が空文字・文字列でない | **構築時に投げる**（文字列でなければ `TypeError`、空文字なら `RangeError`） |
-| `lockDuration` を省略 | Worker に渡さない（BullMQ の既定 30000 ms） |
-| `lockDuration` が `1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数 | 通り、Worker にそのまま渡る（ADR 0548） |
-| `lockDuration` が `0`・負・小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超・数でない（`"30000"`・`null` など） | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`） |
-| `completedJobsToKeep` を省略 | 既定 `1000`（`removeOnComplete: { count: 1000 }`）。ADR 0548 |
-| `completedJobsToKeep` が `0` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数 | 通り、`removeOnComplete: { count }` になる |
-| `completedJobsToKeep` が負・小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超・数でない | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`） |
-| `queueName` が空文字・`:` を含む | BullMQ が `createBullmqTickDriver(...)` の中で同期的に投げる（driver は検査しない） |
-| `queueName` が空白・日本語・300 文字 | 動く |
+| 入力                                                                                                                                        | 結果                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `everyMs` が数・有限・`1` 以上・`Number.MAX_SAFE_INTEGER` 以下                                                                              | 通る。小数（`1.5`）も通り、BullMQ が切り捨てた間隔（`1` ms）で動く                  |
+| `everyMs` が負・`0`・`1` 未満の小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超（`1e21` を含む）・数値の文字列（`"50"`）・`null`・`undefined` | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`）       |
+| `jobName` を省略                                                                                                                            | 既定 `"mnemora-tick"`                                                               |
+| `jobName` が空でない文字列（`:` を含む・空白・日本語・300 文字も）                                                                          | 通る                                                                                |
+| `jobName` が空文字・文字列でない                                                                                                            | **構築時に投げる**（文字列でなければ `TypeError`、空文字なら `RangeError`）         |
+| `lockDuration` を省略                                                                                                                       | Worker に渡さない（BullMQ の既定 30000 ms）                                         |
+| `lockDuration` が `1` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数                                                                             | 通り、Worker にそのまま渡る（ADR 0548）                                             |
+| `lockDuration` が `0`・負・小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超・数でない（`"30000"`・`null` など）                               | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`）       |
+| `completedJobsToKeep` を省略                                                                                                                | 既定 `1000`（`removeOnComplete: { count: 1000 }`）。ADR 0548                        |
+| `completedJobsToKeep` が `0` 以上 `Number.MAX_SAFE_INTEGER` 以下の整数                                                                      | 通り、`removeOnComplete: { count }` になる                                          |
+| `completedJobsToKeep` が負・小数・`NaN`・`Infinity`・`MAX_SAFE_INTEGER` 超・数でない                                                        | **構築時に投げる**（数でなければ `TypeError`、数として不正なら `RangeError`）       |
+| `queueName` が空文字・`:` を含む                                                                                                            | BullMQ が `createBullmqTickDriver(...)` の中で同期的に投げる（driver は検査しない） |
+| `queueName` が空白・日本語・300 文字                                                                                                        | 動く                                                                                |
 
 （検査を足す前の測定【実測】redis-server 7.4.7・bullmq 6.3.8: 負の `everyMs`・`1` 未満の小数・`1e21`・空文字の `jobName` は `start()` が成功し、tick が数回（`1e21`・空文字は1回）で止まり `onTickError` も鳴らなかった。`0`・`NaN`・`null` は `start()` が reject、`Infinity` は Lua のエラーで reject した。数字は ADR 0477。）
 

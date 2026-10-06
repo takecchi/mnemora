@@ -49,6 +49,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Breaking
 
+- **🔴 `subjectCandidates` を渡さない抽出が、LLM が返した `subjectId` を既定で捨てるようになった（`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true` で従来どおり受ける）**（[ADR 0635](./docs/decisions/0635-llm-subject-id-dropped-by-default-without-candidates.md)。オーナー回答 374f6f88 の問15（全部推奨）による既定の変更。[ADR 0442](./docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md) の警告への答え）。
+  以前は、`subjectCandidates` が無い（省略・空配列）抽出——`observe()` で一覧を渡さなかった呼び出し、`extract: 'deferred'` の `tick`、`reextract`——が、LLM が返した `subjectId` をそのまま Memory の主題にした（観察文の注入で、同じテナントの別の subject に記憶を書かせられた）。いまは、その `subjectId`（文字列も明示の `null` も）を捨て、主題は `observation.subjectId`（無ければ主題なし）になる。`subjectId` 以外の欄は変わらない。
+  - **変わらないこと**: `subjectCandidates` を渡した `observe()`（一覧内は採る・一覧外は弾いて `rejectedSubjectIds` に残す・一覧内の `null` は主題なし）。型・シグネチャ（新しい省略可能な設定が1つ増えるだけ）。DB のスキーマ。
+  - **破壊的と数える理由**: 型は変わらないが、**以前は通っていた値（LLM が返す `subjectId`）が、新しく捨てられ、Memory の `subjectId` が変わる**。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による（ask_human 6911db12）。
+  - **誰が影響を受けるか**: 一覧を渡さずに、LLM に候補ごとの主題（Issue #608 項目①、[ADR 0271](./docs/decisions/0271-extraction-candidate-subject-id-overrides-observation.md)）を決めさせていた呼び出し側。`extract: 'deferred'` の `tick`・`reextract` でそれに頼っていたもの。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目66。DB マイグレーションは無い。
+  - 【確かめていないこと】捨てた値は `ObserveResult` に出ない。実際の LLM が一覧なしで `subjectId` を返す頻度。
+
 - **`@mnemora/bullmq` の `createBullmqTickDriver` が、完了したジョブを直近 1000 件だけ Redis に残すようになった（`removeOnComplete: { count: 1000 }` が既定）**（[ADR 0548](./docs/decisions/0548-bullmq-lock-duration-and-remove-on-complete-default.md)。[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料1の判断）。
   以前は `removeOnComplete` の指定が無く、完了したジョブが `everyMs` ごとに1件ずつ全部残った。いまは繰り返しジョブの template に `removeOnComplete: { count: 1000 }` を入れるので、古い完了ジョブは BullMQ が消す。完了ジョブの `returnvalue`（`TickResult`）を `queue.getJobs(["completed"])` などで後から読んでいた人は、古い分が読めなくなる。`completedJobsToKeep`（下の `### Added`）で件数を変えられ、`Number.MAX_SAFE_INTEGER` を渡すと以前に近づく。**`removeOnFail` は触っていない**（失敗したジョブは従来どおり全部残る）。型・シグネチャは変わらない。移行は [migration-v1](./docs/migration-v1.md) の 🟡。
 
@@ -150,9 +158,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **拒む入力**: `digest`・`contentHash`・`extractorVersion` の空文字／`claimKey` の `subject`・`predicate` の空文字・片側だけ／`attributes` の値が文字列以外／`provenance` の中身の欠け・値域外（`stated` の `sourceObservationId`・`at` が無い・空、`inferred` の `confidence` が `[0, 1]` の外・`model` が無い、`consolidated` の `sources` が空、`imported` の `batchId` が無い・空など）。`confidence` の 0 と 1、`claimKey` 無し、`extractorVersion` が `null`、`attributes` が `{}` は通る。
   - **範囲外（変わらない）**: `subjectId`、Observation・Event・`createRecall` の書き込み、既に拒んでいる欄、`tags` の中身、`validFrom > validUntil`。
   - **新しい公開 API**: `assertWellFormedNewMemory(owner, input)`（`@mnemora/core`）。自前の `MemoryStore` 実装が同じ検査を呼べる。
+  - **`runtime.observe` の経路（3口の外）**: 抽出した候補の保存に使う `createMemoriesWithOutboxAndEvents?` も同じ入口を共有するため、壊れた候補は、保存できない他の候補と同じく `created` イベントの `droppedCandidates` に積まれる。observe 全体は落ちず、残りの候補は書く（`@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts` で確認）。testkit の `InMemoryMemoryStore` も、実装を読んだ限り同じく `dropped` に積んで残りを書く（`in-memory-new-memory-rejects.test.ts`）。ただし**全候補が壊れていると、最初の例外を投げる**（InMemory の実装で確認。Postgres で同じかは【未確認】）。core の Fake はこの口を持たない。
   - **conformance suite の約束が増えた**: 上の入力を3口とも拒むこと（拒むときは何も書かないこと・冪等の既存行が在っても拒むこと）。**片側だけの `claimKey` を `createMemory` で書いて「`listActiveClaimPredicates` に数えない」ことを縛っていた歯は、「書き込みの口が拒む」に書き換えた**——自前の adapter が片側だけの鍵を受け付けて「鍵なし」として扱っていたなら、拒むように直す。それより前に書かれた行を鍵なしとして読む扱いは変わらない。
   - **破壊的と数える理由**: 本物の adapter が新しく例外を投げ、conformance の判定が厳しくなる（migration の数え方の規律2 の ⛔）。破壊的変更を v1.X.0 で出してよいことは、オーナーの回答による。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目66。DB マイグレーションは無い（既に書かれた行は直さない）。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目68。DB マイグレーションは無い（既に書かれた行は直さない）。
 
 ### Added
 
@@ -215,6 +224,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ 非破壊と数える（文書の追記のみ）。
 
 ### Fixed
+
+- **`@mnemora/bullmq` の `createBullmqTickDriver` の `stop()` が、同じ `queueName` に自分以外の Worker が居るときは、共有の scheduler を消さなくなった**（最後の1台だけが消す。[ADR 0655](./docs/decisions/0655-bullmq-stop-removes-scheduler-only-when-last-worker.md)。[ADR 0449](./docs/decisions/0449-bullmq-tick-driver-measured-against-real-redis.md) の材料3）。以前は1台の `stop()` が、動いたままの他のプロセスの tick も止めた。`CLIENT LIST` が使えない環境では、従来どおり消す。公開の型・オプション・既定値は変えていない。
+  - **残っていること**: 2台が同時に `stop()` すると scheduler が1件残りうる。永続化なしの Redis の再起動で scheduler が消える件は直っていない。
 
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.eraseTenant` が、`recall_usages` を tenantId の前方一致ではなく完全一致で消すようになった。**以前は `acme` を消すと、`acme:eu` など `acme:` で始まる別テナントの `recall_usages` まで消えていた（[ADR 0604](./docs/decisions/0604-fixture-erase-tenant-usages-exact-tenant.md)。`@mnemora/postgres` は `tenant_id = $1` で、もとから完全一致）。
 

@@ -81,3 +81,7 @@
   - 歯: `pnpm --filter @mnemora/bullmq exec vitest run -c vitest.redis.config.mts src/__tests__/tick-driver.shared-scheduler.redis.test.ts src/__tests__/tick-driver.failed.redis.test.ts`（`REDIS_PORT=56440`）4本緑。**変異**: `stop()` の `removeJobScheduler` を外すと、2本目が赤（他は緑）。戻すと緑。
   - `pnpm run check:doc-snippets`: 印の付いた片34件、落ちた片0件（上の4片を直した後）。陽性対照は決めたこと4。
   - **測っていないこと**: 上の負債のとおり。
+
+---
+
+**2026-10-06 追記**: 材料3（1台の `stop()` が全プロセスの発火を止める）は、[ADR 0655](./0655-bullmq-stop-removes-scheduler-only-when-last-worker.md) で一部直した。`stop()` は、この queue に自分以外の Worker が居るときは共有の scheduler を消さない（最後の1台だけが消す）。`CLIENT LIST` が使えない環境では今までどおり消す。同時に `stop()` する2台が互いに相手を見て scheduler が1件残る点と、材料の (b)（永続化なしの Redis の再起動で scheduler が消える件）は直っていない。この判断はクローン（依頼主）のもので、オーナー本人の判定ではない（ADR 0220）。上の本文は当時の記録であり書き換えていない。
