@@ -103,6 +103,15 @@ describe("claim key の検出: 同じ鍵の主張が1件ずつ届く経路（Iss
       [[3, "unresolved_conflict"]],
     ]);
 
+    // 一致した相手の id は、一致した全員を運ぶ（`matchCount` と同じ件数）。
+    const matchIdsOf = (index: number): string[] => {
+      const result = results[index]!.contestedDetection![0]!.result;
+      if (result.kind !== "unresolved_conflict") throw new Error("unresolved_conflict ではない");
+      return [...result.matchMemoryIds].sort();
+    };
+    expect(matchIdsOf(2)).toEqual([ids[0], ids[1]].sort());
+    expect(matchIdsOf(3)).toEqual([ids[0], ids[1], ids[2]].sort());
+
     const memories = await Promise.all(ids.map((id) => stores.memoryStore.get(ctx, id)));
     expect(memories.map((m) => m?.status)).toEqual(["contested", "contested", "active", "active"]);
     // 1件目・2件目の対は、3件目・4件目が届いても壊れない。
