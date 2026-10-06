@@ -35,7 +35,7 @@ afterAll(async () => {
 describe.each(KITS)(
   "archiveDecayed の reachedLimit：limit に届かなければ false（%s）",
   (_name, make) => {
-      it.each([
+    it.each([
       [5, false],
       [3, false],
       [2, true],
