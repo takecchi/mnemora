@@ -267,6 +267,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **主なもの**: `VectorFilter` の「後段は `status` と忘却ゲートを見ない」（今は見る）、`TaxonomyMode` の「読む経路はまだ無い」（今は `recall()` が読む）、`setEventRetention` の `days` の上限、`ClaimOutboxJobsOptions.limit` の負数の扱い、`RecallUsage.share` の分子と分母、`RecallQuery.text` の空白だけの文字列、`ApplyCorrectionInput.resolution` が投げる `RangeError`、`reflect` の `decayFloorAt` の出どころ、写していた数。一覧は ADR 0576。`runtime.ts` など、開いている PR が触るファイルは除いた。
   - **破壊的と数えない理由**: コメントだけの変更で、型・振る舞い・公開 API の表面は変えていない。
 
+- **`@mnemora/core` の公開 TSDoc のうち、`Ctx` の「空白だけの文字列は受け付ける」（`utterance.text`・`event.name`・`document.content` は今は断る）、抽出の `subjectId` の「検証されない」（NUL・孤立サロゲートは今は弾く）の2か所を、実装に合わせて直した**（[ADR 0642](./docs/decisions/0642-merged-0930-h-docs-recheck-doc-drift.md)）。
+  - **破壊的と数えない理由**: コメントだけの変更で、型・振る舞い・公開 API の表面は変えていない。
+
 - **`scrubPurged`（`Runtime.purge` を purge 済みの記憶にかけ直したときの後始末）が、`recalls.index_band` の `digestBand` に残った、purge 済みの記憶の digest も伏せるようになった**（[ADR 0512](./docs/decisions/0512-scrub-purged-index-band.md)。ADR 0437 決定6の未確認事項の実測）。v1.0.0〜v1.0.2 の `purgeMemory` は `recalls` を書き換えず（v1.1.0 の ADR 0375 決定3 から書き換える）、purge より前に撃った recall の目次帯に元の digest が残っていた。【実測】v1.0.2 の実物で残ることを確かめた。
   - **何が変わるか**: `PostgresMemoryStore.scrubPurged`・`InMemoryMemoryStore.scrubPurged` が、そのテナントの目次帯のうち、渡された id の purge 済み（`forgotten` かつ `purgedAt` が非 `null`）の行のエントリの `digest` を、その行の `digest`（トゥームストーン）へ置き換える。エントリは残し `truncated` は落とす。未 purge の行・他のエントリ・他テナントは触らない。べき等。
   - **変えなかったこと**: `recalls.query`・`explain` は残る（`memoryId` で特定できない。何を消すかはオーナーの判断待ち）。migration での一括処理はしない。自動では走らず、利用者が purge をかけ直した行だけに効く。
