@@ -112,6 +112,10 @@
 //   `findContestedByClaimKey` の日時は、Postgres が下限へ寄せてから比べるので、下限より前でも断らず、意味どおりに答える
 //   （`since` 系は全件、`until` 系は0件）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
 //   Postgres が下限より前を「0件」で返すので掛けない。
+// - `createMemory` 系・`supersedeWithNewMemories` の新しい行の `decayFloorAt` が `Date` でない（`null`・`undefined`・キーなし）→
+//   `InMemoryMemoryStore: decayFloorAt must be a Date (got …)`（`TypeError`。Postgres は `23502`。冪等の既存の行が在っても断る。Issue #1759）。
+// - 「memory not found for tenant: <id>」の `<id>` は Postgres と同じ綴り: 操作の対象が無いときは渡された綴りのまま、参照先
+//   （`supersededById`・`contestedWithId`・`recordUsage` の `memoryIds`）が無いときは小文字（ADR 0521 の追記）。
 // - `reinforce({ addOwnSubjectSeq: true })` の `nowSeq + S_x`（と床）が 2^63 以上 → `reinforce: decayBaseSeq + own subject seq must fit in a
 //   Postgres bigint`（Postgres は `22003`。ADR 0500）。
 // - `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製（ADR 0500）。
