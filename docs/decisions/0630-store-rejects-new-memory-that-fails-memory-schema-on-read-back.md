@@ -50,6 +50,20 @@
 - 表が2か所に在る（`packages/core/src/__tests__/malformed-new-memory-cases.ts` と `memory-store-conformance.ts`）。core のテストは testkit を import できないため。
 - `provenance.sourceObservationId` と `input.sourceObservationId` の食い違い、`provenance` の列挙外の `kind`・`null` の例外の種類が実装で違う点は、そのまま。
 
+## 変異試験の結果（2026-10-06）
+
+【実測】Postgres 17 + pgvector を手元で立て、変異を入れて歯が赤くなるかを見た。**当てた変異 約90 のうち、足りない側・やりすぎた側の主要なものは最初から噛んだ。噛まなかったもの（穴）は下の5つで、歯を足して赤→緑を確かめた。**
+
+- **噛んだ（足りない側）**: 3実装×口（createMemory・createMemoryWithOutbox・supersedeWithNewMemories。Postgres と testkit は `createMemoriesWithOutboxAndEvents` も）ごとの呼び出しの除去／6欄それぞれの検査の除去／provenance の5つの kind それぞれの除去／欄ごとの形（空文字・欠け・confidence の範囲など）／検査を「冪等の既存行の判定より後」「書いた後」へ動かす／supersede で2件目以降を検査しない／observe 経路で拒んだ例外を漏らす・全件が壊れても投げない。
+- **噛んだ（やりすぎた側）**: confidence の 0 と 1・claimKey 無し・extractorVersion が null・attributes が `{}`・省略・値が空文字・digest が1文字・content が空文字を拒む／`subjectId` の空文字・`validFrom > validUntil`・createObservation を拒む。
+- **穴（噛まなかった）→ 歯を足した**:
+  1. `supersedeWithNewMemories` で news の「先頭と末尾だけ」検査する変異（3実装すべてで生き残った。歯は2件のみだった）→ 3件の真ん中が壊れている歯を、conformance（Postgres・fixture）と core の Fake に足した。
+  2. 欄の検査は残したまま特定の形だけ見逃す変異（stated の sourceObservationId 空・at 無し、inferred の confidence NaN・無し・文字列、model 空、promptVersion、basis の欠け・空文字、consolidated の sources、reflected の sources が配列でない、attributes が配列・文字列・真偽値）→ 表（core と conformance の2か所）に18形を足した。
+  3. `attributes: null`・`extractorVersion` 省略を拒む変異 → 通す側の表に足した。
+  4. `createObservationWithOutbox`（3実装）と core の Fake の `createObservation` で、attributes の値が文字列以外なら拒む変異 → 範囲外の歯を3実装に足した。
+  5. observe 経路: 壊れた候補と正常な候補が混ざる場面の歯が Postgres に無く、testkit の InMemory と core の Fake には observe 経路の歯がそもそも無かった（例外を observe 全体へ漏らす変異が Fake 経路で生き残った）→ 3実装に足した（壊れた候補は store の手前の Proxy で作る。Runtime が作る NewMemory では自然には作れないため）。
+- **確かめていない**: createRecall・Event の書き込みを拒む変異は入れていない（自然な「やりすぎ」の形を決められなかった。範囲外の歯は subjectId と createObservation 系のみ）。欄ごとの検査の除去は、重ならない形の変異をまとめて入れて失敗した歯の名前で見分けた（1つずつではない）。Postgres での全形の再実行は、口ごとの除去と supersede の変異でのみ行い、欄ごとの変異は core と testkit で見た（表は同じ）。
+
 ## 覆るとしたら
 
 オーナーが「書き込みの口は値の中身を見ない（読み側が弾く）」へ戻したとき。そのときは、3実装の呼び出しと conformance の歯を外し、TSDoc を戻す。`MemorySchema` に欄が増えたときは、`assertWellFormedNewMemory` の見る欄に足すかを決める（今は6欄の列挙）。
