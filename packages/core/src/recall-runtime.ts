@@ -1828,7 +1828,8 @@ async function runRecallBody(
       companionId !== null && !consumed.has(companionId) ? byId.get(companionId) : undefined;
     if (companion && companion.retrievedVia === "mandatory_companion") {
       consumed.add(companion.memory.id);
-      units.push({ members: [candidate, companion], rankScore: candidate.score.total });
+      units.push({ members: [candidate], rankScore: candidate.score.total });
+      units.push({ members: [companion], rankScore: -1 });
     } else if (companion) {
       // 両側とも独立に withinLimit に含まれていたケース。まだ処理していなければペアにする。
       consumed.add(companion.memory.id);
