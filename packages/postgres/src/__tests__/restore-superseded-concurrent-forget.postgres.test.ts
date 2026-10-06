@@ -152,4 +152,80 @@ describe("PostgresMemoryStore.restoreSupersededBy を本物の並行（forget �
     const finalVictim = await seedStore.get(ctx, victim.id);
     expect(finalVictim?.status).toBe("forgotten");
   }, 20_000);
+
+  // Issue #1775 の #839 の変異b: PR #839 は `restored` の UPDATE が `m.superseded_by_id = $id` も重ねて確かめるようにした。
+  // 上の歯は並行の forget だけを見ていた。読んだ後に、別の置き換え（other）へ付け替えられた行も戻さない
+  // （B が `status` は `superseded` のまま `superseded_by_id` だけを other へ変える UPDATE を BEGIN の中で止め、
+  // A の `restoreSupersededBy(target)` が行ロック待ちになったのを `pg_stat_activity` で確かめてから B を COMMIT する）。
+  // pg_stat_activity を読むので、この直列群のファイルに置く（ADR 0371 の規約）。
+  it("B が別の superseded_by_id へ付け替えて先にコミットすると、A の restoreSupersededBy はその行を戻さず、事象も積まない", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const seedStore = new PostgresMemoryStore(db);
+    const ctx: Ctx = { tenantId: "tenant-1" };
+
+    const target = await seedStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "target" }),
+    );
+    const other = await seedStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "other" }),
+    );
+    const victim = await seedStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "victim" }),
+    );
+    await seedStore.updateStatusWithEvent(
+      ctx,
+      victim.id,
+      "superseded",
+      { supersededById: target.id, expectedStatus: "active" },
+      {
+        tenantId: "tenant-1",
+        memoryId: victim.id,
+        kind: "superseded",
+        at: new Date(),
+        actor: { type: "system" },
+        meta: {},
+      },
+    );
+
+    // 接続 B: 別の置き換えへ付け替える UPDATE を BEGIN の中で発行し、COMMIT しない。
+    const bClient = createPostgresClient(requireDatabaseUrl());
+    pools.push(bClient);
+    const bRaw = await bClient.pool.connect();
+    await bRaw.query("BEGIN");
+    await bRaw.query(
+      `UPDATE memories SET superseded_by_id = $3, updated_at = now()
+       WHERE tenant_id = $1 AND id = $2 AND status = 'superseded'`,
+      [ctx.tenantId, victim.id, other.id],
+    );
+
+    // 接続 A: restoreSupersededBy(target) を呼ぶ（B の行ロック解放待ちで blocked になるはず）。
+    const aClient = createPostgresClient(requireDatabaseUrl());
+    pools.push(aClient);
+    const aStore = new PostgresMemoryStore(aClient.db);
+    const restorePromise = aStore.restoreSupersededBy(ctx, target.id, { at: new Date() });
+
+    await waitForLockWait(bClient, "UPDATE memories m");
+
+    await bRaw.query("COMMIT");
+    bRaw.release();
+
+    const restoreResult = await restorePromise;
+
+    // victim は復元対象に含まれない。
+    expect(restoreResult.restored.map((m) => m.id)).not.toContain(victim.id);
+    // victim は other に置き換えられたまま（B の付け替えを、A が巻き戻していない）。
+    const finalVictim = await seedStore.get(ctx, victim.id);
+    expect(finalVictim?.status).toBe("superseded");
+    expect(finalVictim?.supersededById).toBe(other.id);
+    // 戻していないので、`unsuperseded` の事象も積まれていない。
+    const { rows } = await aClient.pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM memory_events WHERE tenant_id = $1 AND memory_id = $2 AND kind = 'unsuperseded'",
+      [ctx.tenantId, victim.id],
+    );
+    expect(rows[0]!.n).toBe(0);
+  }, 20_000);
 });
