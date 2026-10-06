@@ -222,7 +222,7 @@ function compareCodeUnits(a: string, b: string): number {
  * `contested` / `superseded` の種は利用者が消したものではないので、今どおり近傍を集める。
  */
 function isWithdrawnSeed(seed: Memory): boolean {
-  return seed.status === "forgotten" || (seed.purgedAt ?? null) !== null;
+  return false;
 }
 
 /**
