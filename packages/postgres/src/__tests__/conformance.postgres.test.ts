@@ -1,4 +1,5 @@
-import { afterAll } from "vitest";
+import { Client } from "pg";
+import { afterAll, beforeAll, expect } from "vitest";
 import { sql } from "drizzle-orm";
 import type { Ctx } from "@mnemora/core";
 import {
@@ -427,6 +428,37 @@ describeTenantSettingsStoreConformance({
   supportsTaxonomyMode: true,
   // Issue #1207 / ADR 0383: PostgresTenantSettingsStore は eraseTenant を実装している。
   supportsEraseTenant: true,
+});
+
+/**
+ * Issue #1040（PR #1052）の約束: SQL に `Date` を渡す口は、すべて `toPgTimestamp`（UTC の文字列）を通す。
+ * node-postgres は `Date` のパラメータをプロセスのローカル時刻の文字列にして時差を分に切り捨てるので、
+ * 素の `Date` が `pg` まで届くと、地方平均時の時代の日時が秒単位でずれて保存される。
+ * 個別の口の歯（`timestamp-write-process-tz`）は memory の insert と event の append/list だけを見るので、
+ * 適合テストが一巡する間に発行されたすべてのクエリの束縛値を見て、`Date` のインスタンスが1つでも
+ * 届いたら、その呼び出し元（`src/` の最初のフレーム）を名指しして落とす。
+ */
+const rawDateParamSites = new Set<string>();
+const originalClientQuery = Client.prototype.query;
+beforeAll(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
+    const [config, params] = args as [string | { values?: unknown[] }, unknown[] | undefined];
+    const values = typeof config === "string" ? params : config.values;
+    if (Array.isArray(values) && values.some((v) => v instanceof Date)) {
+      const frame = (new Error().stack ?? "")
+        .split("\n")
+        .find((line) => /packages\/postgres\/src\/(?!__tests__)/.test(line));
+      rawDateParamSites.add((frame ?? "(src のフレームなし)").trim());
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalClientQuery as any).apply(this, args);
+  };
+});
+
+afterAll(() => {
+  Client.prototype.query = originalClientQuery;
+  expect([...rawDateParamSites]).toEqual([]);
 });
 
 afterAll(async () => {
