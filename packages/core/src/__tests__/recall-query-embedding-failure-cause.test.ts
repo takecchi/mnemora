@@ -154,3 +154,101 @@ describe("recall() — 埋め込み失敗の原因が cause で読める", () =>
     expect(o).not.toHaveProperty("cause");
   });
 });
+
+describe("recall() — cause の kind / name は書記素の境界で 64 コードユニット以下に切る", () => {
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+
+  /** 入力の書記素の境界（コードユニットの位置）。0 と末尾を含む。 */
+  function graphemeBoundaries(text: string): Set<number> {
+    const bounds = new Set<number>([0, text.length]);
+    for (const { index } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+      text,
+    )) {
+      bounds.add(index);
+    }
+    return bounds;
+  }
+
+  function expectCleanTruncation(actual: string | undefined, input: string) {
+    expect(typeof actual).toBe("string");
+    const s = actual as string;
+    expect(LONE_SURROGATE.test(s)).toBe(false);
+    expect(s.length).toBeLessThanOrEqual(64);
+    expect(input.startsWith(s)).toBe(true);
+    expect(graphemeBoundaries(input).has(s.length)).toBe(true);
+  }
+
+  async function causeOf(thrown: () => unknown) {
+    const { runtime } = buildRuntime(async () => {
+      throw thrown();
+    });
+    const o = await unavailable(runtime);
+    return o.cause;
+  }
+
+  const surrogateStraddle = `${"a".repeat(63)}😀`; // 絵文字が 63〜64 コードユニット目に跨る
+  const combiningAtEdge = `${"a".repeat(63)}が`; // か + 結合濁点。64 で切ると濁点が落ちる
+
+  it.each([
+    ["サロゲートペアが跨る", surrogateStraddle],
+    ["結合文字が境界に来る", combiningAtEdge],
+  ])("kind: %s", async (_label, input) => {
+    const cause = await causeOf(() => {
+      const e = new Error(SECRET) as Error & { kind: string };
+      e.kind = input;
+      return e;
+    });
+    expectCleanTruncation(cause?.providerErrorKind, input);
+    expect(cause?.providerErrorKind).toBe("a".repeat(63));
+  });
+
+  it.each([
+    ["サロゲートペアが跨る", surrogateStraddle],
+    ["結合文字が境界に来る", combiningAtEdge],
+  ])("name: %s", async (_label, input) => {
+    const cause = await causeOf(() => {
+      const e = new Error(SECRET);
+      e.name = input;
+      return e;
+    });
+    expectCleanTruncation(cause?.errorName, input);
+    expect(cause?.errorName).toBe("a".repeat(63));
+  });
+
+  it("上限ちょうど・以下の ASCII はそのまま返る（kind・name とも）", async () => {
+    for (const label of ["a".repeat(64), "a".repeat(63), "short"]) {
+      const cause = await causeOf(() => {
+        const e = new Error(SECRET) as Error & { kind: string };
+        e.kind = label;
+        e.name = label;
+        return e;
+      });
+      expect(cause).toEqual({ kind: "provider_threw", providerErrorKind: label, errorName: label });
+    }
+  });
+
+  it("上限を超える ASCII は 64 コードユニットで切れる（kind・name とも）", async () => {
+    const long = "b".repeat(100);
+    const cause = await causeOf(() => {
+      const e = new Error(SECRET) as Error & { kind: string };
+      e.kind = long;
+      e.name = long;
+      return e;
+    });
+    expect(cause).toEqual({
+      kind: "provider_threw",
+      providerErrorKind: "b".repeat(64),
+      errorName: "b".repeat(64),
+    });
+  });
+
+  it("絵文字が 62〜63 に収まる位置なら、そのまま残る（切りすぎない）", async () => {
+    const input = `${"a".repeat(62)}😀${"z".repeat(10)}`; // 絵文字は 62〜63 コードユニット目
+    const cause = await causeOf(() => {
+      const e = new Error(SECRET) as Error & { kind: string };
+      e.kind = input;
+      return e;
+    });
+    expect(cause?.providerErrorKind).toBe(`${"a".repeat(62)}😀`);
+  });
+});
