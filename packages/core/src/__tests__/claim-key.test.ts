@@ -248,6 +248,37 @@ describe("deriveClaimKeys（Issue #371、ADR 0185/0315 決定2 の (ii) separate
     expect(result.failure).toBeNull();
   });
 
+  it("空白だけの要素は、半角・全角のスペース以外（タブ・改行・NBSP・混在）でも null にする", async () => {
+    const provider = llmReturning({
+      claims: [
+        { subject: "\t", predicate: "favorite_food" },
+        { subject: "user", predicate: "\n" },
+        { subject: " ", predicate: "favorite_food" },
+        { subject: " \t\n　 ", predicate: "\r\n" },
+      ],
+    });
+    const result = await deriveClaimKeys(provider, ctx, ["発話1", "発話2", "発話3", "発話4"]);
+    expect(result.claimKeys).toEqual([null, null, null, null]);
+    expect(result.failure).toBeNull();
+  });
+
+  it("空白だけではない要素は null にしない（1文字の値・内部に空白を含む値もそのまま鍵になる）", async () => {
+    const provider = llmReturning({
+      claims: [
+        { subject: "姉", predicate: "x" },
+        { subject: "my sister", predicate: "favorite food" },
+        { subject: " user ", predicate: " favorite_food " },
+      ],
+    });
+    const result = await deriveClaimKeys(provider, ctx, ["発話1", "発話2", "発話3"]);
+    expect(result.claimKeys).toEqual([
+      { subject: "姉", predicate: "x" },
+      { subject: "my_sister", predicate: "favorite_food" },
+      { subject: "user", predicate: "favorite_food" },
+    ]);
+    expect(result.failure).toBeNull();
+  });
+
   it("provider が投げたエラーの kind を duck typing で読む（extraction.ts の describeExtractionFailure と同じ規律）", async () => {
     const provider: LLMProvider = {
       complete: async () => {
