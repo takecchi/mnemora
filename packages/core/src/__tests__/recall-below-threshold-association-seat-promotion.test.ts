@@ -121,6 +121,31 @@ describe("recall() — 段3.5 の候補プールで席に着けなかった belo
     expect(overLimitAssociationCount(result)).toBe(1);
   });
 
+  it("(a2) 過取得の窓の外に居た below_threshold の候補も、below_threshold から外れ over_limit(association) だけに数えられる", async () => {
+    const { runtime, stores } = buildRuntime();
+
+    const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
+    const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
+    // どちらもクエリとの類似度が低く段2で below_threshold。アンカーとの類似度は b1 のほうが高い。
+    const b1 = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "B1" });
+    const b2 = await createEmbeddedMemory(stores, [0.04, 0.05, 0.9975], { digest: "B2" });
+
+    // overFetchFactor=1.4、maxCount=1 ⟹ 連想の過取得の窓は1件。窓に入るのは b1 だけで、
+    // b2 は順位付けの土俵にも上がらない。
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 5,
+      overFetchFactor: 1.4,
+      association: { maxCount: 1 },
+    });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids.sort()).toEqual([cand1.id, anchor.id, b1.id].sort());
+    expect(ids).not.toContain(b2.id);
+    expect(belowThresholdOf(result)).toBeUndefined();
+    expect(overLimitAssociationCount(result)).toBe(1);
+  });
+
   it("(b) 連想の土俵に上がっていない below_threshold の候補は、そのまま below_threshold に残る（過剰実装を捕まえる歯）", async () => {
     const { runtime, stores } = buildRuntime();
 
