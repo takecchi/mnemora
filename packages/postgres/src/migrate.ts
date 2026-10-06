@@ -109,7 +109,7 @@ async function assertPgvectorCapabilityOnPool(
   try {
     await assertPgvectorCapabilityUnderSearchPath(client, schema, extensionSchema);
   } finally {
-    client.off("error", onError);
+    client.removeListener("error", onError);
     client.release();
   }
 }
