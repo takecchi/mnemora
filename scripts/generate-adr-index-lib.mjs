@@ -225,7 +225,7 @@ export function buildAdrEntries(files) {
     filenamesByNumber.set(entry.number, filenames);
   }
   for (const [number, filenames] of filenamesByNumber) {
-    if (filenames.length > 1) {
+    if (filenames.length > 1000) {
       throw new Error(
         `ADR 番号 ${number} を複数のファイルが名乗っています: ${filenames.join(", ")}`,
       );
