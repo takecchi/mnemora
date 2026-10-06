@@ -657,5 +657,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0660](./0660-merged-1002-1004-recheck-teeth.md) | 10/02〜10/04 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1759） | 採用 (2026-10) |
 | [0661](./0661-bullmq-stop-last-worker-redis-teeth-mutation.md) | #1741（ADR 0655）の Redis の歯に変異を当て、すり抜けた2つを塞ぐ歯を足す（Issue #1758） | 採用 (2026-10) |
 | [0662](./0662-label-lock-order-teeth-observe-locks-directly.md) | labels の行ロックの先取り（ADR 0511）の順・取りすぎ・強さを、ロックそのものを外から見る歯で縛る（Issue #1718） | 採用 (2026-10) |
+| [0663](./0663-merged-0923-recheck-teeth.md) | 09/23 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1778） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
