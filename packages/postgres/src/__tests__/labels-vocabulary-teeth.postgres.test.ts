@@ -260,3 +260,52 @@ describe("upsertProposedLabels はコードポイント順に処理する", () =
     expect([ASTRAL, BMP_HIGH].sort()).toEqual([ASTRAL, BMP_HIGH]);
   });
 });
+
+// Issue #1775 の #717（変異5・6）: 冪等衝突（同じ `sourceObservationId`・`contentHash` の再呼び出し）は、
+// すでに在る語彙の `proposedCount` を数え直さない（ADR 0318 決定2・`upsertProposedLabels` の doc、約束2）。
+// 再試行のたびに昇格の判断材料が膨らむ誤りを縛る。既存の歯は「語彙が作られない」だけを見て、すでに在る語彙の
+// 件数は見ていなかった。
+describe("冪等衝突で、すでに在る語彙の proposedCount を増やさない", () => {
+  const input = (observationId: string, tenantId: string) =>
+    buildNewMemoryFixture({
+      tenantId,
+      contentHash: "idempotent-labels",
+      content: "idempotent-labels",
+      sourceObservationId: observationId,
+      extractorVersion: "v1",
+      tags: ["alpha"],
+    });
+
+  it("createMemory を同じ入力で2回呼んでも、proposedCount は 1 のまま", async () => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const ctx: Ctx = { tenantId: "tenant-idempotent-create" };
+    const observation = await store.createObservation(
+      ctx,
+      buildNewObservationFixture({ tenantId: ctx.tenantId }),
+    );
+
+    const first = await store.createMemory(ctx, input(observation.id, ctx.tenantId));
+    const second = await store.createMemory(ctx, input(observation.id, ctx.tenantId));
+
+    expect(second.id).toBe(first.id);
+    expect(await labelRows(store, ctx)).toEqual([["alpha", "proposed", 1]]);
+  });
+
+  it("createMemoryWithOutbox を同じ入力で2回呼んでも、proposedCount は 1 のまま", async () => {
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const ctx: Ctx = { tenantId: "tenant-idempotent-outbox" };
+    const observation = await store.createObservation(
+      ctx,
+      buildNewObservationFixture({ tenantId: ctx.tenantId }),
+    );
+
+    const first = await store.createMemoryWithOutbox(ctx, input(observation.id, ctx.tenantId), []);
+    const second = await store.createMemoryWithOutbox(ctx, input(observation.id, ctx.tenantId), []);
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(await labelRows(store, ctx)).toEqual([["alpha", "proposed", 1]]);
+  });
+});

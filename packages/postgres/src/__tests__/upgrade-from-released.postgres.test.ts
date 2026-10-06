@@ -86,6 +86,15 @@ for (const fixture of FIXTURES) {
     let client: PostgresClient;
     let rowsBefore: unknown[];
     let rowsAfter: unknown[];
+    // Issue #1775 の #717: labels の backfill（migration `labels`/`memory_labels` を足す版）の直後の凍結値。
+    let hadLabelsTableBefore: boolean;
+    let backfillAfter:
+      | {
+          tags: { id: string; tenant_id: string; tags: string[] }[];
+          labels: { tenant_id: string; name: string; status: string; proposed_count: number }[];
+          links: { memory_id: string; tenant_id: string; name: string }[];
+        }
+      | undefined;
     let pendingBefore: string[];
     const applied: string[][] = [];
 
@@ -142,6 +151,8 @@ for (const fixture of FIXTURES) {
       // migration の前には書けない。
       await q("UPDATE memories SET tags = ARRAY['legacy-residue'] WHERE purged_at IS NOT NULL");
       rowsBefore = await snapshotRows();
+      hadLabelsTableBefore =
+        (await q<{ t: string | null }>("SELECT to_regclass('labels')::text AS t"))[0]!.t !== null;
 
       applied.push((await runMigrations(client.pool)).applied);
       applied.push((await runMigrations(client.pool)).applied);
@@ -156,6 +167,16 @@ for (const fixture of FIXTURES) {
       // 結果が左右される——vitest の実行順は既定では宣言順だが、`--sequence.shuffle` では
       // 変わる（実測: seed 1790682813243 ほかで赤くなった）。
       rowsAfter = await snapshotRows();
+      backfillAfter = {
+        tags: await q("SELECT id, tenant_id, tags FROM memories ORDER BY id"),
+        labels: await q(
+          "SELECT tenant_id, name, status, proposed_count::int AS proposed_count FROM labels ORDER BY tenant_id, name",
+        ),
+        links: await q(
+          `SELECT ml.memory_id, ml.tenant_id, l.name FROM memory_labels ml JOIN labels l ON l.id = ml.label_id
+           ORDER BY ml.memory_id, l.name`,
+        ),
+      };
     });
 
     afterAll(async () => {
@@ -166,6 +187,34 @@ for (const fixture of FIXTURES) {
     it("1回目は台帳に無い migration だけを当て、2回目は何も当てない", () => {
       expect(applied[0]).toEqual(pendingBefore);
       expect(applied[1]).toEqual([]);
+    });
+
+    // Issue #1775 の #717（変異22・23）: labels の backfill（ADR 0318 決定1・PR 本文「backfill を含む」）。
+    // `labels`・`memory_labels` を足す migration より前の版の DB では、`memories.tags` から、
+    // (tenant, tag) ごとの `proposed_count`（その tag を持つ行数）と、記憶と tag の紐付けが作られる。
+    // 期待値は fixture 自身の `tags` から引く（fixture は読むだけで書き換えない）。
+    // 変異: backfill が消える（labels の INSERT／memory_labels の INSERT を落とす）で赤になる。
+    it("labels の backfill: memories.tags から (tenant, tag) ごとの proposed_count と memory_labels の紐付けが作られる", () => {
+      if (hadLabelsTableBefore) return; // この版は labels の migration を適用済み（backfill は走らない）。
+      const { tags, labels, links } = backfillAfter!;
+      const expectedCounts = new Map<string, number>();
+      const expectedLinks = new Set<string>();
+      for (const row of tags) {
+        for (const tag of row.tags) {
+          const key = JSON.stringify([row.tenant_id, tag]);
+          expectedCounts.set(key, (expectedCounts.get(key) ?? 0) + 1);
+          expectedLinks.add(JSON.stringify([row.id, row.tenant_id, tag]));
+        }
+      }
+      // 陽性対照: fixture に tags を持つ行が在る（無ければこの歯は空振りする）。
+      expect(expectedCounts.size).toBeGreaterThan(0);
+      expect(
+        new Map(labels.map((l) => [JSON.stringify([l.tenant_id, l.name]), l.proposed_count])),
+      ).toEqual(expectedCounts);
+      expect(labels.every((l) => l.status === "proposed")).toBe(true);
+      expect(new Set(links.map((l) => JSON.stringify([l.memory_id, l.tenant_id, l.name])))).toEqual(
+        expectedLinks,
+      );
     });
 
     it("idx_memories_lexical は 0025（Issue #1222・ADR 0364）の式に作り直されている", async () => {
