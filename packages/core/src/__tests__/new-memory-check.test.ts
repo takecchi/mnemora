@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { MemorySchema, NewMemorySchema } from "../memory.js";
 import { assertWellFormedNewMemory } from "../new-memory-check.js";
 import type { NewMemory } from "../memory.js";
-import { MALFORMED_NEW_MEMORY_CASES, WELL_FORMED_NEW_MEMORY_CASES } from "./malformed-new-memory-cases.js";
+import {
+  MALFORMED_NEW_MEMORY_CASES,
+  WELL_FORMED_NEW_MEMORY_CASES,
+} from "./malformed-new-memory-cases.js";
 
 /** ADR 0630: 3つの実装が共有する検査関数（`assertWellFormedNewMemory`）そのものの歯。 */
 

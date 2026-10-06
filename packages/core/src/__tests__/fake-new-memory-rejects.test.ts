@@ -4,7 +4,10 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { MemorySchema } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
-import { MALFORMED_NEW_MEMORY_CASES, WELL_FORMED_NEW_MEMORY_CASES } from "./malformed-new-memory-cases.js";
+import {
+  MALFORMED_NEW_MEMORY_CASES,
+  WELL_FORMED_NEW_MEMORY_CASES,
+} from "./malformed-new-memory-cases.js";
 
 /**
  * ADR 0630: core の Fake（`FakeMemoryStore`）の3つの書き込みの口が、読み戻すと `MemorySchema` を通らない
@@ -73,40 +76,43 @@ async function setup() {
   return { store, obs, input, state };
 }
 
-describe.each(WRITES)("FakeMemoryStore.%s は、読み戻すと MemorySchema を通らない値を入口で拒む（ADR 0630）", (_name, write) => {
-  it.each(MALFORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
-    "%s は拒み、何も書かない",
-    async (_label, c) => {
-      const { store, obs, input, state } = await setup();
-      const before = await state();
-      await expect(write(store, input(c.over(obs)))).rejects.toThrow(c.field);
-      expect(await state()).toBe(before);
-    },
-  );
+describe.each(WRITES)(
+  "FakeMemoryStore.%s は、読み戻すと MemorySchema を通らない値を入口で拒む（ADR 0630）",
+  (_name, write) => {
+    it.each(MALFORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
+      "%s は拒み、何も書かない",
+      async (_label, c) => {
+        const { store, obs, input, state } = await setup();
+        const before = await state();
+        await expect(write(store, input(c.over(obs)))).rejects.toThrow(c.field);
+        expect(await state()).toBe(before);
+      },
+    );
 
-  it.each(MALFORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
-    "%s は、冪等の既存の行が在っても拒む",
-    async (_label, c) => {
-      const { store, obs, input, state } = await setup();
-      const existing = await write(store, input());
-      const before = await state();
-      // 既存の行と同じ冪等キー（観測・抽出器の版・contentHash）で、壊れた値を渡す。
-      const bad = { ...input(c.over(obs)) };
-      await expect(write(store, bad)).rejects.toThrow(c.field);
-      expect(await state()).toBe(before);
-      expect(existing.id).toBeDefined();
-    },
-  );
+    it.each(MALFORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
+      "%s は、冪等の既存の行が在っても拒む",
+      async (_label, c) => {
+        const { store, obs, input, state } = await setup();
+        const existing = await write(store, input());
+        const before = await state();
+        // 既存の行と同じ冪等キー（観測・抽出器の版・contentHash）で、壊れた値を渡す。
+        const bad = { ...input(c.over(obs)) };
+        await expect(write(store, bad)).rejects.toThrow(c.field);
+        expect(await state()).toBe(before);
+        expect(existing.id).toBeDefined();
+      },
+    );
 
-  it.each(WELL_FORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
-    "%s は通り、読み戻した Memory は MemorySchema を通る",
-    async (_label, c) => {
-      const { store, obs, input } = await setup();
-      const memory = await write(store, input(c.over(obs)));
-      expect(MemorySchema.safeParse(memory).success).toBe(true);
-    },
-  );
-});
+    it.each(WELL_FORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
+      "%s は通り、読み戻した Memory は MemorySchema を通る",
+      async (_label, c) => {
+        const { store, obs, input } = await setup();
+        const memory = await write(store, input(c.over(obs)));
+        expect(MemorySchema.safeParse(memory).success).toBe(true);
+      },
+    );
+  },
+);
 
 describe("FakeMemoryStore.supersedeWithNewMemories: news の2件目が壊れていたら、1件目も書かない", () => {
   it("1件目の Memory・ラベル・outbox が残らない", async () => {

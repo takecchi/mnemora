@@ -230,6 +230,7 @@ export interface Memory {
    *
    * ⚠ この拒否は**書き込みの口だけ**の話である。それより前に書かれた行（片側だけの列を持つ行など）は読み側に残りうる。
    * 読み出しの口はそれを**鍵なし**として扱い続ける（`findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` にも数えられない）。
+   */
   claimKey?: ClaimKey | null;
 
   /**
