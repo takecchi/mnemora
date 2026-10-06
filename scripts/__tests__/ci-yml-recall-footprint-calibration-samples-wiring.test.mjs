@@ -181,6 +181,24 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
     expect(benchStep?.run).toContain("run recall-footprint-calibration-samples");
   });
 
+  // Issue #1775 の #728（変異22）: ci.yml が呼ぶ名前は、examples/chat の package.json の scripts にあり、
+  // その scripts が叩く cli.ts のサブコマンドも在る。名前が食い違うと、CI の実行そのものが落ちるが、
+  // 他の歯（出力・要約・基準値）はどれも ci.yml と cli.ts のつながりを見ていなかった。
+  it("⭐ ci.yml が run で呼ぶ名前が、package.json の scripts と cli.ts のサブコマンドの両方に在る", () => {
+    const called = /run\s+(recall-footprint-calibration-samples)\b/.exec(benchStep?.run ?? "")?.[1];
+    expect(called, "ci.yml の bench の段が run で呼ぶ名前が見つからない").toBeDefined();
+    const packageJson = JSON.parse(
+      readFileSync(join(repoRoot, "examples/chat/package.json"), "utf8"),
+    );
+    const script = packageJson.scripts?.[called];
+    expect(script, `examples/chat/package.json の scripts に ${called} が無い`).toBeDefined();
+    // scripts の値は cli.ts を、同じ名前のサブコマンドで呼ぶ。
+    const commandInScript = /src\/cli\.ts\s+(\S+)/.exec(script)?.[1];
+    expect(commandInScript).toBe(called);
+    const cli = readFileSync(join(repoRoot, "examples/chat/src/cli.ts"), "utf8");
+    expect(cli).toContain(`command === "${commandInScript}"`);
+  });
+
   it("⭐ bench が JSON を書く先と、要約が読む先が同じ場所を指している", () => {
     expect(
       summaryStep,
