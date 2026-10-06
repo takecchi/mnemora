@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as MnemoraPostgres from "@mnemora/postgres";
 
 // `close()` 自体が失敗する状況を作る：本物の `closePostgresClient` を呼んでから、わざと reject する。
 vi.mock("@mnemora/postgres", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@mnemora/postgres")>();
+  const actual = await importOriginal<typeof MnemoraPostgres>();
   return {
     ...actual,
     closePostgresClient: vi.fn(async (client: Parameters<typeof actual.closePostgresClient>[0]) => {
