@@ -95,12 +95,7 @@ describe("core の Fake: 壊れた候補を含む抽出結果（ADR 0630）", ()
     expect(await stores.eventStore.list(ctx, { kind: "created" })).toEqual([]);
   });
 
-  it("RuntimeConfig.extractorVersion が空文字なら、候補は全件書けず、observe は投げる（今の振る舞い）", async () => {
-    const { runtime, stores } = makeKit("");
-    candidates = ["一件目の事実"];
-    await expect(runtime.observe(ctx, { kind: "utterance", text: "発話" })).rejects.toThrow(
-      /extractorVersion is malformed/,
-    );
-    expect(await stores.eventStore.list(ctx, { kind: "created" })).toEqual([]);
+  it("RuntimeConfig.extractorVersion が空文字なら、createRuntime が組み立ての時点で投げる", () => {
+    expect(() => makeKit("")).toThrow(/extractorVersion must not be empty or whitespace-only/);
   });
 });

@@ -10,7 +10,8 @@ import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 /**
  * ADR 0630: `observe` の経路で、store が「書いたら読み戻すと `MemorySchema` を通らない」候補を拒んだとき、
  * その候補だけが落ち（`created` の `meta.droppedCandidates` に残る）、observe 全体は落ちず、ほかの候補は書かれる。
- * 全件が壊れていれば、observe は最初の例外のまま投げ、何も書かない。`RuntimeConfig.extractorVersion` が空文字のときも同じ。
+ * 全件が壊れていれば、observe は最初の例外のまま投げ、何も書かない。
+ * （`RuntimeConfig.extractorVersion` の空文字は、`createRuntime` が組み立ての時点で拒む。）
  * testkit の `InMemoryMemoryStore`（`createMemoriesWithOutboxAndEvents` を持つ。1つのまとまりで書く経路）の側。
  * `@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts`、core の Fake は
  * `observe-new-memory-malformed-candidate-fake.test.ts`。
@@ -113,12 +114,7 @@ describe("InMemoryMemoryStore: 壊れた候補を含む抽出結果（ADR 0630�
     expect(memoryStore.events.filter((e) => e.kind === "created")).toEqual([]);
   });
 
-  it("RuntimeConfig.extractorVersion が空文字なら、候補は全件書けず、observe は投げる（今の振る舞い）", async () => {
-    const { runtime, memoryStore } = makeKit("");
-    candidates = ["一件目の事実"];
-    await expect(runtime.observe(ctx, { kind: "utterance", text: "発話" })).rejects.toThrow(
-      /extractorVersion is malformed/,
-    );
-    expect(memoryStore.listByTenant(ctx)).toEqual([]);
+  it("RuntimeConfig.extractorVersion が空文字なら、createRuntime が組み立ての時点で投げる", () => {
+    expect(() => makeKit("")).toThrow(/extractorVersion must not be empty or whitespace-only/);
   });
 });

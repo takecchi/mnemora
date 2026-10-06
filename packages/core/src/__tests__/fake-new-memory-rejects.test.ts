@@ -150,6 +150,39 @@ describe("FakeMemoryStore.supersedeWithNewMemories: news の2件目が壊れて�
   });
 });
 
+describe("FakeMemoryStore.supersedeWithNewMemories: 例外の順（ADR 0630）", () => {
+  it("壊れた news と存在しない対象が同時なら、壊れた値の例外（is malformed）が先に出る", async () => {
+    const { store, input, state } = await setup();
+    const before = await state();
+    const missing = "00000000-0000-4000-8000-000000000001";
+    const outcome = await store.supersedeWithNewMemories!(
+      ctx,
+      [{ input: input({ digest: "" }), jobKinds: ["embed"] }],
+      [
+        {
+          id: missing as never,
+          supersededByIndex: 0,
+          event: {
+            tenantId: ctx.tenantId,
+            memoryId: missing as never,
+            kind: "superseded",
+            actor: { type: "system" },
+            digestSnapshot: "d",
+            sizeBeforeBytes: null,
+            meta: { reason: "test" },
+          },
+        },
+      ],
+    ).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    expect(String(outcome)).toMatch(/digest is malformed/);
+    expect(String(outcome)).not.toMatch(/memory not found/);
+    expect(await state()).toBe(before);
+  });
+});
+
 describe("FakeMemoryStore: 範囲外の口は拒まない（ADR 0630）", () => {
   // 変異試験（2026-10-06）: Observation の書き込みに「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
   it("createObservation・createObservationWithOutbox は、attributes の値が文字列でなくても、この検査では拒まない", async () => {

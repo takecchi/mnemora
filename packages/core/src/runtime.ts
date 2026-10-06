@@ -126,7 +126,9 @@ import { listRelatedLevel } from "./relation-level.js";
 export interface RuntimeConfig {
   /**
    * 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。
-   * 省略時（`undefined`・`null`）は `"v1"`。空文字は既定に倒れず、空文字のまま書かれる。
+   * 省略時（`undefined`・`null`）は `"v1"`。空文字・空白だけの値は既定に倒れず、`createRuntime` が
+   * 組み立ての時点で `Error` を投げて拒む（書くと、読み戻したときに `MemorySchema` を通らないため。ADR 0630）。
+   * 前後に空白のある値（`" v1 "`）は拒まず、そのまま書く。
    */
   extractorVersion?: string | undefined;
   /**
@@ -4311,7 +4313,9 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
 /**
  * {@link Runtime} を組み立てる。
  *
- * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。
+ * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。ただし1つだけ例外がある:
+ * `config.extractorVersion` が空文字・空白だけ（`trim()` が空）なら、`createRuntime` が素の `Error`
+ * （`createRuntime: config.extractorVersion must not be empty or whitespace-only`）を投げる。`undefined`・`null` は既定に倒す。
  * 2026-09-27 に Postgres と testkit の fixture の両方で当てた）。省略した欄は各欄の doc にある
  * 既定値に倒れ、足りない依存や型の外の値は、組み立てでは落ちずに最初の呼び出しで現れる:
  * - 必須の store・`hashContent` が無い: それを使う最初の呼び出しが `TypeError` を投げる
@@ -4330,6 +4334,9 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const clock = deps.clock ?? systemClock;
   const extractorVersion = deps.config?.extractorVersion ?? DEFAULT_EXTRACTOR_VERSION;
+  if (typeof extractorVersion === "string" && extractorVersion.trim() === "") {
+    throw new Error("createRuntime: config.extractorVersion must not be empty or whitespace-only");
+  }
   // 空文字は省略と同じに扱う（`RuntimeConfig.llmModelId`・`promptVersion` の TSDoc）。空文字のまま書くと、
   // inferred の provenance が `ProvenanceSchema`（`model`・`promptVersion` は `min(1)`）を通らなくなる。
   const llmModelId = deps.config?.llmModelId || DEFAULT_LLM_MODEL_ID;
