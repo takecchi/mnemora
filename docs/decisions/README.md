@@ -652,5 +652,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0659](./0659-merged-0929-recheck-followups.md) | 09/29 マージ分の確かめ直し（ADR 0645・0646）の後始末——tick のコメントの言い回し・適合テストの穴・ADR 0390 の欄のすり抜け・ADR 0352 と書かれた誤りの訂正 | 採用 (2026-10) |
 | [0660](./0660-merged-1002-1004-recheck-teeth.md) | 10/02〜10/04 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1759） | 採用 (2026-10) |
 | [0661](./0661-bullmq-stop-last-worker-redis-teeth-mutation.md) | #1741（ADR 0655）の Redis の歯に変異を当て、すり抜けた2つを塞ぐ歯を足す（Issue #1758） | 採用 (2026-10) |
+| [0662](./0662-label-lock-order-teeth-observe-locks-directly.md) | labels の行ロックの先取り（ADR 0511）の順・取りすぎ・強さを、ロックそのものを外から見る歯で縛る（Issue #1718） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
