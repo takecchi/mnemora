@@ -178,6 +178,26 @@ describe("Runtime のメソッドが3文書（README/vision/architecture）で�
     expect(extractMethodNamesFromBlock(block)).toEqual(["required", "optional", "optionalGeneric"]);
   });
 
+  it("陰性対照（Issue #1804 の確かめ直し、クローン（miku）の判断）: 行頭2スペース以外・コメント内・メソッドでない行は抽出しない", () => {
+    // fixture: 抽出が緩む方向（`^ {2,}`・`m` 無し・コメント行を拾う等）に壊れても、
+    // 本体の it（中核動詞を含むか・10個以上か）は緑のままになる。名前の集合が過剰に増える壊れ方を、固定で示す。
+    const block = [
+      "export interface Sample {",
+      "  /**",
+      "   * nestedInComment(ctx) は doc コメントの中の文字列で、メソッドではない。",
+      "   */",
+      "  field: string;",
+      "  real(",
+      "    nestedParam(x: number): void,",
+      "  ): Promise<void>;",
+      "    indented4(ctx: Ctx): void;",
+      "\tTabbed(ctx: Ctx): void;",
+      "}",
+    ].join("\n");
+
+    expect(extractMethodNamesFromBlock(block)).toEqual(["real"]);
+  });
+
   it("この歯が読んでいる3文書が、実在して空でない", () => {
     for (const doc of LIVE_DOCS) {
       const text = readFileSync(doc.path, "utf8");
