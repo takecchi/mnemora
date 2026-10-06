@@ -644,6 +644,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0638](./0638-run-migrations-reruns-file-once-on-embedding-index-name-race.md) | `runMigrations` は、`registerEmbeddingSpace` と索引名がぶつかって `23505` で落ちたファイルを、1回だけ流し直す（ADR 0464 の負債 D1b、逆向き） | 採用 (2026-10) |
 | [0639](./0639-observe-resend-breakdown.md) | `Runtime.observe` の冪等な再送の戻り値に、記憶の内訳 `resend` を足す | 採用 (2026-10) |
 | [0640](./0640-fixture-write-ports-reject-below-timestamptz-floor.md) | testkit の fixture と core の Fake は、行に日時を書く口で `timestamptz` の下限より前を、書く前に `RangeError` で断る（ADR 0500 の【未確認】を実測で埋める） | 採用 (2026-10) |
+| [0641](./0641-merged-0930-docs-recheck-teeth.md) | 09/30 にマージされた文書の PR（H 群：#1494・#1503・#1536）の確かめ直しで見つかった「約束の内」の穴7本に歯を足す | 採用 (2026-10) |
 | [0645](./0645-merged-0929-recheck-teeth-a.md) | 09/29 にマージされた #1380・#1393・#1394・#1395・#1396・#1405・#1406・#1408・#1410・#1421・#1427・#1437・#1442・#1444・#1455 の確かめ直しで見つかった穴に歯を足す（保守操作の activityCounting の配線・注入した時計の失敗側・pool の警告の形・縮退の幅・テナントの柵・purge の派生物・Fake の deleteAcrossSpaces・scopeAggregate の skip の目次帯・eraseTenant の束ね方ほか） | 採用 (2026-10) |
 | [0646](./0646-merged-0929-recheck-teeth-b.md) | 09/29 にマージされた #1385・#1388・#1389・#1392・#1397・#1398・#1399・#1401・#1402・#1404・#1407・#1411・#1424・#1428・#1431・#1434・#1435 の確かめ直しで見つかった穴に歯を足す（tick の中断・consolidate/reflect の signal の配線・分割推論の並び・期限の積・claim key・材料の forget の見直し・反転の一文の既定ほか） | 採用 (2026-10) |
 | [0655](./0655-bullmq-stop-removes-scheduler-only-when-last-worker.md) | `@mnemora/bullmq` の `stop()` は、この queue に自分以外の Worker が居るとき共有 scheduler を消さない（ADR 0449 の材料3の一部を直す） | 採用 (2026-10) |
