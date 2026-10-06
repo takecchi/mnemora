@@ -284,7 +284,7 @@ export function findLicenseViolations(manifest, packageDir) {
  * ことの目印である）。
  */
 export function findVersionViolations(manifest) {
-  if (manifest.version === "0.0.0" || !manifest.version) {
+  if (!manifest.version) {
     return [`version が未設定か 0.0.0 のままです: ${manifest.version}`];
   }
   return [];
