@@ -16,6 +16,7 @@ type Cand = {
   subjectId?: string | null;
   tags?: string[];
   digest?: string;
+  confidence?: number;
 };
 
 function llm(memories: Cand[]): LLMProvider {
@@ -65,6 +66,31 @@ describe("subjectCandidates 無しの抽出は、LLM が返した subjectId を�
     expect(m?.content).toBe("注入された主題の記憶");
     expect(m?.tags).toEqual(["t1"]);
     expect(m?.digest).toBe("要旨");
+  });
+
+  it("捨てても provenanceKind・confidence は変わらない（stated は stated、inferred の confidence はそのまま）", async () => {
+    const { runtime, stores } = build(
+      llm([
+        { content: "述べた記憶", provenanceKind: "stated", subjectId: "victim-subject" },
+        {
+          content: "推論した記憶",
+          provenanceKind: "inferred",
+          confidence: 0.42,
+          subjectId: "victim-subject",
+        },
+      ]),
+    );
+    const r = await runtime.observe(ctx, { kind: "utterance", text: "発話", subjectId: "alice" });
+    const all = await stores.memoryStore.listBySourceObservationAllVersions(ctx, r.observationId);
+    const stated = all.find((m) => m.content === "述べた記憶");
+    const inferred = all.find((m) => m.content === "推論した記憶");
+    expect(stated?.subjectId).toBe("alice");
+    expect(stated?.provenance.kind).toBe("stated");
+    expect(inferred?.subjectId).toBe("alice");
+    expect(inferred?.provenance.kind).toBe("inferred");
+    expect(
+      inferred?.provenance.kind === "inferred" ? inferred.provenance.confidence : undefined,
+    ).toBe(0.42);
   });
 
   it("observe: observation に主題が無ければ主題なし（null）になる", async () => {
@@ -180,6 +206,26 @@ describe("acceptLlmSubjectIdWithoutCandidates: true（opt-in）なら、従来�
     const r = await runtime.observe(ctx, { kind: "utterance", text: "発話", subjectId: "alice" });
     const m = await stores.memoryStore.get(ctx, r.memoryIds[0]!);
     expect(m?.subjectId).toBe("victim-subject");
+  });
+
+  it("subjectCandidates を渡した observe は、opt-in でも一覧に照らす（一覧外は弾いて rejectedSubjectIds に載る）", async () => {
+    const { runtime, stores } = build(
+      llm([
+        { content: "Aの話", provenanceKind: "stated", subjectId: "user:a" },
+        { content: "一覧外の話", provenanceKind: "stated", subjectId: "victim-subject" },
+      ]),
+      on,
+    );
+    const r = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      subjectId: "alice",
+      subjectCandidates: ["user:a"],
+    });
+    const all = await stores.memoryStore.listBySourceObservationAllVersions(ctx, r.observationId);
+    expect(all.find((m) => m.content === "Aの話")?.subjectId).toBe("user:a");
+    expect(all.find((m) => m.content === "一覧外の話")?.subjectId).toBe("alice");
+    expect(r.rejectedSubjectIds).toEqual(["victim-subject"]);
   });
 
   it("observe: 明示の null も受ける", async () => {
