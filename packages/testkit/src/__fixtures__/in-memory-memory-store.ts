@@ -66,7 +66,6 @@ import {
 import {
   assertQueryDate,
   assertQueryTimestamptz,
-  assertQueryInteger,
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
   assertQueryBigint,
