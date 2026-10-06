@@ -1607,11 +1607,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     // Issue #1237: 省略時は1回だけ壁時計を読み、news に積む outbox 行すべてに使う。
     const outboxNow = opts?.now ?? new Date();
     const buildCreatedEvent = opts?.buildCreatedEvent;
-    // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
-    //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
+    // 0. `@mnemora/postgres` と同じ順（RangeError → news の検査 → 対象の存在）。壊れた news と存在しない対象が
+    //    同時にあれば、壊れた値の例外が先に出る。
+    // 0a. 呼び手が壊れた索引を渡した（RangeError。conflicted にも not found にも混ぜない）。
     for (const target of supersede) {
-      assertStorableMemoryEvent(target.event);
-      // 1a. 呼び手が壊れた索引を渡した（RangeError。conflicted にも not found にも混ぜない）。
       if (
         !Number.isInteger(target.supersededByIndex) ||
         target.supersededByIndex < 0 ||
@@ -1621,6 +1620,15 @@ export class InMemoryMemoryStore implements MemoryStore {
           `InMemoryMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
         );
       }
+    }
+    // 0b. ADR 0630: 書いたら読み戻したときに MemorySchema を通らなくなる値は、対象の存在の検査より前に拒む。
+    for (const { input } of news) {
+      assertWellFormedNewMemory("InMemoryMemoryStore", input);
+    }
+    // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
+    //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
+    for (const target of supersede) {
+      assertStorableMemoryEvent(target.event);
       // 1b. 対象の行がそもそも無い。
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {

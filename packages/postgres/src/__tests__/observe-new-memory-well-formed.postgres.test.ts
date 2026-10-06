@@ -123,20 +123,11 @@ describe("observe: 正規の入力は、入口の検査（ADR 0630）で落ち�
   });
 });
 
-describe("observe: RuntimeConfig.extractorVersion が空文字（今の振る舞い。ADR 0630）", () => {
-  it("書けない（以前は書けて、読み戻すと MemorySchema を通らなかった）", async () => {
-    await resetTestDatabase();
-    const { runtime } = await build(
-      [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }],
-      "",
-    );
-    // 全候補が保存できないので、observe は最初の例外（この検査の Error）を投げる。Memory は 0 件。
+describe("RuntimeConfig.extractorVersion が空文字（ADR 0630）", () => {
+  it("createRuntime が組み立ての時点で投げる（以前は書けて、読み戻すと MemorySchema を通らなかった）", async () => {
     await expect(
-      runtime.observe(ctx, { kind: "utterance", text: "好きな食べ物はラーメン" }),
-    ).rejects.toThrow(/extractorVersion is malformed/);
-    const { pool } = await getTestClient();
-    const r = await pool.query("SELECT count(*)::int AS n FROM memories");
-    expect((r.rows[0] as { n: number }).n).toBe(0);
+      build([{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }], ""),
+    ).rejects.toThrow(/extractorVersion must not be empty or whitespace-only/);
   });
 });
 
