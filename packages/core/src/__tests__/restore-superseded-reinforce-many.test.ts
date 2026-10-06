@@ -120,3 +120,109 @@ describe("restoreSuperseded は群の強化を reinforceMany に束ねる", () =
     }
   });
 });
+
+describe("restoreSuperseded が reinforceMany へ渡すもの・返ってきたものの扱い", () => {
+  /** reinforceMany の呼び出しを記録し、1件ずつの reinforce が呼ばれた回数も数える。 */
+  function spyOnReinforce(stores: Awaited<ReturnType<typeof setUpGroup>>["stores"]) {
+    const originalReinforce = stores.memoryStore.reinforce.bind(stores.memoryStore);
+    const manyCalls: { ids: MemoryId[]; at: Date; opts: unknown }[] = [];
+    let singleCalls = 0;
+    // 先に束ね口を差し替える（元の reinforceMany は内部で this.reinforce を呼ぶので、
+    // 1件ずつの reinforce の数は、runtime が直接呼んだぶんだけが数えられるようにする）。
+    stores.memoryStore.reinforceMany = async (c, memoryIds, at, opts) => {
+      manyCalls.push({ ids: [...memoryIds], at, opts });
+      const out = [];
+      for (const id of memoryIds) {
+        out.push(await originalReinforce(c, id, at, opts));
+      }
+      return out;
+    };
+    stores.memoryStore.reinforce = async (c, id, at, opts) => {
+      singleCalls += 1;
+      return originalReinforce(c, id, at, opts);
+    };
+    return { manyCalls, singleCalls: () => singleCalls };
+  }
+
+  it("束ねた強化が成功したら、1件ずつの reinforce は1回も呼ばない", async () => {
+    const { stores, runtime, supersededById } = await setUpGroup(3);
+    const spy = spyOnReinforce(stores);
+
+    await runtime.restoreSuperseded(ctx, { supersededById });
+
+    expect(spy.manyCalls).toHaveLength(1);
+    expect(spy.singleCalls()).toBe(0);
+  });
+
+  it("束ねる対象は戻した記憶だけ（onlyMemoryIds で外した記憶・archived に進んだ記憶は含めない）", async () => {
+    const { stores, runtime, ids, supersededById } = await setUpGroup(4);
+    const [restoredId, leftOutId, archivedId] = [ids[0]!, ids[1]!, ids[2]!];
+    await stores.memoryStore.updateStatus(ctx, archivedId, "archived");
+    const spy = spyOnReinforce(stores);
+
+    const result = await runtime.restoreSuperseded(ctx, {
+      supersededById,
+      onlyMemoryIds: [restoredId, archivedId],
+    });
+
+    expect(result.outcomes.map((o) => o.memoryId)).toEqual([restoredId]);
+    expect(spy.manyCalls).toHaveLength(1);
+    expect(spy.manyCalls[0]!.ids).toEqual([restoredId]);
+    expect(spy.manyCalls[0]!.ids).not.toContain(leftOutId);
+    expect(spy.manyCalls[0]!.ids).not.toContain(archivedId);
+  });
+
+  it("束ねる対象は戻した記憶の全件で、強化の時刻は clock.now() そのもの", async () => {
+    const { stores, runtime, ids, supersededById } = await setUpGroup(3);
+    const spy = spyOnReinforce(stores);
+
+    await runtime.restoreSuperseded(ctx, { supersededById });
+
+    expect(spy.manyCalls).toHaveLength(1);
+    expect([...spy.manyCalls[0]!.ids].sort()).toEqual([...ids].sort());
+    expect(spy.manyCalls[0]!.at).toEqual(NOW);
+  });
+
+  it("活動時計のテナントでは、reinforce に渡す強化の設定（nowSeq）を束ねた強化にも渡す", async () => {
+    const { stores, runtime, supersededById } = await setUpGroup(2);
+    await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
+    const spy = spyOnReinforce(stores);
+
+    await runtime.restoreSuperseded(ctx, { supersededById });
+
+    expect(spy.manyCalls).toHaveLength(1);
+    expect(spy.manyCalls[0]!.opts).toHaveProperty("nowSeq");
+  });
+
+  it("戻した記憶が0件なら、束ねた強化も1件ずつの強化も呼ばない", async () => {
+    const { stores, runtime, ids, supersededById } = await setUpGroup(2);
+    for (const id of ids) {
+      await stores.memoryStore.updateStatus(ctx, id, "archived");
+    }
+    const spy = spyOnReinforce(stores);
+
+    const result = await runtime.restoreSuperseded(ctx, { supersededById });
+
+    expect(result).toEqual({ supported: true, supersedingMemoryId: supersededById, outcomes: [] });
+    expect(spy.manyCalls).toHaveLength(0);
+    expect(spy.singleCalls()).toBe(0);
+  });
+
+  it("outcome の decayFloorAt は、束ねた強化が返した記憶の値（戻す前の値ではない）", async () => {
+    const { stores, runtime, ids, supersededById } = await setUpGroup(2);
+    const reinforcedFloor = new Date("2031-05-05T00:00:00.000Z");
+    const originalMany = stores.memoryStore.reinforceMany.bind(stores.memoryStore);
+    stores.memoryStore.reinforceMany = async (c, memoryIds, at, opts) =>
+      (await originalMany(c, memoryIds, at, opts)).map((m) => ({
+        ...m,
+        decayFloorAt: reinforcedFloor,
+      }));
+
+    const result = await runtime.restoreSuperseded(ctx, { supersededById });
+
+    expect(result.outcomes).toHaveLength(ids.length);
+    for (const outcome of result.outcomes) {
+      expect(outcome).toMatchObject({ kind: "restored", decayFloorAt: reinforcedFloor });
+    }
+  });
+});
