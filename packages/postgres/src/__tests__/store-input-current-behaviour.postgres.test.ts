@@ -389,6 +389,18 @@ describe.each(KITS)("範囲外は、この検査では拒まない（ADR 0630）
     ).resolves.toBeDefined();
   });
 
+  // 変異試験（2026-10-06）: createObservationWithOutbox に「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
+  it("createObservationWithOutbox: attributes の値が文字列でなくても、この検査では拒まない（Observation は範囲外）", async () => {
+    const store = await build();
+    await expect(
+      store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: ctx.tenantId, attributes: { a: 1 } as never }),
+        [],
+      ),
+    ).resolves.toBeDefined();
+  });
+
   it("Memory の subjectId の空文字は、この検査の message では拒まれない（別の担当の件）", async () => {
     const store = await build();
     const outcome = await store

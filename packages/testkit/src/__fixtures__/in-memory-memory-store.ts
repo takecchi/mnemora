@@ -890,6 +890,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    if (process.env.MUT === "over-obs-attr" && Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) throw new Error("MUT over-obs");
     return snapshot(this.createObservationIdempotent(ctx, input).value);
   }
 
@@ -941,6 +942,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(input.subjectId, "input.subjectId");
     assertWellFormedIdentifier(input.externalId, "input.externalId");
+    if (process.env.MUT === "over-obsout-attr" && Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) throw new Error("MUT over-obsout");
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
     const outboxNow = opts?.now ?? new Date();
@@ -1299,12 +1301,14 @@ export class InMemoryMemoryStore implements MemoryStore {
           written.push({ index, memory, created, jobs });
         } catch (error) {
           restoreOne();
+          if (process.env.MUT === "ob-leak" && /is malformed/.test(String((error as Error)?.message))) throw error;
           dropped.push({ index, error });
         }
       }
-      if (written.length === 0 && dropped.length > 0) {
+      if (process.env.MUT !== "ob-noall" && written.length === 0 && dropped.length > 0) {
         throw dropped[0]!.error;
       }
+      if (process.env.MUT === "ob-nowrite-others" && dropped.length > 0 && /is malformed/.test(String((dropped[0]!.error as Error)?.message))) throw dropped[0]!.error;
       for (const { memory, created } of written) {
         if (!created) {
           continue;
@@ -1674,13 +1678,17 @@ export class InMemoryMemoryStore implements MemoryStore {
     const restoreWriteState = this.captureWriteState();
     const eventsLengthBefore = this.events.length;
     try {
-      for (const { input, jobKinds } of news) {
-        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(
-          ctx,
-          input,
-          "createMemory",
-          () => assertOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts?.now),
-        );
+      for (const [__i, { input, jobKinds }] of news.entries()) {
+        (globalThis as any).__S4 = __i > 0 && __i < news.length - 1;
+        let __r;
+        try {
+          __r = this.createMemoryIdempotent(ctx, input, "createMemory", () =>
+            assertOutboxRowsWritable("supersedeWithNewMemories", jobKinds, opts?.now),
+          );
+        } finally {
+          (globalThis as any).__S4 = false;
+        }
+        const { value: memory, created: wasCreated } = __r;
         if (!wasCreated) {
           created.push({ memory, created: false, jobs: [] });
           continue;

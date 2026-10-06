@@ -15099,6 +15099,97 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           field: /provenance\.batchId/,
           over: () => ({ provenance: { kind: "imported" } as never }),
         },
+        // 変異試験（2026-10-06）で、欄の検査は残ったまま「その形だけ見逃す」変異が生き残った形（core の表と同じ）。
+        {
+          label: "provenance: stated で sourceObservationId が空文字",
+          field: /provenance\.sourceObservationId/,
+          over: (obs) => stated(obs, { sourceObservationId: "" }),
+        },
+        {
+          label: "provenance: stated で at が無い",
+          field: /provenance\.at/,
+          over: (obs) => stated(obs, { at: undefined }),
+        },
+        {
+          label: "provenance: inferred で confidence が NaN",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: Number.NaN }),
+        },
+        {
+          label: "provenance: inferred で confidence が無い",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: undefined }),
+        },
+        {
+          label: "provenance: inferred で model が空文字",
+          field: /provenance\.model/,
+          over: (obs) => inferred(obs, { model: "" }),
+        },
+        {
+          label: "provenance: inferred で promptVersion が無い",
+          field: /provenance\.promptVersion/,
+          over: (obs) => inferred(obs, { promptVersion: undefined }),
+        },
+        {
+          label: "provenance: inferred で basis.observationIds に空文字",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { memoryIds: [], observationIds: [""] } }),
+        },
+        {
+          label: "provenance: inferred で basis が無い",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: undefined }),
+        },
+        {
+          label: "provenance: consolidated で sources に空文字",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "consolidated", sources: ["m1", ""] } }),
+        },
+        {
+          label: "provenance: consolidated で sources が無い",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "consolidated" } as never }),
+        },
+        {
+          label: "provenance: reflected で sources が配列でない",
+          field: /provenance\.sources/,
+          over: () => ({ provenance: { kind: "reflected", sources: "m1" } as never }),
+        },
+        {
+          label: "provenance: inferred で confidence が文字列",
+          field: /provenance\.confidence/,
+          over: (obs) => inferred(obs, { confidence: "0.5" }),
+        },
+        {
+          label: "provenance: inferred で promptVersion が空文字",
+          field: /provenance\.promptVersion/,
+          over: (obs) => inferred(obs, { promptVersion: "" }),
+        },
+        {
+          label: "provenance: inferred で basis.memoryIds が無い",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { observationIds: [] } }),
+        },
+        {
+          label: "provenance: inferred で basis.observationIds が無い",
+          field: /provenance\.basis/,
+          over: (obs) => inferred(obs, { basis: { memoryIds: [] } }),
+        },
+        {
+          label: "attributes が文字列",
+          field: /attributes/,
+          over: () => ({ attributes: "a" as never }),
+        },
+        {
+          label: "attributes が配列",
+          field: /attributes/,
+          over: () => ({ attributes: ["a"] as never }),
+        },
+        {
+          label: "attributes の値が真偽値",
+          field: /attributes/,
+          over: () => ({ attributes: { a: true } as never }),
+        },
       ];
       const WELL_FORMED: ReadonlyArray<{
         label: string;
@@ -15114,6 +15205,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         },
         { label: "attributes が空のオブジェクト", over: () => ({ attributes: {} }) },
         { label: "attributes が省略", over: () => ({ attributes: undefined }) },
+        // `null` の `attributes` は「無い」として扱われ、`{}` で書かれる（ADR 0630 決定2）。
+        { label: "attributes が null", over: () => ({ attributes: null as never }) },
+        { label: "extractorVersion が省略", over: () => ({ extractorVersion: undefined }) },
         { label: "attributes の値が空文字", over: () => ({ attributes: { a: "" } }) },
         { label: "attributes が文字列だけ", over: () => ({ attributes: { a: "b", c: "d" } }) },
         { label: "digest が1文字", over: () => ({ digest: "d" }) },
@@ -15240,6 +15334,30 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
                   jobKinds: ["embed"],
                 },
                 { input: input({ contentHash: "second", digest: "" }), jobKinds: ["embed"] },
+              ],
+              [],
+            ),
+          ).rejects.toThrow(/digest/);
+          expect(await state()).toBe(before);
+        });
+
+        // 変異試験（2026-10-06）: 「先頭と末尾だけ検査する」変異が、3実装すべてで生き残った。途中の要素も検査する。
+        it("supersedeWithNewMemories: news の真ん中（3件中の2件目）が壊れていても、前後の Memory・ラベルも書かない", async () => {
+          const { store, input, state } = await setup();
+          const before = await state();
+          await expect(
+            store.supersedeWithNewMemories!(
+              ctx,
+              [
+                {
+                  input: input({ contentHash: "first", tags: ["only-first"] }),
+                  jobKinds: ["embed"],
+                },
+                { input: input({ contentHash: "middle", digest: "" }), jobKinds: ["embed"] },
+                {
+                  input: input({ contentHash: "last", tags: ["only-last"] }),
+                  jobKinds: ["embed"],
+                },
               ],
               [],
             ),

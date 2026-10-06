@@ -731,6 +731,7 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedIdentifier(input.externalId, "input.externalId");
     // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前）。
     assertNoNulInNewObservation("PostgresMemoryStore", input);
+    if (process.env.MUT === "over-obs-attr" && Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) throw new Error("MUT over-obs");
     const externalId = input.externalId ?? null;
     const inserted = await this.db.execute(sql`
       INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -798,6 +799,7 @@ export class PostgresMemoryStore implements MemoryStore {
     assertWellFormedIdentifier(input.externalId, "input.externalId");
     // ADR 0505: NUL は DB の生の例外でなく、名指しの例外で断る（INSERT の前）。
     assertNoNulInNewObservation("PostgresMemoryStore", input);
+    if (process.env.MUT === "over-obsout-attr" && Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) throw new Error("MUT over-obsout");
     const externalId = input.externalId ?? null;
     // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
     // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
@@ -1172,12 +1174,14 @@ export class PostgresMemoryStore implements MemoryStore {
             attachSavepointRollbackError(bodyError.error, error);
             throw bodyError.error;
           }
+          if (process.env.MUT === "ob-leak" && /is malformed/.test(String((error as Error)?.message))) throw error;
           dropped.push({ index, error });
         }
       }
-      if (written.length === 0 && dropped.length > 0) {
+      if (process.env.MUT !== "ob-noall" && written.length === 0 && dropped.length > 0) {
         throw dropped[0]!.error;
       }
+      if (process.env.MUT === "ob-nowrite-others" && dropped.length > 0 && /is malformed/.test(String((dropped[0]!.error as Error)?.message))) throw dropped[0]!.error;
       for (const { memory, created } of written) {
         if (!created) {
           continue;
@@ -1501,7 +1505,7 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     // ADR 0140: createMemory と同じ制約を `news` の各要素にも課す。1件でも違反があれば
     // トランザクションを開く前に落とす（`news`/`supersede` どちらの書き込みも起きない）。
-    for (const { input } of news) {
+    for (const [__i, { input }] of news.entries()) {
       if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
         throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
       }
@@ -1509,7 +1513,12 @@ export class PostgresMemoryStore implements MemoryStore {
       // 穴 O-6-3（ADR 0424）: contentHash の NUL も、トランザクションを開く前に落とす。
       assertNoNulInNewMemory("PostgresMemoryStore", input);
       // ADR 0630: 書いたら読み戻したときに MemorySchema を通らなくなる値は、DB に触れる前に（冪等の既存行の判定より前に）拒む。
-      assertWellFormedNewMemory("PostgresMemoryStore", input);
+      (globalThis as any).__S4 = __i > 0 && __i < news.length - 1;
+      try {
+        assertWellFormedNewMemory("PostgresMemoryStore", input);
+      } finally {
+        (globalThis as any).__S4 = false;
+      }
     }
 
     const result = await this.db.transaction(async (tx) => {

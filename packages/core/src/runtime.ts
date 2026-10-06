@@ -5067,11 +5067,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           }),
         );
       } catch (error) {
+        if ((globalThis as any).process?.env?.MUT === "ob-leak" && /is malformed/.test(String((error as Error)?.message))) throw error;
         firstError ??= { error };
         dropped.push(describeDroppedCandidate(index, newMemory.contentHash, error));
       }
     }
-    if (written.length === 0 && firstError !== null) {
+    if ((globalThis as any).process?.env?.MUT !== "ob-noall" && written.length === 0 && firstError !== null) {
       throw firstError.error;
     }
     for (const { memory, created } of written) {

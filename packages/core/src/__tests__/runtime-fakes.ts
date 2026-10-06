@@ -785,6 +785,7 @@ export class FakeMemoryStore implements MemoryStore {
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
     assertWellFormedCtx(ctx);
     // ADR 0578: 返す Observation は store の中の行ではなく写し。
+    if (process.env.MUT === "over-obs-attr" && Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) throw new Error("MUT over-obs");
     return fakeSnapshot(this.createObservationIdempotent(ctx, input).value);
   }
 
@@ -804,6 +805,7 @@ export class FakeMemoryStore implements MemoryStore {
     opts?: { now?: Date; claimedBy?: string },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     assertWellFormedCtx(ctx);
+    if (process.env.MUT === "over-obsout-attr" && Object.values(input.attributes ?? {}).some((v) => typeof v !== "string")) throw new Error("MUT over-obsout");
     // ADR 0493: 行を実際に書くときだけ、outbox の行が書けるか（`jobKinds`・`opts.now`・`opts.claimedBy`）を、何も書く前に見る。
     const { value: observation, created } = this.createObservationIdempotent(ctx, input, () =>
       assertFakeOutboxRowsWritable("createObservationWithOutbox", jobKinds, opts),
@@ -1700,8 +1702,15 @@ export class FakeMemoryStore implements MemoryStore {
     const outboxLengthBefore = this.backing.outboxJobs.length;
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
     try {
-      for (const { input, jobKinds } of news) {
-        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
+      for (const [__i, { input, jobKinds }] of news.entries()) {
+        (globalThis as any).__S4 = __i > 0 && __i < news.length - 1;
+        let __r;
+        try {
+          __r = this.createMemoryIdempotent(ctx, input);
+        } finally {
+          (globalThis as any).__S4 = false;
+        }
+        const { value: memory, created: wasCreated } = __r;
         if (!wasCreated) {
           created.push({ memory: fakeSnapshot(memory), created: false, jobs: [] });
           continue;

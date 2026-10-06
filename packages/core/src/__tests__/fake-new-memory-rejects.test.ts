@@ -130,4 +130,42 @@ describe("FakeMemoryStore.supersedeWithNewMemories: news の2件目が壊れて�
     ).rejects.toThrow(/digest/);
     expect(await state()).toBe(before);
   });
+
+  // 変異試験（2026-10-06）: 「先頭と末尾だけ検査する」変異が生き残った。途中の要素も検査する。
+  it("3件の真ん中が壊れていても拒み、前後の Memory・ラベル・outbox も残らない", async () => {
+    const { store, input, state } = await setup();
+    const before = await state();
+    await expect(
+      store.supersedeWithNewMemories!(
+        ctx,
+        [
+          { input: input({ contentHash: "first", tags: ["only-first"] }), jobKinds: ["embed"] },
+          { input: input({ contentHash: "middle", digest: "" }), jobKinds: ["embed"] },
+          { input: input({ contentHash: "last", tags: ["only-last"] }), jobKinds: ["embed"] },
+        ],
+        [],
+      ),
+    ).rejects.toThrow(/digest/);
+    expect(await state()).toBe(before);
+  });
+});
+
+describe("FakeMemoryStore: 範囲外の口は拒まない（ADR 0630）", () => {
+  // 変異試験（2026-10-06）: Observation の書き込みに「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
+  it("createObservation・createObservationWithOutbox は、attributes の値が文字列でなくても、この検査では拒まない", async () => {
+    const { store } = await setup();
+    const base = {
+      tenantId: ctx.tenantId,
+      kind: "utterance",
+      payload: { text: "t" },
+      recordedAt: new Date("2026-01-01T00:00:00Z"),
+      attributes: { a: 1 },
+    };
+    await expect(
+      store.createObservation(ctx, { ...base, externalId: "scope-1" } as never),
+    ).resolves.toBeDefined();
+    await expect(
+      store.createObservationWithOutbox(ctx, { ...base, externalId: "scope-2" } as never, []),
+    ).resolves.toBeDefined();
+  });
 });
