@@ -205,7 +205,8 @@ export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "documen
  *   ⚠ **2026-10-06（ADR 0635、オーナー回答 374f6f88 の問15）: このとき runtime は LLM が返す `subjectId` を既定で
  *   捨て、observation の `subjectId` へ落とす。**`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true` のときだけ、
  *   次の「検証されず、そのまま Memory の主題になる」が当てはまる。
- *   ⚠ **このとき LLM が返す `subjectId` は検証されず、そのまま Memory の主題になる**（opt-in のとき）——観察文の注入で
+ *   ⚠ **このとき LLM が返す `subjectId` は、一覧に照らす検証をされず、そのまま Memory の主題になる**
+ *   （opt-in のとき。NUL・孤立サロゲートを含む値だけは、ADR 0456 以降、一覧の有無に関わらず弾く）——観察文の注入で
  *   同じテナントの別の subject に記憶を書かせられ、claim key の検出を併用すると、その subject の既存の
  *   記憶が `contested` になりうる（`ExtractedMemoryCandidateSchema.subjectId` の doc、ADR 0442）。
  *   `extract: 'deferred'` の `tick` と `reextract` は一覧を持てないので、opt-in のときは常にこの扱いになる

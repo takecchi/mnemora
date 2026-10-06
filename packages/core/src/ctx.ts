@@ -45,7 +45,8 @@ import { z } from "zod";
  *
  * ⚠ **2026-09-30 訂正: 上の「例外は `externalId`」は、`observe` の入力（`ObserveInputSchema`、`observation.ts`）が
  * `min(1)` で断る欄の一部しか挙げていなかった。**`observe` の入力で、空文字（`""`）・空配列を `ZodError` にする欄は
- * 次のとおりである（どれも空白だけの文字列は受け付ける。検査そのものは変えていない）。
+ * 次のとおりである（`utterance` の `text`・`event` の `name`・`document` の `content` は、空白だけの文字列も断る
+ * — ADR 0502、2026-10-06 に今の実装に合わせて直した。ほかの欄は空白だけの文字列を受け付ける。検査そのものは変えていない）。
  * - 文字列が空文字だと断る: `subjectId`・`externalId`（4種類すべての `kind`。`memory_usage` は `subjectId` を持たない）、
  *   `utterance` の `speaker`・`text`、`event` の `name`、`document` の `title`・`content`、`memory_usage` の `recallId`。
  * - 配列の要素が空文字だと断る: `subjectCandidates`・`memory_usage` の `usedMemoryIds`・`claimKey.knownPredicates`・

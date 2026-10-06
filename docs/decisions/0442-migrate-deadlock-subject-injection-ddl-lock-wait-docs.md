@@ -68,3 +68,14 @@
 
   - 1〜3の実測は、穴探し17巡目（2026-10-01、PostgreSQL 17・ローカル）で行った。数字は上の「文脈」のとおり。
   - この変更自体は文書だけで、コードは変えていない。
+
+## 追記（2026-10-06）: `subjectId` の注入への答えは、ADR 0635 で既定が逆になった
+
+クローン（miku）の判断で残す訂正。オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。出所は Issue [#1734](https://github.com/takecchi/mnemora/issues/1734) の #1551 のコメント（確かめ直しの記録）。**本文は書き換えていない。**
+
+- **ADR 0635 への指し先**: [ADR 0635](./0635-llm-subject-id-dropped-by-default-without-candidates.md)（オーナー回答 374f6f88 の問15）で、`subjectCandidates` を渡さない経路（`tick`・`reextract` を含む）では、runtime は LLM が返した `subjectId` を**既定で捨て**、observation の `subjectId` へ落とす形になった（`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates`、既定 `false`）。この ADR の次の3か所は、その答えを待っていた記述で、今は古い。
+  - **決定2**（「文書の警告だけにした」）: 警告だけで止める形は、既定の反転で置き換わった。警告は `acceptLlmSubjectIdWithoutCandidates: true`（opt-in）のときの話になった。
+  - **検討した代替案3**（「違う値を捨てる。採らなかった。…オーナーに回した」）: 捨てる案が、オーナーの回答で既定になった。
+  - **「引き受けた負債」の3つ目**と**「これが覆るとしたら」**（「`subjectId` の検証の変更を決めたら…」）: 変更は決まった。注入は、`true` にした利用者にだけ今も起こりうる。
+- **「検証されない」の言い過ぎ**: 本文の「検証されない」は、ADR 0456（2026-10-01）以降は正確でない。NUL・孤立サロゲートを含む識別子は、一覧の有無に関わらず弾く（`sanitizeCandidateSubjectId`）。検証されないのは、一覧に照らす検証である。別の subject の名前を言わせられるという主旨は変わらない。
+- **この追記で変えなかったもの**: この ADR のほかの決定（`0027` の deadlock の文書化、DDL のロック待ちの文書化）は、ADR 0635 の影響を受けていない。
