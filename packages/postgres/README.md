@@ -160,6 +160,9 @@ create extension "vector"` で始まる文言で終わる。その次の行に�
   接続文字列の `options`・`PoolConfig.options`・`ALTER ROLE … SET lock_timeout='2s'` の3通りは、いずれも約2秒で失敗した。
   何も渡さない場合は、握っている側が手放す（約8秒後）まで待って成功した（`lockTimeoutMs: 100` は効かなかった）。
   **測っていないもの**: `lock_timeout` を `ALTER DATABASE … SET`・`PGOPTIONS` で渡した場合（`statement_timeout` はこの3通りとも測った。下の節）、pgbouncer などの接続プール越し（起動パラメータが落ちる構成がありうる）。
+- **時間切れになったとき**: そのファイルのトランザクションは `ROLLBACK` され、`migration <file> failed: canceling statement due to lock timeout`
+  で throw される（`MigrationLockTimeoutError` ではない——あれは advisory lock の待ちの時間切れ）。台帳（`_mnemora_migrations`）にも
+  載らないので、そのまま再実行できる（上の実測で、失敗後の台帳は空・列は増えていなかった）。
 - ⚠ **DDL がロックを待っている間は、その後ろに並んだアプリの操作も止まる**（[ADR 0442](../../docs/decisions/0442-migrate-deadlock-subject-injection-ddl-lock-wait-docs.md)）。
   PostgreSQL は、待っている DDL より後から来たロックの要求を、その DDL の後ろに並べる。【実測】2026-10-01、PostgreSQL 17・ローカル。
   8秒続くアプリのトランザクションが `memories` に書いている裏で、`CREATE INDEX`（`ShareLock`）を当てると、後から来た `observe()` の書き込みが
@@ -200,9 +203,6 @@ create extension "vector"` で始まる文言で終わる。その次の行に�
   詳細は [docs/migration-v1.md](../../docs/migration-v1.md) の `0027` の項目と ADR 0442。
 - **未測定**: `0027` 以外で複数の表を1トランザクションで触る migration（`0020`・`0032` など）。同じ形のものも、書き込みを止めてから当てるのが安全である。
 - 上の「複数プロセスが同時に実行しても安全（advisory lock で直列化する）」は、migrate どうしの話であり、動いているアプリとの同時実行は約束していない。
-- **時間切れになったとき**: そのファイルのトランザクションは `ROLLBACK` され、`migration <file> failed: canceling statement due to lock timeout`
-  で throw される（`MigrationLockTimeoutError` ではない——あれは advisory lock の待ちの時間切れ）。台帳（`_mnemora_migrations`）にも
-  載らないので、そのまま再実行できる（上の実測で、失敗後の台帳は空・列は増えていなかった）。
 
 ### ⚠ 新規インストール後、最初のデータ投入が終わったら `--analyze-memories` を実行すること
 
@@ -489,6 +489,8 @@ for (const outcome of observed.contestedDetection ?? []) {
 | （recall の側。上の4行とは違い、observe で群が作られた**後**の条件）群は DB に在るが、recall する runtime に `relationStore` を配線していない | `packages/core/src/recall-runtime.ts` の段3・段4（`contestedWithId` の無い `contested` 候補は仲間を辿れず、単位を組めない。`RecallRuntimeDeps.relationStore` の TSDoc）                  | その recall で、群のメンバーは同伴もヒット自身も返らない。`omitted` に `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` と `unit_assembly_dropped`（群のヒットの件数）が出る。`status` は動かない（群のまま）                                 |
 
 - `memory_events` の根拠（`note` の JSON）には claim key・新しい Memory・一致した Memory の `status`/`contentHash`/有効期間が入る。
+  一致した Memory が複数になる根拠（群と、記録だけで止まる場合）では、一致した Memory は **id の昇順の先頭 10 件**（`runtime.ts` の `CONTESTED_GROUP_NOTE_SAMPLE_LIMIT`）だけが入り、
+  全件の数が `matchCount`、切り詰めたかが `matchesTruncated` に付く（[ADR 0431](../../docs/decisions/0431-contested-group-event-growth-and-recall-cut.md)）。
 - `superseded` へは進めない。
 - **`detectContested` を渡さない（または `false`）と、検出そのものが走らない**——上の「記録するだけ」ですらなく、
   `memory_events` の根拠も積まれず、`ObserveResult.contestedDetection` の欄自体が無い（`undefined`。`runtime.ts` の `claimKeyOptions?.detectContested === true` と `input.claimKey?.detectContested === true ? { contestedDetection }`）。
