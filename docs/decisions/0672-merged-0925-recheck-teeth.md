@@ -25,6 +25,41 @@
 
 | PR | すり抜けた変異 | 足した歯（置き場所） | 変異での赤 |
 | --- | --- | --- | --- |
+| #697 | 同伴（`fetchMandatoryCompanions`）の `timeWeighting` を `undefined` にする | 2者間の対で同伴の `score.freshness` が eventAware なら 1・legacy なら 1 未満（core `recall-time-weighting-companion-association-wiring.test.ts`） | 赤（1） |
+| #697 | 同伴の別経路（relationStore）で `undefined` を渡す | 多者間の群で同上 | 赤（1） |
+| #697 | 連想枠の `timeWeighting` を `undefined` にする | 連想候補の `score.freshness` が eventAware なら 1 | 赤（1） |
+| #697 | `RecallQuerySchema.timeWeighting` を `z.string().optional()` にする | `"bogus"`・`""`・`1` が拒まれる `it.each` | 赤（2。`1` は `z.string()` でも拒まれる） |
+| #712 | 特例を `subjectId.trim().toLowerCase() === "null"` にする | `"NULL"`・`"Null"`・`" null "`・`"nil"`・`"None"` 等が一覧外として弾かれる `it.each`（core `extraction-string-null-variants.test.ts`） | 赤（4） |
+| #712 | `buildSubjectCandidateInstruction` の「明示的に null を設定」を文字列 `"null"` の指示にする | 指示文が「明示的に null を設定してください」を含み、引用符つき `"null"` を含まない | 赤（1） |
+| #726・#733 | `consolidate({ seedMemoryId })` の近傍 `recall()` を、呼び手の `ctx` に関わらず種の subject に絞る | 種 A・近傍 B。`ctx.subjectId` なしの dryRun で B が eligible、`ctx.subjectId` が A なら入らない、B（種と別）でも B の scope（core `consolidate-scope-teeth.test.ts`） | 赤（2） |
+| #726・#733 | `processConsolidateJob` が、種の `subjectId` が null のとき `ctx.subjectId` を外す | 種が null・`tick` の `ctx.subjectId` が B・近傍が B と A → B の近傍だけ統合、A は active | 赤（1） |
+| #733 | 種が見つからないとき `processConsolidateJob` が投げる | 存在しない `memoryId` を指す consolidate ジョブで `tick` が `processed: 1, failed: 0` | 赤（1） |
+| #824 | `fetchMandatoryCompanions` が `decayFloorAt` が過去の対向を弾く | `decayFloorAt` が now より前の contested の対向も companion として返る（core `recall-companion-status-gate.test.ts` に追記） | 赤（1） |
+| #834 | `resolveEmbeddingInput` の既定を `memory.content` から `memory.digest` にする | フックなしで content と digest が違う記憶を `tick` し、provider が受け取るのが content（core 新規 `embedding-input-default-sends-content.test.ts`） | 赤（1） |
+| #838 | `DEFAULT_RECALL_ASSOCIATION.maxCount` を `0` にする（on と名乗るが1件も選ばない） | 既定値が `{ maxCount: 10 }` であること、`association` を省略しても連想でしか届かない記憶が `retrievedVia: "association"` で入ること（core `recall-association.test.ts` に追記） | 赤（2） |
+| #792 | `buildKnownSubjectInstruction` から第三者の2文を落とす | `knownSubjects` を渡した system が「第三者」と「'user' ではなく」を含む（core `claim-key.test.ts` に追記） | 赤（1） |
+| #792 | `resolveKnownSubjects` が空配列のとき `["user"]` を返す | `claimKey.knownSubjects: []` の claim key 呼び出しが省いた場合と `toEqual`（core `runtime.test.ts` に追記） | 赤（1） |
+| #792 | `knownSubjects` があるとき `knownPredicates` を `deriveClaimKeys` へ渡さない | `observe` を通して predicate と subject の両方の見出しが system に出て、predicate が先 | 赤（1） |
+| #764 | 抽出の `created` イベントの actor を `{ type: "clone" }` にする（`buildCreatedEventFor`） | `observe` → `tick`（抽出・埋め込み・consolidate/reflect）の全イベントの `actor` が `{ type: "system" }`（core `tick-consolidate-reflect-job-event-actor.test.ts` に追記） | 赤（1） |
+| #832 | `contestedWith` を、同伴取得（`companionOf` あり）で来た記憶には付けない | 同伴取得で来た対の両側に `contestedWith` が付く（core `recall-pipeline.test.ts` に追記） | 赤（2。うち1本は #1806 の既存の歯） |
+| #832 | 付かないとき `contestedWith = undefined` をキー付きで書く | 「付かない」2本に `Object.hasOwn(..., "contestedWith")` が false | 赤（2） |
+| #828 | testkit `InMemoryVectorStore.search`・core `FakeVectorStore.search` から `memoryId` の段を外す | upsert を id の降順に打っても id 昇順で返る（testkit `in-memory-vector-store-tiebreak.test.ts`・core `fake-vector-store-tiebreak.test.ts` に追記） | 赤（各1） |
+| #828 | 距離の差が 1e-3 以下なら同点として `recordedAt` へ進める（testkit・core） | 近いが違う距離は距離が先 | 赤（各1） |
+| #828 | 同点の日時を `occurredAt ?? recordedAt` にする（testkit・core） | `occurredAt` の順と `recordedAt` の順が逆の2件 | 赤（各1） |
+| #828 | `{ memoryId, distance }` に絞らず `recordedAt` 付きで返す（testkit・core） | `Object.keys(hits[0])` が `["memoryId","distance"]` | 赤（各1） |
+| #771 | InMemory `setEmbeddingStatus` が、別テナントの行が見つかったとき投げる前にその行の `updatedAt` を書く | 失敗の前後で持ち主の行を `updatedAt` ごと丸ごと比べる（testkit `in-memory-cross-tenant-failure-no-side-effects.test.ts`。InMemory 固有） | 赤（1） |
+| #772 | InMemory `updateStatusWithEvent` が、別テナントの行で失敗するとき呼んだ側（B）のテナントにイベントを積む | 失敗の後で B 側を含めイベントが1件も無い | 赤（1） |
+| #773 | InMemory `supersedeWithNewMemories` が、別テナントの行で失敗するとき呼んだ側のテナントにイベントを積む | 同上（`expectedStatus` 無しと `"active"` 付きの両方で例外、イベント無し） | 赤（1） |
+| #811・#813 | InMemory `claimBatch` の負数・非整数の `limit` の検査を、claim を済ませた後へ動かす | claim 可能なジョブ2件で `limit: -1`・`1.5` を拒んだ後、ジョブが `claimedAt` 未設定・`attempts` 0（testkit `in-memory-claim-batch-invalid-limit-no-claim.test.ts`。InMemory 固有） | 赤（2） |
+| #815 | InMemory `setDefaultHalfLifeRecalls` の上側の境界を `9e38` までにする | 実測の両端 `3.4028235677973362e38`（通る）・`3.4028235677973366e38`（拒む）と、`3.5e38`・`9e38`・`1e39` を拒む（testkit `in-memory-fixtures-half-life-recalls-float4-overflow.test.ts` に追記） | 赤（3） |
+| #815 | 境界を float4 の最大値（`3.4028234663852886e38`）でぴったり切る | 同上（最大値と丸めの境界の間の `3.4028235677973362e38` が通る） | 赤（1） |
+| #716 | `SeededLLMProvider.completeStructured` がスキーマに合わない種の記録を握り潰してそのまま返す | 種の記録がスキーマに合わないとき「いまのスキーマを満たさない」で投げ、`usage.seeded` が増えない（testkit `seeded-provider.test.ts` に追記） | 赤（1） |
+| #716 | `SeededEmbeddingProvider` の `expectedSpace` の照合から `dimensions` を外す | 種・委譲先と同じ3次元で `expectedSpace` だけ次元違いなら構築時に例外 | 赤（1） |
+| #716 | 委譲先が件数違いを返したときの例外を外す | 欠け2件で1件だけ返す委譲先なら例外 | 赤（1） |
+| #716（参考 E4） | 欠けた分の戻りを逆順で元の位置へ戻す | 種と欠けを交互に混ぜた入力（欠け3件）で戻りが入力の順 | 赤（1） |
+| #827 | 適合テストの `supportsFindActiveByClaimKey` の枝を `false` でも本物の歯を走らせる（`=== true` を `!== undefined`） | `false` を渡す3つ目の呼び出し（メソッドを持たない Proxy）。本物の歯は走らず、「実装していない」assert が3メソッドの有無を読みに行く（testkit `memory-store-conformance.supports-labels-and-claim-key-optional.test.ts` に追記） | 赤（12） |
+| #827 | `supportsLabels: false` の枝の assert（`listLabels`/`registerLabel` が無いこと）を空にする | 同上（プロパティの読み出し回数が 0 になる） | 赤（1） |
+| #827 | `supportsFindActiveByClaimKey: false` の枝の assert を空にする | 同上 | 赤（1） |
 
 ### 入れなかったもの
 
@@ -36,3 +71,4 @@
 | #832 | 条件(c)（相手が返却集合に居る） | 歯では塞げない。Issue #1786 |
 | #783 | ベンチ本体（`same-ms-usage-bench.ts`）の検査の修正 | テスト以外のコードを直す必要がある |
 | #839 | `ORDER BY id ASC` を外す変異（デッドロック） | 重すぎて作れない |
+| #722 | `digestBandLimit: 0` の標本で往復が一致する（変異7・8: eligible の桁上がり・`limitedByChars` を差し引かない） | 実 `recall()` では到達しない。`digestBandLimit` は正の整数だけ（`RecallQuerySchema` が `positive()`）で 0 を渡すと検証で落ちる。帯が空で範囲内が12件以上になる標本は、合成した標本で式を再実装する形になり、約束の検査にならない |
