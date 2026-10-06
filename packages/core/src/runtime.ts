@@ -6877,7 +6877,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           const reinforced = await deps.memoryStore.reinforce(ctx, id, reinforcedAt, reinforceOpts);
           byId.set(lookupKey(id), reinforced);
         } catch (err) {
-          reinforceError = describeFailure(err);
+          reinforceError = err instanceof Error ? err.message : String(err);
         }
 
         if (reinforceError === undefined) {
