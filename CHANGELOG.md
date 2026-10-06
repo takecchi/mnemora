@@ -302,6 +302,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **破壊的と数えない理由**: 断る入力は増えない。例外の種類・SQLSTATE も変わらず、変わるのは message の `params:` 以降だけ（ADR 0504・0505 と同じ扱い）。
   - **変えなかったこと**: `PostgresMemoryStore`・`PostgresRelationStore`・`EventStore.get`・`list` の直接呼び（ADR 0516 の負債）。
 
+- **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` を `@mnemora/postgres` に揃えた: 呼び手の `Date` を保存した値と共有しない。`archiveDecayed` は、壁時計（`clock: "wall"`、既定）のとき `nowSeq` を見ない**（[Issue #1731](https://github.com/takecchi/mnemora/issues/1731)、PR #1753。⚠ #1753 の書き漏らしの補い——#1753 は fixture の振る舞いを変えたが、この節に項目を足していなかった）。
+  - **`Date` の共有**: `createRecall` の `createdAt` と、`purgeMemory` の `purgedAt`（イベントの `at` から入る）が、呼び手の `Date` をそのまま持っていた。呼び手が後から `setTime` すると、`getRecall`・`get` の値が変わった（Issue #1120 の「書き込む時点の複製」の約束の外だった）。いまは複製して保存する。`purgedAt` とイベントの `at` が同じ値であることは変わらない。
+  - **`archiveDecayed` の `nowSeq`**: 以前は、壁時計でも整数でない `nowSeq`（`1.5` など）を断っていた。`@mnemora/postgres` は壁時計では `nowSeq` を SQL に入れないので通す。いまは fixture も通す。活動時計（`"activity"`・`"either"`）では今までどおり断る。
+  - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。型・公開 API・既定値・保存済みのデータは変えない。本物の adapter は変えていない。
+
 ## [1.2.0] - 2026-10-02
 
 **この節は `v1.1.0`（tag が指す `5eb6e9d`、[PR #1443](https://github.com/takecchi/mnemora/pull/1443) がその commit の中身）… の差分である。**オーナーが 2026-09-30 に tag `v1.1.0` を `5eb6e9d` で publish し、npm にも `1.1.0` が出た。⟹ **これにより、下の `[1.1.0]` 節は出荷済みになった。**この節は、`5eb6e9d` より後に `main` へ入った PR を数える。
