@@ -202,9 +202,7 @@ function defineTests(label: string, makeKit: () => Promise<Kit> | Kit): void {
       // 前提: 版違いの記憶が実際に2件在る。
       expect(new Set(all.map((m) => m.extractorVersion))).toEqual(new Set(["v1", "v2"]));
       const resend = await v2.observe(ctx, input("resend-version"));
-      expect(resend.resend?.memories.map((m) => m.memoryId)).toEqual(
-        all.map((m) => m.id).sort(),
-      );
+      expect(resend.resend?.memories.map((m) => m.memoryId)).toEqual(all.map((m) => m.id).sort());
     });
 
     it("別テナントの記憶は載らない", async () => {

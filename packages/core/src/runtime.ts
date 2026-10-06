@@ -512,6 +512,42 @@ export interface ObserveResult {
    *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   contestedDetection?: ContestedDetectionOutcome[];
+  /**
+   * ADR 0639（オーナーへのまとめ問い 374f6f88 の問10「再送の内訳は足す方向で検討」。足すと決めたのはクローン miku の判断）:
+   * **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）のときだけ付く。**
+   * 新しく作った呼び出しには、この欄は無い（`undefined`）。`memoryIds: []`・`extraction: 'skipped'` は再送でも変わらない。
+   *
+   * 読み方（`resend.memories` は、その Observation から作られた記憶の、いまの状態）:
+   * - `memories` が空 ＝ まだ抽出されていない。`extract: 'deferred'` で tick 待ち、`extract: 'sync'` の observe が abort された後で
+   *   リースが切れる前、extract ジョブが failed、または抽出が0件だった、のどれか。**ジョブの状態はこの欄では分からない**。
+   * - 全部が `status: 'forgotten'` ＝ forget のために、この再送は何も作り直さなかった。
+   * - `purged: true` ＝ purge 済み（`status` は `'forgotten'` のまま）。
+   *
+   * ⛔ **省略可能にする**（`rejectedSubjectIds` などと同じ理由——必須にすると、`ObserveResult` を自前で組み立てている
+   * 呼び出し側のリテラルがコンパイルを通らなくなる。追加の任意プロパティに留める）。
+   */
+  resend?: ObserveResend;
+}
+
+/**
+ * ADR 0639: `ObserveResult.resend`。冪等な再送のときの内訳。後から任意の欄を足せる形にしてある
+ * （足すときも、既存の欄は変えない）。
+ */
+export interface ObserveResend {
+  /**
+   * 既存の Observation から作られた記憶。`MemoryStore.listBySourceObservationAllVersions` の写しで、
+   * 版（`extractorVersion`）も `status` も問わず全部。`memoryId` の昇順（文字列の比較。`localeCompare` ではない）。
+   * 件数の上限は無い。
+   */
+  memories: ObserveResendMemory[];
+}
+
+/** ADR 0639: `ObserveResend.memories` の1件。 */
+export interface ObserveResendMemory {
+  memoryId: MemoryId;
+  status: MemoryStatus;
+  /** purge 済み（`Memory.purgedAt` が `null` でない）なら `true`。`status` から推さない（purge 済みの `status` は `'forgotten'` のまま）。 */
+  purged: boolean;
 }
 
 /**
@@ -2638,9 +2674,10 @@ export interface Runtime {
    * 理由: 抽出をやり直すと、`purge()` で消した内容が同じ `externalId` の再送だけで
    * 蘇りうる。それは「忘れさせる」という約束と正面から食い違う。
    *
-   * ⚠ 呼び出し側は、この返り値だけでは「正常な冪等の再送」と「forgotten/purged が原因で
-   * 無視された」を区別できない。`ObserveResult` に内訳を持たせる案は見送った（公開の型が
-   * 増えるため）——将来の選択肢としては残っている。
+   * 「正常な冪等の再送」と「forgotten/purged が原因で無視された」は、`ObserveResult.resend`
+   * （冪等な再送のときだけ付く。その Observation から作られた記憶の `status` と `purged`）で区別する
+   * （ADR 0639。以前は区別できず、内訳を持たせる案を見送っていた）。`resend` が無いのは新しく作った呼び出し。
+   * `memories` が空ならまだ抽出されていない（ジョブの状態はこの欄では分からない）。
    *
    * 投げる例外（現状の振る舞いを約束として書く）:
    * - `input` を `ObserveInputSchema` で検証し、合わなければ zod の `ZodError` を投げる
@@ -5941,6 +5978,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // （最初の呼び出しで既に処理済みのはず）。
       // ADR 0454: 渡した欄は再送でも付ける（`ObserveResult` の各欄の「渡したら常に」）。値は「再送は抽出も検出も
       // 走らせなかった」から決まる自然な値——弾いた候補なし（[]）・鍵の導出の失敗なし（null）・検出の対象の候補なし（[]）。
+      // ADR 0639: 再送の内訳。読み取りは1回だけ（版も status も問わない口。書き込みはしない・LLM は呼ばない）。
+      const existing = await deps.memoryStore.listBySourceObservationAllVersions(
+        ctx,
+        observation.id,
+      );
+      const resendMemories: ObserveResendMemory[] = existing
+        .map((memory) => ({
+          memoryId: memory.id,
+          status: memory.status,
+          purged: memory.purgedAt != null,
+        }))
+        .sort((a, b) => (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0));
       return {
         observationId: observation.id,
         memoryIds: [],
@@ -5951,6 +6000,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           : {}),
         ...(input.claimKey?.enabled === true ? { claimKeyFailure: null } : {}),
         ...(input.claimKey?.detectContested === true ? { contestedDetection: [] } : {}),
+        resend: { memories: resendMemories },
       };
     }
 

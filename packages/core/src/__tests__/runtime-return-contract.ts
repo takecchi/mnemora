@@ -122,10 +122,58 @@ type ObserveReturn = Awaited<ReturnType<Runtime["observe"]>>;
  * - `subjectCandidates`（空でない）を渡したときだけ `rejectedSubjectIds` を持ち、常に配列。
  * - `claimKey.enabled: true` を渡したときだけ `claimKeyFailure` を持つ。
  * - `claimKey.detectContested: true` を渡したときだけ `contestedDetection` を持ち、常に配列。
+ * - （ADR 0639）`resend` は冪等な再送のときだけ持つ。持つなら `memoryIds: []`・`extraction: "skipped"`・
+ *   `extractionFailure: null`、`memories` は `memoryId` の昇順で重複が無い。`extraction` が `"skipped"` でない
+ *   （抽出が走った）呼び出し・`memory_usage` は持たない。
+ *
+ * 「新しく作った」か「再送」かは戻り値からは分からないので、`seenObservations`（同じ `Runtime` インスタンスが
+ * これまでに返した Observation の `テナント:id`。呼び手が `Runtime` ごとに1つ持つ）を渡されたときは、
+ * **同じ Observation をもう一度返したのに `resend` が無い**ことも破れとして数える（再送でなければ、同じ id にならない）。
+ * 別の `Runtime` インスタンスが作った Observation への再送は、この集合に無いので「最初に見た」になり、`resend` の有無を問わない。
  */
-export function checkObserveContract(args: ObserveArgs, result: ObserveReturn): string[] {
+export function checkObserveContract(
+  args: ObserveArgs,
+  result: ObserveReturn,
+  seenObservations?: Set<string>,
+): string[] {
   const p: string[] = [];
   const input = args[1];
+
+  const hasResend = result.resend !== undefined;
+  if (input.kind === "memory_usage" && hasResend) {
+    p.push("observe: memory_usage なのに resend が付いている");
+  }
+  if (result.resend !== undefined) {
+    if (
+      result.memoryIds.length !== 0 ||
+      result.extraction !== "skipped" ||
+      result.extractionFailure !== null
+    ) {
+      p.push("observe: resend が在るのに memoryIds が空でない／extraction が skipped でない");
+    }
+    const memories = result.resend.memories;
+    if (!Array.isArray(memories)) {
+      p.push("observe: resend.memories が配列でない");
+    } else {
+      memories.forEach((m, i) => {
+        if (typeof m.purged !== "boolean")
+          p.push("observe: resend.memories[].purged が真偽値でない");
+        if (i > 0 && !(memories[i - 1]!.memoryId < m.memoryId)) {
+          p.push("observe: resend.memories が memoryId の昇順（重複なし）でない");
+        }
+      });
+    }
+  } else if (input.kind !== "memory_usage" && seenObservations !== undefined) {
+    const key = `${args[0].tenantId}:${normId(result.observationId)}`;
+    if (seenObservations.has(key)) {
+      p.push(
+        "observe: 同じ Observation をもう一度返したのに resend が無い（再送の内訳が欠けている）",
+      );
+    }
+  }
+  if (input.kind !== "memory_usage" && seenObservations !== undefined) {
+    seenObservations.add(`${args[0].tenantId}:${normId(result.observationId)}`);
+  }
 
   if (
     (result.extraction === "llm_failed_whole_observation") !==

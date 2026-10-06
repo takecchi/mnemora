@@ -2764,6 +2764,24 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **DB マイグレーション**: 要らない。
 
+### 67. conformance suite に約束が増えた——`listBySourceObservationAllVersions` は purge 済みの行も返す（`@mnemora/testkit`）
+
+[ADR 0639](./decisions/0639-observe-resend-breakdown.md)（`Runtime.observe` の冪等な再送の内訳 `resend` を足す PR が、それに頼る口の約束を suite に足した。クローンの判断の延長で、オーナーが決めたのは問10の推奨の採否だけ。ADR 0546 の作法どおり、足した約束は 🔴 に数える）。
+
+⚠ **未リリース**。**番号は 67 である**——項目66 の続き。別の PR が同じ番号を使っていたら、merge のときに振り直すこと。
+
+**何が変わったか**: 中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.3.0]` 節 `### Breaking` の「conformance suite に約束を足した——`MemoryStore.listBySourceObservationAllVersions`…」の箇条を見ること。**ここには複製しない。**型・シグネチャは変わらない。
+
+**なぜ破壊的と数えるか**: `supportsPurgeMemory: true` を渡している自前の `MemoryStore` が、`listBySourceObservationAllVersions` から purge 済みの行を除いていると、新しく落ちる（足した約束は外せない）。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` を書き、`describeMemoryStoreConformance` に `supportsPurgeMemory: true` を渡している人。`@mnemora/postgres` と `@mnemora/testkit` の fixture は、元から purge 済みの行も返す。
+
+**どう直すか**: `listBySourceObservationAllVersions` が `purgedAt` の有無で絞らないようにする（`status` でも絞らない）。
+
+**確かめたこと**: `InMemoryMemoryStore`・`PostgresMemoryStore` で緑。purge 済みの行を除く変異で赤（ADR 0639、PR 本文）。**確かめていないこと**: 外部の adapter が実際に赤くなるか。
+
+**DB マイグレーション**: 要らない。
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

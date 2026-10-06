@@ -7767,6 +7767,59 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
 
       /**
+       * ADR 0639: `Runtime.observe` の冪等な再送の内訳（`ObserveResult.resend`）は、
+       * `listBySourceObservationAllVersions` が purge 済みの行（`status: 'forgotten'` のまま `purgedAt` が入った行）も
+       * 返すことに頼る。`status` でも `purgedAt` でも絞らない（「status を問わず返す」の約束の、purge 済みの行への適用）。
+       */
+      it("listBySourceObservationAllVersions は purge 済みの行（purgedAt 付き）も返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const kept = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash: "hash-allversions-purged-kept",
+          }),
+        );
+        const toPurge = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash: "hash-allversions-purged",
+            status: "forgotten",
+          }),
+        );
+        await store.purgeMemory!(
+          ctx,
+          toPurge.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: toPurge.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: toPurge.digest,
+            meta: {},
+          },
+        );
+
+        const listed = await store.listBySourceObservationAllVersions(ctx, observation.id);
+        const byId = new Map(listed.map((m) => [m.id, m]));
+        expect(listed).toHaveLength(2);
+        expect(byId.get(kept.id)?.purgedAt ?? null).toBeNull();
+        expect(byId.get(toPurge.id)?.status).toBe("forgotten");
+        expect(byId.get(toPurge.id)?.purgedAt).toBeInstanceOf(Date);
+      });
+
+      /**
        * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `event.at` を
        * 渡すと、`purgedAt` にも同じ値を使う——1つの壁時計を2回読んで別の値になることが
        * ないよう、`purged_at` と `memory_events.at` は常に一致しなければならない。

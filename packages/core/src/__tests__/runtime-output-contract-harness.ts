@@ -55,9 +55,11 @@ export function wrapRuntimeModule(actual: typeof RuntimeModule): typeof RuntimeM
       };
 
       const observe = runtime.observe.bind(runtime);
+      // ADR 0639: この Runtime インスタンスが返した Observation。同じものをもう一度返したら再送のはず。
+      const seenObservations = new Set<string>();
       runtime.observe = async (...observeArgs) => {
         const result = await observe(...observeArgs);
-        problems.push(...checkObserveContract(observeArgs, result));
+        problems.push(...checkObserveContract(observeArgs, result, seenObservations));
         return result;
       };
 
