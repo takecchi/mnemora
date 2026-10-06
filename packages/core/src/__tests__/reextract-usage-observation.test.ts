@@ -91,4 +91,24 @@ describe("reextract: 使用報告の Observation（kind: usage）は抽出しな
     expect(result.extraction).toBe("ok");
     expect(result.memoryIds).toHaveLength(1);
   });
+
+  // 拒むのは使用報告だけ。発話以外の種類（event・document）の reextract も、今までどおり抽出する。
+  it.each([
+    ["event", { kind: "event", name: "login" }],
+    ["document", { kind: "document", content: "文書の本文" }],
+  ] as const)(
+    "回帰確認: %s の Observation の reextract もこれまでどおり抽出する",
+    async (_label, input) => {
+      const stores = createFakeRuntimeStores();
+      const runtime = createRuntime({
+        ...stores,
+        llmProvider: new CountingLLM(),
+        hashContent: (text) => createHash("sha256").update(text).digest("hex"),
+      });
+      const observed = await runtime.observe(ctx, input);
+      const result = await runtime.reextract(ctx, observed.observationId);
+      expect(result.extraction).toBe("ok");
+      expect(result.memoryIds).toHaveLength(1);
+    },
+  );
 });

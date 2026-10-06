@@ -634,6 +634,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0620](./0620-merged-0927-1156-recheck-teeth.md) | 09/27 にマージされた #1156（空間の組の衝突を拒む）の確かめ直しで見つかった穴に歯を足す（専用 schema・同時の登録・大文字小文字だけが違う組・provider だけが違う組） | 採用 (2026-10) |
 | [0621](./0621-merged-0930-1465-recheck-teeth.md) | 09/30 にマージされた #1465（活動時計の書き込みが記憶自身の subject の時計を使う）の確かめ直しで見つかった穴に歯を足す（書く側の相関サブクエリのテナントの絞り） | 採用 (2026-10) |
 | [0622](./0622-merged-0927-rest-recheck-teeth.md) | 09/27 にマージされた #1087・#1086・#1143・#1116 の確かめ直しで見つかった穴に歯を足す（restoreSuperseded の束ねた強化の対象・時刻・設定・戻り値・例外の文面の起きたこと／直し方・claimKey の述語の等値の索引・migrate CLI の `--` の例ほか） | 採用 (2026-10) |
+| [0623](./0623-merged-0927-done-recheck-teeth.md) | 09/27 にマージされた #1176・#1173・#1171・#1162・#1155・#1150・#1145・#1129・#1128・#1122・#1104 の確かめ直しで見つかったすり抜けに歯を足す（schema 名の検査と trigram 閾値・reinforce の起点・setEventRetention の kind の綴り・purgeExpiredEvents の件数と古い順・consolidate の created の actor と note・tick ジョブの actor ほか） | 採用 (2026-10) |
 | [0630](./0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md) | `MemoryStore` の Memory の書き込みの口は、読み戻すと `MemorySchema` を通らない値を入口で拒む | 採用 (2026-10) |
 | [0631](./0631-merged-0930-back-half-recheck-teeth.md) | 09/30 にマージされた PR の後ろ半分（D・E・F・G 群）の確かめ直しで見つかった穴に歯を足す | 採用 (2026-10) |
 | [0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) | `Runtime` のメソッドの層の正本を doc コメントの `層:` 行にし、3文書からメソッド名の列挙を外す（Issue #605） | 採用 (2026-10) |
