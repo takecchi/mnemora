@@ -38,6 +38,47 @@ export declare function closePostgresClient(client: PostgresClient): Promise<voi
 // ===== dist/content-hash.d.ts =====
 export declare function sha256Hex(content: string): string;
 
+// ===== dist/cross-tenant-reference-detection.d.ts =====
+import type { Pool } from "pg";
+export declare const CROSS_TENANT_REFERENCE_KINDS: readonly [
+    "recall_usages",
+    "memories.source_observation_id",
+    "memories.contested_with_id",
+    "memories.superseded_by_id"
+];
+export type CrossTenantReferenceKind = (typeof CROSS_TENANT_REFERENCE_KINDS)[number];
+export interface MemoryReferenceMismatch {
+    id: string;
+    tenantId: string;
+    targetId: string;
+    targetTenantId: string;
+}
+export interface RecallUsageMismatch {
+    tenantId: string;
+    recallId: string;
+    memoryId: string;
+    recallTenantId: string;
+    memoryTenantId: string;
+}
+export type CrossTenantReferenceFinding = {
+    kind: "recall_usages";
+    count: number;
+    samples: RecallUsageMismatch[];
+} | {
+    kind: Exclude<CrossTenantReferenceKind, "recall_usages">;
+    count: number;
+    samples: MemoryReferenceMismatch[];
+};
+export interface FindCrossTenantReferencesOptions {
+    schema?: string;
+    sampleLimit?: number;
+}
+export interface FindCrossTenantReferencesResult {
+    total: number;
+    findings: CrossTenantReferenceFinding[];
+}
+export declare function findCrossTenantReferences(pool: Pool, options?: FindCrossTenantReferencesOptions): Promise<FindCrossTenantReferencesResult>;
+
 // ===== dist/embedding-space-table.d.ts =====
 import type { EmbeddingSpaceId } from "@mnemora/core";
 export declare const EMBEDDING_SPACE_TABLE_PREFIX = "memory_embeddings_";
@@ -75,6 +116,7 @@ export * from "./vector-space.js";
 export * from "./embedding-space-table.js";
 export * from "./content-hash.js";
 export * from "./schema-namespace.js";
+export * from "./cross-tenant-reference-detection.js";
 
 // ===== dist/lexical-store.d.ts =====
 import type { SQL } from "drizzle-orm";
