@@ -323,6 +323,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **`archiveDecayed` の `nowSeq`**: 以前は、壁時計でも整数でない `nowSeq`（`1.5` など）を断っていた。`@mnemora/postgres` は壁時計では `nowSeq` を SQL に入れないので通す。いまは fixture も通す。活動時計（`"activity"`・`"either"`）では今までどおり断る。
   - **破壊的と数えない理由**: 断る入力は増えない（落ちる入力が減るだけ）。型・公開 API・既定値・保存済みのデータは変えない。本物の adapter は変えていない。
 
+- **`@mnemora/core` の `recall()` で、クエリ埋め込みの失敗の `cause`（`providerErrorKind`・`errorName`）を、書記素の境界で切るようにした**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md) の追記）。以前は 64 コードユニットの位置にサロゲートペアが跨ると孤立サロゲートが残った。長さは今までどおり 64 コードユニット以下で、公開の型は変わらない。
+
 ## [1.2.0] - 2026-10-02
 
 **この節は `v1.1.0`（tag が指す `5eb6e9d`、[PR #1443](https://github.com/takecchi/mnemora/pull/1443) がその commit の中身）… の差分である。**オーナーが 2026-09-30 に tag `v1.1.0` を `5eb6e9d` で publish し、npm にも `1.1.0` が出た。⟹ **これにより、下の `[1.1.0]` 節は出荷済みになった。**この節は、`5eb6e9d` より後に `main` へ入った PR を数える。

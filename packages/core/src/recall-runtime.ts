@@ -67,6 +67,7 @@ import {
 } from "./recall-output-validation.js";
 import type { RecallOutputValidationMode } from "./recall-output-validation.js";
 import { omitParamsFromError } from "./failure-description.js";
+import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 
 /**
  * `recall()` の実装（roadmap.md 段階4「想起」・段階5「説明」）。
@@ -196,7 +197,7 @@ const CAUSE_LABEL_MAX = 64;
 /**
  * クエリ埋め込みの失敗から `StageSkippedOmission.cause` を作る。**message・cause の本文・ベクトルの値は読まない。**
  * `providerErrorKind` は投げられた値が文字列の `kind` を持つときだけ、`errorName` は `Error` の `name` が
- * 文字列のときだけ（どちらも先頭 ${CAUSE_LABEL_MAX} 文字まで）。
+ * 文字列のときだけ（どちらも ${CAUSE_LABEL_MAX} コードユニット以下。書記素の境界で切る）。
  */
 function describeQueryEmbeddingFailure(err: unknown): StageSkippedCause {
   if (err instanceof QueryEmbeddingFailure) {
@@ -206,11 +207,11 @@ function describeQueryEmbeddingFailure(err: unknown): StageSkippedCause {
   if (typeof err === "object" && err !== null) {
     const kind = (err as { kind?: unknown }).kind;
     if (typeof kind === "string") {
-      cause.providerErrorKind = kind.slice(0, CAUSE_LABEL_MAX);
+      cause.providerErrorKind = sliceAtGraphemeBoundary(kind, CAUSE_LABEL_MAX);
     }
   }
   if (err instanceof Error && typeof err.name === "string") {
-    cause.errorName = err.name.slice(0, CAUSE_LABEL_MAX);
+    cause.errorName = sliceAtGraphemeBoundary(err.name, CAUSE_LABEL_MAX);
   }
   return cause;
 }
