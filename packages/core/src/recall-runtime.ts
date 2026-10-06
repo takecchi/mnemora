@@ -2248,7 +2248,7 @@ async function runRecallBody(
           // ——上のコメントの通り、`score.similarity` を偽ることは禁じられている。
           // 掛けた値を保つのはこのローカルな `rankKey` だけであり、下で計算済みの
           // `score` をそのまま再利用する（同じ `now` で二度計算しない）。
-          rankedCandidates.push({ hit, memory, score, rankKey: hit.similarity * score.decay });
+          rankedCandidates.push({ hit, memory, score, rankKey: hit.similarity * score.total });
         }
         // 順位キー（similarity × score.total）で並べ替え、maxCount 件だけ席を埋める。
         // `Array.prototype.sort` は安定——同点は `rankFetchHits` の順（アンカー類似度
@@ -2740,15 +2740,12 @@ async function runRecallBody(
   // 取り下げ、ADR 0203「決めたこと」1（`omitted` は返さなかった記憶の集合）と追記3〜6 の
   // 「最後にその候補を落とした段で1回だけ数える」を守る——戻った先で予算に落ちれば
   // `budget_dropped` 側に1回だけ残る。`notComparable` は段2の内部状態として memoryId を
-  // 持つので、公開型を広げずに突き合わせられる。段3.5 で席に着けなかった候補
-  // （`overLimitAssociationSeatlessIds`）も `over_limit(association)` 側に1回だけ残す
-  // （Issue #1788。比較不能は席順の最後尾なので、席が足りないと真っ先にここへ来る）。
+  // 持つので、公開型を広げずに突き合わせられる。
   const promotedFromNotComparable = notComparable.filter(
     (c) =>
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      overLimitAssociationSeatlessIds.has(c.memory.id) ||
       associationAssemblyDroppedIds.has(c.memory.id) ||
       relationOverLimitIds.has(c.memory.id),
   );
