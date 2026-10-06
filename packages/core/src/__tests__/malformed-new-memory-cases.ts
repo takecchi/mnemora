@@ -277,4 +277,27 @@ export const WELL_FORMED_NEW_MEMORY_CASES: ReadonlyArray<{
     label: "provenance: imported で batchId が1文字",
     over: () => ({ provenance: { kind: "imported", batchId: "b" } }),
   },
+  // ADR 0630 の「拒みすぎない」側（独立確認の指摘）: 今は通る形。`MemorySchema` が拒まない形は、入口も拒まない。
+  {
+    label: "claimKey が空白だけ（subject が半角空白・predicate がタブ）",
+    over: () => ({ claimKey: { subject: " ", predicate: "\t" } }),
+  },
+  // 孤立サロゲートは保存時に U+FFFD へ置き換わる（ADR 0543）。ここは「拒まない」ことと、読み戻しが通ることだけ。
+  {
+    label: "claimKey に孤立サロゲートを含む",
+    over: () => ({ claimKey: { subject: "a\uD800b", predicate: "p\uDC00q" } }),
+  },
+  // `MemorySchema.attributes` は `z.record(z.string(), z.string())`（キーの文字種を見ない）。入力側の `AttributesSchema` の
+  // キーの決まり（`/^[A-Za-z0-9_.:-]+$/`・1〜64文字）の外でも、書き込みの口は拒まない。
+  { label: "attributes のキーが空文字", over: () => ({ attributes: { "": "v" } }) },
+  { label: "attributes のキーに空白を含む", over: () => ({ attributes: { "a b": "v" } }) },
+  { label: "attributes のキーに記号を含む", over: () => ({ attributes: { "a/b": "v" } }) },
+  { label: "attributes のキーが非 ASCII", over: () => ({ attributes: { キー: "v" } }) },
+  // `MemorySchema.provenance` は余分なキーを拒まない（zod の既定。strict ではない）。
+  { label: "provenance: stated に余分なキー", over: (obs) => stated(obs, { extra: "x" }) },
+  { label: "provenance: inferred に余分なキー", over: (obs) => inferred(obs, { extra: "x" }) },
+  {
+    label: "provenance: imported に余分なキー",
+    over: () => ({ provenance: { kind: "imported", batchId: "b", extra: "x" } as never }),
+  },
 ];

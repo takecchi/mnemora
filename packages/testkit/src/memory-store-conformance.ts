@@ -15241,6 +15241,31 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           label: "provenance: imported で batchId が1文字",
           over: () => ({ provenance: { kind: "imported", batchId: "b" } }),
         },
+        // ADR 0630 の「拒みすぎない」側（独立確認の指摘）: 今は通る形。`MemorySchema` が拒まない形は、入口も拒まない（core の表と同じ）。
+        {
+          label: "claimKey が空白だけ（subject が半角空白・predicate がタブ）",
+          over: () => ({ claimKey: { subject: " ", predicate: "\t" } }),
+        },
+        // 孤立サロゲートは保存時に U+FFFD へ置き換わる（ADR 0543）。ここは「拒まない」ことと、読み戻しが通ることだけ。
+        {
+          label: "claimKey に孤立サロゲートを含む",
+          over: () => ({ claimKey: { subject: "a\uD800b", predicate: "p\uDC00q" } }),
+        },
+        // `MemorySchema.attributes` はキーの文字種を見ない。入力側 `AttributesSchema` のキーの決まりの外でも拒まない。
+        { label: "attributes のキーが空文字", over: () => ({ attributes: { "": "v" } }) },
+        { label: "attributes のキーに空白を含む", over: () => ({ attributes: { "a b": "v" } }) },
+        { label: "attributes のキーに記号を含む", over: () => ({ attributes: { "a/b": "v" } }) },
+        { label: "attributes のキーが非 ASCII", over: () => ({ attributes: { キー: "v" } }) },
+        // `MemorySchema.provenance` は余分なキーを拒まない（zod の既定）。
+        { label: "provenance: stated に余分なキー", over: (obs) => stated(obs, { extra: "x" }) },
+        {
+          label: "provenance: inferred に余分なキー",
+          over: (obs) => inferred(obs, { extra: "x" }),
+        },
+        {
+          label: "provenance: imported に余分なキー",
+          over: () => ({ provenance: { kind: "imported", batchId: "b", extra: "x" } as never }),
+        },
       ];
 
       const ctx: Ctx = { tenantId: "tenant-new-memory-shape" };
