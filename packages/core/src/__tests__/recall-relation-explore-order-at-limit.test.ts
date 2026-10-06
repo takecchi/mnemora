@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { MemoryId } from "../ids.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
-import type { Relation } from "../interfaces/relation-store.js";
+import type { Relation, RelationStore } from "../interfaces/relation-store.js";
 import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
@@ -75,7 +75,10 @@ async function recallWith(mode: "listRelated" | "listRelatedMany") {
   relationStore.listRelated = async (c, id, kind) =>
     (await innerListRelated(c, id, kind)).sort(byIdDesc);
   if (mode === "listRelatedMany") {
-    relationStore.listRelatedMany = async (c, ids, kind) =>
+    // Fake は `listRelatedMany?` を持たない。持つ adapter として振る舞わせる。
+    (
+      relationStore as unknown as { listRelatedMany: RelationStore["listRelatedMany"] }
+    ).listRelatedMany = async (c, ids, kind) =>
       Promise.all(ids.map(async (id) => (await innerListRelated(c, id, kind)).sort(byIdDesc)));
   }
   const runtime = createRuntime({

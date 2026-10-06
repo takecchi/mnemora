@@ -115,13 +115,13 @@ describe.each(FOREIGN_VARIANTS)("別の realm の store 例外（残りの判定
     // 1件目の embed ジョブだけ provider が落ちる（ハンドラ失敗）。
     let embedCalls = 0;
     const realEmbed = stores.embeddingProvider.embed.bind(stores.embeddingProvider);
-    stores.embeddingProvider.embed = async (c, texts, opts) => {
+    stores.embeddingProvider.embed = async (c, texts) => {
       embedCalls += 1;
       if (embedCalls === 1) throw new Error("provider down");
-      return realEmbed(c, texts, opts);
+      return realEmbed(c, texts);
     };
     let failedJobId: string | null = null;
-    stores.outboxStore.fail = async (c, jobId, error, expected, opts) => {
+    stores.outboxStore.fail = async (_c, jobId, _error, expected) => {
       failedJobId ??= jobId;
       throw foreignOutboxLeaseConflict(jobId, expected, expected + 1, variant);
     };
