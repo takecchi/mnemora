@@ -155,6 +155,45 @@ describe("defaultDecayStrategy.floorAt", () => {
     expect(floor.getTime()).toBe(recordedAt.getTime() + 24 * HOUR);
     expect(floor.getTime()).toBeLessThan(8_640_000_000_000_000);
   });
+
+  // 丸めの判定は「起点 + 経過」の合計に掛かる。経過だけを見て丸めると、起点が
+  // 表現可能域の端に近いときに Invalid Date を返してしまう。
+  it("起点が表現可能域の端に近く、経過は小さくても、合計が最大値を超えるなら最大の Date に丸める", () => {
+    const recordedAt = new Date(8_640_000_000_000_000 - HOUR);
+    const floor = defaultDecayStrategy.floorAt(
+      { recordedAt, lastReinforcedAt: null, strength: 1, halfLifeHours: 24 },
+      0.5,
+    );
+    expect(Number.isNaN(floor.getTime())).toBe(false);
+    expect(floor.getTime()).toBe(8_640_000_000_000_000);
+  });
+
+  // 表現可能域の中なら、巨大でも丸めない（丸めの境目を、最大値より手前に置かない）。
+  it("合計が最大値より小さい巨大な半減期は、丸めずにそのまま計算する", () => {
+    const recordedAt = new Date("2026-01-01T00:00:00.000Z");
+    const floor = defaultDecayStrategy.floorAt(
+      { recordedAt, lastReinforcedAt: null, strength: 1, halfLifeHours: 1e9 },
+      0.5,
+    );
+    expect(floor.getTime()).toBe(recordedAt.getTime() + 1e9 * HOUR);
+    expect(floor.getTime()).toBeLessThan(8_640_000_000_000_000);
+  });
+
+  // 丸めるのは上側だけ。1970 年より前の起点は、そのまま返る（下側へは丸めない）。
+  it("1970 年より前の起点は、下側へ丸めずにそのまま計算する", () => {
+    const recordedAt = new Date("1900-01-01T00:00:00.000Z");
+    expect(recordedAt.getTime()).toBeLessThan(0);
+    const floor = defaultDecayStrategy.floorAt(
+      { recordedAt, lastReinforcedAt: null, strength: 1, halfLifeHours: 24 },
+      0.5,
+    );
+    expect(floor.getTime()).toBe(recordedAt.getTime() + 24 * HOUR);
+    const alreadyBelow = defaultDecayStrategy.floorAt(
+      { recordedAt, lastReinforcedAt: null, strength: 0.05, halfLifeHours: 24 },
+      0.05,
+    );
+    expect(alreadyBelow.getTime()).toBe(recordedAt.getTime());
+  });
 });
 
 /**
@@ -357,5 +396,24 @@ describe("defaultActivityDecayStrategy.floorAt", () => {
     );
     expect(floor).toBe(110); // 既存の「1 half-life 経過で半分になる」ケースと同じ入力
     expect(floor).toBeLessThan(Number.MAX_SAFE_INTEGER);
+  });
+
+  // 丸めの判定は「起点 + 経過」の合計に掛かる。経過だけを見て丸めると、起点が
+  // 安全整数の端に近いときに、精度の無い値を返してしまう。
+  it("baseSeq が安全整数の端に近く、経過は小さくても、合計が上限を超えるなら Number.MAX_SAFE_INTEGER に丸める", () => {
+    const floor = defaultActivityDecayStrategy.floorAt(
+      { baseSeq: Number.MAX_SAFE_INTEGER - 1, strength: 1, halfLifeRecalls: 10 },
+      0.5,
+    );
+    expect(floor).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  // 安全整数の中なら、巨大でも丸めない（丸めの境目を、上限より手前に置かない）。
+  it("合計が安全整数の中に収まる巨大な半減期は、丸めずにそのまま計算する", () => {
+    const floor = defaultActivityDecayStrategy.floorAt(
+      { baseSeq: 7, strength: 1, halfLifeRecalls: 2 ** 45 },
+      0.5,
+    );
+    expect(floor).toBe(7 + 2 ** 45);
   });
 });
