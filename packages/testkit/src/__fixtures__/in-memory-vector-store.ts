@@ -419,7 +419,7 @@ export class InMemoryVectorStore implements VectorStore {
       if (!aNaN && a.distance !== b.distance) return a.distance - b.distance;
       const recordedAtDiff = b.recordedAt.getTime() - a.recordedAt.getTime();
       if (recordedAtDiff !== 0) return recordedAtDiff;
-      return a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0;
+      return a.memoryId < b.memoryId ? 1 : a.memoryId > b.memoryId ? -1 : 0;
     });
     return hits.slice(0, opts.limit).map(({ memoryId, distance }) => ({ memoryId, distance }));
   }
