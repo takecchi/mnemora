@@ -16,7 +16,7 @@ export function assertPositiveSafeInteger(owner: string, field: string, value: u
 }
 
 /**
- * 数なら有限でなければ（`±Infinity` でなければ）投げる（Issue #1785）。`NaN` は対象外（呼び出し側が丸める）。
+ * `±Infinity` なら投げる（Issue #1785）。`NaN` は対象外（呼び出し側が丸める）。
  * 「無限」は有限の回数に丸めようがないので、丸める欄でもここだけは断る。
  */
 export function assertNotInfinite(owner: string, field: string, value: number): void {
