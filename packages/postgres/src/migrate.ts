@@ -1034,7 +1034,10 @@ export async function runMigrations(
     // 「毎回必ず検査する」（pgvector を後からダウングレードされても次の起動で拾える）を、
     // 「初回インストール時だけ最速で落ちる」より優先した（ADR 0367 決定4）。
     // 既に全マイグレーション適用済みの定常状態（最も多い呼び出し）では、
-    // この検査より前に何も新しく適用されない——空振りの往復が1つ増えるだけである。
+    // この検査より前に何も新しく適用されない——増えるのは検査のための往復だけである。
+    // `schema` 未指定: 検査の1往復だけが増える。`schema` 指定（`extensionSchema` は必ず決まる）:
+    // `BEGIN`・`SET LOCAL`・検査・`COMMIT` の4往復になり、#1797 より前（検査の1往復）より3つ多い
+    // （`assertPgvectorCapabilityUnderSearchPath`）。
     if (extensionMode === "create") {
       await assertPgvectorCapabilityUnderSearchPath(lockClient, schema, extensionSchema);
     }
