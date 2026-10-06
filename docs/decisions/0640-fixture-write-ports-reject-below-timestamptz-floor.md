@@ -70,4 +70,6 @@
   - `@mnemora/postgres` が、書く前に下限より前を断る（B2）か、下限へ寄せて書く（B1）ようになるとき。fixture の例外の型・文面は見直す。
   - Postgres が `reinforce` の何も書かない呼び出しの `at` を見なくなる（実行計画・ドライバの変更）とき。同じ歯が落ちる。
 
-- **歯の赤→緑と変異**: PR 本文に書いた。
+- **分類の根拠**: 公開の fixture が新しく例外を投げる変更を 🟡 に置くのは、オーナー回答 374f6f88 の問25（3f3411c5 に沿う）による。ADR 0461 以降の運用と同じ。依頼主が確定した（2026-10-06）。
+
+- **歯の赤→緑と変異**【実測】: 直す前の fixture に対して、testkit の `in-memory-fixtures-written-timestamptz-floor.test.ts` は136本中65本が赤、2実装を並べた `testkit-fixture-alignment-written-floor.postgres.test.ts` は82本中63本が赤、core の Fake の歯は16本中15本が赤。直した後はすべて緑。変異は `cp` で退避・復元し、`cmp` と `git status` で戻りを確かめた。表は PR 本文。
