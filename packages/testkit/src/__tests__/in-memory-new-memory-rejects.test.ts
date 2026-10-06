@@ -115,6 +115,18 @@ describe("InMemoryMemoryStore: 範囲外は拒まない（ADR 0630）", () => {
     ).resolves.toBeDefined();
   });
 
+  // 変異試験（2026-10-06）: createObservationWithOutbox に「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
+  it("createObservationWithOutbox も、attributes の値が文字列でなくても、この検査では拒まない", async () => {
+    const { store } = await setup();
+    await expect(
+      store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: ctx.tenantId, attributes: { a: 1 } as never }),
+        [],
+      ),
+    ).resolves.toBeDefined();
+  });
+
   it("tags の値・validFrom > validUntil は、この検査の対象ではない", async () => {
     const { store, input } = await setup();
     const bad = await store

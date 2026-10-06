@@ -53,6 +53,9 @@ describe("assertWellFormedNewMemory", () => {
     }
     for (const c of WELL_FORMED_NEW_MEMORY_CASES) {
       const input = base(c.over("obs-1"));
+      // 型の外の `null` の `attributes` は、`NewMemorySchema` は通さないが、どの実装も「無い」として `{}` で書く
+      // （読み戻しは `{}`）。上の検査関数が通すこと自体は、上の「通る」の歯が縛る。
+      if ((input as { attributes?: unknown }).attributes === null) continue;
       expect(NewMemorySchema.safeParse(input).success, c.label).toBe(true);
       expect(
         MemorySchema.safeParse({

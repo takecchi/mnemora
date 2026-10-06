@@ -139,6 +139,97 @@ export const MALFORMED_NEW_MEMORY_CASES: ReadonlyArray<NewMemoryCase> = [
     field: /provenance\.batchId/,
     over: () => ({ provenance: { kind: "imported" } as never }),
   },
+  // 変異試験（2026-10-06）で、欄の検査は残ったまま「その形だけ見逃す」変異が生き残った形。
+  {
+    label: "provenance: stated で sourceObservationId が空文字",
+    field: /provenance\.sourceObservationId/,
+    over: (obs) => stated(obs, { sourceObservationId: "" }),
+  },
+  {
+    label: "provenance: stated で at が無い",
+    field: /provenance\.at/,
+    over: (obs) => stated(obs, { at: undefined }),
+  },
+  {
+    label: "provenance: inferred で confidence が NaN",
+    field: /provenance\.confidence/,
+    over: (obs) => inferred(obs, { confidence: Number.NaN }),
+  },
+  {
+    label: "provenance: inferred で confidence が無い",
+    field: /provenance\.confidence/,
+    over: (obs) => inferred(obs, { confidence: undefined }),
+  },
+  {
+    label: "provenance: inferred で model が空文字",
+    field: /provenance\.model/,
+    over: (obs) => inferred(obs, { model: "" }),
+  },
+  {
+    label: "provenance: inferred で promptVersion が無い",
+    field: /provenance\.promptVersion/,
+    over: (obs) => inferred(obs, { promptVersion: undefined }),
+  },
+  {
+    label: "provenance: inferred で basis.observationIds に空文字",
+    field: /provenance\.basis/,
+    over: (obs) => inferred(obs, { basis: { memoryIds: [], observationIds: [""] } }),
+  },
+  {
+    label: "provenance: inferred で basis が無い",
+    field: /provenance\.basis/,
+    over: (obs) => inferred(obs, { basis: undefined }),
+  },
+  {
+    label: "provenance: consolidated で sources に空文字",
+    field: /provenance\.sources/,
+    over: () => ({ provenance: { kind: "consolidated", sources: ["m1", ""] } }),
+  },
+  {
+    label: "provenance: consolidated で sources が無い",
+    field: /provenance\.sources/,
+    over: () => ({ provenance: { kind: "consolidated" } as never }),
+  },
+  {
+    label: "provenance: reflected で sources が配列でない",
+    field: /provenance\.sources/,
+    over: () => ({ provenance: { kind: "reflected", sources: "m1" } as never }),
+  },
+  {
+    label: "provenance: inferred で confidence が文字列",
+    field: /provenance\.confidence/,
+    over: (obs) => inferred(obs, { confidence: "0.5" }),
+  },
+  {
+    label: "provenance: inferred で promptVersion が空文字",
+    field: /provenance\.promptVersion/,
+    over: (obs) => inferred(obs, { promptVersion: "" }),
+  },
+  {
+    label: "provenance: inferred で basis.memoryIds が無い",
+    field: /provenance\.basis/,
+    over: (obs) => inferred(obs, { basis: { observationIds: [] } }),
+  },
+  {
+    label: "provenance: inferred で basis.observationIds が無い",
+    field: /provenance\.basis/,
+    over: (obs) => inferred(obs, { basis: { memoryIds: [] } }),
+  },
+  {
+    label: "attributes が文字列",
+    field: /attributes/,
+    over: () => ({ attributes: "a" as never }),
+  },
+  {
+    label: "attributes が配列",
+    field: /attributes/,
+    over: () => ({ attributes: ["a"] as never }),
+  },
+  {
+    label: "attributes の値が真偽値",
+    field: /attributes/,
+    over: () => ({ attributes: { a: true } as never }),
+  },
 ];
 
 /** 境界のすぐ内側（通し続ける形）。 */
@@ -153,6 +244,9 @@ export const WELL_FORMED_NEW_MEMORY_CASES: ReadonlyArray<{
   { label: "claimKey が1文字ずつ", over: () => ({ claimKey: { subject: "s", predicate: "p" } }) },
   { label: "attributes が空のオブジェクト", over: () => ({ attributes: {} }) },
   { label: "attributes が省略", over: () => ({ attributes: undefined }) },
+  // `null` の `attributes` は「無い」として扱われ、`{}` で書かれる（ADR 0630 決定2）。
+  { label: "attributes が null", over: () => ({ attributes: null as never }) },
+  { label: "extractorVersion が省略", over: () => ({ extractorVersion: undefined }) },
   { label: "attributes の値が空文字", over: () => ({ attributes: { a: "" } }) },
   { label: "attributes が文字列だけ", over: () => ({ attributes: { a: "b", c: "d" } }) },
   { label: "digest が1文字", over: () => ({ digest: "d" }) },

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, LLMProvider, StructuredRequest } from "@mnemora/core";
+import type { Ctx, LLMProvider, MemoryStore, StructuredRequest } from "@mnemora/core";
 import { createRuntime, ExtractionResultSchema, MemorySchema } from "@mnemora/core";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
@@ -36,11 +36,45 @@ function llm(memories: unknown[]): LLMProvider {
   };
 }
 
-async function build(memories: unknown[], extractorVersion?: string) {
+const BAD = "壊れる候補";
+
+/**
+ * 本文が {@link BAD} の候補だけ、store へ渡す前に `digest` を空文字にする（Runtime が作る `NewMemory` では、
+ * digest は本文から補われるので、壊れた候補は自然には作れない）。
+ */
+function corrupting(inner: PostgresMemoryStore): MemoryStore {
+  return new Proxy(inner as MemoryStore, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver) as unknown;
+      if (typeof value !== "function") return value;
+      if (prop === "createMemoriesWithOutboxAndEvents") {
+        return (
+          ...args: Parameters<NonNullable<MemoryStore["createMemoriesWithOutboxAndEvents"]>>
+        ) => {
+          const [c, news, ...rest] = args;
+          const next = news.map((entry) =>
+            entry.input.content === BAD
+              ? { ...entry, input: { ...entry.input, digest: "" } }
+              : entry,
+          );
+          return (value as NonNullable<MemoryStore["createMemoriesWithOutboxAndEvents"]>).call(
+            target,
+            c,
+            next,
+            ...rest,
+          );
+        };
+      }
+      return value.bind(target);
+    },
+  });
+}
+
+async function build(memories: unknown[], extractorVersion?: string, corrupt = false) {
   const { db } = await getTestClient();
   const memoryStore = new PostgresMemoryStore(db);
   const runtime = createRuntime({
-    memoryStore,
+    memoryStore: corrupt ? corrupting(memoryStore) : memoryStore,
     vectorStore: new PostgresVectorStore(db),
     eventStore: new PostgresEventStore(db),
     outboxStore: new PostgresOutboxStore(db),
@@ -100,6 +134,52 @@ describe("observe: RuntimeConfig.extractorVersion が空文字（今の振る舞
     await expect(
       runtime.observe(ctx, { kind: "utterance", text: "好きな食べ物はラーメン" }),
     ).rejects.toThrow(/extractorVersion is malformed/);
+    const { pool } = await getTestClient();
+    const r = await pool.query("SELECT count(*)::int AS n FROM memories");
+    expect((r.rows[0] as { n: number }).n).toBe(0);
+  });
+});
+
+// 変異試験（2026-10-06）: 「拒んだ例外を observe 全体に漏らす」「全件が壊れても例外にしない」変異に噛む歯が、
+// 上の「全件が壊れている」1本しか無かった（壊れた候補と正常な候補が混ざる場面が無かった）。
+describe("observe: 壊れた候補を含む抽出結果（ADR 0630）", () => {
+  it("壊れた候補だけを落として残りを書き、observe は投げない。落とした候補は created の meta に残る", async () => {
+    await resetTestDatabase();
+    const { memoryStore, runtime } = await build(
+      [
+        { content: "一件目の事実", provenanceKind: "stated" },
+        { content: BAD, provenanceKind: "stated" },
+        { content: "三件目の事実", provenanceKind: "stated" },
+      ],
+      undefined,
+      true,
+    );
+    const result = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+    expect(result.extraction).toBe("ok");
+    expect(result.memoryIds).toHaveLength(2);
+    const written = await memoryStore.listBySourceObservationAllVersions(ctx, result.observationId);
+    expect(written.map((m) => m.content).sort()).toEqual(["一件目の事実", "三件目の事実"]);
+    for (const m of written) expect(MemorySchema.safeParse(m).success).toBe(true);
+    const { pool } = await getTestClient();
+    const events = await pool.query(
+      "SELECT meta FROM memory_events WHERE kind = 'created' ORDER BY id",
+    );
+    expect(events.rows).toHaveLength(2);
+    for (const row of events.rows as Array<{
+      meta: { droppedCandidates?: Array<{ index: number; message: string }> };
+    }>) {
+      expect(row.meta.droppedCandidates).toHaveLength(1);
+      expect(row.meta.droppedCandidates![0]).toMatchObject({ index: 1 });
+      expect(row.meta.droppedCandidates![0]!.message).toMatch(/digest is malformed/);
+    }
+  });
+
+  it("全件が壊れていれば、observe は最初の例外のまま投げ、何も書かない", async () => {
+    await resetTestDatabase();
+    const { runtime } = await build([{ content: BAD, provenanceKind: "stated" }], undefined, true);
+    await expect(runtime.observe(ctx, { kind: "utterance", text: "発話" })).rejects.toThrow(
+      /digest is malformed/,
+    );
     const { pool } = await getTestClient();
     const r = await pool.query("SELECT count(*)::int AS n FROM memories");
     expect((r.rows[0] as { n: number }).n).toBe(0);
