@@ -90,4 +90,35 @@ describe("FakeVectorStore.search — 距離 NaN の候補は常に最後尾（Is
       expect(hits.map((h) => h.memoryId)).toEqual(finiteIds);
     },
   );
+
+  it("距離 NaN どうしは同点で、その中は recordedAt の新しい順に並ぶ（挿入順にならない）", async () => {
+    const { memoryStore, vectorStore } = createFakeRuntimeStores();
+    const ctx: Ctx = { tenantId: TENANT };
+    const insert = async (vector: number[], day: number) => {
+      const memory = await memoryStore.createMemory(
+        ctx,
+        fixture({ recordedAt: new Date(Date.UTC(2026, 0, day)) }),
+      );
+      await vectorStore.upsert(ctx, SPACE, memory.id, vector);
+      return memory.id;
+    };
+    const zeroOld = await insert(ZERO_VECTOR, 10);
+    const finiteFirst = await insert([1, 0, 0], 1);
+    const zeroNewest = await insert(ZERO_VECTOR, 12);
+    const finiteSecond = await insert([0, 1, 0], 2);
+    const zeroMiddle = await insert(ZERO_VECTOR, 11);
+
+    const hits = await vectorStore.search(ctx, SPACE, QUERY_VECTOR, {
+      limit: 10,
+      filter: { tenantId: TENANT, status: ["active", "contested"] },
+    });
+
+    expect(hits.map((h) => h.memoryId)).toEqual([
+      finiteFirst,
+      finiteSecond,
+      zeroNewest,
+      zeroMiddle,
+      zeroOld,
+    ]);
+  });
 });
