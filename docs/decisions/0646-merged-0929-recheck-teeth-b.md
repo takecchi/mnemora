@@ -3,14 +3,14 @@
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-06
 
-クローンのマネージャー（mgr-5d638824）の依頼で、担い手が書いた。歯を書くと決めたのも、範囲を決めたのもクローンの判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+クローンのマネージャー（mgr-5d638824）の依頼で担い手が書き、引き継いだマネージャー（mgr-0495eb46）が最新に直した。歯を書くと決めたのも、範囲を決めたのも、#1428・#1431 をいまの約束に当てると決めたのもクローンの判断で、オーナーの判断ではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
 出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果、【判断】は担い手（またはマネージャー）の判定。
 これは試験だけの変更で、実装・CHANGELOG・適合テスト（`*-conformance.ts`）は触らない（[ADR 0608](./0608-merged-0928-recheck-teeth-a.md)・[ADR 0613](./0613-merged-1001-recheck-teeth-b.md) と同じ）。
 この PR は「PR B」で、PR A は ADR 0645（別の PR、同時に出る）である。
 
 ## 経緯
 
-2026-09-29（UTC）にマージされた PR のうち、`@mnemora/core`・provider（`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）・`@mnemora/testkit`・`examples/chat` に当たる17本を、約束ごとに足りない側とやりすぎ側の変異を入れて確かめ直し、どの歯にも捕まらない変異を拾った【実測】。結果は Issue #1733 に PR ごとにコメントとして残してある（#1385・#1388・#1389・#1392・#1397 は前任の担い手が確かめ済みで、歯が push されていなかったので、歯を書き直して実測し直した。#1435 は別の担当が先に確かめ直した［ADR 0603］歯を前提にして当てた）。
+2026-09-29（UTC）にマージされた PR のうち、`@mnemora/core`・provider（`@mnemora/openai`・`@mnemora/anthropic`・`@mnemora/local-embedding`）・`@mnemora/testkit`・`examples/chat` に当たる17本を、約束ごとに足りない側とやりすぎ側の変異を入れて確かめ直し、どの歯にも捕まらない変異を拾った【実測】。結果は Issue #1733 に PR ごとにコメントとして残してある（#1385・#1388・#1389・#1392・#1397 は前任の担い手が確かめ済みで、歯が push されていなかったので、歯を書き直して実測し直した。#1435 は別の担当が先に確かめ直した［ADR 0603］歯を前提にして当てた）。#1402・#1407・#1411・#1428・#1431 には、最初の結果の後に追補がある（#1428・#1431 はいまの約束に当て直した結果）。#1411 の追補の歯も push されていなかったので、引き継いだ担当が書き直して実測し直した。
 
 約束の出所は、各 PR 本文（`gh pr view`）・実装の TSDoc とコメント・その PR の ADR である【現物】。後の ADR で約束が変わっていないかは、各 PR の ADR 番号と関数名を `docs/decisions` から `grep` して、参照している後続の ADR の該当箇所を読んだ。すべての後続 ADR を通読したわけではない【判断】。
 
@@ -76,12 +76,23 @@
 
 出所: PR 本文の仕様2（未指定・`false` では payload にこのキー自体が増えない）。置き場: `packages/postgres/src/__tests__/observe-event-data-document-title-extract-opt-in.postgres.test.ts`（testkit の InMemory・Postgres の2脚）。`false` を明示しても、payload に `extractData`・`extractTitle` のキーが増えず、プロンプトにも入らない。
 
+追補: 出所は `observationPayloadText` の TSDoc（`title` が空でない文字列のときだけ前置きにする）。置き場: `packages/core/src/__tests__/observation-text-blank-title-not-prefixed.test.ts`。`title` が数・`null`・未定義・真偽値・配列・オブジェクトなら前置きにしない。
+
 ### #1428（LLM 待ちの間に forget された材料）
 
 出所: `assertNotForgottenForUpdate` の TSDoc（`tenant_id` の絞り込みも同じ `WHERE` に含める）と、`opts.abortIfForgotten` の契約（forgotten の記憶だけを理由に打ち切る）。置き場: `packages/postgres/src/__tests__/` の新規2ファイル。
 
 - `abort-if-forgotten-tenant-scope.postgres.test.ts`: 別のテナントの forgotten な id を渡しても、`SourceMemoryForgottenError` にならず書ける。
 - `abort-if-forgotten-only-forgotten.postgres.test.ts`: `archived` の記憶の id を渡しても、`SourceMemoryForgottenError` にならず書ける（`contested` は `updateStatus` で作れないので `archived` で縛った）。
+
+追補: いまの約束（下の「約束の変わり方」）に6つの変異を当て、すり抜けは無かった。歯は足していない。
+
+### #1431（claim key の一致が2件以上のとき）
+
+出所: いまの約束（下の「約束の変わり方」）。`relationStore` を配線しない呼び出しでは evidence だけを積み、`unresolved_conflict` は一致した全員の id を運ぶ。配線した呼び出しでも、群の書き込みが `contested_group` にならなければ群を名乗らず同じ形に戻る。置き場: `packages/core/src/__tests__/`。
+
+- `claim-key-sequential-arrival.test.ts`（既存の `it` に検査を足した）: 3件目・4件目の `matchMemoryIds` は一致した全員の id である。
+- `claim-key-group-write-fallback.test.ts`（新規、1件）: `markContestedGroup` が CAS 競合になると、`unresolved_conflict` になり evidence が積まれ、3件目は `active` のまま。
 
 ### #1434（矛盾候補の印の非対称化と一文の追記）
 
@@ -96,7 +107,7 @@
 
 ### 歯を足さなかった PR
 
-#1388・#1399・#1401・#1424・#1431 は、歯が要るすり抜けが無い、または約束が決まっていない（下の「外したもの」）。
+#1388・#1399・#1401・#1424 は、歯が要るすり抜けが無い、または約束が決まっていない（下の「外したもの」）。
 
 3. ほかの ADR には追記しない。
 
@@ -106,27 +117,27 @@ PostgreSQL 17（`--encoding=UTF8 --locale=C.UTF-8`、自分専用のインスタ
 
 走らせた変異の数と、どの歯にも捕まらなかった数（下の等価を含む。数え方は各コメントの見出しに従う）:
 
-| PR | 走らせた変異 | すり抜けた | 足した歯 |
-| --- | --- | --- | --- |
-| #1385 | 8（前任） | 3（1つは等価） | 2か所（`consolidate.test.ts` 1件・`recalled-score.test.ts` 新規5件） |
-| #1388 | 7（前任） | 0 | なし |
-| #1389 | 8（前任） | 1 | 1件 |
-| #1392 | 7（前任） | 3 | 2件 |
-| #1397 | 10（前任） | 4（1つは等価） | 3件 |
-| #1398 | 24 | 6（ほかに歯が無かった1） | 6件 |
-| #1399 | 6 | 0 | なし |
-| #1401 | 5 | 0 | なし |
-| #1402 | 3（ほか2は読んだだけ） | 2 | 2件 |
-| #1404 | 7 | 3 | 3件 |
-| #1407 | 5 | 1 | 1件 |
-| #1411 | 4 | 2（同じ1本で塞ぐ） | 1件（2脚） |
-| #1424 | 3 | 1（等価） | なし |
-| #1428 | 6 | 2 | 2ファイル（各1件） |
-| #1431 | 14 | 0 | なし |
-| #1434 | 7 | 4（1つは等価、1つは一部のみ） | 4件 |
-| #1435 | 5 | 1 | 1件（2脚） |
+| PR    | 走らせた変異                  | すり抜けた                    | 足した歯                                                             |
+| ----- | ----------------------------- | ----------------------------- | -------------------------------------------------------------------- |
+| #1385 | 8（前任）                     | 3（1つは等価）                | 2か所（`consolidate.test.ts` 1件・`recalled-score.test.ts` 新規5件） |
+| #1388 | 7（前任）                     | 0                             | なし                                                                 |
+| #1389 | 8（前任）                     | 1                             | 1件                                                                  |
+| #1392 | 7（前任）                     | 3                             | 2件                                                                  |
+| #1397 | 10（前任）                    | 4（1つは等価）                | 3件                                                                  |
+| #1398 | 24                            | 6（ほかに歯が無かった1）      | 6件                                                                  |
+| #1399 | 6                             | 0                             | なし                                                                 |
+| #1401 | 5                             | 0                             | なし                                                                 |
+| #1402 | 3（ほか2は読んだだけ）＋追補9 | 2                             | 2件                                                                  |
+| #1404 | 7                             | 3                             | 3件                                                                  |
+| #1407 | 5＋追補2                      | 1                             | 1件                                                                  |
+| #1411 | 4＋追補5                      | 3（うち2つは同じ1本で塞ぐ）   | 2か所（1件・2脚と `it.each` 6形）                                    |
+| #1424 | 3                             | 1（等価）                     | なし                                                                 |
+| #1428 | 6＋追補6（いまの約束）        | 2                             | 2ファイル（各1件）                                                   |
+| #1431 | 14＋追補5（いまの約束）       | 2                             | 2件                                                                  |
+| #1434 | 7                             | 4（1つは等価、1つは一部のみ） | 4件                                                                  |
+| #1435 | 5                             | 1                             | 1件（2脚）                                                           |
 
-#1385・#1388・#1389・#1392・#1397 の前任の変異は、前任のコメントの表のまま引用している（再走したのは、すり抜けた変異だけ）。
+#1385・#1388・#1389・#1392・#1397 の前任の変異は、前任のコメントの表のまま引用している（再走したのは、すり抜けた変異だけ）。#1411 の追補の歯は、引き継いだ担当が書き直し、`title` を `String()` で文字列に直す変異で4件（数・真偽値・配列・オブジェクト）が赤、`cp` で戻して `cmp` で同一、22件が緑であることを実測した。
 
 ## 外したもの【判断】
 
@@ -139,12 +150,10 @@ PostgreSQL 17（`--encoding=UTF8 --locale=C.UTF-8`、自分専用のインスタ
 - #1424: `detectClaimKeyContested` の「検出中の Memory の `sourceObservationId` が `null` なら何も除かない」の分岐を外す。`createMemoriesFromCandidates` が observation から作る Memory は常に非 `null` で、store が作った直後の Memory の値を落とさない限り到達しない。
 - #1434: 記録順が同じなら非対称にしない分岐を外す。`recordedOrderById` は順位を重複しない整数で振るので、2件の順位は必ず違う。
 
-約束が変わったので歯を書かなかったもの（すり抜けたまま・当てていない）:
+逆になったので PR 本文の約束には当てなかったもの（既存の歯がいまの約束を縛っている）:
 
-- #1399: PR 本文の「Anthropic の `z.record` は今までどおり送る」は、ADR 0360 の追記（2026-09-30）が逆にした（いまは Anthropic も `z.record` を深さを問わず送る前に落とす）。既存の歯がいまの約束を縛っている。
+- #1399: PR 本文の「Anthropic の `z.record` は今までどおり送る」は、ADR 0360 の追記（2026-09-30）が逆にした（いまは Anthropic も `z.record` を深さを問わず送る前に落とす）。
 - #1401: PR 本文の「`revision` を `main` 以外にすると届かない」は、ADR 0365 が逆にした。
-- #1428: PR 本文の「forgotten/purged 以外の理由で CAS が破れた場合は部分成功」は、ADR 0420（superseded と全件 CAS 弾かれも打ち切る）で狭まった。
-- #1431: PR 本文の「一致が2件以上のときは evidence だけが全経路の振る舞い」は、ADR 0327 の段階B（`relationStore` を配線した呼び出しでは群を書く）で狭まった。`relationStore` を配線しない呼び出しは PR 本文のまま。
 
 約束が決まっていないので歯を書かなかったもの:
 
@@ -154,13 +163,19 @@ PostgreSQL 17（`--encoding=UTF8 --locale=C.UTF-8`、自分専用のインスタ
 
 走らせていないもの【未確認】: #1399・#1401・#1404 の本物のモデル・実 API の live 歯。#1434 の実 API での測定（n=5・gpt-4o-mini）。#1428 の `examples/chat`・`scripts` の追従（基準値 JSON）。
 
-## 判断待ち【判断】
+## 約束の変わり方【判断】
 
-次の PR は、約束が狭まった・逆になったので、その約束には当てていない。いまの約束が正しいかの判断は、マネージャーへ返す。
+どの約束がどの ADR でどう狭まったか（1件1行）。狭まった2本は、クローンの判断でいまの約束に当てた。
 
-- #1428: CAS が破れたときの扱い（ADR 0420）。
-- #1431: 一致が2件以上のときの扱い（ADR 0327 の段階B）。
-- #1399・#1401: ADR 0360 の追記・ADR 0365 が PR 本文の約束を逆にした（既に ADR が決めている。確認だけ）。
+- #1428: PR 本文「forgotten/purged 以外の理由で CAS が破れたら部分成功」→ ADR 0420 で、材料が superseded（ADR 0544 以後は contested も）になった・eligible の全件が active でない・全件が CAS に弾かれたときは打ち切る、に狭まった（1件でも通れば部分成功は残る）。
+- #1431: PR 本文「一致が2件以上なら evidence だけを積む」→ ADR 0327 の段階B（実装は ADR 0381）で、`relationStore` を配線しない呼び出しに狭まった（配線した呼び出しは群を書き、群にならなければ evidence に戻る）。配線の有無の両方に当てた。
+
+## 先の確かめ直しと重ならないように選んだもの【判断】
+
+別の担当が先に確かめ直した ADR のどの約束と重ならないように選んだか（1件1行）。
+
+- #1435: ADR 0603 は「退けたかを最新の `superseded` イベントの理由で決める」を縛った。ここでは `listBySourceObservationAllVersions` の `observationId` の綴り（大文字でも同じ記憶を返す）だけに当てた。
+- #1431: ADR 0602 は `relationStore` を配線して群を書く経路（解消での関係の削除範囲・段3・`attributes`・合併と人数の境界・対の片割れ）を縛った。ここでは `unresolved_conflict` が運ぶ id と、群の書き込みが弾かれたときに evidence へ戻ることだけに当てた。
 
 ## 直しが要りそうなもの（実装は変えていない）【判断】
 
@@ -168,7 +183,7 @@ PostgreSQL 17（`--encoding=UTF8 --locale=C.UTF-8`、自分専用のインスタ
 
 ## 縛っていないもの
 
-- #1428 の新しい歯は `createMemoryWithOutbox` だけに足した。`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents` も同じ共通関数を通る。
+- #1428 の新しい歯は `createMemoryWithOutbox` だけに足した。`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents` も同じ共通関数を通る。いまの約束の変異のうち superseded の読み直しを外す2つは、core の Fake の歯では捕まらず、testkit・Postgres の歯だけが捕まえる（実装は1か所なので足していない）。
 - #1434 の新しい歯は偽の Runtime で、実 API・実モデルは使わない。
 - 全テストは走らせていない。名指しのファイルだけである。
 
