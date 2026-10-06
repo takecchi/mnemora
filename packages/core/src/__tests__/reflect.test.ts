@@ -923,6 +923,84 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
     const { sources } = await getSoleReflectedResult(stores);
     expect(sources).toEqual(expect.arrayContaining([seed.id, neighbor.id]));
   });
+
+  it("種の subjectId が null なら、tick に渡した ctx.subjectId をそのまま使う（捨てない）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(llmReflectingTo({ content: "気づき" }));
+
+    const seed = await enqueueReflectJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: null,
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    const neighborInCtxSubject = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "ctx-subject neighbor",
+        digest: "n-ctx",
+        subjectId: "subject-c",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborInCtxSubject.id,
+      [8, 0],
+    );
+    const neighborOtherSubject = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "other-subject neighbor",
+        digest: "n-other",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborOtherSubject.id,
+      [8, 0],
+    );
+
+    // 種が null のときは、渡された ctx のまま（subject-c）で近傍を探す。ctx.subjectId を
+    // 捨てると、別 subject（subject-a）の近傍まで混ざる。
+    const tickResult = await runtime.tick(
+      { tenantId: "tenant-1", subjectId: "subject-c" },
+      { kinds: ["reflect"], leaseMs: 60_000 },
+    );
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const { sources } = await getSoleReflectedResult(stores);
+    expect(sources).toContain(neighborInCtxSubject.id);
+    expect(sources).not.toContain(neighborOtherSubject.id);
+  });
+
+  it("tick に渡した ctx オブジェクトは書き換えない（種の subjectId を呼び手の ctx に残さない）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(llmReflectingTo({ content: "気づき" }));
+
+    const seed = await enqueueReflectJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: "subject-a",
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    // 同じ ctx は tick の中で複数のジョブに使い回される。種の subject を ctx に残すと、
+    // 次のジョブ（種が別 subject か null）の近傍探索がその subject に絞られてしまう。
+    const callerCtx: Ctx = { tenantId: "tenant-1" };
+    const tickResult = await runtime.tick(callerCtx, { kinds: ["reflect"], leaseMs: 60_000 });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+    expect(callerCtx).toEqual({ tenantId: "tenant-1" });
+    expect(callerCtx.subjectId).toBeUndefined();
+
+    const { reflected } = await getSoleReflectedResult(stores);
+    expect(reflected.subjectId).toBe("subject-a");
+  });
 });
 
 describe("runtime.reflect — 冪等性は買っていない（決定11、意図的に固定する）", () => {
