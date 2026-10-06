@@ -201,6 +201,17 @@ describe("print-local-embedding-cache-key.mjs: CLI", () => {
     });
   });
 
+  // Issue #1784（#595 の確かめ直し）: 空文字の sha も「読めない」と同じく、警告してフォールバックする。
+  // `sha.length > 0` を外しても以前の歯は赤にならず、revision の欠けた鍵が警告なしで出ていた【実測】。
+  it("sha が空文字のときも、警告してフォールバックする（revision の欠けた鍵を黙って作らない）", async () => {
+    await withDeclarationFile(JSON.stringify({ sha: "" }), async (path) => {
+      const r = await runCli(["--declaration-path", path, "--plain"]);
+      expect(PREFIX_IN_WORKFLOW + r.stdout).toBe(KEY_BEFORE_THIS_CHANGE);
+      expect(r.stderr).toContain("::warning::");
+      expect(r.code).toBe(0);
+    });
+  });
+
   it("不明な引数 ⟹ 実行時エラー（exit 3）", async () => {
     const r = await runCli(["--nope"]);
     expect(r.stderr).toContain("不明な引数: --nope");
