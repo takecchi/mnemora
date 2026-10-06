@@ -52,9 +52,10 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-function buildRuntime() {
+function buildRuntime(opts: { withRelationStore?: boolean } = {}) {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({
+    relationStore: opts.withRelationStore === true ? stores.relationStore : undefined,
     memoryStore: stores.memoryStore,
     outboxStore: stores.outboxStore,
     vectorStore: stores.vectorStore,
@@ -179,5 +180,65 @@ describe("recall() — 段3/段3.5で戻った below_threshold の候補が段4�
       expect(below.nearMisses?.map((n) => n.memoryId)).toEqual([bystander.id]);
     }
     expect(budgetDroppedCount(result)).toBe(1);
+  });
+
+  it("(d) 多者間の群の同伴取得（relationStore 経由）で戻った候補が段4の予算で落ちても、below_threshold から外れ budget_dropped だけに数えられる", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: true });
+
+    const cand1 = await createEmbeddedMemory(stores, [1, 0], { digest: "C" });
+    // 群の起点（owner）。クエリとの類似度が高く、段2を通る。
+    const owner = await createEmbeddedMemory(stores, [0.999, 0.0447], { digest: "OWNER" });
+    // クエリとの類似度 ≈0.05 ⟹ 段2で below_threshold。群のメンバーなので段3の同伴取得で戻る。
+    const belowMember = await createEmbeddedMemory(stores, [0.05, 0.9987], { digest: "BELOW" });
+    // 埋め込みを持たない群のメンバー（同伴取得だけが経路）。
+    const plainMember = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "PLAIN" }));
+    const marked = await runtime.markContestedGroup!(ctx, [
+      owner.id,
+      belowMember.id,
+      plainMember.id,
+    ]);
+    expect(marked.outcome.kind).toBe("contested_group");
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 2,
+      overFetchFactor: 10,
+      association: null,
+      budget: { maxMemoryChars: cand1.digest.length },
+    });
+
+    expect(result.memories.map((m) => m.memoryId)).toEqual([cand1.id]);
+    expect(belowThresholdOf(result)).toBeUndefined();
+    expect(budgetDroppedCount(result)).toBe(3);
+  });
+
+  it("(e) 戻った候補が2件あるとき、below_threshold の count はその2件ぶん減り、戻っていない候補だけが残る", async () => {
+    const { runtime, stores } = buildRuntime();
+
+    const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
+    const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
+    // どちらも類似度 ≈0.05 で段2は below_threshold、アンカーとの類似度 ≈0.83 で連想に拾われる。
+    const b1 = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "BBBBBB" });
+    const b2 = await createEmbeddedMemory(stores, [0.05, 0.01, 0.9986], { digest: "DDDDDD" });
+    const bystander = await createEmbeddedMemory(stores, [0.05, 0.9987, 0], {
+      digest: "BYSTANDER",
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 2,
+      overFetchFactor: 10,
+      budget: { maxMemoryChars: cand1.digest.length + anchor.digest.length },
+    });
+
+    expect(result.memories.some((m) => m.memoryId === b1.id)).toBe(false);
+    expect(result.memories.some((m) => m.memoryId === b2.id)).toBe(false);
+    const below = belowThresholdOf(result);
+    expect(below).toBeDefined();
+    if (below?.kind === "below_threshold") {
+      expect(below.count).toBe(1);
+      expect(below.nearMisses?.map((n) => n.memoryId)).toEqual([bystander.id]);
+    }
+    expect(budgetDroppedCount(result)).toBe(2);
   });
 });

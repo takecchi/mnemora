@@ -2707,7 +2707,6 @@ async function runRecallBody(
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      overLimitAssociationSeatlessIds.has(c.memory.id) ||
       associationAssemblyDroppedIds.has(c.memory.id) ||
       relationOverLimitIds.has(c.memory.id),
   );
