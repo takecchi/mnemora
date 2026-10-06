@@ -854,7 +854,7 @@ export function buildTrigramLexicalSearchSelect(
       ) AS rank
     FROM memories, qc
     WHERE ${whereClause}
-    ORDER BY coverage DESC, rank DESC, recorded_at DESC, id
+    ORDER BY coverage DESC, rank DESC, id
     LIMIT ${opts.limit}
   `;
 }
