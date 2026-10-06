@@ -631,9 +631,14 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0614](./0614-merged-0927-postgres-recheck-teeth.md) | 09/27 にマージされた postgres の #1187・#1299・#1289・#1220・#1195 の確かめ直しで見つかった穴に歯を足す（restoreSuperseded の複数 id・語彙クエリの `.` と `-`・searchMany の key の綴り・共有の拡張ロック） | 採用 (2026-10) |
 | [0615](./0615-merged-0927-provider-recheck-teeth.md) | 09/27 にマージされた provider の PR（#1223・#1147・#1083）の確かめ直しで見つかった穴に歯を足す（読み込み失敗のメッセージが名指す場所・包むときの $defs） | 採用 (2026-10) |
 | [0616](./0616-impression-topic-growth-are-not-emotion-simulation.md) | ADR 0074 の「印象」「話題」「成長」は、非目標「複雑な感情シミュレーション」に含まれない — AI 側の感情の状態は持たない | 採用 (2026-10) |
+| [0620](./0620-merged-0927-1156-recheck-teeth.md) | 09/27 にマージされた #1156（空間の組の衝突を拒む）の確かめ直しで見つかった穴に歯を足す（専用 schema・同時の登録・大文字小文字だけが違う組・provider だけが違う組） | 採用 (2026-10) |
+| [0621](./0621-merged-0930-1465-recheck-teeth.md) | 09/30 にマージされた #1465（活動時計の書き込みが記憶自身の subject の時計を使う）の確かめ直しで見つかった穴に歯を足す（書く側の相関サブクエリのテナントの絞り） | 採用 (2026-10) |
 | [0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) | `Runtime` のメソッドの層の正本を doc コメントの `層:` 行にし、3文書からメソッド名の列挙を外す（Issue #605） | 採用 (2026-10) |
 | [0634](./0634-unclassified-runtime-method-layers-decided.md) | `層: 未分類` だった `Runtime` のメソッドの層を1本ずつ決める（Issue #605 の続き、ADR 0633） | 採用 (2026-10) |
+| [0635](./0635-llm-subject-id-dropped-by-default-without-candidates.md) | `subjectCandidates` を渡さない抽出では、LLM が返した `subjectId` を既定で捨てる（`acceptLlmSubjectIdWithoutCandidates` で受ける） | 採用 (2026-10) |
 | [0646](./0646-merged-0929-recheck-teeth-b.md) | 09/29 にマージされた #1385・#1388・#1389・#1392・#1397・#1398・#1399・#1401・#1402・#1404・#1407・#1411・#1424・#1428・#1431・#1434・#1435 の確かめ直しで見つかった穴に歯を足す（tick の中断・consolidate/reflect の signal の配線・分割推論の並び・期限の積・claim key・材料の forget の見直し・反転の一文の既定ほか） | 採用 (2026-10) |
 | [0655](./0655-bullmq-stop-removes-scheduler-only-when-last-worker.md) | `@mnemora/bullmq` の `stop()` は、この queue に自分以外の Worker が居るとき共有 scheduler を消さない（ADR 0449 の材料3の一部を直す） | 採用 (2026-10) |
+| [0656](./0656-activity-clock-advancers-list-is-bound-to-recall-callers.md) | 活動時計を進める入口の一覧は、`recall(` の呼び出し元の集合に縛る（ADR 0394 決定3 の「掃引」の誤記の訂正） | 採用 (2026-10) |
+| [0657](./0657-rejected-subject-ids-order-and-count-teeth.md) | `ObserveResult.rejectedSubjectIds` の件数・順・重複を歯で縛る（Issue #1746） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
