@@ -113,6 +113,30 @@ describe("translateForOpenAIStructuredOutput", () => {
     expect(kindSchema).toEqual({ anyOf: [{ type: "string", const: "x" }, { type: "null" }] });
   });
 
+  // Issue #1775 の #808（変異6・7）: `makeNullable` は型を問わず `const`・`enum` を持つ形を扱う
+  // （doc: 「`const` を持つ形は `anyOf` に包み、`enum` を持つ形は `enum` にも null を足す」。型を限っていない）。
+  // 文字列の literal・enum だけでなく、数値・真偽値の形も同じ。
+  it.each([
+    ["数値", z.literal(1), "number", 1],
+    ["真偽値", z.literal(true), "boolean", true],
+  ] as const)(
+    "省略可能な %s の z.literal も anyOf で null を選べる形に包まれる",
+    (_label, literal, type, value) => {
+      const schema = z.object({ kind: literal.optional() });
+      const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
+      const kindSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>).kind!;
+      expect(kindSchema).toEqual({ anyOf: [{ type, const: value }, { type: "null" }] });
+    },
+  );
+
+  it("省略可能な数値の enum（z.literal の配列）は type に null を足し、enum の末尾にも null を足す", () => {
+    const schema = z.object({ level: z.literal([1, 2]).optional() });
+    const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
+    const levelSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>).level!;
+    expect(levelSchema.type).toEqual(["number", "null"]);
+    expect(levelSchema.enum).toEqual([1, 2, null]);
+  });
+
   it("実際に extraction.ts と同じ形（ExtractionResultSchema 相当）を翻訳できる", () => {
     const extractedMemoryCandidateSchema = z.object({
       content: z.string().min(1),
