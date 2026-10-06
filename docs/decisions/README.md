@@ -668,5 +668,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0671](./0671-merged-0930-front-rest-recheck-teeth-1523-1525-1527-1529.md) | 09/30 マージの前半の残り（#1523・#1525・#1527・#1529・#1534・#1537・#1538・#1542・#1543）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0673](./0673-merged-0918-recheck-runtime-method-doc-extraction-negative-control.md) | 09/18 にマージされた #543（Runtime のメソッドと3文書の対応の歯）の残りを今の約束で確かめ直し、抽出の陰性対照を足す（Issue #1804） | 採用 (2026-10) |
 | [0674](./0674-merged-0926-recheck-teeth.md) | 09/26 にマージされた PR の確かめ直しで見つかった穴に歯を足す（Issue #1774） | 採用 (2026-10) |
+| [0675](./0675-merged-0916-recheck-scripts-ci-group-teeth.md) | 09/16 にマージされた scripts/CI の PR 10本（#365・#380・#385・#398・#414・#423・#434・#436・#438・#444）の確かめ直しで見つかった穴に歯を足す（Issue #1815、G1） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
