@@ -2756,6 +2756,7 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 
 **誰が影響を受けるか**:
 - `MemoryStore` の3つの口を**直接**呼び、上の形の値を渡していた呼び出し側。`Runtime` 経由は、`digest` が空にならず（本文から作る）、`provenance`・`claimKey` を自分で組み立てるので、ふつうは当たらない。ただし **`RuntimeConfig.extractorVersion` に空文字を渡していた利用者**は、抽出した Memory が書けなくなる（【未確認】実際の落ち方は測っていない）。
+- `runtime.observe` の利用者。抽出した候補の保存は `createMemoriesWithOutboxAndEvents?` を通り、この口も同じ検査を共有する。壊れた候補（例: 空の `extractorVersion`）は、保存できない他の候補と同じく `created` イベントの `droppedCandidates` に積まれ、observe 全体は落ちず、残りの候補は書かれる（`@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts` が根拠）。testkit の `InMemoryMemoryStore` も実装を読んだ限り同じ（ただし全候補が壊れていると最初の例外を投げる。Postgres で同じかは【未確認】）。core の Fake はこの口を持たない。
 - 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者（外部の adapter の作者）。上の形を受け付ける実装は、conformance が赤になる。**片側だけの `claimKey` を受け付けて「鍵なし」として扱っていた実装**も同じ（その扱いを縛っていた歯は、「書き込みの口が拒む」に書き換わった）。
 
 **どう直すか**:
