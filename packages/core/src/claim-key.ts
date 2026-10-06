@@ -419,8 +419,8 @@ export interface ClaimKeyOptions {
    * が縛っている。呼び出し側は、`observe()` に期間（`validFrom`/`validUntil`）を明示すれば、重ならない
    * 対は contested にならない。
    *
-   * ⚠ **【2026-10-07 追記、Issue #835】`knownPredicatesFromStore: true` と組むと、別々の発話どうしが
-   * 語彙ヒントに吸い寄せられて同じ predicate になり、訂正ではない対も contested になる**（U1）。
+   * ⚠ **`knownPredicatesFromStore: true` と組むと、別々の発話どうしが語彙ヒントに吸い寄せられて
+   * 同じ predicate になり、訂正ではない対も contested になる**（Issue #835）。
    * その対にも `RecalledMemory.contestedWith` が付き、`examples/chat` の回答プロンプトでは訂正と
    * 同じ「訂正の可能性」の印で届く。測定値と条件は ADR 0335 の追記（2026-10-07、Issue #835）を見ること。
    */
