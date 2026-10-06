@@ -140,4 +140,29 @@ describe("recall() — 段2で score_not_comparable に数えた候補が後の�
 
     expect(sncCount(result)).toBe(1);
   });
+
+  it("(i) 段3.5 で席に着けなかった比較不能の記憶は、over_limit(association) にだけ数える", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "AAAA" });
+    await createEmbeddedMemory(stores, [1, 0], { digest: "XXXX" });
+    // N は halfLifeHours: 0 で total が NaN（段2で score_not_comparable）。比較不能は席順で最後尾に
+    // 送られるので、maxCount: 1 では X が席を取り、N が席に着けない。
+    await createEmbeddedMemory(stores, [1, 0], { digest: "NNNN", halfLifeHours: 0 });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 1,
+      scoreThreshold: 0,
+      includeFullyDecayed: true,
+      association: { maxCount: 1 },
+    });
+
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "association",
+      count: 1,
+      countKind: "exact",
+    });
+    expect(sncCount(result)).toBeUndefined();
+  });
 });

@@ -1181,3 +1181,20 @@ recall の不変条件を固定シードで検査する検査器（Fake）が、
 - 本物の Postgres での実測（判断は件数の意味についてのものであり、コードは変えていない）。
 
 Refs #1021 #1025
+
+---
+
+## 2026-10-07 追記10（クローン miku の判断、Issue #1788）—— 追記7 の取りこぼしを1行直した（新しい判断は無い）
+
+**追記7 が `score_not_comparable` に当てた「最後にそれを落とした段で1回だけ数える」は、段3.5 の連想で `association.maxCount` を超えて席に着けなかった比較不能の記憶について、守れていなかった。** 席に着けなかった記憶は `over_limit(stage: "association")` に数えられるのに、`score_not_comparable` からは差し引かれず、同じ1件が2つの札に数えられていた。
+
+原因は `promotedFromNotComparable` の判定に `overLimitAssociationSeatlessIds` が入っていなかったことだけである。同型の `promotedFromBelowThreshold`・`promotedFromOverLimit`（追記4）には入っていた。比較不能（`total` が `NaN`）は席順で最後尾に送られるので、席が足りないと真っ先に席に着けない。
+
+**決めたこと（新しくは無い）**: 追記7 の決めたことのとおり、戻った先でだけ数える。判定に `overLimitAssociationSeatlessIds.has(...)` を1行足し、席に着けなかった比較不能の記憶は `over_limit(stage: "association")` にだけ数える。公開型・公開 API は変えていない。そのため新しい ADR は立てず、追記7 の取りこぼしの訂正としてここに積む。
+
+- 歯: `recall-score-not-comparable-promotion.test.ts` の (i)。修正前は `over_limit(association)` の count 1 は出るが `score_not_comparable` も count 1 で残り赤。修正後は緑。
+- 変異: 足した1行を外すと (i) が赤になる。判定を無条件に取り下げる形にすると (c) が赤になる。
+
+**確かめていないこと**: `relationOverLimitIds`（群の上限で切られた候補）が同じ形で二重に数えられる疑い（Issue #1023 の確かめ直しで挙がった）は、この追記の射程外で、実測していない。本物の Postgres での再現も取っていない（判定は `packages/core` の中で完結する）。
+
+Refs #1788
