@@ -149,6 +149,22 @@ describe("validateMeasured", () => {
     expect(validateMeasured(makeMeasured()).ok).toBe(true);
   });
 
+  // ADR 0420 の確かめ直し（Issue #1734）: 必須の outcome の一覧に、`ConsolidateOutcome` に無い値が混ざっていると、
+  // 7値ちょうどの正しい内訳が落ちてしまう。欠けた値を落とす歯（下の it.each）だけでは、余計な値は見えない。
+  it("consolidation.outcomes が ConsolidateOutcome の7値ちょうどなら ok:true を返す（余計な必須の値を持たない）", () => {
+    const round = makeRound({ round: 1, consolidation: makeConsolidation() });
+    expect(Object.keys(round.consolidation.outcomes).sort()).toEqual([
+      "aborted_source_forgotten",
+      "aborted_source_status_changed",
+      "consolidated",
+      "dry_run",
+      "llm_failed",
+      "not_examined",
+      "nothing_to_consolidate",
+    ]);
+    expect(validateMeasured(makeMeasured({ rounds: [round] })).ok).toBe(true);
+  });
+
   it("オブジェクトでなければ落ちる", () => {
     expect(validateMeasured(null).ok).toBe(false);
     expect(validateMeasured("x").ok).toBe(false);
