@@ -27,7 +27,7 @@
 5. **検査の位置**: Postgres は `assertNoNulInNewMemory` の直後（3か所）、testkit は `assertStorableNewMemory` の末尾（NUL・列挙の後）、Fake は `provenance.kind` の列挙の検査の後。すでに在る検査が断る入力の文面・順を変えないため、`provenance.kind` が列挙に無いとき・`provenance` が `null` のときは、この検査は見ない。
 6. **conformance suite に歯を足した**（3口 × 21形の拒否 × 冪等の既存行 × 19形の通す側、`supersede` の2件目の巻き戻し）。**片側だけの `claimKey` を `createMemory` で作って「数えない」ことを縛っていた歯**（`listActiveClaimPredicates`、Issue #1238 A7）は、約束を書き換えた: 書き込みの口が拒むこと、拒まれた書き込みが一覧を汚さないこと。**読み側の「それより前に書かれた行は鍵なしとして扱う」は、実装ごとの歯**（fixture・Fake。内部の行を書き換えて作る）が縛る。
 7. **`RuntimeConfig.extractorVersion` が空文字・空白だけなら、`createRuntime` が組み立ての時点で `Error` を投げる**（`undefined`・`null` は今どおり既定の `"v1"`）。【判断】レビュアー（miku）の決定。理由: store の検査だけだと、空文字の `extractorVersion` では抽出した候補がすべて壊れた候補になり、**候補が1件以上ある `observe` が毎回投げる**（Postgres・testkit で実測。歯は上の observe の節）。オーナーが選んだのは「入口で拒む」であり、observe のたびに投げるより、組み立ての1回で分かるほうが利用者に優しい。`llmModelId`・`promptVersion` の空文字を既定に寄せる扱いは変えない。
-8. **`supersedeWithNewMemories` で「壊れた `news`」と「存在しない `supersede` の対象」が同時にあるときは、壊れた値の例外が先**（Postgres の順）。testkit の fixture と core の Fake は、以前は対象の not found を先に投げていたので、Postgres に揃えた（独立確認 mgr-ceace21d の指摘。歯: conformance と Fake のテスト）。【判断】
+8. **`supersedeWithNewMemories` で「壊れた `news`」と「存在しない `supersede` の対象」が同時にあるときは、壊れた値の例外が先**（Postgres の順）。testkit の fixture と core の Fake は、以前は対象の not found を先に投げていたので、Postgres に揃えた（独立確認 mgr-ceace21d の指摘。歯: conformance と Fake のテスト）。testkit では、ADR 0140 の contested の検査も対象の存在より前に移った（Postgres と同じ順。下の変異試験の節）。【判断】
 
 ### 範囲外（触らない）
 
@@ -77,6 +77,27 @@
   4. `createObservationWithOutbox`（3実装）と core の Fake の `createObservation` で、attributes の値が文字列以外なら拒む変異 → 範囲外の歯を3実装に足した。
   5. observe 経路: 壊れた候補と正常な候補が混ざる場面の歯が Postgres に無く、testkit の InMemory と core の Fake には observe 経路の歯がそもそも無かった（例外を observe 全体へ漏らす変異が Fake 経路で生き残った）→ 3実装に足した（壊れた候補は store の手前の Proxy で作る。Runtime が作る NewMemory では自然には作れないため）。
 - **確かめていない**: createRecall・Event の書き込みを拒む変異は入れていない（自然な「やりすぎ」の形を決められなかった。範囲外の歯は subjectId と createObservation 系のみ）。欄ごとの検査の除去は、重ならない形の変異をまとめて入れて失敗した歯の名前で見分けた（1つずつではない）。Postgres での全形の再実行は、口ごとの除去と supersede の変異でのみ行い、欄ごとの変異は core と testkit で見た（表は同じ）。
+
+### 独立確認（mgr-ceace21d）の後に足した歯と変異（2026-10-06）
+
+【実測】
+- **拒みすぎない側（通す表に10形）**: `MemorySchema` が拒まない次の形は、3実装×3口とも今は通り、読み戻しも `MemorySchema` を通る。表（core と conformance の2か所）に足した。
+  - A: 空白だけの `claimKey`（`" "`・`"\t"`）
+  - B: 孤立サロゲートを含む `claimKey`（`"a\uD800b"`。保存時に U+FFFD に置き換わる——ADR 0543）
+  - C: `attributes` のキーが `""`・`"a b"`・`"a/b"`・`"キー"`（`MemorySchema.attributes` はキーの文字種を見ない。キーの決まりは入力側の `AttributesSchema` だけ）
+  - E: `provenance` に余分なキー（`stated`・`inferred`・`imported`）
+- 変異（`assertWellFormedNewMemory` に「その形を拒む」を足す）の赤:
+
+  | 変異 | 検査関数のテスト | core の Fake（3口） | fixture（3口） | Postgres（3口） |
+  |---|---|---|---|---|
+  | A | 赤 | 赤 | 赤 | 赤 |
+  | B | 赤 | **緑（噛まない）** | **緑（噛まない）** | 赤 |
+  | C | 赤 | 赤 | 赤 | 赤 |
+  | E | 赤 | 赤 | 赤 | 赤 |
+
+  ⚠ B が fixture と Fake で噛まないのは、どちらも孤立サロゲートを U+FFFD に置き換えてから検査するため（Postgres は検査が先で、置き換えはドライバ）。検査の位置は変えていない。B を「拒む」側に変える変異は、検査関数のテストと Postgres の conformance が捕まえる。
+- **`createRuntime` の `extractorVersion`（決定7）**: 陽性3・陰性6の歯。変異（検査を外す・`trim()` を外す・`null` を拒む・前後の空白を拒む）がすべて赤。
+- **`supersedeWithNewMemories` の例外の順（決定8）**: 歯は conformance と Fake のテスト。testkit・Fake の新しい検査を外す変異で赤。testkit は、入口の検査を `createMemoryIdempotent` の入口と同じ並び（孤立サロゲートの置き換え → contested → `assertStorableNewMemory`）で前に出した——ADR 0630 の検査だけを先に呼ぶと、`digest: null` などで supersede だけが `Error`、ほかの2口が `TypeError` に割れたため（`in-memory-new-memory-rejects.test.ts` が縛る。その版に戻す変異で赤）。これで testkit の contested の検査も対象の存在より前になり、Postgres の順に揃った。
 
 ## 覆るとしたら
 
