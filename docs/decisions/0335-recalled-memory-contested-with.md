@@ -449,3 +449,76 @@ Issue #1786 は、#959 以降は条件(c)（相手が budget 切り詰め後の�
 
 「既存の38ファイル」は、`packages/core/src/__tests__` のうち `recall(` と `contested` の両方を含むもの。
 本文・「測ったこと」・負債3の元の文は書き換えていない。
+
+## 追記（2026-10-07）——鎖は公開の `Runtime` の経路だけでは作れなかった（Issue #1786 の続き）
+
+**クローン（miku）の判断で残す記録であり、オーナーの判断ではない。**
+
+上の「その後（2026-10-07）」は、鎖 a→b→c が `Runtime.markContested` 単独では作れず、`MemoryStore` を直接
+書いたときだけ作れる、と書いた。**では `Runtime` の公開メソッドを組み合わせれば作れるか**を、
+`superseded` を挟む流れを中心に確かめた。**作れなかった**（鎖も、「b が `contested` で `contestedWithId` が
+相手を指し返さない」状態も）。
+
+### 確かめた流れと、各段の状態
+
+【実測】使い捨ての試験（未追跡・PR には含めない）で、公開の `Runtime` のメソッドだけを呼び、
+各段のあとに `MemoryStore.get` で `status`・`contestedWithId`・`supersededById` を読んだ。
+**testkit の in-memory fixture と本物の Postgres（17 + pgvector）の両方で、同じ結果だった。**
+`a`・`b`・`c` は最初すべて `active`。
+
+| # | 流れ | 結果 |
+|---|---|---|
+| 1 | `markContested(a,b)` → `resolveContested(a,b, supersede, winner=a)` → `restoreSuperseded(supersededById=a)` → `markContested(b,c)` | 段2で b は `superseded`（`contestedWithId` は **`null`**、`supersededById=a`）、a は `active`（`contestedWithId` `null`）。段3で b は `active`・`contestedWithId` `null`・`supersededById` `null`。段4で b↔c が**相互に**付く。a は `active` のまま。**鎖にならない** |
+| 2 | 群 `markContestedGroup([a,b,c])` → `resolveContestedGroup(winner=a)` → `restoreSuperseded(a)` → `markContested(b,c)` | 群のメンバーは `contested`・`contestedWithId` `null`。解決後 b・c は `superseded`、復帰後は `active`・参照なし。b↔c は相互。鎖にならない |
+| 3 | `markContested(a,b)` → `forget(b)` | b は `forgotten`（`contestedWithId=a` が残る）、a は `contested`・`contestedWithId=b` のまま（片方向の孤児。ADR 0150 負債2 の既知の形）。`markContested(a,c)`・`markContested(b,c)` はどちらも `ineligible`。`restoreSuperseded` は何も戻さない |
+| 4 | 3 の続きで `resolveOrphanedContested(a)` → `markContested(a,c)` | a は `active`・参照なし（b は `forgotten` のまま `contestedWithId=a` を**残す**）。そのあと a↔c が相互に付く。**b は `forgotten` なので `contested` の鎖にならない**（下の「止まる理由」） |
+| 5 | `markContested(a,b)` → `forget(b)` → `purge(b)` | `purge` は `forgotten` の行を消さず（`purged` を返す）、状態は 3 と同じ。`markContested(a,c)` は `ineligible` |
+| 6 | `markContested(a,b)` → `markContested(b,c)` | 二度目は `ineligible`（b が `status_not_active`）。a・b は変わらない |
+| 7 | `markContested(a,b)` → `markContestedGroup([a,b,c])` | 群は a・b の相互参照を `null` に落として3者の群になる。そのあとの `markContested(a,c)` は `ineligible` |
+| 8 | `markContested(a,b)` → `markContestedGroup([b,c,d])`（b の相手 a が群の外）、`forget(b)` → `markContestedGroup([a,c,d])`・`[a,b,c]` | いずれも `ineligible`。何も書かない |
+| 9 | `markContested(a,b)` → `resolveContested(winner=b)` → `restoreSuperseded(supersededById=b)` → `markContested(a,c)` | 段で a は `superseded`（参照 `null`）→ `active`。a↔c が相互。鎖にならない |
+
+### 止まる段（コード上の理由）
+
+1. **`contested` の行が `superseded` になる口は、`Runtime` の公開メソッドには無い。**
+   `reextract`（`runtime.ts:5668`・`:5804`）・`consolidate`（`:8649`・`:8802`）は `expectedStatus: "active"` の
+   CAS で `superseded` を書く。`contested` の行は CAS に弾かれる。`contested` の行を `superseded` に動かすのは
+   `resolveContested`/`resolveContestedGroup` だけで、**同じ書き込みで `contested_with_id` を `NULL` に戻す**
+   （Postgres: `memory-store.ts` の `resolveContestedPair` の `updateSide`、`:3982` の `contested_with_id = NULL`。
+   in-memory の fake・fixture も同じ）。つまり、疑っていた段2「b が `contestedWithId` を残したまま
+   `superseded` になる」が起きない。
+2. **`restoreSuperseded` は `status` と `supersededById` しか触らない**（`restoreSupersededBy` の
+   `SET status = 'active', superseded_by_id = NULL`）。段2 で `contestedWithId` が既に `null` なので、
+   戻った b は参照を持たない `active` であり、`markContested(b,c)` は普通の2者の対を作る。
+   a は段2 の時点で既に `active`・参照なし（`resolveContestedPair` は両側を同時に書く）なので、
+   a を直す経路も要らない。
+3. **`markContested` は両側が `active` であることを要求する**（`runtime.ts:7427`〜`:7435` の `classify`）。
+   片側の孤児（`forget` が作る、`contested`・`contestedWithId` が `forgotten` を指す a）は `ineligible` になり、
+   孤児のまま他の記憶と対にはならない。孤児を戻す口は `resolveOrphanedContested`
+   （`runtime.ts:7753` 付近）だけで、a を `active`・参照なしに戻してから普通に対にできる。
+4. **`forgotten` から戻す口が `Runtime` に無い**（`restoreArchived` は `archived`、`restoreSuperseded` は
+   `superseded` だけを対象にする）。`forget(b)` のあと b が `contestedWithId=a` を残すこと（手順 3・4）は
+   実測で確かめたが、b を `active` や `contested` に戻して c と対にする経路が無いので、鎖の2本目の辺（b→c）が書けない。
+5. **群と2者の対は混ざらない。** 群のメンバーは `contestedWithId` を持たない設計で、2者の対のメンバーを
+   群に含めるときは、対の相手も同じ群に入っていなければ `ineligible`（手順 7・8）。
+
+### 確かめていないこと
+
+- **`reextract`・`consolidate`・`reflect` を実際に走らせてはいない。** `contested` の記憶を CAS が弾くことは、
+  コード（上の行）で読んだだけで、実測していない。`reflect` の supersede の書き込みは読んでいない。
+- **claim-key の矛盾の自動検出**（`detectClaimKeyContested`、`runtime.ts:4840` 付近）を `observe`/`tick` から
+  走らせてはいない。コード上は、一致が `active` 1件のときに `markContested`（両側 `active` が条件）、
+  それ以外は `markContestedGroup` に流れ、鎖を書く分岐は読んでいない。
+- **並行（TOCTOU）で鎖ができるか**は見ていない（`markContestedPair` の CAS は事前検証と書き込みの間の
+  競合を `MemoryStatusConflictError` にする、という契約を読んだだけ）。
+- **`recall` の出力は見ていない。** 鎖が作れなかったので、`contestedWith`・段3の同伴取得の実測は無い。
+- **adapter の自作実装**（`MemoryStore` の任意メソッドを独自に実装した場合）は対象外。
+- `forgotten` の行が `contestedWithId` を残すこと（手順 3・4・5）は、`recall` に出ない行の stale な参照であり、
+  今のところ読まれる経路を見つけていない。ただし**読まれる経路が無いことの証明ではない**。
+
+### 結論
+
+**今日の公開の `Runtime` の経路だけでは、鎖は作れない。** 上の条件(c) の歯が `MemoryStore` を直接書いて
+鎖を組むのは、歯として正しい（`Runtime` の外から壊れた入力が来たときの防御を測る）。ただし、
+**将来 `Runtime` に「`contested` の行を `contestedWithId` を残したまま動かす」口、または `forgotten` を戻す口を
+足すときは、この追記の段1・段4が崩れる**ので、鎖の歯と合わせて見直すこと。
