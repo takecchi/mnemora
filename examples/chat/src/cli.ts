@@ -1262,7 +1262,7 @@ const DRIFT_COSINE_THRESHOLD = 0.99;
 async function runVerify(target: CassetteTarget): Promise<void> {
   // 前提が足りないだけなので、例外（stack trace）にせず1行で案内して exit 1 で終わる
   // （未知のサブコマンドや `answer-trials-compare` の引数不足と同じ形）。
-  if (!process.env.OPENAI_API_KEY) {
+  if ((target === "retrieval" || target === "compare") && !process.env.OPENAI_API_KEY) {
     console.error("verify は実 API と記録を突き合わせる。OPENAI_API_KEY を設定すること。");
     process.exitCode = 1;
     return;
