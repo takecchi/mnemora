@@ -58,7 +58,10 @@ describe("FakeMemoryStore.aggregateScope: excludedProvenanceIndexedCount は tot
     await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated }));
     await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated }));
     // 数えない（絞りで落ちる行。どれも除外 kind・ready）
-    await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated, status: "archived" }));
+    await memoryStore.createMemory(
+      ctx,
+      newMemory({ provenance: consolidated, status: "archived" }),
+    );
     await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated, subjectId: "s2" }));
     await memoryStore.createMemory(
       ctx,
