@@ -2732,7 +2732,7 @@ async function main(): Promise<void> {
     await runChat();
   } else if (command === "compare") {
     await runCompare(parseDecayClockFlag(process.argv.slice(3)));
-  } else if (command === "recall-footprint-calibration-samples") {
+  } else if (command === "recall-footprint-calibration-samples-x") {
     await runRecallFootprintCalibrationSamples();
   } else if (command === "scope") {
     await runScope();
