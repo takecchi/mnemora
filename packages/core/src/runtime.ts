@@ -4611,7 +4611,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         halfLifeHours,
         now,
         digestFallbackLength,
-        claimKey: claimKeys?.[index] ?? null,
+        claimKey: null,
         ...activityClockInputsFor(
           activityClockBase,
           subjectSeqs,
