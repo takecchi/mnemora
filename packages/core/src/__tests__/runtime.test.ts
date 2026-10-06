@@ -2721,6 +2721,8 @@ describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項
         // subjectId 省略 ＝ 未指定。従来どおり observation の値へ落ちる。
         { content: "念のための第4の候補", provenanceKind: "stated" },
       ]),
+      // 問15: 一覧を渡さずに候補ごとの主題を受けるのは opt-in（既定は捨てる）。
+      { config: { acceptLlmSubjectIdWithoutCandidates: true } },
     );
 
     const result = await runtime.observe(ctx, {
@@ -2812,9 +2814,10 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
     expect("rejectedSubjectIds" in result).toBe(false);
   });
 
-  it("空配列（[]）を渡した場合も『渡していない』と同じ——検証されず、rejectedSubjectIds も無い", async () => {
+  it("空配列（[]）を渡した場合も『渡していない』と同じ——一覧では検証されず（opt-in なら素通り）、rejectedSubjectIds も無い", async () => {
     const { runtime, stores } = buildRuntime(
       llmReturning([{ content: "任意の主題", provenanceKind: "stated", subjectId: "anything" }]),
+      { config: { acceptLlmSubjectIdWithoutCandidates: true } },
     );
     const result = await runtime.observe(ctx, {
       kind: "utterance",
@@ -2918,6 +2921,9 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
       ]),
       embeddingProvider: stores.embeddingProvider,
       hashContent: (content: string) => `sha256(${content})`,
+      // 問15: 既定では reextract も LLM の subjectId を捨てる（llm-subject-id-dropped-by-default.test.ts）。
+      // ここは「一覧で検証しようがない」ことを縛るので opt-in で受ける。
+      config: { acceptLlmSubjectIdWithoutCandidates: true },
     });
     const reextractResult = await reextractRuntime.reextract(ctx, observeResult.observationId);
     expect(reextractResult.extraction).toBe("ok");
