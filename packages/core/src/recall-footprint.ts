@@ -318,8 +318,7 @@ export function footprintSampleFromRecall(result: RecallResult): RecallFootprint
  * （`indexBandStructuralTerms` の doc）。
  */
 function structuralCarryForSample(sample: RecallFootprintSample): number {
-  if (sample.totalInScope === undefined) return 0;
-  const terms = indexBandStructuralTerms(sample.totalInScope, sample.memoryCount, 0, 0);
+  const terms = indexBandStructuralTerms(sample.totalInScope ?? 10, sample.memoryCount, 0, 0);
   return (
     terms.bandChars +
     terms.totalInScopeDigitCarry +
