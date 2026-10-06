@@ -26,6 +26,26 @@ function build() {
   };
 }
 
+describe("archiveDecayed の nowSeq は wall では見ない（Issue #1731、Postgres は wall では nowSeq を SQL に入れない）", () => {
+  it("wall（既定を含む）は整数でない nowSeq も通し、activity・either は今までどおり断る", async () => {
+    const { memoryStore } = build();
+    const base = { now: new Date(), limit: 10, nowSeq: 1.5 };
+    await expect(memoryStore.archiveDecayed(ctx, { ...base, clock: "wall" })).resolves.toEqual({
+      archived: [],
+      reachedLimit: false,
+    });
+    await expect(memoryStore.archiveDecayed(ctx, base)).resolves.toEqual({
+      archived: [],
+      reachedLimit: false,
+    });
+    for (const clock of ["activity", "either"] as const) {
+      await expect(memoryStore.archiveDecayed(ctx, { ...base, clock })).rejects.toThrow(
+        /^archiveDecayed: nowSeq must be an integer \(got 1\.5\)$/,
+      );
+    }
+  });
+});
+
 describe("testkit の fixture は読みの口の条件の Invalid Date・整数でない通し番号を拒む", () => {
   const cases: Array<[string, (k: ReturnType<typeof build>) => Promise<unknown>, RegExp]> = [
     [

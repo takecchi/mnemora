@@ -687,6 +687,9 @@ add("archiveDecayed(nowSeq:-1, clock:activity)", (h) =>
 add("archiveDecayed(nowSeq:1.5, clock:activity)", (h) =>
   h.s.ms.archiveDecayed(h.ctx, { now: new Date(), limit: 10, nowSeq: 1.5, clock: "activity" }),
 );
+add("archiveDecayed(nowSeq:1.5, clock:wall)（wall は nowSeq を SQL に入れない）", (h) =>
+  h.s.ms.archiveDecayed(h.ctx, { now: new Date(), limit: 10, nowSeq: 1.5, clock: "wall" }),
+);
 add("archiveDecayed(clock:activity, nowSeq 無し)", (h) =>
   h.s.ms.archiveDecayed(h.ctx, { now: new Date(), limit: 10, clock: "activity" }),
 );
