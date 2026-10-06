@@ -354,4 +354,86 @@ describe("recall() — 段3.5(連想枠)の contested 候補にも必須の同�
     expect(associatedResult?.contestedWith).toBeUndefined();
     expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);
   });
+
+  it("連想枠自身が contested の両側を選んでいるときは、対向をもう一度取りに行かない（getMany に両側の id を渡さない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0, 0, 0], { digest: "Q" });
+    const p1 = await createEmbeddedMemory(stores, [0.9, 0.1, 0, 0], { digest: "P1" });
+    const p2 = await createEmbeddedMemory(stores, [0.85, 0.15, 0, 0], { digest: "P2" });
+    expect((await runtime.markContested(ctx, p1.id, p2.id)).outcome.kind).toBe("contested");
+    const pairReads: string[][] = [];
+    const originalGetMany = stores.memoryStore.getMany.bind(stores.memoryStore);
+    stores.memoryStore.getMany = async (c, ids) => {
+      if (ids.length === 2 && ids.includes(p1.id) && ids.includes(p2.id)) pairReads.push([...ids]);
+      return originalGetMany(c, ids);
+    };
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0, 0], limit: 1 });
+
+    const returned = result.memories.map((m) => m.memoryId);
+    expect(returned).toContain(p1.id);
+    expect(returned).toContain(p2.id);
+    // 2人を読むのは、連想の候補の読み出し（段3.5 の入口）の1回だけ。対向の取得でもう1回読まない。
+    expect(pairReads).toHaveLength(1);
+  });
+
+  it("片側だけの contested（対向の id が無い）は、連想枠でも単独では返らず、Unit ごと落ちて数える", async () => {
+    const { runtime, stores } = buildRuntime();
+    const q = await createEmbeddedMemory(stores, [1, 0, 0, 0], { digest: "Q" });
+    const lone = await createEmbeddedMemory(stores, [0.95, 0.05, 0, 0], {
+      digest: "LONE",
+      status: "contested",
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0, 0], limit: 1 });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(q.id);
+    expect(ids).not.toContain(lone.id);
+    expect(result.omitted).toContainEqual({
+      kind: "unit_assembly_dropped",
+      count: 1,
+      countKind: "lower_bound",
+    });
+  });
+
+  it("subject 単位の活動カウンタを使うテナントでも、同伴取得した対向の減衰は、その対向の subject のカウンタで測る", async () => {
+    const { runtime, stores } = buildRuntime();
+    await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
+    const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100);
+    const decay = {
+      decayBaseSeq: 0,
+      decayFloorSeq: 1000,
+      halfLifeRecalls: 8,
+      decayFloorAt: FAR_FUTURE,
+    };
+    const bobCtx: Ctx = { tenantId: "tenant-1", subjectId: "bob" };
+    const carolCtx: Ctx = { tenantId: "tenant-1", subjectId: "carol" };
+    // 連想側（bob）と対向（carol）は subject が違う。対向の subject は同伴取得で初めて読まれる。
+    await createEmbeddedMemory(stores, [1, 0, 0, 0], { digest: "Q", subjectId: "bob", ...decay });
+    const c1 = await createEmbeddedMemory(stores, [0.95, 0.05, 0, 0], {
+      digest: "C1",
+      subjectId: "bob",
+      ...decay,
+    });
+    const c2 = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "C2", subjectId: "carol", ...decay }),
+    );
+    expect((await runtime.markContested(ctx, c1.id, c2.id)).outcome.kind).toBe("contested");
+    // bob と carol の subject カウンタ（S_bob・S_carol）を同じだけ進める。
+    for (const who of [bobCtx, carolCtx]) {
+      for (let i = 0; i < 4; i += 1) {
+        await runtime.recall(who, { vector: [1, 0, 0, 0], limit: 1, activityCounting: "subject" });
+      }
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0, 0], limit: 1 });
+
+    const c1Result = result.memories.find((m) => m.memoryId === c1.id);
+    const c2Result = result.memories.find((m) => m.memoryId === c2.id);
+    expect(c2Result?.retrievedVia).toBe("mandatory_companion");
+    expect(c1Result?.score.decay).toBeLessThan(1);
+    expect(c2Result?.score.decay).toBe(c1Result?.score.decay);
+  });
 });
