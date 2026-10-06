@@ -9204,7 +9204,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           ctx,
           [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
           (memory) => buildReflectedCreatedEvent(memory),
-          { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
+          { now, abortIfForgotten: eligibleIds },
         );
         // 候補は1件なので、全件が落ちたなら store は最初の例外を投げている（`dropped` は空のはず）。
         // 契約に反して `written` が空で返ったときは、落とした例外があればそれを、無ければ契約違反として投げる。
