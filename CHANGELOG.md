@@ -251,6 +251,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ### Fixed
 
 - **`recall()` の段3.5（連想）で `association.maxCount` を超えて席に着けなかった比較不能（`total` が `NaN`）の記憶が、`over_limit`（stage `association`）と `score_not_comparable` の両方に数えられていたのを、`over_limit(association)` にだけ数えるよう直した**（[Issue #1788](https://github.com/takecchi/mnemora/issues/1788)。[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記10。追記7 の取りこぼし）。公開型・公開 API は変えていない。
+- **`recall()` の段3で多者間の群の上限（`relationMaxCount`）に切られた候補が、段3.5 の連想の必須の同伴取得（`RelationStore.link` で張った辺をたどる形）で `memories`（または予算で落ちて `budget_dropped`）へ戻ったとき、`over_limit`（stage `relation`）の count からも差し引かれず二重に数えられていたのを、戻った先でだけ数えるよう直した**（[Issue #1794](https://github.com/takecchi/mnemora/issues/1794)。[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記11）。公開型・公開 API は変えていない。
 
 - **`@mnemora/postgres` の `runMigrations` が、`registerEmbeddingSpace` と同時に走って埋め込み表の索引の名前がぶつかり（`23505`・`pg_class_relname_nsp_index`・`idx_memory_embeddings_…`）落ちたファイルを、1回だけ流し直すようになった**（逆向きの競合。[ADR 0638](./docs/decisions/0638-run-migrations-reruns-file-once-on-embedding-index-name-race.md)。[ADR 0464](./docs/decisions/0464-register-embedding-space-absorbs-migration-index-race.md) の負債 D1b。オーナーへのまとめ問い 374f6f88 の問30）。
   - 以前は、`registerEmbeddingSpace` が索引を作っている最中に `runMigrations` が同じ名前を作ろうとすると、migration がそのファイルごと巻き戻って失敗し、呼び直さないと進まなかった。いまは、そのファイルを頭から1回だけやり直す（適用済みのファイルは流さない）。2回目も落ちたら、2回目のエラーをそのまま投げる。別の例外は流し直さない。

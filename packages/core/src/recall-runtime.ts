@@ -1655,6 +1655,9 @@ async function runRecallBody(
   // ADR 0494: `relationMaxCount` を超えて切った（`over_limit { stage: "relation" }` に数えた）群のメンバーの id。
   // 段3.5 の連想の候補から外す（同じ記憶を連想の `unit_assembly_dropped`・`over_limit` でもう一度数えない）。
   const relationOverLimitIds = new Set<MemoryId>();
+  // Issue #1794: 切られた候補の id → その群の `over_limit(relation)` の Omission（同じ参照）。段3.5 の必須の
+  // 同伴取得（id 引きで、上の除外集合が効かない）が切られた候補を取り戻したとき、その群の count から差し引く。
+  const relationOverLimitEntryById = new Map<MemoryId, OverLimitOmission>();
   if (groupOwners.length > 0) {
     if (deps.relationStore === undefined) {
       omitted.push({
@@ -1759,12 +1762,16 @@ async function runRecallBody(
         const overLimitRelationCount = sorted.length - capped.length;
         for (const cut of sorted.slice(relationMaxCount)) relationOverLimitIds.add(cut.id);
         if (overLimitRelationCount > 0) {
-          omitted.push({
+          const relationEntry: OverLimitOmission = {
             kind: "over_limit",
             stage: "relation",
             count: overLimitRelationCount,
             countKind: explorationTruncated ? "lower_bound" : "exact",
-          });
+          };
+          omitted.push(relationEntry);
+          for (const cut of sorted.slice(relationMaxCount)) {
+            relationOverLimitEntryById.set(cut.id, relationEntry);
+          }
         }
         await ensureSubjectSeqs(capped);
         for (const companionMemory of capped) {
@@ -2699,6 +2706,30 @@ async function runRecallBody(
       } else {
         omitted.splice(assocIndex, 1);
       }
+    }
+  }
+
+  // Issue #1794: 段3で群の上限に切られて `over_limit(stage:"relation")` に数えた候補が、段3.5 の必須の
+  // 同伴取得（`getMany` による id 引き。連想の候補生成の除外集合 `relationOverLimitIds` が効かない）で
+  // `associationUnits` に戻ることがある。戻った先で返れば `memories` に、段4の予算で落ちれば
+  // `budget_dropped` に数えられるので、その群の count から差し引く（ADR 0203 追記3・7 の
+  // 「最後に落とした段で1回だけ数える」）。0件になった札は残さない。差し引くのは
+  // `associationUnits` に実際に入った id だけ（それ以外の経路では切られた候補は戻らない）。
+  const relationPulledByEntry = new Map<OverLimitOmission, number>();
+  for (const id of relationOverLimitIds) {
+    if (!associationUnitIds.has(id)) continue;
+    const entry = relationOverLimitEntryById.get(id);
+    if (entry === undefined) continue;
+    relationPulledByEntry.set(entry, (relationPulledByEntry.get(entry) ?? 0) + 1);
+  }
+  for (const [entry, pulled] of relationPulledByEntry) {
+    const index = omitted.indexOf(entry);
+    if (index === -1) continue;
+    const remainingCount = entry.count - pulled;
+    if (remainingCount > 0) {
+      omitted[index] = { ...entry, count: remainingCount };
+    } else {
+      omitted.splice(index, 1);
     }
   }
 

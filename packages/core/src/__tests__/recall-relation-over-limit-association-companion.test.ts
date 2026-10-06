@@ -113,7 +113,10 @@ async function build(opts: { extraCut: boolean }) {
   let r: Memory | undefined;
   if (opts.extraCut) {
     // R は群に入り、Q より古い validFrom で切られる。連想の対象にはならない（Q と違い、誰の対向でもない）。
-    r = await create(stores, [0.1, 0.1, 0.9], { digest: "RRRR", validFrom: new Date("2025-12-01") });
+    r = await create(stores, [0.1, 0.1, 0.9], {
+      digest: "RRRR",
+      validFrom: new Date("2025-12-01"),
+    });
     members.push(r.id);
   }
   expect((await runtime.markContestedGroup!(ctx, members)).outcome.kind).toBe("contested_group");
@@ -187,4 +190,65 @@ describe("recall() — 群の上限で切られた候補が段3.5 の必須同�
     expect(budgetDropped(result)).toBe(2);
     expect(relationOmissions(result)).toEqual([]);
   });
+
+  it.each(["o1", "o2"] as const)(
+    "(e) 群が2つあるとき、差し引くのは Q を切った群（%s の群）の札だけで、別の群の札には触れない",
+    async (qOwner) => {
+      const { runtime, stores } = buildRuntime();
+      const o1 = await create(stores, [1, 0, 0], { digest: "O1O1" });
+      const a1 = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "A1A1",
+        validFrom: new Date("2026-01-03"),
+      });
+      const a2 = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "A2A2",
+        validFrom: new Date("2026-01-02"),
+      });
+      const ra = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "RARA",
+        validFrom: new Date("2025-12-01"),
+      });
+      const o2 = await create(stores, [0.99, 0.1, 0], { digest: "O2O2" });
+      const b1 = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "B1B1",
+        validFrom: new Date("2026-01-03"),
+      });
+      const b2 = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "B2B2",
+        validFrom: new Date("2026-01-02"),
+      });
+      const rb = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "RBRB",
+        validFrom: new Date("2025-12-01"),
+      });
+      const anchor = await create(stores, [0.9, 0.1, 0.1], { digest: "ANCH" });
+      const p = await create(stores, [0.85, 0.15, 0.1], { digest: "PPPP" });
+      const q = await create(stores, [0.1, 0.1, 0.9], {
+        digest: "QQQQ",
+        validFrom: new Date("2026-01-01"),
+      });
+      await runtime.markContestedGroup!(ctx, [o1.id, a1.id, a2.id, ra.id]);
+      await runtime.markContestedGroup!(ctx, [o2.id, b1.id, b2.id, rb.id]);
+      await runtime.markContested(ctx, p.id, q.id);
+      // Q を切る群を2通りに振る（札が積まれる順に依らず、Q の群の札だけが減ることを見る）。
+      // Q の群の切り落としは Q と R の2件、もう片方の群は R の1件。
+      await stores.relationStore.link(ctx, "contradicts", qOwner === "o1" ? o1.id : o2.id, q.id);
+      void anchor;
+
+      const result = await runtime.recall(ctx, {
+        vector: [1, 0, 0],
+        limit: 3,
+        relationMaxCount: 2,
+      });
+
+      const ids = result.memories.map((m) => m.memoryId);
+      expect(ids).toContain(q.id);
+      expect(ids).not.toContain(ra.id);
+      expect(ids).not.toContain(rb.id);
+      expect(relationOmissions(result)).toEqual([
+        { kind: "over_limit", stage: "relation", count: 1, countKind: "exact" },
+        { kind: "over_limit", stage: "relation", count: 1, countKind: "exact" },
+      ]);
+    },
+  );
 });
