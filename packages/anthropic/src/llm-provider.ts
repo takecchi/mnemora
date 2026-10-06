@@ -33,9 +33,8 @@ import { translateForAnthropicStructuredOutput } from "./json-schema.js";
  * `Pick<Anthropic, "messages">` は `OpenAILLMProviderOptions.client` の
  * `Pick<OpenAI, "chat">` に対応する）。
  *
- * ⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）:
- * `client` を省略すると `new Anthropic({ apiKey })` が作る SDK 既定のクライアントが
- * 使われる——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する
+ * ⚠ **`client` を省略すると `new Anthropic({ apiKey })` が作る SDK 既定のクライアントが
+ * 使われる（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する
  * （実測: `@anthropic-ai/sdk@0.124.0` は既定 `maxRetries: 2`＝最大3回・
  * `timeout: 600000`ms。この数値は mnemora の契約ではなく SDK の既定値であり、
  * SDK の版が上がれば変わりうる）。再試行の有無・回数・timeout を変えたい呼び出し側は、
@@ -87,9 +86,8 @@ export interface AnthropicLLMProviderOptions {
    * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
    * キーの検査もしない。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）:**
-   * この欄の型は `@anthropic-ai/sdk` のクラスを名指ししない自前の構造型
-   * {@link AnthropicMessagesClient} である（以前は `Pick<Anthropic, "messages">` だった）。
+   * ⚠ この欄の型は `@anthropic-ai/sdk` のクラスを名指ししない自前の構造型
+   * {@link AnthropicMessagesClient} である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。
    * **`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している
    * 版と揃える必要が無い**（packages/anthropic/README.md 参照）。
    *
@@ -129,8 +127,6 @@ export interface AnthropicRequest {
  *
  * 空文字の system（`prompt.system` も、`role === "system"` のメッセージの `content` も）は連結に入れない。
  * どれも空なら `system` の鍵ごと持たない（{@link AnthropicRequest.system} の「無ければ鍵ごと無い」）。
- * 以前は `prompt.system` の空文字だけを落とし、`content` が空文字の `role: "system"` のメッセージは
- * `system: ""` として送っていた。
  */
 export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
   const systemParts: string[] = [];
@@ -156,13 +152,13 @@ export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
  * ブロック。`@mnemora/openai` の「最初の choice の content」に対応する規律として、
  * **最初に見つかったテキストブロック**を採用する（thinking 等の他ブロック型は無視する）。
  *
- * ⚠ 2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
+ * ⚠ （[Issue #885](https://github.com/takecchi/mnemora/issues/885)）
  * 呼び出し元（`complete`/`completeStructured`）はこの関数へ `response.content` を
  * そのまま渡す。`content` キー自体が応答オブジェクトに丸ごと無い場合（`{}` が返る等）、
  * `content` 引数は `undefined` になり、下の `content.find(...)` が
  * `TypeError: Cannot read properties of undefined (reading 'find')` を投げる——
  * `AnthropicLLMProviderError` の `kind` 分類には一切載らない。詳細は `errors.ts`
- * 冒頭コメントの同日付追記を参照。 */
+ * 冒頭コメントの「`kind` の外の例外」を参照。 */
 function firstTextBlock(content: AnthropicContentBlock[]): string | undefined {
   return content.find((block) => block.type === "text")?.text;
 }
@@ -215,8 +211,8 @@ function assertNotRefusedOrTruncated(response: {
  * 拒否・切り詰め・空応答は {@link AnthropicLLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
  * HTTP の失敗・認証の失敗などは、SDK の例外がそのまま伝わる。
  *
- * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * ⚠ **（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）
  * `complete`/`completeStructured` の第3引数 `opts?.signal` を、そのまま
  * `messages.create` の request options（`{ signal }`）へ渡す。** `@mnemora/openai` と
  * 同じ形——SDK が既定で対応する `AbortSignal` の仕組みに委ねているだけ。
@@ -295,14 +291,13 @@ export class AnthropicLLMProvider implements LLMProvider {
   /**
    * zod スキーマを Anthropic のネイティブ構造化出力へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
-   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）:
-   * 翻訳できない形は、送る前に {@link AnthropicLLMProviderError}（`kind: "schema_unsupported"`、
-   * `cause` に元の例外）で落ちる。**`z.tuple`・`z.date`・`transform` は SDK の `zodOutputFormat`
-   * が投げた例外をこの `kind` に包む——`messages.create` は呼ばれない。
-   * ⚠ **2026-09-30 追記（ADR 0360 の追記、負債3）: `z.record` を含むスキーマも、深さを問わず（欄・配列の要素・
-   * optional/nullable の内側・union の枝・`z.lazy` の先）同じ `kind` で送る前に落ちる**——以前は翻訳が通り、
-   * 空の object しか許さない形で送って、record の欄が例外無しで黙って空になっていた。`@mnemora/openai` と揃う。
+   * ⚠ **翻訳できない形は、送る前に {@link AnthropicLLMProviderError}（`kind: "schema_unsupported"`、
+   * `cause` に元の例外）で落ちる**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
+   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
+   * `z.tuple`・`z.date`・`transform` は SDK の `zodOutputFormat` が投げた例外をこの `kind` に包む——`messages.create` は呼ばれない。
+   * **`z.record` を含むスキーマも、深さを問わず（欄・配列の要素・
+   * optional/nullable の内側・union の枝・`z.lazy` の先）同じ `kind` で送る前に落ちる**——通すと、
+   * 空の object しか許さない形で送られ、record の欄が例外無しで黙って空になるため。`@mnemora/openai` と揃う。
    * 代わりに `{ key, value }` の配列を使うこと。`z.lazy`・`default`・根が union は今までどおり送る
    * （Anthropic が受けるかは実 API で確かめていない）。一覧は README。
    *
