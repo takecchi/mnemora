@@ -842,7 +842,7 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 | DB が拒んだ例外                  | 負や整数でない `limit`、型の列挙に無い値（CHECK 制約。`createMemory` の `status`）、Invalid Date（`occurredAt`・`validFrom`・`reinforce` の `at`・`archiveDecayed` の `now`）、`1` を超える `strength`、`timestamptz` の下限より前の日時（`occurredAt`・`reinforce` の `at`・イベントの `at`・`archiveDecayed` の `now`）             | drizzle が包んだ `Error`（`err.name === "Error"`）。SQLSTATE は **`err.cause.code`** に在る（`err.code` には無い）。例: `23514`（CHECK 制約）・`2201W`（負の `LIMIT`）・`22P02`（形の崩れた値）・`22007`（Invalid Date）・`22008`（下限より前の日時）。負の `limit` は、行が1本も無いテナントの `purgeExpiredEvents` では投げずに返る（`listActiveClaimPredicates`・`archiveDecayed` は投げる）。 |
 
 ⚠ **`@mnemora/testkit/fixtures` は、DB が拒む入力を同じく拒むが、例外の顔は違う**（名前の無い
-`Error` か、Postgres と同じ `RangeError`。`cause.code` は持たない）。⚠ `timestamptz` の下限より前の日時は、fixture の `archiveDecayed` の `now` と outbox の `opts.at` は `RangeError`（ADR 0500・0597）で断るが、`createMemory` の `occurredAt`・`reinforce` の `at`・イベントの `at` は通す（Postgres は `22008`。【実測 2026-10-06・main `14de22b5`】。揃っていない）。揃えてあるのは「拒むかどうか」と「拒んだときに何も書かないこと」
+`Error` か、Postgres と同じ `RangeError`。`cause.code` は持たない）。⚠ `timestamptz` の下限より前の日時は、fixture も、行に日時を書く口（`archiveDecayed` の `now`、outbox の `opts.at`、`createMemory` の `occurredAt`・`reinforce` の `at`・イベントの `at` など）で `RangeError`（ADR 0500・0597・0640）で書き込みの前に断り、何も書かない（Postgres は `22008`。口と欄ごとの実測は ADR 0640）。下限ちょうどは、どちらも通る。読みの口の日時の条件は、どちらも断らない（ADR 0547）。揃えてあるのは「拒むかどうか」と「拒んだときに何も書かないこと」
 だけである（`packages/testkit/src/fixtures.ts` の冒頭）。`cause.code` を見る処理のテストを fixture で
 書くと、Postgres とは別の枝を通る。
 

@@ -101,7 +101,13 @@
 //   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
 // - 紀元前4714年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
 //   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——行に**書く**日時の `opts.now`・`opts.at`（`OutboxStore.complete`/`fail`、
-//   `archiveDecayed`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）。⚠ **ADR 0547 で、読みの口の条件には掛けなくなった**:
+//   `archiveDecayed`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）と、行の欄に入る日時（ADR 0640）: `createMemory` 系・
+//   `supersedeWithNewMemories` の新しい行の `occurredAt`・`recordedAt`・`lastReinforcedAt`・`validFrom`・`validUntil`・`decayFloorAt`、
+//   `createObservation` 系の `occurredAt`・`recordedAt`・`validFrom`・`validUntil`、`reinforce`・`reinforceMany`・`recordUsageAndReinforce`
+//   の `at`、`createRecall` の `createdAt`、イベントの `at`（`EventStore.append` と、イベントを書く `MemoryStore` の口。`purgeMemory` の
+//   `purged_at` も同じ値）。断るのは、Postgres がその値を実際に書く分岐だけ（CAS に弾かれる対象のイベント・冪等の既存の行の `created`
+//   イベント・何も強化しない呼び出しは見ない）。下限ちょうどは通る（実測）。ADR 0640 に口ごとの実測の表がある。
+//   ⚠ **ADR 0547 で、読みの口の条件には掛けなくなった**:
 //   `EventStore.list` の `since`・`until`、`VectorStore`・`LexicalStore` の検索、`aggregateScope`、`findActiveByClaimKey`・
 //   `findContestedByClaimKey` の日時は、Postgres が下限へ寄せてから比べるので、下限より前でも断らず、意味どおりに答える
 //   （`since` 系は全件、`until` 系は0件）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
@@ -145,8 +151,8 @@
 //
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
 // `jsonb` 列の欄（`payload`・`attributes`・`provenance`）に入る孤立サロゲート（Postgres は拒み、fixture は保持する。`MemoryStore.createMemory` の doc、#1075。
-// `text` 列の欄の孤立サロゲートは、ADR 0543 で fixture も Postgres と同じく U+FFFD に置き換えるようにした）、紀元前4714年より前の日時のうち、行に日時を書く口（`createMemory` の
-// `occurredAt` など。読みの口・`opts.now` は ADR 0500 で揃えた。#1041）、
+// `text` 列の欄の孤立サロゲートは、ADR 0543 で fixture も Postgres と同じく U+FFFD に置き換えるようにした）。
+// （紀元前4714年より前の日時は、読みの口・`opts.now` が ADR 0500 で、行の欄に書く口（`createMemory` の `occurredAt` など。#1041）が ADR 0640 で揃った。）
 // 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
 // 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。
 // ADR 0434 が実測して、Postgres は拒むが fixture は通したままだったもの（`findContestedByClaimKey` の `claimKey` の NUL、

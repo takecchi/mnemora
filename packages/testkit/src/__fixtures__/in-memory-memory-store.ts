@@ -70,6 +70,7 @@ import {
 import {
   assertQueryDate,
   assertQueryTimestamptz,
+  assertWrittenTimestamptzFloor,
   assertQueryJsonWithoutNul,
   assertQueryTextWithoutNul,
   assertQueryBigint,
@@ -203,6 +204,8 @@ function assertRecallRecordStorable(record: NewRecallRecord): void {
   if (record.createdAt != null && Number.isNaN(record.createdAt.getTime())) {
     throw new Error("createRecall: createdAt must be a valid Date (got Invalid Date)");
   }
+  // ADR 0640: 下限より前は、Postgres が `22008` で書けずに拒む。
+  assertWrittenTimestamptzFloor("createRecall", "createdAt", record.createdAt);
   if (record.subjectId != null && record.subjectId.includes("\u0000")) {
     throw new Error("createRecall: subjectId must not contain NUL characters (U+0000)");
   }
@@ -339,6 +342,8 @@ function assertObservationDatesValid(owner: string, input: NewObservation): void
     if (value != null && Number.isNaN(value.getTime())) {
       throw new Error(`${owner}: ${field} must be a valid Date (got Invalid Date)`);
     }
+    // ADR 0640: 下限より前は、Postgres が `22008` で書けずに拒む（冪等の既存の行が在っても、衝突を見る前に拒む。実測）。
+    assertWrittenTimestamptzFloor(owner, field, value);
   }
 }
 
@@ -588,6 +593,17 @@ function assertStorableNewMemory(input: NewMemory): void {
     if (value != null && Number.isNaN(value.getTime())) {
       throw new Error(`InMemoryMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
     }
+  }
+  // ADR 0640: 上の6欄は、下限（4714-11-24 BC 00:00:00 UTC）より前を Postgres が `22008` で書けずに拒む（実測。冪等の既存の行が在っても拒む）。
+  for (const [field, value] of [
+    ["recordedAt", input.recordedAt],
+    ["decayFloorAt", input.decayFloorAt],
+    ["occurredAt", input.occurredAt],
+    ["lastReinforcedAt", input.lastReinforcedAt],
+    ["validFrom", input.validFrom],
+    ["validUntil", input.validUntil],
+  ] as const) {
+    assertWrittenTimestamptzFloor("InMemoryMemoryStore", field, value);
   }
   // Issue #816（NUL 側。孤立サロゲート側はここでは扱わない）: Postgres の `text` 型は
   // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
@@ -1635,7 +1651,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
     for (const target of supersede) {
-      assertStorableMemoryEvent(target.event);
+      // ADR 0640: 下限より前の `at` はここでは見ない——CAS に弾かれる対象はイベントを書かず、Postgres は `at` を見ない（実測）。
+      // CAS を通る対象だけ、下の 1d で見る。
+      assertStorableMemoryEvent(target.event, { skipAtFloor: true });
       // 1b. 対象の行がそもそも無い。
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
@@ -1666,6 +1684,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         continue;
       }
       assertCloneableMemoryEvent(target.event);
+      // ADR 0640: CAS を通ってイベントを書く対象だけ、`at` が下限より前でないかを確かめる（上の 1. は見ない）。
+      assertWrittenTimestamptzFloor("memory_events", "at", target.event.at);
       // ADR 0466: CAS を通ってイベントを書く対象だけ、そのイベントが指す記憶が `ctx` のテナントの行かを確かめる
       // （弾かれる対象はイベントを書かないので確かめない。`PostgresMemoryStore` と同じ）。
       this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
@@ -2037,6 +2057,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (Number.isNaN(at.getTime())) {
       throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
     }
+    // ADR 0640: 下限より前の `at` は、Postgres が何も書かない呼び出し（下の no-op）でも `22008` で拒む（実測）。no-op の判定より前に見る。
+    assertWrittenTimestamptzFloor("reinforce", "at", at);
     // ADR 0434: `opts.nowSeq` は `decay_base_seq`・`decay_floor_seq`（`bigint`）へ書く値で、Postgres は整数でない・範囲外を
     // クエリの時点で拒む（`22P02`・`22003`。実測）。**この Memory が `halfLifeRecalls` を持つときだけ**（持たなければ
     // `nowSeq` は使われず、Postgres は何も見ない）。下の「起点より新しい `at` のときだけ書く」の no-op でも
@@ -2850,6 +2872,9 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: tombstone.digest must not contain NUL characters (U+0000)`,
       );
     }
+    // ADR 0640: `purged_at`・`memory_events.at` に入る `event.at` が下限より前なら、墓石と同じく同じ UPDATE 文の引数として
+    // `22008` で拒む（実測。CAS に弾かれる状態の行でも拒む）ので、行を引く前に見る。
+    assertWrittenTimestamptzFloor("memory_events", "at", event.at);
     // ADR 0543: 墓石の `content`・`digest` は `text` 列へ書く値。孤立サロゲートは U+FFFD に置き換えて保存する。
     tombstone = {
       content: replaceLoneSurrogates(tombstone.content),
@@ -3721,6 +3746,9 @@ export class InMemoryMemoryStore implements MemoryStore {
       };
       assertStorableMemoryEvent(template);
       assertCloneableMemoryEvent(template);
+    } else {
+      // ADR 0640: 下限より前の `at` は、対象が1件も無くても Postgres が `22008` で拒む（実測。Invalid Date が対象が無ければ通るのは、上のコメントのとおり別の話）。
+      assertWrittenTimestamptzFloor("memory_events", "at", event.at);
     }
 
     const restored: Memory[] = [];

@@ -1,6 +1,6 @@
 import type { NewMemoryEvent } from "@mnemora/core";
 import { MemoryEventKindSchema } from "@mnemora/core";
-import { assertInt4Column, stringHasNul } from "./query-check.js";
+import { assertInt4Column, assertWrittenTimestamptzFloor, stringHasNul } from "./query-check.js";
 
 // testkit の fixture の内部モジュール。`InMemoryEventStore` と `InMemoryMemoryStore` の関数の中身から
 // だけ使う——`.d.ts` の import に出ないので、公開の型の面（`exports` から辿れる宣言）には入らない。
@@ -113,12 +113,21 @@ function containsBigInt(value: unknown): boolean {
  * **状態を書き換える前に**これを呼ぶ——Postgres は1トランザクションで巻き戻るので、拒んだときに
  * 何も書かない。それを写す。
  */
-export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
+export function assertStorableMemoryEvent(
+  event: NewMemoryEvent,
+  opts?: { skipAtFloor?: boolean },
+): void {
   if (containsBigInt(event.actor) || containsBigInt(event.meta)) {
     throw new TypeError(`Do not know how to serialize a BigInt`);
   }
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+  }
+  // ADR 0640: `at` は `timestamptz` 列。下限（4714-11-24 BC 00:00:00 UTC）より前は、Postgres が行を書くときに `22008` で拒む。
+  // `skipAtFloor` は、そのイベントを**書かない**かもしれない呼び手（`supersedeWithNewMemories` の事前検査。CAS に弾かれる対象は
+  // イベントを書かず、Postgres は `at` を見ない）が、下限だけを後の「書く」分岐へ回すためのもの（Invalid Date は今までどおり先に見る）。
+  if (opts?.skipAtFloor !== true) {
+    assertWrittenTimestamptzFloor("memory_events", "at", event.at);
   }
   // Postgres の `memory_events_check`: `events_purged`（保持期間の掃除の記録）は特定の Memory を指さない
   // （core の `MemoryEventSchema` の `refine` と同じ約束）。
