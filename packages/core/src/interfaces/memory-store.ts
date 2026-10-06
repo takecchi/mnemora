@@ -772,7 +772,8 @@ export interface MemoryStore {
    * 🔴 **[ADR 0630](../../../../docs/decisions/0630-store-rejects-new-memory-that-fails-memory-schema-on-read-back.md):
    * 書いたら読み戻したときに {@link MemorySchema} を通らなくなる値は、入口で拒む**（CHANGELOG の `[1.3.0]`（版は仮）の破壊的変更。以前は黙って書いていた）。
    * 拒むのは次の欄で、判定は `MemorySchema` の同じ欄の schema と同じである（{@link assertWellFormedNewMemory}。3つの実装が共有する）:
-   * - `digest`・`contentHash`・`extractorVersion`（`null`・省略は可）が空文字
+   * - `digest`・`contentHash`・`extractorVersion` が空文字。`null`・省略を通すのは `extractorVersion` だけで、`digest` の
+   *   `null`・省略と `contentHash` の省略は（以前から）拒む——例外の種類は下の「以前から拒む入力」と ADR 0630 の範囲外の節
    * - `claimKey`（`null`・省略は可）の `subject`・`predicate` が空文字、または片側だけ・欠けている
    * - `attributes` の値が文字列でない（数・入れ子・`null`。空のオブジェクト・省略・`null` は可）
    * - `provenance` の中身の欠け・値域外（例: `stated` の `sourceObservationId`・`at` が無い／`at` が空文字、`consolidated` の
@@ -794,6 +795,10 @@ export interface MemoryStore {
    * - `provenance.kind` が `stated`・`inferred` なのに `input.sourceObservationId` が `null`
    *   ——Postgres は DB の CHECK の例外、fixture は `provenance.kind "…" requires sourceObservationId` を投げる。
    * - `provenance` が `null`——どちらも `TypeError`（`provenance.kind` を読めない）。
+   * - `digest` が `null`・省略、`contentHash` が省略——**ADR 0630 で例外の種類が変わった実装がある**（実測 2026-10-06、3口とも同じ）:
+   *   Postgres は以前の DB の例外（`DrizzleQueryError`、`cause.code` が `23502`・`42601`）から `Error`（`… digest is malformed …`）に、
+   *   core の Fake は以前の `TypeError`（`Cannot read properties of null/undefined`）から同じ `Error` に変わった。
+   *   testkit の fixture は以前どおり `TypeError`（`Cannot read properties of … (reading 'includes')`。この検査より前の入口の検査が先に読む）。
    * `Runtime` は `provenance` を自分で組み立てて渡すので、ここに届くのは store を直接呼ぶ側である。
    */
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
