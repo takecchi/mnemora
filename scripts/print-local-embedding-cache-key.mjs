@@ -154,7 +154,7 @@ function main() {
 
   const repo = readDeclared("DEFAULT_LOCAL_EMBEDDING_REPO");
   const dtype = readDeclared("DEFAULT_LOCAL_EMBEDDING_DTYPE");
-  if (!repo || !dtype) {
+  if (!repo && !dtype) {
     console.error(
       "::warning::キャッシュ鍵: 宣言（DEFAULT_LOCAL_EMBEDDING_REPO / " +
         "DEFAULT_LOCAL_EMBEDDING_DTYPE）を読めなかった。固定した鍵へ落ちる。",

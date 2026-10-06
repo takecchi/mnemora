@@ -82,6 +82,20 @@ describe("compareFingerprints", () => {
     expect(result.unknownOnDisk).toEqual([]);
   });
 
+  // Issue #1784（#563 の確かめ直し）: hash は全桁で比べる。値の先頭だけを比べる緩め方（先頭8桁など）は、
+  // 以前の歯のどれも赤にしなかった【実測】——どの歯の hex も、先頭から食い違う短い文字列だった。
+  it.each([
+    ["git-blob-sha1", "a".repeat(39)],
+    ["sha256", "b".repeat(63)],
+  ])("mismatch: %s の hash が末尾の1桁だけ食い違っても不一致（先頭だけの比較に緩めない）", (algorithm, head) => {
+    const actual = [{ path: "config.json", algorithm, hex: `${head}0` }];
+    const expectedByPath = new Map([["config.json", { algorithm, hex: `${head}1` }]]);
+    const result = compareFingerprints({ actual, expectedByPath });
+    expect(result.verdict).toBe("mismatch");
+    expect(result.matched).toEqual([]);
+    expect(result.mismatched).toHaveLength(1);
+  });
+
   it("mismatch: 手元に在るのに HF の tree に無い（素性不明）ファイルが在る", () => {
     const actual = [{ path: "mystery.bin", algorithm: "git-blob-sha1", hex: "whatever" }];
     const expectedByPath = new Map();

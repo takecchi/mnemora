@@ -145,7 +145,25 @@ describe("ci.yml の local-embedding fingerprint 配線(example-chat ジョブ)"
 
   it("⛔ continue-on-error を持たない(この段は門である)", () => {
     const step = steps[fingerprintStepIndex];
-    expect(/^\s*continue-on-error:/m.test(step)).toBe(false);
+    // Issue #1784: キーを引用符で囲んだ書き方(`"continue-on-error": true`)も YAML としては同じキーである。
+    // 以前の `^\s*continue-on-error:` は、その書き方を素通りさせた【実測】。
+    expect(/^\s*["']?continue-on-error["']?\s*:/m.test(step)).toBe(false);
+  });
+
+  // Issue #1784(#563・#588・#590・#592 の確かめ直し): 門を外す書き方は continue-on-error だけではない。
+  // `if: false`(と、PR では走らない形の `if:`)でステップごと走らなくしても、ジョブの
+  // `continue-on-error: true` でジョブの赤を緑に畳んでも、以前の歯は全部緑のまま通った【実測】。
+  it("⛔ 門のステップは `if:` を持たない(`if: false` などで走らなくする書き方を許さない)", () => {
+    const step = steps[fingerprintStepIndex];
+    // ステップのキーは 8 桁のインデント(`      - name:` の続き)。`run:` の本文の中の `if` は深いので当たらない。
+    expect(/^ {8}["']?if["']?\s*:/m.test(step)).toBe(false);
+  });
+
+  it("⛔ 門が居るジョブ(example-chat)は、ジョブの側でも `continue-on-error` と `if:` を持たない", () => {
+    // ジョブ直下のキーは 4 桁のインデント。`continue-on-error: true` はジョブの失敗を緑に畳み、
+    // ジョブの `if:` が偽ならジョブごと skipped になる(required check は skipped を緑として通す)。
+    expect(/^ {4}["']?continue-on-error["']?\s*:/m.test(jobBlock)).toBe(false);
+    expect(/^ {4}["']?if["']?\s*:/m.test(jobBlock)).toBe(false);
   });
 
   it("⭐ ステップの本体が GITHUB_STEP_SUMMARY へ書き出している(一致・保留のどちらでも1行残す設計)", () => {

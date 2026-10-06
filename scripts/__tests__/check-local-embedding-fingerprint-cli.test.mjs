@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -471,6 +479,34 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
 });
 
 describe("check-local-embedding-fingerprint.mjs（CLI）: 再試行", () => {
+  // Issue #1784（#563・#590 の確かめ直し）: 存在確認の 404 は再試行する（一時的な 404 で必須ジョブを赤にしない）。
+  // 再試行を外して「最初の 404 で即 missing（赤）」にしても、以前の歯は赤にならなかった【実測】。
+  it.concurrent(
+    "存在確認が1回 404 でも、次の試行で 200 なら赤にしない（404 は再試行する）",
+    async () => {
+      let infoHits = 0;
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n' },
+          respond: (e, url) => {
+            if (url.includes("/tree/")) return { status: 200, body: e };
+            infoHits += 1;
+            return infoHits === 1
+              ? { status: 404, body: { error: "not found" } }
+              : { status: 200, body: { id: repo } };
+          },
+        },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stderr).not.toContain("Hugging Face に存在しない");
+          expect(r.code).toBe(0);
+          // 存在確認 404 ＋ 存在確認 200 ＋ tree 1回
+          expect(f.state.hits).toBe(3);
+        },
+      );
+    },
+  );
+
   it.concurrent(
     "503 のとき tree API をちょうど3回叩く（前段は 404 でないので1回で抜ける）",
     async () => {
@@ -526,6 +562,58 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: HF へ問い合わせ�
       });
     },
   );
+
+  // Issue #1784: 宣言の repo を読めないのは「判定を待つ話」ではなく設定の壊れである ⟹ 赤（exit 1）。
+  // 保留（exit 2）に倒しても、以前の歯は赤にならなかった【実測】（CLI は宣言を自分の位置から相対で読む
+  // ので、壊さずに作るには CLI とその lib を一時の木へ写し、宣言の側だけを差し替える）。
+  it.concurrent.each([
+    ["repo の宣言が無い", "export const OTHER = 1;\n"],
+    ["宣言のファイルが無い", null],
+  ])("宣言された repo を読めない（%s）⟹ 赤（exit 1）。HF を1度も叩かない", async (_label, provider) => {
+    await withFixture({ respond: fixed(200, []) }, async (f) => {
+      const root = mkdtempSync(join(tmpdir(), "mnemora-fp-cli-tree-"));
+      try {
+        mkdirSync(join(root, "scripts"), { recursive: true });
+        for (const name of [
+          "check-local-embedding-fingerprint.mjs",
+          "check-local-embedding-fingerprint-lib.mjs",
+        ]) {
+          copyFileSync(join(dirname(script), name), join(root, "scripts", name));
+        }
+        if (provider !== null) {
+          const dir = join(root, "packages", "local-embedding", "src");
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(join(dir, "local-embedding-provider.ts"), provider);
+        }
+        const r = await runNodeScript(join(root, "scripts", "check-local-embedding-fingerprint.mjs"), [
+          "--cache-dir",
+          f.cacheDir,
+          "--api-base",
+          f.origin,
+        ]);
+        expect(r.stderr).toContain("赤（mismatch）");
+        expect(r.stderr).toContain("DEFAULT_LOCAL_EMBEDDING_REPO を取り出せなかった");
+        expect(r.code).toBe(1);
+        expect(f.state.hits).toBe(0);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // Issue #1784: 想定外の例外は実行時エラー（exit 3）で終わる。`main().catch` を exit 0 に倒しても、
+  // 以前の歯は赤にならなかった【実測】（例外を起こす場面が、どの歯にも無かった）。
+  // ここでは「<cache>/<repo> がディレクトリでなくファイル」にして、readdir を例外にする。
+  it.concurrent("想定外の例外（キャッシュの repo の位置がファイル）⟹ 実行時エラー（exit 3）。緑にしない", async () => {
+    await withFixture({ respond: (e) => ({ status: 200, body: e }) }, async (f) => {
+      const asFile = join(f.cacheDir, repo);
+      mkdirSync(dirname(asFile), { recursive: true });
+      writeFileSync(asFile, "not a directory\n");
+      const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+      expect(r.stderr).toMatch(/ENOTDIR/);
+      expect(r.code).toBe(3);
+    });
+  });
 
   it.concurrent("不明な引数 ⟹ 実行時エラー（exit 3）", async () => {
     const r = await runCli(["--no-such-flag"]);
