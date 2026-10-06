@@ -103,7 +103,7 @@ describe("PostgresMemoryStore.aggregateScope × excludeProvenanceKinds: 絞り�
     // 対照: スコープ内の行は除外 kind の2件と、除外 kind でない1件（totalInScope の意味は変えない）
     expect(aggregate.totalInScope).toBe(3);
     expect(aggregate.filteredArchived.count).toBe(1);
-    expect(aggregate.filteredTaxonomy.count).toBe(1);
+    expect(aggregate.filteredTaxonomy?.count).toBe(1);
   });
 
   it("scopeAggregate: 'skip'・digestBand 無しは、除外を指定しても SQL を1本も撃たない", async () => {
