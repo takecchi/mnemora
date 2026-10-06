@@ -40,7 +40,7 @@ function results(overrides) {
   return names.map((name, i) => ({ name, ran: true, exitCode: 0, ...(overrides[i] ?? {}) }));
 }
 
-describe("summarizeStages / gateExitCode: 失敗を、成功とも未起動とも取り違えない（ADR 0210 決定3）", () => {
+describe("summarizeStages / gateExitCode: 失敗を、成功とも未起動とも取り違えない（ADR 0210）", () => {
   it("R5b・R6・R6b・R7: 失敗した段は「✗ 失敗」の行・exit 番号・「失敗した段」の行・門の失敗として出る", () => {
     const summary = summarizeStages(results([{}, { exitCode: 3 }, {}]));
     expect(summary).toContain("✗ 失敗    stage-two（exit 3）");
@@ -111,7 +111,7 @@ const failing = (name, marker, code) => ({
   code: `console.log(${JSON.stringify(marker)}); process.exit(${code});`,
 });
 
-describe("run-root-test-gate.mjs（実行部）: 前段が落ちても後段を必ず起動する（ADR 0210 決定1）", () => {
+describe("run-root-test-gate.mjs（実行部）: 前段が落ちても後段を必ず起動する（ADR 0210）", () => {
   it("R14・R15: 段1が落ちても、段2・段3は起動され、出力が流れ、門は非0で終わる", () => {
     const result = runGateWithFakeStages([
       failing("fake-one", "ONE-RAN", 1),

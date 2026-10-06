@@ -29,13 +29,13 @@ import { execFileSyncWithDeadline, spawnSyncWithDeadline } from "./spawn-with-de
  * 見つかった「すり抜け」だけを固定する歯。
  *
  * ⚠ **ADR 0214 追記の `changelog-candidates-summary.mjs`（CI の段）は ADR 0293 が削除した**ので、
- * ここでは測らない。残っているのは道具の本体だけ（CI に配線しない。ADR 0214 決定6）。
+ * ここでは測らない。残っているのは道具の本体だけ（CI に配線しない。ADR 0214）。
  *
  * 既存の `release-candidates-lib.test.mjs`（純関数）が既に守っているものは重ねていない。足したのは次の2つ。
  *
  * 1. 純関数の欠け：信号が立つ条件の境界（パスの前方一致・`packages/` の位置・`files` 省略・
  *    PR 番号は subject の末尾だけ・16進数は7桁以上）と、`type` が無く信号も無い commit が
- *    母集合の『信号なし』側に残ること（ADR 0214 決定2。`c4a3dc7` の族）。
+ *    母集合の『信号なし』側に残ること（ADR 0214。`c4a3dc7` の族）。
  * 2. **CLI 本体**：既存の歯は CLI を1度も起動していなかった。実物の `release-candidates.mjs` と lib を
  *    一時の git リポジトリへ複写し（`REPO_ROOT` はスクリプトの1つ上なので、その木が対象になる）、
  *    偽の `gh` を PATH の先頭に置いて起動する。確かめるのは、決定2（母集合を落とさない）・
@@ -84,7 +84,7 @@ describe("release-candidates-lib: 信号と母集合の境界", () => {
     expect(isPackageSrcPath("packages/core/package.json")).toBe(false);
   });
 
-  it("L10: type が無く信号も無い commit は、母集合の『信号なし』側に残り、『(type無し)』に集まる（ADR 0214 決定2）", () => {
+  it("L10: type が無く信号も無い commit は、母集合の『信号なし』側に残り、『(type無し)』に集まる（ADR 0214）", () => {
     const classified = classifyCommits([
       {
         sha: "aaa1111",
@@ -221,7 +221,7 @@ describe("release-candidates.mjs（実物を一時の git リポジトリで起�
     expect(signalsBySha[ctx.shas.body]).toEqual(["body-breaking", "src"]);
     expect(signalsBySha[ctx.shas.snapshot]).toEqual(["public-api"]);
     expect(signalsBySha[ctx.shas.plain]).toEqual([]);
-    // type が無く信号も無い commit は『信号なし』側に残る（ADR 0214 決定2）。
+    // type が無く信号も無い commit は『信号なし』側に残る（ADR 0214）。
     const noType = payload.withoutSignals.find((c) => c.sha === ctx.shas.noType);
     expect(noType).toMatchObject({ type: null, prNumber: 13, signals: [] });
     // body の読み取り：`%s%x1f%b` を subject と body に分けている。
@@ -245,7 +245,7 @@ describe("release-candidates.mjs（実物を一時の git リポジトリで起�
     expect(payload.sinceSource).not.toContain("⚠");
   });
 
-  it("K6: gh が失敗したら git describe へ落ち、落ちたことを出力に明記する（ADR 0214 決定4）", () => {
+  it("K6: gh が失敗したら git describe へ落ち、落ちたことを出力に明記する（ADR 0214）", () => {
     const ctx = setup({ fakeGh: "fail" });
     const result = runCli(ctx, ["--json"]);
     expect(result.status).toBe(0);

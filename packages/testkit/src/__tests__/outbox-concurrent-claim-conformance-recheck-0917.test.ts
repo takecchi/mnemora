@@ -10,15 +10,15 @@ import { inMemoryOutboxStoreConformanceOptions } from "./in-memory-conformance-o
  * 「並行に撃った claimBatch が、同じジョブを二重に claim しない」歯の、testkit の側の歯。
  *
  * in-memory 実装は本体に `await` を持たず逐次化されるので、`supportsRealConcurrency` を
- * 渡さない（ADR 0206 決定1）。⟹ 並行の `it` は in-memory では `it.skip` で、`outbox-store-conformance.ts`
+ * 渡さない（ADR 0206）。⟹ 並行の `it` は in-memory では `it.skip` で、`outbox-store-conformance.ts`
  * の並行の歯そのものは、いまの in-memory の試験では**一度も走っていない**。
  * この試験は、**yield 点を持つ（＝本当に重なる）偽の store** に `supportsRealConcurrency: true`
  * を渡して並行の歯を走らせ、次を縛る。
  *   - 約束どおりに動く store では緑（二重 claim しない）。合計が1本でなくても（取りこぼしても）緑
- *     ——ADR 0206 決定2「合計は検査しない」。
+ *     ——ADR 0206「合計は検査しない」。
  *   - 二重 claim する store では赤。⟹ 判定が効いていること。
  *   - 並行数8・ラウンド数10を下回ると、二重 claim を見逃す store が出る（ADR 0206「減らさないこと」）。
- *   - フラグが省略/false なら `it.skip`、true なら走る（ADR 0206 決定1）。
+ *   - フラグが省略/false なら `it.skip`、true なら走る（ADR 0206）。
  *   - in-memory の設定は `supportsRealConcurrency` を渡さない（ADR 0206、in-memory-fixtures.conformance.test.ts の注記）。
  *
  * ⚠ 二重 claim する store に対しては「並行の `it` が落ちること」を期待する。vitest の `fails`
@@ -170,9 +170,7 @@ beforeAll(({}, suite) => {
 });
 
 describe("ADR 0206: 並行 claim の歯の、testkit の側の歯（Issue #1812 G5）", () => {
-  it("フラグを省略/false にすると並行の it は skip、true なら走る（ADR 0206 決定1）", ({
-    task,
-  }) => {
+  it("フラグを省略/false にすると並行の it は skip、true なら走る（ADR 0206）", ({ task }) => {
     // 同じ suite の普通の it が run でないとき（`-t` で絞られているとき）は、全部 skip になるので比べない。
     // ⚠ 並行の it 自身を control にしてはいけない——「常に skip」の変異で control も skip になり、比べずに緑になる。
     if (ordinaryItUnder(task.file, SERIALIZED).mode !== "run") return;

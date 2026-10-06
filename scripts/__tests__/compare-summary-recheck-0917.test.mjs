@@ -97,7 +97,7 @@ describe("compare の門の判定基準（ADR 0133 の基準を ADR 0222 が変�
     expect(withoutRegression.reason).not.toContain("比較できた範囲だけでも");
   });
 
-  it("C20: 退行の配列だけを返す computeRegressions は残していない（ADR 0222 決定1）", () => {
+  it("C20: 退行の配列だけを返す computeRegressions は残していない（ADR 0222）", () => {
     expect(lib.computeRegressions).toBeUndefined();
     expect(typeof computeComparison).toBe("function");
   });
@@ -112,7 +112,7 @@ describe("compare の門の判定基準（ADR 0133 の基準を ADR 0222 が変�
   });
 });
 
-describe("基準値の鮮度（ADR 0231 決定3）。⛔ 門ではない", () => {
+describe("基準値の鮮度（ADR 0231）。⛔ 門ではない", () => {
   const NON_GATE_FIELDS = [
     ["naiveChars", 9999],
     ["naiveTokens", 9999],
@@ -309,7 +309,7 @@ describe("compare-summary.mjs（子プロセス）の stderr", () => {
   });
 });
 
-describe("ci.yml の compare の門の段が、赤を黄色に落とされないこと（ADR 0222 決定5。配線）", () => {
+describe("ci.yml の compare の門の段が、赤を黄色に落とされないこと（ADR 0222。配線）", () => {
   const workflow = readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8");
   const lines = workflow.split("\n");
 

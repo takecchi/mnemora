@@ -20,8 +20,8 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
  * 決着する引数検査）が既に守っているものは重ねていない。足したのは次の2つ。
  *
  * 1. 純関数の欠け：`queued` などの未完了を緑にしない、`skipped` 以外の非 success も赤にする、
- *    green の reason を1バイトも変えない（ADR 0215 決定5）、`dirty` 以外の `mergeable_state` を
- *    `dirty` の扱いにしない（ADR 0281 決定1）、等。
+ *    green の reason を1バイトも変えない（ADR 0215）、`dirty` 以外の `mergeable_state` を
+ *    `dirty` の扱いにしない（ADR 0281）、等。
  * 2. **CLI の本体**：既存の歯は引数検査の経路だけで、`gh` を呼んだ後の配線（下限を取れなければ pending、
  *    base の決め方、`--recheck-after` の分岐、終了コード）は1行も通っていなかった。ADR 0215 の【実測】は
  *    「偽の `gh` を PATH に置いて CLI 全体を走らせた」ものであり、ここでそれを歯にする。
@@ -61,14 +61,14 @@ describe("summarizeCheckRuns / verdict: 未完了と非 success を緑にしな�
     },
   );
 
-  it("V8: green の reason は『N件すべてが completed かつ success』から1バイトも変えない（ADR 0215 決定5。release-v1 §0.1 が逐語で引く）", () => {
+  it("V8: green の reason は『N件すべてが completed かつ success』から1バイトも変えない（ADR 0215。release-v1 §0.1 が逐語で引く）", () => {
     const result = verdict([run("a"), run("b"), run("c")], ["a", "b"]);
     expect(result.status).toBe("green");
     expect(result.reason).toBe("3件すべてが completed かつ success");
   });
 });
 
-describe("summarizeRequiredContexts / verdict の reason: 下限の穴を名指しする（ADR 0215 決定2）", () => {
+describe("summarizeRequiredContexts / verdict の reason: 下限の穴を名指しする（ADR 0215）", () => {
   it("S3b: 同名の check が複数在り、2件とも失敗なら、2件とも名指しする（最初の1件だけにしない）", () => {
     const result = summarizeRequiredContexts(
       [run("a", "completed", "failure"), run("a", "completed", "cancelled")],
@@ -102,7 +102,7 @@ describe("summarizeRequiredContexts / verdict の reason: 下限の穴を名指�
   });
 });
 
-describe("verdict: total===0 の理由は dirty だけを特別扱いする（ADR 0281 決定1）", () => {
+describe("verdict: total===0 の理由は dirty だけを特別扱いする（ADR 0281）", () => {
   it.each(["blocked", "clean", "behind", "unstable", "draft", "has_hooks", ""])(
     "V9c: mergeable_state が %j でも、dirty と同じ『衝突』の理由にしない（従来の理由のまま）",
     (state) => {
