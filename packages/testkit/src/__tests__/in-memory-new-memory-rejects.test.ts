@@ -145,3 +145,27 @@ describe("InMemoryMemoryStore: 範囲外は拒まない（ADR 0630）", () => {
     expect(String(bad)).not.toMatch(/is malformed/);
   });
 });
+
+// 独立確認（mgr-ceace21d）の後: supersede の入口の検査を対象の存在より前に出したとき、ADR 0630 の検査だけを先に
+// 呼ぶと、`digest: null` で supersede だけが `Error` になり、ほかの口（`TypeError`）と割れた。ADR 0630 の範囲外の節の表の
+// 「fixture は3口とも以前どおり `TypeError`」を縛る。
+describe("InMemoryMemoryStore: 以前から拒む入力の例外の種類は、3口で揃う（ADR 0630）", () => {
+  it.each([
+    ["digest: null", { digest: null as never }],
+    ["digest 省略", { digest: undefined as never }],
+    ["contentHash 省略", { contentHash: undefined as never }],
+  ])("%s", async (_name, over) => {
+    const { store, input } = await setup();
+    const caught = async (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: unknown) => e,
+      );
+    const errors = [
+      await caught(store.createMemory(ctx, input(over))),
+      await caught(store.createMemoryWithOutbox(ctx, input(over), ["embed"])),
+      await caught(store.supersedeWithNewMemories(ctx, [{ input: input(over), jobKinds: [] }], [])),
+    ];
+    for (const e of errors) expect(e).toBeInstanceOf(TypeError);
+  });
+});

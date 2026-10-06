@@ -15391,6 +15391,39 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         });
       }
 
+      if (supportsSupersedeWithNewMemories) {
+        // 例外の順（ADR 0630）: 壊れた news と存在しない supersede 対象が同時にあれば、壊れた値の例外が先。
+        it("supersedeWithNewMemories: 壊れた news と存在しない対象が同時なら、壊れた値の例外（is malformed）が先に出る", async () => {
+          const { store, input, state } = await setup();
+          const before = await state();
+          const outcome = await store.supersedeWithNewMemories!(
+            ctx,
+            [{ input: input({ digest: "" }), jobKinds: ["embed"] }],
+            [
+              {
+                id: NONEXISTENT_MEMORY_ID,
+                supersededByIndex: 0,
+                event: {
+                  tenantId: ctx.tenantId,
+                  memoryId: NONEXISTENT_MEMORY_ID,
+                  kind: "superseded",
+                  actor: { type: "system" },
+                  digestSnapshot: "d",
+                  sizeBeforeBytes: null,
+                  meta: { reason: "conformance-test" },
+                },
+              },
+            ],
+          ).then(
+            () => null,
+            (err: unknown) => err,
+          );
+          expect(String(outcome)).toMatch(/digest is malformed/);
+          expect(String(outcome)).not.toMatch(NOT_FOUND_ERROR_MESSAGE);
+          expect(await state()).toBe(before);
+        });
+      }
+
       it("範囲外の欄は拒まない: subjectId の空文字は、この検査の対象ではない（別の担当）", async () => {
         const { store, input } = await setup();
         // `subjectId: ""` が書けるか・拒まれるかは、この歯が決めない。**この検査の message で拒まれないこと**だけを見る。

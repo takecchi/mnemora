@@ -2775,16 +2775,19 @@ uuid の形でない `event.memoryId` は、以前も生の `DrizzleQueryError` 
 **なぜ破壊的と数えるか**: 規律2 の ⛔（本物の adapter が新しく例外を投げる・conformance の判定を厳しくする）。以前は書けた入力（空文字の `digest`・`contentHash`・`extractorVersion`、片側だけ・空文字の `claimKey`、文字列以外の値の `attributes`、中身の欠けた `provenance`）が例外になる。
 
 **誰が影響を受けるか**:
-- `MemoryStore` の3つの口を**直接**呼び、上の形の値を渡していた呼び出し側。`Runtime` 経由は、`digest` が空にならず（本文から作る）、`provenance`・`claimKey` を自分で組み立てるので、ふつうは当たらない。ただし **`RuntimeConfig.extractorVersion` に空文字を渡していた利用者**は、抽出した Memory が書けなくなる（【未確認】実際の落ち方は測っていない）。
-- `runtime.observe` の利用者。抽出した候補の保存は `createMemoriesWithOutboxAndEvents?` を通り、この口も同じ検査を共有する。壊れた候補（例: 空の `extractorVersion`）は、保存できない他の候補と同じく `created` イベントの `droppedCandidates` に積まれ、observe 全体は落ちず、残りの候補は書かれる（`@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts` が根拠）。testkit の `InMemoryMemoryStore` も実装を読んだ限り同じ（ただし全候補が壊れていると最初の例外を投げる。Postgres で同じかは【未確認】）。core の Fake はこの口を持たない。
+- `MemoryStore` の3つの口を**直接**呼び、上の形の値を渡していた呼び出し側。`Runtime` 経由は、`digest` が空にならず（本文から作る）、`provenance`・`claimKey` を自分で組み立てるので、ふつうは当たらない。
+- **`RuntimeConfig.extractorVersion` に空文字・空白だけを渡していた利用者**。上げた後は、**`createRuntime` が組み立ての時点で `Error` を投げる**（Runtime を作れない）。以前は空文字のまま書き、読み戻すと `MemorySchema` を通らなかった。⚠ store の検査だけで見ると、空文字の `extractorVersion` では抽出した候補がすべて壊れた候補になり、**候補が1件以上ある `observe` が毎回投げる**（Postgres・testkit で実測。下の observe の項）——それを observe のたびでなく組み立ての1回で知らせるのが、この `createRuntime` の検査である。
+- `runtime.observe` の利用者。抽出した候補の保存は `createMemoriesWithOutboxAndEvents?` を通り、この口も同じ検査を共有する。壊れた候補は、保存できない他の候補と同じく `created` イベントの `droppedCandidates` に積まれ、残りの候補は書かれる。**全候補が壊れていれば、observe は最初の例外（この検査の `Error`）をそのまま投げ、Memory は1件も書かない**。`@mnemora/postgres`（`observe-new-memory-well-formed.postgres.test.ts`）と testkit の `InMemoryMemoryStore`（`in-memory-observe-new-memory-malformed-candidate.test.ts`）で実測し、歯が縛る。core の Fake はこの口を持たない。
+- 以前から拒まれていた入力（`digest` の `null`・省略、`contentHash` の省略）の**例外の種類で分岐していた**呼び出し側。`@mnemora/postgres` は `DrizzleQueryError`（`cause.code` `23502`・`42601`）から、core の Fake は `TypeError` から、この検査の `Error` に変わった。testkit の `InMemoryMemoryStore` は以前どおり `TypeError`。
+- `supersedeWithNewMemories` に、壊れた `news` と存在しない `supersede` の対象を同時に渡していた呼び出し側。testkit の `InMemoryMemoryStore` と core の Fake は、以前の `memory not found` ではなく、壊れた値の `Error` を先に投げる（Postgres は以前からこの順）。
 - 自前の `MemoryStore` 実装を `describeMemoryStoreConformance` に当てている利用者（外部の adapter の作者）。上の形を受け付ける実装は、conformance が赤になる。**片側だけの `claimKey` を受け付けて「鍵なし」として扱っていた実装**も同じ（その扱いを縛っていた歯は、「書き込みの口が拒む」に書き換わった）。
 
 **どう直すか**:
-- 呼び出し側: `digest`・`contentHash`・`extractorVersion`（持たせないなら `null` か省略）は空でない文字列、`claimKey` は `subject`・`predicate` とも空でない文字列（持たせないなら `null` か省略）、`attributes` の値は文字列だけ、`provenance` は `Provenance` の型どおり（`confidence` は 0〜1 など）にする。`RuntimeConfig.extractorVersion` は、省略するか空でない文字列にする。
+- 呼び出し側: `digest`・`contentHash` は空でない文字列（`null`・省略は以前から不可）、`extractorVersion` は空でない文字列（持たせないなら `null` か省略）、`claimKey` は `subject`・`predicate` とも空でない文字列（持たせないなら `null` か省略）、`attributes` の値は文字列だけ、`provenance` は `Provenance` の型どおり（`confidence` は 0〜1 など）にする。`RuntimeConfig.extractorVersion` は、省略するか、空白以外の文字を含む文字列にする。
 - 自前の `MemoryStore` 実装: 3つの口の入口で、何かを書く前（冪等の既存行の判定より前）に、`@mnemora/core` の `assertWellFormedNewMemory("<実装名>", input)` を呼ぶ。`supersedeWithNewMemories` は `news` の全要素を、何も書く前に（または全体を巻き戻して）拒む。
 - 既に書かれた不正な行は直さない（読み側は従来どおり）。必要なら利用者側で掃除する。
 
-**確かめたこと**: core の Fake・testkit の fixture・Postgres のそれぞれで、直す前に赤、直して緑。検査を外す変異ほかの結果は ADR 0630 と PR 本文。**確かめていないこと**: 外部の adapter・実 API・`RuntimeConfig.extractorVersion` が空のときの Runtime の挙動。
+**確かめたこと**: core の Fake・testkit の fixture・Postgres のそれぞれで、直す前に赤、直して緑。検査を外す変異ほかの結果は ADR 0630 と PR 本文。`RuntimeConfig.extractorVersion` が空文字・空白だけのときに `createRuntime` が投げることは、core の歯が縛る。**確かめていないこと**: 外部の adapter・実 API。
 
 **DB マイグレーション**: 要らない。
 

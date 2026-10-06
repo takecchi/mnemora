@@ -1652,6 +1652,8 @@ export class FakeMemoryStore implements MemoryStore {
     let rowOpts: { now: Date } | undefined;
     // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     supersede = supersede.map((t) => ({ ...t, id: normId(t.id) }));
+    // `@mnemora/postgres` と同じ順（RangeError → news の検査 → 対象の存在）。壊れた news と存在しない対象が
+    // 同時にあれば、壊れた値の例外（ADR 0630）が先に出る。
     for (const target of supersede) {
       if (
         !Number.isInteger(target.supersededByIndex) ||
@@ -1662,6 +1664,11 @@ export class FakeMemoryStore implements MemoryStore {
           `FakeMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
         );
       }
+    }
+    for (const { input } of news) {
+      assertWellFormedNewMemory("FakeMemoryStore", input);
+    }
+    for (const target of supersede) {
       const memory = this.backing.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${target.id}`);
