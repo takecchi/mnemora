@@ -203,6 +203,36 @@ describe("陽性対照: 生 SQL で仕込んだ食い違い行を、種類ごと
     expect(r.total).toBe(1);
   });
 
+  it("recall_usages は、片側だけ食い違う行（recall だけ・memory だけ）も、それぞれ捕まえる", async () => {
+    const s = await setup();
+    const a1 = await s.make(A, "a1");
+    const b1 = await s.make(B, "b1");
+    const aRecall = await s.mem.createRecall(A, recallRecord(A));
+    const bRecall = await s.mem.createRecall(B, recallRecord(B));
+    // recall は A のもの・memory が B のもの（memory 側だけが食い違う）。
+    await s.pool.query(
+      "INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at) VALUES ($1, $2, $3, now())",
+      [TA, aRecall, b1.id],
+    );
+    const onlyMemory = await findCrossTenantReferences(s.pool);
+    const f1 = onlyMemory.findings.find((x) => x.kind === "recall_usages")!;
+    expect(f1.count).toBe(1);
+    expect(f1.samples[0]).toEqual({
+      tenantId: TA,
+      recallId: aRecall,
+      memoryId: b1.id,
+      recallTenantId: TA,
+      memoryTenantId: TB,
+    });
+    // recall が B のもの・memory が A のもの（recall 側だけが食い違う）。
+    await s.pool.query(
+      "INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at) VALUES ($1, $2, $3, now())",
+      [TA, bRecall, a1.id],
+    );
+    const both = await findCrossTenantReferences(s.pool);
+    expect(both.findings.find((x) => x.kind === "recall_usages")!.count).toBe(2);
+  });
+
   it("向きが逆（B の行が A を指す）も、別のテナント組も、同じように捕まえる", async () => {
     const s = await setup();
     const a1 = await s.make(A, "a1");
@@ -252,6 +282,18 @@ describe("count は sampleLimit に左右されない", () => {
     expect(sup(r0).samples).toEqual([]);
     const rd = await findCrossTenantReferences(s.pool);
     expect(sup(rd).samples).toHaveLength(3);
+  });
+
+  it("samples は主キー（id）の昇順で、sampleLimit はその先頭から切る", async () => {
+    const s = await seedThree();
+    const ids = (r: Awaited<ReturnType<typeof findCrossTenantReferences>>) =>
+      sup(r).samples.map((x) => (x as { id: string }).id);
+    const all = ids(await findCrossTenantReferences(s.pool));
+    expect(all).toHaveLength(3);
+    expect(all).toEqual([...all].sort());
+    expect(ids(await findCrossTenantReferences(s.pool, { sampleLimit: 2 }))).toEqual(
+      all.slice(0, 2),
+    );
   });
 
   it("sampleLimit が負・小数・上限超過・NaN なら、DB に触れる前に RangeError", async () => {
@@ -335,11 +377,14 @@ describe("検出は読み取りだけ", () => {
     const r = await findCrossTenantReferences(wrapped);
     expect(r.total).toBe(4);
     expect(log[0]).toMatch(/^\s*BEGIN\b.*\bREAD ONLY\b/i);
+    // 種類ごとの count とサンプルが同じスナップショットを見る（doc の約束）。
+    expect(log[0]).toMatch(/\bISOLATION LEVEL REPEATABLE READ\b/i);
     expect(log).not.toContain("POOL.QUERY(使ってはいけない)");
     for (const text of log) {
       expect(text).not.toMatch(/\b(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE|LOCK|SET)\b/i);
     }
-    expect(log[log.length - 1]).toMatch(/^\s*(ROLLBACK|COMMIT)\b/i);
+    // COMMIT ではなく ROLLBACK で閉じる（何かが書かれていても残らない）。
+    expect(log[log.length - 1]).toMatch(/^\s*ROLLBACK\b/i);
     expect(s.pool.idleCount).toBe(s.pool.totalCount);
     expect(s.pool.waitingCount).toBe(0);
   });
@@ -400,9 +445,33 @@ describe("schema を渡すと、その専用スキーマの側を見る", () => 
         `UPDATE "${SCHEMA}".memories SET superseded_by_id = $1 WHERE id = $2`,
         [b.id as MemoryId, a.id],
       );
+      // 4種すべてを専用スキーマに仕込む（どの表の名前が schema で修飾されなくても、数が合わなくなる）。
+      const a2 = await store.createMemory(
+        A,
+        buildNewMemoryFixture({ tenantId: TA, contentHash: "xdet-s-a2" }),
+      );
+      const a3 = await store.createMemory(
+        A,
+        buildNewMemoryFixture({ tenantId: TA, contentHash: "xdet-s-a3" }),
+      );
+      const bObs = await store.createObservation(B, buildNewObservationFixture({ tenantId: TB }));
+      const bRecall = await store.createRecall(B, recallRecord(B));
+      await client.pool.query(
+        `UPDATE "${SCHEMA}".memories SET contested_with_id = $1 WHERE id = $2`,
+        [b.id as MemoryId, a2.id],
+      );
+      await client.pool.query(
+        `UPDATE "${SCHEMA}".memories SET source_observation_id = $1 WHERE id = $2`,
+        [bObs.id, a3.id],
+      );
+      await client.pool.query(
+        `INSERT INTO "${SCHEMA}".recall_usages (tenant_id, recall_id, memory_id, used_at) VALUES ($1, $2, $3, now())`,
+        [TA, bRecall, a.id],
+      );
 
       const dedicated = await findCrossTenantReferences(pool, { schema: SCHEMA });
-      expect(dedicated.total).toBe(1);
+      expect(dedicated.total).toBe(4);
+      expect(dedicated.findings.map((f) => f.count)).toEqual([1, 1, 1, 1]);
       const pub = await findCrossTenantReferences(pool);
       expect(pub.total).toBe(0);
     } finally {

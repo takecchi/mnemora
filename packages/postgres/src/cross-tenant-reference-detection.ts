@@ -3,8 +3,7 @@ import { assertSafeSchemaName, qualify } from "./schema-namespace.js";
 
 /**
  * 参照の参照先が**別のテナントの行**を指している既存行を、**検出だけ**する（オーナー回答 374f6f88 の問27、
- * 全部推奨）。設計と理由は ADR 0635 系列の「検出の口」の ADR（`docs/decisions/` の
- * `cross-tenant-reference-detection` の名前のもの）。
+ * 全部推奨）。設計と理由は [ADR 0636](../../../docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)。
  *
  * ## 何を検出するか（4種）
  *

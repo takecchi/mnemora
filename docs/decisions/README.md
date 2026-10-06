@@ -633,5 +633,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0616](./0616-impression-topic-growth-are-not-emotion-simulation.md) | ADR 0074 の「印象」「話題」「成長」は、非目標「複雑な感情シミュレーション」に含まれない — AI 側の感情の状態は持たない | 採用 (2026-10) |
 | [0633](./0633-layer-of-runtime-methods-lives-in-doc-comment.md) | `Runtime` のメソッドの層の正本を doc コメントの `層:` 行にし、3文書からメソッド名の列挙を外す（Issue #605） | 採用 (2026-10) |
 | [0634](./0634-unclassified-runtime-method-layers-decided.md) | `層: 未分類` だった `Runtime` のメソッドの層を1本ずつ決める（Issue #605 の続き、ADR 0633） | 採用 (2026-10) |
+| [0636](./0636-cross-tenant-reference-detection-is-read-only.md) | テナントが食い違った参照の既存行は、検出だけする関数 `findCrossTenantReferences` で見つける（何も書き換えない・複合外部キーは足さない） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
