@@ -41,16 +41,19 @@ interface LabelClaimKeyCounts {
  * `InMemoryMemoryStore` 配線と同じ形をここでも組む——ここでは重複を避けるため、
  * `control`/`omitted` の2呼び出しで共有できる部分をこの関数へ集約する。
  */
-function memoryStoreHarness(): {
+function memoryStoreHarness(hideMethods = false): {
   createStore: () => MemoryStore;
   listEventsForMemory: MemoryStoreConformanceOptions["listEventsForMemory"];
   prepareRecallId: MemoryStoreConformanceOptions["prepareRecallId"];
   claimEmbedJobs: MemoryStoreConformanceOptions["claimEmbedJobs"];
   listPurgedEvents: MemoryStoreConformanceOptions["listPurgedEvents"];
   counts: () => LabelClaimKeyCounts;
+  reads: () => LabelClaimKeyCounts;
 } {
   let latest: InMemoryMemoryStore | undefined;
   const counts: LabelClaimKeyCounts = { listLabels: 0, registerLabel: 0, findActiveByClaimKey: 0 };
+  // `hideMethods`（Issue #1775 の #827）: 3つのメソッドを持たない adapter を模す。プロパティの読み出しを数える。
+  const reads: LabelClaimKeyCounts = { listLabels: 0, registerLabel: 0, findActiveByClaimKey: 0 };
   const countedMethods = new Set<keyof LabelClaimKeyCounts>([
     "listLabels",
     "registerLabel",
@@ -63,6 +66,10 @@ function memoryStoreHarness(): {
     return new Proxy(inner, {
       get(target, prop, receiver) {
         if (typeof prop === "string" && countedMethods.has(prop as keyof LabelClaimKeyCounts)) {
+          reads[prop as keyof LabelClaimKeyCounts] += 1;
+          if (hideMethods) {
+            return undefined;
+          }
           const original = Reflect.get(target, prop, receiver) as
             ((...args: unknown[]) => unknown) | undefined;
           if (!original) {
@@ -132,6 +139,7 @@ function memoryStoreHarness(): {
       );
     },
     counts: () => ({ ...counts }),
+    reads: () => ({ ...reads }),
   };
 }
 
@@ -183,6 +191,30 @@ describeMemoryStoreConformance({
   // 呼び出し形そのもの（Issue #818）。
 });
 
+// --- `false`: メソッドを実装していない adapter。本物の歯は走らず、「実装していない」ことの assert が走る ---
+const notImplemented = memoryStoreHarness(true);
+describeMemoryStoreConformance({
+  name: "labels/findActiveByClaimKey probe (both false, methods not implemented)",
+  createStore: notImplemented.createStore,
+  listEventsForMemory: notImplemented.listEventsForMemory,
+  prepareRecallId: notImplemented.prepareRecallId,
+  claimEmbedJobs: notImplemented.claimEmbedJobs,
+  supportsSupersedeWithNewMemories: true,
+  supportsPurgeExpiredEvents: true,
+  listPurgedEvents: notImplemented.listPurgedEvents,
+  supportsArchiveDecayed: true,
+  supportsPurgeMemory: true,
+  supportsMarkContestedPair: true,
+  supportsResolveContestedPair: true,
+  supportsRestoreSupersededBy: true,
+  supportsPreviewRestoreSupersededBy: true,
+  supportsOnlyMemoryIdsFilter: true,
+  supportsLabels: false,
+  supportsFindActiveByClaimKey: false,
+  supportsListActiveClaimPredicates: true,
+  supportsEraseTenant: true,
+});
+
 describe("supportsLabels/supportsFindActiveByClaimKey を省略した呼び出し（v1.0.0 の呼び出し形）は型検査を通り、該当する適合項目を実行しない", () => {
   it("陽性対照: 両方とも true では listLabels/registerLabel/findActiveByClaimKey が実際に呼ばれている", () => {
     const { listLabels, registerLabel, findActiveByClaimKey } = control.counts();
@@ -196,5 +228,18 @@ describe("supportsLabels/supportsFindActiveByClaimKey を省略した呼び出�
     expect(listLabels).toBe(0);
     expect(registerLabel).toBe(0);
     expect(findActiveByClaimKey).toBe(0);
+  });
+
+  // Issue #1775 の #827: `false` は「メソッドを持たない」ことの assert（docs/conformance.md §9・欄の doc）。
+  // 本物の歯は走らない（メソッドは呼ばれない）一方で、assert はメソッドの有無を読みに行く。
+  it("false: listLabels/registerLabel/findActiveByClaimKey は一度も呼ばれず、「実装していない」ことの assert がそれぞれの有無を読みに行く", () => {
+    const { listLabels, registerLabel, findActiveByClaimKey } = notImplemented.counts();
+    expect(listLabels).toBe(0);
+    expect(registerLabel).toBe(0);
+    expect(findActiveByClaimKey).toBe(0);
+    const reads = notImplemented.reads();
+    expect(reads.listLabels).toBeGreaterThan(0);
+    expect(reads.registerLabel).toBeGreaterThan(0);
+    expect(reads.findActiveByClaimKey).toBeGreaterThan(0);
   });
 });
