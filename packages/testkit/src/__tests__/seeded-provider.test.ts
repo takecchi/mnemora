@@ -151,6 +151,22 @@ describe("SeededLLMProvider", () => {
     expect(provider.usage).toEqual({ seeded: 0, real: 1 });
   });
 
+  // Issue #1775 の #716（L4）: 鍵にスキーマを含めていないので、記録以降にスキーマが変わっていないかを
+  // 再生時に検証し直す（コード内コメントの約束）。スキーマに合わない種の記録は、そのまま返さず例外にする。
+  it("種の記録がいまのスキーマを満たさなければ completeStructured は例外を投げ、seeded を増やさない", async () => {
+    const seedPrompt = promptFor("スキーマに合わない種");
+    const seed = seedLLMSection([{ prompt: seedPrompt, value: { digest: 123 } }]);
+    const delegate = new ThrowingLLMProvider();
+    const provider = new SeededLLMProvider(delegate, { seed, expectedModel: MODEL });
+
+    await expect(
+      provider.completeStructured(ctx, { prompt: seedPrompt, schema: SCHEMA }),
+    ).rejects.toThrow(/いまのスキーマを満たさない/);
+
+    expect(provider.usage).toEqual({ seeded: 0, real: 0 });
+    expect(delegate.calls).toHaveLength(0);
+  });
+
   it("モデル名が種と食い違えば構築時に例外", () => {
     const seed = seedLLMSection([]);
     const delegate = new ThrowingLLMProvider();
@@ -230,6 +246,53 @@ describe("SeededEmbeddingProvider", () => {
     expect(
       () => new SeededEmbeddingProvider(delegate, { seed, expectedSpace: mismatched }),
     ).toThrow(/埋め込み空間/);
+  });
+
+  // Issue #1775 の #716（E1）: 種と委譲先が同じ次元で、期待する空間（expectedSpace）だけ次元が違う組みを断る。
+  // 委譲先の空間の照合（ADR 0452）は種と委譲先が一致していれば何も見ないので、expectedSpace の
+  // dimensions の照合が外れても他の歯では見えない。
+  it("種・委譲先と同じ3次元で expectedSpace だけ次元が違えば、構築時に例外", () => {
+    const seed = seedEmbeddingSection([]);
+    const delegate = new ThrowingEmbeddingProvider();
+    const wrongDimensions: EmbeddingSpaceId = { ...SPACE, dimensions: 5 };
+    expect(
+      () => new SeededEmbeddingProvider(delegate, { seed, expectedSpace: wrongDimensions }),
+    ).toThrow(/埋め込み空間/);
+  });
+
+  // Issue #1775 の #716（E6）: 委譲先が入力と違う件数を返したら、記録できないので例外にする。
+  it("委譲先が欠けた入力の件数と違う件数を返したら例外", async () => {
+    const seed = seedEmbeddingSection([]);
+    const delegate: EmbeddingProvider = {
+      space: SPACE,
+      embed: async () => [[1, 2, 3]],
+    };
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    await expect(provider.embed(ctx, ["種に無い文A", "種に無い文B"])).rejects.toThrow(
+      /委譲先が入力と違う件数を返した/,
+    );
+  });
+
+  // Issue #1775 の #716（参考 E4）: 種と欠けを交互に混ぜた入力でも、戻りは入力の順になる。
+  it("種と欠けを交互に混ぜた入力で、戻りが入力の順になる（欠けが2件以上）", async () => {
+    const seed = seedEmbeddingSection([
+      { text: "種A", vector: [1, 1, 1] },
+      { text: "種B", vector: [2, 2, 2] },
+    ]);
+    const delegate = new RespondingEmbeddingProvider();
+    const provider = new SeededEmbeddingProvider(delegate, { seed, expectedSpace: SPACE });
+
+    const result = await provider.embed(ctx, ["欠け1", "種A", "欠け22", "種B", "欠け333"]);
+
+    expect(result).toEqual([
+      ["欠け1".length, 0, 0],
+      [1, 1, 1],
+      ["欠け22".length, 0, 0],
+      [2, 2, 2],
+      ["欠け333".length, 0, 0],
+    ]);
+    expect(delegate.calls).toEqual([["欠け1", "欠け22", "欠け333"]]);
   });
 
   it("種から返した分・実 API から返した分の両方が、新しいカセットに記録される（自己完結）", async () => {
