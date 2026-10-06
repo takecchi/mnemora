@@ -119,4 +119,17 @@ describe("processEmbedJob の注釈 — この性質を書いてある", () => {
     expect(body).toContain("reembed");
     expect(body).toContain("embed-job-ready-write-fails.test.ts");
   });
+
+  it("注釈の結論は「`failed` を書いて投げ直す」（黙って ready のまま続ける、とは書いていない）", () => {
+    const source = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
+    const start = source.indexOf("async function processEmbedJob(");
+    const end = source.indexOf("// Issue #1035 / ADR 0124 決定5", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const body = source.slice(start, end);
+    // 結論の向き。上の語の検査は4語の存在だけで、結論が逆になっても通る。
+    // 「`failed` を書いて投げ直す」は、手前の別の注釈（catch への指し示し）にもあるので、
+    // 追記の側の結論の一句を「区別しない——」まで含めて見る。
+    expect(body).toContain("区別しない——`failed` を書いて投げ直す");
+  });
 });

@@ -149,4 +149,27 @@ describe("TickOptions.leaseMs の TSDoc — この性質を書いてある", () 
     // 実測した歯への住所。
     expect(doc).toContain("tick-batch-lease-expiry.test.ts");
   });
+
+  it("見出しの結論は「切れうる」（切れない、とは書いていない）", () => {
+    const doc = readTickOptionsDoc();
+    // 結論の向き。事実と逆（「前でも切れない」等）に書き換えても、上の語の検査は通ってしまう。
+    expect(doc).toContain("切れうる");
+  });
+
+  it("TSDoc の「既定 N」は、実装の DEFAULT_TICK_LIMIT と同じ数である", () => {
+    const source = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
+    const constant = /const DEFAULT_TICK_LIMIT = (\d+);/.exec(source);
+    expect(constant).not.toBeNull();
+    const doc = readTickOptionsDoc();
+    expect(doc).toContain(`既定 ${constant?.[1]}`);
+  });
 });
+
+function readTickOptionsDoc(): string {
+  const source = readFileSync(fileURLToPath(new URL("../runtime.ts", import.meta.url)), "utf8");
+  const start = source.indexOf("export interface TickOptions {");
+  const end = source.indexOf("\n  leaseMs: number;", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+}
