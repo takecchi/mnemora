@@ -89,7 +89,15 @@ describe("describeZeroPresented: omitted の内訳", () => {
       "t",
       "space",
       recallOf({
-        omitted: [{ kind: "filtered", condition: "taxonomy", count: 3, countKind: "exact" }],
+        omitted: [
+          {
+            kind: "filtered",
+            condition: "taxonomy",
+            scopeRelation: "within_scope",
+            count: 3,
+            countKind: "exact",
+          },
+        ],
       }),
     )!;
     expect(text).toContain("filtered(taxonomy)×3");
