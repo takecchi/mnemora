@@ -254,7 +254,7 @@ describe("Postgres: 拒むとき、Memory・ラベル・outbox・イベントの
 
   describe.each(WRITES)("%s", (_method, write) => {
     it.each(MALFORMED_NEW_MEMORY_CASES.map((c) => [c.label, c] as const))(
-      "%s は、欄を名指しした例外で拒み、何も書かない（冪等の既存の行が在っても拒む）",
+      "%s は、欄を名指しした例外で拒み、何も書かない（既存の行が無くても、冪等の既存の行が在っても）",
       async (_label, c) => {
         const store = await postgresStore();
         const observation = await store.createObservation(
@@ -270,6 +270,10 @@ describe("Postgres: 拒むとき、Memory・ラベル・outbox・イベントの
             tags: ["shape-tag"],
             ...over,
           });
+        // 既存の行が無いとき: 拒み、何も書かない（書いてから検査する実装を赤にする）。
+        const empty = await counts();
+        await expect(write(store, base(c.over(observation.id)))).rejects.toThrow(c.field);
+        expect(await counts()).toEqual(empty);
         // 既存の行（同じ冪等キー）を先に書く。壊れた入力は、その行が在っても拒まれる。
         await write(store, base({}));
         const before = await counts();
