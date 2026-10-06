@@ -1,0 +1,67 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Ctx, TickOptions, TickResult } from "@mnemora/core";
+
+// Redis を要らない検査（Issue #1775 の #746 の変異 a・b・h）。`bullmq` をモックにして、`Worker` のコンストラクタが
+// 受けた処理関数（processor）を取り出し、実際に呼んで `runtime.tick` に渡る引数・呼び出し回数・戻り値・
+// `onTickResult` を見る。`tick-driver.failed.test.ts`・`stop-last-worker` は処理関数を取り出すが、引数を見ていなかった。
+//
+// 約束（ADR 0325 決定1・`BullmqTickDriverOptions` の doc）: Worker が発火するたびに、設定の `ctx` と `tick` を
+// そのまま、1回だけ `runtime.tick(ctx, tick)` へ渡す。結果は返し、`onTickResult` へ渡す。
+// - `tick` が落ちる（`{}`）と `leaseMs` が無く claim が壊れる。2回呼ぶと lease の食い合いが増える。
+// - 別の `ctx` を渡すと、別テナントの outbox を処理する。
+
+type Processor = (job: unknown) => Promise<unknown>;
+const processors: Processor[] = [];
+
+vi.mock("bullmq", () => {
+  class Queue {
+    upsertJobScheduler = vi.fn().mockResolvedValue(undefined);
+    removeJobScheduler = vi.fn().mockResolvedValue(undefined);
+    close = vi.fn().mockResolvedValue(undefined);
+    on = vi.fn().mockReturnThis();
+  }
+  class Worker {
+    on = vi.fn();
+    run = vi.fn().mockImplementation(() => new Promise(() => {}));
+    close = vi.fn().mockResolvedValue(undefined);
+    constructor(_name: string, processor: Processor) {
+      processors.push(processor);
+    }
+  }
+  return { Queue, Worker };
+});
+
+const { createBullmqTickDriver } = await import("../tick-driver.js");
+
+beforeEach(() => {
+  processors.length = 0;
+});
+
+describe("createBullmqTickDriver: Worker の処理関数は runtime.tick(ctx, tick) を1回だけ、渡された値のまま呼ぶ", () => {
+  it("引数は設定の ctx・tick と同一の値、呼び出しは1回、戻り値を返し、onTickResult にも同じ値を渡す", async () => {
+    const ctx: Ctx = { tenantId: "tenant-processor" };
+    const tick: TickOptions = { leaseMs: 12_345, kinds: ["embed"] };
+    const result: TickResult = { processed: 3, failed: 1, unsupported: [], leaseConflicts: [] };
+    const runtimeTick = vi.fn().mockResolvedValue(result);
+    const onTickResult = vi.fn();
+    createBullmqTickDriver({
+      connection: { host: "127.0.0.1", port: 1 },
+      queueName: "q",
+      runtime: { tick: runtimeTick },
+      ctx,
+      tick,
+      everyMs: 100,
+      onTickResult,
+    } as never);
+    expect(processors).toHaveLength(1);
+
+    const returned = await processors[0]!({ id: "job-1" });
+
+    expect(runtimeTick).toHaveBeenCalledTimes(1);
+    expect(runtimeTick.mock.calls[0]![0]).toBe(ctx);
+    expect(runtimeTick.mock.calls[0]![1]).toBe(tick);
+    expect(returned).toBe(result);
+    expect(onTickResult).toHaveBeenCalledTimes(1);
+    expect(onTickResult).toHaveBeenCalledWith(result);
+  });
+});

@@ -60,6 +60,21 @@
 | #827 | 適合テストの `supportsFindActiveByClaimKey` の枝を `false` でも本物の歯を走らせる（`=== true` を `!== undefined`） | `false` を渡す3つ目の呼び出し（メソッドを持たない Proxy）。本物の歯は走らず、「実装していない」assert が3メソッドの有無を読みに行く（testkit `memory-store-conformance.supports-labels-and-claim-key-optional.test.ts` に追記） | 赤（12） |
 | #827 | `supportsLabels: false` の枝の assert（`listLabels`/`registerLabel` が無いこと）を空にする | 同上（プロパティの読み出し回数が 0 になる） | 赤（1） |
 | #827 | `supportsFindActiveByClaimKey: false` の枝の assert を空にする | 同上 | 赤（1） |
+| #773 | Postgres `supersedeWithNewMemories` の、`expectedStatus` 付きで対象が引けなかったときの `SELECT status` から `tenant_id` を外す | 別テナントの active な行を `expectedStatus: "active"` 付きで渡すと `conflicted` でなく「対象が無い」例外、news ロールバック、持ち主の行は無傷（postgres 新規 `supersede-with-new-memories-cross-tenant-expected-status.postgres.test.ts`） | 赤（1） |
+| #724 | Postgres `PostgresLexicalStore` の `filter.attributes` を `@>` から向き違いの `<@` 相当にする | 複数キーの条件は全キー一致だけ返す、属性が `{}` の記憶は条件があれば返らない（postgres 新規 `lexical-store-attributes-and.postgres.test.ts`。Postgres 固有） | 赤（2） |
+| #724 | InMemory `InMemoryLexicalStore` の `filter.attributes` の `every` を `some` にする | 同上（testkit 新規 `in-memory-lexical-store-attributes-and.test.ts`。InMemory 固有） | 赤（1） |
+| #724 | runtime の `survivesAttributesFilter` の `every` を `some` にする | adapter が `attributes` を無視し、片方のキーだけ一致する記憶を返しても結果に出ない（core `recall-attributes-filter.test.ts` に追記） | 赤（1） |
+| #724 | 連想枠（段3.5）の `survivesAttributesFilter` を外す | 連想用の `search()` だけが `attributes` を無視して外の記憶を返しても、連想枠に乗らない | 赤（1） |
+| #743 | 連想枠の `survivesLabelsFilter` を外す | 連想用の `search()` だけが `labels` を無視しても連想枠に乗らない（core `recall-taxonomy-filter.test.ts` に追記） | 赤（1） |
+| #743 | 目次帯の引き直しから `scope.labels` を外す | `scope.labels` を無視する `aggregateScope` から外の `digest` が返っても `digestBand` に乗らず `countKind` が `'unknown'` | 赤（1） |
+| #743 | 同伴（段3）にも `labels` を掛ける | contested の組の片方だけが `labels` に一致するとき、もう一方が同伴として残る | 赤（1） |
+| #743 | `labels` だけで `taxonomyGroups` 相当の群を作る | `labels` だけを渡した `recall()` の `index.groups` に `axis:'taxonomy'` が無い | 赤（1） |
+| #743 | 後置フィルタ `survivesLabelsFilter` を大文字小文字を無視して比べる | adapter が `labels` を無視しても、大文字小文字だけが違う名前は混入しない | 赤（1） |
+| #745 | `enabled: true` だけで検出が走る（`createMemoriesFromCandidates` へ `claimKeyOptions !== undefined` を渡す） | `{ enabled: true }`・`{ enabled: true, detectContested: false }` で `findActiveByClaimKey`・`findContestedByClaimKey` が0回、`contestedDetection` が無い。陽性対照は `detectContested: true`（core 新規 `claim-key-detection-gating-teeth.test.ts`） | 赤（2） |
+| #745（C2 の言い換え） | 観測を持たない（`sourceObservationId` が null の）既存の記憶を、兄弟として一致から落とす | null 観測の active な記憶と同じ鍵・重なる期間なら、後から `observe` した記憶と contested になる | 赤（1） |
+| #746 | Worker の処理関数が `tick` に `{}` を渡す（`leaseMs` が落ちる） | `Worker` のモックから処理関数を取り出して呼び、`runtime.tick` の引数が設定の `ctx`・`tick` と同一の値、呼び出しは1回、戻り値を返し `onTickResult` に渡る（bullmq 新規 `tick-driver.processor.test.ts`。Redis 不要） | 赤（1） |
+| #746 | 処理関数が `runtime.tick` を2回呼ぶ | 同上 | 赤（1） |
+| #746 | 処理関数が別の `ctx`（`{ tenantId: "other" }`）で `tick` を呼ぶ | 同上 | 赤（1） |
 
 ### 入れなかったもの
 
@@ -72,3 +87,11 @@
 | #783 | ベンチ本体（`same-ms-usage-bench.ts`）の検査の修正 | テスト以外のコードを直す必要がある |
 | #839 | `ORDER BY id ASC` を外す変異（デッドロック） | 重すぎて作れない |
 | #722 | `digestBandLimit: 0` の標本で往復が一致する（変異7・8: eligible の桁上がり・`limitedByChars` を差し引かない） | 実 `recall()` では到達しない。`digestBandLimit` は正の整数だけ（`RecallQuerySchema` が `positive()`）で 0 を渡すと検証で落ちる。帯が空で範囲内が12件以上になる標本は、合成した標本で式を再実装する形になり、約束の検査にならない |
+| #745 | C2「検出する側の記憶の観測が `null`（`null` 同士を同じ観測と見なす）」 | 到達しない。`detectClaimKeyContested` の呼び出しは `observe` の抽出経路の2か所だけで、そこで作る記憶は必ず `sourceObservationId` を持つ。代わりに到達できる向き（null 観測の既存の記憶を兄弟として落とす変異）に歯を入れた（上の表） |
+| #745 | C14「冪等な再送（`created === false`）でも検出する」 | 到達しない。同じ `externalId` の `observe` は入口で `resend` として返り、抽出・検出の経路に入らない（【実測】2回目の `memoryIds` は空）。`created === false` が検出の経路で起きるのは並行の競合だけで、Fake では作れない |
+| #745 | C13（自分自身を `excludeMemoryId` なしで除く） | 振る舞いが変わらない変異（前任が「不要」と判定） |
+| #750 | 変異6「空のとき `[]` を返す」 | 振る舞いが変わらない変異（`resolveKnownPredicates` の空配列は「渡していない」と同じ扱い。前任が「不要」と判定） |
+| #782 | 変異i「`NOT EXISTS` を外す」 | 振る舞いが変わらない変異（前任が「歯は不要」と判定。字句検査は壊れやすい） |
+| #839 | 変異f「`ORDER BY` を降順にする」 | 振る舞いが変わらない変異（一貫した順なので観測できる差が無い） |
+| #830 | （すり抜け 0） | 前任の結果が「すり抜けは0」 |
+| #724 | 変異31「除外分の副問い合わせ」・#743 変異27「除外分の数え」 | `recall()` からは到達しない（振る舞いが変わらない）。`aggregateScope` の直接呼びの話で、約束の外に近い |
