@@ -22,16 +22,12 @@ import {
 } from "./test-db.js";
 
 /**
- * `reextract` の LLM を待つ間に、その Observation から出た記憶が `forget`（と `purge`）されたときの
- * 振る舞いを縛る（`consolidate`・`reflect` の Issue #1226 / ADR 0375 決定7 と同じ穴。ADR 0406）。
+ * `reextract` の LLM を待つ間に、その Observation から出た記憶が `forget`（と `purge`）されたときの振る舞いを縛る。
  *
- * - `forget` は `forgotten` を返したのに、LLM が返った後で新しい記憶が `active` で書かれ、
- *   イベントが created → forgotten → created と積まれる、ということが起きてはならない。
- * - 打ち切ったとき、`reextract` は LLM を呼んだ後でも「退けた記憶を持つ Observation」の早期 return
- *   （Issue #1079）と同じ形（`status_not_active`・`extraction: "skipped"`・`atomicity: "not_attempted"`）で返す。
+ * - `forget` は `forgotten` を返したのに、LLM が返った後で新しい記憶が `active` で書かれ、イベントが created → forgotten → created と積まれる、ということが起きてはならない。
+ * - 打ち切ったとき、`reextract` は LLM を呼んだ後でも「退けた記憶を持つ Observation」の早期 return と同じ形（`status_not_active`・`extraction: "skipped"`・`atomicity: "not_attempted"`）で返す。
  * - `testkit` の `InMemoryMemoryStore` は `abortIfForgotten` を実装しない（runtime の読み直しだけが保護）。
- *   `PostgresMemoryStore` は実装する（書き込みと同一トランザクションの `SELECT … FOR UPDATE`）。
- *   両方に同じ入力を当てる。
+ *   `PostgresMemoryStore` は実装する（書き込みと同一トランザクションの `SELECT … FOR UPDATE`）。両方に同じ入力を当てる。
  */
 
 let release: () => void = () => {};
@@ -76,8 +72,8 @@ interface Kit {
 }
 
 /**
- * `supersedeWithNewMemories`（ADR 0100 の口）だけを隠した store。`reextract` の「口が無い adapter」向けの
- * 経路（`createMemoryWithOutbox` のループ）を通す。それ以外は元の store にそのまま委ねる。
+ * `supersedeWithNewMemories` だけを隠した store。`reextract` の「口が無い adapter」向けの経路（`createMemoryWithOutbox` のループ）を通す。
+ * それ以外は元の store にそのまま委ねる。
  */
 function withoutSupersedePort(store: MemoryStore): MemoryStore {
   return new Proxy(store, {
@@ -166,7 +162,6 @@ for (const [name, makeKit] of KITS) {
         hold.resume();
         const result = await pending;
 
-        // 何も書かれていない——「退けた記憶を持つ Observation」の早期 return と同じ形。
         expect(result).toMatchObject({
           observationId: first.observationId,
           memoryIds: [],
@@ -179,7 +174,6 @@ for (const [name, makeKit] of KITS) {
           { kind: "status_not_active", memoryId: x, status: "forgotten" },
         ]);
 
-        // forget の後に active の記憶が書かれていない。
         const all = await kit.memoryStore.listBySourceObservationAllVersions(
           ctx,
           first.observationId,
@@ -188,7 +182,6 @@ for (const [name, makeKit] of KITS) {
           { id: x, status: "forgotten" },
         ]);
 
-        // イベントが created → forgotten → created にならない（created は最初の1件だけ）。
         const kinds = (await kit.eventStore.list(ctx, {})).map((e) => e.kind).sort();
         expect(kinds).toEqual(
           withPurge ? ["created", "forgotten", "purged"] : ["created", "forgotten"],

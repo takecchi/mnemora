@@ -17,16 +17,10 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #961: `observe({kind:'memory_usage'})` は `recall_usages` への INSERT と強化
- * （`memories.last_reinforced_at`/`decay_floor_at` の UPDATE）を別々にコミットしていた。
- * 強化の前で落ちると、同じ `externalId` の再送は `recordUsage` が
- * `insertedMemoryIds: []` を返すため強化を二度と呼ばず、強化は恒久に失われていた
- * （docs/memory-model.md §11 行4「`observe()` と同一トランザクション」・ADR 0009
- * 「再送で完了させられる」と食い違う）。
+ * `PostgresMemoryStore.recordUsageAndReinforce` は `recall_usages` への INSERT と強化（`memories.last_reinforced_at`/`decay_floor_at` の UPDATE）を1トランザクションで撃つ。
+ * 別々にコミットすると、強化の前で落ちたとき、同じ `externalId` の再送は `recordUsage` が `insertedMemoryIds: []` を返すため強化を二度と呼ばず、強化が恒久に失われる。
  *
- * `PostgresMemoryStore.recordUsageAndReinforce` は両方を1トランザクションで撃つ。
- * 強化の UPDATE をトリガーで拒否させ、(1) 1回目の失敗で `recall_usages` に行が
- * 残らないこと、(2) トリガーを外した後の同じ `externalId` の再送で強化が完了することを測る。
+ * 強化の UPDATE をトリガーで拒否させ、(1) 1回目の失敗で `recall_usages` に行が残らないこと、(2) トリガーを外した後の同じ `externalId` の再送で強化が完了することを測る。
  */
 afterAll(async () => {
   const { db } = await getTestClient();

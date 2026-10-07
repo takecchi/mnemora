@@ -22,12 +22,11 @@ import {
 } from "./test-db.js";
 
 /**
- * `decay_clock` を `'wall'` から `'activity'` へ切り替えたときの今の振る舞いを縛る（Issue #1014。ADR 0165 の
- * 2026-09-28 追記と追記2。追記2 でこの振る舞いを契約とした）。振る舞いは変えていない。Postgres と testkit の fixture で同じ。
+ * `decay_clock` を `'wall'` から `'activity'` へ切り替えたときの今の振る舞いを縛る。Postgres と testkit の fixture で同じ。
  *
  * - `'wall'` の間に作られた記憶は、活動時計の3つ組（`decayBaseSeq`・`decayFloorSeq`・`halfLifeRecalls`）が
- *   `null` のまま作られる（決めたこと5 の「`decay_base_seq` も 0 になる」ではない）。
- * - 切り替えた後、活動時計がどれだけ進んでも、その記憶は `sweepArchive` に選ばれない（床が無い、決めたこと4）。
+ *   `null` のまま作られる（`decay_base_seq` も 0 ではなく `null`）。
+ * - 切り替えた後、活動時計がどれだけ進んでも、その記憶は `sweepArchive` に選ばれない（床が無い）。
  *   切り替えた後に作られた記憶は選ばれる。
  */
 

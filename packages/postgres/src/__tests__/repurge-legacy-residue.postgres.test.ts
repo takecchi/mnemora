@@ -23,12 +23,10 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0437 決定3: v1.0.0〜v1.0.2 の `purgeMemory` は `content`・`digest`・`purged_at` しか書き換えず、
- * `tags`・`attributes`・claim key・`memory_labels` が残った（v1.1.0 の ADR 0375 が消すようになったが、
- * migration は遡らない）。`Runtime.purge` をかけ直すと（`already_purged`）、それらが消え、
- * `labels.proposed_count` が実数に揃う。
+ * 旧版（v1.0.0〜v1.0.2）の `purgeMemory` は `content`・`digest`・`purged_at` しか書き換えず、`tags`・`attributes`・claim key・`memory_labels` が残った。
+ * `Runtime.purge` をかけ直すと（`already_purged`）、それらが消え、`labels.proposed_count` が実数に揃う。
  *
- * v1.0.x の purge が残した状態は SQL で作る（今の `purgeMemory` では作れない）。
+ * 旧版が残した状態は SQL で作る（今の `purgeMemory` では作れない）。
  */
 
 async function labelCounts(
@@ -161,7 +159,6 @@ describe("v1.1.0 より前に purge した行は、purge をかけ直すと消�
     const unpurgedBefore = await residueOf(db, unpurged.id);
     const eventsBefore = legacyBefore.events;
 
-    // dryRun は何も書かない。
     const dry = await runtime.purge(
       ctx,
       { memoryIds: [legacy.id, current.id, unpurged.id] },
@@ -178,7 +175,6 @@ describe("v1.1.0 より前に purge した行は、purge をかけ直すと消�
       "tag-y": { proposedCount: 1, links: 1 },
     });
 
-    // purge のかけ直し。
     const redo = await runtime.purge(ctx, { memoryIds: [legacy.id, current.id] });
     expect(redo.outcomes).toEqual([
       { memoryId: legacy.id, kind: "already_purged" },
@@ -201,11 +197,9 @@ describe("v1.1.0 より前に purge した行は、purge をかけ直すと消�
       "tag-x": { proposedCount: 2, links: 2 }, // live + unpurged
       "tag-y": { proposedCount: 0, links: 0 },
     });
-    // 触ってはいけない行は、そのまま。
     expect(await residueOf(db, unpurged.id)).toEqual(unpurgedBefore);
     expect((await residueOf(db, live.id)).tags).toEqual(["tag-x"]);
 
-    // べき等。
     const again = await runtime.purge(ctx, { memoryIds: [legacy.id, current.id] });
     expect(again.outcomes.map((o) => o.kind)).toEqual(["already_purged", "already_purged"]);
     expect(await residueOf(db, legacy.id)).toEqual(legacyAfter);

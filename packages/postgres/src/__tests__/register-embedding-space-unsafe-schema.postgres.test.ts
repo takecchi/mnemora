@@ -4,9 +4,8 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * ADR 0596（ADR 0571 の C3・C4）: `registerEmbeddingSpace` の TSDoc は、「`schema`・`extensionSchema` が
- * `assertSafeSchemaName` を通らなければ（`extensionSchema` は `schema` を指定したときだけ検査する）、通常の `Error`」と約束している。
- * これは SQL に識別子を埋め込む前の安全門で、どのテストも縛っていなかった。
+ * `registerEmbeddingSpace` の TSDoc は、「`schema`・`extensionSchema` が `assertSafeSchemaName` を通らなければ
+ * （`extensionSchema` は `schema` を指定したときだけ検査する）、通常の `Error`」と約束している。これは SQL に識別子を埋め込む前の安全門である。
  *
  * 見るのは「`assertSafeSchemaName` の message で投げる」こと。門が無いと、`"bad;name"` は二重引用符で囲まれて SQL に入り、
  * 「スキーマが無い」という DB の別の例外になる（message が違う）ので、この it が落ちる。

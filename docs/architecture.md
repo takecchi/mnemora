@@ -1132,6 +1132,12 @@ interface EmbeddingProvider {
 `InMemoryVectorStore.upsert` も、`packages/postgres` と同じく float4 に収まらない成分（`NaN`・`Infinity`・`1e308` など）を
 `RangeError` で拒み、保存しない。長さが違う・空のベクトルの差は残っている。
 
+⚠ **2026-10 追記（[ADR 0393](./decisions/0393-core-checks-embedding-dimension.md)。上の 2026-09-27 追記の「core の embed ジョブは中身を確かめずに `upsert` へ渡す」は、もう成り立たない）**:
+embed ジョブは `VectorStore.upsert` の前に、provider が返したベクトルの長さが `space.dimensions` と等しく、成分がすべて有限であることを
+確かめる。違えば `upsert` を呼ばずにジョブを失敗にして `embeddingStatus: 'failed'`（`recall()` では `not_indexed`）にする。
+`InMemoryVectorStore` でも `'ready'` にならない。上に書いた adapter ごとの差が残るのは、`VectorStore` を直接呼ぶ経路だけである
+（§5.4 の 2026-09-30 追記も同じ）。上の本文は、当時の記録として書き換えていない。
+
 ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
 [ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）**:
 `embed` は任意の第3引数 `opts?: AbortOptions` を受け取る。挙動は `LLMProvider`（§5.4 同日付

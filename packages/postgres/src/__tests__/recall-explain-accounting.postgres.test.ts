@@ -31,17 +31,8 @@ import {
 } from "./test-db.js";
 
 /**
- * recall の説明（`explain.stages`）が、実際に起きたことと合っていることを、今の振る舞いのまま縛る
- * （`docs/recall.md` §2 の「`explain.stages` の読み方」、2026-09-27 追記）。約束を足すものではない。
- *
- * - `candidate_generation` の `executed: false` は、`stage_skipped(candidate_generation)` と対になる。
- *   `rescore` の `executed: false` は「採点する候補が0件」で、`stage_skipped` は名乗らない。
- * - `association`（段3.5、Issue #865、2026-09-29）の `executed: false` は
- *   `stage_skipped(association, ...)` と対になる。探して0件だったとき（`executed: true`,
- *   `detail.hits`/`detail.selected` が0）とは区別する。
- * - `rescore` の `detail` の数と `omitted` の件数は、段3・段3.5 で返った分（`omitted` の排他、
- *   ADR 0203）を足すと合う。
- * - `getRecall` の記録は、返り値と一致する（Postgres の jsonb はキーの順を変えるので、順によらずに比べる）。
+ * recall の説明（`explain.stages`）が、実際に起きたことと合っていることを今の振る舞いのまま縛る。
+ * `getRecall` の記録は返り値と一致する。Postgres の jsonb はキーの順を変えるので、順によらずに比べる。
  * 2実装（Postgres・testkit の InMemory）で同じ結果になることも見る。
  */
 
@@ -190,12 +181,9 @@ describe("recall の explain は、実際に起きたことと合う", () => {
           withinLimit: 2,
         });
         expect(countOf(r, "below_threshold")).toBe(2);
-        // limit の外に出た1件は段3.5（連想枠）で返ったので、over_limit に数えない（ADR 0203 の排他）。
+        // limit の外に出た1件は段3.5（連想枠）で返ったので、over_limit に数えない。
         expect(countOf(r, "over_limit", "rescore")).toBe(0);
         expect(r.memories.map((m) => m.retrievedVia)).toEqual(["ann", "ann", "association"]);
-        // Issue #865（2026-09-29）: association の trace も、rescore と同じく実際に起きたことと
-        // 合う——withinLimit の2件がアンカーになり(anchors:2)、除外・minSimilarity(既定0.5)を
-        // 通過した候補は1件(hits:1)、席(既定 maxCount)に収まったのも1件(selected:1)。
         expect(r.explain.stages.find((s) => s.stage === "association")?.executed).toBe(true);
         expect(detailOf(r, "association")).toEqual({ anchors: 2, hits: 1, selected: 1 });
         expect(detailOf(r, "index_band")).toEqual({ totalInScope: r.index.totalInScope });
@@ -234,9 +222,7 @@ describe("recall の explain は、実際に起きたことと合う", () => {
           candidate_generation: false,
           rescore: false,
           contradiction_resolution: true,
-          // Issue #865（2026-09-29）: 連想枠は既定 on（ADR 0337）だが、この run は候補が
-          // 無く（rescore が0件）withinLimit も空なのでアンカーが無い——
-          // stage_skipped(association, "no_anchor") と対になり executed: false。
+          // 連想枠は既定 on だが、この run は候補もアンカーも無いので `stage_skipped(association, "no_anchor")` と対になり executed: false。
           association: false,
           budget_truncation: true,
           index_band: true,

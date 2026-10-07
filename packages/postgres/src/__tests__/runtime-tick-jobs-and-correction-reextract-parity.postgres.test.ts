@@ -37,9 +37,8 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0526: `tick` 経由の `consolidate`・`reflect` ジョブと、訂正の経路で負けた記憶がある状態での `reextract` を、**実 Postgres と InMemory の
- * 両方**で `EXPECTED` に突き合わせる。core の Fake の側は `packages/core/src/__tests__/fake-runtime-tick-jobs-and-correction-reextract-parity.test.ts` が
- * 同じ `EXPECTED` を縛る。3者が一致した（割れなし）。大文字の uuid の id は含めない（ADR 0446・0469・0521）。
+ * `tick` 経由の `consolidate`・`reflect` ジョブと、訂正の経路で負けた記憶がある状態での `reextract` を、実 Postgres と InMemory の両方で `EXPECTED` に突き合わせる。
+ * core の Fake の側は `packages/core/src/__tests__/fake-runtime-tick-jobs-and-correction-reextract-parity.test.ts` が同じ `EXPECTED` を縛る。大文字の uuid の id は含めない。
  */
 interface Env {
   runtime: Runtime;
@@ -66,10 +65,9 @@ interface Env {
 type Result = Record<string, unknown>;
 
 /**
- * ADR 0526（ADR 0524 の「測っていないこと」の実測）: (1) `tick` 経由の `consolidate`・`reflect` ジョブ（種・近傍の記憶を消した後、
- * `eraseTenant` の後、LLM の障害）、(2) 訂正の経路（`findCorrectionCandidates`＋`applyCorrection`）で負けて `superseded`（または `contested`）
- * になった記憶がある状態での `reextract` を、平らなデータにする。実装ごとの差が出るのは、操作の対象の id を大文字で渡したときだけで
- * （ADR 0446・0469。ここには含めない）、小文字の id では3者が一致した。core の Fake の歯と、InMemory・Postgres の歯が、同じ `EXPECTED` に突き合わせる。
+ * (1) `tick` 経由の `consolidate`・`reflect` ジョブ（種・近傍の記憶を消した後、`eraseTenant` の後、LLM の障害）、
+ * (2) 訂正の経路（`findCorrectionCandidates`＋`applyCorrection`）で負けて `superseded`（または `contested`）になった記憶がある状態での `reextract` を、平らなデータにする。
+ * core の Fake の歯と、InMemory・Postgres の歯が、同じ `EXPECTED` に突き合わせる。
  */
 async function scenario(env: Env): Promise<Result> {
   const { runtime, mem, ev, ob, rows, mk, enqueue, obs, setExtracted, setLlmThrows } = env;
@@ -167,7 +165,6 @@ async function scenario(env: Env): Promise<Result> {
       setLlmThrows(false);
     }
   }
-  // (2) 訂正の経路で負けた記憶と reextract
   const VARIANTS: Array<[string, (c: Memory, m: Memory) => ContestedResolution | undefined]> = [
     ["resolution supersede, winner=correcting", (c) => ({ kind: "supersede", winnerId: c.id })],
     ["resolution supersede, winner=corrected", (_c, m) => ({ kind: "supersede", winnerId: m.id })],

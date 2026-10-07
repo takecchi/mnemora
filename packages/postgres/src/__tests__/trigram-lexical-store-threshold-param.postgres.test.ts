@@ -20,7 +20,7 @@ import {
  * - 閾値の設定の文は、数値を SQL の文面に持たない（パラメータとして渡る）。
  * - 検索の後、同じ接続の設定は既定の値のまま（トランザクションの外に漏れない）。
  *
- * SQL_ASCII の leg では `create()` が拒むので（ADR 0319）、その leg では `create()` の拒否だけを確かめる。
+ * SQL_ASCII の leg では `create()` が拒むので、その leg では `create()` の拒否だけを確かめる。
  */
 
 const ctx: Ctx = { tenantId: "trigram-threshold-param" };

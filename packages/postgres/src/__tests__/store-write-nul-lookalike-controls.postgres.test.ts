@@ -1,8 +1,6 @@
-// 確かめ直し（Issue #1759、B 群 #1610・#1625 / ADR 0499・0505）の歯。やりすぎ側の対照。
-//
-// 書き込み口の NUL の検査が断るのは「U+0000 そのもの」だけで、文字どおりの `\u0000`（バックスラッシュ + `u0000`）や
-// `U+0001` は通す（Postgres も通す）。既存の歯は、この対照を Observation の `payload` と `kind` にしか置いていないので、
-// `attributes`（Observation・Memory）と `provenance` の検査を「文字どおりの `\u0000` も断る」へ広げる変異が赤にならなかった。
+// やりすぎ側の対照: 書き込み口の NUL の検査が断るのは「U+0000 そのもの」だけで、文字どおりの `\u0000`（バックスラッシュ + `u0000`）や
+// `U+0001` は通す（Postgres も通す）。`attributes`（Observation・Memory）と `provenance` の検査を
+// 「文字どおりの `\u0000` も断る」へ広げる実装を赤にする。
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "@mnemora/testkit";

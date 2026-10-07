@@ -11,7 +11,7 @@ import { dropTempDatabase } from "./temp-database.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * ADR 0464: `registerEmbeddingSpace` の `CREATE INDEX IF NOT EXISTS`（零ノルムの部分索引・`memory_id` の索引）が、
+ * `registerEmbeddingSpace` の `CREATE INDEX IF NOT EXISTS`（零ノルムの部分索引・`memory_id` の索引）が、
  * migration（0022・0027 の DO ブロック。1ファイル1トランザクション）が同じ名前の索引を作っている最中と重なっても、
  * `23505`（`pg_class_relname_nsp_index`）で落ちない。
  *

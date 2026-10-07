@@ -16,15 +16,12 @@ import {
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
 /**
- * ADR 0056 の段1押し下げ（`excludeProvenanceKinds`）を、`vector-search-subject.test.ts`
- * （ADR 0023、`subjectId` の押し下げ）と同型で実測する。
+ * `excludeProvenanceKinds` の段1押し下げを、`vector-search-subject.test.ts`（`subjectId` の押し下げ）と同型で実測する。
  *
  * **使う kind**: crowd（除外対象）は `"consolidated"`、small（残す対象）は `"imported"`
- * （`buildNewMemoryFixture` の既定）。`"inferred"`/`"stated"` は使わない——CHECK 制約
- * （`packages/postgres/migrations/0001_init.sql:68`）により実在の Observation を指す
- * `source_observation_id` が要り、この歯にはその設定が要らない負荷である
- * （`buildProvenanceFixture` の doc コメント参照）。除外の向き自体はどの kind でも同じ
- * メカニズムなので、実運用の主用途（`inferred` の除外、roadmap.md §5.5）を測るものではなく、
+ * （`buildNewMemoryFixture` の既定）。`"inferred"`/`"stated"` は使わない——CHECK 制約により実在の
+ * Observation を指す `source_observation_id` が要り、この歯にはその設定が要らない負荷である
+ * （`buildProvenanceFixture` の doc コメント参照）。除外の向き自体はどの kind でも同じメカニズムなので、
  * **段1へ押し下げたことでオーバーフェッチの窓が救われるという構造そのもの**を測る。
  *
  * ⚠ `subjectId` との選択性の違い: `subject_id` は高選択性（500件中 crowd/small で分かれる）
@@ -76,7 +73,7 @@ async function seedCrowdAndSmall(
     smallIds.push(memory.id);
   }
 
-  // ANALYZE: 統計情報が無い/古いと HNSW 索引が選ばれないことがある（vector-search-hnsw.test.ts と同じ理由）。
+  // ANALYZE: 統計情報が無い/古いと HNSW 索引が選ばれないことがある。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
 
@@ -99,7 +96,7 @@ describe("PostgresVectorStore.search — excludeProvenanceKinds が段1に効く
     const ctx: Ctx = { tenantId: TENANT };
     const { smallIds } = await seedCrowdAndSmall(memoryStore, vectorStore, ctx, pool);
 
-    // 修正前の段1呼び出しと同じ形（excludeProvenanceKinds を渡さない）。
+    // `excludeProvenanceKinds` を渡さない形。
     const withoutFilter = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
       limit: LIMIT,
       filter: { tenantId: TENANT, status: ["active", "contested"] },
@@ -109,7 +106,7 @@ describe("PostgresVectorStore.search — excludeProvenanceKinds が段1に効く
     const smallHitsWithoutFilter = withoutFilter.filter((h) => smallIdSet.has(h.memoryId));
     expect(smallHitsWithoutFilter).toHaveLength(0);
 
-    // 修正後: excludeProvenanceKinds: ["consolidated"] を渡す。
+    // `excludeProvenanceKinds: ["consolidated"]` を渡す。
     const withFilter = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
       limit: LIMIT,
       filter: {
@@ -124,38 +121,22 @@ describe("PostgresVectorStore.search — excludeProvenanceKinds が段1に効く
 });
 
 /**
- * 歯B（EXPLAIN）: `m.provenance_kind <> ALL($x)` を足した形の段1クエリで、プランナが
- * 実際に何を選ぶか。
+ * 歯B（EXPLAIN）: `m.provenance_kind <> ALL($x)` を足した形の段1クエリで、プランナが実際に何を選ぶか。
  *
- * **⚠ この歯は「HNSW が使われる」とも「HNSW が使われない」とも主張しない。** どちらの
- * 主張も、この作業環境（PostgreSQL が無い）では測れない推測にしかならない。
- * `vector-search-subject.test.ts` の歯Bは「`subject_id = $x` を足すとプランナが HNSW を
- * 捨てる」という、CI の実測で確定した強い主張を書いている——しかしそれは `subject_id` が
- * **高選択性**（実測データでは 3,000行・100 subject ⟹ 1条件で約1/100に絞れる）だから成り立つ
- * 主張である。`provenance_kind` は**低選択性**の離散5値で、しかも `<> ALL` は*除外*なので
- * 典型的には候補の大半が残る——選択性が逆なので、`subject_id` の実測結果をそのまま
- * 転用できない。**プランナがどちらを選ぶかは、この歯を書いている時点でも次の CI 実行までも
- * 分からない。**
+ * **⚠ この歯は「HNSW が使われる」とも「HNSW が使われない」とも主張しない。**
+ * `vector-search-subject.test.ts` の歯Bは「`subject_id = $x` を足すとプランナが HNSW を捨てる」と主張するが、
+ * それは `subject_id` が**高選択性**だから成り立つ。`provenance_kind` は**低選択性**の離散5値で、しかも
+ * `<> ALL` は*除外*なので典型的には候補の大半が残る——選択性が逆なので、その結論をそのまま転用できない。
  *
  * ⟹ ここでは選択性に依存しない、壊れにくい不変だけを検査する:
  * - `memories` 本体の `Seq Scan`（テナント全体を素通し）が現れないこと。
- *   `idx_memories_recall_gate`（`tenant_id, status, decay_floor_at`）が使えるはずで、
- *   `provenance_kind` の条件が追加されても `memories` を全走査する理由にはならない
- *   ——**この不変は選択性に関わらず成り立つはずである**（`provenance_kind` を絞る条件が
- *   `memories` へのアクセス経路を悪化させる理由がない。列は同じテーブルの別列であり、
- *   条件を足すことは既存の索引アクセスを妨げない）。
- * - `provenance_kind` の条件が実際にプランへ現れること（`Filter` か `Index Cond` の
- *   どちらかに `provenance_kind` という文字列が出る）——条件が黙って落ちていないことの確認。
+ *   `idx_memories_recall_gate`（`tenant_id, status, decay_floor_at`）が使えるはずで、`provenance_kind` は
+ *   同じテーブルの別列なので、条件を足しても既存の索引アクセスを妨げない。
+ * - `provenance_kind` の条件が実際にプランへ現れること（`Filter` か `Index Cond` のどちらかに
+ *   `provenance_kind` という文字列が出る）——条件が黙って落ちていないことの確認。
  *
- * **プランそのものは `console.log` で CI ログに残す**（次にこの歯を読む人が実際の
- * プランを見られるようにするため。断定的なアサーションより、生のプランを残すことを
- * 優先する——マネージャーの指示）。
- *
- * **確かめていないこと**: この歯を実行した CI run は、本 PR の時点でまだ存在しない
- * （この作業環境に PostgreSQL/`DATABASE_URL` が無いため、一度も実行していない）。
- * ⟹ 上のアサーションが実際に通るかどうかも含めて、**次の CI 実行が唯一の実測経路**である。
- * 通らなかった場合、それは「この不変も選択性に依存していた」という発見になりうる——
- * その場合はさらに弱いアサーションへ書き直す必要がある。
+ * **プランそのものは `console.log` で CI ログに残す**（次にこの歯を読む人が実際のプランを見られるように。
+ * 断定的なアサーションより、生のプランを残すことを優先する）。
  */
 const EXPLAIN_TENANT = "provenance-explain-tenant";
 const EXPLAIN_ROW_COUNT = 3000;
@@ -178,8 +159,7 @@ async function seedForExplain(
     const vector = [rand(), rand(), rand()];
     await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, vector);
   }
-  // 統計情報が無い/古いままだと、プランナが誤った行数見積もりで意図しない索引を選ぶ
-  // （vector-search-hnsw.test.ts の実測コメントと同じ理由）。
+  // 統計情報が無い/古いままだと、プランナが誤った行数見積もりで意図しない索引を選ぶ。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
 }
@@ -213,7 +193,6 @@ describe("PostgresVectorStore.search — excludeProvenanceKinds を足すとプ�
     const plan = explainResult.rows
       .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
       .join("\n");
-    // 次にこの歯を読む人が実際のプランを見られるよう、CI ログに残す（アサーションでは断定しない）。
     console.log("[vector-search-provenance] EXPLAIN plan:\n" + plan);
 
     // 弱い不変その1: memories 本体を全走査していない（テーブル名の直後に Seq Scan on memories

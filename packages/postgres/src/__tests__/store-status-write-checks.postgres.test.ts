@@ -9,16 +9,14 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0499（ADR 0450・ADR 0447 の材料）: status を書く口の、型の外の入力と purge 済みの行。
+ * status を書く口の、型の外の入力と purge 済みの行。2実装に同じ入力を流し、結果を比べる。
  *
  * - `resolveContestedGroup`・`resolveContestedPair` の `status` は型が `"active" | "superseded"`。型の外の値
- *   （`"forgotten"`・`"contested"`・`"archived"` など）は、以前は通って行をその status にしていた。
- *   2実装とも、書く前に `RangeError` で断る（何も書かない）。
+ *   （`"forgotten"`・`"contested"`・`"archived"` など）は、2実装とも書く前に `RangeError` で断る（何も書かない）。
  * - purge 済みの行（`status = 'forgotten'` のまま `purged_at` が入る）は、`expectedStatus` に一致しない行として扱う
- *   （`MemoryStatusConflictError`）。以前は `updateStatusWithEvent(T, "active", { expectedStatus: "forgotten" })` が
- *   墓石を active に戻していた（`Runtime.purge` の「不可逆」の約束の外）。
- *
- * 2実装に同じ入力を流し、結果を比べる。陽性対照（型の中の値・purge 前の forgotten の復元）は今までどおり通る。
+ *   （`MemoryStatusConflictError`）。`updateStatusWithEvent(T, "active", { expectedStatus: "forgotten" })` で
+ *   墓石を active に戻さない（`Runtime.purge` は不可逆）。
+ * - 陽性対照（型の中の値・purge 前の forgotten の復元）は通る。
  */
 
 const A: Ctx = { tenantId: "status-write-a" };
@@ -223,8 +221,7 @@ for (const [kitName, makeKit] of KITS) {
       );
       expect(error).toBeInstanceOf(MemoryStatusConflictError);
       expect((error as MemoryStatusConflictError).expectedStatus).toBe("forgotten");
-      // ADR 0518: purge 済みの行では observedStatus も "forgotten" になる（例外だけでは purge 済みと分からない。
-      // TSDoc `MemoryStatusConflictError` に書いた振る舞いの歯）。
+      // purge 済みの行では observedStatus も "forgotten" になる（例外だけでは purge 済みと分からない）。
       expect((error as MemoryStatusConflictError).observedStatus).toBe("forgotten");
       const after = (await kit.store.get(A, t.id))!;
       expect(after.status).toBe("forgotten");
@@ -310,8 +307,6 @@ for (const [kitName, makeKit] of KITS) {
       expect((error as Error).name).toBe("SourceMemoryStatusChangedError");
       expect(await kit.eventCount()).toBe(before);
     });
-
-    // ---- やりすぎを捕まえる歯 ----
 
     it("purge 前の forgotten は、今までどおり active へ戻せる（updateStatusWithEvent・updateStatus）", async () => {
       const kit = await makeKit();

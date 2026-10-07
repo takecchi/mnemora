@@ -5,24 +5,12 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #809: `resolveContestedPair`（supersede 分岐）・`restoreSupersededBy`・
- * `updateStatusWithEvent(kind='restored')` が、`status`/`contestedWithId`/
- * `supersededById`/`updatedAt` 以外の付随データ（`subjectId`・`tags`・`attributes`・
- * `provenance`・`validFrom`/`validUntil`・`occurredAt`・`strength`・`halfLifeHours`・
- * `decayFloorAt`・`embeddingStatus` 等）に触れないことを、**本物の Postgres に対して**
- * 実測で確認する。
+ * `resolveContestedPair`（supersede 分岐）・`restoreSupersededBy`・`updateStatusWithEvent(kind='restored')` が、
+ * `status`/`contestedWithId`/`supersededById`/`updatedAt` 以外の付随データ（`subjectId`・`tags`・`attributes`・`provenance`・`validFrom`/`validUntil`・`occurredAt`・`strength`・`halfLifeHours`・`decayFloorAt`・`embeddingStatus` 等）に触れないことを、
+ * 本物の Postgres に対して確認する。
  *
- * **この3本は元々 `packages/testkit/src/memory-store-conformance.ts`（適合テスト一式）
- * に足す案があったが、Issue #809 の方針で見送った**——適合テストに足すと、外部
- * adapter 実装者にまで「この3本の付随データ保全」を要求することになるため。
- * 代わりに、この事実を実際に確かめたい対象（Postgres・testkit の in-memory）ごとに
- * 専用のテストとして持つ。in-memory 側は
- * `packages/testkit/src/__tests__/in-memory-fixtures-restore-carryover.test.ts`。
- *
- * `restoreSupersededBy` の UPDATE 文（`packages/postgres/src/memory-store.ts` の
- * `SET status = 'active', superseded_by_id = NULL, updated_at = now()`）に
- * `subject_id = NULL, strength = 1` を混ぜる変異で、この歯が実際に赤くなることを
- * 確認済み（確認後 revert。手順は `AGENTS.md` の変異試験節）。
+ * この3本は `packages/testkit/src/memory-store-conformance.ts`（適合テスト一式）に足さない。足すと、外部 adapter 実装者にまで「この3本の付随データ保全」を要求することになるため。
+ * 代わりに、確かめたい対象（Postgres・testkit の in-memory）ごとに専用のテストとして持つ。in-memory 側は `packages/testkit/src/__tests__/in-memory-fixtures-restore-carryover.test.ts`。
  */
 
 const TENANT = "restore-carryover-tenant";
