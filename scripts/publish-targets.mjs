@@ -14,7 +14,5 @@ export const PUBLISH_TARGETS = [
   { name: "@mnemora/postgres", dir: "packages/postgres" },
   { name: "@mnemora/anthropic", dir: "packages/anthropic" },
   { name: "@mnemora/local-embedding", dir: "packages/local-embedding" },
-  // 未公開のパッケージは末尾に置く。初版は Trusted Publishing(OIDC)で出せず(npm/cli#8544、ADR 0066)、
-  // 途中に居ると、その後ろが publish されない。
   { name: "@mnemora/bullmq", dir: "packages/bullmq" },
 ];
