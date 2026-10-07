@@ -4,46 +4,8 @@ import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
 /**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * `.github/workflows/ci.yml` の `example-chat` ジョブに、
- * `scripts/check-local-embedding-fingerprint.mjs`（local-embedding が実際に
- * 読み込んだ重みが、宣言された Hugging Face repo の内容と今まさに一致しているかを
- * 照合する門）を走らせるステップが**正しい形**で配線されていること:
- *
- * 1. そのステップが実在し、`check-local-embedding-fingerprint.mjs` を実行している。
- * 2. `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を渡している。
- * 3. **`test:db` ステップより後**に在る（モデルはテスト実行中に取得されるため、
- *    それより前に置いても検査対象がまだ存在しない）。
- * 4. `continue-on-error` を持たない（この段は門であり、依頼者が明示的に禁じた
- *    設定である。付いていると exit 1（不一致）まで素通りしてしまう）。
- * 5. ステップの本体が `GITHUB_STEP_SUMMARY` へ書き出している（一致・保留の
- *    どちらでも Job Summary に1行残す設計——「何も出ていない」を「ステップが
- *    走らなかった」と区別できるようにするため）。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**既存の wiring 歯
- * （`ci-yml-local-embedding-cache-wiring.test.mjs` 等）と同じ判断——依存追加は
- * オーナー専権（`docs/autonomy.md`）。壊れたときは「配線が変わった」か
- * 「取り出し方が古い」かを見て、配線が変わっていないなら取り出し方を直すこと。
- *
- * 🔴 **`blankOutWorkflowComments` を必ず通してから照合している。** これを通さずに
- * `ci.yml` の生テキストへ `toContain` を当てると、地の文のコメントが
- * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` や `GITHUB_STEP_SUMMARY` を**引用しているだけ**
- * でも一致してしまう（`ci-yml-local-embedding-cache-wiring.test.mjs` と同じ理由）。
- *
- * ## 確かめていないこと
- *
- * - この CLI が実際に緑・赤・保留を正しく判定するかは、
- *   `scripts/__tests__/check-local-embedding-fingerprint-lib.test.mjs`（純関数側）と
- *   依頼者が手元で行った変異試験（実モデルに対する実行）が見ている。この歯は
- *   「配線」だけを見る——`node scripts/check-local-embedding-fingerprint.mjs` を
- *   実際には1度も実行しない。
- * - **`run:` の中身に埋め込んだ `case` 文が、exit コードごとに判定表どおりに
- *   分岐するか（exit 2 だけをジョブ失敗にせず飲み込むか）は、この歯では
- *   シェルとして実行して確かめていない。** 静的なテキスト検査（このファイル）と、
- *   **`ci-yml-local-embedding-fingerprint-shell.test.mjs`**（`run:` 本文を
- *   `ci.yml` から逐語で取り出し、実際に `bash` へ食わせて `exit 0/1/2/3` の
- *   4分岐を固定する歯。Issue #574）とで役割を分けている。
+ * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
+ * `blankOutWorkflowComments` を通してから照合する（地の文のコメントが引用しているだけでも一致してしまう）。
  */
 
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
@@ -53,9 +15,6 @@ const { text: workflow, unhandled: workflowUnhandled } = blankOutWorkflowComment
 const JOB_ID = "example-chat";
 
 /**
- * `jobs:` の下の1ジョブ(`  <id>:` から、次の同じ深さの `  <id>:` まで)を切り出す
- * (既存の wiring 歯群と同じ形)。
- *
  * @param {string} yaml
  * @param {string} jobId
  */
@@ -76,9 +35,6 @@ function extractJob(yaml, jobId) {
 }
 
 /**
- * ジョブブロックを `steps:` のリストの要素(段)ごとの生テキストへ切り分ける
- * (`ci-yml-local-embedding-cache-wiring.test.mjs` の `splitSteps` と同じ形)。
- *
  * @param {string} jobBlock
  * @returns {string[]}
  */
@@ -145,14 +101,9 @@ describe("ci.yml の local-embedding fingerprint 配線(example-chat ジョブ)"
 
   it("⛔ continue-on-error を持たない(この段は門である)", () => {
     const step = steps[fingerprintStepIndex];
-    // Issue #1784: キーを引用符で囲んだ書き方(`"continue-on-error": true`)も YAML としては同じキーである。
-    // 以前の `^\s*continue-on-error:` は、その書き方を素通りさせた【実測】。
     expect(/^\s*["']?continue-on-error["']?\s*:/m.test(step)).toBe(false);
   });
 
-  // Issue #1784(#563・#588・#590・#592 の確かめ直し): 門を外す書き方は continue-on-error だけではない。
-  // `if: false`(と、PR では走らない形の `if:`)でステップごと走らなくしても、ジョブの
-  // `continue-on-error: true` でジョブの赤を緑に畳んでも、以前の歯は全部緑のまま通った【実測】。
   it("⛔ 門のステップは `if:` を持たない(`if: false` などで走らなくする書き方を許さない)", () => {
     const step = steps[fingerprintStepIndex];
     // ステップのキーは 8 桁のインデント(`      - name:` の続き)。`run:` の本文の中の `if` は深いので当たらない。
@@ -160,8 +111,6 @@ describe("ci.yml の local-embedding fingerprint 配線(example-chat ジョブ)"
   });
 
   it("⛔ 門が居るジョブ(example-chat)は、ジョブの側でも `continue-on-error` と `if:` を持たない", () => {
-    // ジョブ直下のキーは 4 桁のインデント。`continue-on-error: true` はジョブの失敗を緑に畳み、
-    // ジョブの `if:` が偽ならジョブごと skipped になる(required check は skipped を緑として通す)。
     expect(/^ {4}["']?continue-on-error["']?\s*:/m.test(jobBlock)).toBe(false);
     expect(/^ {4}["']?if["']?\s*:/m.test(jobBlock)).toBe(false);
   });
