@@ -13,9 +13,6 @@ import {
 } from "../retrieval-quality.js";
 import { assertAffinityMeasured } from "../recalled-score.js";
 
-/**
- * `recall()` が返す `RecalledMemory` の最小の作り。`score` 以外はこの検査の対象ではない。
- */
 function memory(
   digest: string,
   score: Partial<ScoreBreakdown> & { total: number },
@@ -37,7 +34,6 @@ function memory(
 
 describe("computeTermSpreads", () => {
   it("項ごとに max - min を出す（total は対象にしない）", () => {
-    // 2 の冪だけを使う——浮動小数の誤差を検査の主題にしないため。
     const spreads = computeTermSpreads([
       memory("a", {
         similarity: 0.5,
@@ -108,14 +104,6 @@ describe("computeTermSpreads", () => {
     expect(spreads.find((s) => s.term === "decay")?.spread).toBe(0.5);
   });
 
-  /**
-   * ⭐ `distinctCount` は `spread`(幅)と別の主張であることを示す歯(ADR 0081 §1.1)。
-   *
-   * 幅がほぼ0(浮動小数として極小)であっても、候補が実際に2通りの異なる値を
-   * 持っていれば `distinctCount` は2のままである——「幅が小さい」ことと
-   * 「候補間で値が動いていない(1通りしか無い)」ことは別物である、という
-   * ADR 0081 の指摘そのものを、ここで固定する。
-   */
   it("distinctCount は spread(幅)と違うものを測る: 値がほぼ同じでも通り数は区別する", () => {
     const spreads = computeTermSpreads([
       memory("a", { similarity: 1, total: 1 }),
@@ -123,10 +111,8 @@ describe("computeTermSpreads", () => {
       memory("c", { similarity: 1, total: 1 }),
     ]);
     const similarity = spreads.find((s) => s.term === "similarity")!;
-    // 幅は極小(1e-8 桁)だが、厳密には 0 ではない。
     expect(similarity.spread).toBeGreaterThan(0);
     expect(similarity.spread).toBeLessThan(1e-7);
-    // それでも通り数は2(1 と 1+1e-8 は厳密比較で別の値)。
     expect(similarity.distinctCount).toBe(2);
   });
 });
@@ -174,8 +160,6 @@ describe("collectScoreDetails", () => {
       [1, ["distractor", "top1"], "1位=distractor"],
       [2, ["gold"], "2位=gold"],
     ]);
-    // Issue #548 方向2 / ADR 0352: フィクスチャは常に ScoreBreakdown の形（similarity/total
-    // つき）なので絞り込む。
     const detailScore = details[1]!.score;
     assertAffinityMeasured(detailScore);
     expect(detailScore.total).toBe(0.45);
@@ -217,9 +201,6 @@ describe("formatScoreValue", () => {
   });
 
   it("負の大きい値は指数表記にしない（判定は絶対値で行う）", () => {
-    // `similarity = 1 - distance` であり、コサイン距離は最大 2 まで出る。
-    // ⟹ 向きが逆のベクトルでは similarity が負になりうる。符号だけを見て
-    // 「小さい」と判定すると、-0.5 のような大きな負の値まで指数表記に倒れる。
     expect(formatScoreValue(-0.5)).toBe("-0.500000");
   });
 
@@ -247,8 +228,7 @@ describe("formatTermSpreads / formatScoreDetail", () => {
   });
 
   it("掛け算の形をそのまま出す（順位・役・内訳・digest が1行に揃う）", () => {
-    // **5項すべてに違う値を入れる。**同じ値を並べると、項を取り違える実装
-    // （例: decay の位置に freshness を出す）をこの検査が通してしまう。
+    // 5項すべてに違う値を入れる。同じ値だと項を取り違える実装が通ってしまう。
     const [detail] = collectScoreDetails(
       [
         memory("父は毎晩ウォーキングをしています。", {
@@ -268,14 +248,6 @@ describe("formatTermSpreads / formatScoreDetail", () => {
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// formatArmDetail — 上で作った内訳が、実際に arm の出力へ載っているか
-//
-// **なぜここまで見るか**: 純関数が正しくても、それを印字に配線し忘れれば
-// 出力からは何も分からない。この PR が直しているのは「ベンチが説明を捨てていた」
-// ことなので、**捨てていないことを出力の側で押さえる。**
-// ---------------------------------------------------------------------------
 
 function probe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
   const memories = [
@@ -306,7 +278,6 @@ function probe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
     scoreDetails: collectScoreDetails(memories, { goldRank: 2, distractorRank: 1 }),
     termSpreads: computeTermSpreads(memories),
     recalledRows: memories.length,
-    // Issue #548 方向2 / ADR 0352: affinityMeasured: false には lexicalMatch という欄が無い。
     lexicalMatchRows: memories.filter(
       (m) => m.score.affinityMeasured !== false && m.score.lexicalMatch !== undefined,
     ).length,
@@ -366,19 +337,12 @@ describe("formatArmDetail", () => {
     expect(out).not.toContain("[gold]");
   });
 
-  /**
-   * ⭐ ADR 0109: 「何通りか」と「decay===freshness」の2行が、既存の行の文面を
-   * 一切変えずに追加されていることを確かめる。
-   */
   it("probe ごとに、項ごとの「何通りか」の行を出す（既存の幅の行はそのまま）", () => {
     const out = formatArmDetail(armReport());
-    // 既存の行はこの PR の前後で1文字も変わっていない。
     expect(out).toContain(
       "項ごとの値の幅(返った候補全体): similarity=0.019073 decay=1.000e-6 " +
         "tagMatch=0.000000 freshness=1.000e-6 strength=0.000000",
     );
-    // 新設の行: tagMatch/strength は1通り(=順位に寄与していない)、
-    // similarity/decay/freshness は2通り。min/max は丸めない生値。
     expect(out).toContain(
       "項ごとの何通りか(返った候補全体): " +
         "similarity=2通り[0.449758..0.468831] decay=2通り[0.999978..0.999979] " +
