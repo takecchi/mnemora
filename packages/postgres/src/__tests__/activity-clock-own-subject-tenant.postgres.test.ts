@@ -7,19 +7,9 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `activity-clock-memory-own-subject.postgres.test.ts`（ADR 0394）の、テナントの境界版。
- *
- * 書く側（`reinforce`・`reinforceMany`・`recordUsageAndReinforce` の `addOwnSubjectSeq: true`）は、
- * 強化される行の起点を `T + S_x` にする。`S_x` は `tenant_subject_activity` を引く相関サブクエリで、
- * そのテナントの絞り（`sa.tenant_id = <行のテナント>`）が外れると、別のテナントの同じ subject id の
- * カウンタを拾う。形は2つ。
- *
- * - 別のテナントにも同じ subject id のカウンタ行があるとき: サブクエリが2行を返し、
- *   「more than one row returned by a subquery」で文が落ちる。
- * - 自分のテナントにカウンタ行が無く、別のテナントにだけあるとき: 落ちずに、別のテナントの `S_x` で起点が決まる。
- *
- * 読む側のテナントの絞りは `activity-subject-counter-tenant-qualification.postgres.test.ts` が見ている。
- * ここは書く側を、3つの口で見る。
+ * 書く側の `S_x` は `tenant_subject_activity` を引く相関サブクエリで、テナントの絞りが外れると別テナントの同じ subject id のカウンタを拾う。
+ * 別テナントにも同じ subject id のカウンタ行がある形（サブクエリが2行を返して文が落ちる）と、
+ * 自分のテナントに無く別テナントにだけある形（落ちずに別テナントの `S_x` で起点が決まる）の両方を作る。
  */
 
 const A: Ctx = { tenantId: "own-subject-tenant-a" };
@@ -152,7 +142,6 @@ describe("addOwnSubjectSeq の S_x は、強化される行のテナントのカ
     "%s: 自分のテナントにカウンタ行が無ければ、別のテナントのカウンタ行は使わず、起点・床は T のみ",
     async (_name, port) => {
       const { db, mem } = await setupStore();
-      // カウンタ行は A にだけある（全体で1行）。C の記憶は、C のカウンタが無いので T のみで決まる。
       await advanceSubject(mem, A, S_A);
       const c = await seedMemory(mem, C, "c");
 

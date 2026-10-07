@@ -20,15 +20,6 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { PostgresRelationStore } from "../relation-store.js";
 import { getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
-/**
- * ADR 0541: forget・purge した記憶の本文を、外部の embedding provider に送らない。forget の前に積まれた埋め込みジョブ
- * （`createMemoryWithOutbox` の `jobKinds: ["embed"]`）が後から `tick` で走っても、`processEmbedJob` は forgotten か purge 済みの記憶なら
- * provider を呼ばずにジョブを終える（`complete`）。以前は、本文（purge 後は墓標）を provider に送り、ベクトルを書いていた。
- * 3 実装（Postgres・testkit の InMemory・core の Fake）で、呼ばれた回数と渡された入力を数える provider で見る。
- * 他の状態（active・archived・superseded・contested）は今までどおり埋め込む（やりすぎの対照）。
- * conformance suite には何も足していない（ADR 0434 決定5）。
- */
-
 const ctx = { tenantId: "tenant-1" };
 const SPACE = TEST_EMBEDDING_SPACE;
 function countingProvider() {
@@ -313,9 +304,7 @@ describe("consolidate・reflect は、forget・purge した記憶の本文を LL
   }
 });
 
-// 種（`seedMemoryId`）が forgotten・purged のとき、近傍（種の digest で recall して集める active な記憶）が居ても、
-// recall（= embedding provider へのクエリ送信）も LLM も呼ばない。上の歯は近傍が無い状況なので、種の判定を外しても
-// 結果が変わらず縛れていなかった（変異 M15・M16）。ベクトルを持つ active な近傍 C・D を置いて見る。
+// 近傍が居ないと種の判定を外しても結果が変わらず縛れないので、ベクトルを持つ active な近傍 C・D を置いて見る。
 describe("consolidate・reflect の { seedMemoryId }: 種が forgotten・purged なら、近傍が居ても recall も LLM も呼ばない（ADR 0541）", () => {
   for (const be of ["pg", "testkit", "fake"]) {
     for (const op of ["consolidate", "reflect"] as const) {

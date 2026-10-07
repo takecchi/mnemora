@@ -1,15 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseMigrateCliOptions } from "../bin/cli-options.js";
 
-/**
- * `--help` / `-h` の優先（`parseMigrateCliOptions` の doc: argv のどこにあっても、他の一切より先に勝つ）の、
- * `cli-options.test.ts` が見ていない側。DB は要らない。
- *
- * - `--` と一緒でも help を返す（`pnpm run migrate -- --help` は `--` ごと渡ってくる）。
- * - 見分けは完全一致: `--help=1`・`--helper`・`-hx` のような似た綴りや、値の位置に埋まった `-h` を help と読まない。
- * - 不正な環境変数と一緒でも help を返す（使い方を見たいだけの利用者に、設定の不備を見せない）。
- */
-
 describe("parseMigrateCliOptions: --help は --（pnpm が渡す区切り）と一緒でも勝つ", () => {
   it.each([
     [["--", "--help"]],

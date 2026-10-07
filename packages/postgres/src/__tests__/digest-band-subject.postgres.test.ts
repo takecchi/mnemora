@@ -4,18 +4,6 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `PostgresMemoryStore.aggregateScope` の `digestBand`（目次帯、ADR 0073 決定7）が、
- * `scope.subjectId` × `scope.includeSubjectless`（`docs/recall.md`「includeSubjectless」節・
- * ADR 0286）の絞りの内側だけを出すことの実測。
- *
- * `digests`/`digest_eligible_count` は `scoped`/`agg` を経由せず `memories` を直接引く
- * 別のサブクエリであり（Issue #355 / ADR 0307）、`totalInScope` 側の絞りとは独立に
- * 壊れうる。**`*-conformance.ts` には足さない**（外部 adapter への要件を増やさないため、
- * Issue #809 の方針）。Fake 側は
- * `packages/testkit/src/__tests__/in-memory-fixtures-digest-band-subject.test.ts`。
- */
-
 const TENANT = "digest-band-subject-tenant";
 
 async function seed() {

@@ -7,15 +7,6 @@ import { buildNewMemoryEventFixture, buildNewMemoryFixture } from "@mnemora/test
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0435: claim key の索引（`idx_memories_claim_key`・`idx_memories_claim_predicates`）の1行の上限
- * （SQLSTATE 54000）で落ちる入力は、4つの口（`createMemory`・`createMemoryWithOutbox`・
- * `createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories`）のどれでも `ClaimKeyIndexLimitError`
- * （`kind: "claim_key_index_limit"`）になる。**断る入力は変えない**: 今通る入力（圧縮で索引の1行に収まる長い文字列、
- * 2600 字）は通り、ほかの索引の 54000・別の SQLSTATE は包まない。message にも `cause` の連鎖にも入力の値を残さない。
- * 書きかけの残り方（トランザクションごと戻る・旧い行は active のまま・一括は悪い候補だけ `dropped`）も縛る。
- */
-
 const ctx: Ctx = { tenantId: "claim-key-index-limit" };
 
 afterAll(async () => {
@@ -169,14 +160,12 @@ describe.each(PORTS)("$method", ({ method, run }) => {
       expect(typed.kind).toBe("claim_key_index_limit");
       expect(typed.method).toBe(method);
       expect(typed.name).toBe("ClaimKeyIndexLimitError");
-      // cause は値を含まない新しい Error（SQLSTATE だけ写す）。drizzle の例外は残さない。
       expect(typed.cause).toBeInstanceOf(Error);
       expect((typed.cause as { code?: string }).code).toBe("54000");
       expect(Object.getOwnPropertyNames(typed.cause)).not.toContain("params");
       expect(Object.getOwnPropertyNames(typed.cause)).not.toContain("query");
       expect((typed.cause as { cause?: unknown }).cause).toBeUndefined();
       expectNoValueLeak(error, [key.subject.slice(0, 40), key.predicate.slice(0, 40)]);
-      // 書きかけの残り方: memory は1件も残らない。
       expect(await count("memories")).toBe(method === "supersedeWithNewMemories" ? 1 : 0);
       expect(await count("outbox")).toBe(0);
     },
@@ -196,9 +185,7 @@ describe.each(PORTS)("$method", ({ method, run }) => {
 
   it("ほかの索引の 54000 と別の SQLSTATE は包まない（生のまま出る）", async () => {
     const cases: Array<[string, Partial<NewMemory>]> = [
-      // GIN の idx_memories_tags（名前付き）。
       ["tag 2800 字（idx_memories_tags）", { tags: [incompressibleHex("g", 2800)] }],
-      // btree の idx_memories_by_subject（名前付き）。claimKey は小さい。
       [
         "subjectId 5000 字（idx_memories_by_subject）",
         { subjectId: incompressibleHex("u", 5000), claimKey: { subject: "s", predicate: "p" } },
@@ -213,7 +200,6 @@ describe.each(PORTS)("$method", ({ method, run }) => {
         "subjectId 1万字・claimKey あり（名前の無い形）",
         { subjectId: incompressibleHex("u", 10000), claimKey: { subject: "s", predicate: "p" } },
       ],
-      // 別の SQLSTATE（23514 check_violation）。
       ["strength が値域の外（23514）", { strength: 5, claimKey: { subject: "s", predicate: "p" } }],
     ];
     for (const [label, over] of cases) {

@@ -18,19 +18,9 @@ import {
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * 「参照の参照先が別テナントの行を指している」既存行の検出（`findCrossTenantReferences`）。
- * オーナー回答 374f6f88 の問27（全部推奨）。検出だけで、複合 FK も修復もしない。
- *
- * 食い違い行は ADR 0398・0436・0439 の入口検査があるので、ストアの口からは作れない。
- * この歯は、生 SQL（検査の外）で食い違い行を仕込み、検出が実際に捕まえること（陽性対照）と、
+ * 食い違い行はストアの口からは作れない。この歯は、生 SQL（検査の外）で食い違い行を仕込み、検出が実際に捕まえること（陽性対照）と、
  * 正しい行・別テナントの正しい行・NULL の参照を数えないこと（陰性対照）を、両方見る。
  * 「0件」を報告する道具なので、陽性対照が無いと「0件」は何も言っていない。
- *
- * 縛るもの:
- * - 4種（recall_usages・source_observation_id・contested_with_id・superseded_by_id）それぞれの検出。
- * - 検出は読み取りだけ（READ ONLY のトランザクション、行は検出の前後で同じ、接続は返る）。
- * - `count` は `sampleLimit` に左右されない。
- * - `schema` を渡すと、その専用スキーマの側を見る。
  */
 
 afterAll(async () => {
@@ -113,7 +103,6 @@ describe("陰性対照: 食い違いの無いデータは1件も数えない", (
   it("2つのテナントの、正しい参照（4種）と NULL の参照だけのデータは、0件", async () => {
     const s = await setup();
     await seedCorrectRows(s);
-    // 仕込みが効いていること（参照が実際に書かれている）を、数えて確かめる。
     const refs = await s.pool.query<{ n: string }>(
       `SELECT (SELECT count(*) FROM memories WHERE superseded_by_id IS NOT NULL
                                                  AND contested_with_id IS NULL) +
@@ -190,12 +179,10 @@ describe("陽性対照: 生 SQL で仕込んだ食い違い行を、種類ごと
     const a1 = await s.make(A, "a1");
     const b1 = await s.make(B, "b1");
     const bRecall = await s.mem.createRecall(B, recallRecord(B));
-    // tenant_id = A の行が、B の recall と B の memory を指す。
     await s.pool.query(
       "INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at) VALUES ($1, $2, $3, now())",
       [TA, bRecall, b1.id],
     );
-    // 食い違いの無い行（A の recall・A の memory）も置く。
     await s.mem.recordUsage(A, await s.mem.createRecall(A, recallRecord(A)), [a1.id]);
     const r = await findCrossTenantReferences(s.pool);
     const f = r.findings.find((x) => x.kind === "recall_usages")!;
@@ -209,7 +196,6 @@ describe("陽性対照: 生 SQL で仕込んだ食い違い行を、種類ごと
     const b1 = await s.make(B, "b1");
     const aRecall = await s.mem.createRecall(A, recallRecord(A));
     const bRecall = await s.mem.createRecall(B, recallRecord(B));
-    // recall は A のもの・memory が B のもの（memory 側だけが食い違う）。
     await s.pool.query(
       "INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at) VALUES ($1, $2, $3, now())",
       [TA, aRecall, b1.id],
@@ -224,7 +210,6 @@ describe("陽性対照: 生 SQL で仕込んだ食い違い行を、種類ごと
       recallTenantId: TA,
       memoryTenantId: TB,
     });
-    // recall が B のもの・memory が A のもの（recall 側だけが食い違う）。
     await s.pool.query(
       "INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at) VALUES ($1, $2, $3, now())",
       [TA, bRecall, a1.id],
@@ -445,7 +430,6 @@ describe("schema を渡すと、その専用スキーマの側を見る", () => 
         `UPDATE "${SCHEMA}".memories SET superseded_by_id = $1 WHERE id = $2`,
         [b.id as MemoryId, a.id],
       );
-      // 4種すべてを専用スキーマに仕込む（どの表の名前が schema で修飾されなくても、数が合わなくなる）。
       const a2 = await store.createMemory(
         A,
         buildNewMemoryFixture({ tenantId: TA, contentHash: "xdet-s-a2" }),

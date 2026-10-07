@@ -6,19 +6,6 @@ import {
 } from "../bin/cli-options.js";
 import type { ExtensionMode } from "../migrate.js";
 
-/**
- * `mnemora-postgres-migrate` の引数・環境変数解釈（Issue #107）を、**DB 無しで**検査する歯。
- *
- * `parseMigrateCliOptions` は純関数として切り出してある（`../bin/cli-options.ts` の doc
- * コメント参照）ため、ここでは `Pool` も `runMigrations` も一切登場しない。実際に
- * 別スキーマへマイグレーションが当たることの検査は別ファイル（DB を要する歯）の役割で、
- * ここには置かない。
- *
- * ⚠ 実装の形（内部の変数名・エラーメッセージの完全一致）ではなく、**ふるまい**
- * （どの入力がどう解決されるか / どの入力が `ok: false` になるか）を固定する。
- * メッセージの検査は部分一致（`toMatch`）にとどめる。
- */
-
 function expectOk(result: MigrateCliParseResult): asserts result is {
   ok: true;
   options: {
@@ -96,9 +83,6 @@ describe("parseMigrateCliOptions: --analyze-memories（Issue #234 / ADR 0143）"
   });
 
   it("`--` 単体は受け付けず（入力は変えない）、エラー文に `--` を付けない正しい書き方を1行で示す", () => {
-    // `pnpm --filter @mnemora/postgres run migrate -- --analyze-memories` と書くと、pnpm が
-    // `--` をそのまま渡す（examples/chat/README.md の注意書き）。以前は `unknown option: --` だけで、
-    // 次の一手が分からなかった。
     const result = parseMigrateCliOptions(["--", "--analyze-memories"], {});
     expectErr(result);
     const lines = result.error.message.split("\n");
@@ -362,20 +346,9 @@ describe("parseMigrateCliOptions: 未知の引数・値の欠けた引数", () =
 
 describe("parseMigrateCliOptions: --help", () => {
   it("--help があれば help: true を返し、schema 等は解決しない", () => {
-    // 🔴 **Issue #184 A**: 以前この歯は `options.help` しか見ておらず、
-    // `MNEMORA_SCHEMA` をわざわざ仕込みながら**それが無視されたかを問う表明が
-    // どこにも無かった**。⟹ 早期 return を
-    // `{ help: true, schema: schemaArg ?? env.MNEMORA_SCHEMA }` へ書き換えても
-    // **緑のままだった**（2026-09-13 実測。`Tests 28 passed (28)`）。
-    //
-    // ⚠ **環境変数の値を `should-be-ignored` から `should_be_ignored` へ変えてある。**
-    // ハイフン入りは `assertSafeIdentifier`（`^[a-z_][a-z0-9_]*$`）が弾く**不正な**
-    // スキーマ名なので、「早期 return を丸ごと消す」欠陥のほうは `expectOk` が
-    // **間接的に**捕まえてしまい、この歯が赤くなる理由が2つに割れていた
-    // （2026-09-13 実測。⚠ Issue #184 は「有効な値なので間接的な捕捉も効かない」と
-    // 書いているが、それは誤りである）。⟹ **解決に成功してしまう値**へ揃えて、
-    // この歯が赤くなる理由を「help 経路が解決した」ただ1つにする。
-    // 不正な値と `--help` の同居は、この describe の3本目が測っている。
+    // 環境変数の値は、不正なスキーマ名（ハイフン入り）にしない。不正だと「早期 return を丸ごと消す」欠陥も
+    // `expectOk` が間接的に捕まえてしまい、この歯が赤くなる理由が2つに割れる。
+    // 解決に成功してしまう値にして、赤くなる理由を「help 経路が解決した」ただ1つにする。
     const result = parseMigrateCliOptions(["--help"], {
       MNEMORA_SCHEMA: "should_be_ignored",
       MNEMORA_EXTENSION_SCHEMA: "should_be_ignored_ext",
@@ -383,13 +356,9 @@ describe("parseMigrateCliOptions: --help", () => {
       MNEMORA_ANALYZE_MEMORIES: "1",
     });
     expectOk(result);
-    // ⭐ 「help だけを返す」ことを**丸ごと**固定する。`schema` / `extensionSchema` /
-    // `extensionMode` を個別に `toBeUndefined()` で並べるより強い——将来
-    // `ParsedMigrateCliOptions` に欄が増えたとき、**その新しい欄が help 経路で
-    // 解決されても、この1本が赤くなる**。
-    // ⛔ `toStrictEqual` にはしない: `{ help: true, schema: undefined }` は
-    // ふるまいとして同じであり、そこで赤くするのは「ふるまい不変で赤くなる歯」になる
-    // （PR #154 が一度除去した向きの欠陥）。
+    // 「help だけを返す」ことを丸ごと固定する。欄を個別に `toBeUndefined()` で並べるより、
+    // 将来 `ParsedMigrateCliOptions` に欄が増えて help 経路で解決されたときも赤くなる。
+    // `toStrictEqual` にはしない: `{ help: true, schema: undefined }` はふるまいとして同じで、そこで赤くするのは偽陽性になる。
     expect(
       result.options,
       "🔴 赤の意味: `--help` の経路が環境変数を解決している。help は" +
@@ -411,14 +380,6 @@ describe("parseMigrateCliOptions: --help", () => {
     expectOk(result);
     expect(result.options.help).toBe(true);
   });
-
-  // 🔴 以下3本は、このファイル冒頭のdocコメント
-  // 「--help はどんな組み合わせでも他の解釈をせず即座に返す（ヘルプ表示に徹する）」を
-  // そのまま検査する歯（実装時点で赤——`--help`/`-h` より後に置かれた壊れた引数が、
-  // ループ内で先に `ok: false` を返してしまい、help に到達しない）。
-  // 上の1本（322行目）は「解決には失敗する*が構文的には壊れていない*値」
-  // （schema="Tenant" は値を消費できる）で help が勝つことしか確認しておらず、
-  // 「構文自体が壊れている（値が無い・未知のオプション）」場合は検査していなかった。
 
   it("--help の後に値の無い --schema が続いても help を優先する", () => {
     const result = parseMigrateCliOptions(["--help", "--schema"], {});

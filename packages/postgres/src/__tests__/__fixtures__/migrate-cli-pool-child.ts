@@ -1,7 +1,6 @@
-// `migrate-cli-pool-idle-loss.test.ts` が子プロセスとして起動する（ADR 0448）。
+// `migrate-cli-pool-idle-loss.test.ts` が子プロセスとして起動する。
 //
-// `mnemora-postgres-migrate` が使う Pool（`createMigrateCliPool`）に待機中の接続を1本置き、別の接続から
-// それを切り、500ms 待ってから次の問い合わせを打つ。
+// `mnemora-postgres-migrate` が使う Pool（`createMigrateCliPool`）に待機中の接続を1本置き、別の接続からそれを切り、500ms 待ってから次の問い合わせを打つ。
 // - 引数無し: CLI の Pool を使う。
 // - `raw`: 陽性対照。error リスナー無しの素の `pg.Pool` を使い、切断が本当に Pool の `error` を発火させ、
 //   リスナーが無ければプロセスが落ちることを示す。

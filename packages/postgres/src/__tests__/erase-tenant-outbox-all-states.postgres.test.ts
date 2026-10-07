@@ -2,14 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `OutboxStore.eraseTenant`（PR #1444、ADR 0383）は、ジョブの状態を問わず（未処理・claim 中・完了・失敗）
- * テナントの `outbox` の行を全部消す。完了済みだけ、あるいは失敗していないものだけを消す実装は、
- * 失敗した行や claim 中の行に、そのテナントが渡したペイロードを残す。
- *
- * 既存の歯が行を作る経路（observe → tick）は、完了済みと claim 済みの行しか作らないので、失敗した行・
- * 一度も claim されていない行は、ここで生 SQL で作る。
- */
+/** 既存の歯が行を作る経路（observe → tick）は完了済みと claim 済みの行しか作らないので、失敗した行・一度も claim されていない行は、ここで生 SQL で作る。 */
 
 afterAll(async () => {
   await closeTestClient();

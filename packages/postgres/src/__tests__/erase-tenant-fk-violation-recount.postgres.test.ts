@@ -3,15 +3,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `MemoryStore.eraseTenant`（PR #1444、ADR 0383）は、削除の最中に外部キー違反（SQLSTATE 23503）に
- * なったとき、トランザクションごとロールバックしたうえで他テナントからの参照を数え直す。
- *
- * - 数え直して1件以上なら `blocked_by_foreign_reference`（検査のあとに他テナントが参照を作った場合）。
- * - 数え直して0件なら、他テナント由来ではないので、元の例外をそのまま投げる。
- *
- * 検査と削除の間に参照を作る競合を、決まった順で起こすために、`memory_events` / `memories` の
- * BEFORE DELETE トリガ（対象のテナントの行だけ）で止める。止めている間に、テスト側が別の接続で
- * 他テナントの行を足す。トリガは、この歯が作って、終わりに必ず落とす。
+ * 検査と削除の間に参照を作る競合を決まった順で起こすため、`memory_events` / `memories` の BEFORE DELETE トリガ（対象のテナントの行だけ）で止め、
+ * 止めている間に、テスト側が別の接続で他テナントの行を足す。トリガは、この歯が作って、終わりに必ず落とす。
  *
  * ⚠ `pg_locks` はクラスタ全体の表なので、読むときは自分の DB に絞る。
  */
@@ -90,7 +83,6 @@ describe("eraseTenant は、削除の最中の外部キー違反を、他テナ�
     const victimMemory = await newMemory(pool, VICTIM, "recount-victim-1");
     await addEvent(pool, VICTIM, victimMemory);
 
-    // memory_events を消す文が、このテナントの行の削除で止まる（検査はもう終わっている）。
     await pool.query(`
       CREATE OR REPLACE FUNCTION erase_recount_gate() RETURNS trigger LANGUAGE plpgsql AS $fn$
       BEGIN
@@ -114,7 +106,6 @@ describe("eraseTenant は、削除の最中の外部キー違反を、他テナ�
       pending = store.eraseTenant({ tenantId: VICTIM }, { limit: 1000 });
       await waitUntilGateIsWaiting(pool);
 
-      // 止まっている間に、他テナントが VICTIM の記憶を指す行を足して、コミットする。
       await addEvent(pool, OTHER, victimMemory);
 
       await holder.query("SELECT pg_advisory_unlock($1)", [GATE_KEY]);
@@ -122,7 +113,6 @@ describe("eraseTenant は、削除の最中の外部キー違反を、他テナ�
 
       expect(await pending).toEqual({ kind: "blocked_by_foreign_reference", count: 1 });
 
-      // ロールバックされている: VICTIM の記憶も、その events も残っている。
       const left = await pool.query<{ n: number }>(
         `SELECT (SELECT count(*) FROM memories WHERE tenant_id = $1)::int
               + (SELECT count(*) FROM memory_events WHERE tenant_id = $1)::int AS n`,
@@ -170,7 +160,6 @@ describe("eraseTenant は、削除の最中の外部キー違反を、他テナ�
       await pool.query("DROP FUNCTION IF EXISTS erase_recount_inject()");
     }
 
-    // ロールバックされている。
     const left = await pool.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM memories WHERE tenant_id = $1",
       [NON_FOREIGN],

@@ -8,30 +8,11 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
- *
- * `memories.superseded_by_id`/`contested_with_id` は `memories(id)` への自己参照 FK
- * （`ON DELETE` 指定なし＝既定の `NO ACTION`）。`limit` で区切ったバッチをまたいで
- * 自己参照が残っていると（このバッチで削除する行を、まだ削除していない別バッチの行が
- * 指している場合）、参照される側（親）を先に消そうとした時点で FK 違反になる。
- *
- * `PostgresMemoryStore.eraseTenant` は、`memories` を削除する**前**に、このテナントの
- * `superseded_by_id`/`contested_with_id` を丸ごと（`limit` に関わらず全件）`NULL` へ
- * 書き換えることでこれを防ぐ（`memory-store.ts` の `eraseTenantBody` 参照）。
- *
- * この歯は、**わざと参照先が別バッチになるデータを作り**（`limit` を小さくする）、
- * それでも全部消し切れることを確かめる。
- *
- * ## データの作り方（自然な heap scan の順序に賭けない）
- *
- * `mem[0]`（先頭、誰も指さない）→ `mem[1].supersededById = mem[0].id` →
- * `mem[2].supersededById = mem[1].id` → … という鎖を作る。挿入順は `mem[0]`
- * が最初——`limit` で区切った削除が挿入順（多くの環境で素の heap scan に近い順序）で
- * 進むと仮定すると、`mem[0]`（親、`mem[1]` から参照されている）が最初のバッチで
- * 削除されようとし、`NULL` 化が無ければ即座に FK 違反になる。**この仮定が外れて
- * 別の順序で消えたとしても、鎖の途中のどこかで同じ形の「親が先に消される」瞬間が
- * 高い確率で起きる**（鎖の要素数ぶん、機会がある）——`limit: 1` で全要素数ぶん
- * 呼び出すことで、この機会を最大化してある。
+ * わざと参照先が別バッチになるデータを作る（`limit` を小さくする）。`mem[0]`（誰も指さない）→ `mem[1].supersededById = mem[0].id` →
+ * `mem[2].supersededById = mem[1].id` → … という鎖で、挿入順は `mem[0]` が最初。`limit` で区切った削除が挿入順に進むと仮定すると、
+ * `mem[0]`（`mem[1]` から参照されている親）が最初のバッチで削除されようとし、`NULL` 化が無ければ即座に FK 違反になる。
+ * この仮定が外れて別の順序で消えても、鎖の途中のどこかで同じ形の「親が先に消される」瞬間が起きる。
+ * `limit: 1` で全要素数ぶん呼び出すことで、この機会を最大化してある。
  */
 
 afterAll(async () => {
@@ -79,7 +60,6 @@ describe("自己参照がバッチ境界をまたいでも eraseTenant は全部
       ids.push(memory.id);
     }
 
-    // 前提の確認: 鎖が実際に張られている（先頭以外は非 null の superseded_by_id を持つ）。
     for (let i = 1; i < CHAIN_LENGTH; i++) {
       const memory = await memoryStore.get(ctx, ids[i]! as never);
       expect(memory?.supersededById).toBe(ids[i - 1]);
@@ -96,7 +76,6 @@ describe("自己参照がバッチ境界をまたいでも eraseTenant は全部
     let guard = 0;
     while (outcome.kind === "executed" && outcome.reachedLimit) {
       guard += 1;
-      // CHAIN_LENGTH 回の呼び出しで消し切れるはず——大きく超えたら無限ループを疑う。
       expect(guard).toBeLessThan(CHAIN_LENGTH * 3);
       outcome = await eraseTenant(ctx, deps, { confirmTenantId: T, limit: 1 });
     }
@@ -154,8 +133,6 @@ describe("自己参照がバッチ境界をまたいでも eraseTenant は全部
       decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
       embeddingStatus: "pending",
     });
-    // `markContestedPair?` を直呼びして、相互参照 + status='contested' を作る
-    // （`createMemory` の時点では相手がまだ確定していない、という通常の作られ方に揃える）。
     const eventFor = (memoryId: string) => ({
       tenantId: T,
       memoryId: memoryId as never,

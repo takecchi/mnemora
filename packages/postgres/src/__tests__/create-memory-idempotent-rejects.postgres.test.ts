@@ -6,13 +6,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `createMemory`・`createMemoryWithOutbox` に、冪等の鍵（観測・抽出器の版・contentHash）が同じ既存の行が
- * 在っても、Postgres は書けない値（型の列挙に無い値・NUL・Invalid Date・値域の外）を拒む——`INSERT ... ON
- * CONFLICT DO NOTHING` は、衝突を見る前に行の値を型に変換し CHECK 制約を当てるためである。testkit の fixture も
- * 同じく拒み、既存の行を返さない。
- *
- * 【実測 2026-09-27】以前は testkit の fixture が、既存の行が在るときは値を確かめずにそれを返していた
- * （下の13の形すべて。Postgres は `23514`・`22021`・`22P05`・`22007`・`22003` で拒んだ）。
+ * `INSERT ... ON CONFLICT DO NOTHING` は衝突を見る前に行の値を型に変換し CHECK 制約を当てるので、冪等の鍵が同じ既存の行が在っても
+ * Postgres は書けない値（型の列挙に無い値・NUL・Invalid Date・値域の外）を拒む。testkit の fixture も同じく拒み、既存の行を返さない。
  */
 
 const KITS: Array<[string, () => Promise<MemoryStore>]> = [
