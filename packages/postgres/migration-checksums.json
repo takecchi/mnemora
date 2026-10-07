@@ -32,6 +32,8 @@
     "0029_memories_claim_predicates_index.sql": "47e76ebded24b1907f59c7e4e297df9f773bc4201570bb2aec28da77b7040b60",
     "0030_recalls_digest_band_index.sql": "631e33c8ac002ddb74ba68fc94238864e907886c07158831628099b67f643cb8",
     "0031_memory_labels_label_id_index.sql": "a31663bc66823e4d8004b754fb40161593d8ecff651356bcbed3e4595fb83a00",
-    "0032_purge_indexes.sql": "d8004fe3812f276c816d7f3a93c07258d95436865a0468646b3c3b435a9752d0"
+    "0032_purge_indexes.sql": "d8004fe3812f276c816d7f3a93c07258d95436865a0468646b3c3b435a9752d0",
+    "0033_provenance_kind_present.sql": "19606c112af14787c620dc0b769a40bbed3e6171b03b02c44ac3e2432ab96b7d",
+    "0034_provenance_kind_present_validate.sql": "69c30f1d48270e014fab758bca674b2102efebdc3fdb2b89a1c7be3665966cd9"
   }
 }

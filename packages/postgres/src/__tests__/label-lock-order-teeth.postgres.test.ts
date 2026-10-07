@@ -519,3 +519,41 @@ describe("purge・scrub の先取りの強さ（FOR SHARE への揺れ）", () =
     60_000,
   );
 });
+
+// 上の A は語彙が対象の記憶にしか付いていないので、絞りを広げても見えない。別の生きた記憶に付いたラベルを置いて確かめる。
+describe("purge・scrub の先取りは、他の記憶に付いたラベルの行を掴まない", () => {
+  const database = "mnemora_label_lock_teeth_bystander";
+  let env: Env | { skip: string } | undefined;
+
+  beforeAll(async () => {
+    env = await createEnv(database, false);
+  }, 60_000);
+  afterAll(async () => {
+    await destroyEnv(env, database);
+    if (adminPool) {
+      await adminPool.end();
+      adminPool = undefined;
+    }
+  }, 60_000);
+  beforeEach(async () => {
+    if (env && "client" in env) await reset(env);
+  });
+
+  it.each(["purge", "scrub"] as const)(
+    "%s: 別の記憶に付いたラベル（名前順で先頭）は掴まれず、そこへの書き込みも塞がれない",
+    async (path) => {
+      const e = env as Env;
+      const ctx: Ctx = { tenantId: "adr1718-c" };
+      await seedLabels(e, ctx.tenantId, NAMES);
+      const run = await preparePath(e, path, ctx, NAMES, path);
+      await e.store.createMemory(ctx, newMemory(ctx, `${path}-bystander`, [UNRELATED]));
+      await installCounter(e);
+      const seen = await observeWhileBlocked(e, ctx, "adr1718-c-other", SORTED[1]!, run);
+      await removeTriggers(e);
+      expect(seen.locked).toEqual(SORTED.slice(0, 2));
+      expect(seen.unrelatedWriteCode).toBeUndefined();
+      expect(failureCodes([seen.outcome])).toEqual([]);
+    },
+    60_000,
+  );
+});
