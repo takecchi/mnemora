@@ -18,16 +18,14 @@ import {
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
 /**
- * マネージャー報告の問題そのものを検査する: 段1（索引が効くフィルタ + ANN 検索）が
- * `subject` で絞っていないと、大規模テナントで小さい subject を引くとき、
+ * 段1（索引が効くフィルタ + ANN 検索）が `subject` で絞っていないと、大規模テナントで小さい subject を引くとき、
  * over-fetch の窓（k' = limit * overFetchFactor）がテナント全体の近傍で埋まってしまい、
  * その subject の記憶が1件も窓に入らず recall から黙って落ちうる
  * （packages/core/src/recall-runtime.ts 段1のコメント参照）。
  *
  * ⚠ クエリ文字列を記憶の本文と完全一致させて距離0にする手はここでは使えない
- * ——距離0なら subject で絞らなくても全体の1位になるので、修正前でも緑になってしまい
- * この歯が噛まない。そのためベクトルを直接指定し、狙った順位を作る
- * （vector-search-hnsw.test.ts の作法に倣う）。
+ * ——距離0なら subject で絞らなくても全体の1位になるので、押し下げが無くても緑になってしまい
+ * この歯が噛まない。そのためベクトルを直接指定し、狙った順位を作る。
  */
 
 const TENANT = "subject-filter-tenant";
@@ -68,7 +66,7 @@ async function seedCrowdAndSmall(
     smallIds.push(memory.id);
   }
 
-  // ANALYZE: 統計情報が無い/古いと HNSW 索引が選ばれないことがある（vector-search-hnsw.test.ts と同じ理由）。
+  // ANALYZE: 統計情報が無い/古いと HNSW 索引が選ばれないことがある。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
 
@@ -91,7 +89,7 @@ describe("PostgresVectorStore.search — subject フィルタが段1に効くこ
     const ctx: Ctx = { tenantId: TENANT };
     const { smallIds } = await seedCrowdAndSmall(memoryStore, vectorStore, ctx, pool);
 
-    // 修正前の段1呼び出しと同じ形（subjectId を渡さない）。
+    // `subjectId` を渡さない形。
     const withoutSubjectFilter = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
       limit: LIMIT,
       filter: { tenantId: TENANT, status: ["active", "contested"] },
@@ -101,7 +99,7 @@ describe("PostgresVectorStore.search — subject フィルタが段1に効くこ
     const smallHitsWithoutFilter = withoutSubjectFilter.filter((h) => smallIdSet.has(h.memoryId));
     expect(smallHitsWithoutFilter).toHaveLength(0);
 
-    // 修正後: subjectId: "small" を渡す。
+    // `subjectId: "small"` を渡す。
     const withSubjectFilter = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, QUERY_VECTOR, {
       limit: LIMIT,
       filter: { tenantId: TENANT, status: ["active", "contested"], subjectId: "small" },
@@ -114,38 +112,17 @@ describe("PostgresVectorStore.search — subject フィルタが段1に効くこ
 /**
  * 歯B（EXPLAIN）: `m.subject_id = $x` を足した形の段1クエリで、プランナが実際に何を選ぶか。
  *
- * **⚠ この歯の当初の期待（「HNSW 索引が使われる」）は、CI の実測で反証された。**
- * GitHub Actions run 34007687930（PostgreSQL 17 + pgvector、3,000行・100 subject）で
- * 実際に出たプランは以下だった:
+ * **選択性の高い等値条件（subject_id）を足すと、プランナは HNSW を捨て、
+ * 「memories を subject の索引で絞ってから、距離で並べ替える」という*厳密な*経路を選ぶ**
+ * （3,000行・100 subject）。プランナは、正しい答えを安く出せる代替経路があるなら、近似索引を使わない
+ * （`count(*) OVER ()` と同じ現象）。この歯はその経路を固定する。
  *
- * ```
- * Limit
- *   -> Sort  (Sort Key: (e.embedding <=> '...'::vector))
- *        -> Hash Join  (Hash Cond: (e.memory_id = m.id))
- *             -> Seq Scan on memory_embeddings_...  (Filter: tenant_id = ...)
- *             -> Hash
- *                  -> Index Scan using idx_memories_by_subject on memories m
- *                       Index Cond: ((tenant_id = ...) AND (subject_id = ...) AND (status = ANY (...)))
- * ```
+ * **正しさは損なわれない**（近似ではなく厳密になる。歯Aが結果の正しさを押さえている）。
+ * **⚠ ただし代償がある**: 埋め込みテーブル側が `Seq Scan` になりうる。3,000行では最安だが、
+ * テナントが大きくなればこの経路の費用はテナントの行数に比例して伸びる（この規模での実測はしていない）。
  *
- * ⟹ **選択性の高い等値条件（subject_id）を足すと、プランナは HNSW を捨て、
- * 「memories を subject の索引で絞ってから、距離で並べ替える」という*厳密な*経路を選ぶ。**
- * これは [ADR 0011](../../../../docs/decisions/0011-no-window-count-in-ann-stage.md) が
- * `count(*) OVER ()` について実測したのと同じ現象である——**プランナは、正しい答えを
- * 安く出せる代替経路があるなら、近似索引を使わない。**
- *
- * **正しさは損なわれない**（むしろ近似ではなく厳密になる。歯Aが結果の正しさを押さえている）。
- * **⚠ しかし代償がある**: 上のプランは埋め込みテーブル側を `Seq Scan` している。
- * 3,000行では最安（cost 148）だが、**テナントが大きくなればこの経路の費用は
- * テナントの行数に比例して伸びる。この規模での実測はしていない**
- * （[ADR 0023](../../../../docs/decisions/0023-subject-filter-in-ann-stage.md)
- * 「確かめていないこと」）。
- *
- * **この歯は、その実測された現実をそのまま固定する**——期待を実測に合わせて書き換えたのであって、
- * 緑にするために緩めたのではない（当初の期待は仮説であり、測って否定された）。
- * **もし将来この歯が赤くなったら、それはプランの選択が変わったということであり、
- * ADR 0023 を見直す合図である**（例: `hnsw.iterative_scan` を入れた、
- * 埋め込みテーブルに `subject_id` を複製した、など）。
+ * **もしこの歯が赤くなったら、プランの選択が変わったということであり、ADR 0023 を見直す合図である**
+ * （例: `hnsw.iterative_scan` を入れた、埋め込みテーブルに `subject_id` を複製した、など）。
  */
 const EXPLAIN_TENANT = "hnsw-subject-explain-tenant";
 const EXPLAIN_ROW_COUNT = 3000;
@@ -165,16 +142,12 @@ async function seedForExplain(
     const vector = [rand(), rand(), rand()];
     await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, vector);
   }
-  // 統計情報が無い/古いままだと、プランナが誤った行数見積もりで意図しない索引を選ぶ
-  // （vector-search-hnsw.test.ts の実測コメントと同じ理由）。
+  // 統計情報が無い/古いままだと、プランナが誤った行数見積もりで意図しない索引を選ぶ。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
 }
 
 describe("PostgresVectorStore.search — subject_id を足すとプランナが何を選ぶか（歯B、実測で確定）", () => {
-  // この2件は、同じ `seedForExplain` の表（乱数は種で固定）を EXPLAIN するだけで書かない。以前は1件ずつ
-  // `resetTestDatabase()` → `seedForExplain()` をやり直し、同じ表を2回作っていた（CI で1件あたり約6秒）。
-  // 積むのはこの describe の最初に1回だけにする——読むものは同じなので、見る範囲は変わらない。
   beforeAll(async () => {
     await resetTestDatabase();
     const { db, pool } = await getTestClient();
@@ -206,12 +179,11 @@ describe("PostgresVectorStore.search — subject_id を足すとプランナが�
     const plan = explainResult.rows
       .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
       .join("\n");
-    // 実測（run 34007687930）で確定した経路: memories を subject の索引で絞り、距離で並べ替える。
+    // 確定した経路: memories を subject の索引で絞り、距離で並べ替える。
     expect(plan).toMatch(/Index Scan using idx_memories_by_subject/);
-    // そして HNSW は使われない。これが当初の期待を反証した点であり、この歯の主張の中心。
+    // そして HNSW は使われない。これがこの歯の主張の中心。
     expect(plan).not.toMatch(/idx_memory_embeddings_hnsw/);
-    // ⚠ 埋め込み側が Seq Scan になるかは行数とプランナ次第なので、ここでは主張しない
-    //（3,000行では Seq Scan だった。大規模での費用は未実測——ADR 0023）。
+    // ⚠ 埋め込み側が Seq Scan になるかは行数とプランナ次第なので、ここでは主張しない。
   }, 120_000);
 
   it("PostgresVectorStore.search が subjectId 込みで実際に発行するクエリも、同じ厳密な経路になる", async () => {
@@ -232,12 +204,10 @@ describe("PostgresVectorStore.search — subject_id を足すとプランナが�
         }),
     );
 
-    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する。
-    // 素の pool.query だと SET LOCAL の効いていない別トランザクションでプランを
-    // 読むことになる（test-db.ts の doc コメント参照）。
+    // 本番と同じ transaction の文脈で EXPLAIN する。素の pool.query だと SET LOCAL の効いていない
+    // 別トランザクションでプランを読むことになる（test-db.ts の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
-    // 上の「再現用の等価クエリ」と同じ経路になることを、実際に発行されるクエリでも押さえる
-    //（歯Bの docstring 参照。実測 run 34007687930 で確定）。
+    // 上の「再現用の等価クエリ」と同じ経路になることを、実際に発行されるクエリでも押さえる。
     expect(plan).toMatch(/Index Scan using idx_memories_by_subject/);
     expect(plan).not.toMatch(/idx_memory_embeddings_hnsw/);
   }, 120_000);

@@ -19,34 +19,24 @@ import {
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
 /**
- * Issue #956（ADR 0343）: pgvector の cosine HNSW 索引は norm が0のベクトル
- * （ゼロベクトル）をそもそも索引へ入れない（pgvector README「Troubleshooting」、
- * 実装は `src/hnswutils.c` の `HnswFormIndexValue`/`HnswCheckNorm`）。この歯は
- * **HNSW（または、他に選べる索引が無い状態での Index Scan）が実際に選ばれている
- * 状態でも**、ゼロベクトルの候補が `search()`/`searchMany()` の結果から落ちないことを
- * 検査する。
+ * pgvector の cosine HNSW 索引は norm が0のベクトル（ゼロベクトル）をそもそも索引へ入れない。この歯は
+ * **HNSW（または、他に選べる索引が無い状態での Index Scan）が実際に選ばれている状態でも**、
+ * ゼロベクトルの候補が `search()`/`searchMany()` の結果から落ちないことを検査する。
  *
  * ⚠ **歯1（EXPLAIN）と歯2〜5（返り値）で、HNSW を選ばせる手段を変えてある。**
- * 自然な行数増加（`vector-search-hnsw.test.ts` と同じ形）だけでは、この2つを
- * **同時に**満たせないと実測で分かった:
+ * 自然な行数増加（`vector-search-hnsw.test.ts` と同じ形）だけでは、この2つを**同時に**満たせない:
  *
- * - ゼロベクトルの候補は距離が常に `NaN`（最大値扱い、ADR 0040）——`limit` が
- *   非ゼロ候補の総数より小さいと、直しても直さなくても「limit 内に入らない」
- *   （本 Issue の対象外、LIMIT の正しい切り捨て）でゼロ候補が消える。
+ * - ゼロベクトルの候補は距離が常に `NaN`（最大値扱い）——`limit` が非ゼロ候補の総数より小さいと、
+ *   「limit 内に入らない」（LIMIT の正しい切り捨て）でゼロ候補が消える。
  * - ⟹ ゼロ候補を確実に含めるには `limit` を非ゼロ候補の総数より大きくする必要がある。
  * - しかし `limit` が非ゼロ候補の総数に近づく（≒ 全件を取りたい）と、プランナは
- *   Seq Scan + 明示 Sort を選ぶほうが安いと判断する（【実測】3,000行・`limit=3010`
- *   で確認——Seq Scan なら（直す前でも）ゼロ候補を正しく返す。これは「直った」
- *   のではなく、そもそも HNSW を経由していないだけである）。
- * - 対象テナントの非ゼロ候補を少数に抑え、他テナントの行で表だけを大きくする
- *   （ADR 0284/Issue #671 と同じ形）と、その少数テナント向けの検索は
- *   `tenant_id` 一致で絞り込める主キー索引（`(tenant_id, memory_id)`）の
- *   ほうが安いとプランナが判断し、やはり HNSW を経由しない（【実測】）。
+ *   Seq Scan + 明示 Sort を選ぶほうが安いと判断する（Seq Scan なら、ゼロ候補を正しく返す。
+ *   これは「直った」のではなく、そもそも HNSW を経由していないだけである）。
+ * - 対象テナントの非ゼロ候補を少数に抑え、他テナントの行で表だけを大きくすると、その少数テナント向けの検索は
+ *   `tenant_id` 一致で絞り込める主キー索引（`(tenant_id, memory_id)`）のほうが安いとプランナが判断し、
+ *   やはり HNSW を経由しない。
  *
- * ⟹ **「HNSW（cosine 索引）を確実に経由させつつ、ゼロ候補が limit 内に収まる」
- * という組み合わせを、行数・統計の調整だけで自然に作ることはできなかった。**
- * 歯2〜5は `SET LOCAL enable_seqscan = off` / `enable_bitmapscan = off`
- * （マネージャーの指示が明示的に許した代替手段）で強制する——`search()`/
+ * ⟹ 歯2〜5は `SET LOCAL enable_seqscan = off` / `enable_bitmapscan = off` で強制する——`search()`/
  * `searchMany()` が実際に組み立てる SQL 文字列・パラメータを `captureClientQuery`
  * で捕まえ、`enable_seqscan`/`enable_bitmapscan` を切った専用の接続でそのまま
  * 再生する（`runForcedIndexOnly`、下記）。**残る唯一の道（`ORDER BY` を満たす
@@ -57,24 +47,18 @@ const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
  * `ANALYZE` してプランナに自然に選ばせる」形を保つ——**強制する前の、素の状態でも
  * 現実の規模なら HNSW が選ばれる**という前提そのものが崩れていないことの
  * 独立した確認になる。
- *
- * 🔴 **歯2〜5は、修正前（`vector_norm` の部分索引・`UNION ALL` を足す前）の
- * `vector-store.ts` では赤くなることを、`cp` で退避した旧実装に差し替えて実測済み**
- * （`docs/autonomy.md`/`AGENTS.md`「⛔ 変異を戻すのに git checkout を使わない」の作法）。
- * 赤の実際の出力は PR 本文 / ADR 0343「一次実測」に記録している。
  */
 
 const TENANT = "zero-norm-tenant";
 const HNSW_ROW_COUNT = 3000;
 
 async function analyzeTable(pool: Pool): Promise<void> {
-  // `vector-search-hnsw.test.ts` と同じ理由: ANALYZE 無しでは主キー索引が選ばれ、
-  // HNSW 索引が選ばれない（実測、同ファイルのコメント参照）。
+  // ANALYZE 無しでは主キー索引が選ばれ、HNSW 索引が選ばれない。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
 }
 
-/** 歯1（EXPLAIN で HNSW が選ばれることの確認）専用の seed。`vector-search-hnsw.test.ts` と同じ形。 */
+/** 歯1（EXPLAIN で HNSW が選ばれることの確認）専用の seed。 */
 async function seedForHnswPlanCheck(
   memoryStore: PostgresMemoryStore,
   vectorStore: PostgresVectorStore,
@@ -97,7 +81,7 @@ async function seedForHnswPlanCheck(
   await analyzeTable(pool);
 }
 
-/** 歯2〜5（返り値の正しさ）専用の、小規模な seed。`vector-store-conformance.ts` と同じ規模。 */
+/** 歯2〜5（返り値の正しさ）専用の、小規模な seed。 */
 async function seedSmall(
   memoryStore: PostgresMemoryStore,
   vectorStore: PostgresVectorStore,
@@ -127,10 +111,9 @@ async function seedSmall(
  * `captured`（`captureClientQuery` が捕まえた、`search()`/`searchMany()` が実際に
  * 発行する SQL・パラメータ）を、`enable_seqscan`/`enable_bitmapscan` を切った専用の
  * 接続で実行する——`ORDER BY` を満たす索引としては HNSW（`vector_cosine_ops`）、
- * `vector_norm(...) = 0` を満たす索引としては本 Issue が足した部分索引しか
- * 残らない状態で、実際に返る行を見る。`explainCaptured`（`test-db.ts`）と同じ形
- * （`precedingSetLocalStatements` を同じ接続・同じトランザクションで先に再生してから
- * 本体を実行する）だが、`EXPLAIN` ではなく実データを取る点が違う。
+ * `vector_norm(...) = 0` を満たす索引としては部分索引しか残らない状態で、実際に返る行を見る。
+ * `explainCaptured`（`test-db.ts`）と同じ形（`precedingSetLocalStatements` を同じ接続・同じ
+ * トランザクションで先に再生してから本体を実行する）だが、`EXPLAIN` ではなく実データを取る点が違う。
  */
 async function runForcedIndexOnly(
   pool: Pool,
@@ -239,7 +222,7 @@ describe("PostgresVectorStore.search/searchMany と HNSW（または Index Scan 
       distance: number;
     }[];
 
-    // 打ち直した SQL の行は、key ではなく `queries` の添字を持つ（Issue #1285）。
+    // 打ち直した SQL の行は、key ではなく `queries` の添字を持つ。
     for (const [index, key] of ["anchor-1", "anchor-2"].entries()) {
       const zeroRow = rows.find((r) => r.query_idx === index && r.memory_id === zeroMemoryId);
       expect(

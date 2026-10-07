@@ -7,11 +7,11 @@ import { dropTempDatabase } from "./temp-database.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * ADR 0460: `registerEmbeddingSpace` は、`max: 1` の `Pool` でも止まらずに通る。
+ * `registerEmbeddingSpace` は、`max: 1` の `Pool` でも止まらずに通る。
  *
- * 以前は、advisory lock を握った接続を `pool.connect()` で借り切ったまま、DDL を `pool.query`
- * （別の接続が要る）で撃っていた。`max: 1` だと、その `pool.query` は借り切られた接続の返却を待ち、
- * 返却は `pool.query` の完了を待つので、誰も進めずに止まった（`lock_timeout` は advisory lock の
+ * advisory lock を握った接続を `pool.connect()` で借り切ったまま、DDL を `pool.query`
+ * （別の接続が要る）で撃つと、`max: 1` ではその `pool.query` は借り切られた接続の返却を待ち、
+ * 返却は `pool.query` の完了を待つので、誰も進めずに止まる（`lock_timeout` は advisory lock の
  * 待ちにしか効かず、Pool の待ちには効かない）。`connectionTimeoutMillis` を渡していないと、止まったまま返らない。
  * この歯は `connectionTimeoutMillis` を短く付けて、止まる形を「時間切れで落ちる」に変えて見る。
  */

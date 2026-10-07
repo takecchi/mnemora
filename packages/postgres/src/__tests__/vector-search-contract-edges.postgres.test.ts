@@ -12,14 +12,10 @@ import {
 } from "./test-db.js";
 
 /**
- * `VectorStore` の TSDoc が約束する端の振る舞いを、`PostgresVectorStore.search` について縛る。振る舞いは変えていない。
+ * `VectorStore` の TSDoc が約束する端の振る舞いを、`PostgresVectorStore.search` について縛る。
  *
  * - `VectorFilter.status`: 「⚠ 空配列なら1件も通らない（`@mnemora/postgres` と testkit の fixture で同じ）」。
  * - `VectorHit.distance`: 「コサイン距離は逆向き（cosine similarity = -1）のとき最大 2 まで出る」。
- *
- * `vector-search-many-diff.postgres.test.ts` は `status: []` を `search` と `searchMany` の突き合わせにしか使って
- * おらず、0件であることは見ていない。有限でない成分のクエリは `vector-search-non-finite-query.postgres.test.ts`
- * が縛っている。conformance suite には足していない。
  */
 
 const ctx: Ctx = { tenantId: `vector-contract-edges-${randomUUID()}` };

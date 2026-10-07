@@ -10,13 +10,10 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * `tenantId` は uuid ではない任意の文字列で、store の入口で小文字にそろえるのは uuid の形の id だけ
  * （`mapping.ts` の `normalizeUuidCase`）。`tenant_id` の比較を大文字小文字を区別しないものにする
  * （`lower(tenant_id) = lower($1)` など）と、別の tenant の行が見えたり消えたりする。
- * 2026-09-28 マージ分の確かめ直しで、試験がこの約束を縛っていないことが分かった。
- * インメモリ実装の同じ検査は `packages/testkit/src/__tests__/in-memory-tenant-case-distinct.test.ts`。
  *
  * 各 `it`: (1) 綴りの違う tenant からは get・getMany・getObservation・aggregateScope・listLabels で見えない。
  * (2) 自分の tenant からは見える（「常に隠す」実装で緑にならない対照）。
  * (3) 片方の tenant の `eraseTenant` は、もう片方の行を消さない。
- * `packages/testkit` の `*-conformance.ts` には足していない（約束を足すのはオーナーの判断）。
  */
 
 const UPPER: Ctx = { tenantId: "Tenant-A" };

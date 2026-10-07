@@ -11,17 +11,16 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #1039: `timestamptz` の文字列を `Date` にする `parsePgTimestamp`（`mapping.ts`）は、
- * `+09` / `+09:00` の形の時差しか読めなかった。Postgres の既定の出力には次の形もあり、
- * `new Date()` が Invalid Date になって `get()` がそのまま返していた。
+ * `timestamptz` の文字列を `Date` にする `parsePgTimestamp`（`mapping.ts`）は、Postgres の既定の出力の
+ * 次の形も読める（読めないと `new Date()` が Invalid Date になる）:
  *
  * - 秒を含む時差（`+09:18:59`）——サーバの `TimeZone` が地方平均時（LMT）の時代を持つ
  *   地域のとき、その時代の時刻（Asia/Tokyo では 1888 年より前）
  * - 紀元前の接尾辞（`0001-06-01 00:00:00+00 BC`）
  * - 5桁以上の年（`10000-01-01 00:00:00+00`）
  *
- * `occurredAt` / `validFrom` / `validUntil` は呼び出し側の申告をそのまま受け入れる
- * （ADR 0037 決定3）。受け入れて保存した値は、同じ値として読めなければならない。
+ * `occurredAt` / `validFrom` / `validUntil` は呼び出し側の申告をそのまま受け入れる。
+ * 受け入れて保存した値は、同じ値として読めなければならない。
  */
 const SERVER_TIME_ZONES = ["UTC", "Asia/Tokyo", "America/New_York"] as const;
 
