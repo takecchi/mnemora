@@ -1120,6 +1120,6 @@ export async function runAnalyzeMemories(
     assertSafeSchemaName(schema);
   }
   const table = qualify(schema, "memories");
-  await pool.query(`ANALYZE ${table}`);
+  await pool.query(`ANALYZE ${table}, ${qualify(schema, "memory_events")}`);
   return { table };
 }
