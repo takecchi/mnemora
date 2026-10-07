@@ -4025,9 +4025,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       (clock === "wall" ? undefined : await readActivitySeq(deps.tenantSettingsStore, ctx));
     const usesSubjectActivityCounters =
       opts.usesSubjectActivityCounters ??
-      (clock === "wall"
-        ? false
-        : await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx));
+      (await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx));
     const result = await archiveDecayed.call(deps.memoryStore, ctx, {
       ...opts,
       clock,
