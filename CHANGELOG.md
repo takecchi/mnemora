@@ -39,13 +39,23 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ---
 
-## [1.3.0] - 未リリース
+## [1.4.0] - 未リリース
 
-**この節は `v1.2.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.2.1` になりうる。版を決めるのはオーナーである。起点は `v1.2.0` の tag が指す commit であり、それより後に `main` へ入った PR がこの節の対象になる。この節は `d49c46c`..`3c90e3b7`（棚卸しした時点の `main` の先端）を棚卸し済みである（基準は `[1.2.0]` の追記1と同じ。下の追記2）。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+**この節は `v1.3.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.3.1` になりうる。版を決めるのはオーナーである。起点は `v1.3.0` の tag が指す commit であり（tag の sha の正本は GitHub Release `v1.3.0`）、それより後に `main` へ入った PR がこの節の対象になる。まだ何も棚卸ししていない。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+## [1.3.0] - 2026-10-07
+
+**この節は `v1.2.0` からの差分を対象とする。****版は `1.3.0` である**（オーナーの指示、2026-10-07）。`v1.3.0` の tag は `d811241f`（PR #1832）に打つ（tag の sha の正本は GitHub Release `v1.3.0`）。（⚠ 2026-10-07 訂正: ここまでこの行は「⛔ 版は仮である——破壊的変更が無ければ `1.2.1` になりうる。版を決めるのはオーナーである」と書いていた）起点は `v1.2.0` の tag が指す commit であり、それより後に `main` へ入った PR がこの節の対象になる。この節は `d49c46c`..`3c90e3b7`（棚卸しした時点の `main` の先端）を棚卸し済みである（基準は `[1.2.0]` の追記1と同じ。下の追記2）。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 ⚠ **2026-10-02 追記**: 下の項目は、`v1.2.0` の区切る点（`d49c46c`）より後に着地した PR（#1610・#1611・#1612）が、まだ未リリースだった `[1.2.0]` 節へ足したものを、この節へ移した（本文は書き換えていない）。`v1.2.0` には入っていない。migration の項目57・58 も同じ理由で `docs/migration-v1.md` の「v1.2.0 → 次の版」へ移した。
 
 ⚠ **2026-10-02 追記2（棚卸し。`d49c46c`..`3c90e3b7` まで数えた）**: `d49c46c` から `3c90e3b7` までに `main` へ入った PR を first-parent で全部当てた。基準は `[1.2.0]` の追記1と同じ（出荷されるファイル〔`packages/*/src` のテスト以外・`packages/*/migrations`・`packages/*/package.json`・`packages/*/README.md`〕に触れた PR を、PR 番号・ADR 番号で節の項目と突き合わせ、当たらなかったものを1本ずつ差分を読んで分けた。コメント・TSDoc・README だけの PR と、テスト・文書だけの PR は、慣例どおり項目にしていない）。これらの PR のうち、#1620（ADR 0507）・#1621（ADR 0503）・#1624（ADR 0527）は、着地した時点で自分で `[1.3.0]` に足していた。**#1615（ADR 0521）・#1616（ADR 0525）は、`v1.2.0` の区切る点より後に着地したのに `[1.2.0]` 節へ項目を足していた**（`v1.2.0` は `d49c46c` で tag 済み、Release は公開済み）ので、下の `### Changed`（ADR 0525）と `### Fixed`（ADR 0521）へ移した（本文は書き換えていない）。`[1.2.0]` の `### Breaking` の項目56（ADR 0498、PR #1606）に ADR 0525 が足していた注記は、出荷された本文（`@mnemora/bullmq` は `resolveConcurrency` と同じ素の `Error`）に戻した。ADR 0525 の内容は、下の `### Changed` の項目に在る。migration の移し先は `docs/migration-v1.md` の「v1.2.0 → 次の版」の 🟡。この判断はクローンの判断であり、オーナーの判断ではない（ADR 0534）。
+
+⚠ **2026-10-07 追記3（2回目の棚卸し。`3c90e3b7`..`d811241f` まで数えた）**: `3c90e3b7` から `d811241f`（PR #1832）までに `main` へ入った PR を first-parent で全部当てた。基準は追記2と同じ（出荷されるファイル〔`packages/*/src` のテスト以外・`packages/*/migrations`・`packages/*/package.json`・`packages/*/README.md`〕に触れた PR を、PR 番号・Issue 番号・ADR 番号で節の項目と突き合わせ、当たらなかったものを1本ずつ差分を読んで分けた）。fix・feat の PR は、どれも着地した時点で自分で項目を足していた（PR 番号でなく Issue 番号・ADR 番号でだけ受けているものを含む）。当たらなかったもののうち、差分がコメント・TSDoc・README だけの PR（「文書とコードのずれを横に掃く」の各弾、コメントの経緯の物語を縮める `chore` の各 PR など）は、慣例どおり項目にしていない。この棚卸しで直したもの:
+- **項目の無かった変更を1件足した**: `test:` を名乗る PR #1712（ADR 0600）・#1715・#1717（ADR 0605）・#1760（ADR 0659）が、`@mnemora/testkit` の conformance suite に `it` を足していた。ADR 0546 の作法（足す約束は Breaking に数える）に揃えて、下の `### Breaking` に1項目として足した（migration の項目71）。
+- **正の対照**: `git diff v1.2.0 d811241f -- scripts/__snapshots__/public-api/` は追加行だけで、削除・狭まった型・新しく必須になった欄は無かった。増えた export・欄（`findCrossTenantReferences`・`ObserveResend`・`assertWellFormedNewMemory`・`acceptLlmSubjectIdWithoutCandidates`・`lockDuration`・`completedJobsToKeep`・conformance suite の新しい任意のフラグ）は、どれもこの節の項目が受けている。
+- **マイグレーション**: `v1.2.0` から増えていない（`git diff --name-only v1.2.0 d811241f -- packages/postgres/migrations` が空）。
+この判断はクローンの判断であり、オーナーの判断ではない。
 
 ### Breaking
 
@@ -170,6 +180,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目69。DB マイグレーションは無い。
 
 - **`@mnemora/local-embedding` の `LocalEmbeddingProvider` は、`retry.attempts` に `Infinity`・`-Infinity` を渡すと、構築時に `RangeError` を投げるようになった**（[Issue #1785](https://github.com/takecchi/mnemora/issues/1785)、[ADR 0498](./docs/decisions/0498-constructor-config-checks.md) の追記）。以前は `+Infinity` が成功するまで無限に再試行し（失敗が続くと `warmup()`・`embed()` が返らず、abort でも読み込みは止まらない）、`-Infinity` は1回に丸められていた。`NaN`・0以下は今までどおり1回に丸め、小数は今までどおり切り捨てた回数だけ試す（`2.5` は2回）。⛔ 壊れるのは `±Infinity` を渡している利用者だけ。クローン miku の判断であり、オーナーの判断ではない。
+
+- **conformance suite に約束を足した——`eraseTenant` の他テナントの自己参照・`dryRun`・`limit`・冪等キー、`VectorStore.deleteAcrossSpaces` が渡していない id を残すこと、`OutboxStore.complete`・`fail` が `timestamptz` の範囲内の極端な `opts.at` を通すこと、`aggregateScope` の `scopeAggregate: 'skip'`**（[PR #1712](https://github.com/takecchi/mnemora/pull/1712)・[ADR 0600](./docs/decisions/0600-erase-tenant-recheck-teeth.md)、[PR #1715](https://github.com/takecchi/mnemora/pull/1715)、[PR #1717](https://github.com/takecchi/mnemora/pull/1717)・[ADR 0605](./docs/decisions/0605-outbox-complete-fail-at-bounds-teeth.md)、[PR #1760](https://github.com/takecchi/mnemora/pull/1760)・[ADR 0659](./docs/decisions/0659-merged-0929-recheck-followups.md)。どれも `test:` を名乗る PR で、着地時に項目を足していなかった。ADR 0546 の作法どおり、足した約束は Breaking に数える）。`@mnemora/postgres` と `@mnemora/testkit` の fixture は変わっておらず、どれも緑。
+  - **`supportsEraseTenant: true` の枝（新しく赤になりうる）**: `describeMemoryStoreConformance` に、`eraseTenant` が他テナントの自己参照（`supersededById`・`contestedWithId`）を書き換えないこと、`dryRun: true` で自己参照を書き換えないこと、1回の呼び出しで `limit` を超えて消さないこと、他テナントの冪等キーを消さないこと、の `it` が増えた。`describeVectorStoreConformance` に、`eraseTenant` の `limit` は全 space の合計に対する上限であること、の `it` が増えた。
+  - **無条件の追加（新しく赤になりうる）**: `describeVectorStoreConformance` に「`deleteAcrossSpaces` は渡していない `memoryId` の行を、同じテナント・同じ space でも残す」、`describeOutboxStoreConformance` に「`complete`・`fail` は `opts.at` が `timestamptz` の範囲内（西暦10000年・紀元前100年など）なら例外にせず、その値を書く」の `it` が増えた。
+  - **`countScopeAggregateQueries` を渡したときの追加**: `describeMemoryStoreConformance` に「`scopeAggregate: 'skip'` は目次帯ありでも件数集計のクエリを発行しない」の `it` が増えた。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目71。DB マイグレーションは無い。
 
 ### Added
 
