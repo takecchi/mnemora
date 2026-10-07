@@ -43,7 +43,6 @@ describe("clopperPearsonUpperBound", () => {
     const ub = clopperPearsonUpperBound(0, 59, 0.05);
     const closed = 1 - 0.05 ** (1 / 59);
     expect(ub).toBeCloseTo(closed, 8);
-    // 「赤が0件のとき上限が5%前後になる」の実測確認。
     expect(ub).toBeGreaterThan(0.04);
     expect(ub).toBeLessThan(0.055);
   });
