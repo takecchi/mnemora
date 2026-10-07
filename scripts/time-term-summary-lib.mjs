@@ -1,45 +1,14 @@
 /**
- * `scripts/time-term-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる CLI)の
- * 純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/retrieval-quality-summary-lib.mjs`/`scripts/identifier-probe-summary-lib.mjs`/
- * `scripts/consolidation-cost-summary-lib.mjs` と同じ分担・同じ理由(Issue #217)。
+ * 純関数の側。ファイル I/O・`process.argv`・`process.exit` を持たない。
  *
- * `examples/chat` の `time-term` サブコマンド(`MNEMORA_TIME_TERM_JSON` が吐く JSON、
- * `examples/chat/src/time-term-json.ts` の `TimeTermRunJson`)を Markdown へ変換する。
+ * ⛔ 門にしない。標本は8 probe で、閾値判定に足る母数ではない(ADR 0088 §2.1、ADR 0033 §3)。
+ * 非0にするのは入力が壊れているときだけ。
  *
- * ## 何を測っているか(ADR 0058)
+ * 🔴 `freshnessRatio`/`decayRatio`/`totalRatio` は基準値と比べない。実行ごとの壁時計時間に依存する連続値で、
+ * 厳密等価では毎回「相違あり」になる(ADR 0088 §2、§3-3)。比べるのは離散値の `outcome`/`totalInScope`/`omittedKinds` だけ。
+ * 連続値は JSON にそのまま残す(丸めない)。
  *
- * 8 probe は「内容は同一・`occurredAt`/`recordedAt` だけ違う」ペアであり、この bench が
- * 出すのは probe ごとの `outcome`(`newer-ranked-higher` 等)——**MRR/hit@k ではない**。
- * ⟹ この要約が比べるのも `outcome`/`totalInScope`/`omittedKinds` という**離散値**であり、
- * `retrieval-quality-summary-lib.mjs`/`identifier-probe-summary-lib.mjs` の MRR/hit@k とは
- * 種類が違う。
- *
- * ## ⛔ 門にしない理由
- *
- * [ADR 0088](../docs/decisions/0088-retrieval-quality-measured-in-ci.md) §2.1 と同じ理由——
- * 標本は8 probe であり、[ADR 0033](../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
- * §3 の規律(標本7件からは失敗率も成功率も統計的に主張しない)にそのまま照らせば、
- * 閾値判定に足る母数ではない。非0になるのは**入力そのものが壊れているとき**だけである。
- *
- * ## 🔴 `freshnessRatio`/`decayRatio`/`totalRatio` は基準値と比べない
- *
- * これらは実行ごとの壁時計時間(occurredAt/recordedAt を計算した瞬間から `recall()` が
- * 実際の `now` を読む瞬間までの実経過時間)にわずかに依存する連続値であり、
- * [ADR 0088](../docs/decisions/0088-retrieval-quality-measured-in-ci.md) §2 が
- * `retrieval-quality` の `decay`/`freshness` について実測したのと同じ種類の揺れ
- * (`total` の6桁目が動く)を持つ——**厳密等価では毎回「相違あり」になり、
- * ADR 0088 §3-3「常に同じ量を出す観測口は読まれない」を作り直すことになる。**
- * ⟹ 比べるのは`outcome`(離散・run 間で安定)/`totalInScope`/`omittedKinds` だけにする。
- * 連続値は JSON にはそのまま残す(丸めない)——見比べたい人は artifact を見ればよい。
- *
- * ## 基準値ファイル(2026-09)
- *
- * このスクリプトを足した PR では、`examples/chat/time-term-baseline.json` を作らなかった——値を
- * 捏造しないためである。予告どおり、PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた
- * （CI の time-term の段は `--baseline` でこれを渡している）。`--baseline` を渡さなければ
- * 差分節そのものを出さない(`buildSummaryMarkdown` 参照。`retrieval-quality-summary.mjs`/
- * `identifier-probe-summary.mjs` と同じく `--baseline` は任意)。
+ * `--baseline` は任意。渡さなければ差分節そのものを出さない。
  */
 
 const KNOWN_OUTCOMES = [
@@ -55,8 +24,6 @@ const KNOWN_OUTCOMES = [
 const REQUIRED_TOP_STRING_FIELDS = ["armLabel", "llmMode", "embeddingMode"];
 
 /**
- * 1 probe のオブジェクトが必須項目をすべて正しい型で持っているかを検査する。
- *
  * @param {unknown} probe
  * @param {string} label
  * @returns {string[]}
@@ -82,11 +49,7 @@ function findProbeFieldProblems(probe, label) {
 }
 
 /**
- * `MNEMORA_TIME_TERM_JSON` が吐いた JSON(パース済み)の形を検査する。
- *
- * **壊れている、と判定する条件はここに限定する**——`probes` の連続値欄
- * (`similarityGapWithinPair` 等)は `number | null` のどちらでもよく、型が
- * 崩れていても致命傷とは見なさない(この要約が使わない欄のため)。
+ * ⛔ 「壊れている」とする条件はここに限る。`probes` の連続値欄は、型が崩れていても致命傷と見なさない(要約が使わない欄のため)。
  *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
@@ -126,13 +89,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(パース済み)の形を検査する。実測と同じ必須項目を、`probes` 配列の
- * 各要素に要求する。
- *
- * **⚠ この関数は、まだコミットされている基準値ファイルが無い時点で書いている。**
- * `--baseline` が渡されたときだけ呼ばれる(`time-term-summary.mjs` 参照)——
- * 基準値ファイルが無くてもこのスクリプト自体は動く。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { probes: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -165,7 +121,9 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {{ probes: Record<string, unknown>[] }} */ (data) };
 }
 
-/** 比べる項目。連続値(`*Ratio`/`*GapWithinPair`)は含めない(冒頭 docstring 参照)。 */
+/**
+ * 比べる項目。連続値(`*Ratio`/`*GapWithinPair`)は含めない(冒頭参照)。
+ */
 const DIFF_FIELDS = ["outcome", "totalInScope", "omittedKinds"];
 
 /**
@@ -180,8 +138,6 @@ function readDiffField(probe, field) {
 }
 
 /**
- * 実測の1 probe と、対応する基準値の1 probe(無ければ `undefined`)を比べる。
- *
  * @param {string} probeId
  * @param {Record<string, any>} measuredProbe
  * @param {Record<string, any> | undefined} baselineProbe
@@ -202,8 +158,6 @@ export function diffProbe(probeId, measuredProbe, baselineProbe) {
 }
 
 /**
- * 基準値との差分節。**一致なら1行、違うときだけ展開する**(ADR 0088 §3-3)。
- *
  * @param {Record<string, any>} measured
  * @param {{ probes: Record<string, unknown>[] }} baseline
  */
@@ -255,7 +209,6 @@ function buildDiffSection(measured, baseline) {
   return lines.join("\n");
 }
 
-/** `newer-ranked-higher` のような outcome を1行にする。 */
 function buildProbeRow(probe) {
   return (
     `| ${probe.probeId} | ${probe.outcome} | ${probe.totalInScope} | ` +
@@ -263,16 +216,7 @@ function buildProbeRow(probe) {
   );
 }
 
-/**
- * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
- * **呼び出し側は必ず validate 済みの値を渡すこと**
- * (`retrieval-quality-summary-lib.mjs`/`identifier-probe-summary-lib.mjs` と同じ分担)。
- *
- * `baseline` は任意(`--baseline` を渡さなければ差分節そのものを出さない
- * ——`--baseline` は任意であり、基準値ファイルが無くても動く。冒頭 docstring 参照)。
- *
- * @param {{ measured: Record<string, any>, baseline?: { probes: Record<string, unknown>[] } }} input
- */
+/** @param {{ measured: Record<string, any>, baseline?: { probes: Record<string, unknown>[] } }} input */
 export function buildSummaryMarkdown({ measured, baseline }) {
   const lines = [
     "# time-term(ADR 0058 / Issue #217): freshness/decay が順位を動かすかの実測",
