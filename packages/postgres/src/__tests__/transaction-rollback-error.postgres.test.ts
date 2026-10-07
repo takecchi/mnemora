@@ -181,7 +181,7 @@ describe("db.transaction(): rollback が失敗しても元のエラーを投げ�
       error: new Error("INJECTED: rollback failure"),
       times: 1,
     });
-    let whileBorrowed: Array<(...args: unknown[]) => void> = [];
+    let whileBorrowed: ReturnType<NonNullable<typeof physical>["listeners"]> = [];
     try {
       await client.db
         .transaction(async () => {
