@@ -14,16 +14,12 @@ import {
 } from "./test-db.js";
 
 /**
- * `taxonomy_mode = 'strict'` のテナントで、`recall({ labels })` を本物の Postgres に対して
- * 端から端まで走らせる（Issue #201 PR-B、ADR 0323「決定2」訂正、docs/memory-model.md §8）。
+ * `taxonomy_mode = 'strict'` のテナントで、`recall({ labels })` を本物の Postgres に対して端から端まで走らせる。
  *
- * core の `recall-taxonomy-filter.test.ts` が Fake で押さえている約束——strict では
- * `registered` のラベルだけが絞り込みに参加し、`proposed` だけを渡すと「何にも一致しない」
- * 絞り込みになる。落ちた分は `filtered(condition: 'taxonomy')` として exact に数え、
- * `totalInScope` から除く——を、`PostgresTenantSettingsStore.getTaxonomyMode` と
- * `PostgresMemoryStore.listLabels`/`registerLabel` を通した実際の経路で確かめる。
- * 段1（ANN・語彙の両チャンネル）と段5（`aggregateScope`・目次帯）が同じ解決済みの
- * `labels` を見ていることも、ここで同時に見る。
+ * core の `recall-taxonomy-filter.test.ts` が Fake で押さえている約束（strict では `registered` のラベルだけが絞り込みに参加し、
+ * `proposed` だけを渡すと「何にも一致しない」絞り込みになる。落ちた分は `filtered(condition: 'taxonomy')` として exact に数え、`totalInScope` から除く）を、
+ * `PostgresTenantSettingsStore.getTaxonomyMode` と `PostgresMemoryStore.listLabels`/`registerLabel` を通した実際の経路で確かめる。
+ * 段1（ANN・語彙の両チャンネル）と段5（`aggregateScope`・目次帯）が同じ解決済みの `labels` を見ていることも、ここで同時に見る。
  */
 
 const TENANT = "recall-taxonomy-strict-tenant";
@@ -67,8 +63,7 @@ async function setup(mode: "open" | "strict") {
     llmProvider: throwingLlm,
     embeddingProvider,
     hashContent: (content: string) => `sha256(${content})`,
-    // buildNewMemoryFixture の既定 recordedAt（2026-01-01）に固定する
-    // （`recall.postgres.test.ts` と同じ理由——実時計だと decay で below_threshold に化ける）。
+    // buildNewMemoryFixture の既定 recordedAt（2026-01-01）に固定する（実時計だと decay で below_threshold に化ける）。
     clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
   });
   const make = async (contentHash: string, tags: string[]) => {

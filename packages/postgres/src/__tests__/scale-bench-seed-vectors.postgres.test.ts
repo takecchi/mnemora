@@ -11,9 +11,8 @@ const { createScaleDatabase, teardownScaleDatabase, seedMemories, seedVectors } 
   await import("../bench/scale-bench.js");
 
 /**
- * Issue #1005: `seedVectors` の `ARRAY(SELECT random() ...)` が外側の行を参照して
- * いないと、PostgreSQL はそれを InitPlan として1回だけ評価し、全行に同じベクトルを
- * 入れる。行ごとに別のベクトルが入ることを見る。
+ * `seedVectors` の `ARRAY(SELECT random() ...)` が外側の行を参照していないと、PostgreSQL はそれを InitPlan として1回だけ評価し、全行に同じベクトルを入れる。
+ * 行ごとに別のベクトルが入ることを見る。
  */
 describe("scale-bench: seedVectors は行ごとに別のベクトルを入れる（Issue #1005、本物の Postgres）", () => {
   const database = "mnemora_scale_bench_seed_vectors_test";

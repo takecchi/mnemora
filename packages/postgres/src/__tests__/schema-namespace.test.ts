@@ -23,18 +23,13 @@ import {
 } from "../vector-space.js";
 
 /**
- * `schema-namespace.ts` とそこに乗る `migrate.ts` / `vector-space.ts` / `client.ts` の
- * 分岐を、**DB 無しで**検査する歯。
+ * `schema-namespace.ts` とそこに乗る `migrate.ts` / `vector-space.ts` / `client.ts` の分岐を、DB 無しで検査する歯。
  *
- * ⚠ DB を要する検査（実際に `runMigrations` / `registerEmbeddingSpace` を専用スキーマへ
- * 通す・`0001_init.sql` が本当に流れる・`search_path` が DML に効くことを見る等）は
- * **ここには書かない。**それは `dedicated-schema.postgres.test.ts` が持つ。
- * このファイルが測るのは、DB を持たない環境でも走る純関数と設定の組み立てだけである。
+ * ⚠ DB を要する検査（実際に `runMigrations` / `registerEmbeddingSpace` を専用スキーマへ通す・`0001_init.sql` が本当に流れる・`search_path` が DML に効くことを見る等）はここには書かない。
+ * それは `dedicated-schema.postgres.test.ts` が持つ。このファイルが測るのは、DB を持たない環境でも走る純関数と設定の組み立てだけである。
  *
- * ⚠ **この分割は「片方が緑なら他方も正しい」を意味しない。**ここの歯は
- * `qualify` が正しい**文字列**を作ることまでしか見ていない——その文字列を
- * PostgreSQL が期待どおりに解釈するかは、`dedicated-schema.postgres.test.ts` が
- * 本物の DB に対してしか測れない。
+ * ⚠ この分割は「片方が緑なら他方も正しい」を意味しない。ここの歯は `qualify` が正しい文字列を作ることまでしか見ていない。
+ * その文字列を PostgreSQL が期待どおりに解釈するかは、`dedicated-schema.postgres.test.ts` が本物の DB に対してしか測れない。
  */
 
 describe("qualify / qualifiedLiteral", () => {
@@ -133,12 +128,10 @@ describe("deriveAdvisoryLockKey", () => {
 
 describe("REQUIRED_EXTENSIONS と migrations/*.sql の突き合わせ", () => {
   it("REQUIRED_EXTENSIONS の集合は migrations/*.sql の CREATE EXTENSION 行の集合と一致する", () => {
-    // フィクスチャを手作りしない——実ファイルを読む（架空の世界を測らないため）。
-    // 抽出規則（正規表現）は `../migrate.js` の `matchCreateExtensionLines` を呼ぶ
-    // ——ここで独自の正規表現を書き写さない。`extensionMode: "verify"`
-    // （`stripCreateExtensionStatements`、ADR 0093）も同じ関数を土台にしており、
-    // 書き写すと片方だけ直して他方を直し忘れるということが起き得るため
-    // （`assertSafeSchemaName` の doc と同じ理由）。
+    // フィクスチャを手作りしない。実ファイルを読む（架空の世界を測らないため）。
+    // 抽出規則（正規表現）は `../migrate.js` の `matchCreateExtensionLines` を呼ぶ。ここで独自の正規表現を書き写さない。
+    // `extensionMode: "verify"`（`stripCreateExtensionStatements`）も同じ関数を土台にしており、
+    // 書き写すと片方だけ直して他方を直し忘れるということが起き得るため（`assertSafeSchemaName` の doc と同じ理由）。
     const files = readdirSync(DEFAULT_MIGRATIONS_DIR).filter((name) => name.endsWith(".sql"));
     const found = new Set<string>();
     for (const file of files) {
