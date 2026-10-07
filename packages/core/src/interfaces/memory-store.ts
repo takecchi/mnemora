@@ -1589,7 +1589,6 @@ export interface MemoryStore {
    * 候補ごとの巻き戻し・`dropped` の対象ではなく、**そのまま投げる**（全候補が落ちたときの例外とも別）。
    * 空配列・省略時は見直しを行わない。`@mnemora/postgres` は同一トランザクションの `SELECT … FOR UPDATE` で実装し、
    * `packages/testkit` の `InMemoryMemoryStore` は `createMemoryWithOutbox` と同じく**実装しない**（渡しても無視）。
-   * このメソッドは 1.2.0 で未リリースなので、引数を足しても既存の第三者 adapter を壊さない（ADR 0416）。
    *
    * ⭐ **ADR 0420: `opts.abortIfSuperseded`**（`createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`
    * にも同じ欄）。`abortIfForgotten` を **superseded にも広げた**もの——`runtime.reflect` が、材料にした Memory を
