@@ -5,11 +5,6 @@ import type { NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeVectorStore.search` が距離 `NaN`（ゼロベクトル、ADR 0040）の候補を
- * `PostgresVectorStore.search` と同じく常に最後尾へ置くこと（Issue #983）。
- * `packages/testkit/src/__tests__/in-memory-vector-store-nan-order.test.ts` と同じ入力。
- */
 const TENANT = "vector-search-nan-order-tenant";
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
 const QUERY_VECTOR: number[] = [1, 0, 0];

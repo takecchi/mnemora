@@ -4,15 +4,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0587: ADR 0577（`supersedeWithNewMemories` の冪等な再送は検査しない）の監査で生き残った2つの変異を塞ぐ歯。
- *
- *  - M7: 再送の news と新規の news が混ざったバッチで、再送の news の `jobKinds`（news ごとの値）は検査しない
- *    （ADR 0577・ADR 0493）。最初に作るときに全部の news の `jobKinds` を見る実装は、再送側の NUL で全体を断ってしまう。
- *  - M24: 置き換えられた古い記憶の `updatedAt` は壁時計（`opts.now` ではない。ADR 0566 A）。
- *    `InMemoryMemoryStore` も同じ（testkit 側の `in-memory-supersede-updated-at.test.ts` が見る）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const PAST = new Date("2020-01-01T00:00:00.000Z");
 const WALL = new Date("2026-06-01T12:34:56.789Z");
@@ -131,8 +122,7 @@ describe("FakeMemoryStore.supersedeWithNewMemories: 古い記憶の updatedAt �
 
 describe("FakeMemoryStore.supersedeWithNewMemories: 古い記憶の createdAt は変わらない（ADR 0592。クローンの判断で不変条件として縛る）", () => {
   it("置き換えで updatedAt は壁時計へ進むが、createdAt は作ったときのまま（後から書き換わらない）", async () => {
-    // 明文の約束は無いが、作成時刻が後から書き換わらないのは当然の不変条件として縛る（クローンの判断）。
-    // `updatedAt` と一緒に `createdAt` も `new Date()` で書き換える実装は、他の歯では捕まらなかった。
+    // 作成時刻が後から書き換わらないことを縛る: `updatedAt` と一緒に `createdAt` も `new Date()` で書き換える実装は、他の歯では捕まらない。
     const CREATED = new Date("2026-05-01T00:00:00.000Z");
     const { memoryStore } = createFakeRuntimeStores();
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -164,7 +154,7 @@ describe("FakeMemoryStore.supersedeWithNewMemories: 古い記憶の createdAt �
 
 describe("FakeMemoryStore.supersedeWithNewMemories: CAS で弾かれた行は updatedAt も createdAt も書き換わらない（ADR 0592。クローンの判断で不変条件として縛る）", () => {
   it("expectedStatus が合わず conflicted に積まれた古い記憶は、置き換えの前後で updatedAt・createdAt が同じ", async () => {
-    // 明文の約束は無いが、弾かれた行には何も書かないのは当然の不変条件として縛る（クローンの判断）。
+    // 弾かれた行には何も書かないことを縛る。
     const CREATED = new Date("2026-05-01T00:00:00.000Z");
     const MID = new Date("2026-05-15T00:00:00.000Z");
     const { memoryStore } = createFakeRuntimeStores();

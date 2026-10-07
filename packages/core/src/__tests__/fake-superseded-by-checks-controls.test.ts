@@ -8,16 +8,6 @@ import {
 import type { Memory, NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0574（ADR 0557 の歯の穴）: `fake-superseded-by-checks.test.ts` の変異試験で生き残った5つを塞ぐ。
- *
- * - 陽性対照: 対・群の外の `superseded`・`contested` を指す `superseded` は通る（外の `active`・`archived` だけでは、
- *   「外の `superseded`・`contested` まで断る」やりすぎが緑のままだった）。
- * - 循環の走査は、先頭のキーだけでなく全メンバーから辿る（先頭が輪の外・尾が輪に入る形）。
- * - 形の検査・pair の循環の検査は、存在確認・`beforeUpdateStatus` hook・CAS より前（ADR 0557「位置」。
- *   testkit の InMemory・`PostgresMemoryStore` と同じ順。Postgres は `store-superseded-by-checks-controls.postgres.test.ts`）。
- */
-
 const A: Ctx = { tenantId: "fake-superseded-by-controls-a" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 let counter = 0;
@@ -322,12 +312,6 @@ describe("Fake: 形・循環の検査は存在確認・hook・CAS より前（AD
   });
 });
 
-/**
- * ADR 0584（ADR 0574 の歯の穴）: 前回の確かめ直しで、どの歯にも捕まらなかった変異を塞ぐ。
- *
- * - F14: 対の外の `forgotten` を指す検査を CAS より前へ動かしても通っていた。
- * - F10・F12: 対・群の形の検査を、存在確認や CAS の後ろへ動かしても 0574 の歯は緑のままだった（0557 の歯1本だけが捕まえた）。
- */
 describe("Fake: 外の forgotten の検査は CAS より後（ADR 0515・0584）", () => {
   const forgotten = async (s: ReturnType<typeof setup>): Promise<Memory> => {
     const m = await s.mem();
@@ -476,8 +460,7 @@ describe("Fake: pair・group の形の検査は存在確認・CAS より前（AD
 });
 
 describe("Fake: 存在しない id の not found は RangeError ではない（ADR 0584 の約束 D の陽性対照、確かめ直し）", () => {
-  // Postgres 側の陽性対照（store-superseded-by-checks-controls.postgres.test.ts）は DB が要る。
-  // core の Fake の `updateStatus` の not found を RangeError で投げても、他の歯は捕まえなかった。
+  // core の Fake の `updateStatus` の not found を RangeError で投げても、他の歯は捕まえない。
   it("updateStatus: 形が正しい存在しない id は、RangeError ではなく memory not found の Error", async () => {
     const s = setup();
     const other = await s.mem();

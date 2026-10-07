@@ -3,24 +3,6 @@ import type { Ctx } from "../ctx.js";
 import { purgeExpiredEventsForTenant } from "../event-retention-purge.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeTenantSettingsStore` の event retention が**テナントごと**に持たれていることの歯。
- *
- * **`packages/testkit` の `tenant-settings-store-conformance.ts` の対象ではない。**
- * `FakeTenantSettingsStore` は `packages/core` 自身の runtime テスト専用の別系統
- * （`fake-aggregate-scope-include-subjectless.test.ts` と同じ理由・同じ形）。
- *
- * 以前の Fake は `eventRetention` をインスタンスに1つだけ持ち、`ctx` を読まずに
- * 書き換えていた——テナント A に `setEventRetention` すると、テナント B の
- * `getEventRetention` も同じ値を返した。`TenantSettingsStore` はテナントの設定であり
- * （ADR 0050）、`ctx.tenantId` は隔離境界である（ADR 0007）。`InMemoryTenantSettingsStore`
- * と `PostgresTenantSettingsStore` はテナントごとに持っている。
- *
- * 害は Fake を使うテストの側に出る: `purgeExpiredEventsForTenant` を2テナントで
- * 走らせる歯を書くと、片方に設定した保持期間がもう片方のイベントまで消し、
- * 本物の adapter では起きないことを Fake が起こす（下の2つ目の it）。
- */
-
 const ctxA: Ctx = { tenantId: "tenant-a" };
 const ctxB: Ctx = { tenantId: "tenant-b" };
 

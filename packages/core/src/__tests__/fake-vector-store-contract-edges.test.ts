@@ -3,18 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `VectorStore` の TSDoc が約束する端の振る舞いを、`FakeVectorStore` について縛る。振る舞いは変えていない。
- *
- * - `VectorFilter.status`: 「⚠ 空配列なら1件も通らない」。
- * - `VectorHit.distance`: 「コサイン距離は逆向き（cosine similarity = -1）のとき最大 2 まで出る」。
- * - `VectorStore.search`: 「`query` が有限でない成分（`NaN`・`Infinity`）を含むときも同じく『比較不能』であり、
- *   `search` は例外を投げない」。候補は落とさず、距離を比較の通らない値にして返す。
- *
- * `FakeVectorStore` は適合試験（`vector-store-conformance.ts`）の対象ではない（`fake-vector-store-filter.test.ts`
- * 冒頭）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const space = { provider: "test", model: "fixture-model", dimensions: 3 };
 let contentHashCounter = 0;

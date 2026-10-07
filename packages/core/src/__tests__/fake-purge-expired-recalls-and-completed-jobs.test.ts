@@ -3,16 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.purgeExpiredRecalls` / `FakeOutboxStore.purgeCompletedJobs`
- * （[ADR 0404](../../../docs/decisions/0404-purge-expired-recalls-and-completed-outbox-jobs.md)）が、
- * `InMemoryMemoryStore` / `PostgresMemoryStore` と同じ契約を守っていることを固定する歯。
- *
- * **`packages/testkit` の適合テストの対象ではない**（`fake-archive-decayed-clock.test.ts` と同じ理由——
- * `FakeMemoryStore` は `packages/core` 自身の runtime テスト専用の別系統）。同じ契約の歯を、
- * 要点だけここに写している。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 const NEW_RECALL = {
@@ -215,7 +205,6 @@ describe("FakeMemoryStore.createRecall / getRecall（ADR 0480）", () => {
     const id = await memoryStore.createRecall(ctx, input);
     (input.query as { text: string }).text = "changed";
     input.explain.stages.push({ stage: "x" } as never);
-    // 渡した createdAt を後から書き換えても、記録の createdAt は動かない（ADR 0598）。
     createdAt.setTime(0);
     const first = await memoryStore.getRecall(ctx, id);
     expect(first?.query).toEqual({ text: "q" });

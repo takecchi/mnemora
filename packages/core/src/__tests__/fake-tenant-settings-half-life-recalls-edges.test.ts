@@ -2,13 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeTenantSettingsStore.setDefaultHalfLifeRecalls` の、断りすぎない側と、書き先の範囲。
- * - float4（Postgres の `real`）に収まる最大の値までは受ける。float4 で `Infinity` へ丸まる境目の
- *   ちょうど手前は受け、ちょうどは断る（`1e300`・`3e38` だけでは、境目の手前で断る実装を見分けられない）。
- * - 書くのは `ctx.tenantId` の行だけ。ほかのテナントの値は変えない。
- */
-
 const FLOAT4_MAX = 3.4028234663852886e38;
 // float4 の最大値と、その次の（`Infinity` になる）値の真ん中。これ以上は `Infinity` へ丸まり、これ未満は最大値へ丸まる。
 const OVERFLOW_AT = 3.4028235677973366e38;
