@@ -11,18 +11,6 @@ import {
   maskMarkdownCodeFences,
 } from "../doc-reference-lib.mjs";
 
-/**
- * 生きた文書の中の参照が、指す先に届くことの門（PR #1118 の提案を、クローン miku が門にすると
- * 判断した）。何を見て何を見ないかは `scripts/doc-reference-lib.mjs` の doc コメントに在る
- * （ここには写さない）。
- *
- * 期待値（リンク先のファイル・ADR のファイル・見出しの番号）は、どれも実行時に repo から取る。
- * 数や一覧を焼き込まないので、期待値の側は腐らない。
- *
- * 陽性対照: 3つの形それぞれで、腐った参照を1つ入れた入力が赤になることを、同じ `env` で
- * 確かめる（検査器が黙って何も見なくなる回帰を捕まえるため）。
- */
-
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 // `.tmp` は `.gitignore` 済みの作業場所。並行に走る歯が一時ファイルを作っては消すので歩かない（末尾の歯）。
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage", ".tmp"]);
@@ -71,7 +59,6 @@ const REPO_ENV = {
   },
 };
 
-/** 生きた文書: `docs/**`（`docs/decisions/` を除く）・各 `README.md`・`AGENTS.md`・`packages/*\/src` の TS。 */
 function isLivingMarkdown(f) {
   if (!f.endsWith(".md")) return false;
   if (f.startsWith("docs/decisions/")) return false;
@@ -99,7 +86,6 @@ describe("🔴 門: 生きた文書の参照が、指す先に届く（相対リ
     expect(LIVING_FILES.some((f) => f === "docs/recall.md")).toBe(true);
     expect(LIVING_FILES.some((f) => f === "packages/core/src/runtime.ts")).toBe(true);
     expect(LIVING_FILES.some((f) => f.startsWith("docs/decisions/"))).toBe(false);
-    // TS のコメントの中の ADR へのリンクが、実際に検査の入力に入っている。
     expect(livingText("packages/core/src/runtime.ts")).toMatch(
       /\]\(\.\.\/\.\.\/\.\.\/docs\/decisions\//,
     );
@@ -124,7 +110,6 @@ describe("陽性対照: 腐った参照を1つ入れた入力は赤になり、�
     const ts =
       "/**\n * [ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)\n */\nexport const x = /\\[a\\]\\(\\d{2}\\)/;\n";
     const broken = findBrokenReferences("packages/core/src/x.ts", commentTextOf(ts), REPO_ENV);
-    // ADR 0165 は実在するので赤は link の1件だけ。正規表現の中の `[a](\\d{2})` は拾わない。
     expect(broken.map((b) => [b.kind, b.line])).toEqual([["link", 2]]);
   });
 
@@ -158,14 +143,7 @@ describe("陽性対照: 腐った参照を1つ入れた入力は赤になり、�
   });
 });
 
-/**
- * repo 直下の `.tmp/`（`.gitignore` 済みの作業場所）は歩かない。
- *
- * 【実測 2026-09-28】`no-unhandled-errors.test.mjs` は root の vitest の中で `.tmp/no-unhandled-errors-*` に
- * fixture を作っては消す。上の `walk(REPO_ROOT)` は収集の段で repo 全体を歩くので、並行に走ると、一覧に出た
- * ディレクトリが読む前に消え、`ENOENT: … scandir '…/.tmp/…'` でファイルごと落ちうる（`.tmp/` の下で作っては
- * 消しながらこの歯を8回走らせると5回落ちた）。`adr-citation.test.mjs` と同じ直し方。
- */
+/** repo 直下の `.tmp/` は歩かない（並行に走る歯が作っては消すので、一覧に出たディレクトリが読む前に消えて ENOENT で落ちる）。 */
 describe("walk は `.tmp/` を歩かない", () => {
   it("`.tmp/` の下は集めず、その外は集める", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "doc-reference-tmp-"));
