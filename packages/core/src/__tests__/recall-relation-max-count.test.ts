@@ -9,21 +9,6 @@ import { RecallQuerySchema } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1449 項目8（ADR 0396）: `RecallQuery.relationMaxCount` の歯。
- *
- * 段3（`contradiction_resolution`）の多者間の同伴取得の、**群ごとの上限**を呼び出し側から
- * 変えられるようにする任意の欄。歯は3種類:
- *
- * 1. 省略と、明示で既定値（10）を渡したときとで、recall の結果（memories・omitted・usage・
- *    explain・記録された recall の中身）が同一であること（省略時は今と1バイトも変わらない）。
- * 2. 指定した値で `over_limit(relation)` の件数と、残る同伴の件数が動くこと。
- * 3. 探索の安全弁（訪れた数の上限）が欄に連動すること・欄の検証。
- *
- * 既存の段3の歯（`recall-relation-group-companion.test.ts`）は無変更で緑のままであること
- * が、省略時不変のもう1本の対照である。
- */
-
 const ctx: Ctx = { tenantId: "tenant-relation-max-count" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -136,7 +121,6 @@ describe("RecallQuery.relationMaxCount — 省略時は既定値10を明示し�
 });
 
 describe("RecallQuery.relationMaxCount — 指定した値で同伴の件数と over_limit(relation) が動く", () => {
-  // 群は owner + 14 件の同伴の候補（合わせて15件）。
   it("省略: 10件 + over_limit 4（exact）", async () => {
     const { companions, relationOverLimit } = await recallGroup(15);
     expect(companions).toHaveLength(10);
@@ -151,7 +135,6 @@ describe("RecallQuery.relationMaxCount — 指定した値で同伴の件数と 
     expect(relationOverLimit).toEqual([
       { kind: "over_limit", stage: "relation", count: 11, countKind: "exact" },
     ]);
-    // validFrom は添字が大きいほど新しい。owner（添字0）を除く上位3件 = 添字 14・13・12。
     expect(companions.map((c) => c.memoryId).sort()).toEqual([ids[14]!, ids[13]!, ids[12]!].sort());
   });
 

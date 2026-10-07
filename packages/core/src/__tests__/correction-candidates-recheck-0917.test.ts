@@ -6,13 +6,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.findCorrectionCandidates`（ADR 0232）の確かめ直し（Issue #1812 まとまり G2）で
- * 変異試験がすり抜けた箇所の歯。既存の `correction-candidates*.test.ts` が縛っていなかった約束だけを置く:
- * 除外してから limit で切ること、`text` を加工せず recall へ渡すこと、`retrievedVia`/`score`/`omitted`/`explain`
- * を recall のまま運ぶこと、limit の上限を課さないこと。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -161,7 +154,6 @@ describe("findCorrectionCandidates — recall の内訳をそのまま運ぶ", (
   it("contested の対向（mandatory_companion）の retrievedVia と score を、recall のまま運ぶ", async () => {
     const { runtime, stores } = buildRuntime();
     const c1 = await createCandidate(stores, [8, 0], { digest: "c1" });
-    // 埋め込みを持たない対向: ANN には現れず、必須の同伴取得だけが引ける。
     const c2 = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "c2" }));
     const marked = await runtime.markContested(ctx, c1.id, c2.id);
     expect(marked.outcome.kind).toBe("contested");
@@ -178,9 +170,7 @@ describe("findCorrectionCandidates — recall の内訳をそのまま運ぶ", (
 
   it("連想枠（score.total を持たない）の候補も落とさず、recall のまま運ぶ", async () => {
     const { runtime, stores } = buildRuntime();
-    // 直接ヒット: query [4,0] に対して類似度 0.707。
     const direct = await createCandidate(stores, [1, 1], { digest: "direct" });
-    // query には当たらない（類似度 0 < 閾値）が、direct には近い ⟹ 連想枠で返る。
     const assoc = await createCandidate(stores, [0, 1], { digest: "assoc" });
 
     const recalled = await runtime.recall(ctx, { text: QUERY_TEXT });
@@ -198,7 +188,6 @@ describe("findCorrectionCandidates — recall の内訳をそのまま運ぶ", (
   it("omitted と explain を、recall が返したままにする", async () => {
     const { runtime, stores } = buildRuntime();
     await createCandidate(stores, [8, 0], { digest: "c1" });
-    // query と直交 ⟹ 閾値で落ちて omitted に載る。
     await createCandidate(stores, [0, 8], { digest: "far" });
 
     const recalled = await runtime.recall(ctx, { text: QUERY_TEXT });

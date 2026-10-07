@@ -110,6 +110,49 @@ async function waitForBackend(
   );
 }
 
+/** `DB` の relcache の init file（`base/<dboid>/pg_internal.init`）が在るか。 */
+async function relcacheInitFileExists(): Promise<boolean> {
+  const { rows } = await admin.query<{ present: boolean }>(
+    `SELECT (pg_stat_file('base/' || oid || '/pg_internal.init', true)).size IS NOT NULL AS present
+       FROM pg_database WHERE datname = $1`,
+    [DB],
+  );
+  return rows[0]!.present;
+}
+
+/**
+ * `client` の接続のまま、init file を確実に消させる。`pg_class` の行を必ず更新する、効果の無い GRANT を流す
+ * （PUBLIC の SELECT は既定で付いている）。VACUUM や統計の更新は、変化が無いと消えないので使わない。
+ */
+async function invalidateRelcacheInitFile(client: Client): Promise<void> {
+  await client.query("GRANT SELECT ON pg_class TO PUBLIC");
+}
+
+/**
+ * `pg_extension` を排他で握る接続を返す。`CREATE EXTENSION IF NOT EXISTS`（存在の確認）は、これが
+ * ROLLBACK されるまでそこで待つ。`prepare` は、握る前に holder 自身の接続で流す。
+ *
+ * 握る前に `pool` の接続を1本借りて返す。握った後に新しく開く接続は、起動の途中で `pg_extension` を
+ * 開いて止まり（relcache の init file が無いとき）、`pg_stat_activity` に `query` を持つ行として現れない。
+ */
+async function holdPgExtensionExclusively(
+  pool: Pool,
+  prepare?: (holder: Client) => Promise<void>,
+): Promise<Client> {
+  // WARM-REMOVED
+  const holder = new Client({ connectionString: connectionStringFor() });
+  await holder.connect();
+  try {
+    await prepare?.(holder);
+    await holder.query("BEGIN");
+    await holder.query("LOCK TABLE pg_extension IN ACCESS EXCLUSIVE MODE");
+    return holder;
+  } catch (error) {
+    await holder.end().catch(() => {});
+    throw error;
+  }
+}
+
 describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () => {
   // Issue #1775 の #780（変異M3・M4）: 共有の拡張ロックは「拡張を作る未適用のファイルがあり、
   // `extensionMode: "create"`」のときだけ取る（PR 本文「未適用に該当ファイルが無ければ取らない」・
@@ -247,12 +290,8 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
 
   it("拡張を作っている最中にロックの接続が切れると、その元の失敗で reject する", async () => {
     const dir = dirWith("9505_ext_lock_connloss_create.sql", "SELECT 1;");
-    // `pg_extension` を排他で握ると、`CREATE EXTENSION IF NOT EXISTS`（存在の確認）がそこで待つ。
-    const holder = new Client({ connectionString: connectionStringFor() });
-    await holder.connect();
+    const holder = await holdPgExtensionExclusively(pool);
     try {
-      await holder.query("BEGIN");
-      await holder.query("LOCK TABLE pg_extension IN ACCESS EXCLUSIVE MODE");
       const run = runMigrations(pool, dir, { schema: "ext_lock_connloss_create" });
       const outcome = run.then(
         () => new Error("resolved"),
@@ -273,9 +312,38 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     }
   }, 20_000);
 
-  // Issue #1825: 上の2本は CI で1回だけ「バックエンドが現れなかった」で落ちた。原因は確定して
-  // いない（手元の再現は 0/約370 回）。次に落ちたとき、待っていた処理が先に失敗していたのか、
-  // 本当に現れなかったのかを、エラー文だけで見分けられるようにする。
+  it("pool が冷えていて relcache の init file も無いとき、拡張を作る段の Lock 待ちに着き、その元の失敗で reject する", async () => {
+    const dir = dirWith("9507_ext_lock_cold_pool.sql", "SELECT 1;");
+    const coldPool = new Pool({ connectionString: connectionStringFor(), max: 4 });
+    const holder = await holdPgExtensionExclusively(coldPool, async (client) => {
+      await invalidateRelcacheInitFile(client);
+      expect(
+        await relcacheInitFileExists(),
+        "前提が崩れた: init file が消えていない（陽性対照）",
+      ).toBe(false);
+    });
+    try {
+      const run = runMigrations(coldPool, dir, { schema: "ext_lock_cold_pool" });
+      const outcome = run.then(
+        () => new Error("resolved"),
+        (error: unknown) => error as Error,
+      );
+      const pid = await waitForBackend("CREATE EXTENSION IF NOT EXISTS%", {
+        onlyWaitingOnLock: true,
+        outcome: run,
+      });
+      await admin.query("SELECT pg_terminate_backend($1)", [pid]);
+      expect((await outcome).message).toMatch(
+        /terminating connection due to administrator command/,
+      );
+    } finally {
+      await holder.query("ROLLBACK").catch(() => {});
+      await holder.end();
+      await coldPool.end();
+    }
+  }, 20_000);
+
+  // `waitForBackend` が、待っていた処理の先の失敗と、本当に現れなかったことを、エラー文だけで見分けられる。
   describe("waitForBackend の診断（Issue #1825）", () => {
     it("待っている間に runMigrations が先に失敗したら、待ちの打ち切りではなく、その元のエラー文で落ちる", async () => {
       // 読めない migrationsDir は、DB に触れる前に reject する（ADR 0448）。

@@ -15,15 +15,7 @@ import { z } from "zod";
 import type { LLMProvider, PromptSpec, StructuredRequest } from "../interfaces/llm-provider.js";
 import type { Observation } from "../observation.js";
 
-/**
- * `llmCassetteKey`（`packages/testkit/src/__fixtures__/cassette.ts`）と同じ
- * 正規化・ハッシュ手順のローカル再実装。**core は testkit に devDependency を持てない**
- * （`dependency-boundary.test.ts` が「dependencies のキーは ['zod'] のみ」と機械的に
- * 検査しており、`testkit` は `core` に依存する側なので循環になる）ため、ここでは
- * `node:crypto` だけで同じ手順を再現し、「`PromptSpec` が1バイトも変わらなければ
- * 鍵も変わらない」ことを、鍵そのものの計算で確かめる（Issue #608 項目②(b)、
- * ADR 0271 前提1と同じ検証手順）。
- */
+/** `llmCassetteKey` と同じ正規化・ハッシュ手順のローカル再実装。core は testkit に devDependency を持てない（`dependency-boundary.test.ts` が検査しており、testkit は core に依存する側なので循環になる）ため、`node:crypto` だけで再現する。 */
 function llmCassetteKeyLocal(prompt: PromptSpec): string {
   const canonical = JSON.stringify({
     system: prompt.system ?? null,
@@ -94,7 +86,6 @@ describe("extractCandidates（roadmap.md 段階3の基本抽出）", () => {
     expect(result.usedWholeObservationFallback).toBe(false);
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]?.content).toBe("東京出張の予定がある");
-    // 成功経路（0件を含む）は必ず failure: null（「間違った有る」を作らない）。
     expect(result.failure).toBeNull();
   });
 
@@ -114,7 +105,6 @@ describe("extractCandidates（roadmap.md 段階3の基本抽出）", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]?.content).toBe("明日は東京に出張する予定です");
     expect(result.candidates[0]?.provenanceKind).toBe("stated");
-    // 失敗経路は必ず failure が非 null。kind を名乗らない Error は kind: null になる。
     expect(result.failure).toEqual({
       kind: null,
       message: "simulated LLM failure (timeout/network)",
@@ -173,25 +163,16 @@ describe("truncateForFallbackDigest", () => {
   });
 
   it("負数の maxLength を渡しても、切り詰め後の本文は空になる（末尾からの削除にならない）", () => {
-    // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
-    // 別の意味になる。`maxLength` は「安全弁」（docs/memory-model.md §4）として本文の
-    // 長さを抑える欄であり、負数は上限0（本文を残さない）の下限として扱うのが筋——
-    // ほぼ全文が残る結果は「安全弁」の契約と食い違う。
+    // `slice(0, n)` は n が負数だと「末尾から n 文字を除く」別の意味になる。負数は上限0（本文を残さない）として扱う。
     const long = "0123456789";
     expect(truncateForFallbackDigest(long, -5)).toBe("…");
   });
 
   it("切り詰め位置が UTF-16 サロゲートペアの内側に落ちたら、1文字手前で止める（孤立サロゲートを作らない）", () => {
-    // "😀" は UTF-16 では2コードユニット（サロゲートペア）——`slice(0, 5)` は素朴には
-    // "AAAA" + 高サロゲートだけを残してしまい、対になる低サロゲートを失った孤立サロゲート
-    // ができる。孤立サロゲートは UTF-8 へエンコードする経路（Postgres の `content`/`digest`
-    // 列に書き込むとき、node-postgres が使う `Buffer.from(str, "utf8")`）で静かに
-    // U+FFFD（置換文字）へ壊れる（Issue #816 が「入力に孤立サロゲートが最初から含まれる」
-    // ケースを報告済みだが、これは「正しい入力を機械的に切り詰めた結果、こちら側が
-    // 孤立サロゲートを作ってしまう」別のケースである）。
+    // "😀" は UTF-16 では2コードユニット（サロゲートペア）。`slice(0, 5)` を素朴にやると孤立サロゲートができ、
+    // UTF-8 へエンコードする経路（Postgres の列への書き込み）で静かに U+FFFD へ壊れる。
     const content = "AAAA😀BBBB";
     expect(truncateForFallbackDigest(content, 5)).toBe("AAAA…");
-    // ペアがちょうど境界に収まる場合は割らない——1文字も余計に削らない。
     expect(truncateForFallbackDigest(content, 6)).toBe("AAAA😀…");
   });
 });
@@ -277,14 +258,7 @@ describe("buildNewMemoryFromCandidate", () => {
     );
   });
 
-  /**
-   * Issue #608 項目①: 抽出候補ごとに `subjectId` を持てるようにする。
-   *
-   * 「候補が subjectId を持たない（省略・undefined）」＝**未指定**として従来どおり
-   * observation の値へ落ちる。「候補が明示的に null を持つ」＝**主題なしを明示**として、
-   * observation の値があっても null で上書きする。この線引きの理由・採らなかった案
-   * （null を「未指定」と読む案）は ADR 0271 を見ること。
-   */
+  /** 候補が subjectId を持たない（省略・undefined）は未指定として observation の値へ落ち、明示的な null は主題なしの明示として observation の値があっても null で上書きする。null を「未指定」と読む案は採らない（ADR 0271）。 */
   describe("candidate.subjectId（Issue #608 項目①）", () => {
     it("候補が subjectId を持てば、observation の値より優先される", () => {
       const observation = makeObservation({ subjectId: "user-observation" });
@@ -328,12 +302,7 @@ describe("buildNewMemoryFromCandidate", () => {
   });
 });
 
-/**
- * `describeExtractionFailure`（ADR 0072 追記）の単体の歯。
- *
- * ⚠ core は provider のクラスを知らない（`instanceof` は使えない）ので、`kind` を名乗らない
- * エラーで `kind` を勝手な種類に読み替えないことを固定する。
- */
+/** core は provider のクラスを知らない（`instanceof` は使えない）ので、`kind` を名乗らないエラーで `kind` を勝手な種類に読み替えないことを固定する。 */
 describe("describeExtractionFailure", () => {
   it("kind: string を持つオブジェクトが投げられたら、その値をそのまま kind として運ぶ", () => {
     const error = new Error("truncated") as Error & { kind: string };
@@ -393,11 +362,6 @@ describe("describeExtractionFailure", () => {
   });
 });
 
-/**
- * Issue #608 項目②(b): 呼び出し側が subject の候補一覧を渡し、抽出器（LLM）に選ばせる口。
- * `buildExtractionPrompt` の文面がどう変わるか／変わらないかを固定する
- * （ADR 0NNN 変異試験1・2 に対応）。
- */
 describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
   const BASE_SYSTEM =
     "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。" +
@@ -428,24 +392,18 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
   it("subjectCandidates 省略時の鍵（llmCassetteKey 相当）は固定値のまま動かない", () => {
     const observation = makeObservation();
     const key = llmCassetteKeyLocal(buildExtractionPrompt(observation));
-    // 2026-09-24、subjectCandidates を足す前の文面から計算した鍵をそのまま固定する。
-    // この値が変わったら、既存の録音済みカセット（examples/chat/cassettes/*.json）の
-    // 照合鍵と食い違う——このテストが赤くなれば、それが実際に壊れた合図になる。
+    // subjectCandidates を足す前の文面から計算した鍵を固定する。この値が変わると既存の録音済みカセット（examples/chat/cassettes/*.json）の照合鍵と食い違う。
     expect(key).toBe("7f158f7ed09fdfd049d8b833e53e8a2c8d550edf8c621bb20d5b99039c1e02f6");
   });
 
   it("subjectCandidates を渡すと、候補一覧と null の指示の両方が system に足される", () => {
     const observation = makeObservation();
     const prompt = buildExtractionPrompt(observation, ["user:a", "user:b"]);
-    // ベースの文面はそのまま残る（先頭に含まれる）——足すだけで、削ったり書き換えたり
-    // しないことを固定する。
     expect(prompt.system?.startsWith(BASE_SYSTEM)).toBe(true);
     expect(prompt.system).toContain("user:a");
     expect(prompt.system).toContain("user:b");
-    // ADR 0271「引き受けた負債1」の申し送り: 一覧に無い・主題が無いなら null を明示させる。
     expect(prompt.system).toContain("null");
-    // messages は候補一覧そのものの影響を受けない。話者（既定の fixture は speaker あり）だけが、
-    // Issue #1370（PR1）で本文の前に1行足される（extractionContext が無い候補経路）。
+    // 話者（既定の fixture は speaker あり）だけが、extractionContext が無い候補経路では本文の前に1行足される。
     expect(prompt.messages).toEqual([
       { role: "user", content: "話者（speaker）: 田中\n\n明日は東京に出張する予定です" },
     ]);
@@ -458,11 +416,7 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
     expect(withCandidates).not.toBe(withoutCandidates);
   });
 
-  /**
-   * Issue #1370: 本文の言語が観測と揃わない・話者を取り違える、の2件。
-   * `subjectCandidates` が渡されたときだけ system に足す（ADR 0051 のカセット鍵・
-   * Issue #704 評価用録音を動かさないため——本 PR の ADR 参照）。
-   */
+  /** `subjectCandidates` が渡されたときだけ system に足す（ADR 0051 のカセット鍵・録音を動かさないため）。 */
   describe("Issue #1370: 言語・話者の指示", () => {
     it("subjectCandidates があると、出力言語を観測に揃える指示が system に足される", () => {
       const observation = makeObservation();
@@ -470,7 +424,6 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
       expect(prompt.system).toContain(
         "記憶の本文（content）と要旨（digest）は、観測の本文と同じ言語で書いてください",
       );
-      // subjectId・provenanceKind などの識別子には適用しないことも明示している。
       expect(prompt.system).toContain(
         "subjectId や provenanceKind などの識別子はこの限りではありません",
       );
@@ -506,8 +459,6 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
         },
       });
       const prompt = buildExtractionPrompt(observation);
-      // 今の extractionContext 分岐の文面（extraction.ts 参照）をそのまま写し、
-      // Issue #1370 の変更がこの経路に1バイトも触れていないことを固定する。
       const expectedSystem =
         BASE_SYSTEM +
         " 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、" +
@@ -517,7 +468,6 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
         "記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。" +
         " digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。";
       expect(prompt.system).toBe(expectedSystem);
-      // 言語・話者の新しい指示はこの経路には一切含まれない。
       expect(prompt.system).not.toContain("観測の本文と同じ言語で書いてください");
       expect(prompt.system).not.toContain(
         "別の人物（利用者など）の発言・意見として書かないでください",
@@ -542,16 +492,10 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
       const existingIndex = system.indexOf(existingContextSentence);
       expect(newIndex).toBeGreaterThanOrEqual(0);
       expect(existingIndex).toBeGreaterThan(newIndex);
-      // 2文とも独立して現れる（互いを部分文字列として含んでいない＝重複していない）。
       expect(newSpeakerSentence).not.toContain(existingContextSentence);
       expect(existingContextSentence).not.toContain(newSpeakerSentence);
     });
 
-    /**
-     * Issue #1370（PR1）: 話者の一文が「または speaker」と言う以上、候補あり・extractionContext 無しの
-     * 経路でも payload.speaker が LLM の入力に見えていなければならない。出す形は
-     * 「話者（speaker）: <値>」の1行＋空行＋本文。それ以外の経路は1バイトも変えない。
-     */
     describe("候補経路（extractionContext 無し）で payload.speaker を user 入力に出す", () => {
       const SPEAKER_TEXT = "明日は東京に出張する予定です";
 
@@ -655,15 +599,6 @@ describe("sanitizeCandidateSubjectId（Issue #608 項目②(b)）", () => {
     });
   });
 
-  /**
-   * 【実測】gpt-4o-mini に実 API を当てて確認した事象（調査タスク、コミットなし）:
-   * `subjectCandidates` を渡したときのプロンプト指示（「主題が無いなら明示的に null を
-   * 設定してください」）に対し、モデルは JSON の `null` リテラルではなく**文字列
-   * `"null"`（ダブルクォート付き）**を5/5回返した。この文字列は一覧に含まれないため、
-   * 修正前のコードでは「一覧外の値」として弾かれ（`rejected: true`）、
-   * `undefined`（未指定）へ戻り、observation の値へフォールバックしていた——
-   * Issue #608 の例2（「明日台風が来る 主題＝なし」）が実現できない、という形で現れる。
-   */
   describe('文字列 "null"（LLM が JSON null の代わりに返す既知の事象）', () => {
     it('一覧に "null" という文字列自体が候補として含まれていなければ、明示的な null（主題なし）として扱う', () => {
       expect(sanitizeCandidateSubjectId("null", ["A", "B", "movie-1"])).toEqual({

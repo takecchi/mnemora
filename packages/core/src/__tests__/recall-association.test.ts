@@ -11,11 +11,7 @@ import {
   withReversedGetVectorsOrder,
 } from "./runtime-fakes.js";
 
-/**
- * 連想枠（Issue #200、ADR 0151、docs/recall.md §9）の歯。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -96,11 +92,9 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
 
-    // 連想は走る（対象がアンカー自身しか無いので収穫0件）——stage_skipped は積まれない。
     expect(
       result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
     ).toBe(false);
-    // byTier.association が在る（既定 on の形の証明。ADR 0337 以前は無かった欄）。
     expect(Object.keys(result.usage.byTier).sort()).toEqual([
       "association",
       "digest",
@@ -117,11 +111,9 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
 
     const result = await runtime.recall(ctx, { vector: [1, 0], association: null });
 
-    // stage_skipped(association) が積まれない——問われていないことは「無い」ではない。
     expect(
       result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
     ).toBe(false);
-    // byTier に association キー自体が無い（明示的な off の形の証明）。
     expect(Object.keys(result.usage.byTier).sort()).toEqual(["digest", "full", "index"]);
     expect(result.memories.every((m) => m.retrievedVia !== "association")).toBe(true);
   });
@@ -159,7 +151,6 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
 
   it("アンカーが0件（withinLimit が空）のとき stage_skipped(no_anchor) が立つ", async () => {
     const { runtime, stores } = buildRuntime();
-    // クエリに全く当たらない記憶を1件だけ置く（below_threshold へ落ちる）。
     await createEmbeddedMemory(stores, [0, 1]);
 
     const result = await runtime.recall(ctx, {
@@ -179,12 +170,9 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
 
   it("連想で拾った候補は retrievedVia:'association' と associationOf:<アンカー> を持ち、クエリには当たらない", async () => {
     const { runtime, stores } = buildRuntime();
-    // Q = [1,0]。A はクエリに強く当たる（similarity ≈ 0.7071）→ アンカーになる。
     const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
       digest: "アンカー本文",
     });
-    // B はクエリには当たらない（similarity = 0 ちょうど、below_threshold）が、
-    // アンカーとの類似度は 0.7071（既定 minSimilarity 0.5 以上）。
     const associated = await createEmbeddedMemory(stores, [0, 1], { digest: "連想本文" });
 
     const result = await runtime.recall(ctx, {
@@ -194,28 +182,20 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
 
     const anchorEntry = result.memories.find((m) => m.memoryId === anchor.id);
     expect(anchorEntry?.retrievedVia).toBe("ann");
-    // クエリとの類似度で拾われた側は affinityMeasured: true（Issue #548 方向1、ADR 0282）。
     expect(anchorEntry?.score.affinityMeasured).toBe(true);
 
     const assocEntry = result.memories.find((m) => m.memoryId === associated.id);
     expect(assocEntry).toBeDefined();
     expect(assocEntry?.retrievedVia).toBe("association");
     expect(assocEntry?.associationOf).toBe(anchor.id);
-    // Issue #548 方向2 / ADR 0352: affinityMeasured: false の score は AffinityUnmeasuredScore
-    // の形になり、similarity/total は「undefined」ではなく欄そのものが無い
-    // ——⛔ アンカーとの類似度を score.similarity（クエリとの類似度の枠）に入れない、という
-    // 元の意図（ADR 0151）を、値ではなく型で保証するようになった。
     expect(assocEntry?.score.affinityMeasured).toBe(false);
     expect(assocEntry?.score).not.toHaveProperty("similarity");
     expect(assocEntry?.score).not.toHaveProperty("total");
 
-    // 収穫が有った run では stage_skipped を積まない（収穫が無い run／null で
-    // 明示的に off にした run とは区別する）。
     expect(
       result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
     ).toBe(false);
 
-    // usage.byTier.association が実際の連想 digest の文字数を報告する。
     expect(result.usage.byTier.association).toBe("連想本文".length);
   });
 
@@ -320,10 +300,8 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
 
     const mainEntry = result.memories.find((m) => m.memoryId === alsoMain.id);
     expect(mainEntry?.retrievedVia).toBe("ann");
-    // M2 が association としてもう一度現れない。
     expect(result.memories.filter((m) => m.memoryId === alsoMain.id)).toHaveLength(1);
     expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);
-    // アンカー自身も連想として現れない。
     expect(result.memories.filter((m) => m.memoryId === anchor.id)).toHaveLength(1);
   });
 
@@ -379,8 +357,6 @@ describe("recall() — 連想枠の既定値（ADR 0337 決定1。Issue #1775 �
 
   it("association を省略しても、連想でしか届かない記憶が retrievedVia:'association' で結果に入る（既定 on が実際に働く）", async () => {
     const { runtime, stores } = buildRuntime();
-    // Q = [1,0]。アンカーはクエリに当たる。連想される側はクエリに当たらない（below_threshold）が、
-    // アンカーとの類似度は 0.7071（既定 minSimilarity 0.5 以上）。
     const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
       digest: "アンカー本文",
     });
@@ -398,9 +374,6 @@ describe("recall() — 連想枠の既定値（ADR 0337 決定1。Issue #1775 �
 describe("recall() — memories と omitted の排他性（Issue #421 / ADR 0203）", () => {
   it("段2で below_threshold として落ちた記憶が連想で丸ごと昇格すると、below_threshold の omission 自体が消える", async () => {
     const { runtime, stores } = buildRuntime();
-    // A はクエリに強く当たる → アンカーになる。B はクエリには当たらない
-    // （below_threshold）が、A との類似度は 0.7071（既定 minSimilarity 0.5 以上）
-    // なので連想で拾われる——below_threshold の対象はこの1件だけである。
     await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
       digest: "アンカー本文",
     });
@@ -411,16 +384,10 @@ describe("recall() — memories と omitted の排他性（Issue #421 / ADR 0203
       association: { maxCount: 5, anchorCount: 1 },
     });
 
-    // ⭐ 陽性対照そのもの（Issue #421 が実測した形）: 修正前はここで
-    // `result.memories` に retrievedVia:'association' として現れる一方、
-    // `result.omitted` の below_threshold.nearMisses にも同じ id が残っていた。
     const assocEntry = result.memories.find((m) => m.memoryId === associated.id);
     expect(assocEntry?.retrievedVia).toBe("association");
 
-    // below_threshold の対象は昇格した1件だけだったので、omission 自体が
-    // 配列から消える（0件の omission を残さない、他の kind と同じ作法）。
     expect(result.omitted.some((o) => o.kind === "below_threshold")).toBe(false);
-    // 昇格した memoryId が、omitted のどのエントリにも（nearMisses という形でも）残らない。
     for (const o of result.omitted) {
       if (o.kind === "below_threshold") {
         expect(o.nearMisses?.some((n) => n.memoryId === associated.id)).toBe(false);
@@ -433,9 +400,7 @@ describe("recall() — memories と omitted の排他性（Issue #421 / ADR 0203
     await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
       digest: "アンカー本文",
     });
-    // promoted: クエリには当たらない（below_threshold）が、A との類似度は高く連想で拾われる。
     const promoted = await createEmbeddedMemory(stores, [0, 1], { digest: "昇格する" });
-    // stillOmitted: クエリにも A にも当たらない——below_threshold のまま残る。
     const stillOmitted = await createEmbeddedMemory(stores, [0, -1], { digest: "残る" });
 
     const result = await runtime.recall(ctx, {
@@ -450,7 +415,6 @@ describe("recall() — memories と omitted の排他性（Issue #421 / ADR 0203
     const belowThreshold = result.omitted.find((o) => o.kind === "below_threshold");
     expect(belowThreshold).toBeDefined();
     if (belowThreshold?.kind === "below_threshold") {
-      // count は「昇格した1件」の分だけ減っている（2件 below_threshold のうち1件が昇格）。
       expect(belowThreshold.count).toBe(1);
       expect(belowThreshold.nearMisses?.some((n) => n.memoryId === promoted.id)).toBe(false);
       expect(belowThreshold.nearMisses?.some((n) => n.memoryId === stillOmitted.id)).toBe(true);
@@ -462,18 +426,8 @@ describe("recall() — 連想枠: 複数アンカーが同じ候補を連想し�
   const deg = (d: number): number => (d * Math.PI) / 180;
 
   it("VectorStore.getVectors が返す順序に依存せず、associationOf は常に anchors のランク順で先に処理されたアンカーになる", async () => {
-    // Q=0°。A(40°)はB(55°)よりQに近い ⟹ 段1の再スコアでA=rank1、B=rank2（anchors=[A,B]）。
-    // C(90°)はQとの類似度がほぼ0（below_threshold）なのでwithinLimitには入らず、連想でしか拾えない。
-    //
-    // ⭐ Cは B（sim≈0.819）のほうが A（sim≈0.643）より近い——だが ADR 0151 の決定
-    // 「複数アンカーから同じ記憶が浮上しても、associationOf は最初に当たったアンカーだけを
-    // 記録する」の「最初」は常に anchors のランク順（A→B）で決まらなければならず、
-    // candidate 側（C）から見てどちらのアンカーに近いかで決めてはいけない。
-    //
-    // Issue #316 の実際の原因（ADR 0167）: `PostgresVectorStore.getVectors` は `ORDER BY`
-    // を持たず、返す順序が ingest ごとにランダムな memory_id（UUID）の索引順になっていた
-    // ——`recall-runtime.ts` がその返り値の順序をそのままアンカー処理順として使っていたため、
-    // 「最初に当たったアンカー」が ingest ごとに入れ替わっていた。
+    // Q=0°、A=40°、B=55°、C=90°。C は B のほうが近い（sim≈0.819）が、associationOf は anchors のランク順（A→B）で
+    // 最初に当たったアンカーになる。ランク順と近さを食い違わせてある。
     const q = [Math.cos(deg(0)), Math.sin(deg(0))];
     const aVec = [Math.cos(deg(40)), Math.sin(deg(40))];
     const bVec = [Math.cos(deg(55)), Math.sin(deg(55))];
@@ -494,14 +448,12 @@ describe("recall() — 連想枠: 複数アンカーが同じ候補を連想し�
       return { a, b, c, cEntry };
     }
 
-    // forward: FakeVectorStore.getVectors は入力順（= anchors のランク順、A→B）を保って返す。
     const forward = await run();
     expect(forward.cEntry?.retrievedVia).toBe("association");
     expect(forward.cEntry?.associationOf).toBe(forward.a.id);
 
-    // reversed: getVectors が B→A の順（anchors のランク順とは逆）で返す adapter を模す。
-    // ⭐ ここが歯——バグがあると、先に処理される B が C を「最初に当たった」として横取りし、
-    // associationOf が B になる（かつ similarity も 0.819 側に変わる）。
+    // getVectors が anchors のランク順と逆（B→A）で返す adapter を模す。
+    // 実装が返り値の順をそのままアンカー処理順に使うと、B が C を横取りして associationOf が B になる。
     const reversed = await run((s) => withReversedGetVectorsOrder(s.vectorStore));
     expect(reversed.cEntry?.retrievedVia).toBe("association");
     expect(reversed.cEntry?.associationOf).toBe(reversed.a.id);

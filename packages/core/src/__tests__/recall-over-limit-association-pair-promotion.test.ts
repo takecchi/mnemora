@@ -5,17 +5,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 段3.5（連想）が、争われている記憶（contested）の対（2人組）を1つの単位として返すとき、
- * `over_limit(stage:"rescore")` に数えていた候補が、単位の**2人目**でも取り下げられること。
- * `recall-over-limit-association-promotion.test.ts` の歯は、1人だけの単位（対向の無い記憶）しか見ていない。
- * 単位の最初の1人だけを「戻った」と数える実装は、2人目を `over_limit(stage:"rescore")` と `memories` の
- * 両方に名乗らせてしまう。
- *
- * 2人目の入り方は2通りある。
- * - 連想の枠が両方を選んだ（2人とも `over_limit` に居て、連想の近傍に入る）。
- * - 1人目の対向を取り直した（2人目は連想の近傍に入らないが `over_limit` に居る）。
- */
+/** 2人目の入り方は2通り: 連想の枠が両方を選ぶ／1人目の対向を取り直す（2人目は連想の近傍に入らない）。単位の最初の1人だけを「戻った」と数える実装は、2人目を `over_limit` と `memories` の両方に名乗らせる。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -91,10 +81,7 @@ describe("recall() — 連想が返した争われている記憶の対でも、
   it("(a) 連想の枠が対の両方を選んだとき", async () => {
     const { runtime, stores } = buildRuntime();
 
-    // anchor: クエリと完全一致。limit=1 なので withinLimit の1件を占め、連想のアンカーになる。
     const anchor = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "anchor" });
-    // y・x: どちらも anchor に近い（連想の minSimilarity を超える）が、limit=1 を超えるので
-    // over_limit(stage:"rescore") に回る。x が y と対（争われている記憶）。
     const y = await createEmbeddedMemory(stores, [0.98, 0.199, 0], {
       status: "contested",
       digest: "y",
@@ -113,7 +100,6 @@ describe("recall() — 連想が返した争われている記憶の対でも、
     expect(ids).toContain(y.id);
     expect(result.memories.find((m) => m.memoryId === x.id)?.retrievedVia).toBe("association");
     expect(result.memories.find((m) => m.memoryId === y.id)?.retrievedVia).toBe("association");
-    // 2人とも返した。over_limit(stage:"rescore") に残してはいけない。
     expect(
       result.omitted.find((o) => o.kind === "over_limit" && o.stage === "rescore"),
     ).toBeUndefined();

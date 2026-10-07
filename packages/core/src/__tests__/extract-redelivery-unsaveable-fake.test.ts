@@ -8,20 +8,7 @@ import { createRuntime } from "../runtime.js";
 import type { Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0347（Issue #1092・#1063）の2つの場面を、core の Fake（`runtime-fakes.ts`）でも当てる。
- * 同じ場面の Postgres と testkit の fixture の歯は `packages/postgres` の
- * `observe-unsaveable-candidate.postgres.test.ts`・`tick-sequential-redelivery.postgres.test.ts`
- * に在る。ここはそれと同じ当て方で、Fake でも同じ結果になることを縛る。
- *
- * - 保存できない候補（本文の NUL）は、その候補だけを落として残りを書く。落とした候補は `created` の
- *   `meta.droppedCandidates` に残り、`code` は（testkit の fixture と同じく）`null`。全件が落ちたら投げる。
- * - 逐次の再配達では、2回目は LLM を呼ばず何も書かない。
- *
- * ⚠ 語の多い 1MB 超の本文は当てない: 保存できない候補の例にならない。Fake も testkit の fixture も受け入れ、
- * Postgres も migration 0025 以降は受け入れる（#1222・ADR 0364。それ以前は Postgres だけが tsvector の上限で拒んでいた）。
- * 並行の2本は `packages/postgres` の `tick-concurrent-extract.postgres.test.ts`。
- */
+/** 語の多い 1MB 超の本文は当てない: 保存できない候補の例にならない（Fake も testkit の fixture も、migration 0025 以降の Postgres も受け入れる）。 */
 
 const ctx: Ctx = { tenantId: "extract-redelivery-unsaveable-fake" };
 const LEASE_MS = 60_000;
@@ -101,7 +88,6 @@ function hangableMemory(inner: MemoryStore): {
 }
 
 function makeKit() {
-  // 以前の Fake は outbox 行の `availableAt` を実時刻で付けたため、runtime の時計を実時刻より後にしている。今の Fake は `opts.now` に従う（ADR 0555）ので、この置き方は必須ではない（組み替えは ADR 0555 の「残り」）。
   nowMs = Date.now() + 60_000;
   const stores = createFakeRuntimeStores();
   const hang = hangableMemory(stores.memoryStore);
@@ -156,7 +142,6 @@ describe("core の Fake: 保存できない候補を含む抽出結果（#1063�
       "一件目の事実",
       "三件目の事実",
     ]);
-    // sync の extract ジョブは完了している（あとの tick が拾い直さない）。
     const tick = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     expect({ processed: tick.processed, failed: tick.failed }).toEqual({ processed: 0, failed: 0 });
     const metas = await kit.createdMetas();
@@ -188,8 +173,6 @@ describe("core の Fake: 保存できない候補を含む抽出結果（#1063�
     ]);
   });
 
-  // ---- やりすぎを捕まえる歯 ----
-
   it("全件が保存できなければ、今どおり observe は例外で、何も書かない", async () => {
     const kit = makeKit();
     extractOutputs = [
@@ -202,14 +185,11 @@ describe("core の Fake: 保存できない候補を含む抽出結果（#1063�
     expect(resent.extraction).toBe("skipped");
     expect(await kit.contents(resent.observationId)).toEqual([]);
     expect(await kit.createdMetas()).toEqual([]);
-    // ADR 0407（挙動の変化）: sync の extract ジョブは observe が claim 済みのまま残る。
-    // 以前は未 claim で残り、直後の tick がすぐ拾っていた。今はリースの内側では拾われない。
     const early = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     expect({ processed: early.processed, failed: early.failed }).toEqual({
       processed: 0,
       failed: 0,
     });
-    // 完了にならずに残る点は今どおり: リースが切れた後の tick の再試行は同じ所で落ちる。
     nowMs += LEASE_MS * 2;
     const tick = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     expect({ processed: tick.processed, failed: tick.failed }).toEqual({ processed: 0, failed: 1 });
@@ -246,7 +226,6 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
       });
       nowMs += 1000;
       await crashThenRedeliver(kit);
-      // 2回目は LLM を呼ばない（再配達のたびに課金しない）。
       expect(extractOutputs).toEqual([outputs[1]]);
       expect(await kit.contents(observationId)).toEqual(
         expectedContents.map((content) => ({ status: "active", content })),
@@ -254,8 +233,6 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
       expect(await kit.createdMetas()).toHaveLength(expectedContents.length);
     });
   }
-
-  // ---- forget・purge した記憶が在る Observation への再配達（#1318） ----
 
   for (const how of ["forget", "purge"] as const) {
     it(`1回目が書いた記憶を ${how} した後の再配達でも、LLM を呼ばず、active は増えず、忘れさせた内容は蘇らない`, async () => {
@@ -268,7 +245,6 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
         extract: "deferred",
       });
       nowMs += 1000;
-      // 1回目: 書いた後・complete の前で止まる。
       kit.crash.crash = true;
       await expect(
         kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS }),
@@ -280,18 +256,15 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
         "v1",
       );
       expect(written.map((m) => m.status)).toEqual(["active"]);
-      // 止まっている間に、書かれた記憶を忘れさせる（purge なら物理削除まで）。
       const target = { memoryId: written[0]!.id };
       await kit.runtime.forget(ctx, target);
       if (how === "purge") await kit.runtime.purge(ctx, target);
-      // 2回目: リースが切れて再配達される。
       nowMs += LEASE_MS * 2;
       const redelivered = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
       expect({ processed: redelivered.processed, failed: redelivered.failed }).toEqual({
         processed: 1,
         failed: 0,
       });
-      // LLM を呼んでいない（2回目の出力が手つかずで残る）。
       expect(extractOutputs).toEqual(["候補B"]);
       const after = await kit.stores.memoryStore.listBySourceObservation(ctx, observationId, "v1");
       expect(after.map((m) => m.status)).toEqual(["forgotten"]);
@@ -299,8 +272,6 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
       expect(await kit.createdMetas()).toHaveLength(1);
     });
   }
-
-  // ---- やりすぎを捕まえる歯（#1092 の判定が正当な抽出を塞がないこと） ----
 
   it("1回目の配達は、今どおり抽出して書く", async () => {
     const kit = makeKit();
@@ -390,7 +361,6 @@ describe("core の Fake: extract のジョブの逐次の再配達（#1092、ADR
       extract: "deferred",
     });
     nowMs += 1000;
-    // 1件目の Memory を書いた後、2件目を書いている途中でワーカーが止まる（この tick は返らない）。
     kit.memoryHang.hangOnCreate = 2;
     void kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     await kit.memoryHang.reached;

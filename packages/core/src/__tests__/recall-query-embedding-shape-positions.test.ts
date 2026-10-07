@@ -4,13 +4,7 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1463 のすり抜け R4・R6（ADR 0393 の C4・C5）。
- * 既存の recall の歯は Fake の次元（2）の上で、次元違いは「長い側（+1）」だけ、非有限の値は「先頭」だけを与えていた。
- * そのため、次元の検査を「短いベクトルを通す」形（`>`）にしても、有限性の走査が末尾を飛ばしても、赤にならなかった。
- * ここでは次元を4にして、短い側・空・長い側と、先頭・中間・末尾の非有限値を与える。
- * どれも `embedding_provider_unavailable`（`cause.kind` は `dimension_mismatch` / `non_finite`）になる。
- */
+/** 次元を4にして、短い側・空・長い側と、先頭・中間・末尾の非有限値を与える。Fake の次元（2）では長い側（+1）と先頭しか与えられず、検査の向きや走査が末尾を飛ばす変異に気づけない。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 const DIMS = 4;
 

@@ -7,11 +7,6 @@ import {
   type RecallFootprintShape,
 } from "../recall-footprint.js";
 
-/**
- * ADR 0467（穴探し38巡目）: `compareWithFullLog` / `calibrateRecallFootprint` に非有限の入力が来たとき、
- * 結論や「較正済み」の顔で NaN・Infinity を返さない。
- */
-
 const sample = (memoryCount: number, totalChars: number): RecallFootprintSample => ({
   memoryCount,
   totalChars,
@@ -36,7 +31,6 @@ describe("compareWithFullLog: 見積もりが数にならない入力では結�
       expect(Number.isNaN(r.estimatedShare)).toBe(true);
       // 「許容誤差の内側」とは言っていない（within_tolerance は NaN の estimatedShare を載せてしまう）。
       expect(r.reasons.map((x) => x.code)).not.toContain("within_tolerance");
-      // reasons は空にならない（既存の約束）。
       expect(r.reasons.length).toBeGreaterThan(0);
     },
   );

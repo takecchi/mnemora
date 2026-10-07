@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeFailure } from "../failure-description.js";
 
-/**
- * ADR 0470: `describeFailure` の長さの上限（4096）での切り詰めを、書記素の境目にする（ADR 0467 面B と同じ）。
- * 印の書き方と元の長さ（UTF-16 の長さ）の数え方、上限を超えないことは変えない。
- */
 const MAX = 4096;
 const MARK = /… \(truncated by mnemora, original length (\d+) chars\)$/;
 const describeText = (text: string) => describeFailure(new Error(text));

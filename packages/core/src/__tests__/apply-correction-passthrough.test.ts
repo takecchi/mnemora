@@ -92,16 +92,6 @@ async function createCandidate(
   return memory;
 }
 
-/**
- * `runtime.applyCorrection` が `markContested`/`resolveContested` へ運ぶもの（引数の順・`actor`・順位）と、
- * 失敗を握り潰さないことの歯（Issue #1804。#537・ADR 0242・0446 の確かめ直しで、変異が素通りした形を塞ぐ）。
- *
- * 約束の出所: `ApplyCorrectionInput` の TSDoc（`correctedId` が `undefined` のときだけ `awaiting_choice`／
- * `actor` は両方へ渡す）、`ApplyCorrectionResult` の TSDoc（`chosenRecallRank` は詰め直していない生の順位）、
- * ADR 0242 決定3（失敗を握り潰さない。`correctedId` を first、`correctingId` を second として運ぶ）。
- * `apply-correction.test.ts`・`apply-correction-candidate-spelling.test.ts` が見ない側面だけを足す。
- */
-
 async function setup() {
   const { runtime, stores } = buildRuntime();
   const target = await createCandidate(stores, [8, 0], { digest: "対象" });

@@ -7,15 +7,6 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 
-/**
- * `Runtime.tick` の embed ジョブは、provider が返したベクトルに `NaN`・`Infinity`・`-Infinity` が
- * 含まれていれば、ベクトルを書かずにジョブを失敗にし、`embeddingStatus` を `'failed'` にする
- * （2026-09-30、ADR 0393。次元の検査 `embed-job-dimension-mismatch.test.ts` と同じ経路）。
- *
- * 以前は確かめずに `vectorStore.upsert` へ渡していた。Postgres は pgvector が拒んで SQL の失敗に見え、
- * InMemory / Fake は黙って `'ready'` で保存した（`interfaces/vector-store.ts` の表）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 

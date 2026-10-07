@@ -4,15 +4,7 @@ import { eraseTenant } from "../erase-tenant.js";
 import type { EraseTenantResult, EraseTenantStoreResult } from "../interfaces/memory-store.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `eraseTenant`（Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）
- * の歯。オーケストレータ自身（4つの port を束ねる部分）を検査する——各 port の
- * `eraseTenant?` 実装そのものの契約は `packages/testkit` の conformance suite
- * （`supportsEraseTenant`）が検査するので、ここでは `FakeMemoryStore`/`FakeVectorStore`/
- * `FakeOutboxStore`/`FakeTenantSettingsStore` の `eraseTenant` を、テストごとに必要な形
- * だけ差し替えて使う（`event-retention-purge.test.ts` が
- * `purgeExpiredEventsByRetention = undefined` で「口が無い」状態を模すのと同じ作法）。
- */
+/** 各 port の `eraseTenant?` の契約は `packages/testkit` の conformance suite が検査する。ここではオーケストレータ自身を検査するため、各 Fake の `eraseTenant` をテストごとに必要な形だけ差し替える。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -99,7 +91,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     }
     expect(await stores.memoryStore.get(mixedCtx, memory.id)).not.toBeNull();
 
-    // 完全一致なら通る（対照）。
     const outcome = await eraseTenant(mixedCtx, deps, { confirmTenantId: "Acme", limit: 10 });
     expect(outcome.kind).toBe("executed");
   });
@@ -121,7 +112,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
 
   it("4 port のうち eraseTenant を実装していない port が1つでもあれば、何も消さずに store_unsupported を返す（missing に port 名が名指しされる）", async () => {
     const stores = createFakeRuntimeStores();
-    // `memories` に1件書いておく——store_unsupported なら消えないことを確認するため。
     const memory = await stores.memoryStore.createMemory(ctx, {
       tenantId: ctx.tenantId,
       subjectId: null,
@@ -158,7 +148,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     );
 
     expect(outcome).toEqual({ kind: "store_unsupported", missing: ["vectorStore"] });
-    // 何も消えていないこと。
     expect(await stores.memoryStore.get(ctx, memory.id)).not.toBeNull();
   });
 
@@ -283,7 +272,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
       outboxStore: stores.outboxStore,
       tenantSettingsStore: stores.tenantSettingsStore,
     };
-    // 3件の memory を作る——limit を小さくして複数回の呼び出しが必要になるようにする。
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
       const memory = await stores.memoryStore.createMemory(ctx, {
@@ -440,7 +428,6 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     ).backing.outboxJobs;
     const jobsOf = (tenantId: string) => outboxJobs.filter((j) => j.tenantId === tenantId).length;
 
-    // 両テナントに同じ形で、memory（冪等キー付き）・埋め込み・outbox・設定を作る。
     const seed = async (c: Ctx) => {
       const { observation } = await stores.memoryStore.createObservationWithOutbox(
         c,
@@ -485,12 +472,10 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     const outcome = await eraseTenant(ctx, deps, { confirmTenantId: ctx.tenantId, limit: 100 });
     expect(outcome.kind).toBe("executed");
 
-    // 対象テナントの分は消えている。
     expect(await stores.memoryStore.get(ctx, mine.memoryId)).toBeNull();
     expect(jobsOf(ctx.tenantId)).toBe(0);
     expect(await stores.tenantSettingsStore.getEventRetention(ctx)).toEqual({ kind: "unset" });
 
-    // 他テナントの分は1つも変わらない。
     expect(await stores.memoryStore.get(otherCtx, other.memoryId)).not.toBeNull();
     expect(jobsOf(otherCtx.tenantId)).toBe(2);
     expect(stores.vectorStore.entries.size).toBe(1);
@@ -501,20 +486,13 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
       kind: "days",
       days: 30,
     });
-    // 冪等キー: 他テナントで同じ内容をもう一度書いても、二重には作られない。
     const again = await stores.memoryStore.createMemoryWithOutbox(otherCtx, other.input, ["embed"]);
     expect(again.created).toBe(false);
     expect(again.memory.id).toBe(other.memoryId);
   });
 });
 
-/**
- * ADR 0383 の約束: 「設定は最後にする——途中で処理が中断しても、まだ『テナントが存在する』
- * ことの手がかりとして残る」。`limit` で途中で止まった回（いずれかの port が
- * `reachedLimit: true` を返した回）に、後ろの port（とくに `tenantSettingsStore`）へ進むと、
- * この約束が破れる。ここでは、止まった回に後ろの port が**呼ばれない**こと・データが残ること・
- * 呼び直せば最後まで消えることを縛る。
- */
+/** 設定は最後にする: 途中で処理が中断しても「テナントが存在する」手がかりとして残る（ADR 0383）。`limit` で止まった回に後ろの port へ進むとこの約束が破れる。 */
 describe("eraseTenant: limit で止まった回は、後ろの port を呼ばない（ADR 0383 の追記）", () => {
   const memoryInput = (i: number) => ({
     tenantId: ctx.tenantId,
@@ -615,7 +593,6 @@ describe("eraseTenant: limit で止まった回は、後ろの port を呼ばな
       expect(outcome.kind).toBe("executed");
       if (outcome.kind !== "executed") throw new Error("unreachable");
       if (!outcome.reachedLimit) break;
-      // まだ続く回では、設定は残っている。
       expect(await stores.tenantSettingsStore.getEventRetention(ctx)).toEqual({
         kind: "days",
         days: 30,

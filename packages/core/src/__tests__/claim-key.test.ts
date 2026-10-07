@@ -19,7 +19,6 @@ describe("normalizeClaimKeyPart（Issue #371、ADR 0185/0315 決定3）", () => 
   });
 
   it("全角文字を NFKC で半角相当に正規化する", () => {
-    // "ＵＳＥＲ"（全角）は NFKC で "USER"（半角）へ正規化され、その後 小文字化される。
     expect(normalizeClaimKeyPart("ＵＳＥＲ")).toBe("user");
   });
 
@@ -68,16 +67,10 @@ describe("buildClaimKeyPrompt（Issue #371）", () => {
 
   it("この system 文面は extraction.ts の EXTRACTION_PROMPT_SYSTEM_BASE と共有しない（別の独立したプロンプト）", () => {
     const prompt = buildClaimKeyPrompt(["発話"]);
-    // 抽出プロンプトが使う文言（「本人が明示的に述べた事実は provenanceKind」）を
-    // 一切含まないことを確かめる——2つのプロンプトが同じ文字列を共有していれば、
-    // 将来どちらかを変更したときに意図せずもう片方の llmCassetteKey が動くリスクがある。
     expect(prompt.system).not.toContain("provenanceKind");
   });
 
-  // Issue #372負債6（ADR 0334）: knownSubjects を一切渡さない呼び出しの system は
-  // 1バイトも変わっていないことを固定する——既存カセット（`llmCassetteKey` は
-  // `PromptSpec` から決まる）が動かないことの直接の証拠。この逐語は
-  // `claim-key.ts` の `CLAIM_KEY_PROMPT_SYSTEM` の定義と完全一致させてある。
+  // 逐語で固定する: 既存カセットの `llmCassetteKey` が動かないことの直接の証拠になる。
   const CLAIM_KEY_PROMPT_SYSTEM_LITERAL =
     "あなたは、複数の記憶候補それぞれが「何についての主張か」を判定するアシスタントです。" +
     "入力は記憶候補の配列であり、各要素の content がその記憶の本文です。" +
@@ -313,11 +306,7 @@ describe("ClaimKeyBatchResultSchema", () => {
   });
 });
 
-/**
- * Issue #1264: `describeClaimKeyFailure`（`claim-key.ts`、export しない複製）は、`extraction.ts` の
- * `describeExtractionFailure` と同じロジックであるべきだ、とその doc は書いている。ずれたら赤くなるよう、
- * 同じ入力を provider に投げさせ、`deriveClaimKeys` の `failure` と `describeExtractionFailure` の出力を突き合わせる。
- */
+/** `describeClaimKeyFailure`（export しない複製）が `describeExtractionFailure` とずれたら赤くなるよう、同じ入力を投げて `failure` と突き合わせる。 */
 describe("deriveClaimKeys の失敗の記述は describeExtractionFailure と同じ（Issue #1264）", () => {
   const withKind = (kind: unknown) => Object.assign(new Error("boom"), { kind });
   const INPUTS: Array<[string, unknown]> = [

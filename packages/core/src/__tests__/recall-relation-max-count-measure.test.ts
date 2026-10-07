@@ -8,16 +8,8 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0396 の測定道具（**門ではない**）。群の大きさ × `RecallQuery.relationMaxCount` で、
- * `usage.chars` と `over_limit(relation)` の件数を決定的に数える。鍵も DB も要らない
- * （core の Fake ストアと決定的な埋め込み）。
- *
- * - 環境変数 `MNEMORA_MEASURE_RELATION_MAX_COUNT=1` のときだけ表を標準出力に出す。
- *   付けなければ何も出さず、下の式の検査だけが走る。
- * - 検査するのは**式**（同伴の数 = min(上限, 群-1)、切った数 = 群-1-同伴の数、exact/lower_bound の別）
- *   であって、`usage.chars` の値ではない——値は digest の長さで動くので、ここに焼き込まない。
- * - 質（想起が良くなるか）は測れない（鍵が無い）。これは量だけである。
- *
+ * ADR 0396 の測定道具（門ではない）。`MNEMORA_MEASURE_RELATION_MAX_COUNT=1` のときだけ表を標準出力に出す。
+ * 検査するのは式であって `usage.chars` の値ではない（値は digest の長さで動くので焼き込まない）。
  * 走らせ方: `MNEMORA_MEASURE_RELATION_MAX_COUNT=1 pnpm --filter @mnemora/core exec vitest run src/__tests__/recall-relation-max-count-measure.test.ts`
  */
 
@@ -110,7 +102,6 @@ describe("段3 relationMaxCount の量の測定（門ではない）", () => {
           (o) => o.kind === "over_limit" && o.stage === "relation",
         );
         const effective = cap ?? 10;
-        // 式の検査（値ではなく式）。
         expect(companions).toBe(Math.min(effective, size - 1));
         const visited = Math.min(size, effective * 10);
         const cut = Math.max(0, visited - 1 - effective);

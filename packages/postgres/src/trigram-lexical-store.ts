@@ -15,179 +15,82 @@ import { isCreateExtensionPermissionDenied } from "./migration-failure-message.j
 import { EXTENSION_LOCK_KEY } from "./migrate.js";
 
 /**
- * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
- * [ADR 0149](../../../docs/decisions/0149-japanese-lexical-no-required-extension.md) §6、
- * ADR 0319）。
+ * `LexicalStore` の **opt-in** 実装（ADR 0149 §6、ADR 0319）。`PostgresLexicalStore`（`./lexical-store.ts`）とは別の、
+ * 導入側が明示的に選ぶ差し替えで、日本語（非 ASCII）の語彙照合に `pg_trgm` の `word_similarity` を使う。
  *
- * ⚠ **この ADR/実装はクローン miku の判断であり、オーナー本人の判断ではない**
- * （[ADR 0220](../../../docs/decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
- * Issue #278 の棚卸しコメントは本件を「E: 判断が要る」（製品・事業判断を含みうる）と
- * 分類している。**この実装が答えているのは「opt-in なら足せるか」だけであり、
- * 「日本語の想起にどこまで投資するか」自体には答えていない。**
+ * - `pg_trgm` は必須依存にしない。`REQUIRED_EXTENSIONS`（`./migrate.ts`）も `migrations/*.sql` も変えず、
+ *   `CREATE EXTENSION` は {@link probeTrigramLexicalSupport} が**呼ばれたときだけ**（`PostgresTrigramLexicalStore.create()`
+ *   で opt-in したときだけ）発行する。
+ * - `buildLexicalSearchSelect` を呼ばず、フィルタ条件の組み立てを**複製している**。切り出すと既定の実装
+ *   （`lexical-store.ts`）の diff が増え、既定を変えていないことの確認コストが上がるため。両者が将来ずれる負債を
+ *   引き受けた（ADR 0319）。
  *
- * ## 何を変えないか（⛔ 既定を変えない）
+ * ## ASCII 部分の意味論
  *
- * - `PostgresLexicalStore`（`./lexical-store.ts`）は**1バイトも変えていない**。
- *   このファイルは新規ファイルであり、`buildLexicalSearchSelect` を呼ばず、
- *   フィルタ条件の組み立てロジックを独立に複製している（下記「なぜ複製するか」）。
- * - `REQUIRED_EXTENSIONS`（`./migrate.ts`）を変えていない。`pg_trgm` は必須依存にならない。
- * - `migrations/*.sql` に番号付きファイルを足していない——`pg_trgm` の `CREATE EXTENSION`
- *   は {@link probeTrigramLexicalSupport} が**呼ばれたときだけ**（＝導入側が明示的に
- *   `PostgresTrigramLexicalStore.create()` を呼んで opt-in したときだけ）発行される。
- *   `schema-namespace.test.ts` の `REQUIRED_EXTENSIONS` 突き合わせ歯は、
- *   `migrations/*.sql` の中身しか見ないため、この設計はその歯に触れない。
+ * ASCII の識別子（`PROJ-1234` 等）は `PostgresLexicalStore` と**同じ意味**で、`mnemora_lexical_query_or` /
+ * `mnemora_lexical_normalize` / `mnemora_lexical_query_tsqueries`（`migrations/0008`/`0009`）をそのまま再利用する。
+ * クエリが完全に ASCII のとき、`coverage`/`rank`/候補集合は `PostgresLexicalStore` と同じ値になる。
  *
- * ## なぜフィルタ条件の組み立てを複製するか
+ * ## 日本語（非 ASCII）部分の意味論
  *
- * `PostgresLexicalStore`（`./lexical-store.ts`）の `buildLexicalSearchSelect` は
- * `WHERE` 条件の組み立てとクエリ本体が一体になっており、再利用可能な形で切り出されて
- * いない。切り出すと `lexical-store.ts` の diff が増え、⛔「既定の実装を変えない」の
- * 確認コストが上がる（実際に挙動が変わっていないことをレビューする面積が広がる）。
- * **この PR ではファイルを触らない方を優先し、フィルタ条件を複製した。**
- * 複製の負債（両者が将来ずれる可能性）は引き受けた——ADR 0319「引き受けた負債」参照。
+ * クエリから非 ASCII の連なりを取り出し（`mnemora_trigram_query_nonascii`）、一部の機能語・語尾
+ * （{@link TRIGRAM_NOISE_STOPWORD_PATTERN}）を取り除いた文字列を「日本語側の1項」として扱う。
  *
- * ## ASCII 部分の意味論（`buildLexicalSearchSelect` と同じ）
- *
- * ASCII の識別子（`PROJ-1234` 等）に対する挙動は `PostgresLexicalStore` と**同じ意味**
- * である——`mnemora_lexical_query_or` / `mnemora_lexical_normalize` /
- * `mnemora_lexical_query_tsqueries`（`migrations/0008`/`0009`、常に導入されているベース
- * スキーマの一部）をそのまま再利用しており、隣接要求（`websearch_to_tsquery` のフレーズ
- * 演算子）・OR 意味論・被覆率の分子分母の数え方を書き換えていない。**⟹ クエリが完全に
- * ASCII のとき、`coverage`/`rank`/候補集合は `PostgresLexicalStore` と同じ値になる**
- * （`buildTrigramLexicalSearchSelect` の doc、および
- * `packages/postgres/src/__tests__/trigram-lexical-store.postgres.test.ts` の
- * 「ASCII 部分の意味論は既存経路と一致する」歯を見ること）。
- *
- * ## 日本語（非 ASCII）部分の意味論 — pg_trgm の word_similarity
- *
- * クエリから非 ASCII の連なりを取り出し（`mnemora_trigram_query_nonascii`）、
- * さらに一部の機能語・語尾（{@link TRIGRAM_NOISE_STOPWORD_PATTERN}）を取り除いた文字列を
- * 「日本語側の1項」として扱う。
- *
- * **🔴 最初の実装は ASCII 側の分母に日本語側の1項を足す形（ADR 0092 の分子/分母をそのまま
- * 拡張する形）にしていたが、変異試験ではなく `trigram-lexical-store.postgres.test.ts` の
- * ASCII パリティ歯そのものが赤くなって発覚した——「`PROJ-1234について前に何か言ってたはず`」
- * （Issue #106 の報告者の逐語、`buildTrigramLexicalSearchSelect` の doc/歯と同じ問い）で
- * `PostgresLexicalStore` は `coverage = 1`（ASCII 語1つが一致、分母1）を返すのに対し、
- * 最初の実装は日本語側の残り「前に何か言ってたはず」を分母に**追加してしまい**
- * `coverage = 0.5` になった。** 識別子の前後を囲む日本語の言い回しが、たまたま
- * {@link TRIGRAM_NOISE_STOPWORD_PATTERN} で削り切れずに残ると、それだけで ASCII 側の
- * coverage を薄めてしまう——**まさに [ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)
- * §2.1.1 が「日本語の残りを AND の一項にすると偽陰性だけを作る、落として失うものが無い」
- * と実測した現象の、別の顔（今回は AND ではなく分母の希釈）である。
- *
- * **⟹ 採用した式は「分子/分母を足す」ではなく、[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)
- * §5 が similarity と lexicalMatch を合成するのに使った `affinity = max(...)` と同じ
- * パターンである**（`recall.ts` の `affinity` の式を参照——掛けると片方が死んだ項になる、
- * 足すと薄まる。どちらも「合成する」を選んだ時点で決まる、という同じ教訓）。
+ * **ASCII 側の分母に日本語側の1項を足す形（分子/分母の拡張）にしない。**`PROJ-1234について前に何か言ってたはず` で、
+ * `PostgresLexicalStore` は `coverage = 1`（ASCII 語1つが一致、分母1）を返すのに、日本語側の残り「前に何か言ってたはず」が
+ * 語尾リストで削り切れずに残ると分母が増えて `coverage = 0.5` になる（日本語の残りを AND の一項にすると偽陰性だけを
+ * 作る、というADR 0084 §2.1.1 と同じ現象の、分母の希釈という別の顔）。ADR 0084 §5 が similarity と lexicalMatch の
+ * 合成に使った `affinity = max(...)` と同じ、max 合成にする。
  *
  * ```
  * hybridCoverage = GREATEST(
- *   coalesce(mnemora_lexical_coverage(content, query), 0),  -- ASCII 側。0009 の関数をそのまま呼ぶ
+ *   coalesce(mnemora_lexical_coverage(content, query), 0),
  *   (日本語側の項が非空 AND word_similarity(項, content) >= threshold) ? 1 : 0
  * )
  * ```
  *
- * **`mnemora_lexical_coverage` は `migrations/0009` の関数を1文字も変えずにそのまま呼ぶ**
- * ——ASCII 側の計算式を独自に書き直さないことで、「ASCII 部分は既存経路と同じ意味を保つ」
- * という制約を、テストで確認するだけでなく**構造として**保証する（同じ関数を呼んでいる
- * 以上、値がずれようがない）。
- *
- * **⟹ クエリが完全に ASCII のとき**: 日本語側の項は無い（`NULL`）ので第2引数は常に0。
- * `GREATEST(ascii側, 0) = ascii側`——`PostgresLexicalStore` と**完全に同じ値**になる。
- * **⟹ クエリが完全に日本語のとき**: ASCII 側は0（`mnemora_lexical_coverage` は語彙が
- * 無ければ `NULL`→`coalesce` で0）。一致すれば `coverage = max(0, 1) = 1`。一致しなければ、
- * その行はそもそも `WHERE` を通らない（`LexicalHit.coverage` は常に `(0, 1]` という契約
- * ——`interfaces/lexical-store.ts` の doc——を破らない）。
- * **⟹ 両方に本物の語彙一致がある混在クエリのとき**: 高いほうの値がそのまま採用される
+ * `mnemora_lexical_coverage`（`migrations/0009`）は**書き直さず、そのまま呼ぶ**。ASCII 側の計算式を独自に書くと
+ * 「ASCII 部分は既存経路と同じ意味」が構造として保証されなくなるため。クエリが完全に ASCII のとき日本語側の項は無い
+ * （`NULL`）ので `GREATEST(ascii側, 0)` になり、完全に日本語のときは ASCII 側が0で、一致すれば `1`、一致しなければ
+ * `WHERE` を通らない（`LexicalHit.coverage` は常に `(0, 1]`）。両方に一致がある混在クエリは、高いほうが採用される
  * （二重に加点しない）。
  *
- * ### 🔴 【実測】機能語のトライグラムが雑音になる — 素の word_similarity では役に立たない
+ * **素の `word_similarity` を使わない。**自然文の問い（「田中さんについて何か言ってましたか」）をそのまま渡すと、
+ * 「について」「ました」「ですか」のような機能語がクエリのトライグラムの大半を占め、「田中さん」を含まない文にも高い
+ * スコアが付いて、固定の閾値で切り分けられない（target 0.222 に対し noise 0.167・0.115）。{@link TRIGRAM_NOISE_STOPWORD_PATTERN}
+ * で語尾・助詞を削ると target 0.400・noise 0.000 になる。
+ * {@link DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD} の根拠はこの実測だけで、サンプル数は小さい（人手の4文+7 probe）。
+ * 一般化を主張しない（ADR 0319）。
  *
- * 自然文の問い「田中さんについて何か言ってましたか」をそのまま
- * `word_similarity(query, content)` に渡すと、「田中さん」を含まない文にも高いスコアが
- * 付く。手元の PostgreSQL 17.11（`initdb --locale=C.UTF-8 --encoding=UTF8`）で実測:
+ * **retrieval-quality の probe set（`examples/chat/src/probe-set.ts`）は、この緩和策をほぼ素通りする。**fact と query が
+ * 内容語を共有しないよう設計されているので（`lexicalControl: true` の `color` 1件を除く）、この語彙チャンネルからは
+ * 何も拾えない。`color` は fact/distractor の両方が「色」を含むため coverage が同点になり、順位を decay/freshness だけが
+ * 決める（ADR 0084 §5.1/§8、ADR 0294）。
  *
- * | content | 素の word_similarity |
- * |---|---|
- * | target: `田中さんが来週から新しいプロジェクトに参加します`（田中さんを含む） | 0.222 |
- * | noise: `来週の予定について何も聞いていません`（田中さんを**含まない**） | 0.167 |
- * | noise: `先月のミーティングについて詳しく説明しました`（田中さんを**含まない**） | 0.115 |
+ * ## 静かな0件を潰す
  *
- * **⟹ target と noise の差はわずか 0.055〜0.107 しかなく、固定の閾値で安全に切り分けら
- * れない。**「について」「ました」「ですか」のような機能語が、クエリのトライグラムの
- * 大半を占めてしまうため（自然文の質問はほぼ機能語でできている）。
- *
- * ### ⟹ 緩和策: 小さく、非網羅的な語尾リストで機能語を削る
- *
- * {@link TRIGRAM_NOISE_STOPWORD_PATTERN} は、良く出る質問の語尾・助詞（「について」
- * 「ましたか」「でしょうか」等）を正規表現の選言で削るだけの、**キュレーションした
- * 固定リストであり、形態素解析器ではない。** 同じ実測環境で、削った後の
- * `word_similarity` は:
- *
- * | content | 語尾を削った後 |
- * |---|---|
- * | target（田中さんを含む） | **0.400** |
- * | noise（田中さんを含まない、2件とも） | **0.000** |
- *
- * **⟹ この実測4件だけを見れば、閾値 0.3 は target を通し noise を通さない。**
- * {@link DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD} をこの値にした根拠はこれだけであり、
- * **サンプル数は小さい（人手で作った4文+7 probe）。** 一般化を主張しない
- * （ADR 0319「確かめていないこと」参照）。
- *
- * ### ⚠ この緩和策は retrieval-quality の probe set をほぼ素通りする
- *
- * `examples/chat/src/probe-set.ts` の `PROBES` は、**意図的に** fact と query が内容語を
- * 共有しないように設計されている（`lexicalControl: true` の `color` 1件を除く）。
- * ⟹ 語尾を削っても、`color` 以外の6 probe は fact 側にも distractor 側にも一致する
- * 非 ASCII 語彙が実質無く、この語彙チャンネルからは何も拾えない
- * （[ADR 0294](../../../docs/decisions/0294-lexical-tie-density-bench.md) が ASCII 語彙
- * チャンネルについて既に測った「probe 7件の総候補数（合計）: 0」と同じ結論が、
- * この trigram チャンネルにも及ぶ）。**`color` 1件は fact/distractor の両方が「色」を
- * 含むため、coverage が同点になり、順位を決めるのは decay/freshness だけになる**
- * （ADR 0084 §5.1/§8 が ASCII 語彙で警告した「低選択率」と同じ形の負債）。
- * 詳細な数字は ADR 0319 §測定を見ること。
- *
- * ## 静かな0件を潰す — {@link probeTrigramLexicalSupport}
- *
- * `PostgresTrigramLexicalStore.create()` は、`pg_trgm` が (i) 拡張として使えるか、
- * (ii) 現在の DB のロケール／エンコーディングで日本語のトライグラムを実際に作れるか
- * を確かめ、どちらかがダメなら {@link TrigramLexicalStoreUnavailableError} を投げる。
- * 判定はこの関数の戻り値（{@link TrigramLexicalProbeResult}）として構造化された値でも
- * 手に入る——「なぜ使えないか」を呼び出し側が分類して扱えるようにするためであり、
- * 例外の文字列を読み取らせない。
+ * `PostgresTrigramLexicalStore.create()` は、`pg_trgm` が (i) 拡張として使えるか、(ii) 現在の DB のロケール／
+ * エンコーディングで日本語のトライグラムを実際に作れるかを確かめ、どちらかがダメなら
+ * {@link TrigramLexicalStoreUnavailableError} を投げる。判定は {@link probeTrigramLexicalSupport} の戻り値
+ * （{@link TrigramLexicalProbeResult}）として構造化された値でも手に入り、呼び出し側が例外の文字列を読まずに
+ * 「なぜ使えないか」を分類できる。
  */
-
-// ---------------------------------------------------------------------------
-// 静かな0件を潰す — 拡張・ロケールの実行時検査
-// ---------------------------------------------------------------------------
 
 /**
  * `probeTrigramLexicalSupport` が「使えない」と判定したときの理由。
  *
- * - `"server_encoding_not_utf8"`: `SHOW server_encoding` が `UTF8` ではない
- *   （実測: `SQL_ASCII`/`C` エンコーディングでは pg_trgm 自体は `CREATE EXTENSION` できるが、
- *   日本語の文字列を正しく格納できないため、この段階で早期に弾く。
- *   [ADR 0103](../../../docs/decisions/0103-negative-tooth-declares-its-precondition.md)
- *   が `to_tsvector` について実測した「効いているのは `server_encoding` だけ」という
- *   軸を、この opt-in ストアの入口検査にも当てている）。
- * - `"extension_unavailable"`: `pg_available_extensions` に `pg_trgm` が無い
- *   （サーバーに contrib モジュールがインストールされていない）。
+ * - `"server_encoding_not_utf8"`: `SHOW server_encoding` が `UTF8` ではない（`SQL_ASCII`/`C` では `pg_trgm` 自体は
+ *   `CREATE EXTENSION` できるが日本語を正しく格納できないので、早期に弾く。ADR 0103）。
+ * - `"extension_unavailable"`: `pg_available_extensions` に `pg_trgm` が無い（contrib モジュールが未インストール）。
  * - `"extension_create_denied"`: `CREATE EXTENSION` が権限不足で失敗した。
  * - `"extension_create_failed"`: `CREATE EXTENSION` がそれ以外の理由で失敗した。
- * - `"locale_no_japanese_trigrams"`: 拡張は使えるが、**同一の日本語リテラル同士の
- *   `word_similarity` が 1 にならない**——[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)
- *   §3.2 が実測した「`C` ロケールのクラスタで `pg_trgm` の日本語トライグラムが黙って
- *   空になる」という「静かな0件」を、ここで検出する。
- * - `"extension_not_visible"`: `pg_trgm` は DB のどこかには存在するが、この接続の
- *   `search_path`（`current_schemas(true)`）からは見えないスキーマに入っている——
- *   専用スキーマの構成（`schema` を指定した接続）で、別の名前空間が先に `pg_trgm` を
- *   作ってしまった場合に起きる（[Issue #1256](https://github.com/takecchi/mnemora/issues/1256)）。
- *   `detail` に、拡張が実際に入っているスキーマ名を入れる。直すには、拡張の権限を持つ
- *   ロールで `ALTER EXTENSION pg_trgm SET SCHEMA <extensionSchema>` を実行する——
- *   ただし、`pg_trgm` をその名前空間の中に入れたまま `DROP SCHEMA <schema> CASCADE` する
- *   と、拡張ごと消える（`pg_trgm` がそのスキーマ内の依存物として扱われるため。
- *   【実測 2026-09-28】このファイルの `probeTrigramLexicalSupport` の doc「2026-09-29 追記」参照）。
+ * - `"locale_no_japanese_trigrams"`: 拡張は使えるが、**同一の日本語リテラル同士の `word_similarity` が 1 にならない**。
+ *   `C` ロケールのクラスタで `pg_trgm` の日本語トライグラムが黙って空になる「静かな0件」を検出する（ADR 0084 §3.2）。
+ * - `"extension_not_visible"`: `pg_trgm` は DB のどこかには存在するが、この接続の `search_path`
+ *   （`current_schemas(true)`）から見えないスキーマに入っている（専用スキーマの構成で、別の名前空間が先に `pg_trgm` を
+ *   作った場合）。`detail` に、拡張が実際に入っているスキーマ名を入れる。直すには、拡張の権限を持つロールで
+ *   `ALTER EXTENSION pg_trgm SET SCHEMA <extensionSchema>` を実行する。`pg_trgm` をその名前空間の中に入れたまま
+ *   `DROP SCHEMA <schema> CASCADE` すると、拡張ごと消える。
  */
 export type TrigramLexicalUnavailableReason =
   | "server_encoding_not_utf8"
@@ -214,28 +117,20 @@ export interface TrigramLexicalProbeUnavailable {
 }
 
 /**
- * `probeTrigramLexicalSupport` の戻り値。「なぜ使えないか」を値として返す
- * （投げるのは {@link PostgresTrigramLexicalStore.create} の責務であり、この関数は
- * 「使えない理由」を値で返す——呼び出し側が判定だけを見たい場面（診断ツール・ヘルスチェック等）の
- * ために例外と値の両方の入口を用意する）。
+ * `probeTrigramLexicalSupport` の戻り値。「なぜ使えないか」を値として返す（投げるのは
+ * {@link PostgresTrigramLexicalStore.create} の責務）。
  *
- * ⚠ **「使えない」ことを値で返すのであって、この関数が一切 reject しないわけではない。**
- * 先頭の `SHOW server_encoding` と `pg_available_extensions` の問い合わせは、失敗を握らずそのまま
- * 伝える——接続の失敗・権限の不足（カタログを読めない等）はここで reject する（値の
- * {@link TrigramLexicalProbeUnavailable} にはならない）。値になるのは、エンコーディングが UTF8 でない
- * （`server_encoding_not_utf8`）・拡張が入手できない（`extension_unavailable`）・`CREATE EXTENSION`
- * 以降で失敗した（`extension_create_denied`/`extension_create_failed`。`vector` の
- * スキーマを読む SELECT もこの `try` の中）場合である。ヘルスチェックに使うときは、reject も
- * 「使えるか分からない」として扱うこと。
+ * **「使えない」ことを値で返すのであって、この関数が一切 reject しないわけではない。**先頭の `SHOW server_encoding` と
+ * `pg_available_extensions` の問い合わせは、失敗を握らずそのまま伝える。接続の失敗・権限の不足はここで reject する
+ * （値の {@link TrigramLexicalProbeUnavailable} にはならない）。値になるのは、エンコーディングが UTF8 でない・拡張が
+ * 入手できない・`CREATE EXTENSION` 以降で失敗した場合である。ヘルスチェックに使うときは、reject も「使えるか
+ * 分からない」として扱うこと。
  */
 export type TrigramLexicalProbeResult = TrigramLexicalProbeOk | TrigramLexicalProbeUnavailable;
 
 /**
- * [Issue #892](https://github.com/takecchi/mnemora/issues/892) のための内部専用の拡張。
- * `extension_create_denied`/`extension_create_failed` のときだけ、元の Postgres エラー
- * オブジェクト（`.stack`・`.code`・ネストした `.cause` を持ちうる）を運ぶ。**export しない**
- * ——公開の {@link TrigramLexicalProbeResult} には `cause` を持たせないため
- * （下記 {@link probeTrigramLexicalSupport} が剥がして返す）。
+ * `extension_create_denied`/`extension_create_failed` のときだけ、元の Postgres エラーオブジェクトを運ぶ内部専用の拡張。
+ * **export しない**（公開の {@link TrigramLexicalProbeResult} には `cause` を持たせない）。
  */
 interface InternalTrigramLexicalProbeUnavailable extends TrigramLexicalProbeUnavailable {
   readonly cause?: unknown;
@@ -245,37 +140,22 @@ type InternalTrigramLexicalProbeResult =
   TrigramLexicalProbeOk | InternalTrigramLexicalProbeUnavailable;
 
 /**
- * `PostgresTrigramLexicalStore.create()` が投げる例外の、メッセージの接頭辞。
- *
- * [ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §4.2 の
- * `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX` と**同じ作法**（呼び出し側と歯が、メッセージ
- * 文字列を書き写さずに識別できるようにするため）だが、**同じ定数を再利用してはいない**
- * ——あちらは「`channels` に `'lexical'` を要求したのに配線されていない」という**配線の
- * 誤り**を表し、こちらは「配線しようとしたが、拡張・ロケールの前提が満たせない」という
- * **別の失敗の族**である（ADR 0084 §4.2 の「埋め込み provider の失敗」と「`LexicalStore` の
- * 不在」の区別と同じ形——こちらは「実行時に一度だけ確かめれば分かる、環境の前提の不足」
- * であり、`recall()` を呼ぶたびに変わる類のものではない）。
+ * `PostgresTrigramLexicalStore.create()` が投げる例外の、メッセージの接頭辞。ADR 0084 §4.2 の
+ * `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX` と同じ作法だが、**同じ定数を再利用しない**。あちらは「`channels` に
+ * `'lexical'` を要求したのに配線されていない」という配線の誤りで、こちらは「配線しようとしたが、拡張・ロケールの前提が
+ * 満たせない」という別の失敗の族であるため。
  */
 export const TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX =
   "PostgresTrigramLexicalStore.create: pg_trgm を日本語の語彙照合に使える状態ではありません: ";
 
 /**
- * `PostgresTrigramLexicalStore.create()` が拡張・ロケールの前提を満たせなかったときに
- * 投げる例外。`reason`/`detail` は {@link TrigramLexicalProbeUnavailable} と同じ形で
- * 保持し、`catch` した側が文字列を読み取らずに分岐できるようにしてある。
+ * `PostgresTrigramLexicalStore.create()` が拡張・ロケールの前提を満たせなかったときに投げる例外。`reason`/`detail` は
+ * {@link TrigramLexicalProbeUnavailable} と同じ形で保持し、`catch` した側が文字列を読まずに分岐できる。
+ * `options?.cause` を渡すと、`Error` 標準の `cause` チェーンに乗る。
  *
- * [Issue #892](https://github.com/takecchi/mnemora/issues/892): `options?.cause` を渡すと、
- * `Error` 標準の `cause` チェーン（`super(message, options)`）に乗る。**新しい第3引数
- * であり、既存の2引数の呼び出し（`new TrigramLexicalStoreUnavailableError(reason, detail)`）は
- * 1バイトも変えずに動く**——`packages/local-embedding/src/errors.ts` の
- * `LocalEmbeddingProviderError` が `options?: ErrorOptions` を末尾に足したのと同じ形。
- *
- * ⚠ **`advisory-lock.ts` の `AdvisoryLockTimeoutError`/`AdvisoryLockUnavailableError`
- * （`constructor(message: string, cause: unknown)` — `cause` が必須の第2位置引数）には
- * 揃えていない。** 揃えると、このクラスの既存の呼び出し（`create()` の
- * `new TrigramLexicalStoreUnavailableError(probe.reason, probe.detail)`、`detail` は
- * `string | undefined` であり `cause` の位置ではない）が全て壊れる破壊的変更になる
- * ——`options?: ErrorOptions` を任意の第3引数として足す形のほうが非破壊で済む。
+ * **`advisory-lock.ts` の `AdvisoryLockTimeoutError`/`AdvisoryLockUnavailableError`（`cause` が必須の第2位置引数）には
+ * 揃えない。**揃えると、`detail`（`string | undefined`）を第2引数に渡す既存の呼び出しが全て壊れる破壊的変更になる。
+ * `options?: ErrorOptions` を任意の第3引数として足す形なら非破壊で済む。
  */
 export class TrigramLexicalStoreUnavailableError extends Error {
   /** 通らなかった理由（{@link TrigramLexicalUnavailableReason}）。機械判定はこの値で行う。 */
@@ -295,90 +175,59 @@ export class TrigramLexicalStoreUnavailableError extends Error {
 }
 
 /**
- * 自己一致検査に使う固定の日本語リテラル。**内容に意味は無い**——`word_similarity(x, x)`
- * が 1 になるかどうかだけを見る。同じ文字列同士の一致なので、トライグラムの粒度が
- * バイト単位であろうと文字単位であろうと、正しく動いていれば必ず 1 になる
- * （逆に、ロケールが日本語のトライグラムを1つも作れない場合——ADR 0084 §3.2 の `C`
- * ロケール——は `show_trgm` が空集合になり、空集合同士の類似度は `pg_trgm` の定義上 0 に
- * なる。**実測（この PR の作業者が手元の PostgreSQL で確認、下記「測定条件」参照）**:
- * `SQL_ASCII`/`C` の DB で `word_similarity('田中さんが会議に参加します',
- * '田中さんが会議に参加します')` は **0**、`UTF8`/`C.UTF-8` では **1**）。
+ * 自己一致検査に使う固定の日本語リテラル。内容に意味は無く、`word_similarity(x, x)` が 1 になるかだけを見る。
+ * ロケールが日本語のトライグラムを1つも作れない場合（`C` ロケール。ADR 0084 §3.2）は `show_trgm` が空集合になり、
+ * 空集合同士の類似度は `pg_trgm` の定義上 0 になる（`SQL_ASCII`/`C` の DB では 0、`UTF8`/`C.UTF-8` では 1）。
  */
 const JAPANESE_TRIGRAM_SELF_TEST_LITERAL = "田中さんが会議に参加します";
 
-/** 自己一致検査で「1」とみなす下限。浮動小数の誤差のためちょうど1ではなく閾値で見る。 */
+/** 自己一致検査で「1」とみなす下限。浮動小数の誤差のため、ちょうど1ではなく閾値で見る。 */
 const SELF_SIMILARITY_OK_THRESHOLD = 0.99;
 
 /**
  * `pg_trgm` が日本語の語彙照合に使える状態かどうかを確かめる。
  *
- * **副作用がある**: (ii) の検査の前提として `CREATE EXTENSION IF NOT EXISTS pg_trgm` を
- * 実際に発行する。これは「呼ぶこと自体が opt-in の意思表示である」という設計
- * （このファイル冒頭の doc）に基づく——呼ばれなければ `pg_trgm` は一切要求されない。
+ * **副作用がある**: (ii) の検査の前提として `CREATE EXTENSION IF NOT EXISTS pg_trgm` を実際に発行する。呼ぶこと自体が
+ * opt-in の意思表示で、呼ばれなければ `pg_trgm` は一切要求されない。
  *
  * 検査の順序（早い段階で弾けるものから）:
  * 1. `SHOW server_encoding` が `UTF8` か。
  * 2. `pg_available_extensions` に `pg_trgm` があるか。
- * 3. `CREATE EXTENSION IF NOT EXISTS pg_trgm`（`vector` 拡張のスキーマが分かり、それが現在の
- *    `search_path` の先頭と違うときは、そこへ `WITH SCHEMA` で入れる。Issue #1256、下記追記）が
- *    成功するか。
- * 4. 作った（または既にあった）`pg_trgm` が、この接続の `search_path` から見えるか
- *    （Issue #1256、下記追記、新設）。
- * 5. 日本語リテラルの自己一致（`word_similarity(x, x) >= 0.99`）が成り立つか
- *    （ADR 0084 §3.2 の「`C` ロケールで黙って0件になる」を検出する本体）。
+ * 3. `CREATE EXTENSION IF NOT EXISTS pg_trgm` が成功するか。`pg_extension`/`pg_namespace` から `vector` 拡張
+ *    （`runMigrations` が `extensionSchema` に入れたもの）のスキーマを引き、それが現在の `search_path` の先頭
+ *    （`current_schema()`）と違うときだけ `WITH SCHEMA "<そのスキーマ>"` を付ける（専用スキーマの構成で、どの名前空間から
+ *    呼んでも `pg_trgm` が `extensionSchema` に入り、全ての名前空間から見えるように）。`vector` が見つからない・
+ *    スキーマが同じときは、SQL は `SCHEMA` を指定しない。
+ * 4. 作った（または既にあった）`pg_trgm` が、この接続の `search_path`（`current_schemas(true)`）から見えるか
+ *    （見えなければ `extension_not_visible`。素の `42883` は出さない）。
+ * 5. 日本語リテラルの自己一致（`word_similarity(x, x) >= 0.99`）が成り立つか（ADR 0084 §3.2 の「`C` ロケールで
+ *    黙って0件になる」を検出する本体）。
  *
- * [Issue #892](https://github.com/takecchi/mnemora/issues/892): この関数自身は、公開の
- * {@link TrigramLexicalProbeResult}（`cause` を持たない）を返す薄いラッパーであり、
- * 元の Postgres エラーを運ぶのは export しない {@link probeTrigramLexicalSupportWithCause}
- * のほうである（{@link PostgresTrigramLexicalStore.create} が使う）。
- *
- * ⚠ **2026-09-29 追記（Issue #1256 の修正、今の振る舞い）: 手順3の `CREATE EXTENSION` は、
- * `pg_extension`/`pg_namespace` を読んで `vector` 拡張（`runMigrations` が `REQUIRED_EXTENSIONS`
- * として `extensionSchema` に入れたもの）のスキーマを引き、そのスキーマが現在の `search_path` の
- * 先頭（`current_schema()`）と違うときだけ `WITH SCHEMA "<そのスキーマ>"` を付けて `pg_trgm` を
- * 入れる。** `vector` が見つからないとき、または `vector` のスキーマが `current_schema()` と同じ
- * とき（`schema` を渡さない既定の構成で、`vector` が `search_path` の先頭のスキーマに在る場合。
- * ⚠ 既定の構成でも `vector` を先頭以外のスキーマに置いていれば、`pg_trgm` もそこへ入る——
- * 今までは先頭のスキーマに入っていた）は、発行する SQL 文字列は今日と1バイトも
- * 変わらない（`CREATE EXTENSION IF NOT EXISTS pg_trgm`、`SCHEMA` を指定しない。
- * `trigram-probe-dedicated-schema.postgres.test.ts` の「既定の構成で SQL 文字列が変わらない」歯
- * が縛る）。**⟹ 専用スキーマの構成で新しく作る DB は、どの名前空間から呼んでも `pg_trgm` は
- * `extensionSchema`（既定 `public`）に入り、全ての名前空間から見える。**
- *
- * **手順4（新設）: 作成後、`pg_trgm` がこの接続の `search_path`（`current_schemas(true)`）から
- * 見えるかを確かめる。** 見えなければ `{ ok: false, reason: "extension_not_visible", detail }`
- * を返す（`detail` は拡張が実際に入っているスキーマ名）——このバグが直る前に作られた DB など、
- * 既に別の名前空間へ `pg_trgm` が入ってしまっている場合に起きる。`create()` はこれを
- * {@link TrigramLexicalStoreUnavailableError} にして投げる。**もう素の `42883`（DB の名前の付かない
- * 例外）は出さない。** 直すには、拡張の権限を持つロールで
- * `ALTER EXTENSION pg_trgm SET SCHEMA <extensionSchema>` を実行する——ただし、`pg_trgm` を
- * 名前空間の中に入れたまま `DROP SCHEMA <schema> CASCADE` すると、拡張ごと消える
- * （`pg_trgm` がそのスキーマ内の依存物として扱われるため。【実測 2026-09-28】）。
- * 【実測 2026-09-29】`trigram-probe-dedicated-schema.postgres.test.ts`。
+ * この関数自身は、公開の {@link TrigramLexicalProbeResult}（`cause` を持たない）を返す薄いラッパーで、元の Postgres
+ * エラーを運ぶのは export しない {@link probeTrigramLexicalSupportWithCause}（{@link PostgresTrigramLexicalStore.create}
+ * が使う）のほうである。
  */
 export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult> {
   const result = await withExtensionLock(db, (tx) => probeTrigramLexicalSupportWithCause(tx));
   if (result.ok) {
     return result;
   }
-  // `cause` を落として公開の形（cause 無し）に揃える——分割代入で明示的に取り除く
-  // （公開の戻り値のオブジェクトに `cause` キーが漏れないことを、この行自体が保証する）。
+  // 公開の戻り値のオブジェクトに `cause` キーが漏れないよう、分割代入で明示的に取り除く。
   const { cause: _cause, ...publicResult } = result;
   return publicResult;
 }
 
 /**
- * `CREATE EXTENSION`・`CREATE OR REPLACE FUNCTION` は「在るか見る」と「作る」がアトミックではなく、
- * 別々の接続から同時に流すと 23505（`pg_extension_name_index`）や XX000（`tuple concurrently updated`）で
- * 落ちる。`body` を1つのトランザクションに包み、先頭で `migrate.ts` の {@link EXTENSION_LOCK_KEY} の
- * `pg_advisory_xact_lock` を取って直列にする（ADR 0430 決定1）。
+ * `CREATE EXTENSION`・`CREATE OR REPLACE FUNCTION` は「在るか見る」と「作る」がアトミックではなく、別々の接続から
+ * 同時に流すと 23505（`pg_extension_name_index`）や XX000（`tuple concurrently updated`）で落ちる。`body` を1つの
+ * トランザクションに包み、先頭で `migrate.ts` の {@link EXTENSION_LOCK_KEY} の `pg_advisory_xact_lock` を取って
+ * 直列にする（ADR 0430）。
  *
- * - **待ちに mnemora の上限は掛けない**（`lock_timeout` を敷かない・待ち時間切れの例外を足さない）。
- *   利用者の `lock_timeout` / `statement_timeout` は効く。
- * - `body` が返す結果（`ok: false` を含む）は、そのまま返す。`body` が投げれば、トランザクションは
- *   ロールバックされて同じ例外が出る。
- * - `CREATE EXTENSION` が失敗するとトランザクションは中断状態になる（25P02）。probe は失敗を値にして
- *   すぐ返すので、以降の SQL は流れない。
+ * - **待ちに mnemora の上限は掛けない**（`lock_timeout` を敷かない・待ち時間切れの例外を足さない）。利用者の
+ *   `lock_timeout` / `statement_timeout` は効く。
+ * - `body` が返す結果（`ok: false` を含む）は、そのまま返す。`body` が投げれば、ロールバックされて同じ例外が出る。
+ * - `CREATE EXTENSION` が失敗するとトランザクションは中断状態になる（25P02）。probe は失敗を値にしてすぐ返すので、
+ *   以降の SQL は流れない。
  */
 async function withExtensionLock<T>(db: Db, body: (tx: Db) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
@@ -388,11 +237,8 @@ async function withExtensionLock<T>(db: Db, body: (tx: Db) => Promise<T>): Promi
 }
 
 /**
- * {@link probeTrigramLexicalSupport} の内部専用の実体。判定のロジックは同じだが、
- * `extension_create_denied`/`extension_create_failed` のときは元の Postgres エラー
- * オブジェクトを `cause` に載せて返す（[Issue #892](https://github.com/takecchi/mnemora/issues/892)）。
- * **export しない**——公開するのは `cause` を持たない {@link probeTrigramLexicalSupport}
- * だけにする。
+ * {@link probeTrigramLexicalSupport} の内部専用の実体。`extension_create_denied`/`extension_create_failed` のときは
+ * 元の Postgres エラーオブジェクトを `cause` に載せて返す。**export しない。**
  */
 async function probeTrigramLexicalSupportWithCause(
   db: Db,
@@ -412,14 +258,8 @@ async function probeTrigramLexicalSupportWithCause(
   }
 
   try {
-    // Issue #1256: `vector` 拡張（`runMigrations` が `REQUIRED_EXTENSIONS` として
-    // `extensionSchema` に入れたもの）のスキーマを読み、それが現在の `search_path` の先頭
-    // （`current_schema()`）と違うときだけ、そこへ `WITH SCHEMA` で `pg_trgm` を入れる。
-    // `vector` が無い、またはスキーマが一致するとき（`schema` を渡さない既定の構成で、
-    // `vector` が `search_path` の先頭のスキーマに在る場合）は、発行する SQL 文字列を今日と
-    // 1バイトも変えない（`trigram-probe-dedicated-schema.postgres.test.ts` の歯が縛る）。
-    // ⚠ 既定の構成でも、`vector` を先頭以外のスキーマ（拡張専用のスキーマなど）に置いていれば、
-    // `pg_trgm` もそこへ入る（今までは先頭のスキーマに入っていた）。
+    // `vector` 拡張のスキーマが現在の `search_path` の先頭と違うときだけ、そこへ `WITH SCHEMA` で `pg_trgm` を入れる
+    // （`probeTrigramLexicalSupport` の doc 手順3）。
     const vectorSchemaResult = await db.execute(sql`
       SELECT n.nspname AS ext_schema, current_schema() AS cur_schema
       FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
@@ -431,10 +271,8 @@ async function probeTrigramLexicalSupportWithCause(
       vectorSchemaRow !== undefined &&
       vectorSchemaRow.ext_schema !== vectorSchemaRow.cur_schema
     ) {
-      // スキーマ名はカタログから読んだ値であり、mnemora が検証した名前とは限らない（利用者が
-      // `vector` を大文字や記号を含むスキーマに入れていることがある）。`assertSafeSchemaName` で
-      // 弾くと、今まで通っていた構成が `extension_create_failed` で落ちるようになるため、弾かずに
-      // `sql.identifier`（二重引用符で囲み、中の `"` を `""` にする）で識別子として埋め込む。
+      // スキーマ名はカタログから読んだ値で、mnemora が検証した名前とは限らない。`assertSafeSchemaName` で弾くと
+      // 今まで通っていた構成が `extension_create_failed` で落ちるので、弾かずに `sql.identifier` で識別子として埋め込む。
       await db.execute(
         sql`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA ${sql.identifier(vectorSchemaRow.ext_schema)}`,
       );
@@ -449,18 +287,13 @@ async function probeTrigramLexicalSupportWithCause(
         ? "extension_create_denied"
         : "extension_create_failed",
       detail: message,
-      // 元の Postgres エラーを保持する——`TrigramLexicalStoreUnavailableError.cause` に
-      // 渡すため（Issue #892）。他の3つの reason は値ベースの判定であり、そもそも
-      // Postgres のエラーオブジェクトを持たない。
+      // `TrigramLexicalStoreUnavailableError.cause` に渡すため、元の Postgres エラーを保持する。
       cause: err,
     };
   }
 
-  // Issue #1256（新設）: 作った（または既にあった）`pg_trgm` が、この接続の `search_path`
-  // から見えるかを確かめる。見えなければ、拡張が実際に入っているスキーマ名を `detail` に
-  // 入れて `extension_not_visible` を返す——このバグが直る前に作られた DB など、既に別の
-  // 名前空間へ `pg_trgm` が入ってしまっている場合に起きる。ここで検出せずに次の自己一致検査へ
-  // 進むと、`word_similarity` が見えない DB の素の例外（42883）になってしまう。
+  // 見えなければ、拡張が実際に入っているスキーマ名を `detail` に入れて返す。ここで検出せずに次の自己一致検査へ進むと、
+  // `word_similarity` が見えない DB の素の例外（42883）になる。
   const visibilityResult = await db.execute(sql`
     SELECT n.nspname AS ext_schema, n.nspname = ANY(current_schemas(true)) AS visible
     FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
@@ -488,15 +321,7 @@ async function probeTrigramLexicalSupportWithCause(
   return { ok: true };
 }
 
-// ---------------------------------------------------------------------------
-// SQL 関数のインストール（番号付き migration ではなく、opt-in の別口。Issue #278）
-// ---------------------------------------------------------------------------
-
-/**
- * クエリから非 ASCII の連なりを取り出す（前後の ASCII は空白に落とし、trim する）。
- * `mnemora_lexical_query_terms`（`migrations/0008`、非 ASCII を落として ASCII だけ残す）の
- * **逆方向**。空になれば SQL の `NULL` を返す——「非 ASCII 側の項が無い」を表す。
- */
+/** クエリから非 ASCII の連なりを取り出す（前後の ASCII は空白に落とし、trim する）。空なら `NULL`。`mnemora_lexical_query_terms` の**逆方向**。 */
 const TRIGRAM_QUERY_NONASCII_FUNCTION_SQL = sql`
   CREATE OR REPLACE FUNCTION mnemora_trigram_query_nonascii(text) RETURNS text AS $$
     SELECT nullif(btrim(regexp_replace($1, '[[:ascii:]]+', ' ', 'g')), '');
@@ -504,14 +329,9 @@ const TRIGRAM_QUERY_NONASCII_FUNCTION_SQL = sql`
 `;
 
 /**
- * 自然文の質問に頻出する語尾・助詞を削る、**小さく非網羅的な**キュレーションリスト。
- * 形態素解析器ではない——見つかった具体的な語を正規表現の選言で並べているだけである。
- *
- * 選定根拠: このファイル冒頭の doc「🔴 【実測】機能語のトライグラムが雑音になる」の実測に
- * 使った質問文（`examples/chat/src/probe-set.ts` の `PROBES` の `query` を含む）から、
- * 削ると target/noise の分離が改善した語を採った。**このリストを増やしたいときは、
- * 実測（target の word_similarity が上がり、noise が下がること）を伴わせること**——
- * 「日本語っぽい語尾を足す」だけでは分離が良くなる保証がない。
+ * 自然文の質問に頻出する語尾・助詞を削る、**小さく非網羅的な**キュレーションリスト。形態素解析器ではない。
+ * 増やすときは、実測（target の `word_similarity` が上がり、noise が下がること）を伴わせること。「日本語っぽい語尾を
+ * 足す」だけでは分離が良くなる保証がない。
  */
 export const TRIGRAM_NOISE_STOPWORD_PATTERN =
   "について|でしたか|ましたか|でしょうか|ませんか|ますか|ですか|ください|という|" +
@@ -525,24 +345,14 @@ const TRIGRAM_STRIP_NOISE_FUNCTION_SQL = sql.raw(`
 `);
 
 /**
- * ASCII 側（`mnemora_lexical_coverage`、`migrations/0009`。常設のベーススキーマの関数を
- * **そのまま呼ぶ**、書き直さない）と日本語側（`mnemora_trigram_query_nonascii` +
- * `mnemora_trigram_strip_noise`、上記2関数）を `GREATEST`（affinity と同じ max 合成、
- * ADR 0084 §5）で混ぜる。**分子/分母を足す形は採らなかった**——このファイル冒頭の doc
- * 「日本語（非 ASCII）部分の意味論」の「🔴 最初の実装は…」を見ること（ASCII パリティの
- * 歯が実際に赤くなって発覚した）。
+ * ASCII 側（`mnemora_lexical_coverage`。**書き直さず、そのまま呼ぶ**）と日本語側（`mnemora_trigram_query_nonascii` +
+ * `mnemora_trigram_strip_noise`）を `GREATEST` で混ぜる。分子/分母を足す形は採らない（モジュール冒頭の doc）。
+ * `threshold` は GUC に頼らず引数で取る。
  *
- * `threshold` を引数に取る（GUC に頼らない）——このファイルの外から呼ばれる場合にも
- * 閾値の受け渡しが明示的になる。
- *
- * **⚠ Issue #878（2026-09-26）: この関数は `ensureTrigramLexicalFunctions` により
- * 引き続きインストールされるが、`buildTrigramLexicalSearchSelect` はもう直接呼ばない。**
- * `mnemora_lexical_coverage(content, query)` を候補行ごとに呼んでおり、`packages/postgres`
- * の `lexical-store.ts`（`buildLexicalSearchSelect`）が Issue #878 で直したのと同じ形の
- * 再計算（`query` の分解を行ごとにやり直す）をここでも抱えていた。`buildTrigramLexicalSearchSelect`
- * は同じ式を、事前に1回だけ計算した配列を受け取る形にインライン展開して呼ぶ
- * （下記参照）——この関数自体は書き換えていない（**互換のためインストールは続ける**が、
- * 内部の呼び出し経路からは外れている）。
+ * **この関数は `ensureTrigramLexicalFunctions` で引き続きインストールするが、`buildTrigramLexicalSearchSelect` は
+ * もう直接呼ばない。**`mnemora_lexical_coverage(content, query)` を候補行ごとに呼ぶと `query` の分解を行ごとに
+ * やり直すため、同じ式を事前に1回だけ計算した配列を受け取る形にインライン展開している。この関数自体は互換のために
+ * 残している。
  */
 const TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL = sql`
   CREATE OR REPLACE FUNCTION mnemora_trigram_hybrid_coverage(content text, query text, threshold float8)
@@ -561,22 +371,17 @@ const TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL = sql`
 `;
 
 /**
- * `PostgresTrigramLexicalStore` が使う SQL 関数をインストールする（`CREATE OR REPLACE
- * FUNCTION`、冪等）。`PostgresTrigramLexicalStore.create()` が内部で呼ぶ——呼び出し側が
- * 個別に呼ぶ必要は無い。`migrations/*.sql` には**足していない**（このファイル冒頭の doc
- * 「何を変えないか」参照）。
+ * `PostgresTrigramLexicalStore` が使う SQL 関数をインストールする（`CREATE OR REPLACE FUNCTION`、冪等）。
+ * `PostgresTrigramLexicalStore.create()` が内部で呼ぶので、呼び出し側が個別に呼ぶ必要は無い。`migrations/*.sql` には
+ * 足さない。
  *
- * **索引は含まない。**`CREATE INDEX` は {@link createOptionalTrigramIndex} という別の口に
- * 分けてある——`memories` は行数が大きくなりうるため（`docs/roadmap.md` §5）、索引の作成
- * （`ShareLock` を取り書き込みだけを止めうる——素の `CREATE INDEX` が `ACCESS EXCLUSIVE`
- * を取るという以前の記述は ADR 0062 (c) の2026-09-29追記で訂正済み）を関数のインストールと
- * 同じタイミングで強制しない（`migrations/0008_memories_lexical_index.sql` が生成列を
- * 避けた理由と同じ配慮）。
+ * **索引は含まない。**`CREATE INDEX` は {@link createOptionalTrigramIndex} という別の口に分けてある。`memories` は
+ * 行数が大きくなりうるので、索引の作成（`ShareLock` を取り、書き込みだけを止めうる）を関数のインストールと同じ
+ * タイミングで強制しない。
  */
 export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
-  // ADR 0430 決定1: `CREATE OR REPLACE FUNCTION` も同時呼び出しでは XX000（`tuple concurrently updated`）で
-  // 落ちるので、{@link withExtensionLock} の中で流す（`create()` の中からは、既に取った lock の中の
-  // 入れ子になる——同じセッションの advisory lock は重ねて取れる）。
+  // `CREATE OR REPLACE FUNCTION` も同時呼び出しでは XX000（`tuple concurrently updated`）で落ちるので、
+  // {@link withExtensionLock} の中で流す（`create()` の中からは入れ子になるが、同じセッションの advisory lock は重ねて取れる）。
   await withExtensionLock(db, async (tx) => {
     await tx.execute(TRIGRAM_QUERY_NONASCII_FUNCTION_SQL);
     await tx.execute(TRIGRAM_STRIP_NOISE_FUNCTION_SQL);
@@ -585,31 +390,12 @@ export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
 }
 
 /**
- * `memories.content` に `gin_trgm_ops` の GIN 索引を張る、**完全に任意の**性能向上策。
+ * `memories.content` に `gin_trgm_ops` の GIN 索引を張る、**完全に任意の**性能向上策。呼ばなくても
+ * {@link PostgresTrigramLexicalStore.search} は正しい結果を返す（Seq Scan になるだけ）。`WHERE` の日本語側の述語を
+ * `content %> $ja` という pg_trgm の演算子の形にしてあり、この索引が無くても意味は変わらない。
  *
- * 呼ばなくても {@link PostgresTrigramLexicalStore.search} は正しい結果を返す
- * （Seq Scan になるだけ）——`WHERE` の日本語側の述語は `content %> $ja` という pg_trgm の
- * 演算子の形にしてあり（`buildTrigramLexicalSearchSelect` 参照）、この索引が無くても
- * 意味は変わらない。
- *
- * 【実測】手元の PostgreSQL 17.11（20,000行、`content` にクエリ語を含む行が1行だけの
- * 表）で、この索引と同じ形（`USING gin (tenant_id, content gin_trgm_ops)`）を張り、
- * `SET pg_trgm.word_similarity_threshold = 0.3` の下で
- * `... WHERE tenant_id = $1 AND status IN ('active','contested') AND content %> $2` を
- * `EXPLAIN` すると、`Bitmap Index Scan` が選ばれることを確認した（`tenant_id`/`content`
- * の両方が `Index Cond` に入る）。**索引が無い場合との実行時間の比較（`EXPLAIN ANALYZE`）は
- * 測っていない**——プランがビットマップ索引スキャンに変わることまでは実測したが、
- * 秒単位の速度差は確かめていない（ADR 0319「確かめていないこと」）。
- *
- * `CONCURRENTLY` は付けない——`packages/postgres` の migration がトランザクション内で
- * 各ファイルを実行するのと同じ理由がここにも当たる可能性があるため、呼び出し側が
- * 自分のトランザクション管理に合わせて選べるよう、単純な `CREATE INDEX` にしてある。
- * 大きな `memories` に対して実行する場合は、呼び出し側が `CONCURRENTLY` 付きの索引を
- * 別途自分で組み立てることもできる——この関数はあくまで「動く最小形」を提供するだけで
- * あり、唯一の経路として使うことを強制しない。
- *
- * ⟹ **`CONCURRENTLY` 付きで張りたい呼び出し側のために、
- * {@link createOptionalTrigramIndexConcurrently} を別に用意した**（この関数の SQL は変えていない）。
+ * `CONCURRENTLY` は付けない（呼び出し側が自分のトランザクション管理に合わせて選べるよう、単純な `CREATE INDEX` にする）。
+ * `CONCURRENTLY` 付きで張りたい呼び出し側のために {@link createOptionalTrigramIndexConcurrently} を別に用意している。
  */
 export async function createOptionalTrigramIndex(db: Db): Promise<void> {
   await db.execute(sql`
@@ -621,27 +407,22 @@ export async function createOptionalTrigramIndex(db: Db): Promise<void> {
 
 /**
  * {@link createOptionalTrigramIndex} と**同じ形の索引**（名前・`gin (tenant_id, content gin_trgm_ops)`・
- * `WHERE status IN ('active', 'contested')`）を、`CREATE INDEX CONCURRENTLY` で張る。
- * `memories` への `INSERT`/`UPDATE`/`DELETE` を止めない（`ShareUpdateExclusiveLock`。素の版は
- * `ShareLock` で書き込みを止める。歯: `trigram-index-concurrently-lock-mode.postgres.test.ts`）。
+ * `WHERE status IN ('active', 'contested')`）を、`CREATE INDEX CONCURRENTLY` で張る。`memories` への書き込みを
+ * 止めない（`ShareUpdateExclusiveLock`。素の版は `ShareLock` で書き込みを止める）。
  *
- * ⚠ **トランザクションの外で呼ぶこと。**`CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY` は
- * トランザクションブロックの中では実行できない（Postgres が拒否する）。`db` には
- * `db.transaction(...)` の `tx` ではなく、プール由来の `Db` を渡す。migration の経路には
- * 載せない（Issue #760 で、`CONCURRENTLY` を流せる migration の経路は作らないと決めた）。
+ * **トランザクションの外で呼ぶこと。**`CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY` はトランザクション
+ * ブロックの中では実行できない。`db` には `db.transaction(...)` の `tx` ではなく、プール由来の `Db` を渡す。
+ * migration の経路には載せない。
  *
- * **前回の `CONCURRENTLY` が失敗・中断すると、`indisvalid = false` の索引が残る**（`IF NOT EXISTS` は
- * 名前だけを見るので、残ったまま何もせず返ってしまい、検索には使われない索引が居座る）。
- * そこでこの関数は、`memories` と同じスキーマに INVALID な `idx_memories_trigram` が在れば
- * `DROP INDEX CONCURRENTLY` で消してから作り直す。VALID な索引が既にあれば何もしない
+ * **前回の `CONCURRENTLY` が失敗・中断すると、`indisvalid = false` の索引が残る**（`IF NOT EXISTS` は名前だけを見るので、
+ * 残ったまま何もせず返り、検索に使われない索引が居座る）。そこで、`memories` と同じスキーマに INVALID な
+ * `idx_memories_trigram` が在れば `DROP INDEX CONCURRENTLY` で消してから作り直す。VALID な索引が既にあれば何もしない
  * （冪等）。
  *
- * ⚠ **複数の呼び出し元が同時に呼んだときの競合（片方が DROP している間に他方が CREATE する等）は
- * 防いでいない**（ADR 0319 2026-09-30 追記「確かめていないこと」）。
+ * **複数の呼び出し元が同時に呼んだときの競合（片方が DROP している間に他方が CREATE する等）は防いでいない。**
  */
 export async function createOptionalTrigramIndexConcurrently(db: Db): Promise<void> {
-  // `CREATE INDEX` は索引をテーブルと同じスキーマに作るので、`memories`（search_path で解決）と
-  // 同じスキーマの `idx_memories_trigram` だけを見る。
+  // `CREATE INDEX` は索引をテーブルと同じスキーマに作るので、`memories` と同じスキーマの `idx_memories_trigram` だけを見る。
   const invalid = await db.execute(sql`
     SELECT format('%I.%I', n.nspname, c.relname) AS qualified_name
       FROM pg_index i
@@ -663,70 +444,30 @@ export async function createOptionalTrigramIndexConcurrently(db: Db): Promise<vo
   `);
 }
 
-// ---------------------------------------------------------------------------
-// search() の SELECT 組み立て
-// ---------------------------------------------------------------------------
-
-/** {@link PostgresTrigramLexicalStore} の既定の word_similarity 閾値。根拠はこのファイル冒頭の doc「⟹ 緩和策」を見ること。 */
+/** {@link PostgresTrigramLexicalStore} の既定の word_similarity 閾値。根拠はモジュール冒頭の doc（サンプル数は小さい）。 */
 export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
 
 /**
- * `PostgresTrigramLexicalStore.search` が打つ `SELECT` を組み立てる。
- * `PostgresLexicalStore`（`./lexical-store.ts`）の `buildLexicalSearchSelect` と
- * 同じ理由で本体から切り出してある（`EXPLAIN` の歯が同じ関数を使うため）。
+ * `PostgresTrigramLexicalStore.search` が打つ `SELECT` を組み立てる。`buildLexicalSearchSelect` と同じ理由で本体から
+ * 切り出してある（`EXPLAIN` の歯が同じ関数を使うため）。
  *
- * `WHERE` の各条件は `buildLexicalSearchSelect` と**同じ形・同じ意味**に揃えている
- * （`LexicalFilter` の doc「`VectorFilter` と同じ絞りを、同じ意味で持つ」の推移律）。
- * ただし、このファイル冒頭の doc「なぜフィルタ条件の組み立てを複製するか」の通り、
- * `lexical-store.ts` のコードは1行も import せず、独立に書いている。
+ * `WHERE` の各条件は `buildLexicalSearchSelect` と同じ形・同じ意味に揃えるが、`lexical-store.ts` のコードは import せず
+ * 独立に書く（モジュール冒頭の doc）。`opts.ctxTenantId` も同じ欄・同じ意味。
  *
- * `threshold` は呼び出しの都度指定できる（`PostgresTrigramLexicalStore` のコンストラクタで
- * 固定した値を渡す）。同じ値を、日本語側の `WHERE` 述語（`content %> $ja`、
- * `pg_trgm.word_similarity_threshold` セッション変数に依存）と `coverage`/`rank` の計算
- * （明示引数）の両方に使う——`search()` がトランザクション内で
- * `pg_trgm.word_similarity_threshold` を先に設定する（`set_config(…, true)`）ことが前提
- * （`PostgresTrigramLexicalStore.search` 参照）。
+ * `threshold` は、日本語側の `WHERE` 述語（`content %> $ja`。`pg_trgm.word_similarity_threshold` セッション変数に依存）と
+ * `coverage`/`rank` の計算（明示引数）の両方に使う。`search()` がトランザクション内で
+ * `pg_trgm.word_similarity_threshold` を先に設定する（`set_config(…, true)`）ことが前提。
  *
- * **🔴 Issue #878（2026-09-26、クローン miku の判断）: ASCII 側の語数・語ごとの文字数に
- * 上限を置く。**`capLexicalQueryWords`（`./lexical-query-cap.ts`、`lexical-store.ts` と
- * 共有）を通した `asciiQuery` を、ASCII 側の呼び出し（`mnemora_lexical_query_or`/
- * `mnemora_lexical_query_tsqueries`）にだけ使う。**日本語側（`jaTerm`）には
- * `capLexicalQueryWords` を通さない**——`capLexicalQueryWords` は非 ASCII を落とす前提の
- * 関数であり（ASCII 側と同じ「クエリ側は非 ASCII を落とす」非対称、
- * `mnemora_lexical_query_terms` と同じ理由）、日本語側に通すと日本語の語彙が消えてしまう。
- * **代わりに、日本語側には別の文字数の上限（{@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）を
- * `LEFT(...)` で直接掛ける**——`mnemora_trigram_query_nonascii` が抽出した非 ASCII の
- * 連なりにも上限を置いた（`TRIGRAM_JAPANESE_QUERY_MAX_CHARS` の doc 参照）。
+ * **ASCII 側にだけ `capLexicalQueryWords` を通す。日本語側（`jaTerm`）には通さない。**`capLexicalQueryWords` は
+ * 非 ASCII を落とす前提の関数で、日本語側に通すと日本語の語彙が消える。代わりに日本語側には別の文字数の上限
+ * （{@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）を `LEFT(...)` で直接掛ける。クエリ全体の文字数の上限は、ASCII 側・日本語側の
+ * 両方に同じ1つの上限として効く（`lexical-query-cap.ts`）。
  *
- * **🔴 Issue #878（同日中の見直し）: `query` 全体の文字数にも上限
- * （`LEXICAL_QUERY_MAX_TOTAL_CHARS`）を置いた。**ASCII 側・日本語側の両方に
- * 同じ1つの上限として効かせる——`asciiQuery`（`capLexicalQueryWords` 経由で内部的に
- * 適用）と `jaTerm`（`totalCappedQuery` を明示的に経由）のどちらも、この上限を
- * 通った後の文字列を基にする（`lexical-query-cap.ts` の
- * `LEXICAL_QUERY_MAX_TOTAL_CHARS` の doc 参照）。
- *
- * **🔴 Issue #878: ASCII 側の `coverage` も、行ごとの再計算をやめた。**
- * `mnemora_trigram_hybrid_coverage(content, query, threshold)` を直接呼ぶ代わりに、
- * `mnemora_lexical_query_tsqueries(asciiQuery)` を `WITH qc AS MATERIALIZED (...)` で
- * 1回だけ計算し、その式を `mnemora_trigram_hybrid_coverage` の本体と同じ形
- * （`GREATEST(ASCII側, 日本語側)`）にインライン展開して使う——`lexical-store.ts` の
- * `buildLexicalSearchSelect` と同じ理由・同じ形（そちらの doc 参照）。
- *
- * **`WHERE`/`rank` 側（`asciiTsQuery`/`jaTerm`）は、`qc`（1回だけ計算する CTE）を
- * 使わない形のままにしてある**——`lexical-store.ts` で実測したのと同じ理由
- * （`query` の具体的な値がプランナから見える形を保ち、`idx_memories_lexical`/
- * `idx_memories_trigram` の選択を壊さないため）。`qc` を `WHERE`/`rank` には使わず、
- * `coverage` の中身だけに使う形は変えていない——`jaTerm` に `LEFT(...)`（文字数の上限）を
- * 足したことは、この形自体には影響しない（`LEFT` も `query` の束縛パラメータだけに
- * 依存する IMMUTABLE な式であり、他リレーションの列参照にはしていない）。
- * 索引の歯（`trigram-lexical-store-index.postgres.test.ts`）がそのまま通ることを確認している。
- * ⚠ 2026-09-28 訂正（[Issue #1260](https://github.com/takecchi/mnemora/issues/1260)）: 以前はこの歯の在りかを
- * `trigram-lexical-store.postgres.test.ts` と書いていたが、そのファイルにも他のどこにも歯は無かった。
- * `lexical-store-index.test.ts` と同じ作法で、上の名前のファイルに置いた。
- *
- * **Issue #1050: `opts.ctxTenantId` は `buildLexicalSearchSelect` と同じ欄・同じ意味**
- * （`filter.tenantId` との AND。`PostgresTrigramLexicalStore.search` は常に `ctx.tenantId`
- * を渡す。省略すれば従来どおり）。
+ * `coverage` は `lexical-store.ts` と同じ理由で、`mnemora_lexical_query_tsqueries(asciiQuery)` を
+ * `WITH qc AS MATERIALIZED (...)` で1回だけ計算し、`mnemora_trigram_hybrid_coverage` の本体と同じ形
+ * （`GREATEST(ASCII側, 日本語側)`）にインライン展開して使う。`WHERE`/`rank` 側（`asciiTsQuery`/`jaTerm`）は `qc` を使わない
+ * 形のままにする。`query` の具体的な値をプランナから見える形に保ち、`idx_memories_lexical`/`idx_memories_trigram` の選択を
+ * 壊さないため（`LEFT(...)` も束縛パラメータだけに依存する IMMUTABLE な式で、他リレーションの列参照ではないので影響しない）。
  */
 export function buildTrigramLexicalSearchSelect(
   query: string,
@@ -737,8 +478,7 @@ export function buildTrigramLexicalSearchSelect(
     ctxTenantId?: string | undefined;
   },
 ): SQL {
-  // Issue #878: 全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc）は
-  // ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
+  // 全体の文字数の上限は、ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
   const totalCappedQuery = capLexicalQueryTotalChars(query);
   const asciiQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
@@ -758,8 +498,6 @@ export function buildTrigramLexicalSearchSelect(
   if (opts.filter.attributes !== undefined) {
     conditions.push(sql`attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
   }
-  // Issue #201 PR-B（ADR 0323）: `PostgresLexicalStore.search`（lexical-store.ts）・
-  // `PostgresVectorStore.search`（vector-store.ts）と同じ述語・同じ意味（配列の重なり演算子）。
   if (opts.filter.labels !== undefined) {
     conditions.push(sql`tags && ${sql.param(opts.filter.labels)}::text[]`);
   }
@@ -788,27 +526,16 @@ export function buildTrigramLexicalSearchSelect(
   }
 
   const asciiTsQuery = sql`mnemora_lexical_query_or(${asciiQuery})`;
-  // Issue #878: mnemora_trigram_query_nonascii には query そのものではなく
-  // totalCappedQuery（全体の文字数の上限を通した後の文字列）を渡す——ASCII 側と
-  // 同じ1つの上限を日本語側にも効かせるため（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc
-  // 参照）。上限に触れない大多数のクエリでは totalCappedQuery === query であり、
-  // 挙動は変わらない。
-  //
-  // mnemora_trigram_query_nonascii が抽出した非 ASCII の連なりに、word_similarity へ
-  // 渡す前に LEFT(...) で別の文字数の上限をかける（TRIGRAM_JAPANESE_QUERY_MAX_CHARS の
-  // doc 参照）。mnemora_trigram_strip_noise は切り詰めた**後**の文字列に掛ける——
-  // 上限に触れない大多数の日本語クエリでは LEFT(...) が no-op になり、strip_noise の
-  // 入力は今までと1バイトも変わらない。上限に触れる場合は、切り詰め後の短い文字列に
-  // strip_noise を掛けるほうが軽い（**⚠ この順序により、切り詰め境界のすぐ手前に
-  // ノイズ語尾の一部が残ることがある**——strip_noise の正規表現は完全な語形を
-  // 対象にしており、途中で切れた断片までは除去しない。上限に触れるクエリでのみ
-  // 起きる、副作用として引き受けた挙動である）。
+  // `mnemora_trigram_query_nonascii` には `query` でなく `totalCappedQuery` を渡す（日本語側にも全体の上限を効かせる）。
+  // 抽出した非 ASCII の連なりに、`word_similarity` へ渡す前に `LEFT(...)` で別の文字数の上限をかけ、
+  // `mnemora_trigram_strip_noise` は切り詰めた**後**の文字列に掛ける（上限に触れるとき、短い文字列に掛けるほうが軽い）。
+  // この順序により、切り詰め境界のすぐ手前にノイズ語尾の一部が残ることがある（`strip_noise` は完全な語形を対象にし、
+  // 途中で切れた断片は除去しない）。上限に触れるクエリでのみ起きる、引き受けた挙動である。
   const jaTerm = sql`mnemora_trigram_strip_noise(LEFT(mnemora_trigram_query_nonascii(${totalCappedQuery}), ${TRIGRAM_JAPANESE_QUERY_MAX_CHARS}))`;
 
-  // ASCII 側は既存経路と同じ述語（式索引 idx_memories_lexical がそのまま選ばれる）。
-  // 日本語側は pg_trgm の演算子形（`content %> $ja`）——`createOptionalTrigramIndex` の
-  // GIN 索引がプランナに選ばれるのはこの演算子形のときだけ（`word_similarity(...)` を
-  // 関数として書くと索引は使われない。このファイル冒頭の doc「【実測】」参照）。
+  // ASCII 側は既存経路と同じ述語（式索引 `idx_memories_lexical` がそのまま選ばれる）。日本語側は pg_trgm の演算子形
+  // （`content %> $ja`）。`createOptionalTrigramIndex` の GIN 索引がプランナに選ばれるのはこの演算子形のときだけで、
+  // `word_similarity(...)` を関数として書くと索引は使われない。
   conditions.push(sql`(
     mnemora_lexical_tsvector(content) @@ ${asciiTsQuery}
     OR (${jaTerm} IS NOT NULL AND content %> ${jaTerm})
@@ -859,33 +586,21 @@ export function buildTrigramLexicalSearchSelect(
   `;
 }
 
-// ---------------------------------------------------------------------------
-// LexicalStore 実装
-// ---------------------------------------------------------------------------
-
 /**
- * `LexicalStore` の pg_trgm 版 opt-in 実装。`PostgresLexicalStore` を置き換えるものでは
- * なく、**導入側が明示的に選ぶ差し替え**である（`interfaces/lexical-store.ts` の doc
- * 「`LexicalStore` を差し替え可能にすることで逃げ道を開ける」、ADR 0084 §3.4）。
+ * `LexicalStore` の pg_trgm 版 opt-in 実装。`PostgresLexicalStore` を置き換えるものではなく、**導入側が明示的に選ぶ
+ * 差し替え**である（ADR 0084 §3.4）。
  *
- * 生成は必ず {@link PostgresTrigramLexicalStore.create} を経由すること——`new` を直接
- * 公開していないのは、静かな0件（このファイル冒頭の doc）を作れないようにするため。
+ * 生成は必ず {@link PostgresTrigramLexicalStore.create} を経由すること。`new` を直接公開していないのは、静かな0件を
+ * 作れないようにするため。
  *
- * `search` の `ORDER BY` は `PostgresLexicalStore` と同じ4段
- * （`coverage DESC, rank DESC, recorded_at DESC, id`。
- * [ADR 0175](../../../docs/decisions/0175-lexical-search-tiebreak-nondeterminism.md) の
- * 決定的な全順序を保つ）。`rank` はこの adapter の内部でしか比較できない値である
- * （`LexicalHit.rank` の doc、ADR 0084 §5）——ASCII の `ts_rank_cd` と日本語の
- * `word_similarity` を単純に足しているだけであり、両者の尺度が本質的に同じという主張は
- * していない。
+ * `search` の `ORDER BY` は `PostgresLexicalStore` と同じ4段（`coverage DESC, rank DESC, recorded_at DESC, id`。ADR 0175）。
+ * `rank` はこの adapter の内部でしか比較できない値（`LexicalHit.rank` の doc、ADR 0084 §5）で、ASCII の `ts_rank_cd` と
+ * 日本語の `word_similarity` を単純に足しているだけであり、両者の尺度が本質的に同じという主張はしない。
  *
- * **`coverage` の尺度**: `GREATEST(ASCII 側, 日本語側)`。ASCII 側は `PostgresLexicalStore` と同じ
- * 1/n 刻み（一致した語の数 ÷ 語の総数）。**日本語側は `word_similarity(日本語の部分, content) >=
- * threshold` なら 1、そうでなければ 0 の二値**で、日本語の複数語は語ごとに数えない
- * （非 ASCII の連なり全体が1つの項）。**`word_similarity` の値そのものは `coverage` に入らず、
- * `rank` に入る。**ASCII の語がいくつあっても、日本語側が当たれば `coverage` は 1 になる。
- * 3つの store の対応と測った値は
- * [ADR 0553](../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
+ * **`coverage` の尺度**: `GREATEST(ASCII 側, 日本語側)`。ASCII 側は `PostgresLexicalStore` と同じ 1/n 刻み。
+ * **日本語側は `word_similarity(日本語の部分, content) >= threshold` なら 1、そうでなければ 0 の二値**で、日本語の複数語は
+ * 語ごとに数えない（非 ASCII の連なり全体が1つの項）。`word_similarity` の値そのものは `coverage` に入らず、`rank` に入る。
+ * ASCII の語がいくつあっても、日本語側が当たれば `coverage` は 1 になる。3つの store の対応は ADR 0553。
  */
 export class PostgresTrigramLexicalStore implements LexicalStore {
   private constructor(
@@ -894,21 +609,16 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
   ) {}
 
   /**
-   * `pg_trgm` の前提（拡張・ロケール）を確かめ、満たせなければ
-   * {@link TrigramLexicalStoreUnavailableError} を投げる。満たせれば、この store が使う
-   * SQL 関数（{@link ensureTrigramLexicalFunctions}）をインストールしてから返す。
-   *
-   * **索引（{@link createOptionalTrigramIndex}）はここでは作らない**——呼び出し側が
-   * 別途、自分のタイミングで呼ぶ（このファイル冒頭の doc「なぜフィルタ条件の組み立てを
-   * 複製するか」の下、`ensureTrigramLexicalFunctions` の doc参照）。
+   * `pg_trgm` の前提（拡張・ロケール）を確かめ、満たせなければ {@link TrigramLexicalStoreUnavailableError} を投げる。
+   * 満たせれば、この store が使う SQL 関数（{@link ensureTrigramLexicalFunctions}）をインストールしてから返す。
+   * **索引（{@link createOptionalTrigramIndex}）はここでは作らない**（呼び出し側が自分のタイミングで呼ぶ）。
    */
   static async create(
     db: Db,
     opts?: { threshold?: number | undefined },
   ): Promise<PostgresTrigramLexicalStore> {
-    // ADR 0430 決定1: probe の `CREATE EXTENSION` と関数のインストールを、1つのトランザクションの中で
-    // `EXTENSION_LOCK_KEY` の advisory lock の下に置く。失敗（`ok: false`）は値で返してから、
-    // トランザクションの外で今までと同じ例外にする。
+    // probe の `CREATE EXTENSION` と関数のインストールを、1つのトランザクションの中で `EXTENSION_LOCK_KEY` の
+    // advisory lock の下に置く（ADR 0430）。失敗（`ok: false`）は値で返してから、トランザクションの外で例外にする。
     const probe = await withExtensionLock(db, async (tx) => {
       const result = await probeTrigramLexicalSupportWithCause(tx);
       if (result.ok) {
@@ -917,10 +627,8 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
       return result;
     });
     if (!probe.ok) {
-      // `probe.cause` は `extension_create_denied`/`extension_create_failed` のときだけ
-      // 値を持つ（Issue #892）。無いときは `options` を渡さない——`{ cause: undefined }` を
-      // 常に渡すと、`"cause" in error` が意味もなく true になる（値は `undefined` のまま）
-      // ため、渡すこと自体を条件で分ける。
+      // `probe.cause` が無いときは `options` を渡さない（`{ cause: undefined }` を常に渡すと、`"cause" in error` が
+      // 意味もなく true になる）。
       throw new TrigramLexicalStoreUnavailableError(
         probe.reason,
         probe.detail,
@@ -943,16 +651,12 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
   ): Promise<LexicalHit[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedFilter(opts.filter, "opts.filter");
-    // 穴 O-6-1（ADR 0424）: 検索語の NUL は、DB に触れる前に明示の例外で断る。
     assertNoNul("PostgresTrigramLexicalStore.search", "query", query);
     assertNoNulInScopeFilter("PostgresTrigramLexicalStore.search", opts.filter, "opts.filter");
     const threshold = this.threshold;
-    // `content %> $ja` は `pg_trgm.word_similarity_threshold`（セッション変数）を読む。
-    // `set_config(name, value, true)` で設定する——値はパラメータで渡し、第3引数の `true`
-    // で、このトランザクションの中だけに効かせる（`SET LOCAL` と同じ。トランザクションの外には
-    // 残らない）。同一トランザクション・同一接続で、設定と本体の SELECT を発行する必要がある
-    // ——`db.transaction` はコールバックの間ずっと同じ接続を使うことを drizzle-orm が保証する
-    // （`memory-store.ts` の各 `db.transaction` 呼び出しと同じ前提）。
+    // `content %> $ja` は `pg_trgm.word_similarity_threshold`（セッション変数）を読むので、`set_config(name, value, true)`
+    // で、このトランザクションの中だけに効かせて設定する。設定と本体の SELECT は、同一トランザクション・同一接続で
+    // 発行する必要がある。
     return omittingParams(() =>
       this.db.transaction(async (tx) => {
         await tx.execute(

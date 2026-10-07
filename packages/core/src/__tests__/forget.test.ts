@@ -8,19 +8,7 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.forget`（Issue #102）の歯。
- *
- * 設計の要点（`runtime.ts` の `ForgetOutcome`/`forget` の doc コメント参照）:
- * - 論理削除のみ。行も `content` も消えない——`status` を `'forgotten'` にし、
- *   `memory_events` へ `kind: 'forgotten'` を同一トランザクションで積む。
- * - 冪等: 既に `forgotten` なら書き込みをしない（`already_forgotten`）。
- * - 6つの `kind` を潰さない（`not_found` / `already_forgotten` / `not_attempted` を
- *   区別する理由は `ForgetOutcome` の doc コメント）。
- * - `recall()` 側は一切変更していない——歯②で裏取りする。
- *
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -140,16 +128,8 @@ describe("runtime.forget — 冪等性", () => {
   });
 
   /**
-   * 🔴 **この歯は `outcomes` を見ない。往復の回数を数える。**
-   *
-   * `forget` は書き込みが成功するたびにローカルの写しを更新するので、同じ呼び出しの中の
-   * 2回目の出現は `already_forgotten` へ**書き込みを撃たずに**落ちる。
-   *
-   * ⚠ **その写しを消しても `outcomes` は変わらない**——2回目は古い status で CAS を撃ち、
-   * 弾かれ、読み直して同じ `already_forgotten` に着く。変異試験でそれを確かめた（ADR 0087）。
-   * ⟹ 上の歯（`outcomes` と件数を見る歯）**だけでは、この最適化は一切測れていない。**
-   * 買っているのは「必ず失敗する UPDATE 1回 + 読み直しの SELECT 1回」を DB へ飛ばさないことなので、
-   * **測るべきは呼び出し回数のほうである。**
+   * この歯は `outcomes` を見ず、往復の回数を数える。ローカルの写しを消しても `outcomes` は変わらない（2回目は古い status で CAS を撃ち、弾かれ、読み直して同じ `already_forgotten` に着く）ので、
+   * `outcomes` と件数を見る歯だけではこの最適化は測れない。買っているのは「必ず失敗する UPDATE 1回 + 読み直しの SELECT 1回」を DB へ飛ばさないことなので、呼び出し回数を測る。
    */
   it("重複した id は、2回目に書き込みも読み直しも撃たない（往復を増やさない）", async () => {
     const { runtime, stores } = buildRuntime();
@@ -175,13 +155,8 @@ describe("runtime.forget — 冪等性", () => {
           };
         }
         if (prop === "getMany") {
-          // 🔴 **本物の store を模す**——行を読み直すたびに新しいオブジェクトが返る。
-          // `FakeMemoryStore` は `memories` Map の**同じ参照**を返し、`updateStatus*` は
-          // その場で `memory.status = status` と書き換える（`runtime-fakes.ts`）。
-          // ⟹ 素の fake では `forget` のローカルの写しが**古くなりようがなく**、
-          // 写しを更新する行を消しても何も壊れない（変異試験 M6 が生き残る）。
-          // **これは fake の性質であって、本物の Postgres の性質ではない。**
-          // 複製を挟んで初めて、この歯は測るべきものを測る。
+          // 本物の store を模して、行を読み直すたびに新しいオブジェクトを返す。素の `FakeMemoryStore` は `memories` Map の同じ参照を返し、
+          // `updateStatus*` がその場で書き換えるので、`forget` のローカルの写しが古くなりようがなく、写しを更新する行を消しても何も壊れない（fake の性質であって Postgres の性質ではない）。
           return async (...args: Parameters<MemoryStore["getMany"]>) =>
             (await target.getMany(...args)).map((m) => structuredClone(m));
         }
@@ -206,9 +181,7 @@ describe("runtime.forget — 冪等性", () => {
     const result = await runtimeCounting.forget(ctx, { memoryIds: [memory.id, memory.id] });
 
     expect(result.outcomes.map((o) => o.kind)).toEqual(["forgotten", "already_forgotten"]);
-    // 1回目だけが書き込む。2回目は撃たない。
     expect(updateCalls).toBe(1);
-    // 読み直し（競合の始末）は一度も起きない——競合していないのだから起きてはいけない。
     expect(getCalls).toBe(0);
   });
 });
@@ -341,15 +314,7 @@ describe("runtime.forget — status のバリエーション", () => {
 });
 
 describe("runtime.forget — 並行（updateStatusWithEvent が MemoryStatusConflictError を投げる）", () => {
-  /**
-   * `getMany` で読んだ後、実際に `updateStatusWithEvent` を撃つまでの間に別の書き込みが
-   * 割り込んだ状況を、既存のテスト用フック `FakeMemoryStore.beforeUpdateStatus`
-   * （`runtime.test.ts` の reextract TOCTOU の歯と同じもの）で再現する。`createMemory` が
-   * 返す `Memory` オブジェクトは `FakeMemoryStore` 内部の Map に格納されているものと
-   * **同一の参照**なので、フックの中でその `status` を書き換えると
-   * `updateStatusWithEvent` 内部の読み直しが新しい値を見て CAS が自然に破れる
-   * ——本番コード（`runtime.ts`）には一切手を入れていない。
-   */
+  /** 既存のテスト用フック `FakeMemoryStore.beforeUpdateStatus` で、`getMany` の後・`updateStatusWithEvent` の前に別の書き込みが割り込んだ状況を再現する。本番コード（`runtime.ts`）には手を入れない。 */
   it("再読すると forgotten になっている ⟹ already_forgotten", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
@@ -387,10 +352,7 @@ describe("runtime.forget — 並行（updateStatusWithEvent が MemoryStatusConf
   it("再読すると行が消えていた（get が null を返す）⟹ not_found・再試行ループにしない", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
-    // 1回目の get（updateStatusWithEvent 内部、CAS 判定用）は普通に応答させ、
-    // status を不一致にして CAS を破る。2回目の get（forget の再読）だけ null を
-    // 返すよう、このテストに限って `get` をインスタンス単位で差し替える
-    // （`runtime.test.ts` が `updateStatusWithEvent` を丸ごと差し替えるのと同じ作法）。
+    // 1回目の get（CAS 判定用）は普通に応答させて status を不一致にし、2回目の get（forget の再読）だけ null を返すよう、このテストに限って `get` をインスタンス単位で差し替える。
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === memory.id) {
         // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
@@ -470,13 +432,6 @@ describe("runtime.forget — recall() との裏取り（recall 側は変更し�
 });
 
 describe("runtime.forget — CAS が破れた後の再読そのものが失敗する", () => {
-  /**
-   * `forget` の doc コメントは「例外はこのメソッドの外へは投げない」と約束している。
-   * CAS が破れたときの1回だけの再読（`memoryStore.get`）が DB 接続断等で失敗しても、
-   * それは「競合以外の例外」であり、`failed` を積んで打ち切り、残りを `not_attempted`
-   * として返す——先に書き込みが確定した要素（ここでは1件目の `forgotten`）を
-   * 例外で呼び出し側から見えなくしない。
-   */
   it("2件目の再読で get が投げても [forgotten, failed, not_attempted]・例外は伝播しない", async () => {
     const { runtime, stores } = buildRuntime();
     const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
@@ -487,7 +442,6 @@ describe("runtime.forget — CAS が破れた後の再読そのものが失敗�
         stores.memoryStore.liveRowForTest(ctx, m2.id)!.status = "archived"; // ADR 0562: 返り値は写し
       }
     };
-    // m2 への get の1回目は updateStatusWithEvent 内部（CAS 判定用）、2回目が forget の再読。
     let m2GetCalls = 0;
     const originalGet = stores.memoryStore.get.bind(stores.memoryStore);
     stores.memoryStore.get = async (c, id) => {
@@ -515,11 +469,6 @@ describe("runtime.forget — CAS が破れた後の再読そのものが失敗�
 });
 
 describe("runtime.forget — ループ前の一括読み（getMany）が失敗する（Issue #964）", () => {
-  /**
-   * 「例外はこのメソッドの外へは投げない」はループ前の読みにも掛かる。まだ1件も書いて
-   * いないので、1件目を `failed`、残りを `not_attempted` として返す（CAS 破れの後の再読の
-   * 失敗と同じ打ち切り、PR #960）。
-   */
   it("getMany が投げても [failed, not_attempted, not_attempted]・例外は伝播せず・書き込み0件", async () => {
     const { runtime, stores } = buildRuntime();
     const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));

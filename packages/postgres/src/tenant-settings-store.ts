@@ -26,13 +26,10 @@ import type { Db } from "./client.js";
 import { omittingParams } from "./omit-params.js";
 
 /**
- * `TenantSettingsStore` の Postgres 実装（roadmap.md 段階3。`getEventRetention`/
- * `setEventRetention` は `docs/decisions/0050-tenant-event-retention.md` で追加）。
+ * `TenantSettingsStore` の Postgres 実装。
  *
- * `tenant_settings` に行が無いテナントは `DEFAULT_HALF_LIFE_HOURS`（DB 側の
- * `default_half_life_hours DEFAULT 720` と同じ値）を返す。DB の DEFAULT はあくまで
- * 「行が作られたとき」に効くものであり、行そのものが無い場合には効かないため、
- * アプリケーション側でも同じフォールバック値を持つ必要がある。
+ * `tenant_settings` に行が無いテナントは、DB の DEFAULT が効かない（行が作られたときにしか効かない）ので、
+ * アプリケーション側で同じ値のフォールバック（`DEFAULT_HALF_LIFE_HOURS` など）を返す。
  */
 export class PostgresTenantSettingsStore implements TenantSettingsStore {
   constructor(private readonly db: Db) {}
@@ -70,15 +67,13 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
     assertWellFormedCtx(ctx);
-    // Issue #1168: 型の外の kind を、無期限として書かずに拒む（decay_clock・taxonomy と同じ形）。
+    // 型の外の kind を、無期限として書かずに拒む。
     assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
       assertValidEventRetentionDays(retention.days);
     }
     const days = retention.kind === "days" ? retention.days : null;
-    // `default_half_life_hours`/`taxonomy_mode` は指定しない——行が無い場合は DB 側の
-    // DEFAULT（720 / 'open'）に任せる（マイグレーションを足さないため、この列にだけ
-    // 値を書く UPSERT にする）。
+    // 他の列は指定しない（行が無ければ DB 側の DEFAULT に任せる）。
     await omittingParams(() =>
       this.db.execute(sql`
       INSERT INTO tenant_settings (tenant_id, event_retention_days, updated_at)
@@ -89,10 +84,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     );
   }
 
-  /**
-   * ADR 0165 決めたこと1・13: `tenant_settings.decay_clock` の現在値。行が無ければ
-   * `DEFAULT_DECAY_CLOCK`（`'wall'`）——`getDefaultHalfLifeHours` と同じ規律。
-   */
+  /** `tenant_settings.decay_clock` の現在値。行が無ければ `DEFAULT_DECAY_CLOCK`。 */
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
     assertWellFormedCtx(ctx);
     const result = await omittingParams(() =>
@@ -104,18 +96,12 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       return DEFAULT_DECAY_CLOCK;
     }
     const row = result.rows[0] as unknown as { decay_clock: string };
-    // DB 側の CHECK 制約（migrations/0015）がこの列を3値に限定しているため、ここでの
-    // asserts は「読み直した値が予期しない値だった」ことを検出する防御であって、
-    // 通常経路では常に通る。
+    // CHECK 制約がこの列を限定しているので、通常経路では常に通る防御。
     assertValidDecayClock(row.decay_clock);
     return row.decay_clock;
   }
 
-  /**
-   * ADR 0165 決めたこと13: 不正な値は `assertValidDecayClock`（core 共有）で拒む。
-   * `event_retention_days`/`default_half_life_hours`/`default_half_life_recalls` は
-   * 指定しない——行が無い場合は DB 側の DEFAULT に任せる（`setEventRetention` と同じ形）。
-   */
+  /** 不正な値は `assertValidDecayClock`（core 共有）で拒む。他の列は指定しない（行が無ければ DB 側の DEFAULT に任せる）。 */
   async setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidDecayClock(clock);
@@ -129,10 +115,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     );
   }
 
-  /**
-   * ADR 0165 決めたこと3・13: `tenant_settings.default_half_life_recalls` の現在値。
-   * 行が無ければ `DEFAULT_HALF_LIFE_RECALLS`（720）——`getDefaultHalfLifeHours` と同じ規律。
-   */
+  /** `tenant_settings.default_half_life_recalls` の現在値。行が無ければ `DEFAULT_HALF_LIFE_RECALLS`。 */
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
     assertWellFormedCtx(ctx);
     const result = await omittingParams(() =>
@@ -148,21 +131,16 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md):
-   * `tenant_settings.default_half_life_recalls` を設定する（UPSERT。行が無ければ作る）。
-   * `setDecayClock`（上）と**完全に同じ形**——不正な値は `assertValidHalfLifeRecalls`
-   * （core 共有）で拒む。`event_retention_days`/`default_half_life_hours`/`decay_clock` は
-   * 指定しない——行が無い場合は DB 側の DEFAULT に任せる（`setDecayClock`/`setEventRetention`
-   * と同じ形）。
+   * `tenant_settings.default_half_life_recalls` を設定する（UPSERT。ADR 0197）。不正な値は
+   * `assertValidHalfLifeRecalls`（core 共有）で拒む。
    *
-   * ⚠ **この列は新規作成時の初期値としてのみ使われる**（migrations/0015 の doc・
-   * `getDefaultHalfLifeRecalls` の doc 参照）。この呼び出しは既存 Memory の
-   * `half_life_recalls`/`decay_floor_seq` を1件も書き換えない。
+   * **この列は新規作成時の初期値としてのみ使われる。**既存 Memory の `half_life_recalls`/`decay_floor_seq` は
+   * 1件も書き換えない。
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidHalfLifeRecalls(recalls);
-    // 列は `real`（float4）。収まらない値は DB の生の例外でなく明示の例外で断る（testkit と同じ判定）。
+    // 列は `real`（float4）。収まらない値は DB の生の例外でなく明示の例外で断る。
     assertHalfLifeRecallsFitsFloat4("PostgresTenantSettingsStore", recalls);
     await omittingParams(() =>
       this.db.execute(sql`
@@ -175,15 +153,11 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0165 決めたこと2・5・13: `tenant_activity.activity_seq` の現在値。行が無ければ
-   * `0`（`decay_clock` を一度も `'wall'` 以外に設定していないテナントの既定）。
-   * **読み出し専用**——進めるのは `PostgresMemoryStore.createRecall`
-   * （`advanceActivityClock: true`）だけである。
+   * `tenant_activity.activity_seq` の現在値。行が無ければ `0`。**読み出し専用**で、進めるのは
+   * `PostgresMemoryStore.createRecall`（`advanceActivityClock: true`）だけ。
    *
-   * `activity_seq` は `bigint` 列。node-postgres は `bigint`（OID 20）を精度損失を避けるため
-   * 文字列で返す——`Number()` で変換する（`tenant_activity.activity_seq` が
-   * `Number.MAX_SAFE_INTEGER` を超える運用は想定していない。recall 呼び出し回数の
-   * カウンタであり、そこまで到達する前に他の限界に当たる）。
+   * `bigint` 列は node-postgres が文字列で返すので `Number()` で変換する
+   * （`Number.MAX_SAFE_INTEGER` を超える運用は想定しない）。
    */
   async getActivitySeq(ctx: Ctx): Promise<number> {
     assertWellFormedCtx(ctx);
@@ -200,11 +174,8 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `tenant_subject_activity` に、このテナントの行が1本でもあるか。
-   * **`EXISTS` だけを見る**——`activity_seq` の値そのものは読まない（呼び出し側は
-   * `getSubjectActivitySeqs` を別途呼ぶ）。主キーの先頭列（`tenant_id`）で引けるので
-   * 追加の索引は要らない。
+   * `tenant_subject_activity` に、このテナントの行が1本でもあるか（ADR 0353）。`EXISTS` だけを見て
+   * `activity_seq` の値は読まない。
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
     assertWellFormedCtx(ctx);
@@ -217,16 +188,12 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `tenant_subject_activity.activity_seq`（`S_x`）を、渡した
-   * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略する
-   * （`readSubjectActivitySeqs`（core）が `0` へ倒す）。
-   *
-   * `activity_seq` は `bigint` 列——`getActivitySeq` と同じ理由で `Number()` に変換する。
+   * `tenant_subject_activity.activity_seq` を、渡した `subjectIds` についてまとめて読む（ADR 0353）。
+   * 行が無い `subjectId` はキーを省略する（`readSubjectActivitySeqs`（core）が `0` へ倒す）。
    */
   async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     assertWellFormedCtx(ctx);
-    // ADR 0437 決定2: `subjectIds` の各要素も識別子の検査の内側に置く（読む前に断る）。
+    // `subjectIds` の各要素も識別子の検査の内側に置く（読む前に断る。ADR 0437）。
     subjectIds.forEach((id, i) => assertWellFormedIdentifier(id, `subjectIds[${i}]`));
     if (subjectIds.length === 0) {
       return {};
@@ -247,10 +214,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     return out;
   }
 
-  /**
-   * Issue #201 / ADR 0318: `tenant_settings.taxonomy_mode` の現在値。行が無ければ
-   * `DEFAULT_TAXONOMY_MODE`（`'open'`）——`getDecayClock` と同じ規律。
-   */
+  /** `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`。 */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
     assertWellFormedCtx(ctx);
     const result = await omittingParams(() =>
@@ -262,19 +226,12 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       return DEFAULT_TAXONOMY_MODE;
     }
     const row = result.rows[0] as unknown as { taxonomy_mode: string };
-    // DB 側の CHECK 制約（migrations/0001_init.sql）がこの列を2値に限定しているため、
-    // ここでの assert は「読み直した値が予期しない値だった」ことを検出する防御であって、
-    // 通常経路では常に通る（`getDecayClock` と同じ形）。
+    // CHECK 制約がこの列を限定しているので、通常経路では常に通る防御。
     assertValidTaxonomyMode(row.taxonomy_mode);
     return row.taxonomy_mode;
   }
 
-  /**
-   * Issue #201 / ADR 0318: 不正な値は `assertValidTaxonomyMode`（core 共有）で拒む。
-   * `event_retention_days`/`default_half_life_hours`/`decay_clock`/
-   * `default_half_life_recalls` は指定しない——行が無い場合は DB 側の DEFAULT に任せる
-   * （`setDecayClock` と同じ形）。
-   */
+  /** 不正な値は `assertValidTaxonomyMode`（core 共有）で拒む。他の列は指定しない（行が無ければ DB 側の DEFAULT に任せる）。 */
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
     assertWellFormedCtx(ctx);
     assertValidTaxonomyMode(mode);
@@ -288,11 +245,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     );
   }
 
-  /**
-   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
-   * `TenantSettingsStore.eraseTenant?` の実装。`tenant_settings` は `tenant_id` が
-   * PK なので高々1行——`reachedLimit` は常に `false`（interface doc 参照）。
-   */
+  /** `TenantSettingsStore.eraseTenant?` の実装（ADR 0383）。`tenant_id` が PK なので高々1行で、`reachedLimit` は常に `false`。 */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
     assertWellFormedCtx(ctx);
     if (opts.dryRun === true) {

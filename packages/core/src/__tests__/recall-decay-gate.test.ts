@@ -11,18 +11,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import type { FakeVectorStore } from "./runtime-fakes.js";
 
-/**
- * 忘却ゲート（decay floor gate）の歯（マネージャー決定、Issue #196 /
- * [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
- *
- * ADR 0011「Phase 1 では `decayFloorAtAfter` を読み取りフィルタに使わない」を
- * ADR 0153 が明示的に上書きした——recall は既定でこのゲートを有効にする
- * （opt-in ではなく opt-out。`RecallQuery.includeFullyDecayed`）。
- *
- * `recall-period-filter.test.ts`（ADR 0059）と同型: `packages/core` 自身のテストなので
- * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- * DB を要さないため手元で実行できる。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭と同じ理由）。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -110,11 +99,6 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-// ---------------------------------------------------------------------------
-// 配線の歯: 既定で段1の filter に decayFloorAtAfter = now が渡り、
-// includeFullyDecayed:true で undefined に戻る。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 段1の filter に decayFloorAtAfter が載ること（配線の歯、ADR 0153）", () => {
   it("既定（includeFullyDecayed 未指定）では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る", async () => {
     const { runtime, stores } = buildRuntime();
@@ -137,10 +121,6 @@ describe("recall() — 段1の filter に decayFloorAtAfter が載ること（�
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐ 本命の歯: ゲートが実際に何を変えるか（ANN チャンネル）。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チャンネル、ADR 0153）", () => {
   it("decayFloorAt が過去（減衰しきった）記憶は既定では返らず、omitted にも explain にも黙って消えない", async () => {
     const { runtime, stores } = buildRuntime();
@@ -159,10 +139,6 @@ describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チ�
     expect(ids).toContain(alive.id);
     expect(ids).not.toContain(decayed.id);
 
-    // ⭐ Issue #329 / ADR 0173: 段1（ANN）の push-down が候補集合そのものから除いていても、
-    // **`omitted` は名乗る。** 件数は段5の `aggregateScope` が、押し下げと同じ述語で
-    // 厳密に数える（`countKind: "exact"`）。
-    // **この歯が反転した経緯と、なぜ反転が正しいのかは ADR 0173 に書いてある。**
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -210,10 +186,7 @@ describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チ�
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐ 語彙チャンネル: LexicalFilter は decayFloorAtAfter を持たない
-// （マネージャー決定3）ので、core の後置フィルタだけがゲートを担う。
-// ---------------------------------------------------------------------------
+// `LexicalFilter` は `decayFloorAtAfter` を持たないので、語彙チャンネルでは core の後置フィルタだけがゲートを担う。
 
 describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語で効く（後置フィルタ、ADR 0153）", () => {
   it("語彙チャンネルだけを使っても、減衰しきった記憶は既定では返らず、omitted に filtered(decayed) が実測件数で出る", async () => {
@@ -245,11 +218,8 @@ describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語
     expect(ids).toContain(alive.id);
     expect(ids).toHaveLength(1);
 
-    // ⚠ 件数を偽らない: `LexicalFilter` は decayFloorAtAfter を持たないので
-    // `FakeLexicalStore`（postgres 実装と同じく LexicalFilter の契約のみを見る）は
-    // decayed-lexical もヒットとして返し、core の後置フィルタがそれを落とす。
-    // **件数はその後置フィルタからではなく、段5の `aggregateScope` から出る**
-    // （Issue #329 / ADR 0173。両方から数えると二重計上になる）——⟹ `exact`。
+    // `FakeLexicalStore` は decayed も返し、core の後置フィルタがそれを落とす。件数は後置フィルタからではなく
+    // 段5の `aggregateScope` から出す（両方から数えると二重計上になる）。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -293,16 +263,8 @@ describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐⭐ 検算: 押し下げと後置フィルタが同じ述語であること（マネージャー決定3）。
-//
-// `DecayFloorAtAfterStrippingVectorStore` は `PeriodStrippingVectorStore`
-// （recall-period-filter.test.ts、ADR 0059）と同じ手口——`opts.filter` から
-// `decayFloorAtAfter` **だけ**を剥がしてから委譲する。これは「段1の adapter が
-// ADR 0034 の契約（filter を実際に適用する）を守らなかった」状況を歯の中だけで
-// 再現するものであり、本番コード（recall-runtime.ts / vector-store.ts）は
-// 1文字も変えない。
-// ---------------------------------------------------------------------------
+// `DecayFloorAtAfterStrippingVectorStore` は `opts.filter` から `decayFloorAtAfter` だけを剥がして委譲する。
+// 段1の adapter が filter を適用しない状況を再現し、押し下げと後置フィルタが同じ述語であることを確かめる。
 
 class DecayFloorAtAfterStrippingVectorStore implements VectorStore {
   constructor(private readonly inner: VectorStore) {}
@@ -355,10 +317,6 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(decayed.id);
-    // ここでは ANN の adapter がゲートを守らなかったぶん、候補が core の後置フィルタまで
-    // 届いている。⭐ Issue #329 / ADR 0173 の後は、**届いたかどうかに関わらず件数は同じ**
-    // ——数えているのは後置フィルタではなく段5の `aggregateScope` だからである。
-    // （下の歯が、押し下げが効いている通常の配線でも同じ値になることを対で固定する。）
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -369,11 +327,6 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
   });
 
   it("⭐ 通常の配線（adapter が正しく押し下げる）でも、壊れた adapter のときと同じ件数を名乗る（段1と段5が同じ述語を見ていることの検算）", async () => {
-    // ⭐ Issue #329 / ADR 0173: この歯は以前「後置フィルタは追加で何も落とさない」を
-    // 固定していた（`filtered(decayed)` が1件も積まれないこと）。それは**実装がそうである**
-    // ことの記録であって、**そうあるべきである**ことを定めた歯ではなかった——そして
-    // その実態は、既定の ANN 単独経路で記憶が名乗り無く消えるという、北極星 項目6 と
-    // 正面から食い違う状態だった（Issue #329）。今はその逆を固定する。
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], {
       digest: "decayed",
@@ -386,8 +339,6 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
-    // (a) count が scope の実際の減衰件数（1件）と一致する。
-    // (b) countKind は "exact"。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -395,8 +346,6 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
       count: 1,
       countKind: "exact",
     });
-    // 押し下げは1バイトも外していない——候補集合そのものから除かれていることを
-    // stages 側からも見る（「後置で拾ったから数えられた」のではないことの確認）。
     const annTrace = result.explain.stages.find(
       (s) => s.stage === "candidate_generation" && s.detail?.["channel"] === "ann",
     );
@@ -423,9 +372,6 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
   });
 
   it("⭐ 件数は scope に従う: subjectId で絞ると、その subject の減衰件数だけを数える", async () => {
-    // `filtered(decayed)` が「テナント全体の減衰件数」ではなく「この scope の減衰件数」で
-    // あることを固定する。scope を無視して数える実装（例: tenant 全体を数える SQL）は
-    // ここで赤くなる。
     const { runtime, stores } = buildRuntime();
     const past = new Date(NOW.getTime() - 1_000);
     for (const subjectId of ["alice", "alice", "bob"]) {
@@ -455,22 +401,14 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐⭐ ADR 0165: 活動時計（decay_clock）の歯。
-//
-// 下の歯はどれも「壁時計は永久に生きる設定（decayFloorAt が遠い未来）」にしたうえで
-// `decayFloorSeq`/`decayBaseSeq` だけを操作する——`halfLifeRecalls` は Memory に載せない
-// ままにしておく。段2の `computeDecay`（scoring.ts）は `decayBaseSeq`/`halfLifeRecalls`
-// の両方が揃っていないと活動時計を使わず壁時計へフォールバックするので、この歯の対象
-// （段1のゲート・後置フィルタ）に段2のスコア変動が混ざらない。
-// ---------------------------------------------------------------------------
+// 下の歯は壁時計を永久に生きる設定にして `decayFloorSeq`/`decayBaseSeq` だけを操作する。`halfLifeRecalls` を載せないのは、
+// 段2の `computeDecay` が両方揃わないと壁時計へフォールバックするため（段2のスコア変動を混ぜない）。
 
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100); // +100年、壁時計では絶対に沈まない
 
 describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと1）", () => {
   it("'wall'（既定）のテナントでは decayFloorSeq が割れていても無視する", async () => {
     const { runtime, stores } = buildRuntime();
-    // decay_clock を明示的に設定しない = 既定 'wall'。
     const alive = await createEmbeddedMemory(stores, [1, 0], {
       digest: "wall-alive-activity-dead",
       decayFloorAt: FAR_FUTURE,
@@ -496,11 +434,6 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(dead.id);
-    // ⭐ Issue #329 / ADR 0173: **活動時計の軸でも、段1の押し下げと段5の集約が一致する。**
-    // `FakeVectorStore` は `decayFloorSeqAfter` を正しく段1へ押し下げるのでこの候補は
-    // 候補集合そのものから外れるが、`aggregateScope` が**同じ軸の述語**で数えるため
-    // `omitted` は exact で名乗る。⚠ ADR 0173 の実測は全行 `wall` でしか取っていない
-    // ——この軸を埋めるのはこの歯である。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -523,8 +456,6 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
-    // ⭐ 鳴ってはいけない側（活動時計）: 1件も沈んでいないのだから、集約も0件でなければ
-    // ならない。
     expect(result.omitted).not.toContainEqual(
       expect.objectContaining({ kind: "filtered", condition: "decayed" }),
     );
@@ -558,9 +489,7 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
-    // ⭐ 'either' は OR（最も緩い）。壁時計が生きているのだから落ちていない——
-    // 集約側で AND/OR を取り違えると（`NOT (wall OR seq)` を `NOT wall OR NOT seq` と
-    // 書くと）ここが 1 件を名乗って赤くなる。**これが段1と段5の述語一致の検算そのもの。**
+    // 'either' は OR（最も緩い）: 壁時計が生きているので落ちていない。集約側で AND/OR を取り違えると 1 件を名乗って赤くなる。
     expect(result.omitted).not.toContainEqual(
       expect.objectContaining({ kind: "filtered", condition: "decayed" }),
     );
@@ -579,8 +508,6 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
-    // ⭐ 'either' は OR: 活動時計が生きているので落ちていない（壁時計だけを見る集約は
-    // ここで 1 件を名乗って赤くなる）。
     expect(result.omitted).not.toContainEqual(
       expect.objectContaining({ kind: "filtered", condition: "decayed" }),
     );
@@ -599,7 +526,6 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
 
     expect(result.memories.map((m) => m.memoryId)).not.toContain(dead.id);
-    // ⭐ 'either' で両軸とも沈んだときだけ、集約は 1 件を名乗る。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "decayed",
@@ -689,8 +615,6 @@ describe("recall() — 非破壊性: RecallRuntimeDeps.tenantSettingsStore を�
 
     const result = await runRecall(ctx, { vector: [1, 0], limit: 10 }, deps);
 
-    // tenantSettingsStore が無いので decay_clock は読めず 'wall' 固定——
-    // decayFloorAt が遠い未来である限り、decayFloorSeq の値に関わらず生き残る。
     expect(result.memories.map((m) => m.memoryId)).toContain(memory.id);
     const annTrace = result.explain.stages.find(
       (s) => s.stage === "candidate_generation" && s.detail?.["channel"] === "ann",
@@ -699,36 +623,17 @@ describe("recall() — 非破壊性: RecallRuntimeDeps.tenantSettingsStore を�
   });
 });
 
-/**
- * ⭐⭐⭐ いちばん大事な歯（マネージャー指示）: **'activity' 単独で「素通りされ続けた記憶が
- * 速く沈む」ことを示す。** 多忙なテナント（recall() が何度も起きて activity_seq が
- * 速く進む）では、壁時計なら生きている記憶が活動時計では床を割る。
- *
- * `advanceActivityClock`（`NewRecallRecord`、ADR 0165 決めたこと5）は `decay_clock` が
- * `'wall'` 以外のテナントの `recall()` 呼び出しごとに `activity_seq` を+1する
- * ——`FakeMemoryStore.createRecall` と `FakeTenantSettingsStore.getActivitySeq` が
- * 同じ `FakeBackingStore.activitySeq` を共有することで、この歯はスタブを1つも追加せず
- * 本番と同じ配線（`recall-runtime.ts` の `advanceActivityClock: decayClock !== "wall"`）を
- * そのまま通す。
- */
 describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶は壁時計より速く沈む（多忙なテナント）", () => {
   /**
-   * ⚠ **意図的に語彙チャンネルを使う（ANN ではない）。** `LexicalFilter` は
-   * `decayFloorAtAfter`/`decayFloorSeqAfter` のどちらも持たない（マネージャー決定3）ため、
-   * 段1の押し下げに助けられる余地が無く、`recall-runtime.ts` の `survivesDecayGate`
-   * （後置フィルタそのもの）だけがこの歯を通す。ANN チャンネルだと `FakeVectorStore` が
-   * 段1で正しく押し下げてしまい、`survivesDecayGate` を素通りしても歯が気づけない
-   * ——実測: `survivesDecayGate` の 'activity' 分岐を壊す変異（`activityAxisAlive` の
-   * 代わりに `wallAxisAlive` を返す）を注入したところ、ANN 版のこの歯は**赤くならなかった**
-   * （段1の押し下げが先に候補を落としていたため）。この歯は同じ変異で確実に赤くなる。
+   * 意図的に語彙チャンネルを使う（ANN ではない）: `LexicalFilter` は `decayFloorAtAfter`/`decayFloorSeqAfter` を持たず、
+   * 段1の押し下げに助けられないので、後置フィルタ（`survivesDecayGate`）だけがこの歯を通す。
+   * ANN だと段1の押し下げが先に候補を落とし、後置の述語の変異に気づけない。
    */
   it("壁時計なら生きているはずの記憶が、activity_seq の前進（recall の繰り返し）だけで沈む", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
 
-    // decayBaseSeq=0, decayFloorSeq=3: 3回 recall が起きた時点(nowSeq=3)で
-    // `decayFloorSeq(3) > nowSeq(3)` が false になり沈む。壁時計側は FAR_FUTURE で
-    // 「何回 recall しても絶対に沈まない」設定にしてある——対比のための対照条件。
+    // decayBaseSeq=0, decayFloorSeq=3: nowSeq=3 で沈む。壁時計側は FAR_FUTURE で絶対に沈まない設定にした対照条件。
     const target = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -741,21 +646,15 @@ describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶
     );
     const query: RecallQuery = { text: "gemstone", channels: ["lexical"], limit: 10 };
 
-    // 1回目: nowSeq=0 (activity_seq はまだ1回も進んでいない)。3>0 で生存。
     const first = await runtime.recall(ctx, query);
     expect(first.memories.map((m) => m.memoryId)).toContain(target.id);
 
-    // 2回目: nowSeq=1(1回目の recall で+1された)。3>1 で生存。
     const second = await runtime.recall(ctx, query);
     expect(second.memories.map((m) => m.memoryId)).toContain(target.id);
 
-    // 3回目: nowSeq=2。3>2 で、まだぎりぎり生存。
     const third = await runtime.recall(ctx, query);
     expect(third.memories.map((m) => m.memoryId)).toContain(target.id);
 
-    // 4回目: nowSeq=3。3>3 は false——ここで初めて沈む。
-    // ⚠ この記憶自身は一度も参照されていない(素通りされ続けている)——4回とも
-    // 「別のクエリのついでに候補窓へ入ったが、この記憶自体は使われなかった」を模している。
     const fourth = await runtime.recall(ctx, query);
     expect(fourth.memories.map((m) => m.memoryId)).not.toContain(target.id);
     expect(fourth.omitted).toContainEqual(
@@ -765,7 +664,6 @@ describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶
 
   it("対照条件: 同じ4回の recall を 'wall' のテナントに対して行うと、壁時計だけを見るので何回呼んでも沈まない", async () => {
     const { runtime, stores } = buildRuntime();
-    // decay_clock を設定しない = 既定 'wall'。decayFloorSeq を割っていても無視される。
     const target = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -783,8 +681,6 @@ describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶
       expect(result.memories.map((m) => m.memoryId)).toContain(target.id);
     }
 
-    // 'wall' のテナントでは activity_seq が1本も進んでいないことも検算する
-    // (ADR 0165 決めたこと5「advanceActivityClock は decay_clock != 'wall' のテナントに限る」)。
     expect(await stores.tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
   });
 });

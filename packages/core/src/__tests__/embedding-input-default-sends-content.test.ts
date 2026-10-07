@@ -7,15 +7,6 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RuntimeDeps.embeddingInput` を渡さないとき、`embed()` へ送る文字列は `memory.content`
- * そのものである（ADR 0336・`runtime.ts` の `embeddingInput` の TSDoc「省略時は `memory.content`
- * をそのまま送る」。Issue #1775 の #834）。
- *
- * 既存の歯は「何を送ったか」をフックを渡した構成でしか見ていない。`content` と `digest` が
- * 違う記憶で、送った文字列が `content` であることを見る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const LATER = new Date(Date.now() + 60_000);
 

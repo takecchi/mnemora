@@ -6,17 +6,6 @@ import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #984: 段2で `below_threshold` に数えられた候補が、段3.5（連想）の候補プールに
- * 入ったが席（`maxCount`）に着けなかった場合、同じ1件が `below_threshold`（`nearMisses` にも
- * 載る）と `over_limit(stage:"association")` の両方に数えられていた。
- *
- * ADR 0203 追記4（Issue #949）が `over_limit(stage:"rescore")` について決めた処置を
- * `below_threshold` にも当てる——この経路の「最後の段」は段3.5 なので、
- * `over_limit(stage:"association")` 側に1回だけ残し、`below_threshold` の `count` と
- * `nearMisses` からは取り下げる（作法は ADR 0203「決めたこと」5 と同じ）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -101,9 +90,7 @@ describe("recall() — 段3.5 の候補プールで席に着けなかった belo
     const { runtime, stores } = buildRuntime();
 
     const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
-    // アンカー（クエリとの類似度 0.6 で段2を通る）。
     const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
-    // どちらもクエリとの類似度が低く段2で below_threshold。アンカーには近く、連想の土俵に上がる。
     const b1 = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "B1" });
     const b2 = await createEmbeddedMemory(stores, [0.04, 0.05, 0.9975], { digest: "B2" });
 
@@ -126,7 +113,6 @@ describe("recall() — 段3.5 の候補プールで席に着けなかった belo
 
     const cand1 = await createEmbeddedMemory(stores, [1, 0, 0], { digest: "C" });
     const anchor = await createEmbeddedMemory(stores, [0.6, 0, 0.8], { digest: "ANCHOR" });
-    // どちらもクエリとの類似度が低く段2で below_threshold。アンカーとの類似度は b1 のほうが高い。
     const b1 = await createEmbeddedMemory(stores, [0.05, 0, 0.9987], { digest: "B1" });
     const b2 = await createEmbeddedMemory(stores, [0.04, 0.05, 0.9975], { digest: "B2" });
 
