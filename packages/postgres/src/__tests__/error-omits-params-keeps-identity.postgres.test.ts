@@ -10,18 +10,14 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Trigram・Outbox・TenantSettings の store を直接呼んだ例外から params を落とす作り（ADR 0516）が、
- * 落とす以外のことをしていない、という歯。`error-message-omits-params.postgres.test.ts` は
- * 「message に値が無い」ことを見る。ここは、その裏の約束（クローンの判断）を本物の DB の例外で縛る。
+ * 値を落とす作りが、落とす以外のことをしていない、という歯。`error-message-omits-params.postgres.test.ts` は「message に値が無い」ことを見る。
+ * ここは、その裏の約束を本物の DB の例外で縛る。
  *
- * - 例外の同一性: 投げられるのは DB 由来の例外そのもの（`DrizzleQueryError`。`name` も元のまま）。
- *   同じ message・cause の別の型（`TypeError` など）に作り直さない。
+ * - 例外の同一性: 投げられるのは DB 由来の例外そのもの（`DrizzleQueryError`。`name` も元のまま）。同じ message・cause の別の型（`TypeError` など）に作り直さない。
  * - `DrizzleQueryError.params`（値の配列）は変えない。落とすのは message と stack の文字だけ。
  * - `cause` の pg エラーの `message`・`detail`（pg が理由を説明する文）は残す。
  *
- * 例外の起こし方は `error-message-omits-params.postgres.test.ts` と同じ（Outbox は `attempts` が int4 に
- * 収まらない 22003、Trigram は `filter.attributes` の孤立サロゲート 22P02、TenantSettings は
- * `search_path` を空にして表を見えなくする 42P01）。
+ * 例外の起こし方は `error-message-omits-params.postgres.test.ts` と同じ。
  */
 
 afterAll(async () => {
@@ -56,7 +52,6 @@ interface Mouth {
 }
 
 function expectDriverErrorKept(error: unknown, mouth: Mouth): void {
-  // C3: DB 由来の例外そのもの
   expect(error).toBeInstanceOf(DrizzleQueryError);
   expect((error as Error).constructor.name).toBe("DrizzleQueryError");
   expect((error as Error).name).toBe("Error");
@@ -64,12 +59,10 @@ function expectDriverErrorKept(error: unknown, mouth: Mouth): void {
   const cause = (error as Error).cause as PgLike | undefined;
   expect(cause?.name).toBe("error");
   expect(cause?.code).toBe(mouth.code);
-  // C2: params プロパティは実際に渡した値の配列のまま
   const params = (error as DrizzleQueryError).params;
   expect(Array.isArray(params)).toBe(true);
   expect(params.length).toBeGreaterThan(0);
   mouth.expectParams(params);
-  // C2: pg エラーの message・detail が残る
   expect(cause?.message).toMatch(mouth.causeMessage);
   if (mouth.causeDetail) {
     expect(cause?.detail).toMatch(mouth.causeDetail);

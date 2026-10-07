@@ -7,9 +7,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * `supersedeWithNewMemories` で置き換えた古い記憶の `createdAt` は変わらない（Postgres の脚）。
- * core の Fake（`fake-supersede-mixed-resend-updated-at.test.ts`）と testkit の InMemory
- * （`in-memory-supersede-updated-at.test.ts`）と同じ不変条件を、3実装目の Postgres にも当てる。
- * 明文の約束は無いが、作成時刻が後から書き換わらないのは当然の不変条件として縛る（クローンの判断。ADR 0592）。
+ * core の Fake と testkit の InMemory と同じ不変条件を、Postgres にも当てる。
  *
  * DB の `now()` は偽の時計で動かせないので、古い記憶の `created_at` を過去へ直接書き換えてから置き換える。
  * 置き換えの UPDATE が `created_at = now()` を書けば、過去の値とは必ず違う。
@@ -68,7 +66,6 @@ describe("Postgres: supersedeWithNewMemories の古い記憶の createdAt は変
 
 describe("Postgres: supersedeWithNewMemories で CAS に弾かれた行は updatedAt も createdAt も書き換わらない（ADR 0592。クローンの判断）", () => {
   it("expectedStatus が合わず conflicted に積まれた古い記憶は、置き換えの前後で updatedAt・createdAt が同じ", async () => {
-    // 明文の約束は無いが、弾かれた行には何も書かないのは当然の不変条件として縛る（クローンの判断）。
     const MID = new Date("2020-06-01T00:00:00.000Z");
     await resetTestDatabase();
     const { db } = await getTestClient();

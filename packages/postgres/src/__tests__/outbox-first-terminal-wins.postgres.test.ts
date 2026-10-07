@@ -5,17 +5,7 @@ import { OutboxLeaseConflictError } from "@mnemora/core";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0440（クローンの委譲先 mgr-0629e6a2 が書いた。直し方はクローン miku が決めた。オーナーではない）:
- * 同じリース（同じ `attempts`）で2回目の `complete`/`fail` が来ても、**先に付いた終端（先勝ち）**の
- * `completed_at`・`failed_at`・`last_error` を保つ。直す前は `complete` の UPDATE が `failed_at IS NULL`
- * しか、`fail` の UPDATE が `completed_at IS NULL` しか見ておらず、同種の再呼び出しが値を上書きした
- * （`purgeCompletedJobs` の olderThan の境界も後ろにずれた）。
- *
- * 戻り値（`Promise<void>`）と例外（`attempts` 不一致の `OutboxLeaseConflictError`、行が無いときの no-op）は
- * 直す前と同じ。testkit の fixture 側の対応する歯は
- * `packages/testkit/src/__tests__/in-memory-outbox-first-terminal-wins.test.ts`。
- */
+/** 同じリース（同じ `attempts`）で2回目の `complete`/`fail` が来ても、先に付いた終端（先勝ち）の `completed_at`・`failed_at`・`last_error` を保つ。戻り値と例外（`attempts` 不一致の `OutboxLeaseConflictError`、行が無いときの no-op）は変わらない。 */
 const T1 = new Date("2026-02-01T00:00:00.000Z");
 const T2 = new Date("2026-03-01T00:00:00.000Z");
 
@@ -44,9 +34,7 @@ describe("PostgresOutboxStore.complete/fail — 先勝ち（ADR 0440）", () => 
     );
     const jobId = seeded.rows[0]!.id;
     const store = new PostgresOutboxStore(db);
-    // 行は上の生の SQL（`now()`）で入れているので、この行の available_at は DB の now()。store の
-    // `claimBatch` は呼び出し側が渡す `now` と比べるので、Node 側の now を少し先にして claim を確実にする
-    // （store が outbox を埋めるときは、`opts.now` を渡さなければ JS の `new Date()`。ADR 0559）。
+    // 行は生の SQL（`now()`）で入れているので、この行の available_at は DB の now()。store の `claimBatch` は呼び出し側が渡す `now` と比べるので、Node 側の now を少し先にして claim を確実にする。
     const claimed = await store.claimBatch(ctx, {
       limit: 10,
       now: new Date(Date.now() + 5_000),

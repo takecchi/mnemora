@@ -18,7 +18,7 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * 公開済みの版で作った DB を、今の main の migration で上げる経路の歯（ADR 0344、Issue #1038）。
+ * 公開済みの版で作った DB を、今の main の migration で上げる経路の歯。
  *
  * `__fixtures__/upgrade-from-<tag>.sql` は、その版のコードで（Postgres adapter と runtime を
  * 通して）データを入れた DB のプレーンテキストの `pg_dump` である。作り方と中身は
@@ -26,8 +26,7 @@ import { requireDatabaseUrl } from "./test-db.js";
  * `runMigrations` を2回当て、今のコードで代表的な読み書きを回す。
  *
  * 新しい DB で緑でも、公開済みの版のデータが入った DB で migration が失敗しない・既存の行の
- * 意味が変わらない、とは言えない——実際に `0022` は、v1.0.1 の DB に在りうるビューで
- * 止まっていた（Issue #1038、PR #1043）。
+ * 意味が変わらない、とは言えない。
  *
  * ⚠ 期待値（どの migration が未適用か・行の中身）は fixture 自身から引く。ここに migration の
  * ファイル名や件数を焼かない（AGENTS.md「数を、道具と生成物に焼き込まない」）。
@@ -62,6 +61,42 @@ class ZeroAwareEmbedding extends DeterministicEmbeddingProvider {
   }
 }
 
+type TableRows = Record<string, Record<string, unknown>[]>;
+
+// 表の名前を固定で並べない: 埋め込みの表は空間ごとに名前が動的に決まり、migration が表を足せば増える。
+// 列を名指しで SELECT しない: 列の削除・改名を、SQL のエラーではなく「キーが無い」差として拾うため。
+async function snapshotPublicTables(q: (text: string) => Promise<unknown[]>): Promise<TableRows> {
+  const tables = (await q(
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+  )) as { tablename: string }[];
+  const snapshot: TableRows = {};
+  for (const { tablename } of tables) {
+    const rows = (await q(
+      `SELECT to_jsonb(t) AS row FROM "${tablename.replaceAll('"', '""')}" t`,
+    )) as { row: Record<string, unknown> }[];
+    snapshot[tablename] = rows.map((r) => r.row);
+  }
+  return snapshot;
+}
+
+// Set で比べない: 主キーが無い表では同じ中身の行が重複しうるので、個数で消し込む。
+// 無い列を undefined にしない: JSON.stringify で null の列と見分けがつかなくなる。
+function rowsMissingAfter(
+  before: Record<string, unknown>[],
+  after: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const columns = Object.keys(before[0] ?? {});
+  const key = (row: Record<string, unknown>) =>
+    JSON.stringify(columns.map((c) => (c in row ? row[c] : { missingColumn: c })));
+  const remaining = new Map<string, number>();
+  for (const row of after) remaining.set(key(row), (remaining.get(key(row)) ?? 0) + 1);
+  return before.filter((row) => {
+    const n = remaining.get(key(row)) ?? 0;
+    remaining.set(key(row), n - 1);
+    return n <= 0;
+  });
+}
+
 function databaseUrlFor(name: string): string {
   const url = new URL(requireDatabaseUrl());
   url.pathname = `/${name}`;
@@ -86,7 +121,9 @@ for (const fixture of FIXTURES) {
     let client: PostgresClient;
     let rowsBefore: unknown[];
     let rowsAfter: unknown[];
-    // Issue #1775 の #717: labels の backfill（migration `labels`/`memory_labels` を足す版）の直後の凍結値。
+    let tablesBefore: TableRows;
+    let tablesAfter: TableRows;
+    // labels の backfill（migration `labels`/`memory_labels` を足す版）の直後の凍結値。
     let hadLabelsTableBefore: boolean;
     let backfillAfter:
       | {
@@ -138,19 +175,20 @@ for (const fixture of FIXTURES) {
       pendingBefore = listMigrationFiles(DEFAULT_MIGRATIONS_DIR).filter((f) => !done.has(f));
       // fixture 自身が、`SPACES` の全空間のデータを持つこと（migration の前に確かめる）。空の空間があると、
       // 下の it() のうちその空間の行を読むもの（zero-norm 索引・ゼロベクトル・purge など）が、
-      // 行の無い表に対して黙って空振りしうる（#1453）。
+      // 行の無い表に対して黙って空振りしうる。
       for (const [name, space] of Object.entries(SPACES)) {
         const rows = await q<{ n: number }>(
           `SELECT count(*)::int AS n FROM "${embeddingSpaceTableName(space)}"`,
         );
         expect(rows[0]!.n, `fixture の埋め込み空間 ${name} に行が無い`).toBeGreaterThan(0);
       }
-      // ADR 0437 決定3: v1.0.0〜v1.0.2 の purge は `tags` を消さなかった（v1.1.0 の ADR 0375 から消える）。
+      // v1.0.0〜v1.0.2 の purge は `tags` を消さなかった。
       // fixture の purge 済みの行に、その残り方（purged_at があり、tags が残る）を再現する。
       // `attributes`・claim key の列は v1.0.x の DB には無い（migration 0019・0021 が足す）ので、
       // migration の前には書けない。
       await q("UPDATE memories SET tags = ARRAY['legacy-residue'] WHERE purged_at IS NOT NULL");
       rowsBefore = await snapshotRows();
+      tablesBefore = await snapshotPublicTables(q);
       hadLabelsTableBefore =
         (await q<{ t: string | null }>("SELECT to_regclass('labels')::text AS t"))[0]!.t !== null;
 
@@ -160,13 +198,14 @@ for (const fixture of FIXTURES) {
       for (const space of Object.values(SPACES)) {
         await registerEmbeddingSpace(client.pool, space);
       }
-      // Issue #1416: 「migration の前後で行が変わらない」の"後"の値も、ここ（beforeAll。
+      // 「migration の前後で行が変わらない」の"後"の値も、ここ（beforeAll。
       // 他の it() がまだ1本も割り込めない場所）で一緒に凍結する。下の it() の中で
       // snapshotRows() を読み直すと、tick/observe・forget→purge・resolveOrphanedContested
       // の it()（同じ describe で同じ DB を書き換える）がそれより先に走ったかどうかに
       // 結果が左右される——vitest の実行順は既定では宣言順だが、`--sequence.shuffle` では
-      // 変わる（実測: seed 1790682813243 ほかで赤くなった）。
+      // 変わる。
       rowsAfter = await snapshotRows();
+      tablesAfter = await snapshotPublicTables(q);
       backfillAfter = {
         tags: await q("SELECT id, tenant_id, tags FROM memories ORDER BY id"),
         labels: await q(
@@ -189,11 +228,9 @@ for (const fixture of FIXTURES) {
       expect(applied[1]).toEqual([]);
     });
 
-    // Issue #1775 の #717（変異22・23）: labels の backfill（ADR 0318 決定1・PR 本文「backfill を含む」）。
     // `labels`・`memory_labels` を足す migration より前の版の DB では、`memories.tags` から、
     // (tenant, tag) ごとの `proposed_count`（その tag を持つ行数）と、記憶と tag の紐付けが作られる。
     // 期待値は fixture 自身の `tags` から引く（fixture は読むだけで書き換えない）。
-    // 変異: backfill が消える（labels の INSERT／memory_labels の INSERT を落とす）で赤になる。
     it("labels の backfill: memories.tags から (tenant, tag) ごとの proposed_count と memory_labels の紐付けが作られる", () => {
       if (hadLabelsTableBefore) return; // この版は labels の migration を適用済み（backfill は走らない）。
       const { tags, labels, links } = backfillAfter!;
@@ -226,14 +263,34 @@ for (const fixture of FIXTURES) {
       expect(rows[0]!.indexdef).not.toContain("mnemora_lexical_normalize(content)");
     });
 
-    // Issue #1416: ここで DB を読み直さない。rowsBefore と rowsAfter はどちらも beforeAll の
+    // ここで DB を読み直さない。rowsBefore と rowsAfter はどちらも beforeAll の
     // 中で凍結済み——この it() 自身がいつ実行されるか（他の it() がどれだけ DB を
     // 書き換えた後か）に結果が依存しないようにするため。
     it("migration の前後で既存の記憶の行（状態・埋め込みの状態・関係・本文）が変わらない", () => {
       expect(rowsAfter).toEqual(rowsBefore);
     });
 
-    // ADR 0437 決定3: migration は遡って消さない（tags は migration の前後で変わらない、上の it）。
+    it("migration の前後で、public の表がどれも消えず、行数も減らない", () => {
+      const names = Object.keys(tablesBefore);
+      expect(names.length).toBeGreaterThan(0);
+      for (const name of names) {
+        expect(tablesAfter[name], `表 ${name} が無くなった`).toBeDefined();
+        expect(tablesAfter[name]!.length, `表 ${name} の行数が減った`).toBeGreaterThanOrEqual(
+          tablesBefore[name]!.length,
+        );
+      }
+    });
+
+    // tablesAfter を toEqual で比べない: migration が足した列・行（台帳など）があっても緑であるべきなので、
+    // restore 時の列と行だけを消し込む。
+    it("migration の前後で、public の各表の行が、restore 時にあった列のまま残っている", () => {
+      for (const [name, before] of Object.entries(tablesBefore)) {
+        const missing = rowsMissingAfter(before, tablesAfter[name] ?? []);
+        expect(missing, `表 ${name} で ${missing.length} 行が消えた・変わった`).toEqual([]);
+      }
+    });
+
+    // migration は遡って消さない（tags は migration の前後で変わらない、上の it）。
     // 消えるのは、今のコードで purge をかけ直したとき。
     it("v1.0.x が残した purge 済みの行の tags・memory_labels は、purge をかけ直すと消える（labels の件数は実数に揃う）", async () => {
       const purged = await q<{ id: string; tenant_id: string }>(
@@ -370,7 +427,6 @@ describe("upgrade fixture の在り処", () => {
     expect(FIXTURES.length).toBeGreaterThan(0);
   });
 
-  // v1.0.1 以降の fixture だけが在り、v1.0.0 から直接上げる経路はどの歯も見ていなかった。
   // 列挙は `upgrade-from-*.sql` を拾うだけなので、足し忘れた版は黙って空振りする。
   // ⚠ ここに書くのは「直接上げる経路を必ず見る」と決めた版だけ（版を出すたびには足さない）。
   it.each(["v1.0.0"])("%s で作った DB の fixture が在る", (tag) => {

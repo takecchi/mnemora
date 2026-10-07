@@ -6,15 +6,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `memory_events.kind` に `MemoryEventKind` に無い値（型を外した呼び出し・JavaScript からの呼び出し）を
- * 渡すと、Postgres は CHECK 制約 `memory_events_kind_check` で拒み、何も書かない。testkit の fixture も
- * 同じく拒み、何も書かない（Issue #1096）。
- *
- * 【実測 2026-09-27】以前は testkit の `InMemoryEventStore.append` と、イベントを受け取る
- * `InMemoryMemoryStore` の口（`markContestedPair` など）が、どんな kind も受け付けて記録していた。
- */
-
 interface Kit {
   memoryStore: MemoryStore;
   eventStore: EventStore;
@@ -48,7 +39,6 @@ function eventWithKind(memoryId: string, kind: string): NewMemoryEvent {
   return {
     tenantId: ctx.tenantId,
     memoryId,
-    // 型を外した呼び出しを模す（`MemoryEventKind` に無い値）。
     kind: kind as NewMemoryEvent["kind"],
     actor: { type: "system" },
     meta: {},

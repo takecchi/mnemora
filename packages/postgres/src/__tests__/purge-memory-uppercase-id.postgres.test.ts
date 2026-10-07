@@ -4,12 +4,7 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * [ADR 0438](../../../docs/decisions/0438-tenant-boundary-teeth-and-purge-uuid-case.md):
- * `purgeMemory` に大文字の uuid を渡しても、`memories` の行だけでなく、`recalls.index_band` の目次帯
- * （`digestBand`）の digest も書き換わる。以前は `memories` の UPDATE（uuid 型で比べる）だけが効き、
- * 目次帯の UPDATE（文字列で比べる）は小文字の id にしか当たらず、書き換える前の digest が recall の記録に残った。
- */
+/** 目次帯の UPDATE は文字列で比べるので小文字の id にしか当たらず、大文字の uuid を渡すと書き換える前の digest が recall の記録に残る。`memories` の UPDATE（uuid 型で比べる）とは別に、目次帯の digest も書き換わることを見る。 */
 
 const ctx: Ctx = { tenantId: "purge-upper-tenant" };
 const usage = {

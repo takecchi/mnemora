@@ -3,9 +3,8 @@ import { describe, expect, it } from "vitest";
 import { registerEmbeddingSpace } from "../vector-space.js";
 
 /**
- * ADR 0525: `registerEmbeddingSpace` の `space.dimensions` の検査の例外の型。
+ * `registerEmbeddingSpace` の `space.dimensions` の検査の例外の型。
  * 数でなければ `TypeError`、数として不正（正の整数でない・hnsw の上限超）なら `RangeError`。
- * message は変えていない。
  *
  * 検査は pool を使う前にあるので、DB は要らない。pool は、触られたら落ちる偽物にする
  * （検査より後ろに進んだら、型の違いではなく「pool に触った」で赤になる）。

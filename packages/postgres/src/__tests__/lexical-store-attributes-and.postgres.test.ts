@@ -6,16 +6,9 @@ import { PostgresLexicalStore } from "../lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `LexicalFilter.attributes` は複数キーのとき AND の等値（ADR 0312 決定5「AND 等値」。
- * `vector-store-conformance.ts` に「複数キーは AND」の歯がある）。語彙チャンネル側の歯は1キーだけだった
- * （Issue #1775 の #724 の変異28）。
- *
- * - `@>`（記憶の属性が条件を含む）を `<@`（条件が記憶の属性に含まれる）へ向き違いにすると、1キーの記憶
- *   では同じ答えになる。複数キーの条件では、条件の一部しか持たない記憶が混ざる。
- * - 属性が `{}` の記憶は、`{} <@ x` が常に真なので、`<@` では条件が何であっても通ってしまう。
- *
- * `recall()` の後置フィルタ（`survivesAttributesFilter`）が混入を止めるので、結果には出ない——ここは
- * adapter 単体の契約を縛る（公開の適合テストには足さない。Postgres 固有）。
+ * `@>`（記憶の属性が条件を含む）を `<@`（条件が記憶の属性に含まれる）へ向き違いにすると、1キーの記憶では同じ答えになる。複数キーの条件では、条件の一部しか持たない記憶が混ざる。
+ * 属性が `{}` の記憶は `{} <@ x` が常に真なので、`<@` では条件が何であっても通ってしまう。
+ * `recall()` の後置フィルタ（`survivesAttributesFilter`）が混入を止めるので結果には出ない。ここは adapter 単体の契約を縛る。
  */
 
 const TENANT = "lexical-attributes-and-tenant";

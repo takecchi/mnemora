@@ -7,12 +7,11 @@ import { killConnectionBeforeStatement } from "./pool-fault-injection.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * ADR 0444 BG-1: drizzle-orm 0.45.2 の `NodePgSession.transaction` は `begin` を `try`/`finally` の
+ * drizzle-orm 0.45.2 の `NodePgSession.transaction` は `begin` を `try`/`finally` の
  * **外**で実行するため、`begin` が reject すると借りた接続が pool へ戻らない（枠が漏れる）。
  * `createPostgresClient` が包んで、`begin` の失敗で `release(err)` する。
  *
  * 「借りられたまま」の数は `pool.totalCount - pool.idleCount`（待機していない接続の数）で読む。
- * 直す前の実装ではこれが 0 に戻らない。
  *
  * 直列の群に置く（`pg_terminate_backend` を使う。`vitest.config.mts` の `SERIAL_TEST_FILES`）。
  * 切るのは `application_name` が一致する接続だけである。
@@ -69,7 +68,6 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
         }
         expect(checkedOut(client.pool), `${i + 1}回目の後`).toBe(0);
       }
-      // 健全な接続で普通に通る。
       await client.db.transaction(async (tx) => {
         await tx.execute(sql`SELECT 1`);
       });
@@ -124,7 +122,6 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
       expect(() => borrowed.release()).not.toThrow();
       expect(() => borrowed.release(new Error("もう一度"))).not.toThrow();
       expect(checkedOut(client.pool)).toBe(0);
-      // 健全なときも同じ: 2回目は何もしない。
       const healthy: PoolClient = await raw.connect();
       healthy.release();
       expect(() => healthy.release()).not.toThrow();
@@ -148,7 +145,6 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
       first.release();
       expect(Object.hasOwn(first, "query")).toBe(false);
       expect(first.query).toBe(prototypeQuery);
-      // 同じ物理接続を借り直しても、包みが二重に積まれない。
       const second: PoolClient = await raw.connect();
       expect(second).toBe(first);
       second.release();
@@ -171,7 +167,6 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
       const returnedWhileBorrowed = returned.listeners("error");
       expect(returnedWhileBorrowed.length).toBeGreaterThan(0);
       returned.release();
-      // 返したあとは、借りている間のリスナーは1つも残らない（pool 自身の待機用リスナーに替わる）。
       expect(returned.listeners("error").some((l) => returnedWhileBorrowed.includes(l))).toBe(
         false,
       );
@@ -221,7 +216,6 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
       expect(client.pool.idleCount).toBe(1);
       expect(await backendGone(keptPid)).toBe(false);
 
-      // 同じ接続を借り直して、今度は release(err) する。捨てられる。
       const doomed: PoolClient = await raw.connect();
       expect(await pidOf(doomed)).toBe(keptPid);
       doomed.release(new Error("捨てる"));
@@ -266,8 +260,7 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
 
   /**
    * CI で回せる形の「再起動の反復」。`pg_ctl restart -m fast` は CI の service container の
-   * 中で動く Postgres には届かない（テストのプロセスから PGDATA にも pg_ctl にも触れない。
-   * 理由と、手元で `pg_ctl restart` を反復して確かめた記録は ADR 0444）ので、代わりに
+   * 中で動く Postgres には届かない（テストのプロセスから PGDATA にも pg_ctl にも触れない）ので、代わりに
    * `pg_terminate_backend` で**全接続を切る反復**を、書き込みの負荷の最中にかける。
    * 切れる位置は運任せだが、反復しても pool が枯れず、最後に借りられたままが 0 で、
    * 新しい transaction が通ることを縛る。
@@ -309,11 +302,10 @@ describe("db.transaction(): begin が reject しても接続は pool へ戻る�
       expect(checkedOut(client.pool)).toBe(0);
       // ⚠ 最後の `pg_terminate_backend` は、pool で待機中の接続の backend も切る。pg-pool が待機中の接続の
       // 死に気づくのは socket のイベントが届いてからなので、直後に借りると死んだ接続を掴み、`begin` が
-      // `57P01`（terminating connection due to administrator command）で落ちうる（ADR 0462。CI の UTF8・
-      // SQL_ASCII の両方の脚で1回ずつ、手元の PostgreSQL 17 で 40 回中 3 回、この形で落ちた）。
+      // `57P01`（terminating connection due to administrator command）で落ちうる。
       // 待機中の接続が死んでいることは使って初めて分かる（`packages/postgres/README.md` の「例外の見分け方」）。
       // ⟹ 死んだ待機中の接続は高々 `max`（3）本なので、切断の種類の失敗だけを `max` 回まで受け入れ、
-      // そのたびに借りられたままが 0 に戻ること（BG-1）を確かめ、最後には新しい transaction が通ることを縛る。
+      // そのたびに借りられたままが 0 に戻ることを確かめ、最後には新しい transaction が通ることを縛る。
       let terminatedFailures = 0;
       for (;;) {
         try {

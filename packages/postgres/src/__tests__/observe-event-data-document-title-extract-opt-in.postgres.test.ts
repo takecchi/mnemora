@@ -22,17 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1185: `observe` の `event.data`・`document.title` を抽出（LLM）へ渡す opt-in
- * （`extractData`/`extractTitle`、既定 `false`）が、実際に効くことを縛る。
- * 仕様・書式は [ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)。
- *
- * opt-in しなかった既定の振る舞い（data/title がプロンプトに入らない）は
- * `observe-event-data-document-title-not-extracted.postgres.test.ts` が縛る——この歯は
- * opt-in した側・しなかった側の「変わらないこと」の両方をここで縛る。testkit の fixture と
- * `@mnemora/postgres` の両方で確認する。
- */
-
 const ctx: Ctx = { tenantId: "observe-data-title-1185-opt-in" };
 const hashContent = (content: string) => `sha256(${content})`;
 const embeddingProvider = {
@@ -209,7 +198,6 @@ describe.each(KITS)(
         content: "本文",
       });
 
-      // payload は今までと1バイトも変わらない — `extractData`/`extractTitle` キー自体が増えない。
       const eventObservation = await memoryStore.getObservation(ctx, eventResult.observationId);
       expect(eventObservation?.payload).toEqual({
         name: "ログインした",
@@ -224,14 +212,11 @@ describe.each(KITS)(
         content: "本文",
       });
 
-      // プロンプトの本文は、data/title を無視した今までどおりの文字列。
       expect(prompts).toHaveLength(2);
       expect(prompts[0]!.messages[0]!.content).toBe("ログインした");
       expect(prompts[1]!.messages[0]!.content).toBe("本文");
 
-      // カセットの鍵（`llmCassetteKey`、ADR 0051）は、この PR の前後で動いていない
-      // （`origin/main` で同じ入力から計算した固定値と比較する。docs/decisions/
-      // 0369-opt-in-extract-event-data-and-document-title.md 参照）。
+      // カセットの鍵（`llmCassetteKey`）は動いていない（`origin/main` で同じ入力から計算した固定値と比較する）。
       expect(llmCassetteKey(prompts[0]!)).toBe(
         "d0b41afac664e1ff6ddf9bc464269bcee92f9e51ed18c138938d02bc075a2f29",
       );
@@ -348,9 +333,7 @@ describe.each(KITS)(
       });
       await runtime.reextract(ctx, withoutTitle.id);
       expect(prompts).toHaveLength(2);
-      // title も空なら、印なしの既定の振る舞い（`JSON.stringify(payload)` フォールバック）と
-      // 同じ経路を通る。フィールド順は adapter によって違いうる（jsonb はキー順を保証しない）ため、
-      // パースした形で比較する（`toEqual` は順序を問わない）。
+      // title も空なら、印なしの既定の振る舞い（`JSON.stringify(payload)` フォールバック）と同じ経路を通る。フィールド順は adapter によって違いうる（jsonb はキー順を保証しない）ので、パースした形で比較する。
       expect(JSON.parse(prompts[1]!.messages[0]!.content)).toEqual({
         title: "",
         content: "",

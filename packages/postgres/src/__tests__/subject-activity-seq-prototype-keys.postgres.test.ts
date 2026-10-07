@@ -14,12 +14,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0472: subjectId が `Object.prototype` のキー名（`constructor`・`valueOf`・`__proto__` など）でも、
- * `getSubjectActivitySeqs` が行のある subject の値を落とさず、`observe` が活動時計の起点を
- * 数のまま書く（直す前は、行が無い `valueOf` で `decay_base_seq` へ文字列を渡して observe が落ち、
- * `__proto__` は行があっても値が黙って落ちた）。
- */
 const TENANT = "proto-keys-tenant";
 const tenantCtx: Ctx = { tenantId: TENANT };
 const KEYS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];

@@ -31,46 +31,34 @@ import {
 /**
  * reextract の `created` イベントの中身を、同じ操作の `superseded` と揃える歯。
  *
- * 穴（c1f4cf1）:
- * 1. `at` のずれ: reextract は入口で `now = clock.now()` を取り、`superseded` はこの `now` を使う。
- *    一方 `created` は `buildCreatedEventFor` が組み立てるときに `clock.now()` を読み直すので、
- *    LLM の待ちの分だけ `superseded` より後になる。
- * 2. meta の区別が無い: reextract の `created` の meta は observe と同じ形（`reason: "extracted"`）で、
- *    再抽出から来たことを示すキーが無い。
- *
- * 直しの方針: 同じ操作の中で `created` と `superseded` の `at` を揃える（入口の `now`）。
- * reextract の `created` の meta に、再抽出を示すキーを**足す**（既存キーの意味は変えない。
- * observe の `created` の meta の形は変えない）。
+ * 1. `at` を揃える: reextract は入口で `now = clock.now()` を取り、`superseded` はこの `now` を使う。
+ *    `created` を組み立てるときに `clock.now()` を読み直すと、LLM の待ちの分だけ `superseded` より後になる。
+ * 2. reextract の `created` の meta に、再抽出を示すキーを持つ（既存キーの意味は変えない。observe の `created` の meta の形は変えない）。
  *
  * ## 検査の形
- * 時計を注入し、`llm.completeStructured` の中で時計を進める。こうして「入口の `now`」と
- * 「組み立て時の `clock.now()`」が違う状況を作る。
+ * 時計を注入し、`llm.completeStructured` の中で時計を進める。こうして「入口の `now`」と「組み立て時の `clock.now()`」が違う状況を作る。
  *
- * 経路は4つ（ストアは実 adapter 2つ × 3経路のうち、Postgres と InMemory の口あり、
- * それぞれを包んだ口なし・名乗らない adapter）:
+ * 経路は3つ（それぞれ Postgres と InMemory に当てる）:
  * - 口あり: `supersedeWithNewMemories` が `opts.buildCreatedEvent` で `created` を同じトランザクションで積む。
- * - 名乗らない: 口はあるが `buildCreatedEvent` を黙って無視し `createdEventsWritten` を返さない。
- *   runtime が別の `appendCreatedEvent` で積む。
+ * - 名乗らない: 口はあるが `buildCreatedEvent` を黙って無視し `createdEventsWritten` を返さない。runtime が別の `appendCreatedEvent` で積む。
  * - 口なし: `supersedeWithNewMemories` が無い。`createMemoryWithOutbox` + supersede ループ。
  *
- * ⚠ `created` と `superseded` の**並び**（同じ `at` の中での順）は縛らない。
+ * ⚠ `created` と `superseded` の並び（同じ `at` の中での順）は縛らない。
  */
 
-/** 再抽出を示す meta のキー。名前は実装の担当が決める——決まったらここだけを差し替える。 */
+/** 再抽出を示す meta のキー。 */
 const REEXTRACT_META_KEY = "reextracted";
 
 /** LLM の待ちの長さ。入口の `now` と組み立て時の `clock.now()` を確実に分ける。 */
 const LLM_LATENCY_MS = 5_000;
 
 let nowMs = Date.now();
-/** 実時刻より1秒だけ未来（歴史的な理由で残している。今は outbox の `available_at` も注入した時計に従う。ADR 0559）。 */
 const clock = { now: () => new Date(nowMs + 1_000) };
 
 let candidates: string[] = [];
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),
   completeStructured: async (_ctx, req) => {
-    // LLM を待っている間に時計が進む。
     nowMs += LLM_LATENCY_MS;
     return req.schema.parse({
       memories: candidates.map((content) => ({ content, provenanceKind: "stated" })),

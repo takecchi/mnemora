@@ -35,9 +35,8 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0530: 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごと（embed・extract・
- * consolidate・reflect）に、**実 Postgres と InMemory の両方**で `EXPECTED` に突き合わせる。core の Fake の側は
- * `packages/core/src/__tests__/fake-tick-batch-exceeds-lease-parity.test.ts` が同じ `EXPECTED` を縛る。
+ * 1回の `tick` の2件目の処理中にリースが切れたとき、別の `tick` が再 claim して二重に処理した結末を、種類ごと（embed・extract・
+ * consolidate・reflect）に、**実 Postgres と InMemory の両方**で `EXPECTED` に突き合わせる。
  * 順序は時計のオフセットと provider の前の門（Promise）で決める（実時間は待たない）。DB はファイル冒頭で作り直し、tenant はこのファイル専用の名前を使う。
  */
 interface Env {
@@ -61,7 +60,7 @@ type Kind = "embed" | "extract" | "consolidate" | "reflect";
 type Result = Record<string, unknown>;
 
 /**
- * ADR 0530: 1回の `tick` が claim した2件のうち、2件目の処理中にリースが切れる（バッチの claim 時点から数えるので、1件あたりの処理が
+ * 1回の `tick` が claim した2件のうち、2件目の処理中にリースが切れる（バッチの claim 時点から数えるので、1件あたりの処理が
  * `leaseMs` より短くても起きる。`TickOptions.leaseMs` の TSDoc）。順序は時計のオフセットと provider の前の門（Promise）で決める:
  * A の2件目が provider の門に着いたところで時計を進め、(1) 別の `tick` B が2件目を再 claim して最後まで処理する／(2) 誰も取り直さない、
  * のあと A の門を開ける。種類ごとに、二重に走った結末を比べる。

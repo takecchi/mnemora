@@ -5,23 +5,11 @@ import type { Db } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 
 /**
- * `PostgresMemoryStore.resolveContestedPair`（Issue #197、ADR 0150）の、**DB に触れる前**
- * の書き込み前ガードだけを検査する。`memory-store-contested-write-guard.test.ts`
- * （ADR 0140 の書き込み側ガード）と同じ形——この作業環境（`DATABASE_URL` 無し）では
- * `*.postgres.test.ts`／`conformance.postgres.test.ts` が一切実行できないため、
- * DB に触れる前の純粋な分岐だけをここで切り出して検査する。
+ * `PostgresMemoryStore.resolveContestedPair` の、DB に触れる前の書き込み前ガードだけを検査する。
+ * `memory-store-contested-write-guard.test.ts` と同じ形で、DB に触れる前の純粋な分岐だけを切り出している。
  *
- * ⚠ **`resolveContestedPair` の CAS・トランザクション・SQL そのものの正しさはここでは
- * 検査しない。**それは `memory-store-conformance.ts` の `resolveContestedPair` 節
- * （`supportsResolveContestedPair: true` で `conformance.postgres.test.ts` から実行される）
- * が担う——**本物の Postgres が無いこの環境では未実行のまま**である（`AGENTS.md`・
- * 本ファイルの検査対象外）。
- *
- * ⚠ このファイルは `packages/postgres` の `test:db`（`vitest run`、DB 必須）経由でしか
- * package.json のスクリプトからは走らない（`memory-store-contested-write-guard.test.ts`
- * と同じ理由）。手元で DB 無しに実行するときは
- * `pnpm --filter @mnemora/postgres exec vitest run src/__tests__/resolve-contested-pair-guard.test.ts`
- * のように、このファイルを名指しで直接 vitest に渡すこと。
+ * ⚠ CAS・トランザクション・SQL そのものの正しさはここでは検査しない。それは `memory-store-conformance.ts` の `resolveContestedPair` 節が担う。
+ * 手元でDB無しに実行するときは、このファイルを名指しで直接 vitest に渡すこと。
  */
 const UNREACHABLE_DB = {} as unknown as Db;
 

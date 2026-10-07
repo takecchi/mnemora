@@ -19,10 +19,7 @@ import {
 
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
-/**
- * 1回だけ使う障壁。`pass()` は `entered` を解決してから、`release()` まで待つ。
- * embed ジョブを決まった地点で止めるためのもの（sleep で順序を作らない）。
- */
+/** 1回だけ使う障壁。embed ジョブを決まった地点で止めるためのもの（sleep で順序を作らない）。 */
 class Gate {
   private enteredResolve!: () => void;
   readonly entered = new Promise<void>((resolve) => {
@@ -78,19 +75,8 @@ class GatedUpsertVectorStore extends PostgresVectorStore {
 }
 
 /**
- * Issue #1035 / ADR 0124: `purge()` は法的要求のための物理削除であり、`content`/`digest` を
- * トゥームストーンで上書きしたうえで、対応する埋め込みも消す（決定5）。
- *
- * embed ジョブ（`tick()` の `processEmbedJob`）は Memory を読んでから provider を呼び、
- * その結果を upsert する。その間に `forget()` → `purge()` が完了すると、ジョブは purge
- * **前**の内容から作ったベクトルを、purge の削除の**後**に書き込む。⟹ `purge()` が
- * `"purged"` を返したのに、消したはずの内容の埋め込みが残る。
- *
- * 止める地点を2つ持つ:
- * - provider の中（provider の応答が遅い、という現実の形）
- * - `upsert()` の入口（provider が返った後、書く直前）。purge 済みかの確かめを
- *   upsert の**前**に置く直し方では、ここで割り込まれると残る——確かめは書いた**後**で
- *   なければならないことを固定する。
+ * embed ジョブは Memory を読んでから provider を呼び、その結果を upsert する。その間に `forget()` → `purge()` が完了すると、ジョブは purge 前の内容から作ったベクトルを purge の削除の後に書き込み、消したはずの内容の埋め込みが残る。
+ * 止める地点を2つ持つ: provider の中（応答が遅い現実の形）と、`upsert()` の入口（provider が返った後、書く直前）。purge 済みかの確かめを upsert の前に置く直し方では、ここで割り込まれると残る。確かめは書いた後でなければならないことを固定する。
  */
 describe("embed ジョブの最中に purge しても、purge した記憶の埋め込みは残らない（Issue #1035、本物の Postgres）", () => {
   beforeEach(async () => {
@@ -131,7 +117,6 @@ describe("embed ジョブの最中に purge しても、purge した記憶の埋
       vectorStore.gate = gate;
     }
     const tick = runtime.tick(ctx, { leaseMs: 60_000 });
-    // ジョブが Memory を読んだ後の地点で止まっている。
     await gate.entered;
 
     const forgotten = await runtime.forget(ctx, { memoryId });

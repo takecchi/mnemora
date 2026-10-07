@@ -5,18 +5,11 @@ import type { Db } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 
 /**
- * `PostgresMemoryStore.resolveOrphanedContested`（Issue #825、ADR 0150 追記）の、
- * **DB に触れる前**の書き込み前ガードだけを検査する。`resolve-contested-pair-guard.test.ts`
- * と同じ形——この作業環境では `*.postgres.test.ts` を DB 無しには実行できないため、
- * DB に触れる前の純粋な分岐だけをここで切り出して検査する。
+ * `PostgresMemoryStore.resolveOrphanedContested` の、DB に触れる前の書き込み前ガードだけを検査する。
+ * `resolve-contested-pair-guard.test.ts` と同じ形で、DB に触れる前の純粋な分岐だけを切り出している。
  *
- * ⚠ **CAS・トランザクション・SQL そのものの正しさはここでは検査しない。**それは
- * `resolve-orphaned-contested.postgres.test.ts`（本物の Postgres + pgvector 必須）が担う。
- *
- * ⚠ このファイルは `packages/postgres` の `test:db`（`vitest run`、DB 必須）経由でしか
- * package.json のスクリプトからは走らない。手元で DB 無しに実行するときは
- * `pnpm --filter @mnemora/postgres exec vitest run src/__tests__/resolve-orphaned-contested-guard.test.ts`
- * のように、このファイルを名指しで直接 vitest に渡すこと。
+ * ⚠ CAS・トランザクション・SQL そのものの正しさはここでは検査しない。それは `resolve-orphaned-contested.postgres.test.ts` が担う。
+ * 手元でDB無しに実行するときは、このファイルを名指しで直接 vitest に渡すこと。
  */
 const UNREACHABLE_DB = {} as unknown as Db;
 

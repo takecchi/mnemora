@@ -5,14 +5,10 @@ import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles } from "../migrate.js";
 import { stripSqlComments } from "./sql-comments.js";
 
 /**
- * `./sql-comments.ts` の `stripSqlComments` 単体の歯（Issue #227）。
+ * `./sql-comments.ts` の `stripSqlComments` 単体の歯。
  *
- * `stripSqlComments` は「自前で書いた comment の剥がし方」であり、Issue #227 は
- * 「自前の剥がし方を歯無しで入れないこと」と名指ししている。この歯がその歯である。
- *
- * Issue #227 が名指しした3つのケース（`--` 行 comment・`/` `*` ブロック comment・
- * 文字列リテラルの中に現れる `--`）を直接検査したうえで、`migrations/*.sql` の
- * 実物すべてに対しても壊れずに通ることを確かめる。
+ * `stripSqlComments` は「自前で書いた comment の剥がし方」であり、自前の剥がし方を歯無しで入れないための歯がこれである。
+ * 3つのケース（`--` 行 comment・`/` `*` ブロック comment・文字列リテラルの中に現れる `--`）を直接検査したうえで、`migrations/*.sql` の実物すべてに対しても壊れずに通ることを確かめる。
  */
 describe("stripSqlComments", () => {
   it("`--` 行 comment を取り除く（改行は残す）", () => {
@@ -111,9 +107,7 @@ describe("stripSqlComments", () => {
       const sql = readFileSync(join(DEFAULT_MIGRATIONS_DIR, file), "utf8");
       const stripped = stripSqlComments(sql);
 
-      // 剥がした結果が空にならない —— 説明 comment しか無いファイルは無い。
       expect(stripped.trim().length).toBeGreaterThan(0);
-      // 剥がした結果は常に元より短いか同じ（comment を追加することは無い）。
       expect(stripped.length).toBeLessThanOrEqual(sql.length);
     }
   });

@@ -938,7 +938,8 @@ export interface MemoryStore {
    * ⚠ **`ready` は `opts.statuses` に指定できない**（型が `NotIndexedReason` であり `ready` を含まない）。
    * `ready` は「ベクトル行が在る」という主張であり（ADR 0053）、`pending` へ戻すと索引済みの Memory が `notIndexed.pending` に数えられる。
    *
-   * 対象が `opts.limit` より多いときは **`updatedAt` の古い順、同着は `id` の昇順**で選ぶ。
+   * 対象が `opts.limit` より多いときは **`updatedAt` の古い順、同着は `id` の昇順**で選ぶ。積み直した行は `updatedAt` が動くので、
+   * 繰り返し呼ぶと対象が一巡する（同じ行だけを取り続けて他が飢えることがない）。
    *
    * ⭐ **`writeOpts` は省略可能な第3引数である**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)）。
    * **`writeOpts.now` を渡すと、積み直す embed ジョブの `availableAt`/`createdAt` にその値を使う。省略時は実装が壁時計を使う。**
@@ -1701,7 +1702,8 @@ export interface MemoryStore {
    *   （ロケール依存の自然順は実装や実行環境によってずれるため、契約から外した。Issue #881）。
    * - `status` は `'registered'` か `'proposed'` のいずれか。
    * - `proposedCount` は「この名前を `tags` に含む Memory が新規作成された回数」の近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』
-   *   ではない**（対象の Memory が後から `forgotten`/`purged` になっても減らない。ADR 0318）。
+   *   ではない**（対象の Memory が後から `forgotten`/`archived`/`superseded` になっても減らない。ADR 0318。`purge` だけは、
+   *   その Memory の紐付けを外し、`status: 'proposed'` の行の `proposedCount` を1減らす。0 が床で、`registered` の行は減らさない。ADR 0375）。
    * - `registeredAt` は `status: 'registered'` のときだけ非 null。
    * - テナントに1件も無ければ空配列。例外にしない。
    *
@@ -1709,7 +1711,7 @@ export interface MemoryStore {
    * - **テナントの全ラベルを1回で返す。**ページング（件数の上限・続きから読む口）は無い。
    * - **ラベルの行は消えない。**`tags` にその名前を持つ Memory が全部 `forgotten`・`archived`・`superseded` になっても、行は残り、
    *   `proposedCount` も減らない。⟹ 誰も使わなくなった `proposed` のラベルも一覧に出続ける。消す口・却下する口は無い。
-   *   purge した Memory の語が残る件は Issue #995。
+   *   `purge` した Memory のラベルも、行は残る（`proposedCount` だけが上の規則で減る）。
    */
   listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
 

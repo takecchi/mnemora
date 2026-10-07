@@ -17,13 +17,12 @@ import { dropTempDatabase } from "./temp-database.js";
 import { requireDatabaseUrl, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
 /**
- * ADR 0531: 複数のプロセスから同じ DB へ `tick` を撃つ場面を、別々の `PostgresClient`（それぞれが自分の `pg` Pool＝別々の接続）を
- * 2つ・3つ作って模す（`erase-tenant-same-tenant-concurrent.postgres.test.ts` と同じ形。ファイル専用の DB を作り、最後に落とす）。
- * ADR 0529 は1つのプールの上で `Promise.all` の複数の `tick` を測った。ここは接続をまたぐ。
+ * 複数のプロセスから同じ DB へ `tick` を撃つ場面を、別々の `PostgresClient`（それぞれが自分の `pg` Pool＝別々の接続）を
+ * 2つ・3つ作って模す（ファイル専用の DB を作り、最後に落とす）。1つのプールの上の `Promise.all` ではなく、接続をまたぐ。
  *
  * 縛るのは2つだけ（どちらも、取り合いがどちらのプールに転んでも成り立つ）:
  * 1. 不変条件: どのジョブも高々1回だけ claim され、`leaseConflicts` は無く、embed の呼び出し回数は処理した件数と同じ。
- *    「どちらのプールが何件取るか」は転び方が毎回違うので縛らない（分かれ方は ADR 0531 に回数と一緒に書いた）。
+ *    「どちらのプールが何件取るか」は転び方が毎回違うので縛らない。
  * 2. リースの CAS が接続をまたいで効く（決定的）: プール A の tick が provider の門で止まり、時計をリースより先へ進めると、別のプールの tick が
  *    再 claim して完了させ、A が遅れて `complete`／`fail` しても `leaseConflicts` に載り、行は書き換わらない。順序は時計のオフセットと門（Promise）で決める。
  * Fake・InMemory には複数のプロセスに当たるものが無いので、Postgres だけで測る。
@@ -187,7 +186,6 @@ describe("複数のプールからの tick の並行: 不変条件（ADR 0531）
           violations.push(`trial ${trial}: total ${total} out of bounds`);
         if ((await readyCount(ctx, ids)) !== total)
           violations.push(`trial ${trial}: ready != processed`);
-        // 取られなかった分は、次の tick が1回ずつ処理して終わる
         for (let r = 0; r < 20; r += 1) {
           if ((await opened[0]!.runtime.tick(ctx, { leaseMs: 60_000, limit: 50 })).processed === 0)
             break;
@@ -222,7 +220,6 @@ describe("複数のプールをまたぐリースの CAS（ADR 0531。決定的�
       try {
         const aP = A.runtime.tick(ctx, { leaseMs: 1000, claimedBy: "A" });
         await enteredP;
-        // リースの内側: 別のプールの tick は何も取らない
         const within = await B.runtime.tick(ctx, { leaseMs: 1000, claimedBy: "B" });
         expect([within.processed, within.failed, within.leaseConflicts.length]).toEqual([0, 0, 0]);
         clockOffsetMs = 5000; // リースの外
@@ -236,7 +233,6 @@ describe("複数のプールをまたぐリースの CAS（ADR 0531。決定的�
         expect(aT.leaseConflicts.map((x) => [x.kind, x.attemptedOutcome])).toEqual([
           ["embed", lateOutcome],
         ]);
-        // 行は書き換わらない（B の完了のまま。A の fail は lastError も残さない）
         expect(await outboxRows(ctx)).toEqual([{ attempts: 2, done: true, failed: false }]);
         const lastError = await boot!.pool.query(
           `SELECT last_error FROM outbox WHERE tenant_id = $1`,
@@ -288,7 +284,6 @@ describe("複数のプールをまたぐリースの CAS（ADR 0531。決定的�
         const aT = await aP;
         expect(aT.processed).toBe(0);
         expect(aT.leaseConflicts.map((x) => x.attemptedOutcome)).toEqual([lateOutcome]);
-        // 弾かれて、行は書き換わらない（B の処理中のまま。A の fail は lastError も残さない）
         expect(await outboxRows(ctx)).toEqual([{ attempts: 2, done: false, failed: false }]);
         releaseB();
         const bT = await bP;

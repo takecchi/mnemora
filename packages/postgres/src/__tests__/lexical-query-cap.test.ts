@@ -5,12 +5,6 @@ import {
   capLexicalQueryWords,
 } from "../lexical-query-cap.js";
 
-/**
- * `capLexicalQueryWords`（Issue #878、2026-09-26、クローン miku の判断）の純粋な単体テスト。
- * DB を要らない——`packages/postgres/src/__tests__/lexical-store-query-word-cap.test.ts`
- * （本物の Postgres に対する結果ベースの歯）とは別に、関数そのものの境界値を見る。
- */
-
 function fillerWords(n: number): string[] {
   return Array.from({ length: n }, (_, i) => `filler${i}`);
 }

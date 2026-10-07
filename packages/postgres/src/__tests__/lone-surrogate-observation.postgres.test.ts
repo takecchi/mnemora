@@ -16,13 +16,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 孤立サロゲート（対をなさない UTF-16 サロゲートコードユニット）を含む Observation の書き込みの扱いを縛る（Issue #1075）。
- *
- * 識別子の欄（`subjectId`・`externalId`）は書く前に断る（ADR 0423）。本文の欄（`payload`・`attributes`）は、
- * 列の型によって違う今の振る舞いのまま（`jsonb` は例外）。この歯は、`MemoryStore.createObservation` の doc コメントに書いた実態が崩れたら気づくためのもの。
- * Memory の側（`createMemory`）は同じ doc の `createMemory` の節（PR #1078）。
- */
+/** 識別子の欄は書く前に断る。本文の欄（`payload`・`attributes`）は列の型によって違う今の振る舞い（`jsonb` は例外）で、`MemoryStore.createObservation` の doc に書いた実態が崩れたら気づくための歯。 */
 
 const ctx: Ctx = { tenantId: "lone-surrogate-observation" };
 /** `text.slice(0, n)` がサロゲートペアの間を切ったときにできる形（😀 の上位半分だけ）。 */

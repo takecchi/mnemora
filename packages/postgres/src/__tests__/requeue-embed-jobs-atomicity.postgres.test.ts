@@ -5,26 +5,17 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0079: `requeueEmbedJobs` の「`memories` の更新と `outbox` の INSERT は
- * 同一トランザクションである」という主張を、**実際に片方を失敗させて**検査する。
+ * `requeueEmbedJobs` の「`memories` の更新と `outbox` の INSERT は同一トランザクションである」という主張を、実際に片方を失敗させて検査する。
  *
- * 🔴 **この歯が無いと、その主張には歯が1本も無い。**適合スイート
- * （`packages/testkit/src/memory-store-conformance.ts`）の検査はすべて正常系であり、
- * 実装を「`UPDATE ... RETURNING` を打ってから、別の文で `INSERT`」の2文へ割る変異は
- * **正常系では同じ結果を返す**——適合スイートは1件も赤くならない
- * （ADR 0079「測ったこと」に実測を記録した）。
+ * 適合スイート（`packages/testkit/src/memory-store-conformance.ts`）の検査はすべて正常系であり、
+ * 実装を「`UPDATE ... RETURNING` を打ってから、別の文で `INSERT`」の2文へ割る変異は正常系では同じ結果を返す。この歯が無いと、その主張には歯が1本も無い。
  *
- * ここでは `outbox` への INSERT を必ず失敗させるトリガーを一時的に作り、
- * `requeueEmbedJobs` が例外で終わったあとに **`memories.embedding_status` が
- * `failed` のまま巻き戻っている**ことを見る。2文に割った実装なら `UPDATE` だけが
- * コミットされ、Memory は `pending` に戻ったまま**運ぶジョブが無い状態**で残る
- * ——それはこの ADR が塞ごうとしている「待っても解けない `pending`」そのものであり、
- * **直すつもりの操作が同じ穴を掘る**という最悪の壊れ方になる。
+ * ここでは `outbox` への INSERT を必ず失敗させるトリガーを一時的に作り、`requeueEmbedJobs` が例外で終わったあとに `memories.embedding_status` が `failed` のまま巻き戻っていることを見る。
+ * 2文に割った実装なら `UPDATE` だけがコミットされ、Memory は `pending` に戻ったまま運ぶジョブが無い状態で残る。
+ * それは「待っても解けない `pending`」そのものであり、直すつもりの操作が同じ穴を掘る。
  *
- * ⚠ トリガーは `finally` で必ず落とす。`resetTestDatabase()` はテーブルの中身を
- * TRUNCATE するだけでスキーマ（トリガーを含む）は作り直さないため、落とし忘れると
- * 同じプロセス内で後から走る他のテストファイルまで巻き込む
- * （`outbox-claim-lease-index.test.ts` が索引の復元で踏んでいるのと同じ勘所）。
+ * ⚠ トリガーは `finally` で必ず落とす。`resetTestDatabase()` はテーブルの中身を TRUNCATE するだけでスキーマ（トリガーを含む）は作り直さないため、
+ * 落とし忘れると同じプロセス内で後から走る他のテストファイルまで巻き込む（`outbox-claim-lease-index.test.ts` が索引の復元で踏んでいるのと同じ勘所）。
  */
 
 const TENANT = "requeue-atomicity-tenant";
@@ -50,10 +41,9 @@ const DROP_FAILING_TRIGGER = `
 /**
  * `Error.cause` の連鎖を平らにして1本の文字列にする。
  *
- * **drizzle の `db.execute()` が投げる例外から元の PostgreSQL のメッセージは直接読めない**
- * ——`Failed query: <SQL>` という別の `Error` で包まれ、pg のエラーは `cause` 側に入る
- * （このリポジトリで一度実測した。`advisory-lock.ts` が生の `PoolClient` を使って
- * `err.code` を読めるのは、あちらが drizzle を経由していないからである）。
+ * drizzle の `db.execute()` が投げる例外から元の PostgreSQL のメッセージは直接読めない。
+ * `Failed query: <SQL>` という別の `Error` で包まれ、pg のエラーは `cause` 側に入る
+ * （`advisory-lock.ts` が生の `PoolClient` を使って `err.code` を読めるのは、あちらが drizzle を経由していないからである）。
  */
 function messageChain(error: unknown): string {
   const parts: string[] = [];
@@ -94,16 +84,12 @@ describe("requeueEmbedJobs の原子性（ADR 0079）", () => {
         (err: unknown) => err,
       );
 
-      // ⚠ **`rejects.toThrow(/.../)` では捕まらない。**drizzle は失敗したクエリを
-      // `Failed query: …` という別の `Error` で包み、**元の PostgreSQL の
-      // エラーメッセージは `cause` の連鎖側に入る**（実測: 一度この形で赤くなった）。
-      // 引数無しの `.rejects.toThrow()` に緩めると「何かが投げられた」しか測らず、
-      // トリガーとは無関係な失敗（接続断・SQL の書き間違い）でも緑になる
-      // ——`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由。
-      // ⟹ **連鎖を平らにしてから照合する。**
+      // ⚠ `rejects.toThrow(/.../)` では捕まらない。drizzle は失敗したクエリを `Failed query: …` という別の `Error` で包み、
+      // 元の PostgreSQL のエラーメッセージは `cause` の連鎖側に入る。
+      // 引数無しの `.rejects.toThrow()` に緩めると「何かが投げられた」しか測らず、トリガーとは無関係な失敗（接続断・SQL の書き間違い）でも緑になる
+      // （`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由）。連鎖を平らにしてから照合する。
       expect(messageChain(error)).toMatch(/requeue-atomicity: outbox insert blocked on purpose/);
 
-      // 🔴 ここが本題。UPDATE だけがコミットされていたら `pending` になっている。
       const after = await store.get(ctx, memory.id);
       const jobs = await pool.query(
         "SELECT count(*)::int AS n FROM outbox WHERE tenant_id = $1 AND kind = 'embed'",

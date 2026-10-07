@@ -6,13 +6,9 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresMemoryStore.resolveOrphanedContested`（Issue #825、ADR 0150 追記）を、
- * 本物の Postgres に対して実行する。**⚠ CI（postgres ジョブ）またはローカルの `test:db`
- * でしか走らない**——`getTestClient()`/`resetTestDatabase()` は `DATABASE_URL` を要求する。
+ * `PostgresMemoryStore.resolveOrphanedContested` を、本物の Postgres に対して実行する。
  *
- * `resolveContestedPair`（ADR 0150 決定3の CAS）は本ファイルでは一切変更していない
- * ——`resolve-contested-pair-guard.test.ts`/`conformance.postgres.test.ts` の
- * `resolveContestedPair` 節が既に測っている。ここで測るのは新しい口だけである。
+ * `resolveContestedPair` の CAS はここでは測らない（`resolve-contested-pair-guard.test.ts`/`conformance.postgres.test.ts` の `resolveContestedPair` 節が既に測っている）。ここで測るのは新しい口だけである。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -155,10 +151,8 @@ describe("PostgresMemoryStore.resolveOrphanedContested — 本物の Postgres（
       { id: b.id, event: event(b.id) },
     );
 
-    // b はまだ contested のまま（forget していない）。それでもこの口は CAS
-    // （a.status === 'contested' かつ a.contestedWithId === b.id）さえ満たせば書く
-    // ——「対向が forgotten か」の判定は Runtime.resolveOrphanedContested の責務であり、
-    // この口自身の契約には無い（interface JSDoc 参照）。
+    // b はまだ contested のまま（forget していない）。それでもこの口は CAS（a.status === 'contested' かつ a.contestedWithId === b.id）さえ満たせば書く。
+    // 「対向が forgotten か」の判定は Runtime.resolveOrphanedContested の責務であり、この口自身の契約には無い。
     const result = await store.resolveOrphanedContested!(ctx, {
       id: a.id,
       contestedWithId: b.id,
@@ -166,7 +160,6 @@ describe("PostgresMemoryStore.resolveOrphanedContested — 本物の Postgres（
     });
     expect(result.memory.status).toBe("active");
 
-    // b 側は一切触れられていない——まだ contested のまま。
     const storedB = await store.get(ctx, b.id);
     expect(storedB?.status).toBe("contested");
     expect(storedB?.contestedWithId).toBe(a.id);

@@ -9,19 +9,15 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { captureClientQuery, closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * Issue #956（PR #982）の約束のうち、`vector-search-zero-norm.postgres.test.ts` が見ていない側。
  * 約束: `search()` / `searchMany()` は、ゼロベクトル（norm 0。距離は常に `NaN`）の候補を
  * 返す。**1回ずつ**（重複させない）、**非ゼロの候補の後ろに**、同じ3段のタイブレーク
  * （距離 → `recorded_at` DESC → `memory_id`）で並べ、`limit` で切る（ゼロ候補が `limit` より
  * 多いときは、`recorded_at` の新しいほう・同点なら `memory_id` の小さいほうが残る）。
  * ゼロ候補にも `filter`（status など）と `ctx` / `filter.tenantId` のテナントの境界が掛かる。
- * ADR 0040 の約束（比較できなくても候補は落とさない）と ADR 0343。
+ * 比較できなくても候補は落とさない。
  *
  * 統計が無い場面の枝（候補D・`CROSS JOIN LATERAL`）と、統計がある場面の枝（`JOIN memories`）は
  * 別のコードなので、**両方**で同じ期待を見る（どちらの形が使われたかは、発行された SQL で確かめる）。
- *
- * ⚠ 既存の歯は「ゼロの候補が結果に入る」（`toContain`）を見ているが、重複・並び・`limit` での
- * 切れ方・`filter` の掛かり方は見ていない。
  */
 
 const TENANT = `zero-norm-contract-${randomUUID()}`;
@@ -247,7 +243,7 @@ describe.each<Mode>(["stats-missing", "stats-present"])(
         ...subjectZerosNewestFirst(),
       ]);
 
-      // ctx と filter.tenantId が食い違えば（ADR 0007）、どちらのテナントのゼロも出ない。
+      // ctx と filter.tenantId が食い違えば、どちらのテナントのゼロも出ない。
       expect(await search(otherCtx, [1, 0, 0], { limit: 50, filter })).toEqual([]);
     });
 

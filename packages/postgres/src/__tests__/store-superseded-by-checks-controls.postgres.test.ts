@@ -12,25 +12,22 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0574（ADR 0557 の歯の穴）: `store-superseded-by-checks.postgres.test.ts` に足りなかった期待を、3実装
- * （testkit の InMemory・core の Fake・Postgres）に同じ入力で流して縛る。core 側の歯は
- * `fake-superseded-by-checks-controls.test.ts`（Fake だけの変異試験の対象）。
+ * `store-superseded-by-checks.postgres.test.ts` に足りなかった期待を、3実装（testkit の InMemory・core の Fake・
+ * Postgres）に同じ入力で流して縛る。
  *
- * - 対・群の外の `superseded`・`contested` を指す `superseded` は通る（ADR 0557 の決定3）。
+ * - 対・群の外の `superseded`・`contested` を指す `superseded` は通る。
  * - 輪が先頭に絡まない循環（先頭が群の外を指す・尾が輪に入る）も RangeError。
  * - 形・循環の検査は、存在確認・CAS より前（存在しない id・contested でない行でも RangeError）。
- *
- * ADR 0584（ADR 0574 の歯の穴）: 次を足した。
- * - F14・P16: 外の `forgotten` を指す検査は CAS（と群の部分解消の検査）より後（MemoryStatusConflictError が先）。
- * - P12: 壊れた id（`isUuidLike` で弾かれる形）+ 形の違反は、not found ではなく RangeError（決定3）。
- * - F10・F12: pair・group の形の違反は、存在確認・CAS より前（形の違反だけが違う入力で、存在しない・contested でないの両方）。
+ * - 外の `forgotten` を指す検査は CAS（と群の部分解消の検査）より後（MemoryStatusConflictError が先）。
+ * - 壊れた id（`isUuidLike` で弾かれる形）+ 形の違反は、not found ではなく RangeError。
+ * - pair・group の形の違反は、存在確認・CAS より前（形の違反だけが違う入力で、存在しない・contested でないの両方）。
  */
 
 const A: Ctx = { tenantId: "superseded-by-controls-a" };
 const ABSENT = "00000000-0000-4000-8000-0000000000aa" as MemoryId;
 const ABSENT2 = "00000000-0000-4000-8000-0000000000ab" as MemoryId;
 const ABSENT3 = "00000000-0000-4000-8000-0000000000ac" as MemoryId;
-/** `isUuidLike` で弾かれる形（uuid ではない）。ADR 0574「決定」3番: 形・循環の検査は、この not found より先。 */
+/** `isUuidLike` で弾かれる形（uuid ではない）。形・循環の検査は、この not found より先。 */
 const BROKEN = "not-a-uuid" as MemoryId;
 const BROKEN2 = "also-not-a-uuid" as MemoryId;
 const BROKEN3 = "still-not-a-uuid" as MemoryId;
@@ -281,7 +278,6 @@ for (const [kitName, makeKit] of KITS) {
       );
     });
 
-    // --- ADR 0584（ADR 0574 の歯の穴）---------------------------------------------------------
     const thrownOf = async (run: () => Promise<unknown>): Promise<unknown> => {
       let thrown: unknown;
       await run().catch((e: unknown) => {
@@ -424,8 +420,6 @@ for (const [kitName, makeKit] of KITS) {
     });
 
     it("位置（P12 の pair・group の陽性対照）: 壊れた id でも形が正しければ、RangeError ではなく memory not found の Error", async () => {
-      // updateStatus / updateStatusWithEvent には上に同じ陽性対照がある。resolveContestedPair /
-      // resolveContestedGroup の `!isUuidLike` の throw を RangeError にしても、他の歯は捕まえなかった。
       const kit = await makeKit();
       const notFound = async (run: () => Promise<unknown>) => {
         const thrown = await thrownOf(run);
@@ -433,7 +427,6 @@ for (const [kitName, makeKit] of KITS) {
         expect(thrown).not.toBeInstanceOf(RangeError);
         expect((thrown as Error).message).toMatch(/memory not found for tenant/);
       };
-      // pair: 先頭が壊れている／先頭は uuid の形で2件目が壊れている
       await notFound(() =>
         resolvePair(
           kit,
@@ -452,7 +445,6 @@ for (const [kitName, makeKit] of KITS) {
           { status: "active" },
         ),
       );
-      // group: 先頭が壊れている／末尾だけ壊れている
       await notFound(() =>
         resolveGroup(
           kit,

@@ -19,20 +19,10 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `purgeExpiredEventsForTenant` が保持期間を読んでから消すまでの間に `setEventRetention` で期間を変えたとき、
- * **変えた後の期間を守る**ことを縛る（Issue #1232 の修正）。以前はここで「読んだときの30日で消す」——
- * つまり `setEventRetention` の呼び出しが返った後にもかかわらず古い期間で監査ログを消してしまう——
- * 今の（バグの）振る舞いを縛っていた。`MemoryStore.purgeExpiredEventsByRetention?`
- * （`packages/core/src/interfaces/memory-store.ts`）が「保持期間を読むことと削除することを1つの
- * 原子的な操作にする」ことで、この race を閉じた。
- *
- * 読んだ直後を門で止め、止めている間に設定を変えて返らせてから門を外す。門が止めているのは
- * `purgeExpiredEventsForTenant` 冒頭の `tenantSettingsStore.getEventRetention` 呼び出し（unset/unlimited を
- * 判定するためだけの読み）——`memoryStore.purgeExpiredEventsByRetention` 自身の内部の読み（Postgres なら
- * `tenant_settings` 行への `SELECT ... FOR SHARE`）はこの門の**外**にあり、`setEventRetention` が commit
- * した**後**に実行される。だから、外側の読みが古い値（30日）で止まっていても、実際に何日で消すかは
- * 内側の読みが見る最新の値になる——これが Issue #1232 を閉じる仕組みそのものである。
- * Postgres と testkit の fixture で同じ。
+ * 読んだ直後を門で止め、止めている間に設定を変えて返らせてから門を外す。門が止めているのは `purgeExpiredEventsForTenant` 冒頭の
+ * `tenantSettingsStore.getEventRetention` 呼び出し（unset/unlimited を判定するためだけの読み）で、
+ * `memoryStore.purgeExpiredEventsByRetention` 自身の内部の読み（Postgres なら `tenant_settings` 行への `SELECT ... FOR SHARE`）はこの門の外にあり、
+ * `setEventRetention` が commit した後に実行される。外側の読みが古い値（30日）で止まっていても、実際に何日で消すかは内側の読みが見る最新の値になる。
  */
 
 interface Kit {
@@ -49,9 +39,7 @@ const KITS: Array<[string, () => Promise<Kit>]> = [
       return {
         memoryStore,
         eventStore: new InMemoryEventStore(memoryStore, memoryStore.events),
-        // `eventRetentionDays` を共有することで、`setEventRetention`（書く側）と
-        // `memoryStore.purgeExpiredEventsByRetention`（読む側）が同じ値を見る
-        // （`InMemoryTenantSettingsStore` クラス doc の2026-09-29追記参照）。
+        // `eventRetentionDays` を共有することで、`setEventRetention`（書く側）と `memoryStore.purgeExpiredEventsByRetention`（読む側）が同じ値を見る。
         settings: new InMemoryTenantSettingsStore(
           memoryStore.activitySeq,
           undefined,
@@ -103,13 +91,8 @@ afterAll(async () => {
 });
 
 /**
- * ラベル・`setEventRetention` に渡す変更後の値・変更後に期待する `purgeExpiredEventsForTenant` の
- * outcome・40日前/100日前の各イベントが消えるかどうか、の組。
- *
- * - 無期限にした場合: `memoryStore.purgeExpiredEventsByRetention` 自身の内側の読みが `unlimited` を見るので、
- *   `purgeExpiredEventsForTenant` は `{ kind: "unlimited" }` を返し、1件も消えない（40日前・100日前とも残る）。
- * - 60日に延ばした場合: 内側の読みが `{ kind: "days", days: 60 }` を見るので、cutoff は「60日前」になる。
- *   40日前のイベントは cutoff より新しい（残る）。100日前のイベントは cutoff より古い（消える）。
+ * ラベル・`setEventRetention` に渡す変更後の値・変更後に期待する outcome・40日前/100日前の各イベントが消えるかどうか、の組。
+ * 無期限にした場合は1件も消えない。60日に延ばした場合は cutoff が60日前になり、40日前は残り、100日前は消える。
  */
 const CHANGES: Array<
   [

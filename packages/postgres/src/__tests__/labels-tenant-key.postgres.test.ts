@@ -5,15 +5,7 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ラベル（ADR 0318）はテナントごとに分かれる（ADR 0318 決定6「テナント分離」）。`tenantId` は
- * 呼び出し側が渡す不透明な文字列で（`Ctx` の doc）、`::` を含んでよい。
- *
- * 【実測 2026-09-27】testkit の `InMemoryMemoryStore` はラベルのキーを `${tenantId}::${name}` で
- * 作り、`listLabels` を `${tenantId}::` の前方一致で絞っていた。テナント `a::b` のタグ `x` と
- * テナント `a` のタグ `b::x` が同じキーに潰れ、`a` のラベル `b::x` が消えて、`a::b` の `x` が
- * 両方のテナントの `listLabels` に `proposedCount: 2` で出ていた。Postgres は分かれていた。
- */
+/** `tenantId` は呼び出し側が渡す不透明な文字列で、`::` を含んでよい。キーの連結で別テナントのラベルと衝突しないこと。 */
 
 const A: Ctx = { tenantId: "a" };
 const AB: Ctx = { tenantId: "a::b" };

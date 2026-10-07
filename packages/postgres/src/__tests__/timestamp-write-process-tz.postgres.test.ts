@@ -13,16 +13,16 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #1040: node-postgres（`pg`）は `Date` のパラメータを**プロセスのローカル時刻**の
+ * node-postgres（`pg`）は `Date` のパラメータを**プロセスのローカル時刻**の
  * 文字列にし、時差を分に切り捨てて送る。プロセスの TZ が Asia/Tokyo のとき1850年の日時は
- * 59秒後へ、America/New_York では2秒前へずれて保存されていた。
+ * 59秒後へ、America/New_York では2秒前へずれる。
  *
- * `occurredAt` / `validFrom` / `validUntil` は呼び出し側の申告をそのまま受け入れる
- * （ADR 0037 決定3）。受け入れた値は、プロセスの TZ にもサーバの `TimeZone` にも
+ * `occurredAt` / `validFrom` / `validUntil` は呼び出し側の申告をそのまま受け入れる。
+ * 受け入れた値は、プロセスの TZ にもサーバの `TimeZone` にも
  * よらず、同じ瞬間として保存されなければならない。
  *
- * 保存された値は `extract(epoch ...)` のミリ秒で見る——読み取り側（`parsePgTimestamp`、
- * Issue #1039）を経由しないため。WHERE の条件に渡す `Date` も同じずれ方をするので、
+ * 保存された値は `extract(epoch ...)` のミリ秒で見る——読み取り側（`parsePgTimestamp`）を経由しないため。
+ * WHERE の条件に渡す `Date` も同じずれ方をするので、
  * `EventStore.list` の `since` / `until` を、保存した瞬間ちょうどに置いて見る。
  */
 const PROCESS_TIME_ZONES = ["UTC", "Asia/Tokyo", "America/New_York"] as const;
