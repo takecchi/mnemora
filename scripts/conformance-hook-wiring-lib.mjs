@@ -1,65 +1,15 @@
 /**
- * **適合テスト（conformance）の呼び出し側が、任意フックを実際に渡しているか**を
- * ソースから読み取る純関数（Issue #184 の追測）。
- *
- * ## なぜ要るか
- *
- * `packages/testkit/src/tenant-settings-store-conformance.ts` は
- *
- * ```ts
- * if (setDefaultHalfLifeHours) {
- *   it("…", async () => { … });
- * }
- * ```
- *
- * という形で**2本の歯を条件付きで登録する**。⟹ 🔴 **フックを渡さない呼び出し側に
- * 対しては、この2本は `it.skip` にすらならず、登録すらされない。**
- * ⟹ **テストの出力から「無い」ことが1ミリも分からない。**
- *
- * 現在の呼び出し側2つ（`packages/postgres` と `packages/testkit` の in-memory）は
- * どちらも渡しているので、**いまは実測されている**（＝ Issue #184 の A ではない）。
- * この歯が守るのは**将来**である——setter を持たない adapter が来て、フックを省いた
- * 瞬間に**2本が黙って消える**のを赤で捕まえる。
- *
- * ## ⛔ なぜ型を必須にしないのか（この判断の経緯を残す）
- *
- * 本来は `memory-store-conformance.ts` の `supportsSupersedeWithNewMemories`
- * （**必須の `boolean`**。`false` なら `expect(store.supersedeWithNewMemories).toBeUndefined()`
- * を積極的に assert し、⛔ `it.skip` にはしない——`docs/autonomy.md`）と揃えて、
- * `setDefaultHalfLifeHours` も**必須のフラグ**にするのが正しい形である。
- *
- * ⛔ **しかし `@mnemora/testkit` は npm に公開済み**（`private` は立っておらず
- * `publishConfig.access: "public"`、registry の `dist-tags.latest` は `0.1.5`）。
- * （2026-10-03 訂正）`0.1.5` は書いた当時の値である。いまの版は `npm view @mnemora/testkit version`
- * で引くこと（ここには写さない）。
- * ⟹ 必須化は**実在する公開パッケージへの破壊的変更**であり、**版を上げる判断は
- * オーナーの領域**である。
- *
- * ⟹ ⭐ **だからここでは型を1バイトも変えず、「呼び出し側が渡していること」を測る歯で
- * 代替した。**次に版を上げる機会が来た人が、そのとき必須化できる。
- *
- * ## ⚠ この網が扱っていないもの
- *
- * - **`${…}` の中に文字列があり、その文字列が `}` を含む**場合（例:
- *   `` `${s.replace("}", "")}` ``）、補間の終わりを取り違える。いまのソースには無い。
- * - **動的な呼び出し**（`const f = describeX; f({…})`）は見つけられない。
- * - **オブジェクト以外の引数**（変数を1つ渡す `describeX(opts)`）は
- *   「フックの有無が読めない」として**挙げる（赤）**——⛔ 「読めない」を緑で通さない。
+ * ⛔ 適合テストの型は、フックを必須にしない。`@mnemora/testkit` は公開済みで、必須化は公開パッケージへの
+ * 破壊的変更になり、版を上げる判断はオーナーの領域。代わりに「呼び出し側がフックを渡していること」を測る。
+ * 🔴 フックを渡さない呼び出し側には、条件付きの歯は `it.skip` にもならず登録すらされない。
+ * ⚠ 扱っていないもの: `${…}` の中の文字列が `}` を含む場合、動的な呼び出し。
+ * オブジェクト以外の引数は「読めない」として挙げる（赤）。⛔ 「読めない」を緑で通さない。
  */
 
 /**
- * コメント・文字列リテラル・テンプレートリテラルを**同じ長さの空白へ潰す**
- * （改行は残す）。⟹ 以降の括弧の深さ勘定が、SQL のテンプレートリテラルや
- * 地の文のコメントに撹乱されない。
- *
- * 🔴 **これを通さないと、地の文のコメントがフック名を引用しているだけで
- * 「渡している」と読んでしまう**（PR #161 が `ci.yml` で踏んだのと同じ形の欠陥）。
- *
- * ⚠ `scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs` と
- * `scripts/__tests__/example-chat-local-embedding-cache-dir-wiring.test.mjs` が
- * それぞれ持っている `blankOutComments` と**同じ思想の別実装**である（あちらは文字列を
- * 潰さないので括弧の深さを数えられない）。⛔ **あの2本を書き換えて統合していない**——
- * この PR の範囲外の歯に手を入れることになるため。統合するなら別途。
+ * 🔴 これを通さないと、地の文のコメントがフック名を引用しているだけで「渡している」と読んでしまう。
+ * ⛔ `ci-yml-postgres-regime-wiring.test.mjs` などの `blankOutComments` とは統合していない
+ * （あちらは文字列を潰さないので、括弧の深さを数えられない）。
  *
  * @param {string} source
  * @returns {{ text: string, unhandled: string[] }} `unhandled` は閉じていない
@@ -156,9 +106,6 @@ function findQuoteEnd(s, from, quote) {
 }
 
 /**
- * テンプレートリテラルの終わり（閉じバッククォート）を探す。`${ … }` の補間は
- * 中身ごと読み飛ばす（波括弧の対応だけを数える。上の「扱っていないもの」参照）。
- *
  * @param {string} s @param {number} from
  * @returns {number} 閉じバッククォートの位置。無ければ -1
  */
@@ -189,14 +136,8 @@ function findTemplateEnd(s, from) {
 }
 
 /**
- * `fnName(…)` という**呼び出し**を全部拾い、その引数がオブジェクトリテラルなら
- * **最上位のプロパティ名の集合**を返す。
- *
- * ⛔ `import { fnName } from …` は拾わない（直後が `(` ではないため）。
- * ⛔ `obj.fnName(…)` も拾わない（直前が `.` のため）。
- * ⛔ **宣言そのもの**（`export function fnName(options: …)`）も拾わない——直前の語が
- *    `function` のときは飛ばす。⟹ 定義ファイル自身を「引数が読めない呼び出し」として
- *    誤って挙げない。
+ * ⛔ `import { fnName }`・`obj.fnName(…)`・宣言そのもの（直前の語が `function`）は拾わない。
+ * 定義ファイル自身を「引数が読めない呼び出し」として挙げない。
  *
  * @param {string} source コメント/リテラルを潰す前の生ソース
  * @param {string} fnName
@@ -248,12 +189,7 @@ function findMatching(s, from, openCh, closeCh) {
 }
 
 /**
- * 引数テキストが**単一のオブジェクトリテラル**なら、その最上位のプロパティ名を返す。
- * そうでなければ `undefined`（＝「読めない」）。
- *
- * ⭐ **深さ1のキー位置**（`{` の直後、または深さ1の `,` の直後）に現れる識別子だけを
- * 拾う。⟹ 入れ子のオブジェクトの中に同名のキーが在っても「渡している」とは読まない。
- * 省略記法（`{ setDefaultHalfLifeHours }`）も拾う。
+ * ⛔ 深さ1のキー位置の識別子だけを拾う。入れ子のオブジェクトの中の同名のキーを「渡している」と読まない。
  *
  * @param {string} argText
  * @returns {string[] | undefined}
@@ -306,10 +242,6 @@ function topLevelObjectKeys(argText) {
 }
 
 /**
- * `fnName(…)` の呼び出しのうち、**`hookName` を渡していないもの**を挙げる。
- * 引数が読めないもの（オブジェクトリテラルでない）も挙げる——⛔「読めない」を
- * 緑で通さない。
- *
  * @param {string} source
  * @param {string} fnName
  * @param {string} hookName
