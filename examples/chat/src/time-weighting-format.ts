@@ -2,12 +2,7 @@ import type { TimeWeightingAggregateCell } from "./time-weighting-bench.js";
 import { answerQualityClaimable } from "./answer-case.js";
 import type { ProviderMode } from "./providers.js";
 
-/**
- * `answer-time-weighting` の人間向け出力（Markdown 表 + 目立つ注記）。
- *
- * `answer-format.ts` と同じ規律——`llmMode=deterministic` では正答数を主張しない
- * （`answerQualityClaimable` が false を返す）。
- */
+/** `llmMode=deterministic` では正答数を主張しない（`answerQualityClaimable` が false を返す）。 */
 
 export function formatTimeWeightingQualityBanner(llmMode: ProviderMode): string {
   if (answerQualityClaimable(llmMode)) {
@@ -21,11 +16,6 @@ export function formatTimeWeightingQualityBanner(llmMode: ProviderMode): string 
   );
 }
 
-/**
- * 「方針 × ケース」の正答数/試行数を Markdown 表にする。
- *
- * `answerQualityClaimable(llmMode) === false` のときは正答数の列を `—` にする。
- */
 export function formatTimeWeightingTable(
   cells: readonly TimeWeightingAggregateCell[],
   llmMode: ProviderMode,
@@ -49,10 +39,6 @@ export function formatTimeWeightingTable(
   return lines.join("\n");
 }
 
-/**
- * 類型ごとに legacy/eventAwareFreshness を並べた要約行を足す
- * （類型A: legacy が低く eventAwareFreshness が高いはず。類型B/C: 両方とも同程度に高いはず）。
- */
 export function formatTimeWeightingKindSummary(
   cells: readonly TimeWeightingAggregateCell[],
   llmMode: ProviderMode,
