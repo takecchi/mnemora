@@ -923,7 +923,7 @@ function build(base: string, stores: Stores, rows: Env["rows"]): Env {
 }
 
 describe("tick 経由の consolidate・reflect ジョブと、訂正の経路で負けた記憶がある reextract（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の、tick 経由の consolidate・reflect ジョブと、訂正の経路（findCorrectionCandidates・applyCorrection）で負けた記憶がある reextract の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build(
       "tick-jobs-inmem",
@@ -955,7 +955,7 @@ describe("tick 経由の consolidate・reflect ジョブと、訂正の経路で
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の、tick 経由の consolidate・reflect ジョブと、訂正の経路（findCorrectionCandidates・applyCorrection）で負けた記憶がある reextract の結果が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const env = build(

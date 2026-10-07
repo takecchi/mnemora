@@ -259,7 +259,7 @@ describe("buildRetrievalQualityJson", () => {
     expect(arm.decayFreshnessDifferentRows).toBe(0);
   });
 
-  it("schemaVersion は 1", () => {
+  it("buildRetrievalQualityJson が書き出す JSON の schemaVersion は 1", () => {
     const json = buildRetrievalQualityJson({
       reports: [fakeReport()],
       providerSource: "recorded",

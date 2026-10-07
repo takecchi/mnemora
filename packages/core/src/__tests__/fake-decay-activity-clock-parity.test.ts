@@ -723,7 +723,7 @@ const EXPECTED: Result = {
 };
 
 describe("活動時計（decay_clock = activity）の経路（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("decay_clock = activity での observe・recall・consolidate・reflect・sweepArchive・tick の結果（活動カウンタを含む）が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     const runtime: Runtime = createRuntime({

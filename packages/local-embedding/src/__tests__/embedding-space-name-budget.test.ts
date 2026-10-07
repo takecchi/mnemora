@@ -43,7 +43,7 @@ describe("packages/local-embedding の EmbeddingSpaceId から導かれる Postg
   });
 });
 
-describe("上の歯が本当に赤くなれること（検出器そのものの検査）", () => {
+describe("長すぎる model では導出名が切り詰められ末尾の dimensions が消える（上の「末尾に dimensions が残っている」検査が、切り詰めを検出できることの確認）", () => {
   /** `model` を長くして実際に化かして確かめる。これが無いと、上の `endsWith` が「たまたま通っている」のか「切り詰めを検出できる」のかが区別できない。 */
   const tooLong = {
     provider: space.provider,

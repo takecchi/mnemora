@@ -535,7 +535,7 @@ function newMemory(ctx: Ctx, content: string): NewMemory {
 }
 
 describe("consolidate・reflect・reextract・observe の「消した後の参照」（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("消した後の記憶に対する consolidate・reflect・reextract・observe・recall の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     const runtime: Runtime = createRuntime({

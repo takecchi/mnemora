@@ -217,7 +217,7 @@ async function countRows(pool: Pool, tenantId: string): Promise<Record<string, n
 }
 
 describe("eraseTenant は、他テナントの行がこのテナントの行を外部キーで参照する、どの経路でも止まる", () => {
-  it("この歯が持つ経路は、tenant_id を持つ表どうしの単一列の外部キーの全部である", async () => {
+  it("以下で検査する経路（PATHS）は、tenant_id を持つ表どうしの単一列の外部キーの全部である", async () => {
     await resetTestDatabase();
     const { pool } = await getTestClient();
     expect(await enumerateForeignKeyPaths(pool)).toEqual(PATHS.map((p) => p.path).sort());

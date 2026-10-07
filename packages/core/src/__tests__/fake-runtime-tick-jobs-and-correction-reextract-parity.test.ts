@@ -828,7 +828,7 @@ function newMemory(ctx: Ctx, content: string, over: Partial<NewMemory> = {}): Ne
 }
 
 describe("tick 経由の consolidate・reflect ジョブと、訂正の経路で負けた記憶がある reextract（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("tick 経由の consolidate・reflect ジョブと、訂正の経路（findCorrectionCandidates・applyCorrection）で負けた記憶がある reextract の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     // 時計は注入しない: 注入した過去の時計では tick がジョブを取らない（`RuntimeDeps.clock` の doc）

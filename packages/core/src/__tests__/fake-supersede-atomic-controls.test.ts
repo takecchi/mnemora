@@ -86,7 +86,7 @@ async function newObservation(stores: Stores) {
   });
 }
 
-describe("ADR 0564 の歯の穴: supersedeWithNewMemories の巻き戻しの範囲（O1・O3）", () => {
+describe("supersedeWithNewMemories の失敗は先の呼び出しが残したイベントを巻き戻さず、成功した呼び出しの冪等キーの索引は残る（ADR 0564。O1・O3）", () => {
   it("O1: 失敗しても、先の呼び出しが残したイベントは消えない（巻き戻しすぎない）", async () => {
     const stores = createFakeRuntimeStores();
     const old = await stores.memoryStore.createMemory(ctx, newMemory());
@@ -168,7 +168,7 @@ describe("ADR 0564 の歯の穴: supersedeWithNewMemories の巻き戻しの範�
   });
 });
 
-describe("ADR 0564 の歯の穴: 行を作る条件（O5・O6）", () => {
+describe("tenantSettingsStore は、不正な値の setter では投げて行を作らず、読む側（get*）は行を作らない（ADR 0564。O5・O6）", () => {
   it("O5: 不正な mode の setTaxonomyMode は投げ、行を作らない（getEventRetention は unset のまま）", async () => {
     const { tenantSettingsStore } = createFakeRuntimeStores();
     await expect(
