@@ -37,7 +37,13 @@ async function dropAllSchemas(pool: Pool): Promise<void> {
   }
 }
 
+// autovacuum が投入の途中で ANALYZE すると、「この呼び出しは統計を動かさない」を測れなくなる。
+async function disableAutovacuum(pool: Pool, schema: string, table: string): Promise<void> {
+  await pool.query(`ALTER TABLE "${schema}".${table} SET (autovacuum_enabled = false)`);
+}
+
 async function seedMemories(pool: Pool, schema: string): Promise<void> {
+  await disableAutovacuum(pool, schema, "memories");
   const ids: string[] = Array.from({ length: ROW_COUNT }, () => randomUUID());
   await pool.query(
     `
@@ -57,6 +63,7 @@ async function seedMemories(pool: Pool, schema: string): Promise<void> {
 }
 
 async function seedMemoryEvents(pool: Pool, schema: string): Promise<void> {
+  await disableAutovacuum(pool, schema, "memory_events");
   await pool.query(
     `
     INSERT INTO "${schema}".memory_events (tenant_id, kind, actor)
