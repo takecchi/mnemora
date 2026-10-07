@@ -1,53 +1,19 @@
 import OpenAI from "openai";
-// 型だけの import。`providers.ts` が本モジュールを値として import しているが、
-// `import type` は実行時に消えるため循環にならない。
+// 型だけの import（`providers.ts` が本モジュールを値として import しているので、`import type` で循環を避ける）。
 import type { ProviderMode } from "./providers.js";
 
 /**
- * 本物の OpenAI を使ったとき、実際に何回叩き・何トークン使い・いくら掛かったかを
- * 実測する（PR 本文 (A)）。
- *
- * **`packages/openai` は変更しない。** `OpenAILLMProvider` / `OpenAIEmbeddingProvider` は
- * どちらもコンストラクタで `client`（`OpenAIChatClient` / `OpenAIEmbeddingsClient`——
- * 2026-09-29 より前は `Pick<OpenAI, "chat">` / `Pick<OpenAI, "embeddings">`。
- * [Issue #1221](https://github.com/takecchi/mnemora/issues/1221) /
- * [ADR 0350](../../../docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）を
- * 注入できる（`packages/openai/src/__tests__/*.test.ts` が同じ穴を使っている）。この
- * provider 自身は `client.chat.completions.create` / `client.embeddings.create` が返す
- * `response.usage` を読んだあとに `{content}` / `T` / `number[][]` へ絞ってから呼び出し側へ
- * 返す——**usage 情報はそこで捨てられる**。したがって計測は provider の外からではなく、
- * provider が握る `client` そのものを横取りする必要がある。
- *
- * ここでは**本物の `OpenAI` インスタンスをそのまま生成し、そのインスタンス自身の
- * `chat.completions.create` / `embeddings.create` を集計付きの実装へ差し替える**——
- * 偽の `client` オブジェクトを新たに組み立てる案は採らなかった。OpenAI SDK の
- * `Chat` / `Completions` / `Embeddings` は `APIResource`（`protected _client` を持つ）を
- * 継承しており、素のオブジェクトリテラルでは構造的に型を満たせない
- * （`packages/openai` の既存テストが `client: {...} as never` とキャストで回避しているのが
- * その証拠）。本物のインスタンスをその場で書き換える形なら、返す `client` の型は
- * 最初から正真正銘の `OpenAI` であり、余計なキャストを host 側の型に対して行わずに済む。
+ * `OpenAILLMProvider`/`OpenAIEmbeddingProvider` は `response.usage` を捨てて返すので、計測は provider の外からではなく `client` 自体を横取りして行う。
+ * 偽の `client` オブジェクトは組み立てず、本物の `OpenAI` インスタンスの `chat.completions.create`/`embeddings.create` を差し替える（SDK のクラスは `protected _client` を持つ `APIResource` を継承していて、オブジェクトリテラルでは型を満たせない）。
  */
 
-// ---------------------------------------------------------------------------
-// 費用の定数表
-// ---------------------------------------------------------------------------
-
-/**
- * ⚠ 2026-09 時点で OpenAI が公開している価格をそのままコードに書き写したものである。
- * OpenAI の Billing API・ダッシュボードから動的に取得した値ではない。
- * モデルの値下げ・値上げ・新モデルの追加があってもこの定数表は自動更新されない
- * ——実際の請求額の確認は OpenAI のダッシュボードで行うこと。
- */
+/** 公開価格の書き写しで、動的に取得した値ではない。値上げ・値下げ・新モデルでも自動更新されない（実際の請求額は OpenAI のダッシュボードで確認する）。 */
 const PRICING_USD_PER_MILLION_TOKENS: Readonly<
   Record<string, { readonly input: number; readonly output?: number }>
 > = {
   "gpt-4o-mini": { input: 0.15, output: 0.6 },
   "text-embedding-3-small": { input: 0.02 },
 };
-
-// ---------------------------------------------------------------------------
-// 集計
-// ---------------------------------------------------------------------------
 
 export interface OpenAIUsageTotals {
   chatCalls: number;
@@ -66,48 +32,22 @@ export interface OpenAIUsageCost {
 
 export interface UsageMeterOptions {
   apiKey?: string;
-  /** 費用計算に使う LLM のモデル名。`PRICING_USD_PER_MILLION_TOKENS` のキーと一致させること。 */
   llmModel: string;
-  /** 費用計算に使う embedding のモデル名。同上。 */
   embeddingModel: string;
 }
 
 export interface UsageMeter {
-  /**
-   * `OpenAILLMProvider` / `OpenAIEmbeddingProvider` の `client` オプションへそのまま渡す、
-   * 集計機能付きの本物の `OpenAI` クライアント。
-   */
   client: OpenAI;
   totals(): OpenAIUsageTotals;
   cost(): OpenAIUsageCost;
-  /** 画面に出す最終レポート（呼び出し回数・トークン・USD）。 */
   formatReport(): string;
 }
 
-/** `Stream<ChatCompletionChunk>` かどうか。`AsyncIterable` を実装している点で判別する。 */
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
 }
 
-/**
- * 本物の `OpenAI` クライアントを1つ作り、`chat.completions.create` /
- * `embeddings.create` を集計付きの実装へその場で差し替える。
- *
- * **型についての注記**: OpenAI SDK の `create` はオーバーロード関数
- * （streaming / non-streaming / base の3つ、embeddings は base64 / 通常の2つ）である。
- * ここで書く実装は「元の呼び出しをそのまま転送し、返ってきた Promise を横から読むだけ」
- * であり、この処理系自体はどのオーバーロードに対しても同じ形で正しく動く。ただし
- * 単一の実装関数の型を、宣言側の複数オーバーロードの型（各オーバーロードの戻り値が
- * 互いにナロー）にそのまま代入することは TypeScript の型システム上できない
- * （例: `ChatCompletionCreateParamsNonStreaming` 版の戻り値 `APIPromise<ChatCompletion>`
- * に対して、実装は union 型 `APIPromise<Stream<...> | ChatCompletion>` を返すため、
- * 個別のオーバーロードの戻り値へは狭められない）。そのため代入の最後に一度だけ
- * 宣言側の型へ `as` で戻す。**実際に呼び出すコード（`OpenAILLMProvider` /
- * `OpenAIEmbeddingProvider`）は streaming も base64 も使わないため、実行時には常に
- * 非 streaming・非 base64 の分岐だけを通る**——この `as` は「型が合わないものを
- * 無理やり通す」のではなく、「オーバーロード関数を汎用的にラップする際に TS が
- * 表現しきれない型の対応」を1箇所に閉じ込めるためのものである。
- */
+/** `create` を集計付きの実装へ差し替える。単一の実装関数はオーバーロードの型へ代入できないので、代入の最後に一度だけ宣言側の型へ `as` で戻す（実際に呼ぶのは非 streaming・非 base64 だけ）。 */
 export function createUsageMeter(options: UsageMeterOptions): UsageMeter {
   const client = new OpenAI({ apiKey: options.apiKey });
 
@@ -135,9 +75,7 @@ export function createUsageMeter(options: UsageMeterOptions): UsageMeter {
         }
       })
       .catch(() => {
-        // 集計の失敗で本来の呼び出しを壊さない。エラー自体は呼び出し元へ返した
-        // `result`（同じ Promise インスタンス）がそのまま伝えるので、ここで二重に
-        // 投げたり握りつぶした事実を隠したりはしない。
+        // 集計の失敗で本来の呼び出しを壊さない。
       });
     return result;
   }) as ChatCreate;
@@ -156,7 +94,7 @@ export function createUsageMeter(options: UsageMeterOptions): UsageMeter {
         totals.embeddingPromptTokens += response.usage?.prompt_tokens ?? 0;
       })
       .catch(() => {
-        // 同上。
+        // 集計の失敗で本来の呼び出しを壊さないため、ここでは握りつぶす。
       });
     return result;
   }) as EmbeddingsCreate;
@@ -215,23 +153,8 @@ export function createUsageMeter(options: UsageMeterOptions): UsageMeter {
 }
 
 /**
- * API を叩かなかった run で画面へ出す明示的な注記。**0 を黙って出さない**——
- * 「呼び出し0回・費用$0」という表示は、一見しただけでは「本物を叩いて0回だった」のか
- * 「そもそも叩いていない」のかが区別できない。後者であることを文字で明言する。
- *
- * ⚠ **モードを引数で必ず受け取る**（ADR 0051）。以前は引数を取らず、本文に
- * 「擬似 provider（@mnemora/testkit）で走っている」と決め打ちで書いていた。
- * `"recorded"`（記録の再生）が入ったことで**その決め打ちは嘘になった**——記録の再生は
- * 本物の応答に由来する値であり、意味を持たない stub とは別物である。
- * **呼び出し側に真実を言わせるため、引数は省略可能にしていない。**
- *
- * ⚠ **Issue #109 で見つけた実測の穴**: `"local"`（`@mnemora/local-embedding`、ADR
- * 0085）を足す前、この関数の `label` は `mode === "recorded" ? ... : mode ===
- * "deterministic" ? ... : "本物の OpenAI"` という2択のternaryだった。`"local"` は
- * どちらにも一致しないため**このelse節に落ち、実際にはローカル推論なのに「本物の
- * OpenAI」と印字されるところだった**——課金も外部通信も無いモードを「本物の
- * OpenAI」と表示する、まさにこの repo が繰り返し警告している「条件を落とした数字」
- * の一種。`switch` に直し、網羅性チェック（`never`）で同じ抜けが今後増えないようにする。
+ * API を叩かなかった run の注記。0 を黙って出さない（「呼び出し0回・費用$0」だけでは、本物を叩いて0回だったのか叩いていないのか区別できない）。
+ * モードは省略可能にしない（呼び出し側に真実を言わせる。決め打ちの文言は `recorded`/`local` が入って嘘になった）。
  */
 export function formatNoApiCallsNotice(modes: {
   llmMode: ProviderMode;
