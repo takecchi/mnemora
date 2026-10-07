@@ -5,18 +5,7 @@ import {
   meetsRequireEsmNodeVersion,
 } from "../check-cjs-require-smoke-lib.mjs";
 
-/**
- * `scripts/check-cjs-require-smoke-lib.mjs`（`scripts/check-cjs-require-smoke.mjs` の純関数部分。
- * ADR 0387。README の「CommonJS からは Node 22.12 以降の `require(esm)` で読み込める」を毎 PR の
- * CI で確かめる、registry に出ない段）の歯。
- *
- * ⚠ ネットワークにも tarball の実際の pack/展開にも触れない——それは
- * `scripts/check-cjs-require-smoke.mjs` を直接実行したときの統合的な確認であり
- * （`pnpm run check:cjs-require-smoke`）、ここでは見ない。ここで見るのは、依存名の抽出・
- * node 版の判定という、fs にもネットワークにも触れない部分だけである
- * （本体側は import された瞬間に pack・展開・symlink・node 実行まで始めるトップレベルの処理を
- * 持つため、歯から直接 import しない——`scripts/check-cjs-require-smoke-lib.mjs` 冒頭のコメント）。
- */
+/** 本体 `check-cjs-require-smoke.mjs` は import した瞬間に pack・展開・node 実行を始めるので、歯は lib だけを import する。 */
 
 describe("externalRuntimeDependencyNames", () => {
   it("dependencies と peerDependencies から、@mnemora/* を除いた名前を集める", () => {
