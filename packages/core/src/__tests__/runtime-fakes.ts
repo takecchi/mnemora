@@ -2398,6 +2398,61 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * `forgotten` かつ purge 済みの行だけを対象に、v1.0.x の purge が残した残骸を消す。残骸の無い行は書き換えない（`updatedAt` も動かさない）。
+   * 本物の adapter（Postgres・testkit の InMemory）と同じ約束（`MemoryStore.scrubPurged`・ADR 0437 決定3・ADR 0512）。
+   */
+  async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    assertWellFormedCtx(ctx);
+    for (const rawId of memoryIds) {
+      const id = normId(rawId);
+      const memory = this.liveRowForTest(ctx, id);
+      if (!memory || memory.status !== "forgotten" || (memory.purgedAt ?? null) === null) {
+        continue;
+      }
+      if (
+        memory.tags.length > 0 ||
+        Object.keys(memory.attributes ?? {}).length > 0 ||
+        (memory.claimKey ?? null) !== null
+      ) {
+        memory.tags = [];
+        memory.attributes = {};
+        memory.claimKey = null;
+        memory.updatedAt = new Date();
+      }
+      const linkKey = this.memoryLabelKey(ctx.tenantId, id);
+      const linkedLabelNames = this.backing.memoryLabels.get(linkKey);
+      if (linkedLabelNames !== undefined) {
+        for (const name of linkedLabelNames) {
+          const key = this.labelKey(ctx.tenantId, name);
+          const existing = this.backing.labels.get(key);
+          if (existing !== undefined && existing.status === "proposed") {
+            this.backing.labels.set(key, {
+              ...existing,
+              proposedCount: Math.max(existing.proposedCount - 1, 0),
+            });
+          }
+        }
+        this.backing.memoryLabels.delete(linkKey);
+      }
+      for (const row of this.backing.recalls.values()) {
+        if (row.tenantId !== ctx.tenantId) continue;
+        const digestBand = row.indexBand?.digestBand;
+        if (!digestBand) continue;
+        let changed = false;
+        const nextDigestBand = digestBand.map((entry) => {
+          if (entry.memoryId !== id) return entry;
+          if (entry.digest === memory.digest && !("truncated" in entry)) return entry;
+          changed = true;
+          return { memoryId: entry.memoryId, digest: memory.digest };
+        });
+        if (changed) {
+          row.indexBand = { ...row.indexBand, digestBand: nextDigestBand };
+        }
+      }
+    }
+  }
+
+  /**
    * 両側とも `status === 'active'` の CAS を課したうえで、`status='contested'`・`contestedWithId` を相互に設定する。
    * 「事前検証してから書く」作法: まだ何も書いていないうちに、存在確認と CAS 判定を両方の対象について済ませることで、in-memory の「ロールバック」を模す（`supersedeWithNewMemories` と同じ形）。
    *

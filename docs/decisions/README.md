@@ -691,5 +691,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0694](./0694-consumer-install-per-package-project.md) | `check:consumer-install` は、出荷パッケージごとに別の空のプロジェクトへ入れて確かめる | 採用 (2026-10) |
 | [0695](./0695-merged-0916-recheck-teeth-example-chat.md) | 09/16 にマージされた G5（examples/chat の使用報告・連想枠の既定・correction の CI の段・footprint の余白）4本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 | [0696](./0696-merged-1006-recheck-teeth.md) | 10/06 マージ分の確かめ直し（#1877）で見つかった穴に歯を足す | 採用 (2026-10) |
+| [0697](./0697-core-fake-scrub-purged.md) | core の Fake に `scrubPurged` を足し、InMemory・Postgres と同じ振る舞いを3者照合の歯で縛る（ADR 0538 の決定2と「`scrubPurged` の扱い」を覆す） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
