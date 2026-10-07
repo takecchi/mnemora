@@ -11,16 +11,6 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/**
- * `answer` サブコマンドの配線検査（本物の Postgres、Issue #506）。
- *
- * 🔴 **これは配線の検査であって、回答品質の測定ではない。** provider は
- * `env: {}`（`OPENAI_API_KEY` 無し）で `deterministic` を強制する——
- * `DeterministicLLMProvider.complete()` は渡した最後のメッセージをそのままエコーする
- * だけであり、この検査で見ているのは「両経路が同じ形の `PromptSpec` を組み立て、
- * 同じ `complete()` を経由し、入力量・呼び出し回数を正しく数えられるか」であって、
- * 「どちらの回答が正しいか」ではない。
- */
 describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
   it("naive/mnemora の両方が同じ system 文・同じ質問文で complete() を呼び、入力量を測れる", async () => {
     await resetTestDatabase();
@@ -38,58 +28,34 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
         "answer-bench-test-wiring",
       );
 
-      // system 文は両経路で完全に同一(§2.2 決定2)。
       expect(result.naive.promptSpec.system).toBe(result.mnemora.promptSpec.system);
       expect(result.naive.promptSpec.system).toBeDefined();
 
-      // どちらも質問文をそのまま末尾に含む。
       expect(result.naive.promptSpec.messages[0]?.content).toContain(answerCase.question);
       expect(result.mnemora.promptSpec.messages[0]?.content).toContain(answerCase.question);
 
-      // 入力量は正の値で、両経路が独立に測られている(0で埋めていない)。
       expect(result.naive.inputChars).toBeGreaterThan(0);
       expect(result.mnemora.inputChars).toBeGreaterThan(0);
       expect(result.naive.inputEstimatedTokens).toBeGreaterThan(0);
       expect(result.mnemora.inputEstimatedTokens).toBeGreaterThan(0);
 
-      // deterministic の complete() は最後のメッセージをそのままエコーするので、
-      // 回答には自分自身が渡した user メッセージの内容が含まれる。
       expect(result.naive.answer).toBe(result.naive.promptSpec.messages[0]?.content);
       expect(result.mnemora.answer).toBe(result.mnemora.promptSpec.messages[0]?.content);
 
-      // 追加費用: ingest は抽出(completeStructured)を最低1回発生させ、embed も最低1回発生する。
-      // 回答生成(complete())は naive 1回 + mnemora 1回 = 2回で固定
-      // ——judge も complete() を呼ぶが、`judgeLLMProvider` という別インスタンスの
-      // snapshot 差分で数えるため、この値には混ざらない(`answerLLMCalls` の docstring)。
       expect(result.cost.extractionLLMCalls).toBeGreaterThanOrEqual(1);
       expect(result.cost.embeddingCalls).toBeGreaterThanOrEqual(1);
       expect(result.cost.answerLLMCalls).toBe(2);
-      // judge の呼び出し回数(naive 採点1回 + mnemora 採点1回)は別勘定で2固定。
       expect(result.cost.judgeLLMCalls).toBe(2);
 
-      // deterministic の judge も complete() の応答(プロンプト全文のエコー)をそのまま
-      // 受け取るので、`判定:` 行を含まずパースに失敗し、必ず indeterminate になる
-      // (`parseAnswerJudgeResponse` 設計上の必須事項2)。
       expect(result.naive.judgement?.outcome).toBe("indeterminate");
       expect(result.mnemora.judgement?.outcome).toBe("indeterminate");
-      // 一次判定(pass/fail のどちらか)と二次観測(indeterminate)は食い違うので、
-      // 突き合わせは必ず indeterminate になる(`reconcileVerdicts`)。
       expect(result.naive.reconciled).toBe("indeterminate");
       expect(result.mnemora.reconciled).toBe("indeterminate");
 
-      // 層2（回答に必要な情報の保持、Issue #693 / 親 #498）。LLM を呼ばない決定的な指標
-      // ——deterministic でも計算そのものは行う（`AnswerPathMeasurement.contentPreservation`
-      // docstring）。
-      // ⭐ naive 経路は全文をそのまま含む（`answerCase.id` は closed-value）ので、
-      // `expected.accept` は必ず入力に残っている——ここは値まで固定してよい
-      // （ケース authoring 自体の歯、`answer-content-preservation.test.ts` の
-      // 「naive 経路は常に保持される」と同じ主張）。
       expect(answerCase.expected.kind).toBe("closed-value");
       expect(result.naive.contentPreservation.applicable).toBe(true);
       expect(result.naive.contentPreservation.preserved).toBe(true);
-      // mnemora 経路は recall() の選定次第であり、この歯（deterministic・配線検査）は
-      // それを固定しない——**形だけ**を見る。値は
-      // `answer-cli.postgres.test.ts`（recorded カセットの再生）が固定している。
+      // mnemora 経路の値は recall() の選定次第なので固定しない（形だけを見る）。
       expect(typeof result.mnemora.contentPreservation.applicable).toBe("boolean");
       expect(typeof result.mnemora.contentPreservation.preserved).toBe("boolean");
     } finally {
@@ -121,9 +87,6 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
         second!,
         "answer-bench-test-isolation",
       );
-      // 別ケース・別テナントなので、mnemora 側の入力（記憶の列）は互いに独立——
-      // 2件目に1件目の会話が紛れ込んでいないことを、質問文以外の部分に相手の
-      // 会話文が含まれていないことで確認する。
       expect(secondResult.mnemora.promptSpec.messages[0]?.content).not.toContain(
         first!.conversation[0]!.text,
       );
@@ -159,7 +122,6 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
       });
       expect(json.qualityClaimable).toBe(false);
       expect(json.summary).toBeUndefined();
-      // `inputReduction` は qualityClaimable に関係なく常に出る(入力量は品質の主張ではない)。
       expect(json.inputReduction).toBeDefined();
       expect(json.inputReduction.naiveInputChars).toBeGreaterThan(0);
 
@@ -173,18 +135,12 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
       await handle.close();
     }
   });
-  // Issue #1776 の #699 のコメント（ADR 0665）: 層2を、どちらの経路も**自分が実際にモデルへ渡した
-  // 直列化文字列**から計算している（約束6）。mnemora の値を naive の文字列から計算する変異が緑だった
-  // （録音の再生では両方 `preserved: true` で、取り違えても同じ）。ここでは、全ケースで、各経路の値が
-  // 自分の `promptSpec` の直列化から `checkContentPreserved` した値と完全に一致することを見る。
   it("層2: naive も mnemora も、自分の promptSpec の直列化から計算した値と一致する（全 dev ケース）", async () => {
     await resetTestDatabase();
     await getTestClient();
     const handle = await createAnswerBenchRuntime(requireDatabaseUrl(), {});
     try {
       let mnemoraDiffersFromNaive = false;
-      // 全 dev ケースに加え、経路で保持が分かれるケースを1つ足す: naive の全文には残るが、質問に関係が薄く
-      // mnemora が渡さない発話を accept にした派生ケース。
       const lossy = {
         ...ANSWER_CASE_SET_DEV[0]!,
         id: "lossy-derived",
@@ -219,7 +175,6 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
           mnemoraDiffersFromNaive = true;
         }
       }
-      // 検算: 経路ごとに値が違うケースが1つはある（無ければ、取り違えを区別できない歯になる）。
       expect(mnemoraDiffersFromNaive).toBe(true);
     } finally {
       await handle.close();
