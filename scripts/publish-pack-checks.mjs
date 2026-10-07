@@ -1,19 +1,11 @@
 /**
- * `scripts/check-publish-pack.mjs` が使う純粋な判定関数だけを集めたモジュール。
- *
- * **なぜ分けたか**: `check-publish-pack.mjs` は import された瞬間に本物の `pnpm pack` を
- * publish 対象ぶん走らせる（トップレベルの実行部にガードが無い）。判定関数だけをここへ
- * 切り出せば、`scripts/__tests__/check-publish-pack.test.mjs` は合成フィクスチャに対して
- * `pnpm pack` を一切走らせずに、各関数が実際に噛むか（違反を作ったら検出し、直したら
- * 検出しないか）を直接測れる。
- *
- * ここに置く関数は副作用（`console.log` / `process.exit` / 子プロセス起動）を持たない。
- * 持たせたくなったら、それは `check-publish-pack.mjs` 側に置くべきものである。
+ * `check-publish-pack.mjs` は import された瞬間に本物の `pnpm pack` を走らせる。判定関数だけをここへ分けて、
+ * 歯が `pnpm pack` を走らせずに合成フィクスチャで各関数の噛み方を測れるようにしている。
+ * 副作用(`console.log` / `process.exit` / 子プロセス起動)を持たせたくなったら、`check-publish-pack.mjs` 側に置く。
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
-/** `dependencies` 等のどの値も `workspace:` プロトコルで始まっていないか調べる。 */
 export function findWorkspaceProtocolViolations(manifest) {
   const violations = [];
   for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
@@ -28,28 +20,13 @@ export function findWorkspaceProtocolViolations(manifest) {
   return violations;
 }
 
-/** 完全固定（レンジ演算子を持たない厳密な `x.y.z` 形）のバージョン文字列にだけ一致する。 */
 const EXACT_SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 /**
- * `dependencies`（**実行時**依存だけ。`devDependencies` は対象外）のうち、完全固定に
- * なっているものを集める（Issue #166）。
- *
- * **なぜ `dependencies` だけを見るか（`devDependencies` を対象外にする理由）**: ルート
- * `.npmrc` の `save-exact=true` は、このリポジトリ自身のビルド再現性のために全ての依存を
- * 追加時点で完全固定する——**これは今回の問題と目的が違う。** `devDependencies` は
- * 公開される tarball に入らず、下流の `node_modules` にも並ばないので、そこが完全固定でも
- * 下流の dedupe は壊れない。壊れるのは、**公開したパッケージの `dependencies` が完全固定の
- * とき**——下流が同じパッケージを新しいバージョンで持っていても npm/pnpm が1本に
- * dedupe できず、2本並んだ型が構造的に非互換になりうる（zod は `_zod.version.minor` を
- * リテラル型に埋め込むため、実際に起きた。Issue #166 の報告者による実測は ADR を見ること）。
- * **`save-exact=true` は `devDependencies` にはそのまま効かせ続ける方針であり、この歯は
- * それを変えない。**
- *
- * **`exemptDependencyNames` について**: 呼び出し側が明示的に渡した依存名は対象外として
- * 扱う——放置ではなく、`EXACT_PINNED_DEPENDENCY_EXEMPTIONS`（下）に負債として名指しで残す。
- * 対象から外すのをやめたくなったら、そこから名前を消すだけでよい
- * （消した瞬間にこの歯が検査し始める）。
+ * `dependencies`(実行時依存)だけを見る。`devDependencies` は公開 tarball に入らず下流の dedupe を壊さないので、
+ * `save-exact=true` はそのまま効かせ続ける。公開した `dependencies` が完全固定だと、下流が同じパッケージの
+ * 新しい版を持っていても dedupe できず、型が構造的に非互換になりうる(zod は `_zod.version.minor` を型に埋める)。
+ * `exemptDependencyNames` は `EXACT_PINNED_DEPENDENCY_EXEMPTIONS` に負債として名指しで残す。消せば検査が始まる。
  */
 export function findExactPinnedDependencyViolations(manifest, exemptDependencyNames = []) {
   const violations = [];
@@ -68,77 +45,36 @@ export function findExactPinnedDependencyViolations(manifest, exemptDependencyNa
 }
 
 /**
- * `findExactPinnedDependencyViolations` の除外リスト（パッケージ名 → 依存名の配列）。
+ * ⚠ これは「問題ない」の一覧ではなく「未確認のまま残した負債」の一覧。Issue #166 が実測で報告したのは zod のみで、
+ * 他の依存が同じ下流2本化を起こすかは確認していない(`docs/autonomy.md` §2「ついでに直さない」)。
+ * `@mnemora/bullmq` の `bullmq` だけは例外で、積極的に固定を選んだ理由が在る(ADR 0325)。
  *
- * **これは「問題ない」の一覧ではなく「未確認のまま残した負債」の一覧である**（Issue #166）。
- * ルート `.npmrc` の `save-exact=true` により、ここに挙げた依存も zod と同じ経緯
- * （機械的な完全固定）で pin されたと見られるが、Issue #166 が実測で報告したのは zod のみ
- * であり、他の依存が同じ下流2本化を実際に起こすかは確認していない。
- * `docs/autonomy.md` §2「ついでに直さない」に従い、対象を zod だけに絞ってここへ
- * 明示的に退避する。将来これらを緩めるときは、ここから名前を消すだけでよい。
- *
- * ⚠ **`@mnemora/bullmq` の `bullmq` だけは例外——「未確認のまま残した負債」ではなく、
- * 積極的に固定を選んだ理由が在る**（下の `"@mnemora/bullmq"` のエントリのコメント参照。
- * ADR 0325「引き受けた負債」4）。緩めてよいかどうかを未確認のまま置いているわけではない
- * ので、この一覧全体の「問題ない、ではなく未確認」という説明は `bullmq` には当たらない。
- *
- * **唯一の定義であること**: `scripts/check-publish-pack.mjs`（実行時に使う側）と
- * `scripts/__tests__/check-publish-pack.test.mjs`（歯として検査する側）の両方がここから
- * import する。かつて2箇所に写しを置いて後からずれた例（`PUBLISH_TARGETS`。ADR 0066）を
- * 踏まえ、最初から1箇所にした——2箇所目を作らないので、ずれを検知する歯自体が不要になる。
+ * 唯一の定義。`check-publish-pack.mjs` とテストの両方がここから import する。2箇所に写しを置いて
+ * ずれた前例がある(`PUBLISH_TARGETS`、ADR 0066)。
  */
 export const EXACT_PINNED_DEPENDENCY_EXEMPTIONS = {
   "@mnemora/openai": ["openai"],
   "@mnemora/anthropic": ["@anthropic-ai/sdk"],
   "@mnemora/postgres": ["@types/pg", "drizzle-orm", "pg"],
   "@mnemora/local-embedding": ["@huggingface/transformers"],
-  // `bullmq` だけは他と理由が違う――`save-exact=true` の機械的な結果という消極的な理由
-  // ではなく、ADR 0325「引き受けた負債」4 が名指しした積極的な理由がある: BullMQ 6.x の
-  // Job Scheduler API（`queue.upsertJobScheduler`）は 5.x 以前には無く、メジャー版を
-  // 上げると型もビルドも壊れうる。範囲指定（`^6.3.8`）に緩めると、この repo が確かめて
-  // いない次のメジャー版が `pnpm install` で黙って入りうる――ここでは緩めない。
-  // `ioredis`（同じ package.json のもう一方の実行時依存）は対象外のまま残した
-  // （`^6.0.0` に緩め済み。bullmq 自身の peerDependencies が `ioredis: ">=5.0.0"` を
-  // 要求するだけで、メジャー版固有の API には依存していない）。
+  // `bullmq` は固定を意図して残す(ADR 0325)。BullMQ 6.x の Job Scheduler API(`queue.upsertJobScheduler`)は
+  // 5.x 以前には無く、範囲指定に緩めると、確かめていない次のメジャー版が `pnpm install` で黙って入りうる。
   "@mnemora/bullmq": ["bullmq"],
 };
 
 /**
- * NEVER_PUBLISHED_TARGETS(Issue #205 追加、初出は `@mnemora/bullmq`)。
- *
- * **git 上の `version` が `0.0.0` のままでよい**publish 対象(`PUBLISH_TARGETS`)の名前の集合。
- * publish 時には、ほかの対象と同じく `scripts/apply-release-version.mjs` が tag の版へ
- * 書き換える(ADR 0070)。git 上の `version` はオーナーの持ち場であり、道具の都合で手で版を
- * 振らない(ADR 0325 決定2 / docs/decisions/README.md の追記参照)。
- *
- * ⚠ **いまは空である。**`@mnemora/bullmq` は 1.1.0 で publish 済みになった(2026-09-29、
- * オーナーの手元での初回。`docs/release-v1.md` §1.7)。2026-09-30、オーナーの指示で git 上の
- * `version` を他の publish 対象と同じ置き値(`0.1.1`)に揃え、この一覧から消した。
- * 仕組みは、次に「初回 publish 前の publish 対象」が増えたときのために残している。
- *
- * **ここに載っている間は**:
- * - 単一パッケージの version 検査(`findVersionViolations`)を、そのパッケージにだけ適用しない
- *   (`0.0.0` のままで違反にしない)。
- * - 全パッケージ版揃い検査(`findVersionSkewViolations`)の対象数からも外す――
- *   git 上の `version` が他と揃っていないため。
- *
- * **消すとき**: git 上の `version` が他の publish 対象と揃ったら、この一覧から名前を消すこと
- * ――消した瞬間、他の publish 対象と同じ検査を受けるようになる
- * (`EXACT_PINNED_DEPENDENCY_EXEMPTIONS` と同じ「消せば検査が始まる」設計)。
+ * git 上の `version` が `0.0.0` のままでよい publish 対象の名前の集合。publish 時には
+ * `scripts/apply-release-version.mjs` が tag の版へ書き換える(ADR 0070)。git 上の `version` は
+ * オーナーの持ち場で、道具の都合で手で版を振らない(ADR 0325)。
+ * 載っている間は、`findVersionViolations` の対象から外し、`findVersionSkewViolations` の対象数からも外す。
+ * 名前を消せば、他の対象と同じ検査を受ける。
  */
 export const NEVER_PUBLISHED_TARGETS = new Set([]);
 
 /**
- * `main` / `types` / `bin` / `exports` が指すファイルのうち、tarball 内に実在しないものを集める。
- *
- * **`exports` を見る理由（ADR 0066）**: Node と TypeScript は `exports` が在れば
- * `main` / `types` を**見ない**。つまり `exports` の指す先だけが欠けた tarball は、
- * `main` / `types` が実在するかぎりこの門の旧版を素通りしたうえで、使う側では
- * `ERR_PACKAGE_PATH_NOT_EXPORTED` や `ERR_MODULE_NOT_FOUND` で落ちる。
- * **今の入口を測らずに、後退路だけを測っていることになる。**
- *
- * 条件付き exports（`{ types, default, import, ... }`）は入れ子になりうるので再帰で辿る。
- * 値が `null`（意図的に塞いだ subpath）のものは指し先が無いのが正しいので飛ばす。
+ * `exports` を見る理由: Node と TypeScript は `exports` が在れば `main` / `types` を見ない。
+ * `exports` の指す先だけが欠けた tarball は旧版の門を素通りし、使う側で `ERR_PACKAGE_PATH_NOT_EXPORTED` 等で落ちた(ADR 0066)。
+ * 値が `null`(意図的に塞いだ subpath)は指し先が無いのが正しいので飛ばす。
  */
 export function findMissingEntryPoints(manifest, packageDir) {
   const missing = [];
@@ -169,8 +105,7 @@ export function findMissingEntryPoints(manifest, packageDir) {
       return;
     }
     if (Array.isArray(node)) {
-      // exports の配列形は「最初に解決できたものを使う」——全件の実在は要求できない。
-      // 1つも実在しなければ違反である。
+      // exports の配列形は最初に解決できたものが使われるので、全件の実在は要求しない。
       const anyResolves = node.some((candidate) => {
         if (typeof candidate !== "string") return false;
         try {
@@ -196,15 +131,8 @@ export function findMissingEntryPoints(manifest, packageDir) {
 }
 
 /**
- * `README.md` が tarball 内（に相当するディレクトリ）に実在するか調べる。
- *
- * **なぜ作業ツリーの `README.md` ではなく tarball 側（`packageDir`）を見るか**: 作業ツリーに
- * `README.md` が実在していても、`files` の絞り込みや `.npmignore` 相当の設定次第では、
- * 使う人が実際に受け取る tarball には入らないことがある——`findLicenseViolations` が
- * `LICENSE` ファイルについて同じ理由で tarball 側を見ているのと同じ理由である
- * （このモジュールの他の関数と同じく、呼び出し側が「pack して展開した実体」を渡す前提に
- * 揃えている）。README が無い tarball は npm のパッケージページや `npm view` で
- * 説明が空になる——publish 自体は失敗しないため、この歯が無いと気づかれないまま起きる。
+ * 作業ツリーではなく tarball 側を見る。`files` の絞り込み等で、作業ツリーに在る README が tarball に入らないことがある。
+ * README が無くても publish は失敗せず、この歯が無いと気づかれない。
  */
 export function findMissingReadme(packageDir) {
   try {
@@ -216,21 +144,14 @@ export function findMissingReadme(packageDir) {
 }
 
 /**
- * tarball 内の manifest に `private` が立っていないか調べる（ADR 0066）。
- *
- * **なぜ tarball の側でも見るか**: `private: true` のままだと publish は
- * `This package has been marked as private` で止まる——つまり事故にはならない。
- * この歯が守っているのは publish の失敗ではなく、**`private` の状態と
- * 「publish してよい」という明示的な決定が一致していること**である（ADR 0060 が
- * ラッチとして置き、ADR 0066 が外した）。作業ツリー側の静的な歯と対にして、
- * **使う人が受け取る実体の側からも**同じことを見る。
+ * `private: true` のままなら publish は止まるので、事故にはならない。守っているのは、`private` の状態と
+ * 「publish してよい」という明示的な決定の一致(ADR 0060、0066)。
  */
 export function findPrivateViolations(manifest) {
   if (manifest.private === undefined || manifest.private === false) return [];
   return [`private が立っています: ${JSON.stringify(manifest.private)}`];
 }
 
-/** `dir` 以下を再帰的に歩き、`predicate(fullPath)` が true のファイルパスを集める。 */
 export function findFiles(dir, predicate, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
@@ -244,19 +165,8 @@ export function findFiles(dir, predicate, out = []) {
 }
 
 /**
- * `license` が `MIT` であること、`LICENSE` ファイルが tarball 内（に相当するディレクトリ）に
- * 実在することを調べる（ADR 0061）。
- *
- * **なぜ「`UNLICENSED` でないこと」ではなく「`MIT` と等しいこと」を見るか**: 前者は
- * `Apache-2.0` のような隣の値もそのまま通してしまう弱い歯になる。オーナーは MIT を
- * 名指しで選んでいる（ADR 0061 逐語）——ここで検査したいのは「publish 可能な何らかの値」
- * ではなく「選んだ値そのもの」である。
- *
- * **なぜ作業ツリーの `package.json` ではなく `manifest`（呼び出し側が tarball を展開して
- * 読んだもの）を受け取るか**: `license` フィールドが作業ツリーで `MIT` でも、`files` の
- * 絞り込みや `.npmignore` 相当の設定次第では、使う人が実際に受け取る tarball の中身は
- * 別物でありうる。**このモジュールの他の関数（`findMissingEntryPoints` 等）と同じく、
- * 呼び出し側が「pack して展開した実体」を渡す前提に揃えている。**
+ * 「`UNLICENSED` でないこと」ではなく `MIT` との等値を見る。前者は `Apache-2.0` のような隣の値も通す弱い歯になる(ADR 0061)。
+ * 作業ツリーの `package.json` ではなく、tarball を展開して読んだ `manifest` を受け取る。
  */
 export function findLicenseViolations(manifest, packageDir) {
   const violations = [];
@@ -272,16 +182,8 @@ export function findLicenseViolations(manifest, packageDir) {
 }
 
 /**
- * `version` が `0.0.0` のまま、または未設定のまま publish 対象の tarball が出ていかないか
- * 調べる（検査2・単一パッケージ側。Issue #174）。
- *
- * **⚠ この検査は「version が正しい値か」を決めているのではない（ADR 0070）**: 版の権威は
- * Release の tag に置かれており、`package.json` の `version` はそれを受け取る側でしかない
- * ——`scripts/apply-release-version.mjs` が publish 直前に tag の値を書き込む。ここで見ているのは
- * 「その書き込みより前の、初期値のまま（`0.0.0`）や空のまま publish 対象が出ていかないこと」
- * だけである。**`0.0.1` のような小さい値や `1.0.0-rc.1` のような prerelease はここでは
- * 弾かない**——弾く理由が無い（`0.0.0` と未設定だけが「まだ tag の値を受け取っていない」
- * ことの目印である）。
+ * ⚠ 版が正しい値かは決めていない(ADR 0070)。版の権威は Release の tag で、`apply-release-version.mjs` が publish 直前に書き込む。
+ * 見るのは、初期値の `0.0.0` や未設定のまま出ないことだけ。`0.0.1` や prerelease は弾かない。
  */
 export function findVersionViolations(manifest) {
   if (manifest.version === "0.0.0" || !manifest.version) {
@@ -291,26 +193,9 @@ export function findVersionViolations(manifest) {
 }
 
 /**
- * publish 対象のうち version 検査（`findVersionViolations`）を通過したものだけを集めた
- * `versions` が、`targetCount`（`PUBLISH_TARGETS.length`）ぶん揃ったうえで全パッケージ
- * 同じ版であるか調べる（検査2・publish 対象をまたぐ側。Issue #174）。
- *
- * **なぜ `manifest` 1個ではなく `versions` の配列と `targetCount` を受け取るか**: この検査は
- * 単一パッケージの中では判定できない——他の対象と揃っているかを見るものなので、呼び出し側
- * （`scripts/check-publish-pack.mjs`）が全対象のループを回し終えたあとに、集まった `versions`
- * を渡して1回だけ呼ぶ。単一パッケージ側の `findVersionViolations` とは引数の形も呼ばれる
- * 回数も違うため、1つの関数にまとめない。
- *
- * **⚠ `versions.length === targetCount` の条件が入っている理由（意図的な性質。歯で固定する）**:
- * `versions` には version 検査を通過したものしか入らない（呼び出し側が
- * `if (versionViolations.length === 0) { versions.push(...) }` という形で積む——
- * `scripts/check-publish-pack.mjs` 参照）。だから1つでも version 違反（`0.0.0` や未設定）で
- * 落ちた回は `versions.length` が `targetCount` より少なくなり、この検査は**揃い検査をしない**。
- * これは見落としではない——欠けた1件はすでに「version が未設定か 0.0.0 のままです」として
- * 別に報告済みであり、それを「version が揃っていません」という不正確な文言（本当は集まった
- * 分の中でどれだけ揃っているかしか言えない）でもう一度重ねて報告しないためである
- * （`scripts/check-publish-pack.mjs` の呼び出し側コメント「version 自体が有効だったものだけを
- * 比較する」がその意図）。
+ * 単一パッケージ側とは別関数にしている。呼び出し側が全対象のループを回し終えたあとに、`versions` と `targetCount` を渡して1回だけ呼ぶため。
+ * ⚠ `versions.length === targetCount` を条件にしているのは意図的(歯で固定する)。version 違反で落ちた回は揃い検査をしない。
+ * 欠けた1件は別に報告済みで、不正確な文言で重ねて報告しないため。
  */
 export function findVersionSkewViolations(versions, targetCount) {
   const distinctVersions = new Set(versions.map((v) => v.version));
@@ -323,18 +208,8 @@ export function findVersionSkewViolations(versions, targetCount) {
 }
 
 /**
- * `publishConfig.access` が `"public"` であることを調べる（検査5。Issue #174）。
- *
- * **なぜ「`restricted` でないこと」ではなく「`public` と等しいこと」を見るか**:
- * `findLicenseViolations` が `license` について「`UNLICENSED` でないこと」ではなく `MIT`
- * との等値を見ているのと同じ理由——前者は隣の値（未設定・大文字違いの `"Public"` 等）も
- * そのまま通してしまう弱い歯になる。ここで検査したいのは「publish 可能な何らかの値」では
- * なく、スコープ付きパッケージ（`@mnemora/*`）を誰でも `npm install` できる状態で出す、
- * という選んだ値そのものである。
- *
- * **`publishConfig` 自体が無い場合も違反になる**: `manifest.publishConfig?.access` は
- * `publishConfig` が無ければ `undefined` になり、`undefined !== "public"` は真になる
- * ——「明示していない」を「public にすると決めていない」として扱う。
+ * 「`restricted` でないこと」ではなく `public` との等値を見る(`findLicenseViolations` と同じ理由)。
+ * `publishConfig` 自体が無い場合も違反: 「明示していない」を「public にすると決めていない」として扱う。
  */
 export function findPublishAccessViolations(manifest) {
   if (manifest.publishConfig?.access !== "public") {
@@ -346,17 +221,7 @@ export function findPublishAccessViolations(manifest) {
 }
 
 /**
- * tarball 内（に相当するディレクトリ）の `*.map` のうち、`sources` がそのディレクトリ内に
- * 実在しない相対パスを指しているものを集める（「宙に浮いた source map」）。
- *
- * **これは publish 前の現物で実際に起きていた形そのものである**: 修正前の
- * `packages/core` の `dist/index.d.ts.map` は `sources: ["../src/index.ts"]` を持っていたが、
- * `files: ["dist"]` は `src/` を tarball に含めないため、その実体は tarball の中に無かった
- * （実測して確認した）。`tsconfig.build.json` に `declarationMap`/`sourceMap: false` を
- * 足して以降、ビルドはそもそも `.map` を出さなくなったので、この関数が現物に対して
- * 何かを検出することは今は無いはずである。だからこそ、この関数が「壊した入力に対しては
- * 実際に検出する」ことを合成フィクスチャで別途測る必要がある
- * （`scripts/__tests__/check-publish-pack.test.mjs` 参照）。
+ * ビルドは今は `.map` を出さないので、現物からは検出されない。壊した入力に対して検出することは、合成フィクスチャで別途測る必要がある。
  */
 export function findOrphanedSourceMaps(packageDir) {
   const mapFiles = findFiles(packageDir, (path) => path.endsWith(".map"));
