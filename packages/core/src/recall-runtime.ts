@@ -2344,7 +2344,7 @@ async function runRecallBody(
         const asAssociationMember = (c: (typeof selectedCandidates)[number]): ScoredCandidate => ({
           memory: c.memory,
           retrievedVia: "association" as const,
-          associationOf: c.hit.anchorId,
+          associationOf: anchorIds[0],
           score: c.score,
         });
 
