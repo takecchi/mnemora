@@ -7,14 +7,6 @@ import type { InferredProvenance } from "../provenance.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecalledMemory.basisLost` の約束のうち、`recall-basis-lost.test.ts` が見ていない4つ。
- * - 根拠が複数あるとき、1つでも失われていれば立つ（全部が失われたときだけ、ではない）。
- * - 根拠が contested の記憶なら、本文が残っているので立たない（archived・superseded と同じ）。
- * - 根拠の取得（`getMany`）は、重複を除いた id で1回だけ。
- * - 根拠の取得は、予算で切り詰めたあとに返る記憶の分だけ。切り詰めで全部落ちたら、根拠は引かない。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 

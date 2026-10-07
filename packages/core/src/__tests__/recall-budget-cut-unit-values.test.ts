@@ -2,14 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TokenCounter } from "../interfaces/token-counter.js";
 import { findBudgetCut, unitChars, unitTokens, type BudgetUnit } from "../recall-budget-cut.js";
 
-/**
- * ADR 0431 の確かめ直し（Issue #1734、PR #1537）で足した歯。`recall-budget-cut.test.ts` の参照実装は
- * `unitChars`・`unitTokens` を**自分で呼んでいる**ので、この2つの定義そのものが変わっても、参照実装と
- * `findBudgetCut` が一緒に動いて一致したままになる。ここでは、2つの値の定義を直接見る。
- *
- * - 文字数は digest の UTF-16 コード単位の長さ（`digest.length`）の合計。
- * - トークン数は**メンバーごと**に数えて足す（単位の digest をつなげて1回数えるのではない）。
- */
+/** `recall-budget-cut.test.ts` の参照実装は `unitChars`・`unitTokens` を自分で呼ぶので、定義が変わっても一緒に動いて一致する。ここでは2つの値の定義を直接見る。 */
 
 const unit = (...digests: string[]): BudgetUnit => ({
   members: digests.map((digest) => ({ memory: { digest } })),

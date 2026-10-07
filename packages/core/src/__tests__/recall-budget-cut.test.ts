@@ -8,11 +8,6 @@ import { createRuntime } from "../runtime.js";
 import { findBudgetCut, unitChars, unitTokens, type BudgetUnit } from "../recall-budget-cut.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0431: 段4の `cut` を、旧実装（毎回 prefix を足し直す線形探索）から累積和＋二分探索へ替えても、
- * 結果が1ビットも変わらないことを縛る。旧実装は `referenceCut` に、`fits` の式ごと写してある。
- */
-
 /** 旧実装（`recall-runtime.ts` の段4、ADR 0431 の前）をそのまま写した参照実装。 */
 function referenceCut(
   allUnits: readonly BudgetUnit[],
@@ -38,7 +33,6 @@ function referenceCut(
   return cut;
 }
 
-/** 決定的な疑似乱数（mulberry32）。 */
 function rng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -138,20 +132,15 @@ describe("findBudgetCut は旧実装（参照実装）と同じ cut を返す", 
   it("tokenCounter の差し替え: 単調でない（負・NaN・Infinity・小数を返す）counter でも同じ", () => {
     const rand = rng(4);
     const weird: TokenCounter[] = [
-      // 文字数によって負になる。
       { count: (t) => ({ tokens: t.length % 3 === 0 ? -2 : t.length, counter: "exact" }) },
-      // 長さ 7 の digest だけ NaN。
       { count: (t) => ({ tokens: t.length === 7 ? NaN : t.length, counter: "exact" }) },
-      // 長さ 5 の digest だけ Infinity。
       { count: (t) => ({ tokens: t.length === 5 ? Infinity : t.length, counter: "exact" }) },
-      // Infinity と -Infinity が混ざり、和が NaN になりうる。
       {
         count: (t) => ({
           tokens: t.length === 5 ? Infinity : t.length === 6 ? -Infinity : t.length,
           counter: "exact",
         }),
       },
-      // 小数（丸めが足す順に依存する値）。
       { count: (t) => ({ tokens: t.length * 0.1, counter: "exact" }) },
       { count: (t) => ({ tokens: (t.length + 1) / 3, counter: "exact" }) },
     ];
@@ -174,7 +163,6 @@ describe("findBudgetCut は旧実装（参照実装）と同じ cut を返す", 
         return { tokens: t.length, counter: "exact" };
       },
     };
-    // 30 文字ずつ 10 単位。文字数の上限 100 なら先頭 3 単位まで。
     const units: BudgetUnit[] = Array.from({ length: 10 }, (_, i) => ({
       members: [{ memory: { digest: `${i}`.repeat(30) } }],
     }));
@@ -238,7 +226,6 @@ describe("recall() の出力: 段4の切り詰めが、参照実装の cut の�
     });
     for (let i = 0; i < digests.length; i++) {
       const m = await stores.memoryStore.createMemory(ctx, newMemory(i, digests[i]!));
-      // 類似度が順に下がる（先頭ほど上位）ようにベクトルを振る。
       await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, m.id, [1, i * 0.001]);
     }
     return runtime;
