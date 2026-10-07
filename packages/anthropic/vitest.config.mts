@@ -1,19 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// packages/testkit/vitest.config.mts と同じ理由: dist ではなく src を直接参照する。
-// @mnemora/openai も devDependency（provider-parity.test.ts が両方の provider を並べて検査する
-// ためだけに使う）なので、同じ理由で openai/src も直接参照する——CI の
-// typecheck → lint → test → build の順では、test の時点で openai の dist が無い前提になる。
-// @mnemora/testkit も同じ理由（llm-provider.conformance.test.ts が使う）。
 export default defineConfig({
   resolve: {
     alias: {
       "@mnemora/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
       "@mnemora/openai": fileURLToPath(new URL("../openai/src/index.ts", import.meta.url)),
-      // `@mnemora/testkit/fixtures` は base の `@mnemora/testkit` より前に書く（packages/postgres/vitest.config.mts
-      // と同じ理由: vite のエイリアスは「pattern + '/'」の前方一致も見るので、base を先に書くと
-      // `.../testkit/src/index.ts/fixtures` に化ける）。api-key-header-safety.test.ts（Issue #1080）が使う。
+      // `/fixtures` を base より前に書く: vite は「pattern + '/'」の前方一致も見るため、
+      // base を先に書くと `.../index.ts/fixtures` に化ける。
       "@mnemora/testkit/fixtures": fileURLToPath(
         new URL("../testkit/src/fixtures.ts", import.meta.url),
       ),
