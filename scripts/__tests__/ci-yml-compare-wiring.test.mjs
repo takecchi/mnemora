@@ -7,33 +7,7 @@ import { validateBaseline, validateMeasured } from "../compare-summary-lib.mjs";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/ci.yml` の `example-chat` ジョブが、実際に
- * `scripts/compare-summary.mjs` へ、`--measured` と `--baseline` の両方を渡して
- * 配線されていること（Issue #242 / ADR 0133）。**
- *
- * ⚠ **これは `compare-summary.test.mjs`/`compare-summary-lib.test.mjs` の重複ではない**
- * （`ci-yml-time-term-wiring.test.mjs` の docstring と同じ理由）。その2本は
- * **入力を自分で作って**要約の中身と exit code を測る——**どちらも `ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` から `--baseline` を落としても、パスを
- * 打ち間違えても、`MNEMORA_COMPARE_JSON` の書き先と `--measured` の読み先をずらしても、
- * **その2本は緑のまま通る。**この歯だけが `ci.yml` を入力に取る。
- *
- * ⚠ **`example-chat` ジョブは `retrieval-quality`/`identifier-probes` 等と違い、
- * 単一目的のジョブではない。**`compare` の前段に Postgres の拡張作成・
- * マイグレーション・`test:db`（本物の DB に対する observe→recall の往復検査）が
- * 同居する。この歯は `MNEMORA_COMPARE_JSON` を渡す step を探して特定するので、
- * 前段の step が増減しても影響を受けない。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**
- * `ci-yml-time-term-wiring.test.mjs` と同じ判断で、歯のために YAML パーサの
- * 依存を足していない（依存追加はオーナー専権。`docs/autonomy.md`）。
- * **だからこの歯は書き方の変更に弱い。**壊れたときは「配線が変わった」か
- * 「書き方が変わった」かを見て、**配線が変わっていないなら取り出し方のほうを
- * 直すこと（歯を消さないこと）。**
- */
+/** YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。壊れたときは、配線が変わったのか書き方が変わったのかを見て、配線が変わっていないなら取り出し方を直す。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
@@ -41,7 +15,6 @@ const workflow = readFileSync(workflowPath, "utf8");
 
 const JOB_ID = "example-chat";
 
-/** `jobs:` の下の1ジョブを切り出す（`ci-yml-time-term-wiring.test.mjs` と同じ形）。 */
 function extractJob(yaml, jobId) {
   const lines = yaml.split("\n");
   const start = lines.findIndex((line) => line === `  ${jobId}:`);
@@ -61,7 +34,6 @@ function extractJob(yaml, jobId) {
   return lines.slice(start, end).join("\n");
 }
 
-/** `steps:` を段へ切り分け、各段の `name`/`env`/`run` だけを取り出す。 */
 function parseSteps(jobBlock) {
   const lines = jobBlock.split("\n");
   const stepsAt = lines.findIndex((line) => line === "    steps:");
@@ -138,7 +110,6 @@ const artifactStep = steps.find((step) => step.name.includes("成果物として
 /** @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]} */
 const stepBlockCommentUnhandled = [];
 
-/** ある段の生テキストを切り出す（`if:`/`uses:`/`with:` を読みたいとき用）。コメントは潰す。 */
 function extractStepBlock(stepName) {
   const lines = jobBlock.split("\n");
   const start = lines.findIndex((line) => line.trim() === `- name: ${stepName}`);
@@ -185,7 +156,6 @@ function benchStepMeasuredPath() {
   return benchStep.env.MNEMORA_COMPARE_JSON;
 }
 
-/** `--baseline <path>` を yml から読む（引用符あり・なしの両方を拾う）。 */
 function summaryStepBaselinePath() {
   const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
   return matched ? (matched[1] ?? matched[2]) : undefined;
@@ -224,15 +194,9 @@ function runSummaryStepFromWorkflow(measured) {
   }
 }
 
-/** 基準値ファイル（本物）。差分の有無を作り分けるための土台に使う。 */
 const baselineRelativePath = "examples/chat/compare-baseline.json";
 const baseline = JSON.parse(readFileSync(join(repoRoot, baselineRelativePath), "utf8"));
 
-/**
- * 本物の基準値ファイルから、実測 JSON（`CompareRunJson` の形）を組み立てる。
- * `rows` は基準値のものをそのまま複製する——順番に依存しない
- * （`diffRow` は `turnCount` で突き合わせる）。
- */
 function measuredFromBaseline() {
   return {
     schemaVersion: 1,
@@ -253,9 +217,6 @@ describe("ci.yml の example-chat ジョブの compare 配線", () => {
   });
 
   it("🔴 要約の段が --baseline をコミット済みの基準値ファイルへ渡している（ADR 0133）", () => {
-    // ⭐ **これが「輪が閉じている」ことの固定点。**この行が消えると、値が動いても
-    // 誰も気づかず、誰も基準値を更新せず、新しい値が PR の diff に現れなくなる
-    // （ADR 0088 §3 / ADR 0094 §8 / ADR 0121 と同じ理由）。
     expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
       baselineRelativePath,
     );
@@ -289,8 +250,6 @@ describe("ci.yml の example-chat ジョブの compare 配線", () => {
   });
 
   it("🔴 実測から会話長が1つ消えたら、この段は exit 2（判定不能）で非0になる（Issue #477）", () => {
-    // ⭐ この歯だけが `ci.yml` を入力に取る——「比較していない」が、実際の CI の段で
-    // 緑にならないことを、本物のコマンド行で測る。
     const measured = measuredFromBaseline();
     const dropped = measured.rows.pop();
     const result = runSummaryStepFromWorkflow(measured);
@@ -333,9 +292,7 @@ describe("ci.yml の example-chat ジョブの compare 配線", () => {
   });
 
   it("ジョブに timeout-minutes が設定されていなくても、少なくとも他ジョブと矛盾しない構造である", () => {
-    // ⚠ example-chat ジョブは既存のまま timeout-minutes を持たない（このPRの範囲外の
-    // 既存挙動）。この歯は将来 timeout-minutes を足す変更が来ても壊れないよう、
-    // 存在を要求しない。
+    // `timeout-minutes` の存在は要求しない。将来足されても壊れないようにする。
     expect(jobBlock).toContain("runs-on: ubuntu-latest");
   });
 
