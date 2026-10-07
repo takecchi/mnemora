@@ -1,16 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { toVectors } from "../pipeline.js";
 
-/**
- * `toVectors` の歯。
- *
- * **なぜ `output.tolist() as number[][]` で済ませないか**を固定する。
- * pooling を指定し忘れると `tolist()` は `[batch][tokens][dim]` の3階を返す。
- * `as` で黙らせると、**トークン列がベクトルとして DB に入る**——
- * 実行時まで、いや DB に入ってからも気づけない壊れ方をする。
- */
+/** `output.tolist() as number[][]` で済ませない。pooling を指定し忘れると `tolist()` は `[batch][tokens][dim]` の3階を返し、`as` で黙らせるとトークン列がベクトルとして DB に入る。 */
 
-/** transformers.js の `Tensor` の、この関数が使う部分だけを真似たもの。 */
 function tensor(value: unknown): { tolist: () => unknown } {
   return { tolist: () => value };
 }

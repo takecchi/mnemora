@@ -1,20 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocalEmbeddingPipeline, type LocalEmbeddingModelSpec } from "../pipeline.js";
 
-/**
- * Issue #1239 の直し方（`pipeline.ts` の `env.cacheDir` の差し替え + 直列化）そのものを縛る歯。
- *
- * `cache-dir-preflight-default-cache.test.ts` は「結果としてネットワークへ出ないこと」を
- * 本物の transformers.js で縛っている。ここはその**仕組み**——`env.cacheDir` を差し替えて
- * 戻す・複数の読み込みを直列化する——を、`@huggingface/transformers` を丸ごと `vi.mock` で
- * 差し替えて、実際にモデルを読み込まずに縛る。
- *
- * `env` は素のオブジェクトを1つだけ用意し、`createLocalEmbeddingPipeline` がそれを
- * どう書き換えるかを直接観測する。`pipeline` はテストごとに手で resolve/reject できる
- * 「保留中の Promise」を返すので、2本の呼び出しが実際に重ならないこと（直列化）を、
- * 実時間のタイマーに頼らずマイクロタスクの粒度で確かめられる。
- */
-
 const pipelineMock = vi.hoisted(() => vi.fn());
 const envMock = vi.hoisted(() => ({ cacheDir: "/original/cache" }) as { cacheDir: unknown });
 
@@ -36,15 +22,7 @@ function defer<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-/**
- * 保留中のマイクロタスクを掃く。`await` の連鎖を手繰るためだけの道具。
- *
- * ⚠ **マイクロタスクの回数を数えるのではなく、マクロタスク（`setImmediate`）まで進める。**
- * `import("@huggingface/transformers")`（`vi.mock` 差し替え）は、vitest のモジュールローダを
- * 経由するぶん、素の `Promise.resolve()` の連鎖よりマイクロタスクの段数が深い（版が変われば
- * 段数も変わりうる）。段数を決め打たず、`setImmediate` で「今たまっているマイクロタスクを
- * 全部片付けてから戻る」形にすることで、内部の実装詳細に依存しない歯にする。
- */
+/** マイクロタスクの回数を数えず、`setImmediate` でマクロタスクまで進める。`vi.mock` 差し替えの `import(...)` は vitest のモジュールローダを経由するぶん段数が深く、版が変われば段数も変わりうるため。 */
 async function flushMicrotasks(times = 2): Promise<void> {
   for (let i = 0; i < times; i += 1) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -103,19 +81,14 @@ describe("createLocalEmbeddingPipeline: env.cacheDir の差し替えと直列化
     const resultA = createLocalEmbeddingPipeline(baseSpec({ cacheDir: "/cache/A" }));
     const resultB = createLocalEmbeddingPipeline(baseSpec({ cacheDir: "/cache/B" }));
 
-    // A が先に待ち行列へ入り、pipeline() を1回だけ呼んだ時点で止まっている
-    // （B はまだ pipeline() に届いていない——直列化されている証拠）。
     await flushMicrotasks();
     expect(pipelineMock).toHaveBeenCalledTimes(1);
     expect(observedCacheDirAtCall).toEqual(["/cache/A"]);
-    // A の pipeline() 呼び出しの最中は、env.cacheDir が A の値に差し替わったままである。
     expect(envMock.cacheDir).toBe("/cache/A");
 
     deferredA.resolve(fakeExtractor(111));
     await flushMicrotasks();
 
-    // A が終わると env.cacheDir は元に戻り、その直後に B が始まる——
-    // B が観測する env.cacheDir は B 自身の値であり、A の値ではない（漏れていない）。
     expect(pipelineMock).toHaveBeenCalledTimes(2);
     expect(observedCacheDirAtCall).toEqual(["/cache/A", "/cache/B"]);
     expect(envMock.cacheDir).toBe("/cache/B");
@@ -148,11 +121,8 @@ describe("createLocalEmbeddingPipeline: env.cacheDir の差し替えと直列化
     deferredWithCacheDir.resolve(fakeExtractor(1));
     await flushMicrotasks();
 
-    // cacheDir を渡さなかった呼び出しは、待ち行列で自分の番が来ても、
-    // 他方が差し替えた "/cache/A" ではなく、常にアンビエントな既定値を見る。
     expect(pipelineMock).toHaveBeenCalledTimes(2);
     expect(observedCacheDirAtCall).toEqual(["/cache/A", "/original/cache"]);
-    // cacheDir を渡さない呼び出しは env.cacheDir に触らない——待っている間もそのままである。
     expect(envMock.cacheDir).toBe("/original/cache");
 
     deferredWithoutCacheDir.resolve(fakeExtractor(2));
@@ -179,7 +149,6 @@ describe("createLocalEmbeddingPipeline: env.cacheDir の差し替えと直列化
     await expect(first).rejects.toThrow("network down");
     await flushMicrotasks();
 
-    // 1本目が失敗しても、待ち行列は詰まらず2本目が進む。
     expect(pipelineMock).toHaveBeenCalledTimes(2);
     deferredSecond.resolve(fakeExtractor(256));
     const secondPipeline = await second;

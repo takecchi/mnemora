@@ -3,19 +3,6 @@ import type { Ctx } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 import type { CreateLocalEmbeddingPipeline, LocalEmbeddingPipeline } from "../pipeline.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1518（ADR 0419）の変異試験で、`dispose()` の
- * 並行・順序の隅の4つがすり抜けた。担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- * 重みは取らない——`createPipeline` の注入口と擬似の pipeline だけで測る（`dispose.test.ts` と同じ）。
- *
- * - M4: `dispose()` を**並行に**呼ぶと、上流の `dispose()` は1回で、2つの返り値は同じ Promise（ADR 0419 決定5）。
- *   既存の歯は `await dispose()` の後に2回目を呼ぶ形（直列）だけで、並行の呼びでは上流を2回呼ぶ変異が緑だった。
- * - M6: 読み込みの**最中に** `dispose()` を呼び、その後で読み込みが失敗しても、`dispose()` は reject しない。
- *   既存の歯は、先に `warmup()` が失敗してから `dispose()` を呼ぶ形（そのとき `#ready` は null）だった。
- * - M8: 上流の `dispose()` が reject したら、`dispose()` も同じ理由で reject する（握りつぶさない）。
- * - M9: `dispose()` を呼んだ時点から（解放の完了を待たずに）、`embed()`・`warmup()` は素の `Error` で断られる。
- */
-
 const ctx: Ctx = { tenantId: "test-tenant" };
 
 interface Gate {
@@ -91,7 +78,6 @@ describe("LocalEmbeddingProvider.dispose() の並行・順序の隅（Issue #173
     loading.open();
 
     expect(await disposeOutcome).toBe("resolved");
-    // 対照: 読み込みの失敗は warmup 側には届く（探り棒が生きている）。
     expect(await warmOutcome).toContain("モデルを読み込めなかった");
   });
 
@@ -121,12 +107,10 @@ describe("LocalEmbeddingProvider.dispose() の並行・順序の隅（Issue #173
     const running = provider.embed(ctx, ["a"]);
     while (embedCalls === 0) await tick();
 
-    // 走っている embed が終わるまで、解放は終わらない。dispose() は await しない。
     const disposing = provider.dispose();
 
     await expect(provider.embed(ctx, ["b"])).rejects.toThrow(/dispose/);
     await expect(provider.warmup()).rejects.toThrow(/dispose/);
-    // 断られた embed は pipeline に届いていない。
     expect(embedCalls).toBe(1);
 
     inference.open();
