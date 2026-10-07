@@ -8,15 +8,7 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1467 のすり抜け R1（ADR 0381 の 2026-09-30 追記・約束1）。
- * 段3の BFS は、`listRelated` の結果（`related`）を `memoryId` の昇順に並べてから処理する
- * （`listRelated` の返す順は契約が規定しない）。この並べ替えだけを外しても、`companionOf` は変わらない
- * （同じ親から出る子どうしは発見元が同じ）ので、既存の歯は赤にならなかった。
- * 観測できるのは、探索が安全弁（訪れた数の上限）で打ち切られるとき、どの id が先に切り捨てられるかだけ。
- * ここでは、群が安全弁より大きく、`listRelated` が id の降順（昇順の逆）で返す store を使い、
- * 打ち切り後に残る id が「id の小さいほう」から決まることを見る。
- */
+/** 観測できるのは、探索が安全弁で打ち切られるとき、どの id が先に切り捨てられるかだけ（並べ替えを外しても `companionOf` は変わらない）。`listRelated` が id の降順で返す store を使い、残る id が id の小さいほうから決まることを見る。 */
 const ctx: Ctx = { tenantId: "tenant-explore-order" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const GROUP_SIZE = 40;
@@ -49,7 +41,6 @@ function newMemory(i: number): NewMemory {
       halfLifeHours,
     }),
     embeddingStatus: "pending",
-    // 添字が大きいほど新しい（残る同伴は validFrom の新しい順）。
     validFrom: new Date(Date.UTC(2020, 0, 1 + i)),
     validUntil: null,
   };
@@ -113,7 +104,6 @@ describe("段3の探索が安全弁で打ち切られるとき、id の小さい
       const { ids, result } = await recallWith(mode);
       const owner = ids[0]!;
       const others = ids.slice(1);
-      // 訪れるのは owner 以外の id の昇順で先頭の (安全弁 - 1) 件。そのうち validFrom が最も新しい1件が残る。
       const ascending = [...others].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
       const visited = ascending.slice(0, VISITED_LIMIT - 1);
       const newest = (xs: MemoryId[]) =>
@@ -126,7 +116,6 @@ describe("段3の探索が安全弁で打ち切られるとき、id の小さい
       const companions = result.memories.filter((m) => m.retrievedVia === "mandatory_companion");
       expect(companions.map((c) => c.memoryId)).toEqual([expected]);
       expect(companions.map((c) => c.memoryId)).not.toContain(owner);
-      // 安全弁で止まったので lower_bound、切った件数は訪れた (安全弁 - 1) 件 - 残した1件。
       expect(result.omitted).toContainEqual({
         kind: "over_limit",
         stage: "relation",

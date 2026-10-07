@@ -4,16 +4,6 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `recall()` のクエリ埋め込みで、provider が `space.dimensions` と違う長さのベクトルを返したときは、
- * 「provider が使えない」（`embedding_provider_unavailable`）として名乗る（2026-09-30、ADR 0393）。
- * ベクトルを返さなかった場合（`recall-query-embedding-missing-vector.test.ts`）と同じ理由に丸める。
- *
- * 以前は次元違いのまま vectorStore へ渡り、Postgres では `toComparableQuery` が全 0 に
- * 差し替えて `score_not_comparable` と記録された。provider によって記録される理由の名前が
- * 違っていた（local-embedding は throw するので `embedding_provider_unavailable`）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 function buildRuntime() {

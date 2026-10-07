@@ -6,21 +6,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecallQuery.timeWeighting` の配線の歯（Issue #690、ADR 0300）。
- *
- * `scoring-time-weighting-policy.test.ts` が `defaultScoringStrategy` を直接呼んで
- * 計算式そのものを守るのに対し、このファイルは **`recall()` から先の配線** を守る:
- * - `RecallQuery.timeWeighting` を渡さない呼び出しは、既定（"legacy"）から1バイトも
- *   変わらない（ケース表・ADR 0300 §2 の陽性対照をここでも取る）。
- * - `RecallQuery.timeWeighting` を渡すと、`recall()` が返す `memories`/`omitted` の
- *   件数（量）が変わりうる——ただし忘却ゲート・`validAt` ゲートは一切変わらない。
- * - ⭐ **期限切れの予定（ケース D）は、`timeWeighting` の値に関係なく常に除外される**
- *   （validity ゲートを弱めないことの本命の歯。ADR 0300 §8 の変異(c)が狙う対象）。
- *
- * `recall-decay-gate.test.ts`/`recall-validity.test.ts` と同型: `packages/core` 自身の
- * テストなので `@mnemora/testkit` には依存しない。DB を要さないため手元で実行できる。
- */
+/** `scoring-time-weighting-policy.test.ts` が計算式を守るのに対し、これは `recall()` から先の配線を守る。期限切れの予定は `timeWeighting` の値に関係なく常に除外される（validity ゲートを弱めない）。`@mnemora/testkit` には依存しない。 */
 
 const HOUR_MS = 1000 * 60 * 60;
 const DAY_MS = 24 * HOUR_MS;

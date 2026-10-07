@@ -6,17 +6,7 @@ import { RecallQuerySchema } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecallQuery.timeWeighting` を、段2以外の3経路（同伴の2経路・連想枠）へ渡す配線と、
- * `RecallQuerySchema` の値の縛りの歯（Issue #690、ADR 0300 決定「`mandatory_companion`・
- * 段3.5 連想枠の順位キーに同じ値を渡す」。Issue #1775 の #697 のすり抜け 7〜10）。
- *
- * `recall-time-weighting-policy.test.ts` は主経路しか通さず、同伴を持つ記憶・連想枠に
- * `timeWeighting` を渡す歯が無かった。同伴・連想枠の `score.freshness` を直接見る
- * （`occurredAt` の無い古い記憶は、`"legacy"` では 1 未満、`"eventAwareFreshness"` では 1）。
- *
- * `@mnemora/testkit` には依存しない。DB を要さない。
- */
+/** `recall-time-weighting-policy.test.ts` は主経路しか通さないので、同伴・連想枠の `score.freshness` を直接見る（`occurredAt` の無い古い記憶は legacy では 1 未満、eventAwareFreshness では 1）。`@mnemora/testkit` には依存しない。 */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -159,7 +149,6 @@ describe("recall() — timeWeighting は連想枠（段3.5）の順位キーに�
     const awareEntry = aware.memories.find((m) => m.memoryId === associated.id);
     expect(awareEntry?.retrievedVia).toBe("association");
     expect(awareEntry?.score.freshness).toBe(1);
-    // legacy では freshness が小さく、連想枠の順位キーが足りず席に入らないか、入っても 1 未満。
     if (legacyEntry !== undefined) {
       expect(legacyEntry.score.freshness).toBeLessThan(1);
     }

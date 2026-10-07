@@ -5,14 +5,6 @@ import type { StageSkippedOmission } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `recall()` のクエリ埋め込みが失敗したとき、`embedding_provider_unavailable` の Omission に
- * 任意の `cause` が付き、原因の種類（4種）が返り値から読めること。
- *
- * - 既存の3欄（`kind` / `stage` / `reason`）と語彙検索への劣化は変わらない。
- * - `cause` には error の message・ベクトルの値を載せない。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const SECRET = "SECRET-user-data-12345";
 
