@@ -73,7 +73,7 @@ export function isHalfLifeHoursInRange(value: number): boolean {
  * `getEventRetention` の呼び出し側（将来の運用ジョブ・管理画面）がこの2つを区別できないと、
  * 「まだ何も設定していないテナントの一覧」が作れなくなる。
  *
- * ⚠ 2026-09-27 追記: ただし今の実装では、保持期間以外の設定を1つでも書くと行ができるので、
+ * ⚠ ただし今の実装では、保持期間以外の設定を1つでも書くと行ができるので、
  * 保持期間を一度も触っていないテナントも `unlimited` になる（`getEventRetention` の doc 参照）。
  */
 export type EventRetention =
@@ -111,8 +111,7 @@ export function assertValidEventRetentionDays(days: number): void {
     throw new Error(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
   }
   // ADR 0499: `tenant_settings.event_retention_days` は `integer`（int4）列で、`2^31` 以上は Postgres が `22003` で拒む。
-  // 以前は `PostgresTenantSettingsStore` だけが DB の生の例外を投げ、testkit の fixture だけがこの検査を別に持っていた。
-  // 受け入れる値は変わらない——共有の検査へ寄せて、2実装が同じ文面で断る。
+  // 共有の検査にして、2実装が同じ文面で断る。
   if (days > EVENT_RETENTION_DAYS_MAX) {
     throw new Error(
       `setEventRetention: days does not fit in a Postgres "integer" (int4) column (got ${days})`,
@@ -137,9 +136,7 @@ export const EVENT_RETENTION_KIND_INVALID_MESSAGE =
  * `assertValidDecayClock` と同じ形——`packages/postgres`・`packages/testkit` の両方の
  * `setEventRetention` 実装がこの関数を呼ぶことで、検査の種類を1箇所に固定する。
  *
- * Issue #1168（クローン miku の判断）: 以前は両実装とも `kind === "days"` のときだけ日数を検査し、
- * それ以外はすべて無期限として書いていた——型の外の `kind`（綴りの誤りなど）が、例外に
- * ならずに保持期間を無期限にしていた。
+ * Issue #1168: 型の外の `kind`（綴りの誤りなど）が、例外にならずに保持期間を無期限にするのを防ぐ。
  */
 export function assertValidEventRetentionKind(
   value: string,
@@ -153,7 +150,7 @@ export function assertValidEventRetentionKind(
  * 減衰の時計の種類（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
  * 決めたこと1）。
  *
- * - `'wall'`: 段1のゲートは `decay_floor_at > now()` のみ（本 ADR 以前と同じ）。
+ * - `'wall'`: 段1のゲートは `decay_floor_at > now()` のみ。
  * - `'activity'`: 段1のゲートは `decay_floor_seq > <そのテナントの activity_seq>` のみ。
  * - `'either'`: どちらかが生きていれば通す（OR）。**最も緩い。**
  */
@@ -239,11 +236,9 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
  *
  * `docs/memory-model.md` §8「二つのモードを二つの経路にしない。『ラベルの状態』一つで
  * 表す」——`strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できる
- * か」だけであり、書き込みは `open`/`strict` に関わらず常に自由である。**この2値が
- * recall のフィルタ・加点へ実際に反映される経路（PR-B）は、この型を追加した時点では
- * まだ実装されていない**——この型と読み書きの口だけを先に用意する。
+ * か」だけであり、書き込みは `open`/`strict` に関わらず常に自由である。
  *
- * （2026-10-03 訂正）上の「まだ実装されていない」は今は成り立たない。`recall()` は `getTaxonomyMode?` を
+ * `recall()` は `getTaxonomyMode?` を
  * 読み、`open` なら `registered`・`proposed` の両方、`strict` なら `registered` だけを
  * ラベルの絞り込みの参加資格にする（`recall-runtime.ts` の `taxonomyMode`、`RecallQuery.labels` の doc）。
  * 読むのは、`labels` か `taxonomyGroups` を指定した `recall()` だけである。
@@ -287,13 +282,8 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * （roadmap.md 段階3）が必要とする「Memory 作成時の既定 half-life」の読み出しと、
  * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
  *
- * ⚠ **上の段落の「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」は
- * [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)（Issue #201）で古くなった。**
- * 本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
- * `decay_clock` と同じ「省略可能」の形でこの interface に加わった。
- * （2026-10-03 訂正）この追記が指す「上の段落」は、いまの本文には無い（書き換えられて消えた）。
- * 今の本文で同じことを言っているのは、下の「`taxonomy_mode`（interface に出していない）」の箇所である
- * ——この追記が言う通り、`taxonomy_mode` は今は `getTaxonomyMode?`/`setTaxonomyMode?` で読み書きできる。
+ * `taxonomy_mode` は `getTaxonomyMode?`/`setTaxonomyMode?`（下記）で読み書きできる
+ * （`decay_clock` と同じ「省略可能」の形。[ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)、Issue #201）。
  *
  * 契約:
  * - テナントに `tenant_settings` 行が無い場合、`getDefaultHalfLifeHours` は
@@ -307,8 +297,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  *   （`EventRetentionSetting` 型がそもそも許さない）。「まだ設定していない」状態への
  *   巻き戻し（行の削除）は、この interface の対象外である。
  * - `setEventRetention` の `days` は、正の整数で、**`2^31 - 1` 以下**でなければならない（`assertValidEventRetentionDays`。
- *   ADR 0499）。超えれば何も書かずに `Error` を投げる——Postgres の `integer` 列に収まらない値で、以前は
- *   `@mnemora/postgres` だけが DB の生の例外を投げていた。受け入れる値は変わらない。
+ *   ADR 0499）。超えれば何も書かずに `Error` を投げる——Postgres の `integer` 列に収まらない値である。
  *
  * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13で
  * `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/`getActivitySeq` を足した。
@@ -353,33 +342,24 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * 1トランザクションを構成することはできない。`getActivitySeq` は**読み出し専用**であり、
  * 段1のゲート（`'activity'`/`'either'`）と書き込み時の `decayBaseSeq` 採番がこの値を読む。
  *
- * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: runtime がテナント設定を読む時点は、口によって違う。**
+ * ⚠ **runtime がテナント設定を読む時点は、口によって違う。**
  * どの口も1回の呼び出しの中で同じ設定を1回だけ読むが、読むのが呼び出しの始めか途中かで、
- * 呼び出しの最中に設定を変えたときの効き方が変わる（【実測 2026-09-27】`observe`・`consolidate`・
+ * 呼び出しの最中に設定を変えたときの効き方が変わる（`observe`・`consolidate`・
  * `recall` は、LLM・埋め込みの応答を止めている間に設定を変えて、`@mnemora/postgres` と testkit の
- * fixture で同じ結果を確かめた。`reextract`・`reflect`・掃除は、同じ関数・同じ位置で読むことを
- * コードで確かめた）:
+ * fixture で同じ結果を確かめている。`reextract`・`reflect`・掃除は、同じ関数・同じ位置で読む）:
  * - `recall`: decay_clock・`activity_seq`・taxonomy を**呼び出しの始め**（埋め込みの前）に読む。
  *   呼び出しの最中に変えた設定は、その呼び出しには効かず、**次の呼び出しから**効く。
  * - `observe`（抽出）・`reextract`・`consolidate`・`reflect`: 書き込む記憶の既定の半減期
  *   （`getDefaultHalfLifeHours`）と活動時計の入力（decay_clock・`activity_seq`・
  *   `getDefaultHalfLifeRecalls`）を、**LLM の応答が返った後**、記憶を組み立てる直前に読む。
  *   LLM を待っている間に変えた設定は、**その呼び出しで書く記憶に効く**。
- * - `purgeExpiredEventsForTenant`（保持期間の掃除）: `getEventRetention` を呼び出しの始めに読む。
- * 「呼び出しの始めの値で揃える」ことは約束していない（揃えるのは新しい方針になる）。
- *
- * ⚠ **2026-09-29 追記: 上の `purgeExpiredEventsForTenant` の行は、もう「今の振る舞い」の全体では
- * ない（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232) の修正、
- * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。**
- * `purgeExpiredEventsForTenant` が呼び出しの始めに読む `getEventRetention` は、いまも
- * unset/unlimited を判定するためだけに残っている——ただし `days` のときに実際へ使う保持期間は、
- * この最初の読みの値では**ない**。`MemoryStore.purgeExpiredEventsByRetention?` が、
- * 自分自身の内部でもう一度保持期間を読み直し（Postgres なら `tenant_settings` 行を
- * `FOR SHARE` で読む同一トランザクションの中で）、その読み直した値で cutoff を計算して
- * 削除まで行う——**「呼び出しの始めの値で揃える」という前段落の記述は、`purgeExpiredEventsByRetention?`
- * を実装した adapter に対してはもう当てはまらない**（「揃えるのは新しい方針になる」の
- * 「新しい方針」がこれである）。この口を実装していない adapter は
- * `{ kind: "store_unsupported" }` になり、そもそも保持期間を読まない。
+ * - `purgeExpiredEventsForTenant`（保持期間の掃除）: `getEventRetention` を呼び出しの始めに読むが、
+ *   これは unset/unlimited を判定するためだけである（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
+ *   [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。`days` のときに実際に使う保持期間は
+ *   この最初の読みの値ではなく、`MemoryStore.purgeExpiredEventsByRetention?` が自分の内部で読み直した値
+ *   （Postgres なら `tenant_settings` 行を `FOR SHARE` で読む同一トランザクションの中）で cutoff を計算して
+ *   削除まで行う。この口を実装していない adapter は `{ kind: "store_unsupported" }` になり、そもそも保持期間を読まない。
+ * 「呼び出しの始めの値で揃える」ことは約束していない。
  */
 export interface TenantSettingsStore {
   /**
@@ -390,11 +370,11 @@ export interface TenantSettingsStore {
   /**
    * `tenant_settings.event_retention_days` の現在の状態を、3状態を保ったまま返す。
    *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）:** `unset` は「そのテナントの設定の行が1つも
+   * ⚠ `unset` は「そのテナントの設定の行が1つも
    * 無い」ことであって、「保持期間を一度も設定していない」ことではない。保持期間を触らずに
    * 別の設定（`setDecayClock`・`setDefaultHalfLifeRecalls`・`setTaxonomyMode`）を1つでも書くと
    * 行ができ、以後は `{ kind: "unlimited" }` を返す（`event_retention_days` は NULL のまま）
-   * ——【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture の両方で同じ。したがって
+   * ——`@mnemora/postgres` と testkit の fixture の両方で同じ。したがって
    * `unlimited` は「明示的に無期限と決めた」とは限らない（{@link EventRetention} の doc 参照）。
    * どちらも無期限として振る舞う点は変わらない。
    */
@@ -410,8 +390,6 @@ export interface TenantSettingsStore {
    * `@mnemora/postgres` も `@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore` も、何も書かずに
    * 同じ文面の `Error` で断る（メッセージは `EVENT_RETENTION_DAYS_INVALID_MESSAGE` ではなく、
    * `setEventRetention: days does not fit in a Postgres "integer" (int4) column` で始まる）。
-   * （2026-10-03 訂正）この段落は以前「上限は約束しない・testkit は上限なく受け付ける・
-   * Postgres は DB の例外」と書いていた。ADR 0499 より前の記述で、今は成り立たない。
    *
    * `retention.kind` が `"unlimited"`・`"days"` のどちらでもなければ、`EVENT_RETENTION_KIND_INVALID_MESSAGE` を
    * 含む `Error` で失敗する（`assertValidEventRetentionKind`、型の外の値が実行時に渡ったとき）。
@@ -419,18 +397,14 @@ export interface TenantSettingsStore {
    * 受け付けた値なら、どれほど大きくても `purgeExpiredEventsForTenant` は例外にならない
    * ——cutoff が表せる最も古い時刻より前になる日数では、それより古い行が無いので0件の削除になる。
    *
-   * ⚠ **走っている掃除は止めない**（2026-09-27 追記、今の振る舞い。Issue #1232）。既に保持期間を読み終えた
-   * `purgeExpiredEventsForTenant` は、この呼び出しが返った後でも、読んだときの日数で消す
-   * （`purgeExpiredEventsForTenant` の doc 参照）。
-   *
-   * ⚠ **2026-09-29 追記: 上の段落はもう成り立たない（Issue #1232 の修正、
-   * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。**
+   * ⚠ **走っている掃除との競合**（Issue #1232、
+   * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）:
    * `MemoryStore.purgeExpiredEventsByRetention?` を実装している adapter では、走っている掃除は
    * この呼び出しの `UPDATE`/`INSERT` が持つ行ロックと衝突する——掃除の内部の読みは、この呼び出しが
-   * commit するまで待たされ、commit した後の最新の値を見る（`purgeExpiredEventsForTenant` の
-   * 2026-09-29 追記、`packages/postgres/src/__tests__/purge-expired-events-by-retention-concurrency.postgres.test.ts`）。
+   * commit するまで待たされ、commit した後の最新の値を見る
+   * （`packages/postgres/src/__tests__/purge-expired-events-by-retention-concurrency.postgres.test.ts`）。
    * この口を実装していない adapter（`purgeExpiredEventsForTenant` が `store_unsupported` を返す
-   * adapter）には、この訂正は当てはまらない——そもそも掃除が走らない。
+   * adapter）では、そもそも掃除が走らない。
    */
   setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
 
@@ -448,7 +422,7 @@ export interface TenantSettingsStore {
    * ⚠ **`'wall'` から `'activity'`/`'either'` へ切り替えても、`'wall'` の間に作られた記憶は活動時計では
    * 沈まない**（活動時計の3つ組が `null` のまま＝床が無い。この口は既存の記憶を書き換えない）。
    * 活動時計で沈むのは、切り替えた後に作られた記憶だけである。これを契約とする
-   * （[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) の 2026-09-28 追記2、Issue #1014）。
+   * （[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)、Issue #1014）。
    */
   setDecayClock?(ctx: Ctx, clock: DecayClock): Promise<void>;
 
@@ -525,13 +499,9 @@ export interface TenantSettingsStore {
    *
    * ⭐ **`decay_clock` と同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
    * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
-   * 決めたこと13）。既定 `'open'` は「未実装の adapter でも今日と同じ挙動」に一致する
-   * （`taxonomy_mode` を読む側自体がまだ存在しないため、`open`/`strict` のどちらであっても
-   * PR-A の時点では観測できる違いが無い——ADR 0318「決めたこと」参照）。
-   *
-   * （2026-10-03 訂正）上の「読む側自体がまだ存在しない」は今は成り立たない。`labels` か `taxonomyGroups` を指定した
+   * 決めたこと13）。`labels` か `taxonomyGroups` を指定した
    * `recall()` が `readTaxonomyMode` 経由で読み、`strict` では `proposed` のラベルを参加させない。
-   * 未実装の adapter が `'open'` に倒れる点は変わらない。
+   * 未実装の adapter は `'open'` に倒れる（ADR 0318「決めたこと」）。
    */
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
 
