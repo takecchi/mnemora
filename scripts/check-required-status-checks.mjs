@@ -1,48 +1,10 @@
 #!/usr/bin/env node
 /**
- * `.github/required-status-checks.json`（main のブランチ保護 — branch protection —
- * が required にしている status check の文脈名の宣言・写し）と、いまの
- * branch protection の実物を突き合わせる CLI。
+ * 判定ロジックはここに置かない(`check-required-status-checks-lib.mjs` が正本)。
  *
- * **判定ロジックはここに置かない。** `scripts/check-required-status-checks-lib.mjs`
- * が正本で、なぜ3値で答えるのか・なぜ空の宣言を素通りさせないのかもあちらの
- * doc に書いてある。
+ * ⛔ 読むだけ。GET しか呼ばず、protection にも宣言にも書かない。
  *
- * ## この道具が言えること・言えないこと
- *
- * - **言えること**: 宣言と protection の required contexts が一致しているか。
- *   食い違っていれば、両側の値を並べて出す。
- * - **言えないこと**: **どちらが正しいか。** 宣言が古いのか protection が意図せず
- *   変わったのかは、この道具からは分からない（`docs/autonomy.md` §3 —— branch
- *   protection の設定変更はオーナー領分）。
- * - **書き換えない。** 読むだけである。GET しか呼ばない——`gh api` を
- *   `-X PATCH`/`-X PUT`/`-X DELETE` 付きで呼ぶことは無い。protection にも
- *   宣言にも1バイトも書かない。
- *
- * ## 終了コード（`check-local-embedding-fingerprint.mjs` / `ci-green-check.mjs` と同じ形）
- *
- * | 終了コード | 意味 |
- * |---|---|
- * | `0` | match —— 宣言と protection が一致した |
- * | `1` | mismatch —— ずれている（空の宣言を含む。ADR 0279） |
- * | `2` | undetermined —— protection を読めなかった（権限・ネットワーク） |
- * | `3` | この CLI 自身のバグ・想定していない例外・不明な引数 |
- *
- * ⚠ **`2` を `0` に丸めないこと。** 読めなかったことを「一致した」の顔で
- * 握りつぶすと、ADR 0274 が直した腐り（required check の文脈名が中身と
- * 食い違ったまま誰にも気づかれない）を、この道具自身の中に作り直すことになる。
- *
- * ## 使い方
- *
- * ```
- * node scripts/check-required-status-checks.mjs
- * node scripts/check-required-status-checks.mjs --json
- * node scripts/check-required-status-checks.mjs --repo takecchi/mnemora --branch main
- * ```
- *
- * `--repo` / `--branch` は既定では `takecchi/mnemora` / `main`
- * （`.github/required-status-checks.json` が守っている対象そのもの）。
- * 変異試験・単体試験から別対象へ差し替えるための注入点である。
+ * ⚠ exit `2`(読めなかった)を `0` に丸めない。ADR 0274 が直した腐りを、この道具自身の中に作り直すことになる。
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -76,12 +38,7 @@ function parseArgs(argv) {
 }
 
 /**
- * `.github/required-status-checks.json` を読み、`contexts` を取り出す。
- *
- * 読めない・`contexts` が文字列の配列でない場合は `null` を返す——これは
- * **この repo 自身が直せる問題**なので、呼び出し側はこれを赤（exit 1）として
- * 扱う（保留にしない。`check-local-embedding-fingerprint.mjs` が「宣言を読み
- * 取れない」を赤にしているのと同じ判断）。
+ * ⛔ 宣言を読めないときは保留にせず赤(exit 1)。この repo 自身が直せる問題のため。
  *
  * @returns {{ contexts: string[] } | null}
  */
@@ -101,15 +58,9 @@ function readDeclaration() {
 }
 
 /**
- * branch protection を `gh api` で読む。読めなければ `{ protection: null, error }` を返す。
- *
- * ⛔ **`-q` で欄を絞らない。** 生 JSON を丸ごと取り、判定は
- * `contextsFromProtection`（lib 側）に委ねる——`ci-green-check.mjs` の
- * `fetchRequiredStatusChecks` と同じ理由（「required_status_checks 自体が無い」と
- * 「在るが contexts が空」を区別するため）。
- *
- * **例外を握り潰すが、握り潰した中身は捨てない**——読めなかった理由
- * （401/403/404/ネットワーク）は、次の一手を決める材料そのものである。
+ * ⛔ `-q` で欄を絞らない。生 JSON を丸ごと取り、判定は lib に委ねる
+ * (「`required_status_checks` が無い」と「在るが `contexts` が空」を区別するため)。
+ * 例外は握り潰すが、読めなかった理由(401/403/404/ネットワーク)は捨てない。
  *
  * @param {string} repo
  * @param {string} branch
