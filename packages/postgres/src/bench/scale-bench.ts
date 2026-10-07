@@ -1,102 +1,36 @@
 #!/usr/bin/env node
 /**
- * 規模を振るベンチ（テストではなくスクリプト。`pnpm --filter @mnemora/postgres run bench:scale`）。
+ * 規模を振る手動ベンチ（テストではなくスクリプト。`pnpm --filter @mnemora/postgres run bench:scale`）。
  *
- * ## 何のためのベンチか
+ * - Part 1: `MemoryStore.aggregateScope`（目次帯・群カウント）の厳密集計が、どの規模から割に合わなくなるか
+ *   （ADR 0011）。`memories` だけを読むので、埋め込みは作らない。
+ * - Part 2: 段1の ANN クエリに `m.subject_id = $x` を足したときの経路（ADR 0023）が、テナント規模でどう伸びるか。
+ * - Part 3: subject の大きさ（10 / 1,000 / 10,000 行）を振って、search と aggregateScope を測る。振る軸は subject の
+ *   大きさだけで、次元は 256 に固定する（2つ同時に振るとどちらが効いたのか分からなくなるため）。
+ * - Part 4: `runtime.recall()` を丸ごと1回呼び、ANN が窓を埋められなかったことが `omitted` / `explain` / `index` に
+ *   現れるかを見る（ADR 0008 の「無いの分類」）。測るだけで、`recall()` の挙動もフィールドも変えない。
  *
- * 3つの未計測の穴に、1回の計測で答える。
- *
- * 1. **`docs/decisions/0011-no-window-count-in-ann-stage.md` / `docs/recall.md` §5**:
- *    `MemoryStore.aggregateScope`（目次帯・第3階の群カウント）は Phase 1 では常に厳密集計
- *    （`memories` テーブルへの `GROUP BY subject_id` 集約）であり、近似経路が無い。
- *    `docs/recall.md` は「大規模テナントでは近似を許す」と書いているが、どの規模から
- *    厳密集計が割に合わなくなるのかは誰も測っていない。
- *    `aggregateScope` は `memories` テーブルだけを読む（`memory-store.ts` の実装を参照。
- *    `JOIN` 無し）ので、**埋め込みを1件も作らずに測れる**。
- *
- * 2. **`docs/decisions/0023-subject-filter-in-ann-stage.md`**: 段1の ANN クエリに
- *    `m.subject_id = $x` を足すと、CI の実測（3,000行）でプランナが HNSW を捨てて
- *    「`idx_memories_by_subject` で絞ってから距離で Sort」という厳密な経路を選んだ。
- *    埋め込みテーブル側は `Seq Scan` になる。この経路がテナント規模に対してどう伸びるかは
- *    未測定。
- *
- *    **⟹ Part 1 / Part 2 として実装し、CI で 10k/100k を実測した結果（ADR 0023 追記）、
- *    `Seq Scan` は出ず Nested Loop が 0.9ms 横ばいだった。しかし、その計測は
- *    「小さい subject」（該当10〜21行）だけを対象にしていた。** Nested Loop が多数回
- *    まわる懸念は、むしろ**大きい subject** でこそ現実的であり、そこが埋まっていなかった。
- *
- * 3. **（本追加分）穴2の続き——subject の大きさそのものを振っていなかった。**
- *    Part 2 が固定していた「小さい subject」を、10行 / 1,000行 / 10,000行（既定）と
- *    振って計測する。**振る軸は subject の大きさだけ**（次元は 256 に固定）——
- *    2つ同時に振ると、どちらが効いたのか分からなくなるため。
- *    `aggregateScope` も同じ subject の大きさで併せて測る（穴1の「小さい subject でしか
- *    測っていない」も同時に埋まる）。
- *
- * 4. **（本追加分・Part 4）穴3——`PostgresVectorStore.search` 単体ではなく
- *    `runtime.recall()` を丸ごと1回呼んで、`RecallResult` をそのまま見る。**
- *    ADR 0023 追記の実測（Part 3、大きい subject＝全体の10%）では、`LIMIT 40` に対して
- *    ANN が6件しか返さなかった。これは段1（`PostgresVectorStore.search`）単体の観測であり、
- *    **その「6件しか無かった」という事実が `runtime.recall()` の返り値
- *    （`omitted` / `explain` / `index`）のどこかに実際に現れるのかは、まだ誰も見ていない**
- *    （[ADR 0008](../../../../docs/decisions/0008-absence-taxonomy.md) の「無いの分類」が
- *    ここで機能しているかという疑い）。**`recall-runtime.ts` を読む限り、
- *    `ann_truncated` は `annHits.length >= kPrime` のときにしか積まれない設計に見える
- *    （6 < 40 の場合は条件を満たさないため、コード上は積まれないはず）——これは読んで
- *    立てた推測であり、Part 4 はこれを実際に走らせて確かめるためだけに存在する。**
- *    測るだけで、`recall()` の挙動もフィールドも変えない。**
- *
- * ## 実行方法
- *
- * `DATABASE_URL` が本物の Postgres + pgvector を指している状態で:
- *
- * ```
- * pnpm --filter @mnemora/postgres run bench:scale
- * ```
- *
- * 既定では 10k/100k/1M の3点で `aggregateScope` を測り（安いので既定でフル規模）、
- * ベクトル検索（Part 2）は既定で 10k/100k までに留める（1M × 高次元は HNSW の
- * 逐次維持コストが非常に重くなりうるため）。Part 3（subject の大きさを振る）は
- * 既定で常に走る。以下の環境変数で調整できる:
+ * 実行: `DATABASE_URL` が本物の Postgres + pgvector を指している状態で `pnpm --filter @mnemora/postgres run bench:scale`。
+ * 既定では 10k/100k/1M の3点で `aggregateScope` を測り、ベクトル検索（Part 2）は 10k/100k までに留める
+ * （1M × 高次元は HNSW の逐次維持コストが非常に重くなりうる）。Part 3 は常に走る。環境変数で調整できる:
  *
  * - `BENCH_SCOPE_SCALES`: `aggregateScope` を測る行数（カンマ区切り）。既定 `10000,100000,1000000`
- * - `BENCH_VECTOR_SCALES`: ベクトル検索を測る行数（カンマ区切り）。`BENCH_SCOPE_SCALES` の
- *   部分集合でなければならない（そのスケールの `memories` を既に流し込んだ上でベクトルだけ
- *   追加するため）。既定 `10000,100000`（1M は明示的な opt-in）
- * - `BENCH_VECTOR_DIMENSIONS`: ベクトルの次元数（Part 1 / Part 2 用）。既定 `256`
- *   （`text-embedding-3-small` 相当の 1536 は重いので既定にしない。次元数は
- *   `memory_embeddings_<space>` の行幅を決め、`Seq Scan` の費用に直接効く——
- *   高次元で測り直したい場合はこの環境変数を上げること）
- * - `BENCH_SUBJECT_SIZES`（Part 3 専用）: 狙いの subject の大きさ（行数、カンマ区切り）。
- *   既定 `10,1000,10000`。**Part 3 の次元数はこの環境変数の対象外で、常に 256 固定**
- *   （振る軸を subject の大きさだけに保つため。`BENCH_VECTOR_DIMENSIONS` は Part 3 に効かない）。
- * - `BENCH_SUBJECT_TOTAL_ROWS`（Part 3 専用）: Part 3 のテーブル全体の行数。既定 `100000`。
- *   狙いの subject 群の合計より大きくなければならない（残りは filler subject に散る）。
- * - `BENCH_SEED`: 決定的な乱数の種（`setseed` に渡す）。既定 `0.20260906`
- *   （Part 3 は同じ種から別系統の値を導出し、他の Part と乱数列を共有しない）。
+ * - `BENCH_VECTOR_SCALES`: ベクトル検索を測る行数（カンマ区切り）。`BENCH_SCOPE_SCALES` の部分集合でなければならない
+ *   （そのスケールの `memories` を流し込んだ上でベクトルだけ追加するため）。既定 `10000,100000`
+ * - `BENCH_VECTOR_DIMENSIONS`: ベクトルの次元数（Part 1 / Part 2 用）。既定 `256`。次元数は行幅を決め、`Seq Scan` の費用に直接効く
+ * - `BENCH_SUBJECT_SIZES`（Part 3 専用）: 狙いの subject の大きさ（行数、カンマ区切り）。既定 `10,1000,10000`。
+ *   Part 3 の次元数はこの対象外で、常に 256 固定
+ * - `BENCH_SUBJECT_TOTAL_ROWS`（Part 3 専用）: テーブル全体の行数。既定 `100000`。狙いの subject 群の合計より大きくなければならない
+ *   （残りは filler subject に散る）
+ * - `BENCH_SEED`: 決定的な乱数の種（`setseed` に渡す）。既定 `0.20260906`。Part 3 は同じ種から別系統の値を導出する
  *
- * ## 使い捨てデータベース
+ * 規模ごとに専用のデータベースを作り、計測後に `dropTempDatabase` で `WITH (FORCE)` を使わずに落とす
+ * （ADR 0020: `WITH (FORCE)` は閉じ切れていないコネクションが残っている不具合を検知不能にする）。
+ * Part 3 は Part 1 / Part 2 と別のデータベース（`mnemora_scale_bench_subject`）を使う
+ * （Part 1 / Part 2 の skew 分布は、狙った大きさの subject を作らないため）。
  *
- * 規模ごとに専用のデータベースを作り（`packages/postgres/src/__tests__/temp-database.ts`
- * と同じ作法）、計測後に `dropTempDatabase` で `WITH (FORCE)` を使わずに落とす
- * （ADR 0020: `WITH (FORCE)` は「閉じ切れていないコネクションが残っている」不具合を
- * 検知不能にする）。**Part 3 は Part 1 / Part 2 とは別のデータベース
- * （`mnemora_scale_bench_subject`）を使う**——Part 1 / Part 2 の subject 分布
- * （skew を掛けた乱数割り当て）は狙った大きさの subject を作らないため、Part 3 専用の
- * 一様でない・しかし行数が既知の分布を別途作る。
- *
- * ## 行の投入
- *
- * `createMemory()` / `vectorStore.upsert()` を1件ずつ呼ぶと1M件は終わらないので、
- * `INSERT ... SELECT FROM generate_series(...)` によるバルク SQL で入れる
- * （`seedMemories` / `seedVectors` 参照）。Part 3 は同じ SQL 雛形（`memoriesInsertSql`）を
- * 再利用し、filler 用の1文 + 狙いの subject ごとの1文（`subject_id` を定数で固定）を追加で撃つ。
- * **狙いの subject の行数は `SELECT count(*)` で実測し、狙い値と並べて出力する**
- * （「狙った」と「実際にそうだった」は別ものであるため）。
- *
- * ## 手元では一切実行できていない
- *
- * この環境には PostgreSQL が無い（`DATABASE_URL` 無し・docker 無し・root 無し）。
- * このスクリプトは**一度も実行されていない**——構文・型は `tsc` で検査したのみ。
+ * 行の投入は `INSERT ... SELECT FROM generate_series(...)` のバルク SQL で行う（`createMemory()` / `vectorStore.upsert()` を
+ * 1件ずつ呼ぶと 1M 件は終わらない）。狙いの subject の行数は `SELECT count(*)` で実測し、狙い値と並べて出力する。
  */
 
 import { performance } from "node:perf_hooks";
@@ -113,10 +47,6 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { dropTempDatabase } from "../__tests__/temp-database.js";
 import { captureClientQuery, explainCaptured, seededRandom } from "../__tests__/test-db.js";
 
-// ---------------------------------------------------------------------------
-// 設定
-// ---------------------------------------------------------------------------
-
 const TENANT = "scale-bench-tenant";
 const STATUS_FILTER: Array<"active" | "contested"> = ["active", "contested"];
 
@@ -128,33 +58,14 @@ const QUERY_VECTOR_SEED = 20260906;
 
 const DEFAULT_SCOPE_SCALES = [10_000, 100_000, 1_000_000];
 /**
- * Part 3（subject の大きさを振る）の既定値。
- *
- * - 全体行数は 100,000 に固定する: Part 2 が既に 100k で Nested Loop / 0.9ms 横ばいを
- *   実測しており、その同じ全体規模の中で「subject 自体が大きくなったらどうなるか」を
- *   分離して見るため（全体規模まで同時に動かすと、どちらが効いたのか分からなくなる）。
- * - 狙いの subject の大きさは 10 / 1,000 / 10,000 行:
- *   10 は Part 2 で実測した「小さい subject」（該当10〜21行）とほぼ同じ桁に揃えた対照点、
- *   10,000 はテーブル全体（既定10万行）の10%を1つの subject が占める、現実的に大きい部類、
- *   1,000 はその中間点。
+ * Part 3 の既定値。全体行数を 100,000 に固定し、subject 自体が大きくなったときの変化だけを分離して見る。
+ * 10 行は小さい subject の対照点、10,000 行は全体の 10% を1つの subject が占める大きい部類、1,000 行はその中間点。
  */
 const DEFAULT_SUBJECT_SIZES = [10, 1_000, 10_000];
 const DEFAULT_SUBJECT_TOTAL_ROWS = 100_000;
-/**
- * Part 3 で振る軸は subject の大きさ「だけ」にする。次元数を同時に振ると、
- * 時間の変化が「subject が大きくなったから」なのか「次元が変わったから」なのか
- * 区別できなくなる。だからこの値は環境変数で変えられない（Part 1 / Part 2 の
- * `BENCH_VECTOR_DIMENSIONS` とは独立）。Part 1 / Part 2 の既定 `DEFAULT_DIMENSIONS`
- * と同じ 256 を使う（比較可能にするため）。
- */
+/** Part 3 で振る軸は subject の大きさだけにする（次元を同時に振ると、どちらが効いたのか分からなくなる）。だから環境変数で変えられない。Part 1 / Part 2 の既定と同じ 256 にして比較可能にする。 */
 const SUBJECT_BENCH_DIMENSIONS = 256;
-/**
- * ベクトル検索の既定スケールは控えめにする。1M × 高次元は HNSW 索引の（挿入のたびに
- * 逐次維持される）構築コストだけで非常に重くなりうる——このスクリプトは
- * `registerEmbeddingSpace` をそのまま使い（索引を先に作ってからデータを流し込む、
- * 本番と同じ順序）、その現実そのものを計測対象にしている。だからこそ既定では
- * 1M を含めない。
- */
+/** ベクトル検索の既定スケールは控えめにする。1M × 高次元は HNSW 索引の逐次維持コストだけで非常に重くなりうる（索引を先に作ってからデータを流す、本番と同じ順序で測るため）。1M は明示的な opt-in。 */
 const DEFAULT_VECTOR_SCALES = [10_000, 100_000];
 const DEFAULT_DIMENSIONS = 256;
 
@@ -254,18 +165,10 @@ function loadConfig(): BenchConfig {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 進捗ログ（CI で長時間無言にならないため）
-// ---------------------------------------------------------------------------
-
 function log(message: string): void {
   const ts = new Date().toISOString();
   console.log(`[${ts}] ${message}`);
 }
-
-// ---------------------------------------------------------------------------
-// 小さなユーティリティ
-// ---------------------------------------------------------------------------
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -280,10 +183,7 @@ function fmtMs(ms: number): string {
   return `${ms.toFixed(1)}ms`;
 }
 
-/**
- * `warmup 1回 + 本計測3回` を行い、本計測の中央値（ミリ秒）を返す。
- * 1回だけの値は揺れるため、必ずこの形で測る（マネージャー指示）。
- */
+/** `warmup 1回 + 本計測3回` を行い、本計測の中央値（ミリ秒）を返す。1回だけの値は揺れるため。 */
 async function measureMedian(fn: () => Promise<unknown>): Promise<number> {
   await fn(); // warm-up（捨てる）
   const samples: number[] = [];
@@ -296,18 +196,12 @@ async function measureMedian(fn: () => Promise<unknown>): Promise<number> {
 }
 
 /**
- * `fn` の中で発行された、`matcher` に一致するクエリを捕まえて `EXPLAIN (ANALYZE, BUFFERS)`
- * にかけ、プランの全文を返す。`PostgresMemoryStore` / `PostgresVectorStore` が実際に
- * 発行するクエリをそのまま EXPLAIN するためのもの。
- *
- * 捕まえ方と EXPLAIN の打ち方は、テストと同じ `captureClientQuery` / `explainCaptured`
- * （`__tests__/test-db.ts`、ADR 0284）を使う（Issue #1016）。ADR 0284 以降、`search()` は
- * `db.transaction()` の中で `SET LOCAL hnsw.iterative_scan` を打ってから SELECT する。
- * そのトランザクションは `pool.connect()` で借りた client の `client.query()` を使い、
- * `pool.query` を通らない——以前の `pool.query` を差し替える捕まえ方では search の SQL が
- * 見えず、Part 2 以降が毎回落ちていた。また、捕まえた SQL を素の `pool.query` で EXPLAIN
- * すると `SET LOCAL` の効いていないプランを見ることになる。`explainCaptured` は同じ
- * `SET LOCAL` を同じトランザクションで再生してから EXPLAIN する。
+ * `fn` の中で発行された、`matcher` に一致するクエリを捕まえて `EXPLAIN (ANALYZE, BUFFERS)` にかけ、プランの全文を返す。
+ * 捕まえ方と EXPLAIN の打ち方は、テストと同じ `captureClientQuery` / `explainCaptured`（`__tests__/test-db.ts`、ADR 0284）を使う。
+ * `search()` は `db.transaction()` の中で `SET LOCAL hnsw.iterative_scan` を打ってから SELECT し、そのトランザクションは
+ * `pool.connect()` で借りた client の `client.query()` を使うので、`pool.query` の差し替えでは SQL が見えない。
+ * また、捕まえた SQL を素の `pool.query` で EXPLAIN すると `SET LOCAL` の効いていないプランを見ることになる。
+ * `explainCaptured` は同じ `SET LOCAL` を同じトランザクションで再生してから EXPLAIN する。
  */
 export async function captureAndExplain(
   pool: Pool,
@@ -337,15 +231,7 @@ function summarizePlan(plan: string): {
   return { usesHnsw, usesSubjectIndex, hasSeqScan, topLine, actualRowsLines };
 }
 
-// ---------------------------------------------------------------------------
-// データ投入（バルク SQL。1件ずつ createMemory() を呼ばない）
-// ---------------------------------------------------------------------------
-
-/**
- * `INSERT INTO memories ... SELECT ...` の雛形。`subjectExpr` だけが呼び出し側ごとに違う
- * （skew を掛けた乱数割り当てにするか、定数の subject_id にするか）。パラメータは常に
- * `$1` = tenant、`$2` = `subjectExpr` が使う値、`$3` = 投入行数の3つで揃える。
- */
+/** `INSERT INTO memories ... SELECT ...` の雛形。`subjectExpr` だけが呼び出し側ごとに違う。パラメータは常に `$1` = tenant、`$2` = `subjectExpr` が使う値、`$3` = 投入行数。 */
 function memoriesInsertSql(subjectExpr: string): string {
   return `
     INSERT INTO memories (
@@ -386,18 +272,12 @@ const SKEWED_SUBJECT_EXPR = "'subject-' || floor(power(random(), 3) * $2)::int";
 const FIXED_SUBJECT_EXPR = "$2::text";
 
 /**
- * `subjectCount` は規模に応じて変える（呼び出し側が決める）。全部同じ subject だと
- * `GROUP BY subject_id` が1行しか返らず、群カウントの費用を過小評価するため。
+ * `subjectCount` は規模に応じて呼び出し側が決める。全部同じ subject だと `GROUP BY subject_id` が1行しか返らず、群カウントの費用を過小評価する。
  *
- * 分布は完全な一様分布にしない: `power(random(), 3)` で低い添字（subject-0 に近いほう）
- * に寄せる緩い skew を掛け、「一部の大きな subject + 大量の小さな subject」という
- * 現実のテナントに近い形にする（完全な Zipf 分布の実装ではない——その主張はしない）。
- * `subjectCount - 1`（分布の裾、最も小さい部類の subject）を、後段の「小さい subject を
- * subjectId で絞る」計測に使う。
- *
- * 各列の値（status / embedding_status の分布、half_life_hours 等）は
- * `aggregateScope` の `FILTER (WHERE ...)` の各枝を実際に踏ませるための最小限の作り込みで、
- * 「これが現実の分布だ」という主張はしていない。
+ * 分布は完全な一様にしない: `power(random(), 3)` で低い添字に寄せる緩い skew を掛け、「一部の大きな subject + 大量の小さな subject」
+ * という現実のテナントに近い形にする（完全な Zipf 分布ではない）。`subjectCount - 1`（分布の裾）を、後段の
+ * 「小さい subject を subjectId で絞る」計測に使う。各列の値は `aggregateScope` の `FILTER (WHERE ...)` の各枝を踏ませるための
+ * 最小限の作り込みで、現実の分布だという主張はしない。
  */
 export async function seedMemories(
   pool: Pool,
@@ -408,8 +288,7 @@ export async function seedMemories(
 ): Promise<void> {
   const client = await pool.connect();
   try {
-    // setseed はセッション（このコネクション）に対して効く。同じクライアントで
-    // 続けて INSERT を発行することで、乱数列を決定的にする。
+    // `setseed` はセッション（このコネクション）に効く。同じクライアントで続けて INSERT を発行して、乱数列を決定的にする。
     await client.query("SELECT setseed($1)", [seed]);
     await client.query(memoriesInsertSql(SKEWED_SUBJECT_EXPR), [tenant, subjectCount, rowCount]);
   } finally {
@@ -423,14 +302,9 @@ function subjectIdForSize(size: number): string {
 }
 
 /**
- * Part 3: テーブル全体を `totalRows` 行に固定し、その中に `targetSizes` の
- * 各値ぴったりの行数を持つ subject を作る（`subjectIdForSize` で名付ける）。
- * 残りの行（`totalRows - sum(targetSizes)`）は、Part 1 / Part 2 と同じ skew 分布で
- * 多数の filler subject に散らす。
- *
- * 狙いどおりの行数になっているかどうかはここでは確認しない
- * （呼び出し側が `countSubjectRows` で実測する——「狙った」と「実際にそうだった」を
- * 混同しないため、投入と確認を分離する）。
+ * Part 3: テーブル全体を `totalRows` 行に固定し、その中に `targetSizes` の各値ぴったりの行数を持つ subject を作る
+ * （`subjectIdForSize` で名付ける）。残りの行は、Part 1 / Part 2 と同じ skew 分布で多数の filler subject に散らす。
+ * 狙いどおりの行数かどうかはここでは確認しない（「狙った」と「実際にそうだった」を混同しないよう、`countSubjectRows` で実測する）。
  */
 async function seedSubjectSizeMemories(
   pool: Pool,
@@ -474,13 +348,9 @@ async function countSubjectRows(pool: Pool, tenant: string, subjectId: string): 
 }
 
 /**
- * `memory_embeddings_<space>` へベクトルをバルク投入する。`vectorStore.upsert()` を
- * 1件ずつ呼ぶと1M件は終わらないので、`memories` から `INSERT ... SELECT` で1文で埋める。
- * ベクトルは `real[]` を組み立てて `::vector` にキャストする（pgvector が対応するキャスト）。
- *
- * `registerEmbeddingSpace` を先に呼んでおく前提（テーブルと HNSW 索引は既に存在する）ので、
- * この INSERT はテーブルが空でない索引へ逐次追記する形になる——本番でベクトルが
- * 継続的に流し込まれるのと同じ順序であり、まさに計測したい経路そのものである。
+ * `memory_embeddings_<space>` へベクトルをバルク投入する。`memories` から `INSERT ... SELECT` で1文で埋める。
+ * ベクトルは `real[]` を組み立てて `::vector` にキャストする。`registerEmbeddingSpace` を先に呼んでおく前提で、
+ * 索引が既にあるテーブルへ逐次追記する形になる（本番でベクトルが継続的に流し込まれるのと同じ順序で、計測したい経路そのもの）。
  */
 export async function seedVectors(
   pool: Pool,
@@ -516,18 +386,12 @@ export async function seedVectors(
 }
 
 function subjectCountFor(rowCount: number): number {
-  // 平均 ~50行/subject という単純な比率で規模に連動させる。
-  // 10k -> 200 subject, 100k -> 2,000 subject, 1M -> 20,000 subject。
   return Math.max(20, Math.round(rowCount / 50));
 }
 
 function smallSubjectIdFor(subjectCount: number): string {
   return `subject-${subjectCount - 1}`;
 }
-
-// ---------------------------------------------------------------------------
-// 使い捨てデータベースのライフサイクル
-// ---------------------------------------------------------------------------
 
 function urlForDatabase(baseUrl: string, database: string): string {
   const url = new URL(baseUrl);
@@ -543,28 +407,16 @@ export interface ScaleDatabase {
 }
 
 /**
- * `migrationsDir` は本番の呼び出し（`runSubjectSizeBench`/`main` 内の2箇所）では
- * 常に省略され、`runMigrations` 自身の既定（`DEFAULT_MIGRATIONS_DIR`）にそのまま
- * 委譲される——1バイトも挙動が変わらない。存在するのは
- * `scale-bench-close-on-throw.postgres.test.ts` が「`Pool` を作って一時 DB も作った
- * *後*に `runMigrations` が失敗する」経路を、`Pool`/接続を模倣せずに実際の
- * `runMigrations` の失敗（存在しないディレクトリを渡す）で再現するための注入口。
+ * `migrationsDir` は本番の呼び出しでは常に省略され、`runMigrations` の既定に委譲される。存在するのは
+ * `scale-bench-close-on-throw.postgres.test.ts` が、`Pool` と一時 DB を作った後に `runMigrations` が失敗する経路を
+ * 実際の失敗（存在しないディレクトリ）で再現するための注入口。
  *
- * **Issue #936**: `admin`/`pool` という2本の `Pool` を作った*後*、両方を返す
- * `ScaleDatabase` を返す*前*に、失敗しうる `await` を複数段（`CREATE DATABASE`・
- * `runMigrations`）挟んでいた。ここで reject すると、呼び出し元
- * （`const handle = await createScaleDatabase(...); try { ... } finally { await
- * teardownScaleDatabase(handle); }`）は `handle` を受け取れず、`teardownScaleDatabase`
- * を呼びようがない——`Pool` 2本のリークに加え、`CREATE DATABASE` が既に成功していた
- * 場合は一時データベース自体も `DROP` されずに残る（`examples/chat` の
- * `createExampleRuntime`／Issue #934 と同じ根、こちらは一時 DB の後始末が絡む分
- * 一段複雑）。
+ * `admin`/`pool` の2本の `Pool` を作った後、`ScaleDatabase` を返す前に失敗しうる `await`（`CREATE DATABASE`・`runMigrations`）
+ * を挟む。ここで reject すると呼び出し元は `handle` を受け取れず `teardownScaleDatabase` を呼べないので、
+ * `Pool` のリークに加え、`CREATE DATABASE` が成功していれば一時データベースも残る。
  *
- * ⚠ **`dropTempDatabase`（`__tests__/temp-database.ts`、ADR 0020）は「呼び出し前に
- * 自分の `pool` を `pool.end()` していること」を前提にしている**——`WITH (FORCE)` を
- * 使わず `pg_stat_activity` が0本になるまで待つ実装のため、`pool` を先に閉じてから
- * 呼ぶ（自傷経路——`pool` を閉じる前に叩くと、まだ生きている自分自身の接続を
- * 検知するだけの待ちになる）。
+ * `dropTempDatabase`（`__tests__/temp-database.ts`、ADR 0020）は、呼び出し前に自分の `pool` を `pool.end()` していることを前提にする
+ * （`WITH (FORCE)` を使わず `pg_stat_activity` が0本になるまで待つので、`pool` を閉じる前に呼ぶと生きている自分の接続を待ち続ける）。
  */
 export async function createScaleDatabase(
   baseUrl: string,
@@ -575,7 +427,7 @@ export async function createScaleDatabase(
   let pool: Pool | undefined;
   let databaseCreated = false;
   try {
-    // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
+    // `WITH (FORCE)` を使わない理由は `temp-database.ts` を参照（ADR 0020）。
     await dropTempDatabase(admin, database);
     await admin.query(`CREATE DATABASE ${database}`);
     databaseCreated = true;
@@ -584,13 +436,12 @@ export async function createScaleDatabase(
     const db = drizzle(pool, { schema });
     return { admin, pool, db, database };
   } catch (err) {
-    // 元の失敗（`err`）を、後始末自体の失敗で上書きしない
-    // （examples/chat の `runtime-factory.ts`／Issue #934 と同じ形）。
+    // 元の失敗（`err`）を、後始末自体の失敗で上書きしない。
     if (pool !== undefined) {
       await pool.end().catch(() => {});
     }
     if (databaseCreated) {
-      // `pool` を閉じた*後*に呼ぶ（上の doc コメント参照、ADR 0020 の自傷経路）。
+      // `pool` を閉じた後に呼ぶ（ADR 0020）。
       await dropTempDatabase(admin, database).catch(() => {});
     }
     await admin.end().catch(() => {});
@@ -603,10 +454,6 @@ export async function teardownScaleDatabase(handle: ScaleDatabase): Promise<void
   await dropTempDatabase(handle.admin, handle.database);
   await handle.admin.end();
 }
-
-// ---------------------------------------------------------------------------
-// Part 1: aggregateScope
-// ---------------------------------------------------------------------------
 
 interface ScopeResult {
   rows: number;
@@ -650,10 +497,6 @@ async function benchAggregateScope(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// Part 2: PostgresVectorStore.search（subject フィルタが段1にある場合）
-// ---------------------------------------------------------------------------
-
 interface VectorResult {
   rows: number;
   dimensions: number;
@@ -676,8 +519,6 @@ async function benchVectorSearch(
     dimensions,
   };
   const table = embeddingSpaceTableName(space);
-  // 生 SQL に埋め込む前の防御的チェック（`space` はこの関数内で組み立てた固定値のみだが、
-  // `vector-store.ts` / `vector-space.ts` と同じ規律を踏襲する）。
   assertSafeIdentifier(table);
 
   log(`  埋め込み空間を登録中（table=${table}, dims=${dimensions}）...`);
@@ -691,12 +532,8 @@ async function benchVectorSearch(
 
   const vectorStore = new PostgresVectorStore(db);
   const ctx: Ctx = { tenantId: TENANT };
-  // クエリベクトルは決定的な擬似乱数から作る（`test-db.ts` の `seededRandom` を再利用）。
-  // ⚠ 全部 0 のベクトルは使わない——cosine 距離はゼロベクトルに対して定義できない
-  // （ノルムが 0 になる）。
-  // **🔴 訂正（ADR 0040）**: ここには以前「pgvector の `<=>` がエラーになる」と
-  // 書いてあったが、**それは誤りだった。実測すると `NaN` を返す**（pgvector 0.8.2）。
-  // ベンチの測定値としては NaN も使い物にならないので、使わない方針は変えない。
+  // クエリベクトルは決定的な擬似乱数から作る（`test-db.ts` の `seededRandom`）。全部 0 のベクトルは使わない。
+  // cosine 距離はゼロベクトルで定義できず、pgvector の `<=>` は `NaN` を返すので、測定値として使い物にならない（ADR 0040）。
   const queryRand = seededRandom(QUERY_VECTOR_SEED);
   const queryVector = Array.from({ length: dimensions }, () => queryRand() * 2 - 1);
   const smallSubjectId = smallSubjectIdFor(subjectCount);
@@ -732,10 +569,6 @@ async function benchVectorSearch(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// Part 3: subject の大きさを振る（search と aggregateScope の両方）
-// ---------------------------------------------------------------------------
-
 interface SubjectSizeResult {
   /** 狙った行数。 */
   targetSize: number;
@@ -749,10 +582,7 @@ interface SubjectSizeResult {
   plan: ReturnType<typeof summarizePlan>;
 }
 
-/**
- * 1つの狙いの subject サイズについて、`PostgresVectorStore.search` と
- * `aggregateScope` の両方を測る。
- */
+/** 1つの狙いの subject サイズについて、`PostgresVectorStore.search` と `aggregateScope` の両方を測る。 */
 async function benchSubjectSize(
   pool: Pool,
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -771,7 +601,6 @@ async function benchSubjectSize(
   const results: SubjectSizeResult[] = [];
   const ctx: Ctx = { tenantId: TENANT };
 
-  // 1. PostgresVectorStore.search（filter.subjectId 有り）
   const vectorStore = new PostgresVectorStore(db);
   const filter: VectorFilter = { tenantId: TENANT, status: STATUS_FILTER, subjectId };
   log(`  PostgresVectorStore.search（subject=${subjectId}）を計測中...`);
@@ -799,7 +628,6 @@ async function benchSubjectSize(
     plan: searchPlan,
   });
 
-  // 2. aggregateScope（scope.subjectId 有り）
   const memoryStore = new PostgresMemoryStore(db);
   log(`  aggregateScope（subject=${subjectId}）を計測中...`);
   const scopeMedianMs = await measureMedian(() => memoryStore.aggregateScope(ctx, { subjectId }));
@@ -827,16 +655,12 @@ async function benchSubjectSize(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// Part 4: runtime.recall() を丸ごと1回呼ぶ（穴3: 「取りこぼした」と「そもそも無かった」の区別）
-// ---------------------------------------------------------------------------
-
 interface RecallOnceResult {
   variant: string;
   ctxSubjectId: string | null;
   targetSize: number;
   actualCount: number;
-  /** `clock.now()` に固定した値（下のコメント参照）。 */
+  /** `clock.now()` に固定した値（`recorded_at` のアンカー）。 */
   referenceNowIso: string;
   memoriesLength: number;
   omitted: RecallResult["omitted"];
@@ -845,51 +669,18 @@ interface RecallOnceResult {
 }
 
 /**
- * `runtime.recall()` を丸ごと1回呼び、返り値をそのまま持ち帰る（穴3、マネージャー指示）。
- * **測るだけ**——`recall()` の実装にもフィールドにも一切手を入れない。
+ * `runtime.recall()` を丸ごと1回呼び、返り値をそのまま持ち帰る。測るだけで、`recall()` の実装にもフィールドにも手を入れない。
+ * Part 3 と同じ狙いの subject（既定では最大の 10,000 行）を `ctx.subjectId` に入れ、同じデータを再シードせずに使う。
+ * 比較のため `ctx.subjectId` を指定しない呼び出しも1回行う。
  *
- * Part 3 が測ったのは `PostgresVectorStore.search` 単体（段1だけ）だった。ここでは
- * `recall()` パイプライン全体を1回通し、`omitted` / `explain` / `index` を実際に見る。
- * `ctx.subjectId` に Part 3 と同じ狙いの subject（既定では最大の 10,000 行、
- * `config.subjectSizes` の末尾）を入れ、同じデータ（Part 3 の seeding をそのまま再利用、
- * 再シードしない）に対して呼ぶ。比較のため `ctx.subjectId` を指定しない呼び出しも
- * 同じデータに対して1回行う。
+ * 時計は固定する。`memoriesInsertSql` が入れる `recorded_at` は `now() - random() * interval '365 days'` で、`now()` はシード投入時点の
+ * Postgres 側の実時刻。`clock` を省略して実時計に委ねると、`recall()` の減衰計算が、このベンチが何時に走ったかに左右される。
+ * そこで `recorded_at` が実際にアンカーしている時刻（`SELECT MAX(recorded_at)`）を実測して固定 `clock.now()` にする。
  *
- * ## 罠1: 時計
- *
- * `memoriesInsertSql` が入れる `recorded_at` は `now() - random() * interval '365 days'`
- * ——`now()` はシード投入時点の **Postgres 側の実時刻**であり、
- * `recall.postgres.test.ts` の `buildNewMemoryFixture` が使うような固定リテラル日付
- * （例: `2026-01-01`）ではない。`recall()` の減衰計算（`defaultScoringStrategy`）は
- * `clock.now() - recordedAt` の経過時間を使うため、ここで `clock` を省略して
- * `systemClock`（実際の壁時計）に委ねると、結果が「このプロセスが実際に何時何分に
- * このクエリを発行したか」——Part 1〜3 がここまでに要した実時間、CI ランナーの混雑具合、
- * DB 接続の遅延など、**再現性の無い雑音**——に左右されてしまう
- * （`recall.postgres.test.ts` 76-83行のコメントが警告している「実時計だと decay で
- * ほぼ0まで落ちて全部 below_threshold に化ける」と同じ罠。ただしそちらは固定リテラル
- * 日付と実時計の食い違いが原因、こちらは「実行時刻に測定結果が依存してしまう」ことが
- * 問題——原因は違うが、どちらも clock を固定しないと解けない）。
- *
- * **そこで、`recorded_at` が実際にアンカーしている時刻そのもの
- * （`SELECT MAX(recorded_at)`——乱数が0に最も近い行、つまりシード投入時刻に
- * 最も近い値）を実測し、それを固定 `clock.now()` として使う。** こうすると
- * `recall()` から見た各行の経過時間は、シードが意図した「0〜365日」の分布に厳密に
- * 一致し、このベンチが実際に何時に走ったかから完全に独立する
- * （365日というレンジ自体は `half_life_hours=720`＝30日に対して十分大きく、
- * 経過時間が長い行の一部は正しく大きく減衰する——これは意図された分布であり、
- * 「時計を固定した」こととは別の話）。
- *
- * ## 罠2: status
- *
- * Part 3 の狙いの subject 行は `memoriesInsertSql` の8択の `status` 分布のまま
- * （`active` x4 / `contested` x1 / `archived` x1 / `superseded` x1 / `forgotten` x1）
- * ——**ここを `active` に揃えて作り直すことはしない。** ADR 0023 追記が測った
- * 「`LIMIT 40` に対して6件」という数字は、まさにこの混在した分布に対する
- * `PostgresVectorStore.search` 単体の実測値であり、ここで母集団を変えると
- * その数字と直接比較できなくなる。**混在は承知の上で、内訳（`filtered(status)` /
- * `filtered(archived)`）を含めて `result.omitted` を生のまま出力する**——
- * 「窓が埋まらない」話（ann_truncated の有無）と「そもそもスコープの外」話
- * （filtered の件数）を、読む側が別々に見分けられるようにする。
+ * `status` は揃えない。Part 3 の狙いの subject の行は `memoriesInsertSql` の `status` 分布のままにする。ADR 0023 が測った
+ * 「`LIMIT 40` に対して6件」は、この混在した分布に対する `PostgresVectorStore.search` 単体の実測値で、母集団を変えると比較できなくなる。
+ * 内訳（`filtered(status)` / `filtered(archived)`）を含めて `result.omitted` を生のまま出力するので、
+ * 「窓が埋まらない」(ann_truncated の有無) と「そもそもスコープの外」(filtered の件数) を読む側が見分けられる。
  */
 async function benchRecallOnce(
   pool: Pool,
@@ -920,8 +711,7 @@ async function benchRecallOnce(
   const runtime = createRuntime({
     memoryStore,
     vectorStore,
-    // observe()/tick() 関連の依存は recall では使わないため、buildTestRuntime
-    // （recall.postgres.test.ts）と同じ作法でダミーを埋める。
+    // `observe()`/`tick()` 関連の依存は recall では使わないので、ダミーを埋める。
     outboxStore: {
       claimBatch: async () => [],
       complete: async () => {},
@@ -934,8 +724,7 @@ async function benchRecallOnce(
     },
     tenantSettingsStore: {
       getDefaultHalfLifeHours: async () => 720,
-      // recall() 経路は event retention を読み書きしないため、呼ばれたら壊れる形で
-      // 埋めておく（ダミーの他プロパティと同じ作法）。
+      // `recall()` 経路は event retention を読み書きしないので、呼ばれたら壊れる形で埋めておく。
       getEventRetention: async () => {
         throw new Error("scale-bench.ts のダミーは getEventRetention を呼ばないはず");
       },
@@ -951,8 +740,7 @@ async function benchRecallOnce(
         throw new Error("bench: runtime.recall() では使われないはず");
       },
     },
-    // クエリに `vector` を明示して渡すため embed() は呼ばれない想定
-    // （呼ばれたらこのベンチの前提が崩れているので例外で気づけるようにする）。
+    // クエリに `vector` を明示して渡すので `embed()` は呼ばれない想定（呼ばれたらベンチの前提が崩れているので、例外で気づけるようにする）。
     // `space` だけは実際に使われる（段1の ANN クエリがどの埋め込みテーブルを見るかを決める）。
     embeddingProvider: {
       space,
@@ -966,14 +754,9 @@ async function benchRecallOnce(
     clock: { now: () => referenceNow },
   });
 
-  // **なぜ scoreThreshold=0 の変種を測るか**（実測で分かったこと）:
-  // seeding は recorded_at を「now() - random()*365日」で散らすため、既定の
-  // halfLife（720h=30日）だと大半の Memory が減衰でスコア ~0 になり、
-  // 既定の scoreThreshold(0.1) で全部 below_threshold に落ちる。
-  // 実測（run 34011723766）では候補3件が score 2e-4 / 7e-7 / 6e-9 で全滅した。
-  // ⟹ それでは「窓が埋まらない」ではなく「減衰で落ちた」を測ることになる。
-  // そこで scoreThreshold=0 の変種を併せて測り、減衰の影響を外した状態で
-  // 「取りこぼしが omitted に出るか」を見る。既定閾値の変種も残して両方見せる。
+  // `scoreThreshold=0` の変種も測る理由: seeding は `recorded_at` を `now() - random()*365日` で散らすので、既定の halfLife（720h）だと
+  // 大半の Memory が減衰でスコア ~0 になり、既定の `scoreThreshold`（0.1）で全部 `below_threshold` に落ちる。
+  // それでは「窓が埋まらない」でなく「減衰で落ちた」を測ることになる。減衰の影響を外した状態で、取りこぼしが `omitted` に出るかを見る。
   const variants: Array<{
     variant: RecallOnceResult["variant"];
     ctxSubjectId: string | undefined;
@@ -993,9 +776,7 @@ async function benchRecallOnce(
     },
   ];
 
-  // ---- 診断（Part 4 が hits=0 を返した原因を切り分けるためのもの）----
-  // recall() の段1と、同じ入力で直接叩く search() を突き合わせる。
-  // 食い違えば recall() の配線、一致すれば seeding かクエリ側の前提が原因である。
+  // 診断: `recall()` の段1と、同じ入力で直接叩く `search()` を突き合わせる。食い違えば `recall()` の配線、一致すれば seeding かクエリ側の前提が原因。
   {
     const table = embeddingSpaceTableName(space);
     const cnt = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM ${table}`);
@@ -1054,17 +835,7 @@ async function benchRecallOnce(
   return results;
 }
 
-/**
- * Part 3 全体を1つの使い捨てデータベース（`mnemora_scale_bench_subject`）で走らせる。
- * Part 1 / Part 2 とは別データベースにした理由は、ファイル冒頭のコメント
- * 「使い捨てデータベース」節を参照——Part 1 / Part 2 の skew 分布は狙った大きさの
- * subject を作らないため。
- *
- * **Part 4（`runtime.recall()` を1回呼ぶ計測）はここに同居させる**——Part 3 の seeding
- * （マネージャー指示で「そのまま再利用してよい」とされた）を再利用するため、
- * 同じ使い捨てデータベース・同じ `space`・同じクエリベクトルのまま、Part 3 のループの後に
- * 続けて実行する（再シードしない）。
- */
+/** Part 3 全体を1つの使い捨てデータベース（`mnemora_scale_bench_subject`）で走らせる。Part 4 は、Part 3 の seeding をそのまま使うので、同じデータベース・同じ `space`・同じクエリベクトルのまま Part 3 のループの後に続けて実行する（再シードしない）。 */
 async function runSubjectSizeBench(
   config: BenchConfig,
 ): Promise<{ subjectSizeResults: SubjectSizeResult[]; recallOnceResults: RecallOnceResult[] }> {
@@ -1079,8 +850,7 @@ async function runSubjectSizeBench(
 
   const results: SubjectSizeResult[] = [];
   try {
-    // Part 1 / Part 2 とは異なる乱数系列にする（同じ種の使い回しを避ける）。
-    // |seed| <= 1 なので、係数を掛けても setseed の範囲(-1..1)に収まる。
+    // Part 1 / Part 2 とは異なる乱数系列にする。`|seed| <= 1` なので、係数を掛けても `setseed` の範囲（-1..1）に収まる。
     const subjectSeed = config.seed * 0.5;
     const vectorSeed = subjectSeed * -1;
 
@@ -1135,9 +905,7 @@ async function runSubjectSizeBench(
       results.push(...forThisSize);
     }
 
-    // Part 4: runtime.recall() を丸ごと1回呼ぶ。狙いの subject は「大きい subject」
-    // （config.subjectSizes は昇順に正規化済みなので、末尾＝最大。既定では 10,000 行、
-    // 全体の10%）——ADR 0023 追記が「6件しか返らなかった」と実測したのと同じ大きさ。
+    // Part 4: 狙いの subject は最大のもの（`config.subjectSizes` は昇順なので末尾。既定では全体の 10% の 10,000 行）。
     const largestTargetSize = config.subjectSizes[config.subjectSizes.length - 1];
     if (largestTargetSize === undefined) {
       throw new Error("runSubjectSizeBench: config.subjectSizes が空（Part 4 を実行できない）");
@@ -1159,10 +927,6 @@ async function runSubjectSizeBench(
     await teardownScaleDatabase(handle);
   }
 }
-
-// ---------------------------------------------------------------------------
-// レポート出力（markdown）
-// ---------------------------------------------------------------------------
 
 function renderScopeTable(results: ScopeResult[]): string {
   const lines = [
@@ -1245,10 +1009,7 @@ function renderSubjectSizeExplainDetails(results: SubjectSizeResult[]): string {
     .join("\n\n");
 }
 
-/**
- * Part 4 の生データをそのまま出す（マネージャー指示: 「加工しすぎないこと」）。
- * `result.omitted` / `result.explain` は JSON でそのまま出す。
- */
+/** Part 4 の生データをそのまま出す。`result.omitted` / `result.explain` は JSON でそのまま出す。 */
 function renderRecallOnceDetails(results: RecallOnceResult[]): string {
   return results
     .map((r) => {
@@ -1282,11 +1043,7 @@ function renderRecallOnceDetails(results: RecallOnceResult[]): string {
     .join("\n\n");
 }
 
-/**
- * 「この計測が答えるべき問い」への回答欄。**ここでは何も先に主張しない**——
- * 実測結果（`scopeResults` / `vectorResults` / `subjectSizeResults` / `recallOnceResults`）
- * から機械的に導ける事実だけを、このセクションで実際に組み立てる（値は実行時に埋まる）。
- */
+/** 「この計測が答えるべき問い」への回答欄。先に何も主張せず、実測結果から機械的に導ける事実だけを組み立てる。 */
 function renderAnswers(
   config: BenchConfig,
   scopeResults: ScopeResult[],
@@ -1593,13 +1350,9 @@ function renderAnswers(
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
 async function main(): Promise<void> {
   const config = loadConfig();
-  // memories とは異なる種を使う（同じ乱数列を2度使い回さない）。
+  // `memories` とは異なる種を使う。
   const vectorSeed = config.seed * -1;
 
   log("規模を振るベンチを開始する。");
@@ -1714,11 +1467,8 @@ async function main(): Promise<void> {
   );
 }
 
-// `scale-bench-close-on-throw.postgres.test.ts` が `createScaleDatabase` を直接
-// import して呼ぶために要るゲート——この行が無いと、import するだけで下の
-// `main()`（Part 1〜4、既定で 10k/100k/1M 行の投入を含む本物のベンチ全体）が
-// 走ってしまう。`tsx src/bench/scale-bench.ts`（`bench:scale` スクリプト経由）
-// で実行する通常の経路ではこの環境変数を設定しないため、今日どおり `main()` が走る。
+// `scale-bench-close-on-throw.postgres.test.ts` が `createScaleDatabase` を直接 import して呼ぶためのゲート。
+// これが無いと、import するだけで `main()`（既定で 10k/100k/1M 行の投入を含むベンチ全体）が走ってしまう。
 if (process.env.MNEMORA_SCALE_BENCH_SKIP_MAIN !== "1") {
   main().catch((err: unknown) => {
     console.error(err);

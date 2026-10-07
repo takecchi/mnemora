@@ -3,22 +3,18 @@ import type { Ctx, NewMemory } from "@mnemora/core";
 
 /**
  * ADR 0435: `memories` への INSERT が claim key の btree 索引の1行の上限（SQLSTATE 54000）で落ちたときだけ、
- * {@link ClaimKeyIndexLimitError} に包む。**断る入力は変えない**（今通る入力は通り、今 54000 で落ちる入力だけが
- * 型付きの例外になる。長さの上限を入口に置かない）。
+ * {@link ClaimKeyIndexLimitError} に包む。断る入力は変えない（長さの上限を入口に置かない）。
  *
- * 包む条件（どれも、Postgres のエラーが `code === "54000"` で、message が下の2つの決まった形のとき）:
+ * 包む条件（Postgres のエラーが `code === "54000"` で、message が次のどちらかの形のとき）:
  *
- * 1. **索引の名前が message に入る形**（`index row size N exceeds btree version V maximum M for index "NAME"`）で、
- *    `NAME` が claim key を含む索引（`idx_memories_claim_key`・`idx_memories_claim_predicates`）のとき。
- *    ほかの索引（`idx_memories_by_subject`・GIN の `idx_memories_tags` など）の 54000 は包まない。
- * 2. **索引の名前が入らない形**（`index row requires N bytes, maximum size is 8191`。1行が 8191 バイトを超えると、
- *    btree の検査より前に出る）。この形は**どの索引の行かを message から言えない**（実測: 1万字の tag・
- *    `subjectId` でも同じ文面）。そこで入力から、**claim key 以外には原因になりえないときだけ**包む
- *    （{@link onlyClaimKeyCanOverflow}）。決められないときは包まず、今までの生の例外のまま出す（安全側）。
+ * 1. 索引の名前が入る形（`index row size N exceeds btree version V maximum M for index "NAME"`）で、
+ *    `NAME` が claim key を含む索引のとき。ほかの索引の 54000 は包まない。
+ * 2. 索引の名前が入らない形（`index row requires N bytes, maximum size is 8191`）。message からは
+ *    どの索引の行か言えないので、入力から claim key 以外には原因になりえないときだけ包む
+ *    （{@link onlyClaimKeyCanOverflow}）。決められないときは生の例外のまま出す。
  *
- * 🔴 **`cause` に drizzle の例外（`Failed query: … params: …` と `params`・`query` の欄）を残さない。**Postgres の
- * エラーから `code`・`schema`・`table`・`constraint` と、上の2形に一致した message（数値と索引名だけ）を写した
- * 新しい `Error` を `cause` にする。`detail`・`hint`・`where` などは写さない。
+ * `cause` に drizzle の例外（`Failed query: … params: …` と `params`・`query` の欄）を残さない。Postgres のエラーから
+ * `code`・`schema`・`table`・`constraint` と、上の2形に一致した message だけを写した新しい `Error` を `cause` にする。
  */
 const CLAIM_KEY_INDEXES: ReadonlySet<string> = new Set([
   "idx_memories_claim_key",
@@ -86,11 +82,10 @@ function bytes(value: string | null | undefined): number {
 }
 
 /**
- * 索引の名前が入らない形の 54000 を、claim key のものと言ってよいか。`claimKey` があり、かつ
- * claim key の索引に入るほかの値（`tenantId`・`subjectId`）、GIN の `tags` の各要素、
- * 冪等の索引（`tenantId`・`extractorVersion`・`contentHash`）が、**それぞれ単独では 8191 バイトの壁に
- * 届かない大きさ（btree の上限 2704 バイト以下）**のとき。圧縮は値を小さくするだけなので、この条件のもとで
- * 8191 バイトを超えうる行は claim key を含む索引の行だけである。
+ * 索引の名前が入らない形の 54000 を、claim key のものと言ってよいか。`claimKey` があり、かつほかの索引に入る値
+ * （`tenantId`・`subjectId`・`tags` の各要素・`extractorVersion`・`contentHash`）が、それぞれ単独では
+ * 8191 バイトの壁に届かない大きさ（btree の上限 2704 バイト以下）のとき。圧縮は値を小さくするだけなので、
+ * この条件のもとで 8191 バイトを超えうる行は claim key の索引の行だけになる。
  */
 function onlyClaimKeyCanOverflow(ctx: Ctx, input: NewMemory): boolean {
   if (input.claimKey === undefined || input.claimKey === null) {

@@ -2,81 +2,39 @@ import type { ExtensionMode } from "../migrate.js";
 import { assertSafeSchemaName } from "../schema-namespace.js";
 
 /**
- * `mnemora-postgres-migrate`（`./migrate.ts`）のコマンドライン引数・環境変数を解釈する
- * 純関数（Issue #107）。
+ * `mnemora-postgres-migrate` のコマンドライン引数・環境変数を解釈する純関数。DB 接続（`Pool`）を経由せず
+ * 分岐を検査できるよう、`bin/migrate.ts` から切り出してある。
  *
- * ## 背景
+ * 優先順位は コマンドライン引数 > 環境変数 > 未指定。どれも未指定なら `undefined` のままで、`runMigrations(pool)`
+ * （options 省略）と同じ振る舞いになる。
  *
- * 専用スキーマ対応（`SchemaNamespaceOptions` = `schema` / `extensionSchema`）はライブラリ側
- * （`../migrate.ts` の `runMigrations`）に既に入っているが、CLI からはこれまで一切渡す
- * 手段が無く、`main()` は常に `runMigrations(pool)` を呼んでいた。共有 DB に他システム
- * （Prisma 管理の `public` 等）が同居する導入先が、mnemora のテーブル群を別スキーマへ
- * 隔離できない、という実報告に対応する。**これは既に決まっている方針の取りこぼしの
- * 解消であり、新しい設計判断ではない。**
+ * `--extension-schema` だけを指定した場合（`--schema` も `MNEMORA_SCHEMA` も無い）はエラーにして終了コード 1 で止める。
+ * `extensionSchema` は `schema` を指定したときだけ効くので、黙って無視すると、拡張の置き場所を専用スキーマにした
+ * つもりで `public` のままになる事故になる。
  *
- * ## なぜ別モジュールに切り出すか
- *
- * 引数解釈を `bin/migrate.ts` に書き込むと、DB 接続（`Pool`）を経由しないと歯を
- * 通せない。ここでは `Pool` は一切登場しない純関数として切り出し、DB 無しで
- * 分岐を検査できるようにする（`../__tests__/cli-options.test.ts`）。
- *
- * ## 優先順位: コマンドライン引数 > 環境変数 > 未指定
- *
- * `--schema` / `--extension-schema` が指定されていれば、対応する環境変数
- * （`MNEMORA_SCHEMA` / `MNEMORA_EXTENSION_SCHEMA`）より常に優先する。両方とも
- * 指定が無ければ `undefined` のままで、`runMigrations(pool)`（options 省略）と
- * **1バイトも変わらない**振る舞いになる——`../schema-namespace.ts` の doc が
- * 「`schema` を指定しない既定の経路は今日と1バイトも変わらないこと」を最優先の線として
- * 引いており、CLI 側もこれを崩さない。
- *
- * ## `--extension-schema` だけを指定した場合（`--schema` 無し）
- *
- * `../schema-namespace.ts` の `SchemaNamespaceOptions.extensionSchema` の doc が
- * 「`extensionSchema` は `schema` を指定したときだけ効く」と明言している。CLI がこれを
- * 黙って無視すると、利用者は「拡張の置き場所を専用スキーマにした」つもりで実際には
- * 何も変わらない（`public` のまま）——気付かれにくい事故になる。**したがって
- * `--schema`（および `MNEMORA_SCHEMA`）が最終的に無指定なのに `--extension-schema`
- * （または `MNEMORA_EXTENSION_SCHEMA`）だけが指定されている場合はエラーとし、
- * 終了コード 1 で止める。** 黙って無視する・`schema` も暗黙に何か決める、のどちらも
- * 採らない。
- *
- * ## スキーマ名の検査
- *
- * `../schema-namespace.ts` の `assertSafeSchemaName` を呼ぶ（正規表現を書き写さない）。
- * このリポジトリは同じ検査ロジックの複製を明示的に嫌っている
- * （`assertSafeSchemaName` の doc コメント参照）。
+ * スキーマ名の検査は `assertSafeSchemaName` を呼ぶ（正規表現を書き写さない）。
  */
 
 /** `parseMigrateCliOptions` が返す、解釈済みのオプション。 */
 export interface ParsedMigrateCliOptions {
   /** `--help` / `-h` が指定されていた場合 `true`。true のときは他の値を見なくてよい。 */
   help: boolean;
-  /**
-   * 適用先スキーマ。`--schema` > `MNEMORA_SCHEMA` > 未指定（`undefined`）の優先順位で
-   * 解決する。`undefined` は「今日と同じ振る舞い」（`runMigrations(pool)` 相当）を表す。
-   */
+  /** 適用先スキーマ。`--schema` > `MNEMORA_SCHEMA` > 未指定（`undefined`）の優先順位で解決する。 */
   schema?: string;
   /**
    * 拡張の置き場所。`--extension-schema` > `MNEMORA_EXTENSION_SCHEMA` > 未指定の優先順位。
-   * `schema` が未指定のまま値を持つことは無い（そのケースはエラーとして弾く）。
+   * `schema` が未指定のまま値を持つことは無い（エラーとして弾く）。
    */
   extensionSchema?: string;
   /**
-   * 拡張の用意のしかた（ADR 0093）。`--extension-mode` > `MNEMORA_EXTENSION_MODE` > 未指定
-   * の優先順位。`undefined` は「今日と同じ振る舞い」（`runMigrations` の既定 `"create"`
-   * 相当）を表す——`schema` / `extensionSchema` と同じく、CLI 側は `runMigrations` の
-   * 既定値をここで決め打ちしない（`../migrate.ts` が唯一の既定値の置き場所）。
+   * 拡張の用意のしかた（ADR 0093）。`--extension-mode` > `MNEMORA_EXTENSION_MODE` > 未指定の優先順位。
+   * `undefined` は `runMigrations` の既定に任せる（CLI 側で既定値を決め打ちしない。唯一の置き場所は `../migrate.ts`）。
    */
   extensionMode?: ExtensionMode;
   /**
-   * マイグレーション適用後に `runAnalyzeMemories`（`../migrate.ts`）を呼ぶかどうか
-   * （Issue #234 / ADR 0143）。`--analyze-memories` の指定、または `MNEMORA_ANALYZE_MEMORIES`
-   * が truthy な値（空文字・`"0"`・`"false"`（大文字小文字を区別しない）以外）のとき `true`。
-   * **`help: true` の経路（下記）を除き、この欄は常に `boolean`（`true`/`false`）に解決され、
-   * `undefined` にはならない**——型を `schema`/`extensionSchema` と同じく optional に
-   * してあるのは、`help` 早期 return（`{ help: true }` のみを返す。下記の doc・
-   * `../__tests__/cli-options.test.ts` の `toEqual({ help: true })` 参照）と型を揃えるため
-   * であって、「指定なし」を表すためではない。
+   * マイグレーション適用後に `runAnalyzeMemories` を呼ぶか（ADR 0143）。`--analyze-memories` の指定、または
+   * `MNEMORA_ANALYZE_MEMORIES` が空文字・`"0"`・`"false"`（大文字小文字を区別しない）以外のとき `true`。
+   * `help: true` の経路を除き、常に `boolean` に解決される（optional なのは `{ help: true }` のみを返す経路と型を揃えるため）。
    */
   analyzeMemories?: boolean;
 }
@@ -96,13 +54,9 @@ const ANALYZE_MEMORIES_FLAG = "--analyze-memories";
 const EXTENSION_MODES: readonly ExtensionMode[] = ["create", "verify"];
 
 /**
- * `MNEMORA_ANALYZE_MEMORIES` の値が truthy かどうかを判定する（Issue #234 / ADR 0143）。
- *
- * `--schema` 等の値を持つフラグと違い、`--analyze-memories` は値を取らない真偽フラグである
- * ため、環境変数側も「値の中身」で意味を持たせる必要がある。空文字・`"0"`・`"false"`
- * （大文字小文字を区別しない、前後の空白は無視する）を偽とし、それ以外の非 `undefined` な
- * 値はすべて真とする——`MNEMORA_SCHEMA` 等の「値がそのまま識別子になる」変数とは扱いが
- * 異なることに注意。
+ * `MNEMORA_ANALYZE_MEMORIES` の値が truthy かを判定する。値を取らない真偽フラグなので、環境変数側は値の中身で
+ * 意味を持たせる。空文字・`"0"`・`"false"`（大文字小文字を区別しない、前後の空白は無視）を偽とし、それ以外は真とする。
+ * `MNEMORA_SCHEMA` 等の「値がそのまま識別子になる」変数とは扱いが異なる。
  */
 function isTruthyEnvFlag(value: string | undefined): boolean {
   if (value === undefined) {
@@ -113,52 +67,34 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 }
 
 /**
- * `argv`（`process.argv.slice(2)` を渡す想定。`node` 本体・スクリプトパスは含めない）と
- * `env`（`process.env` を渡す想定）から、CLI が必要とするオプションを解決する。
+ * `argv`（`process.argv.slice(2)`）と `env`（`process.env`）から、CLI が必要とするオプションを解決する。
  *
  * 受け付ける形:
  * - `--schema <name>` / `--schema=<name>`
  * - `--extension-schema <name>` / `--extension-schema=<name>`
  * - `--extension-mode <create|verify>` / `--extension-mode=<create|verify>`（ADR 0093）
- * - `--analyze-memories`（値を取らない真偽フラグ、Issue #234 / ADR 0143）
+ * - `--analyze-memories`（値を取らない真偽フラグ。ADR 0143）
  * - `--help` / `-h`
  *
  * 弾く形（`ok: false` を返す）:
- * - 未知のオプション（例: `--foo`）
+ * - 未知のオプション（例: `--foo`）。`--analyze-memories=true` も完全一致しないので未知のオプションになる。
  * - 値が無い `--schema`（末尾で値が無い、または次のトークンが `--` で始まる）
  * - `assertSafeSchemaName` が落とす名前
- * - `--schema`（`MNEMORA_SCHEMA` も含め）を伴わない `--extension-schema`
- *   （`MNEMORA_EXTENSION_SCHEMA` も含め）
+ * - `--schema`（`MNEMORA_SCHEMA` も含め）を伴わない `--extension-schema`（`MNEMORA_EXTENSION_SCHEMA` も含め）
  * - `--extension-mode`（`MNEMORA_EXTENSION_MODE` も含め）に `"create"` / `"verify"` 以外の値
- * - `--analyze-memories=<値>`（`=` 区切りでの値の指定。真偽フラグなので値を取らない——
- *   `--analyze-memories` は既知の flag 文字列と完全一致した場合だけ扱われ、
- *   `--analyze-memories=true` はその完全一致に当たらず「未知のオプション」として弾かれる）
  *
- * ⚠ `--extension-mode` は `--schema` の有無に関わらず指定できる（`--extension-schema` とは
- * 独立）。`extensionMode: "verify"` は経路2（`migrations/*.sql` 本文の `CREATE EXTENSION`）
- * にも効くため、`schema` 未指定でも意味を持つ（`../migrate.ts` の doc 参照）。
+ * `--extension-mode` と `--analyze-memories` は `--schema` の有無に関わらず指定できる。
+ * `extensionMode: "verify"` は `migrations/*.sql` 本文の `CREATE EXTENSION` にも効くので、`schema` 未指定でも意味を持つ。
  *
- * ⚠ `--analyze-memories` も `--schema` の有無に関わらず指定できる（`runAnalyzeMemories` に
- * そのまま `schema` を渡すだけで、独立した機能である）。
- *
- * ⚠ **`--help`/`-h` は argv のどこにあっても、他の一切（上の「受け付ける形」の解決も
- * 「弾く形」の判定も）より先に勝つ。** 値の無い `--schema`・未知のオプションが同じ argv に
- * 混じっていても、`ok: false` にはならず `{ help: true }` を返す
- * （`../__tests__/cli-options.test.ts` の該当テスト群参照）。
+ * `--help`/`-h` は argv のどこにあっても、他の一切の解決・判定より先に勝つ。値の無い `--schema` や未知のオプションが
+ * 同じ argv に混じっていても `ok: false` にならず `{ help: true }` を返す。
  */
 export function parseMigrateCliOptions(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
 ): MigrateCliParseResult {
-  // `--help`/`-h` は「どんな組み合わせでも他の解釈をせず即座に返す（ヘルプ表示に徹する）」
-  // ——このファイル冒頭のdocコメント参照。この約束を守るには、他のどの解釈よりも前に
-  // 判定する必要がある。以前はループの中で見つけてから `continue` する形だったため、
-  // `--help`/`-h` より後ろに置かれた壊れた引数（値の無い `--schema`・未知のオプション・
-  // 値の位置に来た `-h` 自身 等）がループの途中で先に `ok: false` を返してしまい、
-  // help に到達しないことがあった（実測: 起票済みの Issue は無く、実装時点のバグ。
-  // `../__tests__/cli-options.test.ts` 「`--help` の後に値の無い `--schema` が続いても
-  // help を優先する」等がこれを固定する）。
-  // ⟹ argv 全体を先に走査し、完全一致する `--help`/`-h` があれば他の一切を見ずに返す。
+  // `--help`/`-h` は、他のどの解釈よりも前に argv 全体を走査して判定する。ループの中で見つけて `continue` する形にすると、
+  // `--help` より後ろの壊れた引数がループの途中で先に `ok: false` を返し、help に到達しないことがある。
   if (argv.some((arg) => arg === "--help" || arg === "-h")) {
     return { ok: true, options: { help: true } };
   }
@@ -180,9 +116,8 @@ export function parseMigrateCliOptions(
     const flag = eqIndex === -1 ? arg : arg.slice(0, eqIndex);
 
     if (arg === "--") {
-      // `pnpm --filter @mnemora/postgres run migrate -- --analyze-memories` のように書くと、
-      // pnpm が `--` をそのまま渡してくる。受け付ける入力は変えず（`--` は未知のオプションのまま）、
-      // エラー文に `--` を付けない正しい書き方を1行足す。例には実際に渡された残りの引数を使う。
+      // pnpm は `pnpm run migrate -- --analyze-memories` の `--` をそのまま渡してくる。受け付ける入力は変えず
+      // （`--` は未知のオプションのまま）、エラー文に `--` を付けない正しい書き方を足す。
       const rest = argv.filter((a) => a !== "--").join(" ");
       const example = `pnpm --filter @mnemora/postgres run migrate${rest.length > 0 ? ` ${rest}` : ""}`;
       return {
@@ -267,11 +202,7 @@ export function parseMigrateCliOptions(
   };
 }
 
-/**
- * `--help` / `-h` のときに表示する使い方。使い方・引数・環境変数・優先順位を
- * 一箇所にまとめる（README と内容が重複するが、`--help` はネットワーク越しに
- * README を読めない状況でも使えることに意味があるため、意図的に持たせてある）。
- */
+/** `--help` / `-h` のときに表示する使い方。README と内容が重複するが、README を読めない状況でも `--help` が使えるよう意図して持たせてある。 */
 export function formatMigrateCliUsage(): string {
   return `使い方: mnemora-postgres-migrate [--schema <name>] [--extension-schema <name>] [--extension-mode <create|verify>] [--analyze-memories]
 

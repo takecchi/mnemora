@@ -1,5 +1,3 @@
-// packages/postgres — MemoryStore / VectorStore / EventStore の Postgres + pgvector 実装。
-
 export * from "./client.js";
 export * from "./advisory-lock.js";
 export * from "./memory-store.js";

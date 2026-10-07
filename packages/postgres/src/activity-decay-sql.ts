@@ -4,10 +4,8 @@ import { sql, type SQL } from "drizzle-orm";
  * 行の `subjectIdExpr` に対応する `tenant_subject_activity.activity_seq`（`S_x`）を相関サブクエリで引く。
  * 行が無い・`subjectIdExpr` が `NULL`（主題なしの記憶）なら `0`。
  *
- * 読む側（段1 ゲート・`aggregateScope`・`archiveDecayed`。下の2関数）と、書く側
- * （[ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md) の
- * `reinforce`/`reinforceMany`。`ReinforceOptions.addOwnSubjectSeq`）が**同じ式**を使う——
- * 書く側と読む側の `S_x` の引き方が食い違うと、起点と「いま」が別の subject の値になる。
+ * 読む側と書く側（`reinforce`/`reinforceMany`。ADR 0394）が同じ式を使う。引き方が食い違うと、
+ * 起点と「いま」が別の subject の値になる。
  */
 export function subjectActivitySeqOrZero(tenantIdExpr: SQL, subjectIdExpr: SQL): SQL {
   return sql`COALESCE((
@@ -29,26 +27,14 @@ export function ownSubjectActivityNow(params: {
 }
 
 /**
- * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
- * （Issue #338）: 活動時計の忘却ゲート（生存側）述語を組み立てる共通ヘルパー。
- * `packages/postgres/src/vector-store.ts`（段1）・`memory-store.ts`（`aggregateScope`・
- * `archiveDecayed`）の3箇所が、この関数を通して同じ式を書く——`ADR 0038`「実装が2つ
- * あると食い違う」を避けるための1箇所である。
+ * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md): 活動時計の忘却ゲート（生存側）述語。
+ * `vector-store.ts`（段1）・`memory-store.ts`（`aggregateScope`・`archiveDecayed`）が同じ式をこの1箇所から得る
+ * （実装が複数あると食い違うため。ADR 0038）。
  *
- * `usesSubjectCounters` が `false`（既定）のときは、**今日どおり `T` のみの単一
- * パラメータ比較**（`decayFloorSeq IS NULL OR decayFloorSeq > tenantSeq`）——
- * `tenant_subject_activity` を一切参照しない。EXPLAIN のプラン族は本 ADR 以前と
- * 1バイトも変わらない。
+ * `usesSubjectCounters` が `false`（既定）のときは `T` のみの比較で、`tenant_subject_activity` を参照しない。
+ * `true` のときは `tenantSeq + COALESCE(S_x, 0)` と比較する。主題なしの記憶は `T` のみと比較される。
  *
- * `true` のときは、行の `subjectIdExpr` に対応する `tenant_subject_activity.
- * activity_seq`（`S_x`）を相関サブクエリで引き、`tenantSeq + COALESCE(S_x, 0)` と
- * 比較する。`subjectIdExpr` が `NULL`（主題なしの記憶）の行は、相関サブクエリが
- * 0件になり `COALESCE(..., 0)` で `0` になる——結果として `tenantSeq` のみと比較
- * される（ADR 0353「読み取りは常に T + S_x（subjectId が無い記憶は T のみ）」）。
- *
- * `tenantIdExpr`/`subjectIdExpr` は呼び出し元のテーブルエイリアスに応じて渡す
- * （段1は `m.tenant_id`/`m.subject_id`、`aggregateScope`/`archiveDecayed` は
- * エイリアス無しの `tenant_id`/`subject_id`）。
+ * `tenantIdExpr`/`subjectIdExpr` は呼び出し元のテーブルエイリアスに応じて渡す。
  */
 export function activityFloorSeqAliveCondition(params: {
   decayFloorSeqAfter: number | undefined;
@@ -70,11 +56,8 @@ export function activityFloorSeqAliveCondition(params: {
 }
 
 /**
- * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
- * （Issue #338）: `activityFloorSeqAliveCondition` の否定側——`MemoryStore.
- * archiveDecayed`（掃引）が対象を選ぶときに使う。**境界は含む（`<=`）**——ゲート側
- * （狭義の `>`）とは非対称であり、これは ADR 0165 決めたこと14 が既に意図した
- * ものをそのまま subject 単位のカウンタにも写す。
+ * `activityFloorSeqAliveCondition` の否定側。`archiveDecayed`（掃引）が対象を選ぶのに使う。
+ * 境界は含む（`<=`）。ゲート側（狭義の `>`）とは非対称で、これは意図（ADR 0165）。
  */
 export function activityFloorSeqDeadCondition(params: {
   nowSeq: number;
