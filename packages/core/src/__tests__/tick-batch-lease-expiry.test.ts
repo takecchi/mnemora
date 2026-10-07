@@ -9,15 +9,10 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `tick()` は `claimBatch` で最大 `limit` 件を**一括で** claim し（全件の `claimed_at` は同じ now）、
- * 1件ずつ順に処理する。リースは各ジョブの処理開始からではなく**バッチの claim 時点**から数えるので、
- * 後ろのジョブは自分の番が来る前に（あるいは自分の処理の途中で）リースが切れうる。
- *
- * この歯は「その性質が今こうである」を実測で固定する。1件あたりの処理時間 (600ms) は
- * `leaseMs` (1000ms) より短い——つまり1件だけなら安全な値でも、2件目は 600ms 待たされた分だけ
- * 遅れて始まるので 1200ms 時点で切れる。別の worker（tick B）が2件目を再 claim でき、
- * A が遅れて `complete` すると CAS（ADR 0142）で `leaseConflicts` に積まれる。
- * **処理（provider 呼び出しと upsert）は二重に走る**——CAS が無害化するのは完了の記録だけである。
+ * リースは各ジョブの処理開始からではなくバッチの claim 時点から数えるので、後ろのジョブは自分の番が来る前に（あるいは自分の処理の途中で）リースが切れうる。
+ * この歯は「その性質が今こうである」を実測で固定する。1件あたりの処理時間 (600ms) は `leaseMs` (1000ms) より短いが、
+ * 2件目は 600ms 待たされた分だけ遅れて始まるので 1200ms 時点で切れ、別の worker（tick B）が再 claim できる。
+ * 処理（provider 呼び出しと upsert）は二重に走り、CAS が無害化するのは完了の記録だけである。
  * 性質を変える（各ジョブの前にリースを延ばす等）ときは、この歯を意図して書き換えること。
  */
 
@@ -96,11 +91,8 @@ describe("tick — 1バッチ内で後ろのジョブのリースが先に切れ
     stores.embeddingProvider.beforeEmbedReturn = async () => {
       embedCalls += 1;
       if (embedCalls === 1) {
-        // A の1件目: 600ms かかった（leaseMs より短い）。
         nowA = T0 + 600;
       } else if (embedCalls === 2) {
-        // A の2件目の処理中: バッチの claim (T0) から 1200ms 経った——2件目は 600ms しか
-        // 処理していないのに、リースは切れている。ここで別の worker が tick する。
         nowA = T0 + 1200;
         nowB = T0 + 1200;
         resultB = await runtimeB.tick(ctx, { leaseMs: LEASE_MS, claimedBy: "worker-b" });
@@ -113,9 +105,7 @@ describe("tick — 1バッチ内で後ろのジョブのリースが先に切れ
       claimedBy: "worker-a",
     });
 
-    // B は A の2件目を再 claim して最後まで処理した。
     expect(resultB).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
-    // A は2件処理したが、2件目の complete は CAS で弾かれた（processed に数えない）。
     expect(resultA.processed).toBe(1);
     expect(resultA.failed).toBe(0);
     expect(resultA.leaseConflicts).toHaveLength(1);
@@ -123,10 +113,8 @@ describe("tick — 1バッチ内で後ろのジョブのリースが先に切れ
       kind: "embed",
       attemptedOutcome: "complete",
     });
-    // 処理は二重に走った: provider 呼び出し 2件+1件、upsert も 3 回（2件目は2回）。
     expect(embedCalls).toBe(3);
     expect(upserts).toBe(3);
-    // 結果は壊れない: 2件とも完了し、2件目は再 claim で attempts が 2。
     const jobs = stores.outboxStore.listJobs(ctx).sort((a, b) => a.attempts - b.attempts);
     expect(jobs.every((j) => j.completedAt !== null && j.failedAt === null)).toBe(true);
     expect(jobs.map((j) => j.attempts)).toEqual([1, 2]);

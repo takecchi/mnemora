@@ -22,14 +22,11 @@ import {
 } from "./runtime-return-contract.js";
 
 /**
- * `Runtime` の戻り値の契約の検査を、テストの一式全体に配線するための部品
- * （TSDoc の7巡目 B1・B2 で始まり、8巡目で `recall()` 以外の16メソッドへ広げた）。
- * core・testkit・postgres の setup ファイルが共有する。
+ * `Runtime` の戻り値の契約の検査を、テストの一式全体に配線するための部品。core・testkit・postgres の setup ファイルが共有する。
  *
  * `recall()` は `checkRecallResultContract`（`./runtime-fakes.ts`）、それ以外の16メソッドは
- * `checkXxxContract`（`./runtime-return-contract.ts`）で検査する——`reembed` だけは対象外
- * （`RequeueEmbedJobsResult` の約束はまだ TSDoc から抽出していない。理由は
- * `runtime-return-contract.ts` 冒頭のコメント参照）。
+ * `checkXxxContract`（`./runtime-return-contract.ts`）で検査する。`reembed` だけは対象外
+ * （`RequeueEmbedJobsResult` の約束はまだ TSDoc から抽出していない。理由は `runtime-return-contract.ts` 冒頭のコメント参照）。
  *
  * 使い方（setup ファイルで）:
  * 1. `vi.mock(<core の src/runtime.ts へのパス>, async (importOriginal) => wrapRuntimeModule(await importOriginal()))`
@@ -55,7 +52,7 @@ export function wrapRuntimeModule(actual: typeof RuntimeModule): typeof RuntimeM
       };
 
       const observe = runtime.observe.bind(runtime);
-      // ADR 0639: この Runtime インスタンスが返した Observation。同じものをもう一度返したら再送のはず。
+      // この Runtime インスタンスが返した Observation。同じものをもう一度返したら再送のはず。
       const seenObservations = new Set<string>();
       runtime.observe = async (...observeArgs) => {
         const result = await observe(...observeArgs);
@@ -178,7 +175,7 @@ export function wrapRuntimeModule(actual: typeof RuntimeModule): typeof RuntimeM
 }
 
 /**
- * 溜まった破れを取り出して空にする（**陽性対照の専用**。Issue #1276 / ADR 0397）。
+ * 溜まった破れを取り出して空にする（陽性対照の専用）。
  *
  * 検査が本当に配線されているか（`vi.mock` の包みが効いているか）を、わざと契約を破る呼び出しで
  * 確かめるテストだけが呼ぶ。取り出した破れは `afterEach` から消えるので、そのテストは

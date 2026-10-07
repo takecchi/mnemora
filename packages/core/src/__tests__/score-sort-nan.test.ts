@@ -4,14 +4,9 @@ import type { Memory } from "../memory.js";
 import type { ScoreBreakdown } from "../recall.js";
 
 /**
- * `recall-runtime.ts` の非 export な `compareDescendingNaNLast` の複製（意図的に export
- * していない——公開 API 表面を1シンボルも増やさないため、Issue #938 の修正は
- * `pnpm api:check` の差分を0のままにする）。`compareScoredCandidates`（段2、下の
- * describe で直接検査）・`associationHits.sort`（段3.5、アンカー類似度降順）・
- * `rankedCandidates.sort`（段3.5、rankKey 降順）の3箇所が同じ実装を共有している。
- * 段3.5の2箇所は private な関数の直接 import では検査できないため、ここでは
- * その形（数値2つを受けて降順・NaN 最後尾を返す）だけを単体で確かめる——
- * 本体（`recall-runtime.ts`）を変更したら、この複製も合わせて直すこと。
+ * `recall-runtime.ts` の非 export な `compareDescendingNaNLast` の複製（公開 API 表面を1シンボルも増やさないため意図的に export していない）。
+ * 段3.5の2つの sort（`associationHits.sort`・`rankedCandidates.sort`）は private な関数の直接 import では検査できないため、
+ * ここではその形（数値2つを受けて降順・NaN 最後尾を返す）だけを単体で確かめる。本体を変更したら、この複製も合わせて直すこと。
  */
 function compareDescendingNaNLast(a: number, b: number): number {
   const aComparable = !Number.isNaN(a);
@@ -24,11 +19,8 @@ function compareDescendingNaNLast(a: number, b: number): number {
 }
 
 /**
- * Issue #938（ADR 0040「引き受ける負債」への反例）: `total` が `NaN` の候補が1件でも
- * 混ざると、`compareScoredCandidates`（段2の並べ替え）は `NaN` と無関係な有限候補
- * どうしの相対順序まで壊す。`b.score.total - a.score.total` は NaN を挟むと
- * 比較関数の一貫性（推移律）を満たさなくなり、`Array.prototype.sort` の結果が
- * 未定義動作になるため。
+ * `total` が `NaN` の候補が1件でも混ざると、`b.score.total - a.score.total` は比較関数の一貫性（推移律）を満たさなくなり、
+ * `Array.prototype.sort` の結果が未定義動作になるので、`NaN` と無関係な有限候補どうしの相対順序まで壊れる。
  */
 function candidate(id: string, total: number, recordedAt: Date) {
   return {
@@ -103,17 +95,10 @@ describe("compareScoredCandidates: NaN な total が混ざっても有限候補�
     const nanNewer = candidate("NAN-NEW", NaN, newer);
     const nanOlder = candidate("NAN-OLD", NaN, older);
     const sorted = [nanOlder, nanNewer].sort(compareScoredCandidates);
-    // 実効時刻降順（新しい方が先）——total が両方 NaN でも、既存のタイブレークが効く。
     expect(sorted.map((c) => c.memory.id)).toEqual(["NAN-NEW", "NAN-OLD"]);
   });
 });
 
-/**
- * `compareDescendingNaNLast`（recall-runtime.ts）は、段2の `compareScoredCandidates` と
- * 段3.5の2つの sort（`associationHits.sort` — アンカー類似度降順、`rankedCandidates.sort`
- * — rankKey 降順）が共有する比較 helper（Issue #938）。`similarity`/`rankKey` は
- * ゼロベクトルの cosine 距離（ADR 0040）に由来して `NaN` になりうるため、単体でも検査する。
- */
 describe("compareDescendingNaNLast（段2・段3.5で共有する比較 helper。Issue #938）", () => {
   it("有限値どうしは通常の降順", () => {
     expect(compareDescendingNaNLast(0.9, 0.5)).toBeLessThan(0);
@@ -132,11 +117,6 @@ describe("compareDescendingNaNLast（段2・段3.5で共有する比較 helper�
   });
 });
 
-/**
- * 段3.5（連想）の2つの sort が実際に `compareDescendingNaNLast` を使っている形
- * （`recall-runtime.ts` の `associationHits.sort`/`rankedCandidates.sort` と同じ呼び方）で、
- * `similarity`/`rankKey` に `NaN` が混ざっても有限候補の相対順序が崩れないことを確かめる。
- */
 describe("段3.5: associationHits/rankedCandidates と同じ sort の形が NaN 混入でも有限候補の順序を壊さない（Issue #938）", () => {
   it("similarity 相当の値に NaN が混ざっても有限候補は降順のまま（associationHits.sort と同形）", () => {
     const items = [

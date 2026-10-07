@@ -6,13 +6,6 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0630: `observe` の経路で、store が「書いたら読み戻すと `MemorySchema` を通らない」候補を拒んだとき、
- * その候補だけが落ち（`created` の `meta.droppedCandidates` に残る）、observe 全体は落ちず、ほかの候補は書かれる。
- * 全件が壊れていれば、今までの「保存できない候補」と同じく、最初の例外のまま observe が投げ、何も書かない。
- * core の Fake の側（旧経路: `createMemoriesWithOutboxAndEvents?` を持たない store は候補ごとに
- * `createMemoryWithOutbox` を呼ぶ）。`@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts`、
- * testkit の fixture は `in-memory-observe-new-memory-malformed-candidate.test.ts`。
- *
  * 壊れた候補は、Runtime が作る `NewMemory` では自然には作れない（digest は本文から補われる）ので、store の手前で
  * 1件の `digest` を空文字に書き換える Proxy で作る。
  */

@@ -13,17 +13,11 @@ import { ExtractionResultSchema } from "../extraction.js";
  * 記憶の状態遷移の期待値の表（`docs/memory-model.md` §11 のライフサイクル）と、それを
  * runtime の公開の口に当てるハーネス。
  *
- * 置き場所と使い方は `recall-invariant-fuzz-harness.ts`（PR #1047）と同じ——この表を1か所にだけ
- * 置き、core Fake のテスト（`lifecycle-transition-table.test.ts`）と Postgres だけのテスト
- * （`packages/postgres/src/__tests__/lifecycle-transition-table.postgres.test.ts`）の両方が
- * 同じ表を走らせる。**1マスを1本の `it` にする**ので、どれか1マスの期待値（または実装）が
- * 変わると、そのマスの `it` だけが赤になる。
- *
- * 表の中身は、2026-09-27 に Postgres と core Fake の両方で総当たりして一致した実測を、
- * 約束（§11・ADR）に照らして確かめたもの（調査の記録は Issue #1079 のコメント）。
+ * この表を1か所にだけ置き、core Fake のテスト（`lifecycle-transition-table.test.ts`）と Postgres だけのテスト
+ * （`packages/postgres/src/__tests__/lifecycle-transition-table.postgres.test.ts`）の両方が同じ表を走らせる。
  * `docs/memory-model.md` §11 の表と食い違ったら赤になる結び目は {@link DOC_ROW_LINKS}。
  *
- * **`*-conformance.ts` には足していない**（#809）——第三者の adapter にこの表を課してはいない。
+ * `*-conformance.ts` には足さない: 第三者の adapter にこの表を課さないため。
  */
 
 export const LIFECYCLE_CTX: Ctx = { tenantId: "lifecycle-transition-table" };
@@ -134,11 +128,11 @@ export const LIFECYCLE_TABLE: Record<LifecycleState, Record<LifecycleOp, CellExp
       "superseded",
     ),
     reflect: unchanged("superseded", "nothing_to_reflect:no_eligible_basis", "superseded"),
-    // 行8 / ADR 0114 決定2: 掃引は active だけ。
+    // 行8: 掃引は active だけ。
     sweepArchive: unchanged("superseded", "untouched", "superseded"),
   },
   contested: {
-    // 行9「任意 → forgotten」。対向は contested のまま孤立する（解くのは resolveOrphanedContested、#825）。
+    // 行9「任意 → forgotten」。対向は contested のまま孤立する（解くのは resolveOrphanedContested）。
     forget: {
       x: "forgotten",
       outcome: "forgotten",
@@ -213,12 +207,10 @@ export const LIFECYCLE_TABLE: Record<LifecycleState, Record<LifecycleOp, CellExp
 
 export type ReextractOldState = "active" | "contested" | "forgotten" | "purged";
 /**
- * 古い Memory（全文フォールバック）の出発状態 → reextract の後の古い Memory と、新しく作られた Memory の件数
- * （ADR 0028 / 0029）。
+ * 古い Memory（全文フォールバック）の出発状態 → reextract の後の古い Memory と、新しく作られた Memory の件数。
  *
  * `newMemories`: 利用者の意思で退けた記憶（`contested`・`forgotten`・purge 済み）を持つ Observation では、
- * reextract は抽出をやり直さず、新しい Memory を作らない（Issue #1079・#1149、ADR 0028 の 2026-09-28 追記）。
- * 以前は `contested` でも1件作り、forget・purge 済みは「未決」として表明していなかった。
+ * reextract は抽出をやり直さず、新しい Memory を作らない。
  */
 export const REEXTRACT_TABLE: Record<
   ReextractOldState,
@@ -450,14 +442,9 @@ function describeEvent(e: MemoryEvent): string {
  * `before`（操作の前に積まれていたイベント）と `after`（操作の後の全イベント）から、
  * この操作が新しく積んだ分だけを表の記法で返す。
  *
- * ⚠ [Issue #1237](https://github.com/takecchi/mnemora/issues/1237): 以前は
- * `after.slice(before.length)` という、`eventStore.list`（`ORDER BY at ASC`）の並びが
- * 積んだ順と一致することに依存した切り出しだった。この表の `archived`（`sweepArchive`
- * が `opts.now` に固定の未来日時 `SWEEP_TO_ARCHIVE_NOW` を使う）と、それに続く操作
- * （`clock.now()` の実際の壁時計）とでは、`archived` の `at` が後続の操作の `at`より
- * 未来になり得る——`slice` は「時刻の順」と「積んだ順」が食い違うと壊れる。`id` の集合差
- * （`before` に無い `id` を持つ行だけを拾う）に切り替えることで、`at` の大小に関わらず
- * 正しく「新しく増えた分」だけを取る。
+ * `after.slice(before.length)` にしない: `eventStore.list`（`ORDER BY at ASC`）の並びが積んだ順と一致するとは限らない。
+ * `sweepArchive` が `opts.now` に固定の未来日時 `SWEEP_TO_ARCHIVE_NOW` を使うので、`archived` の `at` が
+ * 後続の操作（`clock.now()` の実際の壁時計）の `at` より未来になり得る。`id` の集合差（`before` に無い `id` を持つ行だけ）で取る。
  */
 function newEventKinds(before: readonly MemoryEvent[], after: readonly MemoryEvent[]): string[] {
   const beforeIds = new Set(before.map((e) => e.id));
@@ -772,13 +759,13 @@ export const DOC_ROW_LINKS: Array<{ row: number; state: LifecycleState; op: Life
 
 /**
  * §11 の表の行のうち、{@link DOC_ROW_LINKS}（「出発状態 × 操作」のマス）では結べない行を、
- * **別の観測**で結ぶ（ADR 0444 BI。今の振る舞いを縛るだけで、振る舞いは変えていない）。
+ * **別の観測**で結ぶ。
  *
  * 結べる行（この表）:
  * - 行2（`observe` の抽出 → 新しい Memory が `active` で `created`）、
  *   行12（`consolidate` が作る統合先）、行13（`reflect` が作る内省）——**新しく作られた Memory** の
  *   状態とイベントを見る。マスは「出発状態の x」の行き先と積まれたイベントしか持たないので、
- *   新しい Memory（x ではない）の `created` は、マスの外に在った。
+ *   新しい Memory（x ではない）の `created` はマスの外に在る。
  * - 行11（`purgeExpiredEvents` の掃除）——状態の遷移ではなく、`events_purged` が1行積まれることだけを見る。
  *
  * **結べない行（理由）**——どれも「出発状態 × 操作」のどちらも持たず、結ぶ先の観測が無い:

@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { abortReason, isAbort, runAbortable } from "../abort.js";
 
-/**
- * `isAbort`（ADR 0359）の TSDoc が約束していることの直接の歯。
- *
- * 約束: 「`signal` が定義されていて、かつ既に abort 済みかどうか」。`signal` が無ければ `false`。
- * catch 節で使う前提として、`runAbortable` が abort で reject した時点では、`isAbort(signal)` が真で、
- * 例外は {@link abortReason} である（`runAbortable` の doc）。
- */
-
 describe("isAbort", () => {
   it("signal が undefined なら false", () => {
     expect(isAbort(undefined)).toBe(false);

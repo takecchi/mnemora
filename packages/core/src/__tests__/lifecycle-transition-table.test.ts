@@ -20,12 +20,6 @@ import {
 } from "./lifecycle-transition-table.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 記憶の状態遷移の期待値の表（`lifecycle-transition-table.ts`）を core Fake で走らせる。
- * **1マスが1本の `it`**——どれか1マスが食い違うと、そのマスの `it` だけが赤になる。
- * Postgres での同じ表は `packages/postgres/src/__tests__/lifecycle-transition-table.postgres.test.ts`。
- */
-
 function fakeKit(): LifecycleKit {
   const stores = createFakeRuntimeStores();
   return {
@@ -85,16 +79,13 @@ describe("状態遷移の表 と docs/memory-model.md §11 の表の結び目", 
       const doc = docRows.get(row);
       expect(doc, `§11 に行${row}が見つからない`).toBeDefined();
       const cell = LIFECYCLE_TABLE[link.state][link.op];
-      // 遷移の左辺: 「任意」以外は出発状態と一致する。
       if (doc!.from !== "任意") {
         expect(doc!.from).toBe(link.state);
       }
-      // 遷移の右辺: x（または相手）の結果の状態のどれかに含まれる。
       const resulting = [cell.x, cell.partner?.state].filter((s) => s !== undefined);
       for (const to of doc!.to) {
         expect(resulting, `§11 行${row}の右辺 ${to}`).toContain(to);
       }
-      // 残るイベント: x（または相手）に積まれたイベントの kind のどれかに含まれる。
       const kinds = [...cell.events, ...(cell.partner?.events ?? [])].map((e) => e.split(":")[0]);
       expect(doc!.events.length, `§11 行${row}のイベント列が読めない`).toBeGreaterThan(0);
       for (const event of doc!.events.filter((e) =>
@@ -105,7 +96,7 @@ describe("状態遷移の表 と docs/memory-model.md §11 の表の結び目", 
     },
   );
 
-  // ADR 0444 BI: マスでは結べない行（新しく作られる Memory・掃除）を、別の観測で結ぶ。
+  // マスでは結べない行（新しく作られる Memory・掃除）を、別の観測で結ぶ。
   it.each(DOC_ROW_OBSERVATIONS.map((o) => [o.row, o] as const))(
     "§11 行%i の遷移の行き先とイベントが、観測した新しい Memory（または掃除）と一致する",
     async (row, observation) => {

@@ -4,13 +4,6 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0472: subjectId が `Object.prototype` のキー名のとき、書く側の活動時計の「いま」
- * （`T + S_x`）が `plain` の subjectId と同じ式で解ける。
- *
- * 直す前: 行が無い `valueOf` では `T + S_x` が `10 + 関数` の文字列連結になり、`decayBaseSeq` が
- * 数でなくなる。`__proto__` は行があっても `S_x` の代入が黙って落ち、`T` だけになる。
- */
 const TENANT = "tenant-1";
 const tenantCtx: Ctx = { tenantId: TENANT };
 const T = 10;

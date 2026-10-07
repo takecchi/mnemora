@@ -7,15 +7,8 @@ import {
 import type { TenantSettingsStore } from "../interfaces/tenant-settings-store.js";
 import { intersectAttributes } from "../strategies/consolidate.js";
 
-/**
- * ADR 0472: subjectId が `Object.prototype` のキー名（`constructor`・`toString`・`valueOf`・
- * `hasOwnProperty`・`__proto__`）でも、subject 別の活動カウンタの読みは `plain` の subjectId と
- * 同じ形（行が無ければ `0`）で返る。
- *
- * 壊れ方（直す前）: プレーンな `{}` に `result[id] ?? 0` で読むと、`result["constructor"]` は
- * `Object` 関数を返し `?? 0` が効かない。`5 + ({}["valueOf"] ?? 0)` は文字列の連結になる。
- * `__proto__` は代入が黙って捨てられ、読むと `Object.prototype` が返る。
- */
+// 壊れ方: プレーンな `{}` に `result[id] ?? 0` で読むと、`result["constructor"]` は `Object` 関数を返し `?? 0` が効かない。
+// `5 + ({}["valueOf"] ?? 0)` は文字列の連結になる。`__proto__` は代入が黙って捨てられ、読むと `Object.prototype` が返る。
 const ctx: Ctx = { tenantId: "tenant-1" };
 const PROTOTYPE_KEYS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 

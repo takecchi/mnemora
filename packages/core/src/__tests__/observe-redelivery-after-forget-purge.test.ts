@@ -4,16 +4,6 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime.observe` の TSDoc（Issue #897）を縛る。振る舞いは変えていない。
- *
- * `forget()` で `forgotten` になった、あるいはさらに `purge()` した Memory の元になった Observation と
- * 同じ `externalId` で `observe()` を呼び直しても、抽出はやり直さず
- * `{ memoryIds: [], extraction: 'skipped', extractionFailure: null }` を返す。`extract: 'sync'`/`'deferred'` の
- * どちらでも同じ。ここでは、再送の間に LLM が1回も呼ばれないこと、deferred の再送が extract ジョブを積まないこと
- * （後の `tick` が何も処理しない）、消した記憶が戻らないことまで見る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const LEASE_MS = 60_000;
 
@@ -73,7 +63,6 @@ describe("runtime.observe: forget・purge した記憶の Observation と同じ 
           first.observationId,
           "v1",
         );
-        // 前提: 最初の observe で記憶が1件でき、LLM はそのために1回呼ばれた。
         expect(memories).toHaveLength(1);
         expect(llm.structuredCalls).toBe(1);
         const memoryId = memories[0]!.id;
@@ -100,7 +89,7 @@ describe("runtime.observe: forget・purge した記憶の Observation と同じ 
             memoryIds: [],
             extraction: "skipped",
             extractionFailure: null,
-            // ADR 0639: 再送の内訳。forget の後は forgotten・purged: false、purge の後は purged: true。
+            // 再送の内訳。forget の後は forgotten・purged: false、purge の後は purged: true。
             resend: {
               memories: [
                 { memoryId, status: "forgotten", purged: withdrawal === "forget + purge" },

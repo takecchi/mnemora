@@ -5,13 +5,6 @@ import { createRuntime } from "../runtime.js";
 import type { TickOptions } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0496（ADR 0445 BK-2）: `runtime.tick` の入口は、`claimBatch` を呼ぶ前に `opts` と `opts.leaseMs` を検査して名指しの例外で断る。
- * - `opts` が object でない（`tick(ctx)` の第2引数省略・`null`・文字列）: `TypeError`
- * - `leaseMs` が有限の数でない（省略・`undefined`・文字列・`NaN`・`±Infinity`）: `RangeError`
- * - 0 以下・小数の有限の値は断らない（`TickOptions.leaseMs` の doc。今までどおり）。
- */
-
 const ctx: Ctx = { tenantId: "tick-lease-ms-validation" };
 
 function build() {

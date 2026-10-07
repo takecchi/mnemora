@@ -6,24 +6,11 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `observe({kind:'memory_usage'})` は、`recordUsage` が**新しく記録できた** id
- * （`insertedMemoryIds`）だけを強化する——同じ recall について既に記録済みの id を、別の
- * 使用報告で重ねて渡しても、もう一度は強化しない。
- *
- * 約束: `MemoryStore` の interface doc（`recordUsage`）と docs/memory-model.md §6
- * 「実際に挿入が起きたときだけ強化する」。
- *
- * 変異試験で、`recordUsageAndReinforce` を持たない adapter の経路（2段の経路）で強化に
- * `usedMemoryIds` をそのまま渡す変異がすり抜けた（既存の歯は、同じ externalId の再送——
- * 挿入が0件で強化自体が呼ばれない形——しか見ていなかった）。両方の経路で押さえる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const T1 = new Date("2026-06-01T00:00:00.000Z");
 const T2 = new Date("2026-06-02T00:00:00.000Z");
-// 作成時刻は最初の強化より前に置く——reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
-// 書く（Issue #1093）ので、作成と同じミリ秒の強化は書かれない。
+// 作成時刻は最初の強化より前に置く: reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
+// 書くので、作成と同じミリ秒の強化は書かれない。
 const RECORDED_AT = new Date(T1.getTime() - 24 * 60 * 60 * 1000);
 
 function newMemory(): NewMemory {

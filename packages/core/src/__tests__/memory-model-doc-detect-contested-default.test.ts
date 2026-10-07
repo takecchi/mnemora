@@ -7,13 +7,10 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `docs/memory-model.md` が書く claim key の検出（`detectContested`）の既定（on / off）が、
- * `runtime.observe()` の振る舞いと一致することを縛る。**doc の値は `docs/memory-model.md` を実行時に
- * 読んで**（§5 の追記と、状態遷移の表の注記の2か所。両者が食い違えばそれだけで赤）、**実装の値は
- * `detectContested` を省いた `observe()` が `findActiveByClaimKey` を呼ぶかどうかから**取って突き合わせる。
- *
- * 渡したときに検出が実際に走ることも同じ `it` で見る（省いたときに呼ばれないのが、既定だからで
- * あって配線が切れているからではないことを確かめる）。
+ * doc の値は `docs/memory-model.md` を実行時に読み（§5 の追記と、状態遷移の表の注記の2か所。両者が食い違えばそれだけで赤）、
+ * 実装の値は `detectContested` を省いた `observe()` が `findActiveByClaimKey` を呼ぶかどうかから取って突き合わせる。
+ * 渡したときに検出が実際に走ることも同じ `it` で見る: 省いたときに呼ばれないのが既定だからであって、
+ * 配線が切れているからではないことを確かめるため。
  */
 
 const MEMORY_MODEL_DOC = readFileSync(

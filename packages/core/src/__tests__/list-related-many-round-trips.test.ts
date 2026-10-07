@@ -10,19 +10,6 @@ import type { MemoryId } from "../ids.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1449 の案A（ADR 0402）: `RelationStore.listRelatedMany?`（任意メソッド）があるとき、
- * `Runtime` の3つの幅優先探索（recall 段3の群の同伴取得・`resolveContestedGroup` の部分解消の確認・
- * claim key の群の検出）は、1段の frontier を1往復で取る。
- *
- * 縛るもの:
- * - 往復の数: `listRelatedMany` がある store では `listRelated` は0回で、`listRelatedMany` の回数が
- *   BFS の段数になる（星・完全グラフ・鎖）。
- * - 無い store では今と同じ: `listRelated` を起点ごとに直列に呼ぶ（回数も、結果も）。
- * - 結果が変わらない: 同じデータに対し、あるとき／無いときの結果（`companionOf`・`over_limit` と
- *   `countKind`・群のメンバー・打ち切りの位置）が完全に一致する。
- */
-
 const ctx: Ctx = { tenantId: "tenant-list-related-many" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ADDRESS_CLAIM_KEY = { subject: "user", predicate: "address" };
@@ -338,7 +325,6 @@ describe("recall 段3: listRelatedMany が無い store では今と同じ（起�
   });
 
   it("安全弁で打ち切った後は listRelated を呼ばない（1件ごとに確かめる今の規則）", async () => {
-    // 星150: owner の1回で100件に達して止まる。葉の段には進まない。
     const { stores, withoutMany } = buildRuntimes();
     await buildStar(stores, 150);
 
@@ -437,7 +423,6 @@ describe("recall 段3: 安全弁で止まった後は、listRelatedMany をも�
 
     expect(withMany.spy.listRelatedManyCalls.map((c) => c.length)).toEqual([1]);
     expect(withMany.spy.listRelatedCalls).toEqual([]);
-    // 無いときの規則（止まった後は listRelated を呼ばない）と、往復の数が同じ。
     expect(withoutMany.spy.listRelatedCalls).toHaveLength(1);
   });
 
@@ -533,7 +518,6 @@ describe("resolveContestedGroup: listRelatedMany があると、部分解消の�
       kind: "both_active",
     });
 
-    // 渡した3件 → m3 → m4 → m5（m5 の段は何も見つけない）。
     expect(withMany.spy.listRelatedManyCalls.map((c) => c.length)).toEqual([3, 1, 1, 1]);
     expect(a).toEqual(b);
     if (a.outcome.kind === "ineligible") {

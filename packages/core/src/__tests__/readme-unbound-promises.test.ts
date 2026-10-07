@@ -11,17 +11,7 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `packages/core/README.md` が約束していて、どのテストも縛っていなかった振る舞いを縛る。
- * 今の振る舞いの固定であり、望ましい姿の主張ではない。
- *
- * - 「単体で呼べる純関数（動く最小の例）」の片は「そのまま実行できる」。`check:doc-snippets` は型しか
- *   見ないので、ここで片そのものを README から取り出して実行する。
- * - 連想枠の `anchorCount` は `limit` が天井になる（アンカーは段2で `limit` の内側に入った候補から取る）。
- * - 連想枠の既定値（`anchorCount` = `DEFAULT_ASSOCIATION_ANCHOR_COUNT`、
- *   `minSimilarity` = `DEFAULT_ASSOCIATION_MIN_SIMILARITY`、どちらも `recall.ts`）は、
- *   省略したときに実際に使われる（README.md の「連想枠」節）。
- */
+/** 「単体で呼べる純関数（動く最小の例）」の片は「そのまま実行できる」。`check:doc-snippets` は型しか見ないので、ここで片そのものを README から取り出して実行する。 */
 
 const README = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
 
@@ -248,9 +238,8 @@ describe("README「連想枠」: 既定値（anchorCount=3 / minSimilarity=0.5�
     const anchor = await stores.memoryStore.createMemory(ctx, newMemory(0));
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, anchor.id, [1, 0]);
 
-    // クエリ [1,0] とのコサイン類似度がちょうど 0.5（丸め誤差で 0.5000000000000001 になるが、
-    // >= 0.5 は確実に真になる。単位ベクトル [bx, sqrt(1-bx^2)] と [1,0] の内積は bx そのもの
-    // になるため、ノルムの丸めに左右されにくい構成——このファイル追加時に実測して確認した）。
+    // クエリ [1,0] とのコサイン類似度がちょうど 0.5（丸め誤差で 0.5000000000000001 になるが、>= 0.5 は確実に真になる）。
+    // 単位ベクトル [bx, sqrt(1-bx^2)] と [1,0] の内積は bx そのものになるため、ノルムの丸めに左右されにくい構成。
     const atBoundary = await stores.memoryStore.createMemory(ctx, newMemory(1));
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, atBoundary.id, [
       0.5,

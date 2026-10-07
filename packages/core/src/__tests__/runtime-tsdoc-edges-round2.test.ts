@@ -8,18 +8,6 @@ import type { ScopeAggregate } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime` と `ScopeAggregate` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、core の Fake で縛る
- * （2回目の棚卸し）。振る舞いは変えていない。
- *
- * - `ScopeAggregate.filteredTaxonomy?`: 「実装しない adapter では `recall-runtime.ts` がこの欄の不在を『0件』として扱う」。
- * - `ConsolidationResult.atomicity`: 「`outcome` が `"consolidated"` 以外のときは必ず `"not_attempted"`」。
- * - `ReflectOptions.actor`: 「`memory_events.actor`（`created` イベント）」。
- * - `ResolveOrphanedContestedOptions.actor`: 「`memory_events.actor`。省略時 `{ type: "system" }`」。
- * - `Runtime.applyCorrection`: 「`correctedId === correctingId` は特別扱いせず、`markContested` の `RangeError` を
- *   捕まえない」。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 let hashCounter = 0;

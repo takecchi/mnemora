@@ -6,12 +6,8 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `consolidate` / `reflect` の `{ seedMemoryId }` 形は、種が forget・purge された記憶なら近傍を集めない。
- * 判定は「`status` が `forgotten`」または「`purgedAt` が在る」で、両方を見る。
- *
- * 実際の store では purge は `forgotten` の行にしか効かないので、`status` が `active` のまま `purgedAt`
- * だけが立った行は runtime の経路では作れない。判定の `purgedAt` 側だけを独立に縛るため、種の `get` が
- * 返す行を差し替えて作る（`fake-embed-job-skips-withdrawn.test.ts` の `purgedOnly` と同じ作り方）。
+ * 実際の store では purge は `forgotten` の行にしか効かないので、`status` が `active` のまま `purgedAt` だけが立った行は runtime の経路では作れない。
+ * 判定の `purgedAt` 側だけを独立に縛るため、種の `get` が返す行を差し替えて作る（`fake-embed-job-skips-withdrawn.test.ts` の `purgedOnly` と同じ作り方）。
  * 差し替えない対照（種が active なら、同じ近傍を束ねる）が、この構成で近傍が拾えることを示す。
  */
 
