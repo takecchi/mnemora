@@ -8,15 +8,6 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/**
- * `examples/chat/src/recall-explain.ts` の歯——`Runtime.getRecall`（Issue #312、
- * ADR 0161）が、`recall()` の戻り値からは分からない「後から」を実際に満たすことを、
- * 本物の Postgres に対して検査する。
- *
- * provider は `@mnemora/testkit` の決定的な擬似実装（`scope.postgres.test.ts` と
- * 同じ規約——`env: {}` を渡して deterministic モードを強制する）。DB は擬似物で
- * 代替しない。
- */
 describe("examples/chat: explain（Runtime.getRecall、本物の Postgres）", () => {
   it(
     "recall() が返した recallId を getRecall で引き直すと、recall() の返り値と同じ" +
@@ -33,8 +24,6 @@ describe("examples/chat: explain（Runtime.getRecall、本物の Postgres）", (
           "example-chat-explain-test",
         );
 
-        // 前提: そもそも recall() が返した記憶が0件でないこと
-        // （0件のまま比較すると「集合が一致する」が無意味な緑になる）。
         expect(result.recallResultMemoryIds.length).toBeGreaterThan(0);
 
         const record = result.record;
@@ -53,11 +42,6 @@ describe("examples/chat: explain（Runtime.getRecall、本物の Postgres）", (
         const fromRecall = new Set(result.recallResultMemoryIds);
         expect(fromGetRecall).toEqual(fromRecall);
 
-        // スコア内訳つきで読み戻せていること（各項の型・retrievedVia の値域）。
-        // Issue #548 方向2 / ADR 0352: total/similarity/lexicalMatch は affinityMeasured
-        // が false（連想枠・必須の同伴取得）なら欄自体が無い——association を明示的に
-        // 止めていないこの recall では実際に混ざりうる。decay/tagMatch/freshness/strength
-        // はどちらの形にも共通してあるので、無条件に検査する。
         for (const m of returned.memories) {
           if (m.score.affinityMeasured !== false) {
             expect(typeof m.score.total).toBe("number");
@@ -71,8 +55,6 @@ describe("examples/chat: explain（Runtime.getRecall、本物の Postgres）", (
           );
         }
 
-        // digest は getRecall からは届かない（ADR 0155 決定1）——別途 memoryStore.get で
-        // 引けていることを確認する。
         for (const memoryId of fromGetRecall) {
           expect(result.digestByMemoryId[memoryId]).toBeTruthy();
         }

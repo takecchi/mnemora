@@ -2,14 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { RecallRecord } from "@mnemora/core";
 import { formatRecallExplainDemo, type RecallExplainDemoResult } from "../recall-explain.js";
 
-/**
- * `src/recall-explain.ts` の整形関数（`formatRecallExplainDemo`）の純粋な検査。
- * **DB を要求しない**——`RecallRecord` は手で組み立てたフィクスチャであり、
- * `runtime.getRecall`/`memoryStore.get` を一度も呼ばない（`scope.ts` に
- * `scope.postgres.test.ts` しか無いのとは違い、こちらは整形ロジックそのものを
- * DB 無しで検査できる形にしてある）。
- */
-
 function baseRecord(overrides: Partial<RecallRecord> = {}): RecallRecord {
   return {
     recallId: "11111111-1111-4111-8111-111111111111",
@@ -61,10 +53,7 @@ describe("formatRecallExplainDemo", () => {
 
     expect(output).toContain("breakdownCaptured: false");
     expect(output).toContain("内訳を持たない");
-    // ⛔ 内訳を「0」に読み替えていないこと——スコアの数値表現(例: "total=0")が
-    // この行に紛れ込んでいないことを確認する。
     expect(output).not.toMatch(/total=0\.000/);
-    // memoryId 自体は(内訳が無くても)表示されること。
     expect(output).toContain("memory-old");
     expect(output).toContain("(内訳なし)");
   });
@@ -78,9 +67,7 @@ describe("formatRecallExplainDemo", () => {
     const output = formatRecallExplainDemo(result);
 
     const occurrences = output.match(/見つからなかった/g) ?? [];
-    // record 側・missingRecord 側の両方で1回ずつ出る。
     expect(occurrences.length).toBe(2);
-    // 0件・空とは別の文言であること。
     expect(output).not.toMatch(/^0件$/m);
   });
 
