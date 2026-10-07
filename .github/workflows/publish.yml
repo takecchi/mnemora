@@ -3,13 +3,8 @@ name: Publish
 # ⚠ このファイル名（publish.yml）は npm 側の設定と結びついている。
 # Trusted Publishing の信頼発行元は「org / repo / **workflow のファイル名**」で指定するため、
 # **このファイルを改名すると publish が 403 で止まる**（npmjs.com 側も直す必要がある）。
-# 決定と手順は docs/decisions/0066-start-publishing-with-oidc.md。
 
 on:
-  # GitHub Release を publish した瞬間が引き金である。
-  # **Release を作る行為が「npm へ出してよい」の表明**であり、その表明が
-  # リリースノートと一緒に GitHub 上に残る。
-  #
   # ⚠ `push: tags` は**わざと使っていない。**Releases の UI から Release を作ると
   # tag も同時に作られるため、両方を引き金にすると**同じ版で2本走る**
   # （後から走ったほうは下の「既に上がっている版を飛ばす」に落ちて緑になるので、
@@ -78,21 +73,12 @@ jobs:
         # `push: branches: [main]` と `pull_request` にしか反応しないため、
         # **main を通っていない commit から Release を作れば、検査を1つも通らずに
         # publish に到達できてしまう。**
-        # ここでは「Release の tag が指す commit が main の履歴上に在る」ことだけを確かめる
-        # ——つまり main の CI（本物の Postgres を含む3ジョブ）を通った commit である
-        # ことに依拠する。下の段で非 DB の門は改めて全部通す。
-        # ⚠ この依拠は「main へ入った時点で CI が緑だった」ことの検査ではない
-        # （引き受けた負債。ADR 0066）。
         if: github.event_name == 'release'
         run: |
           set -euo pipefail
-          # actions/checkout の fetch-depth: 0 で全履歴と全ブランチが取れているが、
-          # origin/main が無い器でも動くように明示的に取り直す。
           # ⚠ ここに --depth=0 を渡してはならない（git は "depth 0 is not a positive number" で
           # fatal になる。実測して確認した）。
           git fetch origin main
-          # release イベントでは checkout が tag を出しているので HEAD がその commit である
-          # （github.sha に頼らず、実際に checkout された物を見る）。
           TAG_SHA="$(git rev-parse HEAD)"
           if ! git merge-base --is-ancestor "${TAG_SHA}" origin/main; then
             echo "Release の tag が指す commit (${TAG_SHA}) は origin/main の履歴上に在りません。" >&2
@@ -102,18 +88,9 @@ jobs:
           echo "OK: Release の tag は origin/main の履歴上に在ります（${TAG_SHA}）。"
 
       - name: Release の tag の版を package.json へ書き込む（ADR 0070）
-        # ⭐ **版の権威は Release の tag である。**`v0.1.2` の Release を作れば、
-        # この段が6つの package.json を 0.1.2 に書き換えてから梱包する。
-        # ⟹ **版上げのコミットは要らない。**
-        #
-        # ⚠ だから git に入っている `version` は権威ある値ではない
-        # （「最後に誰かが書いた値」であって、npm 上の最新版とは限らない）。
-        #
-        # 判定（tag → 版・dist-tag）は scripts/release-version.mjs の純関数が持ち、
         # 歯がそれを直接測る（ADR 0067 と同じ形）。semver でない tag はここで落ちる
         # ——`${TAG#v}` だけの実装だと `vfoo` が `foo` として書き込まれ、
         # `mnemora-core-foo.tgz` が publish の直前まで誰にも気づかれずに作られる。
-        #
         # ⚠ この段は install の**後**に置くこと。先に置くと `--frozen-lockfile` が
         # 書き換え後の package.json を見ることになる。
         id: version
@@ -124,7 +101,6 @@ jobs:
         run: node scripts/apply-release-version.mjs
 
       - name: 予行のときは package.json の版をそのまま使う
-        # workflow_dispatch（予行）には tag が無い。書き換えず、木に在る版で梱包する。
         id: version_dry_run
         if: github.event_name != 'release'
         run: |
@@ -139,15 +115,6 @@ jobs:
         # ——service container を立てる必要があり、同じ commit に対して main の CI が
         # すでに走っている（上の ancestor 検査がその前提を押さえている）。
         # ルートの `pnpm run test` は DB 段について「実行していません」と明示的に告知する（ADR 0015）。
-        #
-        # ⚠ 直す前はここに `pnpm run typecheck` 〜 `build` の5行を並べ、既定シェル
-        # （bash -e）に任せていた——1本目が落ちた時点でステップ全体が止まり、
-        # 2〜5本目が実際に壊れているかどうかはその回では一度も分からなかった
-        # （ADR 0210 が数え直した族の6番、Issue #476）。
-        # scripts/run-publish-gates.mjs が、ADR 0210 の scripts/run-root-test-gate.mjs と
-        # 同じ形（判定は scripts/publish-gates.mjs の純関数）で、5段を前段の成否に関わらず
-        # 全部起動し、どれか1本でも失敗・未起動なら最後に非0で終わる。落ちた段の名前は
-        # 出力に名指しで出る（詳細は ADR 0210 の 2026-09-24 追記、Issue #476）。
         run: |
           node scripts/run-publish-gates.mjs
 
@@ -163,21 +130,11 @@ jobs:
             --expect-version "${{ steps.version.outputs.version || steps.version_dry_run.outputs.version }}"
 
       - name: 予行か本番かを決める（fail-open にしない）
-        # ⚠ 直す前はここで shell の文字列比較を直接書いていた
-        # （`[ "${{ inputs.dry_run }}" = "true" ]`）。`dry_run` が `"true"` と一致しない
-        # *どんな値*でも本番 publish に倒れる fail-open だった——いま registry は
-        # 4パッケージとも 0.1.0 だけだが、main の package.json は既に 0.1.1 まで進んでおり、
-        # この欠陥はもはや無害ではない（発火すれば 0.1.1 が取り消せない形で本番公開される）。
-        #
-        # 判定は `scripts/publish-dry-run.mjs` の `decideDryRun()` に切り出し、
-        # `scripts/__tests__/publish-dry-run.test.mjs`（純関数）と
-        # `scripts/__tests__/decide-publish-dry-run.test.mjs`（この CLI 自体を子プロセスで
         # 起動して検査）の歯を置いた。「安全と明示されたときだけ予行」から
         # 「危険と明示されたときだけ本番」へ反転しており、workflow_dispatch で
         # `dry_run` が `"true"`/`"false"` のどちらでもない値（空文字・未定義・`"TRUE"`・
         # `"1"` 等）のときは、黙って安全側へ倒れるのではなく `::warning::` を出したうえで
         # 予行にする。
-        #
         # `dry_run` は利用者が渡す値なので `${{ }}` の直接展開ではなく `env:` 経由で渡す
         # （shell への注入面を減らす、今回の変更のついでの副次的な硬化）。
         # `github.event_name` は列挙値で安全だが、揃えて `env:` にしている。
