@@ -3,21 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { redactDatabaseUrl } from "../redact-database-url.js";
 
-/**
- * 実測で見つけたこと: `association-scale-investigate.ts` は（DATABASE_URL を要求しつつ、
- * `main()` がモジュール読み込み時にそのまま走る作りのため、`import` してユニット検査
- * できない）`DATABASE_URL=...` を含む行を `console.log` していた——実際に走らせて
- * 標準出力に生の `DATABASE_URL`（例: `postgresql://worker@127.0.0.1:55432/...`）が
- * そのまま出ることを確認した（この作業のログ）。`grep -rn` で
- * `examples/chat/src` と `packages/postgres/src` を当たった限り、`DATABASE_URL` の値
- * そのものを画面へ出しているのはこの1箇所だけだった（探索は網羅を主張しない）。
- *
- * `main()` を安全に import できないため、この歯は2段に分ける:
- * 1. 抽出した純関数 `redactDatabaseUrl` がパスワードを隠すこと（ユニット）。
- * 2. `association-scale-investigate.ts` のソースが、その関数を経由せずに
- *    `DATABASE_URL=${databaseUrl}` の形で生の値を埋め込んでいないこと（ソース検査、
- *    `correction-scenario-compare-isolation.test.ts` と同じ作法）。
- */
+// association-scale-investigate.ts は main() がモジュール読み込み時に走るので import できない。
+// 抽出した純関数のユニット検査と、ソースが生の DATABASE_URL を埋め込んでいないことのソース検査の2段に分ける。
 
 describe("redactDatabaseUrl", () => {
   it("user:password@host 形式のパスワードを隠す", () => {
