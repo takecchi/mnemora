@@ -10,16 +10,6 @@ import {
   validateMeasured,
 } from "../consolidation-cost-summary-lib.mjs";
 
-/**
- * `consolidation-cost-summary-lib.mjs`(純関数の側)の歯。DB を要求しない
- * ——`retrieval-quality-summary-lib.test.mjs`/`identifier-probe-summary-lib.test.mjs`
- * と同じ分担・同じ理由(ADR 0088 / Issue #136)。
- *
- * `examples/chat/consolidation-baseline.json` は `22c0731`（ADR 0101、2026-09-11）でコミットされている
- * （この歯の当初のコメントは「まだコミットされていない」と書いていた）。この歯は実物のファイルに
- * 依存せず、ここで使う measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
- */
-
 function makeProbe(overrides = {}) {
   return {
     probeId: "color",
@@ -85,7 +75,6 @@ function makeConsolidation(overrides = {}) {
   };
 }
 
-/** measured 側(probes 配列あり)の round。 */
 function makeRound(overrides = {}) {
   return {
     round: 0,
@@ -102,7 +91,6 @@ function makeRound(overrides = {}) {
   };
 }
 
-/** 基準値側(probes 配列を持たない軽量な round。validateBaseline はこれを要求しない)。 */
 function makeBaselineRound(overrides = {}) {
   return {
     round: 0,
@@ -149,8 +137,6 @@ describe("validateMeasured", () => {
     expect(validateMeasured(makeMeasured()).ok).toBe(true);
   });
 
-  // ADR 0420 の確かめ直し（Issue #1734）: 必須の outcome の一覧に、`ConsolidateOutcome` に無い値が混ざっていると、
-  // 7値ちょうどの正しい内訳が落ちてしまう。欠けた値を落とす歯（下の it.each）だけでは、余計な値は見えない。
   it("consolidation.outcomes が ConsolidateOutcome の7値ちょうどなら ok:true を返す（余計な必須の値を持たない）", () => {
     const round = makeRound({ round: 1, consolidation: makeConsolidation() });
     expect(Object.keys(round.consolidation.outcomes).sort()).toEqual([
@@ -455,7 +441,6 @@ describe("computeMinBudgetForGold", () => {
     });
     const result = computeMinBudgetForGold(round);
     expect(result).toEqual([{ probeId: "never", minBudgetForGold: null }]);
-    // 0 でも 512(ラダーの最大値)でもない、ということを名指しで確認する。
     expect(result[0].minBudgetForGold).not.toBe(0);
     expect(result[0].minBudgetForGold).not.toBe(512);
   });
@@ -483,7 +468,6 @@ describe("buildMinBudgetForGoldSection", () => {
     });
     const markdown = buildMinBudgetForGoldSection(makeMeasured({ rounds: [round] }));
     expect(markdown).toContain("(無し)");
-    // ヘッダ行の直後、この1 round分のデータ行に無し件数 1 が出る。
     const dataRow = markdown.split("\n").find((line) => line.startsWith("| 0 |"));
     expect(dataRow).toBeDefined();
     expect(dataRow).toContain("| 1 |"); // 末尾セル(無し件数)
@@ -587,7 +571,6 @@ describe("diffRound", () => {
     const measured = makeRound({
       recall: {
         unbudgeted: { probes: [makeProbe()], mean: makeMean() },
-        // 順序を逆にしても一致することを見る。
         budgeted: [
           { budgetTokens: 64, probes: [makeProbe()], mean: makeMean({ carriedCount: 3 }) },
           { budgetTokens: 32, probes: [makeProbe()], mean: makeMean() },
@@ -733,13 +716,10 @@ describe("buildSummaryMarkdown", () => {
 
   it("⭐ 3つの読み方の注意書きをすべて含む", () => {
     const markdown = buildSummaryMarkdown({ measured: makeMeasured() });
-    // (1) LLM は擬似であり、統合結果の content/digest の長さは擬似物の性質である。
     expect(markdown).toContain("擬似物の性質である");
     expect(markdown).toContain("content");
     expect(markdown).toContain("digest");
-    // (2) 標本は probe 7件、ここから率を主張しない(ADR 0033 §3)。
     expect(markdown).toContain("probe 7件");
-    // (3) 件数が減ったこと自体は良し悪しを言わない。
     expect(markdown).toContain("件数が減ったこと自体は良し悪しを言わない");
   });
 });
