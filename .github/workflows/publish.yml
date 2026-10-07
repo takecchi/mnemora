@@ -24,7 +24,7 @@ permissions:
 
 # 同じ版に対して2本が並走しないようにする（Release の編集で published が
 # 再発火する場合などに備える）。cancel-in-progress は false——publish の途中で
-# 殺すと「6本のうち2本だけ上がった」を作りうる。
+# 殺すと「7本のうち2本だけ上がった」を作りうる。
 concurrency:
   group: publish-${{ github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
@@ -130,13 +130,12 @@ jobs:
             --expect-version "${{ steps.version.outputs.version || steps.version_dry_run.outputs.version }}"
 
       - name: 予行か本番かを決める（fail-open にしない）
-        # 起動して検査）の歯を置いた。「安全と明示されたときだけ予行」から
-        # 「危険と明示されたときだけ本番」へ反転しており、workflow_dispatch で
-        # `dry_run` が `"true"`/`"false"` のどちらでもない値（空文字・未定義・`"TRUE"`・
-        # `"1"` 等）のときは、黙って安全側へ倒れるのではなく `::warning::` を出したうえで
-        # 予行にする。
+        # shell の文字列比較（`[ "..." = "true" ]`）で済ませない: `"true"` と一致しない
+        # どんな値でも本番 publish に倒れる fail-open になるため。「危険と明示されたときだけ本番」
+        # にしてあり、`dry_run` が `"true"`/`"false"` のどちらでもない値（空文字・未定義・
+        # `"TRUE"`・`"1"` 等）は `::warning::` を出したうえで予行にする。
         # `dry_run` は利用者が渡す値なので `${{ }}` の直接展開ではなく `env:` 経由で渡す
-        # （shell への注入面を減らす、今回の変更のついでの副次的な硬化）。
+        # （shell への注入面を減らすため）。
         # `github.event_name` は列挙値で安全だが、揃えて `env:` にしている。
         id: dry-run
         env:
@@ -153,10 +152,10 @@ jobs:
         # 黙って落ちるのではなく、このフラグが原因を名指しして落ちる。
         #
         # **⭐ 既に上がっている版は飛ばす（冪等にする）。**
-        # 6本を順に上げる途中で1本落ちたとき、そのまま再実行すると
+        # 7本を順に上げる途中で1本落ちたとき、そのまま再実行すると
         # 「1本目が既に在る」で E403 になって**再開できない**。飛ばす形にすれば
         # 落ちた続きから再開できる。版そのものの取り違えは上の --expect-version が見ている
-        # （6パッケージとも tag の版であることを確かめてから、ここへ来る）。
+        # （7パッケージとも tag の版であることを確かめてから、ここへ来る）。
         #
         # **⚠ publish の成否は npm publish の出力で判断し、npm view では判断しない。**
         # registry の読み取り側は書き込みに数分遅れ、CDN を迂回する ?write=true でも
