@@ -60,9 +60,34 @@ afterAll(async () => {
   }
 });
 
-/** `DB` の中で、`like` に当たる問い合わせを流しているバックエンドの pid が現れるまで待つ。 */
-async function waitForBackend(like: string, onlyWaitingOnLock = false): Promise<number> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+/**
+ * `DB` の中で、`like` に当たる問い合わせを流しているバックエンドの pid が現れるまで待つ。
+ *
+ * Issue #1825: `outcome`（待っている相手の処理、例えば `runMigrations` の Promise）を渡すと、
+ * - それが先に終わったら、上限まで回らずに、その元のエラー文（または「resolve した」）で落ちる。
+ * - 現れないまま打ち切ったときは、`outcome` がまだ終わっていないことと、`DB` の
+ *   `pg_stat_activity` の行（state・wait_event_type・wait_event・query）をエラー文に載せる。
+ */
+async function waitForBackend(
+  like: string,
+  options: { onlyWaitingOnLock?: boolean; outcome?: Promise<unknown>; attempts?: number } = {},
+): Promise<number> {
+  const { onlyWaitingOnLock = false, outcome, attempts = 100 } = options;
+  let settled: string | undefined;
+  outcome?.then(
+    () => {
+      settled = "resolve した";
+    },
+    (error: unknown) => {
+      settled = `reject した: ${error instanceof Error ? error.message : String(error)}`;
+    },
+  );
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (settled !== undefined) {
+      throw new Error(
+        `waitForBackend: ${like} が現れる前に、待っていた処理が先に終わった（${settled}）`,
+      );
+    }
     const { rows } = await admin.query<{ pid: number }>(
       `SELECT pid FROM pg_stat_activity
         WHERE datname = $1 AND query ILIKE $2 AND pid <> pg_backend_pid()
@@ -72,7 +97,17 @@ async function waitForBackend(like: string, onlyWaitingOnLock = false): Promise<
     if (rows.length > 0) return rows[0]!.pid;
     await sleep(50);
   }
-  throw new Error(`waitForBackend: ${like} を流すバックエンドが現れなかった`);
+  const { rows: activity } = await admin.query(
+    `SELECT pid, state, wait_event_type, wait_event, left(query, 200) AS query
+       FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid() ORDER BY pid`,
+    [DB],
+  );
+  const outcomeState =
+    outcome === undefined ? "渡されていない" : (settled ?? "待っていた処理はまだ終わっていない");
+  throw new Error(
+    `waitForBackend: ${like} を流すバックエンドが現れなかった（${attempts}回）。` +
+      `outcome: ${outcomeState}。pg_stat_activity: ${JSON.stringify(activity)}`,
+  );
 }
 
 describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () => {
@@ -199,11 +234,12 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
       "9504_ext_lock_connloss_file.sql",
       "CREATE EXTENSION IF NOT EXISTS vector;\nSELECT pg_sleep(7.25);",
     );
-    const outcome = runMigrations(pool, dir).then(
+    const run = runMigrations(pool, dir);
+    const outcome = run.then(
       () => new Error("resolved"),
       (error: unknown) => error as Error,
     );
-    const pid = await waitForBackend("%pg_sleep(7.25)%");
+    const pid = await waitForBackend("%pg_sleep(7.25)%", { outcome: run });
     await admin.query("SELECT pg_terminate_backend($1)", [pid]);
     // ロックの返却の失敗が、適用していたファイルの失敗を上書きしない。
     expect((await outcome).message).toMatch(/^migration 9504_ext_lock_connloss_file\.sql failed: /);
@@ -217,11 +253,15 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     try {
       await holder.query("BEGIN");
       await holder.query("LOCK TABLE pg_extension IN ACCESS EXCLUSIVE MODE");
-      const outcome = runMigrations(pool, dir, { schema: "ext_lock_connloss_create" }).then(
+      const run = runMigrations(pool, dir, { schema: "ext_lock_connloss_create" });
+      const outcome = run.then(
         () => new Error("resolved"),
         (error: unknown) => error as Error,
       );
-      const pid = await waitForBackend("CREATE EXTENSION IF NOT EXISTS%", true);
+      const pid = await waitForBackend("CREATE EXTENSION IF NOT EXISTS%", {
+        onlyWaitingOnLock: true,
+        outcome: run,
+      });
       await admin.query("SELECT pg_terminate_backend($1)", [pid]);
       // ロックの返却の失敗が、拡張の作成の失敗を上書きしない。
       expect((await outcome).message).toMatch(
@@ -232,6 +272,47 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
       await holder.end();
     }
   }, 20_000);
+
+  // Issue #1825: 上の2本は CI で1回だけ「バックエンドが現れなかった」で落ちた。原因は確定して
+  // いない（手元の再現は 0/約370 回）。次に落ちたとき、待っていた処理が先に失敗していたのか、
+  // 本当に現れなかったのかを、エラー文だけで見分けられるようにする。
+  describe("waitForBackend の診断（Issue #1825）", () => {
+    it("待っている間に runMigrations が先に失敗したら、待ちの打ち切りではなく、その元のエラー文で落ちる", async () => {
+      // 読めない migrationsDir は、DB に触れる前に reject する（ADR 0448）。
+      const run = runMigrations(pool, join(tmpdir(), "mnemora-ext-lock-teeth-does-not-exist"));
+      run.catch(() => {});
+      const startedAt = Date.now();
+      const error = await waitForBackend("CREATE EXTENSION IF NOT EXISTS%", {
+        onlyWaitingOnLock: true,
+        outcome: run,
+      }).then(
+        () => new Error("resolved"),
+        (e: unknown) => e as Error,
+      );
+      const original = await run.then(
+        () => new Error("resolved"),
+        (e: unknown) => e as Error,
+      );
+      expect(error.message).toContain("先に終わった");
+      expect(error.message).toContain(original.message);
+      expect(error.message).not.toContain("現れなかった");
+      // 上限（約5秒）まで回り切らずに抜ける。
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
+    }, 20_000);
+
+    it("現れないまま打ち切ったときは、pg_stat_activity の行と、待っていた処理がまだ終わっていないことをエラー文に載せる", async () => {
+      const error = await waitForBackend("%mnemora-ext-lock-teeth-never-runs%", {
+        outcome: new Promise<never>(() => {}),
+        attempts: 2,
+      }).then(
+        () => new Error("resolved"),
+        (e: unknown) => e as Error,
+      );
+      expect(error.message).toContain("現れなかった");
+      expect(error.message).toContain("待っていた処理はまだ終わっていない");
+      expect(error.message).toContain("pg_stat_activity");
+    }, 20_000);
+  });
 
   describe("利用者がロールに設定した lock_timeout", () => {
     beforeAll(async () => {
