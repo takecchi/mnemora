@@ -20,33 +20,9 @@ import type { AnthropicJsonSchemaFormat } from "./json-schema.js";
 import { translateForAnthropicStructuredOutput } from "./json-schema.js";
 
 /**
- * `packages/anthropic` の `LLMProvider` 実装（docs/architecture.md §3.8・§5.4）。
- * `packages/openai` の `llm-provider.ts` と同じ構造・同じ契約で書く
- * （オーナーの決定: `LLMProvider` は差し替え可能でなければならない）。
- *
- * `completeStructured` がこのパッケージの中心的な責務——zod スキーマを Anthropic の
- * ネイティブ構造化出力（`output_config.format: json_schema`、`json-schema.ts` 参照）へ
- * 翻訳し、返ってきた JSON をもう一度 zod でパースして返す。**core・呼び出し側に
- * Anthropic SDK の型は一切現れない**（`Anthropic`/`Message` 等の型はこのファイルの外に出ない）。
- *
- * `client` を注入できるようにしてある（`@mnemora/openai` と同じ理由・同じ形。
- * `Pick<Anthropic, "messages">` は `OpenAILLMProviderOptions.client` の
- * `Pick<OpenAI, "chat">` に対応する）。
- *
- * ⚠ **`client` を省略すると `new Anthropic({ apiKey })` が作る SDK 既定のクライアントが
- * 使われる（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する
- * （実測: `@anthropic-ai/sdk@0.124.0` は既定 `maxRetries: 2`＝最大3回・
- * `timeout: 600000`ms。この数値は mnemora の契約ではなく SDK の既定値であり、
- * SDK の版が上がれば変わりうる）。再試行の有無・回数・timeout を変えたい呼び出し側は、
- * `maxRetries`/`timeout` を設定した `Anthropic` インスタンスを自分で作り、`client` へ
- * 渡すこと。**
+ * `max_tokens` の既定。Anthropic の `messages.create` は `max_tokens` が必須なので既定を持つ。
+ * 16000 という値の妥当性は確かめていない。要求する出力の長さに応じて `maxTokens` で上書きする想定。
  */
-
-/** Anthropic の `messages.create` は `max_tokens` が必須（OpenAI の chat completions と違う）。
- * 省略時のデフォルトをここに持つ。**確かめていないこと**: 16000 という値そのものの妥当性
- * ——`@mnemora/openai` 側に対応する既定値は無い（OpenAI 側は `max_tokens` 省略可）ため、
- * 比較対象が無い。要求された出力の長さに応じて呼び出し側が `maxTokens` で上書きすることを
- * 前提にしている。 */
 export const DEFAULT_MAX_TOKENS = 16000;
 
 /** {@link AnthropicLLMProvider} のコンストラクタに渡す設定。 */
@@ -54,79 +30,41 @@ export interface AnthropicLLMProviderOptions {
   /**
    * API キー。省略すると SDK が `ANTHROPIC_API_KEY` を読む。
    *
-   * **構築時に例外を投げることがある**（Issue #1080）: `client` を渡さずに SDK のクライアントを
-   * このクラスが作るとき、SDK が送るヘッダ（`x-api-key`。SDK が `ANTHROPIC_AUTH_TOKEN` を
-   * 読んだときは `Authorization: Bearer <authToken>` も）に載せられない文字（キーの途中の
-   * CR・LF・NUL、U+0100 以上の文字など）を含んでいれば、**キーを含まない**メッセージの
-   * `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
-   * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
+   * `client` を渡さないとき、ヘッダに載せられない文字（キーの途中の CR・LF・NUL など）を含めば、
+   * **キーを含まない**メッセージの `Error` を構築時に投げる。`client` を渡したときは検査しない。
    */
   apiKey?: string | undefined;
-  /** ⚠ 必須。既定値を持たない（`@mnemora/openai` の `OpenAILLMProviderOptions.model` と
-   * 同じ規律——どのモデルを使うかは呼び出し側が決める）。 */
+  /** 必須。既定値を持たない。 */
   model: string;
   /**
    * 省略時 {@link DEFAULT_MAX_TOKENS}。
    *
-   * ⚠ ADR 0498: **渡すなら正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら
-   * `RangeError`。message に値が入る）。
-   *
-   * ⚠ **ADR 0552（ADR 0445 BJ-1）: 検査するのは「正の安全な整数」だけで、上限は見ない。** 21334 以上でも構築は通る。
-   * ただし `client` が `timeout` を持たないと（`client` を省略したときを含む）、`complete`・`completeStructured` を
-   * 呼んだ時点で SDK が**送信前に**素の `AnthropicError`（`Streaming is required for operations that may take longer
-   * than 10 minutes…`。`kind` も `cause` も付かない）を投げる。**21333 までは通り、21334 から落ちる。**
-   * 境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`（境目は 128000/6 = 21333.33）で、
-   * `@anthropic-ai/sdk` 0.124.0 の `client.js` の `calculateNonstreamingTimeout`・`resources/messages/messages.js` の
-   * `create` にある。**SDK の仕様であり mnemora の契約ではない**（SDK の版が上がれば変わりうる）。
-   * 避けるには、`timeout` を持つ `Anthropic` を自分で作って `client` へ渡す（{@link AnthropicLLMProviderOptions.client}）。
-   * 【実測】0.124.0・`fetch` を stub にして、21333 は送信され、21334 は送信が0回で落ちた。
+   * 渡すなら正の安全な整数でなければ構築時に投げる（型が違えば `TypeError`、数として不正なら `RangeError`）。
+   * 上限は見ない: `client` が `timeout` を持たないと（省略時を含む）、21334 以上では SDK が送信前に素の
+   * `AnthropicError`（`Streaming is required ...`）を投げる。SDK の仕様であり、避けるには `timeout` を持つ
+   * `Anthropic` を自分で作って {@link AnthropicLLMProviderOptions.client} へ渡す。
    */
   maxTokens?: number | undefined;
   /**
    * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
-   * キーの検査もしない。
-   *
-   * ⚠ この欄の型は `@anthropic-ai/sdk` のクラスを名指ししない自前の構造型
-   * {@link AnthropicMessagesClient} である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。
-   * **`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している
-   * 版と揃える必要が無い**（packages/anthropic/README.md 参照）。
-   *
-   * ⚠ **ADR 0552: `timeout` を持たない `client` では、`maxTokens` が 21334 以上で SDK が送信前に落ちる**
-   * （{@link AnthropicLLMProviderOptions.maxTokens} の注）。SDK が見るのはコンストラクタに渡した `timeout`
-   * （`new Anthropic({ apiKey, timeout })`）の有無で、`client` を省略した既定のクライアントは持たない
-   * 【実測 0.124.0】。`timeout` を持たない `client` を自分で渡したときも同じ分岐に入る（SDK のコードを読んだ範囲。
-   * 実測していない）。mnemora は `complete`・`completeStructured` で `{ signal }` だけを request options に渡し、
-   * 呼び出しごとの `timeout` は渡さない。
+   * キーの検査もしない。省略時は SDK 既定のクライアントで、SDK が 429・5xx を再試行する（回数・timeout は SDK の既定）。
+   * 型は SDK のクラスを名指ししない構造型 {@link AnthropicMessagesClient}。
    */
   client?: AnthropicMessagesClient | undefined;
 }
 
-/** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。
- * `messages` の要素の型は {@link AnthropicMessageParam}（`client-types.ts`。
- * Anthropic の `messages` 配列は `role: "user" | "assistant"` のみで、
- * `role: "system"` は使えない——`system` は top-level パラメータ）。 */
+/** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。 */
 export interface AnthropicRequest {
-  /** `PromptSpec.system`。無ければ鍵ごと無い（Anthropic では top-level の `system` に入る）。 */
+  /** 無ければ鍵ごと無い。 */
   system?: string;
-  /** `PromptSpec.messages` を `role` と `content` だけの形にしたもの。 */
+  /** `role: "system"` は含まない。 */
   messages: AnthropicMessageParam[];
 }
 
 /**
- * `PromptSpec` → Anthropic 形式への変換。**テストから直接検査できるように export する**
- * （`json-schema.ts` の翻訳と同じ理由——擬似 provider ではこの変換の壊れに気づけない）。
- *
- * **OpenAI と違う点**: OpenAI の `toOpenAIMessages`（`@mnemora/openai/src/llm-provider.ts`）は
- * `system` を `role: "system"` のメッセージとして `messages` 配列の先頭に積むだけで済む
- * （OpenAI の chat completions は `role: "system"` を受け付けるため）。Anthropic はそれを
- * 受け付けず、`system` は独立した top-level パラメータになる。そのため、ここでは
- * (1) `prompt.system` を top-level `system` の先頭に置き、
- * (2) `prompt.messages` のうち `role === "system"` のものは**黙って捨てず**、
- *     top-level `system` へ改行区切りで連結し、
- * (3) 残りの `user`/`assistant` だけを `messages` に入れる。
- *
- * 空文字の system（`prompt.system` も、`role === "system"` のメッセージの `content` も）は連結に入れない。
- * どれも空なら `system` の鍵ごと持たない（{@link AnthropicRequest.system} の「無ければ鍵ごと無い」）。
+ * `PromptSpec` を Anthropic 形式へ変換する。Anthropic の `messages` は `role: "system"` を受け付けないので、
+ * `prompt.system` と `role: "system"` のメッセージは改行区切りで top-level `system` に連結する（黙って捨てない）。
+ * 空文字は連結に入れず、どれも空なら `system` の鍵ごと持たない。
  */
 export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
   const systemParts: string[] = [];
@@ -148,37 +86,15 @@ export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
   return systemParts.length > 0 ? { system: systemParts.join("\n"), messages } : { messages };
 }
 
-/** 応答の `content` は content block の配列。テキストは `{ type: "text", text: string }`
- * ブロック。`@mnemora/openai` の「最初の choice の content」に対応する規律として、
- * **最初に見つかったテキストブロック**を採用する（thinking 等の他ブロック型は無視する）。
- *
- * ⚠ （[Issue #885](https://github.com/takecchi/mnemora/issues/885)）
- * 呼び出し元（`complete`/`completeStructured`）はこの関数へ `response.content` を
- * そのまま渡す。`content` キー自体が応答オブジェクトに丸ごと無い場合（`{}` が返る等）、
- * `content` 引数は `undefined` になり、下の `content.find(...)` が
- * `TypeError: Cannot read properties of undefined (reading 'find')` を投げる——
- * `AnthropicLLMProviderError` の `kind` 分類には一切載らない。詳細は `errors.ts`
- * 冒頭コメントの「`kind` の外の例外」を参照。 */
+// 最初のテキストブロックを採用する（OpenAI の「最初の choice」に揃える）。`content` が応答に無いときは
+// `TypeError` が `kind` 分類に載らず伝播する。
 function firstTextBlock(content: AnthropicContentBlock[]): string | undefined {
   return content.find((block) => block.type === "text")?.text;
 }
 
-/**
- * ⭐ **`content` を読む前に、必ずこれを通す。**
- *
- * **拒否は HTTP 200 で返る。** `stop_reason: "refusal"` が付いた成功応答であり、
- * SDK は例外を投げない。`content` には テキストブロックが1つも無いことがある。
- * ⟹ **見ないと、拒否を「空の成功」として core へ渡す。**
- *
- * **`stop_reason` が無い/null のときは通す。** 非 streaming では常に非 null だと
- * SDK の型コメントが述べているが、streaming の `message_start` では null になり、
- * テストの偽 client も設定しない。**「分からない」を「拒否された」と読まない。**
- *
- * **⚠ `truncated` は依頼された範囲の外である**（依頼は「拒否と空応答を区別する」だった）。
- * 同じ `stop_reason` を読む一手で分かり、**切り詰められた JSON は `SyntaxError` になって
- * 「モデルが壊れた JSON を吐いた」と区別が付かなくなる**ため、同じ固定点
- * （「無い」の種類を潰さない）に当たると判断して入れた。**要らなければ落とせる。**
- */
+// `content` を読む前に必ず通す: 拒否は HTTP 200 で返るので、見ないと「空の成功」として core へ渡る。
+// `stop_reason` が無い/null のときは通す: streaming の途中や偽 client では null で、「分からない」を「拒否」と読まない。
+// `truncated` も同じ `stop_reason` で判る: 切り詰められた JSON は `SyntaxError` になり、壊れた JSON と区別が付かなくなる。
 function assertNotRefusedOrTruncated(response: {
   stop_reason?: string | null;
   stop_details?: { category?: string | null } | null;
@@ -200,22 +116,13 @@ function assertNotRefusedOrTruncated(response: {
 }
 
 /**
- * Anthropic の Messages API を呼ぶ `LLMProvider`。**`EmbeddingProvider` は実装しない**（Anthropic に埋め込み API が無い。
- * 埋め込みは別の provider を併用する）。設定は {@link AnthropicLLMProviderOptions} を見ること。
+ * Anthropic の Messages API を呼ぶ `LLMProvider`。`EmbeddingProvider` は実装しない（Anthropic に埋め込み API が無い）。
  *
- * 構築時: キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
- * `maxTokens` を渡すとき、正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498。`AnthropicLLMProviderOptions.maxTokens` の doc）。
- * ⚠ キーが見つからなくても構築は通る——`complete()` などを呼んだ時点で、SDK の素の `Error`
- * （`Could not resolve authentication method`）が伝わる（`kind` を持たない。【実測 2026-09-27】）。
+ * 構築時: キーがヘッダに載せられない文字を含めば、キーを含まない `Error` を投げる。`maxTokens` が不正なら
+ * `TypeError` / `RangeError` を投げる。キーが見つからなくても構築は通り、呼んだ時点で SDK の素の `Error` が伝わる。
  *
- * 拒否・切り詰め・空応答は {@link AnthropicLLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
- * HTTP の失敗・認証の失敗などは、SDK の例外がそのまま伝わる。
- *
- * ⚠ **（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）
- * `complete`/`completeStructured` の第3引数 `opts?.signal` を、そのまま
- * `messages.create` の request options（`{ signal }`）へ渡す。** `@mnemora/openai` と
- * 同じ形——SDK が既定で対応する `AbortSignal` の仕組みに委ねているだけ。
+ * 拒否・切り詰め・空応答は {@link AnthropicLLMProviderError} の `kind` で返る。HTTP・認証の失敗は SDK の例外がそのまま伝わる。
+ * `complete`/`completeStructured` の `opts?.signal` は SDK の request options にも渡す。
  */
 export class AnthropicLLMProvider implements LLMProvider {
   private readonly client: AnthropicMessagesClient;
@@ -223,7 +130,6 @@ export class AnthropicLLMProvider implements LLMProvider {
   private readonly maxTokens: number;
 
   constructor(options: AnthropicLLMProviderOptions) {
-    // ADR 0498: 省略（`undefined`）は既定。渡すなら正の安全な整数。
     if (options.maxTokens !== undefined) {
       assertPositiveSafeInteger("AnthropicLLMProvider", "maxTokens", options.maxTokens);
     }
@@ -231,8 +137,6 @@ export class AnthropicLLMProvider implements LLMProvider {
       this.client = options.client;
     } else {
       const client = new Anthropic({ apiKey: options.apiKey });
-      // Issue #1080: SDK は `apiKey` を `x-api-key` で、`authToken`（`ANTHROPIC_AUTH_TOKEN` から
-      // 読まれうる）を `Authorization: Bearer <authToken>` で送る。`api-key.ts` の doc コメント参照。
       if (client.apiKey != null) {
         assertApiKeyFitsInHeader("AnthropicLLMProvider", "apiKey", "x-api-key", client.apiKey);
       }
@@ -251,19 +155,11 @@ export class AnthropicLLMProvider implements LLMProvider {
   }
 
   /**
-   * `req` を1回送り、最初のテキストブロックを返す。
+   * `req` を1回送り、最初のテキストブロックを返す。拒否は `kind: "refusal"`、切り詰めは `kind: "truncated"` の
+   * {@link AnthropicLLMProviderError} を投げる。どちらでもなくテキストブロックが無いときは空文字を返す。
    *
-   * `stop_reason: "refusal"` は `kind: "refusal"`、`"max_tokens"`・`"model_context_window_exceeded"` は `kind: "truncated"` の
-   * {@link AnthropicLLMProviderError} を投げる。⚠ どちらでもなくテキストブロックが無いときは、例外にせず空文字を返す
-   * （ADR 0072「引き受けた負債」2。`@mnemora/openai` も同じ形）。
-   *
-   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
-   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
-   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
-   *
-   * ⚠ **ADR 0552（ADR 0445 BJ-1）: 例外を包まない。** `maxTokens` が 21334 以上で `client` が `timeout` を持たないと、
-   * SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を投げ、そのまま伝わる。
-   * 境目と避け方は {@link AnthropicLLMProviderOptions.maxTokens}。
+   * `opts?.signal`: 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に `signal.reason` で reject する。
+   * 例外は包まない（`maxTokens` の SDK 側の例外もそのまま伝わる）。
    */
   async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
     const { system, messages } = toAnthropicRequest(req);
@@ -279,39 +175,19 @@ export class AnthropicLLMProvider implements LLMProvider {
       ),
     );
     assertNotRefusedOrTruncated(response);
-    // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
-    // `@mnemora/openai` も同じ形であり、片方だけ throw にすると差し替えられなくなる。
-    // **ただし上の門を通した後なので、意味が変わっている**——ここへ来る空文字は
-    // 「拒否された」でも「切り詰められた」でもなく、**モデルが本当に何も言わなかった**場合だけである。
-    // ⟹ **「空文字は安全だ」と主張しているのではない。**望ましい姿でもない。
-    // 直すなら両 provider 同時（＝公開 API の破壊的変更）なので、提起までにしてある。
+    // `?? ""` を throw にしない: `@mnemora/openai` と同じ形を保ち、差し替え可能にするため。
     return { content: firstTextBlock(response.content) ?? "" };
   }
 
   /**
    * zod スキーマを Anthropic のネイティブ構造化出力へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
    *
-   * ⚠ **翻訳できない形は、送る前に {@link AnthropicLLMProviderError}（`kind: "schema_unsupported"`、
-   * `cause` に元の例外）で落ちる**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
-   * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
-   * `z.tuple`・`z.date`・`transform` は SDK の `zodOutputFormat` が投げた例外をこの `kind` に包む——`messages.create` は呼ばれない。
-   * **`z.record` を含むスキーマも、深さを問わず（欄・配列の要素・
-   * optional/nullable の内側・union の枝・`z.lazy` の先）同じ `kind` で送る前に落ちる**——通すと、
-   * 空の object しか許さない形で送られ、record の欄が例外無しで黙って空になるため。`@mnemora/openai` と揃う。
-   * 代わりに `{ key, value }` の配列を使うこと。`z.lazy`・`default`・根が union は今までどおり送る
-   * （Anthropic が受けるかは実 API で確かめていない）。一覧は README。
+   * 翻訳できない形（`z.tuple`・`z.date`・`transform`、深さを問わず `z.record` を含むもの）は、送る前に
+   * `kind: "schema_unsupported"` の {@link AnthropicLLMProviderError} で落ちる（`cause` に元の例外）。`z.record` の代わりに `{ key, value }` の配列を使う。
    *
-   * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link AnthropicLLMProviderError}（`kind: "refusal"`・`"truncated"`）、
-   * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
-   * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
-   *
-   * ⚠ **`opts?.signal`（ADR 0359・ADR 0428）:** 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
-   * `signal.reason`（`abortReason(signal)`）で reject する——SDK の `APIUserAbortError` には化けず、SDK の再試行待ち
-   * （429 の `retry-after` 等）の最中でも切れる。`signal` は SDK にも渡すので、裏のリクエストも切れる。
-   *
-   * ⚠ **ADR 0552（ADR 0445 BJ-1）: 送る前に投げるものがもう1つある。** `maxTokens` が 21334 以上で `client` が `timeout` を
-   * 持たないと、`complete` と同じく SDK が送信前に素の `AnthropicError`（`Streaming is required…`。`kind`・`cause` なし）を
-   * 投げ、そのまま伝わる。境目と避け方は {@link AnthropicLLMProviderOptions.maxTokens}。
+   * 送った後: 拒否・切り詰めは `complete` と同じ `kind`、テキストブロックが無ければ `kind: "no_content"`。
+   * 本文が JSON として壊れていれば `SyntaxError`、`req.schema` に合わなければ `ZodError` がそのまま伝わる。
+   * `opts?.signal` と `maxTokens` の SDK 側の例外は `complete` と同じ。
    */
   async completeStructured<T>(
     _ctx: Ctx,
@@ -322,9 +198,6 @@ export class AnthropicLLMProvider implements LLMProvider {
     try {
       format = translateForAnthropicStructuredOutput(req.schema);
     } catch (cause) {
-      // ⭐ ここで投げるのは、送る前の翻訳（SDK の `zodOutputFormat`）だけである。
-      // `messages.create` はまだ呼んでいない——拒否・切り詰め・応答の検証エラーとは
-      // 混ぜない（ADR 0360）。
       throw new AnthropicLLMProviderError({ kind: "schema_unsupported", cause });
     }
     const { system, messages } = toAnthropicRequest(req.prompt);
@@ -341,22 +214,14 @@ export class AnthropicLLMProvider implements LLMProvider {
       ),
     );
 
-    // ⭐ **`content` を読む前に `stop_reason` を見る。**順序が本質である
-    // ——後ろに置くと、拒否が `no_content` に化けて種類が潰れる。
+    // `content` より前に `stop_reason` を見る: 後ろに置くと拒否が `no_content` に化ける。
     assertNotRefusedOrTruncated(response);
     const raw = firstTextBlock(response.content);
     if (!raw) {
-      // メッセージは `@mnemora/openai` と同じ形のまま（差し替え可能性を壊さない）。
-      // 種類は `kind` で足しただけである。
       throw new AnthropicLLMProviderError({ kind: "no_content" });
     }
-    // JSON.parse が失敗すれば SyntaxError をそのまま伝播させる（catch しない）。
     const parsedJson: unknown = JSON.parse(raw);
-    // `json-schema.ts` 冒頭のコメントの通り、Anthropic 側は `required` を元のまま通すため
-    // `.optional()` は optional のまま残る。`@mnemora/openai` の `stripNulls`
-    // （strict モードが返す null を「省略」へ変換し戻す処理）に相当する処理は不要
-    // ——モデルの生の JSON をそのまま core の zod スキーマへ渡してよい。
-    // `.parse` が失敗すれば ZodError をそのまま伝播させる（`.safeParse` は使わない）。
+    // `stripNulls` 相当は不要: Anthropic は `required` を元のまま通すので、生の JSON をそのまま渡す。
     return req.schema.parse(parsedJson);
   }
 }
