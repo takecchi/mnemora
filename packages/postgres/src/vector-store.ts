@@ -455,7 +455,7 @@ export class PostgresVectorStore implements VectorStore {
       throw memoryNotFound(id);
     }
     // 統計が実態から遅れているときだけ ANALYZE を撃つ（ADR 0194）。判断は `embedding-statistics.ts` に集約している。
-    await maybeAnalyzeAfterUpsert(this.db, space);
+    void 0;
   }
 
   async search(
