@@ -9,26 +9,16 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresTrigramLexicalStore.search` が `filter.labels`（Issue #201 PR-B、ADR 0323）を
- * 実際に適用することの実測。
+ * `PostgresTrigramLexicalStore.search` が `filter.labels` を実際に適用することの実測。
  *
- * 約束: `LexicalFilter` の doc「各フィールドは adapter が実際に適用しなければならない
- * （`VectorFilter` と同じ契約。ADR 0034）」と、`LexicalFilter.labels` の doc
- * 「`VectorFilter.labels` と同じ欄・同じ意味」（渡した名前のいずれかを `tags` に持つ
- * Memory だけを通す OR の集合絞り込み）。
- *
- * 語彙の既定経路（`PostgresLexicalStore`）は `lexical-store-conformance.ts` の
- * `filter.labels` の歯が押さえているが、trigram 経路（opt-in、ADR 0319）は適合テストを
- * 通っておらず、`labels` の条件が WHERE に無かった（ADR 0319 の後に ADR 0323 が
- * `labels` を足したとき、trigram 経路だけが取り残されていた）。**`*-conformance.ts` には
- * 足さない**（外部 adapter への要件を増やさないため、Issue #809 の方針）。
+ * 約束: `LexicalFilter.labels` の doc「`VectorFilter.labels` と同じ欄・同じ意味」（渡した名前のいずれかを
+ * `tags` に持つ Memory だけを通す OR の集合絞り込み）。
  *
  * recall の後置フィルタ（`survivesLabelsFilter`）が最終結果からは落とすが、押し下げが
  * 無いと `limit`（recall では over-fetch 済みの kPrime）の窓を絞りの外の候補が占め、
  * 絞りの内側の候補が窓から押し出される——2本目の歯がその形を固定する。
  *
- * **⚠ この歯は UTF8 の `server_encoding` を前提とする**（ADR 0103 の規律。
- * `trigram-lexical-store-query-word-cap.test.ts` と同じ測り方）。
+ * **⚠ この歯は UTF8 の `server_encoding` を前提とする。**
  */
 
 const TENANT = "trigram-labels-tenant";

@@ -23,13 +23,8 @@ import {
 } from "./test-db.js";
 
 /**
- * `restoreSuperseded` の `onlyMemoryIds` に、uuid の形をしていない id が混ざっても例外にしない——
- * その id は群に居ないのと同じに扱う。`supersededById` の形式不正は例外にしない（`Runtime.restoreSuperseded`
- * の doc）、`getMany` は形式不正な id を無いものとして扱う（`isUuidLike` の doc）、と同じ規律である。
- *
- * 【実測 2026-09-27、修正前】`PostgresMemoryStore.restoreSupersededBy`・`previewRestoreSupersededBy` は
- * `onlyMemoryIds` をそのまま `::uuid[]` に渡し、`invalid input syntax for type uuid` を漏らしていた。
- * testkit の InMemory は、形式不正な id を群に居ないものとして扱って返していた。
+ * `restoreSuperseded` の `onlyMemoryIds` に、uuid の形をしていない id が混ざっても例外にしない。その id は群に居ないのと同じに扱う。
+ * `supersededById` の形式不正は例外にしない（`Runtime.restoreSuperseded` の doc）、`getMany` は形式不正な id を無いものとして扱う（`isUuidLike` の doc）、と同じ規律である。
  */
 
 interface Kit {
@@ -146,7 +141,6 @@ describe("restoreSuperseded の onlyMemoryIds に形式不正な id が混ざっ
         expect((await kit.memoryStore.get(ctx, losers[1]!))?.status).toBe("superseded");
       });
 
-      // #1195 B10: 有効な id が複数あるとき、形式不正な id を捨てても有効な id を1件に絞らない。
       it("dryRun: 有効な id が2件＋形式不正な id なら、有効な2件だけが対象で、残りは入らない", async () => {
         const kit = await makeKit();
         const { winner, losers } = await consolidatedGroup(kit, 3);
@@ -186,7 +180,6 @@ describe("restoreSuperseded の onlyMemoryIds に形式不正な id が混ざっ
         expect((await kit.memoryStore.get(ctx, losers[2]!))?.status).toBe("superseded");
       });
 
-      // #1195 B6': onlyMemoryIds が空配列なら「絞り込みあり・対象0件」であり、群全体を戻さない。
       it("dryRun: onlyMemoryIds が空配列なら、対象0件", async () => {
         const kit = await makeKit();
         const { winner } = await consolidatedGroup(kit, 3);

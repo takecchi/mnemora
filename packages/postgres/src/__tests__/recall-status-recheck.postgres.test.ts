@@ -23,11 +23,8 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0432 AL-1: recall の段1の後置の再検査・連想枠が `status ∈ {active, contested}` を見る歯を、
- * 両 adapter（testkit の InMemory と Postgres）で撃つ。`vectorStore.search` が返した直後に
- * `sweepArchive` / `forget` を割り込ませると、`VectorFilter.status`（検索の時点でしか効かない）を
- * すり抜けた archived / forgotten の記憶が `memories` に入っていた。core の fake 版は
- * `packages/core/src/__tests__/recall-status-recheck.test.ts`。
+ * recall の段1の後置の再検査・連想枠が `status ∈ {active, contested}` を見ることを、両 adapter（testkit の InMemory と Postgres）で確かめる。
+ * `vectorStore.search` が返した直後に `sweepArchive` / `forget` を割り込ませる。`VectorFilter.status` は検索の時点でしか効かないので、割り込みが無いとすり抜けを作れない。
  */
 
 const NOW = new Date("2026-09-27T00:00:00.000Z");

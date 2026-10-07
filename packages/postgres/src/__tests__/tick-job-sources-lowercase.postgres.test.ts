@@ -22,15 +22,14 @@ import { PostgresRelationStore } from "../relation-store.js";
 import { getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
 /**
- * ADR 0532: outbox のジョブ経由（`tick`）の `consolidate`・`reflect` で、`created` イベントの `meta.sources`（と作られた記憶の
+ * outbox のジョブ経由（`tick`）の `consolidate`・`reflect` で、`created` イベントの `meta.sources`（と作られた記憶の
  * `provenance.sources`・`superseded` イベントの `memoryId`）が小文字の行の id になることを、3 実装（Postgres・testkit の InMemory・
  * core の Fake）で見る。
  *
  * (A) 通常の入口: ジョブの payload `{ memoryId }` は store が `createMemoryWithOutbox` で作った行の id から組む（利用者が id を渡す口は無い）。
  *     ここでは、積まれた payload が小文字の行の id そのものであることと、`tick` の結果が小文字であることを縛る。
- * (B) 届かないはずの入口: payload を直接大文字に書き換えた行（DB を直接触る・別の書き手がいる場合）を `tick` が受けても、ADR 0527 の直しで
+ * (B) 届かないはずの入口: payload を直接大文字に書き換えた行（DB を直接触る・別の書き手がいる場合）を `tick` が受けても、
  *     `meta.sources` は小文字（直しを外すと、この (B) だけが赤）。
- * conformance suite には何も足していない（ADR 0434 決定5）。
  */
 
 const ctx = { tenantId: "tenant-1" };
@@ -216,8 +215,6 @@ async function viaTick(be: string, kind: "consolidate" | "reflect", payloadUpper
         if (j.kind === kind) j.payload = { memoryId: String(j.payload.memoryId).toUpperCase() };
     }
   }
-  // runtime の時計を壁時計より先へ進める。歴史的な理由で残している（ADR 0526 は `RuntimeDeps.clock` の古い TSDoc を
-  // 根拠に「available_at は壁時計」と書いたが、今は available_at も注入した時計に従う。ADR 0559）。
   e.setNow(Date.now() + 60_000);
   const t = await e.rt.tick(ctx, { leaseMs: 1000, kinds: [kind] });
   const evs = await e.st.eventStore.list(ctx, { limit: 1000 });
@@ -259,7 +256,7 @@ describe("tick 経由の consolidate・reflect の created の meta.sources は�
         for (const be of ["pg", "testkit", "fake"]) {
           const got = await viaTick(be, kind, upper);
           if (be === "fake") {
-            // Fake は語彙の一致を持たず、種の digest を検索語にした近傍が取れない（ADR 0521 の注と同じ。`consolidate`・`reflect` の
+            // Fake は語彙の一致を持たず、種の digest を検索語にした近傍が取れない（`consolidate`・`reflect` の
             // 種の形は近傍 0 件で何もしない）。ジョブが処理されたこと・入口の payload・書かれた欄がすべて小文字であることだけを見る。
             expect([got.payloadIsRowId, got.processed, got.failed]).toEqual([true, 1, 0]);
             expect(got.meta.flat().every((x: string) => !x.startsWith("NOT-LOWER"))).toBe(true);

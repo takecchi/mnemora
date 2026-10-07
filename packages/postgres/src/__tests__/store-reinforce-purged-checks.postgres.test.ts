@@ -8,11 +8,11 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0519（ADR 0501 負債3）: purge 済みの記憶に `reinforce`・`reinforceMany`・`recordUsageAndReinforce` を
- * 流したときの戻り値・例外・状態を、testkit の InMemory と Postgres に同じ入力で流して比べる。
+ * purge 済みの記憶に `reinforce`・`reinforceMany`・`recordUsageAndReinforce` を流したときの戻り値・例外・状態を、
+ * testkit の InMemory と Postgres に同じ入力で流して比べる。
  * 約束（`MemoryStore.reinforce` の TSDoc）は「弾く経路は無い。`lastReinforcedAt`・`decayFloorAt` が書き換わり、
  * `status`・`purgedAt`・`content`・`digest` は動かず、`memory_events` も書かない」。
- * 起点（`lastReinforcedAt ?? recordedAt`）以前の `at` は no-op（Issue #1093）で、purge 済みでも同じ。
+ * 起点（`lastReinforcedAt ?? recordedAt`）以前の `at` は no-op で、purge 済みでも同じ。
  */
 
 const A: Ctx = { tenantId: "reinforce-purged-a" };

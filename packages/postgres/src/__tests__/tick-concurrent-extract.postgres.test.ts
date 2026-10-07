@@ -15,8 +15,7 @@ import {
 } from "./test-db.js";
 
 /**
- * 並行の2本の配達（Issue #1092 の L1・L5 の形）で extract のジョブが今どうなるかを、Postgres で実測して縛る
- * （ADR 0347「引き受けた負債」の「並行の2本の再配達は塞げない」、同 ADR の 2026-09-28 追記）。
+ * 並行の2本の配達で extract のジョブが今どうなるかを、Postgres で実測して縛る。
  * **今の振る舞いを縛る歯であり、望ましい姿ではない。**直すなら、この歯を先に書き換えること。
  *
  * 順序はタイミングではなく、時計と門（Promise）で決める。
@@ -24,8 +23,6 @@ import {
  * 2. 時計をリースより先へ進め、tick②が同じジョブを claim（attempts 2）し、事前の確認を通って書き、`complete` する。
  * 3. ①の門を開ける。①は自分の LLM の結果を書き、`complete` がリース競合で弾かれる。
  * 2つの tick は1本のテストの中で `Promise.all` で走らせる（プロセスを並列に起こさない）。
- *
- * 逐次の再配達は `tick-sequential-redelivery.postgres.test.ts`。
  */
 
 let nowMs = 0;

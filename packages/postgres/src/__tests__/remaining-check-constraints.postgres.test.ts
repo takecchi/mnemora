@@ -7,13 +7,11 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * #1096・#1183 の外側に残っていた CHECK 制約と型の変換を、testkit の fixture も Postgres と同じく拒む。
+ * 次の CHECK 制約と型の変換を、testkit の fixture も Postgres と同じく拒む。
  * - `memories_check`: `provenance.kind` が `stated`/`inferred` なら `sourceObservationId` が要る。
  * - `memories_decay_seq_non_negative` と `bigint`: `decayBaseSeq`・`decayFloorSeq` は 0 以上の整数で、bigint に収まる。
  * - `memories_half_life_recalls_range` と `real`: `halfLifeRecalls` は `(0, ∞)` で、float4 に収まる（0 に丸まらない）。
  * - `memory_events_check`: `kind: "events_purged"` の `memoryId` は null。
- *
- * 【実測 2026-09-27】以前は testkit の fixture が、どれも受け付けて記録していた（Postgres は 23514・22P02・22003 で拒む）。
  */
 
 interface Kit {

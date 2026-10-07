@@ -35,31 +35,16 @@ import {
 } from "./test-db.js";
 
 /**
- * recall の絞り込み（filter）の**組み合わせ**を、種を固定した乱数で作り、testkit の InMemory と
- * Postgres に当てる（property-based の形）。`recall-invariant-fuzz.postgres.test.ts`（#1030・#1125）は
- * 操作列を変える検査器で、recall は scope を絞らない——この歯はその外側（絞り込みの組み合わせ）を見る。
+ * recall の絞り込み（filter）の組み合わせを、種を固定した乱数で作り、testkit の InMemory と Postgres に当てる（property-based の形）。
+ * 連想枠は切る（`association: null`。別の段で既存の検査器が当てている）。
  *
- * 種ごとに約40件の記憶（3次元の乱数ベクトル・tags＝proposed ラベル・subjectId・provenance の種類・
- * `occurredAt`・有効期間を散らす）を作り、labels・tags・`excludeProvenanceKinds`・
- * `occurredAfter`/`occurredBefore`・`validAt`・`includeOutsideValidity`・`ctx.subjectId`・
- * `includeSubjectless`・channels・limit を乱数で組み合わせた recall を投げる。連想枠は切る
- * （`association: null`、別の段で既存の検査器が当てている）。
- *
- * 見るもの:
- * 1. **2実装が同じ結果**: 返る記憶の並び（id・`retrievedVia`・`score.total`）と `omitted`。Postgres は
- *    `enable_indexscan = off` の接続で段1を厳密にする（HNSW の近似は約束の内の揺れ、ADR 0193）。
- *    `lexical_truncated` が立った recall は比べない（`LexicalHit.rank` の尺度は adapter ごとに違う、
- *    #1125 と同じ扱い）。数値は相対 1e-4 まで同じとみなす（pgvector は float4）。文字列に埋め込まれた
- *    数値（`ann_truncated` の説明文など）も同じ丸めで比べる。
- * 2. **絞り込みを破らない**: 返った記憶は、subject・labels・`excludeProvenanceKinds`・期間・有効期間の
- *    それぞれの意味（`RecallQuery` の doc）を満たす。`labels: []` は絞り込み無し（`RecallQuery.labels` の doc）。
- * 3. **黙って0件にしない**: 0件の recall には `omitted` の理由が1つ以上付く。
- * 4. **HNSW を通す脚が黙って減らさない**: planner の接続（HNSW を通しうる）の返る集合が厳密な脚と
- *    違うのは、`ann_unreached` を名乗ったときだけ（#363・#671 の形）。
- *
- * 【実測 2026-09-27、main 4b13825】30種 × 15問（450 recall × 3脚）で、1〜4 の違反は0件だった
- * （`labels: []` を除く。`labels: []` は doc の書き方が紛らわしかったので、doc を直した）。常設では
- * 種と問いの数を減らしてある（環境変数で増やせる）。
+ * 1. 2実装が同じ結果: 返る記憶の並び（id・`retrievedVia`・`score.total`）と `omitted`。
+ *    Postgres は `enable_indexscan = off` の接続で段1を厳密にする（HNSW の近似は約束の内の揺れ）。
+ *    `lexical_truncated` が立った recall は比べない（`LexicalHit.rank` の尺度は adapter ごとに違う）。
+ *    数値は相対 1e-4 まで同じとみなす（pgvector は float4）。文字列に埋め込まれた数値も同じ丸めで比べる。
+ * 2. 絞り込みを破らない。`labels: []` は絞り込み無し。
+ * 3. 黙って0件にしない: 0件の recall には `omitted` の理由が1つ以上付く。
+ * 4. HNSW を通しうる接続の返る集合が厳密な脚と違うのは、`ann_unreached` を名乗ったときだけ。
  */
 
 const SEEDS = Number(process.env.RECALL_FILTER_COMBO_SEEDS ?? 8);
@@ -152,7 +137,6 @@ interface MemoryMeta {
   validUntil: number | null;
 }
 
-/** 種 `s` の記憶を作り、作成順の id と、絞り込みの判定に使う属性を返す。 */
 async function seedMemories(kit: Kit, s: number): Promise<{ ids: string[]; meta: MemoryMeta[] }> {
   const r = seededRandom(s * 7919 + 1);
   const ctx: Ctx = { tenantId: TENANT };
@@ -260,7 +244,6 @@ function buildProbes(s: number): Probe[] {
 }
 
 const roundNumber = (n: number) => Math.round(n * 1e4) / 1e4;
-/** id を作成順の別名に置き換え、数値（文字列に埋め込まれたものを含む）を丸める。 */
 function normalize(result: RecallResult, ids: string[]): unknown {
   const alias = (value: string) => (ids.includes(value) ? `m${ids.indexOf(value)}` : value);
   const deep = (x: unknown): unknown => {
@@ -275,9 +258,7 @@ function normalize(result: RecallResult, ids: string[]): unknown {
     return x;
   };
   return deep({
-    // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠・必須の同伴取得）の
-    // score は total を欄として持たない——両実装（Fake/Postgres）とも同じ形になるはず
-    // なので、undefined で揃えて比べる（無いことも決定的なので parity の指紋には影響しない）。
+    // `affinityMeasured: false`（連想枠・必須の同伴取得）の score は total を欄として持たないので、undefined で揃えて比べる。
     memories: result.memories.map((m) => [
       m.memoryId,
       m.retrievedVia,
@@ -287,7 +268,6 @@ function normalize(result: RecallResult, ids: string[]): unknown {
   });
 }
 
-/** 返った記憶が破っている絞り込みの名前を返す（`RecallQuery` の doc の意味）。 */
 function violatedFilters(probe: Probe, m: MemoryMeta): string[] {
   const q = probe.query;
   const bad: string[] = [];

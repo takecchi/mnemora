@@ -21,13 +21,12 @@ import {
 } from "./test-db.js";
 
 /**
- * `same-ms-usage-bench.ts`（Issue #730 の手動ベンチ）の測定器そのものの歯。
+ * `same-ms-usage-bench.ts`（手動ベンチ）の測定器そのものの歯。
  *
- * ベンチは `PostgresMemoryStore` の強化の呼び出しを spy で記録し、同じ Memory への強化の
- * `at` が一致する頻度を数える。`runtime.observe({kind:'memory_usage'})` は、#917 以降
- * `reinforceMany`、PR #980 以降 `recordUsageAndReinforce` を通り、`reinforce` を呼ばない。
- * spy が `reinforce` しか見ていないと、使用報告のシナリオ（c/d）の記録が空になり、
- * 「一致0件・母数0」を黙って出す。ここでは、使用報告1回で spy に1件記録されることを測る。
+ * ベンチは `PostgresMemoryStore` の強化の呼び出しを spy で記録し、同じ Memory への強化の `at` が一致する頻度を数える。
+ * `runtime.observe({kind:'memory_usage'})` は `reinforceMany`・`recordUsageAndReinforce` を通り、`reinforce` を呼ばない。
+ * spy が `reinforce` しか見ていないと、使用報告のシナリオ（c/d）の記録が空になり、「一致0件・母数0」を黙って出す。
+ * ここでは、使用報告1回で spy に1件記録されることを測る。
  */
 afterAll(async () => {
   await closeTestClient();

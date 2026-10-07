@@ -10,11 +10,9 @@ import {
 } from "./test-db.js";
 
 /**
- * PR #1056 の約束のうち、testkit の InMemory 側の歯（`in-memory-search-ctx-tenant-boundary.test.ts` の
- * 3件目）が「Postgres と揃える」と言っている、**基準の側**: `ctx.tenantId` と `filter.tenantId` が
- * 食い違っていても、`limit` の検査は先に効く（食い違いを理由に「空」を先に返さない）。
- * Postgres は SQL の `LIMIT` に不正な値を渡して例外になる。この歯がないと、Postgres が食い違いで
- * 先に空を返す形になっても、InMemory の歯だけが「揃えた」つもりで緑のままになる。
+ * testkit の InMemory 側の歯（`in-memory-search-ctx-tenant-boundary.test.ts` の3件目）が「Postgres と揃える」と言っている、基準の側:
+ * `ctx.tenantId` と `filter.tenantId` が食い違っていても、`limit` の検査は先に効く（食い違いを理由に「空」を先に返さない）。
+ * Postgres は SQL の `LIMIT` に不正な値を渡して例外になる。この歯がないと、Postgres が食い違いで先に空を返す形になっても、InMemory の歯だけが「揃えた」つもりで緑のままになる。
  */
 
 const ctxB: Ctx = { tenantId: "search-boundary-limit-b" };

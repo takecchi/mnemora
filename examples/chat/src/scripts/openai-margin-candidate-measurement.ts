@@ -33,7 +33,7 @@ const CTX: Ctx = { tenantId: "openai-margin-candidate-embed" };
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`${name} が環境に無い。使い方はこのスクリプトの doc コメントを見ること。`);
+    throw new Error(`${name} が環境に無い（必須。既定値は無い）。`);
   }
   return value;
 }
