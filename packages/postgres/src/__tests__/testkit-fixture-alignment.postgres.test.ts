@@ -23,12 +23,11 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0500: testkit の fixture（InMemory）を、Postgres の振る舞いに揃えた項目を、**同じ入力を2実装へ流して**縛る。
- * fixture 側だけの歯は `packages/testkit/src/__tests__/` にある。ここは「Postgres がそう振る舞う」ことの実測を常設にする
- * （fixture の側を揃えたあとで Postgres が変わったら、ここが落ちる）。
+ * testkit の fixture（InMemory）を、Postgres の振る舞いに揃えた項目を、**同じ入力を2実装へ流して**縛る。
+ * ここは「Postgres がそう振る舞う」ことの実測を常設にする（fixture の側を揃えたあとで Postgres が変わったら、ここが落ちる）。
  *
  * 見るのは、投げたか・何で投げたか（`NUL`・`range`（`timestamptz` の範囲外）・`bigint`（範囲外）・その他）だけ。
- * 例外の文面・クラスは2実装で違う（`packages/testkit/src/fixtures.ts` の冒頭）。
+ * 例外の文面・クラスは2実装で違う。
  */
 
 const ctx: Ctx = { tenantId: "fixture-alignment" };
@@ -261,7 +260,7 @@ describe("下限（4714-11-24 BC 00:00:00 UTC）より前の日時は、書く�
     ],
   ];
 
-  // ADR 0547: 読みの口の条件は、Postgres が下限へ寄せてから比べる（落ちない）。fixture も断らない。書く口だけが、下限より前で断る。
+  // 読みの口の条件は、Postgres が下限へ寄せてから比べる（落ちない）。fixture も断らない。書く口だけが、下限より前で断る。
   const READ_PORT =
     /^(EventStore\.list|VectorStore\.|MemoryStore\.aggregateScope|LexicalStore\.|find(Active|Contested)ByClaimKey)/;
   const readCases = cases.filter(([name]) => READ_PORT.test(name));

@@ -22,9 +22,8 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0514（ADR 0496 の負債5と1）: `runtime.tick` の入口は、`claimBatch` を呼ぶ前に `opts.kinds`・`limit`・`claimedBy` と、
+ * `runtime.tick` の入口は、`claimBatch` を呼ぶ前に `opts.kinds`・`limit`・`claimedBy` と、
  * store が保存できない巨大な `leaseMs` を、名指しの例外で断る。testkit の InMemory と実 Postgres の両方で、同じ顔（種類・message）になることを縛る。
- * core の Fake の側は `packages/core/src/__tests__/tick-opts-validation.test.ts` が同じ `EXPECTED`・`ACCEPTED` を縛る。
  */
 
 const NOW_MS = Date.parse("2100-01-01T00:00:00.000Z");
@@ -96,7 +95,6 @@ const shared = {
     embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
   },
   hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
-  // 先の時刻にしているのは歴史的な理由で、今は outbox の `available_at` も注入した時計に従う（ADR 0559）。
   clock: { now: () => new Date(NOW_MS) },
 };
 

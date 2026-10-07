@@ -11,25 +11,21 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * `registerEmbeddingSpace` の排他（段階2・ADR 0018）を検査する。
+ * `registerEmbeddingSpace` の排他を検査する。
  *
- * 段階1の実測（ADR 0018 の「段階1の実測」）で、まっさらな DB へ複数プロセスが同時に
- * `registerEmbeddingSpace` を呼ぶと**決定的に**（試行した全件で）どちらか一方が落ちる
- * ことを確認した。衝突点は `CREATE TABLE IF NOT EXISTS`（`pg_type_typname_nsp_index`）と
+ * まっさらな DB へ複数プロセスが同時に `registerEmbeddingSpace` を呼ぶと、advisory lock が無ければ**決定的に**
+ * どちらか一方が落ちる。衝突点は `CREATE TABLE IF NOT EXISTS`（`pg_type_typname_nsp_index`）と
  * `CREATE INDEX IF NOT EXISTS`（`pg_class_relname_nsp_index`）の**両方**に独立して存在する。
  * ここでは「advisory lock で塞いだこと」を直接測る——DDL の中身ではなく、
  * `registerEmbeddingSpace` の入り口の排他そのものを検査対象にする。
  *
  * 構造は `migrate-concurrency.test.ts` をそのまま踏襲する（テストごとに独立した
  * データベースを作る理由・`lockKey` を it ごとに変える理由は、同ファイル冒頭の
- * コメントを参照。advisory lock の名前空間がデータベースクラスタ全体で共有される
- * こと、既存の it() のロック残骸に当たるリスクを避けるためという理由は同じ）。
+ * コメントを参照）。
  *
- * オーナーが引いた線（3状態を混同しないこと）に対応する6本の歯:
+ * 6本の歯:
  * 1a. まっさらな DB へ N=4 同時: テーブル層（`pg_type_typname_nsp_index`）の衝突点を通る経路。
- * 1a'. 同じ経路を N=8 で（Issue #755 追記。ADR 0018 の「N=8, 16 等は測っていない」を
- *      実測で埋める。N=16/32 は歯までは足さず、ADR 0018 追記に測定結果のみ残した——
- *      N が上がるほど1試行が遅くなるため、歯は N=8 に留めた）。
+ * 1a'. 同じ経路を N=8 で。
  * 1b. テーブルだけ先に1プロセスで直列に作っておき（索引は作らない）、N=4 同時に呼ぶ:
  *     索引層（`pg_class_relname_nsp_index`）の衝突点を通る経路。
  *
@@ -38,8 +34,8 @@ import { dropTempDatabase } from "./temp-database.js";
  *     `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` はどちらも
  *     「既に存在する」ことがコミット済みで全セッションから見えるため、advisory lock を
  *     外した変異版でも非アトミックな競合そのものが起こらず（両方とも即座に no-op で
- *     抜けるだけ）、歯が変異を検知できない（実測して確認した——後述）。索引だけ
- *     未作成の状態を作ることで、変異版が索引層の衝突を確実に踏むようにしてある。
+ *     抜けるだけ）、歯が変異を検知できない。索引だけ未作成の状態を作ることで、
+ *     変異版が索引層の衝突を確実に踏むようにしてある。
  * 2.  先客が少し後に手放す → 待って進み、`lock.waitedMs` に待ち時間が乗る。
  * 3.  先客が手放さない → 時間切れのエラーで落ちる（黙って続行して成功しない）。
  * 4.  `pg_advisory_lock` の EXECUTE 権限が無いロールで呼ぶ → 時間切れとは別のエラーで落ちる。
@@ -88,7 +84,7 @@ function connectionStringFor(
 }
 
 async function createMigratedDatabase(database: string): Promise<Pool> {
-  // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
+  // FORCE を使わない理由は temp-database.ts 冒頭のコメントを参照。
   await dropTempDatabase(admin(), database);
   await admin().query(`CREATE DATABASE ${database}`);
   createdDatabases.push(database);
@@ -118,8 +114,7 @@ async function createTableOnly(pool: Pool): Promise<void> {
 /**
  * 別セッションから advisory lock を握る（テストの「先客」役）。
  *
- * この client も `openedPools` に登録し、`afterAll` の一括 `pool.end()` に委ねる
- * （以前は登録されておらず、`afterAll` が把握しないまま残る接続だった）。
+ * この client も `openedPools` に登録し、`afterAll` の一括 `pool.end()` に委ねる。
  * `release()` はロックを手放すことだけを担い、pool を閉じるのは `afterAll` の役目に
  * 一本化する——同じ pool を2箇所で `end()` すると `pg-pool` が
  * 「Called end on pool more than once」で例外を投げるため。
@@ -169,10 +164,6 @@ describe("registerEmbeddingSpace の排他（advisory lock）", () => {
 
   // 歯1a: まっさらな DB へ4プロセス相当が同時に registerEmbeddingSpace しても、
   // 全部成功し、テーブル・索引が正しく1組だけ出来ている。
-  //
-  // **この歯に変異（ロックを外す）を当てると赤くなることを確かめてある
-  // （PR 本文に diff と出力を記載）。** 段階1の実測では、この形（まっさらな DB へ
-  // N=4 同時）はテーブル層（`pg_type_typname_nsp_index`）で12/12決定的に落ちた。
   it("まっさらな DB へ4プロセス相当が同時に registerEmbeddingSpace しても、全部成功しテーブル・索引が1組だけ出来ている", async () => {
     const pool = await createMigratedDatabase(DB_CONCURRENT_TABLE);
     const pools = Array.from(
@@ -193,12 +184,7 @@ describe("registerEmbeddingSpace の排他（advisory lock）", () => {
     expect(relations.indexes).toEqual([INDEX]);
   }, 20_000);
 
-  // 歯1a'（Issue #755 追記）: 歯1a と同じ経路（テーブル層の衝突点）を、より高い並行度
-  // （N=8）で確認する。ADR 0018 の「確かめていないこと」——N=1/2/4 までしか測っていない
-  // ——を N=8 まで実測で埋める（ADR 0018 追記、2026-09-25、Issue #755）。
-  //
-  // **この歯に変異（ロックを外す）を当てると赤くなることを確認済み**（PR 本文に出力を記載。
-  // Issue #755 の測定では N=8/16/32 のいずれも同じ形で決定的に再現した）。
+  // 歯1a': 歯1a と同じ経路（テーブル層の衝突点）を、より高い並行度（N=8）で確認する。
   it("N=8プロセス相当が同時に registerEmbeddingSpace しても、全部成功しテーブル・索引が1組だけ出来ている", async () => {
     const pool = await createMigratedDatabase(DB_CONCURRENT_TABLE_N8);
     const pools = Array.from(
@@ -221,10 +207,8 @@ describe("registerEmbeddingSpace の排他（advisory lock）", () => {
 
   // 歯1b: テーブルだけ先に直列で作っておき（索引は無い状態）、4プロセス相当が
   // 同時に registerEmbeddingSpace しても、全部成功し索引が正しく1本だけ出来ている。
-  //
-  // **この歯に変異を当てると、索引層（`pg_class_relname_nsp_index`）で赤くなることを
-  // 確かめてある（PR 本文参照）。** テーブルと索引の両方を先に作ってしまう形では
-  // 変異が検知できないことも実測済み（歯の先頭コメント参照）。
+  // テーブルと索引の両方を先に作ってしまう形では、ロックを外した実装でも競合が起きず検知できない
+  // （歯の先頭コメント参照）。
   it("テーブルだけ先に作った状態で4プロセス相当が同時に呼んでも、全部成功し索引が1本だけ出来ている", async () => {
     const pool = await createMigratedDatabase(DB_CONCURRENT_INDEX);
     await createTableOnly(pool);
@@ -274,9 +258,6 @@ describe("registerEmbeddingSpace の排他（advisory lock）", () => {
 
   // 歯3: 先客が手放さない → 短いタイムアウトで RegisterEmbeddingSpaceLockTimeoutError
   // を投げる（黙って続行しない）。
-  //
-  // **この歯に変異（ロックを外す）を当てると、時間切れにならず普通に成功して
-  // 赤くなることを確かめてある。**
   it("先客が手放さないと、短いタイムアウトで RegisterEmbeddingSpaceLockTimeoutError を投げる", async () => {
     const lockKey = 555555555555555n;
     const pool = await createMigratedDatabase(DB_TIMEOUT);

@@ -6,10 +6,9 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #1759（クローンの判断。根拠はオーナー回答 374f6f88 の問2・問25）: `@mnemora/testkit/fixtures` の
- * `InMemoryMemoryStore` を `@mnemora/postgres` に揃えた2点を、**同じ入力を2実装へ流して**縛る。
+ * `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` を `@mnemora/postgres` に揃えた2点を、**同じ入力を2実装へ流して**縛る。
  *
- * 1. 「memory not found for tenant: <id>」の `<id>` の綴り（ADR 0521 の訂正）。Postgres は、操作の対象が無いときは
+ * 1. 「memory not found for tenant: <id>」の `<id>` の綴り。Postgres は、操作の対象が無いときは
  *    渡された綴りのまま、参照先（`supersededById`・`contestedWithId`・使用の記録の `memoryIds`）が無いときは小文字で載せる。
  * 2. `decayFloorAt` が `null`・`undefined`・キーなしの新しい記憶は、書く前に断る（Postgres は `23502`）。冪等の既存の行が
  *    在っても断る。
@@ -179,7 +178,6 @@ describe("decayFloorAt が無い新しい記憶は、fixture も Postgres と同
           ),
           impl,
         ).rejects.toThrow();
-        // 何も書いていない: 置き換えられるはずだった記憶は active のまま。
         expect((await store.get(ctx, target.id))?.status, impl).toBe("active");
       }
     },

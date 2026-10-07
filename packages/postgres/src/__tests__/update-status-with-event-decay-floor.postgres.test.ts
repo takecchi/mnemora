@@ -5,11 +5,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `updateStatusWithEvent` は `decay_floor_at` を動かさない（ADR 0303 決定1「`supersedeWithNewMemories`・
- * `updateStatusWithEvent` は値を動かさない」。Issue #1775 の #713 の変異A4）。
- *
- * PR の歯は `supersedeWithNewMemories` だけを凍結していた。`updateStatusWithEvent` 側は `restored` の経路を見る
- * 別の歯だけが噛んでいた。`active → archived`・`forgotten` の遷移の後に、入力の `decayFloorAt` のまま残る。
+ * `updateStatusWithEvent` は `decay_floor_at` を動かさない。
+ * `active → archived`・`forgotten` の遷移の後に、入力の `decayFloorAt` のまま残る。
  */
 
 const TENANT = "update-status-decay-floor-tenant";

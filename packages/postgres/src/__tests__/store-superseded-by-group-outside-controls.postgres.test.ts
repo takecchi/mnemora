@@ -1,8 +1,5 @@
-// 確かめ直し（Issue #1759、B 群 #1621 / ADR 0503）の歯。やりすぎ側の対照。
-//
-// ADR 0503 決定5: 「群の外の `archived`・`superseded`・`contested` を指すのは、断らない」。断るのは群の外の
-// `forgotten` だけ。既存の歯は、群版では「群の外の active」を指す対照しか持たず、断る条件を
-// 「active 以外」へ広げる変異（`status === "forgotten"` → `status !== "active"`）が赤にならなかった。
+// やりすぎ側の対照: 群の外の `archived`・`superseded`・`contested` を指すのは断らない。断るのは群の外の
+// `forgotten` だけ。断る条件を「active 以外」へ広げる実装（`status === "forgotten"` → `status !== "active"`）を赤にする。
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx, Memory, MemoryId, MemoryStore, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";

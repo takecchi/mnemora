@@ -10,15 +10,11 @@ import { LEXICAL_QUERY_MAX_DISTINCT_WORDS } from "../lexical-query-cap.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #878（2026-09-26、クローン miku の判断）: `PostgresTrigramLexicalStore.search` の
- * ASCII 側にも、`PostgresLexicalStore` と同じ語数の上限
+ * `PostgresTrigramLexicalStore.search` の ASCII 側にも、`PostgresLexicalStore` と同じ語数の上限
  * （{@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}）を入れたことの実測。
  *
- * **⚠ この歯は UTF8 の `server_encoding` を前提とする**
- * （[ADR 0103](../../../docs/decisions/0103-negative-tooth-declares-its-precondition.md)
- * の規律。`trigram-lexical-store.postgres.test.ts` と同じ前提の測り方）。前提を満たさない
- * 環境では `describe.skip` 相当（`it.skip`）にする——`PostgresTrigramLexicalStore.create`
- * が投げることは既に別の歯（`trigram-lexical-store.postgres.test.ts`）が検査している。
+ * **⚠ この歯は UTF8 の `server_encoding` を前提とする。**前提を満たさない環境では `it.skip` にする
+ * （`PostgresTrigramLexicalStore.create` が投げることは `trigram-lexical-store.postgres.test.ts` が検査している）。
  */
 
 const TENANT = "trigram-query-word-cap-tenant";
@@ -40,7 +36,7 @@ describe("PostgresTrigramLexicalStore.search: ASCII 側のクエリ語数の上�
     const { db } = await getTestClient();
     const probe = await probeTrigramLexicalSupport(db);
     if (!probe.ok) {
-      // ADR 0103: この環境では前提（UTF8 等）が満たせない——`trigram-lexical-store.postgres.test.ts`
+      // この環境では前提（UTF8 等）が満たせない——`trigram-lexical-store.postgres.test.ts`
       // が別途この否定を検査済みであり、ここでは重ねて検査しない。
       return;
     }

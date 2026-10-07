@@ -24,13 +24,11 @@ import {
 
 /**
  * LLM を待つ間に元の記憶が `contested`（と、訂正の解決で負けた `superseded`）になったとき、
- * `reextract`・`consolidate`・`reflect` の3経路が書かずに打ち切ること（ADR 0544。ADR 0406 の
- * 「引き受けた負債」1 と ADR 0454 の負債1・5 を覆す）。
+ * `reextract`・`consolidate`・`reflect` の3経路が書かずに打ち切ること。
  *
- * 対照の歯（従来どおりの振る舞いが変わっていないこと）も同じ場所に置く:
- * 待つ間に何も変わらなければ従来どおり書かれる／archived は（LLM の前の門が通すので）従来どおり。
- * 世代の往復（ADR 0454 負債6）は変えない（ADR 0544 決定4）——そちらの歯は
- * `reextract-anchor-must-be-active.postgres.test.ts`。
+ * 対照の歯も同じ場所に置く:
+ * 待つ間に何も変わらなければ書かれる／archived は（LLM の前の門が通すので）書かれる。
+ * 世代の往復は変えない——そちらの歯は `reextract-anchor-must-be-active.postgres.test.ts`。
  *
  * testkit の InMemory と Postgres を、`supersedeWithNewMemories` の口の有無の2経路ずつ（計4通り）で当てる。
  */

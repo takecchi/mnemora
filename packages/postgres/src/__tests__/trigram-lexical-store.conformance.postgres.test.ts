@@ -14,16 +14,11 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * `packages/testkit` の `LexicalStore` 適合テスト一式を、語彙の trigram 経路
- * （`PostgresTrigramLexicalStore`、opt-in、ADR 0319）にも当てる。
+ * （`PostgresTrigramLexicalStore`、opt-in）にも当てる。**一式には要件を1つも足さない**——
+ * 既存の一式を、もう1つの adapter に通すだけである。
  *
- * それまで一式は `conformance.postgres.test.ts` で `PostgresLexicalStore`（tsvector 経路）に
- * だけ当たっており、ADR 0323 が `filter.labels` を足したとき trigram 経路だけが取り残された
- * （PR #991 で直した）。**一式には要件を1つも足さない**——既存の一式を、もう1つの adapter に
- * 通すだけである。
- *
- * **⚠ UTF8 の `server_encoding` を前提とする**（ADR 0103 の規律）。前提を満たさない環境では
- * 各項目を skip する——`PostgresTrigramLexicalStore.create` が投げることは
- * `trigram-lexical-store.postgres.test.ts` が検査している。
+ * **⚠ UTF8 の `server_encoding` を前提とする。**前提を満たさない環境では各項目を skip する——
+ * `PostgresTrigramLexicalStore.create` が投げることは `trigram-lexical-store.postgres.test.ts` が検査している。
  */
 
 beforeEach(async (context) => {
@@ -39,7 +34,6 @@ describeLexicalStoreConformance({
     const { db } = await getTestClient();
     return PostgresTrigramLexicalStore.create(db);
   },
-  // `conformance.postgres.test.ts` の `PostgresLexicalStore` 向けと同じ書き込み口。
   prepareMemory: async (ctx: Ctx, attrs) => {
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
