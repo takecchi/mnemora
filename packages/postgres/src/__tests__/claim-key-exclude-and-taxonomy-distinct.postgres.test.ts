@@ -101,6 +101,39 @@ describe("aggregateScope の axis: 'taxonomy': 1件の Memory は1つのラベ�
       ]);
     });
 
+    it(`${kitName}: 同じ名前が離れた位置に重なっても（3回・間に別の名前）1件と数える`, async () => {
+      const store = await makeStore();
+      await store.createMemory(ctx, memory({ tags: ["alpha", "beta", "alpha"] }));
+      await store.createMemory(
+        ctx,
+        memory({ tags: ["beta", "alpha", "beta", "other", "alpha", "alpha"] }),
+      );
+
+      const aggregate = await store.aggregateScope(ctx, {
+        taxonomyGroupCandidates: ["alpha", "beta"],
+      });
+
+      expect(taxonomyGroups(aggregate.groups)).toEqual([
+        ["alpha", 2],
+        ["beta", 2],
+      ]);
+    });
+
+    it(`${kitName}: やりすぎない: 大文字小文字だけ違う名前は別のラベルで、どちらの群にも1回ずつ数える`, async () => {
+      const store = await makeStore();
+      await store.createMemory(ctx, memory({ tags: ["Alpha", "alpha"] }));
+      await store.createMemory(ctx, memory({ tags: ["alpha", "Alpha", "alpha"] }));
+
+      const aggregate = await store.aggregateScope(ctx, {
+        taxonomyGroupCandidates: ["Alpha", "alpha"],
+      });
+
+      expect(taxonomyGroups(aggregate.groups)).toEqual([
+        ["Alpha", 2],
+        ["alpha", 2],
+      ]);
+    });
+
     it(`${kitName}: やりすぎない: 重複の無い tags では件数は今どおり（labels で絞った内側も同じ）`, async () => {
       const store = await makeStore();
       await store.createMemory(ctx, memory({ tags: ["alpha"] }));
