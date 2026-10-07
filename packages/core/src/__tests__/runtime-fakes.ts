@@ -473,7 +473,7 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
   assertBuildableFakeEvent(event);
   return {
     id: nextId("evt"),
-    tenantId: ctx.tenantId,
+    tenantId: event.tenantId ?? ctx.tenantId,
     // ADR 0469: uuid の列は小文字の正規形で読み戻る（`@mnemora/postgres`）。大文字で渡された `memoryId` も小文字にそろえて積む。
     memoryId: event.memoryId === null ? null : event.memoryId.toLowerCase(),
     kind: event.kind,
