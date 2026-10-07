@@ -6,21 +6,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime, groupSupersededCandidatesByOperation } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 09/17 にマージされた #464（`Runtime.restoreSuperseded`）・#524（その `dryRun`）の
- * 確かめ直し（Issue #1812、まとまり G1）で、既存の試験の外に残っていた約束の歯。
- *
- * - 省略したときの `actor` は `{ type: "system" }`（`RestoreSupersededOptions.actor` の doc）。
- *   既存の試験は名前に「省略時は system」と書くが、`actor` を渡した場合しか確かめていない。
- * - `outcomes` の順序は、store が返した `restored` の順をそのまま引き継ぐ
- *   （`RestoreSupersededResult.outcomes` の doc）。束ねた強化の経路でも、1件ずつへ戻った経路でも。
- * - `dryRun: true` は「一切の書き込み（`memories` の `UPDATE`・`memory_events` への `INSERT`・
- *   `reinforce`）を行わない」（`RestoreSupersededOptions.dryRun` の doc）。
- *   `reinforce` を呼ばないことと、置き換えた側・候補のどの欄も動かないことを見る。
- * - `groupSupersededCandidatesByOperation` は `supersededReason` を自由文としてそのまま運ぶ。
- *   空文字は `null` と別の値であり、同じグループにしない。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
