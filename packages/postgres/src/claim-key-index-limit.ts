@@ -22,7 +22,6 @@ import type { Ctx, NewMemory } from "@mnemora/core";
  */
 const CLAIM_KEY_INDEXES: ReadonlySet<string> = new Set([
   "idx_memories_claim_key",
-  "idx_memories_claim_predicates",
 ]);
 const NAMED_INDEX_ROW =
   /^index row size \d+ exceeds btree version \d+ maximum \d+ for index "(\w+)"$/;
