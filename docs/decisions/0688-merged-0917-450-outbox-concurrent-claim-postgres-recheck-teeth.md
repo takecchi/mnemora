@@ -32,7 +32,9 @@ main `957491cc` の上で、`packages/postgres/src/outbox-store.ts` の `claimBa
 
 ## 決定【判断】
 
-1. 実装・`*-conformance.ts`・`__fixtures__/` は変えない。足すのは試験だけである。
+1. 実装・`*-conformance.ts`・`__fixtures__/` は変えない。足すのは試験と、その試験を直列群へ置く `packages/postgres/vitest.config.mts` の1行だけである。
+   - 並列群は `isolate: false`（ADR 0397）で、同じ worker で `conformance.postgres.test.ts` が先に評価されていると、歯のファイルの import は評価済みのモジュールを返し、適合の suite が登録されない（`expected [] to deeply equal ['run']`）。ファイルの順で赤緑が変わるので、ADR 0371 の基準（クラスタ全体に効くもの）には当たらないが、`isolate: true` の直列群に置く。
+   - 手元の SQL_ASCII の Postgres で、2ファイルを1 worker・ファイル順シャッフル（seed 1〜3）で走らせ、並列群では seed 1・2 で赤、直列群へ移した後は全 seed で緑を確かめた。
 2. 並行の `it` が実際に二重 claim を捕まえることは、既存の歯と上の変異で確かめられたので、判定側には歯を足さない。
 3. 実バグは無し。
 
@@ -41,5 +43,5 @@ main `957491cc` の上で、`packages/postgres/src/outbox-store.ts` の `claimBa
 - ADR 0206 の負債（複数プロセス・別 `Pool`）。並行の適合は共有の単一 `Pool` までで、別 `Pool` は ADR 0531 の `tick-multi-pool-concurrency` が `tick` の水準で見ている。別ホストは測っていない。
 - testkit 側の定数（ラウンド数・並行数・`limit`）を変える変異を Postgres に当てたことは無い。in-memory の偽 store での歯（PR #1818）に任せた。
 - 「ロックを強めて詰まらせる」形のうち、`FOR UPDATE NOWAIT` と ADR 0208 の外部ロックを超える形（アドバイザリロックでの直列化など）は当てていない。
-- `outbox-concurrent-claim-wiring` が別の適合 suite の取り込みに依存する: vitest の取り込みの仕様が変わると、この歯は登録の数（`["run"]`）で赤くなる。
+- `outbox-concurrent-claim-wiring` が別の適合 suite の取り込みに依存する: vitest の取り込みの仕様が変わるか、このファイルが並列群へ戻されると、この歯は登録の数（`["run"]`）で赤くなる（黙って緑にはならない）。
 - 全テストは流していない。関係するファイルを明示して走らせた。
