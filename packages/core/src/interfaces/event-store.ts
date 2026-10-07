@@ -3,81 +3,59 @@ import type { EventId } from "../ids.js";
 import type { EventFilter, MemoryEvent, NewMemoryEvent } from "../event.js";
 
 /**
- * EventStore — Phase 1（監査ログ、docs/architecture.md §5.8）。
+ * EventStore（監査ログ、docs/architecture.md §5.8）。
  *
- * **`update` / `delete` を意図的に持たせない。** append-only。alteroid の `JournalStore`
- * と同じ形——型に無ければ、実装が間違って消す経路がそもそも生えない、という静的な担保
- * （docs/memory-model.md §9）。
+ * **`update` / `delete` を意図的に持たせない。** append-only。型に無ければ、実装が間違って消す経路が
+ * そもそも生えない（docs/memory-model.md §9）。
  */
 export interface EventStore {
   /**
    * **`event.memoryId` が非 `null` のとき、その Memory が `ctx.tenantId` の Memory でなければ、行を書かずに
    * `memory not found for tenant: <id>` を含むメッセージの `Error` を投げる**（ADR 0436。ADR 0398 の `RelationStore.link` と同じ作法。
    * クラス名の接頭辞は `PostgresEventStore:`／`InMemoryEventStore:`）。実在しない id・別のテナントの Memory の id・
-   * uuid の形でない id（`@mnemora/postgres`）を区別しない。`memoryId` が `null` のイベント（`events_purged`）は Memory を
-   * 指さないので検査しない。`@mnemora/postgres` は確かめと書き込みを1つの SQL 文にしている。
+   * uuid の形でない id（`@mnemora/postgres`）を区別しない。`memoryId` が `null` のイベント（`events_purged`）は検査しない。
    *
    * ⚠ **`event.meta`・`event.actor` の値の中身は検査しない。**JSON で往復しない値と、NUL・孤立サロゲートを
-   * 含む文字列の扱いは adapter によって違う（BigInt は両 adapter とも拒む——下記参照）
-   * ——{@link MemoryEvent.meta} の doc の表を参照（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、
-   * [Issue #1384](https://github.com/takecchi/mnemora/issues/1384)）。
+   * 含む文字列の扱いは adapter によって違う（BigInt は両 adapter とも拒む）。{@link MemoryEvent.meta} の doc の表を参照。
    *
-   * ⚠ 今の振る舞い（`@mnemora/postgres` と testkit の fixture へ同じ入力を当てて確かめた）:
-   * **`event` の形もほとんど検査しない。**
+   * ⚠ **`event` の形もほとんど検査しない**（`@mnemora/postgres` と testkit の fixture で同じ）。
    * - 列挙に無い `actor.type`、`actor: null`、オブジェクトでない `meta`（`null`・配列・文字列）、負の `sizeBeforeBytes` も、
    *   そのまま書いて返す。**返った `MemoryEvent` は `MemoryEventSchema` を通らないことがある。**
-   * - 整数でない `sizeBeforeBytes`（`1.5`・`NaN`・`Infinity`）と、`integer`（int4）の範囲（`-2^31`〜`2^31 - 1`）に収まらない値は、
-   *   例外を投げる（列が `integer`。`@mnemora/postgres` も testkit の fixture も同じ入力を拒む——
-   *   [ADR 0434](../../../../docs/decisions/0434-testkit-fixtures-align-nul-int4-invalid-date-purged-at.md)。範囲の端ちょうどの値は通る）。
-   * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
-   *   `ctx.tenantId`）。
+   * - 整数でない `sizeBeforeBytes`（`1.5`・`NaN`・`Infinity`）と、int4 の範囲（`-2^31`〜`2^31 - 1`）に収まらない値は、
+   *   例外を投げる（範囲の端ちょうどの値は通る。ADR 0434）。
+   * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も同じ）。
    * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・
-   *   存在しない（または形式の壊れた）`memoryId`・別のテナントの Memory を指す `memoryId`（ADR 0436）・`actor`/`meta` に含まれる NUL（U+0000）か孤立サロゲートの文字列
-   *   （[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）・
-   *   `actor`/`meta` に含まれる BigInt（[Issue #1384](https://github.com/takecchi/mnemora/issues/1384)。
-   *   同じく両方とも adapter で同じ入力を拒む）である（例外の種類は adapter で違う）。
-   * - ⚠ **BigInt はこの一覧の他のどの拒否よりも先に働く**——`@mnemora/postgres` は `INSERT` の引数を
-   *   すべて JS 側で評価してから初めて問い合わせを送るため、`actor`/`meta` に BigInt があると、`kind`・
-   *   `memoryId`・`at`・NUL/孤立サロゲートの検査を Postgres 側が行う機会が無いまま `TypeError` になる
-   *   （{@link MemoryEvent.meta} の doc の該当箇所参照）。
+   *   存在しない（または形式の壊れた）`memoryId`・別のテナントの Memory を指す `memoryId`・`actor`/`meta` に含まれる
+   *   NUL（U+0000）か孤立サロゲートの文字列・`actor`/`meta` に含まれる BigInt である（例外の種類は adapter で違う）。
+   * - ⚠ **BigInt はこの一覧の他のどの拒否よりも先に働く**。`actor`/`meta` に BigInt があると、他の検査より先に
+   *   `TypeError` になる（`@mnemora/postgres`。{@link MemoryEvent.meta} の doc 参照）。
    *
    * `MemoryStore` の `event` を受け取る口（`updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・
    * `markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）も、`event` について同じである
-   * ——`updateStatusWithEvent` は同じ入力を当てて確かめた。ほかの口は、fixture が同じ検査（`assertStorableMemoryEvent`）を通し、
-   * Postgres が同じ列へ書くことをコードで読んだ（実測はしていない）。
+   * （`updateStatusWithEvent` は実測。ほかの口は fixture が同じ検査 `assertStorableMemoryEvent` を通し、Postgres が同じ列へ書く）。
    */
   append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent>;
   /**
-   * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
-   * （例外を投げない）。core の `EventId` は単なる `string` であり形式を強制しないため、
-   * ある adapter が主キーに特定の形式（例: UUID）を要求していても、その形式に合わない
-   * `id` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
-   * `isUuidLike` の doc コメント参照）。
-   * UUID 形式の `id` は大文字小文字を区別しない（`@mnemora/postgres` は `uuid` 列、testkit の fixture は小文字に正規化して比べる。
-   * `list` の `filter.memoryId` も同じ）。別のテナントのイベントの `id` も `null` を返す。
+   * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す（例外を投げない）。
+   * UUID 形式の `id` は大文字小文字を区別しない（`list` の `filter.memoryId` も同じ）。
+   * 別のテナントのイベントの `id` も `null` を返す。
    */
   get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null>;
   /**
-   * `filter` に一致する `MemoryEvent` を返す（docs/decisions/0042 参照）。
+   * `filter` に一致する `MemoryEvent` を返す（ADR 0042）。
    *
-   * - **並び順**: `at` の昇順（`PostgresEventStore` の `ORDER BY at ASC` が基準）。
-   *   **`at` が同値の行同士の順序は規定しない** —— Postgres の `ORDER BY at ASC` は
-   *   同値の行の順序を保証しないため、規定しても守れない約束になる。
+   * - **並び順**: `at` の昇順。**`at` が同値の行同士の順序は規定しない。**
    *   ⚠ **この順序を当てにしてはいけない**（ADR 0422）。同じ操作が積む `created` と `superseded`
-   *   （`consolidate`・`reextract`）は同じ `at` を持つので、その並びは挿入順とも限らない
-   *   （実装の都合で挿入順が入れ替わることもある）。順が要るときは `kind` と `meta`
-   *   （例: `superseded` の `meta.supersededById`）で関係を読むこと。
-   * - **`limit`**: 上記の並び順に**並べ替えた後**に適用する。すなわち「`at` が最も
-   *   古い n 件」を返す —— 挿入順の先頭 n 件ではない。`append` は呼び出し側が
-   *   任意の `at` を渡せる（`event.at ?? new Date()`）ため、挿入順と `at` 順は
-   *   一致するとは限らない。
+   *   （`consolidate`・`reextract`）は同じ `at` を持つので、その並びは挿入順とも限らない。
+   *   順が要るときは `kind` と `meta`（例: `superseded` の `meta.supersededById`）で関係を読むこと。
+   * - **`limit`**: 並べ替えた後に適用する。「`at` が最も古い n 件」を返す。挿入順の先頭 n 件ではない
+   *   （`append` は任意の `at` を渡せる）。
    * - **`since` / `until`**: 両端を含む（`at >= since` かつ `at <= until`）。
-   * - ⚠ **`since` と `limit` では、取りこぼしも重複も無いページングは組めない。** カーソルの口は
-   *   無い。同じ `at` の行が `limit` の境目を跨ぐと、次のページを最後の行の `at` から始めれば
-   *   （`since` は両端を含むので）同じ行がもう一度返り、1 ms 進めれば残りの同じ `at` の行を
-   *   飛ばす（同じ `at` の行どうしの順序は上のとおり規定しない）。今の振る舞いを書いたもの。
-   * - **`filter.memoryId`**: adapter の期待する形式でない場合も「一致する行が無い」と
-   *   同じ空配列を返す（他のフィルタの指定に関わらず。例外を投げない）。
+   * - ⚠ **`since` と `limit` では、取りこぼしも重複も無いページングは組めない。** カーソルの口は無い。
+   *   同じ `at` の行が `limit` の境目を跨ぐと、次のページを最後の行の `at` から始めれば同じ行がもう一度返り、
+   *   1 ms 進めれば残りの同じ `at` の行を飛ばす。
+   * - **`filter.memoryId`**: adapter の期待する形式でない場合も「一致する行が無い」と同じ空配列を返す
+   *   （他のフィルタの指定に関わらず。例外を投げない）。
    */
   list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]>;
 }
