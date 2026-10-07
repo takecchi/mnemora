@@ -60,4 +60,17 @@ describe("InMemoryOutboxStore.complete/fail — CAS で弾いたとき・通し�
       expect(other).toEqual(otherBefore);
     });
   }
+
+  // 再確かめ（2026-10-07 マージ分、#1885）。#1885 は「ほかの列は変えない」の歯を、約束ではないとして外した。
+  // ただし `OutboxStore.fail` の doc は「available_at の再計算はしない」と約束している。その1列だけを縛る。
+  it("fail は availableAt を再計算しない（interface の doc の約束）", async () => {
+    const job = makeJob();
+    const before = new Date(job.availableAt);
+    const store = new InMemoryOutboxStore([job]);
+
+    await store.fail(ctx, job.id, "boom", job.attempts, { at: AT });
+
+    expect(job.failedAt).toEqual(AT);
+    expect(job.availableAt).toEqual(before);
+  });
 });

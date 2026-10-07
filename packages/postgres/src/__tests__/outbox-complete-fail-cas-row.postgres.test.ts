@@ -77,4 +77,18 @@ describe("PostgresOutboxStore.complete/fail — CAS で弾いたとき・通し�
       expect(await readRow(job.id)).toEqual(before);
     });
   }
+
+  // 再確かめ（2026-10-07 マージ分、#1885）。#1885 は「ほかの列は変えない」の歯を、約束ではないとして外した。
+  // ただし `OutboxStore.fail` の doc は「available_at の再計算はしない」と約束している。その1列だけを縛る。
+  it("fail は available_at を再計算しない（interface の doc の約束）", async () => {
+    const { store, jobs } = await seedClaimedJobs(1);
+    const job = jobs[0]!;
+    const before = (await readRow(job.id)).available_at as Date;
+
+    await store.fail(ctx, job.id, "boom", job.attempts, { at: AT });
+
+    const after = await readRow(job.id);
+    expect(after.failed_at).toEqual(AT);
+    expect(after.available_at).toEqual(before);
+  });
 });
