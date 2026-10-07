@@ -286,3 +286,14 @@ DEFAULT（720 / 'open'）に任せる」）。
 約1000万時間 −約32分。列の型を変える案・書く前に丸める案は採らず、`Memory.halfLifeHours`・`strength` の TSDoc と
 `docs/memory-model.md` §7 に今の振る舞いを書いた。**決定6（`decay`/`scoring` の計算そのものは変えない）は
 変えていない。**
+
+## 追記（2026-10-07、Issue #1872 の確かめ直し）: 上の追記の「fixture は float64 のまま持つ」は、もう成り立たない
+
+この追記はクローン miku の判断で進めている確かめ直しの作業者が書いた（オーナーではない、[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+上の 2026-09-27 の追記（Issue #1094）は、`@mnemora/testkit` の fixture が `strength`・`half_life_hours` を float64 のまま持つので、
+強化後の床が `@mnemora/postgres` とずれる、と書いた。PR #1517（CHANGELOG の `@mnemora/testkit/fixtures` の項目）
+から、fixture も、書いた値と読み戻す値を Postgres と同じ float4 の表記に揃える。
+【実測】今の main で、Postgres と fixture に同じ記憶を作って1〜4日後に1日ずつ強化した。半減期 720・123456.789・1000000.123・
+10000000.123 時間（`strength` 1）と、半減期 720・123456.789・0.1 時間（`strength` 0.3・0.7・0.9）の組で、強化後の `decay_floor_at` の差も
+`strength` の差も 0 だった。上の追記の差の表は、当時の記録として残す。`Memory.strength`・`halfLifeHours` の TSDoc と
+`docs/memory-model.md` §7 は、この追記に合わせて直した。
