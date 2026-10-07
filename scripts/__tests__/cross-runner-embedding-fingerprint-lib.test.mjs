@@ -53,7 +53,6 @@ describe("crossRunnerLegId / crossRunnerArtifactName / parseCrossRunnerArtifactN
     expect(legs.length).toBe(
       CROSS_RUNNER_RUNNERS.length * CROSS_RUNNER_NUM_THREADS.length * CROSS_RUNNER_REPS.length,
     );
-    // 陽性対照: 基準脚がちょうど1件、実際に含まれている。
     expect(legs.filter((leg) => leg.id === CROSS_RUNNER_BASELINE_LEG_ID)).toHaveLength(1);
   });
 });
@@ -82,7 +81,6 @@ describe("ulpDistanceFloat32 — 隣接 float32 との距離", () => {
   });
 
   it("float32 として1つ隣（1.0 の次の表現可能な値）は距離1", () => {
-    // float32 の 1.0 における ULP は 2^-23。
     const nextUp = Math.fround(1.0 + 2 ** -23);
     expect(nextUp).not.toBe(1.0);
     expect(ulpDistanceFloat32(1.0, nextUp)).toBe(1);
@@ -113,7 +111,6 @@ describe("firstDivergentSignificantDigit — 何桁目の有効数字からず�
   });
 
   it("5桁目からずれる例", () => {
-    // 1.2345... と 1.2346... —— 先頭4桁 "1234" は一致、5桁目 "5" vs "6" で食い違う。
     expect(firstDivergentSignificantDigit(1.2345, 1.2346)).toBe(5);
   });
 
@@ -179,7 +176,6 @@ describe("sha256HexOfFloat32Vectors / vectorsToFloat32Hex", () => {
   });
 });
 
-/** テスト用の leg を作る小道具。 */
 function makeLeg(overrides) {
   return {
     id: "leg",
@@ -244,7 +240,6 @@ describe("classifyLegPair — 「比較できなかった」を「一致」に�
     expect(result.maxAbsDiff).toBeCloseTo(0.5, 5);
   });
 
-  // ⭐ 陽性対照: この歯自体が「常に match と言うだけの空歯」になっていないことを示す。
   it("陽性対照: 明らかに異なる入力に対して実際に mismatch/incomparable のどちらかを返す（match 固定ではない）", () => {
     const alwaysMatch = [
       classifyLegPair(
@@ -383,7 +378,6 @@ describe("buildCrossRunnerSummaryMarkdown — 出力に必要な情報が全部�
   });
 });
 
-// buildPairwiseComparisons は buildGroupSummaries の内部でも使うが、単独の歯も持つ。
 describe("buildPairwiseComparisons", () => {
   it("n件の脚から n*(n-1)/2 組を作る", () => {
     const legs = [makeLeg({ id: "a" }), makeLeg({ id: "b" }), makeLeg({ id: "c" })];

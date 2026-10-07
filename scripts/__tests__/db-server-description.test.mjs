@@ -5,26 +5,13 @@ import {
   majorVersionOf,
 } from "../db-server-description.mjs";
 
-/**
- * `scripts/db-server-description.mjs` の歯。
- *
- * **この歯が守っているもの**: 門が接続先について**黙らない**こと。
- * 「取れた」「取れなかった」「取れたが検証されていない版だった」は**どれも情報**であり、
- * どれか1つでも出力から落ちると、赤くなった人が「自分の変更のせいか」を切り分けられない。
- *
- * DB には触らない（純関数だけを測る）。**実接続で実際に版が取れること**は
- * `.github/workflows/ci.yml` の `root-gate-db-stage` ジョブが `grep` で押さえている
- * ——ADR 0015 が「実行していません」の文言を CI 側で検査しているのと同じ形。
- */
 describe("formatServerLines", () => {
   it("取れなかったときに黙らない（理由を出す）", () => {
     const lines = formatServerLines({ ok: false, reason: "connect ECONNREFUSED 127.0.0.1:1" });
     const text = lines.join("\n");
 
     expect(text).toContain("版を取得できませんでした");
-    // **芯**: 何が起きたかが出ること。理由を落とすと「取れなかった」しか残らない。
     expect(text).toContain("ECONNREFUSED");
-    // 取れたときの顔をしないこと——ここが潰してはいけない区別そのもの。
     expect(text).not.toMatch(/接続先: PostgreSQL \d/);
   });
 
@@ -38,7 +25,6 @@ describe("formatServerLines", () => {
     const text = lines.join("\n");
 
     expect(text).toContain(`接続先: PostgreSQL ${major}.4 (Debian) / pgvector 0.8.2`);
-    // 検証済みなのに警告を出すと、警告そのものが読み飛ばされるようになる。
     expect(text).not.toContain("検証されていない版です");
   });
 
@@ -55,7 +41,6 @@ describe("formatServerLines", () => {
 
     expect(text).toContain(`接続先: PostgreSQL ${unverified}.15`);
     expect(text).toContain(`PostgreSQL ${unverified} は、この repo で検証されていない版です`);
-    // **芯**: 警告だけでは動けない。次に何をするかまで出ること。
     expect(text).toContain("origin/main で対照を取る");
   });
 
