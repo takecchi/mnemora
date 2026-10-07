@@ -3,15 +3,6 @@ import { createRuntime } from "../runtime.js";
 import { GROWTH_CTX, growthLlm } from "./contested-group-event-growth.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0431 の確かめ直し（Issue #1734、PR #1537）で足した歯。`note` の先頭10件の**境界**と、
- * 切るのは `note` だけで `observe()` の戻り値は全員のままであること、群の `note` の `matches` の並び。
- *
- * - ちょうど10件のときは切らず、印は false（`>` であって `>=` ではない）。11件で初めて true。
- * - 群の `note` の `matches` も、`memberIds` と同じく id の昇順。
- * - `observe()` の戻り値（`memberIds`・`matchMemoryIds`）は、切らずに全員。
- */
-
 function build(withRelationStore: boolean) {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({

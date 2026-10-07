@@ -4,12 +4,7 @@ import type { FindCorrectionCandidatesInput } from "../correction-candidates.js"
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0496（ADR 0485 の材料・ADR 0490 穴3）: `findCorrectionCandidates` の入口は、型の外の入力を **`recall()` を呼ぶ前に** `TypeError` で断る。
- * - `excludeMemoryIds` が配列でない（裸の文字列を含む）・文字列でない要素を含む。
- * - `text` が文字列でない（`undefined` を含む）。以前は `no_candidates` を返していた。
- * 断った入力が recall の記録も埋め込みも起こさないこと（`embedCalls`・`recalls`）を確かめる。
- */
+/** 断った入力が recall の記録も埋め込みも起こさないことを `embedCalls`・`recalls` で確かめる。 */
 
 const ctx: Ctx = { tenantId: "correction-candidates-input-rejections" };
 

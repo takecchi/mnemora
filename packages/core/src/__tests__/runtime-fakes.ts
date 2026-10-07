@@ -3642,9 +3642,8 @@ export class FakeOutboxStore implements OutboxStore {
     if (job.attempts !== expectedAttempts) {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
     }
-    // Issue #826: 相手側の終端（fail）が既に付いていれば、先に付いた終端を勝たせる
-    // ——行を変えず、例外も投げない。
-    if ((job.failedAt ?? null) !== null) {
+    // 相手側の終端だけでなく自分と同じ終端が付いていても書かない: 2回目の `at` で上書きすると、先勝ち（ADR 0440）から外れる。
+    if ((job.completedAt ?? null) !== null || (job.failedAt ?? null) !== null) {
       return;
     }
     // Issue #1237: 実装（`InMemoryOutboxStore`・`PostgresOutboxStore`）と同じく、`opts.at` を渡せばそれを使う。
@@ -3670,9 +3669,8 @@ export class FakeOutboxStore implements OutboxStore {
     if (job.attempts !== expectedAttempts) {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
     }
-    // Issue #826: 相手側の終端（complete）が既に付いていれば、先に付いた終端を勝たせる
-    // ——行を変えず、例外も投げない。
-    if ((job.completedAt ?? null) !== null) {
+    // 相手側の終端だけでなく自分と同じ終端が付いていても書かない: 2回目の `at`・`error` で上書きすると、先勝ち（ADR 0440）から外れる。
+    if ((job.completedAt ?? null) !== null || (job.failedAt ?? null) !== null) {
       return;
     }
     job.failedAt = fakeCopyDate(opts?.at) ?? new Date(); // ADR 0562: 呼び手の Date を行に入れない

@@ -3,19 +3,7 @@ import type { Ctx } from "../ctx.js";
 import { purgeExpiredEventsForTenant } from "../event-retention-purge.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `purgeExpiredEventsForTenant`（Issue #210 / ADR 0115）の歯。
- *
- * `TenantSettingsStore.getEventRetention` の3状態（`unset`/`unlimited`/`days`、ADR 0050）と
- * `MemoryStore.purgeExpiredEvents?`（任意メソッド）の有無の組み合わせを、4つの outcome
- * （`unset`/`unlimited`/`store_unsupported`/`purged`）へ正しく写すことを検査する。
- *
- * **モックを使わない**——`FakeMemoryStore.purgeExpiredEvents`（本 PR で実装済み、
- * `fake-memory-store-purge-expired-events.test.ts` が単体で検査する）を実際に呼び、
- * 実際に積んだイベントが消えるかどうかで `olderThan` の計算・引数の受け渡しを検査する
- * （このリポジトリの他のテストと同じ「実際に走らせて確かめる」流儀。スパイで呼び出し
- * 引数だけを見ると、`purgeExpiredEvents` 側の実装を差し替えても検査が気づかない）。
- */
+/** モックを使わない: スパイで呼び出し引数だけを見ると `purgeExpiredEvents` 側の実装を差し替えても検査が気づかないので、`FakeMemoryStore.purgeExpiredEvents` を実際に呼び、積んだイベントが消えるかで `olderThan` の計算・引数の受け渡しを検査する。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -87,14 +75,8 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
     const { memoryStore, eventStore, tenantSettingsStore } = createFakeRuntimeStores();
     await tenantSettingsStore.setEventRetention(ctx, { kind: "days", days: 30 });
     await seedOldEvent(memoryStore, eventStore, new Date("2000-01-01T00:00:00.000Z"));
-    // FakeMemoryStore は既定で purgeExpiredEvents と purgeExpiredEventsByRetention の両方を
-    // 実装している（Issue #1232 の修正）。ここでは「新しい原子的な口だけを持たない adapter」を
-    // 明示的に模す——`purgeExpiredEvents` はあえて残す（実装していても旧経路（`purgeExpiredEvents`
-    // への自動フォールバック）は無い、という決定そのものを検査するため）。⚠ `delete` は使わない:
-    // `purgeExpiredEventsByRetention` はクラスのプロトタイプに定義されたメソッドであり、インスタンス
-    // 自身のプロパティではないため `delete instance.method` は何もしない（プロトタイプ側がそのまま
-    // 見える）。`undefined` を明示的に代入することで、`MemoryStore.purgeExpiredEventsByRetention?` が
-    // 「存在しない」と判定される状態を作る。
+    // 新しい原子的な口だけを持たない adapter を模す。`purgeExpiredEvents` はあえて残す（旧経路への自動フォールバックは無い、という決定を検査するため）。
+    // `delete` は使わない: `purgeExpiredEventsByRetention` はプロトタイプのメソッドなので `delete instance.method` は何もしない。`undefined` を明示的に代入する。
     (memoryStore as { purgeExpiredEventsByRetention?: unknown }).purgeExpiredEventsByRetention =
       undefined;
     expect(memoryStore.purgeExpiredEvents).toBeDefined();
@@ -106,7 +88,6 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
     );
 
     expect(outcome).toEqual({ kind: "store_unsupported" });
-    // 1件も消えないこと（`purgeExpiredEvents` へは一切触れていない）。
     expect(await eventStore.list(ctx, {})).toHaveLength(1);
   });
 
@@ -115,7 +96,6 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
     await tenantSettingsStore.setEventRetention(ctx, { kind: "days", days: 7 });
 
     const now = new Date("2024-06-08T00:00:00.000Z");
-    // cutoff = now - 7日 = 2024-06-01T00:00:00.000Z
     await seedOldEvent(memoryStore, eventStore, new Date("2024-05-31T00:00:00.000Z")); // 対象
     await seedOldEvent(memoryStore, eventStore, new Date("2024-06-02T00:00:00.000Z")); // 対象外
 
@@ -130,7 +110,6 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
     expect(outcome.result.purged).toBe(1);
     expect(outcome.result.oldestPurgedAt).toEqual(new Date("2024-05-31T00:00:00.000Z"));
 
-    // 対象外の1件に加えて、`purged > 0` なので events_purged の要約行も1件積まれる。
     const remaining = await eventStore.list(ctx, {});
     const remainingOriginal = remaining.filter((e) => e.kind !== "events_purged");
     expect(remainingOriginal).toHaveLength(1);

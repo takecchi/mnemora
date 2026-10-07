@@ -2,14 +2,7 @@ import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import { omitParamsFromError } from "../failure-description.js";
 
-/**
- * ADR 0592（ADR 0423・0586 の系の歯の穴、確かめ直し）: `omitParamsFromError`（`../failure-description.ts`）の
- * 既存の歯がどれも捕まえなかった2つ。冪等は `standalone-functions-omit-params.test.ts` に歯があるので足さない。
- *
- * - 循環する `cause` でも止まる（`seen` の歯止め。外すと無限ループ）。無限ループは同期なので vitest の
- *   時間切れでは止まらない。`node:vm` の `timeout` で打ち切り、赤として観測できる形にする。
- * - 書き換えられない（凍結された）例外は、投げずにそのまま返す。
- */
+/** 循環する `cause` の無限ループは同期なので vitest の時間切れでは止まらない。`node:vm` の `timeout` で打ち切り、赤として観測できる形にする。冪等は `standalone-functions-omit-params.test.ts` に歯があるので足さない。 */
 
 const SECRET = "mnemora-core-omit-params-secret-5c1d";
 const SQL = 'Failed query: select * from "memories" where "id" = $1';

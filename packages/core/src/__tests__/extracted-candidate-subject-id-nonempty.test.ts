@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ExtractedMemoryCandidateSchema } from "../extraction.js";
 import { MemorySchema } from "../memory.js";
 
-/**
- * Issue #1778（#612 / ADR 0271 の確かめ直し）: 抽出候補の `subjectId` は、`Memory.subjectId`・`Observation.subjectId` と
- * 同じ規約（`string | null | undefined`、文字列なら空でない）で受ける（PR #612 の本文）。
- * 以前の歯は、候補の `subjectId` の値の優先順（`resolveCandidateSubjectId`）だけを見ていて、スキーマの `min(1)` を外しても
- * どれも赤にならなかった。ここではスキーマの段だけを縛る（空文字を返した LLM の応答が、端から端までどう扱われるかは見ない）。
- */
+/** ここではスキーマの段だけを縛る: 候補の `subjectId` の優先順（`resolveCandidateSubjectId`）だけを見る歯では、スキーマの `min(1)` を外しても赤にならない。 */
 const base = { content: "本文", provenanceKind: "stated" as const };
 
 describe("ExtractedMemoryCandidateSchema.subjectId は、Memory.subjectId と同じく空文字を受けない", () => {

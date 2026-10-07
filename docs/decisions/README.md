@@ -677,9 +677,11 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0680](./0680-merged-0930-front-tail-b-recheck-teeth-1511-1544.md) | 09/30 マージの前半の残り（B 群の #1511・#1512・#1519・#1521・#1526・#1535・#1540・#1544）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0681](./0681-merged-0928-recheck-teeth-b.md) | 09/28 にマージされた B 群4本（#1331・#1340・#1374・#1383）の確かめ直しで見つかった穴に歯を足す（Issue #1827） | 採用 (2026-10) |
 | [0682](./0682-merged-0928-recheck-teeth-c.md) | 09/28 にマージされた C 群3本（#1365・#1368・#1371）の確かめ直しで見つかった穴に歯を足す（Issue #1827） | 採用 (2026-10) |
+| [0683](./0683-merged-0917-g3-write-time-analyze-recheck-teeth.md) | 09/17 にマージされた #492・#502（`memories` への書き込み時 ANALYZE）の確かめ直しで見つかった穴に歯を足す（Issue #1812、まとまり G3） | 採用 (2026-10) |
 | [0684](./0684-merged-0928-recheck-teeth-d.md) | 09/28 にマージされた D 群7本（#1305・#1306・#1312・#1314・#1323・#1328・#1333）の確かめ直しで見つかった穴に歯を足す（Issue #1827） | 採用 (2026-10) |
 | [0685](./0685-merged-0928-recheck-teeth-e.md) | 09/28 にマージされた E 群（#1339・#1382）の確かめ直しで見つかった穴に歯を足す（Issue #1827） | 採用 (2026-10) |
 | [0686](./0686-merged-0930-front-tail-c-recheck-teeth-1457-1546.md) | 09/30 マージの前半の残り（C 群の #1457・#1477・#1530・#1531・#1546）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0689](./0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md) | 確かめ直し（Issue #1827）のあとの手当て——CAS に弾かれた対象のイベント・Fake の `stated`/`inferred`・`searchMany` の TSDoc・包みの `additionalProperties` | 採用 (2026-10) |
+| [0690](./0690-merged-0916-recheck-teeth-core-recall-gates.md) | 09/16 にマージされた G2（core の recall ゲート・排他・型）12本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

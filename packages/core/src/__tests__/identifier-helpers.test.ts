@@ -6,17 +6,6 @@ import {
   MalformedIdentifierError,
 } from "../identifier.js";
 
-/**
- * `findMalformedIdentifierPart`・`assertWellFormedFilter`（ADR 0423）の TSDoc が約束していることの直接の歯。
- *
- * `findMalformedIdentifierPart`: 識別子に含まれる**最初の**問題（孤立サロゲートか NUL）を返し、無ければ `null`。
- * 対をなすサロゲート（絵文字など）は問題にしない。`index` は UTF-16 のコードユニット単位・0 始まり。
- *
- * `assertWellFormedFilter`: `tenantId`・`subjectId` で絞る検索条件に、識別子と同じ検査を掛ける。`field` は例外に載る
- * 欄の名前（既定 `filter`、例 `opts.filter`）。**値は例外に載せない。** 文字列でない値・検索条件が無い（null・undefined）
- * ときは検査しない。
- */
-
 describe("findMalformedIdentifierPart", () => {
   it("問題の無い値（空文字・ASCII・日本語・対をなすサロゲート〔絵文字〕）は null", () => {
     for (const value of ["", "tenant-1", "テナント", "😀", "a😀b", "\u{10FFFF}", "😀😀"]) {
@@ -38,7 +27,6 @@ describe("findMalformedIdentifierPart", () => {
     });
     expect(findMalformedIdentifierPart("\uDC00")).toEqual({ reason: "lone_surrogate", index: 0 });
     expect(findMalformedIdentifierPart("ab\uDFFF")).toEqual({ reason: "lone_surrogate", index: 2 });
-    // 下位→上位の並びは対ではない（先頭の下位が孤立）。
     expect(findMalformedIdentifierPart("\uDE00\uD83D")).toEqual({
       reason: "lone_surrogate",
       index: 0,
@@ -59,7 +47,6 @@ describe("findMalformedIdentifierPart", () => {
       reason: "lone_surrogate",
       index: 4,
     });
-    // 複数あれば最初（NUL が先・孤立サロゲートが先のどちらでも）。
     expect(findMalformedIdentifierPart("a\u0000\uD800")).toEqual({ reason: "nul", index: 1 });
     expect(findMalformedIdentifierPart("a\uD800\u0000")).toEqual({
       reason: "lone_surrogate",

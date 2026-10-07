@@ -7,16 +7,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `forget` が store の `getMany` へ渡す id は、渡されたまま（小文字にしない）であること。
- *
- * `runtime.ts` の `memoryLookupKeyFor` は、store が返した id と渡された id を突き合わせるときだけ両側を
- * 小文字にする。**store へ渡す id は変えない**——在るかどうかは store が決め、Runtime はそれに従うだけ
- * （大文字小文字を区別する store では、大文字の id は `not_found` になる）。この約束は、渡す側を
- * 小文字にしても `fake-uppercase-target-id.test.ts`（結果だけを見る）では赤くならなかった
- * （2026-09-28 マージ分の確かめ直しで見つけた穴）。
- * ここでは `getMany` を記録して、渡された引数そのものを見る。
- */
+/** `memoryLookupKeyFor` は store が返した id と渡された id の突き合わせでだけ両側を小文字にし、store へ渡す id は変えない（在るかどうかは store が決める）。結果だけを見る `fake-uppercase-target-id.test.ts` では渡す側を小文字にしても赤くならないので、ここでは `getMany` を記録して渡された引数そのものを見る。 */
 
 const ctx: Ctx = { tenantId: "forget-store-id-passthrough" };
 const T0 = new Date("2026-06-01T00:00:00.000Z");
@@ -85,7 +76,6 @@ describe("forget: store の getMany へ渡す id は、渡されたまま（小�
 
     expect(getMany).toHaveBeenCalledTimes(1);
     expect(getMany.mock.calls[0]![1]).toEqual([upper, mixed]);
-    // 結果の memoryId も渡された綴りのまま。
     expect(result.outcomes).toMatchObject([
       { memoryId: upper, kind: "forgotten" },
       { memoryId: mixed, kind: "not_found" },

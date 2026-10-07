@@ -13,20 +13,7 @@ import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "../correction-candidates.js"
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.findCorrectionCandidates`（Issue #369 (C)「訂正の口」、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）の歯。
- *
- * 設計の要点（`runtime.ts` の `Runtime.findCorrectionCandidates` の doc コメント参照）:
- * - 記憶と監査ログには書き込まない（`markContested`/`resolveContested` の前に立つ。中の recall() が書く recall の記録は Issue #1244）。
- * - LLM を1回も呼ばない——相手探しは既存の `recall()`（ANN + 既存のスコア）だけ。
- * - 新しい閾値を置かない——`recall()` の既定（`scoreThreshold`）をそのまま通す。
- * - `recallRank` は `excludeMemoryIds` で除外した後も詰め直さない。
- * - `tick()`/`observe()` からは呼ばれない（`markContested` と同じ立場——本ファイルは
- *   `findCorrectionCandidates` を明示的に呼ぶことしかしない）。
- *
- * `@mnemora/testkit` には依存しない（`consolidate.test.ts`/`mark-contested.test.ts` と
- * 同じ理由——`runtime-fakes.ts` 冒頭のコメント参照）。
- */
+/** `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -78,12 +65,7 @@ function countingLlm(): LLMProvider & { calls: number } {
   return provider;
 }
 
-/**
- * `recall()` が実際に ANN 段まで進んだかどうかを、埋め込みの呼び出し回数で数えるための
- * 薄いラッパー（歯7用）。`recall()` は text クエリにつき `embeddingProvider.embed` を
- * 必ず1回呼ぶ（`recall-runtime.ts` の該当箇所）——`RangeError` で早期に落ちた呼び出しは
- * この回数を1つも増やさないはずである。
- */
+/** `recall()` が ANN 段まで進んだかを埋め込みの呼び出し回数で数える薄いラッパー。`RangeError` で早期に落ちた呼び出しはこの回数を増やさない。 */
 function countingEmbeddingProvider(inner: EmbeddingProvider): EmbeddingProvider & {
   calls: number;
 } {
@@ -117,11 +99,7 @@ function buildRuntime(llmProvider?: LLMProvider) {
   return { runtime, stores, embeddingSpy };
 }
 
-/**
- * `FakeEmbeddingProvider` は文字列長・'a' の数から決定的にベクトルを作る
- * （`runtime-fakes.ts` 参照）。`"seed"` → `[4, 0]`——`consolidate.test.ts` の
- * `{ seedMemoryId }` の歯と同じ約束事を流用する。
- */
+/** `FakeEmbeddingProvider` は文字列長・'a' の数から決定的にベクトルを作る。`"seed"` → `[4, 0]`。 */
 const QUERY_TEXT = "seed";
 
 async function createCandidate(
@@ -159,9 +137,7 @@ describe("runtime.findCorrectionCandidates — 候補が返る", () => {
 describe("runtime.findCorrectionCandidates — excludeMemoryIds が効く", () => {
   it("除外した id は candidates に無く、excludedCount が増え、残った候補の recallRank は詰め直さない", async () => {
     const { runtime, stores } = buildRuntime();
-    // [8, 0] は query [4, 0] と同じ向き ⟹ 類似度1.0（1位）。
     const first = await createCandidate(stores, [8, 0], { digest: "1位" });
-    // [8, 4] は [4, 0] からズレる ⟹ 類似度は1位より低いが、閾値(0.1)は超える（2位）。
     const second = await createCandidate(stores, [8, 4], { digest: "2位" });
 
     const result = await runtime.findCorrectionCandidates(ctx, {
@@ -174,7 +150,6 @@ describe("runtime.findCorrectionCandidates — excludeMemoryIds が効く", () =
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates.map((c) => c.memoryId)).not.toContain(first.id);
     expect(result.candidates[0]?.memoryId).toBe(second.id);
-    // ⭐ 詰め直さない: 1位を除外しても、残った候補の recallRank は「2」のまま。
     expect(result.candidates[0]?.recallRank).toBe(2);
   });
 });
@@ -182,7 +157,6 @@ describe("runtime.findCorrectionCandidates — excludeMemoryIds が効く", () =
 describe("runtime.findCorrectionCandidates — limit を守る", () => {
   it("既定では3件以下に切られる", async () => {
     const { runtime, stores } = buildRuntime();
-    // query [4, 0] から徐々に離れていく4つの候補（どれも閾値は超える）。
     await createCandidate(stores, [8, 0], { digest: "c1" });
     await createCandidate(stores, [8, 1], { digest: "c2" });
     await createCandidate(stores, [8, 2], { digest: "c3" });

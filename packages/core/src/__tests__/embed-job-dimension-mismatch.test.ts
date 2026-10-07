@@ -7,16 +7,6 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 
-/**
- * `Runtime.tick` の embed ジョブは、provider が返したベクトルの長さが
- * `embeddingProvider.space.dimensions` と違えば、ベクトルを書かずにジョブを失敗にし、
- * `embeddingStatus` を `'failed'` にする（2026-09-30、ADR 0393）。provider を問わず core が守る。
- *
- * 以前は次元違いをそのまま `vectorStore.upsert` へ渡していた。Postgres では pgvector の
- * `expected N dimensions` で落ちて原因が SQL の失敗に見え、InMemory / Fake は黙って `'ready'` で
- * 保存していた（`interfaces/vector-store.ts` の表）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
