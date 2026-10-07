@@ -63,15 +63,11 @@ describe("手元の `.` で始まるファイルも照合の対象になる", ()
   });
 
   it("tree に無い隠しファイル（`.marker`）が在ると赤（exit 1）で、名前を出す", async () => {
-    await withCache(
-      { "config.json": "{}\n", ".marker": "x\n" },
-      ["config.json"],
-      async (f) => {
-        const r = await runNodeScript(script, ["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-        expect(r.code).toBe(1);
-        expect(r.stdout).toContain(".marker");
-      },
-    );
+    await withCache({ "config.json": "{}\n", ".marker": "x\n" }, ["config.json"], async (f) => {
+      const r = await runNodeScript(script, ["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+      expect(r.code).toBe(1);
+      expect(r.stdout).toContain(".marker");
+    });
   });
 
   it("隠しディレクトリの中のファイル（`.hidden/blob`）も、tree に無ければ赤", async () => {

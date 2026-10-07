@@ -46,7 +46,9 @@ function stepsOf(jobLines) {
 
 const jobLines = jobOf(workflow, "example-chat");
 const steps = stepsOf(jobLines);
-const gate = steps.filter((s) => s.some((l) => l.includes("check-local-embedding-fingerprint.mjs")));
+const gate = steps.filter((s) =>
+  s.some((l) => l.includes("check-local-embedding-fingerprint.mjs")),
+);
 const cacheStep = steps.filter((s) => s.some((l) => /uses:\s*actions\/cache@/.test(l)));
 
 describe("重みの指紋の門の呼び方（example-chat ジョブ）", () => {
@@ -55,7 +57,7 @@ describe("重みの指紋の門の呼び方（example-chat ジョブ）", () => 
     expect(cacheStep).toHaveLength(1);
   });
 
-  it("呼び出しは `node scripts/check-local-embedding-fingerprint.mjs --cache-dir \"${MNEMORA_LOCAL_EMBEDDING_CACHE_DIR}\"` だけである（`--api-base` などを足さない）", () => {
+  it('呼び出しは `node scripts/check-local-embedding-fingerprint.mjs --cache-dir "${MNEMORA_LOCAL_EMBEDDING_CACHE_DIR}"` だけである（`--api-base` などを足さない）', () => {
     const text = gate[0].join("\n");
     const at = text.indexOf("node scripts/check-local-embedding-fingerprint.mjs");
     expect(at).toBeGreaterThan(-1);
@@ -91,5 +93,4 @@ describe("重みの指紋の門の呼び方（example-chat ジョブ）", () => 
       .trim();
     expect(envValue).toBe(cachePath);
   });
-
 });
