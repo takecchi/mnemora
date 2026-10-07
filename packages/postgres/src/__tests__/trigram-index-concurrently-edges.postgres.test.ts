@@ -86,7 +86,6 @@ async function indexState(
   return rows[0];
 }
 
-/** 自 DB で `query` が `pattern`（ILIKE）に当たる、走行中の backend の pid が出るまで待つ。 */
 async function waitForBackend(pool: Pool, pattern: string): Promise<number> {
   for (let i = 0; i < 100; i++) {
     const { rows } = await pool.query<{ pid: number }>(
@@ -102,11 +101,6 @@ async function waitForBackend(pool: Pool, pattern: string): Promise<number> {
   throw new Error(`${pattern} を実行している backend が見つからなかった`);
 }
 
-/**
- * 書き込みトランザクションを開いたまま `CREATE INDEX CONCURRENTLY` をキャンセルして、
- * INVALID な索引を実際に作る。`createSql` は表に対する `CREATE INDEX CONCURRENTLY ...`、
- * `insertSql` はその表に未完了の書き込みを置く文。
- */
 async function leaveInvalidIndex(pool: Pool, insertSql: string, createSql: string): Promise<void> {
   const holder = await pool.connect();
   const victim = createPostgresClient(requireDatabaseUrl(), {
@@ -172,7 +166,6 @@ describe("createOptionalTrigramIndexConcurrently: 消してよい索引は memor
        )`,
       `CREATE INDEX CONCURRENTLY ${OTHER_INDEX} ON memories ${CREATE_SIGNATURE}`,
     );
-    // 前提: 別名の INVALID な索引が実際に残っている。
     expect((await indexState(pool, OTHER_INDEX))?.valid).toBe(false);
 
     await createOptionalTrigramIndexConcurrently(db);
@@ -202,7 +195,6 @@ describe("createOptionalTrigramIndexConcurrently: 消してよい索引は memor
       );
       return rows[0]?.valid;
     };
-    // 前提: 別スキーマに INVALID な同名の索引が実際に残っている。
     expect(await otherState()).toBe(false);
 
     await createOptionalTrigramIndexConcurrently(db);
@@ -216,7 +208,6 @@ describe("createOptionalTrigramIndexConcurrently: INVALID な索引を消すと�
   it("DROP は AccessExclusiveLock を要求せず、待っている間も別接続の INSERT は通る", async () => {
     if (!supported) return;
     const { db, pool } = await getTestClient();
-    // 前提: INVALID な idx_memories_trigram を作る。
     await leaveInvalidIndex(
       pool,
       `INSERT INTO memories (

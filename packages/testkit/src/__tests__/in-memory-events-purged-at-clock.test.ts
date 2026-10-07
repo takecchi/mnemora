@@ -5,7 +5,6 @@ import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
 /**
- * インメモリ実装の `events_purged` の `at` も、store を動かすプロセスの時計の値そのまま。
  * 時計を固定して値を見るのは、「読み戻した `at` が `since`/`until` の端に当たる」だけを見る歯では、
  * どの時刻を入れても緑のままだから。固定する時刻は、消す対象の時刻・`olderThan` と違う値にする。
  */

@@ -7,8 +7,6 @@ import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles, runMigrations } from "../mi
 import { requireDatabaseUrl } from "./test-db.js";
 
 /**
- * 台帳のずれの警告（`runMigrations`）の、境目と文面。専用スキーマの中で走らせ、`public` の台帳には触れない。
- *
  * - 警告の spy は最初の `runMigrations` より前に置く。台帳が空の最初の適用で「番号の最大」が
  *   定まらないまま警告を出す実装は、あとから spy を置く形では見えない。
  * - 台帳の最大と同じ番号の未適用ファイルは「小さい番号」ではないので警告しない。

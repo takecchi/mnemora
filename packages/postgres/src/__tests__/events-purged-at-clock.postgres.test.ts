@@ -5,8 +5,6 @@ import { PostgresEventStore } from "../event-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `events_purged` の `at` は、store を動かすプロセスの時計（`new Date()`）の値そのまま。
- *
  * 時計を固定して値を見るのは、「ミリ秒に揃っている」だけを見る歯では、どの時刻を入れても緑のままだから。
  * 固定する時刻は、消す対象の時刻・`olderThan`・実際の現在時刻のどれとも違う値にする。
  * 他の時刻（`olderThan`・消した行の `at`・DB の `now()` を丸めた値）を入れる実装との違いは、
