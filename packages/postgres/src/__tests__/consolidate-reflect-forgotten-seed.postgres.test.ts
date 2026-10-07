@@ -28,18 +28,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1136: `consolidate` / `reflect` の `{ seedMemoryId }` 形は、種が forget・purge された
- * 記憶なら近傍を集めない。forget と purge は、利用者が「使わないでほしい」と言った記憶である。
- * その `digest` を検索語にして近傍を束ねると、消した情報が別の形で効き続ける（#897 / ADR 0124 が
- * observe の再送で「消した情報が蘇るので抽出をやり直さない」と決めたのと同じ線。クローン miku の
- * 判断）。対象は種1件だけになり、種が見つからないときと同じく既存の分類
- * （`status_not_active(forgotten)` → `no_eligible_sources` / `no_eligible_basis`）に落ちる。
- *
- * 直接呼び出しと自動 job（`tick` 経由、ADR 0157）の両方を、Postgres と testkit の fixture で当てる。
- * 近傍は種と同じ本文にして（決定的な埋め込みで類似度 1）、既定の `minAffinity` でも確実に拾われる
- * 形にしてある——直す前は、近傍2件が統合・内省されていた（赤）。
- */
+/** 近傍は種と同じ本文にして（決定的な埋め込みで類似度 1）、既定の `minAffinity` でも確実に拾われる形にしてある。 */
 
 type Backend = "postgres" | "testkit";
 

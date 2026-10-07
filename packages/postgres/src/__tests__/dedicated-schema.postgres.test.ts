@@ -17,32 +17,8 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * 「専用スキーマを使う側が指定できる」（feat/dedicated-schema）の適合テスト。
- *
- * `schema-namespace-probe.postgres.test.ts`（🔬 段1の測定用の探針、既に削除済み）が
- * 本物の PostgreSQL に対して測った性質のうち、実装（`schema-namespace.ts` /
- * `migrate.ts` / `vector-space.ts` / `client.ts`）が採用した設計に対応する部分を、
- * ここで「契約」として置き直す。探針の doc がそう約束していた
- * （「設計判断が済んで実装が入ったら、ここで測った性質は本物の適合テストへ移し、
- * このファイルは消す」）。
- *
- * ## 探針から運ばなかったもの
- *
- * - 測定5（`ALTER TABLE ... SET SCHEMA` で既存環境を後から移す）: 実装のどの関数も
- *   この操作を行わない。移行手順そのものが製品コードに存在しないため、適合テストの
- *   対象が無い。
- * - 測定6b（既に別スキーマに在る拡張へ `WITH SCHEMA public` 付き
- *   `CREATE EXTENSION IF NOT EXISTS` を撃ったときの挙動）: `extensionSchema` の既定値
- *   （`DEFAULT_EXTENSION_SCHEMA = "public"`）を変える呼び出しは実装が公開していない
- *   経路であり、ここでは確認していない。
- *
- * ## 🔴 探針の唯一の赤の原因（この歯で踏まないための注意）
- *
- * `to_regclass(...)::text` は、`search_path` から到達できるスキーマ修飾を**描画時に
- * 省く**。つまり結果の文字列は `search_path` の中身で変わる——「存在するか」を
- * `::text` の文字列一致で問うと、`search_path` が変われば同じ問い合わせでも別の
- * 文字列を返し、偽陰性/偽陽性になる。ここでは常に `IS NOT NULL`（存在の有無）か
- * `::oid`（同一性の比較）で問い、`::text` の文字列一致は使わない。
+ * `to_regclass(...)::text` は、`search_path` から到達できるスキーマ修飾を描画時に省くので、結果の文字列は `search_path` の中身で変わる。
+ * 「存在するか」を `::text` の文字列一致で問うと偽陰性/偽陽性になるので、常に `IS NOT NULL`（存在の有無）か `::oid`（同一性の比較）で問う。
  */
 
 const DOMAIN_TABLES = [
@@ -98,11 +74,7 @@ async function createBlankDatabase(database: string): Promise<Pool> {
   return pool;
 }
 
-/**
- * `qualifiedName` は `'"schema"."name"'` の形（二重引用符込み）で渡す。
- * `to_regclass` へパラメータとして渡すので SQL 文字列へ埋め込まない
- * （`::text` へ落とさず `::oid` で比較する——冒頭 doc の注意点参照）。
- */
+/** `qualifiedName` は `'"schema"."name"'` の形（二重引用符込み）で渡す。`to_regclass` へパラメータとして渡し、SQL 文字列へ埋め込まない。 */
 async function regclassOid(pool: Pool, qualifiedName: string): Promise<string | null> {
   const { rows } = await pool.query<{ oid: string | null }>(
     "SELECT to_regclass($1)::oid::text AS oid",
@@ -141,11 +113,8 @@ async function foreignKeyTargets(pool: Pool, schema: string, table: string): Pro
 }
 
 /**
- * `schema` の `memory_events` に付いている CHECK 制約の定義文字列一覧
- * （`pg_get_constraintdef` の出力）。`foreignKeyTargets` と同じく `nspname` を
- * 明示的にパラメータで絞る——`relname` だけで絞ると、同じ DB に同居する別スキーマの
- * `memory_events` まで一緒に拾ってしまう（migrations/0011 が実際に踏んだ形と同じ穴を
- * この歯自身に持ち込まないため）。
+ * `schema` の `memory_events` に付いている CHECK 制約の定義文字列一覧（`pg_get_constraintdef` の出力）。
+ * `nspname` を明示的にパラメータで絞る。`relname` だけで絞ると、同じ DB に同居する別スキーマの `memory_events` まで拾ってしまう。
  */
 async function memoryEventsKindCheckDefs(pool: Pool, schema: string): Promise<string[]> {
   const { rows } = await pool.query<{ def: string }>(
@@ -175,22 +144,18 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
   it("測定1: public に本番一式が在る DB で、専用スキーマ（mnemora_alt）へ隔離して適用できる", async () => {
     const pool = await createBlankDatabase(DB_ISOLATE);
 
-    // 既定経路: public に本番一式。
     await runMigrations(pool);
 
-    // 専用スキーマへ同じ一式を適用する。
     const result = await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "mnemora_alt" });
 
-    // 期待値をハードコードしない（migrate.ts の doc: migrations/ が増えるたびに
-    // 書き換える羽目になる歯にしないため）。
+    // 期待値をハードコードしない（migrations/ が増えるたびに書き換える羽目になる歯にしないため）。
     expect(result.applied).toEqual(listMigrationFiles(DEFAULT_MIGRATIONS_DIR));
 
     const altMemoriesOid = await regclassOid(pool, qualifiedName("mnemora_alt", "memories"));
     const publicMemoriesOid = await regclassOid(pool, qualifiedName("public", "memories"));
 
     expect(altMemoriesOid, "mnemora_alt.memories が存在すること").not.toBeNull();
-    // 🔴 public 側が無傷であることは IS NOT NULL（存在の有無）で見る。
-    // to_regclass(...)::text の文字列一致にしない（冒頭 doc 参照）。
+    // public 側が無傷であることは IS NOT NULL（存在の有無）で見る（`::text` の文字列一致にしない）。
     expect(publicMemoriesOid, "public.memories が無傷であること").not.toBeNull();
     expect(altMemoriesOid, "public 側と専用スキーマ側は別の relation であること").not.toBe(
       publicMemoriesOid,
@@ -224,7 +189,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
   it("測定3: まっさらな DB でも2つ目のスキーマが壊れない（拡張は既定で public に置かれる）", async () => {
     const pool = await createBlankDatabase(DB_FRESH_EXT);
 
-    // まっさらな DB（schema 無しの runMigrations を先に通さない）。
     await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "s1" });
     await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "s2" });
 
@@ -233,8 +197,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
       expect(namespace, `拡張 ${ext} が public に在ること（s1 に入っていないこと）`).toBe("public");
     }
 
-    // 🔴 ここが直接の負の対照: s2 側から vector 型が解決できないと
-    // registerEmbeddingSpace 自体が CREATE TABLE の時点で失敗する。
     await expect(
       registerEmbeddingSpace(pool, VECTOR_SPACE, { schema: "s2" }),
     ).resolves.toMatchObject({ lock: { waitedMs: expect.any(Number) } });
@@ -270,9 +232,7 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
 
   it("測定5（端から端まで）: createPostgresClient({ schema }) で書いた行は <schema>.memories に入り、public.memories には入らない", async () => {
     const pool = await createBlankDatabase(DB_CLIENT);
-    // 既定経路（public）と専用スキーマの両方を同じ DB に用意する
-    // ——「DML を1行も変えずに search_path で効く」ことを見るには、
-    // public 側にも同じ形の一式が在って初めて「入らなかった」ことに意味が出る。
+    // 既定経路（public）と専用スキーマの両方を同じ DB に用意する。public 側にも同じ形の一式が在って初めて「入らなかった」ことに意味が出る。
     await runMigrations(pool);
     await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "mnemora_client" });
 
@@ -324,10 +284,9 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
     async () => {
       const pool = await createBlankDatabase(DB_VECTOR_STORE);
 
-      // 既定経路（public）と専用スキーマの両方に同じ一式（migrations + 埋め込みテーブル）を
-      // 用意する。「そちらを読んでいない」ことを言うには、そちらにも読める形が在って
-      // 初めて意味が出る（測定5と同じ理由）。埋め込みテーブルも public 側に無いと、
-      // 後段で public 側を件数0で確認できない（relation does not exist で落ちるだけになる）。
+      // 既定経路（public）と専用スキーマの両方に同じ一式（migrations + 埋め込みテーブル）を用意する。
+      // 「そちらを読んでいない」ことを言うには、そちらにも読める形が在って初めて意味が出る。
+      // 埋め込みテーブルも public 側に無いと、後段で public 側を件数0で確認できない（relation does not exist で落ちるだけになる）。
       await runMigrations(pool);
       await registerEmbeddingSpace(pool, VECTOR_SPACE);
 
@@ -341,18 +300,8 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
         const vectorStore = new PostgresVectorStore(client.db);
         const ctx: Ctx = { tenantId: "tenant-dedicated-schema-vector-store" };
 
-        // provenanceKind に実際に使える値: migrations/0001_init.sql の
-        // memories_provenance_kind_check は5値
-        // ('stated'|'inferred'|'consolidated'|'reflected'|'imported') を許すが、
-        // 同ファイルのもう1つの CHECK
-        // `CHECK (provenance_kind NOT IN ('stated','inferred') OR source_observation_id IS NOT NULL)`
-        // により 'stated'/'inferred' は実在する Observation を指す source_observation_id を
-        // 要求する。ここでは sourceObservationId を用意しない（buildNewMemoryFixture の
-        // 既定は null）ため、その2値は使わない——testkit の buildProvenanceFixture が
-        // まさにこの理由で 'stated'/'inferred' を throw で弾き、'consolidated'/'reflected'/
-        // 'imported' だけを作る（test-data.ts の doc コメント参照）。ADR 0056 の適合テスト
-        // （vector-store-conformance.ts の excludeProvenanceKinds の歯）と同じ2値
-        // （'imported' = 残す側、'consolidated' = 除外する側）を選ぶ。
+        // provenanceKind は 'imported'（残す側）と 'consolidated'（除外する側）を使う。
+        // 'stated'/'inferred' は CHECK により実在する Observation を指す source_observation_id を要求するが、ここでは用意しない。
         const excludedMemory = await memoryStore.createMemory(
           ctx,
           buildNewMemoryFixture({
@@ -371,7 +320,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
         await vectorStore.upsert(ctx, VECTOR_SPACE, excludedMemory.id, [1, 0, 0]);
         await vectorStore.upsert(ctx, VECTOR_SPACE, keptMemory.id, [0, 1, 0]);
 
-        // excludeProvenanceKinds 無し: 2件とも返る（前提が成り立っていることの確認）。
         const bothHits = await vectorStore.search(ctx, VECTOR_SPACE, [1, 0, 0], {
           limit: 10,
           filter: { tenantId: ctx.tenantId },
@@ -385,10 +333,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
         );
         expect(bothIds, "excludeProvenanceKinds 無しなら2件ちょうどであること").toHaveLength(2);
 
-        // excludeProvenanceKinds: ['consolidated'] → 残す側（imported）1件だけ返る。
-        // この1文には動的識別子（sql.identifier(table)）・memories との JOIN・
-        // 拡張の型 ::vector・ADR 0056 が足した m.provenance_kind <> ALL(...) がすべて載る
-        // ——search_path 方式がこの1文全体に効いていることを、この歯が測る。
         const filteredHits = await vectorStore.search(ctx, VECTOR_SPACE, [1, 0, 0], {
           limit: 10,
           filter: { tenantId: ctx.tenantId, excludeProvenanceKinds: ["consolidated"] },
@@ -399,12 +343,8 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
           "excludeProvenanceKinds: ['consolidated'] なら残す側（imported）1件だけ返ること",
         ).toEqual([keptMemory.id]);
 
-        // 🔴 public 側が読まれていないことを直接示す。ここは client ではなく生の pool で問う
-        // ——pool（admin() ではなく createBlankDatabase が返すこの DB 専用の Pool）は
-        // search_path を一切設定していない（createPostgresClient の schema オプションを
-        // 渡していない生の Pool）ため、常に既定の public を見る。client（search_path の
-        // 先頭が専用スキーマ）で書いた行が万一 public 側にも漏れていたら、この
-        // 「同じ問いを非対称な経路で投げる」ことでしか検出できない。
+        // public 側が読まれていないことは、client ではなく生の pool で問う。pool は search_path を設定していないので常に既定の public を見る。
+        // client（search_path の先頭が専用スキーマ）で書いた行が万一 public 側にも漏れていたら、同じ問いを非対称な経路で投げることでしか検出できない。
         const embeddingTable = embeddingSpaceTableName(VECTOR_SPACE);
         const publicMemories = await pool.query<{ n: string }>(
           `SELECT count(*)::text AS n FROM public.memories WHERE tenant_id = $1`,
@@ -429,14 +369,9 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
     },
   );
 
-  // 🔴 安全監査（miku 委譲・オーナー本人の判断ではない）: `assertSafeSchemaName`
-  // （`schema-namespace.ts`）は文字種（`^[a-z_][a-z0-9_]*$`）と長さしか見ないため、
-  // PostgreSQL の完全予約語（`user`/`select`/`table` 等、すべて小文字の英字だけで
-  // 構成される）もそのまま通す。`client.ts` の起動パラメータ（`-c search_path=...`）は
-  // SQL の構文解析を経ないため予約語でも問題なく動くが、`migrate.ts` の
-  // `SET LOCAL search_path TO ...` は通常の SQL 文として解析されるため、
-  // 予約語を引用符無しで埋め込むと構文エラーになる。`user` は実在しうるスキーマ名
-  // （テナントのアカウント種別を反映した命名等）であり、悪意の無い入力である。
+  // `assertSafeSchemaName` は文字種と長さしか見ないので、予約語（`user` 等）も通る。`client.ts` の起動パラメータ（`-c search_path=...`）は
+  // SQL の構文解析を経ないので問題ないが、`migrate.ts` の `SET LOCAL search_path TO ...` は通常の SQL 文として解析されるので、
+  // 予約語を引用符無しで埋め込むと構文エラーになる。
   it("測定8: 予約語スキーマ名（`user`）でも runMigrations / createPostgresClient / 検索が壊れない", async () => {
     const pool = await createBlankDatabase(DB_RESERVED_WORD_SCHEMA);
 
@@ -470,33 +405,19 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
     }
   });
 
-  // 🔴 探針からの移植ではない（測定1〜7と違い、この歯は元の
-  // schema-namespace-probe.postgres.test.ts に対応物を持たない）。
-  // PR #226 / Issue #195 / ADR 0122 決定5: `migrations/0011_memory_events_kind_restored.sql`
-  // の `DO $$ ... $$` が、張り替え対象の CHECK 制約を `pg_class.relname = 'memory_events'`
-  // だけで特定していた。専用スキーマを同居させると（測定2・3と同じ形）候補が2件以上に
-  // なり、その安全弁（`RAISE EXCEPTION`）が発火して CI が赤くなった
-  // （`dedicated-schema.postgres.test.ts` 測定1・2・3・5・7 と `migrate-cli-schema.
-  // postgres.test.ts` 全5件が、移行そのものの失敗として道連れで落ちた）。
-  // 安全弁は設計どおり働いた——直したのは 0011 の絞り込み側（`pg_table_is_visible`
-  // を足した）。この歯は、既存の測定群が結果的に（移行全体の成否として）捕まえていた
-  // ものを、直接（張り替えが正しいスキーマにだけ効いたことそのものを）測る。
+  // 既存の測定群が移行全体の成否として間接的に捕まえていたものを、張り替えが正しいスキーマにだけ効いたことそのものとして直接測る。
   it(
     "追加: 移行0011（memory_events.kind の CHECK 制約張り替え）は、専用スキーマが" +
       "同居していても現在のスキーマの制約だけを張り替える",
     async () => {
       const pool = await createBlankDatabase(DB_KIND_CONSTRAINT_SCOPE);
 
-      // 測定2・3と同じ形: 1つの DB に専用スキーマを2つ同居させる。
       await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "mnemora_kc_a" });
       await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "mnemora_kc_b" });
 
       for (const schema of ["mnemora_kc_a", "mnemora_kc_b"]) {
         const defs = await memoryEventsKindCheckDefs(pool, schema);
-        // memory_events.kind に関する CHECK 制約は常に2本（IN リスト側 +
-        // events_purged 側、0001_init.sql）——0011 は張り替えるだけで本数は増減しない。
         expect(defs, `${schema}: kind の CHECK 制約が2本であること`).toHaveLength(2);
-        // そのうち 'restored' を許す（= 0011 が実際に張り替えた）ものがちょうど1本。
         const restoredDefs = defs.filter((def) => def.includes("'restored'"));
         expect(
           restoredDefs,
@@ -506,10 +427,7 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
     },
   );
 
-  // レビュー所見8: `PostgresVectorStore.deleteAcrossSpaces`（Issue #1425、ADR 0382）が
-  // `current_schema()` の中の全 space だけを対象にすることを、専用スキーマ上で確かめる。
-  // 測定5・測定7と同じ理由で、public 側にも同じ space・同じ tenantId の行を用意し、
-  // 取り違えたら赤になる形にする。
+  // public 側にも同じ space・同じ tenantId の行を用意し、スキーマを取り違えたら赤になる形にする。
   it(
     "測定9: PostgresVectorStore.deleteAcrossSpaces は専用スキーマの中の全 space だけを消し、" +
       "public 側の同名テーブルの行には触らない",
@@ -520,9 +438,7 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
       await runMigrations(pool);
       await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema });
 
-      // 同じ space id を public・専用スキーマの両方に登録する——space id が同じなら
-      // embeddingSpaceTableName が返す名前も同じになるため、スキーマ違いの「同名テーブル」を
-      // 意図的に作る。
+      // 同じ space id を public・専用スキーマの両方に登録する（space id が同じなら `embeddingSpaceTableName` が返す名前も同じになるため、スキーマ違いの「同名テーブル」を意図的に作る）。
       const spaceA: EmbeddingSpaceId = {
         provider: "test",
         model: "dedicated-schema-delete-across-a",
@@ -550,8 +466,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
 
         const ctx: Ctx = { tenantId: "tenant-dedicated-schema-delete-across-spaces" };
 
-        // 専用スキーマ側: 消す対象（target、space A・B 両方に embedding を持つ）と、
-        // 残るはずの対照（control、space A だけに embedding を持つ）。
         const target = await dedicatedMemoryStore.createMemory(
           ctx,
           buildNewMemoryFixture({ contentHash: "das-target" }),
@@ -564,21 +478,18 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
         await dedicatedVectorStore.upsert(ctx, spaceB, target.id, [0, 1, 0]);
         await dedicatedVectorStore.upsert(ctx, spaceA, control.id, [0, 0, 1]);
 
-        // public 側: 同じ tenantId・同じ space の「おとり」。
         const publicDecoy = await publicMemoryStore.createMemory(
           ctx,
           buildNewMemoryFixture({ contentHash: "public-decoy" }),
         );
         await publicVectorStore.upsert(ctx, spaceA, publicDecoy.id, [1, 1, 1]);
 
-        // 前提の確認（消す前）。
         expect(await dedicatedVectorStore.getVectors(ctx, spaceA, [target.id])).toHaveLength(1);
         expect(await dedicatedVectorStore.getVectors(ctx, spaceB, [target.id])).toHaveLength(1);
         expect(await publicVectorStore.getVectors(ctx, spaceA, [publicDecoy.id])).toHaveLength(1);
 
         await dedicatedVectorStore.deleteAcrossSpaces(ctx, [target.id]);
 
-        // target: 専用スキーマの space A・B 両方から消えていること。
         expect(
           await dedicatedVectorStore.getVectors(ctx, spaceA, [target.id]),
           "専用スキーマの space A から target が消えていること",
@@ -588,14 +499,11 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
           "専用スキーマの space B から target が消えていること",
         ).toHaveLength(0);
 
-        // control: 専用スキーマの space A に残っていること（対象外の memoryId まで
-        // 巻き込んでいないこと）。
         expect(
           await dedicatedVectorStore.getVectors(ctx, spaceA, [control.id]),
           "専用スキーマの control は残っていること",
         ).toHaveLength(1);
 
-        // public: 一切触っていないこと（🔴 スキーマを取り違える変異が無いと踏めない対照）。
         expect(
           await publicVectorStore.getVectors(ctx, spaceA, [publicDecoy.id]),
           "public 側の同名テーブルの行は消えずに残っていること",
@@ -607,10 +515,7 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
     },
   );
 
-  // レビュー所見8: `PostgresMemoryStore.findContestedByClaimKey`（Issue #933 案2、ADR 0378）が
-  // 専用スキーマの中の行だけを返すことを確かめる。`memories` は search_path 解決（未修飾の
-  // `FROM memories`）に頼っているため、測定5・測定7と同じ形で public 側にも同じ claimKey の
-  // 「おとり」を用意し、取り違えたら混入する形にする。
+  // `memories` は search_path 解決（未修飾の `FROM memories`）に頼っているため、public 側にも同じ claimKey の「おとり」を用意し、取り違えたら混入する形にする。
   it(
     "測定10: PostgresMemoryStore.findContestedByClaimKey は専用スキーマの中の contested な記憶だけを返し、" +
       "public 側の同名テーブルの行は返さない",
@@ -634,7 +539,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
           predicate: "dedicated-schema-find-contested",
         };
 
-        // 専用スキーマ側に対抗ペア（status='contested'）を作る。
         const dedicatedA = await dedicatedStore.createMemory(
           ctx,
           buildNewMemoryFixture({ contentHash: "dedicated-a", claimKey }),
@@ -655,7 +559,6 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
           },
         );
 
-        // public 側にも同じ tenantId・同じ claimKey で対抗ペアの「おとり」を作る。
         const publicA = await publicStore.createMemory(
           ctx,
           buildNewMemoryFixture({ contentHash: "public-a", claimKey }),

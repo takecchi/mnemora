@@ -1,20 +1,13 @@
-// `readme-unbound-promises.postgres.test.ts` が子プロセスとして起動する
-// （README「pool の `error`: 既定で名乗り、`onPoolError`/自分の `pool.on` で黙らせる」）。
+// `readme-unbound-promises.postgres.test.ts` が子プロセスとして起動する。
 //
-// pool に待機中の接続を1本置き、別の接続からそれを切り、500ms 待ってから次の問い合わせを打つ。
-// 引数で経路を切り替える:
+// pool に待機中の接続を1本置き、別の接続からそれを切り、500ms 待ってから次の問い合わせを打つ。引数で経路を切り替える:
 //
-// - 引数無し（既定）: `onPoolError` も `pool.on("error", …)` も付けない。`createPostgresClient`
-//   が付ける既定のリスナーが名乗るだけで、プロセスは落ちない（Issue #1213 で反転した振る舞い）。
+// - 引数無し（既定）: `onPoolError` も `pool.on("error", …)` も付けない。`createPostgresClient` が付ける既定のリスナーが名乗るだけで、プロセスは落ちない。
 // - `onPoolError`: `config.onPoolError` を渡す。それだけが呼ばれ、既定の警告は出ない。
-// - `listen-before`: `client.pool.on("error", …)` を、接続を張る前（`createPostgresClient` の
-//   直後）に付ける。既定の警告は出ない。
-// - `listen-after`: 同じリスナーを、接続を張ってから（`SELECT pg_backend_pid()` の後）・
-//   切る前に付ける。既定の警告は出ない——付けた順番に依らないことを確かめる側。
-// - `raw`: 陽性対照。`createPostgresClient` を経由しない素の `pg.Pool`（`error` リスナー無し）を使う。
-//   `pg_terminate_backend` が本当に `Pool` の `error` を発火させ、リスナーが無ければプロセスが
-//   落ちることを示す——`createPostgresClient` 側の実装がどうであれ、fault injection 自体が
-//   実在することを独立に確かめる。
+// - `listen-before`: `client.pool.on("error", …)` を、接続を張る前（`createPostgresClient` の直後）に付ける。既定の警告は出ない。
+// - `listen-after`: 同じリスナーを、接続を張ってから（`SELECT pg_backend_pid()` の後）・切る前に付ける。既定の警告は出ない。付けた順番に依らないことを確かめる側。
+// - `raw`: 陽性対照。`createPostgresClient` を経由しない素の `pg.Pool`（`error` リスナー無し）を使い、
+//   `pg_terminate_backend` が本当に `Pool` の `error` を発火させ、リスナーが無ければプロセスが落ちることを示す。
 import { Pool } from "pg";
 import { createPostgresClient } from "../../client.js";
 

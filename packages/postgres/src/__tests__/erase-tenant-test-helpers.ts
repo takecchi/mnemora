@@ -14,16 +14,7 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import type { getTestClient } from "./test-db.js";
 import { TEST_EMBEDDING_SPACE } from "./test-db.js";
 
-/**
- * `eraseTenant`（Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）
- * のテストファイル群が共有する、テナントに「全表に最低1行」を作るための道具。
- * `erase-tenant.postgres.test.ts`・`erase-tenant-all-tenant-tables.postgres.test.ts`・
- * `erase-tenant-reobserve-fresh.postgres.test.ts` が使う。
- *
- * `S`（秘密の目印）は呼び出し側が渡す——`erase-tenant-all-tenant-tables.postgres.test.ts`
- * は独自の目印を使い、`erase-tenant.postgres.test.ts` は別の目印を使う（並行実行時に
- * 同じ文字列一致で互いのデータを拾わないため）。
- */
+/** `S`（秘密の目印）は呼び出し側が渡す。ファイルごとに別の目印を使うのは、並行実行時に同じ文字列一致で互いのデータを拾わないため。 */
 export function vecFor(seed: string): (text: string) => number[] {
   return (text: string): number[] => {
     const h = createHash("sha256").update(seed).update(text).digest();
@@ -81,12 +72,7 @@ export function buildEraseTenantTestRuntime(
   } as never);
 }
 
-/**
- * このテナントについて、`eraseTenant` が消す全表（`memories`・`observations`・
- * `memory_events`・`recalls`・`recall_usages`・`outbox`・`labels`・`memory_labels`・
- * `tenant_activity`・`tenant_subject_activity`・`tenant_settings`・埋め込み空間の表）に
- * 最低1行を作る。
- */
+/** このテナントについて、`eraseTenant` が消す全表に最低1行を作る。 */
 export async function seedAllTablesForTenant(
   runtime: ReturnType<typeof buildEraseTenantTestRuntime>,
   tenantSettingsStore: PostgresTenantSettingsStore,
@@ -95,9 +81,7 @@ export async function seedAllTablesForTenant(
 ): Promise<void> {
   const subjectId = `${S}-subject`;
   const ctx: Ctx = { tenantId, subjectId };
-  // decayClock を進めておかないと `advanceActivityClock` が常に false のまま
-  // （`tenant_activity`/`tenant_subject_activity` に行が作られない。`recall-runtime.ts`
-  // 参照）。
+  // decayClock を進めておかないと `advanceActivityClock` が常に false のままで、`tenant_activity`/`tenant_subject_activity` に行が作られない。
   await tenantSettingsStore.setDecayClock(ctx, "either" as never);
 
   for (let i = 0; i < 6; i++) {
@@ -118,13 +102,11 @@ export async function seedAllTablesForTenant(
     } as never);
     if (r.processed === 0) break;
   }
-  // tenant_activity（テナント単位カウンタ）。
   await runtime.recall(ctx, {
     text: `${S} の問い`,
     limit: 3,
     activityCounting: "tenant",
   } as never);
-  // tenant_subject_activity（subject 単位カウンタ）。
   const recalled = await runtime.recall(ctx, {
     text: `${S} の問い2`,
     limit: 3,
@@ -135,6 +117,6 @@ export async function seedAllTablesForTenant(
     recallId: recalled.recallId,
     usedMemoryIds: recalled.memories.slice(0, 1).map((m: { memoryId: unknown }) => m.memoryId),
   } as never);
-  // tenant_settings。observe/tick/recall だけでは行が作られない。
+  // observe/tick/recall だけでは `tenant_settings` の行が作られない。
   await tenantSettingsStore.setEventRetention(ctx, { kind: "unlimited" } as never);
 }

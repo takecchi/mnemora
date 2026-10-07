@@ -6,14 +6,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `findActiveByClaimKey`・`findContestedByClaimKey` の有効期間の重なりは、半開区間
- * `[validFrom, validUntil)` の重なり（interface の doc）。**空の区間（`validFrom === validUntil`）と逆転した区間
- * （`validFrom > validUntil`）は点を1つも含まない**ので、何とも重ならない——問い合わせ側でも、保存済みの行の側でも。
- *
- * 【実測 2026-10-01】直す前は、`a1 < b2 AND a2 < b1` の式が空・逆転した区間にも当てはまり、**どの `recall()` の
- * 時点でも真にならない記憶（`validAt` ゲートを通らない）が、有効な記憶と「重なる」として矛盾（contested）を作った**
- * （3実装とも同じ。Runtime の `claimKey: { detectContested: true }` で、有効な記憶まで `contested` になった）。
- *
+ * 空の区間（`validFrom === validUntil`）と逆転した区間（`validFrom > validUntil`）は点を1つも含まないので、何とも重ならない。
  * 各 `it` は先に陽性対照（普通の区間は重なる・端が接するだけなら重ならない・両端 null は重なる）を見て、
  * 探り棒が生きていることを示してから、空・逆転した区間を当てる。
  */

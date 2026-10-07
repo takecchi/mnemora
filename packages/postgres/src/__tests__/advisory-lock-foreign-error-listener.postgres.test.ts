@@ -7,12 +7,7 @@ import {
 } from "../advisory-lock.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * `acquireAdvisoryLock` が借りた接続に付ける空の `error` リスナーは、`releaseAdvisoryLock` が外すとき
- * **同じ関数参照の1つだけ**を外す（`NOOP_CLIENT_ERROR_HANDLER` の doc は、`on`/`removeListener` の
- * 両方に同じ参照を使うことを求めている）。接続に別の持ち主が付けた `error` リスナーまでは外さない。
- * （`advisory-lock-cleanup.postgres.test.ts` は、自分のリスナーが残らないことの側だけを見ている。）
- */
+/** 外すのは自分が付けた同じ関数参照の1つだけで、接続に別の持ち主が付けた `error` リスナーは外さない。 */
 
 const errors: AdvisoryLockErrorFactories = {
   timeout: (waitedMs, cause) => Object.assign(new Error(`timeout after ${waitedMs}ms`), { cause }),
@@ -37,7 +32,6 @@ describe("releaseAdvisoryLock: 外すのは自分が付けた error リスナー
     client.on("error", foreign);
     await releaseAdvisoryLock(client, 9_859_001n);
 
-    // 外れたのは自分のリスナーだけで、別の持ち主の `foreign` は残る。
     expect(client.listeners("error")).toContain(foreign);
     expect(client.listeners("error")).not.toContain(ownListeners[0]);
     client.removeListener("error", foreign);

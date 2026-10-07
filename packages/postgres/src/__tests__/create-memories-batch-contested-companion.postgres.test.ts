@@ -11,11 +11,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `createMemoriesWithOutboxAndEvents` は、対向を持たない contested の候補だけを ContestedWithoutCompanionError で
- * 落とし、対向を持つ contested と active の候補は書く。全候補が落ちたら最初の例外を投げて何も書かない。
- */
-
 const A: Ctx = { tenantId: "batch-contested-companion" };
 
 afterAll(async () => {

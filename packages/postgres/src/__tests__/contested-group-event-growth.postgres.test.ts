@@ -20,12 +20,6 @@ import {
 } from "./test-db.js";
 import { insertRawMemory, newEvent } from "./contested-group-fixtures.js";
 
-/**
- * ADR 0431: 群の監査イベントが N に対して線形にしか増えないこと（Postgres 版）。
- * 走らせ方と閾値は core の Fake 版・testkit の InMemory 版と同じ部品を使う。
- * 加えて、`markContestedGroup` の口そのものが、状態の変わらないメンバーにイベントを積まないことを見る。
- */
-
 async function measure(n: number): Promise<GrowthMeasurement> {
   await resetTestDatabase();
   const { db } = await getTestClient();

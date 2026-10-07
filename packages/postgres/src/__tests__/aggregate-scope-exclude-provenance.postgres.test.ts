@@ -13,15 +13,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0390: `PostgresMemoryStore.aggregateScope` の `options.excludeProvenanceKinds` が返す任意の欄
- * `excludedProvenanceIndexedCount`（除外される kind で、スコープ内の索引済み
- * （`embedding_status = 'ready'`）の行の数）の歯。in-memory 側の同じ歯は
- * `packages/core/src/__tests__/fake-aggregate-scope-exclude-provenance.test.ts` と
- * `packages/testkit/src/__tests__/in-memory-fixtures-aggregate-scope-exclude-provenance.test.ts`。
- * `memory-store-conformance.ts` には足さない（Issue #809 の方針）。
- */
-
 const ctx: Ctx = { tenantId: "agg-exclude-prov-tenant" };
 const consolidated: Provenance = { kind: "consolidated", sources: ["a", "b"] };
 
@@ -62,9 +53,7 @@ describe("PostgresMemoryStore.aggregateScope: options.excludeProvenanceKinds（A
     await put();
     await put({ provenance: consolidated });
     await put({ provenance: consolidated });
-    // 未索引（pending）の除外 kind の行は「索引済み」に数えない。
     await put({ provenance: consolidated, embeddingStatus: "pending" });
-    // archived はスコープの外（totalInScope にも数えない）。
     await put({ provenance: consolidated, status: "archived" });
   }
 

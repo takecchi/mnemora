@@ -13,18 +13,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #933 PR1、2026-09-30 の穴埋め（ADR 0378 追記）を `@mnemora/postgres` で縛る
- * ——core の Fake での同じ歯は
- * `packages/core/src/__tests__/claim-key-single-contested-match.test.ts`（詳しい説明は
- * そちら）。
- *
- * 一致がちょうど1件で、その1件が既に `contested` な場合（3件目の有効期間が、既に対に
- * なった1件目・2件目のうち片方とだけ重なる）、直す前は `markContested` へ進んで
- * `ineligible` になり、検出中の Memory は `active` のまま痕跡も残らなかった。直した後は
- * `unresolved_conflict` になり、`markContested` を呼ばず、evidence だけを積む。
- */
-
 const ctx: Ctx = { tenantId: "claim-key-single-contested-933" };
 
 function sameKeyLlm(contents: string[]): LLMProvider {

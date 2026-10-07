@@ -5,18 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * Issue #956 / ADR 0343: `migrations/0022_embedding_zero_norm_index.sql` が索引を作る対象の
- * 範囲の歯（`embedding-zero-norm-migration.postgres.test.ts` の歯4は「ビュー」の1種類だけを見る）。
- *
- * ADR 0343 の決定:「適用時点の `current_schema()` に存在する埋め込みテーブル
- * （`memory_embeddings_%` という名前で `embedding` 列が `vector` 型のテーブル）」だけに、
- * 部分索引を作る。**3条件のどれが欠けても、利用者が同じスキーマに置いた別のテーブルを巻き込む**
- * ——名前が違うだけのテーブルへ勝手に索引が付く、`embedding` 列が無い・`vector` 型でない
- * テーブルで `CREATE INDEX` が失敗して migration 全体が止まる（1ファイル=1トランザクション）。
- *
- * 専用のスキーマの中で、本物の対象1つと、3条件のそれぞれを1つだけ欠いた「おとり」を
- * 並べて migration の SQL を流す。他の歯と同じく、migration ファイルの実際のテキストを読んで
- * 流す（複製した SQL ではない）。
+ * 3条件のどれが欠けても、利用者が同じスキーマに置いた別のテーブルを巻き込む。名前が違うだけのテーブルへ勝手に索引が付き、
+ * `embedding` 列が無い・`vector` 型でないテーブルでは `CREATE INDEX` が失敗して migration 全体が止まる（1ファイル=1トランザクション）。
+ * 専用のスキーマの中で、本物の対象1つと、3条件のそれぞれを1つだけ欠いた「おとり」を並べて、migration ファイルの実際のテキストを読んで流す。
  */
 
 const MIGRATION_SQL = readFileSync(
@@ -53,19 +44,15 @@ describe("0022 が部分索引を作る対象は、memory_embeddings_ で始ま�
     const { pool } = await getTestClient();
     await pool.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
     await pool.query(`CREATE SCHEMA "${SCHEMA}"`);
-    // 本物の対象。
     await pool.query(
       `CREATE TABLE "${SCHEMA}".memory_embeddings_enum_target (tenant_id text, memory_id uuid, embedding public.vector(3))`,
     );
-    // おとり1: 名前が `memory_embeddings_` で始まらない（`embedding vector` 列は持つ）。
     await pool.query(
       `CREATE TABLE "${SCHEMA}".my_notes (tenant_id text, memory_id uuid, embedding public.vector(3))`,
     );
-    // おとり2: 名前は合うが `embedding` という列が無い（`vector` 型の別名の列だけ）。
     await pool.query(
       `CREATE TABLE "${SCHEMA}".memory_embeddings_enum_nocolumn (tenant_id text, memory_id uuid, vec public.vector(3))`,
     );
-    // おとり3: 名前も列名も合うが、型が `vector` ではない。
     await pool.query(
       `CREATE TABLE "${SCHEMA}".memory_embeddings_enum_nottype (tenant_id text, memory_id uuid, embedding float4[])`,
     );
