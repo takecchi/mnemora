@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseBenchChannels } from "../retrieval-quality.js";
 
-/**
- * `MNEMORA_BENCH_CHANNELS` のパース(純関数。ADR 0148、Issue #179)。
- *
- * **既定は `undefined`**(=呼び出し側は `channels` を渡さず、`packages/core` 自身の
- * 既定 `["ann"]` に委ねる)——`consolidation-cost-options.test.ts` と同じ作法で、
- * 「未指定なら既定値、不正な値なら例外」を検査する。
- */
 describe("parseBenchChannels", () => {
   it("未指定(undefined)なら undefined を返す(既定構成のまま1バイトも変えない)", () => {
     expect(parseBenchChannels(undefined)).toBeUndefined();

@@ -9,13 +9,6 @@ import {
 import type { ComparisonRow } from "../compare.js";
 import { buildCompareJson } from "../compare-json.js";
 
-/**
- * `ComparisonRow.outputValidationIssueCount` の導出を検査する（ADR 0551）。
- * **Postgres は要らない**——`outputValidationFieldsFromRecall` は `RecallResult` を渡すだけの
- * 純関数。`ok: false` の `RecallResult` は手で作る（core の `recall-output-validation.test.ts`
- * が `validateRecallOutput` で `ok: false` を作る先例に倣い、ここでは結果の形だけを直接組む）。
- */
-
 function makeRecallResult(outputValidation?: RecallResult["outputValidation"]): RecallResult {
   return {
     recallId: "r1",
@@ -40,19 +33,12 @@ const ISSUES = [
   { path: "index.totalInScope", code: "too_small", message: "c" },
 ];
 
-// 同じ path に2件の issue が重なる（zod は1つの path に複数の issue を出しうる）。
-// path で畳むと 2 になり、`issues.length` の 3 と割れる（ADR 0551 の追記、変異 A）。
 const ISSUES_SHARING_PATH = [
   { path: "usage.chars", code: "invalid_type", message: "a" },
   { path: "usage.chars", code: "too_small", message: "b" },
   { path: "index.totalInScope", code: "too_small", message: "c" },
 ];
 
-/**
- * `runComparison` を実際に通すための最小の偽 `Runtime`（`compare-decay-clock.test.ts` と同じやり方）。
- * `recall()` は呼ばれた順に `validations` の要素を `outputValidation` として返す。
- * `memories: []` なので `memoryStore` は触られない。
- */
 function buildFakeRuntime(validations: Array<RecallResult["outputValidation"]>): Runtime {
   let pendingEmbedJobs = 0;
   let nextObserveId = 0;
@@ -166,7 +152,6 @@ describe("formatComparisonTable — 量だけの表には件数の列を足さ�
     const lines = out.split("\n");
     expect(lines[0]).not.toContain("出力検査");
     for (const line of lines) {
-      // 両端の `|` で割った空の2つを除いた数 = 列の数
       expect(line.split("|").length - 2).toBe(6);
     }
   });
@@ -183,7 +168,6 @@ describe("buildCompareJson — outputValidationIssueCount", () => {
     expect(json.rows[0]!.outputValidationIssueCount).toBe(3);
     expect(json.rows[1]).toHaveProperty("outputValidationIssueCount", 0);
     expect("outputValidationIssueCount" in json.rows[2]!).toBe(false);
-    // JSON 化しても未検証の行に欄が現れない
     expect(JSON.stringify(json.rows[2])).not.toContain("outputValidationIssueCount");
   });
 });

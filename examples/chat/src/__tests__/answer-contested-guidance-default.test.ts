@@ -11,13 +11,6 @@ import {
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { PROVENANCE_PROMPT_CASES } from "./provenance-prompt-cases.js";
 
-/**
- * 案3（矛盾候補の印が出た回だけ、system 文に一文を足す）の**既定がオン**であること。
- * `resolveMnemoraAnswerSystemPrompt`（`issue-1430-contested-correction.test.ts`）は両方の引数を明示して
- * 呼ぶので、既定そのもの（`runAnswerCase`・`runAnswerBench` の `contestedCorrectionGuidance = true`）は
- * ここで縛る。DB・API は使わない（偽の Runtime が、非対称文面が出る recall を返す）。
- */
-
 function asymmetricRecall(): RecallResult {
   const found = PROVENANCE_PROMPT_CASES.find(
     (c) => c.id === "contested-with-asymmetric-both-recorded",

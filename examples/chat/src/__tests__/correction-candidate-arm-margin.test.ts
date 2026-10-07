@@ -11,17 +11,6 @@ import type {
   CorrectionHitOutcome,
 } from "../correction-candidate-arm.js";
 
-/**
- * `correction-candidate-arm.ts` の `margin`/`intrusionMargin`（ADR 0291 §5.5、ADR 0321）を
- * 計算する純関数の歯。DB もネットワークも要らない——値を手で組み立てて渡すだけ。
- *
- * ⭐ **この歯が実際に噛むこと自体を、変異試験で示した**（報告に記録）——
- * `computeCorrectionMargin` の減算を加算に変える／`computeIntrusionMargin` の
- * ガード条件を外す（誤爆(浅)でも値を返すようにする）といった変異を入れて、
- * ここの assertion が実際に赤くなることを確認し、`cp` で戻して緑に戻ることまで
- * 確かめた（`identifier-arm-margin.test.ts` と同じ規律）。
- */
-
 describe("computeCorrectionMargin", () => {
   it("goldScore - distractorScore を返す", () => {
     expect(computeCorrectionMargin(0.9, 0.3)).toBeCloseTo(0.6, 10);
@@ -74,8 +63,6 @@ describe("computeIntrusionMargin", () => {
   });
 
   it("protectedFacts が1件だけの深い誤爆では0になる（topScore と protectedFactScore が同一の記憶を指すため）", () => {
-    // 深い誤爆＝top1が保護対象そのもの ⟹ 保護対象が1件しかなければ
-    // protectedFactScore は topScore と同じ値になる。
     expect(computeIntrusionMargin(0.85, true, 0.85)).toBe(0);
   });
 
@@ -92,16 +79,6 @@ describe("computeIntrusionMargin", () => {
   });
 });
 
-/**
- * `summarizeCorrectionCandidateReport` が A群・B群を取り違えないことの歯。
- *
- * ⭐ **この歯の存在理由**: この PR は `correction-case-set.eval.ts` へ A群6件・
- * B群24件を追加した——「B群をA群として数える」ような取り違えは、件数が
- * 15/8 → 21/32 に変わったこの PR でこそ起きやすい（既存の23件だけなら
- * 15≠8ですぐ気づけるが、母数が変わる変更では境界の取り違えに気づきにくい）。
- * `hits`/`abstains` の**件数が異なる**合成 fixture を使うことで、
- * 「`hitCount` が実は `abstains.length` を見ている」ような取り違えを検出する。
- */
 function hitOutcome(overrides: Partial<CorrectionHitOutcome> = {}): CorrectionHitOutcome {
   return {
     caseId: "x",

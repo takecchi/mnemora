@@ -5,12 +5,6 @@ import {
   resolveAnswerClaimKeyOptions,
 } from "../answer-claim-key-options.js";
 
-/**
- * `resolveAnswerClaimKeyOptions`（Issue #691 続き）の単体テスト。
- *
- * `providers.ts` の `parseModeOverride`（`MNEMORA_LLM`/`MNEMORA_EMBEDDING`）と同じ作法
- * ——未設定/空文字は「未指定」、未知の値は例外——をこの新しい env にも当てる。
- */
 describe("resolveAnswerClaimKeyOptions", () => {
   it("MNEMORA_ANSWER_CLAIM_KEY が未設定なら undefined", () => {
     expect(resolveAnswerClaimKeyOptions({})).toBeUndefined();
@@ -45,14 +39,6 @@ describe("resolveAnswerClaimKeyOptions", () => {
   });
 });
 
-/**
- * `applyCaseKnownSubjects`（ADR 0334 負債2、Issue #372負債6の続き）の単体テスト。
- *
- * **省けば従来どおり**——`condition !== "known-subjects"`、またはケースが
- * `knownSubjects` を持たない場合は、渡された `claimKeyOptions` をそのまま
- * （同じ参照で）返すことを固定する。**指定すれば渡る**——`condition ===
- * "known-subjects"` かつケースが `knownSubjects` を持つときだけ合流することを固定する。
- */
 describe("applyCaseKnownSubjects", () => {
   const baseline: ClaimKeyOptions = { enabled: true, detectContested: true };
 
@@ -79,7 +65,6 @@ describe("applyCaseKnownSubjects", () => {
   it('condition が "known-subjects" かつケースが knownSubjects を持てば合流する', () => {
     const result = applyCaseKnownSubjects(baseline, "known-subjects", ["user", "妻"]);
     expect(result).toEqual({ enabled: true, detectContested: true, knownSubjects: ["user", "妻"] });
-    // 元のオブジェクトは変更しない。
     expect(baseline).toEqual({ enabled: true, detectContested: true });
     expect("knownSubjects" in baseline).toBe(false);
   });

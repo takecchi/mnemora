@@ -38,10 +38,7 @@ describe("groupTiesByScore", () => {
   it("同値でない行を挟むと、タイ集団は分かれる（連続区間のみをまとめる）", () => {
     const rows = [row("a", 1, 0.5), row("b", 1, 0.5), row("c", 0.8, 0.5), row("d", 1, 0.5)];
     const groups = groupTiesByScore(rows);
-    // 前提が「rows は事前にソート済み」であるこの関数は、非隣接の同値を統合しない
-    // （ORDER BY が既に同値を隣接させているはずであり、統合しないことがその前提の
-    // 検査にもなる——もし本体の ORDER BY が壊れて同値が離れて出た場合、ここで
-    // グループ数が増えて見え、静かに握り潰さない）。
+    // rows は事前にソート済みが前提で、非隣接の同値は統合しない（ORDER BY が壊れて同値が離れたら、グループ数が増えて見える）。
     expect(groups).toHaveLength(3);
     expect(groups.map((g) => g.count)).toEqual([2, 1, 1]);
   });
@@ -73,7 +70,6 @@ describe("measureTieDensityFromRows", () => {
   });
 
   it("タイ集団がちょうど limit で終わる場合は、分断していない", () => {
-    // 先頭5件が同値、6件目以降は別値。limit=5 だと、ぴったりタイ集団の終わりで切れる。
     const rows = [
       row("a", 1, 0.5),
       row("b", 1, 0.5),
@@ -118,11 +114,6 @@ describe("renderTieDensityReport", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Issue #1776 の #695 のコメント（ADR 0665）: 総候補数がちょうど limit のときの境界と、
-// 最大タイ集団の列（集団が複数あるとき）を見る歯が無く、`<=` → `<`、`max` → 合計、
-// `n/a` の条件 `<=` → `<` の3つの変異が緑だった。
-// ---------------------------------------------------------------------------
 describe("総候補数がちょうど limit のとき（境界）", () => {
   const rows = [row("a", 1, 0.5), row("b", 1, 0.5), row("c", 0.5, 0.2)];
 
@@ -162,7 +153,6 @@ describe("renderTieDensityReport: 最大タイ集団の列は、集団の最大�
       .find((line) => line.startsWith("| lbl "))!
       .split("|")
       .map((cell) => cell.trim());
-    // 列: ["", label, query, 総候補数, タイ集団数, 最大タイ集団, 境界, ""]
     expect(cells[3]).toBe("6");
     expect(cells[4]).toBe("3");
     expect(cells[5]).toBe("3");

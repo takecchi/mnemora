@@ -9,13 +9,6 @@ import {
 import type { PairMember } from "../time-term-arm.js";
 import { TIE_EPSILON, classifyPairOutcome } from "../time-term-arm.js";
 
-/**
- * 純関数だけを検査する(PR 本文)。**⛔ 品質の数値は assert しない**——DB も provider も
- * 使わない歯であり、`buildTimeTermConversation`/`TIME_PROBES`/`classifyPairOutcome`/
- * `TIE_EPSILON` という「仕組み」だけを検査する。実測値の検査は
- * `time-term.postgres.test.ts`(本物の Postgres)の側に置く。
- */
-
 describe("buildTimeTermConversation", () => {
   it("newer/older の text は厳密に等しい(ペアの本文を同一にすることがこの arm の要)", () => {
     const now = new Date("2026-09-08T00:00:00.000Z");
@@ -75,7 +68,6 @@ describe("buildTimeTermConversation", () => {
     const [newer, older] = buildTimeTermConversation(probe, now);
     expect(newer!.recordedAt).toEqual(new Date("2026-09-07T12:00:00.000Z"));
     expect(older!.recordedAt).toEqual(new Date("2026-09-04T12:00:00.000Z"));
-    // occurredAt は newer/older で揃えてある(decay だけを動かすための要)。
     expect(newer!.occurredAt).toEqual(older!.occurredAt);
     expect(newer!.occurredAt).not.toBeNull();
   });
@@ -143,10 +135,6 @@ describe("TIME_PROBES", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// classifyPairOutcome
-// ---------------------------------------------------------------------------
-
 function member(overrides: Partial<PairMember> & { total: number }): PairMember {
   const score: ScoreBreakdown = {
     decay: 1,
@@ -176,10 +164,6 @@ describe("classifyPairOutcome", () => {
   });
 
   it("pairCollapsed を渡されたら、他のどの分類よりも先に collapsed になる", () => {
-    // ペアが潰れたときに実際に現れる形は「片方が返ってこない」であり、`rank` の
-    // 比較では検出できない(`classifyPairOutcome` の docstring)。⟹ 呼び出し側が
-    // スコープ内総数から判定して渡す。**その判定が `older-not-returned` に
-    // 読み替えられていないこと**をここで確かめる。
     const newer = member({ rank: 1, total: 0.9 });
     expect(classifyPairOutcome(newer, null, { pairCollapsed: true })).toBe("collapsed");
     expect(classifyPairOutcome(newer, null, { pairCollapsed: false })).toBe("older-not-returned");
@@ -219,9 +203,7 @@ describe("classifyPairOutcome", () => {
 
 describe("TIE_EPSILON", () => {
   it("realistic probe が予測する freshness 差(約 0.0655)より十分小さい", () => {
-    // 0.5**(1/30) - 0.5**(4/30) ≈ 0.0654374798760291(PR 本文の数値)。
-    // ここでの「予測」は検査対象の実装と同じ式を使わないよう、この歯自身では
-    // 計算し直さず定数として書く(同義反復を避けるため)。
+    // 期待値は検査対象の実装と同じ式で計算せず、定数として書く（同義反復を避ける）。
     const predictedRealisticFreshnessGap = 0.0654374798760291;
     expect(TIE_EPSILON).toBeLessThan(predictedRealisticFreshnessGap / 100);
   });

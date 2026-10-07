@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CORRECTION_SCENARIO } from "../correction-scenario.js";
 
-/**
- * `correction-scenario.ts` の構造的な整合性の歯（Issue #303）。
- *
- * `contestedPair` は「呼び出し側が既に下した決定」（ADR 0134 決定2）——このファイル自身が
- * その決定を正しく保持していることを検査する。判定ロジックの正しさ（`markContested` 自体が
- * 正しく動くか）ではなく、**宣言が自己矛盾していないか**を見る。
- */
 describe("CORRECTION_SCENARIO: 構造の整合性", () => {
   it("original/correction の externalId は異なる", () => {
     expect(CORRECTION_SCENARIO.original.externalId).not.toBe(

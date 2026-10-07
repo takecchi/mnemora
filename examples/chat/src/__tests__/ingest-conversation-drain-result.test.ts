@@ -3,14 +3,6 @@ import type { Ctx, Runtime, TickResult } from "@mnemora/core";
 import { ingestConversation } from "../mnemora-path.js";
 import { buildConversation } from "../scenario.js";
 
-/**
- * `ingestConversation` は、取り込みの最後に回した drain の結果（処理した件数・失敗した件数）を返す。
- * `chat` はこの値で、embed に失敗した件があることを画面と終了コードで言う。
- *
- * DB 不要: `observe` と `tick` だけを持つ偽の `Runtime` を渡す（`ingestConversation` はそれ以外を呼ばない）。
- * 偽の `observe` は発話ごとに記憶 id を1つ返し、`tick` は決めた件数を1回目で「処理した・失敗した」と答えて、
- * 2回目以降は 0 件にする（drain が干上がる）。
- */
 const ctx: Ctx = { tenantId: "ingest-conversation-drain-result" };
 
 function tickResult(processed: number, failed: number): TickResult {

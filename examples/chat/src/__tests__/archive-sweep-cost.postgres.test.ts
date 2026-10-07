@@ -14,15 +14,6 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-/**
- * `archive-sweep-cost` サブコマンド(Issue #209)を、本物の Postgres + pgvector に対して
- * 実際に走らせる歯。`consolidation-cost.postgres.test.ts` と同じ観点分担:
- *
- * 1. 掃引の前後で store/omitted が実際に動くこと(`deterministic` embedding。速い・
- *    ネットワーク不要)。
- * 2. サブコマンドの配線そのもの(本物の CLI を子プロセスで起動し、
- *    `MNEMORA_ARCHIVE_SWEEP_JSON` が実際に書かれること。`local` embedding)。
- */
 describe("archive-sweep-cost: 掃引の前後(deterministic embedding、配線の検査)", () => {
   it("halfLifeHours=1・haystackSize=6で、backdateしたfillerだけが掃かれ、gold/distractorは残る", async () => {
     await resetTestDatabase();
@@ -60,7 +51,6 @@ describe("archive-sweep-cost: 掃引の前後(deterministic embedding、配線�
       expect(json.halfLifeHours).toBe(1);
       expect(json.budgetLadder).toEqual([32, 128]);
 
-      // before: 6 filler + 7 gold + 7 distractor = 20、まだ何も archived になっていない。
       expect(json.before.store.activeCount).toBe(20);
       expect(json.before.store.archivedCount).toBe(0);
       expect(json.before.store.supersededCount).toBe(0);
@@ -69,28 +59,20 @@ describe("archive-sweep-cost: 掃引の前後(deterministic embedding、配線�
         expect(probe.omittedArchivedCount).toBe(0);
       }
 
-      // 受け入れ条件1: 掃引がベンチ実行時間内に実際に発火する(6件のfillerが対象)。
       expect(json.sweep.supported).toBe(true);
       expect(json.sweep.archivedCount).toBe(6);
       expect(json.sweep.reachedLimit).toBe(false);
 
-      // after: activeCount = 14(gold+distractor)、archivedCount = 6。
       expect(json.after.store.activeCount).toBe(14);
       expect(json.after.store.archivedCount).toBe(6);
       expect(json.after.store.supersededCount).toBe(0);
 
-      // 受け入れ条件2: omitted の {kind:'filtered', condition:'archived'} が 0 → 正 へ動く。
-      // `aggregateScope` はテナント/サブジェクトスコープ全体を数えるため、
-      // どの probe から見ても掃かれた6件が同じ値で見える。
       expect(json.after.recall.unbudgeted.mean.omittedArchivedCount).toBe(6);
       for (const probe of json.after.recall.unbudgeted.probes) {
         expect(probe.omittedArchivedCount).toBe(6);
       }
 
-      // 受け入れ条件2: `recall().usage.chars` が減るはず——目次帯(filteredArchivedを含む
-      // 集約から要旨を作る digestBand)が縮む分、少なくとも増えてはいないことを確認する
-      // (deterministic embedding は similarity が実質ランダムなので、`memories` 欄に
-      // 載る候補の並びまでは主張しない——目次帯という構造的に動くはずの部分だけを見る)。
+      // deterministic embedding は similarity が実質ランダムなので、memories の並びは主張せず、目次帯だけを見る。
       expect(json.after.recall.unbudgeted.mean.usageChars).toBeLessThanOrEqual(
         json.before.recall.unbudgeted.mean.usageChars,
       );

@@ -11,11 +11,6 @@ import {
   reconcileVerdicts,
 } from "../answer-judge.js";
 
-/**
- * `answer-judge.ts` の単体試験。**DB 不要・鍵不要**——`parseAnswerJudgeResponse`/
- * `buildAnswerJudgePromptSpec`/`reconcileVerdicts` はすべて純関数である。
- */
-
 describe("parseAnswerJudgeResponse: 壊れた応答は必ず indeterminate（設計上の必須事項2）", () => {
   it.each<[string, string]>([
     ["", "空文字"],
@@ -31,9 +26,6 @@ describe("parseAnswerJudgeResponse: 壊れた応答は必ず indeterminate（設
   });
 
   it("deterministic stub がプロンプト全文をエコーした場合も indeterminate になる", () => {
-    // buildAnswerJudgePromptSpec が組んだ user 文には「判定:」行が無い
-    // （それは ANSWER_JUDGE_SYSTEM_PROMPT の側にしか無い——DeterministicLLMProvider.complete()
-    // は最後のメッセージ（system ではなく user）だけをそのまま返す）。
     const input: AnswerJudgeInput = {
       question: "わたしの好きな数字は何ですか?",
       expectedKind: "must-abstain",
@@ -92,18 +84,7 @@ describe("reconcileVerdicts: 全組み合わせ", () => {
 });
 
 describe("buildAnswerJudgePromptSpec: expected.accept/reject を渡さない（設計上の必須事項3）", () => {
-  /**
-   * `AnswerJudgeInput` は構造上 `accept`/`reject` を持てない（`answer-judge.ts` の型定義）
-   * ——ここでは、それに加えて**実際に組み立てたプロンプト文字列**にも、実ケースの
-   * `accept`/`reject` の文字列が現れないことを機械で固定する。
-   *
-   * ⚠ **`unknown` 類だけを対象にする。** `grounds.rationale` はそもそも judge に渡してよい
-   * 入力であり（`AnswerJudgeInput.rationale`）、closed-value 系のケースでは rationale が
-   * 正解の値そのものを引用して説明する（例: "25日に延ばして…"）——これは正しい設計であって
-   * 漏洩ではない。`unknown` 類は「根拠となるターンが構造的に存在しない」ことが根拠なので、
-   * rationale が reject の値（例: 血液型・具体的な数字）に触れる理由が無く、この不変条件を
-   * 偽陽性なしに検査できる。
-   */
+  // unknown 類だけを対象にする。closed-value 系は rationale が正解の値を引用するので、検査すると偽陽性になる。
   function groundTurnTextsOf(answerCase: AnswerCase): string[] {
     return answerCase.grounds.turnIndex.map((i) => answerCase.conversation[i]!.text);
   }
@@ -117,16 +98,7 @@ describe("buildAnswerJudgePromptSpec: expected.accept/reject を渡さない（�
     expect(ANSWER_CASE_SET_EVAL.some((c) => c.category === "unknown")).toBe(true);
   });
 
-  /**
-   * ⚠ **`spec.system` は検査対象に含めない。** `ANSWER_JUDGE_SYSTEM_PROMPT` は
-   * `AnswerJudgeInput` から1バイトも組み立てられない固定文字列であり
-   * （`buildAnswerJudgePromptSpec` は `system` に定数をそのまま渡すだけ）、
-   * ケースの `accept`/`reject` が漏れる経路になり得ない。それどころか、この固定文字列は
-   * 「理由: <30字程度の短い説明>」という指示文を含み、たまたま数字の `"3"` を含む
-   * ——`reject: ["7","3","8"]` の `"3"` と偶然一致し、`system` まで検査対象にすると
-   * **偽陽性**になる（実測済み）。検査すべきは「入力（`AnswerJudgeInput`）から実際に
-   * 組み立てられた部分」である `messages` だけ。
-   */
+  // spec.system は検査しない。固定文字列で、たまたま "3" を含み偽陽性になる。
   function userContentOf(spec: ReturnType<typeof buildAnswerJudgePromptSpec>): string {
     return spec.messages.map((m) => m.content).join("\n");
   }
@@ -156,10 +128,7 @@ describe("buildAnswerJudgePromptSpec: expected.accept/reject を渡さない（�
     expect(answerCase).toBeDefined();
     expect(answerCase!.expected.reject).toEqual(["7", "3", "8"]);
 
-    // ⚠ `answer` には accept/reject のどちらとも重ならない中立な文言を使う——
-    // 採点対象の `answer` は正しい must-abstain 回答なら「分かりません」等、`accept` の
-    // 値そのものになり得る。それは正常な回答であって漏洩ではないため、ここでの検査
-    // （プロンプトの組み立てが accept/reject の一覧を埋め込んでいないか）とは別の話になる。
+    // answer は accept/reject と重ならない中立な文言にする（正しい回答が accept の値そのものになり得るため）。
     const input: AnswerJudgeInput = {
       question: answerCase!.question,
       expectedKind: answerCase!.expected.kind,
@@ -189,7 +158,6 @@ describe("buildAnswerJudgePromptSpec: naive/mnemora で同一の書式（設計�
     const mnemoraSpec = buildAnswerJudgePromptSpec({ ...base, answer: "mnemora の回答" });
 
     expect(naiveSpec.system).toBe(mnemoraSpec.system);
-    // 採点対象の回答の行だけが違い、それ以外の行は完全一致する。
     const naiveUser = naiveSpec.messages[0]?.content ?? "";
     const mnemoraUser = mnemoraSpec.messages[0]?.content ?? "";
     expect(naiveUser.replace("naive の回答", "")).toBe(mnemoraUser.replace("mnemora の回答", ""));
@@ -208,20 +176,6 @@ describe("buildAnswerJudgePromptSpec: naive/mnemora で同一の書式（設計�
 });
 
 describe("judgeAnswer: 3段を結んだ結合体が「赤」を通る（Issue #558）", () => {
-  /**
-   * `judgeAnswer` は `buildAnswerJudgePromptSpec` → `llmProvider.complete()` →
-   * `parseAnswerJudgeResponse` の3段を結ぶだけの関数である。**その結合体を通して
-   * `fail` が出る経路は、この repo のどの試験でも踏まれていなかった**（Issue #558）——
-   * 唯一 `judgeAnswer` を通していた `answer-bench.postgres.test.ts` は `env: {}` で
-   * `deterministic` を強制しており、judge は必ず `indeterminate` に落ちる設計である。
-   *
-   * 🔴 **これは Issue #498 の残り（実 API の陽性対照）ではない。**#498 で鍵が要るのは
-   * 「`digest` から答えの語を落としたとき、**実 LLM が生成した回答**を層3が赤と判定する」
-   * 経路であって、ここで見ているパーサの結線ではない。⛔ この歯が緑であることを、
-   * #498 完了条件4「回答評価」側の充足として数えないこと。
-   *
-   * **鍵不要・DB 不要**——フェイクの `LLMProvider` を渡すだけで、外部呼び出しは無い。
-   */
   const ctx: Ctx = { tenantId: "answer-judge-red-path-test" };
 
   const input: AnswerJudgeInput = {
@@ -232,14 +186,7 @@ describe("judgeAnswer: 3段を結んだ結合体が「赤」を通る（Issue #5
     answer: "18日です。",
   };
 
-  /**
-   * 最小のフェイク `LLMProvider`。`complete()` が返す本文だけを差し替え、渡された
-   * `PromptSpec` を記録する。
-   *
-   * ⛔ **`completeStructured` は投げる。**`judgeAnswer` は `complete()` だけを使う
-   * （`answer-judge.ts` の設計上の必須事項1）——この `throw` 自体が、その必須事項を
-   * 機械で縛る歯である。`judgeAnswer` が structured へ移れば、この試験は例外で落ちる。
-   */
+  // completeStructured は投げる。judgeAnswer が complete() だけを使うことを縛る。
   function fakeLLM(content: string): LLMProvider & { seen: PromptSpec[] } {
     const provider = {
       seen: [] as PromptSpec[],
@@ -267,8 +214,6 @@ describe("judgeAnswer: 3段を結んだ結合体が「赤」を通る（Issue #5
   });
 
   it("同じ input でも provider が PASS を返せば outcome=pass（上の赤が空虚でないこと）", async () => {
-    // ⚠ この1本が無いと、`judgeAnswer` が provider を無視して `fail` を返す実装でも
-    // 上の歯は通ってしまう——**応答が結果を決めている**ことをここで固定する。
     const judgement = await judgeAnswer(
       fakeLLM("判定: PASS\n理由: 根拠と一致している"),
       ctx,
@@ -280,7 +225,6 @@ describe("judgeAnswer: 3段を結んだ結合体が「赤」を通る（Issue #5
   it("provider へ渡るのは buildAnswerJudgePromptSpec(input) そのもの（3段の結線）", async () => {
     const provider = fakeLLM("判定: FAIL\n理由: 誤った値を断定している");
     await judgeAnswer(provider, ctx, input);
-    // 1ケース1回だけ呼ぶ（設計上の必須事項5: 呼び出し回数を数える側の前提）。
     expect(provider.seen).toHaveLength(1);
     expect(provider.seen[0]).toEqual(buildAnswerJudgePromptSpec(input));
   });
