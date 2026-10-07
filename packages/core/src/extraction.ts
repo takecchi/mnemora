@@ -432,7 +432,7 @@ export function sanitizeCandidateSubjectId(
     return { subjectId, rejected: false };
   }
   // 識別子として保存できない値（NUL・孤立サロゲート）は、一覧の有無に関わらず弾く（ADR 0456）。
-  if (findMalformedIdentifierPart(subjectId) !== null) {
+  if (findMalformedIdentifierPart(subjectId) !== null || /[^\x00-\x7f]/.test(subjectId)) {
     return { subjectId: undefined, rejected: true };
   }
   if (allowedSubjectCandidates === undefined || allowedSubjectCandidates.length === 0) {
