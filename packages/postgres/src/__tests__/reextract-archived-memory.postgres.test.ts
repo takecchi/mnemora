@@ -22,13 +22,12 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0432 AL-5: `archived` の記憶を持つ Observation を `reextract` したときの帰結を、今の振る舞いとして
- * 縛る（振る舞いは変えていない）。ADR 0028「`archived` は退けた記憶に数えない」の帰結である。
+ * `archived` の記憶を持つ Observation を `reextract` したときの帰結を、今の振る舞いとして縛る（`archived` は退けた記憶に数えない）。
  *
  * - 抽出結果が今の記憶と同じ内容なら、何も起きない（新しい記憶は作られず、記憶は `archived` のまま。
  *   `memoryIds` は既存の記憶そのものを指す。`skipped` に `status_not_active`、`status: "archived"`）。
- * - 内容が違えば新しい版が `active` で作られる。古い `archived` は `superseded` にならず `archived` のまま
- *   残り、それを `restoreArchived` で戻すと、新旧の2件が `active` で並ぶ。
+ * - 内容が違えば新しい版が `active` で作られる。古い `archived` は `superseded` にならず `archived` のまま残り、
+ *   それを `restoreArchived` で戻すと、新旧の2件が `active` で並ぶ。
  *
  * Postgres と testkit の fixture で同じ。
  */
@@ -126,7 +125,6 @@ for (const [name, makeKit] of KITS) {
 
       const result = await kit.runtime.reextract(ctx, first.observationId);
 
-      // `memoryIds` は同じ内容の既存の記憶（x そのもの）を指す。新しい記憶は作られない。
       expect(result.memoryIds).toEqual([x]);
       expect(result.supersededMemoryIds).toEqual([]);
       expect(

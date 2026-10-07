@@ -18,10 +18,6 @@ import {
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
 /**
- * roadmap.md 段階2の完了条件そのもの:
- * 「ベクトル索引を使う ORDER BY について、EXPLAIN で実際に HNSW 索引が使われることを
- *   確認する検査が通る」
- *
  * `PostgresVectorStore.search` が生成するのと同じ形（`ORDER BY` に距離演算子の結果を
  * そのまま昇順で置く）のクエリを EXPLAIN し、実際に `idx_memory_embeddings_hnsw_*` が
  * 使われることを検査する。docs/memory-model.md §10「規約」・ADR 0001 が禁じる
@@ -47,7 +43,6 @@ async function seed(
     await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, vector);
   }
   // 統計情報が無い/古いままだと、プランナが誤った行数見積もりで意図しない索引を選ぶ
-  // （実測: ANALYZE 無しでは主キー索引が選ばれ、HNSW 索引が選ばれなかった）。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
 }
@@ -57,9 +52,6 @@ afterAll(async () => {
 });
 
 describe("PostgresVectorStore.search と HNSW 索引", () => {
-  // 下の3件は、同じ3000行（`seed` の乱数は種で固定）を読むだけで書かない。以前は3件が1本ずつ
-  // `resetTestDatabase()` → `seed()` をやり直し、同じ表を3回作っていた（CI で1本あたり約6〜8秒）。
-  // 積むのはこの describe の最初に1回だけにする——読むものは同じなので、見る範囲は変わらない。
   describe(`${ROW_COUNT} 行を積んだ表で（積むのは1回だけ。3件とも読むだけ）`, () => {
     beforeAll(async () => {
       await resetTestDatabase();
@@ -88,13 +80,9 @@ describe("PostgresVectorStore.search と HNSW 索引", () => {
         .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
         .join("\n");
       // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
-      //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
-      //    CI run 番号も Postgres の版も記載が無い。PR #3 の追記にある PostgreSQL 18.6 +
-      //    pgvector 0.8.6 の変異検査は作業環境での実測であり、CI での実測ではない）。
-      //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
       //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
       //    (3) ANALYZE / 統計情報（上の seed のコメント参照）。
-      //    ⟹ まず `origin/main` で対照を取ること（DB 段の出力が接続先の版を名指しで出す）。
+      //    ⟹ まず `origin/main` で対照を取ること。
       //  見直す合図: ADR 0001（`ORDER BY` に距離演算子をそのまま書く規約）。この歯が赤いとき、
       //    HNSW が使われない理由が版ではなくクエリの形なら、そこが崩れている。
       expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
@@ -120,19 +108,15 @@ describe("PostgresVectorStore.search と HNSW 索引", () => {
       );
 
       // ⚠ `pool.query("EXPLAIN ...")` で素朴に EXPLAIN しない——`search()` は
-      // `db.transaction()` の中で ADR 0284 の `SET LOCAL` を発行してから SELECT する。
+      // `db.transaction()` の中で `SET LOCAL` を発行してから SELECT する。
       // `explainCaptured` は捕まえた `SET LOCAL` を同じ transaction の文脈で再生して
       // から EXPLAIN するので、本番と同じプランナ設定でプランを読む
       // （詳細は test-db.ts の doc コメント）。
       const plan = await explainCaptured(pool, captured);
       // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
-      //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
-      //    CI run 番号も Postgres の版も記載が無い。PR #3 の追記にある PostgreSQL 18.6 +
-      //    pgvector 0.8.6 の変異検査は作業環境での実測であり、CI での実測ではない）。
-      //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
       //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
       //    (3) ANALYZE / 統計情報（上の seed のコメント参照）。
-      //    ⟹ まず `origin/main` で対照を取ること（DB 段の出力が接続先の版を名指しで出す）。
+      //    ⟹ まず `origin/main` で対照を取ること。
       //  見直す合図: ADR 0001（`ORDER BY` に距離演算子をそのまま書く規約）。この歯が赤いとき、
       //    HNSW が使われない理由が版ではなくクエリの形なら、そこが崩れている。
       expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
@@ -152,12 +136,12 @@ describe("PostgresVectorStore.search と HNSW 索引", () => {
       for (let i = 1; i < hits.length; i += 1) {
         expect(hits[i]!.distance).toBeGreaterThanOrEqual(hits[i - 1]!.distance);
       }
-      // 積んだ行が実際に読めていること（積むのを1回にしたので、空の表で緑にならないことを見る）。
+      // 積んだ行が実際に読めていること（空の表で緑にならないことを見る）。
       expect(hits.length).toBe(10);
     }, 60_000);
   });
 
-  // 絞り込みの2件は、それぞれ自分で行を書く。1件ずつ空の表から始める（今までどおり）。
+  // 絞り込みの2件は、それぞれ自分で行を書く。1件ずつ空の表から始める。
   describe("絞り込み（1件ずつ空の表から）", () => {
     beforeEach(async () => {
       await resetTestDatabase();

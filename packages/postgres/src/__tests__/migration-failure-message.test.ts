@@ -4,14 +4,7 @@ import {
   describeMigrationFailure,
 } from "../migration-failure-message.js";
 
-/**
- * `runMigrations` の1ファイルの失敗の文言（Issue #1212）を **DB 無しで**検査する歯。
- *
- * 本物の Postgres で「拡張を作る権限が無いロール」に当てる歯は
- * `extension-mode.postgres.test.ts` の測定4a に在る。ここでは、案内が付く条件の境目
- * （`code` と `routine` の両方）と、付かないときに文言が1バイトも変わらないことを縛る。
- * pg のエラーの欄の値は、PostgreSQL 17 で実測したもの。
- */
+/** 拡張を作る権限が無いロールに当てる歯は `extension-mode.postgres.test.ts` の測定4a に在る。ここでは、案内が付く条件の境目（`code` と `routine` の両方）と、付かないときに文言が1バイトも変わらないことを縛る。 */
 
 function pgError(fields: { message: string; code?: string; routine?: string }): Error {
   return Object.assign(new Error(fields.message), fields);

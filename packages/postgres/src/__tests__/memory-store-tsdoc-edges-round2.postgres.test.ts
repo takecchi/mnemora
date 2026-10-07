@@ -12,24 +12,7 @@ import { PostgresEventStore } from "../event-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`PostgresMemoryStore` について
- * 縛る（2回目の棚卸し）。振る舞いは変えていない。同じ本文の歯を testkit の fixture
- * （`packages/testkit/src/__tests__/in-memory-fixtures-memory-store-tsdoc-edges-round2.test.ts`）と core の Fake
- * （`packages/core/src/__tests__/fake-memory-store-tsdoc-edges-round2.test.ts`）にも置いている。
- *
- * - `markContestedPair`: CAS が破れたときの `MemoryStatusConflictError` は `expectedStatus: 'active'`。
- * - `resolveContestedPair`: 両側とも `contested` でも、相互参照が成り立っていなければ CAS 破れ。
- * - `purgeMemory`: `contentHash`/`digestSource` を変えない。形の崩れた id も「memory not found」。
- * - `restoreSupersededBy`: `digestSnapshot` は今の digest、`actor` の既定は `{ type: 'system' }`。
- *   形の崩れた `supersededById` は（`previewRestoreSupersededBy` も）例外にせず空。
- * - `previewRestoreSupersededBy`: `supersededReason` は `at` が最も新しい `superseded` イベントの理由。
- * - `archiveDecayed`: `clock` が `'activity'`/`'either'` なら `nowSeq` は必須。
- * - `aggregateScope`: 返す `countKind` はすべて `'exact'`。目次帯には `contested` と減衰しきった Memory も載り、
- *   `validAt` のゲートの外は載らない。
- *
- * `*-conformance.ts` には足していない（適合試験を厳しくすると、第三者の adapter を落としうるため）。
- */
+/** `*-conformance.ts` には足していない（適合試験を厳しくすると、第三者の adapter を落としうるため）。 */
 
 const IMPL = "PostgresMemoryStore";
 

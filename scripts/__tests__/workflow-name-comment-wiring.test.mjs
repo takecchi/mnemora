@@ -78,7 +78,7 @@ describe(".github/workflows/** の name: が YAML のコメントに食われて
     });
   }
 
-  it("⭐ 対照: ci.yml:518 型(全角括弧の直後に #)の名前が、誤って truncated 扱いされていない", () => {
+  it("⭐ 対照: ci.yml の identifier-probes ジョブ名型(全角括弧の直後に #)の名前が、誤って truncated 扱いされていない", () => {
     // job id で場所を探す（表示名の文言で探すと、文言の書き換えで対照の場所を見失う）。
     const ciYml = files.find((f) => f.fileName === "ci.yml");
     expect(ciYml, "ci.yml が読めていない").toBeDefined();

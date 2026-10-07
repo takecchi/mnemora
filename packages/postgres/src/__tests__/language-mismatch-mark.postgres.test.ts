@@ -21,15 +21,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #1370（ADR 0391）: `created` イベントの `meta.languageMismatch` は、core の Fake だけでなく
- * 実 adapter（testkit の InMemory と Postgres の jsonb）を通しても、同じ形・同じ値で読み戻る。
- *
- * core の `language-mismatch-mark.test.ts` は Fake の store でしか走らない。抽出の `created` は
- * `MemoryStore.createMemoriesWithOutboxAndEvents`（記憶と同じトランザクションで store が INSERT する。ADR 0410）
- * を通る経路があり、そこは Fake を通る検査では jsonb の往復（数値の `contentLatinShare` が数のまま戻るか、
- * キーが落ちないか）を見ていない。sync・deferred・`reextract` の3経路すべてを、2つの adapter に当てる。
- */
+/** core の Fake の store では jsonb の往復（数値の `contentLatinShare` が数のまま戻るか、キーが落ちないか）を見られないので、実 adapter（testkit の InMemory と Postgres）にも sync・deferred・`reextract` の3経路を当てる。 */
 
 const JA_TEXT = "今日は渋谷のパン屋で働いています。毎朝パンを焼くのが好きです。";
 const EN_CONTENT = "The user works at a bakery in Shibuya and enjoys baking bread every morning.";

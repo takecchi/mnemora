@@ -17,76 +17,33 @@ import {
 } from "./test-db.js";
 
 /**
- * mnemora の Postgres クエリ効率の実測監査（クローン miku の委譲先が行った作業。
- * オーナーではない）で見つけたことを、比の形で固定する歯。
+ * 候補の件数に比例して往復数が増えないことを、比の形で固定する歯。
  *
- * ## 何を固定するか、何を固定しないか
+ * 発行される文の数そのもの（例: 7 とか 21 とか）は固定しない。実装の細部（`SET LOCAL` を挟むかどうか等）が変われば動きうる値で、
+ * 固定すると「往復が増えたわけではないのに、無関係な変更で赤くなる」歯になるため。
+ * だから同じ実装を、候補数（`limit`）だけ変えて2回呼び、往復数を比較する。比較先も同じ実行・同じ環境なので、実装の細部の揺れは両辺に同じだけ乗って相殺される。
  *
- * **固定するのは「候補の件数に比例して往復数が増えないこと」だけである。**
- * 発行される文の数そのもの（例: 7 とか 21 とか）は、実装の細部（ADR 0284 の
- * `SET LOCAL` を挟むかどうか等）が変われば動きうる値であり、歯として固定すると
- * 「往復が増えたわけではないのに、無関係な変更で赤くなる」歯になってしまう
- * （`docs/north-star.md` 問い3——歯自身が説明できない赤を出さない）。
- * だから**同じ実装を、候補数（`limit`）だけ変えて2回呼び、往復数を比較する**——
- * 比較先も同じ実行・同じ環境なので、実装の細部の揺れは両辺に同じだけ乗って相殺される。
- *
- * **固定しないもの**:
- * - アンカー数（`anchorCount`）ぶんの往復の増加——これは
- *   [Issue #377](https://github.com/takecchi/mnemora/issues/377) の領分であり、
- *   むしろ実測して同 Issue にコメントで実測値を積んである（`9 + 4×anchorCount`）。
- *   本ファイルの歯2 はこの増加を歯には**しない**——`limit` を増やしても
- *   `anchorCount`（既定3）自体は増えないことを利用して、逆に
- *   「アンカー数由来の往復は一定である」ことの土台として使う。
- *
- * **⭐ 歯5（新設）は上の「固定しないもの」を覆す。** `VectorStore.searchMany?`
- * （任意メソッド、Issue #377／ADR 0151 追記）を `PostgresVectorStore` に実装し、
- * `recall-runtime.ts` の段3.5がそれを使えるときは全アンカーを1回の往復に束ねる
- * ようにした後は、`anchorCount` を増やしても往復数は増えない——アンカーごとの
- * ループが1回の往復に畳まれるため、`anchorCount` に依存しない定数になる
- * （実測値は PR 本文に控えてある。`main` が動くと変わりうる数なのでここには
- * 焼き込まない）。**この歯は実装前は赤くなる**——実装前の赤い出力も PR 本文に控えてある。
- * - HNSW の近似性そのもの（[Issue #361](https://github.com/takecchi/mnemora/issues/361)）
- *   ——往復数の歯は文の**数**だけを見るので原理的に影響されないはずだが、
- *   `returned` の件数（「意味のある比較か」の検算に使う）が近似索引の揺れで
- *   不安定にならないよう、データを小さく・決定的に作る（下記）。
+ * `VectorStore.searchMany?` が段3.5の全アンカーを1回の往復に束ねるので、`anchorCount` を増やしても往復数は増えない（歯5）。
+ * HNSW の近似性の揺れで `returned` の件数（「意味のある比較か」の検算）が不安定にならないよう、データを小さく・決定的に作る。
  *
  * ## 配置（歯1・歯2 共通のデータ形）
  *
- * `recall-association-gates.postgres.test.ts` と同じ三角形の考え方を使う——
- * クエリに直接当たらない `SATELLITE` は、`ANCHOR` を経由した連想枠でしか届かない。
+ * `recall-association-gates.postgres.test.ts` と同じ三角形の考え方を使う。クエリに直接当たらない `SATELLITE` は、`ANCHOR` を経由した連想枠でしか届かない。
  *
  * - `QUERY = [1,0,0]`
- * - `ANCHOR = [0.70710678,0.70710678,0]` — `cos(QUERY,ANCHOR) ≈ 0.7071`。全候補中
- *   最高の類似度にしてあり、`limit` をいくつにしても `withinLimit` の先頭に必ず
- *   `ANCHOR` が来る。
- * - `SATELLITE = [0,1,0]` — `cos(QUERY,SATELLITE) = 0`（段2の閾値0.1を割り、
- *   通常の候補としては一度も現れない）。`cos(ANCHOR,SATELLITE) ≈ 0.7071`
- *   （連想枠の既定 `minSimilarity` 0.5 を超える）——**連想枠を通してしか
- *   `result.memories` に現れない**。
- * - `SECOND = [0.6,0,0.8]`・`THIRD = [0.62,0,-0.7846]` — `cos(QUERY,·)` は
- *   それぞれ 0.6・0.62（`ANCHOR` の 0.7071 未満、下記 `FILLER` の上限 0.30 より上）。
- *   ⟹ 既定の `anchorCount`（3）が選ぶアンカー集合は、`limit` に依存せず常に
- *   `{ANCHOR, SECOND, THIRD}` になる。**この2点は互いにも `ANCHOR`/`SATELLITE`
- *   にも `cos < 0.5`（連想枠の既定 `minSimilarity` 未満）になるよう Z成分に
- *   逃がしてある**——アンカーになっても自分の近傍検索が何も拾わない「無害な」
- *   アンカーにするため。
- * - `FILLER`: 47件。`ANCHOR`/`SECOND`/`THIRD` のどれとも `cos < 0.5` になる
- *   X-Y平面の反対側（Y成分が負）に押し込み、`cos(QUERY,·)` は 0.1（閾値）より
- *   大きく 0.30（`SECOND`/`THIRD` 未満）より小さい範囲に散らす。`FILLER` どうしは
- *   互いに近い（`cos` が高い）が、`FILLER` が `anchorCount=3` の中に入ることは
- *   無い（`ANCHOR`/`SECOND`/`THIRD` の3つが常に `FILLER` 全件より高い類似度を持つ
- *   ため）ので、この近さが連想枠の結果に影響しない。
+ * - `ANCHOR = [0.70710678,0.70710678,0]`: `cos(QUERY,ANCHOR) ≈ 0.7071`。全候補中最高の類似度にしてあり、`limit` をいくつにしても `withinLimit` の先頭に必ず `ANCHOR` が来る。
+ * - `SATELLITE = [0,1,0]`: `cos(QUERY,SATELLITE) = 0`（段2の閾値0.1を割り、通常の候補としては一度も現れない）。
+ *   `cos(ANCHOR,SATELLITE) ≈ 0.7071`（連想枠の既定 `minSimilarity` 0.5 を超える）ので、連想枠を通してしか `result.memories` に現れない。
+ * - `SECOND = [0.6,0,0.8]`・`THIRD = [0.62,0,-0.7846]`: `cos(QUERY,·)` はそれぞれ 0.6・0.62（`ANCHOR` の 0.7071 未満、`FILLER` の上限 0.30 より上）。
+ *   既定の `anchorCount`（3）が選ぶアンカー集合は、`limit` に依存せず常に `{ANCHOR, SECOND, THIRD}` になる。
+ *   この2点は互いにも `ANCHOR`/`SATELLITE` にも `cos < 0.5`（連想枠の既定 `minSimilarity` 未満）になるよう Z成分に逃がしてある。アンカーになっても自分の近傍検索が何も拾わない「無害な」アンカーにするため。
+ * - `FILLER`: 47件。`ANCHOR`/`SECOND`/`THIRD` のどれとも `cos < 0.5` になる X-Y平面の反対側（Y成分が負）に押し込み、`cos(QUERY,·)` は 0.1（閾値）より大きく 0.30 より小さい範囲に散らす。
+ *   `FILLER` どうしは互いに近いが、`ANCHOR`/`SECOND`/`THIRD` が常に `FILLER` 全件より高い類似度を持つので、`FILLER` がアンカーに入ることは無く、この近さが連想枠の結果に影響しない。
  *
- *   ⚠ **最初の設計は `FILLER`（当時「PADDING」）を1本の密な弧に置き、それを
- *   そのまま `anchorCount` の2位・3位にも使っていた**——`SECOND`/`THIRD` に
- *   相当する候補が `FILLER` 自身の中から選ばれてしまい、その近傍検索が
- *   （`FILLER` どうしが密集しているせいで）類似度 0.999 超の `FILLER` を
- *   大量に連想枠へ引き込み、`SATELLITE`（0.7071）が既定の `maxCount`（10）から
- *   押し出されて歯2が落ちた。`SECOND`/`THIRD` を「アンカーになっても近傍検索が
- *   空になる」孤立点として `FILLER` から切り離したのがこの修正である。
+ *   ⚠ `SECOND`/`THIRD` を `FILLER` 自身の中から選ぶ形にしない。`FILLER` どうしが密集しているせいで、その近傍検索が類似度 0.999 超の `FILLER` を大量に連想枠へ引き込み、
+ *   `SATELLITE`（0.7071）が既定の `maxCount`（10）から押し出されて歯2が落ちる。
  *
- * `ANCHOR` + `SECOND` + `THIRD` + `FILLER`(47件) = 50件が「クエリに直接当たる」
- * 候補の全量。`SATELLITE` はそれとは別に、連想枠経由でだけ+1件になる。
+ * `ANCHOR` + `SECOND` + `THIRD` + `FILLER`(47件) = 50件が「クエリに直接当たる」候補の全量。`SATELLITE` はそれとは別に、連想枠経由でだけ+1件になる。
  */
 
 const QUERY_VECTOR = [1, 0, 0];
@@ -97,7 +54,6 @@ const THIRD_VECTOR = [0.62, 0, -0.7846];
 const FILLER_COUNT = 47;
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
-/** +100年。壁時計では絶対に沈まない（既存の association gate 歯と同じ定数）。 */
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100);
 
 const throwingLlm: LLMProvider = {
@@ -163,15 +119,6 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-/**
- * ファイル冒頭の doc コメントが説明する配置（ANCHOR + SECOND + THIRD + FILLER 47件 +
- * SATELLITE）を置く。`FILLER` は X-Y平面の `SATELLITE` とは反対側（Y成分が負）に、
- * `cos(QUERY,·)` が 0.1（閾値）より大きく 0.30（`SECOND`/`THIRD` の下限）より
- * 小さい範囲で散らす——`ANCHOR`/`SECOND`/`THIRD` の3つが常に `FILLER` 全件より
- * 高い類似度を持つので、既定の `anchorCount`（3）が選ぶアンカー集合は
- * `limit` に依存せず常に `{ANCHOR, SECOND, THIRD}` になる（ファイル冒頭の
- * doc コメント参照）。
- */
 async function seedRoundtripCorpus(
   memoryStore: PostgresMemoryStore,
   vectorStore: PostgresVectorStore,
@@ -200,44 +147,13 @@ async function seedRoundtripCorpus(
 }
 
 /**
- * `fn` の実行中に発行された pg クエリの本数を数える。
+ * 往復数を比較する歯（1・2・4・5）が固定するのは「候補件数・basis件数・anchorCount を変えても往復数が増えない」という比較であって、初回呼び出しに乗る検査ぶんの +1 往復そのものではない。
+ * pgvector 能力検査（`PgvectorCapabilityGate`）は `PostgresVectorStore` インスタンスごとに最初の `search()`/`searchMany()` で1往復を足し、
+ * `StatsPresenceGate` も `memories`・埋め込み表の両方の統計が確認済みになるまで `search()` のたびに `reltuples` を読む往復を足す。
+ * 「未確認→確認済み」に切り替わる回が測定区間に入ると、比較の両辺で往復数が食い違いうるので、測定を始める前に `countClientQueries` の外側で空振りの `search()` を1回打って検査を済ませておく
+ * （1回の `search()` が両方の gate を通るので、名前は能力検査のままにしてある。歯6 がこの相乗りを裏取りする）。
  *
- * `test-db.ts` の `captureClientQuery` と同じ理由で `Client.prototype.query` を
- * パッチする（`pool.query()` も内部で同じ `client.query()` を呼ぶだけなので、
- * ここを1箇所パッチすれば `db.transaction()` 経由・`pool.query()` 経由のどちらも
- * 同じ場所で数えられる）。**このファイルの中だけに閉じた仕組みであり、
- * パッケージの公開 API には出さない。**
- */
-/**
- * pgvector 能力検査（`PgvectorVersionUnsupportedError`、Issue #1301 / ADR 0367）は
- * `PostgresVectorStore` インスタンスごとに、`search()`/`searchMany()` を最初に呼んだときに
- * だけ1往復を追加で発生させ、以降はキャッシュされて追加の往復を生まない
- * （`vector-store.ts` の `PgvectorCapabilityGate` の doc 参照）。
- *
- * **Issue #1415 / ADR 0374 追記**: `StatsPresenceGate`（`vector-store.ts` の doc
- * 参照）も同じ形の仕組みを持つ——`memories`・埋め込み表の**両方**の統計が
- * 確認済みになるまでは、`search()`/`searchMany()` を呼ぶたびに `reltuples` を読む
- * ための往復を1回余分に払い、両方が確認済みになったあとは（そのインスタンス・
- * その表の組み合わせでは）二度と払わない。この歯（歯1・歯2・歯4・歯5）が使う
- * `TEST_EMBEDDING_SPACE` は他のテストファイルとも共有する worker DB 上の表であり、
- * 大抵は既に何らかの `ANALYZE`（自動発火含む）を経て確認済みになっている——
- * それでも「未確認→確認済みへ切り替わる、まさにその1回」を測定区間の中に含めて
- * しまうと、比較の両辺で往復数が食い違いうる（`PgvectorCapabilityGate` と同じ罠）。
- * 下の `warmUpPgvectorCapabilityCheck` は、その名前が示す能力検査だけでなく、
- * **同じ `search()` 呼び出しのついでに `StatsPresenceGate` の遷移も測定区間より前に
- * 済ませる**（1つの `search()` 呼び出しが両方の gate を同時に通るため、名前を
- * 変えずに済んでいる——歯6 がこの相乗りを裏取りする）。
- *
- * この歯（歯1・歯2・歯4・歯5）が固定するのは「候補件数・basis件数・anchorCount を
- * 変えても往復数が増えない」という**比較**であって、初回呼び出しに乗る検査ぶんの
- * +1往復そのものではない——測定を始める前に、`countClientQueries` の外側で1回だけ
- * 空振りの `search()` を打ち、検査を済ませておく。
- *
- * **歯6（新設、Issue #1415 / ADR 0374）は上の「測定を始める前に済ませておく」を
- * あえて崩し、`StatsPresenceGate` の遷移そのものを歯にする**——専用の
- * （他のテストファイルと共有しない、一度も `ANALYZE` されていない）埋め込み表を
- * 使い、「未確認の間だけ+1往復、確認済みになったら今日と同じ数へ戻る」ことを
- * 直接測る。
+ * 歯6 はこの前提をあえて崩し、専用の（他のテストファイルと共有しない、一度も `ANALYZE` されていない）埋め込み表で `StatsPresenceGate` の遷移そのものを測る。
  */
 async function warmUpPgvectorCapabilityCheck(
   vectorStore: PostgresVectorStore,
@@ -250,36 +166,22 @@ async function warmUpPgvectorCapabilityCheck(
 }
 
 /**
- * **統計が「確認済み」の状態を、測定の前に必ず作る**（Issue #1276。歯1・歯2・歯4・歯5 が使う）。
+ * 統計が「確認済み」の状態を、測定の前に必ず作る（歯1・2・4・5）。
  *
- * `StatsPresenceGate`（`vector-store.ts`）は、`memories` と埋め込み表の**両方**が
- * `reltuples >= 0` と確かめられるまで、`search()` のたびに `reltuples` を読む往復を1回余分に払い、
- * 確かめられたら以後は払わない。上の `warmUpPgvectorCapabilityCheck` の空振りの `search()` は、
- * 統計が既に在れば確認済みにするが、**統計が無ければ、読んで未確認のまま帰るだけ**である。
- * **`resetTestDatabase()` の `TRUNCATE` は `reltuples` を `-1`（未確認）へ戻す**——CI のログで、
- * `TRUNCATE` 直後に `memories` と埋め込み表の両方が `-1` であることを確かめた（PostgreSQL 17、
- * このファイルの `it` の全部で）。したがって `beforeEach` の後は毎回、両方が未確認から始まる。
- * すると従来は、**測定の最中に自動 analyze（autovacuum）が終わると**、その読みが確認済みに
- * 変わる1回だけ往復が余分になり、limit=5 と limit=20 の往復数が食い違った
- * （`expected 14 to be 15`、run 36664582749）。
+ * `resetTestDatabase()` の `TRUNCATE` は `reltuples` を `-1`（未確認）へ戻すので、`beforeEach` の後は毎回、両方の表が未確認から始まる。
+ * 上の空振りの `search()` は、統計が既に在れば確認済みにするが、統計が無ければ未確認のまま帰るだけである。
+ * そのため測定の最中に自動 analyze（autovacuum）が終わると、その1回だけ往復が余分になり、比較の両辺が食い違う。
  *
- * ここで両方の表を `ANALYZE` し、同じ `vectorStore` で `search()` をもう1回打つ——その読みが
- * `reltuples >= 0` を見て、ゲートを確認済みにする。**以後この `vectorStore` は往復を余分に払わない**
- * （一度確認済みになったら覚え続ける——`StatsPresenceGate` の doc 参照）ので、測定の中で自動 analyze が
- * 終わっても、往復数は変わらない。**測定の直前にゲートの状態を決定的にするだけで、歯の主張
- * （候補の件数・basis の件数・anchorCount を変えても往復数が増えない）は1バイトも弱めていない**
- * ——許容差も、比べる本数の削減も入れていない。種まきの**後**に呼ぶ（空の表への `ANALYZE` が
- * `reltuples` をどうするかに頼らないため）。歯6 は、この未確認→確認済みの遷移そのものを測る
- * 別の歯（専用の表）なので、これを呼ばない。
+ * ここで両方の表を `ANALYZE` し、同じ `vectorStore` で `search()` をもう1回打ってゲートを確認済みにする（一度確認済みになったら覚え続ける）。
+ * 測定の直前にゲートの状態を決定的にするだけで、歯の主張は弱めていない（許容差も、比べる本数の削減も入れていない）。
+ * 種まきの後に呼ぶ（空の表への `ANALYZE` が `reltuples` をどうするかに頼らないため）。歯6 は遷移そのものを測る別の歯（専用の表）なので、これを呼ばない。
  */
 async function confirmStatsPresence(vectorStore: PostgresVectorStore, ctx: Ctx): Promise<void> {
   const { pool } = await getTestClient();
   const embeddingTable = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
   await pool.query("ANALYZE memories");
   await pool.query(`ANALYZE ${embeddingTable}`);
-  // 事後条件（#1489）: `StatsPresenceGate` が確認済みにする条件（両方の表が `reltuples >= 0`）が、
-  // 実際に成り立っている。`ANALYZE` を外すと、`TRUNCATE` 後の `reltuples` は `-1`（未確認）のままで、
-  // 往復数の比較は「毎回同じ余分な1往復」が乗るだけで等しいまま緑になる——ここで決定的に赤にする。
+  // 事後条件: `ANALYZE` を外すと、`TRUNCATE` 後の `reltuples` は `-1`（未確認）のままで、往復数の比較は「毎回同じ余分な1往復」が乗るだけで等しいまま緑になる。ここで決定的に赤にする。
   const stats = await pool.query(
     "SELECT c.relname, c.reltuples::float8 AS reltuples FROM pg_class c WHERE c.oid = ANY(ARRAY['memories'::regclass, $1::regclass])",
     [embeddingTable],
@@ -295,13 +197,12 @@ async function confirmStatsPresence(vectorStore: PostgresVectorStore, ctx: Ctx):
   confirmedVectorStores.add(vectorStore);
 }
 
-/** `confirmStatsPresence` を済ませた `vectorStore`（測定の門が見る。#1489）。 */
 const confirmedVectorStores = new WeakSet<PostgresVectorStore>();
 
 /**
- * 往復数を比較する測定（歯1・2・4・5）の入口。**統計を確認済みにしていない `vectorStore` の runtime では測れない**
- * ——呼び忘れると、往復数が毎回同じ余分な1往復を払うだけで等しいまま緑になり、「測定の途中で自動 analyze が
- * 終わる」赤の芽が戻っても決定的には気付けない。歯6（未確認→確認済みの遷移そのものを測る）は使わない。
+ * 往復数を比較する測定（歯1・2・4・5）の入口。統計を確認済みにしていない `vectorStore` の runtime では測れない。
+ * 呼び忘れると、往復数が毎回同じ余分な1往復を払うだけで等しいまま緑になり、「測定の途中で自動 analyze が終わる」赤の芽が戻っても決定的には気付けない。
+ * 歯6（未確認→確認済みの遷移そのものを測る）は使わない。
  */
 async function countConfirmedQueries(
   vectorStore: PostgresVectorStore,
@@ -315,6 +216,10 @@ async function countConfirmedQueries(
   return countClientQueries(fn);
 }
 
+/**
+ * `fn` の実行中に発行された pg クエリの本数を数える。`test-db.ts` の `captureClientQuery` と同じ理由で `Client.prototype.query` をパッチする
+ * （`pool.query()` も内部で同じ `client.query()` を呼ぶので、1箇所で `db.transaction()` 経由・`pool.query()` 経由のどちらも数えられる）。
+ */
 async function countClientQueries(fn: () => Promise<unknown>): Promise<number> {
   let count = 0;
   const originalQuery = Client.prototype.query;
@@ -372,7 +277,6 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     expect(resultSmall!.memories.length).toBe(1);
     expect(resultLarge!.memories.length).toBe(50);
 
-    // 固定するのはこれだけ: 候補の件数（1 → 50）が50倍になっても、往復数は増えない。
     expect(roundtripsLarge).toBe(roundtripsSmall);
   });
 
@@ -389,8 +293,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     for (const limit of [5, 20, 50]) {
       let result: Awaited<ReturnType<typeof runtime.recall>> | undefined;
       const roundtrips = await countConfirmedQueries(vectorStore, async () => {
-        // `association` は渡さない — 既定（ADR 0337、DEFAULT_RECALL_ASSOCIATION、
-        // anchorCount は DEFAULT_ASSOCIATION_ANCHOR_COUNT=3）のままの経路を測る。
+        // `association` は渡さない。既定のアンカー数（3）のままの経路を測る。
         result = await runtime.recall(ctx, { vector: QUERY_VECTOR, limit, channels: ["ann"] });
       });
       roundtripsByLimit.set(limit, roundtrips);
@@ -404,34 +307,17 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     expect(returnedByLimit.get(20)).toBe(21);
     expect(returnedByLimit.get(50)).toBe(51);
 
-    // 固定するのはこれだけ: 候補の件数（limit）を5→20→50と変えても、
-    // アンカーの選ばれ方（ANCHOR が常に1位、既定 anchorCount=3）が変わらない限り
-    // 往復数は増え続けない。アンカー数ぶんの増加（#377の領分）はここでは固定しない
-    // ——固定するのは「候補数を増やしても増えない」ことだけである。
     expect(roundtripsByLimit.get(20)).toBe(roundtripsByLimit.get(5));
     expect(roundtripsByLimit.get(50)).toBe(roundtripsByLimit.get(5));
   });
 
   it("歯3: observe({kind:'memory_usage'}) の往復数は usedMemoryIds の件数に比例しない — N=1/5/20 で等しい（Issue #874、PR「perf/874-reinforce-many」）", async () => {
-    // この歯は元々「recordUsage → reinforce ループは使用報告1件ごとに2往復し、
-    // 件数に比例する」ことを `1 + 2 * n` という式で固定していた（現状の記録であり、
-    // あるべき姿ではないと明記していた）。[Issue #874](https://github.com/takecchi/mnemora/issues/874)
-    // を直した本 PR で、その式のとおり書き換える——ただし固定するのは絶対値の式
-    // ではなく、歯1・歯2 と同じ「比較先も同じ実行・同じ環境」の相対比較である
-    // （ファイル冒頭の doc コメント参照）。理由: この歯が数えるのは
-    // `runtime.observe()` 全体（`createObservation` を含む）の往復数であり、
-    // `createObservation` 側の往復数はこの PR の対象外（Issue #870 が並行で
-    // `externalId` を足している）——絶対値を固定すると、無関係な変更で赤くなる歯に
-    // なってしまう（`docs/north-star.md` 問い3）。
-    //
-    // 実測値（直す前・直した後とも）は PR 本文に控えてあり、ここには焼き込まない
-    // （`AGENTS.md`「数を、道具と生成物に焼き込まない」）——固定するのは、この歯自身が
-    // 検査する「N を変えても往復数が変わらない」という関係だけである。
+    // 固定するのは絶対値の式ではなく、歯1・歯2 と同じ相対比較である。
+    // この歯が数えるのは `runtime.observe()` 全体（`createObservation` を含む）の往復数で、`createObservation` 側の往復数は対象外なので、
+    // 絶対値を固定すると無関係な変更で赤くなる歯になってしまう。
     const ctx: Ctx = { tenantId: `tenant-rtc-usage-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
 
-    // 使用報告の対象になる Memory を20件、事前に作る（埋め込みは使わないが、
-    // 既存の helper をそのまま使う）。
     const memoryIds: string[] = [];
     for (let i = 0; i < 20; i += 1) {
       const memory = await createEmbeddedMemory(memoryStore, vectorStore, ctx, ANCHOR_VECTOR, {
@@ -441,10 +327,8 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     }
 
     async function observeMemoryUsage(ids: string[]): Promise<number> {
-      // `recall_usages_recall_id_fkey` を満たすため、呼ぶたびに新しい `recalls` 行を
-      // 1本作る（recall_id が毎回違うので、`memoryIds` を呼び出しの間で再利用しても
-      // `recall_usages` の複合PK（tenant_id, recall_id, memory_id）に衝突しない
-      // ——ON CONFLICT DO NOTHING が効く経路をこの歯では踏まない）。
+      // `recall_usages_recall_id_fkey` を満たすため、呼ぶたびに新しい `recalls` 行を1本作る。
+      // recall_id が毎回違うので、`memoryIds` を呼び出しの間で再利用しても `recall_usages` の複合PK（tenant_id, recall_id, memory_id）に衝突せず、ON CONFLICT DO NOTHING が効く経路は踏まない。
       const recallId = await memoryStore.createRecall(ctx, {
         tenantId: ctx.tenantId,
         subjectId: null,
@@ -476,7 +360,6 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     const roundtripsN5 = await observeMemoryUsage(memoryIds.slice(0, 5));
     const roundtripsN20 = await observeMemoryUsage(memoryIds.slice(0, 20));
 
-    // 固定するのはこれだけ: usedMemoryIds の件数（1→5→20）が変わっても往復数は増えない。
     expect(roundtripsN5).toBe(roundtripsN1);
     expect(roundtripsN20).toBe(roundtripsN1);
   });
@@ -486,8 +369,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
 
-    // `memories_check`（0001_init.sql 68行）: inferred は source_observation_id が
-    // 必須（observations への FK）。まず本物の Observation を1件作る。
+    // `memories_check`: inferred は source_observation_id が必須（observations への FK）。まず本物の Observation を1件作る。
     async function createInferredMemory(
       vector: number[],
       digest: string,
@@ -514,9 +396,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       });
     }
 
-    // 基準: inferred を含まない recall（連想枠 off——`association: null`——で、
-    // 段3の同伴取得も `scope.attributes` も踏まないようにする。歯1・歯2 と同じ
-    // 「候補フェッチ以外の getMany 経路を混ぜない」配置）。
+    // 基準: inferred を含まない recall。連想枠 off（`association: null`）で、段3の同伴取得も `scope.attributes` も踏まないようにする（候補フェッチ以外の getMany 経路を混ぜない）。
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], { digest: "plain-1" });
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.01, 0], {
       digest: "plain-2",
@@ -526,7 +406,6 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
 
-    // 1件の inferred、basis 1件。
     const basis = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: "basis" }),
@@ -537,9 +416,7 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     });
     expect(oneBasisRoundtrips).toBe(baselineRoundtrips + 1);
 
-    // さらに4件の inferred（合計5件）、それぞれ basis 5件（新規24件 + 既存1件 = のべ29件、
-    // ユニークな basis memoryId は25件超）を追加する——basis の件数を増やしても
-    // 往復数が変わらないことを見るのが目的なので、絶対数そのものは固定しない。
+    // さらに4件の inferred（合計5件）、それぞれ basis 5件を追加する。basis の件数を増やしても往復数が変わらないことを見るのが目的なので、絶対数そのものは固定しない。
     for (let i = 0; i < 4; i += 1) {
       const basisIds: string[] = [basis.id];
       for (let j = 0; j < 5; j += 1) {
@@ -559,17 +436,11 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
 
-    // 固定するのはこれだけ: inferred の件数・basis の件数が増えても、
-    // basisLost の解決に要る往復は常に+1のまま増えない。
     expect(manyBasisRoundtrips).toBe(oneBasisRoundtrips);
   });
 
   it("歯5: 連想枠 on — anchorCount=1/3/10 で往復数が等しい（Issue #377、VectorStore.searchMany? を束ねた後）", async () => {
-    // `seedRoundtripCorpus` は ANCHOR + SECOND + THIRD + FILLER(47件) を持つ
-    // （ファイル冒頭の doc コメント参照）。全50件が段2の閾値(0.1)を超えるので、
-    // `limit=20` の `withinLimit` は常に20件——`anchorCount` を 1/3/10 のどれに
-    // しても、`withinLimit.slice(0, anchorCount)` は毎回「実在する」anchorCount件
-    // を返す（`anchorCount` が `withinLimit` の長さを超えて切り詰められる心配が無い）。
+    // 全50件が段2の閾値(0.1)を超えるので、`limit=20` の `withinLimit` は常に20件。`anchorCount` を 1/3/10 のどれにしても、`withinLimit.slice(0, anchorCount)` は毎回実在する anchorCount 件を返す。
     const ctx: Ctx = { tenantId: `tenant-rtc-anchorcount-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     await warmUpPgvectorCapabilityCheck(vectorStore, ctx);
@@ -593,28 +464,20 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       returnedByAnchorCount.set(anchorCount, result!.memories.length);
     }
 
-    // 無意味な等号にしない: anchorCount を変えると連想の探索対象は実際に変わって
-    // いる（返る件数そのものはこの corpus では変わらないことがあるので、
-    // ここでは「例外にならず、20件以上は必ず返る」ことだけを検算する——本題は
-    // 下の往復数比較である）。
+    // 無意味な等号にしない: anchorCount を変えると連想の探索対象は実際に変わっている。
+    // 返る件数そのものはこの corpus では変わらないことがあるので、ここでは「例外にならず、20件以上は必ず返る」ことだけを検算する。
     expect(returnedByAnchorCount.get(1)!).toBeGreaterThanOrEqual(20);
     expect(returnedByAnchorCount.get(3)!).toBeGreaterThanOrEqual(20);
     expect(returnedByAnchorCount.get(10)!).toBeGreaterThanOrEqual(20);
 
-    // 固定するのはこれだけ: anchorCount（1→3→10）を変えても往復数は増えない
-    // ——`VectorStore.searchMany?` が全アンカーを1回の往復に束ねるため。
-    // 実装前はアンカー数に比例して線形に増え、この2つの expect は両方赤くなる
-    // （実測値・式は PR 本文に控えてある——`main` が動くと変わりうる数なので
-    // ここには焼き込まない、AGENTS.md「数を、道具と生成物に焼き込まない」）。
+    // anchorCount（1→3→10）を変えても往復数は増えない。`VectorStore.searchMany?` が全アンカーを1回の往復に束ねるため。
     expect(roundtripsByAnchorCount.get(3)).toBe(roundtripsByAnchorCount.get(1));
     expect(roundtripsByAnchorCount.get(10)).toBe(roundtripsByAnchorCount.get(1));
   });
 
   it("歯6（Issue #1415 / ADR 0374）: recall() の往復数は、統計が未確認の間だけ+1、確認済みになったら今日と同じ数へ戻る", async () => {
     const ctx: Ctx = { tenantId: `tenant-rtc-statsgate-${randomUUID()}` };
-    // このテストだけの専用の埋め込み表——一度も ANALYZE していない、正真正銘
-    // 「統計が無い」表を保証する（`TEST_EMBEDDING_SPACE` は他のテストファイルとも
-    // 共有するため、ここでは使わない）。
+    // このテストだけの専用の埋め込み表。一度も ANALYZE していない「統計が無い」表を保証する（`TEST_EMBEDDING_SPACE` は他のテストファイルとも共有するため使わない）。
     const space: EmbeddingSpaceId = {
       provider: "test-issue-1415-roundtrip",
       model: `roundtrip-statsgate-${randomUUID()}`,
@@ -628,16 +491,11 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, ANCHOR_VECTOR, { digest: "one" });
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, SECOND_VECTOR, { digest: "two" });
 
-    // 1回目: pgvector 能力検査・`StatsPresenceGate` のどちらも未確認——両方の
-    // 検査ぶんの往復が乗る（`association: null` で `search()` だけを踏む——
-    // 歯1・歯4 と同じ「候補フェッチ以外の経路を混ぜない」配置）。
     const call1 = await countClientQueries(async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
 
-    // 2回目: pgvector 能力検査はもう確認済み（インスタンスごとに1回きり）。
-    // `StatsPresenceGate` はまだ未確認のまま——表を一度も ANALYZE していないので
-    // `reltuples < 0` を観測し続け、確認済みにはならない。
+    // 2回目: pgvector 能力検査は確認済み（インスタンスごとに1回きり）。`StatsPresenceGate` は、表を一度も ANALYZE していないので `reltuples < 0` を観測し続け、まだ未確認のまま。
     const call2 = await countClientQueries(async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
@@ -646,12 +504,9 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       "pgvector 能力検査ぶんの1回だけが消え、StatsPresenceGate ぶんの+1はまだ残るはず",
     ).toBe(call1 - 1);
 
-    // ここで初めて ANALYZE を打つ——次の呼び出しで `reltuples >= 0` が観測される。
     await pool.query(`ANALYZE ${table}`);
     await pool.query("ANALYZE memories");
 
-    // 3回目: この呼び出し自身が「未確認→確認済み」の遷移を起こす——遷移する
-    // その回はまだ検査ぶんの往復を払う（call2 と同じ数のはず）。
     const call3 = await countClientQueries(async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
@@ -660,13 +515,11 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
       "確認済みへ切り替わる、まさにその回はまだ検査ぶんの往復を払うはず（call2 と同数）",
     ).toBe(call2);
 
-    // 4回目: 前回で確認済みになったので、今日と同じ数へ戻る。
     const call4 = await countClientQueries(async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });
     expect(call4, "確認済みになったので、今日と同じ数へ戻るはず").toBe(call3 - 1);
 
-    // 5回目: 4回目以降も往復数が増えない（確認済みは以後ずっと保たれる）ことの裏取り。
     const call5 = await countClientQueries(async () => {
       await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
     });

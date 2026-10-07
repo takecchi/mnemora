@@ -25,19 +25,16 @@ import {
 /**
  * `@mnemora/postgres` の store は、入口で uuid の形の id を小文字にそろえる（store の中の正規化。Runtime から
  * 渡す値は変えない）。DB は uuid を大文字小文字を区別せずに比べて小文字で返すので、JS で id を比べる箇所・
- * 渡された id を記録に写す箇所が、大文字の UUID だけで食い違っていた。
+ * 渡された id を記録に写す箇所は、大文字の UUID でも食い違わない。
  *
- * - `resolveContestedPair`: 渡された id のまま Map を引き、`contested_with_id` と比べていた → 「memory not found」
- *   か `MemoryStatusConflictError`。
- * - `markContestedPair`: 同じ行を小文字と大文字で渡すと、TSDoc が約束する `RangeError`（同じ id）にならず
- *   「memory not found」（`Error`）だった。
- * - `restoreSupersededBy`: `meta.supersededById` に渡された値をそのまま写していた（列の値は小文字）。
- * - `resolveOrphanedContested`: 形の崩れた `contestedWithId` で DB の例外（uuid への型変換）が漏れていた
- *   （TSDoc は `MemoryStatusConflictError` を約束する。core の Fake はそうなっている）。
+ * - `resolveContestedPair`: 渡された id を小文字にして Map を引き、`contested_with_id` と比べる。
+ * - `markContestedPair`: 同じ行を小文字と大文字で渡すと、TSDoc が約束する `RangeError`（同じ id）になる。
+ * - `restoreSupersededBy`: `meta.supersededById` は列の値（小文字）を写す。
+ * - `resolveOrphanedContested`: 形の崩れた `contestedWithId` は `MemoryStatusConflictError`（DB の例外を漏らさない。
+ *   core の Fake も同じ）。
  *
- * Runtime の `consolidate`・`reflect` の `{ memoryIds }`・`{ seedMemoryId }` は、`#1324` の `forget` と同じ形で
- * 鍵をそろえる。testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、大文字は `not_found` だった。
- * fixture の leg の `caseInsensitive` を `true` にした。`false` の側の分岐は、いまは通らない）。
+ * Runtime の `consolidate`・`reflect` の `{ memoryIds }`・`{ seedMemoryId }` は、`forget` と同じ形で
+ * 鍵をそろえる。testkit の fixture の id も、大文字小文字を区別しない。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -191,7 +188,7 @@ describe("PostgresMemoryStore.resolveOrphanedContested — 形の崩れた conte
   it("やりすぎの歯: 形の正しい contestedWithId（小文字・大文字）は今どおり対向として突き合わせる", async () => {
     const { store, ctx, a, b } = await contested("tenant-orphan-ok");
 
-    // 対向が一致しない（別の uuid）ときは今どおり MemoryStatusConflictError。
+    // 対向が一致しない（別の uuid）ときは MemoryStatusConflictError。
     await expect(
       store.resolveOrphanedContested!(ctx, {
         id: a.id,

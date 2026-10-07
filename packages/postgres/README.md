@@ -290,6 +290,13 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
 > ⟹ **上の `--analyze-memories`（`ANALYZE memories;`）を1回打てば戻る**（【実測】`memories` だけの
 > `ANALYZE` で、その問い合わせは 1.8 ms。埋め込み表だけでも 1.4 ms）。数百行を超えると、統計が無くても
 > 上乗せは小さくなった（500〜900行で 5〜8 ms）。詳細と、確かめていないことは Issue #1181。
+>
+> ⚠ **2026-10 追記（[ADR 0362](../../docs/decisions/0362-searchmany-lateral-forces-memories-primary-key-lookup.md)・
+> [ADR 0374](../../docs/decisions/0374-search-stats-presence-instance-cache.md)）: 上の遅さは直った。**
+> `PostgresVectorStore` は `search`・`searchMany` とも、統計が無い表では `memories` を主キーで引く形に切り替える
+> （インスタンスが表ごとに統計の有無を一度だけ確かめて覚える）。上の実測（63 ms → 18 ms）は直す前の数字で、
+> 今は `--analyze-memories` を打たなくても、この理由では遅くならない。投入後に `--analyze-memories` を打つ勧めは、
+> 上の節のとおり（プランの統計一般のため）変わらない。
 
 ### 専用スキーマを指定する（`--schema` / `--extension-schema`）
 

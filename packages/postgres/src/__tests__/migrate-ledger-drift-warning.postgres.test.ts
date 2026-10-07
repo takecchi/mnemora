@@ -3,21 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles, runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * `runMigrations` が、台帳（`_mnemora_migrations`）と手元の `migrations/*.sql` のずれを
- * 見つけたら**警告を出して続行する**ことの歯（穴探し6巡目 S-1・S-3、ADR 0425）。
- *
- * - (a) 未適用のファイルのうち、台帳の最大の番号より小さいものが在る（S-1）:
- *   台帳から 0011 の行だけが欠けた DB で流すと、0011 が単独で当たり直り、0018 が足した
- *   `'unsuperseded'` が `memory_events_kind_check` から黙って消える。
- * - (b) 台帳にある名前が、手元のファイルに無い（S-3）: 新しい版で上げた DB に古い版から
- *   流すと、何も言わずに「すべて適用済み」になる。
- *
- * どちらも**止めない**（throw しない・適用の順序と中身は変えない）。
- *
- * 専用スキーマ（このファイル専用の名前）の中で走らせ、`public` の台帳（他のテストが
- * 共有する）には触れない。`analyze-memories.postgres.test.ts` と同じ作法。
- */
+/** 専用スキーマ（このファイル専用の名前）の中で走らせ、`public` の台帳（他のテストが共有する）には触れない。 */
 
 const SCHEMA = "mnemora_ledger_drift_warning";
 const ALL_FILES = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
@@ -82,11 +68,8 @@ describe("runMigrations: 台帳と手元のファイルのずれを警告して�
 
     const result = await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: SCHEMA });
 
-    // 止めない・いまどおり当てる。
     expect(result.applied).toEqual([FILE_0011]);
-    // S-1 の実害: 0018 が足した値が黙って消える。
     expect(await kindCheckDefinition()).not.toContain("unsuperseded");
-    // 警告は、当たり直されるファイルと、台帳の最大の番号（基準）を名指しする。
     const w = warnings();
     expect(w).toHaveLength(1);
     expect(w[0]).toContain("[@mnemora/postgres]");

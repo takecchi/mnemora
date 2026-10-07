@@ -27,15 +27,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * LLM が空白だけの本文（`content`）を返したら、`""` と同じ LLM の失敗として扱う（Issue #1065）。
- * 純関数の歯は `packages/core/src/__tests__/llm-blank-content.test.ts`。
- *
- * 【実測 2026-09-27】以前は Postgres と testkit の InMemory の両方で、空白だけの本文の Memory が
- * 書かれていた——consolidate は元の2件を `superseded` にして空白の Memory に置き換え、
- * reextract は全文フォールバックの Memory を空白の Memory に置き換えていた。
- */
-
 /** 半角空白・全角空白（U+3000）・改行・タブ。`trim()` で空になる。 */
 const BLANK = " 　\n\t";
 const OBSERVED_TEXT = "来週の月曜に歯医者の予約がある";
@@ -79,8 +70,6 @@ function shared(llmState: { failNextExtraction: boolean }) {
       embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
     },
     hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
-    // runtime の時計を先に進める。歴史的な理由で残している（今は available_at も注入した時計に
-    // 従う。ADR 0559。operation-roundtrip-shape の CLOCK_AHEAD_MS も見ること）。
     clock: { now: () => new Date(Date.now() + 60_000) },
     config: { extractorVersion: EXTRACTOR_VERSION },
   };

@@ -5,18 +5,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 同じ語彙を逆の並びで `tags` に持つ記憶を同時に作っても、`labels` の行ロックが循環待ちにならない
- * （ADR 0476）。
- *
- * 【実測 2026-10-02】`upsertProposedLabels` は `tags` の並びのまま `labels` を1行ずつ
- * `INSERT … ON CONFLICT DO UPDATE` する。`tags` は LLM が返した並びのまま保存される（並べ替えない）ので、
- * 別々の `observe()` が同じ語彙を違う順で返すと、片方が `a` → `b`、もう片方が `b` → `a` の順で行ロックを
- * 取り合い、Postgres が `deadlock detected`（40P01）で片方を落とす。1回の `createMemory` は
- * 「本文が正しくても raw の例外で落ちる」。直す前は、同じ4語を逆順で持つ6件を6接続で同時に作る
- * 6ラウンドで 36 件中 25 件が落ちた。
- *
- * 直し方は、`labels` を触る順を、`tags` の並びではなく名前の順に固定すること（`contested` ペアの行ロックを
- * id 昇順で取るのと同じ形）。`Memory.tags` の並び・重複は変えない。
+ * `tags` は LLM が返した並びのまま保存される（並べ替えない）ので、別々の `observe()` が同じ語彙を違う順で返すと、
+ * `labels` の行ロックを逆順に取り合って `deadlock detected`（40P01）になりうる。`labels` を触る順は `tags` の並びではなく名前の順に固定し、`Memory.tags` の並び・重複は変えない。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -56,7 +46,6 @@ describe("PostgresMemoryStore.createMemory は逆順の tags の同時作成で 
           );
         }
       }
-      // 落ちた作成があれば、ここで理由（deadlock detected・40P01 など）つきで赤くする。
       expect(failures).toEqual([]);
       const labels = await store.listLabels(ctx);
       expect(labels.map((l) => [l.name, l.proposedCount])).toEqual([

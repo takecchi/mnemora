@@ -20,14 +20,12 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0451: `createMemoriesWithOutboxAndEvents` は候補ごとに SAVEPOINT（drizzle の入れ子の `tx.transaction`）を張る。
- * drizzle-orm 0.45.2 の `NodePgTransaction.transaction` は `catch { await rollback to savepoint; throw err }` で、
- * `rollback to savepoint` が投げると元のエラーを消す（ADR 0444 の `begin`・`rollback` と同じ形）。以前は、その失敗が
- * `dropped` に積まれ、全候補が落ちたら投げられ、一部が成功したら `created` の `meta` に載った。
+ * `createMemoriesWithOutboxAndEvents` は候補ごとに SAVEPOINT（drizzle の入れ子の `tx.transaction`）を張る。
+ * drizzle-orm の `NodePgTransaction.transaction` は `catch { await rollback to savepoint; throw err }` で、`rollback to savepoint` が投げると元のエラーを消す。
  *
- * 直した形: 巻き戻しそのものが失敗したら、続けず・`dropped` に積まず、**元のエラー**を投げる（外側のトランザクションごと戻る）。
+ * 巻き戻しそのものが失敗したら、続けず・`dropped` に積まず、**元のエラー**を投げる（外側のトランザクションごと戻る）。
  * 失敗は元のエラーの `cause`（空いていれば）か `rollbackError` に残す。新しい例外の型は作らない。
- * rollback が成功する悪い候補は、従来どおり `dropped` に積んで他を書く。
+ * rollback が成功する悪い候補は、`dropped` に積んで他を書く。
  *
  * 直列の群に置く（`Client.prototype.query` の差し替えと `pg_terminate_backend`。`vitest.config.mts` の `SERIAL_TEST_FILES`）。
  */
@@ -46,8 +44,7 @@ function good(hash: string): NewMemory {
 }
 /**
  * DB の CHECK 制約（`memories_strength_range`: `strength` は `(0, 1]`）が拒む（SQLSTATE 23514。トランザクションが aborted になる）。
- * ADR 0499 より前は、本文の NUL（22021）をここに使っていた。いまは NUL を DB に触れる前の名指しの例外で断る
- * （トランザクションは aborted にならない）ので、「DB の失敗でトランザクションが aborted になる」候補は別の値で作る。
+ * 本文の NUL は DB に触れる前の名指しの例外で断る（トランザクションは aborted にならない）ので、「DB の失敗でトランザクションが aborted になる」候補は別の値で作る。
  * 関数名の `nul` は、この歯の各 it の名前（悪い候補）を変えないために残した。
  */
 function nul(hash: string): NewMemory {
@@ -376,8 +373,7 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       };
       const realStore = new PostgresMemoryStore(client.db);
       // 落ちる候補を、runtime が store に渡す2件目へ差し込む。runtime 自身はそういう候補を作らないので、store の手前で書き換える。
-      // JS 側で落ちる候補は `status: "contested"` で相手なし。DB が拒む候補は `strength: 2`（CHECK 制約 23514。ADR 0499 より前は
-      // 本文の NUL を LLM に返させていたが、NUL は DB に触れる前の名指しの例外になり、トランザクションが aborted にならない）。
+      // JS 側で落ちる候補は `status: "contested"` で相手なし。DB が拒む候補は `strength: 2`（CHECK 制約 23514）。
       const memoryStore = new Proxy(realStore, {
         get(target, prop, receiver) {
           if (prop === "createMemoriesWithOutboxAndEvents") {
@@ -457,7 +453,6 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       } finally {
         restore();
       }
-      // どの形で返るにせよ、イベントの meta に注入した失敗の文言は載らない。
       const metas = (
         await admin.pool.query("SELECT meta FROM memory_events WHERE tenant_id = $1", [
           ctx.tenantId,
@@ -465,7 +460,6 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
       ).rows;
       expect(JSON.stringify(metas)).not.toContain("rollback to savepoint");
       expect(JSON.stringify(metas)).not.toContain(INJECTED);
-      // 全体が戻り、呼び出し側へ届くのは元の失敗（23514）。巻き戻しの失敗は rollbackError に残る。
       const thrown = (outcome as { threw?: unknown }).threw;
       expect(thrown).toBeInstanceOf(Error);
       expect(innermostCode(thrown)).toBe("23514");
@@ -501,7 +495,6 @@ describe("createMemoriesWithOutboxAndEvents: savepoint の rollback が失敗し
           ])
         ).rows,
       );
-      // 直す前: ObserveResult（memoryIds が1件）が返り、metas に注入した失敗の文言（Failed query: rollback to savepoint）が載る。
       expect(metas).not.toContain("rollback to savepoint");
       expect(metas).not.toContain(INJECTED);
       const thrown = (outcome as { threw?: unknown }).threw;

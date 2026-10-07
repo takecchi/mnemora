@@ -4,13 +4,6 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `halfLifeHours`・`halfLifeRecalls` が float4（Postgres の `real` 列）に収まらないとき、
- * `NewMemory` を受けるどの入口も DB の生の例外ではなく、`float4` を名指しする明示の例外で断る。
- * `createMemory` は共有の conformance が見る。ここでは他の入口（createMemoryWithOutbox・
- * supersedeWithNewMemories）を見る。
- */
-/** 明示の例外の目印（DB の生の例外は「Failed query: …」で始まり、この文言を含まない）。 */
 const FLOAT4_MESSAGE = /does not fit in a Postgres "real" \(float4\) column/;
 const ctx: Ctx = { tenantId: "half-life-float4-explicit-reject" };
 

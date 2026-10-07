@@ -14,16 +14,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0639: 冪等な再送（同じ `externalId` の Observation が既に在った）の `ObserveResult` には `resend` が付く。
- * 既存の欄（`memoryIds: []`・`extraction: 'skipped'`・ADR 0454 決定4 の3欄）は変えない。
- * `resend.memories` は `listBySourceObservationAllVersions` の写し（版も status も問わない・memoryId の昇順）。
- *
- * ⚠ このファイルは実 Postgres で走らせる。同じ本体を core の Fake
- * （`packages/core/src/__tests__/observe-resend-breakdown.test.ts`）と testkit の InMemory
- * （`packages/testkit/src/__tests__/observe-resend-breakdown.test.ts`）でも走らせている。
- * 3つの本体は同じ形に保つこと。
- */
+/** このファイルは実 Postgres で走らせる。同じ本体を core の Fake と testkit の InMemory でも走らせている（`observe-resend-breakdown.test.ts`）。3つの本体は同じ形に保つこと。 */
 
 interface Kit {
   /** 同じ store に繋がった runtime を、`extractorVersion` ごとに作る。 */
@@ -222,7 +213,6 @@ function defineTests(label: string, makeKit: () => Promise<Kit> | Kit): void {
         ctx,
         first.observationId,
       );
-      // 前提: 版違いの記憶が実際に2件在る。
       expect(new Set(all.map((m) => m.extractorVersion))).toEqual(new Set(["v1", "v2"]));
       const resend = await v2.observe(ctx, input("resend-version"));
       expect(resend.resend?.memories.map((m) => m.memoryId)).toEqual(all.map((m) => m.id).sort());
@@ -253,7 +243,6 @@ function defineTests(label: string, makeKit: () => Promise<Kit> | Kit): void {
       const ascending = [...first.memoryIds].sort();
       const resend = await runtime.observe(ctx, input("resend-order"));
       expect(resend.resend!.memories.map((m) => m.memoryId)).toEqual(ascending);
-      // store が逆順で返しても、runtime が昇順にする（口は順序を規定しない）。
       const reversedStore = kit.runtimeFor("v1", reverseListed);
       const viaReversed = await reversedStore.observe(ctx, input("resend-order"));
       expect(viaReversed.resend!.memories.map((m) => m.memoryId)).toEqual(ascending);

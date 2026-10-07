@@ -7,15 +7,7 @@ import { runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
-/**
- * `runMigrations` が各ファイルの直前に発行する `SET LOCAL search_path TO ...` は、
- * `schema` だけでなく **`extensionSchema` も** 二重引用符で囲み、`schema[,extensionSchema]` の
- * ほかは何も足さない（`quotedSearchPathFor` の doc は、`searchPathFor` が返すコンマ区切りの並びの
- * 要素ごとに囲む、と書いている）。
- * `dedicated-schema.postgres.test.ts` の測定8は `schema` が予約語の場合だけを見ていて、
- * 拡張を置くスキーマ（`extensionSchema`）が予約語の場合も、並びに余分な要素が混ざらないことも、
- * 誰も見ていない。
- */
+/** `SET LOCAL search_path TO ...` は `schema` だけでなく `extensionSchema` も二重引用符で囲み、`schema[,extensionSchema]` のほかは何も足さない。拡張を置くスキーマが予約語の場合も、並びに余分な要素が混ざらないことを見る。 */
 
 const DATABASE = "mnemora_reserved_ext_schema";
 
@@ -43,17 +35,14 @@ describe("runMigrations: search_path の引用符は schema と extensionSchema 
   it("extensionSchema: 'user'（予約語）で適用でき、マイグレーション中の search_path は schema と extensionSchema の2つだけ", async () => {
     await dropTempDatabase(admin(), DATABASE);
     await admin().query(`CREATE DATABASE ${DATABASE}`);
-    // 最後の pgvector の能力検査は `SET LOCAL` の外で流れるので、接続自身の既定の search_path が
-    // 拡張のスキーマに届いている必要がある（ここは本題ではない。`createPostgresClient` が付ける形と同じ）。
+    // 最後の pgvector の能力検査は `SET LOCAL` の外で流れるので、接続自身の既定の search_path が拡張のスキーマに届いている必要がある。
     pool = new Pool({
       connectionString: connectionStringFor(DATABASE),
       max: 3,
       options: "-c search_path=public,user",
     });
-    // 拡張を置くスキーマは、`CREATE EXTENSION ... WITH SCHEMA` の前に存在している必要がある。
     await pool.query('CREATE SCHEMA "user"');
 
-    // マイグレーションの中で見える search_path を、適用先のスキーマの表に書き残す。
     const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-reserved-ext-"));
     writeFileSync(
       join(dir, "9001_probe.sql"),

@@ -6,9 +6,7 @@ import { PostgresRelationStore } from "../relation-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0596（ADR 0571 の A3）: `PostgresRelationStore.link` は、両端とも存在しないとき `fromId` 側を報告する
- * （どちらか一方だけ無いときは、その無い側）。両端が無いときの報告先は、どのテストも縛っていなかった。
- */
+/** `PostgresRelationStore.link` は、両端とも存在しないとき `fromId` 側を報告する（どちらか一方だけ無いときは、その無い側）。 */
 
 const ctx: Ctx = { tenantId: "relation-link-both-absent" };
 const ABSENT_FROM = "00000000-0000-4000-8000-0000000000f1" as MemoryId;

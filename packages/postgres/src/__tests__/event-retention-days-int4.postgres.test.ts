@@ -4,13 +4,6 @@ import { InMemoryTenantSettingsStore } from "@mnemora/testkit/fixtures";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0499（ADR 0479 の材料）: `setEventRetention` の `days` が int4（`2^31 - 1`）を超えると、以前の
- * `PostgresTenantSettingsStore` は DB の生の例外（`DrizzleQueryError`、SQLSTATE 22003）だった。上限の検査は共有の
- * `assertValidEventRetentionDays`（`@mnemora/core`）にあり、2実装が同じ文面で断る。受け入れる値は変わらない
- * （上限ちょうどは通る）。何も書かない（前の設定が残る）。
- */
-
 const ctx: Ctx = { tenantId: "event-retention-int4" };
 const OVER =
   /^setEventRetention: days does not fit in a Postgres "integer" \(int4\) column \(got \d+\)$/;

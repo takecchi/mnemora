@@ -6,10 +6,8 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * `supersedeWithNewMemories` の supersede 対象が**別テナントの active な Memory**で、
- * `expectedStatus: "active"` を付けたとき、「対象が無い」例外で失敗し、`conflicted` に積まない
- * （Issue #759 組B・PR #773 の「対象が無いのと同じ扱い」。Issue #1775 の #773）。
+ * `expectedStatus: "active"` を付けたとき、「対象が無い」例外で失敗し、`conflicted` に積まない。
  *
- * 適合テストの歯は `expectedStatus` を付けない（UPDATE が 0 行で、その場で例外になる経路）。
  * `expectedStatus` 付きは 0 行のあと `SELECT status` で「無い」と「CAS 競合」を見分ける経路を通る。
  * その SELECT から `tenant_id` を外すと、別テナントの行が見えて `conflicted`（他テナントの
  * status が `observedStatus` に載る）になり、他テナントの status が漏れる。

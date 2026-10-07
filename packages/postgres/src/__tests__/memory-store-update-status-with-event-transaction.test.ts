@@ -13,29 +13,9 @@ import {
 } from "./test-db.js";
 
 /**
- * `updateStatusWithEvent`（ADR 0031、PR「supersede-status-and-event-in-one-transaction」）を
- * **本物の Postgres トランザクション**で検査する。
- *
- * `packages/testkit/src/memory-store-conformance.ts` の `updateStatusWithEvent` の歯
- * （postgres 実装にも `conformance.postgres.test.ts` 経由で走る）は単一接続・逐次実行の
- * 範囲で「CAS に弾かれたら Memory もイベントも変わらない」ことを検査できる。しかし
- * それだけでは「`db.transaction()` が本物の BEGIN/COMMIT/ROLLBACK として機能しているか」
- * ——同一行を奪い合う複数の**実際に別の**セッションの下でも、
- * status の更新とイベントの追記が原子的であり続けるか——は確認できない
- * （in-memory 実装は元よりトランザクションを模していない）。
- *
- * `memory-store-update-status-concurrency.test.ts`（ADR 0030）と同じ構え——「別々の
- * `Pool` を N 本」立てる。同一 `Pool` を共有すると複数の論理的な「プロセス」を同じ
- * 接続の使い回しで模すことになり、本当に別セッションから同時に UPDATE が来た場合の
- * 競合（行ロックの奪い合い）を再現できない。
- *
- * 🔴 検査する不変条件: **ちょうど1本だけ成功し、`memories.status` が1回だけ書き換わり、
- * `memory_events` に `superseded` イベントがちょうど1件だけ残る。** 残り3本は
- * `MemoryStatusConflictError` になり、それぞれについてイベントが1件も増えていない。
- *
- * **⚠ これは CI（postgres ジョブ）でしか走らない。** この器には Docker/PostgreSQL/
- * `DATABASE_URL` が無く、手元では実行できていない（`requireDatabaseUrl()` が
- * `DATABASE_URL` 未設定で例外を投げ、テストランナー自体が起動しない）。
+ * 適合テストの歯は単一接続・逐次実行の範囲でしか見られず、in-memory 実装はトランザクションを模していないので、`db.transaction()` が本物の BEGIN/COMMIT/ROLLBACK として機能しているか
+ * （同一行を奪い合う複数の実際に別のセッションの下でも、status の更新とイベントの追記が原子的であり続けるか）を、別々の `Pool` を N 本立てて検査する。
+ * 検査する不変条件: ちょうど1本だけ成功し、`memories.status` が1回だけ書き換わり、`memory_events` に `superseded` イベントがちょうど1件だけ残る。残り3本は `MemoryStatusConflictError` になり、イベントが1件も増えない。
  */
 describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物のトランザクションで検査する", () => {
   const pools: PostgresClient[] = [];
@@ -57,13 +37,13 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
       buildNewMemoryFixture({ tenantId: "tenant-1" }),
     );
     expect(memory.status).toBe("active");
-    // ADR 0503: 自己置換は断られるので、置き換えた側は別の記憶にする。
+    // 自己置換は断られるので、置き換えた側は別の記憶にする。
     const winner = await seedStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),
     );
 
-    // 4本の「プロセス」相当。同一 Pool を共有しない理由は本ファイル冒頭のコメント参照。
+    // 4本の「プロセス」相当。同一 Pool を共有しない。
     const N = 4;
     const clients = Array.from({ length: N }, () => createPostgresClient(requireDatabaseUrl()));
     pools.push(...clients);
@@ -92,7 +72,6 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r) => r.status === "rejected");
 
-    // ちょうど1本だけ成功。
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(N - 1);
 
@@ -102,13 +81,9 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
       expect((reason as MemoryStatusConflictError).memoryId).toBe(memory.id);
     }
 
-    // 最終状態: superseded が1回分だけ適用されている（二重に上書きされていない）。
     const final = await seedStore.get(ctx, memory.id);
     expect(final?.status).toBe("superseded");
 
-    // 🔴 本 PR の芯: status の更新と同じ回数だけイベントが残っている
-    // ——3本が弾かれた分のイベントが漏れて積まれていないこと（原子性が本物の並行下でも
-    // 保たれていること）を、実データを直接読んで確認する。
     const events = await db.execute(sql`
       SELECT * FROM memory_events
       WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memory.id} AND kind = 'superseded'
@@ -124,7 +99,7 @@ describe("PostgresMemoryStore.updateStatusWithEvent を本物の並行・本物�
     const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
     // 現在の status を archived にしておき、期待する expectedStatus: 'active' と食い違わせる。
     await store.updateStatus(ctx, memory.id, "archived");
-    // ADR 0503: superseded は置き換えた側を伴う（この歯の関心事ではない）。
+    // 自己置換は断られるので、置き換えた側は別の記憶にする。
     const winner = await store.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "superseding-winner" }),

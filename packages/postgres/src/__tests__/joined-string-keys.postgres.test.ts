@@ -16,19 +16,8 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * 文字列を区切り文字で繋いだキーが、区切り文字を含む値で別の対象と衝突しないこと。
- * `tenantId`・`extractorVersion`・`contentHash`・埋め込み空間の `model` は呼び手の値で、
- * `:` を含んでよい（`Ctx` の doc、`extractor:v2`・`sha256:…`・`nomic-embed-text:latest` など）。
- *
- * 【実測 2026-09-27】testkit の `InMemoryMemoryStore` は抽出の冪等キーを
- * `${tenantId}:${sourceObservationId}:${extractorVersion}:${contentHash}` で作っていた。
- * - 同じ Observation で版 `v:x`・hash `h` と、版 `v`・hash `x:h` が同じキーになり、2件目の
- *   `createMemory` が1件目の Memory（別の本文）を `created: false` で返した。
- * - テナント `t` の Memory（Observation `O1`、版 `O2:v`）と、テナント `t:O1` の Memory
- *   （Observation `O2`、版 `v`）が同じキーになり、テナント `t:O1` の `createMemory` が
- *   **テナント `t` の Memory を返した**。
- * `InMemoryVectorStore` はベクトルのキーを `${provider}:${model}:${dimensions}:…` で作り、
- * 空間を前方一致で絞っていたため、空間 `{p, m, 3}` の検索が空間 `{p, m:3, 3}` のベクトルを返した。
- * Postgres はどれも分かれていた（冪等は4列の UNIQUE、空間はテーブルが別）。
+ * `tenantId`・`extractorVersion`・`contentHash`・埋め込み空間の `model` は呼び手の値で、`:` を含んでよい。
+ * InMemory の冪等キーや `InMemoryVectorStore` の空間の前方一致は、区切り文字を含む値で別の対象と衝突しうる。Postgres はどれも分かれている（冪等は4列の UNIQUE、空間はテーブルが別）。
  */
 
 const KITS: Array<[string, () => Promise<{ memoryStore: MemoryStore; vectorStore: VectorStore }>]> =
