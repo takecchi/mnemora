@@ -111,18 +111,6 @@ import {
 import type { ReflectionLLMResult } from "./strategies/reflect.js";
 import { listRelatedLevel } from "./relation-level.js";
 
-/**
- * `runtime.observe` / `runtime.tick` の実装（roadmap.md 段階3、docs/architecture.md §3.2・§3.3）。
- *
- * **runtime は `packages/core` に置く**（docs/architecture.md §4）。ただし core は zod 以外の
- * 実行時依存を持てない（§3.6）ため、DB・LLM・埋め込み・時刻・ハッシュ計算はすべて
- * `createRuntime(deps)` の呼び出し側が注入する。core 自身はこれらの実体を import しない。
- *
- * D16 の反映: `contentHash`（SHA-256 hex）の実装は core に置かない。`deps.hashContent` として
- * 注入される関数（`node:crypto` を使う実装は adapter 側、例えば `packages/postgres` の
- * `sha256Hex`）に委ねる。runtime はこの関数を「呼ぶ」だけで、計算そのものは行わない。
- */
-
 export interface RuntimeConfig {
   /**
    * 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。
@@ -155,59 +143,24 @@ export interface RuntimeConfig {
    */
   defaultClaimedBy?: string | undefined;
   /**
-   * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
-   * [ADR 0157](../../../docs/decisions/0157-tick-drives-consolidate-and-reflect.md):
-   * `extract`（`observe()` の sync 経路・`tick()` の `extract` ジョブ経路の両方）が新しい
-   * Memory を1件作るたびに、その `memoryId` を種にした `consolidate` / `reflect` の
-   * outbox ジョブも追加で積むかどうか。
+   * `extract`（`observe()` の sync 経路・`tick()` の `extract` ジョブ経路の両方）が Memory を1件作るたびに、その `memoryId` を種にした `consolidate` / `reflect` の outbox ジョブも積むかどうか
+   * （[ADR 0157](../../../docs/decisions/0157-tick-drives-consolidate-and-reflect.md)）。既定は `false`（積まない）。`false` でも `consolidate()`/`reflect()` は、呼び出し側が明示的に呼べば動く。
+   * `true` にすると、積む job kinds が `["embed"]` から `["embed", "consolidate", "reflect"]` になり、payload は `embed` と同じ `{ memoryId }`。`tick()` はそれを `{ target: { seedMemoryId: memoryId } }` として処理する。
    *
-   * 🔴 **既定は `false`（積まない）。** 北極星の問い2（「これを無効にしたとき、
-   * Memory Framework として成立するか」）を満たすための opt-in——この設定を有効に
-   * しなくても `observe()`/`recall()`/`tick()` は完全に成立し、`tick()` は
-   * `embed` ジョブだけを処理し続ける。`consolidate()`/`reflect()` 自体は
-   * この設定と無関係に、呼び出し側が明示的に呼べば常に動く（ADR 0089/0091）。
-   *
-   * `true` にすると、積む job kinds が `["embed"]` から `["embed", "consolidate", "reflect"]`
-   * に変わる。ジョブの `payload` は既存の `embed` ジョブと同じ `{ memoryId }`
-   * （`MemoryStore.createMemoryWithOutbox` が `jobKinds` の各要素に同じ payload を使う。
-   * 新しい payload 形は発明していない）。`tick()` はその2種を
-   * `consolidate(ctx, { target: { seedMemoryId: memoryId } })` /
-   * `reflect(ctx, { target: { seedMemoryId: memoryId } })` として処理する。
-   *
-   * 🔴 **`consolidate`・`reflect` のどちらも、渡された `ctx` そのままではない**
-   * （`consolidate` は [Issue #579](https://github.com/takecchi/mnemora/issues/579) /
-   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
-   * 決定1、`reflect` は [Issue #820](https://github.com/takecchi/mnemora/issues/820) /
-   * ADR 0317 決定3「確かめていないこと」を埋めた変更）。`processConsolidateJob` /
-   * `processReflectJob` はどちらも種の Memory を読み、その `subjectId` が `null` でなければ
-   * `ctx.subjectId` をそれで置き換えてから `consolidate()` / `reflect()` を呼ぶ——`tick()`
-   * はジョブを subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と
-   * 種の `subjectId` が食い違うと、近傍探索（`recall()`）が種と別の subject から候補を
-   * 集めてしまい、統合後・反映後の `Memory.subjectId` が `null` に畳まれる（`consolidate`
-   * は ADR 0310 実測、`reflect` は Issue #820 実測）。種の `subjectId` が `null`、または
-   * 種そのものが見つからない場合は、今日どおり `tick()` に渡された `ctx` のまま呼ぶ——
-   * どちらも新しい判定は発明していない。**明示的に
-   * `runtime.consolidate(ctx, { target: { seedMemoryId } })` /
-   * `runtime.reflect(ctx, { target: { seedMemoryId } })` を呼ぶ側の挙動はこの設定と
-   * 無関係に変わらない**——呼び手は自分の `ctx.subjectId` で完全に制御できる
-   * （ADR 0310 決定2）。
+   * `tick()` が呼ぶ `consolidate`・`reflect` は、種の Memory の `subjectId` が `null` でなければ `ctx.subjectId` をそれで置き換える（ADR 0317）。`tick()` はジョブを subject で絞って claim できず、
+   * 食い違うと近傍探索が別の subject から候補を集め、統合後・反映後の `Memory.subjectId` が `null` に畳まれるため。種の `subjectId` が `null`、または種が見つからないときは、渡された `ctx` のまま呼ぶ。
+   * 明示的に `consolidate`/`reflect` を呼ぶ側の挙動は変わらない（呼び手が自分の `ctx.subjectId` で制御する）。
    */
   autoQueueConsolidateReflectOnExtract?: boolean | undefined;
   /**
-   * オーナー回答 374f6f88 の問15（全部推奨）による既定の変更。名前・置き場所は担い手が決めた
-   * （`docs/decisions/` の「LLM が返す subjectId は既定で捨てる」の ADR）。
+   * `subjectCandidates` を渡さない（省略・空配列）抽出——一覧を渡さなかった `observe()`、`extract: 'deferred'` の `tick`、
+   * `reextract`——で、LLM が返した候補の `subjectId` を受けるかどうか。
    *
-   * 🔴 **既定は `false`（捨てる）。** `subjectCandidates` を渡さない（省略・空配列）抽出——`observe()` で
-   * 一覧を渡さなかった呼び出し、`extract: 'deferred'` の `tick`、`reextract`（この2つは一覧を持てない）——
-   * では、LLM が返した候補の `subjectId`（文字列も明示の `null` も）を捨て、Memory の主題は
-   * `observation.subjectId`（無ければ主題なし）になる。観察文に仕込んだ「この記憶の主題は bob」で、
-   * 別の subject に記憶を書かせられる（`ExtractedMemoryCandidateSchema.subjectId` の TSDoc、ADR 0442）のを塞ぐ。
+   * 既定は `false`（捨てる）。捨てると Memory の主題は `observation.subjectId`（無ければ主題なし）になる。
+   * 観察文に仕込んだ「この記憶の主題は bob」で、別の subject に記憶を書かせられるのを塞ぐ（ADR 0442）。
+   * `true` にすると、LLM が返した `subjectId` をそのまま受ける。**信用できない本文を抽出するなら `true` にしないこと。**
    *
-   * `true` にすると、以前どおり LLM が返した `subjectId` をそのまま受ける（Issue #608 項目①、ADR 0271 の
-   * 「候補ごとの主題の上書き」を、一覧を渡さない経路でも使う）。**信用できない本文を抽出するなら `true` にしないこと。**
-   *
-   * `subjectCandidates` を渡した `observe()` には効かない——そちらは一覧に照らして検証する
-   * （一覧内は採り、一覧外は弾く。`sanitizeCandidateSubjectId`）。
+   * `subjectCandidates` を渡した `observe()` には効かない（一覧に照らして検証する。一覧内は採り、一覧外は弾く）。
    * ⚠ 捨てた値は `ObserveResult` に出ない（`rejectedSubjectIds` は一覧を渡した呼び出しの欄のまま）。
    */
   acceptLlmSubjectIdWithoutCandidates?: boolean | undefined;
@@ -219,13 +172,11 @@ const DEFAULT_PROMPT_VERSION = "v1";
 const DEFAULT_DIGEST_FALLBACK_LENGTH = 200;
 const DEFAULT_CLAIMED_BY = "runtime.tick";
 const DEFAULT_TICK_LIMIT = 50;
-/** ADR 0514: `tick` が `now - leaseMs` に許す下限（Postgres の `timestamptz` の下限、4714-11-24 BC）。これより前は、どの store も保存できない。 */
+/** `tick` が `now - leaseMs` に許す下限（Postgres の `timestamptz` の下限、4714-11-24 BC）。これより前は、どの store も保存できない（ADR 0514）。 */
 const MIN_STORABLE_TIMESTAMP_MS = -210_866_803_200_000;
 /**
- * ADR 0431: 群の `updated/contested` イベントの `note` に入れる、`memberIds`・`matches` の先頭の件数。
- * 超えたときは `memberIdsTruncated`・`matchesTruncated` が `true` になり、全体の件数は
- * `memberCount`・`matchCount` が持つ。`claim_key_conflict_unresolved` の `note` の `matches` も
- * 同じ件数で切る（`matchCount`・`matchesTruncated`）。
+ * 群の `updated/contested` イベントの `note` に入れる、`memberIds`・`matches` の先頭の件数（ADR 0431）。
+ * 超えたときは `memberIdsTruncated`・`matchesTruncated` が `true` になり、全体の件数は `memberCount`・`matchCount` が持つ。
  */
 const CONTESTED_GROUP_NOTE_SAMPLE_LIMIT = 10;
 
@@ -235,33 +186,22 @@ function compareCodeUnits(a: string, b: string): number {
 }
 
 /**
- * Issue #1136: `consolidate` / `reflect` の `{ seedMemoryId }` 形で、種の `digest` を検索語にして
- * 近傍を集めてよいか。forget と purge は、利用者が「使わないでほしい」と言った記憶である——その
- * `digest` で近傍を束ねると、消した情報が別の形で効き続ける（#897 / ADR 0124 が observe の再送で
- * 「消した情報が蘇るので抽出をやり直さない」と決めたのと同じ線。クローン miku の判断）。
- * `contested` / `superseded` の種は利用者が消したものではないので、今どおり近傍を集める。
+ * `consolidate` / `reflect` の `{ seedMemoryId }` 形で、種の `digest` を検索語にして近傍を集めてよいか。
+ * forget と purge は利用者が「使わないでほしい」と言った記憶で、その `digest` で近傍を束ねると、消した情報が別の形で効き続ける。
+ * `contested` / `superseded` の種は利用者が消したものではないので、近傍を集める。
  */
 function isWithdrawnSeed(seed: Memory): boolean {
   return seed.status === "forgotten" || (seed.purgedAt ?? null) !== null;
 }
 
 /**
- * `tick` が**実際に処理する分岐を持つ** outbox job kind（ADR 0082）。
+ * `tick` が処理する分岐を持つ outbox job kind（ADR 0082）。「tick が何を処理するか」の唯一の出所で、
+ * `claimBatch` の `kinds` の既定値も `jobHandlers` もここを指す。`jobHandlers` は
+ * `Record<TickSupportedJobKind, JobHandler>` なので、kind を足してハンドラを足し忘れると（逆も）型検査が落ちる。
+ * 散文で kind を数え直さないこと（次に kind が増えたとき黙って嘘になる。コメントは検査されない）。
  *
- * ⚠ **ここに「いまは extract と embed だけ」と書かない。**この配列そのものが答えであり、
- * 散文で数え直した瞬間に、次に kind が増えたとき（`consolidate` / `reflect` の本体、
- * 利用者が足す第5・第6の kind）に黙って嘘になる。**コメントは検査されない。**
- *
- * 🔴 **これが「tick が何を処理するか」の唯一の出所である。**`claimBatch` の `kinds` の
- * 既定値も、ジョブを配る先（`jobHandlers`）も、`OutboxJobKind` の JSDoc も、ここを指す。
- * issue #105 の根は、この一覧が3か所（`OutboxJobKind` の名指しの列挙・`tick` の claim
- * 既定値・`if (job.kind === ...)` の分岐）に別々に写されていて、独立にずれたことだった。
- * `jobHandlers` は `Record<TickSupportedJobKind, JobHandler>` として書いてあるので、
- * **この配列に kind を足してハンドラを足し忘れると型検査が落ちる**（逆も落ちる）。
- *
- * ⚠ `OutboxJobKind` は `(string & {})` を含む開いたユニオンであり、ここに無い kind を
- * 積むこと自体は正しい使い方である（利用者が独自の種別を足して別経路で処理する）。
- * ここに無い kind を **`tick` に渡した**ときの倒れ方は {@link TickResult.unsupported} を見ること。
+ * `OutboxJobKind` は開いたユニオンで、ここに無い kind を積むのは正しい使い方（利用者が別経路で処理する）。
+ * ここに無い kind を `tick` に渡したときの倒れ方は {@link TickResult.unsupported}。
  */
 export const TICK_SUPPORTED_JOB_KINDS = ["extract", "embed", "consolidate", "reflect"] as const;
 
@@ -269,21 +209,11 @@ export const TICK_SUPPORTED_JOB_KINDS = ["extract", "embed", "consolidate", "ref
 export type TickSupportedJobKind = (typeof TICK_SUPPORTED_JOB_KINDS)[number];
 
 /**
- * `tick` が `fail()` へ書き込む `last_error` の接頭辞。
- * 「対応していない kind だった」ことは {@link TickResult.unsupported} が第一の伝達路であり、
- * こちらは**後から outbox 行だけを見た人**（運用者・DB を覗いた人）が同じ結論に届くための
- * 二の路である。定数にしてあるのは、歯がこの文字列を名指しで測るため。
+ * `tick` が `fail()` へ書き込む `last_error` の接頭辞。対応していない kind だったことは
+ * {@link TickResult.unsupported} が第一の伝達路で、こちらは後から outbox 行だけを見た人のための二の路。
  */
 export const UNSUPPORTED_KIND_ERROR_PREFIX = "runtime.tick: unsupported outbox job kind: ";
 
-/**
- * `tick` が1件の outbox ジョブを処理する関数の形。
- *
- * `signal`（Issue #1200、ADR 0359）は `tick(ctx, opts)` の `opts.signal` をそのまま渡す。
- * provider を呼ぶハンドラ（`processExtractJob`・`processEmbedJob`・`processConsolidateJob`・
- * `processReflectJob`）だけがこれを使う——`tick` 側の分岐（unsupported kind の `fail()`）は
- * provider を呼ばないため、そもそも受け取らない。
- */
 type JobHandler = (ctx: Ctx, job: OutboxJobRecord, signal?: AbortSignal) => Promise<void>;
 
 /** {@link createRuntime} に渡す依存。store・provider は利用者が用意する（`@mnemora/postgres`・`@mnemora/openai` など）。 */
@@ -295,28 +225,15 @@ export interface RuntimeDeps {
   /** 埋め込みのベクトルを保存し、ANN で引く store。 */
   vectorStore: VectorStore;
   /**
-   * 語彙候補生成チャンネル（[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
-   *
-   * **省略可能である。**省略しても mnemora は成立する（北極星の問い2）——
-   * `recall()` の既定は ANN 1本のままで、何も変わらない。
-   *
-   * **🔴 省略したまま `RecallQuery.channels` に `"lexical"` を渡すと `recall()` は投げる**
-   * （`recall.ts` の `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`）。**黙って0件を返さない**——
-   * 理由は `RecallQuery.channels` の doc に書いてある。
+   * 語彙候補生成チャンネル（[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)）。**省略可能。**
+   * 省略したまま `RecallQuery.channels` に `"lexical"` を渡すと `recall()` は投げる
+   * （`recall.ts` の `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`）。黙って0件を返さない理由は `RecallQuery.channels` の doc。
    */
   lexicalStore?: LexicalStore | undefined;
   /**
-   * `memory_relations` を読む store（Issue #207/#933 PR2、ADR 0292 決定1、ADR 0327、
-   * ADR 0381）。
-   *
-   * **省略可能である。**省略しても mnemora は成立する（北極星の問い2）——省略時は
-   * `detectClaimKeyContested` の `contested_group` 分岐が組み立てる `members` は常に
-   * 「新しく重なった相手」だけになり、既存の穴A（2者間の対）の相方吸収・既存群の合併は
-   * 行われない（`markContestedGroup`/`resolveContestedGroup` 自体は呼べるが、
-   * 呼び出し側がこの store 無しに安全に集合を広げる手段が無いため）。`resolveContestedGroup`
-   * の「渡された `members` が群の全員と一致するか」という読み側の事前確認
-   * （`Runtime.resolveContestedGroup` の doc コメント手順6）も、この欄が無ければ行わず
-   * store 側の CAS だけに任せる。
+   * `memory_relations` を読む store（ADR 0292）。**省略可能。** 省略すると、`detectClaimKeyContested` の
+   * `contested_group` 分岐が組み立てる `members` は「新しく重なった相手」だけになり、2者間の対の相方吸収・既存群の合併は行われない。
+   * `resolveContestedGroup` の読み側の事前確認（`Runtime.resolveContestedGroup` の doc）も行わず、store 側の CAS だけに任せる。
    */
   relationStore?: RelationStore | undefined;
   /** 監査ログ（`memory_events`）を読み書きする store。 */
@@ -328,67 +245,43 @@ export interface RuntimeDeps {
   /** 記憶とクエリの埋め込みに使う provider。ベクトルはこの `space` の空間として `vectorStore` に書かれる（`@mnemora/postgres` では、先に `registerEmbeddingSpace` で登録しておく）。 */
   embeddingProvider: EmbeddingProvider;
   /**
-   * 省略時は `systemClock`。
-   * 注入した時計は、runtime が積む outbox 行の `availableAt`・`createdAt` と、監査ログの `at` にも届く
-   * （runtime は `clock.now()` 由来の `now` を store に渡す。ADR 0355、記述の訂正は ADR 0559）。
-   * 壁時計より過去の時計でも、`tick` は積んだジョブを取れる。`restoreArchived` の `restored` の `at` も
+   * 省略時は `systemClock`。注入した時計は、runtime が積む outbox 行の `availableAt`・`createdAt` と、監査ログの `at` にも届く
+   * （ADR 0355・ADR 0559）。壁時計より過去の時計でも、`tick` は積んだジョブを取れる。`restoreArchived` の `restored` の `at` も
    * 注入した時計で、`sweepArchive` の `archived` だけは呼び出し側が渡す `opts.now` を使う。
-   * 今も壁時計のままの列は {@link Clock} の doc 参照（Issue #1237）。
+   * 今も壁時計のままの列は {@link Clock} の doc を見る。
    */
   clock?: Clock | undefined;
-  /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
+  /** SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
   hashContent: (content: string) => string;
   /** runtime の設定（{@link RuntimeConfig}）。省略すると既定値で動く。 */
   config?: RuntimeConfig | undefined;
   /**
-   * roadmap.md 段階4: `usage`（docs/recall.md §6）の計測に使う。省略時は
-   * `heuristicTokenCounter`（文字数ベースの推定、`counter: 'heuristic'`）。
-   *
-   * ⚠ ADR 0497: 差し替えた実装の `count()` が返す `tokens` が有限で 0 以上の number でなければ、`recall()` は
-   * `RangeError` で断る（契約は {@link TokenCounter}）。
+   * `usage`（docs/recall.md §6）の計測に使う。省略時は `heuristicTokenCounter`（文字数ベースの推定、`counter: 'heuristic'`）。
+   * 差し替えた実装の `count()` が返す `tokens` が有限で 0 以上の number でなければ、`recall()` は `RangeError` で断る（ADR 0497。契約は {@link TokenCounter}）。
    */
   tokenCounter?: TokenCounter | undefined;
   /**
-   * `recall()` の戻り値を zod で検証するときの倒れ方（Issue #131、ADR 0098）。
-   * 省略時は `"report"`（`DEFAULT_RECALL_OUTPUT_VALIDATION`（`recall-output-validation.ts`））——既定では投げない。
-   * `recall-runtime.js` の `RecallRuntimeDeps.outputValidation` へそのまま渡る。
+   * `recall()` の戻り値を zod で検証するときの倒れ方（ADR 0098）。省略時は `"report"`
+   * （`DEFAULT_RECALL_OUTPUT_VALIDATION`）で、投げない。`RecallRuntimeDeps.outputValidation` へそのまま渡る。
    */
   outputValidation?: RecallOutputValidationMode | undefined;
   /**
-   * `processEmbedJob` が `embed(ctx, [...])` へ送る文字列を、`Memory` から差し替える
-   * **任意**のフック（Issue #753、#449 の残り。ADR 0305 は「上限超過は例外」を契約に
-   * 明記したが、失敗した Memory を回復する口までは開けなかった——`reembed()`
-   * （ADR 0079）は failed を pending に戻して embed ジョブを積み直すだけで、次の
-   * `processEmbedJob` はまた同じ `memory.content` を送って同じ理由でまた failed に
-   * 戻る。このフックがその回復の口である）。
+   * `processEmbedJob` が `embed(ctx, [...])` へ送る文字列を `Memory` から差し替える任意のフック（ADR 0305）。
+   * 上限超過で `failed` になった Memory を回復する口である: `reembed()` は failed を pending に戻して embed ジョブを積み直すだけで、
+   * 次の `processEmbedJob` はまた同じ `memory.content` を送って同じ理由で failed に戻る。
    *
-   * **省略時は `memory.content` をそのまま `embed()` へ送る**——この欄の有無は
-   * 既定の挙動を1ビットも変えない（北極星の問い2、`docs/north-star.md`）。
-   * 指定すると `processEmbedJob` は `embed(ctx, [embeddingInput(memory)])` を呼ぶ。
-   * **`Memory.content` 自体はどちらの場合も変えない**——DB に書き戻る content は
-   * 常に元のままで、このフックは送る文字列だけを差し替える。
+   * 省略時は `memory.content` をそのまま送る。指定しても `Memory.content` 自体は変わらない（DB に書き戻る content は常に元のまま）。
+   * 例: 先頭を切って短くする関数を渡し、`runtime.reembed(ctx, { statuses: ['failed'], limit })` →
+   * `runtime.tick(ctx, { kinds: ['embed'], leaseMs })` の順に呼ぶと、対象は `'ready'` に戻る。
    *
-   * 使い方の例: 上限超過で `embeddingStatus: 'failed'` になった Memory を、先頭を
-   * 切って短くする関数を渡し、`runtime.reembed(ctx, { statuses: ['failed'], limit })` →
-   * `runtime.tick(ctx, { kinds: ['embed'], leaseMs })` の順に呼ぶと、対象は `'ready'` に戻る
-   * （`Memory.content` は全文のまま）。
+   * core はモデルごとの入力上限・トークン数を持たない（ADR 0305、ADR 0090）。何をどれだけ切ったかの印も残さない
+   * （残すには `Memory` に列を足す migration が要る）。印が要る呼び出し側は、別テーブル・ログ等に自前で残すこと。
    *
-   * 🔴 **core はモデルごとの入力上限・トークン数を持たない**（ADR 0305 決定6 /
-   * ADR 0090 決定「3.6」と同じ理由——層が違う。core が特定モデルの数字を知ってはならない）。
-   * このフックが「何を・どれだけ切ったか」の印も core は残さない——残すには
-   * `Memory` に列を足す必要があり、それは migration を要する変更であって、この
-   * フック（純粋な関数の注入）の範囲を超える。印が要る呼び出し側は、自前の仕組み
-   * （別テーブル・ログ等）で残すこと。
+   * フックが例外を投げたら、`processEmbedJob` は `embeddingStatus` を `'failed'` にしてから再送出する。
    *
-   * フックが例外を投げた場合、`processEmbedJob` は今までどおり
-   * `embeddingStatus` を `'failed'` にしてから再送出する——このフックのために
-   * 新しい throw の経路を既定側へ作らない。
-   *
-   * ⚠ ADR 0489（今の振る舞いを書くだけ）: **戻り値は検査も変換もしない。**空文字・NUL・孤立サロゲート・
-   * 巨大な文字列、型の外の値（`undefined`・数・オブジェクト・`null`）も、そのまま `embed()` に渡る。
-   * 受け入れるかどうかは provider が決める——落ちれば `embeddingStatus: 'failed'`（job も failed）、
-   * 受け入れれば `'ready'`。`OpenAIEmbeddingProvider` は空文字を含む呼び出しを API の 400 で落とす
-   * （packages/openai/README.md）。Runtime が先回りして断る経路は無い（新しく断る入力は足していない）。
+   * ⚠ **戻り値は検査も変換もしない。** 空文字・NUL・孤立サロゲート・巨大な文字列、型の外の値（`undefined`・数・オブジェクト・`null`）も
+   * そのまま `embed()` に渡り、受け入れるかどうかは provider が決める（落ちれば `embeddingStatus: 'failed'`・job も failed。受け入れれば `'ready'`）。
+   * `OpenAIEmbeddingProvider` は空文字を含む呼び出しを API の 400 で落とす（packages/openai/README.md）。
    * `reembed()` で `failed` を戻した後の `tick` では、このフックがもう一度呼ばれる。
    */
   embeddingInput?: ((memory: Memory) => string) | undefined;
@@ -399,144 +292,87 @@ export interface ObserveResult {
   /** 記録した Observation の id（`externalId` で冪等に再送したときは既存の Observation の id）。 */
   observationId: ObservationId;
   /**
-   * sync 抽出で実際に作られた（または既存の冪等な行として返された）Memory の id。
-   * `deferred` の場合、または冪等な再送（`created: false`）の場合は空配列——
-   * **この場合に「以前作られた Memory の id」を遡って探すことはしない**（本 PR の決定。
-   * PR 本文参照）。
+   * sync 抽出で実際に作られた（または既存の冪等な行として返された）Memory の id。`deferred` の場合、または冪等な再送（`created: false`）の場合は空配列で、以前作られた id は遡って探さない。
+   * 要素は候補ごとに1つで、候補の順に並ぶ。**同じ本文（`content`）の候補が複数あると、同じ id が候補の数だけ入る**（冪等キー `(tenant_id, source_observation_id, extractor_version, content_hash)` は本文だけから作るため、
+   * 2件目以降は1件目の行に当たり、その `provenanceKind`・`confidence`・`subjectId`・`tags` は書かれない）。重複を除いた集合が要るときは呼び手が `new Set(memoryIds)` にする。
    *
-   * 要素は抽出の候補ごとに1つ、候補の順に並ぶ。**同じ本文（`content`）の候補が複数あると、
-   * 同じ id が候補の数だけ入る**——Memory の冪等キーは
-   * `(tenant_id, source_observation_id, extractor_version, content_hash)` で
-   * （`MemoryStore.createMemory`）、`content_hash` は本文だけから作るため、2件目以降の候補は
-   * 1件目が作った行に当たる。そのとき2件目以降の候補の `provenanceKind`・`confidence`・
-   * `subjectId`・`tags` は書かれない（Memory・`created` イベント・`embed` ジョブは1件目の
-   * 分の1つずつだけ）。重複を除いた集合が要るときは、呼び手が `new Set(memoryIds)` にする。
-   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の InMemory で同じ結果になる
-   * （歯は `packages/postgres/src/__tests__/observe-duplicate-candidates.postgres.test.ts`）。
-   *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1234](https://github.com/takecchi/mnemora/issues/1234)）:
-   * 候補は「書く → `created` イベントを積む」の順で、1つのトランザクションではない（2026-09-28 から、候補を全件
-   * 書いてから `created` を積む。Issue #1063、ADR 0347）。**書いた直後、
-   * `created` を積む前にその1件が `forget` → `purge` されると、この配列にも purge した id が入り、その Memory の
-   * 監査ログには `forgotten`・`purged` の**後に** `created` が積まれる（`at` もその順になる。`created` の
-   * `digestSnapshot` は purge 前の digest）。`at` の順に読むと「消した後に作られた」と読めるが、実際は作られてから
-   * 消され、作成の記録だけが遅れて積まれたものである。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture
-   * で同じ（`observe-created-event-after-purge.postgres.test.ts`）。
-   *
-   * ⚠ **2026-09-30 追記（[ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)）: 上の段落は、
-   * `MemoryStore.createMemoriesWithOutboxAndEvents?` を持たない adapter の経路の話である。**持つ store
-   * （`@mnemora/postgres`・testkit の fixture）では、全候補の記憶と `created` を1つのトランザクションで書くので、
-   * 書いた記憶は `created` と一緒にコミットされるまで `forget`・`purge` の対象にならない——この窓は無い
-   * （上の歯は、口を外した store で今の経路を縛り続けている）。
+   * ⚠ `MemoryStore.createMemoriesWithOutboxAndEvents?` を持たない adapter では、候補を書いてから `created` を積む（1つのトランザクションではない）。書いた直後、`created` を積む前にその1件が `forget` → `purge` されると、
+   * この配列に purge した id が入り、監査ログには `forgotten`・`purged` の**後に** `created` が積まれる（`digestSnapshot` は purge 前の digest）。持つ store（`@mnemora/postgres`・testkit の fixture）は
+   * 全候補の記憶と `created` を1つのトランザクションで書くので、この窓は無い（[ADR 0410](../../../docs/decisions/0410-extract-created-event-in-same-transaction.md)）。
    */
   memoryIds: MemoryId[];
   /**
-   * この呼び出しの中で抽出がどうなったか。
-   *
-   * **`boolean` にしない。**「抽出した / していない」の2値に潰すと、
-   * **LLM 呼び出しが失敗して全文フォールバックへ倒れた**という第三の状態が
-   * 「抽出した」と同じ顔になる。ADR 0008 の判定基準——その区別があると
-   * 呼び出し側の次の一手が変わるか——に照らすと、これは潰してはいけない区別である
-   * （`llm_failed_whole_observation` なら、provider の復旧後に抽出をやり直す、
-   * という一手がある。`ok` にはその一手が無い）。
+   * この呼び出しの中で抽出がどうなったか。`boolean` にしない: 2値に潰すと、LLM 呼び出しが失敗して全文フォールバックへ倒れた
+   * 第三の状態が「抽出した」と同じ顔になる。`llm_failed_whole_observation` なら provider の復旧後に抽出をやり直す一手があり、
+   * `ok` にはそれが無い（ADR 0008）。
    */
   extraction: ExtractionOutcome;
   /**
-   * `extraction === "llm_failed_whole_observation"` のときに LLM 呼び出しが失敗した理由。
-   * **それ以外（`"ok"` / `"skipped"`）は必ず `null`。**
+   * `extraction === "llm_failed_whole_observation"` のときに LLM 呼び出しが失敗した理由。それ以外（`"ok"` / `"skipped"`）は必ず `null`。
    *
-   * `ExtractionOutcome` 自体は3値のまま変えない（値を足すと `extraction` を分岐する
-   * 網羅性チェックの無い箇所——本ファイルの三項演算子と
-   * `examples/chat/src/retrieval-quality.ts` の switch——が黙って既定側へ落ちるため）。
-   * その代わり、失敗の中身（provider が名乗った `kind` と人が読むメッセージ）はこの欄で運ぶ。
-   *
-   * **省略可能にしない。** 必須にすることで、`ObserveResult` を組み立てる全経路を
-   * TypeScript に列挙させ、「埋め忘れた経路が黙って `undefined`（＝間違った *有る*）になる」
-   * ことを防ぐ。
+   * `ExtractionOutcome` は3値のまま変えず（値を足すと、`extraction` を分岐する網羅性チェックの無い箇所が黙って既定側へ落ちるため）、
+   * 失敗の中身（provider が名乗った `kind` と人が読むメッセージ）はこの欄で運ぶ。
+   * 省略可能にしない。必須にして、`ObserveResult` を組み立てる全経路を TypeScript に列挙させ、埋め忘れた経路が黙って
+   * `undefined`（＝間違った*有る*）になるのを防ぐ。
    */
   extractionFailure: ExtractionFailure | null;
   /**
-   * Issue #608 項目②(b): この呼び出しで `subjectCandidates` を渡したとき、LLM が返した
-   * `subjectId` のうち**一覧に無かった**ため弾いた値（弾いた順、`ExtractCandidatesResult.
-   * rejectedSubjectIds` の写し）。弾かれた候補自体は observation の `subjectId` へ
-   * フォールバックして作られており（`sanitizeCandidateSubjectId`、extraction.ts）、
-   * **この欄が無くても Memory は正しく作られる**——ここは「黙って戻さない」ための
-   * 監査用の記録に過ぎない。
+   * `subjectCandidates` を渡したとき、LLM が返した `subjectId` のうち**一覧に無かった**ため弾いた値（弾いた順）。
+   * 弾かれた候補自体は observation の `subjectId` へフォールバックして作られる（`sanitizeCandidateSubjectId`、extraction.ts）ので、
+   * この欄が無くても Memory は正しく作られる。「黙って戻さない」ための監査用の記録である。
    *
-   * ⛔ **省略可能にする（既存の `ObserveResult` の他の欄と違う規律）。** 理由は逆——
-   * 他の欄と同じく必須にすると、この PR より前に `ObserveResult` を自前で組み立てている
-   * 呼び出し側（本 repo の外を含む）のリテラルがコンパイルを通らなくなる。**新しい任意
-   * プロパティの追加**（`docs/decisions/0178-public-api-surface-gate.md` が semver 的に
-   * 安全と定める形）に留めるため、あえて必須にしない。
+   * ⛔ 省略可能にする（他の欄と違い必須にしない）。必須にすると、`ObserveResult` を自前で組み立てている呼び出し側のリテラルが
+   * コンパイルを通らなくなる。新しい任意プロパティの追加に留める（`docs/decisions/0178-public-api-surface-gate.md`）。
    *
-   * - **`subjectCandidates` を渡さなかった（省略・空配列）呼び出しでは、この欄は無い**
-   *   （`undefined`）——「候補一覧を渡していないので判定していない」ことと「渡したが
-   *   0件だった」ことを、キーの有無で区別する。
-   * - **渡した場合は常に配列**（弾いた候補が無ければ `[]`）。
-   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
-   *   付く**（値は `[]`：弾いた候補なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
-   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
-   * - **（ADR 0456）識別子として保存できない `subjectId`（NUL・孤立サロゲートを含むもの）は、一覧を渡して
-   *   いなくても弾き、observation の `subjectId` へフォールバックする。** 一覧を渡していない呼び出しでは、
-   *   その記録はこの欄に載らない（上の1つ目のとおり、欄そのものが無い）。
+   * - `subjectCandidates` を渡さなかった（省略・空配列）呼び出しでは、この欄は無い（`undefined`）。
+   *   「判定していない」と「渡したが0件だった」をキーの有無で区別する。
+   * - 渡した場合は常に配列（弾いた候補が無ければ `[]`）。
+   * - 冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は付く
+   *   （値は `[]`。再送は抽出も検出も走らせない。ADR 0454）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
+   * - 識別子として保存できない `subjectId`（NUL・孤立サロゲートを含むもの）は、一覧を渡していなくても弾き、
+   *   observation の `subjectId` へフォールバックする（ADR 0456）。一覧を渡していない呼び出しでは、その記録はこの欄に載らない。
    */
   rejectedSubjectIds?: string[];
   /**
-   * Issue #371: この呼び出しで `claimKey: { enabled: true }` を渡したとき、
-   * `deriveClaimKeys`（claim-key.ts）の呼び出しが失敗した理由。**失敗しても
-   * Memory の作成自体は止まらない**——各候補の `claimKey` が `null` のまま作られる
-   * （`rejectedSubjectIds` と同じ「黙って戻さない」ための監査用の記録）。
+   * `claimKey: { enabled: true }` を渡したとき、`deriveClaimKeys`（claim-key.ts）の呼び出しが失敗した理由。
+   * 失敗しても Memory の作成は止まらず、各候補の `claimKey` が `null` のまま作られる（`rejectedSubjectIds` と同じ監査用の記録）。
    *
-   * ⛔ **省略可能にする**（`rejectedSubjectIds` と同じ理由・同じ規約）。
-   * - **`claimKey.enabled` を渡さなかった（省略、または `enabled: false`）呼び出しでは、
-   *   この欄は無い**（`undefined`）。
-   * - **`claimKey.enabled: true` を渡した場合は常に値を持つ**（成功なら `null`）。
-   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
-   *   付く**（値は `null`：鍵の導出の失敗なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
-   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
+   * ⛔ 省略可能にする（`rejectedSubjectIds` と同じ理由）。
+   * - `claimKey.enabled` を渡さなかった（省略、または `enabled: false`）呼び出しでは、この欄は無い（`undefined`）。
+   * - `claimKey.enabled: true` を渡した場合は常に値を持つ（成功なら `null`）。
+   * - 冪等な再送でも、渡していればこの欄は付く（値は `null`。ADR 0454）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   claimKeyFailure?: ExtractionFailure | null;
   /**
-   * Issue #372（(B) 第2段）: この呼び出しで `claimKey: { enabled: true,
-   * detectContested: true }` を渡したとき、鍵が付いた Memory ごとの検出結果
-   * （`detectClaimKeyContested` 参照）。**LLM を一度も呼ばない**——列と索引だけで
-   * 判定する（`docs/decisions/`「主張キーの衝突検出」ADR、北極星 問い5）。
+   * `claimKey: { enabled: true, detectContested: true }` を渡したとき、鍵が付いた Memory ごとの検出結果（`detectClaimKeyContested` 参照）。
+   * LLM を一度も呼ばず、列と索引だけで判定する。
    *
-   * ⛔ **省略可能にする**（`rejectedSubjectIds`/`claimKeyFailure` と同じ理由・同じ規約）。
-   * - **`claimKey.detectContested` を渡さなかった（省略、または `false`）呼び出しでは、
-   *   この欄は無い**（`undefined`）——「検出していない」ことと「検出したが対象の候補が
-   *   無かった」ことを、キーの有無で区別する。
-   * - **`detectContested: true` を渡した場合は常に配列**（`claimKey` が付かなかった
-   *   候補——鍵の導出自体が失敗した／実行しなかった——は含まれない。付いた鍵の数だけ
-   *   要素がある。0件なら `[]`）。
-   * - **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）でも、渡していればこの欄は
-   *   付く**（値は `[]`：検出の対象の候補なし。再送は抽出も検出も走らせない。ADR 0454。【実測】両 adapter。以前は付かず、この TSDoc の「常に」と
-   *   食い違っていた）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
+   * ⛔ 省略可能にする（`rejectedSubjectIds`/`claimKeyFailure` と同じ理由）。
+   * - `claimKey.detectContested` を渡さなかった（省略、または `false`）呼び出しでは、この欄は無い（`undefined`）。
+   *   「検出していない」と「検出したが対象の候補が無かった」をキーの有無で区別する。
+   * - `detectContested: true` を渡した場合は常に配列。`claimKey` が付かなかった候補（鍵の導出が失敗した・実行しなかった）は含まれず、
+   *   付いた鍵の数だけ要素がある（0件なら `[]`）。
+   * - 冪等な再送でも、渡していればこの欄は付く（値は `[]`。ADR 0454）。`extraction: 'skipped'` と `memoryIds: []` が再送の印。
    */
   contestedDetection?: ContestedDetectionOutcome[];
   /**
-   * ADR 0639（オーナーへのまとめ問い 374f6f88 の問10「再送の内訳は足す方向で検討」。足すと決めたのはクローン miku の判断）:
-   * **冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）のときだけ付く。**
+   * 冪等な再送（同じ `externalId` の Observation が既に在り、抽出をやり直さない呼び出し）のときだけ付く（ADR 0639）。
    * 新しく作った呼び出しには、この欄は無い（`undefined`）。`memoryIds: []`・`extraction: 'skipped'` は再送でも変わらない。
    *
    * 読み方（`resend.memories` は、その Observation から作られた記憶の、いまの状態）:
    * - `memories` が空 ＝ まだ抽出されていない。`extract: 'deferred'` で tick 待ち、`extract: 'sync'` の observe が abort された後で
    *   リースが切れる前、extract ジョブが failed、または抽出が0件だった、のどれか。
-   *   ⚠ **限界: ジョブ（outbox）の状態はこの欄には入れない（決定済み。ADR 0639）。`memories: []` からは「まだ抽出されていない」ことしか
-   *   分からず、tick 待ち・リース中・failed・抽出0件は区別できない。** `OutboxStore` に observation ごとのジョブを読む口は無く、この PR でも足していない。
+   *   ⚠ **限界: ジョブ（outbox）の状態はこの欄には入れない。** `memories: []` からは「まだ抽出されていない」ことしか分からず、
+   *   tick 待ち・リース中・failed・抽出0件は区別できない。`OutboxStore` に observation ごとのジョブを読む口は無い。
    * - 全部が `status: 'forgotten'` ＝ forget のために、この再送は何も作り直さなかった。
    * - `purged: true` ＝ purge 済み（`status` は `'forgotten'` のまま）。
    *
-   * ⛔ **省略可能にする**（`rejectedSubjectIds` などと同じ理由——必須にすると、`ObserveResult` を自前で組み立てている
-   * 呼び出し側のリテラルがコンパイルを通らなくなる。追加の任意プロパティに留める）。
+   * ⛔ 省略可能にする（`rejectedSubjectIds` などと同じ理由。追加の任意プロパティに留める）。
    */
   resend?: ObserveResend;
 }
 
-/**
- * ADR 0639: `ObserveResult.resend`。冪等な再送のときの内訳。後から任意の欄を足せる形にしてある
- * （足すときも、既存の欄は変えない）。
- */
+/** `ObserveResult.resend`。冪等な再送のときの内訳（ADR 0639）。後から任意の欄を足せる形にしてあり、足すときも既存の欄は変えない。 */
 export interface ObserveResend {
   /**
    * 既存の Observation から作られた記憶。`MemoryStore.listBySourceObservationAllVersions` の写しで、
@@ -546,7 +382,7 @@ export interface ObserveResend {
   memories: ObserveResendMemory[];
 }
 
-/** ADR 0639: `ObserveResend.memories` の1件。 */
+/** `ObserveResend.memories` の1件。 */
 export interface ObserveResendMemory {
   memoryId: MemoryId;
   status: MemoryStatus;
@@ -555,43 +391,16 @@ export interface ObserveResendMemory {
 }
 
 /**
- * Issue #372（(B) 第2段）: `detectClaimKeyContested` が Memory 1件について返す結果。
- * `matchCount` は「同じ tenant・同じ subjectId・同じ claim key・有効期間が重なる・
- * `contentHash` が違う」他の Memory の件数（この Memory 自身を除く）——
- * `MemoryStore.findActiveByClaimKey?`（`status = 'active'`）の一致と、
- * `MemoryStore.findContestedByClaimKey?`（`status = 'contested'`。任意メソッド、
- * Issue #933・ADR 0378）の一致を合わせたもの。`findContestedByClaimKey?` を実装していない
- * adapter では、今まで通り `findActiveByClaimKey?` の一致（`active` のみ）だけになる。
+ * `detectClaimKeyContested` が Memory 1件について返す結果（ADR 0185、ADR 0378）。`matchCount` は「同じ tenant・同じ subjectId・同じ claim key・有効期間が重なる・`contentHash` が違う」他の Memory の件数
+ * （この Memory 自身を除く）で、`MemoryStore.findActiveByClaimKey?`（`active`）と `findContestedByClaimKey?`（`contested`。任意メソッド）の一致を合わせたもの。後者を実装しない adapter では `active` のみ。
  *
- * - `matchCount === 0` ⟹ `result.kind === "no_conflict"`。
- * - `matchCount === 1` **かつその1件が `active`** ⟹ `result.kind === "contested"`。
- *   `Runtime.markContested` を実際に呼んだ結果を `markContested` に運ぶ
- *   （`ineligible`/`conflict` になることもある——TOCTOU で相手の status が読んだ後に
- *   変わった場合等。この関数はその結果をそのまま運ぶだけで、再試行はしない）。
- * - `matchCount >= 2`、**または `matchCount === 1` だがその1件が既に `contested`**
- *   ⟹ `result.kind === "unresolved_conflict"`。**`markContested` を呼ばない**——
- *   [#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、多対多）
- *   が無いと、1対1の `contestedWithId` では3件以上を表現できない（ADR 0185 決定5）。
- *   代わりに `memory_events` へ根拠を構造として残すだけに留める（`detectClaimKeyContested`
- *   の実装コメント参照）。**`superseded` へは一切進めない。**⚠ **状態遷移そのものを
- *   動かさない**——`findContestedByClaimKey?` の一致で既に `contested` な相手が
- *   含まれていても、この関数はその相手の `status`/`contestedWithId` に一切触れない
- *   （ADR 0378 決定2、PR1 の範囲）。⚠ **2026-09-30 の直し（ADR 0378 追記）**:
- *   `matchCount === 1` でもこの分岐に入りうる（一致がちょうど1件で、その1件が既に
- *   `contested` だった場合）——直す前は `markContested` へ進んで `ineligible` になり、
- *   検出中の Memory は `active` のまま痕跡も残らなかった（例: 3件目の有効期間が、既に
- *   対になった1件目・2件目のうち片方とだけ重なる場合）。
- *
- * ⚠ **2026-09-30 の直し（Issue #207/#933 PR2、ADR 0381、段階B。2026-09-30 のさらなる
- * 直しで `deps.relationStore` の配線を条件にした）**: `matchCount >= 2`、または
- * `matchCount === 1` だがその1件が既に `contested` の場合、`deps.relationStore` と
- * `deps.memoryStore.markContestedGroup` の両方が配線されていて、かつ「群のメンバー」の
- * 組み立て（下の `detectClaimKeyContested` 実装コメント参照。穴Aの吸収・既存群の合併を
- * 含む）の結果が**3件以上**になれば、`result.kind === "contested_group"` になる——
- * `Runtime.markContestedGroup` を実際に呼んだ結果を運ぶ。それ以外（`relationStore`/
- * `markContestedGroup` のどちらかが配線されていない、または組み立てた群が2件以下にしか
- * ならない場合）は、今まで通り `result.kind === "unresolved_conflict"`（evidence だけ）
- * になる。
+ * - `matchCount === 0` ⟹ `no_conflict`。
+ * - `matchCount === 1` **かつその1件が `active`** ⟹ `contested`（`Runtime.markContested` を実際に呼んだ結果を `markContested` に運ぶ。`ineligible`/`conflict` もありうる。再試行はしない）。
+ * - `matchCount >= 2`、**または `matchCount === 1` だがその1件が既に `contested`** ⟹ 原則 `unresolved_conflict`。`markContested` を呼ばず（`memory_relations` が無いと、1対1の `contestedWithId` では3件以上を表現できない）、
+ *   根拠を `memory_events` へ残すだけで、**`superseded` へは一切進めず**、既に `contested` な相手の `status`/`contestedWithId` にも触れない。1件だけで既に `contested` の場合にここへ入れるのは、
+ *   `markContested` へ進むと `ineligible` になり、検出中の Memory が `active` のまま痕跡も残らないため。
+ *   `deps.relationStore` と `deps.memoryStore.markContestedGroup` の両方が配線されていて、群のメンバー（穴Aの吸収・既存群の合併を含む）が**3件以上**になれば `contested_group`
+ *   （`Runtime.markContestedGroup` を実際に呼んだ結果を運ぶ。ADR 0381）。
  */
 export interface ContestedDetectionOutcome {
   /** 検出の対象にした、新しく作った Memory の id。 */
@@ -613,68 +422,31 @@ export interface ContestedDetectionOutcome {
 }
 
 /**
- * `runtime.reextract` の結果（ADR 0028、ADR 0029）。
+ * この呼び出しで「正典が要求する1トランザクション」が使えたかどうか（[ADR 0100](../../../docs/decisions/0100-supersede-with-new-memories.md)）。
  *
- * `observe()` の `ExtractionOutcome` が持つ `'skipped'`（`ObserveResult.extraction`。
- * `memory_usage` 入力用の値）と、この型が持つ `ReextractResult.skipped` フィールドは
- * **別の語彙**である——前者は「この呼び出しで抽出そのものを行ったか」、後者は
- * 「既存 Memory を supersede しなかった理由」。名前が似ているだけで無関係。
- * `reextract` の `extraction` は `'ok'` か `'llm_failed_whole_observation'` のどちらかが基本である
- * （deferred も冪等な再送もここには来ない）。
- * ⚠ **2026-09-28 変更（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
- * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
- * `extraction: 'skipped'`（observe の再送が抽出をやり直さないときと同じ意味）を返す。**以前は「`'skipped'` は取らない」
- * と約束していた。型は変わらない（`'skipped'` は元から `ExtractionOutcome` に在る）が、「`'skipped'` は来ない」と
- * 仮定したコードは見直しが要る。条件は `Runtime.reextract` の doc を参照。
- */
-/**
- * この呼び出しで「正典が要求する1トランザクション」が使えたかどうか（Issue #134 /
- * [ADR 0100](../../../docs/decisions/0100-supersede-with-new-memories.md)）。
+ * - `'store_supported'` — `MemoryStore.supersedeWithNewMemories`（任意メソッド）が在り、新 Memory の作成と旧行の supersede をその口へ渡した。
+ * - `'store_unsupported'` — 口が無い adapter だったので、作成と supersede を別々の書き込みとして行った
+ *   （docs/memory-model.md §11 行5 は**満たされていない**）。
+ * - `'not_attempted'` — **書き込みを1件も試みていない。** `reextract` の安全弁（LLM がまた失敗した／候補が0件）で早期 return した場合と、
+ *   利用者の意思で退けた記憶を持つ Observation で抽出をやり直さなかった場合。⛔ 上の2つのどちらかに寄せない:
+ *   「口が無かった」と「そもそも書いていない」を潰すと、呼び手は「§11 行5 が破れた」と「破れる機会が無かった」を区別できない。
+ *   名前は `ConsolidationResult` の `not_attempted`（ADR 0087）に揃えた。
  *
- * - `'store_supported'` — `MemoryStore.supersedeWithNewMemories`（任意メソッド）が在り、
- *   新 Memory の作成と旧行の supersede をその口へ渡した。
- * - `'store_unsupported'` — 口が無い adapter だったので、今日どおり作成と supersede を
- *   別々の書き込みとして行った（docs/memory-model.md §11 行5 は**満たされていない**）。
- * - `'not_attempted'` — **書き込みを1件も試みていない。**`reextract` の安全弁（LLM が
- *   また失敗した／候補が0件）で早期 return した場合と、利用者の意思で退けた記憶を持つ Observation で
- *   抽出をやり直さなかった場合（2026-09-28 から。Issue #1079・#1149）。⛔ この状態を上の2つのどちらかに
- *   寄せない——「口が無かった」と「そもそも書いていない」は別のことであり、潰すと
- *   呼び手は「§11 行5 が破れた」と「破れる機会が無かった」を区別できなくなる。
- *   名前は `ConsolidationResult` の `not_attempted`（ADR 0087 決定5）に揃えた。
+ * 🔴 **この値は原子性の証拠ではなく、口の有無の写しである。** adapter が口を実装したと宣言したことしか意味せず、
+ * 実装していても実際にはトランザクションを張っていない adapter（`packages/testkit` の `InMemoryMemoryStore`）は見抜けない。
+ * 原子性を実際に測るのは、適合テストと `packages/postgres` の並行の歯である。
  *
- * 🔴 **この値は原子性の証拠ではない。口の有無の写しである。** adapter が口を実装したと
- * 宣言したことしか意味しない——実装していても実際にはトランザクションを張っていない
- * adapter（`packages/testkit` の `InMemoryMemoryStore` は「トランザクションは一切模して
- * いない」と自分で書いている）を、この値は見抜けない。原子性を実際に測るのは適合テストと
- * `packages/postgres` の並行の歯であって、この値ではない。
- *
- * ⛔ **省略可能（`?`）にしない。**`undefined` が「口が無かった」と「この欄より前の版の
- * 戻り値」の両方を意味してしまい、「無い」の種類を潰すことになる。
+ * ⛔ 省略可能（`?`）にしない。`undefined` が「口が無かった」と「この欄より前の版の戻り値」の両方を意味してしまう。
  */
 export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_attempted";
 
 /**
- * ⚠ **2026-09-26 追記（[Issue #856](https://github.com/takecchi/mnemora/issues/856)）:
- * この型は「observationId が存在しない（または他テナントの id だった）」場合を
- * 表す値を持たない。** `Runtime.reextract(ctx, observationId)` は
- * `deps.memoryStore.getObservation(ctx, observationId)` が `null` を返すと、
- * `ReextractResult` を一切構築せずに素の `Error`
- * （`runtime.reextract: observation not found: <id>`。型付き例外ではない、
- * `RangeError` でもない）で reject する——書き込みは一切行わない。
+ * `runtime.reextract` の結果（ADR 0028、ADR 0029）。`ObserveResult.extraction` の `'skipped'` と `skipped` フィールドは別の語彙で、前者は「抽出そのものを行ったか」、後者は「既存 Memory を supersede しなかった理由」。
+ * `extraction` は基本 `'ok'` か `'llm_failed_whole_observation'` だが、利用者の意思で退けた記憶を持つ Observation では `'skipped'`（observe の再送が抽出をやり直さないときと同じ意味。条件は `Runtime.reextract` の doc）。
  *
- * `Runtime` の他の書き込み系メソッド（`forget`/`purge`/`restoreArchived`/
- * `restoreSuperseded`/`markContested`/`resolveContested`）は、対象 id が存在しない
- * 場合を構造化された outcome（`kind: "not_found"` 等）として返し、例外にしない、
- * という規律をそれぞれの doc コメントで明示している。`reextract` は単一の id を
- * 直接受け取る口という点で `getRecall(ctx, recallId)`（存在しない id には例外では
- * なく `null` を返す）とも似た形をしているが、`getRecall` とは逆に、存在しない id
- * では例外を投げる——この型・このメソッドは、その不揃いを解消していない。
- * 呼び出し側は `try`/`catch`（または Promise の `.catch`）でこれを扱うことになる。
- *
- * 2026-09-26、クローン miku がこの振る舞いを現状の契約として記録すると決めた
- * （[Issue #856](https://github.com/takecchi/mnemora/issues/856)）。採らなかった案は、
- * `ReextractResult` に `not_found` 相当の outcome を足す案（公開の型の変更になる）と、
- * 型付き例外に変える案（投げる例外の種類が変わる）である。
+ * ⚠ 「observationId が存在しない（または他テナントの id だった）」場合を表す値は無く、`getObservation` が `null` を返すと、素の `Error`（`runtime.reextract: observation not found: <id>`。型付き例外でも `RangeError` でもない）で
+ * reject し、書き込みは一切しない。`forget`/`purge` 等は存在しない id を構造化された outcome（`not_found`）で返し、`getRecall` は `null` を返すが、`reextract` は例外を投げる。この不揃いは解消していない
+ * （`not_found` 相当の outcome を足す案は公開の型の変更、型付き例外に変える案は投げる例外の種類の変更になるため採っていない）。呼び出し側は `try`/`catch` で扱う。
  */
 export interface ReextractResult {
   /** 抽出し直した Observation の id。 */
@@ -688,120 +460,56 @@ export interface ReextractResult {
   memoryIds: MemoryId[];
   /**
    * 🔴 安全弁により supersede された既存 Memory の id。
-   * - LLM がまた失敗した場合（`outcome: 'llm_failed_whole_observation'`）は必ず空配列
-   *   ——失敗を根拠に既存の記憶を置き換えない。
-   * - 候補が0件だった場合も必ず空配列——そもそも `supersededById` の指す先が無い。
-   * - 対象は同じ `(sourceObservationId, extractorVersion)` を持つ **`status: 'active'`** の
-   *   Memory のうち、今回作られた content_hash の集合に含まれないものだけ
-   *   （`forgotten` は絶対に含めない。`contested` も対象外——理由は ADR 0028 参照）。
-   * - 🔴 安全弁3（ADR 0030）: supersede は `expectedStatus: "active"` の compare-and-swap で書く
-   *   （store が `supersedeWithNewMemories` を持てばその `supersede[].expectedStatus`、持たなければ
-   *   `updateStatusWithEvent`）。読み（`listBySourceObservation`）と書きの
-   *   間に他の書き込みで status が変わっていた Memory は、ここには**入らない**
-   *   （`skipped` に `status_changed_concurrently` として出る）。
-   * - 🔴 **置き換えた側（`supersededById`）は、今回の抽出で `active` になる行である**（ADR 0454）。
-   *   冪等キーは status を問わないので、候補が同じ版の `superseded`／`archived` な既存行にぶつかると、
-   *   その行が `memoryIds` に載る。ぶつからない先頭の候補（新しく作る行・既に active な行）を置き換えた側にする。
-   *   **候補が全部、非 `active` の既存行にぶつかるときは、何も supersede せず、この配列は空**——
-   *   ぶつかった行は `skipped` に `status_not_active` で載る。以前は、その行が置き換えた側になり、
-   *   X → Y → X と出力が往復すると Y と X が互いを置き換えて active が0件になっていた。
+   * - LLM がまた失敗した場合（`outcome: 'llm_failed_whole_observation'`）は必ず空配列（失敗を根拠に既存の記憶を置き換えない）。
+   * - 候補が0件だった場合も必ず空配列。
+   * - 対象は同じ `(sourceObservationId, extractorVersion)` を持つ **`status: 'active'`** の Memory のうち、今回作られた content_hash の集合に
+   *   含まれないものだけ（`forgotten` は絶対に含めない。`contested` も対象外。ADR 0028）。
+   * - 🔴 supersede は `expectedStatus: "active"` の compare-and-swap で書く（ADR 0030。store が `supersedeWithNewMemories` を持てば
+   *   その `supersede[].expectedStatus`、持たなければ `updateStatusWithEvent`）。読み（`listBySourceObservation`）と書きの間に status が変わっていた
+   *   Memory は、ここには**入らない**（`skipped` に `status_changed_concurrently` として出る）。
+   * - 🔴 **置き換えた側（`supersededById`）は、今回の抽出で `active` になる行である**（ADR 0454）。冪等キーは status を問わないので、
+   *   候補が同じ版の `superseded`／`archived` な既存行にぶつかると、その行が `memoryIds` に載る。ぶつからない先頭の候補
+   *   （新しく作る行・既に active な行）を置き換えた側にする。**候補が全部、非 `active` の既存行にぶつかるときは、何も supersede せず、
+   *   この配列は空**（ぶつかった行は `skipped` に `status_not_active` で載る）。
    */
   supersededMemoryIds: MemoryId[];
   /**
-   * ADR 0029: 既存 Memory を supersede しなかった理由。ADR 0028 が「引き受ける負債」に
-   * 記録した欠落——`contested` で飛ばした・`forgotten` で飛ばした・そもそも置き換える
-   * ものが無かった、の3つが `supersededMemoryIds: []` という同じ顔になっていた——を埋める。
-   * ADR 0030（安全弁3）で `status_changed_concurrently`（TOCTOU で弾かれた）を追加した。
+   * 既存 Memory を supersede しなかった理由（ADR 0029）。`contested` で飛ばした・`forgotten` で飛ばした・置き換えるものが無かった、がすべて `supersededMemoryIds: []` という同じ顔になるのを避ける。
+   * `status_changed_concurrently`（読んだ後に status が変わって弾かれた）も載る（ADR 0030）。件数は持たない（`ReextractSkip` に `count` が無い。`StageSkippedOmission` に倣った形）。
    *
-   * **件数は持たない**（`ReextractSkip` 自体に `count`/`countKind` が無い。`recall.ts` の
-   * `StageSkippedOmission` に倣った形。理由は ADR 0029 参照）。
-   *
-   * 利用者の意思で退けた記憶を持つ Observation の早期 return、`usedWholeObservationFallback` の
-   * 早期 return、`candidates.length === 0` の早期 return、本経路（`classifyReextractTargets` +
-   * `classifySupersedeFailure`）の4つの書き込み経路がある——後ろ2つの早期 return は
-   * **`listBySourceObservation` を呼ぶ前に return する**ため、`skipped` には
-   * `{ kind: 'not_examined', ... }` が入る（「何も飛ばさなかった」ではなく「既存を見ていない」）。
-   *
-   * ⚠ 2026-09-28 追記（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
-   * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)。今の振る舞いを書くだけ）: 1つ目の
-   * 早期 return（退けた記憶が1件でも在ると抽出をやり直さない。条件は `Runtime.reextract` の doc を参照）は、
-   * 既存を見た上で LLM を呼ぶ前に return する。**`skipped` には退けた記憶ごとに `status_not_active`
-   * （`status` はその記憶の今の status）が1件ずつ入り、`not_examined` は入らない。**同じ Observation の
-   * 他の `active` な記憶はここに載らない。このとき `extraction: "skipped"`・`atomicity: "not_attempted"`・
-   * `memoryIds: []`・`supersededMemoryIds: []`・`extractionFailure: null`。【実測 2026-09-28】Postgres と testkit の
-   * fixture で同じ（`status_not_active` が入ることの歯は `reextract-withdrawn-memories.postgres.test.ts`）。
-   *
-   * ⚠ **2026-09-30 変更（[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
-   * [ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）:
-   * 上の「退けた記憶」の判定は `extractorVersion` を問わなくなった。** `extractorVersion` を
-   * 上げた runtime インスタンスで reextract しても、前の版の `forgotten`/`contested`/
-   * 訂正の解決で負けた `superseded` があれば同じく `skipped` に `status_not_active` が入り、
-   * 抽出をやり直さない。**`skipped` に版の欄は足していない**（`memoryId` から
-   * `MemoryStore.get` で版をたどれるため）。詳細は `Runtime.reextract` の doc の
-   * 2026-09-30 変更を参照。
-   *
-   * ⚠ **2026-09-30 追記（[ADR 0406](../../../docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)）:
-   * LLM を待つ間に元の記憶が `forget` されたときも、この早期 return と同じ形で返る**（`status_not_active`、
-   * `status: "forgotten"`）。LLM を呼んだ**後**に打ち切った点だけが違うが、戻り値からは区別できない
-   * （どちらも「何も書かれていない」）。
+   * `usedWholeObservationFallback`・`candidates.length === 0` の早期 return は既存を見る前に return するので `{ kind: 'not_examined', ... }`（「何も飛ばさなかった」ではなく「既存を見ていない」）。
+   * 退けた記憶を持つ Observation の早期 return は、既存を見た上で LLM を呼ぶ前に return し、退けた記憶ごとに `status_not_active`（`status` は今の status）を1件ずつ積む（`not_examined` は入らず、同じ Observation の
+   * 他の `active` な記憶は載らない）。このとき `extraction: "skipped"`・`atomicity: "not_attempted"`・`memoryIds: []`・`supersededMemoryIds: []`・`extractionFailure: null`。
+   * 判定は `extractorVersion` を問わず（[ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）、`skipped` に版の欄は足さない（`memoryId` から `MemoryStore.get` で版をたどれる）。
+   * LLM を待つ間に元の記憶が退けられたときも同じ形で返る（[ADR 0406](../../../docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)）。LLM を呼んだ**後**に打ち切った点だけが違うが、戻り値からは区別できない。
    */
   skipped: ReextractSkip[];
   /** 抽出がどう終わったか（{@link ExtractionOutcome}）。 */
   extraction: ExtractionOutcome;
-  /**
-   * `ObserveResult.extractionFailure` と同じ意味の欄（ADR 0076）。
-   * `reextract` も `extractCandidates` を呼び、`llm_failed_whole_observation` を返す
-   * 早期 return を持つ——`ObserveResult` にだけ運んで `ReextractResult` に運ばないと、
-   * 「片方は種類が分かるのにもう片方は分からない」という非対称ができるため、対称に足す。
-   * `extraction !== "llm_failed_whole_observation"` のときは必ず `null`。
-   */
+  /** `ObserveResult.extractionFailure` と同じ意味の欄（ADR 0076）。`extraction !== "llm_failed_whole_observation"` のときは必ず `null`。 */
   extractionFailure: ExtractionFailure | null;
 }
 
 /**
- * `runtime.forget` の対象（Issue #102）。
- *
- * `{ memoryId }`（単数）と `{ memoryIds }`（複数）のどちらでも同じ意味論——
- * `forget` 自身は内部でこれを `MemoryId[]` に正規化してから処理する
- * （`{ memoryId }` は1要素の配列と同じ扱い）。単数形をわざわざ用意するのは、
- * 呼び出し側の大多数が1件だけを忘れさせたい場合に `{ memoryIds: [id] }` と
- * 書かせないため。
+ * `runtime.forget` の対象。`{ memoryId }`（単数）と `{ memoryIds }`（複数）は同じ意味論で、`{ memoryId }` は1要素の配列と同じ扱い。
  */
 export type ForgetTarget = { memoryId: MemoryId } | { memoryIds: MemoryId[] };
 
 /**
- * `runtime.forget` が対象1件ごとに返す結果（Issue #102）。
+ * `runtime.forget` が対象1件ごとに返す結果。6つの `kind` は、呼び出し側の次の一手がそれぞれ違う（ADR 0008）。
  *
- * **6つの `kind` はそれぞれ呼び出し側の次の一手が違う**——`ReextractSkip` や
- * `UnsupportedOutboxJob` と同じ「無いの分類」（ADR 0008）の適用:
- *
- * - `"forgotten"`: 今回の呼び出しで実際に `status` を `forgotten` へ動かし、
- *   `memory_events` にも `kind: 'forgotten'` を積んだ。`previousStatus` は
- *   動かす直前に観測した status。
- * - `"already_forgotten"`: 対象は最初から（または同じ呼び出し内の先行する
- *   要素の処理によって）`forgotten` だった。**書き込みは一切起きていない**
- *   ——`status` を「動かして `forgotten` になった」のではなく「既に
- *   `forgotten` だった」の区別を、呼び出し側が監査ログの読み方を誤らないよう
- *   に残す（同じ Memory を2回 forget しても `memory_events` は1件のまま、
- *   という冪等性がこの kind の存在理由そのもの）。
- * - `"not_found"`: そのテナントにその id の Memory がそもそも無い（一度も
- *   存在しなかった、または他テナントの id）。`"already_forgotten"` と混同しない
- *   ——「もう忘れている」と「そもそも知らない」は呼び出し側にとって別の状況
- *   （前者は監査ログを遡れる、後者は遡れるものが無い）。
- * - `"conflicted"`: compare-and-swap が破れた——`getMany` で読んだ時点の
- *   status と、実際に書きに行った時点の status が一致しなかった（並行して
- *   別の書き込みが割り込んだ）。**このメソッドは自動で再試行しない**
- *   （上限の無い再試行ループを作らない）。呼び出し側は `observedStatus` を見て
- *   必要なら自分でもう一度 `forget` を呼び直す。
- * - `"failed"`: 競合以外の例外（DB 接続断等）で書き込みそのものが失敗した。
- *   `error` に例外のメッセージを運ぶ。**この時点で処理を打ち切る**
- *   （下の `"not_attempted"` 参照）。
- * - `"not_attempted"`: 同じ呼び出しの中で、**それより前の要素が `"failed"`
- *   になったため、この要素はまだ見ていない。** `"not_found"` や
- *   `"already_forgotten"` に潰さない——それらは「見た上でそう判定した」だが
- *   こちらは「見ていない」であり、意味が違う（`ReextractSkip` の
- *   `not_examined` と同じ区別）。呼び出し側は `"failed"` の原因を解消してから
- *   `"not_attempted"` になった id だけを含めて `forget` を呼び直せる。
+ * - `"forgotten"`: 今回の呼び出しで実際に `status` を `forgotten` へ動かし、`memory_events` にも `kind: 'forgotten'` を積んだ。
+ *   `previousStatus` は動かす直前に観測した status。
+ * - `"already_forgotten"`: 対象は最初から（または同じ呼び出し内の先行する要素の処理によって）`forgotten` だった。
+ *   **書き込みは一切起きていない。** 同じ Memory を2回 forget しても `memory_events` は1件のまま。
+ * - `"not_found"`: そのテナントにその id の Memory がそもそも無い（一度も存在しなかった、または他テナントの id）。
+ *   `"already_forgotten"` と混同しない（前者は監査ログを遡れ、後者は遡れるものが無い）。
+ * - `"conflicted"`: compare-and-swap が破れた（`getMany` で読んだ時点の status と、書きに行った時点の status が一致しなかった）。
+ *   **自動で再試行しない。** 呼び出し側は `observedStatus` を見て、必要なら自分で `forget` を呼び直す。
+ * - `"failed"`: 競合以外の例外（DB 接続断等）で書き込みそのものが失敗した。`error` に例外のメッセージを運ぶ。**この時点で処理を打ち切る。**
+ * - `"not_attempted"`: 同じ呼び出しの中で、**それより前の要素が `"failed"` になったため、この要素はまだ見ていない。**
+ *   `"not_found"` や `"already_forgotten"` に潰さない（それらは「見た上でそう判定した」。`ReextractSkip` の `not_examined` と同じ区別）。
+ *   呼び出し側は `"failed"` の原因を解消してから、`"not_attempted"` になった id だけを含めて `forget` を呼び直せる。
  */
 export type ForgetOutcome =
   | { memoryId: MemoryId; kind: "forgotten"; previousStatus: MemoryStatus }
@@ -812,16 +520,15 @@ export type ForgetOutcome =
       memoryId: MemoryId;
       kind: "failed";
       /**
-       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363、2026-09-30 追記）:
-       * drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、`cause` の連鎖と
-       * SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
+       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363）: drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、
+       * `cause` の連鎖と SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
        * 🔴 **文字列の形は「例外の `message` そのまま」ではない**——パースして使わないこと。
        */
       error: string;
     }
   | { memoryId: MemoryId; kind: "not_attempted" };
 
-/** `runtime.forget` の任意オプション（Issue #102）。 */
+/** `runtime.forget` の任意オプション。 */
 export interface ForgetOptions {
   /**
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。「ユーザーの訂正で
@@ -834,12 +541,8 @@ export interface ForgetOptions {
 }
 
 /**
- * `runtime.forget` の結果（Issue #102）。
- *
- * **`forgottenCount` のような派生値を持たない。**`outcomes` を数えれば得られる
- * 値を欄として複製すると、「同じことを言う道が2つ在り、どちらか一方だけ直して
- * ずれる」というこのリポジトリが繰り返し踏んできた欠陥（`TICK_SUPPORTED_JOB_KINDS`・
- * `MAX_STRENGTH` の JSDoc 参照）を新しく作ることになる。
+ * `runtime.forget` の結果。`forgottenCount` のような派生値を持たない:
+ * `outcomes` を数えれば得られる値を欄として複製すると、同じことを言う道が2つ在り、どちらか一方だけ直してずれる。
  */
 export interface ForgetResult {
   /**
@@ -852,95 +555,35 @@ export interface ForgetResult {
 }
 
 /**
- * `runtime.consolidate` の対象（Issue #103、ADR 0089。`{ seedMemoryId }` は
- * Issue #135、ADR 0152）。
+ * `runtime.consolidate` の対象（ADR 0089。`{ seedMemoryId }` は ADR 0152）。
  *
- * `{ memoryIds }` は `forget` の `ForgetTarget` と同じ規律——正規化せず、**重複も入力順も
- * そのまま保つ**。`{ query, maxCandidates }` は `recall(ctx, query)` を1回呼んで得られた
- * `memories` の id を順に採る（`maxCandidates` があれば先頭からその件数で切る）。
+ * `{ memoryIds }` は正規化せず、**重複も入力順もそのまま保つ**。`{ query, maxCandidates }` は `recall(ctx, query)` を1回呼んで得た `memories` の id を順に採る（`maxCandidates` があれば先頭からその件数で切る）。
  *
- * ⚠ 2026-09-27 追記（今の振る舞いを書くだけ。Postgres と testkit で実測）:
- * - **`{ query }` は、`recall()` の `memories` を `retrievedVia` によらず全部採る。**連想枠は既定 on
- *   （ADR 0337）なので、`query.association` を省略すると、クエリには当たっていない「連想で返った」
- *   `active` な記憶（`retrievedVia: 'association'`）も統合元として適格になる。クエリに当たったものだけを
- *   畳みたいなら `query.association: null` を渡すこと。contested の同伴（`mandatory_companion`）は
- *   `status_not_active` で弾かれる。`{ seedMemoryId }` は `computeAffinity` の閾値で絞るので、
+ * - **`{ query }` は `retrievedVia` によらず全部採る。** 連想枠は既定 on（ADR 0337）なので、`query.association` を省略すると、クエリに当たっていない「連想で返った」`active` な記憶も統合元として適格になる。
+ *   当たったものだけを畳みたいなら `query.association: null` を渡す。contested の同伴（`mandatory_companion`）は `status_not_active` で弾かれる。`{ seedMemoryId }` は `computeAffinity` の閾値で絞るので、
  *   連想や同伴で返った記憶（`similarity` も `lexicalMatch` も持たない）は入らない。
- * - **`{ memoryIds }` は、忘却の床（`decayFloorAt`）を見ない。**（忘却の床はコードを読んで確かめた
- *   だけで、実測はしていない）。`{ query }`・`{ seedMemoryId }` の近傍は `recall()` の忘却のゲートを通る。
- * - ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）: どの形でも、いまの
- *   時点で有効期間（`validFrom`/`validUntil`）の外にある記憶は統合元にしない**（`sources` に `"expired"`/
- *   `"not_yet_valid"`。{@link ConsolidateSourceOutcome} 参照）。それまでは `{ memoryIds }` が有効期間を見ず、
- *   統合先は有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れの記憶の内容が期限の無い
- *   `active` な記憶として `recall()` に戻っていた。`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）と、
- *   `{ query }` に `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶も、同じく統合されていた
- *   （2026-09-29 に Postgres と testkit の fixture で実測）。
- * - ⚠ **2026-09-29 追記2（Issue #1188 残り、[ADR 0368](../../../docs/decisions/0368-consolidate-reflect-validity-intersection.md)）:
- *   統合先は eligible の有効期間の**積**を引き継ぐ（`intersectValidity`、`validity.ts`）
- *   ——今までは常に `validFrom`/`validUntil` とも `null` だった。**代償**: 期限の無い記憶 F と、
- *   将来の期限を持つ記憶 E を一緒に統合すると、統合先は E の期限を持ち、F は他の統合元と同じく
- *   `superseded` になる——期限後は F 由来の内容も `recall()` に出なくなる（F 自身の行は
- *   superseded として残り、消えはしない）。ADR 0368「代償」を見ること。
+ * - **`{ memoryIds }` は忘却の床（`decayFloorAt`）を見ない。** `{ query }`・`{ seedMemoryId }` の近傍は `recall()` の忘却のゲートを通る。
+ * - どの形でも、いま有効期間（`validFrom`/`validUntil`）の外にある記憶は統合元にしない（`sources` に `"expired"`/`"not_yet_valid"`）。統合先は有効期間を持たない（ADR 0164）ので、期限切れの内容が期限の無い `active` として
+ *   `recall()` に戻るのを避ける。`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）や、`{ query }` に `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶にも効く。
+ * - 統合先は eligible の有効期間の**積**を引き継ぐ（`intersectValidity`。[ADR 0368](../../../docs/decisions/0368-consolidate-reflect-validity-intersection.md)）。**代償**: 期限の無い F と将来の期限を持つ E を統合すると、
+ *   統合先は E の期限を持ち、F は `superseded` になって、期限後は F 由来の内容も `recall()` に出なくなる（F の行は残る）。
  *
- * `{ seedMemoryId }` は「この記憶に似ているものを mnemora 自身が集めて、1つに畳め」という
- * 意味である（ADR 0152）。`{ query, maxCandidates }` と違い、**「似ている」の判定
- * そのものを呼び手ではなく mnemora 側が行う**。ただし ADR 0089 却下案7・
- * `docs/roadmap.md` §5.7 が拒んだ「対象を自分で*列挙して*選ぶ」（active な記憶を走査して
- * どれから畳むかを決める）ことはしない——**起点（`seedMemoryId`）は必ず呼び手が渡す。**
- * mnemora が自分で決めるのは「起点に似ているものをどう集めるか」だけである。
+ * `{ seedMemoryId }` は「この記憶に似ているものを mnemora 自身が集めて、1つに畳め」（ADR 0152）。「似ている」の判定は mnemora 側が行うが、対象を自分で列挙して選ぶこと（active な記憶を走査してどれから畳むかを決める。
+ * ADR 0089、`docs/roadmap.md` §5.7）はしない。**起点（`seedMemoryId`）は必ず呼び手が渡す。**
+ * - 種の `digest` で `recall(ctx, { text })` を1回呼ぶ（`{ query }` と同じ経路で、新しい「似ている」の判定を作らない）。`affinity`（`max(similarity, lexicalMatch)`。{@link computeAffinity}）が `minAffinity`
+ *   （既定 {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}）未満の候補は落とす。
+ * - **種は `minAffinity` の判定を受けず、必ず先頭に含める**（種の embedding がまだ無ければ ANN 段に載らず `recall()` の結果に現れないため）。`maxCandidates` は `[seedMemoryId, ...近傍]` を先頭から切る
+ *   （`maxCandidates >= 1` なら種は残る）。
+ * - 種が無い、または forget・purge された記憶なら、`recall()` を呼ばず、対象は `[seedMemoryId]` の1件のみになる（後続の `getMany` が `not_found`/`status_not_active` に分類。`llmCalls: 0`）。
+ *   消した記憶の `digest` で近傍を束ねると、消した情報が別の形で効き続けるため。自動 job（ADR 0157）も同じ。`contested` / `superseded` の種は利用者が消したものではないので、近傍を集める。
+ * - **近傍は `ctx` の scope で集める。** `ctx.subjectId` を付けなければテナント全体から集まり、近傍が別の subject にまたがると統合後の `subjectId` は `null` に畳まれる。帰属を保つなら `ctx.subjectId` に種の `subjectId` を渡す（ADR 0310）。
  *
- * - 実装（`consolidate()` 内）: `seedMemoryId` の Memory を `get` し、その `digest` を
- *   `RecallQuery.text` にして `recall(ctx, { text })` を1回呼ぶ——`{ query }` 形と
- *   まったく同じ経路（同じ `recall()`）を通す。**新しい「似ている」の判定を作らない。**
- * - 「似ている」は `recall()` が既に使っている `affinity`
- *   （`strategies/scoring.ts`: `affinity = max(similarity, lexicalMatch)`）をそのまま使う
- *   （{@link computeAffinity}）。`minAffinity` 未満の候補は落とす。**既定は
- *   {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}。**
- * - **種（`seedMemoryId` そのもの）は `minAffinity` の判定を受けず、必ず候補に含める。**
- *   種の embedding がまだ無ければ ANN 段に載らず `recall()` の結果に現れないため
- *   （`embeddingStatus: 'pending'`。`consolidate` 自身が作る統合先の産物と同じ窓、
- *   ADR 0089「引き受けた負債」4）、`recall()` の結果に種が見つからなければ先頭に足す。
- *   見つかった場合も、`minAffinity` で弾かれないよう先頭に固定する（`affinity` の判定対象は
- *   種以外の候補だけ）。
- * - `maxCandidates` は「1回の統合に入れる上限」——`{ query }` 形と同じ意味。
- *   `[seedMemoryId, ...minAffinity を満たした近傍]` の順に並べたあと、先頭から切る
- *   （種は常に先頭にいるため、`maxCandidates >= 1` である限り必ず残る）。
- * - `seedMemoryId` が指す Memory が無い場合、`recall()` は呼ばない——
- *   対象は `[seedMemoryId]` の1件のみとなり、後続の `getMany` が `not_found` に分類する
- *   （新しい `nothingReason` を発明しない。下記 {@link ConsolidateNothingReason} 参照）。
- * - **種が forget・purge された記憶なら、`recall()` は呼ばない**（Issue #1136）——対象は
- *   `[seedMemoryId]` の1件のみとなり、後続の `getMany` が `status_not_active`（`forgotten`）に
- *   分類する（結果は `nothing_to_consolidate`/`no_eligible_sources`、`llmCalls: 0`）。利用者が
- *   「使わないでほしい」と言った記憶の `digest` で近傍を束ねると、消した情報が別の形で効き続ける
- *   ためである（#897 / ADR 0124 の observe の再送と同じ線）。自動 job（ADR 0157）も同じ経路を通る。
- *   ⚠ **種が `contested` / `superseded` なら、今どおり種の `digest` で近傍を集める**
- *   （種そのものは `status_not_active` で弾かれ、近傍が2件以上あれば近傍どうしが統合される）。
- *   利用者が消した記憶ではないので、集めることを止めていない。
- * - **近傍は `ctx` の scope で集める。**`ctx.subjectId` を付けなければテナント全体から集まる。
- *   近傍が別の subject にまたがると、統合後の `subjectId` は `null` に畳まれる。
- *   **帰属を保ちたいなら、`ctx.subjectId` に種の `subjectId` を渡すこと**——混在は構造的に
- *   起きなくなる（Issue #579、ADR 0310 の実測。付けなかった場合の混在率は、使い方しだいで
- *   0〜100%）。
+ * ⚠ **「同じ対象で2回呼んだら2回目は書き込みゼロ」（ADR 0089）は `{ memoryIds }` でしか成り立たない。** `{ seedMemoryId }` は呼ぶたびに `recall()` で**現在の** active 集合から近傍を拾い直す。1回目で `recall()` の窓から
+ * 溢れて `active` のまま残った近傍は、2回目に eligible として拾われ、LLM が再度呼ばれて新しい統合先ができる（1回目の統合先自身が巻き込まれて `superseded` になることもある）。`{ query, maxCandidates }` も `recall()` を呼び直す点は同じ。
+ * 詳細は [ADR 0152](../../../docs/decisions/0152-consolidate-seed-neighborhood.md)・[ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md)。
  *
- * ⚠ **2026-09-26 追記（Issue #869）: 「同じ対象で2回呼んだら2回目は書き込みゼロ」
- * （ADR 0089 決定3）は `{ memoryIds }` の経路でしか成り立たない。** `{ seedMemoryId }` は
- * 近傍（`neighborIds`）を呼ぶたびに `recall()` で**現在の** active な記憶集合から拾い直す
- * ——1回目で `recall()` の窓（既定 `limit`/`maxCandidates`）から溢れて `active` のまま
- * 残った近傍は、同じ `seedMemoryId` で2回目を呼ぶと eligible として拾われ、LLM が再度
- * 呼ばれて新しい統合先ができる（Fake・Postgres の両方で実測）。1回目の統合先自身が
- * 2回目の統合に巻き込まれて `superseded` になるケースもありうる（Fake で実測）。
- * `{ query, maxCandidates }` も `recall()` を呼び直す点は同じ形を共有するが、この追記では
- * 実測していない。2026-09-26 にクローン miku（オーナーではない）が、挙動を変えずに
- * 既知の負債として記録すると判断した。詳細は
- * [ADR 0152](../../../docs/decisions/0152-consolidate-seed-neighborhood.md) 負債5・
- * [ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md) の2026-09-26 追記。
- *
- * ⚠ **`maxCandidates` の値は検査しない**（[Issue #1067](https://github.com/takecchi/mnemora/issues/1067)）。
- * **保証するのは、正の整数 `n` を渡したとき「`recall()` が返した順（`{ seedMemoryId }` では種が先頭）の
- * 先頭 `n` 件」と、省略したとき「その全件（`recall()` の `limit` と、`{ seedMemoryId }` では `minAffinity` で絞ったあと）」だけである。**それ以外（`0`・負の数・整数でない数・`NaN`）を
- * 渡したときの対象は未定義である——例外は投げず、今の実装はそのまま `Array.prototype.slice` に
- * 渡すので、`-1` は「末尾の1件を除く全部」、`1.5` は1件、`0` と `NaN` は0件になる。`dryRun` でなければ、
- * そうして選ばれた対象に統合（統合元は `superseded` になる）を実際に書く。この解釈は将来変わりうるので、頼らないこと。
+ * ⚠ **`maxCandidates` の値は検査しない。** 保証するのは、正の整数 `n` なら「`recall()` が返した順（`{ seedMemoryId }` では種が先頭）の先頭 `n` 件」、省略なら「その全件」だけ。それ以外（`0`・負・非整数・`NaN`）の対象は未定義で、
+ * 例外は投げず `Array.prototype.slice` に渡す（`-1` は末尾の1件を除く全部、`1.5` は1件、`0` と `NaN` は0件）。`dryRun` でなければ選ばれた対象に統合を書く。この解釈は将来変わりうるので頼らないこと。
  * `Runtime.findCorrectionCandidates` の `limit`（正の整数以外を `RangeError` で拒む）とは揃えていない。
  */
 export type ConsolidateTarget =
@@ -951,30 +594,22 @@ export type ConsolidateTarget =
       maxCandidates?: number | undefined;
       minAffinity?: number | undefined;
       /**
-       * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-       * （Issue #338）: 種の digest で内部的に呼ぶ `recall()` へそのまま渡す
-       * `RecallQuery.activityCounting`。**`{ query }` 形は `RecallQuery` 自体に
-       * この欄を含められるので、ここには無い**——`{ seedMemoryId }` 形だけ、
-       * `recall()` に直接触れられないためにこの欄を用意する。省略時 `"tenant"`
-       * （本 ADR 以前と1バイトも変わらない挙動）。
+       * 種の digest で内部的に呼ぶ `recall()` へそのまま渡す `RecallQuery.activityCounting`
+       * （[ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)）。`{ query }` 形は `RecallQuery` 自体にこの欄を含められるので、
+       * ここには無い。省略時 `"tenant"`。
        */
       activityCounting?: "tenant" | "subject" | undefined;
     };
 
 /**
- * `{ seedMemoryId }` 形（Issue #135、ADR 0152）が使う `minAffinity` の既定値。
+ * `{ seedMemoryId }` 形（ADR 0152）が使う `minAffinity` の既定値。
  *
- * 🔴 **この値は実測していない。**保守側（畳まない側）に倒した理由——統合元は
- * `superseded` へ動く（ADR 0089 決定1）ため、**取り違えて畳んだときの damage は
- * 「畳まなかった」より大きい。**緩めるのは `examples/chat` の `consolidation-cost`
- * （Issue #136、着地済み）で実際に測ってから判断する。`ConsolidateOptions.dryRun` が
- * あるので、呼び手は本番へ入れる前に何が畳まれるはずかを見られる。
+ * 🔴 **この値は実測していない。** 保守側（畳まない側）に倒してある。統合元は `superseded` へ動く（ADR 0089）ので、
+ * 取り違えて畳んだときの damage は「畳まなかった」より大きい。`ConsolidateOptions.dryRun` で、呼び手は本番へ入れる前に何が畳まれるはずかを見られる。
  */
 export const DEFAULT_CONSOLIDATE_MIN_AFFINITY = 0.8;
 
-/**
- * `runtime.consolidate` の任意オプション（Issue #103、ADR 0089）。
- */
+/** `runtime.consolidate` の任意オプション（ADR 0089）。 */
 export interface ConsolidateOptions {
   /** 統合の対象（{@link ConsolidateTarget}）。 */
   target: ConsolidateTarget;
@@ -992,51 +627,28 @@ export interface ConsolidateOptions {
    */
   reason?: string | undefined;
   /**
-   * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
-   * 中断の合図。内部で呼ぶ `recall()`（`{ seedMemoryId }`/`{ query }` 形のとき）と、
-   * LLM 呼び出し（`completeStructured`）の両方に効く。**既定の時間の上限にはならない**
-   * ——省略すれば今までどおり待ち続ける。
+   * 中断の合図（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）。内部で呼ぶ `recall()`（`{ seedMemoryId }`/`{ query }` 形のとき）と、
+   * LLM 呼び出し（`completeStructured`）の両方に効く。**既定の時間の上限にはならない**（省略すれば待ち続ける）。
    *
-   * abort されると、`consolidate()` は reject する（`signal.reason`。無ければ `AbortError`
-   * 相当）。**既存の `"llm_failed"` には倒さない**——中断と LLM の失敗を区別するため。
-   * LLM 呼び出しは、束ねる対象を1件も書く前に行う（上の手順5）ので、abort の時点では
-   * 何も書かれていない。
+   * abort されると、`consolidate()` は `signal.reason`（無ければ `AbortError` 相当）で reject する。既存の `"llm_failed"` には倒さない
+   * （中断と LLM の失敗を区別するため）。LLM 呼び出しは対象を1件も書く前に行うので、abort の時点では何も書かれていない。
    */
   signal?: AbortSignal | undefined;
 }
 
 /**
- * `runtime.consolidate` 全体の結末（Issue #103、ADR 0089）。ADR 0008 の「無い」の分類の適用——
- * 「束ねるものが無かった」「そもそも見ていない」「LLM が落ちた」「下見だけ」を1つの `false` に
- * 潰さない。
+ * `runtime.consolidate` 全体の結末（ADR 0089）。「束ねるものが無かった」「そもそも見ていない」「LLM が落ちた」「下見だけ」を1つの `false` に潰さない（ADR 0008）。
  *
  * - `"consolidated"` — 統合先を1件作り、少なくとも1件を `superseded` へ動かした。
- * - `"nothing_to_consolidate"` — 対象を見た上で、束ねるものが無かった
- *   （{@link ConsolidateNothingReason} で細分）。
- * - `"not_examined"` — 対象そのものが空（`memoryIds: []`）、または `query` が0件だった
- *   ——store の Memory を1件も見ていない。
- * - `"llm_failed"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む。Issue #1065）。
- *   **1件も書いていない。**
- * - `"dry_run"` — 下見だけを行った。**1件も書いていない。**
- * - `"aborted_source_forgotten"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前に
- *   見直したら eligible の1件以上が `forgotten`（`forget()` のみ・`purge()` 済みのどちらも
- *   含む）になっていたので、**何も書かずに打ち切った**（統合先は作らない。eligible の
- *   どれ1つも `superseded` へ動かさない）。2026-09-30 追記（Issue #1226、ADR 0375 決定7、
- *   クローン miku の判断）。{@link ConsolidateSourceOutcome} の `"forgotten_before_write"`
- *   参照。破壊的変更とは数えない（union に値を足す変更は数えない。同日付の
- *   「数え方の規律への追記（2026-09-28）」、`"expired"`/`"not_yet_valid"` の追加と同じ扱い）。
- * - `"aborted_source_status_changed"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前（または書き込みの
- *   トランザクション内）に見直したら、eligible の1件以上が `superseded` になっていた（`reextract` などが
- *   LLM を待つ間に別の記憶で置き換えた）、または eligible の**すべて**が `active` でなくなっていた
- *   （同じ ids の `consolidate` が同時に走って先に commit した、など）ので、**何も書かずに打ち切った**
- *   （統合先は作らない。eligible のどれ1つも `superseded` へ動かさない）。
- *   `aborted_source_forgotten` を superseded・全件 CAS 弾かれにも広げたもの（ADR 0420）。
- *   {@link ConsolidateSourceOutcome} の `"status_changed_concurrently"` が、動いていた要素を名指しする。
- *   ⚠ 1件でも `active` のまま残り、`superseded` になったものが無いなら、今までどおりの部分成功
- *   （`"consolidated"`、動いていた要素だけ `"status_changed_concurrently"`）。
- *   **破壊的変更として数える**（今まで `"consolidated"` で返っていた入力が、この値で返る。
- *   `docs/migration-v1.md` 項目42）。
+ * - `"nothing_to_consolidate"` — 対象を見た上で、束ねるものが無かった（{@link ConsolidateNothingReason}）。
+ * - `"not_examined"` — 対象が空（`memoryIds: []`）、または `query` が0件。store の Memory を1件も見ていない。
+ * - `"llm_failed"` / `"dry_run"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む） / 下見だけを行った。**どちらも1件も書いていない。**
+ * - `"aborted_source_forgotten"` — LLM は呼んだ（`llmCalls: 1`）が、書き込み直前の見直しで eligible の1件以上が `forgotten`（`forget()` のみ・`purge()` 済みも含む）になっていたので、**何も書かずに打ち切った**
+ *   （ADR 0375）。{@link ConsolidateSourceOutcome} の `"forgotten_before_write"` 参照。
+ * - `"aborted_source_status_changed"` — 同じく書き込み直前（または書き込みのトランザクション内）の見直しで、eligible の1件以上が `superseded` になっていた（`reextract` などが LLM を待つ間に別の記憶で置き換えた）、
+ *   または eligible の**すべて**が `active` でなくなっていた（同じ ids の `consolidate` が先に commit した、など）ので、**何も書かずに打ち切った**（ADR 0420）。{@link ConsolidateSourceOutcome} の
+ *   `"status_changed_concurrently"` が動いていた要素を名指しする。1件でも `active` のまま残り、`superseded` になったものが無いなら、部分成功（`"consolidated"`、動いていた要素だけ `"status_changed_concurrently"`）。
+ *   **破壊的変更として数える**（`docs/migration-v1.md` 項目42）。union に値を足す変更は破壊的変更と数えない（同文書の数え方の規律）。
  */
 export type ConsolidateOutcome =
   | "consolidated"
@@ -1048,80 +660,31 @@ export type ConsolidateOutcome =
   | "aborted_source_status_changed";
 
 /**
- * `ConsolidateOutcome: "nothing_to_consolidate"` の理由（Issue #103、ADR 0089）。
+ * `ConsolidateOutcome: "nothing_to_consolidate"` の理由（ADR 0089）。
  *
- * - `"no_eligible_sources"` — 渡された/引けた対象のうち、統合元にできるもの（`status: 'active'`
- *   で、いまの時点で有効期間の内側）が0件。
+ * - `"no_eligible_sources"` — 渡された/引けた対象のうち、統合元にできるもの（`status: 'active'` で、いまの時点で有効期間の内側）が0件。
  * - `"single_eligible_source"` — 統合元にできるものが1件だけ。1件を1件に「統合」しない。
- *
- * ⚠ 2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）: 「統合元にできる」に
- * 有効期間の条件が加わった（{@link ConsolidateSourceOutcome} の `"expired"`/`"not_yet_valid"`）。それまでは
- * `status: 'active'` だけで数えていた。
  */
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
 
 /**
- * `runtime.consolidate` が対象1件ごとに返す結末（Issue #103、ADR 0089）。
- * `ForgetOutcome` / `ReextractSkip` の語彙にできるだけ揃える——新しい `kind` を作らない。
+ * `runtime.consolidate` が対象1件ごとに返す結末（ADR 0089）。`ForgetOutcome` / `ReextractSkip` の語彙にできるだけ揃え、新しい `kind` を作らない。
  *
- * - `"superseded"` — この呼び出しで実際に `status` を `superseded` へ動かした。
- * - `"not_found"` — その id の Memory がそもそも無い（`ForgetOutcome` と同じ意味）。
- * - `"status_not_active"` — `status !== 'active'`（`forgotten` はここで確実に弾かれる。
- *   ADR 0089 §1）。
- * - `"status_changed_concurrently"` — compare-and-swap が破れた（TOCTOU。`reextract` の
- *   `status_changed_concurrently` と同じ意味）。
- * - `"failed"` — 競合以外の例外で書き込みが失敗した。**この時点で処理を打ち切る**
- *   （下の `"not_attempted"` 参照）。
- * - `"not_attempted"` — `status === 'active'`（eligible）だったが、この呼び出しでは
- *   `superseded` への書き込みを試みていない。**次の4つの場合に出る**（どれも書き込みを
- *   試みていないので、状態を変えずにそのまま再送してよい）:
- *   - それより前の要素が `"failed"` になり、そこで打ち切った（まだ見ていない）。
- *   - eligible が1件だけだった（`nothing_to_consolidate`/`single_eligible_source`）。その1件
- *     （重複して渡されていれば、その全部）がこの値になる。
- *   - LLM 呼び出しが失敗した（`llm_failed`）。eligible だった要素がすべてこの値になる。
- *   - `outcome: 'aborted_source_forgotten'`（下）で、**この要素自身は forgotten ではなかった**
- *     （他の eligible が forgotten だったために書き込みごと打ち切られた）。2026-09-30 追記
- *     （Issue #1226）。
- *   ⚠ 2026-09-27 に、実装（`consolidate.test.ts` が固定している振る舞い）に合わせて書き直した。
- *   それまでの doc は1つ目の場合だけを書いていた（ADR 0089 の同日付の追記）。
- * - `"eligible"` — `dryRun: true` のときだけ出る。`status === 'active'` で、実際に統合される
- *   側になったであろう対象。
- * - `"expired"` — `status === 'active'` だが、いまの時点で有効期間が切れている
- *   （`validUntil <= now`）。統合元にしない。`validUntil` はその記憶の値。
- * - `"not_yet_valid"` — `status === 'active'` だが、いまの時点でまだ有効期間が始まっていない
- *   （`validFrom > now`）。統合元にしない。`validFrom` はその記憶の値。
+ * - `"superseded"` — この呼び出しで実際に `superseded` へ動かした。
+ * - `"not_found"` — その id の Memory がそもそも無い。
+ * - `"status_not_active"` — `status !== 'active'`（`forgotten` はここで確実に弾かれる）。
+ * - `"status_changed_concurrently"` — compare-and-swap が破れた（`reextract` の同名と同じ意味）。
+ * - `"failed"` — 競合以外の例外で書き込みが失敗した。**この時点で処理を打ち切る**（下の `"not_attempted"`）。
+ * - `"not_attempted"` — eligible だったが、`superseded` への書き込みを試みていない（状態を変えずにそのまま再送してよい）。次の場合に出る: それより前の要素が `"failed"` で打ち切った / eligible が1件だけ
+ *   （`single_eligible_source`。重複して渡されていれば全部） / LLM 呼び出しが失敗した（`llm_failed`） / `outcome: 'aborted_source_forgotten'` で、この要素自身は forgotten ではなかった。
+ * - `"eligible"` — `dryRun: true` のときだけ出る。実際に統合される側になったであろう対象。
+ * - `"expired"` / `"not_yet_valid"` — `status === 'active'` だが、いま有効期間が切れている（`validUntil <= now`）/ まだ始まっていない（`validFrom > now`）。統合元にしない。値はその記憶の `validUntil`/`validFrom`。
+ * - `"forgotten_before_write"` — LLM を待つ間に eligible の1件が `forget`（さらに `purge`）された。この呼び出し全体が `aborted_source_forgotten` で打ち切られる（統合先を一切作らない。ADR 0375）。
+ *   `"status_not_active"` は LLM を呼ぶ**前**の初期分類、こちらは呼んだ**後**・書き込み直前の見直しで検出した分類で、同じ「forgotten」でも検出した時点が違うので別の kind にした。
  *
- * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
- * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も統合元にして
- * `superseded` へ動かしていた。統合先は有効期間を持たない（`validFrom`/`validUntil` とも null。
- * [ADR 0164](../../../docs/decisions/0164-valid-from-until-recall.md)「射程外にしたもの」1）ので、期限切れ・
- * 未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた。
- * - **判定は `status` の後**に行う（`forgotten` で期限切れの記憶は、今どおり `status_not_active`）。
- *   述語は `recall()` の期間のゲート（ADR 0164 決定1）と同じで、時刻は `consolidate` を呼んだ時点の
- *   `clock.now()`。逆転した区間（`validFrom > validUntil`。Issue #1042）は `"expired"` になる。
- * - **対象の形によらない。**`{ memoryIds }` だけでなく、`{ seedMemoryId }` の種（`recall()` を通らずに
- *   必ず候補に入る）と、`{ query }` に `includeOutsideValidity: true` や過去の `validAt` を渡して集めた
- *   記憶にも効く——`query` の期間の指定は「何を集めるか」を決めるだけで、統合元にできるかは変えない。
- * - 統合先の有効期間は今までどおり null（統合元の区間を引き継がない）。いまの時点で有効な統合元が、
- *   将来の `validUntil` を持っていても、統合先はその期限を持たない（引き継ぎ方は ADR 0164 が別の判断として
- *   残したまま）。
- * - `dryRun` でも同じ値で名指しする。この値の要素は `nothingReason` の数え方にも入らない。
- * - 🔴 **`ConsolidateSourceOutcome` を網羅的に分岐している呼び出し側は、この2値を扱う必要がある。**
- * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の数え方の規律）。
- *   同じ入力でも結果が変わる（統合されずに `nothing_to_consolidate` で返ることもある）。2026-09-29 にクローン miku
- *   （オーナーではない）が決めた（ADR 0089 の同日付の追記）。
- *
- * ⚠ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
- * ADR 0375 決定7、クローン miku の判断）: `"forgotten_before_write"` を足した。**LLM を待つ間に
- * eligible の1件が `forget`（さらに `purge`）されると、**この要素の分類が `"status_not_active"`
- * ではなく `"forgotten_before_write"` になり、この呼び出し全体が `outcome: 'aborted_source_forgotten'`
- * で打ち切られる**（統合先を一切作らない）。`"status_not_active"` は手順2（LLM を呼ぶ**前**）の
- * 初期分類、`"forgotten_before_write"` は手順7（LLM を呼んだ**後**、書き込みの直前）の見直しで
- * 検出した分類——**同じ「forgotten」でも検出した時点が違うので、別の kind にした**（`ForgetOutcome`
- * の語彙を再利用しなかった理由）。それ以前は、この競合が起きても `"status_changed_concurrently"`
- * に分類され、統合先はその本文を入れた LLM の出力から作られ `active` で書かれていた（今の
- * `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` が固定する）。
- * 破壊的変更とは数えない（union に値を足す変更、上と同じ扱い）。
+ * `"expired"`/`"not_yet_valid"` の判定は `status` の後に行い（`forgotten` で期限切れの記憶は `status_not_active`）、述語は `recall()` の期間のゲート（ADR 0164）と同じで、時刻は呼んだ時点の `clock.now()`。
+ * 逆転した区間（`validFrom > validUntil`）は `"expired"`。対象の形によらず効き、`dryRun` でも同じ値で名指しし、`nothingReason` の数え方には入らない。統合先の有効期間は統合元の区間の積（{@link ConsolidateTarget}）。
+ * 🔴 この union を網羅的に分岐する呼び出し側は、`"expired"`・`"not_yet_valid"`・`"forgotten_before_write"` を扱う必要がある（union に値を足す変更は破壊的変更と数えない。`docs/migration-v1.md`）。
  */
 export type ConsolidateSourceOutcome =
   | { memoryId: MemoryId; kind: "superseded"; previousStatus: "active" }
@@ -1134,9 +697,8 @@ export type ConsolidateSourceOutcome =
       memoryId: MemoryId;
       kind: "failed";
       /**
-       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363、2026-09-30 追記）:
-       * drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、`cause` の連鎖と
-       * SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
+       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363）: drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、
+       * `cause` の連鎖と SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
        * 🔴 **文字列の形は「例外の `message` そのまま」ではない**——パースして使わないこと。
        */
       error: string;
@@ -1145,21 +707,14 @@ export type ConsolidateSourceOutcome =
   | { memoryId: MemoryId; kind: "eligible" }
   | { memoryId: MemoryId; kind: "forgotten_before_write" };
 
-/**
- * `runtime.consolidate` の結果（Issue #103、ADR 0089）。
- *
- * ⛔ `consolidatedCount` のような派生値を持たない——`ForgetResult` と同じ理由
- * （`sources` を数えれば得られる）。
- */
+/** `runtime.consolidate` の結果（ADR 0089）。`consolidatedCount` のような派生値を持たない（`ForgetResult` と同じ理由。`sources` を数えれば得られる）。 */
 export interface ConsolidationResult {
   /** 統合がどう終わったか（{@link ConsolidateOutcome}）。 */
   outcome: ConsolidateOutcome;
   /**
    * {@link WriteAtomicity}。⛔ 省略可能にしない。
-   *
-   * `outcome` が `"consolidated"` 以外（`dry_run`・`nothing_to_consolidate`・
-   * `not_examined`・`llm_failed`）のときは必ず `"not_attempted"`——書き込みを1件も
-   * 試みていないからである。
+   * `outcome` が `"consolidated"` 以外（`dry_run`・`nothing_to_consolidate`・`not_examined`・`llm_failed`）のときは必ず `"not_attempted"`
+   * （書き込みを1件も試みていないため）。
    */
   atomicity: WriteAtomicity;
   /** `outcome === "nothing_to_consolidate"` のときだけ非 `null`。それ以外は必ず `null`。 */
@@ -1178,73 +733,22 @@ export interface ConsolidationResult {
 }
 
 /**
- * `runtime.reflect` の対象（Issue #104。`{ seedMemoryId }` は Issue #204、ADR 0154）。
- * `consolidate` の {@link ConsolidateTarget} と**意図的に同じ形**——`reflect` に「何を見るか」を
- * 決めさせない。`target` を必須にしたのは、これを省略できると `reflect` 自身が対象を選ぶことに
- * なり、それは Background Cognition の*実運用*（Phase 1 の範囲外、docs/roadmap.md §1.3）の決定を
- * 先取りしてしまうためである。
+ * `runtime.reflect` の対象（`{ seedMemoryId }` は ADR 0154）。`consolidate` の {@link ConsolidateTarget} と**意図的に同じ形**で、`{ memoryIds }`（重複も入力順も保つ）・`{ query, maxCandidates }`・`{ seedMemoryId }` の
+ * 解決も同じ（種の選定・種を先頭に含める・種が無い/forget・purge された記憶なら `recall()` を呼ばず対象は `[seedMemoryId]` のみ、`contested`/`superseded` の種は近傍を集める）。`target` を必須にしたのは、
+ * 省略できると `reflect` 自身が対象を選ぶことになり、Background Cognition の実運用（docs/roadmap.md §1.3）の決定を先取りしてしまうため。
  *
- * `{ memoryIds }` は正規化せず、**重複も入力順もそのまま保つ**。`{ query, maxCandidates }` は
- * `recall(ctx, query)` を1回呼んで得られた `memories` の id を順に採る（`maxCandidates` が
- * あれば先頭からその件数で切る）。
+ * ⚠ **`minAffinity` の既定値は `consolidate` と別の定数である**（{@link DEFAULT_REFLECT_MIN_AFFINITY}。`consolidate` は {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}）。同じ道具に逆向きの帯を要求する:
+ * `consolidate` は「同じ事実の言い換え」（近いほどよい）、`reflect` は「関連するが同じではない複数の事実」（近すぎると導けるものが無い）を欲しがる。`reflect()` は既存行の `status` を動かさない（ADR 0091）ので、
+ * 取り違えたときの damage が小さく、保守側へ倒す理由も弱い。
+ * ⛔ 上限（近すぎるものを除く帯）は無い。入れると `reflect` が「何が重複か」を判断することになり、それは `consolidate` の仕事である（責務の二重化）。代わりに「`consolidate` が先に走っていれば重複は既に畳まれている」
+ * という前提に乗る。**この前提は負債である**（ADR 0154）。
  *
- * `{ seedMemoryId }` は `ConsolidateTarget` の `{ seedMemoryId }`（ADR 0152）と**同じ土台選定**
- * を使う——種の `digest` を `RecallQuery.text` にして `recall()` を1回呼び、`computeAffinity`
- * （`strategies/consolidate.ts`、`max(similarity, lexicalMatch)`）が `minAffinity` 未満の
- * 候補を落とす。**新しい「似ている」は発明しない。**種そのものは判定を受けず、必ず先頭に
- * 含める（種の embedding がまだ `pending` で `recall()` に現れない窓があるため、
- * `ConsolidateTarget` の doc コメントと同じ理由）。
+ * ⚠ **`maxCandidates` の値は検査しない**（`consolidate` と同じ。正の整数 `n` なら先頭 `n` 件、省略なら全件。それ以外は未定義で、`Array.prototype.slice` に渡る。頼らないこと）。
  *
- * ⚠ **`minAffinity` の既定値は `consolidate` と別の定数である**
- * （{@link DEFAULT_REFLECT_MIN_AFFINITY}、`consolidate` は {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}）。
- * `consolidate` と `reflect` は同じ道具に**逆向きの帯**を要求する——`consolidate` が欲しいのは
- * 「同じ事実の言い換え」（近いほどよい）、`reflect` が欲しいのは「関連するが同じではない
- * 複数の事実」（近すぎると導けるものが無い。同じ事実の写しを5枚並べて内省させても、
- * 新しい知識は出てこない）。低い閾値でよいもう1つの根拠: `reflect()` は既存行の `status` を
- * 1つも動かさない（ADR 0091 決定4）⟹ 取り違えたときの damage が `consolidate`（統合元が
- * `superseded` へ動く）より小さい⟹ 保守側へ倒す理由が `consolidate` ほど強くない。
- *
- * ⛔ **上限（近すぎるものを除く帯）は無い。**上限を入れると `reflect` が「何が重複か」を
- * 判断することになり、それは `consolidate` の仕事である（責務の二重化、Issue #103 が
- * 訴えたのと同じ形）。代わりに「`consolidate` が先に走っていれば重複は既に畳まれている」
- * という前提に乗る——**この前提は負債である**（ADR 0154「引き受けた負債」）。
- *
- * `seedMemoryId` が指す Memory が無い場合、`recall()` は呼ばない——対象は `[seedMemoryId]` の
- * 1件のみとなり、後続の `getMany` が既存の分類（`not_found`）にそのまま落とす（新しい
- * `nothingReason`/`ReflectBasisOutcome` は発明しない）。
- *
- * **種が forget・purge された記憶なら、`recall()` は呼ばない**（Issue #1136、
- * {@link ConsolidateTarget} と同じ規則）——対象は `[seedMemoryId]` の1件のみとなり、
- * `status_not_active`（`forgotten`）→ `nothing_to_reflect`/`no_eligible_basis`（`llmCalls: 0`）に
- * 落ちる。種が `contested` / `superseded` なら、今どおり近傍を集める。
- *
- * この形も `target` を呼び手が必須で渡す点は変わらない——`reflect` 自身が「何を見るか」を
- * 決めているわけではなく、ADR 0091 決定3（`target` 必須）に反しない（ADR 0154）。
- *
- * ⚠ **`maxCandidates` の値は検査しない**（[Issue #1067](https://github.com/takecchi/mnemora/issues/1067)）。
- * **保証するのは、正の整数 `n` を渡したとき「`recall()` が返した順（`{ seedMemoryId }` では種が先頭）の
- * 先頭 `n` 件」と、省略したとき「その全件（`recall()` の `limit` と、`{ seedMemoryId }` では `minAffinity` で絞ったあと）」だけである。**それ以外（`0`・負の数・整数でない数・`NaN`）を
- * 渡したときの対象は未定義である——例外は投げず、今の実装はそのまま `Array.prototype.slice` に
- * 渡すので、`-1` は「末尾の1件を除く全部」、`1.5` は1件、`0` と `NaN` は0件になる。`dryRun` でなければ、
- * そうして選ばれた対象に内省の結果（新しい `reflected` の Memory）を実際に書く。この解釈は将来変わりうるので、頼らないこと。
- * `Runtime.findCorrectionCandidates` の `limit`（正の整数以外を `RangeError` で拒む）とは揃えていない。
- *
- * ⚠ 2026-09-27 追記（今の振る舞いを書くだけ。Postgres と testkit で実測）——{@link ConsolidateTarget} の
- * 同日付の追記と同じ形である:
- * - **`{ query }` は、`recall()` の `memories` を `retrievedVia` によらず全部採る。**連想枠は既定 on
- *   （ADR 0337）なので、クエリには当たっていない「連想で返った」`active` な記憶も材料として適格になる。
- *   クエリに当たったものだけを材料にしたいなら `query.association: null` を渡すこと。
- * - **`{ memoryIds }` は、忘却の床（`decayFloorAt`）を見ない。**（忘却の床はコードを読んで確かめた
- *   だけで、実測はしていない）。`{ query }`・`{ seedMemoryId }` の近傍は `recall()` の忘却のゲートを通る。
- * - ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）: どの形でも、いまの
- *   時点で有効期間（`validFrom`/`validUntil`）の外にある記憶は材料にしない**（`basis` に `"expired"`/
- *   `"not_yet_valid"`。{@link ReflectBasisOutcome} 参照）。それまでは `{ memoryIds }` が有効期間を見ず、
- *   統合先と同じく内省の記憶も有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れの記憶の
- *   内容が期限の無い `active` な記憶として `recall()` に戻っていた。**この2026-09-27 追記自身に誤りがあった**
- *   ——旧文は「`{ query }`・`{ seedMemoryId }` は `recall()` の期間のゲートを通るので、期限切れの記憶は材料に
- *   入らない」と書いていたが、`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）と、`{ query }` に
- *   `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶は、実際には材料に入っていた
- *   （2026-09-29 に testkit の fixture で実測。`consolidate` の同日付の追記と同じ穴）。
+ * - **`{ query }` は `retrievedVia` によらず全部採る。** 連想枠は既定 on（ADR 0337）なので、クエリに当たっていない「連想で返った」`active` な記憶も材料として適格になる（避けるなら `query.association: null`）。
+ * - **`{ memoryIds }` は忘却の床を見ない。** `{ query }`・`{ seedMemoryId }` の近傍は `recall()` の忘却のゲートを通る。
+ * - どの形でも、いま有効期間の外にある記憶は材料にしない（`basis` に `"expired"`/`"not_yet_valid"`）。内省の記憶も有効期間を持たない（ADR 0164）ので、期限切れの内容が期限の無い `active` として `recall()` に戻るのを避ける。
+ *   `{ seedMemoryId }` の種と、`{ query }` に `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶にも効く。
  */
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }
@@ -1254,27 +758,21 @@ export type ReflectTarget =
       maxCandidates?: number | undefined;
       minAffinity?: number | undefined;
       /**
-       * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-       * （Issue #338）: `ConsolidateTarget`（`{ seedMemoryId }` 形）の同名の欄と
-       * 同じ——種の digest で内部的に呼ぶ `recall()` へそのまま渡す。省略時 `"tenant"`。
+       * `ConsolidateTarget`（`{ seedMemoryId }` 形）の同名の欄と同じ。種の digest で内部的に呼ぶ `recall()` へそのまま渡す。省略時 `"tenant"`
+       * （[ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)）。
        */
       activityCounting?: "tenant" | "subject" | undefined;
     };
 
 /**
- * `{ seedMemoryId }` 形（Issue #204、ADR 0154）が使う `minAffinity` の既定値。
+ * `{ seedMemoryId }` 形（ADR 0154）が使う `minAffinity` の既定値。
  *
- * 🔴 **この値は実測していない。**根拠は向きの議論だけであり、数字の根拠ではない
- * （`DEFAULT_CONSOLIDATE_MIN_AFFINITY` の JSDoc と同じ書き方）。`consolidate` の 0.8 より
- * 低くしてあるのは、`reflect` が「近すぎない」複数の事実を欲しがるためである
- * （{@link ReflectTarget} の doc コメント参照）。緩める/締めるのは、`reflect` 側の実測
- * （`consolidation-cost` に相当する reflect 側の計測）が入ってから判断する。
+ * 🔴 **この値は実測していない。** 根拠は向きの議論だけで、数字の根拠ではない。`consolidate` の 0.8 より低くしてあるのは、
+ * `reflect` が「近すぎない」複数の事実を欲しがるため（{@link ReflectTarget} の doc 参照）。
  */
 export const DEFAULT_REFLECT_MIN_AFFINITY = 0.4;
 
-/**
- * `runtime.reflect` の任意オプション（Issue #104）。
- */
+/** `runtime.reflect` の任意オプション。 */
 export interface ReflectOptions {
   /** 内省の対象（{@link ReflectTarget}）。 */
   target: ReflectTarget;
@@ -1291,38 +789,22 @@ export interface ReflectOptions {
    */
   reason?: string | undefined;
   /**
-   * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
-   * 中断の合図。`ConsolidateOptions.signal` と同じ形——内部で呼ぶ `recall()` と LLM 呼び出しの
-   * 両方に効く。abort されると `reflect()` は reject し、既存の `"llm_failed"` には倒さない。
+   * 中断の合図（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）。`ConsolidateOptions.signal` と同じ形で、
+   * 内部で呼ぶ `recall()` と LLM 呼び出しの両方に効く。abort されると `reflect()` は reject し、既存の `"llm_failed"` には倒さない。
    */
   signal?: AbortSignal | undefined;
 }
 
 /**
- * `runtime.reflect` 全体の結末（Issue #104）。`ConsolidateOutcome` と同じ2階層の
- * 「無い」の分類の適用——「一般化するものが無かった」「そもそも見ていない」「LLM が落ちた」
- * 「下見だけ」を1つの `false` に潰さない。
+ * `runtime.reflect` 全体の結末。`ConsolidateOutcome` と同じ「無い」の分類で、「一般化するものが無かった」「そもそも見ていない」「LLM が落ちた」「下見だけ」を1つの `false` に潰さない。
  *
- * - `"reflected"` — 新しい Memory を1件作った。`reflectedMemoryId` は非 `null`。
- * - `"nothing_to_reflect"` — 土台を見た上で、作るものが無かった
- *   （{@link ReflectNothingReason} で細分）。
- * - `"not_examined"` — 対象そのものが空（`memoryIds: []`）、または `query` が0件だった
- *   ——store の Memory を1件も見ていない。
- * - `"llm_failed"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む。Issue #1065）。
- *   **1件も書いていない。**
- * - `"dry_run"` — 下見だけを行った。**1件も書いていない。**
- * - `"aborted_source_forgotten"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前に
- *   見直したら eligible の1件以上が `forgotten`（`forget()` のみ・`purge()` 済みのどちらも
- *   含む）になっていたので、**何も書かずに打ち切った**（内省の Memory を作らない）。
- *   2026-09-30 追記（Issue #1226、ADR 0375 決定7、クローン miku の判断）。
- *   {@link ReflectBasisOutcome} の `"forgotten_before_write"` 参照。破壊的変更とは数えない
- *   （union に値を足す変更は数えない。`ConsolidateOutcome` の同日付の追記と同じ扱い）。
- * - `"aborted_source_status_changed"` — LLM は呼んだ（`llmCalls: 1`）が、書き込みの直前（または書き込みの
- *   トランザクション内）に見直したら、eligible の1件以上が `superseded` になっていたので、**何も書かずに
- *   打ち切った**（内省の Memory を作らない）。`aborted_source_forgotten` を superseded にも広げたもの
- *   （ADR 0420）。{@link ReflectBasisOutcome} の `"status_changed_before_write"` 参照。
- *   **破壊的変更として数える**（今まで `"reflected"` で返っていた入力が、この値で返る。`docs/migration-v1.md` 項目42）。
+ * - `"reflected"` — 新しい Memory を1件作った（`reflectedMemoryId` は非 `null`）。
+ * - `"nothing_to_reflect"` — 土台を見た上で、作るものが無かった（{@link ReflectNothingReason}）。
+ * - `"not_examined"` — 対象が空（`memoryIds: []`）、または `query` が0件。store の Memory を1件も見ていない。
+ * - `"llm_failed"` / `"dry_run"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む） / 下見だけを行った。**どちらも1件も書いていない。**
+ * - `"aborted_source_forgotten"` — LLM は呼んだ（`llmCalls: 1`）が、書き込み直前の見直しで eligible の1件以上が `forgotten`（`purge()` 済みも含む）になっていたので、**何も書かずに打ち切った**（ADR 0375）。
+ * - `"aborted_source_status_changed"` — 同じく書き込み直前（または書き込みのトランザクション内）の見直しで eligible の1件以上が `superseded` になっていたので、**何も書かずに打ち切った**（ADR 0420）。
+ *   **破壊的変更として数える**（`docs/migration-v1.md` 項目42）。union に値を足す変更は破壊的変更と数えない。
  */
 export type ReflectOutcome =
   | "reflected"
@@ -1334,74 +816,31 @@ export type ReflectOutcome =
   | "aborted_source_status_changed";
 
 /**
- * `ReflectOutcome: "nothing_to_reflect"` の理由（Issue #104）。
+ * `ReflectOutcome: "nothing_to_reflect"` の理由。
  *
- * - `"no_eligible_basis"` — 渡された/引けた対象のうち、採れるもの
- *   （`status: 'active'` かつ `provenance.kind !== 'reflected'`）が0件。**LLM を呼んでいない**
- *   （`llmCalls: 0`）。
- * - `"llm_declined"` — LLM を呼び、モデルが「一般化するものは無い」と答えた
- *   （`outcome: 'nothing'`、`llmCalls: 1`）。**書き込みは0件。**
+ * - `"no_eligible_basis"` — 渡された/引けた対象のうち、採れるもの（`status: 'active'` かつ `provenance.kind !== 'reflected'`）が0件。
+ *   **LLM を呼んでいない**（`llmCalls: 0`）。
+ * - `"llm_declined"` — LLM を呼び、モデルが「一般化するものは無い」と答えた（`outcome: 'nothing'`、`llmCalls: 1`）。**書き込みは0件。**
  */
 export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
 
 /**
- * `runtime.reflect` が対象1件ごとに返す結末（Issue #104）。`ConsolidateSourceOutcome` と
- * **意図的に違う語彙を持つ**——`reflect` は N→1 の置換ではなく「足す」操作であり
- * （既存の行の `status` を1つも動かさない）、書き込みの途中で対象1件だけが失敗しうる
- * `"status_changed_concurrently"` / `"failed"` / `"not_attempted"` は存在しない
- * （そもそも対象へ書き込みに行かないので、その種類の失敗が起きようがない）。
+ * `runtime.reflect` が対象1件ごとに返す結末。`ConsolidateSourceOutcome` と**意図的に違う語彙**を持つ: `reflect` は「足す」操作で既存の行の `status` を動かさないので、`"status_changed_concurrently"` / `"failed"` /
+ * `"not_attempted"` は存在しない。
  *
  * - `"used"` — 実際に新しい Memory の `provenance.sources` に入った土台。
- * - `"not_found"` — その id の Memory がそもそも無い（`ConsolidateSourceOutcome` と同じ意味）。
- * - `"status_not_active"` — `status !== 'active'`（`forgotten` はここで確実に弾かれる）。
- * - `"expired"` — `status === 'active'` だが、いまの時点で有効期間が切れている
- *   （`validUntil <= now`）。材料にしない。`validUntil` はその記憶の値。
- * - `"not_yet_valid"` — `status === 'active'` だが、いまの時点でまだ有効期間が始まっていない
- *   （`validFrom > now`）。材料にしない。`validFrom` はその記憶の値。
- * - `"basis_is_reflected"` — `status: 'active'` で、いまの時点で有効期間の内側だが
- *   `provenance.kind === 'reflected'`。自己増幅（reflect の産物を土台にまた reflect すること）を
- *   形の側で止める。
- * - `"eligible"` — 土台として採れる状態だったが、この呼び出しでは結局使われなかった
- *   （`dryRun: true` で下見しただけ／LLM 呼び出しが失敗した／LLM が「無い」と答えた／
- *   他の eligible が `"forgotten_before_write"` になり呼び出し全体が打ち切られた（この
- *   要素自身は forgotten ではなかった。2026-09-30 追記、Issue #1226）、のいずれか）。
- * - `"status_changed_before_write"` — 書き込みの直前（または書き込みのトランザクション内）の見直しで、すでに
- *   `superseded` になっていた（`observedStatus` はそのとき見えた値）。この呼び出し全体が
- *   `outcome: 'aborted_source_status_changed'` で打ち切られる（ADR 0420）。他の eligible は `"eligible"` のまま。
- *   ⚠ **2026-10-02 変更（ADR 0544）: `contested` になっていた場合も同じ**（`observedStatus: 'contested'`）。
+ * - `"not_found"` / `"status_not_active"` — その id の Memory が無い / `status !== 'active'`（`forgotten` はここで確実に弾かれる）。
+ * - `"expired"` / `"not_yet_valid"` — `status === 'active'` だが、いま有効期間が切れている / まだ始まっていない。材料にしない。値はその記憶の `validUntil`/`validFrom`。
+ * - `"basis_is_reflected"` — 有効期間の内側の `active` だが `provenance.kind === 'reflected'`。自己増幅（reflect の産物を土台にまた reflect すること）を形の側で止める。
+ * - `"eligible"` — 土台として採れる状態だったが、結局使われなかった（`dryRun: true` の下見 / LLM 呼び出しの失敗 / LLM が「無い」と答えた / 他の eligible が `"forgotten_before_write"` になり呼び出し全体が打ち切られた、のいずれか）。
+ * - `"forgotten_before_write"` — LLM を待つ間に eligible の1件が `forget`（さらに `purge`）された。この呼び出し全体が `aborted_source_forgotten` で打ち切られる（内省の Memory を作らない。ADR 0375）。
+ *   `"status_not_active"` は LLM の**前**、こちらは**後**・書き込み直前の見直しで検出した分類（`ConsolidateSourceOutcome` と同じ区別）。
+ * - `"status_changed_before_write"` — 書き込み直前（または書き込みのトランザクション内）の見直しで、すでに `superseded`（ADR 0420）・`contested`（ADR 0544）になっていた（`observedStatus` はそのとき見えた値）。
+ *   この呼び出し全体が `aborted_source_status_changed` で打ち切られ、他の eligible は `"eligible"` のまま。
  *
- * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
- * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も材料にして
- * `used`/`eligible` にしていた。内省の記憶は有効期間を持たない（統合先と同じく ADR 0164
- * 「射程外にしたもの」1）ので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に
- * 戻っていた。
- * - **判定は `status` の後・`basis_is_reflected` の前**に行う（`forgotten` で期限切れの記憶は、今どおり
- *   `status_not_active`）。述語は `consolidate()` および `recall()` の期間のゲート
- *   （`recall-runtime.ts` の `survivesValidityGate`、ADR 0164 決定1）と同じ `classifyValidity` を呼ぶ
- *   （`./validity.js`、非公開）。時刻は `reflect` を呼んだ時点の `clock.now()`。逆転した区間
- *   （`validFrom > validUntil`。Issue #1042）は `"expired"` になる。
- * - **対象の形によらない。**`{ memoryIds }` だけでなく、`{ seedMemoryId }` の種（`recall()` を通らずに
- *   必ず候補に入る）と、`{ query }` に `includeOutsideValidity: true` や過去の `validAt` を渡して集めた
- *   記憶にも効く。
- * - 内省の記憶の有効期間は今までどおり null（材料の区間を引き継がない）。
- * - `dryRun` でも同じ値で名指しする。この値の要素は `nothingReason` の数え方にも入らない
- *   （`no_eligible_basis` は今までどおり「eligible が0件」で判定する）。
- * - 🔴 **`ReflectBasisOutcome` を網羅的に分岐している呼び出し側は、この2値を扱う必要がある。**
- * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の
- *   数え方の規律、`consolidate` の同日付の変更と同じ扱い）。同じ入力でも結果が変わる（材料にならず
- *   `nothing_to_reflect` で返ることもある）。
- *
- * ⚠ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
- * ADR 0375 決定7、クローン miku の判断）: `"forgotten_before_write"` を足した。**LLM を待つ間に
- * eligible の1件が `forget`（さらに `purge`）されると、**この要素の分類が `"used"` ではなく
- * `"forgotten_before_write"` になり、この呼び出し全体が `outcome: 'aborted_source_forgotten'`
- * で打ち切られる**（内省の Memory を一切作らない）。`"status_not_active"` は手順2（LLM を呼ぶ
- * **前**）の初期分類、`"forgotten_before_write"` は手順7（LLM を呼んだ**後**、書き込みの直前）
- * の見直しで検出した分類——`ConsolidateSourceOutcome` の同日付の追記と同じ区別。それ以前は、
- * この競合が起きても内省の Memory はその本文を入れた LLM の出力から作られ `active` で
- * 書かれ、`"used"` に分類されていた（今の
- * `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` が固定する）。
- * 破壊的変更とは数えない（union に値を足す変更、上と同じ扱い）。
+ * `"expired"`/`"not_yet_valid"` の判定は `status` の後・`basis_is_reflected` の前で、述語は `consolidate()`・`recall()` と同じ `classifyValidity`（`./validity.js`、非公開）、時刻は呼んだ時点の `clock.now()`
+ * （逆転した区間は `"expired"`）。対象の形によらず効き、`dryRun` でも同じ値で名指しし、`nothingReason` の数え方には入らない。内省の記憶の有効期間は null（材料の区間を引き継がない）。
+ * 🔴 この union を網羅的に分岐する呼び出し側は、`"expired"`・`"not_yet_valid"`・`"forgotten_before_write"` を扱う必要がある（union に値を足す変更は破壊的変更と数えない。`docs/migration-v1.md`）。
  */
 export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "used" }
@@ -1414,12 +853,7 @@ export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "forgotten_before_write" }
   | { memoryId: MemoryId; kind: "status_changed_before_write"; observedStatus: MemoryStatus };
 
-/**
- * `runtime.reflect` の結果（Issue #104）。
- *
- * ⛔ 派生値（`reflectedCount` 等）を持たない——`ConsolidationResult` と同じ理由
- * （`basis` を数えれば得られる）。
- */
+/** `runtime.reflect` の結果。⛔ 派生値（`reflectedCount` 等）を持たない（`ConsolidationResult` と同じ理由。`basis` を数えれば得られる）。 */
 export interface ReflectionResult {
   /** 内省がどう終わったか（{@link ReflectOutcome}）。 */
   outcome: ReflectOutcome;
@@ -1441,116 +875,76 @@ export interface ReflectionResult {
 /** `Runtime.tick` の設定。 */
 export interface TickOptions {
   /**
-   * claim のリース長（ミリ秒）。`ClaimOutboxJobsOptions.leaseMs`（ADR 0032）へそのまま渡す。
-   * **必須・既定値なし**——リース長は「ワーカーが止まったとみなすまでの時間」という
-   * 運用方針であり、`packages/core` が決めてよい値ではなく呼び出し側が決める。
-   * これにより `tick(ctx)` を引数無しで呼ぶことはできない（意図した破壊的変更、ADR 0032）。
+   * claim のリース長（ミリ秒）。`ClaimOutboxJobsOptions.leaseMs`（ADR 0032）へそのまま渡す。**必須・既定値なし**: リース長は「ワーカーが止まったとみなすまでの時間」という運用方針で、`packages/core` が決めてよい値ではない。
+   * `tick(ctx)` を引数無しで呼ぶことはできない。
    *
-   * ⚠ **0 以下も受け付ける（`leaseMs` が有限の数でありさえすれば検査しない）。今の振る舞い:** 0 以下では、claim した行が
-   * その時点で既にリース切れとして扱われる。同時に走る別の `tick` が同じ行を claim して
-   * handler をもう一度走らせ、遅れて `complete`/`fail` した側は {@link TickResult.leaseConflicts}
-   * に載る（Postgres と testkit の fixture の両方で実測）。重複の防ぎは、正の `leaseMs` が
-   * 処理時間より長いときにだけ効く。
-   * `now - leaseMs` が保存できない時刻になる有限の値（例 `1e20`）は断る（下の ADR 0514 の追記）。
+   * ⚠ **0 以下も受け付ける（`leaseMs` が有限の数でありさえすれば検査しない）。** 0 以下では、claim した行がその時点で既にリース切れとして扱われ、同時に走る別の `tick` が同じ行を claim して handler をもう一度走らせ、
+   * 遅れて `complete`/`fail` した側は {@link TickResult.leaseConflicts} に載る。重複の防ぎは、正の `leaseMs` が処理時間より長いときにだけ効く。
    *
-   * ⚠ **2026-10-02 追記（ADR 0496。Issue #1184 の「今の振る舞い」の追記を置き換えた）: Runtime が入口で検査する。**
-   * `tick` は、claim する前に `opts` を確かめる。`opts` が object でない（`tick(ctx)` で第2引数ごと省略した場合を含む）と
-   * `TypeError`、`opts.leaseMs` が有限の数でない（省略・`undefined`・文字列・`NaN`・`±Infinity`）と `RangeError`。
-   * どちらも名指しの例外で（`Runtime.tick: opts.leaseMs must be a finite number` など。入力値は入れない）、store ごとに違う例外には
-   * ならず、ジョブは claim されない（同じ時刻の次の `tick` で取れる）。以前は、省略すると Runtime は検査せず `undefined` のまま
-   * `OutboxStore.claimBatch` へ渡し、`@mnemora/postgres` は drizzle が包んだ `Error`（`err.cause.code` が `22007`）、testkit の fixture は
-   * 名前の無い `Error`（`claimBatch: now - leaseMs must be a valid Date`）で落ち、第2引数ごと省略すると素の `TypeError` だった。
-   * 0 以下の有限の値は、ここでは断らない（上の ⚠）。`1e20` のような巨大な値は、下の ADR 0514 の追記で断るようになった。
-   * 【実測 2026-10-02】`packages/postgres/src/__tests__/runtime-entry-exception-kinds.postgres.test.ts`・
-   * `packages/core/src/__tests__/tick-lease-ms-validation.test.ts`。
+   * ⚠ **Runtime が入口で検査する**（ADR 0496）。claim する前に、`opts` が object でない（`tick(ctx)` で第2引数ごと省略した場合を含む）と `TypeError`、`opts.leaseMs` が有限の数でない
+   * （省略・`undefined`・文字列・`NaN`・`±Infinity`）と `RangeError`（`Runtime.tick: opts.leaseMs must be a finite number` など。入力値は入れない）。store ごとに違う例外にはならず、ジョブは claim されない
+   * （同じ時刻の次の `tick` で取れる）。0 以下の有限の値は断らない。例外の種類は `packages/postgres/src/__tests__/runtime-entry-exception-kinds.postgres.test.ts` が測っている。
+   * ⚠ 巨大な `leaseMs` も、claim する前に `RangeError`（ADR 0514）。`now - leaseMs`（`now` は `RuntimeConfig.clock` の今）が `Date` の範囲を外れる（`1e20`・`-1e20`）か、Postgres の `timestamptz` の下限
+   * （4714-11-24 BC、`-210866803200000` ms）より前になる（`3e14` など）と `Runtime.tick: opts.leaseMs is out of range (now - leaseMs must be a timestamp every store can hold)`。下限ちょうどは通る。
    *
-   * ⚠ **2026-10-02 追記（ADR 0514）: 巨大な `leaseMs` も、claim する前に `RangeError` で断る。** `now - leaseMs`（`now` は `RuntimeConfig.clock` の今）が
-   * `Date` の範囲を外れる（`1e20`・`-1e20`）か、Postgres の `timestamptz` の下限（4714-11-24 BC、`-210866803200000` ms）より前になる（`3e14` など）と、
-   * `Runtime.tick: opts.leaseMs is out of range (now - leaseMs must be a timestamp every store can hold)`。以前は Postgres が drizzle の `DrizzleQueryError`、
-   * testkit の fixture・core の Fake が名前の無い `Error` で落ち（範囲の内側にある `3e14` は、fixture・Fake では通って何も claim しないのに Postgres は落ちる、という食い違いもあった）、
-   * 3者で顔が違った。下限ちょうどは通る。0 以下の `leaseMs` の振る舞いは変えない。
-   * 【実測 2026-10-02】`packages/core/src/__tests__/tick-opts-validation.test.ts`・`packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts`。
+   * ⚠ ジョブの処理がリースより長く掛かっても、その間に別の `tick` が同じジョブを取らなければ、完了は通り、`TickResult` には何も出ない（`attempts` が変わらないので `complete` の CAS が通り、`processed` に数えられ、
+   * `leaseConflicts` は空）。別の `tick` が取った場合は、遅れた側が `leaseConflicts` に載る。リースを超えたこと自体を名乗る口は無い。
    *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、Issue #1200）: ジョブの処理がリースより長く掛かっても、
-   * その間に別の `tick` が同じジョブを取らなければ、完了は通り、`TickResult` には何も出ない**
-   * （`attempts` が変わらないので `complete` の CAS が通る。`processed` に数えられ、`leaseConflicts` は空）。
-   * 別の `tick` が取った場合は、遅れた側が `leaseConflicts` に載る（#1092 の形）。リースを超えたこと自体を
-   * 名乗る口は無い。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ。
+   * ⚠ **リースはバッチの claim 時点から数える。後ろのジョブは、自分の番が来る前に切れうる。** `tick` は {@link TickOptions.limit}（既定 50）件を1回の `claimBatch` で一括して claim し（全件の `claimed_at` は同じ `now`）、
+   * 1件ずつ順に処理するので、各ジョブのリースは**そのジョブの処理開始からではなく、バッチの claim 時点から**減っていく。前のジョブに時間が掛かると、後ろのジョブは自分の処理が始まる前に、あるいは始まって間もなく切れる。
+   * 1件あたりの処理時間が `leaseMs` より短くても、`limit` 件の合計が `leaseMs` を超えれば起きる。切れたジョブは別の `tick` が再 claim できる。そのとき **provider 呼び出しと書き込み（`embed` なら埋め込みの呼び出しと `upsert`）は二重に走る**。
+   * CAS（ADR 0142）が無害にするのは完了の記録だけで、遅れて `complete` した側は {@link TickResult.leaseConflicts} に載る。結果は壊れない（2件とも完了し、`attempts` が進む）が、二重の呼び出し分の費用は掛かる。
+   * `embed` は上書きなので冪等、`extract` は再配達の確認（`OutboxStore` の doc）、`reflect` は再配達で2件になりうる（`Runtime.reflect` の doc）。避けるには、`leaseMs` を「`limit` 件を最後まで処理する時間」より長く取るか、
+   * `limit` を小さくする。`tick` はジョブの所要時間を知らないのでこの関係を検査せず、各ジョブの前にリースを延ばす口も `OutboxStore` には無い。
+   * `packages/core/src/__tests__/tick-batch-lease-expiry.test.ts` が、fake の store で A が2件を claim → 2件目の処理中に時計を進めて別の `tick` B が2件目を再 claim → A の `complete` は `leaseConflicts`、provider 呼び出しは3回、と測っている。
    *
-   * ⚠ **2026-09-30 追記（今の振る舞いを書いたもの）: リースはバッチの claim 時点から数える。後ろのジョブは、自分の番が来る前に切れうる。**
-   * `tick` は {@link TickOptions.limit}（既定 50）件を1回の `claimBatch` で一括して claim する（全件の `claimed_at` は同じ `now`）。
-   * そのあと1件ずつ順に処理するので、各ジョブのリースは**そのジョブの処理開始からではなく、バッチの claim 時点から**減っていく。
-   * 前のジョブに時間が掛かると、後ろのジョブは自分の処理が始まる前に、あるいは始まって間もなく切れる。1件あたりの処理時間が
-   * `leaseMs` より短くても、`limit` 件の合計が `leaseMs` を超えれば起きる。切れたジョブは別の `tick` が再 claim できる。
-   * そのとき **provider 呼び出しと書き込み（`embed` なら埋め込みの呼び出しと `upsert`）は二重に走る**——CAS（ADR 0142）が
-   * 無害にするのは完了の記録だけで、遅れて `complete` した側は {@link TickResult.leaseConflicts} に載る。
-   * 結果は壊れない（2件とも完了し、`attempts` が進む）が、二重の呼び出し分の費用は掛かる。`embed` は上書きなので冪等、
-   * `extract` は再配達の確認（`OutboxStore` の doc）、`reflect` は再配達で2件になりうる（`Runtime.reflect` の doc）。
-   * 避けるには、`leaseMs` を「`limit` 件を最後まで処理する時間」より長く取るか、`limit` を小さくする。
-   * `tick` はジョブの所要時間を知らないので、この関係を検査しない。各ジョブの前にリースを延ばす口も `OutboxStore` には無い。
-   * ⚠ **2026-10-02 追記（今の振る舞いを書いたもの、[ADR 0530](../../../docs/decisions/0530-batch-exceeds-lease-double-processing-per-kind.md)）: 二重に走った結末は種類で違う。**
+   * ⚠ **二重に走った結末は種類で違う**（[ADR 0530](../../../docs/decisions/0530-batch-exceeds-lease-double-processing-per-kind.md)）。
    * `embed` は同じベクトルを上書きするだけで、記憶は壊れない。`extract` は、先に走った側がまだ書いていなければ事前の確認（ADR 0347）が効かず、同じ候補なら冪等の鍵で1件、
    * 違う候補なら両方が `active` で残る（遅れた側の LLM が落ちると全文のフォールバックの記憶も残る）。`reflect` は、材料の記憶を `superseded` にしないので、二重に走ると内省の記憶が2件できる。
    * `consolidate` は、書く前の読み直し（ADR 0420）で、先に統合された元の記憶が `superseded` になっているのを見て、何も書かずに打ち切る（LLM は二重に呼ぶ。統合先は1件のまま）。
-   * どの種類でも、遅れた側の `complete`/`fail` は `leaseConflicts` に載り、行は先に完了した側のまま。【実測 2026-10-02】Fake・testkit の fixture・`@mnemora/postgres` で同じ
-   * （`packages/core/src/__tests__/fake-tick-batch-exceeds-lease-parity.test.ts`・`packages/postgres/src/__tests__/tick-batch-exceeds-lease-parity.postgres.test.ts`）。
-   * 【実測 2026-09-30】`packages/core/src/__tests__/tick-batch-lease-expiry.test.ts`（fake の store で、A が2件を claim →
-   * 2件目の処理中に時計を進めて別の `tick` B が2件目を再 claim → A の `complete` は `leaseConflicts`、provider 呼び出しは3回）。
+   * どの種類でも、遅れた側の `complete`/`fail` は `leaseConflicts` に載り、行は先に完了した側のまま。
    */
   leaseMs: number;
   /**
-   * 1回の `tick` で claim する上限。省略時の値は `@mnemora/core` の内部定数（`packages/core/src/runtime.ts` の `DEFAULT_TICK_LIMIT`）。
-   * `0` なら何も claim しない。
-   * ⚠ **2026-10-02 追記（ADR 0514）: 0 以上 2^63 未満の整数でなければ、claim する前に `RangeError`**
-   * （`Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63`。文字列・`null`・`NaN`・`±Infinity`・負数・小数を含む。`undefined` は省略と同じ）。
-   * 以前は `OutboxStore.claimBatch` へそのまま渡り、Postgres は DB の例外、testkit の fixture・core の Fake は専用のメッセージの `Error` で、文字列の `"5"` は Fake では通った。`0` は今までどおり断らない。
+   * 1回の `tick` で claim する上限。省略時の値は `@mnemora/core` の内部定数（`DEFAULT_TICK_LIMIT`）。`0` なら何も claim しない。
+   * ⚠ 0 以上 2^63 未満の整数でなければ、claim する前に `RangeError`（`Runtime.tick: opts.limit must be an integer from 0 up to (not including) 2^63`。
+   * 文字列・`null`・`NaN`・`±Infinity`・負数・小数を含む。`undefined` は省略と同じ。ADR 0514）。`0` は断らない。
    */
   limit?: number | undefined;
   /**
    * claim する job の種類。省略時は {@link TICK_SUPPORTED_JOB_KINDS}。
    *
-   * - **その外の種類の行は、既定の `tick` では claim されず、終端にもならないまま残る**
-   *   （ADR 0082「頼まれていない kind は claim すらしない」）。明示して渡したときだけ claim し、
-   *   {@link TickResult.unsupported} として `fail` に落とす。
+   * - **その外の種類の行は、既定の `tick` では claim されず、終端にもならないまま残る**（ADR 0082「頼まれていない kind は claim すらしない」）。
+   *   明示して渡したときだけ claim し、{@link TickResult.unsupported} として `fail` に落とす。
    * - 空配列は何も claim しない。
-   * - ⚠ **2026-10-02 追記（ADR 0514）: 文字列の配列でなければ、claim する前に `TypeError`**（`Runtime.tick: opts.kinds must be an array of strings`。裸の文字列・`null`・object・文字列でない要素を含む。
-   *   `undefined` は省略と同じ）。以前は、Postgres は DB の例外、testkit の fixture は名前の無い `TypeError`（`includes is not a function`）、裸の文字列は fixture・Fake では部分文字列として照合されて通った。
-   * - claim の順は、種類に関わらず `available_at` の古い順である。種類ごとの枠の配分は無い
-   *   ——古い job が `limit` を埋めていれば、後から積まれた別の種類の job は次の `tick` に回る。
+   * - ⚠ 文字列の配列でなければ、claim する前に `TypeError`（`Runtime.tick: opts.kinds must be an array of strings`。裸の文字列・`null`・object・文字列でない要素を含む。
+   *   `undefined` は省略と同じ。ADR 0514）。
+   * - claim の順は、種類に関わらず `available_at` の古い順である。種類ごとの枠の配分は無く、古い job が `limit` を埋めていれば、
+   *   後から積まれた別の種類の job は次の `tick` に回る。
    */
   kinds?: OutboxJobKind[] | undefined;
   /**
    * claim した worker の名前（outbox の行の `claimed_by`）。省略すると `RuntimeConfig.defaultClaimedBy`、それも無ければ `"runtime.tick"`。
    * ⚠ 空文字は省略と同じにはならず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
-   * ⚠ **2026-10-02 追記（ADR 0514）: 文字列でなければ、claim する前に `TypeError`**（`Runtime.tick: opts.claimedBy must be a string`。`null`・数・object）。
-   * NUL（U+0000）を含む文字列は `RangeError`（`Runtime.tick: opts.claimedBy must not contain NUL characters (U+0000)`。ADR 0493 が store の側で断っていたものを、Runtime の入口で断る）。`undefined` は省略と同じ。
+   * ⚠ 文字列でなければ、claim する前に `TypeError`（`Runtime.tick: opts.claimedBy must be a string`。`null`・数・object。ADR 0514）。
+   * NUL（U+0000）を含む文字列は `RangeError`（`Runtime.tick: opts.claimedBy must not contain NUL characters (U+0000)`。ADR 0493）。`undefined` は省略と同じ。
    */
   claimedBy?: string | undefined;
   /**
-   * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
-   * 中断の合図。**既定の時間の上限にはならない**——省略すれば今までどおり provider が
-   * 返るまで待ち続ける。
+   * 中断の合図（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）。**既定の時間の上限にはならない**
+   * （省略すれば provider が返るまで待ち続ける）。
    *
    * `signal` を渡し、それが abort されると:
-   * - claim 済みで処理中・未着手のジョブは、**`fail()` しない**——claim されたまま残り、
-   *   リースが切れれば次の `tick` が取る。abort までに `complete()` まで記録できたジョブの
-   *   完了は残る。
-   * - `tick()` 自身は reject する（`signal.reason`。無ければ `AbortError` 相当）。
-   *   `TickResult` はこの中断のために新しい欄を持たない——`tick()` が reject した時点で
-   *   戻り値は無い。
-   * - `tick` がリースを超えたこと自体を名乗る口は、今回も追加していない
-   *   （上の「今の振る舞い」の追記のとおり）。
+   * - claim 済みで処理中・未着手のジョブは、**`fail()` しない**。claim されたまま残り、リースが切れれば次の `tick` が取る。
+   *   abort までに `complete()` まで記録できたジョブの完了は残る。
+   * - `tick()` 自身は reject する（`signal.reason`。無ければ `AbortError` 相当）。`TickResult` はこの中断のために新しい欄を持たない。
    */
   signal?: AbortSignal | undefined;
 }
 
 /**
- * `tick` が claim したものの、**処理する分岐を持たなかった**ジョブ（ADR 0082）。
- * {@link TickResult.unsupported} の要素型。
- *
- * **件数の欄を持たない**（`ReextractSkip` / `StageSkippedOmission` に倣った形。ADR 0029）
- * ——ここは配列そのものが件数を持っている。
+ * `tick` が claim したものの、**処理する分岐を持たなかった**ジョブ（ADR 0082）。{@link TickResult.unsupported} の要素型。
+ * 件数の欄を持たない（配列そのものが件数を持つ。`ReextractSkip` / `StageSkippedOmission` に倣った形。ADR 0029）。
  */
 export interface UnsupportedOutboxJob {
   /** `fail()` で終端に落とした outbox 行の id。どの行が焼かれたかを名指しできる。 */
@@ -1560,15 +954,12 @@ export interface UnsupportedOutboxJob {
 }
 
 /**
- * 🔴 ADR 0142 / Issue #233: `tick` がジョブの結果を `complete`/`fail` で記録しようと
- * した時点で、既にリースを失っていた（`OutboxLeaseConflictError`）ジョブ。
+ * 🔴 `tick` がジョブの結果を `complete`/`fail` で記録しようとした時点で、既にリースを失っていた（`OutboxLeaseConflictError`）ジョブ（ADR 0142）。
  * {@link TickResult.leaseConflicts} の要素型。
  *
- * **これは失敗ではない。** リース競合が起きるのは、別のワーカーが既に同じジョブを
- * 再 claim して（成功にせよ失敗にせよ）終端まで進めた場合だけである——
- * `claimBatch` の `WHERE`（`completed_at IS NULL AND failed_at IS NULL`）が、
- * 終端化されていない行しか対象にしないため。**システムから見れば、そのジョブは
- * （このワーカー以外の誰かによって）既に済んでいる。**
+ * **これは失敗ではない。** リース競合が起きるのは、別のワーカーが既に同じジョブを再 claim して（成功にせよ失敗にせよ）終端まで進めた場合だけである
+ * （`claimBatch` の `WHERE`（`completed_at IS NULL AND failed_at IS NULL`）が、終端化されていない行しか対象にしないため）。
+ * **システムから見れば、そのジョブは（このワーカー以外の誰かによって）既に済んでいる。**
  */
 export interface OutboxLeaseConflict {
   /** 競合した outbox 行の id。 */
@@ -1576,12 +967,10 @@ export interface OutboxLeaseConflict {
   /** その行の `kind`。 */
   kind: OutboxJobKind;
   /**
-   * このワーカーが記録しようとしていた結果。`"complete"` はジョブの処理自体には
-   * 成功したが、その結果を記録しようとした時点でリースを失っていたことを示す。
-   * `"fail"` は、処理に失敗した（または `"complete"` の記録自体が競合以外の理由で
-   * 失敗した）ため `fail()` で記録しようとしたが、それもリース切れで記録できな
-   * かったことを示す。**いずれの場合も、この worker はジョブの最終的な結果に
-   * 影響を与えていない**——別のワーカーが既に書いた結果がそのまま残る。
+   * このワーカーが記録しようとしていた結果。`"complete"` はジョブの処理自体には成功したが、記録しようとした時点でリースを失っていたこと、
+   * `"fail"` は処理に失敗した（または `"complete"` の記録自体が競合以外の理由で失敗した）ため `fail()` で記録しようとしたが、
+   * それもリース切れで記録できなかったことを示す。**いずれの場合も、この worker はジョブの最終的な結果に影響を与えていない**
+   * （別のワーカーが既に書いた結果がそのまま残る）。
    */
   attemptedOutcome: "complete" | "fail";
 }
@@ -1591,59 +980,37 @@ export interface TickResult {
   /** この tick で処理に成功し、`complete()` まで記録できたジョブの本数（完了の記録がリースの競合で弾かれたものは数えない）。 */
   processed: number;
   /**
-   * この tick で `outboxStore.fail()` を呼び、それが `OutboxLeaseConflictError` で
-   * 弾かれなかった件数。
+   * この tick で `outboxStore.fail()` を呼び、それが `OutboxLeaseConflictError` で弾かれなかった件数。
    *
-   * ⚠ **2026-09-26 追記（[Issue #836](https://github.com/takecchi/mnemora/issues/836)）:
-   * 「`fail()` を呼んで弾かれなかった」は「その行が終端 `failed` になった」と同じでは
-   * ない。** `outboxStore.complete()` がハンドラの成功を DB へコミットした**後**に
-   * `OutboxLeaseConflictError` 以外の例外（コミット後の接続断・タイムアウト等）を
-   * 返すと、`tick()` はそれを「処理が失敗した」と区別できずに `fail()` を呼ぶ。
-   * `OutboxStore.complete`/`fail` の契約（Issue #826）により、既に `completed_at` が
-   * 付いた行に対する `fail()` は無言の no-op になる——行は `completed` のまま
-   * （`failed_at`/`last_error` は `NULL`）で変わらないが、`tick()` はそれでも
-   * `failed` を1増やす。この場合、行の実際の終端状態（`completed`）と `failed`
-   * の集計は食い違う。`unsupported` にも `leaseConflicts` にも載らないため、
-   * `TickResult` からはどの1件がこのずれに当たるかを特定できない。
-   * `OutboxStore.complete`/`fail` はどちらも `Promise<void>` で、`OutboxStore` に
-   * id で1件を読み直す口も無いため、`tick()` 自身にこれを区別する手段は無い
-   * （[ADR 0142](../../../docs/decisions/0142-outbox-complete-fail-compare-and-swap.md)
-   * の同日付追記を参照）。
+   * ⚠ **「`fail()` を呼んで弾かれなかった」は「その行が終端 `failed` になった」と同じではない。** `outboxStore.complete()` がハンドラの成功を DB へ
+   * コミットした**後**に `OutboxLeaseConflictError` 以外の例外（コミット後の接続断・タイムアウト等）を返すと、`tick()` はそれを「処理が失敗した」と
+   * 区別できずに `fail()` を呼ぶ。`OutboxStore.complete`/`fail` の契約により、既に `completed_at` が付いた行に対する `fail()` は無言の no-op になる。
+   * 行は `completed` のまま（`failed_at`/`last_error` は `NULL`）で変わらないが、`tick()` はそれでも `failed` を1増やす。この場合、行の実際の終端状態
+   * （`completed`）と `failed` の集計は食い違う。`unsupported` にも `leaseConflicts` にも載らないため、`TickResult` からはどの1件がこのずれに当たるかを
+   * 特定できない。`OutboxStore.complete`/`fail` はどちらも `Promise<void>` で、`OutboxStore` に id で1件を読み直す口も無いため、`tick()` 自身にこれを区別する手段は無い
+   * （[ADR 0142](../../../docs/decisions/0142-outbox-complete-fail-compare-and-swap.md)）。
    */
   failed: number;
   /**
-   * `failed` の**内訳**のうち、「処理を試みて失敗した」のではなく
-   * 「`tick` がその kind を処理する分岐を持っていなかった」もの（ADR 0082、issue #105）。
+   * `failed` の**内訳**のうち、「処理を試みて失敗した」のではなく「`tick` がその kind を処理する分岐を持っていなかった」もの（ADR 0082）。
    *
-   * 🔴 **この欄が在る理由は1つだけ**——これが無いと、
-   * 「embed の provider が落ちて失敗した」と「`kinds: ['consolidate']` を渡したが
-   * `tick` は consolidate を処理できない」が、どちらも `failed: 1` という**同じ顔**になる。
-   * それは ADR 0029 が `ReextractResult.skipped` で塞いだのと同じ族の欠落
-   * （「無い」の種類を潰す）である。**`unsupported` に入ったジョブは `failed` にも数える**
-   * ——`failed` の意味（`fail()` を呼んで弾かれなかった件数）は変えていない。⚠ **この
-   * 「`fail()` を呼んで弾かれなかった件数」という意味そのものが、「終端が `failed` に
-   * なった件数」と常に一致するとは限らない**（`failed` フィールド自身の doc コメント、
-   * [Issue #836](https://github.com/takecchi/mnemora/issues/836) 参照）——ただし
-   * `unsupported` に入るジョブ（対応する handler が無い）はこの分岐（`complete()` が
-   * コミット後に例外を返す）を通らないため、このずれの対象にはならない。
+   * 🔴 **この欄が在る理由は1つだけ**: これが無いと、「embed の provider が落ちて失敗した」と「`kinds: ['consolidate']` を渡したが `tick` は consolidate を
+   * 処理できない」が、どちらも `failed: 1` という**同じ顔**になる（ADR 0029が `ReextractResult.skipped` で塞いだのと同じ、「無い」の種類を潰す欠落）。
+   * **`unsupported` に入ったジョブは `failed` にも数える。** `unsupported` に入るジョブ（対応する handler が無い）は、`failed` の doc にある
+   * 「`complete()` がコミット後に例外を返す」分岐を通らないため、そのずれの対象にはならない。
    *
-   * ⚠ **ここに出たジョブは `fail()` で終端に落ちている**（Phase 1 に自動リトライは無い。
-   * ADR 0032）。黙って lease 切れを待つ形にはしない——claim したまま何もしないと、
-   * 「claim され続けるがいつまでも進まない」という、まさに呼び出し側から見えない停止になる。
+   * ⚠ **ここに出たジョブは `fail()` で終端に落ちている**（Phase 1 に自動リトライは無い。ADR 0032）。claim したまま何もしないと、
+   * 「claim され続けるがいつまでも進まない」という、呼び出し側から見えない停止になるため、黙って lease 切れを待つ形にはしない。
    *
-   * 空配列が既定であり、`undefined` にはならない（「出なかった」と「見ていない」を
-   * 同じ顔にしないため）。
+   * 空配列が既定であり、`undefined` にはならない（「出なかった」と「見ていない」を同じ顔にしないため）。
    */
   unsupported: UnsupportedOutboxJob[];
   /**
-   * 🔴 ADR 0142 / Issue #233: このジョブの結果を記録しようとした時点で、既にリースを
-   * 失っていた（`OutboxLeaseConflictError`）ジョブ。**`processed` にも `failed` にも
-   * 数えない**——「無い」の種類を潰さない、`unsupported` と同じ理由（ADR 0008 の族）。
-   * 良性の競合（正常な並行の結果）を、失敗という別の顔に変えない。
+   * 🔴 このジョブの結果を記録しようとした時点で、既にリースを失っていた（`OutboxLeaseConflictError`）ジョブ（ADR 0142）。
+   * **`processed` にも `failed` にも数えない**（`unsupported` と同じ理由。ADR 0008）。良性の競合（正常な並行の結果）を、失敗という別の顔に変えない。
    *
-   * `tick` はこの例外を検知すると、**そのジョブだけを飛ばして残りのジョブの処理を
-   * 続ける**——1件の良性の競合で、同じ `tick` 呼び出し内の他のジョブまで処理が
-   * 止まるのは、狭い事象を広い停止に変換する形であり、避ける。
+   * `tick` はこの例外を検知すると、**そのジョブだけを飛ばして残りのジョブの処理を続ける**。1件の良性の競合で、同じ `tick` 呼び出し内の他のジョブまで
+   * 処理が止まるのは、狭い事象を広い停止に変換する形である。
    *
    * 空配列が既定であり、`undefined` にはならない。
    */
@@ -1653,15 +1020,10 @@ export interface TickResult {
 /**
  * {@link Runtime.sweepArchive} の返り値（ADR 0114）。
  *
- * `MemoryStore.archiveDecayed` は任意メソッドである。**store 側の
- * `ArchiveDecayedResult`（`interfaces/memory-store.ts`） をそのまま返り値にしない**——store 側の型には
- * 「口が無かった」を語る場所が無い（口が無ければそもそも呼べないので、store が
- * 自分について「対応していない」と言う機会が無い）。この違いを埋めるのが `supported`
- * である。
+ * `MemoryStore.archiveDecayed` は任意メソッドである。**store 側の `ArchiveDecayedResult`（`interfaces/memory-store.ts`）をそのまま返り値にしない**。
+ * store 側の型には「口が無かった」を語る場所が無い。この違いを埋めるのが `supported` である。
  *
- * ⛔ **`supported` を省略可能にしない**（`WriteAtomicity`（ADR 0100）と同じ理由——
- * `undefined` は「口が無かった」と「この欄が増える前の版の戻り値」の両方を意味して
- * しまい、「無い」の種類を潰す）。
+ * ⛔ **`supported` を省略可能にしない**（`WriteAtomicity`（ADR 0100）と同じ理由）。
  */
 export interface SweepArchiveResult {
   /**
@@ -1677,14 +1039,10 @@ export interface SweepArchiveResult {
   reachedLimit: boolean;
 }
 
-/**
- * `runtime.restoreArchived` の対象（Issue #195、ADR 0122）。`ForgetTarget` と**意図的に
- * 同じ形**——`{ memoryId }`（単数）と `{ memoryIds }`（複数）のどちらでも同じ意味論であり、
- * 内部で `MemoryId[]` に正規化してから処理する。
- */
+/** `runtime.restoreArchived` の対象（ADR 0122）。`ForgetTarget` と**意図的に同じ形**。 */
 export type RestoreArchivedTarget = { memoryId: MemoryId } | { memoryIds: MemoryId[] };
 
-/** `runtime.restoreArchived` の任意オプション（Issue #195、ADR 0122）。`ForgetOptions` と同じ形。 */
+/** `runtime.restoreArchived` の任意オプション（ADR 0122）。`ForgetOptions` と同じ形。 */
 export interface RestoreArchivedOptions {
   /**
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。省略時、`meta` に `reason`
@@ -1696,34 +1054,15 @@ export interface RestoreArchivedOptions {
 }
 
 /**
- * `runtime.restoreArchived` が対象1件ごとに返す結果（Issue #195、ADR 0122）。
- * `ForgetOutcome` と**同じ6つの `kind`**（`forgotten`/`already_forgotten` の位置が
- * `restored`/`status_not_archived` に入れ替わるだけ）——呼び出し側の次の一手が違う
- * 状況を1つの `boolean` に潰さない、という同じ「無い」の分類（ADR 0008）を適用する。
+ * `runtime.restoreArchived` が対象1件ごとに返す結果（ADR 0122）。`ForgetOutcome` と**同じ6つの `kind`**（`forgotten`/`already_forgotten` の位置が `restored`/`status_not_archived` に入れ替わるだけ。ADR 0008）。
  *
- * - `"restored"`: 今回の呼び出しで実際に `status` を `archived` から `active` へ動かし、
- *   `memory_events` に `kind: 'restored'` を積んだ。`previousStatus` は常に `"archived"`
- *   （このメソッドが動かす遷移はこの1本だけであり、他の値を取らない）。
- *   **⚠ 2026-09 追記（マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）:
- *   `status` の復帰に続けて `MemoryStore.reinforce` も呼ぶ**（`decay_floor_at` を
- *   復帰の瞬間から引き直す。理由は `restoreArchived` の JSDoc・ADR 0153 を参照）。
- *   **`reinforce` が失敗しても、既に成功した `status` の復帰は握り潰さない**
- *   ——`kind` は `"restored"` のままで、失敗は `reinforceError` に運ぶ
- *   （additive。省略時は成功、または対象が無かった旧来の形と区別が付かないという
- *   ことはない——`reinforce` は必ず `status` の復帰の直後に試みるので、この欄が
- *   無ければ「試みて成功した」ことを意味する）。
- * - `"status_not_archived"`: 対象は最初から（または同じ呼び出し内の先行する要素の
- *   処理によって）`archived` ではなかった。**書き込みは一切起きていない。**
- *   `status` に現在値（`active`/`superseded`/`contested`/`forgotten` のいずれか）が入る。
- *   `ConsolidateSourceOutcome.status_not_active` と同じ命名規律——「対象は見た。
- *   だが前提の状態ではなかった」を1つの語で表す。
- * - `"not_found"`: そのテナントにその id の Memory がそもそも無い。
- * - `"conflicted"`: compare-and-swap が破れた——`getMany` で読んだ時点は `archived` だったが、
- *   実際に書きに行った時点では別の書き込みが割り込んでいた。**このメソッドは自動で
- *   再試行しない。**再読した結果が `"active"`（＝別の呼び出しがちょうど同じ復帰を
- *   先に済ませていた）だった場合は `"status_not_archived"` に含める——「求めていた状態に
- *   既に居る」ことは対立ではない（`forget` の `already_forgotten` と同じ扱い）。
- *   それ以外の状態に変わっていた場合だけ `"conflicted"` として `observedStatus` を運ぶ。
+ * - `"restored"`: `archived` から `active` へ動かし、`kind: 'restored'` を積んだ。`previousStatus` は常に `"archived"`。続けて `MemoryStore.reinforce` も呼ぶ（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
+ *   **`reinforce` が失敗しても復帰は握り潰さず**、`kind` は `"restored"` のまま、失敗を `reinforceError` に運ぶ。
+ * - `"status_not_archived"`: 対象は最初から（または同じ呼び出し内の先行する要素の処理によって）`archived` ではなかった。**書き込みは起きていない。** `status` に現在値。
+ *   `ConsolidateSourceOutcome.status_not_active` と同じ命名規律で、「見たが前提の状態ではなかった」を表す。
+ * - `"not_found"`: そのテナントにその id の Memory が無い。
+ * - `"conflicted"`: compare-and-swap が破れた。**自動で再試行しない。** 再読した結果が `"active"`（別の呼び出しが先に同じ復帰を済ませていた）なら `"status_not_archived"` に含める
+ *   （求めていた状態に既に居るのは対立ではない。`forget` の `already_forgotten` と同じ）。それ以外の状態に変わっていた場合だけ `"conflicted"` で `observedStatus` を運ぶ。
  * - `"failed"`: 競合以外の例外で書き込みそのものが失敗した。**この時点で処理を打ち切る。**
  * - `"not_attempted"`: それより前の要素が `"failed"` になったため、まだ見ていない。
  */
@@ -1733,11 +1072,8 @@ export type RestoreArchivedOutcome =
       kind: "restored";
       previousStatus: "archived";
       /**
-       * `status` の復帰に続けて試みた `reinforce` が失敗した場合だけ在る
-       * （マネージャー決定、Issue #196 / ADR 0153）。省略時（`undefined`）は
-       * `reinforce` も成功したことを意味する——「試みていない」という第3の状態は
-       * 無い（`reinforce` は復帰が成功した全件に対して必ず試みる）。
-       * 文字列は `"failed"` の `error` と同じ整形（params を落とし、cause と SQLSTATE を足し、4096字で切る。ADR 0363）。
+       * `status` の復帰に続けて試みた `reinforce` が失敗した場合だけ在る（ADR 0153）。省略時（`undefined`）は `reinforce` も成功したことを意味する
+       * （`reinforce` は復帰が成功した全件に対して必ず試みる）。文字列は `"failed"` の `error` と同じ整形（ADR 0363）。
        */
       reinforceError?: string;
     }
@@ -1748,22 +1084,15 @@ export type RestoreArchivedOutcome =
       memoryId: MemoryId;
       kind: "failed";
       /**
-       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363、2026-09-30 追記）:
-       * drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、`cause` の連鎖と
-       * SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
+       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363）: drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、
+       * `cause` の連鎖と SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
        * 🔴 **文字列の形は「例外の `message` そのまま」ではない**——パースして使わないこと。
        */
       error: string;
     }
   | { memoryId: MemoryId; kind: "not_attempted" };
 
-/**
- * `runtime.restoreArchived` の結果（Issue #195、ADR 0122）。
- *
- * ⛔ `restoredCount` のような派生値を持たない（`ForgetResult`/`ConsolidationResult` と
- * 同じ理由——`outcomes` を数えれば得られる値を欄として複製すると、片方だけ直して
- * ずれるという、このリポジトリが繰り返し踏んできた欠陥を新しく作ることになる）。
- */
+/** `runtime.restoreArchived` の結果（ADR 0122）。`restoredCount` のような派生値を持たない（`ForgetResult`/`ConsolidationResult` と同じ理由）。 */
 export interface RestoreArchivedResult {
   /**
    * 入力（`RestoreArchivedTarget` を正規化した `MemoryId[]`）と**同じ順序・同じ長さ**。
@@ -1773,160 +1102,79 @@ export interface RestoreArchivedResult {
 }
 
 /**
- * `runtime.restoreSuperseded` の対象（`docs/memory-model.md` §11 行15
- * 「`superseded → active`」を書き込む口）。
+ * `runtime.restoreSuperseded` の対象（`docs/memory-model.md` §11 行15「`superseded → active`」を書き込む口）。
  *
- * 🔴 **粒度の既定は「群」であり、個別の Memory id を渡す形は無い。**`ForgetTarget`/
- * `RestoreArchivedTarget` の `{ memoryId } | { memoryIds }` という二形は、ここでは
- * 意図的に採らない。
+ * 🔴 **粒度の既定は「群」であり、個別の Memory id を渡す形は無い。** `ForgetTarget`/`RestoreArchivedTarget` の `{ memoryId } | { memoryIds }` という二形は、
+ * 意図的に採らない。`superseded` な Memory は `recall()` に出てこない（段1の候補生成が使う status ゲートは `['active','contested']` 固定。
+ * `docs/recall.md` §2 段0「スコープの外延」）ので、呼び出し側は「戻したい Memory の id」を知る手段を持たない。
+ * 手元にある唯一の取っ手は「置き換えた側（supersede した側）」の id である。
  *
- * **理由**: `superseded` な Memory は `recall()` に出てこない——段1の候補生成が使う
- * status ゲートは `['active','contested']` 固定である（`recall-runtime.ts` の該当箇所。
- * `docs/recall.md` §2 段0「スコープの外延」）。⟹ **呼び出し側は「戻したい Memory の id」を
- * そもそも知る手段を持たない**——`restoreArchived` の呼び出し側が辿れる「recall で
- * 見つからないものを id で名指しする」という経路が、ここには無い。手元にある唯一の
- * 取っ手は「置き換えた側（supersede した側）」の id である。
- *
- * 🔴 **⚠ `superseded_by_id` が作る群は「1回の操作」とちょうど一致するとは限らない**
- * （[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md) 冒頭の
- * 訂正1・訂正4）。`resolveContested` の勝者は前から在る Memory であり、`reextract` の
- * アンカーも冪等な `ON CONFLICT` 経由で前から在る Memory に解決されることがある——
- * どちらも「同じ id の下に別々の操作の敗者が積み上がる」余地を残す。`consolidate` の
- * 統合先だけが常に新規作成である（構造的な保証。下記 `onlyMemoryIds` の doc コメント
- * 参照）。
+ * 🔴 **`superseded_by_id` が作る群は「1回の操作」とちょうど一致するとは限らない**
+ * （[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md)）。`resolveContested` の勝者は前から在る Memory であり、
+ * `reextract` のアンカーも冪等な `ON CONFLICT` 経由で前から在る Memory に解決されることがある。どちらも「同じ id の下に別々の操作の敗者が積み上がる」余地を残す。
+ * `consolidate` の統合先だけが常に新規作成である（構造的な保証。下記 `onlyMemoryIds` の doc 参照）。
  */
 export type RestoreSupersededTarget = {
   /** 置き換えた側（supersede した側）の Memory の id。これを `supersededById` に持つ Memory の群を戻す。 */
   supersededById: MemoryId;
   /**
-   * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
-   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
-   * 群を「1回の操作」単位に絞るための**任意の**フィルタ。指定すると、対象は
-   * `superseded_by_id = supersededById` の群のうち、このリストに含まれる
-   * `memoryId` だけへ絞られる（積集合）。**省略時は従来どおり群全体が対象**
-   * ——既定は1バイトも変えない。空配列を渡すと対象0件になる（`id = ANY('{}')`
-   * は常に偽であるため、特別扱いのコードは無い）。
+   * 群を「1回の操作」単位に絞る**任意の**フィルタ（[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。指定すると、対象は `superseded_by_id = supersededById` の群のうち、
+   * このリストに含まれる `memoryId` だけ（積集合）。**省略時は群全体。** 空配列は対象0件（`id = ANY('{}')` は常に偽）。
    *
-   * 🔴 **どの id をまとめて渡すかは、mnemora 自身は判定しない**
-   * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
-   * 決定2「機械は検出まで」）。呼び出し側の責務:
+   * 🔴 **どの id をまとめて渡すかは mnemora は判定しない**（機械は検出まで。[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)）。呼び出し側は `opts.dryRun: true` で
+   * `previewRestoreSupersededBy?` を呼び、`candidates[].supersededReason` から「どの `memoryId` が同じ操作に属するか」を決めてから渡す:
+   * - `"consolidated"`: 同じ reason の候補は、1アンカーの下で高々1つの群（`consolidate` は統合先の `sourceObservationId` を常に `null` にするため、`createMemory` の冪等 `ON CONFLICT`
+   *   〔`WHERE source_observation_id IS NOT NULL`〕の対象に入らず、統合先は必ず新規作成される）。同じ reason の候補全部をまとめて渡せば、1回の操作になる。
+   * - `"contested_resolved"`: **1件 = 1回の操作**（`resolveContested` は1回につき敗者1件）。**1件ずつ**渡す。まとめると、同じ勝者が複数回勝った別々の操作を1回で混ぜて戻す。
+   * - 🔴 `"reextract_superseded"` と `null`（由来不明）: **既存の情報だけでは操作単位に分割できないことがある。⛔ 割れるという顔をしない。** `reextract` のアンカーは位置で選ぶだけで、冪等な `ON CONFLICT` 経由で
+   *   既存の Memory に解決されると、複数回の別々の `reextract` が同じアンカーを共有しうる。そのとき `meta.reason`/`sourceObservationId`/`extractorVersion` は一致しうるので区別できない（ADR 0230、ADR 0258）。
+   *   まとめて渡すのは「確認できていないが、たまたま1回の操作かもしれない」という賭けである。
    *
-   * `opts.dryRun: true` で `previewRestoreSupersededBy?` を呼び、返る
-   * `candidates[].supersededReason` を見て「どの `memoryId` が同じ操作に
-   * 属するか」を自分で決めてから、ここへ渡す。ADR 0258 が実測した非対称:
+   * {@link groupSupersededCandidatesByOperation} がこの判断を補助する任意の純関数（判定はしない・`"unknown"` を隠さない）。
    *
-   * - `supersededReason === "consolidated"`: 同じ reason の候補は、1アンカーの
-   *   下で高々1つの群にしかならない（`consolidate` は統合先の
-   *   `sourceObservationId` を常に `null` にするため、`createMemory` の冪等
-   *   `ON CONFLICT`〔`WHERE source_observation_id IS NOT NULL`〕の対象に
-   *   一度も入らず、統合先は必ず新規作成される——構造的な保証）。
-   *   ⟹ 同じ reason の候補全部をまとめて渡せば、それが1回の操作である。
-   * - `supersededReason === "contested_resolved"`: **1件 = 1回の操作**
-   *   （`resolveContested` は呼び出し1回につきちょうど1件の敗者しか作らない
-   *   ——`packages/core/src/__tests__/resolve-contested-loser-invariant.test.ts`
-   *   の歯が固定する）。⟹ **1件ずつ**渡すこと。まとめて渡すと、同じ勝者が
-   *   複数回勝った別々の操作を、1回の呼び出しで混ぜて戻すことになる。
-   * - 🔴 `supersededReason === "reextract_superseded"` と `null`
-   *   （由来不明）: **既存の情報だけでは操作単位に分割できないことがある。
-   *   ⛔ 割れるという顔をしない。**`reextract` のアンカーは候補列のうち、非 `active` の既存行に
-   *   ぶつからない先頭（ADR 0454。ぶつかる候補が無ければ `memoryIds[0]`）を位置で選ぶだけであり、その候補が冪等な
-   *   `ON CONFLICT` 経由で既存の Memory に解決されると、複数回の別々の
-   *   `reextract` 呼び出しが同じアンカーを共有しうる——このとき
-   *   `meta.reason`/`sourceObservationId`/`extractorVersion` は複数回の
-   *   呼び出しの間で完全に一致しうるため区別できない（ADR 0230 訂正4、
-   *   ADR 0258）。まとめて渡すことは「同じ操作だと確認した」ではなく
-   *   「確認できていないが、たまたま1回の操作かもしれない」という賭けである。
-   *
-   * {@link groupSupersededCandidatesByOperation} が、この判断を機械的に
-   * 補助する任意の純関数として在る——ただし判定はしない・"unknown" を
-   * 隠さない（同関数の doc コメント参照）。
-   *
-   * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
-   * 上の判断材料（`supersededReason`）は、`MemoryStore.purgeExpiredEvents?`
-   * （[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）が保持期間で
-   * 掃除した後は取れなくなる。** `previewRestoreSupersededBy?` は `kind: 'superseded'`
-   * の `memory_events` 行から `supersededReason` を読むが、`purgeExpiredEvents?` は
-   * `kind = 'events_purged'` 以外の行をすべて対象にする——`superseded` 行も除外しない。
-   * ⟹ 保持期間を過ぎた後は、`consolidated`/`contested_resolved` のように本来は
-   * `"structural"`/`"per_item"` へ分類できたはずの候補も `supersededReason: null` に
-   * 劣化し、`groupSupersededCandidatesByOperation` の `"unknown"` グループへ合流する。
-   * **「最初から由来が無かった」候補と「由来はあったが掃除で消えた」候補は、この型・
-   * この関数のどちらからも区別できない**——別々の操作の敗者が、たまたま同じ `null` に
-   * なって1グループへ誤って統合されうる。詳細・採らなかった案は
-   * [ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)
-   * の同日付追記を参照。
+   * ⚠ 判断材料の `supersededReason` は、`MemoryStore.purgeExpiredEvents?`（[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）が保持期間で掃除した後は取れない。`previewRestoreSupersededBy?` は
+   * `superseded` イベントの `meta` から読むが、`purgeExpiredEvents?` は `events_purged` 以外の行を全て対象にする。掃除後は `consolidated`/`contested_resolved` だった候補も `null` に劣化し、`"unknown"` グループに合流する。
+   * **「最初から由来が無かった」候補と「掃除で消えた」候補は区別できず**、別々の操作の敗者が同じ `null` で1グループに誤って統合されうる（採らなかった案は ADR 0258）。
    */
   onlyMemoryIds?: MemoryId[] | undefined;
 };
 
-/**
- * {@link groupSupersededCandidatesByOperation} が返す1グループ。
- * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
- * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
- */
+/** {@link groupSupersededCandidatesByOperation} が返す1グループ（ADR 0258）。 */
 export type SupersededOperationGroup = {
   /** 群を作った `superseded` イベントの `meta.reason`（自由文をそのまま運ぶ。無ければ `null`）。 */
   supersededReason: string | null;
   /** この群に入る Memory の id。 */
   memoryIds: MemoryId[];
   /**
-   * この `memoryIds` の区切りが、1回の操作と一致することをどこまで
-   * 保証できるかを正直に示す。⛔ **`"unknown"` は「安全」の意味ではない**
-   * ——「同じ操作かもしれないし、別の操作かもしれない。mnemora はこれを
-   * 区別する情報を持たない」という宣言である。
+   * この `memoryIds` の区切りが、1回の操作と一致することをどこまで保証できるかを正直に示す。
+   * ⛔ **`"unknown"` は「安全」の意味ではない**: 「同じ操作かもしれないし、別の操作かもしれない。mnemora はこれを区別する情報を持たない」という宣言である。
    *
-   * - `"structural"`: `consolidate` が作る群。統合先は常に新規作成される
-   *   という構造的な保証により、同じ reason の候補は必ず1操作分である。
-   * - `"per_item"`: `resolveContested` が作る群。1件が必ず1操作
-   *   （`resolve-contested-loser-invariant.test.ts` の歯が固定する不変条件）
-   *   ——このとき `memoryIds` は常にちょうど1件になる。
-   * - `"unknown"`: `reextract` が作る群、または `supersededReason` が
-   *   取れなかった候補。既存の情報だけでは1回の操作と一致するかを
-   *   判定できない（ADR 0230 訂正4、ADR 0258）。
+   * - `"structural"`: `consolidate` が作る群。統合先は常に新規作成されるという構造的な保証により、同じ reason の候補は必ず1操作分である。
+   * - `"per_item"`: `resolveContested` が作る群。1件が必ず1操作なので、`memoryIds` は常にちょうど1件になる。
+   * - `"unknown"`: `reextract` が作る群、または `supersededReason` が取れなかった候補。既存の情報だけでは1回の操作と一致するかを判定できない（ADR 0230、ADR 0258）。
    */
   boundaryConfidence: "structural" | "per_item" | "unknown";
 };
 
 /**
- * `previewRestoreSupersededBy?` が返す候補を、推定される「1回の操作」単位へ
- * グルーピングする補助（[Issue #515](https://github.com/takecchi/mnemora/issues/515)
- * 方向①、[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
+ * `previewRestoreSupersededBy?` が返す候補を、推定される「1回の操作」単位へグルーピングする補助（ADR 0258）。
  *
- * 🔴 **これは検出だけである。書き込みには一切触れない**
- * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
- * 決定2「機械は検出まで」）。**どのグループを実際に `restoreSuperseded` の
- * `onlyMemoryIds` へ渡すかは、呼び出し側が決める**——この関数はその判断を
- * 代行しない。
+ * 🔴 **これは検出だけである。書き込みには一切触れない**（機械は検出まで。ADR 0223）。
+ * **どのグループを実際に `restoreSuperseded` の `onlyMemoryIds` へ渡すかは、呼び出し側が決める。**
  *
- * グルーピングの規則（`RestoreSupersededTarget.onlyMemoryIds` の doc
- * コメント参照。ここでは要約だけ）:
- * - `supersededReason === "consolidated"`: 同じ reason の候補をまとめて
- *   1グループにする。`boundaryConfidence: "structural"`。
- * - `supersededReason === "contested_resolved"`: 1件ずつ別グループにする
- *   （`memoryIds` は常に1件）。`boundaryConfidence: "per_item"`。
- * - それ以外（`"reextract_superseded"` を含む未知の reason、および
- *   `null`）: **同じ `supersededReason` の値ごとにまとめて返す**——
- *   ⛔ **1件ずつには分割しない。**分割すると「1件ずつが別操作である」という
- *   *偽の構造*を呼び出し側に与える——分けるのは「分からない」を「分かって
- *   いる」に化けさせる操作であり、`docs/north-star.md` の問い3（この記憶が
- *   選ばれた理由を、後から説明できるか）に反する。`boundaryConfidence:
- *   "unknown"` を付けたうえで、まとめた配列をそのまま返す。
+ * グルーピングの規則（詳細は `RestoreSupersededTarget.onlyMemoryIds` の doc）:
+ * - `supersededReason === "consolidated"`: 同じ reason の候補をまとめて1グループにする。`boundaryConfidence: "structural"`。
+ * - `supersededReason === "contested_resolved"`: 1件ずつ別グループにする（`memoryIds` は常に1件）。`boundaryConfidence: "per_item"`。
+ * - それ以外（`"reextract_superseded"` を含む未知の reason、および `null`）: **同じ `supersededReason` の値ごとにまとめて返す。**
+ *   ⛔ **1件ずつには分割しない。** 分割すると「1件ずつが別操作である」という*偽の構造*を呼び出し側に与える（「分からない」を「分かっている」に化けさせる）。
+ *   `boundaryConfidence: "unknown"` を付けたうえで、まとめた配列をそのまま返す。
  *
- * 入力の順序は保持しない（`supersededReason` の初出順にグループを並べる）。
- * 空配列を渡すと空配列を返す。
+ * 入力の順序は保持しない（`supersededReason` の初出順にグループを並べる）。空配列を渡すと空配列を返す。
  *
- * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
- * この関数自身は渡された `supersededReason` をそのまま group key として使うだけであり、
- * `null` になった理由（最初から由来が記録されていなかったのか、
- * `MemoryStore.purgeExpiredEvents?` の保持期間の掃除で消えたのかのどちらか）は問わない。**
- * `purgeExpiredEvents?`（[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）
- * が走った後は、本来なら別々の `"consolidated"`/`"contested_resolved"` だった候補も
- * `null` に劣化してここへ渡され、同じ `"unknown"` グループへ合流しうる——
- * `boundaryConfidence: "unknown"` の宣言どおり「分からない」という顔のままだが、
- * この場合の「分からない」は**掃除によって後天的に作られたもの**であり、判定材料が
- * 最初から無かった場合と地続きに扱われる。詳細は
- * [ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)
- * の同日付追記を参照。
+ * ⚠ この関数は渡された `supersededReason` をそのまま group key として使うだけで、`null` になった理由（最初から由来が記録されていなかったのか、
+ * `MemoryStore.purgeExpiredEvents?`（ADR 0115）の保持期間の掃除で消えたのか）は問わない。掃除が走った後は、本来なら別々の
+ * `"consolidated"`/`"contested_resolved"` だった候補も `null` に劣化してここへ渡され、同じ `"unknown"` グループへ合流しうる。
+ * この場合の「分からない」は**掃除によって後天的に作られたもの**だが、判定材料が最初から無かった場合と地続きに扱われる。詳細は ADR 0258。
  */
 export function groupSupersededCandidatesByOperation(
   candidates: ReadonlyArray<{ memoryId: MemoryId; supersededReason: string | null }>,
@@ -1971,28 +1219,18 @@ export interface RestoreSupersededOptions {
   /**
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。
    *
-   * ⚠ **省略時の規律が `RestoreArchivedOptions.reason`/`ForgetOptions.reason` とは
-   * 違う。**あちらは省略すると `meta` に `reason` キー自体を持たせないが、こちらは
-   * 省略すると固定タグ `"unsuperseded"` が入る（`MemoryStore.restoreSupersededBy` の
-   * 契約節、`meta` の doc 参照）。**この操作は群単位（複数の Memory にまたがる）
-   * であり、`meta.supersededById`（外した相手の id）と組み合わせて監査ログから
-   * 「どの群が、なぜ戻ったか」を引けるようにするには、`reason` キー自体が常に
-   * 存在するほうが検索・集計しやすい——1件ずつの CAS である `restoreArchived` とは
-   * 前提が違う、という判断。
+   * ⚠ **省略時の規律が `RestoreArchivedOptions.reason`/`ForgetOptions.reason` とは違う。** あちらは省略すると `meta` に `reason` キー自体を持たせないが、
+   * こちらは省略すると固定タグ `"unsuperseded"` が入る（`MemoryStore.restoreSupersededBy` の契約節、`meta` の doc 参照）。
+   * この操作は群単位（複数の Memory にまたがる）で、`meta.supersededById`（外した相手の id）と組み合わせて監査ログから「どの群が、なぜ戻ったか」を引けるようにするには、
+   * `reason` キー自体が常に存在するほうが検索・集計しやすい。
    */
   reason?: string | undefined;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
   /**
-   * 🔴 **下見（Issue #515、ADR 0237、方向3「戻す前に何が戻るかを返す」）。**
-   * `true` のとき、一切の書き込み（`memories` の `UPDATE`・`memory_events` への
-   * `INSERT`・`reinforce`）を行わず、「実際に呼べば何が戻るか」だけを
-   * {@link RestoreSupersededOutcome} の `"would_restore"` として返す。省略時 `false`
-   * ——⚠ **既定は変えていない。省略・`false` のどちらでも、この PR 以前と1バイトも
-   * 違わない「実際に戻す」経路を通る**（`PurgeOptions.dryRun` と同じ規律。あちらは
-   * 対象 id が既知だが、こちらは「群」を範囲走査で選ぶ点が違う——選ぶ内容は
-   * `MemoryStore.previewRestoreSupersededBy?` が `restoreSupersededBy?` と同じ
-   * `WHERE` で選ぶ。前者が無い adapter では `supported: false`）。
+   * 🔴 **下見。** `true` のとき、一切の書き込み（`memories` の `UPDATE`・`memory_events` への `INSERT`・`reinforce`）を行わず、
+   * 「実際に呼べば何が戻るか」だけを {@link RestoreSupersededOutcome} の `"would_restore"` として返す。省略時 `false`。
+   * 選ぶ内容は `MemoryStore.previewRestoreSupersededBy?` が `restoreSupersededBy?` と同じ `WHERE` で選ぶ。前者が無い adapter では `supported: false`。
    */
   dryRun?: boolean | undefined;
 }
@@ -2000,35 +1238,20 @@ export interface RestoreSupersededOptions {
 /**
  * `runtime.restoreSuperseded` が対象1件ごとに返す結果。
  *
- * `RestoreArchivedOutcome` と違い、`"not_found"`/`"status_not_archived"`/`"conflicted"`/
- * `"not_attempted"` を持たない——このメソッドは個別 id への compare-and-swap ではなく、
- * `MemoryStore.restoreSupersededBy` が1トランザクションで選んで戻した行の集合を
- * そのまま返すだけである。`status = 'superseded'` を条件に含めた `WHERE` 句が選定
- * そのものを兼ねるため、「対象ではあったが状態が違った」という分岐がそもそも
- * 発生しない——一致しない行は最初から選ばれていない。
+ * `RestoreArchivedOutcome` と違い、`"not_found"`/`"status_not_archived"`/`"conflicted"`/`"not_attempted"` を持たない。このメソッドは個別 id への
+ * compare-and-swap ではなく、`MemoryStore.restoreSupersededBy` が1トランザクションで選んで戻した行の集合をそのまま返す。`status = 'superseded'` を条件に含めた
+ * `WHERE` 句が選定そのものを兼ねるため、「対象ではあったが状態が違った」という分岐が発生しない（一致しない行は最初から選ばれていない）。
  *
- * - `"restored"`: `status` を `"superseded"` から `"active"` へ動かし、
- *   `superseded_by_id` を `null` にし、`memory_events` に `kind: "unsuperseded"`
- *   （`MemoryEventKind` が本 PR で足す新しい値）を1件積んだ。続けて試みた
- *   `MemoryStore.reinforce` が失敗した場合だけ `reinforceError` が入る
- *   （`RestoreArchivedOutcome.reinforceError` と同じ規律——status の復帰そのものは
- *   reinforce の成否と無関係に確定している）。`decayFloorAt` は reinforce の
- *   成否に関わらず、この呼び出しが最後に観測した値（reinforce が成功していれば
- *   その結果、失敗していれば復帰直後の値）。
- * - `"would_restore"`: **Issue #515、ADR 0237。**`opts.dryRun: true` のとき、`status = 'superseded'`
- *   かつ `superseded_by_id` が対象と一致する行について、実際に呼べば `"restored"` に
- *   なったはずであることを示す。**書き込みは一切起きていない**（`reinforce` も呼ばない）。
- *   `supersededReason` は `MemoryStore.previewRestoreSupersededBy?` の doc コメント参照
- *   ——「なぜその群に入っているか」を運ぶが、`memory_events` に一致する行が無ければ
- *   `null`（**取れないことを `null` で正直に返す。取れるふりをしない**）。
- * - `"failed"`: 🔴 **現在の実装では到達しない防御的な分類**（`PurgeOutcome.conflicted`
- *   と同じ立場——`forget`/`restoreArchived` と同じ「上限の無い再試行にしない安全弁」の
- *   一族だが、こちらは元になる並行の競合そのものが構造的に起こらない）。
- *   `restoreSupersededBy` の1トランザクションが成功したあと、個々の Memory について
- *   `Runtime` が行うのは `reinforce` の呼び出しだけであり、その失敗は必ず
- *   `reinforceError` に運ぶ（`"failed"` には落ちない）。このメンバーは、将来 store 側が
- *   行ごとの部分失敗を報告するようになったときのための予約であり、今日のコードパスからは
- *   一度も生成されない。
+ * - `"restored"`: `status` を `"superseded"` から `"active"` へ動かし、`superseded_by_id` を `null` にし、`memory_events` に `kind: "unsuperseded"` を1件積んだ。
+ *   続けて試みた `MemoryStore.reinforce` が失敗した場合だけ `reinforceError` が入る（`RestoreArchivedOutcome.reinforceError` と同じ規律。
+ *   status の復帰そのものは reinforce の成否と無関係に確定している）。`decayFloorAt` は、この呼び出しが最後に観測した値
+ *   （reinforce が成功していればその結果、失敗していれば復帰直後の値）。
+ * - `"would_restore"`: `opts.dryRun: true` のとき、`status = 'superseded'` かつ `superseded_by_id` が対象と一致する行について、実際に呼べば `"restored"` に
+ *   なったはずであることを示す。**書き込みは一切起きていない**（`reinforce` も呼ばない）。`supersededReason` は `MemoryStore.previewRestoreSupersededBy?` の doc を参照。
+ *   「なぜその群に入っているか」を運ぶが、`memory_events` に一致する行が無ければ `null`（**取れないことを `null` で正直に返す。取れるふりをしない**）。
+ * - `"failed"`: 🔴 **現在の実装では到達しない防御的な分類**（`PurgeOutcome.conflicted` と同じ立場）。`restoreSupersededBy` の1トランザクションが成功したあと、
+ *   個々の Memory について `Runtime` が行うのは `reinforce` の呼び出しだけで、その失敗は必ず `reinforceError` に運ぶ（`"failed"` には落ちない）。
+ *   将来 store 側が行ごとの部分失敗を報告するようになったときのための予約であり、今日のコードパスからは一度も生成されない。
  */
 export type RestoreSupersededOutcome =
   | {
@@ -2049,61 +1272,42 @@ export type RestoreSupersededOutcome =
       memoryId: MemoryId;
       kind: "failed";
       /**
-       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363、2026-09-30 追記）:
-       * drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、`cause` の連鎖と
-       * SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
+       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363）: drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、
+       * `cause` の連鎖と SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
        * 🔴 **文字列の形は「例外の `message` そのまま」ではない**——パースして使わないこと。
        */
       error: string;
     };
 
-/**
- * `runtime.restoreSuperseded` の結果。
- *
- * ⛔ `restoredCount` のような派生値を持たない（`RestoreArchivedResult`/`ForgetResult` と
- * 同じ理由——`outcomes` を数えれば得られる値を欄として複製すると、片方だけ直して
- * ずれるという、このリポジトリが繰り返し踏んできた欠陥を新しく作ることになる）。
- */
+/** `runtime.restoreSuperseded` の結果。⛔ `restoredCount` のような派生値を持たない（`RestoreArchivedResult`/`ForgetResult` と同じ理由）。 */
 export interface RestoreSupersededResult {
   /**
-   * `opts.dryRun` の有無で、見ている口が違う。**`dryRun` 省略・`false`**:
-   * `MemoryStore.restoreSupersededBy?` が実装されていたか。**`dryRun: true`**:
-   * `MemoryStore.previewRestoreSupersededBy?` が実装されていたか（Issue #515）
-   * ——2つの口は独立した任意メソッドであり、片方だけを実装した adapter があり得る。
-   * どちらの場合も `false` のとき `outcomes` は常に空配列**——`SweepArchiveResult.supported`
-   * と同じ規律（「対応していないので0件」であって「対応していて0件だった」ではない。
-   * 呼び出し側はこの2つを取り違えないよう、必ず `supported` を先に見ること）。
+   * `opts.dryRun` の有無で、見ている口が違う。**`dryRun` 省略・`false`**: `MemoryStore.restoreSupersededBy?` が実装されていたか。
+   * **`dryRun: true`**: `MemoryStore.previewRestoreSupersededBy?` が実装されていたか（2つの口は独立した任意メソッドで、片方だけを実装した adapter があり得る）。
+   * どちらの場合も `false` のとき `outcomes` は常に空配列（`SweepArchiveResult.supported` と同じ規律。「対応していないので0件」であって
+   * 「対応していて0件だった」ではない。呼び出し側はこの2つを取り違えないよう、必ず `supported` を先に見ること）。
    */
   supported: boolean;
   /**
-   * 置き換えた側（新しいほう）の id——`target.supersededById` をそのまま運ぶ。
+   * 置き換えた側（新しいほう）の id（`target.supersededById` をそのまま運ぶ）。
    *
-   * 🔴 **この操作は、この id が指す Memory に一切触れない。**消さない・`forget` しない・
-   * `status` を変えない。呼び出し側がそれを見落とさないよう、返り値自身にも明示的に
-   * 運ぶ——`recall()` は戻した直後、古いほう（`outcomes` に載る Memory）も新しいほう
-   * （この `supersedingMemoryId`）も両方 `active` として返しうる。始末したいなら
-   * 呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、あるいは
-   * `markContested` で対にすること——**この分岐をこのメソッドの `opts` には足さない**
-   * （`Runtime.restoreSuperseded` の doc コメント「やらないこと」参照）。
+   * 🔴 **この操作は、この id が指す Memory に一切触れない**（消さない・`forget` しない・`status` を変えない）。呼び出し側がそれを見落とさないよう、返り値自身にも運ぶ。
+   * `recall()` は戻した直後、古いほう（`outcomes` に載る Memory）も新しいほう（この `supersedingMemoryId`）も両方 `active` として返しうる。
+   * 始末したいなら、呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、あるいは `markContested` で対にすること。
+   * この分岐をこのメソッドの `opts` には足さない（`Runtime.restoreSuperseded` の doc「やらないこと」参照）。
    */
   supersedingMemoryId: MemoryId;
   /**
-   * `MemoryStore.restoreSupersededBy` が返した `restored` の順序をそのまま引き継ぐ
-   * （順序の契約は store 側に委ねる。`RestoreArchivedResult.outcomes` のような
-   * 「入力と同じ順序」という契約は無い——入力がそもそも id の配列ではなく単一の群
-   * 指定子であるため）。
+   * `MemoryStore.restoreSupersededBy` が返した `restored` の順序をそのまま引き継ぐ（順序の契約は store 側に委ねる）。
+   * `RestoreArchivedResult.outcomes` のような「入力と同じ順序」という契約は無い（入力が id の配列ではなく単一の群指定子であるため）。
    */
   outcomes: RestoreSupersededOutcome[];
 }
 
-/**
- * `runtime.purge` の対象（Issue #198、ADR 0124）。`ForgetTarget`/`RestoreArchivedTarget` と
- * 意図的に同じ形——`{ memoryId }`（単数）と `{ memoryIds }`（複数）のどちらでも同じ意味論であり、
- * 内部で `MemoryId[]` に正規化してから処理する。
- */
+/** `runtime.purge` の対象（ADR 0124）。`ForgetTarget`/`RestoreArchivedTarget` と意図的に同じ形。 */
 export type PurgeTarget = { memoryId: MemoryId } | { memoryIds: MemoryId[] };
 
-/** `runtime.purge` の任意オプション（Issue #198、ADR 0124）。`ForgetOptions`/`RestoreArchivedOptions` と同じ形に `dryRun` を足す。 */
+/** `runtime.purge` の任意オプション（ADR 0124）。`ForgetOptions`/`RestoreArchivedOptions` と同じ形に `dryRun` を足す。 */
 export interface PurgeOptions {
   /**
    * 監査ログ（`memory_events.meta.reason`）に残る自由文。省略時、`meta` に `reason`
@@ -2113,27 +1317,19 @@ export interface PurgeOptions {
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
   /**
-   * 🔴 **下見（issue #198 の受け入れ条件が名指しする「dryRun 相当の下見」）。**
-   * `true` のとき、一切の書き込み（`content`/`digest`/`purgedAt` の更新、
-   * `memory_events` への追記、`VectorStore.deleteAcrossSpaces`）を行わず、「実行していたら
-   * 何が起きたか」だけを {@link PurgeOutcome} の `"would_purge"`/`"already_purged"`/
-   * `"status_not_forgotten"`/`"not_found"` として返す。**`already_purged` のときも
-   * `dryRun: true` では `VectorStore.deleteAcrossSpaces` を呼ばない**（Issue #1425、
-   * ADR 0382）——`dryRun` は名前どおり「何も書かない」ことが約束であり、`already_purged`
-   * が既に書き込み0件を意味していても、この欄がある限りベストエフォートの副作用
-   * （embedding の削除）も止める。省略時 `false`。
+   * 🔴 **下見。** `true` のとき、一切の書き込み（`content`/`digest`/`purgedAt` の更新、`memory_events` への追記、`VectorStore.deleteAcrossSpaces`）を行わず、
+   * 「実行していたら何が起きたか」だけを {@link PurgeOutcome} の `"would_purge"`/`"already_purged"`/`"status_not_forgotten"`/`"not_found"` として返す。
+   * **`already_purged` のときも `dryRun: true` では `VectorStore.deleteAcrossSpaces` を呼ばない**（ADR 0382）。`dryRun` は「何も書かない」ことが約束なので、
+   * `already_purged` が既に書き込み0件を意味していても、ベストエフォートの副作用（embedding の削除）も止める。省略時 `false`。
    */
   dryRun?: boolean | undefined;
 }
 
 /**
- * `"purged"` / `"already_purged"` の後始末（`VectorStore.deleteAcrossSpaces`）が失敗したことの知らせ
- * （ADR 0399、ADR 0382「引き受けた負債」1）。
+ * `"purged"` / `"already_purged"` の後始末（`VectorStore.deleteAcrossSpaces`）が失敗したことの知らせ（ADR 0399）。
  *
- * **失敗したときだけ付く。成功したときはプロパティ自体が無い。** `kind` は変わらない
- * （MemoryStore 側の書き込みは確定している）。`error` は例外の整形（`"failed"` outcome の `error` と同じ。outbox の `last_error` と同じ
- * 整形——params を落とし、cause と SQLSTATE を足し、4096字で切る。ADR 0363）。
- * `status` は将来の値のための判別子。
+ * **失敗したときだけ付く。成功したときはプロパティ自体が無い。** `kind` は変わらない（MemoryStore 側の書き込みは確定している）。
+ * `error` は例外の整形（`"failed"` outcome の `error` と同じ。ADR 0363）。`status` は将来の値のための判別子。
  */
 export type PurgeEmbeddingCleanup = { status: "failed"; error: string };
 
@@ -2142,9 +1338,8 @@ function embeddingCleanupFailed(error: unknown): PurgeEmbeddingCleanup {
 }
 
 /**
- * `"already_purged"` の後始末（`MemoryStore.scrubPurged`、v1.1.0 より前に purge した行の
- * `tags`・`attributes`・claim key・label の紐付けの掃除。ADR 0437 決定3。ADR 0512 から、
- * `recalls.index_band` の目次帯に残った digest を伏せることも含む）が失敗したことの知らせ。
+ * `"already_purged"` の後始末（`MemoryStore.scrubPurged`。v1.1.0 より前に purge した行の `tags`・`attributes`・claim key・label の紐付けの掃除と、
+ * `recalls.index_band` の目次帯に残った digest を伏せること。ADR 0437、ADR 0512）が失敗したことの知らせ。
  * {@link PurgeEmbeddingCleanup} と同じ形・同じ規律（失敗したときだけ付く。`kind` は変わらない）。
  */
 export type PurgeResidueCleanup = { status: "failed"; error: string };
@@ -2154,42 +1349,19 @@ function residueCleanupFailed(error: unknown): PurgeResidueCleanup {
 }
 
 /**
- * `runtime.purge` が対象1件ごとに返す結果（Issue #198、ADR 0124）。
- * `ForgetOutcome`/`RestoreArchivedOutcome` と同じ「無い」の分類（ADR 0008）に、
- * `purge` 固有の2値（`"would_purge"`/`"already_purged"`）を足す。
+ * `runtime.purge` が対象1件ごとに返す結果（ADR 0124）。`ForgetOutcome`/`RestoreArchivedOutcome` と同じ「無い」の分類（ADR 0008）に、`purge` 固有の `"would_purge"`/`"already_purged"` を足す。
  *
- * - `"purged"`: この呼び出しで実際に `content`/`digest` をトゥームストーンで上書きし、
- *   `purgedAt` を設定し、`memory_events` に `kind: 'purged'` を積んだ
- *   （`VectorStore.deleteAcrossSpaces` もベストエフォートで試みた——失敗してもこの kind は
- *   変わらない。`Runtime.purge` の doc コメント参照）。**その試みが失敗したときだけ**
- *   `embeddingCleanup`（{@link PurgeEmbeddingCleanup}、ADR 0399）が付く。成功時は無い。
- *   `previousStatus` は常に `"forgotten"`。
- * - `"would_purge"`: `opts.dryRun: true` のとき、対象が `status === "forgotten"` かつ
- *   未 purge（`purgedAt` が `null`）であり、`dryRun: false` で呼べば `"purged"` に
- *   なったはずであることを示す。**書き込みは一切起きていない。**
- * - `"already_purged"`: 対象は既に purge 済み（`purgedAt` が非 `null`）だった。
- *   **`MemoryStore` への書き込みは一切起きていない**（下の `scrubPurged` の後始末を除く。`dryRun` の有無に関わらず同じ
- *   kind——「何も起きない」という結論自体は `dryRun` で変わらない）。**`dryRun` が
- *   `false`（省略時を含む）なら、`VectorStore.deleteAcrossSpaces` をベストエフォートで
- *   試みる**（Issue #1425、ADR 0382——埋め込みモデルを移した後に purge を再実行すると、
- *   旧 space に残った埋め込みをこの kind でも後始末できる）。`dryRun: true` のときは
- *   呼ばない。失敗したときだけ `embeddingCleanup` が付く（`"purged"` と同じ）。
- *   **同じく `dryRun` が `false` なら、`MemoryStore.scrubPurged`（任意メソッド）もベストエフォートで
- *   試みる**（ADR 0437——v1.1.0 より前の `purge` は `tags`・`attributes`・claim key・label の
- *   紐付けを残していたので、purge をかけ直すとそれらが消える。ADR 0512 から、v1.0.x の `purge` が
- *   `recalls.index_band` の目次帯に残した digest も伏せる）。失敗したときだけ `residueCleanup` が付く。
- * - `"status_not_forgotten"`: 対象の `status` が `"forgotten"` ではなかった
- *   （`purge` は `forgotten` からのみ遷移できる、ADR 0124 決定1）。`status` に現在値が入る。
- *   **書き込みは一切起きていない。**
+ * - `"purged"`: `content`/`digest` をトゥームストーンで上書きし、`purgedAt` を設定し、`kind: 'purged'` を積んだ。`VectorStore.deleteAcrossSpaces` はベストエフォートで、失敗しても kind は変わらず、
+ *   **失敗したときだけ** `embeddingCleanup`（{@link PurgeEmbeddingCleanup}。ADR 0399）が付く。`previousStatus` は常に `"forgotten"`。
+ * - `"would_purge"`: `opts.dryRun: true` で、対象が `forgotten` かつ未 purge なので、`dryRun: false` なら `"purged"` になったはず。**書き込みは一切起きていない。**
+ * - `"already_purged"`: 既に purge 済み（`purgedAt` が非 `null`）。**`MemoryStore` への書き込みは起きない**（下の `scrubPurged` を除く）。`dryRun` の有無に関わらず同じ kind。`dryRun` が `false` なら、
+ *   `deleteAcrossSpaces`（ADR 0382。埋め込みモデルを移した後の再実行で旧 space の埋め込みを消す）と `MemoryStore.scrubPurged`（任意メソッド。v1.1.0 より前の `purge` が残した `tags`・`attributes`・claim key・label の紐付けと、
+ *   `recalls.index_band` の目次帯の digest を伏せる。ADR 0437、ADR 0512）をベストエフォートで試み、失敗したときだけ `embeddingCleanup`/`residueCleanup` が付く。`dryRun: true` では呼ばない。
+ * - `"status_not_forgotten"`: `status` が `"forgotten"` ではなかった（`purge` は `forgotten` からのみ遷移できる）。`status` に現在値。**書き込みは一切起きていない。**
  * - `"not_found"`: そのテナントにその id の Memory がそもそも無い。
- * - `"conflicted"`: compare-and-swap が破れ、1回だけ再読した結果も上の3分岐のどれにも
- *   明確に分類できなかった——`forgotten` から抜け出す経路も、`purge` 以外に `purgedAt`
- *   を書く経路も本 PR の時点で存在しないため、**現在の実装では到達しない防御的な分類**
- *   （`forget`/`restoreArchived` と同じ、上限の無い再試行にしない安全弁）。
+ * - `"conflicted"`: compare-and-swap が破れ、1回だけ再読しても上の3分岐のどれにも分類できなかった。`forgotten` から抜け出す経路も `purge` 以外に `purgedAt` を書く経路も無いので、**現在の実装では到達しない防御的な分類**。
  * - `"failed"`: 競合以外の例外で書き込みそのものが失敗した。**この時点で処理を打ち切る。**
- * - `"not_attempted"`: それより前の要素が `"failed"` になった、または
- *   `MemoryStore.purgeMemory` が実装されていない（`PurgeResult.supported: false`）ため、
- *   この要素はまだ見ていない。
+ * - `"not_attempted"`: それより前の要素が `"failed"` になった、または `MemoryStore.purgeMemory` が無い（`PurgeResult.supported: false`）ため、まだ見ていない。
  */
 export type PurgeOutcome =
   | {
@@ -2212,28 +1384,19 @@ export type PurgeOutcome =
       memoryId: MemoryId;
       kind: "failed";
       /**
-       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363、2026-09-30 追記）:
-       * drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、`cause` の連鎖と
-       * SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
+       * 失敗の説明。整形は outbox の `last_error` と同じ（ADR 0363）: drizzle が包んだ文の `params:` 以降（SQL に付けた値）は落とし、
+       * `cause` の連鎖と SQLSTATE（`(code: XXXXX)`）を足し、全体を4096字で切る。SQL の文そのものは残る。
        * 🔴 **文字列の形は「例外の `message` そのまま」ではない**——パースして使わないこと。
        */
       error: string;
     }
   | { memoryId: MemoryId; kind: "not_attempted" };
 
-/**
- * `runtime.purge` の結果（Issue #198、ADR 0124）。
- *
- * ⛔ `purgedCount` のような派生値を持たない（`ForgetResult`/`RestoreArchivedResult` と
- * 同じ理由——`outcomes` を数えれば得られる値を欄として複製すると、片方だけ直してずれる
- * という、このリポジトリが繰り返し踏んできた欠陥を新しく作ることになる）。
- */
+/** `runtime.purge` の結果（ADR 0124）。⛔ `purgedCount` のような派生値を持たない（`ForgetResult`/`RestoreArchivedResult` と同じ理由）。 */
 export interface PurgeResult {
   /**
-   * `MemoryStore.purgeMemory` が実装されていたか。**`false` のとき `outcomes` は
-   * 全要素が `"not_attempted"`**（`opts.dryRun` の有無に関わらず——`SweepArchiveResult.supported`
-   * （ADR 0114）と同じ「無い」の扱い。この口を実装しない adapter に対しては、実際の
-   * purge も下見も一様に「見ていない」と名乗る）。
+   * `MemoryStore.purgeMemory` が実装されていたか。**`false` のとき `outcomes` は全要素が `"not_attempted"`**
+   * （`opts.dryRun` の有無に関わらず。`SweepArchiveResult.supported`（ADR 0114）と同じ「無い」の扱い）。
    */
   supported: boolean;
   /**
@@ -2244,14 +1407,12 @@ export interface PurgeResult {
 }
 
 /**
- * `runtime.markContested` が対象1件（`first`/`second` のどちらか）ごとに分類する適格性
- * （Issue #197、ADR 0134）。**新しい語彙を作らない**——`ForgetOutcome`/`ConsolidateSourceOutcome`
- * が既に使っている `"not_found"`/`"status_not_active"`/`"eligible"` にそのまま揃える。
+ * `runtime.markContested` が対象1件（`first`/`second` のどちらか）ごとに分類する適格性（ADR 0134）。
+ * 新しい語彙を作らず、`ForgetOutcome`/`ConsolidateSourceOutcome` が使っている `"not_found"`/`"status_not_active"`/`"eligible"` に揃える。
  *
  * - `"eligible"` — `status === "active"`。書き込みの CAS 条件を満たす。
  * - `"not_found"` — そのテナントにその id の Memory がそもそも無い。
- * - `"status_not_active"` — 存在はするが `status !== "active"`
- *   （既に `contested`・`superseded`・`archived`・`forgotten` のいずれか）。
+ * - `"status_not_active"` — 存在はするが `status !== "active"`（既に `contested`・`superseded`・`archived`・`forgotten` のいずれか）。
  */
 export type MarkContestedSideOutcome =
   | { memoryId: MemoryId; kind: "eligible" }
@@ -2259,23 +1420,16 @@ export type MarkContestedSideOutcome =
   | { memoryId: MemoryId; kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> };
 
 /**
- * `runtime.markContested` 全体の結末（Issue #197、ADR 0134）。ADR 0008 の「無い」の分類の
- * 適用——「対象が適格でなかった」「書き込み時点で競合した」「対応していない」を
- * 1つの `false`/例外に潰さない。
+ * `runtime.markContested` 全体の結末（ADR 0134）。「対象が適格でなかった」「書き込み時点で競合した」「対応していない」を
+ * 1つの `false`/例外に潰さない（ADR 0008）。
  *
- * - `"contested"` — 両側を `status: 'contested'` へ動かし、`contestedWithId` を相互に
- *   設定した。**部分成功は無い**——`supersedeWithNewMemories` の `conflicted`（対象ごとに
- *   独立で部分成功を許す設計）とは違い、対向ペアは本質的に結合しているため全部成功する
- *   か全部失敗するかのどちらかである。
- * - `"ineligible"` — `getMany` で読んだ時点で、どちらか一方（または両方）が
- *   `"eligible"` でなかった。**書き込みは一切試みていない。**
- * - `"conflict"` — 読んだ時点では両側とも `"eligible"` だったが、書き込み時点で
- *   {@link MemoryStatusConflictError} が投げられた（TOCTOU）。1回だけ再読した現在の
- *   `status` を `conflicts` に積む。
- * - `"not_attempted"` — `MemoryStore.markContestedPair` が実装されていない
- *   （`MarkContestedResult.supported: false`）。フォールバック経路は無い
- *   （`archiveDecayed`/`purgeMemory` と同じ理由——`contestedWithId` を書ける経路は
- *   この口以外に無い）。
+ * - `"contested"` — 両側を `status: 'contested'` へ動かし、`contestedWithId` を相互に設定した。**部分成功は無い。**
+ *   `supersedeWithNewMemories` の `conflicted`（対象ごとに独立で部分成功を許す設計）とは違い、対向ペアは本質的に結合しているため、全部成功するか全部失敗するかのどちらかである。
+ * - `"ineligible"` — `getMany` で読んだ時点で、どちらか一方（または両方）が `"eligible"` でなかった。**書き込みは一切試みていない。**
+ * - `"conflict"` — 読んだ時点では両側とも `"eligible"` だったが、書き込み時点で {@link MemoryStatusConflictError} が投げられた（TOCTOU）。
+ *   1回だけ再読した現在の `status` を `conflicts` に積む。
+ * - `"not_attempted"` — `MemoryStore.markContestedPair` が実装されていない（`MarkContestedResult.supported: false`）。
+ *   フォールバック経路は無い（`archiveDecayed`/`purgeMemory` と同じ理由。`contestedWithId` を書ける経路はこの口以外に無い）。
  */
 export type MarkContestedOutcome =
   | { kind: "contested"; first: Memory; second: Memory }
@@ -2286,52 +1440,37 @@ export type MarkContestedOutcome =
     }
   | { kind: "not_attempted" };
 
-/**
- * `runtime.markContested` の任意オプション（Issue #197、ADR 0134）。`ConsolidateOptions`/
- * `ForgetOptions` と同じ形。
- */
+/** `runtime.markContested` の任意オプション（ADR 0134）。`ConsolidateOptions`/`ForgetOptions` と同じ形。 */
 export interface MarkContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
   /**
-   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
-   * この欄では上書きしない——`consolidate`/`reflect` の `opts.reason` → `meta.note` と
-   * 同じ形）。省略時は `meta` に `note` キー自体を持たせない。
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、この欄では上書きしない。
+   * `consolidate`/`reflect` の `opts.reason` → `meta.note` と同じ形）。省略時は `meta` に `note` キー自体を持たせない。
    */
   reason?: string | undefined;
 }
 
-/**
- * `runtime.markContested` の結果（Issue #197、ADR 0134）。
- */
+/** `runtime.markContested` の結果（ADR 0134）。 */
 export interface MarkContestedResult {
-  /**
-   * `MemoryStore.markContestedPair` が実装されていたか。**`false` のとき `outcome` は
-   * 必ず `{ kind: "not_attempted" }`**（`PurgeResult.supported`（ADR 0124）と同じ「無い」の
-   * 扱い）。
-   */
+  /** `MemoryStore.markContestedPair` が実装されていたか。**`false` のとき `outcome` は必ず `{ kind: "not_attempted" }`**（`PurgeResult.supported` と同じ「無い」の扱い）。 */
   supported: boolean;
   /** どう終わったか（{@link MarkContestedOutcome}）。 */
   outcome: MarkContestedOutcome;
 }
 
 /**
- * `runtime.resolveContested` が対象1件（`first`/`second` のどちらか）ごとに分類する適格性
- * （Issue #197、ADR 0150）。**新しい語彙を作りすぎない**——`MarkContestedSideOutcome` が
- * 既に持つ `"not_found"`/`"eligible"` はそのまま使う。この操作固有に足すのは2つだけである。
+ * `runtime.resolveContested` が対象1件（`first`/`second` のどちらか）ごとに分類する適格性（ADR 0150）。
+ * `MarkContestedSideOutcome` が持つ `"not_found"`/`"eligible"` はそのまま使い、この操作固有に足すのは2つだけである。
  *
- * - `"eligible"` — `status === "contested"` かつ、相手の `contestedWithId` が互いを指して
- *   いる（`first.contestedWithId === second.id` かつ `second.contestedWithId === first.id`）。
- *   書き込みの CAS 条件を満たす。
+ * - `"eligible"` — `status === "contested"` かつ、相手の `contestedWithId` が互いを指している
+ *   （`first.contestedWithId === second.id` かつ `second.contestedWithId === first.id`）。書き込みの CAS 条件を満たす。
  * - `"not_found"` — そのテナントにその id の Memory がそもそも無い。
- * - `"status_not_contested"` — 存在はするが `status !== "contested"`。`status` に現在値が
- *   入る。
- * - `"pair_broken"` — `status === "contested"` ではあるが、相互参照が成立していない
- *   （`contestedWithId` が相手を指していない、または `null`）。[ADR 0046](../../../docs/decisions/0046-contested-pair-invariant-tooth.md)
- *   が数え上げた「一対一が破れた状態」の読み取り側の反映であり、`markContestedPair`
- *   （ADR 0134）を経由する限り今日の実装では到達しないはずだが、`PurgeOutcome` の
- *   `"conflicted"` と同じ「防御的な分類」として残す。`contestedWithId` に観測した現在値
- *   （`null` を含む）が入る。
+ * - `"status_not_contested"` — 存在はするが `status !== "contested"`。`status` に現在値が入る。
+ * - `"pair_broken"` — `status === "contested"` ではあるが、相互参照が成立していない（`contestedWithId` が相手を指していない、または `null`）。
+ *   [ADR 0046](../../../docs/decisions/0046-contested-pair-invariant-tooth.md) が数え上げた「一対一が破れた状態」の読み取り側の反映であり、
+ *   `markContestedPair`（ADR 0134）を経由する限り到達しないはずだが、`PurgeOutcome` の `"conflicted"` と同じ「防御的な分類」として残す。
+ *   `contestedWithId` に観測した現在値（`null` を含む）が入る。
  */
 export type ResolveContestedSideOutcome =
   | { memoryId: MemoryId; kind: "eligible" }
@@ -2340,36 +1479,26 @@ export type ResolveContestedSideOutcome =
   | { memoryId: MemoryId; kind: "pair_broken"; contestedWithId: MemoryId | null };
 
 /**
- * `runtime.resolveContested` に「どちらが正しいか」を渡すための判別可能 union
- * （Issue #197、ADR 0150）。**この型自身は何も判定しない**——呼び出し側が既に下した決定を
- * 運ぶだけである（`resolveContested` の interface JSDoc 参照）。
+ * `runtime.resolveContested` に「どちらが正しいか」を渡すための判別可能 union（ADR 0150）。この型自身は何も判定せず、
+ * 呼び出し側が既に下した決定を運ぶだけである。
  *
- * - `"supersede"` — `winnerId` 側が勝ち残る。勝った側は `status: "active"`、負けた側は
- *   `status: "superseded"` + `supersededById: <勝者>` になる。
- * - `"both_active"` — どちらも正しかった（対向ではなかったと分かった）。両側とも
- *   `status: "active"` に戻る。`docs/memory-model.md` §11 lifecycle 行7の
- *   「（負けた側は）」という括弧書きが、負けた側が存在しない決着を許している。
+ * - `"supersede"` — `winnerId` 側が勝ち残る。勝った側は `status: "active"`、負けた側は `status: "superseded"` + `supersededById: <勝者>` になる。
+ * - `"both_active"` — どちらも正しかった（対向ではなかったと分かった）。両側とも `status: "active"` に戻る。
+ *   `docs/memory-model.md` §11 lifecycle 行7の「（負けた側は）」という括弧書きが、負けた側が存在しない決着を許している。
  */
 export type ContestedResolution =
   { kind: "supersede"; winnerId: MemoryId } | { kind: "both_active" };
 
 /**
- * `runtime.resolveContested` 全体の結末（Issue #197、ADR 0150）。`MarkContestedOutcome`
- * と対称——「対象が適格でなかった」「書き込み時点で競合した」「対応していない」を
- * 1つの `false`/例外に潰さない（ADR 0008 の「無い」の分類の適用）。
+ * `runtime.resolveContested` 全体の結末（ADR 0150）。`MarkContestedOutcome` と対称で、「対象が適格でなかった」「書き込み時点で競合した」
+ * 「対応していない」を1つの `false`/例外に潰さない（ADR 0008）。
  *
- * - `"resolved"` — 両側を解決後の状態へ動かした。**部分成功は無い**——対向ペアは本質的に
- *   結合しているため（`MarkContestedOutcome` の `"contested"` と同じ理由）。
- * - `"ineligible"` — `getMany` で読んだ時点で、どちらか一方（または両方）が
- *   `"eligible"` でなかった。**書き込みは一切試みていない。**
- * - `"conflict"` — 読んだ時点では両側とも `"eligible"` だったが、書き込み時点で
- *   {@link MemoryStatusConflictError} が投げられた（TOCTOU）。`markContested` と同じく
- *   **1回だけ**再読した現在の `status` を `conflicts` に積み、そこで打ち切る
- *   （上限の無い再試行ループにしない）。
- * - `"not_attempted"` — `MemoryStore.resolveContestedPair` が実装されていない
- *   （`ResolveContestedResult.supported: false`）。フォールバック経路は無い
- *   （`markContestedPair`/`archiveDecayed`/`purgeMemory` と同じ理由——`contestedWithId` を
- *   `null` へ戻せる口はこの口以外に無い。`resolveContestedPair` の interface JSDoc 参照）。
+ * - `"resolved"` — 両側を解決後の状態へ動かした。**部分成功は無い**（対向ペアは本質的に結合しているため。`MarkContestedOutcome` の `"contested"` と同じ）。
+ * - `"ineligible"` — `getMany` で読んだ時点で、どちらか一方（または両方）が `"eligible"` でなかった。**書き込みは一切試みていない。**
+ * - `"conflict"` — 読んだ時点では両側とも `"eligible"` だったが、書き込み時点で {@link MemoryStatusConflictError} が投げられた（TOCTOU）。
+ *   `markContested` と同じく**1回だけ**再読した現在の `status` を `conflicts` に積み、そこで打ち切る（上限の無い再試行ループにしない）。
+ * - `"not_attempted"` — `MemoryStore.resolveContestedPair` が実装されていない（`ResolveContestedResult.supported: false`）。
+ *   フォールバック経路は無い（`contestedWithId` を `null` へ戻せる口はこの口以外に無い。`resolveContestedPair` の interface JSDoc 参照）。
  */
 export type ResolveContestedOutcome =
   | { kind: "resolved"; first: Memory; second: Memory }
@@ -2380,60 +1509,37 @@ export type ResolveContestedOutcome =
     }
   | { kind: "not_attempted" };
 
-/**
- * `runtime.resolveContested` の任意オプション（Issue #197、ADR 0150）。`MarkContestedOptions`
- * と同じ形。
- */
+/** `runtime.resolveContested` の任意オプション（ADR 0150）。`MarkContestedOptions` と同じ形。 */
 export interface ResolveContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
   /**
-   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値
-   * `'contested_resolved'` であり、この欄では上書きしない——`markContested`/`consolidate`/
-   * `reflect` の `opts.reason` → `meta.note` と同じ形）。省略時は `meta` に `note` キー
-   * 自体を持たせない。
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested_resolved'` であり、この欄では上書きしない。
+   * `markContested`/`consolidate`/`reflect` の `opts.reason` → `meta.note` と同じ形）。省略時は `meta` に `note` キー自体を持たせない。
    */
   reason?: string | undefined;
 }
 
-/**
- * `runtime.resolveContested` の結果（Issue #197、ADR 0150）。
- */
+/** `runtime.resolveContested` の結果（ADR 0150）。 */
 export interface ResolveContestedResult {
-  /**
-   * `MemoryStore.resolveContestedPair` が実装されていたか。**`false` のとき `outcome` は
-   * 必ず `{ kind: "not_attempted" }`**（`MarkContestedResult.supported`（ADR 0134）と同じ
-   * 「無い」の扱い）。
-   */
+  /** `MemoryStore.resolveContestedPair` が実装されていたか。**`false` のとき `outcome` は必ず `{ kind: "not_attempted" }`**（`MarkContestedResult.supported` と同じ「無い」の扱い）。 */
   supported: boolean;
   /** どう終わったか（{@link ResolveContestedOutcome}）。 */
   outcome: ResolveContestedOutcome;
 }
 
 /**
- * `runtime.resolveOrphanedContested` が生存側1件を分類する適格性
- * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
- * `ResolveContestedSideOutcome`（上）と同じ「無いを分類して返す」流儀に倣うが、
- * この口は対の**もう一方**を分類しない——対向はもう `contested` ではない前提の口だから
- * である。
+ * `runtime.resolveOrphanedContested` が生存側1件を分類する適格性（ADR 0150）。
+ * `ResolveContestedSideOutcome` と同じ「無いを分類して返す」流儀に倣うが、この口は対の**もう一方**を分類しない（対向はもう `contested` ではない前提の口だから）。
  *
- * - `"eligible"` — `status === "contested"` かつ `contestedWithId` が非 null で、その id の
- *   Memory が `"forgotten"` であるか、そもそも見つからない（purge 済み等）。
+ * - `"eligible"` — `status === "contested"` かつ `contestedWithId` が非 null で、その id の Memory が `"forgotten"` であるか、そもそも見つからない（purge 済み等）。
  * - `"not_found"` — そのテナントに `survivorId` の Memory がそもそも無い。
  * - `"status_not_contested"` — 存在はするが `status !== "contested"`。
- * - `"no_contested_with_id"` — `status === "contested"` だが `contestedWithId` が `null`
- *   （ADR 0150 負債2「片側だけの `contested`」と同じ形の壊れ方。**この口はそれを直さない**
- *   ——対象外として ineligible で返す）。
- * - `"opposite_not_orphaned"` — `contestedWithId` の指す Memory が見つかったが、
- *   `status` が `"forgotten"` ではない（`active`/`contested`/`superseded`/`archived` のいずれか）。
- *   まだ `resolveContestedPair`（決定3の CAS）で正規に解決できる可能性がある対象を、
- *   この口が代わりに割り込んで処理しないためのガード。
- *   ⚠ 2026-09-28 訂正: ここは以前 `archived` を挙げていなかったが、実装は `"forgotten"` かどうかだけを見るので、
- *   対向が `archived` のときもこの値になる（`oppositeStatus: "archived"`）。文書を実装に合わせた（実装は変えていない）。
- *   `Runtime` の口には `contested` な記憶を `archived` にするものは無い（`sweepArchive` が掃くのは `active` だけ）が、
- *   `MemoryStore.updateStatus` を直接呼べば作れる。歯は
- *   `packages/postgres/src/__tests__/resolve-orphaned-contested-opposite-archived.postgres.test.ts`
- *   （Postgres と testkit の fixture）。
+ * - `"no_contested_with_id"` — `status === "contested"` だが `contestedWithId` が `null`（片側だけの `contested`）。**この口はそれを直さない**。対象外として ineligible で返す。
+ * - `"opposite_not_orphaned"` — `contestedWithId` の指す Memory が見つかったが、`status` が `"forgotten"` ではない（`active`/`contested`/`superseded`/`archived` のいずれか）。
+ *   まだ `resolveContestedPair` で正規に解決できる可能性がある対象を、この口が代わりに割り込んで処理しないためのガード。
+ *   実装は `"forgotten"` かどうかだけを見るので、対向が `archived` のときもこの値になる（`oppositeStatus: "archived"`。`Runtime` の口には
+ *   `contested` な記憶を `archived` にするものは無い（`sweepArchive` が掃くのは `active` だけ）が、`MemoryStore.updateStatus` を直接呼べば作れる）。
  */
 export type ResolveOrphanedContestedEligibility =
   | { kind: "eligible"; contestedWithId: MemoryId }
@@ -2443,17 +1549,13 @@ export type ResolveOrphanedContestedEligibility =
   | { kind: "opposite_not_orphaned"; contestedWithId: MemoryId; oppositeStatus: MemoryStatus };
 
 /**
- * `runtime.resolveOrphanedContested` 全体の結末
- * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
- * `ResolveContestedOutcome`（上）と対称の語彙を使う。
+ * `runtime.resolveOrphanedContested` 全体の結末（ADR 0150）。`ResolveContestedOutcome` と対称の語彙を使う。
  *
  * - `"resolved"` — 生存側を `status: "active"`・`contestedWithId: null` へ動かした。
  * - `"ineligible"` — 読んだ時点で `"eligible"` でなかった。**書き込みは一切試みていない。**
- * - `"conflict"` — 読んだ時点では `"eligible"` だったが、書き込み時点で
- *   {@link MemoryStatusConflictError} が投げられた（TOCTOU）。`resolveContested` と同じく
- *   **1回だけ**再読して打ち切る（上限の無い再試行ループにしない）。
- * - `"not_attempted"` — `MemoryStore.resolveOrphanedContested` が実装されていない
- *   （`ResolveOrphanedContestedResult.supported: false`）。フォールバック経路は無い。
+ * - `"conflict"` — 読んだ時点では `"eligible"` だったが、書き込み時点で {@link MemoryStatusConflictError} が投げられた（TOCTOU）。
+ *   `resolveContested` と同じく**1回だけ**再読して打ち切る（上限の無い再試行ループにしない）。
+ * - `"not_attempted"` — `MemoryStore.resolveOrphanedContested` が実装されていない（`ResolveOrphanedContestedResult.supported: false`）。フォールバック経路は無い。
  */
 export type ResolveOrphanedContestedOutcome =
   | { kind: "resolved"; memory: Memory }
@@ -2461,11 +1563,7 @@ export type ResolveOrphanedContestedOutcome =
   | { kind: "conflict"; observedStatus: MemoryStatus | null }
   | { kind: "not_attempted" };
 
-/**
- * `runtime.resolveOrphanedContested` の任意オプション
- * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
- * `ResolveContestedOptions`（上）と同じ形。
- */
+/** `runtime.resolveOrphanedContested` の任意オプション（ADR 0150）。`ResolveContestedOptions` と同じ形。 */
 export interface ResolveOrphanedContestedOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
@@ -2477,37 +1575,24 @@ export interface ResolveOrphanedContestedOptions {
   reason?: string | undefined;
 }
 
-/**
- * `runtime.resolveOrphanedContested` の結果
- * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
- */
+/** `runtime.resolveOrphanedContested` の結果（ADR 0150）。 */
 export interface ResolveOrphanedContestedResult {
-  /**
-   * `MemoryStore.resolveOrphanedContested` が実装されていたか。**`false` のとき
-   * `outcome` は必ず `{ kind: "not_attempted" }`。**
-   */
+  /** `MemoryStore.resolveOrphanedContested` が実装されていたか。**`false` のとき `outcome` は必ず `{ kind: "not_attempted" }`。** */
   supported: boolean;
   /** どう終わったか（{@link ResolveOrphanedContestedOutcome}）。 */
   outcome: ResolveOrphanedContestedOutcome;
 }
 
 /**
- * `runtime.markContestedGroup` がメンバー1件を分類する適格性（Issue #207/#933 PR2、
- * ADR 0327 §4-c、ADR 0378、ADR 0381）。`MarkContestedSideOutcome`（2者版）と同じ
- * 「無いを分類して返す」流儀だが、`MemoryStore.markContestedGroup` の CAS が
- * `active`/`contested`（穴A の相方吸収）/`contested`（既存群の合併吸収）の3通りを
- * 許すぶん、分類も3者版になる（interface 側の `MemoryStore.markContestedGroup` JSDoc の
- * 契約と1対1対応）。
+ * `runtime.markContestedGroup` がメンバー1件を分類する適格性（ADR 0327、ADR 0378、ADR 0381）。`MarkContestedSideOutcome`（2者版）と同じ「無いを分類して返す」流儀だが、
+ * `MemoryStore.markContestedGroup` の CAS が `active`/`contested`（穴A の相方吸収）/`contested`（既存群の合併吸収）の3通りを許すぶん、分類も3者版になる
+ * （`MemoryStore.markContestedGroup` JSDoc の契約と1対1対応）。
  *
- * - `"eligible"` — 次のいずれか: (1) `status === 'active'`。(2) `status === 'contested'` かつ
- *   `contestedWithId` が渡された `members` の**他の**誰かの id と一致する（穴Aの吸収）。
- *   (3) `status === 'contested'` かつ `contestedWithId === null`（既存群の合併吸収——
- *   実際にその群と `members` がつながっているかは `Runtime` 側で
- *   `detectClaimKeyContested`/呼び出し側が `RelationStore.listRelated` を使って確かめる
- *   前提であり、この分類自体は行レベルの形だけを見る）。
+ * - `"eligible"` — 次のいずれか: (1) `status === 'active'`。(2) `status === 'contested'` かつ `contestedWithId` が渡された `members` の**他の**誰かの id と一致する（穴Aの吸収）。
+ *   (3) `status === 'contested'` かつ `contestedWithId === null`（既存群の合併吸収。実際にその群と `members` がつながっているかは、`Runtime` 側で
+ *   `detectClaimKeyContested`/呼び出し側が `RelationStore.listRelated` を使って確かめる前提であり、この分類自体は行レベルの形だけを見る）。
  * - `"not_found"` — そのテナントにその id の Memory がそもそも無い。
- * - `"status_conflict"` — 上の3通りのいずれにも当てはまらない（`contested` だが
- *   `contestedWithId` が `members` の外を指す、または `superseded`/`archived`/`forgotten`）。
+ * - `"status_conflict"` — 上の3通りのいずれにも当てはまらない（`contested` だが `contestedWithId` が `members` の外を指す、または `superseded`/`archived`/`forgotten`）。
  *   `status`・観測した `contestedWithId` を積む。
  */
 export type MarkContestedGroupSideOutcome =
@@ -2521,19 +1606,14 @@ export type MarkContestedGroupSideOutcome =
     };
 
 /**
- * `runtime.markContestedGroup` 全体の結末（Issue #207/#933 PR2、ADR 0327 §4-c、ADR 0378、
- * ADR 0381）。`MarkContestedOutcome`（2者版）と対称の語彙——「対象が適格でなかった」
- * 「書き込み時点で競合した」「対応していない」を1つの `false`/例外に潰さない。
+ * `runtime.markContestedGroup` 全体の結末（ADR 0327、ADR 0378、ADR 0381）。`MarkContestedOutcome`（2者版）と対称の語彙で、
+ * 「対象が適格でなかった」「書き込み時点で競合した」「対応していない」を1つの `false`/例外に潰さない。
  *
- * - `"contested_group"` — 全メンバーを `status: 'contested'`・`contestedWithId: null` へ
- *   動かし、有効期間が重なる組に `memory_relations` を張った。**部分成功は無い。**
- * - `"ineligible"` — `getMany` で読んだ時点で、1件以上が `"eligible"` でなかった。
- *   **書き込みは一切試みていない。**
- * - `"conflict"` — 読んだ時点では全員 `"eligible"` だったが、書き込み時点で
- *   {@link MemoryStatusConflictError} が投げられた（TOCTOU）。1回だけ再読した現在の
- *   `status` を `conflicts` に積む。
- * - `"not_attempted"` — `MemoryStore.markContestedGroup` が実装されていない
- *   （`MarkContestedGroupResult.supported: false`）。フォールバック経路は無い。
+ * - `"contested_group"` — 全メンバーを `status: 'contested'`・`contestedWithId: null` へ動かし、有効期間が重なる組に `memory_relations` を張った。**部分成功は無い。**
+ * - `"ineligible"` — `getMany` で読んだ時点で、1件以上が `"eligible"` でなかった。**書き込みは一切試みていない。**
+ * - `"conflict"` — 読んだ時点では全員 `"eligible"` だったが、書き込み時点で {@link MemoryStatusConflictError} が投げられた（TOCTOU）。
+ *   1回だけ再読した現在の `status` を `conflicts` に積む。
+ * - `"not_attempted"` — `MemoryStore.markContestedGroup` が実装されていない（`MarkContestedGroupResult.supported: false`）。フォールバック経路は無い。
  */
 export type MarkContestedGroupOutcome =
   | { kind: "contested_group"; members: Memory[] }
@@ -2544,39 +1624,28 @@ export type MarkContestedGroupOutcome =
     }
   | { kind: "not_attempted" };
 
-/**
- * `runtime.markContestedGroup` の任意オプション（Issue #207/#933 PR2、ADR 0381）。
- * `MarkContestedOptions`（2者版）と同じ形。
- */
+/** `runtime.markContestedGroup` の任意オプション（ADR 0381）。`MarkContestedOptions`（2者版）と同じ形。 */
 export interface MarkContestedGroupOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
   /**
-   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
-   * この欄では上書きしない——`markContested` の `opts.reason` → `meta.note` と同じ形）。
-   * 省略時は `meta` に `note` キー自体を持たせない。
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、この欄では上書きしない。
+   * `markContested` の `opts.reason` → `meta.note` と同じ形）。省略時は `meta` に `note` キー自体を持たせない。
    */
   reason?: string | undefined;
 }
 
-/**
- * `runtime.markContestedGroup` の結果（Issue #207/#933 PR2、ADR 0381）。
- */
+/** `runtime.markContestedGroup` の結果（ADR 0381）。 */
 export interface MarkContestedGroupResult {
-  /**
-   * `MemoryStore.markContestedGroup` が実装されていたか。**`false` のとき `outcome` は
-   * 必ず `{ kind: "not_attempted" }`。**
-   */
+  /** `MemoryStore.markContestedGroup` が実装されていたか。**`false` のとき `outcome` は必ず `{ kind: "not_attempted" }`。** */
   supported: boolean;
   /** どう終わったか（{@link MarkContestedGroupOutcome}）。 */
   outcome: MarkContestedGroupOutcome;
 }
 
 /**
- * `runtime.resolveContestedGroup` がメンバー1件を分類する適格性（Issue #207/#933 PR2、
- * ADR 0327 §4-c、ADR 0378 決定3、ADR 0381）。`ResolveContestedSideOutcome`（2者版）と
- * 違い、群のメンバーは `contestedWithId` を持たない設計（`markContestedGroup` 契約）なので
- * `"pair_broken"` に相当する分類は無い——`status` だけを見る。
+ * `runtime.resolveContestedGroup` がメンバー1件を分類する適格性（ADR 0327、ADR 0378、ADR 0381）。`ResolveContestedSideOutcome`（2者版）と違い、
+ * 群のメンバーは `contestedWithId` を持たない設計（`markContestedGroup` 契約）なので、`"pair_broken"` に相当する分類は無い。`status` だけを見る。
  *
  * - `"eligible"` — `status === "contested"`。
  * - `"not_found"` — そのテナントにその id の Memory がそもそも無い。
@@ -2592,20 +1661,14 @@ export type ResolveContestedGroupSideOutcome =
     };
 
 /**
- * `runtime.resolveContestedGroup` 全体の結末（Issue #207/#933 PR2、ADR 0381）。
- * `ResolveContestedOutcome`（2者版）と対称の語彙。
+ * `runtime.resolveContestedGroup` 全体の結末（ADR 0381）。`ResolveContestedOutcome`（2者版）と対称の語彙。
  *
- * - `"resolved"` — 全メンバーを `resolution` に従って `active`/`superseded` へ動かし、
- *   このメンバー間の `memory_relations` を双方向とも削除した。
- * - `"ineligible"` — 読んだ時点で、1件以上が `"eligible"` でなかった——**うち `members` が
- *   `memory_relations` でつながった「今も `contested` な」群の一部しか渡されていなかった
- *   場合も含む**（2026-09-30 の直し、ADR 0381）。この場合は `sides` に含めきれない欠けた
- *   メンバーの id を `missingMembers` に積む（`sides` は渡された `members` だけを分類する
- *   ため、渡されなかった欠けたメンバーはそもそも `sides` に現れない）。**書き込みは一切
- *   試みていない。**
- * - `"conflict"` — 読んだ時点では全員 `"eligible"` だったが、書き込み時点で
- *   {@link MemoryStatusConflictError} が投げられた（TOCTOU、または store 側の
- *   全体一致 CAS 違反）。1回だけ再読した現在の `status` を `conflicts` に積む。
+ * - `"resolved"` — 全メンバーを `resolution` に従って `active`/`superseded` へ動かし、このメンバー間の `memory_relations` を双方向とも削除した。
+ * - `"ineligible"` — 読んだ時点で、1件以上が `"eligible"` でなかった。`members` が `memory_relations` でつながった「今も `contested` な」群の一部しか
+ *   渡されていなかった場合も含む。この場合は、`sides` に含めきれない欠けたメンバーの id を `missingMembers` に積む（`sides` は渡された `members` だけを分類するため、
+ *   渡されなかった欠けたメンバーは `sides` に現れない）。**書き込みは一切試みていない。**
+ * - `"conflict"` — 読んだ時点では全員 `"eligible"` だったが、書き込み時点で {@link MemoryStatusConflictError} が投げられた（TOCTOU、または store 側の全体一致 CAS 違反）。
+ *   1回だけ再読した現在の `status` を `conflicts` に積む。
  * - `"not_attempted"` — `MemoryStore.resolveContestedGroup` が実装されていない。
  */
 export type ResolveContestedGroupOutcome =
@@ -2622,35 +1685,25 @@ export type ResolveContestedGroupOutcome =
   | { kind: "not_attempted" };
 
 /**
- * `runtime.resolveContestedGroup` に「どちらが正しいか」を渡すための判別可能 union
- * （Issue #207/#933 PR2、ADR 0378 決定3、ADR 0381）。`ContestedResolution`（2者版）と
- * 完全に同じ形——新しい決着の種類は増やさない。`"supersede"` の `winnerId` は
- * `members` のうちのちょうど1件を指す。
+ * `runtime.resolveContestedGroup` に「どちらが正しいか」を渡すための判別可能 union（ADR 0378、ADR 0381）。`ContestedResolution`（2者版）と完全に同じ形で、
+ * 新しい決着の種類は増やさない。`"supersede"` の `winnerId` は `members` のうちのちょうど1件を指す。
  */
 export type ContestedGroupResolution = ContestedResolution;
 
-/**
- * `runtime.resolveContestedGroup` の任意オプション（Issue #207/#933 PR2、ADR 0381）。
- * `ResolveContestedOptions`（2者版）と同じ形。
- */
+/** `runtime.resolveContestedGroup` の任意オプション（ADR 0381）。`ResolveContestedOptions`（2者版）と同じ形。 */
 export interface ResolveContestedGroupOptions {
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor | undefined;
   /**
-   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested_resolved'`
-   * であり、この欄では上書きしない）。省略時は `meta` に `note` キー自体を持たせない。
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested_resolved'` であり、この欄では上書きしない）。
+   * 省略時は `meta` に `note` キー自体を持たせない。
    */
   reason?: string | undefined;
 }
 
-/**
- * `runtime.resolveContestedGroup` の結果（Issue #207/#933 PR2、ADR 0381）。
- */
+/** `runtime.resolveContestedGroup` の結果（ADR 0381）。 */
 export interface ResolveContestedGroupResult {
-  /**
-   * `MemoryStore.resolveContestedGroup` が実装されていたか。**`false` のとき `outcome` は
-   * 必ず `{ kind: "not_attempted" }`。**
-   */
+  /** `MemoryStore.resolveContestedGroup` が実装されていたか。**`false` のとき `outcome` は必ず `{ kind: "not_attempted" }`。** */
   supported: boolean;
   /** どう終わったか（{@link ResolveContestedGroupOutcome}）。 */
   outcome: ResolveContestedGroupOutcome;
@@ -2663,245 +1716,81 @@ export interface ResolveContestedGroupResult {
 export interface Runtime {
   /**
    * 層: 中核
-   * `docs/architecture.md` §3.5 の Observation 冪等キー（`externalId`）は、その Observation
-   * から生まれた Memory がその後どうなったかを問わない（2026-09-26 追記、クローン miku の
-   * 判断、[Issue #897](https://github.com/takecchi/mnemora/issues/897)）。`forget()` で
-   * `forgotten` になった、あるいはさらに `purge()` でトゥームストーン化された Memory の
-   * 元になった Observation と同じ `externalId` で `observe()` を呼び直しても、
-   * `createObservationWithOutbox`（`handleExtractableObservation` 参照）は既存の
-   * Observation を `created: false` で返し、抽出はやり直さない——
-   * `{ memoryIds: [], extraction: 'skipped', extractionFailure: null }` がそのまま返る。
-   * `extract: 'sync'`/`'deferred'` のどちらでも同じ形になる（`created: false` の分岐は
-   * `extractMode` を見るより前にあるため）。この振る舞いは `forgotten`（`purge` 前）の
-   * 段階でも同じである——`createObservationWithOutbox` は Observation どうしの一致だけを
-   * 見ており、対応する Memory の `status` を一度も読まない。
+   * Observation を記録し、`extract: 'sync'`（既定）ならその場で LLM 抽出して Memory を書く。
    *
-   * 理由: 抽出をやり直すと、`purge()` で消した内容が同じ `externalId` の再送だけで
-   * 蘇りうる。それは「忘れさせる」という約束と正面から食い違う。
+   * 冪等キー（`externalId`）は、その Observation から生まれた Memory のその後を問わない。`forget()`・`purge()` した Memory の元と同じ `externalId` で呼び直しても、抽出はやり直さず
+   * `{ memoryIds: [], extraction: 'skipped', extractionFailure: null }` を返す（`sync`/`deferred` とも）。やり直すと、`purge()` で消した内容が再送だけで蘇りうるため。
+   * 再送の内訳（その Observation から作られた記憶の `status` と `purged`）は `ObserveResult.resend`（ADR 0639）で読む。
    *
-   * 「正常な冪等の再送」と「forgotten/purged が原因で無視された」は、`ObserveResult.resend`
-   * （冪等な再送のときだけ付く。その Observation から作られた記憶の `status` と `purged`）で区別する
-   * （ADR 0639。以前は区別できず、内訳を持たせる案を見送っていた）。`resend` が無いのは新しく作った呼び出し。
-   * `memories` が空ならまだ抽出されていない（ジョブの状態はこの欄では分からない）。
+   * 投げる例外:
+   * - `input` が `ObserveInputSchema` に合わなければ `ZodError`（何も書く前）。`utterance.text`・`event.name`・`document.content` は、空文字に加えて `trim` で空になる値も断る（ADR 0502。U+200B は通る）。
+   * - `extract: "deferred"` と、空でない `subjectCandidates` または `claimKey` の同時指定は、{@link SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} /
+   *   {@link CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} で始まる `Error`（何も書く前）。
+   * - LLM の呼び出しの失敗は投げず、全文フォールバックへ倒して `extractionFailure` に載せる（docs/memory-model.md §4）。
+   * - store の例外はそのまま伝わる。ただし LLM の抽出結果に保存できない値が混じると、その候補だけを落として残りを書き、投げない
+   *   （[ADR 0347](../../../docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）。落とした候補は `created` イベントの `meta.droppedCandidates` に残り、戻り値には出ない。
+   *   全件が落ちたら最初の例外を投げ、何も書かない（全文フォールバックの Memory も作られない）。NUL は `@mnemora/postgres` も testkit の fixture も拒む。孤立サロゲートを含む `text` などは、
+   *   `@mnemora/postgres` では Observation を書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の doc）。
    *
-   * 投げる例外（現状の振る舞いを約束として書く）:
-   * - `input` を `ObserveInputSchema` で検証し、合わなければ zod の `ZodError` を投げる
-   *   （何も書く前）。`utterance.text`・`event.name`・`document.content` は、空文字に加えて、`trim` で空になる値
-   *   （空白・改行・タブ・U+3000 だけ）も断る（ADR 0502。`path` は欄名。U+200B は `trim` が落とさないので通る）。
-   * - `extract: "deferred"` と `subjectCandidates`（空でない）、または `claimKey` を同時に
-   *   渡すと、{@link SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} /
-   *   {@link CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} で始まる `Error` を投げる（何も書く前）。
-   * - LLM の呼び出しの失敗は投げない。全文フォールバックへ倒し、`extractionFailure` に載せる
-   *   （docs/memory-model.md §4）。
-   * - store が投げた例外は、そのまま伝わる。ただし抽出した候補の書き込み（`createMemoryWithOutbox`）の例外は下のとおり。
-   *   ⚠ 2026-09-28 変更（[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)、
-   *   [ADR 0347](../../../docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)。
-   *   クローン miku の判断であり、オーナーの判断ではない）: LLM の抽出結果が schema は通るが保存できない値を含むと、
-   *   **その候補だけを落とし、残りの候補は書いて、投げない。**候補の書き込みが投げたことだけを根拠にする（core は
-   *   保存できない値と一時的な障害を見分けられない）。**全件が落ちたら、最初の例外をそのまま投げ、何も書かない**
-   *   （この変更の前から例外になっていた入力であり、投げる入力は減る側にだけ変わった）。
-   *   - 落とした候補は、残った候補の `created` イベントの `meta.droppedCandidates`（`index`・`contentHash`・
-   *     最も内側の原因の `code`・`message`。候補の本文は写さない）に残る。**この戻り値には出ない**
-   *     （`memoryIds` が候補の数より少なくなるだけ。`extraction` は `"ok"`・`extractionFailure` は `null` のまま）。
-   *   - 全文フォールバックの Memory は作られない（docs/memory-model.md §4 の安全弁は、LLM の呼び出しの失敗だけを覆う）。
-   *   - 本文の NUL は `@mnemora/postgres` も testkit の fixture も拒む。語の多い 1MB 超の本文は、どちらも受け入れる
-   *     （Postgres は migration 0025 以降。それ以前は Postgres だけが tsvector の上限で拒んでいた。Issue #1222・ADR 0364）。
-   *   - 候補を全件書いてから、`created` を積む（落とした候補は全件を書き終えるまで分からない）。
-   *   【実測 2026-09-28】`packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts`。
-   *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
-   *   書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の
-   *   doc、Issue #1075）。
-   *
-   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
-   * 任意の第3引数 `opts?: AbortOptions` を足した。** `opts.signal` は、この Observation が
-   * `extract: 'sync'`（既定）で LLM を呼ぶ間だけ効く——**Observation と `extract` ジョブは、
-   * LLM を呼ぶ前に既に書かれている**（`createObservationWithOutbox`）。abort されると:
-   * - `observe()` は reject する（`signal.reason`。無ければ `AbortError` 相当）。
-   *   **上の「LLM の呼び出しの失敗は投げない。全文フォールバックへ倒す」には倒さない**
-   *   ——中断と LLM の失敗を同じ顔にしない。
-   * - 全文フォールバックの Memory は作られない。抽出候補も1件も書かれない。
-   * - `extract` ジョブは `complete()` されない。⚠ **2026-10-01 訂正（[ADR 0454](../../../docs/decisions/0454-reextract-anchor-observe-consolidate-state-matrix-round30.md)）:
-   *   以前は「claim もされていないまま残る」と書いていたが、[ADR 0407](../../../docs/decisions/0407-sync-observe-extract-job-lease.md)
-   *   以降は違う。** `extract: 'sync'` の observe が積むジョブは、observe が claim 済み（`claimed_by: "runtime.observe:sync"`・
-   *   `attempts: 1`）の状態で作られ、abort（と、抽出中に投げた例外）の後もその claim のまま残る。`tick()` は**リースが切れるまで**
-   *   そのジョブを拾わない（`leaseMs` の内側の `tick()` は `processed: 0`）。リースが切れた後の `tick()` が取り直し
-   *   （`attempts` は 2）、そのジョブを処理する（`processExtractJob`）。【実測 2026-10-01】`@mnemora/postgres` と
-   *   testkit の fixture で同じ。⚠ **その間に同じ `externalId` で `observe()` を再送しても、抽出はやり直されない**——
-   *   Observation は既に在るので `{ memoryIds: [], extraction: 'skipped' }` が返る（上の #897 と同じ分岐）。
-   *   ただし、この observe 呼び出しにだけ渡した
-   *   `subjectCandidates`・`claimKey` は永続化されないため、後の `tick()` からの再抽出には
-   *   **届かない**（`runExtraction` の doc コメントの「`processExtractJob` は渡さない」と同じ理由）。
-   * - `claimKey.enabled: true` を渡していた場合、claim key の LLM 呼び出し
-   *   （`deriveClaimKeys`）は抽出の LLM 呼び出しの**後**・Memory の書き込みの**前**に行う
-   *   （`runExtraction` の実装順）。abort がどちらの呼び出し中に起きても、Memory の書き込みは
-   *   まだ始まっていない——重複や部分書き込みの余地は無い。
-   * `extract: 'deferred'` の経路・`kind: 'memory_usage'` の経路は LLM を呼ばないため、
-   * `opts.signal` を渡しても何も変わらない。
+   * 第3引数 `opts?: AbortOptions`（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）。`signal` は `sync` で LLM を呼ぶ間だけ効く。Observation と `extract` ジョブは LLM の前に書かれている。
+   * abort されると、全文フォールバックへ倒さず（中断と LLM の失敗を同じ顔にしない）reject し（`signal.reason`。無ければ `AbortError` 相当）、Memory は書かれない。`extract` ジョブは `complete()` されず、
+   * observe の claim（`claimed_by: "runtime.observe:sync"`。[ADR 0407](../../../docs/decisions/0407-sync-observe-extract-job-lease.md)）のまま残るので、`tick()` はリースが切れるまで拾わず、
+   * 切れた後に取り直して処理する。その間の同じ `externalId` の再送は抽出をやり直さず、この呼び出しにだけ渡した `subjectCandidates`・`claimKey` は永続化されないので、後の `tick()` からの再抽出には届かない。
+   * `deferred` と `memory_usage` は LLM を呼ばないので `signal` は効かない。
    */
   observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
   /**
    * 層: 保守操作
-   * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。
-   * `extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが
-   * 明示的に呼ばない限り抽出・埋め込みは永久に走らない——「キューが無ければ黙って
-   * 何も起きない」を作らない、という設計方針をそのまま体現する。
+   * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。`extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが呼ばない限り抽出・埋め込みは永久に走らない。
    *
-   * `opts.leaseMs` は必須（ADR 0032）。`tick(ctx)` を引数無しで呼ぶことはできない
-   * ——`claimBatch` の claim リース長は運用方針であり、`packages/core` が既定値を
-   * 発明せず呼び出し側に決めさせるための意図した破壊的変更。`leaseMs` を省略したとき（型を外した呼び出し）や
-   * `opts` が object でないときは、Runtime が claim する前に名指しの例外（`TypeError`・`RangeError`）で断る
-   * （ADR 0496。{@link TickOptions.leaseMs}）。
+   * `opts.leaseMs` は必須（ADR 0032）で、`packages/core` は既定値を決めない。省略や `opts` が object でないときは、claim する前に `TypeError`・`RangeError` で断る（ADR 0496。{@link TickOptions.leaseMs}）。
    *
-   * 🔴 **処理する kind は {@link TICK_SUPPORTED_JOB_KINDS} が唯一の出所である**
-   * （ADR 0082、issue #105）。`opts.kinds` の既定値もそこを指す。そこに無い kind を
-   * `opts.kinds` に明示して渡した場合、そのジョブは claim され、**終端で失敗し**
-   * （`fail()`。Phase 1 に自動リトライは無い）、{@link TickResult.unsupported} に
-   * **名指しで**出る。黙って何も起きないまま lease が切れる形にはしない。
-   *
-   * ⚠ `OutboxJobKind` に名前が在ることと `tick` が処理することは**別である**——
-   * その型の JSDoc も参照。
+   * 🔴 **処理する kind は {@link TICK_SUPPORTED_JOB_KINDS} が唯一の出所。** それに無い kind を `opts.kinds` に明示すると、そのジョブは claim され、**終端で失敗し**（`fail()`。自動リトライは無い）、
+   * {@link TickResult.unsupported} に名指しで出る（黙って lease 切れを待たない）。`OutboxJobKind` に名前が在ることと `tick` が処理することは別（その型の JSDoc も参照）。
    */
   tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
   /**
    * 層: 中核
-   * roadmap.md 段階4「想起」・段階5「説明」。docs/recall.md §2 の7段パイプライン
-   * （実装は `./recall-runtime.js` の `runRecall`）。
+   * docs/recall.md §2 の7段パイプライン（実装は `./recall-runtime.js` の `runRecall`）。
    *
-   * 投げる例外（現状の振る舞いを約束として書く）:
-   * - `query` を `RecallQuerySchema` で検証し、合わなければ zod の `ZodError` を投げる
-   *   （store を読む前・書く前）。
-   * - `channels` に `"lexical"` が在るのに `RuntimeDeps.lexicalStore` が無ければ、
-   *   `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`（`recall.ts`）で始まる `Error` を投げる（ADR 0084 §4）。
-   * - `RuntimeDeps.outputValidation` が `"throw"` のときだけ、組み立てた結果が検証に落ちると
-   *   `RecallOutputValidationError` を投げる（ADR 0098。既定の `"report"` では投げない）。
-   *   この検証は recall の記録（`recallId`）を書いた後に走る。
-   * - store が投げた例外は、そのまま伝わる。
+   * 投げる例外:
+   * - `query` が `RecallQuerySchema` に合わなければ `ZodError`（store を読む前・書く前）。
+   * - `channels` に `"lexical"` が在るのに `RuntimeDeps.lexicalStore` が無ければ、`LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`（`recall.ts`）で始まる `Error`（ADR 0084）。
+   * - `RuntimeDeps.outputValidation` が `"throw"` のときだけ、結果が検証に落ちると `RecallOutputValidationError`（ADR 0098。既定の `"report"` では投げない）。この検証は recall の記録（`recallId`）を書いた後に走る。
+   * - store の例外はそのまま伝わる。`consolidate` / `reflect` の `{ query }` 形と `findCorrectionCandidates` は内部で `recall()` を呼ぶので、同じ例外が届く。
    *
-   * `consolidate` / `reflect` の `{ query }` 形と `findCorrectionCandidates` は内部で
-   * `recall()` を呼ぶので、同じ例外がそのまま届く。
-   *
-   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
-   * 任意の第3引数 `opts?: AbortOptions` を足した。** `opts.signal` はクエリの埋め込み
-   * （`EmbeddingProvider.embed`）を待つ間だけ効く。abort されると `recall()` は reject し
-   * （`signal.reason`。無ければ `AbortError` 相当）、`embedding_provider_unavailable` の
-   * omission には倒さない。段6（記録、`MemoryStore.createRecall`）はクエリの埋め込みより
-   * 後にしか走らないため、abort の時点では recall の記録も `activity_seq` の前進も
-   * 起きていない。
+   * 第3引数 `opts?: AbortOptions`（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）。`signal` はクエリの埋め込みを待つ間だけ効く。abort されると reject し
+   * （`signal.reason`。無ければ `AbortError` 相当）、`embedding_provider_unavailable` の omission には倒さない。段6（記録）は埋め込みより後にしか走らないため、abort の時点では recall の記録も `activity_seq` の前進も無い。
    */
   recall(ctx: Ctx, query: RecallQuery, opts?: AbortOptions): Promise<RecallResult>;
   /**
    * 層: 説明
-   * [Issue #312](https://github.com/takecchi/mnemora/issues/312) /
-   * [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
-   * `recall()` が返した `RecallId` から、その recall が実際に何を・どの内訳で返したかを
-   * **後から**読み戻す。
+   * `recall()` が返した `RecallId` から、その recall が何を・どの内訳で返したかを**後から**読み戻す（[ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md)）。
+   * 見つからない `recallId`、または別テナントの recall なら `null`（例外にしない）。引数と返り値は {@link RecallId} / {@link RecallRecord} をそのまま使う
+   * （`MemoryStore.getRecall` への素通しで、同じ形の型を2つ置くと黙ってずれる）。
    *
-   * ⚠ **その場の {@link RecallResult}（`recall()` の戻り値）ではなく、後から `recallId` で
-   * 引く口である。**`recall()` を呼んだ時点の変数がスコープを抜けた後でも、`recallId` さえ
-   * 持っていれば同じ内訳（`score`/`retrievedVia`/`companionOf`/`associationOf`）に
-   * 後から届く——`docs/north-star.md`「目指す姿」の「なぜそれを思い出したのかを、
-   * 後から説明できる。」の**「後から」**を、`Runtime` だけを持つ採用側にも届かせるための
-   * 口である（ADR 0155 は `MemoryStore.getRecall` を用意したが、`Runtime` には出していない
-   * ——本 issue はその欠落を埋める）。
-   *
-   * 見つからない（そもそも存在しない `recallId`）、または別テナントの recall なら
-   * `null` を返す（例外にしない。`MemoryStore.get`/`getObservation`/`getRecall` と同じ規律）。
-   *
-   * 引数と返り値は {@link RecallId} / {@link RecallRecord} を**そのまま使う**（`TickOptions`
-   * のように別の型を立てない）。この口は
-   * `MemoryStore.getRecall`（`../interfaces/memory-store.js`）へそのまま素通しするだけで、
-   * runtime 側が足す選択肢が1つも無いためである——`reembed`（ADR 0079、上の doc コメント
-   * 参照）と同じ理由: **同じ形の型を2つ置くと、片方だけ直したときに黙ってずれる。**
-   *
-   * 🔴 **`RecallRecord.returnedMemories` は `memoryId`/`score`/`retrievedVia`/
-   * `companionOf`/`associationOf` までしか運ばない——`digest` には届かない。**`recall()`
-   * の戻り値（`RecalledMemory`）には `digest` が在るのに対して非対称である（ADR 0155
-   * 決定1が `digest` を「後から `MemoryStore.get()` で再現できる」という理由で
-   * `recalls` へ複製しなかったため）。`Runtime` には記憶を1件読む口が無いため、
-   * `digest` まで要る採用側は `MemoryStore` を自前で保持する必要がある——検討の詳細は
-   * ADR 0161 の「検討して採らなかった案」を参照。
+   * 🔴 **`RecallRecord.returnedMemories` は `memoryId`/`score`/`retrievedVia`/`companionOf`/`associationOf` までしか運ばず、`digest` には届かない**
+   * （`recall()` の `RecalledMemory` との非対称。`digest` は `MemoryStore.get()` で再現できるので `recalls` へ複製しなかった。ADR 0155）。`Runtime` には記憶を1件読む口が無いので、
+   * `digest` まで要る採用側は `MemoryStore` を自前で保持する。
    */
   getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
   /**
    * 層: 未分類
-   * [Issue #369](https://github.com/takecchi/mnemora/issues/369) (C)「訂正の口」:
-   * 採用側が「これは訂正だ」と明示的に宣言したとき、mnemora 側が**既存の recall で
-   * 相手の候補を探す**ための口。[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)。
+   * 採用側が「これは訂正だ」と宣言したとき、既存の recall で相手の候補を探して返す（[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。
    *
-   * 🔴 **測定の結果、「機械が相手を選んでそのまま `supersede` する」という形は採らないと
-   * 決まった**——訂正してはいけない8ケース中6ケースで、失効させてはいけない事実を
-   * 1位に置いてしまい、閾値をどこに引いても「訂正すべき」と「訂正してはいけない」を
-   * 分離できなかった（実測、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。**⟹ この口は「候補を返すところまで」である。**
+   * 🔴 **機械が相手を選んで `supersede` する形は採らない**（測定で、訂正してはいけない8ケース中6ケースで失効させてはいけない事実を1位に置き、閾値では分離できなかった）。**候補を返すところまで**で、
+   * 確定と書き込みは採用側が `markContested`/`resolveContested`/`reextract` 等を明示的に呼ぶ。LLM は呼ばず、`recall(ctx, { text: input.text })` を1回だけ呼び（`text` 以外は `recall()` の既定）、
+   * この口専用の閾値は置かない。`tick()`/`observe()` からは呼ばれない。
+   * 記憶と監査ログへの確定の書き込みはしないが、中の `recall()` が recall の記録を1件書き、`decay_clock` が `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165）ので、
+   * 活動時計のテナントでは探すたびに記憶が1回ぶん沈む。
    *
-   * この口が**やらないこと**（設計の芯。曲げない）:
-   * - ⛔ **記憶と監査ログには書き込まない。** `Memory` の `status` を一切動かさない。
-   *   `memory_events` に一切積まない。**`markContested`/`resolveContested` の
-   *   *前*に立つ**——「訂正の相手をこれに決めて、実際に対にする／置き換える」という
-   *   確定と書き込みは、常に採用側が `markContested`/`resolveContested`/
-   *   `reextract` 等の既存の書き込み口を明示的に呼んで行う。この口はその前段の
-   *   「相手を探す」だけを引き受ける。
-   *   ⚠ 2026-09-27 訂正（[Issue #1244](https://github.com/takecchi/mnemora/issues/1244)）: 以前は「書き込みを1件もしない」と
-   *   書いていたが、実装と合っていなかった。中で1回呼ぶ `recall()` が、recall の記録を1件書き（戻り値の `recallId`）、
-   *   `decay_clock` が `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165 決めたこと5）。活動時計の
-   *   テナントでは、訂正の相手を探すたびに記憶が1回ぶん沈む。【実測 2026-09-27】`@mnemora/postgres` と testkit の
-   *   fixture で同じ（`correction-candidates-recall-record.postgres.test.ts`）。
-   * - ⛔ **LLM を1回も呼ばない。** 相手探しは既存の `recall()`（ANN + 既存のスコア
-   *   `strategies/scoring.ts`）だけで行う——訂正かどうかの判定・相手の良し悪しの
-   *   判定のどちらにも LLM を使わない。
-   * - ⛔ **新しい閾値を置かない。** 候補の足切りは `recall()` の段2が使う既存の
-   *   `RecallQuery.scoreThreshold`（既定 `DEFAULT_SCORE_THRESHOLD` = 0.1）を
-   *   そのまま通すだけであり、この口専用の閾値（「これ以上のスコアなら訂正の
-   *   相手として妥当」）は発明しない。**理由は上記の測定そのもの**——閾値では
-   *   「訂正すべき」と「訂正してはいけない」を分離できないことが分かっているので、
-   *   分離できない閾値を1つ増やしても北極星の問い3（説明できるか）に答えられる
-   *   ものにならない。
-   * - ⛔ **新しい探索を書かない。** 既存の `recall(ctx, { text: input.text })` を
-   *   **1回だけ**呼ぶ——`consolidate`/`reflect` の `{ seedMemoryId }` 形が
-   *   「新しい『似ている』の判定を作らない」ために採った作法と同じ（`ConsolidateTarget`
-   *   の doc コメント参照）。`text` 以外のフィールド（`limit`/`channels`/
-   *   `overFetchFactor`/`scoreThreshold` 等）は一切変えず、`recall()` の既定に委ねる。
+   * `CorrectionCandidate.recallRank` は `excludeMemoryIds` で除外した後に詰め直さず、`recall()` の並びでの1始まりの順位を運ぶ（自己除外で1位を落としても次は「2」）。
+   * `outcome` に「探していない」は無く、「見つからなかった」は `no_candidates` と `omitted` で説明される（ADR 0008）。`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切る。
    *
-   * ⭐ **`CorrectionCandidate.recallRank` は `excludeMemoryIds` で除外した後に詰め
-   * 直さない。** `recall()` が返した並びでの、1始まりの順位をそのまま運ぶ——
-   * 採用側が「これは recall の何位だった候補か」を、除外の有無に関係なく説明できる
-   * ようにするため（北極星の問い3）。1位を自己除外で落としても、次に残る候補の
-   * `recallRank` は「2」のままである。
+   * 投げる例外（`recall()` も書き込みも試みる前。ADR 0496）: `input.limit` が指定されていて整数でない・`1` 未満は `RangeError`。`input.text` が文字列でない、`input.excludeMemoryIds` が配列でない
+   * （裸の文字列を含む）か文字列でない要素を含む場合は `TypeError`（呼び出し側の取り違えを黙って直さない）。`""` は `recall()` の検証で例外になる。
    *
-   * ⛔ **`outcome` に「探していない」という値は無い。** `findCorrectionCandidates` を呼んだら
-   * 必ず `recall()` を1回呼ぶ——入力の検査（下）で早期に例外を投げる場合を除き、
-   * `recall()` を呼ばない経路は無い。
-   *
-   * ⚠ **入力の検査（ADR 0496。`recall()` も書き込みも試みる前に落ちる）**: `input.text` が文字列でない
-   * （JavaScript や `as` で型を外したとき。`undefined` を含む）と `TypeError`、`input.excludeMemoryIds` が配列でない
-   * （裸の文字列を含む。省略の `undefined` は通る）か、文字列でない要素を含むと `TypeError`。以前は `text` が `undefined`
-   * だと `recall()` が例外にならず、埋め込みを呼ばずに `no_candidates`（`omitted` に `candidate_generation` の
-   * `stage_skipped`）を返し、裸の文字列の `excludeMemoryIds` は1文字ずつの集合になって何も除外しなかった。`""` は今までどおり
-   * `recall()` の検証で例外になる。裸の文字列を配列に包んで通すことはしない（呼び出し側の取り違えを黙って直さない）。
-   * 「見つからなかった」は
-   * `FindCorrectionCandidatesResult.outcome: "no_candidates"` と、`recall()` から
-   * そのまま運ばれる `omitted`（「候補はあったが除外条件で落ちた」等の内訳）の
-   * **両方**で説明される——`ConsolidateOutcome`/`ReflectOutcome` と同じ「無い」の
-   * 分類（ADR 0008）の適用。
-   *
-   * ⚠ **`tick()`/`observe()` からは一度も呼ばれない。** `markContested` と同じ立場——
-   * 呼び出し側が明示的に呼んだときだけ動く。「訂正の口」は Phase 1 の自動化（背景で
-   * 勝手に走る訂正）を意図しておらず、採用側が UI・ワークフローの中で明示的に
-   * 「これは訂正だ」と宣言した瞬間にだけ動く。
-   *
-   * 実装（`createRuntime` 内）: `input.limit` が指定されていて整数でない・`1` 未満なら
-   * `RangeError` を投げる（`markContested` の `firstId === secondId` と同じ位置づけ——
-   * 書き込みも `recall()` も試みる前に落とす）。続けて `input.text`・`input.excludeMemoryIds` の型も
-   * 確かめ、外れていれば `TypeError`（下の「入力の検査」）。どれにも当たらなければ
-   * `recall(ctx, { text: input.text })` を1回呼び、`excludeMemoryIds` を `Set` にして
-   * 除外し、`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切って返す。
-   *
-   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
-   * 任意の第3引数 `opts?: AbortOptions` を足した。**内部で1回呼ぶ `recall()` へそのまま渡す
-   * だけであり、この口自身は中断を新しく判定しない——`recall()` の同日付追記のとおり、
-   * クエリの埋め込みを待つ間だけ効く。abort されると reject する。
+   * 第3引数 `opts?: AbortOptions`（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）は内部の `recall()` へそのまま渡り、`recall()` と同じくクエリの埋め込みを待つ間だけ効く。
    */
   findCorrectionCandidates(
     ctx: Ctx,
@@ -2910,311 +1799,88 @@ export interface Runtime {
   ): Promise<FindCorrectionCandidatesResult>;
   /**
    * 層: 保守操作
-   * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
-   * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
-   * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
-   * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする
-   * （置き換えた側は `active` な行。非 `active` の既存行にぶつかる候補は選ばない。ADR 0454、
-   * `ReextractResult.supersededMemoryIds` の doc）。
-   * 安全弁3つ（LLM がまた失敗したら何もしない・候補0件なら何もしない・compare-and-swap で
-   * TOCTOU の競合を検知する）は `ReextractResult` の doc コメントを参照。
+   * 失敗した抽出をやり直す（ADR 0028）。指定した Observation にもう一度 `extractCandidates` を走らせ、成功したら、同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
+   * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする。置き換えた側は `active` な行（非 `active` の既存行にぶつかる候補は選ばない。ADR 0454）。
+   * 安全弁3つ（LLM がまた失敗したら何もしない・候補0件なら何もしない・compare-and-swap で競合を検知する）は {@link ReextractResult} の doc。
    *
-   * 抽出をやり直せない対象には、LLM も書き込みも試みる前に `Error` を投げる。Observation が
-   * 見つからないとき（別テナントの id・形式の合わない id を含む）と、使用報告の Observation
-   * （`kind: "usage"`。`observe({ kind: "memory_usage" })` が作る。抽出器を通らない、
-   * docs/memory-model.md §6）を渡したとき（Issue #1099）である。
+   * 投げる例外: 抽出をやり直せない対象には、LLM も書き込みも試みる前に `Error`。Observation が見つからないとき（別テナントの id・形式の合わない id を含む）と、
+   * 使用報告の Observation（`kind: "usage"`。抽出器を通らない。docs/memory-model.md §6）を渡したとき。
    *
-   * ⚠ **2026-09-26 追記（Issue #873）: `extractorVersion` は `this`（この runtime インスタンス）
-   * が生成時に固定した値であり、`reextract()` の引数ではない。** supersede の判定
-   * （`listBySourceObservation(ctx, observationId, extractorVersion)`、ADR 0028 決定1）は
-   * 「今回の runtime が持つ `extractorVersion` に一致する既存 Memory」しか見ない。
-   * ⟹ **`extractorVersion` を上げた別の runtime インスタンスで同じ Observation を
-   * reextract しても、旧い版の Memory は `toSupersede`/`skipped` のどちらにも現れず、
-   * supersede されずに `active` のまま残る**——「supersede しなかった」とすら記録されない
-   * （実測、Fake。`packages/core/src/__tests__/runtime-fakes.ts`）。新しい版の Memory も
-   * `active` として作られるため、同じ Observation に由来する新旧2件の Memory が同時に
-   * `active` になり、`recall()` の候補集合に両方出続ける。**旧い版の Memory を退役させる
-   * のは運用側（呼び出し側）の責務であり、`reextract()` はその経路を持たない**——
-   * `forget`/`consolidate` 等の既存の口を個別に呼ぶこと。版の並行比較
-   * （`docs/roadmap.md` §4 技術上のリスク表）はこの性質の上に成り立っている。
-   * 詳細は [ADR 0028](../../../docs/decisions/0028-reextract-superseded-cleanup.md) の
-   * 2026-09-26 追記。
+   * ⚠ **`extractorVersion` は runtime インスタンスが生成時に固定した値で、`reextract()` の引数ではない。** supersede の判定は「今回の runtime の `extractorVersion` に一致する既存 Memory」しか見ない。
+   * ⟹ `extractorVersion` を上げた別の runtime インスタンスで同じ Observation を reextract しても、旧い版の `active` Memory は supersede されず、新旧2件が `active` のまま `recall()` に出続ける。
+   * **旧い版を退役させるのは運用側の責務**（`forget`/`consolidate` 等を個別に呼ぶ。[ADR 0028](../../../docs/decisions/0028-reextract-superseded-cleanup.md)）。
    *
-   * ⚠ 2026-09-27 追記（新しい Memory に何が引き継がれるか。今の振る舞いを書くだけ。Postgres と testkit で実測）:
-   * - **有効期間・`occurredAt` は、Observation から引き継ぐ**（`observe()` と同じ経路。`validUntil` が過去の
-   *   Observation なら、新しい Memory も期限切れになる）。
-   * - **`claimKey` は常に null である。**`reextract` には `observe()` の `claimKey`（opt-in）の口が無く、
-   *   その鍵は保存もされない（ADR 0320 決定4・6、ADR 0324 負債3）。⟹ `claimKey` 付きで observe した
-   *   Memory を置き換えると、置き換えた側（新しい Memory）は鍵を持たず、鍵は `superseded` の旧い Memory
-   *   にだけ残る。同じ鍵の主張による矛盾の検出（ADR 0324）の対象からも外れる。
-   * - **`subjectCandidates` の口も無い**（`sanitizeCandidateSubjectId` の doc。この行はコードを読んで
-   *   確かめただけで、実測はしていない）。LLM が返した候補の
-   *   `subjectId` は一覧で検査されず、省略された候補は Observation の `subjectId` へ落ちる。
-   *   ⚠ **2026-10-06（ADR 0635、問15）: 既定では、LLM が返した `subjectId` は捨てられ、Observation の
-   *   `subjectId` へ落ちる**（`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true` のときだけ、上の「検査されず」になる）。
+   * 新しい Memory に引き継がれるもの: 有効期間・`occurredAt` は Observation から（`observe()` と同じ）。**`claimKey` は常に null**（`reextract` に `claimKey` の口が無く、鍵は保存もされない。ADR 0320、ADR 0324）ので、
+   * `claimKey` 付きで observe した Memory を置き換えると、鍵は `superseded` の旧い Memory にだけ残り、矛盾検出の対象から外れる。`subjectCandidates` の口も無く、省略された候補は Observation の `subjectId` へ落ちる。
+   * 既定では LLM が返した `subjectId` は捨てられる（`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true` のときだけ検査されずに通る。ADR 0635）。
    *
-   * ⚠ **2026-09-28 変更（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
-   * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
-   * 抽出をやり直さない。**`observe()` の再送が forget・purge した記憶について抽出をやり直さない規律（ADR 0124 の追記、
-   * #897）と同じである。やり直すと、LLM の言い方しだいで、退けた事実が印の無い新しい `active` な Memory として戻るため。
-   * - **退けた記憶として数えるもの**（同じ Observation・今の `extractorVersion` の記憶のうち、1件でも在れば）:
-   *   `forgotten`（purge を含む）、`contested`（利用者の訂正でできたものも、claimKey の自動検出でできたものも）、
-   *   訂正の解決で負けた `superseded`（その記憶の最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。
-   * - **数えないもの:** 機構（`reextract`・`consolidate`）で置き換えた `superseded`、`archived`、理由を読めない
-   *   `superseded`（`superseded` イベントが無い・保持期間の掃除で消えた）。理由を読めないものを数えない側に倒すのは、
-   *   やり直せなくなるほうが利用者に見えにくい失敗になるためである。
-   * - **やり直さないときの戻り値:** LLM を呼ばず、何も書かない。`extraction: "skipped"`、`atomicity: "not_attempted"`、
-   *   `memoryIds: []`、`supersededMemoryIds: []`、`extractionFailure: null`、`skipped` には退けた記憶ごとに
-   *   `status_not_active`。同じ Observation の他の `active` な記憶も作り直さない（Observation 全体をやり直さない）。
-   * - 判定のために、`superseded` の記憶1件ごとに `EventStore.list` を1回読む。
-   * - ⚠ 2026-09-28 のこの変更の前は、退けたことを知らずにやり直していた（言い換えなら新しい `active` を作っていた）。
-   * 歯: `packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`（2実装。退けた記憶の4形と、
-   * やり直す側の4形——退けた記憶が無い・機構の superseded 2形・理由の読めない superseded）。
+   * ⚠ **利用者の意思で退けた記憶を持つ Observation では、抽出をやり直さない。** やり直すと、LLM の言い方しだいで、退けた事実が印の無い新しい `active` として戻るため（`observe()` の再送と同じ規律。ADR 0124）。
+   * - 退けた記憶に数えるもの（同じ Observation の記憶のうち、版を問わず1件でも在れば。[ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）: `forgotten`（purge を含む）、
+   *   `contested`、訂正の解決で負けた `superseded`（最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。数えないもの: 機構（`reextract`・`consolidate`）で置き換えた `superseded`、`archived`、
+   *   理由を読めない `superseded`（イベントが無い・保持期間の掃除で消えた）。やり直せなくなるほうが利用者に見えにくい失敗になるため。運用側が旧い版の記憶を forget すると、その Observation のほかの事実も、
+   *   以後 reextract では新しい版の記憶として作られなくなる。
+   * - やり直さないときは LLM を呼ばず何も書かない: `extraction: "skipped"`・`atomicity: "not_attempted"`・`memoryIds: []`・`supersededMemoryIds: []`・`extractionFailure: null`、`skipped` には退けた記憶ごとに `status_not_active`。
+   * - LLM を待つ間に退けられた場合も、何も書かずに同じ形で打ち切る（[ADR 0406](../../../docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)、
+   *   [ADR 0544](../../../docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)）。LLM が返った直後に、LLM の前に読んだ記憶を読み直して同じ判定を当てる（`archived`・機構で置き換えた
+   *   `superseded` は止めない）。`abortIfForgotten` を実装する adapter（`@mnemora/postgres`）は、書き込みと同一トランザクションでも `forgotten` を見直す（{@link SourceMemoryForgottenError}）。
+   *   例外は投げず、`ReextractResult` に `aborted_source_forgotten` に当たる欄は無い。LLM は呼んでいる。実装しない adapter（testkit の `InMemoryMemoryStore`・core の fake）では、読み直しと書き込みの間の窓が残る。
    *
-   * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
-   * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）:
-   * 任意の第3引数 `opts?: AbortOptions` を足した。** `opts.signal` は抽出の LLM 呼び出しを
-   * 待つ間だけ効く。abort されると `reextract()` は reject し（`signal.reason`。無ければ
-   * `AbortError` 相当）、`extraction: "llm_failed_whole_observation"` には倒さない。
-   * LLM 呼び出しは、supersede 対象を読む・書くよりも前に行う——abort の時点では何も
-   * 書かれていない。
+   * ⚠ **`archived` の記憶を持つ Observation を reextract したときの帰結**（[ADR 0432](../../../docs/decisions/0432-recall-status-recheck-and-archive-docs.md)）。`archived` は「退けた記憶」に数えないので、抽出は走る。
+   * 抽出結果が今の記憶と同じ内容なら何も起きない（`memoryIds` は既存の記憶を指し、`archived` のまま、`skipped` にその記憶の `status_not_active`（`status: "archived"`））。reextract は `archived` を戻さない
+   * （戻すには `restoreArchived`）。内容が違えば、新しい版が `active` で作られ、古い `archived` は `archived` のまま残る（その古い版を `restoreArchived` で戻すと、新旧2件が `active` で並ぶ）。
    *
-   * ⚠ **2026-09-30 変更（[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
-   * [ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）:
-   * 「退けた記憶」の判定（上の2026-09-28 変更）は、`extractorVersion` を**問わなくなった**。**
-   * 2026-09-28 時点では「同じ Observation・**今の** `extractorVersion` の記憶」だけを見ており、
-   * `extractorVersion` を上げた runtime インスタンスで reextract すると、前の版で
-   * forget・contest した記憶を見落とし、退けたはずの内容と同じ意味の Memory を印の無い新しい
-   * `active` として書き直しうる欠陥があった（実測、Fake・Postgres 双方、Issue #1432 本文）。
-   * いまは {@link MemoryStore.listBySourceObservationAllVersions} を使い、版を問わず
-   * `forgotten`・`contested`・訂正の解決で負けた `superseded` を数える。
-   * - **帰結**: 版を跨いでも、1件でも退けたものがあれば、その Observation の抽出全体を打ち切る
-   *   （同じ版のときと同じ規律）。⟹ 運用側が旧い版の記憶を forget すると、その Observation の
-   *   ほかの（退けていない）事実も、以後 reextract では新しい版の記憶として作られなくなる。
-   *   `skipped` に `status_not_active` が出た Observation では、旧い版の記憶を残すことが
-   *   運用側の手がかりになる。
-   * - **変えていないもの**: **supersede 対象の判定**（`existingBefore`、下の実装）は今どおり
-   *   `listBySourceObservation(ctx, observationId, extractorVersion)` のまま——**今の
-   *   `extractorVersion` に一致する `active` な Memory しか supersede しない**。上の
-   *   2026-09-26 追記（Issue #873「版を跨いだ旧い版は退役させない・運用側の責務」）はそのまま
-   *   有効である。版を跨いで退けたものが無い Observation では、今どおり新しい版で抽出され、
-   *   旧い版の `active` は supersede されない。
-   * - 詳細・却下した案・EXPLAIN の実測は ADR 0380。
-   *
-   * ⚠ **2026-09-30 追記（[ADR 0406](../../../docs/decisions/0406-reextract-aborts-if-source-forgotten-while-waiting-for-llm.md)。
-   * [Issue #1226](https://github.com/takecchi/mnemora/issues/1226) と同じ穴）: LLM を待つ間に、その
-   * Observation から出た記憶が `forget`（`purge` を含む）されたら、何も書かずに打ち切る。**
-   * 以前は、上の「退けた記憶」の確認が LLM の**前**だけで、待つ間の `forget` を見なかった——LLM が返った
-   * 後に、言い換えが新しい `active` として書かれ、イベントが `created` → `forgotten` → `created` と
-   * 積まれた（実測、Postgres）。今は LLM が返った直後に、LLM の前に読んだその Observation の記憶
-   * （版・status を問わない）を `getMany` で読み直し、1件でも `forgotten` なら打ち切る。書き込み
-   * （`supersedeWithNewMemories`／口が無い adapter 向けの `createMemoryWithOutbox`）にも
-   * `opts.abortIfForgotten` を渡し、実装する adapter（`@mnemora/postgres`）は書き込みと同一
-   * トランザクションでもう一度見直す（{@link SourceMemoryForgottenError}）。
-   * - **打ち切ったときの戻り値**は、退けた記憶を持つ Observation の早期 return と同じ形——`memoryIds: []`・
-   *   `supersededMemoryIds: []`・`extraction: "skipped"`・`atomicity: "not_attempted"`・`skipped` に
-   *   forgotten だった記憶ごとの `status_not_active`。**例外は投げない。公開の型は増やしていない**
-   *   （`consolidate`/`reflect` の `outcome: 'aborted_source_forgotten'` に当たる欄は `ReextractResult` に無い）。
-   *   LLM は呼んだ（この場合 `extraction: "skipped"` でも LLM の呼び出しは起きている）。
-   * - `abortIfForgotten` を実装しない adapter（testkit の `InMemoryMemoryStore`・core の fake）では、
-   *   読み直しだけが保護になる（`consolidate`/`reflect` と同じ。読み直しと書き込みの間の窓は残る）。
-   * - ⚠ **2026-10-02 変更（[ADR 0544](../../../docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)）:
-   *   見直すのは `forgotten` だけではなくなった。** LLM の前の「退けた記憶」の門と同じ判定（`forgotten`・`contested`・
-   *   訂正の解決で負けた `superseded`）を、読み直した記憶にもう一度当てる。待つ間にそうなった記憶が1件でも在れば、
-   *   同じ形で打ち切る（`skipped` の `status` は読み直した実際の値）。`archived`・機構で置き換えた `superseded` は
-   *   LLM の前の門も通すので、止めない。書き込みと同一トランザクションの見直し（`abortIfForgotten`）は `forgotten` のまま。
-   * 歯: `packages/postgres/src/__tests__/reextract-forget-race.postgres.test.ts`・
-   * `reextract-source-forgotten-for-update-race.postgres.test.ts`。
-   *
-   * ⚠ **2026-10 記録（[ADR 0432](../../../docs/decisions/0432-recall-status-recheck-and-archive-docs.md) AL-5。
-   * 今の振る舞いを書くだけ）: `archived` の記憶を持つ Observation を reextract したときの帰結。**
-   * `archived` は「退けた記憶」に数えない（ADR 0028）ので、上の早期 return には入らず、抽出は走る。
-   * - **抽出結果が今の記憶と同じ内容なら、何も起きない。**新しい記憶は作られず（`memoryIds` は既存の
-   *   記憶そのものを指す）、記憶は `archived` のまま、`skipped` にその記憶の `status_not_active`
-   *   （`status: "archived"`）が入る。⟹ reextract は `archived` の記憶を戻さない。戻すには
-   *   `restoreArchived` を呼ぶ。
-   * - **抽出結果の内容が違えば、新しい版が `active` で作られる。**古い `archived` は `superseded` に
-   *   ならず `archived` のまま残る（supersede の対象は `active` だけ）。その古い版を
-   *   `restoreArchived` で戻すと、新旧の2件が `active` で並ぶ。
-   * 【確かめた】両 adapter（testkit の InMemory と Postgres）で、上の2つを走らせて確かめた。歯:
-   * `packages/postgres/src/__tests__/reextract-archived-memory.postgres.test.ts`。
+   * 第3引数 `opts?: AbortOptions`（[ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）。`signal` は抽出の LLM 呼び出しを待つ間だけ効く。abort されると reject し
+   * （`signal.reason`。無ければ `AbortError` 相当）、`extraction: "llm_failed_whole_observation"` には倒さない。LLM 呼び出しは supersede 対象を読む・書くより前なので、abort の時点では何も書かれていない。
    */
   reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
   /**
    * 層: 保守操作
-   * ADR 0079: 索引に載っていない Memory を**もう一度索引へ載せに行く**。
+   * 索引に載っていない Memory を**もう一度索引へ載せに行く**（ADR 0079）。`recall` は `omitted` に `{ kind: 'not_indexed', reason }` を積んで名乗り、docs/recall.md §4 が `reason` ごとの次の一手を案内している。
+   * 埋め込みの provider が落ちていた間に入った Memory は、provider が直っても自力では索引へ戻らない（`fail` は終端で、Phase 1 に自動リトライは無い。ADR 0032）。この口はその案内どおりに動くための操作である。
    *
-   * `recall` は `omitted` に `{ kind: 'not_indexed', reason }` を積んで
-   * 「索引されていない N 件がある」と正しく名乗る。docs/recall.md §4 はその `reason` に
-   * 応じた次の一手（`pending` は待つ・再試行する、`failed` は埋め込みパイプラインを疑う）
-   * まで案内している。**この口は、その案内どおりに動くための操作である**——
-   * 埋め込みの provider が落ちていた間に入った Memory は、provider が直っても
-   * 自力では索引へ戻らない（`fail` は終端であり、Phase 1 に自動リトライは無い。ADR 0032）。
+   * **このメソッド自身は埋め込まない。** `MemoryStore.requeueEmbedJobs` で `embed` ジョブを積み直すだけで、埋め込むのは次の `tick()`。**呼んだだけでは索引は埋まらない。** `reextract`（抽出のやり直し）とは別の操作。
+   * 引数と返り値は {@link RequeueEmbedJobsOptions} / {@link RequeueEmbedJobsResult} をそのまま使う（store の同名メソッドへ素通しで、同じ形の型を2つ置くと黙ってずれる）。
    *
-   * ⚠ **埋め込みの入力上限を超えて `failed` になった Memory は、この口だけでは戻らない**
-   * （Issue #753）——次の `tick()` がまた同じ `memory.content` を送り、同じ理由で
-   * `failed` に戻る。戻すには {@link RuntimeDeps.embeddingInput}（任意フック、ADR 0336）を
-   * 渡した runtime でこの口を呼び、続けて `tick(ctx, { kinds: ['embed'], leaseMs })` を呼ぶ
-   * （`Memory.content` は変わらない）。既定では何も切らない。
+   * ⚠ 埋め込みの入力上限を超えて `failed` になった Memory は、この口だけでは戻らない（次の `tick()` が同じ `memory.content` を送って同じ理由で `failed` に戻る）。
+   * {@link RuntimeDeps.embeddingInput}（ADR 0336）を渡した runtime でこの口を呼び、続けて `tick(ctx, { kinds: ['embed'], leaseMs })` を呼ぶ。
+   * ⚠ 埋め込み空間を切り替えた後の、古い空間で `ready` の記憶は積み直せない（`statuses` は `pending`/`failed`/`skipped` だけを受け付け、`embeddingStatus` は空間を区別しない。Phase 1 は空間の切り替えを支えない。`docs/memory-model.md` §10）。
    *
-   * ⚠ **埋め込み空間を切り替えた後の、古い空間で `ready` の記憶は、この口では積み直せない**
-   * （[Issue #1015](https://github.com/takecchi/mnemora/issues/1015)）。`statuses` は `NotIndexedReason`
-   * （`pending`/`failed`/`skipped`）だけを受け付け、`embeddingStatus` は空間を区別しないので、
-   * そうした記憶は `ready` のまま今の空間に行を持たない。Phase 1 は空間の切り替えを支えない
-   * （`docs/memory-model.md` §10）。
-   *
-   * ⚠ **`reextract` とは別の操作である。**`reextract` は**抽出**をやり直す
-   * （Observation から Memory を作り直す）。こちらは既にある Memory の**埋め込み**を
-   * やり直す。
-   *
-   * **このメソッド自身は埋め込みを行わない。**`MemoryStore.requeueEmbedJobs` を呼んで
-   * `embed` ジョブを積み直すだけであり、実際に埋め込むのは次の `tick()` である
-   * ——「キューが無ければ黙って何も起きない」を作らない、という `tick` の設計方針
-   * （上の doc コメント）をここでも崩さない。**呼んだだけでは索引は埋まらない。**
-   *
-   * 引数と返り値は {@link RequeueEmbedJobsOptions} / {@link RequeueEmbedJobsResult} を
-   * **そのまま使う**（`TickOptions` のように別の型を立てない）。この口は store の同名
-   * メソッドへ素通しするだけで、runtime 側が足す選択肢が1つも無いためである——
-   * 同じ形の型を2つ置くと、片方だけ直したときに黙ってずれる。
-   *
-   * **`limit` は入口で検査する**（ADR 0433 決定4）。省略したとき（JavaScript からの呼び出し・`as` 経由）と、
-   * 数なのに 0 以上の整数でないとき（負・小数・`NaN`・±`Infinity`）は、store を呼ぶ前に `RangeError`
-   * （`Runtime.reembed: limit must be a non-negative integer`）を投げる——以前は store が SQL の `LIMIT` に
-   * 渡して、Postgres の `syntax error at or near "FOR"` などになっていた。`0` は例外にならず、何も積み直さない
-   * （今までどおり）。
+   * 投げる例外: `limit` は入口で検査する（ADR 0433）。省略したとき（JavaScript・`as` 経由）と、数なのに 0 以上の整数でないとき（負・小数・`NaN`・±`Infinity`）は、store を呼ぶ前に `RangeError`
+   * （`Runtime.reembed: limit must be a non-negative integer`）。`0` は例外にならず、何も積み直さない。
    */
   reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
   /**
    * 層: 保守操作
-   * [ADR 0114](../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md):
-   * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
-   * → `status='archived'` + `archived` イベント」を実行する。
+   * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引 → `status='archived'` + `archived` イベント」を実行する（[ADR 0114](../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md)）。
+   * `MemoryStore.archiveDecayed`（任意メソッド）へ素通しし、引数の型 {@link ArchiveDecayedOptions} を store 側と共有する（`reembed` と同じ）。
    *
-   * `MemoryStore.archiveDecayed`（任意メソッド）へ素通しする——`reembed`（ADR 0079）と
-   * 同じ形。引数の型 {@link ArchiveDecayedOptions} を store 側とそのまま共有している
-   * のも同じ理由（同じ形の型を2つ置くと片方だけ直したときに黙ってずれる）。
+   * ⭐ **`opts.clock` を省略した場合に限り、この口が `tenant_settings.decay_clock` を読んで補う**（[ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。`'wall'`（既定）なら
+   * `decayFloorAt <= now`、`'activity'`/`'either'` なら `nowSeq`（`tenant_activity.activity_seq`）も読んで store へ渡す。**`opts.clock` を明示したときはそちらが勝ち、`decay_clock` は読まない。**
+   * `activity`/`either` を明示して `opts.nowSeq` を省くと、`tenant_activity` は1回読む。読まないのは `clock: wall` を明示したときと、`clock` と `nowSeq` の両方を明示したときだけ。
    *
-   * ⭐ **`opts.clock` を省略した場合に限り、この口が `tenant_settings.decay_clock` を
-   * 読んで補う**（Issue #364 /
-   * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
-   * `'wall'`（既定）なら `decayFloorAt <= now` のまま、`'activity'`/`'either'` なら
-   * `nowSeq`（`tenant_activity.activity_seq`）も併せて読んで store へ渡す。**`opts.clock`
-   * を明示で渡したときはそちらが勝ち、`tenant_settings`（`decay_clock`）は読まない。**
-   * ⚠ 2026-09-27 訂正（[Issue #1217](https://github.com/takecchi/mnemora/issues/1217)）: 以前は「`tenant_activity`
-   * も一切読まない」と書いていたが、実装（ADR 0186 決めたこと1）と合っていなかった。`opts.clock` に
-   * `activity`/`either` を明示して `opts.nowSeq` を省くと、`tenant_activity` は1回読む。
-   * どちらも読まないのは、`clock: wall` を明示したときと、`clock` と `nowSeq` の両方を明示したときだけである。 `decay_clock` を設定していないテナントの挙動は本 ADR の前後で
-   * 1バイトも変わらない。
-   *
-   * store がこの口を実装していなければ `{ supported: false, archived: [], reachedLimit:
-   * false }` を返す——黙って0件を返すのではなく「対応していない」と名指しする
-   * （ADR 0082「黙って何も起きない形にしない」の哲学をここでも守る）。
-   *
-   * ⚠ **`reextract`/`consolidate`（ADR 0100）と違い、フォールバック経路を持たない。**
-   * `supersedeWithNewMemories` は「口が無ければ今日どおりの2段の書き込みで代替できる」
-   * 既存の経路があったが、この掃引には代替経路がそもそも存在しない——`decay_floor_at`
-   * を読んで `archived` にする経路はこの口以外に無い。⟹ 「対応していない」を返す
-   * だけで、それ以上の代替を試みない。
-   *
-   * 🔴 **この掃引は自動では一度も走らない。**`tick()`/`observe()` からは呼ばれない
-   * ——呼び出し側が明示的にこれを呼んだときだけ走る保守操作である（`reembed` と
-   * 同じ立場。`opts.now`/`opts.limit` のどちらにも既定値を置かない規律も共有する）。
+   * store が実装していなければ `{ supported: false, archived: [], reachedLimit: false }`（黙って0件を返さず「対応していない」と名指しする。ADR 0082）。`reextract`/`consolidate` と違いフォールバックは無い
+   * （`decay_floor_at` を読んで `archived` にする経路はこの口だけ）。🔴 **自動では一度も走らない**: `tick()`/`observe()` から呼ばれず、`opts.now`/`opts.limit` にも既定値を置かない（`reembed` と同じ）。
    */
   sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult>;
   /**
    * 層: 是正・取り消し
-   * Issue #195（[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）:
-   * `archived` な Memory を、呼び出し側が**明示的に**取り戻す。`sweepArchive`
-   * （ADR 0114）が閉じる方向（`active` → `archived`）だけを持っていた片道を、
-   * 開く方向（`archived` → `active`）で埋める——`docs/north-star.md` が引くオーナー
-   * 仕様§48「必要な場合だけ過去の記憶を再び呼び戻せる」の、その「呼び戻せる」側。
+   * `archived` な Memory を、呼び出し側が**明示的に**取り戻す（[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）。`sweepArchive` の逆向き（`archived` → `active`）。結果の意味は {@link RestoreArchivedOutcome}。
    *
-   * 🔴 **`MemoryStore` に新しい任意メソッドを足していない。**`sweepArchive`
-   * （`archiveDecayed?`）と違い、この操作は「`status` を1つ動かし、同一トランザクションで
-   * `memory_events` に1件積む」という、**既に必須メソッドとして存在する
-   * `MemoryStore.updateStatusWithEvent`（ADR 0031）がそのまま満たせる形**をしている
-   * ——`archived` → `active` への compare-and-swap を撃つだけであり、`archiveDecayed`
-   * のような「範囲走査して複数件を一度に選ぶ」独自のクエリ形状を必要としない。
-   * **⟹ `supported: false` を名乗る余地が無い**（`MemoryStore` を実装するすべての
-   * adapter で、追加のコードなしに今日から動く）。
+   * `MemoryStore` に新しい任意メソッドは足していない（必須の `updateStatusWithEvent` の compare-and-swap で足りる）ので、`supported: false` は無い。`target` は `MemoryId[]` に正規化して入力順に処理し、
+   * 空配列は store に触れず `{ outcomes: [] }`。在るかどうかは `getMany` の答えに従い、id は小文字にそろえて突き合わせる（`@mnemora/postgres` では大文字の UUID も在る記憶になる。
+   * 大文字小文字だけが違う id を同じ呼び出しに混ぜたときは渡された綴りどおり）。競合は**1回だけ**再読して返し、再試行しない。競合以外の例外は `failed` を積んで打ち切り、残りを `not_attempted` で返す
+   * （再読・ループ前の読みの失敗を含む）。例外は外へ投げない。
    *
-   * 手順（`forget` (`ForgetOutcome` の doc コメント) と同じ骨格。**新しいメソッドを
-   * 足さない代わりに、アルゴリズムの形をできる限り揃えた**）:
-   * 1. `target` を `MemoryId[]` に正規化する。空配列は store に一切触れず
-   *    `{ outcomes: [] }`。
-   * 2. `getMany` で一括読み。存在しなければ `"not_found"`。`status !== "archived"`
-   *    なら `"status_not_archived"`（現在の `status` を添える。書き込み無し）。
-   *    在るかどうかは `getMany` の答えに従い、store が返した id と渡された id を小文字にそろえて突き合わせる
-   *    （`@mnemora/postgres` では大文字の UUID も在る記憶になる）。大文字小文字だけが違う id を同じ呼び出しに
-   *    混ぜたときは、渡された文字列どおりに突き合わせる。
-   * 3. それ以外（`status === "archived"`）は、観測した `"archived"` を `expectedStatus`
-   *    にした compare-and-swap で `updateStatusWithEvent(ctx, id, "active",
-   *    { expectedStatus: "archived" }, { kind: "restored", ... })` を呼ぶ。
-   *    {@link MemoryStatusConflictError} が投げられたら**1回だけ**再読し、
-   *    再読した `status` が `"active"`（＝別の呼び出しが先に同じ復帰を済ませていた）
-   *    なら `"status_not_archived"`、`null`（行が無くなっていた）なら `"not_found"`、
-   *    それ以外なら `"conflicted"` として `observedStatus` を返す——**上限の無い
-   *    再試行ループにはしない**（`forget` と同じ安全弁）。
-   * 4. それ以外の例外は `"failed"` を積んだ上で**その場で処理を打ち切り**、残りの
-   *    対象は一切試みずに `"not_attempted"` として返す。例外はこのメソッドの外へは
-   *    投げない。
-   *    ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
-   *    いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
-   *    ループ前の読み（`getMany`・活動時計の読み）が失敗した場合も同じく、1件目を `"failed"`、残りを
-   *    `"not_attempted"` にして返す（Issue #964。まだ1件も書いていない）。
+   * ⚠ **`decay_floor_at` を動かす**（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。`recall()` は既定で忘却ゲートを持ち、`sweepArchive` が `archived` にした行は定義上その条件を満たす
+   * （テナントの `decay_clock` に従う。[ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）ので、`status` を戻しただけでは既定では recall に二度と現れない。そこで、復帰に成功した対象へ続けて
+   * `MemoryStore.reinforce` を呼び、復帰の瞬間から引き直す。`reinforce` が失敗しても復帰は握り潰さず、`restored` のまま `reinforceError` に運ぶ。
    *
-   * `memory_events` へ積むイベントの `kind` は `"restored"`
-   * （[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md) が
-   * `MemoryEventKind` へ足した新しい値）。`digestSnapshot` にはその Memory の
-   * 現在の `digest` を入れ、**`content`（本文）は運ばない**（`forget`/`reextract` と
-   * 同じ規律。docs/memory-model.md §9）。`opts.reason` を渡すと `meta.reason` に入り、
-   * 省略すると `meta` に `reason` キー自体を持たせない。
+   * ⚠ **`sweepArchive` と重なると、`restored` と返っても `status` が `archived` のままのことがある**（ADR 0432。この版では直していない）。復帰と `reinforce` は別々の書き込みで、その間は `decay_floor_at` が
+   * まだ過去を指す。その窓に同じ Memory を対象にした `sweepArchive` が入ると再び `archived` にされ、あとで `reinforce` が成功しても `decay_floor_at` だけが延びて `status` は `archived` のまま残る
+   * （outcome は `restored` のまま、`memory_events` は `archived → restored → archived`）。確かめるなら、復帰のあとに `get` で今の `status` を読む。
    *
-   * ⚠ **2026-09 訂正（マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）:
-   * `decay_floor_at` は動かす。** ADR 0122 の当初決定は「復帰と強化は別の操作であり、
-   * `decay_floor_at` の再計算は複製しない。居着かせたい呼び出し側が `reinforce` を
-   * 別途呼ぶこと」だった。**この決定は ADR 0153 が覆した。** 理由は、ADR 0153 が
-   * `recall()` に既定 ON の忘却ゲート（`decayFloorAt <= now` の Memory を候補から
-   * 除外する）を導入したことで、上記の「引き受けた負債」が実害に変わったため——
-   * `sweepArchive` が `archived` にする選定条件は、テナントの `decay_clock`（既定
-   * `'wall'`）に従う——`'wall'` なら `decayFloorAt <= now`、`'activity'`/`'either'`
-   * なら `decayFloorSeq <= nowSeq` を軸に含む（Issue #364 /
-   * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
-   * `restoreArchived` の対象は定義上、いずれの軸であってもこの条件を満たす。⟹ `reinforce` を
-   * 別途呼ばない限り、`status` は `"active"` に戻っても**既定では recall に二度と
-   * 現れない**——呼び出し側から見ると「restored と言われたのに何も返ってこない」。
-   * これは `docs/north-star.md`「目指す姿」の逐語「必要な場合だけ過去の記憶を
-   * 再び呼び戻せる」と正面から食い違う（`AGENTS.md`「正典と実装が食い違ったら、
-   * バグなのは実装のほう」）。**⟹ このメソッドは、`status` の復帰に成功した対象へ
-   * 続けて `MemoryStore.reinforce(ctx, id, now)` を呼ぶ**（新しい interface・adapter
-   * は増やさない。既存の契約された口をそのまま呼ぶだけ）。**復帰させるという行為
-   * そのものが「この記憶がいま必要だ」という明示の信号であり、北極星が言う
-   * 「必要な場合」に当たる、というのが ADR 0153 の意味づけである。**
-   *
-   * `reinforce` が失敗しても、既に成功した `status` の復帰は握り潰さない——`outcomes`
-   * の `kind` は `"restored"` のままで、失敗は `RestoreArchivedOutcome` の
-   * `reinforceError` に運ぶ（`RestoreArchivedOutcome` の doc コメント参照）。
-   *
-   * ⚠ **`sweepArchive` と重なると、`"restored"` と返っても `status` が `archived` のままのことがある**
-   * （ADR 0432 AL-2。記録であり、この版では直していない）。`status` の復帰（`updateStatusWithEvent`）と
-   * `reinforce` は**別々の書き込み**で、そのあいだは `decay_floor_at` がまだ過去を指している。
-   * その窓に同じ Memory を対象にした `sweepArchive` が入ると、掃引は `status = 'active'` かつ
-   * `decay_floor_at` を過ぎた行として選び、もう一度 `archived` にする。そのあとで `reinforce` が
-   * 成功すると `decay_floor_at` だけが先へ延び、`status` は `archived` のまま残る。
-   * 返る outcome は `"restored"` のまま（`reinforceError` も付かない）で、`memory_events` には
-   * `archived → restored → archived` の3件が並ぶ。【実測】両 adapter（testkit の InMemory と Postgres）で、
-   * `reinforce` の直前に `sweepArchive` を割り込ませて再現した（前の巡の担い手の実測）。
-   * 呼び出し側が確かめるなら、復帰のあとに `recall` か `get` で今の `status` を読むこと。
-   * 結果に欄を足す・`status` の復帰と `reinforce` を1つの store 操作にする、という直しは
-   * オーナーの判断に回してある（ADR 0432）。
-   *
-   * ⚠ **`recall()` 自身は一切変更していない。**`status` が `"active"` へ戻った時点で、
-   * 段1の候補生成が使う既存の status ゲート（`["active","contested"]`、
-   * `recall-runtime.ts`）へ他の `active` な Memory と全く同じ経路で合流する——
-   * `docs/recall.md` §2 段0「スコープの外延」・§5 の被覆不変条件のどちらも、
-   * この操作のために1行も変更していない。**変わったのはこのメソッドが `reinforce`
-   * も呼ぶようになったことだけであり**、それによって `decayFloorAt` が「いま」より
-   * 先へ進むので、既定の忘却ゲート（ADR 0153）を通過できるようになる。
+   * イベントは `kind: "restored"`。`digestSnapshot` は現在の `digest` で、`content` は運ばない（`forget`/`reextract` と同じ。docs/memory-model.md §9）。`opts.reason` は `meta.reason` に入り、
+   * 省略すると `meta` に `reason` キー自体を持たない。
    */
   restoreArchived(
     ctx: Ctx,
@@ -3223,126 +1889,28 @@ export interface Runtime {
   ): Promise<RestoreArchivedResult>;
   /**
    * 層: 是正・取り消し
-   * `docs/memory-model.md` §11 行15「`superseded → active`」を、呼び出し側が
-   * **明示的に**取り戻す。`consolidate`/`reextract`/`resolveContested` が閉じる方向
-   * （`active` → `superseded`）だけを持っていた片道を、開く方向（`superseded` →
-   * `active`）で埋める——`restoreArchived`（ADR 0122）が `sweepArchive`（ADR 0114）に
-   * 対して果たしたのと同じ役割を、`superseded` という別の起点に対して果たす。
+   * `superseded` な Memory を、呼び出し側が**明示的に**取り戻す（`docs/memory-model.md` §11 行15。`restoreArchived` の `superseded` 版）。結果の意味は {@link RestoreSupersededOutcome}。
    *
-   * 🔴 **粒度の既定は「群」である。**`target: { supersededById }` は、置き換えた側
-   * （新しいほう）の id を指す——`target.onlyMemoryIds` を省略した場合、個別の
-   * Memory id を渡す形は無い。理由は {@link RestoreSupersededTarget} の doc
-   * コメントを参照（要約: `superseded` な Memory は `recall()` に出てこないため、
-   * 呼び出し側は戻したい id を知る手段をそもそも持たない。手元にある唯一の
-   * 取っ手が「置き換えた側」である）。
+   * 🔴 **粒度の既定は「群」。** `target: { supersededById }`（置き換えた側の id）を渡し、`superseded_by_id` が一致する `status = 'superseded'` の行すべてを戻す。個別の Memory id を渡す形は無い
+   * （`superseded` は `recall()` に出ないので、戻したい id を知る手段が無く、手元の取っ手は「置き換えた側」だけ。{@link RestoreSupersededTarget}）。群は「1回の操作」とは限らない
+   * （[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md)。バグではなく確定した契約）ので、呼び出し側は `opts.dryRun: true` で中身（`supersededReason` を含む）を確かめ、
+   * 必要なら `target.onlyMemoryIds`（[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）で絞ってから呼ぶ。どの id をまとめて渡すかは mnemora は判定しない。
    *
-   * ⭐ **[Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
-   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
-   * `target.onlyMemoryIds` を指定すると、群のうちこの id 集合だけに対象を絞る。**
-   * 省略時は従来どおり群全体——**既定は1バイトも変えない。**`MemoryStore.
-   * restoreSupersededBy?`/`previewRestoreSupersededBy?` の `filter.onlyMemoryIds`
-   * へそのまま素通しする（下の手順2参照）。どの id をまとめて渡すべきかは
-   * {@link RestoreSupersededTarget.onlyMemoryIds} の doc コメントを参照——
-   * mnemora 自身はこの判断をしない。
+   * 🔴 **`MemoryStore.restoreSupersededBy?`（新しい任意メソッド）が無い adapter は `{ supported: false, supersedingMemoryId, outcomes: [] }`。** `updateStatusWithEvent` に収まらないため
+   * （個別 CAS ではなく群単位の範囲走査+一括更新で、`superseded_by_id` を `NULL` へ戻す経路が無い。{@link MemoryStore.restoreSupersededBy}）。フォールバックは無い（ADR 0082）。
    *
-   * 🔴 **`MemoryStore` に新しい任意メソッド `restoreSupersededBy?` を足している。**
-   * `restoreArchived` が `updateStatusWithEvent`（既存の必須メソッド）にそのまま
-   * 収まったのとは違う——理由は {@link MemoryStore.restoreSupersededBy} の doc
-   * コメントを参照（要約: (1) 個別 CAS ではなく群単位の範囲走査+一括更新であること、
-   * (2) `updateStatusWithEvent` には `superseded_by_id` を `NULL` へ戻す経路が
-   * 型にも SQL にも無いこと、の2点）。**adapter がこの口を実装していなければ
-   * `{ supported: false, supersedingMemoryId, outcomes: [] }` を返す**——
-   * `sweepArchive`/`archiveDecayed?` と同じ「対応していない、と名指しする」形
-   * （ADR 0082）。フォールバック経路は持たない。
+   * 🔴 **`opts.dryRun: true` は別の枝**: `MemoryStore.previewRestoreSupersededBy?`（独立した任意メソッド）だけを呼び、書き込みも `reinforce` も起きない（ADR 0237）。対象の選び方は `restoreSupersededBy?` と同じ `WHERE` で、
+   * `would_restore` の `memoryId` 集合は直後の `restored` と一致するが、保証する仕組みは無い（間の書き込みでずれる）。`previewRestoreSupersededBy?` が無い adapter では `supported: false`
+   * （`restoreSupersededBy?` があっても免除されない）。
    *
-   * 🔴 **`opts.dryRun: true`（Issue #515、ADR 0237）は、ここまでの「実際に戻す」経路を
-   * 一切通らない別の枝である。**呼ぶのは `MemoryStore.previewRestoreSupersededBy?`
-   * （もう1つの新しい任意メソッド、`restoreSupersededBy?` とは独立）だけで、
-   * `memories` の更新も `memory_events` への追記も `reinforce` の呼び出しも起きない。
-   * 対象の選び方（`WHERE`）は `restoreSupersededBy?` と完全に一致させてあるので、
-   * `dryRun: true` で見た `outcomes`（`kind: "would_restore"`）の `memoryId` 集合は、
-   * 直後に `dryRun` 無しで呼んだときの `outcomes`（`kind: "restored"`）の `memoryId`
-   * 集合と一致する——**ただし「一致することを保証する仕組み」は無い**。2回の呼び出しの
-   * 間に別の書き込みが起きれば、当然ずれる（他の compare-and-swap 系メソッドと同じ、
-   * 「見てから呼ぶ」に内在する race）。`previewRestoreSupersededBy?` を実装しない
-   * adapter では `dryRun: true` も `{ supported: false, supersedingMemoryId,
-   * outcomes: [] }`——`restoreSupersededBy?` を実装済みでも、この2つは独立した
-   * 任意メソッドなので免除されない。
+   * 対象が0件なら `{ supported: true, outcomes: [] }`。存在しない・形式不正な `supersededById` も例外にしない。戻した各対象に続けて `MemoryStore.reinforce` を呼び、失敗しても復帰は握り潰さず `reinforceError` に運ぶ
+   * （理由は `restoreArchived` と同じ忘却ゲート。ADR 0153）。`superseded` な Memory の床は過去とは限らない（統合直後は先の未来を指しうる）が、ADR 0048（`reinforce` は起点を巻き戻さない）により
+   * 無条件に呼んで安全なので、対象ごとに出し分けない。
    *
-   * ⭐ **2026-09-26 追記 —— これが今の契約である（[Issue #515](https://github.com/takecchi/mnemora/issues/515) クローズ）。**
-   * 群（`target.supersededById` と一致する `superseded_by_id` を持つ、`status =
-   * 'superseded'` の行すべて）は、**1回の操作の単位とは限らない**——
-   * `resolveContested` の勝者は前から在る Memory であり、`reextract` のアンカーも
-   * 冪等な `ON CONFLICT` 経由で前から在る Memory に解決されうるため、別々の操作の
-   * 敗者が同じ群へ積み上がることがある（{@link RestoreSupersededTarget} の doc
-   * コメント、[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md)
-   * 冒頭の訂正1・訂正4）。**これはバグではなく確定した契約である。**呼び出し側は
-   * `opts.dryRun: true` で戻す前に群の中身（`supersededReason` を含む）を確かめ、
-   * 必要なら `target.onlyMemoryIds` で絞ってから呼ぶこと——この2つが、群の広さを
-   * 呼び出し側が制御する既定の手段である。群をさらに細かい鍵（`memory_events` への
-   * 操作 id 新設、Issue #515 方向2）で絞る案は v1.0.0 では採らない。理由・
-   * 経緯は ADR 0230 末尾の 2026-09-26 追記を参照。
-   *
-   * 手順:
-   * 1. `deps.memoryStore.restoreSupersededBy` が無ければ
-   *    `{ supported: false, supersedingMemoryId: target.supersededById, outcomes: [] }`。
-   * 2. 在れば `restoreSupersededBy(ctx, target.supersededById, { reason, actor, at: now },
-   *    { onlyMemoryIds: target.onlyMemoryIds })` を呼ぶ——store 側が1トランザクションで
-   *    対象行（`status = 'superseded'` かつ `superseded_by_id = target.supersededById`、
-   *    `target.onlyMemoryIds` が在れば追加で `id` がその集合に含まれる行）を選び、
-   *    `status='active'`・`superseded_by_id=null` へ更新し、行ごとに `memory_events` へ
-   *    `kind: 'unsuperseded'` を積んで、戻した `Memory[]` を返す。
-   * 3. `status` の復帰に成功した各対象について、続けて `MemoryStore.reinforce` を
-   *    呼ぶ——理由は `restoreArchived` と同じ「ADR 0153 の忘却ゲート」だが、
-   *    **前提が違う**点に注意（下記「⚠ reinforce する理由」）。`reinforce` が
-   *    例外を投げても、既に成功した `status` の復帰は握り潰さない——`kind` は
-   *    `"restored"` のままで、失敗は `reinforceError` に運ぶ（`RestoreArchivedOutcome`
-   *    と同じ規律。`restoreArchived` の doc コメント参照）。
-   * 4. 対象が0件なら `{ supported: true, supersedingMemoryId, outcomes: [] }`。
-   *    **例外にしない。**
-   * 5. `target.supersededById` に実在しない・形式不正な id を渡しても例外にしない
-   *    （対象0件と同じ——`MemoryStore.restoreSupersededBy` の契約節参照）。
-   *
-   * ⚠ **reinforce する理由は `restoreArchived` と同じだが、前提は違う。** ADR 0153 が
-   * `recall()` に既定 ON の忘却ゲート（`decayFloorAt <= now` の Memory を候補から
-   * 除外する）を導入したため、`status` だけを戻しても `decayFloorAt` が過去のままなら
-   * recall に出てこない＝復旧になっていない、という事情は同じである。ADR 0048
-   * （`reinforce` は減衰の起点を巻き戻さない）により、床がまだ未来の Memory に対して
-   * 呼んでも縮まないため、無条件に呼んで安全であることも同じ。**しかし
-   * `restoreArchived` の対象（`sweepArchive` が `archived` にした行）は、掃引の選定
-   * 条件そのものにより床が必ず過去である**のに対し、**`superseded` な Memory の床は
-   * 過去とは限らない**——`consolidate`/`reextract` は「まだ活発に使われている
-   * Memory を統合する」ことを妨げておらず、統合された直後の Memory の
-   * `decayFloorAt` は先の未来を指しうる。⟹ **「`restoreArchived` と形を揃えた」から
-   * reinforce するのではなく、「recall の忘却ゲートが同じ土俵にある」から reinforce
-   * する**——床が既に未来を指す対象に対しても、ADR 0048 により安全に呼べるので、
-   * 呼ぶかどうかを対象ごとに出し分ける理由が無い。
-   *
-   * ⛔ **この操作が「やらないこと」（設計上、意図的に持たない機能）:**
-   * - **置き換えた側（`target.supersededById` が指す Memory）に一切触らない。**
-   *   消さない・`forget` しない・`status` を変えない。理由:
-   *   (1) `consolidate` の統合先は、supersede が誤りだったとしても中身自体は
-   *   正しいことがある——黙って消すと作業を破壊する。(2) `forget` が既に在る
-   *   ＝呼び出し側が明示的に選べる。(3) `docs/north-star.md` の迷ったときの問い3
-   *   （説明できるか）——操作1つにイベント1つのほうが後から辿れる。(4) 同じ問い4
-   *   （推論と事実を区別できるか）——統合先の `provenance.kind` は多くの場合
-   *   `'consolidated'`（推論由来）、戻す側は `'stated'` のことが多い。どちらを
-   *   残すかをこの枠組みが勝手に決めない。
-   * - ⟹ **戻した直後は、古いほう（`outcomes` に載る Memory）も新しいほう
-   *   （`supersedingMemoryId`）も両方 `active` であり、`recall()` は両方を返しうる。**
-   *   始末したいなら呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、
-   *   あるいは `markContested` で対にすること。**この分岐をこのメソッドの `opts` には
-   *   足さない**——1つの操作が2つの意思決定（「戻す」と「置き換えた側をどうするか」）
-   *   を暗黙に束ねないため。
-   *
-   * `recall()` 自身は一切変更していない——`restoreArchived` と同じく、`status` が
-   * `'active'` へ戻った時点で既存の status ゲートへ他の `active` な Memory と全く
-   * 同じ経路で合流する。
-   *
-   * ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1079](https://github.com/takecchi/mnemora/issues/1079) のコメント）:
-   * 置き換えた側（`supersededById`）が `forgotten` でも、この口はその群を `active` に戻す（置き換えた側の状態は見ない。
-   * 置き換えた側は `forgotten` のまま）。【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
-   * （`reextract-withdrawn-memories.postgres.test.ts`）。
+   * ⛔ **やらないこと**: 置き換えた側（`supersededById` が指す Memory）には一切触らない（消さない・`forget` しない・`status` を変えない）。統合先は supersede が誤りでも中身が正しいことがあり、黙って消すと作業を破壊する。
+   * `forget` が在って呼び出し側が選べ、操作1つにイベント1つのほうが辿れ、どちらを残すか（統合先は `consolidated`（推論）、戻す側は `stated` のことが多い）を枠組みが決めないため。
+   * ⟹ 戻した直後は古いほうも新しいほうも `active` で、`recall()` は両方を返しうる。始末したいなら呼び出し側が `forget(ctx, supersedingMemoryId)` か `markContested` を呼ぶ。この分岐は `opts` に足さない
+   * （「戻す」と「置き換えた側をどうするか」の2つの意思決定を暗黙に束ねない）。置き換えた側が `forgotten` でも群は `active` に戻る（置き換えた側の状態は見ない）。
    */
   restoreSuperseded(
     ctx: Ctx,
@@ -3351,192 +1919,55 @@ export interface Runtime {
   ): Promise<RestoreSupersededResult>;
   /**
    * 層: 中核
-   * Issue #102: Memory を**論理的に**忘れさせる。
+   * Memory を**論理的に**忘れさせる。結果の意味は {@link ForgetOutcome}。
    *
-   * **行も `content` も消さない。**`status` を `'forgotten'` へ動かすだけで、
-   * 物理削除（`purge()`）は別操作である（{@link Runtime.purge}、Issue #198 / ADR 0124。
-   * docs/memory-model.md「forget() と purge() を分ける」）。`status` の更新と `memory_events` への
-   * `kind: 'forgotten'` の追記は `MemoryStore.updateStatusWithEvent`
-   * （ADR 0031）で**同一トランザクション**として行う——片方だけ起きることはない。
+   * **行も `content` も消さない。** `status` を `'forgotten'` へ動かして `memory_events` に `kind: 'forgotten'` を積むだけで（`updateStatusWithEvent`。同一トランザクション）、物理削除は別操作の `purge()`
+   * （ADR 0124。docs/memory-model.md「forget() と purge() を分ける」）。`digestSnapshot` には `digest` を入れ、`content` は運ばない（§9）。`forgotten` は `recall()` の status ゲート（`['active','contested']`）に
+   * 含まれないので、以後 `recall()` に出ず、`omitted` に `{ kind: 'filtered', condition: 'forgotten' }` で計上される（ADR 0027）。
    *
-   * `memory_events` の `digestSnapshot` にはその Memory の `digest` を入れる。
-   * **`content`（本文）は運ばない**（docs/memory-model.md §9: 監査ログに残す
-   * 記録項目は digest のスナップショットに限る）。
-   *
-   * `forgotten` は `recall()` の候補生成の status ゲート（`['active','contested']`）
-   * に含まれないため、このメソッドを呼んだ後の `recall()` には対象の Memory が
-   * 一切出てこなくなる（`omitted` に `{ kind: 'filtered', condition: 'forgotten' }`
-   * として計上される。ADR 0027）。**`recall` 側のコードはこの機能のために
-   * 一切変更していない**——ゲートも `omitted` の分類も既に在ったものをそのまま使う。
-   *
-   * **冪等である。**既に `forgotten` な Memory を対象に含めても書き込みは起きず
-   * `{ kind: 'already_forgotten' }` を返す。同じ id を同じ呼び出しの中に複数回
-   * 渡しても、`memory_events` に積まれるのは高々1件——1回目の結果を2回目が見る。
-   *
-   * 対象は `target` を `MemoryId[]` に正規化した上で**入力順に**処理する:
-   * - 対象が存在しない、または compare-and-swap の再読で `null` になった場合は
-   *   `{ kind: 'not_found' }`。在るかどうかは `getMany` の答えに従い、store が返した id と渡された id を
-   *   小文字にそろえて突き合わせる（`@mnemora/postgres` では大文字の UUID も在る記憶になる）。大文字小文字
-   *   だけが違う id を同じ呼び出しに混ぜたときは、渡された文字列どおりに突き合わせる。
-   * - 既に `forgotten` の場合は `{ kind: 'already_forgotten' }`（書き込み無し）。
-   * - それ以外は観測した現在の status を `expectedStatus` にした
-   *   compare-and-swap で `forgotten` へ更新する。{@link MemoryStatusConflictError}
-   *   が投げられたら**1回だけ**再読し、再読の結果に応じて `not_found` /
-   *   `already_forgotten` / `{ kind: 'conflicted', observedStatus }` のいずれかを
-   *   返す——**上限の無い再試行ループにはしない。**
-   * - それ以外の例外（DB 接続断等）は `{ kind: 'failed', error }` を積んだ上で
-   *   **その場で処理を打ち切り**、残りの対象は一切試みずに
-   *   `{ kind: 'not_attempted' }` として返す。例外はこのメソッドの外へは
-   *   投げない。
-   *   ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
-   *   いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
-   *   ループ前の読み（`getMany`）が失敗した場合も同じく、1件目を `"failed"`、残りを
-   *   `"not_attempted"` にして返す（Issue #964。まだ1件も書いていない）。
-   *
-   * `kind` の意味と呼び出し側の次の一手は {@link ForgetOutcome} の doc コメントに
-   * 詳しい。`target` が空配列（`{ memoryIds: [] }`）なら、store に一切触れずに
-   * `{ outcomes: [] }` を返す。
+   * **冪等**: 既に `forgotten` なら書き込まず `already_forgotten`。同じ id を同じ呼び出しに複数回渡しても `memory_events` は高々1件。`target` は `MemoryId[]` に正規化して入力順に処理し、
+   * 空配列は store に触れず `{ outcomes: [] }`。在るかどうかは `getMany` の答えに従い、id は小文字にそろえて突き合わせる（`@mnemora/postgres` では大文字の UUID も在る記憶になる。
+   * 大文字小文字だけが違う id を同じ呼び出しに混ぜたときは渡された綴りどおり）。観測した status を `expectedStatus` にした compare-and-swap で書き、競合は**1回だけ**再読して返す（再試行しない）。
+   * 競合以外の例外（DB 接続断等。再読・ループ前の読みの失敗を含む）は、`failed` を積んでその場で打ち切り、残りを `not_attempted` として返す。例外は外へ投げない。
    */
   forget(ctx: Ctx, target: ForgetTarget, opts?: ForgetOptions): Promise<ForgetResult>;
   /**
    * 層: 是正・取り消し
-   * Issue #198（docs/roadmap.md §5.3、[ADR 0124](../../../docs/decisions/0124-purge-physical-delete.md)）:
-   * `forgotten` な Memory を**物理削除**する。`forget()` が可逆な論理削除（`status` を
-   * 動かすだけ）であるのに対し、`purge()` は不可逆——`content`/`digest` を固定の
-   * トゥームストーン文字列で上書きし、`purgedAt` を設定する。**行そのものは消さない**
-   * （`memory_events` からの外部キー参照整合性のため。docs/memory-model.md
-   * 「forget() と purge() を分ける」）。
+   * `forgotten` な Memory を**物理削除**する（docs/roadmap.md §5.3、[ADR 0124](../../../docs/decisions/0124-purge-physical-delete.md)）。不可逆で、`content`/`digest` を固定のトゥームストーン文字列で上書きし、
+   * `purgedAt` を設定する。**行そのものは消さない**（`memory_events` からの外部キー参照整合性のため）。結果の意味は {@link PurgeOutcome}。
    *
-   * 🔴 **`forgotten` からのみ遷移できる。**`active`/`archived`/`superseded`/`contested`
-   * な Memory を直接 purge することはできない——`forget → purge` の二段階を、不可逆操作
-   * に対する最小の安全弁にする（ADR 0124 決定1。`docs/memory-model.md` §11 lifecycle 表
-   * 行10が既に `forgotten → purged` とだけ書いている）。`status` がそれ以外の対象は
-   * `status_not_forgotten` を返し、書き込みは一切起きない。
+   * 🔴 **`forgotten` からのみ遷移できる**（`forget → purge` の二段階が、不可逆操作に対する最小の安全弁。`docs/memory-model.md` §11 行10）。それ以外の `status` は `status_not_forgotten` で書き込みなし。
+   * 🔴 **`MemoryStore.purgeMemory`（任意メソッド）が無い adapter では何も実行できない**: `{ supported: false, outcomes: 全件 "not_attempted" }` を返し、フォールバックは無い。`dryRun` の有無でも同じ扱いにする
+   * （下見だけ許す adapter を作ると、下見の約束と実際の振る舞いが食い違いうる）。
    *
-   * 🔴 **`MemoryStore.purgeMemory`（任意メソッド）が無い adapter では、この操作は
-   * 一切実行できない。**`{ supported: false, outcomes: [...すべて "not_attempted"] }`
-   * を返す——`sweepArchive`（ADR 0114）と同じ「フォールバック経路を持たない」形
-   * （`content`/`digest`/`purgedAt` を書く経路はこの口以外に無いため）。`opts.dryRun`
-   * の有無に関わらず同じ扱いにする——下見だけを許して実際の purge を許さない adapter を
-   * 作ると、下見が約束する内容と実際の振る舞いが食い違いうる。
+   * 契約: `target` は正規化して入力順に処理し、空配列は store に触れず `{ supported, outcomes: [] }`。在るかどうかの突き合わせは `restoreArchived` と同じ。`purgedAt` が非 `null` なら `already_purged`
+   * （`MemoryStore` への書き込み無し）。`opts.dryRun` が `false`（省略含む）なら、`already_purged` でも `VectorStore.deleteAcrossSpaces` をベストエフォートで試みる（ADR 0382。埋め込みモデルを移した後の再実行で
+   * 旧 space の埋め込みを消す。`dryRun: true` では呼ばない）。`forgotten` かつ未 purge は、`dryRun` なら `would_purge`、そうでなければ `purgeMemory` で上書きして `purged` を返し、続けて
+   * `deleteAcrossSpaces`（adapter が持つ**全 space**）をベストエフォートで試みる。その失敗は握り潰さず `embeddingCleanup` で知らせ、`purged` を `failed` に格下げしない（`MemoryStore` 側の書き込みは確定しており、
+   * 「安全に再試行できる」という `failed`/`not_attempted` の意味を裏切るため）。競合（{@link MemoryPurgeConflictError}）は**1回だけ**再読して分類し（`dryRun` では到達しない）、再試行しない。
+   * 競合以外の例外は `failed` を積んで打ち切り、残りを `not_attempted` で返す。例外は外へ投げない（再読・ループ前の読みの失敗を含む）。
    *
-   * 手順（`forget`/`restoreArchived` と同じ骨格。**CAS の条件だけが違う**——下記参照）:
-   * 1. `target` を `MemoryId[]` に正規化する。空配列は store に一切触れず
-   *    `{ supported: <purgeMemory の有無>, outcomes: [] }`。
-   * 2. `deps.memoryStore.purgeMemory` が無ければ、ここで打ち切り全対象を
-   *    `{ supported: false, outcomes: [...すべて "not_attempted"] }` として返す。
-   * 3. `getMany` で一括読み。存在しなければ `"not_found"`。`status !== "forgotten"`
-   *    なら `"status_not_forgotten"`（現在の `status` を添える。書き込み無し）。
-   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（大文字小文字だけが違う id を同じ呼び出しに
-   *    混ぜたときは、渡された文字列どおりに突き合わせる）。
-   *    `status === "forgotten"` かつ `purgedAt` が非 `null` なら `"already_purged"`
-   *    （`MemoryStore` への書き込み無し）。**`opts.dryRun` が `false`（省略時を含む）
-   *    なら、`deps.vectorStore.deleteAcrossSpaces(ctx, [id])` をベストエフォートで試みる**
-   *    （Issue #1425、ADR 0382——既に purge 済みの記憶を、埋め込みモデルを移した後に
-   *    再実行したときの後始末。`dryRun: true` のときは呼ばない）。
-   * 4. それ以外（`status === "forgotten"` かつ `purgedAt === null`）は、`opts.dryRun`
-   *    なら書き込みをせず `"would_purge"` を返す。そうでなければ
-   *    `deps.memoryStore.purgeMemory(ctx, id, { content: PURGE_TOMBSTONE_CONTENT,
-   *    digest: PURGE_TOMBSTONE_DIGEST }, event)` を呼ぶ。成功したら `"purged"` を返し、
-   *    続けて `deps.vectorStore.deleteAcrossSpaces(ctx, [id])` を
-   *    ベストエフォートで試みる（例外は握り潰す——ADR 0124 決定5・ADR 0382。`MemoryStore`
-   *    側の書き込みは既に確定しているため、この失敗を理由に `"purged"` を `"failed"` に
-   *    格下げすると「安全に再試行できる」という `"failed"`/`"not_attempted"` の意味を
-   *    裏切る。**今の `embeddingProvider.space` だけでなく、adapter が持つ全 space から
-   *    消す**——Issue #1425、旧 space に残った埋め込みも対象にする）。
-   * 5. {@link MemoryPurgeConflictError} が投げられたら**1回だけ**再読し、
-   *    再読した `purgedAt` が非 `null` なら `"already_purged"`（この分岐は `dryRun` では
-   *    到達しない——`purgeMemory` 自体を呼んでいないため。手順3と同じく
-   *    `deps.vectorStore.deleteAcrossSpaces(ctx, [id])` をベストエフォートで試みる）、
-   *    `status` が `"forgotten"` でなければ `"status_not_forgotten"`、行が消えていれば
-   *    `"not_found"`、それ以外（`status === "forgotten"` かつ `purgedAt === null` の
-   *    まま）なら `"conflicted"`——**上限の無い再試行ループにはしない。**
-   * 6. それ以外の例外（DB 接続断等）は `"failed"` を積んだ上で**その場で処理を打ち切り**、
-   *    残りの対象は一切試みずに `"not_attempted"` として返す。例外はこのメソッドの外へは
-   *    投げない。
-   *    ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
-   *    いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
-   *    ループ前の読み（`getMany`）が失敗した場合も同じく、1件目を `"failed"`、残りを
-   *    `"not_attempted"` にして返す（Issue #964。まだ1件も書いていない）。
-   *
-   * `memory_events` へ積むイベントの `kind` は `"purged"`（`MemoryEventKind` に
-   * 既に在る値——追加していない）。`digestSnapshot` には上書き**前**の digest を入れ、
-   * **`content`（本文）は運ばない**（`forget`/`restoreArchived` と同じ規律。
-   * docs/memory-model.md §9）。`opts.reason` を渡すと `meta.reason` に入り、省略すると
-   * `meta` に `reason` キー自体を持たせない。
-   *
-   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**`TICK_SUPPORTED_JOB_KINDS` に
-   * `purge` 相当の job kind を足していない・`observe()` の入力分岐に `purge` を混ぜて
-   * いない——issue #198 が要求する「明示的でない経路からは絶対に呼ばれない」ことを、
-   * 歯（`purge.test.ts`）で実測する。
-   *
-   * ⚠ **`recall()`/`aggregateScope` 側は一切変更していない。**`purge` は `status` を
-   * 動かさないため、purge された Memory は purge の前後を通じて常に `status = 'forgotten'`
-   * であり——`docs/recall.md` §2 段0・§5 の決定（スコープ = tenant + subject + period +
-   * taxonomy + status ゲート、status ゲートで落ちた Memory はスコープ内に含まれない）
-   * により、そもそも一度も「スコープ内」に入ったことが無い。群カウント
-   * （`ScopeAggregate.groups`/`totalInScope`）に触れようがない（ADR 0124 決定6）。
+   * イベントの `kind` は `"purged"`。`digestSnapshot` は上書き**前**の digest で、`content` は運ばない。`opts.reason` は `meta.reason` に入り、省略すると `meta` に `reason` キー自体を持たない。
+   * `tick()`/`observe()` からは呼ばれない（`TICK_SUPPORTED_JOB_KINDS` に `purge` 相当は無く、`observe()` の入力分岐にも混ぜていない）。`status` を動かさないので、purge された Memory は常に `forgotten` のままで、
+   * 一度も「スコープ内」に入らず（`docs/recall.md` §2 段0・§5）、`ScopeAggregate` の群カウントに触れない（ADR 0124）。
    */
   purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
   /**
    * 層: 是正・取り消し
-   * Issue #197（ADR 0134）: `docs/memory-model.md` §11 lifecycle 行6「判定できない対向を
-   * 検出 → 両側の `status='contested'`、`contested_with_id` を相互に設定」を実行する
-   * **明示的操作**。
+   * 判定できない対向の2件を、両側 `status='contested'`・`contested_with_id` を相互に設定して書く**明示的操作**（`docs/memory-model.md` §11 行6、ADR 0134）。結果の意味は {@link MarkContestedOutcome}。
    *
-   * **この操作自身は「矛盾しているかどうか」を判定しない。**呼び出し側（人・上位のアプリ
-   * ケーション層・将来の自動検出）が「この2件は対向する」と既に決めていることを前提に、
-   * その決定を`docs/memory-model.md` §5 が要求する形（一対一・相互参照・機構2の
-   * mandatory companion retrieval が働く状態）で機械的に書き込むだけである。
-   * ⟹ **順序（新しい方を勝たせる）で判定しない・LLM を呼ばない**——
-   * どちらの北極星の制約も、判定そのものをこの口が持たないことで自動的に満たす
-   * （`docs/decisions/0134-*.md` 参照）。
+   * **この操作は「矛盾しているか」を判定しない。** 呼び出し側が「この2件は対向する」と決めたことを、§5 の形（一対一・相互参照・mandatory companion retrieval が働く状態）で機械的に書くだけで、
+   * 順序（新しい方を勝たせる）で判定せず、LLM も呼ばない。
    *
-   * `docs/memory-model.md` §11 行7「`contested` → `active | superseded`」（解決）は
-   * この PR の範囲外——別の issue/PR で扱う（ADR 0134「採らなかった案」参照）。
+   * - `firstId === secondId` は `RangeError`（`Runtime.markContested: firstId and secondId must differ`。書き込みは試みない）。
+   * - `MemoryStore.markContestedPair` が無ければ `{ supported: false, outcome: { kind: "not_attempted" } }`（フォールバックなし）。
+   * - 両側を `getMany` で読み、どちらかが `eligible` でなければ書き込まず `ineligible`。在るかどうかの突き合わせは `restoreArchived` と同じで、同じ記憶を小文字と大文字で渡したときは渡された綴りどおりなので、
+   *   store の id と綴りが違う側は `not_found` になる（位置によらない）。
+   * - 競合（{@link MemoryStatusConflictError}。読んだ後に別の書き込みが入った）は**1回だけ**再読して `conflict` で返し、再試行しない。
    *
-   * 手順:
-   * 1. `firstId === secondId` は呼び出し前の programmer error として扱い、
-   *    `RangeError`（`Runtime.markContested: firstId and secondId must differ`）を投げる。
-   *    書き込みは一切試みない（`supersedeWithNewMemories` の
-   *    `supersededByIndex out of range` と同じ「開く前に落とす」位置）。
-   * 2. `deps.memoryStore.markContestedPair` が無ければ、ここで打ち切り
-   *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す
-   *    ——フォールバック経路は無い（interface 側の doc コメント参照）。
-   * 3. `getMany([firstId, secondId])` で一括読み、それぞれを {@link MarkContestedSideOutcome}
-   *    に分類する（`"not_found"`/`"status_not_active"`/`"eligible"`）。どちらか一方でも
-   *    `"eligible"` でなければ、書き込みを一切試みず
-   *    `{ supported: true, outcome: { kind: "ineligible", sides: [...] } }` を返す。
-   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（同じ記憶を小文字と大文字で渡したときは、
-   *    渡された文字列どおりに突き合わせるので、store が返す id と同じ綴りで渡した側だけが在る記憶になり、
-   *    もう一方は `"not_found"` になる。どちらの位置に渡したかによらない——`@mnemora/postgres` では大文字で
-   *    渡した側が `"not_found"`。どちらの側も store の id と綴りが違えば、両側とも `"not_found"`）。
-   * 4. 両側とも `"eligible"` なら `deps.memoryStore.markContestedPair` を呼ぶ。成功すれば
-   *    `{ supported: true, outcome: { kind: "contested", first, second } }`。
-   * 5. {@link MemoryStatusConflictError} が投げられたら（3で読んだ後、4で書く前に別の
-   *    書き込みが割り込んだ TOCTOU）、**1回だけ**再読して `conflicts` に両側の現在の
-   *    `status` を積み、`{ supported: true, outcome: { kind: "conflict", conflicts } }`
-   *    を返す——上限の無い再試行ループにはしない（`forget`/`restoreArchived`/`purge` と
-   *    同じ安全弁）。
-   *
-   * `memory_events` へ両側それぞれ1件ずつ積む。`kind: 'updated'`・`meta.reason: 'contested'`
-   * （`docs/memory-model.md` §11 行6 が定める固定値。`consolidate`/`reflect` の
-   * `meta.reason` と同じ「操作の種類を表す固定タグ」の扱いであり、`forget`/`restoreArchived`
-   * の「呼び出し側の自由文」とは別物）。`opts.reason` を渡すと `meta.note` に追加で入る。
-   * `meta.contestedWithId` には相手の id が入る（A のイベントには B、B には A。Issue #1160——解決で
-   * `contested_with_id` はクリアされるので、監査ログに残さないと誰と対だったかを後から追えない）。
-   * 入るのは store が返した相手の id（列の値と同じ形。`@mnemora/postgres` では小文字）であり、渡された id ではない。
-   * `digestSnapshot` にはその Memory の現在の `digest` を入れる（`content` は運ばない。
-   * `forget`/`reextract` と同じ規律）。
-   *
-   * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` になった時点で、
-   * 既存の段1 status ゲート（`["active","contested"]`）・段3の mandatory companion
-   * retrieval（`contestedWithId` を辿って対向を取得する既存実装）へ他の `contested` な
-   * Memory と全く同じ経路で合流する——この操作のために `recall-runtime.ts` は1行も
-   * 変更していない（変更したのは「ここは一度も通らない」という古くなったコメントだけ）。
-   *
-   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く
-   * ——`forget`/`purge`/`restoreArchived` と同じ立場。
+   * 両側に `kind: 'updated'`・`meta.reason: 'contested'`（操作の種類を表す固定タグ。`forget` 等の自由文とは別）を1件ずつ積む。`opts.reason` は `meta.note` に追加で入る。`meta.contestedWithId` には
+   * store が返した相手の id（`@mnemora/postgres` では小文字）が入る。解決で `contested_with_id` はクリアされるので、監査ログに残さないと誰と対だったかを後から追えない。
+   * `digestSnapshot` は現在の `digest` で、`content` は運ばない。`tick()`/`observe()` からは呼ばれない。
    */
   markContested(
     ctx: Ctx,
@@ -3546,75 +1977,25 @@ export interface Runtime {
   ): Promise<MarkContestedResult>;
   /**
    * 層: 是正・取り消し
-   * Issue #197（ADR 0150）: `docs/memory-model.md` §11 lifecycle 行7「`contested` →
-   * `active | superseded`」を実行する**明示的操作**。`markContested`（`docs/decisions/
-   * 0134-mark-contested-explicit-operation.md`）の解決側であり、その形を手本に対称に
-   * 書いてある。
+   * `contested` の2件を `active | superseded` へ解決する**明示的操作**（`docs/memory-model.md` §11 行7、ADR 0150。`markContested` の解決側）。結果の意味は {@link ResolveContestedOutcome}。
    *
-   * **この操作自身も「どちらが正しいか」を判定しない。**`markContested` と同じ理由——
-   * 呼び出し側（人・上位のアプリケーション層）が既に下した決定（{@link ContestedResolution}）
-   * を、`docs/memory-model.md` が要求する形（CAS・イベント・1トランザクション）で機械的に
-   * 書き込むだけである。⟹ **`recordedAt`/`occurredAt` を一度も参照しない**——
-   * `docs/memory-model.md` §5「順序では解かない」に抵触しない。**LLM を呼ばない。**
+   * **この操作も「どちらが正しいか」を判定しない。** 呼び出し側が下した決定（{@link ContestedResolution}）を機械的に書くだけで、`recordedAt`/`occurredAt` は参照せず（§5「順序では解かない」）、LLM も呼ばない。
    *
-   * 手順:
-   * 1. `firstId === secondId` は呼び出し前の programmer error として扱い、`RangeError`
-   *    （`Runtime.resolveContested: firstId and secondId must differ`）を投げる。書き込みは
-   *    一切試みない（`markContested` と同じ「開く前に落とす」位置）。
-   * 1b. `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ（型を外した呼び出し）、同じく書き込み前に
-   *    `RangeError`（`Runtime.resolveContested: resolution.kind must be "supersede" or "both_active"`。ADR 0496。以前は
-   *    `supersede` の分岐へ倒れ、勝者の無いまま両側とも `superseded` になった）。
-   * 2. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `firstId`/`secondId`
-   *    のどちらでもなければ、同じく書き込み前に `RangeError`
-   *    （`Runtime.resolveContested: resolution.winnerId must be firstId or secondId`）を
-   *    投げる。⚠ `winnerId` が片側と大文字小文字だけ違うときは、store の `get` で同じ記憶かを確かめ、同じ記憶なら
-   *    その側を勝者として扱う（`@mnemora/postgres` の uuid。大文字小文字を区別する store では今どおり `RangeError`）。
-   * 3. `deps.memoryStore.resolveContestedPair` が無ければ、ここで打ち切り
-   *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す——フォールバック
-   *    経路は無い（`MemoryStore.resolveContestedPair` の interface JSDoc 参照）。
-   * 4. `getMany([firstId, secondId])` で一括読み、それぞれを {@link ResolveContestedSideOutcome}
-   *    に分類する（`"not_found"`/`"status_not_contested"`/`"pair_broken"`/`"eligible"`。
-   *    適格性は「両側とも `status === 'contested'` かつ相互参照が成立している」——
-   *    [ADR 0046](../../../docs/decisions/0046-contested-pair-invariant-tooth.md) の対不変
-   *    条件を読む側からも守る）。どちらか一方でも `"eligible"` でなければ、書き込みを
-   *    一切試みず `{ supported: true, outcome: { kind: "ineligible", sides: [...] } }` を返す。
-   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（同じ記憶を小文字と大文字で渡したときは、
-   *    渡された文字列どおりに突き合わせる）。相互参照は store が返した相手の id と比べる。
-   * 5. 両側とも `"eligible"` なら `deps.memoryStore.resolveContestedPair` を呼ぶ。
-   *    - `resolution.kind === "both_active"`: 両側とも `status: "active"`。
-   *    - `resolution.kind === "supersede"`: `winnerId` 側は `status: "active"`、もう一方は
-   *      `status: "superseded"` + `supersededById: <winnerId>`。
+   * 投げる例外（書き込みの前）:
+   * - `firstId === secondId` は `RangeError`。
+   * - `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ `RangeError`（ADR 0496。`supersede` へ倒すと勝者の無いまま両側が `superseded` になるため）。
+   * - `supersede` の `winnerId` が `firstId`/`secondId` のどちらでもなければ `RangeError`。片側と大文字小文字だけ違うときは store の `get` で同じ記憶かを確かめ、同じなら勝者として扱う
+   *   （`@mnemora/postgres` の uuid。大文字小文字を区別する store では `RangeError`）。
+   * - `MemoryStore.resolveContestedPair` が無ければ `{ supported: false, outcome: { kind: "not_attempted" } }`（フォールバックなし）。
    *
-   *    成功すれば `{ supported: true, outcome: { kind: "resolved", first, second } }`。
-   * 6. {@link MemoryStatusConflictError} が投げられたら（4で読んだ後、5で書く前に別の
-   *    書き込みが割り込んだ TOCTOU）、`markContested` と同じく**1回だけ**再読して
-   *    `conflicts` に両側の現在の `status` を積み、
-   *    `{ supported: true, outcome: { kind: "conflict", conflicts } }` を返す——上限の無い
-   *    再試行ループにはしない。
+   * 両側を `getMany` で読み、適格性は「両側とも `status === 'contested'` かつ相互参照が成立している」（[ADR 0046](../../../docs/decisions/0046-contested-pair-invariant-tooth.md) の対不変条件を読む側からも守る）。
+   * どちらかが `eligible` でなければ書き込まず `ineligible`。競合は `markContested` と同じく**1回だけ**再読して `conflict`。`both_active` は両側 `active`、`supersede` は勝者が `active`・
+   * 敗者が `superseded` + `supersededById: <winnerId>`。
    *
-   * `memory_events` へ両側それぞれ1件ずつ積む（`docs/memory-model.md` §11 行7
-   * 「`updated` または `superseded`」）:
-   * - `"supersede"`: 勝者に `kind: 'updated'`、敗者に `kind: 'superseded'`。
-   * - `"both_active"`: 両側とも `kind: 'updated'`。
-   *
-   * どちらも `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
-   * `'supersede' | 'both_active'`（監査ログから「なぜ contested が消えたか」を追えるように
-   * するための欄——`meta.reason` だけでは決着の種類までは分からない）。`opts.reason` を
-   * 渡すと `meta.note` に追加で入る（`meta.reason`/`meta.resolution` は上書きしない）。
-   * どのイベント（勝者・敗者・`both_active` の両側）にも `meta.contestedWithId`（相手の id）が入る（Issue #1160）。
-   * 敗者の `superseded` は、加えて `meta.supersededById`（勝者の id。値は同じ）も持つ。
-   * どちらの meta の id も store が返した id（列の値と同じ形）であり、渡された id ではない。
-   * `digestSnapshot` にはその Memory の現在の `digest` を入れる（`content` は運ばない。
-   * `markContested`/`forget`/`reextract` と同じ規律）。
-   *
-   * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` から
-   * `'active'`/`'superseded'` へ離れた時点で、既存の段1 status ゲート
-   * （`["active","contested"]`）・段3 mandatory companion retrieval（`contestedWithId` を
-   * 辿る既存実装）から自然に外れる——敗者側は次の `recall` から二度と単独でも同伴でも
-   * 出てこない（同伴として出てくるのは、対向がまだ `contested` のときだけ）。
-   *
-   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く
-   * ——`markContested`/`forget`/`purge`/`restoreArchived` と同じ立場。
+   * 両側に `memory_events` を1件ずつ積む（勝者・`both_active` は `updated`、敗者は `superseded`）。`meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` は `'supersede' | 'both_active'`。
+   * `opts.reason` は `meta.note` に追加で入る。全イベントに `meta.contestedWithId` が入り、敗者の `superseded` は加えて `meta.supersededById`（値は同じ）を持つ。どちらも store が返した id（列の値と同じ形）で、
+   * 渡された id ではない。`digestSnapshot` は現在の `digest` で、`content` は運ばない。`contested` から離れると、段1の status ゲートと段3の mandatory companion retrieval から外れ、
+   * 敗者は以後 `recall` に単独でも同伴でも出ない。`tick()`/`observe()` からは呼ばれない。
    */
   resolveContested(
     ctx: Ctx,
@@ -3625,77 +2006,22 @@ export interface Runtime {
   ): Promise<ResolveContestedResult>;
   /**
    * 層: 是正・取り消し
-   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記、
-   * 2026-09-26）: `resolveContested`（上）の決定3（CAS「両側とも `contested` かつ
-   * 相互参照が成立」）は、対の片側を `forget()` すると満たせなくなる——forget は
-   * `status` を `'forgotten'` に動かすだけで `contestedWithId` には触れない
-   * （`forget` の doc コメント参照）ため、生存側は `contested`・`contestedWithId` が
-   * 対向を指したまま残るのに、対向はもう `contested` ではなくなる。この状態になった
-   * 生存側は、`resolveContested` を呼んでも対向側が `status_not_contested` で ineligible
-   * になり、二度と解消できない（Issue #825 の再現）。
+   * 対の片側を `forget()` した後の、生存側1件の `contested` を解消する（[ADR 0150](../../../docs/decisions/0150-resolve-contested-explicit-operation.md)）。`resolveContested` の CAS
+   * （両側とも `contested` かつ相互参照が成立）は、`forget` が `status` だけを `'forgotten'` にして `contestedWithId` に触れないため満たせず、生存側は `resolveContested` を呼んでも対向が `status_not_contested` で
+   * `ineligible` になり、二度と解消できない。この口はそのための別の任意メソッドで、`resolveContested`/`MemoryStore.resolveContestedPair` の CAS には触れない。
+   * 結果の意味は {@link ResolveOrphanedContestedOutcome}。
    *
-   * **この口は決定3の CAS には一切触れない。**`resolveContested`/`MemoryStore.
-   * resolveContestedPair` は1文字も変更していない——既存の呼び出しの振る舞いは変わらない。
-   * 代わりに、**生存側1件だけ**を対象にした別の任意メソッドとして足す
-   * （[ADR 0150](../../../docs/decisions/0150-resolve-contested-explicit-operation.md)
-   * 追記「案D を部分的に覆す」参照）。
+   * **「どちらが正しいか」は判定しない。** 判定するのは「対向が `forgotten`（または purge 済みで見つからない）か」という機械的な事実だけで、`content` の正しさ・`recordedAt`/`occurredAt` には触れず、LLM も呼ばない。
    *
-   * **この操作も「どちらが正しいか」を判定しない。**`markContested`/`resolveContested` と
-   * 同じ理由——判定するのは「対向が forget という正規操作で `forgotten` になった（または
-   * 既に purge 済みで見つからない）かどうか」という機械的な事実だけであり、`content` の
-   * 正しさには一切触れない。⟹ `recordedAt`/`occurredAt` を参照しない。LLM を呼ばない。
+   * `MemoryStore.resolveOrphanedContested` が無ければ `{ supported: false, outcome: { kind: "not_attempted" } }`（フォールバックなし）。`survivorId` を読んで
+   * {@link ResolveOrphanedContestedEligibility} に分類し、`eligible` でなければ書き込まず `ineligible`、`eligible` なら生存側を `status: "active"`・`contestedWithId: null` にして `resolved`。
+   * 競合は**1回だけ**再読して `conflict`、再試行しない。生存側1件にだけ `kind: 'updated'` を積み（対向の行には触れない）、`meta.reason` は `resolveContested` と同じ `'contested_resolved'`、
+   * **`meta.resolution: 'orphan_reclaimed'`**（`'supersede'`/`'both_active'` と区別できる値）、`meta.contestedWithId` は forget された（または見つからない）対向の id。`opts.reason` は `meta.note` に入る。
+   * `tick()`/`observe()` からは呼ばれない。
    *
-   * 手順:
-   * 1. `deps.memoryStore.resolveOrphanedContested` が無ければ、ここで打ち切り
-   *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す——フォールバック
-   *    経路は無い（`MemoryStore.resolveOrphanedContested` の interface JSDoc 参照）。
-   * 2. `survivorId` を読み、{@link ResolveOrphanedContestedEligibility} に分類する:
-   *    - 見つからない → `"not_found"`。
-   *    - `status !== "contested"` → `"status_not_contested"`。
-   *    - `contestedWithId` が `null` → `"no_contested_with_id"`（ADR 0150 負債2の形。
-   *      この口はそれを対象にしない）。
-   *    - `contestedWithId` の指す Memory を読み、見つからないか `status === "forgotten"`
-   *      なら `"eligible"`。それ以外（`active`/`contested`/`superseded`/`archived` のいずれか）なら
-   *      `"opposite_not_orphaned"`（{@link ResolveOrphanedContestedEligibility} の 2026-09-28 訂正）。
-   * 3. `"eligible"` でなければ、書き込みを一切試みず
-   *    `{ supported: true, outcome: { kind: "ineligible", eligibility } }` を返す。
-   * 4. `"eligible"` なら `deps.memoryStore.resolveOrphanedContested` を呼ぶ。成功すれば
-   *    `{ supported: true, outcome: { kind: "resolved", memory } }`。
-   * 5. {@link MemoryStatusConflictError} が投げられたら（2で読んだ後、4で書く前に別の
-   *    書き込みが割り込んだ TOCTOU）、`resolveContested` と同じく**1回だけ**再読して
-   *    `observedStatus` に積み、`{ supported: true, outcome: { kind: "conflict",
-   *    observedStatus } }` を返す——上限の無い再試行ループにはしない。
-   *
-   * `memory_events` へ生存側1件だけに `kind: 'updated'` を積む（対向〔forgotten〕の行には
-   * 一切触れない）。`meta.reason` は `resolveContested` と同じ固定値 `'contested_resolved'`
-   * を使う——**この経路で解消したことは `meta.resolution: 'orphan_reclaimed'` という、
-   * `ContestedResolution`（`'supersede'`/`'both_active'`）のどちらとも異なる値**で
-   * 区別する（監査ログだけを見て「`resolveContested` の正規経路で決着したのか、
-   * この救済経路で戻したのか」を後から読めるようにするため）。`opts.reason` を渡すと
-   * `meta.note` に追加で入る。
-   * `meta.contestedWithId` には、forget された（または見つからない）対向の id が入る（Issue #1160）。
-   *
-   * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` から `'active'` へ
-   * 離れた時点で、既存の段1 status ゲート・段3 mandatory companion retrieval から自然に
-   * 外れる——`resolveContested` と同じ理由。
-   *
-   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く。
-   *
-   * 🔴 **任意メソッドである（2026-09-26 追記、Issue #825 続き）。**当初は必須メソッドとして
-   * 着地したが、`@mnemora/core` は v1.0.0 として npm に公開済みであり、`Runtime` interface
-   * を自前で実装している利用者（`docs/migration-v1.md` §12/§14/§16 が `restoreSuperseded`/
-   * `findCorrectionCandidates`/`applyCorrection` の必須化をそのように破壊的変更として数えた、
-   * まさにその立場）にとって、v1.0.0 の後に必須メソッドが増えることは次のメジャー版を要求する
-   * 破壊的変更になる。`@mnemora/testkit` の `supportsTaxonomyMode`/`supportsLabels`/
-   * `supportsFindActiveByClaimKey`（[Issue #818](https://github.com/takecchi/mnemora/issues/818)、
-   * PR #827）で同じ形（v1.0.0 後の必須化）を任意へ戻した前例に倣い、`?` へ戻した
-   * （クローン miku の判断。[ADR 0150](../../../docs/decisions/0150-resolve-contested-explicit-operation.md)
-   * 追記参照）。⟹ **`createRuntime` が返す `Runtime` には必ずこのメソッドが実装されている**
-   * ——省略されるのは、利用者が独自に `Runtime` を実装する場合の後方互換のためだけである。
-   * `createRuntime()` の戻り値からこの口を呼ぶ側は、`MemoryStore` の任意メソッドを呼ぶ既存の
-   * 慣習（`store.markContestedPair!(...)` 等）と同じく、非 null アサーション
-   * （`runtime.resolveOrphanedContested!(...)`）で呼んでよい——**この repo にはこれ以外の
-   * 前例（`createRuntime` の戻り値の型を狭める工夫）が無いことを確認した上でこの形にした。**
+   * 🔴 **任意メソッド（`?`）。** `@mnemora/core` は v1.0.0 として公開済みで、`Runtime` interface を自前で実装している利用者にとって、後から必須メソッドが増えることは次のメジャー版を要求する破壊的変更になる
+   * （`docs/migration-v1.md` §12/§14/§16）。`createRuntime` が返す `Runtime` には必ず実装されており、省略されるのは独自に `Runtime` を実装する場合の後方互換のためだけ。
+   * 呼ぶ側は非 null アサーション（`runtime.resolveOrphanedContested!(...)`）でよい。
    */
   resolveOrphanedContested?(
     ctx: Ctx,
@@ -3704,63 +2030,19 @@ export interface Runtime {
   ): Promise<ResolveOrphanedContestedResult>;
   /**
    * 層: 是正・取り消し
-   * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378、ADR 0381）: `docs/memory-model.md` §11
-   * lifecycle 行6「`active → contested`」を、**3件以上**（群）へ書く**明示的操作**。
-   * `markContested`（2者専用、ADR 0134）の形を手本にした N者版——「対象が適格だったか」
-   * を読み側で判定してから `MemoryStore.markContestedGroup` を呼ぶ、という2段構えを
-   * そのまま踏襲する。
+   * **3件以上**（群）を `active → contested` へ書く**明示的操作**（ADR 0327、ADR 0378、ADR 0381。`markContested` の N者版）。結果の意味は {@link MarkContestedGroupOutcome}。
    *
-   * **この操作自身も「矛盾しているかどうか」を判定しない。**呼び出し側
-   * （`detectClaimKeyContested` の `contested_group` 分岐、または人・上位のアプリケーション
-   * 層）が「この `members` は対向する」と既に決めていることを前提に、その決定を
-   * 機械的に書き込むだけである。**穴Aの吸収（既存の2者間の対の相方を含める）・合併
-   * （複数の既存群を1つに束ねる）の判定は、この口の呼び出し側の責務である**
-   * （`MemoryStore.markContestedGroup` の interface JSDoc の契約 2・3）——この口は
-   * 渡された `members` をそのまま検査して書くだけで、`RelationStore` を自分で読みには
-   * 行かない。
+   * **「矛盾しているか」は判定しない。** 呼び出し側（`detectClaimKeyContested` の `contested_group` 分岐、または人・上位のアプリケーション層）が `members` は対向すると決めたことを機械的に書く。
+   * **穴Aの吸収（既存の2者間の対の相方を含める）・合併（複数の既存群を1つに束ねる）の判定は呼び出し側の責務**で、この口は渡された `members` を検査して書くだけ（`RelationStore` は読まない）。
    *
-   * 手順（`markContested` と同じ順で追える）:
-   * 1. `memberIds.length < 3` は呼び出し前の programmer error として扱い、`RangeError`
-   *    （`Runtime.markContestedGroup: memberIds must have at least 3 entries`）を投げる。
-   *    書き込みは一切試みない。
-   * 2. `memberIds` に同じ id が2回以上現れるのも programmer error として扱い、`RangeError`
-   *    （`Runtime.markContestedGroup: memberIds must be unique`）を投げる。
-   * 3. `deps.memoryStore.markContestedGroup` が無ければ、ここで打ち切り
-   *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す——フォールバック
-   *    経路は無い。
-   * 4. `getMany(memberIds)` で一括読み、それぞれを
-   *    {@link MarkContestedGroupSideOutcome} に分類する（`"not_found"`/`"status_conflict"`/
-   *    `"eligible"`。適格性は `MemoryStore.markContestedGroup` の契約2・3と同じ3通り）。
-   *    1件でも `"eligible"` でなければ、書き込みを一切試みず
-   *    `{ supported: true, outcome: { kind: "ineligible", sides } }` を返す。
-   * 5. 全員 `"eligible"` なら、この口自身が各メンバーの `event`（`kind: 'updated'`・
-   *    `meta.reason: 'contested'`、下記）を組み立てて `deps.memoryStore.markContestedGroup`
-   *    を呼ぶ——`markContested`（2者版）が `firstId`/`secondId` だけを受け取り `event` は
-   *    自分で組み立てるのと同じ分担（`MemoryStore.markContestedGroup` の `members[].event` は
-   *    この口が埋める）。成功すれば
-   *    `{ supported: true, outcome: { kind: "contested_group", members } }`。
-   * 6. {@link MemoryStatusConflictError} が投げられたら（4で読んだ後、5で書く前に別の
-   *    書き込みが割り込んだ TOCTOU）、**1回だけ**再読して `conflicts` に全員の現在の
-   *    `status` を積み、`{ supported: true, outcome: { kind: "conflict", conflicts } }`
-   *    を返す——上限の無い再試行ループにはしない。
+   * 投げる例外（書き込みの前）: `memberIds.length < 3`・id の重複は `RangeError`（`Runtime.markContestedGroup: memberIds must have at least 3 entries` / `must be unique`）。
+   * `MemoryStore.markContestedGroup` が無ければ `{ supported: false, outcome: { kind: "not_attempted" } }`（フォールバックなし）。全員を `getMany` で読んで {@link MarkContestedGroupSideOutcome} に分類し、
+   * 1件でも `eligible` でなければ書き込まず `ineligible`、全員 `eligible` なら書いて `contested_group`。競合は**1回だけ**再読して `conflict`、再試行しない。
    *
-   * `memory_events` へ全メンバーそれぞれ1件ずつ積む。`kind: 'updated'`・
-   * `meta.reason: 'contested'`（`markContested` と同じ固定値）。`opts.reason` を渡すと
-   * `meta.note` に追加で入る。**`meta.contestedWithId` は積まない**——群のメンバーは
-   * `contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3）であり、「誰と対だったか」は
-   * `memory_relations` の行（`RelationStore.listRelated`）から辿る。
+   * 全メンバーに `kind: 'updated'`・`meta.reason: 'contested'` を1件ずつ積み、`opts.reason` は `meta.note` に追加で入る。**`meta.contestedWithId` は積まない**（群のメンバーは `contestedWithId` を持たない設計。
+   * ADR 0378。「誰と対だったか」は `memory_relations` の行（`RelationStore.listRelated`）から辿る）。`tick()`/`observe()` からは呼ばれない。
    *
-   * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` になった時点で、
-   * 既存の段1 status ゲート・段3 mandatory companion retrieval と全く同じ経路へ合流する
-   * ——`markContested` と同じ理由。
-   *
-   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く。
-   *
-   * 🔴 **任意メソッドである。**`resolveOrphanedContested?`（上、Issue #825 続き）と同じ理由
-   * ——`@mnemora/core` は v1.0.0 として npm に公開済みであり、`Runtime` interface を自前で
-   * 実装している利用者にとって、v1.0.0 の後に必須メソッドが増えることは破壊的変更になる。
-   * ⟹ **`createRuntime` が返す `Runtime` には必ずこのメソッドが実装されている**
-   * ——省略されるのは利用者が独自に `Runtime` を実装する場合の後方互換のためだけである。
+   * 🔴 **任意メソッド（`?`）。** 理由は `resolveOrphanedContested?` と同じ（v1.0.0 公開後に必須メソッドを増やさない）。`createRuntime` が返す `Runtime` には必ず実装されている。
    */
   markContestedGroup?(
     ctx: Ctx,
@@ -3769,79 +2051,28 @@ export interface Runtime {
   ): Promise<MarkContestedGroupResult>;
   /**
    * 層: 是正・取り消し
-   * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378 決定3、ADR 0381）: `docs/memory-model.md`
-   * §11 lifecycle 行7「`contested` → `active | superseded`」を、群へ書く**明示的操作**。
-   * `markContestedGroup`（上）の解決側であり、`resolveContested`（2者版）の形を手本に
-   * 対称に書いてある。
+   * 群の `contested` を `active | superseded` へ解決する**明示的操作**（ADR 0327、ADR 0378、ADR 0381。`markContestedGroup` の解決側）。結果の意味は {@link ResolveContestedGroupOutcome}。
+   * 呼び出し側が下した決定（{@link ContestedGroupResolution}）を機械的に書くだけで、「どちらが正しいか」は判定しない。
    *
-   * **この操作自身も「どちらが正しいか」を判定しない。**呼び出し側が既に下した決定
-   * （{@link ContestedGroupResolution}）を機械的に書き込むだけである。
+   * 投げる例外（書き込みの前）:
+   * - `memberIds.length < 3`・id の重複は `RangeError`。
+   * - `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ `RangeError`（ADR 0496）。
+   * - `supersede` の `winnerId` が `memberIds` のどれとも一致しなければ `RangeError`（`Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds`）。大文字小文字だけ違うときは、
+   *   **一意に絞れたときだけ**救済する（群は候補を一意に絞れないことが多いため）: 小文字にそろえて memberIds から集めた候補がちょうど1件で、store の `get` が `winnerId` と候補に同じ id の記憶を返したときだけ、
+   *   その memberId の綴りを勝者にする（敗者の `supersededById` は memberIds の綴りになる）。候補が2件以上・`get` が食い違う・どの member とも違う場合は `RangeError`（最後は store を読まない）。
+   * `MemoryStore.resolveContestedGroup` が無ければ `{ supported: false, outcome: { kind: "not_attempted" } }`。
    *
-   * 手順:
-   * 1. `memberIds.length < 3` は `RangeError`
-   *    （`Runtime.resolveContestedGroup: memberIds must have at least 3 entries`）。
-   * 2. `memberIds` の id 重複は `RangeError`
-   *    （`Runtime.resolveContestedGroup: memberIds must be unique`）。
-   * 2b. `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ `RangeError`
-   *    （`Runtime.resolveContestedGroup: resolution.kind must be "supersede" or "both_active"`。ADR 0496。2者版と同じ）。
-   * 3. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `memberIds` の
-   *    どの id とも一致しなければ `RangeError`
-   *    （`Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds`）。
-   *    ただし `winnerId` が memberIds のどれかと大文字小文字だけ違うときは、`resolveContested`
-   *    （2者版）と同じ規則で救済する（Issue #1449 項目6。旧版は「群は候補を一意に絞れない
-   *    ことが多い」として見送っていたが、**一意に絞れたときだけ**救済し、絞れなければ今どおり
-   *    落とす形なら2者版と同じ規則を持ち上げられる）: 小文字にそろえて memberIds から候補を集め、
-   *    **ちょうど1件**かつ `memoryStore.get` が `winnerId` と候補に同じ id の記憶を返したとき
-   *    だけ、その memberId の綴りを勝者として使う（敗者の `supersededById` は memberIds の綴り
-   *    ＝store の列の値になる）。候補が2件以上・`get` が食い違う・どの member とも大文字小文字を
-   *    無視しても違う（この場合は store を読まない）ときは `RangeError`。
-   * 4. `deps.memoryStore.resolveContestedGroup` が無ければ
-   *    `{ supported: false, outcome: { kind: "not_attempted" } }`。
-   * 5. `getMany(memberIds)` で一括読み、{@link ResolveContestedGroupSideOutcome}
-   *    に分類する（`"not_found"`/`"status_not_contested"`/`"eligible"`）。
-   * 6. ⚠ **2026-09-30 の直し（ADR 0381）: store 側の CAS（`MemoryStore.resolveContestedGroup`
-   *    契約）が「`members` は `memory_relations` でつながった今も `contested` な群の全員と
-   *    一致しなければならない」を要求するのに合わせ、この読み側でも同じ確認を行う**——
-   *    `deps.relationStore`（配線されていれば）で `memberIds` から `kind: 'contradicts'`
-   *    を辿って到達する id を求め、そのうち `status === 'contested'`（`getMany` で追加で
-   *    読む）のものが `memberIds` の外にあれば、それを `missingMembers` に積んで
-   *    `{ supported: true, outcome: { kind: "ineligible", sides, missingMembers } }` を返す
-   *    ——書き込みは一切試みない。`deps.relationStore` が配線されていなければ、この
-   *    読み側の確認は行わず store 側の CAS だけに任せる（store が
-   *    {@link MemoryStatusConflictError} を投げれば手順8の `conflict` に落ちる——
-   *    `expectedStatus === observedStatus === 'contested'` という特別な形で区別できる、
-   *    `MemoryStore.resolveContestedGroup` の interface JSDoc 参照）。
-   * 7. 手順5・6のどちらでも1件でも `"eligible"` でなければ、書き込みを一切試みず
-   *    `{ supported: true, outcome: { kind: "ineligible", sides, missingMembers: [] } }`
-   *    を返す（手順6で既に `missingMembers` が埋まっている場合を除く）。
-   * 8. 全員 `"eligible"` なら、この口自身が各メンバーの `status`/`supersededById`/`event` を
-   *    `resolution` から組み立てて `deps.memoryStore.resolveContestedGroup` を呼ぶ
-   *    （`resolveContested`（2者版）が `resolution` だけを受け取り、`MemoryStore.
-   *    resolveContestedPair` へ渡す `status`/`event` は自分で組み立てるのと同じ分担）。
-   *    - `resolution.kind === "both_active"`: 全員 `status: "active"`。
-   *    - `resolution.kind === "supersede"`: `winnerId` 側は `status: "active"`、
-   *      他の全員は `status: "superseded"` + `supersededById: <winnerId>`。
+   * 全員を `getMany` で読み {@link ResolveContestedGroupSideOutcome} に分類する。store 側の CAS が「`members` は `memory_relations` でつながった今も `contested` な群の全員と一致しなければならない」
+   * ことを要求する（ADR 0381）ので、`deps.relationStore` が配線されていれば読み側でも `kind: 'contradicts'` を辿って確認し、群の一部しか渡されていなければ欠けた id を `missingMembers` に積んで
+   * 書き込まず `ineligible`。配線されていなければ store 側の CAS だけに任せる（`ContestedGroupMembershipMismatchError` が来れば `ineligible`（`missingMembers` にエラーが名指しした1件）、
+   * `MemoryStatusConflictError` なら `conflict`）。1件でも `eligible` でなければ書き込まず `ineligible`。全員 `eligible` なら、`both_active` は全員 `active`、`supersede` は勝者が `active`・他の全員が
+   * `superseded` + `supersededById: <winnerId>` で `resolved`。競合は**1回だけ**再読して `conflict`。
    *
-   *    成功すれば `{ supported: true, outcome: { kind: "resolved", members } }`。
-   *    {@link MemoryStatusConflictError} が投げられたら（TOCTOU、または store 側の全体一致
-   *    CAS 違反）、**1回だけ**再読して `conflicts` に積み、
-   *    `{ supported: true, outcome: { kind: "conflict", conflicts } }` を返す。
+   * 全メンバーに `memory_events` を1件ずつ積む（`supersede` は勝者 `updated`・他は `superseded`、`both_active` は全員 `updated`）。`meta.reason` は `'contested_resolved'`、`meta.resolution` は
+   * `'supersede' | 'both_active'`、`opts.reason` は `meta.note`。`meta.contestedWithId` は積まない（群のメンバーはその欄を持たない）。負けた側の `superseded` は `meta.supersededById` に勝者の id
+   * （memberIds の綴りに寄せた `winnerId`）を持つ（2者版と同じ。ADR 0421）。`tick()`/`observe()` からは呼ばれない。
    *
-   * `memory_events` へ全メンバーそれぞれ1件ずつ積む。`"supersede"` は勝者に `kind: 'updated'`、
-   * 他の全員に `kind: 'superseded'`。`"both_active"` は全員 `kind: 'updated'`。
-   * `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
-   * `'supersede' | 'both_active'`。`opts.reason` を渡すと `meta.note` に追加で入る。
-   * `meta.contestedWithId` は積まない（`markContestedGroup` と同じ理由——群のメンバーは
-   * その欄自体を持たない）。負けた側の `superseded` は `meta.supersededById` に勝った側の id
-   * （`memberIds` の綴りに寄せた `winnerId`。store へ渡す値と同じ）を持つ——2者版
-   * `resolveContested` と同じ形（ADR 0150 追記。ADR 0421 で揃えた）。勝者の `updated` には足さない。
-   *
-   * ⚠ **`recall()` 側は一切変更していない。**`markContested`/`resolveContested` と同じ
-   * 理由。
-   *
-   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**
-   *
-   * 🔴 **任意メソッドである。**`markContestedGroup?`（上）と同じ理由。
+   * 🔴 **任意メソッド（`?`）。** 理由は `markContestedGroup?` と同じ。
    */
   resolveContestedGroup?(
     ctx: Ctx,
@@ -3851,355 +2082,93 @@ export interface Runtime {
   ): Promise<ResolveContestedGroupResult>;
   /**
    * 層: 是正・取り消し
-   * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
-   * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
-   * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
-   * （書き込み、ADR 0134/ADR 0150）の**間**——「選択」の段（Issue #369、
-   * [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+   * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`（書き込み、ADR 0134・ADR 0150）の間の「選択」の段を、出荷される面（`Runtime` の公開 interface）から駆動する
+   * （[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。`examples/chat/src/correction-demo.ts`（`private: true` で出荷されない）にだけあった3態の状態機械（選択待ち／候補外／解決）を、
+   * `packages/core` の公開 API へ持ち上げたもの。
    *
-   * 実体は `examples/chat/src/correction-demo.ts` に**だけ**あった3態の状態機械
-   * （選択待ち／候補外／解決）を、`packages/core` の公開 API へ持ち上げたものである
-   * ——`examples/chat` は `private: true` であり出荷されない。⟹ この口が無い間、
-   * 北極星 項目5 は「出荷される面」からは一度も駆動できなかった。
+   * ⛔ **この口も「相手を選ぶ」ことはしない。** {@link ApplyCorrectionInput.correctedId} は必ず呼び出し側が渡し、`discovery.candidates[0]` を自動で採る経路は無い
+   * （[ADR 0134](../../../docs/decisions/0134-mark-contested-explicit-operation.md)・[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md) の「機械は選ばない」。
+   * 閾値では分離できず、訂正してはいけない8件中、棄権率 0/8・深い誤爆 6/8だった）。
    *
-   * ⛔ **この口も「相手を選ぶ」ことは一切しない。** {@link ApplyCorrectionInput.correctedId}
-   * は必ず呼び出し側が渡す——`discovery.candidates[0]` を自動的に採る経路は無い。
-   * この設計は [ADR 0134](../../../docs/decisions/0134-mark-contested-explicit-operation.md)
-   * 決定2・[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
-   * の核心（「機械は選ばない」）をそのまま引き継ぐ——ADR 0232 が実測した危険
-   * （B群: 訂正してはいけない8件中、棄権率 0/8・深い誤爆 6/8。閾値は分離できない）が、
-   * この口を足したことで再び現れることはない。
+   * - `input.correctedId` が `undefined` なら、何も呼ばず `{ kind: "awaiting_choice" }`。
+   * - `discovery.candidates` に `memoryId === correctedId` が無ければ、何も呼ばず `{ kind: "not_a_candidate", correctedId }`。完全一致が無くても、大文字小文字を無視してちょうど1件の候補に一致し、
+   *   store の `get` が両者を同じ記憶と言えば、その候補として扱う（ADR 0446。`resolveContested` の `winnerId` と同じ形）。
+   * - `input.resolution` が `supersede` で `winnerId` が `correctedId`・`correctingId` のどちらでもなければ、**書き込む前に** `RangeError`（`resolveContested` と同じ型と文言。`markContested` は呼ばれず何も書かれない。ADR 0446）。
+   * - 見つかれば `markContested(ctx, correctedId, correctingId, { actor, reason })` を呼ぶ。`resolution` が無ければここで止まり `{ kind: "contested", ..., markResult }`。あれば続けて `resolveContested` を呼び、
+   *   `{ kind: "resolved", ..., markResult, resolveResult }` を返す。
    *
-   * 手順（`createRuntime` 内の実装。他に判定は無い——ここが実装の全体である）:
-   * 1. `input.correctedId` が `undefined` なら、何も呼ばずに
-   *    `{ kind: "awaiting_choice" }` を返す。
-   * 2. `input.discovery.candidates` から `memoryId === input.correctedId` を探す。
-   *    見つからなければ、何も呼ばずに
-   *    `{ kind: "not_a_candidate", correctedId: input.correctedId }` を返す。
-   *    ⚠ 完全一致が無くても、大文字小文字を無視してちょうど1件の候補に一致し、かつ store の `get` が両者を同じ記憶と
-   *    言えば（`@mnemora/postgres` は uuid を大文字小文字を区別せずに比べる）、その候補として扱う（ADR 0446。
-   *    `resolveContested` の `winnerId` と同じ形）。言わなければ今どおり `not_a_candidate`。
-   * 2.5. `input.resolution` が `supersede` なら、`winnerId` が `correctedId`・`correctingId` のどちらかであるかを、
-   *    **書き込む前に** `resolveContested` と同じ規則で検査する。どちらでもなければ `RangeError`（`resolveContested` が
-   *    投げるのと同じ型と文言）で、`markContested` は呼ばれず何も書かれない（ADR 0446。以前は `markContested` の
-   *    書き込みのあとに投げ、例外で終わったのに対だけが残っていた）。
-   * 3. 見つかれば `markContested(ctx, input.correctedId, input.correctingId, {
-   *    actor: input.actor, reason: input.reason })` を呼ぶ。
-   * 4. `input.resolution` が `undefined` なら、ここで止まり
-   *    `{ kind: "contested", ..., markResult }` を返す——`resolveContested` は
-   *    一度も呼ばない。
-   * 5. `input.resolution` があれば、続けて `resolveContested(ctx, input.correctedId,
-   *    input.correctingId, input.resolution, { actor: input.actor, reason: input.reason })`
-   *    を呼び、`{ kind: "resolved", ..., markResult, resolveResult }` を返す。
-   *
-   * ⛔ **`markContested`/`resolveContested` 自身の失敗（`ineligible`/`conflict`/
-   * `not_attempted`）を握り潰さない。** {@link MarkContestedResult}/{@link ResolveContestedResult}
-   * をそのまま `markResult`/`resolveResult` として運ぶ——`applyCorrection` はそれらを
-   * 別の顔（例外・`boolean`）に変換しない。`kind: "resolved"` は「`resolveContested` まで
-   * 呼んだ」ことだけを意味し、実際に解決が成功したことは `resolveResult.outcome.kind`
-   * を見て判断すること。
-   *
-   * ⛔ **この口自身は監査理由を自動生成しない。** `input.reason` は
-   * `buildCorrectionReason`（`apply-correction.ts`）（ADR 0238 が定めた形を `packages/core` へ持ち上げたもの）
-   * で呼び出し側が組み立てた文字列、またはその他の自由文をそのまま `markContested`/
-   * `resolveContested` の両方へ渡すだけである——`meta.note` に載る `recallId` が
-   * `RecallResult.explain`（`getRecall` 経由）への橋になる、という ADR 0238 の形は
-   * 変わらない。
-   *
-   * ⭐ **`markContested` だけを呼んだ後（`resolution` を渡さない呼び出し）、別の
-   * `applyCorrection` 呼び出しで改めて `resolution` を渡す、という2段の使い方ができる。**
-   * `applyCorrection` は呼び出しの間で状態を持たない——2回目の呼び出しでも手順3で
-   * `markContested` は呼ばれるが、対象は既に `status: 'contested'` なので
-   * {@link MarkContestedResult} は書き込み無しで `ineligible` を返すだけであり、続く
-   * `resolveContested` は正常に解決へ進む。`examples/chat/src/correction-demo.ts` の
-   * `runCorrectionDemo` がこの2段呼び出しを使い、`markContested` 相当の直後に
-   * `recall()` で対（mandatory companion）を見せてから解決へ進む、という Issue #303
-   * 由来の実演を保っている。
-   *
-   * ⚠ **`correctedId === correctingId` を特別扱いしない。** 手順2の照合を通り抜けた場合
-   * （呼び出し側が `excludeMemoryIds` で自己除外していない等）、`markContested` 自身が
-   * `firstId === secondId` の `RangeError` を投げる——`applyCorrection` はそれを
-   * 捕まえない（`markContested`/`resolveContested` の「開く前に落とす」位置をそのまま
-   * 引き継ぐ、呼び手のバグ）。
-   *
-   * ⚠ **`tick()`/`observe()` からは一度も呼ばれない。** `markContested`/`resolveContested`
-   * と同じ立場——呼び出し側が明示的に呼んだときだけ動く。
+   * ⛔ **`markContested`/`resolveContested` の失敗（`ineligible`/`conflict`/`not_attempted`）を握り潰さず**、`markResult`/`resolveResult` としてそのまま運ぶ（例外・`boolean` に変換しない）。
+   * `kind: "resolved"` は「`resolveContested` まで呼んだ」ことだけを意味するので、解決に成功したかは `resolveResult.outcome.kind` で見る。
+   * ⛔ 監査理由は自動生成しない: `input.reason`（`buildCorrectionReason`〔`apply-correction.ts`。ADR 0238〕で組み立てた文字列か自由文）を両方へそのまま渡す。`meta.note` の `recallId` が `getRecall` への橋になる。
+   * ⭐ `resolution` を渡さず呼んだ後、別の呼び出しで `resolution` を渡す2段の使い方ができる（状態を持たない。2回目も `markContested` は呼ばれるが、対象は既に `contested` なので書き込み無しで `ineligible` を返し、
+   * 続く `resolveContested` は解決へ進む）。
+   * ⚠ `correctedId === correctingId` を特別扱いしない: 照合を通ると、`markContested` が `RangeError` を投げ、捕まえない（呼び手のバグ）。`tick()`/`observe()` からは呼ばれない。
    */
   applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
   /**
    * 層: 中核
-   * Issue #103（ADR 0089）: 複数の Memory を1件に統合する（docs/vision.md「5動詞」の1つ）。
+   * 複数の Memory を1件に統合する（ADR 0089。docs/vision.md「5動詞」の1つ）。結果の意味は {@link ConsolidateOutcome}。
    *
-   * **`forget`/`purge`/減衰のどれでもない、第4の位置——`status: 'superseded'`
-   * （機構の都合）を使う。** 統合元は `status: 'superseded'` + `supersededById: <統合先>` へ
-   * 動き、行も `content` も消えない（`superseded_by_id` で統合先を辿れる。docs/north-star.md
-   * 表4「元を消さない」）。**`forgotten` は絶対に統合元にしない**——利用者が意図して
-   * 忘れさせたものを、機構の都合（統合）で上書きしない（`runtime.forget` の先例と同じ理由）。
+   * 統合元は `status: 'superseded'` + `supersededById: <統合先>` へ動き、行も `content` も消えない。**`forgotten` は絶対に統合元にしない**（利用者が意図して忘れさせたものを、機構の都合で上書きしない）。
    *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1248](https://github.com/takecchi/mnemora/issues/1248)）:
-   * 下の手順が「書き込み無し」「書き込みゼロ」と書くのは、Memory・`memory_events`・outbox のことである。**
-   * `target` が `{ query }`・`{ seedMemoryId }` のときは、手順1の `recall()` が recall の記録を1件書き、`decay_clock` が
-   * `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165 決めたこと5）。**`dryRun`、eligible が0件・1件、
-   * LLM の失敗など、どの枝で終わっても起きる。**⟹ 活動時計のテナントでは、`dryRun` で確かめるだけでも記憶が1回ぶん
-   * 沈む。`tick()` の `consolidate` ジョブ（`{ seedMemoryId }` で呼ぶ）も同じ。`{ memoryIds }` は `recall()` を呼ばないので、
-   * どちらも起きない。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ
-   * （`consolidate-reflect-recall-side-effects.postgres.test.ts`）。
+   * ⚠ 以下の「書き込み無し」は Memory・`memory_events`・outbox のことである。`target` が `{ query }`・`{ seedMemoryId }` のときの `recall()` は、**どの枝で終わっても**（`dryRun`・eligible 0件/1件・LLM の失敗でも）
+   * recall の記録を1件書き、`decay_clock` が `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165）ので、活動時計のテナントでは `dryRun` で確かめるだけでも記憶が1回ぶん沈む
+   * （`tick()` の `consolidate` ジョブも同じ。`{ memoryIds }` は `recall()` を呼ばない）。
    *
-   * 手順（ADR 0089 §3。**この順序が冪等性と安全性を買っている**）:
-   * 1. `target` を正規化する。`{ memoryIds }` はそのまま（重複・入力順を保つ）。空配列は
-   *    store に一切触れず `outcome: 'not_examined'`。`{ query, maxCandidates }` は
-   *    `recall(ctx, query)` を1回呼び、返った `memories` の id を順に採る
-   *    （`maxCandidates` があれば先頭からその件数で切る）。0件も `not_examined`。
-   *    `{ seedMemoryId, maxCandidates?, minAffinity? }`（Issue #135、ADR 0152）は
-   *    種の Memory を `get` し、その `digest` を `text` にして `recall()` を1回呼ぶ
-   *    （`{ query }` とまったく同じ経路）。`recall()` が返した候補のうち、
-   *    `RecalledMemory.score` から `computeAffinity`（`max(similarity, lexicalMatch)`、
-   *    `strategies/consolidate.ts`）が `minAffinity`（既定
-   *    {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}）未満のものは落とす。**種そのものは
-   *    この判定を受けず、必ず先頭に含める**（種の embedding がまだ無いと ANN に
-   *    載らないため）。`maxCandidates` は結果の配列全体（種＋近傍）を先頭から切る。
-   *    種が見つからない、または種が forget・purge された記憶なら（Issue #1136）、`recall()` を
-   *    呼ばず、対象は種の id 1件のみになる。
-   * 2. `getMany` で一括読み。無ければ `not_found`、`status !== 'active'` なら
-   *    `status_not_active`、`active` なら eligible。在るかどうかの突き合わせは `restoreArchived` の手順2と同じ
-   *    （大文字小文字だけが違う id を同じ呼び出しに混ぜたときは、渡された文字列どおりに突き合わせる）。
-   * 3. eligible が0件なら `nothing_to_consolidate`/`no_eligible_sources`、1件だけなら
-   *    `nothing_to_consolidate`/`single_eligible_source`——どちらも `llmCalls: 0`・書き込み無し。
-   *    **eligible は重複を除いて数える**（`reflect` の手順3と同じ。2026-09-27 追記、ADR 0089 の
-   *    追記）——`{ memoryIds: [a, a] }` は eligible 1件として `single_eligible_source` になり、
-   *    同じ Memory を自分自身と統合しない。`sources` は入力と同じ長さ（重複も保つ）のまま
-   *    （歯は `packages/core/src/__tests__/consolidate-duplicate-ids.test.ts`）。
-   *    **これが冪等性の芯**——同じ id 集合で2回目を呼ぶと eligible が0件になり、LLM も
-   *    呼ばず何も書かずに終わる。⚠ **2026-09-26 追記（Issue #869）: 「同じ id 集合」は
-   *    `{ memoryIds }` では保証されるが、`{ seedMemoryId }`（手順1）では保証されない**
-   *    ——`neighborIds` を毎回 `recall()` で拾い直すため、1回目で `recall()` の窓から
-   *    溢れて `active` のまま残った近傍が2回目には eligible に入り、書き込みゼロにならない
-   *    ことがある（{@link ConsolidateTarget} の doc コメント、ADR 0152 負債5・ADR 0089 の
-   *    2026-09-26 追記）。
-   * 4. `dryRun: true` ならここで打ち切る。eligible は `{ kind: 'eligible' }`、他は2の判定の
-   *    まま。`outcome: 'dry_run'`、`llmCalls: 0`、書き込みゼロ。
-   * 5. LLM を1回呼ぶ（`completeStructured`）。失敗したら `outcome: 'llm_failed'`・
-   *    `llmFailure`・`llmCalls: 1`・書き込みゼロ（失敗を根拠に既存の記憶を置き換えない。
-   *    `ReextractResult.supersededMemoryIds` の doc と同じ規律）。
-   *    ⭐ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
-   *    ADR 0375 決定7、クローン miku の判断）: LLM が返った直後・統合先を作る前に、
-   *    eligible を `getMany` で読み直す。**1件でも `status === 'forgotten'`（`forget()` のみ・
-   *    `purge()` 済みのどちらも含む）なら、**統合先を一切作らずに打ち切る**
-   *    （`outcome: 'aborted_source_forgotten'`、`atomicity: 'not_attempted'`、`llmCalls: 1`。
-   *    forgotten だった要素は `sources` で `"forgotten_before_write"`、他の eligible は
-   *    `"not_attempted"`）。**この読み直しと次の書き込みの間には、まだ小さな窓が残る**
-   *    ——`atomicity: 'store_unsupported'` の経路（下の手順7）は、この読み直しだけが保護であり、
-   *    それ以上の見直しは無い。`atomicity: 'store_supported'` の経路（口が在る adapter）は、
-   *    この読み直しに加えて、手順7の `supersedeWithNewMemories` 呼び出し自体に
-   *    `opts.abortIfForgotten: eligibleIds` を渡し、**書き込みと同一トランザクションの中で
-   *    `SELECT … FOR UPDATE` によりもう一度見直す**（`@mnemora/postgres` の実装。
-   *    {@link SourceMemoryForgottenError} 参照）——ここで forgotten が見つかれば
-   *    {@link SourceMemoryForgottenError} を投げ、`news`（統合先）も `supersede`（統合元の更新）も
-   *    一切コミットされずに rollback する。runtime はこの例外を捕まえ、同じ
-   *    `outcome: 'aborted_source_forgotten'` として返す——呼び出し側からは、読み直しの直後に
-   *    打ち切られたのか・書き込みのトランザクション内で打ち切られたのかは区別できない
-   *    （どちらも「何も書かれていない」という点で同じであり、区別する意味が無い）。
-   *    `packages/testkit` の `InMemoryMemoryStore` と `packages/core` のテスト用
-   *    `FakeMemoryStore` は `opts.abortIfForgotten` を実装しないため、これらの adapter では
-   *    上の読み直しだけが保護になる（残る窓については `docs/memory-model.md` の該当箇所参照）。
-   * 6. 統合先を1件作る（`createMemoryWithOutbox`。`buildConsolidatedMemory` 参照）。
-   *    ⚠ **統合先は `embeddingStatus: 'pending'` で作られ、`embed` ジョブを積むだけ——
-   *    `tick()` が回るまで ANN の候補に入らない。**統合元は同じ呼び出しの中で
-   *    `superseded` へ動くため、**元はもう引けないが統合先もまだ引けない窓が開く**
-   *    （[ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md)
-   *    「引き受けた負債」4。塞いでいない——今は決めない、と書いてある）。
-   * 7. eligible を1件ずつ `updateStatusWithEvent` で `superseded` へ CAS する（`reextract` の
-   *    ループと同じ形。**`atomicity: 'store_unsupported'`——`MemoryStore.supersedeWithNewMemories`
-   *    が無い adapter のときだけこの手順を通る**）。`MemoryStatusConflictError` はその1件だけ
-   *    `status_changed_concurrently` として飛ばして続行、それ以外の例外は `failed` を積んで
-   *    その場で打ち切り、残りを `not_attempted` として返す（投げない。`forget`/ADR 0087 決定5
-   *    と同じ）。
-   *    🔴 **`atomicity: 'store_supported'`（口が在る adapter）はこの手順そのものを使わない**
-   *    ——統合先の作成と統合元の supersede を1トランザクションで撃ち、CAS の競合は例外では
-   *    なく戻り値の `conflicted`（`status_changed_concurrently` に写す）として届く。**それ以外の
-   *    予期しない例外はここでは投げる**——ADR 0089 決定5（「予期しない例外は打ち切って
-   *    `not_attempted` として返す。投げない」）を**この経路だけ**部分的に覆す。決定5が
-   *    「投げない」とした理由（部分的に起きたことを呼び出し側から見えなくしないため）は、
-   *    1トランザクションでは部分的に起きたこと自体が無い（統合先の作成も supersede も全部
-   *    巻き戻る）ため、この経路では別の手段で既に満たされている（ADR 0100 決定8）。
-   *    ⚠ **2026-09-30 訂正（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
-   *    ADR 0375 決定7）: この段落は 2026-09-27 に「今の振る舞い」として書いたが、もう成り立たない。**
-   *    当時は、LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、どちらの経路も
-   *    書き込みの前に見直さなかった——その1件は `status_changed_concurrently` として飛ばされる
-   *    だけで、統合先はその本文を入れた LLM の出力から作られ、`active` で書かれていた
-   *    （`purge()` が `"purged"` を返した後でも）。**今は、手順5の直後の読み直し（上）が
-   *    この場合を検出し、`outcome: 'aborted_source_forgotten'` で打ち切る**——`forget`/`purge`
-   *    された要素が `status_changed_concurrently` に分類されて統合先が書かれることはもう無い。
-   *    【実測 2026-09-30】`@mnemora/postgres` と testkit の fixture で確認（歯は
-   *    `consolidate-reflect-forget-race.postgres.test.ts`）。**`status_changed_concurrently` 自体は
-   *    今日も存在する**——`forgotten`/`purged` 以外の理由（例: 別の呼び出しが同じ eligible を
-   *    先に `superseded`/`contested` へ動かした）で CAS が破れたときは、今どおり部分成功として扱う
-   *    （その1件だけ `status_changed_concurrently`、統合先は書かれる）。
-   *    ⚠ **2026-09-30 変更（[ADR 0420](../../../docs/decisions/0420-consolidate-reflect-abort-on-superseded-and-all-conflicted.md)）:**
-   *    上の「`superseded` へ動かした」場合は、もう部分成功にならない。eligible の1件でも `superseded` になっていた
-   *    ときと、eligible の**すべて**が `active` でなくなっていた（CAS がすべて破れた）ときは、統合先を書かず
-   *    `outcome: 'aborted_source_status_changed'` で打ち切る（手順5の直後の読み直しと、
-   *    `supersedeWithNewMemories?` の `opts.abortIfSuperseded`/`opts.abortIfAllConflicted`）。
-   *    ⚠ **2026-10-02 変更（[ADR 0544](../../../docs/decisions/0544-llm-wait-state-change-contested-skips-three-paths.md)）:
-   *    手順5の直後の読み直しは `contested` も見る**（1件でもあれば `superseded` と同じく `aborted_source_status_changed`。
-   *    `sources` は `status_changed_concurrently`・`observedStatus: 'contested'`）。以下の「部分成功が残る」から `contested` は外れた
-   *    （`reflect` の読み直しも同じ）。書き込みと同一トランザクションの見直しは、`contested` についてはまだ無い（ADR 0544 負債1）。
-   *    部分成功が残るのは、
-   *    `superseded` 以外の理由（`archived` など。`contested` は読み直しより後に起きた分だけ）で**一部だけ**が破れたときである。
-   *    ⚠ `supersedeWithNewMemories?` を実装しない adapter の2段の経路では、統合先を書いた後で CAS するので、
-   *    手順5の直後の読み直しより後に全件が破れた場合は打ち切れない（統合先は残る。ADR 0420 の「引き受けた負債」）。
-   * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
+   * 契約:
+   * - 空配列・`query` が0件は `not_examined`（store に触れない）。対象の解決は {@link ConsolidateTarget}。`getMany` で読んで、無ければ `not_found`、`status !== 'active'` なら `status_not_active`、有効期間の外なら
+   *   `expired`/`not_yet_valid`、それ以外が eligible（在るかどうかの突き合わせは `restoreArchived` と同じ）。
+   * - eligible が0件なら `nothing_to_consolidate`/`no_eligible_sources`、1件だけなら `single_eligible_source`（どちらも LLM を呼ばず、書き込み無し）。**eligible は重複を除いて数える**ので、`{ memoryIds: [a, a] }` は
+   *   `single_eligible_source` になり、同じ Memory を自分自身と統合しない（`sources` は入力と同じ長さのまま）。**これが冪等性の芯**で、同じ id 集合の2回目は LLM も呼ばず何も書かない（`{ seedMemoryId }` では保証されない。{@link ConsolidateTarget}）。
+   * - `dryRun: true` は `dry_run`（eligible は `{ kind: 'eligible' }`、`llmCalls: 0`）。LLM を1回呼ぶ（`completeStructured`）。失敗したら `llm_failed`・書き込みゼロ（失敗を根拠に既存の記憶を置き換えない）。
+   * - LLM が返った直後・統合先を作る前に eligible を読み直し（ADR 0375）、1件でも `forgotten`（`purge()` 済みも含む）なら**統合先を作らず** `aborted_source_forgotten`（forgotten だった要素は `"forgotten_before_write"`、他は `"not_attempted"`）。
+   *   `superseded`・`contested`（ADR 0420・ADR 0544）が1件でも、または eligible の**すべて**が `active` でなくなっていた場合は `aborted_source_status_changed`。
+   *   **読み直しと書き込みの間には小さな窓が残る。** `atomicity: 'store_supported'` の経路は、`supersedeWithNewMemories` に `abortIfForgotten`・`abortIfSuperseded`・`abortIfAllConflicted` を渡し、書き込みと同一トランザクションの
+   *   `SELECT … FOR UPDATE` でもう一度見直す（`@mnemora/postgres`。{@link SourceMemoryForgottenError}。何もコミットされず、同じ outcome で返る。`contested` の見直しはまだ無い）。`store_unsupported` の経路は読み直しだけが保護で、
+   *   `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore` は `abortIf*` を実装しない。
+   * - ⚠ **統合先は `embeddingStatus: 'pending'` で作られ、`tick()` が回るまで ANN の候補に入らない。** 統合元は同じ呼び出しで `superseded` へ動くため、**元はもう引けないが統合先もまだ引けない窓が開く**
+   *   （塞いでいない。[ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md)）。
+   * - 統合元の `superseded` 化: `store_supported`（`MemoryStore.supersedeWithNewMemories` が在る）は、作成と supersede を1トランザクションで撃ち、CAS の競合は戻り値の `conflicted`（`status_changed_concurrently`）として届く。
+   *   **それ以外の予期しない例外は、この経路では投げる**（ADR 0089 の「打ち切って `not_attempted` で返す。投げない」を、この経路だけ覆す。1トランザクションでは部分的に起きたことが無く、「投げない」とした理由が満たされるため。ADR 0100）。
+   *   `store_unsupported` は `updateStatusWithEvent` で1件ずつ CAS し、競合はその1件だけ `status_changed_concurrently` で飛ばして続行、それ以外の例外は `failed` を積んで打ち切り、残りを `not_attempted` で返す（投げない）。
+   *   部分成功が残るのは、`superseded` 以外の理由（`archived` など）で一部だけが破れたとき。`store_unsupported` の2段の経路では、読み直しより後に全件が破れても打ち切れず、統合先は残る（ADR 0420）。
    *
-   * `memory_events.meta.reason` は `superseded` イベントに `'consolidated'` を積む
-   * （`reextract_superseded` に次ぐ2つ目の値、ADR 0074 が予言した形）。`digestSnapshot` は
-   * 積むが **`content` は積まない**（`forget`/`reextract` と同じ規律）。
-   *
-   * ⭐ **`tick()` は `'consolidate'` の outbox ジョブが在ればこれを駆動する**
-   * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。ジョブの
-   * `payload` は `{ memoryId }`（既存の `embed` ジョブと同じ形）で、`tick` はそれを
-   * `seedMemoryId` として `consolidate(ctx, { target: { seedMemoryId } })` を呼ぶ
-   * だけである——このメソッド自身の意味論・呼び出し方は一切変わっていない。
-   * ⚠ **そのジョブが自動で積まれるとは限らない**——`extract` がこの種を積むのは
-   * `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効にした
-   * ときだけである。無効のままでも `consolidate()` を直接呼ぶ経路は変わらず動く
-   * （北極星の問い2）。
+   * `meta.reason` は `superseded` イベントに `'consolidated'`。`digestSnapshot` は積むが **`content` は積まない**。⭐ `tick()` は `'consolidate'` の outbox ジョブが在ればこれを駆動する（ADR 0157。`payload` は `{ memoryId }`、
+   * それを `seedMemoryId` として呼ぶだけ）。ジョブが積まれるのは `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効にしたときだけで、無効のままでも `consolidate()` を直接呼ぶ経路は変わらず動く。
    */
   consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
   /**
    * 層: 中核
-   * Issue #104: 複数の Memory から一般化・気づきを1件作る（docs/vision.md「5動詞」の1つ）。
+   * 複数の Memory から一般化・気づきを1件作る（ADR 0091。docs/vision.md「5動詞」の1つ）。結果の意味は {@link ReflectOutcome}。
    *
-   * **`consolidate` の双子だが、意味論は正反対である。** `consolidate` は N→1 の**置換**
-   * （統合元を `superseded` へ動かす）だが、`reflect` は**足すだけ**の操作であり、
-   * 既存の行の `status` を1つも動かさない。書き込みは新しい Memory 1件と `created`
-   * イベントだけであり、`updateStatus`/`updateStatusWithEvent` は1度も呼ばない
-   * ——`reflect` に `superseded`/`forgotten` へ動かす根拠は無い（`consolidate` が
-   * `superseded` を使えるのは N→1 の置換だからである）。
+   * **`consolidate` の双子だが、意味論は正反対**: `consolidate` は N→1 の**置換**（統合元を `superseded` へ動かす）、`reflect` は**足すだけ**で既存の行の `status` を動かさない。書き込みは新しい Memory 1件と `created` イベントだけ。
+   * `consolidate` と同じく、`{ query }`・`{ seedMemoryId }` の `recall()` は**どの枝で終わっても** recall の記録を書き、活動時計のテナントでは `activity_seq` を1進める（ADR 0165。`tick()` の `reflect` ジョブも同じ）。
    *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1248](https://github.com/takecchi/mnemora/issues/1248)）:
-   * 下の手順が「書き込み無し」「書き込みゼロ」と書くのは、Memory・`memory_events`・outbox のことである。**
-   * `target` が `{ query }`・`{ seedMemoryId }` のときは、手順1の `recall()` が recall の記録を1件書き、`decay_clock` が
-   * `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165 決めたこと5）。**`dryRun`、eligible が0件・1件、
-   * LLM の失敗など、どの枝で終わっても起きる。**⟹ 活動時計のテナントでは、`dryRun` で確かめるだけでも記憶が1回ぶん
-   * 沈む。`tick()` の `reflect` ジョブ（`{ seedMemoryId }` で呼ぶ）も同じ。`{ memoryIds }` は `recall()` を呼ばないので、
-   * どちらも起きない。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ
-   * （`consolidate-reflect-recall-side-effects.postgres.test.ts`）。
+   * 契約（`consolidate` と同じ段取りで、書き込みの終盤だけ違う）:
+   * - 対象の解決は {@link ReflectTarget}。`getMany` で読み、**この優先順で**分類する: 無ければ `not_found`、`status !== 'active'` なら `status_not_active`、有効期間の外なら `expired`/`not_yet_valid`（`consolidate`・`recall()` と同じ `classifyValidity`）、
+   *   期間の内側で `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を土台にまた reflect する自己増幅を形の側で止める）、それ以外は eligible。
+   * - eligible（重複除去）が0件なら `nothing_to_reflect`/`no_eligible_basis`（LLM を呼ばない）。`consolidate` と違い、1件だけでも打ち切らない（1件からの一般化も意味を持ちうる）。`dryRun: true` は `dry_run`。
+   * - LLM を1回呼ぶ（`completeStructured`。スキーマは判別子 `outcome: 'reflected' | 'nothing'` の判別可能ユニオン。断れないスキーマを渡すと、モデルは毎回何かを捏造するため、「一般化するものは無い」と答えられる形にしてある）。
+   *   失敗したら `llm_failed`（書き込みゼロ。失敗を根拠に新しい記憶を作らない）。`'nothing'` なら `nothing_to_reflect`/`llm_declined`。
+   * - `'reflected'` が返った直後・組み立てる前に eligible を読み直し（ADR 0375）、1件でも `forgotten` なら**内省の Memory を作らず** `aborted_source_forgotten`（forgotten だった要素は `"forgotten_before_write"`、他は `"eligible"`）。
+   *   `superseded`・`contested`（ADR 0420・ADR 0544）なら `aborted_source_status_changed`（`"status_changed_before_write"`）。読み直しと書き込みの間には小さな窓が残る。`createMemoryWithOutbox` に `abortIfForgotten`・`abortIfSuperseded` を渡し、
+   *   `@mnemora/postgres` は INSERT と同一トランザクションの `SELECT … FOR UPDATE` で見直す（{@link SourceMemoryForgottenError}。何もコミットされず、同じ outcome で返る）。`packages/testkit` の `InMemoryMemoryStore` と
+   *   `packages/core` の `FakeMemoryStore` は実装しないので、読み直しだけが保護。
+   * - 新しい Memory の `provenance` は `{ kind: 'reflected', sources: <eligible の memoryId> }`。**`sources` は必ず埋める**（`ReflectedProvenance.sources` は型としては省略可のままだが、公開型の破壊的変更を避けるため型は変えない）。
+   *   store が `createMemoriesWithOutboxAndEvents?` を持てば `created` も同じ1トランザクションで積む（ADR 0416）。持たなければ `createMemoryWithOutbox` + 別の `eventStore.append`（直さない負債）。`created` の `meta.reason` は `'reflected'`、
+   *   `meta.sources` は store が返した行の id＝小文字の正規形（渡された綴りではない。ADR 0527）、`opts.reason` があれば `meta.note`。eligible は `'used'` で返る。
    *
-   * 手順（`consolidate` §3 と同じ段取りを踏むが、書き込みの終盤だけ違う）:
-   * 1. `target` を正規化する。`{ memoryIds }` はそのまま（重複・入力順を保つ）。空配列は
-   *    store に一切触れず `outcome: 'not_examined'`。`{ query, maxCandidates }` は
-   *    `recall(ctx, query)` を1回呼び、返った `memories` の id を順に採る
-   *    （`maxCandidates` があれば先頭からその件数で切る）。0件も `not_examined`。
-   *    `{ seedMemoryId, maxCandidates?, minAffinity? }`（Issue #204、ADR 0154）は
-   *    `consolidate` の `{ seedMemoryId }`（ADR 0152）と同じ土台選定——種の Memory を
-   *    `get` し、その `digest` を `text` にして `recall()` を1回呼ぶ（`{ query }` と
-   *    まったく同じ経路）。`recall()` が返した候補のうち、`RecalledMemory.score` から
-   *    `computeAffinity`（`max(similarity, lexicalMatch)`、`strategies/consolidate.ts`）が
-   *    `minAffinity`（既定 {@link DEFAULT_REFLECT_MIN_AFFINITY}）未満のものは落とす。
-   *    **種そのものはこの判定を受けず、必ず先頭に含める**（種の embedding がまだ無いと
-   *    ANN に載らないため）。`maxCandidates` は結果の配列全体（種＋近傍）を先頭から切る。
-   *    種が見つからない、または種が forget・purge された記憶なら（Issue #1136）、`recall()` を
-   *    呼ばず、対象は種の id 1件のみになる。
-   * 2. `getMany` で一括読み。**この優先順で**分類する: 無ければ `not_found`、
-   *    `status !== 'active'` なら `status_not_active`、`active` かつ、いまの時点で有効期間
-   *    （`validFrom`/`validUntil`）の外なら `expired`/`not_yet_valid`（2026-09-29 追記、Issue #1188。
-   *    `consolidate()`・`recall()` と同じ `classifyValidity` 述語、`clock.now()` に対して見る）、
-   *    `active` かつ期間の内側で `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を
-   *    土台にまた reflect する自己増幅を、形の側で止める）、それ以外は eligible。
-   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（大文字小文字だけが違う id を同じ呼び出しに
-   *    混ぜたときは、渡された文字列どおりに突き合わせる）。
-   * 3. eligible（重複除去）が0件なら `nothing_to_reflect`/`no_eligible_basis` で打ち切る
-   *    ——**LLM を呼ばない**（`llmCalls: 0`）。`consolidate` と違い、eligible が1件だけでも
-   *    ここでは打ち切らない（1件からの一般化も意味を持ちうる）。
-   * 4. `dryRun: true` ならここで打ち切る。eligible は `{ kind: 'eligible' }`、他は2の判定の
-   *    まま。`outcome: 'dry_run'`、`llmCalls: 0`、書き込みゼロ。
-   * 5. LLM を1回呼ぶ（`completeStructured`、スキーマは判別子 `outcome: 'reflected' | 'nothing'`
-   *    を持つ判別可能ユニオン——断れないスキーマを渡すと、モデルは毎回何かを捏造するため、
-   *    モデルが「一般化するものは無い」と答えられる形にしてある）。失敗したら
-   *    `outcome: 'llm_failed'`・`llmFailure`・`llmCalls: 1`・書き込みゼロ（失敗を根拠に
-   *    新しい記憶を作らない。`ReextractResult`/`ConsolidationResult` と同じ規律）。
-   * 6. LLM が `outcome: 'nothing'` を返したら `nothing_to_reflect`/`llm_declined`、
-   *    `llmCalls: 1`、書き込みゼロ。
-   *    ⭐ **2026-09-30 追記（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
-   *    ADR 0375 決定7、クローン miku の判断）: LLM が `'reflected'` を返した直後・新しい
-   *    Memory を組み立てる前に、eligible を `getMany` で読み直す。**1件でも
-   *    `status === 'forgotten'`（`forget()` のみ・`purge()` 済みのどちらも含む）なら、
-   *    **内省の Memory を一切作らずに打ち切る**（`outcome: 'aborted_source_forgotten'`、
-   *    `llmCalls: 1`。forgotten だった要素は `basis` で `"forgotten_before_write"`、他の
-   *    eligible は `"eligible"`）。この読み直しと次の手順7（書き込み）の間には小さな窓が
-   *    残る——`reflect` は `consolidate` の `atomicity: 'store_supported'` に相当する
-   *    「複数行を1トランザクションで」という仕組みを持たない（既存行を1つも動かさないため
-   *    `supersedeWithNewMemories` を使わない）が、手順7の `createMemoryWithOutbox` 自体に
-   *    `opts.abortIfForgotten: eligibleIds` を渡し、`@mnemora/postgres` はこの INSERT と
-   *    同一トランザクションの中で `SELECT … FOR UPDATE` によりもう一度見直す
-   *    （{@link SourceMemoryForgottenError} 参照）——ここで forgotten が見つかれば
-   *    {@link SourceMemoryForgottenError} を投げ、INSERT は一切コミットされずに rollback
-   *    する。runtime はこの例外を捕まえ、同じ `outcome: 'aborted_source_forgotten'` として
-   *    返す。`packages/testkit` の `InMemoryMemoryStore` と `packages/core` のテスト用
-   *    `FakeMemoryStore` は `opts.abortIfForgotten` を実装しないため、これらの adapter では
-   *    上の読み直しだけが保護になる（`consolidate` の同日付の追記と同じ形。残る窓については
-   *    `docs/memory-model.md` の該当箇所参照）。
-   * 7. `buildReflectedMemory(...)` で新しい Memory を1件組み立て
-   *    （`createMemoryWithOutbox(ctx, newMemory, ['embed'])`）。`provenance` は
-   *    `{ kind: 'reflected', sources: <eligible の memoryId> }`——**`sources` は必ず埋める**
-   *    （`ReflectedProvenance.sources` は型としては省略可のままだが、この実装が作る値は
-   *    常に埋める。公開型の破壊的変更を避けるため型は変えていない）。
-   *    ⚠ **2026-09-30 訂正（[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）:
-   *    この段落は 2026-09-27 に「今の振る舞い」として書いたが、もう成り立たない。**
-   *    当時は、LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、
-   *    書き込みの前に見直さず、内省の Memory はその本文を入れた LLM の出力から作られ
-   *    `active` で書かれていた。**今は、手順6の直後の読み直し（上）がこの場合を検出し、
-   *    `outcome: 'aborted_source_forgotten'` で打ち切る。**【実測 2026-09-30】
-   *    `@mnemora/postgres` と testkit の fixture で確認（歯は
-   *    `consolidate-reflect-forget-race.postgres.test.ts`）。
-   * 8. `created` イベントを1件積む。`meta.reason: 'reflected'`、`meta.sources: <eligible の
-   *    id。store が返した行の id＝小文字の正規形で、渡された綴りではない（ADR 0527。以前は渡された綴りで、直す前に書かれた行は書き換えない）>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
-   *    イベントと同じ形）。
-   * 9. `outcome: 'reflected'`、`reflectedMemoryId`、eligible を `'used'` にして返す。
+   * ⚠ **冪等性は買っていない。** `sourceObservationId: null` なので `createMemoryWithOutbox` の部分一意索引は効かず、既存の行の `status` も動かさないので `consolidate` の「読んで status で弾く」も使えない。
+   * ⟹ 同じ target で2回呼ぶと、内容が同じ `reflected` Memory が2件できる（塞ぐために `MemoryStore` へメソッドや索引は足さない）。**`tick()` の `'reflect'` ジョブも同じ**: outbox は at-least-once（ADR 0032）で、`reflect()` が書いた後・`complete` の前に
+   * ワーカーが止まると、リース切れ後の `tick()` が再処理して内省の Memory が2件になる（`'embed'`・`'consolidate'` は再配達でも1回と同じ状態になる）。
    *
-   * ⚠ **冪等性は買っていない。**`sourceObservationId: null` なので `createMemoryWithOutbox`
-   * の部分一意索引（`WHERE source_observation_id IS NOT NULL`）は効かず、既存の行の
-   * `status` を動かさない（上の手順に `superseded`/`forgotten` が無い）ため `consolidate` の
-   * 「読んで status で弾く」も使えない。**⟹ 同じ target で2回呼ぶと、内容が同じ
-   * `reflected` Memory が2件できる。**これを塞ぐために `MemoryStore` へメソッドや索引を
-   * 足すことはしていない（`reflect.test.ts` がこの挙動を歯で固定している）。
-   *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: `tick()` の `'reflect'` ジョブも同じ理由で冪等でない。**
-   * outbox の処理は at-least-once である（`OutboxStore` の doc、ADR 0032）——`reflect()` が内省の
-   * Memory を書いた後、`complete` の前にワーカーが止まると、リースが切れた後の `tick()` が同じ
-   * ジョブをもう一度処理し、**内省の Memory が2件になる**（created イベントと embed ジョブも2つずつ）。
-   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ。比べて、`'embed'`・
-   * `'consolidate'` のジョブは同じ再配達でも1回だけ処理したときと同じ状態になる（consolidate は
-   * 上の「読んで status で弾く」が効く）。歯は
-   * `packages/postgres/src/__tests__/tick-sequential-redelivery.postgres.test.ts`。
-   *
-   * ⭐ **`tick()` は `'reflect'` の outbox ジョブが在ればこれを駆動する**
-   * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。`consolidate` と
-   * 対称——ジョブの `payload` は `{ memoryId }` で、`tick` はそれを `seedMemoryId` として
-   * `reflect(ctx, { target: { seedMemoryId } })` を呼ぶだけである。
-   * ⚠ **`reflect()` の *実運用*（Background Cognition・Scheduler による自動起動）は
-   * 依然として Phase 1 の範囲外のままである**（docs/roadmap.md §1.3。⚠ 2026-09-29 追記:
-   * 併記していた §1.1 は削除した（#762）。当時の本文は
-   * https://github.com/takecchi/mnemora/blob/635c93d/docs/roadmap.md#11-オーナー指定の範囲 ）——ここで
-   * 変わったのは「`tick` に渡されたジョブを処理できるようになった」ことだけであり、
-   * ジョブを**自動で積む**かどうかは別の決定である。`extract` がこの種を積むのは
-   * `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効に
-   * したときだけであり、無効のままでも `reflect()` を直接呼ぶ経路は変わらず動く
-   * （北極星の問い2）。
+   * ⭐ `tick()` は `'reflect'` の outbox ジョブが在ればこれを駆動する（ADR 0157。`consolidate` と対称）。`reflect()` の*実運用*（Background Cognition・Scheduler による自動起動）は Phase 1 の範囲外（docs/roadmap.md §1.3）で、
+   * ジョブを**自動で積む**のは `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効にしたときだけ。無効のままでも `reflect()` を直接呼ぶ経路は変わらず動く。
    */
   reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
 }
 
-/**
- * `observations.payload`（`kind = 'usage'`）の形。`ObserveMemoryUsageInputSchema`
- * （observation.ts、非公開）と同じ2欄——`externalId` は payload ではなく Observation 行の
- * 列そのもの（他3種と同じ規約）なので、ここには含めない。
- *
- * Issue #870: `handleMemoryUsage` が、冪等な再送で保存済み Observation の payload を
- * 読み直す（＝ `recordUsage`/`reinforce` を保存済みの `recallId`/`usedMemoryIds` で
- * 呼ぶ）ために使う。**runtime 内部専用**——公開 API 表面（ADR 0178）を増やさないよう
- * export しない。
- */
+/** `observations.payload`（`kind = 'usage'`）の形。公開 API 表面（ADR 0178）を増やさないよう export しない。`externalId` は Observation 行の列そのものなので、ここには含めない。 */
 const UsageObservationPayloadSchema = z.object({
   recallId: z.string().min(1),
   usedMemoryIds: z.array(z.string().min(1)),
@@ -4214,9 +2183,7 @@ function extractObservationPayload(
     case "utterance":
       return { text: input.text, speaker: input.speaker, ...context };
     case "event":
-      // Issue #1185: `extractData: true` のときだけ payload に印を足す。`false`・省略では
-      // `payload` は今までと1バイトも変わらない（`extractData` キー自体が増えない）
-      // ——`observationPayloadText`（observation-text.ts）はこの印を見て `data` を本文へ合成する。
+      // `extractData: true` のときだけ印を足す。`false`・省略では `extractData` キー自体を足さない（`payload` を変えないため）。
       return {
         name: input.name,
         data: input.data ?? {},
@@ -4224,8 +2191,7 @@ function extractObservationPayload(
         ...context,
       };
     case "document":
-      // Issue #1185: `extractTitle: true` のときだけ payload に印を足す（`event` の
-      // `extractData` と同じ規律）。
+      // `extractData` と同じく、`true` のときだけ印を足す。
       return {
         title: input.title,
         content: input.content,
@@ -4240,11 +2206,10 @@ function extractObservationPayload(
 }
 
 /**
- * Issue #1063（ADR 0347）: 抽出で保存できずに落とした候補1件の記録。残った候補の `created` イベントの
- * `meta.droppedCandidates` に入る（公開の型ではない。`meta` は自由形式の欄である）。
+/**
+ * 抽出で保存できずに落とした候補1件の記録（ADR 0347）。残った候補の `created` イベントの `meta.droppedCandidates` に入る（公開の型ではない）。
  *
- * 🔴 **候補の本文は写さない。**落ちた理由がまさに本文（NUL・1MB 超）であることが多く、写すと
- * `created` の追記まで同じ理由で落ちる。候補は `index`（LLM が返した順の 0 起点）と `contentHash` で指す。
+ * 🔴 **候補の本文は写さない。** 落ちた理由がまさに本文（NUL・1MB 超）であることが多く、写すと `created` の追記まで同じ理由で落ちる。候補は `index`（LLM が返した順の 0 起点）と `contentHash` で指す。
  */
 interface DroppedCandidate {
   index: number;
@@ -4257,11 +2222,7 @@ interface DroppedCandidate {
 
 const DROPPED_CANDIDATE_MESSAGE_MAX_CHARS = 500;
 
-/**
- * ADR 0443: 候補それぞれの補助の欄（`digest`・`tags`）から、保存できない値だけを落とす。候補は捨てない。
- * 落とした欄の記録は、`created` イベントの `meta.droppedFields` に入る。何も落とさなければ、渡した配列と
- * 候補そのものを返す（`droppedFields` は空）。
- */
+/** 候補それぞれの補助の欄（`digest`・`tags`）から、保存できない値だけを落とす（ADR 0443）。候補は捨てない。落とした欄の記録は、`created` イベントの `meta.droppedFields` に入る。 */
 function sanitizeCandidatesAuxFields(
   candidates: ExtractedMemoryCandidate[],
   hashContent: (content: string) => string,
@@ -4281,10 +2242,8 @@ function sanitizeCandidatesAuxFields(
 }
 
 /**
- * `createMemoryWithOutbox` が投げた例外から {@link DroppedCandidate} を作る。
- *
- * 外側の `message` は使わない——drizzle の `Failed query: <SQL> params: …` は params（候補の本文）を
- * 含むので、本文を写さない規律が破れる。`cause` の連鎖の最も内側（pg のエラー文・fixture の文言）を使う。
+ * `createMemoryWithOutbox` が投げた例外から {@link DroppedCandidate} を作る。外側の `message` は使わない。
+ * drizzle の `Failed query: <SQL> params: …` は params（候補の本文）を含むので、本文を写さない規律が破れる。`cause` の連鎖の最も内側（pg のエラー文・fixture の文言）を使う。
  */
 function describeDroppedCandidate(
   index: number,
@@ -4320,21 +2279,17 @@ function describeDroppedCandidate(
 }
 
 /**
- * `getMany` が返した記憶を、渡された id で引き当てるときの鍵を作る関数を返す（`forget`・`restoreArchived`・`consolidate`・`reflect`・
- * `purge`・`markContested`・`resolveContested`）。`ids` はその呼び出しに渡された id の全部。
+ * `getMany` が返した記憶を、渡された id で引き当てるときの鍵を作る関数を返す。`ids` はその呼び出しに渡された id の全部。
  *
- * store が返す `Memory.id` は、渡した id と文字列として一致するとは限らない——`@mnemora/postgres` は uuid を
- * 大文字小文字を区別せずに比べ、小文字で返す（`get("…ABC…")` が `id: "…abc…"` の記憶を返す）。渡された id のまま
- * 引くと、store が「在る」と言う記憶を `not_found` にしていた（`uppercase-uuid-lookup.postgres.test.ts`）。
- * ⟹ 両側を小文字にして突き合わせる。**store へ渡す id は変えない**——在るかどうかは store の `get`/`getMany` が
- * 決め、Runtime はそれに従うだけである（大文字小文字を区別する store では、大文字の id は今どおり `not_found`）。
+ * store が返す `Memory.id` は、渡した id と文字列として一致するとは限らない。`@mnemora/postgres` は uuid を大文字小文字を区別せずに比べ、小文字で返す
+ * （`get("…ABC…")` が `id: "…abc…"` の記憶を返す）。渡された id のまま引くと、store が「在る」と言う記憶を `not_found` にしてしまう。
+ * ⟹ 両側を小文字にして突き合わせる。**store へ渡す id は変えない。** 在るかどうかは store の `get`/`getMany` が決め、Runtime はそれに従うだけである
+ * （大文字小文字を区別する store では、大文字の id は `not_found`）。
  *
- * ⚠ **大文字小文字だけが違う id を同じ呼び出しに混ぜたときは、その id どうしは渡された文字列どおりに突き合わせる**
- * （小文字にそろえる前と同じ）。`getMany` の戻りだけでは、「store がどちらも在ると言った」と「片方だけ在ると
- * 言った」を区別できないため。⟹ store が返す id と同じ綴りで渡した id だけが在る記憶になり、ほかの綴りは
- * `not_found` のまま残る。**並びの位置によらない**——`@mnemora/postgres` の `forget({ memoryIds: [小文字, 大文字] })`
- * でも `[大文字, 小文字]` でも、`not_found` になるのは大文字の側である。どの綴りも store の id と違えば
- * （`[先頭だけ大文字, 大文字]` など）、全部が `not_found` になる。
+ * ⚠ **大文字小文字だけが違う id を同じ呼び出しに混ぜたときは、その id どうしは渡された文字列どおりに突き合わせる。** `getMany` の戻りだけでは、
+ * 「store がどちらも在ると言った」と「片方だけ在ると言った」を区別できないため。⟹ store が返す id と同じ綴りで渡した id だけが在る記憶になり、ほかの綴りは `not_found` のまま残る。
+ * **並びの位置によらない**（`@mnemora/postgres` の `forget({ memoryIds: [小文字, 大文字] })` でも `[大文字, 小文字]` でも、`not_found` になるのは大文字の側である）。
+ * どの綴りも store の id と違えば（`[先頭だけ大文字, 大文字]` など）、全部が `not_found` になる。
  */
 function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string {
   const spellingsByLower = new Map<string, Set<MemoryId>>();
@@ -4353,23 +2308,16 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
 /**
  * {@link Runtime} を組み立てる。
  *
- * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。ただし1つだけ例外がある:
- * `config.extractorVersion` が空文字・空白だけ（`trim()` が空）なら、`createRuntime` が素の `Error`
- * （`createRuntime: config.extractorVersion must not be empty or whitespace-only`）を投げる。`undefined`・`null` は既定に倒す。
- * 2026-09-27 に Postgres と testkit の fixture の両方で当てた）。省略した欄は各欄の doc にある
- * 既定値に倒れ、足りない依存や型の外の値は、組み立てでは落ちずに最初の呼び出しで現れる:
- * - 必須の store・`hashContent` が無い: それを使う最初の呼び出しが `TypeError` を投げる
- *   （メッセージは欠けた依存の名前ではなく、呼ぼうとしたメソッドの名前を言う）。
- * - `llmProvider` が無い: 例外にならない。`observe()` の抽出は LLM の失敗と同じ扱いになり、
- *   `extraction: "llm_failed_whole_observation"` で観測の全文を1件の Memory として残す
+ * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（1つだけ例外がある: `config.extractorVersion` が空文字・空白だけ（`trim()` が空）なら、`createRuntime` が素の `Error`
+ * （`createRuntime: config.extractorVersion must not be empty or whitespace-only`）を投げる。`undefined`・`null` は既定に倒す）。省略した欄は各欄の doc にある既定値に倒れ、
+ * 足りない依存や型の外の値は、組み立てでは落ちずに最初の呼び出しで現れる:
+ * - 必須の store・`hashContent` が無い: それを使う最初の呼び出しが `TypeError` を投げる（メッセージは欠けた依存の名前ではなく、呼ぼうとしたメソッドの名前を言う）。
+ * - `llmProvider` が無い: 例外にならない。`observe()` の抽出は LLM の失敗と同じ扱いになり、`extraction: "llm_failed_whole_observation"` で観測の全文を1件の Memory として残す
  *   （`extractionFailure.message` に `Cannot read properties of undefined` が出る）。
- * - `embeddingProvider` が無い: `recall()` は `stage_skipped`（`embedding_provider_unavailable`）を
- *   名乗って ANN を飛ばし、`tick()` の `embed` ジョブは `failed` になる。
- * - `clock.now()` が Invalid Date を返す: 最初の書き込み・`recall()`・`tick()` が例外を投げる
- *   （Postgres は DB の例外、testkit の fixture は `RangeError` などで、文言は揃っていない）。
+ * - `embeddingProvider` が無い: `recall()` は `stage_skipped`（`embedding_provider_unavailable`）を名乗って ANN を飛ばし、`tick()` の `embed` ジョブは `failed` になる。
+ * - `clock.now()` が Invalid Date を返す: 最初の書き込み・`recall()`・`tick()` が例外を投げる（Postgres は DB の例外、testkit の fixture は `RangeError` などで、文言は揃っていない）。
  * - `outputValidation` が `"off"`/`"report"`/`"throw"` のどれでもない: `"report"` と同じに振る舞う。
- * - `config.autoQueueConsolidateReflectOnExtract` が真偽値でない: 真偽として評価される
- *   （例: 文字列 `"no"` は真として扱われ、consolidate / reflect の job を積む）。
+ * - `config.autoQueueConsolidateReflectOnExtract` が真偽値でない: 真偽として評価される（例: 文字列 `"no"` は真として扱われ、consolidate / reflect の job を積む）。
  */
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const clock = deps.clock ?? systemClock;
@@ -4388,11 +2336,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const acceptLlmSubjectIdWithoutCandidates =
     deps.config?.acceptLlmSubjectIdWithoutCandidates ?? false;
 
-  /**
-   * 問15: 一覧（`subjectCandidates`）が無い抽出では、既定で LLM の `subjectId` を捨てる
-   * （`RuntimeConfig.acceptLlmSubjectIdWithoutCandidates`）。キーごと消すので、
-   * `buildNewMemoryFromCandidate` は observation の `subjectId` へ落とす。`subjectId` 以外の欄は触らない。
-   */
+  /** キーごと消す。`buildNewMemoryFromCandidate` は `subjectId` キーの有無で observation の `subjectId` へ落とす。 */
   function dropLlmSubjectIdsWithoutCandidates(
     candidates: ExtractedMemoryCandidate[],
     subjectCandidates: readonly string[] | undefined,
@@ -4413,62 +2357,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * 抽出候補から Memory を作る核（`runExtraction` と `reextract` の共通経路）。
-   * `createMemoryWithOutbox` の ON CONFLICT により冪等——同じ候補で複数回呼んでも
-   * 新規行は増えない（`created: false` の場合はイベントも積まない）。
-   * `contentHashes` は `reextract` が「今回作られた集合」を判定するために使う。
-   */
-  /**
-   * 候補から `NewMemory` を組み立てるだけ（**書き込まない**）。
+   * Memory 書き込み側（抽出・consolidate・reflect）が共通して要る、活動時計の入力のうち **subject に依らない部分**（`T` と `halfLifeRecalls`。[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)）。
+   * `decay_clock === 'wall'` のテナントでは `tenant_activity` を一度も読まず `undefined` を返す。「いま」の `S_x` はここでは足さない（[ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)）。
+   * `x` はこれから作る Memory 自身の `subjectId` であって `ctx.subjectId` ではなく（`tick` の ctx には通常 `subjectId` が無く、抽出は候補ごとに `subjectId` が違いうる）、各 Memory の `subjectId` が決まった後で
+   * `readActivitySeqForSubjects` がまとめて引く。
    *
-   * Issue #134 / ADR 0100 で切り出した。`reextract` は「今回作る content_hash の集合」を
-   * supersede 判定（`classifyReextractTargets`）に渡す必要があり、かつ ADR 0100 の
-   * `supersedeWithNewMemories` は**作成と supersede を1回の呼び出しで**受け取る——
-   * ⟹ 作成より前に content_hash を知る必要がある。組み立てと書き込みを分けないと、
-   * この2つを同時に満たせない。
-   */
-  /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・3・5・12:
-   * Memory 書き込み側（抽出・consolidate 手順6・reflect 手順7）が共通して要る、
-   * 活動時計の入力のうち **subject に依らない部分**（`T` と `halfLifeRecalls`）。
-   *
-   * **`decay_clock === 'wall'` のテナントでは `tenant_activity` を一度も読まない**
-   * ——`undefined` を返し、`activityClockInputsFor` は `{}` を返す。`activitySeq`/`halfLifeRecalls` は
-   * `undefined` のまま `buildNewMemoryFromCandidate` 等へ渡る。これらの関数は両方揃っているときだけ
-   * 活動時計の3つ組（`decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls`）を作る
-   * （`extraction.ts` の doc 参照）ので、`'wall'` のテナントで作られる Memory は
-   * 本 ADR の前後で1バイトも変わらない。
-   *
-   * ⚠ **これは 0163 の話であり、tick が consolidate/reflect を駆動する ADR 0157 とは無関係**
-   * ——ここで読むのは `decay_clock`/`activity_seq` だけで、tick のスケジューリングには触れない。
-   *
-   * ⭐ [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
-   * （ADR 0353 の負債1の解消）: 「いま」の `S_x` は、ここでは足さない。`x` は**これから作る
-   * Memory 自身の `subjectId`**であって `ctx.subjectId` ではない（`tick` の ctx には通常
-   * `subjectId` が無く、抽出は候補ごとに `subjectId` が違いうる）。各 Memory の `subjectId` が
-   * 決まった後で、`readActivitySeqForSubjects` が distinct な subject の `S_x` をまとめて引き、
-   * `activityClockInputsFor` が Memory ごとに `T + S_x` を組む。
-   *
-   * 🔴 **まだ残っている負債**（ADR 0394「引き受けた負債」）: 書く側の subject の取り違えは直したが、
-   * 次の3つは**変えていない**（オーナーに問い合わせ中）——(1) 保守の操作（consolidate・reflect 等）の
-   * 中の `recall()` が活動時計を進めること（進める入口の正確な一覧は下）、(2) `tick` の自動ジョブに
-   * `activityCounting` を届けないこと、(3) recall 側の前進が `T` か `S_ctx` か。
-   *
-   * 活動時計を進めるのは `runRecall`（`recall-runtime.ts` の `advanceActivityClock`。`decayClock` が
-   * `"wall"` のテナントでは進めない）を通る呼び出しすべてである。`runtime.ts` の中で `recall()`/`runRecall()`
-   * を呼ぶ入口は次のとおり（ADR 0394 決定3 の「掃引」は誤り。ADR 0394 末尾の訂正を見ること）。
-   * 行頭の印 `ADVANCER:` の行が機械で読める正本で、`activity-clock-advancers-doc.test.ts` が
-   * 「`recall(`/`runRecall(` の呼び出しを囲む関数の集合」と一致することを縛る:
+   * 活動時計を進めるのは `runRecall`（`decayClock` が `"wall"` のテナントでは進めない）を通る呼び出しすべてで、`runtime.ts` の中で `recall()`/`runRecall()` を呼ぶ入口は次のとおり。
+   * 行頭の印 `ADVANCER:` の行が機械で読める正本で、`activity-clock-advancers-doc.test.ts` が「`recall(`/`runRecall(` の呼び出しを囲む関数の集合」と一致することを縛る:
    *
    * - ADVANCER: recall — 公開の `recall()` 自身（`runRecall` を呼ぶ）。
    * - ADVANCER: findCorrectionCandidates — 内部で `recall()` を1回呼ぶ。
    * - ADVANCER: consolidate — `{ seedMemoryId }` 形と `{ query }` 形のどちらも内部で `recall()` を呼ぶ。
    * - ADVANCER: reflect — 同じく `{ seedMemoryId }` 形と `{ query }` 形のどちらも `recall()` を呼ぶ。
    *
-   * ⚠ `consolidate`/`reflect` は `dryRun` でも進む（打ち切りは `recall()` の後ろにあるため）。
-   * `tick` の consolidate/reflect ジョブは上の `consolidate`/`reflect` を呼ぶので、その経由で進める。
-   * 🔴 `sweepArchive` は `memoryStore.archiveDecayed` を呼ぶだけで `recall()` を呼ばない
-   * ——活動時計を**読む**だけで、進めない。
+   * `consolidate`/`reflect` は `dryRun` でも進む（打ち切りは `recall()` の後ろにあるため）。`sweepArchive` は `archiveDecayed` を呼ぶだけで、活動時計を**読む**だけで進めない。
    */
   async function resolveActivityClockBase(
     ctx: Ctx,
@@ -4485,12 +2387,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * ADR 0394: 渡した subject（`null`/`undefined` は主題なし。読まない）のうち distinct なものの
-   * `S_x`（`tenant_subject_activity.activity_seq`）を、まとめて1回で引く。
-   *
-   * `hasSubjectActivityCounters` が `false`（`tenant_subject_activity` に行が1本も無い、または
-   * 未実装）のテナントでは**何も引かない**——`S_x` はどの subject でも `0` で、`T` のみと同じ値になる
-   * （ADR 0353 決めたこと4。段1 SQL 等と同じ規律）。
+   * 渡した subject（`null`/`undefined` は主題なし。読まない）のうち distinct なものの `S_x`（`tenant_subject_activity.activity_seq`）を、まとめて1回で引く（ADR 0394）。
+   * `hasSubjectActivityCounters` が `false`（`tenant_subject_activity` に行が1本も無い、または未実装）のテナントでは何も引かない。`S_x` はどの subject でも `0` で、`T` のみと同じ値になるため。
    */
   async function readActivitySeqForSubjects(
     ctx: Ctx,
@@ -4508,9 +2406,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * ADR 0394: 1つの Memory（`subjectId` が決まったもの）の活動時計の入力。`activitySeq` は
-   * `T + S_x`（`x` = その Memory 自身の `subjectId`。主題なし・`subjectSeqs` に無い subject は
-   * `T` のみ）。`base` が `undefined`（`'wall'` のテナント）なら `{}`。
+   * 1つの Memory（`subjectId` が決まったもの）の活動時計の入力。`activitySeq` は `T + S_x`（`x` = その Memory 自身の `subjectId`。主題なし・`subjectSeqs` に無い subject は `T` のみ）。
+   * `base` が `undefined`（`'wall'` のテナント）なら `{}`。
    */
   function activityClockInputsFor(
     base: { tenantSeq: number; halfLifeRecalls: number } | undefined,
@@ -4525,32 +2422,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
-   * `reinforce` の呼び出し側（使用報告ループ・`restoreArchived`・`restoreSuperseded`）が共通して要る、
-   * 活動時計の「いま」の解決。**`ReinforceOptions` そのものを返す。**
-   *
-   * `resolveActivityClockBase` と同じく `decay_clock === 'wall'` のテナントでは
-   * `tenant_activity` を一度も読まない（`undefined`）。`reinforce` は Memory 単位の `halfLifeRecalls` を
-   * 対象の Memory 自身から読む（store 側の実装、`ReinforceOptions.nowSeq` の doc
-   * コメント参照）ので、ここでは `activitySeq`（`T`）だけを読めば足り、`default_half_life_recalls` は不要。
-   *
-   * ⭐ [ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)
-   * （ADR 0353 の負債1の解消）: `nowSeq` には **`T` だけ**を入れ、`S_x` は足さない。
-   * `reinforceMany` は同じ `opts` を全件に適用し、使用報告は subject の違う Memory を1回の呼び出しで
-   * 強化しうる——呼び出し側は Memory ごとの subject を知らない（強化の前に読み直さない）ので、
-   * 「Memory 自身の subject の `S_x` を足す」ことを `addOwnSubjectSeq: true` で store に頼む
-   * （store が UPDATE の中で行ごとに解く）。`tenant_subject_activity` に行が無いテナント
-   * （`hasSubjectActivityCounters` が `false`）では `S_x` はどの行でも `0` なので、この項目は付けない
-   * （store は相関サブクエリを足さず、今日と同じ SQL のまま）。
-   *
-   * ⭐ **`addOwnSubjectSeq` を渡すのは、store が `MemoryStore.supportsAddOwnSubjectSeq?()` で `true` を
-   * 宣言しているときだけ**（第三者 adapter の挙動を今より悪くしないため）。宣言の無い store には、
-   * ADR 0394 以前と同じ `T + S_ctx` をフラグなしの `nowSeq` として渡す。
-   *
-   * 🔴 **引き受けた負債**: 宣言の無い store では、強化される Memory の subject が `ctx.subjectId` とずれる呼び出しで、
-   * ADR 0394 以前と同じ取り違え（起点が `ctx` の subject の `S_x` で書かれる）が残る。直すには、その adapter が
-   * `reinforce` に `addOwnSubjectSeq` を実装して宣言すること（`ReinforceOptions.addOwnSubjectSeq`・
-   * `MemoryStore.supportsAddOwnSubjectSeq` の TSDoc、testkit の適合テスト）。
+   * `reinforce` の呼び出し側（使用報告・`restoreArchived`・`restoreSuperseded`）が共通して要る活動時計の「いま」を、`ReinforceOptions` として返す（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)）。
+   * `decay_clock === 'wall'` のテナントでは `tenant_activity` を読まない。`nowSeq` には **`T` だけ**を入れ、`S_x` は足さない（[ADR 0394](../../../docs/decisions/0394-activity-clock-writes-use-memorys-own-subject.md)）。
+   * `reinforceMany` は同じ `opts` を全件に適用し、使用報告は subject の違う Memory を1回で強化しうるので、「Memory 自身の `S_x` を足す」ことを `addOwnSubjectSeq: true` で store に頼む
+   * （`tenant_subject_activity` に行が無いテナントでは `S_x` は常に `0` なので付けない）。
+   * ⭐ `addOwnSubjectSeq` を渡すのは、store が `MemoryStore.supportsAddOwnSubjectSeq?()` で `true` を宣言しているときだけ（第三者 adapter の挙動を悪くしないため）。宣言の無い store には `T + S_ctx` を `nowSeq` として渡す。
+   * 🔴 **引き受けた負債**: 宣言の無い store では、強化される Memory の subject が `ctx.subjectId` とずれる呼び出しで、起点が `ctx` の subject の `S_x` で書かれる取り違えが残る。
    */
   async function resolveReinforceOptions(ctx: Ctx): Promise<ReinforceOptions | undefined> {
     const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
@@ -4561,13 +2438,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (!(await readHasSubjectActivityCounters(deps.tenantSettingsStore, ctx))) {
       return { nowSeq };
     }
-    // store が `addOwnSubjectSeq` を読めると宣言しているときだけ、`T` とフラグを渡す。
     if (deps.memoryStore.supportsAddOwnSubjectSeq?.() === true) {
       return { nowSeq, addOwnSubjectSeq: true };
     }
-    // 宣言の無い store（フラグを知らない第三者 adapter）には、今までどおり `T + S_ctx`
-    // （ctx の subject の `S_x`。ctx に subject が無ければ `T` のみ）をそのまま `nowSeq` として渡す。
-    // 対象の subject が ctx とずれる呼び出しでは食い違う値のままだが、ADR 0394 以前より悪くならない。
     const ctxSubjectSeq =
       ctx.subjectId === undefined
         ? 0
@@ -4579,18 +2452,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     ctx: Ctx,
     observation: Observation,
     candidates: ExtractedMemoryCandidate[],
-    // Issue #371: `deriveClaimKeys` の結果（`candidates` と同じ長さ・同じ順序）。
-    // 省略、または opt-in を使わなかった呼び出しでは `undefined` のまま——各候補は
-    // `claimKey: null` として作られる（`buildNewMemoryFromCandidate` の既定）。
     claimKeys?: readonly (ClaimKey | null)[],
   ): Promise<NewMemory[]> {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
-    // ADR 0165 決めたこと3・5・12: 活動時計の3つ組を、書き込み側3箇所のうちの1つとして
-    // ここで織り込む。
-    // ADR 0394: 「いま」の `S_x` の x は、候補ごとに決まる**その Memory 自身の subjectId**
-    // （候補の `subjectId` → observation の `subjectId`。`ctx.subjectId` ではない）。
-    // distinct な subject の `S_x` をまとめて1回で引き、候補ごとに `T + S_x` を組む。
     const activityClockBase = await resolveActivityClockBase(ctx);
     const subjectSeqs =
       activityClockBase === undefined
@@ -4621,20 +2486,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
   }
 
-  /**
-   * `reextract` が `created` に渡す追加の指定（ADR 0422）。`at` は同じ操作の `superseded` と揃える時刻、
-   * `reextracted` は meta に足す印。どちらも省けば今までの形（observe・抽出の経路）。
-   */
   interface CreatedEventReextractOpts {
     readonly at?: Date;
     readonly reextracted?: boolean;
   }
 
-  /**
-   * ADR 0507: 言語の事後検査の、観測側の数え（本文の合成と文字種の数え。長さに比例する）を、観測ごとに1回へ畳む。
-   * 同じ抽出の候補はどれも同じ Observation のオブジェクトを渡してくるので、それを鍵にする（弱参照。
-   * 観測が捨てられれば消える）。候補ごとに変わるのは本文の側だけで、そちらは候補ごとに数える。
-   */
+  /** 言語の事後検査の観測側の数え（長さに比例する）を、観測ごとに1回へ畳む（ADR 0507）。同じ抽出の候補は同じ Observation のオブジェクトを渡すので、それを弱参照の鍵にする。 */
   const observationLanguageProfiles = new WeakMap<Observation, ObservationLanguageProfile>();
   function observationLanguageProfileOf(observation: Observation): ObservationLanguageProfile {
     let profile = observationLanguageProfiles.get(observation);
@@ -4646,18 +2503,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent`
-   * （別コミットで `EventStore.append`）と、`createMemoriesFromCandidates` が
-   * `MemoryStore.createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent`（store が同じトランザクションで
-   * INSERT する）が共有する——`meta` の中身が2つの経路でずれないように、組み立てはここ1箇所に置く
-   * （ADR 0410）。
-   *
-   * `reextractOpts`（ADR 0422）は `reextract` だけが渡す。`at` を渡すとその値を使い（同じ操作の `superseded` と
-   * 同じ入口の `now`）、`reextracted: true` を渡すと meta にその印を足す。省くと今までどおり
-   * （`at` は組み立て時の `clock.now()`、meta に印は無い）。
-   *
-   * ⚠ 同じ `at` を持つ `created` と `superseded`（`consolidate`・`reextract`）の**並びは約束しない**
-   * （`EventStore.list` は `at` の昇順だけ。ADR 0422）。順が要るなら `kind` と meta の `supersededById` で読む。
+   * 新しく作られた Memory の `created` イベントを組み立てる（**書かない**）。`appendCreatedEvent` と、`createMemoriesFromCandidates` が `createMemoriesWithOutboxAndEvents?` へ渡す `buildCreatedEvent` が共有し、
+   * `meta` の中身が2つの経路でずれないよう組み立てを1箇所に置く（ADR 0410）。`reextractOpts`（ADR 0422）は `reextract` だけが渡し、`at` と `reextracted: true` の印を足す。
+   * ⚠ 同じ `at` を持つ `created` と `superseded`（`consolidate`・`reextract`）の**並びは約束しない**（`EventStore.list` は `at` の昇順だけ）。順が要るなら `kind` と meta の `supersededById` で読む。
    */
   function buildCreatedEventFor(
     ctx: Ctx,
@@ -4680,8 +2528,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       tenantId: ctx.tenantId,
       memoryId: memory.id,
       kind: "created",
-      // ADR 0422: 渡されたときはその値（`reextract` は入口の `now`——同じ操作の `superseded` と揃える）。
-      // 渡さないとき（observe・抽出の経路）は今までどおり組み立て時の `clock.now()`。
+      // `reextract` は入口の `now` を渡す（同じ操作の `superseded` と揃える。ADR 0422）。
       at: reextractOpts?.at ?? clock.now(),
       actor: { type: "system" },
       digestSnapshot: memory.digest,
@@ -4693,45 +2540,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             : "extracted",
         sourceObservationId: observation.id,
         extractorVersion,
-        // `meta` は既存の jsonb NOT NULL 列へのキー追加のみ（マイグレーション不要）。
-        // 失敗経路（outcome: "llm_failed_whole_observation"）のときだけ足す——
-        // 成功経路の meta.reason: "extracted" の形は変えない。
+        // 失敗経路のときだけ足す（成功経路の meta の形は変えない）。
         ...(outcome === "llm_failed_whole_observation"
           ? { failureKind: failure?.kind ?? null }
           : {}),
-        // Issue #1063（ADR 0347）: 同じ抽出で保存できずに落とした候補があったときだけ足す——
-        // 落とした候補が無い呼び出しの meta の形は変えない。
+        // 落とした候補があったときだけ足す（ADR 0347）。
         ...(droppedCandidates.length > 0 ? { droppedCandidates: [...droppedCandidates] } : {}),
-        // ADR 0443: 保存できない補助の欄（digest・tags・claim key は対象外。下記）だけを落として候補を残したときに足す。
+        // 保存できない補助の欄（digest・tags）だけを落として候補を残したときに足す（ADR 0443）。
         ...(droppedFields.length > 0 ? { droppedFields: [...droppedFields] } : {}),
-        // Issue #1370（ADR 0391）: 言語の事後検査。日本語の観測から、かな・漢字の無い（ラテン文字の）
-        // 本文が出たときだけ足す——疑いが無い呼び出しの meta の形は変えない。**印を付けるだけ**で、
-        // 再試行も書き換えもしない。全文フォールバックの本文は観測そのものなので検査しない。
+        // 言語の事後検査（ADR 0391）: 日本語の観測からラテン文字だけの本文が出たときだけ足す。印を付けるだけで、再試行も書き換えもしない。
         ...(languageMismatch !== null ? { languageMismatch } : {}),
-        // ADR 0422: `reextract` の `created` にだけ足す印。既存のキーの意味（`reason: "extracted"` など）は
-        // 変えない——足すだけ。observe・抽出の経路の meta の形は変えない。
+        // `reextract` の `created` にだけ足す印（ADR 0422）。
         ...(reextractOpts?.reextracted === true ? { reextracted: true } : {}),
       },
     };
   }
 
   /**
-   * 新しく作られた Memory について `created` イベントを積む。
-   *
-   * ⚠ **このイベントは `memories` への INSERT と同一トランザクションではない**
-   * （`EventStore.append` は別コミット）。**この関数を通るのは次の経路だけである**（ADR 0410・0416）:
-   * - 抽出（sync／deferred）のうち、`MemoryStore.createMemoriesWithOutboxAndEvents?` を**持たない** adapter。
-   *   持つ adapter は `createMemoriesFromCandidates` がその口で `created` を同じトランザクションに積む。
-   * - `reextract` の、(a) 口あり経路（`supersedeWithNewMemories`）で store が `createdEventsWritten: true` を
-   *   **名乗らなかった**とき（`opts.buildCreatedEvent` を知らない adapter。名乗ったら省く）、(b) 口なし経路
-   *   （`createMemoryWithOutbox` のループ。直さない負債）。
-   * - ⚠ `consolidate`・`reflect` は `eventStore.append` を直に呼ぶ（この関数を通らない）が、同じ形の別コミットである
-   *   （ADR 0416。`consolidate` の口あり経路は名乗られたら省く、口なし経路は直さない。`reflect` は
-   *   `createMemoriesWithOutboxAndEvents?` があればそれで積み、無ければ別コミット）。
-   *
-   * ADR 0100 が満たしたのは docs/memory-model.md §11 行5 が名指しした「旧行の更新」と「新 Memory の作成」の
-   * 対であり、`created` イベントはその要求文に含まれていない——この非同時性は ADR 0100 の「守れないもの」に
-   * 記録してあり、ADR 0410・0416 が口を持つ adapter の経路について直した（口を持たない adapter の経路は同じ記録のまま）。
+   * 新しく作られた Memory の `created` イベントを積む。⚠ **`memories` への INSERT と同一トランザクションではない**（`EventStore.append` は別コミット）。通るのは次の経路だけ（ADR 0410・ADR 0416）:
+   * 抽出のうち `MemoryStore.createMemoriesWithOutboxAndEvents?` を**持たない** adapter（持てば `createMemoriesFromCandidates` がその口で同一トランザクションに積む）、`reextract` の口あり経路で store が
+   * `createdEventsWritten: true` を名乗らなかったとき、`reextract` の口なし経路（直さない負債）。`consolidate`・`reflect` は `eventStore.append` を直に呼ぶが、同じ形の別コミットである。
    */
   async function appendCreatedEvent(
     ctx: Ctx,
@@ -4759,83 +2587,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * Issue #372（(B) 第2段。ADR 0185 決定2・決定4、ADR 0320 の続き）: 新しく `active` に
-   * なった Memory 1件について、同じ鍵の衝突を**列と索引だけで**（LLM を一度も呼ばずに）
-   * 見つけ、ちょうど1件、かつその1件が `active` なら `markContested` を呼ぶ
-   * （2026-09-30 の直し、ADR 0378 追記。下の手順3参照）。
-   *
-   * 手順:
-   * 1. `memory.claimKey` が無ければ何もしない（`null` を返す——鍵が無ければ引くものが無い）。
-   * 2. `deps.memoryStore.findActiveByClaimKey` が無ければ何もしない（任意メソッド。
-   *    フォールバック経路は無い——`markContested` と同じ判断）。
-   * 2.5. **（Issue #933 案2、ADR 0378）`deps.memoryStore.findContestedByClaimKey` が
-   *    実装されていれば、同じ query で追加に呼び、`status = 'contested'` の一致も集める。**
-   *    実装していない adapter では、この手順は何もせず（後方互換）、今まで通り
-   *    `findActiveByClaimKey` の一致（`active` のみ）だけを使う。
-   * 2.6. **（ADR 0377、Issue #835 候補1）合わせた一致（`active` + `contested`）から、
-   *    `memory.sourceObservationId` と同じ `sourceObservationId` を持つものを、件数を
-   *    数える前に除く。** `memory.sourceObservationId` が `null` のときは何も除かない
-   *    （`null` 同士を「同じ観測」と見なさない——`null` は「分からない」であって
-   *    「観測0番」ではない）。**この除外は core 側だけで行う**——`MemoryStore.
-   *    findActiveByClaimKey?`/`findContestedByClaimKey?` の interface・Postgres 実装・
-   *    testkit は変えない（下の doc コメント最後の段落、ADR 0377・ADR 0378 参照）。
-   * 3. 残った一致件数と、その `status` で分岐する（ADR 0324 決定5・決定6 が定めた
-   *    分岐そのものは変えていない——手順2.5・下記2026-09-30の直しが変えるのは
-   *    「何を一致として数えるか」「`markContested` へ進めてよい一致かどうか」だけである）:
-   *    - **0件**: 何もしない（`{ kind: "no_conflict" }`）。
-   *    - **ちょうど1件、かつその1件が `active`**: `markContested(ctx, memory.id,
-   *      other.id, { reason: <構造化JSON> })` を呼ぶ。判定の根拠（鍵・重なった有効期間・
-   *      両側の `contentHash`・id）を `memory_events.meta.note` に構造として載せる
-   *      （問い3）。`markContested` 自身が `ineligible`/`conflict` を返すことがある
-   *      （TOCTOU で、読んでから呼ぶまでの間に相手が別件で `contested`/`active` 以外に
-   *      なっていた場合）——**この関数はその結果をそのまま運ぶだけで、追加の再試行や
-   *      フォールバックはしない**（ADR 0134 が確立した「開く前に落とす」「上限の無い
-   *      再試行ループを作らない」規律をそのまま継承する）。
-   *    - **それ以外（2件以上、または、ちょうど1件だがその1件が既に `contested`）**:
-   *      [#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、
-   *      多対多）が無いと1対1の `contestedWithId` では表現できない（ADR 0185 決定5）。
-   *      **`markContested` を一切呼ばない**——状態は一切動かさず、根拠（鍵・関係する各
-   *      `id`/`contentHash`/有効期間・`status`・件数）を `memory_events` へ1件、構造
-   *      として残すだけに留める（`kind: "updated"`、`meta.reason:
-   *      "claim_key_conflict_unresolved"`——`"contested"` と紛れないよう別のタグを使う。
-   *      `MemoryEventKind` という公開 union には値を足さない——`meta` はもともと自由
-   *      形式である）。これにより「同じ鍵に3件以上が並んだ」件数を `memory_events` から
-   *      数えられる（Issue #933 が直る前は、この分岐は `findContestedByClaimKey?` が
-   *      無い限り実質到達不能だった——3件目以降は必ず `no_conflict` に落ちていた。
-   *      ADR 0378 参照）。
-   *
-   *      ⚠ **2026-09-30 の直し（ADR 0378 追記、Issue #933 PR1 の穴埋め）**:
-   *      「ちょうど1件だがその1件が既に `contested`」は、直す前は `markContested` へ
-   *      進み、相手が既に `contested`（＝`active` でない）なので CAS が `ineligible` を
-   *      返し、検出中の Memory は `active` のまま・`memory_events` にも痕跡が残らなかった
-   *      （例: 3件目の有効期間が、既に対になった1件目・2件目のうち片方とだけ重なる場合）。
-   *      **今は、一致の `status` を見てから分岐する**——`active` な1件だけが
-   *      `markContested` の対象になり、`contested` な1件は（2件以上のときと同じ形で）
-   *      evidence だけを積む。
-   *
-   * ⛔ **この関数のどこにも `superseded` への言及が無い。**`contested` までで止める
-   * （ADR 0185 決定4・北極星 問い4「AI の推論と、ユーザーが言った事実を区別する」——
-   * `claimKey` は LLM が作る鍵＝推論であり、推論から導いた「矛盾」でユーザーが言った
-   * 事実を消してはならない）。
-   *
-   * ⚠ **ADR 0377（Issue #835 候補1）**: ADR 0347（PR #1318）が抽出の書き込みを
-   * 「全件書く → 全件について `created`/検出」の2ループへ分けたことで、同じ observation
-   * （＝同じ発話）から抽出された兄弟候補どうしが、互いの検出時点で既に `active` になって
-   * いた。`rawMatches`（`findActiveByClaimKey`/`findContestedByClaimKey` の返り値を
-   * 合わせたもの）は `sourceObservationId` を持つ `Memory[]` である——手順2.6 はそこから
-   * 「検出中の memory と同じ observation」の行を除いてから件数を数える。**両口の契約
-   * （interface の doc コメント）自体は変えていない**——除外は、この関数（呼び出し側）が
-   * 返り値を使う際に行う。store 側（Postgres 実装・testkit）へ押し下げなかった理由と、
-   * その限界（両口の contract に `LIMIT` の規定が無いため、この除外を core 側で行っても
-   * 正しさは保てるが、interface 自体は adapter が独自に `LIMIT` を付けることを禁じて
-   * いない）は ADR 0377 を見ること。
-   *
-   * ⚠ **ADR 0378（Issue #933 案2、PR1 の範囲）**: `findContestedByClaimKey?` を足したのは
-   * このPR（PR1）の範囲であり、**`RelationStore`・多者間グループを実際に `contested` として
-   * 束ねる書き込み（`markContestedGroup` 相当、ADR 0327）は範囲外**——「2件以上」の分岐は
-   * 今まで通り `markContested` を呼ばず evidence を積むだけである。すでに `contested` な
-   * 対（例: 1件目・2件目）は、3件目・4件目が届いても**壊れない**——この関数は一致の
-   * `status`/`contestedWithId` を一切書き換えない。
+   * 新しく `active` になった Memory 1件について、同じ鍵の衝突を**列と索引だけで**（LLM を呼ばずに）見つける（分岐は {@link ContestedDetectionOutcome}。ADR 0185、ADR 0320、ADR 0324、ADR 0378）。
+   * 一致から、検出中の memory と同じ `sourceObservationId` を持つものを、件数を数える前に除く（ADR 0377）: 同じ発話から抽出された兄弟候補どうしが、互いの検出時点で既に `active` になっているため。
+   * `null` 同士は「同じ観測」と見なさない。この除外は core 側だけで行い、`findActiveByClaimKey?`/`findContestedByClaimKey?` の interface・Postgres 実装・testkit は変えない。
+   * ⛔ `superseded` へは進めず `contested` までで止める（`claimKey` は LLM が作る鍵＝推論で、推論から導いた「矛盾」でユーザーが言った事実を消してはならない。ADR 0185）。
    */
   async function detectClaimKeyContested(
     ctx: Ctx,
@@ -4858,28 +2613,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       validUntil: memory.validUntil ?? null,
     };
     const rawActiveMatches = await findActiveByClaimKey.call(deps.memoryStore, ctx, query);
-    // Issue #933 案2（ADR 0378）: `findContestedByClaimKey?` を実装している store でだけ、
-    // 既に `contested` になった相手も一致に数える。実装していない adapter では
-    // `undefined` のままなので、今まで通り `active` の一致だけになる（後方互換）。
     const findContestedByClaimKey = deps.memoryStore.findContestedByClaimKey;
     const rawContestedMatches =
       findContestedByClaimKey === undefined
         ? []
         : await findContestedByClaimKey.call(deps.memoryStore, ctx, query);
     const rawMatches = [...rawActiveMatches, ...rawContestedMatches];
-    // ADR 0377（Issue #835 候補1）: 同じ observation（＝同じ発話）から抽出された兄弟
-    // どうしを、互いへの誤検出の相手にしない。`memory.sourceObservationId` が `null`
-    // のときは何も除かない（`null` 同士を「同じ観測」と見なさない）。
     const memorySourceObservationId = memory.sourceObservationId ?? null;
     const notSiblings =
       memorySourceObservationId === null
         ? rawMatches
         : rawMatches.filter((m) => (m.sourceObservationId ?? null) !== memorySourceObservationId);
-    // 穴 O-3（ADR 0424）: store は生の `content_hash` だけで「同じ内容」を除くので、NFC と NFD の
-    // 違いや末尾の空白1つだけで別の行として返ってくる。`content` を NFC + trim で比べて、
-    // 検出中の memory と等しい行も、件数を数える前に除く（保存値・`content_hash` は変えない）。
-    // `matches` を使う下の分岐（1件の `markContested`・`contested_group`・evidence だけ）は
-    // すべてこの後の値を見る。
+    // store は生の `content_hash` だけで「同じ内容」を除くので、NFC と NFD の違いや末尾の空白1つだけで別の行として返ってくる。
+    // `content` を NFC + trim で比べて、検出中の memory と等しい行も、件数を数える前に除く（保存値・`content_hash` は変えない。ADR 0424）。
     const memoryComparableContent = normalizeContentForComparison(memory.content);
     const matches = notSiblings.filter(
       (m) => normalizeContentForComparison(m.content) !== memoryComparableContent,
@@ -4889,9 +2635,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { memoryId: memory.id, claimKey, matchCount: 0, result: { kind: "no_conflict" } };
     }
 
-    // ADR 0378: `status` も evidence に含める——一致のどれが `active` 由来・どれが
-    // `findContestedByClaimKey` 由来（既に `contested`）かを、監査ログから読めるようにする
-    // （北極星 問い3）。
     const describeSide = (m: Memory) => ({
       id: m.id,
       status: m.status,
@@ -4900,14 +2643,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       validUntil: m.validUntil ?? null,
     });
 
-    // 2026-09-30 の直し（ADR 0378 追記、Issue #933 PR1 の穴埋め）: `markContested` へ
-    // 進めてよいのは、一致がちょうど1件で、かつその1件がまだ `active` のときだけ。
-    // `findContestedByClaimKey` 由来で一致がちょうど1件になっても、その1件は既に
-    // `contested`（＝`active` でない）なので、直す前は `markContested` を呼んで
-    // `ineligible` になり、検出中の Memory は `active` のまま痕跡も残らなかった。
+    // `markContested` へ進めるのは、一致がちょうど1件で、かつその1件がまだ `active` のときだけ。既に `contested` なら `ineligible` になり、検出中の Memory が `active` のまま痕跡も残らない（ADR 0378）。
     if (matches.length === 1 && matches[0]!.status === "active") {
       const other = matches[0]!;
-      // 問い3: 根拠を構造として `meta.note`（`MarkContestedOptions.reason`）へ載せる。
+      // 根拠を構造として `meta.note`（`MarkContestedOptions.reason`）へ載せる。
       const note = JSON.stringify({
         kind: "claim_key_conflict",
         claimKey,
@@ -4924,43 +2663,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // それ以外（matches.length >= 2、または matches.length === 1 だがその1件が既に
-    // `contested`）: 1対1の `contestedWithId` だけでは表せない（ADR 0185 決定5）。
-    //
-    // 2026-09-30 の直し（Issue #207/#933 PR2、ADR 0327、ADR 0378、ADR 0381、段階B。
-    // 2026-09-30 のさらなる直し、オーナー側クローンの判断で `ClaimKeyOptions.
-    // formContestedGroups` フラグを廃止し、`deps.relationStore` の配線を条件にした）:
-    // `deps.relationStore` が配線されており、かつ `deps.memoryStore.markContestedGroup`
-    // も配線されていれば、evidence だけに留めず実際に群として書き込みを試みる——
-    // `deps.memoryStore.markContestedGroup` が在るだけでは群を作らない（`relationStore`
-    // が無いと、後述の穴A吸収・合併の判定に使う `listRelated` そのものが呼べないため）。
-    // **`deps.relationStore` を配線しない呼び出しでは、この分岐は1ビットも変わらない**
-    // ——Issue #933 PR1（ADR 0378）が確立した evidence-only の挙動のままになる
-    // （PR1 の歯を1つも書き換えていない理由。PR1 の歯は `relationStore` を一度も
-    // 配線していないため、影響を受けない）。群のメンバーを次の順で広げる:
-    //   1. 種——検出中の `memory` 自身と、`matches` の全員。
-    //   2. 穴A（既存の2者間の対の吸収）——`matches` のうち `status === 'contested'` かつ
-    //      `contestedWithId !== null` なものは、その相手（`contestedWithId` が指す id）も
-    //      群に加える。相方自身は claim key の一致条件（有効期間の重なり等）を満たさない
-    //      ことがあるため、`matches` に現れないことがある——`contestedWithId` を直接
-    //      辿ることでその欠けを埋める。
-    //   3. 合併（複数の既存群の統合）——`deps.relationStore` が配線されていれば、ここまでの
-    //      メンバーのうち `status === 'contested'` な id から `kind: 'contradicts'` を
-    //      辿って到達できる id をすべて候補に加える（BFS）。**候補は `getMany` で読み直し、
-    //      `status === 'contested'` のものだけを実際に群へ加える**——decision10（forget 等で
-    //      群を離れたメンバーの関係の行は残す）により、BFS は既に群を離れた id も拾い
-    //      うるため、そのまま加えると `markContestedGroup` の CAS 全体が
-    //      `status_conflict` で落ちてしまう（`resolveContestedGroup` の fix2 と同じ
-    //      「行の有無ではなく status で今の群を判定する」規律）。resolve 済みの群は関係の
-    //      行を削除している（`resolveContestedGroup` 契約）ので、ここで見つかるのは今も
-    //      現存する群だけである。`matches` が2つの既存群それぞれのメンバーを1件ずつ
-    //      含んでいた場合、両方の群の全メンバーがここで合流し、1つの群になる。
-    // 広げた結果が3件未満（`markContestedGroup` の最小人数を満たさない——例:
-    // `relationStore` が配線されておらず、既存群の残りのメンバーを辿れない場合）のときは
-    // 呼ばない。`markContestedGroup` を呼んで `outcome.kind !== "contested_group"`
-    // （`ineligible`/`conflict`。TOCTOU 等）になった場合も含め、どちらも今まで通りの
-    // evidence-only の `memory_events` 追記 + `unresolved_conflict` へフォールバックする
-    // ——状態が動かなかった呼び出しで、根拠だけは必ず残す（ADR 0378 決定5の踏襲）。
+    // それ以外（matches.length >= 2、または1件だがその1件が既に `contested`）は、1対1の `contestedWithId` では表せない（ADR 0185）。`deps.relationStore` と `deps.memoryStore.markContestedGroup` の両方が
+    // 配線されていれば群として書き込みを試みる（ADR 0327、ADR 0381）。`relationStore` が無いと穴A吸収・合併の判定に使う `listRelated` が呼べないので、`markContestedGroup` だけでは群を作らない。
+    // 群のメンバーは、(1) 検出中の `memory` と `matches` の全員、(2) 穴A: `matches` のうち `contested` で `contestedWithId` を持つものの相手（相方は有効期間の重なり等を満たさず `matches` に現れないことがある）、
+    // (3) 合併: ここまでの `contested` な id から `kind: 'contradicts'` を辿って到達できる id を `getMany` で読み直した、**`status === 'contested'` のものだけ**（BFS。forget 等で群を離れたメンバーの関係の行は残るので、
+    // そのまま加えると `markContestedGroup` の CAS 全体が `status_conflict` で落ちる。行の有無ではなく status で今の群を判定する）。広げた結果が3件未満なら呼ばない。呼んで `contested_group` にならなかった場合も含め、
+    // evidence-only の `memory_events` 追記 + `unresolved_conflict` へフォールバックする（状態が動かなかった呼び出しでも根拠は残す。ADR 0378）。
     let groupOutcome: {
       memberIds: MemoryId[];
       markContestedGroup: MarkContestedGroupResult;
@@ -4978,8 +2686,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           .filter((m) => m.status === "contested" && (m.contestedWithId ?? null) === null)
           .map((m) => m.id);
         const visited = new Set(seedIds);
-        // 幅優先を1段ずつ進める。1段ぶんは `listRelatedMany?` があれば1往復（Issue #1449、ADR 0402）、
-        // 無ければ今までどおり起点ごとに直列。処理する順（= 先入れ先出しの queue と同じ）は変わらない。
+        // 幅優先を1段ずつ進める。1段ぶんは `listRelatedMany?` があれば1往復で引く（ADR 0402）。
         let level = [...seedIds];
         const discovered = new Set<MemoryId>();
         while (level.length > 0) {
@@ -5009,10 +2716,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       if (memberIdSet.size >= 3) {
         const memberIds = [...memberIdSet];
-        // ADR 0431: 監査イベントの `note` には、群の全員ではなく件数と先頭 K 件だけを入れる（全員を
-        // 入れると、群の全メンバーに積むイベントの1件ごとに N 件ぶんが入り、積み上げで N³ バイトになった）。
-        // 先頭は id の昇順（UTF-16 コード単位順。store の返す順に依らず決定的）。全員の id は
-        // 戻り値の `memberIds` と、各 Memory の状態から引ける。
+        // 監査イベントの `note` には件数と id 昇順の先頭 K 件だけを入れる（全員を入れると、群の全メンバーのイベントに N 件ぶん入り N³ バイトになる。ADR 0431）。
         const sortedMemberIds = [...memberIds].sort(compareCodeUnits);
         const sortedMatches = [...matches].sort((a, b) => compareCodeUnits(a.id, b.id));
         const note = JSON.stringify({
@@ -5046,12 +2750,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // markContestedGroup を呼ばなかった（配線されていない／群が3件未満にしか広がらな
-    // かった）、または呼んだが `contested_group` にならなかった: 今まで通り
-    // markContested を呼ばず、根拠だけを memory_events に残す。
-    // ADR 0431: `note` の `matches` は、群の `note` と同じく id の昇順の先頭 K 件に切り、
-    // 件数（`matchCount`）と切った印（`matchesTruncated`）を付ける。全員の id は戻り値の
-    // `matchMemoryIds` にある。
     const sortedUnresolvedMatches = [...matches].sort((a, b) => compareCodeUnits(a.id, b.id));
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
@@ -5106,27 +2804,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const memoryIds: MemoryId[] = [];
     const contentHashes = new Set<string>();
     const contestedDetection: ContestedDetectionOutcome[] = [];
-    // Issue #204 / ADR 0157: 既定 `["embed"]` のみ。opt-in（config.autoQueueConsolidateReflectOnExtract）
-    // が true のときだけ、同じ memoryId を種にした consolidate/reflect ジョブも積む——
-    // `createMemoryWithOutbox` は jobKinds の各要素に同じ payload `{ memoryId }` を使うので、
-    // 新しい payload 形を発明する必要がない（下の processConsolidateJob/processReflectJob 参照）。
     const jobKinds: OutboxJobKind[] = autoQueueConsolidateReflectOnExtract
       ? ["embed", "consolidate", "reflect"]
       : ["embed"];
-    // Issue #1063（ADR 0347）: 保存できない候補（store が拒む値——本文の NUL など。Postgres の tsvector の上限は migration 0025 で拒まなくなった、#1222）は、
-    // その候補だけを落として残りを書く。core は「保存できない値」と一時的な障害を見分けられず、上限も adapter の
-    // 都合なので事前には検査できない——`createMemoryWithOutbox` が投げたことだけを根拠にする。
-    // ⚠ 捕まえるのは `createMemoryWithOutbox` だけ。書けた後の `created` の追記・衝突の検出の失敗は今どおり投げる。
-    // 🔴 全件が落ちたら、最初の例外をそのまま投げる（今も例外になる入力であり、例外の集合は増えない。
-    // 店が丸ごと落ちている一時的な障害も、今どおり例外で伝わる）。
-    // 落とした候補は、残った候補の `created` の `meta.droppedCandidates` に残す。そのために、候補を全件
-    // 書いてから `created` を積む（落とした候補は、全件を書き終えるまで分からない）。
-    // ADR 0410（穴 D-3）: store が `createMemoriesWithOutboxAndEvents?` を持つなら、全候補の書き込みと `created` の
-    // 追記を1つのトランザクションに任せる。**口が在るかどうかだけで選ぶ**——撃って投げられたときに、下の旧経路で
-    // 撃ち直さない（二重に書きうる。ADR 0100 の `supersedeWithNewMemories` と同じ規律）。
-    // 落とした候補の記述（`describeDroppedCandidate`）は core が作り、store は落とした候補の例外を返すだけ。
-    // Issue #1237: この呼び出し全体で1回だけ読む——同じ observation から作る候補すべてに
-    // 同じ outbox の `now` を使う（`consolidate`/`reflect` と同じ規律）。
+    // 保存できない候補（本文の NUL など）は、その候補だけを落として残りを書く（ADR 0347）。core は「保存できない値」と一時的な障害を見分けられず、上限も adapter の都合なので事前には検査できない。
+    // `createMemoryWithOutbox` が投げたことだけを根拠にする（書けた後の `created` の追記・衝突の検出の失敗は投げる）。全件が落ちたら最初の例外をそのまま投げ、落とした候補は残った候補の `created` の
+    // `meta.droppedCandidates` に残す（そのため候補を全件書いてから `created` を積む）。store が `createMemoriesWithOutboxAndEvents?` を持つなら、書き込みと `created` を1トランザクションに任せる（ADR 0410）。
+    // **口が在るかどうかだけで選ぶ。** 撃って投げられたときに旧経路で撃ち直さない（二重に書きうる。ADR 0100）。`now` はこの呼び出し全体で1回だけ読む（同じ observation から作る候補すべてに同じ outbox の `now`）。
     const outboxNow = clock.now();
     const createBatch = deps.memoryStore.createMemoriesWithOutboxAndEvents;
     if (createBatch !== undefined) {
@@ -5154,7 +2838,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       for (const { memory, created } of batch.written) {
         memoryIds.push(memory.id);
-        // Issue #372: 冪等な再送（`created === false`）では走らせない（下の旧経路と同じ）。
+        // 冪等な再送（`created === false`）では走らせない（下の旧経路と同じ）。
         if (created && detectContested === true) {
           const outcomeForMemory = await detectClaimKeyContested(ctx, memory);
           if (outcomeForMemory !== null) {
@@ -5196,9 +2880,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           undefined,
           droppedFields,
         );
-        // Issue #372: 書き込み時（新しい Memory が active になる時点）の延長として、
-        // opt-in のときだけ検出を走らせる。**冪等な再送（`created === false`）では
-        // 走らせない**——「新しく active になった」わけではないため。
+        // 冪等な再送（`created === false`）では検出を走らせない（新しく `active` になったわけではないため）。
         if (detectContested === true) {
           const outcomeForMemory = await detectClaimKeyContested(ctx, memory);
           if (outcomeForMemory !== null) {
@@ -5206,31 +2888,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           }
         }
       }
-      // embed/consolidate/reflect ジョブは常に outbox 経由（非同期、docs/memory-model.md §11 行3）。
-      // ここでは何もしない — tick() の各 processXxxJob が処理する。
     }
     return { memoryIds, contentHashes, contestedDetection };
   }
 
   /**
-   * Issue #691続き（ADR 0326「採らなかった案B」の実装、ADR 0329）:
-   * `ClaimKeyOptions.knownPredicates`（呼び出し側が明示的に渡した語彙）と
-   * `ClaimKeyOptions.knownPredicatesFromStore`（store から動的に集める語彙）を合成する。
-   *
-   * - `knownPredicatesFromStore` が偽（省略/`false`）、または
-   *   `deps.memoryStore.listActiveClaimPredicates` が無い adapter では、
-   *   `claimKeyOptions.knownPredicates` をそのまま返す（**store を一度も読まない**——
-   *   opt-in していない呼び出しで既存の挙動を1バイトも変えないため）。
-   * - それ以外は `listActiveClaimPredicates` を1回呼び、**利用者の `knownPredicates` を
-   *   先に**、集めた一覧を**後ろに重複を除いて**連結する（ADR 0329 決定2）。
-   *   `subjectId` は `observation.subjectId ?? null`——1回の `observe()` 呼び出しが
-   *   持つ唯一の subjectId であり、候補ごとの `subjectId` 上書き（ADR 0271）は
-   *   `deriveClaimKeys` 呼び出しより後（`buildNewMemoryFromCandidate`）にしか
-   *   確定しないため、ここでは観測全体の既定値を使う（ADR 0329 決定3、確かめていないこと
-   *   参照）。
-   * - 合成の結果、一覧が空（利用者も渡さず、store にも1件も無い）なら `undefined` を返す
-   *   ——`deriveClaimKeys`/`buildClaimKeyPrompt` の「空配列＝渡していない」規約
-   *   （`buildKnownPredicateInstruction` の呼び出し条件）に合わせる。
+   * `ClaimKeyOptions.knownPredicates`（呼び出し側の語彙）と `knownPredicatesFromStore`（store から集める語彙）を合成する（ADR 0329）。後者が偽、または `listActiveClaimPredicates` が無い adapter では、
+   * `knownPredicates` をそのまま返し、**store を読まない**（opt-in していない呼び出しで挙動を変えないため）。そうでなければ `listActiveClaimPredicates` を1回呼び、利用者の語彙を先に、集めた一覧を後ろに重複を除いて連結する。
+   * `subjectId` は `observation.subjectId ?? null`（候補ごとの `subjectId` 上書きは `deriveClaimKeys` より後に確定するため、観測全体の既定値を使う。ADR 0271）。一覧が空なら `undefined`（「空配列＝渡していない」規約）。
    */
   async function resolveKnownPredicates(
     ctx: Ctx,
@@ -5261,27 +2926,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * Issue #372負債6（ADR 0324「real-fixture 実測で、誤検出（30%）のほぼ全量が claim key
-   * の `subject` 誤帰属だと分かった」）への対処、ADR 0334: `deriveClaimKeys` へ渡す
-   * `knownSubjects` を決める。
-   *
-   * **`ClaimKeyOptions.knownSubjects`（呼び出し側が明示的に渡した語彙）だけを見る。**
-   * `subjectCandidates`（Issue #608 項目②(b)、この observe() 呼び出しに渡された抽出用の
-   * 主題候補一覧）への暗黙の転用は行わない——ADR 0334 追記（2026-09-26）参照。
-   *
-   * ⚠ **当初案は `knownSubjects` 省略時に `subjectCandidates` を既定値として転用して
-   * いたが、取り下げた。** `claimKey.enabled: true` と `subjectCandidates` を既存で
-   * 併用している呼び出し側が、この opt-in（`knownSubjects`）を一切選んでいないのに
-   * claim key プロンプト・カセット鍵が動いてしまう——「off のときのプロンプトは1バイトも
-   * 変えない」（`buildClaimKeyPrompt` の doc コメント）に反する。`subjectCandidates` を
-   * ヒントに転用したい呼び出し側は、同じ配列を明示的に `claimKeyOptions.knownSubjects`
-   * へ渡すこと。
-   *
-   * ⚠ **store から動的に集める版（`knownPredicatesFromStore` の対）は意図的に実装して
-   * いない**（ADR 0334「採らなかった案」）。store が自己蓄積した `claim_key_subject` の
-   * 値（LLM が自由記述で作った曖昧な値になりがち）を汎用語彙として横流しすると、
-   * 無関係な話題の主張にまでその値が誤って使い回される汚染を実測で確認したため
-   * （`claim-key.ts` の `ClaimKeyOptions.knownSubjects` doc コメント参照）。
+   * `deriveClaimKeys` へ渡す `knownSubjects` を決める（ADR 0334）。**`ClaimKeyOptions.knownSubjects` だけを見る。** `subjectCandidates` への暗黙の転用はしない: `claimKey.enabled: true` と `subjectCandidates` を併用する
+   * 呼び出し側が、この opt-in を選んでいないのに claim key プロンプトが動いてしまい、「off のときのプロンプトは1バイトも変えない」に反する。転用したいなら同じ配列を `knownSubjects` へ明示的に渡す。
+   * store から動的に集める版（`knownPredicatesFromStore` の対）は実装しない: store が自己蓄積した `claim_key_subject`（LLM が自由記述で作った曖昧な値になりがち）を横流しすると、無関係な話題の主張にその値が使い回される汚染を実測した（`claim-key.ts`）。
    */
   function resolveKnownSubjects(claimKeyOptions: ClaimKeyOptions): string[] | undefined {
     if (claimKeyOptions.knownSubjects !== undefined && claimKeyOptions.knownSubjects.length > 0) {
@@ -5291,23 +2938,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。
-   *
-   * `subjectCandidates`（Issue #608 項目②(b)）は `handleExtractableObservation` の sync
-   * 経路からだけ渡る——`processExtractJob`（deferred 側）は渡さない。渡す先が無いのは
-   * 「保存していないから」であって「対応していないから」ではない（`SubjectCandidatesInput`
-   * の doc コメント、observation.ts 参照）。`reextract` も同じ理由でこの引数を使わない。
-   *
-   * `claimKeyOptions`（Issue #371）も同じ理由で sync 経路からだけ渡る。**既定は無効**
-   * ——`claimKeyOptions` が `undefined`、または `{ enabled: false }` なら
-   * `deriveClaimKeys`（claim-key.ts）は一度も呼ばれない。抽出プロンプト（`extraction.ts`）
-   * は一切変更しない——`extractCandidates` の呼び出しはこの関数の変更前と1バイトも
-   * 変わっていない（ADR 0315 決定1・決定2）。
-   *
-   * `signal`（Issue #1200、ADR 0359）は `extractCandidates`・`deriveClaimKeys` の両方へ
-   * そのまま渡す。abort されたときの例外は、どちらの呼び出しも `createMemoriesFromCandidates`
-   * （書き込み）より前で投げるため、この関数の呼び出し側（`handleExtractableObservation`・
-   * `processExtractJob`）はまだ何も書いていない状態でその例外を受け取る。
+   * 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。`subjectCandidates`・`claimKeyOptions` は `handleExtractableObservation` の sync 経路からだけ渡り、
+   * `processExtractJob`（deferred 側）は渡さない（保存していないから。`reextract` も同じ）。`claimKeyOptions` は既定で無効（`{ enabled: false }` なら `deriveClaimKeys` は呼ばれない。ADR 0315）。
+   * `signal`（ADR 0359）は `extractCandidates`・`deriveClaimKeys` の両方へ渡る。どちらも `createMemoriesFromCandidates`（書き込み）より前に投げるので、呼び出し側は何も書いていない状態で例外を受け取る。
    */
   async function runExtraction(
     ctx: Ctx,
@@ -5334,18 +2967,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       dropLlmSubjectIdsWithoutCandidates(extractedCandidates, subjectCandidates),
       deps.hashContent,
     );
-    // `ExtractCandidatesResult.rejectedSubjectIds` は型としては optional
-    // （`docs/decisions/0178-public-api-surface-gate.md` 対応。extraction.ts の doc
-    // コメント参照）だが、`extractCandidates` の両方の経路が必ず値を埋めるため、
-    // 実際には常に配列——ここでの `?? []` は型を合わせるためだけの防御。
+    // 型としては optional だが、`extractCandidates` の両経路が必ず値を埋める。ここの `?? []` は型を合わせるためだけ。
     const rejectedSubjectIds = rawRejectedSubjectIds ?? [];
     const outcome: ExtractionOutcome = usedWholeObservationFallback
       ? "llm_failed_whole_observation"
       : "ok";
     if (candidates.length === 0) {
-      // ADR 0315 決定2「候補が0件なら+0回にできる」: ここで早期 return するため、
-      // `deriveClaimKeys` の呼び出しにすら到達しない。Issue #372 の検出も同じ理由で
-      // 候補が無ければ何も走らない（鍵が付いた Memory が1件も作られないため）。
+      // 候補が0件なら早期 return する。`deriveClaimKeys` にも検出にも到達しない（ADR 0315）。
       return {
         memoryIds: [],
         outcome,
@@ -5355,8 +2983,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         contestedDetection: [],
       };
     }
-    // Issue #371: opt-in のときだけ、候補群の content をまとめて claim key を取る
-    // 別の構造化呼び出しを1回行う（ADR 0315 決定2 の (ii) separate）。
     let claimKeys: (ClaimKey | null)[] | undefined;
     let claimKeyFailure: ExtractionFailure | null = null;
     if (claimKeyOptions?.enabled === true) {
@@ -5373,11 +2999,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       claimKeys = derived.claimKeys;
       claimKeyFailure = derived.failure;
     }
-    // Issue #372: `enabled: true` と組み合わせたときだけ意味を持つ（`ClaimKeyOptions.
-    // detectContested` の doc コメント参照）。`enabled` が false/省略なら `claimKeys` が
-    // 無いため、`createMemoriesFromCandidates` 内で各 Memory の `claimKey` は常に `null`
-    // になり、検出は呼ばれても何も見つけようがない（`detectClaimKeyContested` の
-    // 早期 return）。
     const { memoryIds, contestedDetection } = await createMemoriesFromCandidates(
       ctx,
       observation,
@@ -5392,52 +3013,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * ADR 0028: `observe()` が LLM 障害で全文フォールバックへ倒れた（または単に古い抽出器版で
-   * 作られた）Observation に対して、抽出をやり直す。
-   *
-   * 🔴 安全弁1: LLM がまた失敗したら（`usedWholeObservationFallback`）、何も supersede せずに
-   * 返す。失敗を根拠に既存の記憶を置き換えない。
-   * 🔴 安全弁2: 候補が0件なら、何も supersede しない。「何も記憶に値しない」という正常な
-   * 抽出結果を根拠に既存を消さない（`superseded_by_id` の指す先も無い）。
-   * 🔴 安全弁3（ADR 0030）: `classifyReextractTargets` が「今回作る前」に読んだ時点で
-   * `active` だった Memory でも、実際に書きに行くまでの間（TOCTOU の窓）に別の書き込みで
-   * status が変わっていることがある。supersede は `expectedStatus: "active"` の compare-and-swap で書き、
-   * 弾かれたものは `skipped` に `status_changed_concurrently` で積む（`supersededMemoryIds` には入れず、
-   * `superseded` イベントも積まない）。store が `supersedeWithNewMemories` を持てば、その
-   * `supersede[].expectedStatus` で書いて `result.conflicted` を写す。持たなければ `updateStatusWithEvent` を
-   * 1件ずつ呼び、投げられた例外を `classifySupersedeFailure` で判定する。
-   *
-   * supersede 対象は、同じ `(sourceObservationId, extractorVersion)` を持つ既存 Memory のうち
-   * **`status: 'active'`** かつ今回作られた content_hash の集合に含まれないものだけ。
-   * `forgotten`（利用者が意図して忘れさせた）は絶対に含めない。`contested` も対象外にする
-   * ——contested は対向 Memory との対で初めて意味を持つ契約（mandatory companion retrieval）を
-   * 持つため、機構都合の reextract がその対の片方だけを動かすと契約を壊しかねない
-   * （ADR 0028「確かめていないこと」参照）。
-   */
-  /**
-   * Issue #1079・#1149・[#1432](https://github.com/takecchi/mnemora/issues/1432): その
-   * Observation から作られた記憶のうち、利用者の意思で退けたものを返す。**`extractorVersion` を
-   * 問わない**（[ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)、
-   * 2026-09-30）——`extractorVersion` を上げた runtime インスタンスで reextract しても、前の版で
-   * forget・contest した記憶を見落とさないようにするため。数えるのは `forgotten`（purge を含む）・
-   * `contested`（利用者の訂正でも、claimKey の自動検出でも）・訂正の解決で負けた `superseded`
-   * （最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。機構
-   * （reextract・consolidate）で置き換えた `superseded` と、理由を読めない `superseded`
-   * （イベントが無い・保持期間の掃除で消えた）は数えない——やり直せなくなるほうが、利用者に
-   * 見えにくい失敗になるため。
-   *
-   * ⚠ **2026-09-30 変更（Issue #1432・ADR 0380）: 以前は `listBySourceObservation(ctx,
-   * observationId, extractorVersion)` を使い、今の runtime の `extractorVersion` に一致する
-   * Memory しか見ていなかった。** 前の版で forget・contest した記憶は見えず、`extractorVersion`
-   * を上げて reextract すると、退けたはずの内容が印の無い新しい `active` として書き直されて
-   * いた（実測、Fake・Postgres 双方、Issue #1432 本文）。いまは
-   * {@link MemoryStore.listBySourceObservationAllVersions} を使い、版を問わず退けたものを見る。
-   * **帰結**: 版を跨いでも、1件でも退けたものがあれば、その Observation の抽出全体を打ち切る
-   * （同じ版のときと同じ規律）——版を上げても、退けたものを含む Observation は新しい版の記憶を
-   * 1件も作らない。⟹ 運用側が旧い版の記憶を退役させる（forget する）と、その Observation の
-   * ほかの事実も、以後 reextract では想起から作られなくなる。**版を跨いだ `active` の扱い
-   * （#873「運用側の責務」）は変えていない**——退けたものが無い Observation では、今どおり
-   * 新しい版で抽出され、旧い版の `active` は supersede されない。
+   * その Observation から作られた記憶のうち、利用者の意思で退けたものを返す。**`extractorVersion` を問わない**（[ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）。
+   * 数える/数えないものは `Runtime.reextract` の doc。版を跨いでも1件でも退けたものがあれば、その Observation の抽出全体を打ち切る（同じ版のときと同じ規律）。
    */
   async function listWithdrawnAmong(ctx: Ctx, existing: readonly Memory[]): Promise<Memory[]> {
     const withdrawn: Memory[] = [];
@@ -5454,31 +3031,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return withdrawn;
   }
 
+  /**
+   * `observe()` が LLM 障害で全文フォールバックへ倒れた（または古い抽出器版で作られた）Observation の抽出をやり直す（ADR 0028。契約は `Runtime.reextract`）。`contested` は supersede 対象にしない:
+   * 対向 Memory との対で意味を持つ契約（mandatory companion retrieval）があり、機構都合の reextract が対の片方だけを動かすと契約を壊しかねない。
+   */
   async function reextract(
     ctx: Ctx,
     observationId: ObservationId,
     opts?: AbortOptions,
   ): Promise<ReextractResult> {
-    // Issue #1237: この呼び出し全体で1回だけ読む（`consolidate`/`reflect` と同じ規律——
-    // 積む `superseded`/`created` イベントの `at` と、`createMemoryWithOutbox` の
-    // outbox 行にすべて同じ値を使う）。
     const now = clock.now();
     const observation = await deps.memoryStore.getObservation(ctx, observationId);
     if (!observation) {
       throw new Error(`runtime.reextract: observation not found: ${observationId}`);
     }
-    // Issue #1099: 使用報告（`kind: "usage"`）は抽出器を通らない（docs/memory-model.md §2・§6）。
-    // 抽出をやり直す対象ではないので、存在しない Observation と同じく、LLM も書き込みも
-    // 試みる前に落とす。以前は payload の JSON を LLM に送り、それを本文とする Memory を作っていた。
     if (observation.kind === observeInputKindToObservationKind("memory_usage")) {
       throw new Error(
         `runtime.reextract: observation ${observationId} is a usage report (kind: "usage") and is never extracted`,
       );
     }
 
-    // Issue #1079・#1149: 利用者の意思で退けた記憶が1件でも在れば、抽出をやり直さない（observe の再送の
-    // #897 と同じ規律）。やり直すと、LLM の言い方しだいで退けた事実が印の無い `active` として戻るため。
-    // LLM を呼ぶ前に確かめ、何も書かない。
     const existingAllVersions = await deps.memoryStore.listBySourceObservationAllVersions(
       ctx,
       observationId,
@@ -5512,42 +3084,32 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
 
     if (usedWholeObservationFallback) {
-      // ADR 0029: この早期 return は `listBySourceObservation` を呼ぶ前に return する——
-      // つまり既存 Memory を「見ていない」。`skipped: []`（既定値の顔）にすると
-      // 「何も飛ばさなかった」と嘘をつくことになるため、`not_examined` を明示する。
+      // この早期 return は既存 Memory を「見ていない」。`skipped: []` にすると「何も飛ばさなかった」と嘘をつくので、`not_examined` を明示する（ADR 0029）。
       return {
         observationId,
         memoryIds: [],
         supersededMemoryIds: [],
         skipped: [{ kind: "not_examined", reason: "llm_failed_whole_observation" }],
-        // 安全弁1 で早期 return——書き込みを1件も試みていない。
         atomicity: "not_attempted",
         extraction: "llm_failed_whole_observation",
         extractionFailure: failure,
       };
     }
     if (candidates.length === 0) {
-      // ADR 0029: 同じ理由でここも `listBySourceObservation` の前——既存を見ていない。
+      // ここも既存を見ていない（上と同じ。ADR 0029）。
       return {
         observationId,
         memoryIds: [],
         supersededMemoryIds: [],
         skipped: [{ kind: "not_examined", reason: "no_candidates" }],
-        // 安全弁2 で早期 return——書き込みを1件も試みていない。
         atomicity: "not_attempted",
         extraction: "ok",
         extractionFailure: null,
       };
     }
 
-    // Issue #1226 と同じ穴（ADR 0406）: LLM を待つ間に、この Observation から出た記憶が `forget`
-    // （`purge` を含む）されても、上の退けた記憶の確認（LLM の前）は古いままである。LLM が
-    // 返った直後・書く前に、LLM の前に見えていた記憶を読み直し、1件でも forgotten なら
-    // 何も書かずに打ち切る（`consolidate`/`reflect` の「書く直前の読み直し」と同じ作法）。
-    // 戻り値は、退けた記憶を持つ Observation の早期 return と同じ形（公開の型は増やさない）。
-    // `abortIfForgotten` を実装しない adapter（InMemory・core の fake）では、この読み直しだけが
-    // 保護になる。実装する adapter（`@mnemora/postgres`）は、下の書き込み自身が同一
-    // トランザクションの `SELECT … FOR UPDATE` で、この読み直しと書き込みの間の窓も閉じる。
+    // LLM を待つ間に退けられた記憶があっても、上の確認（LLM の前）は古いままなので、LLM が返った直後・書く前に読み直し、1件でも退けられていたら何も書かずに打ち切る（ADR 0406）。
+    // `abortIfForgotten` を実装する adapter（`@mnemora/postgres`）は、下の書き込み自身が同一トランザクションの `SELECT … FOR UPDATE` で、読み直しと書き込みの間の窓も閉じる。
     const knownMemoryIds = existingAllVersions.map((memory) => memory.id);
     const abortedSourceForgotten = (
       stopped: ReadonlyArray<{ id: MemoryId; status: Exclude<MemoryStatus, "active"> }>,
@@ -5568,10 +3130,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ids.map((id) => ({ id, status: "forgotten" as const }));
     if (knownMemoryIds.length > 0) {
       const rechecked = await deps.memoryStore.getMany(ctx, knownMemoryIds);
-      // ADR 0544: 見るのは forgotten だけではない。LLM の前の門（上の `listWithdrawnAmong`）が退ける
-      // 状態——forgotten・contested・訂正の解決で負けた superseded——に、待つ間に変わったものも
-      // 「退けた記憶」として打ち切る。archived・機構で置き換えた superseded は LLM の前の門も通すので、
-      // ここでも止めない（待つ前と同じ門を、待った後にもう一度当てる）。
       const withdrawnNow = await listWithdrawnAmong(ctx, rechecked);
       if (withdrawnNow.length > 0) {
         return abortedSourceForgotten(
@@ -5591,39 +3149,25 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       extractorVersion,
     );
 
-    // ADR 0100: content_hash は**作る前**に分かる（`buildNewMemoriesForCandidates` は
-    // 書き込まない）——`supersedeWithNewMemories` が「作成と supersede を1回の呼び出しで」
-    // 受け取るには、supersede 判定を作成より前に済ませておく必要がある。
     const newMemories = await buildNewMemoriesForCandidates(ctx, observation, candidates);
     const contentHashes = new Set(newMemories.map((m) => m.contentHash));
 
-    // ADR 0029: 判定そのものは純関数（`classifyReextractTargets`）に切り出してある——
-    // ここでは判定結果（`toSupersede`・`skipped`）を受け取って I/O するだけ。
-    // supersede する対象・順序・イベントの中身は ADR 0028 からミリも変えていない。
     const { toSupersede: classifiedToSupersede, skipped } = classifyReextractTargets(
       existingBefore,
       contentHashes,
     );
 
-    // ADR 0454: 置き換えた側（アンカー）は、今回の抽出で **`active` になる行**でなければならない。
-    // 冪等キー `(sourceObservationId, extractorVersion, contentHash)` は status を問わないので、候補が
-    // 同じ版の `superseded`／`archived` な既存行にぶつかると、store はその行を `created: false` で返す。
-    // 候補列の先頭を位置で選ぶと、その行が置き換えた側になる（X → Y → X と出力が往復すると、Y は X に
-    // 置き換えられ、X は Y に置き換えられたまま——循環で active が0件）。ぶつかる行は `existingBefore`
-    // （LLM の後に読んだ、この版の全 status の行）に居る。ぶつからない先頭の候補をアンカーにし、無ければ
-    // （候補が全部、非 active の既存行にぶつかる）何も supersede しない。ぶつかった行は、上の分類が
-    // `status_not_active` として `skipped` に載せている。
+    // 置き換えた側（アンカー）は、今回の抽出で **`active` になる行**でなければならない（ADR 0454）。冪等キー `(sourceObservationId, extractorVersion, contentHash)` は status を問わないので、
+    // 候補が同じ版の `superseded`／`archived` な既存行にぶつかると、store はその行を `created: false` で返す。候補列の先頭を位置で選ぶと、その行が置き換えた側になり、
+    // X → Y → X と出力が往復したとき、Y は X に置き換えられ X は Y に置き換えられたままで active が0件になる。ぶつかる行は `existingBefore`（LLM の後に読んだ、この版の全 status の行）に居る。
+    // ぶつからない先頭の候補をアンカーにし、無ければ（候補が全部、非 active の既存行にぶつかる）何も supersede しない。ぶつかった行は、上の分類が `status_not_active` として `skipped` に載せている。
     const nonActiveHashes = new Set(
       existingBefore.filter((m) => m.status !== "active").map((m) => m.contentHash),
     );
     const anchorIndex = newMemories.findIndex((m) => !nonActiveHashes.has(m.contentHash));
     const toSupersede = anchorIndex === -1 ? [] : classifiedToSupersede;
 
-    // `supersededById` を省略すると `meta` からその欄を落とす——ADR 0100 の口を使う経路では
-    // アンカーの id が呼び出し前に存在しないため、store が解決した id で埋める契約になって
-    // いる（`MemoryStore.supersedeWithNewMemories` の doc 参照）。⟹ 監査ログの中身は
-    // 口が在る adapter と無い adapter で**同一**になる。⛔ 同じ論理操作が adapter ごとに
-    // 別の監査記録を残す形にはしない。
+    // `supersededById` を省略すると `meta` からその欄を落とす（口を使う経路ではアンカーの id が呼び出し前に無く、store が埋める）。監査ログの中身は、口が在る adapter と無い adapter で同一にする。
     const buildSupersedeEventFor = (existing: Memory, supersededById?: MemoryId) =>
       ({
         tenantId: ctx.tenantId,
@@ -5641,21 +3185,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         },
       }) satisfies NewMemoryEvent;
 
-    // ADR 0422: この操作の `created` は、`superseded`（`buildSupersedeEventFor`）と同じ入口の `now` を `at` に使い、
-    // meta に `reextracted: true` を足す。3経路（口あり・名乗らない adapter の別の追記・口なし）すべてで同じ値を渡す。
     const reextractCreated: CreatedEventReextractOpts = { at: now, reextracted: true };
 
-    // ------------------------------------------------------------------
-    // ADR 0100: 口が在れば、作成と supersede を1トランザクションで撃つ。
-    // 🔴 フォールバックは**口の不在に対してだけ**（書き込みの前に1度判定する）。
-    // ⛔ 撃って投げられたときに今日の経路で撃ち直さない——それをすると
-    // 「トランザクションを張れなかった」と「張ったが失敗した」が呼び手から
-    // 区別できなくなる（Issue #134 が潰すなと명示した破れ）。
-    // ------------------------------------------------------------------
+    // 口が在れば、作成と supersede を1トランザクションで撃つ（ADR 0100）。フォールバックは**口の不在に対してだけ**。
+    // ⛔ 撃って投げられたときに旧経路で撃ち直さない（「張れなかった」と「張ったが失敗した」が呼び手から区別できなくなる）。
     const supersedeWithNewMemories = deps.memoryStore.supersedeWithNewMemories;
     if (supersedeWithNewMemories !== undefined) {
-      // `supersededByIndex: anchorIndex` は「この呼び出しの news[anchorIndex]」——ぶつからない先頭の候補
-      // （上の ADR 0454 のコメント。ぶつかる候補が無ければ今までどおり news[0]）。
       let result: Awaited<ReturnType<typeof supersedeWithNewMemories>>;
       try {
         result = await supersedeWithNewMemories.call(
@@ -5666,12 +3201,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             id: existing.id,
             supersededByIndex: anchorIndex,
             expectedStatus: "active" as MemoryStatus,
-            // `meta.supersededById` は store が解決した id で埋める（上のコメント参照）。
+            // `meta.supersededById` は store が解決した id で埋める。
             event: buildSupersedeEventFor(existing),
           })),
-          // ADR 0406: 書き込みと同一トランザクションでの見直し（実装する adapter だけ）。
-          // ADR 0416（穴 D-3 の続き）: `created` も同じトランザクションで積ませる（実装する adapter だけ。
-          // 積んだかどうかは戻り値の `createdEventsWritten` で判断する——下を見ること）。
           {
             now,
             abortIfForgotten: knownMemoryIds,
@@ -5690,17 +3222,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
       } catch (error) {
         if (isSourceMemoryForgottenError(error)) {
-          // 作成も supersede も rollback された——書き込みを試みていないのと区別が付かない。
+          // 作成も supersede も rollback された。書き込みを試みていないのと区別が付かない。
           return abortedSourceForgotten(forgottenStopped(error.forgottenIds));
         }
         throw error;
       }
 
       const memoryIds = result.created.map((c) => c.memory.id);
-      // ADR 0416: store が `createdEventsWritten: true` と**名乗ったときだけ**別の append を省く。名乗らない
-      // adapter（`opts.buildCreatedEvent` を黙って無視する既存の第三者の実装）では、今までどおり別の文で積む——
-      // 引数を渡したことだけで「積まれた」と決めると、そういう adapter で `created` がまるごと消える。
-      // ⛔ 投げられたときに撃ち直さない（上の `catch` は投げ直すだけ。ADR 0100）。
+      // store が `createdEventsWritten: true` と**名乗ったときだけ**別の append を省く（ADR 0416）。引数を渡しただけで「積まれた」と決めると、`opts.buildCreatedEvent` を黙って無視する第三者の adapter で `created` がまるごと消える。
       if (result.createdEventsWritten !== true) {
         for (const { memory, created } of result.created) {
           if (created) {
@@ -5718,8 +3247,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
 
-      // CAS に弾かれた対象は**既存の語彙**へ写す（⛔ `ReextractSkip` に新しい kind を
-      // 足さない。exhaustive switch を持つ第三者を壊しうる）。
+      // CAS に弾かれた対象は**既存の語彙**へ写す。⛔ `ReextractSkip` に新しい kind を足さない（exhaustive switch を持つ第三者を壊しうる）。
       const conflictedIds = new Set(result.conflicted.map((c) => c.id));
       for (const conflict of result.conflicted) {
         skipped.push({
@@ -5742,7 +3270,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 口が無い adapter——今日どおりの2段（作成 → supersede ループ）。
     const memoryIds: MemoryId[] = [];
     for (const newMemory of newMemories) {
       let written: Awaited<ReturnType<MemoryStore["createMemoryWithOutbox"]>>;
@@ -5782,21 +3309,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
       }
     }
-    // `candidates.length === 0` を上で早期リターンしている以上 `memoryIds` は非空
-    // ——ここは構造的に保証されている（防御的な二重チェックをあえて置かない。
-    // ADR 0028「変異A」参照）。
-    // ADR 0454: 口ありの経路と同じ候補（ぶつからない先頭）。`toSupersede` が空なら使わない。
     const supersededById = memoryIds[Math.max(anchorIndex, 0)]!;
 
     const supersededMemoryIds: MemoryId[] = [];
     for (const existing of toSupersede) {
       try {
-        // 🔴 安全弁3（ADR 0030）: 読んだ時点で active だったからといって、書きに来た今この
-        // 瞬間も active だとは限らない（TOCTOU）。`expectedStatus: "active"` の
-        // compare-and-swap で「読んでから書くまでの間に status が変わった」ケースを
-        // 検知不能なまま通さない。
-        //
-        // ADR 0031: status の更新と `superseded` イベントの追記を1トランザクションで行う。
         await deps.memoryStore.updateStatusWithEvent(
           ctx,
           existing.id,
@@ -5807,11 +3324,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       } catch (error) {
         const skip = classifySupersedeFailure(existing.id, error);
         if (skip === null) {
-          // 競合以外の例外——飲み込まずそのまま投げる（classifySupersedeFailure の doc 参照）。
+          // 競合以外の例外は飲み込まずそのまま投げる（`classifySupersedeFailure` の doc 参照）。
           throw error;
         }
-        // CAS に弾かれた——supersededMemoryIds に入れず、superseded イベントも積まない
-        // （積むと「置き換えた」という監査ログが嘘になる）。
+        // CAS に弾かれた対象は `supersededMemoryIds` に入れず、`superseded` イベントも積まない（積むと「置き換えた」という監査ログが嘘になる）。
         skipped.push(skip);
         continue;
       }
@@ -5830,21 +3346,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * Issue #870: `externalId` を渡した場合、`createObservation` の冪等性
-   * （docs/architecture.md §3.5、`(tenant_id, external_id)` の一意制約）が `observations`
-   * 行にもそのまま効く。**その上で、以下2点を守る**:
-   *
-   * 1. **`recordUsage`/`reinforce` は、返ってきた（保存済みの）Observation の payload で
-   *    呼ぶ**——`input` の値ではない。初回はこの2つは同じ値。再送では、最初の呼び出しが
-   *    `createObservation` の後・`recordUsage` の前で落ちていた場合でも、保存済みの
-   *    payload を読み直すことで `recordUsage`/`reinforce` を完了させられる。同じ
-   *    `externalId` で違う payload（`recallId`/`usedMemoryIds`）が来た場合、後着の
-   *    payload は無視される——他 kind の冪等な再送（`handleExtractableObservation` の
-   *    `!created` 分岐）と同じ規約。
-   * 2. **返ってきた Observation の `kind` が `usage` 以外**（別 kind の Observation と
-   *    `externalId` が衝突した場合）**なら、`recordUsage`/`reinforce` を呼ばない**——
-   *    payload の形が `{ recallId, usedMemoryIds }` である保証が無いため。他 kind の
-   *    冪等な再送と同じ形（`memoryIds: []`、`extraction: 'skipped'`）で返す。
+   * `externalId` を渡した場合、`createObservation` の冪等性が `observations` 行にもそのまま効く。(1) `recordUsage`/`reinforce` は、**返ってきた（保存済みの）Observation の payload** で呼ぶ（`input` の値ではない）。
+   * 再送では、最初の呼び出しが `createObservation` の後・`recordUsage` の前で落ちていても、保存済みの payload で完了させられる。同じ `externalId` で違う payload が来ても後着は無視する（他 kind の冪等な再送と同じ規約）。
+   * (2) 返ってきた Observation の `kind` が `usage` 以外（別 kind と `externalId` が衝突した）なら、payload の形の保証が無いので `recordUsage`/`reinforce` を呼ばず、他 kind の再送と同じ形（`memoryIds: []`、`extraction: 'skipped'`）で返す。
    */
   async function handleMemoryUsage(
     ctx: Ctx,
@@ -5873,23 +3377,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // ADR 0009・docs/memory-model.md §6: 使用報告は抽出器を通らず recall_usages へ直接反映される。
-    // 上の doc コメント1: 保存済みの Observation の payload を読み直して使う。
     const storedPayload = UsageObservationPayloadSchema.parse(observation.payload);
     const reinforcedAt = clock.now();
-    // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
-    // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
+    // 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める（ADR 0165）。
     const reinforceOpts = await resolveReinforceOptions(ctx);
-    // ⚠ `insertedMemoryIds` の status は確かめない——`MemoryStore.reinforce`/
-    // `MemoryStore.reinforceMany` の doc コメント（Issue #840）が、status を絞らない
-    // ことの帰結を status ごとに明記している。
-    //
-    // [Issue #961](https://github.com/takecchi/mnemora/issues/961): 使用の記録と強化を
-    // 別々にコミットすると、その間で落ちたとき記録だけが残り、同じ `externalId` の再送では
-    // `recordUsage` が `insertedMemoryIds: []` を返すため強化が二度と呼ばれない。
-    // `MemoryStore.recordUsageAndReinforce`（任意メソッド）が在れば、両方を1トランザクション
-    // で撃つ——強化が失敗すれば記録も巻き戻るので、再送がそのまま両方をやり直す。
-    // 無い adapter では下の従来の2段のまま（その窓は残る。ADR 0009 の 2026-09-27 追記）。
+    // 使用の記録と強化を別々にコミットすると、その間で落ちたとき記録だけが残り、同じ `externalId` の再送では `recordUsage` が `insertedMemoryIds: []` を返すため強化が二度と呼ばれない。
+    // `recordUsageAndReinforce`（任意メソッド）が在れば両方を1トランザクションで撃つ。無い adapter では下の2段のまま（その窓は残る。ADR 0009）。`insertedMemoryIds` の status は確かめない（`MemoryStore.reinforce` の doc）。
     const recordUsageAndReinforce = deps.memoryStore.recordUsageAndReinforce;
     if (recordUsageAndReinforce !== undefined) {
       const { insertedMemoryIds } = await recordUsageAndReinforce.call(
@@ -5912,13 +3405,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       storedPayload.recallId,
       storedPayload.usedMemoryIds,
     );
-    // [Issue #874](https://github.com/takecchi/mnemora/issues/874): `reinforce` を
-    // `insertedMemoryIds` の件数だけ直列に呼ぶと、使用報告1件ごとに往復数が線形に
-    // 増える（N+1）。`MemoryStore.reinforceMany`（任意メソッド、`archiveDecayed` と
-    // 同じ「口が在るかどうかで分岐する」作法）が在ればそれを1回呼んで束ね、無ければ
-    // 従来どおり1件ずつのループへ戻る——`reinforceMany` を実装しない adapter の挙動は
-    // 1バイトも変えない。`insertedMemoryIds` が空なら（従来のループも0回だったのと
-    // 同じく）どちらの経路も呼ばない。
+    // `reinforce` を件数だけ直列に呼ぶと往復が線形に増える（N+1）ので、`reinforceMany`（任意メソッド）が在れば1回に束ねる。
     if (insertedMemoryIds.length > 0) {
       const reinforceMany = deps.memoryStore.reinforceMany;
       if (reinforceMany !== undefined) {
@@ -5944,7 +3431,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  /** ADR 0407: sync の observe が積んだ extract ジョブを持つ間の `claimedBy`。 */
+  /** sync の observe が積んだ extract ジョブを持つ間の `claimedBy`（ADR 0407）。 */
   const SYNC_OBSERVE_CLAIMED_BY = "runtime.observe:sync";
 
   async function handleExtractableObservation(
@@ -5955,7 +3442,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const kind = observeInputKindToObservationKind(input.kind);
     const payload = extractObservationPayload(input);
     const extractMode = input.extract ?? "sync";
-    // Issue #1237: `recordedAt` と outbox 行の `now` に同じ値を使う。
+    // `recordedAt` と outbox 行の `now` に同じ値を使う。
     const now = clock.now();
 
     const newObservation: NewObservation = {
@@ -5966,12 +3453,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       payload,
       occurredAt: input.occurredAt ?? null,
       recordedAt: now,
-      // Issue #280: `occurredAt` と同じ経路（`Observation.validFrom`/`validUntil` の
-      // doc コメント参照。deferred 抽出でも値が残るよう Observation に持たせる）。
+      // `occurredAt` と同じ経路。deferred 抽出でも値が残るよう Observation に持たせる。
       validFrom: input.validFrom ?? null,
       validUntil: input.validUntil ?? null,
-      // Issue #152（ADR 0312）: 同じ経路。runtime は常に `{}` 以上の値を書く
-      // （`Observation.attributes` の doc コメント参照）。
+      // 同じ経路。runtime は常に `{}` 以上の値を書く（ADR 0312）。
       attributes: input.attributes ?? {},
     };
 
@@ -5979,18 +3464,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ctx,
       newObservation,
       ["extract"],
-      // ADR 0407: sync のときだけ、observe 自身が LLM を待つあいだ tick に取られないよう、
-      // 「observe が claim 済み」の状態で積む（deferred は tick に渡すためのジョブなので従来どおり）。
+      // sync のときだけ、observe が LLM を待つあいだ tick に取られないよう「observe が claim 済み」で積む（ADR 0407）。
       extractMode === "sync" ? { now, claimedBy: SYNC_OBSERVE_CLAIMED_BY } : { now },
     );
 
     if (!created) {
-      // 冪等な再送（docs/architecture.md §3.5）。extract ジョブは積まれておらず、
-      // sync/deferred のどちらであっても、ここで新たに抽出をやり直す必要はない
-      // （最初の呼び出しで既に処理済みのはず）。
-      // ADR 0454: 渡した欄は再送でも付ける（`ObserveResult` の各欄の「渡したら常に」）。値は「再送は抽出も検出も
-      // 走らせなかった」から決まる自然な値——弾いた候補なし（[]）・鍵の導出の失敗なし（null）・検出の対象の候補なし（[]）。
-      // ADR 0639: 再送の内訳。読み取りは1回だけ（版も status も問わない口。書き込みはしない・LLM は呼ばない）。
+      // 冪等な再送。渡した欄は再送でも付ける（ADR 0454）。値は「再送は抽出も検出も走らせなかった」から決まる自然な値（弾いた候補なし []・鍵の導出の失敗なし null・検出の対象なし []）。再送の内訳は ADR 0639。
       const existing = await deps.memoryStore.listBySourceObservationAllVersions(
         ctx,
         observation.id,
@@ -6025,26 +3504,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // extract: 'sync' — その場で抽出する（docs/architecture.md §3.2）。
-    // Issue #608 項目②(b): `input.subjectCandidates` はここでだけ使う——deferred 側
-    // （上の早期 return・`processExtractJob`）には渡らない。`observe()` が deferred と
-    // 同時に渡された組み合わせを先に弾いているため、ここに来る時点で
-    // `extractMode === 'sync'` であることは保証済み。
     const { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection } =
       await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey, signal);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
-      // CAS（ADR 0142）: ジョブは observe が claim 済みの状態で作られている（ADR 0407。
-      // `attempts` は 1）。作ったときに返った `attempts` を、自分のフェンシングトークンとして渡す。
       try {
         await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts, {
           at: clock.now(),
         });
       } catch (err) {
-        // ADR 0407: LLM がリースより長くかかり、tick に取り直されていた。observe の書き込み
-        // （Observation と抽出した Memory）は既に済んでおり、ジョブの終端は取り直した側が持つ。
-        // ここで投げると「書き込み済みなのに失敗」になり `memoryIds` が失われる。良性なので握る
-        // （tick 側の `leaseConflicts` と同じ扱い）。それ以外の例外は今までどおり投げる。
+        // LLM がリースより長くかかり、tick に取り直されていた（ADR 0407）。observe の書き込み（Observation と抽出した Memory）は既に済んでおり、ジョブの終端は取り直した側が持つ。
+        // ここで投げると「書き込み済みなのに失敗」になり `memoryIds` が失われる。良性なので握る（tick 側の `leaseConflicts` と同じ扱い）。それ以外の例外は投げる。
         if (!isOutboxLeaseConflictError(err)) {
           throw err;
         }
@@ -6055,17 +3525,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       memoryIds,
       extraction: outcome,
       extractionFailure: failure,
-      // Issue #608 項目②(b): `subjectCandidates` を渡した呼び出しだけ、この欄を持たせる
-      // （ObserveResult.rejectedSubjectIds の doc コメント参照。空配列＝渡していないと
-      // 同じ規約、observation.ts の `SubjectCandidatesInput` 参照）。
+      // `subjectCandidates` を渡した呼び出しだけ、この欄を持たせる（空配列＝渡していないと同じ規約）。
       ...(input.subjectCandidates !== undefined && input.subjectCandidates.length > 0
         ? { rejectedSubjectIds }
         : {}),
-      // Issue #371: `claimKey.enabled` を渡した呼び出しだけこの欄を持たせる
-      // （ObserveResult.claimKeyFailure の doc コメント参照。同じ「渡していない」規約）。
+      // `claimKey.enabled` を渡した呼び出しだけこの欄を持たせる（同じ「渡していない」規約）。
       ...(input.claimKey?.enabled === true ? { claimKeyFailure } : {}),
-      // Issue #372: `claimKey.detectContested: true` を渡した呼び出しだけこの欄を持たせる
-      // （ObserveResult.contestedDetection の doc コメント参照。同じ「渡していない」規約）。
+      // `claimKey.detectContested: true` を渡した呼び出しだけこの欄を持たせる（同じ規約）。
       ...(input.claimKey?.detectContested === true ? { contestedDetection } : {}),
     };
   }
@@ -6081,11 +3547,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (parsed.kind === "memory_usage") {
       return handleMemoryUsage(ctx, parsed);
     }
-    // Issue #608 項目②(b): `extract: 'deferred'` と `subjectCandidates` の組み合わせは
-    // 検証の段（DB へ何も書く前）で明示的に落とす——`subjectCandidates` はどこにも
-    // 永続化されないため、deferred 側の実行時（`processExtractJob`）はこの一覧を
-    // 構造的に見られない。「渡されたのに黙って落とす」と、呼び出し側は候補一覧が
-    // 効いたと思い込む（`SubjectCandidatesInput` の doc コメント、observation.ts 参照）。
+    // `extract: 'deferred'` と `subjectCandidates` の組み合わせは、検証の段（DB へ何も書く前）で明示的に落とす。`subjectCandidates` はどこにも永続化されないため、
+    // deferred 側の実行時（`processExtractJob`）は一覧を構造的に見られず、「渡されたのに黙って落とす」と、呼び出し側は候補一覧が効いたと思い込む。
     const extractMode = parsed.extract ?? "sync";
     if (
       extractMode === "deferred" &&
@@ -6097,8 +3560,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           "pass extract: 'sync' (or omit extract), or drop subjectCandidates",
       );
     }
-    // Issue #371: `claimKey` と `extract: 'deferred'` の組み合わせも同じ理由で落とす
-    // （`CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX` の doc コメント、observation.ts 参照）。
+    // `claimKey` と `extract: 'deferred'` の組み合わせも同じ理由で落とす。
     if (extractMode === "deferred" && parsed.claimKey !== undefined) {
       throw new Error(
         CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX +
@@ -6121,16 +3583,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (!observation) {
       throw new Error(`runtime.tick: extract job references missing observation: ${observationId}`);
     }
-    // Issue #1092（ADR 0347）: 再配達（1回目が書いた後・`complete` の前に止まり、リースが切れた後の2回目）で
-    // 違う LLM の出力を足さない。その Observation から今の抽出器の版で作られた Memory が1件でも在れば、抽出は
-    // 済んでいるものとして LLM を呼ばずに返す（`tick` が `complete` する）。
-    // - status では絞らない: 全文フォールバック・forget / purge した Memory も「在る」に数える
-    //   （再配達で、忘れさせた内容を蘇らせない。#897 と同じ向き）。
-    // - 版で絞る: 旧い版の Memory しか無ければ、今どおり新しい版で抽出する（#873）。
-    // - ここ（extract ジョブの handler）にだけ置く。sync の observe は Observation を作った直後であり、
-    //   `reextract` は既存が在ってもやり直すのが目的なので、どちらもこの判定を通らない。
-    // ⚠ 塞げないもの: 並行の2本（どちらも書く前にこの読みを通る。#1092 本文）。1回目が候補の一部だけを書いて
-    //   止まった場合の残り（作られない。`reextract` で回復する）。
+    // 再配達（1回目が書いた後・`complete` の前に止まり、リースが切れた後の2回目）で違う LLM の出力を足さない（ADR 0347）。その Observation から今の抽出器の版で作られた Memory が1件でも在れば、
+    // 抽出は済んでいるものとして LLM を呼ばずに返す（`tick` が `complete` する）。
+    // - status では絞らない: 全文フォールバック・forget / purge した Memory も「在る」に数える（再配達で、忘れさせた内容を蘇らせない）。
+    // - 版で絞る: 旧い版の Memory しか無ければ、新しい版で抽出する。
+    // - ここ（extract ジョブの handler）にだけ置く。sync の observe は Observation を作った直後であり、`reextract` は既存が在ってもやり直すのが目的なので、どちらもこの判定を通らない。
+    // ⚠ 塞げないもの: 並行の2本（どちらも書く前にこの読みを通る）。1回目が候補の一部だけを書いて止まった場合の残り（作られない。`reextract` で回復する）。
     const existing = await deps.memoryStore.listBySourceObservation(
       ctx,
       observation.id,
@@ -6142,13 +3600,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     await runExtraction(ctx, observation, undefined, undefined, signal);
   }
 
-  /**
-   * Issue #753 / `RuntimeDeps.embeddingInput`: `deps.embeddingInput` が省略されていれば
-   * `memory.content` をそのまま返す——この関数の有無は既定の挙動を1ビットも変えない。
-   * 指定されていれば、その戻り値を `embed()` へ送る文字列として使う（`memory.content`
-   * 自体は変えない。呼び出し元の `try` の中で呼ぶので、フックが例外を投げても今までの
-   * `catch` がそのまま `embeddingStatus: 'failed'` にして再送出する）。
-   */
   function resolveEmbeddingInput(memory: Memory): string {
     return deps.embeddingInput ? deps.embeddingInput(memory) : memory.content;
   }
@@ -6166,11 +3617,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (!memory) {
       throw new Error(`runtime.tick: embed job references missing memory: ${memoryId}`);
     }
-    // ADR 0541: forget した記憶（`forgotten`）・purge 済みの記憶（`purgedAt` あり）は、本文（purge 後は墓標）を外部の
-    // embedding provider に送らない。forget の前に積まれた埋め込みジョブが後から走っても、provider を呼ばず、ベクトルも
-    // 書かず、`embeddingStatus` も触らずに返す（`tick` が `complete` する。`failed` にしないので、再試行で回り続けない）。
-    // 判定は上の `get` で読んだ状態による。読んでから provider を呼ぶまでの間に forget されると、本文は送られる（塞げない窓。
-    // ADR 0541 の「残る窓」）。`active`・`archived`・`superseded`・`contested` は今までどおり埋め込む。
+    // forget した記憶・purge 済みの記憶は、本文（purge 後は墓標）を外部の embedding provider に送らない（ADR 0541）。forget の前に積まれた埋め込みジョブが後から走っても、provider を呼ばず、ベクトルも書かず、
+    // `embeddingStatus` も触らずに返す（`failed` にしないので再試行で回り続けない）。判定は上の `get` で読んだ状態による。読んでから provider を呼ぶまでの間に forget されると本文は送られる（塞げない窓）。
     if (isWithdrawnSeed(memory)) {
       return;
     }
@@ -6181,10 +3629,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (!vector) {
         throw new Error("runtime.tick: embedding provider returned no vector");
       }
-      // 2026-09-30 / ADR 0393: provider が宣言した `space.dimensions` と違う長さのベクトルは
-      // upsert に渡さない。Postgres では pgvector の `expected N dimensions` で落ちて原因が
-      // SQL の失敗に見え、InMemory / Fake は黙って 'ready' にしていた。既存の失敗の経路
-      // （下の catch: `failed` を書いて投げ直す）に乗せる。
+      // provider が宣言した `space.dimensions` と違う長さのベクトルは upsert に渡さない（ADR 0393）。Postgres では pgvector の `expected N dimensions` で落ちて原因が SQL の失敗に見え、InMemory / Fake は黙って 'ready' にするため。
       if (vector.length !== deps.embeddingProvider.space.dimensions) {
         throw new Error(
           `runtime.tick: embedding provider returned a vector of the wrong dimension: expected ${deps.embeddingProvider.space.dimensions} dimensions, got ${vector.length}`,
@@ -6198,26 +3643,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
       }
       await deps.vectorStore.upsert(ctx, deps.embeddingProvider.space, memory.id, vector);
-      // ⚠ 2026-09-30 追記（今の振る舞いを書いたもの）: `upsert` に成功したあとのこの `ready` の書き込みが
-      // 一時的に失敗しても、下の `catch` は「埋め込みの失敗」と区別しない——`failed` を書いて投げ直す。
-      // 結果: ベクトルは書けているのに記憶は `failed`（`recall` は `not_indexed{ reason: "failed" }` と名乗る）、
-      // ジョブは `fail()` で終端になる（Phase 1 に自動リトライは無い）ので、次の `tick` では回復しない。
+      // ⚠ `upsert` に成功したあとのこの `ready` の書き込みが一時的に失敗しても、下の `catch` は「埋め込みの失敗」と区別しない——`failed` を書いて投げ直す。
+      // 結果: ベクトルは書けているのに記憶は `failed`（`recall` は `not_indexed{ reason: "failed" }` と名乗る）、ジョブは `fail()` で終端になる（Phase 1 に自動リトライは無い）ので、次の `tick` では回復しない。
       // 戻すには `reembed({ statuses: ["failed"], … })` で積み直して `tick` する（`failed → ready` は許される）。
-      // 直さない理由: この `catch` の中の `failed` は「ここまでの store 呼び出しのどれかが落ちた」を等しく扱う
-      // 唯一の口で、`ready` だけ分けても、ジョブが終端になる点（＝リトライが無い点）は変わらず、
+      // 直さない理由: この `catch` の中の `failed` は「ここまでの store 呼び出しのどれかが落ちた」を等しく扱う唯一の口で、`ready` だけ分けても、ジョブが終端になる点（＝リトライが無い点）は変わらず、
       // 一時的な失敗が1件の記憶を `reembed` が要る状態にする、という同じ形が `memoryStore.get` などにもある。
-      // 【実測 2026-09-30】`packages/core/src/__tests__/embed-job-ready-write-fails.test.ts`。
+      // 測っているのは `packages/core/src/__tests__/embed-job-ready-write-fails.test.ts`。
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {
-      // Issue #1200 / ADR 0359: abort による reject は、埋め込みの失敗と同じ顔にしない
-      // ——`embeddingStatus` を `'failed'` にせず、そのまま投げ直す（`tick()` がこれを
-      // 見て `fail()` を呼ばない——`tick` 本体の catch 節を参照）。
       if (isAbort(signal)) {
         throw err;
       }
-      // 索引の遅れ・失敗を黙って無かったことにしない（docs/architecture.md 原則の姿3）。
-      // Issue #962: `failed` の書き込み自体が失敗しても、元の例外（なぜ埋め込めなかったか）を
-      // 失わない——`cause` に残し、`tick()` が `lastError` に載せるメッセージにも両方を書く。
       let markFailure: { error: unknown } | null = null;
       try {
         await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "failed");
@@ -6250,15 +3686,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `job.payload` から `memoryId` を取り出す共通部分（Issue #204 / ADR 0157）。
-   * `processEmbedJob` の `memoryId` 取り出しと同じ形——`consolidate`/`reflect` の
-   * ジョブも `createMemoryWithOutbox` が作る以上、payload の形は embed と同じ
-   * `{ memoryId }` である（新しい payload 形を発明しない、ADR 0157 決定2）。
-   *
-   * 🔴 **payload が壊れていた（`memoryId` が無い/文字列でない）場合は投げる。**
-   * `processEmbedJob` と同じ規律——黙って何もしない・空処理として `complete()` しない
-   * （ADR 0082 の哲学）。呼び出し元の `tick()` がこれを catch し、`outboxStore.fail()`
-   * で終端に落として `TickResult.failed` に数える。
+   * `job.payload` から `memoryId` を取り出す（ADR 0157）。壊れていたら投げる: 黙って何もしない・空処理として `complete()` しない（ADR 0082）。呼び出し元の `tick()` が catch して `fail()` で終端に落とす。
    */
   function readSeedMemoryIdFromPayload(job: OutboxJobRecord): MemoryId {
     const memoryId = job.payload.memoryId;
@@ -6269,21 +3697,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * Issue #849 / ADR 0157 決定2 追記: `consolidate()`/`reflect()` は ADR 0089 の公開の
-   * 約束により、LLM 呼び出しが失敗しても例外を投げず `outcome: "llm_failed"`（`llmFailure`
-   * 付き）を正常な戻り値として返す。ADR 0157 決定2「種が見つからない場合は、投げない」節は
-   * 「LLM/store が本当に失敗したときの例外だけが伝播して `tick()` に `fail()` させる」と
-   * 書いていたが、この前提は検証されておらず、実際には `consolidate()`/`reflect()` が
-   * 例外を投げないため成り立っていなかった（`processConsolidateJob`/`processReflectJob`
-   * が戻り値を捨てていたため、`tick()` は LLM が落ちても `complete()` して `processed`
-   * に数えていた）。
-   *
-   * `processConsolidateJob`/`processReflectJob` だけがここで結果を見て `llm_failed` を
-   * 例外に変え、`tick()` の既存の catch → `outboxStore.fail()` 経路（`OutboxStore` 契約の
-   * 「Phase 1 では失敗したジョブの自動リトライを行わない」どおり、終端に落ちるだけ）に
-   * 乗せる。`consolidate()`/`reflect()` を直接呼ぶ同期 API の契約（ADR 0089: LLM 失敗は
-   * 例外にしない）はここでは一切変えていない——変えているのは `tick()` 経由の自動ジョブの
-   * 扱いだけである。
+   * `consolidate()`/`reflect()` は ADR 0089 の公開の約束により、LLM 呼び出しが失敗しても例外を投げず `outcome: "llm_failed"`（`llmFailure` 付き）を正常な戻り値として返す。
+   * `processConsolidateJob`/`processReflectJob` が戻り値を捨てると、`tick()` は LLM が落ちても `complete()` して `processed` に数えてしまう。
+   * そこで、この2つのハンドラだけがここで結果を見て `llm_failed` を例外に変え、`tick()` の既存の catch → `outboxStore.fail()` 経路
+   * （`OutboxStore` 契約の「Phase 1 では失敗したジョブの自動リトライを行わない」どおり、終端に落ちるだけ）に乗せる（ADR 0157）。
+   * `consolidate()`/`reflect()` を直接呼ぶ同期 API の契約（LLM 失敗は例外にしない）は変えない。変えるのは `tick()` 経由の自動ジョブの扱いだけである。
    */
   function throwIfLlmFailed(
     kind: "consolidate" | "reflect",
@@ -6297,46 +3715,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `tick` の `consolidate` ジョブハンドラ（Issue #204 / ADR 0157）。
-   *
-   * **`seedMemoryId` が指す Memory が見つからない場合は投げない。**
-   * `consolidate()` 自身が「種が見つからない」を `nothingReason` 経由の正規の結末
-   * （`not_found` → `nothing_to_consolidate`/`no_eligible_sources` 等、ADR 0152 決定6）
-   * として扱うため、ここで二重に判定しない——`processEmbedJob` が `memory not found` を
-   * 例外にしているのとは事情が違う（embed には「対象が無かった」を表す正規の結末が無い）。
-   *
-   * 🔴 **LLM 呼び出しが本当に失敗したときは `throwIfLlmFailed` が例外に変える
-   * （Issue #849 / ADR 0157 決定2 追記）。** `consolidate()` は ADR 0089 の公開の約束により
-   * `outcome: "llm_failed"` を正常な戻り値として返す——例外は投げない。ADR 0157 決定2は
-   * 以前「LLM/store が本当に失敗したときの例外だけが伝播して `tick()` に `fail()` させる」
-   * と書いていたが、この前提は検証されておらず実際には成り立っていなかった。ここで結果を
-   * 見て `llm_failed` を例外に変え、`tick()` の既存の catch → `fail()` 経路に乗せる。
-   *
-   * **種の `subjectId` を `ctx.subjectId` に置いてから `consolidate()` を呼ぶ**
-   * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
-   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
-   * `tick()` はジョブを subject で絞って claim できない（`ClaimOutboxJobsOptions` に
-   * `subjectId` が無い）ため、`tick()` に渡された `ctx.subjectId` と種の `subjectId` が
-   * 食い違うことが、subject をまたぐ統合（`consolidate()` 内の近傍探索が種と別の subject
-   * から候補を拾い、統合後の `Memory.subjectId` が `null` に畳まれる）の主な経路だった
-   * （ADR 0310 実測）。種の `subjectId` を優先すれば、近傍探索は
-   * `recall(ctx, { text: seed.digest })` の scope が種と同じ subject に絞られ、
-   * 混在は構造的に 0% になる（ADR 0310 §「近傍探索を種の subject に絞れば 0%」）。
-   *
-   * 種が見つからない、または種の `subjectId` が `null`（帰属が割れて畳まれた統合済みの
-   * 記憶を種にした場合など）のときは、**今日どおり** `tick()` に渡された `ctx` のまま
-   * `consolidate()` を呼ぶ——ここで新しい判定を発明しない。
-   *
-   * ⚠ **`deps.memoryStore.get()` をここで1回呼ぶのは、`consolidate()` が
-   * `{ seedMemoryId }` 分岐の中でも同じ id を `get()` する（`runtime.ts` の
-   * `consolidate()` 手順1）ため、1件の自動ジョブにつき `get()` が2回になる。**
-   * わざと避けていない——`MemoryStore.get` は主キー1件の索引読みで安価であり、
-   * この経路はそもそも opt-in（`autoQueueConsolidateReflectOnExtract`、既定 `false`）
-   * の内側だけで、かつ同じジョブが既に払っている代償（近傍探索の `recall()` 1回・
-   * 再埋め込み1回、条件により LLM 呼び出し1回、ADR 0152/0157 の負債）に比べて小さい。
-   * `consolidate()` の内部関数へ `ctx` と一緒に「既に読んだ種」を渡す形（二重読みを
-   * 避ける）は、`consolidate()` 本体の手順1を分岐ごとに割る変更になり、`{ memoryIds }`/
-   * `{ query }` 分岐に触らずに済ませられる範囲を超えるため、今回は採らない。
+   * `tick` の `consolidate` ジョブハンドラ（ADR 0157）。種が見つからなくても投げない（`consolidate()` 自身が `not_found` → `nothing_to_consolidate` の正規の結末として扱う。`processEmbedJob` が投げるのは、embed には「対象が無かった」を表す結末が無いから）。
+   * LLM 失敗は `throwIfLlmFailed` が例外に変える。**種の `subjectId` を `ctx.subjectId` に置いてから呼ぶ**（[ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）: `tick()` はジョブを subject で絞って
+   * claim できないので、食い違うと近傍探索が別の subject から候補を拾い、統合後の `Memory.subjectId` が `null` に畳まれた。種が無い、または種の `subjectId` が `null` のときは渡された `ctx` のまま呼ぶ。
+   * `get()` がここと `consolidate()` で2回になるのは、わざと避けていない（主キーの索引読みで安価、opt-in の内側だけ、同じジョブの他の代償に比べて小さい。「既に読んだ種」を渡す形は `consolidate()` 本体を分岐ごとに割る変更になるため採らない）。
    */
   async function processConsolidateJob(
     ctx: Ctx,
@@ -6349,32 +3731,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       seed !== null && typeof seed.subjectId === "string"
         ? { ...ctx, subjectId: seed.subjectId }
         : ctx;
-    // Issue #1200 / ADR 0359: abort されたら `consolidate()` 自体が reject する
-    // （`outcome: "llm_failed"` には倒さない）ため、`throwIfLlmFailed` には届かない
-    // ——その例外がそのまま `tick()` の catch 節まで伝わる。
     const result = await consolidate(scopedCtx, { target: { seedMemoryId }, signal });
     throwIfLlmFailed("consolidate", result);
   }
 
-  /**
-   * `tick` の `reflect` ジョブハンドラ（Issue #204 / ADR 0157）。
-   * `processConsolidateJob` と対称——理由は同じ（`reflect()` も種が見つからない場合を
-   * `not_found` 経由の正規の結末として扱う、ADR 0154 決定5）。
-   *
-   * **種の `subjectId` を `ctx.subjectId` に置いてから `reflect()` を呼ぶ**
-   * （[Issue #820](https://github.com/takecchi/mnemora/issues/820) / ADR 0317 決定3
-   * 「確かめていないこと」を埋めた変更、[ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
-   * 案 S を `processConsolidateJob` と同じ形でそのまま写している）。ADR 0310/0317 が
-   * `consolidate` について実測したのと同じ構造的事情——`tick()` はジョブを subject で
-   * 絞って claim できない（`ClaimOutboxJobsOptions` に `subjectId` が無い）——が
-   * `reflect` にもそのまま当てはまる。種が見つからない、または種の `subjectId` が
-   * `null` のときは、今日どおり `tick()` に渡された `ctx` のまま `reflect()` を呼ぶ
-   * ——ここで新しい判定は発明しない。
-   *
-   * 🔴 **LLM 呼び出しが本当に失敗したときは `throwIfLlmFailed` が例外に変える**
-   * （Issue #849 / ADR 0157 決定2 追記。`processConsolidateJob` と同じ理由——上の
-   * `throwIfLlmFailed` の doc コメント参照）。
-   */
+  /** `tick` の `reflect` ジョブハンドラ（ADR 0157）。`processConsolidateJob` と対称で、種の `subjectId` を `ctx.subjectId` に置く（ADR 0317）。LLM 失敗は `throwIfLlmFailed` が例外に変える。 */
   async function processReflectJob(
     ctx: Ctx,
     job: OutboxJobRecord,
@@ -6386,17 +3747,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       seed !== null && typeof seed.subjectId === "string"
         ? { ...ctx, subjectId: seed.subjectId }
         : ctx;
-    // Issue #1200 / ADR 0359: `processConsolidateJob` と同じ理由——abort されたら
-    // `reflect()` 自体が reject する。
+    // `processConsolidateJob` と同じ理由（ADR 0359）: abort されたら `reflect()` 自体が reject する。
     const result = await reflect(scopedCtx, { target: { seedMemoryId }, signal });
     throwIfLlmFailed("reflect", result);
   }
 
   /**
-   * `tick` がジョブを配る先。**キーの集合は {@link TICK_SUPPORTED_JOB_KINDS} と型で結ばれている**
-   * ——`Record<TickSupportedJobKind, JobHandler>` なので、片方だけ足す/消すと型検査が落ちる。
-   * issue #105（型に `consolidate` が在るのに分岐が無い）と同じずれを、次からは
-   * コンパイル時に止めるための結び目である。
+   * `tick` がジョブを配る先。**キーの集合は {@link TICK_SUPPORTED_JOB_KINDS} と型で結ばれている**: `Record<TickSupportedJobKind, JobHandler>` なので、片方だけ足す/消すと型検査が落ちる。
+   * 型に kind が在るのに分岐が無い、というずれをコンパイル時に止める結び目である。
    */
   const jobHandlers: Record<TickSupportedJobKind, JobHandler> = {
     extract: processExtractJob,
@@ -6405,22 +3763,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     reflect: processReflectJob,
   };
   /**
-   * `job.kind`（開いたユニオン＝任意の文字列）で引くための索引。
-   *
-   * 🔴 **`Map` である理由は1つだけ**——プレーンなオブジェクトを索引にすると
-   * `job.kind` が `"constructor"` / `"toString"` のとき `Object.prototype` 側の関数が
-   * 返り、**「対応している」と誤判定して呼んでしまう**。`kind` は DB の `text` 列から
-   * 来る任意の文字列であり、この2語を弾く仕組みはどこにも無い（`OutboxJobKind` は
-   * 開いたユニオンなので型でも止まらない）。`Map` は prototype を持たない。
-   * `Object.entries(jobHandlers)` から作るので、出所は `TICK_SUPPORTED_JOB_KINDS` のままである。
+   * `job.kind`（開いたユニオン＝任意の文字列）で引くための索引。🔴 **プレーンなオブジェクトにしない**: `job.kind` が `"constructor"` / `"toString"` のとき `Object.prototype` 側の関数が返り、
+   * 「対応している」と誤判定して呼んでしまう（`kind` は DB の `text` 列から来て、この2語を弾く仕組みは無い）。`Map` は prototype を持たない。
    */
   const jobHandlerLookup = new Map<string, JobHandler>(Object.entries(jobHandlers));
 
   async function tick(ctx: Ctx, opts: TickOptions): Promise<TickResult> {
-    // Issue #1200 / ADR 0359（クローン miku の判断）: `signal` を1変数に固定しておく——
-    // 下の分岐が何度も `opts.signal` を読み直さない（`opts` を再代入しないので値は動かない）。
-    // ADR 0496: `leaseMs` は claim する前に、名指しの例外で断る（以前は素の `TypeError` か、store ごとに違う例外だった）。
-    // 0 以下は今までどおり通す（`TickOptions.leaseMs` の doc）。
+    // ADR 0496: `leaseMs` は claim する前に、名指しの例外で断る。0 以下は通す（`TickOptions.leaseMs` の doc）。
     if (typeof opts !== "object" || opts === null) {
       throw new TypeError("Runtime.tick: opts must be an object");
     }
@@ -6483,30 +3832,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const unsupported: UnsupportedOutboxJob[] = [];
     const leaseConflicts: OutboxLeaseConflict[] = [];
     for (const job of jobs) {
-      // Issue #1200 / ADR 0359: abort されたら、claim 済みで未着手のこのジョブ以降には
-      // 手を付けない——`fail()` もしない。claim されたまま残り、リースが切れれば次の
-      // `tick` が取る。ループを抜けた後、下でこの `tick()` 自体を reject する。
       if (signal?.aborted) {
         break;
       }
       const handler = jobHandlerLookup.get(job.kind);
       if (handler === undefined) {
-        // 🔴 ADR 0082 / issue #105: 処理する分岐が無い kind。ここで2つのことを同時にやる。
-        // 1. `fail()` で**終端に落とす**。claim したまま何もしないと lease が切れて
-        //    再び claim され、「claim され続けるがいつまでも進まない」になる。
-        // 2. `unsupported` に**名指しで積む**。`failed` に数えるだけだと、
-        //    「試して失敗した」と同じ顔になって呼び出し側から区別が付かない。
-        // CAS（ADR 0142）: `job` はこの tick が `claimBatch` からたった今受け取った
-        // ものであり、`job.attempts` は「自分の claim」を指すフェンシングトークンである。
-        // 🔴 ADR 0142 決定3: fail() 自体がリース競合（OutboxLeaseConflictError）で
-        // 弾かれることもある——別のワーカーが、この worker が fail() を呼ぶより先に
-        // このジョブを再 claim して終端まで進めていた場合。良性の競合なので
-        // `leaseConflicts` に記録し、`unsupported`/`failed` には数えず次のジョブへ進む。
+        // 🔴 処理する分岐が無い kind（ADR 0082）。2つのことを同時にやる。
+        // 1. `fail()` で**終端に落とす**。claim したまま何もしないと lease が切れて再び claim され、「claim され続けるがいつまでも進まない」になる。
+        // 2. `unsupported` に**名指しで積む**。`failed` に数えるだけだと、「試して失敗した」と同じ顔になって呼び出し側から区別が付かない。
+        // CAS（ADR 0142）: `job.attempts` は「自分の claim」を指すフェンシングトークンである。`fail()` 自体がリース競合（`OutboxLeaseConflictError`）で弾かれることもある
+        // （別のワーカーが先にこのジョブを再 claim して終端まで進めていた場合）。良性の競合なので `leaseConflicts` に記録し、`unsupported`/`failed` には数えず次のジョブへ進む。
         //
-        // ⚠ この分岐は provider を一切呼ばないので、`signal` を渡す先も待つ相手も無い。
-        // ただし abort を無視するわけではない: abort 済みなら、ループ頭の確認（上）で
-        // すでに抜けていて、この分岐へは入らない（どのジョブも `fail()` しない。ADR 0359）。
-        // ここへ入るのは abort されていない間だけで、入ったあとの `fail()` は中断しない。
+        // この分岐は provider を呼ばないので、`signal` を渡す先も待つ相手も無い。abort を無視するわけではない: abort 済みなら、ループ頭の確認（上）ですでに抜けていて、
+        // この分岐へは入らない（どのジョブも `fail()` しない。ADR 0359）。入ったあとの `fail()` は中断しない。
         try {
           await deps.outboxStore.fail(
             ctx,
@@ -6528,20 +3866,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       try {
         await handler(ctx, job, signal);
-        // 🔴 ADR 0142: `complete` がリース競合で弾かれることがある——`handler` の
-        // 処理自体には成功したが、その完了を記録しようとした時点で、既に別の
-        // ワーカーがこのジョブを再 claim して終端まで進めていた場合。良性の競合
-        // なので `leaseConflicts` に記録するだけで、`fail()` は呼ばない
-        // （呼んでも同じ理由でまた弾かれるだけであり、かつ「処理には成功した」
-        // ジョブを `failed` にも数えない——事実と違う顔になる）。
+        // `complete` がリース競合で弾かれることがある（ADR 0142）。処理には成功したが、記録しようとした時点で別のワーカーが再 claim して終端まで進めていた場合。良性なので `leaseConflicts` に記録するだけで、`fail()` は呼ばない。
         await deps.outboxStore.complete(ctx, job.id, job.attempts, { at: clock.now() });
         processed += 1;
       } catch (err) {
-        // Issue #1200 / ADR 0359: `handler` の中で provider 呼び出しが abort された
-        // 例外は、`OutboxLeaseConflictError` と同じく「良性」だが性質が違う——
-        // このジョブは処理を試みた結果失敗したのではなく、待つのをやめただけである。
-        // `fail()` しない・`failed` にも数えない。ここで claim したジョブは claim
-        // されたまま残る（リースが切れれば次の `tick` が取る）。
+        // `handler` の中で abort された例外は、処理を試みて失敗したのではなく待つのをやめただけなので、`fail()` しない・`failed` にも数えない。claim されたまま残り、リースが切れれば次の `tick` が取る（ADR 0359）。
         if (signal?.aborted) {
           break;
         }
@@ -6549,14 +3878,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "complete" });
           continue;
         }
-        // ⚠ 2026-09-26 追記（Issue #836）: ここに来る `err` は「`complete()` が
-        // `OutboxLeaseConflictError` 以外の例外を返した」ことしか意味しない——
-        // `handler` は既に成功しており、`complete()` が DB 上ではコミット済みなのに
-        // （コミット後の接続断・タイムアウト等で）例外だけをクライアントへ返した
-        // ケースを、この catch は「処理が失敗した」ケースと区別できない。前者の場合、
-        // 下の `fail()` は既に `completed_at` が付いた行に対する無言の no-op になり
-        // （Issue #826）、行は `completed` のまま変わらないが、それでも `failed` は
-        // 1増える（`TickResult.failed` の doc コメント参照）。
+        // ここに来る `err` は「`complete()` が `OutboxLeaseConflictError` 以外の例外を返した」ことしか意味しない。`handler` は成功しており、`complete()` が DB 上ではコミット済みなのに
+        // （コミット後の接続断・タイムアウト等で）例外だけが返ったケースと区別できない。その場合、下の `fail()` は `completed_at` が付いた行に対する無言の no-op だが、`failed` は1増える（`TickResult.failed` の doc）。
         try {
           await deps.outboxStore.fail(ctx, job.id, describeFailure(err), job.attempts, {
             at: clock.now(),
@@ -6571,10 +3894,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         failed += 1;
       }
     }
-    // Issue #1200 / ADR 0359: abort されていたら、`tick()` 自体を reject する
-    // （`TickResult` には新しい欄を作らない——戻り値そのものを返さない）。abort までに
-    // `complete()` まで記録できたジョブの完了は、上のループで既に store へ書かれている
-    // ため、ここで reject してもそれらは覆らない。
+    // abort されていたら `tick()` 自体を reject する。abort までに `complete()` まで記録できたジョブの完了は既に store へ書かれており、reject しても覆らない（ADR 0359）。
     if (signal?.aborted) {
       throw abortReason(signal);
     }
@@ -6602,20 +3922,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
   }
 
-  /**
-   * `Runtime.getRecall` の実装（Issue #312、ADR 0161）。doc コメントは interface 側にある
-   * ——ここは素通しそのものだけ。
-   */
   async function getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null> {
     return deps.memoryStore.getRecall(ctx, recallId);
   }
 
-  /**
-   * `Runtime.findCorrectionCandidates` の実装（Issue #369 (C)、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。doc コメントは
-   * interface 側（`findCorrectionCandidates` の JSDoc）にある——ここはアルゴリズムそのもの
-   * だけ。`consolidate` の `{ seedMemoryId }` 形と同じく、`recall()` を1回呼ぶだけで
-   * 新しい「似ている」の判定を作らない。
-   */
   async function findCorrectionCandidates(
     ctx: Ctx,
     input: FindCorrectionCandidatesInput,
@@ -6625,13 +3935,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
     }
     const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
-    // ADR 0496: `text` は文字列でなければ、`recall()` を呼ぶ前に断る（以前は `undefined` が `no_candidates` になった）。
-    // 空文字は今までどおり `recall()` の検証が断る。
+    // `text` は文字列でなければ、`recall()` を呼ぶ前に断る（ADR 0496）。空文字は `recall()` の検証が断る。
     if (typeof input.text !== "string") {
       throw new TypeError("Runtime.findCorrectionCandidates: text must be a string");
     }
-    // ADR 0496: `excludeMemoryIds` は文字列の配列でなければ断る（以前は裸の文字列が1文字ずつの集合になり、
-    // 何も除外されずに通った。文字列でない要素も黙って通った）。省略（`undefined`）は今までどおり。
     if (input.excludeMemoryIds !== undefined) {
       if (!Array.isArray(input.excludeMemoryIds)) {
         throw new TypeError("Runtime.findCorrectionCandidates: excludeMemoryIds must be an array");
@@ -6644,20 +3951,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     }
-    // 除外の集合は `recall()` を呼ぶ前に作る——以前は `excludeMemoryIds` が反復できない値だと
-    // `new Set` が TypeError を投げ、後ろで作ると recall の記録を1件書いた後に落ちていた
-    // （穴探し56巡目）。今は上の検査が、配列でない値をここへ届く前に断る。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を
-    // 小文字で返す。`forget` と同じ扱い）。大文字で渡した自己除外が黙って効かないのを防ぐ。
+    // 除外の集合は `recall()` を呼ぶ前に作る（後ろだと、反復できない値で `new Set` が投げたとき recall の記録を書いた後に落ちる）。大文字小文字は無視して突き合わせる（`@mnemora/postgres` は UUID を小文字で返す）。
     const excludeSet = new Set<unknown>();
     for (const id of new Set(input.excludeMemoryIds ?? [])) {
       excludeSet.add(typeof id === "string" ? id.toLowerCase() : id);
     }
 
-    // `text`/`activityCounting` 以外のフィールドを一切渡さない——閾値・limit・
-    // channels・overFetchFactor はすべて recall() の既定に委ねる（interface 側の
-    // doc コメント参照）。ADR 0353（Issue #338）: `activityCounting` は
-    // `input.activityCounting` をそのまま渡す（省略時は recall() 側の既定
-    // "tenant" に落ちる）。
     const recallResult = await recall(
       ctx,
       {
@@ -6697,13 +3996,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   async function reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
-    // ADR 0433 決定4: `limit` の検査。省略（JavaScript からの呼び出し・`as` 経由）と、数なのに
-    // 0 以上の整数でないもの（負・小数・`NaN`・±`Infinity`）は、store が SQL の `LIMIT` に渡して
-    // 分かりにくい例外（`syntax error at or near "FOR"` など）になっていたので、store を呼ぶ前に
-    // `RangeError` にする（`findCorrectionCandidates` の `limit` と同じ型）。
-    // ⚠ 断るのは「今も例外になる値」だけ。`0`（何も積み直さず成功する）と 2^63 未満の正の整数は
-    // 今までどおり通す。数以外の型（`null`・数字の文字列・`bigint`）は Postgres が受け付けて成功する
-    // ことがあるので、ここでは触らない。2^63 以上の数も store の側の検査に任せる（今と同じ）。
+    // `limit` の検査（ADR 0433）。省略と、数なのに 0 以上の整数でないもの（負・小数・`NaN`・±`Infinity`）は、store が SQL の `LIMIT` に渡して分かりにくい例外になるので、store を呼ぶ前に `RangeError` にする。
+    // ⚠ 断るのは「例外になる値」だけ。`0` と 2^63 未満の正の整数は通す。数以外の型（`null`・数字の文字列・`bigint`）は Postgres が受け付けて成功することがあるので触れない。2^63 以上の数も store の検査に任せる。
     const limit = (opts as { limit?: unknown } | null | undefined)?.limit;
     if (
       limit === undefined ||
@@ -6717,22 +4011,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `Runtime.sweepArchive` の実装（ADR 0114、Issue #364 /
-   * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
-   * doc コメントは interface 側にある——ここは「口が在るかどうかで分岐する」という
-   * アルゴリズムと、`opts.clock` 省略時の解決の2つだけ。
-   *
-   * `deps.memoryStore.archiveDecayed` を一度ローカル変数へ受けてから `undefined` を
-   * 判定するのは、ADR 0100 の `supersedeWithNewMemories` 呼び出しと同じ作法——
-   * `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す必要があるため
-   * （分割代入したメソッドは `this` を失うので、呼び出し時に元のオブジェクトを渡す）。
-   *
-   * ADR 0186: `opts.clock` を省略したら `tenant_settings.decay_clock` に従う
-   * （`resolveActivityClockBase`/`resolveReinforceOptions` と同じ `readDecayClock`/
-   * `readActivitySeq` を使う、同じ規律）。**`opts.clock` を明示で渡した呼び出し元の
-   * 挙動は変えない**（`??` で省略時だけ補う）。解決した `clock` が `'wall'` のときは
-   * `tenant_activity` を一度も読まない——`resolveActivityClockBase` 等と同じ理由で、
-   * `decay_clock` を設定していないテナント（既定 `'wall'`）の挙動を1バイトも変えない。
+   * `archiveDecayed` を一度ローカル変数へ受けてから `undefined` を判定し、`.call(deps.memoryStore, ...)` で `this` を束ね直す（分割代入したメソッドは `this` を失う。ADR 0100 と同じ作法）。
+   * `opts.clock` を省略したら `tenant_settings.decay_clock` に従い（ADR 0186）、明示した呼び出し元の挙動は変えない（`??`）。解決した `clock` が `'wall'` のときは `tenant_activity` を読まない。
    */
   async function sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult> {
     const archiveDecayed = deps.memoryStore.archiveDecayed;
@@ -6743,11 +4023,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const nowSeq =
       opts.nowSeq ??
       (clock === "wall" ? undefined : await readActivitySeq(deps.tenantSettingsStore, ctx));
-    // ADR 0353（Issue #338）: 掃引はテナント全体を対象にする（subject を絞らない）ため、
-    // 行ごとに違う subject の `S_x` を都度計算する必要がある——
-    // `hasSubjectActivityCounters?` が false（一度も subject カウンタを使っていない
-    // テナント）なら相関サブクエリを足さない（プラン族を変えない、`archiveDecayed`
-    // 実装側の `usesSubjectActivityCounters` の doc コメント参照）。
     const usesSubjectActivityCounters =
       opts.usesSubjectActivityCounters ??
       (clock === "wall"
@@ -6762,26 +4037,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { supported: true, archived: result.archived, reachedLimit: result.reachedLimit };
   }
 
-  /**
-   * `Runtime.restoreArchived` の実装（Issue #195、ADR 0122）。doc コメントは interface
-   * 側（`restoreArchived` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   * `forget` の実装と意図的に同じ骨格を持つ（`ForgetOutcome`/`RestoreArchivedOutcome`
-   * の対応は両者の doc コメント参照）。
-   */
   async function restoreArchived(
     ctx: Ctx,
     target: RestoreArchivedTarget,
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。
     const lookupKey = memoryLookupKeyFor(ids);
     if (ids.length === 0) {
       return { outcomes: [] };
     }
 
     const outcomes: RestoreArchivedOutcome[] = [];
-    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
     const abortAt = (i: number, failure: unknown) => {
       outcomes.push({
         memoryId: ids[i]!,
@@ -6794,16 +4061,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { outcomes };
     };
 
-    // Issue #964: ループ前の読みの失敗も「競合以外の例外」である——まだ1件も書いていない
-    // ので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
+    // ループ前の読みの失敗も「競合以外の例外」である。まだ1件も書いていないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
     let found: Memory[];
     let reinforceOpts: ReinforceOptions | undefined;
     try {
       found = await deps.memoryStore.getMany(ctx, ids);
-      // ADR 0165 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
-      // が `resolveActivityClockBase` を候補バッチ1つにつき1回だけ読むのと同じ理由——
-      // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
-      // `tenant_activity` への往復が増える）。
       reinforceOpts = await resolveReinforceOptions(ctx);
     } catch (error) {
       return abortAt(0, error);
@@ -6849,28 +4111,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
         byId.set(lookupKey(id), memory);
 
-        // マネージャー決定（Issue #196 / ADR 0153「restoreArchived と忘却ゲートの
-        // 相互作用」）: 復帰そのものが「いま必要だ」という明示の信号なので、
-        // reinforce して decay_floor_at を復帰の瞬間から引き直す。これをしないと、
-        // status は active に戻ったのに decayFloorAt が過去を指したままなので、
-        // recall() の既定の忘却ゲート（ADR 0153、`RecallQuery.includeFullyDecayed`
-        // の既定 false）に阻まれて recall に二度と現れない——「必要な場合だけ過去の
-        // 記憶を再び呼び戻せる」（docs/north-star.md「目指す姿」）と正面から食い違う。
-        // interface/adapter は増やさない——既存の契約された口 `reinforce`
-        // （`docs/memory-model.md` §7、ADR 0041・ADR 0048）をそのまま呼ぶだけである。
+        // 復帰そのものが「いま必要だ」という明示の信号なので、reinforce して decay_floor_at を復帰の瞬間から引き直す（ADR 0153）。これをしないと、status は active に戻ったのに
+        // decayFloorAt が過去を指したままなので、recall() の既定の忘却ゲート（`RecallQuery.includeFullyDecayed` の既定 false）に阻まれて recall に二度と現れない。
         //
-        // ⚠ status の復帰は既にここで成功している。reinforce が失敗しても、
-        // 既に成功した復帰を握り潰さない——outcome は "restored" のままにし
-        // （`kind` を "failed" に落とさない）、reinforce の失敗は追加欄
-        // `reinforceError` で運ぶ（additive。既存欄の意味は変えない）。
-        // これは既存の「競合以外の例外は打ち切って残りを not_attempted にする」
-        // という規律（下の catch 節）とは別の規律である——あちらは「書き込みその
-        // ものが起きなかった」場合の安全弁だが、こちらは「主たる書き込み
-        // （status の復帰）は成功したあとの、副次的な強化の失敗」であり、
-        // 呼び出し側にとっての意味が違う（前者は「何も変わっていない」、
-        // 後者は「復帰はしたが、忘却ゲートに再び阻まれるかもしれない」）。
-        // だから reinforce 専用の内側の try/catch で切り離し、外側の catch
-        // （`MemoryStatusConflictError` 分岐・打ち切り分岐）に一切触れさせない。
+        // ⚠ status の復帰は既にここで成功している。reinforce が失敗しても、既に成功した復帰を握り潰さない。outcome は "restored" のままにし（`kind` を "failed" に落とさない）、
+        // reinforce の失敗は追加欄 `reinforceError` で運ぶ。下の catch 節の「競合以外の例外は打ち切って残りを not_attempted にする」とは別の規律で、あちらは「書き込みそのものが
+        // 起きなかった」場合の安全弁、こちらは「主たる書き込み（status の復帰）は成功したあとの、副次的な強化の失敗」であり、呼び出し側にとっての意味が違う
+        // （前者は「何も変わっていない」、後者は「復帰はしたが、忘却ゲートに再び阻まれるかもしれない」）。だから reinforce 専用の内側の try/catch で切り離し、外側の catch に触れさせない。
         const reinforcedAt = clock.now();
         let reinforceError: string | undefined;
         try {
@@ -6892,28 +4139,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       } catch (error) {
         if (isMemoryStatusConflictError(error)) {
-          // 安全弁（`forget` と同じ形。1回だけ再読して打ち切る——上限の無い
-          // 再試行ループを作らない）。
+          // 安全弁（`forget` と同じ形）。1回だけ再読して打ち切る。上限の無い再試行ループを作らない。
           let refetched: Memory | null;
           try {
             refetched = await deps.memoryStore.get(ctx, id);
           } catch (refetchError) {
-            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」である——下と同じく
-            // 打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から
-            // 見えなくなる（interface の doc コメント「例外はこのメソッドの外へは投げない」）。
+            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」なので、下と同じく打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から見えなくなる。
             return abortAt(i, refetchError);
           }
           if (refetched === null) {
             outcomes.push({ memoryId: id, kind: "not_found" });
           } else if (refetched.status === "active") {
-            // 別の呼び出しが先に同じ復帰（archived → active）を済ませていた——
-            // 求めていた状態に既に居るのは対立ではない（`forget` の
-            // `already_forgotten` と同じ扱い。interface doc コメント参照）。
             byId.set(lookupKey(id), refetched);
             outcomes.push({ memoryId: id, kind: "status_not_archived", status: "active" });
           } else {
-            // active 以外の別の状態に変わっていた（または archived のまま、という
-            // 二重の競合）——求めていない状態への変化なので conflicted として扱う。
+            // active 以外の別の状態に変わっていた（または archived のまま、という二重の競合）。求めていない状態への変化なので conflicted として扱う。
             byId.set(lookupKey(id), refetched);
             outcomes.push({
               memoryId: id,
@@ -6923,8 +4163,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           }
           continue;
         }
-        // 競合以外の例外——打ち切って、残りは「見ていない」として返す（interface の
-        // doc コメント参照）。例外をここより外へは投げない。
+        // 競合以外の例外は打ち切って、残りは「見ていない」として返す。例外をここより外へは投げない。
         return abortAt(i, error);
       }
     }
@@ -6932,16 +4171,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { outcomes };
   }
 
-  /**
-   * `Runtime.restoreSuperseded` の実装。doc コメントは interface 側
-   * （`restoreSuperseded` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   *
-   * `sweepArchive` と同じ「口が在るかどうかで分岐する」骨格
-   * （`deps.memoryStore.restoreSupersededBy` を一度ローカル変数へ受けてから
-   * `undefined` を判定し、`.call(deps.memoryStore, ...)` で `this` を明示的に
-   * 束ね直す——分割代入したメソッドは `this` を失うため。ADR 0100 の
-   * `supersedeWithNewMemories` 呼び出しと同じ作法）。
-   */
   async function restoreSuperseded(
     ctx: Ctx,
     target: RestoreSupersededTarget,
@@ -6949,9 +4178,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   ): Promise<RestoreSupersededResult> {
     const supersedingMemoryId = target.supersededById;
 
-    // Issue #515、ADR 0237: `opts.dryRun` は既存の既定（省略時・false 時は実際に戻す）を
-    // 1バイトも変えない別の枝——別のメソッド（`previewRestoreSupersededBy?`）へ
-    // 分岐するだけで、下の「実際に戻す」経路には一切触れない。
+    // `opts.dryRun` は別のメソッド（`previewRestoreSupersededBy?`）へ分岐するだけで、下の「実際に戻す」経路には一切触れない（ADR 0237）。
     if (opts?.dryRun === true) {
       const previewRestoreSupersededBy = deps.memoryStore.previewRestoreSupersededBy;
       if (previewRestoreSupersededBy === undefined) {
@@ -6997,18 +4224,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { supported: true, supersedingMemoryId, outcomes: [] };
     }
 
-    // ADR 0165 決めたこと16 と同じ理由（`restoreArchived` の実装コメント参照）:
-    // この呼び出し全体で1回だけ読む。
+    // ADR 0165 と同じ理由（`restoreArchived` と同じ）: この呼び出し全体で1回だけ読む。
     const reinforceOpts = await resolveReinforceOptions(ctx);
 
-    // 群の強化を1回に束ねる（`MemoryStore.reinforceMany?` が在るとき）。群の復帰そのものは
-    // SQL 1本なのに、以前は強化を1件ずつ呼んでいたため、群が1件増えるごとに往復が増えていた
-    // （使用報告を Issue #874 で束ねたのと同じ形。歯は
-    // `packages/postgres/src/__tests__/restore-superseded-roundtrip-count.postgres.test.ts`）。
-    // ⚠ **束ねた強化が失敗したら、下の1件ずつの強化へ戻る**——「強化の失敗は、その要素の
-    // `reinforceError` に入り、outcome は restored のまま」という1件ごとの約束を、束ねた
-    // 経路でも崩さないため。強化は減衰の起点を巻き戻さない（ADR 0048）ので、束ねた強化が
-    // 途中まで書いてから失敗していても、1件ずつやり直して害は無い。
+    // 群の強化を1回に束ねる（`MemoryStore.reinforceMany?` が在るとき）。1件ずつ呼ぶと、群が1件増えるごとに往復が増える。
+    // ⚠ **束ねた強化が失敗したら、下の1件ずつの強化へ戻る。** 「強化の失敗は、その要素の `reinforceError` に入り、outcome は restored のまま」という1件ごとの約束を崩さないため。強化は起点を巻き戻さない（ADR 0048）ので、やり直して害は無い。
     const reinforcedById = new Map<MemoryId, Memory>();
     const reinforceMany = deps.memoryStore.reinforceMany;
     if (reinforceMany !== undefined) {
@@ -7040,9 +4260,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         });
         continue;
       }
-      // status の復帰は既に `restoreSupersededBy` の1トランザクションで成立している
-      // ——ここから先は `restoreArchived` と同じ「reinforce 専用の内側の try/catch」
-      // （復帰の成功を reinforce の失敗で握り潰さない）。
       let decayFloorAt = memory.decayFloorAt;
       let reinforceError: string | undefined;
       try {
@@ -7073,24 +4290,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { supported: true, supersedingMemoryId, outcomes };
   }
 
-  /**
-   * `Runtime.forget` の実装（Issue #102）。doc コメントは interface 側
-   * （`forget` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   */
   async function forget(
     ctx: Ctx,
     target: ForgetTarget,
     opts?: ForgetOptions,
   ): Promise<ForgetResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。
     const lookupKey = memoryLookupKeyFor(ids);
     if (ids.length === 0) {
       return { outcomes: [] };
     }
 
     const outcomes: ForgetOutcome[] = [];
-    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
     const abortAt = (i: number, failure: unknown) => {
       outcomes.push({
         memoryId: ids[i]!,
@@ -7103,24 +4314,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { outcomes };
     };
 
-    // Issue #964: ループ前の一括読みの失敗も「競合以外の例外」である——まだ1件も書いて
-    // いないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
+    // ループ前の一括読みの失敗も「競合以外の例外」である。まだ1件も書いていないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
     let found: Memory[];
     try {
       found = await deps.memoryStore.getMany(ctx, ids);
     } catch (error) {
       return abortAt(0, error);
     }
-    // 呼び出しの中で同じ id が複数回現れたとき、1回目の書き込み結果を2回目が見るための
-    // ローカルの写し。書き込みが成功するたびに更新する。
-    //
-    // ⚠ **これは正しさのためではない。**この更新を消しても `outcomes` は変わらない
-    // ——2回目は「書き込み前」の status で CAS を撃ち、それが弾かれ、読み直して
-    // `already_forgotten` に落ち着くからである（変異試験で確認した。ADR 0087）。
-    // **買っているのは往復である**: この写しが無いと、重複した id 1つにつき
-    // 「必ず失敗する UPDATE」1回と「読み直しの SELECT」1回が余分に DB へ飛ぶ。
-    // 🔴 効果が `outcomes` に出ない以上、歯は**呼び出し回数のほうを数える**
-    // （`forget.test.ts` の「重複した id は…往復を増やさない」）。
+    // 同じ id が複数回現れたとき、1回目の書き込み結果を2回目が見るためのローカルの写し。**正しさのためではなく往復のため**: 消しても `outcomes` は変わらない（2回目は書き込み前の status で CAS を撃ち、弾かれ、
+    // 読み直して `already_forgotten` に落ち着く。ADR 0087）が、写しが無いと、重複した id 1つにつき「必ず失敗する UPDATE」と「読み直しの SELECT」が余分に飛ぶ。
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
       byId.set(lookupKey(memory.id), memory);
@@ -7161,15 +4363,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         outcomes.push({ memoryId: id, kind: "forgotten", previousStatus: observedStatus });
       } catch (error) {
         if (isMemoryStatusConflictError(error)) {
-          // 安全弁（ADR 0030 と同じ形。ただし `reextract` と違い、ここは1回だけ
-          // 再読して打ち切る——上限の無い再試行ループを作らない、という明示の決定）。
+          // 安全弁（ADR 0030 と同じ形。ただし `reextract` と違い、1回だけ再読して打ち切る。上限の無い再試行ループを作らない）。
           let refetched: Memory | null;
           try {
             refetched = await deps.memoryStore.get(ctx, id);
           } catch (refetchError) {
-            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」である——下と同じく
-            // 打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から
-            // 見えなくなる（interface の doc コメント「例外はこのメソッドの外へは投げない」）。
+            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」なので、下と同じく打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から見えなくなる。
             return abortAt(i, refetchError);
           }
           if (refetched === null) {
@@ -7187,8 +4386,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           }
           continue;
         }
-        // 競合以外の例外——打ち切って、残りは「見ていない」として返す（interface の
-        // doc コメント参照）。例外をここより外へは投げない。
+        // 競合以外の例外は打ち切って、残りは「見ていない」として返す。例外をここより外へは投げない。
         return abortAt(i, error);
       }
     }
@@ -7196,20 +4394,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { outcomes };
   }
 
-  /**
-   * `Runtime.purge` の実装（Issue #198、ADR 0124。Issue #1425/ADR 0382 で
-   * `vectorStore.deleteAcrossSpaces` に置き換え、`already_purged` でも呼ぶよう広げた）。
-   * doc コメントは interface 側（`purge` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   * `forget`/`restoreArchived` と意図的に同じ骨格を持つ。CAS の条件・`dryRun`・`supported`・
-   * `vectorStore.deleteAcrossSpaces` の4点だけが違う。
-   */
   async function purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。
     const lookupKey = memoryLookupKeyFor(ids);
 
-    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（ADR 0100/ADR 0114 と
-    // 同じ作法。分割代入したメソッドは `this` を失う）。
     const purgeMemory = deps.memoryStore.purgeMemory;
     const supported = purgeMemory !== undefined;
 
@@ -7224,7 +4412,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     const outcomes: PurgeOutcome[] = [];
-    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
     const abortAt = (i: number, failure: unknown) => {
       outcomes.push({
         memoryId: ids[i]!,
@@ -7237,15 +4424,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { supported: true, outcomes };
     };
 
-    // Issue #964: ループ前の一括読みの失敗も「競合以外の例外」である——まだ1件も書いて
-    // いないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
+    // ループ前の一括読みの失敗も「競合以外の例外」である。まだ1件も書いていないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
     let found: Memory[];
     try {
       found = await deps.memoryStore.getMany(ctx, ids);
     } catch (error) {
       return abortAt(0, error);
     }
-    // `forget` と同じ理由（往復の節約。`ADR 0087`）——正しさのためではない。
+    // `forget` と同じ理由（往復の節約。ADR 0087）。正しさのためではない。
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
       byId.set(lookupKey(memory.id), memory);
@@ -7254,10 +4440,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const actor = opts?.actor ?? { type: "system" };
     const dryRun = opts?.dryRun ?? false;
 
-    // `already_purged`（`dryRun` でないとき）の後始末。2つは独立にベストエフォートで試み、
-    // 片方の失敗がもう片方を止めない。`kind` は変えず、失敗だけを欄で知らせる。
-    // (1) 埋め込み（ADR 0382・0399）。(2) v1.1.0 より前に purge した行の残骸（ADR 0437 決定3。
-    // `scrubPurged` は任意メソッド——無い adapter では飛ばす）。
     const cleanupAlreadyPurged = async (
       cleanupCtx: Ctx,
       id: MemoryId,
@@ -7299,10 +4481,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           kind: "already_purged",
         };
         outcomes.push(alreadyPurged);
-        // Issue #1425 / ADR 0382: 既に purge 済みでも、埋め込みの後始末はベストエフォート
-        // で試みる——埋め込みモデルを移した後に再実行すれば、旧 space に残った行を
-        // 消せるようにするため（`kind` の意味は変えない。書き込みが起きていない、という
-        // 判定はそのまま）。`dryRun` のときは呼ばない。
         if (!dryRun) {
           await cleanupAlreadyPurged(ctx, id, alreadyPurged);
         }
@@ -7338,10 +4516,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         };
         outcomes.push(purgedOutcome);
 
-        // ADR 0124 決定5・ADR 0382: ベストエフォート。失敗しても "purged" の判定は変えない
-        // ——MemoryStore 側の書き込みは既に確定しており、ここで "failed" に格下げすると
-        // 「安全に再試行できる」という failed/not_attempted の意味を裏切る。Issue #1425:
-        // 今の space だけでなく、この adapter が持つ全 space から消す。
+        // ベストエフォート。失敗しても "purged" を "failed" に格下げしない（ADR 0124・ADR 0382。`MemoryStore` 側の書き込みは確定していて、「安全に再試行できる」という failed/not_attempted の意味を裏切るため）。adapter が持つ全 space から消す。
         try {
           await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
         } catch (cleanupError) {
@@ -7350,15 +4525,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       } catch (error) {
         if (isMemoryPurgeConflictError(error)) {
-          // 安全弁（`forget`/`restoreArchived` と同じ形。1回だけ再読して打ち切る
-          // ——上限の無い再試行ループを作らない）。
+          // 安全弁（`forget`/`restoreArchived` と同じ形）。1回だけ再読して打ち切る。上限の無い再試行ループを作らない。
           let refetched: Memory | null;
           try {
             refetched = await deps.memoryStore.get(ctx, id);
           } catch (refetchError) {
-            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」である——下と同じく
-            // 打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から
-            // 見えなくなる（interface の doc コメント「例外はこのメソッドの外へは投げない」）。
+            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」なので、下と同じく打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から見えなくなる。
             return abortAt(i, refetchError);
           }
           if (refetched === null) {
@@ -7370,10 +4542,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               kind: "already_purged",
             };
             outcomes.push(racedAlreadyPurged);
-            // Issue #1425 / ADR 0382: この分岐は purgeMemory を呼んだ後の競合の後始末
-            // であり dryRun では到達しない（dryRun は purgeMemory 自体を呼ばない）——
-            // 上の already_purged 分岐と同じくベストエフォートで埋め込みを消す。
-            // 握り潰さず、欄で知らせる（ADR 0399 の 2026-09-30 追記）。ADR 0437: 残骸の掃除も同じ。
             await cleanupAlreadyPurged(ctx, id, racedAlreadyPurged);
           } else if (refetched.status !== "forgotten") {
             byId.set(lookupKey(id), refetched);
@@ -7383,8 +4551,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               status: refetched.status as Exclude<MemoryStatus, "forgotten">,
             });
           } else {
-            // status === "forgotten" かつ purgedAt === null のまま——本 PR の時点では
-            // 到達しないはずの防御的な分岐（ADR 0124 決定2「並行呼び出し」参照）。
+            // status === "forgotten" かつ purgedAt === null のまま。到達しないはずの防御的な分岐（ADR 0124）。
             byId.set(lookupKey(id), refetched);
             outcomes.push({
               memoryId: id,
@@ -7394,8 +4561,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           }
           continue;
         }
-        // 競合以外の例外——打ち切って、残りは「見ていない」として返す（interface の
-        // doc コメント参照）。例外をここより外へは投げない。
+        // 競合以外の例外は打ち切って、残りは「見ていない」として返す。例外をここより外へは投げない。
         return abortAt(i, error);
       }
     }
@@ -7403,10 +4569,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { supported: true, outcomes };
   }
 
-  /**
-   * `Runtime.markContested` の実装（Issue #197、ADR 0134）。doc コメントは interface 側
-   * （`markContested` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   */
   async function markContested(
     ctx: Ctx,
     firstId: MemoryId,
@@ -7417,8 +4579,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new RangeError("Runtime.markContested: firstId and secondId must differ");
     }
 
-    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（ADR 0100/ADR 0114 と
-    // 同じ作法。分割代入したメソッドは `this` を失う）。
     const markContestedPair = deps.memoryStore.markContestedPair;
     if (markContestedPair === undefined) {
       return { supported: false, outcome: { kind: "not_attempted" } };
@@ -7435,9 +4595,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
 
     const found = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。同じ記憶を小文字と大文字で
-    // 渡したときは渡された文字列どおりに突き合わせるので、store の id と綴りが違う側は今どおり `not_found`
-    // （`ineligible`）になる。どちらの位置に渡したかによらない。
     const lookupKey = memoryLookupKeyFor([firstId, secondId]);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
@@ -7451,10 +4608,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     const actor = opts?.actor ?? { type: "system" };
-    // Issue #1160: 両側のイベントに対向の id（`contestedWithId`）を載せる——解決のときに
-    // `contested_with_id` はクリアされるので、監査ログに残さないと「誰と対だったか」が後から追えない。
-    // 載せるのは store が返した相手の id である（渡された id ではない）——列（`contested_with_id`）の値と揃える
-    // （`@mnemora/postgres` に大文字の UUID を渡しても、列もこの meta も小文字になる）。
     const firstMemory = byId.get(lookupKey(firstId))!;
     const secondMemory = byId.get(lookupKey(secondId))!;
     const buildMeta = (contestedWithId: MemoryId): Record<string, unknown> =>
@@ -7463,7 +4616,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         : { reason: "contested", note: opts.reason, contestedWithId };
 
     try {
-      // Issue #1237: 両側の `updated` イベントに同じ `at` を使う。
+      // 両側の `updated` イベントに同じ `at` を使う。
       const now = clock.now();
       const { first, second } = await markContestedPair.call(
         deps.memoryStore,
@@ -7496,8 +4649,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { supported: true, outcome: { kind: "contested", first, second } };
     } catch (error) {
       if (isMemoryStatusConflictError(error)) {
-        // 安全弁（`forget`/`restoreArchived`/`purge` と同じ形。1回だけ再読して打ち切る
-        // ——上限の無い再試行ループを作らない）。
+        // 安全弁（`forget`/`restoreArchived`/`purge` と同じ形）。1回だけ再読して打ち切る。上限の無い再試行ループを作らない。
         const refetched = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
         const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
         return {
@@ -7521,11 +4673,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  /**
-   * `resolution.kind` が `"supersede"`・`"both_active"` のどちらでもなければ、**書き込む前に** `RangeError`（ADR 0496。
-   * 既存の `winnerId` の `RangeError` と同じ作法）。以前は未知の `kind`（型を外した呼び出し）が `supersede` の分岐へ倒れ、
-   * 勝者の無いまま両側とも `superseded` になった（ADR 0446 の「見つけたが直していない点」）。message に入力値は入れない。
-   */
   function assertKnownResolutionKind(caller: string, resolution: ContestedResolution): void {
     const kind = (resolution as { kind?: unknown } | null | undefined)?.kind;
     if (kind !== "supersede" && kind !== "both_active") {
@@ -7533,11 +4680,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  /**
-   * `resolveContested` が `supersede` の `winnerId` を、渡された 2 つの id のどちらの側かに決める（`both_active` は
-   * `undefined`）。どちらの側でもなければ `RangeError`。`applyCorrection` が **書き込む前に** 同じ検査を通すために、
-   * `resolveContested` の中から切り出してある（ADR 0446）。
-   */
   async function resolveWinnerSideId(
     ctx: Ctx,
     firstId: MemoryId,
@@ -7550,11 +4692,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (resolution.winnerId === firstId || resolution.winnerId === secondId) {
         winnerSideId = resolution.winnerId;
       } else {
-        // `winnerId` が片側と大文字小文字だけ違うときは、同じ記憶かを store に聞く（`@mnemora/postgres` は uuid を
-        // 大文字小文字を区別せずに比べる）。store が同じ記憶と言えば勝者として扱い、言わなければ今どおり
-        // `RangeError`（大文字小文字を区別する store では今どおり）。どちらの側とも大文字小文字を無視しても違う
-        // `winnerId` は、今どおり store を読まずに落とす。`firstId`/`secondId` 自身が大文字小文字だけ違う
-        // （どちらとも一致しうる）ときも、どちらと決められないので今どおり落とす。
         const lower = resolution.winnerId.toLowerCase();
         const candidates = [firstId, secondId].filter((id) => id.toLowerCase() === lower);
         const candidate = candidates.length === 1 ? candidates[0]! : undefined;
@@ -7578,11 +4715,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return winnerSideId;
   }
 
-  /**
-   * `Runtime.resolveContested` の実装（Issue #197、ADR 0150）。doc コメントは interface 側
-   * （`resolveContested` の JSDoc）にある——ここはアルゴリズムそのものだけ。`markContested`
-   * の実装と対称に書いてある（読み方も同じ順で追える）。
-   */
   async function resolveContested(
     ctx: Ctx,
     firstId: MemoryId,
@@ -7596,8 +4728,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 勝者がどちらの側か（渡された `firstId`/`secondId` のどちらか）。`both_active` では使わない。
     const winnerSideId = await resolveWinnerSideId(ctx, firstId, secondId, resolution);
 
-    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`markContested` と同じ作法。
-    // 分割代入したメソッドは `this` を失う）。
     const resolveContestedPair = deps.memoryStore.resolveContestedPair;
     if (resolveContestedPair === undefined) {
       return { supported: false, outcome: { kind: "not_attempted" } };
@@ -7615,12 +4745,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (memory.status !== "contested") {
         return { memoryId: id, kind: "status_not_contested", status: memory.status };
       }
-      // 相互参照は、store が返した相手の id と比べる（`contestedWithId` も store の値である）。相手が見つからない
-      // ときは、今どおり渡された id と比べる。
+      // 相互参照は、store が返した相手の id と比べる（`contestedWithId` も store の値である）。相手が見つからないときは、渡された id と比べる。
       if (memory.contestedWithId !== (otherMemory?.id ?? otherId)) {
-        // ADR 0046 が数え上げた「一対一が破れた状態」——今日の実装では
-        // `markContestedPair`（ADR 0134）経由でしか `contestedWithId` は書かれないため
-        // 到達しないはずだが、防御的に分類する（`PurgeOutcome.conflicted` と同じ立場）。
+        // ADR 0046 の「一対一が破れた状態」。`markContestedPair` 経由でしか `contestedWithId` は書かれないので到達しないはずだが、防御的に分類する。
         return {
           memoryId: id,
           kind: "pair_broken",
@@ -7631,7 +4758,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
 
     const found = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`markContested` と同じ形）。
     const lookupKey = memoryLookupKeyFor([firstId, secondId]);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
@@ -7648,12 +4774,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const actor = opts?.actor ?? { type: "system" };
     const resolutionKind = resolution.kind;
-    // Issue #1160: 勝者・敗者・決着の種類によらず、どのイベントにも対向の id（`contestedWithId`）を
-    // 載せる——解決のときに `contested_with_id` はクリアされるので、`both_active` の対は監査ログに
-    // 残さないと誰と対だったかが消える。敗者の `superseded` は `supersededById` も持つ（値は同じ）が、
-    // 同じキーで相手を引けるように `contestedWithId` も入れる。
-    // meta に載せる id（`contestedWithId`・`supersededById`）は store が返した id である（渡された id ではない）
-    // ——列の値と揃える（`@mnemora/postgres` に大文字の UUID を渡しても、この meta は小文字になる）。
     const buildMeta = (contestedWithId: MemoryId): Record<string, unknown> =>
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind, contestedWithId }
@@ -7664,8 +4784,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             contestedWithId,
           };
 
-    // `docs/memory-model.md` §11 行7「`updated` または `superseded`」: `both_active` は
-    // 両側とも `updated`、`supersede` は勝者が `updated`・敗者が `superseded`。
     const buildSide = (
       id: MemoryId,
       memory: Memory,
@@ -7686,8 +4804,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         at: clock.now(),
         actor,
         digestSnapshot: memory.digest,
-        // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
-        // superseded と同じ形（ADR 0150 追記）。勝者の updated には足さない（相手は contestedWithId で引ける）。
         meta:
           supersededById === undefined
             ? buildMeta(contestedWithId)
@@ -7699,8 +4815,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (id === winnerSideId) {
         return { id, status: "active", event: buildEvent("updated") };
       }
-      // store へ渡す `supersededById` は渡された `winnerId` のまま（store へ渡す値は変えない）。meta には
-      // 勝者の store の id（＝この側の相手）を載せる。
+      // store へ渡す `supersededById` は渡された `winnerId` のまま。meta には勝者の store の id を載せる。
       return {
         id,
         status: "superseded",
@@ -7719,8 +4834,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { supported: true, outcome: { kind: "resolved", first, second } };
     } catch (error) {
       if (isMemoryStatusConflictError(error)) {
-        // 安全弁（`markContested` と同じ形。1回だけ再読して打ち切る——上限の無い再試行
-        // ループを作らない）。
+        // 安全弁（`markContested` と同じ形）。1回だけ再読して打ち切る。上限の無い再試行ループを作らない。
         const refetched = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
         const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
         return {
@@ -7744,19 +4858,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  /**
-   * `Runtime.resolveOrphanedContested` の実装
-   * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
-   * doc コメントは interface 側（`resolveOrphanedContested` の JSDoc）にある——ここは
-   * アルゴリズムそのものだけ。`resolveContested` の実装と対称に書いてある。
-   */
   async function resolveOrphanedContested(
     ctx: Ctx,
     survivorId: MemoryId,
     opts?: ResolveOrphanedContestedOptions,
   ): Promise<ResolveOrphanedContestedResult> {
-    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`resolveContested` と
-    // 同じ作法。分割代入したメソッドは `this` を失う）。
     const resolveOrphanedContestedPair = deps.memoryStore.resolveOrphanedContested;
     if (resolveOrphanedContestedPair === undefined) {
       return { supported: false, outcome: { kind: "not_attempted" } };
@@ -7829,8 +4935,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { supported: true, outcome: { kind: "resolved", memory } };
     } catch (error) {
       if (isMemoryStatusConflictError(error)) {
-        // 安全弁（`resolveContested` と同じ形。1回だけ再読して打ち切る——上限の無い
-        // 再試行ループを作らない）。
+        // 安全弁（`resolveContested` と同じ形）。1回だけ再読して打ち切る。上限の無い再試行ループを作らない。
         const refetched = await deps.memoryStore.get(ctx, survivorId);
         return {
           supported: true,
@@ -7841,11 +4946,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  /**
-   * `Runtime.markContestedGroup` の実装（Issue #207/#933 PR2、ADR 0327 §4-c、ADR 0378、
-   * ADR 0381）。doc コメントは interface 側（`markContestedGroup` の JSDoc）にある——
-   * ここはアルゴリズムそのものだけ。`markContested`（2者版）の実装と同じ形で書いてある。
-   */
   async function markContestedGroup(
     ctx: Ctx,
     memberIds: readonly MemoryId[],
@@ -7862,8 +4962,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       idSet.add(id);
     }
 
-    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`markContested` と
-    // 同じ作法。分割代入したメソッドは `this` を失う）。
     const markContestedGroupPort = deps.memoryStore.markContestedGroup;
     if (markContestedGroupPort === undefined) {
       return { supported: false, outcome: { kind: "not_attempted" } };
@@ -7932,8 +5030,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { supported: true, outcome: { kind: "contested_group", members: writtenMembers } };
     } catch (error) {
       if (isMemoryStatusConflictError(error)) {
-        // 安全弁（`markContested`/`resolveContested`/`forget`/`restoreArchived`/`purge` と
-        // 同じ形。1回だけ再読して打ち切る——上限の無い再試行ループを作らない）。
         const refetched = await deps.memoryStore.getMany(ctx, [...memberIds]);
         const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
         return {
@@ -7951,12 +5047,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  /**
-   * `Runtime.resolveContestedGroup` の実装（Issue #207/#933 PR2、ADR 0327 §4-c、
-   * ADR 0378 決定3、ADR 0381）。doc コメントは interface 側
-   * （`resolveContestedGroup` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   * `resolveContested`（2者版）の実装と同じ形で書いてある。
-   */
   async function resolveContestedGroup(
     ctx: Ctx,
     memberIds: readonly MemoryId[],
@@ -7979,13 +5069,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (memberIds.includes(resolution.winnerId)) {
         winnerId = resolution.winnerId;
       } else {
-        // `winnerId` が memberIds のどれかと大文字小文字だけ違うときは、同じ記憶かを store に聞く
-        // （`resolveContested`〔2者版〕と同じ規則、Issue #1449 項目6。`@mnemora/postgres` は uuid を
-        // 大文字小文字を区別せずに比べる）。小文字にそろえて memberIds から候補を集め、ちょうど1件で、
-        // かつ store の `get` が両者に同じ id の記憶を返したときだけ、その memberId の綴りを勝者として
-        // 使う（敗者の `supersededById`・イベントの meta が、memberIds＝store の列の値の綴りになる）。
-        // 候補が2件以上（memberIds に同じ記憶の別の綴りが混じる）・`get` が食い違う・どの member とも
-        // 大文字小文字を無視しても違う、は今どおり `RangeError`（最後の場合は store を読まない）。
         const lower = resolution.winnerId.toLowerCase();
         const candidates = memberIds.filter((id) => id.toLowerCase() === lower);
         const candidate = candidates.length === 1 ? candidates[0]! : undefined;
@@ -8006,8 +5089,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
-    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`resolveContested` と
-    // 同じ作法）。
     const resolveContestedGroupPort = deps.memoryStore.resolveContestedGroup;
     if (resolveContestedGroupPort === undefined) {
       return { supported: false, outcome: { kind: "not_attempted" } };
@@ -8035,18 +5116,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const sides = memberIds.map((id) => classify(id, byId.get(lookupKey(id))));
 
-    // 2026-09-30 の直し（ADR 0381、fix2「resolve で群の一部だけを渡したら弾く」の
-    // Runtime 側の確認）: `deps.relationStore` が配線されていれば、`memberIds` から
-    // `kind: 'contradicts'` を辿って到達する id のうち、`status === 'contested'` な
-    // ものが `memberIds` の外にあれば、部分解消として拒む。store 側の CAS
-    // （`MemoryStore.resolveContestedGroup`）と同じ「forget 等で群から抜けたメンバー
-    // （もう `contested` ではない）は数えない」規律で判定する。
     const memberKeySet = new Set(memberIds.map((id) => lookupKey(id)));
     let missingMembers: MemoryId[] = [];
     if (deps.relationStore !== undefined) {
       const visitedKeys = new Set(memberKeySet);
       const visitedIds: MemoryId[] = [...memberIds];
-      // 幅優先を1段ずつ進める（1段ぶんは `listRelatedMany?` があれば1往復。Issue #1449、ADR 0402）。
+      // 幅優先を1段ずつ進める（1段ぶんは `listRelatedMany?` があれば1往復。ADR 0402）。
       let level: MemoryId[] = [...memberIds];
       while (level.length > 0) {
         const relatedByOrigin = await listRelatedLevel(
@@ -8085,9 +5160,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind }
         : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
-    // 敗者の superseded イベントの meta には、勝者の id を `supersededById` として残す
-    // （2者版 `resolveContested` と同じ。ADR 0150 追記、ADR 0421）。store へ渡す値と同じ
-    // （`memberIds` の綴りに寄せた winnerId）。勝者・both_active の updated には足さない。
 
     try {
       const now = clock.now();
@@ -8117,13 +5189,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       return { supported: true, outcome: { kind: "resolved", members: writtenMembers } };
     } catch (error) {
-      // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: store 側が
-      // ContestedGroupMembershipMismatchError を投げた場合（部分解消）は、
-      // `deps.relationStore` の配線の有無に関わらず ineligible に写す——TOCTOU による
-      // 競合（MemoryStatusConflictError、下）とは別の意味（読んだ時点から呼び出し側が
-      // 最初から適格でない集合を渡していた）であり、`conflict`（1回だけ再読して打ち切る
-      // 安全弁）には分類しない。`sides` は手順5で読んだ時点の分類（全員 "eligible"）を
-      // そのまま運び、`missingMembers` にエラーが名指しした1件を積む。
+      // 部分解消（ContestedGroupMembershipMismatchError）は、`relationStore` の配線によらず ineligible に写す（ADR 0381）。TOCTOU の競合（下の MemoryStatusConflictError）とは意味が違う（最初から適格でない集合を渡していた）。
       if (isContestedGroupMembershipMismatchError(error)) {
         return {
           supported: true,
@@ -8149,12 +5215,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  /**
-   * `Runtime.applyCorrection` の実装（Issue #369、[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
-   * doc コメントは interface 側（`applyCorrection` の JSDoc）にある——ここは手順そのもの
-   * だけ。`markContested`/`resolveContested` を呼ぶだけの薄い orchestration であり、
-   * それ自身の CAS・イベント・「無い」の分類は一切増やさない。
-   */
   async function applyCorrection(
     ctx: Ctx,
     input: ApplyCorrectionInput,
@@ -8164,15 +5224,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     const correctedId = input.correctedId;
 
-    // ⛔ 相手を選ばない: discovery.candidates[0] は一切見ない。ここでやっているのは
-    // 「呼び出し側が指名した correctedId が候補一覧に居るかどうか」の照合だけである。
     let candidate = input.discovery.candidates.find((c) => c.memoryId === correctedId);
     if (candidate === undefined) {
-      // ADR 0446: `correctedId` が候補の id と大文字小文字だけ違うときは、同じ記憶かを store に聞く（`resolveContested` の
-      // `winnerId` と同じ形。`@mnemora/postgres` は uuid を大文字小文字を区別せずに比べ、`markContested` は大文字の id を
-      // 受け付けるのに、ここだけ文字列の完全一致で `not_a_candidate` にしていた）。store が同じ記憶と言えば候補として扱い、
-      // 言わなければ今どおり `not_a_candidate`（大文字小文字を区別する store では今どおり）。大文字小文字を無視して
-      // 一致する候補が 2 件以上あるときは、どれと決められないので今どおり候補外。
       const lower = correctedId.toLowerCase();
       const sameSpelling = input.discovery.candidates.filter(
         (c) => c.memoryId.toLowerCase() === lower,
@@ -8191,9 +5244,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { kind: "not_a_candidate", correctedId };
     }
 
-    // ADR 0446: `supersede` の `winnerId` が 2 つの id のどちらでもなければ、`resolveContested` は `RangeError` を投げる。
-    // それを `markContested` が書いた**後**に投げると、例外で終わったのに対（`contested` の 2 件と `updated` の 2 件）だけが
-    // 残る。書き込む前に同じ検査を通す（例外の型と文言は変えない）。
     if (input.resolution !== undefined) {
       await resolveWinnerSideId(ctx, correctedId, input.correctingId, input.resolution);
     }
@@ -8231,63 +5281,40 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  /**
-   * `Runtime.consolidate` の実装（Issue #103、ADR 0089）。doc コメントは interface 側
-   * （`consolidate` の JSDoc）にある——ここはアルゴリズムそのものだけ。
-   */
   async function consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult> {
     const target = opts.target;
 
-    // 1. 対象の正規化。
     let ids: MemoryId[];
     if ("memoryIds" in target) {
       ids = target.memoryIds;
     } else if ("seedMemoryId" in target) {
-      // Issue #135（ADR 0152）: 「この記憶に似ているものを mnemora 自身が集めて、
-      // 1つに畳め」。ConsolidateTarget の doc コメント参照。
       const seed = await deps.memoryStore.get(ctx, target.seedMemoryId);
       if (seed === null || isWithdrawnSeed(seed)) {
-        // 種が無い——recall を呼ばない。対象は種の id 1件のみとなり、後続の getMany が
-        // not_found に分類する（新しい nothingReason は発明しない）。
-        // Issue #1136: 種が forget・purge された記憶のときも同じく recall を呼ばない。
-        // 後続の getMany が status_not_active(forgotten) に分類する。
         ids = [target.seedMemoryId];
       } else {
-        // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
-        // 経路を通す（新しい「似ている」の判定を作らない）。
-        // ADR 0353（Issue #338）: `target.activityCounting` をそのまま渡す
-        // （省略時は recall() 側の既定 "tenant" に落ちる）。
-        // Issue #1200 / ADR 0359: `opts.signal` をそのまま渡す——abort されればこの
-        // `recall()` が reject し、その例外がそのまま `consolidate()` の呼び出し側へ届く。
         const recallResult = await recall(
           ctx,
           {
             text: seed.digest,
             activityCounting: target.activityCounting,
-            // ADR 0415: この recall は `memories` しか読まない（`totalInScope`・目次帯・`filtered*` は読まない）ので、
-            // 件数の集計（`aggregateScope` の `GROUP BY subject_id`）を発行しない。
+            // この recall は `memories` しか読まない（`totalInScope`・目次帯・`filtered*` は読まない）ので、件数の集計（`aggregateScope` の `GROUP BY subject_id`）を発行しない（ADR 0415）。
             scopeAggregate: "skip",
           },
           { signal: opts.signal },
         );
         const minAffinity = target.minAffinity ?? DEFAULT_CONSOLIDATE_MIN_AFFINITY;
         const neighborIds = recallResult.memories
-          // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
-          // 渡された `seedMemoryId` のままだと、`@mnemora/postgres` に大文字の UUID を渡したとき種が近傍にも
-          // 入り、同じ記憶が大文字と小文字で2回並んでいた（`uppercase-uuid-store-entry.postgres.test.ts`）。
+          // 種を除く比較は store が返した種の id（`seed.id`）で行う（大文字の UUID を渡しても、種が近傍に重複しない）。
           .filter((m) => m.memoryId !== seed.id)
           .filter((m) => computeAffinity(m.score) >= minAffinity)
           .map((m) => m.memoryId);
-        // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと
-        // recall() の結果に現れないため——ConsolidateTarget の doc コメント参照）。
+        // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと recall() の結果に現れないため）。
         ids = [target.seedMemoryId, ...neighborIds];
         if (target.maxCandidates !== undefined) {
           ids = ids.slice(0, target.maxCandidates);
         }
       }
     } else {
-      // ADR 0415: 利用者が `scopeAggregate` を明示していなければ "skip"（件数の集計を発行しない）。
-      // ここは `memories` しか読まない。明示された値（"exact" を含む）は尊重する。
       const recallResult = await recall(
         ctx,
         { ...target.query, scopeAggregate: target.query.scopeAggregate ?? "skip" },
@@ -8300,9 +5327,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           : recalledIds.slice(0, target.maxCandidates);
     }
     if (ids.length === 0) {
-      // store に一切触れない——「見ていない」。
       return {
-        // 書き込みを1件も試みていない（ADR 0100）。
         atomicity: "not_attempted" as const,
         outcome: "not_examined",
         nothingReason: null,
@@ -8313,7 +5338,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 2. `getMany` で一括読み、id ごとに「まだ何も書いていない時点」の分類を固定する。
     type InitialClassification =
       | { kind: "not_found" }
       | { kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> }
@@ -8321,16 +5345,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       | { kind: "not_yet_valid"; validFrom: Date }
       | { kind: "active" };
 
-    // Issue #1188: `active` でも、いまの時点で有効期間の外にある記憶は統合元にしない。統合先は
-    // 有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れ・未到来の事実が、
-    // 期限の無い `active` な記憶として `recall()` に戻るため。述語は `recall()` の期間のゲート
-    // （`recall-runtime.ts` の `survivesValidityGate`、ADR 0164 決定1）と同じで、対象の形によらない。
-    // ⚠ 2026-09-29 追記: 述語そのものは `classifyValidity`（`./validity.js`）に切り出した——
-    // `reflect()` も同じ関数を呼ぶ（1箇所に置く規律、`classifyValidity` の doc コメント参照）。
     const validAt = clock.now();
 
     const uniqueIds = Array.from(new Set(ids));
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`forget` と同じ形）。
     const lookupKey = memoryLookupKeyFor(uniqueIds);
     const found = await deps.memoryStore.getMany(ctx, uniqueIds);
     const byId = new Map<MemoryId, Memory>();
@@ -8353,11 +5370,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
-    /**
-     * `ids`（入力順・重複を保つ）を `ConsolidateSourceOutcome[]` へ写す。`active` と分類された
-     * id だけ `activeOutcome` に委ねる——`not_found`/`status_not_active`/`expired`/`not_yet_valid`
-     * はどの分岐でも同じ顔。
-     */
     function mapSources(
       activeOutcome: (id: MemoryId) => ConsolidateSourceOutcome,
     ): ConsolidateSourceOutcome[] {
@@ -8379,7 +5391,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       });
     }
 
-    // eligible: 重複を除いた active id を、`ids` の中で最初に現れた順に並べる。
     const eligibleIds: MemoryId[] = [];
     const seenEligible = new Set<MemoryId>();
     for (const id of ids) {
@@ -8389,10 +5400,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
-    // 3. eligible が0件・1件なら、ここで打ち切る（冪等性の芯）。
     if (eligibleIds.length === 0) {
       return {
-        // 書き込みを1件も試みていない（ADR 0100）。
         atomicity: "not_attempted" as const,
         outcome: "nothing_to_consolidate",
         nothingReason: "no_eligible_sources",
@@ -8404,7 +5413,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     if (eligibleIds.length === 1) {
       return {
-        // 書き込みを1件も試みていない（ADR 0100）。
         atomicity: "not_attempted" as const,
         outcome: "nothing_to_consolidate",
         nothingReason: "single_eligible_source",
@@ -8415,10 +5423,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 4. dryRun はここで打ち切る。1件も書かない。
     if (opts.dryRun === true) {
       return {
-        // 書き込みを1件も試みていない（ADR 0100）。
         atomicity: "not_attempted" as const,
         outcome: "dry_run",
         nothingReason: null,
@@ -8431,7 +5437,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const eligibleMemories = eligibleIds.map((id) => byId.get(lookupKey(id))!);
 
-    // 5. LLM を1回呼ぶ。失敗したら1件も書かず、eligible だったものは not_attempted に落とす。
     let llmResult: ConsolidationLLMResult;
     // ADR 0456: LLM が返した補助の欄（digest・tags）のうち保存できない値（NUL）を落とした記録。
     let consolidateDroppedFields: DroppedAuxField[] = [];
@@ -8458,13 +5463,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }));
       }
     } catch (error) {
-      // Issue #1200 / ADR 0359: abort による reject は `"llm_failed"` に丸めず、
-      // そのまま投げ直す——この時点ではまだ何も書いていない（下の手順6より前）。
+      // abort による reject は `"llm_failed"` に丸めずそのまま投げ直す（ADR 0359）。この時点ではまだ何も書いていない。
       if (isAbort(opts.signal)) {
         throw error;
       }
       return {
-        // 書き込みを1件も試みていない（ADR 0100）。
         atomicity: "not_attempted" as const,
         outcome: "llm_failed",
         nothingReason: null,
@@ -8475,10 +5478,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // Issue #1226 / ADR 0375 決定7（クローン miku の判断）: LLM が返った直後・統合先を
-    // 作る前に、eligible を読み直す。1件でも forgotten（`forget()` のみ・`purge()` 済みの
-    // どちらも含む）なら、統合先を一切作らずに打ち切る（interface の doc コメント、
-    // `consolidate` の JSDoc 手順5の追記参照）。
     const recheckedBeforeConsolidateWrite = await deps.memoryStore.getMany(ctx, eligibleIds);
     const recheckedByIdBeforeConsolidateWrite = new Map<MemoryId, Memory>();
     for (const memory of recheckedBeforeConsolidateWrite) {
@@ -8491,8 +5490,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
     if (forgottenBeforeConsolidateWrite.size > 0) {
       return {
-        // 書き込みを1件も試みていない（ADR 0100 と同じ扱い——このトランザクション自体を
-        // 開いていない）。
         atomicity: "not_attempted" as const,
         outcome: "aborted_source_forgotten",
         nothingReason: null,
@@ -8507,10 +5504,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // ADR 0420: 同じ読み直しで、superseded も見る。forgotten と同じ形で、退けた古い本文から作った統合先を
-    // active で残さない。加えて、eligible の**すべて**が active でなくなっていた（同じ ids の consolidate が
-    // 先に commit した、など）ときも、統合先だけが残らないよう打ち切る。1件でも active が残り superseded が
-    // 無いなら、今までどおりの部分成功（動いていた要素だけ `status_changed_concurrently`）。
     const changedBeforeConsolidateWrite = new Map<MemoryId, MemoryStatus>();
     for (const id of eligibleIds) {
       const status = recheckedByIdBeforeConsolidateWrite.get(lookupKey(id))?.status;
@@ -8534,7 +5527,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     if (changedBeforeConsolidateWrite.size > 0) {
       return {
-        // 書き込みを1件も試みていない（ADR 0100 と同じ扱い——このトランザクション自体を開いていない）。
         atomicity: "not_attempted" as const,
         outcome: "aborted_source_status_changed",
         nothingReason: null,
@@ -8550,11 +5542,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 6. 統合先を作る。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
-    // ADR 0165 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（consolidate 手順6）。
-    // ADR 0394: 統合先の subject（eligible 全件が一致すればその値、割れれば null）の `T + S_x`。
+    // 統合先の subject（eligible 全件が一致すればその値、割れれば null）の `T + S_x`（ADR 0165・ADR 0394）。
     const activityClockBase = await resolveActivityClockBase(ctx);
     const consolidatedSubjectId = resolveCommonSubjectId(eligibleMemories);
     const activityClockInputs = activityClockInputsFor(
@@ -8575,17 +5565,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ...activityClockInputs,
     });
     const actor = opts.actor ?? { type: "system" };
-    // ADR 0416: 口あり経路では store が同じトランザクションで呼ぶ（`supersedeWithNewMemories` の
-    // `opts.buildCreatedEvent`）ため、Memory を受け取って `memoryId`/`digestSnapshot` を埋める形にした
-    // （以前は `memoryId: ""` のプレースホルダを呼び出し側が上書きしていた）。
     const buildCreatedEvent = (memory: Memory) =>
       ({
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "created",
         at: now,
-        // `ConsolidateOptions.actor`/`reason` は、この操作が積むイベントすべてに当たる
-        // （統合元の superseded と同じ。`reflect` の created と同じ形）。
         actor,
         digestSnapshot: memory.digest,
         sizeBeforeBytes: null,
@@ -8609,8 +5594,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         sizeBeforeBytes: null,
         meta: {
           reason: "consolidated",
-          // 口を使う経路では store が解決した id で埋める（ADR 0100）。⟹ 監査ログの中身は
-          // 口が在る adapter と無い adapter で同一になる。
+          // 口を使う経路では store が解決した id で埋める（ADR 0100）。監査ログの中身は、口が在る adapter と無い adapter で同一になる。
           ...(supersededById === undefined ? {} : { supersededById }),
           ...(opts.reason !== undefined ? { note: opts.reason } : {}),
         },
@@ -8618,25 +5602,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const finalOutcomeById = new Map<MemoryId, ConsolidateSourceOutcome>();
 
-    // ------------------------------------------------------------------
-    // ADR 0100: 口が在れば、統合先の作成と統合元の supersede を1トランザクションで撃つ。
-    // 🔴 フォールバックは**口の不在に対してだけ**。⛔ 投げられたときに今日の経路で
-    // 撃ち直さない（「張れなかった」と「張ったが失敗した」を潰さない）。
-    //
-    // 🔴 ADR 0089 決定5 を**部分的に覆す**: あちらは「予期しない例外が出たらそこで打ち切り、
-    // 残りを not_attempted にして返す（投げない）」と決めていた。この経路では**投げる**。
-    // 理由——ADR 0089 が「投げない」とした理由は逐語で「部分的に起きたことを呼び出し側から
-    // 見えなくしないためである」。1トランザクションでは**部分的に起きたことが無くなる**
-    // （統合先の作成も supersede も全部巻き戻る）ので、その理由は満たされたままである。
-    // ⚠ 型は変わらないため、例外を受け止めていない呼び手はコンパイルでは気づけない。
-    // ADR 0100「引き受ける負債」参照。オーナー承認済み（`docs/autonomy.md:114`）。
-    // ------------------------------------------------------------------
+    // 口が在れば、作成と supersede を1トランザクションで撃つ（ADR 0100）。⛔ 撃って投げられたときに旧経路で撃ち直さない。
+    // 🔴 ADR 0089 の「予期しない例外は打ち切って `not_attempted` で返す（投げない）」を**この経路だけ**覆し、**投げる**。ADR 0089 が「投げない」とした理由（部分的に起きたことを呼び出し側から見えなくしないため）は、
+    // 1トランザクションでは部分的に起きたこと自体が無い（全部巻き戻る）ので満たされたままである。⚠ 型は変わらないため、例外を受け止めていない呼び手はコンパイルでは気づけない（ADR 0100）。
     const supersedeWithNewMemories = deps.memoryStore.supersedeWithNewMemories;
     if (supersedeWithNewMemories !== undefined) {
-      // Issue #1226 / ADR 0375 決定7: 上の読み直しに続く、書き込みそのものの中での見直し。
-      // `@mnemora/postgres` はこれを INSERT/UPDATE と同一トランザクションの `SELECT …
-      // FOR UPDATE` として実装する（`abortIfForgotten` の doc コメント参照）——上の
-      // 読み直しと、この呼び出しの間に開いた小さな窓を、adapter が対応していれば閉じる。
       let result: Awaited<ReturnType<typeof supersedeWithNewMemories>>;
       try {
         result = await supersedeWithNewMemories.call(
@@ -8649,8 +5619,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             expectedStatus: "active" as MemoryStatus,
             event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
           })),
-          // ADR 0416（穴 D-3 の続き）: 統合先の `created` も同じトランザクションで積ませる（実装する adapter だけ。
-          // 積んだかどうかは戻り値の `createdEventsWritten` で判断する）。
           {
             now,
             abortIfForgotten: eligibleIds,
@@ -8664,8 +5632,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         if (isSourceMemoryForgottenError(error)) {
           const forgottenLate = new Set(error.forgottenIds);
           return {
-            // `news`/`supersede` どちらも rollback された——書き込みを試みていないのと
-            // 呼び出し側からは区別が付かない（`consolidate` の JSDoc 手順5の追記参照）。
+            // `news`/`supersede` どちらも rollback された。書き込みを試みていないのと呼び出し側からは区別が付かない。
             atomicity: "not_attempted" as const,
             outcome: "aborted_source_forgotten",
             nothingReason: null,
@@ -8701,8 +5668,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
 
       const consolidated = result.created[0]!;
-      // ADR 0416: 名乗られたときだけ別の append を省く（reextract の同じ箇所のコメント参照）。
-      // ⛔ 投げられたときに撃ち直さない。
+      // 名乗られたときだけ別の append を省く（reextract と同じ。ADR 0416）。⛔ 投げられたときに撃ち直さない。
       if (consolidated.created && result.createdEventsWritten !== true) {
         await deps.eventStore.append(ctx, buildCreatedEvent(consolidated.memory));
       }
@@ -8729,11 +5695,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 口が無い adapter——今日どおりの2段（作成 → supersede ループ）。
-    // Issue #1226: `abortIfForgotten` を渡す——この adapter が実装していれば
-    // （`@mnemora/postgres` は常に `supersedeWithNewMemories` も実装するため、実際に
-    // ここへ来るのは third-party adapter だけである）、上の読み直しに続く見直しになる。
-    // 実装していなければ無視されるだけで、今日どおり（上の読み直しだけが保護）。
     let consolidatedMemory: Memory;
     let created: boolean;
     try {
@@ -8741,8 +5702,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         ctx,
         newMemory,
         ["embed"],
-        // ADR 0420: superseded を見直す（実装する adapter だけ。`abortIfAllConflicted` は 2 段の書き込みには
-        // 当たらない——統合先を commit した後で CAS するため、下の手順7は部分成功のまま）。
         { now, abortIfForgotten: eligibleIds, abortIfSuperseded: eligibleIds },
       );
       consolidatedMemory = createResult.memory;
@@ -8787,10 +5746,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (created) {
       await deps.eventStore.append(ctx, buildCreatedEvent(consolidatedMemory));
     }
-    // embed ジョブは常に outbox 経由（`createMemoryWithOutbox` が積む）。ここでは何もしない
-    // — tick() の processEmbedJob が処理する。
 
-    // 7. eligible を1件ずつ superseded へ CAS する（`reextract` のループと同じ形）。
     for (let i = 0; i < eligibleIds.length; i += 1) {
       const id = eligibleIds[i]!;
       const source = byId.get(lookupKey(id))!;
@@ -8813,9 +5769,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           });
           continue;
         }
-        // 競合以外の例外——ここで打ち切り、残りは「見ていない」として返す。例外は外へ投げない
-        // （ADR 0089 決定5。⚠ この経路では書き込みが部分的に起きているため、ADR 0100 の
-        // 判断はここには当てはまらない——投げずに返す形をそのまま残す）。
         finalOutcomeById.set(id, {
           memoryId: id,
           kind: "failed",
@@ -8831,8 +5784,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
-    // 8. 統合先は既に作られている——途中で supersede が打ち切られても outcome は変わらない
-    // （ADR 0089 決定5）。
+    // 統合先は既に作られている。途中で supersede が打ち切られても outcome は変わらない（ADR 0089）。
     return {
       outcome: "consolidated",
       nothingReason: null,
@@ -8844,63 +5796,40 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
-  /**
-   * `Runtime.reflect` の実装（Issue #104）。doc コメントは interface 側
-   * （`reflect` の JSDoc）にある——ここはアルゴリズムそのものだけ。`consolidate` の実装の
-   * 双子だが、書き込みの終盤（手順7以降）が違う——既存の行へは一切書き込まない。
-   */
   async function reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult> {
     const target = opts.target;
 
-    // 1. 対象の正規化。
     let ids: MemoryId[];
     if ("memoryIds" in target) {
       ids = target.memoryIds;
     } else if ("seedMemoryId" in target) {
-      // Issue #204（ADR 0154）: `consolidate` の { seedMemoryId }（ADR 0152）と同じ土台選定。
-      // ReflectTarget の doc コメント参照。
       const seed = await deps.memoryStore.get(ctx, target.seedMemoryId);
       if (seed === null || isWithdrawnSeed(seed)) {
-        // 種が無い——recall を呼ばない。対象は種の id 1件のみとなり、後続の getMany が
-        // not_found に分類する（新しい nothingReason は発明しない）。
-        // Issue #1136: 種が forget・purge された記憶のときも同じく recall を呼ばない。
-        // 後続の getMany が status_not_active(forgotten) に分類する。
         ids = [target.seedMemoryId];
       } else {
-        // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
-        // 経路を通す（新しい「似ている」の判定を作らない）。
-        // ADR 0353（Issue #338）: `target.activityCounting` をそのまま渡す
-        // （省略時は recall() 側の既定 "tenant" に落ちる）。
-        // Issue #1200 / ADR 0359: `opts.signal` をそのまま渡す（`consolidate` と同じ形）。
         const recallResult = await recall(
           ctx,
           {
             text: seed.digest,
             activityCounting: target.activityCounting,
-            // ADR 0415: この recall は `memories` しか読まない（`totalInScope`・目次帯・`filtered*` は読まない）ので、
-            // 件数の集計（`aggregateScope` の `GROUP BY subject_id`）を発行しない。
+            // この recall は `memories` しか読まない（`totalInScope`・目次帯・`filtered*` は読まない）ので、件数の集計（`aggregateScope` の `GROUP BY subject_id`）を発行しない（ADR 0415）。
             scopeAggregate: "skip",
           },
           { signal: opts.signal },
         );
         const minAffinity = target.minAffinity ?? DEFAULT_REFLECT_MIN_AFFINITY;
         const neighborIds = recallResult.memories
-          // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
-          // 渡された `seedMemoryId` のままだと、`@mnemora/postgres` に大文字の UUID を渡したとき種が近傍にも
-          // 入り、同じ記憶が大文字と小文字で2回並んでいた（`uppercase-uuid-store-entry.postgres.test.ts`）。
+          // 種を除く比較は store が返した種の id（`seed.id`）で行う（大文字の UUID を渡しても、種が近傍に重複しない）。
           .filter((m) => m.memoryId !== seed.id)
           .filter((m) => computeAffinity(m.score) >= minAffinity)
           .map((m) => m.memoryId);
-        // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと
-        // recall() の結果に現れないため——ReflectTarget の doc コメント参照）。
+        // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと recall() の結果に現れないため）。
         ids = [target.seedMemoryId, ...neighborIds];
         if (target.maxCandidates !== undefined) {
           ids = ids.slice(0, target.maxCandidates);
         }
       }
     } else {
-      // ADR 0415: 利用者が `scopeAggregate` を明示していなければ "skip"（件数の集計を発行しない）。
-      // ここは `memories` しか読まない。明示された値（"exact" を含む）は尊重する。
       const recallResult = await recall(
         ctx,
         { ...target.query, scopeAggregate: target.query.scopeAggregate ?? "skip" },
@@ -8913,7 +5842,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           : recalledIds.slice(0, target.maxCandidates);
     }
     if (ids.length === 0) {
-      // store に一切触れない——「見ていない」。
       return {
         outcome: "not_examined",
         nothingReason: null,
@@ -8924,12 +5852,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 2. `getMany` で一括読み、id ごとに「まだ何も書いていない時点」の分類を固定する。
-    // 優先順: not_found → status_not_active → expired/not_yet_valid → basis_is_reflected → eligible。
-    // Issue #1188（2026-09-29 追記）: status の判定の後・provenance の判定の前に、いまの時点で
-    // 有効期間の外にある記憶を弾く。内省の記憶は有効期間を持たない（ADR 0164「射程外にしたもの」1）
-    // ので、期限切れ・未到来の記憶を材料にすると、その内容が期限の無い `active` な記憶として
-    // `recall()` に戻ってしまうため（`consolidate` の同じ判定と同じ理由・同じ述語）。
     type InitialClassification =
       | { kind: "not_found" }
       | { kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> }
@@ -8938,12 +5860,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       | { kind: "basis_is_reflected" }
       | { kind: "eligible" };
 
-    // 述語は `classifyValidity`（`consolidate` と同じ関数）——対象の形（memoryIds/query/seedMemoryId）
-    // によらず全候補に当てる。時刻は呼んだ時点の `clock.now()` で固定する（土台ごとに違う時刻を見ない）。
     const validAt = clock.now();
 
     const uniqueIds = Array.from(new Set(ids));
-    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`forget` と同じ形）。
     const lookupKey = memoryLookupKeyFor(uniqueIds);
     const found = await deps.memoryStore.getMany(ctx, uniqueIds);
     const byId = new Map<MemoryId, Memory>();
@@ -8972,10 +5891,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
-    /**
-     * `ids`（入力順・重複を保つ）を `ReflectBasisOutcome[]` へ写す。`eligible` と分類された
-     * id だけ `eligibleOutcome` に委ねる——それ以外はどの分岐でも同じ顔。
-     */
     function mapBasis(
       eligibleOutcome: (id: MemoryId) => ReflectBasisOutcome,
     ): ReflectBasisOutcome[] {
@@ -9000,8 +5915,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       });
     }
 
-    // eligible: 重複を除いた「active かつ provenance.kind !== 'reflected'」の id を、`ids`
-    // の中で最初に現れた順に並べる。
     const eligibleIds: MemoryId[] = [];
     const seenEligible = new Set<MemoryId>();
     for (const id of ids) {
@@ -9011,8 +5924,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
     }
 
-    // 3. eligible が0件なら、LLM を呼ばずに打ち切る（`consolidate` と違い、1件だけでも
-    // ここでは打ち切らない——1件からの一般化も意味を持ちうる）。
     if (eligibleIds.length === 0) {
       return {
         outcome: "nothing_to_reflect",
@@ -9024,7 +5935,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 4. dryRun はここで打ち切る。1件も書かない。
     if (opts.dryRun === true) {
       return {
         outcome: "dry_run",
@@ -9038,7 +5948,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const eligibleMemories = eligibleIds.map((id) => byId.get(lookupKey(id))!);
 
-    // 5. LLM を1回呼ぶ。失敗したら1件も書かない。
     let llmResult: ReflectionLLMResult;
     // ADR 0456: consolidate と同じ。落とした補助の欄の記録。
     let reflectDroppedFields: DroppedAuxField[] = [];
@@ -9063,8 +5972,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
       }
     } catch (error) {
-      // Issue #1200 / ADR 0359: abort による reject は `"llm_failed"` に丸めず、
-      // そのまま投げ直す——この時点ではまだ何も書いていない。
+      // abort による reject は `"llm_failed"` に丸めずそのまま投げ直す（ADR 0359）。この時点ではまだ何も書いていない。
       if (isAbort(opts.signal)) {
         throw error;
       }
@@ -9078,7 +5986,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 6. LLM が「一般化するものは無い」と答えた——書き込みゼロ。
     if (llmResult.outcome === "nothing") {
       return {
         outcome: "nothing_to_reflect",
@@ -9090,10 +5997,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // Issue #1226 / ADR 0375 決定7（クローン miku の判断）: LLM が `'reflected'` を返した
-    // 直後・内省の Memory を組み立てる前に、eligible を読み直す。1件でも forgotten
-    // （`forget()` のみ・`purge()` 済みのどちらも含む）なら、内省の Memory を一切作らずに
-    // 打ち切る（interface の doc コメント、`reflect` の JSDoc 手順6の追記参照）。
     const recheckedBeforeReflectWrite = await deps.memoryStore.getMany(ctx, eligibleIds);
     const recheckedByIdBeforeReflectWrite = new Map<MemoryId, Memory>();
     for (const memory of recheckedBeforeReflectWrite) {
@@ -9119,8 +6022,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // ADR 0420: 同じ読み直しで、superseded も見る（forgotten と同じ形）。LLM を待つ間に別の記憶で置き換えられた
-    // 材料の古い本文から作った内省を、active で残さない。
     const supersededBeforeReflectWrite = new Map<MemoryId, MemoryStatus>();
     for (const id of eligibleIds) {
       const status = recheckedByIdBeforeReflectWrite.get(lookupKey(id))?.status;
@@ -9145,11 +6046,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    // 7. 新しい Memory を1件作る（既存の行へは一切書き込まない——決定4）。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
-    // ADR 0165 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（reflect 手順7）。
-    // ADR 0394: 反映先の subject（eligible 全件が一致すればその値、割れれば null）の `T + S_x`。
+    // 反映先の subject（eligible 全件が一致すればその値、割れれば null）の `T + S_x`（ADR 0165・ADR 0394）。
     const activityClockBase = await resolveActivityClockBase(ctx);
     const reflectedSubjectId = resolveCommonSubjectId(eligibleMemories);
     const activityClockInputs = activityClockInputsFor(
@@ -9169,14 +6068,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       now,
       ...activityClockInputs,
     });
-    // Issue #1226: 上の読み直しに続く、書き込みそのものの中での見直し。`@mnemora/postgres`
-    // はこれを INSERT と同一トランザクションの `SELECT … FOR UPDATE` として実装する
-    // （`abortIfForgotten` の doc コメント参照）。
-    //
-    // ADR 0416（穴 D-3 の続き）: store が `createMemoriesWithOutboxAndEvents?` を持つなら、内省の Memory と
-    // `created` をその口で**1トランザクション**に書く（1件。`abortIfForgotten` も同じ呼び出しに渡す）。
-    // 口が無い adapter は今までどおり `createMemoryWithOutbox` + 別の `eventStore.append`（直さない負債）。
-    // 🔴 口の有無だけで経路を選ぶ。⛔ 撃って投げられたときに旧経路で撃ち直さない（二重に書きうる。ADR 0100）。
     const buildReflectedCreatedEvent = (memory: Memory) =>
       ({
         tenantId: ctx.tenantId,
@@ -9265,16 +6156,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw error;
     }
     if (created && !createdEventWritten) {
-      // 8. `created` イベントを1件積む（口が無い adapter の経路。口がある adapter は上の呼び出しで同じ
-      // トランザクションに積み済み）。`reflect` はこれ以外のイベントを一切積まない
-      // （既存の行の status を動かさないため、`superseded`/`forgotten` の類は存在しない）。
       await deps.eventStore.append(ctx, buildReflectedCreatedEvent(reflectedMemory));
     }
-    // embed ジョブは常に outbox 経由（`createMemoryWithOutbox` が積む）。ここでは何もしない
-    // — tick() の processEmbedJob が処理する。
 
-    // 9. eligible は全件 used——`reflect` は既存の行を一切動かしていないので、`consolidate`
-    // の手順7のような「途中で打ち切られる」分岐は存在しない。
     return {
       outcome: "reflected",
       nothingReason: null,
