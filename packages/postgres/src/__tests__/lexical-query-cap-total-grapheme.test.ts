@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LEXICAL_QUERY_MAX_TOTAL_CHARS, capLexicalQueryTotalChars } from "../lexical-query-cap.js";
 
-/**
- * クエリ全体の上限（{@link LEXICAL_QUERY_MAX_TOTAL_CHARS}）の境目に、サロゲートペア・結合文字・
- * ZWJ の絵文字列が来る入力を縛る（Issue #1798 の (B)）。
- * ASCII だけの境界は `lexical-query-cap-total-boundary.test.ts` が見ている。
- */
-
 const MAX = LEXICAL_QUERY_MAX_TOTAL_CHARS;
 
 const SURROGATE_PAIR = "😀";
@@ -24,7 +18,6 @@ function graphemeEnds(text: string): Set<number> {
   return ends;
 }
 
-/** 境目（MAX）をまたぐように `unit` を置く。先頭からの位置が `startOffset` になるよう ASCII で埋める。 */
 function queryWithUnitStartingAt(unit: string, startOffset: number): string {
   return "a".repeat(startOffset) + unit + "b".repeat(50);
 }

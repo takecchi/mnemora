@@ -495,6 +495,6 @@ Issue #878 に残した。
 
 - **理由**【現物】: 境目にサロゲートペアが来ると孤立サロゲートが残り、結合文字・ZWJ の絵文字列が来ると書記素が割れた。ADR 0424・0467・0470 が直した3か所と同じ壊れ方である。
 - **単位の約束**: 本文の「先頭から600文字に切り詰める」は、UTF-16 コードユニットとは書いていない。「600 以下に収める」と読み、単位はコードユニットのまま、境目に書記素が跨るときだけ手前で切る。境目に当たらない入力は1文字も変わらない。
-- **部品**: `sliceAtGraphemeBoundary` の写しを `packages/postgres/src/grapheme-slice.ts` に置いた。core から公開すると公開 API の snapshot（ADR 0178）が増えるため、公開はしていない。
-- **残したもの**: testkit の fixture `in-memory-lexical-store.ts` と、core のテスト用 Fake（`runtime-fakes.ts`）の同じ切り詰めは、別の PR で揃える。
+- **部品**: `sliceAtGraphemeBoundary` の写しを `packages/postgres/src/lexical-query-cap.ts` の中に、export しない関数として置いた。core から公開すると公開 API の snapshot（ADR 0178）が増えるため、公開はしていない。
+- **揃えたもの**: 同じ切り詰めを写している testkit の fixture（`in-memory-lexical-store.ts`）と core のテスト用 Fake（`runtime-fakes.ts`）も、同じ変更で書記素の境界に揃えた。fixture には写しを `in-memory-lexical-store.ts` の中に export しない関数として置き、Fake は core の内部の `text-truncation.ts` を相対 import する。fixture の切り方の変更は例外を投げないので、公開の fixture の破壊的変更には数えない（docs/migration-v1.md の数え方の規律2より軽い）。
 - 本文は書き換えていない。

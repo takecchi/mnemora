@@ -1,5 +1,3 @@
-import { sliceAtGraphemeBoundary } from "./grapheme-slice.js";
-
 /**
  * クエリの語数・語ごとの文字数に上限を設ける（Issue #878、2026-09-26、クローン miku の判断）。
  *
@@ -210,3 +208,26 @@ export function capLexicalQueryWords(query: string): string {
  * （`jaTerm` の組み立てを参照）。
  */
 export const TRIGRAM_JAPANESE_QUERY_MAX_CHARS = 100;
+
+/**
+ * `@mnemora/core` の `sliceAtGraphemeBoundary`（`packages/core/src/text-truncation.ts`）の写し。testkit の fixture（`in-memory-lexical-store.ts`）にも同じ写しがある。
+ * core から import しないのは、core の内部関数で公開していないため（公開すると公開 API の snapshot が増える）。
+ * export しないのは、このパッケージの公開面に出さないため。切り詰めの規則を変えるときは3つとも見ること。
+ */
+function sliceAtGraphemeBoundary(text: string, maxLength: number): string {
+  const limit = Math.max(0, maxLength);
+  if (text.length <= limit) {
+    return text;
+  }
+  let end = 0;
+  for (const { segment, index } of graphemeSegmenter.segment(text)) {
+    const next = index + segment.length;
+    if (next > limit) {
+      break;
+    }
+    end = next;
+  }
+  return text.slice(0, end);
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });

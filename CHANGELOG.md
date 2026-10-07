@@ -343,7 +343,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/core` の `recall()` で、クエリ埋め込みの失敗の `cause`（`providerErrorKind`・`errorName`）を、書記素の境界で切るようにした**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0470](./docs/decisions/0470-footprint-digits-failure-description-grapheme.md) の追記）。以前は 64 コードユニットの位置にサロゲートペアが跨ると孤立サロゲートが残った。長さは今までどおり 64 コードユニット以下で、公開の型は変わらない。
 
-- **`@mnemora/postgres` の語彙検索で、クエリ全体の上限（600）の切り口を、書記素の境界に揃えた**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) の追記）。以前は境目にサロゲートペアが来ると孤立サロゲートが、結合文字・ZWJ の絵文字列が来ると割れた書記素が残った。長さは今までどおり 600 コードユニット以下で、境目に当たらないクエリは変わらない。公開の型・API は変わらない。
+- **`@mnemora/postgres` の語彙検索で、クエリ全体の上限（600）の切り口を、書記素の境界に揃えた**（[Issue #1798](https://github.com/takecchi/mnemora/issues/1798)、[ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) の追記）。以前は境目にサロゲートペアが来ると孤立サロゲートが、結合文字・ZWJ の絵文字列が来ると割れた書記素が残った。長さは今までどおり 600 コードユニット以下で、境目に当たらないクエリは変わらない。公開の型・API は変わらない。 同じ切り詰めを写している `@mnemora/testkit/fixtures` の `InMemoryLexicalStore` も同じ切り口に揃えた（例外は投げない）。
 
 ## [1.2.0] - 2026-10-02
 
