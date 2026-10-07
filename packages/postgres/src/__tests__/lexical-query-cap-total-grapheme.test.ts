@@ -99,3 +99,14 @@ describe("capLexicalQueryTotalChars: 境目に当たらない入力は今まで�
     );
   });
 });
+
+// 再確かめ（2026-10-07 マージ分、#1870）。先頭の書記素だけで上限を超えるときは、割った断片を残さず空にする
+// （core の `sliceAtGraphemeBoundary` の約束。この関数は写し）。上限ちょうどで素朴に切る形へ戻ると、
+// 結合記号の途中で割れた断片が残る。
+describe("capLexicalQueryTotalChars: 先頭の書記素だけで上限を超える入力", () => {
+  it("書記素を割った断片を残さず、空文字列にする", () => {
+    const query = "e" + "́".repeat(MAX + 50) + " tail";
+    expect(graphemeEnds(query).has(MAX)).toBe(false);
+    expect(capLexicalQueryTotalChars(query)).toBe("");
+  });
+});

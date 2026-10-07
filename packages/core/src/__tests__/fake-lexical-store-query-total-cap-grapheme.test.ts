@@ -61,3 +61,12 @@ describe("FakeLexicalStore.search: クエリ全体の上限の境目にある書
     expect(await search(`本文に ${STEM}e を含む`, query)).toHaveLength(1);
   });
 });
+
+// 再確かめ（2026-10-07 マージ分、#1870）。先頭の書記素だけで上限を超えるときは、割った断片（`e` だけ）を
+// 語として残さず、クエリごと空になる。
+describe("FakeLexicalStore.search: 先頭の書記素だけで上限を超えるクエリ", () => {
+  it("書記素を割った断片の `e` を語として残さない", async () => {
+    const query = `e${COMBINING_ACUTE.repeat(LEXICAL_QUERY_MAX_TOTAL_CHARS + 50)} tail`;
+    expect(await search("本文に e を含む", query)).toHaveLength(0);
+  });
+});
