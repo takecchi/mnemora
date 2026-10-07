@@ -24,7 +24,10 @@ function oneFileDir(): string {
   return dir;
 }
 
-function createFakePool(capabilityRow: typeof CAPABLE | null): {
+function createFakePool(
+  capabilityRow: typeof CAPABLE | null,
+  options: { rollbackFails?: boolean } = {},
+): {
   pool: Pool;
   log: string[];
   released: { count: number };
@@ -43,6 +46,9 @@ function createFakePool(capabilityRow: typeof CAPABLE | null): {
   const client = {
     query: async (text: string) => {
       log.push(text.includes("pg_settings") ? "PROBE" : text.trim());
+      if (options.rollbackFails === true && text.trim() === "ROLLBACK") {
+        throw new Error("ROLLBACK 自体の失敗（接続断など）");
+      }
       return respond(text);
     },
     release: () => {
@@ -121,4 +127,17 @@ describe("runMigrations: 能力検査を囲む search_path（Issue #1780、DB �
     const begin = log.indexOf("BEGIN");
     expect(log.slice(begin, begin + 5)).toEqual(["BEGIN", SET_PATH, "PROBE", "COMMIT", "RELEASE"]);
   });
+
+  it.each(["create", "verify"] as const)(
+    "%s + 能力が無い + ROLLBACK も失敗: ROLLBACK の失敗で元の PgvectorVersionUnsupportedError を上書きしない",
+    async (extensionMode) => {
+      const { pool } = createFakePool(null, { rollbackFails: true });
+
+      const err = await runMigrations(pool, oneFileDir(), { ...OPTIONS, extensionMode }).catch(
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(PgvectorVersionUnsupportedError);
+    },
+  );
 });
