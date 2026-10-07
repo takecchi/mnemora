@@ -1,19 +1,9 @@
 /**
- * `scripts/embedding-output-fingerprint-summary.mjs`（CI の Job Summary に載せる
- * Markdown を組み立てる CLI）の**純関数の側**。ファイル I/O・`process.argv`・
- * `process.exit` を一切持たない（`retrieval-quality-summary-lib.mjs` と同じ分担。
- * Issue #565、ADR 0253 追記）。
- *
- * ⛔ **このスクリプトは門ではない。**測定した sha256・次元数・CPU 情報をそのまま
- * 表示するだけで、良し悪しを判定しない——判定（一致/不一致の突き合わせ）は
- * `scripts/compare-embedding-output-fingerprints.mjs` の役目であり、このジョブは
- * それより前段（自分自身が何を測ったか）を報告するだけである。
+ * ⛔ このスクリプトは門ではない。測定した値をそのまま表示するだけで、良し悪しを判定しない。
+ * 一致/不一致の突き合わせは `scripts/compare-embedding-output-fingerprints.mjs` の役目。
  */
 
 /**
- * `scripts/measure-embedding-output-fingerprint.mjs` が書いた測定 JSON（パース済み）の
- * 形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -41,8 +31,6 @@ export function validateFingerprintRecord(data) {
 }
 
 /**
- * CPU 情報を Markdown の箇条書きへ整形する。
- *
  * @param {Record<string, unknown> | undefined} cpuInfo
  * @returns {string[]}
  */
@@ -59,8 +47,6 @@ function formatCpuInfoLines(cpuInfo) {
 }
 
 /**
- * Markdown を組み立てる。**stdout に出すのは呼び出し側の役目**——ここは文字列を返すだけ。
- *
  * @param {Record<string, unknown>} measured
  * @returns {string}
  */
