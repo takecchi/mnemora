@@ -3,115 +3,63 @@ import { omitParamsFromError } from "../failure-description.js";
 import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 
 /**
- * `tenant_settings.default_half_life_hours` の DB 側デフォルト（720時間 = 30日、
- * docs/memory-model.md §10 の DDL `DEFAULT 720`）と一致させる、テナント設定行が
- * 存在しない場合のフォールバック値。adapter 実装（`packages/postgres`）・
- * `packages/testkit` の in-memory 実装の両方がこの定数を使う。
+ * テナント設定行が存在しない場合のフォールバックの半減期（720時間 = 30日）。
+ * `tenant_settings.default_half_life_hours` の DB 側デフォルト（docs/memory-model.md §10 の `DEFAULT 720`）と一致させる。
  */
 export const DEFAULT_HALF_LIFE_HOURS = 720;
 
 /**
  * `halfLifeHours` の値域は **`(0, ∞)`（有限の正の実数）**である（ADR 0125）。
+ * `Memory.halfLifeHours` と `tenant_settings.default_half_life_hours` の両方に同じ意味で適用する。
  *
- * この値は2箇所で同じ意味を持つ——`Memory.halfLifeHours`（`memories.half_life_hours`）と
- * `tenant_settings.default_half_life_hours`（前者の既定値の元になる）。どちらも
- * `defaultDecayStrategy`（`strategies/decay.ts`）の割り算 `elapsedHours / halfLifeHours` に
- * 直接入るため、値域が同じでなければならない。だからこの関数を1箇所に置き、
- * 両方の adapter（`packages/postgres` と `packages/testkit` の in-memory 実装）がここを呼ぶ。
- *
- * **0 を含めない**: `halfLifeHours = 0` は「即座に消える」を意味するが、それは
- * `strength` を下げる・`status: 'forgotten'` にする、という既存の経路が既に表せる。
- * `decay` の式を「0 で割る」経路に落とす理由が無い。
- *
- * **負を含めない**: half-life は「半分になるまでの時間」であり、負の時間は定義されない。
- * 実測（`decay.ts` の式を直接呼んだ）: `halfLifeHours` が負（あるいは負の0）だと、
- * 経過時間が正の Memory では `decay = strength * 0.5 ** (elapsed / halfLifeHours)` の
- * 指数が負に振れ、`decay` が `+Infinity` に発散する——**この issue が名指しした「必ず
- * 想起の1位に来る」壊れ方は、`0` そのものよりもこちらの経路で起きる**（下記「確かめた
- * こと」参照）。
- *
- * **有限に限る（`Infinity` を含めない）**: `Infinity` 自体は式の中では `decay` を
- * 常に `1`（減衰しない）に固定するだけで、`NaN`/`Infinity` には発散しない——**しかし
- * 「半減期」という語の意味上、有限でない half-life は矛盾した値であり、他に使う理由が
- * 無い**。ADR 0078 が「迷ったら厳しい側に置く（緩めるのは後から非破壊、締めるのは
- * 後から破壊的）」と決めた判断をそのまま踏襲する。
- *
- * **確かめたこと（`node` で `decay.ts` の式をそのまま評価した。この関数自体の変更ではない）**:
- *
- * | `halfLifeHours` | `strengthAt(elapsed=100h)` | `strengthAt(elapsed=0h)` |
- * |---|---|---|
- * | `0`（+0） | `0` | `NaN` |
- * | `-0` | `+Infinity` | `NaN` |
- * | `-1` | `+Infinity`（実測値は `1.2676506002282294e+30`、指数が大きいほど発散） | `1` |
- * | `NaN` | `NaN` | `NaN` |
- * | `Infinity` | `1`（発散しない） | `1` |
- *
- * ⟹ **Issue #231 の「`halfLifeHours` が `0` または `NaN` だと `decay = +Infinity` になる」
- * という記述は、`0` については不正確である**（`0` は `elapsed > 0` のとき `decay = 0` に、
- * `elapsed = 0` のとき `NaN` になる。`+Infinity` に発散するのは負の `halfLifeHours` の
- * ときである）。**`NaN` は式全体を `NaN` に伝播させ、`+Infinity` にはならない。**
- * どちらにせよ、`0`・負・`NaN` の**いずれも**この関数が拒む値域の外にあり、
- * 個別の壊れ方の違いはこの関数の設計を変えない——**すべて拒む**。
+ * - **0 を含めない**: 「即座に消える」は `strength` を下げる・`status: 'forgotten'` にする既存の経路が表せる。
+ * - **負を含めない**: `defaultDecayStrategy` の `decay` が `+Infinity` に発散し、「必ず想起の1位に来る」壊れ方になる。
+ * - **有限に限る**: `Infinity` は式の中では発散しないが、「半減期」の意味上、矛盾した値である（ADR 0078。
+ *   緩めるのは後から非破壊、締めるのは後から破壊的）。
+ * - `NaN` は式全体を `NaN` に伝播させる。
  */
 export function isHalfLifeHoursInRange(value: number): boolean {
   return value > 0 && Number.isFinite(value);
 }
 
 /**
- * `tenant_settings.event_retention_days` が取りうる3つの状態（`docs/memory-model.md`
- * §9「保持方針」）。
+ * `tenant_settings.event_retention_days` が取りうる3つの状態（`docs/memory-model.md` §9「保持方針」）。
  *
- * ⚠ この3つを2つに潰さないこと（`ADR 0029` が `not_examined`（見ていない）と
- * `unchanged`（見たが変えなかった）を分けたのと同じ形）:
+ * ⚠ この3つを2つに潰さないこと:
  *
  * - `unset`: `tenant_settings` に行が無い（まだ設定していない。既定は無期限として動く）。
- * - `unlimited`: 行は在るが `event_retention_days` が `NULL`（**明示的に**無期限と決めた）。
+ * - `unlimited`: 行は在るが `event_retention_days` が `NULL`（無期限）。
  * - `days`: 行が在り、`event_retention_days` に具体的な日数が入っている。
  *
- * `unset` と `unlimited` は「結果として無期限として振る舞う」点では同じだが、
- * 「テナントが一度も触っていない」ことと「テナントが無期限を選んだ」ことは別の事実であり、
- * `getEventRetention` の呼び出し側（将来の運用ジョブ・管理画面）がこの2つを区別できないと、
- * 「まだ何も設定していないテナントの一覧」が作れなくなる。
- *
- * ⚠ ただし今の実装では、保持期間以外の設定を1つでも書くと行ができるので、
- * 保持期間を一度も触っていないテナントも `unlimited` になる（`getEventRetention` の doc 参照）。
+ * ⚠ 保持期間以外の設定を1つでも書くと行ができるので、保持期間を一度も触っていないテナントも `unlimited` になる
+ * （`getEventRetention` の doc 参照）。
  */
 export type EventRetention =
   { kind: "unset" } | { kind: "unlimited" } | { kind: "days"; days: number };
 
 /**
- * `setEventRetention` に渡せる値。`unset`（行が無い状態）は*観測される*状態であって、
- * *設定できる*値ではない——「行を無かったことにする」という削除操作を、この interface は
- * 提供しない（`docs/memory-model.md` §9 の削除方針の対象外。下記 doc 参照）。
+ * `setEventRetention` に渡せる値。`unset`（行が無い状態）は*観測される*状態であって、*設定できる*値ではない。
+ * 「行を無かったことにする」削除操作を、この interface は提供しない。
  */
 export type EventRetentionSetting = Exclude<EventRetention, { kind: "unset" }>;
 
 /**
- * `setEventRetention` に不正な `days`（正の整数でない値）を渡したときに両実装が投げる
- * `Error` のメッセージに必ず含める文字列。適合スイート
- * （`packages/testkit/src/tenant-settings-store-conformance.ts`）が、`TypeError` のような
- * 別種の失敗と区別するためにこの文字列を正規表現で固定する
- * （`packages/testkit/src/memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ形）。
+ * `setEventRetention` に不正な `days`（正の整数でない値）を渡したときに両実装が投げる `Error` の
+ * メッセージに必ず含める文字列。
  */
 export const EVENT_RETENTION_DAYS_INVALID_MESSAGE =
   "event retention days must be a positive integer";
 
 /**
  * `days` が正の整数で、int4 に収まる（`2^31 - 1` 以下。ADR 0499）ことを検査する。不正なら `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
- * を含む `Error` を投げる。`packages/postgres`・`packages/testkit` の両方の
- * `setEventRetention` 実装がこの関数を呼ぶことで、検査の種類を1箇所に固定する
- * （実装ごとに条件式を書き直すと、境界（`>= 1` か `>= 0` か）が実装間でずれる余地を作る）。
+ * を含む `Error` を投げる。`packages/postgres`・`packages/testkit` の両方の `setEventRetention` 実装がこの関数を呼ぶ。
  *
- * ⚠ 延長（いまより長い日数への変更）は禁止しない——オーナーが決めたのは「短縮できる口は
- * 必須」であり、延長を禁じたとは言っていない。禁止を勝手に作らない
- * （`docs/decisions/0050-tenant-event-retention.md` 参照）。
+ * ⚠ 延長（いまより長い日数への変更）は禁止しない（ADR 0050）。
  */
 export function assertValidEventRetentionDays(days: number): void {
   if (!Number.isInteger(days) || days < 1) {
     throw new Error(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
   }
-  // ADR 0499: `tenant_settings.event_retention_days` は `integer`（int4）列で、`2^31` 以上は Postgres が `22003` で拒む。
-  // 共有の検査にして、2実装が同じ文面で断る。
   if (days > EVENT_RETENTION_DAYS_MAX) {
     throw new Error(
       `setEventRetention: days does not fit in a Postgres "integer" (int4) column (got ${days})`,
@@ -123,20 +71,16 @@ export function assertValidEventRetentionDays(days: number): void {
 const EVENT_RETENTION_DAYS_MAX = 2 ** 31 - 1;
 
 /**
- * `setEventRetention` に型の外の `kind`（`EventRetentionSetting` の `"unlimited"`・`"days"` の
- * いずれでもない値）を渡したときに両実装が投げる `Error` のメッセージに必ず含める文字列
- * （`DECAY_CLOCK_INVALID_MESSAGE` と同じ形、Issue #1168）。
+ * `setEventRetention` に型の外の `kind`（`"unlimited"`・`"days"` のいずれでもない値）を渡したときに
+ * 両実装が投げる `Error` のメッセージに必ず含める文字列。
  */
 export const EVENT_RETENTION_KIND_INVALID_MESSAGE =
   "event retention kind must be 'unlimited' or 'days'";
 
 /**
- * `value` が `EventRetentionSetting` の `kind`（`"unlimited"`・`"days"`）のいずれかであることを
- * 検査する。不正なら `EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` を投げる。
- * `assertValidDecayClock` と同じ形——`packages/postgres`・`packages/testkit` の両方の
- * `setEventRetention` 実装がこの関数を呼ぶことで、検査の種類を1箇所に固定する。
- *
- * Issue #1168: 型の外の `kind`（綴りの誤りなど）が、例外にならずに保持期間を無期限にするのを防ぐ。
+ * `value` が `EventRetentionSetting` の `kind`（`"unlimited"`・`"days"`）のいずれかであることを検査する。
+ * 不正なら `EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` を投げる。
+ * 型の外の `kind`（綴りの誤りなど）が、例外にならずに保持期間を無期限にするのを防ぐ。
  */
 export function assertValidEventRetentionKind(
   value: string,
@@ -147,8 +91,7 @@ export function assertValidEventRetentionKind(
 }
 
 /**
- * 減衰の時計の種類（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
- * 決めたこと1）。
+ * 減衰の時計の種類（ADR 0165 決めたこと1）。
  *
  * - `'wall'`: 段1のゲートは `decay_floor_at > now()` のみ。
  * - `'activity'`: 段1のゲートは `decay_floor_seq > <そのテナントの activity_seq>` のみ。
@@ -157,36 +100,26 @@ export function assertValidEventRetentionKind(
 export type DecayClock = "wall" | "activity" | "either";
 
 /**
- * `tenant_settings.decay_clock` の DB 側デフォルトと一致させる、テナント設定行が
- * 存在しない場合のフォールバック値（ADR 0165 決めたこと1「`tenant_settings` に行が無い
- * テナントは `'wall'` として動く」——`DEFAULT_HALF_LIFE_HOURS` と同じ扱い）。
+ * テナント設定行が存在しない場合のフォールバックの減衰の時計（`'wall'`。ADR 0165 決めたこと1）。
+ * `tenant_settings.decay_clock` の DB 側デフォルトと一致させる。
  */
 export const DEFAULT_DECAY_CLOCK: DecayClock = "wall";
 
 /**
- * `tenant_settings.default_half_life_recalls` の DB 側デフォルト、テナント設定行が
- * 存在しない場合のフォールバック値（ADR 0165 決めたこと3）。
+ * テナント設定行が存在しない場合のフォールバックの `default_half_life_recalls`（ADR 0165 決めたこと3）。
+ * `tenant_settings.default_half_life_recalls` の DB 側デフォルトと一致させる。
  *
- * **⭐ `720` は「1 recall ↔ 1時間」という1対1の対応を既定に置いたものである。**
- * 壁時計の既定 `DEFAULT_HALF_LIFE_HOURS` も `720`（720時間 = 30日）——この2つの数字が
- * 揃っているのは偶然ではなく、**「1時間に1回 recall するテナントでは、2本の時計がほぼ
- * 同じ速さで進む」**という対応を意図して選んだ値である。活動が疎（1時間に1回未満）な
- * テナントでは活動時計のほうが遅く進み（＝記憶が長生きする）、活動が密（1時間に1回超）な
- * テナントでは活動時計のほうが速く進む——`decay_clock` を `'activity'`/`'either'` に
- * 切り替えたときの体感速度を、壁時計からの延長として説明できるようにするための対応である。
+ * `720` は「1 recall ↔ 1時間」の1対1の対応を既定に置いたもので、`DEFAULT_HALF_LIFE_HOURS` と揃えてある。
+ * 活動が疎（1時間に1回未満）なテナントでは活動時計のほうが遅く進み、密（1時間に1回超）なテナントでは速く進む。
  */
 export const DEFAULT_HALF_LIFE_RECALLS = 720;
 
 /**
- * `halfLifeRecalls` の値域は **`(0, ∞)`（有限の正の実数）**であり、`isHalfLifeHoursInRange`
- * と**同じ値域**である（ADR 0125 の理由をそのまま引く——`halfLifeRecalls` も
- * `defaultActivityDecayStrategy` の割り算 `elapsed / halfLifeRecalls` に直接入るため、
- * 0・負・非有限を拒む理由は `isHalfLifeHoursInRange` の doc コメントに実測として
- * 記録されているものと同一である）。
+ * `halfLifeRecalls` の値域は **`(0, ∞)`（有限の正の実数）**であり、`isHalfLifeHoursInRange` と**同じ値域**である（ADR 0125）。
  *
  * ⚠ この関数が見るのは float64 の値域だけである。保存先の Postgres の列は `real`（float4）なので、
- * float4 に収まらない値（上限は約 `3.4028235e38`、下限は約 `1.4e-45`）は、各 adapter が別に
- * 明示の例外で拒む（`setDefaultHalfLifeRecalls` の doc 参照）。
+ * float4 に収まらない値（上限は約 `3.4028235e38`、下限は約 `1.4e-45`）は、各 adapter が別に明示の例外で拒む
+ * （`setDefaultHalfLifeRecalls` の doc 参照）。
  */
 export function isHalfLifeRecallsInRange(value: number): boolean {
   return value > 0 && Number.isFinite(value);
@@ -194,16 +127,15 @@ export function isHalfLifeRecallsInRange(value: number): boolean {
 
 /**
  * `setDefaultHalfLifeRecalls` に不正な値（`isHalfLifeRecallsInRange` の値域外）を渡したときに
- * 投げる `Error` のメッセージに必ず含める文字列（`DECAY_CLOCK_INVALID_MESSAGE` と同じ形）。
+ * 投げる `Error` のメッセージに必ず含める文字列。
  */
 export const HALF_LIFE_RECALLS_INVALID_MESSAGE =
   "half life recalls must be a finite number greater than 0";
 
 /**
- * `value` が `isHalfLifeRecallsInRange` の値域（`(0, ∞)`）の内側であることを検査する。
- * 不正なら `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` を投げる。`assertValidDecayClock`
- * と同じ形——`packages/postgres`・`packages/testkit` の両方の `setDefaultHalfLifeRecalls`
- * 実装がこの関数を呼ぶことで、検査の種類を1箇所に固定する。
+ * `value` が `isHalfLifeRecallsInRange` の値域の内側であることを検査する。
+ * 不正なら `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` を投げる。
+ * `packages/postgres`・`packages/testkit` の両方の `setDefaultHalfLifeRecalls` 実装がこの関数を呼ぶ。
  */
 export function assertValidHalfLifeRecalls(value: number): void {
   if (!isHalfLifeRecallsInRange(value)) {
@@ -213,16 +145,13 @@ export function assertValidHalfLifeRecalls(value: number): void {
 
 /**
  * `setDecayClock` に不正な値（`DecayClock` の3値のいずれでもない文字列）を渡したときに
- * 両実装が投げる `Error` のメッセージに必ず含める文字列（`EVENT_RETENTION_DAYS_INVALID_MESSAGE`
- * と同じ形）。
+ * 両実装が投げる `Error` のメッセージに必ず含める文字列。
  */
 export const DECAY_CLOCK_INVALID_MESSAGE = "decay clock must be 'wall', 'activity', or 'either'";
 
 /**
- * `value` が `DecayClock` の3値のいずれかであることを検査する。不正なら
- * `DECAY_CLOCK_INVALID_MESSAGE` を含む `Error` を投げる。`assertValidEventRetentionDays` と
- * 同じ形——`packages/postgres`・`packages/testkit` の両方の `setDecayClock` 実装がこの関数を
- * 呼ぶことで、検査の種類を1箇所に固定する。
+ * `value` が `DecayClock` の3値のいずれかであることを検査する。不正なら `DECAY_CLOCK_INVALID_MESSAGE` を含む `Error` を投げる。
+ * `packages/postgres`・`packages/testkit` の両方の `setDecayClock` 実装がこの関数を呼ぶ。
  */
 export function assertValidDecayClock(value: string): asserts value is DecayClock {
   if (value !== "wall" && value !== "activity" && value !== "either") {
@@ -231,39 +160,29 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
 }
 
 /**
- * `tenant_settings.taxonomy_mode` が取りうる値（`packages/postgres/migrations/0001_init.sql` の
- * `tenant_settings` の CHECK、Issue #201、[ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)）。
+ * `tenant_settings.taxonomy_mode` が取りうる値（ADR 0318）。
  *
- * `docs/memory-model.md` §8「二つのモードを二つの経路にしない。『ラベルの状態』一つで
- * 表す」——`strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できる
- * か」だけであり、書き込みは `open`/`strict` に関わらず常に自由である。
- *
- * `recall()` は `getTaxonomyMode?` を
- * 読み、`open` なら `registered`・`proposed` の両方、`strict` なら `registered` だけを
- * ラベルの絞り込みの参加資格にする（`recall-runtime.ts` の `taxonomyMode`、`RecallQuery.labels` の doc）。
- * 読むのは、`labels` か `taxonomyGroups` を指定した `recall()` だけである。
+ * `strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できるか」だけであり、
+ * 書き込みは `open`/`strict` に関わらず常に自由である（`docs/memory-model.md` §8）。
+ * `recall()` は `getTaxonomyMode?` を読み、`open` なら `registered`・`proposed` の両方、`strict` なら `registered` だけを
+ * ラベルの絞り込みの参加資格にする。読むのは、`labels` か `taxonomyGroups` を指定した `recall()` だけである。
  */
 export type TaxonomyMode = "open" | "strict";
 
 /**
- * `tenant_settings.taxonomy_mode` の DB 側デフォルト（`packages/postgres/migrations/0001_init.sql`
- * の `DEFAULT 'open'`）と一致させる、テナント設定行が存在しない場合のフォールバック値。
- * `DEFAULT_DECAY_CLOCK` と同じ規律。
+ * テナント設定行が存在しない場合のフォールバックの `taxonomy_mode`。`tenant_settings.taxonomy_mode` の DB 側デフォルトと一致させる。
  */
 export const DEFAULT_TAXONOMY_MODE: TaxonomyMode = "open";
 
 /**
  * `setTaxonomyMode` に不正な値（`TaxonomyMode` の2値のいずれでもない文字列）を渡したときに
- * 両実装が投げる `Error` のメッセージに必ず含める文字列（`DECAY_CLOCK_INVALID_MESSAGE` と
- * 同じ形）。
+ * 両実装が投げる `Error` のメッセージに必ず含める文字列。
  */
 export const TAXONOMY_MODE_INVALID_MESSAGE = "taxonomy mode must be 'open' or 'strict'";
 
 /**
- * `value` が `TaxonomyMode` の2値のいずれかであることを検査する。不正なら
- * `TAXONOMY_MODE_INVALID_MESSAGE` を含む `Error` で失敗する。`assertValidDecayClock` と
- * 同じ形——`packages/postgres`・`packages/testkit` の両方の `setTaxonomyMode` 実装が
- * この関数を呼ぶことで、検査の種類を1箇所に固定する。
+ * `value` が `TaxonomyMode` の2値のいずれかであることを検査する。不正なら `TAXONOMY_MODE_INVALID_MESSAGE` を含む `Error` で失敗する。
+ * `packages/postgres`・`packages/testkit` の両方の `setTaxonomyMode` 実装がこの関数を呼ぶ。
  */
 export function assertValidTaxonomyMode(value: string): asserts value is TaxonomyMode {
   if (value !== "open" && value !== "strict") {
@@ -272,93 +191,43 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
 }
 
 /**
- * TenantSettingsStore — Phase 1（当初は `getDefaultHalfLifeHours` のみで追加。
- * `getEventRetention`/`setEventRetention` は `docs/roadmap.md` §5.4 のオーナー決定
- * 「監査ログの既定保持期間は無期限。テナント単位で短縮できる口は必須」を満たすために
- * 後から拡張した——このインターフェース自身の doc が最初から「必要になった段階で拡張する」
- * と明記していた通りの拡張である。詳細は `docs/decisions/0050-tenant-event-retention.md`）。
- *
- * `docs/memory-model.md` §10 の `tenant_settings` テーブルのうち、取り込み
- * （roadmap.md 段階3）が必要とする「Memory 作成時の既定 half-life」の読み出しと、
- * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
- *
- * `taxonomy_mode` は `getTaxonomyMode?`/`setTaxonomyMode?`（下記）で読み書きできる
- * （`decay_clock` と同じ「省略可能」の形。[ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)、Issue #201）。
+ * TenantSettingsStore。`docs/memory-model.md` §10 の `tenant_settings` テーブルのうち、
+ * Memory 作成時の既定 half-life の読み出しと、監査ログ（`memory_events`）の保持期間の読み書きなどを提供する。
  *
  * 契約:
- * - テナントに `tenant_settings` 行が無い場合、`getDefaultHalfLifeHours` は
- *   `DEFAULT_HALF_LIFE_HOURS` を返す（エラーにしない。既定値が無いテナントは
- *   「まだ設定していない」という正常系）。
- * - `getEventRetention`/`setEventRetention` は**必須**メソッドである（`?` を付けない）。
- *   理由は2つ: (1) オーナーの決定が「短縮できる口は必須」だから。(2) 任意にすると、
- *   「この adapter は短縮できない」（未実装）と「短縮に失敗した」（実行時エラー）が
- *   呼び出し側から同じ顔になってしまう——interface のレベルで両者を区別できるようにする。
- * - `setEventRetention` は `{ kind: "unset" }` を受け付けない
- *   （`EventRetentionSetting` 型がそもそも許さない）。「まだ設定していない」状態への
- *   巻き戻し（行の削除）は、この interface の対象外である。
- * - `setEventRetention` の `days` は、正の整数で、**`2^31 - 1` 以下**でなければならない（`assertValidEventRetentionDays`。
- *   ADR 0499）。超えれば何も書かずに `Error` を投げる——Postgres の `integer` 列に収まらない値である。
+ * - テナントに `tenant_settings` 行が無い場合、`getDefaultHalfLifeHours` は `DEFAULT_HALF_LIFE_HOURS` を返す（エラーにしない）。
+ * - `getEventRetention`/`setEventRetention` は**必須**メソッドである（`?` を付けない。ADR 0050）。
+ *   任意にすると、「この adapter は短縮できない」（未実装）と「短縮に失敗した」（実行時エラー）が呼び出し側から同じ顔になる。
+ * - `setEventRetention` は `{ kind: "unset" }` を受け付けない。「まだ設定していない」状態への巻き戻し（行の削除）は対象外である。
+ * - `setEventRetention` の `days` は、正の整数で、**`2^31 - 1` 以下**でなければならない（`assertValidEventRetentionDays`。ADR 0499）。
+ *   超えれば何も書かずに `Error` を投げる。
  *
- * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13で
- * `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/`getActivitySeq` を足した。
- * `taxonomy_mode`（interface に出していない）と `event_retention_days`（`getEventRetention`/
- * `setEventRetention` を専用メソッドとして足した、ADR 0050）という2つの前例のうち、
- * **後者を採る**——`examples/chat` が実際に `decay_clock` を設定できなければ、この機能は
- * 「在る」と数えられない（ADR 0165 決めたこと11）。
+ * ⭐ **`getEventRetention`/`setEventRetention` 以外のメソッドはすべて省略可能（`?` 付き）である**（ADR 0165 決めたこと13）。
+ * `@mnemora/core` は npm 公開済みで、必須メソッドを足すと外部の adapter 実装がコンパイルできなくなる。
+ * 既定は `'wall'` なので、実装していない adapter の振る舞いは `?` の欠落を既定へ倒せば一致する。
  *
- * ⭐ **ただし、ここで足したメソッドはすべて省略可能（`?` 付き）である。**`getEventRetention`/
- * `setEventRetention` を**必須**にした ADR 0050 とは、ここだけ向きが違う。理由は
- * ADR 0165 決めたこと13 に書いた（要点: `@mnemora/core` は npm 公開済みであり、
- * interface に必須メソッドを足すと**外部の adapter 実装が軒並みコンパイルできなくなる**。
- * そして本 ADR の既定は `'wall'` なので、**活動時計を実装していない adapter の
- * 望ましい振る舞いは「いまと同じ」**——`?` の欠落をそのまま既定へ倒せば、
- * 意味論が過不足なく一致する）。`event_retention_days` を必須にできたのは、オーナーが
- * 「短縮できる口は必須」と決めていたからであり、`decay_clock` にその指定は無い。
+ * ⚠ **省略時のフォールバックを呼び出し側に散らさないこと。** `packages/core` は `readDecayClock`/`readActivitySeq`/
+ * `readDefaultHalfLifeRecalls`（本ファイル）を通してのみ読む。未実装は `readXxx` が既定値へ倒し、実行時エラーは素通しで投げる。
+ * `setDecayClock` を持たない adapter へ書こうとした場合は `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
+ * （黙って無視しない）。
  *
- * ⚠ **省略時のフォールバックを呼び出し側に散らさないこと。**`packages/core` は
- * `readDecayClock`/`readActivitySeq`/`readDefaultHalfLifeRecalls`（本ファイル）を通して
- * のみ読む。「未実装」と「実行時エラー」が呼び出し側から同じ顔になる、という
- * ADR 0050 が挙げた懸念は、**フォールバックを1箇所に閉じ込めること**で受ける
- * ——未実装は `readXxx` が既定値へ倒し、実行時エラーは素通しで投げる。
- * `setDecayClock` を持たない adapter へ書こうとした場合は
- * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
- * （黙って無視しない——`examples/chat --decay-clock` が黙って効かない形を作らない）。
+ * **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は足していない**（`setDefaultHalfLifeRecalls` の doc、ADR 0197）。
  *
- * [ADR 0197](../../../../docs/decisions/0197-set-default-half-life-recalls.md) で
- * `setDefaultHalfLifeRecalls`（`getDefaultHalfLifeRecalls` の書き込み版）を足した。
- * ADR 0165「引き受けた負債」7 と [Issue #338](https://github.com/takecchi/mnemora/issues/338)
- * がどちらも対処として名指ししていた「`'activity'` を選ぶ採用者は `half_life_recalls` を
- * 自分の recall 頻度に合わせて上げる必要がある」を、本番コードから呼べる口にする。
- * **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は足していない**——理由は
- * `setDefaultHalfLifeRecalls` の doc コメント、および ADR 0197 を参照。**このメソッドの
- * 追加も、ほかの省略可能なメソッドと同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
- * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
- * 決めたこと13 と同じ理由）。
+ * ⚠ **`bumpActivitySeq`（activity_seq を+1する書き込み）はここに無い。** カウンタの前進は `MemoryStore.createRecall` が
+ * `recalls` への INSERT と**同一トランザクション**で行う（`NewRecallRecord.advanceActivityClock`）。`TenantSettingsStore` と
+ * `MemoryStore` は別 adapter であり、この境界を跨いで1トランザクションを構成できない。`getActivitySeq` は**読み出し専用**。
  *
- * ⚠ **`bumpActivitySeq`（activity_seq を+1する書き込み）はここに無い。**
- * カウンタの前進は `MemoryStore.createRecall` が `recalls` への INSERT と**同一トランザクション**
- * で行う契約（`MemoryStore.createRecall` の doc・`NewRecallRecord.advanceActivityClock`
- * 参照）——`TenantSettingsStore` と `MemoryStore` は別 adapter であり、この境界を跨いで
- * 1トランザクションを構成することはできない。`getActivitySeq` は**読み出し専用**であり、
- * 段1のゲート（`'activity'`/`'either'`）と書き込み時の `decayBaseSeq` 採番がこの値を読む。
- *
- * ⚠ **runtime がテナント設定を読む時点は、口によって違う。**
- * どの口も1回の呼び出しの中で同じ設定を1回だけ読むが、読むのが呼び出しの始めか途中かで、
- * 呼び出しの最中に設定を変えたときの効き方が変わる（`observe`・`consolidate`・
- * `recall` は、LLM・埋め込みの応答を止めている間に設定を変えて、`@mnemora/postgres` と testkit の
- * fixture で同じ結果を確かめている。`reextract`・`reflect`・掃除は、同じ関数・同じ位置で読む）:
+ * ⚠ **runtime がテナント設定を読む時点は、口によって違う。** どの口も1回の呼び出しの中で同じ設定を1回だけ読むが、
+ * 読むのが呼び出しの始めか途中かで、呼び出しの最中に設定を変えたときの効き方が変わる:
  * - `recall`: decay_clock・`activity_seq`・taxonomy を**呼び出しの始め**（埋め込みの前）に読む。
  *   呼び出しの最中に変えた設定は、その呼び出しには効かず、**次の呼び出しから**効く。
- * - `observe`（抽出）・`reextract`・`consolidate`・`reflect`: 書き込む記憶の既定の半減期
- *   （`getDefaultHalfLifeHours`）と活動時計の入力（decay_clock・`activity_seq`・
- *   `getDefaultHalfLifeRecalls`）を、**LLM の応答が返った後**、記憶を組み立てる直前に読む。
- *   LLM を待っている間に変えた設定は、**その呼び出しで書く記憶に効く**。
- * - `purgeExpiredEventsForTenant`（保持期間の掃除）: `getEventRetention` を呼び出しの始めに読むが、
- *   これは unset/unlimited を判定するためだけである（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)、
- *   [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。`days` のときに実際に使う保持期間は
- *   この最初の読みの値ではなく、`MemoryStore.purgeExpiredEventsByRetention?` が自分の内部で読み直した値
- *   （Postgres なら `tenant_settings` 行を `FOR SHARE` で読む同一トランザクションの中）で cutoff を計算して
- *   削除まで行う。この口を実装していない adapter は `{ kind: "store_unsupported" }` になり、そもそも保持期間を読まない。
+ * - `observe`（抽出）・`reextract`・`consolidate`・`reflect`: 書き込む記憶の既定の半減期（`getDefaultHalfLifeHours`）と
+ *   活動時計の入力を、**LLM の応答が返った後**、記憶を組み立てる直前に読む。LLM を待っている間に変えた設定は、
+ *   **その呼び出しで書く記憶に効く**。
+ * - `purgeExpiredEventsForTenant`（保持期間の掃除）: `getEventRetention` を呼び出しの始めに読むが、unset/unlimited を判定するためだけである
+ *   （ADR 0354）。`days` のときに実際に使う保持期間は、`MemoryStore.purgeExpiredEventsByRetention?` が自分の内部で読み直した値で、
+ *   cutoff の計算から削除までを行う。この口を実装していない adapter は `{ kind: "store_unsupported" }` になり、保持期間を読まない。
+ *
  * 「呼び出しの始めの値で揃える」ことは約束していない。
  */
 export interface TenantSettingsStore {
@@ -370,190 +239,127 @@ export interface TenantSettingsStore {
   /**
    * `tenant_settings.event_retention_days` の現在の状態を、3状態を保ったまま返す。
    *
-   * ⚠ `unset` は「そのテナントの設定の行が1つも
-   * 無い」ことであって、「保持期間を一度も設定していない」ことではない。保持期間を触らずに
-   * 別の設定（`setDecayClock`・`setDefaultHalfLifeRecalls`・`setTaxonomyMode`）を1つでも書くと
-   * 行ができ、以後は `{ kind: "unlimited" }` を返す（`event_retention_days` は NULL のまま）
-   * ——`@mnemora/postgres` と testkit の fixture の両方で同じ。したがって
-   * `unlimited` は「明示的に無期限と決めた」とは限らない（{@link EventRetention} の doc 参照）。
-   * どちらも無期限として振る舞う点は変わらない。
+   * ⚠ `unset` は「そのテナントの設定の行が1つも無い」ことであって、「保持期間を一度も設定していない」ことではない。
+   * 保持期間を触らずに別の設定（`setDecayClock`・`setDefaultHalfLifeRecalls`・`setTaxonomyMode`）を1つでも書くと
+   * 行ができ、以後は `{ kind: "unlimited" }` を返す（`@mnemora/postgres` と testkit の fixture で同じ）。
+   * したがって `unlimited` は「明示的に無期限と決めた」とは限らない。どちらも無期限として振る舞う点は変わらない。
    */
   getEventRetention(ctx: Ctx): Promise<EventRetention>;
 
   /**
    * `tenant_settings.event_retention_days` を設定する（UPSERT。行が無ければ作る）。
    * `retention.kind === "days"` のとき、`retention.days` が正の整数でなければ
-   * `EVENT_RETENTION_DAYS_INVALID_MESSAGE` を含む `Error` で失敗する
-   * （`assertValidEventRetentionDays` 参照）。
+   * `EVENT_RETENTION_DAYS_INVALID_MESSAGE` を含む `Error` で失敗する（`assertValidEventRetentionDays` 参照）。
    *
-   * ⚠ **`days` の上限は `2^31 − 1`**（`assertValidEventRetentionDays`、ADR 0499）。超えれば
-   * `@mnemora/postgres` も `@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore` も、何も書かずに
+   * ⚠ **`days` の上限は `2^31 − 1`**（ADR 0499）。超えれば `@mnemora/postgres` も `InMemoryTenantSettingsStore` も、何も書かずに
    * 同じ文面の `Error` で断る（メッセージは `EVENT_RETENTION_DAYS_INVALID_MESSAGE` ではなく、
    * `setEventRetention: days does not fit in a Postgres "integer" (int4) column` で始まる）。
    *
    * `retention.kind` が `"unlimited"`・`"days"` のどちらでもなければ、`EVENT_RETENTION_KIND_INVALID_MESSAGE` を
-   * 含む `Error` で失敗する（`assertValidEventRetentionKind`、型の外の値が実行時に渡ったとき）。
+   * 含む `Error` で失敗する（`assertValidEventRetentionKind`）。
    *
-   * 受け付けた値なら、どれほど大きくても `purgeExpiredEventsForTenant` は例外にならない
-   * ——cutoff が表せる最も古い時刻より前になる日数では、それより古い行が無いので0件の削除になる。
+   * 受け付けた値なら、どれほど大きくても `purgeExpiredEventsForTenant` は例外にならない（0件の削除になる）。
    *
-   * ⚠ **走っている掃除との競合**（Issue #1232、
-   * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）:
-   * `MemoryStore.purgeExpiredEventsByRetention?` を実装している adapter では、走っている掃除は
-   * この呼び出しの `UPDATE`/`INSERT` が持つ行ロックと衝突する——掃除の内部の読みは、この呼び出しが
-   * commit するまで待たされ、commit した後の最新の値を見る
-   * （`packages/postgres/src/__tests__/purge-expired-events-by-retention-concurrency.postgres.test.ts`）。
-   * この口を実装していない adapter（`purgeExpiredEventsForTenant` が `store_unsupported` を返す
-   * adapter）では、そもそも掃除が走らない。
+   * ⚠ **走っている掃除との競合**（ADR 0354）: `MemoryStore.purgeExpiredEventsByRetention?` を実装している adapter では、
+   * 走っている掃除の内部の読みは、この呼び出しが commit するまで待たされ、commit した後の最新の値を見る。
    */
   setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
 
   /**
-   * `tenant_settings.decay_clock` の現在値。行が無ければ `DEFAULT_DECAY_CLOCK`（`'wall'`）を
-   * 返す（ADR 0165 決めたこと1）。
+   * `tenant_settings.decay_clock` の現在値。行が無ければ `DEFAULT_DECAY_CLOCK`（`'wall'`）を返す（ADR 0165 決めたこと1）。
    */
   getDecayClock?(ctx: Ctx): Promise<DecayClock>;
 
   /**
-   * `tenant_settings.decay_clock` を設定する（UPSERT。行が無ければ作る）。`clock` が
-   * `DecayClock` の3値のいずれでもない場合は `DECAY_CLOCK_INVALID_MESSAGE` を含む `Error` で
-   * 失敗する（`assertValidDecayClock` 参照）。
+   * `tenant_settings.decay_clock` を設定する（UPSERT。行が無ければ作る）。`clock` が `DecayClock` の3値のいずれでもない場合は
+   * `DECAY_CLOCK_INVALID_MESSAGE` を含む `Error` で失敗する（`assertValidDecayClock` 参照）。
    *
-   * ⚠ **`'wall'` から `'activity'`/`'either'` へ切り替えても、`'wall'` の間に作られた記憶は活動時計では
-   * 沈まない**（活動時計の3つ組が `null` のまま＝床が無い。この口は既存の記憶を書き換えない）。
-   * 活動時計で沈むのは、切り替えた後に作られた記憶だけである。これを契約とする
-   * （[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)、Issue #1014）。
+   * ⚠ **`'wall'` から `'activity'`/`'either'` へ切り替えても、`'wall'` の間に作られた記憶は活動時計では沈まない**
+   * （活動時計の3つ組が `null` のまま＝床が無い。この口は既存の記憶を書き換えない）。
+   * 活動時計で沈むのは、切り替えた後に作られた記憶だけである。これを契約とする（ADR 0165）。
    */
   setDecayClock?(ctx: Ctx, clock: DecayClock): Promise<void>;
 
   /**
-   * `tenant_settings.default_half_life_recalls` の現在値。行が無ければ
-   * `DEFAULT_HALF_LIFE_RECALLS`（`720`）を返す（`getDefaultHalfLifeHours` と同じ規律）。
-   * `halfLifeHours` がそうであるのと同じ理由で、これは**新規作成時の初期値としてのみ**
-   * 使う（ADR 0165 決めたこと3）——既存 Memory の `halfLifeRecalls` はこの値が変わっても
-   * 再計算されない。
+   * `tenant_settings.default_half_life_recalls` の現在値。行が無ければ `DEFAULT_HALF_LIFE_RECALLS`（`720`）を返す。
+   * これは**新規作成時の初期値としてのみ**使う（ADR 0165 決めたこと3）。既存 Memory の `halfLifeRecalls` はこの値が変わっても再計算されない。
    */
   getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
 
   /**
    * `tenant_settings.default_half_life_recalls` を設定する（UPSERT。行が無ければ作る）。
    * `recalls` が `isHalfLifeRecallsInRange` の値域 `(0, ∞)` の外であれば
-   * `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` で失敗する
-   * （`assertValidHalfLifeRecalls` 参照）。
+   * `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` で失敗する（`assertValidHalfLifeRecalls` 参照）。
    *
-   * 値域は `(0, ∞)` だが、Postgres の列は `real`（float4）なので、float4 に収まる範囲（`Math.fround(x)` が有限かつ 0 でない値。上限は約 `3.4028235e38`、下限は約 `1.4e-45`）の外は、`@mnemora/postgres` も testkit の fixture も、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で拒む（DB の生の例外にはしない）。
+   * Postgres の列は `real`（float4）なので、float4 に収まる範囲（`Math.fround(x)` が有限かつ 0 でない値。上限は約 `3.4028235e38`、下限は約 `1.4e-45`）の外は、`@mnemora/postgres` も testkit の fixture も、メッセージに `does not fit in a Postgres "real" (float4) column` を含む `Error` で拒む。
    *
-   * [ADR 0197](../../../../docs/decisions/0197-set-default-half-life-recalls.md): ADR 0165
-   * 「引き受けた負債」7 と Issue #338 が対処として名指ししていた「`'activity'` を選ぶ
-   * 採用者は `half_life_recalls` を自分の recall 頻度に合わせて上げる必要がある」を、
-   * 本番コードから呼べる口にする。
+   * ⭐ **この値は新規作成時の初期値としてのみ使う**（ADR 0165 決めたこと3）。この呼び出しは
+   * **既存 Memory の `halfLifeRecalls`/`decayFloorSeq` を1件も書き換えない**。効くのは呼び出し後に新規作成される Memory だけである。
    *
-   * ⭐ **`getDefaultHalfLifeRecalls` と同じ注記が、書き込み側にも当てはまる**——この値は
-   * **新規作成時の初期値としてのみ**使う（ADR 0165 決めたこと3、
-   * `packages/postgres/migrations/0015_decay_activity_clock.sql`）。この呼び出しは
-   * **既存 Memory の `halfLifeRecalls`/`decayFloorSeq` を1件も書き換えない**——効くのは
-   * 呼び出し後に新規作成される Memory だけである（`docs/memory-model.md` §7 が
-   * `half_life_hours` について書いている「テナント設定を後から変えても既存行を
-   * 書き換えない」設計を、活動時計側でもそのまま踏襲する）。
-   *
-   * ⚠ **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は意図的に足していない。**
-   * ADR 0197「採らなかった案」1 を参照——文書が対処として名指ししているのは
-   * `half_life_recalls` の側だけであり、壁時計側の既定値の与え方（Issue #305）は
-   * オーナー判断としてまだ未決である。
+   * ⚠ **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は意図的に足していない**（ADR 0197「採らなかった案」1）。
    */
   setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
 
   /**
-   * `tenant_activity.activity_seq` の現在値。行が無ければ `0` を返す（ADR 0165 決めたこと2・5
-   * ——`decay_clock` を一度も `'wall'` 以外に設定していないテナントでは `activity_seq` は
-   * `0` のまま）。**読み出し専用。**進めるのは `MemoryStore.createRecall`
-   * （`advanceActivityClock: true`）だけである。
+   * `tenant_activity.activity_seq` の現在値。行が無ければ `0` を返す（ADR 0165 決めたこと2・5）。
+   * **読み出し専用。** 進めるのは `MemoryStore.createRecall`（`advanceActivityClock: true`）だけである。
    */
   getActivitySeq?(ctx: Ctx): Promise<number>;
 
   /**
-   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `tenant_subject_activity` に、このテナントの行が1本でもあるか。
-   * 行が無ければ `false`。**読み出し専用。**進めるのは `MemoryStore.createRecall`
-   * （`advanceActivityClock: { scope: "subject", subjectId }`）だけである。
+   * `tenant_subject_activity` に、このテナントの行が1本でもあるか（ADR 0353）。行が無ければ `false`。
+   * **読み出し専用。** 進めるのは `MemoryStore.createRecall`（`advanceActivityClock: { scope: "subject", subjectId }`）だけである。
    *
-   * ⭐ **このフラグの目的は正しさではなく、SQL のプラン族を変えないための最適化である。**
-   * `false` のテナントでは `T`（`getActivitySeq?`）のみの単一パラメータ比較のままにし、
-   * `true` になった時点で初めて `tenant_subject_activity` を相関サブクエリで引く
-   * （`readHasSubjectActivityCounters` の doc コメント参照）。
+   * ⭐ **このフラグの目的は正しさではなく、SQL のプラン族を変えないための最適化である。** `false` のテナントでは
+   * `getActivitySeq?` のみの単一パラメータ比較のままにし、`true` になって初めて `tenant_subject_activity` を相関サブクエリで引く。
    */
   hasSubjectActivityCounters?(ctx: Ctx): Promise<boolean>;
 
   /**
-   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `tenant_subject_activity.activity_seq`（`S_x`）を、渡した
-   * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略してよい
-   * （呼び出し側の `readSubjectActivitySeqs` が `0` へ倒す）。**読み出し専用。**
+   * `tenant_subject_activity.activity_seq`（`S_x`）を、渡した `subjectIds` についてまとめて読む（ADR 0353）。
+   * 行が無い `subjectId` はキーを省略してよい。**読み出し専用。**
    */
   getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
 
   /**
-   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
-   * `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`
-   * （`'open'`）を返す（`getDecayClock?` と同じ規律）。
-   *
-   * ⭐ **`decay_clock` と同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
-   * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
-   * 決めたこと13）。`labels` か `taxonomyGroups` を指定した
-   * `recall()` が `readTaxonomyMode` 経由で読み、`strict` では `proposed` のラベルを参加させない。
-   * 未実装の adapter は `'open'` に倒れる（ADR 0318「決めたこと」）。
+   * `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）を返す（ADR 0318）。
+   * `labels` か `taxonomyGroups` を指定した `recall()` が `readTaxonomyMode` 経由で読み、`strict` では `proposed` のラベルを参加させない。
+   * 未実装の adapter は `'open'` に倒れる。
    */
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
 
   /**
-   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
-   * `tenant_settings.taxonomy_mode` を設定する（UPSERT。行が無ければ作る）。`mode` が
-   * `TaxonomyMode` の2値のいずれでもない場合は `TAXONOMY_MODE_INVALID_MESSAGE` を含む
-   * `Error` で失敗する（`assertValidTaxonomyMode` 参照）。`setDecayClock?` と同じ形。
+   * `tenant_settings.taxonomy_mode` を設定する（UPSERT。行が無ければ作る）。`mode` が `TaxonomyMode` の2値のいずれでもない場合は
+   * `TAXONOMY_MODE_INVALID_MESSAGE` を含む `Error` で失敗する（`assertValidTaxonomyMode` 参照）。
    */
   setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 
   /**
-   * `ctx.tenantId` の `tenant_settings` 行を消す
-   * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
-   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ口の
-   * 1つで、**順序は最後**（設定を先に消すと、途中で処理が中断した場合に
-   * `getEventRetention` 等が既定値へ静かに戻ってしまい、消去が完了していないことに
-   * 気づきにくくなるため）。
+   * `ctx.tenantId` の `tenant_settings` 行を消す（ADR 0383）。`eraseTenant`（`erase-tenant.ts`）が束ねて呼ぶ口の1つで、
+   * **順序は最後**（設定を先に消すと、途中で処理が中断した場合に `getEventRetention` 等が既定値へ静かに戻り、
+   * 消去が完了していないことに気づきにくくなるため）。
    *
-   * 🔴 **任意メソッドである。**理由は `VectorStore.eraseTenant?`/`OutboxStore.eraseTenant?`
-   * と同じ（`MemoryStore.eraseTenant` の doc コメント参照）。
+   * 🔴 **任意メソッドである。** 理由は `VectorStore.eraseTenant?`/`OutboxStore.eraseTenant?` と同じ（`MemoryStore.eraseTenant` の doc 参照）。
    *
    * **契約**:
-   * - `tenant_settings` の行は `tenant_id` を主キーとするため、高々1行しか存在しない
-   *   ——`opts.limit` が1未満になることは呼び出し元（独立関数 `eraseTenant`）が
-   *   書き込み前に弾くので、この口が `limit` で打ち切られることは実質無い。
-   *   `result.reachedLimit` は常に `false` を返してよい。
-   * - `opts.dryRun === true` のときは削除を一切行わず、行が存在すれば `deleted: 1`、
-   *   存在しなければ `deleted: 0` を返す。
+   * - 行は高々1行で、`opts.limit` が1未満になることは呼び出し元が書き込み前に弾く。`result.reachedLimit` は常に `false` を返してよい。
+   * - `opts.dryRun === true` のときは削除を一切行わず、行が存在すれば `deleted: 1`、存在しなければ `deleted: 0` を返す。
    * - 行が存在しなくても例外にしない（`deleted: 0` を返すだけ）。
    */
   eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 /**
- * `setDecayClock` を実装していない adapter へ書こうとしたときに投げる `Error` の
- * メッセージに必ず含める文字列（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
- * 決めたこと13）。
+ * `setDecayClock` を実装していない adapter へ書こうとしたときに投げる `Error` のメッセージに必ず含める文字列（ADR 0165 決めたこと13）。
  *
- * ⭐ **黙って無視しない。**`decay_clock` は「書けたつもりで効いていない」がいちばん
- * 危険な設定である——`'activity'` に切り替えたつもりのテナントが `'wall'` のまま動くと、
- * **誰も気づかないまま Issue #305 の症状が再発する。**
+ * ⭐ **黙って無視しない。** `'activity'` に切り替えたつもりのテナントが `'wall'` のまま動くと、誰も気づかないまま減衰の症状が再発する。
  */
 export const DECAY_CLOCK_UNSUPPORTED_MESSAGE =
   "this TenantSettingsStore does not support setDecayClock";
 
 /**
- * [ADR 0437](../../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定1:
- * 下の公開ヘルパー（`read*` / `write*`）は、store が投げた例外に `omitParamsFromError` を
- * 掛けてから投げ直す（[ADR 0430](../../../../docs/decisions/0430-concurrent-create-erase-and-standalone-params.md)
- * 決定3と同じ作法）。drizzle の `Failed query: <SQL>\nparams: <値>` の `params:` より後ろを落とす。
- * 例外そのものを返す（新しい例外を作らない。`kind`・`cause` は変わらない）。
+ * 下の公開ヘルパー（`read*` / `write*`）は、store が投げた例外に `omitParamsFromError` を掛けてから投げ直す（ADR 0437 決定1）。
+ * drizzle の `Failed query: <SQL>\nparams: <値>` の `params:` より後ろを落とす。例外そのものを返す（`kind`・`cause` は変わらない）。
  * 「未実装」のときに投げる `*_UNSUPPORTED_MESSAGE` の `Error` は params を持たないので通さない。
  */
 async function omittingParams<T>(call: () => Promise<T>): Promise<T> {
@@ -565,12 +371,10 @@ async function omittingParams<T>(call: () => Promise<T>): Promise<T> {
 }
 
 /**
- * `getDecayClock` を持たない adapter では `DEFAULT_DECAY_CLOCK`（`'wall'`）へ倒す
- * （ADR 0165 決めたこと13）。
+ * `getDecayClock` を持たない adapter では `DEFAULT_DECAY_CLOCK`（`'wall'`）へ倒す（ADR 0165 決めたこと13）。
  *
- * ⚠ **`packages/core` はここを通してのみ `decay_clock` を読む。**省略時の倒し方を
- * 呼び出し側に散らさないための1箇所である（interface の doc を参照）。
- * **メソッドが在って投げた場合は素通しで投げる**——「未実装」と「失敗」を混ぜない。
+ * ⚠ **`packages/core` はここを通してのみ `decay_clock` を読む。** メソッドが在って投げた場合は素通しで投げる
+ * （「未実装」と「失敗」を混ぜない）。
  */
 export async function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Promise<DecayClock> {
   if (store.getDecayClock === undefined) {
@@ -580,8 +384,7 @@ export async function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Prom
 }
 
 /**
- * `getActivitySeq` を持たない adapter では `0` へ倒す（`tenant_activity` に行が無い
- * テナントと同じ値。ADR 0165 決めたこと2・5）。`readDecayClock` と同じ規律。
+ * `getActivitySeq` を持たない adapter では `0` へ倒す（`tenant_activity` に行が無いテナントと同じ値）。`readDecayClock` と同じ。
  */
 export async function readActivitySeq(store: TenantSettingsStore, ctx: Ctx): Promise<number> {
   if (store.getActivitySeq === undefined) {
@@ -591,8 +394,7 @@ export async function readActivitySeq(store: TenantSettingsStore, ctx: Ctx): Pro
 }
 
 /**
- * `getDefaultHalfLifeRecalls` を持たない adapter では `DEFAULT_HALF_LIFE_RECALLS` へ倒す。
- * `readDecayClock` と同じ規律。
+ * `getDefaultHalfLifeRecalls` を持たない adapter では `DEFAULT_HALF_LIFE_RECALLS` へ倒す。`readDecayClock` と同じ。
  */
 export async function readDefaultHalfLifeRecalls(
   store: TenantSettingsStore,
@@ -605,29 +407,19 @@ export async function readDefaultHalfLifeRecalls(
 }
 
 /**
- * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
- * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
- * はできない？」）: テナント単位の活動カウンタ `T`（`tenant_activity.activity_seq`、
- * `getActivitySeq?` が返す既存の値）に加え、subject 単位のカウンタ `S_x`
- * （新テーブル `tenant_subject_activity`）を持つ。ある Memory（subject `x`）の
- * 「有効ないま」は常に `T + S_x`（`x` が無い＝主題なしの記憶は `T` のみ）——
- * これは呼び出しごとの `activityCounting` の値に関わらず、**読み取り時は常に
- * 同じ式**である（`activityCounting` が制御するのは前進（+1）の対象だけ）。
+ * テナント単位の活動カウンタ `T`（`getActivitySeq?`）に加え、subject 単位のカウンタ `S_x`（`tenant_subject_activity`）を持つ（ADR 0353）。
+ * ある Memory（subject `x`）の「有効ないま」は常に `T + S_x`（主題なしの記憶は `T` のみ）。
+ * 読み取り時は呼び出しごとの `activityCounting` の値に関わらず**常に同じ式**で、`activityCounting` が制御するのは前進（+1）の対象だけである。
  *
- * `hasSubjectActivityCounters?` は「このテナントで `tenant_subject_activity` に
- * 行が1本でもあるか」を返す。**未実装 / false のテナントでは、`@mnemora/postgres` の
- * 段1 SQL ゲート・`aggregateScope`・`archiveDecayed` は `T` のみの単一パラメータ比較
- * のままになる**（相関サブクエリを足さない）——1本も subject カウンタを使っていない
- * テナント（今日のすべてのテナントを含む）では、EXPLAIN のプラン族を1つも変えない
- * ための最適化フラグである。
+ * `hasSubjectActivityCounters?` が未実装 / false のテナントでは、`@mnemora/postgres` の段1 SQL ゲート・`aggregateScope`・
+ * `archiveDecayed` は `T` のみの単一パラメータ比較のままになる（相関サブクエリを足さない）。
  */
 export interface SubjectActivitySeqs {
   [subjectId: string]: number;
 }
 
 /**
- * `hasSubjectActivityCounters?` を持たない adapter では `false` へ倒す
- * （`readActivitySeq` と同じ規律）。
+ * `hasSubjectActivityCounters?` を持たない adapter では `false` へ倒す（`readActivitySeq` と同じ）。
  */
 export async function readHasSubjectActivityCounters(
   store: TenantSettingsStore,
@@ -640,9 +432,8 @@ export async function readHasSubjectActivityCounters(
 }
 
 /**
- * `getSubjectActivitySeqs?` を持たない adapter では、渡した `subjectIds` すべてに
- * `0` を割り当てた `SubjectActivitySeqs` へ倒す（行が無い subject と同じ値）。
- * `readActivitySeq` と同じ規律。
+ * `getSubjectActivitySeqs?` を持たない adapter では、渡した `subjectIds` すべてに `0` を割り当てた `SubjectActivitySeqs` へ倒す。
+ * `readActivitySeq` と同じ。
  */
 export async function readSubjectActivitySeqs(
   store: TenantSettingsStore,
@@ -660,14 +451,10 @@ export async function readSubjectActivitySeqs(
     return zeros;
   }
   const result = await omittingParams(() => store.getSubjectActivitySeqs!(ctx, [...subjectIds]));
-  // 未実装/未使用の subjectId は 0 へ倒す——adapter が「行が無い＝キーを省略」して
-  // 返しても、呼び出し側は毎回 `?? 0` を書かずに済む。
-  //
-  // ⭐ ADR 0472: subjectId は利用者が決める文字列で、`constructor`・`toString`・`valueOf`・
-  // `hasOwnProperty`・`__proto__` も入る。`result[id] ?? 0` はこれらで `Object.prototype` 側の
-  // 関数や prototype を返し（`?? 0` が効かず、`T + S_x` が文字列連結になる）、プレーンな `{}` への
-  // `filled["__proto__"] = ...` は黙って捨てられる。だから、store の結果は**自前のキーだけ**・
-  // **有限の数だけ**読み、組み立てる側は prototype の無いオブジェクトにする（`__proto__` も普通のキーになる）。
+  // ADR 0472: subjectId は利用者が決める文字列で、`constructor`・`toString`・`__proto__` なども入る。
+  // `result[id] ?? 0` は `Object.prototype` 側の値を返し（`T + S_x` が文字列連結になる）、プレーンな `{}` への
+  // `filled["__proto__"] = ...` は黙って捨てられる。だから store の結果は自前のキーだけ・有限の数だけ読み、
+  // 組み立てる側は prototype の無いオブジェクトにする。
   const filled = Object.create(null) as SubjectActivitySeqs;
   for (const id of subjectIds) {
     const value = Object.hasOwn(result, id) ? result[id] : undefined;
@@ -677,9 +464,7 @@ export async function readSubjectActivitySeqs(
 }
 
 /**
- * `subjectId` 単数版。`readSubjectActivitySeqs` の薄い包み——作成・強化・復元など、
- * 単一の subject の「いま」だけが要る呼び出し側のために用意する（バッチが要らない
- * 場面でも `Record` を作らずに済む）。
+ * `subjectId` 単数版。`readSubjectActivitySeqs` の薄い包み。
  */
 export async function readSubjectActivitySeq(
   store: TenantSettingsStore,
@@ -691,9 +476,8 @@ export async function readSubjectActivitySeq(
 }
 
 /**
- * `setDecayClock` を持たない adapter では `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む
- * `Error` で**明示的に失敗する**（ADR 0165 決めたこと13）。読み出し側と違い、
- * 書き込みは既定へ倒せない——倒すと「設定したのに効かない」が黙って成立する。
+ * `setDecayClock` を持たない adapter では `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**（ADR 0165 決めたこと13）。
+ * 読み出し側と違い、書き込みは既定へ倒せない（倒すと「設定したのに効かない」が黙って成立する）。
  */
 export async function writeDecayClock(
   store: TenantSettingsStore,
@@ -707,17 +491,13 @@ export async function writeDecayClock(
 }
 
 /**
- * `setTaxonomyMode` を実装していない adapter へ書こうとしたときに投げる `Error` の
- * メッセージに必ず含める文字列（Issue #201、
- * [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)。
- * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` と同じ形）。
+ * `setTaxonomyMode` を実装していない adapter へ書こうとしたときに投げる `Error` のメッセージに必ず含める文字列（ADR 0318）。
  */
 export const TAXONOMY_MODE_UNSUPPORTED_MESSAGE =
   "this TenantSettingsStore does not support setTaxonomyMode";
 
 /**
- * `getTaxonomyMode` を持たない adapter では `DEFAULT_TAXONOMY_MODE`（`'open'`）へ倒す
- * （ADR 0318）。`readDecayClock` と同じ規律。
+ * `getTaxonomyMode` を持たない adapter では `DEFAULT_TAXONOMY_MODE`（`'open'`）へ倒す（ADR 0318）。`readDecayClock` と同じ。
  */
 export async function readTaxonomyMode(
   store: TenantSettingsStore,
@@ -730,9 +510,8 @@ export async function readTaxonomyMode(
 }
 
 /**
- * `setTaxonomyMode` を持たない adapter では `TAXONOMY_MODE_UNSUPPORTED_MESSAGE` を含む
- * `Error` で**明示的に失敗する**（`writeDecayClock` と同じ理由——書き込みは既定へ倒せない。
- * 倒すと「設定したのに効かない」が黙って成立する）。
+ * `setTaxonomyMode` を持たない adapter では `TAXONOMY_MODE_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
+ * （`writeDecayClock` と同じ理由）。
  */
 export async function writeTaxonomyMode(
   store: TenantSettingsStore,
