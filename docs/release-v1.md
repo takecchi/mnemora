@@ -641,8 +641,8 @@ pnpm run check:consumer-install
 ```
 
 **通過条件**: **exit 0** で、最後に `✔ 外から入れた確認を通った` が出ること。段ごとに `✔`/`✖` が出る——
-pack → tarball の `exports` と利用者が頼ってよい入口の一覧の突き合わせ → repo の外への `npm install`
-（`--ignore-scripts`・`--install-strategy=nested`）→ 型検査（`moduleResolution` `node16`・`bundler`、
+pack → tarball の `exports` と利用者が頼ってよい入口の一覧の突き合わせ → repo の外への、**パッケージごとに別の空のプロジェクトへの** `npm install`
+（[ADR 0694](./decisions/0694-consumer-install-per-package-project.md)。`--ignore-scripts`・`--install-strategy=nested`）→ 型検査（`moduleResolution` `node16`・`bundler`、
 `skipLibCheck: true`）→ ESM で全入口を import → CommonJS で全入口を `require`（Node 22.12 以降の `require(esm)`。2026-09-28 に足した段）。`✖` の段の下に、落ちた理由が出る。
 ⚠ その後ろの `⚠ この確認が見ていない範囲:` の段は赤ではない（見ていない範囲の断りである）。
 
