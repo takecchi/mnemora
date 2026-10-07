@@ -4,15 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runNodeScript } from "./spawn-with-deadline.mjs";
 
-/**
- * `runNodeScript` は、子が期限までに close しなければ子を kill し、「N 秒で close しなかった」と名乗って落ちる。
- *
- * 【実測 2026-09-28】`local-embedding-cache-key.test.mjs` の CLI（引数を読んで exit 3 するだけ）が、負荷の下で
- * 子の node のプロセスごと止まり（全スレッドが futex / epoll で待ったまま、exit に至らない）、`close` を待つ歯が
- * `testTimeout`（180 秒）まで何も言わずに待っていた。止まる原因は子の node の内側にあり、ここでは断定していない。
- * この関数は、止まりを「診断できる失敗」に変える——期限を超えたら子を kill し、何を何秒待ったかを名乗る。
- */
-
 function withScript(source, fn) {
   const dir = mkdtempSync(join(tmpdir(), "spawn-with-deadline-"));
   const script = join(dir, "child.mjs");
@@ -56,9 +47,7 @@ describe("runNodeScript: 子の close を待つ期限", () => {
         expect(error).toBeInstanceOf(Error);
         expect(error.message).toContain("1 秒で close しなかった");
         expect(error.message).toContain("child.mjs --x");
-        // 期限の近くで落ちる（testTimeout まで待たない）。
         expect(Date.now() - started).toBeLessThan(10_000);
-        // 子を残さない。
         expect(pid).toBeTypeOf("number");
         expect(isAlive(pid)).toBe(false);
       },
