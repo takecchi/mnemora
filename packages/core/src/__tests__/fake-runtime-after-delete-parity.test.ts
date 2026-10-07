@@ -218,7 +218,7 @@ function newMemory(content: string): NewMemory {
 }
 
 describe("Runtime 層の「消した後の参照」と purgeExpiredEvents の後の参照（Fake）", () => {
-  it("Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("active・forgotten・archived・purged の記憶への forget・purge・restoreArchived・markContested の結果と、purgeExpiredEvents の件数が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const stores = createFakeRuntimeStores();
     const space = { provider: "fake", model: "fake-model", dimensions: 3 };
     const runtime: Runtime = createRuntime({

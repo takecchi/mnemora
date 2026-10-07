@@ -40,7 +40,7 @@ describe("buildAnswerJson: 層2の集計（#699）", () => {
     commit: null,
   });
 
-  it("schemaVersion は 3", () => {
+  it("buildAnswerJson が書き出す JSON の schemaVersion は 3", () => {
     expect(json.schemaVersion).toBe(3);
   });
 

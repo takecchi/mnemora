@@ -791,7 +791,7 @@ function build(
 }
 
 describe("活動時計（decay_clock = activity）の経路（InMemory・Postgres）", () => {
-  it("InMemory は Postgres で実測した結果（EXPECTED）と一致する", async () => {
+  it("InMemory の decay_clock = activity での observe・recall・consolidate・reflect・sweepArchive・tick の結果（活動カウンタを含む）が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     const env = build("activity-clock-inmem", {
       mem: m,
@@ -809,7 +809,7 @@ describe("活動時計（decay_clock = activity）の経路（InMemory・Postgre
     expect(await scenario(env)).toEqual(EXPECTED);
   });
 
-  it("Postgres は EXPECTED と一致する", async () => {
+  it("Postgres の decay_clock = activity での observe・recall・consolidate・reflect・sweepArchive・tick の結果（活動カウンタを含む）が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const env = build("activity-clock-pg", {

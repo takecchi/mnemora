@@ -454,7 +454,7 @@ const COMPARE_TS = join(REPO_ROOT, "examples/chat/src/compare.ts");
 /** 網羅性の歯そのもの（`examples/chat/src/compare.ts` の `formatOmittedSummary` の default 節）。 */
 const EXHAUSTIVE_GUARD = "const exhaustive: never = o;";
 
-describe("Issue #304: examples/chat の compare.ts に網羅性の歯が残っている", () => {
+describe("Issue #304: examples/chat の compare.ts の formatOmittedSummary は、never への代入による網羅性検査を持ち、全 kind を case で受けている", () => {
   const source = readFileSync(COMPARE_TS, "utf-8");
 
   /**

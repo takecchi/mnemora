@@ -357,7 +357,7 @@ describe("recall() — 連想枠（段3.5）にも attributes が掛かる（Iss
   });
 });
 
-describe("recall() — 後置フィルタ（survivesAttributesFilter）の追加の歯（#724）", () => {
+describe("recall() — adapter が attributes を無視しても、後置フィルタ（survivesAttributesFilter）が複数キーの条件と連想枠で条件外の記憶を落とす（#724）", () => {
   it("複数キーの条件: adapter が attributes を無視して、片方のキーだけ一致する記憶を返しても、結果に出ない（every）", async () => {
     const { runtime, stores } = buildRuntime(
       (fvs) => new AttributesFilterStrippingVectorStore(fvs),

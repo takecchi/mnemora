@@ -204,7 +204,7 @@ const PORTS: Port[] = [
   },
 ];
 
-describe("FakeMemoryStore: 代表の歯に無い口も、下限より前の日時を RangeError で断り、何も書かない（ADR 0640）", () => {
+describe("FakeMemoryStore: 下限より前の日時を渡されると、代表の検査に無い口も RangeError で断り、何も書かない（ADR 0640）", () => {
   it.each(PORTS.map((p) => [p.name, p] as const))("%s", async (_name, port) => {
     const stores = createFakeRuntimeStores();
     const act = await port.prepare(stores);

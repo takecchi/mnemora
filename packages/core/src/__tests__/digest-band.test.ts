@@ -343,7 +343,7 @@ describe("packDigestBand — 切り詰め位置が書記素の途中（穴 O-5�
   });
 });
 
-describe("packDigestBand — maxEntryChars の +Infinity と NaN の取りこぼし（ADR 0585 の歯の穴、確かめ直し）", () => {
+describe("packDigestBand — maxEntryChars の +Infinity は上限なし、NaN は band の全件を空に切る（ADR 0585）", () => {
   const opts = { limit: 10, maxChars: 10_000 };
 
   it("maxEntryChars: +Infinity は上限なし——digest を切らず、truncated も立てない", () => {

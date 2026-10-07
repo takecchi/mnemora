@@ -93,7 +93,7 @@ async function supersededGroup(stores: Stores, size: number) {
 }
 
 describe("core の Fake: イベントが書けないときは、状態を1つも書き換えずに投げる", () => {
-  it("purgeMemory", async () => {
+  it("purgeMemory（at が Invalid Date のイベント）", async () => {
     const stores = createFakeRuntimeStores();
     const m = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
 
