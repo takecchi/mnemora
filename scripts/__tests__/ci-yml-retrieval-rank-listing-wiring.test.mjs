@@ -4,22 +4,9 @@ import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
 /**
- * `retrieval-rank-listing` ジョブ(Issue #572、ADR 0276 の 2026-09-28 の追記)が
- * **門にならない配線のまま**であることを固定する歯。
- *
- * 固定する4つ:
- * 1. `.github/required-status-checks.json` の `contexts` に、このジョブの表示名が無い。
- * 2. このジョブ自身が `needs:` を持たない(既存ジョブの鎖に繋がない)。
- * 3. 他のどのジョブの `needs:` にも、このジョブの id が無い(このジョブの失敗が他を止めない)。
- * 4. 一覧を出す段が、終了コードを握りつぶしていない(`|| true` を付けない)——
- *    **bench が壊れたときに落ちる**ことを、配線の側で守る。順位で落ちないことは
- *    `examples/chat/src/__tests__/retrieval-rank-listing.test.ts` が純関数の側で守る。
- *
- * ⛔ **この歯は branch protection そのものを読まない。**`required-status-checks.json` は写しであり、
+ * ⛔ branch protection そのものは読まない。`required-status-checks.json` は写しであり、
  * 実物との突き合わせは `pnpm check:required-status-checks`(手で実行)の役目である(ADR 0279)。
- *
- * ⚠ YAML は構造として解析せず、文字列で見ている(既存の wiring テストと同じ判断)。
- * `skip`・`if:`・`continue-on-error` は `ci-yml-measurement-jobs-wiring.test.mjs` が見る。
+ * YAML は構造として解析せず、文字列で見ている。
  */
 
 const JOB_ID = "retrieval-rank-listing";
@@ -54,7 +41,6 @@ function jobDisplayName(jobBlock) {
   return match[1].trim().replace(/^"(.*)"$/, "$1");
 }
 
-/** `needs:` の値(1行形式 `needs: a` / `needs: [a, b]`)から job id を取り出す。 */
 function needsTargets(workflow) {
   const targets = [];
   for (const match of workflow.matchAll(/^ {4}needs:\s*(.+)$/gm)) {
