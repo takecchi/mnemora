@@ -2,12 +2,6 @@ import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import { ObserveInputSchema } from "../observation.js";
 
-/**
- * `observe()` の入力のうち、本文になる欄（`utterance.text`・`event.name`・`document.content`）が
- * 「`String.prototype.trim` で空になる値」のとき、スキーマの段で断る（ADR 0502、ADR 0482 の材料1）。
- * 「空白」の定義は JS の `trim` が落とす文字（Unicode の空白・行終端子を含む）。
- */
-
 const FIELDS: Array<[string, (value: string) => unknown, string]> = [
   ["utterance.text", (value) => ({ kind: "utterance", text: value }), "text"],
   ["event.name", (value) => ({ kind: "event", name: value }), "name"],

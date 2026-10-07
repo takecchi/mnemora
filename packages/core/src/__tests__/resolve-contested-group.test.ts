@@ -6,19 +6,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.resolveContestedGroup`（Issue #207/#933 PR2、ADR 0327 §4-c、ADR 0378 決定3、
- * ADR 0381）の歯。`resolve-contested.test.ts`（2者版。このリポジトリには専用の歯として
- * `resolve-contested.test.ts`/`resolve-contested-loser-invariant.test.ts` がある）と
- * 対称に書いてある。
- *
- * fix2（2026-09-30 の直し、ADR 0381）の主目的: **`memberIds` が、`memory_relations` で
- * つながった「今も contested な」群の一部だけだったら、CAS で弾いて何も書かない。**
- * この Runtime 層の読み側の確認は `deps.relationStore` が配線されているときだけ働く
- * （`Runtime.resolveContestedGroup` の doc コメント手順6参照）——配線されていなければ
- * store 側の CAS（`MemoryStore.resolveContestedGroup`）だけに任せる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-rcg" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -184,24 +171,19 @@ describe("runtime.resolveContestedGroup — fix2: 群の一部だけを渡すと
   });
 
   it("forget 等で群を離れた（もう contested ではない）メンバーは missingMembers に数えない", async () => {
-    // decision10: forget/supersede/purge/archive で群を離れたメンバーの関係の行は残す。
-    // fix2 は「行の有無」ではなく「status === 'contested'」で今の群を判定する——離れた
-    // メンバーを missingMembers に含めると、二度と解消できなくなってしまう。
-    // ⚠ `resolveContestedGroup` 自身が「3件未満は RangeError」を要求するため
-    // （`markContestedGroup` と同じ最小人数の制約、呼び出し前の programmer error）、
-    // 4件の群を作り、1件を forget で離脱させてから、残った3件（ちょうど最小人数）を
-    // 解消する形にする。
+    // 関係の行は、forget/supersede/purge/archive で群を離れたメンバーの分も残す。今の群は「行の有無」ではなく
+    // 「status === 'contested'」で判定する（離れたメンバーを missingMembers に含めると、二度と解消できなくなる）。
+    // `resolveContestedGroup` は3件未満を RangeError にするので、4件の群を作り、1件を forget で離脱させてから、
+    // 残った3件（ちょうど最小人数）を解消する形にする。
     const { runtime, stores } = buildRuntime({ withRelationStore: true });
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
     const d = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "D" }));
     await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id, d.id]);
-    // d を forget で群から離脱させる（関係の行は残る——decision10）。
     await runtime.forget(ctx, { memoryIds: [d.id] });
     const storedD = await stores.memoryStore.get(ctx, d.id);
     expect(storedD?.status).toBe("forgotten");
-    // 関係の行自体はまだ残っている。
     expect(
       (await stores.relationStore.listRelated(ctx, a.id, "contradicts")).map((r) => r.memoryId),
     ).toContain(d.id);
@@ -237,7 +219,6 @@ describe("runtime.resolveContestedGroup — fix2: 群の一部だけを渡すと
     expect(result.outcome.kind).toBe("resolved");
     const relatedOf = async (id: string) =>
       (await stores.relationStore.listRelated(ctx, id, "contradicts")).map((r) => r.memoryId);
-    // 群の中どうし（a-b・a-c・a-d）の行は消え、forget 済みの e・群の外の outside との行だけが残る。
     expect((await relatedOf(a)).sort()).toEqual([e, outside].sort());
     expect(await relatedOf(b)).toEqual([e]);
     expect(await relatedOf(outside)).toEqual([a]);
@@ -257,11 +238,9 @@ describe("runtime.resolveContestedGroup — relationStore が配線されてい�
       kind: "both_active",
     });
 
-    // Runtime 層は sides をすべて "eligible" と判定する（relationStore が無いので
-    // missingMembers を検査しない）が、store 側（FakeMemoryStore.resolveContestedGroup）の
-    // CAS が同じ理由で拒む——ContestedGroupMembershipMismatchError を投げる。Runtime は
-    // この専用のエラーを、relationStore の配線の有無に関わらず ineligible に写す
-    // （MemoryStatusConflictError の conflict とは別の分岐——ADR 0381 §7 解消）。
+    // Runtime 層は sides をすべて "eligible" と判定する（relationStore が無いので missingMembers を検査しない）が、
+    // store 側（FakeMemoryStore.resolveContestedGroup）の CAS が同じ理由で拒み、ContestedGroupMembershipMismatchError を投げる。
+    // Runtime はこの専用のエラーを、relationStore の配線の有無に関わらず ineligible に写す（MemoryStatusConflictError の conflict とは別の分岐）。
     expect(result.outcome.kind).toBe("ineligible");
     if (result.outcome.kind === "ineligible") {
       expect(result.outcome.missingMembers).toEqual([d.id]);
@@ -304,10 +283,9 @@ describe("runtime.resolveContestedGroup — MemoryStore.resolveContestedGroup �
 });
 
 /**
- * Issue #1449 項目6: 群版の winnerId の大文字小文字の救済（2者版 `resolveContested` と同じ規則）。
- * （ADR 0521 以前の記述）Fake の `get` は大文字小文字を区別した。いまは Fake も区別しないが、この歯は救済が使う `get` だけを
- * 小文字にそろえる差し替えで表す形のまま（救済が使うのは `get` だけで、書き込み側には元の memberIds の綴りを渡すため）。Postgres の本物の歯は
- * `packages/postgres/src/__tests__/uppercase-uuid-contested-runtime.postgres.test.ts`。
+ * 群版の winnerId の大文字小文字の救済（2者版 `resolveContested` と同じ規則）。Fake の `get` は大文字小文字を区別しないので、
+ * この歯は救済が使う `get` だけを小文字にそろえる差し替えで表す（救済が使うのは `get` だけで、書き込み側には元の memberIds の綴りを渡すため）。
+ * Postgres の本物の歯は `packages/postgres/src/__tests__/uppercase-uuid-contested-runtime.postgres.test.ts`。
  */
 describe("runtime.resolveContestedGroup — winnerId の大文字小文字の救済（Issue #1449 項目6）", () => {
   function buildCaseInsensitiveGetRuntime(
@@ -372,7 +350,6 @@ describe("runtime.resolveContestedGroup — winnerId の大文字小文字の救
   });
 
   it("store の get が別の記憶を返すなら RangeError（何も書かない）", async () => {
-    // winnerId（大文字の綴り）として引いたときだけ、別の記憶 b を返す。
     let bId = "";
     const { runtime, stores } = buildCaseInsensitiveGetRuntime((id, real) =>
       id === id.toUpperCase() && id !== id.toLowerCase() ? real(bId) : real(id),

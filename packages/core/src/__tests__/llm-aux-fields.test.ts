@@ -3,7 +3,6 @@ import { DROPPED_TAG_INDEXES_MAX, sanitizeCandidateAuxFields } from "../llm-aux-
 import { deriveClaimKeys } from "../claim-key.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 
-/** 補助の欄（digest・tags・claim key）の「保存できない値」だけを落とす（ADR 0443）。 */
 describe("sanitizeCandidateAuxFields", () => {
   const base = { content: "本文", provenanceKind: "stated" as const };
 

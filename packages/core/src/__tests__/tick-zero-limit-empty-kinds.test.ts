@@ -4,15 +4,8 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `TickOptions` の TSDoc を縛る。振る舞いは変えていない。
- *
- * - `limit`: 「`0` なら何も claim しない」。
- * - `kinds`: 「空配列は何も claim しない」。
- *
- * どちらも、`tick` が既定値（`DEFAULT_TICK_LIMIT`・`TICK_SUPPORTED_JOB_KINDS`）へ倒さないことを見る。
- * 積んだ extract ジョブが claim されず（attempts が 0 のまま、claimedAt が null のまま）、LLM も呼ばれない。
- */
+// どちらも、`tick` が既定値（`DEFAULT_TICK_LIMIT`・`TICK_SUPPORTED_JOB_KINDS`）へ倒さないことを見る。
+// 積んだ extract ジョブが claim されず（attempts が 0 のまま、claimedAt が null のまま）、LLM も呼ばれない。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const LEASE_MS = 60_000;

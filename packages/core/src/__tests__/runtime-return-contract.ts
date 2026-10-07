@@ -4,41 +4,30 @@ import { MemorySchema } from "../memory.js";
 import type { Runtime } from "../runtime.js";
 
 /**
- * `Runtime` の `recall()` 以外のメソッド（16本）の戻り値が、TSDoc（8巡目の棚卸し）が
- * 約束している形を守っているかを確かめ、破れていた点を文字列で返す（空なら守っている）。
- * `./runtime-output-contract-harness.ts` の `wrapRuntimeModule` が、これらを
- * `createRuntime` の戻り値に配線する。
+ * `Runtime` の `recall()` 以外のメソッドの戻り値が、TSDoc が約束している形を守っているかを確かめ、
+ * 破れていた点を文字列で返す（空なら守っている）。
+ * `./runtime-output-contract-harness.ts` の `wrapRuntimeModule` が、これらを `createRuntime` の戻り値に配線する。
  *
- * `recall()` 自身の契約（`RecallResultSchema` を含む）は `checkRecallResultContract`
- * （`./runtime-fakes.ts`）が別に持つ——この一式には持ち込まない。ここに schema が無いのは
- * 手抜きではない: `Runtime` の他の操作の結果型はそもそも zod schema を持たない
- * （`correction-candidates.ts` 末尾のコメント参照）。ここでの検査は、そのぶん TSDoc の
- * 文面から直接書き下した、より狭い約束の集まりである。
+ * `recall()` 自身の契約（`RecallResultSchema` を含む）は `checkRecallResultContract`（`./runtime-fakes.ts`）が別に持つ。
+ * ここに schema が無いのは、`Runtime` の他の操作の結果型がそもそも zod schema を持たないため（`correction-candidates.ts` 末尾のコメント参照）で、
+ * ここでの検査は TSDoc の文面から直接書き下した、より狭い約束の集まりである。
  *
- * `reembed`（`RequeueEmbedJobsResult`）は対象外——この型の約束はまだ TSDoc から
- * 洗い出していない（このファイルが持つ16本のどれとも違う理由で除外している。
- * 「約束が無い」のではなく「まだ抽出していない」）。
+ * `reembed`（`RequeueEmbedJobsResult`）は対象外。この型の約束はまだ TSDoc から洗い出していない。
  *
- * id の突き合わせは、**store から読み直した値どうし・store から読み直した値と呼び出し引数**を
- * 比べるときは大文字小文字を無視する（`normId`）。`@mnemora/postgres` は UUID を小文字で返す一方、
- * テストは大文字の UUID を渡すことがある（`uppercase-uuid` 系の歯が意図的に固定している非対称）
- * ため、素の `===` で比べると postgres 実装だけが誤検知する（`getRecall` の `recallId`、
- * `markContested`/`resolveContested` が返す `Memory.id`、`restoreSuperseded` の
- * `supersedingMemoryId`/`onlyMemoryIds` フィルタなど）。
+ * id の突き合わせは、store から読み直した値どうし・store から読み直した値と呼び出し引数を比べるときは大文字小文字を無視する（`normId`）。
+ * `@mnemora/postgres` は UUID を小文字で返す一方、テストは大文字の UUID を渡すことがある（`uppercase-uuid` 系の歯が意図的に固定している非対称）
+ * ため、素の `===` で比べると postgres 実装だけが誤検知する（`getRecall` の `recallId`、`markContested`/`resolveContested` が返す
+ * `Memory.id`、`restoreSuperseded` の `supersedingMemoryId`/`onlyMemoryIds` フィルタなど）。
  *
- * ⛔ **例外が2つある。どちらも「store から読み直した値」ではなく「入力をそのまま運ぶだけの値」
- * なので、完全一致（`===`）で比べる:**
- * - **`checkSameOrderAndLength`**（`forget`/`purge`/`restoreArchived`/`{ memoryIds }` 形の
- *   `consolidate`/`reflect` が共有する）。`outcomes[i].memoryId` は `runtime.ts` が入力の
- *   `ids[i]` をそのまま運ぶ値であり、大文字小文字だけが違う id を「同じ id」として畳まない
- *   （`uppercase-uuid-lookup.postgres.test.ts`「やりすぎの歯」——渡した綴りが店の綴りと
- *   一致しない側は `"not_found"` のまま）。同じ理由で `checkForgetContract` の「同じ id の
- *   2回目」判定も綴りの完全一致で見る。
- * - **`applyCorrection` の候補の突き合わせ**——`apply-correction.ts` の実装・
- *   `Runtime.applyCorrection` の doc コメント（手順2）が `memoryId === correctedId` の
- *   完全一致で候補を探すと約束しているので、ここも実装と同じ完全一致で確かめる
- *   （下の `checkApplyCorrectionContract` 参照）。ADR 0446 で足した例外が1つ: 完全一致が無く、大文字小文字を
- *   無視してちょうど1件に一致する候補が在るときだけ、store が同じ記憶と言えば候補として扱う。
+ * ⛔ 例外が2つある。どちらも「store から読み直した値」ではなく「入力をそのまま運ぶだけの値」なので、完全一致（`===`）で比べる:
+ * - `checkSameOrderAndLength`（`forget`/`purge`/`restoreArchived`/`{ memoryIds }` 形の `consolidate`/`reflect` が共有する）。
+ *   `outcomes[i].memoryId` は `runtime.ts` が入力の `ids[i]` をそのまま運ぶ値であり、大文字小文字だけが違う id を「同じ id」として畳まない
+ *   （`uppercase-uuid-lookup.postgres.test.ts`「やりすぎの歯」: 渡した綴りが店の綴りと一致しない側は `"not_found"` のまま）。
+ *   同じ理由で `checkForgetContract` の「同じ id の2回目」判定も綴りの完全一致で見る。
+ * - `applyCorrection` の候補の突き合わせ。`apply-correction.ts` の実装・`Runtime.applyCorrection` の doc コメント（手順2）が
+ *   `memoryId === correctedId` の完全一致で候補を探すと約束しているので、ここも実装と同じ完全一致で確かめる
+ *   （下の `checkApplyCorrectionContract` 参照）。ただし完全一致が無く、大文字小文字を無視してちょうど1件に一致する候補が在るときだけ、
+ *   store が同じ記憶と言えば候補として扱う。
  */
 
 function normId(id: string): string {
@@ -122,13 +111,13 @@ type ObserveReturn = Awaited<ReturnType<Runtime["observe"]>>;
  * - `subjectCandidates`（空でない）を渡したときだけ `rejectedSubjectIds` を持ち、常に配列。
  * - `claimKey.enabled: true` を渡したときだけ `claimKeyFailure` を持つ。
  * - `claimKey.detectContested: true` を渡したときだけ `contestedDetection` を持ち、常に配列。
- * - （ADR 0639）`resend` は冪等な再送のときだけ持つ。持つなら `memoryIds: []`・`extraction: "skipped"`・
+ * - `resend` は冪等な再送のときだけ持つ。持つなら `memoryIds: []`・`extraction: "skipped"`・
  *   `extractionFailure: null`、`memories` は `memoryId` の昇順で重複が無い。`extraction` が `"skipped"` でない
  *   （抽出が走った）呼び出し・`memory_usage` は持たない。
  *
  * 「新しく作った」か「再送」かは戻り値からは分からないので、`seenObservations`（同じ `Runtime` インスタンスが
  * これまでに返した Observation の `テナント:id`。呼び手が `Runtime` ごとに1つ持つ）を渡されたときは、
- * **同じ Observation をもう一度返したのに `resend` が無い**ことも破れとして数える（再送でなければ、同じ id にならない）。
+ * 同じ Observation をもう一度返したのに `resend` が無いことも破れとして数える（再送でなければ、同じ id にならない）。
  * 別の `Runtime` インスタンスが作った Observation への再送は、この集合に無いので「最初に見た」になり、`resend` の有無を問わない。
  */
 export function checkObserveContract(
@@ -242,8 +231,7 @@ export function checkTickContract(result: TickReturn): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// getRecall（スコープ: Runtime レベルの突き合わせだけ。RecallRecord の中身・provenance・
-// createRecall・null になる条件は別の担当が扱っているので、ここでは触らない）
+// getRecall（Runtime レベルの突き合わせだけ）
 // ---------------------------------------------------------------------------
 
 type GetRecallArgs = Parameters<Runtime["getRecall"]>;
@@ -334,8 +322,7 @@ function notExaminedReasons(skipped: ReextractReturn["skipped"]): ReextractSkipR
  * - `observationId` は引数と同じ（大文字小文字は無視）。
  * - LLM 失敗の早期 return は `skipped` に `not_examined(llm_failed_whole_observation)` が1件だけ。
  * - 候補0件の早期 return は `skipped` に `not_examined(no_candidates)` が1件だけ。
- * - 2026-09-28 変更（Issue #1079・#1149、`Runtime.reextract` の doc コメント）: 利用者の意思で
- *   退けた記憶を持つ Observation の早期 return は `extraction: "skipped"`、`skipped` は
+ * - 利用者の意思で退けた記憶を持つ Observation の早期 return は `extraction: "skipped"`、`skipped` は
  *   `status_not_active` だけ（`not_examined` は入らない）、`atomicity` は `"not_attempted"`。
  */
 export function checkReextractContract(args: ReextractArgs, result: ReextractReturn): string[] {
@@ -724,7 +711,7 @@ type ApplyCorrectionReturn = Awaited<ReturnType<Runtime["applyCorrection"]>>;
  * - `correctedId` 省略 ⟺ `kind === "awaiting_choice"`。
  * - `correctedId` が `discovery.candidates` に居ない ⟺ `kind === "not_a_candidate"`
  *   （突き合わせは実装と同じ `memoryId === correctedId` の完全一致。ただし大文字小文字だけが違う候補が
- *   ちょうど1件在るときは、store が同じ記憶と言えば候補として扱う——ADR 0446）。
+ *   ちょうど1件在るときは、store が同じ記憶と言えば候補として扱う）。
  * - `kind` が `"contested"`/`"resolved"` のとき: `chosenRecallRank` は候補の `recallRank` と
  *   一致し、`correctingId` は入力と一致する（大文字小文字は無視）。
  * - `resolution` を渡さなければ `"contested"` で止まる。渡せば `"resolved"` まで進む。
@@ -744,7 +731,7 @@ export function checkApplyCorrectionContract(
   }
 
   const exact = input.discovery.candidates.find((c) => c.memoryId === corrected);
-  // ADR 0446: 完全一致する候補が無くても、大文字小文字を無視して**ちょうど1件**に一致するなら、store が同じ記憶と
+  // 完全一致する候補が無くても、大文字小文字を無視してちょうど1件に一致するなら、store が同じ記憶と
   // 言ったときだけ候補として扱う（`resolveContested` の `winnerId` と同じ形）。store の答えはここからは見えないので、
   // その場合は `not_a_candidate` も `contested`/`resolved` も許す（後者のときは、その1件の `recallRank` を運ぶこと）。
   const lowered = corrected.toLowerCase();

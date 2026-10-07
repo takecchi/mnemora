@@ -3,11 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { ObserveResult } from "../runtime.js";
 import { checkObserveContract } from "./runtime-return-contract.js";
 
-/**
- * ADR 0639: `checkObserveContract` が `resend` の約束を検査する（緩めない）。
- * 検査そのものに歯が在ること——破れた戻り値を渡すと、破れを返す——を、合成した戻り値で縛る。
- */
-
 const ctx: Ctx = { tenantId: "t" };
 const utterance = { kind: "utterance" as const, text: "u" };
 const base: ObserveResult = {

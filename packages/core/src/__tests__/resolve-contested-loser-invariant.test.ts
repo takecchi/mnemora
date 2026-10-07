@@ -7,35 +7,15 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * 🔴 この歯が守っているのは `resolveContested` の実装の詳細ではない。
+ * この歯が守っているのは `resolveContested` の実装の詳細ではなく、他所（`restoreSuperseded` の操作単位絞り込み、
+ * `groupSupersededCandidatesByOperation` の `"per_item"` 分類）が依存している契約:
+ * `resolveContested(ctx, firstId, secondId, { kind: "supersede", winnerId })` は、1回の呼び出しにつき、
+ * ちょうど1件の敗者（`status: "superseded"`）と、ちょうど1件の `kind: "superseded"` `memory_events` 行を作る。
+ * この歯が赤くなったら実装のバグではなく、その前提を変える設計判断をしている。
+ * `RestoreSupersededTarget.onlyMemoryIds`（`runtime.ts`）の doc コメントと ADR 0258 も見直すこと。
  *
- * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
- * （[ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)）
- * ——`restoreSuperseded` を「1回の操作」単位に絞る設計——は、次の前提の上に立っている:
- *
- * > `resolveContested(ctx, firstId, secondId, { kind: "supersede", winnerId })` は、
- * > 1回の呼び出しにつき、ちょうど1件の敗者（`status: "superseded"`）と、ちょうど
- * > 1件の `kind: "superseded"` `memory_events` 行を作る。
- *
- * `RestoreSupersededTarget.onlyMemoryIds`（`runtime.ts`）の doc コメントは、
- * `supersededReason === "contested_resolved"` の候補を「1件 = 1回の操作」として
- * 扱ってよいと書いている。この前提が崩れると（例: 将来 `resolveContested` が
- * 2件以上を同時に解決する形へ拡張されたとき）、その扱いが黙って崩れる——
- * この歯が無ければ、その変更をした人は自分が何を壊したか気づけない。
- *
- * ⟹ ここで固定するのは「振る舞いの詳細」ではなく「他所（`restoreSuperseded` の
- * 操作単位絞り込み、`groupSupersededCandidatesByOperation` の `"per_item"` 分類）が
- * 依存している契約」である。**この歯が赤くなったら、実装のバグではなく、上の
- * 前提そのものを変える設計判断をしている**——その変更をするときは、この歯を
- * 直すだけでなく `RestoreSupersededTarget.onlyMemoryIds` の doc コメントと
- * ADR 0258 も見直すこと。
- *
- * `previewRestoreSupersededBy` には依存しない——これから実装する機能（方向①）が、
- * その機能が守るべき前提を検査することになり循環するため。`stores.eventStore.events`
- * を直接読む（`resolve-contested.test.ts` と同じ手段）。
- *
- * `@mnemora/testkit` には依存しない（`resolve-contested.test.ts` と同じ理由。
- * `runtime-fakes.ts` 冒頭のコメント参照）。
+ * `previewRestoreSupersededBy` には依存しない: その機能が守るべき前提を検査することになり循環するため。
+ * `stores.eventStore.events` を直接読む。`@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -160,17 +140,14 @@ describe("resolveContested の1対1不変条件（Issue #515 方向①が依存�
   it("🔴 同じ勝者が2回勝っても、1回の呼び出しが作る敗者はそのつど1件のままである（ADR 0230 の再現2と同じ形）", async () => {
     const { runtime, stores } = buildRuntime();
 
-    // ROUND1: W vs X → W 勝ち。
     const { a: w, b: x } = await createContestedPair(runtime, stores, "round1");
     const statusBeforeRound1 = await countSupersededAmong(stores, [w.id, x.id]);
     const eventsBeforeRound1 = countSupersededEvents(stores);
     await runtime.resolveContested(ctx, w.id, x.id, { kind: "supersede", winnerId: w.id });
 
-    // 1回目の呼び出し単体の増分がちょうど1件であることを確認する。
     expect((await countSupersededAmong(stores, [w.id, x.id])) - statusBeforeRound1).toBe(1);
     expect(countSupersededEvents(stores) - eventsBeforeRound1).toBe(1);
 
-    // ROUND2: 同じ W が、別の相手 Y と再び contested になり、再び勝つ。
     const y = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "round2-Y" }));
     const marked2 = await runtime.markContested(ctx, w.id, y.id);
     expect(marked2.outcome.kind).toBe("contested");
@@ -179,14 +156,11 @@ describe("resolveContested の1対1不変条件（Issue #515 方向①が依存�
     const eventsBeforeRound2 = countSupersededEvents(stores);
     await runtime.resolveContested(ctx, w.id, y.id, { kind: "supersede", winnerId: w.id });
 
-    // ⟹ 2回目の呼び出し「単体」の増分も、累積ではなくちょうど1件のままである。
     expect((await countSupersededAmong(stores, [w.id, y.id])) - statusBeforeRound2).toBe(1);
     expect(countSupersededEvents(stores) - eventsBeforeRound2).toBe(1);
 
-    // 累積では W の下に X・Y の2件が積み上がっている——これが ADR 0230/Issue #515 が
-    // 報告した「別々の操作の敗者が同じ supersededById の下に積み上がる」状態そのもの。
-    // ⟹ この歯が緑である限り、その2件はそれぞれ別々の1回の呼び出しに対応する
-    // ——`onlyMemoryIds` を「1件ずつ」使うべき理由がここで裏付けられる。
+    // 累積では W の下に X・Y の2件が積み上がっている。この歯が緑である限り、その2件はそれぞれ別々の1回の呼び出しに
+    // 対応するので、`onlyMemoryIds` を「1件ずつ」使うべき理由がここで裏付けられる。
     const storedX = await stores.memoryStore.get(ctx, x.id);
     const storedY = await stores.memoryStore.get(ctx, y.id);
     expect(storedX?.status).toBe("superseded");

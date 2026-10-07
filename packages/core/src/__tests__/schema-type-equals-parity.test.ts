@@ -136,72 +136,25 @@ import type { AttributesSchema } from "../attributes.js";
 import type { Attributes } from "../attributes.js";
 
 /**
- * Issue #272: `satisfies z.ZodType<T>` は片方向の代入可能性
- * （「zod が推論する型 → 手書きの型 T」への代入可能性）しか見ない。
+ * `satisfies z.ZodType<T>` は片方向（zod が推論する型 → 手書きの型 T）の代入可能性しか見ない。zod 側だけを広げると落ちるが、
+ * 型側だけを広げると気づかない。`Equals<A, B>` で型としての同一性を型レベルで固定し、型だけを広げても zod だけを広げても `tsc` が赤くなるようにする。
  *
- * - **zod 側だけを広げる**と `satisfies` が落ちる（zod の推論型が T に入らなくなる）。
- * - **型側だけを広げる**と `satisfies` は気づかない（zod の推論型は今までどおり T の
- *   部分集合であり、代入可能性は崩れない）。
+ * `Equals`（`(<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2)`）は、単純な双方向 `extends`（相互代入可能性）より厳しい。
+ * 例: `OutboxJobKind`（`"extract" | "embed" | "consolidate" | "reflect" | (string & {})` という開いたブランド型）と素の `string` は、
+ * 相互に代入可能だが `Equals` は `false` を返す。誤検知にならないよう、各ペアで実際に `tsc` を走らせて確認し、通らないものは個別に理由を書く。
  *
- * [ADR 0144](../../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)
- * の「開いている穴」2番・[ADR 0164](../../../../docs/decisions/0164-valid-from-until-recall.md)
- * の変異Dが、この非対称性を実測で確認している。この issue はその非対称性そのものを歯にする。
- *
- * ## 採った形（Issue #272 の方向1）
- *
- * `Equals<A, B>` で **相互代入可能性**（実際には、より強い「型としての同一性」——下記
- * 「`Equals` は何を検査しているか」参照）を型レベルで固定する。`satisfies` が
- * 「zod が型を超えないこと」しか見ないのに対し、`Equals` は
- * **「zod が型を超えないこと」と「型が zod を超えないこと」の両方**を同時に見る
- * ——**型だけを広げても、zod だけを広げても、どちらでも `tsc` が赤くなる。**
- *
- * ## `Equals` は何を検査しているか（測った）
- *
- * `(<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2)` という
- * よく知られたパターンは、**単純な双方向 `extends`（相互代入可能性）より厳しい**——
- * `X`/`Y` を「同じ型」として同一視するかどうかを、素の相互代入可能性より細かく見る。
- * 【実測、scratch で確認・本ファイルの `OutboxJobRecord` 節で再現】: `OutboxJobKind`
- * （`"extract" | "embed" | "consolidate" | "reflect" | (string & {})` という
- * 「開いた」ブランド型）と素の `string` は、**相互に代入可能ではあるが**
- * `Equals` は `false` を返す。⟹ **この歯は `satisfies` より狭い意味で「同じ」を
- * 要求する**——それが誤検知にならないよう、各ペアで実際に `tsc` を走らせて確認し、
- * 通らないものは個別に理由を書く（下記、各セクション）。
- *
- * ## なぜ「55ペア個別」を、55本の import ではなく discriminated union から `Extract` するか
- *
- * `Omission`/`Provenance`/`ObserveInput` の各枝（`StageSkippedOmissionSchema` 等）は
- * **どれも `export` されていない**——公開 API はまとめの `OmissionSchema`/`ProvenanceSchema`/
- * `ObserveInputSchema` だけである。このテストファイルは `packages/core/src` の外から見た
- * 公開 API だけを検査したいので、`z.infer<typeof OmissionSchema>` を `kind` で
- * `Extract` して個々の枝を取り出す——**これは同時に「まとめの discriminated union 自体が
- * 手書きの union 型と一致するか」も検査する**。
- *
- * **55ペアの外側で見つかったもの**: `OmissionSchema`/`ProvenanceSchema`/`ObserveInputSchema`
- * の3つは、11+5+4=20本の枝それぞれには `satisfies z.ZodType<Xxx>` が付いているのに、
- * まとめのこの1行にだけ付いていなかった。issue #272 の調査（マネージャー経由）は
- * `OmissionSchema` だけを「55箇所のうち唯一 satisfies を持たない箇所」と報告していたが、
- * **同じ形の欠落が `ProvenanceSchema`（provenance.ts）と `ObserveInputSchema`
- * （observation.ts）にもあった**——本ファイルを書く過程で見つけた追加の事実であり、
- * 55ペアの数え上げには含まれない（別途報告する）。`OmissionSchema` には
- * `recall.ts` 側に `satisfies z.ZodType<Omission>` を1行足した（足しても緑のまま
- * だったため——下記 `_p03_Omission_whole` 参照）。`ProvenanceSchema`/`ObserveInputSchema`
- * は対応する `.ts` ファイルを触らず、ここでの `Equals` 検査（`_p40_Provenance_whole`/
- * `_p34_ObserveInput_whole`）だけで同じ効果（相互代入可能性の固定）を持たせてある。
+ * 各枝を import せず discriminated union から `Extract` する理由: `Omission`/`Provenance`/`ObserveInput` の各枝（`StageSkippedOmissionSchema` 等）は
+ * `export` されておらず、公開 API はまとめの `OmissionSchema`/`ProvenanceSchema`/`ObserveInputSchema` だけで、このテストは `packages/core/src` の外から見た
+ * 公開 API だけを検査したいため。`z.infer<typeof OmissionSchema>` を `kind` で `Extract` するので、まとめの union 自体が手書きの union 型と一致するかも同時に検査される。
  */
 
 type Equals<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
 /**
- * `Equals` の弱い形。**「型として同一か」ではなく「相互に代入可能か」**だけを見る、
- * 単純な双方向 `extends`（`[X] extends [Y]` とタプルで包むのは、`X`/`Y` が union の
- * ときに条件型が要素ごとに分配されるのを防ぐため——object 型が対象の本ファイルでは
- * 効果が無いが、意味が変わらない一般形として統一する）。
- *
- * **4ペアでだけ使う**（下記「55ペアのうち Equals が通らなかったもの」参照）。
- * `Equals` より真に弱い——**「同じ型」までは主張できないが「zod のほうが狭くも広くも
- * なっていないこと」は主張できる**。`satisfies` が見ているのはこの一方向
- * （zod→型）だけであり、`MutualAssignable` はその逆方向も足す。
+ * `Equals` の弱い形。「型として同一か」ではなく「相互に代入可能か」だけを見る単純な双方向 `extends`
+ * （`[X] extends [Y]` とタプルで包むのは、`X`/`Y` が union のときに条件型が要素ごとに分配されるのを防ぐため）。
+ * `Equals` が通らないペアでだけ使う。「同じ型」までは主張できないが、「zod のほうが狭くも広くもなっていないこと」は主張できる。
  */
 type MutualAssignable<X, Y> = [X] extends [Y] ? ([Y] extends [X] ? true : false) : false;
 
@@ -216,7 +169,7 @@ type MutualAssignable<X, Y> = [X] extends [Y] ? ([Y] extends [X] ? true : false)
 type Expect<T extends true> = T;
 
 // =============================================================================
-// packages/core/src/recall.ts — 29ペア
+// packages/core/src/recall.ts
 // =============================================================================
 
 type _p01_CountKind = Expect<Equals<z.infer<typeof CountKindSchema>, CountKind>>;
@@ -225,7 +178,7 @@ type _p02_NotIndexedReason = Expect<
   Equals<z.infer<typeof NotIndexedReasonSchema>, NotIndexedReason>
 >;
 
-// --- Omission（discriminated union。`recall.ts` に satisfies を足した——上記コメント参照） ---
+// --- Omission（discriminated union） ---
 type _OmissionInfer = z.infer<typeof OmissionSchema>;
 
 type _p03_Omission_whole = Expect<Equals<_OmissionInfer, Omission>>;
@@ -294,9 +247,8 @@ type _p21_RecallBudget = Expect<Equals<z.infer<typeof RecallBudgetSchema>, Recal
 
 type _p22_ScoreBreakdown = Expect<Equals<z.infer<typeof ScoreBreakdownSchema>, ScoreBreakdown>>;
 
-// Issue #548 方向2 / ADR 0352: `RecalledMemory.score`/`RecallRecordMemory.score` の型
-// （`RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore`）。`_OmissionInfer`/
-// `_p03_Omission_whole` と同じ形——個別の型（_p63）と union 全体（_p64）の両方を縛る。
+// `RecalledMemory.score`/`RecallRecordMemory.score` の型（`RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore`）。
+// `_OmissionInfer`/`_p03_Omission_whole` と同じ形で、個別の型（_p63）と union 全体（_p64）の両方を縛る。
 type _p63_AffinityUnmeasuredScore = Expect<
   Equals<z.infer<typeof AffinityUnmeasuredScoreSchema>, AffinityUnmeasuredScore>
 >;
@@ -327,18 +279,13 @@ type _p29_RecallOutputValidation = Expect<
 type _p30_RecallResult = Expect<Equals<z.infer<typeof RecallResultSchema>, RecallResult>>;
 
 // =============================================================================
-// packages/core/src/observation.ts — 7ペア
+// packages/core/src/observation.ts
 // =============================================================================
 
 type _p31_Observation = Expect<Equals<z.infer<typeof ObservationSchema>, Observation>>;
-// ⚠ `NewObservation` は `Equals` を満たさない。`NewObservation` の宣言は
-// `Omit<Observation, "id" | "recordedAt"> & { recordedAt?: Date }`——**intersection 型**
-// である。zod 側（`.omit({...}).extend({...})`）が返す推論型は、同じメンバーを持つ
-// **1つに平らな object 型**であり、値としては同じでも、`Equals` が見ている
-// 「同一の型表現か」では一致しない（本ファイル冒頭「55ペアのうち Equals が
-// 通らなかったもの」参照。`Omit<T,K> & {...}` という書き方そのものが原因であることを
-// 最小再現（`Flat` vs `Omit<Full,"c"|"b"> & {b?: string}`）で確認済み）。
-// ⟹ 弱い形（`MutualAssignable`、双方向の単純な `extends`）に落とす。
+// ⚠ `NewObservation` は `Equals` を満たさない。宣言は `Omit<Observation, "id" | "recordedAt"> & { recordedAt?: Date }`（intersection 型）で、
+// zod 側（`.omit({...}).extend({...})`）が返す推論型は同じメンバーを持つ1つに平らな object 型であり、
+// 値としては同じでも、`Equals` が見る「同一の型表現か」では一致しない。⟹ 弱い形（`MutualAssignable`）に落とす。
 
 type _p32_NewObservation = Expect<
   MutualAssignable<z.infer<typeof NewObservationSchema>, NewObservation>
@@ -367,7 +314,7 @@ type _p38_ObserveMemoryUsageInput = Expect<
 >;
 
 // =============================================================================
-// packages/core/src/provenance.ts — 6ペア
+// packages/core/src/provenance.ts
 // =============================================================================
 
 type _p39_ProvenanceKind = Expect<Equals<z.infer<typeof ProvenanceKindSchema>, ProvenanceKind>>;
@@ -397,7 +344,7 @@ type _p45_ImportedProvenance = Expect<
 >;
 
 // =============================================================================
-// packages/core/src/memory.ts — 5ペア
+// packages/core/src/memory.ts
 // =============================================================================
 
 type _p46_MemoryStatus = Expect<Equals<z.infer<typeof MemoryStatusSchema>, MemoryStatus>>;
@@ -413,7 +360,7 @@ type _p49_Memory = Expect<Equals<z.infer<typeof MemorySchema>, Memory>>;
 type _p50_NewMemory = Expect<MutualAssignable<z.infer<typeof NewMemorySchema>, NewMemory>>;
 
 // =============================================================================
-// packages/core/src/event.ts — 5ペア
+// packages/core/src/event.ts
 // =============================================================================
 
 type _p51_MemoryEventKind = Expect<Equals<z.infer<typeof MemoryEventKindSchema>, MemoryEventKind>>;
@@ -431,20 +378,14 @@ type _p54_NewMemoryEvent = Expect<
 type _p55_EventFilter = Expect<Equals<z.infer<typeof EventFilterSchema>, EventFilter>>;
 
 // =============================================================================
-// packages/core/src/outbox.ts — 1ペア
+// packages/core/src/outbox.ts
 //
-// ⚠ このペアは `Equals` を**満たさない**（下記「55ペアのうち Equals が落ちたもの」参照）。
-// `OutboxJobRecord.kind: OutboxJobKind`（`"extract" | "embed" | "consolidate" | "reflect" |
-// (string & {})` という開いたブランド型）に対し、zod 側は `z.string().min(1)`（素の
-// `string`）で受けている。**相互に代入可能**（`MutualAssignable` で下記のとおり確認済み。
-// `satisfies` が見ているのはこの片方向——zod→型——であり、今日も緑）だが、`Equals` は
-// ブランド型と素の `string` を「同じ型」とは認めない——本ファイル冒頭「`Equals` は
-// 何を検査しているか」で実測した限界そのものである。
-// ⟹ `MutualAssignable`（弱い形）で型レベルの相互代入可能性を固定したうえ、
-// `OutboxJobKind` はそもそも閉じた union ではなく `(string & {})` を持つ意図的に
-// 開いた型なので `Record<T, true>` 式の網羅は書けない——代わりに、代表値
-// （4リテラル + 任意の文字列1つ）を実際に `safeParse` して「zod が受け付ける値の集合が、
-// 型が許す値の集合の範囲に収まっていること」を実行時にも確認する。
+// ⚠ このペアは `Equals` を満たさない。`OutboxJobRecord.kind: OutboxJobKind`（`"extract" | "embed" | "consolidate" | "reflect" |
+// (string & {})` という開いたブランド型）に対し、zod 側は `z.string().min(1)`（素の `string`）で受けている。
+// 相互に代入可能だが、`Equals` はブランド型と素の `string` を「同じ型」とは認めない。
+// ⟹ `MutualAssignable`（弱い形）で型レベルの相互代入可能性を固定する。`OutboxJobKind` は意図的に開いた型なので
+// `Record<T, true>` 式の網羅は書けない。代わりに、代表値（4リテラル + 任意の文字列1つ）を実際に `safeParse` して、
+// 「zod が受け付ける値の集合が、型が許す値の集合の範囲に収まっていること」を実行時にも確認する。
 
 type _p56_OutboxJobRecord_kind = Expect<
   MutualAssignable<z.infer<typeof OutboxJobRecordSchema>["kind"], OutboxJobRecord["kind"]>
@@ -483,7 +424,7 @@ describe("OutboxJobRecord.kind — Equals が落ちる箇所の弱い形", () =>
 });
 
 // =============================================================================
-// packages/core/src/embedding.ts — 1ペア
+// packages/core/src/embedding.ts
 // =============================================================================
 
 type _p57_EmbeddingSpaceId = Expect<
@@ -491,69 +432,45 @@ type _p57_EmbeddingSpaceId = Expect<
 >;
 
 // =============================================================================
-// packages/core/src/ctx.ts — 1ペア
+// packages/core/src/ctx.ts
 // =============================================================================
 
 type _p58_Ctx = Expect<Equals<z.infer<typeof CtxSchema>, Ctx>>;
 
 // =============================================================================
-// 後から `main` で増えたペア（番号は末尾に足す）
-//
-// ⭐ **この節は、本 PR の歯が実際に噛んだ結果として生まれた。**
-// PR #376（[ADR 0174](../../../../docs/decisions/0174-filtered-omission-scope-relation.md)、
-// `FilteredOmission` に `scopeRelation` を足した）が `ScopeRelation` の型と
-// `ScopeRelationSchema` を `main` へ入れたが、**対応する `_pNN` はここに無かった。**
-// 本 PR の手元の門は緑のままだったが（枝は `main` より前の木を見ている）、
-// **CI は PR と `main` のマージ後の木を検査するため、出現数の歯が
-// `expected 59 to be 58` で赤くなった**——`main` を取り込み、このペアを足して直した。
-// ⟹ **「新しい型を足した人が登録し忘れる」を、この歯が初回から実際に拾った。**
-// （ADR 0181「引き受けた負債」に書いたとおり、これは「気づける」であって
-// 「強制できる」ではない——気づいた後に足すのは人間の仕事である。）
+// 後から増えたペア（番号は末尾に足す）
 // =============================================================================
 
 type _p59_ScopeRelation = Expect<Equals<z.infer<typeof ScopeRelationSchema>, ScopeRelation>>;
 
-// ADR 0288 / Issue #361: `AnnUnreachedOmission.severity?: AnnUnreachedSeverity` を足した。
-// `_p11_AnnUnreachedOmission`（上）は discriminated union の枝全体（`countKind`/`kind` も
-// 含む）を見ているので、`severity` が両側で一致していれば自動的に緑になる——
-// それとは別に、`AnnUnreachedSeveritySchema` 自身に `satisfies z.ZodType<...>` を足した
-// ので、ここにも対応するペアを登録する（このファイル冒頭のコメントの規律どおり）。
+// `AnnUnreachedOmission.severity?: AnnUnreachedSeverity`。`_p11_AnnUnreachedOmission`（上）は枝全体を見ているので `severity` も自動で縛られるが、
+// `AnnUnreachedSeveritySchema` 自身にも `satisfies z.ZodType<...>` が付いているので、対応するペアも登録する。
 type _p60_AnnUnreachedSeverity = Expect<
   Equals<z.infer<typeof AnnUnreachedSeveritySchema>, AnnUnreachedSeverity>
 >;
 
-// `StageSkippedOmission.cause?: StageSkippedCause`（PR #1504）: 埋め込み失敗の原因の種類。
-// `_p04`/`_p03` は枝・union 全体を見ているので `cause` も自動で縛られるが、
+// `StageSkippedOmission.cause?: StageSkippedCause`（埋め込み失敗の原因の種類）。`_p04`/`_p03` は枝・union 全体を見ているので `cause` も自動で縛られるが、
 // `StageSkippedCauseSchema` 自身の `satisfies` にも対応するペアを登録する。
 type _p65_StageSkippedCause = Expect<
   Equals<z.infer<typeof StageSkippedCauseSchema>, StageSkippedCause>
 >;
 
 // =============================================================================
-// packages/core/src/attributes.ts — 1ペア（Issue #152/#153、ADR 0312）
+// packages/core/src/attributes.ts
 // =============================================================================
 
 type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attributes>>;
 
-// Issue #371（(B) 第1段、ADR 0185/0315）: `claim-key.ts` に `ClaimKeyOptionsSchema`
-// （`satisfies z.ZodType<...>`）を新設した。このファイル冒頭のコメントの規律どおり、
-// 対応するペアをここに登録する。
+// `claim-key.ts` の `ClaimKeyOptionsSchema`（`satisfies z.ZodType<...>`）に対応するペア。
 type _p62_ClaimKeyOptions = Expect<Equals<z.infer<typeof ClaimKeyOptionsSchema>, ClaimKeyOptions>>;
 
 // =============================================================================
 // 実行時の存在証明
 //
-// 上の `type _pNN_... = Expect<Equals<...>>` は、`Equals<A,B>` が `false` になった
-// 瞬間にこのファイル自体の宣言でコンパイルエラーになる（型検査だけで完結する——
-// 実行時コードは無い）。`vitest` にも「この歯が実在する」ことを見えるようにするため、
-// この it が要る。
-//
-// ⚠ **2026-09-17 追記（マネージャー指摘、[ADR 0177](../../../docs/decisions/0177-fix-stage3-tooth-blind-asserts.md)
-// と同種の欠陥）**: 当初この it は `expect(55 + 3).toBe(58)` という**定数どうしの比較**
-// だった——`_pNN` を何本消しても、このファイルの外の事実は何も見ていないので永久に緑の
-// ままである。ADR 0177 が `mark-contested.test.ts` の「壊れても緑のままの assert」を
-// 直した直後に、同じ形の欠陥を新しい PR で持ち込みかけていた。**このファイル自身の
-// ソースを `readFileSync` で読み、実際に `_pNN` 宣言の本数と番号を数える形に直した。**
+// 上の `type _pNN_... = Expect<Equals<...>>` は、型検査だけで完結し実行時コードを持たない。vitest にも「この歯が実在する」ことを
+// 見えるようにするため、この it が要る。定数どうしの比較（`expect(55 + 3).toBe(58)` のような形）では、`_pNN` を何本消しても
+// このファイルの外の事実は何も見ていないので永久に緑のままになる。だから、このファイル自身のソースを `readFileSync` で読み、
+// 実際に `_pNN` 宣言の本数と番号を数える。
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
@@ -597,22 +514,15 @@ describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
 });
 
 // =============================================================================
-// 網羅を「強制」できるかの部分的な答え（ADR 0181「引き受けた負債」参照）
+// 網羅を「強制」できるかの部分的な答え
 //
-// 上の `_pNN` 群は、55ペアを**手で**書き出したものである——`packages/core/src` に
-// 56本目の `satisfies z.ZodType<...>` が増えても、このファイルはそれを**自動では
-// 検出しない**（`ALL_FILTERED_CONDITIONS`/`OmissionProbe` レジストリのように
-// `Record<Union, ...>` の形で union から機械的に導いてはいない——55ペアは55個の
-// **別々の型**への言及であり、単一の union から取り出せる形ではないため）。
-//
-// ここで足せるのは「新しい型を足した人が登録し忘れたら**気づける**」までである
-// （「登録し忘れたら通らない」という完全な強制ではない）。`satisfies z.ZodType<...>`
-// の出現数を数え、期待値と食い違えば赤くする——`unreachable-union-values.test.ts` と
-// 同じ静的な文字列走査であり、同じ限界を持つ（コメント中の引用や別の書式の
-// `satisfies` は数えない・数えすぎる可能性がある）。**「新しい satisfies が増えたら、
-// この期待値を更新するのと同時に、対応する `_pNN` をこのファイルへ足すこと」という
-// 運用上の合図として使う**——この数が変わったのに `_pNN` を足し忘れても、この歯は
-// 気づけない（数だけを見ているため）。
+// 上の `_pNN` 群は手で書き出したもので、`packages/core/src` に新しい `satisfies z.ZodType<...>` が増えても、このファイルはそれを
+// 自動では検出しない（`Record<Union, ...>` の形で単一の union から機械的に導ける形ではないため）。
+// ここで足せるのは「新しい型を足した人が登録し忘れたら気づける」までで、`satisfies z.ZodType<...>` の出現数を数え、
+// 期待値と食い違えば赤くする。`unreachable-union-values.test.ts` と同じ静的な文字列走査であり、同じ限界を持つ
+// （コメント中の引用や別の書式の `satisfies` は数えない・数えすぎる可能性がある）。
+// 「新しい satisfies が増えたら、この期待値を更新するのと同時に、対応する `_pNN` をこのファイルへ足すこと」という運用上の合図として使う。
+// 数が変わったのに `_pNN` を足し忘れても、この歯は気づけない（数だけを見ているため）。
 // =============================================================================
 
 const CORE_SRC_ROOT = join(__dirname, "..");
@@ -640,21 +550,14 @@ describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強
     for (const file of files) {
       const lines = readFileSync(file, "utf8").split("\n");
       for (const line of lines) {
-        // `*`/`//` から始まる行（JSDoc コメント・行コメント）は、コード例としての
-        // 引用を誤検出しないため読み飛ばす——`unreachable-union-values.test.ts` と
-        // 同じ規約（本ファイルの `recall.ts` への追記コメント自身が、この規約が
-        // 必要であることを実例で示した——最初の実装では自分のコメント中の引用を
-        // 誤って3件多く数えていた）。
+        // `*`/`//` から始まる行（JSDoc コメント・行コメント）は、コード例としての引用を誤検出しないため読み飛ばす
+        // （`unreachable-union-values.test.ts` と同じ規約）。
         const trimmed = line.trim();
         if (trimmed.startsWith("*") || trimmed.startsWith("//")) continue;
         const matches = line.match(/satisfies z\.ZodType</g);
         count += matches ? matches.length : 0;
       }
     }
-    // 55（issue #272 の調査で数えたペア）+ 3（OmissionSchema・ProvenanceSchema・
-    // ObserveInputSchema。いずれも discriminated union のまとめに足りなかった1行、
-    // ADR 0181「決定」参照）+ 1（`ScopeRelationSchema`、`main` から取り込んだ分）
-    // + 1（`AnnUnreachedSeveritySchema`、ADR 0288 / Issue #361）= 60。
     expect(
       count,
       "packages/core/src の satisfies z.ZodType<...> の出現数が期待値と食い違った。" +

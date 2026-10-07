@@ -4,27 +4,9 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `observe()` に渡した `occurredAt` が、`Memory.occurredAt` を経て
- * `recall()` の period フィルタに効くところまでを、一本の経路として検査する
- * （ADR 0037）。
- *
- * **なぜこの歯が要るか**: `ObserveInput.occurredAt` は3つの入力すべてに最初から在り、
- * `runtime.observe` は素通しし、`buildNewMemoryFromCandidate` が `Memory.occurredAt` へ
- * 写す。**しかしリポジトリ内でこの口に値を渡している箇所は0件だった**
- * （`packages` と `examples` 配下の `src` を検索。テストを含む）。
- * **⟹ 入口から出口まで、一度も通っていない経路だった。**
- *
- * `recall-runtime.ts` は `effectiveTime = memory.occurredAt ?? memory.recordedAt` で
- * `occurredAfter` / `occurredBefore` を当てる。**`occurredAt` が常に null だと、
- * 「いつの出来事か」を絞ると読める欄が、実際には「いつ言われたか」を絞る。**
- * 生の会話ログを後から取り込む（backfill）と `recordedAt` は今日になるので、
- * **この取り違えは静かに間違う。**
- */
-
 const ctx: Ctx = { tenantId: "tenant-occurred-at" };
 const DAY = 24 * 60 * 60 * 1000;
-/** ADR 0032 のリース。この歯はリースの境界そのものを見ないので、十分長い固定値を使う。 */
+/** この歯はリースの境界そのものを見ないので、十分長い固定値を使う。 */
 const TEST_LEASE_MS = 60_000;
 
 /**
@@ -172,17 +154,12 @@ describe("recall() の occurredAfter は、occurredAt を渡したときだけ�
 });
 
 /**
- * period の判定規則は、この repo に**4箇所**ある（ADR 0039）——
- * `recall-runtime.ts` の候補フィルタ、`PostgresMemoryStore.aggregateScope`、
- * `InMemoryMemoryStore.aggregateScope`、`packages/core` のテスト用
- * `FakeMemoryStore.aggregateScope`。
+ * period の判定規則は、この repo に4箇所ある: `recall-runtime.ts` の候補フィルタ、`PostgresMemoryStore.aggregateScope`、
+ * `InMemoryMemoryStore.aggregateScope`、`packages/core` のテスト用 `FakeMemoryStore.aggregateScope`。
+ * 候補フィルタは「何が返るか」を、`aggregateScope` は「`omitted` が何と言うか」を決めるので、食い違うと `omitted` が嘘をつく。
  *
- * **候補フィルタは「何が返るか」を決め、`aggregateScope` は「`omitted` が何と言うか」を決める。**
- * ⟹ **この2つが食い違うと、`omitted` が嘘をつく。**
- *
- * `packages/testkit` の適合テストは adapter 2つ（postgres / in-memory）に届くが、
- * `recall-runtime.ts` には届かない（`recall()` を呼ばないため）。
- * **ここで測るのは「候補フィルタと `aggregateScope` が、同じ境界に対して同じ答えを出すこと」である。**
+ * `packages/testkit` の適合テストは adapter 2つ（postgres / in-memory）に届くが、`recall-runtime.ts` には届かない
+ * （`recall()` を呼ばないため）。ここで測るのは、候補フィルタと `aggregateScope` が同じ境界に対して同じ答えを出すこと。
  */
 describe("recall() の period は境界を含み、返り値と omitted が食い違わない（ADR 0039）", () => {
   const BOUNDARY_TEXT = "きょうどの話です";
@@ -217,10 +194,8 @@ describe("recall() の period は境界を含み、返り値と omitted が食�
     const result = await runtime.recall(ctx, { vector: [1, 0], occurredAfter: cutoff });
     const digests = result.memories.map((m) => m.digest);
 
-    // 候補フィルタ（recall-runtime.ts）の側: 境界は残り、1ミリ秒外は落ちる。
     expect(digests).toContain(BOUNDARY_TEXT);
     expect(digests).not.toContain(JUST_OUTSIDE_TEXT);
-    // aggregateScope の側: 落ちたのはちょうど1件だと言っている。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",
@@ -250,10 +225,8 @@ describe("recall() の period は境界を含み、返り値と omitted が食�
   });
 
   /**
-   * 上限（`occurredBefore`）側。下限側（上の `ingestBoundaryPair`）は「境界ちょうど」と
-   * 「境界の1ミリ秒**前**」の対だが、上限側は向きが逆――「境界ちょうど」と「境界の1ミリ秒
-   * **後**」の対が要る。既存の `ingestBoundaryPair` はそのまま残し、隣に対になるヘルパを
-   * 足す（既存の歯の意味は変えない）。
+   * 上限（`occurredBefore`）側。下限側（上の `ingestBoundaryPair`）は「境界ちょうど」と「境界の1ミリ秒前」の対だが、
+   * 上限側は向きが逆で、「境界ちょうど」と「境界の1ミリ秒後」の対が要る。
    */
   async function ingestUpperBoundaryPair(
     runtime: ReturnType<typeof buildRuntime>["runtime"],
@@ -269,7 +242,6 @@ describe("recall() の period は境界を含み、返り値と omitted が食�
       kind: "utterance",
       text: JUST_OUTSIDE_TEXT,
       externalId: "just-outside",
-      // 境界の1ミリ秒だけ外。上限側なので「後」（下限側は「前」）。
       occurredAt: new Date(cutoff.getTime() + 1),
     });
     await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
@@ -285,10 +257,8 @@ describe("recall() の period は境界を含み、返り値と omitted が食�
     const result = await runtime.recall(ctx, { vector: [1, 0], occurredBefore: cutoff });
     const digests = result.memories.map((m) => m.digest);
 
-    // 候補フィルタ（recall-runtime.ts）の側: 境界は残り、1ミリ秒外（後）は落ちる。
     expect(digests).toContain(BOUNDARY_TEXT);
     expect(digests).not.toContain(JUST_OUTSIDE_TEXT);
-    // aggregateScope の側: 落ちたのはちょうど1件だと言っている。
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",

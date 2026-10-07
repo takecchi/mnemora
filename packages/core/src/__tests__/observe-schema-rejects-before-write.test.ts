@@ -4,14 +4,8 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime.observe` の TSDoc「`input` を `ObserveInputSchema` で検証し、合わなければ zod の `ZodError` を投げる
- * （何も書く前）」のうち、**「何も書く前」**の側を縛る。振る舞いは変えていない。
- *
- * 例外の種類（`ZodError` であること）そのものは #1184 の側（`runtime-entry-exception-kinds.postgres.test.ts`）が
- * 縛るので、ここでは、落ちたのがスキーマの段であることの前提として `name` を見るだけにする。
- * 縛るのは、落ちた後に Observation・outbox・Memory・監査ログが1件も増えていないこと。
- */
+// 例外の種類（`ZodError`）そのものは `runtime-entry-exception-kinds.postgres.test.ts` が縛るので、
+// ここでは落ちたのがスキーマの段であることの前提として `name` を見るだけにする。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -79,7 +73,6 @@ describe("runtime.observe: スキーマに合わない入力は、何も書く�
         (e: unknown) => e as Error,
       );
 
-      // 前提: スキーマの段で落ちている（種類そのものの歯は #1184 の側）。
       expect(err?.name).toBe("ZodError");
       expect(counts()).toEqual(before);
     },

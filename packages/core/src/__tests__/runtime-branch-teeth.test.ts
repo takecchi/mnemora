@@ -9,12 +9,6 @@ import { createRuntime } from "../runtime.js";
 import type { Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.ts` の recall 以外の経路に変異試験を当てたとき、既存の歯がすり抜けた分岐を、
- * それぞれの約束に当てて押さえる歯。1本ごとに、どの変異を捕まえるためのものかと
- * 約束の出所を書く。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -79,17 +73,13 @@ function buildRuntime(opts: {
       ? opts.embeddingProvider(stores.embeddingProvider)
       : stores.embeddingProvider,
     hashContent: (content: string) => `sha256(${content})`,
-    // 以前の Fake は outbox のジョブの availableAt を実時刻で付けたため、tick が claim できるよう
-    // 実時計で動かす（半減期は10年なので、NOW 起点の記憶が減衰で落ちることはない）。
     clock: { now: () => new Date() },
   });
   return { runtime, stores };
 }
 
 describe("抽出：created イベントは実際に INSERT したときだけ", () => {
-  // 変異 S02（`if (created)` → `if (true)`）を捕まえる。約束: docs/memory-model.md の
-  // lifecycle 表・行2——`memories` への INSERT と `created` イベントが対になっている。
-  // 冪等キー（観測・抽出器の版・内容）で既存の行が返っただけなら、INSERT は起きていない。
+  // 冪等キー（観測・抽出器の版・内容）で既存の行が返っただけなら、INSERT は起きていないので created は積まない。
   it("deferred の抽出で、同じ冪等キーの Memory が既に在れば created イベントを積まない", async () => {
     const { runtime, stores } = buildRuntime({
       llm: llmReturning({ memories: [{ content: "既にある記憶", provenanceKind: "stated" }] }),
@@ -120,9 +110,7 @@ describe("抽出：created イベントは実際に INSERT したときだけ", 
 });
 
 describe("tick の embed：埋め込みの最中に purge された記憶のベクトルは残さない", () => {
-  // 変異 S16（書いた後の読み直しで purge 済みなら消す、を外す）を捕まえる。約束:
-  // Issue #1035 / ADR 0124 決定5——purge が「内容の上書き → 埋め込みの削除」を終えた後に
-  // purge 前の内容から作ったベクトルが書かれても、読み直して消す。
+  // purge が「内容の上書き → 埋め込みの削除」を終えた後に、purge 前の内容から作ったベクトルが書かれても、読み直して消す。
   it("embed の最中に forget と purge が完了しても、書いたベクトルは消える", async () => {
     // runtime と memoryId は、embed の割り込みより後で決まる——後から埋める入れ物に置く。
     const late: { runtime?: Runtime; memoryId?: string } = {};
@@ -153,9 +141,7 @@ describe("tick の embed：埋め込みの最中に purge された記憶のベ�
 });
 
 describe("consolidate / reflect の { seedMemoryId }：minAffinity ちょうどの近傍は残る", () => {
-  // 変異 S31・S38（`>= minAffinity` → `>`）を捕まえる。約束: `runtime.ts` の
-  // `ConsolidateTarget`/`Runtime.consolidate` の doc「`minAffinity` 未満の候補は落とす」
-  // （reflect も同じ形）——ちょうど `minAffinity` の近傍は落ちない。
+  // ちょうど `minAffinity` の近傍は落ちない（reflect も同じ形）。
   async function seedAndNeighbor(stores: ReturnType<typeof createFakeRuntimeStores>) {
     const seed = await stores.memoryStore.createMemory(
       ctx,
@@ -199,15 +185,9 @@ describe("consolidate / reflect の { seedMemoryId }：minAffinity ちょうど�
 });
 
 describe("consolidate：統合元の書き込みが CAS で弾かれたら status_changed_concurrently", () => {
-  // 変異 S37（`MemoryStatusConflictError` の扱いを外す）を捕まえる。約束: `runtime.ts` の
-  // `ConsolidateSourceOutcome` の doc の `"status_changed_concurrently"`（ADR 0030 の安全弁3）と
-  // docs/memory-model.md の lifecycle 表・行12の追記（CAS の破れで superseded にならなかった
-  // id もある）。`supersedeWithNewMemories` を持たない adapter の2段の経路で起きる。
-  //
-  // ⚠ 2026-09-30 訂正（Issue #1226）: 元は濃厚状態の変化に `"forgotten"` を使っていたが、
-  // `forgotten` は Issue #1226 の修正で書き込みそのものを打ち切る特別扱いになった
-  // （下の別の describe 参照）——この歯が確かめたいのは「`forgotten`/`purged` 以外の
-  // 理由で CAS が破れたときは今日どおり部分成功する」ことなので、`"archived"` に差し替えた。
+  // `supersedeWithNewMemories` を持たない adapter の2段の経路で起きる。割り込ませる状態の変化に `"forgotten"` を使わないのは、
+  // `forgotten` は書き込みそのものを打ち切る特別扱いだから（下の別の describe 参照）。この歯が確かめたいのは
+  // 「`forgotten`/`purged` 以外の理由で CAS が破れたときは部分成功する」ことなので、`"archived"` を使う。
   it("LLM を呼んでいる間に統合元の1件が archived されると、その1件だけ status_changed_concurrently になる", async () => {
     const stores = createFakeRuntimeStores();
     (
@@ -237,10 +217,8 @@ describe("consolidate：統合元の書き込みが CAS で弾かれたら statu
 });
 
 describe("consolidate：統合元の1件が forgotten になったら書き込みを一切打ち切る（Issue #1226）", () => {
-  // `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts` の
-  // Postgres/testkit 版に対する、core の Fake（`supersedeWithNewMemories` を持たない
-  // `store_unsupported` 経路）での同じ確認。LLM 呼び出しの最中に forget が完了する
-  // （`await` を挟むので、runtime の「LLM が返った直後の読み直し」より前に commit される）。
+  // LLM 呼び出しの最中に forget が完了する（`await` を挟むので、runtime の「LLM が返った直後の読み直し」より前に commit される）。
+  // Postgres/testkit 版は `packages/postgres/src/__tests__/consolidate-reflect-forget-race.postgres.test.ts`。
   it("LLM を呼んでいる間に統合元の1件が forget されると、統合先を作らず outcome: aborted_source_forgotten を返す", async () => {
     const stores = createFakeRuntimeStores();
     (
@@ -267,7 +245,6 @@ describe("consolidate：統合元の1件が forgotten になったら書き込�
       { memoryId: b.id, kind: "forgotten_before_write" },
       { memoryId: c.id, kind: "not_attempted" },
     ]);
-    // A・C は superseded へ動いていない——書き込みが一切起きていない証拠。
     expect((await stores.memoryStore.get(ctx, a.id))?.status).toBe("active");
     expect((await stores.memoryStore.get(ctx, c.id))?.status).toBe("active");
   });

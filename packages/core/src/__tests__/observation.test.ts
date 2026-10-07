@@ -112,11 +112,6 @@ describe("ObserveInputSchema — 各 kind ごとに 1 本ずつ", () => {
   });
 });
 
-/**
- * Issue #608 項目②(b): `subjectCandidates` はスキーマの時点では素通しする
- * （空配列の意味づけ・deferred との組み合わせの検証は `runtime.observe` 側の責務。
- * `runtime.test.ts`「observe: subjectCandidates（Issue #608 項目②(b)）」参照）。
- */
 describe("ObserveInputSchema — subjectCandidates（Issue #608 項目②(b)）", () => {
   it("utterance / event / document のいずれでも省略できる（既定は undefined）", () => {
     for (const input of [

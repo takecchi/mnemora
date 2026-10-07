@@ -5,11 +5,7 @@ import { createRuntime } from "../runtime.js";
 import type { TickOptions } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0514（ADR 0496 の負債5と1）: `runtime.tick` の入口は、`claimBatch` を呼ぶ前に `opts.kinds`・`limit`・`claimedBy` と、
- * store が保存できない巨大な `leaseMs` を、名指しの例外で断る。`EXPECTED`・`ACCEPTED` は、testkit の InMemory と Postgres の側
- * （`packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts`）と同じ表を縛る。
- */
+// `EXPECTED`・`ACCEPTED` は、testkit の InMemory と Postgres の側（`packages/postgres/src/__tests__/tick-opts-validation.postgres.test.ts`）と同じ表を縛る。
 
 const NOW_MS = Date.parse("2100-01-01T00:00:00.000Z");
 /** Postgres の `timestamptz` の下限（4714-11-24 BC）。`now - leaseMs` がこれより前になる `leaseMs` は、どの store でも保存できない。 */

@@ -6,13 +6,8 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1475 のすり抜け A13（ADR 0363 の追記・0399）。
- * `purge` の `embeddingCleanup.error` は、outbox の `last_error` と同じ整形（params 以降を落とし、4096字で切る）。
- * 約束のうち「4096字で切る」は、outbox 側の歯（ADR 0363 本文）にしかなく、`outcome.error` の経路には届いていなかった。
- * この経路だけ上限を 8192 字にずらしても既存の歯は赤にならなかった。
- * （クローンの決定: 0363:267- の追記がいまの約束。狭まった部分——params 以降を落とす・4096字で切る——も約束の内。）
- */
+// `purge` の `embeddingCleanup.error` は、outbox の `last_error` と同じ整形（params 以降を落とし、4096字で切る）。
+// 「4096字で切る」を、outbox 側の歯とは別に、`outcome.error` の経路そのものでも縛る。
 const ctx: Ctx = { tenantId: "tenant-embedding-cleanup-cap" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const CAP = 4096;

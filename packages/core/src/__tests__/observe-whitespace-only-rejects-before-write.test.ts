@@ -4,11 +4,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0502: 空白だけの本文は、LLM を呼ぶ前・何も書く前に ZodError で落ちる
- * （LLM が失敗しても、空白だけの active Memory は残らない）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 describe("runtime.observe: 空白だけの本文", () => {

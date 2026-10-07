@@ -18,12 +18,8 @@ import {
 import type { TenantSettingsStore } from "../interfaces/tenant-settings-store.js";
 
 /**
- * ADR 0437 決定1: `TenantSettingsStore` を受け取る公開ヘルパー（`read*` / `write*`）9本も、
- * store が投げた例外から drizzle の `params:` より後ろを落とす（ADR 0430 決定3 の対象を広げた）。
- *
- * ⭐ 9本は手で数えたのではなく、公開 API の snapshot（`scripts/__snapshots__/public-api/core.d.ts`）の
- * 「第1引数が `store: TenantSettingsStore` の公開関数」から引く。ヘルパーが増えたのにこの表へ足し忘れると、
- * 最初の it が赤になる。
+ * 9本は手で数えたのではなく、公開 API の snapshot（`scripts/__snapshots__/public-api/core.d.ts`）の
+ * 「第1引数が `store: TenantSettingsStore` の公開関数」から引く。ヘルパーが増えたのにこの表へ足し忘れると、最初の it が赤になる。
  */
 
 const SECRET = "問いの本文-SECRET-孤立サロゲート\uD800-末尾";

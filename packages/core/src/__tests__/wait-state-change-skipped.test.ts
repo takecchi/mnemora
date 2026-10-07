@@ -7,11 +7,7 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0544: LLM を待つ間に元の記憶が `contested`（と、訂正の解決で負けた `superseded`）になったら、
- * `reextract`・`consolidate`・`reflect` は書かずに打ち切る。core の `FakeMemoryStore`（3つ目の実装）での確認。
- * testkit の InMemory と Postgres は `packages/postgres/src/__tests__/wait-state-change-skipped.postgres.test.ts`。
- */
+// testkit の InMemory と Postgres は `packages/postgres/src/__tests__/wait-state-change-skipped.postgres.test.ts`。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -263,10 +259,8 @@ describe("reextract: 退けたかは、最新の superseded イベントの理�
     const first = await runtime.observe(ctx, { kind: "utterance", text: "猫は3匹いる" });
     const x = first.memoryIds[0]!;
     const y = (await stores.memoryStore.createMemory(ctx, newMemory("猫は2匹"))).id;
-    // 訂正の解決で x が負ける（今の時刻で `contested_resolved` の superseded イベントが積まれる）。
     await runtime.markContested(ctx, x, y);
     await runtime.resolveContested(ctx, x, y, { kind: "supersede", winnerId: y });
-    // 機構で置き換えた superseded イベントを、それより前（または後）の時刻で足す。
     const mechanismAt =
       order === "contested_resolved_last"
         ? new Date("2020-01-01T00:00:00.000Z")

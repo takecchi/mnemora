@@ -15,21 +15,6 @@ import {
 } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.reflect`（Issue #104）の歯。
- *
- * 置き場所・作法は `consolidate.test.ts` / `forget.test.ts` に揃える:
- * - `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
- * - LLM の偽物はこのファイルにローカルに定義する。
- *
- * 設計の要点（`runtime.ts` の `ReflectOutcome`/`ReflectBasisOutcome`/`reflect` の
- * doc コメント参照）:
- * - `reflect` は `consolidate` の双子だが意味論は正反対——N→1 の**置換**ではなく「足すだけ」。
- *   既存の行の `status` を1つも動かさない（決定4）。
- * - 土台に `provenance.kind === 'reflected'` の Memory は採らない（自己増幅を止める、決定9）。
- * - 冪等性は買っていない——同じ target で2回呼ぶと `reflected` Memory が2件できる（決定11）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -227,7 +212,6 @@ describe("runtime.reflect — created イベント", () => {
       sources: [a.id, b.id],
       note: "手動での反映テスト",
     });
-    // content はイベントのどの欄にも運ばれない。
     expect(JSON.stringify(event)).not.toContain("A本文");
     expect(JSON.stringify(event)).not.toContain("B本文");
   });
@@ -253,10 +237,8 @@ describe("runtime.reflect — 既存の行の status を1つも動かさない�
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
 
-    // `consolidate.test.ts`「途中で store が投げたら打ち切る」と同じ手口——`stores` の
-    // 他の面（eventStore 等）は共有したまま、`memoryStore` だけ Proxy で差し替える
-    // （`backing` を共有しない別の fake 束を新しく作ると、created イベントの実在チェックが
-    // 割れて壊れる）。
+    // `stores` の他の面（eventStore 等）は共有したまま、`memoryStore` だけ Proxy で差し替える
+    // （`backing` を共有しない別の fake 束を新しく作ると、created イベントの実在チェックが割れて壊れる）。
     const base = stores.memoryStore;
     let updateStatusCalls = 0;
     let updateStatusWithEventCalls = 0;
@@ -304,7 +286,6 @@ describe("runtime.reflect — 既存の行の status を1つも動かさない�
     expect(bAfter?.status).toBe("active");
     expect(bAfter?.supersededById ?? null).toBeNull();
 
-    // reflect 自身が積むのは反映先の created イベントだけ。
     const nonCreatedEvents = stores.eventStore.events.filter((e) => e.kind !== "created");
     expect(nonCreatedEvents).toHaveLength(0);
   });
@@ -342,7 +323,6 @@ describe("runtime.reflect — not_found / status_not_active / basis_is_reflected
       { memoryId: priorReflection.id, kind: "basis_is_reflected" },
     ]);
 
-    // forgotten / archived / 既存の reflected 由来は一切書き換えられていない。
     const forgottenAfter = await stores.memoryStore.get(ctx, forgotten.id);
     expect(forgottenAfter?.status).toBe("forgotten");
     const archivedAfter = await stores.memoryStore.get(ctx, archived.id);
@@ -569,7 +549,6 @@ describe("runtime.reflect — target の { seedMemoryId } の形（Issue #204、
     const result = await runtime.reflect(ctx, { target: { seedMemoryId: seed.id } });
 
     expect(result.outcome).toBe("reflected");
-    // low は候補にすら入らない——ids に無いので basis にも現れない。
     expect(result.basis).toEqual([
       { memoryId: seed.id, kind: "used" },
       { memoryId: high.id, kind: "used" },
@@ -705,32 +684,7 @@ describe("runtime.reflect — target の { seedMemoryId } の形（Issue #204、
   });
 });
 
-/**
- * Issue #820 / ADR 0317 決定3「確かめていないこと」: `tick()` の `reflect` ジョブハンドラ
- * （`processReflectJob`）は、`processConsolidateJob`（Issue #579 / ADR 0317）と対称に、
- * 種の `subjectId` を `ctx.subjectId` に置いてから `reflect(ctx', { target: { seedMemoryId } })`
- * を呼ぶ——`consolidate.test.ts` の同名 describe（「runtime.tick — consolidate ジョブは種の
- * subjectId に近傍探索を絞る」）をそのまま `reflect` に写したもの。
- *
- * ⚠ これは `runtime.reflect(ctx, { target: { seedMemoryId } })` を**直接**呼ぶ経路の歯では
- * ない——上の describe（`{ seedMemoryId } の形`）がその経路をすでに固定しており、この変更は
- * そちらに一切触れていない。ここで測るのは、必ず `runtime.tick()` を経由する
- * `processReflectJob` の分岐だけである。
- *
- * `reflect` は `consolidate` と違い、既存の行の `status` を1つも動かさない（決定4）。
- * ⟹ `tick()` の戻り値からは新しく出来た `reflected` Memory の id が分からないため、
- * `stores.eventStore.events` の `kind: 'created'` を1件だけ拾い、その `meta.sources`
- * （`created イベント` describe が固定している形）で基底集合を、`event.memoryId` で
- * 出来た Memory を特定する。
- */
 describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索を絞る（Issue #820 / ADR 0317）", () => {
-  /**
-   * `consolidate.test.ts` の `buildRuntimeWithRealClock` と同じ理由——この describe は
-   * `tick()` の `claimBatch` を経由するため、outbox 行の `availableAt`
-   * （以前の Fake は `enqueueJob` が `new Date()` ＝実時刻で刻んだ。今は `opts.now` に従う。ADR 0555）より前の固定 clock を
-   * 使うと、以前は `availableAt <= now` が成り立たず1件も claim されなかった。⟹ ここだけ実時計
-   * （既定の `systemClock`）を使う。
-   */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
@@ -800,9 +754,8 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
       [8, 0],
     );
 
-    // 別 subject の近傍——**同じベクトル**（話題が重なる使い方、ADR 0310 shared 極）。
-    // 種の subject に絞らなければ、これも既定の minAffinity（reflect は 0.4）を満たして
-    // 候補に入る。
+    // 別 subject の近傍——同じベクトル（話題が重なる使い方）。種の subject に絞らなければ、
+    // これも既定の minAffinity（reflect は 0.4）を満たして候補に入る。
     const neighborOtherSubject = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -819,14 +772,11 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
       [8, 0],
     );
 
-    // `ctx` に subjectId を付けずに tick を呼ぶ——ADR 0310 の「絞らない」列に相当する
-    // 呼び方。修正前はここで別 subject の近傍が混ざり、反映結果の subjectId が null に
-    // 畳まれた（本 PR 本文に、修正前に赤くなることを確認した記録がある）。
+    // `ctx` に subjectId を付けずに tick を呼ぶ（「絞らない」列に相当する呼び方）。
     const tickResult = await runtime.tick(ctx, { kinds: ["reflect"], leaseMs: 60_000 });
     expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
 
     const { sources, reflected } = await getSoleReflectedResult(stores);
-    // 混在 0%: 反映結果の subjectId は null に畳まれず、種の subject のままである。
     expect(reflected.subjectId).toBe("subject-a");
     expect(sources).toEqual(expect.arrayContaining([seed.id, neighborSameSubject.id]));
     expect(sources).not.toContain(neighborOtherSubject.id);
@@ -859,10 +809,8 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
       [8, 0],
     );
 
-    // ctx.subjectId と同じ subject の近傍——ADR 0310 §3 が実測したとおり、`tick()` は
-    // ジョブを subject で絞って claim できないため、種と別の subject が来ることがある。
-    // ここでは「ctx.subjectId に付けた subject」を優先すると、かえってこれが混ざる
-    // ことになる（ADR 0310 の「種と別」の列）——それを防ぐのがこの歯である。
+    // ctx.subjectId と同じ subject の近傍。`tick()` はジョブを subject で絞って claim できないため、種と別の subject が来ることがある。
+    // ここで「ctx.subjectId に付けた subject」を優先すると、かえってこれが混ざる。それを防ぐ歯。
     const neighborSameAsCtx = await stores.memoryStore.createMemory(
       ctx,
       newMemory({
@@ -887,7 +835,6 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
     expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
 
     const { sources, reflected } = await getSoleReflectedResult(stores);
-    // 種の subject（subject-a）を優先する——ctx に付けた subject-c ではない。
     expect(reflected.subjectId).toBe("subject-a");
     expect(sources).toEqual(expect.arrayContaining([seed.id, neighborSameAsSeed.id]));
     expect(sources).not.toContain(neighborSameAsCtx.id);
@@ -915,8 +862,7 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, neighbor.id, [8, 0]);
 
-    // ctx に subjectId を付けない——種が null のとき、ctx をそのまま使うので recall は
-    // テナント全体を見る。今日どおりの挙動（変えていない）を固定する。
+    // ctx に subjectId を付けない——種が null のとき、ctx をそのまま使うので recall はテナント全体を見る。
     const tickResult = await runtime.tick(ctx, { kinds: ["reflect"], leaseMs: 60_000 });
     expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
 
@@ -1005,32 +951,11 @@ describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索�
 
 describe("runtime.reflect — 冪等性は買っていない（決定11、意図的に固定する）", () => {
   /**
-   * 🔴 **この歯は「バグを検出する」歯ではない。「意図した挙動を固定する」歯である。**
-   * 赤くなったときに読む人が間違えやすい歯なので、先にそれを名乗っておく。
-   *
-   * **冪等性は ADR 0091 決定11 で明示的に「買わない」と決めた。** 買わなかったのは
-   * 「難しいから」ではなく「道具が無いから」である:
-   * - `reflect` の産物は `sourceObservationId: null` なので、
-   *   `packages/postgres/migrations/0001_init.sql:106-108` の部分一意索引
-   *   （`WHERE source_observation_id IS NOT NULL`）の**外**に落ちる。
-   * - ADR 0089 決定3 の「読んで status で弾く」（`consolidate` が冪等性を買った方法）は、
-   *   **ADR 0091 決定4**（`reflect` は既存の行の `status` を1つも動かさない）**により
-   *   使えない**——2回目の呼び出しでも同じ土台が `eligible` のまま在り続ける。
-   * - `MemoryStore` に `content_hash` で引く口は無い。足せば公開 interface の必須メソッドが
-   *   増え、第三者の adapter を壊す（`docs/autonomy.md` §3）。索引を足すのはマイグレーションで
-   *   あり、ADR 0091 の範囲外。
-   *
-   * ⟹ **同じ `target` で2回呼ぶと、内容が同じ `reflected` Memory が2件できる。**
-   * 塞がずに、歯で固定して負債として引き受けた（ADR 0091「引き受ける負債」1）。
-   *
-   * 🔴 **この歯が赤くなったのは、`reflect` が冪等になったからである。それ自体は改善かもしれない。**
-   * ⟹ **その場合に直すのは、この歯ではなく ADR である。** ADR 0091 決定11 と
-   * 「引き受ける負債」1 を先に更新してから、この歯を書き換えること
-   * （ADR 0082 の時限式の歯・ADR 0089 決定7 が採っているのと同じ形——
-   * コメントで済ませない。コメントは検査されず、黙って嘘になる）。
-   *
-   * ⚠ **`tick` の `reflect` ジョブ（Phase 3）を入れる人は、ここが痛む場所である**
-   * ——常駐処理は同じ土台を繰り返し内省して重複を積む（ADR 0091「これが覆るとしたら」）。
+   * この歯は「バグを検出する」歯ではなく、「意図した挙動を固定する」歯。冪等性は ADR 0091 決定11 で明示的に「買わない」と決めた
+   * （`reflect` の産物は `sourceObservationId: null` で部分一意索引の外に落ち、`status` を動かさないので
+   * 「読んで status で弾く」も使えない）。同じ `target` で2回呼ぶと、内容が同じ `reflected` Memory が2件できる。
+   * この歯が赤くなったら、直すのはこの歯ではなく ADR を先にする。コメントは検査されず黙って嘘になるので、
+   * ADR 0091 を更新してからこの歯を書き換えること。
    */
   it("🔴 冪等でない: 同じ target で2回呼ぶと reflected Memory が2件できる（ADR 0091 決定11 で「買わない」と決めた挙動。この歯が赤くなったら実装ではなく ADR を先に見ること）", async () => {
     const { runtime, stores } = buildRuntime(llmReflectingTo({ content: "気づき" }));
@@ -1096,18 +1021,10 @@ describe("3つの LLM スキーマ（extraction / consolidation / reflection）�
   });
 
   /**
-   * ⚠ **食い違いの報告**: `outcome` 判別子は `ExtractionResultSchema` とは完全に素だが、
-   * `ConsolidationLLMResultSchema` とは**片方向でだけ**素である。`z.object` は既定で
-   * 未知キーを黙って剥がす（`.strict()` を付けていない）ため、`reflected` 候補
-   * （`{ outcome, content, digest, tags }`）は `outcome` を剥がされたうえで
-   * `ConsolidationLLMResultSchema` にも**一致してしまう**（実測、下のテスト）。
-   *
-   * これは `DeterministicLLMProvider` の実際の分岐順（extraction → consolidation →
-   * reflection の順に candidate を試す）では問題にならない——req.schema が実際に
-   * consolidation のときは、reflection の candidate を試す前に consolidation の
-   * candidate がその時点で一致して返るため、この「片方向の非対称」が表面化する経路が無い。
-   * ただし「2つのスキーマが数学的に素である」という主張はこの限りでは正確ではないため、
-   * ここに測って残す（設計側への報告事項。詳細は PR 本文・報告を参照）。
+   * `outcome` 判別子は `ExtractionResultSchema` とは素だが、`ConsolidationLLMResultSchema` とは片方向でだけ素。
+   * `z.object` は既定で未知キーを黙って剥がす（`.strict()` を付けていない）ため、`reflected` 候補は `outcome` を剥がされたうえで
+   * `ConsolidationLLMResultSchema` にも一致してしまう。`DeterministicLLMProvider` の分岐順（extraction → consolidation → reflection）では
+   * 表面化しないが、「2つのスキーマが数学的に素である」という主張は正確ではないので、ここに測って残す。
    */
   it("[既知の非対称] reflected 候補は outcome を剥がされて consolidation のスキーマにも一致する", () => {
     expect(ConsolidationLLMResultSchema.safeParse(reflectedCandidate).success).toBe(true);
@@ -1182,8 +1099,6 @@ describe("buildReflectedMemory（純関数） — attributes は積集合（Issu
   });
 });
 
-// Issue #1188 残り（ADR 0368）: `validFrom`/`validUntil` は eligible の区間の積。
-// consolidate.test.ts の同名 describe と同じ形（`intersectValidity` は共有する純関数）。
 describe("buildReflectedMemory（純関数） — validFrom/validUntil は eligible 全件の区間の積（ADR 0368）", () => {
   function fixtureMemory(overrides: Partial<Memory> = {}): Memory {
     const recordedAt = overrides.recordedAt ?? NOW;
@@ -1300,24 +1215,8 @@ describe("buildReflectedMemory（純関数） — validFrom/validUntil は eligi
 });
 
 /**
- * Issue #849 / ADR 0157 決定2 追記: `reflect()` は LLM 呼び出しが失敗しても例外を投げず、
- * `outcome: "llm_failed"`（`llmFailure` 付き）を正常な戻り値として返す（ADR 0089 の公開の
- * 約束を `reflect()` にも敷いたもの——上の「runtime.reflect — LLM 障害」describe参照）。
- * `processReflectJob`（`tick()` 経由）は戻り値を見ずに `await reflect(...)` するだけだった
- * ため、LLM が本当に落ちても `tick()` はそのジョブを complete() し `processed` を増やして
- * いた——`consolidate()` 側と対称の食い違いである（`processReflectJob` の doc コメントが
- * 「`processConsolidateJob` と対称」と明記しているとおり）。
- *
- * ⚠ `runtime.tick — consolidate/reflect ジョブを処理する`（`runtime.test.ts` 1296〜1341行）の
- * 「payload が正しければ processed」の歯とは違う——あちらは `nothing_to_reflect`
- * （近傍が無く LLM を呼ばずに決まる正規の結末）を測っており、ここは**LLM を実際に呼んで
- * 実際に落ちた**ケースを測る。`reflect()` は `consolidate()` と違い eligible 1件でも
- * 打ち切らない（「1件からの一般化も意味を持ちうる」、上の「target の { seedMemoryId } の形」
- * describe 参照）ため、種1件だけで LLM 呼び出しの直前まで到達する。
- *
- * `tick()` を経由するため、`consolidate.test.ts` の `buildRuntimeWithRealClock` と同じ理由
- * （以前の Fake は `enqueueJob` が `availableAt` を実時刻で刻み、固定 clock だと
- * `availableAt <= now` が成り立たず claim されなかった。今は `opts.now` に従う（ADR 0555）が組み替えていない）で実時計を使う。
+ * `reflect()` は eligible 1件でも打ち切らないので、種1件だけで LLM 呼び出しの直前まで到達する。
+ * `nothing_to_reflect`（近傍が無く LLM を呼ばずに決まる正規の結末）ではなく、LLM を実際に呼んで実際に落ちたケースを測る。
  */
 describe("runtime.tick — reflect ジョブで LLM が実際に失敗すると、tick は failed に数える（Issue #849 / ADR 0157 決定2 追記）", () => {
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
@@ -1353,8 +1252,6 @@ describe("runtime.tick — reflect ジョブで LLM が実際に失敗すると�
     const { provider, state } = throwingLlmWithCallCount("simulated LLM outage");
     const { runtime, stores } = buildRuntimeWithRealClock(provider);
 
-    // 種1件のみ——`reflect()` は eligible 1件でも打ち切らないため、これだけで LLM
-    // 呼び出しの直前まで到達する（`consolidate()` と違い neighbor は要らない）。
     const { memory: seed, jobs } = await stores.memoryStore.createMemoryWithOutbox(
       ctx,
       newMemory({ content: "seed content", digest: "seed", embeddingStatus: "pending" }),
@@ -1370,9 +1267,6 @@ describe("runtime.tick — reflect ジョブで LLM が実際に失敗すると�
     // 呼ばないまま緑になる退行を防ぐ。
     expect(state.calls).toBe(1);
 
-    // 種は active のまま——`reflect()` は決定4「既存の行の status を1つも動かさない」
-    // ため、これ自体は LLM 失敗の有無と無関係だが、書き込みが1件も起きていないことの
-    // 傍証として確かめる。
     const seedAfter = await stores.memoryStore.get(ctx, seed.id);
     expect(seedAfter?.status).toBe("active");
 
