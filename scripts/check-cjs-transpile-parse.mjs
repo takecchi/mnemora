@@ -1,61 +1,19 @@
 #!/usr/bin/env node
 /**
- * publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`。件数・名前は
- * そちらが唯一の定義——ここには写さない。いずれも `"type": "module"`）の
- * **ビルド後の配布物**
- * （`packages/<name>/dist` 配下の `.js` / `.cjs` / `.mjs`）を、ts-jest 相当の変換に通してから
- * CommonJS として構文解析できることを検査する門。
+ * `import.meta` は CommonJS として解析されると early error になる。関数の中でも、呼ばなくても、
+ * 読み込んだ時点で落ちるので、遅延評価にしても直らない。TypeScript の `transpileModule` はこれを
+ * 素通しするため、`tsc` の型検査や `node` での実行では気づけない。
  *
- * **なぜこの門が要るか（Issue #110）**
+ * ⛔ `grep "import.meta"` にしない。`vm.compileFunction` は構文解析だけを行い(実行しない)、
+ * コメントの中の文字列で誤検知も見逃しもしない。`migrations-dir.cjs` の doc コメントは
+ * その文字列を含むので、`grep` ベースの門は誤って赤くなる。
  *
- * `@mnemora/postgres` は ESM 専用だが、`packages/postgres/src/migrate.ts` がトップレベルで
- * `import.meta.url` を使っていたため、CommonJS へトランスパイルするテストランナー
- * （NestJS + jest + ts-jest 等）から `@mnemora/postgres` を読み込めない、という実報告があった。
+ * 見るのは `src/` ではなくビルド後の `dist/`。テストランナーが `require()` するのは配布物であるため。
  *
- * 実測して確かめた事実（`packages/postgres/src/migrations-dir.cts` 冒頭のコメントにも記録がある）:
+ * 対象パッケージのリストをここに複製しない(ADR 0066)。`PUBLISH_TARGETS` に一箇所へ集める。
  *
- * - `import.meta` は CommonJS として解析されると **early error**
- *   （構文解析の時点の `SyntaxError: Cannot use 'import.meta' outside a module`）になる。
- *   関数の中に在っても、呼ばなくても、読み込んだ時点で落ちる。
- *   「遅延評価にすれば直る」は誤り。
- * - TypeScript の `transpileModule`（= ts-jest の実体）は `module: CommonJS` でも
- *   `import.meta` を**そのまま素通しする**——ここで検出しないかぎり、壊れた配布物を
- *   出しても普通の `tsc` の型検査や `node` での実行では気づけない
- *   （素の Node の ESM 実行や `require(esm)` は通る。壊れるのは CJS へ変換する経路だけ）。
- *
- * **なぜ `vm.compileFunction` を使うか（`grep "import.meta"` ではなく）**
- *
- * `vm.compileFunction` は構文解析だけを行い、コードを一切実行しない
- * （副作用は起きない）。`grep` と違って、変数経由の埋め込み・折り返しで割れた文・
- * 行内の装飾・**コメントの中の文字列**で誤検知も見逃しもしない——見ているのは
- * 実際にテストランナーが踏む構文解析そのものである。
- * （`packages/postgres/dist/migrations-dir.cjs` は、なぜ `import.meta` を避けたかを
- * 説明する doc コメントの中に `import.meta` という文字列を複数回含む。`grep` ベースの門は
- * ここで誤って赤くなる。この門はそうならないことを
- * `scripts/__tests__/check-cjs-transpile-parse.test.mjs` で固定してある。）
- *
- * **なぜソースではなく `dist/`（ビルド後）を見るか**
- *
- * テストランナーが実際に `require()` するのはビルド後の配布物であり、`src/*.ts` ではない。
- * ソースの時点で問題が無くても、ビルド設定や依存の書き方次第で配布物側に問題が
- * 再発することはありうる——測るべきは「使う側が実際に受け取るもの」である。
- *
- * **対象パッケージのリストをここに複製しない理由**
- *
- * publish 対象と対象外（ルートの `mnemora` / `@mnemora/example-chat`）を分ける機械的な
- * 目印は無い（`scripts/check-publish-pack.mjs` 冒頭の議論と同じ事情）。ADR 0066 が
- * 「対象は `./publish-targets.mjs` の `PUBLISH_TARGETS` に一箇所へ集める」と決めており、
- * この門もそれに従う——ここに2つ目の固定リストを書けば、いずれ2つが食い違う。
- *
- * **`dist` が無い・検査対象が0件のときに黙って緑にしない理由**
- *
- * この門の目的は「ビルド後の配布物が壊れていないこと」の確認である。ビルドを忘れた
- * （＝配布物が無い）状態や、対象を1つも見つけられなかった状態は「確認していない」の
- * であって「確認して問題が無かった」ではない。`scripts/run-db-tests.mjs` が
- * DATABASE_URL 未設定時にそうしているように「実行していない」を緑のまま伝える設計も
- * この repo には在るが、それは既存のジョブ構成が別の場所で本物を担保しているからである
- * （postgres / example-chat ジョブ）。この門にはその代わりが無い——ビルド忘れは
- * そのまま「検査していないのに緑」になる。だからここは非0で落とす。
+ * 🔴 `dist` が無い・対象が0件のときは、黙って緑にせず非0で落とす。ビルド忘れは「確認していない」のに
+ * 緑になる。この門には、他のジョブが別の場所で本物を担保してくれる構成が無い。
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
@@ -68,10 +26,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const BANNER = "─".repeat(72);
 
 /**
- * ルートの `typescript`（`transpileModule` = ts-jest の実体）を読む。
- * root の devDependencies に在るのでそれを使うが、万一 pnpm の配置事情で root から
- * 解決できない環境向けに、`packages/postgres/node_modules` 経由の借用も後退路として持つ
- * （どちらも pnpm ワークスペースが実際にインストールした同じ `typescript` を指す）。
+ * root から解決できない環境向けに、`packages/postgres/node_modules` 経由の借用を後退路として持つ。
  */
 async function loadTypeScript() {
   try {
@@ -82,14 +37,6 @@ async function loadTypeScript() {
   }
 }
 
-/**
- * 検査対象のパッケージ群が置かれた親ディレクトリ。既定はこの repo の `packages/`。
- *
- * テスト（`scripts/__tests__/check-cjs-transpile-parse.test.mjs`）は、本物の
- * `packages/<name>/dist` を汚さずに「dist が無い」「対象0件」「壊れた配布物」を作るため、
- * 一時ディレクトリに `<tmp>/<パッケージ名>/dist/...` という同じ形を作り、
- * この環境変数でそこを指す。CLI の通常呼び出しでは未設定でよい。
- */
 const packagesRoot = process.env.CJS_PARSE_CHECK_PACKAGES_ROOT
   ? resolve(process.env.CJS_PARSE_CHECK_PACKAGES_ROOT)
   : join(repoRoot, "packages");
@@ -97,7 +44,6 @@ const displayRoot = process.env.CJS_PARSE_CHECK_PACKAGES_ROOT
   ? resolve(packagesRoot, "..")
   : repoRoot;
 
-/** `.d.ts` / `.d.cts` / `.d.mts` を除いた `.js` / `.cjs` / `.mjs` を dist 配下から再帰的に集める。 */
 function listDistFiles(distDir) {
   if (!existsSync(distDir)) return [];
   return readdirSync(distDir, { recursive: true })
@@ -183,7 +129,6 @@ for (const { target, file } of targetFiles) {
   }).outputText;
 
   try {
-    // 構文解析だけを行う——実行しない。副作用は起きない。
     vm.compileFunction(transpiled, ["exports", "require", "module", "__filename", "__dirname"], {
       filename: file,
     });
