@@ -4,21 +4,6 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `recall()` のクエリ埋め込みで、`EmbeddingProvider.embed` が**ベクトルを1件も返さなかった**
- * （`[]`）ときも、ベクトル候補生成が走らなかったことを
- * `stage_skipped` / `candidate_generation` / `embedding_provider_unavailable` として名乗る。
- *
- * `docs/recall.md` §「埋め込み provider が使えない…場合、ベクトル候補生成という経路そのものが
- * 走らない。これは 0 件ではなく `…embedding_provider_unavailable` として記録する」。
- * 以前は、`embed` が例外を投げたときだけこれを積み、`[]` を返したときは `queryVector` が
- * `undefined` のまま ANN の段を黙って飛ばしていた——omission にも何も出ず、
- * 「ベクトル検索だけが止まった」ことが呼び出し側から見えなかった。
- *
- * embed ジョブの側で同じ入力（`[]`）を失敗として扱うのは
- * `embed-job-missing-vector.test.ts`（`EmbeddingProvider` の doc の 2026-09-27 追記）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 function buildRuntime(embed: EmbeddingProvider["embed"] = async () => []) {
@@ -96,10 +81,6 @@ describe("recall() — クエリ埋め込みがベクトルを返さなかった
     expect(result.omitted).toContainEqual(expect.objectContaining(UNAVAILABLE));
   });
 
-  // 変異 R4（`null` を空の配列に読み替える）・R4b（文字列を文字の配列に読み替える）を捕まえる。
-  // 約束: PR 本文「`embed` の結果の先頭が配列でなければ（`[]` で `undefined`、あるいは `null`）、例外のときと
-  // 同じ経路に乗せ、embedding_provider_unavailable を積む」。後の cause（原因の種類）の導入以降は、
-  // 配列でない要素の原因は no_vector（次元違いではない）。以前は null で vectorStore.search が TypeError になった。
   it.each([
     ["null", [null]],
     ["undefined", [undefined]],

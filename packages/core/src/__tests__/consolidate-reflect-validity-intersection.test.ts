@@ -7,22 +7,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `consolidate`/`reflect` の統合先・内省の記憶は、材料（eligible）の有効期間
- * （`validFrom`/`validUntil`）の**積**を引き継ぐ（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)
- * 残り、[ADR 0368](../../../docs/decisions/0368-consolidate-reflect-validity-intersection.md)）。
- *
- * 純関数（`intersectValidity`）の歯は `consolidate.test.ts`/`reflect.test.ts` の
- * `buildConsolidatedMemory`/`buildReflectedMemory` describe が持つ。このファイルは
- * runtime を通した経路（`{ memoryIds }`）と、材料を選ぶ時刻（`validAt`）と記録する時刻
- * （`recordedAt` にする `now`）の間の窓（ADR 0368 決定2）を縛る——両方とも `clock.now()`
- * だが、間に LLM 呼び出しが挟まる別の呼び出しである。
- *
- * `{ seedMemoryId }`・`{ query }` の形と、2実装（Postgres・testkit の fixture）は
- * `packages/postgres/src/__tests__/consolidate-target-selection.postgres.test.ts` /
- * `reflect-target-selection.postgres.test.ts` が見る。
- */
-
 const ctx: Ctx = { tenantId: "validity-intersection" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -56,11 +40,7 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-/**
- * `clock.now()` を外から進められる、テスト専用の `Clock` 実装。「窓」の歯
- * （下の describe）が、LLM 呼び出しの最中に時計を進めて、選定時刻と記録時刻を
- * 実際にずらすために使う。
- */
+/** `clock.now()` を外から進められるテスト専用の `Clock`。LLM 呼び出しの最中に時計を進めて、選定時刻と記録時刻を実際にずらすために使う。 */
 function createMutableClock(initial: Date): Clock & { advance: (to: Date) => void } {
   let current = initial;
   return {
@@ -167,14 +147,7 @@ describe("runtime.reflect({ memoryIds }) — 内省の記憶は材料の有効�
   });
 });
 
-/**
- * 窓（ADR 0368 決定2、「陽性対照」——`AGENTS.md`「『出なかった』を、事象が無いことの
- * 証明にしない」の適用）: 材料を選ぶ時刻（`consolidate`/`reflect` 手順2の `validAt`）と、
- * 新しい記憶を作る時刻（`recordedAt` にする `now`）は別の `clock.now()` 呼び出しで、間に
- * LLM 呼び出しが挟まる。この歯は、その間に時計を実際に進めて窓を*意図的に起こし*、
- * 探り棒（アサーション）がそれを捕まえることを示す——時計を固定する他の歯（このファイル
- * の上の2つ、`consolidate-validity-gate.test.ts` 等）では再現しない。
- */
+/** 陽性対照: 材料を選ぶ時刻と記録する時刻の間に LLM 呼び出しが挟まるので、時計を実際に進めて窓を意図的に起こし、アサーションがそれを捕まえることを示す。時計を固定する他の歯では再現しない。 */
 describe("窓（ADR 0368 決定2）: validAt と recordedAt の間に min(validUntil) を過ぎると、新しい記憶は作った時点で既に期限切れになる", () => {
   it("consolidate: 統合先は作られる（validUntil <= recordedAt）が、recall には出ない", async () => {
     const stores = createFakeRuntimeStores();
@@ -187,7 +160,6 @@ describe("窓（ADR 0368 決定2）: validAt と recordedAt の間に min(validU
       hashContent: (content: string) => `sha256(${content})`,
       clock,
     });
-    // eligible 判定の時点（validAt = NOW）では期間の内側——validUntil は NOW のわずか後。
     const e = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ content: "統合対象トークンXYZ E", validUntil: justAfterNow }),
@@ -199,21 +171,15 @@ describe("窓（ADR 0368 決定2）: validAt と recordedAt の間に min(validU
 
     const result = await runtime.consolidate(ctx, { target: { memoryIds: [e.id, f.id] } });
     expect(result.outcome).toBe("consolidated");
-    // 両方 eligible だったことの確認（窓を作るための前提）。
     expect(result.sources.map((s) => s.kind)).toEqual(["superseded", "superseded"]);
 
     const created = await stores.memoryStore.get(ctx, result.consolidatedMemoryId!);
-    // 統合先は作られる——書き込み自体は失敗しない。
     expect(created).not.toBeNull();
     expect(created?.status).toBe("active");
     expect(created?.validUntil).toEqual(justAfterNow);
-    // だが記録時刻（LLM 呼び出し中に進めた後の clock.now()）の時点で、その
-    // validUntil は既に過去——「作った時点で既に期限切れの active な記憶」。
     expect(created!.recordedAt.getTime()).toBeGreaterThanOrEqual(created!.validUntil!.getTime());
 
-    // recall には出ない（語彙チャンネルは embeddingStatus に依存しないので、
-    // 統合直後の埋め込み非同期窓（ADR 0089 引き受けた負債4）の影響を受けない
-    // ——出ない理由が validity ゲートであることを切り分けられる）。
+    // 語彙チャンネルは embeddingStatus に依存しないので、出ない理由が validity ゲートであることを切り分けられる。
     const recalled = await runtime.recall(ctx, {
       text: "統合対象トークンXYZ",
       channels: ["lexical"],

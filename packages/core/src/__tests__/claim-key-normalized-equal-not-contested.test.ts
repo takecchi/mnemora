@@ -5,20 +5,6 @@ import { ExtractionResultSchema } from "../extraction.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 穴 O-3（ADR 0424）: contested の検出が、NFC と NFD の違いや末尾の空白だけで、
- * 同じ文を矛盾と判定していた。`findActiveByClaimKey?`/`findContestedByClaimKey?` は生の
- * `content_hash`（生の文字列の sha256）だけで「同じ内容」を除くため、見た目が同じ文が
- * 別の hash になり、一致に数えられていた。
- *
- * 直し: `Runtime.detectClaimKeyContested` が、store から返った行の `content` を
- * 比較用に正規化（NFC の後に trim）し、検出中の memory の content と等しい行を、件数を
- * 数える前に除く。保存値と `content_hash` は変えない。
- *
- * 同じ歯を `@mnemora/postgres` で縛るのは
- * `packages/postgres/src/__tests__/claim-key-normalized-equal.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "tenant-o3" };
 
 function sameKeyLlm(contents: string[]): LLMProvider {

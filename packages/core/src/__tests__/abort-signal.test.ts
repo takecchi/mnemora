@@ -8,35 +8,9 @@ import type { MemoryId } from "../ids.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)（クローン miku の判断）:
- * `AbortSignal` による中断の歯。
- *
- * **この歯が測ること:**
- * - provider（LLM/Embedding）呼び出しの間・呼ぶ前に abort されると、呼んだ Runtime の口が
- *   reject すること。
- * - 中断は、既存の「失敗したときの安全弁」（全文フォールバック・`llm_failed`・
- *   `embedding_provider_unavailable`・`embeddingStatus: 'failed'`・outbox の `fail()`）
- *   のどれにも倒れないこと。
- * - abort の時点で何が書かれ、何が書かれないか（Observation・extract ジョブ・Memory・
- *   recall の記録・outbox ジョブの終端状態）。
- * - provider が signal を無視しても、runtime 自身が abort と競わせるので呼んだ口は返ること
- *   （`HangingLLMProvider`/`HangingEmbeddingProvider` は signal を一切見ない——これが
- *   このファイルの fake の核心の性質）。
- * - 遅れて解決した provider の Promise が unhandled rejection を起こさないこと。
- */
-
 const ctx: Ctx = { tenantId: "tenant-abort" };
 
-/**
- * `completeStructured` を呼ぶと**永久に pending のまま**になる `LLMProvider`。
- * `resolve`/`reject` で外からテストコードが決着を付けられる。
- *
- * 🔴 **`opts.signal` を一切見ない**——runtime 自身が abort と競わせることの歯にするため。
- * 呼ばれた `opts` は `calls` に記録するので、「呼んだかどうか」「signal を渡したか」は
- * 別途アサーションできる。
- */
+/** `completeStructured` を呼ぶと永久に pending のままになる `LLMProvider`。`opts.signal` を一切見ない: runtime 自身が abort と競わせることの歯にするため。 */
 class HangingLLMProvider implements LLMProvider {
   calls: { req: unknown; opts: AbortOptions | undefined }[] = [];
   private pendingResolve: ((value: unknown) => void) | null = null;
@@ -54,18 +28,15 @@ class HangingLLMProvider implements LLMProvider {
     });
   }
 
-  /** 最後の呼び出しを、渡した値で解決する。 */
   resolveLatest(value: unknown): void {
     this.pendingResolve?.(value);
   }
 
-  /** 最後の呼び出しを、渡した理由で拒否する。 */
   rejectLatest(error: unknown): void {
     this.pendingReject?.(error);
   }
 }
 
-/** `HangingLLMProvider` と対になる `EmbeddingProvider`。同じ理由・同じ形。 */
 class HangingEmbeddingProvider implements EmbeddingProvider {
   readonly space = { provider: "hanging", model: "hanging-model", dimensions: 2 };
   calls: { texts: string[]; opts: AbortOptions | undefined }[] = [];
@@ -89,12 +60,7 @@ class HangingEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
-/**
- * 1回目の `completeStructured` 呼び出しは `firstResponse` で即座に成功させ、
- * 2回目（claim key の呼び出しを想定）は pending のままにする `LLMProvider`。
- * `runExtraction` が「抽出 → (opt-inのときだけ)claim key」の順で呼ぶことを前提にした
- * 単純化——`sequencedLlm`（`runtime.test.ts`）と同じ発想。
- */
+/** 1回目の `completeStructured` は `firstResponse` で即座に成功し、2回目（claim key の呼び出し）は pending のままにする `LLMProvider`。 */
 class TwoCallLLMProvider implements LLMProvider {
   callCount = 0;
   secondCallOpts: AbortOptions | undefined;
@@ -122,7 +88,6 @@ class TwoCallLLMProvider implements LLMProvider {
   }
 }
 
-/** 即座に候補を返す、abort と無関係の正常系 LLM（Memory を1件作るための下ごしらえに使う）。 */
 function succeedingLlm(): LLMProvider {
   return {
     complete: async () => {
@@ -135,7 +100,6 @@ function succeedingLlm(): LLMProvider {
   };
 }
 
-/** `succeedingLlm` と対になる、即座に返す `EmbeddingProvider`。 */
 function succeedingEmbeddingProvider(): EmbeddingProvider {
   return {
     space: { provider: "fake", model: "fake-model", dimensions: 2 },
@@ -162,13 +126,7 @@ function buildRuntime(
   return { runtime, stores };
 }
 
-/**
- * `completeStructured`/`embed` の呼び出しが登録されるまで待つ。
- *
- * provider を呼ぶまでに（`recall()` の decay_clock 読み取りなど）複数回 `await` を挟む
- * 経路があるため、固定回数のマイクロタスクではなく、マクロタスクの境界（`setTimeout`）を
- * 複数回挟んで確実に「provider 呼び出しが起きるところまで」進める。
- */
+/** `completeStructured`/`embed` の呼び出しが登録されるまで待つ。固定回数のマイクロタスクではなく `setTimeout` を複数回挟むのは、provider を呼ぶまでに複数回 `await` を挟む経路があるため。 */
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -214,10 +172,6 @@ describe("AbortSignal — 呼ぶ前に既に abort 済みの場合（provider �
     expect(embeddingProvider.calls).toHaveLength(0);
     const jobs = stores.outboxStore.listJobs(ctx);
     const embedJob = jobs.find((j) => j.kind === "embed")!;
-    // `claimBatch` 自体は store 呼び出しであり「provider を呼ぶ前」の判定より前に走るため、
-    // job は claim される（`claimedAt` が付く）——ただし handler は一度も呼ばれず、
-    // `complete()`/`fail()` のどちらも記録されない。claim されたまま残り、リースが
-    // 切れれば次の `tick` が取れる。
     expect(embedJob.claimedAt).not.toBeNull();
     expect(embedJob.completedAt).toBeNull();
     expect(embedJob.failedAt).toBeNull();
@@ -240,7 +194,6 @@ describe("AbortSignal — 呼ぶ前に既に abort 済みの場合（provider �
     ).rejects.toBe(controller.signal.reason);
 
     const row = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobs[0]!.id)!;
-    // claim はされる（claimBatch はループの前に1回だけ呼ぶ）が、終端（failedAt）には焼かない。
     expect(row.claimedAt).not.toBeNull();
     expect(row.failedAt).toBeNull();
     expect(row.completedAt).toBeNull();
@@ -260,14 +213,11 @@ describe("AbortSignal — observe(): 抽出の LLM 呼び出し中に abort", ()
     );
     await flushMicrotasks();
     expect(llm.calls).toHaveLength(1);
-    // runtime 自身が signal を渡している（provider がそれを見るかどうかとは別に、
-    // 渡されていること自体を確かめる）。
     expect(llm.calls[0]!.opts?.signal).toBe(controller.signal);
 
     controller.abort();
     await expect(promise).rejects.toBe(controller.signal.reason);
 
-    // Observation・extract ジョブは LLM を呼ぶ前に書かれている（doc コメントのとおり）。
     const jobs = stores.outboxStore.listJobs(ctx);
     expect(jobs).toHaveLength(1);
     const extractJob = jobs[0]!;
@@ -279,9 +229,6 @@ describe("AbortSignal — observe(): 抽出の LLM 呼び出し中に abort", ()
     const memories = await stores.memoryStore.listBySourceObservation(ctx, observationId, "v1");
     expect(memories).toHaveLength(0);
 
-    // 遅れて LLM が解決しても、observe() は既に reject 済みで、何も書かれない
-    // （unhandled rejection にもならない——`runAbortable` が `.then`/`.catch` を
-    // 必ず付けているため）。
     llm.resolveLatest({
       memories: [{ content: "遅れて届いた本文", provenanceKind: "stated" }],
     });
@@ -308,15 +255,11 @@ describe("AbortSignal — observe(): 抽出の LLM 呼び出し中に abort", ()
     controller.abort();
     await expect(promise).rejects.toBe(controller.signal.reason);
 
-    // 遅れて LLM 自身が失敗しても、unhandled rejection にはならない（後続の it が
-    // 走ること自体が、この rejection が捨てられずに握られていたことの傍証になる）。
     llm.rejectLatest(new Error("LLM がようやく失敗した"));
     await flushMicrotasks();
   });
 
   it("claimKey.enabled: true のとき、claim key の LLM 呼び出し中の abort でも記憶は0件（claim key は書き込みより前）", async () => {
-    // 抽出は即座に成功させ、claim key の呼び出し（2回目）だけを止める——実測（下調べの
-    // 結果）で claim key の呼び出しは Memory の書き込みより前だと分かったことの歯。
     const llm = new TwoCallLLMProvider({
       memories: [{ content: "本文", digest: "要旨", provenanceKind: "stated" }],
     });
@@ -377,7 +320,6 @@ describe("AbortSignal — reextract(): 抽出の LLM 呼び出し中に abort", 
       observeResult.observationId,
       "v1",
     );
-    // 元の observe() で作られた1件のまま——reextract は何も足していない。
     expect(memoriesAfter).toHaveLength(1);
     expect(memoriesAfter[0]!.id).toBe(observeResult.memoryIds[0]);
   });
@@ -405,7 +347,6 @@ describe("AbortSignal — recall(): クエリの埋め込み待ち中に abort",
     const after = await stores.tenantSettingsStore.getActivitySeq(ctx);
     expect(after).toBe(before);
 
-    // 遅れて embed が解決しても、recall の記録は作られない。
     embeddingProvider.resolveLatest([[1, 2]]);
     await flushMicrotasks();
     expect(createRecallSpy).not.toHaveBeenCalled();
@@ -421,8 +362,6 @@ describe("AbortSignal — recall(): クエリの埋め込み待ち中に abort",
     controller.abort();
 
     await expect(promise).rejects.toBe(controller.signal.reason);
-    // reject した場合、`RecallResult`（`omitted` を含む）はそもそも返らない——
-    // 正常応答に丸められていないことは、`rejects` で見ていること自体が証拠。
   });
 });
 
@@ -472,7 +411,6 @@ describe("AbortSignal — tick(): embed ジョブの処理中に abort", () => {
     const memory = await stores.memoryStore.get(ctx, memoryId);
     expect(memory?.embeddingStatus).toBe("pending");
 
-    // 遅れて embed が解決しても、書き込みは起きない（vectorStore へも upsert しない）。
     const upsertSpy = vi.spyOn(stores.vectorStore, "upsert");
     embeddingProvider.resolveLatest([[1, 2]]);
     await flushMicrotasks();
@@ -481,9 +419,6 @@ describe("AbortSignal — tick(): embed ジョブの処理中に abort", () => {
 
   it("リースが切れた後、次の tick() がそのジョブを取り直して正常に処理できる", async () => {
     const embeddingProvider = new HangingEmbeddingProvider();
-    // 以前の Fake は `availableAt` を `FakeBackingStore.enqueueJob` が実時刻 `new Date()` で打ったため、
-    // `fakeNow` を実時刻より確実に先に置いている（`runtime.test.ts` の同種の歯と同じ）。今の Fake は
-    // `opts.now` に従う（ADR 0555）が、組み替えていない（ADR 0555 の「残り」）。
     let fakeNow = new Date(Date.now() + 10_000);
     const fakeClock = { now: () => fakeNow };
     const { runtime, stores } = buildRuntime(succeedingLlm(), {
@@ -500,10 +435,8 @@ describe("AbortSignal — tick(): embed ジョブの処理中に abort", () => {
     controller.abort();
     await expect(promise).rejects.toBe(controller.signal.reason);
 
-    // リースを進める。
     fakeNow = new Date(fakeNow.getTime() + leaseMs + 1);
 
-    // 次の tick() は abort されておらず、embeddingProvider も正常に返す設定に差し替える。
     const stores2 = stores; // 同じ store を共有し、runtime だけ作り直して provider を差し替える。
     const workingEmbeddingProvider = succeedingEmbeddingProvider();
     const runtime2 = createRuntime({
@@ -531,8 +464,6 @@ describe("AbortSignal — tick(): embed ジョブの処理中に abort", () => {
     await runtime.observe(ctx, { kind: "utterance", text: "発話A" });
     await runtime.observe(ctx, { kind: "utterance", text: "発話B" });
 
-    // 1件目はすぐ解決する embed、2件目は abort まで pending のままにするため、
-    // 呼び出し回数で切り替える偽 provider を使う。
     let embedCall = 0;
     const mixedEmbeddingProvider: EmbeddingProvider = {
       space: { provider: "fake", model: "fake-model", dimensions: 2 },
@@ -586,10 +517,6 @@ describe("AbortSignal — consolidate()", () => {
   it("土台探索（内部の recall）中の abort で reject する", async () => {
     const embeddingProvider = new HangingEmbeddingProvider();
     const { runtime } = buildRuntime(succeedingLlm(), { embeddingProvider });
-    // embeddingProvider が Hanging なので observe() の embed ジョブは積まれるだけで
-    // 埋め込みは終わらない——ここでは consolidate() の対象選定に要る Memory の
-    // 存在だけが必要（`seedMemoryId` 経由は種の get() をまず読むため、embed の成否は
-    // 無関係）。
     const [seedId] = await seedTwoActiveMemories(runtime);
 
     const controller = new AbortController();
@@ -683,7 +610,6 @@ describe("AbortSignal — consolidate()・reflect() の土台探索（内部の 
     const controller = new AbortController();
     const promise = run(runtime, a.memoryIds[0]!, controller.signal);
     await flushMicrotasks();
-    // 内部の recall() がクエリの埋め込みを待っている最中（embed に signal が渡っている）。
     expect(embeddingProvider.calls.length).toBeGreaterThan(0);
     expect(embeddingProvider.calls.at(-1)!.opts?.signal).toBeDefined();
     controller.abort();
@@ -747,7 +673,6 @@ describe("AbortSignal — tick() の consolidate・reflect ジョブ（signal �
         signal: controller.signal,
       });
       await flushMicrotasks();
-      // ジョブの中の consolidate()/reflect() が、種の digest を埋め込んで待っている最中。
       expect(embeddingProvider.calls.length).toBeGreaterThan(0);
       expect(embeddingProvider.calls.at(-1)!.opts?.signal).toBeDefined();
       controller.abort();

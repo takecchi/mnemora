@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ExtractionContextSchema } from "../observation.js";
 
-/**
- * `ExtractionContextSchema` の `messages[].text`（`max(2000)`）と `speaker`（`max(200)`）が数える単位の記録（ADR 0486）。
- * 数える単位はコードポイント。UTF-16 のコード単位・書記素・バイトではない。zod の `max` の今の振る舞いを縛る。
- */
+/** 数える単位はコードポイント（UTF-16 のコード単位・書記素・バイトではない）。zod の `max` の今の振る舞いを縛る。 */
 const accepts = (text: string) =>
   ExtractionContextSchema.safeParse({ messages: [{ text }] }).success;
 

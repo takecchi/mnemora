@@ -1,10 +1,7 @@
-// 入口の検査（DB に触れる前に、明示の例外で断る）。穴 O-6（ADR 0424）。
-// `packages/testkit` の in-memory 実装が同じ入力を同じ文面で断る（適合テストが両方を縛る）。
 import { isBeforePgTimestamptzMin } from "./mapping.js";
 
 /**
- * Postgres の `text` 型は NUL (U+0000) を構造的に拒む（C 文字列表現に由来する制約）。以前は DB の生の例外
- * （`invalid byte sequence for encoding "UTF8": 0x00`）が出ていた。DB に触れる前に、何が悪いかを名指しして断る。
+ * Postgres の `text` 型は NUL (U+0000) を構造的に拒む。DB に触れる前に、何が悪いかを名指しして断る。
  * 識別子（tenantId など）の NUL は、ここでは扱わない。
  */
 export function assertNoNul(owner: string, field: string, value: string): void {
@@ -14,11 +11,10 @@ export function assertNoNul(owner: string, field: string, value: string): void {
 }
 
 /**
- * ADR 0594: `timestamptz` へ渡す日時が Invalid Date（`getTime()` が `NaN`）なら、DB に触れる前に名指しして断る。
- * Postgres は `22007` で拒むが、行を探す前の入口が静かに返る口（`OutboxStore.complete`/`fail` の、形の崩れた `jobId`）では
- * DB まで届かず、拒まれなかった。文面は testkit の `assertQueryDate`・core の Fake と同じ
- * （`<owner>: <欄> must be a valid Date (got Invalid Date)`）。省略（`undefined`/`null`）は検査しない。
- * 下限（`timestamptz` の紀元前4714年）は、この関数では見ない（`assertNotBelowTimestamptzMin` が見る）。
+ * `timestamptz` へ渡す日時が Invalid Date（`getTime()` が `NaN`）なら、DB に触れる前に名指しして断る（ADR 0594）。
+ * 行を探す前の入口が静かに返る口（`OutboxStore.complete`/`fail` の、形の崩れた `jobId`）では DB まで届かず拒まれないため。
+ * 文面は `<owner>: <欄> must be a valid Date (got Invalid Date)`。省略（`undefined`/`null`）は検査しない。
+ * 下限は見ない（`assertNotBelowTimestamptzMin` が見る）。
  */
 export function assertValidDate(
   owner: string,
@@ -31,11 +27,10 @@ export function assertValidDate(
 }
 
 /**
- * 行の値になる日時（`OutboxStore.complete`/`fail` の `opts.at`）が `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前なら、
- * DB に触れる前に `RangeError` で断る（クローンの判断。ADR 0597）。Postgres は下限より前を書けず（`22008`）、uuid の形の
- * `jobId` では DB が拒んでいたが、形の崩れた `jobId` では入口が静かに返り、拒まれなかった。型・文面は testkit の `assertQueryTimestamptz`
- * と同じ。下限ちょうどは通す。Invalid Date は見ない（`assertValidDate` が先に見る）。省略（`undefined`/`null`）は検査しない。
- * ⚠ **読みの口の条件には使わない**（ADR 0547: 読みの口は下限へ寄せて比べる）。
+ * 行の値になる日時が `timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前なら、DB に触れる前に
+ * `RangeError` で断る（ADR 0597）。形の崩れた `jobId` では入口が静かに返り DB が拒まないため。
+ * 下限ちょうどは通す。Invalid Date は見ない（`assertValidDate` が先に見る）。省略（`undefined`/`null`）は検査しない。
+ * **読みの口の条件には使わない**（ADR 0547: 読みの口は下限へ寄せて比べる）。
  */
 export function assertNotBelowTimestamptzMin(
   owner: string,
@@ -50,9 +45,8 @@ export function assertNotBelowTimestamptzMin(
 }
 
 /**
- * pgvector の `vector` の成分は float4 で、収まらない値（`1e308` など。有限でない値も含む）は
- * `"1e+308" is out of range for type vector` 等の生の例外になる。DB に触れる前に断る。
- * `Math.fround` が有限に収まるかで見る（pgvector の float4 への変換と同じ丸め）。
+ * pgvector の `vector` の成分は float4 で、収まらない値（有限でない値も含む）は生の例外になる。
+ * DB に触れる前に断る。`Math.fround` が有限に収まるかで見る（pgvector の float4 への変換と同じ丸め）。
  */
 export function assertFloat4Vector(owner: string, vector: readonly number[]): void {
   for (let i = 0; i < vector.length; i++) {
@@ -71,10 +65,8 @@ export function fitsFloat4(vector: readonly number[]): boolean {
 }
 
 /**
- * ADR 0456: 読み取りの絞り（`labels`・`attributes`）の NUL を、DB に触れる前に名指しして断る。
- * 以前は、`labels` の NUL が `invalid byte sequence for encoding "UTF8": 0x00`、`attributes` の NUL が
- * `unsupported Unicode escape sequence` という DB の生の例外（`Failed query: …`）になっていた。
- * 断る入力は増やさない（以前も同じ入力で落ちていた）。`attributes` は key と value の両方を見る。
+ * 読み取りの絞り（`labels`・`attributes`）の NUL を、DB に触れる前に名指しして断る（ADR 0456）。
+ * `attributes` は key と value の両方を見る。
  */
 export function assertNoNulInScopeFilter(
   owner: string,
@@ -101,7 +93,7 @@ export function assertNoNulInScopeFilter(
   }
 }
 
-/** `value`（JSON にする値）の中の文字列（オブジェクトの key も）のどれかが `pred` を満たすか。循環は辿り直さない。 */
+/** `value` の中の文字列（オブジェクトの key も）のどれかが `pred` を満たすか。循環は辿り直さない。 */
 function jsonStringsSome(
   value: unknown,
   pred: (text: string) => boolean,
@@ -127,18 +119,12 @@ const hasLoneSurrogate = (text: string): boolean =>
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
 
 /**
- * ADR 0499（ADR 0456 M4）: `memories` へ書く値の NUL を、DB に触れる前に名指しして断る。
- * 以前は `contentHash` 以外は DB の生の例外（`DrizzleQueryError`。`text` 列は `invalid byte sequence for
- * encoding "UTF8": 0x00`、`jsonb` 列は `unsupported Unicode escape sequence`）だった。断る入力は増やさない。
- * 欄名・検査の順・文面は testkit の `InMemoryMemoryStore` と同じ（`<owner>: <欄> must not contain NUL characters (U+0000)`）。
+ * `memories` へ書く値の NUL を、DB に触れる前に名指しして断る（ADR 0499）。
+ * 文面は `<owner>: <欄> must not contain NUL characters (U+0000)`。
+ * 型を外れた値（文字列でない・欠けている欄）は見ない。断るのは「文字列で、NUL を含む」ものだけ。
  *
- * 型を外れた値（文字列でない・欠けている欄）はここでは見ない——以前と同じ経路（DB の検査）に任せる。
- * 断るのは「文字列で、NUL を含む」ものだけ。
- *
- * 🔴 `content` も見る。抽出の候補の `digest` は、LLM が `digest` を返さないとき本文から作られる（本文に NUL があれば
- * `digest` にも入る）ので、`digest` だけ見ると、本文の NUL を「digest が悪い」と説明してしまう。保存できない候補を落とすとき
- * （ADR 0347）、落とした候補の説明（`describeDroppedCandidate`）は、以前の DB の例外（`code: "22021"`・pg の文面）から、
- * この名指しの例外（`code: null`・`content must not contain NUL …`）に変わる——testkit の fixture と同じ形。
+ * `content` も見る。抽出の候補の `digest` は、LLM が返さないとき本文から作られるので、
+ * `digest` だけ見ると、本文の NUL を「digest が悪い」と説明してしまう。
  */
 export function assertNoNulInNewMemory(
   owner: string,
@@ -188,16 +174,14 @@ function jsonHasBigInt(value: unknown, seen: Set<object> = new Set()): boolean {
 }
 
 /**
- * ADR 0499（ADR 0456 M4・ADR 0446 の材料）: `memory_events` へ書くイベントの NUL を、DB に触れる前に名指しして断る。
- * 以前は `digestSnapshot`（`text` 列）・`meta`・`actor`（`jsonb` 列）の NUL が DB の生の例外になっていた
- * （`Runtime` の口に渡す `reason` は `meta.reason`/`meta.note` に、`actor.id` は `actor` に入る）。
- * `meta`・`actor` は、対をなさない UTF-16 サロゲートも断る（`jsonb` が拒む——以前から同じ入力で落ちていた）。
- * 文面は testkit の `assertStorableMemoryEvent` と同じ欄名（`memory_events.<欄> must not contain NUL …`）。
+ * `memory_events` へ書くイベントの NUL を、DB に触れる前に名指しして断る（ADR 0499）。
+ * `meta`・`actor` は、対をなさない UTF-16 サロゲートも断る（`jsonb` が拒む）。
+ * 文面は `memory_events.<欄> must not contain NUL …`。
  *
- * - **イベントを書く文の直前で呼ぶ**（事前の検査より前に置かない）——ほかの理由で先に落ちる入力（status の CAS 違反・
- *   対象が無いなど）は、今までどおりその例外になる。
- * - **BigInt は NUL より先**に `TypeError`（`JSON.stringify` と同じ文言）で断る。以前は INSERT の引数を JS で組む時点で
- *   `JSON.stringify` が投げ、NUL を DB が見る機会が無かった（`event-meta-roundtrip.postgres.test.ts` が縛る）。
+ * - **イベントを書く文の直前で呼ぶ**（事前の検査より前に置かない）。ほかの理由で先に落ちる入力
+ *   （status の CAS 違反・対象が無いなど）は、その例外のままにするため。
+ * - **BigInt は NUL より先**に `TypeError`（`JSON.stringify` と同じ文言）で断る。`JSON.stringify` が
+ *   INSERT の引数を組む時点で投げるので、NUL を DB が見る機会が無い。
  */
 export function assertNoNulInNewMemoryEvent(
   owner: string,
@@ -224,14 +208,10 @@ export function assertNoNulInNewMemoryEvent(
 }
 
 /**
- * ADR 0505（ADR 0456 M4 の残り）: `observations` へ書く値の NUL を、DB に触れる前に名指しして断る
- * （`createObservation`・`createObservationWithOutbox`）。以前は DB の生の例外（`DrizzleQueryError`。`kind` は
- * `invalid byte sequence for encoding "UTF8": 0x00`、`payload`・`attributes`（`jsonb`）は `unsupported Unicode escape
- * sequence`）だった。断る入力は増やさない。欄名・検査の順・文面は testkit の `InMemoryMemoryStore` と同じ
- * （`<owner>: <欄> must not contain NUL characters (U+0000)`）。
+ * `observations` へ書く値の NUL を、DB に触れる前に名指しして断る（ADR 0505。`createObservation`・
+ * `createObservationWithOutbox`）。型を外れた値（文字列でない `kind`）は見ない。
  *
- * `subjectId`・`externalId` は、`assertWellFormedIdentifier`（ADR 0423）が先に断る（NUL を含む識別子）ので、ここでは見ない。
- * 型を外れた値（文字列でない `kind`）は見ない——以前と同じ経路（DB の検査）に任せる。
+ * `subjectId`・`externalId` は `assertWellFormedIdentifier`（ADR 0423）が先に断るので、ここでは見ない。
  */
 export function assertNoNulInNewObservation(
   owner: string,
@@ -249,11 +229,9 @@ export function assertNoNulInNewObservation(
 }
 
 /**
- * ADR 0505（ADR 0456 M4 の残り）: `recalls` へ書く値（`jsonb` 列）の NUL を、DB に触れる前に名指しして断る
- * （`createRecall`）。以前は `unsupported Unicode escape sequence` の生の例外だった。断る入力は増やさない。
- * 文面は testkit の `InMemoryMemoryStore.createRecall` と同じ（`createRecall: <欄> must not contain NUL characters (U+0000)`）。
- * 欄の順も同じ。`subjectId` は `assertWellFormedIdentifier` が先に断る。JSON にならない値（`undefined` など）は
- * ここでは見ない（以前と同じ経路——`NOT NULL` の列が拒む）。
+ * `recalls` へ書く値（`jsonb` 列）の NUL を、DB に触れる前に名指しして断る（ADR 0505。`createRecall`）。
+ * 文面は `createRecall: <欄> must not contain NUL characters (U+0000)`。`subjectId` は
+ * `assertWellFormedIdentifier` が先に断る。JSON にならない値（`undefined` など）は見ない。
  */
 export function assertNoNulInNewRecall(record: {
   query: unknown;

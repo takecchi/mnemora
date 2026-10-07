@@ -7,16 +7,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 
-/**
- * `Runtime.tick` の embed ジョブは、`EmbeddingProvider.embed` が1件もベクトルを返さなければ、
- * そのジョブを失敗にし、Memory の `embeddingStatus` を `'failed'` にする——ベクトルを書かない
- * まま `'ready'` にしない。
- *
- * 約束: `packages/core/src/interfaces/embedding-provider.ts` の doc（2026-09-27 追記、ADR 0305 の
- * 追記）。embed ジョブは `embed` に常に1件だけ渡すので、「渡した件数より少ない」はこのジョブでは
- * 「空」と同じである。変異試験（PR #1045 の S14）で、`processEmbedJob` の検査を外しても既存の歯が
- * すり抜けたため足した。
- */
+/** embed ジョブは `embed` に常に1件だけ渡すので、「渡した件数より少ない」はこのジョブでは「空」と同じ。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -74,8 +65,6 @@ describe("tick の embed ジョブ：provider がベクトルを返さなけれ�
       llmProvider: notUsedLlm,
       embeddingProvider: emptyProvider,
       hashContent: (content: string) => `sha256(${content})`,
-      // 以前の Fake は outbox のジョブの availableAt を実時刻で付けたため、tick が claim できるよう
-      // 実時計で動かす。
       clock: { now: () => new Date() },
     });
     const { memory } = await stores.memoryStore.createMemoryWithOutbox(ctx, newMemory(), ["embed"]);

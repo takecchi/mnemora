@@ -5,17 +5,6 @@ import { ExtractionResultSchema } from "../extraction.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #933 案2（ADR 0378）: opt-in（`claimKey.enabled`・`detectContested`）を on にした
- * 経路が、`MemoryStore.findContestedByClaimKey?` を実装している store と実装していない
- * store の両方で、決まった結果になることを縛る。既定 off（`claimKey` を渡さない・
- * `detectContested: false`）では `findContestedByClaimKey` が（`findActiveByClaimKey` と
- * 同様に）一度も呼ばれないことも縛る。
- *
- * `packages/core/src/__tests__/claim-key-sequential-arrival.test.ts` が4件を通しで縛るのに
- * 対し、この歯は「呼ばれる/呼ばれない」の境界と、最小の固定結果に絞る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-933-opt-in" };
 
 function sameKeyLlm(contents: string[]): LLMProvider {
@@ -140,16 +129,12 @@ describe("findContestedByClaimKey: opt-in を on にした経路は、実装の�
     ]);
     expect(second.contestedDetection?.[0]?.matchCount).toBe(1);
     expect(second.contestedDetection?.[0]?.result.kind).toBe("contested");
-    // 固定の結果: matchCount 2・unresolved_conflict（決まった結果——Issue #933 が直る前は
-    // 構造的に到達できなかった分岐）。
     expect(third.contestedDetection).toEqual([
       expect.objectContaining({
         matchCount: 2,
         result: expect.objectContaining({ kind: "unresolved_conflict" }),
       }),
     ]);
-    // 3回の observe で findContestedByClaimKey は3回呼ばれている（毎回、opt-in の検出の中で
-    // 呼ぶ——見つかった/見つからなかったに関わらず必ず呼ぶ設計）。
     expect(contestedSpy.calls()).toBe(3);
 
     const thirdMemory = await stores.memoryStore.get(ctx, third.memoryIds[0]!);
@@ -163,8 +148,6 @@ describe("findContestedByClaimKey: opt-in を on にした経路は、実装の�
       "好きな食べ物は寿司",
       "好きな食べ物はカレー",
     ]);
-    // `findContestedByClaimKey` を持たない adapter を模す（`findActiveByClaimKey を実装
-    // しない adapter` の既存の歯、`runtime.test.ts` と同じ手法）。
     // @ts-expect-error テスト用に任意メソッドを取り除く。
     stores.memoryStore.findContestedByClaimKey = undefined;
 
@@ -184,8 +167,6 @@ describe("findContestedByClaimKey: opt-in を on にした経路は、実装の�
       claimKey: { enabled: true, detectContested: true },
     });
 
-    // 後方互換: findContestedByClaimKey が無い adapter では、今までどおり active の一致
-    // だけで判定する——3件目は no_conflict のまま固定される（Issue #933 の直る前の振る舞い）。
     expect(third.contestedDetection).toEqual([
       expect.objectContaining({ matchCount: 0, result: { kind: "no_conflict" } }),
     ]);

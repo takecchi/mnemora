@@ -6,18 +6,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `consolidate` は、いまの時点で有効期間の外にある `active` な記憶を統合元にしない
- * （[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)。`ConsolidateSourceOutcome` の
- * `"expired"`/`"not_yet_valid"` の doc）。統合先は有効期間を持たないので、統合元にすると期限切れ・
- * 未到来の事実が期限の無い `active` な記憶として `recall()` に戻るため。
- *
- * 述語は `recall()` の期間のゲート（ADR 0164 決定1）と同じ——`validUntil <= now` なら期限切れ、
- * `validFrom > now` なら未到来。境界の両側と、やりすぎ（期間の内側の記憶まで弾く）の形も縛る。
- * 2実装（Postgres・testkit の fixture）と `{ seedMemoryId }`・`{ query }` の形は
- * `packages/postgres/src/__tests__/consolidate-target-selection.postgres.test.ts` が見る。
- */
-
 const ctx: Ctx = { tenantId: "consolidate-validity-gate" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const PAST = new Date("2026-01-01T00:00:00.000Z");
@@ -109,7 +97,6 @@ describe("consolidate は、いまの時点で有効期間の外にある記憶�
 
     const created = await stores.memoryStore.get(ctx, result.consolidatedMemoryId!);
     expect(created?.provenance).toMatchObject({ kind: "consolidated", sources: [a.id, b.id] });
-    // 統合先の有効期間は今までどおり持たない（ADR 0164「射程外にしたもの」1）。
     expect(created?.validFrom ?? null).toBeNull();
     expect(created?.validUntil ?? null).toBeNull();
   });
@@ -239,7 +226,6 @@ describe("consolidate は、いまの時点で有効期間の外にある記憶�
       newMemory({ validUntil: PAST }),
     );
     await runtime.forget(ctx, { memoryId: forgottenExpired.id });
-    // 逆転した区間（Issue #1042）: validFrom が validUntil より後。どの時点でも期間の外にある。
     const inverted = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ validFrom: FUTURE, validUntil: PAST }),

@@ -7,12 +7,7 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の #1463 のすり抜け E4・E9（ADR 0393 の C1・C2）。
- * 既存の歯は Fake の次元（2）の上で、次元違いは「長い側（+1）」だけ、非有限の値は「末尾」だけを与えていた。
- * そのため、次元の検査を「短いベクトルを通す」形（`>`）にしても、有限性の走査が先頭を飛ばしても、赤にならなかった。
- * ここでは次元を4にして、短い側・空・長い側と、先頭・中間・末尾の非有限値を与える。
- */
+/** 既存の歯は Fake の次元（2）の上で、次元違いは「長い側（+1）」だけ、非有限の値は「末尾」だけを与えていたので、検査が `>` になっても、走査が先頭を飛ばしても赤にならなかった。ここでは次元を4にして、短い側・空・長い側と、先頭・中間・末尾の非有限値を与える。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const DIMS = 4;

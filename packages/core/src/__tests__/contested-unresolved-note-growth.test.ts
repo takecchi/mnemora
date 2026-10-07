@@ -3,12 +3,6 @@ import { createRuntime } from "../runtime.js";
 import { GROWTH_CTX, growthLlm } from "./contested-group-event-growth.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0431: `relationStore` を配線しないときに積む `claim_key_conflict_unresolved` の `note` も、
- * 群の `note` と同じく、一致の全員ではなく件数と先頭10件だけを持つ（一致が N 件たまると、
- * 1回の observe で N 件ぶんの要約が入り、積み上げで N² バイトになっていた）。
- */
-
 async function unresolvedNotes(n: number): Promise<Record<string, unknown>[]> {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({

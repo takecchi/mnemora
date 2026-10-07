@@ -5,21 +5,9 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * Issue #1436・ADR 0491: 相対的な期間（「去年」「今年」）だけが違う、**どちらも正しい** 2 主張が
- * **別々の observation** に分かれると、`detectContested` は contested にする（今の振る舞い。直し方 (a)(b) は
- * オーナーの判断待ち）。
- *
- * 機序: 「去年」「今年」は `validFrom`/`validUntil` に入らない（どちらの抽出でも null）ので、ADR 0324 決定4 の
- * 有効期間の重なり判定は「重なる」と答え、同じ claim key・`contentHash` が違う 2 件が一致する。同じ observation の
- * 兄弟どうしなら ADR 0377 で除かれる（`claim-key-same-observation-not-contested.test.ts` の (a)）が、別の
- * observation は除かれない。
- *
- * ⚠ **この歯は「今は contested になる」ことを記録する。** 誰かが (a) 抽出で相対時期を `validFrom`/`validUntil` に
- * 入れる、(b) claim key のプロンプトで期間違いを別の predicate にする、のどちらかを入れて、この対が contested に
- * ならなくなったら、この歯が赤くなる。そのときは ADR 0491 と Issue #1436 を読み直し、歯を「contested にならない」
- * 向きに替えること。
- *
- * 作り方は `claim-key-same-observation-not-contested.test.ts` と同じ（core の Fake、固定の LLM の応答）。
+ * この歯は「今は contested になる」ことを記録する（直し方の判断待ち）。(a) 抽出で相対時期を `validFrom`/`validUntil` に入れる、
+ * (b) claim key のプロンプトで期間違いを別の predicate にする、のどちらかを入れて、この対が contested にならなくなったら赤くなる。
+ * そのときは ADR 0491 を読み直し、歯を「contested にならない」向きに替えること。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1436" };
@@ -82,7 +70,6 @@ describe("claim key の検出: 別々の observation に分かれた、相対期
     const lastYear = await stores.memoryStore.get(ctx, lastYearId);
     const thisYear = await stores.memoryStore.get(ctx, thisYearId);
 
-    // 相対的な期間は有効期間に入っていない（どちらも null）。これが「重なる」と答えられる理由。
     expect(lastYear?.validFrom ?? null).toBeNull();
     expect(lastYear?.validUntil ?? null).toBeNull();
     expect(thisYear?.validFrom ?? null).toBeNull();

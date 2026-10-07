@@ -7,17 +7,7 @@ import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0489: `RuntimeDeps.embeddingInput`（利用者のフック）の戻り値の端での `processEmbedJob` の今の振る舞いを縛る。
- *
- * TSDoc（`runtime.ts` の `embeddingInput`）の約束は「省略時は `memory.content` をそのまま送る」「`Memory.content` は
- * 変えない」「フックが投げたら `embeddingStatus` を `'failed'` にして再送出する（新しい throw の経路を既定側へ作らない）」。
- * 戻り値の検査は約束に無い（`resolveEmbeddingInput` は戻り値をそのまま返す）。ここで縛るのは:
- * - 戻り値（空文字・NUL・孤立サロゲート・巨大な文字列・型の外の値）は**検査も変換もされず、そのまま provider に渡る**。
- * - 渡った先が落ちれば `failed`、受け入れれば `ready`（Runtime が先回りして断ることはしない）。
- * - `Memory.content` は常に元のまま。
- * - `reembed()` で `failed` を戻した後の `tick` で、フックはもう一度呼ばれる。
- */
+/** 戻り値の検査は約束に無い（`resolveEmbeddingInput` は戻り値をそのまま返す）ので、Runtime が先回りして断らないことを縛る。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const LATER = new Date(Date.now() + 60_000);

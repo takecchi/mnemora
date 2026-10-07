@@ -8,15 +8,7 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0416（穴 D-3 の続き）: `supersedeWithNewMemories` に `opts.buildCreatedEvent` を渡し、store が
- * 戻り値の `createdEventsWritten: true` で**名乗ったときだけ**、runtime は別の `created` の append を省く。
- * 名乗らない adapter（この fixture の `FakeMemoryStore`。引数を黙って無視する既存の第三者の実装の代表）では、
- * 今までどおり別の文で積む。`reflect` は `createMemoriesWithOutboxAndEvents?` があればそれで積む。
- *
- * この歯が無いと、「core のテストが緑」は名乗らない adapter の経路しか縛らない
- * （実 adapter の歯は `packages/postgres` の `runtime-created-event-same-tx.postgres.test.ts`）。
- */
+/** 名乗らない adapter は引数を黙って無視する既存の第三者の実装の代表（この fixture の `FakeMemoryStore`）。実 adapter の歯は `packages/postgres` の `runtime-created-event-same-tx.postgres.test.ts` で、ここは名乗らない adapter の経路しか縛らない。 */
 
 const ctx: Ctx = { tenantId: "created-event-claim" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -150,7 +142,6 @@ describe("reextract: created の省略は、store が名乗ったときだけ（
     const { stores, runtime, observationId } = await setup();
     const before = stores.eventStore.events.filter((e) => e.kind === "created").length;
     claimSupersede(stores, { opts: undefined, appends: 0 }, true);
-    // 名乗る adapter が「積んだあとで投げた」ので、この adapter の created は1件在る。runtime が足すと2件になる。
     await expect(runtime.reextract(ctx, observationId)).rejects.toThrow("テストの注入");
     const after = stores.eventStore.events.filter((e) => e.kind === "created").length;
     expect(after - before).toBe(1);
