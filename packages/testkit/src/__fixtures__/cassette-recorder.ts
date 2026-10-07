@@ -12,15 +12,9 @@ import type { Cassette, EmbeddingCassetteEntry, LLMCassetteEntry } from "./casse
 import { CASSETTE_FORMAT_VERSION, embeddingCassetteKey, llmCassetteKey } from "./cassette.js";
 
 /**
- * 実 provider を包んで入出力を記録するデコレータ一式（ADR 0051）。
- *
- * **1回の実行で1つのカセットを作る。**LLM と埋め込みで別々のファイルにしないのは、
- * 両者が同じ1回の記録セッションに属する——同じ probe set・同じ日・同じ API の姿——
- * ことを、ファイルの形として保つためである。片方だけ録り直したカセットは、
- * `recordedAt` が示す時点と中身が食い違う。
- *
- * **記録は「素通し」である。**デコレータは委譲先の戻り値をそのまま返し、
- * 加工しない。加工すると、記録したものと本番が返すものがずれる。
+ * 実 provider を包んで入出力を記録するデコレータ一式（ADR 0051）。1回の実行で1つのカセットを作る
+ * （LLM と埋め込みを別ファイルにすると、片方だけ録り直したときに `recordedAt` と中身が食い違う）。
+ * デコレータは委譲先の戻り値を加工せず返す。
  */
 export class CassetteRecorder {
   private readonly embeddingEntries = new Map<string, EmbeddingCassetteEntry>();
@@ -28,12 +22,7 @@ export class CassetteRecorder {
   private embeddingSpace: EmbeddingSpaceId | undefined;
   private llmModel: string | undefined;
 
-  /**
-   * 埋め込みの1件を記録する。同じ `text` を二度記録すると、後の値で上書きする。
-   *
-   * **2回目以降の記録で埋め込み空間（`provider`・`model`・`dimensions`）が最初と違えば落とす**（ADR 0452）。後勝ちで上書きすると、
-   * 別のモデルのベクトルが1枚のカセットに混ざったまま、ヘッダだけが最後の空間を名乗る。
-   */
+  /** 埋め込みの1件を記録する。同じ `text` を二度記録すると、後の値で上書きする。埋め込み空間が最初と違えば落とす（別モデルのベクトルが1枚に混ざるのを防ぐ）。 */
   recordEmbedding(space: EmbeddingSpaceId, text: string, vector: number[]): void {
     const first = this.embeddingSpace;
     if (
@@ -53,10 +42,7 @@ export class CassetteRecorder {
     this.embeddingEntries.set(embeddingCassetteKey(text), { text, vector });
   }
 
-  /**
-   * LLM の応答の1件を記録する。同じ `prompt` を二度記録すると、後の値で上書きする。
-   * **2回目以降の記録でモデル名が最初と違えば落とす**（ADR 0452。理由は {@link recordEmbedding} と同じ）。
-   */
+  /** LLM の応答の1件を記録する。同じ `prompt` を二度記録すると、後の値で上書きする。モデル名が最初と違えば落とす。 */
   recordLLM(model: string, prompt: PromptSpec, value: unknown): void {
     if (this.llmModel !== undefined && this.llmModel !== model) {
       throw new Error(
@@ -68,42 +54,28 @@ export class CassetteRecorder {
     this.llmEntries.set(llmCassetteKey(prompt), { prompt, value });
   }
 
-  /** 記録した埋め込みの件数（鍵の数。呼び出す時点の値）。 */
+  /** 記録した埋め込みの件数。 */
   get embeddingCount(): number {
     return this.embeddingEntries.size;
   }
 
-  /** 記録した LLM の応答の件数（鍵の数。呼び出す時点の値）。 */
+  /** 記録した LLM の応答の件数。 */
   get llmCount(): number {
     return this.llmEntries.size;
   }
 
-  /**
-   * 既に記録済みの応答を引く（{@link RecordingLLMProvider} が同じプロンプトを
-   * 二度叩かないために使う）。⛔ 再生用の口ではない——再生は
-   * `RecordedLLMProvider` の役目である。
-   */
+  /** 既に記録済みの応答を引く。再生用の口ではない（再生は `RecordedLLMProvider`）。 */
   lookupLLM(prompt: PromptSpec): { prompt: PromptSpec; value: unknown } | undefined {
     return this.llmEntries.get(llmCassetteKey(prompt));
   }
 
-  /** 既に記録済みのベクトルを引く（{@link RecordingEmbeddingProvider} 用）。 */
   lookupEmbedding(text: string): EmbeddingCassetteEntry | undefined {
     return this.embeddingEntries.get(embeddingCassetteKey(text));
   }
 
-  /**
-   * 記録をカセットに固める。
-   *
-   * **一度も記録が無い節があれば落とす。**空の節を持つカセットを書き出すと、
-   * 「録ったつもりで録れていない」ことが、再生時の「記録に無い」例外まで
-   * 気づかれない。書き出す側で先に落とす。
-   */
+  /** 記録をカセットに固める。一度も記録が無い節があれば落とす（録れていないカセットが、再生時の「記録に無い」まで気づかれない）。 */
   toCassette(now: Date = new Date()): Cassette {
-    // **何が起きたかだけでなく、どうすればいいかまで言う。**この失敗の既知の原因は1つに
-    // 集中している——`observe()` は `externalId` で重複排除するため、取り込み済みの
-    // テナントで記録を走らせると抽出も埋め込みも呼ばれない。実際にこれで一度落ちた
-    // （ADR 0051「引き受けた負債4」）ので、その原因を例外本文に載せる。
+    // 失敗の原因を例外本文に載せる: `observe()` は `externalId` で重複排除するため、取り込み済みのテナントでは抽出も埋め込みも呼ばれない。
     const hint =
       "記録の実行が API を1回も呼んでいない。よくある原因: 取り込み済みのテナントで " +
       "`record` を走らせた——`observe()` は externalId で重複排除するため、抽出も埋め込みも " +
@@ -132,14 +104,11 @@ export class CassetteRecorder {
 /**
  * 実 `EmbeddingProvider` を包み、入力テキストと返ってきたベクトルの対応を記録する。
  *
- * ADR 0452:
  * - `opts`（`AbortOptions`）は delegate へそのまま渡す。
- * - **同じ入力を並列に呼んでも、delegate は1回だけ呼ぶ**（進行中の呼び出しも memo する）。呼び出し側が見たベクトルと、
- *   記録に残るベクトルが一致する。失敗した呼び出しは memo に残さない（次の呼び出しは delegate を呼び直す）。
- *   ⚠ 並列に待っている側は、先に呼んだ側の `opts.signal` の abort も共有する（先に呼んだ側が abort すると、待っている側も reject する）。
- * - **delegate が壊れたベクトル（次元が `space.dimensions` と違う・有限でない成分）を返したら、記録せずに落とす**
- *   （`EmbeddingProvider` の約束を delegate が破っている。記録すると、カセットが壊れた値を持つ）。
- * - 返すベクトルは記録とは別の配列（呼び出し側が書き換えても記録に漏れない）。
+ * - 同じ入力を並列に呼んでも delegate は1回だけ呼ぶ。失敗した呼び出しは memo に残さない。
+ *   ⚠ 並列に待っている側は、先に呼んだ側の `opts.signal` の abort も共有する。
+ * - delegate が壊れたベクトル（次元の食い違い・有限でない成分）を返したら、記録せずに落とす。
+ * - 返すベクトルは記録とは別の配列。
  */
 export class RecordingEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
@@ -153,10 +122,7 @@ export class RecordingEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
-    // ⭐ **一度録った入力は二度叩かない**（`RecordingLLMProvider` と同じ理由——
-    // そちらの docstring 参照）。実 API の埋め込みはビット単位では再現しないため
-    // （ADR 0051 の実測、最小コサイン 0.998647）、同じ文を録り直すと記録と、
-    // その記録が作られた実行そのものがずれる。
+    // 一度録った入力は二度叩かない: 実 API の埋め込みはビット単位では再現しないので、録り直すと記録と実行がずれる。
     const toFetch = [
       ...new Set(
         texts.filter(
@@ -201,7 +167,7 @@ export class RecordingEmbeddingProvider implements EmbeddingProvider {
         }),
       );
     } finally {
-      // 失敗した Promise を残さない（次の呼び出しが delegate を呼び直せるように）。成功したものは記録に移っている。
+      // 失敗した Promise を残さない（次の呼び出しが delegate を呼び直せるように）。
       for (const [text, one] of mine) {
         if (this.pending.get(text) === one) this.pending.delete(text);
       }
@@ -232,31 +198,13 @@ function assertRecordableVector(vector: unknown, dimensions: number): asserts ve
 /**
  * 実 `LLMProvider` を包み、プロンプトと応答の対応を記録する。
  *
- * 🔴 **同じプロンプトを二度は叩かない。一度録った鍵は、記録済みの値をそのまま返す。**
+ * 🔴 同じプロンプトを二度は叩かない。一度録った鍵は、記録済みの値を返す: 鍵は1つの値しか持てず、実 LLM は同じプロンプトに
+ * 毎回違う応答を返すので、後勝ちで先の値が消え、記録が自分を作った実行を再生できなくなる。
  *
- * **理由**（Issue #498 / #506 の記録で実際に踏んだ）: カセットの鍵は
- * プロンプトのハッシュであり（{@link llmCassetteKey}）、**1つの鍵は1つの値しか持てない。**
- * 一方、実 LLM は同じプロンプトに対して毎回違う応答を返す。⟹ 同じプロンプトが
- * 1回の記録の中で複数回現れると、`Map.set` の**後勝ちで先の値が消え**、
- * **その記録は、記録を作った実行そのものを再生できなくなる。**
- *
- * 実例: `answer` ベンチの評価ケース12件のうち3件が同じフィラー発話
- * （「今日はいい天気ですね。」）を含む。実 `gpt-4o-mini` はその同一の抽出プロンプトに
- * 対して digest を `今日はいい天気` / `今日はいい天気である。` / `今日はいい天気です。`
- * と3通りに返した。記録に残るのは最後の1つだけなので、再生時に先の2ケースが組み立てる
- * 回答プロンプトは記録と食い違い、`RecordedLLMProvider` が「記録に無い」で落ちた。
- *
- * ⟹ **記録器が memo として振る舞うことで、記録は自分自身と矛盾しなくなる。**
- * 副次的に、繰り返し分の API 呼び出しと課金も消える。
- *
- * ADR 0452:
- * - **進行中の呼び出しも memo する。**同じプロンプトを並列に呼んでも、delegate は1回だけ呼ばれ、呼び出し側が見た値と記録に残る値が一致する
- *   （以前は逐次の呼び出しでしか成り立たず、並列だと両方が delegate を呼んで後勝ちになった）。失敗した呼び出しは memo に残さない。
+ * - 同じプロンプトを並列に呼んでも delegate は1回だけ呼ぶ。失敗した呼び出しは memo に残さない。
  *   ⚠ 並列に待っている側は、先に呼んだ側の `opts.signal` の abort も共有する。
  * - `opts`（`AbortOptions`）は delegate へそのまま渡す。
- *
- * ⛔ **これは再生（`RecordedLLMProvider`）の代わりではない。**memo は1回の記録セッション
- * の中でしか効かず、プロセスを跨がない。
+ * - memo は1回の記録セッションの中でしか効かない。再生（`RecordedLLMProvider`）の代わりではない。
  */
 export class RecordingLLMProvider implements LLMProvider {
   private readonly pendingComplete = new Map<string, Promise<LLMResponse>>();
@@ -269,7 +217,6 @@ export class RecordingLLMProvider implements LLMProvider {
   ) {}
 
   async complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
-    // ADR 0500: 記録の参照を返さず、記録にも呼び出し側が持つ参照を入れない（どちらを書き換えても、もう一方に漏れない）。
     const recorded = this.recorder.lookupLLM(req);
     if (recorded !== undefined) {
       return structuredClone(recorded.value) as LLMResponse;
@@ -282,7 +229,6 @@ export class RecordingLLMProvider implements LLMProvider {
     const running = (async () => {
       const response = await this.delegate.complete(ctx, req, opts);
       this.recorder.recordLLM(this.model, req, structuredClone(response));
-      // 待っている側と最初の呼び出し側が、同時に同じ参照を受け取らない。誰も触らない写しを、全員が複製して受け取る。
       return structuredClone(response);
     })();
     this.pendingComplete.set(key, running);
@@ -300,20 +246,17 @@ export class RecordingLLMProvider implements LLMProvider {
   ): Promise<T> {
     const recorded = this.recorder.lookupLLM(req.prompt);
     if (recorded !== undefined) {
-      // 記録済みの値も、呼び出し側の `schema` で検証し直す——`RecordedLLMProvider`
-      // と同じ規律（鍵にスキーマを含めていないため）。
+      // 鍵にスキーマを含めないので、記録済みの値も呼び出し側の `schema` で検証し直す。
       return req.schema.parse(structuredClone(recorded.value));
     }
     const key = llmCassetteKey(req.prompt);
     const waiting = this.pendingStructured.get(key);
     if (waiting !== undefined) {
-      // 並列に待っていた側も、記録済みの値と同じく自分の `schema` で検証し直す。
       return req.schema.parse(structuredClone(await waiting));
     }
     const running = (async () => {
       const value = await this.delegate.completeStructured(ctx, req, opts);
-      // **検証後の値を記録する。**再生側も同じ `schema` で検証し直すため、
-      // ここで検証前の生 JSON を持っても意味が無く、むしろ形が二重になる。
+      // 検証後の値を記録する: 再生側も同じ `schema` で検証し直す。
       this.recorder.recordLLM(this.model, req.prompt, structuredClone(value));
       return structuredClone(value);
     })();
