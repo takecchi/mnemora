@@ -12,45 +12,16 @@ import {
   seededRandom,
 } from "./test-db.js";
 
-/**
- * ADR 0011 の実測根拠を歯にする。
- *
- * `docs/recall.md` §3 の原案は段1のクエリに `count(*) OVER ()` を含め、これで
- * 「フィルタ条件下で候補が何件あったか」を追加クエリ無しに正確に取れる、としていた。
- * マネージャーが実測したところ、これは PostgreSQL 18.6 + pgvector 0.8.6 の HNSW 上では
- * 成立しない（`docs/decisions/0011-no-window-count-in-ann-stage.md` 参照）。
- * このテストはその事実そのものを検査する——ADR の主張が将来ひとりでに腐らないための歯。
- *
- * ⚠ **このテスト自身が走る環境は、上の実測環境（18.6）とは別。** CI では
- * `.github/workflows/ci.yml` の `postgres` ジョブ（`pgvector/pgvector:pg17` イメージ、
- * PostgreSQL 17系）でこのファイルが走る。18.6 は ADR 0011 が根拠にした元の実測環境で
- * あって、このテストが今実際に走っている環境ではない——両者を混同しないこと。
- *
- * 二つの分岐:
- * - 分岐B（既定のプランナ挙動）: `count(*) OVER ()` を入れると HNSW が捨てられ、
- *   Seq Scan + WindowAgg に落ちる（件数は正しいが索引を殺す）。
- * - 分岐A（`enable_seqscan = off` で索引を強制した場合）: 返る件数は真の総件数ではなく、
- *   ANN の探索設定（`hnsw.ef_search`）に依存する値に固定される。データ件数を変えても
- *   ほぼ変わらないことまで確認し、「データと無関係な値」であることをデータで示す。
- */
-
 const TENANT = "count-over-window-tenant";
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
-/** 1回の INSERT 文で送る行数の目安（数百〜1000行）。 */
 const BULK_INSERT_CHUNK_SIZE = 1000;
 
 /**
  * `memories` へ、`buildNewMemoryFixture({ tenantId })` と同じ列値を一括 INSERT する。
- * `PostgresMemoryStore.createMemory`（`../memory-store.ts`）が書く列・既定値
- * （`input.xxx ?? null` の形の既定を含む）と1対1で対応させている——`tags` から
- * `proposed` ラベルを作る副作用（`upsertProposedLabels`）は無い（このテストの
- * `tags` は常に空配列なので、元々そのループは0回だった）。`buildNewMemoryFixture` は
- * 乱数にも現在時刻にも依存しない純関数なので、1回だけ呼んで得た値を全行で使い回せる。
- *
- * `id` だけ `createMemory` と手段が違う（`gen_random_uuid()` ではなく `randomUUID()`
- * で呼び出し側が払い出す）。`memory_embeddings_<space>` 側が同じ id を外部キーとして
- * 参照するため、呼び出し側で id を先に確定させる必要がある。
+ * `buildNewMemoryFixture` は乱数にも現在時刻にも依存しない純関数なので、1回だけ呼んで得た値を全行で使い回せる。
+ * `id` だけ `createMemory` と手段が違い、呼び出し側が `randomUUID()` で払い出す
+ * （`memory_embeddings_<space>` 側が同じ id を外部キーとして参照するため、先に確定させる必要がある）。
  */
 async function insertMemoriesBulk(pool: Pool, ctx: Ctx, ids: readonly string[]): Promise<void> {
   const fixture = buildNewMemoryFixture({ tenantId: ctx.tenantId });
@@ -126,22 +97,12 @@ async function insertMemoriesBulk(pool: Pool, ctx: Ctx, ids: readonly string[]):
 }
 
 /**
- * `memory_embeddings_<space>` へ、`vectorStore.upsert`（`../vector-store.ts`）が書くのと
- * 同じ列を一括 INSERT する。`ON CONFLICT` は無い——`memories` 同様、常に新規行しか
- * 作らないため不要。
+ * `memory_embeddings_<space>` へ、`vectorStore.upsert` が書くのと同じ列を一括 INSERT する。
  *
- * `rand` は呼び出し元と共有する `seededRandom(20260905)` のインスタンスそのもの——
- * 1行につき3回、**`ids` と同じ順**で消費する（元の1行ずつのループが
- * `vectorStore.upsert` の直前で呼んでいたのと同じ消費順）。
- *
- * HNSW は逐次挿入で索引を作るため、`memory_embeddings_<space>` への物理的な挿入順が
- * 元の実装と同じであることが重要。`unnest($1::uuid[], $2::vector[])` は2つの配列を
- * 位置で対にして、配列の順序どおりに行を生成する（`memory-store.ts` の
- * `recordUsage`・`contested-with-index.test.ts` の `seedContestedMemories` が
- * 同じ `unnest` の使い方をしている）。チャンクも `ids` の先頭から順に処理するので、
- * 全体として `ids[0], ids[1], ...` の順で INSERT される——この順序保存は、手元の
- * Postgres で `ORDER BY ctid`（新規テーブルでは物理挿入順を反映する）を使って
- * 実測で確認済み（Issue #758）。
+ * `rand` は呼び出し元と共有する `seededRandom(20260905)` のインスタンスそのもので、1行につき3回、`ids` と同じ順で消費する。
+ * HNSW は逐次挿入で索引を作るため、物理的な挿入順が重要である。`unnest($1::uuid[], $2::vector[])` は
+ * 2つの配列を位置で対にして配列の順序どおりに行を生成し、チャンクも `ids` の先頭から順に処理するので、
+ * 全体として `ids[0], ids[1], ...` の順で INSERT される。
  */
 async function insertEmbeddingsBulk(
   pool: Pool,
@@ -164,19 +125,9 @@ async function insertEmbeddingsBulk(
 }
 
 /**
- * Issue #758: 元は `memoryStore.createMemory` / `vectorStore.upsert` を1行ずつ
- * `count` 回呼ぶ実装だった。実測したところ、`分岐A`（3,000件→9,000件の
- * 2段 seed）の it 全体の時間のうち99.8%以上が seed に費やされ、そのほぼ全部がこの
- * 1行ずつの往復だった（3,000件で約20秒、9,000件で約60秒。クエリ本体
- * `countWithSeqScanDisabled` は数ミリ秒、`resetTestDatabase` も高々百数十ミリ秒）。
- *
- * このテストが検査したいのはプランナ／HNSW 索引の性質（ADR 0011 の主張）であって、
- * `PostgresMemoryStore`/`PostgresVectorStore` の書き込み経路そのものではない——
- * 書き込み経路の契約は `conformance.postgres.test.ts`（`@mnemora/testkit` の
- * `describeMemoryStoreConformance`/`describeVectorStoreConformance` を Postgres 実装に
- * 対して回す）が別途検査している。そのため、ここでは store を経由せず `memories` /
- * `memory_embeddings_<space>` へ直接一括 INSERT する——生成される行・挿入順が
- * 1行ずつの旧実装と同じであることは実測で確認済み（Issue #758）。
+ * このテストが検査したいのはプランナ／HNSW 索引の性質であって、store の書き込み経路ではない
+ * （書き込み経路の契約は `conformance.postgres.test.ts` が別途検査している）。
+ * 1行ずつ `createMemory`/`upsert` を呼ぶと seed が実行時間の大半を占めるので、store を経由せず直接一括 INSERT する。
  */
 async function seed(ctx: Ctx, count: number, pool: Pool): Promise<void> {
   const rand = seededRandom(20260905);
@@ -192,15 +143,10 @@ async function seed(ctx: Ctx, count: number, pool: Pool): Promise<void> {
  * `enable_seqscan = off` で索引を強制した状態で、ANN の全走査結果を件数だけ数える。
  * 別接続・別トランザクションで実行し、`ROLLBACK` で設定変更を後に残さない。
  *
- * **意図的に `WHERE tenant_id = ...` を付けない。** 実測したところ、`tenant_id` で
- * 絞る形にすると、`memory_embeddings_<space>` の主キー `(tenant_id, memory_id)` が
- * 別の非 Seq Scan 経路（Bitmap Index Scan + 明示的な Sort、常に正確な件数を返す）を
- * 提供してしまい、`enable_seqscan = off` だけでは HNSW を強制できない
- * （プランナはこの経路の方が安いと判断し続ける）。この分岐Aは「HNSW 索引そのものが
- * 持つ、探索設定に依存した打ち切り」という一般的な性質の実測であり、
- * マネージャーの実測（`WHERE` 無しの `t_big` に対する検証）と同じ形にしている。
- * 分岐B（下のテスト）は実際の `PostgresVectorStore.search` と同じ `tenant_id` 付きの
- * クエリで検証しており、そちらが本PRの実装に直結する検査である。
+ * **意図的に `WHERE tenant_id = ...` を付けない。** `tenant_id` で絞ると、`memory_embeddings_<space>` の主キー
+ * `(tenant_id, memory_id)` が別の非 Seq Scan 経路（Bitmap Index Scan + 明示的な Sort、常に正確な件数を返す）を
+ * 提供してしまい、`enable_seqscan = off` だけでは HNSW を強制できない。
+ * 分岐Bは実際の `PostgresVectorStore.search` と同じ `tenant_id` 付きのクエリで検証している。
  */
 async function countWithSeqScanDisabled(pool: Pool): Promise<number> {
   const client = await pool.connect();
@@ -236,7 +182,6 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
     const rowCount = 3000;
     await seed(ctx, rowCount, pool);
 
-    // count(*) OVER () を含めない場合: HNSW 索引を使う。
     const withoutWindow = await pool.query(
       `EXPLAIN (FORMAT TEXT)
        SELECT memory_id, embedding <=> '[0.5,0.5,0.5]'::vector AS distance
@@ -251,7 +196,6 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
       .join("\n");
     expect(planWithoutWindow).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
 
-    // count(*) OVER () を含めると、同じ ORDER BY / LIMIT でも Seq Scan + WindowAgg に変わる。
     const withWindow = await pool.query(
       `EXPLAIN (FORMAT TEXT)
        SELECT memory_id,
@@ -270,7 +214,6 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
     expect(planWithWindow).toMatch(/WindowAgg/);
     expect(planWithWindow).not.toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
 
-    // 索引を捨てた代償として、この分岐でだけ candidate_count は真の総件数と一致する。
     const rows = await pool.query(
       `SELECT count(*) OVER () AS candidate_count
        FROM ${TABLE}
@@ -289,7 +232,6 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
     const smallCount = 3000;
     await seed(ctx, smallCount, pool);
     const smallCapped = await countWithSeqScanDisabled(pool);
-    // 真のデータ件数と一致しない（打ち切りが起きている）。
     expect(smallCapped).toBeLessThan(smallCount);
 
     await resetTestDatabase();
@@ -298,9 +240,7 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
     const largeCapped = await countWithSeqScanDisabled(pool);
     expect(largeCapped).toBeLessThan(largeCount);
 
-    // データ件数が 3000 -> 9000 (3倍) に増えても、同じ hnsw.ef_search なら
-    // 打ち切り件数はほぼ変わらない——つまりこの数値は「データが何件あったか」を
-    // 表していない、という ADR 0011 の核心を検査する。
+    // データ件数が 3 倍に増えても打ち切り件数がほぼ変わらないことで、この数値が「データが何件あったか」を表していないことを示す。
     // 環境差を吸収するため、「3倍のデータ件数の差ほどは動かない」という緩い比較にする。
     const ratio = largeCapped / smallCapped;
     expect(ratio).toBeLessThan(2);

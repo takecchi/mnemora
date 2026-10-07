@@ -5,14 +5,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { runAnalyzeMemories } from "../migrate.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `runAnalyzeMemories` の「副作用について」に、文書から引いただけで測っていなかった2点を実測で縛る
- * （Issue #1253）。振る舞いは変えていない。
- *
- * 1. `ANALYZE memories` が `memories` に取るロックは `ShareUpdateExclusiveLock` である。
- * 2. そのロックを持ったまま（`ANALYZE` のトランザクションを開けたまま）でも、別の接続からの書き込みは通る。
- */
-
 const ctx: Ctx = { tenantId: "analyze-memories-lock" };
 
 /** `p` が `ms` のうちに決着したか。 */

@@ -6,15 +6,9 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * `embedding-space-table-conflict.postgres.test.ts`（Issue #1151）の、専用スキーマ版。
- *
- * 衝突の歯は schema を指定しない（`search_path` の先頭、つまり public の）場面しか見ていなかった。
- * `registerEmbeddingSpace(pool, space, { schema })` で、同じテーブルに潰れる別の組を登録したとき、
- * テーブルのコメントを読む `to_regclass` が schema で修飾されていなければ、`search_path` の側
- * （public）を引いて「コメントが無い」と読み、2つ目の登録が通ってコメントを上書きする。
+ * 衝突の歯が schema 未指定（public）しか見ていないと、テーブルのコメントを読む `to_regclass` が schema で修飾されていなくても気づけない。
+ * 修飾されていないと `search_path` の側（public）を引いて「コメントが無い」と読み、2つ目の登録が通ってコメントを上書きする。
  * この歯は、専用スキーマの側でも2つ目が拒まれ、コメントが1つ目の組のままであることを縛る。
- *
- * 専用スキーマは、このファイルが作り、終わりに `DROP SCHEMA ... CASCADE` で消す。
  */
 
 const SCHEMA = "mnemora_conflict_schema_probe";

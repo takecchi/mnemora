@@ -11,24 +11,13 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
 /**
- * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
+ * `listEmbeddingSpaceTables`（TypeScript）と migration 0027 の `DO` ブロック（SQL）は同じ3条件を2回書いていて、
+ * `.sql` から TypeScript の関数を呼ぶ経路が無いので、一致を機械的に強制する仕組みが無い。
+ * この歯は、両方が同じテーブル集合・同じ索引名を導くことを実測で検査する。
  *
- * `packages/postgres/src/embedding-space-catalog.ts` の `listEmbeddingSpaceTables`
- * （TypeScript）と `migrations/0027_erase_tenant_fk_indexes.sql` の `DO` ブロック
- * （SQL）は、**同じ3条件**（Issue #1425 / ADR 0382 決定2）を、コードとしては別の
- * 場所に2回書いている——`.sql` ファイルから TypeScript の関数を呼ぶ経路が無い
- * （`migrate.ts` は `.sql` をそのまま実行するだけ）ため、一致を機械的に強制する
- * 仕組みは無い（ADR 0383「引き受けた負債」）。
- *
- * この歯は、**両方が同じテーブル集合・同じ索引名を導くことを実測で検査する**——
- * 一致しなくなったら（どちらかを直し忘れたら）ここが赤くなる。
- *
- * ⚠ **この歯は migration ファイルの実際のテキストを `readFileSync` で読む**
- * （複製した SQL ではない）——`embedding-zero-norm-migration.postgres.test.ts` と
- * 同じ規律。列挙クエリ自体は `FOR ... IN <SELECT ...> LOOP` の `<SELECT ...>` 部分を
- * 切り出す——これは（`FOR`/`LOOP` を取り除けば）それ自体が有効な単独の SQL 文であり、
- * `DO` ブロックの外でもそのまま実行できる。索引名の一致は、DO ブロック全体
- * （`CREATE INDEX` を含む）を実行し、`pg_indexes` に実在するかで確かめる。
+ * ⚠ migration ファイルの実際のテキストを `readFileSync` で読む（複製した SQL ではない）。
+ * 列挙クエリは `FOR ... IN <SELECT ...> LOOP` の `<SELECT ...>` 部分を切り出す（`FOR`/`LOOP` を取り除けばそれ自体が有効な単独の SQL 文）。
+ * 索引名の一致は、DO ブロック全体（`CREATE INDEX` を含む）を実行し、`pg_indexes` に実在するかで確かめる。
  */
 
 const MIGRATION_PATH = fileURLToPath(
@@ -36,12 +25,7 @@ const MIGRATION_PATH = fileURLToPath(
 );
 const MIGRATION_SQL = readFileSync(MIGRATION_PATH, "utf8");
 
-/**
- * `FOR target_table, target_schema IN <SELECT ...> LOOP` から `<SELECT ...>` の
- * テキストだけを切り出す。切り出した文字列は、`FOR`/`LOOP` を取り除けば
- * そのまま独立した SQL 文として実行できる（この関数はその前提を検査しない——
- * 前提が崩れたら、この関数を呼ぶ側のクエリがそもそも構文エラーになる）。
- */
+/** `FOR target_table, target_schema IN <SELECT ...> LOOP` から `<SELECT ...>` のテキストだけを切り出す。 */
 function extractEnumerationSelect(sqlText: string): string {
   const forMarker = "FOR target_table, target_schema IN";
   const loopMarker = "LOOP";
@@ -82,9 +66,7 @@ const SPACE_B: EmbeddingSpaceId = {
 };
 
 afterAll(async () => {
-  // このファイルが作る埋め込み空間テーブル（SPACE_A/SPACE_B）は、他のテストファイル
-  // （`erase-tenant-all-tenant-tables.postgres.test.ts` 等）が「DB に存在する全 space」を
-  // 列挙する場面で漏れ残ると紛れ込む——`closeTestClient()` の前に落とす。
+  // このファイルが作る埋め込み空間テーブルは、他のテストファイルが「DB に存在する全 space」を列挙する場面で漏れ残ると紛れ込むので、`closeTestClient()` の前に落とす。
   const { pool } = await getTestClient();
   await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(SPACE_A)}`);
   await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(SPACE_B)}`);
@@ -110,20 +92,14 @@ describe("listEmbeddingSpaceTables（TS）と migration 0027 の列挙（SQL）�
     expect(sqlTables).toEqual(tsTables);
   });
 
-  /** 下の2つの it が共有する本体（自分で空間を登録するところまでを含む）。 */
   async function assertIndexNamesAgreeStartingFromAnyState(): Promise<void> {
     const { pool } = await getTestClient();
-    // 前の it に頼らず、自分で空間を登録する（`--sequence.shuffle` で it の順が入れ替わると、
-    // この it が先に走り、SPACE_A/SPACE_B のテーブルがまだ無くて 0 件で落ちた。Issue #1276 / ADR 0397）。
-    // `registerEmbeddingSpace` は冪等（前の it が先に走っても同じ）。
+    // 前の it に頼らず、自分で空間を登録する（it の順が入れ替わっても動くように。`registerEmbeddingSpace` は冪等）。
     await registerEmbeddingSpace(pool, SPACE_A);
     await registerEmbeddingSpace(pool, SPACE_B);
     for (const space of [SPACE_A, SPACE_B]) {
       const table = embeddingSpaceTableName(space);
       const tsIndexName = embeddingSpaceMemoryIdIndexName(space);
-      // 索引を一旦落とし、DO ブロックに作らせてから、TS 側が計算した名前と
-      // ちょうど一致する索引が実在することを確認する（名前がずれていれば、
-      // DO ブロックは別名の索引を作ってしまい、この検査が0件で落ちる）。
       await pool.query(`DROP INDEX IF EXISTS ${tsIndexName}`);
       await pool.query(DO_BLOCK_SQL);
       const result = await pool.query<{ indexname: string }>(
@@ -138,9 +114,6 @@ describe("listEmbeddingSpaceTables（TS）と migration 0027 の列挙（SQL）�
     await assertIndexNamesAgreeStartingFromAnyState();
   });
 
-  // 上の it と順を入れ替えた形（#1472 A8）: `--sequence.shuffle` で上の it が先に走ったときの状態
-  // （SPACE_A/SPACE_B のテーブルがまだ無い）を、通常の実行順でも作って直接確かめる。上の本体が
-  // 自分で空間を登録していなければ、ここで 0 件になって落ちる（修正の取り消しが通常の順でも赤になる）。
   it("空間のテーブルがまだ無い状態から始めても、索引名は一致する（it の順を入れ替えた形。Issue #1276 / ADR 0397）", async () => {
     const { pool } = await getTestClient();
     await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(SPACE_A)}`);
@@ -153,8 +126,6 @@ describe("listEmbeddingSpaceTables（TS）と migration 0027 の列挙（SQL）�
     const { db, pool } = await getTestClient();
     const decoyTable = "memory_embeddings_decoy_no_fk";
     await pool.query(`DROP TABLE IF EXISTS ${decoyTable}`);
-    // `memory_embeddings_` で始まる名前・`memory_id` 列を持つが、`memories(id)` への
-    // 外部キーは持たない——3条件目だけを満たさない decoy。
     await pool.query(`CREATE TABLE ${decoyTable} (tenant_id text, memory_id uuid, model text)`);
 
     const tsResult = await listEmbeddingSpaceTables(db);

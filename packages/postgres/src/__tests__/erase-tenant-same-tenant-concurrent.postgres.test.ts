@@ -16,16 +16,7 @@ import {
   seedAllTablesForTenant,
 } from "./erase-tenant-test-helpers.js";
 
-/**
- * ADR 0430 決定1: 同じテナントへの `eraseTenant` の同時呼び出しは、port ごとのトランザクションの
- * 先頭で取るテナント単位の advisory lock で直列になる。
- *
- * 直す前は、相手が同じ行を先に消すと `drainById` が0行を返し、「予算未満なら表は空」と
- * 読んで `memories` へ進み、行が残っているのに 23503（外部キー違反）で reject した。
- * 2つの別々の pool（別々の接続）から `limit: 3` で同時に呼び、両方が全部0を返すまで繰り返す。
- *
- * 自分専用の DB で走らせる（`erase-tenant-concurrent-other-tenant.postgres.test.ts` と同じ形）。
- */
+/** 2つの別々の pool（別々の接続）から `limit: 3` で同時に呼び、両方が全部0を返すまで繰り返す。自分専用の DB で走らせる。 */
 
 const TEST_DATABASE = "mnemora_erase_tenant_same_tenant_test";
 const TRIALS = 6;

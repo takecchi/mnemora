@@ -22,17 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `consolidate`・`reflect` の LLM を待つ間に、統合元・材料が **superseded** になったとき、
- * および統合元が**すべて** CAS で弾かれるときの振る舞いを縛る（ADR 0420）。
- *
- * forget に対する打ち切り（ADR 0375 決定7・ADR 0406）と同じ形を superseded にも広げた。
- * 退けた古い本文から作った統合記憶・内省が active のまま残らない。
- *
- * 「LLM の中で別の操作を先に commit させる」差し込みで競合を作る（`consolidate-reflect-forget-race`
- * と同じ作法）。Postgres と testkit の fixture の両方で見る。
- */
-
 let release: () => void = () => {};
 let reached: () => void = () => {};
 let gate: Promise<void> = Promise.resolve();
@@ -191,7 +180,6 @@ afterAll(async () => {
 
 for (const [name, makeKit] of KITS) {
   describe(`${name}: 統合元・材料が superseded になったとき（ADR 0420）`, () => {
-    // store 側の層あり（既定）／store が新しい opts を無視する（runtime の読み直しだけが保護）。
     for (const storeIgnoresOpts of [false, true]) {
       const layer = storeIgnoresOpts ? "（store は opts を無視）" : "";
       const kitFor = async (): Promise<Kit> => {
@@ -217,7 +205,6 @@ for (const [name, makeKit] of KITS) {
           { memoryId: a.id, kind: "status_changed_concurrently" },
           { memoryId: b.id, kind: "not_attempted" },
         ]);
-        // B は動いていない、X は active のまま。
         expect((await kit.memoryStore.get(ctx, b.id))?.status).toBe("active");
         expect((await kit.memoryStore.get(ctx, x.id))?.status).toBe("active");
       });

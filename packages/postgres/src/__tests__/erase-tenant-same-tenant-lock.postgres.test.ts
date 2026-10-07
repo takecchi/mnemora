@@ -6,13 +6,9 @@ import { eraseTenantLockKey } from "../erase-tenant-lock.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 同じテナントへの `eraseTenant` は、port ごとのトランザクションの先頭で取るテナント単位の
- * advisory lock で直列になり、別のテナントは待たない（ADR 0430、PR #1444 の `eraseTenant`）。
- *
- * 既存の歯（同じテナントを2つの pool から同時に消す）は、競合が起きるかどうかが運に頼るうえ、
- * `memoryStore` の lock しか見ていない。ここでは、テスト側が先にそのテナントの lock を握り、
- * 各 port の `eraseTenant` がその間は終わらないこと、別のテナントの `eraseTenant` は待たされない
- * ことを、決まった順で見る。lock を握っている間は何も消えず、離すと消える。
+ * 既存の歯（同じテナントを2つの pool から同時に消す）は、競合が起きるかどうかが運に頼るうえ、`memoryStore` の lock しか見ていない。
+ * ここでは、テスト側が先にそのテナントの lock を握り、各 port の `eraseTenant` がその間は終わらないこと、
+ * 別のテナントの `eraseTenant` は待たされないことを、決まった順で見る。
  */
 
 afterAll(async () => {
@@ -62,14 +58,11 @@ describe("eraseTenant の各 port は、同じテナントの lock を待ち、�
         ]);
 
         victim = erase(VICTIM);
-        // 別のテナントは、握られた lock とは無関係に終わる。
         expect(await settlesWithin(erase(BYSTANDER), 10_000)).toBe(true);
-        // 握られているテナントは、終わらない。
         expect(await settlesWithin(victim, 500)).toBe(false);
 
         await holder.query("COMMIT");
         holding = false;
-        // 離すと、終わる。
         expect(await settlesWithin(victim, 10_000)).toBe(true);
       } finally {
         if (holding) {
