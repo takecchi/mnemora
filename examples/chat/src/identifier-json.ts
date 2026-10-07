@@ -5,29 +5,12 @@ import { armHeadline } from "./retrieval-quality.js";
 import type { ArmReport } from "./retrieval-quality.js";
 
 /**
- * `identifier-probes` の機械可読な出力口(`./retrieval-json.js` と同じ作法。Issue #109)。
+ * `identifier-probes` の機械可読な出力口。数字だけで条件を書かない出力は壊れるので、arm ごとに
+ * `llmMode`/`embeddingMode`/`embeddingSpace` を同居させる（次元数だけでは区別できないため `provider`/`model` を添える）。
  *
- * 🔴 **数字だけを書いて、条件を書かないベンチ出力は、この repo で実際に3度壊れている**
- * (ADR 0068・ADR 0081 §3.2)。だからこの JSON も、arm ごとの数字に実際に使われた
- * `llmMode`/`embeddingMode`、そして `embeddingSpace`(`provider`/`model`/`dimensions`)を
- * 同居させる——**次元数だけでは区別できない**(`text-embedding-3-small` も256次元)ため、
- * `provider`/`model` を必ず添える。
- *
- * 🔑 **マネージャー指示(#106 再点検)により、条件が3つになった**: arm(japanese/
- * identifiers)・埋め込み空間・**haystack 条件**(`sparse`/`dense`)。⟹
- * `IdentifierProbeGroupJson` に `haystackKind` を持たせ、ASCII 識別子 probe は
- * `identifiersSparse`/`identifiersDense` の2本を**両方とも**出す
- * (⛔ 片方に差し替えない——`sparse` は #106 を表さないという発見自体を消さない)。
- * `japanese` 群は識別子密度という軸を持たないため1本のまま。
- *
- * ⛔ **`examples/chat/retrieval-baseline.json` とは別ファイル**(`./retrieval-json.js` が
- * 書く `RetrievalQualityRunJson` とは別の形)。既存の `retrieval` の出力口・基準値には
- * 一切触れていない。
- *
- * 🔴 **「重みを取得できなかった」と「測ったが値が悪かった」を型で区別する**
- * (`status` の判別union)。`"weights_unavailable"` のときは各群の欄が**存在しない**
- * ——0 や null で埋めない。「欄が無い」ことそのものが「測っていない」を表す
- * (ADR 0008「無いには種類がある」の適用)。
+ * ASCII 識別子 probe は `identifiersSparse`/`identifiersDense` を両方出す。片方に差し替えない
+ * （sparse では識別子が埋もれる条件を表せない、という発見を消さない）。
+ * 重みを取得できなかったときは各群の欄を存在させない（0 や null で埋めると「測ったら0件」と区別が付かない）。
  */
 
 export interface IdentifierProbeGroupJson {
@@ -35,8 +18,6 @@ export interface IdentifierProbeGroupJson {
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
   embeddingSpace: { provider: string; model: string; dimensions: number };
-  /** `japanese` 群は識別子密度という軸を持たないため `"sparse"` を名乗る
-   *  (`./probe-set.js` の既定 haystack を使う、という意味であって、識別子の疎密ではない)。 */
   haystackKind: IdentifierHaystackKind;
   mrrOverall: number;
   hit1Count: number;
@@ -50,21 +31,11 @@ export type IdentifierProbeRunJson =
       status: "measured";
       measuredAt: string;
       commit: string | null;
-      /** 既存の日本語意味 probe 7件(`./probe-set.js`、変更していない)を、この arm の
-       *  embedding(local)で走らせた結果。arm B(擬似LLM+本物埋め込み)との直接比較用。 */
       japanese: IdentifierProbeGroupJson;
-      /** ASCII 識別子 probe(`./identifier-probe-set.js`)、識別子を含まない既定 haystack。 */
       identifiersSparse: IdentifierProbeGroupJson;
-      /** 同じ識別子 probe を、同じ書式ファミリーの識別子が密な haystack で走らせた結果
-       *  (#106 の「同じ形式の別の識別子が近傍に来て埋もれる」を表す条件)。 */
       identifiersDense: IdentifierProbeGroupJson;
-      /** 日本語の固有名詞 probe(`./japanese-name-probe-set.js`)、固有名詞を含まない既定 haystack。
-       *  ⚠ **これは埋め込み(ANN)が日本語の固有名詞を弁別できるかを測るものであり、
-       *  語彙チャンネルの日本語の制限(ADR 0092)を測るものではない**——語彙チャンネルは
-       *  `examples/chat` で配線されていない(Issue #179 で製品の判断待ち)。 */
+      /** 埋め込み(ANN)が日本語の固有名詞を弁別できるかを測るもので、語彙チャンネルの日本語の制限(ADR 0092)は測らない。 */
       japaneseNamesSparse: IdentifierProbeGroupJson;
-      /** 同じ固有名詞 probe を、同じ姓/組織/製品/地名ファミリーの固有名詞が密な haystack で
-       *  走らせた結果。密度は 60/12 = 5:1 で、識別子ベンチが最初に設計されたときと同じ。 */
       japaneseNamesDense: IdentifierProbeGroupJson;
     }
   | {
@@ -72,7 +43,6 @@ export type IdentifierProbeRunJson =
       status: "weights_unavailable";
       measuredAt: string;
       commit: string | null;
-      /** `warmupLocalEmbedding` が返した detail(`WEIGHTS_UNAVAILABLE_PREFIX` を含む)。 */
       detail: string;
     };
 
@@ -82,7 +52,6 @@ export interface EmbeddingSpaceJson {
   dimensions: number;
 }
 
-/** `ArmReport`(`retrieval-quality.ts`)を `IdentifierProbeGroupJson` へ写す。 */
 function japaneseGroupJson(
   report: ArmReport,
   embeddingSpace: EmbeddingSpaceJson,
@@ -101,7 +70,6 @@ function japaneseGroupJson(
   };
 }
 
-/** `IdentifierArmReport`(`identifier-arm.ts`)を `IdentifierProbeGroupJson` へ写す。 */
 function identifierGroupJson(
   report: IdentifierArmReport,
   embeddingSpace: EmbeddingSpaceJson,
@@ -119,10 +87,6 @@ function identifierGroupJson(
   };
 }
 
-/**
- * 計測できたときの JSON を組み立てる。**出所は `ArmReport`/`IdentifierArmReport` と
- * `armHeadline()` だけ**(`./retrieval-json.js` の `buildRetrievalQualityJson` と同じ規律)。
- */
 export function buildMeasuredIdentifierProbeJson(options: {
   japaneseReport: ArmReport;
   identifierSparseReport: IdentifierArmReport;
@@ -152,10 +116,7 @@ export function buildMeasuredIdentifierProbeJson(options: {
   };
 }
 
-/**
- * 重みを取得できなかったときの JSON を組み立てる。**メトリクスの欄を一切持たない**
- * ——`0`/`null` で埋めると「測ったら0件だった」と区別が付かなくなる。
- */
+/** メトリクスの欄を一切持たない——`0`/`null` で埋めると「測ったら0件だった」と区別が付かなくなる。 */
 export function buildWeightsUnavailableIdentifierProbeJson(options: {
   measuredAt: Date;
   commit: string | null;
