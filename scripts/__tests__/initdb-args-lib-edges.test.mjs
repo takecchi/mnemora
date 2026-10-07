@@ -6,12 +6,6 @@ import {
   parseInitdbArgs,
 } from "../initdb-args-lib.mjs";
 
-/**
- * `initdb-args-lib.mjs`（ADR 0196）の歯の足し（Issue #1815、09/16 マージ分の #414 の確かめ直し）。
- * 既存の `initdb-args-lib.test.mjs` が見ていなかった形だけを足す。実装は変えない。
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 describe("parseInitdbArgs は、引用符で囲まれた行から値だけを取り出す", () => {
   it('`ci.yml` の行のように値の直後に `"` が続いても、値に引用符を含めない', () => {
     expect(parseInitdbArgs('initdbArgs: "--encoding=SQL_ASCII --locale=C"')).toEqual({
