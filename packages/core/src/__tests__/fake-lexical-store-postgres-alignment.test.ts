@@ -1,25 +1,4 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// Issue #951: `FakeLexicalStore`（このファイルが検査する fake）と
-// `PostgresLexicalStore` とで、非 ASCII を含む語の一致判定が分かれていた。3つの機序:
-//
-//   1. クエリ側の非 ASCII 落とし（`mnemora_lexical_query_terms`）——非 ASCII だけの
-//      クエリ（ギリシャ文字・日本語等）は、postgres では語彙が0個になり常に0件。
-//   2. 語末シグマ等、`lower()` と `toLowerCase()` の細部の食い違い（このテストでは、
-//      1 の非 ASCII 落としが先に効くため、実際には表面化しない——下の「確かめたこと」
-//      参照）。
-//   3. ASCII 境界での分割（`mnemora_lexical_normalize`）——ASCII の連なりの前後に
-//      空白を入れてから小文字化するため、小文字化で ASCII 化する非 ASCII 文字
-//      （例: ケルビン記号 U+212A → `k`）が隣の ASCII 文字と癒着しない。
-//
-// これに加えて `FakeLexicalStore` は元々 `String.prototype.includes()`（大文字小文字を
-// 区別する部分文字列一致）を使っており、`PostgresLexicalStore`/`to_tsvector('simple', …)`
-// の大文字小文字を区別しない判定とも食い違っていた——この歯はその回帰確認も兼ねる。
-//
-// 期待値はすべて、本物の Postgres 17.11（pgvector 0.8.0）に対し
-// `PostgresLexicalStore.search` を実際に呼んで実測した値である——CI の2 regime
-// （UTF8 + en_US.UTF-8、SQL_ASCII + C）の両方で同じ結果になることを確認済み
-// （下の各 it のコメント参照。「確かめていないこと」は末尾にまとめる）。
+// 期待値は、同じ内容を本物の `PostgresLexicalStore.search` で引いて得た値。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
@@ -105,13 +84,8 @@ describe("FakeLexicalStore.search — 非ASCIIだけのクエリ・ASCII境界�
     expect(hits[0]?.coverage).toBe(1);
   });
 
-  // ⚠ 「k」単独のクエリは Postgres の regime に依存する（確かめていないことの節を参照）。
-  // UTF8 + en_US.UTF-8 では実測1件（ケルビン記号がロケール依存で `k` へ小文字化される
-  // ため）だが、SQL_ASCII + C では実測0件（`C` ロケールの `lower()` は非 ASCII 文字を
-  // 素通りするため、ケルビン記号は `k` に化けない）。`FakeLexicalStore` は
-  // `String.prototype.toLowerCase()`（常に Unicode 対応、ロケール非依存）を使うため
-  // UTF8 + en_US.UTF-8 側の結果と一致する——SQL_ASCII 側との不一致はこのテストの
-  // 対象外（Postgres 自身の regime 間の不一致であり、Fake と Postgres の不一致ではない）。
+  // 「k」単独のクエリは Postgres の regime に依存する（UTF8 + en_US.UTF-8 は1件、SQL_ASCII + C は0件）。
+  // `FakeLexicalStore` は `toLowerCase()`（ロケール非依存）なので UTF8 側と一致する。SQL_ASCII 側との差は Postgres 自身の regime 間の差で、この歯の対象外。
   it("同じ本文で、クエリ「k」単独は一致する（実測: UTF8 + en_US.UTF-8 regime。SQL_ASCII + C は0件——regime 依存、確かめていないことの節参照）", async () => {
     const stores = createFakeRuntimeStores();
     const memory = await stores.memoryStore.createMemory(
@@ -215,18 +189,3 @@ describe("FakeLexicalStore.search — 回帰しないこと（Issue #951 の修�
     expect(hits.map((h) => h.memoryId)).toEqual([gold.id]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 確かめていないこと
-// ---------------------------------------------------------------------------
-//
-// - 「k」単独クエリの regime 依存（上の it 内のコメント参照）。
-// - ギリシャ語の語末シグマそのものの `lower()`/`toLowerCase()` の食い違いは、
-//   このテストでは表面化しない（クエリが非ASCIIだけだと、シグマの違いを見る前に
-//   語彙が0個になり0件になるため）。
-// - `FakeLexicalStore` の識別子の隣接性（`PROJ-1234` を割らずに1語として扱う）は、
-//   意図した設計ではなく「空白区切りでしか割らない」実装のたまたまの結果である
-//   （`FakeLexicalStore` の doc 参照）——`PROJ-1234 and TASK-5678` のように2つの
-//   識別子が空白区切りで並ぶ本文に対して `PROJ-5678` を投げた場合の偽陽性の有無は、
-//   ここでは確認していない（`packages/postgres` の
-//   `lexical-store-identifier.test.ts` が postgres 側でこの形を検査している）。

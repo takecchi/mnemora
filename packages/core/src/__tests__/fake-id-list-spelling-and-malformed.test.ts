@@ -5,14 +5,7 @@ import type { NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-// id の「一覧」を取る口の綴りと形の崩れ（`@mnemora/postgres` と同じ）。core の `FakeMemoryStore` が対象。DB を使わない。
-//
-// - #1195 T3: `restoreSupersededBy`・`previewRestoreSupersededBy` の `onlyMemoryIds` に大文字の id を渡しても、
-//   小文字の id と同じ記憶として当たる。形の崩れた id が混ざっても投げず、群に居ないものとして扱う。
-// - #1289: `aggregateScope` の `digestBand.excludeMemoryIds` も同じ（大文字の id は除外される・形の崩れた id は投げない）。
-// この Fake の id は小文字の `mem-N` だけで、小文字にそろえても別の id と混ざらない。
-// 3実装の突き合わせは `packages/postgres/src/__tests__/store-boundary-diff.postgres.test.ts`。
-// conformance suite には何も足していない。
+// この Fake の id は小文字の `mem-N` だけなので、小文字にそろえても別の id と混ざらない。
 
 const ctx: Ctx = { tenantId: "fake-id-list-spelling" };
 const MALFORMED = "not-a-uuid" as MemoryId;

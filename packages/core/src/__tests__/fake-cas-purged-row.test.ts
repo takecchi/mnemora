@@ -6,15 +6,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0549（ADR 0518 の TSDoc・ADR 0499 の約束）: core の Fake（`FakeMemoryStore`）の CAS（`expectedStatus`）も、
- * purge 済みの行（`status` は `forgotten` のまま、`purgedAt` が非 null）を、どの `expectedStatus` にも一致しないものとして弾く。
- * testkit の `InMemoryMemoryStore`（`casMismatch`）・`PostgresMemoryStore` と同じ。
- *
- * 対象の4か所: `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories` の事前判定（ADR 0469 の willSupersede）・
- * 同 本処理（弾かれたら `conflicted`）。purge 済みの行は `runtime.forget` → `runtime.purge` で作る。
- */
-
 const A: Ctx = { tenantId: "fake-cas-purged-a" };
 const B: Ctx = { tenantId: "fake-cas-purged-b" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
@@ -73,7 +64,6 @@ function setup() {
     actor: { type: "system" },
     meta: { probe: true },
   });
-  /** forget → purge で、status は forgotten のまま purgedAt が入った行を作る。 */
   const makePurged = async () => {
     const m = await store.createMemory(A, newMemory(A));
     await runtime.forget(A, { memoryId: m.id });

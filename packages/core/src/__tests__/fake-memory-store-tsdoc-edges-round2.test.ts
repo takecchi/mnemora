@@ -8,16 +8,6 @@ import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`FakeMemoryStore` について縛る
- * （2回目の棚卸し）。振る舞いは変えていない。同じ本文の歯を Postgres
- * （`packages/postgres/src/__tests__/memory-store-tsdoc-edges-round2.postgres.test.ts`）と testkit の fixture
- * （`packages/testkit/src/__tests__/in-memory-fixtures-memory-store-tsdoc-edges-round2.test.ts`）にも置いている。
- * 約束の一覧は Postgres 側の冒頭を見ること。
- *
- * `FakeMemoryStore` は適合試験の対象ではない（`fake-memory-store-supersede-with-new-memories.test.ts` 冒頭）。
- */
-
 const IMPL = "FakeMemoryStore";
 
 async function makeKit(): Promise<Kit> {

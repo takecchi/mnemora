@@ -4,17 +4,6 @@ import type { NewMemory } from "../memory.js";
 import type { Provenance } from "../provenance.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）で、PR #1458（ADR 0390）の変異試験が**すり抜けた**
- * 「Fake が archived の行も数える」を塞ぐ歯。担当はクローン（miku）の判断で進めている作業であり、
- * オーナーの判断ではない。`fake-aggregate-scope-exclude-provenance.test.ts` の seed は全部 active・絞りなしで、
- * 絞りで落ちる行が無かった。
- *
- * `excludedProvenanceIndexedCount` は「除外する kind で、ready で、`totalInScope` と同じ絞りの内側の行」
- * を数える（ADR 0390 決定1・2）。archived・別 subject・期間の外・labels に合わない行は数えない。
- * 同じ形の歯が InMemory（testkit）と Postgres にも在る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const consolidated: Provenance = { kind: "consolidated", sources: ["a", "b"] };
 const IN_PERIOD = new Date("2026-06-10T00:00:00.000Z");
@@ -54,10 +43,8 @@ const scope = {
 describe("FakeMemoryStore.aggregateScope: excludedProvenanceIndexedCount は totalInScope と同じ絞りの内側だけを数える（Issue #1734 / PR #1458 のすり抜け）", () => {
   async function seed() {
     const { memoryStore } = createFakeRuntimeStores();
-    // 数える: スコープ内・active・ready・除外 kind
     await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated }));
     await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated }));
-    // 数えない（絞りで落ちる行。どれも除外 kind・ready）
     await memoryStore.createMemory(
       ctx,
       newMemory({ provenance: consolidated, status: "archived" }),
@@ -68,7 +55,6 @@ describe("FakeMemoryStore.aggregateScope: excludedProvenanceIndexedCount は tot
       newMemory({ provenance: consolidated, recordedAt: BEFORE_PERIOD }),
     );
     await memoryStore.createMemory(ctx, newMemory({ provenance: consolidated, tags: ["beta"] }));
-    // 除外 kind ではない行（スコープ内）
     await memoryStore.createMemory(ctx, newMemory());
     return memoryStore;
   }

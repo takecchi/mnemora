@@ -1,10 +1,4 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない（ADR 0513）。
-//
-// `FakeLexicalStore` の一致判定を、`PostgresLexicalStore`（`to_tsvector('simple', …)`）の
-// 「語（token）一致」に揃える歯。以前は `normalizedContent.includes(t)` の部分文字列一致で、
-// query `a` が content `alpha` に当たった（ADR 0509 の割れ 1）。
-// 期待値はすべて、手元の PostgreSQL 17 で `mnemora_lexical_coverage(content, query)` を直接呼んで実測した値。
-// 同じ表を testkit の `InMemoryLexicalStore` も `in-memory-lexical-store-token-match.test.ts` で通す。
+// 期待値は、PostgreSQL 17 の `mnemora_lexical_coverage(content, query)` を直接呼んで得た値。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";

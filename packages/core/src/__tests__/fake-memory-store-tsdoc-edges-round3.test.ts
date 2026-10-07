@@ -4,16 +4,6 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`FakeMemoryStore` について縛る
- * （3回目の棚卸し）。振る舞いは変えていない。同じ本文の歯を Postgres
- * （`packages/postgres/src/__tests__/memory-store-tsdoc-edges-round3.postgres.test.ts`）と testkit の fixture
- * （`packages/testkit/src/__tests__/in-memory-fixtures-memory-store-tsdoc-edges-round3.test.ts`）にも置いている。
- * 約束の一覧は Postgres 側の冒頭を見ること。
- *
- * `FakeMemoryStore` は適合試験の対象ではない（`fake-memory-store-supersede-with-new-memories.test.ts` 冒頭）。
- */
-
 const IMPL = "FakeMemoryStore";
 
 async function makeStore(): Promise<MemoryStore> {
@@ -231,7 +221,7 @@ describe(`${IMPL}.listLabels / registerLabel: 行は消えず、名前は検査�
 
     await store.updateStatus(ctx, memories[0]!.id, "forgotten");
     await store.updateStatus(ctx, memories[1]!.id, "archived");
-    // ADR 0557（ADR 0503 決定8 と同じ扱い）: superseded には置き換えた側が要る。勝者になる別の記憶を渡す。
+    // superseded には置き換えた側が要るので、勝者になる別の記憶を渡す。
     await store.updateStatus(ctx, memories[2]!.id, "superseded", {
       supersededById: memories[1]!.id,
     });

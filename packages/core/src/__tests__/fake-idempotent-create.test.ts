@@ -2,16 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0054: 擬似実装の `created` は、**この呼び出し自身が行を作ったか**を表す。
- *
- * `packages/testkit` の適合スイートは `InMemoryMemoryStore` と（CI では）
- * `PostgresMemoryStore` に対して同じ契約を測るが、`FakeMemoryStore`
- * （`packages/core/src/__tests__/runtime-fakes.ts`）は適合スイートの対象に入っていない
- * ——`packages/testkit` は `packages/core` に依存しており、逆向きに参照できないためである。
- * 3つ目の実装がこの契約から外れるのを防ぐのがこのファイルの役目
- * （ADR 0049「割れていたのは3実装のうち2つ」と同じ形の歯）。
- */
+/** `FakeMemoryStore` は適合スイートの対象外: `packages/testkit` は core に依存していて、逆向きに参照できないため。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 function observationInput(externalId: string) {
@@ -109,10 +100,8 @@ describe("FakeMemoryStore の created は自分が作った行だけを指す（
   });
 
   /**
-   * ADR 0054 の不変条件のうち、**「判定と挿入の間に `await` を挟まない」側**。
-   * 上の2本は「`created` を大域の件数差から導く」壊れ方を捕まえるが、**事前の存在検査 +
-   * `await` 境界**という壊れ方は、鍵が違えば答えが合ってしまうため捕まえない。
-   * ここでは**同じ冪等キーを同時に2回**作らせる（適合スイート側の同名の歯と同じ形）。
+   * 上の2本は `created` を大域の件数差から導く壊れ方しか捕まえない。事前の存在検査 + `await` 境界の壊れ方は、
+   * 鍵が違うと答えが合ってしまうので、ここでは同じ冪等キーを同時に2回作らせる。
    */
   it("createObservationWithOutbox は、同じ冪等キーを同時に作っても created を1回しか返さない", async () => {
     const { memoryStore } = createFakeRuntimeStores();

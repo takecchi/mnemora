@@ -9,14 +9,6 @@ import {
   WELL_FORMED_NEW_MEMORY_CASES,
 } from "./malformed-new-memory-cases.js";
 
-/**
- * ADR 0630: core の Fake（`FakeMemoryStore`）の3つの書き込みの口が、読み戻すと `MemorySchema` を通らない
- * `NewMemory` を入口で拒む。拒むときは何も書かない（Memory・ラベル・outbox・イベント）。冪等の既存の行が在っても拒む。
- * 正しい値（境界のすぐ内側）は通り続け、読み戻した Memory は `MemorySchema` を通る。
- * testkit の fixture・`@mnemora/postgres` の側は `memory-store-conformance.ts` と
- * `packages/postgres/src/__tests__/store-input-current-behaviour.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "fake-new-memory" };
 
 type Write = (store: MemoryStore, input: NewMemory) => Promise<Memory>;
@@ -131,7 +123,6 @@ describe("FakeMemoryStore.supersedeWithNewMemories: news の2件目が壊れて�
     expect(await state()).toBe(before);
   });
 
-  // 変異試験（2026-10-06）: 「先頭と末尾だけ検査する」変異が生き残った。途中の要素も検査する。
   it("3件の真ん中が壊れていても拒み、前後の Memory・ラベル・outbox も残らない", async () => {
     const { store, input, state } = await setup();
     const before = await state();
@@ -184,7 +175,6 @@ describe("FakeMemoryStore.supersedeWithNewMemories: 例外の順（ADR 0630）",
 });
 
 describe("FakeMemoryStore: 範囲外の口は拒まない（ADR 0630）", () => {
-  // 変異試験（2026-10-06）: Observation の書き込みに「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
   it("createObservation・createObservationWithOutbox は、attributes の値が文字列でなくても、この検査では拒まない", async () => {
     const { store } = await setup();
     const base = {
