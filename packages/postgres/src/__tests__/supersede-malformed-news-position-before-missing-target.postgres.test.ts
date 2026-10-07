@@ -6,11 +6,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0630 決定8: `supersedeWithNewMemories` で「壊れた `news`」と「存在しない `supersede` の対象」が同時にあるときは、
- * 壊れた値の例外が先に出る（Postgres の順を、fixture・Fake が写した）。conformance の歯は、壊れた news が**先頭**の1件のときしか
- * 見ていなかった。壊れた news を先頭・真ん中・末尾に置いて、2実装とも壊れた値の例外が先であることを縛る。
- */
 const ctx: Ctx = { tenantId: "supersede-malformed-position" };
 const MISSING = randomUUID();
 

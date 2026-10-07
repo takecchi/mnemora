@@ -5,11 +5,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0630（「`createMemoriesWithOutboxAndEvents?`（3つの口の外）」）: 全候補が壊れていれば、**最初の例外**（この検査の `Error`）を
- * そのまま投げ、Memory は1件も書かない。既存の歯は、全候補が同じ形（同じ欄・同じ文面）で壊れていたので、最初の例外でなく最後の例外を
- * 投げる変異が緑のまま残った。候補ごとに壊れた欄を変え、どの候補の例外が出るかまで縛る（Postgres・fixture）。
- */
 const ctx: Ctx = { tenantId: "create-memories-all-malformed" };
 
 afterAll(async () => {

@@ -5,11 +5,7 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0639: `ObserveResend.memories` は `memoryId` の昇順で、比較は文字列（コードユニット）の比較であり
- * `localeCompare` ではない。UUID（小文字の16進）だけでは両者が区別できないので、
- * 大文字と小文字が混ざる id を store が返す形で縛る（口は id の形を UUID に限らない）。
- */
+// `localeCompare` ではなくコードユニットの比較（ADR 0639）。UUID（小文字の16進）だけでは区別できないので、大文字と小文字が混ざる id を使う。
 
 const ctx: Ctx = { tenantId: "observe-resend-order-code-unit" };
 

@@ -5,12 +5,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-/**
- * #365・#436（ADR 0179・0200）の確かめ直し（Issue #1877）。`adr-renumber.mjs` を、追加された ADR が1本も無い作業木で走らせると、
- * 引数なしでも `--check` でも exit 0（何もしない）。`adr-renumber-cli.test.mjs` はこの経路を走らせていなかったため、
- * 「追加が無いのに exit 1」にしても緑だった。
- */
-
 const scriptsDir = fileURLToPath(new URL("..", import.meta.url));
 const tmpRoots = [];
 afterAll(() => {

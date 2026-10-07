@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
-/**
- * #1783（ADR 0664）の確かめ直し（Issue #1877）。`publish-yml-changelog-gate-wiring.test.mjs` の
- * 「CHANGELOG を1か所も読まない」は、コメントを潰した後の本文を見る。潰す側が `CHANGELOG` を含む行を
- * 丸ごと潰す（コメントでない行まで）変異が入ると、門を戻しても緑のままになる。その変異は
- * `workflow-comment-blank-lib.test.mjs` では赤にならなかったので、ここで縛る。
- */
-
 describe("コメントでない行は、CHANGELOG を含んでいても残す", () => {
   it("run の行（`grep … CHANGELOG.md || exit 1`）は残る", () => {
     const { text, unhandled } = blankOutWorkflowComments(

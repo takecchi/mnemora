@@ -5,13 +5,6 @@ import {
   normalizeActualPath,
 } from "../check-local-embedding-fingerprint-lib.mjs";
 
-/**
- * #1789（ADR 0666）の確かめ直し（Issue #1877）で、既存の歯をすり抜けた変異に当てる歯。
- * - hash の種類（sha256 と git-blob-sha1）が違えば、16進が同じでも一致にしない。
- * - 固定 revision の接頭辞を剥がすのは先頭だけ（途中に同じ並びが在るパスは触らない）。
- * - 素性不明のファイルだけで不一致のとき、報告の文面は「一致」と言わない。
- */
-
 const SUM = "a".repeat(64);
 
 describe("compareFingerprints: hash の種類", () => {

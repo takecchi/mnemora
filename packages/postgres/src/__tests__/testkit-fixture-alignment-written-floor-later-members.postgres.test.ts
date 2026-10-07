@@ -5,13 +5,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * PR #1762（ADR 0640）の約束: 行に日時を書く口が、`timestamptz` の下限より前の `event.at` を、書く前に断り、何も書かない。
- * 複数のイベントを受ける口（`resolveContestedPair` の2つ目、`markContestedGroup`・`resolveContestedGroup` の2件目以降）は、
- * PR の歯が先頭の要素（群は先頭だけ、対の resolve は1つ目だけ）にしか下限より前の `at` を置かず、「先頭だけ見る」「2つ目を見ない」
- * 変異が testkit の歯も2実装並べの歯も赤にしなかった（群で先頭だけ見る変異を入れても緑）。同じ入力を2実装へ流して、
- * どの位置の要素が下限より前でも断り、どのメンバーの状態も動かさないことを縛る。
- */
 const ctx: Ctx = { tenantId: "written-floor-later-members" };
 const T = ctx.tenantId;
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
@@ -58,7 +51,6 @@ const mk = (s: Store, contentHash: string): Promise<Memory> =>
 
 interface Case {
   name: string;
-  /** 準備して、断られるはずの呼び出しと、断られたあとに各メンバーが持つはずの状態を返す。 */
   prepare: (
     s: Store,
     at: Date,

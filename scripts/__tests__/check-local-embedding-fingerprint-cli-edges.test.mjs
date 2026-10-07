@@ -7,12 +7,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runNodeScript } from "./spawn-with-deadline.mjs";
 
-/**
- * #1789（ADR 0666）の確かめ直し（Issue #1877）。キャッシュ置き場の `.` で始まるファイル・ディレクトリを
- * 読み飛ばす変異（`readdirSync` の結果から `.` で始まる名前を除く）が `check-local-embedding-fingerprint-cli.test.mjs` を
- * 素通りした。手元に在って HF の tree に無いものは、隠しファイルでも「素性不明」で赤にする。
- */
-
 const script = fileURLToPath(new URL("../check-local-embedding-fingerprint.mjs", import.meta.url));
 const providerSource = fileURLToPath(
   new URL("../../packages/local-embedding/src/local-embedding-provider.ts", import.meta.url),

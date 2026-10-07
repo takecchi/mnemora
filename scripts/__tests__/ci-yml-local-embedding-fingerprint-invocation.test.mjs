@@ -3,13 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
-/**
- * #1789（ADR 0666）の確かめ直し（Issue #1877）。重みの指紋の門の呼び方そのものを縛る。
- * 既存の配線の歯は「門のステップが在る・`if:` も `continue-on-error` も無い」までを見るが、
- * 呼び出しの引数は見ていなかった。`--api-base` を届かない先へ向けると、門は常に「保留」（exit 2）になり、
- * ステップは緑のまま、何も照合しない（`--cache-dir` を別の場所へ向けても、ここでは縛られていなかった）。
- * YAML は文字列で見る（依存追加はオーナー専権）。
- */
+// YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
 
 const raw = readFileSync(
   fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url)),
@@ -62,7 +56,6 @@ describe("重みの指紋の門の呼び方（example-chat ジョブ）", () => 
     const at = text.indexOf("node scripts/check-local-embedding-fingerprint.mjs");
     expect(at).toBeGreaterThan(-1);
     const rest = text.slice(at).split("\n");
-    // 継続行（行末の `\`）までを1つのコマンドとして連結する。
     const parts = [];
     for (const l of rest) {
       const t = l.trim();

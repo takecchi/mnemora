@@ -3,17 +3,7 @@ import type { Ctx, NewMemory } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * PR #1772（Issue #1759）の約束: `decayFloorAt` が `Date` でない新しい Memory（`null`・`undefined`・キーなし）は、`createMemory`・
- * `createMemoryWithOutbox`・`supersedeWithNewMemories` が書く前に**`TypeError`** で断る。冪等の既存の行が在っても断る。
- * （Postgres は `23502`。例外の顔は揃えない。）
- *
- * PR の歯（`...decay-floor-null.postgres.test.ts`）は `.rejects.toThrow()` だけで、例外の種類・文面を見ていなかった。さらに、
- * 型の検査を丸ごと外しても、直後の `decayFloorAt.getTime()` が `null`・`undefined` に当たって素の `TypeError`
- * （`Cannot read properties of null`）になるので、「断った」ことは変わらず見えた。ここで、種類と欄の名指しを縛る。
- * 冪等の既存の行は、PR の歯が `sourceObservationId` の無い入力で試していて冪等の経路を通っていなかったので、
- * 実際に既存の行が在る形で縛る。
- */
+// Postgres は `23502` で例外の顔が違うので、揃えない。型の検査を外しても直後の `getTime()` が素の `TypeError` になるので、種類と欄の名指しまで見る。
 const ctx: Ctx = { tenantId: "in-memory-decay-floor-at" };
 
 const VARIANTS: Array<[string, (m: NewMemory) => NewMemory]> = [
@@ -102,7 +92,6 @@ describe("InMemoryMemoryStore: decayFloorAt が Date でない新しい Memory �
           ),
         ),
       );
-      // 何も書いていない（outbox・イベント・置き換えられるはずだった記憶の状態も含む）。
       expect(state()).toBe(before);
     },
   );
@@ -113,7 +102,6 @@ describe("InMemoryMemoryStore: decayFloorAt が Date でない新しい Memory �
       const { store, input, state } = await setup();
       await store.createMemoryWithOutbox(ctx, input(), ["embed"]);
       const before = state();
-      // 同じ観測・同じ extractorVersion・同じ contentHash の入力は、既存の行に解決される形。
       expectDecayFloorAtTypeError(await rejection(() => store.createMemory(ctx, broken(input()))));
       expectDecayFloorAtTypeError(
         await rejection(() => store.createMemoryWithOutbox(ctx, broken(input()), ["embed"])),

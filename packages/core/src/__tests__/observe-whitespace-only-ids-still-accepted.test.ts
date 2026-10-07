@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ObserveInputSchema } from "../observation.js";
 
-/**
- * Issue #1877（2026-10-06 マージ分の確かめ直し）の #1773 のすり抜け。
- * `Ctx` の TSDoc（#1773 が直した段落）は「`utterance.text`・`event.name`・`document.content` は空白だけも断る
- * （ADR 0502）。**ほかの欄は空白だけの文字列を受け付ける**」と約束する。既存の歯は「断る3欄」と、
- * 「受け付ける」側は `document.title`・`utterance.speaker` の2つだけを縛っていた。`subjectId`・`externalId`・
- * `recallId`・`usedMemoryIds`・`subjectCandidates` の要素を断る側へ広げる変異（`NonBlankTextSchema` の付け間違い）は緑のままだった。
- */
 const ok = (input: unknown) => ObserveInputSchema.safeParse(input).success;
 const BLANK = "   ";
 

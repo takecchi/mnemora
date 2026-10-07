@@ -12,14 +12,6 @@ import {
   parseManifest,
 } from "../migration-checksums-lib.mjs";
 
-/**
- * #1747（ADR 0637）の確かめ直し（Issue #1877）で、`check-migration-checksums.test.mjs` をすり抜けた変異に当てる歯。
- * - 改行の正規化は CR 単独も LF に揃える（「CRLF/CR」。`\r\n` だけにしても緑だった）。
- * - 名簿の検査: `files` が配列・値が sha256 の16進64桁でない（63桁・大文字・16進でない）を通さない。
- * - `--write` は、出荷済みの migration が消えていても名簿を書かない。
- * - ci.yml の build ジョブに、この門の段が条件づけも握り潰しもされず在る（段を外す・`|| true`・`if:`・`continue-on-error` で緑だった）。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cli = join(repoRoot, "scripts/check-migration-checksums.mjs");
 const tmpRoots = [];
@@ -119,7 +111,7 @@ describe("ci.yml と package.json の配線（ADR 0637）", () => {
   const workflow = readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8");
   const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 
-  /** YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。 */
+  // YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
   function extractJob(yaml, jobId) {
     const lines = yaml.split("\n");
     const start = lines.findIndex((line) => line === `  ${jobId}:`);

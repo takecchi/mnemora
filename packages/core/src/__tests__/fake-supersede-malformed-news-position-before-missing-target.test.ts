@@ -3,11 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0630 決定8: `supersedeWithNewMemories` で「壊れた `news`」と「存在しない `supersede` の対象」が同時にあるときは、
- * 壊れた値の例外が先に出る。Fake の歯は、壊れた news が**先頭**の1件のときしか見ていなかった。入口の検査が先頭の1件だけを見る変異
- * （2件目以降が壊れていると、対象の not found が先に出る）は、どの歯も赤にしなかった。壊れた news を先頭・真ん中・末尾に置いて縛る。
- */
 const ctx: Ctx = { tenantId: "fake-supersede-malformed-position" };
 const MISSING = "00000000-0000-4000-8000-000000000001";
 

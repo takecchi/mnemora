@@ -4,14 +4,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1877（2026-10-06 マージ分の確かめ直し）の #1773 のすり抜け（ADR 0456・0635）。
- * `ObserveUtteranceInput.subjectCandidates` の TSDoc（#1773 が直した）は「`acceptLlmSubjectIdWithoutCandidates: true`
- * （opt-in）で一覧を渡さないときも、LLM が返す `subjectId` が NUL・孤立サロゲートを含む値だけは弾き、observation の
- * `subjectId` へ落とす。ほかの値は一覧に照らさず、そのまま Memory の主題になる」と約束する。既存の歯は
- * `sanitizeCandidateSubjectId` の単体と、既定（LLM の `subjectId` を捨てる）の observe だけで、opt-in の observe は
- * 一覧が無いとき `sanitizeCandidateSubjectId` を飛ばす変異が緑のまま通った。
- */
 const ctx: Ctx = { tenantId: "tenant-malformed-subject-opt-in" };
 
 function makeRuntime(subjectId: string) {

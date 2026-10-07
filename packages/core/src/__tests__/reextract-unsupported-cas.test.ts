@@ -4,13 +4,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1877（2026-10-06 マージ分の確かめ直し）の #1757 のすり抜け（ADR 0030 安全弁3）。
- * `reextract` の TSDoc は「store が `supersedeWithNewMemories` を持たなければ `updateStatusWithEvent` を
- * 1件ずつ呼び、投げられた例外を `classifySupersedeFailure` で判定する」と約束する。既存の歯は、口が在る側
- * （`supersedeWithNewMemories`）の CAS だけを縛っていて、口が無い側のループ（CAS の `expectedStatus: "active"`・
- * 競合を `skipped` へ写すこと・競合以外は投げ直すこと）には1本も歯が無かった。
- */
 const ctx: Ctx = { tenantId: "tenant-reextract-unsupported-cas" };
 
 function llmReturning(contents: string[]): LLMProvider {

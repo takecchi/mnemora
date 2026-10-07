@@ -6,12 +6,6 @@ import { findCrossTenantReferences } from "../cross-tenant-reference-detection.j
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `findCrossTenantReferences`（#1743）の、既存の歯が縛っていなかった2つの約束。
- * - `sampleLimit` を省くと、種類ごとに既定の20件までのサンプルを返す（`count` は全件）。
- * - ROLLBACK まで失敗した接続は、状態が分からないので pool へ戻さず捨てる（`release(error)`）。
- */
-
 afterAll(async () => {
   await closeTestClient();
 });

@@ -3,13 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryEventFixture, buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * PR #1762（ADR 0640）の約束: `assertWrittenTimestamptzFloor` は**下限だけ**を見る。Invalid Date は断らない（別の検査が在る）。
- * 「Invalid Date の文面は変わらない」。PR の歯は、Invalid Date の message を `reinforce`・`createMemory`・`EventStore.append` の3口でしか見ていなかった。
- * 下限の検査が Invalid Date も `RangeError` で断る変異（`!(t >= MIN)`）は、その3口では Invalid Date の検査が先に走るので緑のまま残る。
- * 下限の検査が Invalid Date の検査より前に在る口（`purgeMemory`）で、Invalid Date が従来の `Error`（文面は変わらない）のまま断られ、
- * `RangeError` にならないことを縛る。
- */
+// Invalid Date の検査が先に走る口では下限の検査が見えないので、下限の検査が先に在る `purgeMemory` で見る。
 const ctx: Ctx = { tenantId: "in-memory-floor-leaves-invalid-date" };
 
 describe("下限の検査は Invalid Date を RangeError にしない（Invalid Date の検査が後に在る口）", () => {

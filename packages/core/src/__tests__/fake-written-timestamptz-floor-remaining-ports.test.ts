@@ -4,12 +4,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * PR #1762（ADR 0640）は、core の Fake も「同じ口・同じ位置で」下限（4714-11-24 BC 00:00 UTC）より前を RangeError で断ると書いた。
- * PR の歯（`fake-written-timestamptz-floor.test.ts`）は代表の口だけで、`purgeMemory`・contested の6形・`reinforceMany`・
- * `recordUsageAndReinforce` はどれも縛られていなかった（イベントの検査は `assertBuildableFakeEvent` に集約されているので、
- * 口ごとの呼び出しが落ちても、代表の口が赤にする）。ここで、残りの口が断り、何も書かないことを縛る。
- */
 const ctx: Ctx = { tenantId: "tenant-1" };
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
 const EARLY = new Date(FLOOR_MS - 1);

@@ -3,13 +3,7 @@ import { assertWellFormedNewMemory } from "../new-memory-check.js";
 import type { NewMemory } from "../memory.js";
 import { MALFORMED_NEW_MEMORY_CASES } from "./malformed-new-memory-cases.js";
 
-/**
- * ADR 0630 決定4: 拒むときの例外は**素の `Error`**（型付きのクラスは新設しない。`TypeError` ではない）で、文面は
- * `<実装名>: <欄> is malformed (<理由>); the stored Memory would not pass MemorySchema when read back`。
- * **値は載せない**（`assertWellFormedNewMemory` の TSDoc）。
- * `new-memory-check.test.ts` は `toThrow(Error)`（`TypeError` も通る）と欄の名前だけを見ていたので、例外を `TypeError` にする変異と、
- * 拒んだ値を message に載せる変異が、どの歯も赤にしなかった。
- */
+// 例外は素の `Error`（`TypeError` でも型付きの新クラスでもない。ADR 0630 決定4）。値は message に載せない。
 const base = (over: Partial<NewMemory>): NewMemory => ({
   tenantId: "t",
   subjectId: null,

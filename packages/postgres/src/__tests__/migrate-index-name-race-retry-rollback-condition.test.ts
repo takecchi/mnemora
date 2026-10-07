@@ -6,11 +6,7 @@ import { describe, expect, it } from "vitest";
 import { isEmbeddingSpaceIndexNameCollision } from "../create-index-race.js";
 import { REQUIRED_EXTENSIONS, runMigrations } from "../migrate.js";
 
-/**
- * ADR 0638 の流し直しの条件のうち、実 DB では作りにくい2つを DB 無しで縛る。
- * (1) 流し直すのは ROLLBACK が通ったときだけ（接続の状態が分からないまま同じ接続で流し直さない）。
- * (2) 競合の判定は、`detail` が無い・エラーが null などの入力でも、索引名の接頭辞が確かめられなければ false。
- */
+// 実 DB では作りにくい条件なので、DB 無しで縛る。
 
 const SQL = "SELECT 'race-probe';";
 

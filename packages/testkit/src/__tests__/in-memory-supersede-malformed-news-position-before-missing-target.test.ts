@@ -4,12 +4,6 @@ import type { Ctx, NewMemory } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * ADR 0630 決定8: `supersedeWithNewMemories` で「壊れた `news`」と「存在しない `supersede` の対象」が同時にあるときは、
- * 壊れた値の例外が先に出る。conformance・fixture の歯は、壊れた news が**先頭**の1件のときしか見ていなかった。
- * 入口の検査が先頭の1件（または先頭と末尾）だけを見る変異は、2件目以降が壊れているとき、対象の not found が先に出る形になるが、
- * どの歯も赤にしなかった。壊れた news を先頭・真ん中・末尾に置いて、壊れた値の例外が先であることを縛る。
- */
 const ctx: Ctx = { tenantId: "in-memory-supersede-malformed-position" };
 const MISSING = randomUUID();
 

@@ -5,13 +5,7 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * PR #1772（Issue #1759）は、「`purgeMemory` と contested の口（対・群・孤児）は、もともと両実装とも小文字で揃っていた」と書いた。
- * その PR の歯（`testkit-fixture-alignment-not-found-spelling-and-decay-floor-null.postgres.test.ts`）は、操作の対象が無い5口と
- * 参照先が無い口だけを縛り、この8つの形は縛っていなかった（fixture の message の `<id>` を大文字で綴る変異が、どのテストも赤にしなかった）。
- * ここで、同じ入力（大文字で綴った、どこにも無い id）を2実装へ流して、`memory not found for tenant: <id>` の `<id>` が
- * 小文字であることを縛る。比べるのは `<id>` の綴りだけ（例外の種類・message の頭は2実装で違う）。
- */
+// 比べるのは `<id>` の綴りだけ。例外の種類・message の頭は2実装で違う。
 const ctx: Ctx = { tenantId: "fixture-align-spelling-purge-contested" };
 const U = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE" as MemoryId;
 
@@ -32,7 +26,6 @@ async function build(impl: "postgres" | "fixture"): Promise<Store> {
   return new InMemoryMemoryStore();
 }
 
-/** 断った例外の「not found for tenant: 」より後ろ。断らなかったら null。 */
 async function notFoundId(run: () => Promise<unknown>): Promise<string | null> {
   try {
     await run();

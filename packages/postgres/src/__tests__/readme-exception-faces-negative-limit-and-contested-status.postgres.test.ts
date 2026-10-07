@@ -3,13 +3,6 @@ import type { Ctx, MemoryId } from "@mnemora/core";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * PR #1753 が書き直した README「例外の見分け方」の表のうち、どの歯にも縛られていなかった3つの行（PR の実測表にある）を、
- * 現物の顔のまま縛る。
- * - 負の `limit`: `listActiveClaimPredicates`・`archiveDecayed` は `cause.code` `2201W` の DB が拒んだ例外。`purgeExpiredEvents` は
- *   行が1本も無いテナントでは投げずに返る（README の「負の `limit` は、行が1本も無いテナントの `purgeExpiredEvents` では投げずに返る」）。
- * - `resolveContestedPair` の型の外の `status`: DB に触れる前の `RangeError`（`cause` は無い）。
- */
 const ctx: Ctx = { tenantId: "readme-exception-faces-1753" };
 const A = "00000000-0000-4000-8000-00000000000a" as MemoryId;
 const B = "00000000-0000-4000-8000-00000000000b" as MemoryId;

@@ -553,9 +553,7 @@ describe("purge・scrub の先取りの強さ（FOR SHARE への揺れ）", () =
   );
 });
 
-// 先取りの「絞り」の取りすぎ（ADR 0511 約束8）。purge・scrub の先取りは、対象の記憶に付いたラベルの行だけを掴む。
-// 上の A は、語彙が対象の記憶にしか付いていないので、絞りを「同じテナントの、どれかの記憶に付いたラベル」へ
-// 広げても見えない。同じテナントの別の生きた記憶に付いたラベルを置き、それを掴まないことを見る。
+// 上の A は語彙が対象の記憶にしか付いていないので、絞りを広げても見えない。別の生きた記憶に付いたラベルを置いて確かめる。
 describe("purge・scrub の先取りは、他の記憶に付いたラベルの行を掴まない", () => {
   const database = "mnemora_label_lock_teeth_bystander";
   let env: Env | { skip: string } | undefined;
@@ -581,7 +579,6 @@ describe("purge・scrub の先取りは、他の記憶に付いたラベルの�
       const ctx: Ctx = { tenantId: "adr1718-c" };
       await seedLabels(e, ctx.tenantId, NAMES);
       const run = await preparePath(e, path, ctx, NAMES, path);
-      // UNRELATED（"A"）は名前順で先頭。対象の記憶には付いていない別の記憶（生きている）に付ける。
       await e.store.createMemory(ctx, newMemory(ctx, `${path}-bystander`, [UNRELATED]));
       await installCounter(e);
       const seen = await observeWhileBlocked(e, ctx, "adr1718-c-other", SORTED[1]!, run);
