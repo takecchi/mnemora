@@ -1,28 +1,15 @@
 import { ORDER_LEGEND_LINE } from "./mnemora-path.js";
 import type { CaseMaterial, MaterialMemoryLine } from "./answer-trials-material.js";
 
-/**
- * Issue #705 / ADR 0301 の描画器。`answer-trials-material.ts` が組んだ
- * {@link CaseMaterial}（1つの記憶集合）を、A/B/C 3通りのプロンプト文字列へ描画する。
- *
- * ⭐ **A/B/C は同じ `CaseMaterial` を読むだけである。** 別の記憶集合を取り直すことは
- * 構造的にできない——`CaseMaterial` 以外の入力（DB・recall 等）を取らない。
- *
- * **2026-09（ADR 0309）**: n=15 の候補比較で使った `order-sorted`/`digest-order-legend`
- * は、比較のための一時的なレジストリ項目だった——採用したのは `order-legend`
- * （旧名 `order-sorted-legend`）だけであり、他の2つはレジストリから外した
- * （数値は ADR 0309 に残る）。
- */
+/** `CaseMaterial`（1つの記憶集合）を A/B/C のプロンプト文字列へ描画する。`CaseMaterial` 以外（DB・recall 等）を入力に取らず、別の記憶集合を取り直せない。 */
 
 export type RenderName = "recorded" | "digest-only" | "order-legend";
 
 export interface Renderer {
   readonly name: RenderName;
-  /** `complete()` へ渡す `messages[0].content` に相当する文字列（本体 + 質問）を作る。 */
   renderUserContent(material: CaseMaterial): string;
 }
 
-/** `answer-bench.ts` の `buildQuestionSuffix` と同じ形。`answer-trials-material.ts` と同じ理由で複製する。 */
 function questionSuffix(question: string): string {
   return `\n\n質問: ${question}`;
 }
@@ -35,12 +22,6 @@ function joinBody(digestLines: string, index: string): string {
   return [digestLines, index].filter((s) => s.length > 0).join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 描画 A: recorded — `renderRecalledMemoryLine`（mnemora-path.ts）と同じ形を、
-// 構造化した材料から再構成する。
-// ---------------------------------------------------------------------------
-
-/** `mnemora-path.ts` の `renderRecalledMemoryLine` と同じ欄順序で1行を組み立てる。 */
 function renderLineAsRecorded(line: MaterialMemoryLine): string {
   const segments = [
     `[由来:${line.provenanceKind}]`,
@@ -55,15 +36,8 @@ function renderLineAsRecorded(line: MaterialMemoryLine): string {
 }
 
 /**
- * ⭐ Issue #691 続き: **`recorded` 描画は元の並び順をそのまま再現するだけ**
- * （並べ替えは `order-legend` 描画（下）だけの仕事）だが、カセットの原文と
- * 一致させるには凡例行の有無も再現する必要がある。**`material.lines` から
- * 再導出しない**——`examples/chat/cassettes/answer.json`（旧・凍結カセット）は
- * `[記録順:N]` タグを持つ行があっても凡例行を持たない過渡期の記録であり
- * （`CaseMaterial.hasOrderLegend` docstring参照）、`lines` の中身から
- * 「凡例行があるべきか」を推測すると原文と食い違う（この PR の作業中に実際に
- * 踏んだ）。代わりに `answer-trials-material.ts` の `parseMnemoraPromptBody` が
- * 原文から直接読み取った `material.hasOrderLegend` をそのまま使う。
+ * `recorded` 描画は原文の凡例行の有無も再現する。`material.lines` から再導出しない。旧・凍結カセット `answer.json` は
+ * `[記録順:N]` 行があっても凡例行を持たず、推測すると原文と食い違う。`material.hasOrderLegend` をそのまま使う。
  */
 function renderBodyAsRecorded(material: CaseMaterial): string {
   const digestLines = material.lines.map((l) => renderLineAsRecorded(l)).join("\n");
@@ -71,13 +45,7 @@ function renderBodyAsRecorded(material: CaseMaterial): string {
   return `${head}${joinBody(digestLines, indexLine(material))}`;
 }
 
-/**
- * 描画 A（`recorded`）。**再構成した内容が、カセットに記録された原文と完全に一致することを
- * 毎回検査する**——ずれたら例外（Issue #705 完了条件・変異試験(c)の対象）。
- *
- * この検査があることで、`MaterialMemoryLine` のパース・再構成のどちらかに欠陥があっても、
- * 「材料が壊れているのに気づかず走らせ続ける」ことができない。
- */
+/** 描画 A（`recorded`）。再構成した内容がカセットの原文と完全に一致することを毎回検査し、ずれたら例外にする。パースか再構成の欠陥を見逃さないため。 */
 export const recordedRenderer: Renderer = {
   name: "recorded",
   renderUserContent(material: CaseMaterial): string {
@@ -93,11 +61,6 @@ export const recordedRenderer: Renderer = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// 描画 B: digest-only — 由来等のタグを一切付けない（Issue #691 以前の描画、
-// ADR 0295 追記2 の「digest のみ」列と同じ形）。
-// ---------------------------------------------------------------------------
-
 export const digestOnlyRenderer: Renderer = {
   name: "digest-only",
   renderUserContent(material: CaseMaterial): string {
@@ -107,24 +70,9 @@ export const digestOnlyRenderer: Renderer = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// 描画 C: order-legend — Issue #691 の子（ADR 0309）が採用した描画。
-//
-// n=15 の dev 対照（ADR 0309）で、`schedule-change-meeting-day` が
-// recorded（現行 #698 書式）3/15・digest-only 9/15・order-sorted（並べ替えのみ）5/15・
-// order-sorted-legend（この描画）13/15・digest-order-legend（由来等の欄を落として
-// 並べ替え+凡例）13/15 だった。**由来・話者・主題等の欄を保つ**（ADR 0295 決定3〜6が
-// 足した欄を落とすと eval の誤帰属対照を壊しうる、ADR 0309）ため、この描画を
-// `order-legend` として採用し、`order-sorted`（並べ替えのみ・凡例なし）と
-// `digest-order-legend`（欄を落とす）は採らなかった——数値・却下理由は ADR 0309
-// に集約し、ここには複製しない。
-//
-// **`mnemora-path.ts` の `buildMnemoraPrompt`（本番の実装）と同じ規則を、構造化した
-// 材料の上で再現する**——凡例文字列は `ORDER_LEGEND_LINE` をあちらから import して
-// 1箇所にする（2箇所に手で複製すると、どちらかを直し忘れて静かにずれる）。
-// ---------------------------------------------------------------------------
+// 描画 C: order-legend。凡例文字列は `ORDER_LEGEND_LINE` を `mnemora-path.ts` から import して1箇所にする。
+// 2箇所に手で複製すると、どちらかを直し忘れて静かにずれる。
 
-/** `recordedOrder` を持つ行だけを昇順に並べ替え、持たない行は元順のまま末尾に残す。 */
 function sortByRecordedOrder(lines: readonly MaterialMemoryLine[]): MaterialMemoryLine[] {
   const withOrder = lines.filter((l) => l.recordedOrder !== undefined);
   const without = lines.filter((l) => l.recordedOrder === undefined);
@@ -137,10 +85,7 @@ function sortByRecordedOrder(lines: readonly MaterialMemoryLine[]): MaterialMemo
 export const orderLegendRenderer: Renderer = {
   name: "order-legend",
   renderUserContent(material: CaseMaterial): string {
-    // ⚠ `material.hasOrderLegend`（recordedRenderer が使う、原文に凡例行が
-    // 実際にあったかどうか）とは別の判定——この描画は原文の形に関わらず、
-    // 記録順を1件以上持てば常に凡例行を足す（`mnemora-path.ts`
-    // `sortMemoriesForDisplay` と同じ規則をこの合成描画にも当てるだけ）。
+    // `material.hasOrderLegend`（原文に凡例行があったか）とは別の判定。この描画は原文の形に関わらず、記録順を1件以上持てば常に凡例行を足す。
     const hasAnyRecordedOrder = material.lines.some((l) => l.recordedOrder !== undefined);
     const lines = sortByRecordedOrder(material.lines)
       .map((l) => renderLineAsRecorded(l))
