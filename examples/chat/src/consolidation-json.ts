@@ -2,21 +2,10 @@ import { heuristicTokenCounter } from "@mnemora/core";
 import type { ProviderMode } from "./providers.js";
 
 /**
- * `consolidation-cost` サブコマンド（Issue #136）の機械可読出力口。
+ * `consolidation-cost` サブコマンドの機械可読出力口。ファイル I/O・環境変数・時刻取得を行わない純関数だけを置く。
  *
- * **なぜこれが要るか**: `Runtime.consolidate()`（ADR 0089）は入ったが、`examples/chat`
- * に配線が無く、北極星の物差し（「使う側が会話ログを全部プロンプトへ積むのをやめられたか」）
- * に効いたかを誰も測っていなかった（Issue #136）。さらに ADR 0090 は逐語で
- * 「反復で `content` が縮む保証はコードに無い（⚠ 実際に単調増加することは測っていない）」
- * と書いている。**この bench は「そもそも縮んだか」を実測する器である。**
- *
- * `./retrieval-json.ts`（ADR 0088）・`./identifier-json.ts`（ADR 0094）と同じ分担:
- * ファイル I/O・環境変数・時刻取得を一切行わない純関数だけを置く。DB/LLM/embedding を
- * 要求する側（`consolidation-cost.ts`）が、ここの関数へ既に取り終えた値を渡して
- * JSON を組み立てる。
- *
- * ⛔ **縮み率（前後の比）はここでは書かない**（ADR 0088 §4「数字をどこにも書き写さない」）。
- * 差分は `scripts/consolidation-cost-summary.mjs` 側が基準値との比較として計算する。
+ * 縮み率（前後の比）はここでは書かない。数字を書き写さず、差分は `scripts/consolidation-cost-summary.mjs` が
+ * 基準値との比較として計算する。
  */
 
 export interface ConsolidationEmbeddingSpaceJson {
@@ -27,17 +16,10 @@ export interface ConsolidationEmbeddingSpaceJson {
 
 /**
  * `ConsolidateOutcome`（`packages/core`）をそのまま数え上げたもの。
- * `dryRun` は使わない運用だが、型を1つに揃えるため欄は持つ（常に0のはず）。
  *
- * ⚠ **2026-09-30 追記（Issue #1226、ADR 0375 決定7）: `aborted_source_forgotten` を
- * 足した。**`ConsolidateOutcome`（`packages/core`）に同名の値が増えたことに合わせた
- * ——`outcomes[result.outcome] += 1`（`consolidation-cost.ts`）が
- * `ConsolidateOutcome` の全値を index できることを型検査で保証するため、この
- * インターフェースは常に `ConsolidateOutcome` の全値と1対1で揃える
- * （`packages/core` の union に値が増えたら、ここにも同じ名前の欄を足すこと）。
- * この bench では起きない想定（この bench の consolidate 対象はその場で作った
- * filler/統合結果のみで、並行して forget/purge する操作を行わない）だが、常に
- * 0で埋める。
+ * `ConsolidateOutcome` の全値と1対1で揃えること。`outcomes[result.outcome] += 1` が全値を index できることを
+ * 型検査で保証するため、`packages/core` の union に値が増えたらここにも同名の欄を足す。
+ * `dryRun` と `aborted_source_forgotten` はこの bench では起きない想定だが、常に0で埋める。
  */
 export interface ConsolidationOutcomeCountsJson {
   consolidated: number;
@@ -56,31 +38,23 @@ export interface ConsolidationEmbeddingStatusJson {
 }
 
 export interface ConsolidationRoundConsolidationJson {
-  /** この round で `runtime.consolidate()` を呼んだ群の数。 */
   groups: number;
   llmCalls: number;
   outcomes: ConsolidationOutcomeCountsJson;
-  /** この round で新しく作られた統合先 Memory の件数(`outcome==="consolidated"`の数と同じ)。 */
   newMemoryCount: number;
-  /** 新しい Memory の `embeddingStatus`(drain 後)の内訳。 */
   embeddingStatus: ConsolidationEmbeddingStatusJson;
-  /**
-   * `embeddingStatus: "failed"` に着地した Memory の失敗理由(ADR 0090 の `kind`)を、
-   * 重複を潰して列挙したもの。`kind` を判別できなかった場合は `"unknown"`。
-   * 1件も failed が無ければ空配列。
-   */
+  /** `embeddingStatus: "failed"` に着地した Memory の失敗理由を重複を潰して列挙したもの。判別できなければ `"unknown"`。 */
   embeddingFailureKinds: string[];
 }
 
 export interface ConsolidationStoreJson {
   activeCount: number;
   supersededCount: number;
-  /** active のみ。 */
   activeContentChars: number;
   activeContentTokens: number;
   activeDigestChars: number;
   activeDigestTokens: number;
-  /** active + superseded の合計。⚠ これは必ず増える(隠さない)。 */
+  /** active + superseded の合計。必ず増える（隠さない）。 */
   allContentChars: number;
 }
 
@@ -93,7 +67,6 @@ export interface ConsolidationRecallProbeJson {
   usageIndexChars: number;
   totalInScope: number;
   goldRank: number | null;
-  /** `result.memories.length / store.activeCount`。1.0 に近いと「全部載せる」に退化している。 */
   recalledActiveShare: number;
   omittedKinds: string[];
   budgetExceeded: boolean;
@@ -107,9 +80,7 @@ export interface ConsolidationRecallMeanJson {
   usageIndexChars: number;
   totalInScope: number;
   recalledActiveShare: number;
-  /** `goldRank` が非 null の probe だけの平均。全件 null なら `null`。 */
   goldRank: number | null;
-  /** `goldRank` が null で平均から除いた probe の件数。 */
   goldRankExcludedCount: number;
 }
 
@@ -118,7 +89,6 @@ export interface ConsolidationRecallUnbudgetedJson {
   mean: ConsolidationRecallMeanJson;
 }
 
-/** 予算の階段(既定 [8,16,24,32,48,64,128,256,512]、`maxMemoryTokens`)の1段。 */
 export interface ConsolidationRecallBudgetRungJson {
   budgetTokens: number;
   probes: ConsolidationRecallProbeJson[];
@@ -126,46 +96,30 @@ export interface ConsolidationRecallBudgetRungJson {
 }
 
 export interface ConsolidationRoundJson {
-  /** 0 = 統合前。 */
   round: number;
-  /** round 0 は統合を行っていないので `null`。 */
   consolidation: ConsolidationRoundConsolidationJson | null;
   store: ConsolidationStoreJson;
   recall: {
     unbudgeted: ConsolidationRecallUnbudgetedJson;
-    /** `budgetLadder` と同じ長さ・同じ順序。 */
     budgeted: ConsolidationRecallBudgetRungJson[];
   };
 }
 
 export type ConsolidationStopReason =
-  /** 指定した最大 round 数まで実行できた(打ち切りではない)。 */
   | "completed_all_rounds"
-  /** ある round の開始時点で、統合対象(filler 由来の active な候補)が2件未満だった。 */
   | "insufficient_candidates"
-  /** ある round の実行中に例外が投げられ、打ち切った。詳細は `abort` 欄。 */
+  /** 例外で打ち切った。詳細は `abort` 欄。 */
   | "aborted_on_error";
 
-/**
- * round の実行中に投げられた例外を、cause の連鎖を辿って記述したもの
- * (`stopReason === "aborted_on_error"` のときだけ非 null。詳細は
- * `ConsolidationCostRunJson["measured"]["abort"]` の doc 参照)。
- */
 export interface ConsolidationAbortJson {
-  /** 例外が起きた round 番号。この round の行は `rounds` に無い。 */
   round: number;
-  /** cause の連鎖の各段の message(先頭が投げられた例外自身)。空配列にはならない。 */
   causeChain: string[];
-  /** 連鎖のどこかに在った文字列の `code`(PostgreSQL の SQLSTATE)。無ければ null。 */
   sqlState: string | null;
 }
 
 /**
- * `status` で「測ったが値がこうだった」と「そもそも測れなかった」を区別する
- * (`identifier-json.ts` の `IdentifierProbeRunJson` と同じ形。Issue #136 も
- * `@mnemora/local-embedding` を使うため、同じ「重みを取得できなかった」失敗モードを持つ)。
- * **`"weights_unavailable"` のときは round の欄が丸ごと存在しない**——0 や空配列で
- * 埋めない(ADR 0008「無いには種類がある」)。
+ * `status` で「測ったが値がこうだった」と「そもそも測れなかった」を区別する。
+ * `"weights_unavailable"` のときは round の欄が丸ごと存在しない。0 や空配列で埋めない（ADR 0008）。
  */
 export type ConsolidationCostRunJson =
   | {
@@ -173,7 +127,6 @@ export type ConsolidationCostRunJson =
       status: "measured";
       measuredAt: string;
       commit: string | null;
-      /** 宣言値ではなく handle の実値(ADR 0088 §4 と同じ規律)。 */
       llmMode: ProviderMode;
       embeddingMode: ProviderMode;
       embeddingSpace: ConsolidationEmbeddingSpaceJson;
@@ -182,14 +135,10 @@ export type ConsolidationCostRunJson =
       groupSize: number;
       budgetLadder: number[];
       recallLimit: number;
-      /** 実際に実行できた最後の round 番号(0始まりではなく、実行した round の最大値)。 */
       stoppedAfterRound: number;
       stopReason: ConsolidationStopReason;
       rounds: ConsolidationRoundJson[];
-      /**
-       * `stopReason === "aborted_on_error"` のときだけ非 null。他の2値では
-       * `null`(「打ち切っていない」であって「打ち切ったが詳細不明」ではない)。
-       */
+      /** `stopReason === "aborted_on_error"` のときだけ非 null。`null` は「打ち切っていない」であって「詳細不明」ではない。 */
       abort: ConsolidationAbortJson | null;
     }
   | {
@@ -197,18 +146,10 @@ export type ConsolidationCostRunJson =
       status: "weights_unavailable";
       measuredAt: string;
       commit: string | null;
-      /** `warmupLocalEmbedding` が返した detail(`WEIGHTS_UNAVAILABLE_PREFIX` を含む)。 */
       detail: string;
     };
 
-// ---------------------------------------------------------------------------
-// 純関数の本体
-// ---------------------------------------------------------------------------
-
-/**
- * `carriedCount / activeCount`。`activeCount === 0` のときは 0
- * (分母が0の割り算を undefined/NaN のまま JSON へ出さない)。
- */
+/** `carriedCount / activeCount`。`activeCount === 0` のときは 0。分母0の割り算を NaN のまま JSON へ出さない。 */
 export function computeRecalledActiveShare(carriedCount: number, activeCount: number): number {
   if (activeCount <= 0) {
     return 0;
@@ -216,7 +157,7 @@ export function computeRecalledActiveShare(carriedCount: number, activeCount: nu
   return carriedCount / activeCount;
 }
 
-/** 単純平均。空配列は 0(呼び出し側は空配列を渡さない前提だが、0除算で NaN を出さない)。 */
+/** 単純平均。空配列は 0。0除算で NaN を出さない。 */
 function mean(values: readonly number[]): number {
   if (values.length === 0) {
     return 0;
@@ -224,10 +165,6 @@ function mean(values: readonly number[]): number {
   return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
-/**
- * `goldRank` が null の要素を除いた平均と、除いた件数を返す。
- * 全件 null なら `mean: null`。
- */
 export function meanExcludingNullGoldRank(values: readonly (number | null)[]): {
   mean: number | null;
   excludedCount: number;
@@ -237,15 +174,12 @@ export function meanExcludingNullGoldRank(values: readonly (number | null)[]): {
   return { mean: present.length === 0 ? null : mean(present), excludedCount };
 }
 
-/** `heuristicTokenCounter` を digest の連結(`"\n"` 区切り)に当てる(`docs/recall.md` §6 と同じ数え方)。 */
 export function carriedDigestTokensOf(digests: readonly string[]): number {
   return heuristicTokenCounter.count(digests.join("\n")).tokens;
 }
 
-/** `buildConsolidationProbeJson` への入力。DB/embedding を経由して既に取り終えた値だけを持つ。 */
 export interface RawProbeMeasurement {
   probeId: string;
-  /** `recall().memories` の digest だけを取り出したもの。 */
   memoryDigests: readonly string[];
   goldRank: number | null;
   totalInScope: number;
@@ -275,7 +209,6 @@ export function buildConsolidationProbeJson(
   };
 }
 
-/** `probes[]` の数値欄の平均(`goldRank` は null を除く。§仕様どおり)。 */
 export function buildConsolidationMeanJson(
   probes: readonly ConsolidationRecallProbeJson[],
 ): ConsolidationRecallMeanJson {
@@ -293,11 +226,9 @@ export function buildConsolidationMeanJson(
   };
 }
 
-/** `store` に既に読み終えた active/superseded Memory の content/digest から数える。 */
 export interface RawStoreMeasurement {
   activeContentsAndDigests: readonly { content: string; digest: string }[];
   supersededCount: number;
-  /** active + superseded の content 文字数の合計(呼び出し側が別途合算する)。 */
   allContentChars: number;
 }
 
@@ -342,8 +273,6 @@ export interface BuildConsolidationCostRunJsonOptions {
   abort: ConsolidationAbortJson | null;
 }
 
-/** トップレベルの JSON を組み立てる(`status: "measured"`)。純関数——`rounds` は呼び出し側が
- *  既に組み立てたものを渡す。 */
 export function buildConsolidationCostRunJson(
   options: BuildConsolidationCostRunJsonOptions,
 ): Extract<ConsolidationCostRunJson, { status: "measured" }> {
@@ -368,9 +297,8 @@ export function buildConsolidationCostRunJson(
 }
 
 /**
- * 重みを取得できなかったときの JSON を組み立てる(`identifier-json.ts` の
- * `buildWeightsUnavailableIdentifierProbeJson` と同じ形)。**メトリクスの欄を
- * 一切持たない**——`0`/`null` で埋めると「測ったら0件だった」と区別が付かなくなる。
+ * 重みを取得できなかったときの JSON を組み立てる。メトリクスの欄を一切持たない。
+ * `0`/`null` で埋めると「測ったら0件だった」と区別が付かなくなる。
  */
 export function buildWeightsUnavailableConsolidationCostRunJson(options: {
   measuredAt: Date;
@@ -386,7 +314,6 @@ export function buildWeightsUnavailableConsolidationCostRunJson(options: {
   };
 }
 
-/** `ConsolidateOutcome` の7値をすべて0に初期化した内訳（Issue #1226、2026-09-30 追記）。 */
 export function emptyOutcomeCounts(): ConsolidationOutcomeCountsJson {
   return {
     consolidated: 0,
@@ -400,19 +327,11 @@ export function emptyOutcomeCounts(): ConsolidationOutcomeCountsJson {
 }
 
 /**
- * `runtime.consolidate()` が投げた例外を、cause の連鎖を辿った形で記述する
- * (ADR 0100 / PR #144 以降、`consolidate()` は失敗時に投げる)。
+ * `runtime.consolidate()` が投げた例外を、cause の連鎖を辿った形で記述する。
  *
- * ⚠ **`String(error)` に畳まない**: drizzle が pg のエラーを `Error: Failed query: ...`
- * で包むため、投げられた例外そのものの message だけでは元のメッセージも SQLSTATE も
- * 失われる。`cause` の連鎖を辿って全段の message を集め、SQLSTATE(文字列の `.code`)を
- * どこかの段から探す。辿り方は
- * `packages/postgres/src/__tests__/foreign-key-violation.postgres.test.ts` の
- * `sqlStateOf`(深さ上限8、文字列の `.code` を探す)に**倣う**——**同じ理由**:
- * drizzle が pg のエラーを包むので `.code` を直読みすると `undefined` になる。
- *
- * `Error` でない値(文字列・null 等)が投げられても落ちない——`causeChain` は
- * 最低1件、投げられた値そのものの文字列表現を持つ(空配列にはならない)。
+ * `String(error)` に畳まない。drizzle が pg のエラーを包むので、投げられた例外の message だけでは
+ * 元のメッセージも SQLSTATE も失われる。全段の message を集め、SQLSTATE（文字列の `.code`）をどこかの段から探す。
+ * `Error` でない値が投げられても落ちず、`causeChain` は最低1件持つ。
  */
 export function describeThrownError(error: unknown, round: number): ConsolidationAbortJson {
   const causeChain: string[] = [];
@@ -437,14 +356,9 @@ export function describeThrownError(error: unknown, round: number): Consolidatio
 
 /**
  * `cli.ts` の `runConsolidationCostCommand` が立てる終了コード。
+ * `process.exitCode` への副作用は歯で直接検査しづらいため、純関数として切り出した。
  *
- * **これを純関数として切り出す理由**: cli.ts の終了コードの判断を歯で測れる形にする
- * ため——`process.exitCode` への副作用そのものは歯で直接検査しづらい。
- *
- * - `status === "weights_unavailable"`(重みを取得できず、そもそも測れなかった) → 1
- * - `stopReason === "aborted_on_error"`(round の途中で例外により打ち切った) → 1
- * - それ以外(`completed_all_rounds` / `insufficient_candidates`、いずれも意図した
- *   完走・停止) → 0
+ * `weights_unavailable` と `aborted_on_error` は 1、意図した完走・停止は 0。
  */
 export function exitCodeForConsolidationCostRun(json: ConsolidationCostRunJson): 0 | 1 {
   if (json.status === "weights_unavailable") {

@@ -1,26 +1,13 @@
 /**
- * Issue #109 残件「A」——`./synthetic-score-noise.ts` の合成ノイズ（σ・seed）を、
- * 順位だけでなく **margin（gold score − distractor score、ノイズ後）** にも掛けるための
- * 純関数。候補案1（margin基準、`./verdict-candidate-margin.ts`）を、ADR 0322 が使った
- * `local` 埋め込みの反実仮想データにも当てられるようにする。
- *
- * ⛔ **`synthetic-score-noise.ts`/`local-noise-arm.ts` には1文字も触れていない。**
- * ここは新しいファイルで、`noiseEpsilon`（変更していない・re-export のみ）を呼ぶだけである。
- *
- * `applySymmetricScoreNoise` はノイズ後のスコアを外に出さない（順位だけが観測可能な出力、
- * 同モジュールの doc コメント）ため、margin(ノイズ後)を計算するにはここで
- * `noiseEpsilon` を直接使ってスコアを組み立て直す必要がある。**`streamId`/`index` の
- * 意味は `applySymmetricScoreNoise` と揃える**——`streamId` は probe の並び順の添字、
- * `index` は `probe.candidates`(ノイズ適用前・並べ替え前の順番)の中での位置。
+ * 合成ノイズを margin（gold score − distractor score、ノイズ後）にも掛けるための純関数。
+ * `applySymmetricScoreNoise` はノイズ後のスコアを外に出さないので、ここで `noiseEpsilon` を直接使って組み立て直す。
+ * `streamId`/`index` の意味は `applySymmetricScoreNoise` と揃える（`streamId` は probe の並び順の添字、
+ * `index` はノイズ適用前の `probe.candidates` の中での位置）。
  */
 
 import { noiseEpsilon } from "./synthetic-score-noise.js";
 import type { CapturedProbeCandidates, ScoredCandidate } from "./synthetic-score-noise.js";
 
-/**
- * `candidates`(ノイズ適用前)から gold/distractor を探し、`score` の差を返す。
- * どちらか一方でも見つからなければ `null`(比較不能)。
- */
 export function computeCapturedMargin(
   candidates: readonly ScoredCandidate[],
   goldExternalId: string,
@@ -34,11 +21,6 @@ export function computeCapturedMargin(
   return gold.score - distractor.score;
 }
 
-/**
- * `sigma`/`seed` のノイズを掛けた**後**の margin。`sigma === 0` のときは
- * `noiseEpsilon` の値に関わらず `computeCapturedMargin` と同じ値になる
- * （`applySymmetricScoreNoise` と同じ代数的性質）。
- */
 export function computeNoisyMargin(
   candidates: readonly ScoredCandidate[],
   goldExternalId: string,
@@ -60,10 +42,6 @@ export function computeNoisyMargin(
   return goldScore - distractorScore;
 }
 
-/**
- * 1群の捕捉済み probe 集合すべてに対して、`(sigma, seed)` のノイズ後 margin の配列を返す
- * （probe の並び順のまま。`decideEmbeddingDriftVerdictByMargin` にそのまま渡せる形）。
- */
 export function noisyMarginsForGroup(
   probes: readonly CapturedProbeCandidates[],
   sigma: number,

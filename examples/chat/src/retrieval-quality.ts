@@ -24,59 +24,23 @@ import { formatNoApiCallsNotice } from "./usage-meter.js";
 import type { UsageMeter } from "./usage-meter.js";
 
 /**
- * probe ごとの順位を測る(PR 本文 (D))。
- *
- * **memory → observation の系譜の辿り方**: 本物の LLM は発話を書き換えて記憶を作る
- * (要約・言い換え)ため、`recall().memories[].digest`/`memoryId` から「どの発話が元に
- * なったか」を**文字列一致では判定できない**。その辿り方は `./provenance-trace.js` の
- * `resolveExternalId` に在る——**`compare.ts` も同じ経路を必要とするようになったため、
- * 共有の部品としてそちらへ降ろした**(ADR 0052)。ここでは互換のため re-export する。
+ * probe ごとの順位を測る。memory → observation の系譜は文字列一致では判定できない（本物の LLM は発話を書き換えて記憶を作る）ので、
+ * `./provenance-trace.js` の `resolveExternalId` に在る。`compare.ts` も同じ経路を必要とするため共有部品として降ろし、ここでは互換のため re-export する。
  */
 export { resolveExternalId };
 
-// ---------------------------------------------------------------------------
-// outbox を干上がるまで処理する(PR 本文「実行時の規律」)
-//
-// `drainEmbedTicks`/`DrainResult` の実体は `./embed-drain.js` に移した——
-// `mnemora-path.ts` の `ingestConversation`(主測定である `compare` 経路)にも
-// 同じ罠があったため、共有モジュールへ切り出した(docs/decisions/0021 参照)。
-// ここでは import した名前をそのまま re-export し、この関数を
-// `./retrieval-quality.js` から import している既存コードとの互換を保つ。
-// ---------------------------------------------------------------------------
+// `drainEmbedTicks`/`DrainResult` の実体は `./embed-drain.js`。主測定の経路にも同じ罠があるため共有モジュールにあり、既存コードとの互換のためここで re-export する。
 
 export { drainEmbedTicks };
 export type { DrainResult };
 
-// ---------------------------------------------------------------------------
-// スコア内訳(docs/recall.md §7)を、順位と一緒に記録する
-//
-// **なぜ足すか**: このベンチは順位(goldRank/distractorRank)だけを記録し、
-// `recall()` が返した `RecalledMemory.score` を捨てていた。その結果
-// [ADR 0019 §7.5](../../../docs/decisions/0019-real-openai-measurement-cost.md) は
-// 「なぜ distractor が上に来たか」を**解釈**として書くしかなかった
-// (「主語と時制を見ていない」)。北極星の問い3(なぜ選ばれたかを後から説明できるか)を
-// 第一級と書いている製品のベンチが、説明を捨てていた。
-//
-// ここで足すのは**記録と印字だけ**である——閾値・重み・limit・overFetchFactor は
-// 一切変えない(ADR 0022 の線: 見栄えの良い数字のために測る条件を選び直さない)。
-// ---------------------------------------------------------------------------
+// 記録と印字だけを足す。閾値・重み・limit・overFetchFactor は一切変えない（見栄えの良い数字のために測る条件を選び直さない）。
 
-/**
- * `ScoreBreakdown` のうち `total` を除いた項。**`total` を含めない**のは、
- * `total` が他の項の積であり、「どの項が順位を決めたか」を問う対象ではないため。
- */
+/** `total` を含めない: `total` は他の項の積で、「どの項が順位を決めたか」を問う対象ではない。 */
 export const SCORE_TERMS = ["similarity", "decay", "tagMatch", "freshness", "strength"] as const;
 export type ScoreTerm = (typeof SCORE_TERMS)[number];
 
-/**
- * `memory.score[term]` を、`RecalledScore`（`ScoreBreakdown | AffinityUnmeasuredScore`）から
- * 安全に読む（Issue #548 方向2、
- * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
- * `decay`/`tagMatch`/`freshness`/`strength` はどちらの形にも在る共通の項。`similarity` は
- * `AffinityUnmeasuredScore` には欄そのものが無い——**値は変えていない**（以前も
- * `mandatory_companion`/`association`/lexical-only の候補では `similarity` は
- * `undefined` だった。ここでは同じ `undefined` を、型が許す形で返すだけ）。
- */
+/** `similarity` は `AffinityUnmeasuredScore` には欄そのものが無い。値は変えず、同じ `undefined` を型が許す形で返すだけ。 */
 function getScoreTerm(score: RecalledMemory["score"], term: ScoreTerm): number | undefined {
   switch (term) {
     case "similarity":
@@ -93,48 +57,24 @@ function getScoreTerm(score: RecalledMemory["score"], term: ScoreTerm): number |
 }
 
 /**
- * 返ってきた候補の集合の中で、その項が取った値の幅。
- *
- * **これが順位の説明の本体である。**幅が 0 の項は、その recall の順位付けに
- * 一切寄与していない——「重みが小さい」のではなく、**候補間で差が付いていない**。
- * 幅が最大の項が、順位を実際に決めた項である。
+ * 返ってきた候補の集合の中で、その項が取った値の幅。これが順位の説明の本体で、幅が 0 の項は順位付けに寄与していない
+ * （重みが小さいのではなく、候補間で差が付いていない）。
  */
 export interface TermSpread {
   term: ScoreTerm;
-  /** その項を持っていた候補の件数。`similarity` は ANN 経由の候補にしか存在しない。 */
   presentCount: number;
-  /** 項を持つ候補が1件も無ければ null。 */
   min: number | null;
   max: number | null;
-  /** `max - min`。項を持つ候補が1件も無ければ null(0 と区別する)。 */
   spread: number | null;
   /**
-   * その項を持つ候補が、実際に何通りの値を取ったか(`new Set(values).size`。
-   * 浮動小数は厳密比較)。項を持つ候補が0件なら 0。
-   *
-   * **⚠ `spread`(幅 = `max - min`)とは別の主張である**(ADR 0081 §1.1)。
-   * 幅が0(または極小)であることと、候補間で1通りしか値を取らないことは、
-   * この文脈では違う主張である——**幅は両端の距離だけを言い、中間に何個の値が
-   * 在るかを言わない。**`decay` はこの違いが出る項の実例で、幅は 1e-7 桁(ADR 0109 §4 の実測。
-   * **この桁は系の定数ではなく、取り込みから `recall()` までの実時間の関数である**)だが
-   * 通り数は候補数ぶんある(= 重みを触れば理論上は動く余地がある)のに対し、
-   * `tagMatch`/`strength` は通り数そのものが1であり(= 重みをいくら触っても
-   * 順位は1つも動かない)。**「重みが小さい」と「項が動いていない」を区別するには、
-   * 幅ではなく通り数が要る。**
+   * その項を持つ候補が実際に何通りの値を取ったか。幅（`max - min`）とは別の主張で、幅は両端の距離だけを言い、中間に何個の値が在るかを言わない。
+   * `decay` は幅が 1e-7 桁でも通り数は候補数ぶんあるが、`tagMatch`/`strength` は通り数が1で、重みを触っても順位は動かない。
+   * 「重みが小さい」と「項が動いていない」を区別するには、幅ではなく通り数が要る。
    */
   distinctCount: number;
 }
 
-/**
- * 返ってきた候補全体について、項ごとの値の幅を出す。
- *
- * **項を持つ候補が0件のときに `spread` を 0 と書かない。**「差が無かった」と
- * 「測る対象が無かった」は別物である(ADR 0008 の「無いには種類がある」の、
- * この文脈への適用)。
- *
- * **`presentCount`/`min`/`max`/`spread` の計算はここで変えていない**——
- * `distinctCount`(ADR 0081 §1.1)を追加で計算するだけである。
- */
+/** 項を持つ候補が0件のときに `spread` を 0 と書かない（「差が無かった」と「測る対象が無かった」は別物）。 */
 export function computeTermSpreads(memories: readonly RecalledMemory[]): TermSpread[] {
   return SCORE_TERMS.map((term) => {
     const values = memories
@@ -157,19 +97,8 @@ export function computeTermSpreads(memories: readonly RecalledMemory[]): TermSpr
 }
 
 /**
- * `decay` と `freshness` を、同じ候補行の中で1件ずつ厳密比較(`===`)する
- * (ADR 0081 §2 / ADR 0109)。
- *
- * **なぜ「幅が一致すること」では代用できないか**: `termSpreads` の `decay`/`freshness`
- * の幅が同じ値であっても、それは両端(min/max)が一致しているだけであり、
- * **同じ候補行どうしで値が一致していることを含意しない**——間接証拠でしかない。
- * ここでは行ごとの厳密等価を直接数える。
- *
- * **`ScoreBreakdown.decay`/`freshness` はどちらも必須欄(optional ではない)なので、
- * `memories` に1件でも要素があれば、その行は必ず両方の欄を持つ。**⟹ `rows` は
- * 実質 `memories.length` と一致する。それでも名前を「両方の欄を持つ行数」とするのは、
- * 将来どちらかが optional になった場合に、この関数の意図(「測れた行だけを数える」)を
- * 呼び出し側のコードから読み取れるようにするため。
+ * `decay` と `freshness` を同じ候補行の中で1件ずつ厳密比較する。幅が一致しても両端が一致しているだけで、行ごとの一致を含意しない
+ * （間接証拠でしかない）ので、行ごとの厳密等価を直接数える。
  */
 export function computeDecayFreshnessRowwise(
   memories: readonly RecalledMemory[],
@@ -184,56 +113,30 @@ export function computeDecayFreshnessRowwise(
   return { rows, equalRows, differentRows: rows - equalRows };
 }
 
-/** `computeDecayFreshnessRowwise` の結果(ADR 0109)。 */
 export interface DecayFreshnessRowwise {
-  /** `decay`/`freshness` の両方を持っていた行数。 */
   rows: number;
-  /** そのうち `decay === freshness`(厳密等価)だった行数。 */
   equalRows: number;
-  /** そのうち `decay !== freshness` だった行数。 */
   differentRows: number;
 }
 
-/** 1件の候補が、この probe においてどの役だったか。複数該当しうる(gold が1位など)。 */
 export type ScoredRole = "gold" | "distractor" | "top1";
 
 export interface ProbeScoreDetail {
-  /** 該当する役をすべて持つ。gold が1位なら `["gold","top1"]`。 */
   roles: ScoredRole[];
-  /** 1始まりの順位。 */
   rank: number;
   digest: string;
-  /**
-   * Issue #548 方向2 / ADR 0352: `association` を on にした測定
-   * （`association-default-on-measure.ts`）では、この score が `AffinityUnmeasuredScore`
-   * （`total`/`similarity`/`lexicalMatch` 無し）のことがある。
-   */
   score: RecalledScore;
 }
 
 /**
- * gold・distractor・1位の3つについて、スコア内訳を取り出す。
+ * gold・distractor・1位の3つについて、スコア内訳を取り出す。返らなかったものは含めない（gold が `limit` の外に落ちていれば、
+ * 0 や「不明」を捏造しない。理由は `omittedKinds` が答える）。
  *
- * **返らなかったものは含めない。**gold が `limit` の外に落ちていれば内訳は存在しない——
- * そこで 0 や「不明」を捏造しない。なぜ返らなかったかは `ProbeOutcome.omittedKinds` の側が答える。
- *
- * `goldRank`/`distractorRank` は `runRetrievalQualityArm` が系譜追跡で決めた順位を
- * そのまま受け取る(この関数自身は externalId を解決しない——純関数に保つため)。
- *
- * **2つの順位を位置引数ではなくオブジェクトで受ける。**どちらも `number | null` なので、
- * 位置で渡すと取り違えても型が通り、**gold と distractor の役が入れ替わったまま
- * 出力される**(この配線は検査が届いていない——`runRetrievalQualityArm` は Runtime と
- * MemoryStore を要求するため単体で呼べない)。**検査で捕まえられないなら、
- * 起こせない形にするほうが強い。**
- *
- * **範囲外の順位を弾く番人は置いていない。**呼び出し側は `memories` の `indexOf` から
- * 順位を作るので、`null` か `1..memories.length` 以外は構造上出てこない。届かない分岐を
- * 「念のため」で置くと、検査できない経路が増えるだけである(ADR 0024 の「実装の無い予約を
- * 残さない」と同じ理由)。**別の `recall()` の順位を混ぜて渡せば添字が外れて例外になるが、
- * それは黙って別の記憶を返すより良い**——壊れているものを壊れていない顔で返さない。
+ * 2つの順位は位置引数ではなくオブジェクトで受ける。どちらも `number | null` なので、位置だと取り違えても型が通り、
+ * gold と distractor の役が入れ替わったまま出力される。範囲外の順位を弾く番人は置かない（呼び出し側は `indexOf` から作るので
+ * 構造上出てこない。別の `recall()` の順位を混ぜれば添字が外れて例外になり、黙って別の記憶を返すより良い）。
  */
 export interface ProbeRanks {
-  /** `recall().memories` の中の gold の順位(1始まり)。返っていなければ null。 */
   goldRank: number | null;
   distractorRank: number | null;
 }
@@ -268,71 +171,33 @@ export function collectScoreDetails(
     });
 }
 
-// ---------------------------------------------------------------------------
-// probe ごとの指標
-// ---------------------------------------------------------------------------
-
 export interface ProbeOutcome {
   probeId: string;
   lexicalControl: boolean;
-  /** `recall().memories` の中の gold の順位(1始まり)。居なければ null。 */
   goldRank: number | null;
   distractorRank: number | null;
   hit1: boolean;
-  /** 既定の limit(10件)に残ったか。`memories` は既定で最大10件しか返らないため、
-   *  goldRank !== null であることと同値。 */
   hit10: boolean;
-  /** 話題は合っているが答えが違う記憶(distractor)が gold より上に来たか。
-   *  gold が返らず distractor だけ返った場合も「beats gold」として扱う(最悪のケース)。 */
+  /** gold が返らず distractor だけ返った場合も「beats gold」として扱う（最悪のケース）。 */
   distractorBeatsGold: boolean;
   reciprocalRank: number;
   omittedKinds: string[];
   totalInScope: number;
-  /** gold / distractor / 1位 のスコア内訳(返らなかったものは含まない)。 */
   scoreDetails: ProbeScoreDetail[];
-  /** 返ってきた候補全体で、各項が取った値の幅。順位を実際に決めた項がどれかを示す。 */
   termSpreads: TermSpread[];
   /**
-   * この probe で `recall()` が実際に返した候補行数(`result.memories.length`)。
-   *
-   * **なぜ足すか**(非門ジョブへの可視化。ADR 0108): `SCORE_TERMS` は `lexicalMatch` を
-   * 含まない(第6の項として掛けない、という ADR 0084 §5 の決定の反映であって、この欄が
-   * 無い理由ではない)。⟹ 語彙チャンネルが**そもそも1行も通っていないのか**、**通っては
-   * いるが値が無いのか**を、`termSpreads` だけでは区別できない。この欄と
-   * `lexicalMatchRows` を並べることで、その区別を行数として残す。
+   * この probe で `recall()` が実際に返した候補行数。`SCORE_TERMS` は `lexicalMatch` を含まないので、語彙チャンネルが1行も通っていないのか、
+   * 通っているが値が無いのかを `termSpreads` だけでは区別できない。この欄と `lexicalMatchRows` を並べて、その区別を行数として残す。
    */
   recalledRows: number;
-  /**
-   * そのうち `score.lexicalMatch` 欄を持っていた行数。
-   *
-   * **`examples/chat` のベンチは `channels` を渡していない**(既定
-   * `DEFAULT_RECALL_CHANNELS` = `["ann"]`)ため、現状はどの probe でも 0 のまま推移する
-   * ——これは欠陥ではなく、「語彙チャンネルが配線されていない」という構成そのものの
-   * 反映である(ADR 0108)。
-   */
+  /** `examples/chat` のベンチは `channels` を渡さない（既定 `["ann"]`）ので、現状は 0 のまま推移する。欠陥ではなく構成の反映。 */
   lexicalMatchRows: number;
-  /**
-   * この probe において、`decay` と `freshness` が行ごとに厳密等価だったか(ADR 0109)。
-   *
-   * **なぜ足すか**: ADR 0081 §2 は「`freshness` は `decay` の行ごと厳密な複製である」を
-   * 一時的な計装で測ったが、その計装は捨てられ(§6.1)、再現するには足し直す必要が
-   * あった。ここで恒久化する。
-   */
   decayFreshnessRowwise: DecayFreshnessRowwise;
-  /**
-   * `result.memories` のうち `retrievedVia === "association"` だった件数(ADR 0337
-   * 追記2026-09-26)。**`options.association` を省略した既存の呼び出しでは常に 0**
-   * ——連想枠自体を off(`association: null`)にしているため。この欄を明示的に見るのは
-   * `association-default-on-measure.ts` だけである。
-   */
+  /** 省略した既存の呼び出しでは常に 0（連想枠を off にしているため）。 */
   associationRows?: number;
   /**
-   * 返った候補のうち最下位(`result.memories` の末尾)の `score.total`。候補が0件なら null。
-   *
-   * **なぜ足すか**(Issue #572、ADR 0276 の 2026-09-28 の追記): gold の順位が離散量として
-   * 余裕を持って見えても、スコアでは最下位候補と紙一重のことがある(Issue #572 の実測では
-   * `diet` の gold と10位の差が 1.34%)。その差を `retrieval-rank-listing` の一覧に出すための
-   * 欄である。⛔ 既存の欄の意味を変えない追加であり、この欄を門に使う歯は無い。
+   * 最下位の `score.total`。gold の順位に余裕があっても、スコアでは最下位候補と紙一重のことがあるため、`retrieval-rank-listing` の一覧に出す欄。
+   * 既存の欄の意味を変えない追加で、この欄を門に使う歯は無い。
    */
   lastRecalledScore?: number | null;
 }
@@ -344,68 +209,28 @@ function average(values: number[]): number {
   return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
-// ---------------------------------------------------------------------------
-// 実行ごとに一意な tenantId を組む(ADR 0068)
-//
-// **背景**: `cli.ts` の `runRetrieval` は arm ごとに固定の `tenantId`
-// (`retrieval-quality-arm-a` 等)を使っていた。DB をリセットしないため、2回目の
-// 実行は `observe()` の externalId 冪等性に当たって新規 observation を1件も作らず、
-// `ingest` の欄が「1回で足りた」という**逆の結論**を印字する(1回目は実際に測って
-// 「足りなかった」、2回目は測っていないのに同じ判定式が `false` を返す)。
-// 順位(goldRank 等)は DB に前回の記憶が残っているため正しく出続けるので、
-// 数字を見ていても気付けない——`ingest` の欄だけが嘘をつく。
-//
-// **直し方はテナントを毎回変えること。**冪等性そのもの(externalId の重複排除)は
-// 製品として正しい挙動であり、崩さない。崩すべきは「同じテナントで2回測ってしまう」
-// ベンチ側の呼び出し方である。
-//
-// **引き受ける負債**: 実行のたびに DB へテナントが増える(memories/observations/
-// outbox 行が積み上がり、掃除しない)。掃除しない理由と実測件数は ADR 0068 に書く。
-// ---------------------------------------------------------------------------
+// テナントを毎回変える。arm ごとに固定の tenantId だと、2回目の実行は `observe()` の externalId 冪等性に当たって新規 observation を作らず、
+// `ingest` の欄が「測っていないのに1回で足りた」と逆の結論を印字する（順位は DB に前回の記憶が残るので正しく出続け、数字を見ていても気付けない）。
+// 冪等性自体は製品として正しいので崩さない。引き受ける負債: 実行のたびに DB へテナントが増え、掃除しない（ADR 0068）。
 
 let runTokenCounter = 0;
 
-/**
- * 実行ごとに一意な token。**2回呼べば必ず違う値を返す**——`Date.now()` 単体だと
- * 同一ミリ秒内の2連続呼び出しで衝突しうるため、プロセス内カウンタを足して
- * 「必ず違う」を実装で保証する(クロックの分解能に依存しない)。
- */
+/** 2回呼べば必ず違う値を返す。`Date.now()` 単体だと同一ミリ秒内で衝突しうるので、プロセス内カウンタを足す。 */
 export function newRunToken(): string {
   runTokenCounter += 1;
   return `${Date.now().toString(36)}-${runTokenCounter}`;
 }
 
-/**
- * arm の tenantId を組む。**同じ `runToken` なら同じ、違う `runToken` なら必ず違う**——
- * `armKey` は arm を区別するための安定した鍵(`"a"`/`"b"`/`"c"` 等)であり、
- * `armLabel`(画面の見出し文言)とは独立に保つ(見出し文言を変えても tenantId が
- * 変わらないようにするため)。
- */
+/** `armKey` は arm を区別する安定した鍵で、`armLabel`（見出し文言）とは独立に保つ（見出しを変えても tenantId が変わらないように）。 */
 export function buildArmTenantId(armKey: string, runToken: string): string {
   return `retrieval-quality-arm-${armKey}-${runToken}`;
 }
 
-// ---------------------------------------------------------------------------
-// 語彙チャンネルを通す構成を選べるようにする(ADR 0148、Issue #179)
-//
-// **既定は今日までと1バイトも変えない**——`MNEMORA_BENCH_CHANNELS` を指定しない
-// 呼び出しは `parseBenchChannels` が `undefined` を返し、`RunRetrievalQualityArmOptions
-// .channels` を省略した呼び出しと同じ挙動になる(`runRetrievalQualityArm` は
-// `options.channels` が `undefined` のとき `recall()` に `channels` を渡さず、
-// `packages/core` 自身の既定 `DEFAULT_RECALL_CHANNELS` = `["ann"]` に委ねる)。
-// ---------------------------------------------------------------------------
+// 既定は変えない: `MNEMORA_BENCH_CHANNELS` を指定しない呼び出しは `parseBenchChannels` が `undefined` を返し、`recall()` に `channels` を渡さず `packages/core` の既定に委ねる。
 
 /**
- * `MNEMORA_BENCH_CHANNELS` の値(生の env 文字列)を読み、`recall()` へ渡す
- * `channels` を決める。**純関数**——`consolidation-cost-options.ts` の
- * `parseBudgetLadder` と同じ形で、env オブジェクトそのものではなく値1つを受け取る。
- *
- * **未指定・空文字なら `undefined`**(=呼び出し側は `channels` を渡さず、既定
- * `["ann"]` のまま)。カンマ区切りで `RECALL_CHANNELS`(`packages/core` の唯一の
- * 出所)の値だけを受け付ける——値の一覧をここに書き写さない(`RecallQuery.channels`
- * の doc が「値の一覧を散文で書かない」と定める規律と同じ)。未知の値は
- * `parseModeOverride`(`providers.ts`)と同じ形で例外にする——黙って無視すると、
- * typo が「既定のまま静かに ann だけで走った」に化ける。
+ * 未指定・空文字なら `undefined`。値は `RECALL_CHANNELS` の値だけを受け付け、一覧をここに書き写さない。
+ * 未知の値は例外にする——黙って無視すると、typo が「既定のまま静かに ann だけで走った」に化ける。
  */
 export function parseBenchChannels(
   value: string | undefined,
@@ -425,10 +250,6 @@ export function parseBenchChannels(
   return values as RecallChannel[];
 }
 
-// ---------------------------------------------------------------------------
-// arm 単位の実行
-// ---------------------------------------------------------------------------
-
 export interface RunRetrievalQualityArmOptions {
   armLabel: string;
   tenantId: string;
@@ -436,40 +257,15 @@ export interface RunRetrievalQualityArmOptions {
   memoryStore: MemoryStore;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
-  /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときに渡す。 */
   usageMeter?: UsageMeter;
-  /** 既定は `DEFAULT_HAYSTACK_SIZE`(`DEFAULT_TICK_LIMIT`=50 を超える件数)。 */
   haystackSize?: number;
-  /**
-   * `recall()` に渡す `channels`(ADR 0148、Issue #179)。
-   *
-   * **省略時は `recall()` 自身の既定(`DEFAULT_RECALL_CHANNELS` = `["ann"]`)のまま**
-   * ——この欄を渡さない既存の呼び出しは1バイトも挙動が変わらない(`cli.ts` の
-   * `runRetrieval()` は既定でこの欄を渡さない)。呼び出し側が明示的に
-   * `["ann", "lexical"]` 等を渡したときだけ、語彙チャンネルを通る構成に切り替わる。
-   */
+  /** 省略時は `recall()` 自身の既定のまま（既存の呼び出しの挙動を変えない）。 */
   channels?: readonly RecallChannel[];
-  /**
-   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。連想枠の既定 on が
-   * この arm の基準線を実際にどれだけ動かすかを測る、新設の測定専用オプション)。
-   *
-   * **省略時は `null`**——この arm の基準線(gold/distractor の順位)は連想枠の
-   * 既定 on/off という変更の影響を受けない、という ADR 0337 決定4の前提を1バイトも
-   * 変えない。`examples/chat/src/bench/association-default-on-measure.ts` だけが
-   * この欄を明示的に渡す。
-   */
+  /** 省略時は `null`——この arm の基準線は連想枠の既定 on/off の影響を受けない。`association-default-on-measure.ts` だけが明示的に渡す。 */
   association?: RecallAssociationQuery | null;
 }
 
-/**
- * observe() が返した `ObserveResult.extraction` の内訳(ADR 0068)。
- *
- * **なぜ数えるか**: `handleExtractableObservation`(`packages/core/src/runtime.ts`)は、
- * 冪等な再送(`created === false`)のとき `extraction: "skipped"` を返す——「今回は
- * 何も取り込んでいない」という信号そのものである。それを `for (const utterance of
- * utterances) { await options.runtime.observe(...) }` が丸ごと捨てていたのが、
- * この ADR が塞ぐ欠陥の現物(ADR 0033 が塞いだのと同じ形——返り値の説明を捨てる)。
- */
+/** observe() の `extraction` の内訳。冪等な再送（`created === false`）では `"skipped"` が返る（＝「今回は何も取り込んでいない」という信号）ので、捨てずに数える。 */
 export interface ExtractionOutcomeCounts {
   ok: number;
   skipped: number;
@@ -477,15 +273,8 @@ export interface ExtractionOutcomeCounts {
 }
 
 /**
- * この run が実際に ingest を測ったか(ADR 0008「無いには種類がある」の適用)。
- *
- * - `"measured"`: 全 utterance が新規 observation だった。`ingest` の数字はこの run のもの。
- * - `"replayed"`: 新規が0件だった(＝このテナントは既に取り込み済み)。`ingest` の数字は
- *   **この run のものではない**——前回以前に測った値がたまたま DB に残っているだけ。
- * - `"partial"`: 新規と冪等な再送が混ざっていた。`drain` の数字は新規分だけを反映する。
- *
- * **`boolean` に潰さない。**「測った/測っていない」の2値では `"partial"` を表現できず、
- * 表現しようとすると結局どちらかへ寄せて嘘になる。
+ * この run が実際に ingest を測ったか。`"replayed"` は新規が0件で、`ingest` の数字はこの run のものではない（前回以前の値が DB に残っているだけ）。
+ * `boolean` に潰さない: 2値では `"partial"` を表現できず、どちらかへ寄せて嘘になる。
  */
 export type IngestMeasurement = "measured" | "replayed" | "partial";
 
@@ -500,19 +289,11 @@ function classifyIngestMeasurement(counts: ExtractionOutcomeCounts): IngestMeasu
 export interface ArmIngestSummary {
   observationCount: number;
   drain: DrainResult;
-  /** observe() の `extraction` を捨てずに集計したもの。 */
   extractionCounts: ExtractionOutcomeCounts;
-  /** この run が ingest を実際に測ったか。 */
   measurement: IngestMeasurement;
   /**
-   * 既定の `tick()` を1回だけ呼ぶ実装(`ingestConversation`)だったら、
-   * この arm では止まっていたはずか。
-   *
-   * **`measurement === "replayed"` のときは `null`。**このとき `drain` は
-   * 「今回 claim できた embed ジョブが0件だった」という空の測定であり、そこから
-   * 「1回で足りた」(`false`)を導くのは、**測っていないことを「足りた」と言い換える
-   * 誤りそのもの**(本 ADR の背景)。`boolean | null` にして、「測っていない」と
-   * 「足りた」が同じ顔にならないようにする。
+   * `measurement === "replayed"` のときは `null`。このとき `drain` は空の測定で、そこから「1回で足りた」を導くのは、
+   * 測っていないことを「足りた」と言い換える誤り。`boolean | null` で2つが同じ顔にならないようにする。
    */
   singleTickWouldHaveStalled: boolean | null;
 }
@@ -527,41 +308,25 @@ export interface ArmReport {
   mrrOverall: number;
   mrrLexicalControl: number;
   mrrNonLexical: number;
-  /** usage-meter のレポート、または擬似 provider の場合の明示的な注記。 */
   usageReport: string;
-  /**
-   * この arm が実際に `recall()` へ渡した(または渡さず既定へ委ねた)チャンネル
-   * (ADR 0148、Issue #179)。**数字と条件を同じオブジェクトから離さない**という
-   * ADR 0088 §4 の規律の適用——`options.channels` を省略した呼び出しでも、
-   * ここには実際に使われた既定値(`DEFAULT_RECALL_CHANNELS`)がそのまま入る。
-   */
+  /** 実際に `recall()` へ渡した（または既定へ委ねた）チャンネル。省略した呼び出しでも、実際に使われた既定値が入る（数字と条件を同じオブジェクトから離さない）。 */
   channels: readonly RecallChannel[];
 }
 
-/**
- * 1つの provider の組み合わせ(arm)について、probe set を ingest し、
- * probe ごとに `recall()` を1回投げて順位を測る。
- *
- * **パラメータは既定のまま変えない**(PR 本文「実行時の規律」)——`recall()` には
- * `text` 以外を渡さない。閾値・limit・overFetchFactor は `packages/core` の既定値を
- * そのまま使う。
- */
+/** `recall()` には `text` 以外を渡さない。閾値・limit・overFetchFactor は `packages/core` の既定値をそのまま使う。 */
 export async function runRetrievalQualityArm(
   options: RunRetrievalQualityArmOptions,
 ): Promise<ArmReport> {
   const ctx: Ctx = { tenantId: options.tenantId };
   const utterances = buildProbeSetConversation(options.haystackSize ?? DEFAULT_HAYSTACK_SIZE);
 
-  // **`ObserveResult` を捨てない**(本 ADR の主題)。`extraction` の内訳を数えて、
-  // この run が実際に何を取り込んだか(measurement)を後で判定する材料にする。
+  // `ObserveResult` を捨てない。`extraction` の内訳を数え、この run が実際に何を取り込んだか（measurement）を後で判定する材料にする。
   const extractionCounts: ExtractionOutcomeCounts = {
     ok: 0,
     skipped: 0,
     llmFailedWholeObservation: 0,
   };
-  // Issue #719: `observed.memoryIds`(冪等な再送では空配列——`ObserveResult` の
-  // docstring)も積算し、`drainEmbedTicks` に渡す——「available_at との ms 競合で
-  // claim 0件のまま」黙って抜けないことを検査させる。
+  // `observed.memoryIds`（冪等な再送では空配列）も積算して `drainEmbedTicks` に渡す（claim 0件のまま黙って抜けさせない）。
   let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
     const observed = await options.runtime.observe(ctx, {
@@ -590,12 +355,7 @@ export async function runRetrievalQualityArm(
 
   const probes: ProbeOutcome[] = [];
   for (const probe of PROBES) {
-    // association: options.association ?? null — 連想枠が既定 on になった（ADR 0337。
-    // オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）でも、この欄を
-    // 省略した既存の呼び出しでは北極星の物差し（retrieval-quality）の基準線を
-    // 動かさない。`options.association` を明示的に渡すのは、連想枠の既定 on が
-    // この基準線をどれだけ動かすかを測る新設の測定スクリプト（ADR 0337 追記
-    // 2026-09-26、association-default-on-measure.ts）だけである。
+    // association: options.association ?? null — 連想枠が既定 on でも、省略した既存の呼び出しでは基準線を動かさない。
     const result = await options.runtime.recall(ctx, {
       text: probe.query,
       ...(options.channels !== undefined ? { channels: [...options.channels] } : {}),
@@ -625,8 +385,6 @@ export async function runRetrievalQualityArm(
       scoreDetails: collectScoreDetails(result.memories, { goldRank, distractorRank }),
       termSpreads: computeTermSpreads(result.memories),
       recalledRows: result.memories.length,
-      // Issue #548 方向2 / ADR 0352: affinityMeasured: false には lexicalMatch という欄自体が
-      // 無い（以前は undefined だった——値は変わらず、判定の形だけ変えている）。
       lexicalMatchRows: result.memories.filter(
         (m) => m.score.affinityMeasured !== false && m.score.lexicalMatch !== undefined,
       ).length,
@@ -669,19 +427,11 @@ export async function runRetrievalQualityArm(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 表示
-// ---------------------------------------------------------------------------
-
 function formatRank(rank: number | null): string {
   return rank === null ? "(無し)" : String(rank);
 }
 
-/**
- * 小さい値を 0.000000 に潰さない。幅が 1e-4 未満のときに指数表記へ倒すのは、
- * 「その項は動いていない」を「その項は 0 だった」と読み違えさせないため——
- * decay の幅は実測で 10^-5 の桁に出る（0 ではないが順位を動かせない）。
- */
+/** 小さい値を 0.000000 に潰さない。幅が 1e-4 未満で指数表記に倒すのは、「その項は動いていない」を「0 だった」と読み違えさせないため。 */
 export function formatScoreValue(value: number): string {
   if (value !== 0 && Math.abs(value) < 1e-4) {
     return value.toExponential(3);
@@ -690,25 +440,13 @@ export function formatScoreValue(value: number): string {
 }
 
 /**
- * 丸めない整形(ADR 0081 §6.2 / ADR 0109)。
- *
- * **`formatScoreValue`(6桁丸め、または `1e-4` 未満は指数表記)はここでは変えない**
- * ——既存の印字(`formatTermSpreads`/`formatScoreDetail`)はそのまま使い続ける。
- * こちらは新設で、`String(value)` がそのまま返す、double を往復可能な最短の
- * 10進表現を使う。
- *
- * **なぜ要るか**: ADR 0081 §6.2 は、`formatScoreValue` を `decay`/`freshness` の
- * 生値の印字に流用したところ、両者とも `1.000000` に丸められ、「`distinctCount=10`
- * なのに `min=max=1.000000`」という自己矛盾した表示になったことを記録している
- * (`decay`/`freshness` は 1 からの差が 1e-7〜1e-8 桁であり、6桁丸めでは差が消える。
- * 実測は ADR 0109 §4)。
- * `formatTermDistinctCounts` はこの関数を使うことで、その欠陥を再現しない。
+ * 丸めない整形。`formatScoreValue`（6桁丸め）を `decay`/`freshness` の生値に流用すると、両者とも `1.000000` に丸められ、
+ * 「distinctCount=10 なのに min=max=1.000000」という自己矛盾した表示になる。既存の印字は変えず、こちらを新設した。
  */
 export function formatExactScoreValue(value: number): string {
   return String(value);
 }
 
-/** 項ごとの値の幅を1行にする。幅が最大の項が、その recall の順位を決めた項である。 */
 export function formatTermSpreads(spreads: readonly TermSpread[]): string {
   return spreads
     .map((s) =>
@@ -719,14 +457,7 @@ export function formatTermSpreads(spreads: readonly TermSpread[]): string {
     .join(" ");
 }
 
-/**
- * 項ごとの「何通りか」を1行にする(ADR 0081 §1.1 / ADR 0109)。
- *
- * **既存の `formatTermSpreads`(幅)とは別の行として足す。**両者は別の主張であり
- * (`TermSpread.distinctCount` の doc 参照)、既存の行の文面は1文字も変えない。
- * min/max は丸めない(`formatExactScoreValue`)——`decay`/`freshness` の 1e-7 桁の
- * 差を、6桁丸めの `formatScoreValue` で消さないため(ADR 0081 §6.2 / ADR 0109 §4)。
- */
+/** 既存の `formatTermSpreads`（幅）とは別の行として足す（別の主張であり、既存の行の文面は変えない）。min/max は丸めない。 */
 export function formatTermDistinctCounts(spreads: readonly TermSpread[]): string {
   return spreads
     .map((s) =>
@@ -737,19 +468,12 @@ export function formatTermDistinctCounts(spreads: readonly TermSpread[]): string
     .join(" ");
 }
 
-/** `decay`/`freshness` の行ごと厳密等価を1行にする(ADR 0081 §2 / ADR 0109)。 */
 export function formatDecayFreshnessRowwise(rowwise: DecayFreshnessRowwise): string {
   const suffix = rowwise.differentRows > 0 ? `(違う行が${rowwise.differentRows}件ある)` : "";
   return `${rowwise.equalRows}/${rowwise.rows}行${suffix}`;
 }
 
-/**
- * gold/distractor/1位のスコア内訳を、掛け算の形のまま1行ずつ出す。
- *
- * **2026-09-29（Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）:**
- * `affinityMeasured: false`（連想枠経由）は `total`/`similarity` を欄として持たない
- * ——「掛け算の形」自体を出せないので、比較可能でないことをそのまま名乗る。
- */
+/** `affinityMeasured: false` は `total`/`similarity` を持たず「掛け算の形」を出せないので、比較可能でないことをそのまま名乗る。 */
 export function formatScoreDetail(detail: ProbeScoreDetail): string {
   const s = detail.score;
   if (s.affinityMeasured === false) {
@@ -770,54 +494,28 @@ export function formatScoreDetail(detail: ProbeScoreDetail): string {
   );
 }
 
-// ---------------------------------------------------------------------------
-// arm の見出し数字を1箇所で作る(ADR 0068 ②)
-//
-// **なぜ足すか**: `formatArmSummaryTable` は MRR しか持っていなかった。`hit@1`/
-// `hit@10` を知るには `formatProbeComparisonTable`(arm ごとに5列 × 3 arm = 17列の
-// 横長の表)へ行って行を横に数える必要があり、そこで arm を跨いで数字を拾える隙間が
-// できていた——実際に「arm B の MRR」と「arm C の hit@10」を束ねて読み違えた実例がある。
-//
-// **引数は `ArmReport` 1つだけ。**複数の arm を受け取らないので、構造上、別の arm の
-// 数字が混ざりようがない。
-// ---------------------------------------------------------------------------
+// arm の見出し数字を1箇所で作る。引数は `ArmReport` 1つだけ: 複数の arm を受け取らないので、構造上、別の arm の数字が混ざりようがない
+// （arm B の MRR と arm C の hit@10 を束ねて読み違えた実例がある）。
 
 export interface ArmHeadline {
   mrrOverall: number;
   hit1Count: number;
   hit10Count: number;
   probeCount: number;
-  /** `report.probes[].recalledRows` の総和(この arm が実際に返した候補行の総数)。 */
   recalledRows: number;
-  /** `report.probes[].lexicalMatchRows` の総和(語彙チャンネルが引き当てた行の総数)。 */
   lexicalMatchRows: number;
-  /** 項ごとの、arm 全体での「何通りか」の集計(ADR 0081 §1.1 / ADR 0109)。 */
   termDistinct: ArmTermDistinct[];
-  /** `report.probes[].decayFreshnessRowwise.equalRows` の総和。 */
   decayFreshnessEqualRows: number;
-  /** `report.probes[].decayFreshnessRowwise.differentRows` の総和。 */
   decayFreshnessDifferentRows: number;
 }
 
-/**
- * 項ごとに、arm 全体での「何通りか」を集計する(ADR 0109)。
- *
- * **`probes[].termSpreads` からのみ導く。**別の集計にすると、この関数と
- * `formatArmDetail` の印字が食い違いうる(ADR 0068 ②と同じ理由)。
- */
+/** `probes[].termSpreads` からのみ導く。別の集計にすると、この関数と `formatArmDetail` の印字が食い違いうる。 */
 export interface ArmTermDistinct {
   term: ScoreTerm;
-  /** arm 全体で、その欄を持っていた行数(`presentCount` の probe 間の総和)。 */
   presentRows: number;
-  /** probe ごとの `distinctCount` の最小。 */
   minDistinctPerProbe: number;
-  /**
-   * probe ごとの `distinctCount` の最大。**これが 1 なら、arm 内のどの probe でも
-   * この項は候補間で1通りしか値を取っていない**(= 重みを触っても順位は動かない。
-   * ADR 0081 §1)。
-   */
+  /** probe ごとの `distinctCount` の最大。これが 1 なら、どの probe でもその項は候補間で1通りしか値を取らない（重みを触っても順位は動かない）。 */
   maxDistinctPerProbe: number;
-  /** arm 全体の最小値(丸めない生値)。項を持つ候補がどの probe にも無ければ null。 */
   min: number | null;
   max: number | null;
 }
@@ -825,10 +523,7 @@ export interface ArmTermDistinct {
 function computeArmTermDistinct(probes: readonly ProbeOutcome[]): ArmTermDistinct[] {
   return SCORE_TERMS.map((term) => {
     let presentRows = 0;
-    // `null` は「まだ1件も見ていない」——先頭の probe がたまたまこの項を
-    // 持たない(`termSpreads` にこの項の要素そのものが無い)場合でも、
-    // 見つかった最初の1件を基準に min/max を初期化できるようにする
-    // (probe の並び順に依存させない)。
+    // `null` は「まだ1件も見ていない」。先頭の probe がたまたまこの項を持たなくても、最初に見つかった1件を基準に初期化できる（probe の並び順に依存させない）。
     let minDistinctPerProbe: number | null = null;
     let maxDistinctPerProbe: number | null = null;
     let min: number | null = null;
@@ -865,7 +560,6 @@ function computeArmTermDistinct(probes: readonly ProbeOutcome[]): ArmTermDistinc
   });
 }
 
-/** 1つの arm の見出し数字。`report.probes` からのみ導く。 */
 export function armHeadline(report: ArmReport): ArmHeadline {
   return {
     mrrOverall: report.mrrOverall,
@@ -886,12 +580,10 @@ export function armHeadline(report: ArmReport): ArmHeadline {
   };
 }
 
-/** `4/7` のような `n/総数` の形。 */
 function formatFraction(count: number, total: number): string {
   return `${count}/${total}`;
 }
 
-/** arm ごとの詳細(probe 単位の内訳・ingest の内訳・usage レポート)。 */
 export function formatArmDetail(report: ArmReport): string {
   const lines: string[] = [];
   lines.push(`=== arm ${report.armLabel}(tenant=${report.tenantId}) ===`);
@@ -905,9 +597,7 @@ export function formatArmDetail(report: ArmReport): string {
       `totalFailed=${report.ingest.drain.totalFailed} ` +
       `measurement=${report.ingest.measurement}`,
   );
-  // **測っていない(`"replayed"`)ときは、測っていないと印字する**——これが本 ADR の
-  // 核心。かつてはここが `singleTickWouldHaveStalled` を単純な `? :` で読んでおり、
-  // 「測っていない」が `false`(足りた)と同じ文面に潰れていた。
+  // 測っていない（`"replayed"`）ときは、測っていないと印字する。単純な `? :` で読むと、「測っていない」が `false`（足りた）と同じ文面に潰れる。
   if (report.ingest.measurement === "replayed") {
     lines.push(
       "  (このテナントは既に取り込み済みで、ingest の数字は今回の run のものではない" +
@@ -945,9 +635,7 @@ export function formatArmDetail(report: ArmReport): string {
       lines.push(`      ${formatScoreDetail(detail)}`);
     }
   }
-  // **`armHeadline()` から作る(ADR 0068 ②)。**`formatArmSummaryTable` の同じ数字と
-  // 別々に計算すると、2箇所が食い違うことがあり得る(そして実際に読み違いが起きた)。
-  // 同じ関数から作ることで、構造上食い違いようがなくする。
+  // `armHeadline()` から作る。`formatArmSummaryTable` と別々に計算すると、2箇所が食い違いうる（実際に読み違いが起きた）。
   const headline = armHeadline(report);
   lines.push(
     `MRR: 全体=${headline.mrrOverall.toFixed(3)} ` +
@@ -960,7 +648,6 @@ export function formatArmDetail(report: ArmReport): string {
   return lines.join("\n");
 }
 
-/** probe ごとに、3 arm を並べて goldRank/distractorRank を比較する表。 */
 export function formatProbeComparisonTable(reports: ArmReport[]): string {
   const header = [
     "probe",
@@ -997,14 +684,7 @@ export function formatProbeComparisonTable(reports: ArmReport[]): string {
   ].join("\n");
 }
 
-/**
- * arm ごとの ingest・MRR・hit@1・hit@10 のまとめ表(ADR 0068 ②)。
- *
- * **`hit@1`/`hit@10` をここに足したのは、arm の見出し数字を知るために
- * `formatProbeComparisonTable`(横長・arm を跨いで数える必要がある表)へ行く理由を
- * 無くすため。**MRR と同じ行に並べる——別の表を経由すれば、その分だけ別の arm の
- * 数字を拾い間違える隙間が増える。
- */
+/** `hit@1`/`hit@10` を MRR と同じ行に並べる。横長の `formatProbeComparisonTable` を経由すると、別の arm の数字を拾い間違える隙間が増える。 */
 export function formatArmSummaryTable(reports: ArmReport[]): string {
   const header =
     "| arm | llmMode | embeddingMode | observations | ticks | 初回tick処理数 | 合計処理数 | " +
@@ -1012,8 +692,7 @@ export function formatArmSummaryTable(reports: ArmReport[]): string {
     "MRR(非語彙) | hit@1 | hit@10 |";
   const sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|";
   const rows = reports.map((r) => {
-    // `singleTickWouldHaveStalled` は測っていないとき `null`——それを "いいえ"(足りた)
-    // に潰すと、この ADR が塞いだはずの欠陥がこの表に戻ってきてしまう。
+    // `singleTickWouldHaveStalled` は測っていないとき `null`。「いいえ（足りた）」に潰すと、塞いだはずの欠陥がこの表に戻ってくる。
     const stalled =
       r.ingest.singleTickWouldHaveStalled === null
         ? "(測っていない)"

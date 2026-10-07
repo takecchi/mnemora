@@ -44,46 +44,8 @@ import {
 } from "../retrieval-quality-shadow-verdict.js";
 
 /**
- * Issue #109 後半——ADR 0094「これが覆るとしたら」第1項
- * 「標本が数十件になり、その母数で偽陽性率に上限を置けると実測できたとき」を
- * 実測するスクリプト（手で回す再計測の手順。CI からは呼ばない）。
- *
- * ## やること
- *
- * 1. **6群**（識別子×2haystack・日本語固有名詞×2haystack・数詞×2haystack。
- *    `../openai-arm-probe-groups.ts`）が要求する全テキストを、**1巡=1回のバッチ
- *    embed 呼び出し**で実 API に投げる。同じバッチ内に同じ文字列を入れない
- *    （`collectAllTexts` が重複除去済みの集合を返す）。
- * 2. **round 0 を「公式の記録」（CI が再生するカセット・基準値ファイルの出所）にする。**
- *    round 1..K は round 0 と**同じ設定・同じコード**で独立に録り直したものであり、
- *    round 0 との差は埋め込みの実測揺れ（マネージャーの予備測定: 同一入力を別呼び出しで
- *    投げると最小コサイン類似度 0.9986）だけである。
- * 3. 各 round・各群を、**本物の Postgres + pgvector（`recorded` provider、round の
- *    埋め込みをその場でカセット化したもの）を通した `runIdentifierProbeArm`** で
- *    実測する——cosine 類似度だけで順位を決める簡易近似ではなく、実際の
- *    `recall()` パイプラインを毎回本当に走らせる。
- * 4. round 1..K それぞれについて、round 0（基準値）との比較を
- *    `decideEmbeddingDriftVerdict`（測定前に決めた閾値）にかけ、「品質は変わって
- *    いないのに red になった」割合と、その Clopper–Pearson 片側95%上限を出す。
- * 5. 副産物として、既存の `examples/chat/cassettes/retrieval.json`
- *    （2026-09-06 録画）と、いま録り直した埋め込みとの差で、主測定7 probe の
- *    ADR 0276 shadow verdict（`decideRetrievalQualityShadowVerdict`）がどう出るかを
- *    **1標本として**併記する。⛔ 既存カセットは1バイトも書き換えない。
- *
- * ## 使い方
- *
- * ```
- * OPENAI_API_KEY=... DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-embedding-fp-ceiling.ts
- * ```
- *
- * 環境変数:
- * - `MNEMORA_OPENAI_FP_CEILING_ROUNDS`（既定 59。マネージャー指示——赤が0件のとき
- *   Clopper–Pearson 片側95%上限が約5%になる件数）。
- * - `MNEMORA_OPENAI_FP_CEILING_MRR_DROP_THRESHOLD`（既定 0.01）。
- *
- * ⛔ **`OPENAI_API_KEY` の値はどこにも出力しない**（ログ・生成物のどちらにも）。
- * 呼び出し回数・トークン数・概算費用は `usage-meter.ts` の集計をそのまま出す。
+ * 手で回す再計測（CI からは呼ばない）。round 0 が公式の記録（CI が再生するカセット・基準値の出所）で、round 1..K は同じ設定・同じコードで録り直したもの。
+ * `OPENAI_API_KEY` の値はログにも生成物にも出さない。
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -106,10 +68,6 @@ function requireEnv(name: string): string {
   return value;
 }
 
-/**
- * 1群の実測を、**本物の Postgres + pgvector・`recorded` provider**（round の埋め込みを
- * その場でカセット化したもの）を通して行う。
- */
 async function measureGroup(
   databaseUrl: string,
   cassette: Cassette,
@@ -188,16 +146,8 @@ async function runRound(
 }
 
 /**
- * 副産物: 既存 `retrieval.json` との1標本の乖離チェック(⛔ 統計的主張ではない)。
- *
- * **本物の `recall()` パイプライン（Postgres + pgvector）を通す。**⚠ 最初の実装は
- * 素朴な cosine 順位だけで近似したが、`retrieval-quality-regression.postgres.test.ts`
- * が使う config（`llmMode="recorded"` = 本物の LLM が書き換えた digest を埋め込む、
- * ADR 0094 の arm C 相当）と食い違い、既知の実測値（ADR 0276「MRR=0.738095238095238
- * hit@1=4/7」）を再現しなかった（`diet` probe の goldRank が 13 と出た。既知値は 6）。
- * ⟹ **LLM 層は `retrieval.json` の記録をそのまま再生し（録り直さない）、embedding
- * 層だけを新しい値に差し替える**——マネージャーの依頼そのもの（「主測定7件の判定が
- * どう出るか」の対象は embedding の乖離であり、LLM 出力の乖離ではない）。
+ * 1標本の乖離チェック（統計的主張ではない）。LLM 層は `retrieval.json` の記録をそのまま再生し、embedding 層だけ新しい値に差し替える。
+ * 素朴な cosine 順位での近似は、既知の実測値（ADR 0276）を再現しなかったので使わない。
  */
 async function runDriftOneSample(databaseUrl: string, embeddingProvider: OpenAIEmbeddingProvider) {
   const recorded = loadCassette(RETRIEVAL_CASSETTE_PATH);
@@ -210,7 +160,6 @@ async function runDriftOneSample(databaseUrl: string, embeddingProvider: OpenAIE
   texts.forEach((text, i) => {
     freshEntries[embeddingCassetteKey(text)] = { text, vector: vectors[i]! };
   });
-  // **`llm` 節は録り直した `retrieval.json` の記録そのまま**——embedding だけを新しくする。
   const freshCassette = {
     ...recorded,
     embedding: { space: embeddingProvider.space, entries: freshEntries },
@@ -320,7 +269,6 @@ async function main(): Promise<void> {
       `round 0(公式記録・基準値の出所)+ round 1..${rounds}(偽陽性率の実測)を行う。`,
   );
 
-  // --- round 0: 公式の記録・基準値 ---
   console.log("\n[openai-embedding-fp-ceiling] round 0(公式記録)を実行中…");
   const { result: round0, entries: round0Entries } = await runRound(
     databaseUrl,
@@ -337,7 +285,6 @@ async function main(): Promise<void> {
       .join("\n"),
   );
 
-  // --- カセット・基準値ファイルを書き出す(公式記録。CIが再生する) ---
   const space = embeddingProvider.space;
   const identifierTexts = new Set(collectAllTexts(identifierArmGroups()));
   const numeralTexts = new Set(collectAllTexts(numeralArmGroups()));
@@ -418,7 +365,6 @@ async function main(): Promise<void> {
       `  ${IDENTIFIER_OPENAI_BASELINE_PATH}\n  ${NUMERAL_TOKEN_OPENAI_BASELINE_PATH}`,
   );
 
-  // --- round 1..K: 偽陽性率の実測 ---
   const perRound: { round: number; verdict: DriftVerdict; metrics: ProxyGroupMetrics[] }[] = [];
   for (let round = 1; round <= rounds; round += 1) {
     console.log(`\n[openai-embedding-fp-ceiling] round ${round}/${rounds} を実行中…`);
@@ -433,9 +379,7 @@ async function main(): Promise<void> {
   const numRed = perRound.filter((r) => r.verdict.red).length;
   const upperBound95 = clopperPearsonUpperBound(numRed, rounds, 0.05);
 
-  // 群ごとの red 件数・上限も出す——6群を「いずれかが red」で束ねた集計だけでは、
-  // どの群が偽陽性率を持ち上げているかが読めない(マネージャー報告の対象は
-  // 「上限の値と、その射程」であり、集計だけでは射程が粗すぎる)。
+  // 群ごとの red 件数・上限も出す（「いずれかが red」の集計だけでは、どの群が偽陽性率を持ち上げているか読めない）。
   const perGroupFalsePositiveCeiling: Record<
     string,
     { redCount: number; trials: number; redRate: number; clopperPearsonUpperBound95: number }
@@ -465,7 +409,6 @@ async function main(): Promise<void> {
       .join("\n"),
   );
 
-  // --- 副産物: 既存カセットとの1標本の乖離チェック ---
   console.log(
     "\n[openai-embedding-fp-ceiling] 副産物: retrieval.json との1標本の乖離チェックを実行中…",
   );

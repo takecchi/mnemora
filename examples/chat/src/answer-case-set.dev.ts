@@ -1,15 +1,6 @@
 import type { AnswerCase } from "./answer-case.js";
 
-/**
- * `answer` ベンチの開発用ケース集合（`tuningUse: "development"`）。
- *
- * ⛔ **会話を生成しない。1件ずつ手で書く。** 各会話は6〜12ターン程度、日本語。
- * 6類（`AnswerCategory`）すべてを最低1件ずつ含む——`__tests__/answer-case.test.ts` が
- * この集合に対して機械的に検査する。
- *
- * ここは**調整に使ってよい**側である。実装のふるまいを見ながらケースを直してよい
- * （`answer-case-set.eval.ts` の冒頭コメントと対になる）。
- */
+/** 会話を生成しない。1件ずつ手で書く。 */
 export const ANSWER_CASE_SET_DEV: AnswerCase[] = [
   {
     id: "pref-tea-over-coffee",
@@ -101,8 +92,6 @@ export const ANSWER_CASE_SET_DEV: AnswerCase[] = [
         "第0ターンで『わたしの誕生日は4月3日、妻の誕生日は9月10日』と2人分の事実が並んでいる。問いは妻の側だけを指しており、本人の4月3日は別人（reject）の値である。",
     },
     tuningUse: "development",
-    // ADR 0334 負債2: 本人以外の第三者（妻）が出てくるケース。正解の claim key
-    // subject 候補（上限＝オラクル測定用、`AnswerCase.knownSubjects` docstring参照）。
     knownSubjects: ["user", "妻"],
   },
   {
@@ -145,10 +134,7 @@ export const ANSWER_CASE_SET_DEV: AnswerCase[] = [
       reject: ["A型", "B型", "O型", "AB型"],
     },
     grounds: {
-      // ⭐ 採った案: `turnIndex` の空配列を `unknown` のときだけ許す
-      // （`AnswerGrounds.turnIndex` の docstring / `assertGroundsPresent` 参照）。
-      // 「会話のどこにも根拠が無い」こと自体が根拠なので、根拠となるターンを
-      // 名指しできない——空配列のまま持たせる。
+      // `unknown` のときだけ `turnIndex` の空配列を許す。「会話のどこにも根拠が無い」こと自体が根拠だから。
       turnIndex: [],
       rationale:
         "会話のどのターンにも血液型についての言及が無い。根拠となるターンが構造的に存在しない。",

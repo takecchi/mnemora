@@ -6,21 +6,8 @@ import { JAPANESE_NAME_PROBE_SET_SPEC } from "./japanese-name-probe-set.js";
 import { NUMERAL_TOKEN_PROBE_SET_SPEC } from "./numeral-token-probe-set.js";
 
 /**
- * Issue #109 後半（#106/#109 の「これが覆るとしたら」第1項——標本が数十件になり、
- * その母数で偽陽性率に上限を置けると実測できたとき）のための、
- * **OpenAI 実埋め込み・`recorded` provider の arm を通す6群**の宣言。
- *
- * ⛔ **`identifier-probe-set.ts`/`japanese-name-probe-set.ts`/`numeral-token-probe-set.ts`
- * には1文字も触れていない。**ここは既存の `ArmProbeSetSpec`/`buildConversation` を
- * import して使うだけである（ADR 0094 §3 の規律——既存 probe 集合には触らず、
- * 別ファイルで新しい組み合わせを作る）。
- *
- * **なぜ `japanese`（`./probe-set.js` の既存7 probe）を含めないか**: この群は既に
- * `retrieval-baseline.json` の arm B/C が `(openai, text-embedding-3-small, 256)` で
- * 測っている（`examples/chat/cassettes/retrieval.json`）。同じ空間・同じ probe を
- * 二重に録ると、どちらが正本か分からなくなる。⟹ **ここで足すのは、まだ OpenAI 空間で
- * 測ったことが無い4集合（識別子×2haystack・日本語固有名詞×2haystack）と、
- * 数詞・記号索引×2haystack の計6群だけ**である。
+ * OpenAI 実埋め込み・`recorded` provider の arm を通す6群の宣言。`japanese`（`./probe-set.js` の既存7 probe）を含めないのは、
+ * 既に `retrieval-baseline.json` の arm B/C が同じ空間で測っており、二重に録るとどちらが正本か分からなくなるため。
  */
 export type OpenAiArmGroupKey =
   | "identifiersSparse"
@@ -32,12 +19,9 @@ export type OpenAiArmGroupKey =
 
 export interface OpenAiArmGroupDescriptor {
   key: OpenAiArmGroupKey;
-  /** どのファミリーに属するか。CLI 側で JSON 出力先を分けるために使う。 */
   family: "identifier" | "numeral";
   probeSet: ArmProbeSetSpec;
   haystackKind: IdentifierHaystackKind;
-  /** `armLabel` を組む素材。実際の `(provider, model, dimensions)` は呼び出し側が
-   *  実測空間から埋める（ADR 0094 §1「数字には必ず3つを添える」）。 */
   labelSlug: string;
 }
 
@@ -87,13 +71,8 @@ export const OPENAI_ARM_GROUPS: readonly OpenAiArmGroupDescriptor[] = [
 ];
 
 /**
- * `armLabel` の**唯一の出所**。`examples/chat/src/cli.ts`(実測 JSON を作る側)と
- * `examples/chat/src/scripts/openai-embedding-fp-ceiling.ts`(基準値 JSON を作る側)の
- * どちらも、この関数で label を組む——**別々の文字列テンプレートを持たない**。
- *
- * ⚠ **この関数を2箇所で別々に持っていた初期実装は、実際に相違を起こした**
- * （`openai-arm-summary-lib.mjs` の diff が毎回 `label` だけ相違を出し続けていた——
- * ADR 0094 §8.1「label が条件を落としていた」と同じ形の再発）。
+ * `armLabel` の唯一の出所。`cli.ts` と `openai-embedding-fp-ceiling.ts` のどちらもこの関数で label を組み、
+ * 別々の文字列テンプレートを持たない（2箇所に持つと label だけ相違が出続けた）。
  */
 export function buildArmLabel(
   group: OpenAiArmGroupDescriptor,
@@ -115,23 +94,12 @@ export function numeralArmGroups(): readonly OpenAiArmGroupDescriptor[] {
   return OPENAI_ARM_GROUPS.filter((g) => g.family === "numeral");
 }
 
-/**
- * 1群の会話（`buildConversation`）を実際に組み立て、utterance 全文を返す。
- * haystack サイズは各 probe 集合の既定（`buildConversation` 第1引数省略）に揃える
- * ——CI で実際に走る `identifier-probes`/`numeral-token-probes` サブコマンドと
- * 同じ既定値を使うことが、この測定の忠実さの前提である。
- */
+/** haystack サイズは各 probe 集合の既定に揃える（CI で走るサブコマンドと同じ既定値を使うことが、この測定の忠実さの前提）。 */
 export function buildGroupConversation(group: OpenAiArmGroupDescriptor): ProbeUtterance[] {
   return group.probeSet.buildConversation(undefined, group.haystackKind);
 }
 
-/**
- * 与えた群集合が要求する**全テキストの和集合**（重複除去済み）を返す。
- * これを1回のバッチ embed 呼び出しに渡す（マネージャー指示「1巡=1回のバッチ呼び出し」）。
- *
- * query は `buildConversation` の戻り値に現れない（`recall()` 時に別途埋め込まれる
- * 入力であり、ingest される memory ではない）ため、ここで明示的に足す。
- */
+/** query は `buildConversation` の戻り値に現れない（`recall()` 時に別途埋め込まれる）ので、ここで明示的に足す。 */
 export function collectAllTexts(groups: readonly OpenAiArmGroupDescriptor[]): string[] {
   const set = new Set<string>();
   for (const group of groups) {

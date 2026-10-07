@@ -1,17 +1,11 @@
 import type { CorrectionHitCase } from "./correction-case.js";
 
 /**
- * 訂正の相手探しベンチの**開発用**ケース集合（`tuningUse: "development"`）。
+ * 訂正の相手探しベンチの開発用ケース集合（`tuningUse: "development"`）。調整に使ってよい側。
  *
- * ここは**調整に使ってよい**側である。器が動くことの確認に使い、実装のふるまいを
- * 見ながら直してよい（`correction-case-set.eval.ts` の冒頭コメントと対になる）。
- *
- * ⛔ **この集合の結果を「未使用の評価」として報告しない**（`docs/autonomy.md` §2.2 決定5）。
- *
- * ⚠ `dev-color` は repo に既に在った唯一の訂正シナリオ
- * （`correction-scenario.ts` の「好きな色は青 → 赤」）と同じ題材である。**そちらは相手を
- * `contestedPair` にハードコードしており**、相手探しの的中率という量を生成できない
- * ——この集合はそこを測れる形に置き直したものである。
+ * この集合の結果を「未使用の評価」として報告しない（`docs/autonomy.md` §2.2 決定5）。
+ * `dev-color` は `correction-scenario.ts` と同じ題材だが、あちらは相手を `contestedPair` にハードコードしており、
+ * 相手探しの的中率を生成できない。この集合はそこを測れる形に置き直したもの。
  */
 export const CORRECTION_CASE_SET_DEV: CorrectionHitCase[] = [
   {

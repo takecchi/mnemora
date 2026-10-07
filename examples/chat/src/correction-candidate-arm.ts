@@ -15,77 +15,34 @@ import { resolveExternalId } from "./provenance-trace.js";
 import { requireMeasuredTotal, scoreTotalOrNull } from "./recalled-score.js";
 
 /**
- * Issue #369 (C)「訂正の口」の相手探しの精度を測る arm。
+ * 訂正の口の相手探しの精度を測る arm。`identifier-arm.ts` とほぼ同じ形で、違うのは測る量だけ。
  *
- * **`identifier-arm.ts` とほぼ同じ形**（ケースを1本の会話に ingest → ケースごとに
- * `recall()` を1回投げて順位を測る）である。違うのは測る量だけ:
+ * `recall()` には `text` 以外を渡さない。閾値・`limit`・`overFetchFactor` を変えず、既定の景色を測る。
+ * 訂正の発話そのものは `observe()` しない。自分自身が自明に1位を取るのを避けるため。
+ * 「訂正を observe してから自己を除外して探す」形（`Runtime.findCorrectionCandidates` の `excludeMemoryIds`）は、この器では測っていない。
  *
- * - **A 群**（訂正すべき相手が実在する）→ hit@k / MRR / **distractor 逆転率**
- * - **B 群**（⛔ 訂正してはいけない）→ **誤爆率（深/浅）** と **棄権率**
+ * `intrusionMargin`（ADR 0291 §5.5・ADR 0321）はこの意味のまま凍結する。書き換えず、別名 `protectionMargin`
+ * （ADR 0333）を追加して並べて出す。今日のケース集合は `protectedFacts` が0〜1件なので、深い誤爆のとき
+ * `intrusionMargin` は常に0になる。これは欠陥ではなく定義どおり。
  *
- * ⛔ **`recall()` には `text` 以外を渡さない**（既存 arm と同じ規律）——閾値・`limit`・
- * `overFetchFactor` を一切変えない。⟹ **(C) が実際に見ることになる既定の景色を測る。**
+ * `protectionMargin` の `protectedFactScore` は保護対象のうち最小（最も危うい）を使う。
+ * `protectedAtTop` は最大スコアの保護対象が1位かと同値なので、保護対象が2件以上のケースでは符号がねじれうる
+ * （ADR 0333 §3.5、未検証。今日のケース集合では表面化しない）。max 版は未実装。
  *
- * ⭐ **訂正の発話そのものは `observe()` しない。**自分自身が自明に1位を取るのを避ける
- * ため。⟹ ⚠ **「訂正を observe してから自己を除外して探す」形は、この器では測って
- * いない**（`Runtime.findCorrectionCandidates` の `excludeMemoryIds` がその形を取る）。
- *
- * **`margin`/`intrusionMargin`（[ADR 0291](../../../docs/decisions/0291-primary-probe-coverage-map-correction-candidate-domain.md) §5.5、
- * [ADR 0321](../../../docs/decisions/0321-correction-candidate-domain-implementation.md)）**:
- *
- * - A群: `margin = goldScore − distractorScore`（`ScoreBreakdown.total` の差）。
- *   どちらかが `null`（返らなかった）なら `null`。`identifier-arm.ts` の `margin`
- *   （`similarity` の差）とは**使う値が違う**——この arm はもともと `goldScore` を
- *   `.total` で記録しており、その系譜をそのまま延長した。
- * - B群: `intrusionMargin = topScore − protectedFactScore`。**深い誤爆
- *   （`protectedAtTop === true`）のときだけ**定義し、誤爆(浅)・棄権のときは `null`
- *   （ADR 0291 §5.5 の逐語どおり）。`protectedFactScore` は `protectedFacts`（複数件
- *   ありうる）のうち、返った候補の中で最も順位が低い（＝最も危うい）ものの
- *   `ScoreBreakdown.total`。⚠ **今日のケース集合はどれも `protectedFacts` が0〜1件
- *   なので、深い誤爆のとき `topScore === protectedFactScore` となり
- *   `intrusionMargin` は常に `0`——これは実装の欠陥ではなく定義どおりの挙動である
- *   （ADR 0321 に実測として記録）。**複数件になって初めて非自明な値になる。
- *   🧊 **`intrusionMargin` はこの意味のまま凍結する**（ADR 0291 §5.5 の逐語・
- *   ADR 0321 の回帰テストを1つも変えない）。**並べて出す後継は `protectionMargin`
- *   （ADR 0333、下記）——`intrusionMargin` を書き換えるのではなく、別名を追加する形。
- * - B群: `protectionMargin = protectedFactScore − topNonProtectedScore`
- *   （ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」）。
- *   `topNonProtectedScore` は保護対象でない候補（＝訂正に使われうる候補）の中の
- *   最有力スコア（`maxNonProtectedScore`）。`intrusionMargin` と違い、**深い誤爆・
- *   誤爆(浅)の両方で定義される**（`protectedFacts` が1件以上返っている限り）。
- *   符号: 正=深い誤爆側（保護対象が最有力の非保護候補より高い）、
- *   負=誤爆(浅)側（非保護候補が保護対象より高い）。`null` になるのは
- *   `protectedFactScore`/`topNonProtectedScore` のどちらかが `null` のとき
- *   （`protectedFacts` が0件、または一方の側が1件も候補として返らなかった場合）。
- *   ⚠ **`protectedFacts` が複数件のケースでの限界（ADR 0333 §3.5、未検証）**:
- *   `protectedFactScore` は保護対象のうち**最小**（最も危ういもの、既存の設計判断）を
- *   使う——`protectedAtTop` は「**最大**スコアの保護対象が1位か」と同値であるため、
- *   保護対象が2件以上あるケースでは `protectionMargin`（min協定）の符号が
- *   `protectedAtTop` とねじれうる（例: 保護対象0.95(1位)と0.3の2件、非保護最有力0.5
- *   → `protectedAtTop=true` だが `protectionMargin=0.3−0.5=−0.2` で見かけ上
- *   誤爆(浅)側の符号になる）。**今日のケース集合は `protectedFacts` が0〜1件なので
- *   顕在化しない**——実装のバグではなく、「最も危うい保護対象」と「1位に来た保護対象」が
- *   異なる問いになるために起きる（min版とmax版は別の問いに答える。max版
- *   `protectionMarginBest` は未実装）。
- * - `computeMarginStats`（`identifier-arm.ts`、ADR 0135 §5.5）をそのまま再利用し、
- *   arm 全体では平均・標準偏差・最小値の分布で読む。**二値（hit@k・誤爆の深/浅）と
- *   併記する。置き換えない**——ADR 0135/0291 と同じ理由。
+ * 二値（hit@k・誤爆の深/浅）と margin の分布は併記する。置き換えない（ADR 0135/0291 と同じ理由）。
  */
 
-/** A 群1件ぶんの結果。 */
 export interface CorrectionHitOutcome {
   caseId: string;
-  /** `recall().memories` の中の gold の順位（1始まり）。居なければ null。 */
   goldRank: number | null;
   distractorRank: number | null;
-  /** 同じ話題・違う主語/値が gold より上に来たか。**これが「深刻さ」の指標である。** */
+  /** 同じ話題・違う主語/値が gold より上に来たか。深刻さの指標。 */
   distractorBeatsGold: boolean;
   /** gold の `ScoreBreakdown.total`。返らなかったなら null（0 へ倒さない）。 */
   goldScore: number | null;
   /**
-   * `goldScore − distractorScore`（ADR 0291 §5.5、ADR 0321）。
-   * どちらかが `null`（返らなかった）なら `null`——「差が0だった」と「測れなかった」を
-   * 同じ顔にしない（ADR 0033「無いには種類がある」の適用）。
+   * `goldScore − distractorScore`。どちらかが `null` なら `null`。
+   * 「差が0だった」と「測れなかった」を同じ顔にしない（ADR 0033）。
    */
   margin: number | null;
   returned: number;
@@ -93,46 +50,30 @@ export interface CorrectionHitOutcome {
   omittedKinds: string[];
 }
 
-/** B 群1件ぶんの結果。 */
 export interface CorrectionAbstainOutcome {
   caseId: string;
   kind: CorrectionAbstainCase["kind"];
-  /**
-   * ⛔ 失効させてはいけない事実が1位に来たか（**深い誤爆**）。
-   * 「守るべき相手が記憶に無い」ケース（曖昧）では常に false になる。
-   */
+  /** 失効させてはいけない事実が1位に来たか（深い誤爆）。守るべき相手が記憶に無いケースでは常に false。 */
   protectedAtTop: boolean;
-  /** 1位が返らなかった（＝棄権した）か。 */
   abstained: boolean;
-  /** 1位の `ScoreBreakdown.total`。棄権したなら null。 */
   topScore: number | null;
   topDigest: string | null;
   /**
-   * `protectedFacts`（複数件ありうる）のうち、`recall()` が返した候補の中で
-   * 最も順位が低い（＝最も危うい）ものの `ScoreBreakdown.total`。1件も返って
-   * いなければ `null`（ADR 0291 §5.5、ADR 0321）。
+   * `protectedFacts` のうち、`recall()` が返した候補の中で最も順位が低い（最も危うい）ものの `ScoreBreakdown.total`。
+   * 1件も返っていなければ `null`。
    */
   protectedFactScore: number | null;
   /**
-   * `topScore − protectedFactScore`。**深い誤爆（`protectedAtTop === true`）の
-   * ときだけ**定義する。誤爆(浅)・棄権のときは `null`（ADR 0291 §5.5 の逐語）。
-   * 🧊 **凍結**（ADR 0291 §5.5・ADR 0321 の回帰テストの対象）。並べて出す後継は
-   * `protectionMargin`（ADR 0333）——この値の定義・計算は一切変えない。
+   * `topScore − protectedFactScore`。深い誤爆のときだけ定義し、誤爆(浅)・棄権のときは `null`。
+   * 凍結（ADR 0291 §5.5・ADR 0321 の回帰テストの対象）。定義・計算は変えない。
    */
   intrusionMargin: number | null;
-  /**
-   * ADR 0333 §3.2 案2の追加フィールド: 保護対象でない候補（＝訂正に使われうる候補）の
-   * 中の最有力スコア（`maxNonProtectedScore`）。1件も無ければ `null`。
-   * `protectionMargin` の計算に使う。既存フィールドの意味は変えない・追加のみ。
-   */
+  /** 保護対象でない候補の中の最有力スコア（`maxNonProtectedScore`）。1件も無ければ `null`。`protectionMargin` の計算に使う。 */
   topNonProtectedScore?: number | null;
   /**
-   * ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」——
-   * `protectedFactScore − topNonProtectedScore`。`intrusionMargin` と違い、
-   * `protectedFacts` が1件以上返っていれば深い誤爆・誤爆(浅)の両方で定義される。
-   * 符号: 正=深い誤爆側、負=誤爆(浅)側。`null` はどちらかのスコアが取れなかったとき。
-   * ⚠ `protectedFacts` が複数件のケースでの限界は `computeProtectionMargin` の
-   * doc コメントと、このファイル冒頭の doc コメント（ADR 0333 §3.5）を参照。
+   * `protectedFactScore − topNonProtectedScore`。`protectedFacts` が1件以上返っていれば、深い誤爆・誤爆(浅)の両方で定義される。
+   * 符号は正が深い誤爆側、負が誤爆(浅)側。`null` はどちらかのスコアが取れなかったとき。
+   * 複数件のケースの限界は冒頭の doc を参照（ADR 0333 §3.5）。
    */
   protectionMargin?: number | null;
   returned: number;
@@ -148,21 +89,13 @@ export interface CorrectionCandidateReport {
   ingestDrain: DrainResult;
   hits: CorrectionHitOutcome[];
   abstains: CorrectionAbstainOutcome[];
-  /** A群の `margin` の分布（ADR 0135 §5.5 と同じ形の集約）。 */
   marginStats: MarginStats;
-  /** B群の `intrusionMargin` の分布。🧊 凍結（ADR 0291 §5.5・ADR 0321）。 */
+  /** B群の `intrusionMargin` の分布。凍結（ADR 0291 §5.5・ADR 0321）。 */
   intrusionMarginStats: MarginStats;
-  /**
-   * B群の `protectionMargin` の分布（ADR 0333 §3.2 案2、`intrusionMarginStats` と
-   * 並べて出す後継）。`intrusionMarginStats` と同じ形（`computeMarginStats`）。
-   */
+  /** B群の `protectionMargin` の分布。`intrusionMarginStats` と並べて出す後継。 */
   protectionMarginStats?: MarginStats;
 }
 
-/**
- * gold/distractor の `ScoreBreakdown.total` から margin を計算する純関数
- * （ADR 0291 §5.5、ADR 0321）。どちらかが `null` なら `null`。
- */
 export function computeCorrectionMargin(
   goldScore: number | null,
   distractorScore: number | null,
@@ -174,8 +107,7 @@ export function computeCorrectionMargin(
 }
 
 /**
- * `protectedIds` に含まれる外部IDを持つ候補のうち、`ScoreBreakdown.total` が
- * 最も低いもの（＝最も危うい）を返す純関数。1件も見つからなければ `null`。
+ * `protectedIds` に含まれる外部IDを持つ候補のうち、`ScoreBreakdown.total` が最も低いものを返す純関数。
  * `memories`/`externalIds` は同じ添字で対応している前提（呼び出し側が揃える）。
  */
 export function minProtectedFactScore(
@@ -196,13 +128,8 @@ export function minProtectedFactScore(
 }
 
 /**
- * B群の `intrusionMargin`（ADR 0291 §5.5、ADR 0321）。深い誤爆のときだけ
- * `topScore − protectedFactScore` を返す。誤爆(浅)・棄権のときは `null`。
- *
- * ⚠ `protectedFacts` が1件以下のケースでは、深い誤爆のとき
- * `topScore === protectedFactScore` になり、結果は常に `0`——これは実装の欠陥では
- * なく定義どおりの挙動である（1位そのものが保護対象である以上、自明な結果）。
- * この値が非自明になるのは `protectedFacts` が複数件のケースに限る。
+ * B群の `intrusionMargin`。深い誤爆のときだけ `topScore − protectedFactScore` を返す。
+ * `protectedFacts` が1件以下なら常に `0` になるが、定義どおりの挙動。
  */
 export function computeIntrusionMargin(
   topScore: number | null,
@@ -216,14 +143,8 @@ export function computeIntrusionMargin(
 }
 
 /**
- * `protectedIds` に**含まれない**外部IDを持つ候補のうち、`ScoreBreakdown.total` が
- * 最も高いもの（＝訂正に使われうる候補の中で最有力）を返す純関数（ADR 0333 §3.2 案2）。
- * `minProtectedFactScore` と対になる——あちらは保護対象の中の**最小**（最も危うい）、
- * こちらは非保護対象の中の**最大**（最も強い「訂正の相手」候補）を取る。
- * 1件も見つからなければ `null`。
- *
- * `memories`/`externalIds` は同じ添字で対応している前提（呼び出し側が揃える。
- * `minProtectedFactScore` と同じ契約）。
+ * `protectedIds` に含まれない外部IDを持つ候補のうち、`ScoreBreakdown.total` が最も高いものを返す純関数。
+ * `minProtectedFactScore` と対になる。同じ添字対応の契約。
  */
 export function maxNonProtectedScore(
   memories: readonly { score: { total: number } }[],
@@ -243,21 +164,9 @@ export function maxNonProtectedScore(
 }
 
 /**
- * B群の `protectionMargin`（ADR 0333 §3.2 案2、`intrusionMargin` を凍結したまま
- * 並べて出す後継）。`protectedFactScore − topNonProtectedScore`。どちらかが `null`
- * なら `null`（「差が0だった」と「測れなかった」を同じ顔にしない、ADR 0033 の適用——
- * `computeCorrectionMargin`/`computeIntrusionMargin` と同じ規律）。
- *
- * `intrusionMargin` と違い、`protectedAtTop` を問わない——`protectedFacts` が1件以上
- * 返っていれば、深い誤爆・誤爆(浅)の両方で定義される。符号: 正=深い誤爆側
- * （保護対象のスコアが最有力の非保護候補より高い）、負=誤爆(浅)側。
- *
- * ⚠ **`protectedFacts` が複数件のときの未検証点（ADR 0333 §3.5）**: `protectedFactScore`
- * は保護対象のうち最小（`minProtectedFactScore`、既存の設計判断）を使う。`protectedAtTop`
- * は「最大スコアの保護対象が1位か」と同値であるため、保護対象が2件以上あるケースでは
- * この関数の符号が `protectedAtTop` とねじれうる（実装のバグではなく、「最も危うい
- * 保護対象」と「1位に来た保護対象」が異なる問いになるために起きる）。今日のケース集合は
- * `protectedFacts` が0〜1件なのでこの不整合は表面化しない——実データでは検証していない。
+ * B群の `protectionMargin`。`protectedFactScore − topNonProtectedScore`。どちらかが `null` なら `null`
+ * （「差が0だった」と「測れなかった」を同じ顔にしない）。`protectedAtTop` を問わない。
+ * 保護対象が複数件のときに符号が `protectedAtTop` とねじれうる点は冒頭の doc を参照（ADR 0333 §3.5）。
  */
 export function computeProtectionMargin(
   protectedFactScore: number | null,
@@ -270,7 +179,7 @@ export function computeProtectionMargin(
 }
 
 export interface RunCorrectionCandidateArmOptions {
-  /** ⚠ **必ず、この run で初めて使うテナントを渡すこと**（`identifier-arm.ts` と同じ理由）。 */
+  /** 必ず、この run で初めて使うテナントを渡すこと（`identifier-arm.ts` と同じ理由）。 */
   tenantId: string;
   runtime: Runtime;
   memoryStore: MemoryStore;
@@ -304,9 +213,7 @@ export async function runCorrectionCandidateArm(
     });
   }
 
-  // Issue #719: `observed.memoryIds`（冪等な再送では空配列）を積算し、
-  // `drainEmbedTicks` に渡す——「available_at との ms 競合で claim 0件のまま」
-  // 黙って抜けないことを検査させる。
+  // `observed.memoryIds` を積算して `drainEmbedTicks` に渡し、claim 0件のまま黙って抜けないことを検査させる。
   let expectedEmbedJobs = 0;
   for (const u of utterances) {
     const observed = await options.runtime.observe(ctx, {
@@ -322,9 +229,8 @@ export async function runCorrectionCandidateArm(
 
   const hits: CorrectionHitOutcome[] = [];
   for (const c of options.hitCases) {
-    // ⛔ `text` 以外を渡さない。
-    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-    // でも、この arm（訂正が gold/distractor 順位に与える効果）の基準線を動かさない。
+    // `text` 以外を渡さない。
+    // association: null。連想枠が既定 on でも、この arm の基準線を動かさない（ADR 0337）。
     const result = await options.runtime.recall(ctx, { text: c.correction, association: null });
     const externalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
@@ -333,7 +239,6 @@ export async function runCorrectionCandidateArm(
     const distractorIndex = externalIds.indexOf(correctionDistractorExternalId(c.id));
     const goldRank = goldIndex === -1 ? null : goldIndex + 1;
     const distractorRank = distractorIndex === -1 ? null : distractorIndex + 1;
-    // association: null（上）なので affinityMeasured は必ず true（ADR 0352）。
     const goldScore =
       goldIndex === -1 ? null : (scoreTotalOrNull(result.memories[goldIndex]!.score) ?? null);
     const distractorScore =
@@ -356,21 +261,16 @@ export async function runCorrectionCandidateArm(
 
   const abstains: CorrectionAbstainOutcome[] = [];
   for (const c of options.abstainCases) {
-    // association: null — 上の hitCases ループと同じ理由。基準線を動かさない。
     const result = await options.runtime.recall(ctx, { text: c.utterance, association: null });
     const topMemory = result.memories[0];
-    // ⚠ **全候補の externalId を解決する**（top1 だけではない）——`protectedFacts` が
-    // 複数件のとき、1位以外に居る保護対象のスコアも `protectedFactScore` に使うため
-    // （ADR 0291 §5.5、ADR 0321）。
+    // 全候補の externalId を解決する（top1 だけではない）。`protectedFacts` が複数件のとき、1位以外の保護対象のスコアも使うため。
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
     );
     const topExternalId = resolvedExternalIds[0] ?? null;
     const protectedIds = c.protectedFacts.map((_, i) => correctionProtectedExternalId(c.id, i));
     const protectedAtTop = topExternalId !== null && protectedIds.includes(topExternalId);
-    // Issue #548 方向2 / ADR 0352: minProtectedFactScore/maxNonProtectedScore は
-    // `{ score: { total: number } }[]` という純関数の形をそのまま保つ（歯を書き換えない）。
-    // association: null（上）なので affinityMeasured は必ず true——ここで total を取り出す。
+    // minProtectedFactScore/maxNonProtectedScore は `{ score: { total: number } }[]` という純関数の形をそのまま保つ（歯を書き換えない）。
     const scoredMemories = result.memories.map((m) => ({
       score: { total: requireMeasuredTotal(m.score) },
     }));
@@ -416,24 +316,18 @@ export async function runCorrectionCandidateArm(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 集計（純関数。arm を動かさずに検査できるよう分けてある）
-// ---------------------------------------------------------------------------
-
 export interface CorrectionCandidateSummary {
   hitCount: number;
-  /** k → 当たった件数。k は 1/3/5/10。 */
   hitAtK: Record<number, number>;
   mrr: number;
   distractorBeatsGoldCount: number;
   goldScoreMin: number | null;
   goldScoreMax: number | null;
   abstainCount: number;
-  /** ⛔ 失効させてはいけない事実を1位に置いた件数（**深い誤爆**）。 */
+  /** 失効させてはいけない事実を1位に置いた件数（深い誤爆）。 */
   protectedAtTopCount: number;
-  /** 1位は返ったが、守るべき事実ではなかった件数（**浅い誤爆**）。 */
+  /** 1位は返ったが、守るべき事実ではなかった件数（浅い誤爆）。 */
   shallowMisfireCount: number;
-  /** 1件も返さなかった件数（**棄権**）。 */
   abstainedCount: number;
   abstainTopScoreMin: number | null;
   abstainTopScoreMax: number | null;

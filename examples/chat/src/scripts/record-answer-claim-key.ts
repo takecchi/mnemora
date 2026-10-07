@@ -17,76 +17,9 @@ import {
 } from "../cassette-io.js";
 
 /**
- * Issue #691 続き（claimKey/detectContested の evaluate、ADR 0324 の続き。
- * ADR 0329 で条件（基準/新案）と保存先を選べる引数を追加）。
- *
- * **目的**: `examples/chat` の `answer` 経路（`answer-bench.ts`）だけで、
- * `MNEMORA_ANSWER_CLAIM_KEY=detect`（`answer-claim-key-options.ts`）を opt-in し、
- * `Runtime.observe()` に `claimKey: { enabled: true, detectContested: true }`
- * （`knownPredicates` は渡さない）を渡して dev + eval 全12ケースを実 API で1回ずつ
- * 走らせ、記録済みの回答プロンプトを**新しいカセット**（`answer.claim-key.json`）へ
- * 書き出す。**既存カセット（`retrieval.json`/`compare.json`/`answer.order-legend.json`/
- * `answer-time-weighting.order-legend.json`・#748 の `answer.claim-key.json`）は
- * 1バイトも触らない**（ADR 0315 決定4）——`MNEMORA_RECORD_CASSETTE_PATH` を渡さない
- * ときの既定の保存先・既定の条件（下記 `MNEMORA_RECORD_CONDITION` 省略時）は
- * この PR の変更前と完全に同じままである。
- *
- * **ADR 0329 が足した2つの環境変数**（両方省略すれば、この PR より前と1バイトも
- * 変わらない挙動になる）:
- *
- * - `MNEMORA_RECORD_CONDITION`（`"baseline"` 省略時の既定 |
- *   `"known-predicates-from-store"` | `"known-subjects"`）:
- *   `"known-predicates-from-store"` を指定すると、`MNEMORA_ANSWER_CLAIM_KEY` を
- *   `"detect-known-predicates-from-store"` に切り替える（`ClaimKeyOptions.
- *   knownPredicatesFromStore: true` を足した新案）。省略・`"baseline"` は従来どおり
- *   `"detect"`（`knownPredicatesFromStore` を渡さない基準）。
- *   **`"known-subjects"`（ADR 0334 負債2、Issue #372負債6の続き）**は、
- *   `MNEMORA_ANSWER_CLAIM_KEY` は `"detect"` のまま、ケースごとに
- *   `AnswerCase.knownSubjects`（作業者が手で埋めた、正解の第三者名。任意項目）を
- *   `applyCaseKnownSubjects`（`answer-claim-key-options.ts`）で
- *   `claimKeyOptions.knownSubjects` へ合流させる——**`knownSubjects` を持たない
- *   ケース（14件中10件）はこの条件でも `claimKeyOptions` が1バイトも変わらない**。
- *   ⚠ **これは上限（オラクル）測定である**（`AnswerCase.knownSubjects` docstring・
- *   `applyCaseKnownSubjects` docstring 参照）——正解を作業者が手で渡した場合の
- *   効き目の上限を見るためのものであり、mnemora が実運用でこの正解を知っている
- *   保証は無い。
- * - `MNEMORA_RECORD_CASSETTE_PATH`（省略時の既定 = {@link ANSWER_CLAIM_KEY_CASSETTE_PATH}）:
- *   書き出し先を上書きする。ADR 0329 の測定は、条件×反復ごとに別ファイル
- *   （`examples/chat/cassettes/` の新しいファイル名）へ書く——このスクリプト自体は
- *   1本の記録しか行わないため、反復は呼び出し側（シェル）が複数回このスクリプトを
- *   別のパスで呼ぶことで実現する。
- *
- * **種カセットは常に `answer.order-legend.json` だけ**（下記変更しない）——基準・新案の
- * どちらの条件でも、#748 の `answer.claim-key.json`（既に claimKey opt-in 込みで
- * 記録済み）を種にしない。#748 を種にすると、claim key 派生の呼び出し自体が
- * 「記録済みの応答の再生」になってしまい、実 API に落ちる対照にならないため
- * （ADR 0329 決定、マネージャー指示）。
- *
- * **なぜ `answer.order-legend.json` を種カセットにするか（ADR 0309 §4.5.2 の踏襲）**:
- * ADR 0315 決定1・決定2 により、抽出プロンプト（`extraction.ts`）はこの opt-in でも
- * 1バイトも変わらない——claimKey 派生は既存の抽出候補群への**別の構造化呼び出し**
- * （separate、ADR 0315 決定2）であり、抽出そのものの入出力には触れない。⟹
- * 既存カセットを種にすれば、抽出・埋め込み・（矛盾候補タグが増えない）naive 経路の
- * 回答生成はすべて種から返り、**実 API を呼ぶのは claimKey 派生の呼び出しと、実際に
- * 描画が変わった（矛盾候補タグが増えた）mnemora 経路の回答生成・judge 呼び出しだけ**
- * になる——呼び出し回数を抑えつつ、**A（この新カセット）と B（`answer.order-legend.json`）の
- * 記憶集合（抽出結果）を同じに保てる**（このスクリプトの本命の理由。プロンプト末尾の
- * 実測レポートで、実際に何回が種から返り何回が実 API に落ちたかを報告する）。
- *
- * **診断出力**: `runAnswerCase` に `onObserved` フックを渡し、各ターンの
- * `ObserveResult`（`claimKeyFailure`/`contestedDetection`）をそのまま記録する。
- * 実行後、各ケースのテナントに対して `memories` テーブルを直接 SELECT し、
- * `claim_key_subject`/`claim_key_predicate`/`status`/`valid_from`/`valid_until`/
- * `content_hash` を出力する——「なぜ対にならなかったか」を (a)〜(g) の段で切り分ける
- * ための実データ。
- *
- * **`MNEMORA_ANSWER_CASE_SET`（ADR 0334 追記 2026-09-26（2）、Issue #372負債6の続き。
- * opt-in、省略時は従来どおり）**: `"default"`（省略時の既定）| `"separate-turn"`。
- * **既定は dev+eval 全14件（この env を足す前と1バイトも変わらない）。**
- * `"separate-turn"` を指定すると、代わりに `ANSWER_CASE_SET_SEPARATE_TURN`
- * （`answer-case-set.separate-turn.ts`、本人の事実と第三者の事実を意図的に別ターン
- * ＝別の `observe()` 呼び出しに分けたケース集合）だけを走らせる——**既存14件の
- * ケースセットは一切参照しない**（両方を混ぜて走らせる経路は無い）。
+ * 種カセットは常に `answer.order-legend.json` だけにする。`answer.claim-key.json` を種にすると、claim key 派生の呼び出し自体が記録済みの応答の再生になり、実 API に落ちる対照にならない。
+ * `"known-subjects"` は正解を手で渡した場合の上限（オラクル）測定で、mnemora が実運用でその正解を知っている保証は無い。
+ * 既存カセットは書き換えない。
  */
 
 const RECORD_CONDITIONS = ["baseline", "known-predicates-from-store", "known-subjects"] as const;
@@ -121,7 +54,6 @@ function resolveAnswerCaseSetOption(raw: string | undefined): AnswerCaseSetOptio
   );
 }
 
-/** `caseSetOption` から実際に走らせるケース集合を選ぶ。既定は dev+eval の14件。 */
 function resolveAnswerCases(caseSetOption: AnswerCaseSetOption): AnswerCase[] {
   if (caseSetOption === "separate-turn") {
     return [...ANSWER_CASE_SET_SEPARATE_TURN];
@@ -159,15 +91,11 @@ async function main(): Promise<void> {
     throw new Error("OPENAI_API_KEY が無い。このスクリプトは実 API を叩く。");
   }
 
-  // ADR 0329: 条件（基準/新案）と保存先を env で選べる。両方省略すれば、この PR より前と
-  // 完全に同じ挙動（"detect"、ANSWER_CLAIM_KEY_CASSETTE_PATH）になる。
   const condition = resolveRecordCondition(process.env.MNEMORA_RECORD_CONDITION);
   const answerClaimKeyMode =
     condition === "known-predicates-from-store" ? "detect-known-predicates-from-store" : "detect";
   const outputCassettePath =
     process.env.MNEMORA_RECORD_CASSETTE_PATH ?? ANSWER_CLAIM_KEY_CASSETTE_PATH;
-  // ADR 0334 追記 2026-09-26（2）: ケース集合を env で選べる。省略すれば従来どおり
-  // dev+eval の14件（この env を足す前と1バイトも変わらない）。
   const caseSetOption = resolveAnswerCaseSetOption(process.env.MNEMORA_ANSWER_CASE_SET);
 
   const claimKeyOptions = resolveAnswerClaimKeyOptions({
@@ -205,9 +133,6 @@ async function main(): Promise<void> {
   try {
     const results: { caseId: string; contradictionTagCount: number }[] = [];
     for (const answerCase of allCases) {
-      // ADR 0334 負債2: condition === "known-subjects" のときだけ、このケースの
-      // knownSubjects（在れば）を合流させる。他の条件・knownSubjects を持たない
-      // ケースでは claimKeyOptions をそのまま返す（1バイトも変わらない）。
       const caseClaimKeyOptions = applyCaseKnownSubjects(
         claimKeyOptions,
         condition,
@@ -247,8 +172,6 @@ async function main(): Promise<void> {
           `verdict(mnemora)=${result.mnemora.verdict}`,
       );
 
-      // ⭐ このケースのテナントに実際に書かれた memories を直接 SELECT する
-      // （診断用。「対になるはずが、なぜならなかったか」の段(a)〜(g)を切り分ける）。
       const embeddingSpace = embeddingSpaceSlug(handle.embeddingProvider.space);
       const tenantId = `${tenantPrefix}-${embeddingSpace}-${answerCase.id}`;
       const rows = await diagPool.pool.query(

@@ -3,21 +3,12 @@ import type { ComparisonRow } from "./compare.js";
 import type { ProviderMode } from "./providers.js";
 
 /**
- * `compare`（北極星の物差し。docs/north-star.md「使う側が会話ログを全部プロンプトへ
- * 積むのをやめられたか」）の機械可読な出力口（Issue #242）。
+ * `compare` の機械可読な出力口。ファイル I/O・環境変数・時刻取得を行わない純関数だけを置く。
  *
- * `./retrieval-json.ts`（ADR 0088）・`./time-term-json.ts`（ADR 0058/#217）と同じ分担:
- * ファイル I/O・環境変数・時刻取得を一切行わない純関数だけを置く。`cli.ts` の
- * `runCompare()` が `runComparison()`（`compare.ts`）の返り値（`ComparisonRow[]`）を
- * ここへ渡して JSON を組み立て、`MNEMORA_COMPARE_JSON` が設定されているときだけ書き出す。
+ * 数字だけを書いて条件を書かないベンチ出力は、この repo で実際に壊れている（ADR 0068・ADR 0081 §3.2）。
+ * そのため、実際に使われた `llmMode`/`embeddingMode` をトップレベルに同居させる。
  *
- * 🔴 **数字だけを書いて、条件を書かないベンチ出力は、この repo で実際に3度壊れている**
- * （ADR 0068・ADR 0081 §3.2）。だからこの JSON も、**実際に使われた** `llmMode`/
- * `embeddingMode`（`handle` の実値）をトップレベルに同居させる。
- *
- * ⚠ **`compare.ts` の `ComparisonRow` をほぼそのまま写す。**集計をここで作り直さない
- * ——`omitted`（`Omission[]`）も丸ごと持つ（`compare.ts` 冒頭のコメント「推定値を
- * 実測値の顔で出さない」という規律を、この JSON でも保つ）。
+ * `ComparisonRow` をほぼそのまま写す。集計をここで作り直さず、`omitted` も丸ごと持つ。
  */
 
 export interface CompareRowJson {
@@ -33,37 +24,22 @@ export interface CompareRowJson {
   returnedCount: number;
   annCandidateCount: number;
   /**
-   * `ComparisonRow.bandEntryCount` をそのまま写す（Issue #340 フォローアップ、ADR 0314）。
-   *
-   * **省略可能欄にした理由は `retrieval-json.ts` の `lexicalMatchRows` と同じ**
-   * ——`CompareRunJson.schemaVersion` は既存の欄の意味を変えない追加のために上げていない
-   * （このファイル下部 `schemaVersion` の doc）。欄を持たない古い実測 JSON・
-   * `examples/chat/compare-baseline.json`（この欄をまだ持たない）は、
-   * `scripts/compare-summary-lib.mjs` の `validateMeasured`/`validateBaseline`
-   * （`REQUIRED_ROW_NUMBER_FIELDS` に含めていない）を引き続き通る。
+   * `ComparisonRow.bandEntryCount` をそのまま写す。省略可能欄にしたのは、`schemaVersion` を上げずに済ませるため。
+   * 欄を持たない古い実測 JSON や `examples/chat/compare-baseline.json` が、summary スクリプトの検証を引き続き通る。
    */
   bandEntryCount?: number;
-  /**
-   * `ComparisonRow.rawIndexJsonLength` をそのまま写す。**省略可能にした理由は
-   * `bandEntryCount` と同じ。**
-   */
+  /** `ComparisonRow.rawIndexJsonLength` をそのまま写す。省略可能にした理由は `bandEntryCount` と同じ。 */
   rawIndexJsonLength?: number;
   /**
-   * `ComparisonRow.outputValidationIssueCount` をそのまま写す（ADR 0551）。
-   * **欄が無い行は「検査していない」**（`outputValidation` が `undefined`）——0 とは別。
-   * 省略可能にした理由は `bandEntryCount` と同じ（`schemaVersion` は据え置き）。
-   * 門・基準値・`DIFF_FIELDS` には入れていない。
+   * `ComparisonRow.outputValidationIssueCount` をそのまま写す。欄が無い行は「検査していない」で、0 とは別。
+   * 省略可能にした理由は `bandEntryCount` と同じ。門・基準値・`DIFF_FIELDS` には入れていない。
    */
   outputValidationIssueCount?: number;
   /**
-   * 冒頭の事実表明の出典（`sourceObservationId` → `externalId`）に到達したかだけを
-   * 測る。情報保持・最終回答の正誤はこの欄に含まれない（`ComparisonRow.factStatementSurvived`
-   * の docstring、`docs/autonomy.md` §2.2 の2番、ADR 0226）。
+   * 冒頭の事実表明の出典に到達したかだけを測る。情報保持・最終回答の正誤は含まれない。
    *
-   * 🔴 **キー名はここでは変えていない。** ⭐門（ADR 0133）と
-   * `examples/chat/compare-baseline.json` がこのキー名に依存しているため、
-   * `schemaVersion` を上げずに据え置いている——意味のずれはこのコメントと
-   * ADR 0226 で名乗る。
+   * キー名は変えていない。⭐門（ADR 0133）と `examples/chat/compare-baseline.json` がこのキー名に依存しており、
+   * `schemaVersion` を上げずに据え置くため。意味のずれは ADR 0226 で名乗る。
    */
   factStatementSurvived: boolean;
 }
@@ -71,20 +47,15 @@ export interface CompareRowJson {
 export interface CompareRunJson {
   /**
    * この形が変わったら上げる。読み手（summary スクリプト）が形の変化を検知できるように。
-   *
-   * ⚠ `rows[].bandEntryCount`/`rows[].rawIndexJsonLength`（Issue #340 フォローアップ、
-   * ADR 0314）を足したときは上げていない——既存の欄の意味を変えない追加であり、
-   * `CompareRowJson.bandEntryCount` の doc と同じ理由（`retrieval-json.ts` の先例）。
+   * 既存の欄の意味を変えない追加（`bandEntryCount` など）では上げない。
    */
   schemaVersion: 1;
-  /** ISO 8601。JSON を組み立てた時刻——全会話長の実行が終わった後。 */
   measuredAt: string;
-  /** `git rev-parse HEAD`。取れなければ `null`（推測で埋めない。`./git-info.js` 参照）。 */
+  /** `git rev-parse HEAD`。取れなければ `null`（推測で埋めない）。 */
   commit: string | null;
-  /** その run で**実際に**使われたモード（`handle.llmMode`/`handle.embeddingMode` の実値）。 */
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
-  /** `rows.length`。件数をどこにも書き写さない（ADR 0068 の再発防止と同じ規律）。 */
+  /** `rows.length`。件数をどこにも書き写さない。 */
   rowCount: number;
   rows: CompareRowJson[];
 }
@@ -100,13 +71,8 @@ export interface BuildCompareJsonOptions {
 /**
  * `runComparison()` が返した `ComparisonRow[]` から、機械可読な JSON を組み立てる。
  *
- * **純関数**（ファイル I/O・環境変数・時刻取得を一切行わない）——呼び出し側が
- * `measuredAt`/`commit` を明示的に渡す。これにより DB もネットワークも無い環境で
- * 検査できる（`__tests__/compare-json.test.ts`）。
- *
- * **出所は `ComparisonRow` の欄だけ**（`retrieval-json.ts`/`time-term-json.ts` と
- * 同じ規律）。集計をここで作り直さない——`row.omitted` をそのまま写す（配列を複製し、
- * 呼び出し側の配列への以後の変更が影響しないようにする）。
+ * 純関数にして、`measuredAt`/`commit` は呼び出し側が渡す。DB もネットワークも無い環境で検査できるため。
+ * `row.omitted` は配列を複製して写し、呼び出し側の以後の変更が影響しないようにする。
  */
 export function buildCompareJson(options: BuildCompareJsonOptions): CompareRunJson {
   return {

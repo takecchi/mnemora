@@ -11,128 +11,52 @@ import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
 import { localEmbeddingPinnedRevision } from "./providers.js";
 
 /**
- * `embedding-fingerprint` サブコマンド（Issue #565、ADR 0253 追記）。
+ * `scripts/` ではなくここにある理由: `scripts/*.mjs` は plain `node` で動き、`@mnemora/local-embedding` の TS ソースを
+ * import できない（`exports` は `dist` だけを指す）。`embed()` を呼ぶ部分だけここに置き、モデルに依存しない計算は `scripts/` 側の純関数にある。
  *
- * [Issue #565](https://github.com/takecchi/mnemora/issues/565) が「採るとしたら何が要るか」
- * として挙げた4項目のうち、**(1) 固定の既知入力に対して `embed()` を呼び、結果ベクトルの
- * `sha256` を出す**を満たす。
- *
- * ⛔ **これは門ではない。** ここが書くのは実測値そのものであり、値の良し悪しを判定しない
- * ——`scripts/measure-embedding-output-fingerprint.mjs`（sha256/次元数/lscpu を合成する側）も
- * `scripts/compare-embedding-output-fingerprints.mjs`（2ジョブ間の突き合わせ）も、
- * 常に exit 0 で終わる設計である。n が溜まり、偽陽性率が測れてから、門にするかどうかを
- * 判断する（ADR 0253 追記、Issue #565 が明示した手前）。
- *
- * ## なぜ examples/chat 側にあるか（`scripts/` に無い理由）
- *
- * `scripts/*.mjs` は plain `node` で実行され、`@mnemora/local-embedding` のような
- * ワークスペースパッケージの TS ソースを直接 import できない
- * （`exports` は `dist/index.js` だけを指しており、この2ジョブは dist をビルドしない——
- * `tsx`/`vitest` が `tsconfig.json`/`vitest.config.mts` の `paths`/`alias` で
- * `src/index.ts` へ解決しているのは `examples/chat` 内だけである）。⟹ **実際に
- * `embed()` を呼ぶ部分は `examples/chat`（tsx 経由）に置き、sha256/lscpu のような
- * モデルに依存しない純粋な計算だけを `scripts/` 側の純関数に切り出す**
- * （`scripts/measure-embedding-output-fingerprint-lib.mjs`。歯は本物のモデルを使わず、
- * 固定のベクトルを直接渡して検査する）。
- *
- * ## 固定入力
- *
- * `FIXED_EMBEDDING_FINGERPRINT_INPUTS` は DB の状態にもタイムスタンプにも依存しない、
- * 決まった文字列の小さい集合である。⛔ **DB へは一切触れない**——`requireDatabaseUrl()`
- * を呼ばない（このコマンドは `DATABASE_URL` を要求しない）。
- *
- * ⚠ **`warmup()` は推論しない**（`local-embedding-provider.ts` の docstring）——
- * ウォームアップの直後に置くだけでは推論は起きない、という Issue #565 が名指しした穴を
- * 避けるため、ここでは `warmup()` の後に明示的に `embed()` を呼ぶ。
- *
- * ⭐ **`revision` も固定する（Issue #597 案(a)、ADR 0253 追記5）。** `providers.ts` の
- * `buildEmbedding` の `local` 分岐と同じ `localEmbeddingPinnedRevision()` を渡す
- * ——**使う側はすべて同じ宣言を見る**という決定の対象に、この経路も含まれる。
- * ⚠ **この修正の前は revision を渡していなかった**——`example-chat` ジョブが
- * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を `providers.ts`（revision 有り）とこの
- * ファイル（revision 無し＝`main`）とで共有していたため、同じキャッシュディレクトリに
- * フラット配置と revision サブディレクトリ配置が同居していた（ADR 0253 追記5、CI run
- * 35953212055 で発覚）。この修正でその同居は無くなる。
- *
- * ## ランナー間比較への拡張（Issue #565、`.github/workflows/embedding-cross-runner-reproducibility.yml`）
- *
- * 上の4項目の測定を**複数の runner・`numThreads` の脚**へ広げるための最小の追加を
- * 3つ持つ:
- *
- * 1. `MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS`（任意の環境変数）が設定されていれば、
- *    `LocalEmbeddingProvider` の公開オプション `numThreads` へそのまま渡す。**未設定なら
- *    `DEFAULT_LOCAL_EMBEDDING_NUM_THREADS`（既定 `4`）を明示的に渡す**——渡す値は
- *    「渡さなかったとき」と同じ既定値になるため、既存ジョブ（`example-chat` /
- *    `root-gate-db-stage`）の挙動は変わらない。
- * 2. 実行時の node / `onnxruntime-node` / `@huggingface/transformers` の版
- *    （{@link resolveRuntimeVersions}）。
- * 3. `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` 配下の重みファイルすべての sha256
- *    （{@link digestWeightsDirectory}）——**全脚が同じ重みを読んだことを、宣言（cache
- *    key・revision の固定）だけでなく実測で示す**ため。
- *
- * ⛔ **この3つも門ではない。**読めなくても投げない——版が "unknown" になる、
- * `weightsDigest` が `null` になる、というだけで、embed() 本体の測定は続ける。
+ * 門ではない。実測値を書くだけで、読めなくても投げない（版は "unknown"、`weightsDigest` は `null`）。
+ * DB には触れない。`revision` は `providers.ts` と同じ `localEmbeddingPinnedRevision()` を渡す。
+ * 渡さないと、同じキャッシュディレクトリにフラット配置と revision 配置が同居する。
  */
 
-/**
- * 固定の既知入力（Issue #565「採るとしたら何が要るか」1番）。
- *
- * ⛔ **変えるとこの run の sha256 も変わる。** ただしこれは門ではないので、変えても
- * 落ちる歯は無い——変える場合は、Job Summary / artifact に残る値の意味が変わることを
- * 前提にすること（比較段は同一 workflow run 内の2ジョブ同士を突き合わせるだけであり、
- * run をまたいだ値の同一性は主張していない）。
- */
 export const FIXED_EMBEDDING_FINGERPRINT_INPUTS: readonly string[] = Object.freeze([
   "朝食にパンを食べた。",
   "東京タワーは港区にある。",
   "コーヒーより紅茶が好き。",
 ]);
 
-/** 実行時の node / onnxruntime-node / @huggingface/transformers の版。 */
 export interface EmbeddingFingerprintRuntimeVersions {
   node: string;
   onnxruntimeNode: string;
   transformersJs: string;
 }
 
-/** `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` 配下の重みファイルの sha256 一式。 */
 export interface EmbeddingFingerprintWeightsDigest {
   cacheDir: string;
   fileCount: number;
-  /** 各ファイルの `{ relPath, sha256 }` を relPath 順に並べ、`\n` 連結した文字列の sha256。 */
   combinedSha256: string;
   files: { relPath: string; sha256: string; bytes: number }[];
 }
 
-/** `MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON` が書き出す、生ベクトルを含む中間形式。 */
 export interface EmbeddingFingerprintRawJson {
   status: "ok" | "weights_unavailable";
   detail: string;
   embeddingSpace?: { provider: string; model: string; dimensions: number };
   inputs?: string[];
   vectors?: number[][];
-  /** Issue #565 ランナー間比較への拡張。`LocalEmbeddingProvider` に実際に渡した numThreads。 */
   numThreads?: number;
   runtimeVersions?: EmbeddingFingerprintRuntimeVersions;
   /** `null` は「`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` が未指定、または読めなかった」を表す。 */
   weightsDigest?: EmbeddingFingerprintWeightsDigest | null;
 }
 
-/** `LocalEmbeddingProvider.embed()` に渡すダミーの `Ctx`。DB を持たないためテナントの実在確認は無い。 */
 const FINGERPRINT_CTX: Ctx = { tenantId: "embedding-fingerprint-565" };
 
 /**
  * 実行時の node / `onnxruntime-node` / `@huggingface/transformers` の版を読む。
  *
- * ⚠ **`@huggingface/transformers` は `examples/chat` の直接の依存ではない**
- * （`@mnemora/local-embedding` の依存であり、`onnxruntime-node` はさらにその依存）。
- * ⟹ 標準の node 解決だけを使い、`@mnemora/local-embedding` 自身の `package.json`
- * を起点にする——`localEmbeddingPinnedRevision` が `scripts/` 側のファイルを
- * 相対パスで指すのと同じ形（`import.meta.url` からの相対パス、tsx のパスマッピングに
- * 依存しない）。
- *
- * ⛔ **読めなくても投げない。**この情報は測定の「文脈」であり、無くても embed()
- * の結果そのものは変わらない——読めなければ `"unknown"` を入れる（無いことを隠さない）。
+ * `@huggingface/transformers` は `examples/chat` の直接の依存ではないので、`@mnemora/local-embedding` 自身の
+ * `package.json` を起点に解決する。読めなくても投げず `"unknown"` を入れる（無いことを隠さない）。
  */
 export function resolveRuntimeVersions(): EmbeddingFingerprintRuntimeVersions {
   const node = process.version;
@@ -158,17 +82,9 @@ export function resolveRuntimeVersions(): EmbeddingFingerprintRuntimeVersions {
 }
 
 /**
- * `cacheDir` 配下の全ファイルを再帰的に列挙し、各ファイルの sha256 と、それらをまとめた
- * `combinedSha256` を返す（Issue #565「全脚が同じ重みを読んだか」を実測で示すため）。
- *
- * ⛔ **`cacheDir` が未指定・存在しない・読めない場合は `null`。**「測っていない」を
- * 空のダイジェストで隠さない。
- *
- * ⭐ **HF の revision サブディレクトリの有無など、内部レイアウトの知識を持たない。**
- * `cacheDir` 以下に実在するファイルをそのまま全部拾う——`check-local-embedding-fingerprint.mjs`
- * の `collectActualFiles` と違い、期待されるパス空間との対応づけはしない（あちらは
- * Hugging Face の tree と照合する門、こちらは「同じ runner 間で同じバイト列だったか」
- * を見るだけの測定であり、パスの意味づけは要らない）。
+ * `cacheDir` 配下の全ファイルの sha256 と、それらをまとめた `combinedSha256` を返す。
+ * 未指定・存在しない・読めない場合は `null`（「測っていない」を空のダイジェストで隠さない）。
+ * HF の内部レイアウトは知らず、実在するファイルをそのまま拾う（期待パスとの照合はしない）。
  */
 export function digestWeightsDirectory(
   cacheDir: string | undefined,
@@ -193,7 +109,6 @@ export function digestWeightsDirectory(
     try {
       bytes = readFileSync(absPath);
     } catch {
-      // ディレクトリ自体も readdirSync の結果に混ざる——読めなければファイルではない。
       continue;
     }
     files.push({
@@ -225,9 +140,6 @@ export async function runEmbeddingFingerprint(): Promise<void> {
 
   const cacheDir = process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
   const numThreadsRaw = process.env.MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS;
-  // ⚠ 未設定なら DEFAULT_LOCAL_EMBEDDING_NUM_THREADS を明示的に渡す——「渡さなかった
-  // とき」と同じ既定値なので、既存ジョブの挙動は変わらない（Issue #565 拡張、上の
-  // docstring 参照）。
   const numThreads = numThreadsRaw ? Number(numThreadsRaw) : DEFAULT_LOCAL_EMBEDDING_NUM_THREADS;
   if (numThreadsRaw !== undefined && (!Number.isInteger(numThreads) || numThreads < 1)) {
     console.error(
@@ -260,7 +172,7 @@ export async function runEmbeddingFingerprint(): Promise<void> {
   }
   console.log(`  ${warmup.detail}`);
 
-  // ⚠ warmup() は推論しない——ここで初めて embed() を呼ぶ(Issue #565 が名指しした穴の回避)。
+  // warmup() は推論しない——embed() を明示的に呼ぶ。
   const vectors = await provider.embed(FINGERPRINT_CTX, [...FIXED_EMBEDDING_FINGERPRINT_INPUTS]);
 
   console.log(

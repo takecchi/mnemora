@@ -9,23 +9,7 @@ import {
 } from "./time-weighting-bench.js";
 import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "./time-weighting-case-set.eval-undated.js";
 
-/**
- * 段3a（マネージャー指示、Issue #690）の切り分け専用スクリプト。
- *
- * ⛔ **cli.ts の dispatch には配線しない。** 1ケース（`eval-undated-c1-seat-floor-reinforced`）
- * だけを、temperature 未指定/temperature=0 の2通りで各方針20回ずつ実API（live）で
- * 走らせる、一度きりの切り分け実験である——恒久的な CLI サブコマンドにする理由が無い。
- *
- * **実行**（DATABASE_URL・OPENAI_API_KEY が要る。実 API を叩く——マネージャーが
- * 明示的に許可した1ケースのみ）:
- *
- * ```
- * DATABASE_URL=... OPENAI_API_KEY=... npx tsx src/time-weighting-stage3a-isolation.ts
- * ```
- *
- * 出力: `examples/chat/bench-results/answer-time-weighting-stage3a-isolation.json`
- * （生データ）と、標準出力への集計表。
- */
+/** 一度きりの切り分け実験なので、`cli.ts` の dispatch には配線しない（恒久的なサブコマンドにする理由が無い）。実 API を叩く。 */
 
 const TARGET_CASE_ID = "eval-undated-c1-seat-floor-reinforced";
 const OLD_LOCAL_ID = "old-seat-undated";

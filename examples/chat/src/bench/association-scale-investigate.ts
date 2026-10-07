@@ -1,67 +1,12 @@
 #!/usr/bin/env node
 /**
- * `association-scale-bench.ts` の配置(A)（Issue #337）で見つかった逆転
- * ——1万行スケールで **on-3 だけ 4/12 届き、on-5/on-10 は 0/12**——を切り分ける、
- * 診断スクリプト（`pnpm --filter @mnemora/example-chat run association-scale-investigate`）。
- * 測ったこと・全体像は [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md)
- * （特に §4・§5）を見ること——このファイルは道具、ADR 0332 が記録。
+ * `association-scale-bench.ts` の配置(A)で見つかった逆転（1万行スケールで on-3 だけ 4/12 届き、on-5/on-10 は 0/12）を
+ * 切り分ける診断スクリプト。測ったこと・全体像は ADR 0332 を見ること。このファイルは道具で、ADR が記録。
  *
- * ⛔ **別データベースで走らせること。** `association-scale-bench.ts` の配置(A)/(B)/(R)が
- * 使っている DB（`TRUNCATE` を挟む）を壊さないため、`DATABASE_URL` は専用に
- * `createdb` した別名（例: `mnemora_investigate`）を指す。
+ * 別データベースで走らせること。`association-scale-bench.ts` の配置(A)/(B)/(R)が使っている DB（`TRUNCATE` を挟む）を
+ * 壊さないため、`DATABASE_URL` は専用に `createdb` した別名を指す。
  *
- * ## 何を見るか
- *
- * `recall-runtime.ts`(現物)を読むと、連想枠の最終選抜は次の形をしている
- * （`packages/core` は変更していない——読んで確かめただけ）:
- *
- * 1. 各アンカー(既定 anchorCount=3、`maxCount` に依らず同じ3件)ごとに
- *    `vectorStore.search(limit: kPrime=40)` で生の近傍を集める→`associationHits`
- *    （重複除去・`minSimilarity` で足切り、アンカー類似度降順）。
- * 2. `rankFetchCount = max(maxCount, round(maxCount × overFetchFactor(4)))`
- *    ——`maxCount=3→12, 5→20, 10→40`。**`associationHits` の先頭 `rankFetchCount` 件**
- *    だけを `rankedCandidates` の母集合にする(Issue #402)。
- * 3. `rankKey = similarity(アンカーとの近さ) × score.total(decay×tagMatch×freshness×strength)`
- *    で並べ替え、先頭 `maxCount` 件だけを実際の連想枠にする。
- *
- * ⟹ **`associationHits` 自体は `maxCount` に依らず同じ**(同じ3アンカー・同じ検索)。
- * `maxCount` が動かすのは (a) 母集合を先頭何件まで広げるか(`rankFetchCount`)、
- * (b) 実際に席に着ける件数、の2つだけ。
- *
- * 🔴 **当初の仮説（「フィラー混入がmaxCountとともに増えて gold を押し出す」）は、
- * 実測で確認できなかった。** 単一 ingest（本スクリプト）で maxCount=3/5/10 を
- * 振ったところ、逆転は再現せず **全 arm で 0/12（一様）だった**——(A)側の逆転は
- * `maxCount` の因果効果ではなく、**(A)が arm ごとに独立 `TRUNCATE`+再ingestする
- * こと自体が持ち込む非決定性**（`memory_id`/`recorded_at` の tie-break、または
- * HNSW索引構築の非決定性——ADR 0332 §5.4、切り分けていない）が主要因である
- * 可能性が高い、という**別の**発見をした。この docstring は当初の仮説を消さずに
- * 残す——**外れた仮説も記録**（`docs/autonomy.md`「確かめていないことは確かめて
- * いないと書く」の逆——「外れたと確かめたことも、外れたまま残す」）。
- *
- * ## 何を出すか(per-probe)
- *
- * - `result.memories` のうち `retrievedVia === "association"` の並び(=実際に
- *   席へ着いた連想枠)を、externalId を解決した上で役割分類
- *   (`own-gold`/`own-anchor`/`own-distractor`/`other-probe`/`haystack`/`filler`/`unknown`)
- *   して出す。gold が席に着いていれば、そのgoldの `associationOf`(=どのアンカー
- *   経由か)を externalId で示す——probe自身のアンカーか、別 probe のアンカーか
- *   （後者なら「anchor自体は正しいがgoldが違うprobeの連想として出た」という
- *   別の壊れ方になる）。
- * - `result.omitted` のうち `kind==="over_limit", stage==="association"` の `count`
- *   ——`maxCount` が増えるにつれてどう動くか(母集合が広がれば増えるはず)。
- * - `dActualAnchor`(既存の spy 技法)——3アンカーが `maxCount` に依らず同一かを
- *   確認する(理論通りなら on-3/on-5/on-10 で完全一致するはず——実測でも一致した)。
- *
- * ⛔ **これも測定であり判定ではない。** 見つかったことをそのまま出す。
- *
- * ## 残すか消すか（Issue #337 段2フォローアップでの判断）
- *
- * **残す。** 理由: (1) 単一 ingest で `maxCount` だけを振る、という
- * `association-scale-bench.ts` の配置(R)には無い視点（per-probe の役割分類・
- * `omitted` の直接観測）を持ち、(A)/(B)/(R)のどれとも役割が重ならない。
- * (2) ADR 0332 §5の「独立ingest間の揺れ」を今後さらに切り分ける（§5.4の
- * tie-break説とHNSW非決定性説のどちらが主要因か）ときの出発点になる。
- * (3) 既に一度、当初の仮説を覆す発見をしており、道具として実証済み。
+ * 測定であり判定ではない。見つかったことをそのまま出す。
  */
 import type {
   Ctx,
@@ -102,22 +47,10 @@ import { resolveExternalId } from "../provenance-trace.js";
 import { CachingEmbeddingProvider, FileEmbeddingCache } from "./embedding-cache.js";
 import { redactDatabaseUrl } from "./redact-database-url.js";
 
-// ---------------------------------------------------------------------------
-// 歯 —— 何よりも先に置く（実 API を絶対に叩かないため）。
-//
-// ⚠ 【実測 2026-09-25、ADR 0332 追記 A.8】旧版は `createHandle()` の中でしか
-// `MNEMORA_EMBEDDING`（`instanceof LocalEmbeddingProvider`）を検査しておらず、
-// その手前で `createPostgresClient`/`runMigrations`（実 DB 接続）が走っていた。
-// `association-scale-nondeterminism.ts` の `requireGatesOrThrow()` と同じ形で、
-// provider を1つも構築せず・DB にも繋がず、文字列だけで先に検査する。
-// ---------------------------------------------------------------------------
+// 歯。何よりも先に置く。provider を1つも構築せず・DB にも繋がず、環境変数の文字列だけで先に検査する。
+// 旧版は `createHandle()` の中でしか検査しておらず、その手前で実 DB 接続が走っていた。
 
-/**
- * provider を1つも構築する前に、環境変数の**文字列**だけで判定する
- * （`selectLLMMode`/`selectEmbeddingMode` は provider のインスタンスを作らない
- * 純関数——`../providers.ts` 参照）。ここを通らない限り、後続のどのコードも
- * 実行しない。
- */
+/** provider を構築する前に、環境変数の文字列だけで判定する。ここを通らない限り、後続のコードは実行しない。 */
 function requireGatesOrThrow(): void {
   const llmMode = selectLLMMode(process.env);
   if (llmMode !== "deterministic") {
@@ -160,9 +93,8 @@ interface VectorStoreSpy {
 }
 
 function wrapVectorStoreWithSpy(inner: VectorStore, spy: VectorStoreSpy): VectorStore {
-  // Issue #1012: 内側が持つ任意の口（`searchMany?`、PR #932）は包みも持つ——落とすと runtime の
-  // 段3.5 がアンカーごとの `search()` に戻り、本番と違う経路を測る。このスクリプトは
-  // `getVectors` だけを記録するので、`searchMany` は記録せずに素通しする。
+  // 内側が持つ任意の口 `searchMany?` は包みも持つ。落とすと runtime の段3.5 がアンカーごとの `search()` に戻り、本番と違う経路を測る。
+  // このスクリプトは `getVectors` だけを記録するので、`searchMany` は記録せずに素通しする。
   const innerSearchMany = inner.searchMany;
   return {
     ...(innerSearchMany !== undefined
@@ -187,17 +119,13 @@ interface Handle {
   memoryStore: PostgresMemoryStore;
   spy: VectorStoreSpy;
   pool: PostgresClient["pool"];
-  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
 async function createHandle(databaseUrl: string, cache: FileEmbeddingCache): Promise<Handle> {
   const client = createPostgresClient(databaseUrl);
-  // `examples/chat/src/runtime-factory.ts` の `createExampleRuntime` と同じ穴・
-  // 同じ理由: `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に
-  // 失敗しうる処理が何段もある。呼び出し側は `close()` を `try`/`finally` で包むが、
-  // `await createHandle(...)` 自体はその外にあるため、ここで reject すると handle を
-  // 一度も受け取れず `close()` を呼びようがない。
+  // `createExampleRuntime` と同じ穴。`client` を作った後、`close()` を持つ handle を返す前に失敗しうる処理が続く。
+  // ここで reject すると呼び出し側は handle を受け取れず `close()` できないため、ここで閉じる。
   try {
     await runMigrations(client.pool);
     const {
@@ -243,7 +171,6 @@ async function createHandle(databaseUrl: string, cache: FileEmbeddingCache): Pro
       close: () => closePostgresClient(client),
     };
   } catch (err) {
-    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
     await closePostgresClient(client).catch(() => {});
     throw err;
   }
@@ -285,7 +212,6 @@ function classifyRole(
 }
 
 async function main(): Promise<void> {
-  // ⛔ 何よりも先に。provider を1つも作らず、DB にも繋がない歯（ADR 0332 追記 A.8）。
   requireGatesOrThrow();
 
   const databaseUrl = requireDatabaseUrl();

@@ -12,30 +12,15 @@ import { OPENAI_EMBEDDING_MODEL, OPENAI_LLM_MODEL } from "./providers.js";
 import { createUsageMeter } from "./usage-meter.js";
 
 /**
- * Issue #705: 「同じ記憶集合で回答生成を n 回試行し、正答数（pass/fail/indeterminate の件数）で
- * 見る器」の本体。
+ * 同じ記憶集合で回答生成を n 回試行し、正答数で見る器。1回の試行では揺れるケースの退行も改善も見えないため。
  *
- * 🔴 **背景（ADR 0295 追記2）**: PR #698 は `schedule-change-meeting-day` を1回だけ試行して
- * ✅ を見た。同じ記憶集合で複数回試行すると 3/15 まで割れることが後で分かった——1回の試行では
- * 揺れるケースの退行も改善も見えない。この器は、**同じ記憶集合**（`answer-trials-material.ts`
- * がカセットから読む、DB・recall を一切やり直さない材料）に対して、描画 A/B を n 回ずつ回す。
- *
- * ⛔ **CI の門にしない**（Issue #705 の完了条件・#693 の線）。この器はあくまで手元で回す
- * 観測用の CLI であり、`.github/workflows/ci.yml` には配線しない（ADR 0301 決定）。
- *
- * ⛔ **開発ケースのみを扱う。** `ANSWER_CASE_SET_EVAL`（held-out）はこの module から一度も
- * 参照しない——`answer-trials-material.ts` が `ANSWER_CASE_SET_DEV` だけをカセットから
- * 引き当てる設計になっている（ADR 0301 決定「eval は今回は受け付けない」）。
+ * CI の門にしない。手元で回す観測用の CLI で、`ci.yml` には配線しない。
+ * 開発ケースのみを扱い、`ANSWER_CASE_SET_EVAL`（held-out）は参照しない。
  */
-
-// ---------------------------------------------------------------------------
-// n・描画順の既定と env からの読み取り
-// ---------------------------------------------------------------------------
 
 export const DEFAULT_ANSWER_TRIALS_N = 5;
 export const DEFAULT_ANSWER_TRIALS_RENDERS: readonly RenderName[] = ["recorded", "digest-only"];
 
-/** `MNEMORA_ANSWER_TRIALS_N`。未指定なら {@link DEFAULT_ANSWER_TRIALS_N}。正の整数以外は例外。 */
 export function parseAnswerTrialsN(env: EnvLike): number {
   const raw = env.MNEMORA_ANSWER_TRIALS_N;
   if (raw === undefined || raw === "") {
@@ -50,11 +35,6 @@ export function parseAnswerTrialsN(env: EnvLike): number {
   return n;
 }
 
-/**
- * `MNEMORA_ANSWER_TRIALS_RENDERS`（カンマ区切り）。未指定なら
- * {@link DEFAULT_ANSWER_TRIALS_RENDERS}（A=recorded, B=digest-only の順）。
- * 未知の描画名は例外（`parseModeOverride` と同じ作法、黙って無視しない）。
- */
 export function parseAnswerTrialsRenders(env: EnvLike): RenderName[] {
   const raw = env.MNEMORA_ANSWER_TRIALS_RENDERS;
   if (raw === undefined || raw === "") {
@@ -76,10 +56,6 @@ export function parseAnswerTrialsRenders(env: EnvLike): RenderName[] {
   }
   return names as RenderName[];
 }
-
-// ---------------------------------------------------------------------------
-// 型
-// ---------------------------------------------------------------------------
 
 export interface CaseRenderStatic {
   renderName: RenderName;
@@ -117,12 +93,7 @@ interface AnswerTrialsResultBase {
   caseMaterials: CaseMaterialSummary[];
 }
 
-/**
- * `temperature` は常にこの文字列——`OpenAILLMProvider.complete` が `temperature` を
- * 一切渡していない（`packages/openai/src/llm-provider.ts` 現物確認済み）ため、実際に
- * 使われる値は OpenAI 側の既定であり、この器からは見えない。**数値を捏造しない**
- * （AGENTS.md の一般規律の適用）。
- */
+/** `temperature` は常にこの文字列。`OpenAILLMProvider.complete` が渡しておらず、実際の値は OpenAI 側の既定でこの器からは見えない。数値を捏造しない。 */
 export const TEMPERATURE_UNSPECIFIED_LABEL = "provider既定（未指定）";
 
 export interface AnswerTrialsEvaluated extends AnswerTrialsResultBase {
@@ -142,14 +113,7 @@ export type AnswerTrialsResult = AnswerTrialsEvaluated | AnswerTrialsUnevaluated
 
 export interface RunAnswerTrialsOptions {
   env?: EnvLike;
-  /**
-   * DI 用。テストがモック `LLMProvider` を注入するために使う。**これを渡した run は
-   * `OPENAI_API_KEY` の有無を見ない**（未評価判定をバイパスする）——呼び出し側が
-   * 明示的に provider を用意した以上、キーの有無で判定する理由が無い。この経路では
-   * `usage`/`costUsd` を計測しない（自前で構築した `usage-meter` を経由しないため。
-   * 数値を捏造しない——`usage`/`costUsd` は常に `{0,...}` ではなく、計測していないことを
-   * 示す別の扱いにする。下記 `runAnswerTrials` 実装参照）。
-   */
+  /** DI 用。テストがモック `LLMProvider` を注入する。渡した run は `OPENAI_API_KEY` の有無を見ず、`usage`/`costUsd` も計測しない（数値を捏造しない）。 */
   llmProvider?: LLMProvider;
   material?: AnswerTrialsMaterialSet;
   n?: number;
@@ -179,12 +143,7 @@ function staticSummaryFor(
   };
 }
 
-/**
- * 本体。**`options.llmProvider` が渡されなければ**、`options.env`（既定
- * `process.env`）の `OPENAI_API_KEY` を見る——無ければ実 API を一度も呼ばず、
- * `evaluated: false` を返す（黙った `recorded` へのフォールバックはしない。
- * カセットに無い入力なので——`digest-only` 描画は元より一度も記録されたことが無い）。
- */
+/** 本体。`options.llmProvider` が無く `OPENAI_API_KEY` も無ければ、実 API を呼ばず `evaluated: false` を返す。`recorded` へ黙ってフォールバックしない（`digest-only` 描画はカセットに無い）。 */
 export async function runAnswerTrials(
   options: RunAnswerTrialsOptions = {},
 ): Promise<AnswerTrialsResult> {
@@ -286,11 +245,6 @@ export async function runAnswerTrials(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 表示
-// ---------------------------------------------------------------------------
-
-/** `evaluated: false` のときに画面へ出す注記。`formatNoApiCallsNotice`（usage-meter.ts）と同じ規律。 */
 export function formatAnswerTrialsUnevaluatedNotice(): string {
   return (
     "🔴 未評価（実 API が無い）——OPENAI_API_KEY が環境に無いため、回答生成を一度も呼んでいない。\n" +

@@ -19,29 +19,7 @@ import { createExampleRuntime } from "../runtime-factory.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 import { tryGitRevParseHead } from "../git-info.js";
 
-/**
- * Issue #109 残件「A」——マネージャーからの実測依頼: ADR 0322 と同じ `local` 埋め込み・
- * 合成ノイズの反実仮想データに、**候補案1（margin基準、`../verdict-candidate-margin.ts`）**
- * を当て、既存の判定（案0、`decideNoiseRoundRed` = ADR 0316 の `decideEmbeddingDriftVerdict`
- * を呼ぶだけ、変更していない）と比べる。
- *
- * ⛔ **`local-noise-arm.ts`/`synthetic-score-noise.ts`/`openai-arm-verdict.ts` には
- * 1文字も触れていない。**このスクリプトは新しいファイルであり、既存の
- * `captureGroupCandidates`/`computeNoisyGroupMetrics`/`decideNoiseRoundRed` を
- * 呼ぶだけである。
- *
- * ⛔ 実 API は一切叩かない（`OPENAI_API_KEY` は読まない）。`local` 埋め込みは決定的
- * （ADR 0094 が2 run のビット一致で確認済み）なので、この反実仮想は「もし揺れが
- * あったら」という仮定の下での比較であって、実際の偽陽性率ではない
- * （`synthetic-score-noise.ts` の doc コメントと同じ限定）。
- *
- * ## 使い方
- *
- * ```
- * DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/local-margin-candidate-measurement.ts
- * ```
- */
+/** 反実仮想の比較であって、実際の偽陽性率ではない（`local` 埋め込みは決定的で、揺れは観測されていない）。 */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CHAT_ROOT = join(here, "..", "..");
@@ -184,7 +162,6 @@ async function main(): Promise<void> {
         ),
       });
 
-      // --- 陽性対照: SIGMA_GRID には無い、極端に大きい σ で両案とも red を捕まえられるか ---
       let pcCandidate0Red = 0;
       let pcCandidate1Red = 0;
       for (const seed of SEEDS) {

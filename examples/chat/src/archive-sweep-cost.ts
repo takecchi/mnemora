@@ -37,29 +37,7 @@ import {
 import type { ProviderMode } from "./providers.js";
 import { resolveExternalId } from "./provenance-trace.js";
 
-/**
- * `archive-sweep-cost` サブコマンド(Issue #209)——「掃引(`Runtime.sweepArchive`、
- * ADR 0114)が北極星の物差しに効くか」を実測するベンチの、DB/LLM/embedding を
- * 要求する側。JSON の組み立て(型・平均の純関数)は `./archive-sweep-json.js` に
- * 委ねる——ここは「何を読むか」「いつ呼ぶか」だけを持つ(`consolidation-cost.ts`
- * と同じ分担)。
- *
- * **測る手順**:
- * 1. この bench 専用のテナントの `default_half_life_hours` を短く設定する
- *    (受け入れ条件1「half-life を短くした専用 arm」)。裁量の定数をそのまま
- *    JSON へ書かず、書き込んだ後に読み戻した実値を使う。
- * 2. gold/distractor は実時刻で ingest し、haystack(filler)だけを
- *    `decayFloorOffsetMs(halfLifeHours)` 分(+余裕)だけ過去へ backdate して
- *    ingest する(`MutableClock` を注入する。`time-term-arm.ts` と同じ仕掛け)。
- *    ⟹ filler の `decayFloorAt` だけが実行時点の実時刻より前になり、
- *    gold/distractor の `decayFloorAt` は実時刻よりずっと先になる。
- * 3. before を測る(掃引前。`archivedCount` は常に0のはず)。
- * 4. `runtime.sweepArchive()` を実時刻で呼ぶ。
- * 5. after を測る(掃引後)。
- */
-
-/** `MemoryStore` は `@mnemora/postgres` 経由なので `pool` の型はそこから借りる
- *  (`embed-failure-kind.ts` と同じ理由——`pg` への phantom dependency を作らない)。 */
+/** `pool` の型は `@mnemora/postgres` から借りる（`pg` への phantom dependency を作らない）。 */
 type Pool = PostgresClient["pool"];
 
 export interface RunArchiveSweepCostOptions {
@@ -67,51 +45,24 @@ export interface RunArchiveSweepCostOptions {
   memoryStore: MemoryStore;
   embeddingProvider: EmbeddingProvider;
   pool: Pool;
-  /** filler の ingest だけを backdate するために注入する(`createExampleRuntime` の
-   *  第4引数と同じインスタンスであること)。 */
+  /** filler の ingest だけを backdate するために注入する。`createExampleRuntime` の第4引数と同じインスタンスにすること。 */
   clock: MutableClock;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
   tenantId: string;
-  /** この bench 専用テナントに設定する `default_half_life_hours`(裁量値)。 */
   halfLifeHours: number;
-  /** filler の backdate 量に上乗せる余裕(時間)。 */
   marginHours: number;
-  /** `runtime.sweepArchive` の `limit`。 */
   sweepLimit: number;
   budgetLadder: readonly number[];
   recallLimit: number;
   measuredAt: Date;
   commit: string | null;
-  /** 既定は `DEFAULT_HAYSTACK_SIZE`(`probe-set.ts`、既存 `retrieval`/`consolidation-cost` と同じ既定)。 */
   haystackSize?: number;
-  /**
-   * `--decay-clock`(ADR 0165 決めたこと11)が指定されたときだけ渡す。`compare.ts` の
-   * `CompareOptions.decayClock` と同じ形——「書くかどうか」を1個の optional な値の
-   * 有無だけで判定できるようにするため、`store`/`clock` を1つの欄にまとめる。
-   * この bench 専用テナント(`tenantId`)1つに対して、ingest を始める前に
-   * `writeDecayClock`(`@mnemora/core`)で書き込む。**省略時はこの関数を一度も
-   * 呼ばない。**
-   */
   decayClock?: { store: TenantSettingsStore; clock: DecayClock };
-  /**
-   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
-   * **省略時は `null`**——この bench(archive sweep コスト・gold 順位)の基準線は
-   * 変えない。`examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
-   */
   association?: RecallAssociationQuery | null;
 }
 
-/**
- * この bench 専用テナントの `tenant_settings.default_half_life_hours` を設定し、
- * 読み戻した実値を返す。
- *
- * `TenantSettingsStore`(`@mnemora/core`)にはこの列を書く公開の口が無い
- * (`getDefaultHalfLifeHours` のみで、設定できるのは `event_retention_days` だけ)。
- * ⟹ `packages/core`/`packages/postgres` を変更せずにこの bench を作るため、
- * `embed-failure-kind.ts` の `lookupLatestEmbedFailureKind` と同じやり方
- * (`pool.query` への素の SQL)でこの bench 専用テナントの行だけを UPSERT する。
- */
+/** この bench 専用テナントの `default_half_life_hours` を設定し、読み戻した実値を返す。`TenantSettingsStore` にこの列を書く口が無く、`packages/core`/`postgres` を変えないため素の SQL で UPSERT する。 */
 async function setTenantHalfLifeHours(
   pool: Pool,
   tenantId: string,
@@ -141,7 +92,6 @@ interface StoreSnapshot {
   json: ArchiveSweepPhaseJson["store"];
 }
 
-/** `consolidation-cost.ts` の `measureStore` と同じ形。`archived` バケットを追加で数える。 */
 export async function measureStore(
   memoryStore: MemoryStore,
   ctx: Ctx,
@@ -157,9 +107,6 @@ export async function measureStore(
   const active = byStatus.get("active") ?? [];
   const superseded = byStatus.get("superseded") ?? [];
   const archived = byStatus.get("archived") ?? [];
-  // この bench は `forget`/`consolidate`/`contest` を一切呼ばないので、
-  // active/superseded/archived 以外の status を持つ Memory はここに現れない想定である
-  // (superseded 自体も本来0のはず——出た場合は allContentChars にだけ含め、隠さない)。
   const allContentChars = memories.reduce((sum, m) => sum + m.content.length, 0);
   return {
     json: buildArchiveSweepStoreJson({
@@ -181,8 +128,6 @@ async function measureProbe(
   limit: number | undefined,
   association: RecallAssociationQuery | null = null,
 ): Promise<RawArchiveSweepProbeMeasurement> {
-  // association: 省略時は null — この欄を省略した既存の呼び出しではこの bench
-  // （archive sweep コスト・gold 順位）の基準線を動かさない（ADR 0337 追記2026-09-26）。
   const result = await runtime.recall(
     ctx,
     budget !== undefined
@@ -214,7 +159,6 @@ async function measureProbe(
   };
 }
 
-/** `consolidation-cost.ts` の `measureRecallForRound` と同じ形(round ではなく phase 単位)。 */
 export async function measureRecallForPhase(
   runtime: Runtime,
   memoryStore: MemoryStore,
@@ -270,11 +214,6 @@ export async function measureRecallForPhase(
   };
 }
 
-/**
- * この関数は常に `status: "measured"` を返す(重み取得の失敗は `cli.ts` の
- * `warmupLocalEmbedding` の段で打ち切られる。`consolidation-cost.ts` の
- * `runConsolidationCost` と同じ切り分け)。
- */
 export async function runArchiveSweepCost(
   options: RunArchiveSweepCostOptions,
 ): Promise<Extract<ArchiveSweepCostRunJson, { status: "measured" }>> {
@@ -294,9 +233,7 @@ export async function runArchiveSweepCost(
   const utterances = buildProbeSetConversation(haystackSize);
   const allIds: string[] = [];
 
-  // ⚠ 1点に凍結する(`time-term-arm.ts` の `runOneProbe` と同じ理由)——
-  // member ごとに `new Date()` を取り直すと、gold/distractor 間・filler 間に
-  // ミリ秒差が残り、この bench が動かすつもりの無い軸(decay)にノイズが乗る。
+  // 1点に凍結する。member ごとに `new Date()` を取り直すと、動かすつもりの無い軸（decay）にミリ秒差のノイズが乗る。
   const realNow = new Date();
   const backdated = new Date(realNow.getTime() - backdateMs);
 
@@ -310,17 +247,8 @@ export async function runArchiveSweepCost(
     allIds.push(...observed.memoryIds);
   }
 
-  // ⭐ recall/tick の直前に必ず実時刻へ戻す——歴史的な理由で残している。ADR 0355 より前は
-  // `outbox.available_at` が Postgres の実時刻で入り、Clock を過去に置いたままだと embed ジョブが
-  // 1件も claim されなかった(`time-term-arm.ts` で実測済みの罠)。いまは `available_at` も
-  // 注入した時計に従う(ADR 0559)。
-  //
-  // 🔴 Issue #719: 素の `new Date()` だけでは足りない——`available_at`(Postgres の
-  // `now()`、us精度)と同じ ms 内でこの時刻を読むと、claim が1件も進まない
-  // (`clockPastRecentDbWrites` の docstring 参照)。`clock` は `.set()` するまで
-  // 動かない止まった時計なので、`drainEmbedTicks` の `waitForClockToAdvance`
-  // (実時計が進むのを待つ既定の再試行)は無意味——ここで先に +1ms して確実に
-  // 追い越しておき、`waitForClockToAdvance: false` で無駄な待ちを避ける。
+  // recall/tick の直前に必ず実時刻へ戻す。さらに +1ms して `available_at` を確実に追い越し、`waitForClockToAdvance: false` で無駄な待ちを避ける。
+  // 止まった時計は `.set()` するまで進まないので、既定の再試行（実時計が進むのを待つ）は無意味。
   options.clock.set(clockPastRecentDbWrites());
   await drainEmbedTicks(options.runtime, ctx, {
     expectedProcessed: allIds.length,

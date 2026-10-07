@@ -8,49 +8,8 @@ import { loadCassette } from "../cassette-io.js";
 import type { Conversation, ConversationTurn } from "../scenario.js";
 
 /**
- * Issue #835 候補3「今の文言（v4 ではない、既定の store 語彙ヒント文言）」の対照を、
- * PR #1424（ADR 0377、候補1）後の main で得るための**純粋な再生**（実 API を1回も
- * 叩かない）。
- *
- * ADR 0329 本文「測ったこと」で記録した `answer.claim-key.known-predicates-{1,2,3}.json`
- * （2026-09-25、候補1が入る**前**の main で記録・全14ケース・`{ enabled: true,
- * detectContested: true, knownPredicatesFromStore: true }`）を、`MNEMORA_LLM=recorded`/
- * `MNEMORA_EMBEDDING=recorded` で読み直す。
- *
- * ⚠ **`runAnswerCase`（回答生成込み）ではなく `ingestConversation` だけを呼ぶ。**
- * 【実測】`runAnswerCase` で全14ケースを再生しようとしたところ、2件目
- * （`schedule-change-meeting-day`）の mnemora 回答プロンプトで
- * `RecordedLLMProvider: このプロンプトは記録に無い` の例外になった——claim key 派生・
- * 抽出（`completeStructured`、時刻に依存しない）は候補1と無関係なはずだが、回答生成
- * （`complete`、`recall()` を経由）は `recall()` の減衰（decay、現在時刻に依存）を通る。
- * カセットを記録した日（2026-09-25）と再生した日（数日後）で「現在時刻」が違うため、
- * 減衰の効き方が変わり、回答プロンプトに含まれる記憶の集合・順序が記録済みと食い違った
- * ——**候補1（ADR 0377）そのものが原因ではなく、日付が経った通常の再生の限界**だと
- * 考えられる（推測。確かめていない）。
- *
- * ⟹ **この再生は `ingestConversation` まで（抽出・claim key 派生・書き込み・検出）に
- * 留める。** predicate 一致・`contested` 成立・誤検出は `memories` テーブルを直接読めば
- * 分かる（ADR 0329/0377 の実測手法と同じ）——`recall()`/回答生成を経由しないので、
- * 減衰の時刻依存を踏まない。
- *
- * 使い方: `DATABASE_URL=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/replay-835-candidate3-known-predicates.ts <cassette-path>`
- * （`OPENAI_API_KEY` は不要——記録に無い入力があれば `RecordedLLMProvider`/
- * `RecordedEmbeddingProvider` が例外を投げて止まる。黙って実 API へは落ちない。）
- *
- * ⚠ **claim key 派生の「記録に無い」は、例外として `ingestConversation` まで上がって
- * こない。** `deriveClaimKeys`（`packages/core/src/claim-key.ts`）は失敗を
- * `ObserveResult.claimKeyFailure` に丸め、鍵を `null` にして保存を続ける。
- * 【実測】これを読まずにいた間、`answer.claim-key.candidate3-v4-1.json`（v4 の文言を
- * 実 API へ送る直前だけ差し替えて記録したもの）を渡すと、語彙が空でなくなった2回目
- * 以降の派生がすべて外れ、例外0件・exit 0 のまま `contested` 0件という無意味な結果が
- * 出た（Issue #835）。⟹ `claimKeyFailure` を1件ずつ「ケース・turn・理由」で出し、
- * 表は最後まで出したうえで、最後に件数をまとめ、1件でもあれば exit 1 にする。
- *
- * ⚠ **`answer.claim-key.known-predicates-{1,2,3}.json` は、`other-period-city-this-year`
- * の2ターンが記録に無く、毎回2件の失敗で終わる（exit 1）。** 候補1（ADR 0377）の後で
- * 語彙が変わり、カセットと合わなくなった filler であり、ADR 0377 に記録済み。訂正4件と
- * `unknown-favorite-number` の数字には影響しない。許す一覧は持たない——既知の2件も
- * 本当に失敗しているので、そのまま失敗として数える。
+ * `runAnswerCase` ではなく `ingestConversation` だけを呼ぶ。回答生成は `recall()` の減衰（現在時刻に依存）を通るので、記録した日と再生する日が違うと回答プロンプトが記録と食い違う。
+ * claim key 派生の「記録に無い」は例外にならず `ObserveResult.claimKeyFailure` に丸められるので、1件ずつ出し、1件でもあれば exit 1 にする（許す一覧は持たない）。
  */
 
 function toConversation(answerCase: AnswerCase): Conversation {
