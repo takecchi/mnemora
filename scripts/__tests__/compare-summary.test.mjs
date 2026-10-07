@@ -293,6 +293,36 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
   });
 
   /**
+   * 🔴 Issue #1814: `--baseline` を**空の値で**渡すと、渡さない場合と同じ扱いになり
+   * exit 0 で終わっていた——⭐門が黙って外れる。`--baseline "$BASELINE"` のように
+   * 変数展開が空になる書き方で踏む。空の値・値が無い・値の位置に次のフラグが来るは、
+   * どれも「指定した」側であり、使い方の誤りとして exit 1 にする。
+   */
+  it.each([
+    ["空の値", ["--baseline", ""]],
+    ["値が無い（末尾）", ["--baseline"]],
+  ])("🔴 --baseline が %s なら exit 1（⭐門を黙って外さない。Issue #1814）", (_label, tail) => {
+    const result = run(["--measured", writeJson("measured.json", makeMeasured()), ...tail]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--baseline");
+  });
+
+  it("🔴 --baseline の値の位置に次のフラグが来たら exit 1（Issue #1814）", () => {
+    const result = run(["--baseline", "--measured", writeJson("measured.json", makeMeasured())]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--baseline");
+  });
+
+  it.each([
+    ["空の値", ["--measured", ""]],
+    ["値が無い（末尾）", ["--measured"]],
+  ])("--measured が %s なら exit 1（Issue #1814 の同じ形）", (_label, args) => {
+    const result = run(args);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--measured");
+  });
+
+  /**
    * ⭐ Issue #403: 基準値の鮮度は⭐門が見ない欄(`omitted` 等)の相違を stderr へ
    * 警告として出す。⛔ **門ではない**——終了コードは変えない。
    */

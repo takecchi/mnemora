@@ -38,6 +38,10 @@
  * `--baseline` を渡さない場合はこれまで通り exit 0(門として機能しない。
  * 基準値が無ければ悪化の判定そのものができない)。
  *
+ * 🔴 `--baseline`・`--measured` を渡していて、その値が空・無い・次のフラグである場合は、
+ * 使い方の誤りとして exit 1(Issue #1814)。⛔ 「渡さない」と同じ扱いにしない——
+ * `--baseline "$BASELINE"` の展開が空になると、⭐門が黙って外れるため。
+ *
  * ⚠ `--baseline` を渡していて、⭐門が見ない欄(`omitted` 等)が基準値と相違しているときは
  * stderr へ基準値の鮮度の警告を出す(`evaluateBaselineFreshness`、Issue #403)。
  * ⛔ **これは門ではない**——終了コード(0/1/2 の意味)は一切変えない。
@@ -52,20 +56,34 @@ import {
 } from "./compare-summary-lib.mjs";
 
 const args = process.argv.slice(2);
+const usage = "使い方: node scripts/compare-summary.mjs --measured <path> [--baseline <path>]";
 
+/**
+ * フラグの値を読む。フラグが無ければ `undefined`。
+ * **フラグが在るのに値が空・無い・次のフラグなら exit 1**(Issue #1814)——
+ * 「指定した」を「指定していない」と同じ顔で通さない。
+ *
+ * @param {string} flag
+ * @returns {string | undefined}
+ */
 function readArgValue(flag) {
   const index = args.indexOf(flag);
   if (index === -1) {
     return undefined;
   }
-  return args[index + 1];
+  const value = args[index + 1];
+  if (value === undefined || value === "" || value.startsWith("--")) {
+    console.error(`${flag} にパスが渡っていない（空・値なし・次のフラグ）。\n${usage}`);
+    process.exit(1);
+  }
+  return value;
 }
 
 const measuredPath = readArgValue("--measured");
 const baselinePath = readArgValue("--baseline");
 
-if (!measuredPath) {
-  console.error("使い方: node scripts/compare-summary.mjs --measured <path> [--baseline <path>]");
+if (measuredPath === undefined) {
+  console.error(usage);
   process.exit(1);
 }
 
