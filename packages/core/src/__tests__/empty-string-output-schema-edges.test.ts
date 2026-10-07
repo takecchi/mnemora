@@ -7,11 +7,6 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 import { takeRuntimeOutputContractProblemsForTesting } from "./runtime-output-contract-harness.js";
 
-/**
- * 空文字の識別子は入力では受け付けるが、出力の側の schema を通らない（`Ctx`・`RecalledMemory.subjectId`・
- * `OutboxJobRecord` の TSDoc）。schema を緩める直しをしたら、この TSDoc ごと書き直すことになる。
- */
-
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
 describe("空文字の subjectId で書いた記憶を recall() が返すと、outputValidation が ok: false になる", () => {
