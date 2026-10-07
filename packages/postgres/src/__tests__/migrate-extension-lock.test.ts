@@ -9,15 +9,7 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * `runMigrations` の共有の拡張ロック（`EXTENSION_LOCK_KEY`、#1220）まわりの約束:
- * - 拡張ロックを待つために敷く `lock_timeout` は、待ち終えたら戻し、本体には効かせない。
- *   戻す先は、利用者がロールに設定した値（`RESET`）。
- * - 取った拡張ロックは、終わった後に手放す（pool を持ち続けても、別のセッションが取れる）。
- * - 拡張ロックを持つ最中にロックの接続が切れたら、元の失敗で reject し、ロックの返却の失敗で
- *   上書きしない。
- *
- * `pg_stat_activity`・`pg_terminate_backend`・`CREATE ROLE` を使うので直列の群に置く
- * （`vitest.config.mts`）。advisory lock は DB ごとなので、専用の DB を作って他のファイルと分ける。
+ * `pg_stat_activity`・`pg_terminate_backend`・`CREATE ROLE` を使うので直列の群に置く（`vitest.config.mts`）。advisory lock は DB ごとなので、専用の DB を作って他のファイルと分ける。
  */
 
 const DB = "mnemora_ext_lock_teeth";
@@ -61,12 +53,8 @@ afterAll(async () => {
 });
 
 /**
- * `DB` の中で、`like` に当たる問い合わせを流しているバックエンドの pid が現れるまで待つ。
- *
- * Issue #1825: `outcome`（待っている相手の処理、例えば `runMigrations` の Promise）を渡すと、
- * - それが先に終わったら、上限まで回らずに、その元のエラー文（または「resolve した」）で落ちる。
- * - 現れないまま打ち切ったときは、`outcome` がまだ終わっていないことと、`DB` の
- *   `pg_stat_activity` の行（state・wait_event_type・wait_event・query）をエラー文に載せる。
+ * `DB` の中で、`like` に当たる問い合わせを流しているバックエンドの pid が現れるまで待つ。`outcome`（待っている相手の処理）を渡すと、それが先に終わったら上限まで回らずにその元のエラー文で落ち、
+ * 現れないまま打ち切ったときは、`outcome` がまだ終わっていないことと `pg_stat_activity` の行をエラー文に載せる。
  */
 async function waitForBackend(
   like: string,
@@ -111,10 +99,7 @@ async function waitForBackend(
 }
 
 describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () => {
-  // Issue #1775 の #780（変異M3・M4）: 共有の拡張ロックは「拡張を作る未適用のファイルがあり、
-  // `extensionMode: "create"`」のときだけ取る（PR 本文「未適用に該当ファイルが無ければ取らない」・
-  // 「`"verify"` は一切参照しない」、ADR 0331）。別の接続が拡張ロックを握っていても、取らない経路は
-  // 待たされない。取る経路になると、握られている間 `lockTimeoutMs` で時間切れになる。
+  // 共有の拡張ロックは「拡張を作る未適用のファイルがあり、`extensionMode: "create"`」のときだけ取る。別の接続が拡張ロックを握っていても、取らない経路は待たされない。取る経路になると、握られている間 `lockTimeoutMs` で時間切れになる。
   async function holdExtensionLock(): Promise<Client> {
     const holder = new Client({ connectionString: connectionStringFor() });
     await holder.connect();
@@ -158,7 +143,6 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
       "9514_ext_lock_verify.sql",
       "CREATE EXTENSION IF NOT EXISTS vector;\nSELECT 1;",
     );
-    // `verify` は必要な拡張がすべて在ることを確かめる（作らない）。先に、管理ロールで作っておく。
     for (const ext of ["vector", "btree_gin", "pgcrypto"]) {
       await pool.query(`CREATE EXTENSION IF NOT EXISTS ${ext}`);
     }
@@ -241,13 +225,11 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     );
     const pid = await waitForBackend("%pg_sleep(7.25)%", { outcome: run });
     await admin.query("SELECT pg_terminate_backend($1)", [pid]);
-    // ロックの返却の失敗が、適用していたファイルの失敗を上書きしない。
     expect((await outcome).message).toMatch(/^migration 9504_ext_lock_connloss_file\.sql failed: /);
   }, 20_000);
 
   it("拡張を作っている最中にロックの接続が切れると、その元の失敗で reject する", async () => {
     const dir = dirWith("9505_ext_lock_connloss_create.sql", "SELECT 1;");
-    // `pg_extension` を排他で握ると、`CREATE EXTENSION IF NOT EXISTS`（存在の確認）がそこで待つ。
     const holder = new Client({ connectionString: connectionStringFor() });
     await holder.connect();
     try {
@@ -263,7 +245,6 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
         outcome: run,
       });
       await admin.query("SELECT pg_terminate_backend($1)", [pid]);
-      // ロックの返却の失敗が、拡張の作成の失敗を上書きしない。
       expect((await outcome).message).toMatch(
         /terminating connection due to administrator command/,
       );
@@ -273,12 +254,8 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
     }
   }, 20_000);
 
-  // Issue #1825: 上の2本は CI で1回だけ「バックエンドが現れなかった」で落ちた。原因は確定して
-  // いない（手元の再現は 0/約370 回）。次に落ちたとき、待っていた処理が先に失敗していたのか、
-  // 本当に現れなかったのかを、エラー文だけで見分けられるようにする。
   describe("waitForBackend の診断（Issue #1825）", () => {
     it("待っている間に runMigrations が先に失敗したら、待ちの打ち切りではなく、その元のエラー文で落ちる", async () => {
-      // 読めない migrationsDir は、DB に触れる前に reject する（ADR 0448）。
       const run = runMigrations(pool, join(tmpdir(), "mnemora-ext-lock-teeth-does-not-exist"));
       run.catch(() => {});
       const startedAt = Date.now();
@@ -296,7 +273,6 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
       expect(error.message).toContain("先に終わった");
       expect(error.message).toContain(original.message);
       expect(error.message).not.toContain("現れなかった");
-      // 上限（約5秒）まで回り切らずに抜ける。
       expect(Date.now() - startedAt).toBeLessThan(2_000);
     }, 20_000);
 
@@ -344,7 +320,6 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
            END IF;
          END $$;`,
         );
-        // 台帳は管理ロールが作っていることがあるので、このロールに触らせる。
         await pool.query(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${ROLE}`);
         const rolePool = new Pool({
           connectionString: connectionStringFor({ user: ROLE, password: ROLE_PASSWORD }),

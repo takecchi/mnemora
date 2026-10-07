@@ -4,14 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * ADR 0605:`PostgresOutboxStore.complete`・`fail` が、`opts.at` が `timestamptz` の下限（紀元前4714年11月24日 00:00 UTC）より前を
- * 断るときの例外の型は `RangeError` である（ADR 0597 の本文が「型は Fake の歯が縛る」と書いたが、`@mnemora/postgres` の型を縛る歯は無かった）。
- *
- * 型は `packages/testkit` の適合テストには置かない（外部の adapter が別の型で断る実装にも効いてしまう）。
- * この `@mnemora/postgres` 専用のファイルで縛る。型を縛らないと、`input-check.ts` の `RangeError` を素の `Error` に変えても緑のままだった。
- * 形の崩れた `jobId`（DB に触れず入口で断る口）と、実在の `jobId` の両方で見る。
- */
+/** 型は `packages/testkit` の適合テストには置かない（外部の adapter が別の型で断る実装にも効いてしまう）。この `@mnemora/postgres` 専用のファイルで縛る。形の崩れた `jobId`（DB に触れず入口で断る口）と、実在の `jobId` の両方で見る。 */
 
 const CTX: Ctx = { tenantId: `outbox-floor-error-type-${randomUUID()}` };
 const BELOW = new Date(Date.UTC(-4713, 10, 24) - 1);

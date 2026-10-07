@@ -6,12 +6,6 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "../migrate.js";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
-/**
- * `runMigrations` は本体をロックを持つ接続そのもので流す（Issue #1212）。その接続には
- * ロックを待つための `lock_timeout`（`lockTimeoutMs`）を敷くが、本体の DDL・DML には
- * 効かせない——本体を別の接続で流していたころと同じく、本体が他のロックを待つ時間は
- * `lockTimeoutMs` で切られない。
- */
 describe("runMigrations: ロックを待つための lock_timeout は本体に効かない", () => {
   afterAll(async () => {
     await closeTestClient();

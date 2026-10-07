@@ -12,16 +12,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * Issue #959（本物の Postgres + pgvector に対する歯）: 段3.5（連想枠）が拾った
- * `contested` の記憶が、対向なしの単独で `memories` に返っていた穴を、案 (B) で
- * 塞いだことを実データに対して確かめる。
- *
- * `packages/core` 側の歯（`recall-association-contested-companion.test.ts`）が
- * Fake で網羅的に検査している——ここでは同じ最小再現と drop 経路の2本だけを、
- * 実際の `PostgresMemoryStore`/`PostgresVectorStore` に対して繰り返す
- * （`AGENTS.md` の「テストは本物の Postgres + pgvector に対して走る」原則）。
- */
+/** 段3.5（連想枠）が拾った `contested` の記憶が、対向なしの単独で `memories` に返っていた穴を塞いだことを、実データに対して確かめる。core の Fake での網羅的な歯とは別に、同じ最小再現と drop 経路の2本だけを実 Postgres に対して繰り返す。 */
 
 const TENANT = "recall-959-tenant";
 
@@ -74,8 +65,7 @@ async function buildTestRuntime() {
     llmProvider: throwingLlm,
     embeddingProvider: makeEmbeddingProvider(),
     hashContent: (content: string) => `sha256(${content})`,
-    // buildNewMemoryFixture の既定 recordedAt（2026-01-01）に固定する
-    // （recall.postgres.test.ts と同じ理由——decay で score.total が落ちるのを防ぐ）。
+    // `buildNewMemoryFixture` の既定 recordedAt（2026-01-01）に固定する（decay で score.total が落ちるのを防ぐ）。
     clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
   });
   return { runtime, memoryStore, vectorStore };
@@ -133,7 +123,6 @@ describe("runtime.recall() — 段3.5(連想枠)の contested 候補にも必須
     const c1 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.95, 0.05, 0], {
       digest: "C1",
     });
-    // C2: embedding を持たない——getMany（必須の同伴取得）だけが引ける対向。
     const c2 = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: TENANT, digest: "C2" }),
@@ -156,9 +145,6 @@ describe("runtime.recall() — 段3.5(連想枠)の contested 候補にも必須
     expect(c1Result?.retrievedVia).toBe("association");
     expect(c2Result?.retrievedVia).toBe("mandatory_companion");
     expect(c2Result?.companionOf).toBe(c1.id);
-    // Issue #548 方向2 / ADR 0352: 段3.5 経由のどちらの retrievedVia
-    // （"association"・"mandatory_companion"）も affinityMeasured: false になり、
-    // total/similarity/lexicalMatch という欄を持たない（本物の Postgres + pgvector）。
     expect(c1Result?.score.affinityMeasured).toBe(false);
     expect(c1Result?.score).not.toHaveProperty("total");
     expect(c2Result?.score.affinityMeasured).toBe(false);

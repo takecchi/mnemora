@@ -24,32 +24,14 @@ import {
 } from "./test-db.js";
 
 /**
- * 抽出の書き込みは、「記憶が在るのに `created` が0件」を残さない（穴 D-3。ADR 0410 で扱う）。
- *
- * 今の `createMemoriesFromCandidates` は、候補ごとに `createMemoryWithOutbox` で記憶をコミットしたあと、
- * `EventStore.append` を別の文で呼ぶ。`created` の append が一時的に失敗すると `observe`（sync）／`tick`
- * （deferred）は例外になるが、記憶は残る。あとの再送や tick は `listBySourceObservation` で「在る」と見て
- * 素通りする（ADR 0347 決定1）ので、`created` は0件のまま残る。
- *
- * ## 検査の形（アダプタが新しい任意メソッドを持つかどうかに依らない）
- *
- * 新メソッドの名前・形にはここで依存しない。`Runtime.observe/tick` を実 adapter（testkit の InMemory と
- * Postgres）に載せ、**`created` イベントの書き込みそのものを、DB／配列の側で失敗させる**:
- * - Postgres: `memory_events` への `kind = 'created'` の INSERT を拒むトリガ。別の文で append する今の経路も、
- *   記憶と同じトランザクションで積む新しい経路も、同じところで落ちる。
+ * 検査の形は、アダプタが新しい任意メソッドを持つかどうかに依らない。`Runtime.observe/tick` を実 adapter（testkit の InMemory と Postgres）に載せ、`created` イベントの書き込みそのものを DB／配列の側で失敗させる:
+ * - Postgres: `memory_events` への `kind = 'created'` の INSERT を拒むトリガ。別の文で append する経路も、記憶と同じトランザクションで積む経路も、同じところで落ちる。
  * - InMemory: 共有の `events` 配列の `push` が、`kind = 'created'` のとき投げる。
  *
- * 失敗を外したあとの再送・tick を経て、次の2つが成り立つこと:
  * 1. 失敗している間、記憶は残らない（記憶と `created` は同じトランザクション。落ちたら巻き戻る）。
- * 2. 失敗を外して再試行すれば、書けた候補ごとに `created` が1件ずつ揃う（保存できない候補は
- *    `meta.droppedCandidates` に残る）。記憶の数と `created` の数が食い違わない。
- *    ⚠ deferred の extract ジョブは、落ちると終端 `failed` になり自動では再試行されない（Phase 1）。
- *    そのため deferred は「失敗中は何も残らない」と「記憶と created が食い違わない」だけを縛り、
- *    再試行後に件数が揃うことは sync だけで縛る（sync のジョブは完了にならずに残り、tick が拾い直す）。
- *
- * ⚠ 範囲は抽出の経路（sync／deferred）だけ。re-extract・consolidate・reflect は範囲外。
- * ⚠ `createMemoryWithOutbox` 経由の今の経路しか持たない adapter は、この PR の直しでも取りこぼしが残る
- * （ADR に「守れないもの」として書く）。ここが縛るのは、実 adapter 2つ。
+ * 2. 失敗を外して再試行すれば、書けた候補ごとに `created` が1件ずつ揃う（保存できない候補は `meta.droppedCandidates` に残る）。
+ *    ⚠ deferred の extract ジョブは、落ちると終端 `failed` になり自動では再試行されない。そのため deferred は「失敗中は何も残らない」と「記憶と created が食い違わない」だけを縛り、再試行後に件数が揃うことは sync だけで縛る。
+ * ⚠ 範囲は抽出の経路（sync／deferred）だけ。`createMemoryWithOutbox` 経由の経路しか持たない adapter は取りこぼしが残る。ここが縛るのは、実 adapter 2つ。
  */
 
 let candidates: string[] = [];
@@ -61,10 +43,7 @@ const llm: LLMProvider = {
     }),
 };
 
-/**
- * ADR 0407（#1492）: sync の extract ジョブは claim 済みで積まれ、失敗で完了にならなければ**リース切れまで**
- * tick に拾われない。リース切れを待つ代わりに、時計を進める（実時間は待たない）。
- */
+/** sync の extract ジョブは claim 済みで積まれ、失敗で完了にならなければリース切れまで tick に拾われない。リース切れを待つ代わりに、時計を進める（実時間は待たない）。 */
 let nowMs = Date.now();
 const clock = { now: () => new Date(nowMs) };
 const hashContent = (content: string) => createHash("sha256").update(content).digest("hex");
@@ -177,10 +156,7 @@ async function snapshot(kit: Kit, observationId: string) {
   return { memories, created };
 }
 
-/**
- * `created` の書き込みが失敗している間に抽出し、失敗を外して再送・tick で再試行する。
- * 失敗中の状態（記憶の件数）と、再試行後の状態を返す。
- */
+/** `created` の書き込みが失敗している間に抽出し、失敗を外して再送・tick で再試行する。失敗中の状態と、再試行後の状態を返す。 */
 async function extractWithCreatedFailure(
   kit: Kit,
   given: string[],
@@ -198,15 +174,10 @@ async function extractWithCreatedFailure(
     extract === "deferred"
       ? await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000 })
       : null;
-  // 再送で Observation の id が分かる（同じ externalId は抽出をやり直さない）。
   await kit.failCreated(false);
   const resent = await kit.runtime.observe(ctx, input);
   const observationId = resent.observationId;
-  // 失敗中に書かれたものは、失敗を外す前に読む必要がある——が、失敗を外したあとの再送は
-  // 抽出をやり直さないので、この時点の状態は「失敗中の結果」そのもの。
   const whileFailed = await snapshot(kit, observationId);
-  // 再試行: 再配達される extract ジョブを、何度か tick で回す（backoff があっても取りこぼさないよう複数回）。
-  // ADR 0407: リースを切らせてから、再配達される extract ジョブを拾わせる。
   nowMs += 10 * 60_000;
   let ticks = 0;
   for (let i = 0; i < 3; i += 1) {
@@ -229,10 +200,8 @@ for (const [name, makeKit] of KITS) {
           extract,
         );
         if (extract === "sync") expect(got.first.threw).toBe(true);
-        // 1. 失敗中: 記憶だけが残って created が0件、を許さない。
         expect(got.whileFailed.memories).toHaveLength(0);
         expect(got.whileFailed.created).toHaveLength(0);
-        // 2. 再試行後: 記憶と created が食い違わない。sync なら3件の記憶と、それぞれの created が揃う。
         expect(got.after.created.map((e) => e.memoryId).sort()).toEqual(
           got.after.memories.map((m) => m.id).sort(),
         );
@@ -278,13 +247,8 @@ for (const [name, makeKit] of KITS) {
 }
 
 /**
- * 候補ごとの SAVEPOINT（ADR 0410 決定。`createMemoriesWithOutboxAndEvents`）の歯。
- *
- * 上の「保存できない候補（NUL）」は、SQL を投げる前に JS 側で落ちるので、トランザクションは aborted にならない。
- * SAVEPOINT が無くても後ろの候補は書けてしまい、SAVEPOINT の有無を区別できない（#1496 の確かめ直し）。
- * ここでは **SQL を投げてから DB が断る値**（claim key の索引の1行の上限。SQLSTATE 54000）を真ん中の候補に置く。
- * SAVEPOINT が無いと、その INSERT の失敗でトランザクションが aborted になり、後ろの候補の INSERT と
- * `created` の INSERT が `current transaction is aborted` で落ちる。
+ * 候補ごとの SAVEPOINT の歯。上の「保存できない候補（NUL）」は SQL を投げる前に JS 側で落ちるのでトランザクションは aborted にならず、SAVEPOINT の有無を区別できない。
+ * ここでは SQL を投げてから DB が断る値（claim key の索引の1行の上限。SQLSTATE 54000）を真ん中の候補に置く。SAVEPOINT が無いと、その INSERT の失敗でトランザクションが aborted になり、後ろの候補と `created` の INSERT が `current transaction is aborted` で落ちる。
  */
 describe("Postgres: DB が拒む候補（claim key の索引上限 54000）が真ん中に在っても、前後の候補と created は書ける", () => {
   it("悪い候補だけが dropped になり、前後の記憶と、書けた記憶ぶんの created が同じトランザクションで残る", async () => {

@@ -13,13 +13,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * ADR 0630: `observe` の経路（Runtime が `NewMemory` を組み立てる）で、今まで書けていた正規の入力が、新しい入口の検査で
- * 落ちないこと。LLM が `digest` を返さない・空で返す（本文から作るフォールバック）、`claimKey` を有効にした、
- * `stated`・`inferred` の候補が、どれも書けて、読み戻した Memory が `MemorySchema` を通る。
- * 併せて、`RuntimeConfig.extractorVersion` が空文字のときの今の振る舞いを縛る（以前は書けて、`MemorySchema` を通らなかった）。
- */
-
 const ctx: Ctx = { tenantId: "observe-well-formed" };
 
 function llm(memories: unknown[]): LLMProvider {
@@ -131,8 +124,6 @@ describe("RuntimeConfig.extractorVersion が空文字（ADR 0630）", () => {
   });
 });
 
-// 変異試験（2026-10-06）: 「拒んだ例外を observe 全体に漏らす」「全件が壊れても例外にしない」変異に噛む歯が、
-// 上の「全件が壊れている」1本しか無かった（壊れた候補と正常な候補が混ざる場面が無かった）。
 describe("observe: 壊れた候補を含む抽出結果（ADR 0630）", () => {
   it("壊れた候補だけを落として残りを書き、observe は投げない。落とした候補は created の meta に残る", async () => {
     await resetTestDatabase();

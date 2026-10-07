@@ -30,18 +30,8 @@ import {
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #1425 / ADR 0382: `Runtime.purge` は、今の `embeddingProvider.space` だけでなく、
- * この adapter が持つ**全 space**から embedding を消す（`VectorStore.deleteAcrossSpaces`）。
- *
- * このファイルは2つの層を検査する:
- *
- * 1. `Runtime.purge` を経由した振る舞い（`describe` 1つ目）——共有テストDB
- *    （`test-db.ts` の `getTestClient`）を使い、埋め込みモデルを移した後に残る旧 space の
- *    行が、purge・already_purged の再実行の両方で消えることを確かめる。
- * 2. `PostgresVectorStore.deleteAcrossSpaces` 自身のテーブル列挙（`describe` 2つ目）——
- *    専用の使い捨て DB に2つのスキーマを同居させ、(a) `current_schema()` を跨がない・
- *    (b) `memories(id)` を外部キーで参照していない利用者のテーブルを巻き込まない、
- *    という ADR 0382 決定2の2条件を直接検査する。
+ * 検査は2層: (1) `Runtime.purge` を経由した振る舞い（埋め込みモデルを移した後に残る旧 space の行が、purge・already_purged の再実行の両方で消える）。
+ * (2) `PostgresVectorStore.deleteAcrossSpaces` 自身のテーブル列挙。専用の使い捨て DB に2つのスキーマを同居させ、`current_schema()` を跨がないこと、`memories(id)` を外部キーで参照していない利用者のテーブルを巻き込まないことを直接検査する。
  */
 
 const SECOND_EMBEDDING_SPACE: EmbeddingSpaceId = {
@@ -51,9 +41,7 @@ const SECOND_EMBEDDING_SPACE: EmbeddingSpaceId = {
 };
 
 async function countEmbeddingRows(db: Db, table: string, memoryId: string): Promise<number> {
-  // `memoryId` はこのファイルが呼ぶ `observe()`/`randomUUID()` の出力のみ
-  // （利用者入力ではない）——`purge-during-embed-job.postgres.test.ts` と同じ、
-  // テストコード内だけの文字列組み立て。
+  // `memoryId` はこのファイルが呼ぶ `observe()`/`randomUUID()` の出力のみ（利用者入力ではない）。テストコード内だけの文字列組み立て。
   const result = await db.execute(
     sql.raw(`SELECT count(*)::int AS n FROM ${table} WHERE memory_id = '${memoryId}'`),
   );
@@ -90,7 +78,6 @@ describe("Runtime.purge は全 space の embedding を消す（Issue #1425、本
   it("purge は、今の embeddingProvider.space だけでなく旧 space に残っている embedding も消す（赤の再現・緑の確認）", async () => {
     const { db } = await getTestClient();
     const vectorStore = new PostgresVectorStore(db);
-    // 今の embeddingProvider は SECOND_EMBEDDING_SPACE（=「モデルを移した後」を模す）。
     const runtime = buildRuntime(db, new DeterministicEmbeddingProvider(SECOND_EMBEDDING_SPACE));
     const ctx: Ctx = { tenantId: `tenant-purge-across-spaces-${randomUUID()}` };
 
@@ -106,8 +93,6 @@ describe("Runtime.purge は全 space の embedding を消す（Issue #1425、本
       await countEmbeddingRows(db, embeddingSpaceTableName(SECOND_EMBEDDING_SPACE), memoryId),
     ).toBe(1);
 
-    // 旧 space（埋め込みモデルを移す前）に残っている埋め込み行を模す——
-    // 実運用では「以前の embeddingProvider で embed した後、まだ再 embed していない行」。
     await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memoryId, [0.1, 0.2, 0.3]);
     expect(
       await countEmbeddingRows(db, embeddingSpaceTableName(TEST_EMBEDDING_SPACE), memoryId),
@@ -117,7 +102,6 @@ describe("Runtime.purge は全 space の embedding を消す（Issue #1425、本
     const purged = await runtime.purge(ctx, { memoryId });
     expect(purged.outcomes[0]?.kind).toBe("purged");
 
-    // 🔴 この2つの assert が、直す前（vectorStore.delete のまま）だと後者が赤くなる。
     expect(
       await countEmbeddingRows(db, embeddingSpaceTableName(SECOND_EMBEDDING_SPACE), memoryId),
       "今の space の行は、直す前から既に消えていたはず",
@@ -145,8 +129,6 @@ describe("Runtime.purge は全 space の embedding を消す（Issue #1425、本
     const first = await runtime.purge(ctx, { memoryId });
     expect(first.outcomes[0]?.kind).toBe("purged");
 
-    // 一度 purge した後に、別の（さらに古い）space に残っていた行が後から見つかった、
-    // という状況を模す（memories 行自体は purge 後も残っているので upsert は成功する）。
     await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memoryId, [0.4, 0.5, 0.6]);
     expect(
       await countEmbeddingRows(db, embeddingSpaceTableName(TEST_EMBEDDING_SPACE), memoryId),
@@ -200,14 +182,8 @@ describe("PostgresVectorStore.deleteAcrossSpaces のテーブル列挙（Issue #
     dimensions: 3,
   };
   const ENUM_TABLE = embeddingSpaceTableName(ENUM_SPACE);
-  // `SCHEMA_ALT` にだけ登録する space——`SCHEMA_DEFAULT` にはこの名前のテーブルが
-  // 一切存在しない。`DELETE` はスキーマ修飾されている（ADR 0382「`DELETE` は
-  // スキーマ修飾する」）ため、条件1（`current_schema()` を跨がない）が外れて
-  // このテーブル名を列挙してしまうと、`"mnemora_pas_alt"."<table>"` へ明示的に
-  // `DELETE` を発行してしまう——`ENUM_TABLE`（両スキーマにある同名テーブル）の歯
-  // だけでは「別スキーマの同名テーブルが消える」ことしか示せないので、この
-  // `ALT_ONLY_SPACE` の歯で「同名でなくても、列挙にさえ入れば消えてしまう」ことも
-  // 別に示す。
+  // `SCHEMA_ALT` にだけ登録する space。`DELETE` はスキーマ修飾されているので、列挙の条件1（`current_schema()` を跨がない）が外れてこのテーブル名を列挙してしまうと、別スキーマのテーブルへ明示的に `DELETE` を発行してしまう。
+  // `ENUM_TABLE`（両スキーマにある同名テーブル）の歯だけでは「別スキーマの同名テーブルが消える」ことしか示せないので、「同名でなくても、列挙にさえ入れば消えてしまう」ことをこの歯で別に示す。
   const ALT_ONLY_SPACE: EmbeddingSpaceId = {
     provider: "test",
     model: "purge-across-spaces-alt-only",
@@ -234,8 +210,6 @@ describe("PostgresVectorStore.deleteAcrossSpaces のテーブル列挙（Issue #
     const dbUrl = connectionStringFor(DB_NAME);
     dbPool = new Pool({ connectionString: dbUrl, max: 5 });
 
-    // `s_default`・`s_alt` の2つの専用スキーマを、同じ DB に同居させる
-    // （`dedicated-schema.postgres.test.ts` 測定2と同じ形）。
     await runMigrations(dbPool, DEFAULT_MIGRATIONS_DIR, { schema: SCHEMA_DEFAULT });
     await runMigrations(dbPool, DEFAULT_MIGRATIONS_DIR, { schema: SCHEMA_ALT });
     await registerEmbeddingSpace(dbPool, ENUM_SPACE, { schema: SCHEMA_DEFAULT });
@@ -304,10 +278,6 @@ describe("PostgresVectorStore.deleteAcrossSpaces のテーブル列挙（Issue #
   });
 
   it("条件1: current_schema() を跨がない——別スキーマにしか無い space のテーブルは列挙されない（陽性対照つき、report 参照）", async () => {
-    // `ENUM_TABLE` の歯（上）が「同名テーブルでも別スキーマの行は消えない」ことを
-    // 示すのに対し、こちらは「そもそも列挙に入らない」ことを、同名でないテーブルで
-    // 別途示す（`DELETE` がスキーマ修飾されているため、同名かどうかに関わらず
-    // 列挙に入れば消えてしまう——両方の歯を残す理由）。
     const tenantId = "tenant-cross-schema-alt-only";
     const memoryId = randomUUID();
 
@@ -328,8 +298,6 @@ describe("PostgresVectorStore.deleteAcrossSpaces のテーブル列挙（Issue #
     const memoryId = randomUUID();
     const evilTable = "memory_embeddings_userdata_unrelated";
 
-    // `memory_embeddings_` で始まる名前だが、`memories(id)` への外部キーを持たない
-    // ——利用者が同じ命名慣習で作った無関係なテーブルを模す。
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS "${SCHEMA_DEFAULT}".${evilTable} (
         tenant_id text NOT NULL,
