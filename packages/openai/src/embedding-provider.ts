@@ -8,73 +8,41 @@ import type { OpenAIEmbeddingsClient } from "./client-types.js";
 /**
  * {@link OpenAIEmbeddingProvider} のコンストラクタに渡す設定。
  *
- * 以下はクラスの説明を兼ねる——`packages/openai` の `EmbeddingProvider` 実装（docs/architecture.md §5.5）。
- *
- * 契約: 1インスタンス = 1 `EmbeddingSpaceId` に固定する（D8・§5.5）。`model` /
- * `dimensions` はコンストラクタ引数で固定され、実行時に変わらない。
- *
- * `client` を注入できるようにしてある。本番では省略して OpenAI SDK の既定クライアント
- * （`OPENAI_API_KEY` 環境変数を読む）を使うが、テストでは本物の HTTP を叩かない
- * 手書きの偽クライアントを注入する（PR 本文「擬似物の扱い」参照。ここで擬似にしているのは
- * ネットワーク呼び出しの往復だけであり、`EmbeddingSpaceId` の固定・入出力の対応付けは
- * 本物のロジックを検査している）。
- *
- * ⚠ **`client` を省略すると `new OpenAI({ apiKey })` が作る SDK 既定のクライアントが使われる
- * （[Issue #884](https://github.com/takecchi/mnemora/issues/884)）
- * ——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する（実測:
- * `openai@7.10.0` は既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms。この数値は
- * mnemora の契約ではなく SDK の既定値であり、SDK の版が上がれば変わりうる）。再試行の
- * 有無・回数・timeout を変えたい呼び出し側は、`maxRetries`/`timeout` を設定した
- * `OpenAI` インスタンスを自分で作り、`client` へ渡すこと。**
+ * 1インスタンス = 1 `EmbeddingSpaceId` に固定する。`model` / `dimensions` は実行時に変わらない。
+ * `client` を省略すると SDK 既定のクライアント（`OPENAI_API_KEY` を読む）が使われ、SDK が 429・5xx を再試行する
+ * （回数・timeout は SDK の既定）。変えたい場合は設定した `OpenAI` インスタンスを `client` へ渡す。
  */
 export interface OpenAIEmbeddingProviderOptions {
   /**
    * API キー。省略すると SDK が `OPENAI_API_KEY` を読む。
    *
-   * **構築時に例外を投げることがある**（Issue #1080）: `client` を渡さずに SDK のクライアントを
-   * このクラスが作るとき、SDK が送るヘッダ（`Authorization: Bearer <apiKey>`）に載せられない
-   * 文字（キーの途中の CR・LF・NUL、U+0100 以上の文字など）を含んでいれば、**キーを含まない**
-   * メッセージの `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
-   * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
+   * `client` を渡さないとき、ヘッダに載せられない文字（キーの途中の CR・LF・NUL など）を含めば、
+   * **キーを含まない**メッセージの `Error` を構築時に投げる。`client` を渡したときは検査しない。
    */
   apiKey?: string | undefined;
   /** OpenAI の埋め込みモデル名（例: `text-embedding-3-small`）。`space.model` にそのまま入る。既定値は無い。 */
   model: string;
   /**
    * 返すベクトルの次元。API の `dimensions` にそのまま渡し、`space.dimensions` にも入る。
-   * 返ったベクトルの次元がこれと違えば `embed` は例外を投げる（下の `embed` の doc）。
-   *
-   * ⚠ ADR 0498: **正の安全な整数でなければ、構築時に投げる**（型が違えば `TypeError`、数として不正なら `RangeError`。
-   * message に値が入る）。壊れた値が `space.dimensions` に入るのを防ぐ。
+   * 返ったベクトルの次元がこれと違えば `embed` は例外を投げる。正の安全な整数でなければ構築時に投げる
+   * （型が違えば `TypeError`、数として不正なら `RangeError`）。
    */
   dimensions: number;
   /**
-   * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき。上の Issue #884 の注記）。
-   * 渡すと `apiKey` は使わず、キーの検査もしない。
-   *
-   * ⚠ この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIEmbeddingsClient}
-   * である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。**`openai` を自分の依存として入れる
-   * 版は、`@mnemora/openai` が固定している版と揃える必要が無い**（packages/openai/README.md 参照）。
+   * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
+   * キーの検査もしない。型は SDK のクラスを名指ししない構造型 {@link OpenAIEmbeddingsClient}。
    */
   client?: OpenAIEmbeddingsClient | undefined;
 }
 
 /**
- * OpenAI の埋め込み API を呼ぶ `EmbeddingProvider`（docs/architecture.md §5.5）。
- * 1インスタンスは1つの埋め込み空間に固定される。設定と、`client` を省いたときの SDK の既定の
- * 再試行は {@link OpenAIEmbeddingProviderOptions} の doc を見ること。
+ * OpenAI の埋め込み API を呼ぶ `EmbeddingProvider`。1インスタンスは1つの埋め込み空間に固定される。
  *
- * 構築時: `client` を省き、キーが見つからなければ OpenAI の SDK が `OpenAIError`（`Missing credentials`）を投げる。
- * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
- * `dimensions` が正の安全な整数でなければ、`TypeError`（型が違う）か `RangeError`（数として不正）を投げる（ADR 0498。`OpenAIEmbeddingProviderOptions.dimensions` の doc）。
- *
- * ⚠ **（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）
- * `embed` の第3引数 `opts?.signal` を、そのまま `embeddings.create` の request options
- * （`{ signal }`）へ渡す。** SDK が既定で対応する `AbortSignal` の仕組みに委ねているだけ。
+ * 構築時: `client` を省き、キーが見つからなければ SDK が `OpenAIError`（`Missing credentials`）を投げる。
+ * キーがヘッダに載せられない文字を含めば、キーを含まない `Error` を投げる。`dimensions` が不正なら
+ * `TypeError` / `RangeError` を投げる。`embed` の `opts?.signal` は SDK の request options にも渡す。
  */
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
-  /** `{ provider: "openai", model, dimensions }`。構築時に決まり、変わらない。 */
   readonly space: EmbeddingSpaceId;
   private readonly client: OpenAIEmbeddingsClient;
   private readonly model: string;
@@ -85,8 +53,6 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       this.client = options.client;
     } else {
       const client = new OpenAI({ apiKey: options.apiKey });
-      // Issue #1080: SDK は `Authorization: Bearer <apiKey>` を送る（`apiKey` を省略すると
-      // `OPENAI_API_KEY` を読む）。`api-key.ts` の doc コメント参照。
       assertApiKeyFitsInHeader(
         "OpenAIEmbeddingProvider",
         "apiKey",
@@ -101,31 +67,16 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   /**
    * `texts` を1回の API 呼び出しで埋め込み、入力と同じ順（応答の `index` で並べ直す）で返す。
-   * 空配列なら API を呼ばずに `[]` を返す（ただし `opts.signal` が abort 済みなら、空配列でも `[]` を返さず
-   * `signal.reason` で reject する）。
+   * 空配列なら API を呼ばずに `[]` を返す（`opts.signal` が abort 済みなら、空配列でも `signal.reason` で reject する）。
    *
-   * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。
+   * 失敗は SDK の例外がそのまま伝わる（専用のエラー型は無い）。`opts?.signal` は呼ぶ前・待っている間の abort で `signal.reason` で reject する。
    *
-   * ⚠ **応答を検査する**（[Issue #860](https://github.com/takecchi/mnemora/issues/860)、
-   * [ADR 0305](../../../docs/decisions/0305-embedding-provider-input-limit-contract.md)）。次のどれかが崩れていれば、素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まる。
-   * 専用のエラー型・`kind` は無い）を投げる——(1) `response.data` の件数が `texts.length` と等しい、
-   * (2) `index` が 0..n-1 をちょうど1回ずつ（重複・欠落・範囲外が無い）、(3) 各ベクトルの長さが
-   * `space.dimensions` と等しい、(4) 成分がすべて有限（`NaN`/`Infinity` が無い）。メッセージには期待値・実際の値・
-   * 何番目かを入れ、入力テキストの本文と API キーは入れない。1.2.0 で入った、**新しく例外になる場合が増える変更**
-   * であり、CHANGELOG の `[1.2.0]` と docs/migration-v1.md に破壊的変更として書いてある。
+   * 応答を検査し、次のどれかが崩れていれば素の `Error`（メッセージは `OpenAIEmbeddingProvider:` で始まる）を投げる。
+   * (1) `response.data` の件数が `texts.length` と等しい、(2) `index` が 0..n-1 をちょうど1回ずつ、
+   * (3) 各ベクトルの長さが `space.dimensions` と等しい、(4) 成分がすべて有限。
+   * メッセージに入力テキストの本文と API キーは入れない。`response.data` が丸ごと無い応答は生の `TypeError` が伝わる。
    */
-  // ⚠ `response.data` キー自体が丸ごと無い応答（`{}` が返る等、Issue #885）が来ると、下の `data.length` は
-  // `TypeError`（`Cannot read properties of undefined`）を投げる。上の応答の検査は `data` が配列として
-  // 在ることが前提で、その形の検査は足していない。このクラスは専用のエラー型を持たず
-  // （`OpenAILLMProvider` の `kind` 分類に相当するものが埋め込み側には無い）、壊れた応答は生の例外がそのまま
-  // 呼び出し元へ伝播する（`packages/openai/src/errors.ts` 冒頭コメントを参照）。
-  // 応答の検査のお手本は `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed`
-  // （`packages/local-embedding/src/local-embedding-provider.ts`）。
-  //
-  // ⚠ `opts?.signal`（ADR 0359・ADR 0428）: 呼ぶ前に abort 済みなら SDK を呼ばずに、待っている間に abort したら即座に、
-  // `signal.reason` で reject する。SDK の `APIUserAbortError` には化けず、SDK の再試行待ちの最中でも切れる。
   async embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]> {
-    // abort 済みの signal は、空配列でも `[]` を返さず reject する（空の早期 return より前に見る）。
     opts?.signal?.throwIfAborted();
     if (texts.length === 0) {
       return [];
@@ -142,7 +93,6 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     );
     const data = response.data;
 
-    // 件数: 入力と同じ件数でなければ、呼び出し側で memory とベクトルが1つずれて対応する。
     if (data.length !== texts.length) {
       throw new Error(
         `OpenAIEmbeddingProvider: ${texts.length} 件のテキストに対して ` +
@@ -150,9 +100,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       );
     }
 
-    // index: 0..n-1 をちょうど1回ずつ（重複・欠落・範囲外を落とす）。
-    // OpenAI は入力順を保つと文書化しているが、`index` で並べ直して前提を作らない
-    // （原則の姿3寄り: 順序の保証を暗黙のものとして信頼しない）。
+    // `index` で並べ直す: OpenAI は入力順を保つと文書化しているが、順序の保証を暗黙に信頼しない。
     const ordered = new Array<number[] | undefined>(texts.length);
     for (const [position, item] of data.entries()) {
       const index = item.index;
@@ -174,19 +122,16 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     const vectors: number[][] = [];
     for (const [index, vector] of ordered.entries()) {
       if (vector === undefined) {
-        // 件数が一致し、範囲外・重複が無ければ欠落は起きない。型の上で確かめておく。
         throw new Error(
           `OpenAIEmbeddingProvider: 応答に index=${index} が無い（model=${this.model}）`,
         );
       }
-      // 次元: 宣言した `space.dimensions` と実物の食い違いを、DB へ入る前に落とす。
       if (vector.length !== this.space.dimensions) {
         throw new Error(
           `OpenAIEmbeddingProvider: 宣言した次元数 ${this.space.dimensions} に対して、` +
             `API が返したベクトルは ${vector.length} 次元だった（${index} 番目。model=${this.model}）`,
         );
       }
-      // 有限性: NaN / Infinity は pgvector が拒否する。原因から離れた SQL の失敗にしない。
       const nonFinite = vector.findIndex((component) => !Number.isFinite(component));
       if (nonFinite !== -1) {
         throw new Error(

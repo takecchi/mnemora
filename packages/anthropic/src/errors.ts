@@ -1,76 +1,39 @@
 /**
- * `AnthropicLLMProvider` が投げる失敗を、**呼び出し側が種類として区別できる形**にする（ADR 0072）。
+ * `AnthropicLLMProvider` が投げる失敗を、呼び出し側が `kind` で区別できる形にする。
+ * `Error` を継承する。拒否は HTTP 200（`stop_reason: "refusal"`）で返るため、`content` を読む前に判定して投げる。
  *
- * **なぜ要るか**: 「モデルが拒否した」と「応答が空だった」が同じ `Error` だと、このリポジトリの固定点
- * ——**「無い」の種類を潰さない**（`docs/recall.md`・ADR 0008 / 0013 / 0026 / 0027 / 0044）——に当たる。
- * `packages/core/src/extraction.ts` の `extractCandidates` はこの例外を `try/catch` で飲み、
- * **`ExtractionOutcome: "llm_failed_whole_observation"` へ倒す。**⟹ 種類を潰したまま投げると、
- * 「モデルが拒否した」という情報はそこで完全に消える。
+ * `kind` の外の例外（`AnthropicLLMProviderError` にならない）:
  *
- * **⚠ 拒否は HTTP 200 で返る。** `stop_reason: "refusal"` が付いた成功応答であり、
- * SDK は例外を投げない。**`content` を読む前に `stop_reason` を見ないと、
- * 空文字を「成功」として core へ渡すことになる。**
+ * - API が HTTP 400（`prompt is too long` 等）で拒んだとき: SDK の例外がそのまま伝播する。
+ * - HTTP 200 の応答オブジェクトの形が壊れているとき: 生の `TypeError` 等が伝播する。
+ * - `maxTokens` が 21334 以上で `client` が `timeout` を持たない（省略時を含む）とき:
+ *   SDK が送信前に投げる素の `AnthropicError`（`Streaming is required ...`）が伝播する。
  *
- * `Error` を継承しているので、`@mnemora/openai` と揃えた既存の契約
- * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
- * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
- *
- * ## `kind` の外の例外
- *
- * 次は `AnthropicLLMProviderError` にならず、`kind` でも `instanceof` でも捕まえられない。
- *
- * - **プロンプトがモデルのコンテキストを超えたとき**（実 API では確かめておらず、SDK の例外の形を模した
- *   偽のクライアントで確かめた）: 成功応答の `stop_reason: "model_context_window_exceeded"` は
- *   `kind: "truncated"` になるが、API が HTTP 400（`prompt is too long` 等）で拒むと SDK の例外がそのまま伝播する。
- * - **HTTP 200 の応答オブジェクトの形が壊れているとき**（トップレベルの `content` がキーごと無い、`{}` 等）:
- *   生の `TypeError` 等が伝播する（壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と同じ扱い）。
- *   **実 API がこの形を返すかは確認していない。** 検討した案は
- *   [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) を参照。`llm-provider.ts` の `firstTextBlock` にも個別の doc がある。
- * - **`maxTokens` が 21334 以上で、`client` が `timeout` を持たない**（`client` を省略したときを含む）とき
- *   （ADR 0552 / ADR 0445 BJ-1）: `complete`・`completeStructured` は SDK が**送信前に**投げる素の
- *   `AnthropicError`（`Streaming is required for operations that may take longer than 10 minutes…`）をそのまま伝える。
- *   21333 までは通る（SDK 0.124.0 で実測。境目は SDK の式 `3,600,000 × maxTokens / 128000 > 600,000`）。
- *   `timeout` を持たない `client` を自分で渡したときの分岐は、コードを読んだだけで実測していない。
- *   詳細は `llm-provider.ts` の `AnthropicLLMProviderOptions.maxTokens`・README。
- *
- * ## `kind: "schema_unsupported"`（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）
- *
- * `completeStructured` は、送る前の翻訳（`json-schema.ts` の `translateForAnthropicStructuredOutput`、
- * SDK の `zodOutputFormat`）が投げた例外をこの `kind` に包み、`messages.create` を呼ぶ前に投げ直す。
- * **元の例外は `cause`（ES2022 の `Error.cause`）に載る**。`z.tuple`・`z.date`・`transform`・`z.record`
- * がこの経路に当たる（README「`completeStructured` に渡せる zod の形」参照）。
+ * `kind: "schema_unsupported"` のとき、`completeStructured` は送る前の翻訳の例外を包んで
+ * `messages.create` を呼ぶ前に投げ直す。元の例外は `cause` に載る。
  */
 
-/**
- * 失敗の種類。**増やすときは、呼び出し側が本当に区別したい単位かを先に問うこと**
- * ——区別できない種類を増やしても「無い」の分類は増えない。
- */
+/** 失敗の種類。 */
 export type AnthropicLLMFailureKind =
-  /** `stop_reason: "refusal"`。安全性の分類器が介入した。`refusalCategory` に分類が入る */
+  /** `stop_reason: "refusal"`。`refusalCategory` に分類が入る */
   | "refusal"
   /** `stop_reason: "max_tokens"` / `"model_context_window_exceeded"`。応答が途中で切れた */
   | "truncated"
   /** 上記のどれでもないのに、テキストブロックが1つも無かった */
   | "no_content"
-  /** 送る前の翻訳（`translateForAnthropicStructuredOutput`、SDK の `zodOutputFormat`）が
-   * 例外を投げた。`messages.create` は呼ばれていない。元の例外は `cause` に載る（#1148）。 */
+  /** 送る前の翻訳が例外を投げた。`messages.create` は呼ばれていない。元の例外は `cause` に載る */
   | "schema_unsupported";
 
 /** {@link AnthropicLLMProviderError} のコンストラクタに渡す値。 */
 export interface AnthropicLLMProviderErrorOptions {
-  /** 失敗の種類（{@link AnthropicLLMFailureKind}）。 */
   kind: AnthropicLLMFailureKind;
-  /** SDK が返した生の `stop_reason`。分からなければ `null`（偽 client・streaming の途中など） */
+  /** SDK が返した生の `stop_reason`。分からなければ `null` */
   stopReason?: string | null | undefined;
-  /** `stop_details.category`（`cyber` / `bio` / `frontier_llm` / `reasoning_extraction` …）。
-   * **開いた集合である**——SDK の型は将来値が増えることを前提にしているので、
-   * ここでも文字列のまま持ち、列挙に押し込めない。 */
+  /** `stop_details.category`。開いた集合なので列挙に押し込めず文字列のまま持つ */
   refusalCategory?: string | null | undefined;
-  /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
+  /** 省略時は `kind` から組み立てる */
   message?: string | undefined;
-  /** `kind: "schema_unsupported"` のとき、送る前の翻訳が投げた元の例外。
-   * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
+  /** `kind: "schema_unsupported"` のとき、翻訳が投げた元の例外 */
   cause?: unknown;
 }
 
@@ -104,14 +67,12 @@ function defaultMessage(options: AnthropicLLMProviderErrorOptions): string {
 /**
  * ⚠ **`instanceof` で分岐せず、`kind` で分岐すること。**
  * bundler が同じクラスを二重に読み込むと `instanceof` は落ちる。
- * `kind` は値なのでその影響を受けない。
  */
 export class AnthropicLLMProviderError extends Error {
-  /** 失敗の種類。分岐はこの値で行う。 */
   readonly kind: AnthropicLLMFailureKind;
   /** SDK が返した生の `stop_reason`。分からなければ `null`。 */
   readonly stopReason: string | null;
-  /** `stop_details.category`（開いた集合の文字列）。拒否でなければ・分からなければ `null`。 */
+  /** `stop_details.category`。拒否でなければ・分からなければ `null`。 */
   readonly refusalCategory: string | null;
 
   constructor(options: AnthropicLLMProviderErrorOptions) {
@@ -134,15 +95,9 @@ const ANTHROPIC_LLM_FAILURE_KINDS: ReadonlySet<unknown> = new Set<AnthropicLLMFa
 ]);
 
 /**
- * 受け取ったものが {@link AnthropicLLMProviderError} かを、**`instanceof` を使わずに**判定する
- * （[ADR 0418](../../../docs/decisions/0418-store-error-kind-guards.md) の作法、
- * ADR 0428）。
- *
- * **「`kind` を見て、`kind` が無ければ `name` を見る」。** `kind` があるときは、それが
- * {@link AnthropicLLMFailureKind} のどれかであることを見る。`kind` の値は openai と anthropic で重なるので、`name` が文字列ならそれが `"AnthropicLLMProviderError"` であることも見る（`name` を持たない素の値は `kind` だけで見る）。`kind` が無い値
- * （`kind` を持たない古い版が投げた例外など）は、`name === "AnthropicLLMProviderError"` で見る。
- * bundler が同じクラスを二重に読み込んでいても効く。`name` は偽装できるが、provider は利用者が
- * 自分で配線する信頼された部品なので実害は無いと判断している。
+ * 受け取ったものが {@link AnthropicLLMProviderError} かを、`instanceof` を使わずに判定する。
+ * `kind` があれば {@link AnthropicLLMFailureKind} のどれかであること（`name` が文字列なら
+ * `"AnthropicLLMProviderError"` であることも）を見て、`kind` が無ければ `name` で見る。
  */
 export function isAnthropicLLMProviderError(value: unknown): value is AnthropicLLMProviderError {
   if (typeof value !== "object" || value === null) {
@@ -150,8 +105,7 @@ export function isAnthropicLLMProviderError(value: unknown): value is AnthropicL
   }
   const candidate = value as { kind?: unknown; name?: unknown };
   if (candidate.kind !== undefined) {
-    // kind の値は openai と anthropic で重なる（`refusal` など）。`name` を持つ値は、
-    // それが一致することも見る——相手の provider の例外を取り違えないため。
+    // `kind` の値は openai と anthropic で重なる。`name` も見て、相手の provider の例外を取り違えない。
     return (
       ANTHROPIC_LLM_FAILURE_KINDS.has(candidate.kind) &&
       (typeof candidate.name !== "string" || candidate.name === "AnthropicLLMProviderError")
