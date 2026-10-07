@@ -59,7 +59,10 @@ function writeJson(name, data) {
 }
 
 function run(args, options = {}) {
-  return spawnSyncWithDeadline(process.execPath, [script, ...args], { encoding: "utf8", ...options });
+  return spawnSyncWithDeadline(process.execPath, [script, ...args], {
+    encoding: "utf8",
+    ...options,
+  });
 }
 
 describe("compare-summary.mjs（子プロセスで起動）", () => {
