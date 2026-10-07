@@ -163,6 +163,20 @@ describe("フォールバックの digest は config.digestFallbackLength に従
   });
 });
 
+describe("runtime.reflect — tags を省けば材料の tags の和集合、空の配列を返せば空のまま", () => {
+  it("tags を省いた応答は、材料の tags を引き継ぐ", async () => {
+    const { memory } = await reflectWith({ outcome: "reflected", content: "気づき" });
+
+    expect(memory?.tags).toEqual(["from-basis"]);
+  });
+
+  it("tags: [] は、材料の tags に倒れず空のまま", async () => {
+    const { memory } = await reflectWith({ outcome: "reflected", content: "気づき", tags: [] });
+
+    expect(memory?.tags).toEqual([]);
+  });
+});
+
 describe("runtime.reflect — LLM の tags に空文字があっても、その tag だけを落とす", () => {
   it("tags: ['', '  ', 'kept'] は reflected になり、Memory の tags は ['kept']", async () => {
     const { reflected, memory } = await reflectWith({
