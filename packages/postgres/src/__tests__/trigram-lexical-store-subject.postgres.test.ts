@@ -10,21 +10,15 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * `PostgresTrigramLexicalStore.search` の `filter.subjectId` × `filter.includeSubjectless`
- * （`docs/recall.md`「includeSubjectless」節・ADR 0286）の実測。
+ * （`docs/recall.md`「includeSubjectless」節）の実測。
  *
  * 約束: `subjectId` を指定すると `subject_id = X`、`includeSubjectless: true` なら
  * `subject_id = X OR subject_id IS NULL`——**どちらでも X 以外の別 subject は混ざらない**。
  * `subjectId` を省略した呼び出しでは `includeSubjectless` は無視される（テナント全体）。
  *
- * 語彙の既定経路（`PostgresLexicalStore`）は `lexical-store-filter.test.ts` と共有の
- * 適合テストが押さえているが、trigram 経路（opt-in）は適合テストを通しておらず、この
- * 組み合わせを押さえる歯が無かった。**`*-conformance.ts` には足さない**（外部 adapter
- * への要件を増やさないため、Issue #809 の方針）。
- *
- * **⚠ この歯は UTF8 の `server_encoding` を前提とする**（ADR 0103 の規律。
- * `trigram-lexical-store-query-word-cap.test.ts` と同じ測り方）。前提を満たさない環境では
- * 何もせずに戻る——`PostgresTrigramLexicalStore.create` が投げることは
- * `trigram-lexical-store.postgres.test.ts` が検査している。
+ * **⚠ この歯は UTF8 の `server_encoding` を前提とする。**前提を満たさない環境では
+ * 何もせずに戻る（`PostgresTrigramLexicalStore.create` が投げることは
+ * `trigram-lexical-store.postgres.test.ts` が検査している）。
  */
 
 const TENANT = "trigram-subject-tenant";

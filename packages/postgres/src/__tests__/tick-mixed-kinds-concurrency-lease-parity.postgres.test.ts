@@ -36,11 +36,10 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0529: `tick` が `extract`・`embed`・`consolidate`・`reflect` を混ぜて回るとき、並行する複数の `tick`、リースが切れた後の再取得を、
- * **実 Postgres と InMemory の両方**で `EXPECTED` に突き合わせる。core の Fake の側は
- * `packages/core/src/__tests__/fake-tick-mixed-kinds-concurrency-lease-parity.test.ts` が同じ `EXPECTED` を縛る。
+ * `tick` が `extract`・`embed`・`consolidate`・`reflect` を混ぜて回るとき、並行する複数の `tick`、リースが切れた後の再取得を、
+ * **実 Postgres と InMemory の両方**で `EXPECTED` に突き合わせる。
  * 順序は時計のオフセットと門（Promise）で決める。並行する `tick` の「どちらが何件取るか」は Postgres の実の並行で転ぶので縛らず、
- * どう転んでも成り立つ不変条件だけを縛る（ADR 0529）。テスト用の DB はこのファイルの冒頭で作り直す（`resetTestDatabase`）。
+ * どう転んでも成り立つ不変条件だけを縛る。テスト用の DB はこのファイルの冒頭で作り直す（`resetTestDatabase`）。
  */
 interface Env {
   runtime: Runtime;
@@ -64,8 +63,8 @@ interface Env {
 type Result = Record<string, unknown>;
 
 /**
- * ADR 0529（ADR 0526 の「測っていないこと」の実測）: (b) `tick` が `extract`・`embed`・`consolidate`・`reflect` を混ぜて回るとき、
- * (c) 並行する複数の `tick` と、リースが切れた後の再取得（Runtime の層）。
+ * `tick` が `extract`・`embed`・`consolidate`・`reflect` を混ぜて回るとき、および並行する複数の `tick` と、
+ * リースが切れた後の再取得（Runtime の層）。
  *
  * 決定的にできる部分だけを縛る。順序は時計（`setClockOffset`）と門（Promise）で決める。
  * 並行する `tick` の「どちらが何件取るか」は Postgres の実の並行で転ぶので縛らず、**どう転んでも成り立つ不変条件**
@@ -99,7 +98,6 @@ async function scenario(env: Env): Promise<Result> {
   const inOrder = async (ctx: Ctx) =>
     (await rows(ctx)).map((r) => [r["kind"], r["done"], r["attempts"]]);
 
-  // (b) 種類を混ぜた tick
   {
     setClockOffset(0);
     const ctx = fresh();
@@ -172,7 +170,6 @@ async function scenario(env: Env): Promise<Result> {
     ];
   }
 
-  // (c) 並行する tick: どう転んでも成り立つ不変条件だけ
   for (const [label, limits, delay] of [
     ["2 ticks, limit 3 and 3", [3, 3], 0],
     ["2 ticks, limit 50 and 50", [50, 50], 0],
@@ -207,7 +204,6 @@ async function scenario(env: Env): Promise<Result> {
     };
   }
 
-  // (c) リースの期限切れ: A が止まり、B が再取得し、A が戻る
   for (const lateOutcome of ["complete", "fail"] as const) {
     setClockOffset(0);
     const ctx = fresh();
