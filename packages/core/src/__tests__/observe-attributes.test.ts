@@ -4,17 +4,8 @@ import type { StructuredRequest } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `ObserveXxxInput.attributes` の歯（Issue #152、ADR 0312）。
- *
- * `recall-validity.test.ts`（ADR 0164）と同型: `packages/core` 自身のテストなので
- * `@mnemora/testkit` には依存しない。DB を要さないため手元で実行できる。
- */
+// `@mnemora/testkit` には依存しない（`packages/core` 自身のテストなので）。
 
-// ⚠ 以前の Fake は outbox の `available_at` を、注入した clock ではなく実時刻で書いた
-// （`FakeMemoryStore.enqueueJob`）。今の Fake は `opts.now` に従う（ADR 0555）ので、`NOW` が過去でも
-// deferred 経路の歯（下）は claim できる。ただしこのテストは組み替えておらず、十分未来の固定日時の
-// ままにしている（組み替えは ADR 0555 の「残り」）。
 const NOW = new Date("2099-01-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
 

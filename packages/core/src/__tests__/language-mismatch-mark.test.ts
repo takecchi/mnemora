@@ -4,12 +4,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * Issue #1370（ADR 0391）: 言語の事後検査の印が、すべての抽出経路（sync・deferred・reextract）で
- * `created` イベントの `meta.languageMismatch` に出る。鍵なし（偽の LLM）で効く。
- * 印は付けるだけ——Memory は今までどおり作られ、再試行も全文フォールバックもしない（LLM は1回だけ呼ばれる）。
- */
-
 const ctx: Ctx = { tenantId: "language-mismatch-mark" };
 const JA_TEXT = "今日は渋谷のパン屋で働いています。毎朝パンを焼くのが好きです。";
 const EN_CONTENT = "The user works at a bakery in Shibuya and enjoys baking bread every morning.";

@@ -8,15 +8,9 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `Runtime.resolveContested`（2者版）が、id の綴り（大文字小文字）の違いをどう扱うかの歯。
- * `winnerId` の救済（`resolveWinnerSideId`）、相互参照の突き合わせ（`classify`）、競合のときの読み直し
- * （`refetchedById`）を縛る。約束の出所は #1329 の PR 本文と `runtime.ts` のそれぞれの注釈。
- *
- * 本物の Postgres とテスト用の fixture に当てる歯は
- * `packages/postgres/src/__tests__/uppercase-uuid-contested-runtime.postgres.test.ts`。
- * core の Fake は ADR 0521 以降、大文字小文字を区別しない。この歯は、Fake の `memoryStore` の口を1つだけ差し替えて、
- * 「store が別の記憶を返す」「相手が見つからない」「store の id が大文字を含む」を作る
- * （群版の歯 `resolve-contested-group.test.ts` と同じ流儀）。
+ * 本物の Postgres とテスト用の fixture に当てる歯は `packages/postgres/src/__tests__/uppercase-uuid-contested-runtime.postgres.test.ts`。
+ * core の Fake は大文字小文字を区別しないので、この歯は Fake の `memoryStore` の口を1つだけ差し替えて、
+ * 「store が別の記憶を返す」「相手が見つからない」「store の id が大文字を含む」を作る（群版の歯 `resolve-contested-group.test.ts` と同じ流儀）。
  */
 
 const ctx: Ctx = { tenantId: "tenant-rc-spelling" };

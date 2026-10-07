@@ -3,14 +3,6 @@ import type { MemoryId } from "../ids.js";
 import type { MemoryStatus } from "../memory.js";
 import { isContestedWithoutCompanion } from "../interfaces/memory-store.js";
 
-/**
- * `isContestedWithoutCompanion`（ADR 0140）の TSDoc が約束していることの直接の歯。
- *
- * TSDoc の約束: 「`status: 'contested'` で対向（`contestedWithId`）が無い」ときだけ `true`。
- * **対向があるかどうかだけを見る**（Issue #854 の追記）——`contestedWithId` が指す先が同じテナントの行かは
- * 見ない。`null` と `undefined` はどちらも「無い」。`contested` 以外の status は対向の有無に関わらず `false`。
- */
-
 const STATUSES: MemoryStatus[] = ["active", "contested", "superseded", "archived", "forgotten"];
 const SOME_ID = "11111111-1111-4111-8111-111111111111" as MemoryId;
 

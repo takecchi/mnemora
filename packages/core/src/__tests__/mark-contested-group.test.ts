@@ -7,20 +7,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.markContestedGroup`（Issue #207/#933 PR2、ADR 0327 §4-c、ADR 0378、ADR 0381）の歯。
- *
- * 設計の要点（`runtime.ts` の `MarkContestedGroupOutcome`/`markContestedGroup` の
- * doc コメント参照。`mark-contested.test.ts`（2者版）と対称に書いてある）:
- * - `memberIds.length < 3` は書き込み前に `RangeError`。
- * - `memberIds` の重複も書き込み前に `RangeError`。
- * - 各メンバーが呼び出し時点で `active`／穴Aの相方吸収／既存群の合併吸収のいずれかで
- *   なければ、書き込みを一切試みず `ineligible` を返す。
- * - `MemoryStore.markContestedGroup` が無い adapter では `supported: false`。
- * - 成功すれば全員 `status: 'contested'`・`contestedWithId: null` になり、有効期間が
- *   重なる組にだけ `memory_relations` が張られる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-mcg" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -104,7 +90,7 @@ describe("runtime.markContestedGroup — 基本の成功（3件、新規）", ()
     expect(storedA?.status).toBe("contested");
     expect(storedB?.status).toBe("contested");
     expect(storedC?.status).toBe("contested");
-    // 群のメンバーは contestedWithId を持たない設計（ADR 0378 決定1 §3.3）。
+    // 群のメンバーは contestedWithId を持たない設計。
     expect(storedA?.contestedWithId ?? null).toBe(null);
 
     const related = await stores.relationStore.listRelated(ctx, a.id, "contradicts");
@@ -215,7 +201,6 @@ describe("runtime.markContestedGroup — ineligible", () => {
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
-    // a・b を先に2者間の対にする。
     await runtime.markContested(ctx, a.id, b.id);
 
     const result = await runtime.markContestedGroup!(ctx, [a.id, b.id, c.id]);
@@ -277,7 +262,7 @@ describe("runtime.markContestedGroup — 並行（markContestedGroup が MemoryS
     const c = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C" }));
     stores.memoryStore.beforeUpdateStatus = (id) => {
       if (id === c.id) {
-        // ADR 0562: `createMemory` の返り値は写し。store の中の行を書き換える。
+        // `createMemory` の返り値は写し。store の中の行を書き換える。
         stores.memoryStore.liveRowForTest(ctx, c.id)!.status = "archived";
       }
     };

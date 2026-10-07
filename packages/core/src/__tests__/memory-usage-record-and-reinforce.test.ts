@@ -7,19 +7,10 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 import type { NewMemory } from "../memory.js";
 
-/**
- * Issue #961: `observe({kind:'memory_usage'})` の記録と強化。
- *
- * - `MemoryStore.recordUsageAndReinforce` が在る adapter では両方が1つの口で撃たれ、
- *   強化が失敗すれば記録も残らないので、同じ `externalId` の再送が強化を完了させる。
- * - 無い adapter では従来の2段のまま——**強化の前で落ちると再送でも強化されない窓が残る**
- *   （ADR 0009 の 2026-09-27 追記が負債として明記している）。その現状もここで固定する。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
-// 作成時刻は最初の強化より前に置く——reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
-// 書く（Issue #1093）ので、作成と同じミリ秒の強化は書かれない。
+// 作成時刻は最初の強化より前に置く: reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
+// 書くので、作成と同じミリ秒の強化は書かれない。
 const RECORDED_AT = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
 
 function newMemory(): NewMemory {
@@ -89,7 +80,6 @@ async function setup() {
     explain: { stages: [] },
     returnedMemories: [],
   });
-  // 強化（reinforceMany）を1回だけ失敗させる。
   const originalReinforceMany = stores.memoryStore.reinforceMany.bind(stores.memoryStore);
   let reinforceCalls = 0;
   stores.memoryStore.reinforceMany = async (...args) => {

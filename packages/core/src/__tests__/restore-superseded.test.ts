@@ -7,31 +7,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `runtime.restoreSuperseded`（superseded → active の復旧口）の歯。
- *
- * 設計の要点（`runtime.ts` の `RestoreSupersededOutcome`/`restoreSuperseded` の
- * doc コメント参照）:
- * - 粒度は「群」だけ——`{ supersededById }` は置き換えた側（新しいほう）の id であり、
- *   個別の統合元 id を渡す形は無い（`superseded` な Memory は `recall()` に出てこず、
- *   呼び出し側はそもそも個別 id を知る手段を持たないため）。
- * - `MemoryStore.restoreSupersededBy?`（本 PR が足す新しい任意メソッド）へ素通しする。
- *   口が無ければ `supported: false`。
- * - status の復帰に続けて `reinforce` も呼ぶ（ADR 0153 と同じ理由——recall の忘却
- *   ゲートを再び通すため）。`reinforce` の失敗は `reinforceError` に運び、status の
- *   復帰そのものは握り潰さない。
- * - 置き換えた側（`supersedingMemoryId`）には一切触れない。
- *
- * 🔴 この歯の中心は「往復」——申告ではなく実行で示す。`Runtime.consolidate()` を
- * 実際に呼んで supersede を起こし、`recall()` で統合元が消えたことを確かめてから
- * `restoreSuperseded` で戻し、`recall()` で再び現れることまで確認する
- * （`restore-archived.test.ts` の「往復」節と同じ構え——器（fake store/deps の組み方）も
- * そちらに倣う）。
- *
- * `@mnemora/testkit` には依存しない（`restore-archived.test.ts`/`forget.test.ts` と
- * 同じ理由。`runtime-fakes.ts` 冒頭のコメント参照）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 
@@ -75,7 +50,7 @@ const notUsedLlm: LLMProvider = {
   },
 };
 
-/** `consolidate.test.ts` の `llmConsolidatingTo` と同じ形——統合結果を固定で返す決定的な偽物。 */
+/** `consolidate.test.ts` の `llmConsolidatingTo` と同じ形。統合結果を固定で返す決定的な偽物。 */
 function llmConsolidatingTo(result: {
   content: string;
   digest?: string;
@@ -124,12 +99,6 @@ function unsupersededEvents(
 }
 
 describe("runtime.restoreSuperseded — 往復（consolidate → superseded → recall に出ない → restoreSuperseded → recall に出る）", () => {
-  /**
-   * 🔴 この歯が「往復」そのものである。片道（supersede にするだけ、または active に
-   * 戻すだけ）ではなく、`consolidate` で実際に superseded になったものが
-   * `restoreSuperseded` で戻り、`recall()` に再び現れることを1本で確認する
-   * ——申告ではなく実行で示す（マネージャー指示）。
-   */
   it("consolidate で superseded になった統合元は restoreSuperseded で active に戻り、recall() に再び現れる。統合先は一切触られない", async () => {
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後の本文" }));
     const a = await stores.memoryStore.createMemory(
@@ -143,11 +112,9 @@ describe("runtime.restoreSuperseded — 往復（consolidate → superseded → 
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, b.id, [1, 0]);
 
-    // 0. 統合前: recall に両方出る。
     const before = await runtime.recall(ctx, { vector: [1, 0] });
     expect(before.memories.map((m) => m.memoryId)).toEqual(expect.arrayContaining([a.id, b.id]));
 
-    // 1. 実際に consolidate を起こす（申告ではなく実行）。
     const consolidateResult = await runtime.consolidate(ctx, {
       target: { memoryIds: [a.id, b.id] },
     });
@@ -155,7 +122,6 @@ describe("runtime.restoreSuperseded — 往復（consolidate → superseded → 
     const consolidatedId = consolidateResult.consolidatedMemoryId!;
     expect(consolidatedId).not.toBeNull();
 
-    // 2. 統合元が実際に superseded になったことを読み出して確かめる。
     const aAfterConsolidate = await stores.memoryStore.get(ctx, a.id);
     const bAfterConsolidate = await stores.memoryStore.get(ctx, b.id);
     expect(aAfterConsolidate?.status).toBe("superseded");
@@ -163,7 +129,6 @@ describe("runtime.restoreSuperseded — 往復（consolidate → superseded → 
     expect(bAfterConsolidate?.status).toBe("superseded");
     expect(bAfterConsolidate?.supersededById).toBe(consolidatedId);
 
-    // 3. recall() を呼んで、統合元が返ってこないことを確かめる。
     const duringSuperseded = await runtime.recall(ctx, { vector: [1, 0] });
     expect(duringSuperseded.memories.map((m) => m.memoryId)).not.toContain(a.id);
     expect(duringSuperseded.memories.map((m) => m.memoryId)).not.toContain(b.id);
@@ -175,7 +140,6 @@ describe("runtime.restoreSuperseded — 往復（consolidate → superseded → 
       countKind: "exact",
     });
 
-    // 4. restoreSuperseded を呼ぶ。
     const restoreResult = await runtime.restoreSuperseded(ctx, { supersededById: consolidatedId });
 
     expect(restoreResult.supported).toBe(true);
@@ -190,7 +154,6 @@ describe("runtime.restoreSuperseded — 往復（consolidate → superseded → 
       }
     }
 
-    // 5. status が active・superseded_by_id が null になったことを確かめる。
     const aAfterRestore = await stores.memoryStore.get(ctx, a.id);
     const bAfterRestore = await stores.memoryStore.get(ctx, b.id);
     expect(aAfterRestore?.status).toBe("active");
@@ -198,21 +161,18 @@ describe("runtime.restoreSuperseded — 往復（consolidate → superseded → 
     expect(bAfterRestore?.status).toBe("active");
     expect(bAfterRestore?.supersededById).toBeNull();
 
-    // 6. 🔴 recall() をもう一度呼んで、統合元が返ってくることを確かめる——
-    //    これが「復旧口が本当に復旧していること」の証拠である。5で止めない。
+    // recall() をもう一度呼んで、統合元が返ってくることを確かめる。これが復旧口が本当に復旧している証拠なので、status の確認で止めない。
     const after = await runtime.recall(ctx, { vector: [1, 0] });
     expect(after.memories.map((m) => m.memoryId)).toEqual(expect.arrayContaining([a.id, b.id]));
     expect(after.omitted).not.toContainEqual(
       expect.objectContaining({ kind: "filtered", condition: "superseded" }),
     );
 
-    // 7. memory_events に unsuperseded が対象の件数（2件）だけ積まれたことを確かめる。
     expect(unsupersededEvents(stores, a.id)).toHaveLength(1);
     expect(unsupersededEvents(stores, b.id)).toHaveLength(1);
     const allUnsuperseded = stores.eventStore.events.filter((e) => e.kind === "unsuperseded");
     expect(allUnsuperseded).toHaveLength(2);
 
-    // 8. 置き換えた側（統合先）が active のまま・触られていないことを確かめる。
     const consolidatedAfter = await stores.memoryStore.get(ctx, consolidatedId);
     expect(consolidatedAfter?.status).toBe("active");
     expect(consolidatedAfter?.content).toBe("統合後の本文");
@@ -230,10 +190,8 @@ describe("runtime.restoreSuperseded — supported: false（store が restoreSupe
     });
     const consolidatedId = consolidateResult.consolidatedMemoryId!;
 
-    // FakeMemoryStore は既定で restoreSupersededBy を実装している——ここだけ
-    // 「口が無い adapter」を模す（`mark-contested.test.ts` の
-    // `disableMarkContestedPair` と同じ形。プロトタイプメソッドは `delete` では
-    // 外れないため、`Object.defineProperty` で `undefined` の own property を被せる）。
+    // ここだけ「口が無い adapter」を模す。プロトタイプメソッドは `delete` では外れないため、
+    // `Object.defineProperty` で `undefined` の own property を被せる。
     disableRestoreSupersededBy(stores);
 
     const result = await runtime.restoreSuperseded(ctx, { supersededById: consolidatedId });
@@ -280,9 +238,7 @@ describe("runtime.restoreSuperseded — status が archived/forgotten に進ん�
       ctx,
       newMemory({ content: "forgotten-progeny", status: "superseded", supersededById: anchor.id }),
     );
-    // `superseded_by_id` を残したまま status だけをさらに進める（`purge`/`sweepArchive`
-    // 等が起こしうる状態を模す。`FakeMemoryStore.updateStatus` は `superseded_by_id` を
-    // 明示的に渡さない限り据え置く）。
+    // `superseded_by_id` を残したまま status だけをさらに進める（`purge`/`sweepArchive` 等が起こしうる状態を模す）。
     await stores.memoryStore.updateStatus(ctx, archived.id, "archived");
     await stores.memoryStore.updateStatus(ctx, forgotten.id, "forgotten");
 
@@ -356,11 +312,6 @@ describe("runtime.restoreSuperseded — reason / actor", () => {
 });
 
 describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻す前に何が戻るかを返す」）", () => {
-  /**
-   * 🔴 この歯の中心も「往復」と同じ構え——申告ではなく実行で示す。`consolidate` を
-   * 実際に呼んで群を作り、`dryRun: true` で見た候補が、直後に `dryRun` 無しで
-   * 呼んだときに実際に戻る集合とちょうど一致することまで確認する。
-   */
   it("dryRun: true は書き込みを一切起こさず、would_restore で候補と由来（meta.reason）を返す。直後の実行と集合が一致する", async () => {
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後の本文" }));
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
@@ -389,14 +340,10 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
       expect(outcome.kind).toBe("would_restore");
       if (outcome.kind === "would_restore") {
         expect(outcome.previousStatus).toBe("superseded");
-        // consolidate が積む superseded イベントの meta.reason は "consolidated"
-        // （`buildConsolidateSupersedeEvent`、runtime.ts）。
         expect(outcome.supersededReason).toBe("consolidated");
       }
     }
 
-    // 🔴 書き込みは一切起きていない——status・supersededById は変わらず、
-    // unsuperseded イベントも1件も積まれていない。
     const aAfterPreview = await stores.memoryStore.get(ctx, a.id);
     const bAfterPreview = await stores.memoryStore.get(ctx, b.id);
     expect(aAfterPreview?.status).toBe("superseded");
@@ -406,7 +353,6 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
     expect(unsupersededEvents(stores, a.id)).toHaveLength(0);
     expect(unsupersededEvents(stores, b.id)).toHaveLength(0);
 
-    // 直後に dryRun 無しで呼ぶと、実際に戻る集合は preview と一致する。
     const real = await runtime.restoreSuperseded(ctx, { supersededById: consolidatedId });
     expect(real.supported).toBe(true);
     expect(new Set(real.outcomes.map((o) => o.memoryId))).toEqual(
@@ -433,10 +379,8 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
   it("由来が取れない（一致する superseded イベントが無い）ときは supersededReason: null——取れるふりをしない", async () => {
     const { runtime, stores } = buildRuntime();
     const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
-    // superseded なイベントを一切積まず、status だけ手で superseded にする
-    // （テストの前提を直接作る。`updateStatusWithEvent` は使わない——'superseded' の
-    // 対向必須の分岐と関係が無いことを確かめたいので、"kind: superseded" のイベントを
-    // 意図的に0件のままにする）。
+    // superseded なイベントを一切積まず、status だけ手で superseded にする。`updateStatusWithEvent` は使わない:
+    // "kind: superseded" のイベントを意図的に0件のままにするため。
     const source = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
@@ -464,8 +408,7 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
       ctx,
       newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
     );
-    // resolveContested が実際に積む形と同じ meta を、直接1件積む
-    // （`runtime.ts` の `buildMeta`/`buildSide` 参照——`reason: "contested_resolved"`）。
+    // resolveContested が実際に積む形と同じ meta（`reason: "contested_resolved"`）を、直接1件積む。
     await stores.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
       memoryId: source.id,
@@ -534,8 +477,7 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
     });
     const consolidatedId = consolidateResult.consolidatedMemoryId!;
 
-    // `restoreSupersededBy` はそのまま残す——「dryRun の対応は独立した任意メソッドで
-    // 決まる」ことを確かめたいので、こちらだけを外す。
+    // `restoreSupersededBy` はそのまま残す。「dryRun の対応は独立した任意メソッドで決まる」ことを確かめたいので、こちらだけを外す。
     Object.defineProperty(stores.memoryStore, "previewRestoreSupersededBy", {
       value: undefined,
       configurable: true,
@@ -570,7 +512,6 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
     expect(omittedResult.outcomes[0]?.kind).toBe("restored");
     expect(sourceAfterOmitted?.status).toBe("active"); // 省略時は実際に戻っている
 
-    // 2本目: dryRun: false を明示しても同じ既定。
     const source2 = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ content: "source2", status: "superseded", supersededById: anchor.id }),
@@ -587,11 +528,6 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
 });
 
 describe("runtime.restoreSuperseded — target.onlyMemoryIds（Issue #515 方向①、ADR 0258）", () => {
-  /**
-   * 🔴 ここでも「往復」の構え——申告ではなく実行で示す。`consolidate` で実際に
-   * 群（2件）を作り、`onlyMemoryIds` で片方だけを指定して、指定した側だけが戻り、
-   * もう片方は触られないことを確認する。
-   */
   it("onlyMemoryIds を指定すると、群のうちその id 集合だけが戻り、対象外は触られない", async () => {
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後の本文" }));
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
@@ -652,7 +588,6 @@ describe("runtime.restoreSuperseded — target.onlyMemoryIds（Issue #515 方向
     expect(preview.outcomes).toHaveLength(1);
     expect(preview.outcomes[0]?.memoryId).toBe(b.id);
     expect(preview.outcomes[0]?.kind).toBe("would_restore");
-    // 書き込みは一切起きていない。
     const bAfter = await stores.memoryStore.get(ctx, b.id);
     expect(bAfter?.status).toBe("superseded");
   });

@@ -6,16 +6,7 @@ import { createRuntime } from "../runtime.js";
 import { ReflectionLLMResultSchema } from "../strategies/reflect.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `ReflectionLLMResultSchema` の `digest`・`tags` を、TSDoc と抽出・consolidate の schema に揃えた歯。
- *
- * - `digest: ""`: TSDoc は「省略・空文字は機械的な先頭文字列切り出しへフォールバックする（`resolveDigest`）」と
- *   書いていたが、schema が `min(1)` で応答ごと拒み、`reflect()` は `llm_failed` になっていた。
- * - `tags: [""]`: 実装は `dropBlankTags` で空の tag を落とす前提だが、schema が `min(1)` で応答ごと拒んでいた
- *   （抽出・consolidate の schema は空文字の tag を受け付ける）。
- *
- * やりすぎを捕まえる歯: 型の違う値（`digest: 123`・`tags: [1]`）と空の `content` は今どおり拒む。
- */
+// やりすぎを捕まえる歯: 型の違う値（`digest: 123`・`tags: [1]`）と空の `content` は今どおり拒む。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");

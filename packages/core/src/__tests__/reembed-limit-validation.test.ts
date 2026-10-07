@@ -3,17 +3,6 @@ import type { Ctx } from "../ctx.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0433 決定4: `Runtime.reembed` は入口で `limit` を検査する。
- *
- * 直す前は、`limit` を省くと Postgres の `LIMIT ${opts.limit}` が `syntax error at or near "FOR"` に
- * なるなど、store の側の分かりにくい例外だった。ここでは、Runtime が store を呼ぶ前に
- * `RangeError` を投げることを縛る（`findCorrectionCandidates` の `limit` と同じ型）。
- *
- * 断るのは、これまでも例外になっていた値（省略・非整数・負・`NaN`・`Infinity`）だけである。
- * これまで成功していた `0` と正の整数は、これまでどおり通る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-reembed-limit" };
 
 function setup() {

@@ -4,10 +4,7 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * オーナー回答 374f6f88 の問15（全部推奨）: `subjectCandidates` を渡さない抽出では、LLM が返した
- * `subjectId` を既定で捨てる。受け入れるのは `RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true`（opt-in）。
- */
+/** `subjectCandidates` を渡さない抽出では、LLM が返した `subjectId` を既定で捨てる。受け入れるのは `RuntimeConfig.acceptLlmSubjectIdWithoutCandidates: true`（opt-in）。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 type Cand = {
@@ -252,7 +249,6 @@ describe("acceptLlmSubjectIdWithoutCandidates: true（opt-in）なら、従来�
       r.observationId,
     );
     expect(viaTick.map((m) => m.subjectId)).toEqual(["victim-subject"]);
-    // reextract（別の本文を返す LLM、同じ stores）。
     const other = build(
       llm([{ content: "やり直した本文", provenanceKind: "stated", subjectId: "victim-2" }]),
       on,

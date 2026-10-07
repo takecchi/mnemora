@@ -8,21 +8,7 @@ import { validateRecallOutput } from "../recall-output-validation.js";
 import { classifyReextractTargets } from "../strategies/reextract.js";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
-/**
- * TSDoc の5巡目の調査で、約束どおりに動くがどのテストも縛っていなかった振る舞いを縛る（B1〜B5 の core の分）。
- * 今の振る舞いの固定であり、望ましい姿の主張ではない。
- */
-
-/**
- * ⚠ 2026-09-29 追記（Issue #1232、ADR 0354）: この B1 は元々
- * `purgeExpiredEventsForTenant` を通して cutoff の計算を縛っていた——当時はこの関数自身が
- * `olderThan` を計算し、`MemoryStore.purgeExpiredEvents` へ渡していたため。Issue #1232 の
- * 修正でこの計算は `computeEventRetentionCutoff`（`purgeExpiredEventsForTenant` と同じファイル、
- * `MemoryStore.purgeExpiredEventsByRetention?` を実装する各 adapter が共有する）へ切り出され、
- * `purgeExpiredEventsForTenant` 自身はもう `olderThan` を計算しない。**縛る対象を、抽出した
- * 純関数そのものへ動かした**——振る舞いは変えていない（`event-retention-purge.ts` の
- * `computeEventRetentionCutoff` の doc コメント参照）。
- */
+/** `purgeExpiredEventsForTenant` ではなく、cutoff を計算する純関数 `computeEventRetentionCutoff`（`MemoryStore.purgeExpiredEventsByRetention?` を実装する各 adapter が共有する）そのものを縛る。 */
 describe("computeEventRetentionCutoff: 日数が Date の範囲を越えるときの cutoff（B1）", () => {
   const NOW = new Date("2026-09-28T00:00:00.000Z");
 

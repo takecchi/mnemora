@@ -5,19 +5,6 @@ import type { NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `Runtime` の結果の型の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、core の Fake で縛る
- * （3回目の棚卸し）。振る舞いは変えていない。
- *
- * - `Runtime.sweepArchive`: 「`tick()`/`observe()` からは呼ばれない」の `observe` の側。
- * - `SweepArchiveResult.reachedLimit`: 「store 側の `ArchiveDecayedResult.reachedLimit` をそのまま運ぶ」の `true` の側。
- * - `RestoreSupersededResult.supported`: 「`dryRun: true` のときは `previewRestoreSupersededBy?` が実装されていたか。
- *   2つの口は独立した任意メソッド」——`restoreSupersededBy?` が無くても下見はできる。
- * - `RestoreSupersededOutcome` の `restored.decayFloorAt`: 「reinforce が成功していればその結果、失敗していれば
- *   復帰直後の値」。
- * - `PurgeResult.outcomes`: 「入力に同じ id が2回現れたら、結果にも2回現れる」の `dryRun` の側。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 let hashCounter = 0;

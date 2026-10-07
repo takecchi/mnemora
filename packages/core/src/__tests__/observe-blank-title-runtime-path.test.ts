@@ -4,12 +4,8 @@ import type { StructuredRequest } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0517 の「空白だけの `title` は前置きにしない」を、純関数ではなく `observe()` を実際に通る経路で縛る。
- * `extraction.ts` の2つの呼び出し箇所（抽出に渡る本文・LLM 失敗時の全文フォールバックの Memory の本文）と、
- * `runtime.ts` が保存する payload の `title`（trim せず元の文字列のまま）。
- * core 自身のテストなので `@mnemora/testkit` には依存しない。
- */
+// 純関数ではなく `observe()` を実際に通る経路で縛る: `extraction.ts` の2つの呼び出し箇所（抽出に渡る本文・
+// LLM 失敗時の全文フォールバックの Memory の本文）と、`runtime.ts` が保存する payload の `title`（trim せず元の文字列のまま）。
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2099-01-01T00:00:00.000Z");
