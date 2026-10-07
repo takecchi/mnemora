@@ -1759,18 +1759,9 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * roadmap.md 段階4/5: `countByGroup` を置き換える単一集約（`ScopeAggregate`、
-   * docs/recall.md §5・packages/core の recall.ts の doc コメント参照）。
-   *
-   * インメモリ実装なので「単一クエリ」という概念自体は無いが、契約として重要なのは
-   * 「groups の総和が totalInScope と一致すること」——ここでは同じ1回のループで
-   * 両方を積み上げることでそれを保証する（postgres 実装は単一 SQL 文でこれを保証する）。
-   *
-   * `opts.digestBand`（ADR 0073 決定7）: `packages/core` の `FakeMemoryStore.aggregateScope`
-   * （`packages/core/src/__tests__/runtime-fakes.ts`、参照実装）と同じ意味論——
-   * 上のループで既に集めた in-scope の Memory から、`excludeMemoryIds` を除いて
-   * `(occurredAt ?? recordedAt)` の降順・同値なら `id` の降順に並べ、`limit` 件まで返す。
-   * `digestEligible.count` は `limit` を掛ける前（除外後）の総数。
+   * 単一集約（`ScopeAggregate`）。契約は「groups の総和が totalInScope と一致すること」で、同じ1回のループで両方を積み上げて保証する。
+   * `opts.digestBand`: in-scope の Memory から `excludeMemoryIds` を除き、`(occurredAt ?? recordedAt)` の降順（同値なら `id` の降順）で `limit` 件まで返す
+   * （`FakeMemoryStore.aggregateScope` と同じ意味論）。`digestEligible.count` は `limit` を掛ける前（除外後）の総数。
    */
   async aggregateScope(
     ctx: Ctx,
@@ -1779,20 +1770,15 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<ScopeAggregate> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(scope.subjectId, "scope.subjectId");
-    // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
-    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
-    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
+    // 読みの口の日時は下限（4714-11-24 BC）より前でも断らず、そのまま比べる（Postgres は下限へ寄せるが答えは同じ）。Invalid Date だけ断る。
     assertQueryDate("aggregateScope", "occurredAfter", scope.occurredAfter);
     assertQueryDate("aggregateScope", "occurredBefore", scope.occurredBefore);
     assertQueryDate("aggregateScope", "validAt", scope.validAt);
     assertQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
-    // ADR 0505: `decayFloorSeqAfter` は `bigint` の引数（行が無くても、範囲外なら Postgres はクエリの時点で拒む）。
+    // `decayFloorSeqAfter` は `bigint` の引数（範囲外なら、行が無くても Postgres はクエリの時点で拒む）。
     assertQueryBigint("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
-    // ADR 0434: `attributes`（`jsonb` の包含判定の引数）と `labels`（`text[]` の引数）の NUL は、Postgres ではクエリの
-    // 時点で拒まれる（`22P05`・`22021`）。`scopeAggregate: "skip"` で `digestBand` も無いときだけ、Postgres は
-    // 集計も目次帯も引かずにクエリを1本も発行しないので、見ない。
-    // ADR 0543: `labels`・`taxonomyGroupCandidates`（`text[]` の引数）の孤立サロゲートは、Postgres が引数を UTF-8 に変換するときに
-    // U+FFFD に置き換わる。保存側（`tags`）が置き換わっているので、引数側も同じにしないと一致しない。
+    // `attributes`・`labels` の NUL は、Postgres がクエリの時点で拒む。ただし `scopeAggregate: "skip"` で `digestBand` も無いときは、Postgres はクエリを1本も発行しないので見ない。
+    // `labels`・`taxonomyGroupCandidates` の孤立サロゲートは Postgres が U+FFFD に置き換える。保存側（`tags`）が置き換わっているので、引数側も同じにしないと一致しない。
     scope = {
       ...scope,
       ...(scope.labels === undefined
@@ -1828,23 +1814,16 @@ export class InMemoryMemoryStore implements MemoryStore {
         ? new Set<string>(opts.excludeProvenanceKinds)
         : undefined;
     let excludedProvenanceIndexed = 0;
-    // 目次帯の候補（ADR 0073）: totalInScope に数える条件と**同じ条件**で in-scope の
-    // Memory を集める。`digestBand` が要求されなかった場合はこの配列を使わない。
+    // 目次帯の候補: totalInScope に数える条件と同じ条件で集める。
     const inScopeMemories: Memory[] = [];
-    // [ADR 0384](../../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
-    // 案C: `"skip"` のときはスコープ判定（`continue` するかどうか）は今までどおり行うが
-    // ——`inScopeMemories`（digestBand の候補集め）に必要——、件数の集計（各カウンタの
-    // インクリメント）だけを止める。`AggregateScopeOptions.scopeAggregate` の doc コメント
-    // 「値だけ受け取って計算は今までどおり行う実装は禁止する」を、この fixture でも守る。
+    // `"skip"` のときも、スコープ判定は今までどおり行い（`inScopeMemories` に要る）、件数の集計だけを止める。値だけ受け取って計算は今までどおり行う実装は禁止（`AggregateScopeOptions.scopeAggregate`）。
     const skipCounting = opts?.scopeAggregate === "skip";
 
     for (const memory of this.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) {
         continue;
       }
-      // Issue #608 項目③(b) / ADR 0286: `PostgresMemoryStore.aggregateScope`
-      // （`memory-store.ts` の `subjectFilter`）と同じ意味論——`includeSubjectless: true`
-      // のときだけ `subject_id IS NULL`（主題なし）も scope 内に含める。
+      // `includeSubjectless: true` のときだけ `subject_id IS NULL`（主題なし）も scope 内に含める。
       const subjectMatches =
         scope.subjectId === undefined ||
         memory.subjectId === scope.subjectId ||
@@ -1852,8 +1831,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (!subjectMatches) {
         continue;
       }
-      // Issue #152/#153（ADR 0312）: `attributes` も `subjectId` と同じくスコープの外側の
-      // 境界——落ちた分は `filtered*` のどの列にも数えず、`totalInScope` にも入れない。
+      // `attributes` はスコープの外側の境界: 落ちた分は `filtered*` のどの列にも数えず、`totalInScope` にも入れない。
       if (scope.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};
         const attributesMatch = Object.entries(scope.attributes).every(
@@ -1876,7 +1854,6 @@ export class InMemoryMemoryStore implements MemoryStore {
         if (!skipCounting) filteredForgotten += 1;
         continue;
       }
-      // ここに来るのは status IN ('active','contested') のみ。
 
       const effectiveTime = memory.occurredAt ?? memory.recordedAt;
       const inPeriod =
@@ -1886,12 +1863,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         if (!skipCounting) filteredPeriod += 1;
         continue;
       }
-      // Issue #280（Issue #202 第2弾）: validAt ゲート。両端 null は「いつでも真」
-      // （`RecallQuery.validAt` の doc 参照）。`postgres` 実装（`memory-store.ts`）と同じ、
-      // **独立した2条件**として数える（`count(*) FILTER` を2本立てるのと同じ形）——
-      // どちらか一方でも成立すればスコープ外だが、両方成立しうる壊れたデータ
-      // （`validFrom > validUntil`）でも両方のカウンタへ計上する。`continue` で
-      // 早期に打ち切ると片方しか数えなくなり、postgres 側の独立集計と食い違う。
+      // validAt ゲート。両端 null は「いつでも真」。独立した2条件として数える（`validFrom > validUntil` の壊れたデータでも両方のカウンタに計上する）。`continue` で打ち切ると Postgres の独立集計と食い違う。
       if (scope.validAt !== undefined) {
         const isNotYetValid = memory.validFrom != null && memory.validFrom > scope.validAt;
         const isExpired = memory.validUntil != null && memory.validUntil <= scope.validAt;
@@ -1905,10 +1877,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           continue;
         }
       }
-      // Issue #201 PR-B（[ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
-      // taxonomy ゲート。`attributes`（上）とは違い `period`/`validity` と同じ側
-      // ——`totalInScope` から除かれ、かつ `filtered*` に数えられる
-      // （`PostgresMemoryStore.aggregateScope` の `has_qualifying_label` と同じ意味論）。
+      // taxonomy ゲート。`attributes` と違い `period`/`validity` と同じ側: `totalInScope` から除かれ、`filtered*` に数えられる。
       if (scope.labels !== undefined) {
         const labels = scope.labels;
         const hasQualifyingLabel = memory.tags.some((tag) => labels.includes(tag));
@@ -1921,11 +1890,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (!skipCounting) {
         totalInScope += 1;
       }
-      // ⭐ Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。**`continue` しない**
-      // ——`archived`/`period`/`expired` と違い、減衰しきった Memory は
-      // `totalInScope`・群カウント・目次帯のいずれからも除かれない（スコープ内に在る）。
-      // 述語は `PostgresMemoryStore.aggregateScope` の `isDecayed` と、
-      // `recall-runtime.ts` の `survivesDecayGate` の否定と、同じものでなければならない。
+      // 忘却ゲートで落ちた件数。`continue` しない: 減衰しきった Memory も `totalInScope`・群カウント・目次帯から除かれない（述語は `isDecayedForScope`）。
       if (
         !skipCounting &&
         isDecayedForScope(memory, scope, this.subjectActivitySeq.get(ctx.tenantId))
@@ -1938,12 +1903,10 @@ export class InMemoryMemoryStore implements MemoryStore {
         if (memory.embeddingStatus !== "ready") {
           notIndexed[memory.embeddingStatus] += 1;
         } else if (excludedKinds?.has(memory.provenance.kind) === true) {
-          // ADR 0390: 除外 kind で索引済み（`notIndexed` の補集合）の行。
           excludedProvenanceIndexed += 1;
         }
       }
-      // digestBand の候補集めは "skip" でも続ける（ADR 0384 案C: 目次帯は集計とは
-      // 独立した経路。`AggregateScopeOptions.scopeAggregate` の doc コメント参照）。
+      // digestBand の候補集めは "skip" でも続ける（目次帯は集計とは独立した経路）。
       inScopeMemories.push(memory);
     }
 
@@ -1956,15 +1919,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       }),
     );
 
-    // Issue #201 PR-B（ADR 0323「決定5」）: `scope.taxonomyGroupCandidates` が渡された
-    // ときだけ `axis: 'taxonomy'` の群を足す——`PostgresMemoryStore.aggregateScope` の
-    // `taxonomy_label_groups`/`taxonomy_residual_count` と同じ意味論（`inScopeMemories` は
-    // 既に `has_qualifying_label` を含む最終スコープなので、`hasQualifyingLabel`
-    // フィルタと同じ内側を数える）。カウント0のラベル・残差は載せない
-    // （`axis: 'subject'` の `in_scope > 0` と同じ規約）。
-    // ADR 0384 案C: "skip" のときは taxonomy 群カウントも計算しない（`groups` は空のまま）
-    // ——`RecallQuery.scopeAggregate` の doc コメント「件数集計を止める」が対象にするのは
-    // `axis: 'subject'` だけではない。
+    // `scope.taxonomyGroupCandidates` が渡されたときだけ `axis: 'taxonomy'` の群を足す。カウント0のラベル・残差は載せない。
+    // "skip" のときは taxonomy 群カウントも計算しない（`groups` は空のまま）。
     if (scope.taxonomyGroupCandidates !== undefined && !skipCounting) {
       const candidates = scope.taxonomyGroupCandidates;
       const perLabelCount = new Map<string, number>();
@@ -1995,17 +1951,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     let digests: ScopeAggregate["digests"] = [];
     let digestEligible: ScopeAggregate["digestEligible"] = { count: 0, countKind: "exact" };
     if (opts?.digestBand) {
-      // `PostgresMemoryStore.aggregateScope` は `digestBand.limit` を生 SQL の `LIMIT`
-      // にそのまま渡すため、負数を渡すと Postgres 自身が `LIMIT must not be negative`
-      // で例外を投げる（in-memory-vector-store.ts の同種の注記・実測参照）。ここで
-      // 検査せず `eligibleMemories.slice(0, opts.digestBand.limit)` へ渡すと、
-      // `Array.prototype.slice` の負数引数により、スコープ内のほぼ全件の digest を
-      // 静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
-      // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
-      // `Infinity`/非整数を渡すと Postgres は `invalid input syntax for type bigint: "NaN"`
-      // の形で例外を投げる（実測済み。in-memory-vector-store.ts の同種の注記参照）。
-      // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
-      // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+      // 整数でない・負の `limit` は先に断る: `slice` の負数はスコープ内のほぼ全件の digest を静かに返し、`NaN`/`Infinity` は黙って別の値に丸められる。
       if (!Number.isInteger(opts.digestBand.limit)) {
         throw new Error(
           `aggregateScope: digestBand.limit must be an integer (got ${opts.digestBand.limit})`,
@@ -2016,8 +1962,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           `aggregateScope: digestBand.limit must not be negative (got ${opts.digestBand.limit})`,
         );
       }
-      // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
-      // "9223372036854776000" is out of range for type bigint`）。
+      // `LIMIT` の bigint に収まらない値も Postgres は拒む。
       if (opts.digestBand.limit >= 2 ** 63) {
         throw new Error(
           `aggregateScope: digestBand.limit must fit in a Postgres bigint (got ${opts.digestBand.limit})`,
@@ -2025,19 +1970,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
       const exclude = new Set(opts.digestBand.excludeMemoryIds.map(normId));
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
-      // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順
-      // （ADR 0073、`FakeMemoryStore.aggregateScope` と同じ規則）。
+      // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順。
       eligibleMemories.sort((a, b) => {
         const aTime = (a.occurredAt ?? a.recordedAt).getTime();
         const bTime = (b.occurredAt ?? b.recordedAt).getTime();
         if (aTime !== bTime) return bTime - aTime;
         return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
       });
-      // ADR 0384 案C: `digestEligible` は件数の一種なので、"skip" では in-scope の
-      // 母数（`totalInScope`）を数えていないぶん `eligibleMemories.length` も
-      // 信じられる値ではない——`unknown`/`0` にする。digest 本文の候補一覧
-      // （`digests`）自体は `inScopeMemories`（skip でも push を続けている）から
-      // 変わらず正しく求まる。
+      // "skip" では `totalInScope` を数えていないので、`eligibleMemories.length` も信じられない: `unknown`/`0` にする。`digests` 自体は `inScopeMemories` から正しく求まる。
       digestEligible = skipCounting
         ? { count: 0, countKind: "unknown" }
         : { count: eligibleMemories.length, countKind: "exact" };
@@ -2053,7 +1993,6 @@ export class InMemoryMemoryStore implements MemoryStore {
       groups,
       totalInScope,
       countKind,
-      // ADR 0390: 空配列・未指定・"skip" は欄を足さない（"skip" は件数集計自体をしない）。
       ...(!skipCounting && excludedKinds !== undefined
         ? { excludedProvenanceIndexedCount: excludedProvenanceIndexed }
         : {}),
@@ -2083,19 +2022,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     };
   }
 
-  /**
-   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5
-   * （Issue #305）: `record.advanceActivityClock === true` のとき `this.activitySeq` を
-   * `+1` する——`await` を挟まない同期区間で行を作るのと同じ処理の中で行うことで、
-   * `PostgresMemoryStore.createRecall` の「同一トランザクション」を模す
-   * （`createObservationIdempotent`（ADR 0054）と同じ作法）。**`false`/未指定なら
-   * 一切触らない**（既定 `'wall'` のテナントで `activity_seq` が動かない、という
-   * ADR の意味論をここでも守る）。
-   */
+  /** `record.advanceActivityClock === true` のとき `this.activitySeq` を `+1` する。行を作るのと同じ同期区間で行い、`createRecall` の「同一トランザクション」を模す。`false`/未指定なら一切触らない。 */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(record.subjectId, "record.subjectId");
-    // ADR 0437 決定2: 書き込む先の subject のカウンタ（`tenant_subject_activity.subject_id`）も、書く前に断る。
+    // 書き込む先の subject のカウンタも、書く前に断る。
     if (typeof record.advanceActivityClock === "object" && record.advanceActivityClock !== null) {
       assertWellFormedIdentifier(
         record.advanceActivityClock.subjectId,
@@ -2104,18 +2035,17 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     assertRecallRecordStorable(record);
     const id = nextId("rcl");
-    // Issue #1237: 省略時は壁時計。
     this.recalls.set(id, {
       ...snapshot(record),
       tenantId: ctx.tenantId,
-      // Issue #1731: 呼び手の Date を共有しない（#1120、書き込む時点の複製）。
+      // 呼び手の Date を共有しない。
       createdAt: record.createdAt === undefined ? new Date() : snapshot(record.createdAt),
     });
     if (record.advanceActivityClock === true) {
       const current = this.activitySeq.get(ctx.tenantId) ?? 0;
       this.activitySeq.set(ctx.tenantId, current + 1);
     } else if (
-      // ADR 0353（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
+      // `T` ではなく `S_x`（subject 単位）を進める。
       typeof record.advanceActivityClock === "object" &&
       record.advanceActivityClock !== null &&
       record.advanceActivityClock.scope === "subject"
@@ -2132,11 +2062,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     return id;
   }
 
-  /**
-   * Issue #298 / [ADR 0155](../../../../docs/decisions/0155-recall-score-breakdown-persisted.md):
-   * `createRecall` が書いた行を `recallId` から読み戻す。`PostgresMemoryStore.getRecall` と
-   * 同じ契約——テナントが一致しない、または見つからなければ `null`。
-   */
+  /** `createRecall` が書いた行を `recallId` から読み戻す。テナントが一致しない、または見つからなければ `null`。 */
   async getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null> {
     assertWellFormedCtx(ctx);
     id = normId(id);
@@ -2154,28 +2080,16 @@ export class InMemoryMemoryStore implements MemoryStore {
       usage: row.usage,
       indexBand: row.indexBand,
       explain: row.explain,
-      // この in-memory 実装が保持する行は常に `createRecall` 経由で新規に書かれたものなので
-      // `breakdownCaptured: true` で固定してよい（マイグレーション以前の行を模す必要が
-      // 無い——それは postgres の適合スイート側の検査になる）。
+      // この実装が保持する行は常に `createRecall` 経由で新規に書かれたものなので、`breakdownCaptured: true` で固定してよい。
       returnedMemories: { breakdownCaptured: true, memories: row.returnedMemories },
       createdAt: row.createdAt,
     });
   }
 
   /**
-   * ADR 0079: 索引に載っていない Memory を選んで `pending` へ戻し、`embed` の outbox 行を
-   * 積み直す。
-   *
-   * `PostgresMemoryStore.requeueEmbedJobs` は単一の `WITH ... INSERT ... SELECT` 文で
-   * 更新と INSERT を同じトランザクションに入れる。**この実装が「同一トランザクション」を
-   * 模せるのは、途中に `await` を挟まない同期区間で両方を行うからである**
-   * （`createObservationIdempotent`（ADR 0054）と同じ形）——他の呼び出しの同期区間が
-   * 割り込む余地が無いので、「更新だけ起きて INSERT が起きない」中間状態が外から
-   * 観測されない。⚠ **`for` の中に `await` を入れないこと。**
-   *
-   * `statuses` を `readonly EmbeddingStatus[]` へ受け直しているのは、
-   * **`NotIndexedReason` が `EmbeddingStatus` の部分集合であることを型で確かめる**
-   * ためでもある（どちらかに値が増えてこの包含が崩れたら、ここが赤くなる）。
+   * 索引に載っていない Memory を選んで `pending` へ戻し、`embed` の outbox 行を積み直す。
+   * 更新と INSERT を同じ同期区間で行って「同一トランザクション」を模す。⚠ `for` の中に `await` を入れないこと（「更新だけ起きて INSERT が起きない」中間状態が観測される）。
+   * `statuses` を `readonly EmbeddingStatus[]` へ受け直すのは、`NotIndexedReason` が `EmbeddingStatus` の部分集合であることを型で確かめるため。
    */
   async requeueEmbedJobs(
     ctx: Ctx,
@@ -2183,32 +2097,19 @@ export class InMemoryMemoryStore implements MemoryStore {
     writeOpts?: { now?: Date | undefined },
   ): Promise<RequeueEmbedJobsResult> {
     assertWellFormedCtx(ctx);
-    // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
-    // パラメータ）にそのまま渡す。`NaN`・`Infinity`・非整数は、パラメータの bigint への変換の時点で
-    // Postgres 自身が例外を投げる（実測: `invalid input syntax for type bigint: "NaN"` 等）。
-    // 負数の `LIMIT must not be negative` は常には出ない（実測、ADR 0575 と同じ形）: この `LIMIT` は
-    // `WITH target AS (...) UPDATE ... FROM target` の CTE の中にあり、テナントの行が1本も無く、`memories` の
-    // 統計が古い（`reltuples = 0`）と、`Limit` は `never executed` になり、何も書かずに
-    // `{ requeued: 0 }` で返る。対象の行が1本でもあるか、統計が無ければ投げる。Postgres は負数を断る約束ではない
-    // ——この fixture は常に断る。ここで検査せず `.slice(0, Math.max(0, opts.limit))` へ
-    // 渡すと、`Infinity` は対象を全件、`1.5` は1件、積み直す書き込みをしてしまう
-    // （`archiveDecayed` の Issue #880 と同じ形）。クエリを投げる前に弾く Postgres 側に
-    // 揃える（同じ2段の順序: 非整数を先に、次に負数を見る）。
+    // 整数でない・負の `limit` は先に断る: Postgres が負数を断るのは `LIMIT` が評価されるときだけ（対象の行が無く統計が古いと `never executed` で `{ requeued: 0 }` を返す）が、
+    // この fixture は常に断る。検査せず `.slice(0, Math.max(0, opts.limit))` へ渡すと、`Infinity` は全件、`1.5` は1件の積み直しを書いてしまう。非整数を先に、次に負数を見る。
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`requeueEmbedJobs: limit must be an integer (got ${opts.limit})`);
     }
     if (opts.limit < 0) {
       throw new Error(`requeueEmbedJobs: limit must not be negative (got ${opts.limit})`);
     }
-    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
-    // "9223372036854776000" is out of range for type bigint`。`1e21` 以上は指数表記になり
-    // `invalid input syntax for type bigint`）。
+    // `LIMIT` の bigint に収まらない値も Postgres は拒む。
     if (opts.limit >= 2 ** 63) {
       throw new Error(`requeueEmbedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
-    // ADR 0434: `writeOpts.now` は `available_at`・`created_at`（`timestamptz`）の引数で、Postgres は対象の行が
-    // 0件でも Invalid Date を `22007` で拒む（実測）。`memoryIds` が空配列のときだけ、Postgres はクエリを
-    // 発行せずに `{ requeued: 0 }` を返す（`buildRequeueEmbedTargetSelect` が `null`）ので、見ない。
+    // `writeOpts.now` は `timestamptz` の引数で、Postgres は対象の行が0件でも Invalid Date を拒む。ただし `memoryIds` が空配列のときは、クエリを発行せず `{ requeued: 0 }` を返すので見ない。
     if (opts.memoryIds === undefined || opts.memoryIds.length > 0) {
       assertQueryTimestamptz("requeueEmbedJobs", "writeOpts.now", writeOpts?.now);
     }
@@ -2229,7 +2130,6 @@ export class InMemoryMemoryStore implements MemoryStore {
       )
       .slice(0, opts.limit);
 
-    // Issue #1237: 積み直す embed ジョブの時刻。省略時は1回だけ壁時計を読む。
     const outboxNow = writeOpts?.now ?? new Date();
     const memoryIds: MemoryId[] = [];
     for (const memory of targets) {
@@ -2242,63 +2142,33 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0114 / [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
-   * （Issue #305）: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` の Memory を
-   * `opts.clock`（省略時 `'wall'`）で選び、`decayFloorAt` 昇順で `opts.limit` 件まで
-   * `status='archived'` への更新と `kind='archived'` のイベント追記を1つの同期区間
-   * （`await` を挟まない）で行う——`requeueEmbedJobs` / `supersedeWithNewMemories` と
-   * 同じ作法で、postgres 実装の単一トランザクションを模す。
-   *
-   * `opts.clock` の分岐は `PostgresMemoryStore`/`buildArchiveDecayedTargetSelect`
-   * （`packages/postgres/src/memory-store.ts`）と同じ形——**境界の非対称
-   * （ゲートは狭義 `>`、掃引は境界を含む `<=`）を1バイトも変えずに写す**。
-   * `'either'` は AND（両方の軸で沈んでいるものだけ掃く。ゲートの OR とは逆向き、
-   * `ArchiveDecayedOptions.clock` の doc コメント参照）。
-   *
-   * `digestSnapshot` には更新前の `digest` を入れる（`updateStatusWithEvent` を経由する
-   * `forget` と同じ規約、docs/memory-model.md §9）。
+   * 掃引。`status = 'active'` の Memory を `opts.clock`（省略時 `'wall'`）で選び、`decayFloorAt` 昇順で `opts.limit` 件まで、`status='archived'` への更新と `kind='archived'` のイベント追記を1つの同期区間で行う。
+   * `opts.clock` の分岐は `buildArchiveDecayedTargetSelect` と同じ形で、境界の非対称（ゲートは狭義 `>`、掃引は境界を含む `<=`）をそのまま写す。
+   * `'either'` は AND（両方の軸で沈んでいるものだけ掃く。ゲートの OR とは逆向き）。`digestSnapshot` には更新前の `digest` を入れる。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
     assertWellFormedCtx(ctx);
-    // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
     assertQueryTimestamptz("archiveDecayed", "now", opts.now);
-    // ADR 0505・Issue #1731: `nowSeq` は `bigint` の引数。整数でない値（`assertQueryBigint` が整数も見る）も範囲外も、行が無くても Postgres はクエリの時点で拒む。
-    // ただし壁時計の clock は `nowSeq` を SQL に入れない（`wall` は `decay_floor_at` だけ）ので、どちらも見ない。
+    // `nowSeq` は `bigint` の引数で、整数でない値も範囲外も、行が無くても Postgres は拒む。ただし `wall` は `nowSeq` を SQL に入れないので見ない。
     if ((opts.clock ?? "wall") !== "wall") {
       assertQueryBigint("archiveDecayed", "nowSeq", opts.nowSeq);
     }
-    // `PostgresMemoryStore.archiveDecayed`（`buildArchiveDecayedTargetSelect`）は
-    // `opts.limit` を生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡す。`NaN`・`Infinity`・
-    // 非整数は、bigint への変換の時点で Postgres 自身が例外を投げる（実測:
-    // `invalid input syntax for type bigint: "NaN"` 等。Issue #880）。負数の
-    // `LIMIT must not be negative` は常には出ない（実測、ADR 0575 と同じ形）: この `LIMIT` は
-    // `WITH target AS (...) UPDATE ... FROM target` の CTE の中にあり、テナントの行が1本も無く、`memories` の
-    // 統計が古い（`reltuples = 0`）と、`Limit` は `never executed` になり、何も書かずに
-    // `{ archived: [] }` で返る。対象の行が1本でもあるか、統計が無ければ投げる。Postgres は負数を断る約束ではない
-    // ——この fixture は常に断る。ここで検査せず `.slice(0, Math.max(0, opts.limit))` へ渡すと、
-    // `Math.max(0, NaN)` は `NaN`（`slice` はこれを `0` として扱う＝0件）に、
-    // `Math.max(0, Infinity)` は `Infinity`（`slice` は対象を無条件に全件）にしてしまう
-    // ——このメソッドは書き込みの副作用（`status` を `archived` にし、イベントを積む）
-    // を持つため、他の口（PR #811/#875 の limit ガード）より実害が大きい。クエリを
-    // 投げる前に弾く Postgres 側に揃える（`InMemoryMemoryStore.purgeExpiredEvents` と
-    // 同じ2段の順序: 非整数を先に、次に負数を見る）。
+    // 整数でない・負の `limit` は先に断る: Postgres が負数を断るのは `LIMIT` が評価されるときだけ（対象の行が無く統計が古いと `{ archived: [] }` を返す）が、この fixture は常に断る。
+    // 検査せず `.slice(0, Math.max(0, opts.limit))` へ渡すと、`NaN` は0件、`Infinity` は全件になる。書き込みの副作用（`archived` への更新とイベント）を持つので、他の口より実害が大きい。非整数を先に、次に負数を見る。
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`archiveDecayed: limit must be an integer (got ${opts.limit})`);
     }
     if (opts.limit < 0) {
       throw new Error(`archiveDecayed: limit must not be negative (got ${opts.limit})`);
     }
-    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
-    // "9223372036854776000" is out of range for type bigint`）。
+    // `LIMIT` の bigint に収まらない値も Postgres は拒む。
     if (opts.limit >= 2 ** 63) {
       throw new Error(`archiveDecayed: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     const nowMs = opts.now.getTime();
     const clock = opts.clock ?? "wall";
     const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
-    // ADR 0353（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
-    // その Memory の subjectId に対応する `S_x` を足す（postgres 側
-    // `activityFloorSeqDeadCondition` と同じ式）。
+    // `usesSubjectActivityCounters` が true のときだけ、その Memory の subjectId に対応する `S_x` を足す。
     const subjectActivitySeqByTenant = this.subjectActivitySeq.get(ctx.tenantId);
     const passesActivity = (m: Memory): boolean => {
       if (opts.nowSeq === undefined) {
@@ -2312,8 +2182,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         opts.usesSubjectActivityCounters === true && m.subjectId != null
           ? opts.nowSeq + (subjectActivitySeqByTenant?.get(m.subjectId) ?? 0)
           : opts.nowSeq;
-      // ADR 0505: `nowSeq + S_x` が `bigint` を溢れる行で、式が評価されたなら Postgres は `22003` で失敗する
-      // （`decay_floor_seq IS NOT NULL AND …` の短絡で、非 NULL の行。subject なしの行は `S_x` を引かない）。
+      // `nowSeq + S_x` が `bigint` を溢れる行で式が評価されたなら、Postgres は失敗する（`decay_floor_seq` が非 NULL の行。subject なしの行は `S_x` を引かない）。
       if (
         opts.usesSubjectActivityCounters === true &&
         m.subjectId != null &&
@@ -2328,17 +2197,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     const passesClock = (m: Memory): boolean => {
       if (clock === "wall") return passesWall(m);
       if (clock === "activity") return passesActivity(m);
-      // 'either': AND（両方の軸で沈んでいるものだけ掃く）。
       return passesWall(m) && passesActivity(m);
     };
 
-    // ⭐ ADR 0165 決めたこと8: **並べる軸は、掃く軸に合わせる。**`clock: 'activity'` では
-    // `decayFloorSeq` 昇順で選ぶ（`packages/postgres` の `buildArchiveDecayedTargetSelect` と
-    // 同じ規律——向こうでは `idx_memories_recall_gate_seq` が並び替えを担えるかどうかが
-    // 掛かっている。詳しい経緯はそちらの doc コメントを見ること）。
-    // ⚠ **返り値 `archived` の並び順の契約は変えない**——下で `decayFloorAt` 昇順に
-    // 並べ直す。ここで変わるのは「`limit` が効くときに *どの行を選ぶか*」だけである。
-    // `'either'` は壁時計のまま（掃引の条件が AND なので、どちらの軸も単独では足りない）。
+    // 並べる軸は、掃く軸に合わせる: `clock: 'activity'` では `decayFloorSeq` 昇順で選ぶ（`buildArchiveDecayedTargetSelect` と同じ規律）。
+    // 返り値 `archived` の並び順の契約は変えず、下で `decayFloorAt` 昇順に並べ直す。変わるのは `limit` が効くときにどの行を選ぶかだけ。`'either'` は壁時計のまま。
     const byId = (a: Memory, b: Memory): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     const selectionOrder = (a: Memory, b: Memory): number =>
       clock === "activity"
@@ -2359,7 +2222,6 @@ export class InMemoryMemoryStore implements MemoryStore {
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "archived",
-        // Issue #1237: `archived` の `at` は `opts.now`（`@mnemora/postgres` と同じ）。
         at: opts.now,
         actor: { type: "system" },
         digestSnapshot,
@@ -2369,8 +2231,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.events.push(storedEvent);
       archived.push({ memoryId: memory.id, decayFloorAt: new Date(memory.decayFloorAt) });
     }
-    // `packages/postgres` の外側クエリ（`ORDER BY decay_floor_at ASC, id ASC`）と
-    // 同じ契約に揃える——選び方が clock で変わっても、**返る並びは常に `decayFloorAt` 昇順**。
+    // 返る並びは、選び方が clock で変わっても常に `decayFloorAt` 昇順（`ORDER BY decay_floor_at ASC, id ASC` と同じ）。
     archived.sort(
       (a, b) =>
         a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
@@ -2380,17 +2241,9 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #198 / ADR 0124 / [ADR 0375](../../../../docs/decisions/0375-purge-scope-widened.md):
-   * `forgotten` かつ未 purge（`purgedAt === null`）の Memory だけを対象にした CAS
-   * ——`content`/`digest` をトゥームストーンで上書きし `purgedAt` を設定した上で
-   * `kind: 'purged'` のイベントを積む。`status` は動かさない（`purged` は `status` の値では
-   * ない）。条件を満たさなければ {@link MemoryPurgeConflictError} を投げる（`updateStatus`/
-   * `updateStatusWithEvent` と同じ「まだ何も書いていないうちに判定する」作法）。
-   *
-   * 🔴 ADR 0375 決定1〜3: `content`/`digest`/`purgedAt` に加えて、`tags`/`attributes`/
-   * `claimKey` を空にし、label の紐付けを外して `proposedCount` を減らし（`memoryLabels`
-   * 参照）、このテナントの `recalls` の `indexBand.digestBand` から該当 `memoryId` の
-   * `digest` を書き換える——`packages/postgres` の `purgeMemory` と同じ範囲。
+   * `forgotten` かつ未 purge（`purgedAt === null`）の Memory だけを対象にした CAS。`content`/`digest` をトゥームストーンで上書きし `purgedAt` を設定して、`kind: 'purged'` のイベントを積む。
+   * `status` は動かさない。条件を満たさなければ {@link MemoryPurgeConflictError} を投げる（まだ何も書いていないうちに判定する）。
+   * `tags`/`attributes`/`claimKey` を空にし、label の紐付けを外して `proposedCount` を減らし、このテナントの `recalls` の `indexBand.digestBand` から該当 `memoryId` の `digest` を書き換える（`packages/postgres` の `purgeMemory` と同じ範囲）。
    */
   async purgeMemory(
     ctx: Ctx,
@@ -2399,8 +2252,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
     assertWellFormedCtx(ctx);
-    // ADR 0434: 墓石の `content`・`digest` は `text` 列へ書く値で、Postgres は NUL を拒む（`22021`）。対象の行が
-    // 無くても・CAS に弾かれる状態でも、同じ UPDATE 文の引数として拒む（実測）ので、行を引く前に見る。
+    // 墓石の `content`・`digest` は `text` 列へ書く値で、Postgres は対象の行が無くても・CAS に弾かれる状態でも、同じ UPDATE 文の引数として NUL を拒む。行を引く前に見る。
     if (stringHasNul(tombstone.content)) {
       throw new Error(
         `InMemoryMemoryStore: tombstone.content must not contain NUL characters (U+0000)`,
@@ -2411,10 +2263,9 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: tombstone.digest must not contain NUL characters (U+0000)`,
       );
     }
-    // ADR 0640: `purged_at`・`memory_events.at` に入る `event.at` が下限より前なら、墓石と同じく同じ UPDATE 文の引数として
-    // `22008` で拒む（実測。CAS に弾かれる状態の行でも拒む）ので、行を引く前に見る。
+    // `purged_at`・`memory_events.at` に入る `event.at` が下限より前なら、Postgres は CAS に弾かれる状態の行でも拒む。行を引く前に見る。
     assertWrittenTimestamptzFloor("memory_events", "at", event.at);
-    // ADR 0543: 墓石の `content`・`digest` は `text` 列へ書く値。孤立サロゲートは U+FFFD に置き換えて保存する。
+    // 墓石は `text` 列へ書く値なので、孤立サロゲートは U+FFFD に置き換えて保存する。
     tombstone = {
       content: replaceLoneSurrogates(tombstone.content),
       digest: replaceLoneSurrogates(tombstone.digest),
@@ -2429,11 +2280,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     assertStorableMemoryEvent(event);
     assertCloneableMemoryEvent(event);
-    // ADR 0466: イベントが指す記憶は `ctx` のテナントの行（墓石を書く前に確かめる）。
+    // イベントが指す記憶は `ctx` のテナントの行（墓石を書く前に確かめる）。
     this.assertEventTargetOwn(ctx, event.memoryId, [id]);
-    // Issue #1237: `purgedAt` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
-    // 2回読んで別の値になることがないよう、ここで一度だけ決める（`@mnemora/postgres` と同じ規律）。
-    // Issue #1731: 呼び手の `event.at` を `purgedAt` と共有しない（#1120、書き込む時点の複製）。
+    // `purgedAt` と `memory_events.at` を同じ値にする: 省略時も壁時計を2回読んで別の値にならないよう、一度だけ決める。呼び手の `event.at` と共有しない。
     const at = event.at === undefined ? new Date() : snapshot(event.at);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
@@ -2443,7 +2292,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     memory.purgedAt = at;
     memory.updatedAt = new Date();
 
-    // ADR 0375 決定2: label の紐付けを外し、proposed な label の proposedCount を減らす。
+    // label の紐付けを外し、proposed な label の proposedCount を減らす。
     const linkKey = this.memoryLabelKey(ctx.tenantId, id);
     const linkedLabelNames = this.memoryLabels.get(linkKey);
     if (linkedLabelNames !== undefined) {
@@ -2460,9 +2309,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.memoryLabels.delete(linkKey);
     }
 
-    // ADR 0375 決定3: このテナントの recalls.index_band の digestBand から、この
-    // memoryId のエントリを見つけてトゥームストーンへ書き換える（`recalls.query` は
-    // 触らない——`memoryId` で特定できないため、決定4）。
+    // このテナントの `recalls.index_band` の digestBand から、この memoryId のエントリをトゥームストーンへ書き換える。`recalls.query` は `memoryId` で特定できないので触らない。
     for (const row of this.recalls.values()) {
       if (row.tenantId !== ctx.tenantId) continue;
       const digestBand = row.indexBand?.digestBand;
@@ -2484,12 +2331,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * [ADR 0437](../../../../docs/decisions/0437-helpers-params-subject-ids-repurge.md) 決定3:
-   * `packages/postgres` の `scrubPurged` と同じ契約。`forgotten` かつ `purgedAt` が非 `null` の
-   * 行だけを対象に、`tags`・`attributes`・`claimKey` を空にし、label の紐付けを外して
-   * `proposedCount` を外した本数だけ減らす。残骸の無い行は書き換えない（`updatedAt` も動かさない）。
-   * ADR 0512: `recalls.indexBand.digestBand` の、この行のエントリの digest も行の `digest` へ伏せる。
-   * in-memory は同期区間で完結する（`await` を挟まない）ので、同時呼び出しでも二重には数えない。
+   * `packages/postgres` の `scrubPurged` と同じ契約。`forgotten` かつ `purgedAt` が非 `null` の行だけを対象に、`tags`・`attributes`・`claimKey` を空にし、label の紐付けを外して `proposedCount` を外した本数だけ減らす。
+   * 残骸の無い行は書き換えない（`updatedAt` も動かさない）。`recalls.indexBand.digestBand` の、この行のエントリの digest も行の `digest` へ伏せる。同期区間で完結するので、同時呼び出しでも二重には数えない。
    */
   async scrubPurged(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
     assertWellFormedCtx(ctx);
@@ -2524,8 +2367,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         }
         this.memoryLabels.delete(linkKey);
       }
-      // ADR 0512: このテナントの recalls.indexBand.digestBand の、この行のエントリを、行の digest
-      // （トゥームストーン）へ伏せる（truncated は落とす。同じ digest のエントリは書き換えない）。
+      // このテナントの `recalls.indexBand.digestBand` の、この行のエントリを、行の digest（トゥームストーン）へ伏せる（truncated は落とす。同じ digest のエントリは書き換えない）。
       for (const row of this.recalls.values()) {
         if (row.tenantId !== ctx.tenantId) continue;
         const digestBand = row.indexBand?.digestBand;
@@ -2545,13 +2387,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #197 / ADR 0134: 両側とも `status === 'active'` の CAS を課したうえで、
-   * `status='contested'`・`contestedWithId` を相互に設定する。**in-memory にトランザクションは
-   * 無い**——「まだ何も書いていない」ことでロールバックを模す
-   * （`supersedeWithNewMemories`/`updateStatusWithEvent` と同じ「まだ何も書いていないうちに
-   * 判定する」作法）。存在確認・CAS 判定の両方を先に済ませ、どちらか一方でも失敗したら
-   * この時点で throw する——`first`/`second` のどちらの Map エントリもまだ書き換えていない。
-   *
+   * 両側とも `status === 'active'` の CAS を課したうえで、`status='contested'`・`contestedWithId` を相互に設定する。
+   * in-memory にトランザクションは無いので、存在確認・CAS 判定の両方を先に済ませ、どちらか一方でも失敗したら何も書き換えずに throw して、ロールバックを模す。
    * CAS の失敗（どちらかが `"active"` でない）は {@link MemoryStatusConflictError}。
    */
   async markContestedPair(
@@ -2585,7 +2422,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryEvent(second.event);
     assertCloneableMemoryEvent(first.event);
     assertCloneableMemoryEvent(second.event);
-    // ADR 0466: 2つのイベントが指す記憶は、`ctx` のテナントの行（この呼び出しで更新する2行を含む）。
+    // 2つのイベントが指す記憶は、`ctx` のテナントの行（この呼び出しで更新する2行を含む）。
     this.assertEventTargetOwn(ctx, first.event.memoryId, [first.id, second.id]);
     this.assertEventTargetOwn(ctx, second.event.memoryId, [first.id, second.id]);
     firstMemory.status = "contested";
@@ -2607,15 +2444,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #197 / ADR 0150: `markContestedPair` の解決側。両側とも `status === 'contested'`
-   * かつ相互参照が成立していることを CAS で課したうえで、`contestedWithId` を両側とも
-   * `null` に戻し、呼び出し側が指定した `status`（`'active'`/`'superseded'`）へ更新する。
-   * **in-memory にトランザクションは無い**——`markContestedPair` と同じ「まだ何も書いて
-   * いないうちに判定する」作法（存在確認・CAS 判定の両方を先に済ませ、どちらか一方でも
-   * 失敗したらこの時点で throw する。`first`/`second` のどちらの Map エントリもまだ
-   * 書き換えていない）。
-   *
-   * CAS の失敗（どちらかが `"contested"` でない・相互参照が成り立っていない）は {@link MemoryStatusConflictError}。
+   * `markContestedPair` の解決側。両側とも `status === 'contested'` かつ相互参照が成立していることを CAS で課したうえで、`contestedWithId` を両側とも `null` に戻し、指定された `status`（`'active'`/`'superseded'`）へ更新する。
+   * `markContestedPair` と同じく、何も書き換える前に判定する。CAS の失敗（どちらかが `"contested"` でない・相互参照が成り立っていない）は {@link MemoryStatusConflictError}。
    */
   async resolveContestedPair(
     ctx: Ctx,
@@ -2638,10 +2468,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (first.id === second.id) {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
-    // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
+    // 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
     assertResolvedStatus("resolveContestedPair", "first", first.status);
     assertResolvedStatus("resolveContestedPair", "second", second.status);
-    // ADR 0503: 置き換えた側を伴わない superseded・自己置換・active への supersededById・互いを指す循環は、書く前に断る。
+    // 置き換えた側を伴わない superseded・自己置換・active への supersededById・互いを指す循環は、書く前に断る。
     assertSupersededByShape(
       "resolveContestedPair",
       "first",
@@ -2678,10 +2508,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (secondMemory.status !== "contested" || secondMemory.contestedWithId !== first.id) {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
-    // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること（`PostgresMemoryStore` は UPDATE の中で確かめる）。
+    // `supersededById` は `ctx` のテナントの Memory であること（`PostgresMemoryStore` は UPDATE の中で確かめる）。
     this.assertOwnMemoryRef(ctx, first.supersededById);
     this.assertOwnMemoryRef(ctx, second.supersededById);
-    // ADR 0515: 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ）。対の相手を指すのは断らない。
+    // 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ）。対の相手を指すのは断らない。
     for (const [field, side] of [
       ["first", first],
       ["second", second],
