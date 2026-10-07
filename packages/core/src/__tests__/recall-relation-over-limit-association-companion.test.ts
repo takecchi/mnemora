@@ -237,4 +237,44 @@ describe("recall() — 群の上限で切られた候補が段3.5 の必須同�
       ]);
     },
   );
+
+  it("(f) 同じ群で切られた2件が両方とも同伴取得で戻ったら、2件ぶん差し引いて札ごと外す", async () => {
+    const { runtime, stores } = buildRuntime();
+    const o = await create(stores, [1, 0, 0], { digest: "OOOO" });
+    const g1 = await create(stores, [0.1, 0.1, 0.9], {
+      digest: "G1G1",
+      validFrom: new Date("2026-01-03"),
+    });
+    const g2 = await create(stores, [0.1, 0.1, 0.9], {
+      digest: "G2G2",
+      validFrom: new Date("2026-01-02"),
+    });
+    await create(stores, [0.9, 0.1, 0.1], { digest: "ANCH" });
+    const p1 = await create(stores, [0.85, 0.15, 0.1], { digest: "P1P1" });
+    const p2 = await create(stores, [0.84, 0.16, 0.1], { digest: "P2P2" });
+    const q1 = await create(stores, [0.1, 0.1, 0.9], {
+      digest: "Q1Q1",
+      validFrom: new Date("2026-01-01"),
+    });
+    const q2 = await create(stores, [0.1, 0.1, 0.9], {
+      digest: "Q2Q2",
+      validFrom: new Date("2025-12-31"),
+    });
+    await runtime.markContestedGroup!(ctx, [o.id, g1.id, g2.id]);
+    await runtime.markContested(ctx, p1.id, q1.id);
+    await runtime.markContested(ctx, p2.id, q2.id);
+    await stores.relationStore.link(ctx, "contradicts", o.id, q1.id);
+    await stores.relationStore.link(ctx, "contradicts", o.id, q2.id);
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 2,
+      relationMaxCount: 2,
+    });
+
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(q1.id);
+    expect(ids).toContain(q2.id);
+    expect(relationOmissions(result)).toEqual([]);
+  });
 });
