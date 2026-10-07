@@ -6,33 +6,7 @@ import {
   formatAnswerQualityBanner,
 } from "../answer-format.js";
 
-/**
- * `formatAnswerQualityBanner` の**陽性対照**（Issue #577 / ADR 0260 の増分）。
- *
- * ## 🔴 なぜこの歯が要るのか —— 「消えた」と「廃止した」を区別する
- *
- * ADR 0260 の決定により、`answer` の**既定の道**（env 無指定・鍵なし）は
- * `deterministic` から `recorded` へ倒れる。⟹ `answerQualityClaimable` が
- * `false` → `true` に反転し、⛔⛔⛔「回答品質は測っていない」バナーが
- * **既定の画面から消える**。
- *
- * ⚠ **既定の道でバナーが出ないことだけを歯にすると、それは「バナーを廃止した」
- * でも同じ結果になる。** ⟹ 後から読む人に、次の2つを区別する手段が無い:
- *
- * | | 既定の道でバナーが出ない |
- * |---|---|
- * | **実態が `recorded` に変わり、バナーの条件が偽になった**（正しい） | ⭕ |
- * | **バナーそのものを消した**（誤り） | ⭕ |
- *
- * ⟹ ⭐ **だから「`deterministic` では依然としてバナーが出る」を別に固定する。**
- * この歯が緑である限り、バナーは生きている——既定の画面から消えたのは、
- * 条件が偽になったからだと言える。
- *
- * ⛔ **`qualityClaimable` の真偽値だけを見る歯では足りない。** 画面に出る側
- * （この関数が返す文字列そのもの）まで通っていることを確かめる必要がある
- * ——ADR 0051 の「⚠『黙って別のものへ倒れない』は、表示層まで及ばないと
- * 意味が無い」と同じ線である。
- */
+// 既定の道でバナーが出ないことだけを歯にすると「バナーを廃止した」と区別できない。deterministic では出ることを別に固定する。
 describe("formatAnswerQualityBanner — 陽性対照（バナーは廃止されていない）", () => {
   it("⭐ deterministic では ⛔⛔⛔ バナーが出る（これが偽になったら、バナーが壊れている）", () => {
     const banner = formatAnswerQualityBanner("deterministic");
@@ -51,14 +25,6 @@ describe("formatAnswerQualityBanner — 陽性対照（バナーは廃止され�
   });
 });
 
-/**
- * `formatAnswerInputReduction` の見出しと値の向き。
- * 【実測 2026-09-27、空の DB で `run answer`】以前は「入力量の削減率 … chars -26.3%
- * （合計 3924 → 4956）」と出ていた——値は定義（`(naive - mnemora) / naive`）どおりだが、
- * mnemora のほうが26%多いのに「削減率 -26.3%」と読めるので、「26%削った」と読み違えやすい。
- * ⟹ 見出しに差の向き（mnemora − 全文。負なら mnemora が少ない）を書き、値にも言葉を添える。
- * どちらの向きでも正しく読めることを見る。
- */
 describe("formatAnswerInputReduction — 差の向きを読み違えない", () => {
   const results = (naiveChars: number, mnemoraChars: number) =>
     [
@@ -95,13 +61,6 @@ describe("formatAnswerInputReduction — 差の向きを読み違えない", () 
   });
 });
 
-/**
- * `answer` の導入文。ADR 0260 により、記録の再生（`recorded`）と実 API（`openai`）は
- * 品質を主張してよいモードで、⛔⛔⛔ バナーも出ない（上の陽性対照）。
- * 【実測 2026-09-27、鍵なしの既定の道＝`recorded`】以前の導入文は、モードに関係なく
- * 「これは配線の検査であり、回答品質は測っていない」と言いながら、表には ✅/❌ の判定が
- * 並んでいた——画面の中で言っていることが食い違っていた。⟹ モードで出し分ける。
- */
 describe("formatAnswerIntro — 品質を主張できるかで出し分ける", () => {
   it("deterministic では「配線の検査であり、回答品質は測っていない」と言う", () => {
     const text = formatAnswerIntro("deterministic");
@@ -119,8 +78,6 @@ describe("formatAnswerIntro — 品質を主張できるかで出し分ける", 
   );
 });
 
-// Issue #1776 の #699 のコメント（ADR 0665）: `formatAnswerContentPreservation` を
-// `must-abstain` 入りの結果で見る歯が無く、分母に must-abstain を含める変異が緑だった。
 describe("formatAnswerContentPreservation: 分母は must-abstain 類を除いた件数（#699）", () => {
   const path = (applicable: boolean, preserved: boolean) =>
     ({ contentPreservation: { applicable, preserved, matchedAcceptTerms: [] } }) as never;
