@@ -683,5 +683,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0686](./0686-merged-0930-front-tail-c-recheck-teeth-1457-1546.md) | 09/30 マージの前半の残り（C 群の #1457・#1477・#1530・#1531・#1546）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0687](./0687-merged-0930-front-tail-d-recheck-teeth-1459-1464.md) | 09/30 マージの前半の残り（D 群の #1459・#1464）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0690](./0690-merged-0916-recheck-teeth-core-recall-gates.md) | 09/16 にマージされた G2（core の recall ゲート・排他・型）12本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
+| [0692](./0692-merged-0916-recheck-teeth-postgres-tiebreak-provenance-check-embedding-analyze.md) | 09/16 にマージされた G4（postgres の tie-break・provenance の CHECK・埋め込みの ANALYZE）3本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->
