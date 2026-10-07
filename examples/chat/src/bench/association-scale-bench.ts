@@ -1,108 +1,16 @@
 #!/usr/bin/env node
 /**
- * `association-scale` ベンチ（`pnpm --filter @mnemora/example-chat run association-scale-bench`）。
+ * `association-scale` ベンチ。連想枠を10万行級で測る道具で、測ったことの全体像は ADR 0332 が記録する。
+ * 測定であり判定ではない。exit code は結果で変えない。
  *
- * [Issue #337](https://github.com/takecchi/mnemora/issues/337)「連想枠（段3.5、ADR 0151）を
- * 既定 on にするかを10万行級で測ってから判断する」の測定本体（段1: 62件の陽性対照 +
- * 1万行、段2: 10万行の配置(A)/(B)、反復(R)）。**測ったことの全体像・オーナーが判断する
- * ための材料は [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md)
- * にまとめてある——このファイルは道具、ADR 0332 が記録。**
+ * (A) は arm ごとに独立 ingest するので、`maxCount` の純粋比較にならない（`memory_id`・`recorded_at` が arm ごとに違い、
+ * 同点の tie-break や HNSW 構築の非決定性が混ざりうる）。(R) は単一 ingest に4 arm を当てるので純粋比較になる。
  *
- * ## これは何を測るか
+ * 段ごとの anchor 位置は (a) raw と (c) actual の2段だけ。(b) passed は公開 API から正確に取り出せず、測っていない。
  *
- * arm は4つ——`off`（連想枠なし）/ `on-3` / `on-5` / `on-10`（`maxCount` だけを振り、
- * `anchorCount`・`limit` は `packages/core` の既定のまま）。各 arm・各 `hnsw.ef_search`
- * （40/120）について:
- *
- * - **到達**: `ASSOCIATION_PROBES`（12件、`../association-probe-set.js`）ごとに、
- *   gold が `retrievedVia === "association"` で返ったか。
- * - **memoryChars**: `RecallResult.usage.chars`。`off` 比の増分%。
- * - **段3.5の追加レイテンシ**: `recall()` の壁時計を `off` と比べる（`MNEMORA_ASSOC_SCALE_LATENCY_REPEAT`
- *   回反復し中央値を取る）。加えて、`VectorStore` の spy が計測した「段3.5 由来の DB 呼び出し
- *   （2回目以降の `search()` + `getVectors()`）に使った ms の合計」を、段3.5**だけ**の時間の
- *   近似値として別に出す（CPU 内の処理時間は含まない下限——厳密な内訳は
- *   `packages/core` を変更しないと取れない）。
- *
- * ## 移植元との違い — `anchorPool` に依存しない
- *
- * 閉じた PR #723 の枝（commit `2675576`）の
- * `examples/chat/src/bench/association-anchor-pool-scale-bench.ts` を土台にしたが、
- * その道具は main に無い `RecallAssociationQuery.anchorPool`（ADR 0308、提案のまま・
- * 未採用）に依存していた。本ベンチは `anchorPool` を一切使わない。
- *
- * **段ごとの anchor 位置は (a) raw と (c) actual の2段だけ** ——元の4段
- * （raw / passed / withinLimit / actual anchor）のうち **(b) passed（limit の外・
- * kPrime の内、閾値を通った全候補）は測っていない**。`anchorPool: "passed"` の
- * spy トリック無しにこの集合だけを公開 API から正確に取り出す経路が無いため
- * （`partitionByThreshold`/`defaultScoringStrategy` は公開 export だが、`recall-runtime.ts`
- * 内部の `decayScoringExtras` 相当を含めて完全に再現するのはこのベンチの射程外と判断した
- * ——`docs/autonomy.md`「やりすぎない」）。(c) は `withinLimit` と等価
- * （`off` の実際の `recall()` 結果に anchor が `ann`/`lexical` で載っているか）であり、
- * 元ベンチの `cWithinLimit` と同じ定義。**確かめていないこと**として明記する。
- *
- * ## 埋め込みキャッシュ（Issue #337 段1の依頼）
- *
- * `./embedding-cache.js` の `FileEmbeddingCache`/`CachingEmbeddingProvider` で、
- * テキスト→ベクトル（`local` / ruri-v3-30m の実 ONNX 推論）をファイルにキャッシュし、
- * 全 arm で共有する。詳細はそちらの docstring。
- *
- * ## 配置 — (A) / (B) / (R)（既定 `MNEMORA_ASSOC_SCALE_MODE`）
- *
- * - **(A) 「きれいな比較」**（既定、`MNEMORA_ASSOC_SCALE_MODE` 省略時）: scale ごとに、
- *   arm の数だけ `TRUNCATE` → 同じテナント（`scale-assoc`）へ ingest → 測定、を
- *   繰り返す。4回の独立した ingest が**同じ埋め込みキャッシュ**を共有するので、
- *   DB へ実際に入った埋め込みが arm 間でビット単位（pgvector の float4 丸め後）で
- *   一致するはずである——`hashArmEmbeddings()` で実際に確かめ、4 arm のハッシュが
- *   一致するかを結果に出す。**⚠ (A) は arm ごとに独立 ingest するため、`maxCount` の
- *   純粋比較にはならない**——`memory_id`（ingest のたびにランダムな UUID）・
- *   `recorded_at`（wall-clock）が arm ごとに違い、pgvector の同点 tie-break や
- *   HNSW 索引構築の非決定性を経由して、`maxCount` 以外の要因が結果に混ざりうる
- *   （ADR 0332 実測、10万行では確認できなかったが1万行で確認された）。
- * - **(B) 「4 arm を4テナントとして同じ表に並べる」**（[#363 の閉じコメント](https://github.com/takecchi/mnemora/issues/363#issuecomment-5806513012)・
- *   #671「同じベクトル・relaxed_order」の確認用、`MNEMORA_ASSOC_SCALE_MODE=B`）:
- *   `runModeB()`。(A) と同じく4テナントはそれぞれ独立 ingest——`maxCount` の純粋比較
- *   にはならない点は (A) と同じ。
- * - **(R) 「反復」**（`MNEMORA_ASSOC_SCALE_MODE=R`）: `TRUNCATE` は最初の1回だけ、
- *   単一の ingest に対して4 arm 全部を測る——`maxCount` の純粋比較になる（`off`/
- *   `on-3`/`on-5`/`on-10` が全く同じ物理行を見る）。`association-scale-investigate.ts`
- *   の「単一 ingest」設計を、本ベンチの計測一式（memoryChars・レイテンシ・
- *   段3.5DBms・EXPLAIN・ビット同一性）に載せて再実装したもの。
- *
- * 測った結果・(A)/(B)/(R) の食い違いから何が言えるか・言えないかは
- * [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md) 参照。
- *
- * ## 実行方法
- *
- * ```
- * DATABASE_URL=postgresql://worker@127.0.0.1:55491/mnemora_test \
- * MNEMORA_EMBEDDING=local \
- * MNEMORA_LLM=deterministic \
- * MNEMORA_ASSOC_SCALE_SCALES=62,10000 \
- * MNEMORA_ASSOC_SCALE_EF_SEARCH=40,120 \
- * MNEMORA_ASSOC_SCALE_EMBED_CACHE_DIR=/tmp/mgr-fac332f3/embcache \
- * pnpm --filter @mnemora/example-chat run association-scale-bench
- * ```
- *
- * ⚠ **`MNEMORA_LLM=deterministic` と `MNEMORA_EMBEDDING=local` は両方省略できない**
- * ——`main()` の最初の行（`requireGatesOrThrow()`）が、**どんな provider も構築する前に**
- * `selectLLMMode`/`selectEmbeddingMode`（文字列レベルの判定、`../providers.js`。
- * provider のインスタンスを1つも作らない）で両方を検査し、どちらかが違えば例外で落ちる。
- *
- * この器では `OPENAI_API_KEY` が既に環境に在り(他用途)、`MNEMORA_LLM` を明示しないと
- * `selectProviderMode`(`providers.ts`)が「キー在り ⟹ openai」に倒れ、`observe()`
- * の抽出が黙って実 OpenAI API を叩く——【実測】1呼び出し ~1.5〜2s(cache 済みの
- * `local` embedding 単体なら観測は ~10ms/呼び出し)、かつ実課金。
- *
- * `MNEMORA_EMBEDDING=local` を省いた場合は、**さらに手前**で穴があった
- * ——【実測 2026-09-25、ADR 0332 追記 A.8】`main()` 内で LLM だけを検査していた旧版は、
- * その検査より前に `precomputeEmbeddingCache` が `realEmbedding`（`OPENAI_API_KEY` が
- * 在れば `OpenAIEmbeddingProvider`）へ直接 `embed()` を呼び、実 OpenAI API を叩いていた。
- * `requireGatesOrThrow()` は provider を作る前の文字列検査なので、この穴を塞ぐ
- * （`association-scale-nondeterminism.ts` と同じ形）。
- *
- * `MNEMORA_ASSOC_SCALE_JSON` を指定すると機械可読な結果も書き出す。
- * ⛔ **これは測定であり判定ではない。** exit code は結果で変えない
- * （`lexical-tie-density-bench.ts` / `packages/postgres/src/bench/scale-bench.ts` と同じ規律）。
+ * `MNEMORA_LLM=deterministic` と `MNEMORA_EMBEDDING=local` は両方省略できない。`OPENAI_API_KEY` が環境に在ると、
+ * 省略した場合に抽出や `embed()` が黙って実 OpenAI API を叩き、課金される。`main()` の最初の `requireGatesOrThrow()` が
+ * provider を構築する前に文字列だけで検査して落とす。
  */
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -148,23 +56,7 @@ import {
   precomputeEmbeddingCache,
 } from "./embedding-cache.js";
 
-// ---------------------------------------------------------------------------
-// 歯 —— 何よりも先に置く（実 API を絶対に叩かないため）。
-//
-// ⚠ 【実測 2026-09-25、ADR 0332 追記 A.8】旧版はここが無く、LLM だけを
-// `main()` の途中（`createProviders` の後）で検査していた。`MNEMORA_EMBEDDING`
-// を省略した場合、その検査より前に `precomputeEmbeddingCache` が
-// `realEmbedding`（`OPENAI_API_KEY` が環境に在れば `OpenAIEmbeddingProvider`
-// になっている）へ直接 `embed()` を呼び、実 OpenAI API を叩いていた——
-// `association-scale-nondeterminism.ts` の `requireGatesOrThrow()` と同じ形で塞ぐ。
-// ---------------------------------------------------------------------------
-
-/**
- * provider を1つも構築する前に、環境変数の**文字列**だけで判定する
- * （`selectLLMMode`/`selectEmbeddingMode` は provider のインスタンスを作らない
- * 純関数——`../providers.ts` 参照）。ここを通らない限り、後続のどのコードも
- * 実行しない。
- */
+/** provider を構築する前に、環境変数の文字列だけで判定する。ここを通らない限り、後続のコードは実行しない（実 API を叩かないため）。 */
 function requireGatesOrThrow(): void {
   const llmMode = selectLLMMode(process.env);
   if (llmMode !== "deterministic") {
@@ -212,13 +104,6 @@ function parseIntEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-/**
- * 構成上ゼロ重複の filler（`association-anchor-pool-scale-bench.ts` の
- * `buildDistinctFiller` を踏襲）。`i` ごとに一意な文字列になる式なので、
- * どれだけ大きい `count` でも（10万でも）重複しない——「10万行の filler が
- * 移植元の生成器で重複なく作れるか」の可否そのものはこの式の構造が答えている
- * （実際に10万件生成して確かめる処理は本ベンチには無い。可否と見積もりは報告に書く）。
- */
 function buildDistinctFiller(count: number): { externalId: string; text: string }[] {
   const out: { externalId: string; text: string }[] = [];
   for (let i = 0; i < count; i += 1) {
@@ -230,35 +115,22 @@ function buildDistinctFiller(count: number): { externalId: string; text: string 
   return out;
 }
 
-// VectorStore spy は ./vector-store-spy.ts（Issue #1012 で切り出した）。
-
 interface InstrumentedHandle {
   runtime: Runtime;
   memoryStore: PostgresMemoryStore;
   spy: VectorStoreSpy;
   pool: PostgresClient["pool"];
   cachingEmbeddingProvider: CachingEmbeddingProvider;
-  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
-/**
- * `association-anchor-pool-scale-bench.ts` の `createInstrumentedRuntime` と同じ形
- * ——`VectorStore` を spy で包み、`EmbeddingProvider` を `CachingEmbeddingProvider` で包む。
- * どちらも `examples/chat` の中だけに閉じたラッパーであり、`packages/core`/
- * `packages/postgres` は一切変更していない。
- */
 async function createInstrumentedRuntime(
   databaseUrl: string,
   cache: FileEmbeddingCache,
 ): Promise<InstrumentedHandle> {
   const client = createPostgresClient(databaseUrl);
-  // `examples/chat/src/runtime-factory.ts` の `createExampleRuntime` と同じ穴・
-  // 同じ理由: `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に
-  // 失敗しうる処理が何段もある（`runMigrations`/embedding provider の種類検査/
-  // `registerEmbeddingSpace`）。呼び出し側は `close()` を `try`/`finally` で包むが、
-  // `await createInstrumentedRuntime(...)` 自体はその外にあるため、ここで reject
-  // すると handle を一度も受け取れず `close()` を呼びようがない。
+  // `createExampleRuntime` と同じ穴。`client` を作った後、`close()` を持つ handle を返す前に失敗しうる処理が続く。
+  // ここで reject すると呼び出し側は handle を受け取れず `close()` できないため、ここで閉じる。
   try {
     await runMigrations(client.pool);
 
@@ -302,7 +174,6 @@ async function createInstrumentedRuntime(
       close: () => closePostgresClient(client),
     };
   } catch (err) {
-    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
     await closePostgresClient(client).catch(() => {});
     throw err;
   }
@@ -324,11 +195,7 @@ async function truncateAll(pool: PostgresClient["pool"]): Promise<void> {
   `);
 }
 
-/**
- * `ALTER DATABASE ... SET hnsw.ef_search` は次に張る接続からしか効かない
- * （`postgres`/`pg` の一般的な挙動。`ALTER DATABASE ... SET` はセッション既定値を
- * 変えるだけ）ので、変更後は必ず新しい `Pool` を張り直す。
- */
+/** `ALTER DATABASE ... SET hnsw.ef_search` は次に張る接続からしか効かないので、変更後は必ず新しい `Pool` を張り直す。 */
 async function setEfSearchAndReconnect(
   databaseUrl: string,
   databaseName: string,
@@ -342,12 +209,7 @@ async function setEfSearchAndReconnect(
   return createInstrumentedRuntime(databaseUrl, cache);
 }
 
-// ---------------------------------------------------------------------------
-// ingest
-// ---------------------------------------------------------------------------
-
 interface CorpusTexts {
-  /** `buildAssociationProbeSetConversation()`(既定 62件の haystack)。 */
   base: { externalId: string; text: string; kind: string; probeId?: string }[];
   filler: { externalId: string; text: string }[];
 }
@@ -367,7 +229,6 @@ function buildCorpus(scale: number): CorpusTexts {
 interface IngestResult {
   anchorIds: Map<string, MemoryId>;
   goldIds: Map<string, MemoryId>;
-  /** externalId -> memoryId。ingest した全件(base + filler)。ビット同一性の検算に使う。 */
   memoryIdByExternalId: Map<string, MemoryId>;
   ingestSeconds: number;
   drainSeconds: number;
@@ -441,28 +302,10 @@ async function ingestCorpus(
   return { anchorIds, goldIds, memoryIdByExternalId, ingestSeconds, drainSeconds };
 }
 
-// ---------------------------------------------------------------------------
-// ビット同一性 — 「キャッシュのベクトルと、各armのDBに実際に入った埋め込みが
-// arm間でビット単位で同じであることを確かめる手段」(Issue #337 段1)
-// ---------------------------------------------------------------------------
-
-/** pgvector のテキスト表現("[1,2,3]")を `number[]` にパースする(`vector-store.ts` の逆変換と同じ形)。 */
 function parseVectorLiteral(literal: string): number[] {
   return literal.slice(1, -1).split(",").map(Number);
 }
 
-/**
- * このテナントの embedding を **externalId のソート順**（memory_id はランダムな
- * UUID で ingest のたびに振り直されるため、テナント横断で決定的な順序にならない
- * ——`vector-store.ts` の3段 tie-break の docstring と同じ理由）に並べ、Float64 として
- * 正規化して連結した sha256 を返す。
- *
- * DB に格納されている値は pgvector の `vector(dims)`＝float4 精度である（列型は
- * `packages/postgres/src/vector-space.ts` の `CREATE TABLE`）。ここで比較しているのは
- * **float4 に丸められた後の値**——`FileEmbeddingCache`(Float64)が保証しているのは
- * 「INSERT 直前の JS 配列が arm 間で同じ」ことだけであり(そちらの docstring 参照)、
- * この関数は「実際に Postgres に着地した後」まで確かめる。
- */
 async function hashArmEmbeddings(
   pool: PostgresClient["pool"],
   space: EmbeddingSpaceId,
@@ -498,16 +341,6 @@ async function hashArmEmbeddings(
   return { hash: hash.digest("hex"), rowCount };
 }
 
-// ---------------------------------------------------------------------------
-// EXPLAIN(ANALYZE) — 段1(query視点)/段3.5(anchor視点)、それぞれ同じ shape
-// (`ORDER BY embedding <=> $vector LIMIT kPrime`) を代表 1 probe のベクトルで撃つ。
-// 「段1の検索」と「段3.5の検索」は `recall-runtime.ts` の実装上 **同じ LIMIT(kPrime)**
-// を使う(段3.5はアンカーごとに `limit: kPrime` で `VectorStore.search` を呼ぶ——
-// `rankFetchCount`(`maxCount` 由来)は getVectors 側でしか効かない)。⟹ 2回撃つのは
-// 「違う shape を見るため」ではなく「実際に使われる2種類のクエリベクトル(query/anchor)
-// それぞれで HNSW が選ばれるかを、代表点で確かめるため」である。
-// ---------------------------------------------------------------------------
-
 interface ExplainCapture {
   label: string;
   limit: number;
@@ -520,14 +353,9 @@ function toVectorLiteral(vector: number[]): string {
 }
 
 /**
- * ADR 0284: 本番の `PostgresVectorStore.search()` は `SET LOCAL hnsw.iterative_scan
- * = relaxed_order` を**トランザクション内**で無条件に有効にする（`vector-store.ts`
- * の該当行）。この EXPLAIN 診断がそれを見ずに既定（`off`）のまま撃つと、実際に
- * `recall()` が発行するのとは**別の**プランを見てしまう——`SET LOCAL` は
- * トランザクション単位で効くため、`pool.query()`（呼ぶたびに別接続を借りうる）を
- * 素朴に複数回叩いても scope が繋がらない。ここでは `pool.connect()` で1本の
- * client を握り、`BEGIN`→`SET LOCAL`→`EXPLAIN`→`COMMIT` を同じ接続の上で行う
- * （`vector-store.ts` の `db.transaction()` と同じ規律を、生 SQL 側で踏襲する）。
+ * 本番の `PostgresVectorStore.search()` は `SET LOCAL hnsw.iterative_scan = relaxed_order` をトランザクション内で有効にする。
+ * これを見ずに撃つと `recall()` とは別のプランを見てしまう。`SET LOCAL` はトランザクション単位なので、
+ * `pool.connect()` で1本の client を握り、同じ接続で `BEGIN`→`SET LOCAL`→`EXPLAIN`→`COMMIT` を行う。
  */
 async function captureExplain(
   pool: PostgresClient["pool"],
@@ -554,9 +382,7 @@ async function captureExplain(
     );
     await client.query("COMMIT");
     const text = rows.map((r: { "QUERY PLAN": string }) => r["QUERY PLAN"]).join("\n");
-    // ⚠ ヒューリスティック(文字列一致)。**判定ではなく手掛かり**——
-    // 「機械には検出まで」(AGENTS.md)。最終判断は report に載せる生の EXPLAIN テキストで
-    // 人が確かめること。
+    // ヒューリスティック（文字列一致）。判定ではなく手掛かり。最終判断は report に載せる生の EXPLAIN テキストで人が確かめること。
     const hnswUsedHeuristic =
       /Index (Scan|Only Scan).*hnsw/i.test(text) || /idx_memory_embeddings_hnsw/i.test(text);
     return { label, limit, text, hnswUsedHeuristic };
@@ -565,22 +391,9 @@ async function captureExplain(
   }
 }
 
-// ---------------------------------------------------------------------------
-// arm 定義
-// ---------------------------------------------------------------------------
-
 interface ArmConfig {
   label: string;
-  /**
-   * `null` は明示的な off。**`undefined`（省略）ではない**——`packages/core` の
-   * 連想枠が既定 on になった（[ADR
-   * 0337](../../../../docs/decisions/0337-recall-association-default-on.md)。
-   * オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
-   * `association` キーを省略すると連想が既定で走ってしまうため、"off" arm を
-   * 「キーを渡さない」で作ると `packages/core` の既定に静かに乗っ取られる
-   * （実際にこのバグが在った——下の `measureArmAtEf` は以前
-   * `arm.association ? {...} : {}` で off を「渡さない」に変換していた）。
-   */
+  /** `null` は明示的な off。`undefined`（省略）にしない。`packages/core` の連想枠は既定 on なので、キーを渡さないと off arm が既定に乗っ取られる。 */
   association: RecallAssociationQuery | null;
 }
 
@@ -592,10 +405,6 @@ function buildArms(): ArmConfig[] {
     { label: "on-10", association: { maxCount: 10 } },
   ];
 }
-
-// ---------------------------------------------------------------------------
-// probe ごとの測定
-// ---------------------------------------------------------------------------
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -610,19 +419,14 @@ function indexOfMemory(memories: readonly { memoryId: MemoryId }[], id: MemoryId
 
 interface ProbeArmResult {
   probeId: string;
-  /** (a) raw ANN kPrime に probe自身のanchorが入っていたか(offのsearch spyから)。 */
   aRawAnchor: boolean;
-  /** (c) 実際に返った(ann/lexicalで)withinLimit相当にanchorが入っていたか。 */
   cWithinLimitAnchor: boolean;
-  /** (d) 連想が実際にgetVectorsへ渡したmemoryIdにanchorが入っていたか。offはnull。 */
   dActualAnchor: boolean | null;
   goldRank: number | null;
   goldReturned: boolean;
   goldRetrievedVia: "ann" | "lexical" | "mandatory_companion" | "association" | null;
   memoryChars: number;
-  /** recall() の壁時計(ms)、repeat回の中央値。 */
   latencyMedianMs: number;
-  /** 段3.5由来と見なすDB呼び出し(ms合計、最後のrepeat1回分)。offは0。 */
   stage3_5DbMs: number;
 }
 
@@ -683,10 +487,6 @@ async function measureProbeArm(
     stage3_5DbMs: lastStage35Ms,
   };
 }
-
-// ---------------------------------------------------------------------------
-// scale × ef × arm の1点
-// ---------------------------------------------------------------------------
 
 interface ArmEfReport {
   armLabel: string;
@@ -831,21 +631,6 @@ async function runScale(
   return { scale, precompute, arms: armReports, bitIdentity: { byArm: bitHashByArm, allSame } };
 }
 
-// ---------------------------------------------------------------------------
-// (B) 4 arm を4テナントとして同じ表に並べる。
-// ---------------------------------------------------------------------------
-
-/**
- * 設計 (B): `TRUNCATE` を挟まず、4 arm を4つの別テナント(`scale-assoc-<armLabel>`)として
- * 同じ物理テーブルへ ingest する。[#363 の閉じコメント](https://github.com/takecchi/mnemora/issues/363#issuecomment-5806513012)・
- * #671「同じベクトル・relaxed_order」——複数テナントが同じ表を共有する状況で
- * tie-break・索引選択が (A) と違わないかを確かめるための器。
- *
- * Issue #337 段2で10万行×4テナント(計40万行)を実際に走らせた。結果は
- * [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md) 参照
- * ——`Rows Removed by Filter` が実測でき、ADR 0284 の `relaxed_order` が
- * 他テナント混入を飛び越えて自テナントの候補で `LIMIT` を埋めていることを確認した。
- */
 async function runModeB(
   databaseUrl: string,
   databaseName: string,
@@ -868,7 +653,6 @@ async function runModeB(
   const armReports: ArmScaleReport[] = [];
   const bitHashByArm: Record<string, string> = {};
 
-  // 1回だけ TRUNCATE してから、4テナントぶんまとめて ingest する(truncate は arm 間で挟まない)。
   const truncHandle = await createInstrumentedRuntime(databaseUrl, cache);
   await truncateAll(truncHandle.pool);
   await truncHandle.close();
@@ -917,16 +701,6 @@ async function runModeB(
   const allSame = hashes.every((h) => h === hashes[0]);
   return { scale, precompute, arms: armReports, bitIdentity: { byArm: bitHashByArm, allSame } };
 }
-
-// ---------------------------------------------------------------------------
-// (R) 反復 — 単一 ingest に対して maxCount(off/on-3/on-5/on-10) だけを振る。
-// ADR 0332 §d が要求する「独立 ingest 間の揺れ」のサンプルをもう1つ取るための
-// mode（Issue #337 段2フォローアップ、マネージャー指示）。`association-scale
-// -investigate.ts` の「単一 ingest」設計を、本ベンチの計測一式
-// （memoryChars・レイテンシ・段3.5DBms・EXPLAIN・ビット同一性）に載せ替えたもの
-// ——投機スクリプトの再発明ではなく、同じ発見を本ベンチの計測フル装備で
-// 裏取りする位置づけ。
-// ---------------------------------------------------------------------------
 
 async function runModeR(
   databaseUrl: string,
@@ -984,9 +758,6 @@ async function runModeR(
     });
   }
 
-  // 単一 ingest なので、全 arm が物理的に同じ行を見ている——ハッシュは構造的に
-  // 一致する（(A)/(B) と違い「独立ハッシュを計算して突き合わせる」意味は無いが、
-  // 呼び出し側が同じ形で読めるよう同じ構造で埋める）。
   const bitHashByArm: Record<string, string> = {};
   for (const arm of arms) bitHashByArm[arm.label] = hash;
 
@@ -997,10 +768,6 @@ async function runModeR(
     bitIdentity: { byArm: bitHashByArm, allSame: true },
   };
 }
-
-// ---------------------------------------------------------------------------
-// レポート整形
-// ---------------------------------------------------------------------------
 
 function summarizeScale(report: ScaleReport): string {
   const lines: string[] = [];
@@ -1057,7 +824,6 @@ function summarizeScale(report: ScaleReport): string {
 }
 
 async function main(): Promise<void> {
-  // ⛔ 何よりも先に。provider を1つも作らない歯（ADR 0332 追記 A.8）。
   requireGatesOrThrow();
 
   const databaseUrl = requireDatabaseUrl();
@@ -1075,10 +841,6 @@ async function main(): Promise<void> {
   );
   console.log(`cacheDir=${cacheDir}`);
 
-  // `requireGatesOrThrow()` が文字列レベルで既に検査しているので、ここに来るのは
-  // 「文字列は local と名乗ったのに実際は違うインスタンスだった」という、それ自体が
-  // 壊れの証拠になるケースだけである。多層防御として残す
-  // （`association-scale-nondeterminism.ts` の `main()` と同じ形）。
   const { embeddingProvider: realEmbedding } = createProviders(process.env, {});
   if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
     throw new Error("association-scale-bench: realEmbedding が LocalEmbeddingProvider ではない。");
@@ -1115,7 +877,6 @@ async function main(): Promise<void> {
 
   cache.close();
 
-  // 後始末: ef_search をデータベース既定へ戻す。
   const cleanupHandle = await createInstrumentedRuntime(
     databaseUrl,
     new FileEmbeddingCache(cacheDir, realEmbedding.space),
