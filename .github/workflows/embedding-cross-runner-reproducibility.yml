@@ -1,38 +1,3 @@
-# 🔴🔴 ⛔ **この workflow は required status check ではない。** `.github/workflows/ci.yml`・
-# `.github/required-status-checks.json`・branch protection のどれにも触れていない
-# （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」節・ADR 0279 の対象外——required
-# check の一覧はこの workflow を持たない）。
-#
-# ## 何を測るか（Issue #565「採るとしたら何が要るか」の測定を、複数 runner へ広げる）
-#
-# `examples/chat` の `embedding-fingerprint` サブコマンド（固定入力3件に対して
-# `@mnemora/local-embedding` の `embed()` を呼ぶ）を、
-#
-# - **runner**（`CROSS_RUNNER_RUNNERS`、`scripts/cross-runner-embedding-fingerprint-lib.mjs`）
-#   × **numThreads**（`CROSS_RUNNER_NUM_THREADS`）× **rep**（`CROSS_RUNNER_REPS`、同一設定の
-#   反復——同じジョブ内で2回推論するのではなく、**別ジョブ＝別 VM の反復**）
-#
-# の全組み合わせ（24脚）で走らせ、比較ジョブが基準脚（`ubuntu-latest` /
-# `numThreads=4` / `rep=1`）に対する各脚の一致・不一致・比較できなかった、および
-# 群（同 arch 内 / arch 間 / numThreads 間 / 同条件 rep 間）ごとの要約を Job Summary へ残す。
-#
-# ⚠ **matrix の値（`runner:` / `numThreads:` / `rep:`）は
-# `scripts/cross-runner-embedding-fingerprint-lib.mjs` の `CROSS_RUNNER_RUNNERS` /
-# `CROSS_RUNNER_NUM_THREADS` / `CROSS_RUNNER_REPS` と二重管理である。** ずれたら
-# `scripts/__tests__/embedding-cross-runner-reproducibility-workflow-wiring.test.mjs` が
-# 赤くなる（`EMBEDDING_FINGERPRINT_JOBS` と ci.yml の関係と同じ形）。
-#
-# ⛔ **`ubuntu-22.04` / `ubuntu-22.04-arm` は非推奨（deprecation 開始 2026-09-17、完全終了
-# 2027-04-17。brownout は 2027-03-23〜2027-04-13 の予定——2026-09-25 現在は影響しない）。**
-# この measurement は一回性の観測であり、恒久的な CI ジョブではないため、期限切れ前の
-# runner を使うこと自体は問題にしない。ただし **2027年に入ってこの workflow を再実行する
-# 場合は、この2ラベルが生きているかを先に確認すること。**
-#
-# ⛔ **`onnxruntime-node`（`@huggingface/transformers` の依存）が linux/arm64 の CPU
-# バイナリを実際に同梱していることは、`npm pack onnxruntime-node@<version>` で
-# 手元で確認済み**（`bin/napi-v6/linux/arm64/onnxruntime_binding.node` /
-# `libonnxruntime.so.1` が実在する）——ARM runner を候補から外す理由には**ならない**。
-# 実際に動くかどうかは、この workflow 自身の ARM 脚が判定する。
 name: "embedding 出力のランナー間再現性を測る（測るだけ。門にはしない。Issue #565）"
 
 on:
@@ -112,8 +77,6 @@ jobs:
       - name: "この脚の指紋を成果物として残す(Issue #565)"
         # ⚠ **artifact 名は `crossRunnerArtifactName()`（cross-runner-embedding-fingerprint-lib.mjs）
         # と同じ形を、文字列展開でそのまま書いている。** ずれたら比較段が「artifact が無い」
-        # として扱う——`embedding-cross-runner-reproducibility-workflow-wiring.test.mjs` が
-        # この行と `crossRunnerArtifactName` の出力が一致することを確かめる。
         if: always()
         uses: actions/upload-artifact@v6
         with:
