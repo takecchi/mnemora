@@ -3,13 +3,8 @@ import { basename } from "node:path";
 import type { AnswerTrialsResult } from "./answer-trials.js";
 
 /**
- * Issue #705 完了条件2:「対照の材料の記憶集合が、比べたい記録（カセット）と同じであることを、
- * 器が確かめて表示する」——`answer-trials` の複数回の実行結果（JSON、`MNEMORA_ANSWER_TRIALS_JSON`
- * で書き出したもの）を突き合わせ、**カセットの sha256 かケースごとの材料指紋が一致しなければ
- * exit 1**、一致すれば並べて表示して exit 0 にする。
- *
- * ⛔ **指紋を見ずに通す実装は事故そのものである**（ADR 0295 追記2 の再発防止が Issue #705 の
- * 動機）。この module の中心はまさにその比較——変異試験(b)がここを狙う。
+ * `answer-trials` の複数回の実行結果を突き合わせ、カセットの sha256 かケースごとの材料指紋が一致しなければ exit 1 にする。
+ * 指紋を見ずに通す実装は事故そのもの（対照の材料の記憶集合が違うまま比べてしまう）。
  */
 
 export interface AnswerTrialsCompareInput {
@@ -19,7 +14,6 @@ export interface AnswerTrialsCompareInput {
 
 export interface FingerprintMismatchDetail {
   caseId: string;
-  /** ラベルごとの指紋。その入力にケースが無ければ `undefined`。 */
   fingerprintByLabel: Record<string, string | undefined>;
 }
 
@@ -31,10 +25,6 @@ export interface AnswerTrialsCompareResult {
   fingerprintMismatches: FingerprintMismatchDetail[];
 }
 
-/**
- * 2件以上の `answer-trials` 実行結果を突き合わせる。**カセットの sha256 全体か、
- * ケースごとの材料指紋（`fingerprint`）のどちらかが1件でもずれていれば `ok: false`。**
- */
 export function compareAnswerTrials(
   inputs: readonly AnswerTrialsCompareInput[],
 ): AnswerTrialsCompareResult {
@@ -58,7 +48,6 @@ export function compareAnswerTrials(
   const distinctShas = new Set(Object.values(cassetteShaByLabel));
   const cassetteMismatch = distinctShas.size > 1;
 
-  // caseId の和集合を、最初に現れた入力の順序で並べる。
   const caseIdOrder: string[] = [];
   const seen = new Set<string>();
   for (const input of inputs) {
@@ -92,11 +81,6 @@ export function compareAnswerTrials(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 表示
-// ---------------------------------------------------------------------------
-
-/** ずれた箇所を具体的に示す（exit 1 のときに画面へ出す）。 */
 export function formatCompareMismatchReport(compare: AnswerTrialsCompareResult): string {
   const lines: string[] = ["⛔ 比較できない——記憶集合が一致しない入力がある。"];
   if (compare.cassetteMismatch) {
@@ -131,7 +115,6 @@ function verdictCell(result: AnswerTrialsResult, caseId: string, renderName: str
   return `pass=${v.passCount}/fail=${v.failCount}/indet=${v.indeterminateCount}(n=${v.n})`;
 }
 
-/** 一致したときに画面へ出す、並べた表。 */
 export function formatCompareTable(inputs: readonly AnswerTrialsCompareInput[]): string {
   const lines: string[] = ["✅ 記憶集合は一致している（カセット・材料指紋とも同一）。", ""];
   const first = inputs[0];
@@ -152,10 +135,6 @@ export function formatCompareTable(inputs: readonly AnswerTrialsCompareInput[]):
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// ファイルから読む（CLI 用）
-// ---------------------------------------------------------------------------
-
 function readAnswerTrialsJson(path: string): AnswerTrialsResult {
   let raw: string;
   try {
@@ -170,11 +149,7 @@ function readAnswerTrialsJson(path: string): AnswerTrialsResult {
   return JSON.parse(raw) as AnswerTrialsResult;
 }
 
-/**
- * `answer-trials-compare` サブコマンドの本体。**副作用のある手（exit の判定そのもの）は
- * ここでは打たない**——呼び出し側（`cli.ts`）が戻り値の `ok` を見て `process.exitCode` を
- * 明示的に立てる（`docs/autonomy.md` §4.1 の作法）。
- */
+/** `answer-trials-compare` サブコマンドの本体。exit の判定は打たず、呼び出し側（`cli.ts`）が戻り値の `ok` を見て立てる。 */
 export function runAnswerTrialsCompareFromFiles(paths: readonly string[]): {
   ok: boolean;
   report: string;
