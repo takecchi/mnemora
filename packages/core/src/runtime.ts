@@ -7558,6 +7558,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         const lower = resolution.winnerId.toLowerCase();
         const candidates = [firstId, secondId].filter((id) => id.toLowerCase() === lower);
         const candidate = candidates.length === 1 ? candidates[0]! : undefined;
+        if (candidates.length === 0) await deps.memoryStore.get(ctx, resolution.winnerId);
         if (candidate !== undefined) {
           const [winner, side] = await Promise.all([
             deps.memoryStore.get(ctx, resolution.winnerId),
