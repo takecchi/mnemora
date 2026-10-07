@@ -5,16 +5,6 @@ import {
   decideRetrievalQualityShadowVerdict,
 } from "../retrieval-quality-shadow-verdict.js";
 
-/**
- * `decideRetrievalQualityShadowVerdict()` そのものの歯(Issue #572「段1」、ADR 0276)。
- *
- * **DB もカセットも要らない。**判定を純関数として切り出した理由がこれである
- * (`../retrieval-quality-shadow-verdict.ts` のファイル doc 参照)。
- *
- * **契約の両側を証明する**(AGENTS.md の変異試験の規律の適用)——
- * 「閾値を下回ったら fail」だけでなく「上回ったら pass」も検査する。
- * どちらか片方だけでは、ガードを外して無条件に通す/落とす過剰実装が緑で通ってしまう。
- */
 describe("decideRetrievalQualityShadowVerdict(Issue #572 段1)", () => {
   it("MRR・hit@1 のどちらも閾値以上なら pass、reasons は空", () => {
     const verdict = decideRetrievalQualityShadowVerdict({

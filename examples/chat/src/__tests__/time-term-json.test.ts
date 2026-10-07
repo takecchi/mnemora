@@ -2,14 +2,6 @@ import { describe, expect, it } from "vitest";
 import { buildTimeTermJson } from "../time-term-json.js";
 import type { PairMember, TimeTermArmReport, TimeProbeOutcome } from "../time-term-arm.js";
 
-/**
- * Issue #217: `time-term-json.ts` の出力口。DB もネットワークも要らない(純関数)。
- *
- * ⭐ **最重要の検査**: `report.probes` をそのまま写していること(集計を作り直さない)、
- * そして `similarity` が `undefined` の member を `null` へ写す(`ScoreBreakdown.similarity`
- * は ANN 経由でない候補には存在しない欄——JSON では `undefined` を書けないので `null` にする)。
- */
-
 function makeMember(overrides: Partial<PairMember> = {}): PairMember {
   return {
     rank: 1,

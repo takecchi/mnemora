@@ -2,15 +2,6 @@ import { describe, expect, it } from "vitest";
 import { diffGroupCandidates, diffProbeCandidates } from "../local-noise-candidate-diff.js";
 import type { CapturedProbeCandidates } from "../synthetic-score-noise.js";
 
-/**
- * Issue #109（06:58Z のコメント4番）の仮説——「dense で足した distractor が
- * `recall()` の返す候補に入らなければ、sparse/dense の結果は完全に一致する」——を
- * 確かめる/棄却するための突き合わせ（`local-noise-candidate-diff.ts`）に対する、
- * DB 非依存の純関数の歯。実際の `local` 埋め込み・本物の Postgres に対する実測は
- * `src/scripts/local-noise-arm-candidate-diff.ts` を手で実行して行う
- * （`synthetic-score-noise.ts`/`local-embedding-synthetic-noise-fp.ts` と同じ区別）。
- */
-
 function probe(
   probeId: string,
   candidates: { externalId: string | null; score: number }[],
@@ -56,8 +47,6 @@ describe("diffProbeCandidates", () => {
     const dense = probe("p1", [
       { externalId: "gold-p1", score: 0.9 },
       { externalId: "distractor-p1", score: 0.5 },
-      // sparse に無い候補(dense の filler が密なため recall() の枠に入ってきた)。
-      // だが gold(1位)・distractor(2位)より下(3位)なので、MRR/hit@1 には効かない。
       { externalId: "dense-filler-0007", score: 0.2 },
     ]);
 
@@ -75,7 +64,6 @@ describe("diffProbeCandidates", () => {
       { externalId: "distractor-p1", score: 0.5 },
     ]);
     const dense = probe("p1", [
-      // dense 固有の候補が gold より上位(1位)に割り込んでいる。
       { externalId: "dense-filler-0007", score: 0.95 },
       { externalId: "gold-p1", score: 0.9 },
       { externalId: "distractor-p1", score: 0.5 },
@@ -120,7 +108,6 @@ describe("diffProbeCandidates", () => {
 
     const diff = diffProbeCandidates(sparse, dense);
 
-    // null 同士は entriesEqual で一致扱い(externalId も score も等しい)。
     expect(diff.identical).toBe(true);
     expect(diff.denseOnlyIds).toEqual([]);
     expect(diff.sparseOnlyIds).toEqual([]);
@@ -173,7 +160,6 @@ describe("diffGroupCandidates", () => {
         { externalId: "distractor-p1", score: 0.5 },
       ]),
       probe("p2", [
-        // p2 だけ dense 固有の候補が gold より上位に来ている。
         { externalId: "dense-only", score: 0.95 },
         { externalId: "gold-p2", score: 0.9 },
         { externalId: "distractor-p2", score: 0.5 },

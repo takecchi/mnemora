@@ -14,20 +14,6 @@ import {
   parseManifest,
 } from "../migration-checksums-lib.mjs";
 
-/**
- * ⭐ **この歯が測っているもの**（ADR 0637）
- *
- * 出荷済みの `packages/postgres/migrations/*.sql` が、名簿
- * （`packages/postgres/migration-checksums.json`）の checksum と一致すること。
- * 台帳はファイル名だけで適用済みを判定するので、適用済みの編集は黙ってずれる。
- *
- * 赤にするもの: 書き換え・削除・名簿が読めない。
- * 赤にしないもの: 新しい migration の追加、改行（CRLF）と BOM の違いだけ。
- *
- * ⚠ 名簿に載っていない新しいファイルは固定されない（出すときに `--write` で足す運用）。
- * 足し忘れた間は、そのファイルの編集は見えない。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cli = join(repoRoot, "scripts/check-migration-checksums.mjs");
 const tmpRoots = [];
@@ -40,7 +26,6 @@ function runCli(root, ...extra) {
   return spawnSync(process.execPath, [cli, "--root", root, ...extra], { encoding: "utf8" });
 }
 
-/** 本物の migrations と名簿を、使い捨ての root にコピーする（本物は触らない）。 */
 function copyRepoFixture() {
   const root = mkdtempSync(join(tmpdir(), "mig-checksum-"));
   tmpRoots.push(root);

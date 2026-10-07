@@ -4,24 +4,6 @@ import type { NewMemory } from "../memory.js";
 import { defaultActivityDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.reinforce` の `opts.nowSeq`（`ReinforceOptions.nowSeq`、
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16）が、
- * `InMemoryMemoryStore.reinforce`/`PostgresMemoryStore.reinforce` と同じ意味論——
- * `halfLifeRecalls` を持つ Memory の活動時計側（`decayBaseSeq`/`decayFloorSeq`）を、
- * 壁時計側の強化と同じ強化イベントとして進める——を実際に守っていることを検査する歯。
- *
- * **`packages/testkit` の `memory-store-conformance.ts` の対象ではない。**
- * `FakeMemoryStore` は `packages/core` 自身の runtime テスト専用の別系統
- * （`fake-reinforce-monotonicity.test.ts` と同じ理由・同じ形）。
- *
- * Issue #768: 調査時、この Fake を `describeMemoryStoreConformance` へ一時的に通して
- * 見つけた食い違い（`reinforce` が `opts` 自体を受け取らず、活動時計のテナントでも
- * `reinforce` が忘却ゲートに対して完全な no-op になっていた）を、`runtime-fakes.ts` の
- * `reinforce` に足した `opts?.nowSeq` の分岐で塞いだ。その塞ぎが実際に効いていることを
- * ここで固定する。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
 
@@ -78,9 +60,7 @@ describe("FakeMemoryStore.reinforce の opts.nowSeq（ADR 0165 決めたこと16
   });
 
   it("⚠ 同じ at をもう一度渡すと、opts.nowSeq が進んでいても活動時計側を動かさない（2軸を同じ WHERE で守る、ADR 0048/0165。Issue #730）", async () => {
-    // これは修正ではなく、今の契約を固定する歯である。活動時計側の3列は壁時計の `at` と
-    // 同じ条件（狭義の `<`）で守られる——「seq が進んだから活動時計側だけ書く」実装は
-    // 2軸の起点をずらすので、この契約の下では誤り。
+    // 活動時計側の3列は壁時計の `at` と同じ条件（狭義の `<`）で守られる。「seq が進んだから活動時計側だけ書く」実装は2軸の起点をずらす。
     const { memoryStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(
       ctx,
@@ -93,9 +73,7 @@ describe("FakeMemoryStore.reinforce の opts.nowSeq（ADR 0165 決めたこと16
     const first = await memoryStore.reinforce(ctx, memory.id, at, { nowSeq: firstSeq });
     // 前提: 1回目は活動時計側も実際に進めている。
     expect(first.decayBaseSeq).toBe(firstSeq);
-    // ⚠ プリミティブへ即座に写し取る（`fake-reinforce-monotonicity.test.ts` と同じ理由
-    // ——in-memory 実装は行オブジェクトへの参照を返すので、保持すると同じオブジェクトを
-    // 2回見るだけになる）。
+    // プリミティブへ即座に写し取る: 行オブジェクトへの参照を保持すると、同じオブジェクトを2回見るだけになる。
     const firstDecayFloorSeq = first.decayFloorSeq;
     const firstUpdatedAt = first.updatedAt.getTime();
     // 書けば必ず updatedAt が変わる状況を作る。

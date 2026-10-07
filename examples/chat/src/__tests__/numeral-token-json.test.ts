@@ -5,12 +5,6 @@ import {
 } from "../numeral-token-json.js";
 import type { IdentifierArmReport } from "../identifier-arm.js";
 
-/**
- * ADR 0135: `numeral-token-json.ts` の出力口。DB もネットワークも要らない(純関数)。
- * `./identifier-json.test.ts` と同じ狙い——「重みを取得できなかった」と「測ったが
- * 値が悪かった」が型で区別され、前者に0や既定値を混ぜていないことを見る。
- */
-
 function minimalReport(
   haystackKind: "sparse" | "dense",
   overrides: Partial<IdentifierArmReport> = {},

@@ -10,11 +10,7 @@ import type { OutboxJobRecord } from "../outbox.js";
 import { createRuntime, type ContestedResolution, type Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0526: `tick` 経由の `consolidate`・`reflect` ジョブと、訂正の経路で負けた記憶がある状態での `reextract`（Fake）。同じ `EXPECTED` を
- * 実 Postgres と InMemory の側（`packages/postgres/src/__tests__/runtime-tick-jobs-and-correction-reextract-parity.postgres.test.ts`）が縛る。
- * 大文字の uuid の id は含めない。
- */
+// 大文字の uuid の id は含めない: 実装ごとの差が出るのはそこだけで、fixture の id は `mem-N` のため。同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。
 interface Env {
   runtime: Runtime;
   mem: MemoryStore;
@@ -39,12 +35,6 @@ interface Env {
 
 type Result = Record<string, unknown>;
 
-/**
- * ADR 0526（ADR 0524 の「測っていないこと」の実測）: (1) `tick` 経由の `consolidate`・`reflect` ジョブ（種・近傍の記憶を消した後、
- * `eraseTenant` の後、LLM の障害）、(2) 訂正の経路（`findCorrectionCandidates`＋`applyCorrection`）で負けて `superseded`（または `contested`）
- * になった記憶がある状態での `reextract` を、平らなデータにする。実装ごとの差が出るのは、操作の対象の id を大文字で渡したときだけで
- * （ADR 0446・0469。ここには含めない）、小文字の id では3者が一致した。core の Fake の歯と、InMemory・Postgres の歯が、同じ `EXPECTED` に突き合わせる。
- */
 async function scenario(env: Env): Promise<Result> {
   const { runtime, mem, ev, ob, rows, mk, enqueue, obs, setExtracted, setLlmThrows } = env;
   const out: Result = {};
@@ -141,7 +131,6 @@ async function scenario(env: Env): Promise<Result> {
       setLlmThrows(false);
     }
   }
-  // (2) 訂正の経路で負けた記憶と reextract
   const VARIANTS: Array<[string, (c: Memory, m: Memory) => ContestedResolution | undefined]> = [
     ["resolution supersede, winner=correcting", (c) => ({ kind: "supersede", winnerId: c.id })],
     ["resolution supersede, winner=corrected", (_c, m) => ({ kind: "supersede", winnerId: m.id })],
@@ -233,7 +222,6 @@ const llm = {
   completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
     if (llmThrows) throw new Error("simulated LLM outage");
     return req.schema.parse({
-      // reflect・consolidate・extract のどの schema にも通る、決め打ちの応答（LLM の実 API は使わない）
       outcome: "reflected",
       content: "CANNED merged",
       digest: "canned digest",

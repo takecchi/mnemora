@@ -2,13 +2,6 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * #955 の確かめ直し（#1774）。`cli-help.test.ts` の未知のサブコマンドは `no-such-command` だけで、
- * 既知のサブコマンド・使い方の指定に「似ているだけの名前」は見ていない。前方一致で `chat` などに
- * 流れる実装（`startsWith`）は全部の既存の歯をすり抜けた。似た名前も「本当に未知」なので、
- * 理由を stderr に出して exit 1（stdout には何も出さない）。DB には触れない。
- */
-
 const chatDir = fileURLToPath(new URL("../..", import.meta.url));
 const CLI_TIMEOUT_MS = 20_000;
 

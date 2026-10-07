@@ -4,11 +4,6 @@ import {
   shouldEnforceAdrIndexFreshness,
 } from "../adr-index-freshness-branch-lib.mjs";
 
-/**
- * 「いまの文脈で ADR 索引の鮮度検査を有効にするか」の判定（ADR 0137 / ADR 0192）。
- * 実際の環境変数・git は読まない——配線側は `adr-index-freshness.test.mjs` を見ること。
- */
-
 describe("shouldEnforceAdrIndexFreshness", () => {
   it("GITHUB_REF が refs/heads/main なら true（push イベント、ADR 0137 から）", () => {
     expect(shouldEnforceAdrIndexFreshness({ githubRef: "refs/heads/main" })).toBe(true);
@@ -36,7 +31,6 @@ describe("shouldEnforceAdrIndexFreshness", () => {
   });
 
   it("GITHUB_REF が在れば git のブランチ名より優先する", () => {
-    // detached HEAD 等で git 側が "HEAD" を返しても、CI の GITHUB_REF を信じる。
     expect(
       shouldEnforceAdrIndexFreshness({ githubRef: "refs/heads/main", gitBranch: "HEAD" }),
     ).toBe(true);

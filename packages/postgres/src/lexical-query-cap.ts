@@ -90,12 +90,15 @@ export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 export const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
 
 /**
- * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
- * 切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数
+ * （UTF-16 コードユニット）以下に切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。
+ *
+ * 境目が書記素の内側（サロゲートペア・結合文字・ZWJ の絵文字列）に当たるときは、その書記素の手前で
+ * 切る。上限は「以下に収める」約束（ADR 0092）で、ちょうど600とは約束していない。
  */
 export function capLexicalQueryTotalChars(query: string): string {
   return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
-    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    ? sliceAtGraphemeBoundary(query, LEXICAL_QUERY_MAX_TOTAL_CHARS)
     : query;
 }
 
@@ -205,3 +208,26 @@ export function capLexicalQueryWords(query: string): string {
  * （`jaTerm` の組み立てを参照）。
  */
 export const TRIGRAM_JAPANESE_QUERY_MAX_CHARS = 100;
+
+/**
+ * `@mnemora/core` の `sliceAtGraphemeBoundary`（`packages/core/src/text-truncation.ts`）の写し。testkit の fixture（`in-memory-lexical-store.ts`）にも同じ写しがある。
+ * core から import しないのは、core の内部関数で公開していないため（公開すると公開 API の snapshot が増える）。
+ * export しないのは、このパッケージの公開面に出さないため。切り詰めの規則を変えるときは3つとも見ること。
+ */
+function sliceAtGraphemeBoundary(text: string, maxLength: number): string {
+  const limit = Math.max(0, maxLength);
+  if (text.length <= limit) {
+    return text;
+  }
+  let end = 0;
+  for (const { segment, index } of graphemeSegmenter.segment(text)) {
+    const next = index + segment.length;
+    if (next > limit) {
+      break;
+    }
+    end = next;
+  }
+  return text.slice(0, end);
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });

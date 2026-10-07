@@ -1581,21 +1581,13 @@ async function runNumeralTokenProbesOpenAiArm(
 }
 
 /**
- * `association-probes` サブコマンド（連想枠、ADR 0151）。`identifier-probes` と同じ provider の組み合わせ（`deterministic` LLM + `local` 埋め込み）。
+ * arm ごとに埋め込み空間を分けない: 埋め込みのテーブルは arm 間で共有され、ベクトルはビット単位で同じになるが、
+ * 今の規模では HNSW が発火せず、規模が増えたときの取りこぼしは `relaxed_order`（ADR 0284）で塞がれている
+ * （「同じベクトル・10万行・4 arm」は測っていない）。次のときに見直す: (a) 1 arm が1万〜10万行に近づく、
+ * (b) #337 の測定で同じベクトルの取りこぼしが見える、(c) `search()` から `relaxed_order` が外れる、
+ * (d) CI のジョブがコンテナを使い回す形に変わる。
  *
- * 同じ会話を、別テナントへ4回 ingest する（`off` / `on(maxCount=3)` / `on(maxCount=5)` / `on(maxCount=10)`）。
- * arm 間の汚染を断つため、テナントは `buildArmTenantId` で必ず別々にする。
- *
- * テナントを分けても埋め込みのテーブルは分かれていない（Issue #363）。4つの arm の埋め込みは互いにビット単位で同じになる。
- * 構造を分ける案（arm ごとに別の埋め込み空間にする等）は今は要らない。HNSW の自然選択の規模ではこの機構が発火しておらず、
- * 規模が大きくなったときの故障は `search()` の `hnsw.iterative_scan = relaxed_order`（ADR 0284）で塞がれている。
- * ただし「同じベクトル・10万行・4 arm」の組み合わせは測っていない。
- * 次のいずれかが起きたときに開き直す。(a) 1 arm の行数が HNSW を自然に選ぶ規模（目安1万〜10万行）に近づく。
- * (b) #337 の測定で同じベクトルでの取りこぼしが見える。(c) `search()` から `relaxed_order` が外れる。
- * (d) CI の `association-probes` ジョブがコンテナを使い回す形に変わる。詳細は ADR 0158 の追記を見ること。
- *
- * `warmup()` を明示的に呼び、`ok: false` ならメトリクスを1つも出さずに打ち切る。`AssociationProbeRunJson` は4 arm・3 delta で確定しており、
- * 「一部だけ測れた」を表す枠が無い。失敗時は JSON も書かず、標準エラー出力と `process.exitCode` で伝える。
+ * `warmup()` が `ok: false` なら一部の arm だけ測って出さない: `AssociationProbeRunJson` に「一部だけ測れた」を表す枠が無い。
  */
 async function runAssociationProbes(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();

@@ -7,16 +7,7 @@ import {
   findNumeralTokenTopicKeywordViolations,
 } from "../numeral-token-probe-set.js";
 
-/**
- * 数詞・記号索引 probe set 自体の整合性(DB もネットワークも要らない)。ADR 0135。
- *
- * ⚠ **これらの歯は「引けること」を一切要求していない**(`japanese-name-probe-set.test.ts`
- * と同じ理由)。この集合は「文字種×共有前置長でmarginがどう分布するかを観測する」ために
- * 置いたものであり、順位を主張する歯を置くと実測が悪かったときに `main` が恒久的に
- * 赤くなる。ここで測るのは**集合の形**(件数・行列の被覆・重複・衝突・query の形)だけ。
- * 順位・margin は `numeral-token-probes` が値として記録し、基準値との差は Job Summary に
- * 出る——⛔ 門にはしない。
- */
+// 順位・margin を主張する歯は置かない。実測が悪いと main が恒久的に赤くなる。測るのは集合の形だけ（ADR 0135）。
 describe("numeral-token-probe-set", () => {
   it("文字種3×共有前置長3=9セルを、セルあたり2件(合計18件)で覆っている(ADR 0135 §5.1・§5.4)", () => {
     expect(NUMERAL_TOKEN_PROBES).toHaveLength(18);

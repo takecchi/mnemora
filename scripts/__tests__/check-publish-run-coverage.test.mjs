@@ -6,23 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/check-publish-run-coverage.mjs`（CLI 入口）の歯。
- *
- * ⚠ **`gh` を実際に呼ぶ経路（`--run <id>`）は、ここでは検査しない。** CI のこのジョブに
- * GitHub API への到達性・認証済み `gh` が在る保証が無く、それに依存する歯を書くと
- * 「歯が赤い」のか「この環境に `gh` が届いていない」のかが区別できなくなる
- * （`ci-green-check.test.mjs` と同じ理由）。
- *
- * 代わりに、CLI に `--log-file <path>` という経路を持たせてある——ログをファイルから
- * 読む形にすれば、`gh` を1度も呼ばずに**本物のスクリプトを子プロセスとして起動して**
- * 配線（引数解析・ログの読み込み・純関数への受け渡し・印字・終了コード）を検査できる。
- * `decide-publish-dry-run.test.mjs` が `$GITHUB_OUTPUT` をファイル経由でやり取りして
- * 本物の CLI を子プロセスで起動するのと同じ考え方。
- *
- * 判定そのもの（文言の分類・突き合わせ）は `publish-run-coverage-lib.test.mjs` が
- * 純関数として検査している。ここで見るのは「CLI がその通りに配線されているか」だけ。
- */
+/** `--run <id>`（`gh` を呼ぶ経路）は検査しない。CI のこのジョブに認証済み `gh` の保証が無く、歯が赤いのか `gh` が届いていないのかを区別できなくなる。 */
 
 const script = fileURLToPath(new URL("../check-publish-run-coverage.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -100,9 +84,6 @@ describe("scripts/check-publish-run-coverage.mjs（--log-file 経由。PUBLISH_T
   });
 
   it("run 35169553262 の実測どおり（先頭4本が飛ばし、後方2本が publish した）を再現すると exit 1、名指しできる", () => {
-    // ADR 0207「測ったこと2」の実測をそのまま再現する。ここでは並び順を仮定せず、
-    // PUBLISH_TARGETS の並びに沿って「先頭側を飛ばした・末尾側を publish した」形にする
-    // ——本数を PUBLISH_TARGETS.length から動的に決め、リテラルの6を書かない。
     const skippedCount = Math.max(1, PUBLISH_TARGETS.length - 2);
     const log = PUBLISH_TARGETS.map((t, i) => {
       if (i < skippedCount) {
@@ -117,7 +98,6 @@ describe("scripts/check-publish-run-coverage.mjs（--log-file 経由。PUBLISH_T
     const result = run(["--log-file", logPath]);
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("判定: fail");
-    // 飛ばした側の先頭のパッケージが名指しされていること
     expect(result.stdout).toContain(`${PUBLISH_TARGETS[0].name}: 飛ばした`);
   });
 
@@ -135,8 +115,6 @@ describe("scripts/check-publish-run-coverage.mjs（--log-file 経由。PUBLISH_T
     const logPath = writeLogFile(log);
     const result = run(["--log-file", logPath, "--json"]);
     expect(result.status).toBe(0);
-    // --json は JSON.stringify(..., null, 2) の整形出力を最後にまとめて出す
-    // ——先頭の "{" から末尾までを取り直してパースする。
     const jsonStart = result.stdout.indexOf("{");
     const parsed = JSON.parse(result.stdout.slice(jsonStart));
     expect(parsed.result.verdict).toBe("pass");

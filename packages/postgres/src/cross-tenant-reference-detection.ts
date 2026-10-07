@@ -1,46 +1,6 @@
 import type { Pool } from "pg";
 import { assertSafeSchemaName, qualify } from "./schema-namespace.js";
 
-/**
- * 参照の参照先が**別のテナントの行**を指している既存行を、**検出だけ**する（オーナー回答 374f6f88 の問27、
- * 全部推奨）。設計と理由は [ADR 0636](../../../docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)。
- *
- * ## 何を検出するか（4種）
- *
- * ADR 0439 が書き込み口に入口検査を入れた4種の参照である。どれも外部キーが `(id)` だけで
- * テナントを含まないので、検査の無かった時代の書き込みが、別のテナントの行を指す行を残しえた。
- *
- * | `kind` | 行 | 見るもの |
- * |---|---|---|
- * | `recall_usages` | `recall_usages` | 指す recall か memory の `tenant_id` が、行の `tenant_id` と違う |
- * | `memories.source_observation_id` | `memories` | 指す observation の `tenant_id` が、記憶の `tenant_id` と違う |
- * | `memories.contested_with_id` | `memories` | 指す memory の `tenant_id` が違う |
- * | `memories.superseded_by_id` | `memories` | 指す memory の `tenant_id` が違う |
- *
- * 検出 SQL は ADR 0439 の4本の SELECT と同じ条件である（`JOIN` なので、参照が NULL の行は対象外）。
- * `memory_events`・`memory_embeddings_<space>`（ADR 0436）・`memory_relations`（ADR 0398）は、
- * この関数の対象ではない。各 ADR の SQL を手で流すこと。
- *
- * ## しないこと
- *
- * - **何も書かない。** 食い違い行を消す・付け替える・NULL にするのは、利用者のデータの書き換えで、
- *   オーナーの判断である。この関数は一覧にするだけで、直さない。
- * - **複合外部キーを足さない。** 0行を確かめてから足す、の「確かめる」手段がこの関数である。
- * - **0件は「食い違いが無い」の証明ではなく、「この4種について、この呼び出しの時点の
- *   スナップショットに、食い違う行が無かった」である。** 呼び出しの後に書かれた行は見ない
- *   （入口検査が入っていれば、通常の書き込みでは増えない）。
- *
- * ## 費用と副作用
- *
- * `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` の中で、種類ごとに `count(*)` を1本、
- * `sampleLimit` が1以上ならサンプルの SELECT を1本（計8本以下）発行し、`ROLLBACK` する。
- * 読み取り専用のトランザクションなので、書き込みはサーバー側で拒まれる（この関数が誤って書こうとしても
- * 通らない）。取るロックは `ACCESS SHARE` だけで、書き込みを止めない。REPEATABLE READ なので、
- * 種類ごとの件数とサンプルは同じスナップショットを見る。
- * 費用は対象の表の `JOIN` 1回ぶん（`memories` は全行を、参照が NULL でない行について引く）。
- * **大きな表での所要時間は測っていない**。`statement_timeout` はこの関数では設定しない。
- */
-
 export const CROSS_TENANT_REFERENCE_KINDS = [
   "recall_usages",
   "memories.source_observation_id",
@@ -129,7 +89,6 @@ function memoryRefDetection(column: "superseded_by_id" | "contested_with_id"): D
   };
 }
 
-// ADR 0439 の4本の SELECT と同じ結合・同じ条件。JOIN なので、参照が NULL の行は入らない。
 const DETECTIONS: Record<CrossTenantReferenceKind, Detection> = {
   recall_usages: {
     from: (t) =>
@@ -148,8 +107,21 @@ const DETECTIONS: Record<CrossTenantReferenceKind, Detection> = {
 };
 
 /**
- * 4種の参照について、別のテナントの行を指している行を数え、先頭の `sampleLimit` 件を返す。
- * 読み取りだけ（上の doc）。食い違いが見つかっても投げない——どうするかは呼び出し側（オーナー）の判断である。
+ * 参照先が別のテナントの行を指している既存行を、検出だけする
+ * （[ADR 0636](../../../docs/decisions/0636-cross-tenant-reference-detection-is-read-only.md)）。
+ * 対象は ADR 0439 が書き込み口に入口検査を入れた4種（{@link CROSS_TENANT_REFERENCE_KINDS}）で、種類ごとに
+ * 食い違う行を数え、先頭の `sampleLimit` 件を返す。外部キーが `(id)` だけでテナントを含まないので、
+ * 検査の無かった時代の書き込みが食い違う行を残しうる。参照が NULL の行は対象外。
+ * `memory_events`・`memory_embeddings_<space>`・`memory_relations` は対象外（各 ADR の SQL を手で流す）。
+ *
+ * - 何も書かない。食い違い行の削除・付け替えは利用者のデータの書き換えで、オーナーの判断になる。
+ *   食い違いが見つかっても投げない。
+ * - 0件は「食い違いが無い」の証明ではなく、「この4種について、呼び出し時点のスナップショットに無かった」である。
+ * - `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` の中で種類ごとに `count(*)` とサンプルの SELECT を発行し、
+ *   `ROLLBACK` する。取るロックは `ACCESS SHARE` だけで、書き込みを止めない。
+ * - 費用は対象の表の `JOIN` 1回ぶん。大きな表での所要時間は測っていない。`statement_timeout` は設定しない。
+ *
+ * @throws RangeError `sampleLimit` が 0 以上 1000 以下の整数でないとき。
  */
 export async function findCrossTenantReferences(
   pool: Pool,

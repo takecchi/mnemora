@@ -6,18 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/apply-release-version.mjs` の歯（ADR 0070）。
- *
- * **なぜ CLI を子プロセスとして起動するか**: 判定そのものは
- * `scripts/__tests__/release-version.test.mjs` が純関数を直接測っている。
- * ここで測りたいのは**その先**——実際に `package.json` が書き換わること、
- * `$GITHUB_OUTPUT` に値が出ること、semver でない tag で EXIT=1 になることである。
- * これらは import では測れない（`process.exit` と実ファイルの書き込みを伴う）。
- *
- * **⚠ 本物の `packages/<pkg>/package.json` は書き換えない。**リポジトリを丸ごと
- * 一時ディレクトリへ複製し、そちらに対して走らせる——**歯が作業ツリーを汚さない。**
- */
+/** CLI は子プロセスで起動する。`process.exit` と実ファイルの書き込みを伴うので import では測れない。本物の `packages/<pkg>/package.json` は書き換えず、複製した一時ディレクトリで走らせる。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -31,7 +20,6 @@ afterEach(() => {
   }
 });
 
-/** リポジトリのうち、この段が触る範囲だけを一時ディレクトリへ複製する。 */
 function makeSandbox() {
   const dir = mkdtempSync(join(tmpdir(), "apply-release-version-"));
   cpSync(join(repoRoot, "scripts"), join(dir, "scripts"), { recursive: true });
@@ -39,14 +27,12 @@ function makeSandbox() {
     cpSync(join(repoRoot, target.dir, "package.json"), join(dir, target.dir, "package.json"), {
       recursive: false,
       force: true,
-      // 中間ディレクトリを作る
       ...{},
     });
   }
   return dir;
 }
 
-/** サンドボックス内で CLI を走らせる。 */
 function run(dir, env) {
   const outputPath = join(dir, "github-output");
   writeFileSync(outputPath, "");
@@ -81,12 +67,9 @@ describe("apply-release-version.mjs（ADR 0070）", () => {
     const r = run(sandbox, { RELEASE_TAG: "v9.9.9", GITHUB_PRERELEASE: "false" });
 
     expect(r.status, `EXIT=0 を期待した。stderr:\n${r.stderr}`).toBe(0);
-    // ⚠ 期待値の長さを直書きしない——publish 対象が増えたときに、この歯が
-    // 「4つしか見ていない」まま緑で通り続けるのを防ぐ（`publish-targets.test.mjs` が
-    // 順序の歯について述べているのと同じ理由。現物から導く）。
+    // 期待値の長さを直書きしない。publish 対象が増えたときに、一部しか見ないまま緑で通るのを防ぐ。
     const allNine = PUBLISH_TARGETS.map(() => "9.9.9");
     expect(versionsIn(sandbox)).toEqual(allNine);
-    // 「元から 9.9.9 だったから通った」ではないことを確かめる
     expect(before).not.toEqual(allNine);
   });
 
@@ -104,11 +87,6 @@ describe("apply-release-version.mjs（ADR 0070）", () => {
     expect(r.stdout).toContain("::warning::");
   });
 
-  /**
-   * ⭐ これがこの段を置いた理由そのものである。
-   * `${TAG#v}` だけの実装だと `vfoo` が `foo` として書き込まれ、
-   * `mnemora-core-foo.tgz` が publish の直前まで誰にも気づかれずに作られる。
-   */
   it("semver でない tag では EXIT=1 になり、package.json を書き換えない", () => {
     sandbox = makeSandbox();
     const before = versionsIn(sandbox);
@@ -135,10 +113,6 @@ describe("apply-release-version.mjs（ADR 0070）", () => {
     expect(versionsIn(sandbox)).toEqual(once);
   });
 
-  /**
-   * 書いた結果が prettier の整形と食い違うと、後段の `pnpm run format:check` が赤くなる
-   * （workflow はこの段のあとに門を通す）。**JSON.stringify の整形がそれと一致することを固定する。**
-   */
   it("書き換えた package.json が prettier の整形と一致する", () => {
     sandbox = makeSandbox();
     run(sandbox, { RELEASE_TAG: "v9.9.9", GITHUB_PRERELEASE: "false" });
@@ -150,10 +124,7 @@ describe("apply-release-version.mjs（ADR 0070）", () => {
         process.execPath,
         [
           join(repoRoot, "node_modules", "prettier", "bin", "prettier.cjs"),
-          // ⚠ --parser json ではない。prettier は **package.json には json-stringify
-          // パーサを使う**（`prettier --file-info` で確認した）。json パーサは
-          // `"files": ["dist"]` と1行に畳むが、json-stringify は畳まない。
-          // ⟹ --parser json で比べると、正しい出力を「違う」と誤判定する。
+          // `--parser json` ではなく json-stringify で比べる。prettier は package.json に json-stringify を使い、json パーサは配列を1行へ畳む。
           "--stdin-filepath",
           "package.json",
         ],

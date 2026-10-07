@@ -6,39 +6,6 @@ import type { NewObservation } from "../observation.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * クローン miku の委譲先が書いた回帰テスト。オーナーではない。
- *
- * `packages/testkit` の `InMemory*`（`in-memory-fixtures-negative-limit.test.ts` /
- * `in-memory-fixtures-limit-not-integer.test.ts` / `in-memory-fixtures-getmany-dedupe.test.ts` /
- * `in-memory-fixtures-getvectors-dedupe.test.ts`、PR #804/#806/#811/#812）が既に直した
- * 不一致と**同じ形**の不一致を、`packages/core` 専用の `Fake*`（`runtime-fakes.ts`）に
- * 見つけた。`InMemory*` を直したときの棚卸しが `Fake*` 側には及んでいなかった
- * ——`fake-vector-store-tiebreak.test.ts`（Issue #339）は両方直っているが、負数/非整数
- * limit とダブり id は `Fake*` 側で直っていないまま残っていた。
- *
- * 本物の Postgres 17 + pgvector を手元に立てて実測した（`packages/postgres` の
- * 各 store を直接呼ぶ使い捨てスクリプトで確認、このコミットには含めない）:
- * - `PostgresMemoryStore.getMany([x,x])` は1件（集合演算 `WHERE id = ANY(...)`）。
- * - `PostgresVectorStore.getVectors([x,x,x])` は1件（`memory_id = ANY(...)`）。
- * - `PostgresVectorStore.search` / `PostgresLexicalStore.search` /
- *   `PostgresTrigramLexicalStore.search` / `PostgresEventStore.list` /
- *   `PostgresOutboxStore.claimBatch` / `PostgresMemoryStore.aggregateScope`
- *   （digestBand.limit）は、`limit` が負数・`NaN`・`Infinity`・非整数のとき、
- *   生 SQL の `LIMIT`（bigint パラメータ）が例外を投げる。
- * - `PostgresMemoryStore.purgeExpiredEvents` だけは `limit === -1` の1点が例外にならず
- *   `purged: 0` を返す（`LIMIT opts.limit + 1` の形で組むため）——`limit <= -2` は
- *   他と同じく例外になる。`InMemoryMemoryStore.purgeExpiredEvents` はこの1点を割り切って
- *   「負数はすべて一様に拒む」ため、`-1` ではなく `-2` で確認する
- *   （`in-memory-fixtures-negative-limit.test.ts` と同じ理由）。
- *
- * `FakeMemoryStore`/`FakeVectorStore`/`FakeLexicalStore`/`FakeEventStore`/
- * `FakeOutboxStore` はどれも `packages/testkit` と同じ理由でこの入力を検査しておらず、
- * `Array.prototype.slice` の意味論（負数＝末尾から数えた除外、`NaN`→`0`、`Infinity`→全件、
- * 非整数→切り捨て）を静かに踏んでいた——例外にならず、`limit` が効いていない/
- * 黙って縮む/ほぼ全件返る、という誤った結果になる。
- */
-
 const TENANT = "fake-parity-tenant";
 const ctx: Ctx = { tenantId: TENANT };
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
@@ -195,13 +162,6 @@ describe("Fake*: NaN/Infinity/非整数の limit を渡すと Postgres と同じ
   }
 });
 
-/**
- * `packages/testkit` の `in-memory-fixtures-limit-bigint-range.test.ts` と同じ判定を、
- * `packages/core` 専用の Fake に当てる。bigint に収まらない整数（2^63 以上）は
- * `Number.isInteger` を通るため、上の2つの describe の検査をすり抜けていた。Postgres は
- * `2 ** 63` を `out of range for type bigint`、`1e21` を `invalid input syntax for type
- * bigint` で拒む（実測は testkit 側のテストのコメント参照）。
- */
 describe("Fake*: bigint に収まらない limit（2^63 以上）を渡すと Postgres と同じく例外を投げる", () => {
   const calls: [name: string, call: (limit: number) => Promise<unknown>][] = [
     [
@@ -269,13 +229,6 @@ describe("Fake*: bigint に収まらない limit（2^63 以上）を渡すと Po
   }
 });
 
-/**
- * miku 了承済み（マネージャー経由）: `FakeTenantSettingsStore` に interface 本番メソッド
- * `setDefaultHalfLifeRecalls`（`?` 付き、ADR 0197）を足し、`packages/postgres`/
- * `packages/testkit` と揃える。値域検査（`assertValidHalfLifeRecalls`）と float4
- * （Postgres の `real` 列）オーバーフロー検査は
- * `in-memory-fixtures-half-life-recalls-float4-overflow.test.ts` と同じ形。
- */
 describe("FakeTenantSettingsStore.setDefaultHalfLifeRecalls（ADR 0197、P・T に揃える）", () => {
   it("1e300（float4 の範囲を大きく超える）は例外を投げ、値を書き換えない", async () => {
     const { tenantSettingsStore } = createFakeRuntimeStores();
@@ -297,25 +250,8 @@ describe("FakeTenantSettingsStore.setDefaultHalfLifeRecalls（ADR 0197、P・T �
   });
 });
 
-/**
- * `LexicalStore.search` の doc（`packages/core/src/interfaces/lexical-store.ts`、
- * Issue #345 / ADR 0175）は「coverage/rank の両方が完全一致する行の順序も adapter の
- * 責務」と明記し、`PostgresLexicalStore` の `coverage → rank → recorded_at DESC → id`
- * の4段 tie-break を模範として名指ししている。`FakeLexicalStore.search` は coverage/rank
- * の2段止まりで、同点の中身が挿入順（recordedAt 昇順の通常の呼び出し順では逆向き）に
- * 落ちていた——`InMemoryLexicalStore`（`packages/testkit`）と同じ形の不一致。
- * 実測: 本物の Postgres 17 に対し、完全に同じ content を持つ2件（recordedAt だけ違う）を
- * `PostgresLexicalStore.search` に渡すと新しい方が常に先に返る（使い捨てスクリプトで確認）。
- */
 describe("FakeLexicalStore.search — coverage/rank が完全一致したときの tie-break（LexicalStore.search doc / ADR 0175）", () => {
-  // Issue #951（2026-09-26）: 以前はここで非 ASCII だけの content/query（日本語）を
-  // 使っていたが、`FakeLexicalStore.search` を PostgresLexicalStore に揃えた結果、
-  // 非 ASCII だけのクエリは（本物の Postgres と同じく）常に0件を返すようになった
-  // （`mnemora_lexical_query_terms` がクエリ側の非 ASCII を落とすため）。この歯が
-  // 見たいのは tie-break（coverage/rank が同値のときの順序）であって非 ASCII の
-  // 扱いではないため、ASCII の content に差し替える
-  // （`packages/postgres/src/__tests__/lexical-search-tiebreak.test.ts` の
-  // `TIED_CONTENT` と同じ文字列——postgres 側の同種の歯と揃えてある）。
+  // tie-break（coverage/rank が同値のときの順序）を見るので、ASCII の content を使う: 非 ASCII だけの content/query は Postgres と同じく常に0件になる。
   const CONTENT = "widget alpha bravo tie-break test content";
 
   it("recordedAt が新しい方を先に返す（PostgresLexicalStore.search と同じ契約）", async () => {
@@ -342,17 +278,7 @@ describe("FakeLexicalStore.search — coverage/rank が完全一致したとき�
   });
 });
 
-/**
- * `packages/testkit` の `InMemoryMemoryStore.archiveDecayed`（Issue #880、
- * `in-memory-fixtures-archive-decayed-limit.test.ts`）と同じ形の不一致を
- * `FakeMemoryStore.archiveDecayed` にも見つけた——どちらも `.slice(0, Math.max(0,
- * opts.limit))` を検査せず使っており、`PostgresMemoryStore.archiveDecayed` が
- * `LIMIT`（bigint パラメータ）へそのまま渡して例外にする入力（負数・`NaN`・
- * `Infinity`・非整数）を、書き込みの副作用（`status` を `archived` にし、イベントを
- * 積む）付きで静かに通してしまっていた。実測は `in-memory-fixtures-archive-decayed-limit.test.ts`
- * のコメント参照。⚠ 負数だけは Postgres も常には例外にならない（テナントの行が無く統計が古いと、
- * CTE の中の `Limit` が評価されず `{ archived: [] }` で返る）。この Fake は常に断る。
- */
+/** 負数だけは Postgres も常には例外にならない（テナントの行が無く統計が古いと、CTE の中の `Limit` が評価されず空で返る）が、この Fake は常に断る。 */
 describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も archived にしない（Issue #880）", () => {
   for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
     it(`limit=${limit} は例外を投げ、対象の Memory を archived にしない`, async () => {
@@ -367,14 +293,6 @@ describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres 
   }
 });
 
-/**
- * `packages/testkit` の `InMemoryOutboxStore.claimBatch`
- * （`in-memory-fixtures-claim-batch-lease-ms.test.ts`）と同じ形の不一致が `FakeOutboxStore.claimBatch`
- * にもあった。`PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を
- * `timestamptz` のパラメータとして送るため、どちらかが Invalid Date になる入力では例外になる
- * （実測は testkit 側のテストのコメント参照）。修正前の Fake は `leaseMs` が `NaN` /
- * `±Infinity` / `1e20` でも、未 claim のジョブを claim していた。
- */
 describe("FakeOutboxStore.claimBatch: リースの境界時刻が Date にならない入力は、Postgres と同じく例外を投げ、1件も claim しない", () => {
   const cases: [label: string, now: Date, leaseMs: number][] = [
     ["leaseMs=NaN", new Date("2100-01-01T00:00:00.000Z"), Number.NaN],
@@ -409,17 +327,7 @@ describe("FakeOutboxStore.claimBatch: リースの境界時刻が Date になら
   }
 });
 
-/**
- * `packages/testkit` の `InMemoryMemoryStore.requeueEmbedJobs`
- * （`in-memory-fixtures-requeue-embed-jobs-limit.test.ts`）と同じ形の不一致が
- * `FakeMemoryStore.requeueEmbedJobs` にもあった——`.slice(0, Math.max(0, opts.limit))` を
- * 検査せず使っており（Issue #880 で `archiveDecayed` から取り除いた形）、
- * `PostgresMemoryStore.requeueEmbedJobs` が `LIMIT`（bigint パラメータ）へそのまま渡して
- * 例外にする入力（負数・`NaN`・`Infinity`・非整数）を、書き込みの副作用
- * （`embeddingStatus` を `pending` に戻し、embed ジョブを積む）付きで通していた。
- * ⚠ 負数だけは Postgres も常には例外にならない（テナントの行が無く統計が古いと、CTE の中の
- * `Limit` が評価されず `{ requeued: 0 }` で返る）。この Fake は常に断る。
- */
+/** 負数だけは Postgres も常には例外にならない（テナントの行が無く統計が古いと、CTE の中の `Limit` が評価されず空で返る）が、この Fake は常に断る。 */
 describe("FakeMemoryStore.requeueEmbedJobs: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も積み直さない", () => {
   for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 2 ** 63, 1e21]) {
     it(`limit=${limit} は例外を投げ、embeddingStatus も outbox も変えない`, async () => {
@@ -441,13 +349,6 @@ describe("FakeMemoryStore.requeueEmbedJobs: 壊れた limit を渡すと Postgre
   }
 });
 
-/**
- * `packages/testkit` の `InMemoryMemoryStore.reinforce`/`createMemory`/`InMemoryEventStore.append`
- * （Issue #807、`in-memory-fixtures-invalid-date.test.ts`）と同じ形の不一致を
- * `FakeMemoryStore`/`FakeEventStore` にも見つけた。実測（Postgres が Invalid Date を
- * `timestamptz` 列で拒む根拠）は `in-memory-fixtures-invalid-date.test.ts` のコメント参照
- * ——ここでは同じ判定を `packages/core` 専用の Fake に対して確かめる。
- */
 describe("FakeMemoryStore.reinforce: Invalid Date を渡すと Postgres と同じく例外を投げ、状態を書き換えない（Issue #807）", () => {
   it("Invalid Date は例外を投げ、lastReinforcedAt/decayFloorAt を変えない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
@@ -491,15 +392,7 @@ describe("FakeEventStore.append: at に Invalid Date を渡すと例外を投げ
   });
 });
 
-/**
- * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #817、PR #815 と同根、
- * `in-memory-fixtures-half-life-hours-float4-overflow.test.ts`）と同じ形の不一致を
- * `FakeMemoryStore` にも見つけた。⚠ `strength` には足さない——理由（`isStrengthInRange`
- * の時点で `1e300` は既に値域外として拒まれ、float4 オーバーフローに到達しない）は
- * `in-memory-fixtures-half-life-hours-float4-overflow.test.ts` のコメント、および
- * `runtime-fakes.ts` の `createMemoryIdempotent` doc コメント（ADR 0125「引き受ける負債」
- * ——`halfLifeHours` の値域全体の検査はこの Fake に意図して無い）参照。
- */
+/** `strength` には足さない: `isStrengthInRange` の時点で `1e300` は既に値域外として拒まれ、float4 オーバーフローに到達しない。 */
 describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 列) に収まらない値を拒む（Issue #817）", () => {
   it("1e300（float4 の範囲を大きく超える）は例外を投げ、Memory を作らない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
@@ -509,11 +402,8 @@ describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 
   });
 
   it("halfLifeHours: 0（既存の recall-pipeline.test.ts が使う『壊れた』Memory）は引き続き成功する（回帰確認）", async () => {
-    // `createMemoryIdempotent` の doc コメント（ADR 0125「引き受ける負債」）が明記する
-    // とおり、この Fake は `halfLifeHours` の値域全体を検査しない——float4 オーバーフロー
-    // だけを見る狭い検査を追加しても、`0` のような既存の「壊れた」入力は通り続ける
-    // ことをここで確かめる（通らなくなると `recall-pipeline.test.ts` の複数の歯が
-    // 構造的に書けなくなる）。
+    // この Fake は `halfLifeHours` の値域全体を検査しない: 狭い検査を足しても、`0` のような既存の「壊れた」入力は通り続ける。
+    // 通らなくなると `recall-pipeline.test.ts` の複数の歯が構造的に書けなくなる。
     const { memoryStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, fixture({ halfLifeHours: 0 }));
     expect(memory.halfLifeHours).toBe(0);
@@ -527,12 +417,7 @@ describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 
   });
 });
 
-/**
- * 上の #817 の検査は float4 の**上側**（`Infinity` へ丸まる）だけを見ていた。Postgres の
- * `real` は、0 でない値が float4 で 0 に丸まる（アンダーフロー）ときも拒む——
- * `packages/testkit` の `in-memory-fixtures-float4-underflow.test.ts` と同じ形で揃える。
- * `halfLifeHours: 0` そのもの（下の回帰確認）は「0 に丸まった」のではないので、引き続き通す。
- */
+/** `halfLifeHours: 0` そのもの（下の回帰確認）は「0 に丸まった」のではないので、引き続き通す。 */
 describe("FakeMemoryStore.createMemory: float4 で 0 に丸まる値（アンダーフロー）を Postgres と同じく拒む", () => {
   it("halfLifeHours: 1e-300 は例外を投げる", async () => {
     const { memoryStore } = createFakeRuntimeStores();
@@ -555,8 +440,7 @@ describe("FakeMemoryStore.createMemory: float4 で 0 に丸まる値（アンダ
     expect([a.strength, b.halfLifeHours]).toEqual([1e-45, 0]);
   });
 
-  // float4 の最小の非正規数は約 1.4013e-45。その半分（約 7.0065e-46）より小さい値は 0 に丸まり、
-  // 大きい値は最小の非正規数に丸まる（#1095）。境界の両側を見る。
+  // float4 の最小の非正規数は約 1.4013e-45。その半分（約 7.0065e-46）より小さい値は 0 に丸まり、大きい値は最小の非正規数に丸まる。境界の両側を見る。
   it("境界の両側: 7.0e-46（0 に丸まる）は拒み、7.1e-46（最小の非正規数に丸まる）は通す", async () => {
     expect(Math.fround(7.0e-46)).toBe(0);
     expect(Math.fround(7.1e-46)).toBe(1.4012984643248171e-45);
@@ -585,13 +469,6 @@ describe("FakeMemoryStore.createMemory: float4 で 0 に丸まる値（アンダ
   });
 });
 
-/**
- * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #816、
- * `in-memory-fixtures-nul-content.test.ts`）と同じ形の不一致を `FakeMemoryStore` にも
- * 見つけた。範囲の切り方（`content`・`subjectId`・`tags`・`digest` を塞ぎ、`tenantId`
- * は対象外とする理由）は `in-memory-fixtures-nul-content.test.ts` のコメント参照
- * ——`packages/testkit` と同じ範囲に揃える。
- */
 describe("FakeMemoryStore.createMemory: content に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816）", () => {
   it("content の途中に NUL を含むと例外を投げ、Memory を作らない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
@@ -628,13 +505,6 @@ describe("FakeMemoryStore.createMemory: digest に NUL 文字を含むと Postgr
   });
 });
 
-/**
- * `packages/testkit` の `in-memory-fixtures-observation-nul.test.ts` と同じ判定を、
- * `packages/core` 専用の Fake に当てる（Issue #816 の NUL 側の残り）。Postgres は
- * Observation の `text` 列（`subjectId`・`externalId`・`kind`）と `jsonb` 列（`payload`・
- * `attributes`）、`createMemory` の `jsonb` 列（`attributes`・`provenance`）の NUL を拒む
- * （実測は testkit 側のテストのコメント参照）。
- */
 describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は、NUL を含む値を Postgres と同じく拒む", () => {
   const observation = (overrides: Partial<NewObservation>): NewObservation => ({
     tenantId: TENANT,
@@ -663,8 +533,7 @@ describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は�
       await expect(
         memoryStore.createObservationWithOutbox(ctx, observation(overrides), ["extract"]),
       ).rejects.toThrow(
-        // ADR 0563: `subjectId`・`externalId` の NUL は MalformedIdentifierError（"input.subjectId contains a NUL character …"）。
-        // それ以外の欄は素の Error（"… must not contain NUL characters"）。
+        // `subjectId`・`externalId` の NUL は MalformedIdentifierError、それ以外の欄は素の Error。
         /must not contain NUL characters|^input\.(subjectId|externalId) contains a NUL character/,
       );
       const jobs = await outboxStore.claimBatch(ctx, {
@@ -687,7 +556,7 @@ describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は�
     expect((await memoryStore.getObservation(ctx, created.id))?.payload).toEqual({ text });
   });
 
-  // jsonb の判定は `JSON.stringify` した結果を辿る（Postgres が受け取る形）ので、`toJSON` による変換も同じ形になる（#1073）。
+  // jsonb の判定は `JSON.stringify` した結果を辿る（Postgres が受け取る形）ので、`toJSON` による変換も同じ形になる。
   it("toJSON が NUL を返す値は拒む（元の値には NUL が無くても、Postgres が受け取る JSON に NUL がある）", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     await expect(

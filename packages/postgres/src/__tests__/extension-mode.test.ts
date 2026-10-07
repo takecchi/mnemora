@@ -118,6 +118,31 @@ describe("matchCreateExtensionLines / stripCreateExtensionStatements: 0001_init.
     expect(removed).toEqual(["vector"]);
     expect(stripped).toBe("CREATE EXTENSION IF NOT EXISTS pgcrypto;\n");
   });
+
+  it("大文字小文字は区別しない（小文字で書かれた行も一致し、取り除く）", () => {
+    const sql = "create extension if not exists vector;\nSELECT 1;";
+
+    expect(matchCreateExtensionLines(sql).map((m) => m.name)).toEqual(["vector"]);
+    expect(stripCreateExtensionStatements(sql)).toEqual({ sql: "SELECT 1;", removed: ["vector"] });
+  });
+
+  it("行頭の空白（インデント）は許し、その行ごと取り除く", () => {
+    const sql = "SELECT 1;\n  \tCREATE EXTENSION IF NOT EXISTS vector;\nSELECT 2;";
+
+    expect(matchCreateExtensionLines(sql).map((m) => m.line)).toEqual([
+      "  \tCREATE EXTENSION IF NOT EXISTS vector;\n",
+    ]);
+    expect(stripCreateExtensionStatements(sql).sql).toBe("SELECT 1;\nSELECT 2;");
+  });
+
+  it("改行が CRLF でも、その行末の改行まで取り除く", () => {
+    const sql = "CREATE EXTENSION IF NOT EXISTS vector;\r\nSELECT 1;\r\n";
+
+    expect(matchCreateExtensionLines(sql).map((m) => m.line)).toEqual([
+      "CREATE EXTENSION IF NOT EXISTS vector;\r\n",
+    ]);
+    expect(stripCreateExtensionStatements(sql).sql).toBe("SELECT 1;\r\n");
+  });
 });
 
 describe("MissingExtensionsError: メッセージに足りない拡張名と実行すべき SQL が具体的に載る", () => {

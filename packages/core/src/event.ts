@@ -5,24 +5,15 @@ import type { EventId, MemoryId } from "./ids.js";
  * 監査ログのイベント種別（docs/memory-model.md §9）。
  * 「状態が実際に変わった大分類」だけを列挙し、理由の粒度は `meta` に落とす。
  *
- * **`"purged"` と `"events_purged"` は、どちらも本番コードから実際に書かれる。**
- * - `"purged"`: `Runtime.purge`（`createRuntime` の中の `purge`）が `kind: "purged"` の
- *   イベントを組み立て、`MemoryStore.purgeMemory`（Postgres は `PostgresMemoryStore.purgeMemory`）が
- *   本文のトゥームストーン上書きと同じトランザクションで `memory_events` に積む
- *   （Issue #198 / [ADR 0124](../../../docs/decisions/0124-purge-physical-delete.md)）。
- * - `"events_purged"`: `MemoryStore.purgeExpiredEvents`（任意メソッド。Postgres は
- *   `PostgresMemoryStore.purgeExpiredEvents`）が、期限切れの行を消すのと同じトランザクションで
- *   `memory_id = NULL` の1行を積む（Issue #210 / [ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）。
- *   core はイベントを組み立てず、adapter が生の SQL で書く。
- *
- * **`"restored"`**（`Runtime.restoreArchived`。`status='archived'` → `'active'` の遷移で積む。
- * Issue #195、[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）と
- * **`"unsuperseded"`**（`Runtime.restoreSuperseded`。superseded → active の復旧口）も実際に生成される。
- * `kind:"updated"` + `meta.reason` に寄せず、`"restored"` も再利用しないのは、
- * `idx_memory_events_by_kind`（`tenant_id, kind, at`）で監査ログを引くときに、「archive から戻った」と
- * 「supersede を取り消した」を索引で分けて引けるようにするため（ADR 0122）。
- * union へ値を足すことが破壊的変更になる経路（`MemoryEventKind` を分岐する網羅的 `switch`）は、
- * この repo のどこにも無い。
+ * - `"purged"`: `Runtime.purge` が組み立て、`MemoryStore.purgeMemory` が本文のトゥームストーン上書きと
+ *   同じトランザクションで積む（[ADR 0124](../../../docs/decisions/0124-purge-physical-delete.md)）。
+ * - `"events_purged"`: `MemoryStore.purgeExpiredEvents`（任意メソッド）が、期限切れの行を消すのと同じ
+ *   トランザクションで `memory_id = NULL` の1行を積む（[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）。
+ *   core はイベントを組み立てず、adapter が書く。
+ * - `"restored"`（`Runtime.restoreArchived`、[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）と
+ *   `"unsuperseded"`（`Runtime.restoreSuperseded`）: `kind:"updated"` + `meta.reason` に寄せず、
+ *   `"restored"` も再利用しないのは、`idx_memory_events_by_kind` で「archive から戻った」と
+ *   「supersede を取り消した」を索引で分けて引けるようにするため（ADR 0122）。
  */
 export type MemoryEventKind =
   | "created"
@@ -49,22 +40,17 @@ export const MemoryEventKindSchema = z.enum([
 ]) satisfies z.ZodType<MemoryEventKind>;
 
 /**
- * `type: "human" | "clone"` は本番コード（`examples/chat` 含む）のどこからも生成されない
- * ——実際に書かれる actor は `{ type: "system" }` だけである。**ただしこれは
- * Issue #206 / ADR 0117・0144 が扱った「構造的に到達不能な union 値」とは別の性質である
- * **——`actor` は `Runtime`（`applyCorrection`・`markContested` 等）の各口が受け取る
- * 公開パラメータで、呼び出し側が「これは人間が行った訂正である」「これはクローンが行った
- * 書き込みである」と申告するために存在する。今日それを渡す呼び出し元（人間参加型・
- * クローン参加型のワークフロー）が repo 内に無いだけであり、型の外側に構造的な壁は無い
- * （Issue #168 の棚卸し項目13-3）。
+ * `type: "human" | "clone"` は同梱の本番コードからは生成されない（実際に書かれる actor は
+ * `{ type: "system" }` だけ）。ただし `actor` は `Runtime`（`applyCorrection`・`markContested` 等）の各口が
+ * 受け取る公開パラメータで、呼び出し側が「人間が行った訂正」「クローンが行った書き込み」と申告するために
+ * ある。型の外側に構造的な壁は無い（ADR 0117・0144 が扱った「構造的に到達不能な union 値」とは別）。
  */
 export interface EventActor {
   /** 誰が行ったか。`"system"` は runtime 自身（自動の job など）、`"human"`・`"clone"` は呼び出し側が申告する（上の doc）。 */
   type: "human" | "system" | "clone";
   /**
    * 中身は検査しない。NUL（U+0000）か孤立サロゲートを含むと、`@mnemora/postgres` でも
-   * `@mnemora/testkit` の fixture でも監査ログの書き込みが失敗する——
-   * {@link MemoryEvent.meta} の doc 参照（Issue #1211）。
+   * `@mnemora/testkit` の fixture でも監査ログの書き込みが失敗する（{@link MemoryEvent.meta} の doc 参照）。
    */
   id?: string;
 }
@@ -72,7 +58,7 @@ export interface EventActor {
 /**
  * `EventActor` の zod スキーマ。値を実行時に検査するときに使う（型 `EventActor` と揃えてある）。
  *
- * ⚠ **この schema は store より厳しい**（今の振る舞い。`ctx.ts` の `CtxSchema` と同じ形の差）。`id` に
+ * ⚠ **この schema は store より厳しい**（`ctx.ts` の `CtxSchema` と同じ形の差）。`id` に
  * `min(1)` を書いているので空文字の `id` を拒むが、`EventStore.append` も `MemoryStore` の書き込みの口も
  * この schema で `actor` を検査しないので、`{ type: "human", id: "" }` はそのまま保存される。
  * `@mnemora/postgres`・testkit の fixture・core の Fake の3実装で同じ。
@@ -95,10 +81,9 @@ export interface MemoryEvent {
    * 対象の Memory の id。**`kind = 'events_purged'` のときは必ず `null`**（{@link MemoryEventSchema} の refine と、
    * `@mnemora/postgres`・testkit の fixture が拒む。例外の種類は adapter で違う）。
    *
-   * ⚠ 今の振る舞い: **ほかの `kind` でも `null` は拒まない。**`EventStore.append` などに
+   * ⚠ **ほかの `kind` でも `null` は拒まない。**`EventStore.append` などに
    * `{ kind: "created", memoryId: null }` を渡すと、Postgres も fixture もそのまま書いて返す（`MemoryEventSchema` も
-   * 通る）。同梱のコードが `null` で書くのは、store の `purgeExpiredEvents` が積む `events_purged` だけである
-   * ——`Runtime` が書くイベントは、どれも対象の Memory の id を持つ（`packages/core/src` を grep して確かめた）。
+   * 通る）。同梱のコードが `null` で書くのは、store の `purgeExpiredEvents` が積む `events_purged` だけ。
    */
   memoryId: MemoryId | null;
   /** 何が起きたか（{@link MemoryEventKind}）。 */
@@ -109,13 +94,12 @@ export interface MemoryEvent {
   actor: EventActor;
   /** 記録した時点の Memory の `digest` の写し（本文は写さない）。purge の後も、何が消えたかを digest で読める。 */
   digestSnapshot?: string | null;
-  /** 削除・置換の直前の大きさ（バイト）。⚠ 今は runtime も同梱の store もこの欄に値を書かない（`null`）。 */
+  /** 削除・置換の直前の大きさ（バイト）。⚠ runtime も同梱の store もこの欄に値を書かない（`null`）。 */
   sizeBeforeBytes?: number | null;
   /**
    * `kind` 固有の付帯情報（`docs/memory-model.md` §9）。
    *
-   * ⚠ **今の振る舞い（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）:
-   * `meta` と `actor` は JSON として保存される前提の欄である。**値の中身は検査しない。保証するのは、JSON の値
+   * ⚠ **`meta` と `actor` は JSON として保存される前提の欄である。**値の中身は検査しない。保証するのは、JSON の値
    * （有限の数・文字列・真偽値・`null`・配列・プレーンなオブジェクト）が同じ値で読み戻ることだけである。
    * core が自分で入れる値（`reason`・`note`・id・id の配列）は、どれも JSON で往復する。
    *
@@ -125,30 +109,23 @@ export interface MemoryEvent {
    * | `NaN`・`Infinity`・`-Infinity` | `null` に変わる | そのまま保持する |
    * | `-0` | `0` に変わる | そのまま保持する |
    * | `undefined` の欄（`actor.id` も） | 欄ごと消える | `undefined` の欄が残る |
-   * | BigInt（入れ子・配列の要素も） | 例外（`TypeError: Do not know how to serialize a BigInt`。`append` が失敗する） | **同じ `TypeError`・同じ文言で拒む（Issue #1384）。**状態もイベントも書く前に投げる |
+   * | BigInt（入れ子・配列の要素も） | 例外（`TypeError: Do not know how to serialize a BigInt`。`append` が失敗する） | **同じ `TypeError`・同じ文言で拒む。**状態もイベントも書く前に投げる |
    * | 文字列の中の NUL（U+0000）・孤立サロゲート | 例外（書き込みが失敗する） | 例外（`Error`。状態もイベントも書く前に投げる） |
-   * | 関数・Symbol（欄の値として。`actor` の欄も） | その欄が消える（配列の要素なら `null`）。残りを書いて成功する | 例外（`DataCloneError`。`structuredClone` が写せない）。状態もイベントも書く前に投げる（PR #1231） |
+   * | 関数・Symbol（欄の値として。`actor` の欄も） | その欄が消える（配列の要素なら `null`）。残りを書いて成功する | 例外（`DataCloneError`。`structuredClone` が写せない）。状態もイベントも書く前に投げる |
    *
    * ⚠ **BigInt の行は他のどの行よりも先に評価される。**`@mnemora/postgres` の `EventStore.append` は
-   * `INSERT` の引数（`actor`・`meta` を含む）を全部 JS 側で評価してから初めて DB へ問い合わせを送るため、
-   * `actor`/`meta` のどこかに BigInt があると、`kind` が列挙に無くても・`memoryId` が実在しなくても・
-   * `at` が Invalid Date でも・NUL/孤立サロゲートがあっても、**それらを Postgres 自身が検査する機会が
-   * 無いまま `TypeError` になる**（`kind` 不正・`at` Invalid Date・`memoryId` 実在しない、
-   * のそれぞれと `meta` の BigInt を同時に渡し、いずれも `TypeError: Do not know how to serialize a BigInt`
-   * になることを確認した）。fixture 側の `assertStorableMemoryEvent` もこの優先順位に合わせ、BigInt の検査を
-   * 最初に置いている。
+   * `INSERT` の引数を全部 JS 側で評価してから DB へ問い合わせを送るため、`actor`/`meta` のどこかに BigInt が
+   * あると、`kind` が列挙に無くても・`memoryId` が実在しなくても・`at` が Invalid Date でも・NUL/孤立サロゲートが
+   * あっても、Postgres 自身の検査の前に `TypeError` になる。fixture 側の `assertStorableMemoryEvent` も
+   * この優先順位に合わせ、BigInt の検査を最初に置いている。
    *
    * NUL・孤立サロゲートの行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
    * `@mnemora/postgres` では、状態の書き換えとイベントが同じトランザクションにあるので、両方とも取り消され、
    * 途中まで書かれたものは残らない（`forget` は `{ kind: "failed" }` を返し、`markContested` は DB に触れる前の名指しの `Error` を投げる——ADR 0499）。
-   * **testkit の fixture も同じ入力を拒む**（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）
-   * ——`assertStorableMemoryEvent`（`packages/testkit/src/__fixtures__/memory-event-check.ts`）が状態を書き換える前に
-   * `Error` を投げる。`Runtime.forget` はそれを捕まえて `{ kind: "failed" }` にし、`Runtime.markContested` は
-   * 捕まえずに外へ投げる——どちらも `@mnemora/postgres` が同じ口で外へ見せる形と揃う。
-   * Observation・Memory の `jsonb` の欄では fixture も NUL を拒む（PR #1073）が、孤立サロゲートは #1075 のとおり
-   * Postgres の `jsonb` だけが拒む（イベントの `meta`/`actor` は NUL・孤立サロゲートの両方を拒むのとは違う）。
-   * 歯は `event-meta-roundtrip.postgres.test.ts`（`@mnemora/postgres` と testkit の fixture。`Runtime` の口は
-   * `forget` と `markContested`、関数・Symbol の行は `EventStore.append` と `MemoryStore.updateStatusWithEvent` で当てている）。
+   * **testkit の fixture も同じ入力を拒む。**`assertStorableMemoryEvent` が状態を書き換える前に `Error` を投げ、
+   * `Runtime.forget` はそれを捕まえて `{ kind: "failed" }` にし、`Runtime.markContested` は捕まえずに外へ投げる
+   * （`@mnemora/postgres` が同じ口で外へ見せる形と揃う）。Observation・Memory の `jsonb` の欄では fixture も NUL を拒むが、
+   * 孤立サロゲートは Postgres の `jsonb` だけが拒む（イベントの `meta`/`actor` は NUL・孤立サロゲートの両方を拒むのとは違う）。
    */
   meta: Record<string, unknown>;
 }
@@ -203,7 +180,7 @@ export interface EventFilter {
   until?: Date | undefined;
   /**
    * 返す上限の件数（古い順の先頭から）。省略なら全件。負数・非整数は例外になる（`@mnemora/postgres` と testkit の fixture で同じ）。
-   * `0` は例外にならず、0件を返す（今の振る舞い。{@link EventFilterSchema} は `0` を拒むので、schema と store で違う）。
+   * `0` は例外にならず、0件を返す（{@link EventFilterSchema} は `0` を拒むので、schema と store で違う）。
    */
   limit?: number | undefined;
 }
@@ -211,7 +188,7 @@ export interface EventFilter {
 /**
  * `EventFilter` の zod スキーマ。値を実行時に検査するときに使う（型 `EventFilter` と揃えてある）。
  *
- * ⚠ **この schema は store より厳しい**（今の振る舞い。`ctx.ts` の `CtxSchema` と同じ形の差）。`limit` に
+ * ⚠ **この schema は store より厳しい**（`ctx.ts` の `CtxSchema` と同じ形の差）。`limit` に
  * `positive()` を書いているので `limit: 0` を拒むが、`EventStore.list` はこの schema でフィルタを検査しないので、
  * `limit: 0` は例外にならず0件を返す（負数・非整数は store も例外にする）。
  * `@mnemora/postgres`・testkit の fixture・core の Fake の3実装で同じ。

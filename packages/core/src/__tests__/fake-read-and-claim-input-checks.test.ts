@@ -4,24 +4,6 @@ import { isMalformedIdentifierError } from "../identifier.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0493（穴探し60巡目、形 E「Fake だけ検査が甘い」）: core のテスト用の Fake の `VectorStore`・`LexicalStore`・
- * `EventStore`・`OutboxStore` が、`@mnemora/testkit` の InMemory と `@mnemora/postgres` が**どちらも断る**入力を、
- * 断らずに通していた口を縛る。直前までの Fake は、`limit` の検査（ADR 0434 より前）だけを持っていた。
- *
- * 断る入力（手元の Postgres・InMemory・Fake に同じ入力を流して測った。3者のうち Fake だけが通していた）:
- * - `VectorStore.search`・`LexicalStore.search` の `filter.occurredAfter`・`occurredBefore`・`validAt` が Invalid Date。
- * - 同 `filter.subjectId`・`filter.tenantId` に NUL（`MalformedIdentifierError`）。
- * - `LexicalStore.search` の `filter.attributes` の NUL。
- * - `EventStore.list` の `since`・`until` が Invalid Date。
- * - `OutboxStore.claimBatch` の `claimedBy` に NUL。
- * - `OutboxStore.complete`・`fail` の `opts.at` が Invalid Date（`OutboxStore.complete` の TSDoc が約束する。行には触れない）。
- * - `OutboxStore.purgeCompletedJobs` の `olderThan` が Invalid Date（`dryRun` でも断る）。
- *
- * Fake は適合試験の対象ではない（`fake-vector-store-filter.test.ts` 冒頭）。Runtime が組む値はこれらを破らないので、
- * 直接呼んだときだけ効く。やりすぎの対照（有効な Date・NUL の無い値・`claimedBy` の通常の値）も置く。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const space = { provider: "test", model: "fixture-model", dimensions: 3 };
 const bad = new Date("invalid");
@@ -160,7 +142,6 @@ describe("Fake の読み取り・claim の口の入力の検査（InMemory・Pos
       () => outboxStore.fail(ctx, claimed!.id, "e", claimed!.attempts, { at: bad }),
       /opts\.at must be a valid Date/,
     );
-    // 触れていないので、同じ attempts でまだ終端にできる。
     await expect(
       outboxStore.complete(ctx, claimed!.id, claimed!.attempts),
     ).resolves.toBeUndefined();

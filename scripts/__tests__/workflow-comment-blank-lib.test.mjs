@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
-/**
- * `scripts/workflow-comment-blank-lib.mjs` の境界の歯。
- *
- * ⭐ **この歯が測っているもの**: 合成した YAML/bash 断片に対して、
- * `blankOutWorkflowComments` が「YAML/bash のコメント規則」をどこまで正しく判定できるか、
- * そして「扱えない形」を黙って通さず `unhandled` として名乗るかを機械的に確かめる。
- * 実物の `ci.yml` にこの関数を当てた結果の固定は
- * `scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs` /
- * `scripts/__tests__/ci-yml-postgres-regime-coverage-wiring.test.mjs` 側にある
- * (`lexical-regime-coverage-lib.test.mjs` と同じ分担——ここは ci.yml を1バイトも読まない)。
- */
-
 describe("blankOutWorkflowComments — YAML の地の文のコメント", () => {
   it("行頭の # はコメントとして丸ごと潰す", () => {
     const source = "  # これはコメント\nkey: value\n";
@@ -75,7 +63,6 @@ describe("blankOutWorkflowComments — 変異D/H と同じ形(実害の再現)",
       "        if: success()",
       "",
     ].join("\n");
-    // コメント行自体は(コメントなので)潰れて消える。実キーの行だけが両者を分ける。
     const beforeBlanked = blankOutWorkflowComments(before).text;
     const afterBlanked = blankOutWorkflowComments(after).text;
     expect(beforeBlanked).toContain("if: always()");
@@ -113,10 +100,6 @@ describe("blankOutWorkflowComments — 扱えない形は黙って通さず unha
 });
 
 describe("blankOutWorkflowComments 自体が効いていること(⭐ この可視化が壊れても気づけるため)", () => {
-  // 🔴 この describe が無いと、`blankOutWorkflowComments` が将来「何も潰さない」実装に
-  // 退化しても誰も気づかない(`ci-yml-postgres-regime-wiring.test.mjs` の
-  // `blankOutComments 自体が効いていること` と同じ思想のメタ歯)。
-
   it("コメントにだけ在る文字列は、潰したあと残らない", () => {
     const source = ["# exit 1 はコメントにだけ在る", "key: value", ""].join("\n");
     expect(source, "前提: 素のソースには在る").toContain("exit 1");

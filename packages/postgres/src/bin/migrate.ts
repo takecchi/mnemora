@@ -5,32 +5,19 @@ import { formatMigrateCliUsage, parseMigrateCliOptions } from "./cli-options.js"
 
 /**
  * CLI エントリポイント。`DATABASE_URL` を読み、保留中のマイグレーションを適用する。
+ * マイグレーションの実行は、他パッケージやルートから直接 drizzle-kit を叩かせないこの1つの口からのみ行う（ADR 0001）。
  *
- * 他パッケージやルートから直接 drizzle-kit を叩かせない、という ADR 0001 の規約により、
- * マイグレーションの実行はこの1つの口からのみ行う。
+ * 引数・環境変数の解釈は `./cli-options.ts` の `parseMigrateCliOptions` に切り出してあり、このファイルは
+ * 解釈結果を `runMigrations` にそのまま渡す。未指定は options 省略時と同じに扱われる。
  *
- * 引数・環境変数の解釈（`--schema` / `--extension-schema` / `--extension-mode` /
- * `--analyze-memories` / `MNEMORA_SCHEMA` / `MNEMORA_EXTENSION_SCHEMA` /
- * `MNEMORA_EXTENSION_MODE` / `MNEMORA_ANALYZE_MEMORIES` / 優先順位 / `--help`）は
- * `./cli-options.ts` の `parseMigrateCliOptions` に切り出してある
- * （Issue #107、`extensionMode` は ADR 0093、`analyzeMemories` は Issue #234 / ADR 0143）。
- * このファイルは薄く保ち、解釈結果を `runMigrations` の `options` にそのまま渡すだけにする
- * ——`schema` / `extensionSchema` / `extensionMode` がどれも未指定なら
- * `{ schema: undefined, extensionSchema: undefined, extensionMode: undefined }` を渡すことに
- * なるが、`runMigrations` はこれを options 省略時と同じに扱うため
- * （`../schema-namespace.ts` / `../migrate.ts` 参照）、既定の振る舞いは今日と1バイトも変わらない。
+ * `--analyze-memories` のときだけ、`runMigrations` の後に `runAnalyzeMemories` を呼ぶ。
+ * `ANALYZE memories;` を `runMigrations` の中に混ぜない理由は `../migrate.ts` の `runAnalyzeMemories` を見ること。
  *
- * `--analyze-memories`（`analyzeMemories`）が `true` のときだけ、`runMigrations` の**後に**
- * `runAnalyzeMemories` を呼ぶ——`ANALYZE memories;` を `runMigrations` 自身の中に混ぜない
- * 理由は `../migrate.ts` の `runAnalyzeMemories` の doc コメントを見ること（構造的に
- * 新規インストールでは意味を持たないため、独立した明示的な呼び出しにしてある）。
- *
- * ⚠ **ADR 0552（ADR 0448）: この CLI は `statement_timeout` を設定しない。** 接続・ロール・DB 側の
- * `statement_timeout` などは、migration の本体の DDL にそのまま効く（CLI は `lock_timeout` だけを扱い、
- * 取った直後に `RESET` する）。短い `statement_timeout` が掛かった環境では、`DATABASE_URL` の `options` で
- * この接続だけ無効にする: `?options=-c%20statement_timeout%3D0`（`PGOPTIONS="-c statement_timeout=0"` でも同じ）。
- * 手順と測った範囲は `packages/postgres/README.md` の「接続・ロール・DB の `statement_timeout` などは、migration の本体にも効く」節。
- * なお CLI は同梱の `migrations/` しか使わない（`migrationsDir` を渡さない）ので、`.sql` が1本も無い警告には届かない。
+ * この CLI は `statement_timeout` を設定しない（ADR 0552）。接続・ロール・DB 側の `statement_timeout` などは
+ * migration の本体の DDL にそのまま効く（CLI が扱うのは `lock_timeout` だけで、取った直後に `RESET` する）。
+ * 短い `statement_timeout` が掛かった環境では、`DATABASE_URL` の `options` でこの接続だけ無効にする:
+ * `?options=-c%20statement_timeout%3D0`（`PGOPTIONS="-c statement_timeout=0"` でも同じ）。
+ * 手順は `packages/postgres/README.md` の「接続・ロール・DB の `statement_timeout` などは、migration の本体にも効く」節。
  */
 async function main(): Promise<void> {
   const parsed = parseMigrateCliOptions(process.argv.slice(2), process.env);

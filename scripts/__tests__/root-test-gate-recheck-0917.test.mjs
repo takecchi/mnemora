@@ -6,24 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { gateExitCode, summarizeStages } from "../root-test-gate.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G6 のうち、PR #461（ADR 0210）の
- * ルートの `test` 門に対して、変異を当てて見つかった「すり抜け」だけを固定する歯。
- *
- * 既存の `root-test-gate.test.mjs`（純関数）と `run-db-tests.test.mjs`（`STAGES` の配線）が
- * 既に守っているものは重ねていない。ここで足すのは次の3つ。
- *
- * 1. 要約が「失敗した段」を名指しし、失敗を成功・未起動と取り違えないこと（純関数）。
- * 2. **`run-root-test-gate.mjs`（実行部）が、前段が落ちても後段を必ず起動し、全段の出力を
- *    流し、1つでも落ちれば非0で終わること**——ADR 0210 の芯だが、既存の歯は実行部を一度も
- *    起動していなかった（段2が `pnpm -r run test` を呼ぶので、本物の `STAGES` を歯の中から
- *    起動すると再帰する）。⟹ **実行部の実ファイルを一時ディレクトリへ複写し、`STAGES` だけを
- *    軽い偽の段へ差し替えて起動する**（実行部のコードは1行も書き換えない）。
- * 3. CI の `build` ジョブの `Test` 段が、`pnpm run test` を黙って緑に落とされずに打つこと。
- *
- * 各 `it` の名前の末尾の記号（R1・R10 など）は、Issue #1812 のコメントの変異表の番号である。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptsDir = join(repoRoot, "scripts");
 
@@ -48,7 +30,6 @@ describe("summarizeStages / gateExitCode: 失敗を、成功とも未起動と�
     expect(summary).toContain("失敗した段: stage-two");
     expect(summary).toContain("門: ✗ 失敗");
     expect(summary).not.toContain("門: ✔ 通過");
-    // 3段とも走ったことは、失敗があっても名乗る（未起動と取り違えない）。
     expect(summary).toContain("3/3 段が実際に走りました");
     expect(summary).not.toContain("未起動");
   });
@@ -72,11 +53,9 @@ describe("summarizeStages / gateExitCode: 失敗を、成功とも未起動と�
   });
 });
 
+// 本物の STAGES は pnpm -r run test を呼ぶので、そのまま起動すると再帰する。
+// 実行部の実ファイルを一時ディレクトリへ複写し、STAGES だけ差し替える。
 /**
- * 実行部の実ファイルを一時ディレクトリへ複写し、`STAGES` だけを差し替えて起動する。
- * `run-root-test-gate.mjs` は自分の1つ上のディレクトリを `cwd` にして段を起動するので、
- * 一時ディレクトリの `scripts/` に2ファイルを置けばよい。
- *
  * @param {{ name: string; code: string }[]} fakeStages node -e で走らせる偽の段
  */
 function runGateWithFakeStages(fakeStages) {
@@ -90,7 +69,6 @@ function runGateWithFakeStages(fakeStages) {
   const stagesSource = JSON.stringify(
     fakeStages.map((s) => ({ name: s.name, command: process.execPath, args: ["-e", s.code] })),
   );
-  // 実物の root-test-gate.mjs の末尾に、`STAGES` を中身ごと差し替える1文だけを足す。
   writeFileSync(
     join(workDir, "scripts", "root-test-gate.mjs"),
     `${readFileSync(join(scriptsDir, "root-test-gate.mjs"), "utf8")}\nSTAGES.splice(0, STAGES.length, ...${stagesSource});\n`,
@@ -187,7 +165,6 @@ describe("run-root-test-gate.mjs（実行部）: 前段が落ちても後段を�
 describe("ci.yml の build ジョブの Test 段が、ルートの test 門を黙って緑に落とされずに打つこと（配線）", () => {
   const lines = readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8").split("\n");
 
-  /** `  build:` ジョブの行だけを返す。 */
   function jobLines(jobId) {
     const start = lines.findIndex((line) => line === `  ${jobId}:`);
     expect(start, `${jobId} ジョブが無い`).toBeGreaterThanOrEqual(0);
@@ -201,7 +178,6 @@ describe("ci.yml の build ジョブの Test 段が、ルートの test 門を�
     return lines.slice(start, end);
   }
 
-  /** 段（`      - name:` で始まる塊）のうち、述語に合う最初のもの。 */
   function stepBlock(block, predicate) {
     const starts = block
       .map((line, i) => (/^ {6}- name:/.test(line) ? i : -1))

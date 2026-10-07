@@ -5,20 +5,6 @@ import type { NewMemoryEvent } from "../event.js";
 import { isMalformedIdentifierError } from "../identifier.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0573: ADR 0563 の歯の穴（独立検証で生き残った変異 A2・P2・N5・C6）を塞ぐ。
- *
- * - A2/P2: `archiveDecayed`・`purgeMemory` が行に書く `updatedAt` は壁時計（Postgres は `updated_at = now()`）。
- *   `opts.now`・`event.at` を入れてはいけない（`archived` イベントの `at`・`purgedAt` は逆にそちら）。
- * - N5: `createMemory` の `extractorVersion` の NUL は、素の `Error`（`MalformedIdentifierError` ではない）。
- *   InMemory は `stringHasNul` の素の `Error`、Postgres は `assertNoNulInNewMemory` の素の `Error`で、どちらも
- *   `extractorVersion` は識別子ではなく `text` の欄として扱う。
- * - C6: `listActiveClaimPredicates` は predicate ごとの最新の `createdAt` の新しい順、同着は predicate の順。
- *   既存の `fake-list-claim-predicates-partial-claim-key.test.ts` の同題の歯は `result.sort()` をかけて比べるので並びを見ていない。
- *
- * **testkit の適合テストの対象ではない**（Issue #768 コメント2）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let n = 0;
 
@@ -170,11 +156,6 @@ describe("createMemory の extractorVersion の NUL は素の Error（識別子�
   });
 });
 
-/**
- * ADR 0596: `createdAt` は作ったときのまま。`archiveDecayed` の後も `purgeMemory` の後も書き換わらない。
- * **明文の約束はない**が、作成時刻が後から書き換わらないことを当然の不変条件として縛る、とクローンが判断した
- * （supersede の `createdAt` を同じ判断で縛った ADR 0592 と同じ線）。Fake は `Date` だけを固定して、作成と操作の間で壁時計を進める。
- */
 describe("createdAt は archive・purge の後も作成時のまま（ADR 0596）", () => {
   it("archiveDecayed の後も、createdAt は作成時の値（updatedAt は進む）", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -284,8 +265,6 @@ describe("listActiveClaimPredicates の並び（新しい順、同着は predica
     vi.useFakeTimers({ toFake: ["Date"] });
     const { memoryStore } = createFakeRuntimeStores();
     vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
-    // testkit の適合テスト（memory-store-conformance.ts）が Postgres（COLLATE "C"）に当てているのと同じ入力。
-    // 😀 は D83D DE00 なので、UTF-16 順（JS の `<`）では ～（FF5E）より前に来る。
     const scrambled = ["\u{1F600}", "a", "～", "Z", "é", "_", "B"];
     for (const predicate of scrambled) {
       await memoryStore.createMemory(ctx, memory(claim(predicate)));
@@ -304,7 +283,6 @@ describe("listActiveClaimPredicates の並び（新しい順、同着は predica
     vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
     await memoryStore.createMemory(ctx, memory(claim("newer_created")));
 
-    // older_created を後から強化する（active のまま updatedAt だけ進む。createdAt は変わらない）。
     const reinforcedAt = new Date("2030-01-03T00:00:00.000Z");
     vi.setSystemTime(reinforcedAt);
     await memoryStore.reinforce(ctx, older.id, reinforcedAt);

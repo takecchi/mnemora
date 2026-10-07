@@ -5,23 +5,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0562: Fake が、呼び手の書き換えから自分の中身を守る歯（Issue #1412 A8 の約束）。
- *
- * 約束は2方向ある。
- *  - 入力: 渡した配列・オブジェクト・Date を、渡した後に呼び手が書き換えても、保存した値は変わらない。
- *  - 返り値: 返された配列・オブジェクト・Date を呼び手が書き換えても、次に読んだ値は変わらない。
- *
- * `packages/testkit` の適合テストは Fake を通らない（Issue #768、そのコメント2）ので、同じ期待をここで当てる。
- * 適合テストの該当 9 本は `describeXxxStoreConformance` の it 名のうち「Issue #1412 A8」のもの
- * （`createMemory` の入力・`get`・`getMany`・`supersedeWithNewMemories` の `created[].memory`・`getVectors`・
- * `EventStore.append` の meta・`EventStore.get` の meta・`claimBatch` の payload・`complete`/`fail` の `opts.at`）。
- *
- * 各 `describe` の後半は**対照の歯**——書き換えない場合に値が正しく読める／返り値を呼び手が書き換えること自体は
- * できる（凍結していない）／Date が Date のまま読める（文字列化していない）／id が変わらない、を縛る。
- * 「写しを取りすぎて正当な操作まで壊す」実装で赤くなる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const T0 = "2026-01-01T00:00:00.000Z";
 

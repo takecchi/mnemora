@@ -4,130 +4,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
+ * 正本は `packages/core/src/` を自前でパースせず、公開 API snapshot（`scripts/__snapshots__/public-api/core.d.ts`）を読む。
+ * snapshot の鮮度は CI の `pnpm run api:check` が保証するので、自前の TypeScript パーサを持たずに済む。
  *
- * **`docs/architecture.md` §5 が再掲している port interface のコード片（`MemoryStore` 等）が、
- * `packages/core` の実体からずれたら赤くなる**（Issue #604、ADR 0269、ADR 0273、ADR 0278）。
+ * コード片はインデント幅ではなく括弧の対応で切り出す。docs は2スペース、snapshot は4スペースで書式が違い、
+ * インデント幅に依存すると書式が変わるたびに壊れる。
  *
- * ## 経緯 —— なぜ「件数」ではなく「実体との対応」を検査するか
- *
- * ADR 0269 が `docs/architecture.md` §5 の17個の named interface/type を実体と突き合わせ、
- * 4件の drift（`MemoryStore` 10口・`VectorStore` 1口・`TenantSettingsStore` 7口・
- * `ScoringStrategy` の型名1件）を見つけた。ADR 0273 が「§5 は写した側であり、実体
- * （`packages/core/src/`）が正本である」と決め、PR #622 がその drift を直した——だが
- * **歯（テスト）は1本も置かれず**、直した直後から同じ形の drift がまた静かに積み上がる
- * 余地が残っていた。本歯はその歯を置く。
- *
- * ## 3つに割る（ADR 0273「3つに割る」をそのまま引き継ぐ。⛔ 混同しないこと）
- *
- * ADR 0273 は §5 の対象を3種に分けている。**この歯は1種目だけを縛る。**
- *
- * 1. **写し（実体が在るもの）** ⟹ 本歯の対象。`TARGET_INTERFACE_NAMES` /
- *    `SCORING_STRATEGY_TARGET_NAME` に持つ名前だけを実体と突き合わせる。
- * 2. **予告（`Sensor`・`SpeechPolicy`。実体が無いと文書自身が明記している）**
- *    （`RelationStore` もここに居たが、2026-09-30 に実体ができて1番へ移った——Issue #207/#933
- *    PR2、ADR 0381、ADR 0273 の追記）
- *    ⟹ ⛔ **本歯の対象にしない。**素朴に「§5 が名前を挙げているものを全部実体と比べる」歯を
- *    作ると、この3つが「実体が無い」という理由だけで常に赤くなる——ADR 0269 が「採らなかった
- *    案1」で指摘した偽陽性そのものである。⟹ この3つは `TARGET_INTERFACE_NAMES` に**入れない**。
- *    入っていないことを、下の「やりすぎ側」の it で機械的に確認する。
- * 3. **`ScoringStrategy`（関数型のエイリアス）** ⟹ 型シグネチャの逐語比較。`MemoryStore` 等の
- *    「メンバー名の集合」比較とは別ロジック（下記）。
- *
- * ## 正本の取り方 —— `packages/core/src/` を直接パースせず、公開 API snapshot を使う
- *
- * 正本の取り方には2つの道があった:
- *
- * - (a) `packages/core/src/interfaces/*.ts` を自前の TypeScript パーサで読む。
- * - (b) `scripts/__snapshots__/public-api/core.d.ts`（ADR 0178 の公開 API snapshot）を読む。
- *
- * **本歯は (b) を採る。** 理由:
- *
- * - `scripts/__snapshots__/public-api/core.d.ts` は `packages/core` の**ビルド後の公開型
- *   シグネチャそのもの**であり（`scripts/check-public-api-surface.mjs`）、その鮮度は
- *   `.github/workflows/ci.yml` の `build` ジョブ（required check）の `pnpm run api:check` が
- *   **毎 PR で強制している**（`scripts/__tests__/ci-yml-api-check-wiring.test.mjs` が
- *   その配線自体を別に縛っている）。⟹ **既に「腐らないことが保証された実装の写し」が
- *   repo に在り、それを使えば本歯が自前の TypeScript パーサを持つ必要が無い。**
- * - 【実測、本歯の作業時点】`scripts/__snapshots__/public-api/core.d.ts` に
- *   `RelationStore`/`Sensor`/`SpeechPolicy` は**1件も現れない**
- *   （`grep -c "RelationStore\|Sensor\|SpeechPolicy"` が0件）——実体を持たないこの3つは
- *   ビルドしても `.d.ts` に出てこないので、**category 2 が snapshot に混じる心配はそもそも無い**。
- * - 【実測】対象名（`Ctx`/`MemoryStore`/`VectorStore`/`LexicalStore`/`LLMProvider`/
- *   `EmbeddingProvider`/`Scheduler`/`DecayStrategy`/`EventStore`/`TokenCounter`/`Clock`/
- *   `OutboxStore`/`TenantSettingsStore`/`ScoringStrategy`）は、いずれも snapshot に
- *   ちょうど1回だけ出現する（`grep -cE`で確認済み）。
- *
- * ⚠ **確かめていないこと**: snapshot の鮮度は CI（`build` ジョブ）にしか保証されていない。
- * **手元で `packages/core` を編集した直後、`pnpm run build` を打たずに本歯だけを走らせると、
- * snapshot は古いままなので、本歯は「新しい実装 vs 古い snapshot」を比べて誤検出しうる。**
- * これは `AGENTS.md`「古い `dist/` のまま `check-public-api-surface.mjs --write` を打つ」の
- * 穴と同型であり、本歯固有の対処は無い——`pnpm run build && node
- * scripts/check-public-api-surface.mjs`（snapshot 自体を鮮度チェック）を先に通すこと。
- *
- * ## 抽出方法 —— インデント幅ではなく、括弧の対応で本文を切り出す
- *
- * `docs/architecture.md` のコード片は2スペース、snapshot は4スペースとインデント幅が違う
- * （前者は手書き、後者は `tsc` の出力）。**インデント幅に依存する抽出は両者で書式が変わる
- * たびに壊れる**——だから本歯は「開始位置から `{`/`(`/`[` の対応を辿って、深さ0で終わる
- * `;` ごとに1メンバーとして切り出す」という、書式に依存しない方式を採る
- * （ADR 0269 決定3が自分のスクリプトで採ったのと同じ考え方、「開始行から括弧の対応を辿って
- * 終端を求める」の延長）。切り出した各メンバー文からは、先頭の JSDoc ブロックコメント
- * （`/** ... *\/`）を取り除いてから識別子を読む——`OutboxStore.complete` の直前にある
- * `{@link OutboxLeaseConflictError}` を含む複数行コメントで、実際にこれを削って
- * 初めて正しく抽出できることを手元で確認した。
- *
- * ## この歯が縛らないこと（⛔ 消さないこと）
- *
- * - 🔴 **`RelationStore`/`Sensor`/`SpeechPolicy`（category 2）は縛らない。** 実装されても
- *   されなくても、この歯はこの3つについて何も言わない。実装されたときに §5.3/§5.13 を
- *   「予告」から「写し」へ書き直すかどうかは人の判断であり、この歯は関与しない
- *   ——実装を罰する歯にしないため（依頼の指示どおり）。
- * - 🔴 **随伴する型は対象外。** `VectorStore` の節にある `EmbeddingSpaceId`/`VectorEntry`、
- *   `MemoryStore` の節にある `MemoryStatus`、`OutboxStore` の節にある
- *   `ClaimOutboxJobsOptions`/`OutboxLeaseConflictError` 等は、ADR 0269 決定3の17項目にも
- *   含まれておらず、本歯の対象名一覧にも無い。⟹ **これらのフィールド・引数がずれても、
- *   この歯は緑のままである。**
- * - 🔴 **メンバーの「型」までは比較しない（`ScoringStrategy` を除く）。** `MemoryStore` 等は
- *   メンバー**名**の集合だけを見る——`reinforce` の引数の型が変わっても、名前
- *   `reinforce` が両側に在れば緑である。PR #622 が直した `reinforce` の引数差
- *   （3引数→4引数）のような drift は、名前が変わらない限りこの歯では捕まえられない。
- * - 🔴 **§5 の中に新しい named interface が丸ごと1つ増えても、この歯の対象一覧
- *   （`TARGET_INTERFACE_NAMES`）に手で足すまで検査されない。** ADR 0244 の `Runtime` の歯が
- *   `runtime.ts` という単一のファイルから毎回動的にメソッド一覧を数え直せるのに対し、本歯は
- *   「§5 のどの節が『写し』でどの節が『予告』か」という**意味の分類**（ADR 0273 決定）を
- *   機械的には再導出できない——分類そのものは人（ADR 0269/0273）が決めたものであり、
- *   本歯はその分類結果を一覧として持つ（件数としては持たない。下記参照）。
- * - 🔴 **名前がどこに書かれているかは見ない。** §5 の中のどこかに対応するコード片が
- *   在ればよく、節番号が変わっても（§5.2.1 の例のように）追随できるが、逆に
- *   コード片が本来あるべき節から迷子になっていても検出できない。
- *
- * ## ⚠ 偽陽性の条件（AGENTS.md「偽陽性率に上限を置けない検査は門にしない」への回答）
- *
- * - **`docs/architecture.md` の書式（コードフェンス内のインデント・改行位置）が変わっても、
- *   本歯は偽陽性を出さない**——上記の通り抽出は括弧の対応に基づき、インデント幅に依存しない。
- * - ⚠ **ただし、メンバー文の途中に本歯が想定しない構文（ブロックコメント以外のコメント形式・
- *   デコレータ・見たことのない TypeScript 構文）が入ると、名前抽出に失敗しうる。** その場合は
- *   「メンバーが両側にあるのに名前が一致しない」という形の**偽陽性**になりうる——これは
- *   「陽性対照: extractMemberNames は…」の it が壊れを検出する対象ではない（あちらは合成した
- *   最小構文だけを見る）。**実物のメンバー文で抽出漏れが起きたら、その節を手動で確認すること。**
- *   本歯の設計時点でこの形の偽陽性は実際に1回踏んでいる（`OutboxStore.complete` の直前の
- *   JSDoc）——コメント除去を足して解消したが、**未知のコメント形式・構文が新たに増えたら
- *   同じ形の偽陽性が再発しうる**、という限界は消えていない。
- * - **snapshot が古いまま走らせると誤検出しうる**（上記「確かめていないこと」参照）——
- *   これは偽陽性であり本歯の対処範囲外（`pnpm run build` を先に通すことが前提）。
- *
- * ## `Runtime` の歯（ADR 0244）との違い
- *
- * ADR 0244 の歯は「メソッド名がプローズのどこかに `` `name` `` の形で出現するか」という
- * ゆるい検査だった（README/vision/architecture の3つの生きた文書が対象）。本歯は
- * `docs/architecture.md` 1文書だけが対象だが、**§5 はメソッド名を `` `name` `` で言及する
- * だけでなく、`interface X { ... }` という*コード片そのもの*を再掲している**——だから本歯は
- * ゆるい文字列包含ではなく、コード片を構造的に切り出してメンバー集合として比較する
- * （`Runtime` の歯より厳密だが、対象は1文書に限られる）。ADR 0244 の道具
- * （`runtime-method-doc-correspondence.test.mjs`）をそのまま拡張しなかった理由も
- * これである——あちらの「行頭Nスペースのメソッド宣言」抽出は、§5 のような複数行にまたがる
- * シグネチャ・ネストしたオブジェクト型リテラルを持つコード片には使えない。
+ * 縛らないこと:
+ * - 予告（実体が無いと文書自身が明記しているもの）。実装されても罰しない。
+ * - 随伴する型（`EmbeddingSpaceId` など）。
+ * - メンバーの型（`ScoringStrategy` を除く）。名前の集合だけを比べ、署名は `architecture-section5-port-signature-correspondence.test.mjs` が見る。
+ * - 対象一覧 `TARGET_INTERFACE_NAMES` への追加。写しか予告かの分類は機械的に再導出できないので、手で足す。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -138,9 +25,7 @@ const snapshotPath = join(repoRoot, "scripts/__snapshots__/public-api/core.d.ts"
 const architectureText = readFileSync(architecturePath, "utf8");
 const snapshotText = readFileSync(snapshotPath, "utf8");
 
-// ⭐ 「一覧」を持つ（件数ではない）。ADR 0269 決定1・ADR 0273「3つに割る」が既に人手で
-// 分類した結果の写しであり、本歯はこの分類を機械的に再導出しない
-// （AGENTS.md「対象の一覧をその場で導出するか、一覧そのものを持つ（件数ではなく）」）。
+// 件数ではなく一覧を持つ。写しか予告かの分類（ADR 0269 決定1・ADR 0273）は人が決めたもので、機械的には再導出できない。
 const TARGET_INTERFACE_NAMES = [
   "Ctx",
   "MemoryStore",
@@ -160,8 +45,7 @@ const TARGET_INTERFACE_NAMES = [
 
 const SCORING_STRATEGY_TARGET_NAME = "ScoringStrategy";
 
-// 🔴 category 2（実体が無いと文書自身が明記している。ADR 0269 決定3・ADR 0273「3つに割る」2番）
-// ⟹ 本歯の対象に「入れない」ことそのものを、下の it で機械的に確認する。
+// 予告は入れない。入れると、実体が無いという理由だけで常に赤くなる（ADR 0269）。
 const PLACEHOLDER_NAMES_NOT_TARGETED = ["Sensor", "SpeechPolicy"];
 
 function section5Span(text) {
@@ -180,10 +64,6 @@ function section5Span(text) {
   return text.slice(startIdx, startIdx + heading.length + nextHeadingRel);
 }
 
-/**
- * `interface NAME { ... }` / `type NAME = { ... }` の宣言を探し、開き `{` の index を返す。
- * 見つからなければ `-1`。
- */
 function findDeclarationOpenBraceIndex(text, name) {
   const re = new RegExp(`(?:export\\s+)?(?:interface|type)\\s+${name}\\b[^{;]*\\{`);
   const m = re.exec(text);
@@ -191,7 +71,6 @@ function findDeclarationOpenBraceIndex(text, name) {
   return m.index + m[0].length - 1;
 }
 
-/** `{` から対応する `}` までの中身（両端の括弧を含まない）を、括弧の対応を辿って切り出す。 */
 function extractBalancedBlock(text, openBraceIdx) {
   let depth = 0;
   for (let i = openBraceIdx; i < text.length; i++) {
@@ -207,18 +86,12 @@ function extractBalancedBlock(text, openBraceIdx) {
   );
 }
 
-/** JSDoc 形式のブロックコメント（`/** ... *\/`）を取り除く。 */
+/** JSDoc を除いてから識別子を読む。`OutboxStore.complete` の直前の `{@link …}` を含む複数行コメントで、除かないと抽出が壊れる。 */
 function stripBlockComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-/**
- * インターフェース本文（`{`/`}` の中身）から、トップレベルのメンバー宣言の名前を
- * 括弧の対応を辿って機械的に抽出する。⭐ インデント幅に依存しない
- * （`docs/architecture.md` は2スペース、snapshot は4スペースで書式が違うため）。
- *
- * @returns {string[]}
- */
+/** @returns {string[]} */
 function extractMemberNames(innerTextRaw) {
   const innerText = stripBlockComments(innerTextRaw);
   let depth = 0;
@@ -245,7 +118,6 @@ function extractMemberNames(innerTextRaw) {
   return names;
 }
 
-/** `text` の中から `name` の interface/type 本文を見つけ、メンバー名の集合（ソート済み）を返す。 */
 function extractInterfaceMemberNames(text, name, sourceLabel) {
   const openBraceIdx = findDeclarationOpenBraceIndex(text, name);
   if (openBraceIdx === -1) {
@@ -255,7 +127,6 @@ function extractInterfaceMemberNames(text, name, sourceLabel) {
   return [...extractMemberNames(block)].sort();
 }
 
-/** `type NAME = ...;` の右辺（関数型など）を1文として取り出す。`ScoringStrategy` 専用。 */
 function extractTypeAliasStatement(text, name, sourceLabel) {
   const re = new RegExp(`(?:export\\s+)?type\\s+${name}\\s*=\\s*[^;]+;`);
   const m = re.exec(text);
@@ -265,7 +136,6 @@ function extractTypeAliasStatement(text, name, sourceLabel) {
   return m[0];
 }
 
-/** `export ` の有無・前後の空白だけを正規化する（構文上のスタイル差を無視するため）。 */
 function normalizeTypeAliasStatement(stmt) {
   return stmt
     .replace(/^export\s+/, "")

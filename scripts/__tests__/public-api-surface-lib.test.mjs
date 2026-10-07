@@ -12,20 +12,6 @@ import {
   resolveRelativeDeclarationImport,
 } from "../public-api-surface-lib.mjs";
 
-/**
- * `scripts/check-public-api-surface.mjs`（Issue #342 / ADR 0178）が使う純関数の歯。
- *
- * ⭐ **この歯が測っているもの**: 到達可能性の絞り込み（`exports.*.types` から相対 import を
- * BFS で辿ったものだけを拾い、`dist/` を無差別に拾わないこと）と、コメント剥がし
- * （JSDoc を残さず正規化すること）が実際に効いていること。
- *
- * すべて合成フィクスチャ（一時ディレクトリに手で作った小さな `.d.ts`）に対して行う——
- * `scripts/__tests__/check-cjs-transpile-parse.test.mjs` の docstring が説明するとおり、
- * CI の `build` ジョブで `pnpm run test` が走る「Test」段は「Build」段より**前**にあり、
- * 実物の `packages/<name>/dist` はまだ存在しないことがある。実物に対して走らせる確認は
- * `.github/workflows/ci.yml` の `build` ジョブが `Build` の直後に行う。
- */
-
 /** @type {string | undefined} */
 let fixtureRoot;
 
@@ -55,7 +41,6 @@ describe("entryTypesFilesFromExports", () => {
       exports: {
         ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
         "./fixtures": { types: "./dist/fixtures.d.ts", default: "./dist/fixtures.js" },
-        // `"./package.json": "./package.json"` のような文字列エントリは types を持たない。
         "./package.json": "./package.json",
       },
     };
@@ -102,10 +87,6 @@ describe("resolveRelativeDeclarationImport（⭐ .cjs/.mjs の拡張子ずれ、
     expect(resolveRelativeDeclarationImport("./migrations-dir.cjs", dir)).toBe(
       join(dir, "migrations-dir.d.cts"),
     );
-    // 素朴な「.js → .d.ts」変換だと '.cjs' を単純に '.d.ts' へ変えて
-    // 'migrations-dir.d.ts'（実在しない）を探しに行き、ここで落ちるか、
-    // 見落として BFS から抜け落ちる。ここではそれが起きていないことを別途、
-    // 存在しないファイルで確認する。
     writeFile(dir, "migrations-dir.d.ts", "// これは .cjs の解決先ではない\n");
     expect(resolveRelativeDeclarationImport("./migrations-dir.cjs", dir)).toBe(
       join(dir, "migrations-dir.d.cts"),
@@ -252,7 +233,6 @@ describe("buildPublicApiSnapshotText（統合）", () => {
     expect(text).toContain("// ===== dist/a.d.ts =====");
     expect(text).toContain("// ===== dist/index.d.ts =====");
     expect(text).not.toContain("doc");
-    // a.d.ts が index.d.ts より辞書順で先に来る。
     expect(text.indexOf("dist/a.d.ts")).toBeLessThan(text.indexOf("dist/index.d.ts"));
   });
 

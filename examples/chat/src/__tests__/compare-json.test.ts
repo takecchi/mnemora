@@ -3,14 +3,6 @@ import type { Omission } from "@mnemora/core";
 import { buildCompareJson } from "../compare-json.js";
 import type { ComparisonRow } from "../compare.js";
 
-/**
- * Issue #242: `compare-json.ts` の出力口。DB もネットワークも要らない(純関数)。
- *
- * ⭐ **最重要の検査**: `ComparisonRow[]` をそのまま写していること(集計を作り直さない)、
- * `omitted`(`Omission[]`)を丸ごと保持すること(`retrieval-json.ts`/`time-term-json.ts` の
- * 対応する検査と同じ理由)。
- */
-
 function makeOmission(
   overrides: Partial<Extract<Omission, { kind: "not_indexed" }>> = {},
 ): Omission {

@@ -4,16 +4,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewRecallRecord } from "../recall.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore`（ADR 0439）と `FakeVectorStore.upsert`（ADR 0436）が、別テナントの
- * memory・recall・observation を指す参照を、実在しない id と同じ message で断ることを縛る歯。
- *
- * クローンの判断: message（`... not found for tenant: <id>` の形）まで縛る。例外の型は縛らない
- * （`Error` の一種であればよい）。`toThrow(文字列)` は message の部分一致を見る。
- *
- * どの it も、同じ検査の中で「自テナントの参照は通る」も見る（検査の外し忘れ・やりすぎの両側に歯を当てる）。
- */
-
 const ctxA: Ctx = { tenantId: "tenant-a" };
 const ctxB: Ctx = { tenantId: "tenant-b" };
 const space = { provider: "test", model: "fixture-model", dimensions: 3 };

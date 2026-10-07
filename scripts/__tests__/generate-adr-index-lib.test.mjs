@@ -15,12 +15,6 @@ import {
 } from "../generate-adr-index-lib.mjs";
 
 import { parseAdrFilename } from "../adr-renumber-lib.mjs";
-/**
- * `scripts/generate-adr-index-lib.mjs`（生成器の純関数側）の歯（ADR 0137）。
- *
- * ⚠ このファイルは実際の `docs/decisions/` を1バイトも読まない。実ファイルへの
- * 配線は `adr-index-freshness.test.mjs` が見る（ADR 0128 時代の役割分担を踏襲）。
- */
 
 describe("isAdrFilename", () => {
   it("4桁番号+ハイフン区切りslug+.md だけを ADR ファイルとして認める", () => {

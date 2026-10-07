@@ -5,19 +5,6 @@ import type { MemoryId } from "../ids.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * core の Fake の、`event` を受け取る書き込みの口は、イベントが書けない（Invalid Date の `at`、列挙に無い `kind`
- * など）と、状態を1つも書き換えずに投げる——testkit の fixture（書き換える前に検査する）と `@mnemora/postgres`
- * （1トランザクションで巻き戻る）と同じ。以前は状態を書き換えてからイベントを組み立てていたので、状態の書き換えを
- * 残したまま投げていた（`updateStatusWithEvent` は #1368 で先に揃えた。ここはその残りの6つの口）。
- *
- * - `purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`・
- *   `supersedeWithNewMemories`（新しい記憶も作らない）・`restoreSupersededBy`（対象が複数でも1件も戻さない）。
- * - やりすぎない: 正しいイベントなら今どおり書き換え、イベントを積む。
- *
- * これは Fake（テストの道具）の直しであり、出荷物の振る舞いは変えていない。testkit の fixture には触れていない。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const INVALID = new Date(Number.NaN);
 let hashCounter = 0;
@@ -248,8 +235,6 @@ describe("core の Fake: やりすぎない——正しいイベントなら今�
       oldStatus: (await stores.memoryStore.get(ctx, old.id))?.status,
       newCreated: superseded.created[0]?.created,
       restored: restored.restored.map((m) => m.status),
-      // purge 1・markContestedPair 2×2・resolveContestedPair 2・resolveOrphanedContested 1・
-      // supersede 1・restore 2（updateStatus はイベントを積まない）
       eventsAdded: events() - start,
     }).toEqual({
       purgedContent: "[purged]",

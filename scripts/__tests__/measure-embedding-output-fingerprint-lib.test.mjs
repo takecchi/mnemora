@@ -8,18 +8,6 @@ import {
   vectorDimensions,
 } from "../measure-embedding-output-fingerprint-lib.mjs";
 
-/**
- * `scripts/measure-embedding-output-fingerprint-lib.mjs` の歯（Issue #565）。
- *
- * ⛔ **本物のモデルは一度も呼ばない。** 固定のベクトル（偽の `embed()` の戻り値）を
- * 直接渡して、バイト列化・hash・CPU 情報の抽出・組み立てだけを測る。
- *
- * 🔴 **歯1（マネージャー指示: 実装前に赤であることを確認すること）**——
- * 同じベクトル → 同じ sha256。1成分でも違えば違う sha256。**成分の並べ替えは
- * 違う hash になる**（バイト列化が成分の順序をソートしていないことの固定。
- * 変異(iii)「並べ替えてから hash する」を検出する）。
- */
-
 describe("serializeVectorsToBytes / sha256HexOfVectors（歯1）", () => {
   const vectorsA = [
     [0.1, 0.2, 0.3],
@@ -43,7 +31,6 @@ describe("serializeVectorsToBytes / sha256HexOfVectors（歯1）", () => {
   });
 
   it("成分の順序を入れ替えると違う sha256 になる（並べ替えて hash していないことの固定）", () => {
-    // vectorsC は vectorsA の1本目の成分を並べ替えただけ——多重集合としては同じ値。
     const vectorsC = [
       [0.3, 0.2, 0.1],
       [-1.5, 2.25, 0.0],

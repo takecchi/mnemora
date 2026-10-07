@@ -32,7 +32,6 @@ function recallWith(memories: RecallResult["memories"]): RecallResult {
   };
 }
 
-/** `queryRecall` が `runtime.recall` に実際に渡した `RecallQuery` を捕まえるだけの fake。 */
 function fakeRuntimeCapturingQuery(captured: { query?: RecallQuery }): Runtime {
   return {
     recall: async (_ctx: Ctx, query: RecallQuery) => {
@@ -49,8 +48,7 @@ const FAKE_CONVERSATION: Conversation = {
 };
 
 describe("queryRecall（Issue #291 / ADR 0168: 既定で association を渡す）", () => {
-  // Issue #1775 の #838（変異8）: chat の独自既定の値は core の既定と同じ `{ maxCount: 10 }` のまま
-  // （ADR 0337 決定3が維持を明言。値の根拠は ADR 0168）。ベンチの基準線が静かに動かないよう値そのものを縛る。
+  // chat の独自既定は core の既定と同じ { maxCount: 10 }（ADR 0337）。ベンチの基準線が静かに動かないよう値を縛る。
   it("DEFAULT_MNEMORA_PATH_ASSOCIATION は { maxCount: 10 }", () => {
     expect(DEFAULT_MNEMORA_PATH_ASSOCIATION).toEqual({ maxCount: 10 });
   });
@@ -71,12 +69,7 @@ describe("queryRecall（Issue #291 / ADR 0168: 既定で association を渡す�
 
     await queryRecall(runtime, { tenantId: "t" }, FAKE_CONVERSATION, { association: null });
 
-    // ⚠ ADR 0337 前はここで「association キー自体を渡さない（省略）」を検査していた
-    // ——`packages/core` の既定が off だったので、省略が off と同じ効果だったからである。
-    // `packages/core` の既定が on に変わった後は、省略すると連想が走ってしまう
-    // （黙って off の脱出口が壊れる）。⟹ ここでは null をそのまま転送することを検査する
-    // ——`packages/core` 側の既定が何であっても、この関数の `null` が確実に off を
-    // 意味するようにするための歯（`mnemora-path.ts` の `queryRecall` doc 参照）。
+    // association を省略せず null を転送させる。core の既定が on なので、省略すると連想が走り off の脱出口が黙って壊れる。
     expect(captured.query?.association).toBeNull();
     expect(captured.query && "association" in captured.query).toBe(true);
   });
@@ -96,8 +89,6 @@ describe("queryRecall（Issue #291 / ADR 0168: 既定で association を渡す�
 describe("buildMnemoraPrompt", () => {
   it("memories が0件なら index の行だけになる（空の digest 行は filter で落ちる）", () => {
     const prompt = buildMnemoraPrompt(recallWith([]));
-    // 空の digest 行を落とさずに join すると先頭に無駄な改行が付く。
-    // ここでは「index の行そのものと完全に一致する」ことまで確認する。
     expect(prompt).toBe("(索引: スコープ内 0 件のうち 0 件を提示)");
   });
 
@@ -115,21 +106,12 @@ describe("buildMnemoraPrompt", () => {
         },
       ]),
     );
-    // digest はそのまま含まれる（前に由来・話者・主題のタグが付く。
-    // Issue #691。タグの内容・組み合わせの網羅的な描画契約は
-    // `provenance-prompt-contract.test.ts` が持つ——ここでは配線が
-    // 生きていることだけを見る）。
     expect(prompt).toContain("テストの digest");
     expect(prompt).toContain("[由来:stated]");
     expect(prompt).toContain("1 件のうち 1 件");
   });
 });
 
-/**
- * `reportMemoryUsage`（Issue #301 / ADR 0163）——DB を一切使わず、`runtime.observe`
- * の呼び出し方だけを検査する配線の歯。本物の Postgres 上で `reinforce` が実際に
- * 発火することの検査は `__tests__/memory-usage-reinforce.postgres.test.ts` にある。
- */
 describe("reportMemoryUsage", () => {
   function fakeRuntime(): { runtime: Runtime; observe: ReturnType<typeof vi.fn> } {
     const observe = vi.fn(async (): Promise<ObserveResult> => ({

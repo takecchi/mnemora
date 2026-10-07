@@ -3,18 +3,11 @@ import { z } from "zod";
 /**
  * Memory がどこから来たかを表す判別可能ユニオン（docs/memory-model.md §2）。
  *
- * オーナーの原則7「AI の推論とユーザーが言った事実を区別する」は、追加のフラグではなく
- * `kind` の値そのものとして実装される。
+ * AI の推論とユーザーが言った事実の区別は、追加のフラグではなく `kind` の値そのもので表す。
  */
 export type ProvenanceKind = "stated" | "inferred" | "consolidated" | "reflected" | "imported";
 
-/**
- * `ProvenanceKind` の綴りを1箇所にまとめる。
- *
- * これを置く前、同じ5値の列挙が `recall.ts` の `RecallQuerySchema.excludeProvenanceKinds` に
- * 手で複製されていた。閉じたユニオンの綴りが2箇所にあると、片方を直してもう片方を直し忘れる
- * ことは注意力に依存し、必ず失敗する（AGENTS.md の「複製した瞬間から、正文と要約はずれ始める」）。
- */
+/** `ProvenanceKind` の綴りを1箇所にまとめた zod 表現（`recall.ts` の `excludeProvenanceKinds` も使う）。 */
 export const ProvenanceKindSchema = z.enum([
   "stated",
   "inferred",
@@ -114,13 +107,6 @@ const ImportedProvenanceSchema = z.object({
   batchId: z.string().min(1),
 }) satisfies z.ZodType<ImportedProvenance>;
 
-/**
- * **2026-09-17 追記（Issue #272、[ADR 0181](../../../docs/decisions/0181-schema-type-equals-parity.md)）**:
- * `satisfies z.ZodType<Provenance>` を足した。5本の枝それぞれには
- * `satisfies z.ZodType<XxxProvenance>` が付いているのに、まとめのこの1行にだけ
- * 付いていなかった（`OmissionSchema`（recall.ts）・`ObserveInputSchema`
- * （observation.ts）と同じ形の欠落）。**足しても `tsc` は緑のまま。**
- */
 export const ProvenanceSchema = z.discriminatedUnion("kind", [
   StatedProvenanceSchema,
   InferredProvenanceSchema,

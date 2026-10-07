@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAnswerJson } from "../answer-json.js";
 
-/**
- * `buildAnswerJson`（`answer` の実行結果 JSON）の層2（内容保持、#693 / ADR 0296）の集計。
- * DB 不要。`answer-bench.postgres.test.ts`・`answer-cli.postgres.test.ts` は `preserved === true`
- * しか固定しておらず、分母・経路の取り違え・`schemaVersion` を見る歯が無かった
- * （Issue #1776 の #699 のコメント、ADR 0665）。
- */
-
 function pathWith(applicable: boolean, preserved: boolean) {
   return {
     promptSpec: { system: "s", messages: [] },
@@ -34,7 +27,6 @@ function resultWith(id: string, naive: [boolean, boolean], mnemora: [boolean, bo
 }
 
 describe("buildAnswerJson: 層2の集計（#699）", () => {
-  // naive は3件とも保持。mnemora は closed-value の2件のうち1件が欠落。3件目は must-abstain。
   const results = [
     resultWith("c1", [true, true], [true, true]),
     resultWith("c2", [true, true], [true, false]),

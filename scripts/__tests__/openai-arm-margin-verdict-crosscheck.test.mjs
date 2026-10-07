@@ -10,29 +10,7 @@ import {
   decideMarginShadowVerdict,
 } from "../openai-arm-summary-lib.mjs";
 
-/**
- * ADR 0333 §2・§4.1・§4.3「A」の後続作業(クローン miku の判断)。
- *
- * `scripts/openai-arm-summary-lib.mjs` の `decideMarginShadowVerdict`/
- * `computeMarginStatsShadow` は、正本 `examples/chat/src/verdict-candidate-margin.ts`
- * (`decideMarginDropVerdict`)・`examples/chat/src/identifier-arm.ts`
- * (`computeMarginStats`)の**手複製**である(`.mjs` は `tsx` を通さず CI で直接 `node`
- * 実行されるため TS を import できない——`openai-arm-summary-lib.mjs` 冒頭の
- * docstring・`MRR_DROP_THRESHOLD` と同じ事情)。
- *
- * **この歯は、その手複製が実際に同じ入力で同じ出力を返すことを検査する。**
- * ADR 0316 側の手複製(`decideShadowVerdict`/`decideEmbeddingDriftVerdict`)には
- * 同種の歯が無い——`openai-arm-summary-lib.mjs` 自身の docstring がそれを
- * 「検出できていない負債」と明記している。この歯は、margin基準の候補についてだけ、
- * その負債を埋める。
- *
- * ⚠ **「同じ入力」の作り方が両者で少し違う**——TS側 `decideMarginDropVerdict` は
- * 呼び出し側が既に揃えた同順の `(number|null)[]` を受け取る前提だが、`.mjs` 側
- * `decideMarginShadowVerdict` は `probeId` をキーに交差を取ってから比べる
- * (`OpenAiArmProbeMarginJson[]` を読むため)。**この歯は、`.mjs` 側と同じ `probeId`
- * 交差をこの場で組み立ててから TS側へ渡す**——「同じ入力」を保証した上で
- * 出力を突き合わせる。
- */
+// `.mjs` は tsx を通さず直接 node 実行されるため、TS を import できない。
 
 function makeProbeMargins(overrides = {}) {
   const base = { p1: 0.1, p2: 0.12, p3: 0.08, p4: 0.11, p5: 0.09 };
@@ -40,7 +18,6 @@ function makeProbeMargins(overrides = {}) {
   return Object.entries(merged).map(([probeId, margin]) => ({ probeId, margin }));
 }
 
-/** `.mjs` 側と同じ`probeId`交差を、TS側の位置合わせ配列として組み立てる。 */
 function toAlignedArrays(measuredProbeMargins, baselineProbeMargins) {
   const baselineByProbe = new Map(baselineProbeMargins.map((p) => [p.probeId, p.margin]));
   const measuredAligned = [];
@@ -137,8 +114,6 @@ describe("TS↔mjs 突き合わせ: decideMarginDropVerdict / decideMarginShadow
   });
 
   it("実測(コミット済みカセット再生)相当の実データでも一致する(識別子2群相当の分布)", () => {
-    // examples/chat/identifier-probe-baseline.openai.json の identifiersSparse 群
-    // 相当の margin 分布(実際にこのブランチで recorded 再生して得た値の先頭6件)。
     const baseline = [
       { probeId: "a", margin: 0.20959781014893664 },
       { probeId: "b", margin: 0.046534273081364264 },

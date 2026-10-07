@@ -6,28 +6,7 @@ import { describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/ci.yml` の `example-chat` ジョブが、実際に
- * `recall-footprint-calibration-samples` サブコマンドを実行し、その出力を
- * `scripts/recall-footprint-calibration-samples-summary.mjs` へ渡し、artifact として
- * アップロードしていること（Issue #340 フォローアップ、ADR 0314）。**
- *
- * ⚠ **これは `recall-footprint-calibration-samples-summary.test.mjs`/`-lib.test.mjs`
- * の重複ではない**（`ci-yml-compare-wiring.test.mjs` の docstring と同じ理由）。
- * その2本は**入力を自分で作って**要約の中身と exit code を測る——どちらも `ci.yml` を
- * 1バイトも読まない。この歯だけが `ci.yml` を入力に取る。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**`ci-yml-compare-wiring
- * .test.mjs` と同じ判断——歯のために YAML パーサの依存を足していない（依存追加は
- * オーナー専権）。壊れたときは「配線が変わった」か「書き方が変わった」かを見て、
- * 配線が変わっていないなら取り出し方のほうを直すこと（歯を消さないこと）。
- *
- * 🔴 **`--baseline` は `examples/chat/recall-footprint-calibration-samples-baseline.json` へ渡っている**
- * （基準値ファイルは PR #728 の CI artifact で2回一致を経て作った。ADR 0314）。
- * 以前この歯は「まだ渡していない」ことを固定していた。基準値ファイルができたので、
- * `ci-yml-time-term-wiring.test.mjs` が ADR 0121 決定5 で辿った道と同じように、
- * 「実在する基準値ファイルへ配線されている」ことを固定する歯へ置き換えた。
+ * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -36,7 +15,6 @@ const workflow = readFileSync(workflowPath, "utf8");
 
 const JOB_ID = "example-chat";
 
-/** `jobs:` の下の1ジョブを切り出す（他の `ci-yml-*-wiring.test.mjs` と同じ形）。 */
 function extractJob(yaml, jobId) {
   const lines = yaml.split("\n");
   const start = lines.findIndex((line) => line === `  ${jobId}:`);
@@ -53,7 +31,6 @@ function extractJob(yaml, jobId) {
   return lines.slice(start, end).join("\n");
 }
 
-/** `steps:` を段へ切り分け、各段の `name`/`env`/`run` だけを取り出す。 */
 function parseSteps(jobBlock) {
   const lines = jobBlock.split("\n");
   const stepsAt = lines.findIndex((line) => line === "    steps:");
@@ -181,9 +158,6 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
     expect(benchStep?.run).toContain("run recall-footprint-calibration-samples");
   });
 
-  // Issue #1775 の #728（変異22）: ci.yml が呼ぶ名前は、examples/chat の package.json の scripts にあり、
-  // その scripts が叩く cli.ts のサブコマンドも在る。名前が食い違うと、CI の実行そのものが落ちるが、
-  // 他の歯（出力・要約・基準値）はどれも ci.yml と cli.ts のつながりを見ていなかった。
   it("⭐ ci.yml が run で呼ぶ名前が、package.json の scripts と cli.ts のサブコマンドの両方に在る", () => {
     const called = /run\s+(recall-footprint-calibration-samples)\b/.exec(benchStep?.run ?? "")?.[1];
     expect(called, "ci.yml の bench の段が run で呼ぶ名前が見つからない").toBeDefined();
@@ -192,7 +166,6 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
     );
     const script = packageJson.scripts?.[called];
     expect(script, `examples/chat/package.json の scripts に ${called} が無い`).toBeDefined();
-    // scripts の値は cli.ts を、同じ名前のサブコマンドで呼ぶ。
     const commandInScript = /src\/cli\.ts\s+(\S+)/.exec(script)?.[1];
     expect(commandInScript).toBe(called);
     const cli = readFileSync(join(repoRoot, "examples/chat/src/cli.ts"), "utf8");

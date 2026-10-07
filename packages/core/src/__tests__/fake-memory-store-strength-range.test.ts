@@ -3,26 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.createMemory`/`createMemoryWithOutbox`（`packages/core` 自身の
- * runtime テスト用フェイク、`runtime-fakes.ts`）が、`InMemoryMemoryStore`/
- * `PostgresMemoryStore` と同じ値域の検査（ADR 0078: `strength` は `(0, 1]`）を
- * 実際に持っていることを検査する歯。
- *
- * **`packages/testkit` の `memory-store-conformance.ts` の対象ではない。**
- * `FakeMemoryStore` は adapter 適合テストの対象である `MemoryStore` 実装
- * （`InMemoryMemoryStore`/`PostgresMemoryStore`）ではなく、`packages/core` 自身の
- * runtime テスト専用の別系統（`runtime-fakes.ts` 冒頭のコメント: core は testkit に
- * 依存しない）。`fake-reinforce-monotonicity.test.ts` と同じ理由・同じ形。
- *
- * Issue #768: 調査時、この Fake を `describeMemoryStoreConformance` へ一時的に通して
- * 見つけた食い違い（値域チェックが丸ごと無く、`strength: 2` や `strength: NaN` が
- * 無条件で通っていた）を、`runtime-fakes.ts` の `createMemoryIdempotent` に足した
- * `isStrengthInRange` 検査で塞いだ。その塞ぎが実際に効いていることを、ここで
- * 固定する（通し方自体は PR に含めていない——`runtime-fakes.ts` の
- * `createMemoryIdempotent` の doc コメント参照）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
 
@@ -44,10 +24,8 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
     lastReinforcedAt: null,
     strength: 1,
     halfLifeHours: 720,
-    // ⚠ `strength` が NaN/Infinity のとき `defaultDecayStrategy.floorAt` が
-    // `Invalid Date` を返す（`memory-store-conformance.ts` の同種の歯と同じ実測）。
-    // ここでは検査したいのは `strength` だけなので、`decayFloorAt` は妥当な値を
-    // 明示的に固定する。
+    // `strength` が NaN/Infinity だと `defaultDecayStrategy.floorAt` が `Invalid Date` を返す。
+    // 検査したいのは `strength` だけなので、`decayFloorAt` は妥当な値に固定する。
     decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
     embeddingStatus: "pending",
     ...overrides,

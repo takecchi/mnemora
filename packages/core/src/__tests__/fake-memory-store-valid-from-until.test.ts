@@ -3,21 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.createMemory`（`packages/core` 自身の runtime テスト用フェイク、
- * `runtime-fakes.ts`）が、`Memory.validFrom`/`validUntil`（Issue #202、ADR 0145）を
- * `InMemoryMemoryStore`（`packages/testkit`）と同じ意味論で読み書きすることを検査する歯。
- *
- * **`packages/testkit` の `memory-store-conformance.ts` の対象ではない。**
- * `FakeMemoryStore` は adapter 適合テストの対象である `MemoryStore` 実装
- * （`InMemoryMemoryStore`/`PostgresMemoryStore`）ではなく、`packages/core` 自身の
- * runtime テスト専用の別系統（`runtime-fakes.ts` 冒頭のコメント: core は testkit に
- * 依存しない）。`fake-reinforce-monotonicity.test.ts`・`fake-referential-integrity.test.ts`
- * と同じ理由・同じ形——`packages/testkit` の適合テストが対象とするのは `InMemory*` であり、
- * `packages/core` 専用の `Fake*` には届かない。ADR 0142 の M2（`FakeOutboxStore` 固有の
- * 変異試験）と同じ族の穴を、実装と同時にここで塞ぐ。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
 

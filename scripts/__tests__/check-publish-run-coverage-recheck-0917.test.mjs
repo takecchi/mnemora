@@ -21,26 +21,6 @@ import {
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G6 のうち、PR #462（ADR 0209）の
- * 「予行が何本について確かめたか」を数える道具に対して、変異を当てて見つかった
- * 「すり抜け」だけを固定する歯。
- *
- * 既存の `publish-run-coverage-lib.test.mjs` / `check-publish-run-coverage.test.mjs` が
- * 既に守っているものは重ねていない。足したのは次の4つ。
- *
- * 1. 判定の網羅：`failed`・`missing` が**1本だけ**のときも fail（他が全部 published でも pass に倒れない）。
- * 2. group の切り出し：`endgroup` より後の行を、その本の本文に混ぜない。閉じないまま次の group が
- *    来ても、その本を捨てない（lib の docstring の約束）。
- * 3. **`--run` の経路**（`gh` を呼ぶ側）：既存の CLI の歯は `--log-file` だけを通していた。偽の `gh` を
- *    PATH の先頭に置き、判定不能（exit 2）と実行時エラー（exit 3）の仕分けを固定する。
- * 4. **文言の同一性**（ADR 0209「引き受けた負債」1番）：この道具が読む3文言・group の目印・予行の固定文言が、
- *    `.github/workflows/publish.yml` が実際に出す `echo` と一致していること。
- *    ⚠ ADR 0209 はこの歯を「置く余地が残っている」と書いて置かなかった。ここで置く。
- *
- * 各 `it` の名前の記号（P13c・Q2 など）は、Issue #1812 のコメントの変異表の番号である。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptsDir = join(repoRoot, "scripts");
 const script = join(scriptsDir, "check-publish-run-coverage.mjs");
@@ -119,7 +99,6 @@ describe("parsePublishGroups: group の切り出し境界", () => {
       const groups = parsePublishGroups(log);
       expect(groups).toHaveLength(1);
       expect(classifyPublishOutcome(groups[0].body)).toBe("unknown");
-      // 判定にも出る：group の外に在る文言で、読めなかった本を「通った」にしない。
       expect(evaluatePublishRunCoverage(log, [{ name: "@mnemora/core" }]).verdict).toBe(
         "indeterminate",
       );
@@ -149,7 +128,6 @@ describe("文言の同一性: この道具が読む文言が、publish.yml が�
     .filter(Boolean)
     .map((m) => m[1]);
 
-  /** `${spec}` を含む echo を、現れた順に取り、`${spec}`・`${STATUS}` を実値で置く。 */
   const specEchoes = echoLines
     .filter((text) => text.includes("${spec}"))
     .map((text) => text.replaceAll("${spec}", "@mnemora/core@1.0.0").replaceAll("${STATUS}", "1"));
@@ -192,10 +170,6 @@ describe("文言の同一性: この道具が読む文言が、publish.yml が�
   });
 });
 
-/**
- * `--run` の経路。偽の `gh` を PATH の先頭に置いて、CLI を実物のまま起動する。
- * 偽の `gh` は、`gh run view --json a,b` の欄だけを返す（欄を頼まなければ返さない）。
- */
 describe("check-publish-run-coverage.mjs（--run の経路。偽の gh で判定不能と実行時エラーを仕分ける）", () => {
   /** @type {string | undefined} */
   let workDir;
@@ -326,7 +300,6 @@ describe("check-publish-run-coverage.mjs（--run の経路。偽の gh で判定
   });
 
   it("Q4: 手元の publish.yml から publish 段の step 名が逆算できなければ exit 3（この CLI 自身が使えない）", () => {
-    // 実物の CLI と lib・対象一覧を一時ディレクトリへ複写し、`::group::npm publish` の無い publish.yml を置く。
     workDir = mkdtempSync(join(tmpdir(), "check-publish-run-coverage-recheck-"));
     mkdirSync(join(workDir, "tree", "scripts"), { recursive: true });
     mkdirSync(join(workDir, "tree", ".github", "workflows"), { recursive: true });

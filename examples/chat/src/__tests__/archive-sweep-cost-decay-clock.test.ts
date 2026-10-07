@@ -10,27 +10,6 @@ import { describe, expect, it, vi } from "vitest";
 import { runArchiveSweepCost } from "../archive-sweep-cost.js";
 import { createMutableClock } from "../mutable-clock.js";
 
-/**
- * `runArchiveSweepCost()` に `decayClock` を渡したときだけ `writeDecayClock`
- * （`@mnemora/core`。実体は `store.setDecayClock`）が呼ばれることを、DB/LLM/embedding を
- * 実物で叩かずに検査する（ADR 0165 決めたこと11）。
- *
- * **`consolidation-cost-abort.test.ts` と同じやり方**——`RunArchiveSweepCostOptions` の
- * `runtime`/`memoryStore`/`embeddingProvider`/`pool` を最小の偽物で埋め、
- * `runArchiveSweepCost()` を直接呼ぶ。`haystackSize: 0` にして gold/distractor 14件
- * だけの最小構成にし、`budgetLadder: []` で unbudgeted 分の recall だけに絞る。
- *
- * 偽物が実装するのは、この経路で実際に呼ばれると確認した口だけ:
- * - `runtime.observe`/`tick` — ingest 段(gold/distractor 14件)。
- * - `runtime.recall` — `memories: []` を返し、`resolveExternalId` 経由の
- *   `memoryStore.get`/`getObservation` が呼ばれない経路を選ぶ
- *   （`consolidation-cost-abort.test.ts` と同じ切り分け）。
- * - `runtime.sweepArchive` — 何も archive しない偽の結果を返す。
- * - `memoryStore.getMany` — `measureStore` から。
- * - `embeddingProvider.space` — プロパティとして読まれるだけ。
- * - `pool.query` — `setTenantHalfLifeHours` の UPSERT + 読み戻しの2回。
- */
-
 function fakeMemory(id: string): Memory {
   return {
     id,
@@ -54,14 +33,6 @@ function fakeMemory(id: string): Memory {
 
 function buildFakeRuntime(): Runtime {
   let nextObserveId = 0;
-  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
-  // 後: 実物の `Runtime` は「`observe()` が積んだ embed ジョブを `tick()` が処理する」
-  // という契約を持つ（`packages/core/src/runtime.ts` — outbox 経由、`createMemoryWithOutbox`
-  // が積み `tick()` の `processEmbedJob` が消化する）。この偽 `Runtime` はその契約を無視して
-  // `tick` が常に `processed: 0` を返していたため、`runArchiveSweepCost` が渡す
-  // `expectedProcessed`(= 積んだ件数)と噛み合わず、実際には何も壊れていないのに
-  // `drainEmbedTicks` が例外を投げていた。⟹ `observe()` が積んだ件数を `tick()` が
-  // 消化して返す、最小限の契約通りの偽物に直す。
   let pendingEmbedJobs = 0;
   const observe: Runtime["observe"] = async () => {
     nextObserveId += 1;
@@ -113,7 +84,6 @@ function buildFakeEmbeddingProvider(): EmbeddingProvider {
   } as unknown as EmbeddingProvider;
 }
 
-/** `setTenantHalfLifeHours`(archive-sweep-cost.ts)が撃つ INSERT→SELECT の2回に順に応える。 */
 function buildFakePool(halfLifeHours: number): PostgresClient["pool"] {
   let call = 0;
   const query = vi.fn(async () => {

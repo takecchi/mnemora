@@ -10,16 +10,6 @@ import {
 } from "../public-api-surface-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * 公開 API 表面の門（`check-public-api-surface.mjs`・`public-api-surface-lib.mjs`。Issue #342・ADR 0178）の
- * 歯の足し（Issue #1815、09/16 マージ分の #380・#423 の確かめ直し）。
- *
- * 既存の `check-public-api-surface.test.mjs`・`public-api-surface-lib.test.mjs` が見ていなかった形だけを足す
- * （変異が素通りした）: 差分が出たときの手順の「先に build する」（#423 が足した約束）・同じ長さの書き換え・
- * dist が無いときの失敗・親ディレクトリへの相対 import・`types` を持たない `exports` の項・出力の連結の形。
- * 実装は変えない。**これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const gate = fileURLToPath(new URL("../check-public-api-surface.mjs", import.meta.url));
 const PACKAGE_DIRS = [
@@ -99,7 +89,6 @@ describe("公開 API 表面の門（CLI）", () => {
     const write = output.lastIndexOf("--write");
     expect(build).toBeGreaterThan(-1);
     expect(write).toBeGreaterThan(build);
-    // 古い dist のまま --write すると、他人が入れた変更を snapshot から消してしまう、という理由も添える
     expect(output).toContain("snapshot から消してしまう");
   });
 

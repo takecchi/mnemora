@@ -6,14 +6,6 @@ import {
 import type { ArmReport } from "../retrieval-quality.js";
 import type { IdentifierArmReport } from "../identifier-arm.js";
 
-/**
- * Issue #109: `identifier-json.ts` の出力口。DB もネットワークも要らない(純関数)。
- *
- * ⭐ **「重みを取得できなかった」と「測ったが値が悪かった」が型で区別され、
- * 前者に0や既定値を混ぜていないこと**を見る——`cli.ts` の `runIdentifierProbes` が
- * `warmup()` 失敗時にこの形を書き出す。
- */
-
 function minimalJapaneseReport(): ArmReport {
   return {
     armLabel: "jp",
@@ -82,7 +74,6 @@ describe("buildMeasuredIdentifierProbeJson", () => {
     expect(json.japaneseNamesSparse.embeddingSpace).toEqual(expectedSpace);
     expect(json.japaneseNamesDense.embeddingSpace).toEqual(expectedSpace);
 
-    // haystackKind — 5群のうちどれ1つも落とさない(マネージャー指示)。
     expect(json.japanese.haystackKind).toBe("sparse");
     expect(json.identifiersSparse.haystackKind).toBe("sparse");
     expect(json.identifiersDense.haystackKind).toBe("dense");
@@ -92,7 +83,6 @@ describe("buildMeasuredIdentifierProbeJson", () => {
     expect(json.japanese.mrrOverall).toBe(0.81);
     expect(json.identifiersSparse.mrrOverall).toBe(1);
     expect(json.identifiersDense.mrrOverall).toBe(0.5);
-    // 🔴 5群が別々の欄として出ること——混ぜた単一の MRR を作らない(ADR 0094 §1)。
     expect(json.japaneseNamesSparse.mrrOverall).toBe(0.25);
     expect(json.japaneseNamesDense.mrrOverall).toBe(0.125);
   });

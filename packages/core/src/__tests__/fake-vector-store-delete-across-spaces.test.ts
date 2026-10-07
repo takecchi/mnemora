@@ -7,14 +7,6 @@ import type { Memory, NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * core の `FakeVectorStore.deleteAcrossSpaces` の約束（`InMemoryVectorStore`・`PostgresVectorStore` と同じ）。
- * - 渡した memoryId の行を、全 space から消す。
- * - 渡していない memoryId の行は、同じテナント・同じ space でも残す。
- * - 別のテナントの行は残す。
- * - id の綴り（大文字小文字）は区別しない。
- */
-
 const SPACE_A: EmbeddingSpaceId = { provider: "test", model: "across-a", dimensions: 3 };
 const SPACE_B: EmbeddingSpaceId = { provider: "test", model: "across-b", dimensions: 3 };
 const ctx: Ctx = { tenantId: "fake-delete-across" };

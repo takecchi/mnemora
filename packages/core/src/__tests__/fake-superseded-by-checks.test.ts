@@ -4,20 +4,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0557（ADR 0503・0515 の「Fake は揃えていない」負債）: core の Fake（`FakeMemoryStore`）も、`supersededById`
- * （置き換えた側）の約束を壊す入力を、書く前に `RangeError` で断る。testkit の `InMemoryMemoryStore`・`PostgresMemoryStore` と同じ文面。
- *
- * - `status: "superseded"` に `supersededById` が無い（4口: `updateStatus`・`updateStatusWithEvent`・`resolveContestedPair`・`resolveContestedGroup`）
- * - 自己置換（4口。id の大文字小文字は畳んで比べる）
- * - `superseded` 以外（pair・group では `active`）への付与（4口）
- * - メンバー間の循環（pair・group）
- * - 対の外・群の外の `forgotten` を指す（pair は ADR 0515、group は ADR 0503）
- *
- * 断られたとき、行（status・supersededById）もイベントも変わらない。陽性対照（勝者・相手・外の `active`/`archived` を指す、
- * `supersededById` 無しの非 superseded）は通る。⚠ ADR 0499 の `assertResolvedStatus`（列挙の外の status）は、この Fake には入れていない（ADR 0557 の材料A）。
- */
-
 const A: Ctx = { tenantId: "fake-superseded-by-a" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 let counter = 0;
@@ -305,7 +291,7 @@ describe("Fake: resolveContestedGroup の supersededById（ADR 0503）", () => {
         { status: "superseded", by: ms[0]!.id },
       ]),
     );
-    // 大文字の supersededById で輪になる形も、同じ RangeError（ADR 0557 の「循環は両側を畳んで比べる」。2者版の歯と揃える。ADR 0595）。
+    // 大文字の supersededById で輪になる形も、同じ RangeError（循環は両側を畳んで比べる）。
     await s.expectRefused(
       ids,
       /^resolveContestedGroup: supersededById must not form a cycle among the members$/,
@@ -481,7 +467,7 @@ describe("Fake: updateStatus / updateStatusWithEvent の supersededById（ADR 05
       const u = await s.mem();
       await call(s, u.id, "archived");
       expect(await s.store.get(A, u.id)).toMatchObject({ status: "archived" });
-      // forgotten を指すのを断るのは resolveContested* だけ（ADR 0503・0515）。updateStatus* は断らない（InMemory・Postgres と同じ）。
+      // forgotten を指すのを断るのは resolveContested* だけ。updateStatus* は断らない（InMemory・Postgres と同じ）。
       const v = await s.mem();
       const gone = await s.mem();
       await s.store.updateStatus(A, gone.id, "forgotten");

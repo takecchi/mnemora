@@ -4,18 +4,6 @@ import { isMalformedIdentifierError } from "../identifier.js";
 import type { NewRecallRecord } from "../recall.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0506: core のテスト用 Fake を、`@mnemora/testkit` の InMemory と `@mnemora/postgres` が断る入力に揃える（ADR 0493 の残り）。
- *
- * 1. `createRecall`（ADR 0480 の続き）: `subjectId`・`advanceActivityClock.subjectId` の NUL・孤立サロゲート
- *    （`MalformedIdentifierError`）、`query`・`budget`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` の NUL、
- *    NOT NULL の `jsonb` 欄が JSON にならない値（`undefined`）、`BigInt`・循環参照（`JSON.stringify` の `TypeError`）。何も書かず、活動時計も進めない。
- * 2. `findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates` の `query.subjectId`、
- *    `getSubjectActivitySeqs` の `subjectIds` の各要素（NUL・孤立サロゲート。読む前に断る）。
- * 3. 対照（やりすぎの歯）: 本物が通す `ctx`（大文字・長い・絵文字・対になったサロゲート・空の `tenantId`）と
- *    正当な `subjectId`・JSON 値は通る。ctx の検査（ADR 0493 の E1）が全口に在ることも、代表の口で縛る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const claimKey = { subject: "s", predicate: "p" } as never;
 

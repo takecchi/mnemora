@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { EmbeddingSpaceId } from "@mnemora/core";
 import { describeZeroPresented, embeddingSpaceSlug } from "../answer-bench.js";
 
-/**
- * `embeddingSpaceSlug`（Issue #583）の unit 歯。DB を要求しない——
- * `EmbeddingSpaceId` から文字列を作るだけの純関数を見る。
- */
 describe("embeddingSpaceSlug", () => {
   it("openai の空間から provider-model-dimensions 形のスラグを作る", () => {
     const space: EmbeddingSpaceId = {
@@ -25,7 +21,6 @@ describe("embeddingSpaceSlug", () => {
     expect(embeddingSpaceSlug(space)).toBe("testkit-deterministic-8");
   });
 
-  // ⭐ これが (C) の芯——2つの異なる空間が、異なるスラグになること。
   it("異なる空間は異なるスラグになる", () => {
     const a: EmbeddingSpaceId = {
       provider: "openai",
@@ -58,8 +53,6 @@ describe("embeddingSpaceSlug", () => {
     };
     const slug = embeddingSpaceSlug(space);
     expect(slug).toBe("local-xenova-multilingual-e5-small-1-0-384");
-    // 英数字とハイフンだけであることを直接見る（tenantId・SQL 識別子どちらの
-    // 文脈でも安全に埋め込める形）。
     expect(slug).toMatch(/^[a-z0-9-]+$/);
     expect(slug).not.toMatch(/[./]/);
   });
@@ -74,17 +67,6 @@ describe("embeddingSpaceSlug", () => {
   });
 });
 
-/**
- * `describeZeroPresented`（Issue #583 の警告）の unit 歯。DB を要求しない。
- *
- * 【実測 2026-09-27、空の DB で README の手順どおり `run answer` を初めて走らせた】
- * `unknown-blood-type`（答えを控えるべき類）で、この警告が出た。実際の原因は
- * `below_threshold`（2件とも関連度 0.08 以下）だったが、警告は候補を
- * 「(1) 別の埋め込み空間の先客」「(2) 予算・減衰・validAt ゲート」の2つだけ挙げ、
- * 「どちらかは決まらない」と閉じていた——実際の原因がどちらにも入っていなかった。
- * ⟹ 候補に「関連度が閾値に届かなかった」を足し、この recall が実際に返した
- * `omitted` の内訳をそのまま並べる（判定はしない。データを見せるだけ）。
- */
 describe("describeZeroPresented", () => {
   const belowThresholdRecall = {
     index: { groups: [], totalInScope: 2, countKind: "exact" as const },

@@ -1,9 +1,3 @@
-/**
- * 入力側の公開型を `?: T | undefined` に広げたとき、**広げなかった型**（`Ctx`・`OutboxJob`・`Memory`・
- * testkit の `build*Fixture` の `overrides`）まで広げていないことを見る歯（ADR 0429。Issue #1734 の PR #1534 の
- * 確かめ直しで足した）。`exact-optional-input-types.test.mjs` は「広げた型が `undefined` を受ける」向きだけを見る。
- * 対象は `scripts/__fixtures__/exact-optional-narrow-types.probe.ts`（`@ts-expect-error` が全部効いていれば診断0件）。
- */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

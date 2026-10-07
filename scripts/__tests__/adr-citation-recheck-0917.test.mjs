@@ -5,15 +5,6 @@ import {
   findAdrLineNumberCitations,
 } from "../adr-citation-lib.mjs";
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G7 のうち、PR #469（ADR 0213）の検出器
- * （`adr-citation-lib.mjs`）に変異を当てて見つかった「すり抜け」だけを固定する歯。
- * 各 `it` の名前の記号（A4・B1b など）は、Issue #1812 のコメントの変異表の番号である。
- *
- * ⚠ 検出器は「見つけたもの全部」を返す純関数なので、ここでも文字列を渡して返り値を見るだけにする
- * （実物の文書は読まない。実物を見る歯は `adr-citation.test.mjs` にある）。
- */
-
 describe("findAdrLineNumberCitations（書き方の一族の取りこぼし・過検出）", () => {
   it("A4: adr-comma-line 形は半角のカンマでも拾う", () => {
     const hits = findAdrLineNumberCitations("詳細は ADR 0067, 124-130行 を見ること。");
