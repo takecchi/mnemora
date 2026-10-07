@@ -254,7 +254,7 @@ export class PostgresOutboxStore implements OutboxStore {
   ): Promise<void> {
     const current = await omittingParams(() =>
       this.db.execute(sql`
-      SELECT attempts FROM outbox WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId}
+      SELECT attempts FROM outbox WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND completed_at IS NULL AND failed_at IS NULL
     `),
     );
     const row = current.rows[0] as { attempts: number } | undefined;
