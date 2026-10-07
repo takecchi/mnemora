@@ -9,12 +9,6 @@ import {
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
 
-/**
- * `answer-case.ts` の採点関数・仕掛けの単体試験。**DB 不要・鍵不要**——
- * `gradeAnswer`/`normalizeForGrading`/`answerQualityClaimable`/`assertGroundsPresent` は
- * すべて純関数である。
- */
-
 describe("normalizeForGrading", () => {
   it("NFKC正規化・小文字化・空白/句読点の除去を行う", () => {
     expect(normalizeForGrading("紅茶")).toBe("紅茶");
@@ -53,8 +47,6 @@ describe("gradeAnswer", () => {
   });
 
   it("reject を accept より先に判定する（順序の固定）", () => {
-    // reject 側だけを含む場合と、両方含む場合とで結果が変わらないことを確認する
-    // ——「reject を先に見る」という判定順序そのものを歯にする。
     expect(gradeAnswer("金曜でした。", expected)).toBe("fail");
     expect(gradeAnswer("水曜ですが金曜でした。", expected)).toBe("fail");
   });
@@ -119,10 +111,6 @@ describe("assertGroundsPresent", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// ケース集合そのものの検査（生成していない・規約を満たしているか）
-// ---------------------------------------------------------------------------
-
 const ALL_CATEGORIES: AnswerCategory[] = [
   "preference",
   "schedule-change",
@@ -180,17 +168,6 @@ describe.each([
   });
 });
 
-/**
- * ADR 0334 負債2（Issue #372負債6の続き）: `AnswerCase.knownSubjects`（任意項目）を
- * 持つケースを固定する。**会話に本人以外の第三者が出てくる4件だけ**が持ち、残り10件は
- * このフィールド自体を持たない（`knownSubjects` を省略すれば従来どおり）ことを歯にする。
- *
- * 値は会話本文中の呼び方（relation noun か、会話中で使われている名前）に揃えてある
- * ——`"user"`（本人）と、その第三者を指す1語を候補として渡す（ADR 0334 決定2の
- * ON-ceiling 実測が使った形と同型）。これは上限（オラクル）測定用の正解ラベルであり、
- * 実運用で mnemora がこの正解を知っている保証は無い（`AnswerCase.knownSubjects`
- * docstring参照）。
- */
 describe("AnswerCase.knownSubjects（ADR 0334 負債2、任意項目）", () => {
   const EXPECTED_KNOWN_SUBJECTS: Record<string, string[]> = {
     "other-person-birthday": ["user", "妻"],
