@@ -5,18 +5,6 @@ import {
   validateMeasured,
 } from "../association-summary-lib.mjs";
 
-/**
- * Issue #291: `association-summary-lib.mjs`(純関数の側)の歯。DB を要求しない。
- *
- * ⭐ **最重要の検査**: 入力そのものが壊れているとき(必須項目欠け・型違い・本数違い・
- * 参照整合性違反)に `validateMeasured`/`validateBaseline` が ok:false を返すこと、
- * そして**正しい入力では基準値と相違していても `buildSummaryMarkdown` が普通に
- * Markdown を組み立てる**こと(⛔ このベンチは門ではない、ADR 0033 §3)。
- *
- * ⭐ **次に重要な検査**: `hit@10` は連想枠の効果を測れない、という注記が
- * **常に**(基準値の有無・警告の有無に関係なく)出ること。
- */
-
 const PROBE_IDS = [
   ["ascii-project", "ascii-id"],
   ["ascii-printer", "ascii-id"],
@@ -184,7 +172,6 @@ function makeMeasured(overrides = {}) {
   };
 }
 
-/** 実測から基準値ファイルの形(arm レベルの数値のみ)を作る。 */
 function baselineFrom(measured) {
   return {
     embedding: structuredClone(measured.embedding),
@@ -531,36 +518,20 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("条件が違う");
   });
 
-  /**
-   * ⭐ **実装(`examples/chat/src/cli.ts` の `runAssociationProbes`)を読んで分かった
-   * 実物の armLabel は、`"off: 連想枠なし（既定の recall）(llm=deterministic,
-   * embedding=local/ruri-v3-30m/sym/256次元)"` のように、埋め込み条件を文字列に
-   * 埋めた形である**(タスク仕様が示した3本の固定文字列そのままではない)。
-   * ⟹ 基準値との突き合わせが `armLabel` の完全一致に依存していたら、埋め込み
-   * モデルを変えるたびに(armLabel が変わって)基準値が「全arm 基準値なし」に
-   * 化けてしまう。この歯は、armLabel の文言が違っても
-   * (`associationEnabled`/`associationMaxCount` が同じなら)基準値が引けることを
-   * 固定する。
-   */
+  /** `armLabel` の完全一致に依存しない。実物の armLabel は埋め込み条件を文字列に埋めるので、モデルを変えるたびに基準値が引けなくなる。 */
   it("🔴 armLabel の文言が(埋め込み条件の埋め込みで)基準値と違っても、構造的な鍵で基準値が引ける", () => {
     const measured = makeMeasured();
     const baseline = baselineFrom(measured);
-    // 基準値の armLabel だけを、実装が実際に組み立てる形(埋め込み条件を埋めた文字列)へ
-    // 差し替える——associationEnabled/associationMaxCount はそのまま。
     baseline.arms[0].armLabel =
       "off: 連想枠なし（既定の recall）(llm=deterministic, embedding=local/ruri-v3-30m/sym/256次元)";
     baseline.arms[1].armLabel =
       "on: 連想枠あり（maxCount=3）(llm=deterministic, embedding=openai/text-embedding-3-small/256次元)";
     const markdown = buildSummaryMarkdown({ measured, baseline });
-    // 「基準値なし」に化けていないこと(化けていれば、埋め込みを変えるたびに
-    // 基準値との比較が黙って全滅する、という再発を許すことになる)。
     expect(markdown).not.toContain("基準値なし");
   });
 
   it("🔴 armLabel が違っても、associationEnabled/associationMaxCount が重複していれば validateMeasured が落ちる", () => {
     const measured = makeMeasured();
-    // armLabel は別々のままだが、on3 の associationMaxCount を on5 と同じにする
-    // ——「同じ arm が2件」という壊れ方を armLabel の違いだけでは検知できない。
     measured.arms[1].associationMaxCount = 5;
     const result = validateMeasured(measured);
     expect(result.ok).toBe(false);
@@ -578,8 +549,6 @@ describe("buildSummaryMarkdown", () => {
     const measured = makeMeasured();
     const markdown = buildSummaryMarkdown({ measured });
     expect(markdown).toContain("maxCount 最大の arm");
-    // on10 arm(9件 gold) では 9〜11番目の probeId(gold が無い側)が「haystack」枠として
-    // 列挙されるはず。
     const missedProbeId = PROBE_IDS[9][0];
     expect(markdown).toContain(missedProbeId);
     expect(markdown).toContain("haystack");
@@ -608,17 +577,6 @@ describe("buildSummaryMarkdown", () => {
   });
 });
 
-/**
- * ⚠ **基準値より悪い arm を、Summary の上のほうに目立つ節で警告する(⛔ 門ではない)。**
- *
- * 対象指標は `gold`(goldReturnedCount) / `hit@1`(hit1Count) / `hit@10`(hit10Count) /
- * `MRR`(mrr) の4つ——タスク仕様が名指しした指標。**exit code には一切触れない**
- * (このファイルは純関数だけを持ち、`process.exit` を持たない——CLI 側の
- * `association-summary.mjs` の exit 0 は `association-summary.test.mjs` が別途固定する)。
- *
- * 許容幅は `WORSENED_TOLERANCE`(このファイルが export する定数)から読む。CI 実測
- * (ADR 0385)で揺れが0だったため、既定値は0——1件でも下回れば警告する。
- */
 describe("⚠ 基準値より悪い arm を目立つ節で警告する(門ではない)", () => {
   const WORSENED_HEADING = "## ⚠ 基準値より悪い値がある（門ではない）";
 
@@ -637,7 +595,6 @@ describe("⚠ 基準値より悪い arm を目立つ節で警告する(門では
   it("🔴 gold(goldReturnedCount)が基準値より低い arm があれば、警告節が出て arm名と差を含む", () => {
     const measured = makeMeasured();
     const baseline = baselineFrom(measured);
-    // on3 arm の基準値を、実測より1件多く(=実測が1件悪い)する。
     baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
     const markdown = buildSummaryMarkdown({ measured, baseline });
     expect(markdown).toContain(WORSENED_HEADING);
@@ -712,8 +669,7 @@ describe("⚠ 基準値より悪い arm を目立つ節で警告する(門では
     const baseline = baselineFrom(measured);
     baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
     const markdown = buildSummaryMarkdown({ measured, baseline });
-    // 表の行だけを見る(先頭が "|" の行)——「基準値より悪い値がある」節の箇条書きにも
-    // armLabel が出るため、それと混同しないようにする。
+    // 表の行だけを見る。箇条書きにも armLabel が出るので、混同しない。
     const tableLines = markdown.split("\n").filter((line) => line.startsWith("|"));
     const worsenedRow = tableLines.find((line) => line.includes(measured.arms[1].armLabel));
     const healthyRow = tableLines.find((line) => line.includes(measured.arms[2].armLabel));
@@ -726,7 +682,6 @@ describe("⚠ 基準値より悪い arm を目立つ節で警告する(門では
     const measured = makeMeasured();
     const baseline = baselineFrom(measured);
     const mrrTolerance = WORSENED_TOLERANCE.mrr ?? 0;
-    // 許容幅ちょうどの悪化(許容幅より大きくはしない)は警告しない。
     baseline.arms[1].mrr = measured.arms[1].mrr + mrrTolerance;
     const markdown = buildSummaryMarkdown({ measured, baseline });
     expect(markdown).not.toContain(WORSENED_HEADING);

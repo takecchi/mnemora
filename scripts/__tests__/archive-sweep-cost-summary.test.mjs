@@ -5,19 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/archive-sweep-cost-summary.mjs` の歯。**本物のスクリプトを子プロセスとして
- * 実際に起動する**(`consolidation-cost-summary.test.mjs` と同じ判断)——
- * `archive-sweep-cost-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・exit code)はここでしか測れない。
- *
- * DB は要求しない——このスクリプトは JSON ファイル1〜2個を読むだけである。
- *
- * `examples/chat/archive-sweep-baseline.json` は PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた
- * （この歯が書かれた時点では未コミットだった）。この歯は実物のファイルに依存せず、ここで使う
- * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
- */
-
 const script = fileURLToPath(new URL("../archive-sweep-cost-summary.mjs", import.meta.url));
 
 function makeProbe(overrides = {}) {
