@@ -1,91 +1,37 @@
 /**
- * `OpenAILLMProvider` が投げる失敗を、**呼び出し側が種類として区別できる形**にする。
+ * `OpenAILLMProvider` が投げる失敗を、呼び出し側が `kind` で区別できる形にする。`Error` を継承する。
+ * 拒否・切り詰めは HTTP 200 で返るため、`content` を読む前に `message.refusal`・`finish_reason` を見て投げる。
  *
- * **なぜ要るか**
+ * `kind` の外の例外（`OpenAILLMProviderError` にならない）:
  *
- * `@mnemora/anthropic` の `errors.ts`（ADR 0072 の追記「実測で見つかった穴」）と同じ理由で、
- * **「モデルが拒否した」と「応答が空だった」を同じ `Error` にしない。**
+ * - API が HTTP 400（`context_length_exceeded`）で拒んだとき: SDK の例外がそのまま伝播する。
+ * - HTTP 200 の応答オブジェクトの形が壊れているとき（`choices` が無い等）: 生の `TypeError` 等が伝播する。
  *
- * これはこのリポジトリの固定点——**「無い」の種類を潰さない**（`docs/recall.md`・
- * ADR 0008 / 0013 / 0026 / 0027 / 0044 が一貫して守ってきた線）——に正面から当たる。
- * `packages/core/src/extraction.ts` の `extractCandidates` はこの例外を `try/catch` で飲み、
- * **`ExtractionOutcome: "llm_failed_whole_observation"` へ倒す。**⟹ 種類を潰したまま
- * 投げると、「モデルが拒否した」という情報はそこで完全に消える。
- *
- * **⚠ OpenAI の機構は Anthropic と形が違う。** Anthropic は `stop_reason` 一本で拒否・
- * 切り詰めを表すが、OpenAI は**2つの独立した機構**を持つ:
- * - `message.refusal: string | null` — 拒否したとき `content` は `null` になり、
- *   `refusal` に拒否理由の文字列が入る。**拒否も HTTP 200 で返る。**
- * - `finish_reason: "length" | "content_filter" | ...` — `length` は max tokens 到達、
- *   `content_filter` はコンテンツフィルタで出力が省かれたことを示す。
- * **`content` を読む前にこの2つを見ないと、拒否・切り詰めを「空の成功」として
- * core へ渡すことになる**（`llm-provider.ts` の `assertNotRefusedOrTruncated` 参照）。
- *
- * `Error` を継承しているので、`@mnemora/anthropic` と揃えた既存の契約
- * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
- * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
- *
- * ⚠ **入力がモデルのコンテキストを超えて API がリクエストを HTTP 400
- * （`context_length_exceeded`）で拒むと、SDK の例外がそのまま伝播し `kind` は付かない**
- * （実 API では確かめておらず、SDK の例外の形を模した偽のクライアントで確かめた。`kind: "truncated"` は
- * `finish_reason: "length"`、つまり出力が途中で切れた成功応答だけを指す）。
- *
- * ⚠ **`kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである**
- * （[Issue #885](https://github.com/takecchi/mnemora/issues/885)）。
- * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——`choices`/`data` の
- * トップレベルの欄がキーごと丸ごと無い場合（`{}` が返る等）——は、この分類の**外**にある
- * 生の例外（`TypeError` 等。壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と
- * 同じ扱い）がそのまま伝播する。`OpenAILLMProviderError` にはならず、`instanceof` でも
- * `kind` でも捕まえられない（埋め込み側の `OpenAIEmbeddingProvider.embed` はそもそも
- * この `errors.ts` を使わず、専用のエラー型を持たない——壊れた応答は最初から生の
- * 例外がそのまま伝播する形である）。**実 API がこの形
- * （200 応答なのにトップレベルのキーが丸ごと欠ける）を実際に返すかは確認していない。**
- * 詳細・検討した案は
- * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の Issue #885 の追記
- * （主たる記録）を参照。`llm-provider.ts` の `assertNotRefusedOrTruncated` 呼び出し箇所、
- * `embedding-provider.ts` の `embed` にも個別の doc コメントがある。
- *
- * ⚠ **`kind: "schema_unsupported"`**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）**:**
- * `completeStructured` が、送る前の翻訳
- * （`structured-root.ts` の `toBaseJsonSchema`、zod の既定＝ throw）と、送る直前の検査
- * （`openai` SDK 自身の `lib/transform` の `toStrictJsonSchema` を、実際に送る JSON Schema
- * に通す。戻り値は使わず、送るのは mnemora 自身の翻訳結果である）のどちらかで
- * 投げた例外を、この `kind` に包んで `chat.completions.create` を呼ぶ前に投げ直す。**元の例外は
- * `cause`（ES2022 の `Error.cause`）に載る**。`z.record`・`z.tuple`・`z.date`・`transform` が
- * この経路に当たる（README「`completeStructured` に渡せる zod の形」参照）。
+ * `kind: "schema_unsupported"` のとき、`completeStructured` は送る前の翻訳・検査の例外を包んで
+ * `chat.completions.create` を呼ぶ前に投げ直す。元の例外は `cause` に載る。
  */
 
-/**
- * 失敗の種類。**増やすときは、呼び出し側が本当に区別したい単位かを先に問うこと**
- * ——区別できない種類を増やしても「無い」の分類は増えない。
- */
+/** 失敗の種類。 */
 export type OpenAILLMFailureKind =
-  /** `message.refusal` が非 null かつ空文字でない。または `finish_reason === "content_filter"`
-   * （コンテンツフィルタでの省略はモデル自身の拒否とは別機構だが、呼び出し側の次の一手は
-   * 同じ——同じ入力で再試行しても意味が無い。`kind` は増やさず `finishReason` に生の値を残す）。 */
+  /** `message.refusal` が非 null かつ空文字でない。または `finish_reason === "content_filter"`（生の値は `finishReason` に残る） */
   | "refusal"
   /** `finish_reason === "length"`。応答が max tokens で途中で切れた */
   | "truncated"
-  /** 上記のどちらでもないのに、`content` が空/欠落だった。**`completeStructured` だけが投げる**
-   * （`complete` は同じ場合に例外にせず空文字を返す）。 */
+  /** 上記のどちらでもないのに、`content` が空/欠落だった。`completeStructured` だけが投げる（`complete` は空文字を返す） */
   | "no_content"
-  /** 送る前の翻訳・検査（`toBaseJsonSchema`・`toStrictJsonSchema`）が例外を投げた。
-   * `chat.completions.create` は呼ばれていない。元の例外は `cause` に載る（#1148）。 */
+  /** 送る前の翻訳・検査が例外を投げた。`chat.completions.create` は呼ばれていない。元の例外は `cause` に載る */
   | "schema_unsupported";
 
 /** {@link OpenAILLMProviderError} のコンストラクタに渡す値。 */
 export interface OpenAILLMProviderErrorOptions {
-  /** 失敗の種類（{@link OpenAILLMFailureKind}）。 */
   kind: OpenAILLMFailureKind;
   /** SDK が返した生の `finish_reason`。分からなければ `null`（偽 client など） */
   finishReason?: string | null | undefined;
   /** `message.refusal` の中身（拒否理由の文面）。無ければ `null` */
   refusalMessage?: string | null | undefined;
-  /** 人が読むためのメッセージ。省略時は `kind` から組み立てる */
+  /** 省略時は `kind` から組み立てる */
   message?: string | undefined;
-  /** `kind: "schema_unsupported"` のとき、送る前の翻訳・検査が投げた元の例外。
-   * `Error` の標準の `cause`（ES2022）としてそのまま載せる。 */
+  /** `kind: "schema_unsupported"` のとき、翻訳・検査が投げた元の例外 */
   cause?: unknown;
 }
 
@@ -120,10 +66,8 @@ function defaultMessage(options: OpenAILLMProviderErrorOptions): string {
 /**
  * ⚠ **`instanceof` で分岐せず、`kind` で分岐すること。**
  * bundler が同じクラスを二重に読み込むと `instanceof` は落ちる。
- * `kind` は値なのでその影響を受けない。
  */
 export class OpenAILLMProviderError extends Error {
-  /** 失敗の種類。分岐はこの値で行う。 */
   readonly kind: OpenAILLMFailureKind;
   /** SDK が返した生の `finish_reason`。分からなければ `null`。 */
   readonly finishReason: string | null;
@@ -150,15 +94,9 @@ const OPENAI_LLM_FAILURE_KINDS: ReadonlySet<unknown> = new Set<OpenAILLMFailureK
 ]);
 
 /**
- * 受け取ったものが {@link OpenAILLMProviderError} かを、**`instanceof` を使わずに**判定する
- * （[ADR 0418](../../../docs/decisions/0418-store-error-kind-guards.md) の作法、
- * ADR 0428）。
- *
- * **「`kind` を見て、`kind` が無ければ `name` を見る」。** `kind` があるときは、それが
- * {@link OpenAILLMFailureKind} のどれかであることを見る。`kind` の値は openai と anthropic で重なるので、`name` が文字列ならそれが `"OpenAILLMProviderError"` であることも見る（`name` を持たない素の値は `kind` だけで見る）。`kind` が無い値
- * （`kind` を持たない古い版が投げた例外など）は、`name === "OpenAILLMProviderError"` で見る。
- * bundler が同じクラスを二重に読み込んでいても効く。`name` は偽装できるが、provider は利用者が
- * 自分で配線する信頼された部品なので実害は無いと判断している。
+ * 受け取ったものが {@link OpenAILLMProviderError} かを、`instanceof` を使わずに判定する。
+ * `kind` があれば {@link OpenAILLMFailureKind} のどれかであること（`name` が文字列なら
+ * `"OpenAILLMProviderError"` であることも）を見て、`kind` が無ければ `name` で見る。
  */
 export function isOpenAILLMProviderError(value: unknown): value is OpenAILLMProviderError {
   if (typeof value !== "object" || value === null) {
@@ -166,8 +104,7 @@ export function isOpenAILLMProviderError(value: unknown): value is OpenAILLMProv
   }
   const candidate = value as { kind?: unknown; name?: unknown };
   if (candidate.kind !== undefined) {
-    // kind の値は openai と anthropic で重なる（`refusal` など）。`name` を持つ値は、
-    // それが一致することも見る——相手の provider の例外を取り違えないため。
+    // `kind` の値は openai と anthropic で重なる。`name` も見て、相手の provider の例外を取り違えない。
     return (
       OPENAI_LLM_FAILURE_KINDS.has(candidate.kind) &&
       (typeof candidate.name !== "string" || candidate.name === "OpenAILLMProviderError")

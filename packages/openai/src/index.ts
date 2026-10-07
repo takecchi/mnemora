@@ -1,6 +1,3 @@
-// packages/openai — EmbeddingProvider / LLMProvider の OpenAI 実装。
-// core にも呼び出し側にも OpenAI SDK の型を漏らさない（docs/architecture.md §3.8）。
-
 export * from "./client-types.js";
 export * from "./embedding-provider.js";
 export * from "./errors.js";
