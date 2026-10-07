@@ -3,7 +3,7 @@
 - **状態**: 採用 (2026-10)
 - **日付**: 2026-10-07
 
-**これはクローン（miku）の判断で、オーナーの判断ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。出所は Issue [#1877](https://github.com/takecchi/mnemora/issues/1877)。測ったのは作業者。
+**これはクローンの判断で、オーナーの判断ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。出所は Issue [#1877](https://github.com/takecchi/mnemora/issues/1877)。測ったのは作業者。
 出所の区別: 【現物】は読んだコード、【実測】は手元で走らせた結果、【判断】は担い手の判定。
 これは試験だけの変更で、実装・TSDoc・migration・CHANGELOG・公開の適合テスト（`*-conformance.ts`）・`__fixtures__/` は触らない（[ADR 0671](./0671-merged-0930-front-rest-recheck-teeth-1523-1525-1527-1529.md)、[ADR 0677](./0677-merged-0930-front-tail-a-recheck-teeth-1545-1548-1549.md) と同じ）。
 
