@@ -2508,10 +2508,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (secondMemory.status !== "contested" || secondMemory.contestedWithId !== first.id) {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
-    // `supersededById` は `ctx` のテナントの Memory であること（`PostgresMemoryStore` は UPDATE の中で確かめる）。
     this.assertOwnMemoryRef(ctx, first.supersededById);
     this.assertOwnMemoryRef(ctx, second.supersededById);
-    // 対の外の `forgotten` な記憶を置き換えた側にしない（`resolveContestedGroup` と同じ）。対の相手を指すのは断らない。
+    // 対の外の `forgotten` な記憶を置き換えた側にしない。対の相手を指すのは断らない。
     for (const [field, side] of [
       ["first", first],
       ["second", second],
@@ -2531,7 +2530,6 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryEvent(second.event);
     assertCloneableMemoryEvent(first.event);
     assertCloneableMemoryEvent(second.event);
-    // ADR 0466: `markContestedPair` と同じ。
     this.assertEventTargetOwn(ctx, first.event.memoryId, [first.id, second.id]);
     this.assertEventTargetOwn(ctx, second.event.memoryId, [first.id, second.id]);
     firstMemory.status = first.status;
@@ -2558,12 +2556,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     });
   }
 
-  /**
-   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.markContestedGroup?` の実装（契約は
-   * interface 側の doc コメントにある）。**in-memory にトランザクションは無い**——
-   * `markContestedPair` と同じ「まだ何も書いていないうちに判定する」作法（全員の
-   * 存在確認・CAS 判定を先に済ませ、1件でも失敗したらこの時点で throw する）。
-   */
+  /** `MemoryStore.markContestedGroup?` の実装。`markContestedPair` と同じく、全員の存在確認・CAS 判定を先に済ませ、1件でも失敗したら何も書き換えずに throw する。 */
   async markContestedGroup(
     ctx: Ctx,
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
@@ -2601,13 +2594,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertCloneableMemoryEvent(m.event);
     }
 
-    // ADR 0431: 呼び出し時点で既に contested かつ contestedWithId が無いメンバーは、書いても状態が
-    // 変わらない（既存の群のメンバーを吸収する場合）。そのメンバーには `updated` を積まない。
+    // 呼び出し時点で既に contested かつ contestedWithId が無いメンバー（既存の群のメンバーを吸収する場合）は、書いても状態が変わらないので `updated` を積まない。
     const unchanged = memories.map(
       (memory) => memory.status === "contested" && (memory.contestedWithId ?? null) === null,
     );
-    // ADR 0466: イベントを積むメンバーだけ、そのイベントが指す記憶が `ctx` のテナントの行かを確かめる
-    // （積まないメンバーは確かめない。`PostgresMemoryStore` と同じ）。書き換える前に。
+    // イベントを積むメンバーだけ、そのイベントが指す記憶が `ctx` のテナントの行かを確かめる（`PostgresMemoryStore` と同じ）。書き換える前に。
     members.forEach((m, i) => {
       if (!unchanged[i]) this.assertEventTargetOwn(ctx, m.event.memoryId, ids);
     });
@@ -2617,7 +2608,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       memory.updatedAt = new Date();
     }
 
-    // ADR 0381 決定1: 有効期間が重なる組だけに関係の行を張る（ADR 0324 決定4との整合）。
+    // 有効期間が重なる組だけに関係の行を張る。
     const overlaps = (a: Memory, b: Memory): boolean =>
       (a.validFrom === null ||
         a.validFrom === undefined ||
@@ -2649,7 +2640,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot({ members: memories, events });
   }
 
-  /** `markContestedGroup`/`resolveContestedGroup` が使う内部ヘルパー——双方向2行を冪等に足す。 */
+  /** `markContestedGroup`/`resolveContestedGroup` が使う内部ヘルパー。双方向2行を冪等に足す。 */
   private linkRelationPair(
     tenantId: string,
     fromId: MemoryId,
@@ -2684,12 +2675,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
   }
 
-  /**
-   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.resolveContestedGroup?` の実装
-   * （契約は interface 側の doc コメントにある）。`markContestedGroup` と対称——
-   * 決着の種類に関わらず、このメンバー全員を結んでいた関係の行を消す
-   * （ADR 0381 決定3、2者版 `resolveContestedPair` と同じ扱いに揃える）。
-   */
+  /** `MemoryStore.resolveContestedGroup?` の実装。決着の種類に関わらず、このメンバー全員を結んでいた関係の行を消す（`resolveContestedPair` と同じ扱い）。 */
   async resolveContestedGroup(
     ctx: Ctx,
     members: ReadonlyArray<{
@@ -2708,11 +2694,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (new Set(ids).size !== ids.length) {
       throw new RangeError("resolveContestedGroup: member ids must be unique");
     }
-    // ADR 0499: 型の外の status は、書く前に断る（`PostgresMemoryStore` と同じ位置・同じ文面）。
     members.forEach((m, i) =>
       assertResolvedStatus("resolveContestedGroup", `members[${i}]`, m.status),
     );
-    // ADR 0503: 2者版と同じ（置き換えた側の欠落・自己置換・active への supersededById・循環）。
     members.forEach((m, i) =>
       assertSupersededByShape(
         "resolveContestedGroup",
@@ -2740,11 +2724,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
     }
 
-    // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` が、関係の行で
-    // つながった「今も contested な」群の全員と一致することを CAS で課す
-    // （`PostgresMemoryStore.resolveContestedGroup` と同じ形。決定10と矛盾しない
-    // ——forget 等で抜けたメンバーは `status` が `contested` でなくなっているので、
-    // この到達集合には入らない）。
+    // `members` が、関係の行でつながった「今も contested な」群の全員と一致することを CAS で課す（`PostgresMemoryStore.resolveContestedGroup` と同じ）。forget 等で抜けたメンバーは `contested` でなくなっているので、この到達集合には入らない。
     {
       const idSet = new Set(ids);
       const visited = new Set<MemoryId>(ids);
@@ -2769,17 +2749,12 @@ export class InMemoryMemoryStore implements MemoryStore {
         return memory !== null && memory.status === "contested";
       });
       if (missing.length > 0) {
-        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
-        // 再利用をやめ、専用のエラーを投げる。
         throw new ContestedGroupMembershipMismatchError(missing[0]!);
       }
     }
-    // ADR 0439: `supersededById` は `ctx` のテナントの Memory であること。
     for (const m of members) {
       this.assertOwnMemoryRef(ctx, m.supersededById);
     }
-    // ADR 0503: 群の外の `forgotten` な記憶を置き換えた側にしない（敗者が、もう戻らない勝者に置き換えられた行になる）。
-    // 群の中を指すのは、メンバーの status に関わらず断らない。
     {
       const memberIds = new Set<string>(ids);
       members.forEach((m, i) => {
@@ -2797,7 +2772,6 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertStorableMemoryEvent(asJsonSerializedSizeBeforeBytes(m.event));
       assertCloneableMemoryEvent(m.event);
     }
-    // ADR 0466: 全メンバーのイベントが指す記憶は、`ctx` のテナントの行。書き換える前に。
     for (const m of members) {
       this.assertEventTargetOwn(ctx, m.event.memoryId, ids);
     }
@@ -2835,14 +2809,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot({ members: memories, events });
   }
 
-  /**
-   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記）:
-   * `resolveContestedPair`（上）の解決側 CAS を満たせなくなった生存側1件だけを対象にした
-   * 別の任意メソッド。契約は `MemoryStore.resolveOrphanedContested`（`@mnemora/core`）側に
-   * ある。対向の行には一切触れない。
-   *
-   * CAS の失敗（`"contested"` でない・対向が渡された値と違う）は {@link MemoryStatusConflictError}。
-   */
+  /** `resolveContestedPair` の解決側 CAS を満たせなくなった生存側1件だけを対象にした任意メソッド。対向の行には一切触れない。CAS の失敗（`"contested"` でない・対向が渡された値と違う）は {@link MemoryStatusConflictError}。 */
   async resolveOrphanedContested(
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
@@ -2863,7 +2830,6 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     assertStorableMemoryEvent(survivor.event);
     assertCloneableMemoryEvent(survivor.event);
-    // ADR 0466: イベントが指す記憶は `ctx` のテナントの行。
     this.assertEventTargetOwn(ctx, survivor.event.memoryId, [survivor.id]);
     memory.status = "active";
     memory.contestedWithId = null;
@@ -2875,13 +2841,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot({ memory, event: storedEvent });
   }
 
-  /**
-   * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装（契約は interface
-   * 側の doc コメントにある）。`packages/postgres` の実装と同じ4つの絞り込み——
-   * `subjectId` は `null` 同士も一致・`claimKey` は正規化済み文字列のまま等値比較・
-   * `status === "active"`・`contentHash` が違う——に加え、有効期間の重なりを判定する。
-   * **LLM を一度も呼ばない。**
-   */
+  /** `MemoryStore.findActiveByClaimKey?` の実装。`subjectId` は `null` 同士も一致・`claimKey` は正規化済み文字列のまま等値比較・`status === "active"`・`contentHash` が違う、に加え、有効期間の重なりを判定する。LLM は呼ばない。 */
   async findActiveByClaimKey(
     ctx: Ctx,
     query: {
@@ -2895,15 +2855,12 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
-    // ADR 0543: 検索値（`text` 列の引数）の孤立サロゲートも、Postgres では U+FFFD に置き換わって比べられる。
+    // 検索値の孤立サロゲートも、Postgres では U+FFFD に置き換わって比べられる。
     query = { ...query, claimKey: replaceLoneSurrogatesInClaimKey(query.claimKey) };
-    // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
-    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
-    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
-    // 空の区間かどうかも、寄せずに元の値で決める（両端が下限より前でも from < until なら空ではない）。
+    // 読みの口の日時は下限より前でも断らず、そのまま比べる（Postgres は下限へ寄せるが答えは同じ）。Invalid Date だけ断る。空の区間かどうかも、寄せずに元の値で決める。
     assertQueryDate("findActiveByClaimKey", "validFrom", query.validFrom);
     assertQueryDate("findActiveByClaimKey", "validUntil", query.validUntil);
-    // ADR 0434: `claim_key_subject`・`claim_key_predicate` は `text` 列。検索値の NUL は Postgres ではクエリの時点で拒まれる。
+    // 検索値の NUL は、Postgres がクエリの時点で拒む。
     assertQueryTextWithoutNul("findActiveByClaimKey", "claimKey.subject", query.claimKey.subject);
     assertQueryTextWithoutNul(
       "findActiveByClaimKey",
@@ -2924,14 +2881,12 @@ export class InMemoryMemoryStore implements MemoryStore {
         return false;
       }
       if (m.status !== "active") return false;
-      // ADR 0543: 保存側の `contentHash` は置き換え済み。Postgres は引数（`content_hash <> $n`）も U+FFFD にしてから比べるので、揃える。
+      // 保存側の `contentHash` は置き換え済み。Postgres は引数も U+FFFD にしてから比べるので、揃える。
       if (m.contentHash === replaceLoneSurrogates(query.contentHash)) return false;
-      // 半開区間 [validFrom, validUntil) の重なり判定。`null` は -∞/+∞ として扱う
-      // （`packages/postgres` の実装と同じ規約）。
+      // 半開区間 [validFrom, validUntil) の重なり判定。`null` は -∞/+∞ として扱う。
       const otherFrom = m.validFrom ?? null;
       const otherUntil = m.validUntil ?? null;
-      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
-      // （ADR 0473。`packages/postgres` の実装と同じ）。
+      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない。
       const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
         from !== null && until !== null && from >= until;
       const overlaps =
@@ -2944,11 +2899,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot(matches);
   }
 
-  /**
-   * Issue #933（案2、ADR 0378）: `MemoryStore.findContestedByClaimKey?` の実装（契約は
-   * interface 側の doc コメントにある）。`findActiveByClaimKey` と同じ絞り込みのうえで、
-   * `status === "active"` の代わりに `status === "contested"` を見る。
-   */
+  /** `MemoryStore.findContestedByClaimKey?` の実装。`findActiveByClaimKey` と同じ絞り込みで、`status === "contested"` を見る。 */
   async findContestedByClaimKey(
     ctx: Ctx,
     query: {
@@ -2962,15 +2913,10 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
-    // ADR 0543: `findActiveByClaimKey` と同じ。
     query = { ...query, claimKey: replaceLoneSurrogatesInClaimKey(query.claimKey) };
-    // ADR 0547: 読みの口の条件は、下限（4714-11-24 BC）より前でも断らない。Postgres は下限へ寄せてから比べる。列の値は下限以後しか無いので、
-    // 寄せずにそのまま比べても同じ答えになる（`since` 系は全件、`until` 系は0件）。寄せない。Invalid Date だけ断る（`22007`）。
-    // 空の区間かどうかも、寄せずに元の値で決める（両端が下限より前でも from < until なら空ではない）。
+    // 日時の扱いは `findActiveByClaimKey` と同じ。
     assertQueryDate("findContestedByClaimKey", "validFrom", query.validFrom);
     assertQueryDate("findContestedByClaimKey", "validUntil", query.validUntil);
-    // ADR 0434 の負債（ADR 0500）: 兄弟の `findActiveByClaimKey` と同じ。`claim_key_subject`・`claim_key_predicate` は `text` 列で、
-    // 検索値の NUL は Postgres ではクエリの時点で拒まれる。
     assertQueryTextWithoutNul(
       "findContestedByClaimKey",
       "claimKey.subject",
@@ -2995,12 +2941,9 @@ export class InMemoryMemoryStore implements MemoryStore {
         return false;
       }
       if (m.status !== "contested") return false;
-      // ADR 0543: `findActiveByClaimKey` と同じ（引数の `contentHash` も置き換えてから比べる）。
       if (m.contentHash === replaceLoneSurrogates(query.contentHash)) return false;
       const otherFrom = m.validFrom ?? null;
       const otherUntil = m.validUntil ?? null;
-      // 空の区間・逆転した区間（`from >= until`）は点を1つも含まないので、何とも重ならない
-      // （ADR 0473。`packages/postgres` の実装と同じ）。
       const isEmptyInterval = (from: Date | null, until: Date | null): boolean =>
         from !== null && until !== null && from >= until;
       const overlaps =
@@ -3013,23 +2956,14 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot(matches);
   }
 
-  /**
-   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装（契約は
-   * interface 側の doc コメントにある）。`packages/postgres` の実装と同じ絞り込み
-   * （`subjectId` は `null` 同士も一致・`status === "active"`・`claimKey` を持つ行のみ）
-   * のうえで、predicate ごとに最も新しい `createdAt` を代表値にして降順ソートし、
-   * `limit` 件までを返す。
-   */
+  /** `MemoryStore.listActiveClaimPredicates?` の実装。`subjectId` は `null` 同士も一致・`status === "active"`・`claimKey` を持つ行のみ、のうえで predicate ごとに最も新しい `createdAt` を代表値にして降順ソートし、`limit` 件まで返す。 */
   async listActiveClaimPredicates(
     ctx: Ctx,
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
     assertWellFormedCtx(ctx);
     assertWellFormedIdentifier(query.subjectId, "query.subjectId");
-    // `PostgresMemoryStore.listActiveClaimPredicates` は `query.limit` を生 SQL の `LIMIT`（bigint の
-    // パラメータ）へそのまま渡すので、負数・`NaN`・`Infinity`・非整数・2^63 以上では Postgres が
-    // 例外を投げる。検査せず `slice(0, limit)` へ渡すと違う件数を黙って返すので、他の `limit` を
-    // 取る口（`requeueEmbedJobs` ほか）と同じ2段の順序で、クエリの前に弾く Postgres 側に揃える。
+    // 整数でない・負の `limit` は先に断る: 検査せず `slice(0, limit)` へ渡すと、Postgres と違う件数を黙って返す。
     if (!Number.isInteger(query.limit)) {
       throw new Error(`listActiveClaimPredicates: limit must be an integer (got ${query.limit})`);
     }
@@ -3046,10 +2980,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (m.tenantId !== ctx.tenantId) continue;
       if ((m.subjectId ?? null) !== query.subjectId) continue;
       if (m.status !== "active") continue;
-      // `PostgresMemoryStore.listActiveClaimPredicates` の SQL
-      // （`claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）と同じく、
-      // 主語か述語の片方が欠けた claim key は数えない（以前は述語の欠けた鍵から
-      // `undefined` を一覧に混ぜていた。歯は `in-memory-list-claim-predicates-incomplete-key.test.ts`）。
+      // 主語か述語の片方が欠けた claim key は数えない（`undefined` を一覧に混ぜない）。
       if (!m.claimKey || m.claimKey.subject == null || m.claimKey.predicate == null) continue;
       const predicate = m.claimKey.predicate;
       const createdAtMs = m.createdAt.getTime();
@@ -3068,15 +2999,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
-   * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここは選定・更新の
-   * 実装のみ。`archiveDecayed`（直上ではなく本クラス冒頭寄りのメソッド）と同じ
-   * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
-   * 追記を行うことで、postgres 実装の単一トランザクションを模す。
-   *
-   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: 指定すると、選定条件に
-   * `onlyMemoryIds.includes(m.id)` を積集合として足す——`packages/postgres` の
-   * `AND id = ANY(...)` と同じ意味。
+   * `superseded → active`。選定・更新・イベント追記を `await` を挟まない同期区間で行い、Postgres の単一トランザクションを模す。
+   * `filter?.onlyMemoryIds` を指定すると、選定条件に `onlyMemoryIds.includes(m.id)` を積集合として足す（`AND id = ANY(...)` と同じ）。
    */
   async restoreSupersededBy(
     ctx: Ctx,
@@ -3097,11 +3021,8 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     const actor = event.actor ?? { type: "system" };
     const meta = { reason: event.reason ?? "unsuperseded", supersededById };
-    // 1件目を書き換える前に、書くイベントが書けるかを確かめる（`at` の Invalid Date・`actor` の
-    // structuredClone できない値）。ループの中の `buildStoredMemoryEvent` で初めて投げると、先の行だけが
-    // 戻ってイベントの無い半端な状態が残る——Postgres は1文で巻き戻る。対象が無いときは今までどおり
-    // 確かめない（投げる入力を増やさない。Postgres も対象が無ければ Invalid Date の `at` で空を返す——
-    // #1229 の行3で Postgres の側をこちらに揃えた）。
+    // 1件目を書き換える前に、書くイベントが書けるかを確かめる（`at` の Invalid Date・`actor` の structuredClone できない値）。ループの中で初めて投げると、先の行だけが戻ってイベントの無い半端な状態が残る（Postgres は1文で巻き戻る）。
+    // 対象が無いときは確かめない（投げる入力を増やさない）。
     if (targets.length > 0) {
       const template: NewMemoryEvent = {
         tenantId: ctx.tenantId,
@@ -3116,7 +3037,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       assertStorableMemoryEvent(template);
       assertCloneableMemoryEvent(template);
     } else {
-      // ADR 0640: 下限より前の `at` は、対象が1件も無くても Postgres が `22008` で拒む（実測。Invalid Date が対象が無ければ通るのは、上のコメントのとおり別の話）。
+      // 下限より前の `at` は、対象が1件も無くても Postgres が拒む。
       assertWrittenTimestamptzFloor("memory_events", "at", event.at);
     }
 
@@ -3142,15 +3063,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * `restoreSupersededBy` を実際に呼ぶ**前**に見るための読み取り専用の口
-   * （Issue #515、ADR 0237）。契約は `MemoryStore.previewRestoreSupersededBy`（`@mnemora/core`）
-   * 側にある——対象の選び方は `restoreSupersededBy` と同じ `filter` を使う。
-   * `this.events`（`InMemoryEventStore` と共有する配列、ファイル冒頭の doc コメント
-   * 参照）から、対象ごとに直近の `kind: 'superseded'` イベントを探して
-   * `meta.reason` を運ぶ——見つからなければ `null`。書き込みは一切行わない。
-   *
-   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy` と
-   * 同じ意味の積集合フィルタ——対象の選び方を完全に一致させる。
+   * `restoreSupersededBy` を実際に呼ぶ前に見るための読み取り専用の口。対象の選び方は `restoreSupersededBy` と同じ `filter`（`onlyMemoryIds` を含む）を使う。
+   * `this.events` から、対象ごとに直近の `kind: 'superseded'` イベントを探して `meta.reason` を運ぶ（見つからなければ `null`）。書き込みは一切行わない。
    */
   async previewRestoreSupersededBy(
     ctx: Ctx,
@@ -3190,15 +3104,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     return { candidates };
   }
 
-  /**
-   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
-   * `listLabels?`（`PostgresMemoryStore.listLabels` と同じ契約）。
-   *
-   * Issue #881 / ADR 0318 追記（2026-09-26、クローン miku の判断）: `name` の並び順は
-   * **コードポイント順**（Postgres の `COLLATE "C"` と同じ、バイト順）と決めた。
-   * `localeCompare`（ロケール依存の自然順）はこの契約とずれる——`compareLabelName`
-   * （このファイル下）に置き換える。
-   */
+  /** `listLabels?`。`name` の並び順は、`localeCompare`（ロケール依存の自然順）ではなく、コードポイント順（Postgres の `COLLATE "C"` と同じバイト順）。 */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     assertWellFormedCtx(ctx);
     const results: LabelSummary[] = [];
@@ -3211,21 +3117,13 @@ export class InMemoryMemoryStore implements MemoryStore {
     return snapshot(results);
   }
 
-  /**
-   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
-   * `registerLabel?`（`PostgresMemoryStore.registerLabel` と同じ契約）。
-   *
-   * `name` に NUL（U+0000）を含むと投げる——`PostgresMemoryStore` は `labels.name`（`text` 列）が
-   * NUL を拒んで例外になる（`invalid byte sequence for encoding "UTF8": 0x00`、実測）。ラベルの名前は
-   * `tags` の要素と同じ語彙で、`tags` の NUL はこの fixture の `createMemory` がすでに拒んでいる
-   * （Issue #816）。
-   */
+  /** `registerLabel?`。`name` に NUL（U+0000）を含むと投げる（Postgres は `labels.name`（`text` 列）が NUL を拒む）。 */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
     assertWellFormedCtx(ctx);
     if (name.includes("\u0000")) {
       throw new Error(`InMemoryMemoryStore: label name must not contain NUL characters (U+0000)`);
     }
-    // ADR 0543: `labels.name` は `text` 列。孤立サロゲートは U+FFFD に置き換えて保存する（`tags` の要素と同じ）。
+    // `text` 列なので、孤立サロゲートは U+FFFD に置き換えて保存する。
     name = replaceLoneSurrogates(name);
     const key = this.labelKey(ctx.tenantId, name);
     const existing = this.labels.get(key);
@@ -3240,32 +3138,14 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
-   * このテナントに属する行を、`memory_labels`・`recall_usages`・`memory_events` →
-   * `memories`（+ 冪等キー `extractionIndex`）→ `observations` → `recalls` → `labels` →
-   * `tenant_activity`・`tenant_subject_activity` の順で消す
-   * （`PostgresMemoryStore.eraseTenant` と同じ表の並び、`MemoryStore.eraseTenant` の
-   * doc コメント参照）。
-   *
-   * この in-memory 実装は `Map`/`Set` の上に成り立っており、外部キー制約も
-   * トランザクションの原子性も持たない——`blocked_by_foreign_reference`
-   * （他テナントの行がこのテナントの行を FK で参照している）は返さない
-   * （`packages/postgres` 固有の振る舞い。`postgres` の実装 doc 参照）。自己参照
-   * （`superseded_by_id`/`contested_with_id`）の事前 NULL 化も、`Map` からの削除が
-   * FK エラーを起こさないため不要——単純に対象の行を消すだけでよい。
-   *
-   * [ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md):
-   * 消した `memories` の埋め込みは、{@link onMemoriesDeleted} で登録された
-   * `InMemoryVectorStore` が一緒に消す（Postgres の `ON DELETE CASCADE`。件数には数えない）。
-   * `tenant_subject_activity` は subject ごとに1行として数える。
-   *
-   * `reachedLimit` は `PostgresMemoryStore.eraseTenant` と同じ「保守的な近似」
-   * （ある表でちょうど budget 分だけ削除できた場合、それ以上残っているかを
-   * 追加で確認せず `true` を返す）。
+   * このテナントに属する行を、`memory_labels`・`recall_usages`・`memory_events` → `memories`（+ 冪等キー）→ `observations` → `recalls` → `labels` → `tenant_activity`・`tenant_subject_activity` の順で消す（`PostgresMemoryStore.eraseTenant` と同じ並び）。
+   * 外部キー制約を持たないので、`blocked_by_foreign_reference` は返さない（`packages/postgres` 固有の振る舞い）。
+   * 消した `memories` の埋め込みは、{@link onMemoriesDeleted} で登録された `InMemoryVectorStore` が一緒に消す（件数には数えない）。`tenant_subject_activity` は subject ごとに1行として数える。
+   * `reachedLimit` は `PostgresMemoryStore.eraseTenant` と同じ「保守的な近似」（ちょうど budget 分だけ削除できたら、残りを確認せず `true`）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
     assertWellFormedCtx(ctx);
-    // ADR 0493: `limit` は `bigint` の引数へ渡される。整数でない・範囲外は Postgres が拒む（負数そのものは拒まない）。
+    // `limit` は `bigint` の引数へ渡される（負数そのものは拒まない）。
     assertQueryBigint("eraseTenant", "limit", opts.limit);
     const limit = opts.limit;
     const dryRun = opts.dryRun === true;
@@ -3273,9 +3153,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     let total = 0;
     let reachedLimit = false;
 
-    // 汎用ヘルパー: `matches(key, value)` を満たすエントリを budget 個まで集め、
-    // `dryRun` でなければ Map/Set から取り除く。戻り値は削除した（またはプレビューで
-    // 数えた）件数。
+    // `matches(key, value)` を満たすエントリを budget 個まで集め、`dryRun` でなければ取り除く。戻り値は削除した（またはプレビューで数えた）件数。
     const drainMap = <V>(map: Map<string, V>, tenantOf: (value: V) => string): number => {
       if (remaining <= 0) return 0;
       const budget = remaining;
@@ -3293,8 +3171,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
       return victims.length;
     };
-    // `labels`/`memoryLabels` は key 自体が `JSON.stringify([tenantId, ...])`——
-    // value に `tenantId` を持たないので、key から読む。
+    // `labels`/`memoryLabels` は key 自体が `JSON.stringify([tenantId, ...])` で、value に `tenantId` を持たないので、key から読む。
     const drainKeyedMap = <V>(map: Map<string, V>): number => {
       if (remaining <= 0) return 0;
       const budget = remaining;
