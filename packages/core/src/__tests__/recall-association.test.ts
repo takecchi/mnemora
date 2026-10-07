@@ -10,6 +10,7 @@ import {
   withoutGetVectors,
   withReversedGetVectorsOrder,
 } from "./runtime-fakes.js";
+import { createObservedMemory } from "./observed-memory.js";
 
 /**
  * 連想枠（Issue #200、ADR 0151、docs/recall.md §9）の歯。
@@ -81,7 +82,8 @@ async function createEmbeddedMemory(
   vector: number[],
   overrides: Partial<NewMemory> = {},
 ): Promise<Memory> {
-  const memory = await stores.memoryStore.createMemory(
+  const memory = await createObservedMemory(
+    stores.memoryStore,
     ctx,
     newMemory({ embeddingStatus: "ready", ...overrides }),
   );

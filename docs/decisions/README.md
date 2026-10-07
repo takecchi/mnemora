@@ -673,5 +673,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0676](./0676-merged-0917-recheck-teeth.md) | 09/17 にマージされた15本のうち、Postgres を要さない側（G2・G4・G5・G6・G7）の確かめ直しで見つかった穴に歯を足す（Issue #1812） | 採用 (2026-10) |
 | [0677](./0677-merged-0930-front-tail-a-recheck-teeth-1545-1548-1549.md) | 09/30 マージの前半の残り（#1545・#1548・#1549）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
 | [0680](./0680-merged-0930-front-tail-b-recheck-teeth-1511-1544.md) | 09/30 マージの前半の残り（B 群の #1511・#1512・#1519・#1521・#1526・#1535・#1540・#1544）の確かめ直しで見つかった穴に歯を足す（Issue #1734） | 採用 (2026-10) |
+| [0689](./0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md) | 確かめ直し（Issue #1827）のあとの手当て——CAS に弾かれた対象のイベント・Fake の `stated`/`inferred`・`searchMany` の TSDoc・包みの `additionalProperties` | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

@@ -4,6 +4,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createObservedMemory } from "./observed-memory.js";
 
 /**
  * 永続化する recall の記録（`RecallRecord.returnedMemories`）は、「後から再現できないもの」だけを運ぶ
@@ -76,14 +77,14 @@ describe("recall の記録の returnedMemories は、memoryId・score・retrieve
       hashContent: (content: string) => `sha256(${content})`,
       clock: { now: () => NOW },
     });
-    const anchor: Memory = await stores.memoryStore.createMemory(ctx, newMemory());
+    const anchor: Memory = await createObservedMemory(stores.memoryStore, ctx, newMemory());
     await stores.vectorStore.upsert(
       ctx,
       stores.embeddingProvider.space,
       anchor.id,
       [0.70710678, 0.70710678],
     );
-    const associated: Memory = await stores.memoryStore.createMemory(ctx, newMemory());
+    const associated: Memory = await createObservedMemory(stores.memoryStore, ctx, newMemory());
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, associated.id, [0, 1]);
 
     const result = await runtime.recall(ctx, {

@@ -6,6 +6,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import type { InferredProvenance } from "../provenance.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createObservedMemory } from "./observed-memory.js";
 
 /**
  * Issue #883（[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）:
@@ -96,7 +97,8 @@ async function createEmbeddedMemory(
   vector: number[],
   overrides: Partial<NewMemory> = {},
 ): Promise<Memory> {
-  const memory = await stores.memoryStore.createMemory(
+  const memory = await createObservedMemory(
+    stores.memoryStore,
     ctx,
     newMemory({ embeddingStatus: "ready", ...overrides }),
   );

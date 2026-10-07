@@ -43,6 +43,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.3.0` からの差分を対象とする。**⛔ **版は仮である**——破壊的変更が無ければ `1.3.1` になりうる。版を決めるのはオーナーである。起点は `v1.3.0` の tag が指す commit であり（tag の sha の正本は GitHub Release `v1.3.0`）、それより後に `main` へ入った PR がこの節の対象になる。まだ何も棚卸ししていない。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`@mnemora/testkit` の `InMemoryMemoryStore.supersedeWithNewMemories` が、CAS に弾かれた対象のイベントを確かめなくなった**（[ADR 0689](./docs/decisions/0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md)。[Issue #1827](https://github.com/takecchi/mnemora/issues/1827)。クローンの判断で、オーナーの判断ではない）。
+  以前は、CAS に弾かれる対象に書けないイベント（`kind` が列挙に無い・`at` が Invalid Date・`actor` に NUL・`meta` に BigInt・`sizeBeforeBytes` が整数でない）を渡すと例外になった。いまは `conflicted` に積んで返す（`MemoryStore.supersedeWithNewMemories` の TSDoc の約束。`@mnemora/postgres` は元からこの形）。CAS を通る対象は、いままでどおり状態を書き換える前に投げる。**投げる入力が減る向きだけの変更で、型・シグネチャは変わらない。**
+
 ## [1.3.0] - 2026-10-07
 
 **この節は `v1.2.0` からの差分を対象とする。****版は `1.3.0` である**（オーナーの指示、2026-10-07）。`v1.3.0` の tag は `d811241f`（PR #1832）に打つ（tag の sha の正本は GitHub Release `v1.3.0`）。（⚠ 2026-10-07 訂正: ここまでこの行は「⛔ 版は仮である——破壊的変更が無ければ `1.2.1` になりうる。版を決めるのはオーナーである」と書いていた）起点は `v1.2.0` の tag が指す commit であり、それより後に `main` へ入った PR がこの節の対象になる。この節は `d49c46c`..`3c90e3b7`（棚卸しした時点の `main` の先端）を棚卸し済みである（基準は `[1.2.0]` の追記1と同じ。下の追記2）。⛔ ここに件数を書かないこと（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。

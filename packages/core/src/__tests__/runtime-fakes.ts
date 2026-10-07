@@ -493,7 +493,7 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
  * イベントを組み立て切れない——そこで、記憶を作る前にこの検査だけを全対象について済ませる
  * （testkit の fixture が同じ段で `assertStorableMemoryEvent` を呼ぶのと同じ形）。
  */
-function assertBuildableFakeEvent(event: NewMemoryEvent, opts?: { skipAtFloor?: boolean }): void {
+function assertBuildableFakeEvent(event: NewMemoryEvent): void {
   // ADR 0493: testkit の `assertStorableMemoryEvent`（`memory-event-check.ts`）と同じ判定。BigInt は他のどれより先に断る
   // （Postgres は `JSON.stringify` の時点で `TypeError` になり、問い合わせを送らない）。
   if (fakeContainsBigInt(event.actor) || fakeContainsBigInt(event.meta)) {
@@ -511,11 +511,8 @@ function assertBuildableFakeEvent(event: NewMemoryEvent, opts?: { skipAtFloor?: 
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
   }
   // ADR 0640: 下限（4714-11-24 BC 00:00 UTC）より前の `at` は、Postgres が行を書くときに `22008` で拒む。testkit の
-  // `assertStorableMemoryEvent` と同じ位置・同じ文面。`skipAtFloor` は、そのイベントを書かないかもしれない呼び手（`supersedeWithNewMemories` の
-  // 事前検査。CAS に弾かれる対象は書かず、Postgres は `at` を見ない）が、下限だけを「書く」分岐へ回すためのもの。
-  if (opts?.skipAtFloor !== true) {
-    assertFakeTimestamptzNotBelowMin("memory_events", "at", event.at);
-  }
+  // `assertStorableMemoryEvent` と同じ位置・同じ文面。
+  assertFakeTimestamptzNotBelowMin("memory_events", "at", event.at);
   assertStorableFakeEvent(event);
   if (fakeContainsNulOrLoneSurrogate(event.actor)) {
     throw new Error(
@@ -942,16 +939,11 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewMemory,
     beforeInsert?: () => void,
   ): IdempotentCreateResult<Memory> {
-    // 8回目の TSDoc の棚卸し: testkit の fixture（`InMemoryMemoryStore.createMemoryIdempotent`）と
-    // `@mnemora/postgres` が拒む `provenance` の形のうち、2つをこの Fake も同じく拒む（冪等の衝突の判定より前。
-    // fixture と同じ位置）——`provenance.kind` が列挙に無いとき、と `provenance` が `null` のとき（次の行が
-    // fixture と同じく `TypeError` を投げる）。
-    //
-    // ⚠ **3つ目（`stated`・`inferred` なのに列の `sourceObservationId` が `null`）は、意図して拒まない。**
-    // fixture と Postgres は拒むが、core の既存のテストのうち25件（`recall-pipeline`・`recall-basis-lost`・
-    // `recall-association`・`recall-exclude-provenance-filter`・`runtime` の5ファイル）が、`sourceObservationId: null`
-    // の `inferred`・`stated` の Memory をこの Fake に書いて前提にしている。拒むとそれらのデータを書き換えることに
-    // なり、各テストが縛っているものが変わりうるので、揃えない（`fake-provenance-rejects.test.ts` が今の振る舞いを縛る）。
+    // testkit の fixture（`InMemoryMemoryStore.createMemoryIdempotent`）・`@mnemora/postgres` と同じく、`provenance` の
+    // 3つの形を拒む（冪等の衝突の判定より前。fixture と同じ位置）——`provenance.kind` が列挙に無いとき、`provenance` が
+    // `null` のとき（次の行が `TypeError` を投げる）、`stated`・`inferred` なのに列の `sourceObservationId` が `null` のとき
+    // （Postgres は DB の CHECK、`MemoryStore.createMemory` の TSDoc の約束）。3つ目を受け付けると、Postgres では書けない
+    // Memory を前提にした試験が緑になる。
     // ADR 0543: `text` 列に入る欄の孤立サロゲートは、Postgres と同じく U+FFFD に置き換えて保存する。冪等の鍵
     // （`contentHash`・`extractorVersion`）も置き換えた後の値で比べる。`jsonb` 列の欄（`attributes`・`provenance`）は触らない。
     input = {
@@ -967,6 +959,14 @@ export class FakeMemoryStore implements MemoryStore {
     if (!ProvenanceKindSchema.safeParse(provenanceKind).success) {
       throw new Error(
         `FakeMemoryStore: memories.provenance_kind must be one of ${ProvenanceKindSchema.options.join(", ")} (got ${JSON.stringify(provenanceKind)})`,
+      );
+    }
+    if (
+      (provenanceKind === "stated" || provenanceKind === "inferred") &&
+      input.sourceObservationId == null
+    ) {
+      throw new Error(
+        `FakeMemoryStore: provenance.kind "${provenanceKind}" requires sourceObservationId`,
       );
     }
     // ADR 0630: 書いたら読み戻したときに `MemorySchema` を通らなくなる値（`digest`・`contentHash`・`extractorVersion` の空文字、
@@ -1692,11 +1692,6 @@ export class FakeMemoryStore implements MemoryStore {
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${target.id}`);
       }
-      // 書けないイベント（Invalid Date の `at`、列挙に無い `kind` など）も、記憶を作る前・状態を書き換える前に投げる
-      // ——以前は news を作り、先の対象を superseded にした後で投げていた。`meta.supersededById` は作った記憶の
-      // id で埋めるので、ここでは組み立てずに検査だけを走らせる（`assertBuildableFakeEvent`）。
-      // ADR 0640: 下限より前の `at` はここでは見ない（CAS に弾かれる対象はイベントを書かず、Postgres は `at` を見ない）。下の CAS を通る対象だけが見る。
-      assertBuildableFakeEvent(target.event, { skipAtFloor: true });
     }
     // ADR 0469: CAS を通ってイベントを書く対象だけ、そのイベントが指す記憶が `ctx` のテナントの行かを、news を作る前に確かめる
     // （弾かれる対象はイベントを書かないので確かめない。`PostgresMemoryStore`・`InMemoryMemoryStore` と同じ）。
@@ -1708,7 +1703,10 @@ export class FakeMemoryStore implements MemoryStore {
       const observed = willSupersede.has(target.id) ? { status: "superseded" as const } : memory;
       if (target.expectedStatus !== undefined && casMismatch(observed, target.expectedStatus))
         continue;
-      assertFakeTimestamptzNotBelowMin("memory_events", "at", target.event.at); // ADR 0640: CAS を通る対象だけ
+      // 書けないイベント（Invalid Date の `at`、列挙に無い `kind` など）は、記憶を作る前・状態を書き換える前に投げる。
+      // ただし CAS を通る対象だけ——弾かれる対象はイベントを書かず、Postgres も見ないので、全対象を先に検査すると投げる入力が増える。
+      // `meta.supersededById` は作った記憶の id で埋めるので、ここでは組み立てずに検査だけを走らせる。
+      assertBuildableFakeEvent(target.event);
       this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
       willSupersede.add(target.id);
     }

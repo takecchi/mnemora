@@ -1302,8 +1302,6 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     // 事前検証: まだ何も書いていないうちに投げる。3種類の失敗を1つに潰さない。
     for (const [i, target] of supersede.entries()) {
-      // 下限より前の `at` はここでは見ない: CAS に弾かれる対象はイベントを書かず、Postgres は `at` を見ない。CAS を通る対象だけ、下の 1d で見る。
-      assertStorableMemoryEvent(target.event, { skipAtFloor: true });
       // 1b. 対象の行がそもそも無い。
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
@@ -1333,9 +1331,10 @@ export class InMemoryMemoryStore implements MemoryStore {
         wouldConflict.push({ id: target.id, observedStatus: status });
         continue;
       }
+      // イベントの検査（`kind`・`at`・NUL・BigInt・`sizeBeforeBytes`）は CAS を通る対象だけに掛ける。弾かれる対象は
+      // イベントを書かず、Postgres も見ないので、全対象を先に検査すると投げる入力が増える。
+      assertStorableMemoryEvent(target.event);
       assertCloneableMemoryEvent(target.event);
-      // CAS を通ってイベントを書く対象だけ、`at` が下限より前でないかを確かめる（上の 1. は見ない）。
-      assertWrittenTimestamptzFloor("memory_events", "at", target.event.at);
       // CAS を通ってイベントを書く対象だけ、そのイベントが指す記憶が `ctx` のテナントの行かを確かめる（`PostgresMemoryStore` と同じ）。
       this.assertEventTargetOwn(ctx, target.event.memoryId, [target.id]);
       willSupersede.add(target.id);

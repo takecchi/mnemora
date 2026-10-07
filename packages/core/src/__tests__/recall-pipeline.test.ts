@@ -12,6 +12,7 @@ import { createRuntime } from "../runtime.js";
 import { RecallOutputValidationError } from "../recall-output-validation.js";
 import type { RecallOutputValidationMode } from "../recall-output-validation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createObservedMemory } from "./observed-memory.js";
 
 /**
  * roadmap.md 段階4「想起」・段階5「説明」の完了条件そのものを検査する。
@@ -159,7 +160,8 @@ async function createEmbeddedMemory(
   vector: number[],
   overrides: Partial<NewMemory> = {},
 ): Promise<Memory> {
-  const memory = await stores.memoryStore.createMemory(
+  const memory = await createObservedMemory(
+    stores.memoryStore,
     ctx,
     newMemory({ embeddingStatus: "ready", ...overrides }),
   );
@@ -1139,7 +1141,8 @@ describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答�
     // 同伴側は ANN を通らず getMany で拾われる別経路である。
     // ここを別に見ないと、「ANN 経由だけ正しく、同伴側は主の kind を配る」実装が通る。
     const { runtime, stores } = buildRuntime();
-    const companion = await stores.memoryStore.createMemory(
+    const companion = await createObservedMemory(
+      stores.memoryStore,
       ctx,
       newMemory({
         status: "contested",
@@ -1328,7 +1331,8 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
 
   it("同伴取得（mandatory_companion）でも speaker/subjectId は対向の Memory 自身の値を名乗る", async () => {
     const { runtime, stores } = buildRuntime();
-    const companion = await stores.memoryStore.createMemory(
+    const companion = await createObservedMemory(
+      stores.memoryStore,
       ctx,
       newMemory({
         status: "contested",
@@ -1488,7 +1492,8 @@ describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、
   it("同伴取得（mandatory_companion）でも recordedAt/occurredAt は対向の Memory 自身の値を名乗る", async () => {
     const { runtime, stores } = buildRuntime();
     const companionRecordedAt = new Date("2026-04-01T00:00:00.000Z");
-    const companion = await stores.memoryStore.createMemory(
+    const companion = await createObservedMemory(
+      stores.memoryStore,
       ctx,
       newMemory({
         status: "contested",

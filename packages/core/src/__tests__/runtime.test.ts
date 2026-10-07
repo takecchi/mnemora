@@ -15,6 +15,7 @@ import {
 } from "../runtime.js";
 import type { ReextractSkip } from "../strategies/reextract.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { withSourceObservation } from "./observed-memory.js";
 import type { FakeMemoryStore } from "./runtime-fakes.js";
 
 /**
@@ -1710,7 +1711,7 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
       const { runtime, stores } = buildRuntime(llmReturningOrDecliningReflection([]));
       const { jobs } = await stores.memoryStore.createMemoryWithOutbox(
         ctx,
-        {
+        await withSourceObservation(stores.memoryStore, ctx, {
           tenantId: "tenant-1",
           subjectId: null,
           sourceObservationId: null,
@@ -1731,7 +1732,7 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
           halfLifeHours: 24,
           decayFloorAt: new Date(),
           embeddingStatus: "pending",
-        },
+        }),
         [kind],
       );
       expect(jobs).toHaveLength(1);
