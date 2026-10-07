@@ -488,3 +488,13 @@ Issue #878 に残した。
 本文の次の参照は、**書いた時点から**指す先が無かった（または違う先を指していた）。git の履歴で、指す先がその形で在ったことが一度も無いことを確かめた。本文は書き換えず、正しい先をここに記す（`docs/decisions/README.md` の「採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」）。
 
 - 「`docs/recall.md` §4.2 の」の §4.2 は、`docs/recall.md` に当時も今も無い節である。「無い」の分類は [docs/recall.md](../recall.md) の §4「「無い」の分類」に在る。
+
+## 追記（2026-10-07、Issue #1798 の (B)）: クエリ全体の上限の切り口を、書記素の境界に揃えた
+
+`packages/postgres/src/lexical-query-cap.ts` の `capLexicalQueryTotalChars`（上限 600）が `query.slice(0, 600)` で切っていたのを、書記素の境界で切る形に直した。クローン miku の判断で、オーナーの判断ではない。
+
+- **理由**【現物】: 境目にサロゲートペアが来ると孤立サロゲートが残り、結合文字・ZWJ の絵文字列が来ると書記素が割れた。ADR 0424・0467・0470 が直した3か所と同じ壊れ方である。
+- **単位の約束**: 本文の「先頭から600文字に切り詰める」は、UTF-16 コードユニットとは書いていない。「600 以下に収める」と読み、単位はコードユニットのまま、境目に書記素が跨るときだけ手前で切る。境目に当たらない入力は1文字も変わらない。
+- **部品**: `sliceAtGraphemeBoundary` の写しを `packages/postgres/src/grapheme-slice.ts` に置いた。core から公開すると公開 API の snapshot（ADR 0178）が増えるため、公開はしていない。
+- **残したもの**: testkit の fixture `in-memory-lexical-store.ts` と、core のテスト用 Fake（`runtime-fakes.ts`）の同じ切り詰めは、別の PR で揃える。
+- 本文は書き換えていない。

@@ -1,3 +1,5 @@
+import { sliceAtGraphemeBoundary } from "./grapheme-slice.js";
+
 /**
  * クエリの語数・語ごとの文字数に上限を設ける（Issue #878、2026-09-26、クローン miku の判断）。
  *
@@ -90,12 +92,15 @@ export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 export const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
 
 /**
- * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
- * 切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数
+ * （UTF-16 コードユニット）以下に切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。
+ *
+ * 境目が書記素の内側（サロゲートペア・結合文字・ZWJ の絵文字列）に当たるときは、その書記素の手前で
+ * 切る。上限は「以下に収める」約束（ADR 0092）で、ちょうど600とは約束していない。
  */
 export function capLexicalQueryTotalChars(query: string): string {
   return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
-    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    ? sliceAtGraphemeBoundary(query, LEXICAL_QUERY_MAX_TOTAL_CHARS)
     : query;
 }
 
