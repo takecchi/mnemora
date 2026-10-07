@@ -4,8 +4,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `recalls.index_band` の目次帯の索引の定義と、`purgeMemory` が伏せる値。
- *
  * - 索引の定義を文字列で見るのは、計画が索引を選ぶかどうかでは、演算子クラス（`jsonb_ops` は
  *   `@>` にも使える）や先頭に足した `tenant_id`（複合でも `@>` の述語で選ばれる）の違いが見えないため。
  *   どちらも結果は同じで、索引が大きく書き込みが重くなるだけなので、定義そのものを縛る。

@@ -7,8 +7,6 @@ import * as schema from "../schema.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `createRecall` の活動時計の、鍵と、advance なしの分岐の文の数。
- *
  * - `record.subjectId`（recall の対象）と `advanceActivityClock.subjectId`（進めるカウンタ）を別の値にする。
  *   同じ値だと、カウンタの鍵を取り違えても結果が同じになる。
  * - advance なしの分岐は、撃つ文が `INSERT INTO recalls` の1本だけで、`BEGIN`/`COMMIT` も他の文も伴わない。
