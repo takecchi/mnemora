@@ -62,6 +62,42 @@ class ZeroAwareEmbedding extends DeterministicEmbeddingProvider {
   }
 }
 
+type TableRows = Record<string, Record<string, unknown>[]>;
+
+// 表の名前を固定で並べない: 埋め込みの表は空間ごとに名前が動的に決まり、migration が表を足せば増える。
+// 列を名指しで SELECT しない: 列の削除・改名を、SQL のエラーではなく「キーが無い」差として拾うため。
+async function snapshotPublicTables(q: (text: string) => Promise<unknown[]>): Promise<TableRows> {
+  const tables = (await q(
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+  )) as { tablename: string }[];
+  const snapshot: TableRows = {};
+  for (const { tablename } of tables) {
+    const rows = (await q(
+      `SELECT to_jsonb(t) AS row FROM "${tablename.replaceAll('"', '""')}" t`,
+    )) as { row: Record<string, unknown> }[];
+    snapshot[tablename] = rows.map((r) => r.row);
+  }
+  return snapshot;
+}
+
+// Set で比べない: 主キーが無い表では同じ中身の行が重複しうるので、個数で消し込む。
+// 無い列を undefined にしない: JSON.stringify で null の列と見分けがつかなくなる。
+function rowsMissingAfter(
+  before: Record<string, unknown>[],
+  after: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const columns = Object.keys(before[0] ?? {});
+  const key = (row: Record<string, unknown>) =>
+    JSON.stringify(columns.map((c) => (c in row ? row[c] : { missingColumn: c })));
+  const remaining = new Map<string, number>();
+  for (const row of after) remaining.set(key(row), (remaining.get(key(row)) ?? 0) + 1);
+  return before.filter((row) => {
+    const n = remaining.get(key(row)) ?? 0;
+    remaining.set(key(row), n - 1);
+    return n <= 0;
+  });
+}
+
 function databaseUrlFor(name: string): string {
   const url = new URL(requireDatabaseUrl());
   url.pathname = `/${name}`;
@@ -86,6 +122,8 @@ for (const fixture of FIXTURES) {
     let client: PostgresClient;
     let rowsBefore: unknown[];
     let rowsAfter: unknown[];
+    let tablesBefore: TableRows;
+    let tablesAfter: TableRows;
     // Issue #1775 の #717: labels の backfill（migration `labels`/`memory_labels` を足す版）の直後の凍結値。
     let hadLabelsTableBefore: boolean;
     let backfillAfter:
@@ -151,6 +189,7 @@ for (const fixture of FIXTURES) {
       // migration の前には書けない。
       await q("UPDATE memories SET tags = ARRAY['legacy-residue'] WHERE purged_at IS NOT NULL");
       rowsBefore = await snapshotRows();
+      tablesBefore = await snapshotPublicTables(q);
       hadLabelsTableBefore =
         (await q<{ t: string | null }>("SELECT to_regclass('labels')::text AS t"))[0]!.t !== null;
 
@@ -167,6 +206,7 @@ for (const fixture of FIXTURES) {
       // 結果が左右される——vitest の実行順は既定では宣言順だが、`--sequence.shuffle` では
       // 変わる（実測: seed 1790682813243 ほかで赤くなった）。
       rowsAfter = await snapshotRows();
+      tablesAfter = await snapshotPublicTables(q);
       backfillAfter = {
         tags: await q("SELECT id, tenant_id, tags FROM memories ORDER BY id"),
         labels: await q(
@@ -231,6 +271,26 @@ for (const fixture of FIXTURES) {
     // 書き換えた後か）に結果が依存しないようにするため。
     it("migration の前後で既存の記憶の行（状態・埋め込みの状態・関係・本文）が変わらない", () => {
       expect(rowsAfter).toEqual(rowsBefore);
+    });
+
+    it("migration の前後で、public の表がどれも消えず、行数も減らない", () => {
+      const names = Object.keys(tablesBefore);
+      expect(names.length).toBeGreaterThan(0);
+      for (const name of names) {
+        expect(tablesAfter[name], `表 ${name} が無くなった`).toBeDefined();
+        expect(tablesAfter[name]!.length, `表 ${name} の行数が減った`).toBeGreaterThanOrEqual(
+          tablesBefore[name]!.length,
+        );
+      }
+    });
+
+    // tablesAfter を toEqual で比べない: migration が足した列・行（台帳など）があっても緑であるべきなので、
+    // restore 時の列と行だけを消し込む。
+    it("migration の前後で、public の各表の行が、restore 時にあった列のまま残っている", () => {
+      for (const [name, before] of Object.entries(tablesBefore)) {
+        const missing = rowsMissingAfter(before, tablesAfter[name] ?? []);
+        expect(missing, `表 ${name} で ${missing.length} 行が消えた・変わった`).toEqual([]);
+      }
     });
 
     // ADR 0437 決定3: migration は遡って消さない（tags は migration の前後で変わらない、上の it）。
