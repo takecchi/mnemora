@@ -686,6 +686,9 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0689](./0689-recheck-0928-followups-cas-skipped-event-and-fake-provenance.md) | 確かめ直し（Issue #1827）のあとの手当て——CAS に弾かれた対象のイベント・Fake の `stated`/`inferred`・`searchMany` の TSDoc・包みの `additionalProperties` | 採用 (2026-10) |
 | [0690](./0690-merged-0916-recheck-teeth-core-recall-gates.md) | 09/16 にマージされた G2（core の recall ゲート・排他・型）12本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 | [0691](./0691-merged-0916-recheck-teeth-core-validat-decay-clock-half-life-recalls.md) | 09/16 にマージされた G3（core の validAt・減衰の時計・halfLifeRecalls）3本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
+| [0692](./0692-merged-0916-recheck-teeth-postgres-tiebreak-provenance-check-embedding-analyze.md) | 09/16 にマージされた G4（postgres の tie-break・provenance の CHECK・埋め込みの ANALYZE）3本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
+| [0694](./0694-consumer-install-per-package-project.md) | `check:consumer-install` は、出荷パッケージごとに別の空のプロジェクトへ入れて確かめる | 採用 (2026-10) |
+| [0695](./0695-merged-0916-recheck-teeth-example-chat.md) | 09/16 にマージされた G5（examples/chat の使用報告・連想枠の既定・correction の CI の段・footprint の余白）4本の確かめ直しで見つかった穴に歯を足す（Issue #1815） | 採用 (2026-10) |
 | [0696](./0696-merged-1006-recheck-teeth.md) | 10/06 マージ分の確かめ直し（#1877）で見つかった穴に歯を足す | 採用 (2026-10) |
 
 <!-- ADR-INDEX:GENERATED:END -->

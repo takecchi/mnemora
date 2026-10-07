@@ -66,7 +66,7 @@ jobs:
 
       - name: "publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）"
         # このジョブに足す（独立ジョブにしない）理由: pack:check は各 publish
-        # 対象パッケージの `prepack`（`tsc -p tsconfig.build.json`）を経由して
+        # 対象パッケージの `prepack`（`pnpm run build`）を経由して
         # 自分で dist を作り直す（`pnpm pack` が `prepack` を走らせる）ため、
         # 直前の Build ステップの成果物に依存しない。だから独立ジョブにしても
         # チェックアウト・install・build を丸ごとやり直すだけで意味が薄く、

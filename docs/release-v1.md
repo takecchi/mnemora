@@ -641,8 +641,8 @@ pnpm run check:consumer-install
 ```
 
 **通過条件**: **exit 0** で、最後に `✔ 外から入れた確認を通った` が出ること。段ごとに `✔`/`✖` が出る——
-pack → tarball の `exports` と利用者が頼ってよい入口の一覧の突き合わせ → repo の外への `npm install`
-（`--ignore-scripts`・`--install-strategy=nested`）→ 型検査（`moduleResolution` `node16`・`bundler`、
+pack → tarball の `exports` と利用者が頼ってよい入口の一覧の突き合わせ → repo の外への、**パッケージごとに別の空のプロジェクトへの** `npm install`
+（[ADR 0694](./decisions/0694-consumer-install-per-package-project.md)。`--ignore-scripts`・`--install-strategy=nested`）→ 型検査（`moduleResolution` `node16`・`bundler`、
 `skipLibCheck: true`）→ ESM で全入口を import → CommonJS で全入口を `require`（Node 22.12 以降の `require(esm)`。2026-09-28 に足した段）。`✖` の段の下に、落ちた理由が出る。
 ⚠ その後ろの `⚠ この確認が見ていない範囲:` の段は赤ではない（見ていない範囲の断りである）。
 
@@ -680,6 +680,7 @@ pack → tarball の `exports` と利用者が頼ってよい入口の一覧の�
 > 🔴 **⛔ この文書はその数を持っていない。**【現物】同ファイルは逐語で
 > 「**新しい publish 対象が増えたら、ここに手で足す必要がある**——見落としを機械的には検知できない」
 > と書いている。⟹ **publish 対象が増えれば、この文書の「6」は一斉に腐る。**
+> **【2026-10-07 追記】いまの `PUBLISH_TARGETS` は7本である**（2026-09-29 に `@mnemora/bullmq` を足した。`80c79dfa`）。本文の「6」は書いた当時の数である。手順として読むときは、上のコマンドで引いた本数に読み替えること。
 > ⭐ **当日その場で引くこと:**
 >
 > ```bash

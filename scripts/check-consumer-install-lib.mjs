@@ -49,6 +49,30 @@ export function compareEntryPoints(expected, actual) {
   };
 }
 
+/**
+ * ⛔ 出荷パッケージ全部を1つのプロジェクトへ入れない。`@mnemora/testkit` の peerDependencies の `zod` がトップへ置かれ、
+ * core が `dependencies` から `zod` を落としても core の dist が解決できてしまう(#1890)。
+ * 足すのは、そのパッケージが `dependencies` で頼る `@mnemora/*` の tarball だけ(`workspace:^` は未公開の版を指しうるので、
+ * registry ではなく手元の tarball に解決させる)。peerDependencies は足さず、利用者の npm が自動で入れる姿に任せる。
+ *
+ * @param {readonly { name: string; tarball: string; dependencies?: Record<string, string> }[]} manifests
+ * @param {readonly string[]} entries
+ * @returns {{ name: string; installTarballs: string[]; entries: string[] }[]}
+ */
+export function planConsumerProjects(manifests, entries) {
+  const tarballByName = new Map(manifests.map((m) => [m.name, m.tarball]));
+  return manifests.map((m) => ({
+    name: m.name,
+    installTarballs: [
+      m.tarball,
+      ...Object.keys(m.dependencies ?? {})
+        .filter((dep) => tarballByName.has(dep))
+        .map((dep) => tarballByName.get(dep)),
+    ],
+    entries: entries.filter((spec) => spec === m.name || spec.startsWith(`${m.name}/`)),
+  }));
+}
+
 export function buildSmokeTs(entries) {
   const lines = entries.map((spec, i) => `import * as e${i} from ${JSON.stringify(spec)};`);
   lines.push(`export const namespaces = [${entries.map((_, i) => `e${i}`).join(", ")}];`);
