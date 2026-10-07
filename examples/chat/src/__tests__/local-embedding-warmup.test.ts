@@ -3,17 +3,7 @@ import { DeterministicEmbeddingProvider } from "@mnemora/testkit";
 import { describe, expect, it } from "vitest";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 
-/**
- * Issue #109「重みを取得できなかった」と「測ったが値が悪かった」を区別する preflight
- * の歯。DB もネットワークも要らない——`LocalEmbeddingProvider` の `createPipeline`
- * 注入点(テスト用に用意されている。README・`local-embedding-provider.ts` 参照)へ
- * 失敗する pipeline / 成功する pipeline を差し込むだけで測れる。
- *
- * ⚠ **期待文言はここに逐語で書く**(`WEIGHTS_UNAVAILABLE_PREFIX` を import して
- * 使わない)。実装の定数を import して比較すると、実装が文言を変えても
- * テストが自動的に追従してしまい、「オーナー代理が指定した文言が実際に出るか」を
- * 検査したことにならない(自己整合するテストになる)。
- */
+// 期待文言は逐語で書く。WEIGHTS_UNAVAILABLE_PREFIX を import すると、自己整合するテストになる。
 describe("warmupLocalEmbedding", () => {
   it("createPipeline が失敗したら ok:false になり、指定の文言と cause を含む", async () => {
     const provider = new LocalEmbeddingProvider({
@@ -29,9 +19,7 @@ describe("warmupLocalEmbedding", () => {
 
   it("createPipeline が成功すれば ok:true になる(メトリクスの前段が通ることの確認)", async () => {
     const provider = new LocalEmbeddingProvider({
-      // ⚠ `LocalEmbeddingPipeline`（ADR 0090 §3.1）は maxInputTokens / countTokens を
-      // 必須で持つ interface である。ここでは上限の検査そのものは測らないので、
-      // ダミーの値で埋める——⛔ 実モデルの上限値を書かない。
+      // 上限の検査はここでは測らないので、ダミーの値で埋める。実モデルの上限値は書かない。
       createPipeline: async () => ({
         maxInputTokens: Number.MAX_SAFE_INTEGER,
         countTokens: (texts: string[]) => texts.map(() => 0),

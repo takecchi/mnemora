@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { selectLexicalStoreMode } from "../runtime-factory.js";
 
-/**
- * `selectLexicalStoreMode`(Issue #278、ADR 0319)の純関数としての歯。
- * `providers.test.ts` の `selectLLMMode`/`selectEmbeddingMode` の歯と同じ形——
- * DB を要さない、`MNEMORA_LEXICAL_STORE` の解釈だけを検査する。
- */
 describe("selectLexicalStoreMode", () => {
   it("未指定なら既定値 'default' を返す（既定を変えない）", () => {
     expect(selectLexicalStoreMode({})).toBe("default");
