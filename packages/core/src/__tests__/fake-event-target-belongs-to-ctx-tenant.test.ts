@@ -5,21 +5,7 @@ import type { MemoryId } from "../ids.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0469（ADR 0456 の H4・ADR 0466 の Fake 版）: core の `FakeMemoryStore` の書き込み口のうち、呼び出し側が
- * `NewMemoryEvent`（`memoryId` を持つ）を渡すものは、そのイベントが指す記憶が `ctx` のテナントの記憶であることを、
- * 書く前に確かめる。断るときは何も書かない（status の更新も、先に作った news も、イベントも残らない）。
- *
- * `@mnemora/postgres` の `PostgresMemoryStore`・testkit の `InMemoryMemoryStore` と同じ入力を同じように断る
- * （素の `Error`、message は `FakeMemoryStore: memory not found for tenant: <id>`。`kind`・`code` は無い）。
- * 大文字小文字は区別しない（Postgres は uuid を小文字にそろえて比べる）。
- *
- * この Fake は `createMemoriesWithOutboxAndEvents?` と `supersedeWithNewMemories` の `buildCreatedEvent` を実装していない
- * （任意のメソッド・任意の欄。core が別に `EventStore.append` で `created` を積む）ので、その2つはここに無い。
- *
- * 各 `it`: (1) 別テナントの記憶を指す `event.memoryId` は断られる。(2) 何も書かれない。
- * (3) やりすぎの対照: 自分の id・同じテナントの別の記憶・`null`・同じ呼び出しの別の行を指すイベントは通る。
- */
+/** `createMemoriesWithOutboxAndEvents?` と `supersedeWithNewMemories` の `buildCreatedEvent` は、この Fake が実装していない（任意の欄）のでここに無い。 */
 
 const A: Ctx = { tenantId: "fake-event-target-a" };
 const B: Ctx = { tenantId: "fake-event-target-b" };
@@ -120,7 +106,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     await store.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id.toUpperCase())); // 同じテナントの別の記憶
     expect(eventCount(a.id)).toBe(2);
     expect(backing.events.some((e) => e.memoryId === a.id.toUpperCase())).toBe(false);
-    // 別テナントの記憶は、大文字でも断る。
     const c = await make(A);
     await expect(
       store.updateStatusWithEvent(A, c.id, "archived", {}, ev(b.id.toUpperCase())),
@@ -291,8 +276,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(eventCount(b.id)).toBe(0);
   });
 
-  // ADR 0475（ADR 0469 の続き）: `FakeEventStore.append` も、`event.memoryId` の大文字小文字を区別しない
-  // （`PostgresEventStore.append` は uuid を小文字にそろえて通す）。断るときの message は渡された id のまま。
   it("FakeEventStore.append: 大文字の自テナントの記憶は通り（小文字で積む）、大文字の別テナントは断る。null は検査しない", async () => {
     const stores = createFakeRuntimeStores();
     const a = await stores.memoryStore.createMemory(A, newMemory(A));

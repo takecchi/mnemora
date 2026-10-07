@@ -5,15 +5,6 @@ import type { MemoryId } from "../ids.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `fake-event-target-belongs-to-ctx-tenant.test.ts` は、2者・群の口では「先頭のイベント」が別テナントを指す入力だけを
- * 縛っていた。呼び出しが運ぶイベントは、**どれが**別テナントの記憶を指していても `FakeMemoryStore` は断る
- * （`PostgresMemoryStore` と同じ。イベントを積むすべてのメンバーの指し先を、書く前に確かめる）。この歯は、先頭以外のイベントを縛る。
- *
- * 約束の出所: `FakeMemoryStore.assertEventTargetOwn` の TSDoc（「イベントを積む前に確かめる」）。
- * testkit の `InMemoryMemoryStore` 版は `packages/testkit/src/__tests__/in-memory-event-target-every-event.test.ts`。
- */
-
 const A: Ctx = { tenantId: "fake-event-every-a" };
 const B: Ctx = { tenantId: "fake-event-every-b" };
 const NOT_FOUND = /^FakeMemoryStore: memory not found for tenant: /;

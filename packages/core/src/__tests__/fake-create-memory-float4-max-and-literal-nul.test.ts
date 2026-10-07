@@ -4,13 +4,6 @@ import type { NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.createMemory` が Postgres に揃えて断る入力の、断りすぎない側。
- * - `halfLifeHours`: float4（Postgres の `real`）に収まる最大の値までは受け、`Infinity` へ丸まる境目から断る。
- * - `content`: 断るのは NUL（U+0000）そのもの。`\u0000` という6文字の文字列はただの文字なので受ける。
- *   NUL が先頭・末尾にあるときも断る。
- */
-
 const TENANT = "fake-float4-max-tenant";
 const ctx: Ctx = { tenantId: TENANT };
 

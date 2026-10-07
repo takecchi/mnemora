@@ -4,21 +4,6 @@ import type { Memory, NewMemory } from "../memory.js";
 import type { NewMemoryEvent } from "../event.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`FakeMemoryStore` について縛る。
- * 振る舞いは変えていない。
- *
- * - `listBySourceObservation`: 「`extractorVersion: null` を渡すと `extractor_version IS NULL` の行を返す」。
- * - `requeueEmbedJobs`: 「対象が `opts.limit` より多いときにどれが選ばれるかは `updatedAt` の古い順、同着は `id` の
- *   昇順」「積み直した行は `updatedAt` が動くので、繰り返し呼ぶと対象が一巡する」。
- * - `requeueEmbedJobs`: 「既に `failed_at` が付いた古い outbox 行は触らない」「新しい行の `attempts` は 0 から数え
- *   直される」。
- * - `supersedeWithNewMemories`: 「`event.meta.supersededById` は、実装が解決したアンカーの id で埋める（呼び出し側が
- *   渡した値があれば上書きする）」「`event` の他の欄は一切変えない」。
- *
- * `FakeMemoryStore` は適合試験の対象ではない（`fake-memory-store-supersede-with-new-memories.test.ts` 冒頭）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
 
