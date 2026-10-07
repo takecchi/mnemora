@@ -8,14 +8,6 @@ import {
   rewriteReferencesInText,
 } from "../adr-renumber-lib.mjs";
 
-/**
- * `scripts/adr-renumber-lib.mjs` の歯の足し（Issue #1815、09/16 マージ分の #365・#436 の確かめ直し）。
- *
- * 既存の `adr-renumber-lib.test.mjs` が見ていなかった形だけを足す。どれも「約束どおりに動く」ことを
- * 合成データで縛るだけで、実装は変えない。
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 describe("pickNextFreeNumber は集合の中の最大値の次を返す（入力の並びに依らない）", () => {
   it("降順に並んだ入力でも、最大値の次を返す", () => {
     expect(pickNextFreeNumber(["0009", "0002"])).toBe("0010");
