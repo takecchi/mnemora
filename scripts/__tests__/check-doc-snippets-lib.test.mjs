@@ -7,16 +7,7 @@ import {
   loadCompilerOptions,
 } from "../check-doc-snippets-lib.mjs";
 
-/**
- * ⭐ **この歯が測っているもの**（ADR 0345）
- *
- * `scripts/check-doc-snippets.mjs`（文書の印付きコード片の型検査の門）の、抜き出しと型検査の部品。
- *
- * ⚠ **公開パッケージの `dist` を1つも読まない。**CI ではこのテストが Build より先に走るため、
- * 型検査の側は `@mnemora/*` を import しない合成の片と、合成の前提の宣言で確かめる。
- * `dist` に当てる本番の実行は、CI の build ジョブの Build の後の段
- * （`pnpm run check:doc-snippets`）が担う（`ci-yml-doc-snippets-wiring.test.mjs` が配線を固定する）。
- */
+/** 公開パッケージの `dist` は読まない。CI ではこのテストが Build より先に走るので、型検査は `@mnemora/*` を import しない合成の片で確かめる。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const compilerOptions = loadCompilerOptions(repoRoot);

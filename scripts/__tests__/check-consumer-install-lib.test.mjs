@@ -17,17 +17,7 @@ import {
 } from "../check-consumer-install-lib.mjs";
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
 
-/**
- * ⭐ **この歯が測っているもの**（ADR 0346）
- *
- * `scripts/check-consumer-install.mjs`（出荷6パッケージを repo の外に入れて確かめる道具）の、
- * ネットワークを使わない部品。道具そのもの（pack → npm install → tsc → node）は registry に依存するので、
- * 既定の CI では走らせない（リリース前に人が打つ。`docs/release-v1.md` 0.11）。
- *
- * ⚠ **ここは作業ツリーの package.json を読む**——tarball ではない。道具の本体は tarball の中の
- * package.json を読む。ここで見るのは、一覧（`EXPECTED_ENTRY_POINTS`）と作業ツリーの `exports` が
- * いま揃っていること（入口を足した・消した PR で、一覧の更新漏れに CI で気づけるように）である。
- */
+/** 作業ツリーの package.json を読む（tarball ではない）。入口を足した・消した PR で、一覧の更新漏れに CI で気づくため。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -168,8 +158,6 @@ describe("snapshot から引く値の名前（collectEntryValueNames）", () => 
     expect(names["@mnemora/core"]).not.toContain("MemoryStore");
   });
 
-  // `export *` を辿った名前を取りこぼさない（取りこぼすと、その名前は実行時の検査から黙って外れる）。
-  // 名前の頭文字・定義元のファイルをばらして名指しする（一覧の全文・本数は焼き込まない）。
   it("実際の snapshot: `export *` で再 export された名前（core の heuristicTokenCounter など）を含む", () => {
     const names = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, repoRoot);
     expect(names["@mnemora/core"]).toEqual(
@@ -193,7 +181,6 @@ describe("snapshot から引く値の名前（collectEntryValueNames）", () => 
 });
 
 describe("生成した smoke が、値の名前の欠けを実行時に検出する", () => {
-  /** node_modules/@a/b（ESM の index.mjs と CJS の index.cjs）を持つ一時ディレクトリで smoke を実行する。 */
   function runSmoke(kind, exportedNames, valueNames) {
     const dir = mkdtempSync(join(tmpdir(), "mnemora-smoke-test-"));
     try {
