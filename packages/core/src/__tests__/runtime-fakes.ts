@@ -968,8 +968,8 @@ export class FakeMemoryStore implements MemoryStore {
           `FakeMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
         );
       }
-      // 下側（アンダーフロー）: `packages/testkit` の `InMemoryMemoryStore` と同じ検査
-      // （そちらのコメント参照）。0 でない値が float4 で 0 に丸まるときだけ拒む——
+      // 下側（アンダーフロー）: `packages/testkit` の `InMemoryMemoryStore` と同じ検査。
+      // 0 でない値が float4 で 0 に丸まるときだけ拒む——
       // `halfLifeHours: 0`（上の「壊れた」Memory）はここでは見ない。
       for (const [field, value] of [
         ["halfLifeHours", input.halfLifeHours],

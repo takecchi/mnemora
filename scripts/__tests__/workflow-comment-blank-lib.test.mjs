@@ -17,7 +17,7 @@ describe("blankOutWorkflowComments — YAML の地の文のコメント", () => 
     expect(text).not.toContain("常に走る");
   });
 
-  it("⚠ 全角文字の直後の # はコメントではない(ci.yml:518 型)", () => {
+  it("⚠ 全角文字の直後の # はコメントではない(ci.yml の identifier-probes ジョブ名型)", () => {
     const source = "name: 識別子・固有名詞 probe（#106）を実測する\n";
     const { text, unhandled } = blankOutWorkflowComments(source);
     expect(text).toBe(source);
