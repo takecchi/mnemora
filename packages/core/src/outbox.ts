@@ -4,8 +4,7 @@ import type { OutboxJobKind } from "./interfaces/scheduler.js";
 /**
  * `outbox` テーブルの1行を core の型として表したもの（docs/memory-model.md §10、ADR 0005）。
  *
- * `MemoryStore.createObservationWithOutbox` / `createMemoryWithOutbox` が新規作成時に返し、
- * `OutboxStore` が claim/complete/fail で操作する対象。
+ * `MemoryStore` が新規作成時に返し、`OutboxStore` が claim/complete/fail で操作する対象。
  */
 export interface OutboxJobRecord {
   /** ジョブの id。 */
@@ -14,7 +13,7 @@ export interface OutboxJobRecord {
    * ジョブが属するテナント。
    *
    * ⚠ `ctx.tenantId: ""` で積んだジョブでは `""` になり、{@link OutboxJobRecordSchema}（`min(1)`）を通らない
-   * （今の振る舞い。入力の空文字は `Ctx` の doc のとおり受け付ける。schema は緩めていない）。
+   * （入力の空文字は `Ctx` の doc のとおり受け付ける）。
    */
   tenantId: string;
   /** ジョブの種別（{@link OutboxJobKind}）。 */
@@ -29,7 +28,7 @@ export interface OutboxJobRecord {
    * 最後に claim した worker の名前。
    *
    * ⚠ `claimBatch` に `claimedBy: ""` を渡すと `""` になり、{@link OutboxJobRecordSchema}（`min(1)`）を通らない
-   * （今の振る舞い。入力の空文字は拒まない。`ClaimOutboxJobsOptions.claimedBy` の doc。schema は緩めていない）。
+   * （入力の空文字は拒まない。`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
   claimedBy?: string | null;
   /** claim された回数。claim のたびに1増える。`complete`/`fail` の CAS に使う（上限は無い）。 */
@@ -41,23 +40,15 @@ export interface OutboxJobRecord {
   /**
    * `fail` に渡したエラーの文字列。
    *
-   * ⚠ **利用者の本文を含みうる**（今の振る舞い。[Issue #1064](https://github.com/takecchi/mnemora/issues/1064)）。
-   * `tick()` は処理の失敗の例外の文面（`cause` の連鎖を含む）を、削らずに載せる。`@mnemora/postgres` で DB への書き込みが失敗したときの文面は、
-   * 失敗したクエリの文と params をそのまま含むので、Memory の本文などの利用者のテキストが丸ごと入る。
-   * 長さの上限も無く、本文の大きさに比例して大きくなる（1MB を超えた実測の例が Issue #1064 に在る）。
-   * ⟹ この欄をログ・監視・外部へ流すときは、本文が載りうるものとして扱うこと。削る・上限を置くかは決まっていない。
-   *
-   * ⚠ **2026-09-29 追記（ADR 0363）**: 上の「削らずに載せる」「削る・上限を置くかは決まっていない」は、
-   * `@mnemora/postgres` で DB への書き込みが失敗した経路については、もう成り立たない。
-   * `tick()` の `describeFailure`（`failure-description.ts`。もとの名は `describeJobFailure`）は、drizzle が包んだエラー文の `params:` 以降
-   * （失敗したクエリに渡した値そのもの）を落とし、`(omitted by mnemora, N chars)` という印に
-   * 置き換える。さらに、戻り値全体の長さに上限（4096文字。根拠は `describeFailure` の doc
-   * コメント）を掛け、超えた分は切り詰めて末尾に印を付ける。
+   * ⚠ **利用者の本文を含みうる。** `tick()` は処理の失敗の例外の文面（`cause` の連鎖を含む）を載せる。
+   * `describeFailure`（`failure-description.ts`、ADR 0363）は、drizzle が包んだエラー文の `params:` 以降
+   * （失敗したクエリに渡した値そのもの）を `(omitted by mnemora, N chars)` という印に置き換え、
+   * 戻り値全体を4096文字で切り詰める。
    * **それでも本文が丸ごと載りうる経路は残っている**（ADR 0363「塞がらない経路」）:
    * `@mnemora/openai` の拒否の文面（`OpenAILLMProviderError`、ADR 0075）や、pg の生エラーの
    * 型変換失敗のメッセージ（`invalid input syntax for type ... : "<値>"`）は、`params:` という
-   * 目印を持たないため `omitDrizzleParams` では削れず、長さの上限だけで抑えている。
-   * ⟹ **この欄は、なお「本文の断片が載りうるもの」として扱うこと。**「本文が絶対に載らない」
+   * 目印を持たないため削れず、長さの上限だけで抑えている。
+   * ⟹ **この欄は、「本文の断片が載りうるもの」として扱うこと。**「本文が絶対に載らない」
    * という約束にはなっていない。
    */
   lastError?: string | null;

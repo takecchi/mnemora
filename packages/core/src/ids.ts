@@ -1,10 +1,4 @@
-/**
- * 識別子の型エイリアス。
- *
- * 現時点ではただの `string` だが、名前を分けることで interface のシグネチャが
- * 「何の識別子を渡すべきか」を読み手に伝える（docs/architecture.md §5 各所で
- * `MemoryId` 等の名前が使われている）。
- */
+/** Memory の識別子の型エイリアス。名前を分けることで、interface のシグネチャが何の識別子を渡すべきかを伝える。 */
 export type MemoryId = string;
 /** Observation の識別子（不透明な文字列。`@mnemora/postgres` では uuid）。 */
 export type ObservationId = string;

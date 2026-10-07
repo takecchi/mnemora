@@ -2,18 +2,14 @@
  * LLM が返した抽出候補の補助の欄（`digest`・`tags` の要素・claim key の `subject`/`predicate`）のうち、
  * **保存できない値**だけを落とす（内部の関数。`index.ts` からは出さない。ADR 0443）。
  *
- * 「保存できない」とは、どの adapter も拒む値——**NUL（U+0000）を含む文字列**——のことである。
- * `@mnemora/postgres` は text に NUL を入れられず、testkit の fixture も `digest`・`tags` の NUL を拒む。
- * 補助の欄に1つ入っているだけで、本文が正しくても `createMemoryWithOutbox` が拒み、候補ごと落ちていた
- * （ADR 0347 の「保存できない候補」の経路）。本文（`content`）の NUL はここでは扱わない（本文は落とせない。
- * 従来どおり候補ごと落ちる）。
+ * 「保存できない」とは、どの adapter も拒む **NUL（U+0000）を含む文字列**のこと。補助の欄に1つ入って
+ * いるだけで本文が正しくても候補ごと落ちるので、その欄だけ落とす。本文（`content`）の NUL はここでは
+ * 扱わない（本文は落とせないので、候補ごと落ちる）。
  *
- * ⚠ **既知の限界: 長い tag は索引の上限で落ちうる。**Postgres の GIN 索引（`idx_memories_tags`）は、1要素が
- * 圧縮したあとでおよそ 2712 バイトを超えると INSERT を拒む。上限は圧縮後の大きさで決まり（同じ字数でも
- * 繰り返しなど圧縮が効く値は通る）、testkit の fixture は通すので、字数では線を引かない。今保存できている
- * tag を新しく黙って捨てないために、長さの判定は置いていない（ADR 0443 決定1。claim key の ADR 0433 と同じ
- * 「断る・落とす入力を今より増やさない」）。圧縮が効かない長い tag は、今までどおり例外で候補ごと落ちる。
- * `digest` の長さも見ない（索引が無い）。
+ * ⚠ **既知の限界: 長い tag は索引の上限で落ちうる。**GIN 索引は、1要素が圧縮したあとでおよそ 2712 バイトを
+ * 超えると INSERT を拒む。上限は圧縮後の大きさで決まり、testkit の fixture は通すので、字数では線を引かない。
+ * 今保存できている tag を新しく黙って捨てないため、長さの判定は置いていない（ADR 0443 決定1）。
+ * 圧縮が効かない長い tag は、例外で候補ごと落ちる。`digest` の長さも見ない（索引が無い）。
  */
 
 /** 補助の欄（`digest`・`tags`）を持つ、LLM が返した値の最小の形。抽出の候補・統合・内省の結果が当てはまる。 */
@@ -23,9 +19,8 @@ export interface AuxFieldCarrier {
 }
 
 /**
- * 保存できないために落とした補助の欄1つの記録。`created` イベントの `meta.droppedFields` に入る
- * （公開の型ではない。`meta` は自由形式の欄である）。`droppedCandidates` と同じく、候補は `index`
- * （LLM が返した順の 0 起点）と `contentHash` で指し、**値そのものは写さない**。
+ * 保存できないために落とした補助の欄1つの記録。`created` イベントの `meta.droppedFields` に入る。
+ * 候補は `index`（LLM が返した順の 0 起点）と `contentHash` で指し、**値そのものは写さない**。
  */
 export interface DroppedAuxField {
   /** 候補の `index`（`droppedCandidates[].index` と同じ数え方）。 */
