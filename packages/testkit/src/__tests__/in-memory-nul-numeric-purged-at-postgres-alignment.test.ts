@@ -1,18 +1,3 @@
-// ADR 0434（穴探し14巡目）: testkit のインメモリ実装を、Postgres 実装（正）に揃えた3組の入力の歯。
-// クローンの委譲先（マネージャー mgr-0629e6a2）が書いた。オーナーではない。
-//
-// - 候補2: NUL（U+0000）を、Postgres が拒む口（書き込み・読み取りとも）で同じく拒む。
-// - 候補3: `MemoryEvent.sizeBeforeBytes`（int4）・`reinforce` の `nowSeq`・outbox の行を書くときの `opts.now`
-//   （Invalid Date）を、同じ入力で拒む。
-// - 候補4: `createMemory` に渡された `purgedAt` を保存しない。
-//
-// 各ケースは「拒む」と「通る」の両方を持つ。通るほうは、拒みすぎる実装（境界を1つずらす・Postgres が通す
-// 入力まで拒む）を赤にする歯である。**同じ表を Postgres にも当てたもの**が
-// `packages/postgres/src/__tests__/testkit-fixtures-nul-numeric-purged-at-alignment.postgres.test.ts`
-// （2つの表は同じ内容。こちらは DB が要らない）。
-//
-// このテストは fixture を直接呼ぶだけで、`*-conformance.ts` には触れていない（適合テストを足すのはオーナーの判断）。
-
 import { describe, expect, it } from "vitest";
 import type {
   Ctx,
@@ -38,7 +23,6 @@ import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 
-/** 1つのケースが使う、空の store 一式。 */
 interface Kit {
   memory: MemoryStore;
   events: EventStore;
@@ -59,7 +43,6 @@ async function inMemoryKit(): Promise<Kit> {
 const ctx: Ctx = { tenantId: "align-nul-numeric" };
 const NUL = "a\u0000b";
 const INVALID = new Date(Number.NaN);
-/** uuid の形の、どの行にも当たらない id（Postgres は uuid 列へ渡すので、形の正しい値が要る）。 */
 const NO_SUCH = "00000000-0000-0000-0000-000000000000";
 const I32 = 2 ** 31;
 const AT = new Date("2026-06-01T00:00:00.000Z");
@@ -70,7 +53,6 @@ const newMemory = (o: Partial<NewMemory> = {}): NewMemory =>
 const newEvent = (o: Partial<NewMemoryEvent> = {}): NewMemoryEvent =>
   buildNewMemoryEventFixture({ tenantId: ctx.tenantId, ...o });
 
-/** 冪等の鍵（観測・抽出器の版・contentHash）が決まった `NewMemory`。同じ値で2回書くと2回目は既存の行に当たる。 */
 async function keyedMemory(kit: Kit): Promise<NewMemory> {
   const observation = await kit.memory.createObservation(
     ctx,
@@ -92,7 +74,6 @@ async function forgottenMemory(kit: Kit): Promise<Memory> {
   await kit.memory.updateStatus(ctx, memory.id, "forgotten");
   return memory;
 }
-/** 入れ替え先になる旧い Memory を作って `supersedeWithNewMemories` を呼ぶ。 */
 async function supersede(
   kit: Kit,
   news: Array<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
@@ -119,7 +100,6 @@ const createdEvent =
     newEvent({ memoryId: memory.id, kind: "created", ...overrides });
 const embedJobs: OutboxJobKind[] = ["embed"];
 const nulJob = ["em\u0000bed"] as unknown as OutboxJobKind[];
-// NUL 以外の制御文字（SOH）。`text` 列は受け付けるので、Postgres も fixture も通す。
 const controlJob = [`em${String.fromCharCode(1)}bed`] as unknown as OutboxJobKind[];
 const claimKeyOf = (subject: string, predicate: string) => ({ subject, predicate });
 const find = (kit: Kit, claimKey: { subject: string; predicate: string }) =>
@@ -155,7 +135,6 @@ const emptyRecall = {
   returnedMemories: [],
 } as unknown as NewRecallRecord;
 
-/** 3件の active な Memory を作って、その id を返す（群の検出・解決の口に渡す）。 */
 async function threeMemoryIds(kit: Kit): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
@@ -166,9 +145,7 @@ async function threeMemoryIds(kit: Kit): Promise<string[]> {
 
 interface Case {
   name: string;
-  /** `reject`: 書き込みも読み取りも例外になる（Postgres は生の DB の例外、fixture は `message` の `Error`）。`accept`: 成功する。 */
   expect: "reject" | "accept";
-  /** fixture の例外の文面（`reject` のときだけ）。 */
   message?: RegExp;
   run: (kit: Kit) => Promise<unknown>;
 }
@@ -179,7 +156,6 @@ const INT4_MESSAGE =
 const NOW_MESSAGE = /now must be a valid Date \(got Invalid Date\)/;
 
 const CASES: Case[] = [
-  // ---- 候補2: 書き込み（NUL） ----
   {
     name: "createMemory: claimKey.subject に NUL",
     expect: "reject",
@@ -226,7 +202,6 @@ const CASES: Case[] = [
     },
   },
   {
-    // ADR 0630: 以前は通った（書けて、読み戻すと MemorySchema を通らなかった）。今は入口で拒む。
     name: "createMemory: 空文字の extractorVersion は拒む（ADR 0630。以前は通った）",
     expect: "reject",
     message: /extractorVersion is malformed/,
@@ -470,7 +445,6 @@ const CASES: Case[] = [
     },
   },
 
-  // ---- 候補2: 読み取り（NUL） ----
   {
     name: "findActiveByClaimKey: claimKey.subject に NUL",
     expect: "reject",
@@ -573,7 +547,7 @@ const CASES: Case[] = [
   {
     name: "getSubjectActivitySeqs: subjectId に NUL",
     expect: "reject",
-    message: /subjectIds\[1\] contains a NUL character/, // ADR 0437: MalformedIdentifierError が先に断る
+    message: /subjectIds\[1\] contains a NUL character/,
     run: (k) => k.tenantSettings.getSubjectActivitySeqs!(ctx, ["ok", NUL]),
   },
   {
@@ -585,7 +559,6 @@ const CASES: Case[] = [
     },
   },
 
-  // ---- 候補3: sizeBeforeBytes（int4） ----
   ...(
     [
       ["2^31（int4 の最大値 + 1）", I32, "reject"],
@@ -678,8 +651,7 @@ const CASES: Case[] = [
     },
   },
 
-  // `markContestedGroup`・`resolveContestedGroup` は、Postgres が複数のイベントを1つの `jsonb` の配列で渡す。
-  // `NaN`・`±Infinity` は `JSON.stringify` で `null` になって通る（他の口と、ここだけ違う）。
+  // `markContestedGroup`・`resolveContestedGroup` は、Postgres が複数のイベントを1つの `jsonb` の配列で渡すので、`NaN`・`±Infinity` は `JSON.stringify` で `null` になって通る（他の口と、ここだけ違う）。
   ...(
     [
       ["NaN", Number.NaN, "accept"],
@@ -726,7 +698,6 @@ const CASES: Case[] = [
     },
   ]),
 
-  // ---- 候補3: reinforce の nowSeq ----
   ...(
     [
       ["負（-1）", -1],
@@ -813,7 +784,6 @@ const CASES: Case[] = [
     },
   },
 
-  // ---- 候補3: opts.now の Invalid Date（outbox の行を実際に書くときだけ） ----
   {
     name: "createMemoryWithOutbox: now が Invalid Date（jobKinds あり）",
     expect: "reject",
@@ -1021,7 +991,6 @@ function registerCases(kits: Array<[string, () => Promise<Kit>]>): void {
         });
       }
 
-      // ---- 候補4: purgedAt ----
       it("createMemory に purgedAt を渡しても保存せず、null で読み戻る（断らない）", async () => {
         const kit = await makeKit();
         const created = await kit.memory.createMemory(ctx, newMemory({ purgedAt: AT }));

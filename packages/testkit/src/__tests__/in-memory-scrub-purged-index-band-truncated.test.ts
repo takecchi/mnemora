@@ -3,10 +3,6 @@ import type { Ctx, NewRecallRecord } from "@mnemora/core";
 import { buildNewMemoryEventFixture, buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-// 確かめ直し（Issue #1759、B 群 #1634 / ADR 0512）の歯。
-// ADR 0512 決定1: 伏せるエントリは `{ memoryId, digest }` に作り直す（`truncated` は落とす。Postgres の SQL は
-// `jsonb_build_object` で常に作り直す）。既存の歯は digest が違うエントリでしか `truncated` を見ず、
-// 「digest が既にトゥームストーンと同じで `truncated` だけ付いているエントリ」を作り直さない変異が赤にならなかった。
 describe("InMemoryMemoryStore.scrubPurged: digest が既にトゥームストーンのエントリも truncated を落とす（ADR 0512）", () => {
   it("{ digest: '[purged]', truncated: true } は { digest: '[purged]' } になる", async () => {
     const store = new InMemoryMemoryStore();

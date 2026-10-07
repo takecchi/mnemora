@@ -1,11 +1,3 @@
-// ADR 0596: `createdAt` は作ったときのまま。`archiveDecayed` の後も `purgeMemory` の後も書き換わらない。
-//
-// **明文の約束はない**が、作成時刻が後から書き換わらないことを当然の不変条件として縛る、とクローンが判断した
-// （supersede の `createdAt` を同じ判断で縛った ADR 0592 と同じ線）。
-// Fake 側の同種の歯は `packages/core/src/__tests__/fake-event-time-nul-claim-controls.test.ts`、
-// Postgres 側は `packages/postgres/src/__tests__/created-at-after-archive-purge.postgres.test.ts`。
-// `*-conformance.ts` には触れない（既存の `in-memory-fixtures-*.test.ts` と同じ作法）。
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Ctx, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";

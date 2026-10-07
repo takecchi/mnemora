@@ -13,18 +13,6 @@ import {
   type TenantSettingsStore,
 } from "@mnemora/core";
 
-/**
- * `docs/migration-v1.md` §6 の例（`describeTenantSettingsStoreConformance` に `supportsDecayClock: false`
- * だけを足した呼び出し）が「そのままコンパイル・**実行**できる」ことを縛る。
- * `check:doc-snippets` は型しか見ないので、ここでは片そのものを文書から取り出し、import 先を
- * testkit の入口に向けるだけで実行する——片が登録する適合テストが、このファイルのテストとして走る。
- *
- * 片が前提にしている `MyTenantSettingsStore`（自作 adapter）は、`TenantSettingsStore` の必須の3口だけを持ち、
- * 任意の口（decay clock・taxonomy mode など）を1つも実装しない最小の store として、ここで用意する。
- * ⟹ 任意の口を実装していない adapter に対して、省略した `supports*` の適合項目が走らないことも同時に見ている
- * （走れば、実装していない口を呼んで赤になる）。
- */
-
 class MyTenantSettingsStore implements TenantSettingsStore {
   private readonly retention = new Map<string, EventRetentionSetting>();
 

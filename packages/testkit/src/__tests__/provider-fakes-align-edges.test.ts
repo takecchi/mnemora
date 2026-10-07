@@ -5,16 +5,6 @@ import { CassetteRecorder, RecordingEmbeddingProvider } from "../__fixtures__/ca
 import { RecordedEmbeddingProvider } from "../__fixtures__/recorded-embedding-provider.js";
 import { SeededEmbeddingProvider } from "../__fixtures__/seeded-provider.js";
 
-/**
- * `provider-fakes-align.test.ts` が縛っていない辺を縛る（同じ約束の別の入力）。
- * - 埋め込み空間の食い違いは、`model`・`dimensions` だけでなく `provider` でも断る（種と delegate、記録の2回目以降）。
- * - 成分が有限であることは、`NaN` だけでなく `±Infinity` でも確かめる（カセットの検査・再生・記録の3か所）。
- *
- * 約束の出所: `SeededEmbeddingProvider` の TSDoc「種の空間が `expectedSpace` または `delegate.space` と食い違えば
- * `Error`」、`CassetteRecorder.recordEmbedding` の TSDoc「埋め込み空間（`provider`・`model`・`dimensions`）が最初と違えば落とす」、
- * `RecordedEmbeddingProvider`・`RecordingEmbeddingProvider` の TSDoc「成分が有限の数でないときも `Error`」。
- */
-
 const ctx: Ctx = { tenantId: "provider-fakes-align-edges" };
 const SPACE: EmbeddingSpaceId = { provider: "p", model: "m", dimensions: 3 };
 
@@ -64,7 +54,7 @@ describe("RecordingEmbeddingProvider: 返すベクトルは、呼び出しごと
     expect(b[0]).toEqual([1, 2, 3]);
     expect(recorder.lookupEmbedding("t")?.vector).toEqual([1, 2, 3]);
     expect(own).toEqual([1, 2, 3]);
-    own[1] = 555; // delegate が後から自分の配列を書き換えても、記録は動かない。
+    own[1] = 555;
     expect(recorder.lookupEmbedding("t")?.vector).toEqual([1, 2, 3]);
   });
 });
@@ -75,7 +65,6 @@ describe.each([[Number.POSITIVE_INFINITY], [Number.NEGATIVE_INFINITY]])(
     it("assertCassette は読んだ時点で落ちる", () => {
       const cassette = JSON.parse(JSON.stringify(seedSection())) as ReturnType<typeof seedSection>;
       const key = Object.keys(cassette.embedding.entries)[0]!;
-      // JSON は Infinity を null に化かすので、読み込んだ後のオブジェクトへ直接入れる。
       cassette.embedding.entries[key]!.vector[1] = bad;
       expect(() => assertCassette(cassette, "t")).toThrow(/有限の数でない/);
     });

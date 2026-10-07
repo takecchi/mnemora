@@ -4,12 +4,6 @@ import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * #1096・#1183 の外側に残っていた CHECK 制約と型の変換を、testkit の fixture も Postgres と同じく拒む。
- * 2実装を並べた歯は `packages/postgres/src/__tests__/remaining-check-constraints.postgres.test.ts`（DB が要る）。
- * ここは DB 無しで走る側の歯で、文面と「何も書かない」を縛る。
- */
-
 const ctx: Ctx = { tenantId: "remaining-check-constraints" };
 const ACTIVITY = { decayBaseSeq: 0, decayFloorSeq: 10, halfLifeRecalls: 5 };
 

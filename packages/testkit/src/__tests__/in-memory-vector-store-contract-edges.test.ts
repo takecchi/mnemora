@@ -4,17 +4,6 @@ import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * `VectorStore` の TSDoc が約束する端の振る舞いを、`InMemoryVectorStore` について縛る。振る舞いは変えていない。
- *
- * - `VectorFilter.status`: 「⚠ 空配列なら1件も通らない（`@mnemora/postgres` と testkit の fixture で同じ）」。
- * - `VectorHit.distance`: 「コサイン距離は逆向き（cosine similarity = -1）のとき最大 2 まで出る」。
- * - `VectorStore.search`: 「`query` が有限でない成分（`NaN`・`Infinity`）を含むときも同じく『比較不能』であり、
- *   `search` は例外を投げない」。候補は落とさず、距離を比較の通らない値にして返す。
- *
- * このテストは fixture を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
- */
-
 const ctx: Ctx = { tenantId: "vector-contract-edges" };
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
 

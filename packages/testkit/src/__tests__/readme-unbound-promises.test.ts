@@ -8,10 +8,7 @@ import { DeterministicEmbeddingProvider } from "../__fixtures__/deterministic-em
 import { DeterministicLLMProvider } from "../__fixtures__/deterministic-llm-provider.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * `packages/testkit/README.md` が約束していて、どのテストも縛っていなかった振る舞いを縛る。
- * 今の振る舞いの固定であり、望ましい姿の主張ではない。
- */
+/** 今の振る舞いの固定であり、望ましい姿の主張ではない。 */
 
 const README = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
 const PACKAGE = JSON.parse(
@@ -63,7 +60,7 @@ describe("README「@mnemora/testkit/fixtures」: インメモリの store は別
 
 describe("README「テストデータのひな型」: buildNewMemoryFixture の既定値のまま実時計で recall すると0件になる", () => {
   const ctx: Ctx = { tenantId: "tenant-1" };
-  // 実時計の代わりに、既定の減衰の床（2026-05-10T15:47Z）より後の固定の日付を使う。
+  // 実時計の代わりに、既定の減衰の床より後の固定の日付を使う。
   const NOW = new Date("2026-09-28T00:00:00.000Z");
 
   async function recallCount(

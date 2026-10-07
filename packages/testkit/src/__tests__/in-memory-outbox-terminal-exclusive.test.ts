@@ -1,23 +1,3 @@
-// Issue #826（クローン miku の委譲先が書いた。オーナーではない）: `InMemoryOutboxStore.complete`/
-// `fail` は `attempts` の一致しか見ておらず、相手側の終端列（`completedAt`/`failedAt`）を
-// 見ていなかった。そのため、同じ `attempts` のまま逐次に complete → fail（または
-// fail → complete）を呼ぶと、両方の終端列が付いた——ADR 0142 の「確かめていないこと」が
-// 「本来ありえないはずの矛盾した終端状態」と呼んでいる状態そのものである
-// （docs/decisions/0142-outbox-complete-fail-compare-and-swap.md 145-147 行）。
-//
-// 直し方（Issue #826 案2）: 先に付いた終端を勝たせる。相手側の終端列が既に付いていれば、
-// 後から来た complete/fail は行を変えない（`completedAt`/`failedAt`/`lastError` のどれも
-// 書かない）。例外も投げない——interface の契約（`packages/core/src/interfaces/
-// outbox-store.ts` 61-62 行）が明記する「同じ worker が同じ claim に対して complete/fail
-// を再度呼ぶことは冪等」を、種類が混ざった場合にも一貫させただけであり、`attempts`
-// 不一致の CAS 衝突（`OutboxLeaseConflictError`）や行が無い場合の no-op はこれまで通り。
-//
-// `*-conformance.ts` は外部の store 実装者も走らせる公開面であり、ここに it を足すのは
-// 契約の追加になる（`in-memory-fixtures-negative-limit.test.ts` の前例と同じ理由で、
-// `packages/testkit` 内だけで完結する回帰テストにしてある）。`PostgresOutboxStore`
-// 側の対応する回帰は `packages/postgres/src/__tests__/
-// outbox-complete-fail-terminal-exclusive.postgres.test.ts`。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, OutboxJobRecord } from "@mnemora/core";
 import { OutboxLeaseConflictError } from "@mnemora/core";

@@ -4,15 +4,6 @@ import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * ADR 0500（ADR 0434 の負債・ADR 0456 H3 の fixture 側）: 読みの口の条件に NUL（U+0000）が入ったとき、testkit の fixture も
- * Postgres と同じく断る。Postgres は `findContestedByClaimKey` の claimKey、検索の `filter.labels`・`filter.attributes`
- * を、DB に触れる前に `must not contain NUL characters (U+0000)` で断る（`read-scope-filter-nul.postgres.test.ts`）。
- * 2実装を並べた歯は `packages/postgres/src/__tests__/testkit-fixture-alignment.postgres.test.ts`（DB が要る）。
- *
- * 各 it は、断る入力と、断ってはいけない入力（NUL を含まない同じ形。文字どおりの `\u0000`・日本語）を並べる。
- */
-
 const ctx: Ctx = { tenantId: "read-filter-nul" };
 const NUL = "x\u0000y";
 const SPACE = { provider: "p", model: "m", dimensions: 3 };

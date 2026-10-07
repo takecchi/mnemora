@@ -13,7 +13,6 @@ import {
 
 const SPACE = { provider: "test", model: "fixture-model", dimensions: 3 };
 
-/** ADR 0543: `InMemoryMemoryStore` に当てる。本文は lone-surrogate-fffd-teeth.ts（PG・Fake と同じ）。 */
 async function makeKit(): Promise<LoneSurrogateKit> {
   const store = new InMemoryMemoryStore();
   return {

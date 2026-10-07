@@ -3,11 +3,6 @@ import type { Ctx, EmbeddingSpaceId } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore, InMemoryVectorStore } from "../fixtures.js";
 
-/**
- * `InMemoryVectorStore` は、保存するベクトルとクエリを `Math.fround` で float4 に丸める（Issue #1268）。
- * pgvector の `vector` 型が成分を float4 で持つのに揃える。例外を投げる入力は変えていない。
- */
-
 const ctx: Ctx = { tenantId: "vector-float4" };
 const space: EmbeddingSpaceId = { provider: "test", model: "float4", dimensions: 3 };
 

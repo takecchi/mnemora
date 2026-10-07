@@ -1,8 +1,3 @@
-// `InMemoryMemoryStore.aggregateScope` の `scopeAggregate: "skip"` は、`scope.taxonomyGroupCandidates` が
-// 同時に渡されても、taxonomy の群カウントを計算しない（`groups` は `axis: "subject"` も `axis: "taxonomy"` も空）。
-// 「件数集計を止める」は1つの意味で、軸ごとに部分的に効かせない。Postgres は、集計のクエリ自体を発行しない。
-// **`memory-store-conformance.ts` には足さない**（Issue #809 の方針。外部 adapter へ要求を増やさない）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
@@ -51,7 +46,6 @@ describe("InMemoryMemoryStore.aggregateScope: scopeAggregate 'skip' と taxonomy
     expect(aggregate.totalInScope).toBe(0);
     expect(aggregate.countKind).toBe("unknown");
     expect(aggregate.filteredTaxonomy).toEqual({ count: 0, countKind: "unknown" });
-    // 目次帯は集計とは別の経路なので、同時に出る。
     expect(aggregate.digests.map((d) => d.memoryId)).toContain(a1.id);
   });
 });

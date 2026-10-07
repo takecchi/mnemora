@@ -3,11 +3,6 @@ import type { Ctx, NewRecallRecord } from "@mnemora/core";
 import { buildNewMemoryEventFixture, buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * ADR 0512: `InMemoryMemoryStore.scrubPurged` も `PostgresMemoryStore.scrubPurged` と同じく、
- * `recalls.indexBand.digestBand` の purge 済みの行のエントリを、行の digest（トゥームストーン）へ伏せる。
- * Postgres 側の歯は `packages/postgres/src/__tests__/repurge-legacy-index-band.postgres.test.ts`。
- */
 function recallWithBand(
   tenantId: string,
   digestBand: { memoryId: string; digest: string; truncated?: boolean }[],

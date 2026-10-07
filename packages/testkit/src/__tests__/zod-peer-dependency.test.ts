@@ -2,19 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）で、PR #1491 の変異試験が**すり抜けた**
- * 「testkit の `peerDependencies` から `zod` を外す」を塞ぐ歯。担当はクローン（miku）の判断で進めている
- * 作業であり、オーナーの判断ではない。
- *
- * testkit の公開 d.ts は `zod` の型を使う（core の公開の型経由）。`peerDependencies` に `zod` が無いと、
- * pnpm の `hoist=false` の利用者は `TS2307`（zod が見つからない）で型検査に落ちる。既定の hoist では
- * 偶然解決して気づけない。PR #1491 の確かめ方は pack して一時プロジェクトで `tsc` に掛ける手作業で、
- * 歯として残っていなかった（scripts の pack 検査も、この manifest の zod は見ていない）。
- * ここでは manifest を直接見る（pack・install はしない。偽陽性は manifest の書き方を変えたときだけ）。
- *
- * 範囲は core の `dependencies.zod` と同じにする（PR #1491 の約束。2つの版の zod が同居しないように）。
- */
+/** testkit の公開 d.ts は `zod` の型を使うので、`peerDependencies` に無いと pnpm の `hoist=false` の利用者は `TS2307` で型検査に落ちる（既定の hoist では偶然解決して気づけない）。manifest を直接見る（pack・install はしない）。範囲は core の `dependencies.zod` と同じにする（2つの版の zod が同居しないように）。 */
 
 function readManifest(relative: string): {
   dependencies?: Record<string, string>;
@@ -33,7 +21,6 @@ describe("@mnemora/testkit の package.json: zod は peerDependencies に在り�
   });
 
   it("その範囲は core の dependencies.zod と同じ", () => {
-    // 前提（対照）: core 側が zod の範囲を持っている。
     expect(core.dependencies?.zod).toBeDefined();
     expect(testkit.peerDependencies?.zod).toBe(core.dependencies?.zod);
   });

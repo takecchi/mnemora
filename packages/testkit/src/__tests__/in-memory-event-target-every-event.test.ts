@@ -1,11 +1,3 @@
-// `in-memory-event-target-belongs-to-ctx-tenant.test.ts` は、2者・群の口では「先頭のイベント」が別テナントを指す入力だけを
-// 縛っていた。呼び出しが運ぶイベントは、**どれが**別テナントの記憶を指していても断る（`PostgresMemoryStore` と同じ。
-// イベントを積むすべてのメンバーの指し先を、書く前に確かめる）。この歯は、先頭以外のイベントを縛る。
-//
-// 約束の出所: `InMemoryMemoryStore.assertEventTargetOwn` の TSDoc と、呼び出し側のコメント
-// （「2つのイベントが指す記憶は、`ctx` のテナントの行」「全メンバーのイベントが指す記憶は、`ctx` のテナントの行」）。
-// `*-conformance.ts` には触れない。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";

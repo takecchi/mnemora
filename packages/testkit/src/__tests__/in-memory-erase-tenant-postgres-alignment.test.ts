@@ -7,17 +7,6 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * `InMemoryMemoryStore.eraseTenant` を `PostgresMemoryStore.eraseTenant` に揃える
- * （[ADR 0426](../../../../docs/decisions/0426-in-memory-erase-tenant-postgres-alignment.md)）。
- *
- * 1. `tenant_subject_activity` は `(tenant_id, subject_id)` が主キーで、テナントあたり
- *    subject の数だけ行がある。`deleted` も `limit` の budget も、その行数で数える
- *    （`packages/postgres/src/memory-store.ts` の `eraseTenantBody` 手順9）。
- * 2. `memory_embeddings_<space>.memory_id` は `memories(id) ON DELETE CASCADE`
- *    （`packages/postgres/src/vector-space.ts`）——`memories` の行を消すと、その埋め込みも
- *    同じ文で消える。消えた埋め込みはどの port の `deleted` にも数えない。
- */
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 2 };
 
 function subjectRecall(ctx: Ctx, subjectId: string): NewRecallRecord {
@@ -64,7 +53,6 @@ describe("InMemoryMemoryStore.eraseTenant — tenant_subject_activity を subjec
       await memoryStore.createRecall(ctx, subjectRecall(ctx, subjectId));
     }
 
-    // recalls 3行で3、tenant_subject_activity は残り budget 2 行だけ消える。
     const first = await memoryStore.eraseTenant(ctx, { limit: 5 });
     expect(first).toMatchObject({ deleted: 5, reachedLimit: true });
     expect(memoryStore.subjectActivitySeq.get(ctx.tenantId)?.size).toBe(1);
@@ -96,7 +84,6 @@ describe("InMemoryMemoryStore.eraseTenant — memories を消すと埋め込み�
     );
     await vectorStore.upsert(other, SPACE, otherMemory.id, [1, 0]);
 
-    // memories 3行のうち2行で budget が尽きる。
     const first = await memoryStore.eraseTenant(ctx, { limit: 2 });
     expect(first).toMatchObject({ deleted: 2, reachedLimit: true });
     const remaining = await vectorStore.getVectors(ctx, SPACE, ids);
@@ -154,8 +141,7 @@ describe("InMemoryMemoryStore.eraseTenant — memories を消すと埋め込み�
 });
 
 describe("InMemoryMemoryStore.eraseTenant — recall_usages はテナントの完全一致で消す（ADR 0604）", () => {
-  // tenantId は不透明な文字列で `:` を含んでよい。`recall_usages` の鍵 `${tenantId}:${recallId}:${memoryId}` を
-  // 前方一致で消すと、`acme` を消したときに `acme:eu` の行まで消える。Postgres は `tenant_id` の列で比べる。
+  // tenantId は `:` を含んでよい。`recall_usages` の鍵を前方一致で消すと、`acme` を消したときに `acme:eu` の行まで消える。
   it("acme を消しても、acme:eu の recall_usages は残る", async () => {
     const memoryStore = new InMemoryMemoryStore();
     const eu: Ctx = { tenantId: "acme:eu" };
@@ -176,7 +162,6 @@ describe("InMemoryMemoryStore.eraseTenant — recall_usages はテナントの�
     expect(erasedAcme).toMatchObject({ deleted: 0, reachedLimit: false });
     expect(usages.has(euUsageKey)).toBe(true);
 
-    // 対照: acme:eu 自身を消すと、その recall_usages は消える。
     await memoryStore.eraseTenant(eu, { limit: 1000 });
     expect(usages.has(euUsageKey)).toBe(false);
   });

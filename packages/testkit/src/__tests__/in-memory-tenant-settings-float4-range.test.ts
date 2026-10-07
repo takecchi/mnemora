@@ -1,22 +1,3 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// `InMemoryTenantSettingsStore` の半減期の2つの口を、Postgres の `real`（float4）列の範囲に揃える。
-//
-// - `tenant_settings.default_half_life_recalls` / `default_half_life_hours` はどちらも `real` で、
-//   値域 `(0, ∞)` の CHECK を持つ（migrations/0012・0015）。
-// - 【実測 2026-09-27、本物の Postgres 17 + pgvector】
-//   - `setDefaultHalfLifeRecalls(1e-46)`（float4 で 0 に丸まる値）: Postgres は例外（CHECK に抵触）、
-//     fixture は受け付けて `1e-46` を返していた。上側（`1e39`・`Number.MAX_VALUE`）は両方が拒む（PR #815）。
-//   - `default_half_life_hours` に `1e39`・`Number.MAX_VALUE`・`1e-46` を書く: Postgres は
-//     `"…" is out of range for type real` で拒む（Postgres には書き込みの口が無いので、列へ直に書いた）。
-//     fixture の `setDefaultHalfLifeHours`（fixture だけの口）は、値域 `(0, ∞)` の外だけを拒み、
-//     これらを受け付けていた。
-//   - `1e-40`（float4 の非正規数に収まる値）・`3.4e38`・`0.1` は、両方が受け付けて同じ値を返す。
-// - 境界は `createMemory` の `halfLifeHours`（PR #1095）と同じく「`Math.fround(x)` が 0 または
-//   `Infinity` になるか」。
-//
-// `*-conformance.ts` には触れていない（Issue #809）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { DEFAULT_HALF_LIFE_HOURS, DEFAULT_HALF_LIFE_RECALLS } from "@mnemora/core";

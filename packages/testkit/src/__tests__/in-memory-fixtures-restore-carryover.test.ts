@@ -1,16 +1,3 @@
-// Issue #809: `resolveContestedPair`（supersede 分岐）・`restoreSupersededBy`・
-// `updateStatusWithEvent(kind='restored')` が、`status`/`contestedWithId`/
-// `supersededById`/`updatedAt` 以外の付随データ（`subjectId`・`tags`・`attributes`・
-// `provenance`・`validFrom`/`validUntil`・`occurredAt`・`strength`・`halfLifeHours`・
-// `decayFloorAt`・`embeddingStatus` 等）に触れないことを、`InMemoryMemoryStore` に
-// 対して実測で確認する。
-//
-// **`memory-store-conformance.ts`（適合テスト一式）には足さない**（Issue #809 の方針。
-// 外部 adapter 実装者にまで要求を増やすため）。ここは `packages/testkit` 内だけで
-// 完結する、Fake を直接呼ぶ回帰テスト——`in-memory-fixtures-resolve-orphaned-contested.test.ts`
-// 冒頭の同じ方針を踏襲する。Postgres 側は
-// `packages/postgres/src/__tests__/restore-carryover.postgres.test.ts`。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingStatus, MemoryId, NewMemoryEvent } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
@@ -109,19 +96,7 @@ function restoredEvent(memoryId: MemoryId, digest: string): NewMemoryEvent {
 }
 
 describe("InMemoryMemoryStore — restore/resolve 系の付随データ保全（Issue #809）", () => {
-  // ⚠ `InMemoryMemoryStore.get`/`createMemory` は Postgres と違い、Map に入れた
-  // *まさにその* `Memory` オブジェクトをそのまま返す（行を毎回パースし直す postgres 側
-  // と違い、コピーを取らない——`get()`/`createMemory()` の実装参照）。そのため、
-  // 変異対象のメソッドが対象を直接書き換えると、`a`/`b`/`target`/`memory` のような
-  // 「操作前に受け取った変数」も**同じ参照**なので一緒に書き換わってしまい、
-  // 「操作後の値」対「操作前に受け取った変数」を比較しても常に一致してしまう
-  // （変異があっても赤くならない、偽陰性）。
-  // ⟹ **`ancillary()` のスナップショットは、変異対象の呼び出しより前に取る**——
-  // `ancillary()` は各欄を `Date` ではなく `number`（`getTime()`）・プリミティブへ
-  // 展開して新しいプレーンオブジェクトを返すため、後から元の `Memory` オブジェクトが
-  // 書き換わっても、先に取ったスナップショット（プリミティブのコピー）は影響を受けない。
-  // これで Postgres 側と同じ強さの検査になる（実際に変異試験で確認済み——このファイルの
-  // 冒頭コメント参照）。
+  // `InMemoryMemoryStore.get`/`createMemory` は Map に入れた `Memory` オブジェクトそのものを返す（コピーを取らない）。変異対象のメソッドが対象を直接書き換えると、操作前に受け取った変数も同じ参照なので一緒に書き換わり、変異があっても赤くならない。そのため `ancillary()` のスナップショットは、変異対象の呼び出しより前に取る。
 
   it("resolveContestedPair(supersede) は付随データを、status/contestedWithId/supersededById/updatedAt 以外そのまま保つ（勝者・敗者とも）", async () => {
     const store = new InMemoryMemoryStore();

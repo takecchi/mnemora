@@ -3,12 +3,6 @@ import type { Ctx } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * 空文字の参照・冪等の鍵を、testkit の fixture も Postgres と同じく「値が在る」として扱う。
- * 2実装を並べた歯は `packages/postgres/src/__tests__/empty-string-references.postgres.test.ts`（DB が要る）。
- * ここは DB 無しで走る側の歯で、文面と「何も書かない」を縛る。
- */
-
 const ctx: Ctx = { tenantId: "empty-string-references" };
 
 describe("testkit の fixture は空文字の参照・冪等の鍵を「値が在る」として扱う", () => {

@@ -1,14 +1,3 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// Issue #961: 使用報告の記録（`recordUsage`）と強化（`reinforceMany`）を1つの口で
-// 撃つ任意メソッド `recordUsageAndReinforce` の、`InMemoryMemoryStore` の歯。
-// in-memory にトランザクションは無いので、「まだ何も書いていないうちに、失敗しうる検査を
-// すべて済ませる」ことで Postgres の1トランザクションを模す（`supersedeWithNewMemories`
-// と同じ作法）。この Fake で強化が失敗しうるのは Invalid Date の `at` だけである
-// （Issue #807）——そのとき `recall_usages` 相当の行も残らないことを測る。
-//
-// `*-conformance.ts` には一切触れていない（適合テストに要件を足さない、Issue #809）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";

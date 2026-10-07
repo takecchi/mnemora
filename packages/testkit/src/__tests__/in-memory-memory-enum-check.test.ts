@@ -12,18 +12,8 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { assertStorableMemoryColumn } from "../__fixtures__/memory-enum-check.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * `memories` の列挙の列（`status`・`digest_source`・`embedding_status`・`provenance_kind`）に型の列挙に
- * 無い値を渡すと、testkit の fixture も Postgres と同じく拒み、何も書かない。Postgres は CHECK 制約
- * （`memories_status_check` など）で拒む。
- *
- * 2実装を並べた歯は `packages/postgres/src/__tests__/memories-enum-check.postgres.test.ts`
- * （DB が要る）。ここは DB 無しで走る側の歯である。
- */
-
 const ctx: Ctx = { tenantId: "memory-enum-check" };
 
-/** 型を外した呼び出しを模す（列挙に無い値）。 */
 const BOGUS = "bogus" as never;
 
 function event(memoryId: string): NewMemoryEvent {
@@ -62,8 +52,6 @@ describe("testkit の fixture は memories の列挙の列に無い値を拒む"
   for (const [field, override, message] of createCases) {
     it(`createMemory・createMemoryWithOutbox は列挙に無い ${field} を拒み、何も書かない`, async () => {
       const { memoryStore } = build();
-      // 冪等の鍵（観測・抽出器の版・contentHash）を持たせ、何も書いていないことを「同じ鍵の正しい
-      // 入力が新しく作られる（created: true）」で確かめる。
       const observation = await memoryStore.createObservation(
         ctx,
         buildNewObservationFixture({ tenantId: ctx.tenantId }),
@@ -160,8 +148,6 @@ describe("testkit の fixture は memories の列挙の列に無い値を拒む"
         { id: a.id, status: "active", event: event(a.id) },
         { id: b.id, status: BOGUS, event: event(b.id) },
       ),
-      // ADR 0499 で、列挙の検査より手前に resolveContestedPair 固有の検査（"active" か
-      // "superseded" か）が入った。列挙の外の値はそちらで先に断られる。
     ).rejects.toThrow(/^resolveContestedPair: second\.status must be "active" or "superseded"/);
 
     expect((await memoryStore.get(ctx, a.id))?.status).toBe("contested");

@@ -1,14 +1,3 @@
-// Issue #691 続き: 「種カセット」から再生し、種に無い入力だけ実 API（delegate）へ流す
-// provider の歯。
-//
-// **固定したい振る舞いは3つ**:
-// 1. 種にある入力では delegate（実 API の位置）を一切呼ばない。
-// 2. 種に無い入力では delegate を呼び、種から返した分・delegate から返した分の
-//    どちらも `CassetteRecorder`（新しいカセット）に記録される——新しいカセットは
-//    自己完結し、種への参照を残さない。
-// 3. 種のモデル名・埋め込み空間が呼び出し側の期待と食い違えば、構築時に例外になる
-//    （黙って混ぜない）。
-
 import type {
   Ctx,
   EmbeddingProvider,
@@ -40,7 +29,6 @@ const MODEL = "gpt-4o-mini";
 
 const SCHEMA = z.object({ digest: z.string() });
 
-/** delegate（実 API の位置）。呼ばれたら投げる——「種にある入力では real が呼ばれない」を固定する。 */
 class ThrowingLLMProvider implements LLMProvider {
   calls: PromptSpec[] = [];
   async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
@@ -53,7 +41,6 @@ class ThrowingLLMProvider implements LLMProvider {
   }
 }
 
-/** delegate（実 API の位置）。呼ばれたら記録して、機械的な応答を返す。 */
 class RespondingLLMProvider implements LLMProvider {
   calls: PromptSpec[] = [];
   async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
@@ -151,8 +138,6 @@ describe("SeededLLMProvider", () => {
     expect(provider.usage).toEqual({ seeded: 0, real: 1 });
   });
 
-  // Issue #1775 の #716（L4）: 鍵にスキーマを含めていないので、記録以降にスキーマが変わっていないかを
-  // 再生時に検証し直す（コード内コメントの約束）。スキーマに合わない種の記録は、そのまま返さず例外にする。
   it("種の記録がいまのスキーマを満たさなければ completeStructured は例外を投げ、seeded を増やさない", async () => {
     const seedPrompt = promptFor("スキーマに合わない種");
     const seed = seedLLMSection([{ prompt: seedPrompt, value: { digest: 123 } }]);
@@ -187,12 +172,9 @@ describe("SeededLLMProvider", () => {
     await recording.completeStructured(ctx, { prompt: seededPrompt, schema: SCHEMA });
     await recording.completeStructured(ctx, { prompt: missingPrompt, schema: SCHEMA });
 
-    // ⭐ delegate は「種に無い」1件だけ呼ばれる。
     expect(delegate.calls).toHaveLength(1);
 
-    // ⭐ 新しいカセット（recorder）は両方のエントリを持つ——「種への参照」ではなく
-    // 値そのもの。`CassetteRecorder.toCassette()` は embedding 節も要求するため
-    // （LLM 専用のこの歯では埋めていない）、ここでは `lookupLLM`/`llmCount` で見る。
+    // `CassetteRecorder.toCassette()` は embedding 節も要求するため（LLM 専用のこの歯では埋めていない）、ここでは `lookupLLM`/`llmCount` で見る。
     expect(recorder.llmCount).toBe(2);
     expect(recorder.lookupLLM(seededPrompt)?.value).toEqual({ digest: "種のdigest2" });
     expect(recorder.lookupLLM(missingPrompt)?.value).toEqual({ digest: "実APIのdigest" });
@@ -248,9 +230,7 @@ describe("SeededEmbeddingProvider", () => {
     ).toThrow(/埋め込み空間/);
   });
 
-  // Issue #1775 の #716（E1）: 種と委譲先が同じ次元で、期待する空間（expectedSpace）だけ次元が違う組みを断る。
-  // 委譲先の空間の照合（ADR 0452）は種と委譲先が一致していれば何も見ないので、expectedSpace の
-  // dimensions の照合が外れても他の歯では見えない。
+  // 委譲先の空間の照合は、種と委譲先が一致していれば何も見ないので、expectedSpace の dimensions の照合が外れても他の歯では見えない。
   it("種・委譲先と同じ3次元で expectedSpace だけ次元が違えば、構築時に例外", () => {
     const seed = seedEmbeddingSection([]);
     const delegate = new ThrowingEmbeddingProvider();
@@ -260,7 +240,6 @@ describe("SeededEmbeddingProvider", () => {
     ).toThrow(/埋め込み空間/);
   });
 
-  // Issue #1775 の #716（E6）: 委譲先が入力と違う件数を返したら、記録できないので例外にする。
   it("委譲先が欠けた入力の件数と違う件数を返したら例外", async () => {
     const seed = seedEmbeddingSection([]);
     const delegate: EmbeddingProvider = {
@@ -274,7 +253,6 @@ describe("SeededEmbeddingProvider", () => {
     );
   });
 
-  // Issue #1775 の #716（参考 E4）: 種と欠けを交互に混ぜた入力でも、戻りは入力の順になる。
   it("種と欠けを交互に混ぜた入力で、戻りが入力の順になる（欠けが2件以上）", async () => {
     const seed = seedEmbeddingSection([
       { text: "種A", vector: [1, 1, 1] },
@@ -305,8 +283,7 @@ describe("SeededEmbeddingProvider", () => {
     await recording.embed(ctx, ["種にある文2", "種に無い文3"]);
 
     expect(delegate.calls).toEqual([["種に無い文3"]]);
-    // `toCassette()` は llm 節も要求するため（Embedding 専用のこの歯では埋めていない）、
-    // ここでは `lookupEmbedding`/`embeddingCount` で見る。
+    // `toCassette()` は llm 節も要求するため（Embedding 専用のこの歯では埋めていない）、ここでは `lookupEmbedding`/`embeddingCount` で見る。
     expect(recorder.embeddingCount).toBe(2);
     expect(recorder.lookupEmbedding("種にある文2")?.vector).toEqual([7, 8, 9]);
     expect(recorder.lookupEmbedding("種に無い文3")?.vector).toEqual(["種に無い文3".length, 0, 0]);

@@ -5,23 +5,14 @@ import { CassetteRecorder, RecordingLLMProvider } from "../__fixtures__/cassette
 import { RecordedLLMProvider } from "../__fixtures__/recorded-llm-provider.js";
 import { SeededLLMProvider } from "../__fixtures__/seeded-provider.js";
 
-/**
- * ADR 0500（ADR 0452「材料」）: Recorded・Recording・Seeded の `LLMProvider` が返す応答は、記録・種の参照のままだった。
- * 呼び出し側が受け取った値を書き換えると、次の再生（と、Recording ではカセットに書き出す記録）が変わる。
- * 本物の provider は呼び出しごとに新しい値を返す。ADR 0452 A-6（埋め込み）と同じ作法で、複製して返す。
- *
- * 漏れの実例: `complete` は全て、`completeStructured` は schema が値を作り直さない欄（`z.unknown()`・`z.record(z.unknown())`）を持つとき。
- */
-
 const ctx: Ctx = { tenantId: "llm-isolation" };
 const PROMPT: PromptSpec = { messages: [{ role: "user", content: "p" }] };
 const loose = z.object({ items: z.array(z.unknown()), meta: z.record(z.string(), z.unknown()) });
 const SEED = { items: [{ n: 1 }], meta: { k: { deep: 1 } } };
-/** カセットに入れる値は、テストごとに作り直す（入れた値そのものを、期待値に使わない）。 */
+/** カセットに入れる値は、テストごとに作り直す（入れた値そのものを期待値に使わない）。 */
 const seedValue = () => structuredClone(SEED);
 Object.freeze(SEED);
 
-/** toCassette は埋め込みの節も要るので、1件だけ足す。 */
 function newRecorder() {
   const recorder = new CassetteRecorder();
   recorder.recordEmbedding({ provider: "p", model: "m", dimensions: 3 }, "t", [1, 0, 0]);

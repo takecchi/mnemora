@@ -1,10 +1,3 @@
-// 確かめ直し（Issue #1759、B 群 #1609 / ADR 0500）の歯。
-//
-// ADR 0500: `RecordingLLMProvider` は「呼び出し側へ返す値を、それぞれ別の写しにする」。
-// 既存の歯（provider-fakes-llm-response-isolation.test.ts）は、並列の待ち側を `complete` で1人だけ見ていて、
-// 待ち側の複製（`complete` の `structuredClone(await waiting)`・`completeStructured` の
-// `schema.parse(structuredClone(await waiting))`）を外しても赤にならなかった。
-// ここでは、同じ呼び出しを3つ並列に投げ、全員が別の参照を受け取り、1人が書き換えても他に漏れないことを縛る。
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { Ctx, LLMProvider, PromptSpec } from "@mnemora/core";

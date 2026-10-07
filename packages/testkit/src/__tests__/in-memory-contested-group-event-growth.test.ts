@@ -15,12 +15,6 @@ import {
   InMemoryVectorStore,
 } from "../fixtures.js";
 
-/**
- * ADR 0431: 群の監査イベントが N に対して線形にしか増えないこと（testkit の InMemory 版）。
- * 走らせ方と閾値は core の Fake 版（`contested-group-event-growth.test.ts`）と同じ部品を使う。
- * 加えて、`markContestedGroup` の口そのものが、状態の変わらないメンバーにイベントを積まないことを見る。
- */
-
 async function measure(n: number): Promise<GrowthMeasurement> {
   const memoryStore = new InMemoryMemoryStore();
   const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
