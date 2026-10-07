@@ -497,7 +497,6 @@ describe("runtime.consolidate — recall() との裏取り（recall 側は変更
 
 /** 今の実装がこの窓（統合元は引けなくなったが、統合先は embed 前でまだ引けない）をどう見せるかを固定するだけで、塞ぐ変更ではない。 */
 describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 0089 引き受けた負債4、Issue #765）", () => {
-  /** `tick()` の claim が `availableAt <= now` を要るため、固定 clock ではなく実時計を使う。 */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
@@ -740,7 +739,6 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
 });
 
 describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0317）", () => {
-  /** `tick()` の claim が `availableAt <= now` を要るため、固定 clock ではなく実時計を使う。 */
   function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
     const stores = createFakeRuntimeStores();
     const runtime = createRuntime({
