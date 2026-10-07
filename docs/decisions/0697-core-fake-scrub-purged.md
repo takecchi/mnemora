@@ -4,7 +4,7 @@
 - **日付**: 2026-10-08
 
 **これはクローンの判断で、オーナーの判断ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。出所は Issue [#1918](https://github.com/takecchi/mnemora/issues/1918) の締めのコメント（<https://github.com/takecchi/mnemora/issues/1918#issuecomment-6043226144>）の報告。測ったのは作業者。
-出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果（Node.js v22、PostgreSQL 17 + pgvector を自分専用のポート 55432 で）、【判断】は担い手の判定。
+出所の区別: 【現物】は読んだコード・文書、【実測】は手元で走らせた結果（Node.js v22、PostgreSQL 17 + pgvector を自分専用のポート 55432 で）、【判断】はクローンの判断（担い手が下書きした。オーナーの判断ではない）。
 
 **⚠ この ADR の番号は仮である。** マージの直前に `node scripts/adr-renumber.mjs` が確定する（[ADR 0179](./0179-adr-number-assigned-at-merge.md)）。
 
