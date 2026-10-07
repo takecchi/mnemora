@@ -45,27 +45,9 @@ import { assertTimeWeightingCaseWellFormed } from "./time-weighting-case.js";
 import type { UsageMeter } from "./usage-meter.js";
 
 /**
- * `answer-time-weighting` ベンチの本体（Issue #690 / PR #697）。
- *
- * 🔴 **`answer-bench.ts` と何が違うか**: あちらは `ingestConversation`（抽出 LLM を
- * 通す取り込み）を使い、取り込み直後に `recall()` するため時間項がほぼ1に張り付く
- * （`answer-bench.ts` の docstring・PR 本文参照）。このベンチは
- * (1) 記憶を抽出 LLM を通さず直接書き（明示の `recordedAt`/`occurredAt`/`validFrom`/
- * `validUntil`）、(2) 指定した時刻に `reinforce` し、(3) 壁時計（`MutableClock`）を
- * `recallAt` まで進めてから、同じ質問を `timeWeighting: "legacy"` と
- * `"eventAwareFreshness"` の両方で `recall()` する。
- *
- * ⛔ **`answer-judge.ts`（LLM 採点）は使わない。** マネージャー指示は「既存の回答生成で
- * 回答→`gradeAnswer` で正誤」——一次判定（文字列一致）だけで完結させる。理由:
- * このベンチが問うているのは「`recall()` に正しい記憶が候補として残ったか」という
- * 構造的な性質であり、`answer-case.ts` の `gradeAnswer` の docstring が要求する
- * 「答えが短く閉じる質問」という制約とも整合する。
+ * `answer-bench.ts` と違い抽出 LLM を通さず記憶を直接書く（あちらは取り込み直後に `recall()` するため時間項がほぼ1に張り付く）。
+ * `answer-judge.ts`（LLM 採点）は使わない: 問うているのは「`recall()` に正しい記憶が候補として残ったか」という構造的な性質で、一次判定（文字列一致）だけで完結する。
  */
-
-// ---------------------------------------------------------------------------
-// Runtime の組み立て（`answer-bench.ts` の `createAnswerBenchRuntime` と同じ構成 +
-// `MutableClock` の注入）
-// ---------------------------------------------------------------------------
 
 export interface TimeWeightingBenchRuntimeHandle {
   runtime: Runtime;
@@ -77,9 +59,8 @@ export interface TimeWeightingBenchRuntimeHandle {
   embeddingProvider: CountingEmbeddingProvider;
   usageMeter?: UsageMeter;
   cassetteIgnored: boolean;
-  /** `Providers.readSeedUsage` をそのまま通す（`providerOptions.seedCassette` を渡したときだけ存在する）。 */
   readSeedUsage?: () => SeedUsageSummary;
-  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
+  /** 冪等: 2回目以降は何もせず resolve する。 */
   close(): Promise<void>;
 }
 
@@ -89,12 +70,7 @@ export async function createTimeWeightingBenchRuntime(
   providerOptions: CreateProvidersOptions = {},
 ): Promise<TimeWeightingBenchRuntimeHandle> {
   const client: PostgresClient = createPostgresClient(databaseUrl);
-  // `runtime-factory.ts` の `createExampleRuntime` と同じ穴・同じ理由:
-  // `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に失敗しうる
-  // `await` が何段もある（`runMigrations`/`registerEmbeddingSpace`）。呼び出し側は
-  // `const handle = await createTimeWeightingBenchRuntime(...); try { ... } finally {
-  // await handle.close(); }` という形で、ここで reject すると `handle` に一度も
-  // 代入されないため `close()` を呼びようがない。
+  // `runtime-factory.ts` と同じ理由: `client` を作った後に失敗しうる `await` が続き、呼び出し側は `try` の外で `await` するので、ここで reject すると `close()` を呼びようがない。
   try {
     await runMigrations(client.pool);
 
@@ -104,11 +80,7 @@ export async function createTimeWeightingBenchRuntime(
     await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
     const memoryStore = new PostgresMemoryStore(client.db);
-    // ⭐ 初期値はどうでもよい——`runTimeWeightingCase` が各ケースの `recallAt` へ
-    // `recall()` の直前に必ず `set()` する。記憶の作成・reinforce は `Clock` を読まない
-    // （`NewMemory.recordedAt`/`reinforce(ctx, id, at)` はどちらも呼び出し側が渡す
-    // 明示の `Date` であり、`RuntimeDeps.clock` に依らない——`mutable-clock.ts` の
-    // docstring と同じ理解）。
+    // 初期値はどうでもよい（`runTimeWeightingCase` が `recall()` の直前に必ず `set()` する。記憶の作成・reinforce は `Clock` を読まない）。
     const clock = createMutableClock();
 
     const runtime = createRuntime({
@@ -138,29 +110,13 @@ export async function createTimeWeightingBenchRuntime(
       close: () => closePostgresClient(client),
     };
   } catch (err) {
-    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
+    // 元の失敗（`err`）を `close()` 自体の失敗で上書きしない。
     await closePostgresClient(client).catch(() => {});
     throw err;
   }
 }
 
-// ---------------------------------------------------------------------------
-// 記憶を直接書く（抽出 LLM を通さない）
-// ---------------------------------------------------------------------------
-
-/**
- * `TimeWeightingMemorySeed` から `NewMemory` を組み立てる。`@mnemora/testkit` の
- * `buildNewMemoryFixture`（適合テストが使うのと同じひな型）を土台にし、
- * `contentHash` だけ実物の SHA-256（`sha256Hex`）へ差し替える——同一 tenant 内で
- * 異なる内容の記憶が `(tenant_id, source_observation_id, extractor_version,
- * content_hash)` の冪等キーで衝突しないようにするため（`buildNewMemoryFixture` の
- * 既定 `contentHash` は固定文字列であり、複数件を同じ tenant に書くとこの衝突を踏む）。
- *
- * `provenance` は `imported`（`buildNewMemoryFixture` の既定）のまま——`sourceObservationId`
- * が無いことと整合する（`stated`/`inferred` は実在の Observation を要求する、
- * `packages/postgres/migrations/0001_init.sql` の CHECK 制約）。「抽出 LLM を通さず
- * 直接書く」という設計そのものが imported（取り込み由来）の意味に近い。
- */
+/** `buildNewMemoryFixture` の既定 `contentHash` は固定文字列で、複数件を同じ tenant に書くと冪等キーで衝突するので、実物の SHA-256 へ差し替える。 */
 function buildTimeWeightingNewMemory(tenantId: string, seed: TimeWeightingMemorySeed): NewMemory {
   return buildNewMemoryFixture({
     tenantId,
@@ -175,17 +131,6 @@ function buildTimeWeightingNewMemory(tenantId: string, seed: TimeWeightingMemory
   });
 }
 
-/**
- * ケースの記憶を直接書き、`reinforceAt` を順番に適用する。**抽出 LLM を一度も呼ばない**
- * ——`memoryStore.createMemoryWithOutbox` に `jobKinds: ["embed"]` だけを積み、
- * `drainEmbedTicks` で埋め込みだけを処理する（`ingestConversation` が `observe()` +
- * `tick()` で行うのと同じ埋め込みの配線を、抽出の段だけ飛ばして再利用する）。
- *
- * `reinforce` は `MemoryStore.reinforce(ctx, id, at)` の `at` にそのまま
- * `seed.reinforceAt` の値を渡す——`Runtime`/`Clock` を経由しない直接呼び出しなので、
- * 壁時計（`MutableClock`）を動かす必要が無い（`createTimeWeightingBenchRuntime` の
- * docstring 参照）。
- */
 export async function seedTimeWeightingMemories(
   memoryStore: PostgresMemoryStore,
   runtime: Runtime,
@@ -199,34 +144,10 @@ export async function seedTimeWeightingMemories(
     const { memory } = await memoryStore.createMemoryWithOutbox(ctx, input, ["embed"]);
     memoryIdByLocalId.set(seed.localId, memory.id);
   }
-  // (歴史的な理由で残している。ADR 0355 より前は、埋め込みジョブの `available_at` が DB 側の
-  // 実時刻（SQL の `now()`）で書かれ、`RuntimeDeps.clock`（このケースでは `MutableClock`）を
-  // 読まなかった。いまは `available_at` も注入した時計に従う。ADR 0559。)
-  // 当時は `runtime.tick()` の claim クエリが「いま」を `deps.clock.now()` から取る
-  // （`packages/core/src/runtime.ts`）ので、**`clock` を書き込み前の値（構築時点の
-  // 実時刻）のまま止めておくと、ジョブ作成の実時刻のほうがわずかに後になり、
-  // `available_at <= now` が常に false になって claim が1件も進まなかった**
-  // （当時、実際に踏んだ——`totalProcessed` が常に0だった）。
-  // ⟹ 埋め込みを処理する直前に `clock` を実時刻へ進めてから `drainEmbedTicks` を呼ぶ。
-  // 呼び出し側（`runTimeWeightingCase`）がこの後で `recallAt` へ改めて `set()` する。
-  //
-  // 🔴 **Issue #719: 上の `new Date()` だけでは足りない。** `available_at`（Postgres の
-  // `now()`、マイクロ秒精度）に対し JS の `Date` はミリ秒精度（切り捨て）——seed 直後の
-  // 書き込みと同じ 1ms の枠内でこの時刻を読むと、`available_at <= now` が false になり
-  // claim が1件も進まない。詳細・実測・数学的な安全性の根拠は
-  // `clockPastRecentDbWrites`（`./embed-drain.js`）の docstring 参照。
+  // 埋め込みを処理する直前に `clock` を実時刻へ進める。止めたままだと `available_at <= now` が false になり claim が1件も進まない。
+  // `available_at` はマイクロ秒精度で JS の `Date` はミリ秒なので、`clockPastRecentDbWrites` で追い越す。
   clock.set(clockPastRecentDbWrites());
-  // 埋め込みは全件書き終えた後にまとめて処理する——`ingestConversation` と同じ順序
-  // （`mnemora-path.ts` の `drainEmbedTicks` 呼び出し）。
-  //
-  // 🔴 **Issue #719: 黙って0件のまま進まない歯は `drainEmbedTicks` 自身が持つ**
-  // （`embed-drain.ts` の `DrainEmbedTicksOptions.expectedProcessed` 参照）。ここでは
-  // 書いた seed 件数を渡すだけでよい——上の +1ms 対策が効かなかった（または将来また
-  // 同じ形の競合を踏んだ）場合、`drainEmbedTicks` 自身が例外を投げる。`clock` は
-  // `.set()` するまで動かない止まった `MutableClock` なので、`waitForClockToAdvance`
-  // （実時計が進むのを待つ既定の再試行）は無意味——`false` で無駄な待ちを避ける
-  // （この関数がこの直前で `clockPastRecentDbWrites()` により1回目から追い越して
-  // いるので、待たずとも揃うはず）。
+  // 書いた seed 件数を `expectedProcessed` に渡す。止まった `MutableClock` は動かないので、`waitForClockToAdvance` は `false` にして無駄な待ちを避ける。
   await drainEmbedTicks(runtime, ctx, {
     expectedProcessed: seeds.length,
     waitForClockToAdvance: false,
@@ -244,10 +165,6 @@ export async function seedTimeWeightingMemories(
   return memoryIdByLocalId;
 }
 
-// ---------------------------------------------------------------------------
-// 1ケース・1方針の実行
-// ---------------------------------------------------------------------------
-
 const ANSWER_SYSTEM_PROMPT =
   "以下に列挙した記憶だけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。";
 
@@ -255,40 +172,17 @@ function buildQuestionSuffix(question: string): string {
   return `\n\n質問: ${question}`;
 }
 
-/**
- * `runTimeWeightingPolicy` の診断専用 `recall()` が使う `scoreThreshold`
- * （段3a、マネージャー指示「recall で文脈に入った記憶を毎回記録する出力を足せ」）。
- *
- * **実際の回答生成に使う `recall()`（既定の `scoreThreshold`、`DEFAULT_SCORE_THRESHOLD`
- * = 0.1）とは別の、2回目の呼び出しにだけ使う。** 診断の目的は「ケースの各記憶が
- * スコアの上でどう並んだか」を、実際に候補から落ちたかどうかに関わらず**全件**
- * 見えるようにすることであり、極端に低い閾値を渡すことで below_threshold ゲートに
- * よる除外を実質無効化する（`__tests__/time-weighting-bench.postgres.test.ts` が
- * 同じ手法で `score.freshness` を読んでいるのと同じ考え方）。
- * ⛔ **回答生成に使う `recall()` 呼び出し自体はこの閾値を使わない**——プロンプトへ
- * 実際に積まれる記憶の集合は、この診断とは無関係に既定のまま決まる。
- */
+/** 診断専用の2回目の `recall()` だけが使う極端に低い閾値（below_threshold による除外を実質無効化し、全件を見えるようにする）。回答生成の `recall()` はこの閾値を使わない。 */
 const DIAGNOSTIC_SCORE_THRESHOLD = -1_000_000;
 
-/**
- * 診断専用 `recall()` が返した1件の記憶の順位・スコア内訳（段3a）。
- *
- * `localId` は `TimeWeightingMemorySeed.localId`（例: `"old-seat-undated"` /
- * `"current-seat"`）——どちらが「古い予定」でどちらが「現行の予定」かは、この
- * 文字列そのものが名乗る（ケース集合の localId 命名がその説明を兼ねる。新しい
- * enum 欄は足さない）。
- */
 export interface TimeWeightingContextDiagnosticEntry {
   localId: string;
   memoryId: string;
-  /** 診断用 `recall()`（`DIAGNOSTIC_SCORE_THRESHOLD`）が返した順序での1始まりの順位。 */
   rank: number;
   total: number;
   freshness: number;
   decay: number;
-  /** `total < DEFAULT_SCORE_THRESHOLD`——既定の閾値なら below_threshold で落ちるか。 */
   belowThreshold: boolean;
-  /** `!belowThreshold` の別名。「文脈に入ったか」をそのまま読める形で持つ。 */
   enteredContext: boolean;
 }
 
@@ -296,24 +190,13 @@ export interface TimeWeightingPolicyResult {
   policy: TimeWeightingPolicy;
   answer: string;
   verdict: AnswerVerdict;
-  /** `recall().memories` の件数（何件が候補として残ったか）。 */
   recallMemoryCount: number;
-  /** `recall()` が実際にプロンプトへ積んだ文字列（デバッグ・監査用）。 */
   prompt: string;
   inputChars: number;
   inputEstimatedTokens: number;
-  /**
-   * 段3a: このケースの記憶（`localIdByMemoryId` に載っている全件）の順位・スコア内訳。
-   * 診断専用の2回目の `recall()`（`DIAGNOSTIC_SCORE_THRESHOLD`）から得る——実際の
-   * 回答生成に使った `recall()`（1回目、既定の `scoreThreshold`）の結果には影響しない。
-   */
   contextDiagnostics: TimeWeightingContextDiagnosticEntry[];
 }
 
-/**
- * 診断専用の2回目の `recall()` を呼び、`localIdByMemoryId` に載っている記憶それぞれの
- * 順位・スコア内訳を返す（段3a）。
- */
 async function collectContextDiagnostics(
   runtime: Runtime,
   ctx: Ctx,
@@ -322,9 +205,7 @@ async function collectContextDiagnostics(
   localIdByMemoryId: ReadonlyMap<string, string>,
   association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingContextDiagnosticEntry[]> {
-  // association: 省略時は null — この欄を省略した既存の呼び出しではこの bench
-  // （時間重み付け方針の比較）の基準線（recorded cassette へのプロンプト・判定）を
-  // 動かさない（ADR 0337 追記2026-09-26）。
+  // association: 省略時は null（この bench の基準線を動かさない）。
   const diagnosticRecall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
@@ -335,17 +216,10 @@ async function collectContextDiagnostics(
   diagnosticRecall.memories.forEach((m, index) => {
     const localId = localIdByMemoryId.get(m.memoryId);
     if (localId === undefined) {
-      // このケースが直接書いた記憶ではない（連想枠等——`association` を省略した既存の
-      // 呼び出しは null で明示的に止めているので実際には起きない経路だが、`association`
-      // を明示して on にする呼び出し（ADR 0337 追記2026-09-26の測定スクリプト）では
-      // 実際に起きる。いずれの場合も診断の対象外として黙って飛ばす——診断は「この
-      // ケースが直接書いた記憶」だけを見る）。
+      // このケースが直接書いた記憶ではない（連想枠等）。診断の対象外として黙って飛ばす。
       return;
     }
-    // Issue #548 方向2 / ADR 0352: association を明示して on にした呼び出しでは、
-    // このケースが直接書いた記憶（localId が付く）でも affinityMeasured: false
-    // （連想枠経由）で見つかることがある——total が無いので、上の localId 未対応と
-    // 同じ扱いで診断の対象外として飛ばす。
+    // affinityMeasured: false には total が無いので、同じく診断の対象外として飛ばす。
     const total = scoreTotalOrNull(m.score);
     if (total === null) {
       return;
@@ -365,15 +239,6 @@ async function collectContextDiagnostics(
   return entries;
 }
 
-/**
- * 1ケースを1方針（`legacy` または `eventAwareFreshness`）で実行する。
- *
- * **`ctx.tenantId` はケース + trial ごとに独立**——呼び出し側（`runTimeWeightingCase`）が
- * 割り当てる。同じ tenant に対して legacy/eventAwareFreshness を続けて呼ぶのは安全
- * （`recall()` は読み取りのみで、このベンチは `reportMemoryUsage` を呼ばないため
- * `reinforce` が誘発されない——`mnemora-path.ts` の `reportMemoryUsage` docstring
- * 「これを呼ばないと reinforce が発火しない」の逆を利用している）。
- */
 async function runTimeWeightingPolicy(
   runtime: Runtime,
   llmProvider: LLMProvider,
@@ -384,11 +249,7 @@ async function runTimeWeightingPolicy(
   localIdByMemoryId: ReadonlyMap<string, string>,
   association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingPolicyResult> {
-  // association: 省略時は null（上の collectContextDiagnostics と同じ理由）。この
-  // recall() の結果がそのまま `buildMnemoraPrompt` を経て LLM プロンプトへ入るため、
-  // 連想を on にすると増える候補は recorded cassette に無い入力を作りうる——
-  // ADR 0337 追記2026-09-26 の測定スクリプトは、この欄を明示するときは
-  // llmMode=deterministic（cassette 再生に依らない）でだけ呼ぶ。
+  // association: 省略時は null。この `recall()` の結果は LLM プロンプトへ入り、連想を on にすると recorded cassette に無い入力を作りうる。
   const recall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
@@ -420,23 +281,13 @@ async function runTimeWeightingPolicy(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 1ケース（全方針・複数 trial）
-// ---------------------------------------------------------------------------
-
 export interface TimeWeightingTrialResult {
   case: TimeWeightingCase;
   trial: number;
   byPolicy: Record<TimeWeightingPolicy, TimeWeightingPolicyResult>;
 }
 
-/**
- * `caseId` から tenantId を作る。`answer-bench.ts` の `embeddingSpaceSlug` と同じ理由
- * （埋め込み空間ごとに tenant を分ける）に加え、**trial ごとにも分ける**——
- * 実測モード（`openai`）で trial を跨いで独立に API を呼ぶ（キャッシュしない）ことを、
- * 記憶の書き込みからやり直すことで保証する（マネージャー指示「trial ごとに実際に
- * API を呼ぶこと」）。
- */
+/** `caseId` から tenantId を作る。embedding 空間ごとに加え trial ごとにも分ける（記憶の書き込みからやり直し、trial を跨いで独立に API を呼ぶことを保証する）。 */
 function tenantIdFor(
   tenantPrefix: string,
   spaceSlug: string,
@@ -446,28 +297,15 @@ function tenantIdFor(
   return `${tenantPrefix}-${spaceSlug}-${caseId}-t${trial}`;
 }
 
-/**
- * 1ケースを1 trial ぶん実行する: 記憶を直接書き → reinforce → 壁時計を `recallAt` へ
- * 進める → `legacy`/`eventAwareFreshness` それぞれで recall→回答生成→採点。
- *
- * ⚠ **2方針は同じ記憶の状態に対して呼ぶ**——`legacy` を走らせても記憶やテナントの
- * 状態は変わらない（`recall()` は読み取りのみ、`reportMemoryUsage` を呼ばない）ので、
- * 続けて `eventAwareFreshness` を呼んでも「先に legacy が動いた影響」は無い。
- */
+/** 2方針は同じ記憶の状態に対して続けて呼ぶ（`recall()` は読み取りのみで `reportMemoryUsage` を呼ばないので、状態は変わらない）。 */
 export async function runTimeWeightingCase(
   handle: TimeWeightingBenchRuntimeHandle,
   timeWeightingCase: TimeWeightingCase,
   tenantPrefix: string,
   trial: number,
-  // `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
-  // **省略時は `null`**——この bench の基準線を変えない。
+  // 省略時は `null`（この bench の基準線を変えない）。
   association: RecallAssociationQuery | null = null,
-  // 走らせる方針の集合(ADR 0337 追記2026-09-26「回答の正誤」測定用の新設オプション)。
-  // **省略時は `TIME_WEIGHTING_POLICIES`（両方）**——既存の呼び出し（CLI・
-  // `association-default-on-measure.ts`）は1バイトも挙動が変わらない。実 API で
-  // 「off/on でプロンプトが変わった方針だけ」を課金対象にしたい呼び出し側
-  // （`association-answer-correctness-measure.ts`）が、変わっていない方針の
-  // 回答生成コールを無駄に払わないために使う。
+  // 省略時は `TIME_WEIGHTING_POLICIES`（両方）。変わっていない方針の回答生成コールを無駄に払わずに済むよう、呼び出し側が絞れる。
   policies: readonly TimeWeightingPolicy[] = TIME_WEIGHTING_POLICIES,
 ): Promise<TimeWeightingTrialResult> {
   assertTimeWeightingCaseWellFormed(timeWeightingCase);
@@ -491,9 +329,7 @@ export async function runTimeWeightingCase(
     [...memoryIdByLocalId.entries()].map(([localId, memoryId]) => [memoryId, localId]),
   );
 
-  // recall() の decay/freshness/decayFloor ゲートが読む「いま」をここで確定させる。
-  // 記憶の作成・reinforce は明示の Date を渡すだけで Clock を読まないため、
-  // このケースを通して Clock を動かすのはここ1回だけでよい。
+  // 記憶の作成・reinforce は `Clock` を読まないので、`Clock` を動かすのはここ1回だけでよい。
   handle.clock.set(timeWeightingCase.recallAt);
 
   const byPolicy = {} as Record<TimeWeightingPolicy, TimeWeightingPolicyResult>;
@@ -513,16 +349,11 @@ export async function runTimeWeightingCase(
   return { case: timeWeightingCase, trial, byPolicy };
 }
 
-/**
- * 複数ケース × 複数 trial を実行する。**既定は呼び出し側の指定に委ねる**
- * （マネージャー決定: 既定1、評価は5）。
- */
 export async function runTimeWeightingBench(
   handle: TimeWeightingBenchRuntimeHandle,
   cases: readonly TimeWeightingCase[],
   tenantPrefix: string,
   trials: number,
-  // `runTimeWeightingCase` と同じ規律——省略すれば挙動は変わらない（ADR 0337 追記2026-09-26）。
   association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingTrialResult[]> {
   if (trials < 1) {
@@ -539,10 +370,6 @@ export async function runTimeWeightingBench(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// 集計: 方針 × ケースの正答数/試行数
-// ---------------------------------------------------------------------------
-
 export interface TimeWeightingAggregateCell {
   caseId: string;
   kind: TimeWeightingCase["kind"];
@@ -551,13 +378,7 @@ export interface TimeWeightingAggregateCell {
   passCount: number;
 }
 
-/**
- * `TimeWeightingTrialResult[]` を「方針 × ケース」の正答数/試行数へ畳む。
- *
- * `passCount` は `verdict === "pass"` の件数のみを数える——`indeterminate`/`fail` は
- * どちらも「正しく答えられなかった」側に落ちる（`gradeAnswer` の三分割を、この集計では
- * 二値の合否へさらに畳んでいる。内訳が要る呼び出し側は `results` を直接読むこと）。
- */
+/** `passCount` は `verdict === "pass"` のみ。`indeterminate`/`fail` はどちらも正解でない側に畳む。 */
 export function aggregateTimeWeightingResults(
   results: readonly TimeWeightingTrialResult[],
 ): TimeWeightingAggregateCell[] {
