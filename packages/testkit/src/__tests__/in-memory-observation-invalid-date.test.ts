@@ -3,14 +3,6 @@ import type { Ctx, NewObservation } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewObservationFixture } from "../test-data.js";
 
-/**
- * `createObservation` 系の日時の欄の Invalid Date を、testkit の fixture も Postgres と同じく拒む（Postgres は
- * `timestamptz` への変換で拒む。`externalId` が同じ既存の行が在っても拒む）。
- *
- * 2実装を並べた歯は `packages/postgres/src/__tests__/observation-invalid-date.postgres.test.ts`（DB が要る）。
- * ここは DB 無しで走る側の歯で、文面と「何も書かない」を縛る。
- */
-
 const ctx: Ctx = { tenantId: "observation-invalid-date" };
 
 describe("testkit の fixture は createObservation 系の Invalid Date を拒む", () => {

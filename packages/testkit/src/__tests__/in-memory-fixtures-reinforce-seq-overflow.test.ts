@@ -3,16 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * ADR 0500: `reinforce` の `addOwnSubjectSeq` は、`nowSeq + S_x`（`decay_base_seq`）と、床 `nowSeq + S_x + offset`
- * （`decay_floor_seq = LEAST(… + offset::bigint, MAX_SAFE_INTEGER)`）を、Postgres が `bigint` で足す。どちらかが 2^63 以上に
- * なると `22003 bigint out of range` で、行は何も書かれない（`reinforce`・`reinforceMany` とも。実測は ADR 0500）。
- * fixture は float64 で足して通していた。
- *
- * ⚠ Postgres が足すのは、ドライバが `nowSeq` を文字にした値（`String(2**63 - 1024)` は `"9223372036854775000"`）。
- * この歯の境界（S_x = 374 は通り、375 で落ちる）は、その値と、この Memory の `offset`（433）で決まる。
- * 実 DB での同じ境界は `testkit-fixture-alignment.postgres.test.ts`。
- */
+/** Postgres が足すのは、ドライバが `nowSeq` を文字にした値（`String(2**63 - 1024)` は `"9223372036854775000"`）。境界（S_x = 374 は通り、375 で落ちる）は、その値とこの Memory の `offset`（433）で決まる。 */
 
 const ctx: Ctx = { tenantId: "reinforce-seq-overflow" };
 const BIG = 2 ** 63 - 1024;

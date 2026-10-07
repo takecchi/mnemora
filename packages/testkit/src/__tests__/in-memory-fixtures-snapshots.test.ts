@@ -10,21 +10,6 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * `@mnemora/testkit/fixtures` の InMemory 一式は、Memory 以外の値（Observation・イベント・
- * outbox ジョブ・ラベル・recall 記録・ベクトル・Date）も、**返す時点・書き込む時点の複製**で
- * やり取りする——Postgres が書き込みで値を写し、読むたびに新しいオブジェクトを返すのと同じ
- * （Issue #1108 の続き。Memory を返す口は `in-memory-return-snapshots.test.ts`）。
- *
- * 3つの形を見る:
- * - (A) 後の操作で、受け取った値が遡って変わらない
- * - (B) 受け取った値（入れ子のオブジェクト・配列・Date）を書き換えても、store の中身が変わらない
- * - (C) 書き込みに渡した入力を後から書き換えても、store の中身が変わらない
- *
- * 穴が無かった口（`InMemoryLexicalStore.search`・`InMemoryTenantSettingsStore` の全口・
- * 件数や id だけを返す口）は、ここに歯を置かず PR 本文の「探した形の一覧」に書いた。
- */
-
 const ctx: Ctx = { tenantId: "in-memory-fixtures-snapshots" };
 const SPACE = { provider: "test", model: "snapshot", dimensions: 3 };
 const T0 = new Date("2026-01-01T00:00:00.000Z");
@@ -292,7 +277,6 @@ describe("(B) 受け取った値を書き換えても、store の中身が変わ
     claimed!.claimedAt!.setTime(0);
     claimed!.availableAt.setTime(now + 10 * 365 * 24 * 3_600_000);
 
-    // リースを切らした後に取り直す——store の中身が書き換わっていなければ、同じジョブが同じ payload で返る。
     const [reclaimed] = await outboxStore.claimBatch(ctx, {
       limit: 10,
       now: new Date(now + 120_000),
@@ -300,7 +284,6 @@ describe("(B) 受け取った値を書き換えても、store の中身が変わ
       leaseMs: 60_000,
     });
     expect(reclaimed?.payload).toEqual({ observationId: observation.id });
-    // claimedAt を 0 に書き換えられていたら、リースの切れた扱いになって即座に取り直せてしまう。
     const [early] = await outboxStore.claimBatch(ctx, {
       limit: 10,
       now: new Date(now + 121_000),
@@ -455,7 +438,6 @@ describe("(C) 書き込みに渡した入力を後から書き換えても、sto
 
     now.setTime(0);
 
-    // claimedAt が呼び手の now と同じ Date なら、0 に書き換わってリースが切れた扱いになり、取り直せてしまう。
     const [early] = await outboxStore.claimBatch(ctx, {
       limit: 10,
       now: new Date(nowMs + 1_000),
@@ -477,7 +459,6 @@ describe("(C) 書き込みに渡した入力を後から書き換えても、sto
     });
     expect(first).toBeDefined();
 
-    // リースが切れたあとの取り直し。availableAt が呼び手の now へ書き直される。
     const reclaimMs = firstMs + 120_000;
     const reclaimNow = new Date(reclaimMs);
     const [reclaimed] = await outboxStore.claimBatch(ctx, {
@@ -490,7 +471,6 @@ describe("(C) 書き込みに渡した入力を後から書き換えても、sto
 
     reclaimNow.setTime(0);
 
-    // availableAt が呼び手の now と同じ Date なら、0 に書き換わる。
     const stored = memoryStore.outboxJobs.find((job) => job.id === first!.id);
     expect(stored?.availableAt.getTime()).toBe(reclaimMs);
   });

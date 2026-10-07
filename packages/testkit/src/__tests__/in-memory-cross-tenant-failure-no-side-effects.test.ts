@@ -3,15 +3,7 @@ import type { Ctx, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * `InMemoryMemoryStore` の、別テナントの Memory を対象にした呼び出しが失敗するとき、何も書かない
- * ことの歯（Issue #759 組B・D の続き。Issue #1775 の #771・#772・#773）。
- *
- * 適合テスト（`memory-store-conformance.ts`）は持ち主のテナント（A）側から見て無傷であることしか
- * 見ない。**InMemory 固有**の余計な書き込み——失敗の前に別テナントの行の `updatedAt` を書く、
- * 呼んだ側（B）のテナントの履歴にイベントを積む——は、Postgres ではトランザクションごと戻るので
- * 起きない形で、ここで縛る（適合テストには足さない）。
- */
+/** 適合テストは持ち主のテナント側から見て無傷であることしか見ない。InMemory 固有の余計な書き込み（失敗の前に別テナントの行の `updatedAt` を書く、呼んだ側の履歴にイベントを積む）はここで縛り、適合テストには足さない。 */
 
 const ctxA: Ctx = { tenantId: "tenant-a" };
 const ctxB: Ctx = { tenantId: "tenant-b" };
@@ -22,7 +14,6 @@ afterEach(() => {
 });
 
 function eventsFor(store: InMemoryMemoryStore, memoryId: string): unknown[] {
-  // テナントを問わず、その memoryId のイベントが1件も無いことを見る。
   return store.events.filter((e) => e.memoryId === memoryId);
 }
 

@@ -19,15 +19,6 @@ import { buildNewMemoryFixture, buildProvenanceFixture } from "../test-data.js";
 import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
 import { describeTenantSettingsStoreConformance } from "../tenant-settings-store-conformance.js";
 
-/**
- * `docs/conformance.md` §9 の約束を縛る: 任意の適合フラグを**省略**すると、`it.skip` ではなく
- * 「⚠ 未検査: <フラグ名> が指定されていない — adapter "<name>" に対して …」という named it が1本登録される。
- * 適合テストの中身は変えず、呼び出して、登録された it の名前を vitest の task の木から読むだけである。
- *
- * 同じ §9 の追記どおり、`TenantSettingsStoreConformanceOptions.supportsTaxonomyMode` だけは形が違い、
- * 省略すると taxonomy mode の歯も「未検査」の it も登録されない——今の振る舞いとして、それも固定する。
- */
-
 const MEMORY_NAME = "omitted optional flags (memory)";
 let latest: InMemoryMemoryStore | undefined;
 const current = (): InMemoryMemoryStore => {
@@ -79,18 +70,10 @@ describeMemoryStoreConformance({
   supportsResolveContestedPair: true,
   supportsRestoreSupersededBy: true,
   supportsPreviewRestoreSupersededBy: true,
-  // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
   supportsEraseTenant: true,
-  // ⭐ 任意のフラグ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
-  // supportsFindContestedByClaimKey / supportsListActiveClaimPredicates /
-  // supportsResolveOrphanedContested / supportsAbortIfForgotten / supportsAbortIfSuperseded / supportsAbortIfAllConflicted / supportsPurgeExpiredEventsByRetention / supportsMarkContestedGroup /
-  // supportsResolveContestedGroup / supportsPurgeExpiredRecalls / supportsCreateMemoriesWithOutboxAndEvents / supportsSupersedeCreatedEvents）と、関数フックの countScopeAggregateQueries は意図的に渡さない。
+  // 任意のフラグは意図的に渡さない（渡すと「未検査」の it が登録されない）。
 });
 
-/**
- * 必須の3口だけを持つ最小の store。`setDefaultHalfLifeHours` は適合テストへ渡すフック（store の口ではない）で、
- * 行が在るテナントは retention が未設定でも unlimited になる（Postgres の行と同じ3状態）。
- */
 class MinimalTenantSettingsStore implements TenantSettingsStore {
   private readonly retention = new Map<string, EventRetentionSetting>();
   private readonly halfLifeHours = new Map<string, number>();
@@ -121,15 +104,10 @@ describeTenantSettingsStoreConformance({
   createStore: () => tenantStore,
   setDefaultHalfLifeHours: (ctx, hours) => tenantStore.setDefaultHalfLifeHours(ctx, hours),
   supportsDecayClock: false,
-  // Issue #1207 / ADR 0383: MinimalTenantSettingsStore は eraseTenant を実装していない。
   supportsEraseTenant: false,
-  // ⭐ supportsTaxonomyMode は意図的に渡さない。
+  // supportsTaxonomyMode は意図的に渡さない。
 });
 
-/**
- * VectorStore: 必須の口（`supportsGetVectors`/`supportsEraseTenant`）だけを渡し、
- * `supportsSearchMany` は意図的に渡さない（Issue #1412 の続き）。
- */
 const VECTOR_NAME = "omitted optional flags (vector)";
 let latestVectorMemoryStore: InMemoryMemoryStore | undefined;
 let vectorHashCounter = 0;
@@ -167,13 +145,9 @@ describeVectorStoreConformance({
   prepareEmbeddingSpace: () => {},
   supportsGetVectors: true,
   supportsEraseTenant: true,
-  // ⭐ supportsSearchMany は意図的に渡さない。
+  // supportsSearchMany は意図的に渡さない。
 });
 
-/**
- * OutboxStore: `supportsPurgeCompletedJobs` を意図的に渡さない（ADR 0404）。
- * `supportsRealConcurrency` は省略/false で `it.skip` になる別の形なので対象外。
- */
 const OUTBOX_NAME = "omitted optional flags (outbox)";
 let latestOutboxMemoryStore: InMemoryMemoryStore | undefined;
 describeOutboxStoreConformance({
@@ -197,10 +171,9 @@ describeOutboxStoreConformance({
   peekJob: async (_ctx, jobId) =>
     latestOutboxMemoryStore?.outboxJobs.find((j) => j.id === jobId) ?? null,
   supportsEraseTenant: true,
-  // ⭐ supportsPurgeCompletedJobs は意図的に渡さない。
+  // supportsPurgeCompletedJobs は意図的に渡さない。
 });
 
-/** task の木から、名前に `needle` を含む describe の下の it を全部集める。 */
 function testsUnder(root: RunnerTask, needle: string): RunnerTask[] {
   const out: RunnerTask[] = [];
   const walk = (task: RunnerTask, inside: boolean) => {
@@ -222,7 +195,6 @@ function expectOneUncheckedNamedIt(file: RunnerTask, suiteName: string, flags: s
       n.startsWith(`⚠ 未検査: ${flag} が指定されていない — adapter "${suiteName}" に対して `),
     );
     expect(unchecked, flag).toHaveLength(1);
-    // `-t` で絞られて同じ suite の普通の it が run でないときは mode を比べない（MemoryStore の歯と同じ）。
     if (control?.mode === "run") {
       expect(tests.find((t) => t.name === unchecked[0])?.mode, flag).toBe("run");
     }
@@ -258,9 +230,7 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
         n.startsWith(`⚠ 未検査: ${flag} が指定されていない — adapter "${MEMORY_NAME}" に対して `),
       );
       expect(unchecked, flag).toHaveLength(1);
-      // `it.skip` ではなく、常に実行される it である（§9 の表の「省略」行）。
-      // ⚠ `-t` で絞ると絞った外の it はすべて mode が skip になるので、同じ suite の普通の it が
-      // run のとき（＝絞り込みがこの suite を外していないとき）だけ比べる。
+      // `-t` で絞ると絞った外の it はすべて skip になるので、同じ suite の普通の it が run のとき（絞り込みがこの suite を外していないとき）だけ mode を比べる。
       if (control?.mode === "run") {
         expect(tests.find((t) => t.name === unchecked[0])?.mode, flag).toBe("run");
       }

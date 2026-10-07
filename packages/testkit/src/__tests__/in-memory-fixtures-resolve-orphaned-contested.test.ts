@@ -1,12 +1,3 @@
-// Issue #825（ADR 0150 追記）: `resolveContestedPair`（決定3の CAS）は、対向を forget した
-// 生存側を戻せない——forget は `contestedWithId` に触れないため、生存側は `contested` の
-// まま、対向はもう `contested` ではなくなり、CAS を満たせなくなる。
-// `MemoryStore.resolveOrphanedContested?`（生存側1件だけを対象にした別の任意メソッド）を
-// `InMemoryMemoryStore` に足した。ここは `packages/testkit` 内だけで完結する、Fake を
-// 直接呼ぶ回帰テストである——`memory-store-conformance.ts`（適合テスト、外部の store
-// 実装者も走らせる公開面）には要件を足さない
-// （`in-memory-fixtures-getmany-dedupe.test.ts` 冒頭の同じ方針を踏襲）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, NewMemoryEvent } from "@mnemora/core";
 import { MemoryStatusConflictError } from "@mnemora/core";
@@ -27,7 +18,6 @@ function event(memoryId: string, overrides: Partial<NewMemoryEvent> = {}): NewMe
   };
 }
 
-/** a/b を markContestedPair で対にし、b だけを forgotten にする（forget の意味論そのまま：contestedWithId には触れない）。 */
 async function createOrphanedPair(store: InMemoryMemoryStore) {
   const a = await store.createMemory(
     ctx,
@@ -65,7 +55,6 @@ describe("InMemoryMemoryStore.resolveOrphanedContested（Issue #825）", () => {
     expect(storedA?.status).toBe("active");
     expect(storedA?.contestedWithId).toBeNull();
 
-    // 対向は一切書き換わっていない。
     const storedB = await store.get(ctx, b.id);
     expect(storedB?.status).toBe("forgotten");
     expect(storedB?.contestedWithId).toBe(a.id);
@@ -87,7 +76,6 @@ describe("InMemoryMemoryStore.resolveOrphanedContested（Issue #825）", () => {
   it("CAS 破れ（status が contested でない）: MemoryStatusConflictError を投げ、行は無傷", async () => {
     const store = new InMemoryMemoryStore();
     const { a, b } = await createOrphanedPair(store);
-    // a 自身が forget された後（呼び出し側の読み違い・TOCTOU を模す）。
     await store.updateStatusWithEvent(
       ctx,
       a.id,

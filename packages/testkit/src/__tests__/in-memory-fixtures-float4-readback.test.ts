@@ -1,13 +1,4 @@
-// Postgres の `real`（float4）の列は、値を float4 で持ち、**最短の10進表記**で読み戻す。fixture も同じ値を返す。
-//
-// 対象の列（`packages/postgres/migrations/*.sql` の `real`）: `memories.strength`・`memories.half_life_hours`・
-// `memories.half_life_recalls`・`tenant_settings.default_half_life_hours`・`tenant_settings.default_half_life_recalls`。
-//
-// ⚠ 読み戻す値は `Math.fround(x)` そのものではない（`Math.fround(720.1)` は `720.0999755859375` だが、Postgres は
-// `720.1` を返す）。下の表は `packages/postgres/src/__tests__/float4-readback.postgres.test.ts` が本物の Postgres で
-// 確かめた値と**同じ表**——変えるときは両方を揃えること。
-//
-// `*-conformance.ts` には足さない: float4 で持つのは Postgres の列の性質で、adapter 一般の契約ではない。
+// 読み戻す値は `Math.fround(x)` そのものではない（`Math.fround(720.1)` は `720.0999755859375` だが、Postgres は `720.1` を返す）。下の表は `float4-readback.postgres.test.ts` と同じ表なので、変えるときは両方を揃えること。`*-conformance.ts` には足さない（float4 で持つのは Postgres の列の性質で、adapter 一般の契約ではない）。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";

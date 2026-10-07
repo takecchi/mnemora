@@ -1,34 +1,4 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// Issue #816（NUL 側。孤立サロゲート側はここでは扱わない——別途の製品判断が要ると
-// Issue 本文が明記している）: `InMemoryMemoryStore.createMemory` に NUL 文字
-// （`\u0000`）を含む `content`/`subjectId`/`tags`/`digest` を渡すと、例外を投げず
-// 静かに受け入れていた。`PostgresMemoryStore.createMemory` は Postgres の `text` 型が
-// NUL バイトを構造的に拒む（C 文字列表現に由来する制約）ため、`invalid byte sequence
-// for encoding "UTF8": 0x00` で例外を投げる（実測: 本物の Postgres 17 + pgvector を
-// 手元に立て、`content`・`subjectId`・`tags`・`digest` の4欄それぞれに NUL を含めて
-// 確認した。4欄とも同じメッセージで例外になる）。
-//
-// PR #923 の時点ではこのファイルは `content` だけを塞いでいた（同 PR の comment
-// 「本 PR では content だけに絞る」）。本 PR（Issue #816 の残り）でその文言どおり
-// `subjectId`・`tags`（各要素）・`digest` にも同じ検査を広げた——実測すると、この
-// 4欄はどれも Postgres が同じ理由（`text` 型の NUL 拒否）で例外にする、対称な入力面
-// だったため。
-//
-// `tenantId` は対象外のまま——`ctx` を通じてほぼ全メソッドが共有する横断的な値であり、
-// `createMemory` の入口だけを直しても `get`/`reinforce` 等の他のメソッドでは `ctx.tenantId`
-// を直接読んでいて素通りのままで一貫しない（`InMemoryMemoryStore`/`FakeMemoryStore`
-// のどちらも `ctx` を受ける共通の入口を持たない）。`tenantId` を含めるには全メソッドへの
-// 横展開が要り、本 PR の範囲を超えるためここでは扱わない。
-//
-// 孤立サロゲート（`\uD800` 等）は対象外——Issue #816 が指摘するとおり、Postgres 側の
-// 挙動（node-postgres が U+FFFD へ静かに置換する）は `packages/postgres` のコードでは
-// 変えられず、Fake 側をどちらに寄せるかは製品判断が要る。今の挙動（Postgres は
-// 静かに U+FFFD へ置換、Fake はそのまま保持——どちらも例外にはならない）は契約として
-// `InMemoryMemoryStore.createMemory` の doc コメントに記録した。
-//
-// このテストは Fake を直接呼ぶだけで、`*-conformance.ts` には一切触れていない
-// （Issue #809 と同じ理由。PR #811/#812/#923 の作法を踏襲）。
+// `tenantId` は対象外: `ctx` を通じてほぼ全メソッドが共有する値で、`createMemory` の入口だけ検査しても他のメソッドが素通りして一貫しない。孤立サロゲートも対象外: Postgres は U+FFFD へ置換し Fake は保持する（契約は `InMemoryMemoryStore.createMemory` の doc）。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";

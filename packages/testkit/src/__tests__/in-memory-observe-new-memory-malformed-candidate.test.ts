@@ -7,18 +7,7 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * ADR 0630: `observe` の経路で、store が「書いたら読み戻すと `MemorySchema` を通らない」候補を拒んだとき、
- * その候補だけが落ち（`created` の `meta.droppedCandidates` に残る）、observe 全体は落ちず、ほかの候補は書かれる。
- * 全件が壊れていれば、observe は最初の例外のまま投げ、何も書かない。
- * （`RuntimeConfig.extractorVersion` の空文字は、`createRuntime` が組み立ての時点で拒む。）
- * testkit の `InMemoryMemoryStore`（`createMemoriesWithOutboxAndEvents` を持つ。1つのまとまりで書く経路）の側。
- * `@mnemora/postgres` は `observe-new-memory-well-formed.postgres.test.ts`、core の Fake は
- * `observe-new-memory-malformed-candidate-fake.test.ts`。
- *
- * 壊れた候補は、Runtime が作る `NewMemory` では自然には作れない（digest は本文から補われる）ので、store の手前で
- * 1件の `digest` を空文字に書き換える Proxy で作る。
- */
+/** 壊れた候補は Runtime が作る `NewMemory` では自然には作れない（digest は本文から補われる）ので、store の手前で1件の `digest` を空文字に書き換える Proxy で作る。 */
 
 const ctx: Ctx = { tenantId: "in-memory-observe-malformed-candidate" };
 const BAD = "壊れる候補";
@@ -32,7 +21,6 @@ const llm: LLMProvider = {
     }),
 };
 
-/** 本文が {@link BAD} の候補だけ、store へ渡す前に `digest` を空文字にする。 */
 function corrupting(inner: InMemoryMemoryStore): MemoryStore {
   return new Proxy(inner as MemoryStore, {
     get(target, prop, receiver) {

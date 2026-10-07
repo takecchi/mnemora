@@ -1,23 +1,4 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// Issue #816 の NUL 側は、PR #923/#928 で `createMemory` の `text` 列（`content`・
-// `subjectId`・`tags`・`digest`）だけを Postgres に揃えた。Observation を書く口と、
-// `jsonb` 列（`payload`・`attributes`・`provenance`）は残っていた。
-//
-// 実測（本物の Postgres 17 + pgvector）:
-// - `createObservation` / `createObservationWithOutbox` の `subjectId`・`externalId`・`kind`
-//   （`text` 列）に NUL → `invalid byte sequence for encoding "UTF8": 0x00`
-// - 同じ口の `payload`（入れ子の値・キーも含む）・`attributes`（`jsonb` 列）に NUL →
-//   `unsupported Unicode escape sequence`
-// - `createMemory` の `attributes`・`provenance`（`jsonb` 列）に NUL → 同上
-//
-// 修正前の Fake は例外を投げずに書き込んでいた（Observation の口では extract ジョブも
-// 積んでいた）。
-//
-// 孤立サロゲートは扱わない。`jsonb` 列では Postgres が例外にし、`text` 列では U+FFFD に
-// 置き換えるので、揃える向きが決まっていない（別の Issue）。
-//
-// このテストは Fake を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
+// 孤立サロゲートは扱わない（`jsonb` 列では Postgres が例外にし、`text` 列では U+FFFD に置き換えるので、揃える向きが決まっていない）。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx, NewObservation } from "@mnemora/core";
@@ -92,7 +73,7 @@ describe("InMemoryMemoryStore: Observation の口は、NUL を含む値を Postg
     expect(got?.attributes).toEqual({ k: text });
   });
 
-  // jsonb の判定は `JSON.stringify` した結果を辿る（Postgres が受け取る形）ので、`toJSON` による変換も同じ形になる（#1073）。
+  // jsonb の判定は `JSON.stringify` した結果を辿る（Postgres が受け取る形）ので、`toJSON` による変換も同じ形になる。
   it("toJSON が NUL を返す値は拒む（元の値には NUL が無くても、Postgres が受け取る JSON に NUL がある）", async () => {
     const store = new InMemoryMemoryStore();
     await expect(

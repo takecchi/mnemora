@@ -3,25 +3,10 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * `InMemoryMemoryStore.listActiveClaimPredicates` は、claim key の片方（主語か述語）が欠けた
- * Memory を数えない——`PostgresMemoryStore.listActiveClaimPredicates` の SQL
- * （`claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）と同じ。
- *
- * 【実測 2026-09-27】以前は、述語の欠けた claim key（`{ subject: "user" }`）を持つ Memory から
- * **`null` を一覧に混ぜて**返していた（`[null, "favorite_color"]`）——戻り値の型 `string[]` に
- * 反する。同じ入力で Postgres は `[]` を返した（片方だけの行は、書き込みの口の後の読み出し側で
- * 「鍵なし」として扱われる。`packages/postgres/src/mapping.ts` の `rowToClaimKey`）。
- *
- * 片方だけの claim key は型（`ClaimKey` は2欄とも必須）を破る入力である。ADR 0630 から、書き込みの口はそれを
- * **入口で拒む**（`in-memory-new-memory-rejects.test.ts`）。ここで縛るのは、**それより前に書かれた行**（読み側に残りうる）を、
- * 読み出しの一覧が Postgres と同じく「両方そろった鍵だけ」数えることである。片方だけの行は、正しい鍵で書いた後に、
- * fixture の内部の `memories` の行を書き換えて作る。
- */
+/** 片方だけの claim key は、ADR 0630 より前に書かれた行（読み側に残りうる）の再現。正しい鍵で書いた後に、fixture 内部の `memories` の行を書き換えて作る。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
-/** 正しい鍵で書いた行を、書いた後に、別の値へ書き換える（ADR 0630 より前に書かれた行の再現）。 */
 async function seedLegacyClaimKey(
   store: InMemoryMemoryStore,
   contentHash: string,

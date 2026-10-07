@@ -5,42 +5,12 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
 import type { MemoryStoreConformanceOptions } from "../memory-store-conformance.js";
 
-/**
- * [Issue #818](https://github.com/takecchi/mnemora/issues/818): 棚卸し（v1.0.0..main）で
- * `supportsTaxonomyMode` と同じ形の計上漏れが2件見つかった——
- * `MemoryStoreConformanceOptions.supportsLabels`（ba6e5dd / PR #717 / ADR 0318）と
- * `supportsFindActiveByClaimKey`（7987de4 / PR #745 / ADR 0324）。どちらも v1.0.0 の
- * 時点では存在せず、「省略可にしない」判断で必須として足されたため、v1.0.0 の利用者の
- * `describeMemoryStoreConformance(...)` 呼び出しがコンパイルできなくなっていた。
- *
- * この歯は、`tenant-settings-store-conformance.supports-taxonomy-mode-optional.test.ts` と
- * 同じ形で、2フィールドをまとめて固定する:
- *
- * 1. **型**: 下の `omitted` の呼び出しは `supportsLabels`/`supportsFindActiveByClaimKey` を
- *    どちらも渡さない——`pnpm --filter @mnemora/testkit run typecheck` がこの2つを
- *    必須へ戻すと赤くなる。
- * 2. **挙動**: 省略時、`listLabels`/`registerLabel`/`findActiveByClaimKey` を exercise する
- *    `it()` が実行されないこと——`InMemoryMemoryStore` をラップし呼び出し回数を数える
- *    Proxy で検証する。陽性対照（`control`、両方とも `true`）が、同じ探り棒で
- *    実際に呼ばれることを先に示す（AGENTS.md「『出なかった』を、事象が無いことの
- *    証明にしない——先に陽性対照を示す」）。
- */
-
 interface LabelClaimKeyCounts {
   listLabels: number;
   registerLabel: number;
   findActiveByClaimKey: number;
 }
 
-/**
- * `describeMemoryStoreConformance` の他の必須フィールド（`listEventsForMemory`/
- * `prepareRecallId`/`claimEmbedJobs`/`listPurgedEvents`）は `supportsLabels`/
- * `supportsFindActiveByClaimKey` と無関係だが、型上は省略できない
- * （このファイルが検査したい2フィールドの他は変えていない）。
- * `packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts` の
- * `InMemoryMemoryStore` 配線と同じ形をここでも組む——ここでは重複を避けるため、
- * `control`/`omitted` の2呼び出しで共有できる部分をこの関数へ集約する。
- */
 function memoryStoreHarness(hideMethods = false): {
   createStore: () => MemoryStore;
   listEventsForMemory: MemoryStoreConformanceOptions["listEventsForMemory"];
@@ -52,7 +22,6 @@ function memoryStoreHarness(hideMethods = false): {
 } {
   let latest: InMemoryMemoryStore | undefined;
   const counts: LabelClaimKeyCounts = { listLabels: 0, registerLabel: 0, findActiveByClaimKey: 0 };
-  // `hideMethods`（Issue #1775 の #827）: 3つのメソッドを持たない adapter を模す。プロパティの読み出しを数える。
   const reads: LabelClaimKeyCounts = { listLabels: 0, registerLabel: 0, findActiveByClaimKey: 0 };
   const countedMethods = new Set<keyof LabelClaimKeyCounts>([
     "listLabels",
@@ -143,7 +112,6 @@ function memoryStoreHarness(hideMethods = false): {
   };
 }
 
-// --- 陽性対照: supportsLabels/supportsFindActiveByClaimKey: true では実際に呼ばれる ---
 const control = memoryStoreHarness();
 describeMemoryStoreConformance({
   name: "labels/findActiveByClaimKey probe (control, both true)",
@@ -167,7 +135,6 @@ describeMemoryStoreConformance({
   supportsEraseTenant: true,
 });
 
-// --- 本題: v1.0.0 の呼び出し形そのもの。supportsLabels/supportsFindActiveByClaimKey を渡さない ---
 const omitted = memoryStoreHarness();
 describeMemoryStoreConformance({
   name: "labels/findActiveByClaimKey probe (v1.0.0 call shape, both omitted)",
@@ -187,11 +154,9 @@ describeMemoryStoreConformance({
   supportsOnlyMemoryIdsFilter: true,
   supportsListActiveClaimPredicates: true,
   supportsEraseTenant: true,
-  // ⭐ supportsLabels / supportsFindActiveByClaimKey は意図的に渡さない — v1.0.0 の
-  // 呼び出し形そのもの（Issue #818）。
+  // supportsLabels / supportsFindActiveByClaimKey は意図的に渡さない（v1.0.0 の呼び出し形そのもの）。
 });
 
-// --- `false`: メソッドを実装していない adapter。本物の歯は走らず、「実装していない」ことの assert が走る ---
 const notImplemented = memoryStoreHarness(true);
 describeMemoryStoreConformance({
   name: "labels/findActiveByClaimKey probe (both false, methods not implemented)",
@@ -230,8 +195,6 @@ describe("supportsLabels/supportsFindActiveByClaimKey を省略した呼び出�
     expect(findActiveByClaimKey).toBe(0);
   });
 
-  // Issue #1775 の #827: `false` は「メソッドを持たない」ことの assert（docs/conformance.md §9・欄の doc）。
-  // 本物の歯は走らない（メソッドは呼ばれない）一方で、assert はメソッドの有無を読みに行く。
   it("false: listLabels/registerLabel/findActiveByClaimKey は一度も呼ばれず、「実装していない」ことの assert がそれぞれの有無を読みに行く", () => {
     const { listLabels, registerLabel, findActiveByClaimKey } = notImplemented.counts();
     expect(listLabels).toBe(0);

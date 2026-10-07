@@ -3,19 +3,6 @@ import type { Ctx, NewMemoryEvent } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1520（ADR 0423）の変異試験で、
- * `InMemoryMemoryStore.createMemoryWithOutbox` が `input.subjectId` の入口検査を外してもすり抜けた
- * （適合テストの識別子の `it` は `createMemory`・`createObservation*` などの代表の口を見て、
- * `createMemoryWithOutbox`・`createMemoriesWithOutboxAndEvents`・`supersedeWithNewMemories` の `subjectId` は
- * 代表に含まれない）。担当はクローン（miku）の判断で進めている作業であり、オーナーの判断ではない。
- * ADR 0423 決定2は、識別子を入力に持つ口を全部、書き込みより前に断ると決めている（Postgres と揃える）。
- * 同じ型の2つの口も同じ表で見る。公開の適合テスト（`*-conformance.ts`）には足さない。
- *
- * 断る対象: 孤立サロゲートと NUL を含む識別子（`kind: "malformed_identifier"`、message に入力値を入れない）。
- * 書き込みより前に断るので、何も残らない。対をなすサロゲート（絵文字）は受け付ける（陽性対照）。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 const MALFORMED: ReadonlyArray<readonly [label: string, value: string]> = [

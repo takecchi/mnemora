@@ -3,46 +3,11 @@ import type { Ctx, TenantSettingsStore } from "@mnemora/core";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { describeTenantSettingsStoreConformance } from "../tenant-settings-store-conformance.js";
 
-/**
- * [Issue #818](https://github.com/takecchi/mnemora/issues/818): PR #717 (`ba6e5dd`) made
- * `TenantSettingsStoreConformanceOptions.supportsTaxonomyMode` a *required* field. The
- * v1.0.0 caller shape — `describeTenantSettingsStoreConformance({ name, createStore,
- * supportsDecayClock })`, the exact `supportsDecayClock` example from
- * `docs/migration-v1.md` §6 (valid against v1.0.0, which predates `supportsTaxonomyMode`
- * entirely) — stopped compiling as a result.
- *
- * This file fixes two teeth in one place:
- *
- * 1. **型**: the `describeTenantSettingsStoreConformance({ name, createStore,
- *    supportsDecayClock: false })` call below (`omitted`) never mentions
- *    `supportsTaxonomyMode` — it mirrors the v1.0.0 call shape exactly. If
- *    `supportsTaxonomyMode` were required again, `tsc -p tsconfig.json`
- *    (`pnpm --filter @mnemora/testkit run typecheck`; `packages/testkit/tsconfig.json`
- *    has `include: ["src"]`, so this `__tests__` file is in scope) would fail to compile
- *    this file — that's the type-level tooth.
- * 2. **挙動**: when `supportsTaxonomyMode` is omitted, no taxonomy conformance `it()`
- *    should run — proven below by counting calls to `getTaxonomyMode`/`setTaxonomyMode`
- *    on a wrapped store. A positive control (`supportsTaxonomyMode: true`, `control`)
- *    proves the counting probe itself actually detects calls when they happen —
- *    `AGENTS.md`「『出なかった』を、事象が無いことの証明にしない——先に陽性対照を示す」。
- *
- * ⚠ **順序に依存する**: `describeTenantSettingsStoreConformance` calls the real `describe()`
- * at module scope, registering the conformance suites into this file's root suite before
- * the closing `describe(...)` block below is registered. Vitest runs a file's top-level
- * suites sequentially in registration order by default (no `.concurrent`), so both
- * conformance suites finish running before the assertions below execute.
- */
+/** 順序に依存する: `describeTenantSettingsStoreConformance` は module scope で実際の `describe()` を呼び、下の `describe(...)` より前に登録される。vitest は同じファイルのトップレベルの suite を登録順に走らせるので、検証の時点では両方の適合 suite が走り終えている。 */
 
 interface CountingTaxonomyStore {
   store: TenantSettingsStore;
-  /**
-   * `scripts/__tests__/tenant-settings-conformance-hook-wiring.test.mjs`（Issue #184 の
-   * 追測）が、`describeTenantSettingsStoreConformance(…)` を呼ぶ側は必ず
-   * `setDefaultHalfLifeHours` を渡していることを repo 全体で縛っている——省くと
-   * `tenant-settings-store-conformance.ts` の `if (setDefaultHalfLifeHours) { it(…) }` の
-   * 2本が登録すらされなくなるため。このフックはこのファイルの本題（taxonomy の歯）とは
-   * 無関係だが、その門を通すために両方の呼び出しへ渡す。
-   */
+  /** `setDefaultHalfLifeHours` はこのファイルの本題とは無関係だが、`scripts/__tests__/tenant-settings-conformance-hook-wiring.test.mjs` の門（呼ぶ側は必ず渡す）を通すために両方の呼び出しへ渡す。 */
   setDefaultHalfLifeHours: (ctx: Ctx, hours: number) => void;
   counts: () => { get: number; set: number };
 }
@@ -72,7 +37,6 @@ function countingTaxonomyStore(): CountingTaxonomyStore {
   };
 }
 
-// --- 陽性対照: supportsTaxonomyMode: true では getTaxonomyMode/setTaxonomyMode が呼ばれる ---
 const control = countingTaxonomyStore();
 describeTenantSettingsStoreConformance({
   name: "taxonomy-mode probe (control, supportsTaxonomyMode: true)",
@@ -80,18 +44,15 @@ describeTenantSettingsStoreConformance({
   setDefaultHalfLifeHours: control.setDefaultHalfLifeHours,
   supportsDecayClock: false,
   supportsTaxonomyMode: true,
-  // Issue #1207 / ADR 0383: `control.store` は手組みのオブジェクトで、eraseTenant を実装していない。
   supportsEraseTenant: false,
 });
 
-// --- 本題: v1.0.0 の呼び出し形そのもの。supportsTaxonomyMode を渡さない ---
 const omitted = countingTaxonomyStore();
 describeTenantSettingsStoreConformance({
   name: "taxonomy-mode probe (v1.0.0 call shape, supportsTaxonomyMode omitted)",
   createStore: () => omitted.store,
   setDefaultHalfLifeHours: omitted.setDefaultHalfLifeHours,
   supportsDecayClock: false,
-  // Issue #1207 / ADR 0383: `omitted.store` は手組みのオブジェクトで、eraseTenant を実装していない。
   supportsEraseTenant: false,
 });
 

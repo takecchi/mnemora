@@ -15,21 +15,8 @@ import {
   RecordingLLMProvider,
 } from "../__fixtures__/cassette-recorder.js";
 
-/**
- * 🔴 **記録器が、同じ鍵に対して2つ目の値を録らないことを固定する。**
- *
- * カセットの鍵はプロンプト（/ 入力テキスト）のハッシュであり、**1つの鍵は1つの値しか
- * 持てない。**一方、実 LLM は同じプロンプトに毎回違う応答を返す。⟹ 記録中に同じ
- * プロンプトが複数回現れると、後勝ちで先の値が消え、**その記録は、記録を作った実行
- * そのものを再生できなくなる。**
- *
- * この歯は、その壊れ方を「非決定的な偽 provider」で再現し、記録器が memo として
- * 振る舞うことで消えることを機械で止める（Issue #498 / #506 の記録で実際に踏んだ）。
- */
-
 const ctx: Ctx = { tenantId: "cassette-recorder-test" };
 
-/** 呼ばれるたびに違う応答を返す偽 LLM——実 `gpt-4o-mini` の揺れを模す。 */
 class NondeterministicLLMProvider implements LLMProvider {
   calls = 0;
 
@@ -44,7 +31,6 @@ class NondeterministicLLMProvider implements LLMProvider {
   }
 }
 
-/** 呼ばれるたびに違うベクトルを返す偽 embedding——ADR 0051 が実測した揺れを模す。 */
 class NondeterministicEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId = {
     provider: "openai",
@@ -76,11 +62,9 @@ describe("RecordingLLMProvider: 同じプロンプトを二度叩かない", () 
     const second = await recording.complete(ctx, prompt);
     const third = await recording.complete(ctx, prompt);
 
-    // ⛔ 委譲先が非決定的でも、返る応答は揺れない。
     expect(first.content).toBe("応答#1");
     expect(second.content).toBe("応答#1");
     expect(third.content).toBe("応答#1");
-    // ⭐ 実 API は1回しか叩かれない（繰り返し分の課金が消える）。
     expect(delegate.calls).toBe(1);
     expect(recorder.llmCount).toBe(1);
   });
@@ -119,15 +103,12 @@ describe("RecordingLLMProvider: 同じプロンプトを二度叩かない", () 
     const recorder = new CassetteRecorder();
     const recording = new RecordingLLMProvider(delegate, recorder, "fake-model");
 
-    // 1回の記録の中で同じプロンプトが3回現れる状況（`answer` の評価ケース12件のうち
-    // 3件が同じフィラー発話を含む、という実際の形）。
     const live = [
       (await recording.complete(ctx, prompt)).content,
       (await recording.complete(ctx, prompt)).content,
       (await recording.complete(ctx, prompt)).content,
     ];
 
-    // カセットに残る唯一の値が、実行中に返した値すべてと一致する。
     const entry = recorder.lookupLLM(prompt);
     expect(entry).toBeDefined();
     const recordedContent = (entry?.value as LLMResponse).content;
@@ -170,7 +151,6 @@ describe("RecordingEmbeddingProvider: 同じ入力テキストを二度叩かな
     const vectors = await recording.embed(ctx, ["あ", "あ", "い"]);
 
     expect(delegate.embeddedTexts).toEqual([["あ", "い"]]);
-    // 入力の件数・順序はそのまま返す（委譲先の契約を壊さない）。
     expect(vectors).toHaveLength(3);
     expect(vectors[0]).toEqual(vectors[1]);
   });

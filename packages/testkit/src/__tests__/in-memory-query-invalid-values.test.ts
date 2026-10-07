@@ -5,13 +5,6 @@ import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * 読みの口（検索・集約・掃除）の条件の Invalid Date と、整数でない通し番号を、testkit の fixture も Postgres と同じく
- * 拒む（Postgres はクエリの時点で `timestamptz`・`bigint` への変換に失敗する）。
- * 2実装を並べた歯は `packages/postgres/src/__tests__/store-boundary-diff.postgres.test.ts`（DB が要る）。
- * ここは DB 無しで走る側の歯で、文面を縛る。
- */
-
 const ctx: Ctx = { tenantId: "query-invalid-values" };
 const bad = () => new Date(Number.NaN);
 const SPACE = { provider: "p", model: "m", dimensions: 3 };

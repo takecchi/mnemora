@@ -1,23 +1,10 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// Issue #878（2026-09-26）: `PostgresLexicalStore`/`PostgresTrigramLexicalStore` に
-// クエリの異なる語数の上限（32）を入れた。`InMemoryLexicalStore` にも同じ形の上限を
-// 入れる（`in-memory-lexical-store.ts` の `LEXICAL_QUERY_MAX_DISTINCT_WORDS`/
-// `capQueryTerms` の doc 参照）。
-//
-// **結果（一致する/しない）で見る——時間では見ない**（in-memory 実装は計算量の問題を
-// そもそも持たないため、この歯は「postgres 側と同じ契約になっているか」だけを見る）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 
-// `in-memory-lexical-store.ts` の `LEXICAL_QUERY_MAX_DISTINCT_WORDS` は export しない
-// （`pnpm api:check` の公開面に漏れるため——同ファイルの doc 参照）。値を書き写す
-// ——ずれていないことは `packages/postgres` 側の歯 `lexical-query-cap-values-match.test.ts`
-// が3ファイルのソースを読んで検査する。
+// 定数は export されていない（公開面に漏れるため）ので値を書き写す。ずれは `packages/postgres` の `lexical-query-cap-values-match.test.ts` が見る。
 const WORD_COUNT_AT_CAP = 32;
 
 const TENANT = "in-memory-lexical-query-word-cap-tenant";

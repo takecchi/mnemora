@@ -1,21 +1,4 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// `InMemoryOutboxStore.claimBatch`（packages/testkit/src/__fixtures__/in-memory-outbox-store.ts）は
-// `opts.now` と `opts.leaseMs` を検査せず、`now - leaseMs` を数のまま比べていた。
-// `PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を `timestamptz` の
-// パラメータとして送るため、どちらかが Invalid Date になる入力では例外になる（実測: 本物の
-// Postgres 17 + pgvector。`leaseMs` が `NaN` / `Infinity` / `-Infinity` / `1e20`、`now` が
-// Invalid Date のとき、`invalid input syntax for type timestamp with time zone`）。
-//
-// 修正前の Fake は、`leaseMs` が `NaN` / `±Infinity` / `1e20` でも例外を投げず、まだ claim
-// されていないジョブを実際に claim していた（`claimedAt`・`attempts` の書き込み）。
-//
-// ⚠ `new Date(now - leaseMs)` が `Date` としては有効でも、Postgres の `timestamptz` の範囲
-// （紀元前4713年より前）を外れると Postgres だけが例外になる（実測: `leaseMs: 8e15` で
-// `timestamp out of range`）。表現できる範囲の違いは Issue #1041 の論点なので、ここでは
-// 揃えない。
-//
-// このテストは Fake を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
+// `new Date(now - leaseMs)` が `Date` として有効でも、Postgres の `timestamptz` の範囲（紀元前4713年より前）を外れると Postgres だけが例外になる。表現できる範囲の違いはここでは揃えない。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx, OutboxJobRecord } from "@mnemora/core";
@@ -60,8 +43,6 @@ describe("InMemoryOutboxStore.claimBatch: リースの境界時刻が Date に�
     });
   }
 
-  // 回帰確認: 有限の leaseMs（0・負数・小数を含む）は、これまでどおり claim する
-  // （実測: Postgres も例外にならない）。
   for (const leaseMs of [0, -1_000, 0.5, 60_000]) {
     it(`leaseMs=${leaseMs} は例外を投げず、未 claim のジョブを claim する（回帰確認）`, async () => {
       const job = unclaimedJob();

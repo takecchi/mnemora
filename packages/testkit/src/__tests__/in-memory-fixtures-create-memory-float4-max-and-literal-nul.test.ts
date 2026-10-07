@@ -3,12 +3,6 @@ import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-// `InMemoryMemoryStore.createMemory` が Postgres に揃えて断る入力の、断りすぎない側。
-// - `halfLifeHours`: float4（Postgres の `real`）に収まる最大の値までは受け、`Infinity` へ丸まる境目から断る
-//   （`1e300`・`Number.MAX_VALUE` を断り `3e38` を受けるだけでは、`3.4e38` 付近で断る実装を見分けられない）。
-// - `content`: 断るのは NUL（U+0000）そのもの。`\u0000` という6文字の文字列（バックスラッシュ・u・0・0・0・0）は
-//   ただの文字なので受ける。NUL が先頭・末尾にあるときも断る。
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 const FLOAT4_MAX = 3.4028234663852886e38;

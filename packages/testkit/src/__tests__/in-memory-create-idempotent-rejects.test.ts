@@ -3,14 +3,6 @@ import type { Ctx, NewMemory } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * 冪等の鍵が同じ既存の行が在っても、`createMemory` 系は書けない値を拒む（Postgres の `INSERT ... ON CONFLICT
- * DO NOTHING` は、衝突を見る前に値を型に変換し CHECK 制約を当てる）。
- *
- * 2実装を並べた歯は `packages/postgres/src/__tests__/create-memory-idempotent-rejects.postgres.test.ts`
- * （DB が要る。13の形）。ここは DB 無しで走る側の歯で、検査の種類ごとに1つずつ文面まで縛る。
- */
-
 const ctx: Ctx = { tenantId: "create-idempotent-rejects" };
 
 const CASES: Array<[string, Partial<NewMemory>, RegExp]> = [

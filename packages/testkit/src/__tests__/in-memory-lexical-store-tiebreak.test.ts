@@ -1,30 +1,3 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// `InMemoryVectorStore.search` の tie-break は Issue #339 / ADR 0170 で
-// `in-memory-vector-store-tiebreak.test.ts` により直っているが、`InMemoryLexicalStore.search`
-// には同じ形の不一致が残っていた。
-//
-// `packages/core/src/interfaces/lexical-store.ts` の `LexicalStore.search` doc は
-// 「`coverage`/`rank` の両方が完全に一致する行が複数あるときの順序も、adapter の責務である」
-// と明記し（Issue #345 / ADR 0175）、`PostgresLexicalStore` は
-// `coverage → rank → recorded_at DESC → id` の4段で tie-break すると名指しし、
-// 「adapter を新しく書くときは、coverage/rank だけでなく完全なタイブレークまで含めて
-// 決定的な順序を返すこと」と要求している。
-//
-// `InMemoryLexicalStore.search` は `hits.sort((a, b) => b.coverage - a.coverage ||
-// b.rank - a.rank)` の2段止まりで、同点の中身は `Array.prototype.sort` の安定性により
-// **挿入順**（＝通常の呼び出し順では `recordedAt` が古いほうが先）に落ちる——
-// `recorded_at` DESC（新しい方が先）とは**逆向き**になる。
-//
-// 実測: 本物の Postgres 17 + pgvector を手元に立て、`PostgresLexicalStore.search` に
-// 完全に同じ `content` を持つ2件（`recordedAt` だけが異なる）を渡すと、新しい方
-// （`recordedAt` が新しい行）が常に先に返ることを確認した（使い捨てスクリプトで確認、
-// このコミットには含めない）。`PostgresTrigramLexicalStore` は自分の doc コメントで
-// 「`search` の `ORDER BY` は `PostgresLexicalStore` と同じ4段」と明記しており、
-// ソースの `ORDER BY` 句も文字どおり同じ（`packages/postgres/src/trigram-lexical-store.ts`
-// 505行目）——**ただしこちらは実行環境の locale 制約（日本語 trigram 未対応）により、
-// このコミットの作業では直接実行できていない**（読んだだけ）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
@@ -32,14 +5,7 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 
 const TENANT = "lexical-search-tiebreak-tenant";
-// Issue #951（2026-09-26）: 以前はここで非 ASCII だけの content/query（日本語）を
-// 使っていたが、`InMemoryLexicalStore.search` を `PostgresLexicalStore` に揃えた結果、
-// 非 ASCII だけのクエリは（本物の Postgres と同じく）常に0件を返すようになった
-// （`mnemora_lexical_query_terms` がクエリ側の非 ASCII を落とすため）。この歯が
-// 見たいのは tie-break（coverage/rank が同値のときの順序）であって非 ASCII の
-// 扱いではないため、ASCII の content に差し替える
-// （`packages/postgres/src/__tests__/lexical-search-tiebreak.test.ts` の
-// `TIED_CONTENT` と同じ文字列——postgres 側の同種の歯と揃えてある）。
+// content は ASCII にする。非 ASCII だけのクエリは Postgres と同じく常に0件になり、tie-break を見られない。
 const CONTENT = "widget alpha bravo tie-break test content";
 
 describe("InMemoryLexicalStore.search — coverage/rank が完全一致したときの tie-break（LexicalStore.search doc / ADR 0175）", () => {

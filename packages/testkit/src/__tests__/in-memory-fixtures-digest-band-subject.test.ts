@@ -1,11 +1,3 @@
-// `InMemoryMemoryStore.aggregateScope` の `digestBand`（目次帯、ADR 0073 決定7）が、
-// `scope.subjectId` × `scope.includeSubjectless`（`docs/recall.md`「includeSubjectless」節・
-// ADR 0286）の絞りの内側だけを出すことを、Fake に対して実測で確認する。
-//
-// **`memory-store-conformance.ts`（適合テスト一式）には足さない**（Issue #809 の方針。
-// 外部 adapter 実装者にまで要求を増やすため）。Postgres 側は
-// `packages/postgres/src/__tests__/digest-band-subject.postgres.test.ts`。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";

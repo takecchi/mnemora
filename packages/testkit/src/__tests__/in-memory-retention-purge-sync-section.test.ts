@@ -3,14 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * `InMemoryMemoryStore.purgeExpiredEventsByRetention` は、保持期間（`eventRetentionDays`）を読んでから
- * 消し終えるまでを、`await` を1つも挟まない1つの同期区間で行う。本物のトランザクションが無い
- * in-memory 実装で「読んだ後に別の呼び出しが割り込む余地」を作らない唯一の手段である。
- *
- * 呼び出しを `await` する前（マイクロタスクが1つも回る前）に、もう消し終わっていることで見る。
- * 読みと削除のあいだで一度でも yield すると、この時点ではまだ何も消えていない。
- */
+/** 保持期間を読んでから消し終えるまでを、`await` を挟まない1つの同期区間で行う（本物のトランザクションが無い in-memory で、割り込む余地を作らない唯一の手段）。呼び出しを `await` する前に消し終わっていることで見る。 */
 
 const ctx: Ctx = { tenantId: "retention-purge-sync-section" };
 

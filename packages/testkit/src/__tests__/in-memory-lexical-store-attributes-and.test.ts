@@ -4,14 +4,6 @@ import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 
-/**
- * `InMemoryLexicalStore.search` の `filter.attributes` は複数キーで AND の等値（ADR 0312 決定5。
- * `vector-store-conformance.ts` に「複数キーは AND」の歯がある）。語彙チャンネルの歯は1キーだけだった
- * （Issue #1775 の #724 の変異33）。条件の `every` を `some` にすると、条件の一部だけを持つ記憶が混ざる。
- * Postgres 側は `packages/postgres` の `lexical-store-attributes-and.postgres.test.ts`
- * （InMemory 固有。公開の適合テストには足さない）。
- */
-
 const TENANT = "lexical-attributes-and-tenant";
 const QUERY = "obsidian shards";
 const CONTENT = "obsidian shards glimmer in the cave";

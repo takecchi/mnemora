@@ -4,12 +4,6 @@ import { buildNewMemoryEventFixture } from "../test-data.js";
 import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * `purgeExpiredEvents` が積む `events_purged` の `at` を、読み戻した値のまま `EventStore.list`
- * の `since`/`until`（両端を含む）に渡すと、その行自身が返る
- * （[ADR 0427](../../../../docs/decisions/0427-events-purged-at-millisecond.md)。
- * `packages/postgres/src/__tests__/events-purged-at-millisecond.postgres.test.ts` と同じ形）。
- */
 describe("InMemoryMemoryStore.purgeExpiredEvents — events_purged の at は since/until の両端に当たる", () => {
   it("読み戻した at をそのまま until・since に渡すと、どちらでも行自身が返る", async () => {
     const memoryStore = new InMemoryMemoryStore();

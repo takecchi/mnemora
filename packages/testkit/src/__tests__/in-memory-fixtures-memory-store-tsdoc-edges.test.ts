@@ -4,21 +4,6 @@ import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`InMemoryMemoryStore` について
- * 縛る。振る舞いは変えていない。
- *
- * - `listBySourceObservation`: 「`extractorVersion: null` を渡すと `extractor_version IS NULL` の行を返す」。
- * - `requeueEmbedJobs`: 「対象が `opts.limit` より多いときにどれが選ばれるかは `updatedAt` の古い順、同着は `id` の
- *   昇順」「積み直した行は `updatedAt` が動くので、繰り返し呼ぶと対象が一巡する」。
- * - `requeueEmbedJobs`: 「既に `failed_at` が付いた古い outbox 行は触らない」「新しい行の `attempts` は 0 から数え
- *   直される」。
- * - `supersedeWithNewMemories`: 「`event.meta.supersededById` は、実装が解決したアンカーの id で埋める（呼び出し側が
- *   渡した値があれば上書きする）」「`event` の他の欄は一切変えない」。
- *
- * このテストは fixture を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
- */
-
 const ctx: Ctx = { tenantId: "memory-store-tsdoc-edges" };
 let hashCounter = 0;
 const memory = (overrides: Parameters<typeof buildNewMemoryFixture>[0] = {}) => {
@@ -108,7 +93,6 @@ describe("InMemoryMemoryStore.requeueEmbedJobs: 選び方と、古い outbox 行
     await outbox.fail(ctx, claimed!.id, "boom", claimed!.attempts);
     await store.setEmbeddingStatus(ctx, m.id, "failed");
     const oldBefore = { ...store.outboxJobs.find((j) => j.id === jobs[0]!.id)! };
-    // 前提: 古い行は失敗で終端している。
     expect({ attempts: oldBefore.attempts, lastError: oldBefore.lastError }).toEqual({
       attempts: 1,
       lastError: "boom",

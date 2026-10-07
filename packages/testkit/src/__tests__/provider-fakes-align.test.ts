@@ -18,11 +18,6 @@ import { DeterministicEmbeddingProvider } from "../__fixtures__/deterministic-em
 import { RecordedEmbeddingProvider } from "../__fixtures__/recorded-embedding-provider.js";
 import { SeededEmbeddingProvider, SeededLLMProvider } from "../__fixtures__/seeded-provider.js";
 
-/**
- * ADR 0452: testkit の fake・カセットを、`EmbeddingProvider`・`LLMProvider` の約束と本物の provider に揃える。
- * 候補ごとに「直す前で赤」と「やりすぎで赤」の歯を持つ（A-1〜A-6・A-8。変異試験の結果は ADR）。
- */
-
 const ctx: Ctx = { tenantId: "provider-fakes-align" };
 const SPACE: EmbeddingSpaceId = { provider: "p", model: "m", dimensions: 3 };
 const PROMPT: PromptSpec = { messages: [{ role: "user", content: "p" }] };
@@ -174,7 +169,6 @@ describe("A-3: Recording* は進行中の呼び出しも memo する", () => {
     expect(d.calls()).toBe(1);
     expect(a).toEqual(b);
     expect(recorder.lookupLLM(PROMPT)?.value).toEqual(a);
-    // 待つ側の schema が合わなければ、その側だけ落ちる。
     const d2 = llmDelegate();
     const p2 = new RecordingLLMProvider(d2.provider, new CassetteRecorder(), "m");
     const strict = z.object({ other: z.string() });
@@ -416,7 +410,6 @@ describe("A-8: DeterministicEmbeddingProvider は dimensions が正の整数で�
     expect(new DeterministicEmbeddingProvider().space.dimensions).toBe(8);
   });
 
-  // ADR 0525: 型の誤りは TypeError、範囲の誤りは RangeError。message は同じ。
   const construct = (dimensions: unknown) => () =>
     new DeterministicEmbeddingProvider({
       provider: "p",

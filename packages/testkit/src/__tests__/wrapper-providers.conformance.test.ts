@@ -1,14 +1,4 @@
-// 公開している包み型の provider（`SeededLLMProvider`/`SeededEmbeddingProvider`、
-// `RecordingLLMProvider`/`RecordingEmbeddingProvider`）に、既存の適合テスト一式をそのまま
-// 当てる。**一式には要件を1つも足さない。**
-//
-// それまで一式は、包まれる側（`DeterministicLLMProvider` ほか）にだけ当たっていた。包み型は
-// `examples/chat` の `providers.ts` で実 API の provider と重ねて使われる（種の再生・記録）ので、
-// 包んだことで契約（空入力・順序・次元・例外を握り潰さない・リトライを内蔵しない等）が
-// 崩れていないかを、包み型そのものに対して測る。包まれる側には `Deterministic*` を使う。
-//
-// `createFailing`: 包み型は下層の SDK client を持たないが、**包まれる側が下層にあたる**
-// ——必ず失敗する `LLMProvider` を包ませ、その呼び出し回数を数える。
+// `createFailing`: 包み型は下層の SDK client を持たないが、包まれる側が下層にあたる。必ず失敗する `LLMProvider` を包ませ、その呼び出し回数を数える。
 
 import { vi } from "vitest";
 import { z } from "zod";
