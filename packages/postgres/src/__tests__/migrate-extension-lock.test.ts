@@ -120,14 +120,12 @@ async function relcacheInitFileExists(): Promise<boolean> {
   return rows[0]!.present;
 }
 
-/** システムカタログの統計を更新して、`client` の接続のまま init file を消させる（autovacuum が同じことをする）。 */
+/**
+ * `client` の接続のまま、init file を確実に消させる。`pg_class` の行を必ず更新する、効果の無い GRANT を流す
+ * （PUBLIC の SELECT は既定で付いている）。VACUUM や統計の更新は、変化が無いと消えないので使わない。
+ */
 async function invalidateRelcacheInitFile(client: Client): Promise<void> {
-  await client.query("CREATE TEMP TABLE relcache_churn (i int)");
-  await client.query("INSERT INTO relcache_churn SELECT generate_series(1, 2000)");
-  await client.query("DROP TABLE relcache_churn");
-  for (const catalog of ["pg_class", "pg_attribute", "pg_type"]) {
-    await client.query(`VACUUM ${catalog}`);
-  }
+  await client.query("GRANT SELECT ON pg_class TO PUBLIC");
 }
 
 /**
@@ -315,7 +313,7 @@ describe("runMigrations: 共有の拡張ロック（EXTENSION_LOCK_KEY）", () =
   }, 20_000);
 
   it("pool が冷えていて relcache の init file も無いとき、拡張を作る段の Lock 待ちに着き、その元の失敗で reject する", async () => {
-    const dir = dirWith("9506_ext_lock_cold_pool.sql", "SELECT 1;");
+    const dir = dirWith("9507_ext_lock_cold_pool.sql", "SELECT 1;");
     const coldPool = new Pool({ connectionString: connectionStringFor(), max: 4 });
     const holder = await holdPgExtensionExclusively(coldPool, async (client) => {
       await invalidateRelcacheInitFile(client);
