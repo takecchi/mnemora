@@ -182,7 +182,7 @@ Issue #109 の閉じる条件と、実測した偽陽性率の上限は
 過大に読まないように、測れていない範囲をここに並べる。
 
 - **閾値の門は無い。**基準値と相違しても `exit 0` のままである
-  （`scripts/retrieval-quality-summary.mjs:19` に意図として明記）。理由は
+  （`scripts/retrieval-quality-summary.mjs` の冒頭の TSDoc に意図として明記）。理由は
   [ADR 0088](./docs/decisions/0088-retrieval-quality-measured-in-ci.md) §2——
   **probe が7件では閾値の門が偽陽性を出す。**
 - **埋め込みモデル側が変わったことによる退行は、再生では検知できない。**
@@ -693,7 +693,7 @@ outcome=candidates / 候補1件
   [`mark-contested.test.ts`](./packages/core/src/__tests__/mark-contested.test.ts)/
   [`resolve-contested.test.ts`](./packages/core/src/__tests__/resolve-contested.test.ts) が
   検査済みであり、`applyCorrection` はその結果をそのまま運ぶだけで独自の分岐を持たない
-  （ADR 0242 決定3 のコメント「`markResult`/`resolveResult` は…そのまま運ぶ」）。
+  （ADR 0242 決定3。`Runtime.applyCorrection` の TSDoc が、失敗を握り潰さず `markResult`/`resolveResult` として運ぶと書く）。
 
 ---
 

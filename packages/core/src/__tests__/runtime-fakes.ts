@@ -967,7 +967,7 @@ export class FakeMemoryStore implements MemoryStore {
         );
       }
       // 下側（アンダーフロー）: `packages/testkit` の `InMemoryMemoryStore` と同じ検査
-      // （そちらのコメント参照）。0 でない値が float4 で 0 に丸まるときだけ拒む——
+      // （Postgres は `out of range for type real` で拒む）。0 でない値が float4 で 0 に丸まるときだけ拒む——
       // `halfLifeHours: 0`（上の「壊れた」Memory）はここでは見ない。
       for (const [field, value] of [
         ["halfLifeHours", input.halfLifeHours],

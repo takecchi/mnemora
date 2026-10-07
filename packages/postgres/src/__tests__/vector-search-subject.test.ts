@@ -22,7 +22,7 @@ const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
  * `subject` で絞っていないと、大規模テナントで小さい subject を引くとき、
  * over-fetch の窓（k' = limit * overFetchFactor）がテナント全体の近傍で埋まってしまい、
  * その subject の記憶が1件も窓に入らず recall から黙って落ちうる
- * （packages/core/src/recall-runtime.ts 段1のコメント参照）。
+ * （ADR 0023）。
  *
  * ⚠ クエリ文字列を記憶の本文と完全一致させて距離0にする手はここでは使えない
  * ——距離0なら subject で絞らなくても全体の1位になるので、修正前でも緑になってしまい
