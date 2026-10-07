@@ -68,7 +68,6 @@ describe("empiricalKOfNRedRate", () => {
   });
 
   it("n=2,k=2(両方red必須)は、隣接窓が両方redのときだけ数える", () => {
-    // [T,T, F,T, T,T] -> 窓1=[T,T]both -> red, 窓2=[F,T]片方 -> green, 窓3=[T,T]both -> red
     const flags = [true, true, false, true, true, true];
     const r = empiricalKOfNRedRate(flags, 2, 2);
     expect(r.windowCount).toBe(3);
