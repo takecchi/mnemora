@@ -1,44 +1,14 @@
 /**
- * `scripts/correction-candidate-probe-summary.mjs`(CI の Job Summary に載せる Markdown を
- * 組み立てる CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/numeral-token-probe-summary-lib.mjs`/`scripts/identifier-probe-summary-lib.mjs`
- * と同じ分担・同じ理由（ADR 0291 §7-3、ADR 0321、Issue #109）。
+ * 🔴 `status` で最初に分岐する。`"weights_unavailable"` と `"measured"` を同じ顔で出さない。
  *
- * `examples/chat` の `correction-candidates` サブコマンド
- * （`MNEMORA_CORRECTION_CANDIDATE_JSON` が吐く JSON、
- * `examples/chat/src/correction-candidate-json.ts` の `CorrectionCandidateProbeRunJson`）を
- * Markdown へ変換する。
+ * ⛔ 門にはしない。相違で非0を返さない。標本53件は閾値の門に足る母数ではない(ADR 0033 §3、ADR 0291 §4 決定7)。
+ * 非0になるのは入力そのものが壊れているときだけ。
  *
- * ⛔ **`scripts/identifier-probe-summary-lib.mjs`/`scripts/numeral-token-probe-summary-lib.mjs`
- * とは別の道具・別の入力である**——既存の識別子・数詞索引 probe の要約には1文字も触れていない。
+ * 🔴 比べるのは数字だけではない。`embeddingSpace`・`llmMode`/`embeddingMode`・`caseSet` に加え、
+ * `marginStats`/`intrusionMarginStats` の分布も比べる(ADR 0291 §5.5)。
  *
- * **群は1つだけ**（`identifier-probes`/`numeral-token-probes` の sparse/dense のような
- * haystack 条件の分岐がこの arm には無い。A群/B群という別の軸を持つが、それは
- * `summary` オブジェクトのフィールドとして表現する）。
- *
- * 🔴 **`status` で最初に分岐する。**`"weights_unavailable"` と `"measured"` を
- * 同じ顔で出さない（既存2つの summary-lib と同じ理由）。
- *
- * ## ⛔ 門にはしない
- *
- * 相違で非0を返さない。標本53件（A群21・B群32）は ADR 0033 §3 の規律に照らして
- * 閾値の門に足る母数ではない（ADR 0291 §4 決定7、ADR 0232 決定文「n=8 では偽陽性率に
- * 上限を置けない」）。非0になるのは**入力そのものが壊れているとき**だけである。
- *
- * ## 🔴 比べるのは数字だけではない
- *
- * `embeddingSpace`（`provider`/`model`/`dimensions`）・`llmMode`/`embeddingMode`・
- * `caseSet` に加え、**`marginStats`/`intrusionMarginStats`（count/mean/stdDev/min）も
- * 比べる**——ADR 0291 §5.5 の核心である margin/intrusionMargin の分布が、
- * 基準値と実測でずれていないかを見る。
- *
- * ## 🧊 `protectionMargin`（ADR 0333 §3.2 案2）は影で並べるだけ——`DIFF_FIELDS` には入れない
- *
- * `intrusionMargin` を凍結したまま並べて出す後継 `protectionMargin`
- * （`summary.protectionMarginStats`）を、**`DIFF_FIELDS`（基準値との一致/相違判定）には
- * 加えていない**——既存の判定を1つも変えないため。measured 側の値は本文の表に
- * intrusionMargin と並べて出す。基準値側に `protectionMarginStats` があれば、
- * 「参考（差分判定には使っていない）」と明記した別節で並べて出す（`exit code` は変えない）。
+ * 🧊 `protectionMargin`(ADR 0333 §3.2 案2)は並べて出すだけで、`DIFF_FIELDS` には入れない。既存の判定を1つも変えないため。
+ * 基準値側に `protectionMarginStats` があれば、「参考(差分判定には使っていない)」と明記した別節で並べる。
  */
 
 const REQUIRED_SUMMARY_NUMBER_FIELDS = [
@@ -52,10 +22,6 @@ const REQUIRED_SUMMARY_NUMBER_FIELDS = [
 ];
 
 /**
- * `marginStats`/`intrusionMarginStats`（`{ count, mean, stdDev, min }`）が正しい形かを
- * 検査する。`mean`/`stdDev`/`min` は `count` によって `null` でもよい
- * （`computeMarginStats` の契約）。
- *
  * @param {unknown} stats
  * @param {string} label
  * @returns {string[]}
@@ -79,8 +45,6 @@ function findMarginStatsProblems(stats, label) {
 }
 
 /**
- * `summary` オブジェクトが必須項目をすべて正しい型で持っているかを検査する。
- *
  * @param {unknown} summary
  * @returns {string[]}
  */
@@ -107,9 +71,7 @@ function findSummaryFieldProblems(summary) {
   }
   problems.push(...findMarginStatsProblems(s.marginStats, "summary.marginStats"));
   problems.push(...findMarginStatsProblems(s.intrusionMarginStats, "summary.intrusionMarginStats"));
-  // ADR 0333 §3.2 案2: `protectionMarginStats` は追加フィールドであり、旧い実測 JSON・
-  // 旧い基準値には存在しない。⟹ **在るときだけ**形を検査する（無いこと自体は問題にしない
-  // ——`REQUIRED_SUMMARY_NUMBER_FIELDS` と違い必須項目に昇格させない）。
+  // `protectionMarginStats` は旧い実測 JSON・基準値には無いので、在るときだけ形を検査する(必須項目に昇格させない)。
   if (s.protectionMarginStats !== undefined) {
     problems.push(
       ...findMarginStatsProblems(s.protectionMarginStats, "summary.protectionMarginStats"),
@@ -119,8 +81,6 @@ function findSummaryFieldProblems(summary) {
 }
 
 /**
- * `MNEMORA_CORRECTION_CANDIDATE_JSON` が吐いた JSON(パース済み)の形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -171,10 +131,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル（`examples/chat/correction-candidate-probe-baseline.json`、パース済み）の
- * 形を検査する。`measured` と同じ shape のスナップショットを1つ持つだけ（群は1つなので
- * `groups` 配列にしていない）。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -193,7 +149,6 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {Record<string, unknown>} */ (data) };
 }
 
-/** `4/7` の形。 */
 function formatFraction(count, total) {
   return `${count}/${total}`;
 }
@@ -206,7 +161,6 @@ function formatSpace(space) {
   return `${space.provider}/${space.model}/${space.dimensions}次元`;
 }
 
-/** `identifier-arm.ts` の `formatMarginStats` と同じ桁数の表示に揃える。 */
 function formatMargin(stats) {
   if (!stats || stats.count === 0) {
     return "(測れた件が0件)";
@@ -215,9 +169,6 @@ function formatMargin(stats) {
   return `n=${stats.count} mean=${stats.mean.toExponential(3)} stdDev=${stdDevText} min=${stats.min.toExponential(3)}`;
 }
 
-/**
- * 基準値と突き合わせる項目。`readPath` の入れ子パス記法を使う。
- */
 const DIFF_FIELDS = [
   "llmMode",
   "embeddingMode",
@@ -247,8 +198,6 @@ const DIFF_FIELDS = [
 ];
 
 /**
- * `"summary.hitAtK.1"` のような入れ子のパスを読む。
- *
  * @param {Record<string, any> | undefined} obj
  * @param {string} path
  */
@@ -276,7 +225,7 @@ export function diffSnapshot(measured, baselineSnapshot) {
 }
 
 /**
- * 基準値との差分節。**一致なら1行、違うときだけ展開する**（ADR 0088 §3-3 と同じ規律）。
+ * 一致なら1行、違うときだけ展開する(ADR 0088 §3-3)。
  *
  * @param {Record<string, any>} measured
  * @param {Record<string, any>} baseline
@@ -313,10 +262,7 @@ function buildDiffSection(measured, baseline) {
 }
 
 /**
- * `protectionMargin`（ADR 0333 §3.2 案2）の基準値との突き合わせを、**参考としてだけ**
- * 出す節。🔴 **`DIFF_FIELDS`/`diffSnapshot` には一切関わらない**——ここで測定と基準値の
- * 値が違っても `matches`/exit code は動かない。基準値に無い（旧い基準値、または
- * 何らかの理由で欠けている）ときは、その旨を書いて終える。
+ * 🔴 `DIFF_FIELDS`/`diffSnapshot` には一切関わらない。値が違っても `matches`/exit code は動かない。
  *
  * @param {Record<string, any>} measured
  * @param {Record<string, any>} baseline
@@ -342,8 +288,7 @@ function buildProtectionMarginReferenceSection(measured, baseline) {
 }
 
 /**
- * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
- * **呼び出し側は必ず validate 済みの値を渡すこと。**
+ * 呼び出し側は必ず validate 済みの値を渡すこと。
  *
  * @param {{ measured: Record<string, any>, baseline?: Record<string, any> }} input
  */
