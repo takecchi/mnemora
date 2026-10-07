@@ -9,9 +9,6 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * `tenant_id` を行の値として書く（`WHERE` で絞る文ではない）ので、テナントの境界は
  * 「どのテナントの行に足すか」にある。A の recall が B のカウンタを進めず、同じ subject 名でも
  * テナントごとに別のカウンタになることを縛る。
- *
- * 変異試験（テナントの値を共有の固定値にする）で赤になる。`packages/testkit` の `*-conformance.ts`
- * には足していない。
  */
 
 const A: Ctx = { tenantId: "teeth2-tenant-a" };

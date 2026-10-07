@@ -11,17 +11,11 @@ import {
 } from "./test-db.js";
 
 /**
- * `PostgresVectorStore.search` の tie-break（Issue #339 / ADR 0170）。
- *
- * ADR 0167 が最初に足した tie-break（距離 → `memory_id`）は、`memory_id` が
- * ingest のたびに新しく振られるランダムな UUID であるため、**同一内容が
- * fresh ingest（DB を作り直す）のたびに、同点候補の並び順が変わってしまう**
- * ——`examples/chat` の `compare` の⭐門（322ターン行）で実際に観測した
- * （Issue #339 本文）。
+ * `PostgresVectorStore.search` の tie-break。同点（距離が完全に一致）の並びは `recorded_at` の新しい順で決まり、
+ * `memory_id`（`gen_random_uuid()` が振るランダムな UUID）の大小には依存しない。
  *
  * 本ファイルは、距離が完全に一致する2件を意図的に作り（同じベクトルを2回 `upsert`）、
- * `recorded_at` の順序で決定的に並ぶこと（`memory_id` の大小には依存しないこと）を
- * 直接検査する。`memory_id` は `gen_random_uuid()` が振るため、事前にどちらが
+ * `recorded_at` の順序で決定的に並ぶことを直接検査する。事前にどちらの `memory_id` が
  * 大きい/小さいかを制御できない——そこで、**まず自然に生成された2つの `memory_id`
  * の大小関係を実測し、その大小関係と「意図して逆にした」`recorded_at` の順序を
  * 突き合わせる**ことで、「`memory_id` の辞書順ではなく `recorded_at` が勝っている」
@@ -118,8 +112,7 @@ describe("PostgresVectorStore.search — 距離が完全一致したときの ti
     expect(hits).toHaveLength(2);
 
     // `recorded_at` が完全一致したときの並びは `memory_id` の辞書順に落ちる
-    // （このケースに限り、ADR 0167 が最初に足した挙動に戻る——ADR 0170 の
-    // 「確かめていないこと」に明記した既知の残余）。
+    // （このケースに限り、`memory_id` の辞書順に戻る）。
     const expectedOrder = [a.id, b.id].sort();
     expect(hits.map((h) => h.memoryId)).toEqual(expectedOrder);
   }, 60_000);

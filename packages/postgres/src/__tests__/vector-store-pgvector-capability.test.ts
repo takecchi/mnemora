@@ -5,25 +5,19 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PgvectorVersionUnsupportedError } from "../pgvector-capability.js";
 
 /**
- * `PostgresVectorStore` の pgvector 能力検査（`PgvectorCapabilityGate`、Issue #1301 /
- * ADR 0367）を **DB 無しで**検査する歯。`vector-store.ts` の `withRelaxedOrderScan` が、
- * `hnsw.iterative_scan` を `relaxed_order` に変える `SET LOCAL` 文を発行する**前**に
- * 検査すること・インスタンスごとに成功をキャッシュすること・失敗はキャッシュしないことを、
- * `db.execute`/`db.transaction` を差し替えた偽の `Db` で固定する。
+ * `PostgresVectorStore` の pgvector 能力検査（`PgvectorCapabilityGate`）を **DB 無しで**検査する歯。
+ * `vector-store.ts` の `withRelaxedOrderScan` が、`hnsw.iterative_scan` を `relaxed_order` に変える
+ * `SET LOCAL` 文を発行する**前**に検査すること・インスタンスごとに成功をキャッシュすること・
+ * 失敗はキャッシュしないことを、`db.execute`/`db.transaction` を差し替えた偽の `Db` で固定する。
  *
- * **Issue #1415 / ADR 0374 追記**: `search()`/`searchMany()` は、この能力検査に加えて
- * `StatsPresenceGate`（`vector-store.ts` の doc 参照）も持つ——未確認の間は
- * `db.execute` で `reltuples` を読む別の往復を払う。この歯の本題は
- * `PgvectorCapabilityGate` であって `StatsPresenceGate` ではないため、
- * `createFakeDb` は `reltuples` を含むクエリを検出し、常に「両方の表が確認済み」
- * という行を返す（`queryLiteralText`/`createFakeDb` の doc コメント参照）——
- * こうしておくと `StatsPresenceGate` の往復は最初の1回だけ静かに消費され、
- * この歯が元々検査していた「能力検査の呼び出し回数・順序」の期待値は
- * Issue #1415 の前後で変えずに済む。
+ * `search()`/`searchMany()` は、この能力検査に加えて `StatsPresenceGate`（`vector-store.ts` の doc 参照）も
+ * 持つ——未確認の間は `db.execute` で `reltuples` を読む別の往復を払う。この歯の本題は
+ * `PgvectorCapabilityGate` であって `StatsPresenceGate` ではないため、`createFakeDb` は `reltuples` を
+ * 含むクエリを検出し、常に「両方の表が確認済み」という行を返す——こうしておくと `StatsPresenceGate` の
+ * 往復は最初の1回だけ静かに消費され、「能力検査の呼び出し回数・順序」の期待値に影響しない。
  *
- * 本物の Postgres + pgvector 0.8.0 に対する実測は
- * `search-hnsw` 系・`recall-roundtrip-count.postgres.test.ts` 等の `*.postgres.test.ts`
- * が担う（このファイルは判定ロジックと呼び出し順序だけを見る）。
+ * 本物の Postgres + pgvector に対する実測は `*.postgres.test.ts` が担う
+ * （このファイルは判定ロジックと呼び出し順序だけを見る）。
  */
 
 const SPACE: EmbeddingSpaceId = { provider: "testkit", model: "fake", dimensions: 1 };
@@ -53,15 +47,13 @@ function queryLiteralText(query: unknown): string {
  * `db.execute` を2種類に分けて差し替えた偽の `Db`。
  *
  * - **能力検査**（`PgvectorCapabilityGate`、`PGVECTOR_CAPABILITY_QUERY`）——
- *   このファイルの本題。`capabilityRows` を今までどおり位置で読む。
- * - **統計確認**（Issue #1415 / ADR 0374、`StatsPresenceGate.bothPresent`）——
- *   このファイルの本題ではない。`reltuples` を含むクエリだと分かったら、
- *   常に「両方の表の統計が確認済み」（`reltuples >= 0`）な行を返す——`capabilityRows`
- *   の位置を一切消費しない。`StatsPresenceGate` は一度確認済みになったら二度と
- *   `db.execute` を呼ばないため、この固定応答は最初の1回だけ効き、以後の
- *   `search()`/`searchMany()` 呼び出しでは（能力検査だけが）`db.execute` を呼ぶ
- *   ——このファイルが元々検査していた「能力検査の呼び出し回数・順序」は、
- *   この分離によって Issue #1415 以前とまったく同じ形のまま検査できる。
+ *   このファイルの本題。`capabilityRows` を位置で読む。
+ * - **統計確認**（`StatsPresenceGate.bothPresent`）——このファイルの本題ではない。
+ *   `reltuples` を含むクエリだと分かったら、常に「両方の表の統計が確認済み」
+ *   （`reltuples >= 0`）な行を返す——`capabilityRows` の位置を一切消費しない。
+ *   `StatsPresenceGate` は一度確認済みになったら二度と `db.execute` を呼ばないため、
+ *   この固定応答は最初の1回だけ効き、以後の `search()`/`searchMany()` 呼び出しでは
+ *   能力検査だけが `db.execute` を呼ぶ。
  *
  * `db.transaction`（`SET LOCAL` + 本体 SELECT）も差し替える。
  */

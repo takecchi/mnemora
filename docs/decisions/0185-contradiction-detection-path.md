@@ -103,8 +103,8 @@ examples/chat/src/cli.ts:1507  command === "correction"
       → :146 runtime.resolveContested(ctx, firstId, secondId, {kind:"supersede", winnerId})
 ```
 
-🔴 **そして、この鎖のどこにも「判定」は無い。**`examples/chat/src/correction-scenario.ts:14-15`
-が逐語でそう書いている【現物】:
+🔴 **そして、この鎖のどこにも「判定」は無い。**`examples/chat/src/correction-scenario.ts` の冒頭 TSDoc
+が逐語でそう書いている【現物】（以下の引用は書いた時点のもの。2026-10-07 の #1843 で縮み、いまは「矛盾の判定はこのファイルが構造として宣言する（ADR 0134 決定2）」の形で残る）:
 
 > ⟹ `contestedPair` は「どちらの externalId とどちらの externalId が対向するか」を
 > **書いた時点で固定された宣言**として持つ。LLM にもヒューリスティクスにも聞かない。
@@ -612,7 +612,7 @@ issue の受け入れ条件は「検出（**何を矛盾と見なすか**。`con
 
 ### 負債1: 🔴 (B) は、この器では費用を測れない —— **カセットの録り直しが要る可能性が高い**
 
-**【現物】カセットの鍵の作り方**（`packages/testkit/src/__fixtures__/cassette.ts:77-83`）:
+**【現物】カセットの鍵の作り方**（`packages/testkit/src/__fixtures__/cassette.ts` の `llmCassetteKey`）:
 
 > **`schema` を鍵に含めない。**スキーマは「何を返してほしいか」であって「何を訊いたか」
 > ではなく、鍵に混ぜるとスキーマの些細な変更で全記録が引けなくなる。
@@ -691,7 +691,7 @@ export function llmCassetteKey(prompt: PromptSpec): string {
 下流の LLM が古い事実を信じる事故を減らす（`memory-model.md` §5 機構3）。
 
 ⚠ **「どれだけ減るか」は測っていない。**⭐門の12行に矛盾は1件も含まれていない
-（`correction-scenario.ts:21-24` が `compare` から完全に隔離されている）
+（`correction-scenario.ts` の冒頭 TSDoc が `compare` から完全に隔離されていると書く）
 ⟹ **今日の器では、この削減を測る場所が無い。**
 
 ### 問2: これを無効にしたとき、Memory Framework として成立するか
@@ -769,7 +769,7 @@ export function llmCassetteKey(prompt: PromptSpec): string {
 | **4** | **#207 `memory_relations` の最小形**: 多対多の `contradicts` を持てる形。段3 が単数の `contestedWithId` を読む形からの移行 | ⚠ 大きい。2本に割れる可能性 | 3（方針が決まっていること）。**Issue #207 本文の「#197 が先」はこの ADR で満たされる** |
 | **5** | [#371](https://github.com/takecchi/mnemora/issues/371) **(B) 第1段: 主張キーを持たせる**（検出はしない）。`ExtractedMemoryCandidateSchema` と `Memory` に鍵を足し、書き込み経路を配線する。**ADR 0134「これが覆るとしたら」1番を意図的に満たす** | ⭕ | 3、4 |
 | **6** | [#372](https://github.com/takecchi/mnemora/issues/372) **(B) 第2段: 検出**。同じ `subjectId`・同じ鍵・**有効期間（`validFrom`/`validUntil`、ADR 0145）が重なる**・内容が違う `active` 同士を見つけて `markContested`。**既定 off。`contested` で止める（決定4）** | ⭕ | 5 |
-| **7** | ~~[#374](https://github.com/takecchi/mnemora/issues/374) **段3 が本番経路で鳴ることを CI で見張る**: `ci.yml` に `correction` の実行が **0件**である【実測】⟹ `cli.ts:1507` の dispatch 行が消えても CI は緑~~ ⭐ **着地済み（2026-09-17、ADR 0190 / PR #384）**。`ci.yml:336-359` が `pnpm --filter @mnemora/example-chat run correction` を実際に走らせる【実測】⟹ **この行の前提（0件）はもう成り立たない** | — | — |
+| **7** | ~~[#374](https://github.com/takecchi/mnemora/issues/374) **段3 が本番経路で鳴ることを CI で見張る**: `ci.yml` に `correction` の実行が **0件**である【実測】⟹ `cli.ts:1507` の dispatch 行が消えても CI は緑~~ ⭐ **着地済み（2026-09-17、ADR 0190 / PR #384）**。`ci.yml` の「correction サブコマンド(cli.ts の dispatch 行)を実際に実行し…」ステップが `pnpm --filter @mnemora/example-chat run correction` を実際に走らせる【実測】⟹ **この行の前提（0件）はもう成り立たない** | — | — |
 
 ⚠ **6 の「有効期間が重なる」は、この ADR の中で初めて出てくる条件である。**
 これが在ると「去年の住所」と「今の住所」は**矛盾ではなくなる**——
@@ -787,13 +787,13 @@ export function llmCassetteKey(prompt: PromptSpec): string {
 | 何を | コマンド | 結果 |
 |---|---|---|
 | 正典が矛盾に触れる箇所 | `grep -n "矛盾\|訂正\|間違い\|contested\|争" docs/north-star.md` | **2行のみ**（`:32` と `:112`） |
-| `markContested` の本番の呼び手 | `rg "markContested" --glob '!**/__tests__/**' --glob '!**/*.test.ts' packages examples` | `packages/` には定義と適合テストのみ。**`examples/chat/src/correction-demo.ts:142` が唯一の非テスト呼び出し** |
-| `examples/chat` が出荷されるか | `examples/chat/package.json:4` / `scripts/publish-targets.mjs:21-` | `"private": true`。`PUBLISH_TARGETS` は6件で、`@mnemora/example-chat` は**入っていない** |
+| `markContested` の本番の呼び手 | `rg "markContested" --glob '!**/__tests__/**' --glob '!**/*.test.ts' packages examples` | `packages/` には定義と適合テストのみ。**`examples/chat/src/correction-demo.ts` の `markContested` 呼び出しが唯一の非テスト呼び出し** |
+| `examples/chat` が出荷されるか | `examples/chat/package.json:4` / `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` | `"private": true`。`PUBLISH_TARGETS` は6件で、`@mnemora/example-chat` は**入っていない** |
 | `correction` の CI の歯 | `grep -c "correction" .github/workflows/ci.yml` | **0** |
 | ADR 番号の空き | `ls docs/decisions/`（**本 ADR を置く前**） | 最大は **0173**。**0174〜0185 はどれも未使用だった**。⚠ **0185 は中央で配られた番号を使っている**【受】——`git fetch` してから最大 +1 を取る `docs/autonomy.md` §4 の作法とは別経路である |
 | 抽出の構造化出力の形 | `packages/core/src/extraction.ts:18-34` | `content` / `digest` / `tags` / `provenanceKind` / `confidence`。**主張キーに当たる欄は無い** |
 | `Memory` 型の構造化フィールド | `packages/core/src/memory.ts:74-180` | 主語・述語・対象に当たる欄は**無い**（ADR 0134 案A の確認と一致） |
-| カセットの鍵 | `packages/testkit/src/__fixtures__/cassette.ts:77-83` | `system` + `messages` の SHA-256。**`schema` は含まない** |
+| カセットの鍵 | `packages/testkit/src/__fixtures__/cassette.ts` の `llmCassetteKey` | `system` + `messages` の SHA-256。**`schema` は含まない** |
 
 ## 確かめていないこと
 

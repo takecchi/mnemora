@@ -26,16 +26,13 @@ import {
 /**
  * 大きさの端の今の振る舞いを縛る。
  *
- * 1. LLM が失敗したときの全文フォールバック（Issue #1222、migrations/0025・ADR 0364で直した）:
+ * 1. LLM が失敗したときの全文フォールバック:
  *    語の多い本文で tsvector が1MBを超えても、`@mnemora/postgres` はフォールバックの Memory を
  *    書ける——`mnemora_lexical_tsvector`（`idx_memories_lexical` の式）が、1MBを超える本文
  *    だけ先頭150,000文字で tsvector を作り直すため。**本文は1文字も欠けずに `memories.content`
  *    へ残る**——縮退するのは語彙**索引**（先頭150,000文字だけが語彙検索の対象になる）だけで、
- *    保存される本文そのものではない。⚠ **これは 2026-09-27 に書いた「Postgres では動かない」
- *    という記録（PR #1224、`docs/memory-model.md` §4・`extraction.ts` の同日追記）を反転させる**
- *    ——このファイルの歯自体も、その反転後の振る舞いを縛る側へ書き換えた。
- * 2. claimKey の主語・述語（Issue #1074 の続き、`Ctx` の doc）: 索引の1行の上限を超える長さは、
- *    Postgres だけが例外にする（この振る舞いは本 PR の対象外——変えていない）。
+ *    保存される本文そのものではない。
+ * 2. claimKey の主語・述語（`Ctx` の doc）: 索引の1行の上限を超える長さは、Postgres だけが例外にする。
  */
 
 const shared = {

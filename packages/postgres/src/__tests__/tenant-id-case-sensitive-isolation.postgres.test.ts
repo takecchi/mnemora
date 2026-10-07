@@ -1,10 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- 3 実装の store を同じ形で突き合わせる試験 */
-// 確かめ直し（Issue #1759、B 群 #1615 / ADR 0521）の歯。やりすぎ側の対照。
-//
-// ADR 0521 が小文字にそろえるのは「操作の対象の id（記憶・observation・recall・ジョブ）」だけである。
+// やりすぎ側の対照: 小文字にそろえるのは「操作の対象の id（記憶・observation・recall・ジョブ）」だけである。
 // tenantId は別物で、`tenant_id` は text 列（大文字小文字を区別する）。fixture の `get` が tenantId の比べにまで
 // 大文字小文字の畳みを入れると、`Tenant-X` の記憶が `tenant-x` から見える（テナントの越境）。
-// 既存の歯はどれも、綴りだけが違う別テナントからの読みを見ていなかったので、その変異は赤にならなかった。
 import { afterAll, describe, expect, it } from "vitest";
 import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { buildNewMemoryFixture } from "@mnemora/testkit";

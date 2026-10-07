@@ -20,14 +20,14 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * `coverage` の 1/0 を決める側（`word_similarity(...) >= threshold`）である。前者だけ丸めれば行が消え、
  * 後者だけ丸めれば行は残って `coverage` が 0 になる。どちらも見えるように、`coverage` まで確かめる。
  *
- * SQL_ASCII の leg では `create()` が拒むので（ADR 0319）、その leg では `create()` の拒否だけを確かめる。
+ * SQL_ASCII の leg では `create()` が拒むので、その leg では `create()` の拒否だけを確かめる。
  */
 
 const TENANT = "trigram-threshold-boundary";
 const ctx: Ctx = { tenantId: TENANT };
 const filter = { tenantId: TENANT };
 const QUERY = "東京タワー";
-/** `word_similarity(QUERY, この本文)` が 0.375（実測）。 */
+/** `word_similarity(QUERY, この本文)` が 0.375。 */
 const CONTENT = "東京ワー";
 
 afterAll(async () => {

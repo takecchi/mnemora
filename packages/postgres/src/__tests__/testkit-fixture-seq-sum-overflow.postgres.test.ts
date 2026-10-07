@@ -13,16 +13,16 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0505: `nowSeq + S_x`（`archiveDecayed`）・`decayFloorSeqAfter + S_x`（`aggregateScope`・`VectorStore.search`）が
- * bigint を溢れるとき、Postgres は `22003 bigint out of range` で文ごと失敗する（ADR 0500 の材料、ADR 0505 で測り直した）。
+ * `nowSeq + S_x`（`archiveDecayed`）・`decayFloorSeqAfter + S_x`（`aggregateScope`・`VectorStore.search`）が
+ * bigint を溢れるとき、Postgres は `22003 bigint out of range` で文ごと失敗する。
  * testkit の InMemory も同じ入力で断ることを、**同じ入力を2実装へ流して**縛る。
  *
- * Postgres が溢れを見るのは、**その式が実際に評価される行があるとき**だけである（測った）:
+ * Postgres が溢れを見るのは、**その式が実際に評価される行があるとき**だけである:
  * - 評価されるのは `decay_floor_seq` が非 NULL（`IS NULL OR …`・`IS NOT NULL AND …` の短絡）で、記憶が subject を持つ行
  *   （`S_x` の引きが 0 に落ちる subject なしの行は `nowSeq + 0`）。
  * - 2軸（壁時計と活動時計）が両方あるときは、式の左（壁時計）で決まれば右（活動時計）は評価されない。
  * - 行が先に別の条件（`status`・`attributes`・集計の「スコープ内」など）で落ちれば、評価されない。
- * 例外の種類（`bigint`）だけを見る。文面・クラスは2実装で違う（`packages/testkit/src/fixtures.ts` の冒頭）。
+ * 例外の種類（`bigint`）だけを見る。文面・クラスは2実装で違う。
  */
 
 const ctx: Ctx = { tenantId: "seq-sum-overflow" };

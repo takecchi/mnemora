@@ -21,10 +21,9 @@ import { PostgresRelationStore } from "../relation-store.js";
 import { getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
 /**
- * ADR 0542: `Runtime.reembed`（`MemoryStore.requeueEmbedJobs`）は、`active`・`contested` の記憶だけを積み直す。forgotten・purge 済み・
- * archived・superseded の記憶は、`embeddingStatus` が対象でも選ばない。ADR 0541 の材料1は「forgotten も積み直す」と書いたが、
- * 現物（3実装とも `status IN ('active','contested')` で絞る）を読み違えていた——この歯が今の振る舞いを縛る（直す前に赤にならなかった）。
- * 3 実装（Postgres・testkit の InMemory・core の Fake）で見る。conformance suite には何も足していない（ADR 0434 決定5）。
+ * `Runtime.reembed`（`MemoryStore.requeueEmbedJobs`）は、`active`・`contested` の記憶だけを積み直す。
+ * forgotten・purge 済み・archived・superseded の記憶は、`embeddingStatus` が対象でも選ばない（3実装とも `status IN ('active','contested')` で絞る）。
+ * 3 実装（Postgres・testkit の InMemory・core の Fake）で見る。
  */
 
 const ctx = { tenantId: "tenant-1" };
