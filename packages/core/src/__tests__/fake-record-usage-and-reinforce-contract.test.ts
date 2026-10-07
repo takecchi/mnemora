@@ -1,11 +1,3 @@
-// #980 の確かめ直し（#1774）。core の `FakeMemoryStore.recordUsageAndReinforce`（`runtime-fakes.ts`）の契約のうち、
-// 既存の歯（`memory-usage-record-and-reinforce.test.ts`）が見ていない形。
-//
-// - 強化の対象は「この呼び出しで実際に挿入した id だけ」。再送（全部が既に記録済み）では空配列を返し、強化もしない。
-//   一部だけが新しい呼び出しでは、新しい id だけを返して強化し、既に記録済みの id は強化し直さない。
-// - `at`・`opts`（`nowSeq`）は強化にそのまま届く。
-// - 強化が失敗して取り消すのは「この呼び出しで挿入した行」だけで、以前の呼び出しで記録済みの行は残る。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { Memory, NewMemory } from "../memory.js";
@@ -86,12 +78,10 @@ describe("FakeMemoryStore.recordUsageAndReinforce: 挿入した id だけを返�
     expect(afterFirst.lastReinforcedAt).toBe(AT1.toISOString());
     expect(afterFirst.decayBaseSeq).toBe(5);
 
-    // 再送：全部が記録済み
     const r2 = await store.recordUsageAndReinforce(ctx, recallId, [m1.id], AT2, { nowSeq: 7 });
     expect(r2.insertedMemoryIds).toEqual([]);
     expect(await view(m1)).toEqual(afterFirst);
 
-    // 一部だけ新しい
     const r3 = await store.recordUsageAndReinforce(ctx, recallId, [m1.id, m2.id], AT2, {
       nowSeq: 7,
     });
@@ -112,7 +102,6 @@ describe("FakeMemoryStore.recordUsageAndReinforce: 挿入した id だけを返�
         nowSeq: 6,
       }),
     ).rejects.toThrow();
-    // m2 は取り消され、m1 は記録済みのまま
     const retry = await store.recordUsageAndReinforce(ctx, recallId, [m1.id, m2.id], AT2, {
       nowSeq: 7,
     });

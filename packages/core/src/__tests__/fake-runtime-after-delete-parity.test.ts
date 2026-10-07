@@ -8,15 +8,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime, type Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0522（ADR 0493 §9「測っていないこと」の実測）: Runtime 層（forget・purge・restoreArchived・restoreSuperseded・markContested・
- * recall・findCorrectionCandidates+applyCorrection）を、消した後（forgotten・archived・purge 済み）の記憶に当てた結果と、
- * `purgeExpiredEvents` の後の `EventStore.get`・`list`、`LexicalFilter` に無い `decayFloor*After` を渡したときの結果を、Fake で縛る。
- * 同じ `EXPECTED` を、実 Postgres と InMemory の側（`packages/postgres/src/__tests__/runtime-after-delete-parity.postgres.test.ts`）が
- * 縛る。3者の振る舞いは一致していた（割れは見つからなかった）。この歯は、その一致が崩れたときに落ちる。
- *
- * 大文字の uuid の id は含めない（fixture の id は `mem-N` で、Postgres と割れることが分かっている。ADR 0469・0521）。
- */
+// 大文字の uuid の id は含めない: fixture の id は `mem-N` で、Postgres と割れることが分かっている。
 
 interface Env {
   runtime: Runtime;
@@ -31,11 +23,6 @@ interface Outcomes {
   outcomes: Array<{ kind: string }>;
 }
 
-/**
- * 同じ操作列を、実装ごとの組み立て（`Env`）に流し、結果を平らなデータにする。core の Fake の歯
- * （`fake-runtime-after-delete-parity.test.ts`）と、InMemory・Postgres の歯
- * （`packages/postgres/src/__tests__/runtime-after-delete-parity.postgres.test.ts`）が、同じ `EXPECTED` に突き合わせる。
- */
 async function scenario(env: Env): Promise<Record<string, unknown>> {
   const { runtime, mem, lex, ev, mk, ctx } = env;
   const out: Record<string, unknown> = {};
@@ -113,7 +100,6 @@ async function scenario(env: Env): Promise<Record<string, unknown>> {
     });
     out[`applyCorrection(corrected ${st})`] = ac.kind;
   }
-  // purgeExpiredEvents の後の EventStore の参照
   const em = await mk("events memory");
   const eids: string[] = [];
   for (const at of [

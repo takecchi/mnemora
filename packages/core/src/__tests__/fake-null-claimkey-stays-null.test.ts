@@ -3,15 +3,6 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0588: 入力の `claimKey: null` は、保存しても・返しても `null` のまま（`{}` などに化けない）。
- *
- * ADR 0578 の入力の写し（`fakeSnapshot(input.claimKey ?? null)`）の歯は、claimKey が在る値の共有だけを見ていた。
- * 「null を `{}` にする」実装は、そこでは赤にならない。
- * 置き場所: `fake-returns-copies-for-writers.test.ts` の最後の describe（入力の claimKey）は別の PR が末尾に足しているので、
- * 行がぶつからないよう新しいファイルに置いた。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const T0 = "2026-01-01T00:00:00.000Z";
 

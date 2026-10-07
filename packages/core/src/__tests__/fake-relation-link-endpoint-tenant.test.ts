@@ -1,12 +1,3 @@
-// Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1474（ADR 0398）の変異試験で、
-// 「Fake の `link` が別テナントの記憶を端に取れる」変異がすり抜けた（Fake の `link` を呼ぶ歯が、
-// ctx のテナントの記憶しか与えていなかった）。担当はクローン（miku）の判断で進めている作業であり、
-// オーナーの判断ではない。
-//
-// ADR 0398 決定4: core の Fake も、両端（from・to）がどちらも `ctx.tenantId` の実在の記憶であることを
-// 書く前に確かめ、無い・別テナントなら行を書かずに `memory not found for tenant` を含む Error を投げる
-// （「無い」と「別テナント」は区別しない）。適合テスト（`describeRelationStoreConformance`）は Fake に
-// 当たっていない（当たるのは InMemory と Postgres だけ）ので、Fake 自身の歯をここに置く。
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { MemoryId } from "../ids.js";
