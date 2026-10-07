@@ -21,21 +21,7 @@ import {
 import { translateForOpenAIStructuredOutput } from "../json-schema.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
-/**
- * 根が object でないスキーマ（判別可能ユニオンなど）を、OpenAI の strict な Structured Outputs が
- * 受け付ける形で送り、返った値を元の形へ戻す。
- *
- * OpenAI の strict は、根が `type: "object"` であること・`oneOf` を使わないことを求める
- * （`openai` SDK 自身の strict 変換 `lib/transform.js` の `toStrictJsonSchema` が
- * `Root schema must have type: 'object'` / `Root schema must not use anyOf` で投げ、
- * `helpers/standard-schema.js` は「OpenAI strict schemas do not support `oneOf`」と書く）。
- *
- * 【実測 2026-09-27、`openai@7.10.0`】core の4つのスキーマの翻訳を SDK の `toStrictJsonSchema` に
- * 通すと、`ReflectionLLMResultSchema`（`outcome` を判別子にする判別可能ユニオン、ADR 0091）
- * だけが `Root schema must have type: 'object' but got type: undefined` で落ちた——
- * `runtime.reflect()` を OpenAI の provider で呼ぶと、実 API に拒まれる形を送っていた
- * （実 API には当てていない。当てたのは SDK 自身の検査だけ）。
- */
+/** OpenAI の strict は、根が `type: "object"` であること・`oneOf` を使わないことを求める（`openai` SDK の `toStrictJsonSchema` が投げる）。実 API には当てておらず、当てたのは SDK 自身の検査だけ。 */
 
 const require = createRequire(import.meta.url);
 const { toStrictJsonSchema } = require("openai/lib/transform") as {
@@ -98,8 +84,7 @@ describe("OpenAI の strict が受け付ける形で送る（SDK 自身の stric
     });
   });
 
-  // `structured-root.ts` の `wrapRootSchema` の doc・README の表の注: 根そのものを指す `$ref: "#"` は
-  // 書き換えないので、根が再帰する union を包むと、子の参照は包みの object を指す（今の振る舞いを縛る）。
+  // 根そのものを指す `$ref: "#"` は書き換えないので、根が再帰する union を包むと、子の参照は包みの object を指す（今の振る舞いを縛る）。
   it("根が再帰する union は、子の $ref: '#' が包みの object（{ result }）を指したまま送る", () => {
     type Node = { kind: "leaf" } | { kind: "node"; children: Node[] };
     const NodeSchema: z.ZodType<Node> = z.lazy(() =>
@@ -109,7 +94,6 @@ describe("OpenAI の strict が受け付ける形で送る（SDK 自身の stric
       ]),
     );
     const { schema: sent } = translateForOpenAIStructuredOutput("x", NodeSchema);
-    // 根は包みの object で、その唯一の欄が元の union。
     expect(sent["type"]).toBe("object");
     expect(sent["required"]).toEqual(["result"]);
     const union = (sent["properties"] as { result: { anyOf: Array<Record<string, unknown>> } })
@@ -118,13 +102,11 @@ describe("OpenAI の strict が受け付ける形で送る（SDK 自身の stric
       (branch) => (branch["properties"] as { kind: { const: string } }).kind.const === "node",
     )!;
     const children = (nodeBranch["properties"] as { children: { items: unknown } }).children;
-    // 子は根（＝包みの object）を指す。元の union を指す `$defs` の参照にはなっていない。
     expect(children.items).toEqual({ $ref: "#" });
     expect(sent["$defs"]).toBeUndefined();
   });
 
-  // `wrapRootSchema` の doc: 包むとき `$defs` は根に残す（`#/$defs/...` の参照が指す先を変えないため。#1147）。
-  // 枝が再帰する共有のスキーマを持つと、zod は根に `$defs` を作る。
+  // 包むとき `$defs` は根に残す（`#/$defs/...` の参照が指す先を変えないため）。
   it("$defs を持つ根の union を包むと、$defs は包みの根に残り、result の内側には入らない", () => {
     type Tree = { label: string; children: Tree[] };
     const TreeSchema: z.ZodType<Tree> = z.lazy(() =>

@@ -3,13 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import OpenAI from "openai";
 import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 
-/**
- * `embed()` が応答を検査することの歯（Refs #860、ADR 0305 の 2026-09-30 追記）。
- *
- * 本物の `openai` SDK に偽の `fetch` を渡す。SDK は既定で `encoding_format: "base64"` を送り、
- * 応答の base64 を Float32 に戻す——その経路ごと通したうえで、件数・index・次元・有限性の
- * ずれが例外になることを見る。実 API・ネットワークは使わない。
- */
+/** 本物の `openai` SDK に偽の `fetch` を渡す。SDK は既定で `encoding_format: "base64"` を送り、応答の base64 を Float32 に戻すので、その経路ごと通す。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 type Item = { index: number; vector: number[] };
@@ -113,8 +107,7 @@ describe("OpenAIEmbeddingProvider.embed の応答検査", () => {
     await expect(p.embed(ctx, ["a", "b", "c"])).rejects.toThrow(DIM);
   });
 
-  // 整数でない index（小数・NaN）は範囲外として断る（`Number.isInteger` を外すと別の経路の例外になる）。
-  // NaN は JSON で null になって届く。それも整数ではない。
+  // 整数でない index（小数・NaN）は範囲外として断る（`Number.isInteger` を外すと別の経路の例外になる）。NaN は JSON で null になって届く。
   it.each([0.5, 1.5, Number.NaN])("index が整数でない（%s）応答は範囲外で例外", async (bad) => {
     const p = providerReturning([
       { index: 0, vector: [1, 2] },
@@ -133,7 +126,6 @@ describe("OpenAIEmbeddingProvider.embed の応答検査", () => {
     await expect(p.embed(ctx, ["a"])).rejects.toThrow(FINITE);
   });
 
-  // どの検査で落ちても、入力本文・キーはメッセージに入らない。
   const SECRET = "SECRET-INPUT-TEXT";
   const ok = (index: number): Item => ({ index, vector: [1, 2] });
   it.each<[string, RegExp, Item[]]>([

@@ -4,14 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import type { OpenAILLMProviderError } from "../errors.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
-/**
- * 出力が途中で切れた（`finish_reason: "length"`）ときの例外の文面。
- *
- * この provider は `max_tokens` を送らない（設定が無い）ので、「`max_tokens` を上げよ」とは
- * 勧められない。起きたこと（途中で切れた・`finish_reason`）と、直し方（入力を短くする。上限は
- * モデル側にある）を書く。プロンプトや応答の本文は文面に載せない。種類（`name`・`kind`・
- * `finishReason`）は文面とは別に守る。
- */
+/** この provider は `max_tokens` を送らないので、「`max_tokens` を上げよ」とは勧められない。直し方は入力を短くすること（上限はモデル側にある）。プロンプトや応答の本文は文面に載せない。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 const PROMPT_BODY = "秘密の本文-プロンプト-9f3a";
 const PARTIAL_CONTENT = '{"content":"途中までの応答-7c1d';

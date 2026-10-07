@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OpenAILLMProviderError, isOpenAILLMProviderError } from "../errors.js";
 
-/** ADR 0428 / ADR 0418: `instanceof` を使わず「`kind`、無ければ `name`」で見る判定関数。 */
 describe("isOpenAILLMProviderError", () => {
   it.each(["refusal", "truncated", "no_content", "schema_unsupported"] as const)(
     "本物の例外（kind: %s）を true と判定する",
@@ -42,12 +41,10 @@ describe("isOpenAILLMProviderError", () => {
       kind: "refusal",
     });
     expect(isOpenAILLMProviderError(other)).toBe(false);
-    // name を持たない素のオブジェクト（二重読み込みを模したもの）は、引き続き kind で見る。
     expect(isOpenAILLMProviderError({ kind: "refusal" })).toBe(true);
   });
 
-  // 相手の name が1つ（"AnthropicLLMProviderError"）だけでなく、どの別の name でも断る
-  // （「相手の名前だけ断る」変異を捕まえる）。
+  // 相手の name は1つだけでなく、どの別の name でも断る（「相手の名前だけ断る」変異を捕まえる）。
   it.each(["LocalEmbeddingProviderError", "Error", "SomethingElse"])(
     "kind を持つが name が %s の値は false",
     (name) => {
