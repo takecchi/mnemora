@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { sql } from "drizzle-orm";
+import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
@@ -166,6 +167,67 @@ describe("db.transaction(): rollback が失敗しても元のエラーを投げ�
     }
     expect(gone, "捨てたはずの接続の backend が残っている").toBe(true);
   });
+
+  it("rollback だけが失敗して捨てた接続にも、error リスナーが残る（捨てたあとに届く切断の error で落ちない）", async () => {
+    const app = "bg2-discard-listener";
+    const client = victim(app);
+    let physical: PoolClient | undefined;
+    client.pool.once("connect", (c) => {
+      physical = c;
+    });
+    const restore = rejectStatement({
+      applicationName: app,
+      matches: (text) => /^\s*rollback\s*;?\s*$/i.test(text),
+      error: new Error("INJECTED: rollback failure"),
+      times: 1,
+    });
+    let whileBorrowed: Function[] = [];
+    try {
+      await client.db
+        .transaction(async () => {
+          whileBorrowed = physical?.listeners("error") ?? [];
+          throw new Error("元のエラー");
+        })
+        .catch(() => {});
+    } finally {
+      restore();
+    }
+
+    expect(whileBorrowed.length).toBeGreaterThan(0);
+    expect(physical?.listeners("error").some((l) => whileBorrowed.includes(l))).toBe(true);
+  });
+
+  it.each([
+    ["文字列", "文字列で投げた失敗"],
+    ["Error でないオブジェクト", { code: "X-NOT-AN-ERROR" }],
+  ])(
+    "本体が %s を投げ、rollback も失敗しても、投げられるのはその値のまま（cause を足さない）",
+    async (_label, original) => {
+      const app = "bg2-non-error";
+      const client = victim(app);
+      const restore = rejectStatement({
+        applicationName: app,
+        matches: (text) => /^\s*rollback\s*;?\s*$/i.test(text),
+        error: new Error("INJECTED: rollback failure"),
+        times: 1,
+      });
+      let thrown: unknown;
+      try {
+        thrown = await client.db
+          .transaction(async () => {
+            throw original;
+          })
+          .catch((e: unknown) => e);
+      } finally {
+        restore();
+      }
+
+      expect(thrown).toBe(original);
+      if (typeof original === "object") {
+        expect(Object.keys(original as object)).toEqual(["code"]);
+      }
+    },
+  );
 
   describe("forget / purge の outcomes[].error にも元のエラーが載る", () => {
     const ctx: Ctx = { tenantId: "transaction-rollback-error" };
