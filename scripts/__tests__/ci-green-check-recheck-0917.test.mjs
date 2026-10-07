@@ -11,26 +11,6 @@ import {
 } from "../ci-green-check-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G6 のうち、PR #478（ADR 0215）・
- * ADR 0281（empty check-runs の理由）の「CI が緑」の下限の道具に対して、変異を当てて
- * 見つかった「すり抜け」だけを固定する歯。
- *
- * 既存の `ci-green-check-lib.test.mjs`（判定の純関数）と `ci-green-check.test.mjs`（`gh` を呼ぶ前に
- * 決着する引数検査）が既に守っているものは重ねていない。足したのは次の2つ。
- *
- * 1. 純関数の欠け：`queued` などの未完了を緑にしない、`skipped` 以外の非 success も赤にする、
- *    green の reason を1バイトも変えない（ADR 0215）、`dirty` 以外の `mergeable_state` を
- *    `dirty` の扱いにしない（ADR 0281）、等。
- * 2. **CLI の本体**：既存の歯は引数検査の経路だけで、`gh` を呼んだ後の配線（下限を取れなければ pending、
- *    base の決め方、`--recheck-after` の分岐、終了コード）は1行も通っていなかった。ADR 0215 の【実測】は
- *    「偽の `gh` を PATH に置いて CLI 全体を走らせた」ものであり、ここでそれを歯にする。
- *    偽の `gh` は呼ばれた引数を全部記録するので、「どの base の protection を引いたか」
- *    「mergeable_state を引いたか」も確かめられる。
- *
- * 各 `it` の名前の記号（G1・C4 など）は、Issue #1812 のコメントの変異表の番号である。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const script = join(repoRoot, "scripts", "ci-green-check.mjs");
 
@@ -139,10 +119,6 @@ describe("compareCheckRunNameSets: 増えただけ・消えただけでも不安
   });
 });
 
-/**
- * ここから CLI 本体。偽の `gh` を PATH の先頭に置く。`FAKE_GH_DIR` の `scenario.json` が応答を決め、
- * 呼ばれた引数は `calls.log` に1行ずつ残る。
- */
 describe("ci-green-check.mjs（偽の gh で CLI 全体を走らせる。ADR 0215 の【実測】の再現）", () => {
   /** @type {string[]} */
   const workDirs = [];
@@ -318,13 +294,11 @@ describe("ci-green-check.mjs（偽の gh で CLI 全体を走らせる。ADR 021
     expect(dirty.stdout).toContain("衝突");
     expect(pullsCalls(dirty.calls)).toHaveLength(1);
 
-    // 0件でも --sha 直指定なら PR が無いので引かない（従来の理由のまま）。
     const bySha = runCli(base({ polls: [[]], mergeable: "dirty" }), ["--sha", SHA1]);
     expect(bySha.status).toBe(2);
     expect(bySha.stdout).not.toContain("衝突");
     expect(pullsCalls(bySha.calls)).toHaveLength(0);
 
-    // check-runs が在って走っている最中（pending）でも引かない（0件の理由の切り分けのためだけに引く）。
     const running = runCli(
       base({
         polls: [[run("req-a"), run("req-b", "in_progress", null), run("req-c")]],
@@ -336,7 +310,6 @@ describe("ci-green-check.mjs（偽の gh で CLI 全体を走らせる。ADR 021
     expect(running.stdout).not.toContain("衝突");
     expect(pullsCalls(running.calls)).toHaveLength(0);
 
-    // check-runs が在るなら（緑でも）引かない。
     const green = runCli(base({ mergeable: "dirty" }), ["--pr", "5"]);
     expect(green.status).toBe(0);
     expect(pullsCalls(green.calls)).toHaveLength(0);

@@ -6,12 +6,6 @@ import {
   scoresMatchWithinJitter,
 } from "../intrusion-margin-candidates.js";
 
-/**
- * Issue #109 残件C（マネージャー依頼）——`intrusion-margin-candidates.ts` の純関数の歯。
- * DB もネットワークも要らない——値を手で組み立てて渡すだけ
- * （`correction-candidate-arm-margin.test.ts` と同じ規律）。
- */
-
 describe("maxNonProtectedScore", () => {
   it("protectedIds に含まれない候補のうち最大スコアを返す", () => {
     const memories = [{ score: { total: 0.9 } }, { score: { total: 0.5 } }];
@@ -48,12 +42,10 @@ describe("maxNonProtectedScore", () => {
 
 describe("computeProtectionMargin", () => {
   it("深い誤爆側（保護対象が最有力の非保護候補より高い）は正の値", () => {
-    // 保護対象0.9、最有力の非保護候補0.7 ⟹ 保護対象が1位に来る（深い誤爆）状況を表す。
     expect(computeProtectionMargin(0.9, 0.7)).toBeCloseTo(0.2, 10);
   });
 
   it("誤爆(浅)側（非保護候補が保護対象より高い）は負の値", () => {
-    // 保護対象0.6、最有力の非保護候補0.8 ⟹ 非保護候補が1位に来る（誤爆(浅)）状況を表す。
     expect(computeProtectionMargin(0.6, 0.8)).toBeCloseTo(-0.2, 10);
   });
 

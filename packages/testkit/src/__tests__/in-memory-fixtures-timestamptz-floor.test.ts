@@ -7,14 +7,6 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * ADR 0500（読みの口は ADR 0547 で置き換えた）: 紀元前4713年より前（Postgres の `timestamptz` の下限 4714-11-24 BC 00:00:00 UTC より前）の日時を、
- * Postgres は条件・引数に渡された時点で `22008 timestamp out of range` にする。fixture も同じ口で断る。
- * 口ごとの実測の表は ADR 0500 の「測ったこと」。**断らない口**（`purgeExpiredEvents`・`purgeExpiredRecalls`・
- * `purgeCompletedJobs` の `olderThan`。Postgres は下限より前の cutoff を「0件」で返す）は、やりすぎの歯で縛る。
- * 2実装を並べた歯は `packages/postgres/src/__tests__/testkit-fixture-alignment.postgres.test.ts`（DB が要る）。
- */
-
 const ctx: Ctx = { tenantId: "timestamptz-floor" };
 const SPACE = { provider: "p", model: "m", dimensions: 3 };
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
@@ -44,7 +36,6 @@ function build() {
 type K = ReturnType<typeof build>;
 const f = (extra: object) => ({ tenantId: ctx.tenantId, ...extra });
 
-/** 下限より前を扱う口（読みの口と書く口の両方）。`run(k, date)` は、その口に日時を1つ渡す。 */
 const allPorts: Array<[string, (k: K, d: Date) => Promise<unknown>]> = [
   ["EventStore.list since", (k, d) => k.ev.list(ctx, { since: d } as never)],
   ["EventStore.list until", (k, d) => k.ev.list(ctx, { until: d } as never)],
@@ -143,7 +134,6 @@ const allPorts: Array<[string, (k: K, d: Date) => Promise<unknown>]> = [
   ],
 ];
 
-// ADR 0547: 読みの口の条件は、Postgres が下限へ寄せてから比べる。fixture は断らない。書く口（行の値になる日時）だけが断る。
 const READ_PORT =
   /^(EventStore\.list|VectorStore\.|MemoryStore\.aggregateScope|LexicalStore\.|MemoryStore\.find(Active|Contested)ByClaimKey)/;
 const reading = allPorts.filter(([name]) => READ_PORT.test(name));
@@ -211,7 +201,6 @@ describe("やりすぎ: 下限ちょうど・断らない口は通る", () => {
         () => null,
         (e: unknown) => e as Error,
       );
-      // 日時の検査では落ちない（口によっては別の理由で落ちうるので、文面だけを見る）。
       expect(error?.message ?? "").not.toMatch(RANGE);
     },
   );

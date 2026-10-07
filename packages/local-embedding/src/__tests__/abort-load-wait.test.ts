@@ -3,12 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 import type { CreateLocalEmbeddingPipeline, LocalEmbeddingPipeline } from "../pipeline.js";
 
-/**
- * ADR 0428: モデルの読み込み中・読み込みの再試行中に abort されたとき、呼び出し側は
- * `signal.reason` で**すぐに** reject する。ただし**共有の読み込み（複数の embed が待つ `#load`）は
- * 止めない**——待ちだけを signal ごとに切る（ある呼び出しの abort が、別の呼び出しの待つ読み込みを
- * 巻き添えにしない）。`createPipeline` / `sleep` の注入で組む（実モデルは落とさない）。
- */
+/** 共有の読み込み（複数の embed が待つ `#load`）は止めず、待ちだけを signal ごとに切る。ある呼び出しの abort が、別の呼び出しの待つ読み込みを巻き添えにしない。`createPipeline` / `sleep` の注入で組み、実モデルは落とさない。 */
 const ctx: Ctx = { tenantId: "test-tenant" };
 
 function pipelineOf(): LocalEmbeddingPipeline {
@@ -45,9 +40,8 @@ describe("LocalEmbeddingProvider — 読み込み中の abort", () => {
     await tick();
     controller.abort(reason);
 
-    // 読み込み（gate）はまだ開けていない。それでも reject する。
     await expect(promise).rejects.toBe(reason);
-    gate.resolve(pipelineOf()); // 後始末（未解決の Promise を残さない）
+    gate.resolve(pipelineOf());
   });
 
   it("再試行の待ち（sleep）の最中に abort すると、sleep の完了を待たずに signal.reason で reject する", async () => {
@@ -68,11 +62,11 @@ describe("LocalEmbeddingProvider — 読み込み中の abort", () => {
 
     const promise = provider.embed(ctx, ["a"], { signal: controller.signal });
     await tick();
-    expect(createCalls).toBe(1); // 1回目が失敗し、sleep で止まっている
+    expect(createCalls).toBe(1);
     controller.abort(reason);
 
     await expect(promise).rejects.toBe(reason);
-    sleepGate.resolve(); // 共有の再試行は続く（後始末）
+    sleepGate.resolve();
     await tick();
   });
 
@@ -123,7 +117,7 @@ describe("LocalEmbeddingProvider — 読み込み中の abort", () => {
 
     gate.resolve(pipelineOf());
     await expect(promiseB).resolves.toEqual([[0, 1]]);
-    expect(createCalls).toBe(1); // 読み込みは1回のまま（A の abort で作り直していない）
+    expect(createCalls).toBe(1);
   });
 
   it("A を abort しても、共有の再試行は続き、B は再試行の末に成功する", async () => {

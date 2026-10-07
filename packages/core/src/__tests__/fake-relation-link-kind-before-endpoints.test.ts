@@ -1,7 +1,4 @@
-// 確かめ直し（Issue #1759、B 群 #1599 / ADR 0488）の歯。
-//
-// ADR 0488: Fake の `link` は、範囲外の kind を「両端の検査より前に」断る。
-// 既存の歯は両端が在る入力でしか kind を試さないので、検査を両端の検査の後ろへ動かしても赤にならなかった。
+// 両端の検査より前に範囲外の kind を断る。両端が在る入力でしか kind を試さないと、検査を両端の検査の後ろへ動かしても赤にならない。
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { RelationKind } from "../interfaces/relation-store.js";

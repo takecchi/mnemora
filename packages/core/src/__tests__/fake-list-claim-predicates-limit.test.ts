@@ -1,11 +1,3 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// core の `FakeMemoryStore.listActiveClaimPredicates` も、testkit の
-// `InMemoryMemoryStore.listActiveClaimPredicates` と同じく `query.limit` を検査せず
-// `slice(0, limit)` へ渡していた。Postgres（生 SQL の `LIMIT`）に揃えて、負数・`NaN`・
-// `Infinity`・非整数・2^63 以上を例外にする（歯の対は
-// `packages/testkit/src/__tests__/in-memory-list-claim-predicates-limit.test.ts`）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
@@ -18,7 +10,6 @@ describe("FakeMemoryStore.listActiveClaimPredicates: limit を Postgres と同�
     [Infinity, /limit must be an integer/],
     [1.5, /limit must be an integer/],
     [-1, /limit must not be negative/],
-    // #1157: 負かつ整数でない値は、先頭の検査＝整数の文面で拒む。
     [-1.5, /limit must be an integer/],
     [-Infinity, /limit must be an integer/],
     [2 ** 63, /limit must fit in a Postgres bigint/],

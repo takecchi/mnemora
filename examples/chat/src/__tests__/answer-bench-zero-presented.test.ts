@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { describeZeroPresented } from "../answer-bench.js";
 
-/**
- * `describeZeroPresented`（Issue #583 の警告）の、`answer-bench.test.ts` の3本が見ていない側の歯。
- * 約束は Issue #1071 の PR 本文と、`describeZeroPresented` の doc（「スコープ内に記憶が在り、
- * 1件も提示されなかったときだけ文を返す」「判定ではなく候補の一覧として出す」）。DB を要求しない。
- *
- * ⚠ 文面の言い回しそのものは固定しない。見ているのは、この警告が運ぶ**情報**（どの tenant の・
- * どの空間の・何件のスコープ内記憶か／挙げた候補／omitted の内訳）と、「判定ではない」と
- * 名乗ること、警告を出す条件だけ。
- */
+// 文面の言い回しは固定しない（見ているのは警告が運ぶ情報と、警告を出す条件）。
 
 type Recall = Parameters<typeof describeZeroPresented>[2];
 

@@ -5,16 +5,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewObservation } from "../observation.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0640（Issue #1755）: core のテスト専用 Fake も、行に日時を書く口で `timestamptz` の下限（4714-11-24 BC 00:00 UTC）より前を、
- * 書く前に `RangeError` で断る（`@mnemora/testkit/fixtures` の `InMemory*` と同じ型・同じ文面。Postgres は `22008`）。
- * 前例は ADR 0597（`FakeOutboxStore.complete`・`fail`）。「Postgres で通らないテストが Fake で通る」ずれを残さない。
- *
- * 口を全部並べた歯は testkit 側（`in-memory-fixtures-written-timestamptz-floor.test.ts`）。Fake は conformance に繋がっていない
- * （Issue #768）ので、ここは代表の口（Memory・Observation の欄、`reinforce`・`createRecall`・イベントの `at`）と、
- * Postgres が日時を見ない分岐（CAS に弾かれる対象）を当てる。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
 const EARLY = new Date(FLOOR_MS - 1);

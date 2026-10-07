@@ -4,13 +4,6 @@ import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * `InMemoryVectorStore.deleteAcrossSpaces` は、大文字で綴った memoryId でも同じ行を消す。
- * `@mnemora/postgres` は `memory_id` を uuid 型の列で比べるので、綴りの違いは区別しない
- * （ADR 0521 が `delete`・`getVectors` などを揃えた。`deleteAcrossSpaces` も同じ）。
- * 全 space から消すこと・渡していない id の行を残すことも、同じ it で見る。
- */
-
 const ctx: Ctx = { tenantId: "in-memory-delete-across-spelling" };
 const SPACE_A: EmbeddingSpaceId = { provider: "test", model: "across-a", dimensions: 3 };
 const SPACE_B: EmbeddingSpaceId = { provider: "test", model: "across-b", dimensions: 3 };

@@ -4,13 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll } from "vitest";
 
-/**
- * `packages/testkit/README.md`「動く最小の例（実際に vitest で実行して確認済み）」を縛る。
- * `check:doc-snippets` は型しか見ないので、ここでは片そのものを README から取り出し、import 先を
- * testkit の入口に向けるだけで実行する——片が登録する `describeEventStoreConformance` が、このファイルの
- * テストとして走る（片の自作 `MyEventStore` が適合テストを全部通ることを見る）。
- */
-
 const README = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
 const section = README.slice(README.indexOf("## 動く最小の例"));
 const open = section.indexOf("```ts check\n");

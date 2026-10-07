@@ -5,13 +5,8 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `FakeLexicalStore.search` の並びは `coverage` 降順 → `rank` 降順 → `recordedAt` 降順 → `memoryId` 昇順。
- * 同点（`recordedAt` まで同じ）の最後の段は `memoryId` の文字列順で、挿入順ではない。
- * また `recordedAt` は `coverage`・`rank` が同じときだけ効く（新しいからといって、`coverage`・`rank` が低い行が先に出てはならない）。
- * 新しい方が先に来ること（`recordedAt` の段そのもの）は `fake-store-postgres-parity.test.ts` にある。
- *
- * ⚠ 1つ目の歯は、このファイルで最初に Memory を作る歯でなければならない。`mem-N` の連番は
- * ファイルごとに 1 から始まるので、12件作ると `mem-10` を跨ぎ、「作った順」と「文字列順」が分かれる。
+ * 1つ目の歯は、このファイルで最初に Memory を作る歯でなければならない: `mem-N` の連番はファイルごとに 1 から始まり、
+ * 12件作ると `mem-10` を跨いで「作った順」と「文字列順」が分かれる。
  */
 
 const TENANT = "fake-lexical-tiebreak-order-tenant";

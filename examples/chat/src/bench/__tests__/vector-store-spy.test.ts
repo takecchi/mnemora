@@ -2,15 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { VectorHit, VectorStore } from "@mnemora/core";
 import { stage3_5DbMs, type VectorStoreSpy, wrapVectorStoreWithSpy } from "../vector-store-spy.js";
 
-/**
- * Issue #1012: association-scale 系ベンチの VectorStore の包みの歯。
- *
- * 包みが、内側の store が持つ任意の一括の口（`searchMany?`、PR #932）を外へ出さないと、
- * runtime の段3.5 は「`searchMany` が無い adapter」とみなしてアンカーごとに `search()` を
- * 撃つ——本番（`PostgresVectorStore` は `searchMany` を持つ）と違う経路の往復・時間を測る。
- * ここでは、包みが `searchMany` を外へ出し、1回の束を1件として（時間は束の単位で、按分しない）
- * 記録し、段3.5 の DB 時間に含めることを測る。
- */
+// 包みは searchMany（任意の一括の口）を外へ出す。出さないと runtime が adapter に searchMany が無いとみなし、アンカーごとに search() を撃って本番と違う経路を測る。
 
 const hit = (memoryId: string): VectorHit => ({ memoryId, distance: 0.1 }) as VectorHit;
 
@@ -61,7 +53,6 @@ describe("association-scale 系ベンチの VectorStore の包み（Issue #1012�
     expect(spy.calls.map((c) => c.kind)).toEqual(["search", "searchMany"]);
     const batch = spy.calls[1]!;
     expect(batch.queryCount).toBe(2);
-    // 段3.5 の DB 時間は、1回目の search（段1）より後の呼び出しの合計——束はそのまま1件で入る。
     expect(stage3_5DbMs(spy)).toBe(batch.ms);
   });
 });

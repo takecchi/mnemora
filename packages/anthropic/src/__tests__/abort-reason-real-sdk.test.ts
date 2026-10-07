@@ -6,12 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Ctx } from "@mnemora/core";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
-/**
- * ADR 0428: provider を**直に**呼んだとき、abort の reject が `signal.reason` そのものであること
- * （ADR 0359 決定4）。`client` に**実物の `@anthropic-ai/sdk`** を注入し、localhost の擬似 HTTP
- * サーバに向ける（実 API・鍵は使わない）。`@mnemora/openai` の同名の歯と同じ形・同じ理由。
- * サーバの挙動はリクエストのヘッダ `x-mode`（`defaultHeaders`）で切り替える。
- */
+/** `client` に実物の `@anthropic-ai/sdk` を注入し、localhost の擬似 HTTP サーバに向ける。偽 client では SDK が signal をどう扱うか分からないため。サーバの挙動はヘッダ `x-mode`（`defaultHeaders`）で切り替える。 */
 const ctx: Ctx = { tenantId: "tenant-abort-real" };
 const prompt = { messages: [{ role: "user" as const, content: "hi" }] };
 
@@ -24,7 +19,7 @@ beforeAll(async () => {
     requestCount += 1;
     const mode = req.headers["x-mode"];
     if (mode === "hang") {
-      return; // 応答しない
+      return;
     }
     if (mode === "rate-limit") {
       res.writeHead(429, { "retry-after": "3", "content-type": "application/json" });
@@ -104,7 +99,7 @@ describe.each(Object.entries(calls))("実物の Anthropic SDK — %s の abort",
       () => "resolved",
       (error: unknown) => error,
     );
-    // 待ち時間を先に見る（SDK の再試行待ち 3 秒を待ち切っていたら、値の前にここで落ちる）
+    // 待ち時間を先に見る（SDK の再試行待ち 3 秒を待ち切っていたら、値の前にここで落ちる）。
     expect(Date.now() - started).toBeLessThan(1500);
     expect(outcome).toBe(reason);
   });

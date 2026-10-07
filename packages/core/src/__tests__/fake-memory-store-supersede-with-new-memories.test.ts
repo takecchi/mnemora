@@ -5,20 +5,6 @@ import type { NewMemory } from "../memory.js";
 import type { NewMemoryEvent } from "../event.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.supersedeWithNewMemories`（Issue #134 / ADR 0100）の歯。
- *
- * **`packages/testkit` の適合テストの対象ではない。** `FakeMemoryStore` は
- * `packages/core` 自身の runtime テスト専用の別系統であり（`runtime-fakes.ts` 冒頭の
- * コメント）、`packages/testkit` の適合テスト（`InMemoryMemoryStore` が対象）はこれを
- * 検査できない。ADR 0047「実装後に判明したこと」が踏んだ穴——ガードを実装しても、
- * それを守る歯が `packages/core` 側に無ければ変異を入れても赤くならない——を、
- * この新設ファイルが `FakeMemoryStore.supersedeWithNewMemories` について埋める。
- *
- * ⚠ `runtime.ts` の `reextract`/`consolidate` はこのメソッドへまだ寄せられていない
- * （実装の報告参照）。この歯は `FakeMemoryStore` そのものの契約だけを検査する。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
 
@@ -65,9 +51,8 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
     const oldA = await stores.memoryStore.createMemory(ctx, newMemory());
     const oldB = await stores.memoryStore.createMemory(ctx, newMemory());
 
-    // 🔴 news は**3件**（ADR 0100 の穴①）。`created[i]` が `news[i]` に対応することは
-    // 型が保証しておらず、並びがずれると `supersededById` に別の記憶の id が書かれたまま
-    // 検査が緑で通る。3件にして**異なる索引（0 と 2）**へ寄せることで取り違えを捕まえる。
+    // news は3件にして、異なる索引（0 と 2）へ寄せる: `created[i]` が `news[i]` に対応することは型が保証せず、
+    // 2件だと並びがずれて別の記憶の id が `supersededById` に書かれても検査が緑で通る。
     const news1 = newMemory({ content: "news-1 の本文" });
     const news2 = newMemory({ content: "news-2 の本文" });
     const news3 = newMemory({ content: "news-3 の本文" });
@@ -218,8 +203,7 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
       extractorVersion: "fake-supersede-with-new-memories-v1",
     });
 
-    // 🔴 穴②: 「呼び手が壊れた索引を渡した」は「CAS で弾かれた」とも「対象の行が無い」とも
-    // 別の失敗である。⛔ 潰さない——`RangeError` であることとメッセージまで固定する。
+    // `RangeError` であることとメッセージまで固定する: CAS で弾かれた場合・対象の行が無い場合とは別の失敗なので、潰さない。
     await expect(
       stores.memoryStore.supersedeWithNewMemories(
         ctx,

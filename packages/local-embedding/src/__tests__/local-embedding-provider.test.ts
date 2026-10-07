@@ -15,25 +15,11 @@ import type {
 } from "../pipeline.js";
 import { LocalEmbeddingProviderError, isLocalEmbeddingProviderError } from "../errors.js";
 
-/**
- * `LocalEmbeddingProvider` の歯。**本物のモデルは一切落とさない**——
- * `createPipeline` を注入して、このクラスが本当に持っているロジックだけを測る:
- * `space` の確定と凍結 / 遅延ロードを1回に畳むこと / 失敗後に再試行できること /
- * 次元と件数の検査 / prefix の適用 / `warmup()`。
- *
- * **擬似にしているのは「モデルを読み込んで推論する」往復だけである。**
- * 本物のモデルが実際に 256 次元を返すこと・日本語で意味のある近さを出すことは
- * `live.local-embedding.test.ts`（opt-in）が測る。
- */
+/** `createPipeline` を注入して、本物のモデルは一切落とさない。擬似にしているのは「モデルを読み込んで推論する」往復だけで、256 次元を返すことや日本語での近さは `live.local-embedding.test.ts`（opt-in）が測る。 */
 
 const ctx: Ctx = { tenantId: "test-tenant" };
 
-/**
- * このファイルの偽 pipeline を `LocalEmbeddingPipeline`（ADR 0090 §3.1 の必須 interface）の
- * 形に組み立てる。**このファイルは上限の検査そのものは測らない**（それは
- * `input-token-limit.test.ts` の役目）ので、`maxInputTokens` / `countTokens` は
- * ダミーの値で埋める——⛔ ここに実モデルの上限値を書かない。
- */
+/** このファイルは上限の検査を測らない（`input-token-limit.test.ts` の役目）ので、`maxInputTokens` / `countTokens` はダミーの値で埋める。実モデルの上限値を書かないこと。 */
 function fakeLocalEmbeddingPipeline(
   embed: (texts: string[]) => Promise<number[][]>,
 ): LocalEmbeddingPipeline {
@@ -44,13 +30,10 @@ function fakeLocalEmbeddingPipeline(
   };
 }
 
-/** 呼ばれた回数と、渡された `spec` / テキストを記録する偽 pipeline。 */
 function createRecordingPipeline(
   options: {
     dimensions?: number;
-    /** 返すベクトルの件数を入力件数からずらす（件数不一致の歯で使う）。 */
     countDelta?: number;
-    /** `createPipeline` の解決を止めておくためのゲート。 */
     gate?: Promise<void>;
   } = {},
 ) {
@@ -80,7 +63,6 @@ function createRecordingPipeline(
     createPipeline,
     specs: state.specs,
     embeddedBatches: state.embeddedBatches,
-    /** `createPipeline` が呼ばれた回数。**この数がこのファイルで一番大事な数である。** */
     get calls(): number {
       return state.createCalls;
     },
@@ -97,8 +79,7 @@ describe("space（コンストラクタで同期に確定する）", () => {
       model: DEFAULT_LOCAL_EMBEDDING_MODEL_ID,
       dimensions: 256,
     });
-    // ⭐ 既定値そのものを書き下しておく。定数を参照するだけだと
-    // 「既定値が変わった」ことをこの歯が検知できない。
+    // 既定値そのものを書き下す。定数を参照するだけだと、既定値が変わったことをこの歯が検知できない。
     expect(provider.space.provider).toBe("local");
     expect(provider.space.model).toBe("ruri-v3-30m/sym");
     expect(provider.space.dimensions).toBe(256);
@@ -116,7 +97,6 @@ describe("space（コンストラクタで同期に確定する）", () => {
     const provider = new LocalEmbeddingProvider({ createPipeline: recorder.createPipeline });
 
     expect(Object.isFrozen(provider.space)).toBe(true);
-    // strict mode（ESM）では凍結オブジェクトへの代入は TypeError になる。
     expect(() => {
       (provider.space as { dimensions: number }).dimensions = 999;
     }).toThrow(TypeError);
@@ -136,17 +116,7 @@ describe("space（コンストラクタで同期に確定する）", () => {
 });
 
 describe("遅延ロード", () => {
-  /**
-   * ⭐ **この歯がこのファイルの本体である。**
-   *
-   * Promise を握らない素朴な実装（読み込み済みの pipeline だけを持つ形）では、
-   * 同時に来た8本の `embed()` が全員それぞれモデルを読み込み、
-   * 557ms / 406MB が 3,138ms / 1,009MB になることを実測している。
-   * **`createPipeline` の呼び出し回数を数えることで、その形へ戻ったら赤くなる。**
-   *
-   * ゲートで読み込みを止めたまま8本を投げる——止めないと、1本目が
-   * マイクロタスク1つで解決してしまい、競合の窓が開かないことがある。
-   */
+  /** Promise を握らない素朴な実装（読み込み済みの pipeline だけを持つ形）では、同時に来た8本の `embed()` が全員モデルを読み込み、557ms / 406MB が 3,138ms / 1,009MB になる。`createPipeline` の呼び出し回数を数えることで、その形へ戻ったら赤くなる。ゲートで読み込みを止めたまま8本を投げる（止めないと、1本目がマイクロタスク1つで解決して競合の窓が開かないことがある）。 */
   it("並行する embed() 8本でも、モデルの読み込みは1回だけ", async () => {
     let openGate = (): void => {};
     const gate = new Promise<void>((resolve) => {
@@ -180,16 +150,7 @@ describe("遅延ロード", () => {
     expect(recorder.calls).toBe(1);
   });
 
-  /**
-   * 失敗した Promise を握り続けると、**一度の一時的な失敗が、そのインスタンスを
-   * 永久に使えなくする**（ネットワークが落ちていた最初の1回で終わる）。
-   *
-   * ⚠ **`retry: { attempts: 1 }` でこの回の中のリトライ（Issue #261 / ADR 0141）を
-   * 無効化している。**ここで確かめたいのは「1回の `#load()` が使い切って失敗したあと、
-   * 次の `embed()` 呼び出しが新しい `#load()` をやり直せるか」であって、
-   * 1回の `#load()` の中で何度試すかではない——後者は下の
-   * describe("読み込みの再試行 (Issue #261 / ADR 0141)") が見る。
-   */
+  /** 失敗した Promise を握り続けると、一度の一時的な失敗でそのインスタンスが永久に使えなくなる。`retry: { attempts: 1 }` で1回の `#load()` の中のリトライを無効にする。確かめたいのは、使い切って失敗したあとの次の `embed()` が新しい `#load()` をやり直せることで、リトライの回数は下の describe が見る。 */
   it("読み込みに失敗しても、次の呼び出しで再試行できる", async () => {
     let attempts = 0;
     const createPipeline: CreateLocalEmbeddingPipeline = async () => {
@@ -201,7 +162,7 @@ describe("遅延ロード", () => {
     };
     const provider = new LocalEmbeddingProvider({ createPipeline, retry: { attempts: 1 } });
 
-    // ⚠ 失敗は包まれる（下の describe を見ること）ので、cause 側で確かめる。
+    // 失敗は包まれるので、cause 側で確かめる。
     await expect(provider.embed(ctx, ["1回目"])).rejects.toThrow(/モデルを読み込めなかった/);
     const vectors = await provider.embed(ctx, ["2回目"]);
 
@@ -223,8 +184,7 @@ describe("遅延ロード", () => {
     expect(((error as Error).cause as Error).message).toBe("同期に落ちた");
   });
 
-  // ⚠ `retry: { attempts: 1 }`——ここで確かめたいのは #ready の並行時の畳み方であって、
-  // 1回の #load() の中のリトライではない。
+  // `retry: { attempts: 1 }` にする。確かめたいのは `#ready` の並行時の畳み方で、リトライではない。
   it("同時に来た8本が全部失敗しても、読み込みは1回だけで、その後再試行できる", async () => {
     let attempts = 0;
     const createPipeline: CreateLocalEmbeddingPipeline = async (_spec) => {
@@ -249,15 +209,7 @@ describe("遅延ロード", () => {
 });
 
 describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
-  /**
-   * **Issue #261 の直接の再現**: `actions/cache` が hit しても
-   * （またはそもそもキャッシュに関係なく）、モデルの読み込みが
-   * 「種類の分かっていない失敗」（典型はネットワーク）で1回だけ落ちることがある。
-   * ⟹ **1回の `#load()` の中で、呼び出し側に見せずに吸収できるはずである。**
-   *
-   * `sleep` を注入して実時間を消費しないようにしている——待つこと自体は
-   * `defaultLocalEmbeddingRetryDelayMs` の歯（下）が別に見る。
-   */
+  /** `sleep` を注入して実時間を消費しない（待つこと自体は `defaultLocalEmbeddingRetryDelayMs` の歯が見る）。 */
   it("種類の分かっていない失敗は、既定の設定でも同じ embed() 呼び出しの中で吸収される", async () => {
     let calls = 0;
     const createPipeline: CreateLocalEmbeddingPipeline = async () => {
@@ -267,8 +219,7 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
         texts.map(() => Array.from({ length: 256 }, () => 0.1)),
       );
     };
-    // ⭐ retry オプション自体は既定値（DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS）のまま——
-    // 「CI が何も指定しなくても直る」ことを確かめるのが、この歯の主眼である。
+    // retry オプションは既定値のまま。「CI が何も指定しなくても直る」ことを確かめるため。
     const provider = new LocalEmbeddingProvider({ createPipeline, sleep: async () => {} });
 
     const vectors = await provider.embed(ctx, ["1回だけ失敗しても通る"]);
@@ -305,13 +256,7 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     expect(calls).toBe(5);
   });
 
-  /**
-   * `retry: { attempts: NaN }` を渡すと、コンストラクタの `Math.max(1, NaN)` が
-   * `NaN` のままになり、`#startLoad` の `for (attempt = 1; attempt <= NaN; …)` が
-   * 一度も回らない——`createPipeline` を一度も呼ばずに「モデルを読み込めなかった」が
-   * 投げられる（コンストラクタのコメントが明言している「一度も試さない、は許さない」への違反）。
-   * ⟹ 成功する pipeline を渡せば、`createPipeline` が最低1回呼ばれて `embed()` が通るはずである。
-   */
+  /** `retry: { attempts: NaN }` だと `Math.max(1, NaN)` が `NaN` のままになり、`#startLoad` のループが一度も回らず、`createPipeline` を呼ばずに「モデルを読み込めなかった」が投げられる（「一度も試さない、は許さない」への違反）。 */
   it("試行回数に NaN を渡しても、createPipeline は少なくとも1回は呼ばれる", async () => {
     const recorder = createRecordingPipeline();
     const provider = new LocalEmbeddingProvider({
@@ -340,7 +285,6 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     });
 
     await expect(provider.embed(ctx, ["テキスト"])).rejects.toThrow(/モデルを読み込めなかった/);
-    // 3回試行 ⟹ 待つのは attempt 1 と 2 の後だけ（最後の失敗の後には待たない）。
     expect(waited).toEqual([100, 200]);
   });
 
@@ -363,7 +307,7 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
       () => expect.fail("例外が投げられなかった"),
       (reason: unknown) => reason as Error,
     );
-    // 2.5 ⟹ 試すのは2回（attempt 1・2）。待つのはその間の1回だけ。
+    // 2.5 のとき試すのは2回（待つのはその間の1回だけ）。
     expect(calls).toBe(2);
     expect(waited).toEqual([100]);
     expect(error.message).toMatch(/^LocalEmbeddingProvider: モデルを読み込めなかった/);
@@ -439,11 +383,7 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     expect((error as Error).message).not.toContain("2.5 回");
   });
 
-  /**
-   * 🔴 **`kind` の付いた失敗（ADR 0090）はリトライしない。**
-   * 入力・設定の問題であり、同じ入力で再試行しても結果は変わらない
-   * ——リトライは無駄な待ち時間を足すだけである。
-   */
+  /** `kind` の付いた失敗は入力・設定の問題で、再試行しても結果は変わらず、待ち時間を足すだけなのでリトライしない。 */
   it("kind の付いたエラー（unknown_input_limit 等）はリトライせず、1回で即座に投げ直す", async () => {
     let calls = 0;
     const createPipeline: CreateLocalEmbeddingPipeline = async () => {
@@ -459,7 +399,6 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     expect(calls).toBe(1);
     expect(isLocalEmbeddingProviderError(error)).toBe(true);
     expect((error as LocalEmbeddingProviderError).kind).toBe("unknown_input_limit");
-    // ⚠ 包まれていない——「モデルを読み込めなかった」の文面は付かない。
     expect((error as Error).message).not.toMatch(/モデルを読み込めなかった/);
   });
 });
@@ -483,15 +422,7 @@ describe("defaultLocalEmbeddingRetryDelayMs（既定のバックオフ）", () =
 });
 
 describe("読み込み失敗のメッセージ", () => {
-  /**
-   * 既定の repo は**個人の変換 repo** であり、消えうる。それを承知で選べているのは
-   * **元モデルが公式（`cl-nagoya/ruri-v3-30m`, apache-2.0）で、変換をやり直せる**からである。
-   * ⟹ **その情報が、repo が消えて落ちた人に届かなければ、選択の前提が成立しない。**
-   * 届く先は doc ではなく、その人が最初に見るもの——**例外のメッセージ**である。
-   *
-   * ⚠ **文面を全文一致で固定しない。**そうすると文言のほうを直せなくなる。
-   * 見るのは「必要なものが入っているか」だけ。
-   */
+  /** 既定の repo は個人の変換 repo で消えうる。それを承知で選べているのは、元モデルが公式（`cl-nagoya/ruri-v3-30m`, apache-2.0）で変換をやり直せるからで、その情報は repo が消えて落ちた人が最初に見る例外のメッセージに載せる。文面は全文一致で固定しない（文言のほうを直せなくなる）。見るのは「必要なものが入っているか」だけ。 */
   const failing: CreateLocalEmbeddingPipeline = async () => {
     throw new Error("HTTP 404: model not found");
   };
@@ -509,9 +440,7 @@ describe("読み込み失敗のメッセージ", () => {
   }
 
   it("実際に使った repo 名が入る（既定値ではなく）", async () => {
-    // ⚠ modelId も明示する——既定と異なる repo だけを渡すと、コンストラクタの
-    // repo/modelId 宣言食い違い検査（Issue #142 / ADR 0247）が先に throw する。
-    // この歯自体は repo-model-id-declaration-guard.test.ts が別に測る。
+    // modelId も明示する。既定と異なる repo だけを渡すと、コンストラクタの repo/modelId 宣言食い違い検査が先に throw する（`repo-model-id-declaration-guard.test.ts` が別に測る）。
     const error = await loadFailure({
       repo: "someone/my-own-conversion",
       modelId: "someone-custom-model",
@@ -548,32 +477,19 @@ describe("読み込み失敗のメッセージ", () => {
 
   it("やり直せること（元モデル・変換・repo オプション）が書いてある", async () => {
     const error = await loadFailure({ createPipeline: failing });
-    // 元モデルの識別子が無いと、読んだ人は何を変換すればよいか分からない。
     expect(error.message).toContain("cl-nagoya/ruri-v3-30m");
-    // 変換したものをどこへ差すか。
     expect(error.message).toContain("repo");
-    // 詳しい手順の在り処。
     expect(error.message).toContain("README");
   });
 
-  /**
-   * 【実測 2026-09-27】キャッシュのファイルが壊れていると（取得の中断など。onnx を途中で
-   * 切る・0 バイト・`tokenizer.json` を途中で切る・`config.json` を空にする、の4形を本物の
-   * transformers.js で当てた）、3回の再試行を使い切っても、次のプロセスでも同じように落ち続ける
-   * （cause は `Protobuf parsing failed`・`Unexpected end of JSON input` など）。
-   * 以前のメッセージはネットワーク断・repo の消滅・dtype 名の誤りしか挙げず、キャッシュの破損と、
-   * 消せば取り直せる場所に届かなかった。
-   */
+  /** キャッシュのファイルが壊れていると、再試行を使い切っても次のプロセスでも同じように落ち続ける（cause は `Protobuf parsing failed`・`Unexpected end of JSON input` など）。メッセージはネットワーク断・repo の消滅・dtype 名の誤りだけでなく、キャッシュの破損と、消せば取り直せる場所に届かなければならない。 */
   it("キャッシュのファイルの破損を原因の候補に挙げ、消す場所（cacheDir の下の repo）を名指す", async () => {
     const error = await loadFailure({ cacheDir: "/tmp/mnemora-models", createPipeline: failing });
     expect(error.message).toContain("壊れ");
     expect(error.message).toContain("/tmp/mnemora-models/sirasagi62/ruri-v3-30m-ONNX");
   });
 
-  // ⚠ 2026-09-27: 以前はここで npm の配置（`@huggingface/transformers/.cache/`）を名指すことを
-  // 縛っていたが、pnpm では実際の場所が違う。注入した `createPipeline` の置き場所はこのクラスには
-  // 分からないので、特定の場所を断言しないことを縛る。既定の `createPipeline` のときに実際の場所を
-  // 名指すことは `load-failure-cache-place.test.ts` が縛る。
+  // 注入した `createPipeline` の置き場所はこのクラスには分からないので、特定の場所を断言しないことを縛る。既定の `createPipeline` のときに実際の場所を名指すことは `load-failure-cache-place.test.ts` が縛る。
   it("cacheDir が未指定で、createPipeline を注入したなら、特定の場所を断言せず env.cacheDir を指す", async () => {
     const error = await loadFailure({ createPipeline: failing });
     expect(error.message).toContain("壊れ");
@@ -582,8 +498,7 @@ describe("読み込み失敗のメッセージ", () => {
     expect(error.message).toContain("sirasagi62/ruri-v3-30m-ONNX");
   });
 
-  // ⚠ `retry: { attempts: 1 }`——ここで確かめたいのは「包むことと握り続けることは別」
-  // （#ready を早期に手放すこと）であって、1回の #load() の中のリトライではない。
+  // `retry: { attempts: 1 }`。確かめたいのは「包むことと握り続けることは別」（#ready を早期に手放すこと）で、リトライではない。
   it("包んでも、次の呼び出しで再試行できる（包むことと握り続けることは別）", async () => {
     let attempts = 0;
     const createPipeline: CreateLocalEmbeddingPipeline = async () => {
@@ -639,17 +554,13 @@ describe("embed(ctx, [])", () => {
     const provider = new LocalEmbeddingProvider({ createPipeline: recorder.createPipeline });
 
     await expect(provider.embed(ctx, [])).resolves.toEqual([]);
-    // ⚠ **だから空配列ではウォームアップできない。**`warmup()` が要る理由がこれである。
+    // 空配列ではウォームアップできない。`warmup()` が要る理由がこれ。
     expect(recorder.calls).toBe(0);
   });
 });
 
 describe("次元の検査", () => {
-  /**
-   * `interfaces/embedding-provider.ts` の「次元をモデルに応じて動的に変える実装は
-   * 許容しない」を**実行時に守らせる歯**。宣言と中身が食い違ったまま DB へ入ると、
-   * `EmbeddingSpaceId` はテーブル名スラグの導出元なので、後から分けられない。
-   */
+  /** 宣言と中身が食い違ったまま DB へ入ると、`EmbeddingSpaceId` はテーブル名スラグの導出元なので、後から分けられない。 */
   it("宣言した次元と実物が食い違うと、初回 embed() で例外になる", async () => {
     const recorder = createRecordingPipeline({ dimensions: 384 });
     const provider = new LocalEmbeddingProvider({
@@ -667,7 +578,6 @@ describe("次元の検査", () => {
       createPipeline: recorder.createPipeline,
     });
 
-    // 片方だけ書いてあると、読んだ人は「何と食い違ったのか」を調べ直すことになる。
     await expect(provider.embed(ctx, ["テキスト"])).rejects.toThrow(/256/);
     await expect(provider.embed(ctx, ["テキスト"])).rejects.toThrow(/384/);
   });
@@ -682,13 +592,7 @@ describe("次元の検査", () => {
 });
 
 describe("成分の検査（Issue #992）", () => {
-  /**
-   * 適合テスト（`describeEmbeddingProviderConformance`）は「ベクトルの各成分は有限の数である」を
-   * provider の要件にしている。次元の検査と同じ位置で、注入された pipeline の出力を信じずに
-   * 確かめる——NaN / Infinity は provider を素通りすると、pgvector への書き込み
-   * （`NaN not allowed in vector` / `infinite value not allowed in vector`）で初めて失敗し、
-   * 原因から離れた SQL の失敗として現れる。
-   */
+  /** NaN / Infinity は provider を素通りすると、pgvector への書き込み（`NaN not allowed in vector`）で初めて失敗し、原因から離れた SQL の失敗として現れる。次元の検査と同じ位置で、注入された pipeline の出力を信じずに確かめる。 */
   function providerReturning(vector: number[]) {
     return new LocalEmbeddingProvider({
       dimensions: vector.length,
@@ -771,24 +675,13 @@ describe("prefix", () => {
 
     await provider.embed(ctx, ["紅茶が好き", "コーヒーが好き"]);
 
-    // ⭐ 「全件に同じもの」が仕様である。embed() は渡されたテキストがクエリなのか
-    // 文書なのかを知らないので、区別できるふりをしない（options.prefix の説明）。
+    // 「全件に同じもの」が仕様。embed() は渡されたテキストがクエリなのか文書なのかを知らないので、区別できるふりをしない。
     expect(recorder.embeddedBatches).toEqual([
       ["検索文書: 紅茶が好き", "検索文書: コーヒーが好き"],
     ]);
   });
 
-  /**
-   * 🔴 **呼び出し側が渡した配列を、下流へ素通ししない。**
-   *
-   * この歯が在るのは、実際に踏んだからである——`prefix` が空のときだけ
-   * `texts` をそのまま `createPipeline` の先へ渡していた。書き換える pipeline を
-   * 注入すると、**既定の設定でだけ呼び出し側の配列が壊れ、`prefix` を設定すると
-   * 壊れなかった。振る舞いが設定に依存し、しかも壊れるほうが既定だった。**
-   *
-   * ⚠ **2つの設定の両方で測る。**片方だけだと、また分岐が生えたときに気づけない
-   * （前回まさにその分岐が原因だった）。
-   */
+  /** 呼び出し側が渡した配列を下流へ素通ししない。`prefix` が空のときだけ `texts` をそのまま `createPipeline` の先へ渡していた実績がある（書き換える pipeline を注入すると、既定の設定でだけ呼び出し側の配列が壊れた）。2つの設定の両方で測る。片方だけだと、また分岐が生えたときに気づけない。 */
   it.each([
     ["既定（prefix が空）", undefined],
     ["prefix を設定したとき", "検索文書: "],
@@ -834,9 +727,7 @@ describe("モデル指定が createPipeline へ届く（配線）", () => {
 
   it("差し替えた値がそのまま渡る", async () => {
     const recorder = createRecordingPipeline();
-    // ⚠ modelId も明示する——既定と異なる repo だけを渡すと、コンストラクタの
-    // repo/modelId 宣言食い違い検査（Issue #142 / ADR 0247）が先に throw する。
-    // この歯自体は repo-model-id-declaration-guard.test.ts が別に測る。
+    // modelId も明示する。既定と異なる repo だけを渡すと、コンストラクタの repo/modelId 宣言食い違い検査が先に throw する（`repo-model-id-declaration-guard.test.ts` が別に測る）。
     const provider = new LocalEmbeddingProvider({
       repo: "someone/other-onnx",
       modelId: "someone-custom-model",

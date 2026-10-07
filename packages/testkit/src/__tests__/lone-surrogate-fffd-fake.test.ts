@@ -8,11 +8,7 @@ import {
 
 const SPACE = { provider: "test", model: "fixture-model", dimensions: 3 };
 
-/**
- * ADR 0543: core のテスト用 `FakeMemoryStore` に当てる。本文は lone-surrogate-fffd-teeth.ts（PG・IM と同じ）。
- * `packages/core` は `@mnemora/testkit` を import できない（`dependency-boundary.test.ts`）ので、この歯は testkit 側に置き、
- * core の Fake を相対パスで読む（`packages/postgres` の `consolidate-reflect-sources-lowercase.postgres.test.ts` と同じ向き）。
- */
+/** `packages/core` は `@mnemora/testkit` を import できないので、この歯は testkit 側に置き、core の Fake を相対パスで読む。 */
 async function makeKit(): Promise<LoneSurrogateKit> {
   const stores = createFakeRuntimeStores();
   return {

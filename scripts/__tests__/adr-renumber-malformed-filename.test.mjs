@@ -13,15 +13,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-/**
- * `scripts/adr-renumber.mjs` は、`docs/decisions/` の下の名前の形が外れた `.md`（ドット入り・`adr-0538-x.md`・`538-x.md` など）を、
- * 黙って対象から外さず、**何も書き換える・改名する前に**失敗する（ADR 0540。生成器の ADR 0537 と同じ規則を
- * `generate-adr-index-lib.mjs` から共有する）。
- *
- * 一時ディレクトリに小さな git リポジトリ（`origin/main` に相当する ref 付き）を作り、本物のスクリプト3本を写して、
- * 子プロセスで走らせる。実リポジトリには触らない。
- */
-
 const scriptsDir = fileURLToPath(new URL("..", import.meta.url));
 const tmpRoots = [];
 afterAll(() => {
@@ -36,7 +27,6 @@ function git(cwd, ...args) {
   return r.stdout;
 }
 
-/** `origin/main` に `0001-a.md`・`README.md` が在り、作業ツリーに `0001-b.md`（番号が衝突する新しい ADR）と `extra` を足した repo。 */
 function makeRepo({ extra = [], mainExtra = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "adr-renumber-"));
   tmpRoots.push(dir);

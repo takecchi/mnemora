@@ -5,13 +5,8 @@ import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * Issue #1050（PR #1056）の約束: `search` の口は `opts.filter.tenantId` に加えて
- * `ctx.tenantId` の境界も掛ける（AND）。食い違えば空を返し、例外は投げない（ADR 0007）。
- * PR 本文は「core の `FakeVectorStore` / `FakeLexicalStore` は以前からこの振る舞い」と書き、
- * Postgres と testkit の InMemory を、それに揃えた。この歯は、その基準側（core の Fake）を縛る。
- *
- * 「一致すれば A 自身が返る」も同じ it で見る——「常に空を返す」実装で緑にならないため。
- * `*-conformance.ts` には足さない（#809）。
+ * 「一致すれば A 自身が返る」も同じ it で見る: 「常に空を返す」実装で緑にならないため。
+ * `*-conformance.ts` には足さない。
  */
 
 const TENANT_A = "fake-search-boundary-a";

@@ -4,23 +4,6 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-/**
- * **`docs/architecture.md` §5 が再掲している port interface のコード片の、メンバーの*署名*が
- * 実体（公開 API snapshot `scripts/__snapshots__/public-api/core.d.ts`）と一致することを縛る。**
- *
- * `architecture-section5-port-interface-correspondence.test.mjs` はメンバー**名**の集合だけを比べ、
- * 「🔴 メンバーの『型』までは比較しない」と自分で書いている——`reinforce` の引数が3つから4つに
- * 変わったような drift は、名前が変わらない限り捕まらない。この歯がその残りを縛る。
- *
- * - 対象の名前は隣の歯と同じ（写しとして実体を持つもの）。予告（`RelationStore` など）と
- *   `ScoringStrategy`（隣の歯が署名を逐語比較している）は対象にしない。
- * - 比べ方: doc と snapshot の両方を TypeScript で構文解析し、同じ名前のメンバーの宣言文を
- *   コメントを除いて正規化して比べる（空白・引用符の種類・`;`/`,` の末尾・`z.ZodType` の修飾を揃える）。
- *   同名のオーバーロードが在れば、doc の署名がそのどれかと一致すればよい。
- * - 名前が片側にしか無いメンバーは見ない（隣の歯の担当）。
- * - ⚠ snapshot が古いと誤検出しうるのは隣の歯と同じ（`pnpm run build` → `api:check` を先に通すこと）。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const architectureText = readFileSync(join(repoRoot, "docs/architecture.md"), "utf8");
 const snapshotText = readFileSync(
@@ -44,7 +27,6 @@ const TARGET_NAMES = [
   "TenantSettingsStore",
 ];
 
-/** 署名の比較用に正規化する。 */
 function normalizeSignature(text) {
   return text
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -56,7 +38,6 @@ function normalizeSignature(text) {
     .replace(/[;,]$/, "");
 }
 
-/** ソース中の `interface X {…}` と `type X = {…}` のメンバーを、名前 → 正規化した宣言文の配列で返す。 */
 function membersByName(source, names) {
   const sf = ts.createSourceFile("x.ts", source, ts.ScriptTarget.Latest, true);
   /** @type {Map<string, Map<string, string[]>>} */

@@ -32,7 +32,6 @@ describe("summarizeTrials", () => {
     expect(rows).toHaveLength(2);
   });
 
-  // Issue #1775 の #726（変異8）: ctxVariant（none・own・mismatched）は ADR 0310 の表の軸の1つ。
   // 試行データが ctxVariant を1種類しか持たないと、グループのキーから外れても気づけない。
   it("ctxVariant が none・own・mismatched の試行は、別々の3グループに分かれる", () => {
     const rows = summarizeTrials([

@@ -11,17 +11,7 @@ import {
   runAnswerTrials,
 } from "../answer-trials.js";
 
-/**
- * `answer-trials.ts` の単体試験。**DB 不要・鍵不要**——`OPENAI_API_KEY` を一切使わない
- * （env にキーを渡さない・`llmProvider` を DI する）。実 API は1回も呼ばない（Issue #705）。
- */
-
-/**
- * 「既知の形（回答プロンプト: system が含まれ、user メッセージが1件）」以外を受けたら
- * 例外を投げるモック。**カセットの形と完全に一致しない入力を受け取ったら黙って何か
- * 返すのではなく落ちる**——`answer-trials` が意図せず別の形のプロンプトを組んでいないかを
- * このモック自体が見張る。
- */
+// 既知の形以外を受けたら、黙って何か返さず例外を投げる。別の形のプロンプトを組んでいないかを、このモックが見張る。
 class StrictAnswerPromptMockLLMProvider implements LLMProvider {
   public receivedContents: string[] = [];
   constructor(private readonly answerByContentPrefix: (content: string) => string) {}
@@ -95,7 +85,6 @@ describe("runAnswerTrials(OPENAI_API_KEY 無し)", () => {
     expect(result.evaluated).toBe(false);
     if (result.evaluated) throw new Error("unreachable");
     expect(result.reason).toBe("no-api-key");
-    // caseMaterials(指紋・文字数)は API を叩かなくても埋まる。
     expect(result.caseMaterials).toHaveLength(ANSWER_CASE_SET_DEV.length);
     expect(result.cassetteSha256).toBe(material.cassetteSha256);
   });
@@ -113,7 +102,6 @@ describe("runAnswerTrials(モック LLM を DI、n回試行)", () => {
     const prefCase = ANSWER_CASE_SET_DEV.find((c) => c.id === "pref-tea-over-coffee");
     if (prefCase === undefined) throw new Error("test fixture: pref-tea-over-coffee が無い");
 
-    // 常に正解(accept[0])を返すモック。
     const provider = new StrictAnswerPromptMockLLMProvider(() => prefCase.expected.accept[0] ?? "");
     const result = await runAnswerTrials({
       llmProvider: provider,
@@ -132,7 +120,6 @@ describe("runAnswerTrials(モック LLM を DI、n回試行)", () => {
       expect(r.failCount).toBe(0);
       expect(r.indeterminateCount).toBe(0);
     }
-    // 呼び出し回数: 6ケース × 2描画 × 3回 = 36
     expect(provider.receivedContents).toHaveLength(ANSWER_CASE_SET_DEV.length * 2 * 3);
   });
 
@@ -208,7 +195,6 @@ describe("runAnswerTrials(モック LLM を DI、n回試行)", () => {
       expect(r.userContentChars).toBeGreaterThan(0);
       expect(r.systemChars).toBeGreaterThan(0);
     }
-    // digest-only は由来タグなどが無い分、recorded より短いはず(このケースは記憶がある)。
     const recordedChars = cm?.renders.find((r) => r.renderName === "recorded")?.userContentChars;
     const digestOnlyChars = cm?.renders.find(
       (r) => r.renderName === "digest-only",

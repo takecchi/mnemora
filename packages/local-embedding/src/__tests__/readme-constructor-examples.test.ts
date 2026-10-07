@@ -9,18 +9,8 @@ import {
 import type { CreateLocalEmbeddingPipeline } from "../pipeline.js";
 
 /**
- * README の `ts check` の片にある `new LocalEmbeddingProvider({ ... })` が、構築時に例外を投げないこと。
- *
- * `ts check` の印は型しか見ない（ADR 0345）。README の「変換したものをどこに置けば拾われるか」の2つの例は、
- * 型は通るのに、`repo` だけを差し替えて `modelId` を省いていたので、構築時の検査（Issue #142 / ADR 0247）で
- * 投げていた。ここでは README から呼び出しを読み出して、同じ引数で実際に構築する。
- *
- * ネットワークには出ない——`new` はモデルを読まない（読むのは最初の `embed()`・`warmup()`）。
- * `createPipeline` の識別子は、呼ばれたら落ちる偽物に差し替える。
- *
- * ⚠ 読むのは、1行に収まった呼び出しで、引数が文字列のリテラルか `createPipeline` の識別子だけのもの
- * （README の `repo`・`cacheDir` の例がこの形）。複数行の呼び出し（`retry` の例）と `new LocalEmbeddingProvider()`
- * は読まない。読めない形の1行の呼び出しは、黙って飛ばさずに赤にする。
+ * `ts check` の印は型しか見ないので、型は通るのに構築時の検査で投げる例（`repo` だけを差し替えて `modelId` を省く）を拾えない。README から呼び出しを読み出して、同じ引数で実際に構築する。
+ * 読むのは、1行に収まった呼び出しで、引数が文字列のリテラルか `createPipeline` の識別子だけのもの。複数行の呼び出し（`retry` の例）と `new LocalEmbeddingProvider()` は読まない。読めない形の1行の呼び出しは、黙って飛ばさずに赤にする。`createPipeline` の識別子は、呼ばれたら落ちる偽物に差し替える。
  */
 
 const README = readFileSync(fileURLToPath(new URL("../../README.md", import.meta.url)), "utf8");
@@ -31,7 +21,6 @@ const notCalled: CreateLocalEmbeddingPipeline = async () => {
   throw new Error("この歯では createPipeline を呼ばない");
 };
 
-/** `ts check` の片の中の、1行の `new LocalEmbeddingProvider({ ... })` の引数の中身を返す。 */
 function singleLineCalls(): string[] {
   const calls: string[] = [];
   for (const block of README.matchAll(/```ts check\n([\s\S]*?)```/g)) {

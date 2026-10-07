@@ -1,167 +1,26 @@
-// packages/testkit — `src/index.ts` とは別の入口。
+// ⚠ この入口の fixture を `createStore` に渡して適合スイートを走らせないこと。自分の実装を測らずに緑になる。
+// `index.ts` から出さないのはそのためで、この入口はリポジトリ内のテストが `Runtime` を組むためのもの。
 //
-// `src/index.ts` 冒頭の宣言（「プレースホルダ実装（`__fixtures__`）は意図的にここから
-// export しない。adapter 作者は自分の実装を `createStore` に渡して conformance suite を
-// 走らせる」）は、そのまま維持する。**このファイルはその宣言を弱めるものではない。**
+// Postgres が DB の例外（型の変換・CHECK 制約・`text`/`jsonb` が受け付けない文字）で拒む入力を、
+// fixture は書き込みの前に `Error` で拒む（何も書かない）。例外の種類と文面は Postgres と違い、
+// 揃えてあるのは「拒むかどうか」だけ。冪等の鍵が同じ既存の行が在っても、値は先に検査する。
+// 対象は limit・日時・NUL・列挙値・int4/bigint/float4 の範囲・`timestamptz` の下限など。
+// 読みの口の日時の条件には下限の検査を掛けない（Postgres は下限へ寄せて比べる）。
 //
-// ⚠ なぜ別の入口が要るか、そして危険:
+// 揃えていないもの:
+// - `purgeExpiredEvents` の `limit: -1`（Postgres は例外にならない）。
+// - `listBySourceObservation` に uuid の形でない `observationId` を渡したときの NUL 検査。
+// - `jsonb` 列の欄（`payload`・`attributes`・`provenance`）の孤立サロゲート（Postgres は拒み、fixture は保持する）。
+// - 索引の行の上限を超える識別子、JSON で往復しない値。
 //
-// **adapter 作者がこれを `createStore` に渡して適合スイートを走らせると、自分の実装を
-// 1文字も測らないまま緑になる。** `index.ts` から出さないのはそのためである。
-//
-// この入口は**リポジトリ内のテストが `Runtime` を組み立てるため**のものである
-// （例: `packages/openai` が本物の `OpenAILLMProvider` を `@mnemora/core` の
-// `createRuntime` に渡して、`runtime.observe()` を実際に走らせる通しの歯を書く場合。
-// `runtime.observe()` が呼ぶストアは `MemoryStore` / `VectorStore` / `EventStore` /
-// `OutboxStore` / `TenantSettingsStore` の5種すべてであり、全メソッドが throw する
-// 偽ストアでは最初の1歩で止まってしまう——本物の provider を配線するには、
-// 何かしら実際に動くインメモリ実装が要る）。
-//
-// **この入口は適合スイートの入力にしてはいけない。**「別の目的のための入口」であって、
-// 「`index.ts` の制約を回避する裏口」ではない——適合テストを書く・走らせるときは、
-// 引き続き自分の adapter 実装を `createStore` に渡すこと。
-//
-// ## Postgres が拒む入力を、同じ入力で拒む（現状の振る舞いを約束として書く）
-//
-// `@mnemora/postgres` が DB の例外（型の変換・CHECK 制約・`text`/`jsonb` が受け付けない文字）
-// で拒む入力を、この入口の fixture は**書き込みの前に `Error` で**拒む。例外の種類と文面は
-// Postgres と違う（Postgres は drizzle が包んだ DB の例外、こちらは下の文面の `Error`）。揃えて
-// あるのは「拒むかどうか」と「拒んだときに何も書かないこと」だけである。
-//
-// `createMemory` 系（`WithOutbox`・`supersedeWithNewMemories` の新しい行を含む）は、冪等の鍵が同じ既存の行が
-// 在っても、下の検査で拒む（既存の行を返さない）。Postgres の `INSERT ... ON CONFLICT DO NOTHING` が、衝突を
-// 見る前に値を検査するのを写す。外部キー相当（参照先が在るか）だけは、行を実際に書くときにしか見ない。
-//
-// - `limit` が整数でない（`NaN`・`Infinity` を含む）・負・2^63 以上 →
-//   `<口>: limit must be an integer / must not be negative / must fit in a Postgres bigint`。
-//   対象: `InMemoryOutboxStore.claimBatch`・`InMemoryVectorStore.search`・
-//   `InMemoryLexicalStore.search`・`InMemoryEventStore.list`・
-//   `InMemoryMemoryStore.purgeExpiredEvents`・`.aggregateScope`（`digestBand.limit`）・
-//   `.archiveDecayed`・`.requeueEmbedJobs`（#804・#813・#923・#1058・#1061）。
-//   ⚠ `purgeExpiredEvents` の `limit: -1` だけは Postgres が例外にならない（`MemoryStore` の doc
-//   の表のとおり。揃えていない）。
-// - `InMemoryOutboxStore.claimBatch` の `now - leaseMs` が有効な `Date` にならない
-//   （`leaseMs` が `NaN`・`±Infinity`・範囲外、`now` が Invalid Date）→
-//   `claimBatch: now - leaseMs must be a valid Date`（#1059）。
-// - NUL（U+0000）を含む値 → `<欄> must not contain NUL characters (U+0000)`。
-//   対象: `createMemory` 系の `content`・`subjectId`・`tags`・`digest`・`attributes`・`provenance`、
-//   `createObservation`（`WithOutbox` を含む）の `subjectId`・`externalId`・`kind`・`payload`・
-//   `attributes`（#923・#928・#1073）。
-//   ADR 0434 で足した口（書き込み）: `createMemory` 系（`supersedeWithNewMemories` の新しい行・`createMemoriesWithOutboxAndEvents` を含む。
-//   冪等の既存の行が在っても拒む）の `claimKey.subject`・`claimKey.predicate`・`extractorVersion`、イベントの `digestSnapshot`
-//   （`memory_events.digestSnapshot must not contain NUL characters (U+0000)`）、`purgeMemory` の墓石の `content`・`digest`
-//   （`tombstone.content must not contain NUL…`。対象の行が無くても・CAS に弾かれる状態でも先に拒む）。`jobKinds` の要素
-//   （`jobKinds must not contain NUL…`。**outbox の行を実際に書くときだけ**——`jobKinds` が空・冪等の既存の行に当たるときは見ない）。
-//   （読み取り）: `findActiveByClaimKey`・`findContestedByClaimKey` の `claimKey.subject`・`claimKey.predicate`、`listBySourceObservation` の `extractorVersion`、
-//   `aggregateScope` の `attributes`・`labels`（`scopeAggregate: "skip"` で `digestBand` が無いときは、Postgres がクエリを発行しないので見ない）、
-//   `InMemoryLexicalStore.search` の `filter.labels`・`filter.attributes`、`InMemoryVectorStore.search`・`searchMany` の `filter.labels`・
-//   `filter.attributes`（ADR 0500）、`InMemoryTenantSettingsStore.getSubjectActivitySeqs` の `subjectId`。
-//   ⚠ `listBySourceObservation` は、`observationId` が uuid の形でないとき Postgres がクエリを発行せずに `[]` を返して NUL を見ない。
-//   この fixture の id は uuid の形ではないので、その入力だけは揃えていない。
-// - Invalid Date（ADR 0434 で足した口）→ `<口>: opts.now must be a valid Date (got Invalid Date)`（`requeueEmbedJobs` は
-//   `writeOpts.now`）。対象: `createMemoryWithOutbox`・`createObservationWithOutbox`・`supersedeWithNewMemories`・
-//   `createMemoriesWithOutboxAndEvents` の `opts.now`（**outbox の行を実際に書くときだけ**。`jobKinds` が空・冪等の既存の行に
-//   当たるときは見ない）、`requeueEmbedJobs` の `writeOpts.now`（対象が0件でも拒む。`memoryIds` が空配列のときだけ、
-//   Postgres はクエリを発行しないので見ない）。
-// - `MemoryEvent.sizeBeforeBytes` が整数でない・`NaN`・`Infinity`・`integer`（int4）の範囲（`-2^31`〜`2^31 - 1`）の外 →
-//   `memory_events.sizeBeforeBytes must be an integer / does not fit in a Postgres "integer" (int4) column`（ADR 0434。負の数そのものは
-//   通る——列に CHECK は無い。対象はイベントを受け取るすべての口。ただし `markContestedGroup`・`resolveContestedGroup` だけは、
-//   Postgres が `jsonb` の配列で渡すので `NaN`・`±Infinity` が `null` になって通り、fixture も通して `null` で保存する）。
-// - `reinforce`（`reinforceMany`・`recordUsageAndReinforce` を含む）の `nowSeq` が整数でない・2^63 以上（`-2^63` 未満）→
-//   `reinforce: nowSeq must be an integer / must fit in a Postgres bigint`（`archiveDecayed` の `nowSeq` と同じ検査に範囲を足したもの）。
-//   書く値（`addOwnSubjectSeq` なら `nowSeq + S_x`）が負 → `reinforce: decayBaseSeq must not be negative`（何も書かない呼び出しでは見ない）。
-//   対象の Memory が `halfLifeRecalls` を持たないときは `nowSeq` が使われないので、どちらも見ない（ADR 0434）。
-// - `createMemory` 系に渡された `purgedAt` は、断らずに無視する（`null` で保存）。Postgres は `purged_at` を INSERT に含めず、
-//   `purgeMemory` だけが書く（ADR 0434）。
-// - Invalid Date → `<欄> must be a valid Date`。対象: `createMemory` 系の日時の欄、
-//   `createObservation` 系の `occurredAt`・`recordedAt`・`validFrom`・`validUntil`（`externalId` が同じ既存の行が
-//   在っても拒む）、`reinforce` の `at`、イベントの `at`（#807）。
-//   ⚠ `restoreSupersededBy` の `at` は、戻す対象が在るときだけ拒む。対象が無ければ `{ restored: [] }` を返す
-//   （Postgres も同じ。#1229 の行3で Postgres の側をこちらに揃えた——`MemoryStore.restoreSupersededBy?` の doc）。
-// - `MemoryEventKind` に無いイベントの `kind`（型を外した呼び出し）→
-//   `memory_events.kind must be one of <9値> (got "<値>")`。対象: `InMemoryEventStore.append` と、
-//   イベントを受け取る `InMemoryMemoryStore` の口（`updateStatusWithEvent`・`supersedeWithNewMemories`・
-//   `purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）。Postgres の
-//   CHECK 制約 `memory_events_kind_check` を写す。イベントの `at` の検査とともに、状態を書き換える
-//   前に確かめるので、拒んだときは何も書かない（#1096）。
-// - `memories` の列挙の列に無い値（型を外した呼び出し）→ `memories.<列> must be one of <値> (got "<値>")`。
-//   対象: `createMemory` 系の `status`・`digestSource`・`embeddingStatus`・`provenance.kind`、
-//   `InMemoryMemoryStore` の `updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・
-//   `resolveContestedPair`。Postgres の CHECK 制約（`memories_status_check` など）を写す。見つからない
-//   id・CAS の食い違いの検査の後、状態を書き換える前に確かめる。
-// - `#1183` の外側の CHECK 制約と `bigint` への変換。対象はどれも `createMemory` 系（冪等の既存の行が在っても拒む）:
-//   `provenance.kind` が `stated`/`inferred` で `sourceObservationId` が無い → `provenance.kind "<値>" requires sourceObservationId`
-//   （`memories_check`）。`decayBaseSeq`・`decayFloorSeq` が整数でない・負・2^63 以上 → `<欄> must be an integer /
-//   must not be negative / must fit in a Postgres bigint`（`memories_decay_seq_non_negative`）。`halfLifeRecalls` が
-//   `(0, ∞)` の外 → `halfLifeRecalls out of range (0, ∞)`（`memories_half_life_recalls_range`）。省略（`null`）はどれも検査しない。
-// - 読みの口の条件の Invalid Date → `<口>: <欄> must be a valid Date`、整数でない通し番号 → `<口>: <欄> must be an integer`。
-//   対象: `purgeExpiredEvents` の `olderThan`、`archiveDecayed` の `now`・`nowSeq`、`aggregateScope` の日時の条件と
-//   `decayFloorSeqAfter`、`findActiveByClaimKey` の `validFrom`・`validUntil`、`InMemoryEventStore.list` の `since`・`until`、
-//   `InMemoryVectorStore.search`・`InMemoryLexicalStore.search` の filter の日時と `decayFloorSeqAfter`（Postgres はクエリの
-//   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
-// - 紀元前4714年11月24日 00:00:00 UTC（`timestamptz` の下限）より前の日時（ADR 0500）→ `<口>: <欄> must not be earlier than 4714-11-24 BC`
-//   （`RangeError`）。Postgres が `22008` にする口にだけ掛ける——行に**書く**日時の `opts.now`・`opts.at`（`OutboxStore.complete`/`fail`、
-//   `archiveDecayed`、`requeueEmbedJobs`、outbox の行を書く口の `now` を含む）と、行の欄に入る日時（ADR 0640）: `createMemory` 系・
-//   `supersedeWithNewMemories` の新しい行の `occurredAt`・`recordedAt`・`lastReinforcedAt`・`validFrom`・`validUntil`・`decayFloorAt`、
-//   `createObservation` 系の `occurredAt`・`recordedAt`・`validFrom`・`validUntil`、`reinforce`・`reinforceMany`・`recordUsageAndReinforce`
-//   の `at`、`createRecall` の `createdAt`、イベントの `at`（`EventStore.append` と、イベントを書く `MemoryStore` の口。`purgeMemory` の
-//   `purged_at` も同じ値）。断るのは、Postgres がその値を実際に書く分岐だけ（CAS に弾かれる対象のイベント・冪等の既存の行の `created`
-//   イベント・何も強化しない呼び出しは見ない）。下限ちょうどは通る（実測）。ADR 0640 に口ごとの実測の表がある。
-//   ⚠ **ADR 0547 で、読みの口の条件には掛けなくなった**:
-//   `EventStore.list` の `since`・`until`、`VectorStore`・`LexicalStore` の検索、`aggregateScope`、`findActiveByClaimKey`・
-//   `findContestedByClaimKey` の日時は、Postgres が下限へ寄せてから比べるので、下限より前でも断らず、意味どおりに答える
-//   （`since` 系は全件、`until` 系は0件）。`purgeExpiredEvents`・`purgeExpiredRecalls`・`purgeCompletedJobs` の `olderThan` は、
-//   Postgres が下限より前を「0件」で返すので掛けない。
-// - `createMemory` 系・`supersedeWithNewMemories` の新しい行の `decayFloorAt` が `Date` でない（`null`・`undefined`・キーなし）→
-//   `InMemoryMemoryStore: decayFloorAt must be a Date (got …)`（`TypeError`。Postgres は `23502`。冪等の既存の行が在っても断る。Issue #1759）。
-// - 「memory not found for tenant: <id>」の `<id>` は Postgres と同じ綴り: 操作の対象が無いときは渡された綴りのまま、参照先
-//   （`supersededById`・`contestedWithId`・`recordUsage` の `memoryIds`）が無いときは小文字（ADR 0521 の追記）。
-// - `reinforce({ addOwnSubjectSeq: true })` の `nowSeq + S_x`（と床）が 2^63 以上 → `reinforce: decayBaseSeq + own subject seq must fit in a
-//   Postgres bigint`（Postgres は `22003`。ADR 0500）。
-// - `RecordedLLMProvider`・`SeededLLMProvider`・`RecordingLLMProvider` の応答は、記録・種の参照ではなく複製（ADR 0500）。
-// - `InMemoryTenantSettingsStore.setEventRetention` の `days` が Postgres の `integer`（int4）に収まらない（2^31 以上）→
-//   `setEventRetention: days does not fit in a Postgres "integer" (int4) column`。
-// - `createRecall` の `subjectId` に NUL → `createRecall: subjectId must not contain NUL characters (U+0000)`。`query`・`budget`・
-//   `omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` に NUL → `createRecall: <欄> must not contain NUL characters`、
-//   `budget` 以外が JSON にならない（`undefined` など）→ `createRecall: <欄> must be JSON-serializable`。何も書かず、活動時計も進めない。
-// - `InMemoryOutboxStore.claimBatch` の `claimedBy` に NUL → `claimBatch: claimedBy must not contain NUL characters (U+0000)`。
-// - 空文字の参照・冪等の鍵は「値が在る」として扱う（`null`/`undefined` だけが「無い」）。`createMemory` 系の
-//   `sourceObservationId`・`supersededById`・`contestedWithId` が `""` → `… not found: `（Postgres は uuid として読めずに拒む）。
-//   `createObservation` 系の `externalId` が `""` → 2回目は既存の行を返す（Postgres の一意制約は `external_id IS NOT NULL` の行に効く）。
-// - `kind: "events_purged"` で `memoryId` が null でないイベント → `memory_events.memoryId must be null for kind "events_purged"`
-//   （`memory_events_check`、core の `MemoryEventSchema` と同じ約束）。対象は `memory_events.kind` の検査と同じ口。
-// - Postgres の `real`（float4）列に収まらない数 → `… does not fit in a Postgres "real" (float4) column`。
-//   対象: `createMemory` 系の `halfLifeHours`・`halfLifeRecalls` など、
-//   `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（#815・#817）。
-//
-// ## `memory_events` を1か所で見るには、`InMemoryEventStore` に `memoryStore.events` を渡す
-//
-// `InMemoryEventStore` を既定の形（`new InMemoryEventStore(memoryStore)`）で組むと、
-// `InMemoryMemoryStore` が自分の中で書くイベント（forget・archive・purge・contested・
-// supersede・unsuperseded・events_purged など）は `eventStore.list` に出ない——別の配列に
-// 入るためである。`@mnemora/postgres` は1つの表なので、観測の形が割れる。Postgres と同じく
-// 全部を1か所で見るには、次のように組む（詳細は `InMemoryEventStore` の TSDoc）:
+// `memory_events` を1か所で見るには、`InMemoryEventStore` に `memoryStore.events` を渡す。既定の形
+// （`new InMemoryEventStore(memoryStore)`）では `InMemoryMemoryStore` が書くイベントが `eventStore.list` に出ない。
+// `InMemoryRelationStore` も同じで、`memoryStore.relations` を渡す:
 //
 //   const memoryStore = new InMemoryMemoryStore();
 //   const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
 //   const outboxStore = new InMemoryOutboxStore(memoryStore.outboxJobs);
-//
-// 同じ理由で、`InMemoryRelationStore`（Issue #207/#933 PR2）も既定の形
-// （`new InMemoryRelationStore(memoryStore)`）で組むと、`markContestedGroup`/
-// `resolveContestedGroup`（`InMemoryMemoryStore` の中）が書いた `memory_relations`
-// 相当の行が `listRelated` に出ない——`memoryStore.relations` を渡すこと:
-//
 //   const relationStore = new InMemoryRelationStore(memoryStore, memoryStore.relations);
-//
-// 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
-// `jsonb` 列の欄（`payload`・`attributes`・`provenance`）に入る孤立サロゲート（Postgres は拒み、fixture は保持する。`MemoryStore.createMemory` の doc、#1075。
-// `text` 列の欄の孤立サロゲートは、ADR 0543 で fixture も Postgres と同じく U+FFFD に置き換えるようにした）。
-// （紀元前4714年より前の日時は、読みの口・`opts.now` が ADR 0500 で、行の欄に書く口（`createMemory` の `occurredAt` など。#1041）が ADR 0640 で揃った。）
-// 索引の行の上限を超える識別子（#1074）、JSON で往復しない値（#1076）。
-// 1MB を超える本文（tsvector の上限、#1063）は、Postgres の migration 0025 で揃った（#1222・ADR 0364）。
-// ADR 0434 が実測して、Postgres は拒むが fixture は通したままだったもの（`findContestedByClaimKey` の `claimKey` の NUL、
-// `InMemoryLexicalStore.search` の `filter.labels` の NUL、紀元前4714年より前の `opts.now`、`VectorStore.search` の filter の NUL）は、
-// ADR 0500 で揃えた。`archiveDecayed`・`aggregateScope`・`VectorStore.search` の `S_x` を足す式の bigint 溢れも、ADR 0505 で揃えた（Postgres がその式を評価する行があるとき、と `nowSeq`・`decayFloorSeqAfter` そのものが 2^63 以上のとき）。
 
 export { InMemoryMemoryStore } from "./__fixtures__/in-memory-memory-store.js";
 export { InMemoryRelationStore } from "./__fixtures__/in-memory-relation-store.js";
@@ -171,6 +30,4 @@ export { InMemoryEventStore } from "./__fixtures__/in-memory-event-store.js";
 export { InMemoryOutboxStore } from "./__fixtures__/in-memory-outbox-store.js";
 export { InMemoryTenantSettingsStore } from "./__fixtures__/in-memory-tenant-settings-store.js";
 
-// `InMemoryRelationStore` のコンストラクタの第2引数（`memoryStore.relations` と共有する配列）の要素型。
-// 公開シグネチャに出る型は、この入口から名指せるようにする（歯: `__tests__/fixtures-entry-public-types.test.ts`）。
 export type { StoredRelation } from "./__fixtures__/in-memory-memory-store.js";

@@ -1,14 +1,4 @@
-/**
- * 歯: **ADR が `AGENTS.md` を括って引いた文が、いまの `AGENTS.md` に実在するか**（Issue #636）。
- *
- * ⭐ この歯は、引用文と原典の**両方を実行時に repo から取って**突き合わせる
- * ⟹ **腐る期待値がどこにも無い。**
- *
- * ⛔ 門にするのは **狭い窓**（帰属の直後に鉤括弧）だけである。広い窓は報告に留める——
- * `AGENTS.md`「⚠ 偽陽性率に上限を置けない検査は門にしない」
- * （ADR 0223 決定3 / ADR 0254）。理由は
- * `scripts/agents-md-quote-attribution-lib.mjs` の冒頭 doc を見ること。
- */
+/** 門にするのは狭い窓（帰属の直後に鉤括弧）だけ。広い窓は偽陽性率に上限を置けないので報告に留める（ADR 0223 決定3 / ADR 0254）。 */
 
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -50,11 +40,6 @@ describe("引用の取り出し（入れ子の鉤括弧に対応する）", () =
 });
 
 describe("⭐ 陽性対照 —— 既存の `anchorExistsInTarget` が落とす形を、この歯は捕まえる", () => {
-  // 現物から出た形。AGENTS.md の見出し
-  // `#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-...md) が反例`
-  // ⚠ 当初（PR #639）はここで `anchorExistsInTarget` が `false` を返し、この歯は段2で当てていた。
-  // それは `stripMarkdownDecoration` がリンクを外さない穴であり、その穴を塞いだので
-  // いまは段1（`anchorExistsInTarget`）で当たる。⟹ 「穴がある」を正解として固定しないこと。
   const target =
     "#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例";
   const quote = "🔴 線は引けない — ADR 0178 が反例";
@@ -81,7 +66,6 @@ describe("⭐ 陽性対照 —— 既存の `anchorExistsInTarget` が落とす�
   });
 });
 
-/** ADR ファイル（`NNNN-slug.md`）を全部読む。 */
 function readAdrFiles() {
   return readdirSync(DECISIONS)
     .filter((name) => /^\d{4}.*\.md$/.test(name))
@@ -119,21 +103,11 @@ describe("門: ADR が `AGENTS.md` を括って引いた文は、いまの `AGEN
         .filter(({ quote }) => !quoteExistsInAgentsMd(quote, AGENTS_MD).exists)
         .map(({ quote }) => `${name}「${quote}」`),
     );
-    // ⛔ 赤にしない。件数が数えられること自体を固定する。
     expect(Array.isArray(wide)).toBe(true);
   });
 });
 
-/**
- * 🔴 宣言ファイル自身が *腐る期待値* にならないようにする。
- *
- * 「どこで訂正済みか」を住所として持つのは良いが、**その住所が実在するかを誰も
- * 確かめていない**と、訂正の節が消えたり改名されたりしても宣言は残り、歯は緑のままになる
- * ⟹ **腐りが静かに復活する。**⟹ これはこの歯が扱っている「在るものと名乗りがずれる」の
- * 同族であり、⛔ **自分が作る歯で同じ罪を犯さない。**
- *
- * ⟹ ⭕ **宣言と現物の両方を実行時に取る**（`AGENTS.md` の引用と同じ手）。
- */
+/** 宣言と現物の両方を実行時に取る。住所だけを持つと、訂正の節が消えても宣言が残って緑のままになる。 */
 describe("宣言ファイルの住所も、実行時に当てる", () => {
   const readCorrected = (c) => readFileSync(path.join(REPO_ROOT, c.correctedIn.file), "utf8");
 

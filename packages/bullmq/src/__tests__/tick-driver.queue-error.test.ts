@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ctx, TickOptions } from "@mnemora/core";
 
-// Redis を要らない検査。driver が作る `Queue`（繰り返しジョブの登録に使う）が `'error'` を emit したとき
-// （Redis 接続の失敗など）、`onTickError` に届くことを縛る。以前は `Queue` に listener が無く、bullmq
-// （6.3.8 の `QueueBase.emit`）が `console.error` へ固定で出すだけだった。
 // fake は `QueueBase.emit` の形（listener が無い `'error'` は `console.error` へ落ちる）を写す。
 
 type Listener = (...args: unknown[]) => void;
@@ -20,7 +17,7 @@ class FakeEmitter {
   emit(event: string, ...args: unknown[]): boolean {
     const ls = this.listeners[event] ?? [];
     if (ls.length === 0) {
-      if (event === "error") console.error(args[0]); // bullmq の既定の落ち先
+      if (event === "error") console.error(args[0]);
       return false;
     }
     for (const l of ls) l(...args);
@@ -88,7 +85,6 @@ describe("createBullmqTickDriver() — Queue 側の error は onTickError に届
   });
 
   it("同じ Queue が 'error' を続けて2回 emit すると、onTickError に2回とも、それぞれのエラーが順に届く", () => {
-    // Redis が落ちている間は、再接続のたびに error が複数回届く（束ねない・最初の1回で止めない）。
     const onTickError = vi.fn();
     create(onTickError);
     const first = new Error("queue redis down (1)");

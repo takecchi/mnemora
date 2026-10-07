@@ -4,14 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import { ExtractionResultSchema } from "@mnemora/core";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
-/**
- * 応答に余分な `"__proto__"` の欄があるとき、`@mnemora/openai` は `@mnemora/anthropic`
- * （`JSON.parse` の結果をそのまま zod へ渡す）と同じ結果を返すこと（ADR 0468）。
- *
- * `stripNulls` / `keepSchemaNulls` は応答を新しい object へ写す。`result[key] = ...` で写すと、
- * `JSON.parse` が自分自身の欄として作った `"__proto__"` が、欄ではなく**プロトタイプの差し替え**になり、
- * zod の `object` が継承された値を読む（例: 候補の `subjectId`）。
- */
+/** `stripNulls` / `keepSchemaNulls` は応答を新しい object へ写す。`result[key] = ...` で写すと、`JSON.parse` が自分自身の欄として作った `"__proto__"` が欄ではなくプロトタイプの差し替えになり、zod の `object` が継承された値を読む。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const prompt = { messages: [{ role: "user" as const, content: "u" }] };
@@ -47,7 +40,6 @@ describe("応答の余分な __proto__ の欄は、継承された値として�
   });
 
   it("2段目（スキーマが許す null を残して検査し直す経路）でも同じ", async () => {
-    // 必須の .nullable() があると1段目は落ち、2段目（keepSchemaNulls）で通る。
     const schema = z.object({ a: z.string().nullable(), b: z.string().optional() });
     const raw = '{"a":null,"__proto__":{"b":"inherited"}}';
     const result = await providerReturningRaw(raw).completeStructured(ctx, { prompt, schema });

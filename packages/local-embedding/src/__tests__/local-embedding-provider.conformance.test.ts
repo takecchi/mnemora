@@ -1,24 +1,6 @@
-// Issue #116 の残債: ADR 0095 が新設した適合テストを、**本物の `LocalEmbeddingProvider`** に当てる。
-//
-// ADR 0095 は suite を作ったが、当てたのは testkit 自身の2実装だけだった。ここがもう片方を返す。
-//
-// ## 🔴 何を測っていて、何を測っていないか（正直に書く）
-//
-// **測っている**: `LocalEmbeddingProvider` が実際に書いたロジック——`space` を
-// コンストラクタで凍結すること・`embed([])` でモデルを起こさないこと・prefix を通す経路・
-// 件数の実行時検査・宣言した次元との一致の実行時検査。
-// **そして、そこを流れるベクトルは本物の ruri-v3-30m (ONNX/q8) が実際に返したものである**
-// （`./fixtures/real-ruri-embeddings.json`。出所は同ファイルの `provenance`）。
-//
-// **測っていない**: onnxruntime の推論そのもの・トークナイザ・モデルの取得。
-// ⚠ **もう1つ、性質として測れていないものがある**: 注入した pipeline は表引きなので
-// **バッチの組み方に依らず同じベクトルを返す**が、本物のモデルは padding を伴う
-// バッチ処理をするため、そうとは限らない（ADR 0090 §1.4、ADR 0095 決定5）。
-// ⟹ **順序の歯が本物のモデルでも成り立つかは、ここでは分からない。**
-// それを問うのは `./live.local-embedding.test.ts` 側（opt-in）である。
-//
-// ⚠ **この検査はモデルの重みを一切落とさない**（`createPipeline` を注入するため）。
-// ⟹ CI の費用も、CI が落ちる回数も増えない。
+// 本物の `LocalEmbeddingProvider` に適合 suite を当てる。流れるベクトルは本物の ruri-v3-30m (ONNX/q8) が返したもの（`./fixtures/real-ruri-embeddings.json`）。onnxruntime の推論・トークナイザ・モデルの取得は測らない。
+// 注入した pipeline は表引きでバッチの組み方に依らず同じベクトルを返すが、本物のモデルは padding を伴うバッチ処理をするのでそうとは限らない。順序の歯が本物のモデルでも成り立つかは `./live.local-embedding.test.ts`（opt-in）が問う。
+// モデルの重みは一切落とさない（`createPipeline` を注入する）。
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -47,23 +29,8 @@ const real = JSON.parse(
 const byText = new Map(real.entries.map((e) => [e.text, e.vector]));
 const [a, b, c] = real.entries.map((e) => e.text) as [string, string, string];
 
-/**
- * 本物のモデルの出力を再生する `createPipeline`。
- *
- * 🔴🔴 **空配列で呼ばれたら投げる。これは意図であって、手抜きではない。**
- *
- * `LocalEmbeddingProvider.embed` は `if (texts.length === 0) return []` で
- * **モデルを起こさずに返す**（`warmup()` の doc が「`embed(ctx, [])` ではウォームアップ
- * できない」と書いているのは、この早期 return が在るからである）。
- * **足場が `[]` を受けて `[]` を返してしまうと、この早期 return を丸ごと消しても
- * 「`embed(ctx, [])` は `[]` を返す」の歯は緑のままになる。**＝ 歯が偽陽性になる。
- * 投げるようにして初めて、「空配列でモデルを起こしていない」ことを測れる。
- * （実際に早期 return を消す変異を入れて、この歯が落ちることを確かめてある。PR 本文参照。）
- *
- * ⛔ 記録に無い入力にも投げる（黙って作りもののベクトルへ倒れない。ADR 0051 と同じ規律）。
- */
-// ⚠ この足場は上限の検査そのものは測らない（それは input-token-limit.test.ts の役目）ので、
-// `maxInputTokens` / `countTokens` はダミーの値で埋める——⛔ 実モデルの上限値を書かない。
+/** 空配列で呼ばれたら投げる。足場が `[]` を返すと、`embed` の早期 return を消しても「`embed(ctx, [])` は `[]` を返す」の歯が緑のままになる（偽陽性）。投げるようにして初めて、空配列でモデルを起こしていないことを測れる。記録に無い入力にも投げる（黙って作りもののベクトルへ倒れない）。 */
+// この足場は上限の検査を測らない（`input-token-limit.test.ts` の役目）ので、`maxInputTokens` / `countTokens` はダミーの値で埋める。実モデルの上限値を書かないこと。
 const createReplayPipeline: CreateLocalEmbeddingPipeline = async () => {
   return {
     maxInputTokens: Number.MAX_SAFE_INTEGER,
@@ -91,10 +58,7 @@ const createReplayPipeline: CreateLocalEmbeddingPipeline = async () => {
 };
 
 describe("適合テストの前提", () => {
-  /**
-   * 🔴 順序の歯は `embed([a,b])[0] === embed([b,a])[1]` を見る。**もし a と b の
-   * ベクトルが同じなら、対応が壊れていてもこの等式は成り立ち、歯は何も測らずに通る。**
-   */
+  /** 順序の歯は `embed([a,b])[0] === embed([b,a])[1]` を見る。a と b のベクトルが同じだと、対応が壊れていてもこの等式が成り立つので、互いに違うことを前提として固定する。 */
   it("記録した3本のベクトルは互いに異なる", () => {
     const [va, vb, vc] = real.entries.map((e) => e.vector);
     expect(va).not.toEqual(vb);
@@ -102,11 +66,7 @@ describe("適合テストの前提", () => {
     expect(va).not.toEqual(vc);
   });
 
-  /**
-   * ⚠ fixture の `space` を**本物の定数から**照合する。ベタ書きの文字列どうしを
-   * 比べても、既定が変わったことは検出できない（`vitest.config.mts` が
-   * `@mnemora/postgres` を「本物を import して使う」ことにしているのと同じ理由）。
-   */
+  /** fixture の `space` を本物の定数から照合する。ベタ書きの文字列どうしを比べても、既定が変わったことは検出できない。 */
   it("fixture の space は LocalEmbeddingProvider の既定と一致する（ずれていたら写しが古い）", () => {
     expect(real.space).toEqual({
       provider: LOCAL_EMBEDDING_PROVIDER_ID,
@@ -118,16 +78,10 @@ describe("適合テストの前提", () => {
 
 describeEmbeddingProviderConformance({
   name: "LocalEmbeddingProvider（本物のモデルの出力を写した pipeline の再生）",
-  // ⚠ `createPipeline` 以外は渡さない——**既定のまま = production と同じ `space`** で測る。
+  // `createPipeline` 以外は渡さない。既定のまま（production と同じ `space`）で測る。
   createProvider: () => new LocalEmbeddingProvider({ createPipeline: createReplayPipeline }),
-  // 決定性を与えているのは再生（表引き）であって、モデルではない。
-  // **本物のモデルが決定的かどうかは `./live.local-embedding.test.ts` 側が測る。**
+  // 決定性を与えているのは再生（表引き）であって、モデルではない。本物のモデルが決定的かどうかは `./live.local-embedding.test.ts` が測る。
   deterministic: true,
   texts: { a, b, c },
-  // ⚠ `overLimitText`（Issue #449 / ADR 0305）は渡さない——`createReplayPipeline` の
-  // `maxInputTokens` はダミーの `Number.MAX_SAFE_INTEGER`（上記コメント参照）であり、
-  // `byText` の表引きに無い入力は「記録に無い」という別の理由で reject する。渡しても
-  // 上限検査そのものを測ったことにならない（vacuous な緑になる）。**本物の上限検査は
-  // `./input-token-limit.test.ts`（fake extractor）と `./live.local-embedding.test.ts`
-  // の歯1〜3（本物のモデル、opt-in）が既に測っている。**
+  // `overLimitText` は渡さない。`maxInputTokens` はダミーで、表引きに無い入力は「記録に無い」という別の理由で reject するので、渡しても上限検査を測ったことにならない（vacuous な緑）。本物の上限検査は `./input-token-limit.test.ts` と `./live.local-embedding.test.ts` が測っている。
 });

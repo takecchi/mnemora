@@ -10,39 +10,11 @@ import type {
 } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * ADR 0543: 孤立サロゲート（対をなさない UTF-16 のサロゲートコードユニット）を `text` 列の欄へ渡したとき、
- * **3実装（`PostgresMemoryStore`・`InMemoryMemoryStore`・core のテスト用 `FakeMemoryStore`）が同じく U+FFFD へ置き換える**
- * ことを、同じ本文で縛る。本体は次の3つが呼ぶ:
- * - `packages/testkit/src/__tests__/lone-surrogate-fffd.test.ts`（InMemory）
- * - `packages/testkit/src/__tests__/lone-surrogate-fffd-fake.test.ts`（Fake）
- * - `packages/postgres/src/__tests__/lone-surrogate-fffd.postgres.test.ts`（Postgres。置き換えの出所そのもの）
- *
- * 期待値は `String.prototype.toWellFormed()` に等しい（対の無い単位を1つずつ U+FFFD にする。node-postgres が
- * UTF-8 へ変換するときの置き換えと同じ）。Postgres で先に緑にしてから、他の2つへ当てた
- * （Postgres が実際に置き換える欄を、実測で確かめるため）。
- *
- * 置き換えの対象外（この本文は縛らない）: 識別子（ADR 0423 が断る）、`jsonb` 列の欄（Postgres は断る。
- * IM・Fake は保持する——ADR 0458 の B3 が縛る）。
- */
-
 export interface LoneSurrogateKit {
   store: MemoryStore;
-  /**
-   * Observation の `payload`（と Memory の `attributes`/`provenance`。`jsonb` 列）の孤立サロゲートを実装が断るか。
-   * Postgres は断る（`true`。`payload` は `invalid input syntax for type json`）。InMemory・Fake は断らず、
-   * **置き換えもせず**そのまま保持する（`false`）。どちらも U+FFFD にはならない。
-   * （イベントの `actor`/`meta` はこの旗の対象外: 3実装とも書く前に断る。Issue #1211。）
-   */
   jsonbRejectsLoneSurrogate: boolean;
-  /** そのテナントの全イベント。 */
   listEvents(ctx: Ctx): Promise<MemoryEvent[]>;
-  /** `OutboxStore.claimBatch`（`kinds`・`claimedBy` の引数が `text[]`・`text` の列に当たる口）。 */
   claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
-  /**
-   * `VectorStore.search`・`LexicalStore.search` の `filter.labels`（`text[]` の引数）。`memoryId` の記憶（`tags` に孤立サロゲートの入ったもの）を
-   * 埋め込み済み・語彙一致する状態にしてから、`labels` で絞った検索の当たった memoryId を返す。
-   */
   searchByLabels?(
     ctx: Ctx,
     memoryId: string,
@@ -50,7 +22,6 @@ export interface LoneSurrogateKit {
   ): Promise<{ vector: string[]; lexical: string[] }>;
 }
 
-/** `searchByLabels` の記憶が語彙一致するための本文と問い。 */
 export const LEXICAL_PROBE = {
   content: "obsidian shards glimmer in the cave",
   query: "obsidian shards",
@@ -58,7 +29,6 @@ export const LEXICAL_PROBE = {
 
 const CTX: Ctx = { tenantId: "lone-fffd" };
 
-/** 孤立サロゲートの型。入力 → 期待（U+FFFD への置き換え）。 */
 export const LONE_CASES: ReadonlyArray<readonly [label: string, input: string, expected: string]> =
   [
     ["孤立した上位サロゲート（後ろに文字）", "a\uD800b", "a�b"],
@@ -68,7 +38,6 @@ export const LONE_CASES: ReadonlyArray<readonly [label: string, input: string, e
     ["上位サロゲートが2つ続く", "\uD800\uD800", "��"],
   ];
 
-/** 変わってはいけない値（対照）。 */
 export const UNCHANGED_CASES: ReadonlyArray<readonly [label: string, value: string]> = [
   ["対をなすサロゲート（絵文字）", "ok-\u{1F600}-ok"],
   ["対をなすサロゲートの直後に孤立（絵文字は残る）", "\u{1F600}"],
@@ -200,7 +169,6 @@ export function describeLoneSurrogateFffd(
       });
 
       it("OutboxStore.claimBatch の kinds（絞り）・claimedBy（書く値）も置き換わる", async () => {
-        // 保存側の kind が置き換わっているので、同じ入力でも、置き換わった形でも絞りに当たる。
         for (const probe of [input, expected]) {
           const { store: s2, claimBatch: claim2 } = await makeKit();
           await s2.createMemoryWithOutbox(CTX, mem(), [input]);
@@ -252,7 +220,6 @@ export function describeLoneSurrogateFffd(
             claimKey: { subject: input, predicate: input },
           }),
         );
-        // 保存側が置き換わっているので、同じ孤立サロゲートの入力で引いても、置き換わった形で引いても当たる。
         for (const probe of [input, expected]) {
           const hits = await store.findActiveByClaimKey!(CTX, {
             subjectId: null,
@@ -271,7 +238,6 @@ export function describeLoneSurrogateFffd(
             listed.map((h) => h.id),
             `extractorVersion probe=${JSON.stringify(probe)}`,
           ).toEqual([m.id]);
-          // labels の絞り（`text[]` の引数）。保存側の tags が置き換わっているので、引数側も置き換わらないと当たらない。
           const agg = await store.aggregateScope(CTX, { labels: [probe] });
           expect(agg.totalInScope, `labels probe=${JSON.stringify(probe)}`).toBe(1);
         }
@@ -347,8 +313,6 @@ export function describeLoneSurrogateFffd(
               : await store.findContestedByClaimKey!(CTX, q);
           return hits.length > 0;
         };
-        // 当たった（true）か。保存済みの contentHash と「同じ」とみなされる引数は除外される（false）。
-        // Postgres は引数を U+FFFD にしてから比べるので、置き換え前の値も、置き換え後の値も除外される。
         const observed = {
           activeRaw: await find("active", `h-${input}`),
           activeReplaced: await find("active", `h-${expected}`),
@@ -384,8 +348,6 @@ export function describeLoneSurrogateFffd(
     describe.each(UNCHANGED_CASES)("対照: %s", (_label, value) => {
       it("変わらない（content・digest・tags・claimKey・kind・label name）", async () => {
         const { store } = await makeKit();
-        // ADR 0630: 空文字の digest・claimKey は、書き込みの口が拒む（読み戻すと MemorySchema を通らない）。空文字の対照は、
-        // 書ける欄（content・tags・kind・label name）で見る。
         const digest = value === "" ? "d" : value;
         const claimKey = value === "" ? null : { subject: value, predicate: value };
         const m = await store.createMemory(
@@ -468,7 +430,6 @@ export function describeLoneSurrogateFffd(
       } else {
         expect(viaCreate?.payload).toEqual({ text: lone });
         expect(viaOutbox?.payload).toEqual({ nested: [{ text: lone }] });
-        // 読み戻しも保持したまま（U+FFFD にならない）。
         expect((await store.getObservation(CTX, viaCreate!.id))?.payload).toEqual({ text: lone });
       }
     });

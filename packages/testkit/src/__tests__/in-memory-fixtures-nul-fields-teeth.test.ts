@@ -1,12 +1,3 @@
-// #928 の確かめ直し（#1774）。`InMemoryMemoryStore.createMemory` の NUL の検査の、既存の歯が見ていなかった形。
-//
-// - `tags` は要素ごとに見る：NUL が先頭・中・末尾のどこにあっても断る（既存の歯は `tags[0]` だけ）。
-// - 例外の文言は `InMemoryMemoryStore: <欄> must not contain NUL characters (U+0000)`（欄名を取り違えない）。
-// - NUL そのものでない値（文字どおりの `\u0000` の6文字、U+2400 `␀`）は断らず、そのまま保存する。
-//
-// 孤立サロゲートは置き換えて保存する（ADR 0543）ので、ここでは見ない。`subjectId` の NUL は入口の
-// `assertWellFormedIdentifier`（ADR 0563、`MalformedIdentifierError`）が先に断る。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";

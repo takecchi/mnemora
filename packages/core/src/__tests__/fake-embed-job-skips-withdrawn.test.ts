@@ -5,12 +5,6 @@ import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0541: forget・purge した記憶の本文を、埋め込みジョブ（`tick`）が外部の embedding provider に送らない（Fake の歯。DB を要らない）。
- * 3実装の突き合わせは `packages/postgres/src/__tests__/embed-job-skips-withdrawn-memory.postgres.test.ts`。
- * 他の状態（active・archived）は今までどおり埋め込む（やりすぎの対照）。conformance suite には何も足していない（ADR 0434 決定5）。
- */
-
 const ctx: Ctx = { tenantId: "fake-embed-skip" };
 const SECRET = "secret-body-XYZ";
 const llm: LLMProvider = {
@@ -101,7 +95,6 @@ async function run(
   if (state === "forgotten" || state === "purged") await rt.forget(ctx, { memoryId: id });
   if (state === "purged") await rt.purge(ctx, { memoryId: id });
   if (state === "archived") await stores.memoryStore.updateStatus(ctx, id, "archived");
-  // `signal` を渡す経路（`tick` の `opts.signal`）でも、同じく provider を呼ばない。
   const tickOpts = {
     leaseMs: 1000,
     kinds: ["embed" as const],
@@ -144,7 +137,6 @@ describe("Fake: 埋め込みジョブは、forget・purge した記憶の本文�
     });
   }
 
-  // `tick` に `signal` を渡す経路でも守る（判定を signal の有無で変えない）。
   for (const state of ["forgotten", "purged", "purgedOnly"] as const) {
     it(`${state}: tick に signal を渡しても、provider もフックも呼ばない`, async () => {
       const r = await run(state, { withSignal: true });

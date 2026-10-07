@@ -2,26 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/ci.yml` の `build` ジョブが、実際に `pnpm run api:check`
- * （`scripts/check-public-api-surface.mjs`、Issue #342 / ADR 0178）を、
- * `Build` ステップの直後・`pack:check`/`check:cjs-parse` と同じジョブで走らせていること。**
- *
- * ⚠ **`scripts/__tests__/public-api-surface-lib.test.mjs`/`check-public-api-surface.test.mjs`
- * の重複ではない**（`ci-yml-compare-wiring.test.mjs` の docstring と同じ理由）。その2本は
- * 合成フィクスチャへ直接呼ぶ・CLI を env var 差し替えで走らせるだけで、**`ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` からこのステップを落としても、`Build` より
- * 前に動かしても（dist が無くて壊れる）、7つ目の別ジョブへ切り出しても
- * （branch protection の対象名とずれる、ADR 0138 と同じ事故）、**その2本は緑のまま通る。**
- * この歯だけが `ci.yml` を入力に取る。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**依存追加はオーナー専権
- * （`docs/autonomy.md`）であり、この歯のために YAML パーサを足さない——他の
- * `ci-yml-*-wiring.test.mjs` と同じ判断。壊れたときは「配線が変わった」か「書き方が
- * 変わった」かを見て、配線が変わっていないなら取り出し方のほうを直すこと。
- */
+/** YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。壊れたときは、配線が変わったのか書き方が変わったのかを見て、配線が変わっていないなら取り出し方を直す。 */
 
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
 const workflow = readFileSync(workflowPath, "utf8");
@@ -30,7 +11,6 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 
 const JOB_ID = "build";
 
-/** `jobs:` の下の1ジョブを切り出す（`ci-yml-compare-wiring.test.mjs` と同じ形）。 */
 function extractJob(yaml, jobId) {
   const lines = yaml.split("\n");
   const start = lines.findIndex((line) => line === `  ${jobId}:`);
@@ -64,7 +44,6 @@ describe("ci.yml の build ジョブの api:check 配線（Issue #342 / ADR 0178
     expect(buildIdx, "Build ステップが見つからない").toBeGreaterThan(-1);
     expect(apiIdx, "api:check の段が見つからない").toBeGreaterThan(-1);
     expect(apiIdx).toBeGreaterThan(buildIdx);
-    // 既存の並び（Build → api:check → check:cjs-parse → pack:check）を崩していないこと。
     expect(apiIdx).toBeLessThan(cjsIdx);
     expect(cjsIdx).toBeLessThan(packIdx);
   });

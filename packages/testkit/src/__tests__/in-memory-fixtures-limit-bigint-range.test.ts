@@ -1,23 +1,3 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// 各 store の `limit` は、Postgres 実装では生 SQL の `LIMIT`（bigint パラメータ）にそのまま
-// 渡る。PR #804/#811/#923 で Fake は負数・`NaN`・`Infinity`・非整数を Postgres と同じく
-// 拒むようになったが、**bigint に収まらない整数（2^63 以上）**は `Number.isInteger` を通り、
-// Fake だけが受け入れていた。
-//
-// 実測（本物の Postgres 17 + pgvector、`claimBatch`・`VectorStore.search`・
-// `LexicalStore.search`・`EventStore.list`・`purgeExpiredEvents`・`digestBand.limit`・
-// `archiveDecayed` のすべて）:
-// - `2 ** 63`（`String()` は `"9223372036854776000"`）: `value "9223372036854776000" is out of
-//   range for type bigint`
-// - `1e21` 以上（`String()` が指数表記になる）: `invalid input syntax for type bigint: "1e+21"`
-// - `2 ** 63 - 1024`（2^63 未満で最大の double）: 例外にならない
-//
-// 修正前の Fake は例外を投げず、書き込みを持つ口（`claimBatch`・`archiveDecayed`）では
-// 対象を全件書き換えていた。
-//
-// このテストは Fake を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
@@ -33,7 +13,6 @@ const SPACE = { provider: "test", model: "test", dimensions: 3 };
 const TOO_LARGE = [2 ** 63, 1e21];
 const LARGEST_BELOW = 2 ** 63 - 1024;
 
-/** 各口を、与えた limit で1回呼ぶ。 */
 const CALLS: [name: string, call: (limit: number) => Promise<unknown>][] = [
   [
     "InMemoryOutboxStore.claimBatch",

@@ -108,8 +108,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである。測る前に宣言するのは、Issue #148 が「⛔ 順序を逆にしない」
           POSTGRES_INITDB_ARGS: ${{ matrix.initdbArgs }}
         ports:
           - 5432:5432

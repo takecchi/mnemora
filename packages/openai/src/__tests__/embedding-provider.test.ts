@@ -3,13 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import OpenAI from "openai";
 import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 
-/**
- * **正直に書く**: ここで注入する `client` は本物の OpenAI SDK ではない。
- * ネットワーク往復（HTTP・認証・リトライ）は検査しておらず、検査しているのは
- * 「`OpenAIEmbeddingProvider` が受け取ったレスポンスをどう core の型へ変換するか」
- * という、このパッケージが実際に書いたロジックの部分だけである。
- * 本物の OpenAI に対する検査は `live.openai.test.ts`（`OPENAI_API_KEY` がある場合のみ）に分離する。
- */
+/** ここで注入する `client` は本物の OpenAI SDK ではない。ネットワーク往復（HTTP・認証・リトライ）は検査しない。本物に対する検査は `live.openai.test.ts` に分離する。 */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
 describe("OpenAIEmbeddingProvider", () => {
@@ -65,32 +59,14 @@ describe("OpenAIEmbeddingProvider", () => {
         input: ["a", "b"],
         dimensions: 2,
       },
-      // Issue #1200 / ADR 0359: `embed` は常に第2引数（request options）を渡す
-      // ——`opts?.signal` を省略した呼び出しでは `{ signal: undefined }` になる。
+      // `embed` は常に第2引数（request options）を渡す。`opts?.signal` を省略した呼び出しでは `{ signal: undefined }` になる。
       { signal: undefined },
     );
   });
 
   /**
-   * Issue #449 / ADR 0305: `OpenAIEmbeddingProvider` は入力トークン数の上限を自前で
-   * 検査しない（`@mnemora/local-embedding` と違う）。`EmbeddingProvider` の契約
-   * （`embedding-provider.ts` の interface doc）は「上限超過は例外にする」だが、
-   * この実装は**それを自前の検査ではなく、サーバの拒否に全面的に依存して満たしている**
-   * ——ADR 0305「確かめていないこと」に書いたとおり、その依存自体は実 API では
-   * 確かめていない。
-   *
-   * ここで測れるのはそれとは別で、より狭いことである: **サーバが実際に拒否したとき
-   * （＝ client が例外を投げたとき）、`embed()` がそれを握りつぶさず・切り詰めて
-   * 再送しもせず、そのまま呼び出し側へ伝播すること。** `embed()` の実装（`embedding-provider.ts`）
-   * には `try/catch` が無く、この歯はその「無い」ことを固定する——`try/catch` で
-   * 握りつぶす変更が入ったら、この歯が最初に落ちる。
-   *
-   * 投げる client は、実際の OpenAI SDK が HTTP 400 で投げる例外
-   * （`OpenAI.BadRequestError`）を、マネージャーが実 API に当てて得た文面
-   * 【実測 2026-09-25、実 API 1回】そのままで組み立てる:
-   * `text-embedding-3-small` に `" hello".repeat(10000)` を送ると
-   * `HTTP 400 {"error":{"message":"Invalid 'input[0]': maximum input length is
-   * 8192 tokens.","type":"invalid_request_error","param":null,"code":null}}` が返る。
+   * `OpenAIEmbeddingProvider` は入力トークン数の上限を自前で検査せず、サーバの拒否に依存している。そのため、client が例外を投げたとき `embed()` がそれを握りつぶさず・切り詰めて再送もせず、そのまま伝播することを固定する。`embed()` には `try/catch` が無く、握りつぶす変更が入ったらこの歯が最初に落ちる。
+   * 投げる client は、実際の OpenAI SDK が HTTP 400 で投げる例外（`OpenAI.BadRequestError`）を、実 API から得た文面そのままで組み立てる。`text-embedding-3-small` に `" hello".repeat(10000)` を送ると `Invalid 'input[0]': maximum input length is 8192 tokens.` が返る。
    */
   it("client が HTTP 400（入力トークン数の上限超過）を投げると、embed() はそれを握りつぶさず・切り詰めて再送もせず、そのまま reject する", async () => {
     const serverError = new OpenAI.BadRequestError(
@@ -112,7 +88,7 @@ describe("OpenAIEmbeddingProvider", () => {
     });
 
     await expect(provider.embed(ctx, [" hello".repeat(10000)])).rejects.toBe(serverError);
-    // ⚠ 1回しか呼ばない——切り詰めて黙って再送すると、ここが2回以上になる。
+    // 1回しか呼ばない。切り詰めて黙って再送すると、ここが2回以上になる。
     expect(create).toHaveBeenCalledTimes(1);
   });
 });

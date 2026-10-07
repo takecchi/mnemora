@@ -3,31 +3,14 @@ import type { EmbeddingCassetteSection } from "./cassette.js";
 import { embeddingCassetteKey } from "./cassette.js";
 
 /**
- * 記録した実 API の応答を再生する `EmbeddingProvider`（ADR 0051）。
- *
- * **`DeterministicEmbeddingProvider` の代わりではない。**あちらは文字コードから
- * 機械的にベクトルを作る stub であり、意味的な類似度を一切表現しない（配線の検査用）。
- * こちらは**記録元の本物のモデル（同梱のカセットでは `text-embedding-3-small`）が実際に返したベクトルをそのまま返す**ため、
- * 記録済みの入力に対しては本物と同じ順位が出る。
- *
- * **記録に無い入力に対しては例外を投げる。**黙って stub のベクトルへ倒れたり、
- * ゼロベクトルを返したりしない——それをすると「本物で測った」と読める出力の中に
- * 意味を持たない値が混ざり、どの行が信用できるかが誰にも分からなくなる。
- * これは `DeterministicLLMProvider` が既に守っている原則（「知らない形に遭遇したら
- * 黙って何か返すことをしない」）の、この文脈への適用である。
+ * 記録した実 API の応答を再生する `EmbeddingProvider`（ADR 0051）。`DeterministicEmbeddingProvider` と違い、
+ * 記録元の本物のモデルが返したベクトルをそのまま返す。
+ * 記録に無い入力には例外を投げる: stub のベクトルやゼロベクトルへ黙って倒れると、本物で測った出力に意味の無い値が混ざり、信用できる行が分からなくなる。
  */
 export interface RecordedEmbeddingProviderOptions {
   /** 再生するカセットの埋め込みの節。 */
   section: EmbeddingCassetteSection;
-  /**
-   * 呼び出し側が期待する埋め込み空間。指定すると、記録元の空間と食い違ったときに
-   * **構築時に**落ちる。
-   *
-   * **なぜ必要か（ADR 0051 の「引き受ける負債」）**: カセットはモデル版を凍結する。
-   * 呼び出し側が `text-embedding-3-small` / 256次元のつもりで、別のモデルで録った
-   * カセットを読んだ場合、ベクトルは正常に引けてしまい、順位も出てしまう——
-   * **数字が出るのに意味が違う**という最も見つけにくい壊れ方になる。ここで照合する。
-   */
+  /** 期待する埋め込み空間。指定すると、記録元の空間と食い違ったときに構築時に落ちる（別モデルで録ったカセットを、数字が出るまま読むのを防ぐ）。 */
   expectedSpace?: EmbeddingSpaceId | undefined;
 }
 
@@ -56,7 +39,6 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
         );
       }
     }
-    // ADR 0452: カセットの `space` オブジェクトそのものは持たない（`provider.space` を書き換えても、カセットや他の provider に漏れない）。
     this.space = Object.freeze({ ...section.space });
     this.entries = section.entries;
   }
@@ -79,7 +61,6 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
             "カセットが壊れている。",
         );
       }
-      // 本物の provider（`@mnemora/openai`・`@mnemora/local-embedding`）と同じく、成分が有限の数であることを確かめる（ADR 0452）。
       const bad = entry.vector.findIndex((x) => typeof x !== "number" || !Number.isFinite(x));
       if (bad !== -1) {
         throw new Error(
@@ -87,17 +68,12 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
             `（${bad} 番目: ${String(entry.vector[bad])}）。カセットが壊れている。`,
         );
       }
-      // 記録の配列そのものは返さない（呼び出し側が書き換えても、次の再生に漏れない）。
       return [...entry.vector];
     });
   }
 }
 
-/**
- * 記録に無かった入力を、例外の文面に載せる形にする。本文を丸ごと載せない——長い発話や
- * 文書を入れると例外文（とそれを写すログ・CI の出力）が本文で埋まるため、先頭 80 文字と
- * 全体の長さだけを出す。どの入力かを見分けるには、これで足りる。
- */
+/** 例外の文面に載せる入力は先頭 80 文字と全体の長さだけにする: 本文を丸ごと載せると、例外文とそれを写すログが本文で埋まる。 */
 function describeRecordedInput(text: string): string {
   const LIMIT = 80;
   const chars = Array.from(text);

@@ -5,24 +5,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { extractGoalStatements } from "../north-star-default-probe-lib.mjs";
 
-/**
- * `docs/north-star-paths.md`（北極星「目指す姿」の各項目を満たしている出荷物の経路の一覧）の
- * **参照先が実在すること**だけを確かめる歯（Issue #387）。
- *
- * 確かめるのは次の3種と、節の対応だけである:
- *
- * - `- 口: \`<パッケージ>\` \`<名前>\`` —— 名前が `scripts/__snapshots__/public-api/<パッケージ>.d.ts`
- *   （公開 API のスナップショット、ADR 0178）に語として在る。
- * - `- 実装: \`<パス>\`` —— ファイルが在る。
- * - `- テスト: \`<パス>\` 「<it の名前>」` —— ファイルが在り、その名前が `it(`／`test(` の**第1引数として**
- *   逐語で在り、その宣言が `.skip`／`.fails` でない（名前がコメントや別の文字列にあるだけでは足りない）。
- * - `docs/north-star.md`「目指す姿」の箇条それぞれに `### 項目N` の節が在る
- *   （箇条の数はここに焼き込まず、正典から読む）。
- *
- * ⛔ **項目が満たされているかは判定しない。**⛔ **参照先が出荷パッケージの中かも確かめない**
- * （ADR 0216「(ア)」で退けた検査）。一覧の中身はオーナーの確認待ちであり、この歯は
- * 書いてある参照が腐っていないことだけを見る。
- */
+// 参照先が出荷パッケージの中かは確かめない（ADR 0216「(ア)」で退けた検査）。
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const PATHS_DOC = "docs/north-star-paths.md";
@@ -34,8 +17,7 @@ const FILE_REF = /^`([^`]+)`$/;
 const TEST_REF = /^`([^`]+)` 「(.+)」$/;
 
 /**
- * `## 経路` 節の `### 項目N` ごとに、参照の行を拾う。形の崩れた行は `malformed` に出す
- * （黙って読み飛ばすと、壊れた参照が「確かめなかった」まま緑になる）。
+ * 形の崩れた行は `malformed` に出す（黙って読み飛ばすと、壊れた参照が緑になる）。
  *
  * @param {string} markdown
  */
@@ -82,13 +64,9 @@ function parsePathsDoc(markdown) {
 
 const IDENTIFIER_CHAR = "[A-Za-z0-9_$]";
 
-/** 走らない、または結果を反転する宣言。これが付いた it は「縛っている」に数えない。 */
 const NON_RUNNING_MODIFIERS = new Set(["skip", "fails"]);
 
 /**
- * `source` の中で、`name` を第1引数に持つ `it(`／`test(` の宣言を探す。
- * `it.skipIf(cond)(name, …)` のように呼び先が連なる形も、根が `it`／`test` なら宣言として数える。
- *
  * @param {string} source
  * @param {string} name
  * @returns {{ found: false } | { found: true, modifiers: string[] }}
@@ -129,8 +107,6 @@ function findTestDeclaration(source, name) {
 }
 
 /**
- * 参照ごとに実在を確かめ、見つからなかったものを文字列で返す（空なら全部在る）。
- *
  * @param {ReturnType<typeof parsePathsDoc>["items"]} items
  * @param {string} root
  */

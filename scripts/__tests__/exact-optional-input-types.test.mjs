@@ -1,14 +1,5 @@
 /**
- * 入力側の公開型の任意欄が、`exactOptionalPropertyTypes: true` の利用者から `undefined` を受け取れることを
- * 見る歯（ADR 0429、穴探し8巡目 AA）。
- *
- * 対象は `scripts/__fixtures__/exact-optional-input-types.probe.ts` の1ファイル。各パッケージの **src** を
- * `paths` で指して型検査するので、`pnpm run build` より前に走るルートの `pnpm run test`（CI の build ジョブ）
- * でも動く（dist を要らない）。src の内部の型エラー（src 自身は `exactOptionalPropertyTypes: false` で書かれて
- * いる）は見ない。診断を数えるのは probe ファイルだけ。
- *
- * 陽性対照: 同じ設定で、`exactOptionalPropertyTypes` が効いていないと 0 件になる既知の赤い行を持つ
- * 一時ソースが TS2375 を出すこと。設定が黙って効かなくなった場合に、「0 件で緑」が偽の緑にならない。
+ * src の内部の型エラーは見ない（src 自身は `exactOptionalPropertyTypes: false` で書かれている）。診断を数えるのは probe ファイルだけ。
  */
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

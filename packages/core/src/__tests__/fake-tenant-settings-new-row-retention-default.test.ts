@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeTenantSettingsStore` の「新しい行の保持期間の既定」の歯（ADR 0564、Issue #768）。
- *
- * Postgres の `tenant_settings` は、どの設定を書いても行を upsert し、`event_retention_days` は `NULL`
- * ⟹ `unlimited` になる。`InMemoryTenantSettingsStore` は `ensureRow` で同じにしている。以前の Fake は
- * 保持期間の Map にキーを立てず、行ができたのに `unset` のままだった。
- *
- * **testkit の conformance の対象ではない**（Issue #768 コメント2）。直したものはここで押さえる。
- */
-
 const ctxA: Ctx = { tenantId: "tenant-a" };
 const ctxB: Ctx = { tenantId: "tenant-b" };
 

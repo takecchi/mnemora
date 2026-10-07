@@ -5,17 +5,6 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 
-/**
- * Issue #1050: `InMemoryVectorStore.search` と `InMemoryLexicalStore.search` は、
- * `opts.filter.tenantId` に加えて **`ctx.tenantId` の境界も掛ける**（AND）。
- * 2つが食い違えば空を返す（例外は投げない）。
- *
- * Postgres 側の同じ歯は `packages/postgres/src/__tests__/search-ctx-tenant-boundary.postgres.test.ts`。
- * **`*-conformance.ts` には足していない**（#809）。
- *
- * 「変わる」側（一致すれば A 自身が返る）も同じ it で見る——「常に空を返す」実装で緑にならないため。
- */
-
 const TENANT_A = "in-memory-search-boundary-a";
 const TENANT_B = "in-memory-search-boundary-b";
 const ctxA: Ctx = { tenantId: TENANT_A };

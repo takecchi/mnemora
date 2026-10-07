@@ -4,18 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createBullmqTickDriver } from "../tick-driver.js";
 import type { BullmqTickDriver } from "../tick-driver.js";
 
-/**
- * 実 Redis（`REDIS_PORT`）で、`lockDuration`（ADR 0548）が Worker の lock の期限として Redis に届くことを縛る。
- *
- * tick の途中で止めておき、実行中の job の lock キー（bullmq 6.3.8 では `queue.toKey(jobId) + ":lock"`）の
- * `PTTL` を読む。BullMQ は lock を `lockDuration` ミリ秒で取り、既定では `lockDuration / 2` ごとに延ばすので、
- * 読んだ値は `lockDuration / 2` より大きく `lockDuration` 以下に入る。
- *
- * - 渡したとき（60000）: 既定の 30000 より大きい。
- * - 渡さないとき: BullMQ の既定（30000）の範囲。driver が勝手に値を載せていない。
- *
- * ⚠ stalled が減ること（ADR 0449 の 45 秒の測定）はここでは見ない。見るのは期限が Redis に届くことだけ。
- */
+/** lock キーの PTTL を読む。BullMQ は lock を `lockDuration` ミリ秒で取り `lockDuration / 2` ごとに延ばすので、読んだ値は `lockDuration / 2` より大きく `lockDuration` 以下に入る。 */
 const REDIS_PORT = process.env.REDIS_PORT;
 if (!REDIS_PORT) {
   throw new Error(
@@ -45,7 +34,6 @@ async function waitFor(cond: () => boolean, timeoutMs: number): Promise<void> {
   }
 }
 
-/** tick の途中で止めた状態で、実行中の job の lock キーの PTTL（ミリ秒）を返す。 */
 async function lockPttlDuringTick(extra: { lockDuration?: number }): Promise<number> {
   const queueName = `mnemora-tick-lock-duration-${Date.now()}`;
   const queue = new Queue(queueName, { connection });

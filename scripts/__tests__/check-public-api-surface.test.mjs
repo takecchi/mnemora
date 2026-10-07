@@ -5,27 +5,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/check-public-api-surface.mjs`（公開 API 表面の門。Issue #342 / ADR 0178）の CLI 全体
- * を対象にした歯。
- *
- * `scripts/__tests__/check-cjs-transpile-parse.test.mjs` と同じ形——フィクスチャは常に
- * 一時ディレクトリに作り、`afterEach` で必ず消す。作業ツリーの `packages/<name>/dist` や
- * `scripts/__snapshots__/public-api/` には一切触れない（CI の「Test」段は「Build」段より
- * 前にあり、実物の dist はまだ存在しない可能性がある。実物に対して走らせる確認は
- * `.github/workflows/ci.yml` の `build` ジョブが `Build` の直後に行う）。
- *
- * `MNEMORA_API_CHECK_PACKAGES_ROOT` / `MNEMORA_API_CHECK_SNAPSHOT_DIR` の2つの env var で
- * 差し替える（`scripts/check-cjs-transpile-parse.mjs` の `CJS_PARSE_CHECK_PACKAGES_ROOT` と
- * 同じ理由・同じ形）。`./publish-targets.mjs` の `PUBLISH_TARGETS`（パッケージ名・dir 名）は
- * 実物のまま使う——対象リストそのものが正しく `PUBLISH_TARGETS` を参照していることも
- * この歯が同時に確かめる。
- */
+/** 実物の dist・snapshot には触れない。CI では Test 段が Build 段より前にあり、dist がまだ無いことがある。 */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const gate = fileURLToPath(new URL("../check-public-api-surface.mjs", import.meta.url));
 
-// `./publish-targets.mjs` の `PUBLISH_TARGETS` と同じ7パッケージのディレクトリ名。
 const PACKAGE_DIRS = [
   "core",
   "testkit",
@@ -52,7 +36,6 @@ afterEach(() => {
   }
 });
 
-/** 7パッケージすべてに、最小限の `exports`/`dist/index.d.ts` を持つフィクスチャを作る。 */
 function newFixtureRoots() {
   const base = mkdtempSync(join(tmpdir(), "api-check-cli-"));
   packagesRoot = join(base, "packages");
@@ -132,7 +115,6 @@ describe("scripts/check-public-api-surface.mjs（公開 API 表面の門）", ()
       "export declare const ok: true;\n",
       "utf8",
     );
-    // 上の1行を実際の変異に差し替える。
     writeIndexDts(
       "core",
       [
@@ -151,7 +133,6 @@ describe("scripts/check-public-api-surface.mjs（公開 API 表面の門）", ()
     expect(output).toContain("次にすること");
     expect(output).toContain("ADR 0178");
     expect(output).toContain("--write");
-    // 変異していないパッケージは差分なしのまま。
     expect(output).toContain("[@mnemora/testkit] 差分なし");
   });
 

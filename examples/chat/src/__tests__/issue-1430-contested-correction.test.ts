@@ -8,23 +8,6 @@ import {
 import { buildMnemoraPrompt, buildMnemoraPromptDetail } from "../mnemora-path.js";
 import { PROVENANCE_PROMPT_CASES } from "./provenance-prompt-cases.js";
 
-/**
- * Issue #1430（ADR 0379、C2 採用: 案1＋案3、案3は既定オン）の歯。
- *
- * 1. `buildMnemoraPromptDetail`: `hasContestedCorrectionWording` は、描画の途中
- *    （矛盾候補欄が非対称文面＝案1を選ぶ分岐そのもの）から決まる**構造の値**であり、
- *    できあがった `body`（プロンプト文字列）を後から部分文字列で走査し直すものではない。
- *    `digest` の本文にたまたま「（訂正の可能性）」/「（訂正された可能性）」という文字列が
- *    紛れ込んでいても、それだけでは `true` にならないことを固定する。
- * 2. `buildMnemoraPrompt(recall)` は `buildMnemoraPromptDetail(recall).body` と1バイトも
- *    変わらない（公開シグネチャ・出力を変えていない後方互換ラッパー）ことを固定する。
- * 3. `resolveMnemoraAnswerSystemPrompt`: 案3（system 文への一文追記、既定オン・
- *    切替可能）が、`hasContestedCorrectionWording` が `true` のときだけ一文を足すこと
- *    （フラグが既定 `true` でも、印が無ければ足さない）。
- *
- * どちらも DB・API を一切使わない純関数の単体試験である。
- */
-
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
 
 function recallWith(memories: RecallResult["memories"]): RecallResult {
@@ -109,8 +92,6 @@ describe("buildMnemoraPromptDetail: hasContestedCorrectionWording（構造で見
         score: SCORE,
       };
       const detail = buildMnemoraPromptDetail(recallWith([decoy]));
-      // 文字列としては body に紛れ込んでいることを先に確認する
-      // （でなければ、この歯が「そもそも紛れ込んでいない」だけで通ってしまう）。
       expect(detail.body).toContain("（訂正の可能性）");
       expect(detail.hasContestedCorrectionWording).toBe(false);
     },
@@ -141,7 +122,6 @@ describe("buildMnemoraPromptDetail: hasContestedCorrectionWording（構造で見
       };
       const detail = buildMnemoraPromptDetail(recallWith([owner, companion]));
       expect(detail.body).toContain("（訂正された可能性）");
-      // companionOf 由来なので対称な旧文面（矛盾候補欄そのものは出る）。
       expect(detail.body).toContain("[矛盾候補:");
       expect(detail.hasContestedCorrectionWording).toBe(false);
     },

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MnemoraPostgres from "@mnemora/postgres";
 
-// `close()` 自体が失敗する状況を作る：本物の `closePostgresClient` を呼んでから、わざと reject する。
 vi.mock("@mnemora/postgres", async (importOriginal) => {
   const actual = await importOriginal<typeof MnemoraPostgres>();
   return {
@@ -19,11 +18,6 @@ import { createTimeWeightingBenchRuntime } from "../time-weighting-bench.js";
 import { closePostgresClient } from "@mnemora/postgres";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * #937 の確かめ直し（#1774）。ファクトリが `Pool` を閉じるときに `close()` 自体が失敗しても、
- * 呼び出し側へ届くのは元の失敗（`.catch(() => {})` で二次失敗を握り潰す約束、PR 本文「直したこと」）。
- * `close()` の失敗で元のエラーを上書きしてはならない。
- */
 describe("examples/chat: ファクトリの失敗時に Pool を閉じ、close() が失敗しても元のエラーが届く（本物の Postgres）", () => {
   beforeEach(() => {
     vi.mocked(closePostgresClient).mockClear();
@@ -61,7 +55,6 @@ describe("examples/chat: ファクトリの失敗時に Pool を閉じ、close()
       expect(rejection).toBeInstanceOf(Error);
       expect((rejection as Error).message).toMatch(original);
       expect((rejection as Error).message).not.toMatch(/close failed on purpose/);
-      // 閉じる責務を引き受けている（呼び出し側は handle を受け取れず、close() を呼べない）
       expect(closePostgresClient).toHaveBeenCalledTimes(1);
     });
   }

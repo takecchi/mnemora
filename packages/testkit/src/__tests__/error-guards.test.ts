@@ -5,19 +5,6 @@ import {
   expectStoreError,
 } from "../error-guards.js";
 
-/**
- * Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1514（ADR 0418 の続き）の変異試験で、
- * 適合テストの道具 `error-guards.ts` が判定関数の結果を見ない（常に通す）変異が、`expectStoreError`・
- * `expectRejectsWithoutStoreError` の両方ですり抜けた。担当はクローン（miku）の判断で進めている作業であり、
- * オーナーの判断ではない。
- *
- * 既存の歯（`foreign-realm-conformance.test.ts`）は、**正しい**例外が別 realm でも通ることだけを見る。
- * 道具自身が「別の例外を落とす」ことを、間違った例外で確かめる歯が無かった。道具が壊れると、すべての
- * 適合テストの「正しい例外を投げる」検査が静かに緑になる（Postgres の適合テストも同じ道具を通る）。
- * この歯は道具そのものを、通る例外・通らない例外の両方で縛る。`error-guards.ts` は公開しない内部の道具なので、
- * 公開の適合テスト（`*-conformance.ts`）には触れない。
- */
-
 class Boom extends Error {
   readonly kind = "boom" as const;
 }

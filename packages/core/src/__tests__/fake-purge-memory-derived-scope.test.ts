@@ -5,13 +5,6 @@ import type { NewMemory } from "../memory.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * core の `FakeMemoryStore.purgeMemory` が、本文の派生物（label の紐付け・`recalls.index_band` の目次帯）に
- * 触れる範囲。`InMemoryMemoryStore`・`PostgresMemoryStore` と同じ。
- * - `registered` の label は触らない（`proposedCount` も `status` も動かさない）。
- * - 目次帯のこの Memory のエントリは `{ memoryId, digest: 墓石 }` だけになる（`truncated` は落ちる）。
- */
-
 const ctx: Ctx = { tenantId: "fake-purge-derived-scope" };
 
 function newMemory(overrides: Partial<NewMemory>): NewMemory {

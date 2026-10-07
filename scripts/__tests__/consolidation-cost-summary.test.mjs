@@ -5,19 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/consolidation-cost-summary.mjs` の歯。**本物のスクリプトを子プロセスとして
- * 実際に起動する**(`scripts/__tests__/retrieval-quality-summary.test.mjs` と同じ判断)
- * ——`consolidation-cost-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・exit code)はここでしか測れない。
- *
- * DB は要求しない——このスクリプトは JSON ファイル1〜2個を読むだけである。
- *
- * `examples/chat/consolidation-baseline.json` は `22c0731`（ADR 0101、2026-09-11）でコミットされている
- * （この歯の当初のコメントは「まだコミットされていない」と書いていた）。この歯は実物のファイルに
- * 依存せず、ここで使う measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
- */
-
 const script = fileURLToPath(new URL("../consolidation-cost-summary.mjs", import.meta.url));
 
 function makeProbe(overrides = {}) {

@@ -5,32 +5,6 @@ import { CORRECTION_SCENARIO } from "../correction-scenario.js";
 import { DEFAULT_COMPARE_SEQUENCE } from "../compare.js";
 import { FACT_STATEMENT, QUERY_TEXT, buildConversation } from "../scenario.js";
 
-/**
- * `compare` の⭐門（ADR 0133）への影響を機械的に確かめる歯（Issue #303 受け入れ条件4）。
- *
- * **ADR 0133 の⭐門は `examples/chat/compare-baseline.json` に対する退行検査**——
- * `mnemoraShareOfNaiveChars` の悪化 / `factStatementSurvived` の退行を CI の
- * `example-chat` ジョブが機械的に落とす。この PR は `compare.ts`/`compare-json.ts`/
- * `scenario.ts`/`compare-baseline.json` のいずれも変更していない——⟹ 影響の測り方は
- * 「変えていないことを主張する」ではなく、**変えようがない構造になっていることを検査する**
- * ことにした。
- *
- * この歯が検査するのは3点:
- * 1. `correction-demo.ts`/`correction-scenario.ts` のソースが `compare.ts`/
- *    `compare-json.ts`/`scenario.ts`/`probe-set.ts`/`naive-path.ts` のどれも import して
- *    いない（import グラフに経路が無い＝実行時に影響しようがない）。
- * 2. `compare.ts`/`scenario.ts` のソースが `correction`（大小無視）を1文字も含まない
- *    （逆方向の依存も無い）。
- * 3. `compare` が実測に使う値（`DEFAULT_COMPARE_SEQUENCE`・`FACT_STATEMENT`・`QUERY_TEXT`・
- *    `buildConversation` の出力）が、このシナリオを足す前と同じ値のままである
- *    （このリポジトリでは `compare-baseline.json` が CI 実測値そのものなので、ここでの
- *    「同じ値」は基準値の欄を書き写したものではなく、既存コードの読み取りである）。
- *
- * **⚠ この歯が測っていないこと**: `compare-baseline.json` に対する実際の退行検査そのもの
- * （`DATABASE_URL`/カセットが要り、この作業環境では実行できない——CI の `example-chat`
- * ジョブが、この PR をマージした後も基準値と一致することで確認する）。
- */
-
 function readSourceText(relativePath: string): string {
   const url = new URL(relativePath, import.meta.url);
   return readFileSync(fileURLToPath(url), "utf-8");

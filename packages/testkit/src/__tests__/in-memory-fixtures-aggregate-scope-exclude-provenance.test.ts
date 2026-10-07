@@ -1,9 +1,3 @@
-// `InMemoryMemoryStore.aggregateScope` の `options.excludeProvenanceKinds`（ADR 0390）が返す任意の欄
-// `excludedProvenanceIndexedCount`（「除外される kind で、索引済み（embeddingStatus='ready'）の行の
-// 数」）の歯。**`memory-store-conformance.ts` には足さない**（Issue #809 の方針。外部 adapter へ
-// 要求を増やさない）。core 側の Fake は
-// `packages/core/src/__tests__/fake-aggregate-scope-exclude-provenance.test.ts`。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, Provenance } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";

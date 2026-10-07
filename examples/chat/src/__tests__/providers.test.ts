@@ -28,12 +28,6 @@ import {
 } from "../providers.js";
 import { formatNoApiCallsNotice } from "../usage-meter.js";
 
-/**
- * `selectProviderMode`/`createProviders` の唯一の分岐（`OPENAI_API_KEY` の有無）に、
- * 両方向から歯を通す。実際の OpenAI へのネットワーク呼び出しは行わない
- * （provider の構築だけを検査する。`packages/openai/src/__tests__/live.openai.test.ts` と
- * 同じ区別——構築のロジックと、本物の API 呼び出しは別に検査する）。
- */
 describe("selectProviderMode", () => {
   it("OPENAI_API_KEY が無い場合は 'deterministic'", () => {
     expect(selectProviderMode({})).toBe("deterministic");
@@ -64,11 +58,6 @@ describe("createProviders", () => {
   });
 });
 
-/**
- * `MNEMORA_LLM`/`MNEMORA_EMBEDDING` による個別上書き（本 PR (B)）。
- * **未指定なら `selectProviderMode` と一致する**——上の `describe("selectProviderMode")`
- * のテストが変わらず通ることが、この契約が壊れていないことの一次的な証拠でもある。
- */
 describe("selectLLMMode / selectEmbeddingMode", () => {
   it("未指定なら selectProviderMode と同じ結果になる（鍵無し）", () => {
     expect(selectLLMMode({})).toBe("deterministic");
@@ -110,7 +99,6 @@ describe("createProviders: LLM/Embedding の個別上書き", () => {
     expect(providers.embeddingMode).toBe("openai");
     expect(providers.llmProvider).toBeInstanceOf(DeterministicLLMProvider);
     expect(providers.embeddingProvider).toBeInstanceOf(OpenAIEmbeddingProvider);
-    // どちらか一方でも本物を使うので usage-meter が存在する。
     expect(providers.usageMeter).toBeDefined();
   });
 
@@ -120,17 +108,6 @@ describe("createProviders: LLM/Embedding の個別上書き", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// ADR 0051: 第3のモード `"recorded"` の配線
-//
-// ⚠ **この節が無かったために、表示層の不具合が「691テスト緑」のまま出荷されかけた。**
-// `ProviderMode` に `"recorded"` を足したとき、`createProviders` は直したが
-// `describeMode`/`formatNoApiCallsNotice` は直しておらず、記録を再生している run が
-// 画面には「決定的な擬似 provider」と出ていた。**モードを増やす変更は、provider の
-// 構築だけでなく、それを人に見せる経路まで含めて検査する。**
-// ---------------------------------------------------------------------------
-
-/** 最小のカセット。中身の正しさは packages/testkit の歯が見るので、ここでは形だけ。 */
 function minimalCassette(): Cassette {
   return {
     version: CASSETTE_FORMAT_VERSION,
@@ -207,18 +184,7 @@ describe("createProviders — recorded モード（ADR 0051）", () => {
   });
 });
 
-/**
- * `CreateProvidersOptions.seedCassette`（Issue #691 続き）。
- *
- * **ここでは構築（同期処理）だけを検査する**——`complete()`/`embed()` を実際に
- * 呼ぶ「種にある入力では real が呼ばれない」等の振る舞いは、real を差し替えられる
- * `SeededLLMProvider`/`SeededEmbeddingProvider` 自身の歯として
- * `packages/testkit/src/__tests__/seeded-provider.test.ts` に置いてある
- * （`createProviders` は `OpenAILLMProvider`/`OpenAIEmbeddingProvider` をハードコードで
- * 構築するため、ネットワークを叩かずに呼び出し挙動まで検査することはできない——
- * `describe("createProviders")` の既存コメント「構築のみ。ネットワーク呼び出しはしない」
- * と同じ区別）。
- */
+/** 構築だけ検査する。complete()/embed() の振る舞いは Seeded*Provider 自身のテスト（packages/testkit）が持つ。createProviders は OpenAI provider をハードコードで構築するので、ここでは呼び出しまで検査できない。 */
 describe("createProviders — 種カセット（Issue #691 続き）", () => {
   it("seedCassette を渡さなければ readSeedUsage は無い（既存の挙動を変えない）", () => {
     const providers = createProviders({ OPENAI_API_KEY: "sk-fake-for-test" });
@@ -293,16 +259,7 @@ describe("createProviders — 種カセット（Issue #691 続き）", () => {
   });
 });
 
-/**
- * `Providers.cassetteIgnored`（Issue #577 の増分）。
- *
- * **`requireCassette` の鏡像。**`requireCassette` は「`recorded` を指定したのに
- * カセットが無い」を例外にするが、**その逆（カセットを渡したのに一度も `recorded`
- * を選ばなかった）は例外にできない**——`cli.ts` の `runRetrieval` の arm A は
- * `llmOverride`/`embeddingOverride` とも `"deterministic"` のまま、全 arm に同じ
- * カセットを渡す配線で正しく動いている既存の経路であり、例外にすると arm A が
- * 落ちる。⟹ ここでは例外を投げないことそのものを固定する。
- */
+/** cassetteIgnored は例外にしない。arm A は deterministic のまま全 arm に同じカセットを渡す正規の経路で、例外にすると落ちる。 */
 describe("createProviders — cassetteIgnored（ADR 0255 / ADR 0223 決定5の適用。例外にしない）", () => {
   it("両モードとも recorded なら cassetteIgnored=false（カセットは実際に使われている）", () => {
     const providers = createProviders(
@@ -340,16 +297,6 @@ describe("createProviders — cassetteIgnored（ADR 0255 / ADR 0223 決定5の�
   });
 });
 
-/**
- * `localEmbeddingCacheDirEnv`（Issue #164 続き）。
- *
- * リテラルの env オブジェクトを `createExampleRuntime` に渡す呼び出し
- * （`consolidation-cost.postgres.test.ts` 等）が `process.env` を丸ごと展開せずに
- * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` だけを運べるようにする、小さな公開ヘルパ。
- * 設定在り／無しの両方を測る——`{}` を返す場合、呼び出し側が
- * `...localEmbeddingCacheDirEnv()` と展開しても何も足されないことが要る
- * （余計なキーを増やさない）。
- */
 describe("localEmbeddingCacheDirEnv — MNEMORA_LOCAL_EMBEDDING_CACHE_DIR だけを持ち出す", () => {
   it("設定されていれば、その値を持つオブジェクトを返す", () => {
     expect(localEmbeddingCacheDirEnv({ MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: "/tmp/cache" })).toEqual({
@@ -423,18 +370,7 @@ describe("formatNoApiCallsNotice — モードを取り違えない（ADR 0051�
   });
 });
 
-// ---------------------------------------------------------------------------
-// ADR 0068 ③: 「キーが在るだけで、カセット再生のつもりが実 API に倒れる」を塞ぐ
-//
-// **現物の欠陥**: 直していない旧 `resolveCassetteForRun`(`cli.ts`)は
-// `process.env.OPENAI_API_KEY` の有無だけを見ており、`MNEMORA_LLM=recorded` を
-// 渡しても救えなかった(`runRetrieval`/`runCompare` はどちらも `MNEMORA_LLM`/
-// `MNEMORA_EMBEDDING` を自分で明示的に上書きするため)。「キーが在るときにカセットを
-// 使う口」がどこにも無かった——`decideProviderSource` がその口を足す。
-//
-// **歯はキーが在る状態で測る**——キーが無い状態で緑にしても、この欠陥(キーが在ると
-// 強制指定が効かなくなる)は一生捕まらない。
-// ---------------------------------------------------------------------------
+// 歯はキーが在る状態で測る。無い状態で緑にしても、キーが在ると強制指定が効かなくなる欠陥は捕まらない。
 
 describe("decideProviderSource — カセット再生か実 API かの判定（ADR 0068 ③）", () => {
   const fakeKeyEnv = { OPENAI_API_KEY: "sk-test-dummy-not-real" };
@@ -453,24 +389,10 @@ describe("decideProviderSource — カセット再生か実 API かの判定（A
     });
   });
 
-  // -------------------------------------------------------------------------
-  // ⚠ この歯は、本 PR の実装の途中で実際に踏んだ穴を殺すために足した。
-  //
-  // `MNEMORA_PROVIDER_SOURCE="openai"` をキー無しで指定できてしまうと、`cli.ts` の
-  // `runCompare` はカセットを読まずに `process.env` をそのまま `createProviders` へ
-  // 渡す——`selectProviderMode` が「キーが無い ⟹ deterministic」と判定するので、
-  // **画面には「実 API を叩く」と出しながら擬似 provider で走り、数字の表を出して
-  // EXIT=0 で終わる**。走らせて実際にこの出力を確認した。
-  //
-  // **⟹ ADR 0068 が塞ごうとしている「正直な顔をして違うことをする」形そのものを、
-  // ③ の実装が新しく作っていた。**「明示した source と、実際に使われる provider が
-  // 食い違う」経路は作らない。
-  // -------------------------------------------------------------------------
   it('MNEMORA_PROVIDER_SOURCE="openai" をキー無しで指定したら例外（擬似 provider へ黙って倒れない）', () => {
     expect(() => decideProviderSource({ MNEMORA_PROVIDER_SOURCE: "openai" })).toThrow(
       /OPENAI_API_KEY/,
     );
-    // 空文字のキーも「無い」側（`selectProviderMode` の falsy 判定と揃える）。
     expect(() =>
       decideProviderSource({ OPENAI_API_KEY: "", MNEMORA_PROVIDER_SOURCE: "openai" }),
     ).toThrow(/OPENAI_API_KEY/);
@@ -479,7 +401,6 @@ describe("decideProviderSource — カセット再生か実 API かの判定（A
   it("③-2: 未指定なら、いままで通りキーの有無だけで決まる（既定の振る舞いは変えていない）", () => {
     expect(decideProviderSource(fakeKeyEnv)).toEqual({ source: "openai", reason: "key-present" });
     expect(decideProviderSource({})).toEqual({ source: "recorded", reason: "no-key" });
-    // 空文字は「未指定」として扱う（`parseModeOverride` と同じ作法）。
     expect(decideProviderSource({ MNEMORA_PROVIDER_SOURCE: "" })).toEqual({
       source: "recorded",
       reason: "no-key",
@@ -504,15 +425,6 @@ describe("decideProviderSource — カセット再生か実 API かの判定（A
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// Issue #109: 第4のモード `"local"`(`@mnemora/local-embedding`、ADR 0085)
-//
-// **embedding 専用である。** `selectProviderMode` の契約(既存テスト、本ファイル冒頭)は
-// 変えていない——`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を設定しない呼び出しは、この節を
-// 足す前とまったく同じ結果になる(上の `describe("selectProviderMode", ...)` が
-// そのまま緑であることが、その一次的な証拠でもある)。
-// ---------------------------------------------------------------------------
 
 describe("selectEmbeddingMode / selectLLMMode — 第4のモード local（Issue #109）", () => {
   it('MNEMORA_EMBEDDING="local" を受け付ける', () => {
@@ -567,21 +479,7 @@ describe("createProviders — local モード（Issue #109、@mnemora/local-embe
   });
 });
 
-/**
- * `localEmbeddingPinnedRevision`（Issue #597 案(a)）。
- *
- * ⭐ **`scripts/print-local-embedding-cache-key.mjs` と、同じ唯一の宣言
- * （`scripts/local-embedding-pinned-revision.json`）を見ていることを、両者から
- * それぞれ独立に読んだ値と突き合わせて確かめる**——このテストファイル自身が
- * `JSON.parse` で直接読む「独立した証人」を用意し、そこと突き合わせる
- * （`readDeclared`/`declaredIndependently` と同じ二重確認の作法）。
- *
- * ⚠ **これが崩れる歯（変異試験で確かめたこと）**は PR 本文に記録した:
- * - `localEmbeddingPinnedRevision` がこの宣言と違う値を返す ⟹ 下の
- *   「examples 側が読む revision は、宣言と一致する」が赤くなる。
- * - 宣言ファイルが読めない・JSON が壊れている・`sha` が無い ⟹
- *   「宣言が読めなければ例外を投げる」系の3本が赤くなる。
- */
+/** 宣言は、このファイルが JSON.parse で直接読んだ値と突き合わせる（独立した証人）。 */
 describe("localEmbeddingPinnedRevision — 固定した Hugging Face revision（Issue #597 案(a)）", () => {
   function pinnedRevisionIndependently(): string {
     const url = new URL(
@@ -646,15 +544,7 @@ describe("localEmbeddingPinnedRevision — 固定した Hugging Face revision（
     expect(() => createProviders({ MNEMORA_EMBEDDING: "local" })).not.toThrow();
   });
 
-  /**
-   * 🔴 **`LocalEmbeddingProvider` の `revision` は private（`#spec`）なので、構築結果から
-   * 直接は読めない。** ⟹ 「`buildEmbedding` の `local` 分岐が `localEmbeddingPinnedRevision()`
-   * の戻り値を実際に渡しているか」を、上の「examples 側が読む revision は宣言と一致する」
-   * （`localEmbeddingPinnedRevision()` 単体の歯）だけでは検出できない——
-   * `buildEmbedding` 側がリテラルをハードコードしても、あちらは赤くならない。
-   * ⟹ `readProvidersSource`（下で定義済み。anthropic 非配線の歯と同じ手法）で
-   * ソーステキストを直接見て、ハードコードしていないことを確かめる。
-   */
+  // LocalEmbeddingProvider の revision は private（#spec）で構築結果から読めない。readProvidersSource でソースを見て、リテラルのハードコードを防ぐ。
   it("buildEmbedding の local 分岐は、revision に localEmbeddingPinnedRevision() の戻り値を渡している（ハードコードしていない）", () => {
     const source = readProvidersSource();
     const localBranchStart = source.indexOf('if (embeddingMode === "local") {');
@@ -666,11 +556,6 @@ describe("localEmbeddingPinnedRevision — 固定した Hugging Face revision（
 });
 
 describe("formatNoApiCallsNotice — local モードを「本物の OpenAI」と言わない（Issue #109）", () => {
-  // 🔴 この歯が無かったら、Issue #109 の実装は
-  // `formatNoApiCallsNotice` の `label` の非網羅な ternary(recorded/deterministic 以外は
-  // 一律「本物の OpenAI」)にそのまま引っかかっていた——ローカル推論で課金も外部通信も
-  // 無いのに「本物の OpenAI」と表示される、まさにこの repo が繰り返し警告している
-  // 「条件を落とした数字」を新しく作るところだった(usage-meter.ts の docstring 参照)。
   it("擬似LLM + ローカル埋め込みの run を「本物の OpenAI」と言わない", () => {
     const notice = formatNoApiCallsNotice({ llmMode: "deterministic", embeddingMode: "local" });
     expect(notice).toContain("ローカル推論");
@@ -678,24 +563,7 @@ describe("formatNoApiCallsNotice — local モードを「本物の OpenAI」と
   });
 });
 
-/**
- * `ProviderMode` に `anthropic` が無い理由が、ファイルから読み取れることを検査する
- * 歯（Issue #458）。`correction-scenario-compare-isolation.test.ts` と同じ手法
- * ——自分のソーステキストを文字列として読み、部分文字列の有無を機械的に見る。
- *
- * **これが無いと何が起きるか**: Issue #458 が見つけた非対称——`"local"` の除外理由は
- * `ProviderMode` の直前 docstring に書いてあるのに、`"anthropic"` の除外理由は
- * どこにも無い——が、docstring の書き換えで再び起きても誰も気づけない
- * （`grep -ic anthropic examples/chat/src/providers.ts` が黙って0に戻る）。
- *
- * **この歯が見ているもの**: 最後の import から `export type ProviderMode` 宣言までの
- * 範囲（＝3つの docstring ブロックがまとまっている領域）に `"anthropic"` という
- * 文字列が含まれているかどうか、という**機械的に数え直せる事実**だけである。
- * ⛔ **書かれている理由の中身（ADR 0072 の引用が正しいか）は検証しない**——
- * それは prose の逐語一致であり、`identifier-probes-readme-freshness` のような
- * 「数値を基準値 JSON と突き合わせる」形の歯にできる対象ではない
- * （PR 本文「歯について」参照）。
- */
+/** 書かれている理由の中身（prose の逐語）は検証しない。見るのは ProviderMode 直前の範囲に "anthropic" が在るかだけ。 */
 function readProvidersSource(): string {
   const url = new URL("../providers.ts", import.meta.url);
   return readFileSync(fileURLToPath(url), "utf-8");

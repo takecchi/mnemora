@@ -6,11 +6,6 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime, type Runtime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0539（ADR 0536 の「次の候補」の3つ目）: claim key と矛盾の検出の読み口（`findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`）と、
- * `observe` で claim key を有効にした経路を、Fake で縛る。同じ `EXPECTED` を実 Postgres と InMemory の側
- * （`packages/postgres/src/__tests__/claim-key-parity.postgres.test.ts`）が縛る。
- */
 interface Env {
   runtime: Runtime;
   mem: MemoryStore;
@@ -23,14 +18,8 @@ interface Env {
 
 type Result = Record<string, unknown>;
 
-/**
- * ADR 0539（ADR 0536 の「次の候補」の3つ目）: claim key と矛盾の検出の読み口を3者（core の Fake・testkit の InMemory・Postgres）に流す。
- * (1) store の口（`findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`）に同じ記憶と同じ問い合わせを直接。
- * (2) `observe` で claim key を有効にした経路（`detectContested`）。
- * 契約（`MemoryStore.findActiveByClaimKey?` の TSDoc）: 鍵は正規化済みの文字列として**そのまま等値比較**（大文字小文字・空白・Unicode の正規化形を区別する）、
- * `subjectId` は NULL 同士も一致、`active` の行だけ、`excludeMemoryId` と `contentHash` が同じ行は返さない、有効期間は半開区間 `[validFrom, validUntil)`
- * （null は無限）の重なりで、空・逆転した区間は何とも重ならない（問い合わせ側も保存済みの行側も。ADR 0473）、別テナントは見えない。
- */
+/** 同じ `EXPECTED` を実 Postgres と InMemory の側も縛る。
+ * store の口（`findActiveByClaimKey`・`findContestedByClaimKey`・`listActiveClaimPredicates`）と、claim key を有効にした `observe` の経路を縛る。 */
 async function scenario(env: Env): Promise<Result> {
   const { runtime, mem, fresh, mk, setNext } = env;
   const out: Result = {};
@@ -39,7 +28,6 @@ async function scenario(env: Env): Promise<Result> {
   const NONE = "00000000-0000-4000-8000-000000000000";
   const key = (subject: string, predicate: string) => ({ subject, predicate });
 
-  // ---- (1) store の口 ----
   const ctx = fresh();
   const other = fresh();
   const ids: Record<string, string> = {};
@@ -285,7 +273,6 @@ async function scenario(env: Env): Promise<Result> {
     await mem.findActiveByClaimKey!(other, base),
   );
 
-  // listActiveClaimPredicates: 新しい順・重複なし・active だけ・subject（null 同士）・limit・他テナント
   const lp = fresh();
   const lpOther = fresh();
   const addP = async (
@@ -451,7 +438,6 @@ const llm = {
   },
   completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> =>
     req.schema.parse({
-      // 抽出（`memories`）と claim key の導出（`claims`）のどちらの schema にも通る、決め打ちの応答（LLM の実 API は使わない）
       memories: [
         { content: nextContent, digest: nextContent, provenanceKind: "stated", confidence: 1 },
       ],

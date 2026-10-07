@@ -7,42 +7,23 @@ import {
 import type { CreateLocalEmbeddingPipeline, LocalEmbeddingModelSpec } from "../pipeline.js";
 import { LocalEmbeddingProviderError, isLocalEmbeddingProviderError } from "../errors.js";
 
-/**
- * `LocalEmbeddingProviderOptions.maxBatchSize`（Issue #1141）の歯。
- *
- * **本物のモデルは一切落とさない**——`createPipeline` を注入した偽 pipeline で、
- * 「件数が `maxBatchSize` 以下なら1回で・超えたら `maxBatchSize` 件ずつに分けて呼ぶ」
- * という、このクラスが**新しく持つロジックだけ**を測る。実モデルでのビット一致は
- * `live.local-embedding.test.ts`（opt-in）が別途見る。
- *
- * ⭐ **偽 pipeline の出力は「そのバッチの中の位置（row）」に依存させてある**
- * （`(row + column) / 1000`）。これにより、「1回で渡したか・複数回に分けて渡したか」が、
- * 返ってきたベクトルの値そのものにも現れる——`embeddedBatches`（何が渡ったか）と
- * 二重に確かめられる。
- */
+/** 偽 pipeline の出力は「そのバッチの中の位置（row）」に依存させてある（`(row + column) / 1000`）。「1回で渡したか・複数回に分けて渡したか」が返ってきたベクトルの値にも現れ、`embeddedBatches` と二重に確かめられる。実モデルでのビット一致は `live.local-embedding.test.ts` が見る。 */
 
 const ctx: Ctx = { tenantId: "max-batch-size-test" };
 
-/** 偽 pipeline が1回のバッチに対して返すベクトル（このファイルの唯一の生成規則）。 */
 function expectedVectorsForBatch(batchLength: number, dimensions: number): number[][] {
   return Array.from({ length: batchLength }, (_, row) =>
     Array.from({ length: dimensions }, (_, column) => (row + column) / 1000),
   );
 }
 
-/** ベクトルの配列を Float32 のバイト列にする（「ビット一致」を実際にバイトで比べるため）。 */
 function toFloat32Bytes(vectors: number[][]): Buffer {
   const flat = vectors.flat();
   const f32 = new Float32Array(flat);
   return Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength);
 }
 
-/**
- * 呼ばれた回数と、各回に渡された配列（そのままの参照ではなくコピー）を記録する偽 pipeline。
- * ⚠ 既定の次元数は `LocalEmbeddingProvider` の既定（256）に合わせてある——
- * provider 側の次元検査（`vector.length !== this.space.dimensions`）に、
- * この歯の本題ではないところで引っかからないようにするため。
- */
+/** 既定の次元数は `LocalEmbeddingProvider` の既定（256）に合わせる。provider 側の次元検査に、この歯の本題ではないところで引っかからないようにするため。 */
 function createRecordingPipeline(dimensions = 256) {
   const state = {
     createCalls: 0,
@@ -68,13 +49,7 @@ function createRecordingPipeline(dimensions = 256) {
   };
 }
 
-/**
- * 偽 pipeline のうち、**`offendingCallIndex` 回目（0始まり）の呼び出しでだけ**、
- * その呼び出しに渡された配列の**バッチ内の位置** `offendingLocalIndex` が
- * `input_too_long` として reject されるもの。本物の `buildLocalEmbeddingPipeline` が
- * 「渡された配列の何番目か」を**そのバッチの中だけ**で数えるのと同じ形
- * （`pipeline.ts` の `embed` 参照）——グローバル（`texts` 全体での）位置は知らない。
- */
+/** 本物の `buildLocalEmbeddingPipeline` は「渡された配列の何番目か」をそのバッチの中だけで数える（`pipeline.ts` の `embed`）ので、この偽 pipeline もバッチ内の位置しか知らない。 */
 function createTokenLimitPipeline(offendingCallIndex: number, offendingLocalIndex: number) {
   const embeddedBatches: string[][] = [];
   let callIndex = -1;
@@ -101,7 +76,7 @@ function createTokenLimitPipeline(offendingCallIndex: number, offendingLocalInde
 
 describe("既定値の export", () => {
   it("DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE は 128 である", () => {
-    // ⭐ 既定値そのものを書き下す（定数を参照するだけだと既定値が変わったことを検知できない）。
+    // 既定値そのものを書き下す（定数を参照するだけだと既定値が変わったことを検知できない）。
     expect(DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE).toBe(128);
   });
 });
@@ -121,7 +96,6 @@ describe("既定値以下（1回で推論、ビット一致）", () => {
     expect(recorder.embeddedBatches).toHaveLength(1);
     expect(recorder.embeddedBatches[0]).toEqual(texts);
 
-    // ⭐ ビット一致: 「1回で全部渡したときに pipeline が返す値」と Float32 のバイト列で完全一致する。
     const expected = expectedVectorsForBatch(count, 256);
     expect(toFloat32Bytes(vectors)).toEqual(toFloat32Bytes(expected));
   });
@@ -152,11 +126,8 @@ describe("既定値より多い件数（分割して呼ぶ）", () => {
     expect(recorder.embeddedBatches).toHaveLength(2);
     expect(recorder.embeddedBatches[0]).toEqual(texts.slice(0, 128));
     expect(recorder.embeddedBatches[1]).toEqual(texts.slice(128, 129));
-    // 件数は保たれる。
     expect(vectors).toHaveLength(129);
-    // ⚠ 分割すると、2回目のバッチは「バッチ内の位置」から数え直すため、
-    // 分割しない場合の値とは食い違う（これは q8 の実モデルでベクトルが動きうることの、
-    // 偽 pipeline での類比である——ADR 0358 参照）。
+    // 分割すると、2回目のバッチは「バッチ内の位置」から数え直すため、分割しない場合の値とは食い違う（q8 の実モデルでベクトルが動きうることの、偽 pipeline での類比）。
     const notSplit = expectedVectorsForBatch(129, 256);
     expect(toFloat32Bytes(vectors)).not.toEqual(toFloat32Bytes(notSplit));
   });
@@ -213,17 +184,9 @@ describe("既定値より多い件数（分割して呼ぶ）", () => {
     }
   });
 
-  /**
-   * 上限超過（`input_too_long`）の `index` は、**渡した配列全体での位置**を名乗る
-   * （`errors.ts` の `LocalEmbeddingInputTooLongDetail.index` の doc:
-   * 「`embed(ctx, texts)` に渡された配列の何番目か」）。分割すると pipeline は
-   * バッチ内の位置しか知らないため、provider 側でチャンクの開始位置ぶんだけ
-   * 足し戻す必要がある——それを確かめる。
-   */
+  /** 分割すると pipeline はバッチ内の位置しか知らないため、provider 側でチャンクの開始位置ぶんだけ足し戻す必要がある。 */
   it("2つ目以降のチャンクで上限超過が起きても、index はチャンク内ではなく全体での位置になる", async () => {
-    // maxBatchSize=2、5件 ["a","b","c","d","e"] は [a,b] [c,d] [e] の3チャンクに分かれる。
-    // 2回目の呼び出し（0始まりで callIndex=1、つまり [c,d]）のバッチ内 index 1（"d"）だけが
-    // 上限超過する偽 pipeline を仕込む——"d" のグローバルな位置は 3（チャンク開始位置2 + ローカル1）。
+    // maxBatchSize=2、5件は [a,b] [c,d] [e] の3チャンクに分かれる。2回目の呼び出しのバッチ内 index 1（"d"）だけが上限超過する偽 pipeline を仕込む。"d" のグローバルな位置は 3（チャンク開始位置2 + ローカル1）。
     const { createPipeline, embeddedBatches } = createTokenLimitPipeline(1, 1);
     const provider = new LocalEmbeddingProvider({ createPipeline, maxBatchSize: 2 });
     const texts = ["a", "b", "c", "d", "e"];
@@ -236,10 +199,8 @@ describe("既定値より多い件数（分割して呼ぶ）", () => {
     expect(isLocalEmbeddingProviderError(error)).toBe(true);
     const typed = error as LocalEmbeddingProviderError;
     expect(typed.kind).toBe("input_too_long");
-    // 2回目のチャンク（[c, d]、グローバル index 2,3）のバッチ内 index 1 == "d" == グローバル index 3。
     expect(typed.detail?.index).toBe(3);
     expect(typed.message).toMatch(/3 番目の入力が上限を超えている/);
-    // 1回目のチャンクは超過しないので最後まで呼ばれ、2回目で落ちた後は3回目を呼ばない。
     expect(embeddedBatches).toHaveLength(2);
   });
 });
@@ -261,12 +222,10 @@ describe("分割しても、prefix・順序・上限超過以外の失敗は崩�
       ["文書: c", "文書: d"],
       ["文書: e"],
     ]);
-    // 呼び出し側の配列は書き換わらない。
     expect(texts).toEqual(["a", "b", "c", "d", "e"]);
   });
 
   it("返るベクトルの並びは入力の並びのまま（チャンクの結果を入力の順に連結する）", async () => {
-    // 各テキスト（"0"〜"6"）の数字を先頭の成分に写す偽 pipeline。どのベクトルがどの入力のものかを値で見分けられる。
     const createPipeline: CreateLocalEmbeddingPipeline = async () => ({
       maxInputTokens: Number.MAX_SAFE_INTEGER,
       countTokens: (texts: string[]) => texts.map(() => 0),
@@ -313,14 +272,7 @@ describe("分割しても、prefix・順序・上限超過以外の失敗は崩�
 });
 
 describe("不正な maxBatchSize", () => {
-  /**
-   * `retry.attempts`（`local-embedding-provider.ts` のコンストラクタ）と同じ流儀で、
-   * 分割ループが前進できることを構造的に保証するため、0以下・NaN は 1 に丸める
-   * （投げない）。`maxBatchSize` はループの刻み幅・`Array.prototype.slice` の引数に
-   * 直接使われるため、素通しすると無限ループや `slice(i, i+NaN)` による静かな
-   * 空バッチ（テキストの消失）を起こしうる——`retry.attempts` より一段強い理由で
-   * 丸めを選んでいる（ADR 0358）。
-   */
+  /** `maxBatchSize` はループの刻み幅・`slice` の引数に直接使われるため、素通しすると無限ループや `slice(i, i+NaN)` による静かな空バッチ（テキストの消失）を起こしうる。`retry.attempts` と同じ流儀で、0以下・NaN は 1 に丸める（投げない）。 */
   it.each([
     ["NaN", Number.NaN],
     ["0", 0],

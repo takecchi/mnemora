@@ -3,42 +3,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **[ADR 0252](../../docs/decisions/0252-release-changelog-section-is-a-publish-gate.md) が入れた
- * 「出す版の節が `CHANGELOG.md` に在るか」の門が、`.github/workflows/publish.yml` に
- * *配線されていない* こと。**
- *
- * 🔴 **この歯は 2026-09-23 に向きが反転している。**
- * **それまでは「門が配線されていること」を測っていた。**
- * ⟹ 門はオーナーの判断で撤回された
- * （[ADR 0267](../../docs/decisions/0267-withdraw-the-release-changelog-publish-gate.md)）。
- * ⛔ **歯を消さずに反転させたのは、撤回を「黙って戻せる」状態にしないためである。**
- *
- * ## ⭐ なぜ「無いこと」を測るのか —— 消してしまえばよいのではないか
- *
- * **撤回は決定であって、事故ではないからである。**
- * ⟹ 🔴 **門の配線が黙って復活したら、それは ADR 0267 を読まずに戻したということである。**
- * **そのときに赤くなる場所が、どこかに要る。**
- * ⛔ **歯を消すと、復活は誰にも気づかれない**——`publish.yml` は required の check を持たない
- * （`release` の引き金でしか走らない）ので、**壊れていても PR は緑のままである。**
- *
- * ⚠ **これは「門を二度と入れるな」という意味ではない。**入れ直す判断が出たなら、
- * **この歯をもう一度反転させること**（＋ ADR を積むこと）が、その判断の記録になる。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。** 既存の workflow 検査の歯と同じ判断で、
- * 依存（js-yaml 等）を足していない（依存追加はオーナー専権）。**だからこの歯は書き方の変更に弱い。**
- * ⚠ **注釈の中に同じ文字列があるだけで赤くなる誤検出を避けるため、`blankOutWorkflowComments` で
- * コメントを潰した本文に対して判定する**（`workflow-comment-blank-lib.mjs` の docstring と同じ理由）。
- *
- * 🔴 **この歯が捕まえないもの:**
- * - **`CHANGELOG.md` の節が実際に在るか**は、もうどこも機械で止めていない。
- *   ADR 0251 の**非門の通知**（`.github/workflows/release-followup-notice.yml`）も
- *   オーナーの判断で削除した。⟹ **いまは何も見ていない。**
- *   ⛔ **その限界は ADR 0267「引き受けた負債」に書いてある。ここで薄めないこと。**
- * - **`if:` の式を GitHub が本当にそう評価するか**は見ていない。
- */
+// 門の撤回（ADR 0267）を黙って戻せなくするため、歯を消さずに「配線が無いこと」を測る。
+// YAML は文字列で見る（依存を足さない）。注釈の中の同じ文字列で赤くならないよう、
+// blankOutWorkflowComments でコメントを潰してから判定する。
 
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/publish.yml", import.meta.url));
 const workflowRaw = readFileSync(workflowPath, "utf8");
@@ -69,12 +36,6 @@ describe("🔴 出す版の節の門は publish.yml に配線されていない�
     expect(workflow).not.toContain("RELEASE_PRERELEASE:");
   });
 
-  /**
-   * Issue #1782（#601 の確かめ直し）: 上の3本は、撤回前の配線の文字列だけを探す。⟹ 門を別の書き方で戻すと
-   * （道具を使わず `grep` で `CHANGELOG.md` の節を見て `exit 1` する段など）、どれにも当たらずに素通りした【実測】。
-   * いまの `publish.yml` は、コメントを除くと `CHANGELOG` を1か所も読まない。⟹ 読み始めたら、書き方によらず赤にする。
-   * ⚠ 正当な理由で読むことになったら（門以外の用途でも）、ADR を積んでこの it を直すこと。
-   */
   it("コメントを除いた publish.yml は、CHANGELOG を1か所も読まない（書き方を変えた門の復活も捕まえる）", () => {
     const lines = workflow
       .split("\n")
@@ -94,12 +55,7 @@ describe("🔴 出す版の節の門は publish.yml に配線されていない�
 });
 
 describe("⛔ ADR 0251 の通知は、いまも門にされていない", () => {
-  /**
-   * 🔴 **ADR 0251 の核心は「終了コードが常に 0 であること」である。**
-   * ⚠ **門が撤回されたいま、この歯の意味はむしろ増している**——
-   * **「止めるものが無くなったから、通知のほうを門に格上げする」という筋は、
-   * ADR 0251 が明示的に却下した案である。**⟹ ADR を積まずに移らないこと。
-   */
+  // 通知を門へ格上げしない（ADR 0251 が却下した案）。
   it("通知の道具（`check-release-changelog-section.mjs`）は publish.yml から呼ばれていない", () => {
     expect(workflow).not.toContain("scripts/check-release-changelog-section.mjs");
   });

@@ -14,15 +14,6 @@ const {
   validateBaseline,
 } = lib;
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G7 のうち、PR #493（ADR 0222）・PR #513
- * （ADR 0231）の `compare` の門に対して、変異を当てて見つかった「すり抜け」だけを固定する歯。
- *
- * 既存の `compare-summary-lib.test.mjs` / `compare-summary.test.mjs` /
- * `ci-yml-compare-wiring.test.mjs` が既に守っているものは、ここへ重ねていない。
- * 各 `it` の名前の末尾の記号（C2・F4 など）は、Issue #1812 のコメントの変異表の番号である。
- */
-
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const script = fileURLToPath(new URL("../compare-summary.mjs", import.meta.url));
 
@@ -313,7 +304,6 @@ describe("ci.yml の compare の門の段が、赤を黄色に落とされない
   const workflow = readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8");
   const lines = workflow.split("\n");
 
-  /** コメント行を除き、`continue-on-error` を真として宣言している行を返す。 */
   function continueOnErrorLines(blockLines) {
     return blockLines.filter(
       (line) => !/^\s*#/.test(line) && /^\s*continue-on-error:\s*(?!false\s*$)\S/.test(line),

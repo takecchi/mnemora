@@ -1,15 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ctx, TickOptions } from "@mnemora/core";
 
-// Issue #1734（2026-09-30 マージ分の確かめ直し）の歯。PR #1491 の変異試験で、「成功した tick でも
-// `onTickError` を呼ぶ」（`worker.on("completed", ...)` で通知する）変異がすり抜けた。担当はクローン（miku）の
-// 判断で進めている作業であり、オーナーの判断ではない。
-//
-// `tick-driver.failed.test.ts` の「成功した tick は onTickError を呼ばない」は processor を呼ぶだけで、
-// 実 Worker が成功のときに emit する `'completed'` を emit しない（`'failed'` が来ないことしか見ていない）。
-// Redis の歯（`tick-driver.failed.redis.test.ts`）は Redis が無い環境では走らない。ここは Redis を要らない形で、
-// 実 Worker が emit する失敗でない出来事（`completed`・`active`・`stalled` など）を一通り emit して、
-// `onTickError` が0回であることを見る。陽性対照として `'failed'`・`'error'` では呼ばれる。
+// `tick-driver.failed.test.ts` の「成功した tick は onTickError を呼ばない」は processor を呼ぶだけで、実 Worker が成功時に emit する `completed` を emit しないので、「completed で通知する」変異がすり抜ける。Redis を要らない形で、失敗でない出来事を一通り emit して見る。
 
 type Listener = (...args: unknown[]) => void;
 type Processor = (job: unknown) => Promise<unknown>;

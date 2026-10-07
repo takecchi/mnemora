@@ -10,14 +10,6 @@ import {
   runAnswerTrialsCompareFromFiles,
 } from "../answer-trials-compare.js";
 
-/**
- * `answer-trials-compare.ts` の単体試験。**DB 不要・鍵不要。**
- *
- * Issue #705 完了条件2「対照の材料の記憶集合が、比べたい記録と同じであることを、器が
- * 確かめて表示する」——ADR 0295 追記2 の見落とし（別の記憶集合を比べて『退行は消えた』と
- * 誤判定した）の再発防止そのものを検査する。
- */
-
 function baseResult(overrides: Partial<AnswerTrialsResult> = {}): AnswerTrialsResult {
   const base = {
     measuredAt: "2026-09-25T00:00:00.000Z",

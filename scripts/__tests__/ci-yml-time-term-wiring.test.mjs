@@ -8,34 +8,7 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/ci.yml` の `time-term` ジョブが、実際に
- * `scripts/time-term-summary.mjs` へ、`--measured` と `--baseline` の両方を渡して
- * 配線されていること（Issue #217 / ADR 0121）。**
- *
- * ⚠ **これは `time-term-summary.test.mjs`/`time-term-summary-lib.test.mjs` の
- * 重複ではない**（`ci-yml-identifier-probes-wiring.test.mjs` の docstring と同じ理由）。
- * その2本は**入力を自分で作って**要約の中身と exit code を測る——**どちらも `ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` から `--baseline` を落としても、パスを
- * 打ち間違えても、測定段の JSON 書き先をずらしても、summary 段の `--measured` の
- * 読み先をずらしても、**その2本は緑のまま通る。**この歯だけが `ci.yml` を入力に取る。
- *
- * 🔴 **`--baseline` は `examples/chat/time-term-baseline.json`（ADR 0121）へ渡っている。**
- * この基準値ファイルは main の初回 CI（run 34911117399、headSha
- * fd6ee53296f63c053fedf3706d2ba831b6d8e655）が出した artifact をそのままコミットした
- * ものである（ADR 0120 §5 が予告し、ADR 0121 が塞いだ）。**基準値ファイルが本物として
- * 存在する**ので、`ci-yml-consolidation-wiring.test.mjs`（基準値ファイルがまだ無い時点で
- * 書かれ、一時ファイルへ差し替えて走らせている）ではなく、
- * `ci-yml-identifier-probes-wiring.test.mjs`（基準値ファイルが実在する）の形をそのまま
- * 踏襲する——本物のファイルを `cwd: repoRoot` からそのまま読ませて実行する。
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**
- * `ci-yml-identifier-probes-wiring.test.mjs` と同じ判断で、歯のために YAML パーサの
- * 依存を足していない（依存追加はオーナー専権。`docs/autonomy.md`）。
- * **だからこの歯は書き方の変更に弱い。**壊れたときは「配線が変わった」か
- * 「書き方が変わった」かを見て、**配線が変わっていないなら取り出し方のほうを
- * 直すこと（歯を消さないこと）。**
+ * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -44,7 +17,6 @@ const workflow = readFileSync(workflowPath, "utf8");
 
 const JOB_ID = "time-term";
 
-/** `jobs:` の下の1ジョブを切り出す（`ci-yml-identifier-probes-wiring.test.mjs` と同じ形）。 */
 function extractJob(yaml, jobId) {
   const lines = yaml.split("\n");
   const start = lines.findIndex((line) => line === `  ${jobId}:`);
@@ -64,7 +36,6 @@ function extractJob(yaml, jobId) {
   return lines.slice(start, end).join("\n");
 }
 
-/** `steps:` を段へ切り分け、各段の `name`/`env`/`run` だけを取り出す。 */
 function parseSteps(jobBlock) {
   const lines = jobBlock.split("\n");
   const stepsAt = lines.findIndex((line) => line === "    steps:");
@@ -141,7 +112,6 @@ const artifactStep = steps.find((step) => step.name.includes("成果物として
 /** @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]} */
 const stepBlockCommentUnhandled = [];
 
-/** ある段の生テキストを切り出す（`if:`/`uses:`/`with:` を読みたいとき用）。コメントは潰す。 */
 function extractStepBlock(stepName) {
   const lines = jobBlock.split("\n");
   const start = lines.findIndex((line) => line.trim() === `- name: ${stepName}`);
@@ -188,7 +158,6 @@ function benchStepMeasuredPath() {
   return benchStep.env.MNEMORA_TIME_TERM_JSON;
 }
 
-/** `--baseline <path>` を yml から読む（引用符あり・なしの両方を拾う）。 */
 function summaryStepBaselinePath() {
   const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
   return matched ? (matched[1] ?? matched[2]) : undefined;
@@ -257,15 +226,9 @@ function makeMeasured() {
   };
 }
 
-/** 基準値ファイル（本物）。差分の有無を作り分けるための土台に使う。 */
 const baselineRelativePath = "examples/chat/time-term-baseline.json";
 const baseline = JSON.parse(readFileSync(join(repoRoot, baselineRelativePath), "utf8"));
 
-/**
- * 本物の基準値ファイルから、実測 JSON（`status` を持たない `TimeTermRunJson` の形）を
- * 組み立てる。`probes` は基準値のものをそのまま複製する——順番に依存しない
- * （`diffProbe` は `probeId` で突き合わせる）。
- */
 function measuredFromBaseline() {
   return {
     schemaVersion: 1,
@@ -287,9 +250,6 @@ describe("ci.yml の time-term ジョブの配線", () => {
   });
 
   it("🔴 要約の段が --baseline をコミット済みの基準値ファイルへ渡している（ADR 0121）", () => {
-    // ⭐ **これが「輪が閉じている」ことの固定点。**この行が消えると、outcome が動いても
-    // 誰も気づかず、誰も基準値を更新せず、新しい値が PR の diff に現れなくなる
-    // （ADR 0088 §3 / ADR 0094 §8 と同じ理由）。
     expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
       baselineRelativePath,
     );
@@ -314,9 +274,7 @@ describe("ci.yml の time-term ジョブの配線", () => {
 
   it("🔴 基準値と相違しても緑のまま（⛔ このジョブは門ではない。標本が小さい。ADR 0033 §3）", () => {
     const measured = measuredFromBaseline();
-    // half-life の outcome を反転させる——「時間項の効きが壊れた」に相当する変化。
-    // **それでも落ちてはいけない。**落ちるようになったら、この repo は probe 8件の
-    // 標本で偽陽性を出す門を持ってしまったことになる。
+    // それでも落ちてはいけない（落ちると、probe 8 件の標本で偽陽性を出す門になる）。
     const halfLife = measured.probes.find((p) => p.probeId === "half-life");
     halfLife.outcome = "older-ranked-higher";
     const result = runSummaryStepFromWorkflow(measured);
@@ -355,11 +313,6 @@ describe("ci.yml の time-term ジョブの配線", () => {
     expect(blockDeclaresAlways(block)).toBe(true);
   });
 
-  /**
-   * `ci-yml-identifier-probes-wiring.test.mjs` の同名の歯と同じ理由
-   * （#127 が action を node24 の版へ上げたとき、後から足したジョブだけが
-   * 取り残される形が実際に一度起きた）。
-   */
   const NODE24_MIN_MAJOR = {
     "actions/checkout": 6,
     "actions/setup-node": 6,

@@ -4,12 +4,6 @@ import {
   shouldEnforceAdrIndexFreshness,
 } from "../adr-index-freshness-branch-lib.mjs";
 
-/**
- * `adr-index-freshness-branch-lib.mjs`（ADR 0137・0192）の歯の足し（Issue #1815、09/16 マージ分の #398 の確かめ直し）。
- * 既存の `adr-index-freshness-branch-lib.test.mjs` が見ていなかった境界だけを足す。実装は変えない。
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 describe("isPullRequestMergeRef は `refs/pull/<数字>/merge` ちょうどだけを真にする", () => {
   it("末尾に何かが続く形は偽（`merge` で終わること）", () => {
     expect(isPullRequestMergeRef("refs/pull/5/merge/extra")).toBe(false);

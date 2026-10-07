@@ -1,11 +1,3 @@
-// 確かめ直し（Issue #1759、B 群 #1593 / ADR 0486）の歯。
-//
-// ADR 0486 は「プレーンオブジェクトと配列だけ辿る。`Map`・`Set`・型付き配列・クラスのインスタンスは
-// 今までどおり `structuredClone` に任せる」と約束している。`toStorablePayload` からその分岐を外して
-// 全部をプレーンな欄として辿ると（Map・Set が `{}` に、型付き配列が欄の集まりに潰れる）、
-// 既存の歯（observation-payload-json-roundtrip.postgres.test.ts）は赤にならなかった。
-// ここで「そのまま保持される」ことを縛る。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, NewObservation } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";

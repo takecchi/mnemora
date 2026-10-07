@@ -6,32 +6,12 @@ import {
 } from "../local-embedding-provider.js";
 
 /**
- * この歯が測っているもの: `repo` だけを既定から差し替え、`modelId` を渡さないと、
- * コンストラクタが throw すること（Issue #142 / ADR 0247）。
- *
- * ⛔ **この歯が捕まえないもの**（必ず読むこと）:
- *
- * - **実際に読み込まれた重みが `modelId` の名乗りと合っているかは見ていない。**
- *   縛っているのは**宣言どうしの整合**（`repo` を変えたら `modelId` も変えたか）だけである。
- *   ⟹ **本物の指紋照合**（既知の入力に対するベクトルの一致を確かめる。本物のモデルの取得が要る）
- *   **は別の話であり、Issue #142 に残る。**
- * - **`dtype` は対象にしていない。**量子化（`q8` / `fp32` 等）が変われば出てくるベクトルは
- *   変わりうるが、この guard は `dtype` を一切見ない。鳴らない。
- * - **既定の `repo` と `modelId` の組が「正しい」ことは、この歯は何も言っていない。**
- *   既定値そのものが間違っている可能性は、この歯の射程の外にある。
- *
- * ⛔ **モデルのサイズ（MB）をこのファイルに書かない。**サイズの正本は ADR 0212 と
- * `scripts/__tests__/local-embedding-size-noun-correspondence.test.mjs` が持つ
- * （`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。⚠ 実際に、初稿がここへ
- * サイズを書いたところ、その歯が「数字が名詞と対応していない」として赤にした【実測】。
- *
- * ⭐ **DB も実 API もモデルのダウンロードも要らない**——guard はコンストラクタで
- * 同期に鳴るので、`createPipeline`（pipeline 経路）を一切読まない。
- * ⟹ required な `typecheck / lint / test / build` に素直に乗る。
- *
- * ⛔ **既定の repo/modelId の文字列を literal で書かない**——差し替え側には、
- * 既定から確実に異なることだけが分かる値（`${DEFAULT_LOCAL_EMBEDDING_REPO}-OTHER`）を使う。
- * 焼き込んだ錨に頼ると、既定値が変わったときにこの歯が意味を失っていることに気づけない。
+ * この歯が捕まえないもの:
+ * - 実際に読み込まれた重みが `modelId` の名乗りと合っているか。縛っているのは宣言どうしの整合（`repo` を変えたら `modelId` も変えたか）だけで、本物の指紋照合は別の話。
+ * - `dtype`。量子化が変われば出てくるベクトルは変わりうるが、この guard は `dtype` を見ない。
+ * - 既定の `repo` と `modelId` の組が正しいこと。
+ * モデルのサイズをこのファイルに書かない。サイズの正本は `scripts/__tests__/local-embedding-size-noun-correspondence.test.mjs` が持ち、書くと数字と名詞が対応していないとして赤になる。
+ * 既定の repo/modelId の文字列を literal で書かない。差し替え側には既定から確実に異なる値（`${DEFAULT_LOCAL_EMBEDDING_REPO}-OTHER`）を使う。焼き込んだ錨に頼ると、既定値が変わったときにこの歯が意味を失っていることに気づけない。
  */
 
 const OTHER_REPO = `${DEFAULT_LOCAL_EMBEDDING_REPO}-OTHER`;
@@ -52,9 +32,7 @@ describe("repo/modelId 宣言食い違い検査（コンストラクタ、Issue 
     } catch (error) {
       message = (error as Error).message;
     }
-    // ⚠ メッセージ全文の一致では縛らない（文面を直すたびに歯が壊れる）。
-    // 個別に assert するのは (a) 渡した repo の値 (b) modelId という語
-    // (c) space または EmbeddingSpaceId の語、の3点だけ。
+    // メッセージ全文の一致では縛らない（文面を直すたびに歯が壊れる）。assert するのは (a) 渡した repo の値 (b) modelId という語 (c) space または EmbeddingSpaceId の語、の3点だけ。
     expect(message).toContain(OTHER_REPO);
     expect(message).toContain("modelId");
     expect(message).toMatch(/space|EmbeddingSpaceId/);
@@ -73,13 +51,6 @@ describe("repo/modelId 宣言食い違い検査（コンストラクタ、Issue 
     const provider = new LocalEmbeddingProvider({ modelId: OTHER_MODEL_ID });
     expect(provider.space.model).toBe(OTHER_MODEL_ID);
   });
-
-  // ---- Issue #1793（09/19 マージ分の確かめ直し）が足した歯 ----
-  // 変異で素通りした形:
-  //  (1) 既定と同じ modelId を明示した私設ミラー（決定3 の逃げ道そのもの）を、guard が弾く
-  //  (2) repo と同時に別の option（revision / cacheDir / dtype …）が在ると guard が黙る
-  //  (3) repo が空文字のとき（`options.repo &&` の真偽値で見ると素通りする）
-  //  (4) 大文字小文字だけ違う repo（「既定と異なる」は文字列そのままの比較）
 
   it("repo を差し替えても、既定と同じ modelId を明示すれば通る（私設ミラーの逃げ道。決定3）", () => {
     const provider = new LocalEmbeddingProvider({

@@ -6,28 +6,6 @@ import type { NewMemoryEvent } from "../event.js";
 import type { NewRecallRecord } from "../recall.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore`/`FakeVectorStore`/`FakeEventStore`（`packages/core` 自身の runtime
- * テスト用フェイク、`runtime-fakes.ts`）が、ADR 0047 で足した外部キー相当の「存在」検査を
- * 実際に守っていることを検査する歯。
- *
- * **`packages/testkit` の適合テストの対象ではない。** これらは adapter 適合テストの
- * 対象である `MemoryStore`/`VectorStore`/`EventStore` 実装（`InMemoryMemoryStore` 等）
- * ではなく、`packages/core` 自身の runtime テスト専用の別系統
- * （`runtime-fakes.ts` 冒頭のコメント: core は testkit に依存しない）。
- * `fake-vector-store-filter.test.ts`（ADR 0034 の穴を core 側で埋めた前例）・
- * `fake-event-store-list.test.ts`（ADR 0042 の同種の前例）と同じ理由・同じ形。
- *
- * **⚠ この歯を置く前は、ADR 0047 が `FakeMemoryStore`/`FakeVectorStore`/`FakeEventStore`
- * に足した9箇所のガードのうち1つも `packages/core` 側からは検査されていなかった**
- * （変異を1つずつ入れて実測: 9箇所とも赤くなる歯が0本だった。「歯が弱い」の実例）。
- * `packages/testkit` の適合テスト（`InMemoryMemoryStore` 等が対象）はこの Fake 系統を
- * 検査できない——テスト対象が違う。この歯はその穴を埋める。
- *
- * すべて非対称——「実在しない参照では失敗する」と「実在する参照では成功する」を
- * 同じ検査の中で見る。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
 

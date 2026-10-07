@@ -4,16 +4,6 @@ import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 import type { CreateLocalEmbeddingPipeline } from "../pipeline.js";
 import { isLocalEmbeddingProviderError } from "../errors.js";
 
-/**
- * `LocalEmbeddingProvider.embed()` の成分の検査（Issue #992）の、`local-embedding-provider.test.ts`
- * の「成分の検査」が見ていない側の歯。
- *
- * - **有限な値は通す**（検査は `Number.isFinite` だけ。大きな値・小さな値・負の値・-0 を
- *   「怪しい」として弾かない）。
- * - **件数が `maxBatchSize` を超えて分割された経路でも**、有限でない成分は同じ例外になり、
- *   メッセージの番号は分割前の通し番号（チャンクの中の位置ではない）。
- */
-
 const ctx: Ctx = { tenantId: "finite-components-test" };
 
 function pipelineReturning(embed: (texts: string[]) => number[][]): CreateLocalEmbeddingPipeline {
@@ -49,7 +39,6 @@ describe("embed(): 有限な成分は、値が大きくても小さくても負�
 
 describe("embed(): 件数が maxBatchSize を超えて分割されても、有限でない成分は同じ例外になる", () => {
   it("2つ目のチャンクの中の NaN は、分割前の通し番号で名指しされる（素の Error、kind なし）", async () => {
-    // 5件を2件ずつ（2 + 2 + 1）に分ける。通し番号 3（0 始まり）= 2つ目のチャンクの2件目に NaN を入れる。
     const provider = new LocalEmbeddingProvider({
       dimensions: 2,
       maxBatchSize: 2,

@@ -19,41 +19,20 @@ import type {
 } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * 31巡目（ADR 0458）: `MemoryStore` の port の約束のうち、conformance suite にも既存の `__tests__` にも
- * 歯が見当たらなかったものを、**同じ本文で2実装（`InMemoryMemoryStore`・`PostgresMemoryStore`）に流す**。
- * 本体は `packages/testkit/src/__tests__/memory-store-round31.test.ts`（IM）と
- * `packages/postgres/src/__tests__/memory-store-round31.postgres.test.ts`（PG）が呼ぶ。
- *
- * `packages/testkit/src/*-conformance.ts` には足していない（ADR 0434 決定5: conformance suite に約束を
- * 足すのはオーナーの領分）。約束の出所と一覧は ADR 0458 を見ること。
- */
-
 export interface Round31Kit {
   store: MemoryStore;
-  /** メモリ id を渡せばその Memory のイベント、渡さなければそのテナントの全イベント。 */
   listEvents(ctx: Ctx, memoryId?: MemoryId): Promise<MemoryEvent[]>;
-  /** `memory_relations` で `memoryId` と結ばれた相手の id（行ごと。重複していれば重複したまま返す）。 */
   relatedIds(ctx: Ctx, memoryId: MemoryId): Promise<string[]>;
-  /** `contradicts` の関係を `fromId`→`toId` の向きで1行足す（`RelationStore.link`。群の外の記憶との行を作るのに使う）。 */
   linkContradicts(ctx: Ctx, fromId: MemoryId, toId: MemoryId): Promise<void>;
   setRetention(ctx: Ctx, days: number | "unlimited"): Promise<void>;
   activitySeq(ctx: Ctx): Promise<number>;
   claimEmbedJobs(ctx: Ctx, now: Date): Promise<OutboxJobRecord[]>;
-  /** v1.0.x の purge が残した状態（purgedAt だけ立つ）を作る。 */
   seedLegacyPurged(ctx: Ctx, memoryId: MemoryId): Promise<void>;
 }
 
 export interface Round31Flags {
-  /** この実装が `opts.abortIfForgotten` を実装している（IM は実装せず、渡されても無視する）。 */
   implementsAbortIfForgotten: boolean;
-  /**
-   * jsonb 列の欄（attributes/provenance）に孤立サロゲートを渡したときに例外を投げる（PG）。IM は投げずにそのまま保持する。
-   * ⚠ ADR 0543 で、`text` 列の欄（content/digest/tags）は全実装が U+FFFD に置き換える形に揃えた——以前ここにあった
-   * フラグ `loneSurrogateText`（`"replace"` か `"keep"`）は無くなった。jsonb の欄の差は ADR 0543 の対象外で、今も残る。
-   */
   jsonbRejectsLoneSurrogate: boolean;
-  /** 索引の1行の上限を超える claimKey を断る（PG: `ClaimKeyIndexLimitError`）。IM はどの長さも受け入れて投げない。 */
   claimKeyIndexLimit: boolean;
 }
 
@@ -90,7 +69,6 @@ export function describeRound31Teeth(
     };
     const mk = async (store: MemoryStore, ctx: Ctx, over: Partial<NewMemory> = {}) =>
       store.createMemory(ctx, mem(ctx, over));
-    /** contested は対向が要る（ADR 0140）ので、markContestedPair で作る。 */
     const contestedPair = async (store: MemoryStore, ctx: Ctx) => {
       const a = await mk(store, ctx);
       const b = await mk(store, ctx);
@@ -127,7 +105,6 @@ export function describeRound31Teeth(
       (memory: { id: MemoryId }): NewMemoryEvent =>
         ev(ctx, memory.id, "created");
 
-    // ---------------------------------------------------------------- A1
     it("A1: 冪等の衝突で既存の行を返す createMemory・createMemoryWithOutbox にも、別テナントを指す参照の検査は当たる（ADR 0439）", async () => {
       const { store } = await makeKit();
       const obs = await store.createObservation(
@@ -152,7 +129,6 @@ export function describeRound31Teeth(
       }
     });
 
-    // ---------------------------------------------------------------- A2 / A3
     const supersededSource = async (store: MemoryStore, ctx: Ctx) => {
       const anchor = await mk(store, ctx);
       const src = await mk(store, ctx, { status: "superseded", supersededById: anchor.id });
@@ -188,7 +164,6 @@ export function describeRound31Teeth(
         }),
       );
       expectStatusChanged(e, "createMemoryWithOutbox", [[src.id, "superseded"]]);
-      // 何も書かれていない: 同じ抽出キーで作り直すと created: true（書かれていれば created: false）。
       const jobsBefore = await store.createMemoryWithOutbox(A, input, ["embed"], {
         abortIfSuperseded: [active.id],
       });
@@ -289,14 +264,12 @@ export function describeRound31Teeth(
         [a.id, "archived"],
         [b.id, "archived"],
       ]);
-      // news は残っていない: 同じ入力でもう一度（今度は通る supersede を混ぜて）呼ぶと created: true。
       const partial = await store.supersedeWithNewMemories!(A, [news], [sup(a.id), sup(live.id)], {
         abortIfAllConflicted: true,
       });
       expect(partial.created[0]?.created).toBe(true);
       expect(partial.conflicted.map((c) => c.id)).toEqual([a.id]);
       expect((await store.get(A, live.id))?.status).toBe("superseded");
-      // 省略・false は今日どおり（全部弾かれても例外にせず conflicted に積む）。
       const dflt = await store.supersedeWithNewMemories!(A, [newsOf(A)], [sup(b.id)]);
       expect(dflt.conflicted.map((c) => c.id)).toEqual([b.id]);
       const off = await store.supersedeWithNewMemories!(A, [newsOf(A)], [sup(b.id)], {
@@ -305,7 +278,6 @@ export function describeRound31Teeth(
       expect(off.conflicted.map((c) => c.id)).toEqual([b.id]);
     });
 
-    // ---------------------------------------------------------------- A4
     it("A4: getMany は ids に同じ id が複数あっても、結果に1回だけ載せる", async () => {
       const { store } = await makeKit();
       const m = await mk(store, A);
@@ -313,7 +285,6 @@ export function describeRound31Teeth(
       expect(r.map((x) => x.id)).toEqual([m.id]);
     });
 
-    // ---------------------------------------------------------------- A5
     it("A5: updateStatus・updateStatusWithEvent の判定順は「対象の id が無い → supersededById が無い → expectedStatus が違う」", async () => {
       const { store } = await makeKit();
       const target = await mk(store, A);
@@ -337,7 +308,6 @@ export function describeRound31Teeth(
       );
       expect(isMemoryStatusConflictError(e2)).toBe(false);
       expect(String(e2)).toContain(missing);
-      // 対象が無いときは supersededById の検査より先に「対象が無い」。
       const gone = randomUUID();
       const e3 = await caught(
         store.updateStatus(A, gone, "superseded", {
@@ -383,7 +353,6 @@ export function describeRound31Teeth(
       expect(isMemoryStatusConflictError(e2)).toBe(true);
     });
 
-    // ---------------------------------------------------------------- A6 / A7
     it("A6: reinforce は status を見ない——active/contested/archived/superseded/forgotten のどれでも lastReinforcedAt を書く（Issue #840）", async () => {
       const { store } = await makeKit();
       const anchor = await mk(store, A);
@@ -417,7 +386,6 @@ export function describeRound31Teeth(
       expect((await store.get(A, a.id))!.updatedAt.getTime()).toBe(updatedAt);
     });
 
-    // ---------------------------------------------------------------- A9 / A10 / A11
     it("A9: purgeExpiredEvents は対象0件なら削除も events_purged の追記もせず、oldest/newestPurgedAt は null", async () => {
       const { store, listEvents } = await makeKit();
       const m = await mk(store, A);
@@ -458,7 +426,6 @@ export function describeRound31Teeth(
       const real = await store.purgeExpiredEventsByRetention!(A, { now, limit: 10 });
       expect(real).toMatchObject({ kind: "executed", result: { purged: 1, dryRun: false } });
       expect((await listEvents(A, m.id)).length).toBe(0);
-      // 他テナントの設定は読まない。
       expect(await store.purgeExpiredEventsByRetention!(B, { now, limit: 10 })).toEqual({
         kind: "unset",
       });
@@ -496,7 +463,6 @@ export function describeRound31Teeth(
       expect((await listEvents(A)).map((x) => x.kind)).toEqual(before);
     });
 
-    // ---------------------------------------------------------------- A12
     it("A12: archiveDecayed(clock: 'activity') の usesSubjectActivityCounters: true は nowSeq に行の subject の S_x を足して比べる（既定 false は足さない）", async () => {
       const { store } = await makeKit();
       const recall = (subjectId: string) =>
@@ -525,7 +491,6 @@ export function describeRound31Teeth(
         decayBaseSeq: 0,
         decayFloorSeq: 10,
       });
-      // T=5 だけなら 10 に届かない。S_alice=7 を足せば 12 >= 10 で沈んでいる。
       const without = await store.archiveDecayed!(A, {
         now: LATER,
         limit: 10,
@@ -551,12 +516,10 @@ export function describeRound31Teeth(
       expect(withS.archived.map((x) => x.memoryId)).toEqual([m.id]);
     });
 
-    // ---------------------------------------------------------------- A13 / A14
     it("A13: purgeMemory は registered の label を触らず、proposed の proposedCount だけ減らす", async () => {
       const { store } = await makeKit();
       const m = await mk(store, A, { status: "forgotten", tags: ["r31-reg", "r31-prop"] });
       await mk(store, A, { tags: ["r31-prop"] });
-      // proposed で proposedCount=1 になった後に registered へ昇格する（昇格後は proposedCount を保つ）。
       await store.registerLabel!(A, "r31-reg");
       const before = await store.listLabels!(A);
       expect(before.find((l) => l.name === "r31-reg")).toMatchObject({
@@ -592,14 +555,11 @@ export function describeRound31Teeth(
       expect((await store.get(A, m.id))?.tags).toEqual([]);
     });
 
-    // ---------------------------------------------------------------- A15 / A16
     it("A15: programmer error の RangeError は TSDoc どおりのメッセージ（markContestedPair・resolveContestedPair）", async () => {
       const { store } = await makeKit();
       const x = await mk(store, A);
       const side = { id: x.id, event: ev(A, x.id, "updated") };
-      // TSDoc はメッセージを「`<実装のクラス名>: first.id and second.id must differ`」と書く（接頭辞は
-      // `InMemoryMemoryStore: …`・`PostgresMemoryStore: …` のように実装ごとに違う。ADR 0458 で TSDoc を実装に合わせた）。
-      // ここで縛るのは「RangeError で、`first.id and second.id must differ` で終わる」こと。
+      // TSDoc のメッセージの接頭辞は実装ごとに違うので、`first.id and second.id must differ` で終わることだけを縛る。
       for (const call of [
         () => store.markContestedPair!(A, side, side),
         () =>
@@ -648,11 +608,9 @@ export function describeRound31Teeth(
         expect(e, label).toBeInstanceOf(RangeError);
         expect((e as Error).message, label).toBe(message);
       }
-      // 何も書かれていない（3件目の c を含めても全員 active のまま）。
       for (const m of [a, b, c]) expect((await store.get(A, m.id))?.status).toBe("active");
     });
 
-    // ---------------------------------------------------------------- A17
     it("A17: 群の一部だけを渡すと ContestedGroupMembershipMismatchError。forget で抜けた分は欠けとして数えない", async () => {
       const { store } = await makeKit();
       const [a, b, c, d, e5] = await group(store, A, 5);
@@ -696,7 +654,6 @@ export function describeRound31Teeth(
         })),
       );
       expect(ok.members).toHaveLength(4);
-      // 群の中どうし（a-b・a-c・a-d）の行は消え、forget 済みの e5・群の外の outside との行だけが残る。
       expect([...(await relatedIds(A, a!.id))].sort()).toEqual([e5!.id, outside.id].sort());
       expect(await relatedIds(A, b!.id)).toEqual([e5!.id]);
       expect(await relatedIds(A, outside.id)).toEqual([a!.id]);
@@ -717,7 +674,6 @@ export function describeRound31Teeth(
       expect((await store.get(A, pb.id))?.status).toBe("contested");
       expect((await store.get(A, c.id))?.status).toBe("active");
       expect((await store.get(A, d.id))?.status).toBe("active");
-      // 対の両方を含めれば（片割れが群の中を指す）通る。断る条件を締めすぎていないこと。
       await store.markContestedGroup!(
         A,
         [pa, pb, c].map((m) => ({ id: m.id, event: ev(A, m.id, "updated") })),
@@ -725,7 +681,6 @@ export function describeRound31Teeth(
       for (const m of [pa, pb, c]) expect((await store.get(A, m.id))?.status).toBe("contested");
     });
 
-    // ---------------------------------------------------------------- A18 / A19 / A20
     it("A18: markContestedGroup は既に張られている関係の行を重複させない（既存の群を吸収する）", async () => {
       const { store, relatedIds } = await makeKit();
       const [a, b, c] = await group(store, A, 3);
@@ -794,7 +749,6 @@ export function describeRound31Teeth(
       for (const m of bGroup) expect((await store.get(B, m.id))?.status).toBe("contested");
     });
 
-    // ---------------------------------------------------------------- A21 / A22
     it("A21: restoreSupersededBy は updatedAt を進め、content/digest は書き換えない", async () => {
       const { store } = await makeKit();
       const anchor = await mk(store, A);
@@ -828,14 +782,13 @@ export function describeRound31Teeth(
       expect(count).toBe(1);
     });
 
-    // ---------------------------------------------------------------- A23
     it("A23: eraseTenant は memory_events・memory_labels/labels・memory_relations・recall_usages・tenant_activity も消す", async () => {
       const { store, listEvents, relatedIds, activitySeq } = await makeKit();
-      const ms = await group(store, A, 3); // memory_relations・updated イベント
+      const ms = await group(store, A, 3);
       await store
         .updateStatusWithEvent(A, ms[0]!.id, "forgotten", {}, ev(A, ms[0]!.id, "forgotten"))
         .catch(() => undefined);
-      await mk(store, A, { tags: ["r31-erase"] }); // labels
+      await mk(store, A, { tags: ["r31-erase"] });
       await store.registerLabel!(A, "r31-erase-reg");
       const recallId = await store.createRecall(A, {
         tenantId: A.tenantId,
@@ -872,7 +825,6 @@ export function describeRound31Teeth(
       expect((await store.listLabels!(B)).map((l) => l.name)).toEqual(["r31-erase"]);
     });
 
-    // ---------------------------------------------------------------- B 代表
     it("B1: createObservation の input.tenantId が ctx と違っても、ctx のテナントとして書く", async () => {
       const { store } = await makeKit();
       const o = await store.createObservation(
@@ -986,11 +938,7 @@ export function describeRound31Teeth(
       },
     );
 
-    // ---------------------------------------------------------------- B3 / B4
-    // ⚠ B4 は、インメモリと Postgres の**今の振る舞いの記録であって、約束ではない**（ADR 0458 の材料4）。
-    // 差（`flags.claimKeyIndexLimit`）をそのまま縛っている。B3 のうち `text` 列の欄は、ADR 0543 で
-    // 「全実装が U+FFFD に置き換える」に揃えた（B3 の歯を書き換えた。全欄・3実装の突き合わせは
-    // `lone-surrogate-fffd-teeth.ts`）。jsonb の欄の差（PG だけが例外）は `flags.jsonbRejectsLoneSurrogate` が今も縛る。
+    // B4 は今の振る舞いの記録であって、約束ではない。差（`flags.claimKeyIndexLimit`）をそのまま縛る。
     it("B3: 孤立サロゲートを本文の欄へ渡したときは、PG・IM とも U+FFFD に置換（ADR 0543。ADR 0458 の旧 B3 は『IM は保持』を縛っていた）／jsonb の欄は PG だけが例外", async () => {
       const { store } = await makeKit();
       const lone = "a\uD800b";

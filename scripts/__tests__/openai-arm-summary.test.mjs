@@ -5,20 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/openai-arm-summary.mjs` の歯。**本物のスクリプトを子プロセスとして実際に
- * 起動する**(`identifier-probe-summary.test.mjs` と同じ形・同じ理由)。
- *
- * 🔴 **このファイルが固定している線**:
- *
- * 1. **基準値と相違しても exit 0**(⛔ 門ではない)。
- * 2. **`--measured` のファイルが無くても exit 0**(openai arm ブロックが失敗して
- *    JSON が1件も書かれなかった場合を、入力破損と同じ顔で落とさない)。
- * 3. **入力そのものが壊れていれば非0**。
- * 4. **並走の判定(red/green)が red でも exit 0**——判定は Markdown に載るだけで
- *    exit code には反映しない。
- */
-
 const script = fileURLToPath(new URL("../openai-arm-summary.mjs", import.meta.url));
 
 function makeGroup(overrides = {}) {

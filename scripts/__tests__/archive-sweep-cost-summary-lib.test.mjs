@@ -10,15 +10,6 @@ import {
   validateMeasured,
 } from "../archive-sweep-cost-summary-lib.mjs";
 
-/**
- * `archive-sweep-cost-summary-lib.mjs`(純関数の側)の歯。DB を要求しない
- * ——`consolidation-cost-summary-lib.test.mjs` と同じ分担・同じ理由(Issue #209)。
- *
- * `examples/chat/archive-sweep-baseline.json` は PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた
- * （この歯が書かれた時点では未コミットだった）。この歯は実物のファイルに依存せず、ここで使う
- * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
- */
-
 function makeProbe(overrides = {}) {
   return {
     probeId: "color",
@@ -67,7 +58,6 @@ function makeStore(overrides = {}) {
   };
 }
 
-/** measured 側(probes 配列あり)の phase。 */
 function makePhase(overrides = {}) {
   return {
     store: makeStore(overrides.store),
@@ -79,7 +69,6 @@ function makePhase(overrides = {}) {
   };
 }
 
-/** 基準値側(probes 配列を持たない軽量な phase)。 */
 function makeBaselinePhase(overrides = {}) {
   return {
     store: makeStore(overrides.store),
@@ -463,7 +452,6 @@ describe("collectBeforeUsageInfoRows / buildBeforeUsageInfoSection", () => {
     const markdown = buildSummaryMarkdown({ measured, baseline });
     expect(markdown).toContain("before 段の usageChars 系");
     expect(markdown).toContain("12345");
-    // 差分節(比較・カウント対象)は一致のまま黙る側であることも確認する。
     expect(markdown).toContain("✅ 一致(差分なし)。");
   });
 });
@@ -519,8 +507,6 @@ describe("buildSummaryMarkdown", () => {
     const markdown = buildSummaryMarkdown({ measured, baseline: makeBaseline() });
     expect(markdown).toContain("基準値との差分");
     expect(markdown).toContain("✅ 一致(差分なし)。");
-    // 「基準値との差分」節そのものは表を展開しない(この節に限って検査する——
-    // 「before 段の usageChars 系」節はこの一致/不一致とは独立に常に表を出す。ADR 0123)。
     const diffSection = markdown.split("## 基準値との差分")[1].split("## before 段の")[0];
     expect(diffSection).not.toContain("| 項目 | 基準値 | 実測 |");
   });

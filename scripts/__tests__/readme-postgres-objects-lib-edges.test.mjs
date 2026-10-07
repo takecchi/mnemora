@@ -7,16 +7,6 @@ import {
   extractMarkdownSection,
 } from "../readme-postgres-objects-lib.mjs";
 
-/**
- * `readme-postgres-objects-lib.mjs`（Issue #168、ADR 0202・0204）の歯の足し
- * （Issue #1815、09/16 マージ分の #438・#444 の確かめ直し）。
- *
- * 既存の `readme-postgres-objects-lib.test.mjs` は、DDL の書き方の揺れ（`IF NOT EXISTS`・`CONCURRENTLY`・`IF EXISTS`・
- * 小文字）と、節・見出し・箇条書きの拾い方の境界を見ていなかった。**ここを取りこぼすと、README の一覧と migrations の
- * 最終形の突き合わせが、その書き方のオブジェクトを黙って数えない**（過不足なしの主張が緩む）。実装は変えない。
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 describe("deriveMigrationObjects は DDL の書き方の揺れを拾う", () => {
   it("`CREATE TABLE IF NOT EXISTS` のテーブルを拾う", () => {
     expect(deriveMigrationObjects(["CREATE TABLE IF NOT EXISTS foo (id int);"]).tables).toEqual([

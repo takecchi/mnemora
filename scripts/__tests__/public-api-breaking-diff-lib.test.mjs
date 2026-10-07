@@ -8,17 +8,6 @@ import {
 } from "../public-api-breaking-diff-lib.mjs";
 import { execFileSyncWithDeadline, isDeadlineError } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/public-api-breaking-diff.mjs`（Issue #818 / #811 / #813 / #815）が使う純関数の歯。
- *
- * 前半は合成フィクスチャ（小さな `.d.ts` 文字列）で5形それぞれの陽性・陰性を確かめる。
- * 後半（describe.skipIf ブロック）は実際の履歴（`v1.0.0` と `55a39bd`）を読み、
- * 実物の破壊的変更（`supportsTaxonomyMode`/`supportsLabels`/`supportsFindActiveByClaimKey` が
- * 一時的に必須化されていた区間、#717・#745 で足され #827 で任意へ戻された）を
- * 実際に捕まえることを確認する陽性対照（AGENTS.md「⚠ 「出なかった」を、事象が無いことの
- * 証明にしない」）。
- */
-
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 function diffOf(baseText, headText) {
@@ -267,12 +256,7 @@ describe("Markdown 組み立て", () => {
   });
 });
 
-/**
- * 実際の履歴を読む陽性対照。`v1.0.0`/`55a39bd` の両 ref が手元に無い環境
- * （浅い clone 等）では、`adr-index-freshness.test.mjs` と同じ考え方で
- * スキップする——このテストの目的は「実履歴を読めたときに、実際の3件を捕まえるか」
- * であり、ref が無い環境で赤くして CI を無関係な理由で落とすことではない。
- */
+// 浅い clone など ref が手元に無い環境ではスキップする（無関係な理由で CI を落とさない）。
 /**
  * @param {string} ref
  * @param {typeof execFileSyncWithDeadline} [run] 期限の例外を投げ直すことを歯から確かめるための注入点。
@@ -317,8 +301,6 @@ describe.skipIf(!bothRefsAvailable)(
       expect(members).toEqual(
         ["supportsFindActiveByClaimKey", "supportsLabels", "supportsTaxonomyMode"].sort(),
       );
-      // 空振り防止（AGENTS.md「⚠ 「出なかった」を、事象が無いことの証明にしない」）:
-      // 3件が本当にちょうど3件であり、探り棒が鈍って0件やそれ以上を返していないことまで見る。
       expect(diff.requiredMemberAdded).toHaveLength(3);
     });
 
@@ -334,7 +316,6 @@ describe.skipIf(!bothRefsAvailable)(
 );
 
 describe("refIsAvailable: 期限の例外だけは、読み替えずに投げ直す", () => {
-  // 止まる子。期限を短くして、`git` の代わりに起こす。
   const hang = (_command, _args, options) =>
     execFileSyncWithDeadline(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
       ...options,

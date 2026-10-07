@@ -7,7 +7,7 @@ export const systemClock: Clock = {
   },
 };
 
-/** テストで固定時刻を注入するための実装（docs/architecture.md §5.10）。 */
+/** テストで固定時刻を注入するための実装。 */
 export function fixedClock(at: Date): Clock {
   return {
     now(): Date {

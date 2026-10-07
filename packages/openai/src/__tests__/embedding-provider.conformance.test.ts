@@ -1,26 +1,5 @@
-// Issue #116 の残債: ADR 0095 が新設した適合テストを、**本物の `OpenAIEmbeddingProvider`** に当てる。
-//
-// ADR 0095 は suite を作ったが、当てたのは testkit 自身の2実装
-// （`DeterministicEmbeddingProvider` / `RecordedEmbeddingProvider`）だけだった。
-// ⟹ 「4つの実装が同じ契約を満たす」ことは確かめられていなかった。ここがその片方を返す。
-//
-// ## 🔴 何を測っていて、何を測っていないか（正直に書く）
-//
-// **測っている**: `OpenAIEmbeddingProvider` が実際に書いたロジック——`space` を
-// `(provider, model, dimensions)` で固定すること・空配列で client を呼ばずに `[]` を返すこと・
-// 応答を `index` で並べ直すこと・件数と次元が入力に対応すること。
-// **そして、そこを流れるベクトルは本物の `text-embedding-3-small` が実際に返したものである**
-// （`./fixtures/recorded-openai-embeddings.json`。出所は同ファイルの `provenance`）。
-// ⟹ 「各ベクトル長 = space.dimensions」「成分が有限」は、**足場が自分で作った数**ではなく
-// 実 API の出力に対して成り立っている。
-//
-// **測っていない**: HTTP・認証・リトライ・レート制限、そして**実 API 自身の振る舞い**。
-// 注入した client は記録の再生であって OpenAI ではない。実 API に対して同じ9本を当てるのは
-// `./live.openai.test.ts` の側で、そちらは `OPENAI_API_KEY` と `MNEMORA_LIVE_OPENAI` の
-// 二重の opt-in が要る（ADR 0019 §5c）。**この2つを混同しないこと。**
-//
-// 既存の `./embedding-provider.test.ts` の冒頭コメントと同じ規律である
-// （「ここで注入する client は本物の OpenAI SDK ではない」）。
+// 本物の `OpenAIEmbeddingProvider` に適合 suite を当てる。流れるベクトルは本物の `text-embedding-3-small` が返したもの（`./fixtures/recorded-openai-embeddings.json`）で、注入した client は記録の再生であって OpenAI ではない。HTTP・認証・リトライ・レート制限・実 API 自身の振る舞いは測らない。
+// 実 API に当てるのは `./live.openai.test.ts` で、二重の opt-in が要る。この2つを混同しないこと。
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -34,8 +13,7 @@ interface RecordedEmbeddings {
   entries: { text: string; vector: number[] }[];
 }
 
-// JSON を `import` せずに読む——`resolveJsonModule` を有効にするのは、この歯1本のために
-// パッケージの tsconfig を広げることになる。読み込みはテスト実行時の1回きりで足りる。
+// JSON を `import` せずに読む。`resolveJsonModule` を有効にすると、この歯1本のためにパッケージの tsconfig を広げることになる。
 const recorded = JSON.parse(
   readFileSync(
     fileURLToPath(new URL("./fixtures/recorded-openai-embeddings.json", import.meta.url)),
@@ -51,33 +29,13 @@ const [a, b, c] = recorded.entries.map((e) => e.text) as [string, string, string
 
 /**
  * 記録した実応答を再生する、`Pick<OpenAI, "embeddings">` の形をした client。
- *
- * 🔴🔴 **`data` を index の降順（＝逆順）で返す。これは意図であって、手抜きではない。**
- *
- * `OpenAIEmbeddingProvider.embed` は `[...response.data].sort((a, b) => a.index - b.index)` で
- * 応答を並べ直している（「OpenAI は入力順を保つと文書化しているが、前提を作らない」）。
- * **足場が入力順のまま返すと、並べ直しは一度も仕事をしない**——並べ直しを消しても
- * 出力が1ビットも変わらない構成で「並べ直しを測った」とは言えない。逆順で返すことで、
- * 返り値が `.sort(...)` の実行に実際に依存する状態を作っている。
- *
- * ⚠⚠ **ただし、逆順にするだけでは順序の歯は `.sort(...)` の除去を検出しない。**
- * これは推測ではなく実測である: 逆順の再生 client のまま `.sort(...)` を外す変異を
- * 入れたところ、**適合テスト10本は全部緑のまま**で、落ちたのは
- * `./embedding-provider.test.ts` の「index 順に並べ替えて返す」1本だけだった。
- * 理由は当時の順序の歯が2件の入れ替え（`[a,b]` と `[b,a]`）で測っていたことにあり、
- * **つねに逆順で返す実装はその等式を恒等的に満たしてしまう。**
- * ⟹ 適合 suite 側の順序の歯を**3件の巡回**（`[a,b,c]` と `[b,c,a]`）へ強めた
- * （`packages/testkit/src/embedding-provider-conformance.ts` の当該コメント）。
- * その後に同じ変異を入れ直すと、**順序の歯がちょうど1本落ちる。**
- *
- * ⛔ **記録に無い入力には例外を投げる。**黙って作りものベクトルへ倒れない
- * ——`RecordedEmbeddingProvider`（ADR 0051）が守っているのと同じ規律である。
- * 倒れると「本物のベクトルで測った」と読める出力に、意味の無い値が混ざる。
+ * `data` を index の降順（逆順）で返す。入力順のまま返すと、並べ直しを消しても出力が1ビットも変わらず、並べ直しを測ったことにならない。
+ * ただし逆順にするだけでは順序の歯は `.sort(...)` の除去を検出しない。つねに逆順で返す実装は、2件の入れ替え（`[a,b]` と `[b,a]`）の等式を恒等的に満たすため、適合 suite 側の順序の歯を3件の巡回（`[a,b,c]` と `[b,c,a]`）にしてある。
+ * 記録に無い入力には例外を投げる。黙って作りものベクトルへ倒れると、「本物のベクトルで測った」と読める出力に意味の無い値が混ざる。
  */
 function createReplayClient(): Pick<OpenAI, "embeddings"> {
   const embeddings = {
     async create(params: { model: string; input: string[]; dimensions: number }) {
-      // provider が何を送っているかも、ここで測る（送っていなければ記録を引く資格が無い）。
       if (params.model !== MODEL) {
         throw new Error(
           `再生クライアント: model が記録と違う（受け取り: ${params.model} / 記録: ${MODEL}）`,
@@ -88,13 +46,7 @@ function createReplayClient(): Pick<OpenAI, "embeddings"> {
           `再生クライアント: dimensions が記録と違う（受け取り: ${String(params.dimensions)} / 記録: ${DIMENSIONS}）`,
         );
       }
-      // 🔴🔴 **空入力で呼ばれたら投げる。これも意図である。**
-      // `OpenAIEmbeddingProvider.embed` は `if (texts.length === 0) return []` で
-      // **client を呼ばずに**返す契約である（既存の `./embedding-provider.test.ts` が
-      // `expect(create).not.toHaveBeenCalled()` で固定している）。
-      // ⚠ **足場が空入力に `data: []` を返してしまうと、この早期 return を丸ごと消しても
-      // 「`embed(ctx, [])` は `[]` を返す」の歯は緑のままになる**——実測でそうなった。
-      // 投げるようにして初めて、「空配列で API を叩いていない」ことを測れる。
+      // 空入力で呼ばれたら投げる。足場が空入力に `data: []` を返すと、`embed` の早期 return を消しても「`embed(ctx, [])` は `[]` を返す」の歯が緑のままになる。投げるようにして初めて、空配列で API を叩いていないことを測れる。
       if (params.input.length === 0) {
         throw new Error(
           "再生クライアント: 空の input で呼ばれた。OpenAIEmbeddingProvider は " +
@@ -112,7 +64,7 @@ function createReplayClient(): Pick<OpenAI, "embeddings"> {
         }
         return { index, embedding: vector, object: "embedding" as const };
       });
-      // 🔴 逆順で返す（上記の理由）。
+      // 逆順で返す（上記の理由）。
       return {
         object: "list" as const,
         model: MODEL,
@@ -124,13 +76,7 @@ function createReplayClient(): Pick<OpenAI, "embeddings"> {
   return { embeddings } as unknown as Pick<OpenAI, "embeddings">;
 }
 
-/**
- * 🔴 適合テストの前に、**足場が歯を空回りさせていない**ことを1本測る。
- *
- * 順序の歯は `embed([a,b])[0] === embed([b,a])[1]` を見る。**もし a と b のベクトルが
- * 同じなら、並べ直しが壊れていてもこの等式は成り立ってしまい、歯は何も測らずに通る。**
- * ⟹ 3本が互いに違うことは、順序の歯が意味を持つための前提である。ここで固定しておく。
- */
+/** 順序の歯は `embed([a,b])[0] === embed([b,a])[1]` を見る。a と b のベクトルが同じだと、並べ直しが壊れていてもこの等式が成り立つので、3本が互いに違うことを前提として固定する。 */
 describe("適合テストの前提: 記録した3本のベクトルは互いに異なる", () => {
   it("a / b / c のベクトルは、どの2本を取っても一致しない", () => {
     const [va, vb, vc] = recorded.entries.map((e) => e.vector);
@@ -148,18 +94,8 @@ describeEmbeddingProviderConformance({
       dimensions: DIMENSIONS,
       client: createReplayClient(),
     }),
-  // ⚠ **決定性を与えているのは再生であって、実 API ではない。**
-  // 同じ入力に同じ記録を返すのだから、この構成は定義上決定的である——が、
-  // **実 API が決定的かどうかは、ここでは一切測っていない。**それを問うのは
-  // `./live.openai.test.ts` 側で、そちらは `deterministic: false` を宣言している
-  // （私たちは実 API の再現性の保証を持っていない。ADR 0095「3.1 決定性を無条件に要求する」の却下理由）。
+  // 決定性を与えているのは再生であって、実 API ではない。実 API が決定的かどうかは測っておらず、`./live.openai.test.ts` は `deterministic: false` を宣言している。
   deterministic: true,
   texts: { a, b, c },
-  // ⚠ `overLimitText`（Issue #449 / ADR 0305）は渡さない。`createReplayClient` は
-  // `byText` の表引きであり、上限の概念を持たない——記録に無い入力は「記録に無い」という
-  // 別の理由で reject する（このファイル冒頭のコメントの規律と同じ）。渡しても上限検査
-  // そのものを測ったことにならない（vacuous な緑になる）。**`OpenAIEmbeddingProvider` が
-  // 実 API のサーバ拒否を握りつぶさずそのまま reject することは、
-  // `../embedding-provider.test.ts` の偽クライアント（400相当のエラーを投げる）で
-  // 別途測っている。**
+  // `overLimitText` は渡さない。`createReplayClient` は `byText` の表引きで上限の概念を持たず、渡しても上限検査を測ったことにならない（vacuous な緑）。サーバ拒否の伝播は `../embedding-provider.test.ts` の偽 client（400 相当のエラーを投げる）で測っている。
 });

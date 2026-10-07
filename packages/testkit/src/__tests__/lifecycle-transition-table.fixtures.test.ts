@@ -21,14 +21,6 @@ import {
   InMemoryVectorStore,
 } from "../fixtures.js";
 
-/**
- * 記憶の状態遷移の期待値の表（`packages/core/src/__tests__/lifecycle-transition-table.ts`）を、
- * `@mnemora/testkit/fixtures` の InMemory で走らせる。**表は core と同じ1つ**——core Fake の歯は
- * `packages/core/src/__tests__/lifecycle-transition-table.test.ts`、Postgres の歯は
- * `packages/postgres/src/__tests__/lifecycle-transition-table.postgres.test.ts`。1マスが1本の `it`。
- * 利用者が自分のテストで使う公開の fixture が、同じ表どおりに動くことを縛る。
- */
-
 function fixtureKit(): LifecycleKit {
   const memoryStore = new InMemoryMemoryStore();
   const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);

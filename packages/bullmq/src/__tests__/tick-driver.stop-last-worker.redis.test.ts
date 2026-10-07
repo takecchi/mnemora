@@ -4,23 +4,8 @@ import { createBullmqTickDriver } from "../tick-driver.js";
 import type { BullmqTickDriver } from "../tick-driver.js";
 
 /**
- * 実 Redis（`REDIS_PORT`）での歯: 「最後の Worker だけが共有 scheduler を消す」（ADR 0655、ADR 0449 の材料3の一部を直す）。
- *
- * ## 捕まえるもの
- * - 同じ `queueName`・`jobName` の driver が2台以上居るとき、1台の `stop()` が scheduler を消さず、残った driver の tick が
- *   発火し続けること（本体）。
- * - 陽性対照: driver が1台だけなら、`stop()` は今までどおり scheduler を消すこと（「自分」を数えて消さない側に倒していない）。
- * - 全員が順に `stop()` したら、最後の1台が scheduler を消すこと（残骸にならない）。
- * - 名前なしの Worker（ADR 0655 より前の版の driver）も「他」と数えること。本物の CLIENT LIST での接続名が
- *   `bull:<base64(queue)>`（`:w:` が無い）であることも、ここで確かめる（単体の歯のモックはこの形を前提にしている）。
- * - `queue.getWorkers()`（CLIENT LIST に頼る）が使えない環境（throw する／bullmq が CLIENT 非対応時に返す偽の1件）では、
- *   2台居ても今までどおり消す側に倒れること。注入は `Queue.prototype.getWorkers` の spy で行う（公開 API に注入口は無い）。
- *
- * ## 捕まえないもの（既知の残り。ADR 0655「引き受けた負債」）
- * - 2台が同時に `stop()` すると、互いに相手を見てどちらも消さず、scheduler が1件残る。この競合は縛らない（再現も保証もしない）。
- * - Redis を永続化なしで再起動すると scheduler が消える件（ADR 0449 の (b)）。
- * - CLIENT LIST を禁じた本物の Redis（ACL など）。ここでは `getWorkers` の失敗の注入でしか見ていない。
- * - 長時間（数分以上）の発火。観測は数秒である。
+ * `queue.getWorkers()`（CLIENT LIST に頼る）が使えない場合の注入は `Queue.prototype.getWorkers` の spy で行う（公開 API に注入口が無い）。
+ * 名前なしの Worker の接続名は `bull:<base64(queue)>`（`:w:` なし）で、単体の歯のモックがこの形を前提にしている。
  */
 const REDIS_PORT = process.env.REDIS_PORT;
 if (!REDIS_PORT) {
@@ -86,12 +71,10 @@ describe("実 Redis: 最後の Worker だけが共有 scheduler を消す（ADR 
     const b = make(name, () => undefined);
     await a.start();
     await b.start();
-    // 陽性対照: stop() の前は発火している。
     await waitFor(() => ticksA >= 1, 10_000);
 
     await b.stop();
     expect((await q.getJobSchedulers()).length).toBe(1);
-    // stop() の後に、a の tick が増え続ける（進行中の1回を越えて、少なくとも3回）。
     const before = ticksA;
     await waitFor(() => ticksA >= before + 3, 10_000);
     expect((await q.getJobSchedulers()).length).toBe(1);
@@ -151,13 +134,12 @@ describe("実 Redis: 最後の Worker だけが共有 scheduler を消す（ADR 
   it("名前なしの Worker（ADR 0655 より前の版の driver の形）が同じ queue に居れば、stop() は scheduler を消さない", async () => {
     const name = `mnemora-tick-last-unnamed-${Date.now()}`;
     const q = queueFor(name);
-    // 前の版の driver は Worker に name を付けなかった（autorun: false で作って run() する形は今と同じ）。
     const old = new Worker(name, async () => undefined, { connection, autorun: false });
     rawWorkers.push(old);
     old.run().catch(() => undefined);
     const b = make(name, () => undefined);
     await b.start();
-    // 健全性: 名前なしの Worker が、本物の CLIENT LIST に `:w:` の無い接続名で出ている（接続名の設定は非同期なので待つ）。
+    // 接続名の設定は非同期なので待つ。
     const unnamed = `bull:${Buffer.from(name).toString("base64")}`;
     let rawnames: unknown[] = [];
     const start = Date.now();

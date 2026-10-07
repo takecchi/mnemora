@@ -8,7 +8,6 @@ import {
   formatArmSummaryTable,
 } from "../retrieval-quality.js";
 
-/** `computeTermSpreads`/`computeDecayFreshnessRowwise` の検査用に、最小の `RecalledMemory` を作る。 */
 function memory(score: ScoreBreakdown): RecalledMemory {
   return {
     memoryId: `memory-${JSON.stringify(score)}`,
@@ -18,19 +17,6 @@ function memory(score: ScoreBreakdown): RecalledMemory {
     score,
   };
 }
-
-/**
- * ADR 0068 ②: 「arm を跨いで数字を拾えてしまう」を塞ぐ歯。
- *
- * **現物の事故**: `formatArmSummaryTable` は MRR しか持っておらず、`hit@1`/`hit@10` を
- * 知るには `formatProbeComparisonTable`(arm ごとに5列 × 3 arm = 17列の横長の表)へ行き、
- * そこで行を横に数えて arm を跨ぐ必要があった。実際に「arm B の MRR」と「arm C の
- * hit@10」を束ねて読み違えた実例がある。
- *
- * **直し方の検査**: (1) `formatArmSummaryTable` の同じ行に MRR・hit@1・hit@10 が
- * 揃っていて、別の表へ行く理由が無いこと。(2) `armHeadline()` が `ArmReport` を
- * 1つしか受け取らない(構造上、他の arm の数字が混ざりようがない)こと。
- */
 
 function makeProbe(id: string, hit1: boolean, hit10: boolean): ProbeOutcome {
   const goldRank = !hit10 ? null : hit1 ? 1 : 2;
@@ -68,8 +54,6 @@ function makeArmReport(armLabel: string, probes: ProbeOutcome[], mrrOverall: num
     },
     probes,
     mrrOverall,
-    // ②-3 の対照用に、わざと probes/mrrOverall と無関係な値を入れておく——
-    // `armHeadline()` がこれらを見ていないことを検査できるようにするため。
     mrrLexicalControl: 0.123,
     mrrNonLexical: 0.456,
     usageReport: "(usage)",
@@ -77,22 +61,18 @@ function makeArmReport(armLabel: string, probes: ProbeOutcome[], mrrOverall: num
   };
 }
 
-// arm A: 7 probe すべて hit@1 かつ hit@10(見出しの数字が「よく効いた」側の極)。
 const armA = makeArmReport(
   "A",
   Array.from({ length: 7 }, (_, i) => makeProbe(`p${i}`, true, true)),
   1.0,
 );
 
-// arm B: 7 probe すべて外す(「まったく効いていない」側の極)。
 const armB = makeArmReport(
   "B",
   Array.from({ length: 7 }, (_, i) => makeProbe(`p${i}`, false, false)),
   0.0,
 );
 
-// arm C: 混在(hit@1=4/7, hit@10=6/7 — hit@1 と hit@10 も互いに違う値にして、
-// 列の取り違えも検出できるようにする)。
 const armC = makeArmReport(
   "C",
   [
@@ -107,7 +87,6 @@ const armC = makeArmReport(
   0.714,
 );
 
-/** `| a | b | c |` 形式の1行を、先頭・末尾の空セルを落として配列にする。 */
 function parseTableRow(line: string): string[] {
   return line
     .split("|")
@@ -192,17 +171,11 @@ describe("armHeadline — ArmReport を1つだけ受け取り、probes からの
     expect(headline.lexicalMatchRows).toBe(2);
   });
 
-  /**
-   * ⭐ ADR 0109: `termDistinct`/`decayFreshnessEqualRows`/`decayFreshnessDifferentRows`
-   * が `report.probes` からのみ導かれること(別計算をしないこと)。
-   */
   it("termDistinct は probes の termSpreads から、項ごとの何通りかを arm 単位で集計する", () => {
-    // p0: tagMatch/strength は1通り(常に1)、similarity は2通り。
     const memoriesP0 = [
       memory({ similarity: 0.5, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.5 }),
       memory({ similarity: 0.3, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.3 }),
     ];
-    // p1: tagMatch は1通りのまま(arm全体でも1通り)、similarity はさらに広い範囲。
     const memoriesP1 = [
       memory({ similarity: 0.9, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.9 }),
       memory({ similarity: 0.1, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.1 }),
@@ -225,19 +198,16 @@ describe("armHeadline — ArmReport を1つだけ受け取り、probes からの
     expect(similarity.presentRows).toBe(4);
     expect(similarity.minDistinctPerProbe).toBe(2);
     expect(similarity.maxDistinctPerProbe).toBe(2);
-    // arm 全体の min/max は probe を跨いだ最小・最大(丸めない生値)。
     expect(similarity.min).toBe(0.1);
     expect(similarity.max).toBe(0.9);
 
     const tagMatch = headline.termDistinct.find((t) => t.term === "tagMatch")!;
     expect(tagMatch.presentRows).toBe(4);
-    // ⟹ どの probe でも1通りしか値を取らない: 重みを触っても順位は動かない。
     expect(tagMatch.minDistinctPerProbe).toBe(1);
     expect(tagMatch.maxDistinctPerProbe).toBe(1);
     expect(tagMatch.min).toBe(1);
     expect(tagMatch.max).toBe(1);
 
-    // decay===freshness は全4行で厳密等価(どちらも1のまま)。
     expect(headline.decayFreshnessEqualRows).toBe(4);
     expect(headline.decayFreshnessDifferentRows).toBe(0);
   });

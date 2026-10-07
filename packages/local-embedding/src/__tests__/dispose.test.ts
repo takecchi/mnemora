@@ -8,10 +8,6 @@ import {
   type LocalEmbeddingPipeline,
 } from "../pipeline.js";
 
-/**
- * ADR 0419: `LocalEmbeddingProvider.dispose()`（任意・`EmbeddingProvider` には載せない）。
- * 重みは取らない——`createPipeline` の注入口と、擬似の extractor だけで測る。
- */
 const ctx: Ctx = { tenantId: "test-tenant" };
 
 interface Probe {

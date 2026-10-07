@@ -6,38 +6,8 @@ import { describe, expect, it } from "vitest";
 import { decideDryRun } from "../publish-dry-run.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * ⭐ **この歯が測っているもの（消す前に読むこと）**
- *
- * **`.github/workflows/publish.yml` が、実際に `decideDryRun()` に配線されていること。**
- *
- * ⚠ **これは `scripts/__tests__/publish-dry-run.test.mjs` /
- * `scripts/__tests__/decide-publish-dry-run.test.mjs` の重複ではない。**
- * その2本は**入力を自分で作って**判定を測る——前者は関数を直接呼び、後者は CLI を
- * 子プロセスで起動する。**どちらも `publish.yml` を1バイトも読まない。**
- * ⟹ 誰かが `publish.yml` から `node scripts/decide-publish-dry-run.mjs` の呼び出しを消して
- * 直す前のインライン `if`（fail-open）に戻しても、**その2本は緑のまま通る。**
- * ADR 0067 が塞いだ穴が、workflow 側の1行の書き換えで静かに開く。
- *
- * **この歯だけが `publish.yml` を入力に取る。**やっていることは:
- *
- * 1. `publish.yml` から**判定ステップを取り出す**（`decide-publish-dry-run.mjs` を打つ段）
- * 2. そのステップが `env:` で何を渡しているかを**yml から読み取る**
- *    （`EVENT_NAME` / `DRY_RUN_INPUT` という名前をこの歯に書き写さない——
- *    書き写すと、名前が変わったときに歯のほうが古いまま緑になる）
- * 3. **yml に書いてある通りのコマンドと env 名で**本物のスクリプトを起動し、
- *    `decideDryRun()` と**同じ入力集合**（event_name × dry_run の総当たり）を流して、
- *    **答えが一致する**ことを見る
- * 4. 判定の答えが `npm publish` の段まで届いていること——出力名（`steps.<id>.outputs.dry_run`）と、
- *    それを受けて `--dry-run` を立てる shell 分岐——を、**yml から取り出した shell を
- *    実際に走らせて**確かめる
- *
- * ⚠ **YAML は構造として解析していない（文字列で見ている）。**
- * `scripts/__tests__/publish-targets.test.mjs` の workflow 節と同じ判断で、
- * 歯のために YAML パーサの依存を足していない。**だからこの歯は書き方の変更に弱い。**
- * 壊れたときは「配線が変わった」か「書き方が変わった」かを見て、
- * **配線が変わっていないなら取り出し方のほうを直すこと**（歯を消さないこと）。
- */
+// YAML は構造解析せず文字列で見る（歯のために依存を足さない）。壊れたら、配線が変わったのか
+// 書き方が変わったのかを見て、配線が同じなら取り出し方のほうを直す。
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/publish.yml", import.meta.url));
@@ -45,9 +15,6 @@ const workflowPath = fileURLToPath(new URL("../../.github/workflows/publish.yml"
 const workflow = readFileSync(workflowPath, "utf8");
 
 /**
- * `steps:` の下の1段（`      - name: ...` から次の同じ深さまで）へ切り分ける。
- * 各段の `id:` / `env:` / `run:` だけを取り出す（それ以外は使わない）。
- *
  * @param {string} yaml
  * @returns {{ name: string, id: string | undefined, env: Record<string, string>, run: string }[]}
  */
@@ -63,7 +30,6 @@ function parseSteps(yaml) {
     }
     if (!current) continue;
     if (line.trim() !== "" && /^ {0,7}\S/.test(line)) {
-      // steps ブロックより浅い行が来たら、そこで終わり。
       current = null;
       continue;
     }
@@ -83,8 +49,6 @@ function parseSteps(yaml) {
 }
 
 /**
- * `        env:` の下の `          KEY: value` を拾う。
- *
  * @param {string[]} lines
  * @returns {Record<string, string>}
  */
@@ -107,8 +71,6 @@ function parseBlock(lines, key) {
 }
 
 /**
- * `        run: |` の下の本体、または `        run: <一行>` を返す。
- *
  * @param {string[]} lines
  * @returns {string}
  */
@@ -146,11 +108,6 @@ describe(".github/workflows/publish.yml が decideDryRun() に配線されてい
     expect(steps.length, "publish.yml の steps を1段も切り出せなかった").toBeGreaterThan(5);
   });
 
-  /**
-   * ⭐ **この歯の存在理由そのもの。**これが落ちるときは、
-   * publish.yml が判定を自前の shell に戻した（＝ ADR 0067 が塞いだ fail-open が開いた）か、
-   * 呼び出し先のファイル名が変わったかのどちらかである。
-   */
   it("判定を scripts/decide-publish-dry-run.mjs に委ねる段が在る（インライン判定に戻っていない）", () => {
     expect(
       decisionStep,
@@ -187,13 +144,9 @@ describe(".github/workflows/publish.yml が decideDryRun() に配線されてい
   });
 });
 
-/**
- * yml から読み取った「起動の仕方」。**この歯の中に env 名やコマンドを書き写さない。**
- * 書き写すと、yml 側で名前が変わったときに歯だけが古い名前で通り続ける。
- */
+// env 名やコマンドは yml から読み取る。書き写すと、yml 側の改名で歯だけ古いまま緑になる。
 function readInvocationFromWorkflow() {
-  // ⚠ 配線が消えていると decisionStep が undefined になる。ここで名指しで落とす
-  // ——素の TypeError にすると「歯が壊れた」と読まれ、「配線が消えた」と読まれない。
+  // 配線が消えると decisionStep は undefined になる。素の TypeError にせず、名指しで落とす。
   expect(
     decisionStep,
     "publish.yml に decide-publish-dry-run.mjs を打つ段が無い" +
@@ -216,10 +169,6 @@ describe("publish.yml の判定が decideDryRun() と同じ答えを出す（同
   const eventNames = ["release", "workflow_dispatch", "push", ""];
   const dryRunInputs = ["true", "false", "", undefined, "TRUE", "True", "1", "yes", "null"];
 
-  /**
-   * yml に書いてある通りのコマンドと env 名で本物のスクリプトを起動し、
-   * `$GITHUB_OUTPUT` に書かれた `dry_run=` を読む。
-   */
   function runAsWorkflowWould({ eventName, dryRunInput }) {
     const { command, eventKey, dryRunKey } = readInvocationFromWorkflow();
     const workDir = mkdtempSync(join(tmpdir(), "publish-yml-wiring-"));
@@ -278,10 +227,6 @@ describe("判定の答えが npm publish の段まで届いている（出力名
     ).toBeDefined();
   });
 
-  /**
-   * ⭐ 出力を**読み違えていない**ことを、yml から取り出した shell を実際に走らせて確かめる。
-   * `dry_run=true` を受けたときにだけ `--dry-run` が立つこと。
-   */
   it("受け取った dry_run が true のときだけ --dry-run が立つ（yml の shell を実際に走らせる）", () => {
     expect(decisionStep, "判定の段が無いので、受け取る出力そのものが存在しない").toBeDefined();
     const consumed = Object.entries(publishStep.env).find(([, v]) =>
@@ -300,7 +245,6 @@ describe("判定の答えが npm publish の段まで届いている（出力名
       ["false", ""],
       ["", ""],
     ]) {
-      // 分岐そのものの告知（「予行です」）は捨て、立った flag だけを読む。
       const result = spawnSyncWithDeadline(
         "bash",
         ["-c", `set -u\n{\n${segment}\n} > /dev/null\nprintf '%s' "\${${flagVar}}"`],

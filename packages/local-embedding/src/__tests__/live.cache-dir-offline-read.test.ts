@@ -15,30 +15,8 @@ import type { LocalEmbeddingModelSpec } from "../pipeline.js";
 const execFileAsync = promisify(execFile);
 
 /**
- * live テスト（本物のモデルを一度だけ Hugging Face から落とす。opt-in の条件・課金が発生しない
- * 理由は `live.local-embedding.test.ts` の docstring と同じ）。
- *
- * **直した Issue #1239 を、本物の transformers.js・本物のモデルで通す。**
- * `cache-dir-preflight-default-cache.test.ts`（偽のファイル）・
- * `cache-dir-env-swap-serialization.test.ts`（`@huggingface/transformers` を丸ごと mock）は
- * どちらも本物の読み込みを通していない。ここは、
- *
- * 1. `cacheDir` を一度だけ本物のモデルで温め（cold・ネットワークあり）、
- * 2. **まっさらな別プロセス**で、**既定のキャッシュには一切触れず**、`env.fetch` を
- *    必ず失敗させた状態で、`createLocalEmbeddingPipeline({ cacheDir })` から読み込んで
- *    `embed()` まで通し、
- *
- * 「`cacheDir` だけで、オフラインで読めて埋め込みが出る」ことを実際に確かめる。
- *
- * ⚠ **要る条件**: `MNEMORA_LIVE_LOCAL_EMBEDDING`（既存の opt-in）に加えて、
- * **このテストを走らせる前に `pnpm --filter @mnemora/core run build` と
- * `pnpm --filter @mnemora/local-embedding run build` が要る**——ステップ2は
- * `@mnemora/local-embedding` の**ビルド済み dist**を、公開されている入口
- * （`createLocalEmbeddingPipeline`）から読む別プロセスだからである（`src/pipeline.ts` を
- * 直接読む形にすると、直した対象が実際に消費者へ届く形になっているかまでは確かめられない）。
- * dist が無い・古いと、ステップ2はモジュール解決の失敗か、直す前の挙動で失敗する。
- *
- * **CI では走らない**（既存の opt-in と同じ。`MNEMORA_LIVE_LOCAL_EMBEDDING` を設定していない）。
+ * opt-in の条件・課金が発生しない理由は `live.local-embedding.test.ts` の docstring と同じ。
+ * ステップ2は `@mnemora/local-embedding` のビルド済み dist を公開の入口（`createLocalEmbeddingPipeline`）から読む別プロセスなので、走らせる前に `pnpm --filter @mnemora/core run build` と `pnpm --filter @mnemora/local-embedding run build` が要る（`src/pipeline.ts` を直接読むと、直した対象が消費者へ届く形になっているかは確かめられない）。dist が無い・古いと、モジュール解決の失敗か直す前の挙動で失敗する。
  */
 const live = (process.env.MNEMORA_LIVE_LOCAL_EMBEDDING ?? "") !== "";
 
@@ -69,7 +47,6 @@ describe("live: cacheDir だけで、オフラインで読めて埋め込みが�
     async () => {
       const cacheDir = await mkdtemp(path.join(tmpdir(), "mnemora-local-embedding-offline-"));
       try {
-        // 1. 温める（cold。本物のモデル一式を cacheDir へ落とす）。
         const spec: LocalEmbeddingModelSpec = {
           repo: DEFAULT_LOCAL_EMBEDDING_REPO,
           dtype: DEFAULT_LOCAL_EMBEDDING_DTYPE,
@@ -81,7 +58,6 @@ describe("live: cacheDir だけで、オフラインで読めて埋め込みが�
         expect(coldVectors).toHaveLength(1);
         expect(coldVectors[0]).toHaveLength(256);
 
-        // 2. まっさらな別プロセス・既定のキャッシュ空・ネットワーク無効で読む（"オフライン"）。
         const offline = await measureOfflineRead(cacheDir);
 
         // 報告に数字を持ち帰るため、有効桁を落とさずに出力する。

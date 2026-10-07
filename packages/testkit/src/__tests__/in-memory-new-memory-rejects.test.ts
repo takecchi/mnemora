@@ -3,12 +3,6 @@ import type { Ctx, NewMemory } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * ADR 0630: `InMemoryMemoryStore` の Memory の書き込みの口が、読み戻すと `MemorySchema` を通らない値を入口で拒む。
- * 全形を3口で縛るのは適合テスト（`memory-store-conformance.ts`。この fixture と Postgres に当たる）。ここは fixture 固有の
- * 内部状態（outbox・イベント）が進まないことと、範囲の境界（範囲外の欄・口を拒まない）を縛る。
- */
-
 const ctx: Ctx = { tenantId: "in-memory-new-memory" };
 
 async function setup() {
@@ -106,7 +100,6 @@ describe("InMemoryMemoryStore: 拒むとき、Memory・outbox・イベント・�
 describe("InMemoryMemoryStore: 範囲外は拒まない（ADR 0630）", () => {
   it("createObservation は、attributes の値が文字列でなくても、この検査では拒まない（Observation は範囲外）", async () => {
     const { store } = await setup();
-    // 範囲外: Observation の書き込みにこの検査は掛からない（Memory と同じ形の attributes を渡しても、今までどおり書ける）。
     await expect(
       store.createObservation(
         ctx,
@@ -115,7 +108,6 @@ describe("InMemoryMemoryStore: 範囲外は拒まない（ADR 0630）", () => {
     ).resolves.toBeDefined();
   });
 
-  // 変異試験（2026-10-06）: createObservationWithOutbox に「attributes の値が文字列以外なら拒む」を足す変異が生き残った。
   it("createObservationWithOutbox も、attributes の値が文字列でなくても、この検査では拒まない", async () => {
     const { store } = await setup();
     await expect(
@@ -146,9 +138,7 @@ describe("InMemoryMemoryStore: 範囲外は拒まない（ADR 0630）", () => {
   });
 });
 
-// 独立確認（mgr-ceace21d）の後: supersede の入口の検査を対象の存在より前に出したとき、ADR 0630 の検査だけを先に
-// 呼ぶと、`digest: null` で supersede だけが `Error` になり、ほかの口（`TypeError`）と割れた。ADR 0630 の範囲外の節の表の
-// 「fixture は3口とも以前どおり `TypeError`」を縛る。
+// supersede の入口で ADR 0630 の検査だけを先に呼ぶと、`digest: null` で supersede だけが `Error` になり、ほかの口（`TypeError`）と割れる。ADR 0630 の範囲外の表の「fixture は3口とも以前どおり `TypeError`」を縛る。
 describe("InMemoryMemoryStore: 以前から拒む入力の例外の種類は、3口で揃う（ADR 0630）", () => {
   it.each([
     ["digest: null", { digest: null as never }],

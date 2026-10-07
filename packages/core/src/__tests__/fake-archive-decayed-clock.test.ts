@@ -3,24 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `FakeMemoryStore.archiveDecayed` の `opts.clock`（`ArchiveDecayedOptions.clock`、
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15）が、
- * `InMemoryMemoryStore.archiveDecayed`/`PostgresMemoryStore.archiveDecayed` と同じ
- * 意味論（`'wall'`/`'activity'`/`'either'` の2軸、`'either'` は AND）を実際に守って
- * いることを検査する歯。
- *
- * **`packages/testkit` の `memory-store-conformance.ts` の対象ではない。**
- * `FakeMemoryStore` は `packages/core` 自身の runtime テスト専用の別系統
- * （`fake-reinforce-monotonicity.test.ts` と同じ理由・同じ形）。
- *
- * Issue #768: 調査時、この Fake を `describeMemoryStoreConformance` へ一時的に通して
- * 見つけた食い違い（`archiveDecayed` が `opts.clock` を一切見ず、常に壁時計
- * （`decayFloorAt <= now`）だけで掃いていた）を、`runtime-fakes.ts` の
- * `archiveDecayed` に足した `passesClock`/`selectionOrder` の分岐で塞いだ。その塞ぎが
- * 実際に効いていることを、`memory-store-conformance.ts` の対応する3本の歯と同じ形で
- * ここに固定する。
- */
+/** `memory-store-conformance.ts` には足さない: `FakeMemoryStore` は core の runtime テスト専用の別系統のため。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 let contentHashCounter = 0;
@@ -59,7 +42,6 @@ describe("FakeMemoryStore.archiveDecayed の opts.clock（ADR 0165 決めたこ�
       ctx,
       newMemory({ decayFloorAt: now, decayFloorSeq: nowSeq - 1 }),
     );
-    // 境界そのもの（decayFloorSeq === nowSeq）も対象に含む——`<=`、境界を含む。
     const boundary = await memoryStore.createMemory(
       ctx,
       newMemory({ decayFloorAt: now, decayFloorSeq: nowSeq }),
@@ -68,8 +50,6 @@ describe("FakeMemoryStore.archiveDecayed の opts.clock（ADR 0165 決めたこ�
       ctx,
       newMemory({ decayFloorAt: now, decayFloorSeq: nowSeq + 1 }),
     );
-    // decayFloorSeq が NULL（この軸を使っていない）の行は 'activity' 単独では対象外
-    // （ADR 0165 決めたこと4「NULL はこの軸には床が無い」——掃引側も NULL を拾わない）。
     const nullSeq = await memoryStore.createMemory(ctx, newMemory({ decayFloorAt: now }));
 
     const result = await memoryStore.archiveDecayed(ctx, {
@@ -112,7 +92,6 @@ describe("FakeMemoryStore.archiveDecayed の opts.clock（ADR 0165 決めたこ�
       limit: 2,
     });
 
-    // 活動軸の昇順で 10, 20 が選ばれる。
     // ⛔ 壁時計の昇順なら seqThird（-3000）と seqSecond（-2000）が選ばれるはずで、
     //    この歯はそれを排除している。
     expect(new Set(result.archived.map((a) => a.memoryId))).toEqual(
@@ -121,7 +100,6 @@ describe("FakeMemoryStore.archiveDecayed の opts.clock（ADR 0165 決めたこ�
     expect((await memoryStore.get(ctx, seqThird.id))?.status).toBe("active");
     expect(result.reachedLimit).toBe(true);
 
-    // 返り値の並びは decayFloorAt 昇順のまま（選び方とは別の契約）。
     expect(result.archived.map((a) => a.memoryId)).toEqual([seqSecond.id, seqFirst.id]);
   });
 

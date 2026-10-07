@@ -7,11 +7,6 @@ import {
 } from "@mnemora/postgres";
 import { DETERMINISTIC_EMBEDDING_SPACE } from "../providers.js";
 
-/**
- * examples/chat のテストは本物の Postgres + pgvector に接続して実行する
- * （packages/postgres/src/__tests__/test-db.ts と同じ理由・同じ規約。PR 本文
- * 「⚠ 擬似物のほうが本物より偶然厳しいことがある」を踏まえ、擬似物では代替しない）。
- */
 export function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
   if (!url) {

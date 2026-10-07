@@ -8,14 +8,6 @@ import {
   extractGoalStatements,
 } from "../north-star-default-probe-lib.mjs";
 
-/**
- * `scripts/north-star-default-probe-lib.mjs` の歯（Issue #387 / ADR 0216 決定7「段1」）。
- *
- * `north-star-default-probe.mjs`（実際に `Runtime` を組んで観測する側）は、ここでは
- * 走らせない——`association-summary.mjs`/`-lib.mjs` と同じ分担で、この歯が見るのは
- * 純関数（登録簿の突き合わせ・ADOPTER-SUPPLIED の集計・Markdown 組み立て）だけである。
- */
-
 const CANON_GOAL_MARKDOWN = `# north star
 
 ## 目指す姿
@@ -43,7 +35,6 @@ describe("NORTH_STAR_ITEM_REGISTRY", () => {
 
   it("類は甲・乙・丙のいずれかで、ADR 0216 決定1の割り当てと一致する", () => {
     const byItem = new Map(NORTH_STAR_ITEM_REGISTRY.map((entry) => [entry.item, entry.class]));
-    // ADR 0216 決定1: 甲 = 1・2・5・6 / 乙 = 7 / 丙 = 3・4。
     expect(byItem.get(1)).toBe("甲");
     expect(byItem.get(2)).toBe("甲");
     expect(byItem.get(3)).toBe("丙");
@@ -110,9 +101,7 @@ describe("buildRegistryReport", () => {
   it("正典側に登録簿に無い項目があれば unassignedCanonStatements に出る（推測で埋めない）", () => {
     const report = buildRegistryReport(["文面A", "文面C（新項目）"], registry);
     expect(report.unassignedCanonStatements).toEqual(["文面C（新項目）"]);
-    // 「文面B」は正典に無いので missing 側に出る。
     expect(report.registryEntriesMissingFromCanon.map((e) => e.item)).toEqual([2]);
-    // foundInCanon は文面Aの行だけ true。
     const rowByItem = new Map(report.rows.map((row) => [row.entry.item, row.foundInCanon]));
     expect(rowByItem.get(1)).toBe(true);
     expect(rowByItem.get(2)).toBe(false);
@@ -184,7 +173,6 @@ describe("buildSummaryMarkdown", () => {
     { item: 7, mode: "measured", fact: "観測7の事実。" },
   ];
 
-  /** 段1相当のダミー `stage`（このテストでは文面の逐語一致は見ない）。 */
   const stage1 = {
     label: "段1",
     scopeNote:
@@ -262,10 +250,7 @@ describe("buildSummaryMarkdown", () => {
       adopterSuppliedTally: new Map(),
       generatedAt: "2026-09-25T00:00:00.000Z",
     });
-    // 冒頭の断り・ADOPTER-SUPPLIED節は、方針そのもの（ADR 0216 決定4-2の逐語）を
-    // 説明するために「半分」等の語を自己言及として含みうる——それは判定として書いて
-    // いることとは違う。判定語が実際に混ざってはいけないのは、項目ごとの事実を書く
-    // 「## 観測」セクションであり、ここだけを切り出して見る。
+    // 冒頭の断りは自己言及として判定語を含みうるので、項目ごとの事実を書く「## 観測」だけを見る。
     const observationsStart = markdown.indexOf("## 観測");
     const observationsEnd = markdown.indexOf("## ADOPTER-SUPPLIED");
     expect(observationsStart).toBeGreaterThan(-1);
@@ -273,7 +258,6 @@ describe("buildSummaryMarkdown", () => {
     const observationsSection = markdown.slice(observationsStart, observationsEnd);
     expect(observationsSection).not.toContain("満たす");
     expect(observationsSection).not.toContain("半分");
-    // 「在る6 / 半分1」のような件数を焼き込まない。
     expect(observationsSection).not.toMatch(/在る\d/);
   });
 
@@ -320,7 +304,6 @@ describe("buildSummaryMarkdown", () => {
     });
     expect(markdown).toContain("🔴（印字に失敗した）");
     expect(markdown).toContain("印字に失敗した: 何かの理由");
-    // 他の項目は無傷で残っている（全体が落ちていないことの印字側の証拠）。
     expect(markdown).toContain("観測1の事実。");
     expect(markdown).toContain("観測7の事実。");
   });

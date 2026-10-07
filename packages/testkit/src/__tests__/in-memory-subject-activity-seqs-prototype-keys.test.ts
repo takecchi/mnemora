@@ -2,11 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 
-/**
- * ADR 0472: InMemoryTenantSettingsStore.getSubjectActivitySeqs が、`Object.prototype` のキー名の
- * subjectId（`__proto__` を含む）の行の値を落とさず、行の無い subject のキーを作らない
- * （Postgres 実装と同じ。直す前は、プレーンな `{}` への `out["__proto__"] = n` が黙って捨てられた）。
- */
 const ctx: Ctx = { tenantId: "t1" };
 const KEYS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 

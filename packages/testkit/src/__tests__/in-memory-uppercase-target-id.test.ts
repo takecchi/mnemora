@@ -10,15 +10,6 @@ import { InMemoryRelationStore } from "../__fixtures__/in-memory-relation-store.
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-// ADR 0521: `InMemoryMemoryStore`（と `InMemoryVectorStore`・`InMemoryRelationStore`・`InMemoryEventStore`）も、操作の対象の
-// id の大文字小文字を区別しない——`@mnemora/postgres` が uuid 型の列で比べる・入口で `normalizeUuidCase` を掛けるのに揃えた
-// （ADR 0446 が「既存の違い」としていた点。ADR 0469・0475 はイベントの指し先だけを揃えていた）。
-//
-// 各 `it`: 大文字にした id を渡した操作が、小文字の id と同じ結果になること（状態・積まれるイベントの `memoryId` が小文字）。
-// 3実装の突き合わせは `packages/postgres/src/__tests__/uppercase-target-id-parity.postgres.test.ts`。
-// この fixture の id は小文字の `mem-N` だけで、小文字にそろえても別の id と混ざらない。
-// `*-conformance.ts` には何も足していない（ADR 0434 決定5。約束を足すのはオーナーの判断）。
-
 const ctx: Ctx = { tenantId: "inmemory-uppercase-target" };
 const SPACE = { provider: "test", model: "uppercase", dimensions: 3 };
 const T0 = new Date("2026-06-01T00:00:00.000Z");
@@ -262,8 +253,7 @@ describe("InMemoryMemoryStore: 大文字の対象 id を同じ記憶として受
     const prefix = stored.id.slice(0, -1) as never;
     expect(prefix).not.toBe(stored.id);
     expect(await stores.eventStore.get(ctx, prefix)).toBeNull();
-    // 先頭の1字を落とした形（`endsWith` なら当たる）と、末尾に1字足した形（保存した id で始まる長い id。
-    // `lowered.startsWith(e.id)` なら当たる）も、等しくないので null（ADR 0593）。
+    // 先頭の1字を落とした形（`endsWith` なら当たる）と、末尾に1字足した形（`lowered.startsWith(e.id)` なら当たる）も、等しくないので null。
     const suffix = stored.id.slice(1) as never;
     const longer = `${stored.id}0` as never;
     expect(await stores.eventStore.get(ctx, suffix)).toBeNull();

@@ -4,14 +4,6 @@ import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * ADR 0426 の確かめ直し（Issue #1734、PR #1529）で見つかった穴の歯。
- *
- * 1. subject ごとの行をすべて消したら、テナントの入れ物（`subjectActivitySeq` の外側の Map のエントリ）も消える。
- * 2. `dryRun` は何も消さない——冪等キー（`extractionIndex`）も消さない。
- * 3. `onMemoriesDeleted` は listener を足していく。`InMemoryVectorStore` を2つ（別の space を持つなど）
- *    同じ `InMemoryMemoryStore` に載せたら、どちらの埋め込みも消える。
- */
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 2 };
 
 describe("InMemoryMemoryStore.eraseTenant（ADR 0426）の確かめ直し", () => {

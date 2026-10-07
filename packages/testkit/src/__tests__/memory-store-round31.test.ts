@@ -7,7 +7,6 @@ import {
 } from "../fixtures.js";
 import { describeRound31Teeth, type Round31Kit } from "./memory-store-round31-teeth.js";
 
-/** 31巡目（ADR 0458）: `InMemoryMemoryStore` に当てる。本文は memory-store-round31-teeth.ts（PG と同じ）。 */
 async function makeKit(): Promise<Round31Kit> {
   const store = new InMemoryMemoryStore();
   const settings = new InMemoryTenantSettingsStore(

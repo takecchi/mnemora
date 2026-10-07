@@ -5,19 +5,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
-/**
- * `scripts/recall-footprint-calibration-samples-summary.mjs` の歯(Issue #340
- * フォローアップ、ADR 0314)。**本物のスクリプトを子プロセスとして実際に起動する**
- * (`scripts/__tests__/consolidation-cost-summary.test.mjs` と同じ判断)——
- * `recall-footprint-calibration-samples-summary-lib.test.mjs` は純関数だけを見ており、
- * 「CLI としての配線」(引数の読み方・ファイル I/O・exit code)はここでしか測れない。
- *
- * DB は要求しない——このスクリプトは JSON ファイル1〜2個を読むだけである。
- *
- * ⛔ この bench の基準値ファイルはまだ存在しない(ADR 0314 §2)。ここで使う
- * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
- */
-
 const script = fileURLToPath(
   new URL("../recall-footprint-calibration-samples-summary.mjs", import.meta.url),
 );

@@ -5,14 +5,6 @@ import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * `MemoryEventKind` に無い kind のイベントを、testkit の fixture も Postgres と同じく拒む（Issue #1096）。
- * Postgres は CHECK 制約 `memory_events_kind_check` で拒み、1トランザクションで何も書かない。
- *
- * 2実装を並べた歯は `packages/postgres/src/__tests__/memory-events-kind-check.postgres.test.ts`
- * （DB が要る）。ここは DB 無しで走る側の歯である。
- */
-
 const ctx: Ctx = { tenantId: "event-kind-check" };
 
 function eventWithKind(memoryId: string, kind: string): NewMemoryEvent {
@@ -74,8 +66,6 @@ describe("testkit の fixture は MemoryEventKind に無い kind を拒む", () 
   });
 });
 
-// #1170: 残りの口（purgeMemory・resolveContestedPair・resolveOrphanedContested・supersedeWithNewMemories・
-// markContestedPair の1件目）も、不正な kind を拒み、何も書かない。
 describe("testkit の fixture は、イベントを書く残りの口でも MemoryEventKind に無い kind を拒む", () => {
   const KIND_MESSAGE = /memory_events\.kind must be one of/;
 
@@ -225,7 +215,6 @@ describe("testkit の fixture は、イベントを書く残りの口でも Memo
       await expect(
         store.purgeMemory(ctx, "mem-missing", tombstone, eventWithKind("mem-missing", "bogus")),
       ).rejects.toThrow(/memory not found/);
-      // active のままの行は forgotten ではないので、purge の CAS に弾かれる。
       await expect(
         store.purgeMemory(ctx, m.id, tombstone, eventWithKind(m.id, "bogus")),
       ).rejects.toThrow(MemoryPurgeConflictError);
@@ -268,7 +257,6 @@ describe("testkit の fixture は、イベントを書く残りの口でも Memo
           },
         ),
       ).rejects.toThrow(/memory not found/);
-      // a・b は contested ではないので、CAS に弾かれる。
       await expect(
         store.resolveContestedPair(
           ctx,
@@ -293,7 +281,6 @@ describe("testkit の fixture は、イベントを書く残りの口でも Memo
           event: eventWithKind("mem-missing", "bogus"),
         }),
       ).rejects.toThrow(/memory not found/);
-      // m は contested ではないので、CAS に弾かれる。
       await expect(
         store.resolveOrphanedContested(ctx, {
           id: m.id,

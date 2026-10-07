@@ -1,9 +1,3 @@
-// ADR 0051: 記録した実 API の応答を再生する provider の歯。
-//
-// **ここで固定したい振る舞いは1つに尽きる**——「記録に無いものを訊かれたら、
-// 黙って何かを返さずに落ちる」。カセットの価値は「本物と同じ数字が出る」ことにあり、
-// 一部が擬似物で埋まった出力は、どの行が信用できるかを誰にも分からなくする。
-
 import type { Ctx, EmbeddingProvider, LLMProvider, PromptSpec } from "@mnemora/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -25,7 +19,6 @@ const ctx: Ctx = { tenantId: "cassette-test" };
 
 const SPACE = { provider: "openai", model: "text-embedding-3-small", dimensions: 3 } as const;
 
-/** 実 provider の代わり。記録側の歯では「本物」の位置に置く。 */
 class StubEmbeddingProvider implements EmbeddingProvider {
   readonly space = SPACE;
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
@@ -49,7 +42,6 @@ const PROMPT: PromptSpec = {
   messages: [{ role: "user", content: "私の好きな色は青です。" }],
 };
 
-/** 記録 → カセット化 → 再生、の往復を1回分作る。 */
 async function recordRoundTrip(): Promise<Cassette> {
   const recorder = new CassetteRecorder();
   const embedding = new RecordingEmbeddingProvider(new StubEmbeddingProvider(), recorder);
@@ -124,7 +116,6 @@ describe("RecordedEmbeddingProvider（ADR 0051）", () => {
   it("記録されたベクトルの次元が空間と食い違えば、「記録に無い」とは別の理由で落ちる", async () => {
     const cassette = await recordRoundTrip();
     const key = Object.keys(cassette.embedding.entries)[0] as string;
-    // 記録は在るが中身が壊れている、という状態を作る。
     (cassette.embedding.entries[key] as { vector: number[] }).vector = [1, 2];
     const replay = new RecordedEmbeddingProvider({ section: cassette.embedding });
     const text = cassette.embedding.entries[key]?.text as string;
@@ -147,7 +138,6 @@ describe("RecordedLLMProvider（ADR 0051）", () => {
   it("記録以降にスキーマが変わっていたら、「記録に無い」とは別の理由で落ちる", async () => {
     const cassette = await recordRoundTrip();
     const replay = new RecordedLLMProvider({ section: cassette.llm });
-    // 記録した時点には無かった必須欄をスキーマに足す＝記録が新スキーマを満たさない。
     const tightened = z.object({
       memories: z.array(z.object({ content: z.string(), digest: z.string() })),
     });

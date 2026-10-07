@@ -4,19 +4,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * ADR 0478: `examples/chat/README.md` の節「フラグと環境変数の一覧」が載せると決めたフラグ・環境変数が、
- *   (1) README に在ること、(2) `examples/chat/src`（テストを除く）が実際に読んでいること、を縛る。
- *
- * ⚠ **全集合の一致は縛らない。**ソースが読む環境変数のうち、`src/scripts/*`・`src/bench/*` の単発の測定スクリプトだけが
- * 読むもの（`MEASURE_*` など）は、README が網羅しないと決めている（ADR 0478 の基準）。全集合を縛ると内部用まで載せることになる。
- * 載せるものを増やしたら、下の表にも足すこと。ソースから消えた変数を README が載せ続けていたら (2) が赤になる。
+ * 全集合の一致は縛らない（縛ると、単発の測定スクリプトだけが読む内部用の変数まで README に載せることになる。ADR 0478）。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const readme = readFileSync(join(repoRoot, "examples/chat/README.md"), "utf8");
 
 const SECTION_HEADING = "## フラグと環境変数の一覧";
-/** 節の本文（見出しから次の `## ` まで）。 */
 function section() {
   const start = readme.indexOf(SECTION_HEADING);
   if (start < 0) return "";
@@ -25,7 +19,6 @@ function section() {
   return next < 0 ? rest : rest.slice(0, next);
 }
 
-/** 載せると決めたフラグ・環境変数（ADR 0478）。 */
 const FLAGS = ["--trials", "--temperature", "--dev"];
 const ENV_VARS = [
   "MNEMORA_TIME_WEIGHTING_JSON",
@@ -50,7 +43,6 @@ const ENV_VARS = [
   "MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS",
 ];
 
-/** `examples/chat/src` の、テスト（`__tests__`）を除く `.ts` の本文を連結する。 */
 function readSources() {
   const out = [];
   const walk = (dir) => {
@@ -66,10 +58,7 @@ function readSources() {
 }
 const sources = readSources();
 
-/**
- * `cli.ts` の `printHelp` の本文（usage = `--help` の出力の元）。
- * `cli.ts` は末尾で `main()` を無条件に実行するので import できない。ソースの文字列として切り出す。
- */
+/** `cli.ts` は末尾で `main()` を無条件に実行するので import できない。ソースの文字列として切り出す。 */
 function readUsageSource() {
   const cli = readFileSync(join(repoRoot, "examples/chat/src/cli.ts"), "utf8");
   const start = cli.indexOf("function printHelp(");
@@ -98,8 +87,6 @@ describe("examples/chat/README.md の節「フラグと環境変数の一覧」�
     expect(sources).toContain("MEASURE_N");
   });
 
-  // ADR 0501（ADR 0478 負債1）: README の節に載せた利用者向けのものは、usage（--help）にも出ていること。
-  // 内部用（MEASURE_N など）は usage に載せない。
   it("陽性対照: usage の本文を切り出せている（既に usage にある変数と、サブコマンド名が在る）", () => {
     expect(usage.length).toBeGreaterThan(500);
     expect(usage).toContain("MNEMORA_ANSWER_TRIALS_N");

@@ -2,28 +2,8 @@ import type { MemoryStore, Runtime, TenantSettingsStore } from "@mnemora/core";
 import { describe, expect, it, vi } from "vitest";
 import { runComparison } from "../compare.js";
 
-/**
- * `runComparison()` に `decayClock` を渡したときだけ `writeDecayClock`
- * （`@mnemora/core`。実体は `store.setDecayClock`）が呼ばれることを、DB/LLM/embedding を
- * 実物で叩かずに検査する（ADR 0165 決めたこと11）。
- *
- * **`consolidation-cost-abort.test.ts` と同じやり方**——`CompareOptions` の
- * `memoryStore` を最小の偽物で埋め、`Runtime` も最小の偽物を注入して
- * `runComparison()` を直接呼ぶ。`recall()` が `memories: []` を返すことで
- * `factStatementSurvived`（→ `memoryStore.get`/`getObservation`）が呼ばれない
- * 経路を選んでいるため、`memoryStore` は一切実装しなくてよい。
- */
-
 function buildFakeRuntime(): Runtime {
   let nextObserveId = 0;
-  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
-  // 後: 実物の `Runtime` は「`observe()` が積んだ embed ジョブを `tick()` が処理する」
-  // という契約を持つ（`packages/core/src/runtime.ts` — outbox 経由）。この偽 `Runtime`
-  // はその契約を無視して `tick` が常に `processed: 0` を返していたため、
-  // `ingestConversation`（`runComparison` → `runMnemoraPath` 経由）が渡す
-  // `expectedProcessed`(= 積んだ件数)と噛み合わず、実際には何も壊れていないのに
-  // `drainEmbedTicks` が例外を投げていた。⟹ `observe()` が積んだ件数を `tick()` が
-  // 消化して返す、最小限の契約通りの偽物に直す。
   let pendingEmbedJobs = 0;
   const observe: Runtime["observe"] = async () => {
     nextObserveId += 1;
@@ -61,8 +41,6 @@ function buildFakeRuntime(): Runtime {
 }
 
 function buildFakeMemoryStore(): MemoryStore {
-  // `recall()` が `memories: []` を返すため、`factStatementSurvived` の
-  // `resolveExternalId` は一度も呼ばれない(ループが空)——実装は不要。
   return {} as unknown as MemoryStore;
 }
 

@@ -20,17 +20,7 @@ import {
   GENERATED_END_MARKER,
 } from "../generate-adr-index-lib.mjs";
 
-/**
- * `scripts/ci-green-check.mjs` の、`gh` を呼んだ後の経路（Issue #294・ADR 0191、Issue #1815 の確かめ直し）。
- *
- * 既存の `ci-green-check.test.mjs` は「`gh` を呼ぶ前に決着する引数検査」だけを見ており、判定の配線
- * （どの `gh` を呼び、結果を `verdict()` へ渡し、exit code と `--match-head-commit` のコマンドへ落とすか）は
- * 誰も走らせて見ていなかった。実 `gh` に依存すると「歯が赤い」のか「`gh` が届かない」のか区別がつかない
- * ので、**偽の `gh`（node スクリプト）を PATH の先頭に置く**——ネットワーク・認証に依存しない。
- * 偽の `gh` は呼ばれた引数を記録し、設定（JSON）に沿った応答を返す。
- *
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
+/** 偽の `gh`（node スクリプト）を PATH の先頭に置く。実 `gh` だと、歯が赤いのか `gh` が届いていないのかを区別できない。 */
 
 const script = fileURLToPath(new URL("../ci-green-check.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -96,7 +86,6 @@ function run(args, cfg, { sandbox = null } = {}) {
   writeFileSync(join(dir, "cfg.json"), JSON.stringify({ log, sha: SHA, ...cfg }));
   let scriptPath = script;
   if (sandbox) {
-    // 道具を一時ディレクトリへ写し、その `docs/decisions` を「呼び出し側の作業木」にする（索引の鮮度の相乗りを見るため）
     const sdir = join(dir, "sandbox");
     mkdirSync(join(sdir, "scripts"), { recursive: true });
     mkdirSync(join(sdir, "docs/decisions"), { recursive: true });

@@ -6,14 +6,6 @@ import {
   applyRetentionMutation,
 } from "../answer-retention-mutation.js";
 
-/**
- * `applyRetentionMutation`（回答評価の陽性対照の変異、Issue #498 完了条件4、PR #700）の単体試験。DB 不要。
- *
- * 再生の歯（`answer-retention-positive-control.postgres.test.ts`）は、対象が見つかる正常な入力でしか
- * この関数を呼ばず、「見つからなければ・`messages` が空なら投げる」（約束2）を見ていなかった
- * （Issue #1776 の #700 のコメント、ADR 0665）。
- */
-
 const TARGET = RETENTION_MUTATION_TARGET_SUBSTRING;
 
 describe("applyRetentionMutation", () => {

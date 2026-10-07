@@ -13,26 +13,15 @@ import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
 /**
- * Issue #1080: API キーの途中に CR・LF・NUL が入っていると、Node の `fetch` はヘッダを組む
- * 段階で `TypeError: Headers.append: "Bearer <キー全体>" is an invalid header value.` を投げる。
- * adapter はこれをそのまま伝播していたので、キー全体が `observe` の
- * `extractionFailure.message` と outbox の `lastError`（Postgres では DB に保存される）に
- * 残っていた。
- *
- * 直した後は、adapter の構築時に、SDK が組むのと同じヘッダの値を `Headers` に通して確かめ、
- * 通らなければ**キーを含まない**例外を投げる。`Headers` が受け付ける値（末尾の空白・改行、
- * 途中の TAB など）は、これまでどおり受け付ける（狭めない）。
- *
+ * adapter の構築時に、SDK が組むのと同じヘッダの値を `Headers` に通して確かめ、通らなければキーを含まない例外を投げる。`Headers` が受け付ける値（末尾の空白・改行、途中の TAB など）は狭めない。
  * ここで使うキーは実在しない、この歯のためだけの文字列である。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const BROKEN_KEY = "sk-zq9X7vK2pL\nW8mR4tY6";
 
-/** キーの断片（制御文字で区切った各部分の、4文字の窓すべて）。 */
 function keyFragments(key: string): string[] {
   const fragments: string[] = [];
-  // 制御文字（U+0000〜U+001F・U+007F）で区切る。
   const parts = [...key]
     .map((ch) => (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f ? "\n" : ch))
     .join("")
@@ -53,7 +42,6 @@ function expectNoKeyFragment(text: string | null | undefined, key: string): void
   }
 }
 
-/** SDK（`openai`）は `Authorization: Bearer <key>` を送る。 */
 function headerAccepts(key: string): boolean {
   try {
     new Headers().append("authorization", `Bearer ${key}`);
@@ -63,8 +51,7 @@ function headerAccepts(key: string): boolean {
   }
 }
 
-// 万一ヘッダの検査を抜けても、外へは出ない先にしておく（送信の前に失敗するので、実際には
-// どこにも接続しない）。
+// 万一ヘッダの検査を抜けても、外へは出ない先にしておく（送信の前に失敗するので、実際にはどこにも接続しない)。
 const ORIGINAL_BASE_URL = process.env.OPENAI_BASE_URL;
 beforeAll(() => {
   process.env.OPENAI_BASE_URL = "http://127.0.0.1:9/v1";
@@ -78,7 +65,6 @@ afterAll(() => {
 });
 
 describe("@mnemora/openai: ヘッダに載せられない API キーは、キーを含まない例外で構築時に拒む（Issue #1080）", () => {
-  /** 修正前の経路: 構築は通り、呼び出しの時点でキーを含む例外が core へ届く。 */
   function buildRuntimeOrConstructionError() {
     try {
       const llmProvider = new OpenAILLMProvider({ apiKey: BROKEN_KEY, model: "gpt-test" });

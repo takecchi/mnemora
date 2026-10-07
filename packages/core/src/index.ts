@@ -49,7 +49,7 @@ export * from "./claim-key.js";
 export * from "./runtime.js";
 export * from "./recall-runtime.js";
 export * from "./recall-output-validation.js";
-// Issue #210 / ADR 0115: 明示呼び出し専用（`runtime.tick`/`observe` には配線しない）。
+// 明示呼び出し専用（`runtime.tick`/`observe` には配線しない。ADR 0115）。
 export * from "./event-retention-purge.js";
-// Issue #1207 / ADR 0383: 同上、明示呼び出し専用（`runtime.tick`/`observe` には配線しない）。
+// 同上（ADR 0383）。
 export * from "./erase-tenant.js";

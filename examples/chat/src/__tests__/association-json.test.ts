@@ -2,13 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { AssociationArmReport } from "../association-arm.js";
 import { buildAssociationProbeRunJson } from "../association-json.js";
 
-/**
- * Issue #291: `association-json.ts` の出力口。DB もネットワークも要らない(純関数)。
- *
- * ⭐ この JSON のキー名は確定しており、別担当の summary スクリプトが前提にしている
- * ——ここでは形(キーの有無・値の導出)だけを見る。
- */
-
 function minimalArmReport(overrides: Partial<AssociationArmReport> = {}): AssociationArmReport {
   return {
     armLabel: "off",
@@ -182,7 +175,6 @@ describe("buildAssociationProbeRunJson", () => {
       memoryCharsTotal: 400,
       charsPerAdditionalGold: 100,
     });
-    // on5 は off と同値(goldReturnedCount の差分が0) ⟹ charsPerAdditionalGold は null。
     expect(deltaOn5).toEqual({
       baselineArmLabel: "off",
       againstArmLabel: "on5",

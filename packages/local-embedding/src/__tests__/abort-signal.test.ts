@@ -3,12 +3,6 @@ import type { Ctx } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 import type { CreateLocalEmbeddingPipeline, LocalEmbeddingPipeline } from "../pipeline.js";
 
-/**
- * [Issue #1200](https://github.com/takecchi/mnemora/issues/1200) /
- * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md):
- * `LocalEmbeddingProvider.embed` は推論（`pipeline.embed`）の途中では止まらない
- * ——推論の前後で `signal.throwIfAborted()` 相当を確かめるだけである。
- */
 const ctx: Ctx = { tenantId: "test-tenant" };
 
 function fakeLocalEmbeddingPipeline(
@@ -85,19 +79,14 @@ describe("LocalEmbeddingProvider — AbortSignal", () => {
     promise.catch(() => {
       settled = true;
     });
-    // `pipeline.embed` が実際に呼ばれ、`resolveEmbed` が埋まるまで待つ（モデルの読み込みの
-    // await を挟むため、この時点では abort していない——推論そのものが「途中」にある状態を
-    // 作ってから abort する）。
+    // モデルの読み込みの await を挟むため、`pipeline.embed` が実際に呼ばれて pending になるまで待ってから abort する。
     while (resolveEmbed === undefined) {
       await new Promise((r) => setTimeout(r, 0));
     }
-    // 推論の「途中」で abort する——`pipeline.embed` 自体はまだ pending のまま。
     controller.abort();
-    // 推論が終わる前は、まだ reject していない（止めていない証拠）。
     await new Promise((r) => setTimeout(r, 10));
     expect(settled).toBe(false);
 
-    // 推論が終わる。ここで初めて abort 済みであることが効き、正常なベクトルの代わりに reject する。
     resolveEmbed!([[1, 2]]);
     await expect(promise).rejects.toBe(controller.signal.reason);
   });

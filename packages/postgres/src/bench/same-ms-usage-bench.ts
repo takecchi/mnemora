@@ -1,105 +1,22 @@
 #!/usr/bin/env node
 /**
- * Issue #730 のための実測ベンチ（テストではなくスクリプト。CI には乗らない。
- * `pnpm --filter @mnemora/postgres run bench:same-ms-usage`）。
+ * `PostgresMemoryStore.reinforce` の WHERE 句（`last_reinforced_at IS NULL OR last_reinforced_at < at`、ADR 0048）は、
+ * 等しい `at` での2回目の強化を例外にせず黙って何もしない。同じミリ秒に2回の使用報告が来たとき、活動時計
+ * （`decay_clock = 'activity'`）側で `activity_seq` をどれだけ取り逃がすかを実測する手動ベンチ。テストではなく、CI には乗らない。
  *
- * ## 何を測るか
+ * 強化の口（`reinforce`・`reinforceMany`・`recordUsageAndReinforce`）だけ、引数と返り値を記録するためにインスタンス単位で
+ * 差し替える（`installReinforceSpy`）。挙動・公開 API・既定値は変えない。
  *
- * [Issue #730](https://github.com/takecchi/mnemora/issues/730): `PostgresMemoryStore.reinforce`
- * の WHERE 句は `last_reinforced_at IS NULL OR last_reinforced_at < at`（ADR 0048「起点を
- * 巻き戻さない」）。**等しい `at` での2回目の強化は、例外にならず黙って何もしない。**
- * `at` は `runtime.ts` の `handleMemoryUsage` が `clock.now()`（= `new Date()`、ミリ秒分解能）
- * から取る。Issue 本文は「実運用で踏むのは同じミリ秒に2回報告が来た場合だけ」と書いているが、
- * その頻度も、踏んだときに活動時計（`decay_clock = 'activity'`）側でどれだけ `activity_seq`
- * を取り逃がすかも、実測していなかった。本スクリプトはそれを実測する。
+ * 実行: `DATABASE_URL` が本物の Postgres + pgvector を指している状態で `pnpm --filter @mnemora/postgres run bench:same-ms-usage`。
+ * 試行回数は環境変数で調整できる（`DEFAULT_TRIALS`）。
  *
- * **挙動・公開 API・既定値は一切変えない。** `PostgresMemoryStore` の強化の口
- * （`reinforce`・`reinforceMany`・`recordUsageAndReinforce`）だけ、呼ばれた引数と返り値を
- * 記録するためにインスタンス単位で差し替える（`installReinforceSpy`、`./reinforce-spy.ts`）
- * ——プロトタイプもクラス定義も触らない。⚠ 2026-09-27: 以前は `reinforce` だけを差し替えて
- * いたため、#917（`reinforceMany`）以降は使用報告の強化を1件も記録していなかった
- * （下の「実測した結果」は 2026-09-25、#917 より前の実行なので、この不具合の影響を受けていない）。
+ * 結論の限界: 並行だと `at` の一致は起きるが、活動時計の `nowSeq` の取り逃がしは自然な同時実行では観測されなかった。
+ * 一方、`at` と `nowSeq` の順序を意図的に逆にすると必ず no-op になり差が失われる（機構としての害は実在する）。
+ * 「自然には起きなかった」を「起こりえない」と読み替えないこと。複数プロセス・ネットワーク越しの DB・イベントループが
+ * 詰まる環境は確かめていない。
  *
- * ## セクション
- *
- * 1. **時計の分解能**（DB 不要）: `Date.now()` を密なループで呼び、連続する呼び出しが
- *    同じ値を返る割合と、値が変わる刻み。`performance.now()` の最小刻みも併せて測る。
- * 2. **同じ Memory への reinforce の `at` が一致する頻度**（本物の Postgres が必要）:
- *    a. 同じ recall を2回報告（`recordUsage` の `ON CONFLICT DO NOTHING` で2回目が
- *       弾かれ、`reinforce` 自体が呼ばれないはず、を確認する——Issue #730 の対象とは
- *       別の安全弁である。**recallId が異なる2回の報告は、この安全弁の対象外**——
- *       それが (c)/(d) で測る本題）。
- *    b. 1回の報告で `usedMemoryIds` に同じ id が重複。
- *    c. 逐次: recall → 報告 → 直後に別の recall → 同じ Memory を報告。「LLM 呼び出しが
- *       無い最悪条件」と「LLM 相当の遅延を挟む現実の条件」の2通り。
- *    d. 並行: 同じテナントで N 本（既定 2/8/32）の recall→報告を `Promise.all` で同時に
- *       投げる。
- *    e. `restoreArchived` と使用報告が同じミリ秒に重なる形。
- *    f. （追加）強制的な逆順コミットの実演: 古い `at` を持つ書き込みを、新しい `at` の
- *       書き込みが確実に先にコミットしたあとに実行する——「自然な頻度」ではなく、
- *       「そのとき何が起きるか」を機械的に確かめるための決定的な再現。
- * 3. **害の見積もり**（活動時計テナント）: 一致・逆順が起きたときに、`decay_base_seq`/
- *    `decay_floor_seq` へ実際に書かれた値が、どちらの呼び出しの `nowSeq` だったか
- *    （＝取り逃がした seq の差）を、`reinforce` の返り値そのものではなく**最終状態を
- *    1回読み直して**判定する（並行実行では個々の呼び出しの返り値は「その呼び出しが
- *    見たコミット時点」のスナップショットに過ぎず、全呼び出しが終わったあとの
- *    最終状態とは限らないため）。
- *
- * ## 実行方法
- *
- * `DATABASE_URL` が本物の Postgres + pgvector を指している状態で:
- *
- * ```
- * pnpm --filter @mnemora/postgres run bench:same-ms-usage
- * ```
- *
- * 試行回数は環境変数で調整できる（既定値は下の `DEFAULT_TRIALS` 参照）。
- * 全体で数十秒〜数分かかる（同時実行数32の並行シナリオが最も重い）。
- *
- * ## 実測した結果（参考。既定の試行回数での1回の実行——【実測】2026-09-25、
- * ローカルの initdb 起動の Postgres 17 + pgvector、Node v22.23.3、CPU 48コア。
- * **この節は「どこかの正本の写し」ではなく、測った記録そのものである**——実行するたびに
- * 具体的な数は変わりうる。数の桁・傾向を掴むための参考であり、閾値として使わない）
- *
- * - **時計の分解能**: 密なループで `Date.now()` を300万回呼ぶと、連続する呼び出しの
- *   **99.99%が直前と同じ値を返した**（`sameAsPreviousRate`）。刻みはおよそ1msごと
- *   （235ms の間に224回変化）。`performance.now()` はサブマイクロ秒の分解能を持つ。
- * - **2a/2b（recordUsage の重複排除）**: 200試行とも、2回目は常に空——`reinforce` 自体が
- *   呼ばれない。Issue #730 の対象はここではなく、recallId が異なる2回の報告である。
- * - **2c（逐次、recall を挟む）**: wall / 活動時計のどちらも、LLM 呼び出しなしの
- *   最悪条件（300試行）・300ms のLLM相当の遅延あり（50試行）のいずれでも、
- *   **`at` の一致は1件も観測されなかった**——2回の DB 往復（recall・report）が
- *   自然に生む遅延だけで、ミリ秒境界を跨ぐのに十分だった。
- * - **2d（並行 N 本、活動時計）**: `at` の一致は N が増えるほど増える
- *   （N=2: 30試行中7ペア、N=8: 30試行中43/840ペア、N=32: 30試行中1027/14880ペア）——
- *   **並行だと実際に起こる。** ただし、一致した組・`at` が逆順だった組のどちらも、
- *   実際に活動時計の `nowSeq` を取り逃がした例は**1件も観測されなかった**
- *   （`lostSeqDeltasAtTie`/`lostSeqDeltasReverseOrder` はどのシナリオでも空）。
- * - **2e（restoreArchived との重なり）**: 100試行中2ペアで `at` が一致したが、
- *   ここでも seq の取り逃がしは観測されなかった。
- * - **2f（強制的な逆順コミット）**: `at` の順序と `nowSeq` の順序を意図的に逆にすると
- *   （古い `at`・大きい `nowSeq` を、新しい `at`・小さい `nowSeq` の後に書き込む）、
- *   **50試行すべてで確実に no-op になり、`nowSeq` の差（この実演では 400）がそのまま
- *   失われた。**機構としての害は実在し、100%再現する——ただし自然な同時実行
- *   （2c/2d/2e）ではこの `at`/`nowSeq` の逆転そのものが一度も起こらなかった、という
- *   のがここまでの実測である。
- *
- * **確かめていないこと**: 複数の Node プロセス・複数ホストからの同時アクセス、
- * ネットワーク越しの DB（本測定は localhost）、GC 一時停止やイベントループの詰まりが
- * 大きい実運用下での `at`/`nowSeq` の逆転頻度。2f が示すとおり機構としての害は実在する
- * ため、この実測の「自然には起きなかった」を「起こりえない」と読み替えないこと。
- *
- * ## 引き受けた簡略化
- *
- * - シナリオ (a)/(b)/(e)/(f) と害の見積もりは、`runtime.recall()`（ANN 経路）を通さず
- *   `PostgresMemoryStore.createRecall` を直接呼んで recall 行を作る——`handleMemoryUsage`
- *   が触るのは `recalls.id` への外部キーだけであり、その行が ANN 経由か直接書き込みかは
- *   `reinforce`/`recordUsage` の挙動に影響しない（読んだコードの範囲での判断。実測で
- *   両経路の差を確かめてはいない）。
- * - シナリオ (c)/(d) は「examples/chat の会話ループに近い形」を要求されたため、
- *   `runtime.recall()` を実際に通す。単一の Memory を固定ベクトルで埋め込み、
- *   クエリも同じ固定ベクトルを渡すことで、毎回同じ Memory が確実に返る形にしている
- *   （意味のある近傍探索は測っていない——測っているのは reinforce の競合だけ）。
+ * 簡略化: シナリオ (a)/(b)/(e)/(f) は ANN 経路を通さず `createRecall` を直接呼ぶ（`handleMemoryUsage` が触るのは
+ * `recalls.id` への外部キーだけ。両経路の差は実測していない）。(c)/(d) は `runtime.recall()` を通し、固定ベクトルで毎回同じ Memory を返す。
  */
 
 import { performance } from "node:perf_hooks";
@@ -114,10 +31,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { installReinforceSpy, type ReinforceCallLog } from "./reinforce-spy.js";
-
-// ---------------------------------------------------------------------------
-// 設定
-// ---------------------------------------------------------------------------
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -162,10 +75,6 @@ const BENCH_EMBEDDING_SPACE: EmbeddingSpaceId = {
 };
 const FIXED_VECTOR = [1, 0, 0];
 const LLM_GAP_MS = envInt("BENCH_LLM_GAP_MS", 300);
-
-// ---------------------------------------------------------------------------
-// 共通の下ごしらえ
-// ---------------------------------------------------------------------------
 
 function throwingLlm(): LLMProvider {
   return {
@@ -221,10 +130,7 @@ function buildRig(client: PostgresClient): Rig {
   const memoryStore = new PostgresMemoryStore(client.db);
   const vectorStore = new PostgresVectorStore(client.db);
   const tenantSettingsStore = new PostgresTenantSettingsStore(client.db);
-  // `memoryStore.reinforce` を1回だけ差し替える(`installReinforceSpy` の doc コメント参照)。
-  // `createRuntime` へ渡すのは、この差し替え後の `memoryStore` インスタンス——
-  // `runtime.observe`/`runtime.restoreArchived` が内部で呼ぶ `deps.memoryStore.reinforce`
-  // は、この時点でこのインスタンスが持つメソッドを常に指す。
+  // `memoryStore.reinforce` は1回だけ差し替える（`installReinforceSpy`）。`createRuntime` には差し替え後のインスタンスを渡す。
   const reinforceSpy = installReinforceSpy(memoryStore);
   const runtime = createRuntime({
     memoryStore,
@@ -236,9 +142,7 @@ function buildRig(client: PostgresClient): Rig {
     llmProvider: throwingLlm(),
     embeddingProvider: throwingEmbeddingProvider(BENCH_EMBEDDING_SPACE),
     hashContent: (content: string) => `sha256(${content})`,
-    // clock は省略——systemClock（実時計、ミリ秒分解能）をそのまま使う。
-    // これは意図的: このベンチが測りたいのは「本物の壁時計の下で何が起きるか」であり、
-    // 偽の時計を注入すると測る対象そのものが消える。
+    // clock は省略して実時計（ミリ秒分解能）を使う。このベンチが測るのは本物の壁時計の下で起きることで、偽の時計を注入すると測る対象が消える。
   });
   return { memoryStore, vectorStore, tenantSettingsStore, runtime, reinforceSpy };
 }
@@ -307,10 +211,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ---------------------------------------------------------------------------
-// セクション1: 時計の分解能（DB 不要）
-// ---------------------------------------------------------------------------
-
 interface ClockResolutionResult {
   node: string;
   dateNow: {
@@ -328,7 +228,6 @@ interface ClockResolutionResult {
 }
 
 function measureClockResolution(samples: number): ClockResolutionResult {
-  // Date.now(): 連続する呼び出しが同じ値を返す割合。
   let dnSameCount = 0;
   let dnDistinct = 1;
   let dnPrev = Date.now();
@@ -344,7 +243,6 @@ function measureClockResolution(samples: number): ClockResolutionResult {
   }
   const dnElapsedMs = performance.now() - dnStart;
 
-  // performance.now(): 最小の正の刻み幅。
   let pnDistinct = 1;
   let pnPrev = performance.now();
   let minDiff = Number.POSITIVE_INFINITY;
@@ -374,10 +272,6 @@ function measureClockResolution(samples: number): ClockResolutionResult {
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// セクション2: シナリオ (a)/(b) — recordUsage の重複排除（reinforce に到達しない経路）
-// ---------------------------------------------------------------------------
 
 interface DedupResult {
   trials: number;
@@ -453,10 +347,6 @@ async function scenarioDuplicateIdInSingleReport(rig: Rig, trials: number): Prom
   };
 }
 
-// ---------------------------------------------------------------------------
-// セクション2: シナリオ (c)/(d) の共通処理 — 異なる recallId からの reinforce 競合
-// ---------------------------------------------------------------------------
-
 interface CollisionTrialOutcome {
   memoryId: string;
   calls: ReinforceCallLog[];
@@ -465,37 +355,20 @@ interface CollisionTrialOutcome {
 }
 
 /**
- * `calls`(同じ Memory に対する `reinforce` 呼び出しの列)を集計する。
- *
- * **`at` が一致するペアの数**（Issue #730 が指す形そのもの）と、**害（活動時計の
- * seq を実際に取り逃がしたか）を分けて数える**——`at` が一致しても害が出るとは
- * 限らない(誰かの書き込みが結果的に勝てば、その nowSeq が正しく残る)。害は
- * **呼び出し単位**で判定する: その呼び出しの `nowSeq` が、最終的に残った
- * `decay_base_seq` より大きいのに反映されていない場合だけが実害である
- * (`nowSeq` が最終値以下なら、そもそも取り逃がしていない——最終値のほうが
- * 進んでいるだけ)。
- *
- * `at` が一致しない場合の害(古い `at` が、より新しい `at` の後にコミットされて
- * no-op になった側の呼び出しが、たまたま大きい `nowSeq` を持っていた場合)も、
- * **同じ「呼び出し単位で `nowSeq` > 最終 `decay_base_seq`」の基準**で数える——
- * 逐次シナリオ(c)の通常経路(at も nowSeq も両方単調に増える)では、古い呼び出しが
- * 負けるのは当たり前で、それ自体は害ではない。害として数えるべきは、
- * **`at` の順序と `nowSeq` の順序が食い違った**ときだけである。
+ * `calls`（同じ Memory に対する `reinforce` 呼び出しの列）を集計する。`at` が一致するペアの数と、害（活動時計の seq を
+ * 実際に取り逃がしたか）を分けて数える。害は呼び出し単位で判定し、その呼び出しの `nowSeq` が最終的に残った
+ * `decay_base_seq` より大きいのに反映されていない場合だけを数える。`at` も `nowSeq` も単調に増える通常経路で古い呼び出しが
+ * 負けるのは害ではなく、`at` の順序と `nowSeq` の順序が食い違ったときだけが害になる。
  */
 interface CollisionStats {
   memoriesObserved: number;
   totalReinforceCalls: number;
-  // `at` が一致した呼び出しペアの数(一致した回数そのもの)。
   equalAtPairs: number;
   totalPairs: number;
-  // `at` が一致しなかったペアの数(参考——(e) の逆順コミットの機会の母数)。
   differingAtPairs: number;
-  // 取り逃がした seq の差(nowSeq - 実際に残った decay_base_seq)の分布。
-  // `at` が最終値と一致した呼び出しの損失(同着で負けた側)。
+  // 取り逃がした seq の差（nowSeq - 実際に残った decay_base_seq）。`at` が最終値と一致した、同着で負けた側の損失。
   lostSeqDeltasAtTie: number[];
-  // `at` が最終値と一致しなかった呼び出しの損失(古い at が新しい at に
-  // 追い越された側で、なお nowSeq のほうは進んでいた——「古い at の逆順コミット」
-  // が実際に害を出したケース)。
+  // `at` が一致しなかった側（古い at が新しい at に追い越された、逆順コミット）の損失。
   lostSeqDeltasReverseOrder: number[];
 }
 
@@ -512,7 +385,6 @@ function analyzeCollisions(outcomes: CollisionTrialOutcome[]): CollisionStats {
     const final = outcome.finalLastReinforcedAtMs;
     const finalSeq = outcome.finalDecayBaseSeq;
 
-    // 一致した回数(ペア単位、Issue #730 が指す量そのもの)。
     for (let i = 0; i < outcome.calls.length; i += 1) {
       for (let j = i + 1; j < outcome.calls.length; j += 1) {
         totalPairs += 1;
@@ -526,7 +398,6 @@ function analyzeCollisions(outcomes: CollisionTrialOutcome[]): CollisionStats {
       }
     }
 
-    // 害(呼び出し単位)。
     if (final === null || finalSeq === null) continue;
     for (const call of outcome.calls) {
       if (call.nowSeq === undefined) continue;
@@ -562,10 +433,6 @@ async function readFinalState(
     finalDecayBaseSeq: memory?.decayBaseSeq ?? null,
   };
 }
-
-// ---------------------------------------------------------------------------
-// セクション2: シナリオ (c) — 逐次、recall を挟む
-// ---------------------------------------------------------------------------
 
 async function scenarioSequential(
   rig: Rig,
@@ -611,10 +478,6 @@ async function scenarioSequential(
   return analyzeCollisions(outcomes);
 }
 
-// ---------------------------------------------------------------------------
-// セクション2: シナリオ (d) — 並行 N 本
-// ---------------------------------------------------------------------------
-
 async function scenarioConcurrent(rig: Rig, n: number, trials: number): Promise<CollisionStats> {
   const outcomes: CollisionTrialOutcome[] = [];
 
@@ -645,10 +508,6 @@ async function scenarioConcurrent(rig: Rig, n: number, trials: number): Promise<
 
   return analyzeCollisions(outcomes);
 }
-
-// ---------------------------------------------------------------------------
-// セクション2: シナリオ (e) — restoreArchived と使用報告の重なり
-// ---------------------------------------------------------------------------
 
 async function scenarioRestoreOverlap(rig: Rig, trials: number): Promise<CollisionStats> {
   const outcomes: CollisionTrialOutcome[] = [];
@@ -681,10 +540,6 @@ async function scenarioRestoreOverlap(rig: Rig, trials: number): Promise<Collisi
   return analyzeCollisions(outcomes);
 }
 
-// ---------------------------------------------------------------------------
-// セクション2: シナリオ (f) — 強制的な逆順コミットの実演（自然頻度ではなく機械的確認）
-// ---------------------------------------------------------------------------
-
 interface ForcedReverseCommitResult {
   trials: number;
   oldAtAlwaysNoOp: boolean;
@@ -707,16 +562,12 @@ async function scenarioForcedReverseCommit(
 
     const oldAt = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
     const newAt = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60 * 2);
-    // 「A(古い at・大きい nowSeq) が、B(新しい at・小さい nowSeq) より後にコミットされる」
-    // という、活動時計にとって最悪の組み合わせを意図的に作る——古い at のほうが seq は
-    // 進んでいた、という状況が実際に起こりうることを機械的に示す（並行下で seq の
-    // 進み方と at の発行順が一致する保証は無い——両者は別のクロックである）。
+    // 「A（古い at・大きい nowSeq）が、B（新しい at・小さい nowSeq）より後にコミットされる」という、活動時計にとって最悪の組み合わせを
+    // 意図的に作る。並行下で seq の進み方と at の発行順が一致する保証は無い（別のクロックである）。
     const oldAtLargerSeq = 500;
     const newAtSmallerSeq = 100;
 
-    // 先に新しい at で確定させる。
     await rig.memoryStore.reinforce(ctx, memory.id, newAt, { nowSeq: newAtSmallerSeq });
-    // そのあとで、古い at・より大きい nowSeq を持つ書き込みを試みる。
     const result = await rig.memoryStore.reinforce(ctx, memory.id, oldAt, {
       nowSeq: oldAtLargerSeq,
     });
@@ -725,20 +576,13 @@ async function scenarioForcedReverseCommit(
       oldAtAlwaysNoOp = false;
     }
     if ((result.decayBaseSeq ?? null) !== newAtSmallerSeq) {
-      // 古い at の書き込みが決して適用されないなら、ここは常に newAtSmallerSeq のまま。
       oldAtAlwaysNoOp = false;
     }
-    // 古い at のほうが本来 nowSeq が大きかった（=より活発だった）のに、結果は
-    // newAtSmallerSeq のまま——差分を損失として記録する。
     seqLossWhenOldAtHadLargerSeq.push(oldAtLargerSeq - newAtSmallerSeq);
   }
 
   return { trials, oldAtAlwaysNoOp, seqLossWhenOldAtHadLargerSeq };
 }
-
-// ---------------------------------------------------------------------------
-// 害の見積もり（decay への影響）
-// ---------------------------------------------------------------------------
 
 function estimateDecayImpact(lostSeqDeltas: number[]): {
   count: number;
@@ -747,8 +591,6 @@ function estimateDecayImpact(lostSeqDeltas: number[]): {
   mean: number;
   p50: number;
   p95: number;
-  // halfLifeRecalls=DEFAULT_HALF_LIFE_RECALLS のとき、seq が delta だけ余計に「古い」
-  // ことにされた場合の強さの相対低下（0.5 ** (delta / halfLifeRecalls) - 1、負の値）。
   strengthRatioAtP50: number;
   strengthRatioAtP95: number;
   strengthRatioAtMax: number;
@@ -770,10 +612,6 @@ function estimateDecayImpact(lostSeqDeltas: number[]): {
     strengthRatioAtMax: strengthRatio(sorted[sorted.length - 1]!),
   };
 }
-
-// ---------------------------------------------------------------------------
-// メイン
-// ---------------------------------------------------------------------------
 
 function printImpact(label: string, stats: CollisionStats): void {
   const atTie = estimateDecayImpact(stats.lostSeqDeltasAtTie);

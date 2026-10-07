@@ -4,16 +4,7 @@ import { createExampleRuntime } from "../runtime-factory.js";
 import { createTimeWeightingBenchRuntime } from "../time-weighting-bench.js";
 import { closeTestClient, requireDatabaseUrl } from "./test-db.js";
 
-/**
- * #941 の確かめ直し（#1774）。`runtime-factory-close-idempotent.postgres.test.ts` は `createExampleRuntime` の
- * handle の `close()` だけを見ている。同じ形の薄いラッパー（`close: () => closePostgresClient(client)`）を
- * 持つ `createAnswerBenchRuntime`（`answer-bench.ts`）・`createTimeWeightingBenchRuntime`
- * （`time-weighting-bench.ts`）の handle も、`close()` を2回呼んで reject しない。
- *
- * （失敗時に `Pool` を閉じる約束（#937）は `factories-close-failure-keeps-original-error.postgres.test.ts` が見る。
- * `bench/association-scale-*.ts` の3つの `create*` は、export されておらず import すると `main()` が走るので、
- * この形では見られない。）
- */
+// bench/association-scale-*.ts の create* は、export されておらず import すると main() が走るので対象にしない。
 
 const factories = [
   ["createExampleRuntime", createExampleRuntime],

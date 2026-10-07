@@ -11,19 +11,6 @@ import {
 } from "../answer-bench.js";
 import { buildMnemoraPrompt } from "../mnemora-path.js";
 
-/**
- * `checkContentPreserved`（層2・回答に必要な情報の保持、Issue #693 / 親 #498）の単体試験。
- * **DB 不要・LLM 不要・鍵不要**——`answer-content-preservation.ts` は純関数であり、
- * ここで使う `ANSWER_CASE_SET_DEV`/`ANSWER_CASE_SET_EVAL`/`buildNaiveAnswerPromptSpec`/
- * `buildMnemoraPrompt` もすべて DB もネットワークも使わない（各自の docstring 参照）。
- *
- * ⚠ **`ANSWER_CASE_SET_EVAL` を読んでいる。** `docs/autonomy.md` §2.2 決定5 が禁じるのは
- * 「見て調整すること」であり、「見て評価に使うこと」ではない——ここでは `expected.accept`
- * を変えず、既存の値をそのまま使って検査を回しているだけである。この検査を書いた担い手は
- * eval ケースの中身を読んでいる（本文は既にこのファイルに書いてある）ことを、PR 本文に
- * 正直に記す。
- */
-
 function buildFakeRecallWithDigests(digests: readonly string[]): RecallResult {
   return {
     recallId: "recall-content-preservation-test",
@@ -66,7 +53,6 @@ describe("checkContentPreserved: 単体（ケースの authoring とは独立の
     };
     const result = checkContentPreserved("- 妻の誕生日は9月10日である。", expected);
     expect(result.preserved).toBe(true);
-    // 両方が部分文字列として現れる場合、両方とも記録される（"9月10日" は "9月" も含む）。
     expect(result.matchedAcceptTerms.sort()).toEqual(["9月", "9月10日"]);
   });
 
@@ -102,15 +88,6 @@ describe("checkContentPreserved: 単体（ケースの authoring とは独立の
   });
 });
 
-/**
- * 実ケース集合（dev + eval）を使った、機械的に汎化した検査。
- *
- * `naive` 経路（全文、`buildNaiveAnswerPromptSpec`）は `recall()` に依らない純関数で
- * 組み立てられる（同関数の docstring）。`expected.accept` はケースの authoring 規約上、
- * 元の発話からの引用であるため、**全 closed-value ケースで naive 側は必ず
- * preserved=true になるはず**——これが崩れたら、ケースの authoring 自体（`expected.accept`
- * が会話の文言と一致していない）を疑う歯である。
- */
 describe("checkContentPreserved × 実ケース集合（dev + eval）: naive 経路は常に保持される", () => {
   const allCases: AnswerCase[] = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
   const closedValueCases = allCases.filter((c) => c.expected.kind === "closed-value");
@@ -143,7 +120,6 @@ describe("checkContentPreserved × 実ケース集合（dev + eval）: naive 経
   );
 
   it("system 文そのものには expected.accept の語が紛れ込んでいない（誤検出の土台が無いことの確認）", () => {
-    // ANSWER_SYSTEM_PROMPT は固定文字列であり、ケースごとの正解語を含まない。
     for (const answerCase of closedValueCases) {
       const result = checkContentPreserved(ANSWER_SYSTEM_PROMPT, answerCase.expected);
       expect(result.preserved).toBe(false);
@@ -151,22 +127,6 @@ describe("checkContentPreserved × 実ケース集合（dev + eval）: naive 経
   });
 });
 
-/**
- * ⭐ **本題（Issue #693 完了条件2）**: 同一出典のまま `digest` から答えの情報を削る
- * 陽性対照で `preserved=false`（赤）になり、復元すると `preserved=true`（緑）に戻る。
- *
- * ADR 0236（PR #523）は同じ形の変異を**1個の作り物のケース**（「青」という架空の答え）
- * だけに対して固定した。ここでは**実ケース集合の全 closed-value ケース**
- * （5類 × dev/eval、`grounds.turnIndex` で引いた実際の根拠ターンの文面）に対して同じ
- * 変異を汎化する——架空の正解語を新しく書き足さず、ケースが既に持っている
- * `grounds`/`expected.accept` だけを使う。
- *
- * **「同一出典のまま」の意味**: ここでは `memories[].memoryId` を固定したまま
- * （`mem-0`、両方の変異で同じ値）`digest` だけを2通り差し替える——`buildMnemoraPrompt`
- * は `digest` の中身だけを見て `memoryId` を見ない関数なので、出典（`memoryId`）が
- * 変わっていないことは構造的に保証される。`sourceObservationId` までの層1の追跡は
- * `provenance-trace.test.ts`（ADR 0236）がすでに固定しており、ここでは重複させない。
- */
 describe("checkContentPreserved × buildMnemoraPrompt: 同一出典のまま digest を欠落させる変異試験", () => {
   const closedValueDevCases = ANSWER_CASE_SET_DEV.filter((c) => c.expected.kind === "closed-value");
 
@@ -182,8 +142,6 @@ describe("checkContentPreserved × buildMnemoraPrompt: 同一出典のまま dig
       );
       expect(groundTurnTexts.length).toBeGreaterThan(0); // closed-value は grounds が空ではない
 
-      // 変異: 根拠ターンの文面を持つ digest → 情報を持たない汎用 digest に差し替える。
-      // memoryId（"mem-0" 等）は変えない——出典は同一のまま。
       const recallInfoLost = buildFakeRecallWithDigests(
         groundTurnTexts.map(() => GENERIC_INFO_LOST_DIGEST),
       );
@@ -192,17 +150,14 @@ describe("checkContentPreserved × buildMnemoraPrompt: 同一出典のまま dig
       const promptInfoLost = buildMnemoraPrompt(recallInfoLost);
       const promptInfoKept = buildMnemoraPrompt(recallInfoKept);
 
-      // 赤: 情報を落とした digest では、答えに必要な語が入力から消えている。
       const lostResult = checkContentPreserved(promptInfoLost, answerCase.expected);
       expect(lostResult.applicable).toBe(true);
       expect(lostResult.preserved).toBe(false);
 
-      // 緑: 根拠ターンの文面を戻すと、答えに必要な語が入力に戻る。
       const keptResult = checkContentPreserved(promptInfoKept, answerCase.expected);
       expect(keptResult.applicable).toBe(true);
       expect(keptResult.preserved).toBe(true);
 
-      // memoryId は変異の前後で同一——「同一出典のまま」を型ではなく実際の値で確認する。
       expect(recallInfoLost.memories.map((m) => m.memoryId)).toEqual(
         recallInfoKept.memories.map((m) => m.memoryId),
       );
@@ -210,8 +165,6 @@ describe("checkContentPreserved × buildMnemoraPrompt: 同一出典のまま dig
   );
 });
 
-// Issue #1776 の #699 のコメント（ADR 0665）: 正規化（プロンプト側・accept 側）と any-match を
-// 「生のままでも・全部要求しても」同じ結果になる入力でしか見ておらず、3つの変異が緑だった。
 describe("checkContentPreserved: 正規化は両側に掛かり、accept は1つでも見つかれば保持（#699）", () => {
   it("プロンプト側だけが全角・大文字・句読点を含んでいても、accept（半角・小文字）と一致する", () => {
     const r = checkContentPreserved("Ｔｅａ、です", {

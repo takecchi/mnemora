@@ -1,14 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Redis を要らない検査（`bullmq` の `Queue`/`Worker` を丸ごとモックに差し替える）。
-// Issue #890 / #891 の2点を検査する:
-//   (890) Worker は `autorun: false` で構築され、`start()` を呼ぶまでジョブを処理しない
-//         （実 Worker では `run()` を呼ぶことがジョブ処理の開始そのもの）。
-//   (891) `stop()` の後の `start()` は無言で成功したふりをせず、理由の分かる Error で reject する。
-// 実際に Redis へ繋ぐ経路・BullMQ 自身の挙動は `concurrent-tick.redis.test.ts`
-// （`test:redis`）側で検査しており、ここはその手前——driver の状態遷移だけを、
-// 外側の副作用を起こさずに検査する。
-
 interface MockQueueInstance {
   upsertJobScheduler: ReturnType<typeof vi.fn>;
   removeJobScheduler: ReturnType<typeof vi.fn>;
@@ -38,14 +29,9 @@ vi.mock("bullmq", () => {
   }
   class Worker {
     on = vi.fn();
-    // 実 Worker の `run()` は Worker が閉じるまで resolve しない promise を返す
-    // （bullmq 6.3.8 の `mainLoop` は `while ((!this.closing && !this.paused) || ...)`）。
-    // 既定では、テストの中で明示的に解決/拒否させない限り pending のままにしておく
-    // ——「呼ばれたかどうか」だけを検査するのに、実物の「返らない」性質を壊さないため。
+    // `run()` は既定で pending のままにする。実 Worker の `run()` は閉じるまで resolve しないので、「呼ばれたか」だけ見るのに実物の性質を壊さない。
     run = vi.fn().mockImplementation(() => new Promise(() => {}));
     close = vi.fn().mockResolvedValue(undefined);
-    // 実 EventEmitter と同じく、on() で登録したリスナーを実際に呼べるようにしておく
-    // （run() の reject を `worker.emit("error", ...)` で流す実装を検査するため）。
     emit = vi.fn();
     private listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
     constructor(..._args: unknown[]) {
@@ -117,7 +103,7 @@ describe("createBullmqTickDriver() — start() を呼ぶまでジョブを処理
     worker.run.mockReturnValueOnce(Promise.reject(boom));
 
     await driver.start();
-    // run() の reject は非同期に伝播する（`.catch()` 経由）ため、マイクロタスクを1回逃がす。
+    // `.catch()` 経由で非同期に伝播するため、マイクロタスクを1回逃がす。
     await Promise.resolve();
     await Promise.resolve();
 
@@ -178,7 +164,6 @@ describe("createBullmqTickDriver() — start() が途中で失敗したら、次
     await expect(driver.start()).rejects.toThrow("redis down");
     await driver.start();
 
-    // 2回目の start() が実際に登録をやり直した（1回目は失敗したので、成功した登録は2回目の1回だけ）。
     expect(queue.upsertJobScheduler).toHaveBeenCalledTimes(2);
     await expect(queue.upsertJobScheduler.mock.results[1]!.value).resolves.toBeUndefined();
     expect(worker.run).toHaveBeenCalledTimes(1);

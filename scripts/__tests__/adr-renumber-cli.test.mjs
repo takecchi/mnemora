@@ -14,21 +14,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-/**
- * `scripts/adr-renumber.mjs` の CLI としての振る舞い（Issue #295・#405、ADR 0179・0200）。
- *
- * 既存の `adr-renumber-lib.test.mjs` は純関数だけを見ており、`adr-renumber-malformed-filename.test.mjs` は
- * 形の外れた名前の拒否だけを見ていた。「付け替えると、このブランチが足した行だけが書き換わり、継承した行は
- * 触られない」「付け替えが起きたら PR タイトルと本文の警告が出る」「略記の連なりに残った旧番号は exit 1 で人に渡す」
- * 「`--check` の exit code」「`--next` が他のブランチ・open な PR の主張を数える」は、誰も CLI を走らせて見ていなかった
- * （Issue #1815 の確かめ直しで、変異が素通りした）。
- *
- * 一時ディレクトリに小さな git リポジトリ（`origin/main` に相当する ref 付き）を作り、本物のスクリプトを写して
- * 子プロセスで走らせる。実リポジトリには触らない。`gh` は偽物を PATH の先頭に置く（ネットワークに出ない）。
- *
- * **これはクローン（miku）の判断で足した歯で、オーナーの判断ではない**（ADR 0220）。
- */
-
 const scriptsDir = fileURLToPath(new URL("..", import.meta.url));
 const tmpRoots = [];
 afterAll(() => {
@@ -48,10 +33,6 @@ function write(dir, path, body) {
   writeFileSync(join(dir, path), body);
 }
 
-/**
- * `origin/main` に ADR 0001-a・0002-c・README と、継承した行を持つ `docs/inherited.md` が在る repo を作り、
- * `setup(dir)` で「ブランチが足した変更」を作業ツリーへ入れて add する。
- */
 function makeRepo(setup) {
   const dir = mkdtempSync(join(tmpdir(), "adr-renumber-cli-"));
   tmpRoots.push(dir);
@@ -74,7 +55,6 @@ function makeRepo(setup) {
   return dir;
 }
 
-/** 偽の `gh`。`pr list` は `prs`（番号の配列）を、`pr view N` は `files[N]` を1行ずつ出す。`prs` が null なら失敗する。 */
 function fakeGh(root, prs, files = {}) {
   const bin = join(root, "fakebin");
   mkdirSync(bin, { recursive: true });
@@ -116,13 +96,11 @@ describe("adr-renumber.mjs（引数なし）は、付け替えて、このブラ
   const repo = () =>
     makeRepo((dir) => {
       write(dir, "docs/decisions/0001-b.md", ADR("0001", "b"));
-      // main に在るファイルへ1行足す。継承した行（ADR 0001）は触られず、足した行だけが書き換わる
       write(
         dir,
         "docs/inherited.md",
         "継承した行: ADR 0001 は main の正当な言及\n途中の行\n新しい行: ADR 0001（0001-b）を見よ\n",
       );
-      // main に在る ADR への追記は「追加された ADR」ではないので、改名しない
       write(
         dir,
         "docs/decisions/0002-c.md",
@@ -136,17 +114,13 @@ describe("adr-renumber.mjs（引数なし）は、付け替えて、このブラ
     expect(r.status).toBe(0);
     expect(existsSync(join(dir, "docs/decisions/0003-b.md"))).toBe(true);
     expect(existsSync(join(dir, "docs/decisions/0001-b.md"))).toBe(false);
-    // 改名された ADR 自身の見出し（このブランチが足した行）
     expect(read(dir, "docs/decisions/0003-b.md")).toContain("# ADR 0003: b");
-    // 継承した行は、同じファイルの中でも旧番号のまま
     const inherited = read(dir, "docs/inherited.md");
     expect(inherited).toBe(
       "継承した行: ADR 0001 は main の正当な言及\n途中の行\n新しい行: ADR 0003（0003-b）を見よ\n",
     );
-    // main に在った ADR は改名されない・触られない
     expect(existsSync(join(dir, "docs/decisions/0002-c.md"))).toBe(true);
     expect(read(dir, "docs/decisions/0002-c.md")).toContain("追記: 0002-c と ADR 0002 は自分自身");
-    // 衝突しなかった main の ADR 0001-a も触られない
     expect(read(dir, "docs/decisions/0001-a.md")).toBe(ADR("0001", "a"));
   });
 
@@ -196,7 +170,6 @@ describe("adr-renumber.mjs（引数なし）は、付け替えて、このブラ
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("付け替えられずに残った参照が 1 件");
     expect(r.stderr).toContain("docs/chain.md:1");
-    // 書き換えていない
     expect(read(dir, "docs/chain.md")).toBe("参照: ADR 0009 / 0001 を見よ\n");
   });
 
@@ -219,7 +192,6 @@ describe("adr-renumber.mjs --check", () => {
     expect(r.stderr).toContain("衝突あり: 1 件");
     expect(r.stderr).toContain("0001-b.md");
     expect(r.stderr).toContain("次の空き番号: 0003");
-    // 検査だけで、何も書き換えない
     expect(existsSync(join(dir, "docs/decisions/0001-b.md"))).toBe(true);
   });
 
@@ -247,7 +219,6 @@ describe("adr-renumber.mjs の引数", () => {
 
 describe("adr-renumber.mjs --next は origin/main・他のリモートブランチ・open な PR の主張を全部数える", () => {
   const withBranch = (dir) => {
-    // 別のリモートブランチが 0005 を、open な PR が 0010 を名乗っている
     write(dir, "docs/decisions/0005-other.md", ADR("0005", "other"));
     git(dir, "add", "-A");
     git(dir, "commit", "-qm", "other");

@@ -5,13 +5,6 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * `createRecall` と `claimBatch` に、Postgres が行を書けずに拒む入力を渡すと、testkit の fixture も拒み、
- * 何も書かない。`recalls.subject_id`・`outbox.claimed_by` は `text` 列（NUL を拒む）、`recalls` の
- * `query` などは `NOT NULL` の `jsonb` 列（NUL を拒み、JSON にならない値は NULL になって拒む）。
- * 2実装を並べた歯は `packages/postgres/src/__tests__/store-boundary-diff.postgres.test.ts`（DB が要る）。
- */
-
 const ctx: Ctx = { tenantId: "recall-claim-storable" };
 
 function record(override: Partial<NewRecallRecord> = {}): NewRecallRecord {
@@ -51,7 +44,6 @@ describe("testkit の fixture は createRecall で Postgres が書けない記�
       { budget: { chars: 1, x: "\u0000" } as never },
       /^createRecall: budget must not contain NUL/,
     ],
-    // #1280: jsonb 列の omitted・usage・indexBand・returnedMemories も NUL を拒む。
     [
       "omitted に NUL",
       { omitted: [{ kind: "x\u0000" } as never] },

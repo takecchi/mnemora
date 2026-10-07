@@ -4,15 +4,7 @@ import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 
-// `InMemoryLexicalStore.search` の並びは `coverage` 降順 → `rank` 降順 → `recordedAt` 降順 → `memoryId` 昇順。
-// - 同点（`recordedAt` まで同じ）の最後の段は `memoryId` の文字列順で、挿入順ではない。
-// - `recordedAt` は `coverage`・`rank` が同じときだけ効く（新しいからといって、`coverage`・`rank` が低い行が先に出てはならない）。
-// 新しい方が先に来ること（`recordedAt` の段そのもの）と、2件だけの `memoryId` 昇順は
-// `in-memory-lexical-store-tiebreak.test.ts` にある。
-//
-// ⚠ 1つ目の歯は、このファイルで最初に Memory を作る歯でなければならない。`mem-N` の連番は
-// ファイルごとに 1 から始まるので、12件作ると `mem-10` を跨ぎ、「作った順」と「文字列順」が分かれる
-// （2件だけでは、挿入順と文字列順が同じになって、`memoryId` の段を外しても気づけない）。
+// 1つ目の歯は、このファイルで最初に Memory を作る歯でなければならない。`mem-N` の連番はファイルごとに 1 から始まり、12件作ると `mem-10` を跨いで「作った順」と「文字列順」が分かれる（2件だけでは `memoryId` の段を外しても気づけない）。
 
 const TENANT = "lexical-tiebreak-order-tenant";
 const ctx: Ctx = { tenantId: TENANT };
@@ -40,7 +32,6 @@ describe("InMemoryLexicalStore.search の並び: coverage・rank・recordedAt �
       created.push(memory.id);
     }
     const expected = [...created].sort();
-    // 歯が効く前提: 作った順と文字列順が違う（`mem-10` 以降があるので違うはず）。
     expect(created).not.toEqual(expected);
 
     const hits = await lexicalStore.search(ctx, "widget", {

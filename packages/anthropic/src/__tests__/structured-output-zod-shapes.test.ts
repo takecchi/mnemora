@@ -4,22 +4,7 @@ import type { Ctx } from "@mnemora/core";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 import { AnthropicLLMProviderError } from "../errors.js";
 
-/**
- * 利用者が `completeStructured` に渡す zod の形のうち、どれが送る前に落ちるか
- * （[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)）。
- * README「`completeStructured` に渡せる zod の形」の歯。偽の client で、送ったかどうかだけを見る
- * （Anthropic の実 API には当てていない——送った後にベンダーが受けるかは確かめていない）。
- *
- * ⚠ **2026-09-29 追記: 振る舞いを変えた。**以前は送る前に落ちる形（`z.tuple`・`z.date`・
- * `transform`）は SDK の `zodOutputFormat`（zod の `toJSONSchema` と SDK の
- * `transformJSONSchema`）が投げる**素の** `Error` がそのまま伝わり、`kind` を持たなかった。
- * **いまはその例外を `AnthropicLLMProviderError`（`kind: "schema_unsupported"`）に包み、
- * 元の例外を `cause` に載せる。**`messages.create` は今までどおり呼ばれない。**
- *
- * ⚠ **2026-09-30 追記: `z.record` も送る前に落ちるようにした**（ADR 0360 の追記、負債3）。
- * 以前は翻訳が通り、空の object しか許さない形で送っていた（中身が黙って空になる）。
- */
+/** README「`completeStructured` に渡せる zod の形」の歯。偽の client で、送ったかどうかだけを見る（実 API には当てていない）。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const prompt = { messages: [{ role: "user" as const, content: "u" }] };
@@ -88,10 +73,7 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  // 旧: z.record は「空の object しか許さない形」で送っていた（README の 2026-09-28 追記）。
-  // 翻訳が失敗しない代わりに中身が黙って空になるため、送る前に落とす（ADR 0360 の 2026-09-30 追記）。
-  // ⚠ 深さを問わない: object の欄・配列の要素・optional/nullable/default の内側・union の枝・
-  // 再帰（z.lazy / getter）の先・discriminatedUnion・intersection・キーが enum の record も落ちる。
+  // 深さを問わない: object の欄・配列の要素・optional/nullable/default の内側・union の枝・再帰（z.lazy / getter）の先・discriminatedUnion・intersection・キーが enum の record も落ちる。
   const R = z.record(z.string(), z.string());
   const Node = z.object({
     name: z.string(),
@@ -129,7 +111,6 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
       const cause = (caught as AnthropicLLMProviderError).cause;
       expect(cause).toBeInstanceOf(Error);
       expect(String(cause)).toMatch(/z\.record/);
-      // 移行先の助言（`{ key, value }` の配列を使うこと）が cause に載っている（ADR 0360 追記）。
       expect(String(cause)).toMatch(/\{ key, value \}/);
       expect(create).not.toHaveBeenCalled();
     },
@@ -157,10 +138,7 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
   });
 });
 
-/**
- * README「上の表に無い形の、今の振る舞い」の歯（[ADR 0471](../../../../docs/decisions/0471-structured-output-zod-shapes-recorded-in-readme.md)）。
- * ⚠ **今の振る舞いの記録であって、約束ではない**——変えるかどうかはオーナーの判断が要る。変えると決まったら、この歯と README の表を一緒に書き換えること。
- */
+/** 今の振る舞いの記録であって、約束ではない。変えると決まったら、この歯と README の表を一緒に書き換えること。 */
 describe("AnthropicLLMProvider.completeStructured: 上の表に無い形の、今の振る舞い（記録）", () => {
   async function sendAndParse(schema: z.ZodType<unknown>, response: unknown) {
     const create = vi.fn(async (_body: unknown) => ({

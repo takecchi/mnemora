@@ -4,11 +4,6 @@ import {
   validateFingerprintRecord,
 } from "../embedding-output-fingerprint-summary-lib.mjs";
 
-/**
- * `scripts/embedding-output-fingerprint-summary-lib.mjs` の歯（Issue #565）。
- * 本物のモデルは呼ばない——固定の測定 JSON を直接渡す。
- */
-
 describe("validateFingerprintRecord", () => {
   it("status=ok で sha256/dimensions が揃っていれば ok:true", () => {
     const result = validateFingerprintRecord({ status: "ok", sha256: "abc", dimensions: 256 });

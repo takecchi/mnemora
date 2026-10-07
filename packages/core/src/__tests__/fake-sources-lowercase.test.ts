@@ -7,14 +7,6 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0527: `consolidate`・`reflect` が積む `created` イベントの `meta.sources` は、渡された `memoryIds`（大文字でもよい）の
- * 綴りではなく、store が返した行の id（小文字の正規形）で書く。作られた記憶の `provenance.sources`・`superseded` イベントの
- * `memoryId` は元から正規形で、`meta.sources` だけが渡された綴りのまま残っていた（ADR 0524 の材料）。
- * 3 実装の突き合わせは `packages/postgres/src/__tests__/consolidate-reflect-sources-lowercase.postgres.test.ts`。
- * conformance suite には何も足していない（ADR 0434 決定5）。
- */
-
 const ctx: Ctx = { tenantId: "fake-sources-lowercase" };
 const T0 = new Date("2026-06-01T00:00:00.000Z");
 

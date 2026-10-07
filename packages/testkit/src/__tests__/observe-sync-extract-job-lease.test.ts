@@ -7,16 +7,7 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * ADR 0407: `observe({ extract: "sync" })` が積む extract のジョブは、observe が LLM を待っている間、
- * tick に claim されない（observe がリースを持った状態で作る）。
- *
- * 穴（D-1）: 以前は「すぐ claim できる状態」で作っていたため、observe が LLM を待つ間に tick が
- * 同じジョブを claim し、LLM が2回呼ばれ、中身の違う記憶が2件とも active で残り、observe は
- * `complete` が `OutboxLeaseConflictError` で落ちて `memoryIds` を返せなかった。
- *
- * 順序は時計と門（Promise）で決める。タイミングには頼らない。
- */
+/** 順序は時計と門（Promise）で決める。タイミングには頼らない。 */
 
 let nowMs = 0;
 const clock = { now: () => new Date(nowMs) };
@@ -37,7 +28,6 @@ function gate(): Gate {
 
 interface Step {
   content: string;
-  /** 在れば、呼ばれたことを `entered` で知らせ、`hold` が解決するまで返さない。 */
   hold?: Promise<void>;
   entered?: () => void;
 }
@@ -112,12 +102,12 @@ describe("InMemory: sync observe が積んだ extract のジョブは、observe 
     const entered = gate();
     steps = [
       { content: "候補A", hold: hold.promise, entered: entered.resolve },
-      { content: "候補B" }, // tick が claim してしまった場合にだけ使われる
+      { content: "候補B" },
     ];
     const observing = kit.runtime.observe(ctx, { kind: "utterance", text: "発話" });
     await entered.promise;
 
-    nowMs = T0 + 1000; // リースの内側
+    nowMs = T0 + 1000;
     const tick = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     expect(tick.processed).toBe(0);
     expect(tick.leaseConflicts).toEqual([]);
@@ -162,12 +152,12 @@ describe("InMemory: sync observe が積んだ extract のジョブは、observe 
     const observing = kit.runtime.observe(ctx, { kind: "utterance", text: "発話" });
     await entered.promise;
 
-    nowMs = T0 + LEASE_MS + 1; // リース切れ
+    nowMs = T0 + LEASE_MS + 1;
     const tick = await kit.runtime.tick(ctx, { kinds: ["extract"], leaseMs: LEASE_MS });
     expect(tick.processed).toBe(1);
 
     hold.resolve();
-    const result = await observing; // 例外を投げない
+    const result = await observing;
     expect(result.memoryIds).toHaveLength(1);
     expect(await extractJobs(kit)).toEqual([{ completed: true, failed: false }]);
   });

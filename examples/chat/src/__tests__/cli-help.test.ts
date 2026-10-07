@@ -2,16 +2,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/**
- * `cli.ts` の使い方表示と終了コード・出力先の歯（Issue #944）。
- *
- * - 引数なし / `--help` / `-h` / `help`: 使い方を stdout に出して exit 0。
- * - 未知のサブコマンド: 理由を stderr に1行出し、使い方も stderr に出して exit 1。
- *   stdout には何も出さない。
- *
- * `cli.ts` は末尾で `main()` を無条件に実行するため、子プロセスで起動して観る。
- * どの経路も DB に触れないので、`DATABASE_URL` は子プロセスから外す。
- */
+// cli.ts は末尾で main() を無条件に実行するので、import せず子プロセスで起動する。
 
 const chatDir = fileURLToPath(new URL("../..", import.meta.url));
 const CLI_TIMEOUT_MS = 20_000;

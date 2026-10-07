@@ -10,22 +10,6 @@ import {
   validateMeasured,
 } from "../openai-arm-summary-lib.mjs";
 
-/**
- * Issue #109 後半: `openai-arm-summary-lib.mjs`(純関数の側)の歯。DB を要求しない。
- *
- * ⭐ **最重要の検査**: 基準値と比べていること・一致なら1行で黙り違うときだけ展開すること
- * (`identifier-probe-summary-lib.test.mjs` と同じ規律)。
- * ⭐ **この集合固有の検査**: 「旧判定」(`decideShadowVerdict`、ADR 0316)が
- * `examples/chat/src/openai-arm-verdict.ts` の `decideEmbeddingDriftVerdict` と
- * 同じ規則で動くこと、かつ**この判定は `buildSummaryMarkdown` の出力に現れるだけで
- * exit code には影響しないこと**(この歯は純粋にオブジェクトの戻り値だけを見る——
- * exit code の検査は CLI を子プロセスで起動する歯の範囲外にある)。**2026-09-30 の
- * ADR 0333 追記以降、このジョブの判定は margin基準
- * (`decideMarginShadowVerdict`/`buildMarginShadowVerdictSection`)であり、
- * `decideShadowVerdict` は移行の追跡用に残っている旧判定である**
- * (`openai-arm-margin-verdict-promotion.test.mjs` が実データでこの入れ替わりを縛る)。
- */
-
 function makeGroup(overrides = {}) {
   return {
     group: "identifiersSparse",
@@ -232,14 +216,6 @@ describe("buildSummaryMarkdown", () => {
   });
 });
 
-/**
- * `decideMarginShadowVerdict`/`buildMarginShadowVerdictSection` の歯(ADR 0333 §2・§4.1・
- * §4.3「A」。2026-09-30 追記でこのジョブの判定に採った——⛔ ただし門ではない)。
- *
- * baseline の5probeの margin([0.10, 0.12, 0.08, 0.11, 0.09])は
- * mean=0.10・標本標準偏差(n-1)=0.01581138830...(電卓で検算済み)——
- * `3×stdDev`≈0.04743 なので、0.05 縮めれば確実に閾値を超える。
- */
 function makeProbeMargins(overrides = {}) {
   const base = {
     p1: 0.1,
@@ -340,10 +316,6 @@ describe("decideMarginShadowVerdict(このジョブの判定。⛔ 門ではな�
   });
 
   it("変異: 比較の向きを反転させる(measured−baseline)と、縮んでいるのに red が消える", () => {
-    // ここでの「向きの反転」変異は、実装の `drop = b - m`(baseline−measured)を
-    // `m - b`(measured−baseline)に入れ替えたときと同じ効果を、呼び出し側の入力を
-    // 入れ替えることで再現する——baseline と measured を丸ごと入れ替えて渡すと、
-    // 「縮んだ」はずの2 probe が符号反転して「伸びた」side になり、red が消える。
     const baseline = makeGroupWithMargins();
     const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
     const forwardVerdict = decideMarginShadowVerdict(measured, baseline);
@@ -373,8 +345,6 @@ describe("buildMarginShadowVerdictSection(このジョブの判定。⛔ 門で�
   });
 
   it("判定節(margin基準)が red でも、旧判定(decideShadowVerdict)の結果は変わらない——判定を混ぜていない", () => {
-    // 旧判定(ADR 0316)は hit1Count/mrrOverall だけを見る——margin(判定節)を
-    // どれだけ動かしても、旧判定は影響を受けない(⛔ 判定を混ぜていないことの直接確認)。
     const baseline = makeGroupWithMargins();
     const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
     const marginVerdict = decideMarginShadowVerdict(measured, baseline);

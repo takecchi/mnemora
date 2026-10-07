@@ -8,18 +8,8 @@ import {
   cacheRepoDirs,
 } from "../check-local-embedding-fingerprint-lib.mjs";
 
-/**
- * `scripts/check-local-embedding-fingerprint-lib.mjs` の純関数の歯。
- *
- * ⚠ このファイルはネットワークにもモデル取得にも触れない。`gitBlobSha1Hex` の
- * 実測値は、この作業木でこの依頼のために実際に `git hash-object` を実行して
- * 確かめた値であり（下記コメント参照）、そらで書いた値ではない。
- */
-
 describe("gitBlobSha1Hex", () => {
   it("『test\\n』(5バイト)の git blob hash と一致する（実測値。`echo -n 'test\\n' > f; git hash-object f` で確認済み）", () => {
-    // ⭐ 実測: printf 'test\n' > /tmp/x; git hash-object /tmp/x
-    //   => 9daeafb9864cf43055ae93beb0afd6c7d144bfa4（依頼文に書かれた値と一致した）。
     const bytes = Buffer.from("test\n", "utf8");
     expect(gitBlobSha1Hex(bytes)).toBe("9daeafb9864cf43055ae93beb0afd6c7d144bfa4");
   });
@@ -82,8 +72,6 @@ describe("compareFingerprints", () => {
     expect(result.unknownOnDisk).toEqual([]);
   });
 
-  // Issue #1784（#563 の確かめ直し）: hash は全桁で比べる。値の先頭だけを比べる緩め方（先頭8桁など）は、
-  // 以前の歯のどれも赤にしなかった【実測】——どの歯の hex も、先頭から食い違う短い文字列だった。
   it.each([
     ["git-blob-sha1", "a".repeat(39)],
     ["sha256", "b".repeat(63)],
@@ -119,8 +107,6 @@ describe("compareFingerprints", () => {
   });
 
   it("🔴 HF の tree に在るが手元に無いファイルは、match のまま崩れない（transformers.js は必要な分だけ取るため）", () => {
-    // expectedByPath には onnx/model.onnx（fp32 の完全版）も在るが、手元には
-    // q8 量子化版しか無い、という現実的なケース。
     const actual = [{ path: "onnx/model_quantized.onnx", algorithm: "sha256", hex: "bbb" }];
     const expectedByPath = new Map([
       ["onnx/model.onnx", { algorithm: "sha256", hex: "fp32-hash-not-on-disk" }],
@@ -134,15 +120,6 @@ describe("compareFingerprints", () => {
   });
 });
 
-/**
- * `normalizeActualPath`（Issue #597 案(a) の追加分、ADR 0253 追記5）。
- *
- * 【背景・実測】CI run 35953212055 で、`examples/chat` が固定した revision を
- * `LocalEmbeddingProvider` へ渡すようになった結果、`@huggingface/transformers` の
- * `FileCache` が `<repo>/<revision>/<filename>` というサブディレクトリにファイルを
- * 置くようになり、この門が「素性不明」を4本報告して赤くなった
- * （`不一致: 一致 4 本 / hash 食い違い 0 本 / 素性不明 4 本`）。
- */
 describe("normalizeActualPath", () => {
   const REVISION = "cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0";
 
@@ -167,16 +144,12 @@ describe("normalizeActualPath", () => {
   });
 
   it("⚠ 陰性対照: プレフィックスの後に `/` が無い（たまたま前方一致するだけのファイル名）は剥がさない", () => {
-    // 例: revision 名そのものをファイル名の先頭に持つ、たまたまの一致。
     expect(normalizeActualPath(`${REVISION}not-a-directory.json`, REVISION)).toBe(
       `${REVISION}not-a-directory.json`,
     );
   });
 
   it("プレフィックスの無いフラットな配置は、pinnedRevision が在っても変わらない", () => {
-    // revision=main で落とした（フラットな）ファイルと、revision 指定で落とした
-    // （ネストした）ファイルが同じキャッシュディレクトリに同居するケース
-    // （CI の example-chat ジョブで実際に起きている——本文参照）。
     expect(normalizeActualPath("config.json", REVISION)).toBe("config.json");
   });
 });
@@ -223,10 +196,6 @@ describe("formatFingerprintReport", () => {
   });
 });
 
-/**
- * `cacheRepoDirs`（Issue #1403・ADR 0365）。`@mnemora/local-embedding` は `revision` を渡されると、根を
- * `<cacheDir>/<encodeURIComponent(revision)>/` に分ける。門は平たい配置と両方を見る。
- */
 describe("cacheRepoDirs", () => {
   it("固定した revision があれば、平たい配置と <revision>/ の根の下の両方を返す", () => {
     expect(cacheRepoDirs("/c", "o/m", "abc123")).toEqual(["/c/o/m", "/c/abc123/o/m"]);

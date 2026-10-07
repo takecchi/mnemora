@@ -5,11 +5,6 @@ import {
   decideMarginDropVerdict,
 } from "../verdict-candidate-margin.js";
 
-/**
- * `verdict-candidate-margin.ts`（Issue #109 残件「A」候補案1）の歯。
- * DB もネットワークも要らない——margin の配列を手で組み立てて渡すだけ。
- */
-
 describe("decideMarginDropVerdict", () => {
   it("baseline と measured が同じなら red にならない(縮みが無い)", () => {
     const baseline = [0.5, 0.4, 0.3, 0.6, 0.2];
@@ -20,14 +15,12 @@ describe("decideMarginDropVerdict", () => {
   });
 
   it("1 probe だけ大きく縮んでも red にならない(閾値minShrunkProbes=2)", () => {
-    // baseline: 平均0.4、標準偏差はそこそこの分布にする
     const baseline = [0.1, 0.2, 0.3, 0.4, 0.9];
     const stats_unit = (() => {
       const mean = baseline.reduce((a, b) => a + b, 0) / baseline.length;
       const variance = baseline.reduce((s, v) => s + (v - mean) ** 2, 0) / (baseline.length - 1);
       return Math.sqrt(variance);
     })();
-    // 1件だけ、3標準偏差以上縮める
     const measured = [...baseline];
     measured[4] = baseline[4]! - stats_unit * 4;
     const v = decideMarginDropVerdict(measured, baseline);
