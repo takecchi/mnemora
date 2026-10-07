@@ -654,3 +654,62 @@ describe("runtime.restoreArchived — ループ前の読みが失敗する（Iss
     expect((await stores.memoryStore.get(ctx, m1.id))?.status).toBe("archived");
   });
 });
+
+describe("runtime.restoreArchived — 復帰の時刻は注入された時計から取る", () => {
+  const FLOOR_BEFORE_RESTORE = new Date(NOW.getTime() - 1_000);
+
+  async function restoreOne() {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "archived", decayFloorAt: FLOOR_BEFORE_RESTORE }),
+    );
+    await runtime.restoreArchived(ctx, { memoryId: memory.id });
+    return { stores, memory };
+  }
+
+  it("積む restored イベントの at は時計の now である", async () => {
+    const { stores, memory } = await restoreOne();
+
+    expect(restoredEvents(stores, memory.id).map((e) => e.at)).toEqual([NOW]);
+  });
+
+  it("減衰の起点（lastReinforcedAt）は復帰の瞬間に引き直され、decayFloorAt はそこから既定の戦略で計算した値になる", async () => {
+    const { stores, memory } = await restoreOne();
+
+    const stored = await stores.memoryStore.get(ctx, memory.id);
+    expect(stored?.lastReinforcedAt).toEqual(NOW);
+    expect(stored?.decayFloorAt).toEqual(
+      defaultDecayStrategy.floorAt({
+        recordedAt: memory.recordedAt,
+        lastReinforcedAt: NOW,
+        strength: memory.strength,
+        halfLifeHours: memory.halfLifeHours,
+      }),
+    );
+  });
+});
+
+describe("runtime.restoreArchived — 空の memoryIds は store を一切読まない", () => {
+  it("getMany も活動時計の読みも呼ばれず、outcomes は空である", async () => {
+    const { runtime, stores } = buildRuntime();
+    let reads = 0;
+    const originalGetMany = stores.memoryStore.getMany.bind(stores.memoryStore);
+    stores.memoryStore.getMany = async (...args) => {
+      reads += 1;
+      return originalGetMany(...args);
+    };
+    const originalGetDecayClock = stores.tenantSettingsStore.getDecayClock.bind(
+      stores.tenantSettingsStore,
+    );
+    stores.tenantSettingsStore.getDecayClock = async (...args) => {
+      reads += 1;
+      return originalGetDecayClock(...args);
+    };
+
+    const result = await runtime.restoreArchived(ctx, { memoryIds: [] });
+
+    expect(result).toEqual({ outcomes: [] });
+    expect(reads).toBe(0);
+  });
+});
