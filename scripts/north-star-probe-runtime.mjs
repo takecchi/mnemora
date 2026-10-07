@@ -1,43 +1,16 @@
 /**
- * 北極星「目指す姿」7項目の既定差分を、渡された `@mnemora/*` のモジュール（`mods`）から
- * `Runtime` を組んで観測する、**段1・段2で共有する**probe ロジック（Issue #387 /
- * ADR 0216 決定7）。
- *
- * ## なぜ切り出したか
- *
- * ADR 0216 決定7は、観測を2段に分けている:
- *
- * - 段1（`north-star-default-probe.mjs`）: ワークスペース内から `@mnemora/core` /
- *   `@mnemora/testkit` を import して組む（毎 PR、`build` ジョブに相乗り）。
- * - 段2（`north-star-tarball-probe.mjs`）: `pnpm pack` した tarball を `npm install` した
- *   先から import して組む（手動起動）。
- *
- * **観測する項目・観測のやり方（何を渡さない呼び出しと何を渡した呼び出しの差を見るか）は
- * 両段で同一であるべきである**——違うのは「`mods`（`createRuntime` 等）をどこから
- * import したか」だけ。この前提が崩れる（=段1と段2で別のロジックを書く）と、
- * 「段1は通ったのに段2は落ちた」の差が、probe 自体の実装差なのか、workspace解決と
- * tarball解決の差なのかが分からなくなる。**だからこのファイルは複製せず、共有する。**
- *
- * このファイルは `mods`（`createRuntime` / `DeterministicLLMProvider` /
- * `DeterministicEmbeddingProvider` / `InMemory*Store` の5種）を受け取るだけで、
- * それをどう import したか（workspace か、tarball を install した先か）を一切知らない。
- * ⛔ **このファイル自身は `@mnemora/*` を1つも import しない。**
- *
- * ⛔ **判定しない。** 差が出た/出なかった/観測に失敗した、という事実だけを文字列で返す。
- * ⛔ **例外を外へ投げない。** `runItemSafe`/`runAllNorthStarItems` が個々の観測を
- * try/catch で包む——1項目の失敗が他の項目・呼び出し元全体を止めない。
+ * ⛔ 段1・段2で共有し、複製しない。別のロジックにすると、差が probe の実装差か解決の差か分からなくなる。
+ * ⛔ このファイル自身は `@mnemora/*` を1つも import しない（`mods` を受け取るだけ）。
+ * ⛔ 判定しない。例外を外へ投げない（1項目の失敗が他の項目を止めない）。
  */
 
-/** `packages/core/src/__tests__/runtime.test.ts` と同じ、操作上のリース長（測定対象の数ではない）。 */
 const TEST_LEASE_MS = 60_000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-/** node:crypto を渡さずに済むよう、呼び出し側の環境で使える hash だけに依存する。 */
 export function makeHashContent(createHash) {
   return (content) => createHash("sha256").update(content).digest("hex");
 }
 
-/** `@mnemora/testkit/fixtures` の5種のインメモリ・ストアを新しく組み立てる。 */
 function buildStores(mods) {
   const memoryStore = new mods.InMemoryMemoryStore();
   const outboxStore = new mods.InMemoryOutboxStore(memoryStore.outboxJobs);
@@ -48,18 +21,9 @@ function buildStores(mods) {
 }
 
 /**
- * 項目ごとに独立した `Runtime` を組む。**ストアも Clock も項目間で共有しない**——時計を
- * 進める項目（項目1）が、他の項目の忘却ゲートへ影響しないようにするため。
- *
- * ⚠ **Clock は「上書きするまでは実時間を素通しする」形にする**（固定の過去/未来日付を
- * 最初から使わない）。理由: `@mnemora/testkit/fixtures` の `InMemoryMemoryStore`（outbox
- * ジョブの `availableAt`）は `Clock` を経由せず `new Date()`（実時間）で書く
- * （`in-memory-memory-store.ts`）。ここで `Clock` を実時間からかけ離れた固定値に
- * 差し替えてしまうと、`tick()` の `claimBatch` が `job.availableAt <= now` を判定する際に
- * 「作った直後のジョブなのに、注入した Clock 上ではまだ来ていない（または既に過ぎた）」
- * というズレが起き、embed ジョブが一向に処理されない——実際に手元でこれを踏んだ
- * （`FIXED_START` を2026-01-01固定にしていたときは `tick()` が常に `processed:0` だった）。
- * 「上書きするまでは実時間」にすることで、ジョブ生成・claim の両方が同じ時間軸に乗る。
+ * ⛔ ストアも Clock も項目間で共有しない（時計を進める項目1が他の項目の忘却ゲートへ影響しないように）。
+ * ⚠ Clock は「上書きするまでは実時間を素通し」にする。固定日付を最初から使うと、`InMemoryMemoryStore` が
+ * `Clock` を経由せず `new Date()` で書く outbox ジョブの `availableAt` とずれ、`tick()` が `processed:0` のままになる。
  */
 export function buildIsolatedRuntime(mods, tenantId, hashContent) {
   const stores = buildStores(mods);
@@ -85,11 +49,6 @@ export function buildIsolatedRuntime(mods, tenantId, hashContent) {
   };
 }
 
-/**
- * 項目1（甲）「言ったことを、次の日も覚えている」。
- * observe() 直後の recall() と、Memory 自身の `decayFloorAt` を1日過ぎた時点まで
- * Clock を進めた後の recall() を比べる（ADR 0216 決定2）。
- */
 export async function runItem1(mods, hashContent) {
   // ADOPTER-SUPPLIED(item1): 配線 — hashContent と in-memory ストアの構築だけを供給する。
   const { runtime, ctx, stores, setNow } = buildIsolatedRuntime(
@@ -122,11 +81,6 @@ export async function runItem1(mods, hashContent) {
     };
   }
 
-  // Memory 自身が書き込み時に計算した忘却の床（`strategies/decay.ts` の
-  // `defaultDecayStrategy.floorAt`。既定 halfLifeHours=720 と DEFAULT_DECAY_THRESHOLD=0.05
-  // から導かれる）を、この Memory の実測値そのものから読んで1日過ぎた時点まで、注入した
-  // Clock を進める——式を再計算せず、Memory が既に計算し終えた値をそのまま使う。
-  // 実時間は待たない（ADR 0216 測定4）。
   setNow(new Date(decayFloorAt.getTime() + ONE_DAY_MS));
 
   const after = await runtime.recall(ctx, { text });
@@ -147,11 +101,6 @@ export async function runItem1(mods, hashContent) {
   };
 }
 
-/**
- * 項目2（甲）「聞かれていないことを、自分から思い出す」。
- * `recall({ vector, limit:1 })` と、`association: { maxCount: 10 }` を渡した recall の差
- * （ADR 0216 決定2）。
- */
 export async function runItem2(mods, hashContent) {
   // ADOPTER-SUPPLIED(item2): 配線 — hashContent と in-memory ストアの構築だけを供給する。
   const { runtime, ctx, stores, embeddingProvider } = buildIsolatedRuntime(
@@ -174,10 +123,8 @@ export async function runItem2(mods, hashContent) {
   }
   await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
 
-  // 決定性のための試験用配線（ADOPTER-SUPPLIED の対象ではない——採用者が本来供給する
-  // ものではなく、probe が再現可能にするための細工）。`DeterministicEmbeddingProvider`
-  // 自身のハッシュ挙動（文字コード和）には依存させず、2件のベクトルを直接上書きして
-  // コサイン類似度を 0.9（連想枠の既定 minSimilarity=0.5 より確実に高い）に固定する。
+  // 決定性のための試験用配線（ADOPTER-SUPPLIED の対象ではない）。`DeterministicEmbeddingProvider` の
+  // ハッシュ挙動に依存させず、2件のベクトルを直接上書きして類似度を固定する。
   const space = embeddingProvider.space;
   const anchorVector = new Array(space.dimensions).fill(0);
   anchorVector[0] = 1;
@@ -191,8 +138,7 @@ export async function runItem2(mods, hashContent) {
   const withAssociation = await runtime.recall(ctx, {
     vector: anchorVector,
     limit: 1,
-    // ADOPTER-SUPPLIED(item2): データ — maxCount は採用者が決める量。mnemora の既定は
-    // association 省略＝連想を一切走らせない（ADR 0216 候補6の表・項目2「設定」）。
+    // ADOPTER-SUPPLIED(item2): データ — maxCount は採用者が決める量。
     association: { maxCount: 10 },
   });
 
@@ -218,11 +164,6 @@ export async function runItem2(mods, hashContent) {
   };
 }
 
-/**
- * 項目5（甲）「間違いを正すと、古いほうが先に出てこなくなる」。
- * observe(A) → observe(A′、矛盾する内容) → **既定経路**（markContested / resolveContested /
- * applyCorrection は一切呼ばない）の recall() で A が返るか（ADR 0216 決定2）。
- */
 export async function runItem5(mods, hashContent) {
   // ADOPTER-SUPPLIED(item5): 配線 — hashContent と in-memory ストアの構築だけを供給する。
   // markContested/resolveContested/applyCorrection は一切呼ばない——既定経路だけを見る。
@@ -241,9 +182,7 @@ export async function runItem5(mods, hashContent) {
   }
   await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
 
-  // 決定性のための試験用配線（ADOPTER-SUPPLIED の対象ではない）: 「Aが消えたか」の判定を
-  // 埋め込み表現の巧拙から切り離すため、Memory のベクトルを固定のクエリベクトルへ強制的に
-  // 揃える。
+  // 決定性のための試験用配線（ADOPTER-SUPPLIED の対象ではない）。ベクトルを固定のクエリベクトルへ揃える。
   const space = embeddingProvider.space;
   const queryVector = new Array(space.dimensions).fill(0);
   queryVector[0] = 1;
@@ -282,11 +221,7 @@ export async function runItem5(mods, hashContent) {
   };
 }
 
-/**
- * 項目6（甲）「知らないことを、知らないと言える」。
- * `result.omitted` が空でないか。`Omission.kind`（11種の union）の型網羅は実行時には
- * 測れないため、このprobeでは測らない（ADR 0216 決定2、決定4-2と同じ「載せない」明記の規律）。
- */
+/** `Omission.kind` の型網羅は実行時には測れないので、測らない。 */
 export async function runItem6(mods, hashContent) {
   // ADOPTER-SUPPLIED(item6): 配線 — 何も渡さない（recall(ctx, {}) を呼ぶだけ）。
   const { runtime, ctx } = buildIsolatedRuntime(mods, "north-star-probe-item6", hashContent);
@@ -302,11 +237,7 @@ export async function runItem6(mods, hashContent) {
   };
 }
 
-/**
- * 項目7（乙）「どれだけ載せるかを、使う側が決められる」。
- * budget 未指定で `budgetApplied:false` か、指定すると実際に落ちるかだけを見る。
- * **既定の向きは当てない**（ADR 0216 決定3）。
- */
+/** ⛔ 既定の向きは当てない。 */
 export async function runItem7(mods, hashContent) {
   // ADOPTER-SUPPLIED(item7): 配線 — 1件目・2件目とも hashContent とストア構築だけ。
   const { runtime, ctx, stores, embeddingProvider } = buildIsolatedRuntime(
@@ -339,9 +270,7 @@ export async function runItem7(mods, hashContent) {
   const withBudget = await runtime.recall(ctx, {
     vector: queryVector,
     limit: 10,
-    // ADOPTER-SUPPLIED(item7): データ — maxMemoryChars は採用者にしか無い「どれだけ載せ
-    // たいか」の意思（ADR 0216 候補6の表・項目7）。ここでは差を確実に起こすため極端に
-    // 小さい値（1文字）を渡す——既定の向きは当てない（ADR 0216 決定3）。
+    // ADOPTER-SUPPLIED(item7): データ — maxMemoryChars は採用者にしか無い意思。
     budget: { maxMemoryChars: 1 },
   });
   const withBudgetTrace = withBudget.explain.stages.find((s) => s.stage === "budget_truncation");
@@ -360,7 +289,6 @@ export async function runItem7(mods, hashContent) {
   };
 }
 
-/** 1項目ぶんの観測を try/catch で包む。**個別の失敗が全体を止めない**（AGENTS.md）。 */
 export async function runItemSafe(item, fn, mods, hashContent) {
   try {
     const { fact } = await fn(mods, hashContent);
@@ -371,9 +299,6 @@ export async function runItemSafe(item, fn, mods, hashContent) {
   }
 }
 
-/**
- * 項目3・4（丙）は機械に載せない（ADR 0216 決定4）。段1・段2 共通の固定文面。
- */
 export function notMeasuredItemResults() {
   return [
     {
@@ -399,12 +324,7 @@ export function notMeasuredItemResults() {
 }
 
 /**
- * 7項目ぶんの `ItemResult` を一括で組み立てる。**段1・段2はこの関数を呼ぶだけ**——
- * 何をどう観測するかはここに集約し、複製しない。
- *
- * @param {object} mods `createRuntime` / `DeterministicLLMProvider` /
- *   `DeterministicEmbeddingProvider` / `InMemory*Store` の5種（呼び出し側が段ごとに
- *   別の場所から import して渡す）。
+ * @param {object} mods
  * @param {(content: string) => string} hashContent
  */
 export async function runAllNorthStarItems(mods, hashContent) {
