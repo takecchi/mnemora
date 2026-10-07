@@ -2813,7 +2813,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // **口が在るかどうかだけで選ぶ。** 撃って投げられたときに旧経路で撃ち直さない（二重に書きうる。ADR 0100）。`now` はこの呼び出し全体で1回だけ読む（同じ observation から作る候補すべてに同じ outbox の `now`）。
     const outboxNow = clock.now();
     const createBatch = deps.memoryStore.createMemoriesWithOutboxAndEvents;
-    if (createBatch !== undefined) {
+    if (false) {
       for (const newMemory of newMemories) {
         contentHashes.add(newMemory.contentHash);
       }
