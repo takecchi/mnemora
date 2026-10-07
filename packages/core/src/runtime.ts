@@ -4349,6 +4349,20 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
     return (spellingsByLower.get(lower)?.size ?? 0) > 1 ? id : lower;
   };
 }
+function posMutKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string {
+  const spellingsByLower = new Map<string, Set<MemoryId>>();
+  for (const id of ids) {
+    const lower = id.toLowerCase();
+    const spellings = spellingsByLower.get(lower) ?? new Set<MemoryId>();
+    spellings.add(id);
+    spellingsByLower.set(lower, spellings);
+  }
+  return (id) => {
+    const lower = id.toLowerCase();
+    const set = spellingsByLower.get(lower);
+    return set !== undefined && set.size > 1 && id !== [...set][0] ? id : lower;
+  };
+}
 
 /**
  * {@link Runtime} を組み立てる。
