@@ -21,48 +21,13 @@ import {
 import type { TimeProbe } from "./time-term-probe-set.js";
 
 /**
- * 時間項2つ(`freshness` と `decay`)を意味的類似度から分離して測る arm(PR 本文)。
- *
- * **ペアの本文を厳密に同一にする。**⟹ `similarity` はペア内で構成上ぴったり同じになる。
- * そこから先は、動かす項ごとに口が違う——`freshness` は `observe()` の `occurredAt`、
- * `decay` は注入した `Clock`(`mutable-clock.ts`)で振る `recordedAt` である
- * (`decay` の起点は `lastReinforcedAt ?? recordedAt` であり `occurredAt` を読まない)。
- *
- * **⚠ probe ごとに時刻を1点へ凍結する。**`runOneProbe` は probe の先頭で実時刻を1回
- * 捕まえ、`recordedAt` を明示しない member にはその同じ瞬間を使う。⟹ `recordedAt` を
- * 明示しない probe では、ペアの `decay` の幅が**厳密に 0** になる。
- * **これは ADR 0033 が測った `decay` の幅(probe ごとに 1.1〜1.8×10⁻⁵)とは違う条件である**
- * ——あちらは60件超を1〜2分かけて取り込んだ実時間の産物であり、こちらは
- * 「時間項以外を動かさない」ために意図して消してある。
- *
- * **probe ごとに別テナントを使う。**理由: スコープ内にそのペアの2件だけを置けば、
- * `limit`(既定10件)/`scoreThreshold`(既定 `DEFAULT_SCORE_THRESHOLD`)の外に
- * 落ちる可能性(他の候補に押し出される)や、他 probe との語彙的な競合を消せる。
- * **この arm は「現実らしさ」を捨てて「分離」を採る**——複数の話題が同じスコープに
- * 同居する状況での現実らしさは、既存の `probe-set.ts`(`retrieval-quality.ts`)の側が
- * 既に担っている。ここでは「時間項だけが動いたときに順位がどう動くか」を、
- * 他の変数を極力削って見る。
+ * ペアの本文は厳密に同一にし、時間項以外を動かさない。probe ごとに時刻を1点へ凍結するので、`recordedAt` を明示しない probe では `decay` の幅は厳密に 0 になる（ADR 0033 が測った実時間の幅とは別の条件）。
+ * probe ごとに別テナントを使う。他の候補に押し出される可能性や他 probe との語彙的な競合を消すためで、現実らしさは捨てて分離を採る（現実らしさは `probe-set.ts` 側が担う）。
  */
 
-// ---------------------------------------------------------------------------
-// ペアの判定
-// ---------------------------------------------------------------------------
-
 /**
- * ペアの total 差を「時間項が順位を決めていない」と読む上限。
- *
- * ⚠ 根拠(裁量値であり、強い根拠は無い): ペアの2件は連続する `observe()` 呼び出しなので
- * `recordedAt` がミリ秒〜数百ミリ秒しか違わない。`decay` の起点は
- * `lastReinforcedAt ?? recordedAt` であり(`packages/core/src/strategies/scoring.ts`)、
- * 半減期の既定 720時間(30日、`packages/postgres/src/tenant-settings-store.ts` の
- * `DEFAULT 720`)に対してミリ秒〜数百ミリ秒の差は
- * `0.5 ** (数百ミリ秒/時間 ÷ 720時間)` ≒ `1 - 1e-7` の桁にしかならず、
- * `decay` の比は 1 から 1e-7 程度しか離れない。一方 `realistic` probe の `freshness` 差は
- * `0.5**(1/30) - 0.5**(4/30)` ≒ 0.0655 で、絶対値で 0.05 前後在る。
- * ⟹ `1e-4` は「ミリ秒差の残り(decay 側のノイズ)」より十分大きく、
- * 「`realistic` probe が意図する現実的な差」より十分小さい。
- * **ただし、この数自体を裏付ける実測やより厳密な導出は無い**——「十分大きい/小さい」の
- * 判断は上記2つの実測値の桁を並べただけであり、境界付近の挙動まで検証したものではない。
+ * ペアの total 差を「時間項が順位を決めていない」と読む上限。裁量値で、この数自体を裏付ける実測は無い。
+ * ミリ秒差の残り（decay 側、1 から 1e-7 程度）より十分大きく、`realistic` probe の freshness 差（0.05 前後）より十分小さい、という桁の比較だけで決めた。
  */
 export const TIE_EPSILON = 1e-4;
 
@@ -77,27 +42,13 @@ export type PairOutcome =
 
 export interface PairMember {
   rank: number;
-  /**
-   * Issue #548 方向2 / ADR 0352: `options.association` を明示すると
-   * （`association-default-on-measure.ts` だけが渡す）、`AffinityUnmeasuredScore`
-   * （`total`/`similarity` 無し）のことがある。
-   */
   score: RecalledScore;
   digest: string;
 }
 
 /**
- * 純関数。返らなかったものを 0 に潰さない(ADR 0008「無いには種類がある」の適用)。
- *
- * **`collapsed` は呼び出し側が判定して渡す。**`rank` の比較では検出できない——
- * 1件の Memory は1つの externalId にしか解決されないので、2つの違う externalId を
- * `indexOf` で引いた添字が一致することは構造上起こらない。**ペアが潰れたときに実際に
- * 現れる形は「片方が返ってこない」であり、`older-not-returned` と区別が付かない。**
- * ⟹ 潰れたかどうかは `recall()` のスコープ内総数から見る(`runOneProbe` 参照)。
- *
- * **⛔ ここに `newer.rank === older.rank` の分岐を置いていたが、届かない分岐だったので
- * 外した**(ADR 0024 の「実装の無い予約を残さない」と同じ理由——検査できない経路を
- * 「念のため」で増やさない)。
+ * 純関数。返らなかったものを 0 に潰さない。`collapsed` は呼び出し側が判定して渡す（潰れたペアは「片方が返ってこない」形で現れ、`rank` の比較では `older-not-returned` と区別できない）。
+ * `newer.rank === older.rank` の分岐は置かない（構造上届かず、検査できない経路を増やさない）。
  */
 export function classifyPairOutcome(
   newer: PairMember | null,
@@ -117,10 +68,7 @@ export function classifyPairOutcome(
   if (older === null) {
     return "older-not-returned";
   }
-  // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠経由）には total が無い
-  // ——total 差での tie 判定はできない。順位（`rank`）だけで決める（2件の rank が
-  // 一致することは構造上無いので、"tied" にはならない——上の doc コメントの
-  // 「`newer.rank === older.rank` は届かない分岐」と同じ理由）。
+  // affinityMeasured: false には total が無いので、順位だけで決める（2件の rank は一致しないので "tied" にならない）。
   if (newer.score.affinityMeasured === false || older.score.affinityMeasured === false) {
     return newer.rank < older.rank ? "newer-ranked-higher" : "older-ranked-higher";
   }
@@ -131,44 +79,21 @@ export function classifyPairOutcome(
   return newer.rank < older.rank ? "newer-ranked-higher" : "older-ranked-higher";
 }
 
-// ---------------------------------------------------------------------------
-// probe ごとの指標
-// ---------------------------------------------------------------------------
-
 export interface TimeProbeOutcome {
   probeId: string;
   outcome: PairOutcome;
   newer: PairMember | null;
   older: PairMember | null;
-  /** ペアの2件の similarity の差の絶対値。片方が返っていなければ null(0 と区別する)。 */
   similarityGapWithinPair: number | null;
-  /**
-   * ペアの2件の freshness の差の絶対値(`similarityGapWithinPair` と同じ形)。
-   * `decay` 分離 probe(`decay-*`)では、両者の `occurredAt` を揃えてあるので
-   * これが 0 でなければ分離できていない——`decay-*` probe の検査の要。
-   */
   freshnessGapWithinPair: number | null;
-  /** older / newer の freshness の比。片方が返っていなければ null。 */
   freshnessRatio: number | null;
-  /** older / newer の decay の比。片方が返っていなければ null。 */
   decayRatio: number | null;
-  /** older / newer の total の比。片方が返っていなければ null。 */
   totalRatio: number | null;
   omittedKinds: string[];
   totalInScope: number;
-  /** 返った候補全体の項ごとの幅。`retrieval-quality.ts` の `computeTermSpreads` を再利用する。 */
   termSpreads: TermSpread[];
 }
 
-/**
- * 片方でも欠けていれば null(0 と区別する)。
- *
- * Issue #548 方向2 / ADR 0352: `pick` は `number | undefined` を返せるようにした
- * ——`affinityMeasured: false` の score には `total` が無い（`totalRatio` の呼び出し側、
- * 下）。`undefined` は「欠けている」に合流させる（値は変わらない。以前も
- * `pick(score).total` は候補によって `undefined` になりえたが、そのときは実行時に
- * `NaN` を作っていた——`null` にするほうが正確である）。
- */
 function ratio(
   newer: PairMember | null,
   older: PairMember | null,
@@ -197,7 +122,6 @@ function similarityGap(newer: PairMember | null, older: PairMember | null): numb
   return Math.abs(a - b);
 }
 
-/** `similarityGap` と同じ形。`freshness` は必須欄なので undefined チェックは要らない。 */
 function freshnessGap(newer: PairMember | null, older: PairMember | null): number | null {
   if (newer === null || older === null) {
     return null;
@@ -215,27 +139,15 @@ export interface TimeTermArmReport {
 
 export interface RunTimeTermArmOptions {
   armLabel: string;
-  /** probe ごとに `${tenantIdPrefix}-${probe.id}` を使う。 */
   tenantIdPrefix: string;
   runtime: Runtime;
   memoryStore: MemoryStore;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
-  /** 既定は `new Date()`。検査から固定できるように受ける。 */
   now?: Date;
-  /**
-   * `decay` を `freshness` から分離して測る probe(`decay-*`)だけが使う。
-   * この `clock` は `createExampleRuntime` に渡した `MutableClock` と**同じインスタンス**
-   * でなければならない——別インスタンスを渡しても `Runtime` 内部の `recordedAt` 計算には
-   * 反映されない。省略した場合、`newerRecordedDaysAgo`/`olderRecordedDaysAgo` は無視され
-   * (常に実時刻のまま)、`decay-*` probe は「分離できていない」結果になる。
-   */
+  /** `createExampleRuntime` に渡した `MutableClock` と同じインスタンスでなければならない（別インスタンスは `Runtime` 内部の `recordedAt` に反映されない）。省略すると `decay-*` probe は分離できない結果になる。 */
   clock?: MutableClock;
-  /**
-   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
-   * **省略時は `null`**——この arm(時制の新旧判定)の基準線は変えない。
-   * `examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
-   */
+  /** 省略時は `null`（この arm の基準線を動かさない）。 */
   association?: RecallAssociationQuery | null;
 }
 
@@ -250,21 +162,12 @@ async function runOneProbe(
 ): Promise<TimeProbeOutcome> {
   const ctx: Ctx = { tenantId: `${options.tenantIdPrefix}-${probe.id}` };
   const utterances = buildTimeTermConversation(probe, now);
-  // この probe のあいだ「実時刻」として使う1点。**member ごとに `new Date()` を
-  // 取り直さない**——取り直すと `recordedAt` を明示しない member どうしにミリ秒差が
-  // 残り、`decay` に測るつもりの無い幅が入る。
+  // member ごとに `new Date()` を取り直さない（ミリ秒差が残り、`decay` に測るつもりの無い幅が入る）。
   const realNow = new Date();
 
-  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)を積算し、
-  // `drainEmbedTicks` に渡す——「available_at との ms 競合で claim 0件のまま」
-  // 黙って抜けないことを検査させる。
   let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
-    // ⭐ member を observe する直前に、**必ず** Clock を置く。
-    // `recordedAt` を明示する member(`decay-*` probe)はその時刻へ、明示しない member は
-    // `realNow` へ。**「明示しないときは何もしない」にはしない**——それだと、片方だけ
-    // `recordedAt` を持つ probe を足したときに、もう片方が前の member の過去時刻を
-    // そのまま引き継いでしまう(いまの `TIME_PROBES` には無いが、罠は残さない)。
+    // member を observe する直前に必ず Clock を置く。「明示しないときは何もしない」にすると、片方だけ `recordedAt` を持つ probe を足したとき、もう片方が前の member の過去時刻を引き継ぐ。
     options.clock?.set(utterance.recordedAt ?? realNow);
     const observed = await options.runtime.observe(ctx, {
       kind: "utterance",
@@ -275,30 +178,8 @@ async function runOneProbe(
     expectedEmbedJobs += observed.memoryIds.length;
   }
 
-  // ⭐ recall の直前に必ず実時刻へ戻す——`recall()` の `now`(freshness/decay の基準時刻)も
-  // `clock.now()` から来る(`packages/core/src/recall-runtime.ts` の
-  // `const now = deps.clock.now()`)。ここで戻し忘れると、この probe の recall 自体が
-  // 過去の時刻で評価されてしまう。
-  //
-  // ⭐⚠ **戻す先は `realNow` ではなく、いま取り直した実時刻でなければならない。**
-  // (歴史的な理由で残している。ADR 0355 より前は `outbox.available_at` が Postgres の
-  // SQL `now()` で入り、アプリ側の `Clock` を読まなかった。いまは runtime が `clock.now()`
-  // 由来の `now` を store に渡すので、`available_at` も注入した時計に従う。ADR 0559。)
-  // 当時は `tick()` の claim 条件 `available_at <= clock.now()` を**アプリ側の
-  // `Clock` で**評価していたので、`clock` を取り込み開始より前の時刻(= `realNow`)に
-  // 戻すと、`available_at`(取り込み中の DB 時刻)のほうが後になり、
-  // **embed ジョブが1件も claim されずに ANN 候補が空になった。**
-  // **実測でこれを踏んだ**——8 probe すべてが「この項を持つ候補が無い」になった(ADR 0355 より前)。
-  //
-  // 🔴 Issue #719: 素の `new Date()` を渡すだけでは足りなかった(当時の事実。ADR 0559)——
-  // `available_at`(当時は Postgres の `now()`、us精度)と同じ ms 内でこの時刻を読むと
-  // claim が1件も進まなかった(`clockPastRecentDbWrites` の docstring 参照)。`options.clock` が
-  // 在る(`decay-*` probe、止まった `MutableClock`)場合は、`.set()` するまで
-  // 動かないので `drainEmbedTicks` の `waitForClockToAdvance`(実時計が進むのを
-  // 待つ既定の再試行)は無意味——ここで先に +1ms して確実に追い越しておき、
-  // `waitForClockToAdvance: false` で無駄な待ちを避ける。`options.clock` が
-  // 無い(既定の `systemClock`)場合は `.set()` する対象が無いので何もせず、
-  // `waitForClockToAdvance` の既定 `true`(実時計が進むのを待つ)に任せる。
+  // recall の直前に必ず実時刻へ戻す（`recall()` の `now` も `clock.now()` 由来）。戻す先は `realNow` ではなく、いま取り直した実時刻でなければならない。
+  // 止まった `MutableClock` は `.set()` するまで動かないので、ここで先に +1ms して確実に追い越し、`waitForClockToAdvance: false` で無駄な待ちを避ける。
   if (options.clock !== undefined) {
     options.clock.set(clockPastRecentDbWrites());
   }
@@ -308,14 +189,8 @@ async function runOneProbe(
     waitForClockToAdvance: options.clock === undefined,
   });
 
-  // ⛔ `text` 以外を渡さない——既定の limit/閾値/overFetchFactor のまま測る
-  // (既存 `runRetrievalQualityArm` と同じ規律)。
-  // association: options.association ?? null — `packages/core` の連想枠が既定 on に
-  // なった（ADR 0337）後も、この欄を省略した既存の呼び出しではこの arm の基準線
-  // （時制の新旧判定）を動かさない。連想は on/off の判断そのものとは無関係な効果
-  // （近傍からの追加昇格）を持ち込むため、"text 以外を渡さない" の規律よりここを
-  // 優先する。`options.association` を明示するのは ADR 0337 追記2026-09-26 の
-  // 測定スクリプトだけである。
+  // `text` 以外を渡さない（既定の limit・閾値・overFetchFactor のまま測る）。ただし association は `options.association ?? null` を優先する:
+  // 連想枠が既定 on でも、省略した呼び出しではこの arm の基準線を動かさない。
   const result = await options.runtime.recall(ctx, {
     text: probe.query,
     association: options.association ?? null,
@@ -329,17 +204,8 @@ async function runOneProbe(
   const newer = newerIndex === -1 ? null : toPairMember(result.memories[newerIndex]!, newerIndex);
   const older = olderIndex === -1 ? null : toPairMember(result.memories[olderIndex]!, olderIndex);
 
-  // ペアが2件として残ったか。**この arm は probe ごとに専用のテナントを使う**ので、
-  // スコープ内の Memory はそのペアだけである。⟹ `totalInScope < 2` は「2つの
-  // Observation が2件の Memory にならなかった」＝ペアが潰れたことを意味する。
-  //
-  // いまは起きない——Memory の抽出の冪等キーに `source_observation_id` が入っているため、
-  // 同一内容でも別 Observation なら別 Memory になる(`packages/core/src/interfaces/
-  // memory-store.ts` の `createMemoryWithOutbox` の契約)。**dedupe や矛盾検出が入れば
-  // 起きる。そのとき `older-not-returned` へ黙って読み替えないために独立して見る。**
-  //
-  // ⚠ 見るのは `< 2` の側だけである。本物の LLM は1発話から複数の Memory を作りうるので、
-  // `> 2` は異常ではない。
+  // `totalInScope < 2` はペアが潰れたことを意味する（この arm は probe ごとに専用テナント）。今は起きないが、dedupe や矛盾検出が入れば起きる。
+  // そのとき `older-not-returned` へ黙って読み替えないよう独立して見る。`> 2` は異常ではない（1発話から複数の Memory を作りうる）ので見ない。
   const pairCollapsed = result.index.totalInScope < 2;
 
   return {
@@ -373,10 +239,6 @@ export async function runTimeTermArm(options: RunTimeTermArmOptions): Promise<Ti
   };
 }
 
-// ---------------------------------------------------------------------------
-// 表示
-// ---------------------------------------------------------------------------
-
 function formatRatio(value: number | null): string {
   return value === null ? "(片方が返っていない)" : formatScoreValue(value);
 }
@@ -386,8 +248,6 @@ function formatPairMember(label: "newer" | "older", member: PairMember | null): 
     return `  ${label}: (返っていない)`;
   }
   const s = member.score;
-  // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total/similarity という
-  // 欄自体が無い——「掛け算の形」を出せないので、比較可能でないことをそのまま名乗る。
   if (s.affinityMeasured === false) {
     return (
       `  ${label}: #${member.rank} total=n/a（affinityMeasured: false、連想枠経由で` +
@@ -406,7 +266,6 @@ function formatPairMember(label: "newer" | "older", member: PairMember | null): 
   );
 }
 
-/** probe ごとの outcome・両者の内訳・比・omitted を出す。 */
 export function formatTimeTermReport(report: TimeTermArmReport): string {
   const lines: string[] = [];
   lines.push(`=== time-term arm ${report.armLabel} ===`);

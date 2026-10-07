@@ -8,23 +8,6 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * `InMemoryMemoryStore` が返す Memory（と入れ子の値）は、**返した時点の複製**である
- * ——`PostgresMemoryStore` が毎回行を読み直した新しいオブジェクトを返すのと同じ（Issue #1108）。
- *
- * 【実測 2026-09-27】以前は内部に持っている Memory の実体そのものを返し、後の書き込みが
- * その実体をその場で書き換えていた。そのため、呼び手が一度受け取った値が、後の別の操作で
- * 遡って変わった——`runtime.applyCorrection` の返り値の中の「contested にした」という
- * 結果の Memory が、同じ呼び出しの後の resolve で `superseded` と名乗っていた（Postgres は
- * 印を付けた時点の `contested`）。
- *
- * 2つのことを見る:
- * 1. 依頼の場面: `applyCorrection` の返り値が、後から書き換わらない。
- * 2. 返す口の一覧: `MemoryStore` の Memory を返す口それぞれで、
- *    (a) 後の書き込み（`reinforce`）で、受け取った値が変わらない
- *    (b) 受け取った値を書き換えても（入れ子の配列も含めて）、store の中身が変わらない
- */
-
 const ctx: Ctx = { tenantId: "in-memory-return-snapshots" };
 const LATER = new Date("2099-01-01T00:00:00.000Z");
 
@@ -107,7 +90,6 @@ describe("applyCorrection の返り値が、後から書き換わらない（Iss
   });
 });
 
-/** Memory を返す口を1つ呼び、返った Memory を並べる。`target` は後の書き込みを当てる Memory。 */
 type Returner = (store: InMemoryMemoryStore) => Promise<{ returned: Memory[] }>;
 
 const RETURNERS: Array<[string, Returner]> = [
@@ -302,7 +284,6 @@ const RETURNERS: Array<[string, Returner]> = [
       };
     },
   ],
-  // 以下は、上の17口の別の分岐と、一覧に無かった口（#1114 の歯の足し）。
   [
     "createMemoryWithOutbox（冪等の再送。created: false）",
     async (s) => {
@@ -421,13 +402,11 @@ describe("InMemoryMemoryStore の Memory を返す口は、返した時点の複
     expect(returned.length).toBeGreaterThan(0);
     const snapshot = JSON.stringify(returned);
 
-    // (a) 後の書き込み（reinforce は status を問わず lastReinforcedAt を書き換える）で、受け取った値が変わらない。
     for (const memory of returned) {
       await store.reinforce(ctx, memory.id, LATER);
     }
     expect(JSON.stringify(returned)).toBe(snapshot);
 
-    // (b) 受け取った値を書き換えても（入れ子の配列も含めて）、store の中身が変わらない。
     const target = returned[0]!;
     const before = JSON.stringify(await store.get(ctx, target.id));
     (target as { status: string }).status = "mutated-by-caller";

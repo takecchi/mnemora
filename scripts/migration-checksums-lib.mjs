@@ -3,28 +3,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * 出荷済みの `packages/postgres/migrations/*.sql` が書き換えられていないことを、
- * 内容の sha256 で固定する門の判定部（ADR 0637、オーナー回答 374f6f88 の問29）。
- *
- * ⭐ **なぜ要るか**: `_mnemora_migrations` 台帳はファイル名だけで適用済みを判定する
- * （`packages/postgres/src/migrate.ts` の `runMigrations`）。適用済みのファイルを後から
- * 編集しても、既に当てた DB では再実行されないので、「実行された内容」と「リポジトリの正本」が
- * 黙ってずれる。ここはその編集を CI で赤にする。
- *
- * ⭐ **何を固定し、何を固定しないか**
- * - 固定する: 名簿（manifest）に載っているファイルの内容。**書き換え**も**削除**も赤。
- * - 固定しない: 名簿に載っていない**新しい**ファイルの追加。追加は赤にしない
- *   （新しい migration を足すこと自体が、直し方の正道だから）。名簿に載せるのは `--write`
- *   （既存の行は決して書き換えず、足すだけ）。
- * - 正規化: 先頭の BOM と、改行の CRLF/CR は LF に揃えてから hash する。エディタや
- *   `core.autocrlf` が入れる改行・BOM の違いだけで赤にしない。それ以外の空白・コメントの
- *   変更は、内容の変更として赤にする。
- *
- * この関数群は副作用（console / process.exit / 書き込み）を持たない。入口は
- * `scripts/check-migration-checksums.mjs`。
+ * ⛔ 名簿に載っていない新しいファイルの追加は赤にしない（新しい migration を足すのが正道）。
+ * 名簿への追加は `--write`（既存の行は書き換えず、足すだけ）。
+ * 先頭の BOM と改行の CRLF/CR は LF に揃えてから hash する（エディタや `core.autocrlf` の違いだけで赤にしない）。
+ * それ以外の空白・コメントの変更は、内容の変更として赤にする。
  */
 
-/** 名簿（manifest）の置き場。publish 対象（`files`: dist・migrations）の外。 */
 export const MANIFEST_RELATIVE_PATH = "packages/postgres/migration-checksums.json";
 export const MIGRATIONS_RELATIVE_DIR = "packages/postgres/migrations";
 
@@ -61,8 +45,6 @@ export function computeChecksums(migrationsDir) {
  * @param {Record<string, string>} pinned 名簿の files
  * @param {Record<string, string>} actual 手元の現物
  * @returns {{ changed: string[]; missing: string[]; unpinned: string[] }}
- *   changed: 名簿にあり、内容が違う。missing: 名簿にあり、ファイルが無い。
- *   unpinned: ファイルはあるが名簿に無い（赤にしない。新しい migration）。
  */
 export function compareChecksums(pinned, actual) {
   const changed = [];
@@ -76,7 +58,6 @@ export function compareChecksums(pinned, actual) {
 }
 
 /**
- * 名簿の JSON 文字列を読む。形が違えば例外（黙って空として扱わない）。
  * @param {string} json
  * @returns {Record<string, string>}
  */
@@ -95,7 +76,6 @@ export function parseManifest(json) {
 }
 
 /**
- * 既存の行は一切書き換えず、名簿に無いファイルだけを足した名簿を返す。
  * @param {Record<string, string>} pinned
  * @param {Record<string, string>} actual
  */
@@ -110,7 +90,6 @@ export function appendUnpinned(pinned, actual) {
 }
 
 /**
- * 赤のときの出力（読み手が次の一手を決められる形）。
  * @param {{ changed: string[]; missing: string[] }} result
  */
 export function describeFailure({ changed, missing }) {

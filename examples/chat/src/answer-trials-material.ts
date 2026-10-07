@@ -5,129 +5,67 @@ import { ANSWER_CASE_SET_DEV } from "./answer-case-set.dev.js";
 import { ORDER_LEGEND_LINE } from "./mnemora-path.js";
 
 /**
- * Issue #705 / ADR 0301 の材料抽出器。
- *
- * 🔴 **この module は DB・埋め込み・抽出・recall を一切呼ばない（import もしない）。**
- * `examples/chat/cassettes/answer.json`（`record answer` が実 API で記録した既存のカセット、
- * ADR 0051）を読むだけで、`answer-case-set.dev.ts` の dev 6件それぞれに対応する
- * mnemora 経路の回答プロンプト（`mnemora-path.ts` の `buildMnemoraPrompt` が組んだもの）を
- * 見つけ、`renderRecalledMemoryLine` が描画した1行ずつのタグ付き文字列を、構造化した
- * `MaterialMemoryLine` へ**パースして戻す**。
- *
- * **なぜ recall をやり直さないのか（Issue #691 / ADR 0295 追記2 の見落としの再発防止）**:
- * ADR 0295 追記2 が明らかにした事故は、「対照Aと対照Bが同じ記憶集合の上で回っている」ことを
- * 器が確かめていなかったことだった——別の抽出・別の recall で得た記憶集合を比べて
- * 「退行は消えた」と誤判定した。この module が**カセットの中の1つの記録済みプロンプトだけを
- * 材料の唯一の情報源にする**のは、そもそも「別の記憶集合になりうる経路」（DB・埋め込み・抽出・
- * recall の再実行）を構造的に持たないことで、同じ事故を再発させないためである。
+ * 材料抽出器。DB・埋め込み・抽出・recall を一切呼ばない（import もしない）。
+ * 記録済みカセットの1つのプロンプトだけを材料の唯一の情報源にする。別の記憶集合になりうる経路を
+ * 構造的に持たないことで、「別の記憶集合どうしを比べて退行が消えたと誤判定する」事故を再発させない。
  */
 
-// ---------------------------------------------------------------------------
-// 型
-// ---------------------------------------------------------------------------
-
 /**
- * `renderRecalledMemoryLine`（`mnemora-path.ts`）が描画した1行を構造へ戻したもの。
- *
- * 各欄の「無い」の表現:
- * - `speaker`: `provenanceKind !== "stated"` のときはタグそのものが無い ⟹ `undefined`。
- *   `stated` だが値が無いときはタグの値が文字通り `"不明"` になる（`speakerSegment` 参照）
- *   ——これは `undefined` にせず、そのまま文字列 `"不明"` として保持する。「無い」と
- *   「不明」を型のレベルで潰さない。
- * - `subject`: 常にタグが在る（`subjectSegment` は常に値を返す）。値が無ければ文字列
- *   `"なし"`。
- * - `contradiction`: 矛盾関係が無ければタグが無い ⟹ `undefined`。
- * - `recordedOrder`: `recordedAt` を渡さなかった要素はタグが無い ⟹ `undefined`。
- * - `occurredAt`: `occurredAt` が `undefined`（頼んでいない）ならタグが無い ⟹
- *   `undefined`。`null`（頼んだが無かった）なら文字列 `"不明"`。
+ * `renderRecalledMemoryLine` が描画した1行を構造へ戻したもの。「無い」と「不明」を型のレベルで潰さない。
+ * タグそのものが無ければ `undefined`、タグの値が `"不明"`/`"なし"` ならその文字列を保持する。
  */
 export interface MaterialMemoryLine {
   provenanceKind: string;
   speaker?: string;
   subject: string;
   contradiction?: string;
-  /** `[根拠:失われた]` の欄が在った（Issue #972、`RecalledMemory.basisLost`）。 */
   basisLost?: true;
   recordedOrder?: number;
   occurredAt?: string;
   digest: string;
 }
 
-/** 1 dev ケース分の材料。 */
 export interface CaseMaterial {
   caseId: string;
   question: string;
-  /** カセットに記録された system 文（`ANSWER_SYSTEM_PROMPT` と一致するはず）。 */
   system: string;
   totalInScope: number;
   presented: number;
   lines: MaterialMemoryLine[];
   /**
-   * `rawContent` の本体が {@link ORDER_LEGEND_LINE}（ADR 0309 の凡例行）で始まって
-   * いたかどうか。**`lines` に `recordedOrder` を持つ行があるかどうかとは独立の
-   * 情報として保持する**——`examples/chat/cassettes/answer.json`（旧・凍結カセット、
-   * ADR 0301/0309 の対照の基準）は `[記録順:N]` タグは持つが凡例行を持たない
-   * （2026-09 の過渡期の記録形式、PR #703 直後・PR #716 より前）。`recordedRenderer`
-   * （`answer-trials-render.ts`）はこの欄を見て凡例行の有無を原文どおりに再現する
-   * ——`lines` から再導出すると `answer.json` の再構成検査が壊れる（この PR の
-   * 作業中に実際に踏んだ）。
+   * `rawContent` の本体が {@link ORDER_LEGEND_LINE} で始まっていたか。`lines` から再導出しない。
+   * 旧・凍結カセット `answer.json` は `[記録順:N]` タグを持つが凡例行を持たず、再導出すると再構成検査が壊れる。
    */
   hasOrderLegend: boolean;
-  /** カセットに記録された、この case の mnemora 側 `messages[0].content` の原文そのまま。 */
   rawContent: string;
-  /** 正規化した構造（`caseId`/`question`/`system`/`totalInScope`/`presented`/`lines`）の sha256。 */
   fingerprint: string;
 }
 
 export interface AnswerTrialsMaterialSet {
   cassettePath: string;
-  /** カセットファイル全体（生のテキスト）の sha256。 */
   cassetteSha256: string;
-  /** カセットの `recordedAt`（現物の値をそのまま通す。焼き直さない）。 */
   cassetteRecordedAt: string;
-  /** `answer-case-set.dev.ts` と同じ順序。 */
   cases: CaseMaterial[];
 }
 
-// ---------------------------------------------------------------------------
-// 既知の定数（answer-bench.ts / answer-retention-mutation.ts の値を、DB を import せずに
-// 独立して複製したもの——理由は下のコメント参照）
-// ---------------------------------------------------------------------------
-
 /**
- * `answer-bench.ts` の `ANSWER_SYSTEM_PROMPT` と同じ文字列。**あちらを import しない**
- * ——`answer-bench.ts` は `@mnemora/postgres`（DB）を import しており、この module は
- * DB を一切 import しない規律を持つ（本ファイル冒頭）。ずれた場合は
- * `__tests__/answer-trials-material.test.ts` がソースの生テキストを直接読んで一致を
- * 確認する（import を使わない自己整合性の検査、下記テスト参照）。
+ * `answer-bench.ts` の `ANSWER_SYSTEM_PROMPT` と同じ文字列。あちらを import しない。
+ * `answer-bench.ts` は DB を import しており、この module は DB を import しない。ずれは単体試験がソースの生テキストで検出する。
  */
 const ANSWER_SYSTEM_PROMPT =
   "以下の会話ログだけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。";
 
-/**
- * `answer-bench.ts` の `buildQuestionSuffix` と同じ形（`"\n\n質問: " + question`）。
- * 同上の理由で複製する。
- */
+/** `answer-bench.ts` の `buildQuestionSuffix` と同じ形。同上の理由で複製する。 */
 function questionSuffix(question: string): string {
   return `\n\n質問: ${question}`;
 }
 
 /**
- * `answer-retention-mutation.ts` の `RETENTION_MUTATION_REPLACEMENT` と同じ文字列。
- * **あちらを import しない**（同上の理由——`answer-retention-mutation.ts` は
- * `answer-bench.ts` 経由で DB を import する）。
- *
- * カセットには、この文字列を含む「陽性対照」用の mnemora プロンプトが1件混じっている
- * （`pref-tea-over-coffee` の digest を意図的に壊した変異、`recordRetentionMutationPositiveControl`
- * が記録する）。材料抽出はこれを**除外する**——除外できなければ「複数に当たった」例外に
- * 落ちる（下記 `findMnemoraEntryContent` 参照）。ずれ（この文字列が変わったのに複製し忘れる）
- * を黙って見逃さない——ずれた場合、除外に失敗して候補が2件になり、例外として表面化する。
+ * `answer-retention-mutation.ts` の `RETENTION_MUTATION_REPLACEMENT` と同じ文字列。あちらを import しない（同上）。
+ * カセットには、この文字列を含む陽性対照のプロンプトが1件混じる。材料抽出はそれを除外する。複製がずれると
+ * 除外に失敗して候補が2件になり、例外として表面化する。
  */
 const KNOWN_MUTATION_MARKERS: readonly string[] = ["[要約失敗。内容は保持していません]"];
-
-// ---------------------------------------------------------------------------
-// カセットのパス・読み込み
-// ---------------------------------------------------------------------------
 
 export function defaultCassettePath(): string {
   return fileURLToPath(new URL("../cassettes/answer.json", import.meta.url));
@@ -179,10 +117,6 @@ function readCassette(cassettePath: string): { raw: string; parsed: CassetteShap
   return { raw, parsed: shape as CassetteShape };
 }
 
-// ---------------------------------------------------------------------------
-// 1行のパース（`renderRecalledMemoryLine` の逆変換）
-// ---------------------------------------------------------------------------
-
 function takeBracket(s: string, tag: string): { value: string; rest: string } | undefined {
   const re = new RegExp(`^\\[${tag}:([^\\]]*)\\]`);
   const m = re.exec(s);
@@ -201,13 +135,7 @@ function stripLeadingSpace(s: string, context: string): string {
   return s.slice(1);
 }
 
-/**
- * `renderRecalledMemoryLine` が描画した1行（先頭の `"- "` を含む）を
- * {@link MaterialMemoryLine} へパースする。欄の順序は由来 → 話者 → 主題 → 矛盾候補 →
- * 根拠 → 記録順 → 出来事時刻 → digest（`mnemora-path.ts` の同関数 docstring と同じ順序）。
- *
- * ⛔ **解析できない行は例外を投げる（黙って飛ばさない、Issue #705 の要求）。**
- */
+/** `renderRecalledMemoryLine` が描画した1行を {@link MaterialMemoryLine} へパースする。解析できない行は例外を投げ、黙って飛ばさない。 */
 export function parseMemoryLine(line: string): MaterialMemoryLine {
   if (!line.startsWith("- ")) {
     throw new Error(`parseMemoryLine: 行が "- " で始まっていない: ${JSON.stringify(line)}`);
@@ -243,8 +171,7 @@ export function parseMemoryLine(line: string): MaterialMemoryLine {
   let basisLost: true | undefined;
   const basis = takeBracket(rest, "根拠");
   if (basis) {
-    // 描画側（mnemora-path.ts の basisSegment）が出す値は1つだけ。ほかの値は、描画の形が
-    // 変わったのに追従していないしるしなので、黙って受けずに止める（Issue #705 の規律）。
+    // 描画側が出す値は1つだけ。ほかの値は描画の形が変わったのに追従していないしるしなので、黙って受けずに止める。
     if (basis.value !== "失われた") {
       throw new Error(
         `parseMemoryLine: [根拠:...] の値が想定外（「失われた」だけを想定）: ${JSON.stringify(basis.value)}`,
@@ -292,10 +219,6 @@ export function parseMemoryLine(line: string): MaterialMemoryLine {
 
 const INDEX_LINE_RE = /^\(索引: スコープ内 (\d+) 件のうち (\d+) 件を提示\)$/;
 
-/**
- * `buildMnemoraPrompt` の出力（質問の接尾辞を含まない本体部分）をパースする。
- * 最後の行が索引行、それより前の行があれば1行ずつ `parseMemoryLine` へ渡す。
- */
 export function parseMnemoraPromptBody(body: string): {
   totalInScope: number;
   presented: number;
@@ -315,12 +238,6 @@ export function parseMnemoraPromptBody(body: string): {
   }
   const totalInScope = Number(m[1]);
   const presented = Number(m[2]);
-  // ⭐ Issue #691 続き: `order-legend` 描画（ADR 0309）は、記録順を1件以上持つときだけ
-  // 本文の先頭に {@link ORDER_LEGEND_LINE} を足す（`mnemora-path.ts`
-  // `sortMemoriesForDisplay` docstring参照）。**この行は記憶の行ではない**——
-  // 残っていると `parseMemoryLine` が「"- " で始まっていない」で例外にする。
-  // `isMnemoraShapedContent` の3条件目（同ファイル）と対になる修正——あちらは
-  // 「候補として見つける」段、こちらは「見つけた後にパースする」段の同じ穴を塞ぐ。
   const hasOrderLegend = rawLines[0] === ORDER_LEGEND_LINE;
   const withoutLegend = hasOrderLegend ? rawLines.slice(1) : rawLines;
   const memoryLines = withoutLegend.slice(0, withoutLegend.length - 1);
@@ -333,10 +250,6 @@ export function parseMnemoraPromptBody(body: string): {
   return { totalInScope, presented, lines, hasOrderLegend };
 }
 
-/**
- * カセットの1エントリの `content`（本体 + 質問の接尾辞）から、本体部分だけを切り出す。
- * `question` に対応する接尾辞（`"\n\n質問: " + question`）で終わっていなければ例外。
- */
 function splitOffQuestionSuffix(content: string, question: string): string {
   const suffix = questionSuffix(question);
   if (!content.endsWith(suffix)) {
@@ -347,11 +260,6 @@ function splitOffQuestionSuffix(content: string, question: string): string {
   return content.slice(0, content.length - suffix.length);
 }
 
-// ---------------------------------------------------------------------------
-// 安定 JSON 化・指紋
-// ---------------------------------------------------------------------------
-
-/** キーをソートして再帰的に安定させた JSON 文字列を作る（オブジェクトの挿入順に依存しない）。 */
 export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((v) => stableStringify(v)).join(",")}]`;
@@ -379,28 +287,6 @@ function sha256OfText(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-// ---------------------------------------------------------------------------
-// カセットからケース1件分を探す
-// ---------------------------------------------------------------------------
-
-/**
- * ⭐ Issue #691 続き（claimKey 評価用カセットの材料化、ADR 0301 §4.5.2 の続き）:
- * `content.startsWith(ORDER_LEGEND_LINE)` を追加した。ADR 0309 が採用した
- * `order-legend` 描画（`buildMnemoraPrompt`）は、記録順タグを1件以上持つときだけ
- * 本文の先頭に {@link ORDER_LEGEND_LINE} を足す（`mnemora-path.ts`
- * `sortMemoriesForDisplay` docstring参照）——**この形の content は元の2条件
- * （`"- [由来:"` 始まり・`"(索引:"` 始まり）のどちらにも当たらず、素通りしていた**。
- * `loadAnswerTrialsMaterial()` の既定は今も `answer.json`（旧形式、凡例行を持たない）
- * であり、この穴は顕在化していなかった——**`answer.order-legend.json` や、
- * 本 PR が足す `answer.claim-key.json`（どちらも凡例行を持つ）を`cassettePath`に
- * 明示して渡すと、`findMnemoraEntryContent` が「記憶経路の回答プロンプトが見つからない」
- * という誤った例外を投げていた（この PR の作業中に実際に踏んだ）。**
- *
- * ⛔ **default 挙動は変えない**——`answer.json` の content は凡例行を持たない
- * （`hasAnyRecordedOrder` が false の記録時点の描画、または #698 旧書式）ため、
- * 3条件目が新たに真になることはない。追加した条件は純粋に「今まで弾かれていた
- * 形を拾えるようにする」ものであり、既存の2条件が真になるケースの判定を変えない。
- */
 function isMnemoraShapedContent(content: string): boolean {
   return (
     content.startsWith("- [由来:") ||
@@ -488,20 +374,6 @@ function buildCaseMaterial(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 公開 API
-// ---------------------------------------------------------------------------
-
-/**
- * `examples/chat/cassettes/answer.json` から、dev 6件それぞれの mnemora 経路の
- * 回答プロンプトを読み、構造化した材料に戻す。
- *
- * ⛔ **DB・埋め込み・抽出・recall は一切呼ばない**（この module 自体、それらを import すら
- * していない——冒頭のコメント参照）。
- *
- * **対応づけられない dev ケース・複数に当たるケースは例外で止める。**
- * （`findMnemoraEntryContent` 参照。黙って飛ばさない、Issue #705 の要求。）
- */
 export function loadAnswerTrialsMaterial(
   cassettePath: string = defaultCassettePath(),
 ): AnswerTrialsMaterialSet {

@@ -1,16 +1,6 @@
 #!/usr/bin/env node
 /**
- * `scripts/measure-embedding-output-fingerprint.mjs` が書いた測定 JSON を人が読める
- * Markdown へ変換し、CI の Job Summary（`$GITHUB_STEP_SUMMARY`）へ載せる CLI
- * （Issue #565、ADR 0253 追記）。
- *
- * 組み立てそのものは `./embedding-output-fingerprint-summary-lib.mjs` の純関数に委ねる。
- *
- * 使い方:
- *   node scripts/embedding-output-fingerprint-summary.mjs --measured <path>
- *
- * ⛔ **このスクリプトは門ではない。**非0で終わるのは、`--measured` の中身が
- * 測定結果として使えない（壊れている）ときだけである。
+ * ⛔ 門ではない。非0で終わるのは、`--measured` の中身が測定結果として使えない(壊れている)ときだけ。
  */
 import { readFileSync } from "node:fs";
 import {

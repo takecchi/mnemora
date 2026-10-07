@@ -1,54 +1,13 @@
 import type { AnswerCase } from "./answer-case.js";
 
 /**
- * ADR 0334 追記 2026-09-26（2）（Issue #372負債6の続き、クローン miku の委譲で動く
- * セッションが追加。判断はクローン miku のもの、オーナーではない）。
+ * 本人の事実と第三者の事実を、意図的に別ターン（別の `observe()`）に分けた集合。
+ * 同じターンに同居すると、1回の `deriveClaimKeys` が比較材料を持つ前提が崩れる（既存14件はそうだった）。
  *
- * **既存の `answer-case-set.dev.ts`/`answer-case-set.eval.ts`（dev6+eval8=14件）は
- * 1バイトも変えない。この集合は別ファイルとして追加する**——14件の母集合・
- * `__tests__/answer-case.test.ts` の「14件中4件」の歯を動かさないため。
+ * 既存の `answer-case-set.dev.ts`/`answer-case-set.eval.ts` は変えず、別ファイルにする。
+ * 14件の母集合と `answer-case.test.ts` の「14件中4件」の歯を動かさないため。
  *
- * ## なぜこの集合が要るか
- *
- * ADR 0334 の追記（2026-09-26）は、既存14件のうち `knownSubjects` を持つ4件
- * （`other-person-birthday` 等）で `knownSubjects` の効果を測ったが、
- * **その4件はいずれも本人の事実と第三者の事実が同じターン（同じ `observe()`
- * 呼び出し）に同居していた**（例: 「わたしの誕生日は4月3日です。妻の誕生日は
- * 9月10日です。」が1つの `AnswerCaseTurn.text`）。ADR 0334 決定1「型A」
- * （1回の `deriveClaimKeys` 呼び出しは、本番では通常「1件の Observation から
- * 抽出された候補群」だけを含む——比較材料を構造的に持たない）が成り立つのは
- * **本人の事実と第三者の事実が別ターン（別の `observe()`）にある場合**であり、
- * 既存14件はこの条件を満たしていなかった（追記「なぜ ADR 0324/決定2 の実測と
- * 食い違うか」節）。
- *
- * この集合は、本人の事実と第三者の事実を**意図的に別々のターン**（別の
- * `AnswerCaseTurn`、したがって別の `observe()` 呼び出し）に分けて書く——
- * ADR 0324 §4 real-fixture 実測・ADR 0334 決定2 の ON-ceiling 実測が使った
- * `family`/`diet`/`language` の型（誤帰属率が高かった3類、ADR 0324 §4:
- * family 4/5・language 3/5・diet 2/5）と `pet`（0/5 だった対照）を参考にした。
- *
- * ⛔ **ケースを作り込んで型Aを無理に再現させない。** 会話は自然な家族・同僚・
- * 配偶者の発話にする——ADR 0324/0334 が使った関係名詞（弟/姉/妹/同僚/父/妻）を
- * そのまま流用せず、この集合独自の自然な文にする（既存ケースとの重複を避ける
- * 意図もある）。
- *
- * ## 構造上の規約（`__tests__/answer-case-set.separate-turn.test.ts` が検査する）
- *
- * - 3〜6件。
- * - 全件 `AnswerCase.knownSubjects` を持つ（`["user", "<第三者>"]`、上限＝オラクル
- *   測定用——`AnswerCase.knownSubjects` docstring と同じ限定がそのまま当てはまる）。
- * - 全件、本人の事実の語（`expected.reject` の値）と第三者の事実の語
- *   （`expected.accept` の値）が**同じ `conversation` ターンに同居しない**——
- *   これが「別ターン」であることの機械的な歯である（同居していれば、その時点で
- *   型Aの前提が崩れる）。
- * - `tuningUse: "held-out"`——`answer-case-set.eval.ts` と同じ規律（実装の挙動を
- *   見てからケースを直さない）で、実装結果を見る前に会話・期待値・`knownSubjects`
- *   を決めてから実測に使った。
- *
- * ## 使い方
- *
- * `scripts/record-answer-claim-key.ts` の `MNEMORA_ANSWER_CASE_SET=separate-turn`
- * （opt-in、省略時は従来どおり dev+eval の14件）でこの集合を選べる。
+ * ケースを作り込んで型Aを無理に再現させない。会話は自然な発話にする。
  */
 export const ANSWER_CASE_SET_SEPARATE_TURN: AnswerCase[] = [
   {

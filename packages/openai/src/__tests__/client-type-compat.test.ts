@@ -3,8 +3,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import OpenAI from "openai";
-// `openai-latest` は devDependency のエイリアス（`package.json` の
-// `"openai-latest": "npm:openai@7.23.0"`。下の docstring 参照）。
+// `openai-latest` は devDependency のエイリアス（`package.json` の `npm:openai@7.23.0`）。
 import OpenAILatest from "openai-latest";
 import type { Ctx } from "@mnemora/core";
 import type {
@@ -16,34 +15,13 @@ import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
 /**
- * [Issue #1221](https://github.com/takecchi/mnemora/issues/1221) の歯。
- *
- * `OpenAILLMProviderOptions.client` / `OpenAIEmbeddingProviderOptions.client` の型は、
- * `openai` パッケージのクラスを名指ししない自前の構造型（`client-types.ts`）である。
- * この歯は3つを縛る（3つ目は下の `describe("公開する .d.ts に …")`）:
- *
- * 1. **型**: `@mnemora/openai` が依存に固定している版（`openai@7.10.0`、通常の
- *    `import OpenAI from "openai"`）と、利用者が入れうる別の版（devDependency に
- *    `"openai-latest": "npm:openai@7.23.0"` としてエイリアスした、2026-09-29 時点の
- *    最新）の**両方**の `OpenAI` インスタンスが、`OpenAIChatClient`/`OpenAIEmbeddingsClient`
- *    に代入できること。これは実行時の assert ではなく、**この行が
- *    `tsc -p tsconfig.json`（`pnpm run typecheck`）を通ること自体**が検査である
- *    ——型が食い違えば `TS2322` でこのファイルごと typecheck が落ちる。
- * 2. **実際の呼び出し**: 本物の SDK client（`fetch` を差し替えたもの）を provider に
- *    渡し、実際に送られる URL・method・JSON body が変わっていないことを、固定した版・
- *    別の版の両方で確かめる（下の `describe("実際に送られる HTTP …")`）。
  * 3. **公開 `.d.ts`**: 公開する `.d.ts` に `openai` パッケージの import が出ないこと
  *    （`import ... from "openai"`・`import("openai")`・`/// <reference types="openai" />`）。
- *    ⚠ CI は `test` を `build` より前に走らせる（`.github/workflows/ci.yml`）ので `dist` は
- *    まだ無い。そのためこの歯は `dist` を読まず、`tsconfig.build.json` と同じ設定で
- *    TypeScript の API が `.d.ts` をメモリへ出したものを読む（`dist` が無くても黙って通らない）。
- *
- * ⚠ **ネットワークは叩かない**——`fetch` を差し替えて呼び出しを捕まえるだけであり、
- * 本物の OpenAI API への到達性は確かめていない（`live.openai.test.ts` の役目）。
+ * ⚠ CI は `test` を `build` より前に走らせるので `dist` がまだ無い。そのため `dist` を読まず、`tsconfig.build.json` と同じ設定で TypeScript の API が `.d.ts` をメモリへ出したものを読む（`dist` が無くても黙って通らない）。
+ * 型の検査は実行時の assert ではなく、`tsc -p tsconfig.json` を通ること自体が検査である。
  */
 const ctx: Ctx = { tenantId: "tenant-1" };
 
-/** 代入できることそのものが検査であるマーカー関数。実行時は何もしない。 */
 function assertAssignable<T>(_value: T): void {
   // 意図的に空。呼べる（＝ typecheck が通る）ことが検査である。
 }
@@ -81,9 +59,7 @@ describe("client の型は別の版の openai インスタンスも受け付け�
   });
 });
 
-/** `Float32Array` を OpenAI の base64 埋め込みエンコーディングへ変換する
- * （SDK が既定で `encoding_format: "base64"` を強制し、応答をデコードして返す。
- * `lib/embeddings.js` 参照。実測は PR 本文）。 */
+/** SDK は既定で `encoding_format: "base64"` を強制し、応答をデコードして返す（`lib/embeddings.js`）。 */
 function toBase64Float32(values: number[]): string {
   const buf = new Float32Array(values);
   return Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength).toString("base64");
@@ -95,7 +71,6 @@ interface CapturedRequest {
   body: unknown;
 }
 
-/** `fetch` を差し替えた本物の SDK client を作る。捕まえたリクエストは `calls` に積む。 */
 function withCapturingFetch<T>(
   buildClient: (fetchStub: typeof fetch) => T,
   respond: () => Response,
@@ -221,8 +196,6 @@ describe("実際に送られる HTTP は、client の型を切り離す前と変
   });
 });
 
-/** `create` に渡された引数をそのまま積む偽 client（`temperature` の有無を、SDK の
- * 直列化を挟まずに見る）。 */
 function fakeChatClient(): {
   client: OpenAIChatClient;
   bodies: OpenAIChatCompletionCreateParams[];
@@ -265,16 +238,7 @@ describe("temperature は指定したときだけ、その値で送られる（c
   });
 });
 
-/**
- * 公開する `.d.ts` に SDK の import が出ないこと。
- *
- * ⚠ **`dist` を読まない。** CI の `typecheck / lint / test / build` ジョブは `test` を
- * `build` より前に走らせる（`.github/workflows/ci.yml`）ので、`dist` はまだ無い。`dist` を
- * 読む形にすると、build 前は「読めるファイルが0本」で黙って通る穴になる。代わりに
- * `tsconfig.build.json` と同じ設定（テストを除く `src`、`declaration`）で TypeScript の API が
- * `.d.ts` をメモリへ出したものを読み、**1本も出なければ落とす**。`@mnemora/core` だけは
- * `dist` が無いので `core/src` を指させる（`import "@mnemora/core"` の綴りは変わらない）。
- */
+/** `dist` を読む形にすると、build 前は「読めるファイルが0本」で黙って通る穴になる。`@mnemora/core` だけは `dist` が無いので `core/src` を指させる（`import "@mnemora/core"` の綴りは変わらない）。 */
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SDK_SPECIFIER = String.raw`openai(?:-latest)?(?:/[^"']*)?`;
 /** 直前が引用符なので、`"@mnemora/openai"` や `"./openai.js"` には当たらない。 */

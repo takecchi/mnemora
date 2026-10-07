@@ -8,12 +8,7 @@ import { OpenAILLMProvider } from "../llm-provider.js";
 import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 
 /**
- * ADR 0428: provider を**直に**呼んだとき、abort の reject が `signal.reason` そのものであること
- * （ADR 0359 決定4）。`client` に**実物の `openai` SDK** を注入し、localhost の擬似 HTTP サーバに向ける
- * （実 API・鍵は使わない）。既存の `abort-signal.test.ts` の偽 client は「signal を渡し忘れていないか」しか
- * 測れず、SDK が abort を `APIUserAbortError` に化かす穴（と、SDK の再試行待ちが abort で切れない穴）を
- * 通り抜けていた。
- *
+ * `client` に実物の `openai` SDK を注入し、localhost の擬似 HTTP サーバに向ける。偽 client では SDK が abort を `APIUserAbortError` に化かす穴や、再試行待ちが abort で切れない穴を通り抜ける。
  * サーバの挙動は URL のパスではなく、リクエストのヘッダ `x-mode` で切り替える（`defaultHeaders`）。
  */
 const ctx: Ctx = { tenantId: "tenant-abort-real" };
@@ -28,7 +23,7 @@ beforeAll(async () => {
     requestCount += 1;
     const mode = req.headers["x-mode"];
     if (mode === "hang") {
-      return; // 応答しない
+      return;
     }
     if (mode === "rate-limit") {
       res.writeHead(429, { "retry-after": "3", "content-type": "application/json" });
@@ -112,7 +107,7 @@ describe.each(Object.entries(calls))("実物の openai SDK — %s の abort", (_
       () => "resolved",
       (error: unknown) => error,
     );
-    // 待ち時間を先に見る（SDK の再試行待ち 3 秒を待ち切っていたら、値の前にここで落ちる）
+    // 待ち時間を先に見る（SDK の再試行待ち 3 秒を待ち切っていたら、値の前にここで落ちる）。
     expect(Date.now() - started).toBeLessThan(1500);
     expect(outcome).toBe(reason);
   });

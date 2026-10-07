@@ -2,15 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
 
 /**
- * 読み込みに失敗したときのメッセージが名指すキャッシュの場所は、**実際に解決された場所**である。
- *
- * 【実測 2026-09-27】以前のメッセージは、`cacheDir` を省いたときの既定を
- * `node_modules/@huggingface/transformers/.cache/`（npm の配置）と決め打ちで名指していた。
- * pnpm で入れた利用者の実際の場所は `node_modules/.pnpm/@huggingface+transformers@<版>/node_modules/
- * @huggingface/transformers/.cache/` であり（transformers.js の `env.cacheDir`）、メッセージは
- * 無い場所を「消せば取り直す」と指していた。
- *
- * 既定の `createPipeline` は transformers.js を import した後で `env.cacheDir` を読めるので、その値を出す。
+ * pnpm で入れた利用者の実際の場所は `node_modules/.pnpm/@huggingface+transformers@<版>/node_modules/@huggingface/transformers/.cache/` で、npm の配置を決め打ちで名指すと、無い場所を「消せば取り直す」と指してしまう。既定の `createPipeline` は transformers.js を import した後で `env.cacheDir` を読めるので、その値を出す。
  * `@huggingface/transformers` は `vi.mock` で差し替えるので、本物のモデルも onnxruntime も読み込まない。
  */
 
@@ -42,7 +34,6 @@ describe("読み込み失敗のメッセージは、実際に解決されたキ�
     const error = await loadFailure();
     expect(error.message).toContain(`既定: ${PNPM_CACHE_DIR}）`);
     expect(error.message).toContain(` ${PNPM_CACHE_DIR}sirasagi62/ruri-v3-30m-ONNX を消すと`);
-    // npm の配置を決め打ちで名指さない（以前の文面は、この2つの形で名指していた）。
     expect(error.message).not.toContain("既定: node_modules/");
     expect(error.message).not.toContain(" node_modules/@huggingface/transformers/.cache/");
   });

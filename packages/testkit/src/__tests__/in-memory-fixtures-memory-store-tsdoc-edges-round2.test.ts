@@ -11,19 +11,6 @@ import { MemoryStatusConflictError } from "@mnemora/core";
 import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`InMemoryMemoryStore` について
- * 縛る（2回目の棚卸し）。振る舞いは変えていない。同じ本文の歯を Postgres
- * （`packages/postgres/src/__tests__/memory-store-tsdoc-edges-round2.postgres.test.ts`）と core の Fake
- * （`packages/core/src/__tests__/fake-memory-store-tsdoc-edges-round2.test.ts`）にも置いている。約束の一覧は
- * Postgres 側の冒頭を見ること。
- *
- * ⚠ `markContestedPair` の `expectedStatus` は、この fixture については
- * `in-memory-typed-error-fields.test.ts` が既に縛っている。3実装で同じ本文にするため、ここにも置いている。
- *
- * `*-conformance.ts` には足していない。
- */
-
 const IMPL = "InMemoryMemoryStore";
 
 async function makeKit(): Promise<Kit> {
@@ -271,7 +258,7 @@ describe(`${IMPL}.restoreSupersededBy / previewRestoreSupersededBy: イベント
       ctx,
       newMemory({ status: "superseded", supersededById: anchor.id }),
     );
-    // 新しい at のほうを先に積む——積んだ順で選ぶ実装ならここで赤になる。
+    // 新しい at のほうを先に積む（積んだ順で選ぶ実装ならここで赤になる）。
     await kit.events.append(
       ctx,
       event(target.id, {
@@ -358,7 +345,6 @@ describe(`${IMPL}.aggregateScope: 返す countKind はすべて 'exact'（ScopeA
       { digestBand: { limit: 10, excludeMemoryIds: [] } },
     );
 
-    // 入力がどの欄も踏んでいること（0 の欄の countKind を見ても意味が薄い）。
     expect({
       totalInScope: aggregate.totalInScope,
       pending: aggregate.notIndexed.pending.count,

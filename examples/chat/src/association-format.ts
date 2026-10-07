@@ -1,9 +1,5 @@
 import type { AssociationDeltaJson, AssociationProbeRunJson } from "./association-json.js";
 
-/**
- * `association-probes` の人が読む要約(Markdown の表。`./archive-sweep-format.ts` と
- * 同じ形)。機械可読な出力は `MNEMORA_ASSOCIATION_JSON` の側(`./association-json.js`)。
- */
 export function formatAssociationProbeRunReport(json: AssociationProbeRunJson): string {
   const lines: string[] = [];
   lines.push(

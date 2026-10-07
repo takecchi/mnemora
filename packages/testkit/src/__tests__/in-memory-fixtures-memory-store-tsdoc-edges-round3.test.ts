@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryStore, NewMemory } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-/**
- * `MemoryStore` の TSDoc が約束していて、どのテストも縛っていなかった振る舞いを、`InMemoryMemoryStore` について
- * 縛る（3回目の棚卸し）。振る舞いは変えていない。同じ本文の歯を Postgres
- * （`packages/postgres/src/__tests__/memory-store-tsdoc-edges-round3.postgres.test.ts`）と core の Fake
- * （`packages/core/src/__tests__/fake-memory-store-tsdoc-edges-round3.test.ts`）にも置いている。約束の一覧は
- * Postgres 側の冒頭を見ること。
- *
- * `*-conformance.ts` には足していない。
- */
-
 const IMPL = "InMemoryMemoryStore";
 
 async function makeStore(): Promise<MemoryStore> {
@@ -45,7 +35,6 @@ function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
   };
 }
 
-/** status を渡された値にした Memory を作る。`contested` は対向が要るので、無関係の対向を1件作る（ADR 0140）。 */
 async function memoryWithStatus(
   store: MemoryStore,
   status: "contested" | "superseded" | "forgotten",
@@ -229,7 +218,6 @@ describe(`${IMPL}.listLabels / registerLabel: 行は消えず、名前は検査�
 
     await store.updateStatus(ctx, memories[0]!.id, "forgotten");
     await store.updateStatus(ctx, memories[1]!.id, "archived");
-    // ADR 0503: superseded は置き換えた側を伴う（この歯の関心事ではない）。
     await store.updateStatus(ctx, memories[2]!.id, "superseded", {
       supersededById: memories[0]!.id,
     });

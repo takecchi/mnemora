@@ -11,32 +11,15 @@ import type {
 import { drainEmbedTicks, type DrainResult } from "./embed-drain.js";
 import type { Conversation, ConversationTurn } from "./scenario.js";
 
-/**
- * `queryRecall` が既定で渡す `RecallQuery.association`（Issue #291 / ADR 0168）。
- *
- * **値の根拠**: `association-probes` ベンチ（ADR 0158 / 0167 で器の非決定性・
- * probe の公正性を直した後の実測、Issue #291 の 2026-09-16 コメント）が
- * `maxCount=10` で `goldReturned` 0/12 → 12/12（連想でしか届かない gold の
- * 到達が全件揃う）、費用は `memoryChars` +4.32% だったことに基づく。
- * `maxCount=5` では 10/12 止まり（+2.22%）——「聞かれていないことを自分から
- * 思い出す」という目指す姿を、この12件の範囲で完全に満たすのは 10 だけである。
- * 詳細は ADR 0168。
- */
+/** `queryRecall` が既定で渡す連想枠。`maxCount=10` は、連想でしか届かない gold が12件すべて届く値（5 では 10/12 止まり、ADR 0168）。 */
 export const DEFAULT_MNEMORA_PATH_ASSOCIATION: RecallAssociationQuery = { maxCount: 10 };
 
 export interface MnemoraPathOptions {
   budget?: RecallBudget;
   /**
-   * `RecallQuery.association` に渡す値。**省略時は
-   * {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} を渡す**（ADR 0168。「聞かれていないことを、
-   * 自分から思い出す」を実際に呼び手側で使う経路にするための既定）。
-   * 連想枠そのものを止めたい呼び出し側（比較・検査のため）は `association: null` を
-   * 明示すること——この関数は `null` を `packages/core` へそのまま転送する
-   * （`queryRecall` の doc 参照）。**この関数の既定（on、`DEFAULT_MNEMORA_PATH_ASSOCIATION`）
-   * は `packages/core` 側の既定が off だった ADR 0151 のときから独立に持っている値であり、
-   * `packages/core` 側の既定が [ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)
-   * で on に変わっても変えない**（`examples/chat` という一呼び手が、明示的に
-   * オプトインしている形であることに変わりはない）。
+   * `RecallQuery.association` に渡す値。省略時は {@link DEFAULT_MNEMORA_PATH_ASSOCIATION}。連想枠を止めたい呼び出し側は
+   * `association: null` を明示すること（`null` は `packages/core` へそのまま転送する）。この既定は
+   * `packages/core` 側の既定が変わっても変えない（`examples/chat` が明示的にオプトインしている形のため）。
    */
   association?: RecallAssociationQuery | null;
 }
@@ -49,63 +32,24 @@ export function externalIdForTurn(index: number): string {
   return `turn-${index}`;
 }
 
-/**
- * 冒頭の事実表明（`FACT_STATEMENT`）を取り込んだ Observation の `externalId`。
- *
- * `buildConversation` は事実表明を必ず先頭（index 0）に置く（`scenario.ts`）。
- * **その前提をここで1箇所に閉じ込める**——`compare.ts` が系譜を辿って
- * 「冒頭の事実の出典に到達したか」を判定するのに使う（ADR 0052）。
- */
+/** `buildConversation` は事実表明を必ず先頭（index 0）に置く。その前提をここ1箇所に閉じ込める。 */
 export function factStatementExternalId(): string {
   return externalIdForTurn(0);
 }
 
-/**
- * {@link ingestConversation} の任意オプション（Issue #691 続き、claimKey 評価用の opt-in）。
- *
- * **既定（省略）では、これまでと1バイトも挙動が変わらない**——`claimKey` を省略すると
- * `runtime.observe()` へ `claimKey` キー自体を渡さない（`undefined` を明示的に渡すのでは
- * なく、キーを持たない）ので、`packages/core` 側は「claimKey opt-in を渡さなかった
- * 呼び出し」として扱う（ADR 0320/0324 の既定 off の規約と同じ）。`onObserved` も
- * 省略すれば呼ばれない。
- */
+/** {@link ingestConversation} の任意オプション。省略時の挙動は変えない。 */
 export interface IngestConversationOptions {
-  /** 渡すと `runtime.observe()` の各呼び出しへそのまま転送する（ADR 0320/0324）。 */
   claimKey?: ClaimKeyOptions;
-  /**
-   * 診断用のフック。各ターンを observe() した直後、そのターンと `ObserveResult`
-   * （`claimKeyFailure`/`contestedDetection` を含む）を受け取る。**`answer-bench.ts` の
-   * 呼び出し経路を変えない**——`runAnswerCase`/`runAnswerBench` 経由で渡さなければ、
-   * このフックは一度も呼ばれない。
-   */
+  /** 診断用のフック。`answer-bench.ts` の呼び出し経路を変えないため、渡さなければ一度も呼ばれない。 */
   onObserved?: (turn: ConversationTurn, result: ObserveResult) => void;
 }
 
 /**
- * 会話全体を observe() し、tick() で embed を処理する（経路Bの取り込み段）。
+ * 会話全体を observe() し、tick() で embed を処理する。`externalId` に turn の連番を使うので、誤って二度 ingest しても
+ * Observation は重複しない。
  *
- * `externalId` に turn の連番を使う——同じ `conversation` に対してこの関数を
- * 2度呼んでも（例: recall() を budget 有り/無しで2通り試したい呼び出し側が、
- * 誤ってもう一度 ingest してしまっても）Observation が重複して作られない
- * （`observe()` の `externalId` による冪等性がそのまま効く。⚠ 当初は `docs/roadmap.md`
- * 段階3 を指していたが、同節は 2026-09-29 に削除した（#762）。当時の本文は 635c93d の版にある）。
- * **呼び出し側は ingest と query を
- * 混ぜて何度も呼ばない**のが前提だが、それでも壊れないようにしてある。
- *
- * **なぜ `tick()` を1回だけ呼ばないのか（docs/decisions/0019-real-openai-measurement-cost.md
- * §5、docs/decisions/0021-drain-embed-ticks-in-ingest.md）**: `tick()` の既定 `limit` は
- * `DEFAULT_TICK_LIMIT`（`packages/core/src/runtime.ts`。下の「50件」はこの欠陥が
- * 見つかった当時の値）。embed ジョブは
- * `claimBatch` が `ORDER BY available_at ASC` で先着順に claim するため、
- * この関数がかつて `tick()` を1回しか呼んでいなかった頃は、**会話が長くなって
- * observe() された発話が50件を超えると、51件目以降の記憶が埋め込まれないまま
- * `pending` に残り、`recall()` の ANN 候補にすらならない**という欠陥があった
- * （`recall()` はこれを `omitted` に `not_indexed(reason: "pending")` として
- * 正直に出していたが、`examples/chat` 側はそれを読まずに「スコープ内 N 件のうち
- * 10件を返した」という表を書いていた——ADR 0019 §5 が実測して記録した）。
- * ここでは `drainEmbedTicks`（`./embed-drain.js`）で `processed === 0` になるまで
- * `tick()` を回し切ることで、**取り込んだ量に関わらず、ingest が終わった時点で
- * 全件が embed 済みであること**を保証する。
+ * `tick()` を1回だけ呼ばないのは、既定 `limit` を超えた分の記憶が `pending` のまま embed されず、`recall()` の ANN 候補にすら
+ * ならないため（ADR 0019 §5）。`drainEmbedTicks` で `processed === 0` になるまで回し切り、ingest 終了時点で全件 embed 済みを保証する。
  */
 export async function ingestConversation(
   runtime: Runtime,
@@ -113,10 +57,7 @@ export async function ingestConversation(
   conversation: Conversation,
   opts: IngestConversationOptions = {},
 ): Promise<DrainResult> {
-  // Issue #719: `observed.memoryIds`(冪等な再送では空配列——`ObserveResult` の
-  // docstring)を積算し、`drainEmbedTicks` に渡す——`compare`/`retrieval` が使う
-  // 主測定の取り込み段であるため、「available_at との ms 競合で claim 0件のまま」
-  // 黙って抜けないことをここでも検査させる。
+  // `observed.memoryIds`（冪等な再送では空配列）を積算して `drainEmbedTicks` に渡す（claim 0件のまま黙って抜けさせない）。
   let expectedEmbedJobs = 0;
   for (const turn of conversation.userUtterances) {
     const observed = await runtime.observe(ctx, {
@@ -124,43 +65,20 @@ export async function ingestConversation(
       text: turn.text,
       speaker: turn.role,
       externalId: externalIdForTurn(turn.index),
-      // ⭐ `opts.claimKey` を省略した呼び出しでは、このキー自体を渡さない
-      // （`claimKey: undefined` を明示するのとは違う——`IngestConversationOptions`
-      // docstring参照）。既存の呼び出し側の挙動を1バイトも変えないための規律。
+      // `opts.claimKey` を省略した呼び出しでは、キー自体を渡さない（`claimKey: undefined` を明示するのとは違う）。
       ...(opts.claimKey !== undefined ? { claimKey: opts.claimKey } : {}),
     });
     expectedEmbedJobs += observed.memoryIds.length;
     opts.onObserved?.(turn, observed);
   }
-  // ADR 0445: drain の結果を返す（以前は捨てていた）。`chat` が `totalFailed` を画面に出す。
   return drainEmbedTicks(runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 }
 
 /**
- * 経路B（mnemora）の想起段。ingest 済みの `ctx` に対して、終盤の質問を recall() する。
+ * 経路B（mnemora）の想起段。`opts.association` を省略すると {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} を使う。
  *
- * **呼び出し側が実際にプロンプトへ積むのは `recall().memories`（の digest）と
- * `index` だけであり、`usage` はその量をそのまま計測している**（docs/recall.md §6）。
- * mnemora 自身はプロンプトを組み立てない（同§6「正直に書くべき限界」）——ここでは
- * その組み立てをサンプルアプリ側（呼び出し側の役）が代行して見せている。
- *
- * `opts.budget` を渡すと、段4（予算による切り詰め）が実際に候補を落とす
- * （docs/recall.md §2 段4）。渡さなければ切り詰めは起こらない。
- *
- * **既定で `association`（連想枠、ADR 0151・Issue #291・ADR 0168）を渡す**——
- * `opts.association` を省略すると {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} が使われる。
- *
- * ⚠ **`opts.association: null`（明示的に off にしたい呼び出し側の脱出口）は、
- * `packages/core` へ `association: null` をそのまま転送する**（[ADR
- * 0337](../../../docs/decisions/0337-recall-association-default-on.md) 前は、この関数は
- * `association` キー自体を省略して転送していた——`packages/core` の既定が off だったので
- * 「省略」が「off」と同じ効果だったからである。**ADR 0337（採用。オーナーが選択肢(あ)を
- * 選んだ、ask_human ac5953d1、2026-09-25）で `packages/core` の既定が on に変わると、この「省略」は意味が反転し、
- * `opts.association: null` の呼び出しが黙って連想 on になってしまう**——実際に
- * `memory-usage-reinforce.postgres.test.ts` が「`packages/core` 既定の off のまま呼ぶ
- * 脱出口」という契約でこの経路に依存していた。⟹ ここでは省略ではなく `null` を
- * そのまま転送し、`packages/core` 側の既定が何であっても this 関数の
- * `opts.association: null` が確実に off を意味するようにする。
+ * `opts.association: null` は `packages/core` へそのまま転送する。キーを省略して転送すると、core の既定が on のとき
+ * `null` の呼び出しが黙って連想 on になる（ADR 0337）。
  */
 export async function queryRecall(
   runtime: Runtime,
@@ -177,7 +95,6 @@ export async function queryRecall(
   });
 }
 
-/** `ingestConversation` + `queryRecall` を1回で行う便宜関数（`compare.ts` が使う）。 */
 export async function runMnemoraPath(
   runtime: Runtime,
   ctx: Ctx,
@@ -189,30 +106,12 @@ export async function runMnemoraPath(
   return { recall };
 }
 
-// ---------------------------------------------------------------------------
-// buildMnemoraPrompt の各欄の描画（Issue #691）
-//
-// ケース定義・決めたことの詳細は
-// `__tests__/provenance-prompt-cases.ts` の冒頭コメントを参照。要点だけ:
-// - null（頼んだが無かった）と「その kind は欄を持ちようが無い」を別の表現にする。
-// - 欠落値を推測で埋めない（"user" 等を書かない）。
-// - 矛盾関係は recall.memories 全体を見て、companionOf の向き先・向かれ元の
-//   両方に対称な印を出す。中身は相手の memoryId ではなく相手の digest 本文。
-// - contestedWith（Issue #691 続き、ADR 0335）も同じ矛盾候補欄に合流する——
-//   同伴取得（companionOf）を経由せず、両方とも ann/lexical で自然に候補に
-//   入った contested な対にも印が出るようにする。
-// - Issue #1430（ADR 0379）: contestedWith 由来の対で、両側の記録順が分かるときだけ
-//   文面を非対称にする（新しい側／古い側で言い方を変え、「訂正の可能性」を示す）。
-//   companionOf だけが由来の対・記録順が片方でも分からない対は、今までどおり
-//   対称な文面（相手の digest 本文をそのまま埋め込むだけ）のまま——既定の経路
-//   （companionOf 経由・記録順を渡さない呼び出し）は1バイトも変わらない。
-// ---------------------------------------------------------------------------
+// 欠落値を推測で埋めない（"user" 等を書かない）。null（頼んだが無かった）と「その kind は欄を持ちようが無い」は別の表現にする。
+// 既定の経路（companionOf 経由・記録順を渡さない呼び出し）は1バイトも変えない。
 
 /**
- * 話者欄。`provenanceKind === "stated"` のときだけ出す
- * （`RecalledMemory.speaker` の docstring・ADR 0289: 他の kind は「話者という概念が
- * 無い」のであって「話者が分からない」のではない——同じ「不明」表示で潰さない）。
- * `stated` で値が無ければ、値で埋めずに「不明」と明示する。
+ * 話者欄。`provenanceKind === "stated"` のときだけ出す。他の kind は「話者という概念が無い」のであって「分からない」のではないので、
+ * 同じ「不明」で潰さない。`stated` で値が無ければ、値で埋めずに「不明」と明示する。
  */
 function speakerSegment(m: RecalledMemory): string | undefined {
   if (m.provenanceKind !== "stated") {
@@ -222,11 +121,7 @@ function speakerSegment(m: RecalledMemory): string | undefined {
   return typeof speaker === "string" && speaker.length > 0 ? `[話者:${speaker}]` : "[話者:不明]";
 }
 
-/**
- * 主題欄。`subjectId` はどの `provenanceKind` でも持ちうる欄なので、kind に関わらず
- * 常に出す。値が無ければ（例: 統合で subject をまたいだ）「なし」と明示する
- * ——他の主題を代表値として埋めない。
- */
+/** 主題欄。kind に関わらず常に出す。値が無ければ「なし」と明示し、他の主題を代表値として埋めない。 */
 function subjectSegment(m: RecalledMemory): string {
   const subjectId = m.subjectId;
   return typeof subjectId === "string" && subjectId.length > 0
@@ -235,19 +130,8 @@ function subjectSegment(m: RecalledMemory): string {
 }
 
 /**
- * `m` と矛盾関係にある相手の `memoryId` の集合。`RecalledMemory` 単体では非対称
- * （`companionOf` を持つのは同伴取得された側だけ、`docs/recall.md` §8）なので、
- * `all` 全体を見て逆向き（`m` が誰かの `companionOf` に指されている側）も拾う。
- *
- * `contestedWith`（Issue #691 続き、[ADR 0335](../../../docs/decisions/0335-recalled-memory-contested-with.md)）も
- * 同じ理由で両向きを見る——`companionOf` は「同伴取得（段3）でだけ付く」ため、
- * 矛盾する2件が `"ann"`/`"lexical"` で自然に両方とも候補に入った場合には
- * 印を出す手段が無かった。`contestedWith` は取得経路を問わず、相手が同じ
- * recall 結果に含まれるときだけ付くので、`companionOf` と違い**双方が自分自身の
- * 欄として持ちうる**（一方向にしか設定されていないこともある——`core` 側は
- * 相互参照を要求しない、`RecalledMemory.contestedWith` の doc 参照）。
- * `Set` で重複を除くため、同伴取得の既存の出力（`companionOf` 側の印）とは
- * 重複しても表示は1つにまとまる。
+ * `m` と矛盾関係にある相手の `memoryId` の集合。`RecalledMemory` 単体では非対称（`companionOf` を持つのは同伴取得された側だけ）なので、
+ * `all` 全体を見て逆向きも拾う。`contestedWith` も両向きを見る（core は相互参照を要求しないので、片方向にしか無いこともある）。
  */
 function contradictionCounterpartIds(m: RecalledMemory, all: readonly RecalledMemory[]): string[] {
   const ids = new Set<string>();
@@ -268,11 +152,6 @@ function contradictionCounterpartIds(m: RecalledMemory, all: readonly RecalledMe
   return [...ids];
 }
 
-/**
- * `m` と `id` の対が `contestedWith`（どちらの向きでも）由来かどうか（Issue #1430）。
- * `companionOf` 由来だけの対（`contestedWith` を一度も経由しない）は `false` を返す——
- * 同じ相手が両方の由来で来た場合（companion かつ contested）は `true`（contested 扱い）。
- */
 function isContestedCounterpart(
   m: RecalledMemory,
   id: string,
@@ -285,38 +164,20 @@ function isContestedCounterpart(
   return counterpart !== undefined && counterpart.contestedWith === m.memoryId;
 }
 
-/** {@link contradictionSegment} の戻り値。欄の文字列と、その欄が非対称文面（案1、下記docstring）を出したかを対で返す。 */
 interface ContradictionSegmentResult {
-  /** 矛盾候補欄の文字列。矛盾関係が無ければ `undefined`。 */
   segment: string | undefined;
   /**
-   * この欄の中に、非対称文面（「訂正の可能性」／「訂正された可能性」）を1件以上
-   * 出したら `true`。**この判定は描画の途中の分岐そのもの（構造）であり、出来上がった
-   * 文字列を後から部分文字列で走査して調べ直すものではない**——`digest` の本文に
-   * たまたま同じ文字列が含まれていても、この値には一切影響しない
-   * （`buildMnemoraPromptDetail` の docstring・Issue #1430 参照）。
+   * 非対称文面を1件以上出したら `true`。描画の途中の分岐そのもの（構造）で判定し、出来上がった文字列を部分文字列で
+   * 走査し直さない（`digest` の本文に同じ文字列が含まれていても影響しない）。
    */
   hasAsymmetricWording: boolean;
 }
 
 /**
- * 矛盾候補欄（Issue #1430、Issue #835 U4・#691 の続き）。
- *
- * **既定（companionOf だけが由来、または記録順が片方でも分からない）は、これまでと
- * 1バイトも変わらない**——相手の digest 本文を `「…」` で埋め込むだけの対称な文面
- * （回答モデルは memoryId の対応表を持たないため、id だけでは対立が読めない）。
- *
- * **`contestedWith`（どちらの向きでも）由来の相手で、`m` と相手の両方が記録順
- * （`order`、`recordedOrderById`）を持つときだけ**、文面を非対称にする（#1430 の
- * 実測: 対称な印だと、実 API が本物の訂正でも「分かりません」に倒れることがあった）:
- * - `m` が新しい側（記録順が相手より大きい）: 相手より後の記録であることを
- *   「訂正の可能性」として示す。
- * - `m` が古い側（記録順が相手より小さい）: 相手が後に記録されたことを
- *   「訂正された可能性」として示す。
- *
- * 相手が `all` の中に見つからない（想定外の入力）場合は、本文を捏造せず `memoryId` と
- * 「本文未取得」を出す（新旧どちらの由来でも同じ——本文が無ければ記録順があっても
- * 非対称文面を組めない）。矛盾関係が無ければ欄そのものを出さない。
+ * 矛盾候補欄。既定（`companionOf` だけが由来、または記録順が片方でも分からない）は、相手の digest 本文を埋め込むだけの
+ * 対称な文面（回答モデルは memoryId の対応表を持たないため）。`contestedWith` 由来で両側の記録順が分かるときだけ非対称にする
+ * （対称な印だと、実 API が本物の訂正でも「分かりません」に倒れることがあった）。
+ * 相手が `all` に見つからなければ、本文を捏造せず `memoryId` と「本文未取得」を出す。
  */
 function contradictionSegment(
   m: RecalledMemory,
@@ -349,37 +210,16 @@ function contradictionSegment(
   return { segment: `[矛盾候補:${parts.join("／")}]`, hasAsymmetricWording };
 }
 
-/**
- * 根拠欄（Issue #972）。`RecalledMemory.basisLost`（[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）が
- * `true` のとき——`provenanceKind === "inferred"` で、その根拠（`basis.memoryIds`）の少なくとも
- * 1件が失われている（存在しない・`forgotten`・purge 済み）とき——だけ `[根拠:失われた]` を出す。
- * 書き方は矛盾候補欄に揃える（`[ラベル:値]`、当てはまらなければ欄そのものを出さない）。
- * ⟹ 根拠が残っている `inferred` の行は1バイトも変わらず、根拠を失った `inferred` とは
- * この欄の有無だけで区別できる。
- *
- * ⚠ 今日の抽出パイプラインは `basis.memoryIds` を書かないので（ADR 0342 負債1）、実運用の
- * 経路でこの欄が出る場面はまだ無い。記録済みの `answer` カセットの行にもこの欄は無いので、
- * 再生カセットのハッシュ鍵は動かない。
- */
+/** 根拠欄。`basisLost` のときだけ出す。根拠が残っている `inferred` の行は1バイトも変えない（再生カセットのハッシュ鍵を動かさない）。 */
 function basisSegment(m: RecalledMemory): string | undefined {
   return m.basisLost === true ? "[根拠:失われた]" : undefined;
 }
 
 /**
- * `recall.memories` を `recordedAt` の昇順で並べ替えた順位（1始まり）を返す
- * （Issue #691 の子、Issue #702、ADR 0298）。
+ * `recall.memories` を `recordedAt` の昇順に並べた順位（1始まり）を返す。
  *
- * 🔴 **生の ISO 8601 ではなく、この順位を描画に使う。** 実 API（gpt-4o-mini）での
- * dev 対照で、生のタイムスタンプを行末に付けると `schedule-change-meeting-day`
- * （「金曜→水曜」の訂正が後続するケース）の正答率が 5/5 → 1/5 に落ちることを実測した
- * ——ISO 文字列どうしの日時比較より、小さい整数の大小関係のほうがモデルに
- * 読み取らせやすいと考えられる（数値・他の描画候補との比較は ADR 0295 の追記、
- * PR #698 本文を参照）。
- *
- * `recordedAt` が `undefined`（そもそも欄を渡さなかった呼び出し側）の要素は
- * 順位付けの対象から外す。同じ `recordedAt`（同一ミリ秒）の要素は、`all` に現れた
- * 元の順序で安定的にタイブレークする——`Array.prototype.sort` が安定ソートである
- * ことに依拠する（ECMA-262 の要件、Node.js の V8 実装も安定）。
+ * 生の ISO 8601 ではなく、この順位を描画に使う。生のタイムスタンプを付けると、実 API で訂正が後続するケースの正答率が
+ * 5/5 → 1/5 に落ちた（ADR 0295 追記）。同一ミリ秒は `all` の元の順で安定的にタイブレークする（`sort` が安定ソートであることに依拠）。
  */
 function recordedOrderById(all: readonly RecalledMemory[]): ReadonlyMap<string, number> {
   const withRecordedAt = all.filter(
@@ -393,10 +233,6 @@ function recordedOrderById(all: readonly RecalledMemory[]): ReadonlyMap<string, 
   return order;
 }
 
-/**
- * 記録順欄。`recordedOrderById` が順位を持たない（`recordedAt` が `undefined`）
- * 要素には欄を出さない。
- */
 function recordedOrderSegment(
   m: RecalledMemory,
   order: ReadonlyMap<string, number>,
@@ -406,31 +242,15 @@ function recordedOrderSegment(
 }
 
 /**
- * 行の並び順を「記録順」に揃える凡例（ADR 0309、Issue #691 の続き）。
- *
- * `sortMemoriesForDisplay` で行そのものを並べ替えたときにだけ、この1行を本文の
- * 先頭へ足す——**`order-legend` という描画名で `examples/chat/src/answer-trials-render.ts`
- * が測った候補と、一字一句同じ文字列**（同じ器で測った数値の裏付けを保つため、
- * 2箇所に手で複製しない。あちらはこの定数を import する）。
+ * 行の並び順を「記録順」に揃える凡例。`order-legend` 描画で `answer-trials-render.ts` が測った候補と一字一句同じ文字列で、
+ * 同じ器で測った数値の裏付けを保つため2箇所に複製しない（あちらはこの定数を import する）。
  */
 export const ORDER_LEGEND_LINE =
   "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)";
 
 /**
- * `recall.memories` を表示用に並べ替える（ADR 0309 が採用した `order-legend` 描画）。
- *
- * **`recordedAt` を持つ行（`order` に順位がある行）だけを昇順に並べ替える。**
- * `recordedAt` が無い行（`order` に順位が無い行）は、並べ替えの対象にせず、
- * 元の（`recall()` が返した、スコアによる）配列順のまま**末尾に**残す——
- * 「無い」ものを先頭に回したり、他の値で埋めたりしない（欠落値を推測しない、
- * Issue #691 完了条件1・ADR 0298 決定7と同じ規律）。
- *
- * ⚠ **`recall.memories` の元の並び（スコア降順、`docs/recall.md` §2）は、この並べ替えで
- * 失われる。** `recordedOrderById`/`recordedOrderSegment` が付ける `[記録順:N]` タグは
- * 元のスコア順を保ったまま添えるだけの注記だったが、この関数は行そのものの表示順序を
- * 記録順へ差し替える——呼び出し側がスコア順を知りたい場合、この関数の出力からは
- * 復元できない（`RecallResult.memories` 自体は変更していないので、`recall.memories`
- * を直接見ればスコア順は残っている）。
+ * `recall.memories` を表示用に並べ替える。`recordedAt` を持つ行だけを昇順に並べ、無い行は並べ替えの対象にせず
+ * 元の順のまま末尾に残す（欠落値を推測しない）。元のスコア順はこの出力から復元できないので、必要なら `recall.memories` を直接見ること。
  */
 function sortMemoriesForDisplay(
   all: readonly RecalledMemory[],
@@ -444,12 +264,7 @@ function sortMemoriesForDisplay(
   return [...sortedWithOrder, ...withoutOrder];
 }
 
-/**
- * 出来事時刻欄（Issue #691 の子、Issue #702、ADR 0298）。`occurredAt` は3値ある:
- * `undefined`（頼んでいない・欄を出さない）／`null`（頼んだが無かった・
- * `recordedAt` の値で埋めずに「不明」と明示する——`speaker` の `null` と同じ規律）／
- * `Date`（値がある・ISO 8601 で出す）。
- */
+/** 出来事時刻欄。`occurredAt` は3値: `undefined`（欄を出さない）／`null`（頼んだが無かった。`recordedAt` で埋めずに「不明」と明示）／`Date`。 */
 function occurredAtSegment(m: RecalledMemory): string | undefined {
   if (m.occurredAt === undefined) {
     return undefined;
@@ -457,16 +272,11 @@ function occurredAtSegment(m: RecalledMemory): string | undefined {
   return m.occurredAt === null ? "[出来事時刻:不明]" : `[出来事時刻:${m.occurredAt.toISOString()}]`;
 }
 
-/** {@link renderRecalledMemoryLine} の戻り値。行の文字列と、その行が非対称文面を出したかを対で返す。 */
 interface RecalledMemoryLineResult {
   line: string;
   hasAsymmetricWording: boolean;
 }
 
-/**
- * 1件の `RecalledMemory` を1行に描画する。
- * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 根拠 → 記録順 → 出来事時刻 → digest。
- */
 function renderRecalledMemoryLine(
   m: RecalledMemory,
   all: readonly RecalledMemory[],
@@ -489,66 +299,22 @@ function renderRecalledMemoryLine(
 }
 
 /**
- * {@link buildMnemoraPromptDetail} の戻り値。
- *
- * `hasContestedCorrectionWording` は、案3（`answer-bench.ts` の
- * `resolveMnemoraAnswerSystemPrompt`）が system 文へ一文を足すかどうかの判定に使う
- * **構造の結果**である——`body`（できあがった文字列）を後から部分文字列で走査して
- * 調べ直すものではない。描画の途中（`contradictionSegment`）で「非対称文面（案1）を
- * 実際に選んだかどうか」の分岐そのものを、行ごと・欄ごとに拾い上げて集約する。
- * ⟹ `digest` の本文にたまたま「（訂正の可能性）」という文字列が含まれていても、
- * それだけでは `true` にならない（Issue #1430、判定を文字列一致から構造に置き換えた回）。
+ * `hasContestedCorrectionWording` は構造の結果で、`body` を後から部分文字列で走査して調べ直すものではない
+ * （`digest` の本文に同じ文字列が含まれていても `true` にならない）。
  */
 export interface MnemoraPromptDetail {
-  /** {@link buildMnemoraPrompt} が返すのと同じ文字列。 */
   body: string;
-  /**
-   * 矛盾候補欄が、非対称文面（`contestedWith` 由来・両側の記録順が分かる対にだけ出す
-   * 「訂正の可能性」／「訂正された可能性」）を1件以上出したら `true`。
-   */
   hasContestedCorrectionWording: boolean;
 }
 
 /**
- * mnemora path が実際にプロンプトへ積む文字列を、`recall()` の返り値だけから組み立てる
- * ——「mnemora はプロンプトを組み立てない」ことを実演する関数。**`body` の組み立て規則は
- * {@link buildMnemoraPrompt} と同一**（あちらはこの関数の `body` だけを返す薄い
- * ラッパーであり、2箇所に手で複製していない）。
+ * mnemora path が実際にプロンプトへ積む文字列を、`recall()` の返り値だけから組み立てる。
  *
- * **積むのは `recall.memories` の各行と、`recall.index.totalInScope` から作る
- * `(索引: …)` の1行だけである。目次帯（`recall.index`）の中身——digest 帯・群カウント
- * （`docs/recall.md` §5 の被覆不変条件の第2階・第3階）——は積まない。**
- * `usage.chars` は目次帯の JSON（`usage.indexChars`）を含めて数えるので、この関数の出力とは
- * 材料そのものが違う。目次帯を回答プロンプトへ描画する案は、プロンプトと再生カセットの
- * 形を変える別の方針として残っている（Issue #971）。
- *
- * **2026-09（Issue #691）**: digest だけでなく、由来（`provenanceKind`）・話者
- * （`speaker`）・主題（`subjectId`）・矛盾関係（`companionOf`/`retrievedVia`）も
- * 1行ずつ埋め込む。**`usage.chars` はこの追加分を数えていない**——`usage.chars` は
- * `recall()` 自身の返り値の量であり、この関数が実際に文字列へ足す装飾（`[由来:...]`
- * 等のタグ）は呼び出し側だけが知っている増分である。`compare` の `mnemoraChars`
- * （`recall.usage.chars` をそのまま使う）とこの関数の出力文字数は、本 PR 以降
- * さらに乖離する——詳細と実測は `docs/recall.md` §6・`examples/chat/README.md`
- * 「`answer`」節・本変更の PR 本文を参照。
- *
- * **2026-09（ADR 0309、`order-legend` 描画）**: 行の並びを `recordedAt` の昇順
- * （`sortMemoriesForDisplay`）へ差し替え、少なくとも1行が `[記録順:N]` を持つとき
- * （＝ `order.size > 0`）だけ、本文の先頭に {@link ORDER_LEGEND_LINE} を1行足す。
- * 記録順が1つも無い（`recordedAt` を誰も渡していない）呼び出しでは、並べ替えも
- * 凡例も出さない——「並べてある」という文言を、並べ替えていないのに出さないため
- * （n=15 の実測でこの描画（`schedule-change-meeting-day` 13/15）が、由来等の
- * タグを保ったまま記録順だけ生ISOから並べ替え+凡例に変えた3候補中で最も高かった
- * ことが根拠。ADR 0309 を参照。他候補・数値はそちらに集約し、ここには複製しない）。
- *
- * ⚠ **`recall.memories` の元のスコア順は、この並べ替えで失われる**
- * （`sortMemoriesForDisplay` の doc を参照）。この関数の**出力文字列**からは
- * 元のスコア順を復元できない——スコア順が要る呼び出し側は `recall.memories` を
- * 直接見ること。
- *
- * **2026-09-30（Issue #1430）**: `hasContestedCorrectionWording`（上記docstring）を
- * 足した。`buildMnemoraPrompt(recall): string` という既存の公開シグネチャ・出力は
- * 1バイトも変えていない——あちらは `buildMnemoraPromptDetail(recall).body` を返すだけの
- * 後方互換のラッパーになった。
+ * 積むのは `recall.memories` の各行と `(索引: …)` の1行だけで、目次帯の中身は積まない（目次帯をプロンプトへ描画する案は
+ * 別の方針として残っている）。`usage.chars` は目次帯の JSON を含み、行に足す装飾タグは数えないので、この関数の出力文字数とは乖離する。
+ * 記録順が1つも無いときは並べ替えも凡例も出さない（並べていないのに「並べてある」と書かないため）。
+ * 元のスコア順はこの出力から復元できないので、必要なら `recall.memories` を直接見ること。
+ * `buildMnemoraPrompt` の公開シグネチャと出力は変えない（あちらは `body` を返すだけのラッパー）。
  */
 export function buildMnemoraPromptDetail(recall: RecallResult): MnemoraPromptDetail {
   const order = recordedOrderById(recall.memories);
@@ -562,45 +328,20 @@ export function buildMnemoraPromptDetail(recall: RecallResult): MnemoraPromptDet
   return { body, hasContestedCorrectionWording };
 }
 
-/**
- * `buildMnemoraPromptDetail(recall).body` と同じ（後方互換のラッパー）。
- * `hasContestedCorrectionWording` も要る呼び出し側（`answer-bench.ts` の
- * `runAnswerCase`）は {@link buildMnemoraPromptDetail} を直接呼ぶこと。
- */
+/** `buildMnemoraPromptDetail(recall).body` と同じ後方互換のラッパー。`hasContestedCorrectionWording` も要る呼び出し側は Detail を直接呼ぶこと。 */
 export function buildMnemoraPrompt(recall: RecallResult): string {
   return buildMnemoraPromptDetail(recall).body;
 }
 
-/**
- * `reportMemoryUsage` の戻り値。
- *
- * `reported: false` は「呼ばなかった」ことをそのまま返す——`observe()` を呼んで
- * 失敗したのではなく、載せる記憶が0件だったので**そもそも呼んでいない**
- * （`ObserveMemoryUsageInputSchema.usedMemoryIds` は `min(1)` であり、空配列を
- * 渡すと zod に弾かれる。呼び出し側はこの分岐を自分で持つ必要がある）。
- */
+/** `reported: false` は「呼ばなかった」。載せる記憶が0件のときは `observe()` を呼ばない（`usedMemoryIds` は `min(1)` で、空配列は zod に弾かれる）。 */
 export type MemoryUsageReport =
   | { reported: true; recallId: RecallResult["recallId"]; usedMemoryIds: string[] }
   | { reported: false };
 
 /**
- * `recall` が実際にプロンプトへ載せた Memory（＝ `buildMnemoraPrompt` が積んでいるのと
- * 同じ集合、`recall.memories`）を、使用報告として `observe({ kind: 'memory_usage' })` で
- * mnemora へ伝え返す（Issue #301、ADR 0009）。
- *
- * **これを呼ばないと `reinforce` が発火しない**（`runtime.observe` の
- * `handleMemoryUsage` → `recordUsage` → `insertedMemoryIds` ごとに `reinforce`。
- * `packages/core/src/runtime.ts`）——使われた記憶と使われなかった記憶が同じ速さで
- * 遠ざかっていた、というのが Issue #301 の欠落そのものである。
- *
- * **明示的な opt-in 関数である。**`tick()` や Scheduler には一切乗せていない
- * ——呼ばない呼び出し側でも `observe`/`recall` はそれまでどおり成立する
- * （ADR 0114 決定3・0115 決定7 と同じ規律。北極星の問い2「これを無効にしたとき、
- * Memory Framework として成立するか」に当てた結果は該当 ADR に書く）。
- *
- * **報告は、呼び出し側が `recall` の測定・表示を終えたあとに呼ぶことを想定している**
- * ——この関数自身は `recall` を撃たない（引数で受け取るだけ）ので、呼んでも
- * その `recall` の測定値（`usage`/`omitted`/`index` 等）は一切変わらない。
+ * `recall` がプロンプトに載せた Memory を、使用報告として `observe({ kind: 'memory_usage' })` で mnemora へ返す。
+ * 呼ばないと `reinforce` が発火しない。明示的な opt-in で、`tick()` や Scheduler には乗せない（呼ばなくても observe/recall は成立する）。
+ * この関数は `recall` を撃たないので、呼んでもその測定値は変わらない。
  */
 export async function reportMemoryUsage(
   runtime: Runtime,

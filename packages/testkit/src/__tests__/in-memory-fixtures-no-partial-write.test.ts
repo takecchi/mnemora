@@ -1,15 +1,3 @@
-// クローン miku の委譲先が書いた回帰テスト。オーナーではない。
-//
-// `InMemoryMemoryStore` にトランザクションは無く、「まだ何も書いていないうちに投げる」ことで
-// `packages/postgres` の1トランザクションを模す（クラス doc と各メソッドの doc）。ここでは、
-// 書き始めた後に投げる経路が残っていないことを見る——投げたら、Memory・outbox・ラベル・
-// イベントのどれも、呼ぶ前と同じであること。
-//
-// `packages/postgres` の側は、最後の書き込みを DB に失敗させても何も残らないことを
-// `packages/postgres/src/__tests__/store-write-atomicity.postgres.test.ts` が縛っている。
-//
-// このテストは fixture を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, NewMemoryEvent, ObservationId } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
@@ -19,7 +7,6 @@ import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 const ctx: Ctx = { tenantId: "no-partial-write" };
 let seq = 0;
 
-/** structuredClone できない値（Postgres は JSON にするときに欄ごと落とす。#1211 の表の外）。 */
 const uncloneable = { f: () => 1 };
 
 function event(
@@ -43,7 +30,6 @@ async function memory(store: InMemoryMemoryStore, over: object = {}) {
   );
 }
 
-/** 呼ぶ前と後で比べる、store の中身の写し（プリミティブへ写し取る）。 */
 async function stateOf(store: InMemoryMemoryStore): Promise<string> {
   return JSON.stringify({
     memories: store
@@ -379,8 +365,6 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
   });
 
   describe("イベントの meta・actor に BigInt があるとき、状態を書き換えない（Issue #1384）", () => {
-    // `@mnemora/postgres` の `JSON.stringify` が投げるのと同じ `TypeError`・同じ文言
-    // （`assertStorableMemoryEvent`、`packages/testkit/src/__fixtures__/memory-event-check.ts`）。
     const BIGINT_MESSAGE = /Do not know how to serialize a BigInt/;
     const bigint = { b: 10n };
 
@@ -514,8 +498,7 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
     });
 
     it("restoreSupersededBy", async () => {
-      // `restoreSupersededBy` の `event` 引数に `meta` は無い（`meta` は内部で組み立てる）ので、
-      // ここで呼び手が渡せる欄のうち BigInt を入れられるのは `actor` だけ。
+      // `restoreSupersededBy` の `event` 引数に `meta` は無い（内部で組み立てる）ので、呼び手が渡せる欄のうち BigInt を入れられるのは `actor` だけ。
       const store = new InMemoryMemoryStore();
       const anchor = await memory(store);
       for (let i = 0; i < 2; i++) {

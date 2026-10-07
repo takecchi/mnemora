@@ -1,53 +1,17 @@
 /**
- * `.github/workflows/embedding-cross-runner-reproducibility.yml`（Issue #565「採るとしたら
- * 何が要るか」の測定を、複数 runner × `numThreads` × 反復（rep）へ広げる workflow）が使う
- * **純関数の側**。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * （`compare-embedding-output-fingerprints-lib.mjs` と同じ分担）。
- *
- * ⛔ **この module も門ではない。**`classifyLegPair` が返す `"mismatch"` は「値が違った」
- * という観測であって、良し悪しの判定ではない——呼び出し側のどこも exit code を
- * 非0にしない（`.github/workflows/embedding-cross-runner-reproducibility.yml` の比較
- * ジョブは常に成功する設計にする）。
- *
- * ## この module が持つ3つの塊
- *
- * 1. **脚（leg）の識別**——runner label × numThreads × rep の組を、artifact 名・ジョブ内の
- *    matrix 値の両方から同じ形に正規化する（{@link crossRunnerLegId} /
- *    {@link crossRunnerArtifactName} / {@link parseCrossRunnerArtifactName}）。
- *    ⚠ **`CROSS_RUNNER_RUNNERS` / `CROSS_RUNNER_NUM_THREADS` / `CROSS_RUNNER_REPS` は
- *    workflow の matrix と二重管理である**（`EMBEDDING_FINGERPRINT_JOBS` と同じ形）。
- *    ずれたら `scripts/__tests__/embedding-cross-runner-reproducibility-workflow-wiring.test.mjs`
- *    が赤くなる。
- * 2. **float32 ビット列としての比較**——`embed()` の出力は internally float32（onnxruntime
- *    は float32 で計算する）だが、JS の `number` は double なので、値をそのまま比較すると
- *    「double としては違うが float32 としては同じ」を見落とす・逆に「float32 として全く
- *    無関係な丸め誤差」を過大に見る、という取り違えが起こる。⟹ 比較の前に必ず
- *    `Math.fround`（float32 への丸め）を通す（{@link ulpDistanceFloat32} /
- *    {@link float32BitsHex} / {@link sha256HexOfFloat32Vectors}）。
- * 3. **群ごとの比較**——基準脚（{@link CROSS_RUNNER_BASELINE_LEG_ID}、
- *    `ubuntu-latest` / `numThreads=4` / `rep=1`）に対する各脚の差分
- *    （{@link buildBaselineComparisons}）と、脚同士のペアワイズ比較を条件で束ねた群の要約
- *    （{@link buildGroupSummaries}）。
- *
- * ## `"incomparable"` を `"match"` にしない
- *
- * `classifyLegPair` は、artifact が無い・読めない・`weights_unavailable`・vectors の形が
- * 崩れている、のいずれかを **必ず `"incomparable"` として返す**——`"match"`／`"mismatch"`
- * のどちらにも倒さない。`AGENTS.md`「⚠『出なかった』を、事象が無いことの証明にしない」の
- * 適用（`compare-embedding-output-fingerprints-lib.mjs` と同じ形）。
+ * ⛔ この module も門ではない。`classifyLegPair` が返す `"mismatch"` は観測であって判定ではなく、
+ * どの呼び出し側も exit code を非0にしない。
+ * ⚠ `CROSS_RUNNER_RUNNERS` / `CROSS_RUNNER_NUM_THREADS` / `CROSS_RUNNER_REPS` は workflow の matrix と二重管理。
+ * ずれたら `embedding-cross-runner-reproducibility-workflow-wiring.test.mjs` が赤くなる。
+ * 比較の前に必ず `Math.fround` を通す。double では違っても float32 では同じ(逆も)を取り違えるため。
+ * artifact 無し・読めない・`weights_unavailable`・vectors の形崩れは必ず `"incomparable"` で返し、
+ * `"match"` / `"mismatch"` のどちらにも倒さない。
  */
 
 import { createHash } from "node:crypto";
 
-// ---------------------------------------------------------------------------
-// 1. 脚（leg）の識別 —— workflow の matrix と二重管理（ここが唯一の宣言）
-// ---------------------------------------------------------------------------
-
 /**
- * matrix が回す runner。`label` は GitHub Actions の `runs-on:` にそのまま渡る値、
- * `arch` はこの measurement が期待するアーキテクチャ（実測でも `uname -m` 等と突き合わせる
- * ——{@link buildGroupSummaries} が信じるのは実測の `leg.arch` であり、ここの `arch` は
- * 「意図した値」でしかない）。
+ * `arch` は意図した値でしかない。比較で信じるのは実測の `leg.arch`。
  *
  * @type {ReadonlyArray<{ label: string, arch: "x64" | "arm64" }>}
  */
@@ -64,16 +28,11 @@ export const CROSS_RUNNER_NUM_THREADS = Object.freeze([1, 2, 4]);
 /** @type {ReadonlyArray<number>} */
 export const CROSS_RUNNER_REPS = Object.freeze([1, 2]);
 
-/** artifact 名の prefix。この後に `--runner-<label>--nt-<n>--rep-<r>` が続く。 */
 export const CROSS_RUNNER_ARTIFACT_PREFIX = "cross-runner-embedding-fingerprint";
 
 /**
- * runner label・numThreads・rep から、比較段が使う脚の識別子を作る。
- *
- * ⚠ **区切りに `--`（ハイフン2連）を使う。** `CROSS_RUNNER_RUNNERS` の label
- * （`ubuntu-24.04-arm` 等）は単発のハイフンとピリオドを含むが `--` は含まない
- * ——含むようになったら、この関数と {@link parseCrossRunnerArtifactName} の
- * 正規表現を両方直すこと。
+ * ⚠ 区切りは `--`。runner label は単発のハイフンとピリオドを含むが `--` は含まない。
+ * 含むようになったら `parseCrossRunnerArtifactName` の正規表現も直すこと。
  *
  * @param {string} runnerLabel
  * @param {number} numThreads
@@ -85,8 +44,6 @@ export function crossRunnerLegId(runnerLabel, numThreads, rep) {
 }
 
 /**
- * `crossRunnerLegId` を artifact 名（`actions/upload-artifact` の `name:`）へ変換する。
- *
  * @param {string} runnerLabel
  * @param {number} numThreads
  * @param {number} rep
@@ -97,9 +54,7 @@ export function crossRunnerArtifactName(runnerLabel, numThreads, rep) {
 }
 
 /**
- * artifact 名（ディレクトリ名）から `{ runnerLabel, numThreads, rep }` を復元する。
- * 形が合わなければ `null`（この module は「読めない」を投げずに `null` で返す一貫した
- * 作法を取る——呼び出し側が判断する）。
+ * 形が合わなければ throw せず `null`。
  *
  * @param {string} artifactName
  * @returns {{ runnerLabel: string, numThreads: number, rep: number } | null}
@@ -118,11 +73,6 @@ export function parseCrossRunnerArtifactName(artifactName) {
 }
 
 /**
- * matrix が回すべき脚の全量（`CROSS_RUNNER_RUNNERS` × `CROSS_RUNNER_NUM_THREADS` ×
- * `CROSS_RUNNER_REPS`）。比較段が「artifact が1つも無い脚」（ジョブ自体が起動すら
- * しなかった等）を「比較できなかった」として名指しするために使う——`present: false`
- * の脚を暗黙に無視しない。
- *
  * @returns {{ id: string, artifactName: string, runnerLabel: string, arch: "x64" | "arm64", numThreads: number, rep: number }[]}
  */
 export function allExpectedCrossRunnerLegs() {
@@ -144,18 +94,10 @@ export function allExpectedCrossRunnerLegs() {
   return legs;
 }
 
-/** 基準脚（Issue #565 が指定した比較の基点）: `ubuntu-latest` / `numThreads=4` / `rep=1`。 */
 export const CROSS_RUNNER_BASELINE_LEG_ID = crossRunnerLegId("ubuntu-latest", 4, 1);
 
-// ---------------------------------------------------------------------------
-// 2. float32 ビット列としての比較
-// ---------------------------------------------------------------------------
-
 /**
- * IEEE754 単精度（float32）のビットパターンを、8桁の16進文字列にする。
- * **big-endian（MSB が先頭）で表示する**——符号・指数・仮数を人が読む慣習に合わせるため
- * （バイト列としての並びの規約ではなく、あくまで表示上の規約。{@link sha256HexOfFloat32Vectors}
- * のバイト列化とは独立な選択であり、混同しないこと）。
+ * big-endian 表示は人が読む慣習に合わせたもの。`sha256HexOfFloat32Vectors` のバイト列化とは独立で、混同しない。
  *
  * @param {number} value
  * @returns {string}
@@ -167,9 +109,6 @@ export function float32BitsHex(value) {
 }
 
 /**
- * ベクトルの配列（渡された順序のまま、⛔ 並べ替えない）を、float32 の符号なし32bit整数の
- * 配列に変換する（内部用、bit 演算の材料）。
- *
  * @param {number} value
  * @returns {number}
  */
@@ -180,11 +119,7 @@ function float32Uint32Bits(value) {
 }
 
 /**
- * float32 の32bit表現を、大小関係を保った符号なし整数へ写す（Bruce Dawson の
- * "Comparing Floating Point Numbers" が示す標準的な ULP 距離の作り方）。
- * 符号ビットが立っていれば `0x100000000 - bits`、立っていなければ `bits + 0x80000000`。
- * **`+0` と `-0` は同じ順序値になる**（両者の ULP 距離は0——符号だけの違いを
- * 「1 ULP 離れている」と数えない）。
+ * `+0` と `-0` は同じ順序値(ULP 距離 0)。
  *
  * @param {number} bits 符号なし32bit整数
  * @returns {number}
@@ -194,9 +129,7 @@ function orderedFromFloat32Bits(bits) {
 }
 
 /**
- * 2つの数値を float32 に丸めたうえでの ULP（Unit in the Last Place）距離。
- * `NaN`／`Infinity` が絡む場合は `null`（「距離」という概念が無いことを、0 で
- * ごまかさない）。
+ * `NaN` / `Infinity` が絡めば 0 でごまかさず `null`。
  *
  * @param {number} a
  * @param {number} b
@@ -212,13 +145,6 @@ export function ulpDistanceFloat32(a, b) {
 }
 
 /**
- * 2つの数値が「十進で何桁目の有効数字から食い違うか」（1始まり）。
- * 完全に一致していれば `null`。
- *
- * - 符号が違えば（0 同士を除く）1（最初の桁から食い違う）。
- * - 10 の指数（桁数）が違えば1。
- * - 指数が同じなら、仮数部の桁を先頭から比較し、最初に違う桁の位置（1始まり）を返す。
- *
  * @param {number} a
  * @param {number} b
  * @param {number} precision 比較する有効数字の桁数(既定15——double が確実に持つ桁数)
@@ -232,7 +158,6 @@ export function firstDivergentSignificantDigit(a, b, precision = 15) {
     return 1;
   }
   if (a === 0 || b === 0) {
-    // a === b (含む 0 === 0) は上で弾いてある——ここに来るのは片方だけ0のとき。
     return 1;
   }
   const signA = a < 0 ? -1 : 1;
@@ -263,9 +188,7 @@ export function firstDivergentSignificantDigit(a, b, precision = 15) {
 }
 
 /**
- * ベクトルの配列を、float32 のリトルエンディアン4バイトで連結したバイト列にする。
- * ⛔ 並べ替えない——`measure-embedding-output-fingerprint-lib.mjs` の
- * `serializeVectorsToBytes`（float64 版）と同じ形の float32 版。
+ * ⛔ 並べ替えない。
  *
  * @param {number[][]} vectors
  * @returns {Buffer}
@@ -284,8 +207,6 @@ export function serializeVectorsToFloat32Bytes(vectors) {
 }
 
 /**
- * ベクトルの配列の、float32 表現での sha256 16進文字列。
- *
  * @param {number[][]} vectors
  * @returns {string}
  */
@@ -294,9 +215,6 @@ export function sha256HexOfFloat32Vectors(vectors) {
 }
 
 /**
- * ベクトルの配列を、成分ごとの float32 ビットパターン（16進）の配列に変換する
- * （artifact に残す「ビット列を hex で丸ごと」の実体）。
- *
  * @param {number[][]} vectors
  * @returns {string[][]}
  */
@@ -305,10 +223,7 @@ export function vectorsToFloat32Hex(vectors) {
 }
 
 /**
- * 2組のベクトル集合を突き合わせ、成分ごとの統計を返す。
- *
- * ⚠ **本数・成分数が違えば `comparable: false`。** 次元が違うベクトル同士に対して
- * 「最大絶対差」を語ることに意味は無い。
+ * ⚠ 本数・成分数が違えば `comparable: false`。次元が違うベクトルの「最大絶対差」に意味は無い。
  *
  * @param {number[][]} vectorsA
  * @param {number[][]} vectorsB
@@ -390,26 +305,20 @@ export function compareVectorSets(vectorsA, vectorsB) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 3. 脚同士の判定と、群ごとの要約
-// ---------------------------------------------------------------------------
-
 /**
  * @typedef {object} CrossRunnerLeg
- * @property {string} id `crossRunnerLegId` の戻り値
+ * @property {string} id
  * @property {string} runnerLabel
- * @property {"x64" | "arm64" | string} arch **実測値**（意図ではない。宣言と食い違えば
- *   別途「宣言と食い違う」欄で分かるようにする——ここでは信じて使うだけ）
+ * @property {"x64" | "arm64" | string} arch 実測値(意図ではない)
  * @property {number} numThreads
  * @property {number} rep
- * @property {boolean} present artifact が存在したか
- * @property {string} [error] 存在したが読めない/parse できなかった理由
- * @property {Record<string, unknown>} [record] 読めた測定 JSON(パース済み)
+ * @property {boolean} present
+ * @property {string} [error]
+ * @property {Record<string, unknown>} [record]
  */
 
 /**
- * 2つの脚を突き合わせる。🔴 **どの分岐でも exit code を決めない**（この module 全体の
- * 決まりごと、上の docstring 参照）。
+ * 🔴 どの分岐でも exit code を決めない。
  *
  * @param {CrossRunnerLeg} legA
  * @param {CrossRunnerLeg} legB
@@ -480,8 +389,6 @@ export function classifyLegPair(legA, legB) {
 }
 
 /**
- * 全脚を基準脚（`baselineId`）と突き合わせる。
- *
  * @param {CrossRunnerLeg[]} legs
  * @param {string} baselineId
  * @returns {{ baselinePresent: boolean, comparisons: { legId: string, result: ReturnType<typeof classifyLegPair> }[] }}
@@ -511,8 +418,6 @@ export function buildBaselineComparisons(legs, baselineId) {
 }
 
 /**
- * 全脚のペアワイズ比較（$\binom{n}{2}$ 組）。群の要約はここから作る。
- *
  * @param {CrossRunnerLeg[]} legs
  * @returns {{ aId: string, bId: string, result: ReturnType<typeof classifyLegPair> }[]}
  */
@@ -529,8 +434,6 @@ export function buildPairwiseComparisons(legs) {
 }
 
 /**
- * ペアの集合から、比較可能な組だけの要約統計を作る。
- *
  * @param {{ aId: string, bId: string, result: ReturnType<typeof classifyLegPair> }[]} pairs
  * @returns {{ pairCount: number, comparablePairCount: number, matchCount: number, allMatch: boolean | null, maxAbsDiff: number | null, maxUlpDiff: number | null }}
  */
@@ -552,15 +455,6 @@ function summarizePairs(pairs) {
 }
 
 /**
- * 群ごと（同 arch 内 / arch 間 / numThreads 間 / 同条件 rep 間）の一致の要約。
- *
- * - `archInternal`: 2脚とも同じ arch（runner・numThreads・rep は問わない）。
- * - `archCross`: 2脚の arch が違う。
- * - `numThreadsInternal`: runner と rep が同じで numThreads だけ違う組
- *   （スレッド数だけを動かした影響を切り分ける）。
- * - `repInternal`: runner と numThreads が同じで rep だけ違う組
- *   （同一条件での VM 間ばらつきを切り分ける）。
- *
  * @param {CrossRunnerLeg[]} legs
  * @returns {{ archInternal: ReturnType<typeof summarizePairs>, archCross: ReturnType<typeof summarizePairs>, numThreadsInternal: ReturnType<typeof summarizePairs>, repInternal: ReturnType<typeof summarizePairs> }}
  */
@@ -592,13 +486,7 @@ export function buildGroupSummaries(legs) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 4. Job Summary 向けの Markdown
-// ---------------------------------------------------------------------------
-
 /**
- * `classifyLegPair` / `buildBaselineComparisons` の1件を1行にする。
- *
  * @param {string} legId
  * @param {ReturnType<typeof classifyLegPair>} result
  * @returns {string}
@@ -621,8 +509,6 @@ function baselineRowMarkdown(legId, result) {
 }
 
 /**
- * 群の要約1件を1行にする。
- *
  * @param {string} label
  * @param {ReturnType<typeof summarizePairs>} summary
  * @returns {string}
@@ -644,8 +530,6 @@ function groupSummaryRowMarkdown(label, summary) {
 }
 
 /**
- * Job Summary に載せる Markdown 一式を組み立てる。
- *
  * @param {{
  *   legs: CrossRunnerLeg[],
  *   baselineId: string,

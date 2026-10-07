@@ -1,88 +1,14 @@
 /**
- * `scripts/compare-summary.mjs`(CI の Job Summary に載せる Markdown を組み立て、
- * 基準値からの悪化を判定する CLI)の純関数の側。ファイル I/O・`process.argv`・
- * `process.exit` を一切持たない——`time-term-summary-lib.mjs`/
- * `archive-sweep-cost-summary-lib.mjs` と同じ分担(Issue #242)。
+ * 純関数の側。ファイル I/O・`process.argv`・`process.exit` を持たない。
  *
- * `examples/chat` の `compare` サブコマンド(`MNEMORA_COMPARE_JSON` が吐く JSON、
- * `examples/chat/src/compare-json.ts` の `CompareRunJson`)を Markdown へ変換する。
+ * ⛔ 退行の判定は `mnemoraShareOfNaiveChars` の悪化と `factStatementSurvived` の true→false の2欄だけ。
+ * 全欄の厳密一致を門にしない(`naiveChars` のような北極星と無関係な欄で赤くなるため。ADR 0133)。
  *
- * ## 何を測っているか(docs/north-star.md / Issue #242)
+ * ⛔ 新しい会話長・消えた会話長は退行ではなく `indeterminate`。黙って読み飛ばすと
+ * 「比較していない」が「退行が無い」と同じ顔で緑になる。
  *
- * `compare` は北極星の物差しそのもの——`mnemoraShareOfNaiveChars`
- * (mnemora が焼く文字数 / naive が焼く文字数)が「使う側が会話ログを全部プロンプトへ
- * 積むのをやめられたか」に直接答える値である。他5本の基準値ファイル
- * (`retrieval-baseline.json`/`identifier-probe-baseline.json`/`time-term-baseline.json`/
- * `consolidation-baseline.json`/`archive-sweep-baseline.json`)には対応する基準値が
- * 無く、この bench だけが退行を機械で見ていなかった(Issue #242)。
- *
- * ## ⭐ 他5本と違い、これは門である(ADR 0133)
- *
- * 他5本(`retrieval-quality`/`identifier-probes`/`consolidation-cost`/
- * `archive-sweep-cost`/`time-term`)は ADR 0088/0094 により意図的に非ゲート
- * (`exit 0`)にされている——理由は「decay/freshness が壁時計時間に依存して run ごとに
- * 揺れる」(ADR 0088 §2 実測)と「標本が小さく統計的な主張ができない」(ADR 0033 §3)の
- * 2点である。
- *
- * `compare` にもこの2つの懸念は一見当てはまるように見えた——**しかし ADR 0133 が
- * 実測した**: 同一 commit で CI を2回実行し(同じ run のジョブを rerun)、
- * `measuredAt` を除いて JSON が完全一致した(12 行すべて含む。大きい会話長で
- * `over_limit` による上位 `DEFAULT_RECALL_LIMIT` 件への絞り込みが起きている行も
- * 含めて揺れなかった)。⟹ **この bench は run 間で揺れないことを実測で確認した**
- * ——他5本とは前提が違う。**だからこの bench だけは、`mnemoraShareOfNaiveChars`
- * の悪化と `factStatementSurvived` の退行(true→false)を検知したら非0で終わる。**
- *
- * ⚠ 標本(会話長12点)が少ないことは他5本と同じだが、ここで問題になる「標本が
- * 小さいと何が主張できないか」(ADR 0033 §3)は**想起の質についての統計的な主張**
- * (hit@1 が真の成功率をどれだけ代表するか等)の話であり、`compare` が測るのは
- * 「この12点の会話長で、決定的な入力に対して機械的に同じ値が出るか」という
- * **再現性**の話である。再現性は個々の点ごとに検証可能であり、標本数の少なさは
- * 「この点で退行したかどうか」の判定を曖昧にしない。
- *
- * ## 何を悪化とみなすか
- *
- * `turnCount` をキーに基準値と突き合わせ、次のどちらかが起きた行を「退行」とする
- * (`computeComparison`。旧 `computeRegressions`——Issue #477 で戻り値の形を変え、名前も変えた):
- *
- * 1. **`mnemoraShareOfNaiveChars` が基準値より大きい**(= mnemora が焼く量が
- *    naive に対して相対的に増えた。北極星の物差しそのものの悪化)。
- * 2. **`factStatementSurvived` が `true` → `false` に変わった**(量を削った結果、
- *    答えが落ちた。README「削減率だけでは意味を持たない」節の懸念そのもの)。
- *
- * **それ以外の欄(`naiveChars`/`totalInScope`/`omitted` 等)は Job Summary の
- * 差分節には出すが、退行の判定には使わない**——`naiveChars` は会話生成側の変更で
- * 動きうるが、それ自体は北極星の物差しの悪化ではない。判定を `mnemoraShareOfNaiveChars`
- * と `factStatementSurvived` の2つに絞ることで、無関係な変更が門を赤くしない
- * (却下した代案は ADR 0133 参照: 全欄の厳密一致を門にする案は、`naiveChars` の
- * ような北極星と無関係な欄が変わるたびに赤くなり、`AGENTS.md`
- * 「機能を足すかどうかは北極星に当てて決める」の運用を阻害するため却下した)。
- *
- * ## 新しい会話長・消えた会話長 —— 退行ではないが、判定不能である(Issue #477)
- *
- * **どちらも「退行」ではない。しかし「退行が無い」でもない——比較していないだけである。**
- * 🔴 2026-09-17 以前、この2つは黙って読み飛ばされ、門は緑を出していた
- * (Issue #477 の実測: 基準値を `turnCount=2` の1行だけにすると、退行11件の実測が
- * `computeRegressions` で0件になり exit 0 で通った。`rows: []` でも同じ)。
- * ⟹ **「失敗が0件」と「N件を比較して失敗が0件」が同じ顔で出ていた。**
- *
- * いまは `evaluateCompare` が、**実測側の `turnCount` 集合と基準値側の `turnCount`
- * 集合が一致したときだけ**判定する:
- *
- * - 実測に在って基準値に無い `turnCount`(新しい会話長) ⟹ **その行は1度も比較されて
- *   いない** ⟹ `indeterminate`。
- * - 基準値に在って実測に無い `turnCount`(消えた会話長、たとえば
- *   `DEFAULT_COMPARE_SEQUENCE` を変更した) ⟹ **測る点が黙って減った**
- *   ⟹ `indeterminate`(`ci-green-check` の「部分登録」と同じ窓。ADR 0215)。
- *
- * **会話長の構成を変える判断は、いまもこの bench の門の役目ではない**——門は
- * 「変えたこと」を赤にするのではなく、**「変わったので比較できていない」と名乗って
- * 止まる**。基準値を更新すれば(意図した変更なら、それが正しい手当てである)通る。
- *
- * ⚠ **「本来いくつの会話長が在るべきか」は、この lib からは引けない。**
- * 母集合の正体は `examples/chat/src/compare.ts` の `DEFAULT_COMPARE_SEQUENCE`(12点)
- * だが、それは TypeScript であり `scripts/*.mjs` から素直に import できない。
- * ⟹ **引かない。** 下限は上の2集合から取る(件数をこのファイルに書かない。
- * ADR 0215 決定1・案D と同じ「下限を実測側の集合から取る」形)。
+ * ⚠ 本来の会話長の母集合は TypeScript の `DEFAULT_COMPARE_SEQUENCE` にあり、この lib から import できない。
+ * 下限は実測側の集合から取り、件数をここに書かない。
  */
 
 const REQUIRED_TOP_STRING_FIELDS = ["llmMode", "embeddingMode"];
@@ -105,8 +31,6 @@ function isObject(value) {
 }
 
 /**
- * 1 row のオブジェクトが必須項目をすべて正しい型で持っているかを検査する。
- *
  * @param {unknown} row
  * @param {string} label
  * @returns {string[]}
@@ -131,8 +55,6 @@ function findRowFieldProblems(row, label) {
 }
 
 /**
- * `MNEMORA_COMPARE_JSON` が吐いた JSON(パース済み)の形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -171,9 +93,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(パース済み)の形を検査する。実測と同じ必須項目を、`rows` 配列の
- * 各要素に要求する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { rows: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -206,7 +125,6 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {{ rows: Record<string, unknown>[] }} */ (data) };
 }
 
-/** Job Summary の差分節で比べる項目(門の判定には使わない。冒頭 docstring 参照)。 */
 const DIFF_FIELDS = [
   "naiveChars",
   "naiveTokens",
@@ -221,18 +139,11 @@ const DIFF_FIELDS = [
 ];
 
 /**
- * ⭐門(`computeComparison`)が判定に使う2欄——`mnemoraShareOfNaiveChars` の悪化と
- * `factStatementSurvived` の true→false だけを見る(上の `computeComparison` 参照)。
- * 🔴 `computeComparison` の判定ロジックを変えたら、ここも揃えること
- * (欄名の出所を2箇所に増やさないため、`FRESHNESS_FIELDS` は `DIFF_FIELDS` から
- * この2欄を引いて導出する——ベタ書きしない)。
+ * 🔴 `computeComparison` の判定を変えたらここも揃える。
+ * `FRESHNESS_FIELDS` は `DIFF_FIELDS` から導出し、欄名の出所を増やさない。
  */
 const GATE_FIELDS = ["mnemoraShareOfNaiveChars", "factStatementSurvived"];
 
-/**
- * 基準値の「鮮度」(`evaluateBaselineFreshness`)が見る欄——`DIFF_FIELDS` から
- * `GATE_FIELDS`(⭐門が見る2欄)を引いたもの。鮮度は門の仕事を二重にしない。
- */
 const FRESHNESS_FIELDS = DIFF_FIELDS.filter((field) => !GATE_FIELDS.includes(field));
 
 /**
@@ -247,8 +158,6 @@ function readDiffField(row, field) {
 }
 
 /**
- * 実測の1 row と、対応する基準値の1 row(無ければ `undefined`)を比べる。
- *
  * @param {number} turnCount
  * @param {Record<string, any>} measuredRow
  * @param {Record<string, any> | undefined} baselineRow
@@ -269,17 +178,9 @@ export function diffRow(turnCount, measuredRow, baselineRow) {
 }
 
 /**
- * ⭐ **何を比較し、何を比較できなかったか**を返す(Issue #477)。
+ * ⛔ 退行の配列だけを返す関数は意図的に残さない。空配列が「比較して0件」と「比較していない」を区別できない。
  *
- * 🔴 **退行の配列だけを返す関数を、意図的に残していない。** 以前の
- * `computeRegressions()` は「基準値に対応する行が無ければ `continue`」していたため、
- * 呼び手には「比較して退行が無かった」と「そもそも比較していない」が**同じ空配列**
- * として届いていた。⟹ **呼び手が比較漏れを直視せざるを得ない形にする**ため、
- * 戻り値をオブジェクトにし、比較できなかった `turnCount` を必ず同梱する。
- *
- * ⚠ **この関数は合否を決めない。** 合否は `evaluateCompare()`、終了コードは
- * `compare-summary.mjs` が持つ(`publish-run-coverage-lib.mjs` の
- * `evaluatePublishRunCoverage` / `check-publish-run-coverage.mjs` と同じ分担)。
+ * ⚠ 合否は決めない(`evaluateCompare` と CLI の役目)。
  *
  * @param {Record<string, any>} measured
  * @param {{ rows: Record<string, unknown>[] }} baseline
@@ -288,9 +189,7 @@ export function diffRow(turnCount, measuredRow, baselineRow) {
  *   regressions: { turnCount: number, reasons: string[] }[],
  *   measuredOnlyTurnCounts: number[],
  *   baselineOnlyTurnCounts: number[],
- * }} `comparedTurnCounts` は両側に在って実際に突き合わせた会話長、
- * `measuredOnlyTurnCounts` は実測に在って基準値に無い(1度も比較していない)会話長、
- * `baselineOnlyTurnCounts` は基準値に在って実測に無い(測る点が黙って減った)会話長。
+ * }}
  */
 export function computeComparison(measured, baseline) {
   const baselineByTurn = new Map(baseline.rows.map((r) => [/** @type {any} */ (r).turnCount, r]));
@@ -304,7 +203,7 @@ export function computeComparison(measured, baseline) {
   for (const row of measured.rows) {
     const base = /** @type {Record<string, any> | undefined} */ (baselineByTurn.get(row.turnCount));
     if (!base) {
-      // ⛔ ここで黙って読み飛ばさない(Issue #477)——「比較していない」として数える。
+      // ⛔ ここで黙って読み飛ばさない。「比較していない」として数える。
       measuredOnlyTurnCounts.push(row.turnCount);
       continue;
     }
@@ -335,20 +234,8 @@ export function computeComparison(measured, baseline) {
 }
 
 /**
- * ⭐ **門の判定そのもの**(Issue #477)。`evaluatePublishRunCoverage`
- * (`publish-run-coverage-lib.mjs`、ADR 0207)と同じ形——lib が
- * `verdict: "pass" | "fail" | "indeterminate"` と `reason` を返し、**終了コードへの
- * 写し取り(0/1/2)は CLI(`compare-summary.mjs`)が持つ。**
- *
- * ## ⭐ いつ判定してよいか
- *
- * **実測側の `turnCount` 集合と基準値側の `turnCount` 集合が一致したときだけ判定する。**
- * 一致しなければ `indeterminate` ——「比較していない」を「退行が無い」と同じ顔で
- * 出さないためである(冒頭 docstring「新しい会話長・消えた会話長」)。
- *
- * ⚠ **`pending` という語は使わない。** `ci-green-check-lib.mjs` の `pending` は
- * 「後でもう一度見ろ」という再試行含みの意味を持つが、基準値の取りこぼしは
- * 再試行では直らない(基準値を更新するか、実測側を戻すかの判断が要る)。
+ * ⚠ `pending` という語は使わない。再試行で直る意味に読めるが、基準値の取りこぼしは
+ * 基準値を更新するか実測側を戻すかの判断が要る。
  *
  * @param {Record<string, any>} measured
  * @param {{ rows: Record<string, unknown>[] }} baseline
@@ -414,18 +301,7 @@ export function evaluateCompare(measured, baseline) {
 }
 
 /**
- * ⭐ 基準値の「鮮度」(Issue #403。⛔ **判定ではない**——終了コードを一切変えない)。
- *
- * `evaluateCompare`(⭐門)は `GATE_FIELDS` の2欄だけを見るため、それ以外の欄
- * (`omitted` 等)が相違しても緑のまま出続ける——ADR 0188 の負債3が実際にこの形で
- * 放置された。この関数は判定をやり直さず、**基準値が名乗る出所(`declaration`)と
- * いま実測したもの(`current`)を毎回並べて言わせ**、⭐門が見ない欄の食い違いを
- * `staleRows`/`staleFieldNames` として返すだけである(道具の役目は宣言と現在地の差を
- * 言わせることに留める。ADR 0214 決定5)。
- *
- * 比較は `diffRow` を再利用する(`omitted` の JSON 化比較を書き直さない)。
- * 両側に `turnCount` が在る行だけを見る——片側だけの `turnCount` は
- * `computeComparison` の判定不能の担当であり、鮮度では数えない。
+ * ⛔ 判定ではない。終了コードを変えない。⭐門が見ない欄の食い違いを並べて言うだけ。
  *
  * @param {Record<string, any>} measured
  * @param {{ rows: Record<string, unknown>[], provenance?: unknown }} baseline
@@ -437,10 +313,7 @@ export function evaluateCompare(measured, baseline) {
  *   staleRows: { turnCount: number, fields: string[] }[],
  *   staleFieldNames: string[],
  *   isStale: boolean,
- * }} `declaration` は `baseline.provenance` から読む(無ければ `null` ——出所を
- * 名乗っていない)。`current` は実測の同名トップレベル欄(無ければ `undefined`)。
- * `sameCommit` は両方の commit が文字列で在って一致するときだけ `true`。
- * `staleRows` は `turnCount` 昇順、`fields` は `DIFF_FIELDS` の順。
+ * }}
  */
 export function evaluateBaselineFreshness(measured, baseline) {
   const provenance = /** @type {any} */ (baseline).provenance;
@@ -493,8 +366,6 @@ export function evaluateBaselineFreshness(measured, baseline) {
 }
 
 /**
- * 基準値との差分節。**一致なら1行、違うときだけ展開する**(ADR 0088 §3-3)。
- *
  * @param {Record<string, any>} measured
  * @param {{ rows: Record<string, unknown>[] }} baseline
  */
@@ -520,7 +391,6 @@ function buildDiffSection(measured, baseline) {
   }
 
   if (evaluation.verdict === "indeterminate") {
-    // 🔴 「比較していない」を、緑とも赤とも別の名前で出す(Issue #477)。
     lines.push(`🔴 **判定不能(比較していない会話長が在る)**: ${evaluation.reason}`, "");
   }
 
@@ -569,7 +439,6 @@ function buildDiffSection(measured, baseline) {
   return lines.join("\n");
 }
 
-/** 1 row を表の1行にする。 */
 function buildRowLine(row) {
   const ratio = `${(row.mnemoraShareOfNaiveChars * 100).toFixed(1)}%`;
   const survived = row.factStatementSurvived ? "✅" : "❌";
@@ -579,11 +448,7 @@ function buildRowLine(row) {
   );
 }
 
-/**
- * 「基準値の宣言」の1行。`provenance` が無ければ、出所を名乗っていない旨を返す。
- *
- * @param {ReturnType<typeof evaluateBaselineFreshness>["declaration"]} declaration
- */
+/** @param {ReturnType<typeof evaluateBaselineFreshness>["declaration"]} declaration */
 function formatDeclarationLine(declaration) {
   if (declaration === null) {
     return (
@@ -601,11 +466,7 @@ function formatDeclarationLine(declaration) {
   );
 }
 
-/**
- * 「いま実測したもの」の1行。
- *
- * @param {ReturnType<typeof evaluateBaselineFreshness>["current"]} current
- */
+/** @param {ReturnType<typeof evaluateBaselineFreshness>["current"]} current */
 function formatCurrentLine(current) {
   const commit =
     typeof current.commit === "string" ? `\`${current.commit}\`` : "不明(commit 欄が無い)";
@@ -614,10 +475,6 @@ function formatCurrentLine(current) {
 }
 
 /**
- * ⭐門ではなく警告のための節——`evaluateBaselineFreshness` の結果を Markdown にする。
- * ⛔ **これはゲートではない**——ここに書く内容が exit code を変えることは無い
- * (`compare-summary.mjs` 側で終了コードを変えない設計になっている)。
- *
  * @param {Record<string, any>} measured
  * @param {{ rows: Record<string, unknown>[], provenance?: unknown }} baseline
  */
@@ -667,16 +524,7 @@ function buildFreshnessSection(measured, baseline) {
   return lines.join("\n");
 }
 
-/**
- * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
- * **呼び出し側は必ず validate 済みの値を渡すこと**
- * (`time-term-summary-lib.mjs`/`archive-sweep-cost-summary-lib.mjs` と同じ分担)。
- *
- * `baseline` は任意——`--baseline` を渡さなければ差分節そのものを出さない
- * (門の判定もできない。`compare-summary.mjs` 側で exit 0 にする)。
- *
- * @param {{ measured: Record<string, any>, baseline?: { rows: Record<string, unknown>[] } }} input
- */
+/** @param {{ measured: Record<string, any>, baseline?: { rows: Record<string, unknown>[] } }} input */
 export function buildSummaryMarkdown({ measured, baseline }) {
   const lines = [
     "# compare(北極星の物差し): mnemora/naive の比が実測でどう動いたか(Issue #242)",

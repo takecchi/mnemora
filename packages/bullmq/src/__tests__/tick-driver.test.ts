@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConcurrency } from "../tick-driver.js";
 
-// Redis を要らない純関数だけの検査（既定の `test` はここで完結する）。
-// `createBullmqTickDriver` 自体（Queue/Worker を実際に作る側）は Redis 接続を要るため、
-// `concurrent-tick.redis.test.ts`（`test:redis`、専用 CI job）側で検査する。
 describe("resolveConcurrency", () => {
   it("省略時は1", () => {
     expect(resolveConcurrency(undefined)).toBe(1);
@@ -23,7 +20,6 @@ describe("resolveConcurrency", () => {
     expect(() => resolveConcurrency(1.5)).toThrow(/positive integer/);
   });
 
-  // ADR 0525: 型の誤りは TypeError、範囲の誤りは RangeError。message は同じ。
   it("⭐ 数でなければ TypeError（RangeError ではない）", () => {
     for (const value of ["2", null, 2n, {}]) {
       const call = () => resolveConcurrency(value as unknown as number);

@@ -2,31 +2,12 @@ import type { TimeWeightingCase } from "./time-weighting-case.js";
 import { daysBefore } from "./time-weighting-dates.js";
 
 /**
- * `answer-time-weighting` ベンチの評価用ケース集合・補足（`tuningUse: "held-out"`）。
- * 段2a（マネージャー決定、Issue #690）。
- *
- * 🔴 **この集合も `time-weighting-case-set.eval.ts` と同じ規律で凍結する**——
- * 実装・スコア式の数値を見て調整していない。自然な利用場面として書き、この commit で
- * 凍結する。以後変更が必要と判断したら、実装側を直さず先にマネージャーへ相談すること。
- *
- * **既存の `eval.ts`（類型A/B/C）とは別ファイルにする理由**: 類型B/Cは両方の記憶に
- * `occurredAt`（Cは`validUntil`も）を持たせた regression guard であり、
- * legacy/eventAwareFreshness で数式レベルの不変条件が効くため「新方針が実際に
- * 退行するか」を測れない。ここに足す類型B'/C'は、**抽出が出来事時刻・期限を
- * 捉えられなかった（`occurredAt`/`validUntil` が無い）古い記憶**を競合させる——
- * eventAwareFreshness が freshness=1 に固定する対象そのものが「本当は古い」場面。
- *
- * 各類型2件、計4件。**各類型のうち1件は、古い側を直近に reinforce する版**
- * （「最近その話題が出た」）にする——reinforce で `decay` も高いままだと、
- * freshness=1（eventAwareFreshness）と組み合わさって初めて legacy より悪化しうる、
- * という組み合わせを実際に踏む。
+ * 実装・スコア式の数値を見て調整しない（`time-weighting-case-set.eval.ts` と同じ凍結の規律）。
+ * `eval.ts` の類型B/Cは数式レベルの不変条件が効く regression guard で「新方針が退行するか」を測れないので、`occurredAt`/`validUntil` が無い古い記憶を競合させるこの集合を別ファイルにしている。
  */
 const T0 = new Date("2026-08-01T09:00:00.000Z");
 
 export const TIME_WEIGHTING_CASE_SET_EVAL_UNDATED: TimeWeightingCase[] = [
-  // ---------------------------------------------------------------------
-  // 類型B': 古い出来事が occurredAt 無しで記録され、新しい出来事と競合する。
-  // ---------------------------------------------------------------------
   {
     id: "eval-undated-b1-department-reinforced",
     kind: "old-event-undated-vs-new",
@@ -36,7 +17,6 @@ export const TIME_WEIGHTING_CASE_SET_EVAL_UNDATED: TimeWeightingCase[] = [
         localId: "old-department-undated",
         content: "以前は営業部で働いていた。",
         recordedAt: daysBefore(T0, 500),
-        // 最近その話題が出た（例: 昔話をした）ので reinforce された。
         reinforceAt: [daysBefore(T0, 1)],
       },
       {
@@ -86,10 +66,6 @@ export const TIME_WEIGHTING_CASE_SET_EVAL_UNDATED: TimeWeightingCase[] = [
     tuningUse: "held-out",
   },
 
-  // ---------------------------------------------------------------------
-  // 類型C': 期限切れの予定が occurredAt・validFrom・validUntil のいずれも無く
-  // 記録され（抽出が期限を構造化できなかった）、validAt ゲートでは除かれない。
-  // ---------------------------------------------------------------------
   {
     id: "eval-undated-c1-seat-floor-reinforced",
     kind: "expired-schedule-undated-vs-current",
@@ -99,7 +75,6 @@ export const TIME_WEIGHTING_CASE_SET_EVAL_UNDATED: TimeWeightingCase[] = [
         localId: "old-seat-undated",
         content: "オフィスの座席は3階です。",
         recordedAt: daysBefore(T0, 300),
-        // 最近また座席の話題が出た（例: 来客案内で聞かれた）ので reinforce された。
         reinforceAt: [daysBefore(T0, 2)],
       },
       {

@@ -4,12 +4,6 @@ import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fak
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * ADR 0431 の確かめ直し（Issue #1734、PR #1537）で足した歯。`markContestedGroup` が `updated` を積まないのは、
- * 呼び出し時点で「既に contested で `contestedWithId` が無い」メンバー（既存の群の一員）だけ。
- * 対の片割れ（contested で `contestedWithId` がある）は、群へ吸収されて状態が変わるので、積む。
- * Postgres の同じ歯は `contested-group-event-growth.postgres.test.ts`（testkit の InMemory と core の Fake は無かった）。
- */
 const ctx: Ctx = { tenantId: "contested-group-unchanged-members" };
 
 function event(memoryId: MemoryId): NewMemoryEvent {

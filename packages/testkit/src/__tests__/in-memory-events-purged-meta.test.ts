@@ -3,15 +3,6 @@ import type { Ctx } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * `InMemoryMemoryStore.purgeExpiredEvents` が積む `events_purged` の meta の日時は、ISO 8601 の
- * 文字列である——`PostgresMemoryStore` は meta を JSON で保存するので、読み戻すと文字列になる。
- * fixture はそれを写す。【実測 2026-09-27】以前は `Date` のまま持っていた。
- *
- * 2実装を並べた歯は `packages/postgres/src/__tests__/memory-events-meta-parity.postgres.test.ts`
- * （DB が要る）。ここは DB 無しで走る側の歯である。
- */
-
 const ctx: Ctx = { tenantId: "events-purged-meta" };
 
 describe("InMemoryMemoryStore.purgeExpiredEvents の events_purged の meta", () => {

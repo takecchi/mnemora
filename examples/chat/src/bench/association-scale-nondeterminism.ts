@@ -1,86 +1,14 @@
 #!/usr/bin/env node
 /**
- * `association-scale-nondeterminism` ベンチ
- * （`pnpm --filter @mnemora/example-chat run association-scale-nondeterminism`）。
+ * `association-scale-nondeterminism` ベンチ。ingest をやり直すたびに連想枠の到達が揺れる原因を切り分ける診断。
+ * 測定であり判定ではない。CI には載せず、exit code は結果で変えない。
  *
- * [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md) §5 が
- * 記録した「同じベクトルでも ingest をやり直すたびに連想枠の到達・probe自身の anchor が
- * 段1の生 ANN 窓（kPrime=40）に残る数が 0/12〜11/12 と揺れる」を切り分ける診断ベンチ
- * （Issue #337 のフォローアップ、マネージャー依頼）。
+ * `association-scale-bench.ts` のロジックは複製しており、あちらは変更しない。既存ベンチのコードを変えない規律と、
+ * export 追加で変えてよいという依頼が両立しなかったため、複製（無変更）の側を採った。
  *
- * ⛔ **これは測定であり判定ではない。** CI には載せない。exit code は結果で変えない
- * （`association-scale-bench.ts` と同じ規律）。
- *
- * ## 何を切り分けるか（ADR 0332 §5.4 が挙げた2つの仮説 + tie-break の順序依存）
- *
- * 1. **(a) tie-break**: `PostgresVectorStore.search()` の3段 tie-break
- *    （距離 → `recorded_at` DESC → `memory_id` ASC、`vector-store.ts`）が、同点（距離が
- *    float8 で完全一致）の filler 同士の勝敗を ingest のたびに変えている可能性。
- * 2. **(b) HNSW 構築の乱数**: pgvector の HNSW 索引構築時のレベル割り当てに使う乱数が、
- *    同じベクトル集合でも ingest のたびに近似最近傍探索の結果自体を変えている可能性。
- * 3. **(c) 挿入順**: `buildDistinctFiller` の filler 挿入順が変わると
- *    （`recorded_at` の相対順が変わるため）tie-break の勝敗が変わる可能性。
- *
- * ## 測定の組
- *
- * 独立 ingest を3回（I1・I2・I3。I3 だけ filler の挿入順を反転する——base/anchor/gold の
- * 順序は変えない）。各 ingest ごとに TRUNCATE → ingest → drain → ANALYZE の後、同じ
- * DB 状態に対して5つの測定点を撮る:
- *
- * - **M0**: ingest 中の逐次挿入で育った HNSW をそのまま測る（本番と同じ状態）。
- * - **EXACT**: 同じ DB・同じ行に対して、`enable_indexscan`/`enable_bitmapscan` を
- *   `off` にしたセッション（`createPostgresClient` の `options` startup parameter、
- *   `client.ts` の docstring が明記する機構）で厳密探索する。`memory_id`・
- *   `recorded_at`・行そのものは M0 と同一——**索引を経由しない厳密順位**が
- *   `PostgresVectorStore.search()` と同じ3段 tie-break で求まる。
- * - **R1〜R3**: `REINDEX INDEX`（HNSW 索引だけ）→ `ANALYZE` を3回繰り返し、そのたびに
- *   M0 と同じ測定をする。行・`memory_id`・`recorded_at`・tie-break は一切変わらない
- *   ——**HNSW の乱数だけが動く**状況を作る。
- *
- * 判定の筋（走らせる前に決めた読み方）:
- *
- * - R1〜R3 で aRaw/到達が揺れる ⟹ (b) HNSW 構築の乱数だけで揺れが出る。
- * - EXACT が I1〜I3 で一致するなら、(b) を除けば揺れない ⟹ (a) tie-break・(c) 挿入順は
- *   主因でない。EXACT が I1〜I3 で違うなら (a) か (c)（I3 だけ違うなら挿入順依存）。
- * - 厳密順位で anchor が40位より深い probe は、HNSW が「本来入らない anchor を拾って
- *   いた」ことになる。浅いのに aRaw で落ちるなら HNSW の recall 失敗。
- *
- * ## `association-scale-bench.ts` との関係 —— 複製であって改変ではない
- *
- * **`association-scale-bench.ts` 自体は一切変更していない。** `buildDistinctFiller` /
- * `ingestCorpus` / `createInstrumentedRuntime` / `wrapVectorStoreWithSpy` 相当のロジックは
- * このファイルへ複製した——依頼文（「既存ファイルを export 追加で変える必要があるなら
- * 最小限で可」）と、この repo の ⛔ 規律（「既存ベンチのコードも変えない」）が同じ依頼の
- * 中で両立しない指示だったため、より安全な側（複製、無変更）を採った。この判断は
- * report で明示する。`CachingEmbeddingProvider`/`FileEmbeddingCache`/
- * `precomputeEmbeddingCache`（`./embedding-cache.js`）・`buildAssociationProbeSetConversation`/
- * `ASSOCIATION_PROBES`/`ASSOCIATION_HAYSTACK_SIZE`（`../association-probe-set.js`）・
- * `drainEmbedTicks`（`../embed-drain.js`）・`createProviders`/`selectLLMMode`/
- * `selectEmbeddingMode`（`../providers.js`）は、既に export 済みの既存関数をそのまま
- * import しているだけであり、複製していない。
- *
- * ## 実行方法
- *
- * ```
- * DATABASE_URL=postgresql://worker@127.0.0.1:55743/mnemora_test \
- * MNEMORA_EMBEDDING=local \
- * MNEMORA_LLM=deterministic \
- * MNEMORA_ASSOC_NONDET_SCALE=10000 \
- * MNEMORA_ASSOC_NONDET_EMBED_CACHE_DIR=/tmp/mgr-243b5dc9/embcache \
- * MNEMORA_ASSOC_NONDET_JSON=/tmp/mgr-243b5dc9/results/nondeterminism.json \
- * pnpm --filter @mnemora/example-chat run association-scale-nondeterminism
- * ```
- *
- * ⚠ **`MNEMORA_LLM=deterministic` と `MNEMORA_EMBEDDING=local` は両方省略できない**
- * ——`main()` の最初の行（`requireGatesOrThrow()`）が、**どんな provider も構築する前に**
- * `selectLLMMode`/`selectEmbeddingMode`（文字列レベルの判定、`../providers.js`。
- * provider のインスタンスを1つも作らない）で検査し、どちらかが違えば例外で落ちる。
- * この順序にしたのは、`association-scale-bench.ts` の実測で見つけた穴——
- * `MNEMORA_LLM=deterministic` だけ明示し `MNEMORA_EMBEDDING` を省いた場合、
- * `createInstrumentedRuntime` 内の `instanceof LocalEmbeddingProvider` 検査に達する
- * **前** に、`precomputeEmbeddingCache` が `realEmbedding`（`OPENAI_API_KEY` が環境に
- * あれば `OpenAIEmbeddingProvider` になっている）へ直接 `embed()` を呼び、実 OpenAI API
- * を叩いていた——を塞ぐため。詳細は本 PR の報告（歯の確認節）参照。
+ * `MNEMORA_LLM=deterministic` と `MNEMORA_EMBEDDING=local` は両方省略できない。`OPENAI_API_KEY` が環境に在ると、
+ * 省略した場合に `precomputeEmbeddingCache` が実 OpenAI API へ `embed()` を呼ぶ。`requireGatesOrThrow()` が
+ * provider を構築する前に文字列だけで検査して落とす。
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -119,16 +47,7 @@ import {
   precomputeEmbeddingCache,
 } from "./embedding-cache.js";
 
-// ---------------------------------------------------------------------------
-// 歯 —— 何よりも先に置く（実 API を絶対に叩かないため）。
-// ---------------------------------------------------------------------------
-
-/**
- * provider を1つも構築する前に、環境変数の**文字列**だけで判定する
- * （`selectLLMMode`/`selectEmbeddingMode` は provider のインスタンスを作らない
- * 純関数——`../providers.ts` 参照）。ここを通らない限り、後続のどのコードも
- * 実行しない。
- */
+/** provider を構築する前に、環境変数の文字列だけで判定する。ここを通らない限り、後続のコードは実行しない（実 API を叩かないため）。 */
 function requireGatesOrThrow(): void {
   const llmMode = selectLLMMode(process.env);
   if (llmMode !== "deterministic") {
@@ -164,10 +83,6 @@ function parseIntEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-// ---------------------------------------------------------------------------
-// corpus —— `association-scale-bench.ts` の複製 + filler挿入順のパラメータ化。
-// ---------------------------------------------------------------------------
-
 type FillerOrder = "forward" | "reversed";
 
 function buildDistinctFiller(
@@ -198,20 +113,12 @@ function buildCorpus(scale: number, fillerOrder: FillerOrder): CorpusTexts {
   return { base, filler };
 }
 
-// VectorStore spy は ./vector-store-spy.ts（association-scale-bench.ts と共有。Issue #1012）。
-
-// ---------------------------------------------------------------------------
-// runtime handle —— `association-scale-bench.ts` の `createInstrumentedRuntime` の
-// 複製 + 追加の `PoolConfig`（EXACT 用の `options: "-c enable_indexscan=off ..."`）。
-// ---------------------------------------------------------------------------
-
 interface InstrumentedHandle {
   runtime: Runtime;
   memoryStore: PostgresMemoryStore;
   spy: VectorStoreSpy;
   pool: PostgresClient["pool"];
   cachingEmbeddingProvider: CachingEmbeddingProvider;
-  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
@@ -224,11 +131,8 @@ async function createInstrumentedRuntime(
     databaseUrl,
     extraOptions !== undefined ? { options: extraOptions } : undefined,
   );
-  // `examples/chat/src/runtime-factory.ts` の `createExampleRuntime` と同じ穴・
-  // 同じ理由: `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に
-  // 失敗しうる処理が何段もある。呼び出し側は `close()` を `try`/`finally` で包むが、
-  // `await createInstrumentedRuntime(...)` 自体はその外にあるため、ここで reject
-  // すると handle を一度も受け取れず `close()` を呼びようがない。
+  // `createExampleRuntime` と同じ穴。`client` を作った後、`close()` を持つ handle を返す前に失敗しうる処理が続く。
+  // ここで reject すると呼び出し側は handle を受け取れず `close()` できないため、ここで閉じる。
   try {
     await runMigrations(client.pool);
 
@@ -269,7 +173,6 @@ async function createInstrumentedRuntime(
       close: () => closePostgresClient(client),
     };
   } catch (err) {
-    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
     await closePostgresClient(client).catch(() => {});
     throw err;
   }
@@ -290,10 +193,6 @@ async function truncateAll(pool: PostgresClient["pool"]): Promise<void> {
     RESTART IDENTITY CASCADE
   `);
 }
-
-// ---------------------------------------------------------------------------
-// ingest —— `association-scale-bench.ts` の `ingestCorpus` の複製。
-// ---------------------------------------------------------------------------
 
 interface IngestResult {
   anchorIds: Map<string, MemoryId>;
@@ -363,19 +262,10 @@ async function ingestCorpus(
   return { anchorIds, goldIds, ingestSeconds, drainSeconds };
 }
 
-// ---------------------------------------------------------------------------
-// REINDEX（HNSW索引だけ）—— R1〜R3。行・memory_id・recorded_at・tie-breakは不変。
-// ---------------------------------------------------------------------------
-
 /**
- * ⚠ この器の `/dev/shm` は62MB しかない（【実測】`df -h /dev/shm`）。既定の
- * `max_parallel_maintenance_workers=2` のまま REINDEX すると、並列ワーカーの
- * 共有メモリ確保が `could not resize shared memory segment ... No space left on
- * device` で落ちる（【実測】I1のR1で実際に踏んだ）。並列ワーカーを使わせない
- * ことで塞ぐ——**索引の中身・HNSW構築アルゴリズム自体は変えない**（並列/直列は
- * ビルドの実行方式であって、レベル割り当てに使う乱数列や採用するグラフ構造の
- * 決定則を変えるものではない、という前提を置く。この前提自体は検証していない
- * ——確かめていないこととして報告に残す）。
+ * この器の `/dev/shm` は62MB しかなく、既定の `max_parallel_maintenance_workers=2` のまま REINDEX すると
+ * 並列ワーカーの共有メモリ確保が落ちる。並列ワーカーを使わせない。並列/直列はビルドの実行方式で、HNSW の乱数や
+ * 構造の決定則を変えないという前提を置くが、この前提は検証していない。
  */
 async function reindexHnsw(pool: PostgresClient["pool"], space: EmbeddingSpaceId): Promise<void> {
   const index = embeddingSpaceIndexName(space);
@@ -390,21 +280,13 @@ async function reindexHnsw(pool: PostgresClient["pool"], space: EmbeddingSpaceId
   await pool.query("ANALYZE");
 }
 
-// ---------------------------------------------------------------------------
-// probe ごとの測定(aRaw/到達 off・on-3・on-10/dActual) —— 既存ベンチの定義を踏む。
-// ---------------------------------------------------------------------------
-
 interface ProbeMeasurement {
   probeId: string;
-  /** (a) raw — probe自身の anchor が段1の生ANN窓(kPrime=40)に入っていたか。 */
   aRaw: boolean;
   aRawRank: number | null;
-  /** 到達 — gold が retrievedVia:"association" で返ったか(armごと)。 */
   reachedOff: boolean;
   reachedOn3: boolean;
   reachedOn10: boolean;
-  /** 連想が実際にアンカーにした3件(anchorCount既定3、on-3のgetVectors呼び出し)に
-   *  probe自身のanchorが入っていたか。 */
   dActual: boolean;
 }
 
@@ -420,10 +302,8 @@ async function measureAllProbes(
     const anchorId = anchorIds.get(probe.id)!;
     const goldId = goldIds.get(probe.id)!;
 
-    // off（同時に aRaw を測る — 段1のANN検索はarmに依らず同じkPrimeを使う）。
     handle.spy.reset();
-    // association: null — 明示的な off。上の measureEfPoint と同じ理由
-    // （ADR 0337 で association 省略＝既定 on になり得るため、off の測定点を守る）。
+    // association: null — 明示的な off。`association` を省略すると既定 on になり得るので、off の測定点を守る。
     const offResult = await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
@@ -433,7 +313,6 @@ async function measureAllProbes(
       (m) => m.memoryId === goldId && m.retrievedVia === "association",
     );
 
-    // on-3（同時に dActual を測る）。
     handle.spy.reset();
     const on3Result = await handle.runtime.recall(ctx, {
       text: probe.query,
@@ -446,7 +325,6 @@ async function measureAllProbes(
     const actualAnchorIds = getVectorsCalls[0]?.memoryIds ?? [];
     const dActual = actualAnchorIds.includes(anchorId);
 
-    // on-10。
     handle.spy.reset();
     const on10Result = await handle.runtime.recall(ctx, {
       text: probe.query,
@@ -482,10 +360,6 @@ function summarizeMeasurement(label: string, probes: ProbeMeasurement[]): string
   );
 }
 
-// ---------------------------------------------------------------------------
-// 厳密順位・距離・境界の同点 —— EXACT測定の中核。
-// ---------------------------------------------------------------------------
-
 function toVectorLiteral(vector: number[]): string {
   return `[${vector.join(",")}]`;
 }
@@ -497,7 +371,6 @@ interface ExactRankResult {
   rank40Distance: number | null;
   rank41Distance: number | null;
   boundaryWindow: { rank: number; memoryId: string; distance: number }[];
-  /** 境界(35〜45位)に、anchorと距離がfloat8で完全一致する別の行があるか。 */
   tieAtBoundary: boolean;
 }
 
@@ -571,10 +444,6 @@ async function measureExactRanks(
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// EXPLAIN —— 索引使用の有無を確かめる（判定ではなくヒューリスティック、AGENTS.md「機械には検出まで」）。
-// ---------------------------------------------------------------------------
-
 interface ExplainCapture {
   label: string;
   text: string;
@@ -623,17 +492,9 @@ async function showEfSearch(pool: PostgresClient["pool"]): Promise<string> {
 }
 
 /**
- * `captureExplainAt`と違い、`memories`へのJOINと3段tie-break（`vector-store.ts`の
- * `search()`と1バイトも違わない形）を含む——**ef_searchが上がると、この JOIN
- * 付きクエリと JOIN 無しの `captureExplainAt` とでプランナのコスト推定が乖離し、
- * 索引を諦める閾値(Seq Scanへ切り替わるef値)がずれる**ことを実機で確認した
- * (ef=400で`captureExplainAt`はSeq Scanと報告したが、この関数(JOIN付き、
- * 本番と同形)ではef=500まで索引が使われ、ef=600以降でSeq Scanに切り替わった
- * ——`/tmp/mgr-243b5dc9/`での実測、2026-09-26)。**aRaw/到達の実測値自体は
- * `measureEfPoint`が本物の`runtime.recall()`(`PostgresVectorStore.search()`)を
- * 経由するため、この関数の結果に依存せず正しい**——この関数は「その値が
- * 本当に索引を使って得られたのか、それともプランナが黙って厳密探索へ
- * 倒れた結果なのか」を切り分ける診断専用。
+ * `captureExplainAt` と違い、`memories` への JOIN と3段 tie-break を含む本番と同形のクエリ。ef_search が上がると
+ * JOIN の有無でプランナのコスト推定が乖離し、索引を諦める閾値がずれる。aRaw/到達の実測値は本物の `runtime.recall()` を
+ * 経由するのでこの関数に依存せず、この関数は「索引を使って得られた値か」を切り分ける診断専用。
  */
 async function captureExplainAtProduction(
   pool: PostgresClient["pool"],
@@ -671,10 +532,6 @@ async function captureExplainAtProduction(
   }
 }
 
-// ---------------------------------------------------------------------------
-// 1測定点(M0/EXACT/R1..R3)ぶんのレポート型。
-// ---------------------------------------------------------------------------
-
 interface MeasurementReport {
   label: string;
   probes: ProbeMeasurement[];
@@ -695,7 +552,6 @@ interface IngestReport {
   m0: MeasurementReport;
   exact: ExactMeasurementReport;
   r: MeasurementReport[];
-  /** I1だけ: max_parallel_workers_per_gather=0 の有無で厳密順位が変わるか(余力があれば)。 */
   exactNoParallelRanks?: ExactRankResult[];
 }
 
@@ -737,27 +593,6 @@ async function buildMeasurementReport(
   return { label, probes, explainQuery, explainAnchor, efSearch };
 }
 
-// ---------------------------------------------------------------------------
-// repeat-ef モード(マネージャー追加依頼、2026-09-26) —— 以下の3点を追加で測る。
-//
-// 1. M0だけの追加反復(I4〜I8、filler順はforward固定)。ADR 0332の1万行(A)では
-//    独立ingestのaRawが0,9,1,0と揺れた——本ファイルのmainモード(I1〜I3)では
-//    3回とも0/12でほぼ揺れなかったため、反復数を増やして分布を見る。
-// 2. I4の索引をそのまま(REINDEXしない)使い、hnsw.ef_search=40/120/400/1000を
-//    本番経路(PostgresVectorStore.search、ADR 0284のrelaxed_order込み)で掃引。
-//    aRaw・到達(on-3/on-10)・aRawに入ったときの順位を見る——「取りこぼしが
-//    探索幅の問題か(efで戻るか)、ef=1000でも戻らないか(グラフ到達性の問題を
-//    示唆)」を分けるため。EXPLAINでHNSW使用を確認する。
-// 3. (余力があれば)I4・ef=40の上で、hnsw.iterative_scan=off と relaxed_order
-//    でaRawが変わるか。**production経路(PostgresVectorStore.search)は
-//    ADR 0284によりrelaxed_orderを無条件にSET LOCALするため、iterative_scan=off
-//    はproduction経路からは再現できない**——ここだけは生SQL(EXACT測定と同じ
-//    `pool.connect()`→`BEGIN`→`SET LOCAL`→`SELECT`→`COMMIT`の形)で、
-//    LIMIT=kPrime・索引は使わせたまま(enable_indexscanは弄らない)、
-//    `hnsw.iterative_scan`の値だけを変えて生ANN候補の集合を直接比べる。
-// ---------------------------------------------------------------------------
-
-/** `association-scale-bench.ts` の `setEfSearchAndReconnect` と同じ形の複製。 */
 async function setEfSearchAndReconnect(
   databaseUrl: string,
   databaseName: string,
@@ -779,7 +614,6 @@ interface EfProbeResult {
   reachedOn10: boolean;
 }
 
-/** ef_search掃引の1点ぶん —— 本番経路(runtime.recall、spy)でaRaw/rank/到達(on-3/on-10)を測る。 */
 async function measureEfPoint(
   handle: InstrumentedHandle,
   tenantId: string,
@@ -793,11 +627,7 @@ async function measureEfPoint(
     const goldId = goldIds.get(probe.id)!;
 
     handle.spy.reset();
-    // association: null — 明示的な off。`packages/core` の連想枠が既定 on になった
-    // （ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
-    // association キーを省略すると既定 on を意味するようになる——ここは "off" の
-    // 測定点なので、それに乗っ取られないよう明示する（association-scale-bench.ts の
-    // ArmConfig と同じ修正）。
+    // association: null — 明示的な off。`association` を省略すると既定 on になるので、off の測定点を守る。
     await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
@@ -840,7 +670,6 @@ interface EfSweepPoint {
   explainQuery: ExplainCapture;
 }
 
-/** 生ANN候補(memory_id, distance)をLIMIT件、指定したsetupSqlの下で1本の接続内で撮る。 */
 async function rawAnnHits(
   pool: PostgresClient["pool"],
   table: string,
@@ -880,11 +709,6 @@ interface IterativeScanComparisonRow {
   aRawOff: boolean;
 }
 
-/**
- * I4・ef=40の上で、`hnsw.iterative_scan`を`relaxed_order`(production既定)と`off`の
- * 2通りに変えたときの生ANN(kPrime=40)候補にanchorが入るかを比べる。**索引は
- * 使わせたまま**(enable_indexscanには触れない)——変えるのは`iterative_scan`だけ。
- */
 async function runIterativeScanComparison(
   pool: PostgresClient["pool"],
   space: EmbeddingSpaceId,
@@ -927,19 +751,8 @@ interface RepeatEfReport {
   iterativeScanComparison: IterativeScanComparisonRow[];
 }
 
-// ⚠ [40,120,400,1000]の粗い掃引では「ef=1000で全回復」に見えたが、
-// `captureExplainAtProduction`による実機検証(2026-09-26)で、本番と同形のクエリは
-// ef=500まで索引を使い、ef=600以降でプランナがSeq Scan(厳密探索)へ切り替わる
-// ことが分かった——⟹ 1000は索引が効いていない領域。500近辺の解像度を上げて、
-// 「索引が効いている範囲内でaRawが改善するか」を見られるようにする。
 const EF_SWEEP_VALUES = [40, 120, 400, 500, 550, 600, 700, 1000];
 
-/**
- * I4(または単独ingestのef-sweepモード)の索引をそのまま使い、ef_search掃引 +
- * (余力)iterative_scan比較を行う。呼び出し側が既にingest済みのanchorIds/goldIds/
- * spaceを渡す——**REINDEXもTRUNCATEもしない**(索引・行は不変のまま、ef_searchと
- * iterative_scanという「検索時」パラメータだけを動かす)。
- */
 async function runEfSweepAndIterativeScan(
   databaseUrl: string,
   databaseName: string,
@@ -964,9 +777,6 @@ async function runEfSweepAndIterativeScan(
       efHandle.cachingEmbeddingProvider,
       repProbe.query,
     );
-    // ⚠ 本番と同形(JOIN + 3段tie-break込み)のEXPLAINを撮る——`captureExplainAt`
-    // (JOIN無し)はef_searchが上がったときのプランナのコスト推定がずれ、
-    // 索引を諦める閾値を読み違える(2026-09-26の実機検証、上のコメント参照)。
     const explainQuery = await captureExplainAtProduction(
       efHandle.pool,
       table,
@@ -993,7 +803,6 @@ async function runEfSweepAndIterativeScan(
     await efHandle.close();
   }
 
-  // --- 余力: ef=40の上でiterative_scan=off vs relaxed_orderの比較(生SQL) ---
   const ef40Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 40, cache);
   const iterativeScanComparison = await runIterativeScanComparison(
     ef40Handle.pool,
@@ -1009,7 +818,6 @@ async function runEfSweepAndIterativeScan(
   }
   await ef40Handle.close();
 
-  // ef_searchをDB既定へ戻す(呼び出し側の後続測定に漏れないように)。
   const resetHandle = await createInstrumentedRuntime(databaseUrl, cache);
   await resetHandle.pool.query(`ALTER DATABASE ${databaseName} RESET hnsw.ef_search`);
   await resetHandle.close();
@@ -1017,8 +825,6 @@ async function runEfSweepAndIterativeScan(
   return { efSweep, iterativeScanComparison };
 }
 
-/** 単独ingest(I9)1回だけしてef-sweepを行う軽量モード(`MNEMORA_ASSOC_NONDET_MODE=ef-sweep`)。
- * I4〜I8のM0反復(既に別実行で測定済み)を再実行せずに済ませるため。 */
 async function runEfSweepOnlyMode(
   databaseUrl: string,
   databaseName: string,
@@ -1115,8 +921,6 @@ async function runRepeatEfMode(
     });
 
     if (label === "I4") {
-      // --- I4の索引そのまま(REINDEXしない)でef_search掃引 + iterative_scan比較 ---
-      // (共通ロジックは runEfSweepAndIterativeScan、ef-sweep単独モードと共有)
       const result = await runEfSweepAndIterativeScan(
         databaseUrl,
         databaseName,
@@ -1136,18 +940,6 @@ async function runRepeatEfMode(
   return { repeats, efSweep, iterativeScanComparison };
 }
 
-// ---------------------------------------------------------------------------
-// order モード(マネージャー追加依頼、2026-09-26第2弾) —— base-last / interleaved
-//
-// 仮説: baseを先にfillerを後から逐次INSERTすると、HNSW構築時にfillerの近傍選択・
-// 刈り込みでbaseの島(anchor/gold/distractor + haystack)への辺が後から消え、
-// 入口点(entry point)からbaseの島へ辿り着けなくなる(ef を上げても戻らないことと
-// 整合)。I1〜I3(main)・I4〜I9(repeat-ef/ef-sweep)は全てbase-first(baseを先に
-// 挿入)だった——I3のfiller順反転はfillerどうしの相対順を変えただけで、
-// 「baseが最初」という構造自体は変えていない。この仮説を直接検査する:
-// P1(base-last)・P2(interleaved、固定間隔)でaRawが回復するか。
-// ---------------------------------------------------------------------------
-
 type IngestOrder = "base-first" | "base-last" | "base-interleaved";
 
 interface OrderedUtterance {
@@ -1157,15 +949,6 @@ interface OrderedUtterance {
   probeId?: string;
 }
 
-/**
- * base(62件、anchor/gold/distractor/haystack)とfiller(scale-62件)を、指定した
- * 順序で1本のingest順配列に組む。
- *
- * - `base-first`: これまでの全モードと同じ(baseを先に、fillerを後に)。対照。
- * - `base-last`: fillerを先に、baseを最後にingestする。
- * - `base-interleaved`: baseをfillerの間に**固定間隔**(`filler.length/base.length`
- *   ≈161件おき)で均等に散らす。baseがingest全体を通して薄く分布する状況。
- */
 function buildOrderedCorpus(scale: number, order: IngestOrder): OrderedUtterance[] {
   const base = buildAssociationProbeSetConversation();
   const filler: OrderedUtterance[] = buildDistinctFiller(
@@ -1178,7 +961,6 @@ function buildOrderedCorpus(scale: number, order: IngestOrder): OrderedUtterance
   if (order === "base-last") {
     return [...filler, ...base];
   }
-  // base-interleaved: fillerを1件ずつ積みながら、固定比率でbaseを挟む。
   const out: OrderedUtterance[] = [];
   const ratio = filler.length / base.length;
   let baseIdx = 0;
@@ -1202,11 +984,6 @@ function buildOrderedCorpus(scale: number, order: IngestOrder): OrderedUtterance
   return out;
 }
 
-/**
- * `ingestCorpus`の一般化版——base/fillerを分けず、渡された配列の**そのままの順**で
- * 逐次observe()する。`base-last`/`base-interleaved`のような、base-firstを前提と
- * しない挿入順を作るために要る(既存の`ingestCorpus`はbase→fillerの順が固定)。
- */
 async function ingestOrderedCorpus(
   handle: InstrumentedHandle,
   tenantId: string,
@@ -1265,22 +1042,13 @@ interface OrderPointReport {
   ingestSeconds: number;
   drainSeconds: number;
   m0: MeasurementReport;
-  /** ef=400・本番形(JOIN込み)EXPLAINでHNSW索引が使われたか(索引が実際に検査対象に
-   *  入っていることの確認。ef-sweepモードの実測でef=400はまだ索引が使われる境界の
-   *  内側であることが分かっている)。 */
   explain400: ExplainCapture;
-  /** P1の1回目だけ: 厳密探索(EXACT)。ingest順を変えても距離自体は変わらないはず、
-   *  という確認。 */
   exact?: ExactMeasurementReport;
 }
 
 /**
- * `MNEMORA_ASSOC_NONDET_MODE=order`。P1(base-last×2)・P2(base-interleaved×1)・
- * 対照(base-first×1、既存モードと同じ型が再び~0/12になることの確認)を測る。
- *
- * ⚠ base の ingest 位置を変えると `recorded_at` の新旧関係が変わる(base-lastでは
- * baseが最も新しい行になり、段2の並べ替え(freshness)が到達に影響しうる)——
- * **aRaw(段1の生ANN、並べ替え前)を主指標として読む**、到達は参考値。
+ * `MNEMORA_ASSOC_NONDET_MODE=order`。base の ingest 位置を変えると `recorded_at` の新旧関係が変わり、
+ * 段2の並べ替え（freshness）が到達に影響しうる。aRaw（段1の生ANN、並べ替え前）を主指標として読み、到達は参考値にする。
  */
 async function runOrderExperimentMode(
   databaseUrl: string,
@@ -1360,8 +1128,6 @@ async function runOrderExperimentMode(
 
     await handle.close();
 
-    // ef=400・本番形(JOIN込み)EXPLAINで索引使用を確認(索引がまだ効いている
-    // 境界の内側であることをef-sweepモードの実測から知っている値)。
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
     const ef400Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 400, cache);
@@ -1402,29 +1168,8 @@ async function runOrderExperimentMode(
   return { points };
 }
 
-// ---------------------------------------------------------------------------
-// order-scale モード（マネージャー追加依頼、2026-09-26第3弾） —— ADR 0332 追記(2)。
-//
-// 上の "order" モード（P1/P2/対照、各1〜2反復のみ・単一規模）は A.2(3) の1回きりの
-// 切り分けだった。このモードは同じ3型（base-first/base-last/base-interleaved）を、
-// **複数規模 × 独立ingest3回以上 ×（余力で）HNSWパラメータ**で振り直す——
-// 「base を末尾に入れると直る」が反復・規模を通して安定した効果か、1回だけの
-// 偶然かを見分けるため。
-//
-// ⛔ **"order" モード・他の既存モード（main/repeat-ef/ef-sweep）のコード・挙動は
-// 一切変えていない。** ここから下は完全に新しい関数だけを足す（既存関数は呼ぶだけで
-// 変更しない）。既定で `MNEMORA_ASSOC_NONDET_MODE` を指定しなければ、これまで通り
-// "main" モードが動く。
-//
-// 新しい環境変数（すべて省略可、省略時は下記の既定値）:
-// - `MNEMORA_ASSOC_NONDET_ORDER_TYPES`（既定 "base-first,base-last,base-interleaved"）
-// - `MNEMORA_ASSOC_NONDET_ORDER_REPEATS`（既定 3、型ごとの独立ingest回数）
-// - `MNEMORA_ASSOC_NONDET_EXACT_REPEATS`（既定 1、型ごとに何反復目までEXACTも撮るか）
-// - `MNEMORA_ASSOC_NONDET_HNSW_M` / `MNEMORA_ASSOC_NONDET_HNSW_EF_CONSTRUCTION`
-//   （両方指定したときだけ有効。指定が無ければ pgvector 既定（m=16, ef_construction=64
-//   ——`registerEmbeddingSpace` の `CREATE INDEX ... USING hnsw (...)` に `WITH` 句が
-//   無いことを現物で確認済み、`packages/postgres/src/vector-space.ts`）のまま）
-// ---------------------------------------------------------------------------
+// order-scale モード。既存モード（main/repeat-ef/ef-sweep/order）のコード・挙動は変えず、新しい関数だけを足す。
+// `MNEMORA_ASSOC_NONDET_MODE` を指定しなければ、これまで通り "main" モードが動く。
 
 interface OrderScaleProbeResult {
   probeId: string;
@@ -1449,8 +1194,7 @@ async function measureOrderScaleProbes(
     const goldId = goldIds.get(probe.id)!;
 
     handle.spy.reset();
-    // association: null — 明示的な off。上の measureEfPoint と同じ理由
-    // （ADR 0337 で association 省略＝既定 on になり得るため、off の測定点を守る）。
+    // association: null — 明示的な off。`association` を省略すると既定 on になり得るので、off の測定点を守る。
     const offResult = await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
@@ -1510,12 +1254,6 @@ function summarizeOrderScale(label: string, probes: OrderScaleProbeResult[]): st
   );
 }
 
-/**
- * HNSW 索引を DROP して、指定した `m`/`ef_construction` で作り直す。migration・
- * `registerEmbeddingSpace` 自体は書き換えない——呼び出し側（このベンチ）が、
- * 空になったテーブル（`truncateAll` 直後）に対して1回だけ呼ぶ。以降の `observe()`
- * の逐次 INSERT が、この新しい索引に対して本番と同じ「逐次挿入で育つ」形で積まれる。
- */
 async function recreateHnswIndexWithParams(
   pool: PostgresClient["pool"],
   space: EmbeddingSpaceId,
@@ -1566,8 +1304,6 @@ interface OrderScaleIterationReport {
   ingestSeconds: number;
   drainSeconds: number;
   probes: OrderScaleProbeResult[];
-  /** 既定 ef_search（掃引しない）での、本番と同形（JOIN + 3段tie-break込み）の
-   *  EXPLAIN。HNSW 索引が実際に使われたことの確認用。 */
   explainProduction: ExplainCapture;
   exact?: { ranks: ExactRankResult[]; probes: OrderScaleProbeResult[] };
 }
@@ -1692,7 +1428,7 @@ async function runOrderScaleMode(
         ...(exact ? { exact } : {}),
       });
 
-      // ⚠ 逐次書き出し —— 長時間測定の途中でプロセスが落ちても、それまでの分は残す。
+      // 逐次書き出し。長時間測定の途中でプロセスが落ちても、それまでの分は残す。
       if (jsonPath) {
         mkdirSync(dirname(jsonPath), { recursive: true });
         writeFileSync(jsonPath, `${JSON.stringify(results, null, 2)}\n`, "utf-8");
@@ -1704,12 +1440,7 @@ async function runOrderScaleMode(
   return results;
 }
 
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
 async function main(): Promise<void> {
-  // ⛔ 何よりも先に。provider を1つも作らない歯。
   requireGatesOrThrow();
 
   const databaseUrl = requireDatabaseUrl();
@@ -1735,9 +1466,7 @@ async function main(): Promise<void> {
 
   const { embeddingProvider: realEmbedding } = createProviders(process.env, {});
   if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
-    // requireGatesOrThrow() が文字列レベルで既に検査しているので、ここに来るのは
-    // 「文字列は local と名乗ったのに実際は違うインスタンスだった」という、それ自体が
-    // 壊れの証拠になるケースだけである。多層防御として残す。
+    // requireGatesOrThrow() が文字列で既に検査しているので、ここに来るのは「local と名乗ったのに実際は違うインスタンス」という壊れのときだけ。多層防御として残す。
     throw new Error(
       "association-scale-nondeterminism: realEmbedding が LocalEmbeddingProvider ではない。",
     );
@@ -1752,8 +1481,6 @@ async function main(): Promise<void> {
 
   const cache = new FileEmbeddingCache(cacheDir, realEmbedding.space);
 
-  // precompute: I1/I2/I3(/I4〜I8) は filler の「挿入順」だけが違い、テキスト集合自体は
-  // 同じ——一度の precompute で全 ingest ぶんのキャッシュが埋まる。
   const forwardCorpus = buildCorpus(scale, "forward");
   const allTexts = [
     ...forwardCorpus.base.map((u) => u.text),
@@ -1809,7 +1536,6 @@ async function main(): Promise<void> {
   }
 
   if (mode === "order-scale") {
-    // runOrderScaleMode 自体が逐次 jsonPath へ書き出す(1件終わるごとに全体を上書き)。
     const results = await runOrderScaleMode(databaseUrl, scale, cache, jsonPath);
     cache.close();
     console.log(
@@ -1831,7 +1557,6 @@ async function main(): Promise<void> {
     console.log(`\n########## ${plan.label} (fillerOrder=${plan.fillerOrder}) ##########`);
     const corpus = buildCorpus(scale, plan.fillerOrder);
 
-    // --- TRUNCATE + ingest + drain + ANALYZE ---
     const handle = await createInstrumentedRuntime(databaseUrl, cache);
     await truncateAll(handle.pool);
     const ingest = await ingestCorpus(handle, tenantId, corpus);
@@ -1840,7 +1565,6 @@ async function main(): Promise<void> {
     );
     const space = handle.cachingEmbeddingProvider.space;
 
-    // --- M0: そのまま ---
     const m0 = await buildMeasurementReport(
       handle,
       tenantId,
@@ -1858,7 +1582,6 @@ async function main(): Promise<void> {
     );
     await handle.close();
 
-    // --- EXACT: enable_indexscan/enable_bitmapscan off の別 runtime ---
     const exactHandle = await createInstrumentedRuntime(
       databaseUrl,
       cache,
@@ -1893,7 +1616,6 @@ async function main(): Promise<void> {
     }
     const exact: ExactMeasurementReport = { ...exactBase, exactRanks };
 
-    // I1 だけ、余力があれば: max_parallel_workers_per_gather=0 の有無で厳密順位が動くか。
     let exactNoParallelRanks: ExactRankResult[] | undefined;
     if (plan.label === "I1") {
       exactNoParallelRanks = await measureExactRanks(
@@ -1914,7 +1636,6 @@ async function main(): Promise<void> {
     }
     await exactHandle.close();
 
-    // --- R1..R3: REINDEX(HNSWだけ) -> ANALYZE -> M0と同じ測定 ---
     const rReports: MeasurementReport[] = [];
     for (let i = 1; i <= 3; i += 1) {
       const rHandle = await createInstrumentedRuntime(databaseUrl, cache);

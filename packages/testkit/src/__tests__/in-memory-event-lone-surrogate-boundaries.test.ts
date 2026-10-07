@@ -5,20 +5,7 @@ import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * イベントの `reason`（`meta.reason`・`meta.note`）と `actor.id` の、NUL・孤立サロゲートの検査の境目
- * （`__fixtures__/memory-event-check.ts` の `hasNulOrLoneSurrogate`）。
- *
- * Postgres の `jsonb` は、対をなさないサロゲートのエスケープ（`\ud800` から `\udfff`）を拒み、NUL（U+0000）を拒む。
- * それ以外の制御文字（SOH = U+0001 など）と、サロゲートの範囲のすぐ外（U+D7FF・U+E000）は通す。
- * 2026-09-28 マージ分の確かめ直しで、次の3つの境目を縛る歯が無かった。
- * - 文字列の末尾の孤立した上位サロゲート（`"abc\uD800"`）を断る。
- * - 孤立した下位サロゲートの上端 U+DFFF を断る。
- * - SOH は通す（NUL だけを断る）。
- *
- * ソースにサロゲートは `\u` の表記で書く（生の文字を入れない）。2実装を並べた歯は
- * `packages/postgres/src/__tests__/event-meta-roundtrip.postgres.test.ts`。
- */
+/** ソースにサロゲートは `\u` の表記で書く（生の文字を入れない）。 */
 
 const ctx: Ctx = { tenantId: "event-lone-surrogate-boundaries" };
 

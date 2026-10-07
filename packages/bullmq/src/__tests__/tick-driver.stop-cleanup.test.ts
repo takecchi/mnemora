@@ -1,11 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Redis を要らない検査（`bullmq` の `Queue`/`Worker` を丸ごとモックに差し替える）。
-// `createBullmqTickDriver` 自体が実際に Redis へ繋ぐ経路は `concurrent-tick.redis.test.ts`
-// （`test:redis`）側で検査しており、ここはその手前——`stop()` の資源の後始末の**手順**
-// （どの順で何を呼ぶか、片方が失敗したときにもう片方へ進むか）だけを、外側の副作用を
-// 起こさずに検査する。
-
 interface MockQueueInstance {
   upsertJobScheduler: ReturnType<typeof vi.fn>;
   removeJobScheduler: ReturnType<typeof vi.fn>;
@@ -67,11 +61,7 @@ describe("createBullmqTickDriver().stop() の資源の後始末", () => {
 
     await expect(driver.stop()).rejects.toThrow("worker close boom");
 
-    // 🔴 ここが赤くなる観測点: 現状の実装は
-    //   try { await queue.removeJobScheduler(...) }
-    //   finally { await worker.close(); await queue.close(); }
-    // という並びなので、`worker.close()` が reject すると `queue.close()` の行に
-    // 到達せず、Queue 側の Redis 接続が開いたまま残る。
+    // `worker.close()` が reject しても `queue.close()` に進むこと。try/finally で並べた実装だと `queue.close()` に届かず Redis 接続が残るので、ここで赤くなる。
     expect(queue.close).toHaveBeenCalledTimes(1);
   });
 

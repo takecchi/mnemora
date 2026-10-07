@@ -1,32 +1,9 @@
 #!/usr/bin/env node
 /**
- * `examples/chat` の `archive-sweep-cost` ベンチ(`MNEMORA_ARCHIVE_SWEEP_JSON` が吐く
- * JSON)を人が読める Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ
- * 載せる CLI(Issue #209)。`scripts/consolidation-cost-summary.mjs` と同じ分担。
+ * ⛔ 基準値と相違しても exit 0 のまま。門ではない(ADR 0088 §2.1)。
+ * 非0にするのは入力が壊れているときだけ。
  *
- * 組み立ては `./archive-sweep-cost-summary-lib.mjs` の純関数に委ねる。ここは
- *
- * 1. `--measured <path>`(必須)・`--baseline <path>`(任意)を読む
- * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
- * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
- * 4. Markdown を stdout に出す
- *
- * だけを行う。
- *
- * 使い方:
- *   node scripts/archive-sweep-cost-summary.mjs --measured <path> [--baseline <path>]
- *
- * 🔴 **基準値ファイルと相違しても exit 0 のままである。**これは意図した設計であり、
- * バグではない(ADR 0088 §2.1 /「決めたこと」4番 と同じ判断)。**このスクリプトは門ではない。**
- * 非0になるのは、入力そのものが壊れているとき(measured の JSON が読めない・
- * parse できない・必須項目が無い。`--baseline` を指定していて、それが読めない/
- * 壊れている場合も含む)だけである。
- *
- * 🔴 **`--baseline` は省略できる。**この PR では
- * `examples/chat/archive-sweep-baseline.json` を作っていない(この作業環境に DB が無く、
- * 捏造した数値を基準値として残さないため——初回 CI の artifact を後続 PR で基準値にする)。
- * （2026-10-03 訂正）`examples/chat/archive-sweep-baseline.json` は、いまは在る。`ci.yml` の
- * `archive-sweep-cost` ジョブはそれを `--baseline` に渡している。
+ * ⛔ `--baseline` は省略できる作りのままにする。
  */
 import { readFileSync } from "node:fs";
 import {
@@ -105,6 +82,5 @@ const markdown = buildSummaryMarkdown({
 });
 
 console.log(markdown);
-// 明示的に0を宣言する——`--baseline` が相違を含んでいても、ここまで来たら入力は
-// 壊れていない。門ではない、という設計の要をコード上で目に見える形にする。
+// 門ではない: ここまで来たら入力は壊れていないので、相違があっても 0 を明示する。
 process.exit(0);

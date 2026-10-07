@@ -13,106 +13,50 @@ import { CORRECTION_SCENARIO } from "./correction-scenario.js";
 import { scoreTotalOrNull } from "./recalled-score.js";
 
 /**
- * 訂正を含む会話シナリオを `Runtime` に対して実際に走らせるデモ（Issue #303 / Issue #369 (C)）。
+ * 訂正を含む会話シナリオを `Runtime` に対して実際に走らせるデモ。
+ * `markContested` → `recall`（両方が隣接して出る）→ `resolveContested` → `recall`（敗者はもう出ない）の一巡を実演する。
  *
- * 北極星「目指す姿」の項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
- * `markContested`（ADR 0134）→`recall`（両方隣接して出る）→`resolveContested`
- * （ADR 0150）→`recall`（敗者はもう出ない）の一巡で実演する。`packages/core`
- * `resolve-contested.test.ts` の「検出から解決までの一巡」と同じ形を、本物の
- * `Runtime`（`examples/chat` の Postgres 配線）に対して行う。
+ * 「選択」の段（`applyCorrection`/`buildCorrectionReason`）は `packages/core` の公開口で、このファイルは呼ぶだけで実装を二重に持たない。
  *
- * **🔴 このデモは今日から `Runtime.findCorrectionCandidates`
- * （[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）を
- * 本番コードの経路として実際に呼ぶ。** ADR 0232 は「本番コードから呼ぶ経路が無い」ことを
- * 「この ADR が着地させないもの」に明記していた——このファイルがその経路である
- * （[ADR 0235](../../../docs/decisions/0235-correction-demo-explicit-choice.md)）。
+ * `findCorrectionCandidates` が返した候補を機械的に採らない。ADR 0232 が測った危険（B群で棄権率 0/8・深い誤爆 6/8、
+ * 閾値は A 群と B 群を分離しない）が残っているため。候補は提示と、指名された相手が居るかの照合にしか使わない。
+ * 訂正の相手は呼び出し側が `CorrectionChoice` として明示的に指名する（台本 `correction-scenario.ts` に記録済みの判断）。
+ * `candidates[0]` を採る実装への退行は、`__tests__/correction-demo.test.ts` の「採用者の指名が候補1位ではない」歯が防ぐ。
  *
- * **🔴🔴🔴 「選択」の段そのもの（3態の状態機械・`buildCorrectionReason`）は、もうこの
- * ファイルの実装ではない。** [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)
- * が `Runtime.applyCorrection`/`buildCorrectionReason` として `packages/core` へ持ち上げた
- * ——このファイルは `@mnemora/core` が公開するその口を**呼ぶだけ**であり、実装を
- * 二重に持たない。ADR 0232 が「本番コードから呼ぶ経路が無い」と名指しした欠落は、
- * 今日では `applyCorrection` という**出荷される面**そのものが埋めている——このファイルは
- * その口を実際に使う一例（`examples/chat` は `private: true` で出荷されない）にすぎない。
+ * 矛盾かどうか・どちらが勝つかは `correction-scenario.ts` の `contestedPair` が持つ。`turns` の並び順・`recordedAt` の大小・
+ * candidates の順位からは何も導かない。
  *
- * **🔴🔴 ADR 0232 が測った危険（B群: 訂正してはいけない8件中、棄権率 0/8・深い誤爆 6/8。
- * 閾値は A 群と B 群を分離しない）は、依然としてそのまま存在する。** ⟹ このファイルは
- * **`findCorrectionCandidates` が返した候補を機械的に採らない**——候補は「提示」と
- * 「指名された相手が候補に居るかどうかの照合」にしか使わない（照合そのものは
- * `applyCorrection` の内部で行われる——ADR 0242 参照）。**訂正の相手は呼び出し側
- * （このデモでは台本 `correction-scenario.ts` に記録済みの判断）が `CorrectionChoice`
- * として明示的に指名する。** `candidates[0]` を無条件に採る実装になっていないことは、
- * `__tests__/correction-demo.test.ts` の「🔴🔴 採用者の指名が候補1位ではない」歯が保証する。
+ * `applyCorrection` には `reason` を必ず渡し、選んだ根拠を `memory_events.meta.note` に残す（ADR 0238）。
+ * `candidates[0]` を機械的に採る実装への退行を、後から検出できるようにするため。
  *
- * **矛盾かどうか・どちらが勝つかの判定はこのファイルではなく `correction-scenario.ts` の
- * `contestedPair` が持つ**（ADR 0134 決定2 / ADR 0150 決定1）。**どの候補を訂正の相手として
- * 指名するかは呼び出し側が持つ**（このファイルは `CorrectionChoice` を受け取るだけで、
- * `turns` の並び順や `recordedAt` の大小・candidates の順位からは何も導かない）。
+ * `applyCorrection` は2回呼ぶ（ADR 0242 が許した使い方）。1回目は `resolution` を渡さず対（mandatory companion）を見せ、
+ * 2回目に `resolution` を渡して解決まで進める。2回目の内部の `markContested` は対象が既に `contested` なので書き込みは起きない。
+ * 両方に同じ `reason` を渡す。
  *
- * **🔴 `applyCorrection` には `reason`（`buildCorrectionReason` が組む。今日は
- * `@mnemora/core` の公開 export、ADR 0242）を必ず渡す**——選んだ根拠（`discovery.recallId`・
- * 選んだ候補の `recallRank`・候補の件数・どちらへ倒したか）を `memory_events.meta.note`
- * に残す（Issue #369 チェックボックス、
- * [ADR 0238-correction-choice-rationale-in-events](../../../docs/decisions/0238-correction-choice-rationale-in-events.md)）。
- * `meta.note` に載る `recallId` が `RecallResult.explain`（`Runtime.getRecall` 経由）への
- * 橋になる——**記録そのものが、`candidates[0]` を機械的に採る実装への退行を後から
- * 検出できるようにする歯の一種**（同 ADR 参照）。
+ * 北極星の主測定（`compare`/`retrieval`）には関わらない。`compare.ts`/`compare-json.ts`/`scenario.ts`/`probe-set.ts`/`naive-path.ts` を import しない。
  *
- * **🔑 `applyCorrection` は2回呼ぶ**（[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)
- * が明示的に許した使い方）: 1回目は `resolution` を渡さず `markContested` 相当だけを
- * 起こして `recall()` で対（mandatory companion）を見せ、2回目に `resolution` を渡して
- * `resolveContested` 相当まで進める。**2回目の呼び出しでも内部で `markContested` は
- * もう一度呼ばれるが、対象は既に `contested` なので書き込みは起きない**（ADR 0242 の
- * doc コメント参照）——`markOutcomeKind`/`resolveOutcomeKind` はそれぞれ1回目・2回目の
- * 結果を運ぶ。**両方の呼び出しに同じ `reason` を渡す**（ADR 0238「同じ文字列を渡す」）。
- *
- * **⚠ 北極星の主測定（`compare`/`retrieval`）には一切関わらない。**`compare.ts`/
- * `compare-json.ts`/`scenario.ts`/`probe-set.ts`/`naive-path.ts` のいずれも import しない
- * （`scope.ts`/`backfill.ts` と同じ規律）。
- *
- * **⚠ `recall()` は `limit: 1` を明示して呼ぶ（PR #320 の CI 失敗の修正、ADR 0162 決定5）。**
- * この会話には `original`/`correction` の2件しか Memory が無いため、既定の limit（`DEFAULT_RECALL_LIMIT`）
- * では両方が独立に段2（再スコア）の `withinLimit` へ収まってしまい、段3「矛盾の解決と
- * 必須の同伴取得」（`docs/recall.md` §2 段3）の同伴取得（`retrievedVia: 'mandatory_companion'`）
- * が一度も発火しない——両方ともスコアだけで既に出るので、対向を「必ず連れてくる」機構が
- * 要らない状態になる。`limit: 1` にすると、段2で上位1件だけが `withinLimit` に残り、
- * その1件が `contested` なら対向（もう一方）が limit を超えて強制的に連れてこられる
- * （実測: `afterMark.memories.length` は limit=1 でも 2 になる）。これで Issue #197 の
- * 受け入れ条件「段3 が実際に発火することを測る歯が在る」を、`examples/chat` からも
- * 満たす。
+ * `recall()` は `limit: 1` を明示して呼ぶ（ADR 0162 決定5）。会話の Memory が2件だけだと、既定の limit では両方が段2で
+ * `withinLimit` に収まり、段3の同伴取得が一度も発火しない。`limit: 1` なら、残った1件が `contested` のとき対向が強制的に連れてこられる。
  */
 
 /**
- * 訂正の相手として、採用側が明示的に下した判断（Issue #369 (C)、ADR 0232 引き受けた負債1
- * への応答）。
+ * 訂正の相手として、採用側が明示的に下した判断。
  *
- * ⛔ **候補（`FindCorrectionCandidatesResult.candidates`）から導出したものではない。**
- * `runCorrectionDemo` はこの値を`候補一覧に居るかどうかの照合`にしか使わない——
- * どの候補が「相手」であるかを、この型自身が決める。
- *
- * 台本シナリオでは `scenario.contestedPair.firstExternalId` を渡す。**これは
- * 「機械が選んだ」のではなく「人が前もって選んで台本に書いた」判断である**——
- * `correction-scenario.ts` の `ContestedPairDeclaration` の doc コメントが述べる
- * 「呼び出し側が既に決めていることを前提にする」（ADR 0134 決定2）という前提を、
- * この型でも同じ強さで保つ。実運用では、UI 上で人が候補一覧を見て選んだ結果が
- * ここに入る想定。
+ * 候補（`FindCorrectionCandidatesResult.candidates`）から導出したものではない。`runCorrectionDemo` はこの値を
+ * 候補一覧に居るかの照合にしか使わない。台本では `scenario.contestedPair.firstExternalId` を渡す。
+ * 機械が選んだのではなく、人が前もって選んで台本に書いた判断（ADR 0134 決定2）。
  */
 export interface CorrectionChoice {
-  /** 訂正される相手の `externalId`（`scenario.original.externalId` 等）。 */
   chosenExternalId: string;
 }
 
 /**
  * `runCorrectionDemo` の結果に載る「選択の段」の結末。
  *
- * - `"resolved"` — 指名された相手が候補に居て、`markContested` → `resolveContested`
- *   まで実際に進んだ。
- * - `"awaiting_choice"` — `choice` が渡されなかった。**候補は提示したが、
- *   書き込みは1件もしていない。** ⟹ ADR 0232 が測った B群の危険（棄権率 0/8）を
- *   可視化する経路そのもの——mnemora は候補を出す。だが選ぶのは人であり、
- *   人が選ばなければ何も起きない。
- * - `"choice_not_in_candidates"` — `choice` は渡されたが、指名された相手が
- *   `findCorrectionCandidates` の候補一覧に居なかった。**書き込みは1件もしていない。**
+ * - `"resolved"`: 指名された相手が候補に居て、`resolveContested` まで進んだ。
+ * - `"awaiting_choice"`: `choice` が渡されなかった。候補は提示したが書き込みは1件もしていない。
+ *   mnemora は候補を出すが選ぶのは人で、人が選ばなければ何も起きない。
+ * - `"choice_not_in_candidates"`: 指名された相手が候補一覧に居なかった。書き込みは1件もしていない。
  */
 export type CorrectionOutcomeKind = "resolved" | "awaiting_choice" | "choice_not_in_candidates";
 
@@ -120,32 +64,16 @@ export interface CorrectionDemoResult {
   scenario: CorrectionScenario;
   originalId: MemoryId;
   correctionId: MemoryId;
-  /**
-   * 【発見の段】`runtime.findCorrectionCandidates(ctx, { text: scenario.correction.text,
-   * excludeMemoryIds: [correctionId] })` の結果そのまま。⛔ **この段は書き込まない・
-   * LLM を呼ばない**（`findCorrectionCandidates` 自身の契約、ADR 0232）。
-   */
+  /** 【発見の段】`findCorrectionCandidates` の結果そのまま。この段は書き込まず、LLM を呼ばない（ADR 0232）。 */
   discovery: FindCorrectionCandidatesResult;
-  /** 選択の段の結末。上の {@link CorrectionOutcomeKind} 参照。 */
   outcome: CorrectionOutcomeKind;
-  /** 指名された相手の memoryId。`choice` が渡されなかった場合は `null`。 */
   chosenId: MemoryId | null;
-  /**
-   * 指名された相手が `discovery.candidates` の何位（`recallRank`）だったか。
-   * **見つからない・未指名なら `null`。** 北極星の問い3「なぜそれを選んだのかを、
-   * 後から説明できるか」——「人が選んだものが recall の何位だったか」をここで
-   * 説明できるようにする。
-   */
+  /** 指名された相手が `discovery.candidates` の何位（`recallRank`）だったか。見つからない・未指名なら `null`。 */
   chosenRecallRank: number | null;
-  /** markContested 前の recall。`outcome !== "resolved"` のときは `null`（書き込みに進んでいない）。 */
   beforeMark: RecallResult | null;
-  /** markContested の結果。`outcome !== "resolved"` のときは `null`。 */
   markOutcomeKind: string | null;
-  /** markContested 後の recall（両方が隣接して出るはず）。`outcome !== "resolved"` のときは `null`。 */
   afterMark: RecallResult | null;
-  /** resolveContested の結果。`outcome !== "resolved"` のときは `null`。 */
   resolveOutcomeKind: string | null;
-  /** resolveContested 後の recall（敗者はもう出ないはず）。`outcome !== "resolved"` のときは `null`。 */
   afterResolve: RecallResult | null;
 }
 
@@ -156,10 +84,7 @@ function findByMemoryId(
   return memories.find((m) => m.memoryId === id);
 }
 
-/**
- * 【選択の段】が使う、externalId → MemoryId の対応。`observe()` の戻り値からのみ得る
- * ——`correction-scenario.ts` は名前しか持たない。
- */
+/** 【選択の段】が使う、externalId → MemoryId の対応。`observe()` の戻り値からのみ得る。シナリオは名前しか持たない。 */
 function buildExternalIdIndex(
   scenario: CorrectionScenario,
   originalId: MemoryId,
@@ -172,22 +97,16 @@ function buildExternalIdIndex(
 }
 
 /**
- * この3回の `recall()` が共通して使うクエリ。**`limit: 1` を明示する**——理由は
- * このファイル冒頭の doc コメント参照（段3の必須同伴取得を実際に発火させるため、
- * ADR 0162 決定5）。同じクエリを使い回すことで、「訂正の前後で答えがどう変わるか」を
- * 同じ条件で比較できる。
+ * この3回の `recall()` が共通して使うクエリ。`limit: 1` を明示する理由は冒頭の doc を参照。
+ * 同じクエリを使い回して、訂正の前後を同じ条件で比べる。
  */
 function buildRecallQuery(scenario: CorrectionScenario): { text: string; limit: number } {
   return { text: scenario.query, limit: 1 };
 }
 
-// 🔴 `buildCorrectionReason` はもうこのファイルに無い。[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)
-// が `@mnemora/core` の公開 export へ持ち上げた——このファイルは import して使うだけである
-// （冒頭 import 文参照）。`winner` の語彙は ADR 0238 の `original`/`correction` から、
-// `Runtime` レベルの汎用語彙（`corrected`/`correcting`）へ ADR 0242 が変えている
-// ——このシナリオでは `correction`（訂正する側）が常に勝つので `winner=correcting` になる。
+// `winner` の語彙は ADR 0242 が `Runtime` レベルの汎用語彙（`corrected`/`correcting`）へ変えている。
+// このシナリオでは訂正する側が常に勝つので `winner=correcting`。
 
-/** `outcome !== "resolved"` のときの、書き込み段を持たない結果を組み立てる共通部分。 */
 function buildStoppedResult(
   scenario: CorrectionScenario,
   originalId: MemoryId,
@@ -215,25 +134,9 @@ function buildStoppedResult(
 /**
  * シナリオを `Runtime` に対して端から端まで走らせる。
  *
- * 1. `original`/`correction` を `observe()` する（別々の Memory になる）。
- * 2. `tick()` を干上がるまで回して埋め込みを済ませる。
- * 3. 【発見の段】`findCorrectionCandidates(ctx, { text: scenario.correction.text,
- *    excludeMemoryIds: [correctionId] })` を呼ぶ。訂正の発話そのものを自己除外する。
- *    ⛔ 書き込まない・LLM を呼ばない（`findCorrectionCandidates` の契約）。
- * 4. 【選択の段】`choice` が無ければ、候補を提示するだけで
- *    `outcome: "awaiting_choice"` を返して止まる（書き込み0件）。`choice` が在れば、
- *    指名された相手が候補一覧に居るかを確かめる——**居なければ書き込まずに
- *    `outcome: "choice_not_in_candidates"` を返して止まる。**居れば、その
- *    `recallRank` を結果に持たせて次へ進む。
- * 5. 訂正前の `recall()`（対向の宣言をまだ `markContested` していない状態。`limit: 1`
- *    なのでこの時点では1件しか返らない）。
- * 6. `markContested(chosenId, correctionId)`（`chosenId` は選択の段で確かめた指名）。
- * 7. 訂正を対にした直後の `recall()`（`limit: 1` でも両方が隣接して出るはず——
- *    mandatory companion retrieval が limit を超えて対向を連れてくる、ADR 0134/0162）。
- * 8. `resolveContested({ kind: 'supersede', winnerId })`（`winnerId` は
- *    `scenario.contestedPair.winnerExternalId` の宣言——ADR 0150 決定1。**選択の段が
- *    決めるのは「誰が相手か」だけであり、「どちらが勝つか」は従来どおり台本の宣言**）。
- * 9. 解決後の `recall()`（負けた側は `superseded` になり、`limit` に関わらずもう出ない）。
+ * 【選択の段】`choice` が無ければ候補を提示するだけで止まる（書き込み0件）。指名された相手が候補一覧に居なければ、
+ * 書き込まずに `choice_not_in_candidates` で止まる。
+ * 選択の段が決めるのは「誰が相手か」だけで、「どちらが勝つか」は台本の宣言（ADR 0150 決定1）。
  */
 export async function runCorrectionDemo(
   runtime: Runtime,
@@ -253,9 +156,6 @@ export async function runCorrectionDemo(
     speaker: "user",
     externalId: scenario.correction.externalId,
   });
-  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)の合計を
-  // `drainEmbedTicks` に渡し、「available_at との ms 競合で claim 0件のまま」
-  // 黙って抜けないことを検査させる。
   await drainEmbedTicks(runtime, ctx, {
     expectedProcessed: originalObserved.memoryIds.length + correctionObserved.memoryIds.length,
   });
@@ -268,9 +168,8 @@ export async function runCorrectionDemo(
     );
   }
 
-  // 【発見の段】必ず1回だけ呼ぶ。書き込まない・LLM を呼ばない（findCorrectionCandidates
-  // 自身の契約、ADR 0232）。⚠ choice の有無に関わらずここまでは常に進む——「選ばなければ
-  // 候補も出さない」ではなく「候補は出すが、選ばなければ何も起きない」ことを見せるため。
+  // 【発見の段】choice の有無に関わらず、ここまでは常に進む。「選ばなければ候補も出さない」ではなく、
+  // 「候補は出すが、選ばなければ何も起きない」ことを見せるため。
   const discovery = await runtime.findCorrectionCandidates(ctx, {
     text: scenario.correction.text,
     excludeMemoryIds: [correctionId],
@@ -278,9 +177,7 @@ export async function runCorrectionDemo(
 
   const byExternalId = buildExternalIdIndex(scenario, originalId, correctionId);
 
-  // 【選択の段】choice が無ければ、候補を提示するだけで止まる。
-  // ⟹ ADR 0232 の B群（棄権率 0/8）が可視化する危険そのもの——候補は必ず返る。
-  // 止めるのはこのデモの側であって、mnemora 側の棄権ではない。
+  // 【選択の段】choice が無ければ止まる。止めるのはこのデモの側であって、mnemora 側の棄権ではない。
   if (choice === undefined) {
     return buildStoppedResult(
       scenario,
@@ -300,14 +197,12 @@ export async function runCorrectionDemo(
     );
   }
 
-  // 🔴 ここが「候補から相手を導出しない」ことの核心: chosenId は choice（呼び出し側の
-  // 指名）から得た値であり、discovery.candidates の並びからは一切導いていない。
-  // 候補一覧はここで「chosenId が居るかどうかの照合」にしか使わない。
+  // 核心: chosenId は choice（呼び出し側の指名）から得た値で、discovery.candidates の並びからは導かない。
+  // 候補一覧は chosenId が居るかの照合にしか使わない。
   const chosenCandidate: CorrectionCandidate | undefined = discovery.candidates.find(
     (c) => c.memoryId === chosenId,
   );
   if (chosenCandidate === undefined) {
-    // 🔴 居なければ書き込まずに止める。
     return buildStoppedResult(
       scenario,
       originalId,
@@ -326,12 +221,8 @@ export async function runCorrectionDemo(
     );
   }
 
-  // 🔴 Issue #369 チェックボックス: 選んだ根拠(recallId・順位・候補の数・どちらへ倒したか)を
-  // memory_events.meta.note から辿れるようにする(ADR 0238)。`buildCorrectionReason` は
-  // 今日は `@mnemora/core` の公開 export(ADR 0242)。このシナリオは勝者(winnerId)を
-  // あらかじめ知っている(`contestedPair.winnerExternalId`)ので、まだ `resolution` を
-  // 渡していない1回目の `applyCorrection` 呼び出しから、同じ reason を組み立てて
-  // 両方に渡す(ADR 0238「同じ文字列を渡す」)。
+  // 選んだ根拠を `memory_events.meta.note` から辿れるようにする（ADR 0238）。勝者を先に知っているので、
+  // 1回目の `applyCorrection` から同じ reason を組み立てて両方に渡す。
   const resolution = { kind: "supersede" as const, winnerId };
   const correctionReason = buildCorrectionReason({
     discovery,
@@ -344,17 +235,13 @@ export async function runCorrectionDemo(
   const recallQuery = buildRecallQuery(scenario);
   const beforeMark = await runtime.recall(ctx, recallQuery);
 
-  // 【書き込み: 1回目】resolution を渡さない ⟹ applyCorrection は markContested 相当
-  // だけを起こして contested で止まる(ADR 0242)。
   const marked = await runtime.applyCorrection(ctx, {
     discovery,
     correctedId: chosenId,
     correctingId: correctionId,
     reason: correctionReason,
   });
-  // 🔴 chosenId が discovery.candidates に居ることは上の chosenCandidate チェックで
-  // 既に確かめている ⟹ applyCorrection が "awaiting_choice"/"not_a_candidate" を
-  // 返すことは無い(到達しないはずの防御)。
+  // chosenId が候補に居ることは上で確かめ済み。`applyCorrection` が "awaiting_choice"/"not_a_candidate" を返すことは無い（到達しないはずの防御）。
   if (marked.kind !== "contested" && marked.kind !== "resolved") {
     throw new Error(
       `runCorrectionDemo: 到達しないはずの applyCorrection outcome (kind=${marked.kind})`,
@@ -363,9 +250,7 @@ export async function runCorrectionDemo(
 
   const afterMark = await runtime.recall(ctx, recallQuery);
 
-  // 【書き込み: 2回目】resolution を渡す ⟹ markContested はもう一度呼ばれるが、対象は
-  // 既に contested なので書き込みは起きない(ineligible)。resolveContested だけが実際に
-  // 進む(ADR 0242 が明示的に許した2段呼び出し)。
+  // 【書き込み: 2回目】`markContested` はもう一度呼ばれるが、対象は既に contested なので書き込みは起きない。
   const resolved = await runtime.applyCorrection(ctx, {
     discovery,
     correctedId: chosenId,
@@ -398,72 +283,40 @@ export async function runCorrectionDemo(
 }
 
 export interface CorrectionDemoCheck {
-  /** markContested が実際に "contested" を返したか。 */
   markSucceeded: boolean;
-  /** resolveContested が実際に "resolved" を返したか。 */
   resolveSucceeded: boolean;
-  /** markContested 後の recall で、両方が同時に出たか。 */
   afterMarkBothPresent: boolean;
   /**
-   * markContested 後の recall で、`original`/`correction` の**どちらか片方**の
-   * retrievedVia が mandatory_companion か。
+   * markContested 後の recall で、`original`/`correction` のどちらか片方の retrievedVia が mandatory_companion か。
    *
-   * ⚠ **どちらが mandatory_companion になるかはスコアのランキング次第であり、
-   * `resolveContested` の勝者（`scenario.contestedPair.winnerExternalId`）とは無関係**
-   * （ADR 0162 決定5）——段2（再スコア）で `limit` 内に自然に残ったほうが「アンカー」、
-   * 残らなかったほうが「同伴（mandatory_companion）」として強制的に連れてこられる。
-   * このスコア順は実行のたびに変わりうる想定はしていない（決定的な provider・固定の
-   * テキストなので同じ実行環境では安定するはずだが、**どちらが勝つかを前提にした
-   * 検査にしない**——`afterMarkCompanionOfOther` も参照）。
+   * どちらが mandatory_companion になるかはスコアのランキング次第で、`resolveContested` の勝者とは無関係（ADR 0162 決定5）。
+   * どちらが勝つかを前提にした検査にしない。
    */
   afterMarkCompanionRetrieval: boolean;
   /**
-   * markContested 後の recall で、mandatory_companion 側の companionOf が、
-   * もう片方（アンカー側）の memoryId を指しているか。**`original`/`correction` の
-   * どちらがアンカーでどちらが同伴かは決め打たない**（上の `afterMarkCompanionRetrieval`
-   * の注記参照）——対がちゃんと相互に指し合っているかだけを見る。
+   * mandatory_companion 側の companionOf が、もう片方（アンカー側）の memoryId を指しているか。
+   * どちらがアンカーかは決め打たず、対が相互に指し合っているかだけを見る。
    */
   afterMarkCompanionOfOther: boolean;
-  /**
-   * 北極星 項目5 の核心: resolveContested 後、**古いほう（original）が recall から
-   * 消えたか**。
-   */
   afterResolveOriginalAbsent: boolean;
-  /** resolveContested 後も、新しいほう（correction）は残っているか。 */
   afterResolveCorrectionPresent: boolean;
 }
 
 /**
- * `checkCorrectionDemo()` とは別に持つ、`omitted`（`docs/recall.md` §4「「無い」の分類」）
- * 側からの検査（Issue #374）。
- *
- * `CorrectionDemoCheck.afterResolveOriginalAbsent` は「`recall().memories` に居ない」
- * ことしか見ない——それだけでは、消えた理由が**machine の都合で棚上げされた
- * （superseded）**のか、**そもそも最初から無かった**のかを区別できない。北極星
- * 「目指す姿」項目6「知らないことを、知らないと言える」——「見つからなかった」と
- * 「探していない」を同じ顔で返さない——の適用として、`omitted` 側に実際に
- * `{ kind: "filtered", condition: "superseded" }` が記録されていることまで見て
- * 初めて、この2つが区別できる。
+ * `omitted` 側からの検査。`afterResolveOriginalAbsent` は「`recall().memories` に居ない」ことしか見ず、
+ * 棚上げされた（superseded）のか最初から無かったのかを区別できない。
+ * 「見つからなかった」と「探していない」を同じ顔で返さないため、`{ kind: "filtered", condition: "superseded" }` が記録されていることまで見る。
  */
 export interface CorrectionOmissionCheck {
-  /**
-   * resolveContested 後の recall で、負けた側（original）の不在が、
-   * `omitted` に `condition: "superseded"` として実際に記録されているか。
-   */
   afterResolveOriginalOmittedAsSuperseded: boolean;
 }
 
 /**
- * `result.afterResolve.omitted` を見て、`CorrectionOmissionCheck` を組み立てる
- * （印字・歯の両方が使う。`checkCorrectionDemo` と同じ規律）。
+ * `result.afterResolve.omitted` を見て、`CorrectionOmissionCheck` を組み立てる。
  *
- * ⚠ **`count` は「original 1件」を名指ししない**——`aggregateScope` の
- * `filteredSuperseded` はスコープ（このデモが使うテナント）内の superseded 件数を
- * 集約するので、このデモの会話（original/correction の2件だけ）では実質的に
- * 1件を指すが、型としては件数の下限（`count > 0`）だけを見る。
- *
- * ⚠ **`outcome !== "resolved"` の結果に対して呼ぶと例外になる**——書き込みに
- * 進んでいない結果には「消えた」も「残った」も無い（`checkCorrectionDemo` と同じ規律）。
+ * `count` は「original 1件」を名指ししない。`aggregateScope` の `filteredSuperseded` はテナント内の superseded 件数の集約なので、
+ * 件数の下限（`count > 0`）だけを見る。
+ * `outcome !== "resolved"` の結果に対して呼ぶと例外になる。書き込みに進んでいない結果には「消えた」も「残った」も無い。
  */
 export function checkCorrectionOmission(result: CorrectionDemoResult): CorrectionOmissionCheck {
   if (result.afterResolve === null) {
@@ -480,12 +333,10 @@ export function checkCorrectionOmission(result: CorrectionDemoResult): Correctio
 }
 
 /**
- * `CorrectionDemoResult` から、見せたい性質を機械的に判定する（印字・歯の両方が使う）。
+ * `CorrectionDemoResult` から、見せたい性質を機械的に判定する。
  *
- * ⚠ **`outcome !== "resolved"` の結果に対して呼ぶと例外になる。**選択の段が止まった
- * 結果（`awaiting_choice`/`choice_not_in_candidates`）には `markContested`/
- * `resolveContested` の一巡そのものが無いため、この検査は成立しない——
- * 呼び出し側は先に `result.outcome === "resolved"` を確かめること。
+ * `outcome !== "resolved"` の結果に対して呼ぶと例外になる。選択の段が止まった結果には一巡そのものが無く、
+ * この検査は成立しない。呼び出し側は先に `result.outcome === "resolved"` を確かめること。
  */
 export function checkCorrectionDemo(result: CorrectionDemoResult): CorrectionDemoCheck {
   if (
@@ -507,9 +358,7 @@ export function checkCorrectionDemo(result: CorrectionDemoResult): CorrectionDem
   const afterMarkOriginal = findByMemoryId(afterMark.memories, result.originalId);
   const afterMarkCorrection = findByMemoryId(afterMark.memories, result.correctionId);
 
-  // 🔑 どちらが mandatory_companion になるかを決め打たない（上の doc コメント参照）。
-  // 「ちょうど片方が mandatory_companion で、その companionOf がもう片方を指す」ことだけを
-  // 見る——ランキングの勝敗にも resolveContested の勝敗にも依存しない検査にする。
+  // どちらが mandatory_companion になるかを決め打たない。ランキングの勝敗にも `resolveContested` の勝敗にも依存しない検査にする。
   const companion =
     afterMarkOriginal?.retrievedVia === "mandatory_companion"
       ? afterMarkOriginal
@@ -537,16 +386,14 @@ export function checkCorrectionDemo(result: CorrectionDemoResult): CorrectionDem
   };
 }
 
-/** 発見の段の候補一覧を、人に見せる形で印字する。 */
 function formatCandidates(discovery: FindCorrectionCandidatesResult): string {
   if (discovery.candidates.length === 0) {
     return "  (候補0件)";
   }
   return discovery.candidates
     .map((c) => {
-      // Issue #548 方向2 / ADR 0352: findCorrectionCandidates は association の既定（on、
-      // ADR 0337）をそのまま使うので、候補に affinityMeasured: false（連想枠経由）が
-      // 混ざりうる——total が無い候補は「n/a」と表示する。
+      // `findCorrectionCandidates` は association の既定（on）をそのまま使うので、`affinityMeasured: false` の候補が混ざりうる。
+      // total が無い候補は「n/a」と表示する。
       const total = scoreTotalOrNull(c.score);
       const totalText = total === null ? "n/a" : total.toFixed(5);
       return `  - #${c.recallRank}位 "${c.digest}" (memoryId=${c.memoryId}, score.total=${totalText})`;
@@ -566,7 +413,6 @@ function formatMemoryList(memories: RecallResult["memories"]): string {
     .join("\n");
 }
 
-/** 画面向けの印字。訂正の前後で `recall()` の答えがどう変わるかを並べて見せる。 */
 export function formatCorrectionDemo(result: CorrectionDemoResult): string {
   const lines: string[] = [];
 

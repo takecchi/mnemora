@@ -1,78 +1,25 @@
 import type { ProbeUtterance } from "./probe-set.js";
 
 /**
- * 連想枠（段3.5、ADR 0151、Issue #200）専用の probe set（Issue #291）。
+ * 連想枠専用の probe set。三角形（`query ≈ anchor` / `anchor ≈ gold` / `query ≉ gold`）で、query だけでは gold に届かず、
+ * アンカーの近傍を辿れば届く状況を作る。`hit@10` は連想枠の効果を測れない（gold は11位以降に現れる）ので、
+ * `goldReturned`/`goldRank`/`mrr` を見る。
  *
- * **背景**: `recall()` に連想枠（`RecallQuery.association`）が入ったが、それが想起の質を
- * 動かすかを測る器が無かった。`retrieval`（`./probe-set.js`）の probe は、query が直接
- * `limit` 内で gold に当たることを前提に設計されており、連想枠が無くても gold が返る
- * ——⟹ 連想枠を on/off しても `retrieval` の12行の指標は動かない（伸び代が無い）。
- *
- * **この probe set の三角形**（マネージャー設計。実装は逐語で受ける）:
- *
- *   `query ≈ anchor`（クエリで上位に当たる） /
- *   `anchor ≈ gold`（ブリッジ語を共有） /
- *   `query ≉ gold`（クエリでは `limit=10` の外）
- *
- * つまり、**query だけでは gold に届かない**が、query が引いた anchor の近傍（コサイン
- * 類似度）を辿れば gold に届く、という状況を作る。連想枠が off なら gold は原理的に
- * 返らない（`recall-runtime.ts` の段3.5は `association` を渡したときしか走らない）。
- * 連想枠が on なら、gold は `retrievedVia: "association"` として `allUnits` の後ろに
- * 連結されて返りうる——⟹ **`hit@10` は連想枠の効果を測れない**（gold は本体の11位以降に
- * しか現れない）。この probe set が測る指標は `goldReturned`/`goldRank`/`mrr` など、
- * `limit` を超えて返るかどうかを見るものにする（`./association-arm.ts` 参照）。
- *
- * **12件 = 3カテゴリ（ブリッジ語の字種）× 4件**——ASCII の識別子・日本語の固有名詞・
- * 日本語の普通名詞（カテゴリごとにブリッジ語の性質が違うことで、埋め込み空間の
- * どの領域でも三角形が成立することを確かめる。ADR 0033 §3 と同じ規律で、12件からは
- * 「一般にどの程度」を統計的に主張しない——「この12件で何件成立したか」までである）。
- *
- * 🔴 **訂正（Issue #317）: 下の4条件は当初「12/12 で実測済み」と書かれていたが、
- * 現物（新 haystack `55e5e4b` での CI 実測）はそれと食い違っていた。**
- *   ① アンカーがクエリ上位3件以内 ② gold がクエリ順位11位以降
- *   ③ cos(anchor, gold) ≥ 0.5 ④ gold がアンカー近傍の40位以内。
- *
- * - **条件②が `ascii-project`/`name-trip` の2件で破れていた**——`off` arm
- *   （連想枠なし）でも `goldRank` がちょうど `recallLimit`（10）で、クエリ単独で
- *   `limit=10` 以内に入ってしまっていた（Issue #317 本文、CI run `35020771347`）。
- *   ⟹ 本 PR（Issue #317）で `ASSOCIATION_HAYSTACK` にこの2件専用の filler を
- *   2文足し、境界にいた gold を11位以降へ押し下げた（`ASSOCIATION_HAYSTACK` の
- *   「Issue #317 で足した2件」節、PR 本文の「測ったこと」参照）。①③④は
- *   この2件について崩れていない（filler は anchor の近傍を奪わない設計。
- *   PR 本文の手元検算・CI 実測を見ること）。
- * - **`name-meeting` は `maxCount=10`（連想枠の最大設定）でも一度も gold を
- *   返さない**（旧・新 haystack のどちらでも `goldRank = null`）。⟹ 「12/12で
- *   実測済み」は元よりこの点でも成立していなかった。**原因は確かめていない**
- *   ——場を弱める方向の変更（recallLimit を下げる・競合を減らす等）はしない
- *   （Issue #317 のコメントが名指しで禁じている）。「この probe は現状 gold を
- *   返せていない」という事実だけをここに記録する。
- * - **他10件については、②が既に十分な余裕（`goldRank` が null、すなわち上位圏外）で
- *   成立していたことを、CI 実測（`off` arm）と手元の素コサイン計算の両方で確認した**
- *   （PR 本文参照）。③④は前任者（マネージャー）の実測を引き継ぎ、本 PR では
- *   再検算していない——**確かめていないこと**として明記する。
- *
- * ⛔ **`ASSOCIATION_PROBES` の中身（`bridge`/`query`/`anchor`/`gold`/`distractor`）は
- * 逐語である。1文字も変えないこと**——マネージャーが上の4条件を実測した対象そのもの
- * だからである。
+ * `ASSOCIATION_PROBES` の中身は逐語で、1文字も変えない。三角形の条件を実測した対象そのものだから。
+ * `name-meeting` は `maxCount=10` でも gold を返さない。原因は確かめていない。
+ * 場を弱める方向の変更（recallLimit を下げる等）はしない。
  */
 export interface AssociationProbe {
   id: string;
-  /** ブリッジ語の字種。3カテゴリ×4件。 */
   category: "ascii-id" | "proper-noun" | "common-noun";
-  /** anchor と gold の両方に現れ、他のどの発話にも現れない語（機械的に検査する）。 */
   bridge: string;
-  /** 終盤に投げる質問。gold とは内容語を共有しない(`limit=10` の外に gold を追いやる)。 */
   query: string;
-  /** query で上位に当たる、bridge を含む記憶。連想枠の起点(アンカー)。 */
   anchor: string;
-  /** query では引けないが、anchor とは bridge を共有する記憶。連想枠が拾うべき答え。 */
   gold: string;
-  /** 同じ話題(query 寄り)だが bridge を含まない記憶。連想枠が無くても引ける対照。 */
   distractor: string;
 }
 
 export const ASSOCIATION_PROBES: AssociationProbe[] = [
-  // --- ascii-id（ASCII の識別子がブリッジ） ---
   {
     id: "ascii-project",
     category: "ascii-id",
@@ -109,7 +56,6 @@ export const ASSOCIATION_PROBES: AssociationProbe[] = [
     gold: "WXR-5950 の2.4GHz帯は近隣の無線と干渉しやすいです。",
     distractor: "自宅の回線は光の1ギガ契約です。",
   },
-  // --- proper-noun（日本語の固有名詞がブリッジ） ---
   {
     id: "name-meeting",
     category: "proper-noun",
@@ -146,7 +92,6 @@ export const ASSOCIATION_PROBES: AssociationProbe[] = [
     gold: "佐野さんは3年前からお酒を断っています。",
     distractor: "退職祝いは部署の全員でお金を出し合います。",
   },
-  // --- common-noun（日本語の普通名詞句がブリッジ） ---
   {
     id: "noun-car",
     category: "common-noun",
@@ -185,36 +130,17 @@ export const ASSOCIATION_PROBES: AssociationProbe[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// ブリッジ語の漏れを機械的に検査する(歯1) — `identifier-probe-set.ts` の
-// `findIdentifierTopicKeywordViolations` の作法を踏む。
-// ---------------------------------------------------------------------------
-
 export interface AssociationBridgeViolation {
   index: number;
   text: string;
   bridge: string;
-  /** ブリッジ語が漏れた元の probe(このブリッジ語の持ち主)。 */
   probeId: string;
 }
 
 /**
- * 各 probe の `bridge` が、**その probe の anchor と gold の2件にだけ**現れ、
- * 他のどの発話(他 probe の anchor/gold/distractor・haystack すべて)にも現れないことを
- * 検査する。
- *
- * **なぜこの検査が要るか**: この probe set の三角形(`query ≈ anchor` /
- * `anchor ≈ gold` / `query ≉ gold`)は、bridge が anchor と gold の**外へ漏れていない**
- * ことに依存している。bridge が別の発話(たとえば同じ probe の distractor や、
- * 他の probe の anchor)に漏れれば、「anchor 経由でしか gold に届かない」という
- * 前提が崩れ、連想枠を on にしなくても gold が別経路(語彙一致・別のアンカー)で
- * 引けてしまいうる——それは「連想枠が効いた」のではなく「設計が漏れていた」である。
- *
- * `utterances` は `ProbeUtterance`(`kind`/`probeId` を持つ)を受け取る——文字列の配列
- * ではなく、**どの発話がどの probe の anchor/gold かを構造的に判定する**ため
- * (`identifier-probe-set.ts` の検査は probe を跨いだ「自分自身」の除外が要らないため
- * 文字列配列で足りたが、この検査は「自分自身の anchor/gold」を除外する必要があり、
- * 文字列だけでは判定できない)。
+ * 各 probe の `bridge` が、その probe の anchor と gold にだけ現れることを検査する。
+ * 他の発話に漏れると gold が別経路で引けてしまい、「連想枠が効いた」のではなく「設計が漏れていた」ことになる。
+ * 文字列ではなく `ProbeUtterance` を受け取るのは、どの発話がどの probe の anchor/gold かを構造で判定するため。
  */
 export function findAssociationBridgeViolations(
   utterances: readonly ProbeUtterance[],
@@ -236,18 +162,9 @@ export function findAssociationBridgeViolations(
   return violations;
 }
 
-// ---------------------------------------------------------------------------
-// query の語彙漏れを機械的に検査する(歯2) — 「gold はクエリの語彙では引けない」
-// という設計を機械が守る。
-// ---------------------------------------------------------------------------
-
 /**
- * probe ごとに人手で拾った、query の内容語(3〜5語)。`identifier-probe-set.ts` の
- * `IDENTIFIER_TOPIC_KEYWORDS` と同じ理由で、`ASSOCIATION_PROBES` から自動導出しない
- * (文全体の部分文字列一致にすると、助詞・助動詞まで「内容語」に混じり、検査として
- * 機能しなくなるため)。「ます」「です」等の機能語は含めない。
- *
- * `ASSOCIATION_PROBES` に probe を足したら、ここにも対応する内容語を足すこと。
+ * probe ごとに人手で拾った query の内容語（3〜5語）。`ASSOCIATION_PROBES` から自動導出しない。
+ * 部分文字列一致にすると助詞・助動詞まで混じり、検査として機能しなくなる。probe を足したらここにも足すこと。
  */
 export const ASSOCIATION_QUERY_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   "ascii-project": ["担当", "案件", "資料", "取引先", "共有"],
@@ -270,15 +187,6 @@ export interface AssociationQueryLeakViolation {
   gold: string;
 }
 
-/**
- * `ASSOCIATION_QUERY_KEYWORDS` のどの語も、**その probe の gold に現れない**ことを
- * 検査する(全 probe に対する静的検査。`ASSOCIATION_PROBES`/`ASSOCIATION_QUERY_KEYWORDS`
- * 自身から導くため、会話の組み立て結果に依らない——引数を取らない)。
- *
- * 「gold はクエリの語彙では引けない」という、この probe set 存在理由そのものを
- * 機械が守る。ここが破れると、たとえ連想枠が off でも(=`recall()` が query の
- * 語彙一致だけで)gold を返してしまいうる——それは連想枠の効果ではない。
- */
 export function findAssociationQueryLeakViolations(): AssociationQueryLeakViolation[] {
   const violations: AssociationQueryLeakViolation[] = [];
   for (const probe of ASSOCIATION_PROBES) {
@@ -292,66 +200,27 @@ export function findAssociationQueryLeakViolations(): AssociationQueryLeakViolat
   return violations;
 }
 
-// ---------------------------------------------------------------------------
-// 会話の組み立て
-// ---------------------------------------------------------------------------
-
-/** `assoc-gold-<id>` の externalId 規約。 */
 export function associationGoldExternalId(probeId: string): string {
   return `assoc-gold-${probeId}`;
 }
 
-/** `assoc-anchor-<id>` の externalId 規約。 */
 export function associationAnchorExternalId(probeId: string): string {
   return `assoc-anchor-${probeId}`;
 }
 
-/** `assoc-distractor-<id>` の externalId 規約。 */
 export function associationDistractorExternalId(probeId: string): string {
   return `assoc-distractor-${probeId}`;
 }
 
-/** `assoc-filler-NNNN`(4桁ゼロ埋め)の externalId 規約。 */
 export function associationHaystackExternalId(index: number): string {
   return `assoc-filler-${String(index).padStart(4, "0")}`;
 }
 
-// ---------------------------------------------------------------------------
-// haystack — ⭐ この probe 集合だけ、専用の haystack を持つ
-// ---------------------------------------------------------------------------
-
 /**
- * この probe 集合専用の haystack(60件)。
- *
- * 🔴 **なぜ `./probe-set.js` の `buildHaystackUtterance` を使わないのか**——
- * **実測で、あれでは連想枠を測れないことが分かったからである。**
- *
- * `buildHaystackUtterance` は「${時期}${主語}${述語}」の3スロットのテンプレートから
- * 60文を組む。⟹ **60文が互いに極めて似た1つのクラスタになる。**【実測】
- * (`@mnemora/local-embedding` / ruri v3 30m/sym で 1770 ペアを測った):
- *
- * | | cos |
- * |---|---|
- * | haystack 同士(中央値) | 0.854 |
- * | haystack 同士(上位10%) | 0.921 |
- * | haystack 同士(最大) | **0.982** |
- * | この集合が設計した anchor→gold(最小) | 0.847 |
- *
- * ⟹ **haystack ペアの 58.2%(1030/1770)が、設計した最弱の anchor→gold より強い。**
- *
- * **連想枠(ADR 0151 段3.5)は、アンカー上位3件の近傍をプールして上位 `maxCount` 件を採る。**
- * ⟹ 3つのアンカー枠のうち1つでも haystack が取ると、**その近傍(＝ほぼ全部 haystack)が
- * プールを埋め尽くし、設計した anchor→gold の枝が押し出される。**
- *
- * **これは推測ではない。CI の実測(commit `4a4f014`)で現に起きた**——
- * `associationFrame[].anchorExternalId` を記録したところ、12 probe 中8件で
- * 連想枠の5件すべてが `assoc-filler-*` を起点とする haystack だった。
- *
- * ⟹ **テンプレート生成の haystack は、この測定にとって「埋め草」ではなく「妨害」である。**
- * だから手書きの、互いに似ていない60文を置く。
- *
- * ⚠ **既存の4 probe 集合は `buildHaystackUtterance` を使い続ける。**あちらは近傍を
- * プールしないので、この退化は害にならない——**器を作り直したのはこの集合だけである。**
+ * この probe 集合専用の haystack（60件）。`./probe-set.js` の `buildHaystackUtterance` を使わない。
+ * テンプレート生成の60文は互いに極めて似た1つの密なクラスタになり（cos 中央値 0.854）、連想枠が
+ * アンカー近傍をプールするとき、haystack がプールを埋め尽くして設計した anchor→gold の枝を押し出す。
+ * 既存の4 probe 集合は近傍をプールしないので、`buildHaystackUtterance` を使い続ける。
  */
 export const ASSOCIATION_HAYSTACK: readonly string[] = [
   "冷蔵庫の製氷機の水を週に一度替えている。",
@@ -415,45 +284,14 @@ export const ASSOCIATION_HAYSTACK: readonly string[] = [
   "窓際に置いた本が日に焼けた。",
   "靴の修理を商店街の店に頼んだ。",
 
-  // --- Issue #317 で足した2件 ---
-  //
-  // 上の60文は生活雑事のみで、12 probe の話題(仕事の案件・出張の手続き等)と
-  // 意味的に一切重ならない【Issue #317 のコメント(委譲先の監査)】。⟹
-  // `ascii-project`/`name-trip` の2件だけ、query が haystack のどれにも競り負けず
-  // gold(境界の10位)より上位に来てしまい、条件②(gold はクエリ単独では11位以降にしか
-  // 出ない)が破れていた(`off` arm で goldRank=10、Issue #317 本文)。
-  //
-  // ここに足す2文は、**該当 probe の query と話題は近いが、その probe の bridge
-  // 語を持たない**——Issue #317 のコメントが名指しで推奨した方向(「別の案件番号」
-  // 「別の出張先」)。この2文が query 側の順位を押し上げ、境界にいた gold を
-  // 11位以降へ押し下げる。⚠ 大量には足さない——Issue #316(haystack が連想枠の
-  // プールを占領する)の再発を避けるため、**このボーダーの2件を押し下げる最小限**に
-  // 留めている(手元の素コサイン計算での確認を PR 本文に記録)。
+  // 以下の2文は、該当 probe の query と話題が近く、その probe の bridge 語を持たない。境界にいた gold を11位以降へ押し下げる。
+  // 大量には足さない。haystack が連想枠のプールを占領する再発を避けるため、押し下げる最小限に留める。
   "担当している別件の見積もりをまだ作成していません。", // ascii-project の query(案件)と話題が近い。bridge(PROJ-1234)は含まない。
   "来週、大阪への出張の日程を変更しました。", // name-trip の query(出張)と話題が近い。bridge(シンガポール)は含まない。
 ];
 
-/** `ASSOCIATION_HAYSTACK` の既定件数。 */
 export const ASSOCIATION_HAYSTACK_SIZE = ASSOCIATION_HAYSTACK.length;
 
-/**
- * 全 association probe の anchor/gold/distractor + 共有の haystack を1本の会話に組む。
- *
- * **haystack は `ASSOCIATION_HAYSTACK`(この集合専用)を使う。**`./probe-set.js` の
- * `buildHaystackUtterance` は使わない——理由は `ASSOCIATION_HAYSTACK` の docstring に
- * 実測値とともに書いた(要約: テンプレート生成の60文が1つの密なクラスタになり、
- * 連想枠のプールを埋め尽くして、測りたいものが枠に入れなくなる)。
- * ブリッジ語を1件も含まないことは `findAssociationBridgeViolations` が実行時に再検査する。
- *
- * 各 probe につき anchor → gold → distractor の順に積む(この順序は三角形の成立に
- * 必須ではない——`recall()` はテキストの並び順ではなく埋め込みで引く——が、
- * 「まずアンカーが在り、その近傍に gold が在る」という設計意図を会話の見た目にも
- * 揃えるための選択)。
- *
- * ⭐ **歯を2本、ここで実行時に噛ませる**(`findAssociationBridgeViolations`/
- * `findAssociationQueryLeakViolations`)。違反があれば例外にする——
- * `identifier-probe-set.ts`/`probe-set.ts` の先例と同じ規律。
- */
 export function buildAssociationProbeSetConversation(
   haystackSize: number = ASSOCIATION_HAYSTACK_SIZE,
 ): ProbeUtterance[] {

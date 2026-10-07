@@ -3,21 +3,6 @@ import type { Ctx, Memory, MemoryId, MemoryStore, NewMemoryEvent } from "@mnemor
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * ADR 0503（ADR 0447 の材料3〜5・ADR 0450 の材料1・2）: `supersededById`（置き換えた側）の約束を壊す入力。
- *
- * - `resolveContestedPair`・`resolveContestedGroup` で `status: "superseded"` に `supersededById` を付けない
- *   → 戻せない敗者（`restoreSuperseded` の群に入らない）ができていた。
- * - `supersededById` に自分自身（自己置換）、2者版で互いを指す・群版で輪になる（循環）、群版で群の外の
- *   `forgotten` な記憶を指す、`active` のメンバーに `supersededById` を付ける。
- * - `updateStatus(T, "superseded", { supersededById: T })`・`updateStatus(T, "superseded")`
- *   （`updateStatusWithEvent` も同じ）。
- *
- * testkit の InMemory が `RangeError` で何も書かないことを確かめる（`PostgresMemoryStore` と同じ入力を流す歯は
- * `packages/postgres/src/__tests__/store-superseded-by-checks.postgres.test.ts`。DB が要る）。陽性対照（正当な `supersededById`）は通る
- * ——断りすぎる実装で赤になる。
- */
-
 const A: Ctx = { tenantId: "superseded-by-a" };
 
 interface Kit {
@@ -61,7 +46,6 @@ async function caught(run: () => Promise<unknown>): Promise<unknown> {
   return thrown;
 }
 
-/** 行の (status, supersededById) を写し取る。断った呼び出しの前後で変わらないことを見る。 */
 async function snap(kit: Kit, ids: string[]): Promise<Array<[string, string | null | undefined]>> {
   return Promise.all(
     ids.map(async (id) => {
@@ -386,7 +370,6 @@ for (const [kitName, makeKit] of KITS) {
         );
       });
 
-      // 大文字小文字だけが違う自己置換も自己置換（Postgres は `normalizeUuidCase` で両側を畳んで比べる）。
       for (const [label, flip] of [
         ["id 小文字・supersededById 大文字", (id: string) => [id, id.toUpperCase()]],
         ["id 大文字・supersededById 小文字", (id: string) => [id.toUpperCase(), id]],
@@ -411,8 +394,6 @@ for (const [kitName, makeKit] of KITS) {
         expect(await snap(kit, [t.id])).toEqual([["superseded", w.id]]);
       });
 
-      // 断る文面は、自分自身（大文字でも）を付けても「superseded 以外に付けない」のまま（自己置換の文面にならない）。
-      // Postgres も同じ（`uppercase-target-id-parity.postgres.test.ts` の `edge.updateStatus(active + self ...)`）。
       it(`${name}: superseded 以外の status に自分自身（大文字でも）を supersededById に付けても、文面は「superseded 以外に付けない」のまま`, async () => {
         const kit = await makeKit();
         const t = await mem(kit);

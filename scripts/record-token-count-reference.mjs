@@ -1,33 +1,14 @@
 #!/usr/bin/env node
 /**
- * `packages/core/src/__tests__/fixtures/token-count-reference.json`（Issue #108）を
- * js-tiktoken で再計算し、書き直す手動スクリプト。
+ * ⛔ どの門にも入れない(`pnpm run test` からも CI からも呼ばれない)。`js-tiktoken` を `package.json` / `pnpm-lock.yaml` に
+ * 足さないため(依存の追加方針の変更はオーナー専権。`docs/autonomy.md` §3)、実行のたびに手で用意する。
+ * 動かしたら `node_modules/js-tiktoken`(と `base64-js`)を消してから終えること。
  *
- * **これはどの門にも入っていない**（`pnpm run test` からも CI からも呼ばれない）。
- * `js-tiktoken` を `package.json` / `pnpm-lock.yaml` に足さない判断
- * （依存の追加方針の変更はオーナー専権。`docs/autonomy.md` §3 の表）をしたため、
- * 実行するたびに手で用意してもらう形にしてある。
+ * ⛔ 新しい corpus を持たない。既存フィクスチャの `id/class/source/text` を読み直し、
+ * `o200k_base`/`cl100k_base` の列だけを再計算して一致を確認する。
  *
- * 使い方:
- *   npm i --no-save js-tiktoken   # このリポジトリのどこか（推奨: リポジトリ直下）で
- *   node scripts/record-token-count-reference.mjs
- *
- * `--no-save` なので `package.json` は書き換わらない。`node_modules/` は
- * `.gitignore` されているので、実行後に消しても消さなくても `git status` は汚れない
- * ——ただし CI の環境には `js-tiktoken` が無い前提なので、動かしたら
- * `node_modules/js-tiktoken`（と依存の `base64-js`）を消してから作業を終えること。
- *
- * ## このスクリプトが「新しい corpus」を持たない理由
- *
- * 元の測定（121件のコーパス、実 API 突き合わせ）は本タスクの外で一度だけ行われた
- * （`measure/` 以下。このリポジトリには無い一時ディレクトリ）。このスクリプトは
- * その corpus を再取得する手段を持たない——**既存のフィクスチャの `id/class/source/text`
- * を「動かない corpus」として読み直し、`o200k_base`/`cl100k_base` の列だけを
- * js-tiktoken で再計算して、フィクスチャの値と一致するか確認する。**
- *
- * `verifiedAgainstApi`（実 API に課金して確かめた記録）は再現できない
- * （もう一度叩けば新しい課金が発生する）ため、このスクリプトは**その節を書き換えない**
- * ——既存のフィクスチャからそのまま引き継いで書き戻す。
+ * ⛔ `verifiedAgainstApi`(実 API に課金して確かめた記録)は再現できない(再実行は新しい課金)ので書き換えず、
+ * 既存の値を引き継いで書き戻す。
  */
 
 import { readFileSync, writeFileSync } from "node:fs";

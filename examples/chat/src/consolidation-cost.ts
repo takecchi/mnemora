@@ -42,19 +42,8 @@ import type { ProviderMode } from "./providers.js";
 import { resolveExternalId } from "./provenance-trace.js";
 
 /**
- * `consolidation-cost` サブコマンド(Issue #136)——「`Runtime.consolidate()` を実際に
- * 使うと、載せる量は縮むのか」を実測するベンチの、DB/LLM/embedding を要求する側。
- *
- * **測る手順(仕様書の「測る手順(ラウンド制)」節そのもの)**:
- * 1. `probe-set.ts` の発話列を `observe()` で ingest し、embed を drain する。
- * 2. round 0(統合前)を計測する。
- * 3. round 1..3: gold/distractor を除いた active な filler を id の安定した順に
- *    `groupSize` 件ずつの群へ分け、群ごとに `runtime.consolidate()` を呼ぶ。
- *    round 2 以降は前回の統合結果も対象に含める(候補プールを引き継ぐ)。
- * 4. 1つの round の開始時点で候補が2件未満なら、そこで打ち切る。
- *
- * JSON の組み立て(型・平均・株分けの純関数)は `./consolidation-json.js` に委ねる——
- * ここは「何を読むか」「いつ呼ぶか」だけを持つ。
+ * `consolidation-cost` サブコマンドのうち、DB/LLM/embedding を要求する側。
+ * JSON の組み立て（型・平均・群分けの純関数）は `./consolidation-json.js` に委ね、ここは「何を読むか」「いつ呼ぶか」だけを持つ。
  */
 
 const MAX_ROUNDS = 3;
@@ -72,12 +61,10 @@ export interface RunConsolidationCostOptions {
   recallLimit: number;
   measuredAt: Date;
   commit: string | null;
-  /** 既定は `DEFAULT_HAYSTACK_SIZE`(`probe-set.ts`、既存 `retrieval` と同じ既定)。 */
   haystackSize?: number;
   /**
-   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
-   * **省略時は `null`**——この bench(統合コスト・gold 順位)の基準線は変えない。
-   * `examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
+   * `recall()` に渡す `association`（測定専用オプション）。省略時は `null`。
+   * この bench の基準線を変えないため。明示するのは `bench/association-default-on-measure.ts` だけ。
    */
   association?: RecallAssociationQuery | null;
 }
@@ -101,10 +88,8 @@ export async function measureStore(
   }
   const active = byStatus.get("active") ?? [];
   const superseded = byStatus.get("superseded") ?? [];
-  // ⚠ この bench は `forget`/`archive`/`contest` を一切呼ばないので、active/superseded
-  // 以外の status を持つ Memory はここに現れない想定である。現れた場合は
-  // `allContentChars` の合計にだけ含め(隠さない)、`activeCount`/`supersededCount` の
-  // 内訳には計上しない——この bench の範囲外の状態だからである。
+  // この bench は `forget`/`archive`/`contest` を呼ばないので、active/superseded 以外の status は現れない想定。
+  // 現れた場合は `allContentChars` にだけ含め（隠さない）、内訳には計上しない。
   const allContentChars = memories.reduce((sum, m) => sum + m.content.length, 0);
   return {
     activeIds: active.map((m) => m.id),
@@ -131,8 +116,6 @@ async function measureProbe(
   limit: number | undefined,
   association: RecallAssociationQuery | null = null,
 ): Promise<RawProbeMeasurement> {
-  // association: 省略時は null — この欄を省略した既存の呼び出しではこの bench
-  // （統合コスト・gold 順位）の基準線を動かさない（ADR 0337 追記2026-09-26）。
   const result = await runtime.recall(
     ctx,
     budget !== undefined
@@ -223,9 +206,7 @@ function bucketEmbeddingStatus(status: Memory["embeddingStatus"]): "ok" | "pendi
     case "failed":
       return "failed";
     case "skipped":
-      // この経路では実際には起きない(embed ジョブが "skipped" を書く分岐は
-      // `packages/core` に無い——型にのみ存在する値)。観測されたら見失わないよう
-      // failed 側へ丸めておく。
+      // この経路では起きない（embed ジョブが "skipped" を書く分岐は `packages/core` に無い）。観測されたら見失わないよう failed 側へ丸める。
       return "failed";
     default: {
       const exhaustive: never = status;
@@ -258,9 +239,7 @@ export async function measureNewMemoriesEmbedding(
 }
 
 /**
- * この関数は常に `status: "measured"` を返す(重み取得の失敗はこの関数に来る前、
- * `cli.ts` の `warmupLocalEmbedding` の段で打ち切られる——`ConsolidationCostRunJson` が
- * 持つ `status: "weights_unavailable"` はこの関数の外側の関心事)。
+ * 常に `status: "measured"` を返す。重み取得の失敗はこの関数に来る前に `cli.ts` の `warmupLocalEmbedding` で打ち切られる。
  */
 export async function runConsolidationCost(
   options: RunConsolidationCostOptions,
@@ -282,9 +261,7 @@ export async function runConsolidationCost(
       fillerIds.push(...observed.memoryIds);
     }
   }
-  // Issue #719: `allIds`(いま作った Memory の総数、冪等な再送は含まない——`observed.
-  // memoryIds` の docstring)を `drainEmbedTicks` に渡し、「available_at との ms 競合で
-  // claim 0件のまま」黙って抜けないことを検査させる。
+  // `allIds` を `drainEmbedTicks` に渡し、available_at との競合で claim 0件のまま黙って抜けないことを検査させる。
   await drainEmbedTicks(options.runtime, ctx, { expectedProcessed: allIds.length });
 
   const embeddingSpace: ConsolidationEmbeddingSpaceJson = { ...options.embeddingProvider.space };
@@ -314,13 +291,8 @@ export async function runConsolidationCost(
       break;
     }
 
-    // ⚠ この try は round の本体まるごとを囲む(群のループ・drainEmbedTicks・
-    // measureNewMemoriesEmbedding・measureStore・measureRecallForRound)。全部 store を
-    // 触るので、どの段で例外が起きても「測れた分を捨てて死ぬ」のではなく、
-    // 完走した round までの結果を持って `aborted_on_error` で打ち切る
-    // (`consolidate()` は ADR 0100 / PR #144 以降、失敗時に投げる)。
-    // 関数全体を1つの try で囲まないのは、そうすると「どの round で死んだか」が
-    // 分からなくなるため。
+    // この try は round の本体まるごとを囲む。どの段で例外が起きても、完走した round までの結果を持って
+    // `aborted_on_error` で打ち切るため。関数全体を1つの try で囲むと、どの round で死んだかが分からなくなる。
     try {
       const { groups, leftover } = splitIntoConsolidationGroups(candidatePool, options.groupSize);
       const outcomes: ConsolidationOutcomeCountsJson = emptyOutcomeCounts();
@@ -340,19 +312,13 @@ export async function runConsolidationCost(
           newMemoryIdsThisRound.push(result.consolidatedMemoryId);
           allIds.push(result.consolidatedMemoryId);
         } else {
-          // この bench では起きない想定だが(全対象は直前の round で active と確認した
-          // filler/統合結果のみ)、起きた場合は対象を「未統合のまま」次の round へ持ち越す
-          // ——黙って消さない。
+          // この bench では起きない想定。起きた場合は対象を未統合のまま次の round へ持ち越し、黙って消さない。
           nextPool.push(...group);
         }
       }
       candidatePool = [...nextPool, ...leftover];
 
-      // Issue #719: `newMemoryIdsThisRound`(この round で `consolidate()` が新しく
-      // 作った Memory——`createMemoryWithOutbox(ctx, newMemory, ['embed'])` を1件につき
-      // 1回だけ呼ぶ、`packages/core/src/runtime.ts` 参照)の件数を `drainEmbedTicks` に
-      // 渡し、「available_at との ms 競合で claim 0件のまま」黙って抜けないことを
-      // 検査させる。
+      // `newMemoryIdsThisRound` の件数を `drainEmbedTicks` に渡し、available_at との競合で claim 0件のまま黙って抜けないことを検査させる。
       await drainEmbedTicks(options.runtime, ctx, {
         expectedProcessed: newMemoryIdsThisRound.length,
       });
@@ -385,8 +351,7 @@ export async function runConsolidationCost(
       };
 
       rounds.push({ round, consolidation, store: store.json, recall });
-      // ⚠ この行の直前で例外が起きた場合は実行されない——`stoppedAfterRound` は
-      // 最後に完走した round のままになる(落ちた round は完走していない)。
+      // 直前で例外が起きた場合は実行されない。`stoppedAfterRound` は最後に完走した round のままになる。
       stoppedAfterRound = round;
     } catch (error) {
       abort = describeThrownError(error, round);

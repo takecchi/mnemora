@@ -12,42 +12,7 @@ import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
 import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io.js";
 
-/**
- * Issue #1430: 矛盾候補欄の非対称文面（案1）と、system への一文追記（案3）を、実 API
- * （gpt-4o-mini）で測る。#835 候補4（`measure-835-candidate4-answer-quality.ts`、PR #1429）
- * と同じ対象6ケース・n=5・同じ `ClaimKeyOptions` の骨組みを再利用する——
- * 差分は「矛盾候補欄の文面」と「system 文」だけになるようにするため。
- *
- * **対象6ケース**: 訂正4件（`schedule-change-meeting-day`・`negation-moved-city`・
- * `schedule-change-deadline`・`negation-moved-job`）+ 誤検出2件（`unknown-favorite-number`・
- * `other-period-city-this-year`）。
- *
- * **2条件**（`MNEMORA_1430_CONDITION` で選ぶ）:
- * - `"c1"`: 案1（非対称文面）のみ。`runAnswerCase` へ `contestedCorrectionGuidance: false`
- *   を明示的に渡す——system は常に `ANSWER_SYSTEM_PROMPT` のまま
- *   （`runAnswerCase` 自体の既定は Issue #1430・ADR 0379「C2 採用」以降 `true` だが、
- *   この条件では明示的に上書きする）。
- * - `"c2"`: 案1＋案3。`contestedCorrectionGuidance: true` を渡す——実際に非対称文面が
- *   出た回だけ、system に `CONTESTED_CORRECTION_GUIDANCE` が足される（構造として
- *   `hasContestedCorrectionWording` が true の回だけ、という規律。
- *   `resolveMnemoraAnswerSystemPrompt` docstring参照）。
- *
- * claim key は #835 候補4の (A) 印あり条件と同じ
- * `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }` を両条件で使う
- * ——A'（旧文面・印あり、同日の対照、別 worktree の main で `with-tag` 条件を回す）との
- * 差分が「矛盾候補欄の文面／system」だけになるようにするため。
- *
- * **同じ入力・同じ記憶集合にする**ため、claim key 派生の呼び出し以外は種カセット
- * `answer.order-legend.json` から返る（`measure-835-candidate4-answer-quality.ts` と
- * 同じ配線・同じ理由）。
- *
- * 出力: ケースごとに、`[矛盾候補:]` タグ件数・非対称文面（「訂正の可能性」印）が
- * 実際に出たか・system がどちらだったか・mnemora の `verdict`/`judgement.outcome`/
- * `reconciled`・回答本文を記録する。
- *
- * 使い方: `DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_1430_CONDITION=c1|c2 \
- *   MNEMORA_RECORD_CASSETTE_PATH=... pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-1430-contested-tag-direction.ts`
- */
+/** 差分が矛盾候補欄の文面と system 文だけになるよう、`measure-835-candidate4-answer-quality.ts` と同じ対象・n・`ClaimKeyOptions` の骨組みを再利用する。 */
 
 const TARGET_CASE_IDS = [
   "schedule-change-meeting-day",
@@ -71,7 +36,6 @@ function resolveCondition(raw: string | undefined): Condition {
   );
 }
 
-// #835 候補4の (A) 印あり条件と同じ ClaimKeyOptions（両条件で共通）。
 const CLAIM_KEY_OPTIONS: ClaimKeyOptions = {
   enabled: true,
   detectContested: true,
@@ -146,10 +110,6 @@ async function main(): Promise<void> {
       const mnemoraContent = result.mnemora.promptSpec.messages[0]?.content ?? "";
       const contradictionTagCount = (mnemoraContent.match(/\[矛盾候補:/g) ?? []).length;
       const mnemoraSystem = result.mnemora.promptSpec.system ?? "";
-      // `systemExtended`（下記ログ）が、非対称文面（案1）が実際に出たかどうかの構造の
-      // 判定結果をそのまま表す——`contestedCorrectionGuidance` を明示している条件では、
-      // system が拡張された ⟺ `buildMnemoraPromptDetail` の `hasContestedCorrectionWording`
-      // が true だった、という対応になる（`resolveMnemoraAnswerSystemPrompt` の docstring）。
 
       const embeddingSpace = embeddingSpaceSlug(handle.embeddingProvider.space);
       const tenantId = `${tenantPrefix}-${embeddingSpace}-${answerCase.id}`;

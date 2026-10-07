@@ -4,10 +4,8 @@ import type {
   ArchiveSweepPhaseJson,
 } from "./archive-sweep-json.js";
 
-/** `status: "measured"` のときだけ呼ばれる(`consolidation-cost-format.ts` と同じ形)。 */
 type MeasuredArchiveSweepCostRunJson = Extract<ArchiveSweepCostRunJson, { status: "measured" }>;
 
-/** 画面向けの人が読む要約(機械可読な出力は `MNEMORA_ARCHIVE_SWEEP_JSON` の側)。 */
 export function formatArchiveSweepCostReport(json: MeasuredArchiveSweepCostRunJson): string {
   const lines: string[] = [];
   lines.push(

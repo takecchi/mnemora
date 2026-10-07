@@ -5,42 +5,18 @@ import { isBoundedScoringStrategy } from "./strategies/scoring.js";
  * over-fetch の窓（k'）の外に、本来 top-k に入るべき候補が残っていたかを判定する
  * （[ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md) 案A）。
  *
- * ## なぜこれが要るか
- *
- * かつて `ann_truncated` の発火条件は `annHits.length >= kPrime` **だけ**だった。
- * `kPrime` はスコープの件数を一切見ないので、**スコープに k' 件以上あれば必ず鳴る**——
- * **⟹ 札は「スコープが k' 以上ある」としか言っておらず、損したかどうかを一切言っていなかった。**
- * 実測では 7 probe すべてで鳴り、実損は 0/7 だった（ADR 0069 §1.1）。
- *
- * そして `docs/recall.md` は、この札の次の一手を「厳密検索へのフォールバックを選べる」と
- * 書いている。**100% 鳴る札でそれをやると、ANN 索引を一度も使わないのと同じになる。**
- *
- * ## 判定式
- *
  * ```
  * R = bar / ( sim_k' × M_max )        R >= 1 なら「窓の外は原理的に top-k へ入れない」
  * ```
  *
- * **健全性の根拠**: ANN は距離順に返すので、窓の外の候補 c は必ず `sim_c <= sim_k'` である。
- * その total は `sim_c × M_c <= sim_k' × M_max`。これが `bar` 以下なら c は k 位を抜けない。
- * **⟹ k'+1 位以降を取りに行かずに、上界だけで判定できる。**
- *
- * **⚠ これは「ANN が距離順に返す」という機構の性質に依っており、実装の偶然ではない。**
- * ただし `sim_k'` は**索引が返した** k' 番目であって**真の** k' 番目ではない——
- * 近似索引が scope の他の場所へ行っていた場合、上界は破れる。その事象は本判定の対象ではなく
- * `ann_unreached`（ADR 0025 / 0026）が別に扱う。**塞げていない範囲を塞いだことにしない。**
- *
- * **🔴 ⚠ この最後の一文は、[ADR 0193](../../../docs/decisions/0193-ann-unreached-covers-full-window.md)
- * より前は嘘だった。** `ann_unreached`（ADR 0026）の発火条件には `annHits.length < kPrime`
- * （窓が埋まっていない）という条件があり、**窓が満杯（この判定＝`decideAnnTruncation` が
- * 実際に動く場合）にはそもそも `ann_unreached` が発火しえなかった**——つまり、まさに
- * この一文が「別に扱う」と名指ししていた事象（窓が満杯なのに近似索引が scope の他所へ
- * 行っていた場合）を、`ann_unreached` の条件式自身が除外していた。ADR 0193 が
- * `ann_unreached` の条件から `annHits.length < kPrime` を落としたことで、この一文は
- * ようやく実態と一致した。
+ * 根拠: ANN は距離順に返すので、窓の外の候補 c は `sim_c <= sim_k'`。その total は
+ * `sim_c × M_c <= sim_k' × M_max` で、これが `bar` 以下なら c は k 位を抜けない。
+ * `sim_k'` は**索引が返した** k' 番目であって真の k' 番目ではない。近似索引が scope の他所へ
+ * 行っていた場合は上界が破れるが、それは本判定の対象外で、`ann_unreached`
+ * （ADR 0025 / 0026、[ADR 0193](../../../docs/decisions/0193-ann-unreached-covers-full-window.md)）が扱う。
  */
 
-/** 判定の結果。**3つの状態を潰さない**（ADR 0008 の「無いには種類がある」を判定へ適用する）。 */
+/** 判定の結果。**3つの状態を潰さない**（ADR 0008）。 */
 export type AnnTruncationVerdict =
   /**
    * 窓の外の候補は原理的に top-k へ入れない、と証明できた。
@@ -65,11 +41,7 @@ export interface DecideAnnTruncationInput {
   lastAnnSimilarity: number;
   /**
    * 返した最後（k 位）の `total`。**`limit` に満たなかったら `null`。**
-   *
-   * `null` のとき、比較の基準は `scoreThreshold` になる——**閾値を超える候補なら
-   * 必ず返っていたはず**だからである（`limit` に余りが在るのに返らなかったのは、
-   * 閾値を超えなかったからでしかない）。⟹ 窓の外の候補が「入れたはず」と言えるのは、
-   * 閾値を超えられた場合だけ。
+   * `null` のとき比較の基準は `scoreThreshold` になる（閾値を超える候補なら必ず返っていたはずのため）。
    */
   lastReturnedTotal: number | null;
   /** 段2の閾値（`RecallQuery.scoreThreshold` の実効値）。 */
@@ -81,7 +53,7 @@ function isUsableNumber(v: number): boolean {
 }
 
 /**
- * over-fetch の窓の外に、本来 top-k に入るべき候補が残っていたかを判定する純関数（このファイルの冒頭の doc、ADR 0069 案A）。
+ * over-fetch の窓の外に、本来 top-k に入るべき候補が残っていたかを判定する純関数（ADR 0069 案A）。
  * 判定できないときは `undecidable`（「損しなかった」ではない）を返す。例外は投げない。
  */
 export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncationVerdict {
@@ -103,8 +75,7 @@ export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncat
     };
   }
 
-  // 分母。`M_max <= 0` や非有限は「上界として使えない」——0 で割って Infinity を
-  // 「安全だ」と読ませない（ADR 0044 が NaN を below_threshold に混ぜなかったのと同じ線）。
+  // 分母。`M_max <= 0` や非有限は上界として使えない（0 で割った Infinity を「安全だ」と読ませない）。
   if (!isUsableNumber(bound.value) || bound.value <= 0) {
     return {
       kind: "undecidable",
@@ -112,10 +83,8 @@ export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncat
     };
   }
 
-  // `sim_k'` は 1 - distance であり、**コサインは負になりうる**（直交より遠い候補）。
-  // 分母が 0 以下になったら「窓の外は total を稼げない」と読める誘惑があるが、そう読まない——
-  // **`total` の符号まで含めた大小関係は、この上界の議論の外に在る**（負の similarity を
-  // 掛けた total 同士の順序は、上界の不等式が保証しない）。判定不能に落とす。
+  // `sim_k'` は 1 - distance で、コサインは負になりうる。分母が 0 以下でも「窓の外は total を稼げない」
+  // とは読まない（負の similarity を掛けた total の順序は、上界の不等式が保証しない）。判定不能に落とす。
   if (!isUsableNumber(input.lastAnnSimilarity) || input.lastAnnSimilarity <= 0) {
     return {
       kind: "undecidable",
@@ -125,9 +94,8 @@ export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncat
     };
   }
 
-  // 比較の基準。`lastReturnedTotal` が NaN のときは判定不能——これは
-  // `score_not_comparable`（ADR 0044、埋め込みがゼロベクトル）の領域であり、
-  // 「閾値を緩める」でも「窓を広げる」でも直らない別の出来事である。
+  // `lastReturnedTotal` が NaN のときは判定不能。`score_not_comparable`（ADR 0044）の領域で、
+  // 閾値を緩めても窓を広げても直らない。
   const bar = input.lastReturnedTotal ?? input.scoreThreshold;
   if (!isUsableNumber(bar)) {
     return {
@@ -144,9 +112,8 @@ export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncat
     };
   }
 
-  // **境界は `>= 1` が安全側である。**ちょうど 1 のとき、窓の外の候補は「k 位と同点」までしか
-  // 届かず、**k 位を抜けはしない**（並べ替えは `total` の降順で、同点は既存の順序を崩さない）。
-  // ⟹ 等号を安全側に含める。
+  // 境界は `>= 1` が安全側。ちょうど 1 のとき窓の外の候補は k 位と同点までしか届かず、
+  // 同点は既存の順序を崩さない。
   return safetyRatio >= 1
     ? { kind: "provably_safe", safetyRatio, assumptions: bound.assumptions }
     : { kind: "loss_possible", safetyRatio, assumptions: bound.assumptions };

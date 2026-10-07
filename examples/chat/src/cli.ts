@@ -154,7 +154,6 @@ import { runAnswerTrialsCompareFromFiles } from "./answer-trials-compare.js";
 import { databaseErrorHint } from "./db-error-hint.js";
 import { formatAnswerTrialsReport, runAnswerTrials } from "./answer-trials.js";
 
-/** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
 
 function requireDatabaseUrl(): string {
@@ -171,13 +170,9 @@ function requireDatabaseUrl(): string {
 }
 
 /**
- * **`ProviderMode` のすべての値を名指しする**（ADR 0051 / ADR 0085）。
- *
- * ⚠ ここは一度壊れていた——`ProviderMode` に `"recorded"` を足したとき、この関数は
- * 「`openai` でなければ擬似 provider」のままだった。その結果、記録を再生している run が
- * 画面には「決定的な擬似 provider」と出て、**同じ report の別の行（`llm=recorded`）と
- * 矛盾していた。**ADR 0051 が「どちらで走ったかを隠さない」ことを土台にしている以上、
- * これは最も起こしてはならない壊れ方である。**モードを増やすときは必ずここも増やすこと。**
+ * `ProviderMode` のすべての値を名指しする。「`openai` でなければ擬似 provider」と書くと、
+ * `"recorded"` を足したとき再生中の run が擬似と表示され、同じ report の別の行と矛盾する（ADR 0051）。
+ * モードを増やすときは必ずここも増やすこと。
  */
 function describeMode(mode: ProviderMode): string {
   switch (mode) {
@@ -197,16 +192,10 @@ function describeMode(mode: ProviderMode): string {
 }
 
 /**
- * どの組み合わせで動いているかを必ず画面に出す(黙って擬似物にフォールバックしない、
- * という原則の適用)。`MNEMORA_LLM`/`MNEMORA_EMBEDDING` で LLM と embedding を別々に
- * 上書きできるようになったため、`mode` 1個ではなく `llmMode`/`embeddingMode` を
- * それぞれ表示する。
+ * どの組み合わせで動いているかを必ず画面に出す。黙って擬似物にフォールバックしない。
  *
- * ⭐ **`cassetteIgnored` を引数に畳み込む。オプショナルにしない・既定値を持たせない。**
- * 理由: 「カセットを渡したのに使わなかった」を開示せずに provider バナーを出せる経路を
- * 作らないため（AGENTS.md「形で塞ぐ」）。呼び出し側は必ず自分の handle
- * （`ExampleRuntimeHandle`/`AnswerBenchRuntimeHandle`）が持つ `cassetteIgnored` を渡す
- * ——`providers.ts` の `Providers.cassetteIgnored` の docstring参照。
+ * `cassetteIgnored` は引数に畳み込み、オプショナルにも既定値付きにもしない。
+ * 「カセットを渡したのに使わなかった」を開示せずにバナーを出せる経路を作らないため（AGENTS.md「形で塞ぐ」）。
  */
 function printProviderMode(
   modes: {
@@ -230,9 +219,8 @@ function printProviderMode(
         '（llmMode/embeddingMode のどちらも "recorded" でない）。',
     );
   }
-  // 🔴 **Issue #594。** 上の `cassetteIgnored` は `cassette !== undefined` を前提に持つため、
-  // `resolveRecordedRun` の `openai` 枝（カセットを読まずに即 return する）を**原理的に見ない**。
-  // ⟹ 予定と実測の食い違いは、カセットとは別の検出器で開示する。
+  // 上の `cassetteIgnored` は `cassette !== undefined` が前提なので、`resolveRecordedRun` の `openai` 枝（カセットを読まずに return する）を
+  // 原理的に見ない。予定と実測の食い違いは、カセットとは別の検出器で開示する。
   const mismatch = detectPlanActualMismatch(plannedSource, modes);
   if (mismatch !== undefined) {
     console.log(describePlanActualMismatch(mismatch));
@@ -240,65 +228,36 @@ function printProviderMode(
 }
 
 /**
- * `resolveRecordedRun` の返り値。**カセットを受け取る唯一の経路が、倒した env を必ず
- * 一緒に返す**——「名乗ったのに倒し忘れる」形を書けなくする（Issue #577）。
+ * `resolveRecordedRun` の返り値。カセットを受け取る唯一の経路が、倒した env を必ず一緒に返す。
+ * 「名乗ったのに倒し忘れる」形を書けなくするため。
  */
 interface RecordedRunPlan {
-  /**
-   * provider を構築するときに渡す env。カセットを読めたら `MNEMORA_LLM`/
-   * `MNEMORA_EMBEDDING` を `"recorded"` へ倒してある。カセットを読めなかった
-   * （`decideProviderSource` が `"openai"` を選んだ）ときは `process.env` そのまま。
-   */
+  /** provider を構築するときに渡す env。カセットを読めたら `MNEMORA_LLM`/`MNEMORA_EMBEDDING` を `"recorded"` へ倒してある。 */
   env: NodeJS.ProcessEnv;
-  /** `createProviders` に渡す options。カセットが無ければ空オブジェクト。 */
   providerOptions: CreateProvidersOptions;
-  /** カセットを読めたか（呼び出し側が arm を組むときに使う。`runRetrieval` が使う）。 */
   cassette: Cassette | undefined;
   /**
-   * ⭐ **画面に名乗った「予定」そのもの（Issue #594）。**
-   *
-   * `resolveRecordedRun` は `[cassette] provider source の予定: …` を**必ず**画面へ出す。
-   * ⟹ **その予定を返り値に含めることで、呼び出し側が `printProviderMode` へ渡し忘れる
-   * 経路を無くす**——`RecordedRunPlan.env` が Issue #577 に対して同じ形で効いたのと
-   * 同じ理由である（名乗ることと、名乗りを検査へ渡すことを、分離できない形にする）。
+   * 画面に名乗った「予定」そのもの。返り値に含めることで、呼び出し側が `printProviderMode` へ渡し忘れる経路を無くす。
+   * 名乗ることと、名乗りを検査へ渡すことを分離できない形にする。
    */
   plannedSource: ProviderSourceDecision["source"];
 }
 
 /**
- * この実行が実 API を使うのか、記録の再生を使うのかを決める（ADR 0051 / 0052 / 0068 ③）。
+ * この実行が実 API を使うのか、記録の再生を使うのかを決める。
  *
- * **判定そのものは `decideProviderSource`（`providers.ts`）に委ねる**——ここは
- * その結果を画面へ出し、`"recorded"` ならカセットを読んで、それを実際に使うために
- * 必要な env（`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を `"recorded"` へ倒したもの）まで
- * 一緒に組み立てる薄い配線に留める。
+ * 判定は `decideProviderSource`（`providers.ts`）に委ね、ここは結果を画面へ出し、`"recorded"` ならカセットを読んで
+ * 必要な env まで一緒に組み立てる薄い配線に留める。
  *
- * ⭐ **名乗ることと env を倒すことを、この関数の中で分離できない形にする（Issue #577）。**
- * 以前の `resolveCassetteForRun` は「記録した応答を再生する」と画面に出しながら
- * `Cassette | undefined` だけを返し、それを実際に `"recorded"` として使うための
- * env の書き換えは呼び出し側の手作業に委ねていた——3箇所の呼び出しのうち `runAnswer`
- * だけがその手作業を忘れ、画面には再生の宣言を出しながら実際には `deterministic` の
- * 擬似 provider で走っていた。`RecordedRunPlan.env` を返り値に含めることで、
- * 呼び出し側が env を組み立て直す必要そのものが無くなる。
- *
- * ⚠ **かつては「キーが在れば無条件に実 API」だった**（`process.env.OPENAI_API_KEY` を
- * 直接見ていた）。そのため `MNEMORA_PROVIDER_SOURCE=recorded` を指定しても、環境に
- * キーが在るだけで意図せず実 API に倒れ、課金が発生し得た——「明示すればカセットを
- * 使える口」がどこにも無かった(ADR 0068 の背景3)。`decideProviderSource` が
- * `MNEMORA_PROVIDER_SOURCE` を最優先で見るようになったことで、この口が塞がる。
- *
- * `cassette` が `undefined` なら実 API を使う、という意味である（挙動は変えていない）。
+ * 名乗ることと env を倒すことを分離できない形にする。かつて env の書き換えを呼び出し側に委ねたところ、
+ * `runAnswer` だけが忘れ、再生と名乗りながら擬似 provider で走った。
+ * キーが在れば無条件に実 API、という判定にも戻さない。環境にキーが在るだけで意図せず課金が発生しうる（ADR 0068）。
  */
 function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
   const decision = decideProviderSource(process.env);
   console.log(
-    // 🔴 **この行が名乗るのは「どの source を選んだか」までである（Issue #589）。**
-    // `decideProviderSource` は env だけを見る判定であり、**`createProviders` は
-    // この判定を一度も読まない**（あちらが見るのは `MNEMORA_LLM`/`MNEMORA_EMBEDDING` と
-    // 鍵の有無である）。⟹ **両者は食い違いうる。**【実測】鍵を置いたうえで
-    // `MNEMORA_LLM=deterministic` を明示すると、この行は `openai(理由: …実 API)` と出るが、
-    // 実際には擬似 provider で走る——**ADR 0068 が自分で踏んだと記録している状態である。**
-    // ⟹ だから「予定」と明示し、断定は `printProviderMode` の実測へ寄せる。
+    // この行が名乗るのは「どの source を選んだか」まで。`createProviders` はこの判定を読まず、`MNEMORA_LLM`/`MNEMORA_EMBEDDING` と
+    // 鍵の有無を見るので、両者は食い違いうる。だから「予定」と明示し、断定は `printProviderMode` の実測に寄せる。
     `[cassette] provider source の予定: ${decision.source}(理由: ${describeProviderSourceReason(decision)})`,
   );
   if (decision.source === "openai") {
@@ -320,14 +279,8 @@ function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
     );
   }
   const cassette = loadCassette(path);
-  // 🔴 **この行は「読んだ」までしか名乗らない（Issue #589）。**
-  // かつては `[cassette] 記録した応答を再生する` と書いていた——**だがこの時点では
-  // provider をまだ1つも組んでおらず、「再生する」は測っていない予告だった。**
-  // ⟹ 実際、`MNEMORA_LLM=deterministic` を明示した実行（ADR 0260 追記で正規の道に
-  // なった）では、カセットを読んでも使わない。そこで画面は「再生する」と名乗りながら
-  // 擬似 provider で走っていた——**Issue #577 が報告した欠陥そのものである。**
-  // ⟹ **名乗ってよいのは、ここで実際に確かめたこと（ファイルを読めた・中身が何件か）
-  // だけである。** 「何で走るか」は `printProviderMode` が構築後の実測から出す。
+  // この行は「読んだ」までしか名乗らない。ここでは provider をまだ組んでおらず、「再生する」は測っていない予告になる。
+  // `MNEMORA_LLM=deterministic` の明示ではカセットを読んでも使わない。名乗ってよいのは、実際に確かめたことだけ。
   console.log(`[cassette] カセットを読んだ: ${describeCassette(cassette)}`);
   console.log(
     "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること。",
@@ -337,16 +290,8 @@ function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
       "[provider] 行が構築後の実測から出す（ADR 0223 決定5 / Issue #589）。",
   );
   return {
-    // 🔴 **明示が在るときは倒さない（Issue #577 続き / ADR 0068）。**
-    // 当初この行は無条件に `"recorded"` を焼き込んでいた——**利用者が
-    // `MNEMORA_LLM=deterministic` を明示しても黙って上書きし、画面は
-    // 「記録した実 API 応答の再生」と名乗って走った。**⟹ ADR 0068 の
-    // 「明示した source と、実際に使われる provider が食い違う経路を作らない」に
-    // 反しており、#577 が塞いだ欠陥を向きだけ変えて作り直していた。
-    //
-    // ⚠ **`??` ではなく `||` を使う。**`providers.ts` の `parseModeOverride` が
-    // **空文字を「未指定」として扱う**ため、`??` だと `MNEMORA_LLM=""` が
-    // 「明示」扱いになり、あちらの規約とずれる。
+    // 明示が在るときは倒さない。無条件に `"recorded"` を焼き込むと、利用者の `MNEMORA_LLM=deterministic` を黙って上書きする（ADR 0068）。
+    // `??` ではなく `||` を使う。`parseModeOverride` は空文字を「未指定」として扱うので、`??` だと規約がずれる。
     env: {
       ...process.env,
       MNEMORA_LLM: process.env.MNEMORA_LLM || "recorded",
@@ -381,9 +326,7 @@ async function runChat(): Promise<void> {
     console.log("\n=== 経路B（mnemora）: observe() → tick() ===");
     const ingestDrain = await ingestConversation(handle.runtime, ctx, conversation);
     if (ingestDrain.totalFailed > 0) {
-      // ADR 0445: `correction-candidates`（下の `report.ingestDrain.totalFailed`）と同じ形——標準エラーへ 🔴 と、
-      // `process.exitCode = 1`。ただし `chat` は実演なので、以降の recall の表示（`omitted` の
-      // `not_indexed`・`embedding_provider_unavailable`）は止めずに出す（何が起きたかを画面で読めるように）。
+      // `chat` は実演なので、以降の recall の表示は止めずに出す（何が起きたかを画面で読めるように）。
       console.error(
         `\n🔴 embed に失敗した件がある(${String(ingestDrain.totalFailed)}件)。⛔ 以降の recall の結果は使えない。` +
           "（embedding provider の鍵・接続・上限を確かめること。失敗の理由は recall の omitted に出る）",
@@ -395,9 +338,6 @@ async function runChat(): Promise<void> {
         `（成功 ${String(ingestDrain.totalProcessed)} 件 / 失敗 ${String(ingestDrain.totalFailed)} 件）。`,
     );
 
-    // デモ本体は budget-demo.ts に切り出してある（Issue #306）——`__tests__` から
-    // 同じ2回の recall() 呼び出しを検査できるようにするためで、ここでの印字は
-    // これまでと1バイトも変えていない。
     const { withoutBudget, withBudget } = await runBudgetDemo(handle.runtime, ctx, conversation);
 
     console.log("\n=== recall()（budget 無し） ===");
@@ -405,11 +345,7 @@ async function runChat(): Promise<void> {
     console.log("呼び出し側がプロンプトへ積む文字列（recall() の返り値だけから組み立てる例）:");
     console.log(buildMnemoraPrompt(withoutBudget));
 
-    // ⭐ Issue #301 / ADR 0163: 実際にプロンプトへ積んだ Memory を、使用報告として
-    // observe({kind:'memory_usage'}) で mnemora へ伝え返す。これが無いと reinforce
-    // が一度も発火せず、使われた記憶と使われなかった記憶が同じ速さで遠ざかる。
-    // ここは recall() の測定・表示を終えたあとに呼ぶ——この呼び出しは
-    // withoutBudget の usage/omitted/index を一切変えない。
+    // recall() の測定・表示を終えたあとに使用報告する。この呼び出しは測定値を変えない。
     const usageReport = await reportMemoryUsage(handle.runtime, ctx, withoutBudget);
     console.log(
       usageReport.reported
@@ -443,11 +379,6 @@ async function runChat(): Promise<void> {
   }
 }
 
-/**
- * `tenantId`/`subjectId` のスコープを「動く例」で見せるデモ(`src/scope.ts`)。
- * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行——
- * `runScopeDemo`/`formatScopeDemo` は `compare.ts`/`retrieval-quality.ts` を import しない。
- */
 async function runScope(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
   printProviderMode(handle, null);
@@ -465,14 +396,6 @@ async function runScope(): Promise<void> {
   }
 }
 
-/**
- * `Runtime.getRecall` を「動く例」で見せるデモ(`src/recall-explain.ts`、Issue #312、
- * ADR 0161)。`recall()` の戻り値からは `recallId` だけを使い、別の呼び出しとして
- * `getRecall(ctx, recallId)` を呼んで、永続化された `recalls` 行から内訳を読み戻す。
- * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行——
- * `runRecallExplainDemo`/`formatRecallExplainDemo` は `compare.ts`/`retrieval-quality.ts`/
- * `probe-set.ts`/`scenario.ts`/`naive-path.ts` を import しない。
- */
 async function runExplain(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
   printProviderMode(handle, null);
@@ -491,12 +414,6 @@ async function runExplain(): Promise<void> {
   }
 }
 
-/**
- * `observe()` の `occurredAt` を「動く例」で見せるデモ(`src/backfill.ts`、ADR 0037)。
- * 同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせ、
- * **同じ問い合わせが取り込み方だけで別の答えを返す**ことを並べて見せる。
- * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行。
- */
 async function runBackfill(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
   printProviderMode(handle, null);
@@ -517,45 +434,17 @@ async function runBackfill(): Promise<void> {
 }
 
 /**
- * 訂正を含む会話シナリオを実演するデモ(`src/correction-demo.ts`、Issue #303 / Issue #369 (C))。
+ * 訂正を含む会話シナリオを実演するデモ（`src/correction-demo.ts`）。
  *
- * 北極星「間違いを正すと、古いほうが先に出てこなくなる」を、`findCorrectionCandidates`
- * （発見の段、ADR 0232）→ 指名の照合（選択の段）→`markContested`（ADR 0134）→`recall`
- * （両方隣接して出る）→`resolveContested`（ADR 0150）→`recall`（古いほうが消える）の
- * 一巡で実演する。`Runtime.markContested`/`resolveContested` は `examples/chat` から
- * これまで一度も呼ばれていなかった（Issue #303 本文）。`Runtime.findCorrectionCandidates`
- * も、ADR 0232 が着地させた時点では本番コードから呼ぶ経路が無かった
- * （[ADR 0235](../../../docs/decisions/0235-correction-demo-explicit-choice.md)
- * がその経路を立てる）。
+ * どの2件が対向し、どちらが勝つかは `correction-scenario.ts` が宣言する。訂正の相手は、この CLI が `CorrectionChoice` として
+ * 明示的に渡す。`findCorrectionCandidates` の候補の並びからは導かない。
  *
- * **どの2件が対向し、どちらが勝つかは `correction-scenario.ts` が構造として宣言する。**
- * **どの候補を訂正の相手として指名するかは、この CLI が `CorrectionChoice` として明示的に
- * 渡す**——`scenario.contestedPair.firstExternalId`（「記録済みの採用者の判断」）を渡すだけで、
- * `findCorrectionCandidates` が返した候補の並びからは一切導かない。このコマンドは判定を
- * せず、宣言をそのまま渡すだけ。北極星の主測定(`compare`/`retrieval`)には触れない、
- * 独立したデモ実行。
+ * 印字するだけでなく、`checkCorrectionDemo()`/`checkCorrectionOmission()` の全欄を assert し、1つでも false なら
+ * `process.exitCode = 1` にする。`correction-demo.postgres.test.ts` は `runCorrectionDemo()` を直接 import しており、
+ * この dispatch 行を経由しない。CI の `example-chat` ジョブから呼ぶことで、dispatch 行そのものが歯になる。
  *
- * **⚠ Issue #374: 印字するだけでなく、実際に assert する。** このコマンドの
- * dispatch（`main()` の `command === "correction"` 分岐）は、足すまで CI から
- * 一度も呼ばれていなかった——`correction-demo.postgres.test.ts` は
- * `runCorrectionDemo()` を直接 import しており、この dispatch 行を経由しない
- * （dispatch 行を消しても、あのテストは落ちない）。CI の `example-chat` ジョブに
- * `pnpm --filter @mnemora/example-chat run correction` を足すことで、初めて
- * dispatch 行そのものが CI の歯になる。そのうえで、`checkCorrectionDemo()`
- * と `checkCorrectionOmission()` の全欄を assert し、1つでも false なら
- * `process.exitCode = 1` にする——`formatCorrectionDemo()` の出力を画面に印字する
- * だけでは、段3（矛盾の解決と必須の同伴取得）が壊れても CI は緑のままだった。
- *
- * **provider 層は `deterministic` を使う（明示の override はしない）。**
- * `requireDatabaseUrl()` 以外に env を渡さないため、`OPENAI_API_KEY` が無い CI では
- * `selectProviderMode` が `deterministic` を選ぶ。`recorded` にしない理由:
- * `examples/chat/cassettes/` には `compare`/`retrieval` の記録しか無く、この
- * デモの発話は記録に無い入力になる（`RecordedLLMProvider`/`RecordedEmbeddingProvider`
- * は記録に無い入力を例外にする）。このデモが確かめる性質（mandatory companion
- * retrieval・resolveContested によるフィルタ）はスコアの質に依存しない構造的な
- * ものなので、`deterministic`（配線・契約の検査用、ADR 0051/`AGENTS.md` の4層表）
- * で足りる——北極星の主測定（`compare`/`retrieval`、`recorded` で走る）には
- * 触れない、という上の doc コメントの独立性とも整合する。
+ * provider 層は `deterministic` を使い、明示の override はしない。`recorded` にしないのは、`examples/chat/cassettes/` に
+ * このデモの発話の記録が無く、記録に無い入力は例外になるため。確かめる性質は構造的なので `deterministic` で足りる。
  */
 async function runCorrection(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
@@ -567,8 +456,7 @@ async function runCorrection(): Promise<void> {
         "指名の照合(選択) → markContested → recall → resolveContested → recall で" +
         "「間違いを正すと古いほうが出てこなくなる」ことを実演する。\n",
     );
-    // 🔴 ここで渡す choice は「記録済みの採用者の判断」であり、findCorrectionCandidates が
-    // 返す候補の並びからは一切導いていない(candidates[0]を機械的に採らないことの実演)。
+    // choice は「記録済みの採用者の判断」で、候補の並びからは導かない（candidates[0] を機械的に採らないことの実演）。
     const result = await runCorrectionDemo(handle.runtime, ctx, CORRECTION_SCENARIO, {
       chosenExternalId: CORRECTION_SCENARIO.contestedPair.firstExternalId,
     });
@@ -604,12 +492,7 @@ async function runCorrection(): Promise<void> {
   }
 }
 
-/**
- * `--decay-clock`（ADR 0165 決めたこと11）が指定されたときだけ、`compare`/
- * `archive-sweep-cost` の実行前に画面へ出す。**未指定なら1行も出ない**——
- * `decay-clock-options.ts`/`compare.ts`/`archive-sweep-cost.ts` が持つ
- * 「省略時は `writeDecayClock` を一度も呼ばない」契約と対になる案内。
- */
+/** `--decay-clock` が指定されたときだけ画面に出す。未指定なら1行も出さず、「省略時は `writeDecayClock` を呼ばない」契約と対になる。 */
 function printDecayClockNotice(decayClock: DecayClock | undefined): void {
   if (decayClock === undefined) {
     return;
@@ -622,9 +505,6 @@ function printDecayClockNotice(decayClock: DecayClock | undefined): void {
 
 async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
-  // `retrieval` と同じ規律（ADR 0051）: キーがあれば実 API、無ければ記録の再生。
-  // **どちらで走ったかは必ず画面に出す。**`resolveRecordedRun` が名乗りと env の
-  // 倒しを一緒に返すため、ここでは三項演算子で env を組み立て直す必要が無い。
   const plan = resolveRecordedRun("compare");
   const handle = await createExampleRuntime(databaseUrl, plan.env, plan.providerOptions);
   printProviderMode(handle, plan.plannedSource);
@@ -666,16 +546,6 @@ async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
           }),
     );
 
-    // ---------------------------------------------------------------------------
-    // 機械可読な出力口（Issue #242。`retrieval`/`time-term` と同じ層の env 規約）
-    //
-    // **`MNEMORA_COMPARE_JSON` が設定されたときだけ書く。未設定なら1バイトも
-    // 挙動を変えない**——既存の `MNEMORA_RETRIEVAL_JSON`/`MNEMORA_TIME_TERM_JSON` と
-    // 同じ規約（cli.ts 冒頭の各関数のコメント参照）。
-    //
-    // 組み立ては `compare-json.ts` の純関数 `buildCompareJson` に委ねる——
-    // ここでの役割は「どこに書くか」だけである。
-    // ---------------------------------------------------------------------------
     const compareJsonPath = process.env.MNEMORA_COMPARE_JSON;
     if (compareJsonPath) {
       const json = buildCompareJson({
@@ -694,20 +564,10 @@ async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
 }
 
 /**
- * Issue #340 フォローアップ（ADR 0314）: `recall-footprint` 較正の補助標本
- * （`CALIBRATION_SAMPLE_DESIGN`）を、`compare` と同じ recorded カセット
- * （`examples/chat/cassettes/compare.json`）に対して生成する。
+ * `recall-footprint` 較正の補助標本（`CALIBRATION_SAMPLE_DESIGN`）を、`compare` と同じ recorded カセットに対して生成する（ADR 0314）。
  *
- * ⚠ **`compare` の代わりではない。** `compare-baseline.json`（⭐門）の `rows`
- * には混ぜない——`examples/chat/README.md`
- * 「`recall-footprint-calibration-samples-baseline.json`」節・ADR 0314 §2 参照
- * （⚠ 当初の `.dev.json` は削除した。README の同節に経緯がある）。
- * この関数は CI の `example-chat` ジョブに、`compare` ステップと並ぶ独立のステップとして
- * 配線される（`.github/workflows/ci.yml`）。
- *
- * `resolveRecordedRun("compare")` を使う——`recall-footprint-calibration-samples.ts`
- * 冒頭の doc が実測済みのとおり、抽出プロンプトの鍵は発話内容だけで決まるため、
- * `compare` のカセットがそのまま再生に使える（新しいカセットを録る必要が無い）。
+ * `compare` の代わりではない。`compare-baseline.json`（⭐門）の `rows` には混ぜない。
+ * 抽出プロンプトの鍵は発話内容だけで決まるので、`compare` のカセットがそのまま再生に使える。
  */
 async function runRecallFootprintCalibrationSamples(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -735,7 +595,6 @@ async function runRecallFootprintCalibrationSamples(): Promise<void> {
           }),
     );
 
-    // `MNEMORA_COMPARE_JSON` と同じ規約——設定されているときだけ書く。
     const jsonPath = process.env.MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON;
     if (jsonPath) {
       const json = buildRecallFootprintCalibrationSamplesJson({
@@ -756,32 +615,12 @@ async function runRecallFootprintCalibrationSamples(): Promise<void> {
 }
 
 /**
- * PR 本文 (D)。arm A(擬似LLM+擬似embedding)・B(擬似LLM+本物embedding)・
- * C(本物LLM+本物embedding)の3通りを順に走らせ、probe set の順位を比較する。
+ * arm A（擬似LLM+擬似embedding）・B（擬似LLM+本物embedding）・C（本物LLM+本物embedding）を順に走らせ、probe set の順位を比較する。
  *
- * **arm ごとに別のテナントを使う**(PR 本文「実行時の規律」)——`runRetrievalQualityArm`
- * 自体は tenantId を受け取るだけで固定しないため、ここで3つのテナントを渡す。
+ * arm ごとに別のテナントを使い、`runToken` ごとに違うテナントにする（ADR 0068）。固定文字列だと、DB をリセットしないこの harness の
+ * 2回目の実行が冪等性に当たって新規 observation を作らず、`ingest` の欄が逆の結論を印字してしまう。
  *
- * ⚠ **`runToken` ごとに違うテナントになる（ADR 0068）。**かつては3つとも固定文字列
- * （`retrieval-quality-arm-a` 等）だった。DB をリセットしないこの harness では、
- * 2回目の実行が同じテナントへ同じ probe set を `observe()` し直すことになり、
- * externalId の冪等性に当たって新規 observation を1件も作らない——`ingest` の欄が
- * 「今回は測っていない」のに「1回で足りた」という**逆の結論**を印字してしまう
- * （`ArmIngestSummary`/`IngestMeasurement` の docstring 参照）。`newRunToken()`/
- * `buildArmTenantId()`（`retrieval-quality.ts`）を経由することで、通常利用では
- * 毎回新しいテナントを使い、2回目も1回目と同じ結論を出す。
- *
- * B・C は、実 API を選んだ実行では本物の OpenAI(embedding、C はさらに LLM も)を叩く。
- * **CI は実 API を叩かない**——CI の `retrieval-quality` ジョブは `recorded`(記録した実 API
- * 応答の再生)で走る(ADR 0088)。本物の API を叩く実行は、手動で叩いたときだけ。
- */
-/**
- * arm の定義（ADR 0051 で `source` を足した）。
- *
- * `source` は「本物の API を叩くか、記録した応答を再生するか」だけを切り替える。
- * **arm の意味（どちらが擬似で、どちらが本物由来か）は変えていない**——arm B は
- * 「擬似LLM＋本物由来の埋め込み」のままである。記録は本物の応答そのものなので、
- * ラベルの意味は保たれる。
+ * CI は実 API を叩かず、`recorded` で走る（ADR 0088）。
  */
 function buildArmSpecs(
   source: "openai" | "recorded",
@@ -791,10 +630,7 @@ function buildArmSpecs(
   tenantId: string;
   llmOverride: ProviderMode;
   embeddingOverride: ProviderMode;
-  /**
-   * この arm が実 API に触れるか。`record` は**この欄で**対象を選ぶ——
-   * tenantId の文字列一致で除外すると、arm の id を変えた瞬間に静かに壊れる。
-   */
+  /** この arm が実 API に触れるか。`record` はこの欄で対象を選ぶ。tenantId の文字列一致で除外すると、arm の id を変えた瞬間に静かに壊れる。 */
   touchesApi: boolean;
 }[] {
   return [
@@ -825,23 +661,13 @@ function buildArmSpecs(
 async function runRetrieval(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
 
-  // **キーがあれば本物、無ければ記録の再生。どちらで走ったかは必ず画面に出す**
-  // （黙って別のものへ倒れない、という既存の規律の適用。ADR 0051）。
-  // 判定は `compare` と同じ `resolveRecordedRun` に寄せてある（ADR 0052 / 0068 ③）。
   const plan = resolveRecordedRun("retrieval");
-  // **実行ごとに新しい tenantId を使う（ADR 0068）。**通常利用で2回続けて走らせても、
-  // 2回目が DB に残った前回の記憶を「取り込み済み」として素通りし、`ingest` の欄が
-  // 逆の結論を印字しないようにするための唯一の直し方——冪等性(externalId の重複排除)
-  // 自体は製品として正しい挙動であり、崩さない。
+  // 実行ごとに新しい tenantId を使う（ADR 0068）。2回目が前回の記憶を「取り込み済み」として素通りし、`ingest` の欄が逆の結論を
+  // 印字しないようにするため。冪等性（externalId の重複排除）自体は正しい挙動なので崩さない。
   const runToken = newRunToken();
   const armSpecs = buildArmSpecs(plan.cassette ? "recorded" : "openai", runToken);
 
-  // **`MNEMORA_BENCH_CHANNELS` を選べるようにする（ADR 0148、Issue #179）。**
-  // 未指定なら `undefined`——`runRetrievalQualityArm` は `channels` を渡さず、
-  // `packages/core` の既定 `["ann"]` のまま 1 バイトも挙動が変わらない。
-  // 明示的に `MNEMORA_BENCH_CHANNELS=ann,lexical` 等を渡した呼び出しだけが、
-  // `examples/chat` の `Runtime` に配線済みの `LexicalStore`（`runtime-factory.ts`）
-  // を実際に通る構成へ切り替わる。
+  // `MNEMORA_BENCH_CHANNELS` 未指定なら `undefined` のまま渡し、`packages/core` の既定 `["ann"]` の挙動を変えない（ADR 0148）。
   const benchChannels = parseBenchChannels(process.env.MNEMORA_BENCH_CHANNELS);
   if (benchChannels !== undefined) {
     console.log(
@@ -885,17 +711,6 @@ async function runRetrieval(): Promise<void> {
   console.log("\n=== arm ごとのまとめ ===");
   console.log(formatArmSummaryTable(reports));
 
-  // ---------------------------------------------------------------------------
-  // 機械可読な出力口（PR「retrieval を CI に載せる」）
-  //
-  // **`MNEMORA_RETRIEVAL_JSON` が設定されたときだけ書く。未設定なら1バイトも
-  // 挙動を変えない**——既存の `MNEMORA_PROVIDER_SOURCE`/`MNEMORA_LLM`/`MNEMORA_EMBEDDING`
-  // と同じ層の env 規約（cli.ts 冒頭の各関数のコメント参照）。
-  //
-  // 組み立ては `retrieval-json.ts` の純関数 `buildRetrievalQualityJson` に委ねる——
-  // ここでの役割は「どこに書くか」だけであり、「何を書くか」は DB を要求せずに
-  // 検査できる形で別ファイルに置く。
-  // ---------------------------------------------------------------------------
   const retrievalJsonPath = process.env.MNEMORA_RETRIEVAL_JSON;
   if (retrievalJsonPath) {
     const json = buildRetrievalQualityJson({
@@ -913,29 +728,15 @@ async function runRetrieval(): Promise<void> {
 /**
  * 実 API の応答を記録してカセットに書き出す（ADR 0051）。
  *
- * **再生する当のもの（`retrieval` の arm B・C）をそのまま走らせて録る。**
- * probe set を読んで「必要そうな入力」を列挙する形は採らない——列挙が漏れると、
- * 再生時に「記録に無い」で落ちる。実行経路そのものが唯一の正しい入力一覧である。
- *
- * **arm B と C の両方を録る必要がある。**arm B は擬似 LLM が作った digest を、
- * arm C は本物の LLM が書き換えた digest を埋め込む——**埋め込みへの入力が arm 間で違う**。
- * arm A は API を一切叩かないため、記録の対象にならない。
- */
-/**
- * `retrieval` の arm B・C を実 API で走らせて記録する（ADR 0051）。
- *
- * arm A は API を一切叩かないため記録の対象にならない。arm B と C の**両方**が要る——
- * arm B は擬似 LLM が作った digest を、arm C は本物の LLM が書き換えた digest を
- * 埋め込むので、**埋め込みへの入力が arm 間で違う。**
+ * 再生する当のもの（`retrieval` の arm B・C）をそのまま走らせて録る。probe set から「必要そうな入力」を列挙する形は採らない。
+ * 列挙が漏れると再生時に「記録に無い」で落ちる。arm B と C は埋め込みへの入力が違うので両方録る。arm A は API を叩かない。
  */
 async function recordRetrieval(
   databaseUrl: string,
   recorder: CassetteRecorder,
   runId: number,
 ): Promise<void> {
-  // **id の文字列一致ではなく、宣言された欄で選ぶ。**
-  // `runToken` には `runId` をそのまま使う——直後で `-record-${runId}` を
-  // さらに足すため衝突の心配は無く、記録に使ったテナントを runId から追跡できる。
+  // id の文字列一致ではなく、宣言された欄で選ぶ。
   const armSpecs = buildArmSpecs("openai", String(runId)).filter((a) => a.touchesApi);
   for (const arm of armSpecs) {
     console.log(`\n########## 記録中: arm ${arm.armLabel} ##########`);
@@ -963,11 +764,7 @@ async function recordRetrieval(
 
 /**
  * `compare` の全会話長を実 API で走らせて記録する（ADR 0052）。
- *
- * **`retrieval` より1桁高い。**`DEFAULT_COMPARE_SEQUENCE` の合計 = Σ(fillerPairs+1) 回の
- * LLM 呼び出しが要る（回数・所要時間・費用の見積もりは ADR 0019 §3、実測は同 §7.8。
- * 数はここに写さない。⚠ §7.8 は見積もりの費用を外していた）。
- * だからこそ `record` は対象を明示させる（`parseCassetteTarget`）。
+ * `retrieval` より1桁高い費用がかかる（見積もりは ADR 0019 §3、数はここに写さない）。だから `record` は対象を明示させる。
  */
 async function recordCompare(
   databaseUrl: string,
@@ -987,8 +784,6 @@ async function recordCompare(
       tenantPrefix: `example-compare-record-${runId}`,
       memoryStore: handle.memoryStore,
     });
-    // 記録しながら実測もできてしまうので、その場で出す——**この表が
-    // 「本物の provider で走らせた compare」そのものである。**
     console.log(`\n${formatComparisonTable(rows)}`);
     console.log(`\n${formatRecallQualityTable(rows)}`);
     if (handle.usageMeter) {
@@ -1000,16 +795,8 @@ async function recordCompare(
 }
 
 /**
- * 「種カセット」（Issue #691 続き）を環境変数 `MNEMORA_RECORD_SEED_CASSETTE` から読む。
- *
- * **未設定なら `undefined`**——`recordAnswer`/`recordTimeWeighting` はその場合
- * `providerOptions.seedCassette` を渡さず、既存の挙動を1バイトも変えない
- * （`providers.ts` の `CreateProvidersOptions.seedCassette` docstring参照）。
- *
- * **何のためか**: 録り直すたびに抽出（`observe()`）が実 API でやり直され、記憶集合が
- * 変わりうる。旧カセット（例: `examples/chat/cassettes/answer.json`）を種として渡すと、
- * 同じ入力には記録済みの値を返す——記憶集合を旧カセットへ揃え、実 API を呼ぶ回数も
- * 減らせる。`loadCassette` と同じ検査（形式版・必須欄）にそのまま通す。
+ * 「種カセット」を環境変数 `MNEMORA_RECORD_SEED_CASSETTE` から読む。未設定なら `undefined` で、既存の挙動を変えない。
+ * 録り直すたびに抽出が実 API でやり直されて記憶集合が変わりうるので、旧カセットを種に渡して揃え、実 API の呼び出し回数も減らす。
  */
 function loadRecordSeedCassette(): Cassette | undefined {
   const path = process.env.MNEMORA_RECORD_SEED_CASSETTE;
@@ -1021,18 +808,10 @@ function loadRecordSeedCassette(): Cassette | undefined {
 }
 
 /**
- * `answer` を実 API で走らせて記録する（Issue #506 / 親 #498。ADR 0051）。
+ * `answer` を実 API で走らせて記録する（ADR 0051）。再生する当のもの（`runAnswer` と同じ実行経路）をそのまま走らせて録る。
  *
- * **再生する当のもの（`runAnswer` と同じ実行経路）をそのまま走らせて録る。**
- * 「必要そうな入力を列挙する」形は採らない——`runRecord` docstring と同じ規律。
- * ここでは `createAnswerBenchRuntime` に `MNEMORA_LLM=openai`/`MNEMORA_EMBEDDING=openai`
- * を明示で渡し、`ANSWER_CASE_SET_DEV` + `ANSWER_CASE_SET_EVAL` の全ケースを
- * `runAnswerBench` に通す（judge の呼び出しも同じ経路で記録される）。
- *
- * ⚠ **tenantPrefix に `runId` を含め、毎回新しいテナントにする。** `observe()` は
- * `externalId` で重複排除するため、既に取り込み済みのテナントで録ると抽出も埋め込みも
- * 呼ばれず「空のカセット」で `CassetteRecorder.toCassette()` が落ちる（ADR 0051
- * 「引き受けた負債4」——`recordRetrieval`/`recordCompare` と同じ既知の事故を踏まない）。
+ * tenantPrefix に `runId` を含め、毎回新しいテナントにする。`observe()` は `externalId` で重複排除するため、
+ * 取り込み済みのテナントで録ると抽出も埋め込みも呼ばれず、空のカセットで `CassetteRecorder.toCassette()` が落ちる。
  */
 async function recordAnswer(
   databaseUrl: string,
@@ -1060,18 +839,14 @@ async function recordAnswer(
       `answer-record-${runId}`,
     );
 
-    // 記録しながら実測もできてしまうので、その場で出す（`recordCompare` と同じ規律）。
     console.log(`\n${formatAnswerTable(results, handle.llmMode)}`);
     console.log("\n--- 追加費用(別ブロック。⛔ 下の入力量の差には含めない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
     console.log(formatAnswerContentPreservation(results));
 
-    // ⭐ Issue #498 完了条件4・「回答評価」側の陽性対照（ADR 0236 が未達のまま残した
-    // 半分）を、この全置換の記録の一部として毎回追記する——`recordAnswer` は毎回空の
-    // `CassetteRecorder` から始まる全置換なので、この呼び出しをここに置かないと、
-    // 次に誰かが素の `record answer` を走らせた瞬間にこの陽性対照の2エントリだけが
-    // 新しいカセットから消える（`answer-retention-mutation.ts` の docstring参照）。
+    // Issue #498 完了条件4の陽性対照を、この全置換の記録の一部として毎回追記する。`recordAnswer` は毎回空の `CassetteRecorder` から
+    // 始まるので、ここに置かないと、次の素の `record answer` で陽性対照の2エントリが新しいカセットから消える。
     const retentionMutation = await recordRetentionMutationPositiveControl(
       handle.runtime,
       handle.llmProvider,
@@ -1092,15 +867,10 @@ async function recordAnswer(
     if (handle.usageMeter) {
       console.log(`\n${handle.usageMeter.formatReport()}`);
     }
-    // usage-meter（実 API の実測）とは別枠で出す（マネージャー指示）。
     if (handle.readSeedUsage) {
       console.log(`\n${formatSeedUsageReport(handle.readSeedUsage())}`);
     }
 
-    // ⭐ `record answer` でも `MNEMORA_ANSWER_JSON` が設定されていれば書き出す
-    // ——記録と同時に実測結果を機械可読な形でも取りたい、という要望への対応。
-    // `llmMode`/`embeddingMode` はここで実際に走った値（`handle.llmMode`/`handle.embeddingMode`、
-    // 常に `"openai"`）を使う。
     const jsonPath = process.env.MNEMORA_ANSWER_JSON;
     if (jsonPath) {
       const json = buildAnswerJson({
@@ -1119,14 +889,9 @@ async function recordAnswer(
 }
 
 /**
- * `answer-time-weighting` の記録（Issue #690 / PR #697）。`recordAnswer` と同じ規律——
- * 毎回新しい tenantId（`runId` を含める）で走らせる。
- *
- * ⚠ **trial は1回だけ記録する。** カセットは「プロンプトのハッシュ→応答」の連想配列
- * なので、同じ質問・同じ記憶状態に対する複数 trial はどのみち同じ鍵に畳まれる
- * （`time-weighting-bench.ts` の docstring・マネージャー指示「trial 間で
- * プロンプトが同じなら LLM 値もキャッシュ再生で同じになる」）——記録時に trial を
- * 増やしても記録される内容は増えない。
+ * `answer-time-weighting` の記録。`recordAnswer` と同じく毎回新しい tenantId で走らせる。
+ * trial は1回だけ記録する。カセットは「プロンプトのハッシュ→応答」の連想配列なので、同じ質問・同じ記憶状態の複数 trial は
+ * 同じ鍵に畳まれ、増やしても記録される内容は増えない。
  */
 async function recordTimeWeighting(
   databaseUrl: string,
@@ -1134,11 +899,8 @@ async function recordTimeWeighting(
   runId: number,
 ): Promise<void> {
   console.log("\n########## 記録中: answer-time-weighting ##########");
-  // 🔴 マネージャー決定（段3b）: この記録は temperature=0 で固定する——段3a の
-  // 切り分け（`bench-results/STAGE3A-NOTES.txt`）で、temperature 未指定（既定1.0）は
-  // 同じ入力でも gradeAnswer の正誤が run ごとに揺れることを実測した。カセットは
-  // 「記録した時点の応答」を固定して再生するものなので、揺れの少ない temperature=0 で
-  // 録ることで、再生（CI・cassette-coverage）の判定が安定する。
+  // この記録は temperature=0 で固定する。temperature 未指定（既定1.0）は、同じ入力でも `gradeAnswer` の正誤が run ごとに揺れることを
+  // 実測した（`bench-results/STAGE3A-NOTES.txt`）。カセットは記録時点の応答を固定して再生するので、揺れの少ない値で録る。
   const seedCassette = loadRecordSeedCassette();
   const handle = await createTimeWeightingBenchRuntime(
     databaseUrl,
@@ -1164,7 +926,6 @@ async function recordTimeWeighting(
     if (handle.usageMeter) {
       console.log(`\n${handle.usageMeter.formatReport()}`);
     }
-    // usage-meter（実 API の実測）とは別枠で出す（マネージャー指示）。
     if (handle.readSeedUsage) {
       console.log(`\n${formatSeedUsageReport(handle.readSeedUsage())}`);
     }
@@ -1173,13 +934,6 @@ async function recordTimeWeighting(
   }
 }
 
-/**
- * 実 API の応答を記録してカセットに書き出す（ADR 0051 / 0052）。
- *
- * **再生する当のものをそのまま走らせて録る。**probe set や会話生成を読んで
- * 「必要そうな入力」を列挙する形は採らない——列挙が漏れると再生時に落ちる。
- * 実行経路そのものが唯一の正しい入力一覧である。
- */
 async function runRecord(target: CassetteTarget): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   if (!process.env.OPENAI_API_KEY) {
@@ -1190,11 +944,8 @@ async function runRecord(target: CassetteTarget): Promise<void> {
 
   const recorder = new CassetteRecorder();
 
-  // ⚠ **記録は必ず新しいテナントで走らせる。**`observe()` は `externalId` で
-  // 重複排除するため、既に取り込み済みのテナントで走らせると抽出も埋め込みも呼ばれず、
-  // 「1件も記録されていない」カセットができる（実際にこれで一度落ちた）。
-  // 記録に必要なのはプロンプトと入力テキストの対応だけであり、それは probe set /
-  // 会話生成関数から決まってテナントに依らない。
+  // 記録は必ず新しいテナントで走らせる。`observe()` は `externalId` で重複排除するため、取り込み済みのテナントでは
+  // 抽出も埋め込みも呼ばれず、1件も記録されていないカセットができる。
   const runId = Date.now();
 
   if (target === "retrieval") {
@@ -1218,7 +969,6 @@ async function runRecord(target: CassetteTarget): Promise<void> {
   );
 }
 
-/** コサイン類似度。`verify` が記録と実 API のベクトルを比べるためだけに使う。 */
 function cosine(a: readonly number[], b: readonly number[]): number {
   let dot = 0;
   let na = 0;
@@ -1235,33 +985,14 @@ function cosine(a: readonly number[], b: readonly number[]): number {
 }
 
 /**
- * 記録が実 API から乖離していないかを測る（ADR 0051 の「覆る条件」を、測れる形にしたもの）。
+ * 記録が実 API から乖離していないかを測る（ADR 0051 の「覆る条件」を測れる形にしたもの）。
  *
- * **埋め込みだけを照合する。**`gpt-4o-mini` の応答は同じ入力でも揺れるため、差が出ても
- * 「モデルが変わった」とは言えない——**照合できないものを照合したふりをしない**ので、
- * LLM 側は件数の確認だけに留める。
- *
- * ⚠ **埋め込みも、ビット単位では再現しない（本 PR の実測）。**同じ日・同じモデル
- * （`text-embedding-3-small` / 256次元）に同じ152件を投げ直したところ、
- * **20件が記録と完全一致しなかった**。最小コサイン類似度は **0.998647**。
- * 当初「埋め込みは決定的だから差が出たらモデルが変わった証拠」として `1e-6` を
- * 閾値に置いていたが、それは**この実測で否定された**——実 API 側に揺らぎがある。
- *
- * そこで閾値は `DRIFT_COSINE_THRESHOLD` に置き、**「完全一致したか」と「乖離したか」を
- * 別々に数える。**前者はほぼ常に一部が外れる（それが普通）。後者だけが記録し直す理由になる。
- */
-/**
- * これを下回ったら「記録し直すべき乖離」とみなす境。
- *
- * **根拠**: 上記の実測で、同一モデルの揺らぎは最小 0.998647 に収まった（152件、1日、1回）。
- * モデルそのものが替われば、同じ文のベクトルはこれよりはるかに大きく動くと考えられる。
- * **ただし「モデルが替わったときにどこまで下がるか」は測っていない**——この 0.99 は
- * 揺らぎの実測の下に置いた線であって、モデル交代を実際に検出できると確かめた値ではない。
+ * 埋め込みだけを照合し、LLM 側は件数の確認に留める。LLM の応答は同じ入力でも揺れるため、照合できないものを照合したふりをしない。
+ * 埋め込みもビット単位では再現しない（同じ日・同じモデルで20/152件が不一致、最小コサイン類似度 0.998647）。
+ * そのため「完全一致したか」と「乖離したか」を別々に数える。前者は一部が外れるのが普通で、後者だけが記録し直す理由になる。
  */
 const DRIFT_COSINE_THRESHOLD = 0.99;
 async function runVerify(target: CassetteTarget): Promise<void> {
-  // 前提が足りないだけなので、例外（stack trace）にせず1行で案内して exit 1 で終わる
-  // （未知のサブコマンドや `answer-trials-compare` の引数不足と同じ形）。
   if (!process.env.OPENAI_API_KEY) {
     console.error("verify は実 API と記録を突き合わせる。OPENAI_API_KEY を設定すること。");
     process.exitCode = 1;
@@ -1286,8 +1017,6 @@ async function runVerify(target: CassetteTarget): Promise<void> {
   let drifted = 0;
   entries.forEach((entry, i) => {
     const similarity = cosine(entry.vector, fresh[i] ?? []);
-    // 「完全一致したか」と「乖離したか」は別の問い。前者が欠けるのは普通のこと
-    // （実 API 側の揺らぎ）であり、後者だけが記録し直す理由になる。
     if (similarity >= 1 - Number.EPSILON) {
       exact += 1;
     }
@@ -1320,23 +1049,15 @@ async function runVerify(target: CassetteTarget): Promise<void> {
 }
 
 /**
- * `freshness`/`decay` を意味的類似度から分離して測る arm(PR 本文)。
+ * `freshness`/`decay` を意味的類似度から分離して測る arm。
  *
- * **provider は既定で `deterministic` に倒す。**理由: ペアの2件は本文が厳密に同一なので、
- * `DeterministicEmbeddingProvider` を使う限り `similarity` は構成上定数になる
- * (`time-term-probe-set.ts` の docstring 参照)。この測定は provider 層(擬似か本物か)に
- * 依らない——⟹ カセットの再録も `OPENAI_API_KEY` も要らない。
- * `MNEMORA_LLM`/`MNEMORA_EMBEDDING` が明示されていればそれを尊重する(既存の
- * `retrieval`/`compare` と同じ、上書き優先の規約)。
+ * provider は既定で `deterministic` に倒す。ペアの2件は本文が同一なので、`similarity` は構成上定数になり、
+ * この測定は provider 層に依らない。カセットの再録も `OPENAI_API_KEY` も要らない。
+ * `MNEMORA_LLM`/`MNEMORA_EMBEDDING` が明示されていればそれを尊重する。
+ * ただし「想起の質」は主張しない。測るのは時間項が順位を決めているかだけ（AGENTS.md）。
  *
- * ⚠ **ただし「想起の質」は主張しない**(AGENTS.md「`deterministic` で測った想起の質は、
- * 性能について何も言っていない」)。ここで測るのは「時間項が順位を決めているか」だけであり、
- * 「正しい記憶を引けているか」ではない。
- *
- * **`MutableClock` を注入する。**`decay-*` probe が `recordedAt` を過去へ振るには、
- * `createExampleRuntime` に渡した `Clock` と `runTimeTermArm` に渡す `clock` が
- * **同じインスタンス**でなければならない(`time-term-arm.ts` の
- * `RunTimeTermArmOptions.clock` の docstring 参照)。
+ * `MutableClock` を注入する。`decay-*` probe が `recordedAt` を過去へ振るには、`createExampleRuntime` と `runTimeTermArm` に
+ * 同じ `Clock` インスタンスを渡す必要がある。
  */
 async function runTimeTerm(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -1370,9 +1091,6 @@ async function runTimeTerm(): Promise<void> {
     });
     console.log(formatTimeTermReport(report));
 
-    // Issue #217: `MNEMORA_TIME_TERM_JSON` が設定されているときだけ機械可読な結果を書く
-    // （`retrieval`/`identifier-probes`/`consolidation-cost` と同じ、未設定なら挙動を
-    // 変えない規約。ADR 0088「決めたこと」2番）。
     const jsonPath = process.env.MNEMORA_TIME_TERM_JSON;
     if (jsonPath) {
       const json = buildTimeTermJson({ report, measuredAt, commit });
@@ -1385,15 +1103,8 @@ async function runTimeTerm(): Promise<void> {
 }
 
 /**
- * `validAt` ゲート（Issue #280、Issue #202 第2弾）を測る arm(PR 本文)。
- *
- * **provider は既定で `deterministic` に倒す**（`runTimeTerm()` と同じ理由——ペアの
- * 本文が厳密に同一なので `similarity` は構成上定数になり、この測定は provider 層に
- * 依らない。カセットの再録も `OPENAI_API_KEY` も要らない）。
- *
- * **`MutableClock` は要らない**——動かす項は `recordedAt`（壁時計）ではなく
- * `validFrom`/`validUntil`（`observe()` に明示的に渡す `Date`）なので、`time-term` と
- * 違って `Clock` を注入し直す必要がない。
+ * `validAt` ゲートを測る arm。provider は既定で `deterministic` に倒す（`runTimeTerm()` と同じ理由）。
+ * 動かす項は `validFrom`/`validUntil` で `recordedAt` ではないので、`MutableClock` は要らない。
  */
 async function runValidity(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -1420,8 +1131,6 @@ async function runValidity(): Promise<void> {
     });
     console.log(formatValidityReport(report));
 
-    // `MNEMORA_VALIDITY_JSON` が設定されているときだけ機械可読な結果を書く
-    // （`time-term`/`retrieval` と同じ、未設定なら挙動を変えない規約。ADR 0088「決めたこと」2番）。
     const jsonPath = process.env.MNEMORA_VALIDITY_JSON;
     if (jsonPath) {
       const json = buildValidityJson({ report, measuredAt, commit });
@@ -1434,39 +1143,15 @@ async function runValidity(): Promise<void> {
 }
 
 /**
- * Issue #109(#106 由来): 当時の `retrieval` の probe は**すべて日本語の query**で、
- * ASCII の識別子・固有名詞を含む query が1件も無かった——#106 の報告者の用途
- * (人名・チャンネル名・社内システム名・案件コード・チケット番号)を、
- * 既存ベンチは1件も測っていなかった。
+ * 識別子・固有名詞を含む query の想起を、擬似LLM + ローカル埋め込み（`@mnemora/local-embedding`、鍵もカセットも要らない）で測る。
+ * LLM 層は `retrieval` の arm B と同一で、差は埋め込みだけ。
  *
- * **擬似LLM + ローカル埋め込み(`@mnemora/local-embedding`、鍵もカセットも要らない)。**
- * LLM 層は `retrieval` の arm B(擬似LLM+本物の埋め込み)と同一
- * (`DeterministicLLMProvider`)——差は埋め込みだけであり、
- * `@mnemora/local-embedding` の README が「確かめていないこと」として名指しした
- * 「`@mnemora/openai` と比べて想起の質がどうなるか」を、ここで初めて測る。
+ * 群を別々に集計し、混ぜた単一の MRR を主たる数字にしない（件数は `examples/chat/README.md` と各 probe set が持つ。ここには写さない）。
+ * 群2（sparse）は消さない。当初の識別子 probe が全件 hit@1 だった実測自体が発見であり、dense は「難しくして失敗させる」ためではなく
+ * 「同じ書式の識別子が多数居る状況を表す」ために足した。
  *
- * **群を別々に集計する(群1〜5の5群。内訳・件数は `examples/chat/README.md` の
- * 「5群を別々に集計する」節と各 probe set が持つ。ここには件数を写さない)。**
- * ⛔ 混ぜた単一の MRR を主たる数字にしない。
- *   1. 既存の日本語意味 probe(`./probe-set.js`、変更していない)を、この arm の
- *      embedding(local)で走らせた結果——arm B(embedding=recorded、実質 openai 由来)
- *      との直接比較になる。
- *   2. ASCII 識別子 probe(`./identifier-probe-set.js`)・**識別子が薄い haystack**
- *      (`sparse`。識別子を1件も含まない既定 haystack)。
- *   3. 同じ識別子 probe を、**識別子が密な haystack**(`dense`。probe と同じ書式ファミリーの
- *      識別子を含む)で走らせた結果——マネージャー指示(#106 の逐語「同じ形式の
- *      別の識別子が近傍に来て埋もれる」の再点検)。
- *   4・5. 日本語の固有名詞 probe(`./japanese-name-probe-set.js`)の sparse / dense。
- *      後から足した群(上の3群はこの2群より先に在った)。
- *
- * ⛔ **群2(sparse)は消さない。**当初の識別子 probe が全件 hit@1 だった実測(`identifier-probe-
- * baseline.json`)自体が発見であり、群3(dense)は「難しくして失敗させる」ためではなく
- * 「#106 が報告した状況(同じ書式の識別子が"多数"居る)を表す」ために足す
- * (`./identifier-probe-set.js` の `DENSE_IDENTIFIER_FAMILIES` の docstring 参照)。
- *
- * **`warmup()` を明示的に呼び、失敗を区別する。**「HF から取得できなかった」が
- * 「想起の質が下がった」に見えてはならない(オーナー代理の懸念)——`warmup()` が
- * 失敗したら、メトリクスを1つも出さずに打ち切る(`local-embedding-warmup.ts` 参照)。
+ * `warmup()` を明示的に呼び、失敗を区別する。「HF から取得できなかった」が「想起の質が下がった」に見えてはならない。
+ * 失敗したらメトリクスを1つも出さずに打ち切る。
  */
 async function runIdentifierProbes(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -1518,11 +1203,8 @@ async function runIdentifierProbes(): Promise<void> {
       `\n=== 群1: 既存の日本語意味 probe ${PROBES.length}件(./probe-set.js、変更していない) ===`,
     );
     const japaneseReport = await runRetrievalQualityArm({
-      // ⚠ **`haystack=sparse` を label に含める**（他の2群と同じ書式にする）。
-      // この群は識別子密度という軸を持たないが、JSON の `haystackKind` は
-      // `"sparse"` を名乗り（`identifier-json.ts`）、Job Summary の表にも
-      // `sparse` の列が出る。**label だけがその条件を落としていると、
-      // 「条件を落とした数字」を label の側で作ることになる。**
+      // `haystack=sparse` を label に含める。JSON の `haystackKind` は `"sparse"` を名乗るので、label だけが条件を落とすと、
+      // 条件を落とした数字を label の側で作ることになる。
       armLabel: `identifier-probes/japanese(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=sparse)`,
       tenantId: `identifier-probes-jp-${runToken}`,
       runtime: handle.runtime,
@@ -1644,12 +1326,8 @@ async function runIdentifierProbes(): Promise<void> {
     await handle.close();
   }
 
-  // Issue #109 後半——OpenAI 実埋め込み(recorded provider でカセットを再生。鍵もネットワーク
-  // も要らない)の4群(identifiersSparse/identifiersDense/japaneseNamesSparse/
-  // japaneseNamesDense)を追加で走らせる。⛔ 門ではない——このブロックが例外を投げても、
-  // 上の local embedding の5群の測定・書き出しは既に終わっている(この行より前)。
-  // `MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON` が指定されていないときは何もしない
-  // (既存の呼び出し——CI 含む——を1つも変えない)。
+  // OpenAI 実埋め込みの4群を追加で走らせる。門ではない。このブロックが例外を投げても、上の local embedding の測定・書き出しは終わっている。
+  // `MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON` が指定されていないときは何もしない。
   const openaiJsonPath = process.env.MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON;
   if (openaiJsonPath) {
     try {
@@ -1665,11 +1343,8 @@ async function runIdentifierProbes(): Promise<void> {
 }
 
 /**
- * Issue #109 後半——識別子・日本語固有名詞 probe の4群を、OpenAI 実埋め込み
- * (`examples/chat/cassettes/identifier-probes.openai.json` の再生)で測る。
- *
- * ⛔ **門ではない。**呼び出し側(`runIdentifierProbes`)がこの関数の例外を握って
- * ログに出すだけで、既存の local embedding 測定・ジョブ自体には影響させない。
+ * 識別子・日本語固有名詞 probe の4群を、OpenAI 実埋め込み（カセットの再生）で測る。
+ * 門ではない。呼び出し側が例外を握ってログに出すだけで、既存の local embedding 測定には影響させない。
  */
 async function runIdentifierProbesOpenAiArm(
   databaseUrl: string,
@@ -1724,25 +1399,11 @@ async function runIdentifierProbesOpenAiArm(
 }
 
 /**
- * `numeral-token-probes` サブコマンド(ADR 0135、Issue #109)。
+ * `numeral-token-probes` サブコマンド（ADR 0135）。`identifier-probes` が確立した形（擬似LLM + `@mnemora/local-embedding`、
+ * 鍵・カセット不要、`warmup()` で失敗を区別、sparse/dense を別々に集計、門にしない）を踏襲する。
+ * 別の集合・別の JSON・別の CI ジョブで、`identifier-probes` 自体には触れない。
  *
- * 「単独トークンの数詞・記号インデックス」(文字種×共有前置長の行列)を弁別軸とする
- * 第4の probe 集合(`./numeral-token-probe-set.js`)を測る——`identifier-probes` が
- * 確立した形(擬似LLM + `@mnemora/local-embedding`、鍵・カセット不要、`warmup()` を
- * 明示的に呼んで失敗を区別、sparse/dense の2 haystack 条件を別々に集計、⛔ 門にしない)を
- * そのまま踏襲する。**別の集合・別の arm 実行・別の JSON・別の CI ジョブ**であり、
- * `identifier-probes` サブコマンド自体には1文字も触れていない
- * (ADR 0135 §8-3「CLI サブコマンド・CI ジョブ・基準値ファイル・summary script の配線」)。
- *
- * **2群を別々に集計する。**⛔ 混ぜた単一の MRR を主たる数字にしない
- * (`identifier-probes` と同じ規律)。
- *   1. sparse: 数詞・記号索引を1件も含まない既定 haystack。
- *   2. dense: 同じセルの索引が密な haystack(件数は `numeral-token-probe-set.ts` が持つ)。
- *
- * **margin(ADR 0135 §5.5)を、hit@1/hit@10 と併記する。**`runIdentifierProbeArm` が
- * 共有の arm として計算する(`./identifier-arm.js` の `marginStats`)——この集合の
- * ために `identifier-arm.ts` へ足した機能だが、既存の識別子・日本語固有名詞集合の
- * 挙動は変えていない(既存の歯は変異試験で緑のままであることを別途確認済み)。
+ * 混ぜた単一の MRR を主たる数字にしない。margin（ADR 0135 §5.5）は hit@1/hit@10 と併記する。
  */
 async function runNumeralTokenProbes(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -1853,7 +1514,6 @@ async function runNumeralTokenProbes(): Promise<void> {
     await handle.close();
   }
 
-  // Issue #109 後半——`identifier-probes` の同名ブロックと同じ規律。⛔ 門ではない。
   const openaiJsonPath = process.env.MNEMORA_NUMERAL_TOKEN_OPENAI_JSON;
   if (openaiJsonPath) {
     try {
@@ -1868,11 +1528,6 @@ async function runNumeralTokenProbes(): Promise<void> {
   }
 }
 
-/**
- * Issue #109 後半——数詞・記号索引 probe の2群を、OpenAI 実埋め込み
- * (`examples/chat/cassettes/numeral-token-probes.openai.json` の再生)で測る。
- * ⛔ 門ではない(`runIdentifierProbesOpenAiArm` と同じ規律)。
- */
 async function runNumeralTokenProbesOpenAiArm(
   databaseUrl: string,
   jsonPath: string,
@@ -1926,72 +1581,21 @@ async function runNumeralTokenProbesOpenAiArm(
 }
 
 /**
- * `association-probes` サブコマンド(連想枠、ADR 0151、Issue #291)。
+ * `association-probes` サブコマンド（連想枠、ADR 0151）。`identifier-probes` と同じ provider の組み合わせ（`deterministic` LLM + `local` 埋め込み）。
  *
- * **`identifier-probes` と同じ provider の組み合わせ**(`deterministic` LLM +
- * `local` 埋め込み。鍵・カセット不要)——差は probe set と arm(`./association-arm.js`)。
+ * 同じ会話を、別テナントへ4回 ingest する（`off` / `on(maxCount=3)` / `on(maxCount=5)` / `on(maxCount=10)`）。
+ * arm 間の汚染を断つため、テナントは `buildArmTenantId` で必ず別々にする。
  *
- * **同じ会話を、別テナントへ4回 ingest する**(`off` / `on(maxCount=3)` /
- * `on(maxCount=5)` / `on(maxCount=10)`)。`maxCount=10` は、CI 実測(commit `4362333`)で
- * `returnedCount` が全 probe で「10 + maxCount」ちょうどになっていた
- * (連想枠が常に満杯)ことを受け、「gold は枠のすぐ下に居て `maxCount` を増やせば
- * 届くのか、それとも枠を広げても届かないのか」を切り分けるために足した(Issue #291
- * フォローアップ)。arm 間の汚染を断つため、テナントは `buildArmTenantId` で
- * 必ず別々にする(`retrieval-quality.ts` の先例と同じ理由)。
+ * テナントを分けても埋め込みのテーブルは分かれていない（Issue #363）。4つの arm の埋め込みは互いにビット単位で同じになる。
+ * 構造を分ける案（arm ごとに別の埋め込み空間にする等）は今は要らない。HNSW の自然選択の規模ではこの機構が発火しておらず、
+ * 規模が大きくなったときの故障は `search()` の `hnsw.iterative_scan = relaxed_order`（ADR 0284）で塞がれている。
+ * ただし「同じベクトル・10万行・4 arm」の組み合わせは測っていない。
+ * 次のいずれかが起きたときに開き直す。(a) 1 arm の行数が HNSW を自然に選ぶ規模（目安1万〜10万行）に近づく。
+ * (b) #337 の測定で同じベクトルでの取りこぼしが見える。(c) `search()` から `relaxed_order` が外れる。
+ * (d) CI の `association-probes` ジョブがコンテナを使い回す形に変わる。詳細は ADR 0158 の追記を見ること。
  *
- * ⚠ **テナントを分けても、埋め込みのテーブルは分かれていない**(Issue #363)。
- * 4つの arm は同じ埋め込み空間(同じ `memory_embeddings_*` テーブル)へ同じ会話を
- * ingest する。抽出は1:1(`packages/testkit/src/__fixtures__/deterministic-llm-provider.ts` の
- * `DeterministicLLMProvider.completeStructured` の決定的な抽出)で、embed job は
- * `memory.content` から決定的に埋め込む(`packages/core/src/runtime.ts` の
- * `resolveEmbeddingInput`。`embeddingInput` フックが無ければ `memory.content` をそのまま
- * 使う)。この arm は `MNEMORA_LLM=deterministic` /
- * `MNEMORA_EMBEDDING=local` 固定(下の `createExampleRuntime` 呼び出し)で、
- * local embedding の決定性(同じ入力に同じベクトル)自体は本物のモデルに対して
- * 実測されている(`packages/local-embedding/src/__tests__/live.local-embedding.test.ts` の
- * 「`deterministic: true` の根拠は実測である」の節。
- * ⚠ CI では走らない実測であり、別のハードウェア・別の onnxruntime 版での再現は
- * 保証されない)。⟹ **4つの arm の埋め込みは、互いにビット単位で同じになる**
- * (推測ではなく上の経路をたどって確認した。1 arm の行数は `ASSOCIATION_HAYSTACK` と
- * 各 probe の発話の合計——`association-probe-set.ts`。数はここに写さない)。
- *
- * **起こりうる機構そのものは Issue #671 / PR #673(ADR 0284)が実測で確かめている**:
- * プランナが HNSW の索引スキャンを選んだ場合、`tenant_id` の絞り込みは索引スキャンの
- * 後に効く。そのとき `hnsw.ef_search` の候補の窓が他テナントの重複行で埋まり、
- * この arm の行が窓に入らなくなりうる。**ただし、今のこのベンチの規模(1 arm 約100行)
- * では、この機構はまだ発火していない**——Issue #363 の実測(コメント 5804415910 のセル1・2・2b。home=100行に
- * filler/near-dup を積んだセル)はいずれも自然なプランが Seq Scan であり、HNSW を選ばせるのは
- * クエリ対象テナント*自身*の行数である(ADR 0111 §3.2。同じテナントが10万行に
- * 育って初めて自然に HNSW を選ぶ)。⟹ **候補枠の食い潰しは、今のこの bench の
- * 規模では起きていない。**
- *
- * HNSW が自然に選ばれる規模(home 10万行)まで育つと、既定の
- * `hnsw.iterative_scan=off` では他テナントの near-duplicate が40件
- * (`= kPrime = ef_search`)以上で全滅することが実測されている(Issue #671)。
- * この故障は PR #673(ADR 0284)が `search()` に
- * `hnsw.iterative_scan = relaxed_order` を採用したことで塞がれた——見積もり
- * (⚠推測、未測定)では、このベンチのように同じベクトルが他3 arm に複製される
- * 構造でも、読み捨てる件数は1回の検索あたり約 3×40=120件で、
- * `hnsw.max_scan_tuples`(既定20,000)の天井より2桁小さい。
- * ⚠ **ただし「同じベクトル・10万行・4 arm」の組み合わせは測っていない**——
- * 同じ距離の点が大量にあるときの HNSW の振る舞い自体が未測定である。
- *
- * ⟹ **構造を分ける案(arm ごとに別の埋め込み空間にする等)は、今は要らない。**
- * 次のいずれかが起きたときに開き直す: (a) 1 arm の行数が HNSW を自然に選ぶ規模
- * (目安1万〜10万行)に近づいたとき、(b) #337 の測定で同じベクトルでの取りこぼしが
- * 実際に見えたとき、(c) `search()` から `relaxed_order` が外れたとき(ADR 0284 が
- * 覆ったとき)、(d) CI の `association-probes` ジョブがコンテナを使い回す形に
- * 変わったとき(今は `.github/workflows/ci.yml` の `association-probes` ジョブ専用の
- * 使い捨て Postgres コンテナを毎回作り直しており、同ジョブ内のステップで毎回マイグレーションを
- * 流している——他の測定との同居や、削除した行が VACUUM まで候補枠を食う交絡
- * (Issue #671)は今の形では当たらない)。詳細と出典は ADR 0158 の
- * 「追記(Issue #671 / PR #673 の実測を受けての整理)」を見ること。
- *
- * **`warmup()` を明示的に呼び、失敗を区別する**(`identifier-probes` と同じ理由)。
- * `ok: false` なら、メトリクスを1つも出さずに打ち切る——この bench の
- * `AssociationProbeRunJson`(`./association-json.js`)は4 arm・3 delta を持つ形で
- * 確定しており、「一部だけ測れた」を表す枠が無い。⟹ 失敗時は JSON も書かない
- * (打ち切ったことは標準エラー出力と `process.exitCode` で伝える)。
+ * `warmup()` を明示的に呼び、`ok: false` ならメトリクスを1つも出さずに打ち切る。`AssociationProbeRunJson` は4 arm・3 delta で確定しており、
+ * 「一部だけ測れた」を表す枠が無い。失敗時は JSON も書かず、標準エラー出力と `process.exitCode` で伝える。
  */
 async function runAssociationProbes(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -2105,13 +1709,8 @@ async function runAssociationProbes(): Promise<void> {
 }
 
 /**
- * `consolidation-cost` サブコマンド(Issue #136)。
- *
- * **なぜ `deterministic` LLM + `local` embedding か**（仕様書「使う provider 層」節）:
- * `consolidate()` は LLM を呼ぶため `recorded` は使えない(カセットに consolidation の
- * プロンプトが無く、`RecordedLLMProvider` が例外を投げる)。統合結果の新しい content の
- * 埋め込みもカセットに無い。⟹ この2点を避けるため `deterministic` LLM ＋ `local` 埋め込み
- * を固定で使う(`identifier-probes` と同じ組み合わせ、ADR 0094)。
+ * `consolidation-cost` サブコマンド。`deterministic` LLM + `local` embedding を固定で使う（ADR 0094）。
+ * `consolidate()` は LLM を呼ぶが、カセットに consolidation のプロンプトも、統合結果の埋め込みも無く、`recorded` は使えないため。
  */
 async function runConsolidationCostCommand(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -2177,9 +1776,7 @@ async function runConsolidationCostCommand(): Promise<void> {
       writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
       console.log(`\n[consolidation-cost] 機械可読な結果を書き出した: ${jsonPath}`);
     }
-    // round の途中で例外により打ち切った場合も、ここまでのレポート印字・JSON書き出しは
-    // 上と同じく行った上で、終了コードだけ非0にする(測れた分を捨てない——これが今回の
-    // 増分。`weights_unavailable` の経路は上の `return` で既に打ち切っており、ここには来ない)。
+    // round の途中で例外により打ち切った場合も、ここまでのレポート印字・JSON書き出しは行った上で、終了コードだけ非0にする。測れた分を捨てない。
     process.exitCode = exitCodeForConsolidationCostRun(json);
   } finally {
     await handle.close();
@@ -2187,14 +1784,9 @@ async function runConsolidationCostCommand(): Promise<void> {
 }
 
 /**
- * `archive-sweep-cost` サブコマンド(Issue #209)。
- *
- * **なぜ `deterministic` LLM + `local` embedding か**: `consolidation-cost` と同じ理由
- * (`archive-sweep-cost.ts` の docstring 参照)——この bench 専用の会話は `retrieval` の
- * カセットに無い入力を含む(clock を backdate した filler)ため、`recorded` は使えない。
- *
- * **なぜ `MutableClock` を注入するか**: filler だけを backdate して掃引を実行時間内に
- * 発火させるため(`archive-sweep-cost.ts` の docstring、`time-term` arm と同じ仕掛け)。
+ * `archive-sweep-cost` サブコマンド。`consolidation-cost` と同じ理由で `deterministic` LLM + `local` embedding を使う
+ * （clock を backdate した filler がカセットに無い入力のため、`recorded` は使えない）。
+ * `MutableClock` を注入するのは、filler だけを backdate して掃引を実行時間内に発火させるため。
  */
 async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -2276,49 +1868,21 @@ async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): P
 }
 
 /**
- * `answer` サブコマンド(Issue #506 / 親 #498)。
+ * `answer` サブコマンド。
  *
- * 🔴 **これは配線の検査であって、回答品質の測定ではない。** 同じ会話・同じ質問・
- * 同じ回答モデル・同じ採点基準で、naive(全文経路)と mnemora(記憶経路)の最終回答と
- * 入力量を対で出す——着地しても回答品質は未評価のままである
- * (`examples/chat/README.md` の `answer` 節)。
+ * これは配線の検査であって、回答品質の測定ではない。着地しても回答品質は未評価のまま（`examples/chat/README.md` の `answer` 節）。
  *
- * **provider は `compare`/`retrieval` と同じ規律である**——`resolveRecordedRun` が
- * 名乗り（画面表示）と env の倒し（`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を `"recorded"`
- * へ倒すこと）を一緒に返すため、この関数はその返り値をそのまま
- * `createAnswerBenchRuntime` へ渡すだけでよい。**`record answer`（`recordAnswer`）で
- * カセットを作れる**——作った後は、キーが環境に無ければ自動的に記録を再生する
- * （`decideProviderSource` が `no-key` を選ぶ）。`MNEMORA_LLM=recorded
- * MNEMORA_EMBEDDING=recorded` の明示指定も引き続き効く——`decideProviderSource` は
- * `MNEMORA_PROVIDER_SOURCE` を見るだけで、`MNEMORA_LLM`/`MNEMORA_EMBEDDING` の
- * 個別指定を上書きしない（`selectLLMMode`/`selectEmbeddingMode` 参照）。カセットが
- * 無い状態で `MNEMORA_LLM=recorded` を指定すると、既存の挙動どおり `createProviders` の
- * `requireCassette` がそのまま落ちる。
+ * provider は `compare`/`retrieval` と同じ規律で、`resolveRecordedRun` の返り値をそのまま `createAnswerBenchRuntime` へ渡す。
+ * カセットが無い状態で `MNEMORA_LLM=recorded` を指定すると、`createProviders` の `requireCassette` がそのまま落ちる。
  *
- * ⚠ **かつてはここが `resolveCassetteForRun` の返り値（`Cassette | undefined`）だけを
- * 読み、env を倒す作業を自分の手で書き忘れていた**（`process.env` をそのまま渡していた）
- * ——画面には「記録した応答を再生する」と出しながら、実際には `deterministic` の
- * 擬似 provider で走っていた（Issue #577）。`resolveRecordedRun` に改名し、
- * `RecordedRunPlan.env` を返り値に含めたことで、この「名乗ったのに倒し忘れる」形は
- * 書けなくなった。
- *
- * `runtime-factory.ts` の `createExampleRuntime` を使わない理由は
- * `answer-bench.ts` の `createAnswerBenchRuntime` の docstring を見ること
- * (呼び出し回数を数える decorator を `createRuntime()` へ渡す前に噛ませる必要があるため)。
+ * `createExampleRuntime` を使わない理由は `answer-bench.ts` の `createAnswerBenchRuntime` の docstring を見ること。
  */
 async function runAnswer(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   const measuredAt = new Date();
   const commit = tryGitRevParseHead(process.cwd());
-  // ⭐ `compare`/`retrieval` と同じ配線でカセットを解決する——`resolveRecordedRun` が
-  // 名乗りと env の倒しを一緒に返すため、ここで env を組み立て直す必要が無い
-  // （Issue #577。以前はここで `process.env` をそのまま渡していたために、
-  // 「記録した応答を再生する」と画面に出しながら実際には `deterministic` の
-  // 擬似 provider で走っていた）。
   const plan = resolveRecordedRun("answer");
   const handle = await createAnswerBenchRuntime(databaseUrl, plan.env, plan.providerOptions);
-  // ⭐ 品質を主張できないモードでは、stdout の先頭で目立たせる
-  // (AGENTS.md「`deterministic` で測った想起の質は、性能について何も言っていない」)。
   const banner = formatAnswerQualityBanner(handle.llmMode);
   if (banner) {
     console.log(banner);
@@ -2342,8 +1906,6 @@ async function runAnswer(): Promise<void> {
     console.log(`\n${formatAnswerInputReduction(results)}`);
     console.log(formatAnswerContentPreservation(results));
 
-    // `MNEMORA_ANSWER_JSON` が設定されたときだけ書く。未設定なら1バイトも挙動を
-    // 変えない(既存の `MNEMORA_COMPARE_JSON` 等と同じ規約)。
     const jsonPath = process.env.MNEMORA_ANSWER_JSON;
     if (jsonPath) {
       const json = buildAnswerJson({
@@ -2361,10 +1923,6 @@ async function runAnswer(): Promise<void> {
   }
 }
 
-/**
- * `--trials=N` を argv から読む。省略時は1（マネージャー決定「既定1、評価は5」——
- * この既定値そのものは変えない。評価時は呼び出し側が `--trials=5` を明示する）。
- */
 function parseTimeWeightingTrials(argv: readonly string[]): number {
   const flag = argv.find((a) => a.startsWith("--trials="));
   if (flag === undefined) {
@@ -2377,12 +1935,7 @@ function parseTimeWeightingTrials(argv: readonly string[]): number {
   return value;
 }
 
-/**
- * `--temperature=N` を argv から読む。省略時は `undefined`（既定は渡さない——
- * `OpenAILLMProvider`/`CreateProvidersOptions` の既定と同じ規律。`llmMode !== "openai"`
- * のときは無視される）。段3b でこの run 自身を temperature=0 に固定して再現性を
- * 上げるために使う（`bench-results/STAGE3A-NOTES.txt` 参照）。
- */
+/** `--temperature=N` を argv から読む。省略時は `undefined`（既定は渡さない）。`llmMode !== "openai"` のときは無視される。 */
 function parseTimeWeightingTemperature(argv: readonly string[]): number | undefined {
   const flag = argv.find((a) => a.startsWith("--temperature="));
   if (flag === undefined) {
@@ -2396,17 +1949,8 @@ function parseTimeWeightingTemperature(argv: readonly string[]): number | undefi
 }
 
 /**
- * `answer-time-weighting` サブコマンド（Issue #690 / PR #697）。
- *
- * 🔴 **`answer` サブコマンドとは測る問いが違う。** `answer` は naive/mnemora の配線
- * 検査、こちらは `RecallQuery.timeWeighting`（ADR 0300）を**回答の正誤**で比べる——
- * 記憶を抽出 LLM を通さず直接書き、reinforce し、壁時計を進めてから、同じ質問を
- * `legacy`/`eventAwareFreshness` の両方で recall→回答生成→採点する
- * （`time-weighting-bench.ts` の docstring参照）。
- *
- * provider の解決は `answer`/`compare`/`retrieval` と同じ規律
- * （`resolveRecordedRun`）。`--trials=N`（既定1）と `--dev`（開発用ケース集合に絞る。
- * 既定は dev + eval の両方）を argv から読む。
+ * `answer-time-weighting` サブコマンド。`answer` とは測る問いが違う。`answer` は配線検査、こちらは `RecallQuery.timeWeighting`（ADR 0300）を
+ * 回答の正誤で比べる。`--trials=N`（既定1）と `--dev`（開発用ケース集合に絞る）を argv から読む。
  */
 async function runTimeWeighting(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -2472,19 +2016,11 @@ async function runTimeWeighting(): Promise<void> {
 }
 
 /**
- * `answer-trials` サブコマンド（Issue #705、ADR 0301）。
+ * `answer-trials` サブコマンド（ADR 0301）。`answer` とは別の器。dev ケースだけを、`answer.json` に記録済みのプロンプトから読んだ
+ * 同じ記憶集合の上で、描画 A/B ごとに n 回ずつ答えさせ、正答数で見る（1回の試行では揺れが見えない、ADR 0295 追記2）。
  *
- * 🔴 **`answer` とは別の器である。** `answer` は dev + eval の全ケースを1回ずつ回して naive/mnemora の
- * 最終回答・入力量を対で出す（配線の検査）。**この器は dev ケースだけを、`examples/chat/cassettes/answer.json`
- * に記録済みの mnemora 経路プロンプトから読んだ**同じ記憶集合**の上で、描画 A（recorded）/
- * B（digest-only）ごとに n 回ずつ答えさせ、正答数（`gradeAnswer` の pass/fail/indeterminate）
- * で見る（ADR 0295 追記2 が見つけた「1回の試行では揺れが見えない」ことへの対応）。
- *
- * ⛔ **DB を使わない。** `DATABASE_URL` は不要——材料はカセットの静的な読み出しだけで作る
- * （`answer-trials-material.ts` は DB・埋め込み・抽出・recall を一切 import しない）。
- *
- * ⛔ **CI の門にしない**（Issue #705 完了条件・#693 の線）。`.github/workflows/ci.yml` には
- * 配線しない——手元で回す観測用の CLI である（ADR 0301）。
+ * DB を使わない。材料はカセットの静的な読み出しだけで作る。
+ * CI の門にしない。`.github/workflows/ci.yml` には配線せず、手元で回す観測用の CLI（ADR 0301）。
  */
 async function runAnswerTrialsCommand(): Promise<void> {
   const result = await runAnswerTrials({ env: process.env });
@@ -2495,20 +2031,12 @@ async function runAnswerTrialsCommand(): Promise<void> {
     writeFileSync(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
     console.log(`\n[answer-trials] 機械可読な結果を書き出した: ${jsonPath}`);
   }
-  // ⭐ 未評価（実 API が無い）は exit 0 のまま——「実行できなかった」ことを画面と JSON に
-  // 明示するのが目的であり、実行環境（鍵の有無）を落とす理由にしない（Issue #705 完了条件）。
+  // 未評価（実 API が無い）は exit 0 のまま。「実行できなかった」ことを画面と JSON に明示するのが目的で、鍵の有無で落とす理由にしない。
 }
 
-/**
- * `answer-trials-compare` サブコマンド（Issue #705、ADR 0301）。
- *
- * `answer-trials` の実行結果 JSON を2件以上突き合わせ、カセットの sha256 か
- * ケースごとの材料指紋が一致しなければ、どこがずれたかを表示して exit 1。一致すれば
- * 並べて表示して exit 0（Issue #705 完了条件2、ADR 0295 追記2 の見落としの再発防止）。
- */
+/** `answer-trials-compare` サブコマンド。カセットの sha256 かケースごとの材料指紋が一致しなければ、ずれた箇所を表示して exit 1。 */
 async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
-  // `pnpm run answer-trials-compare -- a.json b.json` では pnpm が `--` をそのまま渡してくる
-  // （実測: `--` をファイルとして開こうとして ENOENT）。パスではないので落とす。
+  // `pnpm run answer-trials-compare -- a.json b.json` では pnpm が `--` をそのまま渡してくる。パスではないので落とす。
   const paths = argv.filter((a) => a !== "--");
   if (paths.length < 2) {
     console.error(
@@ -2520,31 +2048,21 @@ async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
   }
   const { ok, report } = runAnswerTrialsCompareFromFiles(paths);
   console.log(report);
-  // ⭐ 副作用のある手（exit の判定）を判定と同じ行に繋がない——`ok` を見てから
-  // ここで明示的に立てる（docs/autonomy.md §4.1）。
+  // 副作用のある手（exit の判定）を判定と同じ行に繋がない。`ok` を見てからここで明示的に立てる（docs/autonomy.md §4.1）。
   if (!ok) {
     process.exitCode = 1;
   }
 }
 
 /**
- * Issue #369 (C)「訂正の口」の相手探しの精度を測る（`correction-candidate-arm.ts`）。
+ * 訂正の口の相手探しの精度を測る（`correction-candidate-arm.ts`）。
  *
- * **provider は `identifier-probes` と同じ組み合わせに固定する**——LLM は
- * `deterministic`、埋め込みは `local`（ONNX の実推論）。⛔ **鍵を要求しない。**
- * ⚠ `recorded` は使えない——この器のケースはカセットに記録が無い入力であり、
- * `recorded` provider は記録に無い入力を例外にする（ADR 0051）。
+ * provider は `identifier-probes` と同じ組み合わせに固定する。LLM は `deterministic`、埋め込みは `local`。鍵を要求しない。
+ * `recorded` は使えない。この器のケースはカセットに記録の無い入力で、`recorded` provider は記録に無い入力を例外にする（ADR 0051）。
+ * 順位を決めているのは埋め込み（実推論）で、`deterministic` が掛かるのは抽出側。
  *
- * ⚠ **順位を決めているのは埋め込み（`local` ＝ 実推論）であり、`deterministic` が
- * 掛かるのは抽出側である。**`docs/autonomy.md` §2.2 の3番の「意味的品質を測るときに
- * `deterministic` stub へ置き換えない」は、この配線では埋め込み側に掛かる
- * （`identifier-probes`/`association-probes`/`consolidation-cost` と同じ前提）。
- *
- * **`warmup()` を明示的に呼び、失敗を区別する**（`identifier-probes` と同じ理由）
- * ——「重みを取得できなかった」が「相手探しの精度が低い」に見えてはならない。
- *
- * `-- --dev` を付けると開発用ケース集合で走る（⛔ その結果を「未使用の評価」として
- * 報告しないこと。`docs/autonomy.md` §2.2 の5番）。
+ * `warmup()` を明示的に呼び、失敗を区別する。「重みを取得できなかった」が「相手探しの精度が低い」に見えてはならない。
+ * `-- --dev` の結果を「未使用の評価」として報告しないこと（`docs/autonomy.md` §2.2 の5番）。
  */
 async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
@@ -2631,10 +2149,6 @@ async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
   }
 }
 
-/**
- * 使い方を出す。既定は stdout。未知のサブコマンドのときは `console.error` を渡して
- * stderr に出す（Issue #944）。
- */
 function printHelp(write: (text: string) => void = console.log): void {
   write(
     [
@@ -2777,7 +2291,6 @@ async function main(): Promise<void> {
   } else if (command === undefined || HELP_COMMANDS.has(command)) {
     printHelp();
   } else {
-    // 未知のサブコマンド: 理由と使い方を stderr に出して exit 1（Issue #944）。
     console.error(`未知のサブコマンド: ${command}`);
     printHelp(console.error);
     process.exitCode = 1;
@@ -2786,7 +2299,6 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   console.error(err);
-  // DB のエラーなら、README の「DB を用意する」節を指す一行を足す（元のエラーは上でそのまま出す）。
   const hint = databaseErrorHint(err);
   if (hint !== undefined) {
     console.error(`\n→ ${hint}`);

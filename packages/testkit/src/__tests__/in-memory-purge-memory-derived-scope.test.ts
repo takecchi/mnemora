@@ -4,13 +4,6 @@ import type { Ctx, MemoryId } from "@mnemora/core";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * `InMemoryMemoryStore.purgeMemory` が、本文の派生物（label の紐付け・`recalls.index_band` の目次帯）に
- * 触れる範囲。`PostgresMemoryStore` と同じ（`packages/postgres` の `purge-memory-derived-scope.postgres.test.ts`）。
- * - `registered` の label は触らない（`proposedCount` も `status` も動かさない）。紐付けは外れる。
- * - 目次帯のこの Memory のエントリは `{ memoryId, digest: 墓石 }` だけになる（`truncated` は落ちる）。
- */
-
 const ctx: Ctx = { tenantId: "in-memory-purge-derived-scope" };
 
 async function purge(store: InMemoryMemoryStore, id: MemoryId): Promise<void> {

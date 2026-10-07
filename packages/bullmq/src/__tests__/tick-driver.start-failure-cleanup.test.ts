@@ -1,21 +1,6 @@
-// #967 の確かめ直し（#1774）。`tick-driver.lifecycle.test.ts` の「start() が途中で失敗したら、次の start() でやり直せる（Issue #963）」が見ていない境界。
-//
-// 1. 失敗した起動の後始末で、Worker・Queue を閉じない。bullmq の Worker・Queue は一度 close() すると再利用できない
-//    （Issue #891）ので、閉じてしまうと「次の start() でやり直せる」が実物では成り立たない。この PR の決定は
-//    「失敗する手順の前に Worker を走らせないので、片付けるものが無い」である。
-// 2. 失敗は何回続いても、成功する start() が来たら、その1回で登録して Worker を1回だけ走らせる。
-// 3. 失敗した start() は、渡された例外をそのまま（包まずに）reject する。
+// 失敗した起動の後始末で Worker・Queue を閉じない。一度 close() した bullmq の Worker・Queue は再利用できず、次の start() でやり直せなくなる。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-// Redis を要らない検査（`bullmq` の `Queue`/`Worker` を丸ごとモックに差し替える）。
-// Issue #890 / #891 の2点を検査する:
-//   (890) Worker は `autorun: false` で構築され、`start()` を呼ぶまでジョブを処理しない
-//         （実 Worker では `run()` を呼ぶことがジョブ処理の開始そのもの）。
-//   (891) `stop()` の後の `start()` は無言で成功したふりをせず、理由の分かる Error で reject する。
-// 実際に Redis へ繋ぐ経路・BullMQ 自身の挙動は `concurrent-tick.redis.test.ts`
-// （`test:redis`）側で検査しており、ここはその手前——driver の状態遷移だけを、
-// 外側の副作用を起こさずに検査する。
 
 interface MockQueueInstance {
   upsertJobScheduler: ReturnType<typeof vi.fn>;
@@ -46,14 +31,9 @@ vi.mock("bullmq", () => {
   }
   class Worker {
     on = vi.fn();
-    // 実 Worker の `run()` は Worker が閉じるまで resolve しない promise を返す
-    // （bullmq 6.3.8 の `mainLoop` は `while ((!this.closing && !this.paused) || ...)`）。
-    // 既定では、テストの中で明示的に解決/拒否させない限り pending のままにしておく
-    // ——「呼ばれたかどうか」だけを検査するのに、実物の「返らない」性質を壊さないため。
+    // `run()` は既定で pending のままにする。実 Worker の `run()` は閉じるまで resolve しないので、「呼ばれたか」だけ見るのに実物の性質を壊さない。
     run = vi.fn().mockImplementation(() => new Promise(() => {}));
     close = vi.fn().mockResolvedValue(undefined);
-    // 実 EventEmitter と同じく、on() で登録したリスナーを実際に呼べるようにしておく
-    // （run() の reject を `worker.emit("error", ...)` で流す実装を検査するため）。
     emit = vi.fn();
     private listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
     constructor(..._args: unknown[]) {
@@ -102,7 +82,7 @@ describe("createBullmqTickDriver() — 失敗した start() の後始末（#967�
     queue.upsertJobScheduler.mockRejectedValueOnce(new Error("redis down"));
 
     await expect(driver.start()).rejects.toThrow("redis down");
-    // 失敗の後始末は、reject を観測した後の microtask で走りうるので1周待つ
+    // 失敗の後始末は reject を観測した後の microtask で走りうるので1周待つ。
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(worker.close).not.toHaveBeenCalled();

@@ -4,20 +4,8 @@ import type { AnswerVerdict } from "./answer-case.js";
 import { computeInputReduction } from "./answer-json.js";
 import type { ProviderMode } from "./providers.js";
 
-/**
- * `answer` の人間向け出力（Markdown 表 + 目立つ注記）。
- *
- * 🔴 **`answerQualityClaimable(llmMode) === false` のとき、正誤の列に判定を出さない。**
- * `—` を出し、脚注で理由を書く——`llmMode=deterministic` は意味を持たない stub であり、
- * この bench が回っても回答品質は測っていない。
- */
+/** `answerQualityClaimable(llmMode) === false` のとき、正誤の列に判定を出さず `—` と脚注にする。deterministic の実行は品質を測っていないため。 */
 
-/**
- * `answer` の導入文。**品質を主張できるか（`answerQualityClaimable`）で出し分ける**——
- * 以前はモードに関係なく「配線の検査であり、回答品質は測っていない」と言いながら、
- * `recorded`/`openai` では表に ✅/❌ の判定が並んでいた（ADR 0260 は `recorded` を
- * 品質を主張してよいモードとし、⛔⛔⛔ バナーも `deterministic` のときだけ出す）。
- */
 export function formatAnswerIntro(llmMode: ProviderMode): string {
   const lead =
     "\n同じ会話・同じ質問・同じ回答モデル・同じ採点基準で、naive(全文経路)と" +
@@ -32,7 +20,6 @@ export function formatAnswerIntro(llmMode: ProviderMode): string {
   );
 }
 
-/** stdout の先頭に出す、目立つ注記。`llmMode` が `deterministic` のときだけ非空を返す。 */
 export function formatAnswerQualityBanner(llmMode: ProviderMode): string {
   if (answerQualityClaimable(llmMode)) {
     return "";
@@ -60,8 +47,6 @@ function verdictGlyph(verdict: AnswerVerdict): string {
   }
 }
 
-/** 二次観測・突き合わせの列も `verdictGlyph` を使い回す——`AnswerJudgeOutcome` は
- * `AnswerVerdict` と同じ3値（"pass"/"fail"/"indeterminate"）である。 */
 function glyphOrDash(claimable: boolean, value: AnswerVerdict | undefined): string {
   if (!claimable || value === undefined) {
     return "—";
@@ -69,13 +54,6 @@ function glyphOrDash(claimable: boolean, value: AnswerVerdict | undefined): stri
   return verdictGlyph(value);
 }
 
-/**
- * ケースごとの入力量（naive/mnemora）と、質を主張できるときだけの正誤・二次観測・
- * 突き合わせを並べた表。
- *
- * `answerQualityClaimable(llmMode) === false` のときは正誤・二次観測・突き合わせの
- * **すべての列**に `—` を出し、表の下に脚注を足す。
- */
 export function formatAnswerTable(
   results: readonly AnswerCaseRunResult[],
   llmMode: ProviderMode,
@@ -115,9 +93,7 @@ export function formatAnswerTable(
   return lines.join("\n");
 }
 
-/**
- * 追加費用（別ブロック）。⛔ 削減率から差し引かない——ここに独立して出す。
- */
+/** 追加費用は別ブロック。削減率から差し引かず、独立して出す。 */
 export function formatAnswerCostTable(results: readonly AnswerCaseRunResult[]): string {
   const header =
     "| id | 抽出 LLM 呼び出し | 埋め込み呼び出し | 回答生成 LLM 呼び出し | judge LLM 呼び出し |";
@@ -137,12 +113,6 @@ export function formatAnswerCostTable(results: readonly AnswerCaseRunResult[]): 
   return [header, sep, ...body, totalRow].join("\n");
 }
 
-/**
- * 層2（回答に必要な情報の保持）の集計を1行で出す。**`qualityClaimable` に関係なく
- * 常に出す**——LLM を呼ばない決定的な指標であり、層3（最終回答の正しさ）の集計とは
- * 独立している（`answer-json.ts` の `AnswerRunJson.contentPreservation` docstring）。
- * `applicable` は `must-abstain` 類を除いた分母。
- */
 export function formatAnswerContentPreservation(results: readonly AnswerCaseRunResult[]): string {
   const tally = (pick: (r: AnswerCaseRunResult) => { applicable: boolean; preserved: boolean }) => {
     const values = results.map(pick).filter((v) => v.applicable);
@@ -158,16 +128,8 @@ export function formatAnswerContentPreservation(results: readonly AnswerCaseRunR
 }
 
 /**
- * 入力量の削減率を1行で出す。**`qualityClaimable` に関係なく常に出す**
- * ——入力量は品質の主張ではない（`answer-json.ts` の `AnswerInputReductionJson`
- * docstring 参照）。計算は `computeInputReduction`（`answer-json.ts`）に委ね、
- * ここでは表示用の書式だけを持つ。
- *
- * **見出しに差の向きを書き、値にも言葉を添える**——以前は「入力量の削減率 … chars -26.3%」
- * と出ていた。値は定義（`(naive - mnemora) / naive`）どおりだが、mnemora のほうが多いのに
- * 「削減率 -26.3%」と読めるので、「26%削った」と読み違えやすかった。いまは
- * 「mnemora − 全文の差（負なら mnemora が少ない）: chars 3924 → 4956（+1032、mnemora が 26.3% 多い）」
- * の形で出す。JSON（`AnswerInputReductionJson`）の欄と値は変えていない。
+ * 入力量の削減率を1行で出す。見出しに差の向きを書き、値にも言葉を添える。
+ * 「削減率 -26.3%」とだけ出すと、mnemora のほうが多いのに「26%削った」と読み違えるため。
  */
 export function formatAnswerInputReduction(results: readonly AnswerCaseRunResult[]): string {
   const r = computeInputReduction(results);

@@ -1,10 +1,4 @@
-// PR #1058 の確かめ直しで足した歯。`InMemoryMemoryStore.requeueEmbedJobs` の `limit` のガードは
-// `archiveDecayed` と同じ2段で、**非整数を先に、次に負数を見る**（例外の文言も揃える。PR 本文）。
-// 負数でもある非整数（-1.5）は「must be an integer」で断る——順序を入れ替える変異（負数を先に見る）は、
-// 文言が変わるだけで例外は投げ続けるので、既存の歯（`/limit must (be an integer|not be negative|…)/`）を
-// すり抜けた。
-//
-// このテストは Fake を直接呼ぶだけで、`*-conformance.ts` には触れていない（Issue #809）。
+// 非整数を先に、次に負数を見る。-1.5 は「must be an integer」で断る。順序を入れ替える変異は文言が変わるだけで例外は投げ続けるので、文言まで見る。
 
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";

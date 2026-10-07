@@ -1,84 +1,17 @@
 /**
- * `scripts/association-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる
- * CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/identifier-probe-summary-lib.mjs`/`scripts/retrieval-quality-summary-lib.mjs`
- * と同じ分担・同じ理由(Issue #109 で確立し、Issue #291 でも踏襲する)。
+ * ⛔ 門にしない。非0になるのは入力そのものが壊れているとき(読めない・parse できない・必須項目欠落・型違い・参照整合性の破れ)だけ。
+ * probe は12件で、閾値判定の門を置くには足りない標本(ADR 0033 §3、ADR 0088 §2.1)。
+ * 悪化した arm を目立たせるのも検出だけで、exit code には触れない(ADR 0385)。
  *
- * `examples/chat` の `association-probes` サブコマンド(`MNEMORA_ASSOCIATION_JSON` が
- * 吐く JSON)を Markdown へ変換する。`recall()` の連想枠(`RecallQuery.association`、
- * ADR 0151 / Issue #200)が想起の質を動かすかを、4本の arm
- * (`off: 連想枠なし（既定の recall）` / `on: 連想枠あり（maxCount=3）` /
- * `on: 連想枠あり（maxCount=5）` / `on: 連想枠あり（maxCount=10）`)で比べる(Issue #291。
- * `maxCount=10` は、CI 実測(commit `4362333`)で `returnedCount` が全 probe で
- * 「10 + maxCount」ちょうど(枠が常に満杯)だった一方 gold は12件中5件しか居なかった
- * ことを受けたフォローアップ——「gold は枠のすぐ下に居るのか、届いていないのか」を
- * `maxCount` を伸ばして切り分ける)。
+ * ⛔ hit@10 は連想枠の効果を測れない。連想枠の候補は recall 本体の limit 件の後ろに連結されるため。
+ * 読み違えを防ぐ注記 `HIT10_CAVEAT_NOTE` を必ず出す。
  *
- * ## ⛔ 門にしない。非0になるのは入力そのものが壊れているときだけ
- *
- * このファイルの関数(そして `association-summary.mjs` の exit code)は、実測値が
- * 基準値と相違していても non-zero を返さない。probe は12件(カテゴリ3種×4件)で
- * あり、[ADR 0033](../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
- * §3 の規律(標本7件からは失敗率も成功率も統計的に主張しない)に照らして、
- * 閾値判定の門を置くには足りない標本である——`identifier-probes`/`retrieval-quality`
- * と同じ判断(ADR 0088 §2.1)。
- *
- * **非0になるのは、JSON が読めない・parse できない・必須項目が無い・型が違う・
- * 参照整合性が壊れている(例: `deltas[].baselineArmLabel` が `arms[].armLabel` の
- * どれとも一致しない)ときだけである。**
- *
- * ## 基準値ファイル `examples/chat/association-baseline.json`(ADR 0385)
- *
- * CI(`ubuntu-latest`)で association-probes を5回以上再実行し、arm ごとの値が
- * 揺れないこと(ADR 0167 が Issue #316 の非決定性を直したことの裏取り)を確かめた上で
- * 置いた基準値である。`ci.yml` の summary ステップが `--baseline` として渡す。
- * `--baseline` は今も任意であり(`buildSummaryMarkdown` の `baseline` は optional)、
- * 省略すれば基準値なしで動く——単体テスト・手元実行では省略してよい。
- *
- * ## ⚠ 基準値より悪化した arm を目立たせる(門にはしない、ADR 0385)
- *
- * `gold`(goldReturnedCount)/`hit@1`/`hit@10`/`MRR` のいずれかが基準値を下回った arm を、
- * Markdown の上のほう(`## arm 別まとめ`の表より前)に「## ⚠ 基準値より悪い値がある
- * （門ではない）」節として列挙する(`buildWorsenedArmsSection`)。許容幅は
- * `WORSENED_TOLERANCE`(このファイルが export する定数)——ADR 0385 の実測(揺れ0)により
- * 既定は全指標0にしてある。**exit code には一切触れない**——上の「⛔ 門にしない」節と
- * 同じ規律で、検出するだけに留める。
- *
- * ## 🔴 hit@10 は連想枠の効果を測れない(表の下に必ず注記する)
- *
- * 連想枠が拾った候補(`retrievedVia: "association"`)は、`recall()` 本体の
- * `limit`件の**後ろへ連結**されて返る(`examples/chat/src/association-probe-set.ts`
- * の docstring、ADR 0151)。⟹ 連想由来の gold は11位以降にしか現れず、`hit@10`
- * (上位10件に gold が入ったか)は連想枠が効いているかどうかを原理的に判定できない。
- * この事実は `buildSummaryMarkdown` が**必ず**注記として出す
- * (`HIT10_CAVEAT_NOTE`)——読む人が「hit@10 が動いていない＝連想枠が効いていない」
- * と読み違えるのを防ぐため。
- *
- * ## ⚠ 基準値との同一性は `armLabel` では取らない(実装を読んで訂正した点)
- *
- * 当初はタスク仕様の「`armLabel` は3本の固定文字列」を鵜呑みにし、`armLabel` を
- * そのまま同一性の鍵にしていた。**しかし実装
- * (`examples/chat/src/cli.ts` の `runAssociationProbes`)を読むと、実際の
- * `armLabel` は `` `off: 連想枠なし（既定の recall）(llm=${llmMode}, ` +
- * `embedding=${embeddingMode}/${model}/${dimensions}次元)` `` のように、
- * **埋め込みモデルの条件を文字列に埋めた形**で組み立てられている——
- * これはまさに `identifier-probe-summary-lib.mjs` が「`label` を鍵にしない」と
- * 名指しした理由(条件が変わると `label` ごと変わり、鍵にすると「何が変わったか」が
- * 読めなくなる)がそのまま当てはまる形である。
- *
- * ⟹ ここでは `armLabel` を**表示にだけ**使い、同一性の鍵には
- * `armShortKey(arm)`(`associationEnabled`/`associationMaxCount` という構造化
- * フィールドから導く、`"off"`/`"on(max=3)"`/`"on(max=5)"`)を使う——
- * `identifier-probe-summary-lib.mjs` の「群の名前」に相当するものを、この bench では
- * 別フィールドとして持たせる代わりに、既存の2フィールドの組から導出する。
+ * ⚠ arm の同一性の鍵に `armLabel` を使わない。実装の `armLabel` は埋め込み条件を文字列に埋めており、
+ * 条件が変わると丸ごと変わる。表示にだけ使い、鍵は `armShortKey(arm)` を使う。
  */
 
 /**
- * ⚠ **基準値より悪化した arm を判定する対象指標(ADR 0385)。**
- *
- * `label` は Markdown 上の表示名、`field` は `arms[]`(実測・基準値とも共通)の
- * フィールド名。**この4つはタスク仕様が名指ししたものであり、増減するときは
- * `WORSENED_TOLERANCE` も合わせて見直すこと。**
+ * ⚠ 増減するときは `WORSENED_TOLERANCE` も合わせて見直すこと。
  */
 const WORSENED_METRICS = [
   { field: "goldReturnedCount", label: "gold" },
@@ -88,12 +21,7 @@ const WORSENED_METRICS = [
 ];
 
 /**
- * ⚠ **悪化と判定する許容幅(0 = 1件でも下回れば警告)。**
- *
- * ADR 0385 の実測(CI `ubuntu-latest` で association-probes を5回以上再実行)により
- * 決めた値をここに置く——**唯一の出所は ADR 0385 であり、値の根拠(揺れの実測結果)は
- * そちらに書く。**`buildWorsenedArmsSection`/`findWorsenedArms` はこの定数を読むだけで、
- * 数字の妥当性そのものは判断しない。
+ * ⚠ 値の唯一の出所は ADR 0385。ここでは妥当性を判断しない。
  */
 export const WORSENED_TOLERANCE = {
   goldReturnedCount: 0,
@@ -102,11 +30,8 @@ export const WORSENED_TOLERANCE = {
   mrr: 0,
 };
 
-/** 現在の仕様(Issue #291)で固定されている arm の本数。 */
 const ARM_COUNT = 4;
-/** 現在の仕様で固定されている delta の本数(いずれも baseline=off との対比)。 */
 const DELTA_COUNT = 3;
-/** probe のカテゴリ(ブリッジ語の字種)。3種×4件。 */
 const CATEGORIES = ["ascii-id", "proper-noun", "common-noun"];
 
 const TOP_STRING_FIELDS = ["measuredAt", "llmMode"];
@@ -124,8 +49,6 @@ const ARM_NUMBER_FIELDS = [
   "returnedMemoryTotal",
   "memoryCharsTotal",
   "associationCharsTotal",
-  // ⭐ Issue #291 フォローアップ: 同じストア・同じクエリで recall() を引き直したときの
-  // 一致件数(`examples/chat/src/association-arm.ts` の `AssociationArmReport` 参照)。
   "repeatFrameIdenticalCount",
   "repeatGoldRankSameCount",
 ];
@@ -138,13 +61,10 @@ const PROBE_BOOLEAN_FIELDS = [
   "hit10",
   "goldReturned",
   "goldAnchoredOnProbeAnchor",
-  // ⭐ Issue #291 フォローアップ: 同じストア・同じクエリでの recall() 引き直しが
-  // 一致したか(probe 単位。`AssociationProbeOutcome` 参照)。
   "repeatFrameIdentical",
   "repeatGoldRankSame",
 ];
 
-/** `AssociationFrameEntry.role`(`examples/chat/src/association-arm.ts`)の既知の値。 */
 const ASSOCIATION_FRAME_ROLE_VALUES = [
   "own-gold",
   "own-anchor",
@@ -164,10 +84,8 @@ const DELTA_NUMBER_FIELDS = [
 ];
 
 /**
- * 共通の「文字列/数値/真偽値フィールドが揃っているか」を見る。
- *
  * @param {unknown} obj
- * @param {string} path エラーメッセージ用のラベル(例: `arms[0]`)
+ * @param {string} path
  * @param {{ stringFields?: string[], numberFields?: string[], booleanFields?: string[] }} spec
  * @returns {string[]}
  */
@@ -195,11 +113,7 @@ function findScalarFieldProblems(obj, path, spec) {
 }
 
 /**
- * arm の同一性の鍵(表示用の `armLabel` ではなく、こちらを使う——冒頭 docstring
- * 「⚠ 基準値との同一性は armLabel では取らない」参照)。`associationEnabled`/
- * `associationMaxCount` という構造化フィールドから直接導く——実装
- * (`examples/chat/src/cli.ts`)の `armLabel` は埋め込みモデルの条件を文字列に
- * 埋めており、条件が変われば `armLabel` ごと変わるため、鍵には使えない。
+ * ⚠ `armLabel` ではなくこちらを同一性の鍵にする(冒頭参照)。
  *
  * @param {{ associationEnabled: boolean, associationMaxCount: number | null }} arm
  */
@@ -207,7 +121,6 @@ function armShortKey(arm) {
   return arm.associationEnabled ? `on(max=${arm.associationMaxCount})` : "off";
 }
 
-/** `null` または期待した型のどちらか、を見る。 */
 function isStringOrNull(value) {
   return value === null || typeof value === "string";
 }
@@ -218,9 +131,7 @@ function isNumberOrNull(value) {
 const PROBE_CATEGORY_VALUES = CATEGORIES;
 
 /**
- * 1件の `associationFrame` エントリ(`{ externalId, rank, role, anchorExternalId }`)の
- * 形を検査する。⚠ ここも門にはしない(呼び出し側の `validateMeasured` と同じ姿勢)
- * ——形が壊れていなければ ok、内容(role が期待通りか等)は問わない。
+ * ⚠ 門にしない。形だけ見て、内容は問わない。
  *
  * @param {unknown} entry
  * @param {string} path
@@ -298,11 +209,9 @@ function findProbeFieldProblems(probe, path) {
 }
 
 /**
- * 1本の arm(`off`/`on: maxCount=3`/`on: maxCount=5`)の必須項目を検査する。
- *
  * @param {unknown} arm
  * @param {string} path
- * @param {number} topProbeCount 実測 JSON トップレベルの `probeCount`(arm 間で揃っているはず)
+ * @param {number} topProbeCount
  * @returns {string[]}
  */
 function findArmFieldProblems(arm, path, topProbeCount) {
@@ -347,9 +256,7 @@ function findArmFieldProblems(arm, path, topProbeCount) {
     problems.push(`${path}.probes が配列でない`);
     return problems;
   }
-  // 🔴 件数をここに書き写さない。arm 自身の probeCount、そしてトップレベルの
-  // probeCount と、実際の probes 配列長が一致していることを見る(書き写した数字が
-  // probe を増やした後も古いまま緑になる、という取り違えを避けるため)。
+  // 🔴 件数を書き写さない。probes 配列長と突き合わせる(書き写した数字は probe を増やしても古いまま緑になる)。
   if (typeof arm.probeCount === "number" && arm.probes.length !== arm.probeCount) {
     problems.push(
       `${path}.probes の長さ(${arm.probes.length})が ${path}.probeCount(${arm.probeCount})と一致しない`,
@@ -386,8 +293,6 @@ function findDeltaFieldProblems(delta, path) {
 }
 
 /**
- * `embedding`(`{ provider, model, dimensions }`)の必須項目を検査する。
- *
  * @param {unknown} embedding
  * @param {string} path
  * @returns {string[]}
@@ -409,8 +314,6 @@ function findEmbeddingFieldProblems(embedding, path) {
 }
 
 /**
- * `MNEMORA_ASSOCIATION_JSON` が吐いた JSON(パース済み)の形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -463,9 +366,7 @@ export function validateMeasured(data) {
         seenLabels.add(label);
         armLabels.push(label);
       }
-      // 🔴 同一性の本当の鍵(associationEnabled/associationMaxCount)でも重複を見る
-      // ——armLabel は埋め込み条件を埋めた表示用文字列であり、それだけでは
-      // 「同じ arm が2件」を見落とす場合がある(冒頭 docstring 参照)。
+      // armLabel だけでは「同じ arm が2件」を見落とすため、構造化フィールドの鍵でも重複を見る。
       if (typeof arm === "object" && arm !== null && typeof arm.associationEnabled === "boolean") {
         const armKey = armShortKey(arm);
         if (seenArmKeys.has(armKey)) {
@@ -488,7 +389,6 @@ export function validateMeasured(data) {
     deltas.forEach((delta, i) => {
       problems.push(...findDeltaFieldProblems(delta, `測定結果.deltas[${i}]`));
       if (typeof delta === "object" && delta !== null) {
-        // 🔴 参照整合性: delta が指す arm が、実在する arm の armLabel でなければならない。
         // 順番ではなく名前で突き合わせる(識別子誤字を検出するため)。
         for (const field of ["baselineArmLabel", "againstArmLabel"]) {
           const label = delta[field];
@@ -509,11 +409,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`examples/chat/association-baseline.json`。ADR 0385、冒頭 docstring
- * 参照)の形を検査する。arm レベルの数値だけを要求し、
- * `probes`/`stageSkippedReasons` は要求しない(基準値と比べるのは arm 別まとめの
- * 行だけであり、probe 明細までは比べない仕様のため)。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { embedding: Record<string, unknown>, llmMode: string, arms: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -555,7 +450,7 @@ export function validateBaseline(data) {
         }
         seenLabels.add(label);
       }
-      // 🔴 同一性の本当の鍵でも重複を見る(冒頭 docstring 参照。measured 側と同じ理由)。
+      // measured 側と同じ理由で、構造化フィールドの鍵でも重複を見る。
       if (typeof arm === "object" && arm !== null && typeof arm.associationEnabled === "boolean") {
         const armKey = armShortKey(arm);
         if (seenArmKeys.has(armKey)) {
@@ -579,10 +474,6 @@ export function validateBaseline(data) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Markdown の組み立て
-// ---------------------------------------------------------------------------
-
 function formatMrr(value) {
   return Number(value).toFixed(3);
 }
@@ -591,12 +482,10 @@ function formatFraction(count, total) {
   return `${count}/${total}`;
 }
 
-/** 差分を符号付きの整数として表示する(0 は符号無し)。 */
 function formatSignedInt(diff) {
   return diff > 0 ? `+${diff}` : `${diff}`;
 }
 
-/** 差分を符号付きの小数(3桁)として表示する(0 は符号無し)。 */
 function formatSignedMrr(diff) {
   const fixed = Math.abs(diff).toFixed(3);
   if (diff > 0) return `+${fixed}`;
@@ -604,20 +493,10 @@ function formatSignedMrr(diff) {
   return fixed;
 }
 
-/** `(provider, model, dimensions)` を1つの文字列にする。 */
 function formatEmbeddingSpace(embedding) {
   return `${embedding.provider}/${embedding.model}/${embedding.dimensions}次元`;
 }
 
-/**
- * ⭐ **`hit@10` は連想枠の効果を測れない、という注記。**
- *
- * 連想枠が拾った候補は `recall()` 本体の `limit` 件の後ろへ連結されて返る
- * (`examples/chat/src/association-probe-set.ts` の docstring、ADR 0151)。
- * ⟹ 連想由来の gold は11位以降にしか現れず、`hit@10` は連想枠が効いているかを
- * 原理的に判定できない。**この関数は毎回同じ文言を返す**——表の下に必ず出すため
- * (毎回計算し直すと、いつか条件分岐で消えることがある)。
- */
 function hit10CaveatNote() {
   return (
     "⚠ **`hit@10` は連想枠の効果を測れない。**連想枠が拾った候補は recall() 本体の" +
@@ -627,7 +506,6 @@ function hit10CaveatNote() {
   );
 }
 
-/** 基準値の arms を `armShortKey`(同一性の鍵。armLabel ではない)で引けるようにする。 */
 function indexBaselineArms(baseline) {
   const byKey = new Map();
   for (const arm of baseline?.arms ?? []) {
@@ -665,9 +543,6 @@ function buildWarmupWarningLines(measured) {
 }
 
 /**
- * `arm` が基準値(`baselineArm`)に対して、`WORSENED_METRICS` のどれかで
- * `WORSENED_TOLERANCE` を超えて悪化しているかを見る。
- *
  * @param {Record<string, any>} arm
  * @param {Record<string, any> | undefined} baselineArm
  * @returns {{ field: string, label: string, baselineValue: number, measuredValue: number, diff: number }[]}
@@ -694,8 +569,7 @@ function findWorsenedFields(arm, baselineArm) {
 }
 
 /**
- * 実測の全 arm を基準値と突き合わせ、悪化している arm だけを返す(門ではない——
- * ここでは検出するだけで、`buildSummaryMarkdown` はこの結果を exit code に反映しない)。
+ * 門ではない。検出するだけで exit code に反映しない。
  *
  * @param {Record<string, any>} measured
  * @param {{ arms: Record<string, unknown>[] } | undefined} baseline
@@ -717,10 +591,7 @@ function findWorsenedArms(measured, baseline) {
 }
 
 /**
- * ⚠ **基準値より悪い arm がある場合だけ、Summary の上のほうに出す節(門ではない)。**
- * 悪化した arm が無ければ `undefined`(常に同じ節を出すと、読む人が「毎回出るだけの
- * 定型文」として読み飛ばすようになる——`identifier-probe-summary-lib.mjs` の
- * 「一致なら1行、違うときだけ展開する」と同じ判断)。
+ * 悪化が無ければ `undefined`。常に同じ節を出すと定型文として読み飛ばされる。
  *
  * @param {ReturnType<typeof findWorsenedArms>} worsenedArms
  */
@@ -747,7 +618,6 @@ function buildWorsenedArmsSection(worsenedArms) {
   return lines.join("\n");
 }
 
-/** 基準値との差分を短い文字列にまとめる(1セル分)。悪化していれば先頭に ⚠ を付ける。 */
 function formatArmBaselineDiff(arm, baselineArm) {
   if (!baselineArm) {
     return "基準値なし";
@@ -879,12 +749,6 @@ function buildStageSkippedSection(measured) {
   return lines.join("\n").trimEnd();
 }
 
-/**
- * ⭐ **arm 別の `associationFrameRoles` の内訳**(「連想枠には何が入ったか」、
- * 北極星の問い3)。role の列は実測に現れたものだけを出す(`ASSOCIATION_FRAME_ROLE_VALUES`
- * を決め打ちで並べない——現れなかった role の列を毎回出すと、role が増減したときに
- * この関数を書き換え忘れても気づけない)。
- */
 function buildAssociationFrameRolesTable(measured) {
   const roles = new Set();
   for (const arm of measured.arms) {
@@ -906,23 +770,6 @@ function buildAssociationFrameRolesTable(measured) {
   return lines.join("\n");
 }
 
-/**
- * ⭐ **同じストア・同じクエリで `recall()` を引き直したとき、連想枠/goldRank が
- * 一致した probe 数**(Issue #291 フォローアップ)。
- *
- * CI で同一 commit を再実行したところ、12 probe 中 10 件で連想枠の構成員が
- * 入れ替わった(一方 `off` arm は probe 別の値まで完全一致した)。原因の候補は2つ:
- * (甲) ingest ごとの差(CI は毎回まっさらな Postgres へ入れ直すため、memory id・
- * 物理配置・HNSW 索引の構築が毎回違う。近似索引である HNSW の誤差が最も大きい帯を
- * 段3.5(連想枠)は定義上採る)、(乙) **同じストアへの引き直しでも変わる**(こちらなら
- * 北極星の問い3「なぜ思い出したかを説明できるか」に直接刺さる)。
- *
- * この表は(甲)/(乙)を切り分けるための計測であって、CI 再実行間の非決定性そのものは
- * 測っていない——**同じ ingest 結果の中で** 2回 `recall()` を呼んだときの一致率を見る。
- * ここで不一致(`repeatFrameIdenticalCount < probeCount`)が出れば(乙)が確定する。
- * 一致し続けるなら、非決定性は ingest 側(甲)に局在している可能性が高い、と読める
- * (ただし「CI 再実行間でも一致するはず」までは、この表だけでは主張できない)。
- */
 function buildRepeatConsistencyTable(measured) {
   const header = "| armLabel | 連想枠 | 枠が一致した probe 数 | goldRank が一致した probe 数 |";
   const divider = "|---|---|---|---|";
@@ -938,7 +785,6 @@ function buildRepeatConsistencyTable(measured) {
   return lines.join("\n");
 }
 
-/** `associationMaxCount` が最大の(連想枠が on の)arm を返す。無ければ undefined。 */
 function findMaxAssociationCountArm(measured) {
   let best;
   for (const arm of measured.arms) {
@@ -952,19 +798,10 @@ function findMaxAssociationCountArm(measured) {
   return best;
 }
 
-/** `associationFrame` の1件を「順位:role(externalId)」の短い文字列にする。 */
 function formatAssociationFrameEntry(entry) {
   return `${entry.rank}:${entry.role}(${entry.externalId})`;
 }
 
-/**
- * ⭐ **`maxCount` 最大の arm について、gold が返らなかった probe の `associationFrame`
- * を probe ごとに列挙する。**「その枠には代わりに何が入っていたか」を読めるようにする
- * ことが目的(北極星の問い3)——1 probe につき枠の全件を1行にまとめる(長くなりすぎない
- * ように)。連想枠が on の arm が無ければ節ごと出さない(`off` しか無い実測はここでは
- * 起こらないはずだが、`validateMeasured` は「非0にする門」ではないため、壊れていない
- * 範囲で寛容に振る舞う)。
- */
 function buildMissedGoldFrameSection(measured) {
   const arm = findMaxAssociationCountArm(measured);
   if (!arm) {
@@ -990,20 +827,12 @@ function buildMissedGoldFrameSection(measured) {
   return lines.join("\n");
 }
 
-/**
- * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
- * **呼び出し側は必ず validate 済みの値を渡すこと**
- * (`identifier-probe-summary-lib.mjs` と同じ分担)。
- *
- * @param {{ measured: Record<string, any>, baseline?: { embedding: Record<string, unknown>, llmMode: string, arms: Record<string, unknown>[] } }} input
- */
+/** @param {{ measured: Record<string, any>, baseline?: { embedding: Record<string, unknown>, llmMode: string, arms: Record<string, unknown>[] } }} input */
 export function buildSummaryMarkdown({ measured, baseline }) {
   const lines = ["# association-probes（連想枠 / ADR 0151・Issue #291）", ""];
   lines.push(buildConditionsLine(measured));
   lines.push(...buildWarmupWarningLines(measured));
 
-  // ⚠ 基準値より悪い arm があれば、Summary の一番上のほう(arm別まとめの表より前)に
-  // 目立つ節として出す(門ではない——検出するだけで、確定・判断は人に残す)。
   const worsenedArms = findWorsenedArms(measured, baseline);
   const worsenedArmsSection = buildWorsenedArmsSection(worsenedArms);
   if (worsenedArmsSection) {

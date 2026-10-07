@@ -5,34 +5,15 @@ import { armHeadline } from "./retrieval-quality.js";
 import type { ArmReport, ArmTermDistinct } from "./retrieval-quality.js";
 
 /**
- * `retrieval` の機械可読な出力口（PR「retrieval を CI に載せる」）。
- *
- * **背景**: `cli.ts` の `runRetrieval()` は `console.log` の表しか持っておらず、CI が
- * 「今回いくつだったか」を掴む手段が無かった（ADR 0022 が名指しした負債）。
- * `MNEMORA_RETRIEVAL_JSON=<path>` が設定されたときだけ、このモジュールが組み立てた
- * オブジェクトを `cli.ts` がファイルへ書く（このファイル自身はファイル I/O を持たない
- * ——**純関数のまま保ち、DB を要求せずに検査できるようにする**ため）。
- *
- * 🔴 **数字だけを書いて、条件を書かないベンチ出力は、この repo で実際に3度壊れている**
- * （ADR 0068 が丸ごとその再発防止、ADR 0081 §3.2 が3度目の記録: 「arm を取り違えて
- * 記憶した」）。だからこの JSON は、arm ごとの数字に **その arm で実際に使われた
- * `llmMode`/`embeddingMode`** を同じオブジェクトに同居させ、実行全体には
- * provider source・カセットの `recordedAt`・埋め込み空間・probe/haystack の件数・
- * 測定時刻・commit を同居させる。**後から数字だけを切り離して readable にできない形**
- * にすることが、この形の存在理由である。
- *
- * **出所は `ArmReport` と `armHeadline()` だけ**（PR 本文の指定）。
- * `mrrOverall`/`hit1Count`/`hit10Count`/`probeCount` は `armHeadline(report)` から取る
- * ——`formatArmSummaryTable`/`formatArmDetail` と同じ関数を経由することで、
- * 表示用の文字列とこの JSON が別々に集計して食い違う経路を、構造上閉じる
- * （ADR 0068 ②と同じ考え方）。`mrrLexicalControl`/`mrrNonLexical` は `armHeadline` が
- * 持っていない（ADR 0068「引き受ける負債」に明記された既知の欠け）ため、
- * `formatArmSummaryTable` 自身と同じく `report` から直接読む。
+ * `retrieval` の機械可読な出力口。ファイル I/O を持たない純関数のまま保ち、DB なしで検査できるようにする（書くのは `cli.ts`）。
+ * 数字だけで条件を書かない出力は壊れるので、arm ごとに実際に使われた `llmMode`/`embeddingMode` を同居させ、
+ * 実行全体にも provider source・カセットの `recordedAt`・埋め込み空間などを同居させる。
+ * 出所は `ArmReport` と `armHeadline()` だけにする——表示用の文字列とこの JSON が別々に集計して食い違う経路を構造上閉じるため。
+ * `mrrLexicalControl`/`mrrNonLexical` は `armHeadline` が持っていないので、`report` から直接読む。
  */
 
 export interface RetrievalQualityArmJson {
   armLabel: string;
-  /** その arm で**実際に**使われたモード（`ArmReport.llmMode` = `handle.llmMode` の実値）。 */
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
   mrrOverall: number;
@@ -42,47 +23,23 @@ export interface RetrievalQualityArmJson {
   hit10Count: number;
   probeCount: number;
   /**
-   * この arm が実際に返した候補行の総数、および そのうち `score.lexicalMatch` 欄を
-   * 持っていた行数(ADR 0108。非門ジョブへの可視化)。
-   *
-   * **省略可能欄にした理由**: `RetrievalQualityRunJson.schemaVersion` は `1` の
-   * リテラル型で「この形が変わったら上げる」という契約を負っている
-   * (`schemaVersion` 自身の doc)。ここで足すのは既存の欄の意味を変えない**追加**であり、
-   * 欄を持たない古い実測 JSON・`examples/chat/retrieval-baseline.json`(この欄を持たない)
-   * を読む側(`validateMeasured`/`validateBaseline`。`REQUIRED_ARM_*_FIELDS` に含めていない)
-   * が引き続き通ることを保っている。⟹ `schemaVersion` は上げない。
+   * 省略可能欄にした理由: 既存の欄の意味を変えない追加なので `schemaVersion` は上げず、この欄を持たない古い実測 JSON・
+   * `retrieval-baseline.json` を読む側（`validateMeasured`/`validateBaseline`）が通り続けるようにする。
    */
   lexicalMatchRows?: number;
   recalledRows?: number;
   /**
-   * 項ごとの「何通りか」(arm 単位。ADR 0081 §1.1 / ADR 0109)、および
-   * `decay`/`freshness` の行ごと厳密等価の集計。**省略可能欄にした理由は
-   * `lexicalMatchRows`/`recalledRows` と同じ**——既存の欄の意味を変えない追加であり、
-   * `schemaVersion` を上げる理由が無い(古い実測 JSON・`retrieval-baseline.json` は
-   * この欄を持たないまま、引き続き `validateMeasured`/`validateBaseline` を通る。
-   * `REQUIRED_ARM_*_FIELDS`/`DIFF_FIELDS` のどちらにも含めていない)。
-   *
-   * **⚠ JSON は数値をそのまま書く(丸めない)。**`formatScoreValue` を経由しないので、
-   * `min`/`max` がここでは 1e-7 桁の `decay`/`freshness` の差(ADR 0109 §4 の実測)を保つ**唯一の保全経路**
-   * である——コンソール出力(`formatArmDetail`)は `formatExactScoreValue` で
-   * 丸めずに出すとはいえ、機械可読な形で残るのはこの JSON だけである。
+   * 省略可能欄にした理由は `lexicalMatchRows` と同じ。JSON は数値を丸めずに書く: 1e-7 桁の `decay`/`freshness` の差を
+   * 機械可読に残す唯一の経路のため。
    */
   termDistinct?: ArmTermDistinct[];
   decayFreshnessEqualRows?: number;
   decayFreshnessDifferentRows?: number;
-  /**
-   * この arm が実際に `recall()` へ渡した(または既定へ委ねた)チャンネル
-   * (ADR 0148、Issue #179)。**省略可能欄にした理由は `lexicalMatchRows` と同じ**
-   * ——既存の欄の意味を変えない追加であり、古い実測 JSON・`retrieval-baseline.json`
-   * (この欄を持たない)は引き続き `validateMeasured`/`validateBaseline` を通る
-   * (`REQUIRED_ARM_*_FIELDS`/`DIFF_FIELDS` のどちらにも含めていない)。
-   * ⛔ **門にはしない**——ADR 0148 の決定により、語彙構成の数字は報告に留める。
-   */
+  /** 省略可能欄にした理由は `lexicalMatchRows` と同じ。門にはしない——語彙構成の数字は報告に留める（ADR 0148）。 */
   channels?: readonly RecallChannel[];
 }
 
 export interface RetrievalQualityCassetteJson {
-  /** カセットを記録した時刻（ISO 8601）。カセットを使っていない run では欄自体が無い。 */
   recordedAt: string;
   embedding: {
     provider: string;
@@ -92,48 +49,28 @@ export interface RetrievalQualityCassetteJson {
 }
 
 export interface RetrievalQualityRunJson {
-  /** この形が変わったら上げる。読み手（summary スクリプト）が形の変化を検知できるように。 */
   schemaVersion: 1;
-  /** ISO 8601。JSON を組み立てた時刻——arm の実行が全部終わった後。 */
   measuredAt: string;
-  /** `git rev-parse HEAD`。取れなければ `null`（推測で埋めない。`./git-info.js` 参照）。 */
   commit: string | null;
-  /** ADR 0068 ③ の `decideProviderSource` が選んだ側。 */
   providerSource: "recorded" | "openai";
-  /** `providerSource === "openai"`（実 API 直叩き）のときは `null`。 */
   cassette: RetrievalQualityCassetteJson | null;
-  /** 全 arm 共通の probe 件数（`reports[0].probes.length`。arm ごとに違うことは無い）。 */
   probeCount: number;
-  /** 全 arm 共通の haystack 件数。`ingest.observationCount` から probe 分（gold+distractor）を
-   *  引いて求める——`DEFAULT_HAYSTACK_SIZE` を書き写すと、呼び出し側が別の値を渡したときに
-   *  この JSON だけが古い値のまま残る（ADR 0068 ②と同じ「出所を1箇所にする」判断）。 */
+  /** `ingest.observationCount` から probe 分を引いて求める。`DEFAULT_HAYSTACK_SIZE` を書き写すと、呼び出し側が別の値を渡したときにこの JSON だけ古い値のまま残る。 */
   haystackSize: number;
   arms: RetrievalQualityArmJson[];
 }
 
 export interface BuildRetrievalQualityJsonOptions {
-  /** 3 arm 分。空配列は渡さない想定だが、渡されても例外にはしない（下記参照）。 */
   reports: readonly ArmReport[];
   providerSource: "recorded" | "openai";
-  /** `providerSource === "openai"` なら `undefined` を渡すこと。 */
   cassette: Cassette | undefined;
   measuredAt: Date;
   commit: string | null;
 }
 
 /**
- * `runRetrieval()` が集めた `ArmReport[]` から、機械可読な JSON を組み立てる。
- *
- * **純関数**（ファイル I/O・環境変数・時刻取得を一切行わない）——呼び出し側が
- * `measuredAt`/`commit` を明示的に渡す。これにより DB もネットワークも無い環境で
- * 検査できる（`__tests__/retrieval-json.test.ts`）。
- *
- * **`reports` が空のとき** `probeCount`/`haystackSize` は 0 になる。`cli.ts` の
- * `runRetrieval()` は必ず3 arm を作ってから呼ぶため実際には起きないが、
- * 「起きたら例外にする」という選択は取らない——このオブジェクトを作ること自体は
- * 失敗させず、`0` という値そのものに「今回は arm が無かった」が現れるようにする
- * （ADR 0008「無いには種類がある」の軽い適用。空配列を渡して落ちるほうが、
- * 呼び出し側のミスを実行時例外という重い形で伝えることになり、この用途には合わない）。
+ * 純関数。`measuredAt`/`commit` は呼び出し側が渡す。`reports` が空でも例外にしない: `probeCount`/`haystackSize` が 0 になることで
+ * 「今回は arm が無かった」を表す。
  */
 export function buildRetrievalQualityJson(
   options: BuildRetrievalQualityJsonOptions,

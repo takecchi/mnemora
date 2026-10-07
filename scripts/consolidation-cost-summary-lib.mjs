@@ -1,36 +1,9 @@
 /**
- * `scripts/consolidation-cost-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる
- * CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/retrieval-quality-summary-lib.mjs`/`scripts/identifier-probe-summary-lib.mjs`
- * と同じ分担・同じ理由(Issue #136)。
- *
- * `examples/chat` の `consolidation-cost` サブコマンド(`MNEMORA_CONSOLIDATION_JSON` が吐く
- * JSON、`examples/chat/src/consolidation-json.ts` の `ConsolidationCostRunJson`)を
- * Markdown へ変換する。
- *
- * ## ⛔ 門にしない。ただし基準値とは比べる
- *
- * ADR 0088 §3(基準値との diff を Job Summary に出す)と、同 ADR「決めたこと」4番・§2.1
- * (相違では落とさない)が確立した形をそのまま踏襲する: 基準値と diff を取って Job Summary に出し、
- * **かつ**相違では落とさない(exit 0)。標本は probe 7件であり
- * (`docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md` §3)、
- * 閾値の門を置くには足りない。非0になるのは入力そのものが壊れているときだけ。
- *
- * ## 一致していれば1行、違うときだけ展開する(ADR 0088 §3-3)
- *
- * ## ⛔ 縮み率(前後の比)はここで計算して基準値と比べない
- *
- * 比べるのは `rounds[].store`/`rounds[].consolidation`/`rounds[].recall.*.mean` の
- * **その場の値**であり、round 間の比は診断表(下記「gold を載せるのに要った最小予算」節)
- * を除いて計算しない——`consolidation-json.ts` 自身が「縮み率をJSONに書かない」と
- * 決めているのと同じ理由(ADR 0088 §4「数字をどこにも書き写さない」）。
- *
- * ## 「gold を載せるのに要った最小予算」の表は、基準値と比べない
- *
- * この表は `budgetLadder` の実測値(`rounds[].recall.budgeted[]`)から直接導出する
- * **診断表**であり、`ConsolidationCostRunJson` はこの値そのものを持たない
- * (JSON に書き写さないため——マネージャー指示)。⟹ 基準値ファイルにもこの表の値は
- * 持たせない。常に測定 JSON から計算し直す。
+ * ⛔ 門にしない。基準値との diff は Job Summary に出すが、相違では落とさない（exit 0）。
+ * 標本が probe 7件で、閾値の門を置くには足りない。非0は入力が壊れているときだけ。
+ * ⛔ 縮み率（round 間の比）は、診断表を除いて計算しない。基準値と比べるのは各 round のその場の値だけ。
+ * ⛔ 「gold を載せるのに要った最小予算」の表は、基準値と比べない。JSON が持たない値で、
+ * 常に測定 JSON から計算し直す。
  */
 
 const REQUIRED_STORE_FIELDS = [
@@ -53,10 +26,7 @@ const REQUIRED_MEAN_FIELDS = [
   "recalledActiveShare",
 ];
 
-// ⚠ 2026-09-30 追記（Issue #1226、ADR 0375 決定7）: "aborted_source_forgotten" を足した
-// ——`ConsolidateOutcome`（packages/core）に同名の値が増えたことに合わせた
-// （`examples/chat/src/consolidation-json.ts` の `ConsolidationOutcomeCountsJson` と同じ
-// 理由で、この一覧も `ConsolidateOutcome` の全値と1対1で揃える）。
+// `ConsolidateOutcome` の全値と1対1で揃える。
 const REQUIRED_CONSOLIDATION_OUTCOME_FIELDS = [
   "consolidated",
   "nothing_to_consolidate",
@@ -131,10 +101,6 @@ function findConsolidationProblems(consolidation, label) {
   return problems;
 }
 
-/**
- * 1 round の形を検査する。`requireProbes: true` のときは `recall.*.probes` 配列の存在も
- * 要求する(measured 側だけが要る——診断表の計算に使うため)。
- */
 function findRoundProblems(round, i, { requireProbes }) {
   if (!isObject(round)) {
     return [`rounds[${i}] がオブジェクトでない`];
@@ -222,21 +188,12 @@ function findTopLevelProblems(data) {
 }
 
 /**
- * 🔴 **`examples/chat/src/local-embedding-warmup.ts` の `WEIGHTS_UNAVAILABLE_PREFIX` と
- * 同じ文言をここに逐語で持つ。**⚠ TS 側の定数を import できない(このファイルは素の
- * `.mjs` であり、CI の Job Summary の段は `tsx` を通さない)。二重管理であることを
- * 認めて書いておく(`identifier-probe-summary-lib.mjs` と同じ判断)。
+ * 🔴 `examples/chat/src/local-embedding-warmup.ts` の `WEIGHTS_UNAVAILABLE_PREFIX` と同じ文言を逐語で持つ。
+ * TS 側の定数は import できない（素の `.mjs` で、`tsx` を通さない）。
  */
 const WEIGHTS_UNAVAILABLE_PHRASE = "重みを取得できなかったので、値は測っていない";
 
 /**
- * `MNEMORA_CONSOLIDATION_JSON` が吐いた JSON(パース済み)の形を検査する。
- * `status: "weights_unavailable"` それ自体は壊れた入力ではない(`detail` さえ在れば
- * 正しい形)——壊れているのは JSON がオブジェクトでない・`status` が未知の値・
- * `"measured"` なのに必須項目が無い場合だけである。
- * `"measured"` のときは `rounds[].recall.*.probes` の存在も要求する
- * (診断表の計算に使うため)。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -271,12 +228,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`examples/chat/consolidation-baseline.json`、パース済み)の形を検査する。
- * **基準値は常に `status: "measured"` であること**(基準値は実際に測れた値を記録する
- * もの——`weights_unavailable` を基準値にする意味が無い)。
- * `probes` 配列は要求しない——基準値は round・store・consolidation・mean だけを持つ
- * 軽量な形でよい(診断表は基準値と比べないため)。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -306,10 +257,6 @@ export function validateBaseline(data) {
   }
   return { ok: true, value: /** @type {Record<string, unknown>} */ (data) };
 }
-
-// ---------------------------------------------------------------------------
-// 差分
-// ---------------------------------------------------------------------------
 
 const TOP_DIFF_FIELDS = [
   "llmMode",
@@ -346,8 +293,6 @@ function embeddingFailureKindsOf(round) {
 }
 
 /**
- * 1 round の実測と基準値を比較する。
- *
  * @param {Record<string, any>} measuredRound
  * @param {Record<string, any> | undefined} baselineRound
  */
@@ -364,7 +309,6 @@ export function diffRound(measuredRound, baselineRound) {
       fieldDiffs.push({ field, baseline, measured });
     }
   }
-  // consolidation は round 0 のとき null——null 同士は一致、片方だけ null なら相違。
   if (measuredRound.consolidation === null || baselineRound.consolidation === null) {
     if (measuredRound.consolidation !== baselineRound.consolidation) {
       fieldDiffs.push({
@@ -391,7 +335,6 @@ export function diffRound(measuredRound, baselineRound) {
       });
     }
   }
-  // unbudgeted mean
   for (const field of MEAN_DIFF_FIELDS) {
     const path = `recall.unbudgeted.mean.${field}`;
     const baseline = readPath(baselineRound, path);
@@ -400,7 +343,7 @@ export function diffRound(measuredRound, baselineRound) {
       fieldDiffs.push({ field: path, baseline, measured });
     }
   }
-  // budgeted rungs、budgetTokens で対応付ける(順序ではなく値で——ADR 0094 §「群の同一性」と同じ判断)。
+  // budgetTokens の値で対応付ける（順序では対応付けない）。
   const baselineRungsByTokens = new Map(
     (baselineRound.recall?.budgeted ?? []).map((r) => [r.budgetTokens, r]),
   );
@@ -509,15 +452,7 @@ function buildDiffSection(measured, baseline) {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 「gold を載せるのに要った最小予算」診断表(基準値とは比べない。マネージャー指示)
-// ---------------------------------------------------------------------------
-
 /**
- * measured の round について、probe ごとに「`goldRank !== null` になった最小の
- * `budgetTokens`」を求める。どの段でも載らなければ `null`(0 や最大値で埋めない——
- * 「載らなかった」を別の欄で数える、という規律)。
- *
  * @param {Record<string, any>} round
  * @returns {{ probeId: string, minBudgetForGold: number | null }[]}
  */
@@ -535,7 +470,6 @@ export function computeMinBudgetForGold(round) {
   });
 }
 
-/** measured 全体から、「gold を載せるのに要った最小予算」の表(Markdown)を組み立てる。 */
 export function buildMinBudgetForGoldSection(measured) {
   const rounds = measured.rounds ?? [];
   const probeIds = (rounds[0]?.recall?.unbudgeted?.probes ?? []).map((p) => p.probeId);
@@ -568,26 +502,10 @@ export function buildMinBudgetForGoldSection(measured) {
   ].join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 退化検出(recalledActiveShare が 1.0 近傍 = 「全部載せる」に退化している)
-// ---------------------------------------------------------------------------
-
-/**
- * `recalledActiveShare`(`carriedCount / activeCount` の平均)がこの値以上なら
- * 「ほぼ全ての active Memory を載せている」とみなす。1.0 ちょうどでなくても、
- * 平均を取る過程で丸め誤差が乗ることがあるため、僅かに余裕を持たせてある。
- *
- * ⚠ **実測でこれは実際に起きる**(round2/round3 の budget=256/512 で
- * `recalledActiveShare` が 1.000 になった)。budget を上げても対象を絞れていない
- * ——つまりその段は「budget が効いた結果」ではなく「そもそも載せる対象が少なかった
- * だけ」であり、他の段と比較しても意味を持たない。**黙って良い数字として並べない。**
- */
+/** 1.0 ちょうどでなくても平均を取る過程で丸め誤差が乗るので、僅かに余裕を持たせてある。 */
 const DEGENERATE_SHARE_THRESHOLD = 0.999;
 
 /**
- * measured の全 round・全 budget 段(unbudgeted も含む)を洗い、
- * `mean.recalledActiveShare` が退化しきい値以上の行を集める。
- *
  * @param {Record<string, any>} measured
  * @returns {{ round: number, label: string, recalledActiveShare: number }[]}
  */
@@ -613,11 +531,6 @@ export function findDegenerateRecalledActiveShareRows(measured) {
 }
 
 /**
- * 退化検出の節を組み立てる。基準値とは比べない(`buildMinBudgetForGoldSection` と
- * 同じ判断——これは measured 単体から言える診断であり、基準値との一致/不一致とは
- * 独立に常に見えるべきものだから)。該当が無ければ1行で済ませる
- * (ADR 0088 §3-3「一致していれば1行、違うときだけ展開する」と同じ形の適用)。
- *
  * @param {Record<string, any>} measured
  */
 export function buildDegenerateShareSection(measured) {
@@ -641,10 +554,6 @@ export function buildDegenerateShareSection(measured) {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 注意書き(ADR 0088 §4 と同じ形。3点)
-// ---------------------------------------------------------------------------
-
 function buildCautionSection() {
   return [
     "## 読み方の注意",
@@ -663,12 +572,8 @@ function buildCautionSection() {
 }
 
 /**
- * Markdown を組み立てる。`validateMeasured`/`validateBaseline` を通した値を渡すこと。
- *
- * 🔴 **`status` で最初に分岐する**(`identifier-probe-summary-lib.mjs` の
- * `buildSummaryMarkdown` と同じ形)。`"weights_unavailable"` のときはメトリクスの表を
- * 1つも出さず、**基準値との比較も1つも行わない**——⛔ 「測れなかった」を
- * 「基準値と違う」に化けさせない(`--baseline` を渡していても無視する)。
+ * 🔴 `status` で最初に分岐する。`"weights_unavailable"` のときは基準値との比較を行わない
+ * （`--baseline` を渡していても無視する）。「測れなかった」を「基準値と違う」に化けさせない。
  *
  * @param {{ measured: Record<string, any>, baseline?: Record<string, any> }} input
  */

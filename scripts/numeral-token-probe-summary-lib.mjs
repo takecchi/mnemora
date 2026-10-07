@@ -1,51 +1,26 @@
 /**
- * `scripts/numeral-token-probe-summary.mjs`(CI の Job Summary に載せる Markdown を組み立てる
- * CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を一切持たない
- * ——`scripts/identifier-probe-summary-lib.mjs` と同じ分担・同じ理由(ADR 0135、Issue #109)。
+ * ⛔ `identifier-probe-summary-lib.mjs`/`identifier-probe-baseline.json` とは別の道具・別の入力。既存の識別子・日本語固有名詞 probe の要約には触れない。
+ * 群は `sparse`/`dense` の2つだけ。
  *
- * `examples/chat` の `numeral-token-probes` サブコマンド
- * (`MNEMORA_NUMERAL_TOKEN_JSON` が吐く JSON、`examples/chat/src/numeral-token-json.ts` の
- * `NumeralTokenProbeRunJson`)を Markdown へ変換する。
+ * 🔴 `status` で最初に分岐する。`"weights_unavailable"` と `"measured"` を同じ顔で出さない。
  *
- * ⛔ **`scripts/identifier-probe-summary-lib.mjs`/`examples/chat/identifier-probe-baseline.json`
- * とは別の道具・別の入力である**——既存の識別子・日本語固有名詞 probe の要約には
- * 1文字も触れていない。
+ * ⛔ 門にしない。標本18件は閾値の門に足る母数ではない(ADR 0033 §3、ADR 0135 §4-8)。非0になるのは入力そのものが壊れているときだけ。
  *
- * 群は **`sparse`/`dense` の2つだけ**(識別子集合の5群とは違う——ADR 0135 は
- * `lexicalControl`/日本語固有名詞に相当する第3の比較対象を持たない、§5.3)。
- *
- * 🔴 **`status` で最初に分岐する。**`"weights_unavailable"` と `"measured"` を
- * 同じ顔で出さない(`identifier-probe-summary-lib.mjs` と同じ理由)。
- *
- * ## ⛔ 門にはしない
- *
- * 相違で非0を返さない。標本18件は ADR 0033 §3 の規律に照らして閾値の門に足る母数
- * ではない(ADR 0135 §4-8)。非0になるのは**入力そのものが壊れているとき**だけである。
- *
- * ## 🔴 比べるのは数字だけではない
- *
- * `embeddingSpace`(`provider`/`model`/`dimensions`)と `haystackKind` に加え、
- * **`marginStats`(count/mean/stdDev/min)も比べる**——ADR 0135 §5.5 の核心である
- * margin の分布が、基準値と実測でずれていないかを見る。
+ * 🔴 数字だけでなく `embeddingSpace`・`haystackKind`・`marginStats`(count/mean/stdDev/min)も比べる。margin の分布が基準値からずれていないかを見る。
  */
 
-/** 群の同一性は群の名前(`sparse`/`dense`)で取る(`identifier-probe-summary-lib.mjs` と同じ理由)。 */
 const GROUP_KEYS = ["sparse", "dense"];
 
 const REQUIRED_GROUP_STRING_FIELDS = ["label", "llmMode", "embeddingMode", "haystackKind"];
 const REQUIRED_GROUP_NUMBER_FIELDS = ["mrrOverall", "hit1Count", "hit10Count", "probeCount"];
 
 /**
- * 🔴 **`examples/chat/src/local-embedding-warmup.ts` の `WEIGHTS_UNAVAILABLE_PREFIX` と
- * 同じ文言をここに逐語で持つ**(`identifier-probe-summary-lib.mjs` と同じ二重管理。
- * 文言を変えるときは両方を直すこと)。
+ * 🔴 `examples/chat/src/local-embedding-warmup.ts` の `WEIGHTS_UNAVAILABLE_PREFIX` と同じ文言を逐語で持つ(二重管理。文言を変えるときは両方直すこと)。
  */
 const WEIGHTS_UNAVAILABLE_PHRASE = "重みを取得できなかったので、値は測っていない";
 
 /**
- * `marginStats`(`{ count, mean, stdDev, min }`)が正しい形かを検査する。
- * `mean`/`stdDev`/`min` は `count` によって `null` でもよい(`computeMarginStats` の契約)
- * ——ここでは「数値または null」であることまでしか見ない(値の整合はこの歯の対象外)。
+ * `mean`/`stdDev`/`min` は `count` によって `null` でもよい。数値または null までしか見ない。
  *
  * @param {unknown} stats
  * @param {string} groupName
@@ -70,8 +45,6 @@ function findMarginStatsProblems(stats, groupName) {
 }
 
 /**
- * 1群(`sparse`/`dense`)のオブジェクトが必須項目をすべて正しい型で持っているかを検査する。
- *
  * @param {unknown} group
  * @param {string} groupName
  * @returns {string[]}
@@ -109,8 +82,6 @@ function findGroupFieldProblems(group, groupName) {
 }
 
 /**
- * `MNEMORA_NUMERAL_TOKEN_JSON` が吐いた JSON(パース済み)の形を検査する。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: Record<string, unknown> } | { ok: false, error: string }}
  */
@@ -140,9 +111,6 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`examples/chat/numeral-token-probe-baseline.json`、パース済み)の形を
- * 検査する。`groups` 配列の各要素は `group`(`sparse`/`dense`)を持つこと。
- *
  * @param {unknown} data
  * @returns {{ ok: true, value: { groups: Record<string, unknown>[] } } | { ok: false, error: string }}
  */
@@ -178,23 +146,18 @@ export function validateBaseline(data) {
   return { ok: true, value: /** @type {{ groups: Record<string, unknown>[] }} */ (data) };
 }
 
-/** `4/7` の形。 */
 function formatFraction(count, total) {
   return `${count}/${total}`;
 }
 
-/** MRR を既存のベンチの表示(`toFixed(3)`)に揃える。 */
 function formatMrr(value) {
   return /** @type {number} */ (value).toFixed(3);
 }
 
-/** `(provider, model, dimensions)` を1つの文字列にする。 */
 function formatSpace(space) {
   return `${space.provider}/${space.model}/${space.dimensions}次元`;
 }
 
-/** `n=18 mean=+3.747e-2 stdDev=1.902e-2 min=+1.048e-2` の形(`formatMarginStats`
- *  と同じ桁数、`identifier-arm.ts` の表示に揃える)。`count===0` は専用の文言にする。 */
 function formatMargin(stats) {
   if (!stats || stats.count === 0) {
     return "(測れた probe が0件)";
@@ -203,9 +166,7 @@ function formatMargin(stats) {
   return `n=${stats.count} mean=${stats.mean.toExponential(3)} stdDev=${stdDevText} min=${stats.min.toExponential(3)}`;
 }
 
-/**
- * @param {Record<string, any>} group
- */
+/** @param {Record<string, any>} group */
 function buildGroupRow(group) {
   return (
     `| ${group.label} | ${group.llmMode} | ${formatSpace(group.embeddingSpace)} | ` +
@@ -216,10 +177,6 @@ function buildGroupRow(group) {
   );
 }
 
-/**
- * 基準値と突き合わせる項目。`embeddingSpace` の3項目・`haystackKind`・`label` に加え、
- * `marginStats` の4項目も含む(ADR 0135 §5.5)。
- */
 const DIFF_FIELDS = [
   "label",
   "llmMode",
@@ -239,8 +196,6 @@ const DIFF_FIELDS = [
 ];
 
 /**
- * `"embeddingSpace.provider"` のような入れ子のパスを読む。
- *
  * @param {Record<string, any> | undefined} obj
  * @param {string} path
  */
@@ -251,9 +206,7 @@ function readPath(obj, path) {
 }
 
 /**
- * 実測の1群と、対応する基準値の1群(無ければ `undefined`)を比べる。
- *
- * @param {string} groupName `sparse`/`dense`
+ * @param {string} groupName
  * @param {Record<string, any>} measuredGroup
  * @param {Record<string, any> | undefined} baselineGroup
  * @returns {{ groupName: string, matches: boolean, missingBaseline: boolean, fieldDiffs: { field: string, baseline: unknown, measured: unknown }[] }}
@@ -274,7 +227,7 @@ export function diffGroup(groupName, measuredGroup, baselineGroup) {
 }
 
 /**
- * 基準値との差分節。**一致なら1行、違うときだけ展開する**(ADR 0088 §3-3と同じ規律)。
+ * 一致なら1行、違うときだけ展開する。
  *
  * @param {Record<string, any>} measured
  * @param {{ groups: Record<string, unknown>[] }} baseline
@@ -331,8 +284,7 @@ function buildDiffSection(measured, baseline) {
 }
 
 /**
- * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
- * **呼び出し側は必ず validate 済みの値を渡すこと。**
+ * 呼び出し側は必ず validate 済みの値を渡すこと。
  *
  * @param {{ measured: Record<string, any>, baseline?: { groups: Record<string, unknown>[] } }} input
  */

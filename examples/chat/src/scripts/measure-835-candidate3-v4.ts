@@ -7,52 +7,12 @@ import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
 import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io.js";
 
-/**
- * Issue #835 候補3: ADR 0329 追記（2026-09-25）「負債1を語彙ヒントの文言で塞ぐ試み」が
- * 試作した v4 文言（本ファイル下部 {@link V4_INSTRUCTION_TEMPLATE}、ADR 0329 の追記から
- * 逐語転記）だけを、PR #1424（ADR 0377、Issue #835 候補1）が入った後の main で
- * 再測定する（マネージャー指示）。
- *
- * **同じ物差し**（ADR 0329 追記「測ったこと」節と同一）:
- * - 対象: `answer-case-set.dev.ts`（6件）+ `.eval.ts`（8件）の全14ケース。
- * - 条件: `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`
- *   （`record-answer-claim-key.ts` の `MNEMORA_RECORD_CONDITION=known-predicates-from-store`
- *   と同じ）。
- * - 記録スクリプトの配線: `record-answer-claim-key.ts` と同じ
- *   （`createAnswerBenchRuntime` → `runAnswerCase` → `CassetteRecorder`）。
- * - 種カセットは常に `answer.order-legend.json` だけ（ADR 0329 決定6 と同じ理由）。
- *
- * **v4 の文言を core（`packages/core/src/claim-key.ts`）へは一切入れない。** 代わりに、
- * この測定スクリプトだけが `OpenAILLMProvider.prototype.completeStructured` を実行時に
- * 差し替え（monkey-patch）、claim key 派生の system プロンプト（`" 既知の predicate
- * 候補一覧: {list}。この一覧に当てはまる場合は必ずそのまま使い、…"` を含むものだけ）を
- * 実 API へ送る**直前**に v4 文言へ書き換える。既定の経路（`buildKnownPredicateInstruction`）
- * にも既存カセットの鍵にも触れない——差し替えは real の直前、実 API へ送る request
- * オブジェクトの上でだけ起きる（`examples/chat/src/scripts/measure-claim-key-835.ts` が
- * 先行して使った「real 層だけを monkey-patch する」手法と同型）。
- *
- * 使い方: `DATABASE_URL=... OPENAI_API_KEY=... MNEMORA_RECORD_CASSETTE_PATH=... \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/measure-835-candidate3-v4.ts`
- */
+/** v4 文言は core へ入れない。この測定だけが `OpenAILLMProvider.prototype.completeStructured` を、実 API へ送る直前に差し替える（既定の経路にも既存カセットの鍵にも触れない）。 */
 
-// ---------------------------------------------------------------------------
-// v4 文言（ADR 0329 追記 2026-09-25 から逐語転記。試作コードの再現であり、
-// core には実装しない——このファイルだけが持つ）
-// ---------------------------------------------------------------------------
-
-/** 既定の文言（`claim-key.ts` の `buildKnownPredicateInstruction`）が生成する接尾辞を検出する正規表現。 */
 const DEFAULT_SUFFIX_PATTERN =
   / 既知の predicate 候補一覧: (.+?)。この一覧に当てはまる場合は必ずそのまま使い、どれにも当てはまらない場合だけ新しい predicate を作ってください。/;
 
-/**
- * ADR 0329 追記（2026-09-25）「試した4変種」v4 の逐語（原文はブロック引用の折り返しの
- * ため複数行に分かれているが、改行そのものは版組みの都合であり文の一部ではない——
- * ADR 本文を1文字も変えない制約の下、`{predicates}` の前後を機械的に切り出して
- * 連結する。`packages/core/src/__tests__/claim-key.test.ts` 的な「原文との一致」を
- * 保つため、分割元の文字列は ADR から一度も手で書き写していない
- * （このコメントの下の2つの定数は、ADR 0329 の v4 引用ブロックをそのまま抜き出し、
- * `{predicates}` の位置で機械的に2分割しただけである）。
- */
+// ADR 0329 の v4 引用ブロックを `{predicates}` の位置で機械的に2分割しただけ（手で書き写して原文とずれないように）。
 const V4_INSTRUCTION_PREFIX =
   "既知の predicate 候補一覧（このテナント・主題について過去に使われたもの）:";
 const V4_INSTRUCTION_SUFFIX =
@@ -62,7 +22,6 @@ const V4_INSTRUCTION_SUFFIX =
   "「言及していない」「特に述べていない」「〜したいことがある」のように実質的な主張を持たない場合は、一覧を無理に" +
   "当てはめず、新しい predicate を作ってください。無関係な記憶どうしを同じ predicate にまとめないでください。";
 
-/** `export` は自己検査用（`_smoke-835-v4.ts`、追跡外）が ADR 原文との一致を確かめるため。 */
 export function buildV4Instruction(predicatesList: string): string {
   return ` ${V4_INSTRUCTION_PREFIX}${predicatesList}${V4_INSTRUCTION_SUFFIX}`;
 }
@@ -70,13 +29,7 @@ export function buildV4Instruction(predicatesList: string): string {
 let patchedCalls = 0;
 let sawSuffixCalls = 0;
 
-/**
- * `OpenAILLMProvider.prototype.completeStructured` を書き換える。real（実 API）の直前で
- * だけ効く——`SeededLLMProvider`/`RecordingLLMProvider` はこのインスタンスを包む外側の層
- * であり、書き換え後の `req.prompt.system`（同じオブジェクト参照）をそのままカセットへ
- * 記録する（`RecordingLLMProvider.completeStructured` は呼び出し後に `req.prompt` を鍵に
- * 使う——`cassette-recorder.ts` 参照）。
- */
+/** 実 API の直前でだけ効く。外側の `RecordingLLMProvider` は書き換え後の `req.prompt`（同じ参照）をそのままカセットへ記録する。 */
 function installV4Patch(): () => void {
   const proto = OpenAILLMProvider.prototype as unknown as {
     completeStructured: (...args: unknown[]) => Promise<unknown>;

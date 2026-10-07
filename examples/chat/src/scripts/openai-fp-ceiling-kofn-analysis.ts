@@ -9,37 +9,7 @@ import {
 } from "../verdict-candidate-kofn.js";
 import { tryGitRevParseHead } from "../git-info.js";
 
-/**
- * Issue #109 残件「A」——マネージャーからの実測依頼: ADR 0316 が**既にコミットした**
- * `openai-embedding-fp-ceiling-measurement.json`（測定B、K=59、実 API）を読み、
- * **候補案2（k-of-n・多数決）**を**新しい実 API 呼び出し無しで**評価する。
- *
- * ⛔ **入力ファイルは読むだけで、1バイトも書き換えない。**`openai-arm-verdict.ts`にも
- * 触れていない——`clopperPearsonUpperBound`（変更していない）と、この Issue の
- * ために新設した `verdict-candidate-kofn.ts`（変更していない、このスクリプトが
- * 呼ぶだけ）を使う。
- *
- * ## やること
- *
- * 1. 6群それぞれについて、round 1..59 の `red` フラグ列（既存 JSON の `perRound[].groups[].red`、
- *    ADR 0316 の判定=案0で確定済みの値）を取り出す。
- * 2. **sparse/dense 一致**（追加録画なしで CI 実装可能な案2の一種）を実測する——
- *    同じ round で sparse と dense が両方 red だったか、片方だけだったかを数える。
- * 3. **k-of-n（N本の独立な録画のうち k本以上）**を、既存59巡を「N個ずつ重ならない窓」に
- *    区切って実測する（`empiricalKOfNRedRate`）——これは「N本委託録画してCIに置いた場合」の
- *    シミュレーションであり、実装するなら録画コストがN倍になることに注意
- *    （`verdict-candidate-kofn.ts` の doc コメント）。
- * 4. 二項分布による理論値（`binomialAtLeastK`）も、実測 red 率とその
- *    Clopper–Pearson 片側95%上限の両方を p として代入し、参考値として併記する。
- *
- * ## 使い方
- *
- * ```
- * pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-fp-ceiling-kofn-analysis.ts
- * ```
- *
- * ⛔ DB も実 API も呼ばない——既存 JSON を読むだけの純粋な後処理。
- */
+/** 手で回す後処理。既存 JSON を読むだけで書き換えない。k-of-n は「N本録画して CI に置いた場合」のシミュレーションで、実装するなら録画コストが N 倍になる。 */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CHAT_ROOT = join(here, "..", "..");

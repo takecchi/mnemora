@@ -2,12 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx, OutboxJobRecord } from "@mnemora/core";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 
-/**
- * `InMemoryOutboxStore.claimBatch` は取り直し（更新前の `claimedAt` が在る行）で `availableAt` を
- * `opts.now` に書き直す。書くのは呼び手が渡した `Date` そのものではなく、その写し。
- * `PostgresOutboxStore` は値を列へ書くので、呼び手があとで自分の `now` を書き換えても保存した行は動かない。
- * 同じ `Date` を保存すると、呼び手の書き換えが取り直された job の `availableAt` に漏れる。
- */
+/** `availableAt` には呼び手の `Date` そのものではなく写しを書く。同じ `Date` を保存すると、呼び手の書き換えが取り直された job に漏れる。 */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 

@@ -3,16 +3,6 @@ import type { Ctx, MemoryId } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 
-// id の「一覧」を取る口の綴りと形の崩れ（Postgres と同じ）。DB を使わない。
-//
-// - #1195 T1: `restoreSupersededBy`・`previewRestoreSupersededBy` の `onlyMemoryIds` に大文字の id を渡しても、
-//   小文字の id と同じ記憶として当たる（`@mnemora/postgres` は uuid 型の列で比べる）。
-// - #1289 T1: `aggregateScope` の `digestBand.excludeMemoryIds` に大文字の id を渡しても、その記憶は除外される。
-// - #1289 T2': 形の崩れた id が混ざっても投げない（Postgres は `isUuidLike` で落として無いものとして扱う）。
-//   ほかの id の絞り込み・除外は今までどおり効く。
-// 3実装の突き合わせは `packages/postgres/src/__tests__/store-boundary-diff.postgres.test.ts`。
-// `*-conformance.ts` には何も足していない。
-
 const ctx: Ctx = { tenantId: "inmemory-id-list-spelling" };
 const MALFORMED = "not-a-uuid" as MemoryId;
 const up = (id: MemoryId) => id.toUpperCase() as MemoryId;
@@ -68,7 +58,6 @@ describe("InMemoryMemoryStore: restoreSupersededBy・previewRestoreSupersededBy 
 });
 
 describe("InMemoryMemoryStore: aggregateScope の digestBand.excludeMemoryIds", () => {
-  /** active の記憶を2件（a・b）持つ store。 */
   async function twoActive() {
     const store = new InMemoryMemoryStore();
     const [a, b] = [

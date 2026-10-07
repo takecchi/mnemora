@@ -13,27 +13,15 @@ import {
 const execFileAsync = promisify(execFile);
 
 /**
- * Issue #1403 の歯。`revision` を `main` 以外にしても、温めたキャッシュだけでオフラインで読める。
- *
- * `@huggingface/transformers@4.2.0` の読み込みの前段の確認（`get_pipeline_files`）は `revision` を運ばない。
- * 以前は `revision` を `pipeline()` に渡していたので、前段の確認だけが `main` の鍵を探し、温めていても
- * `resolve/main/config.json` へ出て失敗した。いまは既定の `createPipeline` が、`revision` を
- * `env.remotePathTemplate` に埋め込み、キャッシュの根を `<根>/<encodeURIComponent(revision)>` に分ける
- * （ADR 0365）。
- *
- * - ネットワークには出ない: 子プロセスの `env.fetch` は、呼ばれたら記録して必ず失敗する。
- * - 本物の重みは要らない: 置くのは中身の無い偽のファイルで、この歯が見るのは「外へ出ようとしたか・どこへ」
- *   だけである（出なかった場合も、偽のファイルを解釈する段で読み込みは失敗する）。
- * - 既定のキャッシュは、子プロセスの `env.cacheDir` を一時ディレクトリへ向けて模す。
- * - `createLocalEmbeddingPipeline` は**ビルド済みの dist** から読む（`@mnemora/local-embedding` の入口）。
- *   走らせる前に `pnpm --filter @mnemora/local-embedding run build` が要る。
+ * `@huggingface/transformers@4.2.0` の読み込みの前段の確認（`get_pipeline_files`）は `revision` を運ばないので、`revision` を `pipeline()` に渡すと前段の確認だけが `main` の鍵を探し、温めていても `resolve/main/config.json` へ出て失敗する。そのため既定の `createPipeline` は `revision` を `env.remotePathTemplate` に埋め込み、キャッシュの根を `<根>/<encodeURIComponent(revision)>` に分ける。
+ * 子プロセスの `env.fetch` は呼ばれたら記録して必ず失敗する。置くのは中身の無い偽のファイルで、見るのは「外へ出ようとしたか・どこへ」だけ。
+ * `createLocalEmbeddingPipeline` はビルド済みの dist から読むので、走らせる前に `pnpm --filter @mnemora/local-embedding run build` が要る。
  */
 
 const PROBE = fileURLToPath(
   new URL("./fixtures/probe-preflight-default-cache.mjs", import.meta.url),
 );
 const REPO = DEFAULT_LOCAL_EMBEDDING_REPO;
-/** 40桁の commit sha の形なら何でもよい（ネットワークには出ない）。 */
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 
 interface ProbeResult {
@@ -47,7 +35,6 @@ let root: string;
 let defaultCacheDir: string;
 let cacheDir: string;
 
-/** `<dir>/<encodeURIComponent(revision)>/<repo>/` に、偽の4ファイルを置く。 */
 async function warm(dir: string, revision: string): Promise<void> {
   const files: [string, string][] = [
     ["config.json", JSON.stringify({ model_type: "modernbert" })],
@@ -74,7 +61,6 @@ async function probe(cacheDirArg: string, revision: string): Promise<ProbeResult
 function expectNoNetwork(result: ProbeResult): void {
   expect(result.urls).toEqual([]);
   expect(result.fetchCount).toBe(0);
-  // 読み込みの成否はこの歯の主張ではない（偽のファイルなので、ネットワークに出ずにその先で失敗する）。
   expect(result.error ?? "").not.toContain("network is disabled");
 }
 

@@ -1,37 +1,18 @@
 import type { CorrectionAbstainCase, CorrectionHitCase } from "./correction-case.js";
 
 /**
- * 訂正の相手探しベンチの**調整に使わない**ケース集合（held-out、`tuningUse: "held-out"`）。
+ * 訂正の相手探しベンチの、調整に使わないケース集合（held-out、`tuningUse: "held-out"`）。
  *
- * ⛔ **このファイルのケースを見て実装や閾値を調整しない。** 見て調整したら、そのケースは
- * 以後 `development` として扱い、`correction-case-set.dev.ts` へ移すこと
- * （`docs/autonomy.md` §2.2 決定5）。
- * ⚠ **これを機械で強制する手段は無い。ここは規律に残る。**
+ * このファイルのケースを見て実装や閾値を調整しない。見て調整したら、そのケースは以後 `development` として扱い、
+ * `correction-case-set.dev.ts` へ移すこと（`docs/autonomy.md` §2.2 決定5）。これを機械で強制する手段は無く、規律に残る。
  *
- * ⛔ **この集合に代表性は無い。**すべて手書きであり、「実際の会話で訂正・否定・別人・
- * 別期間がどれくらいの頻度で来るか」は測っていない。⟹ **ここから出る率は、この53件に
- * ついての率である。**
+ * この集合に代表性は無い。すべて手書きで、実際の会話での頻度は測っていない。ここから出る率は、このケース集合についての率。
  *
- * **A群6件・B群24件（合計30件）を追加した**
- * （[ADR 0291](../../../docs/decisions/0291-primary-probe-coverage-map-correction-candidate-domain.md) §5.4、
- * [ADR 0321](../../../docs/decisions/0321-correction-candidate-domain-implementation.md)）。
- * 追加分の弁別軸は「短い索引の型」（ASCII 識別子／日本語固有名詞／数詞インデックス——
- * ADR 0094・ADR 0135 がすでに一般的な想起で脆いと確立した3型）。**元の15件・8件は
- * 1文字も書き換えていない**（既存ケースは「一般値」のセルとしてそのまま残す）。
- *
- * - A群の新セル: 索引型3 × 2インスタンス = 6件（`ascii-*`/`jpname-*`/`numeral-*`）。
- * - B群の新セル: 索引型3 × kind4（`docs/autonomy.md` §2.2 決定1）× 2インスタンス = 24件。
- *
- * 各ケースの「なぜ訂正すべき/してはいけないか」の一覧表は ADR 0321 の表に1ケース1行で
- * 書いてある——ここには写さない（この doc コメントとケース個別の `grounds` が一次情報）。
- *
- * 数詞インデックスのセルは、ADR 0135 が実装した `numeral-token-probe-set.ts` の
- * 語彙の作り方（算用数字1桁＋短い助数詞・共有前置ほぼ0文字、同ファイルの
- * `arabic-short`/`arabic-medium` 相当）を借りている——ADR 0291 §7-5 が残した
- * 順序の選択肢のうち **(a)**（ADR 0135 実装済みなのでそこから借りる）を採用した。
+ * 既存ケースは書き換えない（一般値のセルとしてそのまま残す）。新規セルの弁別軸は「短い索引の型」。
+ * 各ケースの根拠は ADR 0321 の表と、ケース個別の `grounds` が一次情報で、ここには写さない。
+ * 数詞インデックスのセルは、`numeral-token-probe-set.ts` の語彙の作り方を借りている（ADR 0291 §7-5 の選択肢 (a)）。
  */
 
-/** A 群（15件 + 新規6件 = 21件）: 訂正すべき相手が実在する。hit@k の分母。 */
 export const CORRECTION_HIT_CASE_SET_EVAL: CorrectionHitCase[] = [
   {
     id: "move",
@@ -168,7 +149,6 @@ export const CORRECTION_HIT_CASE_SET_EVAL: CorrectionHitCase[] = [
       "訂正の発話が訂正前の値（68キロ）を名指ししている。主語は本人であり、兄の目標体重には掛からない。",
     tuningUse: "held-out",
   },
-  // --- ここから ADR 0291/0321 の新規セル（索引型 × 2インスタンス = 6件） ---
   {
     id: "ascii-a",
     gold: "PROJ-6801 の初回リリースは来月10日を予定しています。",
@@ -227,11 +207,7 @@ export const CORRECTION_HIT_CASE_SET_EVAL: CorrectionHitCase[] = [
   },
 ];
 
-/**
- * B 群（8件 + 新規24件 = 32件）: ⛔ **訂正してはいけない**。誤爆率・棄権率の分母。
- *
- * `docs/autonomy.md` §2.2 決定1 の4分類を2件ずつ持つ。
- */
+/** B 群: 訂正してはいけない。誤爆率・棄権率の分母。`docs/autonomy.md` §2.2 決定1 の4分類を2件ずつ持つ。 */
 export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
   {
     id: "neg-jog",
@@ -304,8 +280,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "訂正しているのは学生時代の居住地についての言明であり、現在の居住地の記憶には掛からない。現在の居住地は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- ここから ADR 0291/0321 の新規セル（索引型3 × kind4 × 2インスタンス = 24件） ---
-  // --- ASCII識別子 × negation ---
   {
     id: "neg-ticket-1",
     kind: "negation",
@@ -324,7 +298,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "「今週報告しなかった」は特定週の行動報告であり、報告の習慣自体を否定していない。習慣の記憶は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- ASCII識別子 × vague ---
   {
     id: "vague-ascii-1",
     kind: "vague",
@@ -343,7 +316,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "対象のチケット番号を含まない。⟹ どの記憶を相手として選んでも、選んだ根拠が発話に無い。",
     tuningUse: "held-out",
   },
-  // --- ASCII識別子 × other_person ---
   {
     id: "person-ticket-1",
     kind: "other_person",
@@ -362,7 +334,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "訂正の主語は後輩であり、後輩の担当案件についての記憶は一度も述べられていない。⟹ 失効させてよい相手が存在しない。本人の担当案件の記憶は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- ASCII識別子 × other_period ---
   {
     id: "period-ticket-1",
     kind: "other_period",
@@ -381,7 +352,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "訂正しているのは去年の参加案件についての言明であり、現在の参加案件の記憶には掛からない。現在の案件は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- 日本語固有名詞 × negation ---
   {
     id: "neg-jpname-1",
     kind: "negation",
@@ -400,7 +370,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "「今朝は無かった」は特定日の報告であり、朝礼の習慣自体を否定していない。習慣の記憶は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- 日本語固有名詞 × vague ---
   {
     id: "vague-jpname-1",
     kind: "vague",
@@ -418,7 +387,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
     grounds: "対象の部署名を含まない。⟹ どの記憶を相手として選んでも、選んだ根拠が発話に無い。",
     tuningUse: "held-out",
   },
-  // --- 日本語固有名詞 × other_person ---
   {
     id: "person-jpname-1",
     kind: "other_person",
@@ -438,7 +406,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "訂正の主語は先輩であり、先輩の所属についての記憶は一度も述べられていない。⟹ 失効させてよい相手が存在しない。本人の所属の記憶は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- 日本語固有名詞 × other_period ---
   {
     id: "period-jpname-1",
     kind: "other_period",
@@ -457,7 +424,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "訂正しているのは入社時の所属についての言明であり、現在の所属の記憶には掛からない。現在の所属は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- 数詞インデックス × negation ---
   {
     id: "neg-numeral-1",
     kind: "negation",
@@ -476,7 +442,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "「今朝しなかった」は特定日の報告であり、清掃の習慣自体を否定していない。習慣の記憶は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- 数詞インデックス × vague ---
   {
     id: "vague-numeral-1",
     kind: "vague",
@@ -494,7 +459,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
     grounds: "対象の会議室番号を含まない。⟹ どの記憶を相手として選んでも、選んだ根拠が発話に無い。",
     tuningUse: "held-out",
   },
-  // --- 数詞インデックス × other_person ---
   {
     id: "person-numeral-1",
     kind: "other_person",
@@ -513,7 +477,6 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
       "訂正の主語は隣の課であり、隣の課の利用会議室についての記憶は一度も述べられていない。⟹ 失効させてよい相手が存在しない。本人の利用会議室の記憶は成立し続ける。",
     tuningUse: "held-out",
   },
-  // --- 数詞インデックス × other_period ---
   {
     id: "period-numeral-1",
     kind: "other_period",

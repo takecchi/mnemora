@@ -2,44 +2,21 @@ import type { Ctx, RecallResult, Runtime } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
 
 /**
- * `observe()` の `occurredAt` を「動く例」で見せるデモ（examples/chat/README.md
- * 「`backfill`」節、ADR 0037）。
+ * `observe()` の `occurredAt` を「動く例」で見せるデモ。`occurredAt` を渡さないと、「いつの出来事か」を絞る欄が
+ * 実際には「いつ言われたか」を絞り、backfill すると同じ問い合わせが黙って別の答えを返す。
  *
- * **なぜ在るか**: `ObserveInput.occurredAt` という口は3つの入力すべてに最初から在り、
- * `runtime.observe` は素通しし、`buildNewMemoryFromCandidate` が `Memory.occurredAt` へ
- * 写す。**しかしリポジトリ内でこの口に値を渡している箇所は0件だった。**
- *
- * `recall-runtime.ts` は `effectiveTime = memory.occurredAt ?? memory.recordedAt` で
- * `occurredAfter` / `occurredBefore` を当てる。⟹ **`occurredAt` を渡さないと、
- * 「いつの出来事か」を絞ると読める欄が、実際には「いつ言われたか」を絞る。**
- * 生の会話ログを後から取り込む（backfill）と `recordedAt` は今日になるので、
- * **同じ問い合わせが黙って別の答えを返す。**このデモはその差を並べて見せる。
- *
- * **⚠ 北極星の主測定（`compare` / `retrieval`）には一切関わらない。**このファイルは
- * `runComparison` / `runRetrievalQualityArm` を呼ばず、`compare.ts` / `retrieval-quality.ts` /
- * `probe-set.ts` / `scenario.ts` / `naive-path.ts` のいずれも import しない
- * （`scope.ts` と同じ規律）。
+ * 北極星の主測定（`compare` / `retrieval`）には関わらない。`runComparison` / `runRetrievalQualityArm` を呼ばず、
+ * `compare.ts` / `retrieval-quality.ts` / `probe-set.ts` / `scenario.ts` / `naive-path.ts` を import しない。
  */
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/**
- * 「古い」出来事を何日前に置くか。
- *
- * ⚠ 既定の半減期（720時間 = 30日）に対して**わざと小さく**取ってある。例えば365日前に
- * すると `freshness` が 0.000217 まで落ち、既定の `scoreThreshold`（0.1）で落ちてしまう
- * ——**period で落ちたのか閾値で落ちたのかが、画面から区別できなくなる。**
- */
+/** 「古い」出来事を何日前に置くか。既定の半減期に対して、わざと小さく取る。大きいと `freshness` が閾値で落ち、period で落ちたのか区別できなくなる。 */
 export const BACKFILL_OLD_DAYS = 20;
 export const BACKFILL_RECENT_DAYS = 2;
-/** `recall({ occurredAfter })` の境目。古いほうだけが外に出る位置に置く。 */
 export const BACKFILL_CUTOFF_DAYS = 10;
 
-/**
- * 2つの発話。**長さを揃えてある**——擬似 embedding は文字コードから機械的にベクトルを
- * 作るので、長さが近いほど類似度の差が小さくなる。**⟹ 返るか落ちるかの差が
- * period フィルタ由来であることを、画面上で読み取りやすくする。**
- */
+/** 2つの発話。長さを揃える。擬似 embedding は長さが近いほど類似度の差が小さくなり、返るか落ちるかの差が period フィルタ由来だと読み取りやすい。 */
 export const BACKFILL_OLD_FACT = "三週間前に沖縄へ旅行しました。";
 export const BACKFILL_RECENT_FACT = "一昨日に金沢へ旅行しました。";
 export const BACKFILL_QUERY = "わたしの旅行について知っていますか?";
@@ -48,14 +25,10 @@ const OLD_EXTERNAL_ID = "backfill-demo-old";
 const RECENT_EXTERNAL_ID = "backfill-demo-recent";
 
 export interface BackfillDemoResult {
-  /** `occurredAt` を渡して取り込んだテナント。 */
   withOccurredAtTenantId: string;
-  /** `occurredAt` を渡さずに取り込んだテナント（いままでの呼び方）。 */
   withoutOccurredAtTenantId: string;
   cutoff: Date;
-  /** `occurredAt` を渡した側に `occurredAfter` を掛けた結果。 */
   withOccurredAt: RecallResult;
-  /** `occurredAt` を渡さなかった側に、**同じ** `occurredAfter` を掛けた結果。 */
   withoutOccurredAt: RecallResult;
 }
 
@@ -68,19 +41,13 @@ function hasPeriodOmission(result: RecallResult): boolean {
 }
 
 export interface BackfillDemoCheck {
-  /** `occurredAt` あり: 古い出来事が落ちたか。 */
   withOccurredAtDropsOld: boolean;
-  /** `occurredAt` あり: 新しい出来事は残ったか。 */
   withOccurredAtKeepsRecent: boolean;
-  /** `occurredAt` あり: 落ちた理由が `filtered: period` として出ているか。 */
   withOccurredAtReportsPeriod: boolean;
-  /** ⚠ `occurredAt` なし: 古い出来事も**残ってしまう**か（残るなら true ＝ 絞りが効いていない）。 */
   withoutOccurredAtKeepsOld: boolean;
-  /** ⚠ `occurredAt` なし: `filtered: period` が1件も出ないか。 */
   withoutOccurredAtReportsNothing: boolean;
 }
 
-/** `BackfillDemoResult` から、見せたい性質を機械的に判定する（印字・歯の両方が使う）。 */
 export function checkBackfillDemo(result: BackfillDemoResult): BackfillDemoCheck {
   return {
     withOccurredAtDropsOld: !includesDigest(result.withOccurredAt.memories, "沖縄"),
@@ -91,13 +58,7 @@ export function checkBackfillDemo(result: BackfillDemoResult): BackfillDemoCheck
   };
 }
 
-/**
- * 同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせる。
- *
- * **テナントを分けるのは、`externalId` の冪等性が同じテナント内で効くため**——
- * 同じテナントに同じ `externalId` で2度 observe すると、2回目は既存の Observation を
- * 返してしまい、`occurredAt` の有無を比べられない。
- */
+/** 同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせる。`externalId` の冪等性はテナント内で効き、同じテナントでは比べられないため。 */
 export async function runBackfillDemo(
   runtime: Runtime,
   tenantIds: { withOccurredAt: string; withoutOccurredAt: string },
@@ -109,7 +70,6 @@ export async function runBackfillDemo(
   const recentOccurredAt = new Date(now.getTime() - BACKFILL_RECENT_DAYS * DAY);
   const cutoff = new Date(now.getTime() - BACKFILL_CUTOFF_DAYS * DAY);
 
-  // 1. 出来事の時刻を渡して取り込む（backfill の正しい呼び方）。
   const withOld = await runtime.observe(withCtx, {
     kind: "utterance",
     text: BACKFILL_OLD_FACT,
@@ -124,14 +84,10 @@ export async function runBackfillDemo(
     externalId: RECENT_EXTERNAL_ID,
     occurredAt: recentOccurredAt,
   });
-  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)の合計を
-  // `drainEmbedTicks` に渡し、「available_at との ms 競合で claim 0件のまま」
-  // 黙って抜けないことを検査させる。
   await drainEmbedTicks(runtime, withCtx, {
     expectedProcessed: withOld.memoryIds.length + withRecent.memoryIds.length,
   });
 
-  // 2. 渡さずに取り込む（これまでの呼び方。recordedAt は今日になる）。
   const withoutOld = await runtime.observe(withoutCtx, {
     kind: "utterance",
     text: BACKFILL_OLD_FACT,
@@ -180,7 +136,6 @@ function formatOmitted(result: RecallResult): string {
   return `  omitted: ${result.omitted.map((o) => ("condition" in o ? `${o.kind}:${o.condition}` : o.kind)).join(", ")}`;
 }
 
-/** 画面向けの印字。**同じ問い合わせが、取り込み方だけで別の答えを返す**ことを並べて見せる。 */
 export function formatBackfillDemo(result: BackfillDemoResult): string {
   const check = checkBackfillDemo(result);
   const lines: string[] = [];

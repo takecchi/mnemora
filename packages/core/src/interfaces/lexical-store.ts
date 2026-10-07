@@ -5,29 +5,19 @@ import type { MemoryStatus } from "../memory.js";
 import type { ProvenanceKind } from "../provenance.js";
 
 /**
- * `search` の `filter`。`VectorFilter` と**同じ絞りを、同じ意味で**持つ
- * （[ADR 0084](../../../../docs/decisions/0084-lexical-recall-channel.md)）。
+ * `search` の `filter`。`VectorFilter` と**同じ絞りを、同じ意味で**持つ（ADR 0084）。
  *
- * **⚠ `VectorFilter` を再利用せず、別の型として書いている。**
- * 名前が意味を運ぶからである——`VectorFilter` は「ベクタ索引に降ろせる絞り」という
+ * **⚠ `VectorFilter` を再利用せず、別の型として書いている。** `VectorFilter` は「ベクタ索引に降ろせる絞り」という
  * 文脈を持っており、語彙索引の adapter がそれを実装するのは読み手を惑わせる。
- * **⟹ 欄が同じであることは、型が同じであるべきことを意味しない。**
  *
- * **`decayFloorAtAfter` は持たない。**`VectorFilter` はこれを持つが、
- * [ADR 0011](../../../../docs/decisions/0011-no-window-count-in-ann-stage.md) の通り
- * Phase 1 では読み取りフィルタとして使われていない——`recall-runtime.ts` は
- * ANN 段にもこの欄を渡していない。**使われていない欄を、新しい契約に写さない。**
+ * **`decayFloorAtAfter` は持たない。** `VectorFilter` はこれを持つが、読み取りフィルタとして使われていない（ADR 0011）。
  *
- * **各フィールドは adapter が実際に適用しなければならない**
- * （`VectorFilter` と同じ契約。ADR 0034）。`packages/testkit` の
- * `lexical-store-conformance.ts` が adapter 非依存の歯として検査する。
+ * **各フィールドは adapter が実際に適用しなければならない**（`VectorFilter` と同じ契約。ADR 0034）。
  */
 export interface LexicalFilter {
   /**
-   * **`ctx.tenantId` と AND で掛ける**（Issue #1050）。隔離の境界は `ctx.tenantId` である
-   * （ADR 0007）——adapter は、この欄と `ctx.tenantId` の**両方**に一致する行だけを返す。
-   * 2つが食い違えば0件を返し、例外は投げない。runtime は常に同じ値を渡す。
-   * `VectorFilter.tenantId` と同じ。
+   * **`ctx.tenantId` と AND で掛ける。** 隔離の境界は `ctx.tenantId` である（ADR 0007）。adapter は、この欄と
+   * `ctx.tenantId` の**両方**に一致する行だけを返す。2つが食い違えば0件を返し、例外は投げない。`VectorFilter.tenantId` と同じ。
    */
   tenantId: string;
   /** `VectorFilter.status` と同じ意味（未指定なら絞らない。空配列なら1件も通らない）。 */
@@ -35,11 +25,8 @@ export interface LexicalFilter {
   /** 指定すると、この `subjectId` の行だけを返す（`includeSubjectless` で、主題の無い行も含められる）。未指定なら主題で絞らない。 */
   subjectId?: string | undefined;
   /**
-   * `VectorFilter.includeSubjectless` と同じ欄・同じ意味（Issue #608 項目③(b)、
-   * [ADR 0286](../../../../docs/decisions/0286-recall-include-subjectless.md)）——
-   * `subjectId` が渡されているときだけ効き、述語を `subject_id = ${subjectId} OR
-   * subject_id IS NULL` へ広げる。追加のみの欄であり、知らない adapter は無視してよい
-   * （`VectorFilter.includeSubjectless` の doc 参照）。
+   * `VectorFilter.includeSubjectless` と同じ欄・同じ意味（ADR 0286）。`subjectId` が渡されているときだけ効き、
+   * 主題の無い行も通す。追加のみの欄であり、知らない adapter は無視してよい。
    */
   includeSubjectless?: boolean | undefined;
   /** この中の `provenance.kind` を持つ行を除く。未指定・空配列なら除かない。 */
@@ -48,21 +35,11 @@ export interface LexicalFilter {
   occurredAfter?: Date | undefined;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以前の行だけを返す（境界を含む。ADR 0039）。 */
   occurredBefore?: Date | undefined;
-  /**
-   * Issue #280（Issue #202 第2弾）: `VectorFilter.validAt` と同じ絞り・同じ意味
-   * （`@mnemora/core` の `RecallQuery.validAt` の doc 参照）。`period` と同じ扱いで
-   * 両チャンネルに存在する——`decayFloorAtAfter`（`LexicalFilter` は持たない）とは
-   * 違い、この欄は語彙チャンネルの SQL にも直接効く。
-   */
+  /** `VectorFilter.validAt` と同じ絞り・同じ意味（`RecallQuery.validAt` の doc 参照）。語彙チャンネルにも直接効く。 */
   validAt?: Date | undefined;
-  /**
-   * `VectorFilter.attributes` と同じ欄・同じ意味（Issue #152/#153、ADR 0312）。
-   */
+  /** `VectorFilter.attributes` と同じ欄・同じ意味（ADR 0312）。 */
   attributes?: Attributes | undefined;
-  /**
-   * `VectorFilter.labels` と同じ欄・同じ意味（Issue #201 PR-B、
-   * [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
-   */
+  /** `VectorFilter.labels` と同じ欄・同じ意味（ADR 0323）。 */
   labels?: string[] | undefined;
 }
 
@@ -71,105 +48,57 @@ export interface LexicalHit {
   /** 当たった Memory の id。 */
   memoryId: MemoryId;
   /**
-   * **一致したクエリ語彙の数 ÷ クエリから作れた語彙の総数**
-   * （[ADR 0092](../../../../docs/decisions/0092-lexical-or-coverage.md)）。
+   * **一致したクエリ語彙の数 ÷ クエリから作れた語彙の総数**（ADR 0092）。値域は `(0, 1]`。
+   * 一致した語彙が無い候補は `search` が返さない。
    *
-   * 値域は `(0, 1]`——分子が 0（＝一致した語彙が無い）候補はそもそも `search` が
-   * 返さない（下の `LexicalStore` の doc「クエリ語彙のいずれかと一致する候補を返す
-   * （OR 意味論）」参照）。
-   *
-   * **🔴 `recall` の段2 は `ScoreBreakdown.lexicalMatch` にこの値をそのまま入れる**
-   * （`recall-runtime.ts`）。**⚠ ADR 0084 が定めた旧仕様（`lexicalMatch` は候補集合の上で
-   * 常に `1` の二値）は ADR 0092 で置き換わった。**旧仕様はクエリ語彙を AND で結ぶ契約の
-   * 上に立っており、英語の自然文（`what did we say about PROJ-1234`）のような複数語の
-   * クエリでは「全語を含む記憶しか返らない」という負債を抱えていた（ADR 0084 §2.1.1・§8）。
+   * **🔴 `recall` の段2 は `ScoreBreakdown.lexicalMatch` にこの値をそのまま入れる。**
    *
    * **⚠ 尺度は store ごとに同じではない。** tsvector 版・InMemory は上の式どおりの 1/n 刻み。
-   * pg_trgm 版は、ASCII 側は同じ式だが、日本語側は `word_similarity` が閾値以上なら 1、
-   * そうでなければ 0 の二値で、`GREATEST` で合成する（`word_similarity` の値は `coverage` ではなく
-   * `rank` に入る）。測った値と、尺度を揃えるなら何が動くかは
-   * [ADR 0553](../../../../docs/decisions/0553-lexical-coverage-scale-across-stores.md)。
+   * pg_trgm 版は、ASCII 側は同じ式だが、日本語側は `word_similarity` が閾値以上なら 1、そうでなければ 0 の二値で、
+   * `GREATEST` で合成する（`word_similarity` の値は `coverage` ではなく `rank` に入る）。ADR 0553。
    */
   coverage: number;
   /**
-   * **`coverage` が同値の候補どうしを adapter がどう並べたか、というタイブレークの値。
-   * 大きいほど上位。**
+   * **`coverage` が同値の候補どうしを adapter がどう並べたか、というタイブレークの値。大きいほど上位。**
    *
-   * **🔴 この値はスコアに入らない。**`recall` の段2 が使うのは `coverage`
-   * （`ScoreBreakdown.lexicalMatch`）であり、`rank` ではない（ADR 0084 §5、ADR 0092）。
-   * 理由: `rank` の尺度は adapter ごとに違い（postgres 実装は `ts_rank_cd`）、
-   * **コサイン類似度と比較可能な量ではない。**
-   * 比較してよいのは**同一クエリ・同一 adapter が返した `LexicalHit` 同士だけ**である。
-   *
-   * **⟹ ではなぜ返すのか。**返さないと、adapter が同着の候補をどう並べたかが
-   * 呼び出し側からも適合テストからも見えなくなる。`explain` にもこの値が出る
-   * （ADR 0084 §6）。
+   * **🔴 この値はスコアに入らない。** `recall` の段2 が使うのは `coverage` であり、`rank` ではない（ADR 0092）。
+   * `rank` の尺度は adapter ごとに違い、**コサイン類似度と比較可能な量ではない。**
+   * 比較してよいのは**同一クエリ・同一 adapter が返した `LexicalHit` 同士だけ**である。`explain` にもこの値が出る。
    */
   rank: number;
 }
 
 /**
- * LexicalStore — recall の**語彙候補生成チャンネル**（[ADR 0084](../../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
+ * LexicalStore — recall の**語彙候補生成チャンネル**（ADR 0084）。
  *
  * 契約:
- * - **`MemoryStore` が真実の源であり、語彙索引は再構築可能な派生索引である**
- *   （`VectorStore` と同じ非対称。`packages/core/src/interfaces/vector-store.ts` 参照）。
- * - **クエリ語彙は OR で結ばれる**（[ADR 0092](../../../../docs/decisions/0092-lexical-or-coverage.md)）。
- *   クエリから作れる語彙のうち**どれか1つでも一致すれば**候補になる——
- *   ADR 0084 が定めた旧仕様（AND：すべての語彙を含む候補しか返さない）は ADR 0092 で
- *   置き換わった。**⟹ 一致した語彙が1つも無い候補は返さない**（`LexicalHit.coverage`
- *   は常に `(0, 1]`）。
- * - **返り値は `coverage` の降順である。同値なら `rank` の降順でタイブレークする。**
- *   `limit` はその上位から切る。**⚠ ADR 0084 の旧契約（`rank` の降順）は ADR 0092 で
- *   置き換わった**——`limit` の窓を切るときに、被覆率の高い候補を、被覆率の低い
- *   高 `rank` の候補に押し出させてはならないため。
+ * - **`MemoryStore` が真実の源であり、語彙索引は再構築可能な派生索引である**（`VectorStore` と同じ非対称）。
+ * - **クエリ語彙は OR で結ばれる**（ADR 0092）。クエリから作れる語彙の**どれか1つでも一致すれば**候補になる。
+ *   **⟹ 一致した語彙が1つも無い候補は返さない**（`LexicalHit.coverage` は常に `(0, 1]`）。
+ * - **返り値は `coverage` の降順である。同値なら `rank` の降順でタイブレークする。** `limit` はその上位から切る。
  * - `filter` の各フィールドを adapter が実際に適用する（`LexicalFilter` の doc）。
- * - **`query` は正規化前の生のクエリ文字列である。**どう分かち書きするかは adapter の責務で
- *   あり、core は一切関与しない——**core は「語彙的に引く」としか言っていない。**
+ * - **`query` は正規化前の生のクエリ文字列である。** どう分かち書きするかは adapter の責務で、core は関与しない。
  *   **⟹ adapter は、自分の索引では原理的に一致しえない種類の語を query から落としてよい。**
- *   postgres 実装は実際にそうしている（日本語の語を落とす。ADR 0084 §2.1.1）——
- *   残しても真陽性を1件も生まず、日本語の語だけを理由に他の一致を薄めるためである。
- *   **⚠ ただし「落としてよい」は「落とすべき」ではない。**何を落としたかは adapter が説明できること。
+ *   postgres 実装は日本語の語を落とす（ADR 0084 §2.1.1）。**⚠ ただし「落としてよい」は「落とすべき」ではない。**
+ *   何を落としたかは adapter が説明できること。
  *
- * **🔴 書き込み口（`upsert` / `delete`）を持たない。**`VectorStore` との最大の違いである。
- * Phase 1 の postgres 実装は `memories.content` そのものの上に式索引を張るので、
- * **索引は本体の書き込みに自動で追随し、同期の口が要らない。**
- * **⟹ これは「外部の検索エンジンを語彙 adapter にできる」ことを意味しない。**
- * `memories` の外に索引を持つ実装は、この interface だけでは同期できない。
- * **その口が要るようになったら足す。いまは要る実装が存在しないので足さない**
- * （ADR 0084 §8 の負債）。
+ * **🔴 書き込み口（`upsert` / `delete`）を持たない。** Phase 1 の postgres 実装は `memories.content` そのものの上に
+ * 式索引を張るので、索引は本体の書き込みに自動で追随し、同期の口が要らない。
+ * **⟹ これは「外部の検索エンジンを語彙 adapter にできる」ことを意味しない。** `memories` の外に索引を持つ実装は、
+ * この interface だけでは同期できない。その口が要る実装が現れたら足す（ADR 0084 §8）。
  */
 export interface LexicalStore {
   /**
-   * `coverage` 降順・同値なら `rank` 降順で最大 `opts.limit` 件を返す（クラス doc
-   * 「返り値は `coverage` の降順である。同値なら `rank` の降順でタイブレークする」）。
+   * `coverage` 降順・同値なら `rank` 降順で最大 `opts.limit` 件を返す。
    *
-   * **⚠ `coverage`/`rank` の両方が完全に一致する行が複数あるときの順序も、adapter の
-   * 責務である**（Issue #345 /
-   * [ADR 0175](../../../../docs/decisions/0175-lexical-search-tiebreak-nondeterminism.md)、
-   * `VectorStore.search` の doc（`packages/core/src/interfaces/vector-store.ts`）が
-   * [ADR 0170](../../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)
-   * で書いたのと同じ形の契約の、語彙チャンネル版）。
+   * **⚠ `coverage`/`rank` の両方が完全に一致する行が複数あるときの順序も、adapter の責務である**（ADR 0175。
+   * `VectorStore.search` の ADR 0170 と同じ形の契約）。
+   * 段2 は候補を全順序で並べ直すので、効くのはその手前の `opts.limit` による切り詰めである。同点候補のうちどの `limit` 件を
+   * 返すかが変われば、段2に届く候補集合そのものが変わり、`recall()` の結果が同じ入力に対して変わりうる。
    *
-   * **⚠ これが効く理由は「core が返却順をそのまま使うから」ではない。**
-   * `recall-runtime.ts` の段2（再スコア）は `compareScoredCandidates`（ADR 0170 決定2）で
-   * 候補を**並べ直す**——`score.total` → 実効時刻 → `memory.id` の3段であり、
-   * `memory.id` は一意なので**全順序**である。⟹ 段2に届いた後の並びは、
-   * `search()` が返した順序に依存しない。
-   * **効くのは、その手前の `opts.limit` による切り詰めである**——`search()` は
-   * 「同点の候補のうち、どの `limit` 件を返すか」を決めており、
-   * **そこで落ちた候補は段2に一度も届かない。**⟹ 同点候補の順序が adapter ごとに
-   * （あるいは DB を作り直すたびに）変われば、**候補集合そのものが変わり、`recall()` の
-   * 結果が同じ入力に対して変わりうる。**ADR 0170 が Issue #339 で実際に踏んだのも
-   * この機序である（あちらは `maxCount`／段2の `limit` による切り詰めだった）。
-   *
-   * `PostgresLexicalStore` は `coverage` → `rank` → `recorded_at` DESC → `id` の4段で
-   * tie-break する（`packages/postgres/src/lexical-store.ts` のクラス doc参照）。
-   * **`id` だけに頼る tie-break は不十分**——`id` はテナントの内容とは無関係な、
-   * ingest のたびに新しく振られる値であり、同一内容が重複記録される場面（同じ `content`
-   * を持つ行が複数ある場合、`coverage`/`ts_rank_cd` はどちらも完全に一致する）では、
-   * DB を作り直すたびに同点候補の並び順が変わる。**adapter を新しく書くときは、
-   * `coverage`/`rank` だけでなく完全なタイブレークまで含めて決定的な順序を返すこと。**
+   * `PostgresLexicalStore` は `coverage` → `rank` → `recorded_at` DESC → `id` の4段で tie-break する。
+   * **`id` だけに頼る tie-break は不十分**（`id` は内容と無関係に ingest のたびに振られるので、同一内容の重複記録では
+   * DB を作り直すたびに並びが変わる）。**adapter を新しく書くときは、完全なタイブレークまで含めて決定的な順序を返すこと。**
    */
   search(
     ctx: Ctx,

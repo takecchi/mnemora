@@ -4,15 +4,7 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 import { buildNewMemoryFixture } from "../test-data.js";
 
-/**
- * ADR 0505: `nowSeq + S_x`（`archiveDecayed`）・`decayFloorSeqAfter + S_x`（`aggregateScope`・`VectorStore.search`）が
- * `bigint` を溢れるとき、Postgres は `22003 bigint out of range` で文ごと失敗する（ADR 0500 の材料）。fixture は通していた。
- * 評価されない行（`decay_floor_seq` が NULL・subject なし・ほかの条件で落ちる・2軸の左で決まる）では Postgres は失敗しない
- * ので、その境界も縛る。実 DB と同じ表は `testkit-fixture-seq-sum-overflow.postgres.test.ts`。
- *
- * ⚠ 境界は、ドライバが `nowSeq` を文字にした値（`String(2**63 - 1024)` は `"9223372036854775000"`）で決まる:
- * S_x = 807 までは通り、808 で 2^63 以上になる。
- */
+/** 境界は、ドライバが `nowSeq` を文字にした値（`String(2**63 - 1024)` は `"9223372036854775000"`）で決まる: S_x = 807 までは通り、808 で 2^63 以上になる。 */
 
 const ctx: Ctx = { tenantId: "seq-sum-overflow" };
 const SPACE = { provider: "p", model: "m", dimensions: 3 };
@@ -92,7 +84,6 @@ describe.each(seqOnly)("%s: nowSeq + S_x が bigint を溢れるなら断る", (
     await expect(call(true)(await setup(counter))).rejects.toThrow(OVERFLOW);
   });
 
-  // やりすぎの歯: 溢れない・評価されない入力まで断らない。
   it("S_x = 807（溢れない境界）・0 は通る", async () => {
     await expect(call(true)(await setup(807))).resolves.toBeDefined();
     await expect(call(true)(await setup(0))).resolves.toBeDefined();
@@ -144,7 +135,7 @@ describe("式が評価される行が無ければ、溢れても通る", () => {
   });
 
   it("VectorStore.search: ほかの絞りを通る行は、活動時計の条件で落ちる行でも評価される", async () => {
-    // 活動時計の条件の結果（この行は decay_floor_seq 5 が「いま」より小さいので落ちる）より先に、式が評価される。
+    // 活動時計の条件では落ちる行（decay_floor_seq 5 が「いま」より小さい）でも、式が先に評価される。
     await expect(search(true)(await setup(5000))).rejects.toThrow(OVERFLOW);
   });
 });

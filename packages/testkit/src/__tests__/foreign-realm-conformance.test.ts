@@ -1,12 +1,3 @@
-// testkit の適合テストは、core が2つの版に分かれた環境でも、正しい adapter を誤って赤にしてはならない
-// （ADR 0418 の追記）。
-//
-// 利用者の手元で `@mnemora/core` が2つの版に分かれると、adapter が投げる core の例外
-// （`MemoryStatusConflictError` など）は、適合テストが import したクラスとは別物になり、
-// `toBeInstanceOf(クラス)` / `rejects.toThrow(クラス)`（中身は `instanceof`）は false になる。
-//
-// ここでは「それ以外は正しく振る舞う」in-memory 実装を包み、core の例外だけを `vm` の別 context で
-// 定義し直したものへ差し替えて（`kind` 無し・有りの両方）、適合テストをそのまま当てる。
 import { runInNewContext } from "node:vm";
 import type { MemoryStore, OutboxStore } from "@mnemora/core";
 import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
@@ -32,7 +23,6 @@ const VARIANTS = [
   { label: "kind 有り（別の realm の新しい core）", withKind: true },
 ] as const;
 
-/** 別 realm でクラスを定義し直したインスタンスを作る（`instanceof <本物のクラス>` は常に false）。 */
 function foreignError(name: string, fields: Record<string, unknown>, kind: string | null): Error {
   const make = runInNewContext(`
     (function (fields, kind) {
@@ -50,7 +40,6 @@ function foreignError(name: string, fields: Record<string, unknown>, kind: strin
   return make(fields, kind);
 }
 
-/** core の例外なら、欄をそのまま写した別 realm の例外にする。それ以外（別の例外）はそのまま返す。 */
 function toForeign(error: unknown, withKind: boolean): unknown {
   if (!(error instanceof Error) || !(error.name in KIND_BY_NAME)) {
     return error;
@@ -64,7 +53,6 @@ function toForeign(error: unknown, withKind: boolean): unknown {
   return foreignError(error.name, fields, withKind ? KIND_BY_NAME[error.name]! : null);
 }
 
-/** store の全メソッドを包み、投げる（reject する）core の例外を別 realm のものに差し替える。 */
 function foreignRealmStore<T extends object>(store: T, withKind: boolean): T {
   return new Proxy(store, {
     get(target, property) {

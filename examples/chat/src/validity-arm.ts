@@ -12,27 +12,15 @@ import {
 import type { ValidityProbe } from "./validity-probe-set.js";
 
 /**
- * `RecallQuery.validAt` ゲート（Issue #280、Issue #202 第2弾）を測る arm(PR 本文)。
- *
- * **ペアの本文を厳密に同一にする**（`time-term-arm.ts` と同じ設計思想）。⟹ `similarity`
- * は構成上ぴったり同じになるので、recall に候補として残るかどうかの違いは
- * `validFrom`/`validUntil`/`validAt` 由来だとしか説明できない。
- *
- * **書く経路は `Runtime.observe()` の `validFrom`/`validUntil`（マネージャー決定4）を使う**
- * ——`MemoryStore` を直に叩かない。これは、issue が要求する「書き口が端から端まで通る」
- * ことの実演そのものである。
- *
- * **probe ごとに別テナントを使う**（`time-term-arm.ts` と同じ理由——スコープ内にその
- * ペアの2件だけを置き、`limit`/`scoreThreshold` の外に落ちる可能性や語彙的な競合を消す）。
+ * ペアの本文を厳密に同一にし（`time-term-arm.ts` と同じ設計）、`similarity` を構成上同じにする。書く経路は `Runtime.observe()` の `validFrom`/`validUntil` で、`MemoryStore` を直に叩かない。
+ * probe ごとに別テナントを使う（`time-term-arm.ts` と同じ理由）。
  */
 
 export interface ValidityMemberOutcome {
-  /** 既定（`validAt` 省略 = いま）の recall にこの member が含まれたか。 */
   returnedAtNow: boolean;
 }
 
 export interface ValidityHistoricalCheck {
-  /** 過去の `validAt` を指定した recall。 */
   validAt: Date;
   currentReturned: boolean;
   otherReturned: boolean;
@@ -49,11 +37,8 @@ export interface ValidityProbeOutcome {
   otherReason: ValidityProbe["otherReason"];
   current: ValidityMemberOutcome;
   other: ValidityMemberOutcome;
-  /** 既定の recall で `omitted` に積まれた `filtered` の `condition` 一覧。 */
   omittedConditionsAtNow: string[];
-  /** `probe.historicalValidAtDaysAgo` を持つ probe だけ在る（受け入れ条件1）。 */
   historical: ValidityHistoricalCheck | null;
-  /** `includeOutsideValidity: true` の recall（ゲートの明示的な opt-out）。 */
   optOut: ValidityOptOutCheck;
   totalInScope: number;
 }
@@ -73,13 +58,8 @@ export interface RunValidityArmOptions {
   memoryStore: MemoryStore;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
-  /** 既定は `new Date()`。検査から固定できるように受ける。 */
   now?: Date;
-  /**
-   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
-   * **省略時は `null`**——この arm(validAt ゲート)の基準線は変えない。
-   * `examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
-   */
+  /** 省略時は `null`（この arm の基準線を変えない）。 */
   association?: RecallAssociationQuery | null;
 }
 
@@ -101,10 +81,6 @@ async function runOneProbe(
   const ctx: Ctx = { tenantId: `${options.tenantIdPrefix}-${probe.id}` };
   const utterances = buildValidityConversation(probe, now);
 
-  // ⭐ 書く経路は Runtime.observe() の validFrom/validUntil（マネージャー決定4）。
-  // Issue #719: `observed.memoryIds`（冪等な再送では空配列——`ObserveResult` の
-  // docstring）を積算し、`drainEmbedTicks` に渡す——drain が「available_at との ms
-  // 競合で claim 0件のまま」黙って抜けないことを検査させる。
   let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
     const observed = await options.runtime.observe(ctx, {
@@ -122,9 +98,6 @@ async function runOneProbe(
   const currentId = currentExternalId(probe.id);
   const otherId = otherExternalId(probe.id);
 
-  // 既定（validAt 省略 = いま）。
-  // association: options.association ?? null（下2箇所も同じ）——この欄を省略した
-  // 既存の呼び出しではこの arm（validity ゲート）の基準線を動かさない。
   const association = options.association ?? null;
   const atNow = await options.runtime.recall(ctx, { text: probe.query, association });
   const atNowExternalIds = await memoryIdsByExternalId(
@@ -136,7 +109,6 @@ async function runOneProbe(
     .filter((o): o is Extract<typeof o, { kind: "filtered" }> => o.kind === "filtered")
     .map((o) => o.condition);
 
-  // 受け入れ条件1: 過去の validAt を指定すると、その時点で真だった記憶が返る。
   let historical: ValidityHistoricalCheck | null = null;
   const validAt = historicalValidAt(probe, now);
   if (validAt !== undefined) {
@@ -160,7 +132,6 @@ async function runOneProbe(
     };
   }
 
-  // includeOutsideValidity: true — ゲートの明示的な opt-out。
   const optOutResult = await options.runtime.recall(ctx, {
     text: probe.query,
     includeOutsideValidity: true,
@@ -201,10 +172,6 @@ export async function runValidityArm(options: RunValidityArmOptions): Promise<Va
     probes,
   };
 }
-
-// ---------------------------------------------------------------------------
-// 表示
-// ---------------------------------------------------------------------------
 
 export function formatValidityReport(report: ValidityArmReport): string {
   const lines: string[] = [];

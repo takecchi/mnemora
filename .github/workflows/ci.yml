@@ -13,7 +13,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # 元は PR タイトル/本文の ADR 番号検査（削除済み）のために入れたもの。
           # git の履歴を読むテスト（adr-index-freshness など）が shallow checkout で
           # 通るかは確かめていないため、残している。
           fetch-depth: 0
@@ -45,37 +44,18 @@ jobs:
         run: pnpm run build
 
       - name: "公開 API 表面の破壊的変更を検出する門（Issue #342 / ADR 0178）"
-        # 直前の Build ステップが作った packages/*/dist の .d.ts に依存する（自分では
-        # ビルドし直さない）。既存の6つ目の門（pack:check）と同じジョブへ足す理由は
-        # 直下の pack:check ステップのコメントと同じ——このジョブ名
-        # （`typecheck / lint / test / build`）は branch protection の
-        # required_status_checks に登録された文字列そのものであり、ジョブを分けると
-        # オーナー権限での branch protection 更新が要る（ADR 0138 と同じ論拠）。
         run: pnpm run api:check
 
       - name: "配布物（packages/*/dist）が CommonJS として構文解析できること（Issue #110）"
         run: pnpm run check:cjs-parse
 
       - name: "文書の印付きコード片（```ts check）が今の公開 API で型検査に通ること（ADR 0345）"
-        # 直前の Build ステップが作った packages/*/dist の .d.ts に当てる（自分では
-        # ビルドし直さない）。印の無い片は見ない（opt-in）ので、偽陽性が出うる母集団は
-        # 印を付けた片に閉じる——門にしてよい理由は ADR 0345 決定2。
-        # 別ジョブにしない理由は上の api:check の段と同じ（ジョブ名が required status
-        # check の文脈名そのものであり、分けると branch protection の更新が要る）。
         run: pnpm run check:doc-snippets
 
       - name: "出荷済みの migration が書き換えられていないこと（checksum の固定、ADR 0637）"
-        # packages/postgres/migration-checksums.json の sha256 と突き合わせる。書き換え・削除は赤、
-        # 新しい migration の追加は赤にしない。ビルドに依存しない。別ジョブにしない理由は上の
-        # api:check の段と同じ（ジョブ名が required status check の文脈名そのものである）。
-        # 同じ検査はルートの `pnpm run test`（scripts/__tests__）の中でも走る。
         run: pnpm run check:migration-checksums
 
       - name: "publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）"
-        # 六つの門（docs/autonomy.md §2）のうち pack:check だけが、これまで
-        # publish.yml（release / workflow_dispatch 経由）でしか走っていなかった
-        # ——毎 PR の CI（このジョブ）には一度も現れていなかった。
-        #
         # このジョブに足す（独立ジョブにしない）理由: pack:check は各 publish
         # 対象パッケージの `prepack`（`tsc -p tsconfig.build.json`）を経由して
         # 自分で dist を作り直す（scripts/check-publish-pack.mjs 冒頭のコメント）ため、
@@ -84,21 +64,9 @@ jobs:
         # このジョブの末尾に1ステップ足すほうが CI 時間の増分が小さい。
         # また、このジョブ名（`typecheck / lint / test / build`）は branch
         # protection の required_status_checks に登録された文字列そのものである
-        # （`gh api repos/takecchi/mnemora/branches/main/protection` で確認済み）
-        # ため、ジョブ名を変えたり分割したりすると別途 branch protection の更新が
-        # 要る——それはこの PR の範囲外（オーナー権限の設定変更）とし、既存の
-        # ジョブへステップを足す形に留めた。
         run: pnpm run pack:check
 
       - name: "北極星7項目・既定差分の一覧を印字する（⛔ 門ではない。常に exit 0。Issue #387 / ADR 0216 決定7 段1）"
-        # ADR 0216 決定7「段1: 一覧を印字するだけ」の実装。#387 自身が置いた制約
-        # （「⛔ CIを重くしない。新しいジョブは要らない」「最初に作るなら、門ではなく
-        # 『一覧を吐くだけ』にすること」）をそのまま継ぎ、この既存の build ジョブへ
-        # 相乗りする——上の pack:check ステップのコメントと同じ論拠で、このジョブ名
-        # （`typecheck / lint / test / build`）は branch protection の
-        # required_status_checks に登録された文字列そのものであり、ジョブを分けると
-        # オーナー権限での branch protection 更新が要る。**required status checks の
-        # 名前・必須かどうかはこのステップで変えていない。**
         # `continue-on-error: true` にする理由: scripts/north-star-default-probe.mjs
         # 自体は個々の観測を try/catch で包み常に exit 0 を返す設計だが、想定外の失敗
         # （例: import 解決そのものが壊れる）でこのジョブ全体を巻き込んで赤くしない
@@ -107,12 +75,6 @@ jobs:
         run: node scripts/north-star-default-probe.mjs >> "$GITHUB_STEP_SUMMARY"
 
       - name: "公開 API の破壊的変更候補を印字する（⛔ 門ではない。常に exit 0。Issue #818 / #811 / #813 / #815）"
-        # scripts/public-api-breaking-diff.mjs 冒頭のコメントの実装。上の北極星ステップと
-        # 同じ理由でこの既存ジョブへ相乗りする——このジョブ名
-        # （`typecheck / lint / test / build`）は branch protection の
-        # required_status_checks に登録された文字列そのものであり、ジョブを分けると
-        # オーナー権限での branch protection 更新が要る。**required status checks の
-        # 名前・必須かどうかはこのステップで変えていない。**
         # 既定引数のまま（`--base v1.0.0`、`--head` 省略＝このジョブがチェックアウトした
         # 作業ツリー）で実行する——`git show <ref>:<path>` で snapshot を取るため、
         # 冒頭の Checkout ステップの `fetch-depth: 0`（タグ `v1.0.0` を含む全履歴）に依存する。
@@ -125,34 +87,18 @@ jobs:
   postgres:
     name: packages/postgres (本物の Postgres + pgvector, server_encoding=${{ matrix.serverEncoding }})
     runs-on: ubuntu-latest
-    # roadmap.md 段階2の完了条件: 「testkit の適合テストが postgres 実装に対してすべて通る
-    # （2テナント分離のテストを含む）。EXPLAIN で実際に HNSW 索引が使われることを確認する
-    # 検査が通る」。擬似物での置き換えを認めない——本物の Postgres の service container に
-    # 対して実行する。
-    #
-    # 🔴 Issue #155(ADR 0105): このジョブだけを regime の matrix にする。オーナーが
-    # 2026-09-12T00:09Z に「server_encoding=SQL_ASCII の PostgreSQL をサポート対象に
-    # する」と決めた(ADR 0106 追記)——CI はその regime を一度も踏んでいなかった。
     # `fail-fast: false` を必ず付ける: SQL_ASCII 脚が落ちても UTF8 脚の証拠(artifact/
     # Job Summary)を残すため。⛔ 他5本の pgvector ジョブは matrix にしない
-    # (Issue #155 の範囲外——まず1本で機序を確かめる)。
     strategy:
       fail-fast: false
       matrix:
         include:
-          # UTF8 脚: Issue #148 由来の実測(main の run 34635954755)のままで、
-          # 1バイトも変えない——過去の実測との比較可能性を壊さないため。
           - serverEncoding: UTF8
             initdbArgs: "--encoding=UTF8"
-          # SQL_ASCII 脚: オーナーが決めた新しいサポート対象(ADR 0106 追記)。
           # `--locale=C` が要る——initdb は encoding とロケールの整合を検査するので、
           # SQL_ASCII だけを渡すと既定ロケール(実測 en_US.utf8)と噛み合わずに
           # コンテナの起動ごと落ちうる(それ自体が「POSTGRES_INITDB_ARGS が効いている」
           # という答えである。Issue #155 満たすべきこと5)。
-          # ⛔ この `--locale=C` は「ロケールを ci.yml で宣言すること」(Issue #148 が
-          # 順序として見送った側)ではない——ADR 0106 決定2が見送ったのは
-          # `LANG`/`LC_*` の env や `--expect-locale` の門であり、`initdb` に
-          # 要求される整合のための指定はその対象ではない。
           - serverEncoding: SQL_ASCII
             initdbArgs: "--encoding=SQL_ASCII --locale=C"
     services:
@@ -162,12 +108,8 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②/Issue #155: この CI が**どの regime で測っているか**を
-          # 宣言する。matrix の脚ごとに値が変わる——UTF8 脚の値は変えていない
-          # (上のコメント参照)。
           # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
           #    からである。測る前に宣言するのは、Issue #148 が「⛔ 順序を逆にしない」
-          #    と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: ${{ matrix.initdbArgs }}
         ports:
           - 5432:5432
@@ -211,10 +153,6 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: Run postgres conformance / EXPLAIN / ADR 0011 tests against the real database
-        # Issue #148: `MNEMORA_LEXICAL_REGIME_JSON` を渡す。`lexical-store-identifier.
-        # test.ts` の「素の to_tsvector で識別子を引けるかどうかは server_encoding で
-        # 反転する」の歯が、`expect` より前にこのパスへ測った regime を書く
-        # (歯が赤くなっても値は残る)。このジョブの他のテストはこの変数を無視する。
         env:
           MNEMORA_LEXICAL_REGIME_JSON: ${{ github.workspace }}/lexical-regime.json
         run: pnpm --filter @mnemora/postgres run test:db
@@ -223,16 +161,6 @@ jobs:
         # このステップは常に走る(`if: always()`)——上の test:db が(regime とは無関係な
         # 理由も含め)落ちても、その run で regime を書けていたかどうかを Job Summary
         # から読めるようにする。`lexical-regime-summary.mjs` 自体は server_encoding /
-        # nonAsciiIsIndexed の値そのものでは非0にならない——非0になるのは「値が出ていない
-        # (歯が書いていない)」「JSON が壊れている」「値が空だった」、そして
-        # 🔴 「この脚が宣言した POSTGRES_INITDB_ARGS(下の --expect-encoding)と、
-        # 実際に測れた server_encoding が食い違った」の4つだけである(Issue #148 ②)。
-        # **最後の1つだけは値を見るが、『UTF8 が正しい』ではなく『宣言どおりだったか』
-        # だけを見る。**これは「値の良し悪しの門」ではなく「宣言と実測が揃っている
-        # ことの門」である(`scripts/lexical-regime-summary-lib.mjs` の docstring)。
-        # ⚠ --expect-encoding は matrix.serverEncoding にそのまま揃えている——
-        # 揃っていることは scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs が
-        # 固定している。
         if: always()
         run: |
           node scripts/lexical-regime-summary.mjs \
@@ -241,7 +169,6 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: "実測値そのもの(機械可読)を成果物として残す(Issue #148/#155)"
-        # 🔴 artifact 名を脚ごとに分ける(lexical-regime-${{ matrix.serverEncoding }})。
         # 分けないと2脚が同じ名前へ upload しようとして衝突・上書きする
         # (Issue #155 満たすべきこと1)。
         if: always()
@@ -257,12 +184,10 @@ jobs:
   postgres-regime-coverage:
     # ⚠ クォートが要る: YAML は `空白 + #` をコメントの開始として読むので、
     # 引用符なしだと check の名前が `…を測る(Issue` で**黙って切れる**
-    # (2026-09-12 実測。required status check の名前と一致しなくなる)。
     name: "両方の server_encoding regime が実際に走ったことを測る (Issue #155)"
     needs: postgres
     # 🔴 `postgres` ジョブ(matrix)の一部の脚が落ちても、このジョブは必ず走る——
     # 「揃って別々に走ったか」を測れるだけの artifact は、失敗した run にも残りうる
-    # (Issue #155 満たすべきこと2 の裏側)。
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -291,36 +216,12 @@ jobs:
           path: ${{ github.workspace }}/lexical-regime-artifacts
 
       - name: 両方の regime が実際に走ったかを判定する(⛔ 値の良し悪しではなく「揃って別々に走ったか」の門)
-        # scripts/lexical-regime-coverage.mjs が非0で終わる経路は、期待する脚の
-        # artifact が無い・JSON が壊れている・artifact 名と中身の server_encoding が
-        # 食い違う・実際に測れた server_encoding が2種類に届かない、の4つ
-        # (Issue #155 満たすべきこと2)。期待する脚の集合(UTF8/SQL_ASCII)は
-        # scripts/lexical-regime-coverage-lib.mjs の EXPECTED_SERVER_ENCODINGS に
-        # 持たせてあり、それが上の matrix の脚と一致していることは
-        # scripts/__tests__/ci-yml-postgres-regime-coverage-wiring.test.mjs が固定している。
         run: |
           node scripts/lexical-regime-coverage.mjs \
             --artifacts-dir "${{ github.workspace }}/lexical-regime-artifacts" \
             >> "$GITHUB_STEP_SUMMARY"
 
   bullmq:
-    # Issue #205 の2本目（`packages/bullmq`、ADR 0325）。
-    #
-    # 🔴 **required status check には入れていない。** `.github/required-status-checks.json`
-    # の宣言（branch protection の写し）に本ジョブは無い——required にするかどうかは
-    # branch protection 側の設定変更を伴いオーナー領分（`docs/autonomy.md` §3）であり、
-    # 本 PR の範囲外。⟹ このジョブが赤くても GitHub の Merge ボタンは単独では止まらない
-    # （Issue #426 が名指しした「required でない check」と同じ形。
-    # `scripts/__tests__/ci-yml-measurement-jobs-wiring.test.mjs` の対象にもしていない
-    # ——あちらは「測定ジョブ」7本を対象にした歯であり、本ジョブは測定ではなく
-    # 正しさの検査〔pass/fail が明確な歯〕なので対象が違う）。
-    #
-    # `@mnemora/bullmq` は publish 済み（1.1.0 から。`scripts/publish-targets.mjs` の
-    # `PUBLISH_TARGETS` に載っている）ため、`build`（typecheck/lint/test/build/
-    # api:check/check:cjs-parse/pack:check）ジョブの各門は他の publish 対象と同じく
-    # bullmq も見る（2026-09-30 に `NEVER_PUBLISHED_TARGETS` から外したので、`pack:check` の
-    # version 検査も同じく受ける——`scripts/publish-pack-checks.mjs` の doc コメント参照）。**Redis を要る歯
-    # （`src/**/*.redis.test.ts`、`test:redis`）だけがこのジョブの持ち場である。**
     name: "packages/bullmq（本物の Postgres + 本物の Redis）"
     runs-on: ubuntu-latest
     services:
@@ -330,10 +231,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # Issue #148 ②/Issue #224: matrix 化していない pgvector ジョブ（このジョブを
-          # 含む）は、`postgres` ジョブの matrix の UTF8 脚と同じ値を宣言する
-          # （scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs (b) が固定する）。
-          # このジョブ自体は server_encoding の regime を測らない——単に揃えるだけ。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -390,16 +287,6 @@ jobs:
         run: pnpm --filter @mnemora/bullmq run test:redis
 
   cjs-require-smoke:
-    # README（`packages/core`・`packages/postgres` ほかの「前提」）が約束する
-    # 「CommonJS からは Node 22.12 以降の `require(esm)` で読み込める」を、毎 PR の CI で確かめる
-    # （ADR 0387）。
-    #
-    # 🔴 **required status check には入れていない。** `.github/required-status-checks.json`
-    # の宣言（branch protection の写し）に本ジョブは無い——required にするかどうかは
-    # branch protection 側の設定変更を伴いオーナー領分（`docs/autonomy.md` §3）であり、
-    # 本 PR の範囲外。⟹ このジョブが赤くても GitHub の Merge ボタンは単独では止まらない
-    # （上の `bullmq` ジョブと同じ形）。
-    #
     # 既存の `scripts/check-consumer-install.mjs`（ADR 0346）は同じ約束をより広い範囲
     # （型・ESM 経路・入口一覧の突き合わせも）で確かめるが、npm registry から約550MB を
     # 取り直し・ロックファイル無しで依存の範囲を解決するため、既定の CI には入れていない
@@ -436,26 +323,8 @@ jobs:
     # の `contexts`（6件）に、この文字列が逐語で入っている。ここを書き換えると
     # required check が「見つからない」状態になり、branch protection 側の設定変更
     # （オーナー領分）が要る。
-    #
-    # 🔴 そして「擬似 provider」は、このジョブ全体の名乗りとしては不正確——ステップ
-    # ごとに層が混在している(下記、各ステップの env・コメントで実測。推測ではない):
-    #   - `test:db` / `correction` ステップ: `deterministic`(意味を持たない stub。
-    #     OPENAI_API_KEY 未設定、MNEMORA_LLM/MNEMORA_EMBEDDING の override も無し)
-    #   - `compare` ステップ: **`recorded`**(記録した実 API 応答の再生)。
-    #     `examples/chat/cassettes/compare.json` が在るため `decideProviderSource`
-    #     が「no-key」理由で `recorded` を選ぶ——「擬似物」ではない
-    #     (`AGENTS.md`「⚠『実 API を叩かない』は『擬似物で走る』と同じではない」、
-    #     下の compare ステップのコメント参照)。
-    # ⟹ 直せるのは名前ではなく名指しの精度のほうである、という判断と経緯は ADR 0274。
     name: examples/chat (本物の Postgres + pgvector、擬似 provider)
     runs-on: ubuntu-latest
-    # roadmap.md 段階7の完了条件: 「サンプルアプリが observe → recall の往復を実演し、
-    # omitted と usage を画面またはログに可視化する」。PR 本文「サンプルアプリ自体が
-    # 壊れていないことを CI で検査する」——LLM/Embedding は既定で @mnemora/testkit の
-    # provider に置き換わる(OPENAI_API_KEY を設定しない)が、**ステップごとに層が違う**
-    # (`test:db`/`correction` は `deterministic`、`compare` は `recorded`——直上の
-    # `name:` の注記参照)。DB は擬似物で代替しない。本物の Postgres の
-    # service container に対して実行する。
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -463,13 +332,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -480,25 +342,9 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # 🔴 Issue #164 (1): `test:db`(= `vitest run`)は `root-gate-db-stage`
-      # ジョブが `run-db-tests.mjs` 経由で走らせるのと**同じ**
-      # `consolidation-cost.postgres.test.ts` を実行する——`warmupLocalEmbedding` が
-      # `@mnemora/local-embedding` のモデル一式(4ファイル計42MB、うち重み36MB)を
-      # Hugging Face から取得する。
-      # 2026-09-12 の run 34699094705(14:25 UTC)では、このジョブ自身は
-      # `✓ src/__tests__/consolidation-cost.postgres.test.ts (3 tests) 43228ms`
-      # で成功していたが、同 run の `root-gate-db-stage` は重み取得が 429 になって
-      # 落ちた——**同じ重みを取りに行くジョブが実は4本ある**うちの1本である。
       # 🔑 `identifier-probes`/`consolidation-cost`/`root-gate-db-stage` と
       # **同じキー空間を意図的に共有する**(下の cache 段の `key` を参照。同じモデル
       # `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い)。
-      # ⚠ この job-level env は後段の `compare` ステップにも見えるが、`compare` では
-      # 読まれない
-      # (`examples/chat/src/providers.ts` は `embeddingMode === "local"` のときだけ
-      # `LocalEmbeddingProvider` へ `cacheDir` を渡す。このジョブの `compare` は
-      # `embeddingMode` が `"local"` ではないため——ただし `"deterministic"` でもなく
-      # **`"recorded"`** である。以前ここは「OPENAI_API_KEY 無しの擬似 provider」と
-      # 書いていたが、それは誤りだった。下の `compare` ステップのコメント参照)。
       MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
     steps:
       - name: Checkout
@@ -530,21 +376,9 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
-        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
-        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
-        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
-        #
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-        # revision は `scripts/local-embedding-pinned-revision.json`
-        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
-        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
-        #
-        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
-        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
-        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
-        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -560,7 +394,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -577,21 +410,12 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run test:db
 
       - name: local-embedding が実際に読み込んだ重みファイルは、宣言された Hugging Face repo が今まさに持っているものと一致しているか(⭐ 門)
-        # 🔴 なぜここか: 直前の test:db ステップが(cache がヒットしていればキャッシュから、
-        # ミスしていれば Hugging Face から)local-embedding のモデル一式を既に読み込み
-        # 終えている。⟹ ここで改めてファイルを取りに行く必要は無く、追加のネットワーク
-        # 費用は Hugging Face の tree API を1回(+再試行)引くだけでほぼ無い。
-        # `scripts/check-local-embedding-fingerprint.mjs` の docstring の判定表のとおり、
-        # exit 0=一致 / 1=不一致(赤) / 2=保留(HF API に届かない) / 3=実行時エラー。
-        #
         # ⛔ `continue-on-error: true` は使わない——それだと exit 1(不一致)まで
         # 素通りしてしまい、この段が門でなくなる。
         # 🔴 exit 2(保留)だけはジョブを落とさない——落とすと exit 1(赤)と区別が
         # 付かなくなる(スクリプト側の判定表が空文になる)。だから shell 側で終了コードを
         # 見て分岐する(`publish.yml` の `set +e` → `STATUS=$?` → `set -e` と同じ形。
         # ci.yml の shell は既定の `bash -e` である——ADR 0245)。
-        # ⭐ 一致・保留のどちらでも Job Summary に1行残す——「何も出ていない」を
-        # 「ステップが走らなかった」と区別できるようにするため。
         env:
           MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
         run: |
@@ -614,20 +438,6 @@ jobs:
           esac
 
       - name: "固定入力に対する embedding 出力を測り、sha256・次元数・lscpu を残す(測るだけ、門にはしない。Issue #565 / ADR 0253 追記)"
-        # 🔴 [Issue #565](https://github.com/takecchi/mnemora/issues/565) が
-        # 「採るとしたら何が要るか」として挙げた4項目のうち、(1)固定入力に対する
-        # embed() の sha256、(3)lscpu、を満たす(比較段(4)は別ジョブ、
-        # 既存の3段の形への合流(2)は下2ステップ)。
-        #
-        # ⛔ **これは門ではない。** 一致・不一致のどちらでも、この段は exit 0 のまま
-        # である(`scripts/measure-embedding-output-fingerprint.mjs` 参照)。
-        #
-        # 🔑 **モデルの読み込みを既存の段と共有する**: 直前の test:db ステップが
-        # 既に @mnemora/local-embedding のモデル一式をディスクキャッシュ
-        # (`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`)へ読み込み終えている。ここで
-        # `warmup()` を呼び直しても、ネットワークへは行かずディスクキャッシュから
-        # 読むだけである——追加費用は推論1回(数秒)のみ。
-        #
         # ⚠ **2つのコマンドを順に走らせるが、片方が失敗しても後段を必ず試す**
         # (`local-embedding が実際に読み込んだ重み...` ステップと同じ
         # `set +e`/`STATUS=$?`/`set -e` の形、ADR 0245)。重みを取得できなかった
@@ -669,15 +479,6 @@ jobs:
           if-no-files-found: ignore
 
       - name: "correction サブコマンド(cli.ts の dispatch 行)を実際に実行し、recall 段3(矛盾の解決と必須の同伴取得)が本番経路で発火することを CI が判定する(Issue #374 / ADR 0190)"
-        # 🔴 Issue #374: `grep -c "correction" .github/workflows/ci.yml` が 0 だった
-        # ——`examples/chat/src/cli.ts` の `command === "correction"` という
-        # dispatch 行は、これまで CI から一度も実行されていなかった
-        # (`correction-demo.postgres.test.ts` は `runCorrectionDemo()` を直接
-        # import しており、この dispatch 行を経由しない)。⟹ その行が消えても
-        # CI は緑のままだった。既存のこのジョブに1ステップ足すだけで済ませる
-        # (`DATABASE_URL`・拡張・migrate は上のステップ群がすでに整えている——
-        # 新しいコンテナも install も migrate も増えない)。
-        #
         # provider は `deterministic`(明示 override 無し、OPENAI_API_KEY 無し)。
         # `recorded` にしない理由: `examples/chat/cassettes/` に correction 用の
         # 記録が無く、`recorded` は記録に無い入力を例外にする(ADR 0051)。
@@ -685,50 +486,14 @@ jobs:
         # resolveContested のフィルタ)はスコアの質に依存しない構造的な検査なので
         # `deterministic` で足りる(`examples/chat/src/cli.ts` の `runCorrection()`
         # doc コメント参照)。
-        #
-        # `pnpm --filter @mnemora/example-chat run correction` は、印字するだけで
-        # 終わらない——`checkCorrectionDemo()` の7欄 + `checkCorrectionOmission()`
-        # (omitted に condition="superseded" が実際に記録されているか、北極星
-        # 項目6「消えた」と「最初から無かった」の区別)の1欄、計8欄を assert し、
-        # 1つでも false なら非0で終わる。
         run: pnpm --filter @mnemora/example-chat run correction
 
       - name: 北極星の物差し（会話ログを全部積むのをやめてもどれだけ削れたか・冒頭の事実の出典に到達できるか）を compare で実測しログに残す
-        # 🔴 このステップは `OPENAI_API_KEY` を設定していないが、**擬似(deterministic)
-        # provider では走らない**——`examples/chat/cassettes/compare.json`
-        # （ADR 0052 の `record:compare`）が存在するため、`resolveCassetteForRun`
-        # （`cli.ts`）経由の `decideProviderSource` が「no-key」理由で `recorded`
-        # （記録した実 API 応答の再生）を選ぶ。このコメントは以前「擬似 provider で
-        # 走る」と書いていたが、それは誤りだった——実測（ADR 0133）で判明し、この
-        # コメントは実際の挙動に合わせて訂正した。`compare` は
-        # 「量を削れたか」（naive/mnemora の文字数比）だけでなく、本 PR で追加した
-        # 「冒頭の事実の出典に削った後にも到達できるか」「スコープ内の何件が実際に ANN の
-        # 候補になれたか（= 何件と競って絞ったか）」を表にして出力する
-        # （docs/north-star.md の物差し、examples/chat/README.md
-        # 「⭐ 削減率だけでは意味を持たない——答えが残っているか」節）。
-        # これまでこの数値は手元で測ったきり CI では実測していなかった
-        # （ADR 0021 参照）——このステップはそれを埋め、以後の変更で
-        # 「削れたが出典に到達できなくなった」への回帰をログから読めるようにする
-        # （情報保持・最終回答の正誤はこのステップでは測っていない。ADR 0226）。
-        #
-        # 🔴 Issue #242 / ADR 0133: `MNEMORA_COMPARE_JSON` で機械可読な出力口を足した
-        # （`retrieval`/`time-term` と同じ規約、`examples/chat/src/compare-json.ts`）。
-        # 基準値ファイル `examples/chat/compare-baseline.json` は、この機構を配線した
-        # 最初の CI run（同一 commit を2回実行し、`measuredAt` を除いて完全一致した
-        # ことを確認した run）の artifact をそのままコミットしたものである
-        # （詳細は基準値ファイルの `provenance` / ADR 0133「測ったこと」参照）。
         env:
           MNEMORA_COMPARE_JSON: ${{ github.workspace }}/compare.json
         run: pnpm --filter @mnemora/example-chat run compare
 
       - name: 北極星の物差しが基準値から悪化していないかを判定する（⭐ 門。ADR 0133）
-        # 🔴 このステップは他5本の summary 段と違い、**門である**。
-        # `scripts/compare-summary.mjs` は、同一 commit の CI 2回実行が
-        # `measuredAt` を除いて完全一致した（ADR 0133「測ったこと」）ことを踏まえ、
-        # `mnemoraShareOfNaiveChars` の悪化・`factStatementSurvived` の
-        # true→false 退行を検知すると非0で終わる（`compare-summary-lib.mjs` の
-        # `evaluateCompare`）。それ以外の入力異常（JSON が読めない/parse
-        # できない/形が想定と違う）でも非0になる。
         # 🔴 さらに Issue #477 から、**実測と基準値の turnCount 集合が一致しない**
         # （比較していない会話長が在る）ときは exit 2（判定不能）で非0になる
         # ——「比較していない」を「退行が無い」と同じ顔で緑にしないためである。
@@ -751,24 +516,12 @@ jobs:
           if-no-files-found: ignore
 
       - name: recall-footprint 較正の補助標本（limit=20の8点、#340 フォローアップ・ADR 0314）を生成する
-        # 🔴 `compare` ステップと同じ理由で `OPENAI_API_KEY` を設定していないが、
-        # 同じ recorded カセット（`examples/chat/cassettes/compare.json`）を再生する
-        # （`recall-footprint-calibration-samples.ts` 冒頭の doc が実測済みのとおり、
-        # 抽出プロンプトの鍵は発話内容だけで決まるため、新しいカセットは要らない）。
-        #
         # `compare-baseline.json`（⭐門）とは別物である——`rows` には混ぜない
-        # （ADR 0314 §2）。この標本を `compare-baseline.json` のような CI-sourcing の
-        # 基準値へ昇格させる（同一 commit で本ジョブを2回以上実行し一致を確かめる）のは、
-        # この配線を経た artifact が揃ってから行う、別の判断・別の PR である。
         env:
           MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON: ${{ github.workspace }}/recall-footprint-calibration-samples.json
         run: pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples
 
       - name: 較正標本の8点を Job Summary に残す（⛔ 門ではない。相違があっても exit 0、ADR 0314 §2）
-        # 基準値ファイル examples/chat/recall-footprint-calibration-samples-baseline.json
-        # が Issue #340 フォローアップで新設された（CI-sourcing 済み）。--baseline に渡すと
-        # 相違（設計点の欠落・値のずれ）が Job Summary に出るが、依然として非ゲートである
-        # （recall-footprint-calibration-samples-summary-lib.mjs 冒頭の doc）。
         if: always()
         run: |
           node scripts/recall-footprint-calibration-samples-summary.mjs \
@@ -785,21 +538,6 @@ jobs:
           if-no-files-found: ignore
 
       - name: "RecallQuery.timeWeighting（legacy/eventAwareFreshness、Issue #690・ADR 0300）を answer-time-weighting で再生し、正誤の表をログへ残す"
-        # 🔴 このステップも `OPENAI_API_KEY` を設定していないが、`compare` と同じ理由で
-        # 擬似(deterministic) provider では走らない——`examples/chat/cassettes/
-        # answer-time-weighting.json`（段3b-2、`record:answer-time-weighting` を
-        # temperature=0 で実行して作った）が存在するため、`resolveRecordedRun`
-        # 経由の `decideProviderSource` が「no-key」理由で `recorded`（記録した実 API
-        # 応答の再生）を選ぶ。鍵は要らないが、擬似物でもない
-        # （AGENTS.md「⚠『実 API を叩かない』は『擬似物で走る』と同じではない」）。
-        #
-        # ⛔ **このステップ自体は門ではない。** 実際の合否判定（記録した時点の
-        # gradeAnswer 正誤を1バイトも変えず再生できるか）は、このジョブの前段
-        # `test:db`（`examples/chat/src/__tests__/time-weighting-recorded-replay
-        # .postgres.test.ts`）が既に検査している——ここは legacy/eventAwareFreshness
-        # の正誤の表を人間が読める形で Job Summary 相当のログに残すだけの、
-        # `compare` ステップと同格の可視化である。
-        #
         # 🔴 既知の取り引き（ADR 0300）: `reinforced-fact-vs-fresh-weak` 類型は
         # legacy が構造的に失敗し eventAwareFreshness が直す——この表にもその非対称が
         # そのまま出る。隠さない。
@@ -818,26 +556,6 @@ jobs:
   root-gate-db-stage:
     name: ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）
     runs-on: ubuntu-latest
-    # ADR 0015「ルートの test 門は、DB テストを『走らせなかった』と明示する」の
-    # 「確かめていないこと」1・2つ目を塞ぐジョブ。
-    #
-    # ルートの `pnpm run test` は最後に `node scripts/run-db-tests.mjs` を呼ぶ
-    # （DATABASE_URL が無ければ「実行していません」と告知して緑、在れば
-    # `pnpm -r --if-present run test:db` を走らせて、落ちれば赤・通れば
-    # 「✔ DB テストも実行し、通りました。」で緑になる段）。
-    # `postgres` / `example-chat` ジョブは `test:db` を各パッケージに直接呼んでおり、
-    # この段そのものを一度も経由しない。つまり「DATABASE_URL 在りでこの段が
-    # 実際に走って緑になる」ことは、CI ではまだ誰も実測していなかった。
-    # このジョブはその1点だけを測る——DB テストそのものの合否は上の2ジョブの役目のまま
-    # （置き換えない）。
-    #
-    # 「ルートの test がこの段を呼ぶ配線」自体は、
-    # scripts/__tests__/run-db-tests.test.mjs の「ルートの test 門の配線」が
-    # package.json の scripts.test を静的に検査して常時押さえている。
-    # ここではその配線ではなく、段そのものの実行結果（DATABASE_URL 在り・
-    # 対象パッケージが全部通ったときに実際に緑になること）を実測する。
-    # 歯（配線・未設定側・落ちた側）とこのジョブ（順方向の実物）とで役割を分けている。
-    #
     # `pnpm run test` 全体ではなく DB 段だけを直接呼ぶ: 型検査・lint・format・
     # 各パッケージの単体テスト・build は `build` ジョブがすでに測っており、
     # ここで二重に走らせて時間を伸ばさない。
@@ -848,13 +566,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -865,14 +576,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # 🔴 Issue #164 (1): このジョブは `node scripts/run-db-tests.mjs` 経由で
-      # `examples/chat` の `test:db`(= `vitest run`)を呼ぶ。その中の
-      # `consolidation-cost.postgres.test.ts` が `warmupLocalEmbedding` を通じて
-      # `@mnemora/local-embedding` のモデル一式(4ファイル計42MB、うち重み36MB)を
-      # 実際に Hugging Face から取得する——`identifier-probes`/`consolidation-cost` ジョブと同じ理由で、
-      # このジョブも「毎 run 素で重みを取りに行く」側だった。2026-09-12 の
-      # run 34699094705(14:25 UTC)では、この重み取得が 429 になって1本の PR を
-      # 止めた実測がある。
       # 🔑 `identifier-probes`/`consolidation-cost` と**同じキー空間を意図的に
       # 共有する**(下の cache 段の `key` を参照。同じモデル
       # `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い)。
@@ -907,21 +610,9 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
-        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
-        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
-        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
-        #
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-        # revision は `scripts/local-embedding-pinned-revision.json`
-        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
-        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
-        #
-        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
-        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
-        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
-        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -937,7 +628,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -958,12 +648,7 @@ jobs:
           node scripts/run-db-tests.mjs 2>&1 | tee gate.log
           grep -F "DB テストを実行します" gate.log
           grep -F "この段では実行していない: @mnemora/postgres" gate.log
-          # 接続先の Postgres が実際に読めていること。純関数の形は
-          # scripts/__tests__/db-server-description.test.mjs が測るが、
-          # 「本物の DB に繋いで版が取れる」ことを測れるのは、DB を持つこのジョブだけ。
           grep -E "接続先: PostgreSQL [0-9]+" gate.log
-          # CI の service container は pgvector/pgvector:pg17 なので、検証済みの版であり
-          # 未検証の警告は出てはいけない。出るなら CI の版か検証済み一覧のどちらかがずれている。
           if grep -F "検証されていない版です" gate.log; then
             echo "CI の Postgres が検証済み一覧から外れている（VERIFIED_MAJOR_VERSIONS を見直すこと）" >&2
             exit 1
@@ -975,15 +660,6 @@ jobs:
           fi
 
       - name: "固定入力に対する embedding 出力を測り、sha256・次元数・lscpu を残す(測るだけ、門にはしない。Issue #565 / ADR 0253 追記)"
-        # `example-chat` ジョブの同名ステップと対になる(ci-green-check.mjs が挙げた
-        # 「本物の重みで本物の推論を通す2ジョブ」のもう一方)。理由・費用・門にしない
-        # 判断は、あちらのコメントを参照——ここでは重複させない。
-        #
-        # 🔑 **モデルの読み込みを既存の段と共有する**: 直前の「ルートの門の DB 段」
-        # ステップが `run-db-tests.mjs` 経由で `examples/chat` の `test:db` を実行し、
-        # 既に @mnemora/local-embedding のモデル一式をディスクキャッシュ
-        # (`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`、このジョブの job-level env)へ
-        # 読み込み終えている。
         env:
           MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON: ${{ github.workspace }}/embedding-fingerprint-raw.json
         run: |
@@ -1051,16 +727,6 @@ jobs:
   retrieval-quality:
     name: 想起の質を実 embedding（記録の再生）で実測し、値を残す（ADR 0088）
     runs-on: ubuntu-latest
-    # ADR 0088。**ADR 0022 の「これが覆るとしたら」第1項が名指しした負債を返すジョブ。**
-    #
-    # ADR 0022 は「`retrieval` は本物の API キーが要るため CI には載っていない
-    # （手動実行のみ）」を前提に、「想起の質の回帰を検知する歯が無い」を負債として
-    # 引き受けていた。**その前提はもう成り立たない。**ADR 0051 のカセット
-    # （examples/chat/cassettes/retrieval.json — 実 API の埋め込み 152 件、
-    # text-embedding-3-small / 256 次元）を再生すれば、鍵なしに実 embedding の
-    # 想起の質を測れる。追加コストは 0 であり、ADR 0022 が言う「安価な embedding
-    # provider」に文言どおり一致する。
-    #
     # ⛔ **このジョブは門ではない。**基準値と違っても落ちない。
     # 落ちるのは bench そのものが壊れたときだけ（カセットに無い入力・DB エラー・
     # 出力が壊れている）。理由は ADR 0088 §2:
@@ -1068,13 +734,6 @@ jobs:
     #     見出しの数字が安定するのは similarity の変域が decay の約 10^6 倍だからで、
     #     「2 回一致した」は決定性の証明ではない。偽陽性率に上限を置けない。
     #   - 標本は probe 7 件しかない（ADR 0033 §3）。閾値の門は偽陽性を出す。
-    #
-    # ⚠ **`compare` ステップ（example-chat ジョブ）と同じ轍を踏まないこと。**
-    # あちらは「回帰をログから読めるようにする」と約束したきり、表の中身に対する
-    # assertion を1つも持たない——気づくかどうかが生ログを開くかどうかに委ねられている。
-    # このジョブは値を生ログではなく **Job Summary**（PR の Checks から
-    # ダウンロードなしで読める場所）へ出し、**基準値と一致していれば1行で黙り、
-    # 違うときだけ展開する**。git に残るのは基準値ファイルの diff のほうである。
     timeout-minutes: 20
     # ⚠ この repo は timeout-minutes を1箇所も設定しておらず、既定は 360 分である。
     # bench 自体は数秒で終わる（手元の実測で 4.9 秒）。刺さったときに6時間燃やさない
@@ -1087,13 +746,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -1164,20 +816,12 @@ jobs:
   retrieval-rank-listing:
     name: "固定回帰ケースと同じ条件で probe ごとの順位を一覧にする（Issue #572、ADR 0276 追記。⛔ 門ではない）"
     runs-on: ubuntu-latest
-    # Issue #572 / ADR 0276 の 2026-09-28 の追記。クローン miku の判断であり、オーナーの判断ではない。
-    #
-    # ADR 0227 の門（`example-chat` ジョブの `retrieval-quality-regression.postgres.test.ts`）は
-    # `goldRank !== null` だけを見て、順位を出力しない。`retrieval-quality` ジョブは probe ごとの
-    # 順位を生ログに出すが、実時計で走るので門と条件が違う。⟹ このジョブは、**門と同じ条件
-    # （`recorded`・固定時刻・`PROBES`）で probe ごとの順位とスコアの差を Job Summary に出す。**
-    #
     # ⛔ **このジョブは門ではない。**
     #   - 順位がどうであっても落ちない。落ちるのは bench が壊れて一覧を作れないとき
     #     （例外・全 probe で候補が0件・probe の件数が合わない）だけ（`decideRankListingExit`）。
     #   - `.github/required-status-checks.json` に入れない。どのジョブの `needs` にも入れない。
     #     `scripts/__tests__/ci-yml-retrieval-rank-listing-wiring.test.mjs` がこの2つを固定する。
     #   - 基準値とは比べない（順位を焼き込まない）。前の値は前の run の成果物で見ること。
-    #   - 門（`example-chat` ジョブ）の合否条件は1つも変えていない。
     timeout-minutes: 15
     services:
       postgres:
@@ -1186,7 +830,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # `retrieval-quality` ジョブと同じ regime の宣言（Issue #148 ②）。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -1227,7 +870,6 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: probe ごとの順位を一覧にして Job Summary に残す（⛔ 門ではない）
-        # 標準出力（Markdown）をそのまま Job Summary へ足す。終了コードは順位を見ない。
         env:
           MNEMORA_RANK_LISTING_JSON: ${{ github.workspace }}/retrieval-rank-listing.json
         run: pnpm --silent --filter @mnemora/example-chat run retrieval-rank-listing >> "$GITHUB_STEP_SUMMARY"
@@ -1243,17 +885,11 @@ jobs:
   identifier-probes:
     name: 識別子・固有名詞 probe（#106）を @mnemora/local-embedding で実測し、値を残す
     runs-on: ubuntu-latest
-    # Issue #109（#106 由来）。`retrieval-quality` ジョブと同じく「実測値を Job Summary
-    # へ残す・落とすのは bench 自体が壊れたときだけ」という形を踏襲するが、
-    # **このジョブが想定する主な失敗は基準値との相違ではなく「HF からモデル重みを
-    # 取得できないこと」である**。
-    #
     # ⚠ **なぜ閾値の門にしないか**: ADR 0088 が `retrieval-quality` について
     # 「標本7件では偽陽性を出す」として明示的に採らなかったのと同じ理由——この bench の
     # probe は30件(識別子)・12件(日本語)であり(ADR 0094 追記 / PR #191 / PR #192)、
     # ADR 0033 §3 の規律に照らして統計的な閾値判定に足る母数ではない。probe を増やした後、
     # 別途測ってから決める段取りである。
-    #
     # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
     # ——`identifier-probes` サブコマンドは `warmup()` が失敗したらメトリクスを1件も
     # 出さずに `process.exitCode = 1` で終わる仕様であり(`local-embedding-warmup.ts`)、
@@ -1269,13 +905,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -1286,9 +915,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
-      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
-      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -1316,27 +942,13 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
-        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
-        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
-        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
-        #
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-        # revision は `scripts/local-embedding-pinned-revision.json`
-        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
-        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
-        #
-        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
-        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
-        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
-        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
       - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
-        # 実測（この作業を行った器）では transformers.js の既定キャッシュは
-        # `node_modules/.pnpm/@huggingface+transformers@4.2.0/.../.cache/` に落ちた。
         # ⚠ CI ランナーでは同じ場所とは限らない（pnpm のバージョン・store の位置に依存する）
         # ため、`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`（`examples/chat/src/providers.ts` が
         # `LocalEmbeddingProvider` の `cacheDir` オプションへそのまま渡す——**使うだけで
@@ -1348,7 +960,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -1364,22 +975,10 @@ jobs:
         env:
           MNEMORA_IDENTIFIER_PROBE_JSON: ${{ github.workspace }}/identifier-probe.json
           MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
-          # Issue #109 後半。`recorded` provider でカセット
-          # （examples/chat/cassettes/identifier-probes.openai.json）を再生するだけであり、
-          # 鍵もネットワークも要らない——この env を足しても、上の local embedding 測定・
-          # このステップの失敗モード（重み取得失敗）は1つも変わらない。このブロックが
-          # 例外を投げても `identifier-probes` サブコマンド自体は握って続行する
-          # （`cli.ts` の openai arm ブロックの doc コメント参照）。
           MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON: ${{ github.workspace }}/identifier-probe-openai.json
         run: pnpm --filter @mnemora/example-chat run identifier-probes
 
       - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
-        # このステップは常に走る（`if: always()`）——measure ステップが重み取得失敗で
-        # 落ちても、その理由を Job Summary へ出すのはこのステップの役目である。
-        # `identifier-probe-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
-        # 非0で終わる(JSON が読めない/parse できない/形が想定と違う。--baseline を
-        # 渡していて、それが読めない/壊れている場合も含む)。
-        #
         # 🔴 **`--baseline` を渡す。**「⛔ 門にしない」と「⛔ 基準値と比べない」は
         # 別のことである——差分を Job Summary に出すのは ADR 0088 §3、相違では落とさない
         # のは同 ADR「決めたこと」4番・§2.1 である（両方を同時にやっている）。基準値が
@@ -1428,19 +1027,9 @@ jobs:
   numeral-token-probes:
     name: "単独トークンの数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
-    # ADR 0135 §8-3。`identifier-probes` ジョブと**同じ形**（実測値を Job Summary へ残す・
-    # 落とすのは bench 自体が壊れたときだけ）を踏襲する——**別の probe 集合・別の arm
-    # 実行・別の JSON・別の基準値ファイル**であり、`identifier-probes` ジョブ自体には
-    # 1文字も触れていない。
-    #
     # ⚠ **なぜ閾値の門にしないか**: `identifier-probes` と同じ理由——この bench の
     # probe は18件であり、ADR 0033 §3 の規律に照らして統計的な閾値判定に足る母数では
     # ない（ADR 0135 §4-8）。
-    #
-    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
-    # ——`identifier-probes` ジョブと同じ仕様（`warmup()` が失敗したらメトリクスを1件も
-    # 出さずに `process.exitCode = 1` で終わる）。measure ステップが失敗しても、
-    # 後続の summary/artifact ステップは `if: always()` で必ず走る。
     timeout-minutes: 15
     services:
       postgres:
@@ -1459,9 +1048,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
-      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
-      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -1496,8 +1082,6 @@ jobs:
         # 🔴 **`identifier-probes` ジョブが使うキャッシュキー空間をそのまま共有する**
         # ——同じモデル `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い
         # （`consolidation-cost`/`archive-sweep-cost` ジョブの先例と同じ判断）。
-        # ⚠ **ジョブをまたいで共有されるので、`identifier-probes` が先に走って作った
-        # キャッシュをこのジョブが再利用できる**（逆方向も同様）。
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
@@ -1505,7 +1089,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -1519,15 +1102,10 @@ jobs:
         env:
           MNEMORA_NUMERAL_TOKEN_JSON: ${{ github.workspace }}/numeral-token-probe.json
           MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
-          # Issue #109 後半。`identifier-probes` ジョブの同名 env と同じ規律
-          # （recorded provider の再生。鍵もネットワークも要らない）。
           MNEMORA_NUMERAL_TOKEN_OPENAI_JSON: ${{ github.workspace }}/numeral-token-probe-openai.json
         run: pnpm --filter @mnemora/example-chat run numeral-token-probes
 
       - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
-        # `identifier-probes` ジョブと同じ規律——このステップは常に走る（`if: always()`）。
-        # `numeral-token-probe-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
-        # 非0で終わる。相違しても exit 0（⛔ 門ではない）。
         if: always()
         run: |
           node scripts/numeral-token-probe-summary.mjs \
@@ -1544,7 +1122,6 @@ jobs:
           if-no-files-found: ignore
 
       - name: "OpenAI 実埋め込み arm（recorded 再生、Issue #109 後半）の差分と並走の判定を Job Summary に残す（⛔ 門ではない）"
-        # `identifier-probes` ジョブの同名ステップと同じ規律。
         if: always()
         run: |
           node scripts/openai-arm-summary.mjs \
@@ -1564,24 +1141,10 @@ jobs:
   correction-candidate-probes:
     name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
-    # ADR 0291 §7-3、ADR 0321。`identifier-probes`/`numeral-token-probes` ジョブと
-    # **同じ形**（実測値を Job Summary へ残す・落とすのは bench 自体が壊れたときだけ）を
-    # 踏襲する——**別のケース集合・別の arm 実行・別の JSON・別の基準値ファイル**であり、
-    # 既存2ジョブには1文字も触れていない。
-    #
-    # 🔑 **このジョブが返す一手**: ADR 0232「引き受けた負債」3番が「`correction-candidates`
-    # サブコマンドは手で走らせるものであり、CI ジョブを足していない」と名指しした残債を
-    # ここで返す（ADR 0291 §3.1 決定2）。
-    #
     # ⚠ **なぜ閾値の門にしないか**: `identifier-probes`/`numeral-token-probes` と同じ理由
     # ——この bench のケースは A群21件・B群32件であり、ADR 0033 §3 の規律に照らして
     # 統計的な閾値判定に足る母数ではない（ADR 0291 §4 決定7、ADR 0232 決定文「n=8 では
     # 偽陽性率に上限を置けない」）。
-    #
-    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
-    # ——`identifier-probes`/`numeral-token-probes` ジョブと同じ仕様（`warmup()` が
-    # 失敗したらメトリクスを1件も出さずに `process.exitCode = 1` で終わる）。measure
-    # ステップが失敗しても、後続の summary/artifact ステップは `if: always()` で必ず走る。
     timeout-minutes: 15
     services:
       postgres:
@@ -1600,11 +1163,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
-      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
-      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
-      # 重みの cache 段の path と同じ値を job-level env に置く（`identifier-probes` と同じ形。
-      # scripts/__tests__/ci-yml-local-embedding-cache-wiring.test.mjs が両向きに検査する）。
       MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
     steps:
       - name: Checkout
@@ -1647,7 +1205,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -1663,9 +1220,6 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run correction-candidates
 
       - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
-        # `identifier-probes`/`numeral-token-probes` ジョブと同じ規律——このステップは
-        # 常に走る（`if: always()`）。`correction-candidate-probe-summary.mjs` 自体は
-        # 「入力そのものが壊れている」ときだけ非0で終わる。相違しても exit 0(⛔ 門ではない)。
         if: always()
         run: |
           node scripts/correction-candidate-probe-summary.mjs \
@@ -1684,17 +1238,12 @@ jobs:
   association-probes:
     name: "連想枠（ADR 0151 / Issue #291）が想起の質を動かすかを @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
-    # Issue #291。`identifier-probes` ジョブ(#109)と同じ体裁を踏襲する——
-    # `retrieval-quality`/`identifier-probes` が確立した「実測値を Job Summary へ残す・
-    # 落とすのは bench 自体が壊れたときだけ」という形(ADR 0088)。
-    #
     # 🔴 **このジョブは門ではない。**probe は12件(ブリッジ語の字種3カテゴリ×4件)であり、
     # [ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
     # §3 の規律(標本7件からは失敗率も成功率も統計的に主張しない)に照らして、
     # 閾値判定に足る母数ではない——`identifier-probes`/`retrieval-quality` と同じ判断。
     # 相違があっても summary ステップは exit 0 のままである
     # (`scripts/association-summary.mjs` 参照)。
-    #
     # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` と同じ規律で、
     # モデル重みを取得できない・bench 自体が例外を投げる、といった run はこのジョブ
     # 自体が赤くなることを仕様とする。後続の summary/artifact ステップだけを
@@ -1717,11 +1266,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
-      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
-      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い
-      # (`identifier-probes` ジョブと同じ理由)。この bench の LLM 側は
-      # `deterministic` 固定であり(埋め込みだけが `local`)、そちらも鍵を要求しない。
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -1749,32 +1293,13 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
-        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
-        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
-        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
-        #
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-        # revision は `scripts/local-embedding-pinned-revision.json`
-        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
-        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
-        #
-        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
-        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
-        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
-        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
       - name: モデル重みをキャッシュする（identifier-probes と同じ key を共有する）
-        # 🔴 **`identifier-probes` ジョブが使うキャッシュキー
-        # (`local-embedding-ruri-v3-30m-q8-v1`)をそのまま共有する。**同じモデル
-        # (ruri-v3-30m)・同じ dtype(q8)を読むだけであり、ジョブごとに別キーへ
-        # 分ける理由が無い——同じ重みを2回落とすのは、CI 時間の浪費であり
-        # HF 側への不要な負荷でもある。GitHub Actions のキャッシュはジョブを
-        # またいで共有されるので、`identifier-probes` が先に走って作ったキャッシュを
-        # このジョブが読める(逆にこのジョブが先に走ればこちらが作る)。
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
@@ -1782,7 +1307,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -1802,17 +1326,6 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run association-probes
 
       - name: 実測値を Job Summary に残す（⛔ 門ではない）
-        # このステップは常に走る(`if: always()`)——measure ステップが落ちても、
-        # 可能な範囲で値を Job Summary へ出すのはこのステップの役目である。
-        # `association-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
-        # 非0で終わる(JSON が読めない/parse できない/形が想定と違う)。
-        #
-        # `--baseline` は `examples/chat/association-baseline.json`(ADR 0385。CI
-        # `ubuntu-latest` での実測から手作業で置いた)を渡す——`identifier-probes`
-        # ジョブと同じ形。相違しても exit code には影響しない(このベンチは
-        # required ではない、ADR 0158)。基準値より悪化した arm(gold/hit1/hit10/MRR)が
-        # あれば、`association-summary-lib.mjs` が Job Summary の上のほうに警告節を
-        # 出す(⛔ これも門ではない——検出するだけで確定・判断は人に残す)。
         if: always()
         run: |
           node scripts/association-summary.mjs \
@@ -1831,20 +1344,9 @@ jobs:
   consolidation-cost:
     name: "Runtime.consolidate() が「載る量」に効くかを実測し、値を残す（Issue #136）"
     runs-on: ubuntu-latest
-    # Issue #136。`identifier-probes` ジョブと同じ体裁を踏襲する——`retrieval-quality`/
-    # `identifier-probes` が確立した「実測値を Job Summary へ残す・落とすのは bench 自体が
-    # 壊れたときだけ」という形（ADR 0088）。
-    #
     # ⚠ **なぜ閾値の門にしないか**: 標本は probe 7件・haystack由来の filler 群であり、
     # ADR 0033 §3 の規律（標本7件からは失敗率も成功率も主張しない）にそのまま照らせば
     # 閾値判定に足る母数ではない。`retrieval-quality`/`identifier-probes` と同じ判断。
-    #
-    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
-    # ——`consolidation-cost` サブコマンドも `warmup()` が失敗したらメトリクスを1件も
-    # 出さずに `process.exitCode = 1` で終わる（`local-embedding-warmup.ts` を共有）。
-    # measure ステップが失敗しても、後続の summary/artifact ステップは `if: always()` で
-    # 必ず走る。
-    #
     # ⛔ **これは想起の質の門でも、統合の質の門でもない。**この bench が測るのは
     # 「載る量」（`store`/`recall.*.usage` の実測）と「そもそも縮んだか」であって、
     # `deterministic` LLM が作る統合結果の意味的な良し悪しではない
@@ -1857,13 +1359,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -1874,8 +1369,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
-      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)。
       # `consolidate()` は LLM も呼ぶが、`deterministic` に固定するため
       # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い
       # （`RecordedLLMProvider` はカセットに統合プロンプトを持たないため使えない——
@@ -1907,21 +1400,9 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
-        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
-        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
-        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
-        #
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-        # revision は `scripts/local-embedding-pinned-revision.json`
-        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
-        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
-        #
-        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
-        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
-        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
-        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -1935,7 +1416,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -1953,10 +1433,6 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run consolidation-cost
 
       - name: 実測値と基準値の差分を Job Summary に残す（⛔ 門ではない）
-        # このステップは常に走る（`if: always()`）——measure ステップが重み取得失敗で
-        # 落ちても、その理由を Job Summary へ出すのはこのステップの役目である。
-        # `consolidation-cost-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
-        # 非0で終わる。
         if: always()
         run: |
           node scripts/consolidation-cost-summary.mjs \
@@ -1975,33 +1451,15 @@ jobs:
   archive-sweep-cost:
     name: "掃引(Runtime.sweepArchive)が「載る量」/hit@k に効くかを実測し、値を残す（Issue #209）"
     runs-on: ubuntu-latest
-    # Issue #209。`consolidation-cost` ジョブと同じ体裁を踏襲する——`retrieval-quality`/
-    # `identifier-probes`/`consolidation-cost` が確立した「実測値を Job Summary へ残す・
-    # 落とすのは bench 自体が壊れたときだけ」という形（ADR 0088）。
-    #
     # ⚠ **なぜ閾値の門にしないか**: ADR 0088 §2 が retrieval 系を門にしない理由
     # （decay/freshness が実行毎に揺れる、標本 probe 7件では失敗率も成功率も主張できない
     # ——ADR 0033 §3）は、この bench にもそのまま当たる。この bench はさらに
     # `decay_floor_at`（掃引の判定基準そのもの）を扱うため、時刻依存の揺れに対して
     # `consolidation-cost` より慎重であるべき理由はあっても、緩めてよい理由は無い。
-    #
-    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
-    # ——`archive-sweep-cost` サブコマンドも `warmup()` が失敗したらメトリクスを1件も
-    # 出さずに `process.exitCode = 1` で終わる（`local-embedding-warmup.ts` を共有）。
-    # measure ステップが失敗しても、後続の summary/artifact ステップは `if: always()` で
-    # 必ず走る。
-    #
     # ⛔ **これは想起の質の門でも、掃引の正しさの門でもない。**この bench が測るのは
     # 「載る量」（`store`/`recall.*.usage` の実測）と「掃引の前後で omitted/hit@k が
     # どう動くか」であって、`deterministic` LLM が作る抽出結果の意味的な良し悪しではない
     # （AGENTS.md「`deterministic` で測った想起の質は、性能について何も言っていない」）。
-    #
-    # 🔴 **基準値ファイル `examples/chat/archive-sweep-baseline.json`（ADR 0121）は、
-    # ADR 0119 決定6が予告したとおり、初回 CI（main の run 34911117399、headSha
-    # fd6ee53296f63c053fedf3706d2ba831b6d8e655）が出した artifact をそのまま基準値に
-    # コミットしたものである。この作業環境に DB が無いため、基準値の作業者自身は
-    # この bench を一度も自分の手で実行していない——値は CI が実測したものである
-    # （基準値ファイルの `provenance` 参照）。
     timeout-minutes: 15
     services:
       postgres:
@@ -2010,13 +1468,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -2027,8 +1478,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
-      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)。
       # 掃引は LLM を呼ばないが、この bench の ingest 段（`observe()`）は抽出のために
       # LLM を呼ぶ——`consolidation-cost` と同じ理由で `deterministic` に固定するため
       # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
@@ -2059,21 +1508,9 @@ jobs:
         run: pnpm --filter @mnemora/postgres run migrate
 
       - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
-        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
-        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
-        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
-        #
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-        # revision は `scripts/local-embedding-pinned-revision.json`
-        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
-        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
-        #
-        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
-        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
-        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
-        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -2087,7 +1524,6 @@ jobs:
 
       - name: "復元した model キャッシュのファイルの一覧を出す（読むだけ。門ではない。Issue #1004）"
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
-        # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
         run: |
           find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
@@ -2105,10 +1541,6 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run archive-sweep-cost
 
       - name: 実測値と基準値の差分を Job Summary に残す（⛔ 門ではない）
-        # このステップは常に走る（`if: always()`）——measure ステップが重み取得失敗で
-        # 落ちても、その理由を Job Summary へ出すのはこのステップの役目である。
-        # `archive-sweep-cost-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
-        # 非0で終わる。
         if: always()
         run: |
           node scripts/archive-sweep-cost-summary.mjs \
@@ -2127,10 +1559,6 @@ jobs:
   time-term:
     name: "時間項(freshness/decay)が順位を動かすかを実測し、値を残す（ADR 0058 / Issue #217）"
     runs-on: ubuntu-latest
-    # Issue #217。`retrieval-quality`/`identifier-probes`/`consolidation-cost` と同じ体裁
-    # ——「実測値を Job Summary へ残す・落とすのは bench 自体が壊れたときだけ」という形
-    # （ADR 0088）。
-    #
     # ⚠ **なぜ閾値の門にしないか**: 標本は probe 8件であり、ADR 0033 §3 の規律
     # （標本7件からは失敗率も成功率も統計的に主張しない）にそのまま照らせば、
     # 閾値判定に足る母数ではない（`identifier-probes`/`retrieval-quality` と同じ判断。
@@ -2142,13 +1570,6 @@ jobs:
     # docstring 参照）——⟹ HuggingFace への外向き通信も、モデル重みのキャッシュも
     # 「重みを取得できなかった」という失敗モードも、このジョブには無い
     # （`identifier-probes`/`consolidation-cost` との違い）。
-    #
-    # 🔴 **基準値ファイル `examples/chat/time-term-baseline.json`（ADR 0121）は、
-    # ADR 0120 §5 が予告したとおり、初回 CI（main の run 34911117399、headSha
-    # fd6ee53296f63c053fedf3706d2ba831b6d8e655）が出した artifact をそのまま基準値に
-    # コミットしたものである。この作業環境に DB が無いため、基準値の作業者自身は
-    # この bench を一度も自分の手で実行していない——値は CI が実測したものである
-    # （基準値ファイルの `provenance` 参照）。
     timeout-minutes: 15
     services:
       postgres:
@@ -2157,13 +1578,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
-          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
-          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
-          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
-          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
-          #    からである(この PR で測る側には足したが、その実測値が出るのは
-          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
-          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
@@ -2174,9 +1588,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `time-term` は `deterministic` LLM + `deterministic` embedding に固定される
-      # （`cli.ts` の `runTimeTerm()` docstring）——`MNEMORA_PROVIDER_SOURCE`/
-      # `OPENAI_API_KEY` はこのジョブに関係が無い。
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -2209,9 +1620,6 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run time-term
 
       - name: 実測値と基準値の差分を Job Summary に残す（⛔ 門ではない）
-        # このステップは常に走る（`if: always()`）。`time-term-summary.mjs` 自体は
-        # 「入力そのものが壊れている」ときだけ非0で終わる（JSON が読めない/parse
-        # できない/形が想定と違う）。
         if: always()
         run: |
           node scripts/time-term-summary.mjs \
@@ -2230,23 +1638,13 @@ jobs:
   validity:
     name: "validAt ゲート(Issue #202 第2弾)が候補の有無を動かすかを実測し、値を残す（Issue #280）"
     runs-on: ubuntu-latest
-    # `time-term` と同じ体裁——「実測値を Job Summary/artifact へ残す・落とすのは
-    # bench 自体が壊れたときだけ」という**非ゲート**ジョブ（ADR 0088）。
-    #
     # ⚠ **なぜ閾値の門にしないか**: 標本は probe 2件であり、ADR 0033 §3 の規律
     # （少標本からは失敗率も成功率も統計的に主張しない）にそのまま照らせば、
     # 閾値判定に足る母数ではない（`time-term`/`identifier-probes` と同じ判断）。
-    #
     # ⚠ **`compare`（ADR 0133、required 門）とは別物である。** このジョブは
     # `examples/chat/compare-baseline.json` を一切参照せず、`examples/chat/src/scenario.ts`/
     # `compare.ts` にも配線していない——`validity` 専用の probe set・専用の tenant
     # スコープで、`compare` の回帰判定には一切影響しない。
-    #
-    # 🔴 **基準値ファイルは、まだ無い**（`time-term-baseline.json` のような形は、
-    # この PR の作業環境に DB が無く一度も自分の手で実行できていないため、
-    # 用意しなかった——ADR 0120 §5 が予告した「初回 CI の実測値をそのまま基準値に
-    # コミットする」手順を、この PR ではまだ踏んでいない。差分の Job Summary 出力は
-    # 次の担い手の作業とする。詳細は本 PR の ADR「射程外にしたもの」参照）。
     timeout-minutes: 15
     services:
       postgres:
@@ -2265,9 +1663,6 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # `validity` は `deterministic` LLM + `deterministic` embedding に固定される
-      # （`cli.ts` の `runValidity()` docstring）——`MNEMORA_PROVIDER_SOURCE`/
-      # `OPENAI_API_KEY` はこのジョブに関係が無い。
     steps:
       - name: Checkout
         uses: actions/checkout@v6

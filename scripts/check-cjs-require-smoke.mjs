@@ -1,48 +1,10 @@
 #!/usr/bin/env node
 /**
- * README（`packages/core`・`packages/postgres` ほかの「前提」）が約束する
- * 「CommonJS からは Node 22.12 以降の `require(esm)` で読み込める」を、毎 PR の CI で確かめる（ADR 0387）。
- *
- * `scripts/check-consumer-install.mjs`（ADR 0346）の6段目と同じ約束を検査するが、あちらの
- * 1〜5段（pack → 入口の突き合わせ → npm registry から取った install → `tsc` 型検査 ×2 → ESM 実行）は
- * 引き継がない。ADR 0346 が測った「既定の CI に入れない理由」——npm registry から約550MB を
- * 取り直すこと・ロックファイル無しで依存の範囲を解決するので上流の新しい版で PR と無関係に赤に
- * なりうること——は、どちらも「registry から新しく取りに行く」ことが原因である。この段は
- * registry に一切出ない設計にすることで、その理由を外した。
- *
- * ## 何をするか
- *
- * 1. `scripts/pack-publish-targets.mjs`（`pack:check` と同じ道具、ADR 0066）で
- *    `PUBLISH_TARGETS` 全対象の tarball を作る。
- * 2. 各 tarball を、OS の一時ディレクトリ（repo の外）に作った空プロジェクトの
- *    `node_modules/<パッケージ名>` へ**自分で展開する**（`npm install` を使わない）。
- * 3. 各パッケージの実行時依存（`dependencies` と `peerDependencies`。`@mnemora/*` は除く——
- *    それは手順2の tarball 自身）を、**この作業ツリーが `pnpm install --frozen-lockfile`
- *    で既に解決済みの実体へ symlink する**（`createRequire` で対象パッケージ自身の視点から
- *    解決し、見つかった実体の package.json の `name` を確かめて symlink 先を決める）。
- *    registry には出ない——このジョブの手前の `pnpm install --frozen-lockfile` が
- *    ロックファイルどおりに解決済みのものを、そのまま再利用するだけである。
- * 4. `./check-consumer-install-lib.mjs` の `buildSmokeCjs(EXPECTED_ENTRY_POINTS, valueNames)` で
- *    全入口を `require` する `smoke.cjs` を作り、node で実行する。`valueNames` は公開 API の snapshot から引いた
- *    入口ごとの値の名前で、実行時に undefined のものがあれば赤にする（ADR 0441）。
- *
- * ## 見ないこと（`scripts/check-consumer-install.mjs` が見続ける）
- *
- * - 型（`tsc` の `node16`/`bundler` 型検査）・ESM 経路（`import`）。
- * - 入口の一覧（`EXPECTED_ENTRY_POINTS`）と tarball の `exports` が揃っているかの突き合わせ
- *   ——これは registry 不要なので、既に `scripts/__tests__/check-consumer-install-lib.test.mjs`
- *   が既定の CI（`pnpm run test`）で見ている。
- * - 依存の宣言漏れ（`--install-strategy=nested` が防ぐ形）。このスクリプトは各パッケージの
- *   実行時依存を「この作業ツリーで今どう解決されているか」からそのまま symlink するので、
- *   たとえ `package.json` に書き忘れていても、モノレポ内の別の場所でその依存が解決できれば
- *   見逃す。
- * - 依存の版が npm registry の最新とずれていないか（そもそも registry を見ない）。
- * - README が利用者に要求する追加の依存（#1117 の `zod`・`@mnemora/openai`）。
- *
- * 純関数の部分（依存名の抽出・node 版の判定）は `./check-cjs-require-smoke-lib.mjs` に分けてあり、
- * `scripts/__tests__/check-cjs-require-smoke.test.mjs` が fs にもネットワークにも触れずに検査する。
- *
- * 使い方: `pnpm run check:cjs-require-smoke`（`--keep` で一時ディレクトリを残す）
+ * ⛔ `scripts/check-consumer-install.mjs` の1〜5段は引き継がない。registry から新しく取りに行かない設計にして、
+ * 「既定の CI に入れない理由」（約550MB の取り直し・上流の新しい版で PR と無関係に赤になる）を外した。
+ * 実行時依存は `npm install` を使わず、この作業ツリーが `pnpm install --frozen-lockfile` で解決済みの実体へ symlink する。
+ * ⚠ 見ないこと（check-consumer-install.mjs が見続ける）: 型・ESM 経路・依存の版のずれ、
+ * 依存の宣言漏れ（モノレポ内の別の場所で解決できれば見逃す）。
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -82,12 +44,8 @@ if (!meetsRequireEsmNodeVersion(process.version)) {
 }
 
 /**
- * `resolvedFile`（`require.resolve` が返したファイル）から上に辿り、`package.json` の `name` が
- * `depName` と一致する最初のディレクトリ（＝そのパッケージの実体のルート）を返す。
- *
- * pnpm はスコープ付き・peer 依存でサフィックスが付いたディレクトリ名（例:
- * `.pnpm/openai@7.10.0_zod@4.5.4/node_modules/openai`）で実体を持つため、ディレクトリ名では
- * 判定できない——`package.json` の中身（`name`）で判定する。
+ * ディレクトリ名では判定できない（pnpm はスコープ・peer 依存でサフィックスが付いた名前で実体を持つ）。
+ * `package.json` の `name` で判定する。
  *
  * @param {string} resolvedFile
  * @param {string} depName
@@ -219,7 +177,6 @@ try {
     join(consumerDir, "package.json"),
     `${JSON.stringify({ name: "mnemora-cjs-require-smoke", private: true, version: "0.0.0" }, null, 2)}\n`,
   );
-  // ADR 0441: 公開 API の snapshot の値の名前が、全入口で実行時に undefined でないことも見る（`check-consumer-install.mjs` と同じ表）。
   const valueNames = collectValueNamesForEntries(EXPECTED_ENTRY_POINTS, REPO_ROOT);
   writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS, valueNames));
   const cjs = step("CommonJS で全入口を require（require(esm)、README の約束そのもの）", () => {

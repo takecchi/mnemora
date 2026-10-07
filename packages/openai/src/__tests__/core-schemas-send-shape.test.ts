@@ -19,28 +19,14 @@ import { translateForOpenAIStructuredOutput } from "../json-schema.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 import { needsRootWrap, toBaseJsonSchema, WRAPPED_ROOT_KEY } from "../structured-root.js";
 
-/**
- * core が `completeStructured` に渡す4つのスキーマ（抽出・claim key・統合・内省）が、`@mnemora/openai` の
- * **送る前の変換と検査**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、
- * [ADR 0360](../../../../docs/decisions/0360-schema-unsupported-thrown-before-send.md)。
- * zod の既定＝ throw の `toBaseJsonSchema` → `hardenForStrictMode` → 送る直前の
- * `openai` SDK 自身の `toStrictJsonSchema`）を通り、`chat.completions.create` まで届くこと。
- *
- * `@mnemora/anthropic` の `core-schemas-send-shape.test.ts` の openai 版。
- *
- * ⚠ **射程は送る前の変換・検査まで。**OpenAI の実 API が、送った JSON Schema を受けるかは
- * PR #1147・#1164 で既に実測済み（README 参照）。ここは「送る前に `schema_unsupported` で
- * 落ちないこと」を縛る——利用者が渡す zod の形（`z.record`・`z.tuple`・`z.date`・`transform`）は
- * `structured-output-zod-shapes.test.ts` が縛る。ここは core が実際に渡す形だけを縛る。
- */
+/** 射程は送る前の変換・検査まで。利用者が渡す zod の形は `structured-output-zod-shapes.test.ts` が縛り、ここは core が実際に渡す形だけを縛る。 */
 
 describe("core の4つのスキーマは、送る前の変換・検査を通る（schema_unsupported にならない）", () => {
   const cases: Array<[string, z.ZodType<unknown>, "object" | "wrapped"]> = [
     ["ExtractionResultSchema（observe・reextract）", ExtractionResultSchema, "object"],
     ["ClaimKeyBatchResultSchema（claim key）", ClaimKeyBatchResultSchema, "object"],
     ["ConsolidationLLMResultSchema（consolidate）", ConsolidationLLMResultSchema, "object"],
-    // 根が判別可能ユニオン。OpenAI は根に object を要求するので、1つの欄 `result` に包んで送る
-    // （PR #1147、`structured-root.ts`）。
+    // 根が判別可能ユニオン。OpenAI は根に object を要求するので、1つの欄 `result` に包んで送る（`structured-root.ts`）。
     ["ReflectionLLMResultSchema（reflect）", ReflectionLLMResultSchema, "wrapped"],
   ];
 
@@ -49,7 +35,6 @@ describe("core の4つのスキーマは、送る前の変換・検査を通る�
       const base = toBaseJsonSchema(schema);
       const wrapped = needsRootWrap(base);
       expect(wrapped).toBe(rootShape === "wrapped");
-      // 翻訳（zod の既定＝throw を含む）も、送る直前の strict 検査も、投げない。
       const { schema: jsonSchema } = translateForOpenAIStructuredOutput(name, schema);
       expect(jsonSchema["type"]).toBe("object");
       if (wrapped) {
@@ -60,7 +45,6 @@ describe("core の4つのスキーマは、送る前の変換・検査を通る�
 });
 
 describe("runtime の LLM の口は、偽の client の chat.completions.create まで届く（送る前に落ちない）", () => {
-  /** 送られた JSON Schema から、返す最小の JSON を決める偽の client。 */
   function fakeClient(sent: Array<Record<string, unknown>>) {
     const reply = (schema: Record<string, unknown>): unknown => {
       const s = JSON.stringify(schema);
@@ -138,7 +122,7 @@ describe("runtime の LLM の口は、偽の client の chat.completions.create 
       claimKey: { enabled: true },
     });
     expect(withClaimKey.extraction).toBe("ok");
-    expect(sent.length - before).toBe(2); // 抽出 + claim key
+    expect(sent.length - before).toBe(2);
 
     before = sent.length;
     await runtime.reextract(ctx, withClaimKey.observationId);
@@ -152,7 +136,6 @@ describe("runtime の LLM の口は、偽の client の chat.completions.create 
     const reflected = await runtime.reflect(ctx, { target: { memoryIds: targets } });
     expect(reflected.llmFailure).toBeNull();
     expect(sent.length - before).toBe(1);
-    // 根が union なので、包んで送っている（`result` を持つ）。
     expect((sent[sent.length - 1]!["required"] as string[]).includes(WRAPPED_ROOT_KEY)).toBe(true);
 
     before = sent.length;

@@ -9,11 +9,6 @@ import type { AnswerVerdict } from "./answer-case.js";
 import type { TimeWeightingCaseKind } from "./time-weighting-case.js";
 import type { ProviderMode } from "./providers.js";
 
-/**
- * `answer-time-weighting` の機械可読な出力口（`MNEMORA_TIME_WEIGHTING_JSON`、`cli.ts`）。
- * `answer-json.ts` と同じ分担: 純関数のみ、ファイル I/O は呼び出し側（`cli.ts`）が行う。
- */
-
 export interface TimeWeightingTrialJson {
   caseId: string;
   kind: TimeWeightingCaseKind;
@@ -23,7 +18,6 @@ export interface TimeWeightingTrialJson {
   recallMemoryCount: number;
   inputChars: number;
   inputEstimatedTokens: number;
-  /** 段3a: このケースの記憶の順位・スコア内訳（`time-weighting-bench.ts` 参照）。 */
   contextDiagnostics: TimeWeightingContextDiagnosticEntry[];
 }
 

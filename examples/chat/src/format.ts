@@ -1,17 +1,12 @@
 import type { RecallResult } from "@mnemora/core";
 import { scoreTotalOrNull } from "./recalled-score.js";
 
-/**
- * `recall()` の返り値のうち、roadmap.md 段階7の完了条件そのものである
- * `omitted` と `usage` を画面に可視化する（PR 本文「omitted と usage を可視化する」）。
- */
 export function formatRecall(result: RecallResult, label: string): string {
   const lines: string[] = [];
   lines.push(`--- recall (${label}) ---`);
   lines.push(`memories: ${result.memories.length} 件返却`);
   for (const m of result.memories) {
-    // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠・必須の同伴取得）は
-    // total を持たない——表示は「n/a」にする（比較可能な total ではないことをそのまま出す）。
+    // 連想枠（affinityMeasured: false）は total を持たないので「n/a」にする。
     const total = scoreTotalOrNull(m.score);
     const scoreText = total === null ? "n/a" : total.toFixed(3);
     lines.push(`  - [${m.retrievedVia}] score=${scoreText} digest="${m.digest}"`);
@@ -36,12 +31,8 @@ export function formatRecall(result: RecallResult, label: string): string {
 }
 
 /**
- * `chat` の「まとめ」の行（naive と、budget 無し／あり の mnemora の文字数）を組み立てる。
- *
- * mnemora の2行には内訳——予算の対象になった量（`chars - indexChars`）と、予算の外の
- * 目次帯（`usage.indexChars`）——を並べる。目次帯は予算の対象外なので、予算で落とした
- * 記憶が目次帯へ回ると、予算を渡した run の全量は渡さない run より大きくなりうる。
- * 内訳が無いと「予算を渡したら増えた」と読める（歯は `__tests__/format.test.ts`）。
+ * `chat` の「まとめ」の行を組み立てる。mnemora の2行には、予算の対象になった量と予算の外の目次帯（`usage.indexChars`）の内訳を並べる。
+ * 内訳が無いと、目次帯へ回った分で「予算を渡したら増えた」と読めてしまう。
  */
 export function formatChatSummary(
   naiveChars: number,

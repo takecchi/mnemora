@@ -22,36 +22,7 @@ import { OPENAI_EMBEDDING_DIMENSIONS, OPENAI_EMBEDDING_MODEL } from "../provider
 import { createUsageMeter } from "../usage-meter.js";
 import { tryGitRevParseHead } from "../git-info.js";
 
-/**
- * Issue #109 残件「A」——マネージャーからの実測依頼: ADR 0316 の判定
- * （`decideEmbeddingDriftVerdict`）に対する候補案（margin基準・k-of-n）を、
- * **実 API・同じデータ上**で比べるための、per-probe margin 付きの新規測定。
- *
- * ⛔ **既存の判定コード・CI ジョブ・`ci.yml` は1文字も変えていない。**
- * `examples/chat/src/scripts/openai-embedding-fp-ceiling.ts`（ADR 0316 の測定手順）と
- * ほぼ同じ手順を踏むが、次の3点が違う:
- *
- * 1. **`report.probes`（probe ごとの `margin`）を捨てずに保存する。**
- *    既存スクリプトの `measureGroup` は `ProxyGroupMetrics`（群レベルの集約）だけを
- *    返し、`report.probes` を捨てる——このスクリプトはそれを保存する。
- * 2. **カセット・基準値ファイルを一切書き換えない。**`saveOpenAiArmCassette` を
- *    呼ばない——round ごとのカセットはメモリ上だけで使い、ディスクには残さない
- *    （マネージャー指示「カセットは新規ファイルのみ」を、そもそも書かないことで満たす）。
- * 3. **出力は既存の `openai-embedding-fp-ceiling-measurement.json` とは別ファイル**
- *    （`openai-margin-candidate-measurement.json`）。
- *
- * ## 使い方
- *
- * ```
- * OPENAI_API_KEY=... DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test \
- *   pnpm --filter @mnemora/example-chat exec tsx src/scripts/openai-margin-candidate-measurement.ts
- * ```
- *
- * 環境変数: `MNEMORA_MARGIN_CANDIDATE_ROUNDS`(既定20)。
- *
- * ⛔ `OPENAI_API_KEY` の値はどこにも出力しない。呼び出し回数・トークン・概算費用は
- * `usage-meter.ts` の集計をそのまま出す。
- */
+/** 手で回す測定。カセット・基準値ファイルは書き換えない（round のカセットはメモリ上だけで使い、`saveOpenAiArmCassette` を呼ばない）。出力は `openai-embedding-fp-ceiling-measurement.json` とは別ファイル。 */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CHAT_ROOT = join(here, "..", "..");
@@ -153,7 +124,6 @@ async function runRound(
   allTexts.forEach((text, i) => {
     entries[embeddingCassetteKey(text)] = { text, vector: vectors[i]! };
   });
-  // ⛔ ディスクには書かない(メモリ上のカセットとして、この round の6群だけに使う)。
   const cassette = buildEmbeddingOnlyCassette(
     embeddingProvider.space,
     entries,
@@ -226,7 +196,6 @@ async function main(): Promise<void> {
     console.log(`  完了(${result.groups.length}群)`);
   }
 
-  // --- 案0(現行、decideEmbeddingDriftVerdict をそのまま呼ぶ。変更していない) ---
   const baselineMetrics: ProxyGroupMetrics[] = round0.groups.map(toProxyMetrics);
   const candidate0PerRound = perRound.map((r) => {
     const measured = r.groups.map(toProxyMetrics);
@@ -234,7 +203,6 @@ async function main(): Promise<void> {
     return { round: r.round, red: verdict.red, groups: verdict.groups };
   });
 
-  // --- 案1(margin基準、decideEmbeddingDriftVerdictByMargin。新設・このリポジトリで新規) ---
   const candidate1PerRound = perRound.map((r) => {
     const inputs = r.groups.map((g) => ({
       group: g.group,
@@ -245,7 +213,6 @@ async function main(): Promise<void> {
     return { round: r.round, red: verdict.red, groups: verdict.groups };
   });
 
-  // --- 案2(k-of-n。ここでは候補0の red flags 列に対して適用する) ---
   function kOfNForGroup(groupKey: string) {
     const flags = candidate0PerRound.map((r) => r.groups.find((g) => g.group === groupKey)!.red);
     const redCount = flags.filter(Boolean).length;
@@ -268,7 +235,6 @@ async function main(): Promise<void> {
   }
   const candidate2ByGroup = OPENAI_ARM_GROUPS.map((g) => kOfNForGroup(g.key));
 
-  // --- sparse/dense 一致(候補2の一種、追加録画なしでCI実装可能)の実測 ---
   function sparseDenseAgreement(sparseKey: string, denseKey: string) {
     const sparseFlags = candidate0PerRound.map(
       (r) => r.groups.find((g) => g.group === sparseKey)!.red,

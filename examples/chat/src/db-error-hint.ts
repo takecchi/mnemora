@@ -1,15 +1,9 @@
 /**
  * examples/chat の CLI が DB のエラーで止まったときに、元のエラーの後ろへ出す「次の一手」の一行。
  *
- * 素の clone から README どおりに動かすと、DB を用意していない・`DATABASE_URL` を書き間違えた・
- * 拡張を作る権限が無い、のどれでも pg の生のエラーとスタックだけが出て、README のどこを見れば
- * よいかが分からなかった。**元のエラーは消さない**（`cli.ts` の `main` がそのまま出す）——ここは
- * 当てはまるときだけ README の「DB を用意する」節を指す一行を返し、当てはまらなければ
- * `undefined` を返す。
- *
- * 判定はエラーの `code`（Node のネットワークのエラー名、または Postgres の SQLSTATE）だけで行い、
- * `cause` の連鎖も辿る（`runMigrations` は失敗した migration の名前を足して元のエラーを
- * `cause` に包む）。
+ * 元のエラーは消さない（`cli.ts` の `main` がそのまま出す）。当てはまるときだけ README の「DB を用意する」節を指す一行を返し、
+ * 当てはまらなければ `undefined` を返す。判定はエラーの `code` だけで行い、`cause` の連鎖も辿る
+ * （`runMigrations` は元のエラーを `cause` に包む）。
  */
 
 const SECTION = "examples/chat/README.md「DB を用意する」";

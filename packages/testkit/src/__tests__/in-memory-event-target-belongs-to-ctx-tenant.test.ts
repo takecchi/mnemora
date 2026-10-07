@@ -1,16 +1,3 @@
-// ADR 0466（ADR 0456 の H4 の InMemory 版）: `InMemoryMemoryStore` の書き込み口のうち、呼び出し側が
-// `NewMemoryEvent`（`memoryId` を持つ）を渡すものは、そのイベントが指す記憶が `ctx` のテナントの記憶であることを、
-// 書く前に確かめる。断るときは何も書かない（status の更新も、news も、先に積んだイベントも残らない）。
-//
-// `packages/postgres` の `PostgresMemoryStore` と同じ入力を同じように断る（例外は素の `Error`、message は
-// `<クラス名>: memory not found for tenant: <id>`。`kind`・`code` は無い）。
-// 2実装の一致は `packages/postgres/src/__tests__/event-target-parity.postgres.test.ts` が同じ入力を流して縛る。
-//
-// このテストは fixture を直接呼ぶだけで、`*-conformance.ts` には触れていない（ADR 0434 決定5。約束を足すのはオーナーの判断）。
-//
-// 各 `it`: (1) 別テナントの記憶を指す `event.memoryId` は `memory not found for tenant` で断られる。
-// (2) 何も書かれない。(3) やりすぎの対照: 自分の id・同じテナントの別の記憶・`null`・今作った行を指すイベントは通る。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, NewMemoryEvent } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
@@ -63,12 +50,11 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(eventCount(b.id)).toBe(0);
     expect(store.events.length).toBe(total);
     expect(await statusOf(A, a.id)).toBe("active");
-    // やりすぎの対照
     const other = await make(A);
     await store.updateStatusWithEvent(A, a.id, "archived", {}, ev(a.id));
-    await store.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id)); // 同じテナントの別の記憶
+    await store.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id));
     const third = await make(A);
-    await store.updateStatusWithEvent(A, third.id, "archived", {}, ev(null)); // 記憶を指さない
+    await store.updateStatusWithEvent(A, third.id, "archived", {}, ev(null));
     expect(store.events.length).toBe(total + 3);
   });
 
@@ -93,8 +79,8 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     const a = await make(A);
     const other = await make(A);
     const b = await make(B);
-    await store.updateStatusWithEvent(A, a.id, "archived", {}, ev(a.id.toUpperCase())); // 今更新した行
-    await store.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id.toUpperCase())); // 同じテナントの別の記憶
+    await store.updateStatusWithEvent(A, a.id, "archived", {}, ev(a.id.toUpperCase()));
+    await store.updateStatusWithEvent(A, other.id, "archived", {}, ev(a.id.toUpperCase()));
     expect(eventCount(a.id)).toBe(2);
     expect(store.events.some((e) => e.memoryId === a.id.toUpperCase())).toBe(false);
     const c = await make(A);
@@ -102,11 +88,9 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
       store.updateStatusWithEvent(A, c.id, "archived", {}, ev(b.id.toUpperCase())),
     ).rejects.toThrow(NOT_FOUND);
     expect(eventCount(b.id)).toBe(0);
-    // 操作の対象の id も大文字小文字を区別しない（ADR 0521。以前は完全一致で NOT_FOUND だった＝ADR 0438・0446 の既存の違い）。
     const d = await make(A);
     await store.updateStatusWithEvent(A, d.id.toUpperCase(), "archived", {}, ev(d.id));
     expect((await store.get(A, d.id))?.status).toBe("archived");
-    // 断るときの message は、渡された id のまま。
     const error = await store
       .updateStatusWithEvent(A, c.id, "archived", {}, ev(b.id.toUpperCase()))
       .catch((e: unknown) => e as Error);
@@ -147,7 +131,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(store.events.length).toBe(total);
     expect(await statusOf(A, p1.id)).toBe("active");
     expect(await statusOf(A, p2.id)).toBe("active");
-    // 対照: 相手側の id を指すイベントも通る（同じ呼び出しで更新する行）。
     await store.markContestedPair!(
       A,
       { id: p1.id, event: ev(p2.id) },
@@ -209,7 +192,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(eventCount(b.id)).toBe(0);
     expect(store.events.length).toBe(total);
     expect(await statusOf(A, g1.id)).toBe("active");
-    // 対照: 群の別のメンバーの id を指すイベントは通る。
     await store.markContestedGroup!(A, [{ id: g1.id, event: ev(g2.id) }, own(g2.id), own(g3.id)]);
     expect(await statusOf(A, g1.id)).toBe("contested");
     await expect(
@@ -230,13 +212,12 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     const [g1, g2, g3, g4] = [await make(A), await make(A), await make(A), await make(A)] as const;
     const own = (id: MemoryId) => ({ id, event: ev(id) });
     await store.markContestedGroup!(A, [own(g1.id), own(g2.id), own(g3.id)]);
-    // g1 は既に contested かつ相手なし（群の吸収）。g1 のイベントは積まれないので、別テナントを指していても通る。
     const result = await store.markContestedGroup!(A, [
       { id: g1.id, event: ev(b.id) },
       own(g2.id),
       own(g4.id),
     ]);
-    expect(result.events).toHaveLength(1); // g4 だけが active -> contested（g1・g2 は既に contested で相手なし）
+    expect(result.events).toHaveLength(1);
     expect(eventCount(b.id)).toBe(0);
   });
 
@@ -274,7 +255,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect((await store.listByTenant(A)).length).toBe(memoriesBefore);
     expect(eventCount(b.id)).toBe(0);
     expect(store.events.length).toBe(total);
-    // 対照: 作った記憶自身を指す created、supersede の対象自身を指す event は通る。
     const ok = await store.supersedeWithNewMemories!(
       A,
       [{ input: fresh("s3"), jobKinds: [] }],
@@ -343,8 +323,6 @@ describe("event.memoryId が別テナントの記憶なら、書かずに断る�
     expect(eventCount(ok.written[0]!.memory.id)).toBe(1);
   });
 
-  // ADR 0475（ADR 0469 の続き）: `EventStore.append` も、`event.memoryId` の大文字小文字を区別しない（`PostgresEventStore.append` は
-  // uuid を小文字にそろえて通す）。断るときの message は渡された id のまま。`null`（`events_purged`）は検査しない。
   it("InMemoryEventStore.append: 大文字の自テナントの記憶は通り（小文字で積む）、大文字の別テナントは断る。null は検査しない", async () => {
     const { store, make } = setup();
     const eventStore = new InMemoryEventStore(store, store.events);

@@ -8,72 +8,10 @@ import {
 import { ANSWER_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io.js";
 
 /**
- * Issue #498 完了条件4・「回答評価」側の陽性対照を、実 API で**変異分だけ**追加記録する
- * ——**既存の `examples/chat/cassettes/answer.json`（67件）を1バイトも録り直さずに**。
- *
- * ⛔ **ADR 0309（Issue #691 続き）以降、このスクリプトは事実上使われなくなった。**
- * 下の段落が予告していた「`answer.json` を近く全体で録り直す」は、実際には
- * **採らなかった**——`buildMnemoraPrompt` の描画が変わった（`order-legend`）ときの
- * 方針は「既存カセットは1バイトも書き換えず、新しいファイル
- * （`answer.order-legend.json`、`cassette-io.ts` の `ANSWER_ORDER_LEGEND_CASSETTE_PATH`）
- * を足す」に決まった（ADR 0309）。`answer.json` は今後も `answer-trials-material.ts`
- * （ADR 0301 の対照の基準）が読み続けるので、**このスクリプトが対象にしていた67件も
- * 変異2件も、このまま歴史的な記録として残る。** 新形式カセットへ変異分を記録するときは、
- * 下の段落と同じ理由でこのスクリプトを使い回さない——`recordAnswer`（`record:answer`）が
- * 毎回全置換で `recordRetentionMutationPositiveControl` を呼ぶので、新形式カセットは
- * その1回で変異分も含めて揃う（このスクリプトが要る場面自体が生じない）。
- *
- * ⭐ **通常はこのスクリプトを直接使う必要は無い。** 変異の記録は
- * `recordRetentionMutationPositiveControl`（`../answer-retention-mutation.ts`）として
- * `cli.ts` の `recordAnswer`（＝ `pnpm --filter @mnemora/example-chat run record:answer`）
- * に組み込んである——**以後、誰かが `record answer` を素で（全置換で）走らせれば、
- * この変異分は自動的に一緒に録り直される。**
- *
- * **このスクリプトが要るのは、全12ケース×2経路（24回答生成＋24 judge、約 $0.003）を
- * 録り直さずに、変異分（chat 2回だけ）を既存カセットへ追記したいときだけ**——
- * 実際にこの Issue の残作業を片付けた本 PR がまさにその場合だった。`record answer` は
- * 毎回空の `CassetteRecorder` から始まる全置換なので、既存67件を保ったまま変異だけを
- * 足すには、既存カセットを `CassetteRecorder` へ事前投入し
- * （`RecordingLLMProvider`/`RecordingEmbeddingProvider` の「既に記録済みの鍵は委譲先を
- * 呼ばない」という既存の挙動——ADR 0233 決定1——を利用して）既存分の呼び出しを
- * 実 API へ送らないようにする必要がある。
- *
- * ⚠ **`answer.json` が既に（`record answer` の全置換 or 他の手段で）録り直されていたら、
- * このスクリプトは不要——`recordRetentionMutationPositiveControl` が `recordAnswer` の
- * 経路に組み込まれているので、その録り直し自体に変異分が含まれているはずである。**
- * 万一含まれていない場合（組み込みが後から外された等）は、このスクリプトを
- * そのまま再実行すればよい——既存カセットを毎回読み直して事前投入するので、
- * 何度実行しても安全（冪等ではないが、既存分の呼び出しは常に0回のまま、
- * 変異分だけが新たに追記される）。
- *
- * ## 呼び出し回数（このスクリプトを読めば事前に確定できる。実行前にコードで確定させる規律）
- *
- * 1. `ANSWER_CASE_SET_DEV` から `pref-tea-over-coffee` を取り出し、`runAnswerCase` を
- *    そのまま1回走らせる（段1・健全性確認）——ingest（抽出）・recall・naive/mnemora の
- *    回答生成・naive/mnemora の judge、全部で `complete`/`completeStructured` が
- *    複数回走るが、**入力はどれも `examples/chat/cassettes/answer.json` に既に記録済みの
- *    内容と一致する**（ケース定義を1文字も変えていない）ので、事前投入した
- *    `CassetteRecorder.lookupLLM`/`lookupEmbedding` がすべて命中し、**実 API 呼び出しは
- *    0 回**になるはずである（このスクリプトはその前提を `recorder.llmCount`/
- *    `embeddingCount` の前後比較で検査し、0 でなければ即座に落ちる）。
- * 2. `recordRetentionMutationPositiveControl` が同じケースをもう一度 `runAnswerCase` で
- *    走らせ（これも同じ理由で実 API 呼び出しは0回）、`applyRetentionMutation` で
- *    mnemora 側の回答生成 `PromptSpec` の digest から答えの語を落とし、`complete()` を
- *    1回呼ぶ ⟹ **新規 chat 呼び出し #1**。その回答を使って judge を1回呼ぶ
- *    ⟹ **新規 chat 呼び出し #2**。
- *
- * ⟹ **このスクリプトが実 API に送る呼び出しは、合計ちょうど2回（どちらも
- * `gpt-4o-mini` の chat）。embeddings は0回。** Issue #498 の最新コメントが見積もった
- * 「1ケースあたり chat 2回」と一致する。
- *
- * ⛔ **既存カセットへの書き込みは追記のみ**——`CassetteRecorder.toCassette()` が返す
- * `Map` は事前投入した既存エントリを挿入順のまま保持し、新規の2件はその後に追加される
- * ため、`saveCassette` が書き出す JSON も既存67件が同じ順・同じ内容のまま、末尾に
- * 新規2件が足される形になる（diff で確認すること。書き出し後に
- * `pnpm run format`（prettier）を通すこと——`saveCassette` は素の
- * `JSON.stringify(cassette, null, 2)` を書くため、既存ファイルの prettier
- * 整形（配列を printWidth に合わせて詰める）とは行の折り方が異なり、
- * prettier を通さないと無関係な整形差分で diff が埋まる）。
+ * 既存の `answer.json` を録り直さず、変異分（chat 2回だけ）を追記する。`record answer` は毎回空の `CassetteRecorder` から始まる全置換なので、
+ * 既存カセットを事前投入し、既存分の呼び出しを実 API へ送らない（0 回であることを前後比較で検査する）。
+ * 変異分は `recordAnswer` の経路にも組み込んであるので、通常はこのスクリプトを直接使わない。
+ * 書き出し後は prettier を通す（`saveCassette` は素の `JSON.stringify` で、整形差分が diff を埋める）。
  */
 
 const usage = () => {
@@ -102,7 +40,6 @@ async function main(): Promise<void> {
   );
 
   const recorder = new CassetteRecorder();
-  // ⭐ 既存エントリを挿入順のまま事前投入する（diff を追記だけにするため）。
   for (const entry of Object.values(existing.embedding.entries)) {
     recorder.recordEmbedding(existing.embedding.space, entry.text, entry.vector);
   }
@@ -131,10 +68,6 @@ async function main(): Promise<void> {
       );
     }
 
-    // ---------------------------------------------------------------------
-    // 段1: 健全性確認（元のケースをそのまま1回走らせる）。既存カセットに記録済みの
-    // 入力だけを踏むはずなので、実 API 呼び出しは0回であることを検査する。
-    // ---------------------------------------------------------------------
     const runId = Date.now();
     const sanityCheck = await runAnswerCase(
       handle.runtime,
@@ -174,9 +107,6 @@ async function main(): Promise<void> {
         "（実 API 呼び出し 0 回。既存カセットの命中だけで完走した）",
     );
 
-    // ---------------------------------------------------------------------
-    // 段2: 変異（digest から答えの語を落とす）。ここだけが実 API を叩く。
-    // ---------------------------------------------------------------------
     const afterSanityLLMCountForMutation = recorder.llmCount;
     const mutation = await recordRetentionMutationPositiveControl(
       handle.runtime,
@@ -208,9 +138,6 @@ async function main(): Promise<void> {
       console.log(`\n${handle.usageMeter.formatReport()}`);
     }
 
-    // ---------------------------------------------------------------------
-    // 書き出し（既存67件 + 新規2件 = 69件のはず）。
-    // ---------------------------------------------------------------------
     const cassette = recorder.toCassette();
     const newCount = Object.keys(cassette.llm.entries).length;
     console.log(

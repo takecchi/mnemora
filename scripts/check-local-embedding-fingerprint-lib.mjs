@@ -1,35 +1,16 @@
 /**
- * `scripts/check-local-embedding-fingerprint.mjs`（`@mnemora/local-embedding` が
- * 実際に読み込んだ重みファイルと、宣言された Hugging Face repo が「今まさに」
- * 持っているものを照合する CLI）の純関数の側。
- *
- * ファイル I/O・ネットワーク（`fetch`）・`process.argv`・`process.exit` を
- * 一切持たない——`scripts/ci-green-check-lib.mjs` と同じ分担・同じ理由である。
- * 判定ロジックをここへ切り出すことで、ネットワークもモデル取得も無しに
- * 単体試験できる（`scripts/__tests__/check-local-embedding-fingerprint-lib.test.mjs`）。
- *
- * ⭐ **この道具の設計の核心は「期待値をリポジトリに1つも焼き込まない」ことである。**
- * repo が今日更新されても、明日 CI が別の repo を宣言していても、この道具は
- * 常に「宣言された repo に今まさに問い合わせて」期待値を作る（CLI 側の役目）。
- * ここ（純関数の側）はハッシュそのものを1つも知らない——渡された `actual` /
- * `expectedByPath` を突き合わせるだけである。
+ * ⛔ 期待値をリポジトリに焼き込まない。この純関数の側はハッシュそのものを1つも知らず、渡された `actual` / `expectedByPath` を突き合わせるだけ。
+ * 期待値は CLI 側が、宣言された repo に今問い合わせて作る。
+ * ファイル I/O・ネットワーク・`process.argv`・`process.exit` を持たない(モデル取得無しに単体試験できる)。
  */
 
 import { createHash } from "node:crypto";
 
 /**
- * git の blob hash（`git hash-object` と同じ値）を hex で返す。
- *
- * `node:crypto` の `createHash` はここでは I/O ではなく純粋な計算として使っている
- * ——ネットワークにもファイルシステムにも触れない（Node 組み込みの暗号計算）ので、
- * このファイルが「純関数だけ」であるという前提を破らない。
- *
- * git の blob object は `"blob " + <バイト数の10進数文字列> + "\0" + <中身>` を
- * sha1 したものである（git 自身の object 形式。LFS を使わない小さいテキスト
- * ファイル——`config.json` 等——は Hugging Face の tree API でもこの値を返す）。
+ * `node:crypto` の `createHash` は純粋な計算で、I/O ではない。
  *
  * @param {Uint8Array | Buffer} bytes
- * @returns {string} 40桁の hex
+ * @returns {string}
  */
 export function gitBlobSha1Hex(bytes) {
   const header = `blob ${bytes.length}\0`;
@@ -37,16 +18,8 @@ export function gitBlobSha1Hex(bytes) {
 }
 
 /**
- * Hugging Face の tree API（`GET /api/models/<repo>/tree/main?recursive=1&expand=1`）
- * が返す1エントリから、期待される hash を取り出す。
- *
- * - `entry.lfs` が在れば、その実体は Git LFS 経由で管理されている大きいファイルであり、
- *   `entry.lfs.oid` が実体の **sha256** である（`entry.oid` は LFS ポインタファイル
- *   自身の git blob hash であり、実体のハッシュではないので使わない）。
- * - `entry.lfs` が無ければ、`entry.oid` がそのまま実体の **git blob sha1** である
- *   （小さいテキストファイルは LFS を通さず直接コミットされる）。
- * - どちらの oid も取れなければ（tree API の形が変わった等）`null` を返す
- *   ——呼び出し側はこれを「期待値が作れない」として扱う。
+ * ⚠ `entry.lfs` が在れば `entry.lfs.oid`(実体の sha256)を使う。`entry.oid` は LFS ポインタファイル自身の blob hash なので使わない。
+ * 無ければ `entry.oid`(git blob sha1)。どちらも取れなければ `null`(呼び出し側が「期待値が作れない」として扱う)。
  *
  * @param {{ oid?: string, lfs?: { oid?: string } }} entry
  * @returns {{ algorithm: "sha256" | "git-blob-sha1", hex: string } | null}
@@ -62,34 +35,14 @@ export function expectedHashOfTreeEntry(entry) {
 }
 
 /**
- * 手元で見つかったファイルの相対パスを、HF の tree のパス空間へ正規化する
- * （Issue #597 案(a) の追加分、ADR 0253 追記5）。
+ * 🔴 `revision` が `"main"` 以外だと、`@huggingface/transformers` の `FileCache` は `<repo>/<revision>/<filename>` とサブディレクトリに置く。
+ * 正規化しないと、手元にファイルが在るのに「素性不明」として不一致になる。
+ * 🔴 照合する対象は変えない(`main` の tree と照合し続ける)。変えるのは、手元のファイルと tree のパスの対応という解釈だけ。
+ * ⚠ `pinnedRevision` が無い(宣言が読めない)ときは何もしない。追加のフォールバックで、無くても動く形を壊さない。
  *
- * 🔴 **なぜ要るか（実測、CI run 35953212055 で赤くなって判明）**:
- * `@huggingface/transformers` の `FileCache` は、`revision` を `"main"` 以外の値で
- * 渡すと、`<repo>/<revision>/<filename>` という**revision 名のサブディレクトリ**に
- * ファイルを置く（`revision` が既定の `"main"` のときだけ `<repo>/<filename>` という
- * フラットな配置になる——`node_modules/@huggingface/transformers/src/utils/hub.js`
- * の `buildResourcePaths` が `proposedCacheKey` を組み立てる箇所で確認した）。
- *
- * Issue #597 案(a) で `examples/chat` が固定した revision を渡すようになったため、
- * CI のキャッシュには `<cacheDir>/<repo>/<固定revision>/<filename>` という配置で
- * ファイルが置かれる。この門は HF の tree のパス（`config.json` / `onnx/model_quantized.onnx`
- * のようにサブディレクトリを持たない）と突き合わせるので、正規化しないと**手元に
- * ファイルが実在するのに「素性不明」として不一致になる**（実際に CI でそう壊れた）。
- *
- * 🔴 **この関数は「照合する対象」を変えない。** 変えるのは「手元のどのファイルが、
- * tree のどのパスに対応するか」という*解釈*だけである——この門はいまも
- * `main` の tree と照合し続ける（クローンの決定。ADR 0253 追記4）。
- *
- * ⚠ **`pinnedRevision` が無い（宣言が読めない）場合は何もしない。** revision=main の
- * フラットな配置しか扱わない、この変更より前の挙動そのままになる——**この正規化は
- * 追加のフォールバック**であり、無くても（今までどおり）動く形を壊さない。
- *
- * @param {string} relPath repoDir からの相対パス（`/` 区切り）
- * @param {string | null} pinnedRevision 固定した revision（`scripts/local-embedding-pinned-revision.json`）。
- *   読めなければ `null` を渡すこと。
- * @returns {string} 正規化した相対パス（プレフィックスが無ければそのまま返す）
+ * @param {string} relPath
+ * @param {string | null} pinnedRevision
+ * @returns {string}
  */
 export function normalizeActualPath(relPath, pinnedRevision) {
   if (!pinnedRevision) {
@@ -100,16 +53,8 @@ export function normalizeActualPath(relPath, pinnedRevision) {
 }
 
 /**
- * 手元のキャッシュのうち、この門が見るディレクトリの一覧（Issue #1403・ADR 0365）。
- *
- * - `<cacheDir>/<repo>` … `revision` を渡さずに読み込んだもの（transformers.js の `main` の配置）。
- * - `<cacheDir>/<encodeURIComponent(固定revision)>/<repo>` … `revision` を渡して読み込んだもの。
- *   `@mnemora/local-embedding` の既定の `createPipeline` は、`revision` を渡されると、キャッシュの根を
- *   `<根>/<encodeURIComponent(revision)>` に分ける（`packages/local-embedding/src/transformers-cache-place.ts`
- *   の `revisionCacheRoot`）。この形は mnemora が決めたもので、transformers.js の内部の鍵の形ではない。
- *
- * ⚠ CI では、`revision` を渡すステップと渡さないステップが同じキャッシュを使うので、両方が並ぶ。
- * `pinnedRevision` が無い（宣言が読めない）なら、前者だけを返す。
+ * ⚠ CI では `revision` を渡すステップと渡さないステップが同じキャッシュを使うので、両方が並ぶ。`pinnedRevision` が無いなら前者だけを返す。
+ * `<cacheDir>/<encodeURIComponent(revision)>/<repo>` の形は mnemora が決めたもので、transformers.js の内部の鍵の形ではない(`transformers-cache-place.ts` の `revisionCacheRoot`)。
  *
  * @param {string} cacheDir
  * @param {string} repo
@@ -126,37 +71,14 @@ export function cacheRepoDirs(cacheDir, repo, pinnedRevision) {
 }
 
 /**
- * 手元に実在するファイルの hash と、HF の tree から作った期待値を突き合わせる。
+ * 🔴 HF の tree に在って手元に無いファイルは不一致にしない。読み込み器は必要なファイルだけを取得する(例: `dtype: "q8"` なら量子化版しか落ちてこない)ので、tree 全件が手元に揃うことは無い。
+ * 不一致にすると、正常な実行のたびに赤くなる。見るのは `unknownOnDisk`(手元に在るのに tree に無い)だけ。
  *
- * 🔴 **HF の tree に在るが手元に無いファイルは、不一致にしない。**
- * transformers.js（`@mnemora/local-embedding` が使う読み込み器）は、必要なファイル
- * だけを選んで取得する——たとえば `onnx/model.onnx`（fp32 の完全版）と
- * `onnx/model_quantized.onnx`（q8 量子化版）が両方 tree に在っても、
- * `dtype: "q8"` を指定していれば量子化版しか落ちてこない。**tree 全件が手元に揃う
- * ことは設計上ありえない**——「揃っていない」を「不一致」として扱うと、この道具は
- * 正常な実行のたびに赤くなる歯になってしまう。だから `unknownOnDisk`
- * （逆方向。手元に在るのに tree に無い＝素性の分からないファイル）だけを見る。
+ * ⛔ `verdict` は `"match"` / `"mismatch"` の2値で、`"undetermined"` は無い。判定不能は HF API に届かなかったときに CLI 側だけが名乗る。
  *
- * ⭐ **`verdict` は `"match"` / `"mismatch"` の2値しか持たない（`"undetermined"` は
- * 無い）。** これはこのファイルが純関数だけの側であることの直接の帰結である——
- * 「判定できない」が意味を持つのは、この道具が**ネットワークに問い合わせようとして
- * 失敗した**とき（HF の tree API に3回試しても届かなかった）だけであり、それは
- * I/O の失敗であって、`actual` と `expectedByPath` という**すでに揃ったデータ同士**の
- * 突き合わせの話ではない。⟹ `undetermined` は
- * `scripts/check-local-embedding-fingerprint.mjs`（CLI 側）が HF API 到達失敗の
- * ときにだけ名乗る状態であり、この関数の戻り値には現れない。**この関数に来た時点で
- * 「問い合わせは成功した」ことが前提であり、あとは「一致したか・していないか」の
- * 二択しか無い。**
- *
- * 🔴 **`actual` が空（手元に検査対象のファイルが1本も無い）は `"mismatch"` である。**
- * この道具は CI の門として使う——CI ではモデルのキャッシュ鍵が存在する以上、
- * `<cacheDir>/<repo>/` にファイルが1本も無いこと自体が設定の壊れであり、
- * 「判定を保留する」のではなく「赤」として扱う（依頼者の決定）。
+ * 🔴 `actual` が空(手元に検査対象が1本も無い)は `"mismatch"`。CI の門で、キャッシュ鍵が在るのにファイルが無いのは設定の壊れなので、保留ではなく赤にする。
  *
  * @param {{ actual: { path: string, algorithm: string, hex: string }[], expectedByPath: Map<string, { algorithm: string, hex: string }> }} params
- *   `actual` は手元に実在したファイル（`path` は repo 内の相対パス。例
- *   `onnx/model_quantized.onnx`）。`expectedByPath` は HF の tree から作った
- *   `expectedHashOfTreeEntry` の結果の集まり。
  * @returns {{
  *   verdict: "match" | "mismatch",
  *   matched: string[],
@@ -172,7 +94,6 @@ export function compareFingerprints({ actual, expectedByPath }) {
   for (const file of actual) {
     const expected = expectedByPath.get(file.path);
     if (!expected) {
-      // 手元に在るのに HF の tree に無い——素性が分からないファイル。
       unknownOnDisk.push(file.path);
       continue;
     }
@@ -187,7 +108,6 @@ export function compareFingerprints({ actual, expectedByPath }) {
     }
   }
 
-  // `actual` が空＝手元に1本もファイルが無い＝赤（上の docstring 参照）。
   const verdict =
     actual.length === 0 || mismatched.length > 0 || unknownOnDisk.length > 0 ? "mismatch" : "match";
 
@@ -195,8 +115,6 @@ export function compareFingerprints({ actual, expectedByPath }) {
 }
 
 /**
- * `compareFingerprints` の結果を人が読める日本語の報告文字列にする。
- *
  * @param {ReturnType<typeof compareFingerprints>} result
  * @returns {string}
  */
@@ -215,8 +133,6 @@ export function formatFingerprintReport(result) {
     result.mismatched.length === 0 &&
     result.unknownOnDisk.length === 0
   ) {
-    // `actual` が空だったケース（`compareFingerprints` の docstring 参照）。
-    // 個別の食い違いが無いので、その旨を名指しする。
     lines.push(
       "不一致: 手元に検査対象のファイルが1本も無い——" +
         "キャッシュの場所やモデル未取得を疑うこと。",

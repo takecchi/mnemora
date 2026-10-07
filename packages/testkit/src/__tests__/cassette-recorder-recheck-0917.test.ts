@@ -15,12 +15,6 @@ import {
   RecordingLLMProvider,
 } from "../__fixtures__/cassette-recorder.js";
 
-/**
- * Issue #1812（09/17 マージ分の確かめ直し）まとまり G5: PR #514（ADR 0233）の
- * `cassette-recorder.ts` の確かめ直しで、既存の試験をすり抜けた変異に足した歯。
- * 約束の出所は、各 `it` の頭に ADR・doc の名前で書く。
- */
-
 const ctx: Ctx = { tenantId: "cassette-recorder-recheck-0917" };
 const space: EmbeddingSpaceId = { provider: "openai", model: "fake-embedding", dimensions: 2 };
 const prompt: PromptSpec = { system: "s", messages: [{ role: "user", content: "q" }] };

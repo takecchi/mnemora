@@ -2,56 +2,20 @@ import type { ProbeUtterance } from "./probe-set.js";
 import { DEFAULT_HAYSTACK_SIZE, buildHaystackUtterance } from "./probe-set.js";
 
 /**
- * 識別子・固有名詞を含む probe set（Issue #109、#106 が名指しした用途）。
- *
- * **背景**: `retrieval` ベンチの probe 7件（`./probe-set.js`）は**すべて日本語の query**
- * で、ASCII の識別子・固有名詞を含む query が0件である。Issue #106 の報告者の用途は
- * 「固有名詞と識別子が多い」（人名・チャンネル名・社内システム名・案件コード・チケット番号。
- * 例: `PROJ-1234` と `PROJ-5678` の取り違え）——⟹ 報告者が困っている領域を、既存ベンチは
- * 1件も測っていなかった。
- *
- * 既存の `retrieval` はカセット（`examples/chat/cassettes/retrieval.json`）の鍵が
- * **入力文字列の SHA-256** であり、記録に無い入力は `RecordedEmbeddingProvider`/
- * `RecordedLLMProvider` が例外にする。⟹ probe を1件足すたびに録り直しが要る。
- * `@mnemora/local-embedding`（鍵もカセットも要らない、ADR 0085）を使うことで、
- * この制約なしに probe を足せる——それがこの第2の probe set をここに置く理由である。
- *
- * ⛔ **`./probe-set.js` は1文字も変更していない**（haystack 生成関数・topic keyword
- * 検査関数だけを import して再利用する）。
- *
- * ⚠ **この probe set は `./probe-set.js` と狙いが「逆」である。**
- *
- * - 既存（`./probe-set.js`）: gold の質問は gold の事実と**内容語を共有しない**。
- *   擬似 embedding が持つのは文字コードに由来する語彙的な重なりだけなので、内容語を
- *   共有しない質問は擬似物では引けず、**本物の埋め込みでしか引けない**ことを確かめる。
- * - こちら（識別子 probe）: **query に識別子そのものを含める**——「その文字列を含むか」
- *   で引きたいのが Issue #106 の報告者の要求そのものだからである。
- *
- * distractor は**「同じ書式・違う識別子」**にする（例: `PROJ-1234` に対する
- * `PROJ-5678`）。これが gold より上に来たら「書式は合っているが対象が違う」ものを
- * 返しているということであり、まさに #106 が報告した失敗そのものである。
- *
- * **何件で覆うか**: Issue #106 が名指しした5領域（人名・チャンネル名・社内システム名・
- * 案件コード・チケット番号）を、まず12件（領域あたり2〜3件）で覆う。
- * ⚠ **ADR 0033 §3 は「標本7件からは失敗率も成功率も主張しない」と書いている**——
- * 12件という標本数についても同じ規律を適用する。ここから言えるのは
- * 「12件のうちこの arm が何件引けたか」までであり、「識別子一般でどの程度の成功率が
- * 出るか」を統計的に主張できる件数ではない（測定結果の報告に明記する）。
+ * 識別子・固有名詞を含む probe set。`./probe-set.js` と狙いが逆で、query に識別子そのものを含め、
+ * distractor は「同じ書式・違う識別子」にする（gold より上に来たら、書式は合うが対象が違うものを返している）。
+ * カセットではなく `@mnemora/local-embedding` を使うのは、カセットの鍵が入力文字列の SHA-256 で、probe を足すたびに録り直しが要るため。
+ * 12件の標本から、識別子一般の成功率は統計的に主張しない（ADR 0033 §3）。
  */
 export interface IdentifierProbe {
   id: string;
-  /** Issue #106 が名指しした5領域のどれを代表するか。 */
   category: "person" | "channel" | "system" | "project-code" | "ticket";
-  /** 会話の冒頭付近で1度だけ表明される、識別子を含む事実。これが gold。 */
   fact: string;
-  /** 終盤に投げる質問。**識別子そのものを含む**（既存 probe-set.ts とは逆）。 */
   query: string;
-  /** 同じ書式・違う識別子の記憶。gold より上に来たら「書式は合うが対象が違う」。 */
   distractor: string;
 }
 
 export const IDENTIFIER_PROBES: IdentifierProbe[] = [
-  // --- 案件コード（project code） ---
   {
     id: "project-code-a",
     category: "project-code",
@@ -94,7 +58,6 @@ export const IDENTIFIER_PROBES: IdentifierProbe[] = [
     query: "PROJ-3401 のリリース判定会議はどこが主催しますか?",
     distractor: "PROJ-3402 のリリース判定会議は開発部が主催します。",
   },
-  // --- チケット番号（ticket number） ---
   {
     id: "ticket-a",
     category: "ticket",
@@ -137,7 +100,6 @@ export const IDENTIFIER_PROBES: IdentifierProbe[] = [
     query: "INC-81101 は現在どういう状態ですか?",
     distractor: "INC-81102 は日中に発生した障害チケットで、現在も調査中です。",
   },
-  // --- 社内システム名（internal system name） ---
   {
     id: "system-a",
     category: "system",
@@ -180,7 +142,6 @@ export const IDENTIFIER_PROBES: IdentifierProbe[] = [
     query: "SYS-DW41 はいつメンテナンス予定ですか?",
     distractor: "社内システム SYS-DW42(データ基盤・検証環境)は来週月曜にメンテナンス予定です。",
   },
-  // --- チャンネル名（channel name） ---
   {
     id: "channel-a",
     category: "channel",
@@ -223,7 +184,6 @@ export const IDENTIFIER_PROBES: IdentifierProbe[] = [
     query: "#incident-2025-01 は何のための専用チャンネルですか?",
     distractor: "#incident-2025-02 は2月に起きた障害の振り返り専用チャンネルです。",
   },
-  // --- 人名（person / employee identifier） ---
   {
     id: "person-a",
     category: "person",
@@ -268,16 +228,9 @@ export const IDENTIFIER_PROBES: IdentifierProbe[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// 識別子の重なり検査(機械的) — `./probe-set.js` の `PROBE_TOPIC_KEYWORDS` /
-// `findTopicKeywordViolations` と同じ形の検査を、識別子側にも用意する。
-// ---------------------------------------------------------------------------
-
 /**
- * probe ごとの識別子(fact/query/distractor に登場する識別子そのもの)。
- * `./probe-set.js` の `PROBE_TOPIC_KEYWORDS` と同じ理由で、`IDENTIFIER_PROBES` から
- * 自動導出せず人手で書き出す。`IDENTIFIER_PROBES` に probe を足したら、ここにも
- * 対応する識別子を足すこと。
+ * probe ごとの識別子。`./probe-set.js` の `PROBE_TOPIC_KEYWORDS` と同じ理由で、`IDENTIFIER_PROBES` から
+ * 自動導出せず人手で書き出す。probe を足したらここにも足すこと。
  */
 export const IDENTIFIER_TOPIC_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   "project-code-a": ["PROJ-1234", "PROJ-5678"],
@@ -321,13 +274,8 @@ export interface IdentifierKeywordViolation {
 }
 
 /**
- * `./probe-set.js` の `findTopicKeywordViolations` と同じ形の検査を、識別子の集合に対して
- * 行う。haystack の各文が `IDENTIFIER_PROBES` の識別子を(偶然にも)含んでいないかを
- * 機械的に見る。空配列を返せば「重なり無し」。
- *
- * `./probe-set.js` の `findTopicKeywordViolations` はキーワード集合を内部に固定している
- * ため(`ALL_TOPIC_KEYWORDS`)そのままでは呼べない——ロジックは同じだが、対象の
- * キーワード集合(`ALL_IDENTIFIER_KEYWORDS`)が違うので、ここで独立に実装する。
+ * haystack の各文が `IDENTIFIER_PROBES` の識別子を偶然含んでいないかを見る。`./probe-set.js` の
+ * `findTopicKeywordViolations` はキーワード集合を内部に固定していて呼べないため、独立に実装する。
  */
 export function findIdentifierTopicKeywordViolations(
   utterances: readonly string[],
@@ -343,60 +291,21 @@ export function findIdentifierTopicKeywordViolations(
   return violations;
 }
 
-// ---------------------------------------------------------------------------
-// 密な haystack(識別子が密な干し草) — マネージャー指示(#106 の再点検)
-//
-// **背景**: 当初の12 probe を `sparse`(= `./probe-set.js` の既定 haystack、話題語ベースで
-// 識別子を1件も含まない)で走らせたところ、全12 probe が hit@1 だった(2026-09-10 実測、
-// `identifier-probe-baseline.json` の `identifiers` 群)。
-//
-// ⚠ **これを「probe が易しすぎた」と即断しない。**`TICKET-48213`/`TICKET-48214` は
-// 1文字違いで、query は両者と「不具合の報告」という語彙を共有しており、識別子だけが
-// 弁別子である——それを正しく1位にできたのは実際の発見である。
-//
-// 🔑 **ただし #106 の逐語(Issue #106)はこう書いている**:
-// 「ベクタ検索だと、同じ形式の別の識別子(`PROJ-5678`)が近傍に来て、欲しいものが
-// 埋もれます」。**「近傍に来て埋もれる」は、同じ書式の識別子が"多数"居る状況を指す**
-// ——`sparse` 条件は probe ごとに distractor 1件しか同じ書式の競合を置いておらず、
-// この状況を表していない。
-//
-// ⟹ **`dense` 条件を第2の haystack として足す**——`IDENTIFIER_PROBES` が使う9つの
-// 書式ファミリー(`PROJ-`/`TICKET-`/`INC-`/`SYS-`/`EMP-`/`#proj-`/`#team-`/
-// `#incident-2024-`/`@<surname>.<given>`)それぞれについて、**probe の識別子とは別の
-// 値**を持つ干し草を計60件、決定的に(乱数無しで)生成する。`./probe-set.js` の
-// `buildHaystackUtterance` と同じ「直積で一意性を作る」考え方を踏襲するが、ここでは
-// 「書式ファミリー × ファミリー内の連番/語」の2軸で一意にする(意味的な話題は
-// ファミリーごとに固定の文で足りる——変える軸は識別子そのものであり、`buildHaystackUtterance`
-// のように3軸を混ぜる必要が無い)。
-//
-// 🔴 **この段では、まだ結果を見ていない。**設計はここで確定し、下の
-// `DENSE_IDENTIFIER_FAMILIES`/件数/識別子の値を**測定前に固定する**——
-// 「まだ1.0だからもっと難しくしよう」を避けるため、値を見てからここを書き直さない。
-// ---------------------------------------------------------------------------
+// 密な haystack: `sparse` は同じ書式の競合が distractor 1件しか無く、「近傍に来て埋もれる」状況を表せないので足した。
+// 件数と識別子の値は測定前に固定した。結果を見てから難しくするために書き直さない。
 
 export type IdentifierHaystackKind = "sparse" | "dense";
 
 interface DenseIdentifierFamily {
-  /** probe の `category` と対応させるための識別名(表示・集計には使わない、設計メモ)。 */
   id: string;
-  /** このファミリーが提供する干し草の件数。 */
   count: number;
-  /** ファミリー内の連番(0始まり)から、`IDENTIFIER_PROBES` に無い新しい識別子を作る。 */
   identifierAt: (n: number) => string;
-  /** 識別子を埋め込んだ、ありふれた事務連絡文(意味は無害・probe の話題とは無関係)。 */
   sentenceFor: (identifier: string) => string;
 }
 
 /**
- * `IDENTIFIER_PROBES`(12件)が使う書式ファミリーごとに、**probe が使っていない値**で
- * 干し草を作る。件数の合計が `DEFAULT_DENSE_HAYSTACK_SIZE`(60)になるよう固定した
- * (`sparse` 条件の既定 haystack 件数 `DEFAULT_HAYSTACK_SIZE` と同程度)。
- *
- * ⚠ **`IDENTIFIER_TOPIC_KEYWORDS` に登場する既存24件の識別子とは重ならない値域を
- * 選んである**(番号は既存より大きい/一致しない範囲、語は既存に無い単語)。
- * その保証は「番号を選んだ」だけでは終わらない——`buildIdentifierProbeSetConversation`
- * が `findIdentifierTopicKeywordViolations` で機械的に再検査し、万一重なっていれば
- * 構築時に例外にする(このコメントの主張を実行時にも裏付ける)。
+ * `IDENTIFIER_PROBES` が使う書式ファミリーごとに、probe が使っていない値で干し草を作る。
+ * 値域が重ならないことは、`buildIdentifierProbeSetConversation` が実行時にも再検査する。
  */
 const DENSE_IDENTIFIER_FAMILIES: readonly DenseIdentifierFamily[] = [
   {
@@ -465,16 +374,11 @@ const DENSE_IDENTIFIER_FAMILIES: readonly DenseIdentifierFamily[] = [
   },
 ];
 
-/** `DENSE_IDENTIFIER_FAMILIES` の件数の合計から導く——ここにも 60 を書き写さない。 */
 export const DEFAULT_DENSE_HAYSTACK_SIZE: number = DENSE_IDENTIFIER_FAMILIES.reduce(
   (sum, f) => sum + f.count,
   0,
 );
 
-/**
- * `index`(0始まり)に対応する、識別子が密な haystack 文を1件返す。
- * ファミリーを跨ぐ累積オフセットで、どのファミリーの何番目かを決める(決定的、乱数無し)。
- */
 export function buildDenseIdentifierHaystackUtterance(index: number): string {
   if (!Number.isInteger(index) || index < 0) {
     throw new Error(
@@ -495,40 +399,22 @@ export function buildDenseIdentifierHaystackUtterance(index: number): string {
   );
 }
 
-// ---------------------------------------------------------------------------
-// 会話の組み立て
-// ---------------------------------------------------------------------------
-
-/** `identifier-gold-<id>` の externalId 規約。`./probe-set.js` の `gold-<id>` と衝突しない
- *  よう別の prefix を使う——同じ会話に両 probe set を混在させることは無いが、テナントを
- *  跨いだ誤集計を防ぐため、名前空間を最初から分けておく。 */
+/** `./probe-set.js` の `gold-<id>` と衝突しないよう別の prefix を使う（テナントを跨いだ誤集計を防ぐ）。 */
 export function identifierGoldExternalId(probeId: string): string {
   return `identifier-gold-${probeId}`;
 }
 
-/** `identifier-distractor-<id>` の externalId 規約。 */
 export function identifierDistractorExternalId(probeId: string): string {
   return `identifier-distractor-${probeId}`;
 }
 
-/** `identifier-filler-NNNN`(4桁ゼロ埋め)の externalId 規約。 */
 export function identifierHaystackExternalId(index: number): string {
   return `identifier-filler-${String(index).padStart(4, "0")}`;
 }
 
 /**
  * 全 identifier probe の gold/distractor + 共有の haystack を1本の会話に組む。
- *
- * `haystackKind`(既定 `"sparse"`)で haystack の生成器を切り替える:
- * - `"sparse"`: `./probe-set.js` の `buildHaystackUtterance` を再利用する(識別子を
- *   1件も含まない、話題語ベースの既定 haystack)。**既定値なので、この引数を渡さない
- *   既存の呼び出し(歯を含む)は1ミリも挙動が変わらない。**
- * - `"dense"`: 上の `buildDenseIdentifierHaystackUtterance`(同じ書式ファミリーの
- *   識別子が密な haystack)。
- *
- * どちらの kind でも、識別子の重なり検査(`findIdentifierTopicKeywordViolations`)は
- * 必ず通す——`dense` は probe の識別子と衝突しない値を選んで設計してあるが、
- * 「選んだつもり」で終わらせず実行時にも再検査する。
+ * 既定は `"sparse"` で、引数を渡さない既存の呼び出しの挙動は変えない。どちらの kind でも識別子の重なり検査は必ず通す。
  */
 export function buildIdentifierProbeSetConversation(
   haystackSize?: number,

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { OpenAIEmbeddingProvider } from "../embedding-provider.js";
 import { OpenAILLMProvider } from "../llm-provider.js";
 
-// ADR 0498: 数値オプションは構築時に検査する。dimensions は正の安全な整数、temperature は有限で 0 以上。
 // 省略時の既定は変えない（temperature は省略なら渡さない）。
 
 const client = {} as never;

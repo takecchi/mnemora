@@ -1,76 +1,17 @@
 #!/usr/bin/env node
 /**
- * リリース当日に、「前回のリリース以降、リリースノート／CHANGELOG に載せるべき候補」を
- * その場で出す道具。
+ * ⛔ 歯ではなく道具。CI ワークフローには配線せず、当日に人が叩く。
  *
- * ## これは歯ではなく道具である
+ * ⛔ 判定ではなく候補の一覧。機械的な信号だけを根拠に「破壊的変更はこれだけ」と結論しない。
+ * 信号が付かなかった側(`withoutSignals`)も必ず人が読むこと(信号が1つも付かない破壊的変更が実在した)。
  *
- * `scripts/__tests__/` の下に置く歯（`release-candidates-lib.test.mjs`）は、この CLI が
- * 使う純関数だけを検査する。**この CLI 自体は、どの CI ワークフローにも配線していない**
- * ——`.github/workflows/*.yml` からは呼ばれない。当日、人がターミナルで直接叩くものである
- * （`node scripts/release-candidates.mjs [--since <tag>] [--json]`）。
+ * ⛔ 数字も tag 名も焼き込まない(ADR 0070)。起点の tag は引数か `gh release view`/`git describe` からその場で取る。
+ * repo 名も同様。焼き込んだ数字は次のリリースで腐る。
+ * `gh` が失敗して `git describe` へ落ちたことは、出力に明記する。
  *
- * ## これは判定ではなく候補の一覧である
+ * ⛔ `CHANGELOG.md` を書き換えない(ADR 0169。手で書く)。この道具は書き忘れを確認する材料を出すだけ。
  *
- * `v0.2.0..origin/main`（70 commit、2026-09-17 時点で実測）には、確定的な破壊的変更が
- * 4件あるが、印の付き方はバラバラだった:
- *
- * | sha | `!` | 本文に「破壊的」/BREAKING | 公開API snapshot を触る |
- * |---|---|---|---|
- * | `c4a3dc7` | ✗ | ✗ | ✗ |
- * | `2097a72` | ✗ | ✓ | ✗ |
- * | `855286a` | ✗ | ✓ | ✓ |
- * | `b84f120` | ✓ | ✗ | ✓ |
- *
- * 🔴 **`c4a3dc7` はどの信号にも掛からない**——それでいて `CHANGELOG.md` の
- * `### 変更（破壊的）` 節には載っている。🔴 **`BREAKING CHANGE:` フッタは repo 全履歴で
- * 0件**（使われていない）。🔴 **`b84f120` は確定的な破壊的変更なのに、この道具を書いている
- * 時点の `CHANGELOG.md` に未収録**（`grep -c LocalEmbeddingPipeline CHANGELOG.md` は 0 を返す）。
- * ⟹ **機械的な信号だけを根拠に「破壊的変更はこれだけ」と結論しないこと。**この道具が
- * 出すのは「人が読むべき候補の一覧」であって、「破壊的変更の確定リスト」ではない。
- * **信号が付かなかった側（`withoutSignals`）も必ず人が読むこと**——`c4a3dc7` はそこにしか
- * 現れない。
- *
- * ## 数字も tag も焼き込んでいない
- *
- * [ADR 0070](../docs/decisions/0070-version-comes-from-the-release-tag.md) は
- * 「**Release の tag が版を決める。`package.json` はそれを受け取る側になる。**」と定めている
- * ——版の権威は tag にあり、この repo のどのファイルにも「現在の版」を焼き込まない設計である。
- * この道具が起点の tag をコマンドライン引数か `gh release view`/`git describe` からその場で
- * 取り、ソースコードに数字や tag 名を書かないのは、その決定と同じ理由による——**焼き込んだ
- * 数字は、次のリリースが出た瞬間に腐る。**`CHANGELOG.md` 自身が「数字を焼き込む以上、
- * `main` が動けば必ず腐る」と明記しているのと同じ規律を、この道具にも掛ける。
- *
- * ## `CHANGELOG.md` を書き換えない
- *
- * [ADR 0169](../docs/decisions/0169-changelog-hand-curated.md) 決定1は「CHANGELOG.md は
- * ルートに置き、手で書く（Keep a Changelog 風）」と定めている。同 ADR の「引き受けた負債」
- * 1番は逐語でこう書いている:
- *
- * > 🔴 **手で書く CHANGELOG は、書き忘れうる。** 自動生成ではないため、ある Release で
- * > 利用者に影響する変更が実際にあったのに、CHANGELOG.md への追記を忘れる、という
- * > 失敗モードを構造的に持つ。**これを検出する歯は無い**——`compare`（ADR 0133）のような
- * > ⭐ 門は、CHANGELOG の鮮度には掛かっていない。
- *
- * **この道具はその負債を埋める側であって、CHANGELOG.md の代わりに書く側ではない。**
- * CHANGELOG は引き続き人が手で書く——この道具は「何を書き忘れていないか」を人が確認する
- * ための材料（候補一覧と鮮度の申告）を出すだけで、ファイルへの書き込みは一切しない。
- *
- * ## 使い方
- *
- * ```
- * node scripts/release-candidates.mjs
- * node scripts/release-candidates.mjs --since v0.2.0
- * node scripts/release-candidates.mjs --since v0.2.0 --json
- * ```
- *
- * `--since` を省くと、`gh release view --repo <repo> --json tagName -q .tagName` で
- * 「最新リリースの tag」を取る。`gh` が失敗したら `git describe --tags --abbrev=0` へ落ちる
- * ——**落ちたことは出力に明記する**。repo 名も `gh repo view` か `git remote get-url origin`
- * から導き、焼き込まない。
- *
- * 終了コード: **常に `0`**（候補が0件でも、信号なし commit が在っても `0`）。
- * ⛔ **これは門ではない**——実行時エラー（`git`/`gh` 呼び出し失敗等）のときだけ `1` で落ちる。
+ * ⛔ 門ではない。常に exit 0(候補が0件でも、信号なし commit が在っても)。実行時エラーのときだけ 1。
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -108,9 +49,7 @@ function resolveRepo() {
   try {
     return run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).trim();
   } catch {
-    // gh が使えない・未認証等 — origin の URL から owner/repo を導く。
     const url = run("git", ["remote", "get-url", "origin"]).trim();
-    // 対応する形: git@github.com:owner/repo.git / https://github.com/owner/repo.git
     const match = /(?:github\.com[:/])([^/]+\/[^/]+?)(?:\.git)?$/.exec(url);
     if (!match) {
       throw new Error(`origin の URL から owner/repo を読み取れなかった: ${url}`);
@@ -120,8 +59,6 @@ function resolveRepo() {
 }
 
 /**
- * 起点の tag を決める。**数字も tag 名もソースに焼き込まない**——その場で取る。
- *
  * @param {string | null} explicitSince
  * @param {string} repo
  * @returns {{ tag: string, source: string }}
@@ -154,8 +91,7 @@ function resolveSinceTag(explicitSince, repo) {
 }
 
 /**
- * `<since>..HEAD` の全 commit を、分類に要る生の形（sha/subject/body/files）で取る。
- * ⭐ 候補だけを探すのではなく、**母集合をまず落としてから**印を当てる。
+ * ⭐ 候補だけを探さず、母集合をまず落としてから印を当てる。
  */
 function collectRawCommits(since) {
   const shas = run("git", ["log", `${since}..HEAD`, "--format=%H"])
@@ -174,10 +110,6 @@ function collectRawCommits(since) {
   });
 }
 
-/**
- * `CHANGELOG.md` の鮮度を申告する。**書き換えない。読むだけ。**
- * 読み取れなければ「読み取れなかった」を返す（例外にしない — lib 側の契約どおり）。
- */
 function describeChangelogFreshness() {
   const changelogPath = join(REPO_ROOT, "CHANGELOG.md");
   if (!existsSync(changelogPath)) {

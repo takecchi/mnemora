@@ -1,13 +1,3 @@
-// ADR 0440（クローンの委譲先 mgr-0629e6a2 が書いた。直し方はクローン miku が決めた。オーナーではない）:
-// 同じリース（同じ attempts）で2回目の complete/fail が来ても、**先に付いた終端（先勝ち）**の
-// `completedAt`・`failedAt`・`lastError` を保つ。直す前は同種の再呼び出しが値を上書きしていた
-// （complete×2 で completedAt が2回目に、fail×2 で failedAt と lastError が2回目になり、
-// `purgeCompletedJobs` の olderThan の境界も後ろにずれた）。
-//
-// 戻り値（Promise<void>）と例外（attempts 不一致の OutboxLeaseConflictError、行が無いときの no-op）は
-// 直す前と同じ。`*-conformance.ts` は公開面なので触らず、testkit の中だけで完結する回帰にする。
-// Postgres 側の対応する歯は `packages/postgres/src/__tests__/outbox-first-terminal-wins.postgres.test.ts`。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx, OutboxJobRecord } from "@mnemora/core";
 import { OutboxLeaseConflictError } from "@mnemora/core";
@@ -85,7 +75,6 @@ describe("InMemoryOutboxStore.complete/fail — 先勝ち（ADR 0440）", () => 
     const dry = await store.purgeCompletedJobs(ctx, { olderThan, limit: 10, dryRun: true });
     expect(dry.purged).toBe(1);
     expect(dry.oldestPurgedAt).toEqual(T1);
-    // 境界ちょうど（completedAt === olderThan）は対象外、1回目の値で決まる
     const boundary = await store.purgeCompletedJobs(ctx, {
       olderThan: T1,
       limit: 10,

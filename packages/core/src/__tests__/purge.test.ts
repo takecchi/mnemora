@@ -1136,3 +1136,67 @@ describe("runtime.purge — ADR 0375: 広げた範囲（tags・attributes・clai
     expect(record?.indexBand.digestBand).toEqual([{ memoryId: memory.id, digest: "[purged]" }]);
   });
 });
+
+describe("runtime.purge — embedding を消すのは purge の対象にした記憶だけである", () => {
+  function embeddedMemoryIds(stores: ReturnType<typeof createFakeRuntimeStores>): MemoryId[] {
+    return [...stores.vectorStore.entries.values()].map((entry) => entry.memoryId).sort();
+  }
+
+  async function createEmbedded(
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+    overrides: Partial<NewMemory>,
+  ) {
+    const memory = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ embeddingStatus: "ready", ...overrides }),
+    );
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
+    return memory;
+  }
+
+  it("同じ呼び出しに forgotten でない記憶が混ざっていても、その embedding は残る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const forgotten = await createEmbedded(stores, { status: "forgotten" });
+    const active = await createEmbedded(stores, { status: "active" });
+    const archived = await createEmbedded(stores, { status: "archived" });
+
+    const result = await runtime.purge(ctx, {
+      memoryIds: [forgotten.id, active.id, archived.id],
+    });
+
+    expect(result.outcomes.map((o) => o.kind)).toEqual([
+      "purged",
+      "status_not_forgotten",
+      "status_not_forgotten",
+    ]);
+    expect(embeddedMemoryIds(stores)).toEqual([active.id, archived.id].sort());
+  });
+
+  it("purge 済みの記憶を再実行しても、同じ呼び出しの他の記憶の embedding には触れない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const alreadyPurged = await createEmbedded(stores, { status: "forgotten" });
+    await runtime.purge(ctx, { memoryId: alreadyPurged.id });
+    // purge 後に旧 space から残った行を模す。
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, alreadyPurged.id, [1, 0]);
+    const active = await createEmbedded(stores, { status: "active" });
+
+    const result = await runtime.purge(ctx, { memoryIds: [alreadyPurged.id, active.id] });
+
+    expect(result.outcomes.map((o) => o.kind)).toEqual(["already_purged", "status_not_forgotten"]);
+    expect(embeddedMemoryIds(stores)).toEqual([active.id]);
+  });
+});
+
+describe("runtime.purge — イベントの at は注入された時計の now である", () => {
+  it("記憶の recordedAt が now と違っても、purged イベントの at は now になる", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", recordedAt: new Date(NOW.getTime() - 86_400_000) }),
+    );
+
+    await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(purgedEvents(stores, memory.id).map((e) => e.at)).toEqual([NOW]);
+  });
+});

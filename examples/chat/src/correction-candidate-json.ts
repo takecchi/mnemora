@@ -6,21 +6,10 @@ import type { MarginStats } from "./identifier-arm.js";
 import type { ProviderMode } from "./providers.js";
 
 /**
- * `correction-candidates` の機械可読な出力口（`./identifier-json.js`/
- * `./numeral-token-json.js` と同じ作法。ADR 0291 §7-3、ADR 0321）。
+ * `correction-candidates` の機械可読な出力口。
  *
- * ⛔ **`./identifier-json.js`/`./numeral-token-json.js` とは別ファイル**（既存の
- * 識別子・数詞索引 probe の出力口・基準値には一切触れていない）。
- *
- * 🔴 **「重みを取得できなかった」と「測ったが値が悪かった」を型で区別する**
- * （`status` の判別union、既存2つの json 出力口と同じ理由）。
- *
- * **群は1つだけ**（`hits`/`abstains` を同じ run の中に持つ。sparse/dense のような
- * haystack 条件の分岐がこの arm には無い——`correction-candidate-arm.ts` の
- * doc コメントの通り、この bench は「1本の会話へ ingest → ケースごとに recall()」
- * という単一条件である）。
- *
- * **`marginStats`/`intrusionMarginStats` を持つ**（ADR 0291 §5.5 の核心）。
+ * `./identifier-json.js`/`./numeral-token-json.js` とは別ファイル。既存の出力口・基準値には触れない。
+ * 「重みを取得できなかった」と「測ったが値が悪かった」を `status` の判別 union で型として区別する。
  */
 
 export interface CorrectionCandidateEmbeddingSpaceJson {
@@ -45,19 +34,17 @@ export interface CorrectionCandidateAbstainJson {
   abstained: boolean;
   topScore: number | null;
   protectedFactScore: number | null;
-  /** 🧊 凍結（ADR 0291 §5.5・ADR 0321）。並べて出す後継は `protectionMargin`。 */
+  /** 凍結（ADR 0291 §5.5・ADR 0321）。並べて出す後継は `protectionMargin`。 */
   intrusionMargin: number | null;
   /**
-   * ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」——
-   * `protectedFactScore − topNonProtectedScore`。`intrusionMargin` と違い、深い誤爆・
-   * 誤爆(浅)の両方で定義される。既存フィールドの意味は変えない・追加のみ。
+   * `protectedFactScore − topNonProtectedScore`。`intrusionMargin` は凍結し、別名で新設した（ADR 0333 §3.2 案2）。
+   * 既存フィールドの意味は変えない。
    */
   protectionMargin: number | null;
 }
 
 export interface CorrectionCandidateSummaryJson {
   hitCount: number;
-  /** k(1/3/5/10)ごとの当たった件数。JSON のキーは文字列になる（`"1"`/`"3"`/...）。 */
   hitAtK: Record<string, number>;
   mrr: number;
   distractorBeatsGoldCount: number;
@@ -70,13 +57,11 @@ export interface CorrectionCandidateSummaryJson {
   abstainTopScoreMin: number | null;
   abstainTopScoreMax: number | null;
   marginStats: MarginStats;
-  /** 🧊 凍結（ADR 0291 §5.5・ADR 0321）。 */
+  /** 凍結（ADR 0291 §5.5・ADR 0321）。 */
   intrusionMarginStats: MarginStats;
   /**
-   * ADR 0333 §3.2 案2、`intrusionMarginStats` と並べて出す後継。**同じ形**
-   * （`count`/`mean`/`stdDev`/`min`）。`report.protectionMarginStats` が無い
-   * （型上は起こりうる。実際には `runCorrectionCandidateArm` は常に埋める）
-   * ときは、このフィールド自体を省く——「測ったが0件だった」と型で区別する。
+   * `intrusionMarginStats` と並べて出す後継。`report.protectionMarginStats` が無いときはこのフィールド自体を省く。
+   * 「測ったが0件だった」と型で区別するため。
    */
   protectionMarginStats?: MarginStats;
 }
@@ -87,7 +72,6 @@ export type CorrectionCandidateProbeRunJson =
       status: "measured";
       measuredAt: string;
       commit: string | null;
-      /** `"eval"`（held-out、既定）か `"dev"`（`-- --dev`、調整に使ってよい側）か。 */
       caseSet: "eval" | "dev";
       llmMode: ProviderMode;
       embeddingMode: ProviderMode;
@@ -101,7 +85,6 @@ export type CorrectionCandidateProbeRunJson =
       status: "weights_unavailable";
       measuredAt: string;
       commit: string | null;
-      /** `warmupLocalEmbedding` が返した detail（`WEIGHTS_UNAVAILABLE_PREFIX` を含む）。 */
       detail: string;
     };
 
@@ -134,10 +117,7 @@ function summaryJson(
   };
 }
 
-/**
- * 計測できたときの JSON を組み立てる。**出所は `CorrectionCandidateReport` だけ**
- * （`./identifier-json.js`/`./numeral-token-json.js` と同じ規律）。
- */
+/** 計測できたときの JSON を組み立てる。出所は `CorrectionCandidateReport` だけ。 */
 export function buildMeasuredCorrectionCandidateProbeJson(options: {
   report: CorrectionCandidateReport;
   summary: CorrectionCandidateSummary;
@@ -179,8 +159,8 @@ export function buildMeasuredCorrectionCandidateProbeJson(options: {
 }
 
 /**
- * 重みを取得できなかったときの JSON を組み立てる。**メトリクスの欄を一切持たない**
- * ——`0`/`null` で埋めると「測ったら0件だった」と区別が付かなくなる。
+ * 重みを取得できなかったときの JSON を組み立てる。メトリクスの欄を一切持たない。
+ * `0`/`null` で埋めると「測ったら0件だった」と区別が付かなくなる。
  */
 export function buildWeightsUnavailableCorrectionCandidateProbeJson(options: {
   measuredAt: Date;

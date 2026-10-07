@@ -5,18 +5,6 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";
 
-/**
- * ADR 0493（穴探し60巡目）: testkit の InMemory が、Postgres は断るのに通していた入力を断る（形 D「型の外の入力」）。
- * どれも手元の Postgres 17 に同じ入力を流して、Postgres が断ることを測ってある
- * （`packages/postgres/src/__tests__/input-checks-parity-0493.postgres.test.ts` が Postgres 側を縛る）。
- *
- * - D1: `createMemory` の `decayFloorAt`・`lastReinforcedAt` が Invalid Date（`timestamptz` 列）。
- * - D2: `createObservationWithOutbox` の `opts.claimedBy` に NUL（`outbox.claimed_by` は `text` 列）。行を書かないときは見ない。
- * - D3: `eraseTenant` の `limit` が NaN・非整数・Infinity・2^63 以上（`MemoryStore`・`VectorStore`・`OutboxStore`。`bigint` の引数）。
- *
- * 落ちる入力が増える変更なので、migration-v1 の 🔴 に載せる（CHANGELOG の [1.2.0] と同じ節）。やりすぎの対照も置く。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const bad = new Date("invalid");
 

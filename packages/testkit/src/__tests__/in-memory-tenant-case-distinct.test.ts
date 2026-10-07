@@ -1,18 +1,3 @@
-// 大文字と小文字だけが違う2つの tenant（`"Tenant-A"` と `"tenant-a"`）は別の tenant で、互いに見えない。
-//
-// `tenantId` は uuid ではない任意の文字列で、store の入口で小文字にそろえるのは uuid の形の id だけ
-// （`packages/postgres/src/mapping.ts` の `normalizeUuidCase`）。tenant を小文字にそろえる（または
-// 大文字小文字を区別せず比べる）と、別の tenant の行が見えてしまう。2026-09-28 マージ分の確かめ直しで、
-// 試験がこの約束を縛っていないことが分かった。
-//
-// `InMemoryMemoryStore` を直接呼ぶだけで、`*-conformance.ts` には触れていない
-// （約束を足すのはオーナーの判断）。Postgres の同じ約束は
-// `packages/postgres/src/__tests__/tenant-case-distinct.postgres.test.ts`。
-//
-// 各 `it`: (1) 綴りの違う tenant からは get・getMany・getObservation・aggregateScope・listLabels で見えない。
-// (2) 自分の tenant からは見える（「常に隠す」実装で緑にならない対照）。
-// (3) 片方の tenant の `eraseTenant` は、もう片方の行を消さない。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "../test-data.js";

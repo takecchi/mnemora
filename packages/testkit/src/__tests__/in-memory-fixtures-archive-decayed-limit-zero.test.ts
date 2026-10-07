@@ -1,12 +1,3 @@
-// クローンの委譲先が書いた回帰テスト。オーナーではない（ADR 0432 AL-4）。
-//
-// `archiveDecayed` の `reachedLimit` は `archived.length === opts.limit` だったので、
-// `limit: 0` のときは対象が0件でも `true` になった。TSDoc（`MemoryStore.archiveDecayed`）は
-// 「対象が0件なら `reachedLimit: false`」と書いている。`limit: 0` は断らない（Postgres の
-// `LIMIT 0` は通るので、Fake も通す）——何も掃かず、「上限で打ち切った」とも言わない。
-//
-// `*-conformance.ts` には触れない（`in-memory-fixtures-archive-decayed-limit.test.ts` と同じ作法）。
-
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";

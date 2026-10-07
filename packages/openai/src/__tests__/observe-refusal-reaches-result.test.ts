@@ -13,29 +13,8 @@ import {
 import { OpenAILLMProvider } from "../llm-provider.js";
 
 /**
- * ⭐ この PR の主張はただ1つ: **本物の `OpenAILLMProvider` で、
- * `ObserveResult.extractionFailure.kind` まで通ることを測る。**
- *
- * ADR 0075（`@mnemora/openai` が拒否・打ち切りを `kind` で区別して投げる）と
- * ADR 0076（`packages/core` がそれを `catch` で拾い `ObserveResult.extractionFailure` まで
- * 運ぶ）は、それぞれ別々のテストで塞がれている。しかし ADR 0076 の「通しの歯」
- * （`packages/core/src/__tests__/runtime.test.ts`）が使う LLMProvider は、
- * **`kind` を持つ素の `Error` を投げるだけの偽物**である
- * （`packages/core` の実行時依存は zod だけであり、provider パッケージを
- * import できないため）。⟹ 「本物の `OpenAILLMProvider` が投げたものが、
- * 実際に core の catch を通って `ObserveResult` まで届くか」は、
- * どちらのテストからも測られていない。この歯がその隙間を埋める。
- *
- * **⚠ 検査していないこと**:
- * - 実 API は一切叩いていない。`OpenAILLMProvider` の `client` に偽の HTTP client
- *   （`chat.completions.create` を差し替えたオブジェクト）を注入し、拒否・打ち切りの
- *   応答を固定で返させているだけである（`refusal.test.ts` と同じ形）。
- * - ストアは `@mnemora/testkit/fixtures` のインメモリ・プレースホルダ実装であり、
- *   本物の DB（`packages/postgres`）ではない。索引・永続化・トランザクションは
- *   一切模していない（`in-memory-memory-store.ts` の doc コメント参照）。
- * - `@mnemora/testkit/fixtures` は `src/index.ts` とは別の入口であり、**適合スイート
- *   （conformance suite）の入力にはしていない**——ここでは `Runtime` を実際に動かす
- *   ための配線としてだけ使う（`fixtures.ts` 冒頭のコメント参照）。
+ * 本物の `OpenAILLMProvider` で、`ObserveResult.extractionFailure.kind` まで通ることを測る。core の通しの歯（`packages/core/src/__tests__/runtime.test.ts`）が使う LLMProvider は `kind` を持つ素の `Error` を投げるだけの偽物で（core は provider パッケージを import できない）、本物が投げたものが core の catch を通って届くかはどこからも測られていない。
+ * 実 API は叩かず、`client` に偽の HTTP client を注入する（`refusal.test.ts` と同じ形）。ストアは `@mnemora/testkit/fixtures` のインメモリ実装で、適合 suite の入力にはせず `Runtime` を動かす配線としてだけ使う。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -44,7 +23,6 @@ function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-/** `refusal.test.ts` と同じ組み立て方: 応答を丸ごと差し込める偽 client。 */
 function buildRuntimeWithResponse(response: unknown) {
   const memoryStore = new InMemoryMemoryStore();
   const outboxStore = new InMemoryOutboxStore(memoryStore.outboxJobs);

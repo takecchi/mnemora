@@ -1,14 +1,6 @@
 import type { CorpusPole, CtxSubjectVariant, TrialResult } from "./subject-crossing-measure.js";
 
-/**
- * `subject-crossing-summary.ts`(CLI)の純関数側(`consolidation-cost-summary-lib.mjs`
- * と同じ分担——組み立ては純関数に、argv・ファイルI/Oは薄い CLI 側に置く)。
- *
- * `TrialResult`（`subject-crossing-measure.ts` が書き出す raw JSON の要素）を、
- * S×N×pole×ctxVariant×minAffinity で集約する。**加工ではなく集約だけ**——`mixed`
- * （`consolidate.ts` 本体の判定そのもの）を group ごとに数えるだけで、新しい判定は
- * 作らない。
- */
+/** 加工ではなく集約だけ: `mixed`（`consolidate.ts` 本体の判定）を数えるだけで、新しい判定は作らない。 */
 
 export interface SummaryRow {
   pole: CorpusPole;
@@ -17,7 +9,6 @@ export interface SummaryRow {
   ctxVariant: CtxSubjectVariant;
   minAffinity: number;
   totalTrials: number;
-  /** eligible(種を含む)が2件以上あった試行——実際に統合され得た試行。 */
   trialsWithCandidates: number;
   mixedCount: number;
   /** `trialsWithCandidates` が0のときは `null`(0/0 を0%と書かない)。 */
@@ -81,10 +72,6 @@ function pct(x: number | null): string {
   return x === null ? "n/a" : `${(x * 100).toFixed(0)}%`;
 }
 
-/**
- * N を行・S を列にした `mixedRateAmongCandidates` の表を、pole×ctxVariant×minAffinity
- * ごとに作る。
- */
 export function renderMarkdownReport(rows: readonly SummaryRow[]): string {
   const poles = [...new Set(rows.map((r) => r.pole))];
   const ctxVariants = [...new Set(rows.map((r) => r.ctxVariant))];
@@ -137,7 +124,6 @@ export interface SubjectCrossingRawFile {
   results: TrialResult[];
 }
 
-/** raw JSON 文字列(未検証)を読む。壊れていたら `{ ok: false, error }`。 */
 export function parseRawFile(
   text: string,
 ): { ok: true; value: SubjectCrossingRawFile } | { ok: false; error: string } {

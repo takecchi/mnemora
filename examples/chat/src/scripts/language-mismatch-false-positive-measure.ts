@@ -1,26 +1,6 @@
 /**
- * ADR 0554（問24「基準は測ってから」）: 言語の事後検査（`packages/core/src/language-mismatch.ts`、ADR 0391・0490）の測定。
- *
- * ⛔ **門ではない。**CI にも、package.json の `test` にも載せない。**終了コードは測定結果を見ない**
- * （常に 0。落ちるのは、記録が読めない・例外のときだけ）。件数・割合はファイルに保存せず、
- * 実行するたびに計算して出す。本体（`packages/core/src/**`）には触れない。
- *
- * 実 API・DB は要らない（記録を読むだけ）:
- * ```
- * pnpm --filter @mnemora/example-chat run language-mismatch-measure
- * ```
- *
- * ## 出すもの
- * - (a) 記録の再生での、実際に出た分布: 鍵なしで読める抽出結果の記録（カセットとフィクスチャ）の各本文に
- *   検査を当て、条件ごとにどこで落ちたかを数える。⚠ 本文は全件が日本語のはずで、条件2で落ちる。
- *   **0 件でも安全の証拠ではない**——条件3〜6は試されていない。
- * - (b) 手で作った境界の入力（`language-mismatch-boundary-cases.ts`）の「境界の例と当たり方」。⚠ 率ではない。
- * - 閾値・`LOWERCASE_WORD` を差し替えたときに、(b) のどの判定が入れ替わるか（材料。本体は変えない）。
- *
- * ## 本体との突き合わせ
- * 判定の正規表現（`CJK` など）は本体が export していないので、ここに写している。写しが本体とずれたら
- * 検知できるよう、全入力で「ここでの最終判定」と本体の `detectLanguageMismatch` の戻り値を突き合わせ、
- * 不一致は出力の先頭に大きく出す（それでも終了コードは変えない）。
+ * 門ではない。終了コードは測定結果を見ない（常に 0）。記録の再生が 0 件でも安全の証拠ではない（条件3〜6は試されていない）。
+ * 判定の正規表現は本体が export していないので写している。ずれは本体との突き合わせで検知して先頭に出す。
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -42,18 +22,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(here, "..", "..", "..", "..");
 const CASSETTE_DIR = join(REPO_ROOT, "examples", "chat", "cassettes");
 const FIXTURE_DIR = join(REPO_ROOT, "packages", "core", "src", "__tests__", "fixtures");
-/** 抽出の system prompt の先頭（`prompt.system` がこれで始まる応答だけを、抽出の記録として数える）。 */
 const EXTRACTION_SYSTEM_PREFIX =
   "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです";
 
-// ---- 本体の判定の写し（`language-mismatch.ts` :49-58。本体は export していない）----
+// 本体が export していないので、判定を写している。
 const CJK = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/gu;
 const LATIN = /(?=\p{L})\p{Script=Latin}/gu;
 const LETTER = /\p{L}/gu;
 const URL_PATTERN = /https?:\/\/\S+/gi;
 const CODE_MARKER = /[`{}<>|\\]|&&|=>|(?:^|\s)--[a-z]|(?:^|\s)\.{0,2}\/[\w.-]+/;
 const LOWERCASE_WORD_CORE = /^[a-z]+(?:'[a-z]+)?[.,!?;:]?$/;
-/** 試験用: `’`・囲み語・ハイフン語も数える版（本体には無い。差し替えの材料）。 */
 const LOWERCASE_WORD_WIDE = (word: string): boolean =>
   /^[a-z]+(?:['’-][a-z]+)*$/.test(word.replace(/^[("“‘]+/, "").replace(/[.,!?;:)"”’]+$/, ""));
 
@@ -83,13 +61,11 @@ const STAGES = ["1a", "1b", "2", "3", "4", "5", "6", "flag"] as const;
 type Stage = (typeof STAGES)[number];
 
 interface Verdict {
-  /** 落ちた条件。全部通れば `flag`。 */
   stage: Stage;
   latinLetters: number;
   share: number;
 }
 
-/** 本体の `detectLanguageMismatchFromProfile` と同じ順に条件を辿り、落ちた条件を返す。 */
 function evaluate(observation: string, content: string, p: Params): Verdict {
   const obsCjk = count(observation, CJK);
   const verdict = (stage: Stage, latinLetters = 0, share = 0): Verdict => ({
@@ -112,7 +88,6 @@ function evaluate(observation: string, content: string, p: Params): Verdict {
   return verdict("flag", latinLetters, share);
 }
 
-// ---- 突き合わせ ----
 interface Disagreement {
   where: string;
   observation: string;
@@ -137,7 +112,6 @@ function evaluateAndCrossCheck(where: string, observation: string, content: stri
   return mine;
 }
 
-// ---- (a) 材料の読み込み ----
 interface Pair {
   observation: string;
   content: string;
@@ -207,13 +181,11 @@ function loadFixtures(): Material {
     let responses = 0;
     const pairs: Pair[] = [];
     for (const c of json.cases ?? json.rows ?? []) {
-      // 観測は本体と同じ `observationPayloadText`（extractionContext は含まない）で読む。
       const observation = observationPayloadText(c.observation as Observation);
       const runs: FixtureRun[] = c.runs ?? [{ response: c.response }];
       for (const run of runs) {
         const raw = run.response?.message?.content;
         if (typeof raw !== "string") continue;
-        // 同じ観測への同一の応答（複数 run が同じ文を返す）は1つに数える。
         const key = JSON.stringify([observation, raw]);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -234,7 +206,6 @@ function loadFixtures(): Material {
   };
 }
 
-// ---- 表の出力 ----
 function row(cells: (string | number)[]): string {
   return `| ${cells.join(" | ")} |`;
 }
@@ -280,7 +251,6 @@ function printDistribution(materials: Material[]): void {
   console.log(row(["合計", totalN, ...STAGES.map((s) => total[s])]));
   console.log("");
   console.log(`印が付いた件数 / N = ${total.flag} / ${totalN}`);
-  // 各条件に「到達した」件数（その条件を実際に試された件数）。
   let reaching = totalN;
   const reached: string[] = [];
   for (const s of STAGES.slice(0, 7)) {
@@ -300,7 +270,6 @@ function printDistribution(materials: Material[]): void {
   console.log("");
 }
 
-// ---- (b) ----
 type Judgement = "一致" | "誤検出" | "取りこぼし" | "（判断が割れる）";
 function judge(label: BoundaryLabel, flagged: boolean): Judgement {
   if (label === "split") return "（判断が割れる）";
@@ -354,7 +323,6 @@ function printBoundary(): void {
   );
 }
 
-// ---- 閾値・LOWERCASE_WORD の差し替え ----
 function printSensitivity(materials: Material[]): void {
   console.log("## 基準を変えたとき、(b) のどの判定が入れ替わるか（材料。本体は変えていない）\n");
   const variants: { name: string; params: Params }[] = [
@@ -440,7 +408,6 @@ function main(): void {
   const materials = [loadCassettes(), loadFixtures()];
   const out: string[] = [];
   const log = console.log;
-  // 突き合わせの結果を先頭に出すため、いったん本文を溜める。
   console.log = (...args: unknown[]) => out.push(args.join(" "));
   printDistribution(materials);
   printBoundary();

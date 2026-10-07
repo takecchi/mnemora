@@ -12,13 +12,6 @@ import {
 } from "./migration-checksums-lib.mjs";
 
 /**
- * 出荷済みの migration が書き換えられていないことを、名簿（`migration-checksums.json`）と
- * 突き合わせる（ADR 0637）。判定は `migration-checksums-lib.mjs`。
- *
- *   node scripts/check-migration-checksums.mjs           # 検査。書き換え・削除があれば exit 1
- *   node scripts/check-migration-checksums.mjs --write   # 名簿に無いファイルだけを足す（既存の行は書き換えない）
- *
- * `--root <dir>` は歯のため（既定は、このファイルの1つ上）。
  * exit: 0 一致 / 1 書き換え・削除 / 2 名簿を読めない。
  */
 

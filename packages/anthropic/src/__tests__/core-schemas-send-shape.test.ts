@@ -20,14 +20,8 @@ import { translateForAnthropicStructuredOutput } from "../json-schema.js";
 import { AnthropicLLMProvider } from "../llm-provider.js";
 
 /**
- * core が `completeStructured` に渡す4つのスキーマ（抽出・claim key・統合・内省）が、`@mnemora/anthropic` の
- * **送る前の変換**（SDK の `zodOutputFormat` = zod の `toJSONSchema` → SDK の `transformJSONSchema`）を通ること。
- *
- * ⚠ **射程は送る前の変換まで。**Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない
- * （鍵が無いため。README の「🔴 実 API には、適合テストを一度も当てていない」）。
- *
- * 利用者が渡す zod の形（`z.tuple`・`z.date`・`transform`・`z.record` は送る前に落ちる）は
- * `structured-output-zod-shapes.test.ts` が縛る。ここは core が実際に渡す形だけを縛る。
+ * 射程は送る前の変換まで。実 API が送った JSON Schema を受けるかは確かめていない（鍵が無い）。
+ * 利用者が渡す zod の形は `structured-output-zod-shapes.test.ts` が縛り、ここは core が実際に渡す形だけを縛る。
  */
 
 describe("core の4つのスキーマは、送る前の変換を通る", () => {
@@ -35,7 +29,7 @@ describe("core の4つのスキーマは、送る前の変換を通る", () => {
     ["ExtractionResultSchema（observe・reextract）", ExtractionResultSchema, "object"],
     ["ClaimKeyBatchResultSchema（claim key）", ClaimKeyBatchResultSchema, "object"],
     ["ConsolidationLLMResultSchema（consolidate）", ConsolidationLLMResultSchema, "object"],
-    // 根が判別可能ユニオン。@mnemora/openai（PR #1147）と違い、包まずに anyOf のまま送る（今の形）。
+    // 根が判別可能ユニオン。`@mnemora/openai` と違い、包まずに anyOf のまま送る。
     ["ReflectionLLMResultSchema（reflect）", ReflectionLLMResultSchema, "anyOf"],
   ];
 
@@ -51,14 +45,12 @@ describe("core の4つのスキーマは、送る前の変換を通る", () => {
           expect(branch.type).toBe("object");
         }
       }
-      // 送る値として JSON で往復できる（関数などを含まない）。
       expect(JSON.parse(JSON.stringify(jsonSchema))).toEqual(jsonSchema);
     });
   }
 });
 
 describe("runtime の LLM の口は、偽の client の messages.create まで届く（送る前に落ちない）", () => {
-  /** 送られた JSON Schema から、返す最小の JSON を決める偽の client。 */
   function fakeClient(sent: Array<Record<string, unknown>>): Pick<Anthropic, "messages"> {
     const reply = (schema: Record<string, unknown>): unknown => {
       const s = JSON.stringify(schema);
@@ -128,14 +120,13 @@ describe("runtime の LLM の口は、偽の client の messages.create まで�
       claimKey: { enabled: true },
     });
     expect(withClaimKey.extraction).toBe("ok");
-    expect(sent.length - before).toBe(2); // 抽出 + claim key
+    expect(sent.length - before).toBe(2);
 
     before = sent.length;
     await runtime.reextract(ctx, withClaimKey.observationId);
     expect(sent.length - before).toBe(1);
 
-    // 統合・内省の対象は、まだ superseded になっていない2件（reextract は元の候補を置き換えるので、
-    // その後に新しく作る）。
+    // 統合・内省の対象は、まだ superseded になっていない2件（reextract は元の候補を置き換えるので、その後に新しく作る）。
     const second = await runtime.observe(ctx, { kind: "utterance", text: "京都にも家がある" });
     await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     const targets = [plain.memoryIds[0]!, second.memoryIds[0]!];

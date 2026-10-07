@@ -1,6 +1,3 @@
-// 適合テストに当てる in-memory 実装の設定（ADR 0418 の追記）。
-// `in-memory-fixtures.conformance.test.ts`（そのまま）と `foreign-realm-conformance.test.ts`
-// （store が投げる core の例外を別 realm のものに差し替える包み）が同じ設定を共有する。
 import type { MemoryStore, OutboxStore } from "@mnemora/core";
 import type { MemoryStoreConformanceOptions } from "../memory-store-conformance.js";
 import type { OutboxStoreConformanceOptions } from "../outbox-store-conformance.js";
@@ -11,10 +8,7 @@ import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-se
 export function inMemoryMemoryStoreConformanceOptions(
   decorate: (store: MemoryStore) => MemoryStore = (store) => store,
 ): MemoryStoreConformanceOptions {
-  // `listEventsForMemory`（ADR 0031）も `seedJob`/`setDefaultHalfLifeHours` と同じ理由で
-  // 直近のインスタンスを持ち回る——`updateStatusWithEvent` が積んだイベントを読むには、
-  // `createStore()` が作った、まさにその `InMemoryMemoryStore` インスタンスの `events` 配列を
-  // 見る必要がある。
+  // `createStore()` が作った instance の `events` 配列を読む必要があるので、直近のインスタンスを持ち回る。
   let latestMemoryStoreForEvents: InMemoryMemoryStore | undefined;
   return {
     name: "in-memory placeholder",
@@ -31,12 +25,7 @@ export function inMemoryMemoryStoreConformanceOptions(
         (event) => event.tenantId === ctx.tenantId && event.memoryId === memoryId,
       );
     },
-    // ADR 0047: `recall_usages.recall_id → recalls(id)` の外部キーを `InMemoryMemoryStore`
-    // にも適用したことで、`recordUsage` の適合テストには実在の recallId が要る
-    // （既定の固定文字列 `"recall-1"` はもう通らない）。`MemoryStore.createRecall` は
-    // 本体がまさに用意している「recall を記録する」書き込み口そのものなので、それを使う
-    // （`memory-store-conformance.ts` の「createRecall は recallId を発行する」の歯と
-    // 同じ最小フィクスチャ）。
+    // `recordUsage` には実在の recallId が要る（既定の固定文字列は通らない）ので、`createRecall` で用意する。
     prepareRecallId: async (ctx) => {
       if (!latestMemoryStoreForEvents) {
         throw new Error("prepareRecallId より先に createStore() を呼ぶ必要がある");
@@ -59,11 +48,7 @@ export function inMemoryMemoryStoreConformanceOptions(
         returnedMemories: [],
       });
     },
-    // ADR 0079: 積み直した `embed` ジョブを、運搬役が実際に claim できるところまで見る。
-    // `InMemoryOutboxStore` は `InMemoryMemoryStore.outboxJobs` の配列を共有参照で受け取る
-    // ——`createStore()` が作った、まさにその instance のジョブを claim する必要がある
-    // （`listEventsForMemory` と同じ理由・同じ形）。
-    // `leaseMs` はこの検査の中だけの値であり、実運用のリース長とは無関係（ADR 0032）。
+    // `InMemoryOutboxStore` は `outboxJobs` を共有参照で受け取るので、`createStore()` が作った instance のジョブを claim する。
     claimEmbedJobs: (ctx, now) => {
       if (!latestMemoryStoreForEvents) {
         throw new Error("claimEmbedJobs より先に createStore() を呼ぶ必要がある");
@@ -76,22 +61,13 @@ export function inMemoryMemoryStoreConformanceOptions(
         leaseMs: 60_000,
       });
     },
-    // Issue #134 / ADR 0100: InMemoryMemoryStore は supersedeWithNewMemories を実装している。
     supportsSupersedeWithNewMemories: true,
-    // Issue #1226 / ADR 0375 決定7: InMemoryMemoryStore は opts.abortIfForgotten を実装
-    // しない（渡しても無視される。`SourceMemoryForgottenError` の doc コメント参照）。
+    // InMemoryMemoryStore は opts.abortIfForgotten を実装しない（渡しても無視される）。
     supportsAbortIfForgotten: false,
-    // ADR 0420 / ADR 0546: InMemoryMemoryStore は opts.abortIfSuperseded・opts.abortIfAllConflicted を実装している
-    // （`createMemoryWithOutbox`・`supersedeWithNewMemories`・`createMemoriesWithOutboxAndEvents`）。
     supportsAbortIfSuperseded: true,
     supportsAbortIfAllConflicted: true,
-    // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
     supportsPurgeExpiredEvents: true,
-    // ADR 0404: InMemoryMemoryStore は purgeExpiredRecalls を実装している。
     supportsPurgeExpiredRecalls: true,
-    // ADR 0354 / ADR 0546: InMemoryMemoryStore は purgeExpiredEventsByRetention を実装している。保持期間は
-    // `createStore()` が作った、まさにその instance が持つ `eventRetentionDays` へ、`InMemoryTenantSettingsStore`
-    // 経由で書く（`listEventsForMemory` と同じ理由・同じ形）。
     supportsPurgeExpiredEventsByRetention: true,
     setEventRetention: async (ctx, retention) => {
       if (!latestMemoryStoreForEvents) {
@@ -111,12 +87,9 @@ export function inMemoryMemoryStoreConformanceOptions(
         (event) => event.tenantId === ctx.tenantId && event.kind === "events_purged",
       );
     },
-    // ADR 0114: InMemoryMemoryStore は archiveDecayed を実装している。
     supportsArchiveDecayed: true,
-    // Issue #198 / ADR 0124: InMemoryMemoryStore は purgeMemory を実装している。
     supportsPurgeMemory: true,
-    // ADR 0437 決定3: InMemoryMemoryStore は scrubPurged を実装している。v1.0.x の purge が残した状態
-    // （purgedAt だけ立ち、tags・attributes・claim key・label の紐付けが残る）は、内部の Map を書き換えて作る。
+    // v1.0.x の purge が残した状態（purgedAt だけ立ち、tags・attributes・claim key・label の紐付けが残る）は、内部の Map を書き換えて作る。
     supportsScrubPurged: true,
     seedLegacyPurgedRow: async (ctx, memoryId) => {
       if (!latestMemoryStoreForEvents) {
@@ -138,39 +111,20 @@ export function inMemoryMemoryStoreConformanceOptions(
       memory.digest = "[purged]";
       memory.purgedAt = new Date();
     },
-    // Issue #197 / ADR 0134: InMemoryMemoryStore は markContestedPair を実装している。
     supportsMarkContestedPair: true,
-    // Issue #197 / ADR 0150: InMemoryMemoryStore は resolveContestedPair を実装している。
     supportsResolveContestedPair: true,
-    // 本 PR: InMemoryMemoryStore は restoreSupersededBy を実装している。
     supportsRestoreSupersededBy: true,
-    // Issue #515: InMemoryMemoryStore は previewRestoreSupersededBy を実装している。
     supportsPreviewRestoreSupersededBy: true,
-    // Issue #515 方向①、ADR 0258: InMemoryMemoryStore は onlyMemoryIds フィルタを
-    // 実装している。
     supportsOnlyMemoryIdsFilter: true,
-    // Issue #201 / ADR 0318: InMemoryMemoryStore は listLabels/registerLabel を
-    // 実装している。
     supportsLabels: true,
-    // Issue #372: InMemoryMemoryStore は findActiveByClaimKey を実装している。
     supportsFindActiveByClaimKey: true,
-    // Issue #933 案2 / ADR 0378: InMemoryMemoryStore は findContestedByClaimKey を実装している。
     supportsFindContestedByClaimKey: true,
-    // Issue #691続き / ADR 0329: InMemoryMemoryStore は listActiveClaimPredicates を
-    // 実装している。
     supportsListActiveClaimPredicates: true,
-    // Issue #1412 コメント1 / ADR 0373: InMemoryMemoryStore は resolveOrphanedContested を
-    // 実装している。
     supportsResolveOrphanedContested: true,
-    // Issue #1207 / ADR 0383: InMemoryMemoryStore は eraseTenant を実装している。
     supportsEraseTenant: true,
-    // Issue #207/#933 PR2 / ADR 0381: InMemoryMemoryStore は markContestedGroup /
-    // resolveContestedGroup を実装している。
     supportsMarkContestedGroup: true,
     supportsResolveContestedGroup: true,
-    // ADR 0410（穴 D-3）: InMemoryMemoryStore は createMemoriesWithOutboxAndEvents を実装している。
     supportsCreateMemoriesWithOutboxAndEvents: true,
-    // ADR 0416: supersedeWithNewMemories の opts.buildCreatedEvent（created を events 配列へ、supersede の前に積む）。
     supportsSupersedeCreatedEvents: true,
     listRelationsForMemory: (ctx, memoryId) => {
       if (!latestMemoryStoreForEvents) {
@@ -186,7 +140,6 @@ export function inMemoryMemoryStoreConformanceOptions(
 export function inMemoryOutboxStoreConformanceOptions(
   decorate: (store: OutboxStore) => OutboxStore = (store) => store,
 ): OutboxStoreConformanceOptions {
-  // `seedJob` が `createStore()` の作った `MemoryStore`（同じジョブ配列を共有する側）を参照できるよう、直近のインスタンスを持ち回る。
   let latestMemoryStoreForOutboxSeed: InMemoryMemoryStore | undefined;
   return {
     name: "in-memory placeholder",
@@ -210,7 +163,7 @@ export function inMemoryOutboxStoreConformanceOptions(
         },
         [input.kind],
       );
-      // Issue #1108: 返るジョブは複製なので、store の中の行（共有している `outboxJobs`）を書き換える。
+      // 返るジョブは複製なので、store の中の行（共有している `outboxJobs`）を書き換える。
       const job = latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobs[0]!.id)!;
       if (input.payload) {
         job.payload = input.payload;
@@ -226,9 +179,7 @@ export function inMemoryOutboxStoreConformanceOptions(
       }
       return latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobId) ?? null;
     },
-    // Issue #1207 / ADR 0383: InMemoryOutboxStore は eraseTenant を実装している。
     supportsEraseTenant: true,
-    // ADR 0404: InMemoryOutboxStore は purgeCompletedJobs を実装している。
     supportsPurgeCompletedJobs: true,
   };
 }

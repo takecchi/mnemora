@@ -1,17 +1,4 @@
-/**
- * ADR 0554: 言語の事後検査（`packages/core/src/language-mismatch.ts`）の「境界の例」。
- * `language-mismatch-false-positive-measure.ts` が読む。⛔ テストではない（門にしない）。
- *
- * 各入力の `label` は、**検査の結果を見る前に**、ADR 0554 の「ラベルの基準」だけで目視で付けた。
- * 検査の結果に合わせて直していない。
- * - `should`    : 印が付くべき（日本語・中国語の観測から、その言語で書くべき記憶が、別の言語の散文で書かれた）
- * - `shouldNot` : 印が付くべきでない（固有名詞・コード・識別子・URL・書名など、言語を持たないもの。
- *                 観測自体が英語主体のもの）
- * - `split`     : 判断が割れる（割れる理由を `note` に書く）。誤検出・取りこぼしの数に入れない。
- *
- * ⚠ これは分布ではない。実データから抽いたものでも、母集団から無作為に選んだものでもなく、
- * 境界を突くために手で作った。件数や割合を「率」として読まないこと。
- */
+/** 門ではない。`label` は検査の結果を見る前に基準だけで付けた（結果に合わせて直さない）。手で作った境界の例であり分布ではないので、件数を率として読まない。 */
 
 export type BoundaryLabel = "should" | "shouldNot" | "split";
 
@@ -28,7 +15,6 @@ const JA = "来週の火曜日は大阪で取引先と打ち合わせをしま�
 const ZH = "我下周二要去大阪和客户开会。";
 
 export const BOUNDARY_CASES: readonly BoundaryCase[] = [
-  // --- 本当に取り違えた英文（長さ・語数の境界）---
   {
     id: "en-prose-long",
     group: "英文",
@@ -102,7 +88,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     label: "split",
     note: "全語が大文字始まりの見出し。見出しなら言語の取り違えとも言えるが、固有名詞の列とも読める",
   },
-  // --- 固有名詞・識別子・書名（付くべきでない）---
   {
     id: "proper-nouns-hotel",
     group: "固有名詞の羅列",
@@ -162,7 +147,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     label: "shouldNot",
     note: "16進の識別子。3語が小文字だけ",
   },
-  // --- コード・コマンド ---
   {
     id: "code-command-and",
     group: "コード片",
@@ -216,7 +200,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     content: "kubectl get pods namespace production",
     label: "shouldNot",
   },
-  // --- URL・メール・数字 ---
   {
     id: "url-only",
     group: "URL",
@@ -268,7 +251,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     content: "ID 4829-11 / 2026-04-10 / 48,000 / 3.5%",
     label: "shouldNot",
   },
-  // --- ’ ・囲み語・ハイフン語（条件6の取りこぼし）。対は ' / 囲みなしに替えたもの ---
   {
     id: "curly-apostrophe",
     group: "’（U+2019）",
@@ -341,7 +323,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     label: "should",
     note: "ハイフン語があっても、他の小文字語が3つ以上ある",
   },
-  // --- ラテン文字の他言語 ---
   {
     id: "spanish-ascii",
     group: "他言語（ラテン文字）",
@@ -387,7 +368,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     label: "split",
     note: "日本語のローマ字書き。英語ではないが、日本語の文字でもない",
   },
-  // --- 観測の側の境界 ---
   {
     id: "obs-chinese",
     group: "中国語の観測",
@@ -458,7 +438,6 @@ export const BOUNDARY_CASES: readonly BoundaryCase[] = [
     content: 'Tanaka said "Hello world" to the staff at the front desk',
     label: "should",
   },
-  // --- 本文のラテン文字の割合（0.9 の前後）---
   {
     id: "mixed-script-share-high",
     group: "本文の割合（0.9 の前後）",

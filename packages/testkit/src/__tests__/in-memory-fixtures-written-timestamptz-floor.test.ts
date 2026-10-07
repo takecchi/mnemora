@@ -9,20 +9,6 @@ import {
   buildNewObservationFixture,
 } from "../test-data.js";
 
-/**
- * ADR 0640（Issue #1755）: 行に日時を**書く**口は、`timestamptz` の下限（4714-11-24 BC 00:00:00 UTC）より前を、書く前に
- * `RangeError` で断る。Postgres は同じ入力を値が渡された時点で `22008` にする（口・欄ごとの実測の表は ADR 0640）。
- *
- * 見るのは4つ。
- * 1. 下限の1ms前・紀元前9001年は断る。メッセージは `<口>: <欄> must not be earlier than 4714-11-24 BC …`（`assertQueryTimestamptz` と同じ形）。
- * 2. **断ったら何も書かない**——Memory・Observation・イベント・outbox・ラベル・使用の記録・Recall・活動時計が、呼ぶ前と同じ。
- * 3. 対照: 下限ちょうど・1ms 後は通る（Postgres も下限ちょうどは通る。実測）。
- * 4. 対照: Postgres が日時を見ない分岐（CAS に弾かれる対象のイベント・冪等の既存行の `created` イベント・何も強化しない
- *    `recordUsageAndReinforce`・読みの口・`claimBatch` の `now`）は、下限より前でも断らない。
- *
- * 2実装を並べた歯は `packages/postgres/src/__tests__/testkit-fixture-alignment.postgres.test.ts`（DB が要る）。
- */
-
 const ctx: Ctx = { tenantId: "written-floor" };
 const T = ctx.tenantId;
 const FLOOR_MS = Date.UTC(-4713, 10, 24);
@@ -82,7 +68,6 @@ const recall = (createdAt?: Date) =>
     ...(createdAt ? { createdAt } : {}),
   }) as never;
 
-/** 呼ぶ前と後で比べる、store の中身の写し（プリミティブへ写し取る）。private の Map も読む。 */
 async function stateOf(k: K): Promise<string> {
   const priv = (name: string) => Reflect.get(k.mem, name) as Map<string, unknown> | Set<string>;
   return JSON.stringify({
@@ -99,14 +84,12 @@ async function stateOf(k: K): Promise<string> {
   });
 }
 
-/** 「準備を済ませて、断られるはずの呼び出しを返す」形。準備のあとに状態を写し、呼び出しの後に比べる。 */
 type Prepare = (k: K, d: Date | undefined) => Promise<() => Promise<unknown>>;
 interface Port {
   name: string;
   owner: string;
   field: string;
   prepare: Prepare;
-  /** 下限以後の日時でも、別の理由で投げる口の、その例外の `name`（日時の検査では落ちないことを見る）。 */
   edgeError?: string;
 }
 
@@ -153,7 +136,6 @@ const ports: Port[] = [
         },
       },
       {
-        // 冪等の既存の行が在っても、Postgres は衝突を見る前に拒む（実測）。
         name: `createMemory（冪等の既存行）${field}`,
         owner: "InMemoryMemoryStore",
         field,
@@ -207,7 +189,6 @@ const ports: Port[] = [
     },
   },
   {
-    // 何も書かない呼び出し（起点より古い `at`）でも、Postgres は拒む（実測）。
     name: "reinforce at（起点より古い）",
     owner: "reinforce",
     field: "at",
@@ -282,7 +263,6 @@ const ports: Port[] = [
     },
   },
   {
-    // 1つ目が CAS を通って（早い `at` のイベントを書く）、2つ目が CAS に弾かれる。Postgres は1つ目で拒む（実測）。
     name: "supersedeWithNewMemories 1つ目が CAS を通る・2つ目は CAS に弾かれる",
     owner: "memory_events",
     field: "at",
@@ -455,7 +435,6 @@ const ports: Port[] = [
     },
   },
   {
-    // 対象が1件も無くても、Postgres は拒む（実測）。
     name: "restoreSupersededBy event.at（対象なし）",
     owner: "memory_events",
     field: "at",
@@ -476,7 +455,6 @@ const ports: Port[] = [
     },
   },
   {
-    // 墓石と同じく、CAS に弾かれる状態の行でも Postgres は先に拒む（実測）。
     name: "purgeMemory event.at（purge できない状態の行）",
     owner: "memory_events",
     field: "at",
@@ -517,7 +495,6 @@ describe("行に日時を書く口: 下限（4714-11-24 BC 00:00:00 UTC）より
         if (port.edgeError === undefined) {
           await expect(act()).resolves.not.toThrow();
         } else {
-          // 日時の検査では落ちない。別の理由（この準備では purge できない状態）で落ちる口。
           await expect(act()).rejects.toMatchObject({ name: port.edgeError });
         }
       }

@@ -4,14 +4,6 @@ import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
-/**
- * `InMemoryVectorStore.search` が距離 `NaN`（ゼロベクトル、ADR 0040）の候補を
- * `PostgresVectorStore.search` と同じく常に最後尾へ置くこと（Issue #983）。
- *
- * Postgres は `float8` の順序規則で `NaN` をどの有限値よりも大きく扱う。比較関数が
- * `a.distance - b.distance` だけだと `NaN` で一貫しなくなり、ゼロベクトルの候補の位置が
- * 挿入順しだいで揺れる。挿入順を変えても同じ順序が返ることを見る。
- */
 const TENANT = "vector-search-nan-order-tenant";
 const SPACE: EmbeddingSpaceId = { provider: "test", model: "fixture-model", dimensions: 3 };
 const QUERY_VECTOR: number[] = [1, 0, 0];

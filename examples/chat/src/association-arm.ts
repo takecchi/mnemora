@@ -16,106 +16,37 @@ import type { AssociationProbe } from "./association-probe-set.js";
 import { drainEmbedTicks } from "./embed-drain.js";
 import { resolveExternalId } from "./provenance-trace.js";
 
-/**
- * 連想枠（段3.5、ADR 0151、Issue #200）が想起の質を動かすかを測る arm（Issue #291）。
- *
- * **`./identifier-arm.ts` / `./retrieval-quality.ts` の `runRetrievalQualityArm` と同じ形**
- * （probe set を1本の会話に ingest → probe ごとに `recall()` を1回投げて順位を測る）だが、
- * この probe set（`./association-probe-set.js`）は**query だけでは gold に届かない**よう
- * 設計されている（三角形: `query ≈ anchor` / `anchor ≈ gold` / `query ≉ gold`）。⟹
- * `hit@10` は連想枠の効果を測れない（gold は本体の11位以降にしか現れない、
- * `recall-runtime.ts` の段3.5の doc 参照）。この arm が主に見るのは
- * `goldReturned`/`goldRank`/`mrr`/`goldRetrievedVia` である。
- *
- * ⛔ **`recall()` には `text` と `association` 以外を渡さない**
- * （`retrieval-quality.ts` の `runRetrievalQualityArm` と同じ規律。閾値・limit・
- * overFetchFactor は `packages/core` の既定値のまま）。
- */
+/** 連想枠が想起の質を動かすかを測る arm。`recall()` には `text` と `association` 以外を渡さない。閾値・limit・overFetchFactor は `packages/core` の既定のまま。 */
 
 export interface AssociationProbeOutcome {
   probeId: string;
-  /** `AssociationProbe.category`（3カテゴリ×4件）。 */
   category: AssociationProbe["category"];
-  /** `recall().memories` の中の gold の順位（1始まり）。居なければ null。 */
   goldRank: number | null;
-  /** 同じ順位付けでの anchor の順位。 */
   anchorRank: number | null;
-  /** 同じ順位付けでの distractor の順位。 */
   distractorRank: number | null;
-  /** gold が返っていたときの `RecalledMemory.retrievedVia`。返っていなければ null。 */
   goldRetrievedVia: "ann" | "lexical" | "mandatory_companion" | "association" | null;
-  /**
-   * gold が `retrievedVia: "association"` で、`associationOf`（アンカーの memoryId）を
-   * externalId へ解決できた場合はその値。解決できなければ memoryId のまま。
-   * `associationOf` 自体が無ければ null。
-   */
   goldAssociationOf: string | null;
-  /** `goldRetrievedVia === "association"` かつ、そのアンカーがこの probe 自身の anchor か。 */
   goldAnchoredOnProbeAnchor: boolean;
-  /** `recall().memories` の件数。 */
   returnedCount: number;
-  /** `usage.chars`（返した全量、tier 合計）。 */
   memoryChars: number;
-  /** `usage.byTier.association`（連想が焼いた digest 文字数）。渡していなければ 0。 */
   associationChars: number;
   hit1: boolean;
-  /** `goldRank !== null && goldRank <= 10`。 */
   hit10: boolean;
   goldReturned: boolean;
   reciprocalRank: number;
-  /** この probe の `omitted` に出た `stage_skipped{stage:"association"}` の reason。無ければ null。 */
   stageSkipped: string | null;
-  /**
-   * この probe の recall() が返した「連想由来」（`retrievedVia === "association"`）の
-   * 候補を、返った順に並べたもの。⭐ **「なぜ gold が入らなかったか」を、後から
-   * 説明できるようにするために記録する**（北極星の問い3）。
-   */
   associationFrame: AssociationFrameEntry[];
-  /**
-   * ⭐ **同じストア・同じクエリで `recall()` をもう一度呼び直したとき、連想枠
-   * （`retrievedVia === "association"` の候補列、externalId の並びとして）が
-   * 完全一致したか**（Issue #291 フォローアップ）。
-   *
-   * CI で同一 commit を再実行したところ、12 probe 中 10 件で連想枠の構成員が
-   * 入れ替わった。原因の候補は2つ: (甲) ingest ごとの差（毎回まっさらな Postgres へ
-   * 入れ直すため memory id・物理配置・HNSW 索引の構築が毎回違う）、(乙) 同じストアへの
-   * 引き直しでも変わる（こちらなら北極星の問い3「なぜ思い出したかを説明できるか」に
-   * 直接刺さる）。この欄は、**同じ ingest 結果の中でだけ**この非決定性を切り分ける
-   * ——`false` が出れば(乙)が確定し、`true` ばかりが出れば非決定性は ingest 側
-   * （(甲)）に局在している可能性が高い、と読める。
-   */
   repeatFrameIdentical: boolean;
-  /** 2回目の `recall()` で `goldRank`（`null` を含む）が一致したか。 */
   repeatGoldRankSame: boolean;
 }
 
 export interface AssociationFrameEntry {
-  /** `resolveExternalId` で解決した externalId。解決できなければ memoryId のまま。 */
   externalId: string;
-  /** 返り値全体での順位（1始まり）。 */
   rank: number;
-  /**
-   * この externalId が、probe 体系の中で何だったか。
-   * - `"own-gold"` … この probe の gold
-   * - `"own-anchor"` … この probe の anchor（⚠ ADR 0151 は「アンカー自身は除く」と
-   *   決めているので、本来ここには現れない。現れたら実装か理解のどちらかが間違っている）
-   * - `"own-distractor"` … この probe の distractor
-   * - `"other-probe"` … 別 probe の anchor/gold/distractor（どれかは `externalId` で分かる）
-   * - `"haystack"` … 共有 haystack の filler
-   * - `"unknown"` … 上のどれでもない（externalId を解決できなかった等）
-   */
   role: "own-gold" | "own-anchor" | "own-distractor" | "other-probe" | "haystack" | "unknown";
-  /** 連想の起点になったアンカー（`associationOf` を externalId へ解決したもの）。無ければ null。 */
   anchorExternalId: string | null;
 }
 
-/**
- * `AssociationProbeOutcome.associationFrame` の1件が、この probe(`currentProbeId`)
- * にとって何であるかを判定する(機械的。文字列を手で書かない——`ASSOCIATION_PROBES`
- * と `associationGoldExternalId`/`associationAnchorExternalId`/
- * `associationDistractorExternalId` の規約関数、そして `haystackExternalIds`
- * (この会話で実際に積んだ haystack の externalId 集合)とだけ突き合わせる)。
- */
 function classifyAssociationFrameRole(
   currentProbeId: string,
   externalId: string,
@@ -148,12 +79,6 @@ function classifyAssociationFrameRole(
   return "unknown";
 }
 
-/**
- * `retrievedVia === "association"` の候補だけを、返った順のまま externalId の配列にする
- * （`resolvedExternalIds[i]` が引けなければ `memoryId` のまま——`associationFrame` を
- * 組み立てる本処理と同じフォールバック）。1回目・2回目の `recall()` 結果を同じロジックで
- * 比べるための共通処理（Issue #291 フォローアップ）。
- */
 function associationExternalIdSequence(
   memories: readonly RecalledMemory[],
   resolvedExternalIds: readonly (string | null)[],
@@ -171,33 +96,21 @@ function associationExternalIdSequence(
 
 export interface AssociationArmReport {
   armLabel: string;
-  /** `options.association` を渡したかどうか。 */
   associationEnabled: boolean;
-  /** `options.association?.maxCount`。渡していなければ null。 */
   associationMaxCount: number | null;
   probeCount: number;
-  /** ingest した発話の総数（anchor+gold+distractor × probe数 + haystack）。 */
   ingestedCount: number;
   goldReturnedCount: number;
   hit1Count: number;
   hit10Count: number;
-  /** `goldRetrievedVia === "association"` だった probe の件数。 */
   goldViaAssociationCount: number;
   mrr: number;
   returnedMemoryTotal: number;
   memoryCharsTotal: number;
   associationCharsTotal: number;
-  /** stage_skipped(stage:"association") の reason → 件数。 */
   stageSkippedReasons: Record<string, number>;
-  /** 連想枠に入ったものの `role` 別の件数(全 probe の合計)。 */
   associationFrameRoles: Record<string, number>;
-  /**
-   * `repeatFrameIdentical` が `true` だった probe の件数(Issue #291 フォローアップ、
-   * 上の docstring 参照)。`probeCount` 件中いくつが「同じストアへの引き直しでも
-   * 連想枠が変わらなかった」かを示す。
-   */
   repeatFrameIdenticalCount: number;
-  /** `repeatGoldRankSame` が `true` だった probe の件数。 */
   repeatGoldRankSameCount: number;
   probes: AssociationProbeOutcome[];
 }
@@ -207,17 +120,8 @@ export interface RunAssociationArmOptions {
   memoryStore: MemoryStore;
   tenantId: string;
   armLabel: string;
-  /**
-   * 渡さなければ連想枠は一切走らない——[ADR
-   * 0337](../../../docs/decisions/0337-recall-association-default-on.md)（`RecallQuery.association`
-   * の既定を on にする決定。オーナーが選択肢 (あ) を選んだ。ask_human ac5953d1、
-   * 2026-09-25T21:11Z）後は、この arm 自身が `association: null` を
-   * `packages/core` へ明示することでこの「渡さなければ off」を担保する
-   * （`runAssociationArm` 本体の doc 参照）——`packages/core` 側の既定が
-   * 何であっても、この arm の "off" は常に真の off である。
-   */
+  /** 渡さなければ連想枠は走らない。`packages/core` の既定が何であっても、この arm 自身が `association: null` を明示して真の off を担保する。 */
   association?: { maxCount: number };
-  /** 既定は `./association-probe-set.js` の `DEFAULT_HAYSTACK_SIZE`。 */
   haystackSize?: number;
 }
 
@@ -229,30 +133,10 @@ function average(values: number[]): number {
 }
 
 /**
- * `AssociationArmReport.associationEnabled` を、`recall()` へ実際に渡す
- * `association`（`RecallAssociationQuery | null`）から決める純関数（ADR 0385 §7 で
- * 見つかったバグの修正、2026-09-30）。
- *
- * 🔴 **もともとは `association !== undefined` だった。** ADR 0337（`packages/core` の
- * `RecallQuery.association` の既定を on にする決定）後、この関数の直上のコメントの
- * とおり "off" arm は `recall()` へ `association: null` を**明示的に**渡すよう直された
- * ——だが `associationEnabled` の判定側は `!== null` に更新されておらず、`null` も
- * 「defined」と判定されたままだった。**⟹ "off" arm でも `associationEnabled` が
- * `true` になっていた**（`null !== undefined` は JavaScript では `true`）。値そのもの
- * （`goldReturnedCount`/`hit1Count`/`mrr` 等）には影響しないが、`armShortKey`/
- * `buildArmSummaryTable`（`scripts/association-summary-lib.mjs`）が読む「連想枠」列の
- * 表示が "off" arm でも `on(maxCount=null)` になる、という表示不具合を生んでいた
- * （詳細は ADR 0385 §7）。
- *
- * `null`/`undefined` のどちらも「連想枠を渡していない＝off」として扱う
- * （`!= null` は `null`/`undefined` の両方を弾く、緩い等価比較を意図して使っている）。
- * テストのために独立した純関数として export した——`runAssociationArm` 本体は
- * 本物の `Runtime`/`MemoryStore`（実質 Postgres）を要求し重いため
- * （`docs/autonomy.md` の `initdb` 手順が要る）、この判定だけを軽く固定する。
- * **呼び出し側（下の `runAssociationArm` の `return` 文）がこの関数を実際に呼んでいる
- * ことは、`examples/chat/src/__tests__/association-arm.test.ts` がソースを読んで
- * 構造的に固定する**（この関数を単体でテストするだけでは、呼び出し側が別のロジックへ
- * 差し替わった場合を検出できないため）。
+ * `AssociationArmReport.associationEnabled` を `recall()` へ渡す `association` から決める純関数。`null`/`undefined` はどちらも off。
+ * `!= null`（緩い等価比較）は両方を弾くために意図して使っている。
+ * `runAssociationArm` 本体は Postgres を要求して重いので、判定だけを切り出して export した。呼び出し側がこの関数を
+ * 呼んでいることは、`association-arm.test.ts` がソースを読んで固定する。
  */
 export function computeAssociationEnabled(association: RecallAssociationQuery | null): boolean {
   return association != null;
@@ -264,9 +148,6 @@ export async function runAssociationArm(
   const ctx: Ctx = { tenantId: options.tenantId };
   const utterances = buildAssociationProbeSetConversation(options.haystackSize);
 
-  // Issue #719: `observed.memoryIds`（冪等な再送では空配列）を積算し、
-  // `drainEmbedTicks` に渡す——「available_at との ms 競合で claim 0件のまま」
-  // 黙って抜けないことを検査させる。
   let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
     const observed = await options.runtime.observe(ctx, {
@@ -279,29 +160,18 @@ export async function runAssociationArm(
 
   await drainEmbedTicks(options.runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 
-  // ⚠ `options.association` が無い（"off" arm）ときは `null` を明示する——`undefined`
-  // にして `recall()` へキー自体を渡さないと、`packages/core` の既定が on になった
-  // （ADR 0337）後はこの "off" arm が黙って on（既定値）になってしまう。実際に
-  // この関数はかつて `undefined` を使っており、cli.ts の `runAssociationArm({..})`
-  // （association を渡さない呼び出し）がこのバグの実例だった。
+  // "off" arm では `null` を明示する。`undefined` にしてキー自体を渡さないと、`packages/core` の既定が on の今は黙って on になる。
   const association: RecallAssociationQuery | null = options.association
     ? { maxCount: options.association.maxCount }
     : null;
 
-  // ⭐ 枠の中身を判定するための「共有 haystack の externalId 一覧」。この会話に
-  // 実際に積んだ utterances(`buildAssociationProbeSetConversation` の戻り値)自身から
-  // 導く——`kind: "haystack"` を機械的に見るだけであり、文字列を手で書かない。
   const haystackExternalIds = new Set(
     utterances.filter((u) => u.kind === "haystack").map((u) => u.externalId),
   );
 
   const probes: AssociationProbeOutcome[] = [];
   for (const probe of ASSOCIATION_PROBES) {
-    // ⛔ `text`/`association` 以外を渡さない(既存 arm と同じ規律)——閾値・limit・
-    // overFetchFactor は一切変えない。`association` は常に渡す（`null` も含む）——
-    // 上の `association ? {...} : {}` 相当の条件付き spread は使わない。使えば
-    // `association === null`（"off" arm）のときにキー自体を落としてしまい、
-    // このコメント直上の変数コメントが警告しているバグをここで再現する。
+    // `text`/`association` 以外を渡さない。`association` は `null` も含めて常に渡す。条件付き spread にすると "off" arm でキーを落とし、既定の on になる。
     const result = await options.runtime.recall(ctx, {
       text: probe.query,
       association,
@@ -341,9 +211,6 @@ export async function runAssociationArm(
         ? stageSkippedEntry.reason
         : null;
 
-    // ⭐ 連想枠の中身(「gold ではない何かが枠に入っていたとき、それが何だったか」を
-    // 後から説明できるようにする、北極星の問い3)。`retrievedVia === "association"` の
-    // 候補だけを、返った順のまま拾う。
     const associationFrame: AssociationFrameEntry[] = [];
     for (let i = 0; i < result.memories.length; i += 1) {
       const memory = result.memories[i]!;
@@ -368,10 +235,6 @@ export async function runAssociationArm(
       });
     }
 
-    // ⭐ 同じストア・同じクエリでもう一度 recall() を呼び直す(Issue #291
-    // フォローアップ、`AssociationProbeOutcome.repeatFrameIdentical` の docstring
-    // 参照)。⛔ text/association 以外を渡さない、という規律は一回目とまったく
-    // 同じ引数を繰り返すことで保たれる。
     const resultRepeat = await options.runtime.recall(ctx, {
       text: probe.query,
       association,
