@@ -4001,7 +4001,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const limit = (opts as { limit?: unknown } | null | undefined)?.limit;
     if (
       limit === undefined ||
-      (typeof limit === "number" && (!Number.isInteger(limit) || limit < 0))
+      (!Number.isInteger(limit) || (limit as number) < 0)
     ) {
       throw new RangeError(
         `Runtime.reembed: limit must be a non-negative integer (got ${String(limit)})`,
