@@ -1,146 +1,16 @@
 #!/usr/bin/env node
 /**
- * `@mnemora/local-embedding` が実際に読み込んだ重みファイルが、宣言された
- * Hugging Face repo が**今まさに**持っているものと一致するかを照合する CLI。
- *
- * ⭐ **この道具は期待値をリポジトリに1つも焼き込まない。**
- *
- * - **repo 名はここにもハードコードしない。** 唯一の出所は
- *   `packages/local-embedding/src/local-embedding-provider.ts` の
- *   `DEFAULT_LOCAL_EMBEDDING_REPO` であり、この CLI はその文字列リテラルを
- *   正規表現で取り出す（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
- * - **期待する hash もここには置かない。** 毎回 Hugging Face の tree API を実際に
- *   引いて、**その瞬間の repo の内容**を期待値にする。ファイルにハッシュを
- *   埋め込むと、repo が更新された翌日には陳腐化した期待値と黙って比較することになる
- *   ——それは「照合」ではなく「1回限りのスナップショットとの比較」であり、
- *   この道具が検査したいこと（今まさに一致しているか）とは別物になる。
- *
- * 判定ロジック（`gitBlobSha1Hex` / `expectedHashOfTreeEntry` / `compareFingerprints` /
- * `formatFingerprintReport`）は `scripts/check-local-embedding-fingerprint-lib.mjs`
- * にある——ファイル I/O・ネットワークを持たない純関数の側であり、ここ（CLI）は
- * それを呼ぶだけの薄い層である（`scripts/ci-green-check.mjs` と同じ分担）。
- *
- * ## ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記4・追記5）: この門は `main` を見続ける
- *
- * `scripts/print-local-embedding-cache-key.mjs`（CI のキャッシュ鍵）と
- * `examples/chat/src/providers.ts`（`local` embedding が使う revision）は、
- * `scripts/local-embedding-pinned-revision.json` に固定した revision（採用時の sha）を
- * 使うようになった——**この門が「何と照合するか」はそちらへは切り替えない。**
- *
- * ⟹ **この門は引き続き `main`（tree URL の `main` は変えていない）を照合する番犬として
- * 残る。** 上流の `main` が動いて、固定した revision の中身と食い違えば、この門が
- * 赤くなる——それが「固定した revision を更新するかどうか、人間が判断する」合図になる。
- *
- * ⚠ **追記5（CI run 35953212055 で発覚）**: **この門は固定した revision の宣言を読む
- * ようになった**——ただし「何と照合するか」のためではなく、「手元のファイルを tree の
- * パス空間へどう対応づけるか」（キャッシュの置き場所の解釈）のためだけである。
- * `@huggingface/transformers` は revision を `"main"` 以外で渡すと
- * `<repo>/<revision>/<filename>` というサブディレクトリにファイルを置くため、
- * 正規化しないと実在するファイルが「素性不明」になって不一致になる（実際に CI で
- * そう壊れた）。`collectActualFiles`/`normalizeActualPath` の docstring 参照。
- *
- * ## 判定表（この CLI はゲートである）
- *
- * ⭐ **問いは2つに割れている**（Issue #586 / ADR 0253 追記1）——
- * **(1) 宣言が指す先が在るか**（{@link checkDeclaredRepoExists}）と
- * **(2) その中身を読めたか**（{@link fetchTreeWithRetry} 以降）。
- *
- * | # | 事象 | 判定 | exit |
- * |---|---|---|---|
- * | — | 宣言された repo（`DEFAULT_LOCAL_EMBEDDING_REPO`）を読み取れない | 赤 | `1` |
- * | — | `cacheDir` が引けない（`--cache-dir` も env も無い） | 赤 | `1` |
- * | **(1)** | 🔴 **宣言された repo が存在しない（モデル情報 API が再試行3回とも 404）** | **赤** | **`1`** |
- * | **(1)** | モデル情報 API が 404 以外の非2xx／到達しない ⟹ **「在るか」に答えない。(2) へ続行** | — | — |
- * | (2) | 全ファイル一致 | match | `0` |
- * | (2) | ハッシュが食い違う | 赤 | `1` |
- * | (2) | 手元に在るが HF の tree に無いファイルが在る | 赤 | `1` |
- * | (2) | 手元のファイルが読めない（I/O エラー） | 赤 | `1` |
- * | (2) | `<cacheDir>/<repo>/` にも `<cacheDir>/<固定revision>/<repo>/` にもファイルが1本も無い（2026-09-29、Issue #1403: 後者を足した） | 赤 | `1` |
- * | (2) | tree API に届かない（再試行3回を尽くしてもネットワーク失敗） | 保留 | `2` |
- * | (2) | 🔴 **tree API が非2xx（404 を含む）を返す** | **保留** | **`2`** |
- * | (2) | 🔴 **tree API が 200 を返したが、応答が配列でない** | **保留** | **`2`** |
- * | (2) | 🔴 **tree のエントリから hash を取れない（`oid` も `lfs.oid` も無い）** | **判定は変えない。⚠ 理由を必ず印字** | — |
- * | (2) | 🔴 **tree のエントリが file でも directory でもない（type/path が想定と違う）** | **判定は変えない。⚠ 理由を必ず印字** | — |
- * | — | この CLI 自身のバグ・想定外の例外・不明な引数 | 実行時エラー | `3` |
- *
- * 🔴 **tree API の非2xx／応答が配列でない の2行は、2026-09-21 まで判定表に行が
- * 無かった**（Issue #586 発見1）。**実装は最初からそう倒れていたのに、表がそれを
- * 書いていなかった。** ⟹ **表が実装の射程を覆っていなかったのであって、実装が
- * 勝手に振る舞っていたのではない。**
- *
- * ## ⚠ 「判定は変えない。理由を必ず印字」の2行について（Issue #586 発見2）
- *
- * **これらは exit コードを持たない。** {@link buildExpectedByPath} が読み飛ばすので、
- * **対応する手元のファイルが在れば `unknownOnDisk`（素性不明）として赤になり、
- * 無ければ判定は動かない。** ⟹ **結果として fail-safe である（黙って緑にならない）。**
- *
- * 🔴 **だが 2026-09-21 まで、読み飛ばしたこと自体がどこにも出ていなかった。** 出るのは
- * 「素性不明（HF の tree に無い）」だけで、**読んだ人は「キャッシュが汚れた」と読む——
- * 真因（HF の応答の形が変わった）に辿り着けない。** ⟹ {@link formatSkippedTreeEntries}
- * が件数と理由を必ず印字するようにした。⛔ **判定は1つも変えていない。変えたのは診断だけ。**
- *
- * ⭐ **なぜ「全件読み飛ばし」を保留にしないか**: 保留は「HF に届かない／tree を読めない」
- * に取ってある。**配列は届いていて、中身も数えられている**——読めなかったのではなく、
- * **知っている形と違った**のである。⟹ そこを保留に倒すと、#586 が名指しした
- * 「黙って緑に近い状態で通る」を、別の入口から作り直すことになる。**赤のままにする。**
- *
- * ## ⭐ 保留（exit 2）に倒してよいものの境界
- *
- * **「この repo が直せないもの」だけである。** ⟹ **(2) の失敗はすべて保留でよい**
- * ——tree が読めないのは HF 側の事情であり、偽陽性率に上限を置けない。
- *
- * 🔴 **だが「宣言された repo 名が何も指していない」は、この repo が直せる。**
- * ⟹ **それだけを (1) として切り出し、赤にした。** ⛔ **(1) に 429 や 5xx を
- * 混ぜないこと**——それらは「在るか」に答えていないので、赤の根拠にならない。
- *
- * ⚠ **なぜ (2) の 404 は保留のままか**: (1) を通った時点で「repo は在る」ので、
- * tree だけが 404 を返すのは HF 側の事情（API の形の変更等）である。⟹ 外部要因。
- *
- * **それ以外（`cacheDir`／repo 宣言／ファイルの不在）はすべて赤**——CI に置くこの門は、
- * モデルのキャッシュ鍵が存在する（＝置き場所が決まっている）ことを前提にしており、
- * それらは「判定を保留する」話ではなく「**設定が壊れている**」話だからである。
- *
- * ⛔ **ハッシュの選び分けはファイル名や拡張子で分岐しない。** HF API の応答に
- * `lfs` が在るかどうかだけで分岐する（`expectedHashOfTreeEntry` の戻り値の
- * `algorithm`）——CLI 自身が拡張子等から独自に判断すると、焼き込んだ期待値と
- * 同じ理由で腐る。
- *
- * ## キャッシュの場所
- *
- * `--cache-dir <path>` → 無ければ環境変数 `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` →
- * どちらも無ければ赤（exit 1）。**transformers.js の既定のキャッシュ場所を
- * 推測しない**——推測が外れると「モデルは在るのに検査していない」を
- * 「一致した」と取り違えかねない。
- *
- * ## HF API
- *
- * 既定では `https://huggingface.co/api/models/<repo>/tree/main?recursive=1&expand=1`
- * を `fetch` で引く。失敗したら最大3回まで、2秒間隔で再試行する。それでも
- * 失敗したら保留（exit 2）。
- *
- * ⚠ **`--api-base <url>`（既定 `https://huggingface.co`）で問い合わせ先を差し替えられる。**
- * これは本番の挙動を変えるための入口ではなく、**「HF API に届かない」という exit 2 の
- * 経路を、実際のネットワーク障害を待たずに単体試験・変異試験から再現するための注入点**
- * である（`packages/openai` の `client` 注入と同じ役目）。到達不能な URL を渡せば
- * 到達失敗を、その場で・決定的に再現できる。
- *
- * ## 終了コード（`ci-green-check.mjs` と同じ形の規約）
- *
- * `0` = match（一致）/ `1` = mismatch（不一致。上の判定表の「赤」全部を含む）/
- * `2` = undetermined（判定保留。HF API 取得に失敗した場合のみ）/
- * `3` = 実行時エラー（この CLI 自身のバグ・想定していない例外）。
- *
- * ⚠ **`undetermined` を `match` と取り違えないこと。** `0` 以外はすべて非0で落ちる
- * ——`undetermined` を「まあ緑」として握りつぶす呼び出し側を書かないこと。
- *
- * ## 使い方
- *
- * ```
- * node scripts/check-local-embedding-fingerprint.mjs --cache-dir /path/to/cache
- * node scripts/check-local-embedding-fingerprint.mjs --cache-dir /path/to/cache --json
- * MNEMORA_LOCAL_EMBEDDING_CACHE_DIR=/path/to/cache node scripts/check-local-embedding-fingerprint.mjs
- * node scripts/check-local-embedding-fingerprint.mjs --cache-dir /path/to/cache --api-base http://127.0.0.1:1
- * ```
+ * ⛔ 期待値（repo 名・hash）をリポジトリに焼き込まない。repo 名は `DEFAULT_LOCAL_EMBEDDING_REPO` の文字列リテラルを
+ * 正規表現で取り出し、hash は毎回 Hugging Face の tree API を引いて、その瞬間の repo の内容を期待値にする。
+ * ⛔ 照合先は `main` のままにする。固定した revision（`scripts/local-embedding-pinned-revision.json`）は、
+ * キャッシュの置き場所の解釈（`normalizeActualPath`）にだけ使う。
+ * ⛔ 保留（exit 2）に倒してよいのは、この repo が直せない外部要因（tree API が読めない・届かない）だけ。
+ * 宣言された repo が存在しない（404）はこの repo が直せるので、前段で切り出して赤にする。429・5xx は混ぜない。
+ * ⛔ ハッシュの選び分けは、ファイル名や拡張子で分岐せず、HF の応答に `lfs` が在るかどうかだけで決める。
+ * ⛔ transformers.js の既定のキャッシュ場所を推測しない（外れると「検査していない」を「一致した」と取り違える）。
+ * ⚠ `undetermined`（exit 2）を `match` と取り違えないこと。
+ * `--api-base` は、到達失敗（exit 2）の経路を単体試験・変異試験から決定的に再現するための注入点で、
+ * 本番の挙動を変えるためではない。
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -158,7 +28,6 @@ import {
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 2_000;
 
-/** HF の tree API の既定の問い合わせ先。`--api-base` で差し替えない限りこれを使う。 */
 const DEFAULT_HF_API_BASE = "https://huggingface.co";
 
 function parseArgs(argv) {
@@ -177,10 +46,7 @@ function parseArgs(argv) {
 }
 
 /**
- * 唯一の出所（`local-embedding-provider.ts` の `DEFAULT_LOCAL_EMBEDDING_REPO`）から
- * 宣言された repo 名を取り出す。⛔ ここにも `ci.yml` にも repo 名を書かない
- * （焼き込み禁止）——だからこの関数が「読めなかった」ときは、フォールバック値を
- * 持たずにそのまま `null` を返す。
+ * ⛔ repo 名のフォールバック値を持たない。読めなければ `null` を返す。
  *
  * @returns {string | null}
  */
@@ -204,18 +70,8 @@ function readDeclaredRepo() {
 }
 
 /**
- * 固定した revision（`scripts/local-embedding-pinned-revision.json`）を読む。
- * **キャッシュの置き場所の解釈にのみ使う**（Issue #597 案(a) の追加分、ADR 0253 追記5）。
- *
- * 🔴 **これは「何と照合するか」を変えない。** この門はいまも HF の `main` の tree と
- * 照合し続ける——ここで読んだ値は、`collectActualFiles` が手元のファイルを tree の
- * パス空間へ正規化する（`normalizeActualPath`）ためだけに使う。理由は
- * `@huggingface/transformers` の `FileCache` が、revision を `"main"` 以外で渡すと
- * `<repo>/<revision>/<filename>` というサブディレクトリにファイルを置くため
- * （実測。`normalizeActualPath` の docstring 参照）。
- *
- * ⛔ **読めなくても赤にしない。** `null` を返し、呼び出し側は「正規化しない」
- * （＝この変更より前の、revision=main のフラットな配置だけを扱う挙動）として扱う。
+ * キャッシュの置き場所の解釈にのみ使う。⛔ 「何と照合するか」は変えない。
+ * 読めなくても赤にせず `null` を返す（正規化しない）。
  *
  * @returns {string | null}
  */
@@ -240,29 +96,9 @@ function readPinnedRevisionForCacheLayout() {
 }
 
 /**
- * ⭐ **前段: 「宣言が指す先が在るか」だけを問う**（Issue #586、ADR 0253 追記1）。
- *
- * 🔴 **この問いは 404 か否かの2値に留める。⛔ ここに 429 や 5xx を混ぜないこと。**
- *
- * **なぜ分けるか**: 元の形は、tree API から返ったあらゆる非2xx を `fetchTreeWithRetry`
- * が1つの `{ok:false}` に畳み、CLI がそれを**すべて保留（exit 2）**にしていた。
- * ⟹ 判定表が逐語で「保留に倒してよいのは **HF API への到達失敗ただ1つ**である。この
- * **リポジトリの管理が及ばない外部要因**であり（…）」と書いていた論拠が、
- * **404（＝宣言された repo 名が何も指していない。この repo が直せる）を覆っていなかった。**
- *
- * ⟹ **問いを2つに割る。** 「宣言が指す先が在るか」（ここ。404 なら赤）と
- * 「その中身を読めたか」（{@link fetchTreeWithRetry}。失敗は従来どおり保留）。
- * ⭐ **前者には「赤／答えない」の2値しかなく、それ以上分ける先が無い**——だから
- * 再帰しない。⛔ **答えられないときは答えない**（`"undetermined"` を返して続行する）
- * ——ここで黙って赤にすると、外部要因を内部起因として扱うことになる。
- *
- * 🔴 **404 は再試行して確かめる。** 404 を1回で赤にすると、HF の一過性の不調が
- * **必須ジョブを止める**。⟹ {@link RETRY_ATTEMPTS} 回すべてが 404 のときだけ
- * `"missing"` を名乗る。⭐ **正常系（200）では追加の HTTP 往復はちょうど1回である**
- * ——200 を見た時点で即座に返すので、再試行の待ち時間は発生しない。
- *
- * ⛔ **429 / 5xx / 到達失敗は `"undetermined"` である。** それらは「在るか」に
- * 答えていない。⟹ 続行して、tree 側の判定（保留）に委ねる。
+ * 404 か否かの2値に留める。⛔ 429・5xx・到達失敗は `"undetermined"` で、続行して tree 側の判定に委ねる。
+ * ⛔ 404 は再試行して確かめる（1回で赤にすると HF の一過性の不調が必須ジョブを止める）。
+ * {@link RETRY_ATTEMPTS} 回すべてが 404 のときだけ `"missing"`。
  *
  * @param {string} apiBase
  * @param {string} repo
@@ -275,7 +111,6 @@ async function checkDeclaredRepoExists(apiBase, repo) {
     try {
       status = (await fetch(url)).status;
     } catch (error) {
-      // 到達していない ⟹ 「在るか」に答えていない。
       return { verdict: "undetermined", url, detail: String(error?.message ?? error) };
     }
     if (status !== 404) {
@@ -293,10 +128,6 @@ async function checkDeclaredRepoExists(apiBase, repo) {
 }
 
 /**
- * `sleep` を挟んでの再試行付き `fetch`。**HF の tree API が読めなければ`
- * undetermined` に落とす**——この関数はネットワーク I/O を持つため
- * `check-local-embedding-fingerprint-lib.mjs`（純関数だけの側）には置いていない。
- *
  * @param {string} url
  * @returns {Promise<{ ok: true, entries: unknown[] } | { ok: false, reason: string }>}
  */
@@ -326,27 +157,8 @@ async function fetchTreeWithRetry(url) {
 }
 
 /**
- * HF の tree エントリの配列から `path -> {algorithm, hex}` の Map を作る。
- *
- * 🔴 **読み飛ばしたものを黙って捨てない**（Issue #586 発見2、ADR 0253 追記2）。
- *
- * 以前はここが `if (expected)` で **oid を取れないエントリを無言で落としていた。**
- * ⟹ HF が `oid` / `lfs.oid` の返し方を変えると、そのエントリが期待値から消え、
- * 対応する手元のファイルが `unknownOnDisk`（素性不明）として**赤**になる。
- * ⭕ **赤になること自体は正しい**（fail-safe。黙って緑にはならない）。
- * 🔴 **だが出る文面が「素性不明（HF の tree に無い）」だったので、読んだ人は
- * 「キャッシュが汚れた」と読む——真因（HF の応答の形が変わった）に辿り着けない。**
- *
- * ⟹ **読み飛ばした件数と理由を持ち回り、呼び出し側が文面に出す。**
- * ⛔ **判定（verdict）は変えていない**——変えるのは診断だけである。
- *
- * ⚠ **`type: "directory"` は正常なので数えない。** 数えるのは次の2つだけ:
- *
- * - `noOid`: `type: "file"` で `path` も在るのに、`oid` も `lfs.oid` も取れない
- *   （{@link expectedHashOfTreeEntry} が `null` を返す）。**HF が hash の返し方を
- *   変えた**ときにここが増える。
- * - `unrecognized`: オブジェクトではあるが、file でも directory でもない／`path` が
- *   無い。**HF がフィールド名そのものを変えた**ときにここが増える。
+ * ⛔ 読み飛ばしたものを黙って捨てない。件数と理由を持ち回り、呼び出し側が文面に出す（判定は変えない）。
+ * `type: "directory"` は正常なので数えない。
  *
  * @param {unknown[]} entries
  * @returns {{ map: Map<string, { algorithm: string, hex: string }>, noOid: string[], unrecognized: number }}
@@ -361,7 +173,6 @@ function buildExpectedByPath(entries) {
       continue;
     }
     if (entry.type === "directory") {
-      // 正常。tree にはディレクトリも並ぶ。
       continue;
     }
     if (entry.type !== "file" || !entry.path) {
@@ -379,11 +190,6 @@ function buildExpectedByPath(entries) {
 }
 
 /**
- * 読み飛ばしたエントリを、人が真因に辿り着ける文面にする。読み飛ばしが無ければ空配列。
- *
- * ⭐ **緑のときにも出す。** 「手元に対応するファイルが無かったので赤にならなかった」
- * だけかもしれず、**そのときこそ黙ってはいけない**（形の変化の予兆である）。
- *
  * @param {{ noOid: string[], unrecognized: number }} skipped
  * @returns {string[]}
  */
@@ -410,25 +216,10 @@ function formatSkippedTreeEntries(skipped) {
 }
 
 /**
- * `repoDir` 以下に実在するファイルを再帰的に列挙し、`expectedByPath` の情報を使って
- * それぞれの hash を計算する。**`expectedByPath` に無い path（素性不明のファイル）も
- * 列挙は続ける**——`compareFingerprints` が `unknownOnDisk` として拾うのはここで
- * 挙げたものだけなので、ここで除外すると門として機能しなくなる。
- * その場合の algorithm は `git-blob-sha1` を既定にする（`compareFingerprints` は
- * `expectedByPath` に無い path の hex/algorithm を実際には比較しないので、
- * この既定値が判定結果を左右することはない）。
- *
- * 🔴 **1本でも読めなければ、それは「片方のハッシュしか計算できない」＝赤（判定表）
- * である。** ここで例外を投げて `main()` の `catch` に落とし exit 3（実行時
- * エラー）にしてしまうと、「この CLI 自身のバグ」と「対象ファイルが読めない」が
- * 区別できなくなる——読めなかった path を `unreadable` として返し、呼び出し側
- * （`main()`）が判定表どおり赤（exit 1）にする。
- *
- * ⭐ **`pinnedRevision` が渡っていれば、相対パスを `normalizeActualPath` で正規化する**
- * （Issue #597 案(a) の追加分、ADR 0253 追記5）。`@huggingface/transformers` が
- * revision 指定時に `<repo>/<revision>/<filename>` というサブディレクトリへ書くため、
- * 正規化しないと手元に実在するファイルが「素性不明」になる（CI run 35953212055 で
- * 実際に踏んだ）。⛔ **これは「照合対象」を変えない**——tree は今も `main` のもの。
+ * ⛔ `expectedByPath` に無い path（素性不明のファイル）も列挙を続ける。除外すると門として機能しない。
+ * ⛔ 読めなかったファイルで例外を投げない（exit 3 になり、CLI 自身のバグと区別できなくなる）。
+ * `unreadable` として返し、呼び出し側が赤にする。
+ * ⛔ `pinnedRevision` の正規化は「照合対象」を変えない（tree は今も `main`）。
  *
  * @param {string} repoDir
  * @param {Map<string, { algorithm: string, hex: string }>} expectedByPath
@@ -446,7 +237,6 @@ function collectActualFiles(repoDir, expectedByPath, pinnedRevision) {
     if (!dirent.isFile()) continue;
     const parentPath = dirent.parentPath ?? dirent.path;
     const absPath = join(parentPath, dirent.name);
-    // HF の path は常に `/` 区切り——Windows でも一致させるため sep を置換する。
     const rawRelPath = relative(repoDir, absPath).split(sep).join("/");
     const relPath = normalizeActualPath(rawRelPath, pinnedRevision);
     const expected = expectedByPath.get(relPath);
@@ -468,13 +258,11 @@ function collectActualFiles(repoDir, expectedByPath, pinnedRevision) {
   return { actual, unreadable };
 }
 
-/** 判定表の「赤」（不一致）に落として exit 1 で終える。 */
 function red(reason) {
   console.error(`赤（mismatch）: ${reason}`);
   process.exit(1);
 }
 
-/** 判定表の「保留」（HF API 到達失敗のみ）に落として exit 2 で終える。 */
 function undetermined(reason) {
   console.error(`保留（undetermined）: ${reason}`);
   process.exit(2);
@@ -483,7 +271,6 @@ function undetermined(reason) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  // 🔴 判定表: 宣言を読み取れない ⟹ 赤（保留にしない）。
   const repo = readDeclaredRepo();
   if (!repo) {
     red(
@@ -493,8 +280,7 @@ async function main() {
     return;
   }
 
-  // 🔴 判定表: cacheDir が引けない ⟹ 赤（保留にしない）。この門は CI 専用であり、
-  // CI ではキャッシュ鍵が存在する＝置き場所が決まっていることが前提だからである。
+  // 保留にしない。この門は CI 専用で、置き場所が決まっている前提であり、引けないのは設定が壊れている。
   const cacheDir = args.cacheDir ?? process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
   if (!cacheDir) {
     red(
@@ -510,8 +296,7 @@ async function main() {
 
   const apiBase = args.apiBase ?? DEFAULT_HF_API_BASE;
 
-  // 🔴 判定表（前段）: 宣言された repo が存在しない ⟹ 赤。⛔ 保留にしない。
-  // ⭐ この段が答えるのは「在るか」だけである。答えられないときは続行する。
+  // 保留にしない。答えられないときは続行する。
   const existence = await checkDeclaredRepoExists(apiBase, repo);
   if (existence.verdict === "missing") {
     red(
@@ -527,8 +312,7 @@ async function main() {
   const treeUrl = `${apiBase}/api/models/${repo}/tree/main?recursive=1&expand=1`;
   const treeResult = await fetchTreeWithRetry(treeUrl);
   if (!treeResult.ok) {
-    // ⭐ 判定表で唯一「保留」にしてよい事象——このリポジトリの管理が及ばない
-    // 外部要因（ネットワーク）であり、偽陽性率に上限を置けないため。
+    // 保留にしてよいのは、この repo の管理が及ばない外部要因（ネットワーク）だけ。
     undetermined(
       `Hugging Face の tree API を ${RETRY_ATTEMPTS} 回試したが取得できなかった` +
         `（${treeUrl}）。最後の失敗理由: ${treeResult.reason}`,
@@ -537,21 +321,15 @@ async function main() {
   }
 
   const { map: expectedByPath, ...skipped } = buildExpectedByPath(treeResult.entries);
-  // 🔴 読み飛ばしは、緑でも赤でも必ず出す（Issue #586 発見2）。⛔ 判定は変えない。
   for (const line of formatSkippedTreeEntries(skipped)) {
     console.error(line);
   }
-  // ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記5）: キャッシュの置き場所の解釈
-  // にだけ、固定した revision の宣言を読む。⛔ 「何と照合するか」は変えない
-  // （tree は今も main のもの）——理由は collectActualFiles の docstring 参照。
   const pinnedRevision = readPinnedRevisionForCacheLayout();
   console.log(
     pinnedRevision !== null
       ? `固定した revision の宣言（キャッシュの置き場所の解釈にのみ使う。照合対象は main のまま）: ${pinnedRevision}`
       : "固定した revision の宣言を読めなかった（キャッシュの置き場所は revision=main のフラットな配置として解釈する）",
   );
-  // ⭐ 2026-09-29 追記（Issue #1403、ADR 0365）: `revision` を渡した読み込みは、根を
-  // `<cacheDir>/<encodeURIComponent(revision)>/` に分けて置く。平たい配置と両方を見る（`cacheRepoDirs`）。
   const actual = [];
   const unreadable = [];
   for (const repoDir of cacheRepoDirs(cacheDir, repo, pinnedRevision)) {
@@ -563,13 +341,8 @@ async function main() {
   const result = compareFingerprints({ actual, expectedByPath });
   console.log(formatFingerprintReport(result));
 
-  // ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記4・追記5）: この門はいまも `main`
-  // を照合する番犬のままであり、**照合対象（tree の URL）は固定した宣言へ切り替えて
-  // いない**。固定した宣言（scripts/local-embedding-pinned-revision.json）は
-  // `collectActualFiles` の「キャッシュの置き場所の解釈」にのみ使う（上を参照）。
-  // ⟹ ここが不一致になったということは、宣言された repo の `main` が固定した時点から
-  // 動いた（可能性が高い）——固定revisionを更新するかどうかの判断は人間に委ねる。
-  // ⛔ 判定（verdict/exit code）はこのメッセージでは変えない。
+  // ⛔ 照合対象（tree の URL）は固定した宣言へ切り替えない。不一致は `main` が固定した時点から動いた合図で、
+  // 固定 revision を更新するかどうかは人間が判断する。
   if (result.verdict !== "match") {
     console.error(
       "⚠ この門は Hugging Face の `main` の tree と照合し続けている" +
@@ -580,9 +353,7 @@ async function main() {
     );
   }
 
-  // 🔴 判定表: 手元のファイルが読めない ⟹ 赤。`compareFingerprints` は読めた分だけを
-  // 見て match を返しうるが、読めなかったファイルがある時点で「全ファイル一致」は
-  // 主張できないので、ここで上書きする。
+  // 読めなかったファイルが在る時点で「全ファイル一致」は主張できないので、ここで上書きする。
   if (unreadable.length > 0) {
     console.error(`読めなかったファイル ${unreadable.length} 本:`);
     for (const item of unreadable) {
