@@ -1,9 +1,5 @@
-// 確かめ直し（Issue #1759、B 群 #1599 / ADR 0488）の歯。
-//
-// `RelationStore.link` は、範囲外の kind を両端の検査より前に `unknown relation kind` で断る
-// （`PostgresRelationStore.link` の TSDoc。fixture の `InMemoryRelationStore` が揃える先）。
-// 既存の relation-store-parity は両端が在る入力でしか kind を試さないので、fixture の検査の位置を
-// 両端の検査の後ろへ動かしても赤にならなかった。ここで、端の記憶が無い入力で縛る。
+// `RelationStore.link` は、範囲外の kind を両端の検査より前に `unknown relation kind` で断る（`PostgresRelationStore.link` の TSDoc。fixture の `InMemoryRelationStore` が揃える先）。
+// 既存の relation-store-parity は両端が在る入力でしか kind を試さないので、fixture の検査の位置を両端の検査の後ろへ動かしても赤にならない。ここで、端の記憶が無い入力で縛る。
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, MemoryStore, RelationKind, RelationStore } from "@mnemora/core";
 import { InMemoryMemoryStore, InMemoryRelationStore } from "@mnemora/testkit/fixtures";

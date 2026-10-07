@@ -6,13 +6,8 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）は、減衰の起点を巻き戻さない
- * （Issue #1093、ADR 0048）。規則は1つ: **`at` が起点（`lastReinforcedAt ?? recordedAt`）より新しいとき
- * だけ書く。そうでなければ、活動時計の欄も含めて何も書かない。**
- *
- * 【実測 2026-09-27】以前は未強化の記憶（`lastReinforcedAt` が null）だけ、作成時刻より前の `at` でも
- * 書いていた——`lastReinforcedAt` が作成時刻より前になり、`decayFloorAt` が早まり、活動時計の
- * `decayBaseSeq`/`decayFloorSeq` も進んだ（Postgres・testkit とも）。作成時刻ちょうどの `at` も書いていた。
+ * `MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）は、減衰の起点を巻き戻さない。
+ * 規則は1つ: **`at` が起点（`lastReinforcedAt ?? recordedAt`）より新しいときだけ書く。そうでなければ、活動時計の欄も含めて何も書かない。**
  */
 
 const ctx: Ctx = { tenantId: "reinforce-origin-no-rewind" };

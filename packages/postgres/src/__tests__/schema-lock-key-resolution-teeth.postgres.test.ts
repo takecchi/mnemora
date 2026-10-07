@@ -17,15 +17,13 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * #924（Issue #779）の確かめ直し（#1774）。`role-name-schema-lock-key.postgres.test.ts` が見ていない3つの境界。
+ * `role-name-schema-lock-key.postgres.test.ts` が見ていない3つの境界。
  *
- * 1. `schema` を明示したら、`current_schema()` を読まず、その schema の導出キーを使う（明示した
- *    schema ごとに別のキーで排他する、ADR 0057 決定6）。常に `current_schema()` を読む実装だと、
- *    明示した schema の導出キーを先客が握っていても待たなくなる。
+ * 1. `schema` を明示したら、`current_schema()` を読まず、その schema の導出キーを使う（明示した schema ごとに別のキーで排他する）。
+ *    常に `current_schema()` を読む実装だと、明示した schema の導出キーを先客が握っていても待たなくなる。
  * 2. `current_schema()` を読むのは「`schema` 未指定、かつ `options.lockKey` の上書きも無い」ときだけ。
  *    上書きがあるときや schema を明示したときに、余計な `SELECT current_schema()` を発行しない。
- * 3. `current_schema()` が `NULL`（`search_path` のどのスキーマも無い）なら、未指定のままと同じ扱い
- *    （既定の固定キー）になる。
+ * 3. `current_schema()` が `NULL`（`search_path` のどのスキーマも無い）なら、未指定のままと同じ扱い（既定の固定キー）になる。
  */
 
 const createdDatabases: string[] = [];

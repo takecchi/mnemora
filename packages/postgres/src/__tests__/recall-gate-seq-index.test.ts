@@ -6,53 +6,25 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・9
- * （Issue #305）: `idx_memories_recall_gate_seq`
- * （`(tenant_id, status, decay_floor_seq)`、`WHERE status IN ('active', 'contested')`。
- * `migrations/0015_decay_activity_clock.sql`）に対して、`recall-gate-index.test.ts` が
- * Issue #150 で確立した3本立て（歯1 形・歯2 適用可能性・歯3 同値）を**同じ形で**置く。
+ * `idx_memories_recall_gate_seq`（`(tenant_id, status, decay_floor_seq)`、`WHERE status IN ('active', 'contested')`）に、
+ * `recall-gate-index.test.ts` と同じ3本立て（歯1 形・歯2 適用可能性・歯3 同値）を置く。冒頭の doc コメントを先に読むこと。
  *
- * **`recall-gate-index.test.ts` 冒頭の doc コメントを先に読むこと。** ここでは繰り返さない
- * ——要点だけ書くと、「プランナがこの索引を選んだ」と「この索引がこの述語に使える」は
- * 別の主張であり、後者（性質）だけを assert する。前者（コスト比較で実際に選ばれるか）は
- * 他にどんな索引が在るかに依存して揺れる。
- *
- * ⚠ **この歯が測らないもの**: 段1の実際のゲート述語（`packages/postgres/src/vector-store.ts`）は
- * `(decay_floor_seq IS NULL OR decay_floor_seq > $n)` という、**NULL を通す OR** を含む形である
- * （ADR 0165 決めたこと4「NULL はこの軸には床が無いことを意味する」）。この索引テストの
- * 代表クエリ（`GATE_SELECT`、下記）は `recall-gate-index.test.ts` の `decay_floor_at`
- * 版と同じく**「本番が実際に発行する SQL ではない」**——`decay_floor_at` がそうであるのと
- * 同じ理由で、ここでは NULL 分岐を持たない素の範囲比較にしてある。
- * **`IS NULL OR >` という複合条件は、同じ列に対する2つの選言（NULL 判定・範囲判定）を
- * bitmap 経由でしか1本の索引にまとめられない**（`enable_bitmapscan = off` で歯2を測ると
- * この複合条件では索引が引けなくなる、という制約そのものを検査してしまうことになり、
- * 「この索引が range 述語に使えるか」という測りたい性質から外れる）。
- * ⟹ **NULL 分岐を含む実際のゲート述語の検査は、`packages/testkit` の
- * `vector-store-conformance.ts`（`decayFloorSeqAfter` の適合テスト、`PostgresVectorStore.search`
- * を実際に叩く）に委ねる。**そちらは代表クエリではなく本番の実装コードを直接検査する。
+ * 代表クエリ（`GATE_SELECT`）は、段1の実際のゲート述語 `(decay_floor_seq IS NULL OR decay_floor_seq > $n)` から NULL 分岐を外した素の範囲比較にしてある。
+ * `IS NULL OR >` という複合条件は bitmap 経由でしか1本の索引にまとめられないので、`enable_bitmapscan = off` で歯2を測るとこの条件では索引が引けなくなり、
+ * 測りたい性質（この索引が range 述語に使えるか）から外れてしまう。
+ * NULL 分岐を含む実際のゲート述語の検査は、`packages/testkit` の `vector-store-conformance.ts`（`decayFloorSeqAfter`）に委ねる。
  */
 
 const TENANT = "recall-gate-seq-tenant";
 
-/** `recall-gate-index.test.ts` と同じ理由で 4000（歯1〜3 はいずれも行数に依存しない）。 */
 const ROW_COUNT = 4000;
 
-/** 段1の関門が候補に含める status。索引の部分述語と同じ集合であること自体を歯1が測る。 */
 const GATE_STATUSES = ["active", "contested"] as const;
 
-/**
- * 全行に同じ `decay_floor_seq`（非 null）を持たせ、閾値 `0` は常に真になるようにしてある
- * ——`recall-gate-index.test.ts` の `decay_floor_at > now() - interval '1000 days'`
- * （seed した全行が常に通る、非選択的な条件）と同じ役割。この歯が測るのは
- * 「`status` の集合」であって、`decay_floor_seq` の値そのものの選択性ではない。
- */
+/** 全行に同じ `decay_floor_seq`（非 null）を持たせ、閾値 `0` は常に真になるようにしてある。この歯が測るのは `status` の集合であって、`decay_floor_seq` の選択性ではない。 */
 const FIXED_DECAY_FLOOR_SEQ = 1_000_000;
 
-/**
- * 段1の関門クエリ（活動時計版）。`recall-gate-index.test.ts` の `GATE_SELECT` と同じ理由で、
- * **本番が実際に発行している SQL ではない**——NULL 分岐を持たない素の範囲比較にしてある
- * （ファイル冒頭 doc コメント参照）。
- */
+/** 段1の関門クエリ（活動時計版）。本番が実際に発行している SQL ではなく、NULL 分岐を持たない素の範囲比較にしてある。 */
 const GATE_SELECT = `SELECT id, status FROM memories
        WHERE tenant_id = $1 AND status = ANY($2::text[]) AND decay_floor_seq > $3
        ORDER BY decay_floor_seq, id
@@ -66,8 +38,7 @@ async function insertManyMemories(
   statuses: MemoryStatus[],
   pool: Pool,
 ) {
-  // ADR 0140: `createMemory` は `status: 'contested'` を `contestedWithId` 無しでは
-  // 作れない。`recall-gate-index.test.ts` と同じ理由・同じ形で対向を1件だけ用意する。
+  // `createMemory` は `status: 'contested'` を `contestedWithId` 無しでは作れないので、対向を1件だけ用意する。
   const contestedCompanion = await store.createMemory(
     ctx,
     buildNewMemoryFixture({
@@ -91,14 +62,12 @@ async function insertManyMemories(
       }),
     );
   }
-  // 統計情報が無いと、プランナが誤った行数見積もりで無関係な索引を選んでしまう
-  // （`recall-gate-index.test.ts` と同じ勘所）。
+  // 統計情報が無いと、プランナが誤った行数見積もりで無関係な索引を選んでしまうことがある。
   await pool.query("ANALYZE memories");
 }
 
 type Forcing = "none" | "btreeIndex" | "seqscan";
 
-/** `recall-gate-index.test.ts` の `withForcing` と同じ形（このファイル単独で完結させる）。 */
 async function withForcing<T>(
   pool: Pool,
   forcing: Forcing,
@@ -140,10 +109,7 @@ async function gateRowIds(pool: Pool, forcing: Forcing): Promise<string[]> {
 }
 
 describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
-  // 歯2・歯3は、同じ `insertManyMemories` の表（同じ status の並び）を読むだけで書かない（`withForcing` は
-  // ROLLBACK で閉じる）。以前は1件ずつ `resetTestDatabase()` → `insertManyMemories()` をやり直し、同じ表を
-  // 2回作っていた。積むのはこの describe の最初に1回だけにする。歯1（形）は catalog だけを読むので、表の
-  // 中身に左右されない。
+  // 歯2・歯3は、同じ `insertManyMemories` の表を読むだけで書かない（`withForcing` は ROLLBACK で閉じる）ので、積むのは最初に1回だけにする。
   beforeAll(async () => {
     await resetTestDatabase();
     const { db, pool } = await getTestClient();
@@ -159,10 +125,6 @@ describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
     await closeTestClient();
   });
 
-  /**
-   * 歯1（形）: `recall-gate-index.test.ts` と同じ形——catalog から列順・部分述語を読む。
-   * プランナを一切通さない。
-   */
   it("形: idx_memories_recall_gate_seq は (tenant_id, status, decay_floor_seq) の3列で、部分述語が拾う status は active と contested の2つちょうど", async () => {
     const { pool } = await getTestClient();
 
@@ -199,11 +161,6 @@ describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
     expect([...new Set(literals)].sort(), pred).toEqual([...GATE_STATUSES].sort());
   });
 
-  /**
-   * 歯2（適用可能性）: `recall-gate-index.test.ts` と同じ形——btree 経路だけに絞ると、
-   * 部分述語 `status IN ('active','contested')` を含意する `status = ANY(...)` の下で
-   * `idx_memories_recall_gate_seq` が選べること。
-   */
   it("適用可能性: btree 経路だけに絞ると、部分述語 (status IN ('active','contested')) でも idx_memories_recall_gate_seq が引ける", async () => {
     const { pool } = await getTestClient();
 
@@ -219,10 +176,6 @@ describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
     expect(forcedPlan, forcedPlan).not.toMatch(/Seq Scan on memories/);
   }, 60_000);
 
-  /**
-   * 歯3（同値）: `recall-gate-index.test.ts` と同じ形——自然・btree強制・全走査強制の
-   * 3経路が同じ行を返すこと。
-   */
   it("同値: 自然な計画・btree を強制した計画・全走査を強制した計画が、同じ行を返す（contested を含み、他の status を含まない）", async () => {
     const { pool } = await getTestClient();
 
