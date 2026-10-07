@@ -4,13 +4,6 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0452: `recall()` のクエリ埋め込みは、`Float32Array` などの数値の型付き配列も、配列と同じく受ける。
- * embed ジョブ（`processEmbedJob`）は型付き配列を受けて保存していたので、以前は ingest が通るのに、
- * recall だけが「ベクトルを返さなかった」（`embedding_provider_unavailable`、`no_vector`）になっていた。
- * 次元違い・有限でない成分は、型付き配列でも配列と同じく `embedding_provider_unavailable`。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const UNAVAILABLE = {
   kind: "stage_skipped",

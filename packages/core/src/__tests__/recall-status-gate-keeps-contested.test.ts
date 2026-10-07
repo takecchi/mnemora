@@ -6,12 +6,6 @@ import type { RecallQuery } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * ADR 0432 AL-1 の確かめ直し（Issue #1734、PR #1538）で足した歯。段1と連想枠の後置の再検査（`survivesStatusGate`）は
- * `status ∈ {active, contested}` を通す。`contested` は落とさない（落とすのは archived・forgotten・superseded だけ）。
- * `recall-status-recheck.test.ts` は落とす側（archived・forgotten）だけを見ていた。
- */
-
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100);

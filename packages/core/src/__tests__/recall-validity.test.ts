@@ -8,12 +8,7 @@ import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * `RecallQuery.validAt` ゲートの歯（Issue #280、Issue #202 第2弾、マネージャー決定1〜3）。
- *
- * `recall-decay-gate.test.ts`（ADR 0153）と同型: `packages/core` 自身のテストなので
- * `@mnemora/testkit` には依存しない。DB を要さないため手元で実行できる。
- */
+/** `@mnemora/testkit` には依存しない。 */
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -116,11 +111,6 @@ async function createEmbeddedMemory(
 
 const DAY_MS = 1_000 * 60 * 60 * 24;
 
-// ---------------------------------------------------------------------------
-// 配線の歯: 既定で段1の filter に validAt = now が渡り、
-// includeOutsideValidity:true で undefined に戻る（ADR 0153 の decayFloorAtAfter と同型）。
-// ---------------------------------------------------------------------------
-
 describe("recall() — 段1の filter に validAt が載ること（配線の歯、Issue #280）", () => {
   it("既定（validAt/includeOutsideValidity 未指定）では VectorStore.search / LexicalStore.search の opts.filter.validAt に「いま」が渡る", async () => {
     const { runtime, stores } = buildRuntime();
@@ -155,27 +145,20 @@ describe("recall() — 段1の filter に validAt が載ること（配線の歯
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐ 本命の歯: ゲートが実際に何を変えるか。
-// ---------------------------------------------------------------------------
-
 describe("recall() — validAt ゲートが実際に候補を落とす／浮上させる（ADR 0164）", () => {
   it("受け入れ条件1: 過去の validAt を指定すると、その時点で真だった（今は期限切れの）記憶が返る", async () => {
     const { runtime, stores } = buildRuntime();
-    // 「去年の住所」: 365日前から30日前まで真だった。
     const oldAddress = await createEmbeddedMemory(stores, [1, 0], {
       digest: "old-address",
       validFrom: new Date(NOW.getTime() - 365 * DAY_MS),
       validUntil: new Date(NOW.getTime() - 30 * DAY_MS),
     });
-    // 「今の住所」: 30日前から無期限に真。
     const currentAddress = await createEmbeddedMemory(stores, [1, 0], {
       digest: "current-address",
       validFrom: new Date(NOW.getTime() - 30 * DAY_MS),
       validUntil: null,
     });
 
-    // 100日前の時点では、old-address は真・current-address はまだ真になっていない。
     const validAt = new Date(NOW.getTime() - 100 * DAY_MS);
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, validAt });
 
@@ -312,10 +295,7 @@ describe("recall() — validAt ゲートが実際に候補を落とす／浮上�
   });
 });
 
-// ---------------------------------------------------------------------------
-// ⭐ 語彙チャンネル: LexicalFilter も validAt を持つ（decayFloorAtAfter とは違う扱い、
-// マネージャー決定2）ので、段1の SQL/フィルタで直接絞られる。
-// ---------------------------------------------------------------------------
+// `LexicalFilter` も `validAt` を持つ（`decayFloorAtAfter` とは違う扱い）ので、段1のフィルタで直接絞られる。
 
 describe("recall() — validAt ゲートが語彙チャンネルにも段1で効く（Issue #280）", () => {
   it("語彙チャンネルだけを使っても、期限切れの記憶は既定では返らない", async () => {
@@ -353,10 +333,6 @@ describe("recall() — validAt ゲートが語彙チャンネルにも段1で効
     expect(lexicalTrace?.detail?.["validityGate"]).toBe("pushed_down");
   });
 });
-
-// ---------------------------------------------------------------------------
-// ⭐ Runtime.observe() の validFrom/validUntil が Memory まで到達する（条件4）。
-// ---------------------------------------------------------------------------
 
 describe("Runtime.observe() — validFrom/validUntil が Memory まで素通しされる（Issue #280、マネージャー決定4）", () => {
   it("observe({ kind: 'utterance', validFrom, validUntil }) が Memory.validFrom/validUntil に到達する", async () => {
