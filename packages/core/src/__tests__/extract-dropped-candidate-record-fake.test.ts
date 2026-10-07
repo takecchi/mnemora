@@ -6,23 +6,6 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
-/**
- * 抽出で保存できずに落とした候補の記録と、全件が落ちたときの例外を、core の Fake の上で縛る
- * （Issue #1063、`Runtime.observe` の doc）。2026-09-28 マージ分 #1318 の確かめ直しで、次の変異が既存の歯を
- * すり抜けた。
- *
- * - `meta.droppedCandidates` の `message` は、NUL を `\u0000` の6文字に、孤立サロゲートを U+FFFD に置き換え、
- *   500 文字で切る。`code` は最も内側の原因が名乗った、空でない文字列のときだけ（それ以外は `null`）。
- *   外側の例外の `message`（drizzle の `Failed query: … params: <本文>` のように本文を含みうる）は写さない。
- *   変異: 置き換えを外す／500 を 501 にする／空文字の `code` を通す。
- * - 全件が落ちたら、最初の例外をそのまま投げる。変異: 最後の例外を投げる。
- * - 書けた後の `created` の追記の失敗は、今どおり投げる（候補の書き込みの失敗だけを落とす）。
- *   変異: 追記の失敗を握りつぶす。
- *
- * ここは `createMemoriesWithOutboxAndEvents` を持たない store（core の Fake）の経路である。Postgres の
- * 経路（store が先に落とした候補を返す）の「最初の例外」は `memory-store-batch-first-error.postgres.test.ts`。
- */
-
 const ctx: Ctx = { tenantId: "extract-dropped-candidate-record-fake" };
 const hashContent = (content: string) => `h(${content})`;
 
@@ -39,9 +22,7 @@ function llmReturning(contents: readonly string[]): LLMProvider {
 function makeKit(
   contents: readonly string[],
   hooks: {
-    /** `createMemoryWithOutbox` が、この本文の候補で投げる例外。 */
     throwFor?: (content: string) => unknown;
-    /** `EventStore.append` が `created` で投げる例外。 */
     appendThrows?: unknown;
   },
 ) {
@@ -95,7 +76,9 @@ function droppedOf(meta: Record<string, unknown>): Array<Record<string, unknown>
 
 describe("core の Fake: 落とした候補の記録（#1063）", () => {
   it("前提: この Fake は createMemoriesWithOutboxAndEvents を持たない（core の経路を通る）", () => {
-    expect(createFakeRuntimeStores().memoryStore.createMemoriesWithOutboxAndEvents).toBeUndefined();
+    expect("createMemoriesWithOutboxAndEvents" in createFakeRuntimeStores().memoryStore).toBe(
+      false,
+    );
   });
 
   it("message は最も内側の原因から取り、NUL・孤立サロゲートを置き換えて 500 文字で切る。外側の message（本文を含みうる）は写さない", async () => {
@@ -124,15 +107,11 @@ describe("core の Fake: 落とした候補の記録（#1063）", () => {
         code: "22021",
       });
       const message = dropped[0]!.message as string;
-      // NUL は目に見える6文字（バックスラッシュ・u・0・0・0・0）になり、NUL 自身は残らない。
       expect(message).not.toContain("\u0000");
       expect(message.startsWith("bad\\u0000value-")).toBe(true);
-      // 孤立サロゲートは U+FFFD に置き換わる（元の孤立サロゲートは残らない）。
       expect(message).toContain("�");
       expect(message).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-      // 500 文字（コードポイント）で切る。
       expect(Array.from(message)).toHaveLength(500);
-      // 外側の message は写さない。
       expect(JSON.stringify(dropped)).not.toContain("SECRET-BODY-TEXT");
       expect(JSON.stringify(dropped)).not.toContain("Failed query");
     }

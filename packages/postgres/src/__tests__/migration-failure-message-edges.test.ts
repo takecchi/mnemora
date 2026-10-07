@@ -6,18 +6,6 @@ import {
   isCreateExtensionPermissionDenied,
 } from "../migration-failure-message.js";
 
-/**
- * `describeMigrationFailure`（Issue #1212）の、`migration-failure-message.test.ts` が縛っていない3つの約束を縛る
- * （2026-09-28 マージ分 #1310 の確かめ直しで、次の変異が既存の歯をすり抜けた）。
- *
- * - 案内が付くかどうかは `code` と `routine` だけで決まり、`message` は見ない（`lc_messages` で訳されるため）。
- *   変異: 条件に英語の `message` の一致を足す／条件を英語の `message` に絞る。
- * - 案内が指す文書（`packages/postgres/README.md` の、接続先に要る拡張の項目）は実在する。
- *   変異: 案内の文書名を存在しないものに変える。
- * - 文言を作る関数は、`cause` が `null`・文字列・数値でも投げない（投げると、元の失敗に代わって別の例外が出る）。
- *   変異: `cause` の連鎖を辿る条件から `null` の検査を外す。
- */
-
 function pgError(fields: { message: string; code?: string; routine?: string }): Error {
   return Object.assign(new Error(fields.message), fields);
 }

@@ -5,17 +5,6 @@ import { InMemoryMemoryStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `MemoryStore.createMemoriesWithOutboxAndEvents` は、全候補が保存できないとき、**最初に**落ちた候補の例外を
- * 投げて何も書かない（`Runtime.observe` の doc の「全件が落ちたら、最初の例外をそのまま投げる」。ADR 0410）。
- *
- * 2026-09-28 マージ分 #1318 の確かめ直しで、`@mnemora/postgres` の `throw dropped[0]!.error` を最後の例外に
- * 変える変異が、適合テスト（`memory-store-conformance.ts` は `toBeInstanceOf(Error)` だけを見る）と
- * `observe-unsaveable-candidate.postgres.test.ts`（2件とも同じ文言の NUL）をすり抜けた。ここでは、落ちる理由が
- * 候補ごとに違う入力で、どの例外が出るかを見る。適合テストには足さない（公開の約束を増やすのはオーナーの領分）。
- * testkit の InMemory にも同じ入力を流す。
- */
-
 const ctx: Ctx = { tenantId: "batch-first-error" };
 const now = new Date("2026-01-01T00:00:00.000Z");
 
@@ -65,7 +54,6 @@ for (const [name, makeStore] of KITS) {
         }),
         jobKinds: ["embed" as const],
       });
-      // 1件目は本文の NUL、2件目は `contentHash` の NUL（別の欄名で断られる）。
       const first = candidate("first-bad", { content: "一件目\u0000" });
       const second = candidate("second\u0000-bad", { content: "二件目の事実" });
 
