@@ -21,12 +21,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `decay_clock` を `'wall'` から `'either'` へ切り替えても、`'wall'` の間に作られた記憶は活動時計の床を持たず、
- * 壁時計の床が過ぎていても `sweepArchive`（`'either'` は両方の軸が沈んだものだけを掃く）に選ばれない。
- * 切り替えた後に作られた記憶は、両方の軸が沈めば選ばれる。
- */
-
 let nextContent = "";
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),

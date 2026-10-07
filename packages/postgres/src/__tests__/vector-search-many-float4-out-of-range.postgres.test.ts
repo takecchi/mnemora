@@ -5,11 +5,6 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
-/**
- * float4 に収まらない有限の成分を持つクエリベクトルは、`search()` も `searchMany()` も投げず、
- * 比較の通らないクエリとして扱う。`searchMany` だけが投げる入力が在ってはならない。
- */
-
 const SPACE = TEST_EMBEDDING_SPACE;
 const runTag = Math.random().toString(36).slice(2, 7);
 const ctx: Ctx = { tenantId: `smf4-${runTag}` };
@@ -39,7 +34,11 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-const settle = async (run: () => Promise<unknown>) => run().then(() => "returns", () => "throws");
+const settle = async (run: () => Promise<unknown>) =>
+  run().then(
+    () => "returns",
+    () => "throws",
+  );
 
 describe("PostgresVectorStore.searchMany は、float4 に収まらない成分のクエリでも search() と同じく投げない", () => {
   for (const [label, vector] of OUT_OF_RANGE) {

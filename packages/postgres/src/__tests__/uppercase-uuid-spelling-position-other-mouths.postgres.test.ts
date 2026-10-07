@@ -22,12 +22,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * 大文字小文字だけが違う id を同じ呼び出しに混ぜたとき、`not_found` になるのは並びの位置ではなく、store が返す id と
- * 綴りが違う側である。どの綴りも store の id と違えば、全部が `not_found` になり、何も書かない。
- * `restoreArchived`・`purge`・`consolidate`・`reflect` で、大文字を先に渡す並びと、どの綴りも違う組を縛る。
- */
-
 interface Kit {
   runtime: Runtime;
   memoryStore: MemoryStore;
@@ -102,122 +96,125 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-describe.each(KITS)("大文字小文字だけが違う id を混ぜたとき、位置によらず綴りで突き合わせる（%s）", (_name, makeKit) => {
-  it("restoreArchived: 大文字を先に渡しても、not_found になるのは大文字の側で、小文字の側だけが restored になる", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "restore-upper-first", "archived");
+describe.each(KITS)(
+  "大文字小文字だけが違う id を混ぜたとき、位置によらず綴りで突き合わせる（%s）",
+  (_name, makeKit) => {
+    it("restoreArchived: 大文字を先に渡しても、not_found になるのは大文字の側で、小文字の側だけが restored になる", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "restore-upper-first", "archived");
 
-    const result = await kit.runtime.restoreArchived(ctx, {
-      memoryIds: [upper(memory.id), memory.id],
+      const result = await kit.runtime.restoreArchived(ctx, {
+        memoryIds: [upper(memory.id), memory.id],
+      });
+
+      expect(kindsOf(result.outcomes)).toEqual([
+        [upper(memory.id), "not_found"],
+        [memory.id, "restored"],
+      ]);
+      expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
     });
 
-    expect(kindsOf(result.outcomes)).toEqual([
-      [upper(memory.id), "not_found"],
-      [memory.id, "restored"],
-    ]);
-    expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
-  });
+    it("restoreArchived: どの綴りも store の id と違えば、全部が not_found になり、archived のまま", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "restore-no-exact", "archived");
+      const capitalized = capitalizeFirstLetter(memory.id);
+      expect([capitalized === memory.id, capitalized === upper(memory.id)]).toEqual([false, false]);
 
-  it("restoreArchived: どの綴りも store の id と違えば、全部が not_found になり、archived のまま", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "restore-no-exact", "archived");
-    const capitalized = capitalizeFirstLetter(memory.id);
-    expect([capitalized === memory.id, capitalized === upper(memory.id)]).toEqual([false, false]);
+      const result = await kit.runtime.restoreArchived(ctx, {
+        memoryIds: [capitalized, upper(memory.id)],
+      });
 
-    const result = await kit.runtime.restoreArchived(ctx, {
-      memoryIds: [capitalized, upper(memory.id)],
+      expect(kindsOf(result.outcomes)).toEqual([
+        [capitalized, "not_found"],
+        [upper(memory.id), "not_found"],
+      ]);
+      expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("archived");
     });
 
-    expect(kindsOf(result.outcomes)).toEqual([
-      [capitalized, "not_found"],
-      [upper(memory.id), "not_found"],
-    ]);
-    expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("archived");
-  });
+    it("purge: 大文字を先に渡しても、not_found になるのは大文字の側で、小文字の側だけが purged になる", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "purge-upper-first", "forgotten");
 
-  it("purge: 大文字を先に渡しても、not_found になるのは大文字の側で、小文字の側だけが purged になる", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "purge-upper-first", "forgotten");
+      const result = await kit.runtime.purge(ctx, { memoryIds: [upper(memory.id), memory.id] });
 
-    const result = await kit.runtime.purge(ctx, { memoryIds: [upper(memory.id), memory.id] });
-
-    expect(kindsOf(result.outcomes)).toEqual([
-      [upper(memory.id), "not_found"],
-      [memory.id, "purged"],
-    ]);
-    expect((await kit.memoryStore.get(ctx, memory.id))?.purgedAt ?? null).not.toBeNull();
-  });
-
-  it("purge: どの綴りも store の id と違えば、全部が not_found になり、何も消さない", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "purge-no-exact", "forgotten");
-    const capitalized = capitalizeFirstLetter(memory.id);
-
-    const result = await kit.runtime.purge(ctx, { memoryIds: [capitalized, upper(memory.id)] });
-
-    expect(kindsOf(result.outcomes)).toEqual([
-      [capitalized, "not_found"],
-      [upper(memory.id), "not_found"],
-    ]);
-    expect((await kit.memoryStore.get(ctx, memory.id))?.purgedAt ?? null).toBeNull();
-  });
-
-  it("consolidate: 大文字を先に渡しても、not_found になるのは大文字の側である", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "consolidate-upper-first");
-
-    const result = await kit.runtime.consolidate(ctx, {
-      target: { memoryIds: [upper(memory.id), memory.id] },
+      expect(kindsOf(result.outcomes)).toEqual([
+        [upper(memory.id), "not_found"],
+        [memory.id, "purged"],
+      ]);
+      expect((await kit.memoryStore.get(ctx, memory.id))?.purgedAt ?? null).not.toBeNull();
     });
 
-    expect(kindsOf(result.sources)).toEqual([
-      [upper(memory.id), "not_found"],
-      [memory.id, expect.not.stringMatching(/^not_found$/)],
-    ]);
-  });
+    it("purge: どの綴りも store の id と違えば、全部が not_found になり、何も消さない", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "purge-no-exact", "forgotten");
+      const capitalized = capitalizeFirstLetter(memory.id);
 
-  it("consolidate: どの綴りも store の id と違えば、全部が not_found になる", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "consolidate-no-exact");
-    const capitalized = capitalizeFirstLetter(memory.id);
+      const result = await kit.runtime.purge(ctx, { memoryIds: [capitalized, upper(memory.id)] });
 
-    const result = await kit.runtime.consolidate(ctx, {
-      target: { memoryIds: [capitalized, upper(memory.id)] },
+      expect(kindsOf(result.outcomes)).toEqual([
+        [capitalized, "not_found"],
+        [upper(memory.id), "not_found"],
+      ]);
+      expect((await kit.memoryStore.get(ctx, memory.id))?.purgedAt ?? null).toBeNull();
     });
 
-    expect(kindsOf(result.sources)).toEqual([
-      [capitalized, "not_found"],
-      [upper(memory.id), "not_found"],
-    ]);
-    expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
-  });
+    it("consolidate: 大文字を先に渡しても、not_found になるのは大文字の側である", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "consolidate-upper-first");
 
-  it("reflect: 大文字を先に渡しても、not_found になるのは大文字の側である", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "reflect-upper-first");
+      const result = await kit.runtime.consolidate(ctx, {
+        target: { memoryIds: [upper(memory.id), memory.id] },
+      });
 
-    const result = await kit.runtime.reflect(ctx, {
-      target: { memoryIds: [upper(memory.id), memory.id] },
+      expect(kindsOf(result.sources)).toEqual([
+        [upper(memory.id), "not_found"],
+        [memory.id, expect.not.stringMatching(/^not_found$/)],
+      ]);
     });
 
-    expect(kindsOf(result.basis)).toEqual([
-      [upper(memory.id), "not_found"],
-      [memory.id, expect.not.stringMatching(/^not_found$/)],
-    ]);
-  });
+    it("consolidate: どの綴りも store の id と違えば、全部が not_found になる", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "consolidate-no-exact");
+      const capitalized = capitalizeFirstLetter(memory.id);
 
-  it("reflect: どの綴りも store の id と違えば、全部が not_found になる", async () => {
-    const kit = await makeKit();
-    const memory = await create(kit, "reflect-no-exact");
-    const capitalized = capitalizeFirstLetter(memory.id);
+      const result = await kit.runtime.consolidate(ctx, {
+        target: { memoryIds: [capitalized, upper(memory.id)] },
+      });
 
-    const result = await kit.runtime.reflect(ctx, {
-      target: { memoryIds: [capitalized, upper(memory.id)] },
+      expect(kindsOf(result.sources)).toEqual([
+        [capitalized, "not_found"],
+        [upper(memory.id), "not_found"],
+      ]);
+      expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
     });
 
-    expect(kindsOf(result.basis)).toEqual([
-      [capitalized, "not_found"],
-      [upper(memory.id), "not_found"],
-    ]);
-  });
-});
+    it("reflect: 大文字を先に渡しても、not_found になるのは大文字の側である", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "reflect-upper-first");
+
+      const result = await kit.runtime.reflect(ctx, {
+        target: { memoryIds: [upper(memory.id), memory.id] },
+      });
+
+      expect(kindsOf(result.basis)).toEqual([
+        [upper(memory.id), "not_found"],
+        [memory.id, expect.not.stringMatching(/^not_found$/)],
+      ]);
+    });
+
+    it("reflect: どの綴りも store の id と違えば、全部が not_found になる", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "reflect-no-exact");
+      const capitalized = capitalizeFirstLetter(memory.id);
+
+      const result = await kit.runtime.reflect(ctx, {
+        target: { memoryIds: [capitalized, upper(memory.id)] },
+      });
+
+      expect(kindsOf(result.basis)).toEqual([
+        [capitalized, "not_found"],
+        [upper(memory.id), "not_found"],
+      ]);
+    });
+  },
+);
