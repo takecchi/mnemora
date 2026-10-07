@@ -76,7 +76,7 @@ describe("InMemoryVectorStore.search — 距離が完全一致したときの ti
   });
 });
 
-describe("search の tie-break の追加の歯（ADR 0170 の契約。Issue #1775 の #828）", () => {
+describe("search の tie-break: memory_id の段・距離が先・同点の日時は recordedAt・返す形（ADR 0170 の契約。Issue #1775 の #828）", () => {
   const filter = {
     tenantId: TENANT,
     status: ["active", "contested"] as ("active" | "contested")[],

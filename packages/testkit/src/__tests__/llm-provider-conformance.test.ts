@@ -60,7 +60,7 @@ const recordedSection: LLMCassetteSection = {
   },
 };
 
-describe("適合テストの前提（RecordedLLMProvider）: 足場が歯を空回りさせていない", () => {
+describe("適合テストの前提（RecordedLLMProvider）: complete 用の記録値はちょうど { content } の形で、completeStructured 用の記録値は schema に無い欄を実際に持つ（無いと適合テストが何も確かめないまま緑になる）", () => {
   it("complete 用の記録値は、ちょうど { content } の形をしている（歯1が検査する形そのもの）", () => {
     const entry = recordedSection.entries[llmCassetteKey(RECORDED_PROMPT)];
     expect(Object.keys(entry?.value as object)).toEqual(["content"]);
