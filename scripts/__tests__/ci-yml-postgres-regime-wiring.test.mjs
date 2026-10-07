@@ -9,64 +9,7 @@ import { normalizeWorkflowExpressions } from "../workflow-expression-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
- * ⚠ **2026-09-12 追記(Issue #155)**: `postgres` ジョブを `server_encoding` の
- * matrix(`UTF8` / `SQL_ASCII`)にした。下の (b)(c) は matrix 化に合わせて
- * 主張を作り直した(弱めていない——`scripts/__tests__/ci-yml-postgres-regime-wiring
- * .test.mjs` 内の該当 describe の docstring に理由を書いた)。summary 段を実際に
- * 走らせる歯(`runSummaryStepFromWorkflow`)は `${{ matrix.serverEncoding }}` /
- * `${{ matrix.initdbArgs }}` も展開できるようにした(`substituteWorkspace` に
- * `leg` を渡す)。
- *
- * ⭐ **この歯が測っているもの(消す前に読むこと)**
- *
- * **`.github/workflows/ci.yml` の `postgres` ジョブが、実際に
- * `scripts/lexical-regime-summary.mjs` へ配線されていること。**(Issue #148)
- *
- * `packages/postgres/src/__tests__/lexical-store-identifier.test.ts` の
- * 「素の to_tsvector で識別子を引けるかどうかは server_encoding で反転する」の歯は、
- * `MNEMORA_LEXICAL_REGIME_JSON` が設定されていれば測った regime を機械可読な JSON として
- * 書く(PR #147 / ADR 0103 の続き)。**それが緑のときにも読めるためには、
- * CI が(1)その環境変数を渡し、(2)出た JSON を要約して Job Summary へ載せ、(3)
- * JSON 自体を artifact として残す、という3段の配線が要る。**
- *
- * ⚠ **これは `lexical-regime-summary.test.mjs`/`lexical-regime-summary-lib.test.mjs`
- * の重複ではない**(`ci-yml-consolidation-wiring.test.mjs` の docstring と同じ理由)。
- * その2本は**入力を自分で作って**要約の中身と exit code を測る——**どちらも `ci.yml` を
- * 1バイトも読まない。**⟹ 誰かが `ci.yml` から summary 段を消しても、
- * `MNEMORA_LEXICAL_REGIME_JSON` の書き先と `--measured` の読み先をずらしても、
- * **その2本は緑のまま通る。**この歯だけが `ci.yml` を入力に取る。
- *
- * 🔴 **さらに、`lexical-store-identifier.test.ts` のソースを文字列として読み、
- * `MNEMORA_LEXICAL_REGIME_JSON` を参照していることも固定する**(下の
- * describe("値を作る側の歯 …") を見ること)——DB を持たない環境(この歯が走る
- * `build` ジョブ自体がそう)でも、「歯が JSON を書く呼び出しごと消された」ことを
- * 赤で捕まえられるようにするためである。⚠ **この固定は文字列一致であり、書き方を
- * 変えれば(例えば別名の環境変数へ書き換える)簡単にすり抜ける。**壊れたときは
- * 「配線が変わった」のか「書き方が変わっただけ」なのかを見て、配線が変わっていない
- * なら固定のしかたを直すこと(既存の wiring 歯と同じ断り書き)。
- *
- * ⚠ **YAML は構造として解析していない(文字列で見ている)。**
- * 既存3本の wiring テストと同じ判断で、歯のために YAML パーサの依存を足していない
- * (依存追加はオーナー専権。`docs/autonomy.md`)。**だからこの歯は書き方の変更に弱い。**
- * 壊れたときは「配線が変わった」か「書き方が変わった」かを見て、**配線が変わっていない
- * なら取り出し方のほうを直すこと(歯を消さないこと)。**
- *
- * ⛔ **この歯は基準値ファイルの存在を要求しない。**`lexical-regime-summary.mjs` は
- * そもそも基準値と比べない。
- *
- * ⚠ **2026-09-12 訂正**: 以前はここに「SQL_ASCII をサポート対象にするかをオーナーが
- * まだ決めていない前提の上に基準値を置くと、実装が先回りしてその判断を決めてしまうから」
- * と書いていたが、オーナーの決定(2026-09-12T00:09Z、[ADR 0106](../../docs/decisions/
- * 0106-ci-declares-the-regime-it-measures.md))でこの前提は解けた——オーナーは
- * `server_encoding` が `SQL_ASCII` の PostgreSQL をサポート対象にすると決めた。
- * **基準値ファイルを置かない理由も変わった**: 「決まっていないから」ではなく、
- * **基準値はもう `.github/workflows/ci.yml` の `POSTGRES_INITDB_ARGS`
- * (`--encoding=UTF8`)に在り**、`lexical-regime-summary.mjs` の `--expect-encoding`
- * がそれを受け取っているからである(`scripts/lexical-regime-summary-lib.mjs` の
- * docstring も同様に訂正した)。⛔ **これは「だから門にする」という意味ではない。**
- * この歯・この script が門にするのは依然として「ci.yml が宣言した regime と実測が
- * 食い違ったこと」だけであり、どの regime をサポートするかという製品判断を1つも
- * 含まない。
+ * YAML は構造として解析せず文字列で見る（依存追加はオーナー専権）。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -75,17 +18,7 @@ const workflow = readFileSync(workflowPath, "utf8");
 
 const JOB_ID = "postgres";
 
-/**
- * artifact 名の**正規形**(Issue #163 ①)。
- *
- * 🔴 これは「${{ }} の中がこう書かれていること」を要求するものではない——
- * `normalizeWorkflowExpressions` を通したあとの形である。⟹ `${{matrix.serverEncoding}}`
- * や `${{ format('{0}', matrix.serverEncoding) }}` のような**同値な書き換えは、
- * どれもこの形へ揃ってから照合される**(2026-09-13 実測: 直す前はどちらも赤くなっていた)。
- *
- * ⭐ **測りたい主張は「artifact 名が matrix.serverEncoding に依存していること」**であり、
- * その依存が消えれば(`lexical-regime-UTF8` など)いまも赤くなる。
- */
+/** `normalizeWorkflowExpressions` を通したあとの形で照合する（`${{ }}` の中の書き方は要求しない）。 */
 const ARTIFACT_NAME_CANONICAL = "name: lexical-regime-${{ matrix.serverEncoding }}";
 const TOOTH_SOURCE_PATH = fileURLToPath(
   new URL(
@@ -95,9 +28,6 @@ const TOOTH_SOURCE_PATH = fileURLToPath(
 );
 
 /**
- * `jobs:` の下の1ジョブ(`  <id>:` から、次の同じ深さの `  <id>:` まで)を切り出す
- * (`ci-yml-consolidation-wiring.test.mjs` の `extractJob` と同じ形)。
- *
  * @param {string} yaml
  * @param {string} jobId
  * @returns {string}
@@ -122,8 +52,6 @@ function extractJob(yaml, jobId) {
 }
 
 /**
- * ジョブ直下の `env:` を読む(段の中の `env:` は拾わない)。
- *
  * @param {string} jobBlock
  * @returns {Record<string, string>}
  */
@@ -150,9 +78,6 @@ function parseJobEnv(jobBlock) {
 }
 
 /**
- * `steps:` を段へ切り分け、各段の `name` / `env` / `run` だけを取り出す
- * (既存3本の wiring テストと同じ形)。
- *
  * @param {string} jobBlock
  * @returns {{ name: string, env: Record<string, string>, run: string }[]}
  */
@@ -235,29 +160,13 @@ const artifactStep = steps.find(
 );
 
 /**
- * このファイル内で `extractStepBlock` が `blankOutWorkflowComments` を通した結果、
- * 「扱えない」と名乗った箇所をすべて集める(呼び出し側がこれを無視できないようにするため
- * ——下の describe("コメント潰しが …") が空であることを固定する)。
- *
  * @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]}
  */
 const stepBlockCommentUnhandled = [];
 
 /**
- * ある段の生テキスト(`- name: <name>` から次の段の `- name:` まで)を切り出す。
- * `parseSteps` は `if:`/`uses:`/`with:` を読まないので、それらを検査したいときは
- * こちらを使う。
- *
- * 🔴 **返す前にコメントを空白へ潰す(Issue #148/#155 段1)。**この歯の一部
- * (下の `if: always()` / `${{ matrix.serverEncoding }}` の固定)は、実キーではなく
- * **地の文のコメントがその文字列を引用しているだけ**でも `toContain` が一致していた
- * (変異H。段0で実測)。⟹ 照合前にコメントを潰す(`blankOutComments` が
- * `lexical-store-identifier.test.ts` のために下ったのと同じ判断——
- * `scripts/workflow-comment-blank-lib.mjs` の docstring)。
- *
- * ⛔ **この関数は照合専用であり、実行はしない。**`jobBlock`/`parseSteps` 側
- * (`summaryStep.run` → `runSummaryStepFromWorkflow` が子プロセスで実際に走らせる)には
- * 適用しない——実行するテキストからコメントを潰すと歯の意味が変わる。
+ * 返す前にコメントを空白へ潰す（コメントが引用しているだけでも `toContain` が一致するため）。
+ * 照合専用であり、実際に走らせる側（`jobBlock`/`parseSteps`）には適用しない。
  *
  * @param {string} stepName
  * @returns {string | undefined}
@@ -284,13 +193,7 @@ function extractStepBlock(stepName) {
 }
 
 /**
- * `${{ github.workspace }}` / `${{ matrix.serverEncoding }}` / `${{ matrix.initdbArgs }}`
- * を実際の値に置き換える。
- *
- * 🔴 **Issue #155 で足した。**`postgres` ジョブを matrix にしたことで、
- * `summaryStep.run` は `${{ matrix.serverEncoding }}` を、`POSTGRES_INITDB_ARGS` は
- * `${{ matrix.initdbArgs }}` を含むようになった——GitHub Actions はこれを実行時に
- * 脚ごとの値へ展開するが、この歯は bash へ直接渡すので**自分で展開する**必要がある。
+ * summary 段は bash へ直接渡すので、`${{ }}` はここで自分で展開する。
  *
  * @param {string} text
  * @param {{ workspace: string, leg?: { serverEncoding: string, initdbArgs: string } }} substitutions
@@ -313,9 +216,7 @@ function substituteWorkspace(text, { workspace, leg }) {
 }
 
 /**
- * 歯が regime JSON を書く先(`MNEMORA_LEXICAL_REGIME_JSON`)を yml から読む。
- * **この歯はパスを自分では書かない**——書き写すと、yml 側が変わったときに
- * 歯のほうが古いまま緑になる。
+ * パスは書き写さず yml から読む（書き写すと、yml が変わったとき歯が古いまま緑になる）。
  *
  * @returns {string}
  */
@@ -347,23 +248,16 @@ function makeValidRegime(overrides = {}) {
   };
 }
 
-/**
- * postgres ジョブの matrix の脚(既定は UTF8——既存の歯の呼び出しをそのまま使えるように
- * するため。Issue #155)。
- *
- * @type {{ serverEncoding: string, initdbArgs: string }}
- */
+/** @type {{ serverEncoding: string, initdbArgs: string }} */
 const DEFAULT_LEG = { serverEncoding: "UTF8", initdbArgs: "--encoding=UTF8" };
 
 /**
- * yml から取り出した summary の段を、実際に bash で走らせる。
- *
  * @param {"present" | "missing"} fileState `"missing"` なら measured ファイルを
  *   一切書かず、ENOENT の経路を実地で走らせる。
  * @param {unknown} [content] `fileState: "present"` のときにファイルへ書く中身
  *   (JSON.stringify する。文字列を渡せばそのまま書く——壊れた JSON も作れる)。
  * @param {{ serverEncoding: string, initdbArgs: string }} [leg] `${{ matrix.* }}` を
- *   どの脚の値として展開するか(既定は UTF8 脚。Issue #155)。
+ *   どの脚の値として展開するか(既定は UTF8 脚)。
  * @returns {{ status: number, summary: string, stderr: string }}
  */
 function runSummaryStepFromWorkflow(fileState, content, leg = DEFAULT_LEG) {
@@ -443,20 +337,6 @@ describe("ci.yml の postgres ジョブの regime 配線(Issue #148)", () => {
   });
 
   it("🔴 Issue #155/#163: artifact 名が matrix.serverEncoding へ配線されている(脚ごとに分かれていないと上書き・衝突する)", () => {
-    // 🔴 **Issue #163 ①**: 以前はここで生テキストを1文字単位で \`toContain\` していた。
-    // ⟹ \`${{matrix.serverEncoding}}\`(内側の空白落とし)や
-    // \`${{ format('{0}', matrix.serverEncoding) }}\` のような、**Actions にとって
-    // 完全に同値で artifact 名の値も変わらない書き換え**で赤くなっていた(2026-09-13 に
-    // 手で当てて実測)。PR #154 が一度直したのと同じ向きの欠陥である。
-    //
-    // ⟹ **照合専用の網(\`scripts/workflow-expression-lib.mjs\`)を通してから当てる。**
-    // ⛔ この網を \`substituteWorkspace\`(summary 段を実際に spawn するための展開)へ
-    // 混ぜてはいけない——あちらの出力は**実行されるテキスト**であり、照合専用の変換が
-    // 漏れる(PR #181 と同じ判断。lib の docstring に理由を書いた)。
-    //
-    // ⭐ **弱めていない**: 測りたい主張は「artifact 名が \`matrix.serverEncoding\` に
-    // 依存している(脚ごとに分かれている)」であって、式の字面ではない。依存が消えた
-    // \`lexical-regime-UTF8\` は**いまも赤くなる**(下の describe が両向きで固定している)。
     const block = extractStepBlock(artifactStep.name);
     const { text, unhandled } = normalizeWorkflowExpressions(block ?? "");
     expect(
@@ -470,9 +350,6 @@ describe("ci.yml の postgres ジョブの regime 配線(Issue #148)", () => {
   it("🔴 Issue #163: 正規化しても、artifact 名の接頭辞と脚ごとの分岐そのものは消えていない(網が式を丸ごと畳んでいないことの固定)", () => {
     const block = extractStepBlock(artifactStep.name);
     const { text } = normalizeWorkflowExpressions(block ?? "");
-    // ⭐ **空回り防止**: 網が「${{ … }} を全部消す」実装に退化すると、上の
-    // \`toContain\` は \`name: lexical-regime-\` の一致だけで緑になりうる。
-    // ⟹ 正規化後のテキストに**式そのものが残っている**ことを別途見る。
     expect(text).toContain("${{ matrix.serverEncoding }}");
     expect(text).not.toContain("name: lexical-regime-UTF8");
   });
@@ -551,8 +428,6 @@ describe("ci.yml の postgres ジョブの regime 配線(Issue #148)", () => {
     expect(emptyResult.status).not.toBe(0);
     const missingResult = runSummaryStepFromWorkflow("missing");
     expect(missingResult.status).not.toBe(0);
-    // ⭐ 2つの非0経路が同じメッセージに潰れていないこと(「値が出ていない」と
-    // 「値が空だった」を区別する、という Issue #148 の要求そのもの)。
     expect(emptyResult.stderr).not.toBe(missingResult.stderr);
   });
 
@@ -563,25 +438,7 @@ describe("ci.yml の postgres ジョブの regime 配線(Issue #148)", () => {
 });
 
 /**
- * ソースから**コメントだけ**を空白へ潰す(改行は残す)。
- *
- * 🔴 **なぜ要るか — 変異試験で見つけた欠陥のために足した。**
- * 下の describe は「歯のコードがそう書いてあること」を固定するつもりで
- * `toContain("schemaVersion: 2")` を素のソースへ当てていた。ところが
- * `lexical-store-identifier.test.ts` は **docstring にも同じ文字列を書いている**ため、
- * **実際の代入を `schemaVersion: 1` に変えてもこの歯は緑のままだった**
- * (手で撃った変異が生き残った)。⟹ 当てる前にコメントを潰す。
- *
- * ⚠ **何を落として、何を落としていないか**:
- * - 落とす: ブロックコメント(`/*` 〜 `*` + `/`)と行コメント(`//` 〜 行末)
- * - 落とさない: 文字列リテラル(`'` / `"` / バッククォート)の中身。
- *   ⟹ 文字列の中に `//` が在っても潰さない(URL など)
- * - ⛔ 正規表現リテラルの中の `//` は見分けていない。この歯が読む対象には無いが、
- *   将来そこで誤爆したらこの関数を直すこと(**歯を消さないこと**)
- * - **改行は必ず残す。**残さないと、下の「`expect` より前に書いている」の固定
- *   (行頭の字下げごと一致させている)が壊れる
- *
- * ⭐ 1文字を消費したら必ず1文字を出すので、**元のソースと添字が一致する**。
+ * コメントだけを空白へ潰す（改行と添字は保つ）。正規表現リテラル中の `//` は見分けない。
  *
  * @param {string} source
  * @returns {string}
@@ -638,7 +495,6 @@ export function blankOutComments(source) {
       i += 1;
       continue;
     }
-    // 文字列の中: エスケープを1組として読み飛ばし、同じ引用符で閉じる。
     if (ch === "\\") {
       out += source.slice(i, i + 2);
       i += 2;
@@ -654,19 +510,8 @@ export function blankOutComments(source) {
 }
 
 describe("値を作る側の歯が MNEMORA_LEXICAL_REGIME_JSON を参照していること(Issue #148)", () => {
-  // 🔴 この describe が固定しているのは配線そのものではなく「配線の呼び出しが
-  // ソースから消えていないか」である。DB を持たない環境(この歯が走る `build` ジョブ)
-  // でも、`lexical-store-identifier.test.ts` が `MNEMORA_LEXICAL_REGIME_JSON` への
-  // 書き込みごと削除されたことを赤で捕まえられるようにするため。
-  //
-  // ⚠ **文字列一致であり、書き方の変更に弱い。**環境変数名を変えずに書き込み処理
-  // だけを別のヘルパー関数へ切り出す、といった変更にはこの歯は気づけない。
-  // 壊れたときは「配線が変わった」のか「書き方が変わっただけ」なのかを見て、
-  // 配線が変わっていないなら固定のしかたを直すこと(歯を消さないこと)。
   const toothSource = readFileSync(TOOTH_SOURCE_PATH, "utf8");
-  // 🔴 **コメントを潰してから当てる。**素のソースへ当てると「docstring に同じ文字列が
-  // 在るだけ」で緑になる——実際にそれで変異が1本生き残った(`blankOutComments` の
-  // docstring を見ること)。⛔ ここを `toothSource` に戻さないこと。
+  // コメントを潰してから当てる（素のソースだと docstring に同じ文字列があるだけで緑になる）。`toothSource` に戻さない。
   const toothCode = blankOutComments(toothSource);
 
   it("MNEMORA_LEXICAL_REGIME_JSON を参照している", () => {
@@ -687,27 +532,13 @@ describe("値を作る側の歯が MNEMORA_LEXICAL_REGIME_JSON を参照して�
     expect(writeIndex).toBeLessThan(firstExpectAfterProbeIndex);
   });
 
-  // 🔴 Issue #148 ②: ロケールを測るだけ足した(まだ宣言しない)ことを固定する。
   it("lcCollate / lcCtype / defaultTextSearchConfig を参照している(ロケールを測り始めたこと)", () => {
     expect(toothCode).toContain("lcCollate");
     expect(toothCode).toContain("lcCtype");
     expect(toothCode).toContain("defaultTextSearchConfig");
-    // 🔴 **名前が在るだけでは足りない。**JSON の欄と TS の型だけを残して
-    // `probe` の SQL から `current_setting(…)` を落とすと、名前は3つとも残ったまま
-    // **値だけが undefined になる**——手で撃った変異がここで1本生き残った。
-    // ⟹ **実際に問い合わせていること**も固定する。
-    // ⚠ この器には DB が無いので、これが「本当に Postgres で動く SQL か」までは
-    // 測っていない。測っているのは「問い合わせる行がソースから消えていないこと」だけである。
-    // ⚠ 欄ごとに「正しい引き方」が違う。**同じ式で全部を測ろうとしない。**
-    // PostgreSQL 16 で lc_collate / lc_ctype は GUC ではなくなり DB ごとの属性に
-    // なった ⟹ GUC として引くと 42704 で落ちる（PR #151 の CI が pg17 で実測）。
-    // ⟹ ロケール2つは pg_database から、text search config は GUC から引く。
-    // ⚠ **空白の数で固定しない。**以前はここを `toContain("SELECT datctype   FROM
-    // pg_database")` と**桁揃えの空白ごと**書いていたので、SQL の桁を揃え直すだけ
-    // ——**SQL として1文字も意味が変わらない変更**——でこの歯が赤くなった（撃って確かめた）。
-    // ⟹ それは「ふるまい不変で赤くなる歯」であり、直す人に嘘の警告を出す。
-    // ⟹ 空白を \s+ で受ける正規表現にする。**測る強さは落ちていない**
-    //   （式を消す・GUC 経由へ戻す、はどちらも下で赤くなる）。
+    // 名前だけでなく実際に問い合わせていることも固定する。
+    // lc_collate / lc_ctype は PG16 から GUC ではないので pg_database から引き、text search config だけ GUC から引く。
+    // 空白は桁揃えの変更で赤くならないよう `\s+` で受ける。
     const probeExpressions = [
       ["lcCollate", /SELECT\s+datcollate\s+FROM\s+pg_database/],
       ["lcCtype", /SELECT\s+datctype\s+FROM\s+pg_database/],
@@ -721,8 +552,6 @@ describe("値を作る側の歯が MNEMORA_LEXICAL_REGIME_JSON を参照して�
           "Job Summary 側の validateMeasured が「値が空だった」で落ちるまで誰も気づかない。",
       ).toMatch(expression);
     }
-    // 🔴 弾いていないことも測る: GUC 経由へ戻したら赤くなる。
-    // 戻すと pg17 で 42704 になり、測定段そのものが落ちる。
     expect(
       toothCode.includes("current_setting('lc_collate')") ||
         toothCode.includes("current_setting('lc_ctype')"),
@@ -737,43 +566,10 @@ describe("値を作る側の歯が MNEMORA_LEXICAL_REGIME_JSON を参照して�
 });
 
 describe("ci.yml の pgvector ジョブが regime を宣言していること(Issue #148 ②/Issue #155/Issue #224)", () => {
-  // 🔴 この describe が固定しているのは「1本(いま1脚)で測った regime が他ジョブに効く」
-  // 根拠そのもの——`postgres` ジョブ1本(1脚)だけが実際に regime を測るが、他のジョブは
-  // 同じ `POSTGRES_INITDB_ARGS` を宣言することで「同じ regime のはず」を保証する設計である
-  // (ADR 0106「測ったこと」)。この根拠が技術的に要求するのは次の2つだけである
-  // (ADR 0127「この歯は何を守っているのか」):
-  //   1. matrix 配線(実測している側)がちょうど1本であること
-  //   2. matrix 配線されていない残り全部が、matrix の UTF8 脚と同じ
-  //      `POSTGRES_INITDB_ARGS` を宣言していること
-  // **どちらも「絶対何本あるか」を要求しない。**
-  //
-  // 🔴 **2026-09-15、Issue #224(PR #220/#221 で実際に踏んだ)を受けて、絶対本数の固定
-  // (旧: services ブロック数 toHaveLength(8) / matrix化していない値の数 toHaveLength(7))
-  // を外した。** ADR 番号のような排他割当と違い、絶対本数は「複数の並行 PR がそれぞれ
-  // 独立に1本ずつ足し、どちらも自分の分だけを正しく数え直しても、結果が食い違いうる」
-  // 構造的な罠だった(#220 と #221 がそれぞれ 6→7 に更新し、実数の8と食い違った)。
-  // ⛔ **これは歯を黙らせただけではない**——絶対本数が捕まえていた「知らないうちに
-  // 増減したこと」という主張自体は、ADR 0106 の技術的主張(1本の実測が他に効く)には
-  // 元々不要だったと判断し、理由を ADR 0127 に書いた。捨てていないのは
-  // `matrixWired.length === 1`(条件1そのもの)——matrix 化は日常的に増減する対象ではなく
-  // 単発の設計判断(ADR 0105)であり、#220/#221 型の罠を受けない(理由は ADR 0127)。
-  //
-  // 作り直した主張:
-  // - (a): **pgvector を持つ全ジョブが `POSTGRES_INITDB_ARGS` を宣言している**
-  //   (本数は問わない。0本だと以降の判定が空振りになるため「1本以上」だけ確かめる)。
-  // - (b): **matrix 配線はちょうど1本であり、matrix 化していない残り全部の値は、
-  //   matrix の UTF8 脚の initdbArgs と一致する**——UTF8 脚の値は Issue #148 由来の
-  //   実測のまま1バイトも変えていないので、「1本(いま1脚)で測った regime が他ジョブに
-  //   効く」という根拠は保たれる。**残り全部の本数そのものは問わない。**
-  // - (c): **matrix の各脚について、--encoding= の値とその脚の serverEncoding が一致し
-  //   (自己無矛盾)、かつ service env と summary 段がどちらも同じ matrix 変数へ
-  //   直接配線されている**(値を書き写すのではなく、同じ変数を参照している——
-  //   実行時にどちらの脚が走っても自動的に一致する)。
+  // 絶対本数は固定しない（並行 PR が1本ずつ足すと、どちらが正しく数え直しても食い違う。ADR 0127）。
 
   /**
-   * `image: pgvector/pgvector:pg17` を持つ全 services ブロックの `env:` 行を
-   * (コメント込みで)切り出す。ジョブをまたぐため `extractJob` は使わない——
-   * インデントの形(services 直下、8/10 スペース)だけを頼りに、生の行を直接見る。
+   * ジョブをまたぐため `extractJob` は使わず、インデントの形だけを頼りに生の行を見る。
    *
    * @returns {{ envLines: string[] }[]}
    */
@@ -804,9 +600,6 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
   }
 
   /**
-   * env ブロックの生テキスト(コメント行を含む)から `KEY: value` の実キー行だけを
-   * 取り出す(コメント行は無視する)。
-   *
    * @param {string[]} envLines
    * @returns {Record<string, string>}
    */
@@ -827,11 +620,6 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
   }
 
   /**
-   * `postgres` ジョブの `strategy.matrix.include` を切り出す(Issue #155)。
-   * `jobBlock` はファイル先頭で `extractJob(workflow, "postgres")` によってすでに
-   * 切り出してある——このジョブの `strategy:` はここでしか出てこない前提で、
-   * インデント(10スペースのバレット、12スペースの続き)だけを頼りに読む。
-   *
    * @returns {{ serverEncoding: string, initdbArgs: string }[]}
    */
   function extractMatrixLegs() {
@@ -865,7 +653,6 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
         continue;
       }
       if (!/^ {10,}/.test(line)) {
-        // include リストの終わり(次のキー、例えば `services:` へ戻った)。
         break;
       }
     }
@@ -925,9 +712,6 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
       `matrix 化していない pgvector ジョブの POSTGRES_INITDB_ARGS が同一でない: ${JSON.stringify(fixedValues)}。` +
         "packages/postgres ジョブでしか regime を実測していない前提が崩れる(ADR 0106)。",
     ).toBe(1);
-    // `parseEnvLines` は `KEY: "value"` の右辺をクォート込みで返す(YAML の文字列表現を
-    // そのまま持つ)のに対し、`extractMatrixLegs` は `initdbArgs: "(.*)"` の中身だけを
-    // 取り出しているのでクォート無し——比較する前に外側のクォートを剥がす。
     const fixedValueUnquoted = [...distinctFixed][0]?.replace(/^"(.*)"$/, "$1");
     expect(
       fixedValueUnquoted,
@@ -953,13 +737,6 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
   });
 
   it("(c'') ⭐ matrix の各脚は --locale= も含めて自己無矛盾(--locale= が含意する encoding と serverEncoding が一致する。Issue #162 E)", () => {
-    // ⚠ この歯が測る「赤の意味」: --locale= が含意する encoding と、その脚が宣言した
-    // serverEncoding が食い違っている。initdb は encoding とロケールの整合を検査する
-    // ため(ci.yml のコメント参照)、これが実際の CI ではコンテナの起動ごと失敗しうる
-    // ——「歯が気づかないまま矛盾した脚が main に残る」ことを防ぐための歯である。
-    // ⛔ --locale= の有無そのものは要求していない(UTF8 脚には --locale= が無いのが
-    // 正しい)。findInconsistentLegs は「自己無矛盾かどうか」だけを見る
-    // (scripts/initdb-args-lib.mjs の docstring)。
     const flagged = findInconsistentLegs(matrixLegs);
     expect(
       flagged,
@@ -970,16 +747,12 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
   });
 
   it("(c''') ⭐ 陰性対照(空回り防止): 現物の脚のうち --locale= を持つものからだけ --locale= を剥がすと、剥がした脚だけが挙がる(Issue #162 E)", () => {
-    // 「弾くものと弾いてはいけないものを同じ1回の呼び出しに混ぜる」陰性対照。
-    // ⛔ `toEqual(new Set())`(空=空)だけの歯は陰性対照として数えない——それは
-    // 「歯が何も測っていない」場合と区別が付かない。ここでは現物の matrixLegs を
-    // 混合の材料にして、集合の一致で見る。
+    // 空=空だけの陰性対照は「何も測っていない」場合と区別できないので、現物の matrixLegs を混合の材料にする。
     const hasLocale = (/** @type {{ initdbArgs: string }} */ leg) =>
       parseInitdbArgs(leg.initdbArgs).locale !== undefined;
     const withLocale = matrixLegs.filter(hasLocale);
     const withoutLocale = matrixLegs.filter((leg) => !hasLocale(leg));
 
-    // ⭐ 混合であること自体を先に固定する(どちらかが空なら、この歯は何も測っていない)。
     expect(new Set(withLocale.map((leg) => leg.serverEncoding))).not.toEqual(new Set());
     expect(new Set(withoutLocale.map((leg) => leg.serverEncoding))).not.toEqual(new Set());
 
@@ -1012,10 +785,6 @@ describe("ci.yml の pgvector ジョブが regime を宣言していること(Is
 });
 
 describe("blankOutComments 自体が効いていること(⭐ この可視化が壊れても気づけるため)", () => {
-  // 🔴 この describe が無いと、`blankOutComments` が将来「何も潰さない」実装に
-  // 退化しても誰も気づかない——上の固定は全部緑のまま通り、変異は再び生き残る。
-  // ⟹ **潰す処理そのものを直接測る。**
-
   it("コメントにだけ在る文字列は、潰したあと残らない", () => {
     const source = [
       "/**",
@@ -1058,11 +827,6 @@ describe("blankOutComments 自体が効いていること(⭐ この可視化が
 });
 
 describe("コメント潰しが postgres ジョブの対象範囲で「扱えない」形に当たっていないこと(段1)", () => {
-  // 🔴 `extractStepBlock` が返す前に通す `blankOutWorkflowComments` の
-  // unhandled を無視できないようにする(呼び出し側が黙って安全側へ倒さないための
-  // 配線そのもの。`scripts/workflow-comment-blank-lib.mjs` の docstring)。
-  // ⚠ 特定の呼び出し履歴に依存しないよう、ここで postgres ジョブの全段を
-  // 洗い直してから確かめる。
   it("postgres ジョブの全段(name 段)に unhandled が無い", () => {
     stepBlockCommentUnhandled.length = 0;
     for (const step of steps) {
