@@ -45,54 +45,20 @@ import { createProviders } from "./providers.js";
 import type { Conversation, ConversationTurn } from "./scenario.js";
 import type { UsageMeter } from "./usage-meter.js";
 
-/**
- * `answer` サブコマンドの本体（Issue #506 / 親 #498）。
- *
- * 🔴 **この器は配線の検査であって、回答品質の測定ではない**（`answer-case.ts` 冒頭・
- * Issue #506 を参照）。1ケースにつき、naive（全文経路）と mnemora（記憶経路）を
- * **同じ会話・同じ質問・同じ回答モデル・同じ採点基準**で両方回し、最終回答と
- * 入力量を対で出す。
- *
- * Issue #693（親 #498）で、層2（回答に必要な情報の保持、`answer-content-preservation.ts`
- * の `checkContentPreserved`）を `AnswerPathMeasurement.contentPreservation` として足した。
- * 層1（出典到達、`provenance-trace.ts`）・層3（最終回答の正しさ、`verdict`/`judgement`）
- * とは別の欄であり、どちらも上書きしない（`docs/autonomy.md` §2.2 決定2）。
- */
-
-// ---------------------------------------------------------------------------
-// system 文・質問文（両経路で完全に同一にする。§2.2 決定2）
-// ---------------------------------------------------------------------------
-
 export const ANSWER_SYSTEM_PROMPT =
   "以下の会話ログだけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。";
 
-/**
- * 案3（Issue #1430、既定オン・切替可能。ADR 0379 決定「C2 採用」）:
- * `contestedCorrectionGuidance` を有効にした呼び出しで、mnemora 経路のプロンプトに
- * 実際に非対称の「訂正の可能性」文面（`buildMnemoraPromptDetail` が構造として返す
- * `hasContestedCorrectionWording`、`mnemora-path.ts`）が出たときだけ、
- * `ANSWER_SYSTEM_PROMPT` の直後にそのまま連結する一文。
- *
- * **区切りに空白を入れない**——`ANSWER_SYSTEM_PROMPT` 自身が句点「。」で終わる2文
- * （「…答えてください。根拠が無ければ…」）を、すでに空白無しで連結する書き方に
- * 揃えている（このファイル自身の `ANSWER_SYSTEM_PROMPT` の値を参照）。
- */
+/** 区切りに空白を入れない。`ANSWER_SYSTEM_PROMPT` 自身が、2文を空白無しで連結する書き方だから。 */
 export const CONTESTED_CORRECTION_GUIDANCE =
   "矛盾候補の印がある記憶どうしは、記録順の新しい方を現在の値として答えてください。";
 
-/** `question` を両経路で同じ形に組み立てる（`"\n\n質問: " + question`）。 */
 function buildQuestionSuffix(question: string): string {
   return `\n\n質問: ${question}`;
 }
 
 /**
- * `complete()` へ渡した `PromptSpec` を、system + messages をまとめた1つの文字列へ
- * 直列化する。**両経路がこの同じ関数で入力量を測る**（§2.2 決定2「同じ採点基準」の
- * 入力量版）。
- *
- * ⚠ `recall().usage.chars` を入力量として報告しない理由はここにある——`usage.chars`
- * は `recall()` が返した量であって、`complete()` へ実際に渡した量ではない
- * （`buildMnemoraPrompt` は目次帯の1行を足すため、両者は一致しない）。
+ * 両経路がこの同じ関数で入力量を測る。`recall().usage.chars` を入力量として報告しないのは、
+ * `complete()` へ実際に渡した量と一致しない（`buildMnemoraPrompt` が目次帯の1行を足す）から。
  */
 export function serializePromptSpec(spec: PromptSpec): string {
   const parts: string[] = [];
@@ -105,30 +71,11 @@ export function serializePromptSpec(spec: PromptSpec): string {
   return parts.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// 追加費用を数える decorator（実 OpenAI 専用の usage-meter.ts は使えない。ADR 無し・
-// 本 PR で新設する自前の薄い decorator）
-// ---------------------------------------------------------------------------
-
 export interface AnswerBenchCallCounts {
-  /** `completeStructured()` 呼び出し回数——`Runtime` が抽出に使う経路（取り込み）。 */
   extractionCalls: number;
-  /** `complete()` 呼び出し回数——この bench が回答生成に使う経路。 */
   answerCalls: number;
 }
 
-/**
- * `LLMProvider` を呼び出し回数を数える decorator で包む。
- *
- * `packages/core` の `Runtime` は抽出に `completeStructured()` しか使わない
- * （`runtime.ts` を実測済み——`llmProvider.complete(...)` を呼ぶ行は無い）。
- * ⟹ **`complete()` と `completeStructured()` を別のカウンタにするだけで、
- * 「取り込み（抽出）」と「回答生成」の呼び出し回数が自然に分かれる**——
- * 同じ decorator インスタンスを `Runtime` にも、この bench 自身の回答生成にも渡せる。
- *
- * ⛔ **削減率から差し引かない。** `answer-json.ts`/`answer-format.ts` は
- * この値を常に別ブロックとして出す。
- */
 export class CountingLLMProvider implements LLMProvider {
   private counts: AnswerBenchCallCounts = { extractionCalls: 0, answerCalls: 0 };
 
@@ -144,13 +91,11 @@ export class CountingLLMProvider implements LLMProvider {
     return this.inner.completeStructured(ctx, req);
   }
 
-  /** 呼び出し側が差分を取れるよう、複製したスナップショットを返す。 */
   snapshot(): AnswerBenchCallCounts {
     return { ...this.counts };
   }
 }
 
-/** `EmbeddingProvider` を呼び出し回数（`embed()` の回数）を数える decorator で包む。 */
 export class CountingEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
   private calls = 0;
@@ -179,18 +124,9 @@ function diffCounts(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Runtime の組み立て
-//
-// ⚠ **`runtime-factory.ts` の `createExampleRuntime` を再利用していない。**
-// 理由: 呼び出し回数を数える decorator（上記）は `createRuntime()` へ渡す**前**の
-// `LLMProvider`/`EmbeddingProvider` インスタンスを包む必要があるが、
-// `createExampleRuntime` は `createProviders()` の結果を内部で直接 `createRuntime()`
-// へ渡してしまい、呼び出し側が provider インスタンスを差し込む口が無い
-// （`ExampleRuntimeHandle` も `llmProvider` を公開していない）。既存ファイルの改変は
-// `cli.ts`/`package.json`/README に限る（Issue #506 の範囲）ため、`runtime-factory.ts`
-// 自体は変更せず、ここで同じ組み立て手順を独立に行う。
-// ---------------------------------------------------------------------------
+// `runtime-factory.ts` の `createExampleRuntime` を再利用しない。呼び出し回数を数える decorator は
+// `createRuntime()` へ渡す前の provider を包む必要があるが、`createExampleRuntime` は provider を
+// 内部で直接渡してしまい、差し込む口が無い。
 
 export interface AnswerBenchRuntimeHandle {
   runtime: Runtime;
@@ -199,29 +135,13 @@ export interface AnswerBenchRuntimeHandle {
   llmProvider: CountingLLMProvider;
   embeddingProvider: CountingEmbeddingProvider;
   /**
-   * judge（`answer-judge.ts`）専用の呼び出し回数カウンタ。**`llmProvider` とは別の
-   * `CountingLLMProvider` インスタンスである**——ただし同じ生の `created.llmProvider`
-   * （実 API / 記録の再生 / deterministic のいずれか）を包むだけの薄いデコレータなので、
-   * 2つに分けても届く先は完全に同じ1個の provider である。
-   *
-   * **これが要る理由**: `CountingLLMProvider.complete()` は呼ぶたびに
-   * `answerCalls` を1増やす。judge も `complete()` を呼ぶ（`answer-judge.ts` 設計上の
-   * 必須事項1）ため、もし judge が `llmProvider`（回答生成と同じインスタンス）を経由すると
-   * `answerLLMCalls`（「回答生成のみで常に2」という既存の契約・`answer-bench.postgres.test.ts`
-   * の固定 assertion）が 2 から 4 に化ける。**呼び出し先を分けるのではなく、数える
-   * デコレータのインスタンスを分けることで、既存の `answerLLMCalls` の意味を1バイトも
-   * 変えずに judge の呼び出し回数を独立に数えられる**——`llmCassetteKey` はプロンプト内容の
-   * ハッシュで引くため（`packages/testkit/src/__fixtures__/cassette.ts`）、どちらの
-   * デコレータ経由で呼んだかは記録・再生のどちらにも影響しない。
+   * judge 専用の呼び出し回数カウンタ。`llmProvider` と同じ生の provider を包む別インスタンスにする。
+   * judge が `llmProvider` を経由すると `answerLLMCalls`（回答生成のみで常に2）が 4 に化けるため。
    */
   judgeLLMProvider: CountingLLMProvider;
-  /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する（`Providers.usageMeter` と同じ規約）。 */
   usageMeter?: UsageMeter;
-  /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
   cassetteIgnored: boolean;
-  /** `Providers.readSeedUsage` をそのまま通す（`providerOptions.seedCassette` を渡したときだけ存在する）。 */
   readSeedUsage?: () => SeedUsageSummary;
-  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
@@ -231,18 +151,13 @@ export async function createAnswerBenchRuntime(
   providerOptions: CreateProvidersOptions = {},
 ): Promise<AnswerBenchRuntimeHandle> {
   const client: PostgresClient = createPostgresClient(databaseUrl);
-  // `runtime-factory.ts` の `createExampleRuntime` と同じ穴・同じ理由:
-  // `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に失敗しうる
-  // `await` が何段もある（`runMigrations`/`registerEmbeddingSpace`）。呼び出し側は
-  // `const handle = await createAnswerBenchRuntime(...); try { ... } finally {
-  // await handle.close(); }` という形で、ここで reject すると `handle` に一度も
-  // 代入されないため `close()` を呼びようがない。
+  // `client` を作った後、`close()` を持つ handle を返す前に失敗しうる `await` が続く。ここで reject すると
+  // 呼び出し側は handle を受け取れず `close()` できないため、ここで閉じる（`createExampleRuntime` と同じ穴）。
   try {
     await runMigrations(client.pool);
 
     const created = createProviders(env, providerOptions);
     const llmProvider = new CountingLLMProvider(created.llmProvider);
-    // ⭐ 同じ生の provider を、judge 専用の別インスタンスでもう一度包む(上記 docstring)。
     const judgeLLMProvider = new CountingLLMProvider(created.llmProvider);
     const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
     await registerEmbeddingSpace(client.pool, embeddingProvider.space);
@@ -272,19 +187,11 @@ export async function createAnswerBenchRuntime(
       close: () => closePostgresClient(client),
     };
   } catch (err) {
-    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
     await closePostgresClient(client).catch(() => {});
     throw err;
   }
 }
 
-// ---------------------------------------------------------------------------
-// 1ケースを両経路に通す
-// ---------------------------------------------------------------------------
-
-/** `AnswerCase.conversation` + `question` を、`ingestConversation`/`queryRecall` が
- * 要求する `Conversation`（`scenario.ts`）へ写す。**会話を生成しない**——
- * 手書きのケースの中身をそのまま並べ直すだけ。 */
 function toConversation(answerCase: AnswerCase): Conversation {
   const turns: ConversationTurn[] = answerCase.conversation.map((turn, index) => ({
     index,
@@ -300,50 +207,19 @@ function toConversation(answerCase: AnswerCase): Conversation {
 
 export interface AnswerPathMeasurement {
   promptSpec: PromptSpec;
-  /** `serializePromptSpec(promptSpec)` の文字数。 */
   inputChars: number;
-  /** 同じ直列化文字列に対する `heuristicTokenCounter` の概算。 */
   inputEstimatedTokens: number;
   answer: string;
-  /** `gradeAnswer` の一次判定。**`answerQualityClaimable(llmMode) === false` でも計算はする**
-   * （純関数なので害は無い）——表示・集計を止めるのは呼び出し側（`answer-format.ts`/
-   * `answer-json.ts`）の役目である。 */
   verdict: AnswerVerdict;
-  /**
-   * 二次観測（LLM 採点、`answer-judge.ts`）。**一次判定 `verdict` を上書きしない**——
-   * 別欄として持つだけである。呼び出し側が judge を走らせなかった run では `undefined`。
-   */
   judgement?: AnswerJudgement;
-  /**
-   * `verdict` と `judgement.outcome` を `reconcileVerdicts`（`answer-judge.ts`）で
-   * 突き合わせた結果。一致すれば `verdict` と同じ値、食い違えば `"indeterminate"`。
-   * `judgement` が無ければこちらも無い。
-   */
   reconciled?: AnswerVerdict;
-  /**
-   * 層2（回答に必要な情報の保持）の決定的な指標（`answer-content-preservation.ts`、
-   * Issue #693 / 親 #498）。**`verdict`/`judgement`（層3・最終回答の正しさ）とは別物**
-   * ——LLM を呼ばない、`promptSpec` の直列化文字列と `expected.accept` だけを見た判定。
-   * `answerQualityClaimable(llmMode) === false` でも計算する（純関数なので害は無い。
-   * `verdict` と同じ扱い）——ただし `deterministic` の下では `digest` が本物の要約では
-   * ないため、この値は「配線」を測っているにすぎない（`answer-content-preservation.ts`
-   * の docstring 参照）。
-   */
   contentPreservation: ContentPreservationResult;
 }
 
 export interface AnswerCaseCost {
-  /** この1ケースの ingest（`ingestConversation`）で発生した抽出 LLM 呼び出し回数。 */
   extractionLLMCalls: number;
-  /** この1ケースの ingest + recall で発生した埋め込み呼び出し回数。 */
   embeddingCalls: number;
-  /** この1ケースの回答生成（naive 1回 + mnemora 1回）の LLM 呼び出し回数。常に2。 */
   answerLLMCalls: number;
-  /**
-   * この1ケースの judge 呼び出し回数（naive 採点1回 + mnemora 採点1回。常に2）。
-   * ⛔ `answerLLMCalls` には混ぜない——`judgeLLMProvider` という別インスタンスの
-   * snapshot 差分で数える（`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring）。
-   */
   judgeLLMCalls: number;
 }
 
@@ -358,14 +234,7 @@ function buildPromptMessage(content: string): PromptMessage {
   return { role: "user", content };
 }
 
-/**
- * naive（全文経路）の `PromptSpec` を、**ケースの定義だけから**組み立てる。
- *
- * ⭐ `recall()` に依らないので、DB も provider も無しに再現できる——
- * カセット被覆の歯（`__tests__/cassette-coverage.test.ts`）が、この関数を呼んで
- * 「ケースを変えたのに録り直していない」を**実行の数分後ではなく検査の時点で**捕まえる。
- * ⛔ プロンプトの組み立てをテスト側へ写さない（二重定義にしない）ため、ここに1つだけ置く。
- */
+/** プロンプトの組み立てをテスト側へ写さない（二重定義にしない）ため、ここに1つだけ置く。 */
 export function buildNaiveAnswerPromptSpec(answerCase: AnswerCase): PromptSpec {
   const conversation = toConversation(answerCase);
   return {
@@ -377,31 +246,9 @@ export function buildNaiveAnswerPromptSpec(answerCase: AnswerCase): PromptSpec {
 }
 
 /**
- * mnemora 経路の system 文を決める（Issue #1430、案3・切替可能・既定オン）。
- *
- * `contestedCorrectionGuidance` が `true` で、かつ `hasContestedCorrectionWording`
- * （`buildMnemoraPromptDetail(recall).hasContestedCorrectionWording`——描画の途中で
- * 非対称文面（案1）を実際に選んだかどうかという**構造の結果**。`mnemora-path.ts` の
- * `MnemoraPromptDetail` docstring参照）が `true` のときだけ、`ANSWER_SYSTEM_PROMPT` に
- * `CONTESTED_CORRECTION_GUIDANCE` を（空白を挟まず）連結する。それ以外は
- * `ANSWER_SYSTEM_PROMPT` のまま——**opt-in のフラグそのものだけでは足さない。実際に
- * 非対称文面が出たかどうかで決める**。この判定は `buildMnemoraPromptDetail` が描画の
- * 分岐そのものから返す値であり、できあがったプロンプト文字列を後から部分文字列で
- * 走査し直すものではない——`digest` の本文にたまたま「（訂正の可能性）」という
- * 文字列が含まれていても、`hasContestedCorrectionWording` はその影響を受けない
- * （`issue-1430-contested-correction.test.ts` の「digest に紛れ込んでも」歯を参照）。
- *
- * ⚠ **naive 経路には適用しない**（呼び出し側が意図的に、mnemora 側だけに渡す）——
- * naive のプロンプトは recall に依らず `[矛盾候補:]` の印を一度も含まないため、
- * `contestedCorrectionGuidance: true` でも naive の system は `ANSWER_SYSTEM_PROMPT`
- * のまま変わらない（§2.2 決定2「両経路で完全に同一」からの、この案3だけの意図的な
- * 逸脱——mnemora 側だけに矛盾候補の印が出うるので、system の読み方の指示も
- * mnemora 側だけに足す）。
- *
- * **既定は `contestedCorrectionGuidance: true`**（Issue #1430、ADR 0379 決定「C2 採用」）
- * ——`hasContestedCorrectionWording` が `false` の回（印そのものが無い・
- * `companionOf` だけが由来・記録順が片方でも分からない contested）は、フラグが
- * `true` のままでも system は今までどおり `ANSWER_SYSTEM_PROMPT` のまま変わらない。
+ * mnemora 経路の system 文を決める。naive 経路には適用しない。naive のプロンプトは `[矛盾候補:]` の印を
+ * 含まないので、読み方の指示を足すのは印が出うる mnemora 側だけにする。
+ * 足すかどうかは、フラグそのものではなく `hasContestedCorrectionWording`（実際に非対称文面を出したか）で決める。
  */
 export function resolveMnemoraAnswerSystemPrompt(
   hasContestedCorrectionWording: boolean,
@@ -413,20 +260,6 @@ export function resolveMnemoraAnswerSystemPrompt(
   return ANSWER_SYSTEM_PROMPT;
 }
 
-/**
- * 1ケースを両経路に通す。
- *
- * - **取り込み**: `ingestConversation`（`mnemora-path.ts`）を再利用する。ケースごとに
- *   新しいテナントを使う（`compare.ts` の `runComparison` と同じやり方——
- *   `recall()` のスコープはテナント単位であり、使い回すと前のケースの記憶を引きずる）。
- * - **記憶の列**: `buildMnemoraPrompt`（`mnemora-path.ts`）を再利用する（新しく書かない）。
- * - **system 文・質問文・`complete()` の呼び方**は両経路で完全に同一。
- */
-/**
- * `grounds.turnIndex` を `answerCase.conversation` の本文へ写す。`unknown` 類では
- * `turnIndex` が空配列なので、結果も空配列になる（`answer-judge.ts` の
- * `AnswerJudgeInput.groundTurnTexts` の docstring 参照）。
- */
 function resolveGroundTurnTexts(answerCase: AnswerCase): string[] {
   return answerCase.grounds.turnIndex.map((index) => {
     const turn = answerCase.conversation[index];
@@ -441,44 +274,16 @@ function resolveGroundTurnTexts(answerCase: AnswerCase): string[] {
 }
 
 /**
- * `EmbeddingSpaceId`（`provider`/`model`/`dimensions`）から、tenantId に埋め込める
- * 英数字とハイフンだけの短いスラグを作る（Issue #583）。
+ * `EmbeddingSpaceId` から、tenantId に埋め込める短いスラグを作る。
  *
- * ⭐ **なぜ埋め込み空間を tenant に含めるのか**——実測した壊れ方: `observations` は
- * `ON CONFLICT (tenant_id, external_id) DO NOTHING` の冪等 insert であり、埋め込みは
- * `(provider, model, dimensions)` ごとに別テーブルに分かれる（`packages/postgres`の
- * `embeddingSpaceTableName`、ADR 0002 D8）。⟹ **`deterministic`（8次元）がその tenant で
- * 先に抽出を走らせると、後から既定（`recorded`/256次元）で走ったとき、抽出が冪等
- * スキップされて 256次元テーブルが0行のまま recall が走り、「スコープ内 N 件のうち
- * 0 件を提示」というカセットに無いプロンプトが組まれて `RecordedLLMProvider` が
- * 例外を投げる**（exit 1、実測済み。Issue #583）。tenant に埋め込み空間のスラグを
- * 挟めば、空間が変われば tenant も変わり、この冪等スキップの土台（同一 tenant への
- * 二重 observe）自体が起きなくなる。
+ * 埋め込み空間を tenant に含める理由: 空間が違う run が同じ tenant を共有すると、冪等な `observe` が
+ * 抽出をスキップし、片方の空間のテーブルが0行のまま recall が走ってカセットに無いプロンプトが組まれる。
  *
- * ⛔ **`packages/postgres` の `embeddingSpaceTableName` は import しない**——
- * あちらは PostgreSQL 識別子（63バイト上限・ハッシュ衝突回避）という別の制約から
- * 逆算した命名規則であり、ここが要るのは tenantId（`z.string().min(1)` 以外に上限が
- * 無い、`packages/core` の `CtxSchema`）に挟める短い文字列だけである。両者を結合する
- * 理由が無いので、`examples/chat` 側の関心事として自前で持つ。
+ * `packages/postgres` の `embeddingSpaceTableName` は import しない。あちらは PostgreSQL 識別子の
+ * 制約から決めた命名で、ここが要るのは tenantId に挟める短い文字列だけ。
  *
- * ⛔ **`runId` を入れる案（`cli.ts` の `recordAnswer` が `answer-record-${runId}` で
- * 採っている形に揃える案）は採らなかった。** `recordAnswer` は**毎回新しい記録を作る**
- * のが仕事なので、実行ごとに新しい tenant が要る（`recordAnswer` の docstring
- * 「⚠ tenantPrefix に runId を含め、毎回新しいテナントにする」・`observe()` の
- * `externalId` 冪等排除が理由として明記されている）。一方この関数が使われる
- * `runAnswer`（`cli.ts`）は**同じ入力で同じ結果が出る**ことが仕事であり——
- * `answer-cli.postgres.test.ts` 冒頭の docstring が「⭐ 同じモードでの連続実行は
- * 冪等である【実測 2026-09-21】——2回続けて走らせて `measuredAt` を除く JSON が
- * 完全一致した」と実測して固定している——tenant は**入力（ここでは埋め込み空間）で
- * 決まるべきで、実行ごとに変わってはいけない**。実行ごとに変えると、この歯
- * （2回続けて走らせて同じ結果が出ることを測る歯）が意味を失い、かつ tenant が
- * 無限に積み上がる（掃除の口が無い）。
- */
-/**
- * ⚠ 「記憶は在るが、この空間のベクトルが0件」を名乗る（Issue #583）。
- * 🔴 例外にしない・落ちるのを防がない——「なぜ落ちたか」が画面に出ることだけが目的。
- * ⚠ 判定ではなく候補の一覧として出す（ADR 0223 決定5 / ADR 0255）。
- * スコープ内に記憶が在り、1件も提示されなかったときだけ文を返す（それ以外は `null`）。
+ * `runId` を入れる案は採らない。この関数を使う `runAnswer` は同じ入力で同じ結果が出ることが仕事で、
+ * 実行ごとに tenant を変えるとその検査が意味を失い、tenant が積み上がる。
  */
 export function describeZeroPresented(
   tenantId: string,
@@ -501,10 +306,6 @@ export function describeZeroPresented(
   ].join("\n");
 }
 
-/**
- * `omitted` を1行に並べる（`describeZeroPresented` 用）。判定はせず、種類と件数を
- * そのまま出す——例: `below_threshold×2, stage_skipped(association:no_anchor)`。
- */
 function describeOmittedBrief(omitted: RecallResult["omitted"]): string {
   if (omitted.length === 0) {
     return "(無し)";
@@ -544,25 +345,8 @@ export async function runAnswerCase(
   judgeLLMProvider: CountingLLMProvider,
   answerCase: AnswerCase,
   tenantPrefix: string,
-  // Issue #691 続き（claimKey 評価用の opt-in）。**省略すれば、これまでと1バイトも
-  // 挙動が変わらない**——`ingestConversation` へそのまま転送するだけであり、
-  // このパラメータを渡さない既存の呼び出し（`cli.ts` の `recordAnswer`/`runAnswer`、
-  // `record-answer-retention-mutation.ts`、`answer-retention-mutation.ts`）は
-  // 1つも変更していない（`IngestConversationOptions` docstring参照）。
   ingestOptions: IngestConversationOptions = {},
-  // `queryRecall` へそのまま転送する `association`(ADR 0337 追記2026-09-26。新設の
-  // 測定専用オプション)。**省略時は `undefined`**——`queryRecall` 自身の既定
-  // ({@link DEFAULT_MNEMORA_PATH_ASSOCIATION}、`{maxCount:10}`)のまま、これまでと
-  // 1バイトも挙動が変わらない。明示するのは
-  // `examples/chat/src/bench/association-default-on-measure.ts` だけである。
   association?: RecallAssociationQuery | null,
-  // 案3（Issue #1430、既定オン・切替可能。ADR 0379 決定「C2 採用」）。true のときだけ、
-  // mnemora 経路の system 文に `CONTESTED_CORRECTION_GUIDANCE` を足す——**足すかどうかは
-  // opt-in のフラグそのものではなく、`buildMnemoraPromptDetail` が構造として返す
-  // `hasContestedCorrectionWording`（実際に非対称文面を出したか）で決める**。
-  // `hasContestedCorrectionWording` が false の回（印が無い・`companionOf` だけが由来・
-  // 記録順が片方でも分からない contested）は、`contestedCorrectionGuidance: true`
-  // （既定）のままでも system は `ANSWER_SYSTEM_PROMPT` のまま変わらない。
   contestedCorrectionGuidance = true,
 ): Promise<AnswerCaseRunResult> {
   const embeddingSpace = embeddingSpaceSlug(embeddingProvider.space);
@@ -575,12 +359,8 @@ export async function runAnswerCase(
   await ingestConversation(runtime, ctx, conversation, ingestOptions);
   const afterIngestLLM = llmProvider.snapshot();
 
-  // 連想枠（`DEFAULT_MNEMORA_PATH_ASSOCIATION`）は既定のまま渡す——`queryRecall` の
-  // 既定と同じ規律をこの bench でも保つ（明示的に外していない）。`association` を
-  // 呼び出し側が明示したときだけ上書きする。
   const recall = await queryRecall(runtime, ctx, conversation, { association });
 
-  // 提示0件の警告（Issue #583）。文面と規律は `describeZeroPresented` の doc にある。
   const zeroPresentedWarning = describeZeroPresented(ctx.tenantId, embeddingSpace, recall);
   if (zeroPresentedWarning !== null) {
     console.log(zeroPresentedWarning);
@@ -609,16 +389,9 @@ export async function runAnswerCase(
   const naiveVerdict = gradeAnswer(naiveResponse.content, answerCase.expected);
   const mnemoraVerdict = gradeAnswer(mnemoraResponse.content, answerCase.expected);
 
-  // 層2（内容保持）: LLM を呼ばない決定的な指標。モデルへ実際に渡した直列化文字列
-  // （`naiveSerialized`/`mnemoraSerialized`、上ですでに計算済み）だけを見る。
   const naiveContentPreservation = checkContentPreserved(naiveSerialized, answerCase.expected);
   const mnemoraContentPreservation = checkContentPreserved(mnemoraSerialized, answerCase.expected);
 
-  // ---------------------------------------------------------------------------
-  // 二次観測（judge）。`llmProvider` ではなく `judgeLLMProvider`（別インスタンス）を
-  // 経由する——`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring 参照。
-  // ⛔ `expected.accept`/`expected.reject` を渡さない（渡せない——`AnswerJudgeInput` の形）。
-  // ---------------------------------------------------------------------------
   const groundTurnTexts = resolveGroundTurnTexts(answerCase);
   const beforeJudgeLLM = judgeLLMProvider.snapshot();
   const naiveJudgement = await judgeAnswer(judgeLLMProvider, ctx, {
@@ -679,11 +452,8 @@ export async function runAnswerBench(
   judgeLLMProvider: CountingLLMProvider,
   cases: readonly AnswerCase[],
   tenantPrefix: string,
-  // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない。
   ingestOptions: IngestConversationOptions = {},
-  // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない（ADR 0337 追記2026-09-26）。
   association?: RecallAssociationQuery | null,
-  // `runAnswerCase` と同じ規律——既定 `true`（Issue #1430、ADR 0379 決定「C2 採用」）。
   contestedCorrectionGuidance = true,
 ): Promise<AnswerCaseRunResult[]> {
   const results: AnswerCaseRunResult[] = [];
