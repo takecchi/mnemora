@@ -20,15 +20,11 @@ export const CountKindSchema = z.enum([
   "unknown",
 ]) satisfies z.ZodType<CountKind>;
 
-// ---------------------------------------------------------------------------
-// Omission（docs/recall.md §4、ADR 0008）
-// ---------------------------------------------------------------------------
-
+/**
 /**
  * `stage_skipped` の `reason` が `"embedding_provider_unavailable"` のときだけ付きうる、失敗の原因の種類。
- *
  * **message・cause の本文・ベクトルの値は載せない**（利用者データや内部情報が混ざりうるため）。
- * 載るのは種類と、投げられた値の `kind` / `name`（文字列のときだけ、先頭64文字まで）だけである。
+ * 載るのは種類と、投げられた値の `kind` / `name`（文字列のときだけ、先頭64文字まで）だけ。
  *
  * - `"provider_threw"`: `EmbeddingProvider.embed` が throw / reject した。`embeddingProvider` が配線されて
  *   いないときも（`embed` を呼べず `TypeError` になるため）ここに入り、`errorName` が `"TypeError"` になる。
@@ -53,35 +49,18 @@ export interface StageSkippedOmission {
   /** 実行しなかった段（`candidate_generation` は段1、`rescore` は段2、`index_band` は段5、`association` は段3.5、`relation` は段3）。 */
   stage: "candidate_generation" | "rescore" | "index_band" | "association" | "relation";
   /**
-   * **`"budget_exhausted"` は、この union に存在していたが、2026-09-16 に落とした**
-   * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)
-   * の分類3、[ADR 0144](../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)
-   * で実施。`@mnemora/core` の公開 API の破壊的変更）。`recall-runtime.ts` はこの値を
-   * 一度も push しておらず、`RecallBudget` を使い切ったときの実際の落とし方は
-   * `budget_dropped`（`BudgetDroppedOmission`）である。
+   * `"vector_store_lacks_get_vectors"` / `"no_anchor"` は連想枠専用（`stage: "association"` のときだけ）。
+   * - `"vector_store_lacks_get_vectors"`: `deps.vectorStore.getVectors`（任意メソッド）が実装されておらず、
+   *   `query.association` を渡しても連想は実行されない。
+   * - `"no_anchor"`: `getVectors` はあるが、段3までに残った候補（アンカー候補）が0件だった。
    *
-   * **`"vector_store_lacks_get_vectors"` / `"no_anchor"` は連想枠（Issue #200）専用**
-   * （`stage: "association"` のときだけ現れる）。
-   * - `"vector_store_lacks_get_vectors"`: `deps.vectorStore.getVectors` が
-   *   実装されていない。**北極星の問い2**（これを無効にしても recall は成立するか）を
-   *   型で担保する任意メソッド（`VectorStore.getVectors` の doc 参照）が無いだけであり、
-   *   `query.association` を渡しても連想は一切実行されない。
-   * - `"no_anchor"`: `getVectors` はあるが、段3までに残った候補（アンカー候補）が
-   *   0件だった——連想を起点にできる記憶が無い。
+   * 連想を走らせて0件だったときはこの omission を積まない。`stage_skipped` は常に「実行しなかった」ことの札。
    *
-   * **⚠ この2つは「連想を走らせたが0件だった」とは別の事象である。**走らせて0件なら
-   * この omission は積まない（`docs/recall.md` の「無いの種類を潰さない」原則）——
-   * `stage_skipped` は常に「実行しなかった」ことの札であり、「実行して収穫が無かった」
-   * ことの札ではない。
-   *
-   * **`"relation_store_unavailable"` は段3（必須の同伴取得、Issue #207/#933 PR2、
-   * ADR 0292 決定3-b、ADR 0381）専用**（`stage: "relation"` のときだけ現れる）。
-   * `withinLimit` に `status === 'contested'` かつ `contestedWithId === null`（多者間の
-   * 群のメンバー）が1件以上あるのに、`deps.relationStore` が配線されていない——群の
-   * 残りのメンバーを辿る手段が無いので、その候補は今までどおり単独の `contested`
-   * として単位を組めず落ちる（`unit_assembly_dropped`）。**候補が無ければこの omission
-   * も積まない**（`no_anchor` と同じ「実行する理由が無かった」との区別、
-   * `stage_skipped` の doc 冒頭の原則）。
+   * `"relation_store_unavailable"` は段3（必須の同伴取得、ADR 0292 決定3-b、ADR 0381）専用
+   * （`stage: "relation"` のときだけ）。`withinLimit` に `status === 'contested'` かつ
+   * `contestedWithId === null`（多者間の群のメンバー）が1件以上あるのに `deps.relationStore` が
+   * 配線されていない場合に積む。その候補は単独の `contested` として単位を組めず落ちる
+   * （`unit_assembly_dropped`）。候補が無ければ積まない。
    */
   reason:
     | "embedding_provider_unavailable"
@@ -97,32 +76,16 @@ export interface StageSkippedOmission {
 }
 
 /**
- * `FilteredOmission.condition` が分かれる2つの群の名前（Issue #352 / ADR 0174）。
+ * `FilteredOmission.condition` が分かれる2つの群の名前（ADR 0174）。
  *
- * **なぜ2群か（真偽値ではなく名前のある値にした理由も含む）**:
+ * - `"outside_scope"` — 問うている切り口そのものを定義するゲート（`expired`/`not_yet_valid` など）で落ちた。
+ *   `IndexBand.totalInScope` から**引かれる**。
+ * - `"within_scope"` — スコープの中に居るまま、到達しにくさのゲート（`decayed`）で落ちた。
+ *   `totalInScope` から**引かれない**。
  *
- * - `"outside_scope"` — **問うている切り口そのものを定義するゲート**で落ちた。
- *   `expired`/`not_yet_valid` は「その事実はいま真ではない」ことを言う。これは
- *   `period`（いつ起きたか）・tenant/subject（誰について）と同じく、**問うている
- *   切り口そのものを定義する次元**である。だから `IndexBand.totalInScope` から
- *   **引かれる**。
- * - `"within_scope"` — **スコープの中に居るまま、到達しにくさのゲート**で落ちた。
- *   `decayed` は「その記憶は**まだ真**で、**まだ切り口の中に在る**が、遠ざかった」
- *   ことを言う——**到達しにくさ**のゲートであって、切り口のゲートではない。だから
- *   `totalInScope` から**引かれない**（内訳・部分集合として残る）。
- *
- *   **決め手は `docs/north-star.md`「目指す姿」の逐語である**:
- *   > 使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。
- *
- *   `decayed` を `"outside_scope"` 側に置く（＝`totalInScope` から引く）と、
- *   減衰した記憶は `totalInScope` からも目次帯からも消える（`digestEligible`/
- *   `digests` は同じ述語に乗っている）。**呼び手から見て、減衰は削除と区別が
- *   付かなくなる。**正典が名指しで否定した振る舞いになるため、この型は
- *   `decayed` を `"within_scope"` 側に固定する。
- *
- * **真偽値にしない**——このリポジトリは `superseded`/`forgotten` を分けたときと
- * 同じく、名前のある値を好む（ADR 0027）。`isOutsideScope: boolean` のような形は、
- * 読み手が「true が何を意味するか」を毎回コードへ戻って確認する必要が生まれる。
+ * `decayed` を `"outside_scope"` 側に置くと、減衰した記憶が `totalInScope` からも目次帯からも消え、
+ * 呼び手から見て減衰が削除と区別できなくなる（`docs/north-star.md`「消えるのではなく、遠ざかる」に反する）。
+ * 真偽値にせず名前のある値にしたのは、`superseded`/`forgotten` を分けたとき（ADR 0027）と同じ理由。
  */
 export type ScopeRelation = "outside_scope" | "within_scope";
 
@@ -137,90 +100,23 @@ export interface FilteredOmission {
   /** 常に `"filtered"`（{@link Omission} の判別の鍵）。 */
   kind: "filtered";
   /**
-   * `"superseded"` と `"forgotten"` を分けて持つ（ADR 0027）。両方とも status ゲートで
-   * 落ちる点は同じだが、次の一手が違う——`superseded` はより良い抽出への置き換え、
-   * または統合という**機構の都合**（`superseded_by_id` で置き換え先を辿れる）、`forgotten` は
-   * 利用者が明示的に忘れさせたという**製品の振る舞い**（指す先を持たない）。1つの
-   * `"status"` に束ねると、「利用者が忘れてほしいと言ったのか、こちらが作り直したのか」を
-   * 呼び出し側が判定できなくなる。`"archived"` が既に別条件として独立している先例に倣う。
+   * 落ちた条件。
    *
-   * **⚠ `"tenant"` は、この union に在るが生成するコードが無い**
-   * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) で棚卸し済み）。
-   * **意図的に、恒久的に来ない。これは欠陥ではなく正しい状態である。**
-   * tenant はスコープの外側の境界であり、`filtered` としては報告しない
-   * （別テナントのデータを omission として報告しないのと同じ理由。`ScopeAggregate` の doc 参照）。
-   * **実装を待っている値ではない**——生成するコードを足す予定は無い。
-   *
-   * **⚠ `"taxonomy"` は ADR 0117 の棚卸し時点（Issue #206）では `"tenant"` と同じ未実装の
-   * union 値だったが、2026-09-25（Issue #201 PR-A/PR-B、[ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)/
-   * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）に実体を持った。**
-   * `RecallQuery.labels` による絞り込みが落とした Memory を数える（`recall-runtime.ts`
-   * が `aggregate.filteredTaxonomy.count > 0` のときだけ push する。`period`/`expired`と
-   * 同じ扱い）。**`"tenant"` とは違い、今は現に生成される。**
-   *
-   * **`"decayed"`（マネージャー決定、Issue #196 /
-   * [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）**:
-   * `decayFloorAt` を過ぎた（＝完全に減衰しきった）Memory が recall の候補から
-   * 外れたことを表す。**`"archived"` に相乗りさせない**——`archived` は
-   * `status` 列によるゲート（掃引が明示的に書き換えた状態）だが、`"decayed"` は
-   * `decay_floor_at` 列によるゲート（書き込み時に計算された時刻と「いま」の比較）であり、
-   * 別の列・別の条件・別の次の一手（`archived` を戻すには `restoreArchived` を呼ぶ——
-   * 強化（`reinforce`）では戻らない。`decayed` は強化すれば `decayFloorAt` 自体が先へ延びるため、そもそも次の recall では
-   * この条件に当たらなくなる）を持つ。
-   *
-   * **`count`/`countKind`（2026-09-16 変更、Issue #329 /
-   * [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md)）**:
-   * `"period"`/`"expired"` と同じ扱いになった——**`countKind` は常に `"exact"`。**
-   * 件数は `MemoryStore.aggregateScope`（`ScopeAggregate.filteredDecayed`）が、
-   * 段1へ押し下げているのと**同じ述語**の `count(*) FILTER` で厳密に数える。
-   *
-   * **⚠ 戻り値の意味が変わった。** ADR 0173 より前は `"lower_bound"` 固定であり、
-   * その `count` は「core の後置フィルタが実際に落とした件数」だった——既定の
-   * ANN 単独経路では段1の押し下げが先に候補を除くため、**この omission 自体が
-   * 一度も現れなかった**（Issue #329）。今は「scope 内で減衰しきっていた件数」を名乗る。
-   * **その2つは違う数である**——後者は「ANN が k' の窓の中で落とした件数」ではない。
-   * 窓の内側で何件落ちたかは
-   * [ADR 0011](../../../docs/decisions/0011-no-window-count-in-ann-stage.md) の
-   * 限界として引き続き不明である。ただし `archived`/`period`/`expired`/`not_yet_valid`
-   * も**すべて前者**を数えており、`docs/recall.md` §5「スコープの外延」の契約が
-   * そもそも前者である ⟹ 契約と整合する。
-   *
-   * **⚠ `"archived"` 等と違い、この件数は `IndexBand.totalInScope` から除かれていない**
-   * ——減衰しきった Memory はスコープ内に在る（`ScopeAggregate.filteredDecayed` の doc）。
-   *
-   * **`scopeRelation` は `"within_scope"` である（Issue #352 / ADR 0174）。**
-   * `decayed` は**スコープ内に在るまま到達しなかった側**である。`totalInScope` から
-   * 引かれない。引くと、正典が否定した「消える」になる——
-   * `docs/north-star.md`「目指す姿」の逐語:
-   * 「使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。」
-   * これに対し `"archived"`/`"expired"`/`"not_yet_valid"` は `scopeRelation:
-   * "outside_scope"` であり、`totalInScope` から引かれる（各条件の doc 参照）。
-   *
-   * **`"expired"`/`"not_yet_valid"`（Issue #280、Issue #202 第2弾、マネージャー決定3）**:
-   * `RecallQuery.validAt` ゲート（既定 `now`）が落とした Memory を名指しする。
-   * - `"expired"`: `validUntil` が `validAt` 以前（`validUntil <= validAt`）——
-   *   その事実はもう真ではない。
-   * - `"not_yet_valid"`: `validFrom` が `validAt` より後（`validFrom > validAt`）——
-   *   その事実はまだ真になっていない。
-   *
-   * **⚠ 1つの `"invalid"` のような値に束ねない。** ゲートは両端を独立に落とす
-   * （`validFrom` 超過と `validUntil` 超過は別の原因）。1つに束ねると、
-   * 「まだ来ていない」のか「もう過ぎた」のかを呼び出し側が判定できなくなり、
-   * **issue が禁じる「片方だけ名指しして残りが黙って減る」形になる**——
-   * `"superseded"`/`"forgotten"` を分けた ADR 0027 と同じ判断。
-   *
-   * **`count`/`countKind` は `"period"` と同じ扱い**:
-   * 段1（ANN・語彙の両チャンネル）へ SQL の `WHERE` として押し下げているため
-   * （`VectorFilter.validAt`/`LexicalFilter.validAt`）、`MemoryStore.aggregateScope`
-   * の `count(*) FILTER` で厳密集計できる。⟹ `countKind` は常に `"exact"`。
-   *
-   * **⚠ 2026-09 訂正（Issue #352 / ADR 0174）**: 以前この段落は「`"decayed"` は ANN にしか
-   * 押し下げていないので `lower_bound` になるのと対照的」と書いていたが、これは
-   * ADR 0173（2026-09-16）で古くなっていた——`"decayed"` の `countKind` はその ADR で
-   * `"lower_bound"` から `"exact"` へ上がっている（`decayed` の doc 参照）。**`"expired"`/
-   * `"not_yet_valid"` と `"decayed"` の `countKind` は今日どちらも `"exact"` であり、
-   * 対照は無い。** 両者が実際に違うのは `countKind` ではなく `scopeRelation`
-   * （下記）である。
+   * - `"superseded"` と `"forgotten"` は分けて持つ（ADR 0027）。`superseded` は置き換えという機構の都合
+   *   （`superseded_by_id` で辿れる）、`forgotten` は利用者が明示的に忘れさせた製品の振る舞い。
+   *   束ねると、呼び出し側がどちらかを判定できなくなる。
+   * - **`"tenant"` は union に在るが、生成するコードが無い。意図的に、恒久的に来ない**（ADR 0117）。
+   *   tenant はスコープの外側の境界で、`filtered` としては報告しない（`ScopeAggregate` の doc）。
+   * - `"taxonomy"`: `RecallQuery.labels` による絞り込みが落とした Memory を数える（ADR 0318、ADR 0323）。
+   * - `"decayed"`（ADR 0153）: `decayFloorAt` を過ぎた Memory。`"archived"` に相乗りさせない。
+   *   `archived` は `status` 列のゲート、`decayed` は `decay_floor_at` 列のゲートで、次の一手も違う
+   *   （`archived` は `restoreArchived`、`decayed` は強化すれば `decayFloorAt` が延びて次の recall で当たらなくなる）。
+   *   `countKind` は常に `"exact"`（ADR 0173）。件数は `ScopeAggregate.filteredDecayed` が、段1へ押し下げているのと
+   *   同じ述語で数える。「ANN が k' の窓の中で落とした件数」ではない（窓の内側の件数は ADR 0011 の限界として不明）。
+   *   `scopeRelation` は `"within_scope"` で、`IndexBand.totalInScope` から除かれない。
+   * - `"expired"`: `validUntil <= validAt`。`"not_yet_valid"`: `validFrom > validAt`
+   *   （`RecallQuery.validAt` ゲート、既定 `now`）。1つの `"invalid"` に束ねない（ADR 0027 と同じ判断）。
+   *   `countKind` は常に `"exact"`（段1へ押し下げているため `aggregateScope` で厳密集計できる）。
    */
   condition:
     | "tenant"
@@ -233,10 +129,8 @@ export interface FilteredOmission {
     | "expired"
     | "not_yet_valid";
   /**
-   * この `condition` が `IndexBand.totalInScope` の内側と外側のどちらの群に属するかを
-   * 名乗る（Issue #352 / ADR 0174）。**どの条件がどちらかを決める唯一の場所は
-   * `FILTERED_CONDITION_SCOPE_RELATION` である**——ここでは決めない・重複させない
-   * （式を2箇所に書くと必ずずれる、ADR 0038 が実測した穴）。
+   * この `condition` が `IndexBand.totalInScope` の内側と外側のどちらの群に属するか（ADR 0174）。
+   * 決める唯一の場所は `FILTERED_CONDITION_SCOPE_RELATION`（式を2箇所に書くとずれる。ADR 0038）。
    */
   scopeRelation: ScopeRelation;
   /** この種類で落ちた候補の件数。 */
@@ -246,23 +140,14 @@ export interface FilteredOmission {
 }
 
 /**
- * `FilteredOmission.condition` のどの値がどちらの `ScopeRelation` かを決める、
- * **唯一の場所**（Issue #352 / ADR 0174）。`omitted` を組み立てる側
- * （`recall-runtime.ts`）は、この定数から読むだけにする——式をここと組み立て側の
- * 2箇所に書くと、どちらか一方だけ直して他方を直し忘れたときに黙ってずれる
- * （ADR 0038 が実測した穴と同じ形）。
+ * `FilteredOmission.condition` のどの値がどちらの `ScopeRelation` かを決める唯一の場所（ADR 0174）。
+ * `omitted` を組み立てる側（`recall-runtime.ts`）はここから読むだけにする。式を2箇所に書くと、
+ * 片方だけ直して黙ってずれる（ADR 0038）。
  *
- * `Record<FilteredOmission["condition"], ScopeRelation>` という型そのものが、
- * `condition` の union に値を足したときにこの定数の更新漏れを型エラーにする
- * （キー不足・キー余剰のどちらも赤くなる）。実行時にも網羅性を検査する歯が
- * `packages/core/src/__tests__/` に在る（`OmissionSchema`/`condition` の enum と
- * このオブジェクトのキー集合を突き合わせる、`omission-kind-generation.test.ts` と
- * 同じ作法）。
+ * `Record<FilteredOmission["condition"], ScopeRelation>` の型が、`condition` に値を足したときの更新漏れを
+ * 型エラーにする。
  *
- * - `tenant`/`superseded`/`forgotten`/`archived`/`taxonomy`/`period`/`expired`/
- *   `not_yet_valid` → `"outside_scope"`（スコープを定義するゲートで落ちた）。
- * - `decayed` → `"within_scope"`（スコープ内に居るまま到達しなかった。`ScopeRelation`
- *   の doc コメントに理由の全文がある）。
+ * - `decayed` → `"within_scope"`、それ以外 → `"outside_scope"`（理由は `ScopeRelation`）。
  */
 export const FILTERED_CONDITION_SCOPE_RELATION: Record<
   FilteredOmission["condition"],
@@ -280,14 +165,10 @@ export const FILTERED_CONDITION_SCOPE_RELATION: Record<
 };
 
 /**
- * **排他性契約（Issue #421 / [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）:
- * `nearMisses`（および `count` が数える集合）は、`RecallResult.memories` に実際に
- * 返った memoryId を含まない。** 段2はこの Omission を「閾値未満で落ちた」候補から
- * 確定させるが、段3.5（連想）や段3（必須の同伴取得）がその候補を後から
- * `RecallResult.memories` へ昇格させることがある——その場合、昇格した分は `count`/
- * `nearMisses` の両方から取り下げる（`recall-runtime.ts` の「排他性契約」ブロック）。
- * ⟹ **`nearMisses` に載っている memoryId が、同じ `recall()` の `memories` に
- * 同時に現れることは無い。**
+ * **排他性契約（[ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）:
+ * `nearMisses`（および `count` が数える集合）は、`RecallResult.memories` に実際に返った memoryId を含まない。**
+ * 段3.5（連想）や段3（必須の同伴取得）が候補を後から `memories` へ昇格させたときは、昇格した分を
+ * `count`/`nearMisses` の両方から取り下げる。
  */
 export interface BelowThresholdOmission {
   /** 常に `"below_threshold"`（{@link Omission} の判別の鍵）。 */
@@ -297,38 +178,28 @@ export interface BelowThresholdOmission {
   /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
   /**
-   * **`count` 全件のサンプルではない。** 実装（`recall-runtime.ts`）は
-   * `belowThreshold`（段2の閾値未満で落ちた全候補）のうち**上位5件だけ**を積む
-   * （ADR 0203「決めたこと」5 の「`nearMisses` の上位5件サンプル」）——`count` が5を超えても
-   * `nearMisses.length` は5を超えない。6件目以降は `count` にだけ数として残り、
-   * 個体としては現れない。
+   * **`count` 全件のサンプルではない。** `belowThreshold` のうち上位5件だけを積む（ADR 0203）。
+   * 6件目以降は `count` にだけ数として残り、個体としては現れない。
    */
   nearMisses?: { memoryId: MemoryId; score: number }[];
 }
 
 /**
- * **`stage`（Issue #375 / [ADR 0188](../../../docs/decisions/0188-association-over-limit-omission.md)）**:
- * この上限切り捨てがどの段で起きたかを言う。次の一手を変える欄なので必須にした
- * （`filtered.condition` と同じ理由——「どの上限を動かせばよいか」が段ごとに違う）。
+ * **`stage`（[ADR 0188](../../../docs/decisions/0188-association-over-limit-omission.md)）**:
+ * この上限切り捨てがどの段で起きたかを言う。次の一手を変える欄なので必須。
  *
- * - `"rescore"` — 段2。`RecallQuery.limit` を超えた分（`docs/recall.md` §2 段2）。
- *   次の一手: `limit` を増やす、あるいはページングする。
- * - `"association"` — 段3.5。`RecallAssociationQuery.maxCount` を超えた分
- *   （`docs/recall.md` §9）。次の一手: `maxCount` を増やす。**`limit` を増やしても
- *   直らない**——連想枠の候補は段2の `limit` とは別の上限（`maxCount`）で切られる。
- * - `"relation"`（Issue #207/#933 PR2、ADR 0292 決定3-a、ADR 0381）— 段3。多者間の
- *   `contested` 群（`RelationStore.listRelated` で辿った同伴）が群ごとの上限件数
- *   （{@link RecallQuery.relationMaxCount}、省略時は
- *   {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ値）を超えた分
- *   （`docs/recall.md` §2 段3・§8）。次の一手: `RecallQuery.relationMaxCount` を増やす
- *   （ADR 0396。それまでは呼び出し側から動かす口が無く、群そのものを分割する
- *   〔`resolveContestedGroup` で一部を解消する〕以外に手立てが無かった）。`limit` や
+ * - `"rescore"` — 段2。`RecallQuery.limit` を超えた分。次の一手: `limit` を増やす、あるいはページングする。
+ * - `"association"` — 段3.5。`RecallAssociationQuery.maxCount` を超えた分。次の一手: `maxCount` を増やす
+ *   （`limit` を増やしても直らない）。
+ * - `"relation"`（ADR 0292 決定3-a、ADR 0381）— 段3。多者間の `contested` 群が群ごとの上限件数
+ *   （{@link RecallQuery.relationMaxCount}、省略時は {@link DEFAULT_RECALL_ASSOCIATION}.maxCount と同じ値）を
+ *   超えた分。次の一手: `RecallQuery.relationMaxCount` を増やす（ADR 0396）。`limit` や
  *   `association.maxCount` を増やしても直らない。
  */
 export interface OverLimitOmission {
   /** 常に `"over_limit"`（{@link Omission} の判別の鍵）。 */
   kind: "over_limit";
-  /** どの段の上限で切られたか（上の doc: `rescore` は `limit`、`association` は `maxCount`、`relation` は段3の同伴取得の上限）。 */
+  /** どの段の上限で切られたか（上の doc）。 */
   stage: "rescore" | "association" | "relation";
   /** 上限を超えて落ちた候補の件数。 */
   count: number;
@@ -348,18 +219,13 @@ export interface BudgetDroppedOmission {
 
 /**
  * `not_indexed` の理由。`embeddingStatus` のうち `'ready'` 以外の3値に対応する。
- *
- * ADR 0008 の基準（区別があると次の一手が変わるか）に照らして分ける:
- * `pending` は待てば解決する、`failed` はパイプラインの調査が要る、
+ * 区別があると次の一手が変わるので分ける（ADR 0008）: `pending` は待てば解決する、`failed` はパイプラインの調査が要る、
  * `skipped` は意図した除外なので何もしなくてよい。
  *
- * ⚠ **`failed` でも、ベクトル行が在ることがある**（今の振る舞い、ADR 0053 の追記、Issue #962）。
- * 埋め込みジョブが `VectorStore.upsert` を終えた後で `ready` の書き込み（または
- * `PostgresVectorStore.upsert` の後の ANALYZE）が失敗すると、ワーカー1体でも `failed` が書かれる。このとき記憶は
- * `recall` の `memories` に返りつつ、同じ呼び出しの `not_indexed{ reason: "failed" }` にも
- * 数えられる。原因はパイプラインそのものではなく、その書き込みの一時的な失敗である。
- * `Runtime.reembed(ctx, { statuses: ["failed"], limit })` で積み直してジョブを処理すれば、
- * `ready` に戻る。
+ * `failed` でも、ベクトル行が在ることがある（ADR 0053 の追記）。埋め込みジョブが `VectorStore.upsert` を終えた後の
+ * `ready` の書き込み（または ANALYZE）が失敗すると `failed` が書かれ、その記憶は `memories` に返りつつ同じ呼び出しの
+ * `not_indexed{ reason: "failed" }` にも数えられる。`Runtime.reembed(ctx, { statuses: ["failed"], limit })` で
+ * 積み直してジョブを処理すれば `ready` に戻る。
  */
 export type NotIndexedReason = "pending" | "failed" | "skipped";
 
@@ -385,10 +251,8 @@ export interface NotIndexedOmission {
 /**
  * この札が立っている理由（[ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md)）。
  *
- * **🔴 3つ目の状態「証明できたので立てない」は、この union に無い。**
- * 証明できた場合、この omission は**そもそも積まれない**——**沈黙は「値」ではなく「不在」で表す。**
- * こうしないと「安全だと分かった」と「判定できなかった」が同じ形（omission が在る）で返り、
- * ADR 0069 が「沈黙と判定不能を別の顔で返す」と決めた意味が消える。
+ * 「証明できたので立てない」はこの union に無い。証明できた場合は omission を積まない
+ * （沈黙は「値」ではなく「不在」で表す）。値にすると「安全だと分かった」と「判定できなかった」が同じ形で返る。
  */
 export type AnnTruncationCertainty = "loss_possible" | "undecidable";
 
@@ -399,11 +263,10 @@ export interface AnnTruncatedOmission {
   /** 常に `"unknown"`（件数は分からない）。 */
   countKind: "unknown";
   /**
-   * **なぜこの札が立っているか**（ADR 0069）。
-   *
+   * なぜこの札が立っているか（ADR 0069）。
    * - `loss_possible` — 窓の外の候補が top-k へ入りえた。`safetyRatio` が付く。
-   * - `undecidable` — 判定そのものができなかった（上界が宣言されていない等）。
-   *   **「損しなかった」ではない。**`undecidableReason` が付く。
+   * - `undecidable` — 判定そのものができなかった（上界が宣言されていない等）。「損しなかった」ではない。
+   *   `undecidableReason` が付く。
    */
   certainty: AnnTruncationCertainty;
   /**
@@ -413,8 +276,8 @@ export interface AnnTruncatedOmission {
    */
   safetyRatio?: number;
   /**
-   * この判定が立っている**前提**（ADR 0069 §6・§8）。**歯にできていないものを含む。**
-   * 空配列は「前提なしの保証」を意味する——**コメントではなく、この配列自身に語らせる。**
+   * この判定が立っている前提（ADR 0069 §6・§8）。検証できていないものを含む。
+   * 空配列は「前提なしの保証」を意味する。
    */
   assumptions?: readonly string[];
   /** `certainty: 'undecidable'` のときだけ。**なぜ判定できなかったか。** */
@@ -423,47 +286,21 @@ export interface AnnTruncatedOmission {
 
 /**
  * 近似索引（ANN）が、scope 内にまだ見られていない候補を残したことの報告
- * （[ADR 0025](../../../docs/decisions/0025-ann-underfill-is-not-reported-in-omitted.md) の
- * 実測、[ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md) の決定、
- * [ADR 0193](../../../docs/decisions/0193-ann-unreached-covers-full-window.md) が
- * 発火条件を拡張）。
+ * （[ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md)、
+ * [ADR 0193](../../../docs/decisions/0193-ann-unreached-covers-full-window.md)）。
  *
- * **`ann_truncated` とは別の問いに答える。** `ann_truncated`
- * （[ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md)）は
- * 「窓の外（k' 位より後ろ）は k 位を抜けないと証明できるか」に答える札であり、その証明は
- * **窓の中身（`annHits`）が scope の真の上位 k' 件である**ことを前提にしている。
- * `ann_unreached` は逆に「近似索引は scope の候補を拾いきったか」に答える札であり、
- * **窓が満杯でも拾いきれているとは限らない**——近似索引は scope の他の場所へ辿って
- * しまい、窓の中身自体が真の上位 k' 件からズレている（＝より近い候補を取りこぼしている）
- * ことがありうる（`ann-truncation.ts` の doc コメント参照）。
+ * `ann_truncated` とは別の問いに答える。あちらは「窓の外は k 位を抜けないと証明できるか」で、その証明は
+ * 窓の中身が scope の真の上位 k' 件であることを前提にする。こちらは「近似索引は scope の候補を拾いきったか」で、
+ * 窓が満杯でも拾いきれているとは限らない（`ann-truncation.ts`）。窓の満杯/未満を問わず判定するので、
+ * `ann_truncated` と `ann_unreached` は同時に立ちうる。
  *
- * **🔴 ADR 0193 より前は `annHits.length < kPrime`（窓が埋まっていない）という条件が
- * 付いており、`ann_truncated` と排反だった。** その条件は「窓が埋まっていれば scope の
- * 候補を ANN が拾いきれている」という前提に立っていたが、その前提こそが
- * `ann-truncation.ts` の doc コメントが明示的に否定している事象（近似索引が scope の
- * 他所へ行った場合、窓が満杯でも上界は破れる）だった。ADR 0193 はこの条件を落とし、
- * **窓の満杯/未満を問わず、scope 内にまだ見られていない候補が残っているかだけ**で
- * 判定するよう直した。**⟹ 今日 `ann_truncated` と `ann_unreached` は同時に立ちうる**
- * ——同じ事象の重複ではなく、別の問いにそれぞれ答えているだけである。
+ * **件数を持たせない。`countKind` は常に `'unknown'`。** ANN が触れなかった候補を数えるには scope 全体を
+ * 厳密に走査する必要があり、それでは ANN を使う意味が無くなる。新しい語彙を作らず、既にある `'unknown'` で
+ * 「取りこぼしたのは確かだが、何件かは分からない」とだけ言う。
  *
- * **🔴 件数を持たせない。`countKind` は常に `'unknown'` である。**
- * 理由: この系は「何件取りこぼしたか」を原理的に知りようがない——ANN が触れなかった
- * 候補を数えるには、scope 全体を厳密に走査して ANN が返した集合と突き合わせる必要があり、
- * それをやるなら ANN を使う意味（近似で索引を使い倒す）自体が無くなる。
- * だから新しい語彙（例えば独自の "unreachable" カウント種別）を作らず、既にある
- * `CountKind` の `'unknown'` で「取りこぼしたのは確かだが、何件かは分からない」とだけ言う。
- * （`AnnTruncatedOmission` が同じ形をしているのに倣った。）
- *
- * **`severity?: AnnUnreachedSeverity`（[ADR 0288](../../../docs/decisions/0288-ann-unreached-severity.md)、
- * Issue #361）。**ADR 0193 §8-1 が引き受けた負債（`eligible > kPrime` のテナントでは
- * この札が実質すべての `recall()` で鳴る「常時オン」になる）に対して、呼び手が
- * 「構造上いつも鳴る札」と「実損の兆候がある札」を濾せるようにするために足した。
- *
- * **任意（`?`）にする理由**: `docs/migration-v1.md` 項目9・10 と ADR 0178 は
- * 返り値型への**必須**フィールドの追加を破壊的変更に数える。v1.0.0 出荷済みの
- * この repo で破壊的変更を出さないため、[ADR 0282](../../../docs/decisions/0282-score-breakdown-affinity-measured.md)
- * （`affinityMeasured?: boolean`）と同じ形——**型は任意だが、runtime は必ず値を入れる**
- * ——に揃えた。値の作り方・偽陰性の射程は ADR 0288 参照。
+ * `severity` は任意（[ADR 0288](../../../docs/decisions/0288-ann-unreached-severity.md)）。返り値型への必須
+ * フィールドの追加は破壊的変更に数える（`docs/migration-v1.md` 項目9・10、ADR 0178）ので、型は任意にして
+ * runtime は必ず値を入れる（ADR 0282 と同じ形）。
  */
 export interface AnnUnreachedOmission {
   /** 常に `"ann_unreached"`（{@link Omission} の判別の鍵）。 */
@@ -475,36 +312,23 @@ export interface AnnUnreachedOmission {
 }
 
 /**
- * {@link AnnUnreachedOmission.severity} の値（[ADR 0288](../../../docs/decisions/0288-ann-unreached-severity.md)、Issue #361）。
+ * {@link AnnUnreachedOmission.severity} の値（[ADR 0288](../../../docs/decisions/0288-ann-unreached-severity.md)）。
  *
- * - `"warning"`: 同じ recall で、ANN 窓が実際に到達可能な下限（ADR 0285 追記の
- *   `annReturnedFewerThanReachable` が真になる条件——`annStageTrace.detail` の
- *   同じキーと**同じ式**から引く）に届かなかった。
- * - `"info"`: それ以外——窓は満杯で、`eligible > kPrime` という構造だけで鳴っている
- *   （ADR 0193 §8-1 が「常時オン」と名指しした状態そのもの）。
+ * - `"warning"`: ANN 窓が実際に到達可能な下限（`annStageTrace.detail` の `annReturnedFewerThanReachable` と同じ式）
+ *   に届かなかった。
+ * - `"info"`: それ以外。窓は満杯で、`eligible > kPrime` という構造だけで鳴っている。
  *
- * **⚠ `"info"` は「損が無い」の保証ではない。** ANN の近似探索が窓を満杯にしたまま
- * 真の近傍を取りこぼす事象（`ann-truncation.ts` の doc コメント参照）はこの値の外に
- * 居る——ADR 0288「射程」参照。
+ * `"info"` は「損が無い」の保証ではない。窓を満杯にしたまま真の近傍を取りこぼす事象は射程の外（ADR 0288）。
  */
 export type AnnUnreachedSeverity = "info" | "warning";
 
 /**
- * 段2の閾値比較が**どちらにも決まらなかった**候補
- * （[ADR 0044](../../../docs/decisions/0044-score-not-comparable-omission.md)）。
+ * 段2の閾値比較が**どちらにも決まらなかった**候補（[ADR 0044](../../../docs/decisions/0044-score-not-comparable-omission.md)）。
  *
- * 段2は `total >= scoreThreshold` で残し、`total < scoreThreshold` で
- * `below_threshold` に数える。**この2つは補集合ではない**——どちらかの値が `NaN` だと
- * **両方の比較が false** になり、候補は残らないのに落ちた記録も残らなかった。
- *
- * **⚠ `omitted` が空配列になることは「取りこぼしは無い」という主張である。**
- * 黙っている欄ではなく、積極的に誤った答えを返していた。だから種類を足した。
- *
- * **件数を持つ。**[ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md) の
- * `ann_unreached` が件数を持たないのは「原理的に数えられない」からだが、
- * **こちらは段2が触った候補を数え上げるだけなので、本当に数えられる。**
- * ただし `countKind` は**リテラルで名乗らない**——三分割が網羅であることを実際に確かめた
- * 結果から引き継ぐ（`recall-runtime.ts` の `partitionByThreshold` を参照）。
+ * `total >= scoreThreshold` で残す側と `total < scoreThreshold` で `below_threshold` に数える側は補集合ではない。
+ * どちらかの値が `NaN` だと両方の比較が false になり、`omitted` が空でも取りこぼしが無いとは言えなくなる。
+ * `ann_unreached` と違って件数は数えられる。`countKind` はリテラルで名乗らず、三分割が網羅であることの
+ * 確認結果から引き継ぐ。
  */
 export interface ScoreNotComparableOmission {
   /** 常に `"score_not_comparable"`（{@link Omission} の判別の鍵）。 */
@@ -519,18 +343,11 @@ export interface ScoreNotComparableOmission {
  * 段3で組んだ「単位」から、候補が**どの単位にも入らないまま消えた**ことの報告
  * （[ADR 0043](../../../docs/decisions/0043-unit-assembly-dropped-omission.md)）。
  *
- * 段3は `contested` の対向を必ず同伴させるため、候補を「単位（Unit）」にまとめる。
- * **その繰り返しは `contestedWithId` が一対一であることを前提にしている**
- * （`docs/memory-model.md` §5「一対一の対向関係に限って Phase 1 で成立させるための補助列」）。
- * **⚠ 一対一が破れていると、候補がどの単位にも入らないまま落ちる。**
- * そうなるとその候補は返り値にも他のどの `omitted` にも現れず、**黙って消える。**
+ * 段3は `contested` の対向を同伴させるために候補を単位にまとめる。その繰り返しは `contestedWithId` が一対一であることを
+ * 前提にしており（`docs/memory-model.md` §5）、破れていると候補が返り値にも他のどの `omitted` にも現れず黙って消える。
+ * この欄は「黙らせない」ためだけに在り、消えたことの良し悪しは決めない。
  *
- * **⟹ この欄は「黙らせない」ためだけに在る。**候補が消えたこと自体が良いか悪いかは
- * ここでは決めない——決めるのは、`contested` を作る主体が入る Phase 2 の判断である。
- *
- * **`countKind` は `'lower_bound'` である。**単位が候補を*覆えていない*数は数えられるが、
- * 別の候補が二重に単位へ入っていると、その分だけ消失が隠れる。
- * **⟹ 「少なくともこの件数は消えた」までしか言えない。**
+ * `countKind` は `'lower_bound'`（別の候補が二重に単位へ入っているとその分の消失が隠れる）。
  */
 export interface UnitAssemblyDroppedOmission {
   /** 常に `"unit_assembly_dropped"`（{@link Omission} の判別の鍵）。 */
@@ -542,22 +359,13 @@ export interface UnitAssemblyDroppedOmission {
 }
 
 /**
- * **語彙チャンネルが窓（k'）を埋めたまま打ち切ったことの報告**
- * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §7、Issue #106）。
+ * 語彙チャンネルが窓（k'）を埋めたまま打ち切ったことの報告（[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §7）。
  *
- * **`ann_truncated` に相乗りさせない。**あちらは
- * [ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md) が
- * `safetyRatio` による損失可能性の判定まで作り込んだ札であり、
- * **語彙チャンネルにはその判定機構が無い。**同じ札に潰すと、
- * 「証明を試みた結果」と「証明の機構をそもそも持たない」が同じ顔で返る。
+ * `ann_truncated` に相乗りさせない。あちらは `safetyRatio` による損失可能性の判定まで作り込んだ札で
+ * （[ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md)）、語彙チャンネルにはその機構が無い。
+ * 同じ札にすると「証明を試みた結果」と「証明の機構を持たない」が同じ顔で返る。
  *
- * **🔴 件数を持たない。`countKind` は常に `'unknown'` である。**
- * 窓の外に何件あるかを言うには全件を数え直す必要があり、
- * [ADR 0011](../../../docs/decisions/0011-no-window-count-in-ann-stage.md) /
- * [ADR 0024](../../../docs/decisions/0024-remove-exact-counts-option.md) が
- * ANN 段について閉じた道と同じ理由で、ここでも採らない。
- * 形は [ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md) の
- * `ann_unreached` に倣う——**「取りこぼしたのは確かだが、何件かは分からない」**とだけ言う。
+ * 件数を持たない。`countKind` は常に `'unknown'`（窓の外の件数には全件を数え直す必要がある。ADR 0011、ADR 0024）。
  */
 export interface LexicalTruncatedOmission {
   /** 常に `"lexical_truncated"`（{@link Omission} の判別の鍵）。 */
@@ -566,7 +374,7 @@ export interface LexicalTruncatedOmission {
   countKind: "unknown";
 }
 
-/** recall が返さなかったものの理由（docs/recall.md §4、ADR 0008）。`kind` で判別する。「無い」の種類を潰さないための札である。 */
+/** recall が返さなかったものの理由（docs/recall.md §4、ADR 0008）。`kind` で判別する。 */
 export type Omission =
   | StageSkippedOmission
   | FilteredOmission
@@ -648,17 +456,14 @@ const AnnTruncatedOmissionSchema = z.object({
   kind: z.literal("ann_truncated"),
   countKind: z.literal("unknown"),
   certainty: z.enum(["loss_possible", "undecidable"]),
-  // 3欄はどれも「その certainty のときだけ在る」ものだが、**zod では相関を強制していない。**
-  // 相関（loss_possible なら safetyRatio が在り 1 未満、undecidable なら undecidableReason が
-  // 在る）は `decideAnnTruncation` が構成するときに満たしており、そちらを歯で固定している——
-  // ここで `superRefine` を重ねると、**同じ規則が2箇所に載って食い違いうる**（ADR 0011 が
-  // 「複数の経路から同じ意味の件数を出すと食い違う」を避けたのと同じ理由）。
+  // 3欄は「その certainty のときだけ在る」が、zod では相関を強制しない。相関は `decideAnnTruncation` が
+  // 構成するときに満たしており、`superRefine` を重ねると同じ規則が2箇所に載って食い違いうる（ADR 0011）。
   safetyRatio: z.number().optional(),
   assumptions: z.array(z.string()).readonly().optional(),
   undecidableReason: z.string().optional(),
 }) satisfies z.ZodType<AnnTruncatedOmission>;
 
-/** `AnnUnreachedSeverity` の zod スキーマ。値を実行時に検査するときに使う（型 `AnnUnreachedSeverity` と揃えてある）。 */
+/** `AnnUnreachedSeverity` の zod スキーマ。 */
 export const AnnUnreachedSeveritySchema = z.enum([
   "info",
   "warning",
@@ -667,7 +472,7 @@ export const AnnUnreachedSeveritySchema = z.enum([
 const AnnUnreachedOmissionSchema = z.object({
   kind: z.literal("ann_unreached"),
   countKind: z.literal("unknown"),
-  // ADR 0288: 任意欄——非破壊（docs/migration-v1.md 項目9・10、ADR 0178）。
+  // ADR 0288: 任意欄（非破壊。docs/migration-v1.md 項目9・10、ADR 0178）。
   severity: AnnUnreachedSeveritySchema.optional(),
 }) satisfies z.ZodType<AnnUnreachedOmission>;
 
@@ -688,20 +493,6 @@ const UnitAssemblyDroppedOmissionSchema = z.object({
   countKind: CountKindSchema,
 }) satisfies z.ZodType<UnitAssemblyDroppedOmission>;
 
-/**
- * **2026-09-17 追記（Issue #272、[ADR 0181](../../../docs/decisions/0181-schema-type-equals-parity.md)）**:
- * `satisfies z.ZodType<Omission>` を足した。この discriminated union は、11本の枝
- * それぞれには `satisfies z.ZodType<XxxOmission>` が付いているのに、まとめのこの1行にだけ
- * 付いていなかった（55箇所の `satisfies z.ZodType<...>` のうち、唯一この形の宣言が
- * 欠けていた箇所）。**足しても `tsc` は緑のまま**——各枝が既に個別に検査されているため、
- * 実質的な検査の追加ではないが、「まとめの discriminated union 自体は誰も見ていない」
- * という読み手の誤解を防ぐ。`packages/core/src/__tests__/schema-type-equals-parity.test.ts`
- * が、この1行が無くても `Equals<z.infer<typeof OmissionSchema>, Omission>` として
- * 同じ検査をテスト側からも固定している（この行が万一巻き戻っても、あちらの歯が拾う）。
- *
- * （2026-10-03 訂正）上の本数・箇所数は当時の数え方であり、`Omission` の種類や `satisfies`
- * の宣言が増減するたびに変わる。今の数は `Omission` の union と各スキーマの宣言を直接数えること。
- */
 export const OmissionSchema = z.discriminatedUnion("kind", [
   StageSkippedOmissionSchema,
   FilteredOmissionSchema,
@@ -716,35 +507,17 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
   UnitAssemblyDroppedOmissionSchema,
 ]) satisfies z.ZodType<Omission>;
 
-// ---------------------------------------------------------------------------
-// 目次帯 / 被覆不変条件（docs/recall.md §5）
-// ---------------------------------------------------------------------------
-
 /**
- * D12: `key` は `string | null` にする。`subject_id IS NULL` の群（`axis: 'subject'`）や、
- * 参加資格のあるラベルを1つも持たない群（`axis: 'taxonomy'` の残差群）を表すため。
- * `'(none)'` のような番兵文字列は実在する subject 名・ラベル名と衝突しうるので採らない。
+ * `key` は `string | null`。`subject_id IS NULL` の群（`axis: 'subject'`）や、参加資格のあるラベルを1つも持たない群
+ * （`axis: 'taxonomy'` の残差群）を表す。`'(none)'` のような番兵文字列は実在する subject 名・ラベル名と衝突しうるので採らない。
  *
- * **⚠ `axis` は Issue #206（[ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)）
- * の棚卸し時点では `"subject"` でしか生成されなかった。**
- * - `"taxonomy"`: 2026-09-25（Issue #201 PR-B、
- *   [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）に実体を持った。
- *   `RecallQuery.taxonomyGroups: true` を渡したときだけ生成される（既定は今日どおり
- *   `"subject"` のみ）。
- * - `"time_window"`: 2026-09-16 に落とした（ADR 0117 の分類3、
- *   [ADR 0144](../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)
- *   で実施。`@mnemora/core` の公開 API の破壊的変更）。実装が消えたのに union に値だけ
- *   残っていたもので、生成するコードは一度も無かった。
+ * `axis: 'taxonomy'` は `RecallQuery.taxonomyGroups: true` を渡したときだけ生成される（既定は `"subject"` のみ。ADR 0323）。
  *
- * **🔴 `axis: 'taxonomy'` の被覆不変条件は `axis: 'subject'` と違う。** `subject` は
- * 1 Memory が厳密に1つの値（または `null`）しか持たないため、`axis: 'subject'` の
- * `count` の総和は必ず `ScopeAggregate.totalInScope`/`IndexBand.totalInScope` と一致する。
- * **`taxonomy` は多対多（1 Memory が複数のラベルを持ちうる）ため、`axis: 'taxonomy'` の
- * `count` の単純合計は `totalInScope` と一致しない（超えうる）。** 保証されるのは
- * 「合計の一致」ではなく「取りこぼしが無いこと」——スコープ内の Memory は必ず
- * (a) 少なくとも1つのラベル群、または (b) 残差群（`key: null`）のどちらかに数えられる
- * （両方に載ることは無い——(a)(b) は排他的だが、ラベル群どうしは排他的ではない）。
- * 詳細・適合テストの形は ADR 0323「決定6」、`docs/recall.md` §5 を参照。
+ * **被覆不変条件は軸で違う。** `axis: 'subject'` の `count` の総和は必ず `totalInScope` と一致する
+ * （1 Memory が持つ主題は高々1つ）。**`axis: 'taxonomy'` は多対多なので、`count` の単純合計は `totalInScope` と
+ * 一致しない（超えうる）。** 保証されるのは「取りこぼしが無いこと」で、スコープ内の Memory は必ず
+ * (a) 少なくとも1つのラベル群、または (b) 残差群（`key: null`）のどちらかに数えられる（(a)(b) は排他的、
+ * ラベル群どうしは排他的ではない）。詳細は ADR 0323「決定6」、`docs/recall.md` §5。
  */
 export interface GroupCount {
   /** 何で群に分けたか（`subject` は主題、`taxonomy` はラベル）。 */
@@ -757,7 +530,7 @@ export interface GroupCount {
   countKind: CountKind;
 }
 
-/** `GroupCount` の zod スキーマ。値を実行時に検査するときに使う（型 `GroupCount` と揃えてある）。 */
+/** `GroupCount` の zod スキーマ。 */
 export const GroupCountSchema = z.object({
   axis: z.enum(["subject", "taxonomy"]),
   key: z.string().nullable(),
@@ -775,20 +548,17 @@ export interface DigestEntry {
   truncated?: boolean;
 }
 
-/** `DigestEntry` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestEntry` と揃えてある）。 */
+/** `DigestEntry` の zod スキーマ。 */
 export const DigestEntrySchema = z.object({
   memoryId: z.string().min(1),
   digest: z.string(),
   truncated: z.boolean().optional(),
 }) satisfies z.ZodType<DigestEntry>;
 
-/**
- * 目次帯がどの上限で切れたか。`entry_limit`（件数上限）・`char_budget`（文字数予算）・
- * `both`（同じ件で両方に同時に当たった。`packDigestBand` の doc 参照）のいずれか。
- */
+/** 目次帯がどの上限で切れたか。`both` は同じ件で件数上限と文字数予算の両方に同時に当たったとき。 */
 export type DigestBandLimitedBy = "entry_limit" | "char_budget" | "both";
 
-/** `DigestBandLimitedBy` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestBandLimitedBy` と揃えてある）。 */
+/** `DigestBandLimitedBy` の zod スキーマ。 */
 export const DigestBandLimitedBySchema = z.enum([
   "entry_limit",
   "char_budget",
@@ -796,17 +566,13 @@ export const DigestBandLimitedBySchema = z.enum([
 ]) satisfies z.ZodType<DigestBandLimitedBy>;
 
 /**
- * 目次帯の被覆度（recall.md §5、ADR 0008 の「『無い』の種類を潰さない」の適用）。
+ * 目次帯の被覆度（recall.md §5、ADR 0008）。
  *
- * **2階建てであることが設計の芯である**（`'none'` というリテラルを足して1つの値に潰さない）:
+ * 2階建てを潰さない（`'none'` というリテラルを足して1つの値にしない）:
  * - `IndexBand.digestBandCoverage` 自体が無い ＝ 帯を作っていない。
- * - `digestBandCoverage` は在るが `limitedBy` が無い ＝ 帯を作ったが、どの上限にも
- *   当たらなかった（＝候補が全件載った）。
+ * - `digestBandCoverage` は在るが `limitedBy` が無い ＝ 帯を作ったが、どの上限にも当たらなかった（候補が全件載った）。
  *
- * この2つを1つの `'none'` に潰すと、「帯を作らなかった（＝呼び出し側が造成すら
- * 要求しなかった、または実装が対応していない）」と「帯を作ったうえで空だった／全部載った」
- * が区別できなくなる——ADR 0008 が禁じている「別の理由を同じ顔にする」を、
- * この欄自身がやることになる。
+ * 潰すと「帯を作らなかった」と「帯を作ったうえで空だった／全部載った」が区別できなくなる。
  */
 export interface DigestBandCoverage {
   /** 実際に帯へ載せた件数。 */
@@ -819,7 +585,7 @@ export interface DigestBandCoverage {
   limitedBy?: DigestBandLimitedBy;
 }
 
-/** `DigestBandCoverage` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestBandCoverage` と揃えてある）。 */
+/** `DigestBandCoverage` の zod スキーマ。 */
 export const DigestBandCoverageSchema = z.object({
   shown: z.number().int().nonnegative(),
   eligible: z.number().int().nonnegative(),
@@ -836,17 +602,16 @@ export interface IndexBand {
   /** `totalInScope` がどこまで正確か（{@link CountKind}）。 */
   countKind: CountKind;
   /**
-   * `recall()` が返さなかった Memory（スコープ内だが `memories` に載っていないもの）の
-   * 1件1行の要旨。**`memories` に入った分の要旨は既に `RecalledMemory.digest` に在るので、
-   * この帯には載せない**（`packDigestBand` を呼ぶ側が `excludeMemoryIds` で除く）。
+   * `recall()` が返さなかった Memory（スコープ内だが `memories` に載っていないもの）の1件1行の要旨。
+   * `memories` に入った分は `RecalledMemory.digest` に在るので載せない（`excludeMemoryIds` で除く）。
    * 決定的な順序で、`digestBandCoverage` の被覆規則に従って切り詰めたもの。
    */
   digestBand?: DigestEntry[];
-  /** `digestBand` の被覆度。`digestBand` を組んだときだけ在る（`DigestBandCoverage` の doc 参照）。 */
+  /** `digestBand` の被覆度。`digestBand` を組んだときだけ在る。 */
   digestBandCoverage?: DigestBandCoverage;
 }
 
-/** `IndexBand` の zod スキーマ。値を実行時に検査するときに使う（型 `IndexBand` と揃えてある）。 */
+/** `IndexBand` の zod スキーマ。 */
 export const IndexBandSchema = z.object({
   groups: z.array(GroupCountSchema),
   totalInScope: z.number().int().nonnegative(),
@@ -855,249 +620,129 @@ export const IndexBandSchema = z.object({
   digestBandCoverage: DigestBandCoverageSchema.optional(),
 }) satisfies z.ZodType<IndexBand>;
 
-// ---------------------------------------------------------------------------
-// 目次帯の定数（docs/recall.md §5、本 PR）
-// ---------------------------------------------------------------------------
-
 /**
  * `RecallQuery.digestBandLimit` の既定値（帯に載せる件数の上限）。
  *
- * **⚠ この値が実際に帯を止めるとは限らない。** 帯は、この件数上限と
- * {@link DIGEST_BAND_MAX_CHARS}（帯全体の文字数上限。呼び出し側からは変えられない）の
- * どちらか**先に当たったほう**で切れる（`packDigestBand`、`digest-band.ts`）。1件の
- * 内部コストは `DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + min(digest長,
- * DIGEST_BAND_MAX_ENTRY_CHARS) + DIGEST_BAND_ENTRY_SEPARATOR_CHARS`（値の正本は
- * `digest-band.ts` の各定数。ここには写さない）なので、**digest が長いテナントほど、
- * この値に届く前に {@link DIGEST_BAND_MAX_CHARS} が先に効く。** 【実測
- * 2026-09-21・合成コーパス】digest が短い（≈15字）水準ではこの値が実際に発火したが、
- * digest が60字を超える水準では全設定で `DIGEST_BAND_MAX_CHARS` が先に効き、この値は
- * 一度も発火しなかった（[Issue #413](https://github.com/takecchi/mnemora/issues/413)、
- * `docs/recall.md` §6「目次帯の量を把握し、調整する」節に詳細）。
- * どちらの上限が実際に効いたかは `IndexBand.digestBandCoverage.limitedBy`
- * （`"entry_limit"` / `"char_budget"` / `"both"`）で読める。
+ * この値が実際に帯を止めるとは限らない。帯は、この件数上限と {@link DIGEST_BAND_MAX_CHARS}
+ * （呼び出し側からは変えられない）の**先に当たったほう**で切れる（`packDigestBand`）。
+ * digest が長いテナントほど、この値に届く前に {@link DIGEST_BAND_MAX_CHARS} が先に効く
+ * （`docs/recall.md` §6「目次帯の量を把握し、調整する」）。
+ * どちらが効いたかは `IndexBand.digestBandCoverage.limitedBy` で読める。
  */
 export const DEFAULT_DIGEST_BAND_LIMIT = 50;
 
 /**
  * 帯全体の文字数予算。呼び出し側からは変えられない（`RecallQuery` に欄を持たない）。
  * `digestBandLimit` にどれだけ大きい値を渡されても、帯全体はこれを超えない。
- *
- * **⚠ digest が短くない限り、実際に帯を止めているのはこちらであって
- * {@link DEFAULT_DIGEST_BAND_LIMIT} ではないことが多い**——理由・実測は
- * {@link DEFAULT_DIGEST_BAND_LIMIT} の doc、`docs/recall.md` §6「目次帯の量を把握し、
- * 調整する」節を参照（[Issue #413](https://github.com/takecchi/mnemora/issues/413)）。
- * 帯を縮めたい呼び出し側は、`digestBandLimit` を「この値 ÷ 帯1件のコスト」未満に
- * しないかぎり、`digestBandLimit` を下げても帯は縮まない。
+ * digest が短くない限り、実際に帯を止めているのはこちらで、`digestBandLimit` を下げても帯は縮まないことが多い
+ * （{@link DEFAULT_DIGEST_BAND_LIMIT}、`docs/recall.md` §6）。
  */
 export const DIGEST_BAND_MAX_CHARS = 4000;
 
 /**
- * 帯に載せる1件の digest の文字数上限。呼び出し側からは変えられない。
- *
- * **⚠ 暫定値である。** 実 digest の長さの実測がリポジトリにごくわずかしか無く
- * （examples/chat の記録済みフィクスチャ程度）、この値を弁別できるだけのデータが無い。
- * 実運用の digest 長が測れたら見直すこと——見直す根拠になるのは「多くの digest が
- * この値の前後で切られている（＝短すぎて情報が削れすぎ、または長すぎて予算を圧迫する）」
- * という実測であり、勘で変えない。
- *
- * **帯1件の内部コストの一部**（{@link DEFAULT_DIGEST_BAND_LIMIT} の doc、
- * `digest-band.ts` の `packDigestBand` 参照）。この値で切り詰められた digest は
+ * 帯に載せる1件の digest の文字数上限。呼び出し側からは変えられない。この値で切り詰められた digest は
  * `truncated: true` を持つ。
+ *
+ * **暫定値。** 実 digest の長さの実測が足りず、この値を弁別できない。見直す根拠は「多くの digest がこの値の前後で
+ * 切られている」という実測であり、勘で変えない。
  */
 export const DIGEST_BAND_MAX_ENTRY_CHARS = 120;
 
-// ---------------------------------------------------------------------------
-// スコープの外延（マネージャー決定。docs/recall.md §2 段0・§5 の欠けていた定義の補完）
-// ---------------------------------------------------------------------------
-
 /**
- * `recall()` のスコープ = tenant + subject + 時間窓(period) + taxonomy + status ゲート。
+ * `recall()` のスコープ = tenant + subject + 時間窓(period) + taxonomy + status ゲート（docs/recall.md §2 段0・§5）。
  *
- * **マネージャー決定（本 PR）**: docs/recall.md §5 は被覆不変条件を「スコープ内の全 Memory は、
- * 返るか群カウントに乗るかのどちらか。かつ総和がスコープ内の総数と一致する」と定めるが、
- * 「スコープ」の外延がどこにも確定していなかった（§2 段0は tenant/subject/時間窓/taxonomy と
- * 書いて status に触れず、§4 の `FilteredOmission.condition` には `'status'`/`'archived'` が
- * 在るという食い違い）。この型はその補完——status ゲート（段1と同じ
- * `status IN ('active','contested')`）をスコープの一部として確定する決定を反映する。
+ * - tenant と subject はスコープの外側の境界で、`filtered` としては報告しない（呼び出し側が明示した境界の外は
+ *   「失われた」のではなく「そもそも問うていない」）。`FilteredOmission.condition` の `"tenant"` は union に在るが
+ *   生成されない（ADR 0117）。
+ * - period・status（archived / superseded / forgotten）・validity（expired / not_yet_valid）・taxonomy は
+ *   `filtered` として報告され、`totalInScope` から除かれる（ADR 0323）。
+ * - `attributes`（`RecallQuery.attributes`）は tenant/subject と同じ側で、`filtered` として報告しない
+ *   （専用の値を足さない。ADR 0312）。`totalInScope` は絞り込みの内側だけを数える。
+ *   taxonomy はこちらではなく period/validity 側なので読み違えないこと。
  *
- * **tenant と subject はスコープの外側の境界であり、`filtered` としては報告しない。**
- * ちょうど「別テナントのデータ」を omission として報告しないのと同じ理由——呼び出し側が
- * 明示した境界の外は「失われた」のではなく「そもそも問うていない」。
- *
- * **⚠ この文は2つの型の状態を1つの文で説明していたため、不正確だった（Issue #206 で発見）。**
- * `subject` は `FilteredOmission.condition` の union に値そのものが無い。`tenant` は違う——
- * `condition: "tenant" | ...` として union には**在る**が、`filtered` を組み立てるコードが
- * この値を一度も生成しない（`recall-runtime.ts` に push 箇所ゼロ）。「値が無い」のではなく
- * 「値は在るが生成されない」であり、この2つは型を読む側にとって別の事実である
- * （詳細は `FilteredOmission.condition` の doc、[ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)）。
- * **period・status（archived / superseded / forgotten）・validity（expired /
- * not_yet_valid、Issue #280）が実際に `filtered` として報告される次元である。**
- *
- * **⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
- * 上の「taxonomy は Phase 1 に実体が無い」は、`labels`/`memory_labels` テーブルが
- * 存在しなかった時点（PR-A 以前）の記述であり、今は成り立たない。** `taxonomy` は
- * `period`/`validity` と同じ側（`filtered` として報告され、`totalInScope` から
- * 除かれる）に実装された——`RecallQuery.labels` による絞り込みが `filteredTaxonomy`
- * （下）として数えられる。
- *
- * **⚠ 2026-09 追記（Issue #152/#153、ADR 0312）: `attributes`（`RecallQuery.attributes`）は
- * `tenant`/`subject` と同じ側——スコープの外側の境界である。** `attributes` で絞り込んだ
- * 結果は `filtered` として報告しない（`FilteredOmission.condition` に専用の値を足さない
- * ——ADR 0312「採らなかった案」参照）。`totalInScope` はこの絞り込みの内側だけを数える。
- * `RecallScope.attributes` の doc コメント参照。**`taxonomy`（上）はこちら側ではなく
- * `period`/`validity` 側であることに注意**——読み違えないこと（ADR 0323「前提として
- * 確認したこと」）。
- *
- * **件数はすべてこの集約1本から取る**（ADR 0011 が段1から締め出した
- * `count(*) OVER ()` の代わりに指定した経路と同じ発想）。`groups` の総和・`totalInScope`・
- * `filteredArchived`/`filteredSuperseded`/`filteredForgotten`/`filteredPeriod`/
- * `filteredExpired`/`filteredNotYetValid`/`filteredTaxonomy`/`filteredDecayed`/`notIndexed`
- * の各件数を、
- * 別々のクエリではなく同一の集約クエリから得ることで、書き込みが並行して起きていても
- * 「群カウントと totalInScope の総和が一致する」という被覆不変条件が構造的に崩れない。
- * **⚠ この「総和が一致する」は `axis: 'subject'` の群カウントについてである
- * ——`axis: 'taxonomy'`（`RecallQuery.taxonomyGroups`、ADR 0323）は別の被覆保証を持つ。
- * `GroupCount` の doc コメント参照。**
+ * **件数はすべてこの集約1本から取る。** `groups` の総和・`totalInScope`・`filtered*`・`notIndexed` を別々のクエリではなく
+ * 同一の集約クエリから得ることで、書き込みが並行しても「群カウントと totalInScope の総和が一致する」被覆不変条件が
+ * 構造的に崩れない（ADR 0011 が段1から締め出した `count(*) OVER ()` の代わりの経路）。
+ * この「総和が一致する」は `axis: 'subject'` の群カウントについてで、`axis: 'taxonomy'` は別の保証を持つ（`GroupCount`）。
  */
 export interface ScopeAggregate {
   /**
-   * 群カウント（第3階）。**既定では `axis: 'subject'` のみ**——`RecallQuery.taxonomyGroups:
-   * true` を渡したときだけ `axis: 'taxonomy'` の群も追加される（Issue #201 PR-B、
-   * ADR 0323）。`axis: 'subject'` の `count` の総和は必ず `totalInScope` に一致するが、
-   * `axis: 'taxonomy'` はそうではない（`GroupCount` の doc コメント参照）。
+   * 群カウント（第3階）。既定では `axis: 'subject'` のみ。`RecallQuery.taxonomyGroups: true` を渡したときだけ
+   * `axis: 'taxonomy'` の群も追加される（ADR 0323）。
    */
   groups: GroupCount[];
   /** スコープ内（tenant + subject? + period? + status ゲート + validity? ゲート）の総数。 */
   totalInScope: number;
   /**
-   * groups の総和が totalInScope と一致することの信頼度。
-   *
-   * ⚠ **2026-09-30 追記（ADR 0384 案C）**: 「Phase 1 は常に 'exact'」という以前の
-   * 記述は、`RecallQuery.scopeAggregate` が無かった時点のものである。`"skip"` を
-   * 渡した呼び出しでは `'unknown'` になる（`groups: []`・`totalInScope: 0` とともに）。
-   * **渡さない・`"exact"` を渡した呼び出しは今日どおり常に `'exact'`。**
+   * groups の総和が totalInScope と一致することの信頼度。`RecallQuery.scopeAggregate` に `"skip"` を渡した呼び出しでは
+   * `'unknown'`（`groups: []`・`totalInScope: 0` とともに）。渡さない・`"exact"` を渡した呼び出しは常に `'exact'`（ADR 0384）。
    */
   countKind: CountKind;
   /**
-   * スコープ内だが埋め込みがまだ無い件数を、**理由ごとに分けて**持つ。
-   *
-   * 1つの数値に潰さないのは ADR 0008 の判定基準（その区別があると呼び出し側の次の一手が
-   * 変わるか）による。**変わる**——`pending` は「待つ / 再試行する」、`failed` は
-   * 「埋め込みパイプラインを疑う」、`skipped` は「意図した除外なので何もしない」。
-   * これを1つの `not_indexed` に潰すと、恒久的な失敗と一時的な遅延が同じ顔になる。
+   * スコープ内だが埋め込みがまだ無い件数を、理由ごとに分けて持つ。1つに潰すと、恒久的な失敗と一時的な遅延が
+   * 同じ顔になる（ADR 0008）。`pending` は待つ / 再試行する、`failed` は埋め込みパイプラインを疑う、
+   * `skipped` は意図した除外なので何もしない。
    */
   notIndexed: Record<NotIndexedReason, { count: number; countKind: CountKind }>;
   /** status = 'archived' で「スコープを定義するフィルタ」により落ちた件数。 */
   filteredArchived: { count: number; countKind: CountKind };
   /**
-   * status = 'superseded' で落ちた件数——**機構の都合**（より良い抽出への置き換え、または統合）。
-   * `filteredForgotten` とは分けて持つ（ADR 0027）。ADR 0008 の判定基準（区別があると
-   * 呼び出し側の次の一手が変わるか）に照らすと変わる——`superseded` は置き換え先
-   * （`superseded_by_id`）を辿れば「なぜ無いのか」の説明が付くのに対し、`forgotten` は
-   * 利用者が意図して忘れさせた結果であり、置き換え先を持たない。同じ札に束ねると、
-   * 「利用者が忘れてほしいと言ったのか、こちらが作り直しただけなのか」を呼び出し側が
-   * 判定できなくなる。`archived` が既に独立した条件になっている先例に倣う。
+   * status = 'superseded' で落ちた件数（機構の都合）。`filteredForgotten` とは分けて持つ（ADR 0027）。
+   * `superseded` は置き換え先（`superseded_by_id`）を辿れるが、`forgotten` は利用者が意図して忘れさせた結果で
+   * 置き換え先を持たない。束ねると、呼び出し側が「忘れてほしいと言ったのか、作り直しただけなのか」を判定できない。
    */
   filteredSuperseded: { count: number; countKind: CountKind };
-  /**
-   * status = 'forgotten' で落ちた件数——**製品の振る舞い**（利用者が明示的に忘れさせた）。
-   * `filteredSuperseded` を見よ。
-   */
+  /** status = 'forgotten' で落ちた件数（製品の振る舞い）。`filteredSuperseded` を見よ。 */
   filteredForgotten: { count: number; countKind: CountKind };
   /** 時間窓（period）の外にあるため落ちた件数。period 未指定なら常に0。 */
   filteredPeriod: { count: number; countKind: CountKind };
   /**
-   * Issue #280: `validUntil` が `scope.validAt` 以前で落ちた件数
-   * （`FilteredOmission.condition: 'expired'` の doc 参照）。`scope.validAt` が
-   * `undefined`（ゲート無効）なら常に0。`filteredPeriod` と同じく `countKind` は
-   * 常に `'exact'`（段1へ SQL として押し下げているため厳密集計できる）。
+   * `validUntil` が `scope.validAt` 以前で落ちた件数（`FilteredOmission.condition: 'expired'`）。
+   * `scope.validAt` が `undefined`（ゲート無効）なら常に0。`countKind` は常に `'exact'`。
    */
   filteredExpired: { count: number; countKind: CountKind };
   /**
-   * Issue #280: `validFrom` が `scope.validAt` より後で落ちた件数
-   * （`FilteredOmission.condition: 'not_yet_valid'` の doc 参照）。同上、
+   * `validFrom` が `scope.validAt` より後で落ちた件数（`FilteredOmission.condition: 'not_yet_valid'`）。
    * `scope.validAt` が `undefined` なら常に0、`countKind` は常に `'exact'`。
    */
   filteredNotYetValid: { count: number; countKind: CountKind };
   /**
-   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
-   * `RecallQuery.labels` による絞り込みで落ちた件数（`FilteredOmission.condition:
-   * 'taxonomy'` の doc 参照）。`scope.labels` が `undefined`（絞り込み無し）なら常に0。
-   * `countKind` は常に `'exact'`——`filteredExpired`/`filteredNotYetValid` と同じく、
-   * 段1へ押し下げているのと**同じ述語**（`tags` と参加資格のあるラベル名の重なり）を
-   * この集約が `count(*) FILTER` として持つため厳密に数えられる。
+   * `RecallQuery.labels` による絞り込みで落ちた件数（`FilteredOmission.condition: 'taxonomy'`。ADR 0323）。
+   * `scope.labels` が `undefined`（絞り込み無し）なら常に0。`countKind` は常に `'exact'`。
    *
-   * **`filteredArchived`/`filteredPeriod`/`filteredExpired`/`filteredNotYetValid` と
-   * 同じ側**——`totalInScope` から**除かれた**件数である（`filteredDecayed`（下）とは
-   * 違う）。`docs/recall.md` §2 段0「スコープの外延」が列挙する次元
-   * （tenant + subject + period + taxonomy + status）に taxonomy が含まれる、という
-   * 元々の型設計（`FILTERED_CONDITION_SCOPE_RELATION.taxonomy === 'outside_scope'`）を
-   * そのまま実装したもの。
+   * `totalInScope` から**除かれた**件数（`filteredDecayed` とは違う）。`filteredDecayed` より先に評価され、
+   * taxonomy で除外された Memory は `filteredDecayed` の対象集合にも入らない。
    *
-   * **`filteredDecayed`（下）より先に評価される**——`decayed` はスコープ内に在る
-   * Memory の到達しにくさのゲートであり、taxonomy で既に除外された Memory は
-   * `filteredDecayed` の対象集合にも入らない（`aggregateScope` の実装コメント参照）。
-   *
-   * 🔴 **任意フィールドである。** `ScopeAggregate` の他の `filtered*` 欄
-   * （`filteredArchived` 等）は必須だが、それらは Phase 1 から存在する契約であり、
-   * `aggregateScope` を実装するすべての adapter が最初から満たしている。**この欄を
-   * 必須にすると、`aggregateScope` を自作する第三者 adapter（`@mnemora/core` は npm
-   * 公開済み）が本 PR の取り込みだけでコンパイルできなくなる**——`VectorFilter.labels?`/
-   * `RecallScope.labels?` 等、本 PR の他のすべての欄が任意である（新しい機能は追加のみ、
-   * 既存の実装を壊さない）のと不整合になる。`postgres`/`testkit` は常にこの欄を返すが、
-   * 実装しない adapter では `recall-runtime.ts` がこの欄の不在を「0件」として扱う
-   * （`labels`/`taxonomyGroups` を渡さない呼び出しと同じ「機能が無いだけ」の扱い、
-   * ADR 0318 が確立した規律）。
+   * **任意フィールド。** 必須にすると、`aggregateScope` を自作する第三者 adapter（`@mnemora/core` は npm 公開済み）が
+   * コンパイルできなくなる。実装しない adapter では、`recall-runtime.ts` が不在を「0件」として扱う（ADR 0318）。
    */
   filteredTaxonomy?: { count: number; countKind: CountKind };
   /**
-   * Issue #329 / [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
-   * 忘却ゲート（`decay_floor_at` / `decay_floor_seq`）が落とした件数
-   * （`FilteredOmission.condition: 'decayed'` の doc 参照）。
-   * `RecallScope.decayFloorAtAfter`/`decayFloorSeqAfter` がどちらも `undefined`
-   * （ゲート無効＝`includeFullyDecayed: true`）なら常に0。`countKind` は常に `'exact'`
-   * ——`filteredExpired` と同じく、段1へ押し下げているのと**同じ述語**をこの集約が
-   * `count(*) FILTER` として持つため厳密に数えられる。
+   * 忘却ゲート（`decay_floor_at` / `decay_floor_seq`）が落とした件数（`FilteredOmission.condition: 'decayed'`。ADR 0173）。
+   * `RecallScope.decayFloorAtAfter`/`decayFloorSeqAfter` がどちらも `undefined`（`includeFullyDecayed: true`）なら常に0。
+   * `countKind` は常に `'exact'`。
    *
-   * **⚠ 他の `filtered*` 欄と、`totalInScope` との関係が違う。**
-   * `filteredArchived`/`filteredPeriod`/`filteredExpired`/`filteredNotYetValid`/
-   * `filteredTaxonomy` は `totalInScope` から**除かれた**件数だが、**`filteredDecayed`
-   * は `totalInScope` の内訳（部分集合）である。** 忘却ゲートは `docs/recall.md` §2 段0
-   * 「スコープの外延」が列挙する次元（tenant + subject + period + taxonomy + status）に
-   * **入っていない**——減衰しきった Memory はスコープ内に在り、群カウントにも目次帯にも
-   * 現れる（だから `below_threshold` と同じ「スコープ内で落ちたもの」の側に属する）。
-   * ⟹ **群カウントの総和 = `totalInScope` という被覆不変条件は、この欄を足しても崩れない。**
-   * 詳細は ADR 0173。
+   * 他の `filtered*` 欄と違い、**`totalInScope` の内訳（部分集合）である**。忘却ゲートは「スコープの外延」の次元に
+   * 入っておらず、減衰しきった Memory はスコープ内に在って群カウントにも目次帯にも現れる。
+   * 群カウントの総和 = `totalInScope` という被覆不変条件は、この欄を足しても崩れない。
    */
   filteredDecayed: { count: number; countKind: CountKind };
   /**
-   * ADR 0390: `AggregateScopeOptions.excludeProvenanceKinds`（非空）が渡されたときだけ、
-   * **その kind の行のうち、スコープ内（`totalInScope` の内側）で索引済み
-   * （`embeddingStatus = 'ready'`）のものの件数**。`recall()` はこれを `eligible`
-   * （= `totalInScope` − `notIndexed` 合計 = 索引済みの行数）から引き、段1が ANN から除外した
-   * 行を分母から外す。「索引済み」の定義を `notIndexed` と揃えてあるので、
-   * 引く量は ANN が本来返しうる除外行の数と一致する。
+   * `AggregateScopeOptions.excludeProvenanceKinds`（非空）が渡されたときだけ、その kind の行のうち、スコープ内で索引済み
+   * （`embeddingStatus = 'ready'`）のものの件数（ADR 0390）。`recall()` はこれを `eligible`
+   * （= `totalInScope` − `notIndexed` 合計）から引き、段1が ANN から除外した行を分母から外す。
    *
-   * **任意フィールドである**（`filteredTaxonomy?` と同じ理由）。返さない adapter・除外を
-   * 渡さない呼び出しでは省かれ、`recall()` は今日と同じ判定に倒れる。
-   * `totalInScope`・`groups`・`filtered*` の意味は動かさない。
+   * **任意フィールド**（`filteredTaxonomy?` と同じ理由）。省かれたときは除外を渡さない場合と同じ判定になる。
    */
   excludedProvenanceIndexedCount?: number;
   /**
-   * 目次帯（`IndexBand.digestBand`）に載せる候補（スコープ内 かつ
-   * `AggregateScopeOptions.digestBand.excludeMemoryIds` に含まれないもの）を、
-   * 決定的な順序で最大 `digestBand.limit` 件。`aggregateScope` の呼び出しで
-   * `opts.digestBand` が渡されなかった場合は空配列。
+   * 目次帯（`IndexBand.digestBand`）に載せる候補（スコープ内 かつ `AggregateScopeOptions.digestBand.excludeMemoryIds` に
+   * 含まれないもの）を、決定的な順序で最大 `digestBand.limit` 件。`opts.digestBand` が渡されなかった場合は空配列。
    *
-   * **切り詰めない。** `DIGEST_BAND_MAX_ENTRY_CHARS` による1件の切り詰めと
-   * `DIGEST_BAND_MAX_CHARS` による帯全体の文字数予算は、ここではなく
-   * `packDigestBand`（`digest-band.ts`）が純関数として行う——ここは DB/実装から来た
-   * 生の digest をそのまま持つ。
-   *
-   * **件数はすべて `aggregateScope` の1回の呼び出しから取る**（この doc コメント冒頭の
-   * 「件数はすべてこの集約1本から取る」という既存の方針が、`digests`/`digestEligible` にも
-   * 及ぶ）。別クエリにすると、群カウントと帯が別スナップショットになり、並行する書き込みの
-   * もとで被覆不変条件が構造的に崩れる。
+   * **切り詰めない。** 1件の切り詰め（`DIGEST_BAND_MAX_ENTRY_CHARS`）と帯全体の文字数予算（`DIGEST_BAND_MAX_CHARS`）は
+   * `packDigestBand` が行い、ここは生の digest をそのまま持つ。
+   * 件数は `aggregateScope` の1回の呼び出しから取る。別クエリにすると、群カウントと帯が別スナップショットになり、
+   * 並行する書き込みのもとで被覆不変条件が崩れる。
    */
   digests: DigestEntry[];
   /**
@@ -1107,15 +752,9 @@ export interface ScopeAggregate {
   digestEligible: { count: number; countKind: CountKind };
 }
 
-// ---------------------------------------------------------------------------
-// 量の計測と予算（docs/recall.md §6）
-// ---------------------------------------------------------------------------
-
 /**
  * 実際に返した量の計測（docs/recall.md §6）。
- *
- * **計測（`usage`）と強制（`budget`）は別物である。**`usage` は測るだけで、
- * 何も抑止しない（docs/roadmap.md §4「計測と抑止を混同しない」）。
+ * 計測（`usage`）と強制（`budget`）は別物で、`usage` は測るだけで何も抑止しない（docs/roadmap.md §4）。
  */
 export interface RecallUsage {
   /** 返した全量（`memories` tier + 目次帯）。 */
@@ -1125,114 +764,72 @@ export interface RecallUsage {
   /**
    * `estimatedTokens` が推定（`"heuristic"`）か実測（`"exact"`）か。
    *
-   * ⚠ これは `estimatedTokens` を出した1回の計測（返した digest を連結し、目次帯の JSON を足した文字列を
-   * `tokenCounter.count()` に1回渡したもの）の `counter` の印である。段4の予算の判定は digest ごとに数えるので、
-   * テキストによって印を変える `TokenCounter` では、予算の判定に使った印とは食い違いうる（ADR 0487。今の振る舞いを書いたもの）。
+   * `estimatedTokens` を出した1回の計測（返した digest を連結し目次帯の JSON を足した文字列を `tokenCounter.count()` に
+   * 1回渡したもの）の印である。段4の予算判定は digest ごとに数えるので、テキストによって印を変える `TokenCounter` では
+   * 予算判定に使った印と食い違いうる（ADR 0487）。
    */
   counter: "heuristic" | "exact";
   /** 返した量の段ごとの内訳（文字数）。 */
   byTier: {
-    /** `recall-runtime.ts` は現状この欄に常に `0` を入れる（`full` tier を返す経路が無い）。 */
+    /** 現状は常に `0`（`full` tier を返す経路が無い）。 */
     full: number;
     /** 返した `memories` の digest の合計文字数。連想枠が返した分も含む。 */
     digest: number;
     /** 目次帯の JSON の文字数（`indexChars` と同じ値）。 */
     index: number;
     /**
-     * **`memories`（連想を含む）のうち、連想枠（Issue #200）が返した digest の
-     * 合計文字数の内訳。**`digest` に既に含まれている量の一部であり、`digest` に
-     * 加算するものではない——「呼び手が連想で何文字増えたか」を見られるようにするための
-     * 内訳の欄である。
+     * `memories` のうち連想枠が返した digest の合計文字数の内訳。`digest` に既に含まれる量の一部で、加算するものではない。
      *
-     * **存在条件は「連想枠を実際に走らせたか」**（[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)
-     * で既定 on になったため、`RecallQuery.association` を渡したかどうかとは**もう
-     * 一致しない**）。連想は既定で走るので、**`association` を省略した通常の呼び出しでも
-     * この欄は在る。**欄が無いのは `RecallQuery.association: null` を明示して連想を
-     * 止めた呼び出しだけである——`byTier` の形が変わらないのは、今度は明示的な
-     * opt-out 側になる。連想が実際には0件だった run でも `0` として現れる——
-     * 「連想を走らせたが0件だった」と「連想を走らせなかった（= `null` で止めた）」を
-     * 同じ顔にしない、という `docs/recall.md` の原則をここでも守る。
+     * 存在条件は「連想枠を実際に走らせたか」（ADR 0337 で既定 on）。`association` を省略した通常の呼び出しでも在り、
+     * 欄が無いのは `RecallQuery.association: null` で止めた呼び出しだけ。連想が0件だった run では `0` として現れる
+     * （「走らせたが0件」と「走らせなかった」を同じ顔にしない）。
      */
     association?: number;
   };
   /**
-   * 目次帯（`IndexBand`）の実費。**`budget` の対象外**であり、
-   * `budget` をどれだけ小さくしてもこの分は削られない（理由は `RecallBudget` を見よ）。
-   *
-   * `chars - indexChars` が予算の対象になった量である——**予算の内と外が、
-   * 数の形から読めるようにするために独立して返す。**（`byTier.index` と同じ値。）
+   * 目次帯（`IndexBand`）の実費（`byTier.index` と同じ値）。**`budget` の対象外**で、`budget` をどれだけ小さくしても
+   * 削られない（`RecallBudget`）。`chars - indexChars` が予算の対象になった量。
    */
   indexChars: number;
   /**
-   * `budget` が申告されている場合のみ。**予算の対象（`memories` tier）が、
-   * 申告された予算のどれだけを使ったか。**
+   * `budget` が申告されている場合のみ。予算の対象（`memories` tier）が、申告された予算のどれだけを使ったか。
+   * 「渡した予算のうち記憶がどれだけ使ったか」と「応答全体でいくらかかったか」は別の問いで、後者は `chars` と
+   * `indexChars` を見る。
    *
-   * **分子を `memories` tier だけに絞ったこと自体は正しい**——以前は分子に目次帯を
-   * 含めていたため 248% のような「割合として成立しない値」が出ていたが、目次帯を
-   * 予算の対象外として外したことでその不具合は直っている。
-   * 「私が渡した予算のうち記憶がどれだけ使ったか」と「この応答は全体でいくらかかったか」は
-   * **別の問い**であり、後者は `chars` と `indexChars` を見れば分かる。
+   * **この値は 1 を超えうる。超えたときは `budgetExceeded` が `true` になる**（ADR 0097）。
    *
-   * **⚠ ただし、目次帯を外したことだけでは「この値は 1 を超えない」の根拠として足りない。**
-   * **この値は 1 を超えうる。超えたときは `budgetExceeded` が `true` になる。**
-   *
-   * **分子・分母は予算の申告のしかたで決まる**（`recall-runtime.ts` の `usageShareNumerator` /
-   * `usageShareDenominator`）:
-   * - `maxMemoryTokens` か `promptBudgetTokens` のどちらかが申告されている ⟹ 分母はその小さいほう、
-   *   分子は返した digest を `"\n"` で連結して `tokenCounter.count()` を1回だけ呼んだトークン数。
+   * 分子・分母は予算の申告のしかたで決まる:
+   * - `maxMemoryTokens` か `promptBudgetTokens` が申告されている ⟹ 分母はその小さいほう、分子は返した digest を
+   *   `"\n"` で連結して `tokenCounter.count()` を1回だけ呼んだトークン数。
    * - どちらも無く `maxMemoryChars` だけ ⟹ 分母は `maxMemoryChars`、分子は返した digest の合計文字数。
-   *   （この場合は強制側と数え方が同じなので、下の食い違いは起きない。）
    *
-   * 超える理由は、トークン予算のとき、段4の切り詰め（強制）と、この値の計測が
-   * **別の数え方**をしているからである:
-   * - 強制側（段4の `fits`/`unitTokens`）は **digest ごとに** `tokenCounter.count()` を呼び、
-   *   その合計で判定する（`heuristicTokenCounter` の `Math.ceil` が digest の件数ぶん掛かる）。
-   * - この値の分子は **`digests.join("\n")` を1回だけ** `count()` する（連結後の量。
-   *   呼び出し側が実際にプロンプトへ積むのはこちらである）。
-   *
-   * 改行区切り文字の分だけ後者が前者を上回ることがあり、そのとき段4は「予算内」と
-   * 判定して両方残すのに、実際に返した量を測り直すと予算を超えている
-   * （実測: `recall-pipeline.test.ts` の `usage.budgetExceeded` 節。非CJK20字の digest
-   * 2件・`maxMemoryTokens: 10` で `share = 1.1` が再現する）。
-   *
-   * **この不一致自体は、ここでは直していない**（ADR 0083 が「どちらの数え方を正とするかは
-   * 別の判断」として意図的に見送った範囲。[ADR 0097](../../../docs/decisions/0097-recall-usage-share-may-exceed-1.md) 参照）。
+   * 超えるのは、トークン予算のとき、段4の強制側が digest ごとに `count()` を呼んだ合計で判定するのに対し、
+   * 分子は連結後に1回だけ `count()` するため、数え方が違うから。改行の分だけ後者が上回ると、段4は「予算内」と
+   * 判定して両方残すのに、測り直すと予算を超える。この不一致は直さない（どちらの数え方を正とするかは別の判断として
+   * 見送った。ADR 0083、ADR 0097）。
    */
   share?: number;
   /**
-   * **申告された予算次元のうち、いずれか1つでも実際に超えたか**（Issue #108「案3」）。
+   * 申告された予算次元のうち、いずれか1つでも実際に超えたか。
    *
-   * **3状態を区別する（additive。既存欄の意味は変えない）**:
-   * - 予算が1次元も申告されていない ⟹ この欄自体が無い（`undefined`）。
-   *   **存在条件は `share` と同じ**（`budget: {}` のように次元が1つも無い場合も無い）
-   *   ——`recall-runtime.ts` の `runRecall` が両欄を同じ条件式（`usageShareDenominator`）
-   *   から作る。
+   * - 予算が1次元も申告されていない ⟹ この欄自体が無い（`undefined`。`budget: {}` も同じ。存在条件は `share` と同じ）。
    * - 申告されていて、どの次元も超えていない ⟹ `false`。
    * - 申告されていて、どれか1次元でも超えた ⟹ `true`。
    *
-   * ⛔ **`false` を「超えていない」と「測っていない」の両方の意味にしない**——
-   * だから「測っていない」は `false` ではなく欄そのものの不在（`undefined`）で表す。
+   * 「測っていない」を `false` にしない。不在（`undefined`）で表す。
    *
-   * **`share` からは導出しない。** 理由（`recall-runtime.ts` の該当コメントを参照）:
-   * 1. 強制側（段4の `fits`/`unitTokens`）は digest ごとに `tokenCounter.count()` を呼ぶため
-   *    `heuristicTokenCounter` の `Math.ceil` が件数ぶん掛かる。`share` の分子
-   *    （連結した1本に対して `ceil` を1回）とは加法的に一致しない。
-   * 2. `share` の分母は `effectiveTokenBudget(budget) ?? budget?.maxMemoryChars` であり、
-   *    トークン予算が申告されると `maxMemoryChars` は分母から丸ごと消える。
+   * **`share` からは導出しない。** 強制側は digest ごとに `count()` するので `share` の分子（連結した1本に対して1回）と
+   * 加法的に一致せず、`share` の分母はトークン予算が申告されると `maxMemoryChars` を丸ごと失うため。
+   * 返した memories を、申告された全予算次元（`maxMemoryChars` / `maxMemoryTokens` / `promptBudgetTokens`）に対して
+   * 個別に測り直し、どれか1つでも超えていれば `true` にする。
    *
-   * ⟹ 返した memories を、申告された全予算次元（`maxMemoryChars` / `maxMemoryTokens` /
-   * `promptBudgetTokens`）に対して個別に測り直し、どれか1つでも超えていれば `true` にする。
-   *
-   * **⚠ 引き受けた負債（Issue #108・本 PR の PR 本文に詳細）**:
-   * 1. これは真偽値なので、`heuristic` な推定が実態からどれだけ外れているかは分からない。
-   *    「推定である」こと自体の検知には別の口が要る。
-   * 2. 「強制と計測で数え方が違う」という `share` の穴（上記1）はここでも直していない
-   *    ——ADR 0083 が意図的に見送った範囲であり、見落としではない。
+   * 限界: 真偽値なので `heuristic` な推定が実態からどれだけ外れているかは分からない。強制と計測で数え方が違う
+   * 穴（`share`）もここでは直していない（ADR 0083）。
    */
   budgetExceeded?: boolean;
 }
 
-/** `RecallUsage` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallUsage` と揃えてある）。 */
+/** `RecallUsage` の zod スキーマ。 */
 export const RecallUsageSchema = z.object({
   chars: z.number().int().nonnegative(),
   estimatedTokens: z.number().int().nonnegative(),
@@ -1244,28 +841,20 @@ export const RecallUsageSchema = z.object({
     association: z.number().int().nonnegative().optional(),
   }),
   indexChars: z.number().int().nonnegative(),
-  // ⚠ `.max(1)` を外してある（ADR 0097）。`share` は 1 を超えうる——超えたときは
-  // `budgetExceeded` が `true` になる（doc 参照）。`.max(1)` は保証ではなく、
-  // 守られていない宣言だった。
+  // `.max(1)` を外してある（ADR 0097）。`share` は 1 を超えうる（doc 参照）。
   share: z.number().nonnegative().optional(),
-  // additive: share の計算は変えない。既存欄の意味も変えない（doc 参照）。
+  // additive: share の計算も既存欄の意味も変えない。
   budgetExceeded: z.boolean().optional(),
 }) satisfies z.ZodType<RecallUsage>;
 
 /**
  * `recall()` に渡す予算（docs/recall.md §6）。
  *
- * **⚠ 予算が縛るのは `memories` tier（返す Memory の digest）だけである。
- * 目次帯（`IndexBand`）は予算の対象外であり、`budget` をどれだけ小さくしても削られない。**
- *
- * 理由は [ADR 0008](../../../docs/decisions/0008-absence-taxonomy.md) の芯にある——
- * 目次帯の唯一の存在理由は **「recall が0件でも、何が在るかは言える」** ことである。
- * これを予算の対象にすると、**呼び出し側が渡した数字ひとつでその保証が消える。**
- * 予算次第で消える保証は、保証ではない。
- *
- * **だから名前に `Memory` を入れている。**「recall 全体の上限」ではないことが、
- * 型を見ただけで分かるようにするためである。目次帯が実際に何文字かは
- * `RecallUsage.indexChars` で別に返る——呼び出し側は足せば全体量が分かる。
+ * **予算が縛るのは `memories` tier（返す Memory の digest）だけ。** 目次帯（`IndexBand`）は予算の対象外で、
+ * `budget` をどれだけ小さくしても削られない。目次帯の存在理由は「recall が0件でも、何が在るかは言える」ことで
+ * （[ADR 0008](../../../docs/decisions/0008-absence-taxonomy.md)）、予算の対象にすると呼び出し側の数字ひとつでその
+ * 保証が消えるため。名前に `Memory` を入れているのは、recall 全体の上限ではないことを型から分かるようにするため。
+ * 目次帯の実費は `RecallUsage.indexChars` で別に返る。
  */
 export interface RecallBudget {
   /** `memories` tier の合計文字数の上限。目次帯は含まない。 */
@@ -1280,42 +869,24 @@ export interface RecallBudget {
   promptBudgetTokens?: number;
 }
 
-/** `RecallBudget` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallBudget` と揃えてある）。 */
+/** `RecallBudget` の zod スキーマ。 */
 export const RecallBudgetSchema = z.object({
   maxMemoryChars: z.number().int().positive().optional(),
   maxMemoryTokens: z.number().int().positive().optional(),
   promptBudgetTokens: z.number().int().positive().optional(),
 }) satisfies z.ZodType<RecallBudget>;
 
-// ---------------------------------------------------------------------------
-// スコア内訳（docs/recall.md §7）
-// ---------------------------------------------------------------------------
-
-/**
- * 候補1件のスコアの内訳（docs/recall.md §7）。既定の戦略では `total = affinity × decay × tagMatch × freshness × strength`（`affinity` は `similarity` と `lexicalMatch` の大きいほう。どちらも無ければ 1）。
- */
+/** 候補1件のスコアの内訳（docs/recall.md §7）。既定の戦略では `total = affinity × decay × tagMatch × freshness × strength`（`affinity` は `similarity` と `lexicalMatch` の大きいほう。どちらも無ければ 1）。 */
 export interface ScoreBreakdown {
   /** ANN 経由でのみ存在。距離から変換した類似度。 */
   similarity?: number;
   /**
-   * **語彙チャンネルが引き当てた候補にのみ存在する**
-   * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
+   * 語彙チャンネルが引き当てた候補にのみ存在する（ADR 0084）。`LexicalHit.coverage`（一致したクエリ語彙数 ÷
+   * クエリ語彙の総数）がそのまま入る（ADR 0092）。値域は `(0, 1]`。
    *
-   * **`LexicalHit.coverage`（一致したクエリ語彙数 ÷ クエリ語彙の総数）がそのまま入る**
-   * （[ADR 0092](../../../docs/decisions/0092-lexical-or-coverage.md)）。値域は `(0, 1]`。
-   *
-   * **⚠ 旧仕様（ADR 0084）はこの値が候補集合の上で常に `1` の二値だった**——
-   * adapter は「クエリの語彙をすべて含む」候補しか返さない契約（AND 意味論）だったため。
-   * ADR 0092 はクエリ語彙を OR で結ぶ契約に変え、一致の度合いを連続値として持つようにした。
-   * **⟹ ADR 0081 が測った「候補集合の上で1通りしか値を取らない項は、順位に構造上
-   * ゼロ寄与である」という指摘は、この項にはもう当たらない**——被覆率の高い候補ほど
-   * `affinity`（下記）が高くなり、部分一致の候補は自然に順位が下がる。
-   *
-   * **⟹ ただし、語彙候補どうしの順序の任意さ（ADR 0084 §8）が完全に消えたわけではない。**
-   * 被覆率が同値の候補どうしの順序は、依然として `decay` / `freshness`
-   * （ADR 0081 の実測ではその変域は 1e-8 桁）が決める。低選択率のクエリ（ありふれた語1つ）
-   * では被覆率が大量の候補で `1` に揃うため、この負債は残る（ADR 0092 の「引き受けた負債」）。
-   * **adapter が返す `LexicalHit.rank` はこの項に入らない**（`interfaces/lexical-store.ts` 参照）。
+   * 被覆率が同値の候補どうしの順序は `decay` / `freshness` が決める。低選択率のクエリ（ありふれた語1つ）では被覆率が
+   * 大量の候補で `1` に揃うため、この順序の任意さは残る（ADR 0084 §8、ADR 0092）。
+   * adapter が返す `LexicalHit.rank` はこの項に入らない（`interfaces/lexical-store.ts`）。
    */
   lexicalMatch?: number;
   /** 減衰の係数（既定の戦略の壁時計では `0.5^(経過時間 / halfLifeHours)`。強さそのものは掛けない）。 */
@@ -1330,29 +901,20 @@ export interface ScoreBreakdown {
   /** 順位と閾値の比較に使う合計のスコア。 */
   total: number;
   /**
-   * 🔴 **`total` の比較可能性を名乗る欄**（Issue #548 方向1、
-   * [ADR 0282](../../../docs/decisions/0282-score-breakdown-affinity-measured.md)）。
+   * `total` の比較可能性を名乗る欄（[ADR 0282](../../../docs/decisions/0282-score-breakdown-affinity-measured.md)）。
    *
-   * **`similarity`/`lexicalMatch` のどちらか一方でも在れば `true`。両方とも無いときだけ
-   * `false`。** `total` は `affinity × decay × tagMatch × freshness × strength` の積で
-   * （`strategies/scoring.ts` 冒頭 doc）、`affinity` は `similarity`/`lexicalMatch` の
-   * どちらも無いとき中立の `1` に退化する——クエリとの関連度を一切測っていないのに、
-   * 積の他の項次第で `total` が高く見えることがある（連想枠。ADR 0246「⛔ これが閉じないもの」2）。
-   * ⟹ **この欄が `false` の記憶の `total` を、`true` の記憶の `total` と比較しないこと。**
-   * 同じ `false`（あるいは同じ `true`）どうしの比較は妨げない。
+   * `similarity`/`lexicalMatch` のどちらか一方でも在れば `true`、両方とも無いときだけ `false`。両方無いと `affinity` が
+   * 中立の `1` に退化し、クエリとの関連度を測っていないのに他の項次第で `total` が高く見えることがある（連想枠）。
+   * **`false` の記憶の `total` を、`true` の記憶の `total` と比較しないこと。** 同じ値どうしの比較は妨げない。
    *
-   * ⚠ **`undefined`（欄が無いこと）は「関連度を測っていない」ことを意味しない。**
-   * `defaultScoringStrategy` は常にこの欄を埋める（`true`/`false` のどちらか）ので、
-   * `undefined` は「`defaultScoringStrategy` を経由していない」——独自の
-   * `ScoringStrategy`（`strategies/scoring.ts` の公開拡張点）がこの欄を埋めていない、
-   * という別の意味になる。**この2つは型の上では区別できない**——`undefined` を見たら
-   * 「関連度を測ったかどうか分からない」としてのみ扱い、比較可能とも不可能とも仮定しないこと
-   * （ADR 0282「引き受けた負債」）。
+   * `undefined`（欄が無い）は「関連度を測っていない」ではなく、`defaultScoringStrategy` を経由していない
+   * （自作の `ScoringStrategy` が埋めていない）という別の意味で、型の上では区別できない。
+   * `undefined` は「関連度を測ったか分からない」としてのみ扱い、比較可能とも不可能とも仮定しないこと。
    */
   affinityMeasured?: boolean;
 }
 
-/** `ScoreBreakdown` の zod スキーマ。値を実行時に検査するときに使う（型 `ScoreBreakdown` と揃えてある）。 */
+/** `ScoreBreakdown` の zod スキーマ。 */
 export const ScoreBreakdownSchema = z.object({
   similarity: z.number().optional(),
   lexicalMatch: z.number().optional(),
@@ -1365,32 +927,17 @@ export const ScoreBreakdownSchema = z.object({
 }) satisfies z.ZodType<ScoreBreakdown>;
 
 /**
- * 連想枠・必須の同伴取得（段3・段3.5とも、`retrievedVia: "mandatory_companion"` /
- * `"association"`）が返す記憶の `score`（Issue #548 方向2、
- * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+ * 連想枠・必須の同伴取得（`retrievedVia: "mandatory_companion"` / `"association"`）が返す記憶の `score`
+ * （[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
  *
- * **`ScoreBreakdown` との違いは、`total`・`similarity`・`lexicalMatch` を持たないことだけ**
- * ——この3つは「クエリとの関連度（affinity）」を前提にした量であり、affinity を測っていない
- * 候補（`affinityMeasured: false`）ではそもそも計算に使った実測値が無い（`similarity`/
- * `lexicalMatch` を渡さずに `defaultScoringStrategy` を呼んでいるため、`affinity` は中立の
- * `1` に退化し、`total` はその退化した値を含んだまま `decay`/`tagMatch`/`freshness`/
- * `strength` の積になる——他の記憶の `total` と比較すると、遠ざかったはずの記憶が
- * 遠ざかる前より高く見えることがある。ADR 0246「⛔ これが閉じないもの」2、Issue #548）。
+ * `ScoreBreakdown` との違いは `total`・`similarity`・`lexicalMatch` を持たないことだけ。affinity を測っていない候補
+ * （`affinityMeasured: false`）の `total` は中立の `1` に退化した値を含み、他の記憶の `total` と比較すると
+ * 遠ざかったはずの記憶が高く見えることがあるため。
  *
- * **`affinityMeasured: false` は常にこのリテラルで、判別の鍵である**——
- * `RecalledMemory.score` / `RecallRecordMemory.score` は
- * `ScoreBreakdown | AffinityUnmeasuredScore` の判別可能な union であり、
- * `score.affinityMeasured === false` で絞り込むとこちらの型になる
- * （`score.affinityMeasured !== false` なら `ScoreBreakdown` のまま——`true` のときは
- * もちろん、`undefined`（`ScoringStrategy` を自作していて欄を埋めていない場合。
- * ADR 0282「設計問2」）のときも安全側に `ScoreBreakdown` 側へ倒す。**`total` を
- * 落とすのは、affinity を測っていないと明示された記憶だけ**）。
- *
- * `decay`/`tagMatch`/`freshness`/`strength` は `ScoreBreakdown` と同じ意味・同じ値
- * （`defaultScoringStrategy` は内部では常に4項＋`total` を計算しており、この型は
- * その計算結果から `total`/`similarity`/`lexicalMatch` を落として返すだけ——**内部の
- * 順位付け（`recall-runtime.ts` の `rankKey` や段2の並び）は `total` を持つ内部表現の
- * ままであり、1バイトも変わらない。変わるのは呼び出し側に返す形だけである**）。
+ * `affinityMeasured: false` は常にこのリテラルで、判別の鍵。`RecalledMemory.score` / `RecallRecordMemory.score` は
+ * `ScoreBreakdown | AffinityUnmeasuredScore` の判別可能な union で、`score.affinityMeasured === false` で絞り込むと
+ * こちらになる。`true` / `undefined` のときは安全側に `ScoreBreakdown` へ倒す（`total` を落とすのは、
+ * 測っていないと明示された記憶だけ）。`decay`/`tagMatch`/`freshness`/`strength` は `ScoreBreakdown` と同じ意味・同じ値。
  */
 export interface AffinityUnmeasuredScore {
   /** 常に `false`（判別の鍵）。 */
@@ -1405,7 +952,7 @@ export interface AffinityUnmeasuredScore {
   strength: number;
 }
 
-/** `AffinityUnmeasuredScore` の zod スキーマ（型と揃えてある）。 */
+/** `AffinityUnmeasuredScore` の zod スキーマ。 */
 export const AffinityUnmeasuredScoreSchema = z.object({
   affinityMeasured: z.literal(false),
   decay: z.number(),
@@ -1415,14 +962,9 @@ export const AffinityUnmeasuredScoreSchema = z.object({
 }) satisfies z.ZodType<AffinityUnmeasuredScore>;
 
 /**
- * `RecalledMemory.score` / `RecallRecordMemory.score` の型
- * （Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
- *
- * **判別の鍵は `affinityMeasured`。**`false` なら {@link AffinityUnmeasuredScore}
- * （`total` を持たない）、それ以外（`true`/`undefined`）なら {@link ScoreBreakdown}
- * （`total` を持つ）。`ScoringStrategy`（公開の拡張点、`strategies/scoring.ts`）の
- * 戻り値型はこの union ではなく `ScoreBreakdown` のまま変えていない——変換は
- * `recall-runtime.ts` が、`ScoringStrategy` の結果を返り値へ詰めるときに行う。
+ * `RecalledMemory.score` / `RecallRecordMemory.score` の型（ADR 0352）。判別の鍵は `affinityMeasured`。
+ * `false` なら {@link AffinityUnmeasuredScore}（`total` を持たない）、それ以外なら {@link ScoreBreakdown}。
+ * `ScoringStrategy`（`strategies/scoring.ts`）の戻り値型はこの union ではなく `ScoreBreakdown` のまま。
  */
 export type RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore;
 
@@ -1438,223 +980,115 @@ export interface RecalledMemory {
   /**
    * どの経路でこの記憶が候補に入ったか。
    *
-   * **⚠ ANN と語彙（`"lexical"`）の両方が同じ記憶を引き当てたときは `"ann"` になる**
-   * （この記憶を候補集合へ入れた**最初の**チャンネル。ANN が先に候補プールへ入れるため。
-   * ADR 0084 §6）。「このチャンネルだけが見つけた」ことを表す欄ではない——**単一の値で
-   * チャンネルの集合を表そうとしない**、という設計判断である。語彙チャンネルも当てたかどうかは
-   * `score.lexicalMatch` の有無が名乗る（`ScoreBreakdown.lexicalMatch` の doc 参照）。
-   * 2つを併せて読むと、どのチャンネルの集合に入っていたかが一意に決まる。
+   * ANN と語彙（`"lexical"`）の両方が同じ記憶を引き当てたときは `"ann"` になる（候補集合へ入れた**最初の**チャンネル。
+   * ADR 0084 §6）。「このチャンネルだけが見つけた」ことを表す欄ではない。語彙チャンネルも当てたかは
+   * `score.lexicalMatch` の有無が名乗る。
    *
-   * **`"tag_match"` と `"recency"` は、この union に存在していたが、2026-09-16 に落とした**
-   * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)
-   * の分類3、[ADR 0144](../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)
-   * で実施。`@mnemora/core` の公開 API の破壊的変更）。`recall-runtime.ts` はこの2値を
-   * 一度も書いておらず、ADR 0084 の方針（実装を伴わない値を union に置かない）より前に
-   * 置かれた値であり、設計だけが消えて型に残っていた。**これが Issue #106 の報告者が
-   * 踏んだ罠そのものだった**——型に名前が在るので呼び出し側は「使える」と読むが、実装が
-   * 無いので黙って何も起きない。`"lexical"` は実装を伴って足した値である。**新しく足す
-   * 値を、`"tag_match"`/`"recency"` だった形（実装より先に型だけ置く）にしないこと**
-   * （ADR 0084 の決定）。
+   * `"association"` は「クエリに直接は当たらなかったが、クエリで引けた記憶（アンカー）の近傍として引いた」候補。
+   * 既定 on（ADR 0337）で、`query.association` を省略しても {@link DEFAULT_RECALL_ASSOCIATION} で現れる。
+   * `query.association: null` を明示した呼び出しでは現れない。この union を網羅的に `switch` している呼び出し側は、
+   * 新しい値を扱わないまま通る可能性がある。
    *
-   * **`"association"`（Issue #200）は「クエリに直接は当たらなかったが、クエリで
-   * 引けた記憶（アンカー）の近傍として引いた」候補**（北極星「聞かれていないことを、
-   * 自分から思い出す」）。**既定 on**（[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)。
-   * 採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）——`query.association` を省略した呼び出しでも
-   * {@link DEFAULT_RECALL_ASSOCIATION} で現れる。`query.association: null` を
-   * 明示した呼び出しでは一度も現れない。
-   * `recall-runtime.ts` の段3.5、`VectorStore.getVectors`（任意メソッド）を参照。
-   *
-   * **⚠ 公開 API の破壊的変更である**——この union を網羅的に `switch` している
-   * 呼び出し側は、新しい値を扱わないまま黙って通ってしまう可能性がある。
-   * `0.x` の間はオーナーの明示で許容されている（`docs/autonomy.md` §3）。
-   * この変更を入れた PR で `switch (m.retrievedVia)` の網羅箇所を grep し、
-   * 全箇所を確認済み（PR 本文参照）。
+   * 実装を伴わない値を union に置かない（ADR 0084、ADR 0144）。型に名前が在ると呼び出し側は「使える」と読み、
+   * 実装が無いと黙って何も起きない。
    */
   retrievedVia: "ann" | "lexical" | "mandatory_companion" | "association";
   /** 矛盾の相手として同伴取得された場合、その相手の memoryId。 */
   companionOf?: MemoryId;
   /**
-   * この記憶が `contested`（矛盾の相手が居る）で、かつその相手（`Memory.contestedWithId`）が
-   * **同じ recall 結果に含まれるとき**、その相手の memoryId（Issue #691 続き、
-   * [ADR 0335](../../../docs/decisions/0335-recalled-memory-contested-with.md)）。
+   * この記憶が `contested` で、かつその相手（`Memory.contestedWithId`）が同じ recall 結果に含まれるとき、
+   * その相手の memoryId（[ADR 0335](../../../docs/decisions/0335-recalled-memory-contested-with.md)）。
    *
-   * **`companionOf` とは別の欄である。**`companionOf` は「同伴取得（段3の必須の同伴取得、
-   * `retrievedVia: 'mandatory_companion'`）で候補に引き込まれた側だけが持つ」という
-   * 既存の意味（`docs/recall.md` §8、`examples/chat` の `correction-demo.ts` が
-   * 「ちょうど片方が mandatory_companion」を前提にしている）をそのまま残すために、
-   * 意味を変えずに新設した——`companionOf` は**この記憶が対の中でどちらの役割だったか**
-   * （起点か同伴か）を表すのに対し、この欄は**取得経路を問わず**「対が両方とも
-   * 返っているかどうか」だけを表す。
-   *
-   * **`retrievedVia` の値に関わらず在りうる**——矛盾する2件が同伴取得ではなく
-   * `"ann"`/`"lexical"` で自然に両方とも候補に入ったとき（相手の順位がたまたま
-   * 予算・limit の内側だったとき）にも付く。これが本欄を足した理由そのもの:
-   * 同伴取得（`companionOf`）だけでは、この場合に矛盾を示す手段が無かった。
-   *
-   * **相手が最終的な結果集合（budget による切り詰め後）に含まれないときは付かない**
-   * ——連想枠（`retrievedVia: 'association'`）経由で単独候補になった `contested` な
-   * 記憶や、相手が forget 済み・予算で落ちた場合がこれに当たる（ADR 0335「決定」参照）。
+   * `companionOf` とは別の欄。`companionOf` は同伴取得で引き込まれた側だけが持つ（`docs/recall.md` §8）ので、
+   * 意味を変えずに新設した。この欄は取得経路を問わず「対が両方とも返っているか」だけを表し、
+   * `retrievedVia` の値に関わらず在りうる（矛盾する2件が `"ann"`/`"lexical"` で自然に両方入ったときも付く）。
+   * 相手が最終的な結果集合（budget による切り詰め後）に含まれないときは付かない。
    */
   contestedWith?: MemoryId;
-  /**
-   * **`retrievedVia: "association"` のときだけ在る。**どのアンカー（`memoryId`）を
-   * 起点に連想したか（Issue #200）。`companionOf` と同じ形・同じ理由——
-   * 北極星の問い3（この記憶が選ばれた理由を、後から説明できるか）に答えるための欄であり、
-   * 「なぜこれが出てきたか」を呼び出し側がアンカーまで辿れるようにする。
-   */
+  /** `retrievedVia: "association"` のときだけ在る。どのアンカー（`memoryId`）を起点に連想したか。 */
   associationOf?: MemoryId;
   /**
-   * この記憶が「本人が述べた事実」なのか「AI の推論」なのか（オーナーの原則7）。
+   * この記憶が「本人が述べた事実」なのか「AI の推論」なのか。
    *
-   * **なぜ `provenance` 全体ではなく `kind` だけを返すか。**
-   * オーナーが roadmap.md §5.5 の回答で付けた条件は「**`provenance.kind` で区別して返す**」
-   * であり、求められているのは**区別**であって中身の追加ではない。`kind` だけを平らに持てば、
-   * 「そのうち `basis` や `confidence` も足そう」という圧力が構造的に掛からない
-   * （`provenance: Provenance` という形にすると、欄が1つ増えるたびに毎回の返り値が太る）。
-   * `model` / `promptVersion` / `basis` / `confidence` が要るなら
-   * `MemoryStore.get()` を引く——**そちらは「1件を詳しく見る」問いであり、
-   * recall の「何を返したか」とは別の問いである。**
-   *
-   * 欄名を `provenanceKind` と平らにしてあるのは、既にある
-   * `RecallQuery.excludeProvenanceKinds` と同じ語彙で揃えるためでもある。
-   *
-   * **`basisLost`（下、Issue #883・ADR 0342）もこの原理を保つ**——`kind === "inferred"`
-   * のとき「根拠を失っているか」という**派生した1bitの印**だけを別欄で返し、
-   * `basis` そのもの（`memoryIds`/`observationIds`）は今回も返さない。
+   * `provenance` 全体ではなく `kind` だけを返す。求められているのは区別であって中身の追加ではなく、`kind` だけを
+   * 平らに持てば欄を足す圧力が掛からない。`model` / `promptVersion` / `basis` / `confidence` が要るなら
+   * `MemoryStore.get()` を引く。欄名は `RecallQuery.excludeProvenanceKinds` と同じ語彙。
+   * `basisLost`（ADR 0342）も同じ原理で、`kind === "inferred"` のとき派生した1bitの印だけを返し、`basis` 自体は返さない。
    */
   provenanceKind: ProvenanceKind;
   /**
-   * スコアの内訳。**`affinityMeasured: false` のときは {@link AffinityUnmeasuredScore}**
-   * （`total`/`similarity`/`lexicalMatch` を持たない）、**それ以外（`true`/`undefined`）は
-   * {@link ScoreBreakdown}**（{@link RecalledScore} の doc、Issue #548 方向2、
-   * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
+   * スコアの内訳。`affinityMeasured: false` のときは {@link AffinityUnmeasuredScore}（`total`/`similarity`/`lexicalMatch` を
+   * 持たない）、それ以外は {@link ScoreBreakdown}（{@link RecalledScore}、ADR 0352）。
    */
   score: RecalledScore;
   /**
-   * この記憶を実際に述べた人（Issue #579 案D、[ADR 0289](../../../docs/decisions/0289-recalled-memory-speaker-subject.md)）。
+   * この記憶を実際に述べた人（[ADR 0289](../../../docs/decisions/0289-recalled-memory-speaker-subject.md)）。
    *
-   * **`provenance.kind === "stated"` のときだけ在りうる**（`speaker` は
-   * `StatedProvenance` にしか存在しない欄——`provenance.ts` 参照）。`stated` でも
-   * `speaker` を述べていなければ `null`。`inferred`/`consolidated`/`reflected`/`imported`
-   * は常に `null`（この欄を持ちようが無い）。
-   *
-   * 🔴 **型の上では省略可能（`?`）だが、`recall-runtime.ts` は常にこの欄へ値か `null` を
-   * 書く——`undefined` にもキー自体を省くこともしない。**「無い（`null`）」と
-   * 「頼まなかった・書き忘れた（`undefined`）」を実行時に混ぜないための runtime 側の保証であり、
-   * [ADR 0257](../../../docs/decisions/0257-searched-and-found-nothing-versus-did-not-search.md)
-   * （「探したが無かった」と「探していない」を分ける）の考え方をこの欄に当てたものである。
-   * 型を必須にしなかった理由・runtime が保証する理由は ADR 0289 を参照。
+   * `provenance.kind === "stated"` のときだけ値が入りうる。`stated` でも `speaker` を述べていなければ `null`。
+   * それ以外の kind は常に `null`。型の上では省略可能だが、`recall-runtime.ts` は常に値か `null` を書く
+   * （`undefined` にもキーの省略にもしない）。「無い（`null`）」と「書き忘れ（`undefined`）」を実行時に混ぜないため
+   * （ADR 0257、ADR 0289）。
    */
   speaker?: string | null;
   /**
-   * この記憶が「誰との」やり取りに紐づくか（Issue #579 案D、ADR 0289）。
+  /**
+   * この記憶が「誰との」やり取りに紐づくか（ADR 0289）。
    *
-   * **その Memory 自身の `subjectId` をそのまま引き継ぐ**——`Memory.subjectId?: string | null`
-   * が `undefined` のときも `null` に揃える（`undefined` と `null` を呼び出し側へ
-   * 混ぜて渡さない）。統合（`consolidate`）が subject をまたいだ場合、この欄は
-   * `Memory.subjectId` と同じく `null` になる——**この欄は Issue #579 の困りごと1
-   * （統合で帰属が消える）を直すものではない**。困りごと3（recall の場で speaker/subjectId が
-   * 見えない）にだけ答える。
+   * その Memory 自身の `subjectId` を引き継ぐ。`undefined` のときも `null` に揃える。統合（`consolidate`）が subject を
+   * またいだ場合は `Memory.subjectId` と同じく `null` になり、この欄は帰属が消える問題を直すものではない。
+   * 型の上では省略可能だが、`recall-runtime.ts` は常に値か `null` を書く（`speaker` と同じ保証）。
    *
-   * 🔴 **型の上では省略可能だが、`recall-runtime.ts` は常にこの欄へ値か `null` を書く**
-   * （`speaker` と同じ保証。ADR 0289 参照）。
-   *
-   * ⚠ **空文字の `subjectId` は、入力では受け付けるが、この出力の schema（{@link RecalledMemorySchema} の
-   * `subjectId` は `min(1)`）を通らない**（今の振る舞い）。`ctx.subjectId: ""`（{@link Ctx} の doc のとおり受け付ける）
-   * で書いた記憶を返すと、この欄が `""` になり、`recall()` の `outputValidation` が `ok: false`
-   * （`memories.<n>.subjectId`）になる。schema は緩めていない。
+   * 限界: 空文字の `subjectId` は入力では受け付けるが、この出力の schema（{@link RecalledMemorySchema} の `subjectId` は
+   * `min(1)`）を通らない。`ctx.subjectId: ""` で書いた記憶を返すと `""` になり、`recall()` の `outputValidation` が
+   * `ok: false`（`memories.<n>.subjectId`）になる。schema は緩めていない。
    */
   subjectId?: string | null;
   /**
-   * この記憶を取り込んだ壁時計の時刻（Issue #691 の子、Issue #702、
-   * [ADR 0298](../../../docs/decisions/0298-recalled-memory-recorded-occurred-at.md)）。
-   *
-   * **`Memory.recordedAt` をそのまま引き継ぐ。**`Memory.recordedAt` は `Date`
-   * （必須・`null` になりようが無い）なので、この欄は runtime が書く限り常に値を持つ。
-   *
-   * 🔴 **型の上では省略可能（`?`）だが、`recall-runtime.ts` は常にこの欄へ値を書く**
-   * ——`undefined` にもキー省略にもしない（`speaker`/`subjectId` と同じ保証。
-   * ADR 0289 の runtime 保証をこの欄にも当てた。ADR 0298 参照）。
-   *
-   * **並び替え（複数件の `recall()` の中でどれが後の発言か）に使う想定の欄。**
-   * `occurredAt`（下）が無い記憶でも、`recordedAt` は必ず在る——観測（会話のターン）を
-   * 取り込んだ順序を表す。
+   * この記憶を取り込んだ壁時計の時刻（[ADR 0298](../../../docs/decisions/0298-recalled-memory-recorded-occurred-at.md)）。
+   * `Memory.recordedAt` を引き継ぐ。型の上では省略可能だが、`recall-runtime.ts` は常に値を書く。
+   * 複数件の中でどれが後の発言かの並び替えに使う想定。`occurredAt` が無い記憶でも必ず在る。
    */
   recordedAt?: Date;
   /**
-   * この記憶が指す出来事・事実が実際にいつのものか（Issue #691 の子、Issue #702、
-   * ADR 0298）。
+   * この記憶が指す出来事・事実が実際にいつのものか（ADR 0298）。`Memory.occurredAt` を引き継ぎ、`undefined` のときも
+   * `null` に揃える（`memory.ts` の `occurredAt`/`recordedAt` の区別、ADR 0145）。
    *
-   * **その Memory 自身の `occurredAt` をそのまま引き継ぐ。**`Memory.occurredAt?: Date | null`
-   * が `undefined` のときも `null` に揃える（`undefined` を呼び出し側へ渡さない——
-   * 「述べられていない」を `null` として正直に伝える。`memory.ts` の
-   * `occurredAt`/`recordedAt` の区別、[ADR 0145](../../../docs/decisions/0145-valid-from-until-storage.md)
-   * を参照）。
-   *
-   * 🔴 **`null` は「出来事の時点が分からない・述べられていない」ことを表す。**
-   * この欄が `null` だからといって `recordedAt` で埋めない——2つの時計は意味が違う
-   * （`memory.ts` の `occurredAt` doc コメント参照）。**呼び出し側が「訂正の順序」を
-   * 読みたい場合、この欄が `null` なら `recordedAt` へフォールバックするかどうかは
-   * 呼び出し側の判断であり、この core の型・runtime は代わりに埋めない**
-   * （ADR 0298「決めなかったこと」参照）。
-   *
-   * 🔴 **型の上では省略可能だが、`recall-runtime.ts` は常にこの欄へ値か `null` を書く**
-   * （`speaker`/`subjectId` と同じ保証）。
+   * `null` は「出来事の時点が分からない・述べられていない」で、`recordedAt` で埋めない（2つの時計は意味が違う）。
+   * 「訂正の順序」を読みたい呼び出し側が `recordedAt` へフォールバックするかは呼び出し側の判断で、core は代わりに埋めない
+   * （ADR 0298）。型の上では省略可能だが、`recall-runtime.ts` は常に値か `null` を書く。
    */
   occurredAt?: Date | null;
   /**
-   * この記憶の `Memory.attributes`（`memory.ts`）（呼び手が申告した属性）（Issue #152/#153、
-   * ADR 0312）。
+   * この記憶の `Memory.attributes`（呼び手が申告した属性。ADR 0312）。
    *
-   * **なぜ「詳細は `get()` の問い」という設計原理の例外にするか**（`provenanceKind` の
-   * doc コメント参照）: `RecallQuery.attributes` で母集合を絞ったのに、絞りに使った軸の
-   * 値が返らないと、呼び出し側は「なぜこれが返ったか」を自分で検証できない——北極星の
-   * 問い3（「この記憶が選ばれた理由を、後から説明できるか」）に直接触れる。**線を引く
-   * なら「絞り込みに使える軸は載せる。使えない詳細は `get()` に残す」**（ADR 0312）。
-   *
-   * **型の上では省略可能だが、`recall-runtime.ts` は常に `{}` 以上の値を書く**
-   * （`speaker`/`subjectId` と同じ runtime 保証。`Memory.attributes` が `undefined` の
-   * 古い行・adapter でも、この欄は `{}` になる——「無い」を `undefined` と `{}` の
-   * 2つの顔にしない）。
+   * 「詳細は `get()` の問い」という原則（`provenanceKind`）の例外: `RecallQuery.attributes` で絞ったのに絞りに使った軸の
+   * 値が返らないと、呼び出し側が「なぜこれが返ったか」を検証できない。絞り込みに使える軸は載せ、使えない詳細は `get()` に残す。
+   * 型の上では省略可能だが、`recall-runtime.ts` は常に `{}` 以上の値を書く（`Memory.attributes` が `undefined` の
+   * 古い行・adapter でも `{}`）。
    */
   attributes?: Attributes;
   /**
-   * この記憶が `provenanceKind === "inferred"` で、かつその `basis.memoryIds`
-   * （どの Memory から導いたか）の少なくとも1件が失われているときだけ `true`
-   * （Issue #883、[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）。
+   * この記憶が `provenanceKind === "inferred"` で、かつその `basis.memoryIds` の少なくとも1件が失われているときだけ
+   * `true`（[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）。
+   * 根拠が消えても隠さず、「根拠を失った推論」として印を付けて返す（docs/memory-model.md §2。削除はしない）。
    *
-   * docs/memory-model.md §2 の規律「推論は根拠なしに提示しない」——`basis` が指す先が
-   * 消えても隠さず、「根拠を失った推論」として印を付けて返す（削除はしない。推論という
-   * 事実自体は消えていないため）を実装する欄。
-   *
-   * **「失われている」の定義**（3つのうちどれか1つでも当たれば、その1件は失われている）:
-   * - `MemoryStore.getMany` の結果に無い（存在しない・他テナント・adapter が期待する
-   *   形式でない——`getMany` の doc コメントが定める「静かに落とす」契約そのまま）。
+   * 「失われている」は次のどれか1つでも当たるとき:
+   * - `MemoryStore.getMany` の結果に無い（存在しない・他テナント・adapter が期待する形式でない）。
    * - `status === "forgotten"`。
    * - `purgedAt` が非 `null`。
    *
-   * **`archived`/`superseded`/`contested` は失われていない扱い**——本文が残り、
-   * 復帰する経路がある（docs/memory-model.md §11 行7・14・15）。
+   * `archived`/`superseded`/`contested` は失われていない扱い（本文が残り、復帰する経路がある。docs/memory-model.md §11）。
    *
-   * 🔴 **`basis.observationIds` は確かめない。**Observation は追記専用で、forget/purge/
-   * 削除の経路がコードに無く（docs/memory-model.md §11 行1）、一括取得口
-   * （`getMany` の Observation 版）も存在しない——「探したが無かった」ではなく
-   * 「そもそも探していない」（[ADR 0257](../../../docs/decisions/0257-searched-and-found-nothing-versus-did-not-search.md)
-   * の区別）。この限界は ADR 0342「引き受けた負債」に記録してある。
+   * **`basis.observationIds` は確かめない。** Observation は追記専用で、forget/purge の経路が無く、一括取得口も無い
+   * （ADR 0257 の「探していない」。ADR 0342 に限界として記録）。
    *
-   * **`false` にはしない。**基準を満たさないときはキー自体を出さない
-   * （`companionOf`/`associationOf`/`contestedWith` と同じ、`?: true` の作法——
-   * 「無いことを表す値」を持たせず、キーの有無そのものが意味を持つ）。
-   *
-   * **basis の中身（`memoryIds`/`observationIds` そのもの）は返さない。**
-   * `provenanceKind` の doc コメントが説明する設計原理（`provenance` 全体ではなく
-   * 判別だけを平らに返す）をこの欄でも保つ——`basis` の詳細が要るなら
-   * `MemoryStore.get()` を引く。
+   * `false` にはせず、基準を満たさないときはキー自体を出す側に倒さない（`companionOf` と同じ `?: true` の作法）。
+   * `basis` の中身は返さない（詳細が要るなら `MemoryStore.get()`）。
    */
   basisLost?: true;
 }
 
-/** `RecalledMemory` の zod スキーマ。値を実行時に検査するときに使う（型 `RecalledMemory` と揃えてある）。 */
+/** `RecalledMemory` の zod スキーマ。 */
 export const RecalledMemorySchema = z.object({
   memoryId: z.string().min(1),
   digest: z.string(),
@@ -1672,26 +1106,12 @@ export const RecalledMemorySchema = z.object({
   basisLost: z.literal(true).optional(),
 }) satisfies z.ZodType<RecalledMemory>;
 
-// ---------------------------------------------------------------------------
-// パイプラインのトレース（docs/recall.md §2）
-// ---------------------------------------------------------------------------
-
 /**
  * `explain.stages` の段の名前。`scope` は段0、`candidate_generation` は段1、`rescore` は段2、`contradiction_resolution` は段3、`association` は段3.5、`budget_truncation` は段4、`index_band` は段5、`record` は段6（docs/recall.md §2・§9）。
  *
- * **`association`（[Issue #865](https://github.com/takecchi/mnemora/issues/865)、2026-09-29）**:
- * この union への値の追加は破壊的変更に数えない（オーナー回答 ask_human d9364c91）。
- * `association` の trace が `stages` に積まれるのは `query.association !== null`
- * （既定 on、または明示の値）のときだけ——`null` で明示的に off にしたときは、
- * 他のどの段の trace も足されない（`candidate_generation` の ANN/語彙チャンネルが、
- * そもそも要求されていないときに trace を積まないのと同じ形。docs/recall.md §2「`explain.stages`
- * の読み方」）。off にした run と on にした run で `stages` の並びが同じにならなくなった
- * ——差分は `association` の trace の有無そのものである。
- *
- * `executed: false` になるのは `stage_skipped(association, ...)`（`vector_store_lacks_get_vectors`／
- * `no_anchor`）と対になるときだけで、`rescore` と同じく「探したが0件だった」（`hits`/`selected` が
- * 0 のまま `executed: true`）とは区別する。`maxCount` を超えた分の `over_limit` は、これまでどおり
- * `omitted` に `stage: "association"` で出る。
+ * この union への値の追加は破壊的変更に数えない。`association` の trace は `query.association !== null` のときだけ
+ * `stages` に積まれる（`null` で off にした run は、`candidate_generation` の ANN/語彙チャンネルが要求されていないとき
+ * に trace を積まないのと同じ形。docs/recall.md §2「`explain.stages` の読み方」）。
  */
 export type RecallStageName =
   | "scope"
@@ -1708,17 +1128,12 @@ export interface StageTrace {
   /** 段の名前（{@link RecallStageName}）。 */
   stage: RecallStageName;
   /**
-   * ⚠ 意味は段ごとに違う——**`false` は「段を飛ばした」とは限らない**（2026-09-27 追記、今の振る舞いを
-   * 書くだけ。`docs/recall.md` §2「`explain.stages` の読み方」）。
-   * - `candidate_generation`: その経路（`detail.channel`）が走らなかった。必ず
-   *   `stage_skipped(candidate_generation)` の `Omission` と対になる。
+   * 意味は段ごとに違う。**`false` は「段を飛ばした」とは限らない**（`docs/recall.md` §2「`explain.stages` の読み方」）。
+   * - `candidate_generation`: その経路（`detail.channel`）が走らなかった。必ず `stage_skipped(candidate_generation)` の
+   *   `Omission` と対になる。
    * - `rescore`: 採点する候補が0件だった（段は飛ばしていない）。`stage_skipped` は名乗らない。
-   * - `association`（2026-09-29、Issue #865）: `stage_skipped(association, ...)`
-   *   （`vector_store_lacks_get_vectors`／`no_anchor`）と対になるときだけ `false`。
-   *   アンカーから実際に検索した結果 `detail.hits`/`detail.selected` が0件だったときは
-   *   `rescore` と同じく `true`（探したが0件、と探さなかったを区別する）。この段自体が
-   *   `stages` に現れるのは `query.association !== null` のときだけ——`null`（明示 off）
-   *   のときは trace そのものが無い。
+   * - `association`: `stage_skipped(association, ...)` と対になるときだけ `false`。アンカーから検索して
+   *   `detail.hits`/`detail.selected` が0件だったときは `true`（探したが0件と、探さなかったを区別する）。
    * - それ以外の段: 常に `true`。
    */
   executed: boolean;
@@ -1726,7 +1141,7 @@ export interface StageTrace {
   detail?: Record<string, unknown>;
 }
 
-/** `StageTrace` の zod スキーマ。値を実行時に検査するときに使う（型 `StageTrace` と揃えてある）。 */
+/** `StageTrace` の zod スキーマ。 */
 export const StageTraceSchema = z.object({
   stage: z.enum([
     "scope",
@@ -1742,212 +1157,128 @@ export const StageTraceSchema = z.object({
   detail: z.record(z.string(), z.unknown()).optional(),
 }) satisfies z.ZodType<StageTrace>;
 
-// ---------------------------------------------------------------------------
-// RecallQuery / RecallResult（docs/recall.md §1）
-// ---------------------------------------------------------------------------
-
 /**
  * `recall()` への入力。
  *
- * docs/recall.md はパイプラインの段（§2）と各種オプションの効果を規定するが、
- * `RecallQuery` 自体の網羅的な型は明記していない。ここでの型は、各段の記述
- * （スコープ確定・候補生成・予算・countKind の近似許可）から素直に導いたもので、
- * フィールド名は本 PR の裁量である。
+ * 既定で `provenance.kind = 'inferred'` を含める。除外する場合は `excludeProvenanceKinds` に `['inferred']` を渡す。
  *
- * D5: 既定で `provenance.kind = 'inferred'` を含める。除外する場合は
- * `excludeProvenanceKinds` に `['inferred']` を渡す。
- *
- * ⚠ **subject で絞るなら、`ctx.subjectId` に置く。この型に `subjectId` は無い。**
- * **クエリの未知のキーは、例外にも警告にもならず黙って捨てられる**
- * （[Issue #1123](https://github.com/takecchi/mnemora/issues/1123)。`RecallQuerySchema` は `.strict()` ではない）。
- * ⟹ `recall(ctx, { text, subjectId: "alice" })` と書くと `subjectId` は捨てられ、
- * **テナント全体から引いた結果が、何事も無く返る**。キーの綴り違い（`scoreTreshold` など）も
- * 同じく無視される。TypeScript の余剰プロパティ検査が止めるのは、オブジェクトリテラルを直接
- * 渡したときだけである——変数に入れてから渡す・スプレッドで組む・JavaScript から呼ぶ、の
- * いずれも素通りする。絞れたかは `explain.stages` の `scope` の `detail.subjectId` で確かめられる
- * （絞れていなければ `null`）。
+ * **subject で絞るなら、`ctx.subjectId` に置く。この型に `subjectId` は無い。**
+ * **クエリの未知のキーは、例外にも警告にもならず黙って捨てられる**（`RecallQuerySchema` は `.strict()` ではない）。
+ * `recall(ctx, { text, subjectId: "alice" })` と書くと `subjectId` は捨てられ、テナント全体から引いた結果が何事も無く返る。
+ * キーの綴り違い（`scoreTreshold` など）も無視される。TypeScript の余剰プロパティ検査が止めるのはオブジェクトリテラルを
+ * 直接渡したときだけで、変数経由・スプレッド・JavaScript からの呼び出しは素通りする。絞れたかは
+ * `explain.stages` の `scope` の `detail.subjectId` で確かめられる（絞れていなければ `null`）。
  */
 export interface RecallQuery {
   /**
+  /**
    * クエリの本文。埋め込み（`vector` を渡さないとき）と語彙チャンネルに使う。空文字は `ZodError` になる。
    *
-   * ⚠ **空白だけの文字列（`"  "` など）は `ZodError` にならない**——`recall()` は前後の空白を
-   * `trim()` してから使い（埋め込みに渡すのも `trim()` 後の文字列）、`trim()` 後に空なら
-   * その本文では何も引けないものとして `stage_skipped(candidate_generation, "empty_query_content")`
-   * を積む（`recall-runtime.ts` の `embeddableText`）。
+   * 空白だけの文字列は `ZodError` にならない。前後の空白を `trim()` してから使い、`trim()` 後に空なら
+   * `stage_skipped(candidate_generation, "empty_query_content")` を積む。
    */
   text?: string | undefined;
   /**
-   * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と
-   * 一致することは、この型では検証しない——**一致させるのは呼び出し側の責任**である。
+   * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と一致することはこの型では
+   * 検証しない。**一致させるのは呼び出し側の責任**。
    *
-   * **長さが違うときは「比較不能」として扱う**（Issue #867 / 案B）。**新しい throw は
-   * 増えない**——候補は `search` の結果から落とさず、距離を比較が通らない値（`NaN`）に
-   * 差し替える。`recall()` の段2（ADR 0044 の網羅的な三分割）がこれを検出し、
-   * `omitted` の `score_not_comparable` に数える。**`memories` には出ない。**
+   * 長さが違うときは「比較不能」として扱う。新しい throw は増えず、候補は `search` の結果から落とさずに距離を `NaN` に
+   * 差し替え、段2（ADR 0044）が `omitted` の `score_not_comparable` に数える。`memories` には出ない。
+   * [ADR 0040](../../../docs/decisions/0040-zero-vector-never-returned.md)（ゼロベクトルが絡む候補は結果に出ない）と同じ形の契約で、
+   * `packages/postgres`・`packages/testkit`・`packages/core` の3実装が同じ振る舞いをする。
    *
-   * これは [ADR 0040](../../../docs/decisions/0040-zero-vector-never-returned.md)
-   * （ゼロベクトルが絡む候補は `recall()` の結果に出ない）と同じ形の契約であり、
-   * `packages/postgres`・`packages/testkit`・`packages/core` の3実装が同じ振る舞いをする
-   * （[ADR 0040 追記 2026-09-26](../../../docs/decisions/0040-zero-vector-never-returned.md)）。
+   * 限界: `VectorStore.upsert` に長さの違うベクトルを直接渡したときは対象外（Postgres は例外、Fake はそのまま保存する）。
+   * `Runtime.tick` の embed ジョブは `upsert` の前に長さを確かめる（ADR 0393）。
    *
-   * **覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを**直接**渡したときの扱いは
-   * この決定の対象外（Issue #867「範囲外で見つけたもの」）——Postgres は例外、Fake は
-   * そのまま保存する食い違いが残ったままである。`Runtime.tick` の embed ジョブは
-   * 2026-09-30 から `upsert` の前に長さを確かめる（ADR 0393）。
-   *
-   * ⚠ **2026-09-30 追記（ADR 0393）: 長さの検査を受けるのは、`text` から provider が作った
-   * 問い合わせベクトルだけである。**この `vector` を呼び出し側が直接渡したときは core は長さを
-   * 確かめず、上の「比較不能」の扱い（`score_not_comparable`）のままである。⚠ **2026-09-30 訂正: 有限性は
-   * 長さと同じ扱いではない。**`NaN`・`Infinity`・`-Infinity` を成分に含む `vector` は、`runRecall` の入口の
-   * {@link RecallQuerySchema}（`z.array(z.number())`。zod の `z.number()` は有限でない数を拒む）で
-   * `ZodError` になり、`score_not_comparable` には数えられない（ADR 0393 決定4-5 の記述と同じ）。provider が返した
-   * 問い合わせベクトルの長さが違うときは `embedding_provider_unavailable` になる（`RecallQuery.text`
-   * の経路）。
+   * 長さの検査を受けるのは `text` から provider が作った問い合わせベクトルだけ（ADR 0393）。この `vector` を直接渡したときは
+   * 長さを確かめず、上の `score_not_comparable` のまま。有限性は別で、`NaN`・`Infinity`・`-Infinity` を成分に含む `vector` は
+   * {@link RecallQuerySchema}（`z.array(z.number())`）で `ZodError` になり、`score_not_comparable` には数えられない。
+   * provider が返した問い合わせベクトルの長さが違うときは `embedding_provider_unavailable` になる。
    */
   vector?: number[] | undefined;
   /**
    * クエリのタグ。スコアの `tagMatch` にだけ効く（絞り込みではない）。
    *
-   * ⚠ ADR 0474（今の振る舞いを書くだけ）: `tagMatch = 1 + 0.1 × m` の `m` は、この配列の**要素ごと**に、
-   * 記憶の `tags` に完全一致で含まれるかを数える。**この配列の重複は重複のまま数える**
-   * （`["a", "a"]` は `a` を持つ記憶に 1.2、`["a"]` は 1.1）。記憶側の `tags` の重複は1回に数える。
+   * `tagMatch = 1 + 0.1 × m` の `m` は、この配列の要素ごとに記憶の `tags` に完全一致で含まれるかを数える（ADR 0474）。
+   * この配列の重複は重複のまま数える（`["a", "a"]` は `a` を持つ記憶に 1.2、`["a"]` は 1.1）。記憶側の `tags` の重複は1回に数える。
    * `"a"` と `"A"`、前後の空白は別の語（正規化しない）。
    */
   tags?: string[] | undefined;
   /**
-   * **母集合を段1（候補生成）で減らす、AND 等値の絞り込み**（Issue #152/#153、ADR 0312）。
+   * 母集合を段1（候補生成）で減らす、AND 等値の絞り込み（ADR 0312）。
    *
-   * `tags`（上）とは別の軸——`tags` は加点（段2の再スコア、`computeTagMatch`）にしか
-   * ならず母集合を減らさないが、この欄は減らす。`Memory.attributes` の doc コメントが
-   * 説明する通り、`tags` は LLM の推論、`attributes` は呼び手の申告であり、由来の違う
-   * 2つを同じ絞り込み意味論に混ぜない。
+   * `tags` とは別の軸。`tags` は LLM の推論で加点にしかならず母集合を減らさないが、`attributes` は呼び手の申告で
+   * 母集合を減らす。由来の違う2つを同じ絞り込み意味論に混ぜない。
    *
-   * **意味論は AND 等値だけ**（ADR 0312 決定5）。渡したキーすべてが、その Memory の
-   * `attributes` に同じ値で存在する場合だけ候補に残る（`jsonb` の `@>` 包含と同じ形）。
-   * **OR・キーの不在（`key が無いこと`）を表す形は、この版では提供しない**——
-   * 「いまは決めない」と明示する（ADR 0223 決定8 の反例節、ADR 0046 の形）。母集合を
-   * 減らすという #153 の要求には AND 等値で足りるため、必要になってから足す。
+   * 意味論は AND 等値だけ（ADR 0312 決定5）。渡したキーすべてが、その Memory の `attributes` に同じ値で存在する場合だけ
+   * 候補に残る（`jsonb` の `@>` 包含と同じ形）。OR・キーの不在を表す形は、この版では提供しない。
+   * **空オブジェクト（`{}`）は「絞り込み無し」を意味する。**
    *
-   * **空オブジェクト（`{}`）は「絞り込み無し」を意味する**——省略したときと1バイトも
-   * 挙動が変わらない。
+   * `subjectId` と同じく「スコープの定義」の一部で、この欄で落ちた Memory は `omitted`（`FilteredOmission`）に出ない
+   * （`ScopeAggregate`）。`FilteredOmission.condition` に専用の値を足す案は採らない（ADR 0312）。
    *
-   * **`subjectId`（`Ctx.subjectId`）と同じく「スコープの定義」の一部である**
-   * （`docs/recall.md` §2 のスコープ確定、`RecallScope.attributes` の doc コメント参照）。
-   * ⟹ この欄で落ちた Memory は `omitted`（`FilteredOmission`）に**出ない**——
-   * `subjectId`/`tenant` と同じ「呼び出し側が明示した境界の外は『失われた』のではなく
-   * 『そもそも問うていない』」という扱い（`ScopeAggregate` の doc コメント参照）。**v2 で
-   * `FilteredOmission.condition` に専用の値を足す案は、この版では採らない**——公開 union
-   * への値追加が破壊的変更に当たるかどうかは #541 が未決であり（ADR 0312「採らなかった
-   * 案」参照）、この PR は純粋な追加のみで完結させる。
+   * 段1（ANN・語彙の両チャンネル）と段3.5（連想枠）の両方へ押し下げ、`MemoryStore.aggregateScope` にも同じ述語で渡る。
+   * `totalInScope` はこの絞り込みの内側を数える。連想枠だけ絞りが漏れた過去（ADR 0172）を繰り返さないよう、
+   * `RecallScope.attributes` を唯一の出所にする。
    *
-   * **段1（ANN・語彙の両チャンネル）と段3.5（連想枠）の両方へ押し下げる**——`period`/
-   * `validAt`（ADR 0059/0164）と同じ形、`VectorFilter.attributes`/`LexicalFilter.attributes`
-   * 経由。`MemoryStore.aggregateScope` にも同じ述語で渡り、`totalInScope` はこの絞り込みの
-   * **内側**を数える（ADR 0172/#347 の見落とし——連想枠だけ後から絞りが漏れていた——を
-   * 繰り返さないよう、`RecallScope.attributes` を唯一の出所にする）。
-   *
-   * **渡したキー数・キー長・値長には上限がある**（`AttributesSchema`、`attributes.ts`）。
-   * 上限超過は `parse()` の時点で例外になる——`ObserveXxxInput.attributes` と同じ検査。
-   * キーが自前の `__proto__`（`JSON.parse` が作る）なら、`parse()` の前に `ZodError` で断る
-   * （ADR 0496。zod の record は黙って落とし、絞り込みが外れていた）。
+   * 渡したキー数・キー長・値長には上限があり（`AttributesSchema`）、超過は `parse()` の時点で例外になる
+   * （`ObserveXxxInput.attributes` と同じ検査）。キーが自前の `__proto__`（`JSON.parse` が作る）なら `parse()` の前に
+   * `ZodError` で断る（ADR 0496。zod の record は黙って落とし、絞り込みが外れる）。
    */
   attributes?: Attributes | undefined;
   /**
-   * **taxonomy によるラベルの絞り込み**（Issue #201 PR-B、
-   * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
+   * taxonomy によるラベルの絞り込み（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
    *
-   * `MemoryStore.listLabels?`/`registerLabel?`（[ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)）
-   * が管理する統制語彙（`tags` に語彙の状態 `registered`/`proposed` を持たせたもの）で
-   * 絞り込む。**意味論は OR**——渡した名前のうち、現在の `TenantSettingsStore.getTaxonomyMode?`
-   * （既定 `'open'`）で参加資格のあるものを1つでも `tags` に持つ Memory だけを残す。
+   * `MemoryStore.listLabels?`/`registerLabel?`（ADR 0318）が管理する統制語彙で絞り込む。**意味論は OR**: 渡した名前のうち、
+   * 現在の `TenantSettingsStore.getTaxonomyMode?`（既定 `'open'`）で参加資格のあるものを1つでも `tags` に持つ Memory だけを残す。
    *
-   * **参加資格の規則**（`docs/memory-model.md` §8）:
-   * - `taxonomy_mode: 'open'`（既定）—— `registered`・`proposed` の両方が参加資格を持つ。
-   * - `taxonomy_mode: 'strict'` —— `registered` のみ。渡した名前の中に `proposed`
-   *   （または未登録）のものが混ざっていても、**それらは参加資格のある名前の集合から
-   *   外れる**（ADR 0323「決定2」）。
+   * 参加資格の規則（`docs/memory-model.md` §8）:
+   * - `taxonomy_mode: 'open'`（既定）: `registered`・`proposed` の両方が参加資格を持つ。
+   * - `taxonomy_mode: 'strict'`: `registered` のみ。`proposed`（または未登録）は参加資格のある名前の集合から外れる（ADR 0323 決定2）。
    *
-   * 🔴 **参加資格のある名前が1つも残らなかった場合、絞り込みは「何にも一致しない」
-   * 述語になる（結果は0件、落ちた Memory は `FilteredOmission.condition: 'taxonomy'`
-   * に計上される）——この欄を渡さなかった場合（絞り込み無し・全件通過）とは逆の結果に
-   * なる。** `docs/memory-model.md` §8【逐語】「strict モードで `proposed` ラベルが
-   * フィルタから外れて記憶が返らなかった場合、それは recall の `Omission.kind =
-   * 'filtered'`…にそのまま乗る」が定める契約そのものであり、「絞り込み自体を
-   * 諦める」側には倒さない（2026-09-25 訂正——以前この段落は逆に書いていた）。
+   * **参加資格のある名前が1つも残らなかった場合、絞り込みは「何にも一致しない」述語になる**（結果は0件、
+   * 落ちた Memory は `FilteredOmission.condition: 'taxonomy'` に計上される）。絞り込みを諦めて全件通す側には倒さない
+   * （`docs/memory-model.md` §8）。**空配列（`labels: []`）は「絞り込み無し」**で、この欄を渡さなかったときと同じく全件が通る。
+   * 「0件」になるのは、名前を1つ以上渡してそのどれも参加資格を持たなかった場合。
    *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: 空配列（`labels: []`）は「絞り込み無し」**——この欄を
-   * 渡さなかったときと同じで、全件が通る（`recall-taxonomy-filter.test.ts` が固定している）。上の 🔴 の
-   * 「0件」は、**名前を1つ以上渡し、そのどれも参加資格を持たなかった**場合の話である（空配列には当てはまらない）。
-   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（歯は
-   * `packages/postgres/src/__tests__/recall-filter-combination-parity.postgres.test.ts`）。
+   * 名前は文字列の完全一致で比べる（`['project']` は `tags: ['Project']` に当たらない）。大文字小文字・全角半角・
+   * Unicode の正規化形・前後の空白は同じものとして扱わない（`docs/memory-model.md` §8）。
    *
-   * **`tags`（上）とは別の軸**——`tags` は LLM の推論で加点（段2）にしか使われないが、
-   * この欄は呼び出し側が明示した統制語彙による絞り込みであり、母集合を段1で減らす
-   * （`attributes` と同じ「AND 等値の絞り込み」の隣に立つ、こちらは「OR の集合絞り込み」）。
+   * `MemoryStore.listLabels?` を実装していない adapter では、絞り込みを黙って諦めて全件へ広げず、`taxonomy_mode` に応じて倒す
+   * （ADR 0323 決定2）:
+   * - `'open'`（既定・フォールバック含む）: 渡した名前をそのまま参加資格ありとして使う。
+   * - `'strict'`: 検証できないため参加資格ゼロと見なす（0件になる）。`open` 側へ広げてテナントの明示した方針を破らない。
    *
-   * 名前は文字列の完全一致で比べる——`['project']` は `tags: ['Project']` の記憶に当たらない。
-   * 大文字小文字・全角半角・Unicode の正規化形・前後の空白は同じものとして扱わない
-   * （Issue #953、`docs/memory-model.md` §8 の 2026-09-27 追記）。
-   *
-   * **`MemoryStore.listLabels?` を実装していない adapter**（`registered`/`proposed` の
-   * 状態を一切知りようが無い）**では、`taxonomy_mode` に応じて次のどちらかに倒す**
-   * （ADR 0323「決定2」参照。黙って絞り込みを諦めて全件へ広げることはしない）:
-   * - `'open'`（既定・フォールバック含む）: 渡した名前をそのまま参加資格ありとして使う
-   *   （open は状態を見ないので、状態が引けなくても結論は変わらない）。
-   * - `'strict'`: 検証できないため参加資格ゼロと見なす（絞り込みは0件になる）——
-   *   `open` 側へ広げてテナントの明示した方針を破らない。
-   *
-   * **段1（ANN・語彙の両チャンネル）と段3.5（連想枠）へ押し下げ、`MemoryStore.aggregateScope`
-   * にも同じ述語で渡る**（`RecallScope.labels` の doc コメント参照）。**必須の同伴取得
-   * （段3）では検査しない**（`tags` と同じ扱い、ADR 0323「決定3」）。
-   *
-   * **落ちた分は `FilteredOmission.condition: 'taxonomy'` として報告される**
-   * （`attributes` とは違う——`attributes` はスコープの内側の境界として報告しないが、
-   * taxonomy は `period`/`validity` と同じくスコープを定義するゲートとして報告される。
-   * ADR 0323「前提として確認したこと」参照）。`totalInScope` はこの絞り込みの内側を数える。
+   * 段1（ANN・語彙の両チャンネル）と段3.5（連想枠）へ押し下げ、`MemoryStore.aggregateScope` にも同じ述語で渡る。
+   * **必須の同伴取得（段3）では検査しない**（`tags` と同じ扱い、ADR 0323 決定3）。
+   * 落ちた分は `FilteredOmission.condition: 'taxonomy'` として報告される（`attributes` と違い、スコープを定義するゲートとして）。
+   * `totalInScope` はこの絞り込みの内側を数える。
    */
   labels?: string[] | undefined;
   /**
-   * **`IndexBand.groups` に `axis: 'taxonomy'` の群を作るかどうかの明示的な opt-in**
-   * （Issue #201 PR-B、ADR 0323「決定5」）。
+   * `IndexBand.groups` に `axis: 'taxonomy'` の群を作るかどうかの明示的な opt-in（ADR 0323 決定5）。
    *
-   * **既定 `false`（省略）——この欄を渡さない呼び出しの出力は1バイトも変わらない。**
-   * `true` にすると、テナントの語彙全体（現在の `taxonomy_mode` で参加資格のある
-   * ラベル名すべて）を候補にした群カウントが `groups` に追加される。
+   * 既定 `false`（省略）。`true` にすると、テナントの語彙全体（現在の `taxonomy_mode` で参加資格のあるラベル名すべて）を
+   * 候補にした群カウントが `groups` に追加される。`labels` とは独立で、グルーピングだけが増える。
    *
-   * **`labels`（上）とは独立**——この欄だけを `true` にしても、`labels` を指定して
-   * いなければ絞り込みには何の影響もない（グルーピングだけが増える）。
-   *
-   * ⚠ **この軸の被覆不変条件は `subject` 軸と違う**——ラベルは多対多なので、
-   * `axis: 'taxonomy'` の `count` の総和は `totalInScope` と一致しない（超えうる）。
-   * `GroupCount` の doc コメント、`docs/recall.md` §5、ADR 0323「決定6」を参照。
-   *
-   * **`MemoryStore.listLabels?` を実装していない adapter では、この欄は静かに無視される**
-   * （`taxonomy` 軸のエントリが1つも生成されない。`labels` と同じ規律）。
+   * この軸の被覆不変条件は `subject` 軸と違う。ラベルは多対多なので `axis: 'taxonomy'` の `count` の総和は
+   * `totalInScope` を超えうる（`GroupCount`、`docs/recall.md` §5、ADR 0323 決定6）。
+   * `MemoryStore.listLabels?` を実装していない adapter では静かに無視される（`taxonomy` 軸のエントリが生成されない）。
    */
   taxonomyGroups?: boolean | undefined;
   /**
-   * **段3（`contradiction_resolution`）の多者間の同伴取得の、群ごとの上限件数**
-   * （Issue #1449 項目8、[ADR 0396](../../../docs/decisions/0396-recall-relation-max-count.md)）。
+   * 段3（`contradiction_resolution`）の多者間の同伴取得の、群ごとの上限件数
+   * （[ADR 0396](../../../docs/decisions/0396-recall-relation-max-count.md)）。
    *
-   * 多者間の `contested` 群（`RuntimeDeps.relationStore` で辿る）が見つかったとき、群ごとに
-   * 何件まで同伴として載せるか。超えた分は `validFrom` の新しい順→`id` の順で切られ、
-   * 群ごとに1件の `over_limit { stage: "relation" }` に積まれる。**owner（元々候補に居た記憶）は
-   * 数えない**（`detail.companionsAdded` と同じ規約）。
+   * 多者間の `contested` 群（`RuntimeDeps.relationStore` で辿る）が見つかったとき、群ごとに何件まで同伴として載せるか。
+   * 超えた分は `validFrom` の新しい順→`id` の順で切られ、群ごとに1件の `over_limit { stage: "relation" }` に積まれる。
+   * owner（元々候補に居た記憶）は数えない（`detail.companionsAdded` と同じ規約）。
    *
-   * **省略すると {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（`recall-runtime.ts` は
-   * `validatedQuery.relationMaxCount ?? DEFAULT_RECALL_ASSOCIATION.maxCount` で引く）——この欄が
-   * 無かった時点の挙動と1バイトも変わらない**（明示でその値を渡した呼び出しとも同一。歯:
-   * `recall-relation-max-count.test.ts`）。**正の整数、上限1000**（`RecallQuerySchema` が検査する）。
+   * 省略すると {@link DEFAULT_RECALL_ASSOCIATION}.maxCount。**正の整数、上限1000**（`RecallQuerySchema` が検査する）。
    *
-   * **探索の安全弁（群ごとに訪れた数の上限）はこの欄の10倍に連動する**（`recall-runtime.ts` の
-   * `EXPLORATION_VISIT_LIMIT`）。連動させないと、安全弁を超える値を指定しても群の探索がそこで
-   * 止まり、指定した値が効かない（常に `countKind: "lower_bound"` になる）。この欄の上限を
-   * 1000にしたのは、安全弁（＝`listRelated` を呼ぶ回数の上限）を頭打ちにするため。
-   *
-   * `association.maxCount`（連想枠）とは別の欄——連想枠には効かず、連想枠の上限もこの欄に
-   * 連動しない。
+   * 探索の安全弁（群ごとに訪れた数の上限）はこの欄の10倍に連動する。連動させないと、安全弁を超える値を指定しても
+   * 探索がそこで止まり、指定した値が効かない（常に `countKind: "lower_bound"` になる）。上限を1000にしたのは安全弁
+   * （`listRelated` を呼ぶ回数の上限）を頭打ちにするため。`association.maxCount`（連想枠）とは別の欄で、連動しない。
    */
   relationMaxCount?: number | undefined;
   /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以後の記憶だけを対象にする（境界を含む）。 */
@@ -1957,493 +1288,281 @@ export interface RecallQuery {
   /** 段2で残す上限の件数（正の整数）。省略すると {@link DEFAULT_RECALL_LIMIT}。超えた分は `over_limit` になる。 */
   limit?: number | undefined;
   /**
-   * 段1で取り込む候補数の倍率（`k' = max(1, round(limit × overFetchFactor))`、既定は
-   * {@link DEFAULT_OVER_FETCH_FACTOR}。`docs/recall.md` §3）。段3.5（連想枠）の過取得
-   * （`maxCount × overFetchFactor`）にも同じ値を使う。
+   * 段1で取り込む候補数の倍率（`k' = max(1, round(limit × overFetchFactor))`、既定は {@link DEFAULT_OVER_FETCH_FACTOR}。
+   * `docs/recall.md` §3）。段3.5（連想枠）の過取得（`maxCount × overFetchFactor`）にも同じ値を使う。
    *
-   * ⚠ **上限は置かず、丸めもしない**（[Issue #1066](https://github.com/takecchi/mnemora/issues/1066)）。
-   * schema が検査するのは「有限の正数」だけで、`k'` はそのまま store の `search` の `limit` に
-   * 渡る。**保証するのは、`k'`（と `maxCount × overFetchFactor`）が 2^63 未満のときだけである。**
-   * これ以上になると、`@mnemora/postgres` は DB の例外（`bigint` の範囲外）を、
-   * `@mnemora/testkit` の fixture は「`limit must fit in a Postgres bigint`」の `Error` を投げ、
-   * `recall()` ごと reject する（例: `limit` 10 なら `overFetchFactor` が約 9.2e17 以上）。
-   * 2^63 未満でも、大きな値はそのまま大きな `LIMIT` になる（費用は呼び出し側の選択である）。
+   * **上限は置かず、丸めもしない。** schema が検査するのは「有限の正数」だけで、`k'` はそのまま store の `search` の
+   * `limit` に渡る。**保証するのは `k'`（と `maxCount × overFetchFactor`）が 2^63 未満のときだけ。**
+   * これ以上だと `@mnemora/postgres` は DB の例外（`bigint` の範囲外）を、`@mnemora/testkit` の fixture は
+   * 「`limit must fit in a Postgres bigint`」の `Error` を投げ、`recall()` ごと reject する
+   * （例: `limit` 10 なら `overFetchFactor` が約 9.2e17 以上）。2^63 未満でも大きな値はそのまま大きな `LIMIT` になる。
    */
   overFetchFactor?: number | undefined;
-  /** D5: recall は既定で inferred を含める。除外したい provenance.kind を明示する。 */
+  /** recall は既定で inferred を含める。除外したい provenance.kind を明示する。 */
   excludeProvenanceKinds?: ProvenanceKind[] | undefined;
   /**
-   * **段1（候補生成）で走らせるチャンネル**
-   * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
+   * 段1（候補生成）で走らせるチャンネル（[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)）。
    *
-   * **省略時は {@link DEFAULT_RECALL_CHANNELS}。**⟹ 既定の挙動は ANN 1本のままであり、
-   * **この欄を渡さない呼び出しの結果は1バイトも変わらない**（歯:
-   * `packages/core/src/__tests__/recall-channels.test.ts`）。
-   * **空配列 `[]` は `ZodError` になる**（`RecallQuerySchema` が `.min(1)` で検査する。
-   * 「省略」と同じ扱いにはならない）。
+   * 省略時は {@link DEFAULT_RECALL_CHANNELS}（ANN 1本）。**空配列 `[]` は `ZodError` になる**（`.min(1)`。「省略」と同じ扱いにはならない）。
    *
-   * **🔴 `"lexical"` を渡したのに `RuntimeDeps.lexicalStore` が配線されていないとき、
-   * `recall()` は投げる**（{@link LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX}）。
-   * **黙って0件を返さない**——「語彙で探したが1件も無かった」と
-   * 「語彙で探していない」が同じ顔になるからである。
-   * **⚠ これは `embedding_provider_unavailable` とは別の族である。**
-   * あちらは実行時の失敗（次に呼べば成功しうる）なので `omitted` に落ちるが、
-   * こちらは**配線の誤りであり、何度呼んでも成功しない。**
-   * ⟹ degrade させると、呼び出し側は「使っているつもりで一度も使えていない」製品を出荷する。
+   * **`"lexical"` を渡したのに `RuntimeDeps.lexicalStore` が配線されていないとき、`recall()` は投げる**
+   * （{@link LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX}）。黙って0件を返すと「語彙で探したが1件も無かった」と
+   * 「語彙で探していない」が同じ顔になる。`embedding_provider_unavailable` とは別の族で、あちらは実行時の失敗
+   * （次に呼べば成功しうる）なので `omitted` に落ちるが、こちらは配線の誤りで何度呼んでも成功しない。
+   * degrade させると、呼び出し側は「使っているつもりで一度も使えていない」製品を出荷する。
    *
-   * **⚠ 値の一覧をここに散文で書かない。**唯一の出所は {@link RECALL_CHANNELS} である
-   * （[ADR 0082](../../../docs/decisions/0082-tick-names-unsupported-job-kinds.md) が
-   * `TICK_SUPPORTED_JOB_KINDS` について引いた線と同じ——**散文で数え直した瞬間に、
-   * 次に値が増えたとき黙って嘘になる。コメントは検査されない。**）
+   * 値の一覧をここに散文で書かない。唯一の出所は {@link RECALL_CHANNELS}（散文で数え直すと、値が増えたとき黙って嘘になる。ADR 0082）。
    */
   channels?: RecallChannel[] | undefined;
   /** 返却量の予算（{@link RecallBudget}）。収まらない分は `budget_dropped` になる。省略すれば予算で絞らない。 */
   budget?: RecallBudget | undefined;
   /**
-   * 段2（再スコア）で候補を残すか捨てるかの閾値（docs/recall.md §2 段2）。
+   * 段2（再スコア）で候補を残すか捨てるかの閾値（docs/recall.md §2 段2）。既定値 `DEFAULT_SCORE_THRESHOLD`（0.1）。
+   * 強い根拠がある値ではなく、明らかに無関係な候補（類似度が低い、または大きく減衰した候補）を落とす最低限の閾値。
    *
-   * docs/recall.md はこの閾値の具体的な値・単位を規定していない
-   * （`ScoreBreakdown.total` がどの範囲に収まるかはスコアリング戦略次第であり、
-   * 埋め込みモデルが返す類似度の分布にも依存する）。本 PR の裁量として、
-   * 既定値 `DEFAULT_SCORE_THRESHOLD`（0.1）を置く——強い根拠がある値ではなく、
-   * 「明らかに無関係な候補（類似度が低い、または大きく減衰した候補）を落とす」
-   * という最低限の閾値である。呼び出し側が上書きできる。
-   *
-   * ⚠ **負にすると、段2の並びが単調でなくなりうる**（[ADR 0433](../../../docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定2。
-   * 値の範囲は検査していない）。`ScoreBreakdown.total` は類似度が負の候補で負になる
-   * （コサイン距離は最大 2 まで出るので `similarity` は −1 まで下がる）。閾値が負だと、その候補が
-   * 段2を通り、並びは `total` の降順なので、負の `total` どうしでは `decay` が小さい（古く弱い）ものほど
-   * 0 に近く、**上位に来る**。負にする理由が無ければ 0 以上にすること（docs/recall.md §9.2）。
+   * **負にすると、段2の並びが単調でなくなりうる**（値の範囲は検査していない。ADR 0433 決定2）。類似度が負の候補の
+   * `ScoreBreakdown.total` は負になる（`similarity` は −1 まで下がる）。閾値が負だとその候補が段2を通り、並びは `total` の降順なので、
+   * 負の `total` どうしでは `decay` が小さい（古く弱い）ものほど 0 に近く上位に来る。負にする理由が無ければ 0 以上にすること
+   * （docs/recall.md §9.2）。
    */
   scoreThreshold?: number | undefined;
   /**
    * 帯に載せる件数の上限。既定 `DEFAULT_DIGEST_BAND_LIMIT`。
    *
-   * **⚠ この値を下げても、帯が縮むとは限らない。** 帯は、この件数上限と
-   * `DIGEST_BAND_MAX_CHARS`（帯全体の文字数上限。呼び出し側からは変えられない）の
-   * どちらか**先に当たったほう**で切れる（`packDigestBand`、`digest-band.ts`）。digest が
-   * 短ければこの値が先に効くが、digest が長い（【実測 2026-09-21・合成コーパス】では
-   * 約60字を超える水準）と `DIGEST_BAND_MAX_CHARS` が先に効き、この値をいくら下げても
-   * 「`DIGEST_BAND_MAX_CHARS` ÷ 帯1件のコスト」未満にするまでは帯は縮まない
-   * （[Issue #413](https://github.com/takecchi/mnemora/issues/413)、`docs/recall.md` §6
-   * 「目次帯の量を把握し、調整する」節に実測の詳細がある）。**どちらの上限が実際に
-   * 効いたかは `IndexBand.digestBandCoverage.limitedBy`（`"entry_limit"` /
-   * `"char_budget"` / `"both"`）で分かる。**自分の recall で帯がどれだけ占有しているかは
-   * `RecallUsage.indexChars / RecallUsage.chars` で読める——`budget`（`RecallBudget`）
-   * ではこの分は削れない（`RecallBudget` の doc参照）。
+   * **この値を下げても、帯が縮むとは限らない。** 帯は、この件数上限と `DIGEST_BAND_MAX_CHARS`（呼び出し側からは変えられない）の
+   * 先に当たったほうで切れる（`packDigestBand`）。digest が長いと `DIGEST_BAND_MAX_CHARS` が先に効き、
+   * 「`DIGEST_BAND_MAX_CHARS` ÷ 帯1件のコスト」未満にするまで帯は縮まない（`docs/recall.md` §6「目次帯の量を把握し、調整する」）。
+   * どちらが効いたかは `IndexBand.digestBandCoverage.limitedBy` で、帯の占有は `RecallUsage.indexChars / RecallUsage.chars` で読める
+   * （`budget` ではこの分は削れない）。
    *
-   * **⚠ `0` は渡せない（`positive()`）。** 目次帯の存在理由は「recall が0件でも
-   * 何が在るかは言える」ことであり（`RecallBudget` の doc・docs/recall.md §6 参照）、
-   * 呼び出し側が渡した数字ひとつでその保証が消えてはならない。`RecallQuery.limit` と
-   * 同じ作法——上げ下げはできるが、0にして帯そのものを消すことはできない。
+   * **`0` は渡せない（`positive()`）。** 目次帯の存在理由は「recall が0件でも何が在るかは言える」ことで
+   * （`RecallBudget`、docs/recall.md §6）、渡した数字ひとつでその保証が消えてはならない（`RecallQuery.limit` と同じ作法）。
    */
   digestBandLimit?: number | undefined;
   /**
-   * **段5（`MemoryStore.aggregateScope`）の件数集計を止める、明示的な opt-in**
-   * （[ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
-   * 案C）。
+   * 段5（`MemoryStore.aggregateScope`）の件数集計を止める、明示的な opt-in
+   * （[ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案C）。
    *
-   * **既定 `"exact"`（省略時と同じ）——この欄を渡さない呼び出しの結果は1バイトも
-   * 変わらない。** `aggregateScope` は今日どおり `GROUP BY subject_id` で群カウント・
-   * `totalInScope`・`filtered*`・`notIndexed` を厳密に数える。
+   * 既定 `"exact"`（省略時と同じ）。`aggregateScope` は `GROUP BY subject_id` で群カウント・`totalInScope`・`filtered*`・
+   * `notIndexed` を厳密に数える。
    *
-   * `"skip"` を渡すと、`MemoryStore.aggregateScope` はこれらの件数を**実際に数えない**
-   * ——`IndexBand.groups` は空配列、`IndexBand.totalInScope` は `0`、
-   * `IndexBand.countKind`（と `ScopeAggregate` の各 `countKind`）は `"unknown"` になる。
-   * `omitted` の `filtered(archived/superseded/forgotten/period/expired/not_yet_valid/
-   * taxonomy/decayed)` は、件数が数えられない以上どれも `count > 0` の条件を満たさず、
-   * 一切積まれない——**`"skip"` は「スコープ内で何が落ちたか」の説明力を手放す代わりに
-   * 集計の費用を払わない、という取引である**（北極星の問い3「選ばれた理由を後から
-   * 説明できるか」に対して、この欄は正直に「説明できなくなる」と名乗る）。
+   * `"skip"` を渡すと、`aggregateScope` はこれらの件数を実際に数えない。`IndexBand.groups` は空配列、`IndexBand.totalInScope` は `0`、
+   * `IndexBand.countKind`（と `ScopeAggregate` の各 `countKind`）は `"unknown"` になる。`omitted` の `filtered(...)` は
+   * 件数が数えられない以上どれも積まれない。「スコープ内で何が落ちたか」の説明力を手放す代わりに集計の費用を払わない取引である。
    *
-   * **目次帯（`digestBand`）は「skip」でも今日どおり出る**——digest 候補の取得
-   * （`ORDER BY ... LIMIT`）は件数集計とは別の経路であり、ADR 0384 案A の索引
-   * （`idx_memories_digest_band`）で支えられる。ただし `digestEligible`（帯の外に
-   * まだ何件あるか）も件数の一種なので `countKind: "unknown"`・`count: 0` になる
-   * ——「帯には何が載っているか」は分かるが「あと何件あるか」は分からなくなる。
+   * 目次帯（`digestBand`）は `"skip"` でも出る（digest 候補の取得は件数集計とは別の経路）。ただし `digestEligible` も
+   * 件数なので `countKind: "unknown"`・`count: 0` になり、「帯に何が載っているか」は分かるが「あと何件あるか」は分からない。
    *
-   * **ADR 0024 の事故（`exactCounts` を受け取って黙って無視していた）を繰り返さない**
-   * ため、`AggregateScopeOptions.scopeAggregate` を読まずに、`"skip"` を頼まれても集計して
-   * `countKind: "exact"` を返す adapter は、conformance suite が許さない
-   * （`packages/testkit/src/memory-store-conformance.ts` の aggregateScope / scopeAggregate の
-   * `it` は、フラグ無しで `"skip"` を守ることを求める）。`"skip"` を頼まれたら、
-   * `groups` は空・`totalInScope` は `0`・`countKind` は `"unknown"` を返さなければならない
-   * ——**`"exact"` を返し続ける実装は suite に落ちる。**
-   * （訂正: 以前のこの段落は「実装しない adapter は必ず `"exact"` を返し続ける」と書いていたが、
-   * suite の実際の要求と逆だった。CHANGELOG `[1.2.0]` と docs/migration-v1.md 項目38 で
-   * 先に訂正済み。）
+   * `"skip"` を頼まれても集計して `countKind: "exact"` を返す adapter は、conformance suite が許さない
+   * （`packages/testkit/src/memory-store-conformance.ts`）。`"skip"` を頼まれたら `groups` は空・`totalInScope` は `0`・
+   * `countKind` は `"unknown"` を返さなければならない。受け取って黙って無視する実装を作らないため（ADR 0024）。
    *
-   * **⚠ `"skip"` では、ANN が scope の候補を拾いきったかを判定できない**（母数 `eligible` が
-   * 数えられないため、`ann_unreached` は鳴らない）。**`ann_unreached` が無いことは「拾いきった」
-   * を意味しない。** ANN の段が走っていて件数が取れなかったときは、`explain.stages` の
-   * ANN（`detail.channel === "ann"`）の `detail.annReachability: "unknown"` がそう名乗る
-   * （ADR 0390。既定 `"exact"` の出力にはこのキーは付かない）。
+   * **`"skip"` では、ANN が scope の候補を拾いきったかを判定できない**（母数 `eligible` が数えられないため `ann_unreached` は
+   * 鳴らない）。`ann_unreached` が無いことは「拾いきった」を意味しない。ANN の段が走っていて件数が取れなかったときは、
+   * `explain.stages` の ANN（`detail.channel === "ann"`）の `detail.annReachability: "unknown"` がそう名乗る
+   * （既定 `"exact"` の出力にはこのキーは付かない。ADR 0390）。
    */
   scopeAggregate?: "exact" | "skip" | undefined;
   /**
-   * **忘却ゲート（decay floor gate）の明示的な opt-out**
-   * （マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
+   * 忘却ゲート（decay floor gate）の明示的な opt-out（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
    *
-   * **既定（省略 = `false`）では、`decayFloorAt` を過ぎた（＝完全に減衰しきった）Memory は
-   * recall の候補から外れる。**ANN チャンネル（段1）は `VectorFilter.decayFloorAtAfter` に
-   * 「いま」を押し下げ、語彙チャンネルは `LexicalFilter` を増やさず core の後置フィルタで
-   * 同じ述語（`memory.decayFloorAt > now`）を適用する（ADR 0153「決めたこと」3）。
+   * 既定（省略 = `false`）では、`decayFloorAt` を過ぎた（完全に減衰しきった）Memory は recall の候補から外れる。
+   * ANN チャンネル（段1）は `VectorFilter.decayFloorAtAfter` に「いま」を押し下げ、語彙チャンネルは `LexicalFilter` を増やさず
+   * core の後置フィルタで同じ述語（`memory.decayFloorAt > now`）を適用する（ADR 0153「決めたこと」3）。
+   * 「使われない記憶が、静かに遠ざかる」を、掃引（`status='archived'`）を呼んでいない期間にも効かせるため。
    *
-   * **⚠ これは破壊的変更である。**[ADR 0011](../../../docs/decisions/0011-no-window-count-in-ann-stage.md)
-   * の「Phase 1 では `decayFloorAtAfter` を読み取りフィルタに使わない」という決定を、
-   * ADR 0153 が明示的に上書きしている——**「使われない記憶が、静かに遠ざかる」
-   * （docs/north-star.md「目指す姿」）を、掃引（`status='archived'`）を呼んでいない期間にも
-   * 効かせるため。**
-   *
-   * `true` を渡すと、この PR より前の挙動（減衰しきった Memory も候補に残り続ける）に戻る
-   * ——北極星の問い2（「これを無効にしたとき、Memory Framework として成立するか」）に
-   * 応じて用意した明示的な逃げ道であり、既定を opt-in にする代わりに opt-out を持たせる形
-   * （ADR 0153「検討した代替案」）。
-   *
-   * `true` を渡したときの `explain.stages` の `candidate_generation` の `detail.decayGate`
-   * は `"disabled"` になる（既定は ANN が `"pushed_down"`、語彙が `"post_filtered"`）——
-   * **ゲートが効いたかどうかは、呼び出し側から常に見える**（マネージャー決定「⚠ 件数を
-   * 偽らない」の一部）。
+   * `true` を渡すと、減衰しきった Memory も候補に残り続ける。このときの `explain.stages` の `candidate_generation` の
+   * `detail.decayGate` は `"disabled"` になる（既定は ANN が `"pushed_down"`、語彙が `"post_filtered"`）。
    */
   includeFullyDecayed?: boolean | undefined;
   /**
-   * **「この時刻において真だった記憶」を問う**（Issue #280、Issue #202 第2弾、
-   * マネージャー決定1）。
+   * 「この時刻において真だった記憶」を問う。
    *
-   * 述語: `(validFrom IS NULL OR validFrom <= validAt) AND
-   * (validUntil IS NULL OR validUntil > validAt)`。
-   * - `validFrom` は**閉じた左端**（`<=`）。
-   * - `validUntil` は**開区間の右端**（狭義の `>`）——`includeFullyDecayed` の
-   *   `VectorFilter.decayFloorAtAfter` が採る狭義 `>` に境界の扱いを揃えた
-   *   （「ちょうど境界の Memory を含めるかどうか」を、同じ repo 内で2通りに
-   *   しない）。`validUntil` の瞬間そのものは、もう真ではない側に入る。
-   * - **`validFrom`/`validUntil` が両方 `null` の Memory は「いつでも真」と扱う**
-   *   （「不明」ではない）。**理由**: この PR の時点で、両方 `null` が既存行の
-   *   大多数である（[ADR 0145](../../../docs/decisions/0145-valid-from-until-storage.md)
-   *   が配線するまで、この2列に非 null を書く経路が1つも無かった）。「不明」と
-   *   解釈すると、この述語は既存のほぼ全ての記憶を落とす——「いつ時点で真だったか
-   *   分からない記憶は無いことにする」という、この issue が意図しない挙動になる。
+   * 述語: `(validFrom IS NULL OR validFrom <= validAt) AND (validUntil IS NULL OR validUntil > validAt)`。
+   * - `validFrom` は閉じた左端（`<=`）。
+   * - `validUntil` は開区間の右端（狭義の `>`）。`includeFullyDecayed` の `VectorFilter.decayFloorAtAfter` が採る狭義 `>` に
+   *   境界の扱いを揃えた。`validUntil` の瞬間そのものは、もう真ではない側に入る。
+   * - **`validFrom`/`validUntil` が両方 `null` の Memory は「いつでも真」と扱う**（「不明」ではない）。「不明」と解釈すると
+   *   既存のほぼ全ての記憶を落としてしまう（ADR 0145）。
    *
-   * **省略時の既定は `now`**（＝ゲートは既定で効く）。`includeFullyDecayed` と同じ
-   * opt-out 型——`valid_until` を過ぎた記憶は定義上もう真ではなく、黙って返すのは
-   * 誤りである。**この既定は実質非破壊である**: この PR の時点で、production の
-   * どの書き込み経路も `validFrom`/`validUntil` に非 null を書いていない
-   * （ADR 0145 が配線した読み書きを、`ObserveXxxInput` 経由で初めて production に
-   * つなぐのは本 PR 自身——「射程外にしたもの」参照）。⟹ 既存の呼び出しが渡す
-   * `Memory` の `validFrom`/`validUntil` は常に両方 `null` であり、上の述語は
-   * 常に恒真になる。**既定を on にしても、この PR の時点で挙動は1バイトも
-   * 変わらない**（歯: `packages/core/src/__tests__/recall-validity.test.ts` の
-   * 「両方 null の既存データでは絞りが恒真になる」)。
+   * **省略時の既定は `now`**（ゲートは既定で効く。`includeFullyDecayed` と同じ opt-out 型）。`validUntil` を過ぎた記憶は
+   * 定義上もう真ではなく、黙って返すのは誤りである。`validUntil` を過ぎた記憶・`validFrom` が未来の記憶は、`validAt` を
+   * 省略しても落ちる（`omitted` の `filtered(expired)`/`filtered(not_yet_valid)`。ADR 0164 決定4）。
    *
-   * ⚠ **上の「実質非破壊」は、この欄を足した PR の時点の話である。**今は `observe()` の
-   * `validFrom`/`validUntil` が `Memory` に非 `null` を書く（ADR 0164 決定4）ので、
-   * **`validUntil` を過ぎた記憶・`validFrom` が未来の記憶は、`validAt` を省略しても既定（`now`）で
-   * 落ちる**（`omitted` の `filtered(expired)`/`filtered(not_yet_valid)`）。両方 `null` の記憶
-   * だけが、今も「いつでも真」のまま恒真になる。
-   *
-   * **段1（ANN・語彙の両チャンネル）へ押し下げる**（`VectorFilter.validAt`/
-   * `LexicalFilter.validAt`。`period`/ADR 0059 と同じ形——`includeFullyDecayed` とは
-   * 違い、語彙チャンネルも SQL の `WHERE` で絞る。理由は `VectorFilter.validAt` の
-   * doc を参照）。**新しい索引は足していない**——理由は
-   * [ADR 0164](../../../docs/decisions/0164-valid-from-until-recall.md) を参照。
+   * 段1（ANN・語彙の両チャンネル）へ押し下げる（`VectorFilter.validAt`/`LexicalFilter.validAt`。`includeFullyDecayed` と違い
+   * 語彙チャンネルも SQL の `WHERE` で絞る）。新しい索引は足していない（ADR 0164）。
    */
   validAt?: Date | undefined;
   /**
    * `validAt` ゲートの明示的な opt-out（`includeFullyDecayed` と対称）。
-   *
-   * `true` を渡すと、`validFrom`/`validUntil` を一切見ない——この PR より前の挙動
-   * （区間の内外を問わずすべての記憶が候補に残る）に戻る。**`validAt` を同時に
-   * 渡しても無視される**（ゲートそのものが無効になるため）。
+   * `true` を渡すと `validFrom`/`validUntil` を一切見ない。**`validAt` を同時に渡しても無視される。**
    */
   includeOutsideValidity?: boolean | undefined;
   /**
-   * **連想枠（Issue #200、北極星「聞かれていないことを、自分から思い出す」）。**
+   * 連想枠。**既定 on**（[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)）。
+   * 省略すると {@link DEFAULT_RECALL_ASSOCIATION} が適用される。明示的に off にしたいときは **`null` を渡す**
+   * （`undefined` ＝省略、とは別の状態）。`null` を渡した呼び出しでは連想は一切走らず、`RecallUsage.byTier.association` も現れない。
    *
-   * **既定 on**（[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)。
-   * ADR 0151 が選んだ既定 off から反転した決定——**採用。オーナーが選択肢(あ)を選んだ、
-   * ask_human ac5953d1、2026-09-25**）——**省略すると
-   * {@link DEFAULT_RECALL_ASSOCIATION} が適用される。**明示的に off にしたいときは
-   * **`null` を渡す**（`undefined` ＝省略、とは別の状態として区別する）。`null` を渡した
-   * 呼び出しでは連想は一切走らず、`RecallUsage.byTier.association` も現れない——
-   * ADR 0151 以前の挙動そのものに戻る（歯: `packages/core/src/__tests__/recall-association.test.ts`）。
-   *
-   * ⚠ **`DEFAULT_RECALL_ASSOCIATION.maxCount` はいまの時点で最も根拠のある仮値であって、
-   * 確定値ではない。**根拠・値を変えるときに直す箇所は ADR 0337「これが覆るとしたら」を参照。
-   *
-   * 詳細は {@link RecallAssociationQuery} と `recall-runtime.ts` の段3.5の doc を参照。
+   * `DEFAULT_RECALL_ASSOCIATION.maxCount` は確定値ではなく、いまの時点で最も根拠のある仮値
+   * （変えるときに直す箇所は ADR 0337「これが覆るとしたら」）。詳細は {@link RecallAssociationQuery}。
    */
   association?: RecallAssociationQuery | null | undefined;
   /**
-   * **`ctx.subjectId` の等値絞りを、明示的な `null`（主題なし）まで広げる opt-in**
-   * （Issue #608 項目③(b)、[ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
+   * `ctx.subjectId` の等値絞りを、明示的な `null`（主題なし）まで広げる opt-in
+   * （[ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
    *
-   * `subjectId` は `RecallQuery` の欄ではなく `Ctx` の任意欄である（`docs/recall.md` §「⚠
-   * `subjectId` を省略すると何が起きるか」）。**この欄は `ctx.subjectId` を置き換えない**——
-   * 述語を `subject_id = X` から `subject_id = X OR subject_id IS NULL` へ広げるだけで、
-   * 「X について」という絞り自体は変わらない。
+   * この欄は `ctx.subjectId` を置き換えない。述語を `subject_id = X` から `subject_id = X OR subject_id IS NULL` へ広げるだけ。
+   * 既定（省略・`false`）では `subjectId: null` の Memory は、`ctx.subjectId` を指定した recall から見えない。
+   * `true` を渡すと、`ctx.subjectId` と一致する Memory に加え `subjectId: null` の Memory も候補に含める。
+   * **`ctx.subjectId` 自体を省略した呼び出し（テナント全体）ではこの欄は無視される**（すでに主題なしを含む上位集合のため）。
    *
-   * **既定（省略・`false`）では、この欄が無かった時点の挙動と1バイトも変わらない**——
-   * `subjectId: null` の Memory（主題を持たない記憶）は、`ctx.subjectId` を指定した
-   * recall からは今日どおり見えない。
-   *
-   * **`true` を渡すと**、`ctx.subjectId` と一致する Memory に加え、`subjectId: null` の
-   * Memory も候補に含める。**`ctx.subjectId` 自体を省略した呼び出し（テナント全体）では
-   * この欄は無視される**——テナント全体は定義上すでに主題なしの Memory を含む上位集合
-   * であり、この欄が広げる余地が無い（ADR 0286「決めたこと」参照）。
-   *
-   * **段1（ANN・語彙の両チャンネル）へ `VectorFilter.includeSubjectless`/
-   * `LexicalFilter.includeSubjectless` として押し下げ、段5の `MemoryStore.aggregateScope`
-   * にも同じ意味で渡る**（`RecallScope.includeSubjectless` 経由）。全チャンネル共通の
-   * 後置フィルタ（段1・段3.5）も同じ述語を見る——adapter がこの欄を無視しても
-   * （追加のみの契約なので無視してよい）、後置フィルタが取りこぼすことはあっても
-   * **別の subject の Memory を混ぜることはない**（ADR 0286「採らなかった案」）。
+   * 段1（`VectorFilter.includeSubjectless`/`LexicalFilter.includeSubjectless`）と段5の `MemoryStore.aggregateScope`
+   * （`RecallScope.includeSubjectless`）へ渡る。全チャンネル共通の後置フィルタ（段1・段3.5）も同じ述語を見るので、
+   * adapter がこの欄を無視しても、取りこぼすことはあっても別の subject の Memory を混ぜることはない。
    */
   includeSubjectless?: boolean | undefined;
   /**
-   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
-   * はできない？」）: `decay_clock` が `'wall'` 以外のテナントで、この recall が
-   * どのカウンタを `+1` するかを選ぶ。
+   * `decay_clock` が `'wall'` 以外のテナントで、この recall がどのカウンタを `+1` するかを選ぶ
+   * （[ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)）。
    *
-   * - **`"tenant"`（既定・省略時）**: テナント単位のカウンタ `T`
-   *   （`tenant_activity.activity_seq`）を `+1` する——**本 ADR 以前と1バイトも
-   *   変わらない挙動。**
-   * - **`"subject"`**: `ctx.subjectId` が指定されているときだけ、その subject の
-   *   カウンタ `S_x`（`tenant_subject_activity`、新設）を `+1` する（`T` には
-   *   触れない）。`ctx.subjectId` が無い（テナント全体 recall）ときは `"tenant"` と
-   *   同じ——絞っていない recall に "誰の" カウンタを進めるかという問いは無い。
+   * - `"tenant"`（既定・省略時）: テナント単位のカウンタ `T`（`tenant_activity.activity_seq`）を `+1` する。
+   * - `"subject"`: `ctx.subjectId` が指定されているときだけ、その subject のカウンタ `S_x`（`tenant_subject_activity`）を
+   *   `+1` する（`T` には触れない）。`ctx.subjectId` が無いときは `"tenant"` と同じ。
    *
-   * **読み取り（忘却ゲート・段2の再スコア・掃引）は、この欄の値に関わらず常に
-   * 「その Memory の subject の有効ないま」（`T + S_x`。`subjectId` が無い記憶は `T`
-   * のみ）を使う。**この欄が変えるのは前進（+1）の対象だけである——`"tenant"` を
-   * 選んでいても、他の呼び出しが `"subject"` で進めた `S_x` は読み取りに反映される。
-   *
-   * **既定 `"tenant"` の呼び出しだけを続ける限り、`tenant_subject_activity` は
-   * 一度も書き込まれず、読み取り側の SQL も相関サブクエリを足さない
-   * （`TenantSettingsStore.hasSubjectActivityCounters?` が `false` のまま）**——
-   * この欄を1本も使わないテナントには、ビット単位で本 ADR 以前と同じ挙動が保たれる。
+   * 読み取り（忘却ゲート・段2の再スコア・掃引）は、この欄の値に関わらず常に「その Memory の subject の有効ないま」
+   * （`T + S_x`。`subjectId` が無い記憶は `T` のみ）を使う。この欄が変えるのは前進（+1）の対象だけ。
+   * 既定 `"tenant"` の呼び出しだけを続ける限り `tenant_subject_activity` は書き込まれず、読み取り側の SQL も
+   * 相関サブクエリを足さない（`TenantSettingsStore.hasSubjectActivityCounters?` が `false` のまま）。
    */
   activityCounting?: "tenant" | "subject" | undefined;
   /**
-   * **段2（再スコア）の時間項の方針を明示的に選ぶ**
-   * （Issue #690、[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
+   * 段2（再スコア）の時間項の方針を明示的に選ぶ（[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
    *
-   * **省略時は `"legacy"`**（`DEFAULT_TIME_WEIGHTING_POLICY`（`strategies/scoring.ts`）、`ScoringInput.timeWeighting`
-   * と同じ既定）——この欄を渡さない呼び出しの `recall()` 結果は1バイトも変わらない。
+   * 省略時は `"legacy"`（`DEFAULT_TIME_WEIGHTING_POLICY`、`ScoringInput.timeWeighting` と同じ既定）。
+   * `"legacy"` の `freshness` は `occurredAt ?? recordedAt` を起点にした減衰係数で、`decay` と同じ半減期を使う。
+   * `occurredAt` が無い記憶（恒常的な事実・好み）は、使われ続けていても `recordedAt` の古さで `freshness` だけが沈み続ける
+   * （時間の二重減衰）。
    *
-   * `"legacy"` の `freshness` は `occurredAt ?? recordedAt` を起点にした減衰係数であり、
-   * `decay`（`lastReinforcedAt` 起点、`reinforce` で若返る）と同じ半減期を使う。
-   * ⟹ `occurredAt` が無い記憶（恒常的な事実・好み）は、使われ続けていても
-   * `recordedAt` の古さで `freshness` だけが沈み続ける（Issue #690 が指摘した
-   * 「時間の二重減衰」）。
+   * `"eventAwareFreshness"` を渡すと、`occurredAt` が無い記憶の `freshness` を 1（頭打ちの上限 `MAX_FRESHNESS`、ADR 0036）に
+   * 固定する。`occurredAt` が在る記憶は `"legacy"` と同じ式のまま。
    *
-   * **`"eventAwareFreshness"` を渡すと**、`occurredAt` が無い記憶の `freshness` を
-   * 1（頭打ちの上限、ADR 0036 の `MAX_FRESHNESS`）に固定する。`occurredAt` が在る記憶
-   * （実際に出来事時刻を持つもの）は `"legacy"` と完全に同じ式のままであり、
-   * 事件の順位付けは変わらない。詳細・比較実測は
-   * [ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md) を参照。
-   *
-   * **⛔ 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート
-   * （`includeOutsideValidity`）はこの欄と独立である。** どちらの値を渡しても、
-   * 期限切れ（`validUntil` を過ぎた）記憶・減衰しきった記憶は今までどおり除外される
-   * ——この欄が動かすのは段2の順位付けだけであり、段1の候補生成ゲートには一切渡らない。
-   *
-   * **既定を `"eventAwareFreshness"` にするかどうかはオーナー判断であり、本 ADR の
-   * 時点では決めていない**（ADR 0300 §7、`v2.0.0` の候補）。
+   * 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート（`includeOutsideValidity`）とは独立。この欄は段2の順位付けだけを動かし、
+   * 期限切れ・減衰しきった記憶は今までどおり除外される。
    */
   timeWeighting?: TimeWeightingPolicy | undefined;
 }
 
 /**
- * **段1で走らせられるチャンネルの、唯一の出所**
- * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)）。
+ * 段1で走らせられるチャンネルの、唯一の出所（[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)）。
  *
- * **⚠ ここに `"recent"` は無い。**Issue #106 の提案は
- * `Array<"ann" | "lexical" | "recent">` だったが、**実装を伴わない値をユニオンに置かない**
- * ——それは当時 `RecalledMemory.retrievedVia` に居た `"tag_match"` / `"recency"` が
- * 作っていた欠陥（型に名前が在るのに何も起きない）を、新規に1つ増やすことになる。
- * この2値は Issue #206 / ADR 0117 の分類3として棚卸しされ、
- * [ADR 0144](../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)
- * で `retrievedVia` から落ちている。
- * **⟹ 必要になったときに、実装と一緒に足す。**リクエスト側のユニオンを広げても
- * 既存の呼び出し側は壊れない。
+ * ここに `"recent"` は無い。実装を伴わない値をユニオンに置かない（型に名前が在るのに何も起きない欠陥を増やさない。ADR 0144）。
+ * 必要になったときに、実装と一緒に足す。リクエスト側のユニオンを広げても既存の呼び出し側は壊れない。
  */
 export const RECALL_CHANNELS = ["ann", "lexical"] as const;
 
 /** {@link RECALL_CHANNELS} の要素型。 */
 export type RecallChannel = (typeof RECALL_CHANNELS)[number];
 
-/**
- * `RecallQuery.channels` の既定値。**ANN 1本**——[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)
- * 以前の挙動そのものであり、`channels` を渡さない既存の呼び出しは何も変わらない。
- */
+/** `RecallQuery.channels` の既定値。**ANN 1本**。 */
 export const DEFAULT_RECALL_CHANNELS: readonly RecallChannel[] = ["ann"];
 
 /**
- * 語彙チャンネルが走った run で、`ann_truncated` が `undecidable` に落ちる理由
- * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §7）。
+ * 語彙チャンネルが走った run で、`ann_truncated` が `undecidable` に落ちる理由（ADR 0084 §7）。
  *
- * [ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md) の
- * 損失可能性の判定は「**ANN の窓の外の候補の similarity は `sim_k'` 以下**」を前提に
- * `R = bar / (sim_k' × M_max)` を組み立てている。**語彙チャンネルが走ると、その前提が崩れる**
- * ——窓の外の候補が `lexicalMatch` で `affinity = 1` を名乗りうるからである。
- * **⟹ 「安全だと分かった」とは言えなくなる。だから沈黙せず、判定不能だと名乗る。**
+ * ADR 0069 の損失可能性の判定は「ANN の窓の外の候補の similarity は `sim_k'` 以下」を前提にする。
+ * 語彙チャンネルが走るとこの前提が崩れる（窓の外の候補が `lexicalMatch` で `affinity = 1` を名乗りうる）ので、
+ * 沈黙せず判定不能だと名乗る。
  */
 export const ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE =
   "語彙チャンネルが走ったため、ANN の窓の外の候補が lexicalMatch で affinity を稼ぎうる。" +
   "ADR 0069 の上界（窓の外の similarity <= sim_k'）が前提として成り立たない。";
 
 /**
- * `channels` に `"lexical"` が在るのに `LexicalStore` が配線されていないときに
- * `recall()` が投げる例外の、メッセージの接頭辞
- * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §4）。
- *
- * 定数として出しているのは `UNSUPPORTED_KIND_ERROR_PREFIX`（`runtime.ts`、ADR 0082）と
- * 同じ理由——**呼び出し側と歯が、メッセージ文字列を書き写さずに識別できるようにするため。**
+ * `channels` に `"lexical"` が在るのに `LexicalStore` が配線されていないときに `recall()` が投げる例外の、
+ * メッセージの接頭辞（ADR 0084 §4）。定数で出しているのは、呼び出し側が文字列を書き写さずに識別できるようにするため
+ * （`UNSUPPORTED_KIND_ERROR_PREFIX` と同じ。ADR 0082）。
  */
 export const LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX =
   "recall: channels included 'lexical' but no LexicalStore is wired: ";
 
-/** RecallQuery.scoreThreshold の既定値。強い根拠のない Phase 1 の裁量値（本ファイルの doc 参照）。 */
+/** RecallQuery.scoreThreshold の既定値。強い根拠のない裁量値。 */
 export const DEFAULT_SCORE_THRESHOLD = 0.1;
 
-// ---------------------------------------------------------------------------
-// 連想（association）枠（Issue #200、北極星「聞かれていないことを、自分から思い出す」）
-// ---------------------------------------------------------------------------
-
 /**
- * `RecallQuery.association` の入力。**省略すると {@link DEFAULT_RECALL_ASSOCIATION} が
- * 適用される（既定 on。[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)。
- * 採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）。
- * 一切走らせたくないときは `RecallQuery.association: null` を渡す**——北極星の問い2
- * 「これを無効にしても Memory Framework として成立するか」は、`null` という明示の
- * opt-out が型の上に在ることで担保する（既定 off で担保していた ADR 0151 から、
- * 担保する手段だけを乗り換える）。
+ * `RecallQuery.association` の入力。省略すると {@link DEFAULT_RECALL_ASSOCIATION} が適用される（既定 on。ADR 0337）。
+ * 一切走らせたくないときは `RecallQuery.association: null` を渡す。
  *
- * 「何が似ているか」を新しく定義しない——ANN が既に使っているコサイン類似度そのものを、
- * クエリの代わりにアンカー（クエリで引けた記憶）を起点に使うだけである
- * （`recall-runtime.ts` の段3.5の doc 参照）。
+ * 「何が似ているか」を新しく定義しない。ANN が使っているコサイン類似度を、クエリの代わりにアンカー（クエリで引けた記憶）を
+ * 起点に使うだけ。
  */
 export interface RecallAssociationQuery {
-  /**
-   * 連想枠に入れる最大件数。**必須**——`maxCount` を持たない「連想を頼む」は
-   * 存在しない（`digestBandLimit` が0を許さないのと似た理由で、量の上限を
-   * 呼び出し側に必ず明示させる）。
-   */
+  /** 連想枠に入れる最大件数。**必須**（量の上限を呼び出し側に必ず明示させる。`digestBandLimit` が0を許さないのと似た理由）。 */
   maxCount: number;
   /**
    * 起点にするアンカーの数。既定 {@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}。
    *
-   * **⚠ `RecallQuery.limit`（既定 {@link DEFAULT_RECALL_LIMIT} = 10）が天井になる。**
-   * アンカーは「段3までに残った候補」全部からではなく、**そのうち `limit` の内側に入った分**
-   * （`recall-runtime.ts` の `withinLimit = passed.slice(0, limit)`）から取る
-   * （`const anchors = withinLimit.slice(0, anchorCount)`）。
-   * ⟹ **`anchorCount` だけを上げても、`limit` を超えた候補は起点にならない。**
-   * 連想の裾野を広げたいなら `limit` と `anchorCount` の**両方**を上げること。
-   * ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`
-   * （= `limit` × {@link DEFAULT_OVER_FETCH_FACTOR}）も一緒に広がる——費用は連想枠だけの話では済まない。
+   * **`RecallQuery.limit`（既定 {@link DEFAULT_RECALL_LIMIT}）が天井になる。** アンカーは段3までに残った候補のうち
+   * `limit` の内側に入った分から取る。`anchorCount` だけを上げても、`limit` を超えた候補は起点にならない。
+   * 実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)`。連想の裾野を広げたいなら `limit` と `anchorCount` の
+   * 両方を上げること。ただし `limit` を上げると段1の取り込み幅 `kPrime`（= `limit` × {@link DEFAULT_OVER_FETCH_FACTOR}）も
+   * 広がるので、費用は連想枠だけの話では済まない。
    *
-   * 【実測 2026-09-17、本物の Postgres + pgvector、`main` = `f8a8fa7`。単一話題90件を ingest し、
-   * 段2を通った候補が常に `limit` より多い状態で、段3.5 が `VectorStore.getVectors` へ渡した
-   * memoryId の件数を数えた（`packages/core` が `getVectors` を呼ぶのはこの1箇所だけである）】
-   * `limit:10 / anchorCount:3` → 3、**`limit:10 / anchorCount:40` → 10**、
-   * `limit:40 / anchorCount:40` → 40、**`limit:5 / anchorCount:40` → 5**、
-   * `limit:40 / anchorCount:3` → 3。
-   * すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
+   * **計算量は O(`anchorCount` × `limit`)。** アンカー1つごとに `kPrime` 件まで ANN 検索で引くので、両方上げると積で増える。
+   * アンカーごとの件数を席に要る分まで絞ることは、結果（`memories` の順序・score と `omitted` の件数）が変わるので
+   * しなかった（docs/recall.md §9.2、ADR 0443 決定3）。
    *
-   * **⚠ 計算量は O(`anchorCount` × `limit`)。**アンカー 1 つごとに `kPrime`（= `limit × overFetchFactor`）件まで
-   * ANN 検索で引く（`overFetchFactor` は定数）ので、引く件数の合計は最大でアンカー数 × `kPrime`、並べ替えも同じ件数に掛かる。
-   * `anchorCount` と `limit` を両方上げると積で増える。アンカーごとの件数を席に要る分まで絞ることは、
-   * 結果（`memories` の順序・score と `omitted` の件数）が変わるので、しなかった（docs/recall.md §9.2、ADR 0443 決定3）。
-   *
-   * **⚠ 既定の 3 は固定で、テナントの規模に追随しない**（[Issue #377](https://github.com/takecchi/mnemora/issues/377)。
-   * 今の振る舞いを書くだけで、既定値は変えていない）。記憶が増えるほど、連想の起点になれる候補の
-   * 割合は下がる。【実測】`examples/chat` の連想 probe 12件を1万行の合成テナントに入れると、
-   * probe 自身のアンカーが段1の ANN 窓（`kPrime`）に入らず、既定のままでは gold へほとんど届かなかった
-   * （0〜1/12）。ただし中身は「アンカー数が足りない」だけではなかった——真の順位が1〜3位のアンカーを
-   * HNSW が返さない形で、挿入の順序を変えると同じ規模で戻った（ADR 0332 §3 と 2026-09-26 の2つの追記）。
-   * `anchorCount` や `limit` を上げても確実には戻らない。
-   * ⛔ **規模に見合う値がいくつかは測っていない。**実運用のテナントで同じことが起きるかも測っていない。
-   * アンカーごとの ANN 検索の往復は、`VectorStore.searchMany?` があれば1回に束ねる（PR #932）。
+   * **既定の 3 は固定で、テナントの規模に追随しない**。記憶が増えるほど、連想の起点になれる候補の割合は下がる。
+   * 1万行の合成テナントでは、probe 自身のアンカーが段1の ANN 窓（`kPrime`）に入らず、既定のままでは gold へほとんど
+   * 届かなかった（0〜1/12）。中身はアンカー数の不足だけではなく、`anchorCount` や `limit` を上げても確実には戻らない
+   * （ADR 0332 §3）。規模に見合う値も、実運用のテナントで同じことが起きるかも測っていない。
+   * アンカーごとの ANN 検索の往復は、`VectorStore.searchMany?` があれば1回に束ねる。
    */
   anchorCount?: number;
   /**
    * アンカーとの類似度の下限。既定 {@link DEFAULT_ASSOCIATION_MIN_SIMILARITY}。
    *
-   * **既存の `scoreThreshold`（既定 {@link DEFAULT_SCORE_THRESHOLD} = 0.1）とは
-   * 独立の値である。**`scoreThreshold` は `ScoreBreakdown.total`
-   * （affinity × decay × tagMatch × freshness × strength の積、0〜1に収まらない
-   * 複合値）に対する閾値だが、`minSimilarity` は**生のコサイン類似度**
-   * （`VectorHit.distance` から `1 - distance` で変換した値。負にもなりうる——
-   * `ScoreBreakdown.similarity` の doc 参照）に対する閾値であり、尺度が違う。
-   * `scoreThreshold` の値をそのまま流用すると、単位の違う2つの閾値が
-   * 同じ数字を共有する偶然の一致になり、どちらかを見直すときにもう片方を
-   * 巻き込む——だから独立の定数を置く。
+   * 既存の `scoreThreshold`（既定 {@link DEFAULT_SCORE_THRESHOLD} = 0.1）とは独立の値。`scoreThreshold` は
+   * `ScoreBreakdown.total`（複合値）に対する閾値、`minSimilarity` は生のコサイン類似度（`1 - distance`。負にもなりうる）に
+   * 対する閾値で、尺度が違う。流用すると、どちらかを見直すときにもう片方を巻き込む。
    *
-   * ⚠ **負の値にすると、連想枠の席の順位が単調でなくなる**（[ADR 0433](../../../docs/decisions/0433-claim-key-length-space-error-reembed-limit.md) 決定2。
-   * 値の範囲は検査していない。負の値を断る直しもしていない）。席の順位キーは
-   * `アンカー類似度 × decay × tagMatch × freshness × strength` で、類似度が負の候補では、
-   * 積の絶対値が小さい（`decay` が小さい、つまり古く弱い）ほど 0 に近く、**上位に来る**。
-   * 既定（{@link DEFAULT_ASSOCIATION_MIN_SIMILARITY}）は負の類似度を通さないので、この逆転は
-   * `minSimilarity` を負にしたときだけ起きる。負にする理由が無ければ 0 以上にすること
-   * （docs/recall.md §9.2）。
+   * **負の値にすると、連想枠の席の順位が単調でなくなる**（値の範囲は検査していない。ADR 0433 決定2）。席の順位キーは
+   * `アンカー類似度 × decay × tagMatch × freshness × strength` で、類似度が負の候補では、積の絶対値が小さい
+   * （古く弱い）ほど 0 に近く上位に来る。既定は負の類似度を通さないので、この逆転は `minSimilarity` を負にしたときだけ起きる。
+   * 負にする理由が無ければ 0 以上にすること（docs/recall.md §9.2）。
    */
   minSimilarity?: number;
 }
 
-/** `RecallAssociationQuery` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallAssociationQuery` と揃えてある）。 */
+/** `RecallAssociationQuery` の zod スキーマ。 */
 export const RecallAssociationQuerySchema = z.object({
   maxCount: z.number().int().positive(),
   anchorCount: z.number().int().positive().optional(),
   minSimilarity: z.number().optional(),
 }) satisfies z.ZodType<RecallAssociationQuery>;
 
-/** `RecallAssociationQuery.anchorCount` の既定値（マネージャー決定）。 */
+/** `RecallAssociationQuery.anchorCount` の既定値。 */
 export const DEFAULT_ASSOCIATION_ANCHOR_COUNT = 3;
 
 /**
- * `RecallAssociationQuery.minSimilarity` の既定値（マネージャー決定）。
+ * `RecallAssociationQuery.minSimilarity` の既定値。
  *
- * **強い根拠のない Phase 1 の裁量値**（`DEFAULT_SCORE_THRESHOLD`/
- * `DIGEST_BAND_MAX_ENTRY_CHARS` と同じ立て付け）。コサイン類似度は埋め込みモデル・
- * データ分布に強く依存するため、実データでの分布を測ってから見直すべき値である。
- * 0.5 を選んだ理由: `scoreThreshold`（0.1）のように「明らかに無関係なものだけを
- * 落とす」緩い閾値ではなく、**連想は「クエリしていないのに手元に来る」性質上、
- * 無関係なものを混ぜるコストがクエリ結果より高い**（北極星の問い1「増やすなら、
- * その分だけ想起が良くなると言えるか」）ため、中間より少し厳しめの値を既定にした。
- * 実運用のコサイン類似度の分布が測れたら見直すこと——見直す根拠になるのは
- * 「多くの連想候補がこの値の前後で切られている」という実測であり、勘で変えない。
+ * 強い根拠のない裁量値。コサイン類似度は埋め込みモデル・データ分布に強く依存するので、実データでの分布を測ってから
+ * 見直す（見直す根拠は「多くの連想候補がこの値の前後で切られている」という実測で、勘で変えない）。
+ * `scoreThreshold`（0.1）のような緩い閾値にしないのは、連想は「クエリしていないのに手元に来る」性質上、無関係なものを
+ * 混ぜるコストがクエリ結果より高いため。
  */
 export const DEFAULT_ASSOCIATION_MIN_SIMILARITY = 0.5;
 
 /**
- * `RecallQuery.association` を省略したときに適用される既定値
- * （[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)。
- * ADR 0151 の既定 off から反転した決定——**採用。オーナーが選択肢(あ)を選んだ、
- * ask_human ac5953d1、2026-09-25T21:11Z、[Issue #337](https://github.com/takecchi/mnemora/issues/337)
- * の問いへの回答**）。
+ * `RecallQuery.association` を省略したときに適用される既定値（[ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)）。
  *
- * ⛔⛔ **`maxCount: 10` は10万行級で再検証された値ではない、いまの時点で最も根拠のある
- * 仮値である。**`examples/chat` の `association-probes` ベンチの実測（ADR 0168、Issue #291 の
- * 2026-09-16 コメント）では、`haystackSize=62`（HNSW 未使用の小規模）で
- * `maxCount=10` のとき gold 到達 **12/12**（費用 `memoryChars` **+4.32%**）だった。
- * [Issue #337](https://github.com/takecchi/mnemora/issues/337) はこの値を10万行級で
- * 測ってから既定 on を判断するようオーナーが指示しており、
- * [ADR 0332](../../../docs/decisions/0332-association-default-100k-measurement.md)
- * が10万行級の実測を行ったが、**その実測自体は規模による到達の低下がベンチの base
- * 挿入位置の産物である可能性を示した（追記(2)）ものの確定しておらず、`maxCount=10` を
- * 積極的に支持する新しい実測ではない**——オーナーは10万行級の実測が確定しない段階で
- * 既定 on を選んだ（ask_human ac5953d1）。**⟹ 実運用の分布で見直すべき値であり、
- * 勘で変えない。**
+ * `maxCount: 10` は10万行級で再検証された値ではなく、いまの時点で最も根拠のある仮値。`haystackSize=62` の小規模では
+ * gold 到達 12/12（費用 `memoryChars` +4.32%、ADR 0168）だったが、10万行級の実測（ADR 0332）は確定しておらず、
+ * `maxCount=10` を積極的に支持する新しい実測ではない。実運用の分布で見直すべき値で、勘で変えない。
  *
- * **`examples/chat` はこの定数を継がない**——`examples/chat/src/mnemora-path.ts` の
- * `DEFAULT_MNEMORA_PATH_ASSOCIATION` は同じ値 `{ maxCount: 10 }` を独自に持つ
- * （ADR 0168）。値が同じなので挙動は変わらないが、**どちらかを直したら他方も直すか
- * 検討すること**——ADR 0337「examples/chat の独自既定を維持した理由」参照。
- *
- * **この値を変えるときは、この1箇所を直せば済む**——`anchorCount`/`minSimilarity` は
- * 個別の既定（{@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}/
- * {@link DEFAULT_ASSOCIATION_MIN_SIMILARITY}）に委ね、ここでは上書きしない。
+ * `examples/chat` はこの定数を継がず、`DEFAULT_MNEMORA_PATH_ASSOCIATION`（`examples/chat/src/mnemora-path.ts`）が同じ値を独自に
+ * 持つ。どちらかを直したら他方も直すか検討すること（ADR 0337）。
+ * `anchorCount`/`minSimilarity` は個別の既定に委ね、ここでは上書きしない。
  */
 export const DEFAULT_RECALL_ASSOCIATION: RecallAssociationQuery = {
   maxCount: 10,
@@ -2455,7 +1574,7 @@ export const DEFAULT_RECALL_LIMIT = 10;
 /** RecallQuery.overFetchFactor の既定値（docs/recall.md §3: k' = k × overFetchFactor）。 */
 export const DEFAULT_OVER_FETCH_FACTOR = 4;
 
-/** `RecallQuery` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallQuery` と揃えてある）。 */
+/** `RecallQuery` の zod スキーマ。 */
 export const RecallQuerySchema = z.object({
   text: z.string().min(1).optional(),
   vector: z.array(z.number()).optional(),
@@ -2466,7 +1585,7 @@ export const RecallQuerySchema = z.object({
   limit: z.number().int().positive().optional(),
   overFetchFactor: z.number().positive().optional(),
   excludeProvenanceKinds: z.array(ProvenanceKindSchema).optional(),
-  // 一覧を書き写さない——RECALL_CHANNELS から導く（ADR 0084 / ADR 0082）。
+  // 一覧を書き写さない。RECALL_CHANNELS から導く（ADR 0084、ADR 0082）。
   channels: z.array(z.enum(RECALL_CHANNELS)).min(1).optional(),
   budget: RecallBudgetSchema.optional(),
   scoreThreshold: z.number().optional(),
@@ -2476,34 +1595,21 @@ export const RecallQuerySchema = z.object({
   includeFullyDecayed: z.boolean().optional(),
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),
-  // ADR 0353（Issue #338）: 数え方は前進の対象だけを選ぶ引数——読み取りには影響しない
-  // （`RecallQuery.activityCounting` の doc コメント参照）。
+  // 数え方は前進の対象だけを選ぶ引数で、読み取りには影響しない（ADR 0353）。
   activityCounting: z.enum(["tenant", "subject"]).optional(),
-  // .nullable() は明示的な off（ADR 0337）。.optional() は省略——省略時は
-  // recall-runtime.ts が DEFAULT_RECALL_ASSOCIATION を適用する。zod で null と
-  // undefined を区別できることは歯（recall-association.test.ts）で固定してある。
+  // .nullable() は明示的な off（ADR 0337）、.optional() は省略（`DEFAULT_RECALL_ASSOCIATION` が適用される）。
   association: RecallAssociationQuerySchema.nullable().optional(),
   includeSubjectless: z.boolean().optional(),
-  // 一覧を書き写さない——TIME_WEIGHTING_POLICIES から導く（Issue #690、ADR 0300）。
+  // 一覧を書き写さない。TIME_WEIGHTING_POLICIES から導く（ADR 0300）。
   timeWeighting: z.enum(TIME_WEIGHTING_POLICIES).optional(),
-  // Issue #201 PR-B（ADR 0323）。
   labels: z.array(z.string()).optional(),
   taxonomyGroups: z.boolean().optional(),
-  // Issue #1449 項目8（ADR 0396）。上限1000の理由は `RecallQuery.relationMaxCount` の doc。
+  // 上限1000の理由は `RecallQuery.relationMaxCount` の doc。
   relationMaxCount: z.number().int().positive().max(1000).optional(),
 }) satisfies z.ZodType<RecallQuery>;
 
 /**
- * `MemoryStore.aggregateScope` に渡すスコープ。docs/architecture.md §5.1 は型を明記していないため、
- * §2 の段0（スコープ確定）・段5（目次帯は段0のスコープ全体を使う）の記述から
- * 素直に導いた最小限の型を置く。
- *
- * `subjectId` を省略すると「テナント全体」を意味する（`ctx.subjectId` が無い呼び出し）。
- *
- * **⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
- * 上の「`taxonomy` フィールドが無いのは意図的」という記述は、`labels`/`memory_labels`
- * テーブルが存在しなかった時点（PR-A 以前）のものであり、今は成り立たない。** `labels`
- * フィールド（下）が taxonomy 次元をスコープの一部として持つ。
+ * `MemoryStore.aggregateScope` に渡すスコープ。`subjectId` を省略すると「テナント全体」を意味する。
  */
 export interface RecallScope {
   /** スコープの主題（`ctx.subjectId`）。無ければテナント全体。 */
@@ -2512,127 +1618,73 @@ export interface RecallScope {
   occurredAfter?: Date | undefined;
   /** `RecallQuery.occurredBefore` のまま。 */
   occurredBefore?: Date | undefined;
-  /**
-   * Issue #280: `RecallQuery.validAt` ゲートが有効なときの基準時刻。`recall-runtime.ts`
-   * が `RecallQuery.includeOutsideValidity` を見て、ゲート無効なら `undefined` にする
-   * （`period` が未指定なら `undefined` のままなのと同じ形）。
-   */
+  /** `RecallQuery.validAt` ゲートが有効なときの基準時刻。ゲート無効（`includeOutsideValidity`）なら `undefined`。 */
   validAt?: Date | undefined;
   /**
-   * Issue #329 / [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
-   * 忘却ゲートの**壁時計側**の基準時刻。`validAt` とまったく同じ形で入る——
-   * `recall-runtime.ts` が `RecallQuery.includeFullyDecayed` とテナントの `decay_clock`
-   * （ADR 0165）を見て、ゲート無効なら `undefined` にする。
+   * 忘却ゲートの壁時計側の基準時刻（[ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md)）。
+   * `RecallQuery.includeFullyDecayed` とテナントの `decay_clock`（ADR 0165）で、ゲート無効なら `undefined`。
    *
-   * **⚠ ここに並ぶ3欄は `VectorFilter.decayFloorAtAfter`/`decayFloorSeqAfter`/
-   * `decayFloorAnyAxis`（`interfaces/vector-store.ts`）と同じ名前・同じ意味・同じ境界
-   * （狭義の `>`）である。**名前を揃えているのは飾りではない——段1の押し下げと段5の集約が
-   * **同じ述語**を見ていることが、`omitted.filtered(decayed)` の件数を信じられる唯一の
-   * 根拠だからである（ADR 0173）。
+   * ここに並ぶ3欄は `VectorFilter.decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis` と同じ名前・同じ意味・同じ境界
+   * （狭義の `>`）。名前を揃えているのは、段1の押し下げと段5の集約が同じ述語を見ていることが、
+   * `omitted.filtered(decayed)` の件数を信じられる唯一の根拠だから（ADR 0173）。
    */
   decayFloorAtAfter?: Date | undefined;
   /**
-   * 忘却ゲートの**活動時計側**の基準（ADR 0165 の `activity_seq`）。
-   * `decayFloorSeq` が NULL の Memory は「この軸には床が無い」ので常に生き残る
-   * （ADR 0165 決めたこと4）——`VectorFilter.decayFloorSeqAfter` と同じ規則。
+   * 忘却ゲートの活動時計側の基準（ADR 0165 の `activity_seq`）。`decayFloorSeq` が NULL の Memory は
+   * 「この軸には床が無い」ので常に生き残る（`VectorFilter.decayFloorSeqAfter` と同じ規則）。
    */
   decayFloorSeqAfter?: number | undefined;
   /**
-   * `decay_clock: 'either'`（ADR 0165 決めたこと1）のとき `true`。2軸を **OR** で結ぶ
-   * （どちらかが生きていれば通す＝最も緩い）。`VectorFilter.decayFloorAnyAxis` と同じく、
-   * **両方の基準が渡されているときだけ**効く。
-   *
-   * ⚠ `MemoryStore.archiveDecayed` の `'either'` は **AND** であり向きが逆である
-   * （`ArchiveDecayedOptions.clock` の doc「⭐」）。ここはゲート側なので OR。
+   * `decay_clock: 'either'`（ADR 0165）のとき `true`。2軸を **OR** で結ぶ（どちらかが生きていれば通す）。
+   * `VectorFilter.decayFloorAnyAxis` と同じく、両方の基準が渡されているときだけ効く。
+   * `MemoryStore.archiveDecayed` の `'either'` は **AND** で向きが逆（`ArchiveDecayedOptions.clock`）。ここはゲート側なので OR。
    */
   decayFloorAnyAxis?: boolean | undefined;
   /**
-   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味——
-   * `true` なら `decayFloorSeqAfter`（`T`）に、その Memory の `subjectId` に対応する
-   * `S_x` を足した値と比較する。`recall-runtime.ts` が
-   * `TenantSettingsStore.hasSubjectActivityCounters?` の結果をそのまま置くだけであり、
-   * このテナントが一度も subject カウンタを使っていなければ `false`。
+   * `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味（[ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)）。
+   * `true` なら `decayFloorSeqAfter`（`T`）に、その Memory の `subjectId` に対応する `S_x` を足した値と比較する。
    */
   decayFloorSeqUsesSubjectCounters?: boolean | undefined;
   /**
-   * `RecallQuery.includeSubjectless` がそのまま入る（Issue #608 項目③(b)、
-   * [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
-   *
-   * `true` なら、`subjectId` の等値絞りに `subject_id IS NULL` を OR で足す——
-   * `VectorFilter.includeSubjectless`/`LexicalFilter.includeSubjectless` へそのまま渡り、
-   * `MemoryStore.aggregateScope` にも同じ `scope` が渡る（段1の押し下げと段5の集約が
-   * 同じ述語を見る、という他の欄と同じ規律）。`subjectId` が `undefined`（テナント全体）
-   * のときは無視される——テナント全体は定義上すでに主題なし（`subjectId: null`）の
-   * Memory を含む上位集合であり、この欄が広げる余地が無い。
+   * `RecallQuery.includeSubjectless` がそのまま入る（[ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
+   * `true` なら `subjectId` の等値絞りに `subject_id IS NULL` を OR で足す。`VectorFilter`/`LexicalFilter` と
+   * `MemoryStore.aggregateScope` に同じ `scope` が渡る。`subjectId` が `undefined`（テナント全体）のときは無視される。
    */
   includeSubjectless?: boolean | undefined;
   /**
-   * Issue #152/#153（ADR 0312）: `RecallQuery.attributes` がそのまま入る（空オブジェクト
-   * なら `recall-runtime.ts` が `undefined` に正規化する——「絞り込み無し」を1つの形に
-   * 揃える。`RecallQuery.attributes` の doc コメント参照）。**⭐ 軸の唯一の出所**——段1
-   * （ANN・語彙）と段3.5（連想枠）の `VectorFilter.attributes`/`LexicalFilter.attributes`、
-   * および `MemoryStore.aggregateScope` は、いずれもこの欄を読むだけで自前の式を持たない
-   * （`decayFloorAtAfter` 等と同じ「2箇所に式を書くと食い違う」規律、ADR 0038）。
+   * `RecallQuery.attributes` がそのまま入る（ADR 0312）。空オブジェクトなら `recall-runtime.ts` が `undefined` に正規化する。
+   * **軸の唯一の出所**: 段1・段3.5の `VectorFilter.attributes`/`LexicalFilter.attributes` と `MemoryStore.aggregateScope` は
+   * この欄を読むだけで自前の式を持たない（2箇所に式を書くと食い違う。ADR 0038）。
    */
   attributes?: Attributes | undefined;
   /**
-   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
-   * `RecallQuery.labels` を、現在の `taxonomy_mode` での参加資格（`registered` は常に、
-   * `proposed` は `taxonomy_mode: 'open'` のときだけ）で絞り込んだ結果。
+   * `RecallQuery.labels` を、現在の `taxonomy_mode` での参加資格（`registered` は常に、`proposed` は `taxonomy_mode: 'open'` のときだけ）で
+   * 絞り込んだ結果（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）。意味論は OR。
    *
-   * **`attributes` と同じ「スコープの外側の境界」である**——ただし `attributes` とは
-   * 違い、`filtered` として**報告される**（`FilteredOmission.condition: 'taxonomy'`、
-   * `FILTERED_CONDITION_SCOPE_RELATION.taxonomy === 'outside_scope'` は ADR 0318 より前
-   * から固定されている分類）。`totalInScope` はこの絞り込みの内側だけを数える。
+   * `attributes` と違い、`filtered` として報告される（`FilteredOmission.condition: 'taxonomy'`）。`totalInScope` は絞り込みの内側だけを数える。
    *
-   * **意味論は OR**（渡した名前のうち参加資格のあるものを1つでも `tags` に持てば通る）。
-   *
-   * **3つの状態を区別する**（`undefined`/空配列/非空配列を混同しない）:
-   * - `undefined`: 絞り込み無し（全件通過）——`RecallQuery.labels` が未指定、または
-   *   空配列で渡された場合（「絞り込み無し」を1つの形に揃える、`attributes` の空
-   *   オブジェクトと同じ規約）。
-   * - **空配列 `[]`**: 絞り込みは要求されたが、参加資格のある名前が1つも残らなかった
-   *   （ADR 0323「決定2」訂正）。**この場合「何にも一致しない」述語として働く**
-   *   （OR の対象が0個 ⟹ 恒偽）——`undefined` とは逆の結果になる。`docs/memory-model.md`
-   *   §8 の契約（参加資格の無いラベルは記憶を返さず `filtered` に計上する）をそのまま
-   *   実装したものであり、2026-09-25 より前はここを `undefined` へ丸めて「絞り込み
-   *   無し」に倒す誤りがあった（レビューで訂正）。
+   * **3つの状態を区別する**:
+   * - `undefined`: 絞り込み無し（全件通過）。`RecallQuery.labels` が未指定または空配列。
+   * - 空配列 `[]`: 絞り込みは要求されたが、参加資格のある名前が1つも残らなかった（ADR 0323 決定2）。
+   *   **「何にも一致しない」述語として働く**（`undefined` とは逆の結果）。`docs/memory-model.md` §8。
    * - 非空配列: その名前のいずれかを `tags` に持つ Memory だけを通す。
    *
-   * **段1（ANN・語彙の両チャンネル）と段3.5（連想枠）へ `VectorFilter.labels`/
-   * `LexicalFilter.labels` として押し下げる。`MemoryStore.aggregateScope` にも同じ
-   * `scope` が渡る**——`attributes` と同じ3点セットの規律（ADR 0038 が測った
-   * 「2箇所に式を書くと食い違う」を避けるための唯一の出所）。
-   *
-   * **必須の同伴取得（段3）では検査しない**——`tags` 自体が同伴取得を素通しするのと
-   * 同じ理由（ADR 0323「決定3」）。
+   * 段1（`VectorFilter.labels`/`LexicalFilter.labels`）と段3.5へ押し下げ、`MemoryStore.aggregateScope` にも同じ `scope` が渡る
+   * （`attributes` と同じ規律。ADR 0038）。**必須の同伴取得（段3）では検査しない**（`tags` が同伴取得を素通しするのと同じ。ADR 0323 決定3）。
    */
   labels?: string[] | undefined;
   /**
-   * Issue #201 PR-B（ADR 0323）: `RecallQuery.taxonomyGroups: true` のときだけ、
-   * `IndexBand.groups` に `axis: 'taxonomy'` の群を作るための候補ラベル名（現在の
-   * `taxonomy_mode` で参加資格のある、テナントの語彙**全体**）。
+   * `RecallQuery.taxonomyGroups: true` のときだけ、`IndexBand.groups` に `axis: 'taxonomy'` の群を作るための候補ラベル名
+   * （現在の `taxonomy_mode` で参加資格のある、テナントの語彙全体。ADR 0323）。
    *
-   * **`labels`（上）とは独立**——`RecallQuery.labels` を指定していなくても、または
-   * 指定した名前と違う名前でも、テナントの語彙全体を対象にグルーピングする。
-   * `undefined` は「グルーピングしない」（`IndexBand.groups` に `taxonomy` 軸の
-   * エントリを1つも作らない）。空配列は「グルーピングは要求されたが、現在参加資格の
-   * あるラベルが0件」を表す有効な値であり、`undefined` とは区別される
-   * （このときは残差群 `{ axis: 'taxonomy', key: null, ... }` だけが載りうる）。
-   *
-   * **`labels` フィルタが指定されているときは、その絞り込みの内側を数える**——
-   * `subject` 軸の群カウントが `attributes`/`subjectId` の絞り込みの内側を数えるのと
-   * 同じ設計。
-   *
-   * ⚠ **被覆不変条件が `subject` 軸とは違う形になる**——`GroupCount` の doc コメント、
-   * `docs/recall.md` §5、ADR 0323「決定6」を参照。ラベルは多対多なので、この軸の
-   * `count` の総和は `totalInScope` と一致しない（超えうる）。
+   * `labels` とは独立。`undefined` は「グルーピングしない」。空配列は「グルーピングは要求されたが、現在参加資格のあるラベルが0件」を
+   * 表す有効な値で、残差群 `{ axis: 'taxonomy', key: null, ... }` だけが載りうる。`labels` フィルタが指定されているときは
+   * その絞り込みの内側を数える。この軸の `count` の総和は `totalInScope` を超えうる（`GroupCount`、ADR 0323 決定6）。
    */
   taxonomyGroupCandidates?: string[] | undefined;
 }
 
-/** `RecallScope` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallScope` と揃えてある）。 */
+/** `RecallScope` の zod スキーマ。 */
 export const RecallScopeSchema = z.object({
   subjectId: z.string().min(1).optional(),
   occurredAfter: z.date().optional(),
@@ -2648,12 +1700,7 @@ export const RecallScopeSchema = z.object({
   taxonomyGroupCandidates: z.array(z.string()).optional(),
 }) satisfies z.ZodType<RecallScope>;
 
-/**
- * `recall()` の戻り値そのものを zod で検証した結果の1項目（Issue #131、ADR 0098）。
- *
- * `path` は不正だったフィールドをドット連結で示す（例: `"usage.estimatedTokens"`）。
- * `code` / `message` は zod の `safeParse` が返す `error.issues` の対応する欄をそのまま写す。
- */
+/** `recall()` の戻り値を zod で検証した結果の1項目（ADR 0098）。`path` は不正だったフィールドのドット連結（例: `"usage.estimatedTokens"`）。 */
 export interface RecallOutputValidationIssue {
   /** 不正だった欄のドット連結のパス。 */
   path: string;
@@ -2663,9 +1710,7 @@ export interface RecallOutputValidationIssue {
   message: string;
 }
 
-/**
- * `RecallOutputValidationIssue` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallOutputValidationIssue` と揃えてある）。
- */
+/** `RecallOutputValidationIssue` の zod スキーマ。 */
 export const RecallOutputValidationIssueSchema = z.object({
   path: z.string(),
   code: z.string(),
@@ -2673,22 +1718,15 @@ export const RecallOutputValidationIssueSchema = z.object({
 }) satisfies z.ZodType<RecallOutputValidationIssue>;
 
 /**
- * `recall()` の戻り値を zod で検証した結果（Issue #131、ADR 0098）。
+ * `recall()` の戻り値を zod で検証した結果（ADR 0098）。
  *
- * **この欄の「無い」は3種類ある（ADR 0008 の「無い」の分類の適用。潰さない）:**
- * - **`RecallResult.outputValidation` 自体が無い（`undefined`）** — 検証していない
- *   （`RecallRuntimeDeps.outputValidation: "off"`）。
+ * **この欄の「無い」は3種類ある（潰さない。ADR 0008）:**
+ * - `RecallResult.outputValidation` 自体が無い（`undefined`）— 検証していない（`RecallRuntimeDeps.outputValidation: "off"`）。
  * - `{ ok: true, issues: [] }` — 検証して通った。
- * - `{ ok: false, issues: [...] }` — 検証して落ちた。`issues` は `ok: false` のときだけ
- *   非空（`ok: true` のときは必ず空配列）。
+ * - `{ ok: false, issues: [...] }` — 検証して落ちた。`issues` は `ok: false` のときだけ非空。
  *
- * **⚠ `share > 1`（`usage.share`）はこの検証が弾く対象ではない。** ADR 0097 が
- * `RecallUsageSchema.share` から `.max(1)` を意図的に外している——`share` が 1 を超えるのは
- * 契約違反ではなく、実在する正しい値である（強制側と計測側で数え方が違うため）。
- * `RecallResultSchema`（この検証が使うスキーマ）は `.max(1)` を持たないので、
- * `share: 1.1` のような値は `ok: true` として通る。**この検証は「壊れた値を隠す」ためではなく
- * 「壊れた値を見えるようにする」ためにある**——`usage` の値そのものを丸めたり書き換えたりは
- * 一切しない。
+ * **`usage.share > 1` はこの検証が弾く対象ではない**（ADR 0097）。`RecallResultSchema` は `.max(1)` を持たないので
+ * `share: 1.1` は `ok: true` として通る。この検証は壊れた値を見えるようにするためにあり、`usage` を丸めたり書き換えたりしない。
  */
 export interface RecallOutputValidation {
   /** 検証に通ったなら `true`。 */
@@ -2697,7 +1735,7 @@ export interface RecallOutputValidation {
   issues: RecallOutputValidationIssue[];
 }
 
-/** `RecallOutputValidation` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallOutputValidation` と揃えてある）。 */
+/** `RecallOutputValidation` の zod スキーマ。 */
 export const RecallOutputValidationSchema = z.object({
   ok: z.boolean(),
   issues: z.array(RecallOutputValidationIssueSchema),
@@ -2710,24 +1748,13 @@ export interface RecallResult {
   /** 返した記憶（順位の順）。 */
   memories: RecalledMemory[];
   /**
-   * **返さなかった記憶の分類（`docs/recall.md` §4）。** `memories` と memoryId で排他——
-   * ある memoryId が `memories` に載っているなら、この配列のどの Omission も
-   * その memoryId を名指しで含まない（Issue #421 /
-   * [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）。
-   * ただし memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり、
-   * この契約が**個体単位で（外部から）検証できる**のもそこだけである——他の `kind` は
-   * 件数（`count`）だけを持ち（あるいは件数も持たず）、どの記憶を指しているかを言わない
-   * （ADR 0203「引き受けた負債」参照）。
-   *
-   * **Issue #823（ADR 0203 2026-09-26 追記）**: `over_limit(stage:"rescore")` は
-   * memoryId を公開していないが、`recall-runtime.ts` は段2の内部状態（`overLimit`）を
-   * まだ手元に持ったまま段3（必須の同伴取得）の結果と突き合わせられるため、
-   * **公開型を広げずに**同じ排他性を内部で実装できた——段3の必須同伴取得が
-   * `over_limit(stage:"rescore")` の候補を `finalMemories` へ昇格させたときも、
-   * その分は `count` から差し引かれる（全件昇格すれば Omission 自体が消える）。
-   * ただし外部からの検証は依然としてできない（`nearMisses` に相当する欄が無いため）。
-   * `over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等、
-   * 内部状態自体が memoryId を持ち回っていない他の kind は対象外のままである。
+   * 返さなかった記憶の分類（`docs/recall.md` §4）。**`memories` と memoryId で排他**: ある memoryId が `memories` に載っているなら、
+   * この配列のどの Omission もその memoryId を名指しで含まない（[ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）。
+   * memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけで、外部から個体単位で検証できるのもそこだけ。
+   * 他の `kind` は件数だけを持ち（あるいは件数も持たず）、どの記憶を指しているかを言わない。
+   * `over_limit(stage:"rescore")` も、段3の必須同伴取得が候補を昇格させたとき `count` から差し引かれる（全件昇格すれば
+   * Omission 自体が消える）が、外部から検証はできない。`over_limit(stage:"association")`/`budget_dropped`/
+   * `score_not_comparable` 等は対象外。
    */
   omitted: Omission[];
   /** 目次帯（{@link IndexBand}）。 */
@@ -2737,21 +1764,17 @@ export interface RecallResult {
   /** 段ごとの記録（{@link StageTrace}）。 */
   explain: { stages: StageTrace[] };
   /**
-   * `recall()` の戻り値（この欄自身を除く）を zod で検証した結果（Issue #131、ADR 0098）。
+   * `recall()` の戻り値（この欄自身を除く）を zod で検証した結果（ADR 0098）。
    *
-   * **additive。既存欄の意味は変えない。** 省略時（`undefined`）は「検証していない」
-   * （`RecallRuntimeDeps.outputValidation: "off"`）であり、「検証して通った」とは違う——
-   * {@link RecallOutputValidation} の doc の3状態を見ること。
-   *
-   * **既定（`RecallRuntimeDeps.outputValidation` を省略したとき）は `"report"` であり、
-   * 検証に落ちても `recall()` は例外を投げない。** 落ちたことは `outputValidation.ok`
-   * を見た呼び出し側が判断する。投げさせたい場合は `RecallRuntimeDeps.outputValidation`
-   * に `"throw"` を渡す（`RecallOutputValidationError` を参照）。
+   * 省略時（`undefined`）は「検証していない」（`RecallRuntimeDeps.outputValidation: "off"`）で、「検証して通った」とは違う
+   * （{@link RecallOutputValidation} の3状態）。**既定（`RecallRuntimeDeps.outputValidation` を省略したとき）は `"report"` で、
+   * 検証に落ちても `recall()` は例外を投げない**（`outputValidation.ok` で判断する）。投げさせたい場合は
+   * `"throw"` を渡す（`RecallOutputValidationError`）。
    */
   outputValidation?: RecallOutputValidation;
 }
 
-/** `RecallResult` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallResult` と揃えてある）。 */
+/** `RecallResult` の zod スキーマ。 */
 export const RecallResultSchema = z.object({
   recallId: z.string().min(1),
   memories: z.array(RecalledMemorySchema),
@@ -2762,33 +1785,20 @@ export const RecallResultSchema = z.object({
   outputValidation: RecallOutputValidationSchema.optional(),
 }) satisfies z.ZodType<RecallResult>;
 
-// ---------------------------------------------------------------------------
-// 段6（記録）の書き込み口（docs/recall.md §2 段6、ADR 0008、ADR 0155）
-// ---------------------------------------------------------------------------
-
 /**
- * `recalls` へ永続化する、返した記憶1件ぶんの内訳（Issue #298、[ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md)）。
- *
- * `RecalledMemory` が持つ欄のうち**「後から再現できないもの」だけ**を持つ。
- * `digest` と `provenanceKind` は `MemoryStore.get(ctx, memoryId)` を引けば
- * 再現できるため、ここには持たない（同じことを言う道を2つ作らない。ADR 0155 決定1）。
- * `score`（`ScoreBreakdown` 全項）・`retrievedVia`・`companionOf?`・`associationOf?` は
- * クエリ時点の索引の状態・`now`・矛盾関係の解決状況に依存し、後から同じ値を
- * 計算し直せないため持つ。
+ * `recalls` へ永続化する、返した記憶1件ぶんの内訳（[ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md)）。
+ * 「後から再現できないもの」だけを持つ。`digest` と `provenanceKind` は `MemoryStore.get(ctx, memoryId)` で再現できるので持たない
+ * （同じことを言う道を2つ作らない。ADR 0155 決定1）。
  */
 export interface RecallRecordMemory {
   /** 返した記憶の id。 */
   memoryId: MemoryId;
   /**
-   * 返した時点のスコアの内訳。`RecalledMemory.score` と同じ判別（{@link RecalledScore}
-   * の doc、Issue #548 方向2、ADR 0352）。
+   * 返した時点のスコアの内訳。`RecalledMemory.score` と同じ判別（{@link RecalledScore}、ADR 0352）。
    *
-   * ⚠ **本 PR（ADR 0352）より前に永続化された行は、`association` 経由の記憶でも
-   * `total`/`similarity`/`lexicalMatch` を含む `ScoreBreakdown` の形のまま jsonb に
-   * 残っている。**`getRecall` はこの欄を zod で検証せず（ADR 0282 決定4、
-   * `packages/postgres/src/mapping.ts` の `rowToRecallRecord` は単純な cast）、
-   * 書かれた形をそのまま返す——**過去の行を、後から `AffinityUnmeasuredScore` の形に
-   * 作り直すことはしない**（マイグレーション無し。ADR 0352「決定」参照）。
+   * ADR 0352 より前に永続化された行は、`association` 経由の記憶でも `total`/`similarity`/`lexicalMatch` を含む
+   * `ScoreBreakdown` の形のまま残っている。`getRecall` はこの欄を zod で検証せず（ADR 0282 決定4）、書かれた形をそのまま返す。
+   * 過去の行を作り直すマイグレーションはしない。
    */
   score: RecalledScore;
   /** どの経路で引いたか（`RecalledMemory.retrievedVia` と同じ）。 */
@@ -2800,31 +1810,20 @@ export interface RecallRecordMemory {
 }
 
 /**
- * `MemoryStore.getRecall` が返す `returnedMemories` の形
- * （[ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md)）。
+ * `MemoryStore.getRecall` が返す `returnedMemories` の形（[ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md)）。
  *
- * **`breakdownCaptured` で「無い」と「空」を区別する**（ADR 0008 の「無い」の分類の族、
- * Issue #298 受け入れ条件5）。マイグレーション以前に書かれた行は内訳を一度も
- * 持ったことが無い——`breakdownCaptured: false` になり、`memories` は
- * `memoryId` だけを持つ（旧 `returned_memory_ids` 列から移した値）。マイグレーション後に
- * 書かれた行は常に `breakdownCaptured: true` になり、`memories` が空配列なのは
- * 「その recall が実際に0件しか返さなかった」ことを表す。**この2つを同じ `[]` の顔に
- * しない**——さもないと「内訳を記録しそこねた」と「記録したが0件だった」が呼び出し側から
- * 区別できなくなる。
+ * `breakdownCaptured` で「無い」と「空」を区別する（ADR 0008）。マイグレーション以前に書かれた行は内訳を持たず、
+ * `breakdownCaptured: false` で `memories` は `memoryId` だけを持つ。それ以降に書かれた行は常に `breakdownCaptured: true` で、
+ * `memories` が空配列なら「その recall が0件しか返さなかった」。この2つを同じ `[]` の顔にしない。
  */
 export type RecallRecordReturnedMemories =
   | { breakdownCaptured: true; memories: RecallRecordMemory[] }
   | { breakdownCaptured: false; memories: Array<{ memoryId: MemoryId }> };
 
 /**
- * `MemoryStore.createRecall` への入力。`recalls` テーブル1行分のスナップショット
- * （docs/memory-model.md §10）。段6が必須である理由（`recallId` が無いと
- * `observe({kind:'memory_usage'})` が紐付け先を持たない）は docs/recall.md §2・§4 を参照。
- *
- * `returnedMemories` は書き込み時点で常に内訳を持つ（`recall-runtime.ts` は
- * `finalMemories` から `score`/`retrievedVia`/`companionOf`/`associationOf` を毎回
- * 計算している）。「内訳が無い」状態は新規の書き込みには存在しない——それは
- * マイグレーション以前の行にだけ起きる、{@link RecallRecordReturnedMemories} 側の話である。
+ * `MemoryStore.createRecall` への入力。`recalls` テーブル1行分のスナップショット（docs/memory-model.md §10）。
+ * 段6が必須である理由は docs/recall.md §2・§4。`returnedMemories` は書き込み時点で常に内訳を持つ
+ * （内訳が無いのは {@link RecallRecordReturnedMemories} 側の、マイグレーション以前の行だけ）。
  */
 export interface NewRecallRecord {
   /** recall を呼んだテナント。 */
@@ -2833,8 +1832,7 @@ export interface NewRecallRecord {
   subjectId?: string | null | undefined;
   /**
    * 発行された recall クエリ/オプションのスナップショット（JSON にシリアライズ可能な形）。
-   * `recall()` は検証した後のクエリをそのまま渡すので、`Date` の欄を含みうる。読み戻したときの
-   * 値は adapter によって違う——{@link RecallRecord.query} の doc 参照（Issue #1206）。
+   * `recall()` は検証した後のクエリをそのまま渡すので `Date` の欄を含みうる。読み戻した値は adapter によって違う（{@link RecallRecord.query}）。
    */
   query: unknown;
   /** 渡された予算。無ければ `null`。 */
@@ -2850,45 +1848,27 @@ export interface NewRecallRecord {
   /** 返した記憶と、その時点の内訳。 */
   returnedMemories: RecallRecordMemory[];
   /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5:
-   * `true` のとき、`MemoryStore.createRecall` の実装は `recalls` への INSERT と
-   * **同一トランザクションで** `tenant_activity.activity_seq`（テナント単位のカウンタ
-   * `T`）を `+1` しなければならない。既定 `false`（省略時は今日と同じ挙動——
-   * `activity_seq` は動かない）。
+   * `true` のとき、`MemoryStore.createRecall` の実装は `recalls` への INSERT と**同一トランザクションで**
+   * `tenant_activity.activity_seq`（テナント単位のカウンタ `T`）を `+1` しなければならない（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5）。
+   * 既定 `false`（省略時は `activity_seq` は動かない）。
    *
-   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
-   * （Issue #338）: `{ scope: "subject"; subjectId }` を渡すと、実装は `T` ではなく
-   * **`tenant_subject_activity`（`subjectId` の行、`S_x`）を同じトランザクションで
-   * `+1` する**（`T` には触れない）。`RecallQuery.activityCounting: "subject"` を
-   * 選び、かつ `ctx.subjectId` が指定された recall のときだけ、呼び出し側
-   * （`recall-runtime.ts`）がこの形を渡す。
+   * `{ scope: "subject"; subjectId }` を渡すと、実装は `T` ではなく `tenant_subject_activity`（`subjectId` の行、`S_x`）を
+   * 同じトランザクションで `+1` する（`T` には触れない。[ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)）。
+   * `RecallQuery.activityCounting: "subject"` かつ `ctx.subjectId` が指定された recall のときだけ、呼び出し側がこの形を渡す。
    *
-   * **1単位 = `recall()` 1回。** `observe()` はこのカウンタに触れない（ADR 0165
-   * 決めたこと6）——活動時計が測るのは「記憶が、想起される機会を何回見送られたか」であり、
-   * 書き込みは機会ではない。
+   * **1単位 = `recall()` 1回。** `observe()` はこのカウンタに触れない（ADR 0165 決めたこと6。書き込みは「想起される機会」ではない）。
    *
-   * **呼び出し側の責務**: `false` 以外を渡すのは、そのテナントの `decay_clock` が
-   * `'wall'` 以外（`'activity'`/`'either'`）のときに限る（ADR 0165 決めたこと5
-   * 「`activity_seq` を進めるのは `decay_clock != 'wall'` のテナントに限る」）。
-   * この欄自体は `decay_clock` を読まない——`createRecall` の呼び出し側
-   * （`packages/core/src/recall-runtime.ts` 等）がテナント設定を読んで渡す。
-   *
-   * ⭐ **非破壊**: `boolean` はこの union にそのまま含まれるため、既存の
-   * `advanceActivityClock: true`/`false`/省略はすべて型の変更前と同じ意味のまま通る。
+   * **呼び出し側の責務**: `false` 以外を渡すのは、そのテナントの `decay_clock` が `'wall'` 以外のときに限る。
+   * この欄自体は `decay_clock` を読まない。
    */
   advanceActivityClock?: boolean | { scope: "subject"; subjectId: string } | undefined;
-  /**
-   * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237): 書き込む行の `createdAt`。
-   * 省略時は実装が壁時計（`new Date()`）を使う——今日と同じ挙動（⭐ 非破壊、既存の欄を1つ
-   * 足すだけ）。`recall-runtime.ts` はこの欄に `clock.now()` を渡す。
-   */
+  /** 書き込む行の `createdAt`。省略時は実装が壁時計（`new Date()`）を使う。`recall-runtime.ts` は `clock.now()` を渡す。 */
   createdAt?: Date | undefined;
 }
 
 /**
- * `MemoryStore.getRecall` の戻り値。`recalls` 行1件ぶん全部
- * （Issue #298、[ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md)）。
- * 見つからなければ `null`（例外にしない——`MemoryStore.get`/`getObservation` と同じ規律）。
+ * `MemoryStore.getRecall` の戻り値。`recalls` 行1件ぶん全部（[ADR 0155](../../../docs/decisions/0155-recall-score-breakdown-persisted.md)）。
+ * 見つからなければ `null`（例外にしない。`MemoryStore.get`/`getObservation` と同じ規律）。
  */
 export interface RecallRecord {
   /** recall の id。 */
@@ -2900,9 +1880,7 @@ export interface RecallRecord {
   /**
    * 記録したクエリ（`recall()` が検証した後の `RecallQuery`）。
    *
-   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1206](https://github.com/takecchi/mnemora/issues/1206)）:
-   * JSON で往復しない値は、adapter によって違う値で読み戻る。**型は `unknown` のままで、どちらかに揃える約束はしない
-   * （同じ形の `ObserveEventInput.data`、Issue #1076 と同じ扱い）。
+   * JSON で往復しない値は、adapter によって違う値で読み戻る。型は `unknown` のままで、どちらかに揃える約束はしない。
    *
    * | 値 | `@mnemora/postgres`（`jsonb` に保存） | `@mnemora/testkit` の fixture |
    * |---|---|---|
@@ -2910,9 +1888,8 @@ export interface RecallRecord {
    * | `vector` の要素の `-0` | `0` | `-0` |
    * | キーの順 | `jsonb` の順（渡した順ではない） | 渡した順 |
    *
-   * `RecallQuery` の検証は `NaN`・`Infinity` を拒むので、JSON で往復しない値はこの表のものだけである。
+   * `RecallQuery` の検証は `NaN`・`Infinity` を拒むので、JSON で往復しない値はこの表のものだけ。
    * 読み戻した日付を使う側は、`new Date(value)` を通すと両方で同じ値になる。
-   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`recall-record-query-roundtrip.postgres.test.ts`）。
    */
   query: unknown;
   /** 渡された予算。無ければ `null`。 */

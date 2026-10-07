@@ -3,18 +3,7 @@ import { sliceAtGraphemeBoundary } from "./text-truncation.js";
 
 /**
  * `packDigestBand` — 目次帯（`IndexBand.digestBand`）を組む純関数（docs/recall.md §5）。
- *
- * `recall-runtime.ts` の段5から呼ばれるが、埋め込まずここに独立させてある——歯を
- * 当てやすくするため（`MemoryStore` や `Ctx` に依存しない純関数として、DB もフェイクも
- * 要らずに検査できる）。
- *
- * **この関数がやること**: `ScopeAggregate.digests`（DB/実装から来た生の digest。切り詰めて
- * いない）を受け取り、
- * 1. `maxEntryChars` を超える digest を切り詰め、`truncated: true` を立てる
- * 2. `maxChars`（帯全体の文字数予算）と `limit`（件数上限）のどちらかに当たったら打ち切る
- * 3. どの上限に当たったか（あるいは当たらなかったか）を `limitedBy` として返す
- *
- * **この関数がやらないこと**: 候補の並べ替え（呼び出し側が決めた順序をそのまま使う）。
+ * 候補の並べ替えはしない（呼び出し側が決めた順序をそのまま使う）。
  */
 export interface PackDigestBandOptions {
   /** 帯に載せる件数の上限。`NaN` は打ち切り側（負数と同じ）、`+Infinity` は上限なしとして扱う。 */
@@ -32,16 +21,13 @@ export interface PackDigestBandOptions {
 export interface PackedDigestBand {
   /** 帯に載せた digest（呼び出し側が決めた順のまま）。 */
   band: DigestEntry[];
-  /** どの上限で打ち切ったか。どの上限にも当たらなかったら省く（`packDigestBand` の doc）。 */
+  /** どの上限で打ち切ったか。どの上限にも当たらなかったら省く。 */
   limitedBy?: DigestBandLimitedBy;
 }
 
 /**
- * 1件を帯へ積んだときの JSON 上の費用の見積もり——固定部分。
- *
- * `{"memoryId":"<36字uuid>","digest":"..."}` を `JSON.stringify` した際の、digest の
- * 中身そのものを除く固定部分（`"memoryId":"` `"` `,"digest":"` `"` `{` `}` の記号類 と
- * 36字の UUID）の実測値。digest 自身の長さはここに含まれず、都度 `digest.length` を足す。
+ * 1件を帯へ積んだときの JSON 上の費用の見積もり（固定部分）。
+ * `{"memoryId":"<36字uuid>","digest":"..."}` から digest の中身を除いた記号類と UUID の実測値。
  */
 export const DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS = 63;
 
@@ -51,35 +37,23 @@ export const DIGEST_BAND_ENTRY_SEPARATOR_CHARS = 1;
 /**
  * `candidates` から目次帯を組む。
  *
- * @param candidates 帯に載せる資格がある候補。**呼び出し側が決めた順序をそのまま使う
- *   （ここでは並べ替えない）。**
- * @param eligible 資格があった総数（`candidates.length` とは限らない——呼び出し側が既に
- *   `limit` で切って渡してくることがある。`ScopeAggregate.digestEligible.count`）。
+ * @param candidates 帯に載せる資格がある候補。呼び出し側が決めた順序をそのまま使う。
+ * @param eligible 資格があった総数（`ScopeAggregate.digestEligible.count`）。呼び出し側が既に
+ *   `limit` で切って渡すことがあるので `candidates.length` とは限らない。
  * @param opts 上限3種（`PackDigestBandOptions`）。
  *
- * **呼び出し側の義務: `candidates.length <= eligible` を満たして渡すこと。**これを満たす限り
- * `band.length <= eligible` が成り立つ（`band` は `candidates` の部分列なので
- * `band.length <= candidates.length <= eligible`）。
+ * **呼び出し側の義務: `candidates.length <= eligible` で渡すこと。** この関数は `eligible` で打ち切らない。
+ * 破られるのは `MemoryStore` が契約（`digests` は `digestEligible.count` を超えない）を破ったときだけで、
+ * 握り潰さず契約側（`packages/testkit` の適合テスト）で捕まえる。
+ * この関数自身が保証するのは `band.length <= candidates.length` まで。
  *
- * ⚠ **この関数は `eligible` で打ち切らない。**`candidates.length > eligible` で呼ばれたら
- * `band.length > eligible` になりうる。ここで握り潰さないのは、そうなるのは `MemoryStore` の
- * 実装が契約（`digests` は `digestEligible.count` を超えない）を破ったときだけであり、
- * **契約の側で捕まえるべきだから**である——`packages/testkit` の適合テストに
- * `digests.length <= digestEligible.count` を直接主張する歯を置いてある。
- *
- * **この関数自身が保証するのは**「`limit` にどれだけ大きい値を渡されても `candidates` に
- * 無い件数までは返さない」（`band.length <= candidates.length`）のほうである。
- *
- * **`limitedBy` の決め方**:
- * - 打ち切りが一度も起きず、`candidates` を全部載せ、かつ `band.length >= eligible` なら
- *   `limitedBy` は省略する（＝どの上限にも当たらなかった）。
+ * **`limitedBy`**:
  * - 件数の上限（`limit`）で打ち切った ⟹ `"entry_limit"`。
  * - 文字数の予算（`maxChars`）で打ち切った ⟹ `"char_budget"`。
- * - **同じ件で両方に同時に当たった**（次の件を足すと件数も文字数も超える状態）
- *   ⟹ `"both"`。
- * - `eligible > band.length` なのに `limitedBy` が省略される状態は作らない——`candidates`
- *   自体が `limit` 件しか渡ってきていない（＝呼び出し側/store が既に切って渡してきた）
- *   場合も `"entry_limit"` として報告する。
+ * - 同じ件で両方に当たった ⟹ `"both"`。
+ * - 打ち切りが起きず `candidates` を全部載せ、かつ `band.length >= eligible` なら省略する。
+ * - `eligible > band.length` なのに省略される状態は作らない（`candidates` が既に `limit` 件で切られて
+ *   渡ってきた場合も `"entry_limit"`）。
  */
 export function packDigestBand(
   candidates: readonly DigestEntry[],
@@ -91,13 +65,10 @@ export function packDigestBand(
   let limitedBy: DigestBandLimitedBy | undefined;
 
   for (const candidate of candidates) {
-    // `length > NaN` は常に false になり、`maxEntryChars: NaN` が「切り詰めなし」へ化ける。
-    // `limit`/`maxChars`（Issue #803）と同じく NaN は上限0（digest を空に切る）として扱う。
+    // NaN は上限0（digest を空に切る）として扱う。`length > NaN` は常に false で「切り詰めなし」へ化ける。
     const entryCharsIsNaN = Number.isNaN(opts.maxEntryChars);
     const digestTooLong = entryCharsIsNaN || candidate.digest.length > opts.maxEntryChars;
-    // `slice(0, n)` は `n` が負数だと「末尾から `n` 文字を除く」意味になり先頭からの切り詰めに
-    // ならないため、負数は上限0として扱う。サロゲートペアの内側で切らない丸めも
-    // `sliceAtGraphemeBoundary`（`text-truncation.ts`）に集約してある。
+    // 負数は上限0として扱う（`slice(0, 負)` は末尾から除く意味になる）。
     const digest = digestTooLong
       ? // `sliceAtGraphemeBoundary` は NaN を 0 へ丸めない（`Math.max(0, NaN)` は NaN）ので、
         // NaN はここで 0 を明示して渡す。
@@ -106,9 +77,8 @@ export function packDigestBand(
     const cost =
       DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + digest.length + DIGEST_BAND_ENTRY_SEPARATOR_CHARS;
 
-    // `NaN` を含む比較は常に false になり、`limit`/`maxChars` が NaN だと上限が無制限へ化ける
-    // （Issue #803）。NaN は負数と同じ安全側（既に上限に達している扱い）に倒す。
-    // `±Infinity` は通常の比較で意図どおり（`+Infinity`＝上限なし、`-Infinity`＝常に超過）。
+    // NaN を含む比較は常に false で、上限が無制限へ化ける。NaN は既に上限に達している扱いに倒す。
+    // `±Infinity` は通常の比較で意図どおり。
     const wouldExceedLimit = Number.isNaN(opts.limit) || band.length >= opts.limit;
     const wouldExceedChars = Number.isNaN(opts.maxChars) || runningChars + cost > opts.maxChars;
 
@@ -134,8 +104,7 @@ export function packDigestBand(
   }
 
   if (limitedBy === undefined && band.length < eligible) {
-    // 打ち切りは起きなかったのに資格件数に届かない＝`candidates` 自体が既に `limit` 相当で
-    // 切られて渡ってきた。その切り詰めも entry_limit として報告する。
+    // 資格件数に届かない＝`candidates` が既に `limit` 相当で切られて渡ってきた。entry_limit として報告する。
     limitedBy = "entry_limit";
   }
 
