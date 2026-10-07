@@ -11,24 +11,6 @@ import {
 } from "../trigram-lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `mnemora_lexical_tsvector`（`migrations/0025_lexical_tsvector_fallback.sql`、
- * Issue #1222、ADR 0364）の2つの主張を縛る。
- *
- * (i) **今まで通っていた本文では、新関数は旧式と完全一致する。**
- *     `to_tsvector('simple', mnemora_lexical_normalize(content))`（旧式、1MBに収まる
- *     本文なら例外にならない）と `mnemora_lexical_tsvector(content)`（新関数）を、
- *     同じ本文に対して直接 SQL で当て、`::text`・`ts_rank_cd`・
- *     `PostgresLexicalStore.search` の結果と順位が一致することを見る。
- * (ii) **1MBを超える本文（先頭150,000文字だけが対象になる側）でも INSERT が通り、
- *      先頭の語は語彙検索で引ける。**（`whole-observation-fallback-size.postgres.test.ts`
- *      が `runtime.observe()`/`createMemory` 経由でこれを縛っている——ここでは
- *      `PostgresTrigramLexicalStore` 側の同じ主張を足す。）
- *
- * N=150,000 の安全性の根拠（理論上限・実測）は `migrations/0025_*.sql` の冒頭コメントと
- * ADR 0364「N の実測」に書いてある——ここでは繰り返さない。
- */
-
 const TENANT = "lexical-tsvector-fallback-tenant";
 
 /** 旧式（0008/0009 のまま）を直接 SQL で当てる。1MBに収まる本文専用（超えると例外）。 */
@@ -57,10 +39,7 @@ function manyWords(bytes: number): string {
   return words.join(" ");
 }
 
-// 旧式でもまだ例外にならない、1MBの上限に近い大きな本文。
-// 【実測】manyWords(650_000) は旧式の tsvector が1,060,793バイト（::text）で既に例外
-// （`string is too long for tsvector`）。manyWords(600_000) は978,413バイトで収まる。
-// ⟹ 600,000バイトより小さい550,000バイトを「上限直前」として使う（安全余裕を持たせる）。
+// 旧式でもまだ例外にならない、1MBの上限に近い大きな本文。旧式の tsvector が1MBを超えると例外になるので、その手前の大きさを使う。
 const NEAR_LIMIT_BODIES: Record<string, string> = {
   日本語: "四半期レビューでPROJ-1234の納期が来週まで延びました。".repeat(2000),
   識別子混在: Array.from({ length: 20000 }, (_, i) => `PROJ-${i} TASK-${i} user${i}`).join(" "),
@@ -120,13 +99,12 @@ describe("mnemora_lexical_tsvector: 旧式との完全一致（Issue #1222、ADR
       );
     }
 
-    // 新関数を使う本番経路の結果。
     const viaSearch = await lexicalStore.search(ctx, "PROJ-1234 TASK-5 user1 四半期", {
       limit: 50,
       filter: { tenantId: ctx.tenantId },
     });
 
-    // 旧式で直接組み立てた対照（0008/0009 の式そのまま、mnemora_lexical_tsvector を使わない）。
+    // 旧式で直接組み立てた対照（`mnemora_lexical_tsvector` を使わない）。
     const oldResult = await db.execute(sql`
       SELECT id AS memory_id,
              mnemora_lexical_coverage(content, ${"PROJ-1234 TASK-5 user1 四半期"}) AS coverage,
@@ -164,8 +142,7 @@ describe("PostgresTrigramLexicalStore: 1MBを超える本文でも INSERT が通
     const { db } = await getTestClient();
     const probe = await probeTrigramLexicalSupport(db);
     if (!probe.ok) {
-      // ADR 0103: この環境では pg_trgm の前提（UTF8 等）が満たせない——
-      // trigram-lexical-store.postgres.test.ts が別途この否定を検査済み。
+      // この環境では pg_trgm の前提（UTF8 等）が満たせない。trigram-lexical-store.postgres.test.ts が別途この否定を検査済み。
       return;
     }
 

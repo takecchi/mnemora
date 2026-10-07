@@ -5,10 +5,7 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `setEventRetention` は、`kind` が `"unlimited"`・`"days"` とちょうど一致するもの以外を、例外で拒み、何も書かない（Issue #1168）。
- * `event-retention-kind-validation.postgres.test.ts` は `bogus`・`Days`・空文字・`kind` 無しを渡す。
- * ここは、それが試していない形を、Postgres と testkit の InMemory に流す。
- *
+ * `event-retention-kind-validation.postgres.test.ts` が試していない形を流す。
  * - 前後に空白・改行のある綴り: 空白を落として比べる実装は通す。通ると、後段の `kind === "days"` が偽になり、
  *   `{ kind: " days", days: 7 }` が、黙って無期限（`event_retention_days = NULL`）として書かれる。
  * - 文字列でない `kind`（`null`・数値・オブジェクト）: JSON を素通しする呼び手が渡しうる。
