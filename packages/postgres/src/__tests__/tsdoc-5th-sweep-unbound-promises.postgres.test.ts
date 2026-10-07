@@ -13,8 +13,7 @@ import {
 import { closeTestClient, getTestClient, requireDatabaseUrl } from "./test-db.js";
 
 /**
- * TSDoc の5巡目の調査で、約束どおりに動くがどのテストも縛っていなかった振る舞いを縛る
- * （B1 の postgres の側、B6・B7・B8）。今の振る舞いの固定であり、望ましい姿の主張ではない。
+ * 今の振る舞いの固定であり、望ましい姿の主張ではない。
  */
 
 afterAll(async () => {

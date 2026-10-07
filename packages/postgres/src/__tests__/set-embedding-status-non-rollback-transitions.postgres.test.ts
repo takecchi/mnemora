@@ -5,12 +5,9 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `setEmbeddingStatus` の巻き戻しの守りは「片側だけの規則」——`ready` の行へ `failed` を書くのだけを弾く
- * （ADR 0053・`MemoryStore.setEmbeddingStatus` の doc「それ以外の遷移は今日どおり無条件」。
- * Issue #1775 の #782 の変異e）。
+ * `setEmbeddingStatus` の巻き戻しの守りは「片側だけの規則」で、`ready` の行へ `failed` を書くのだけを弾く（`MemoryStore.setEmbeddingStatus` の doc「それ以外の遷移は今日どおり無条件」）。
  *
- * 適合テストは `ready → failed` が弾かれることと `failed → ready` が通ることだけを見る。守りを全 `status`
- * へ掛ける誤り（`ready` の行へ `pending`・`ready` を書いても弾く）は、どれも赤にしなかった。
+ * 適合テストは `ready → failed` が弾かれることと `failed → ready` が通ることだけを見る。守りを全 `status` へ掛ける誤り（`ready` の行へ `pending`・`ready` を書いても弾く）は、どれも赤にしなかった。
  * `ready → pending`（再投入）が黙って効かなくなると、リセット後の再埋め込みが走らない。
  */
 

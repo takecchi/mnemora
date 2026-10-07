@@ -59,10 +59,7 @@ function containsBigInt(value: unknown): boolean {
  * `memory_events` の1行として書けるイベントかを確かめる（Postgres が拒む入力を、同じ入力で拒む）。
  * 呼び手のイベントを受け取る口は、状態を書き換える前にこれを呼ぶ（Postgres は1トランザクションで巻き戻るので、拒んだら何も書かない）。
  */
-export function assertStorableMemoryEvent(
-  event: NewMemoryEvent,
-  opts?: { skipAtFloor?: boolean },
-): void {
+export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
   // BigInt の検査は他のどの検査よりも先に置く: Postgres の `append` は `JSON.stringify` を JS 側で先に評価するので、
   // BigInt があると他の検査（kind・外部キー・NUL など）が DB に届く前に `TypeError` になる。
   if (containsBigInt(event.actor) || containsBigInt(event.meta)) {
@@ -71,10 +68,7 @@ export function assertStorableMemoryEvent(
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
   }
-  // `skipAtFloor`: そのイベントを書かないかもしれない呼び手（CAS に弾かれる対象は `at` を見られない）が、下限だけを後の書く分岐へ回すためのもの。
-  if (opts?.skipAtFloor !== true) {
-    assertWrittenTimestamptzFloor("memory_events", "at", event.at);
-  }
+  assertWrittenTimestamptzFloor("memory_events", "at", event.at);
   // `events_purged` は特定の Memory を指さない（`memory_events_check`）。
   if (event.kind === "events_purged" && event.memoryId !== null) {
     throw new Error(

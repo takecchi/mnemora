@@ -6,14 +6,10 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `MemoryStore.restoreSupersededBy` の `event.at` に Invalid Date を渡したときの振る舞いを縛る
- * （Issue #1229 の行3。`restoreSupersededBy?` の doc の 2026-09-28 追記）。
+ * `MemoryStore.restoreSupersededBy` の `event.at` に Invalid Date を渡したときの振る舞いを縛る。
  *
- * - 戻す対象が**無い**とき: 2実装とも `{ restored: [] }` を返す（例外にしない）。以前は `@mnemora/postgres` だけが、
- *   対象が無くても `at` を `timestamptz` に変えて例外になっていた。例外の少ない側（testkit の fixture）に揃えた
- *   （クローン miku の判断であり、オーナーの判断ではない）。
- * - 戻す対象が**在る**とき: 今どおり2実装とも例外で、1件も戻さない。`@mnemora/postgres` の例外の種類も今どおり
- *   （drizzle の `Failed query` に包まれ、DB の例外が `cause` に入る）。
+ * - 戻す対象が無いとき: 2実装とも `{ restored: [] }` を返す（例外にしない）。
+ * - 戻す対象が在るとき: 2実装とも例外で、1件も戻さない。`@mnemora/postgres` の例外の種類は、drizzle の `Failed query` に包まれ、DB の例外が `cause` に入る。
  * - やりすぎない: 正しい `at` なら今どおり戻す。
  */
 

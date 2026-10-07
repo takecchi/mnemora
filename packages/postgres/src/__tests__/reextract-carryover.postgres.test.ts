@@ -15,15 +15,11 @@ import {
 } from "./test-db.js";
 
 /**
- * 「記憶を作り替える操作の後の付随データの引き継ぎ」バグ探し——`runtime.reextract`
- * （新しい記憶を作る系のもう1つの経路）を、本物の Postgres で端から端で検査する。
+ * 「記憶を作り替える操作の後の付随データの引き継ぎ」を、`runtime.reextract` について本物の Postgres で端から端で検査する。
  *
- * `reextract` は `extraction.ts` の `buildNewMemoryFromCandidate` をそのまま使う
- * （`consolidate`/`reflect` 専用の `buildConsolidatedMemory`/`buildReflectedMemory` とは違う
- * ——`runtime.ts` の `buildNewMemoriesForCandidates` 参照）。⟹ `validFrom`/`validUntil`/
- * `attributes` は Observation からの素通し（Issue #280/#152、ADR 0312）が約束であり、
- * consolidate/reflect の「約束が無い」とは対称ではない。ここではその約束が実際に
- * Postgres 往復で守られているかを検査する。
+ * `reextract` は `extraction.ts` の `buildNewMemoryFromCandidate` をそのまま使う（`consolidate`/`reflect` 専用の
+ * `buildConsolidatedMemory`/`buildReflectedMemory` とは違う）。そのため `validFrom`/`validUntil`/`attributes` は Observation からの素通しが約束であり、
+ * consolidate/reflect の「約束が無い」とは対称ではない。ここではその約束が実際に Postgres 往復で守られているかを検査する。
  */
 
 const TENANT = "reextract-carryover-tenant";
@@ -52,11 +48,6 @@ async function buildRuntime(memoryStore: PostgresMemoryStore, llmProvider: LLMPr
       embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
     },
     hashContent: (content: string) => `sha256(${content})`,
-    // `clock` は実時刻より 1 秒だけ未来を返す。これは歴史的な理由で残している。かつて outbox の
-    // `available_at` が DB 側の `now()`（マイクロ秒）で書かれていたころ（Issue #719・#1002・PR #834）は、
-    // 書いた直後の `tick()` が同じミリ秒に入ると積んだ行を claim できなかった。今は runtime が
-    // `clock.now()` 由来の `now` を渡すので `available_at` も注入した時計に従う（ADR 0355・0559）。
-    // 1 秒は `leaseMs` よりずっと小さいので、claim 済みの行がリース切れとして取り直されることはない。
     clock: { now: () => new Date(Date.now() + 1_000) },
   });
 }
@@ -102,21 +93,19 @@ describe("runtime.reextract — 付随データの引き継ぎ（本物の Postg
 
     const created = await memoryStore.get(ctx, result.memoryIds[0]!);
     expect(created).not.toBeNull();
-    // Issue #280: Observation から素通し(約束あり——consolidate/reflect とは対称ではない)。
+    // Observation から素通し（約束あり。consolidate/reflect とは対称ではない）。
     expect(created!.validFrom?.toISOString()).toBe(validFrom.toISOString());
     expect(created!.validUntil?.toISOString()).toBe(validUntil.toISOString());
-    // Issue #152/#153（ADR 0312）: Observation の attributes をそのまま継承する。
+    // Observation の attributes をそのまま継承する。
     expect(created!.attributes).toEqual({ visibility: "internal" });
     // claim key 導出（opt-in）を使っていないので既定で null。
     expect(created!.claimKey).toBeNull();
     expect(created!.sourceObservationId).toBe(observation.id);
     expect(created!.embeddingStatus).toBe("pending");
 
-    // labels: 新しい行の tags から proposed ラベルが作られている。
     const labels = await labelsFor(memoryStore, ctx);
     expect(labels.get("tag-x")?.proposedCount).toBe(1);
 
-    // embed ジョブ → tick → ready。
     const outboxRows = await db.execute(sql`
       SELECT * FROM outbox WHERE tenant_id = ${TENANT} AND kind = 'embed' AND completed_at IS NULL
     `);

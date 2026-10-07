@@ -15,13 +15,12 @@ import {
 } from "./test-db.js";
 
 /**
- * `reextract` 版の Issue #1226 の陽性対照（`consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts`
- * と同じ作法。ADR 0406）: runtime 自身の「書く直前の読み直し」（`getMany`）と書き込みの間に開いた窓に、
- * `forget` を割り込ませても、書き込みメソッド自身の `SELECT … FOR UPDATE`（`opts.abortIfForgotten`）が
- * 検出して打ち切ること。書き込みメソッドの入口で障壁を張る（読み直しは別メソッドなので影響を受けない）。
+ * `reextract` の陽性対照（`consolidate-reflect-source-forgotten-for-update-race.postgres.test.ts` と同じ作法）:
+ * runtime 自身の「書く直前の読み直し」（`getMany`）と書き込みの間に開いた窓に `forget` を割り込ませても、
+ * 書き込みメソッド自身の `SELECT … FOR UPDATE`（`opts.abortIfForgotten`）が検出して打ち切ること。
+ * 書き込みメソッドの入口で障壁を張る（読み直しは別メソッドなので影響を受けない）。
  *
- * `supersedeWithNewMemories`（口の有る経路）と `createMemoryWithOutbox`（口の無い adapter 向けのループ）は
- * 別のメソッドで別の見直しを持つので、両方を確かめる。
+ * `supersedeWithNewMemories`（口の有る経路）と `createMemoryWithOutbox`（口の無い adapter 向けのループ）は別のメソッドで別の見直しを持つので、両方を確かめる。
  */
 
 class Gate {

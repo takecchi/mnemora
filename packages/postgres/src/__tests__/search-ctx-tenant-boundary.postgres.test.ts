@@ -16,21 +16,13 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #1050: `search` の3口（`PostgresVectorStore.search`/`searchMany`、
- * `PostgresLexicalStore.search`、`PostgresTrigramLexicalStore.search`）は、
- * `opts.filter.tenantId` に加えて **`ctx.tenantId` の境界も掛ける**（AND）。
- * 2つが食い違えば、両方を満たす行は無いので空を返す（例外は投げない）。
+ * `search` の3口（`PostgresVectorStore.search`/`searchMany`、`PostgresLexicalStore.search`、`PostgresTrigramLexicalStore.search`）は、
+ * `opts.filter.tenantId` に加えて `ctx.tenantId` の境界も掛ける（AND）。2つが食い違えば、両方を満たす行は無いので空を返す（例外は投げない）。
+ * 隔離の境界は `ctx.tenantId` である。`VectorStore.getVectors` の doc も同じ境界を約束している。
  *
- * 以前は `filter.tenantId` だけで絞っていたため、`ctx` をテナント B、
- * `filter.tenantId` をテナント A にすると、A の memoryId とスコアが返った。
- * 隔離の境界は `ctx.tenantId` である（ADR 0007）。`VectorStore.getVectors` の doc も
- * 同じ境界を約束している。core の `FakeVectorStore`/`FakeLexicalStore` は以前から AND だった。
+ * `packages/testkit` の `*-conformance.ts` には足さない。InMemory 側の同じ歯は `packages/testkit/src/__tests__/in-memory-search-ctx-tenant-boundary.test.ts`。
  *
- * **`packages/testkit` の `*-conformance.ts` には足していない**（#809）。
- * InMemory 側の同じ歯は `packages/testkit/src/__tests__/in-memory-search-ctx-tenant-boundary.test.ts`。
- *
- * 「変わらない」（食い違えば空）だけでなく「変わる」（一致すれば A 自身が返る）も
- * 同じ it の中で見る——そうしないと「常に空を返す」実装でも緑になる。
+ * 「変わらない」（食い違えば空）だけでなく「変わる」（一致すれば A 自身が返る）も同じ it の中で見る。そうしないと「常に空を返す」実装でも緑になる。
  */
 
 const TENANT_A = "search-boundary-tenant-a";

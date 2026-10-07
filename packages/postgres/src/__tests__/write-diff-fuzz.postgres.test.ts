@@ -54,7 +54,6 @@ import {
  *   検査器が黙って何も比べなくなる回帰を捕まえる。
  *
  * `WRITE_FUZZ_PG_SEEDS`・`WRITE_FUZZ_LEN`・`WRITE_FUZZ_PG_FIRST_SEED` で本数・長さ・起点を変えられる。
- * 【実測】20シード × 60手で、4本合わせて 22〜24 秒（手元の PostgreSQL 17、3回とも食い違い0）。
  * Postgres の側は seed ごとに1回だけ流し、その結果を Fake・testkit・陽性対照の4本で使い回す。
  */
 
@@ -62,8 +61,7 @@ const SEEDS = Number(process.env.WRITE_FUZZ_PG_SEEDS ?? 20);
 const LEN = Number(process.env.WRITE_FUZZ_LEN ?? 60);
 const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.WRITE_FUZZ_PG_FIRST_SEED ?? 1);
-// 時計は実時刻より先から始める。歴史的な理由で残しているが、今は `available_at` も注入した時計に
-// 従う（ADR 0559）。1回の実行の中では両方の backend で同じ値を使う。
+// 時計は実時刻より先から始める。1回の実行の中では両方の backend で同じ値を使う。
 const T0 = Date.now() + 86_400_000;
 // Postgres の側の実行結果は、seed・`T0`・`LEN` が同じなら同じなので、4本の it で使い回す
 // （Postgres を seed ごとに1回しか流さない）。

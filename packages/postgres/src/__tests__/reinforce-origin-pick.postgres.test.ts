@@ -6,17 +6,13 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）が書くかどうかを決める起点は、
- * **`lastReinforcedAt ?? recordedAt`** である（Issue #1093、ADR 0048）。
- * `reinforce-origin-no-rewind.postgres.test.ts` は、起点が作成時刻（`recordedAt`）より後ろにある場面と、
- * 未強化の記憶で `recordedAt` が過去にある場面を縛る。ここは、その歯が持たない2つの向きを縛る。
+ * `MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）が書くかどうかを決める起点は、**`lastReinforcedAt ?? recordedAt`** である。
+ * `reinforce-origin-no-rewind.postgres.test.ts` は、起点が作成時刻（`recordedAt`）より後ろにある場面と、未強化の記憶で `recordedAt` が過去にある場面を縛る。
+ * ここは、その歯が持たない2つの向きを縛る。
  *
- * - **起点が `lastReinforcedAt` であること**: `lastReinforcedAt` が `recordedAt` より前にある行
- *   （既に作成時刻より前の起点を持つ記憶。CHANGELOG の射程が「変えない」と書いた）では、
- *   `lastReinforcedAt` と `recordedAt` の間の `at`、`recordedAt` ちょうどの `at` が書かれる。
- *   起点を `GREATEST(lastReinforcedAt, recordedAt)` で取ると、この行だけ強化が落ちる。
- * - **未強化の起点が `recordedAt` であって、行ができた時刻（`createdAt`）ではないこと**:
- *   呼び手が `recordedAt` を未来で渡す取り込みでは、`createdAt` より後ろに `recordedAt` が来る。
+ * - **起点が `lastReinforcedAt` であること**: `lastReinforcedAt` が `recordedAt` より前にある行（既に作成時刻より前の起点を持つ記憶）では、
+ *   `lastReinforcedAt` と `recordedAt` の間の `at`、`recordedAt` ちょうどの `at` が書かれる。起点を `GREATEST(lastReinforcedAt, recordedAt)` で取ると、この行だけ強化が落ちる。
+ * - **未強化の起点が `recordedAt` であって、行ができた時刻（`createdAt`）ではないこと**: 呼び手が `recordedAt` を未来で渡す取り込みでは、`createdAt` より後ろに `recordedAt` が来る。
  *   `createdAt < at < recordedAt` の `at` は書かれない。起点を `LEAST(recordedAt, createdAt)` で取ると書いてしまう。
  *
  * 3つの口（`reinforce`・`reinforceMany`・`recordUsageAndReinforce`）に、Postgres と testkit の InMemory で当てる。

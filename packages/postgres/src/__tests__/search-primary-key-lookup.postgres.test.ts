@@ -9,19 +9,13 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { captureClientQuery, closeTestClient, explainCaptured, getTestClient } from "./test-db.js";
 
 /**
- * Issue #1415 / ADR 0374: `PostgresVectorStore.search()`（段1、`searchMany()` の
- * 単一クエリ版）も、`searchMany()` と同じ欠陥を持っていた——`memories` の統計が無い
- * （`ANALYZE` 前）小さいテナントで、`m.id = e.memory_id` を `Join Filter` として
- * 後から捨てる悪いプランを選ぶ（Issue #1181 が `searchMany()` に見つけたのと同じ
- * 病、Issue #1415 本文の実測）。
+ * `PostgresVectorStore.search()`（段1）も、`memories` の統計が無い（`ANALYZE` 前）小さいテナントで、`m.id = e.memory_id` を `Join Filter` として後から捨てる悪いプランを選びうる。
  *
- * `search()` と `searchMany()` は同じ `StatsPresenceGate`（インスタンス・表ごとに
- * 「両方の統計が確認済みか」を覚える、`vector-store.ts` の doc 参照）で切り替える
- * ため、この歯は `search-many-primary-key-lookup.postgres.test.ts` と対になる
- * ——`searchMany()` 用の歯が持つ理由・注意点（共有の `TEST_EMBEDDING_SPACE` を
- * 使わない理由、行数・幅を実データに寄せる理由）はそのまま当てはまる。
+ * `search()` と `searchMany()` は同じ `StatsPresenceGate`（インスタンス・表ごとに「両方の統計が確認済みか」を覚える）で切り替えるため、
+ * この歯は `search-many-primary-key-lookup.postgres.test.ts` と対になる。
+ * そちらが持つ理由・注意点（共有の `TEST_EMBEDDING_SPACE` を使わない理由、行数・幅を実データに寄せる理由）はそのまま当てはまる。
  *
- * ⚠ **速さは縛らない**。縛るのはプランの形・送られる SQL の形だけである。
+ * ⚠ 速さは縛らない。縛るのはプランの形・送られる SQL の形だけである。
  */
 const SPACE: EmbeddingSpaceId = {
   provider: "test-issue-1415",
@@ -109,8 +103,7 @@ describe("search: 統計が無くても memories を主キーで引く（Issue #
       () => vectorStore.search(ctx, space, [1, 2, 3], { limit: 40, filter }),
     );
 
-    // ADR 0374: 統計が確認済みになったあとは、`reltuples`/One-Time Filter/候補D の
-    // 痕跡を一切持たない、今の main と同じ2枝の SQL がそのまま送られる。
+    // 統計が確認済みになったあとは、`reltuples`/One-Time Filter の痕跡を一切持たない、素の `JOIN` の SQL がそのまま送られる。
     expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(/reltuples/i);
     expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(/OFFSET 0/i);
     expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(/to_regclass/i);

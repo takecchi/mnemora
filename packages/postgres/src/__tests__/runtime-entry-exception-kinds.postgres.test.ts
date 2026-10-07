@@ -24,19 +24,15 @@ import {
 } from "./test-db.js";
 
 /**
- * Runtime の入口が不正な入力に投げる例外の種類を、今のまま縛る（Issue #1184 の案1「今のまま（口ごとの種類を
- * doc に書く）」）。ADR 0496 で `findCorrectionCandidates`・`resolveContested(Group)`・`tick` の型の外の入力を断る例外を足した（下）。
+ * Runtime の入口が不正な入力に投げる例外の種類を、今のまま縛る。
  *
  * 種類は口ごとに違い、揃えていない。揃える（`RangeError`・`TypeError` に寄せる、名前付きの class を足す、など）と、catch している利用者を壊しうるので、
- * どれかが変わればここが赤くなる。揃えるかどうかは #1184 で決めていない。
+ * どれかが変わればここが赤くなる。
  *
- * `tick` は、ADR 0496 で入口の検査を足した（`leaseMs` の省略・非有限は `RangeError`、`opts` が object でなければ `TypeError`）。
- * 以前は Runtime が検査せず、`leaseMs` を `OutboxStore.claimBatch` へそのまま渡していたので、顔が store で違った
- * （Postgres は drizzle が包んだ `Error`、fixture は名前の無い `Error`）。いまは store の種類によらず同じ顔になる。
+ * `tick` は入口の検査がある（`leaseMs` の省略・非有限は `RangeError`、`opts` が object でなければ `TypeError`）ので、store の種類によらず同じ顔になる。
  * その記述を `TickOptions.leaseMs` の TSDoc に書いてあり、TSDoc の記述とここで測った顔を突き合わせる。
  *
- * `registerEmbeddingSpace` のテーブルの衝突（`name` だけの `Error`）は
- * `embedding-space-table-conflict.postgres.test.ts` が縛っている。
+ * `registerEmbeddingSpace` のテーブルの衝突（`name` だけの `Error`）は `embedding-space-table-conflict.postgres.test.ts` が縛っている。
  */
 
 const RUNTIME_SOURCE = readFileSync(
@@ -66,7 +62,6 @@ const shared = {
     embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
   },
   hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
-  // 先の時刻にしているのは歴史的な理由で、今は outbox の `available_at` も注入した時計に従う（ADR 0559）。
   clock: { now: () => new Date("2100-01-01T00:00:00.000Z") },
 };
 
