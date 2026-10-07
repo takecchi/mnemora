@@ -1,10 +1,12 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
+import { isMalformedIdentifierError } from "@mnemora/core";
 import type {
   Ctx,
   EventStore,
   Memory,
   MemoryStore,
+  NewMemory,
   NewRecallRecord,
   OutboxStore,
   TenantSettingsStore,
@@ -23,7 +25,7 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）を、実 Postgres と InMemory の両方で `EXPECTED` に突き合わせる。
+ * 保持と掃除の口（`purgeExpiredEventsByRetention`・`purgeExpiredRecalls`・`purgeCompletedJobs`）と `scrubPurged` を、実 Postgres と InMemory の両方で `EXPECTED` に突き合わせる。
  * core の Fake の側は `packages/core/src/__tests__/fake-retention-purge-parity.test.ts` が同じ `EXPECTED` を縛る。DB はファイル冒頭で作り直し、tenant はこのファイル専用の名前を使う。
  */
 interface Env {
@@ -36,6 +38,12 @@ interface Env {
   /** 記憶を1件作り、`embed` のジョブを1本積む。 */
   mk: (ctx: Ctx, tag: string) => Promise<Memory>;
   fresh: () => Ctx;
+  /** 記憶を、`NewMemory` の欄を上書きして1件作る（`createMemory`）。 */
+  mkWith: (ctx: Ctx, tag: string, over: Partial<NewMemory>) => Promise<Memory>;
+  /** その行の `purgedAt` を立てる。公開の口では作れない v1.0.x の残骸を、実装ごとの内部の口で作る。 */
+  markPurgedAt: (ctx: Ctx, id: string) => Promise<void>;
+  /** その label の `proposedCount` を直に書き換える（数え間違いの状態を作る）。 */
+  setProposedCount: (ctx: Ctx, name: string, count: number) => Promise<void>;
 }
 
 type Result = Record<string, unknown>;
@@ -44,10 +52,10 @@ type Result = Record<string, unknown>;
  * 保持と掃除の口を3者（core の Fake・testkit の InMemory・Postgres）に同じ入力で流す。
  * `MemoryStore.purgeExpiredEventsByRetention`（テナントごとの保持の設定を読んで掃除）・`purgeExpiredRecalls`・`OutboxStore.purgeCompletedJobs`。
  * 見るのは、日時の境界（ちょうど・1ms 前後・ミリ秒の端数）、`limit` と `reachedLimit`、`dryRun`、`events_purged` の記録、保持の設定、別テナントに触れないこと、時刻の注入（`now`）。
- * `scrubPurged`（Fake は実装しない任意メソッド）は、この歯の外。
+ * `scrubPurged` は、v1.0.x の purge が残した状態（公開の口では作れない）を実装ごとの内部の口で作って流す。見るのは、対象の行の絞り込み（forgotten かつ purgedAt あり・渡された id だけ・他テナントに触れない）、tags・attributes・claimKey・label の紐付けの除去、`proposedCount` の減らし方（外した本数・床0・registered は動かさない）、べき等・`updatedAt`、目次帯の digest の伏せ方、不正な ctx。
  */
 async function scenario(env: Env): Promise<Result> {
-  const { mem, ts, ev, ob, rows, mk, fresh } = env;
+  const { mem, ts, ev, ob, rows, mk, fresh, mkWith, markPurgedAt, setProposedCount } = env;
   const out: Result = {};
   const D = (s: string) => new Date(s);
   const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -310,6 +318,222 @@ async function scenario(env: Env): Promise<Result> {
       (await rows(other)).length,
     ];
   }
+
+  {
+    // v1.0.x の purge が残した状態は公開の口では作れない。`markPurgedAt` / `setProposedCount` は、実装ごとの内部の口（Fake・InMemory は内部の Map、Postgres は SQL）で作る。
+    const ctx = fresh();
+    const other = fresh();
+    const GHOST = "00000000-0000-4000-8000-000000000000";
+    const residue = {
+      attributes: { owner: "alice" },
+      claimKey: { subject: "user", predicate: "home_city" },
+    };
+    const legacy = async (c: Ctx, tag: string, over: Partial<NewMemory>) => {
+      const m = await mkWith(c, tag, { status: "forgotten", digest: "[purged]", ...over });
+      await markPurgedAt(c, m.id);
+      return m;
+    };
+    const purged = await legacy(ctx, "scrub-purged", { ...residue, tags: ["shared", "own"] });
+    const purgedB = await legacy(ctx, "scrub-purged-b", { tags: ["shared"] });
+    const clean = await legacy(ctx, "scrub-clean", {});
+    const notPassed = await legacy(ctx, "scrub-not-passed", { ...residue, tags: ["shared"] });
+    const regLegacy = await legacy(ctx, "scrub-reg-legacy", { tags: ["reg"] });
+    const floor = await legacy(ctx, "scrub-floor", { tags: ["floor"] });
+    const unpurged = await mkWith(ctx, "scrub-unpurged", {
+      status: "forgotten",
+      ...residue,
+      tags: ["shared", "unpurged-only"],
+    });
+    const activePurgedAt = await mkWith(ctx, "scrub-active", { ...residue, tags: ["shared"] });
+    await markPurgedAt(ctx, activePurgedAt.id);
+    await mkWith(ctx, "scrub-reg-keep", { tags: ["reg"] });
+    await mem.registerLabel!(ctx, "reg");
+    const foreign = await legacy(other, "scrub-foreign", { ...residue, tags: ["shared"] });
+    await setProposedCount(ctx, "floor", 0);
+
+    const rowsOf: Array<[string, Ctx, Memory]> = [
+      ["purged", ctx, purged],
+      ["purgedB", ctx, purgedB],
+      ["clean", ctx, clean],
+      ["notPassed", ctx, notPassed],
+      ["regLegacy", ctx, regLegacy],
+      ["floor", ctx, floor],
+      ["unpurged", ctx, unpurged],
+      ["activePurgedAt", ctx, activePurgedAt],
+      ["foreign", other, foreign],
+    ];
+    const read = async (c: Ctx, m: Memory) => (await mem.get(c, m.id))!;
+    const shape = async () =>
+      Object.fromEntries(
+        await Promise.all(
+          rowsOf.map(async ([name, c, m]) => {
+            const g = await read(c, m);
+            return [
+              name,
+              [
+                g.status,
+                g.content,
+                g.digest,
+                g.tags,
+                g.attributes,
+                g.claimKey ?? null,
+                iso(g.purgedAt ?? null),
+              ],
+            ] as const;
+          }),
+        ),
+      );
+    const stamps = async () =>
+      Object.fromEntries(
+        await Promise.all(
+          rowsOf.map(async ([name, c, m]) => [name, iso((await read(c, m)).updatedAt)] as const),
+        ),
+      );
+    const labelsOf = async (c: Ctx) =>
+      (await mem.listLabels!(c))
+        .map((l) => [l.name, l.status, l.proposedCount])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    const moved = (before: Record<string, string | null>, after: Record<string, string | null>) =>
+      Object.fromEntries(Object.keys(before).map((k) => [k, before[k] !== after[k]]));
+
+    const labelsBefore = [await labelsOf(ctx), await labelsOf(other)];
+    const stampsBefore = await stamps();
+    const eventsBefore = [(await ev.list(ctx, {})).length, (await ev.list(other, {})).length];
+    await new Promise((r) => setTimeout(r, 5)); // updatedAt が動いたかを、時計の分解能に埋もれさせない
+    const returned = await mem.scrubPurged!(ctx, [
+      purged.id,
+      purgedB.id,
+      clean.id,
+      regLegacy.id,
+      floor.id,
+      unpurged.id,
+      activePurgedAt.id,
+      foreign.id,
+      GHOST,
+      "not-a-uuid",
+    ]);
+    const stampsAfter = await stamps();
+    out[
+      "scrubPurged: only forgotten rows with purgedAt lose tags, attributes, claimKey and label links"
+    ] = [
+      returned === undefined,
+      await shape(),
+      moved(stampsBefore, stampsAfter),
+      [(await ev.list(ctx, {})).length, (await ev.list(other, {})).length].join() ===
+        eventsBefore.join(),
+    ];
+    out["scrubPurged: proposedCount drops by the links removed, registered and the floor stay"] = [
+      labelsBefore,
+      [await labelsOf(ctx), await labelsOf(other)],
+    ];
+    const labelsAfter = [await labelsOf(ctx), await labelsOf(other)];
+    const shapeAfter = await shape();
+    await mem.scrubPurged!(ctx, [purged.id, purgedB.id, regLegacy.id, floor.id]);
+    await mem.scrubPurged!(ctx, []);
+    out[
+      "scrubPurged: idempotent, an empty list does nothing, rows with no residue keep updatedAt"
+    ] = [
+      JSON.stringify([await labelsOf(ctx), await labelsOf(other)]) === JSON.stringify(labelsAfter),
+      JSON.stringify(await shape()) === JSON.stringify(shapeAfter),
+      JSON.stringify(await stamps()) === JSON.stringify(stampsAfter),
+    ];
+    const badCtx = await mem.scrubPurged!({ tenantId: "bad\u0000tenant" }, [purged.id]).then(
+      () => "resolved",
+      (error: unknown) =>
+        isMalformedIdentifierError(error) ? "MalformedIdentifierError" : "other",
+    );
+    out["scrubPurged: a malformed ctx is refused with MalformedIdentifierError"] = badCtx;
+  }
+  {
+    const ctx = fresh();
+    const other = fresh();
+    const purged = await mkWith(ctx, "band-purged", {
+      status: "forgotten",
+      digest: "[purged]",
+    });
+    await markPurgedAt(ctx, purged.id);
+    const notPassed = await mkWith(ctx, "band-not-passed", {
+      status: "forgotten",
+      digest: "[purged]",
+    });
+    await markPurgedAt(ctx, notPassed.id);
+    const unpurged = await mkWith(ctx, "band-unpurged", { status: "forgotten", digest: "未purge" });
+    const live = await mkWith(ctx, "band-live", { digest: "生きている" });
+    const names = new Map([
+      [purged.id, "purged"],
+      [notPassed.id, "notPassed"],
+      [unpurged.id, "unpurged"],
+      [live.id, "live"],
+    ]);
+    const recallOf = (
+      c: Ctx,
+      digestBand: NonNullable<NewRecallRecord["indexBand"]["digestBand"]>,
+    ): NewRecallRecord => ({
+      tenantId: c.tenantId,
+      subjectId: "s",
+      query: { text: "q" },
+      budget: null,
+      omitted: [],
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      indexBand: { groups: [], totalInScope: 0, countKind: "exact", digestBand },
+      explain: { stages: [] },
+      returnedMemories: [],
+    });
+    const band = [
+      { memoryId: purged.id, digest: "秘密", truncated: true },
+      { memoryId: notPassed.id, digest: "秘密2" },
+      { memoryId: unpurged.id, digest: "未purge" },
+      { memoryId: live.id, digest: "生きている" },
+    ];
+    const mine = await mem.createRecall(ctx, recallOf(ctx, band));
+    const plain = await mem.createRecall(
+      ctx,
+      recallOf(ctx, [{ memoryId: purged.id, digest: "別の秘密" }]),
+    );
+    const theirs = await mem.createRecall(other, recallOf(other, band));
+    const bandOf = async (c: Ctx, id: string) =>
+      ((await mem.getRecall(c, id))?.indexBand.digestBand ?? []).map((e) => [
+        names.get(e.memoryId),
+        e.digest,
+        "truncated" in e ? e.truncated : "absent",
+      ]);
+    const rest = async () => {
+      const r = (await mem.getRecall(ctx, mine))!;
+      return JSON.stringify([r.query, r.explain, r.indexBand.groups, r.indexBand.totalInScope]);
+    };
+    const restBefore = await rest();
+    const memoryBefore = await mem.get(ctx, purged.id);
+    await mem.scrubPurged!(ctx, [purged.id, unpurged.id, live.id]);
+    const memoryAfter = await mem.get(ctx, purged.id);
+    out[
+      "scrubPurged: the digest band hides only the passed purged rows, drops truncated, leaves other entries, rows and tenants"
+    ] = [
+      await bandOf(ctx, mine),
+      await bandOf(ctx, plain),
+      await bandOf(other, theirs),
+      (await rest()) === restBefore,
+      [
+        memoryAfter?.content,
+        memoryAfter?.digest,
+        iso(memoryAfter?.purgedAt ?? null),
+        memoryAfter?.status,
+      ].join() ===
+        [
+          memoryBefore?.content,
+          memoryBefore?.digest,
+          iso(memoryBefore?.purgedAt ?? null),
+          memoryBefore?.status,
+        ].join(),
+    ];
+    await mem.scrubPurged!(ctx, [purged.id]);
+    out["scrubPurged: running it again leaves the band as it was"] = await bandOf(ctx, mine);
+  }
   return out;
 }
 const EXPECTED: Result = {
@@ -523,6 +747,134 @@ const EXPECTED: Result = {
     [6, false, "2026-02-28T23:59:55.000Z", "2026-02-28T23:59:55.000Z", false],
     0,
   ],
+  "scrubPurged: only forgotten rows with purgedAt lose tags, attributes, claimKey and label links":
+    [
+      true,
+      {
+        purged: ["forgotten", "scrub-purged", "[purged]", [], {}, null, "2026-02-01T00:00:00.000Z"],
+        purgedB: [
+          "forgotten",
+          "scrub-purged-b",
+          "[purged]",
+          [],
+          {},
+          null,
+          "2026-02-01T00:00:00.000Z",
+        ],
+        clean: ["forgotten", "scrub-clean", "[purged]", [], {}, null, "2026-02-01T00:00:00.000Z"],
+        notPassed: [
+          "forgotten",
+          "scrub-not-passed",
+          "[purged]",
+          ["shared"],
+          { owner: "alice" },
+          { subject: "user", predicate: "home_city" },
+          "2026-02-01T00:00:00.000Z",
+        ],
+        regLegacy: [
+          "forgotten",
+          "scrub-reg-legacy",
+          "[purged]",
+          [],
+          {},
+          null,
+          "2026-02-01T00:00:00.000Z",
+        ],
+        floor: ["forgotten", "scrub-floor", "[purged]", [], {}, null, "2026-02-01T00:00:00.000Z"],
+        unpurged: [
+          "forgotten",
+          "scrub-unpurged",
+          "scrub-unpurged",
+          ["shared", "unpurged-only"],
+          { owner: "alice" },
+          { subject: "user", predicate: "home_city" },
+          null,
+        ],
+        activePurgedAt: [
+          "active",
+          "scrub-active",
+          "scrub-active",
+          ["shared"],
+          { owner: "alice" },
+          { subject: "user", predicate: "home_city" },
+          "2026-02-01T00:00:00.000Z",
+        ],
+        foreign: [
+          "forgotten",
+          "scrub-foreign",
+          "[purged]",
+          ["shared"],
+          { owner: "alice" },
+          { subject: "user", predicate: "home_city" },
+          "2026-02-01T00:00:00.000Z",
+        ],
+      },
+      {
+        purged: true,
+        purgedB: true,
+        clean: false,
+        notPassed: false,
+        regLegacy: true,
+        floor: true,
+        unpurged: false,
+        activePurgedAt: false,
+        foreign: false,
+      },
+      true,
+    ],
+  "scrubPurged: proposedCount drops by the links removed, registered and the floor stay": [
+    [
+      [
+        ["floor", "proposed", 0],
+        ["own", "proposed", 1],
+        ["reg", "registered", 2],
+        ["shared", "proposed", 5],
+        ["unpurged-only", "proposed", 1],
+      ],
+      [["shared", "proposed", 1]],
+    ],
+    [
+      [
+        ["floor", "proposed", 0],
+        ["own", "proposed", 0],
+        ["reg", "registered", 2],
+        ["shared", "proposed", 3],
+        ["unpurged-only", "proposed", 1],
+      ],
+      [["shared", "proposed", 1]],
+    ],
+  ],
+  "scrubPurged: idempotent, an empty list does nothing, rows with no residue keep updatedAt": [
+    true,
+    true,
+    true,
+  ],
+  "scrubPurged: a malformed ctx is refused with MalformedIdentifierError":
+    "MalformedIdentifierError",
+  "scrubPurged: the digest band hides only the passed purged rows, drops truncated, leaves other entries, rows and tenants":
+    [
+      [
+        ["purged", "[purged]", "absent"],
+        ["notPassed", "秘密2", "absent"],
+        ["unpurged", "未purge", "absent"],
+        ["live", "生きている", "absent"],
+      ],
+      [["purged", "[purged]", "absent"]],
+      [
+        ["purged", "秘密", true],
+        ["notPassed", "秘密2", "absent"],
+        ["unpurged", "未purge", "absent"],
+        ["live", "生きている", "absent"],
+      ],
+      true,
+      true,
+    ],
+  "scrubPurged: running it again leaves the band as it was": [
+    ["purged", "[purged]", "absent"],
+    ["notPassed", "秘密2", "absent"],
+    ["unpurged", "未purge", "absent"],
+    ["live", "生きている", "absent"],
+  ],
 };
 
 afterAll(async () => {
@@ -544,7 +896,7 @@ function memoryFixture(ctx: Ctx, tag: string) {
 }
 
 describe("保持と掃除の口（InMemory・Postgres）", () => {
-  it("InMemory の保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
+  it("InMemory の保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs・scrubPurged の結果が、Postgres で実測した値（EXPECTED）と一致する", async () => {
     const m = new InMemoryMemoryStore();
     let n = 0;
     const out = await scenario({
@@ -557,6 +909,21 @@ describe("保持と掃除の口（InMemory・Postgres）", () => {
       ev: new InMemoryEventStore(m, m.events),
       ob: new InMemoryOutboxStore(m.outboxJobs),
       fresh: () => ({ tenantId: `retention-inmem-${(n += 1)}` }),
+      mkWith: (ctx, tag, over) => m.createMemory(ctx, { ...memoryFixture(ctx, tag), ...over }),
+      // v1.0.x の purge が残した状態は公開の口では作れない。InMemory は内部の Map を直に書き換える。
+      markPurgedAt: async (ctx, id) => {
+        const internals = m as unknown as {
+          memories: Map<string, { tenantId: string; purgedAt?: Date | null }>;
+        };
+        internals.memories.get(id)!.purgedAt = new Date("2026-02-01T00:00:00.000Z");
+      },
+      setProposedCount: async (ctx, name, count) => {
+        const internals = m as unknown as {
+          labels: Map<string, { proposedCount: number }>;
+          labelKey: (tenantId: string, name: string) => string;
+        };
+        internals.labels.get(internals.labelKey(ctx.tenantId, name))!.proposedCount = count;
+      },
       mk: async (ctx, tag): Promise<Memory> =>
         (await m.createMemoryWithOutbox(ctx, memoryFixture(ctx, tag), ["embed"])).memory,
       rows: async (ctx) =>
@@ -570,7 +937,7 @@ describe("保持と掃除の口（InMemory・Postgres）", () => {
     expect(out).toEqual(EXPECTED);
   });
 
-  it("Postgres の保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs の結果が、EXPECTED と一致する", async () => {
+  it("Postgres の保持日数による event の purge と、purgeExpiredRecalls・purgeCompletedJobs・scrubPurged の結果が、EXPECTED と一致する", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const mem = new PostgresMemoryStore(db);
@@ -581,6 +948,20 @@ describe("保持と掃除の口（InMemory・Postgres）", () => {
       ev: new PostgresEventStore(db) as EventStore,
       ob: new PostgresOutboxStore(db) as OutboxStore,
       fresh: () => ({ tenantId: `retention-pg-${(n += 1)}` }),
+      mkWith: (ctx, tag, over) => mem.createMemory(ctx, { ...memoryFixture(ctx, tag), ...over }),
+      // v1.0.x の purge が残した状態は公開の口では作れない。Postgres は SQL で書き換える。
+      markPurgedAt: async (ctx, id) => {
+        await db.execute(sql`
+          UPDATE memories SET purged_at = '2026-02-01T00:00:00.000Z'
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+        `);
+      },
+      setProposedCount: async (ctx, name, count) => {
+        await db.execute(sql`
+          UPDATE labels SET proposed_count = ${count}
+          WHERE tenant_id = ${ctx.tenantId} AND name = ${name}
+        `);
+      },
       mk: async (ctx, tag): Promise<Memory> =>
         (await mem.createMemoryWithOutbox(ctx, memoryFixture(ctx, tag), ["embed"])).memory,
       rows: async (ctx) => {

@@ -692,12 +692,71 @@ describe("runtime.purge — already_purged の再実行で、v1.1.0 より前の
     expect(calls).toEqual([[memory.id]]);
   });
 
-  it("scrubPurged が無い adapter では飛ばす（残骸の欄も付かない）", async () => {
+  // Fake に `scrubPurged` が無かった頃は、Fake の不在そのものがこの経路の証人だった。Fake が実装したので、明示的に外した store で縛る。
+  it("scrubPurged の無い adapter では Runtime.purge が後始末を飛ばし、already_purged の形は変わらず（残骸の欄も付かず）例外にもならない。残骸はそのまま残る", async () => {
     const { runtime, stores } = buildRuntime();
+    Object.defineProperty(stores.memoryStore, "scrubPurged", {
+      value: undefined,
+      configurable: true,
+    });
+    expect(stores.memoryStore.scrubPurged).toBeUndefined();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
     await runtime.purge(ctx, { memoryId: memory.id });
+    const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+    live.tags = ["legacy-tag"];
+    live.attributes = { owner: "alice" };
+
     const second = await runtime.purge(ctx, { memoryId: memory.id });
+
     expect(second.outcomes).toEqual([{ memoryId: memory.id, kind: "already_purged" }]);
+    expect(live.tags).toEqual(["legacy-tag"]);
+    expect(live.attributes).toEqual({ owner: "alice" });
+  });
+
+  it("Fake の上で already_purged をかけ直すと、v1.0.x の purge が残した残骸（tags・attributes・claim key・目次帯の digest）が実際に消える", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", digest: "秘密の要旨" }),
+    );
+    await runtime.purge(ctx, { memoryId: memory.id });
+    const live = stores.memoryStore.liveRowForTest(ctx, memory.id)!;
+    live.tags = ["legacy-tag"];
+    live.attributes = { owner: "alice" };
+    live.claimKey = { subject: "user", predicate: "home_city" };
+    const recallId = await stores.memoryStore.createRecall(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId: null,
+      query: { text: "q" },
+      budget: null,
+      omitted: [],
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      indexBand: {
+        groups: [],
+        totalInScope: 0,
+        countKind: "exact",
+        digestBand: [{ memoryId: memory.id, digest: "秘密の要旨", truncated: true }],
+      },
+      explain: { stages: [] },
+      returnedMemories: [],
+    });
+
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(second.outcomes).toEqual([{ memoryId: memory.id, kind: "already_purged" }]);
+    const after = await stores.memoryStore.get(ctx, memory.id);
+    expect({ tags: after?.tags, attributes: after?.attributes, claimKey: after?.claimKey }).toEqual(
+      { tags: [], attributes: {}, claimKey: null },
+    );
+    const band = (await stores.memoryStore.getRecall(ctx, recallId))?.indexBand.digestBand;
+    expect(band).toEqual([{ memoryId: memory.id, digest: after!.digest }]);
+    expect(after!.digest).not.toBe("秘密の要旨");
   });
 });
 
