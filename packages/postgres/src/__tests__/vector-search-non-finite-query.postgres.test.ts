@@ -19,19 +19,13 @@ import {
  * `PostgresVectorStore.search`/`searchMany` は、クエリベクトルに有限でない成分
  * （`NaN`・`Infinity`・`-Infinity`）があっても例外を投げず、「比較不能」として扱う。
  *
- * 以前は、`toVectorLiteral` がそのまま `[NaN,0,0]` を作り、pgvector が
- * 「NaN not allowed in vector」／「infinite value not allowed in vector」で拒んで、
- * 未捕捉の `DrizzleQueryError` になっていた。`runtime.recall()` 自体が reject される。
- * 経路は、埋め込み provider がクエリ埋め込みに有限でない成分を返したときだった（当時 provider の
- * 出力は core では検証しなかった）。**2026-09-30（ADR 0393）から、この経路は core が vectorStore へ渡す前に
- * 弾き、`embedding_provider_unavailable` になる**。`search`/`searchMany` を直接呼ぶ場合の
- * 「比較不能」の扱いは変わらない（上の2つの it）。利用者が `recall({ vector })` に渡す値は `RecallQuerySchema`
- * の `z.number()` が `NaN`・`Infinity` とも拒むので、この経路には来ない（実測）。
+ * core は provider のクエリ埋め込みの有限でない成分を、vectorStore へ渡す前に弾き、`embedding_provider_unavailable` に
+ * する。`search`/`searchMany` を直接呼ぶ場合の「比較不能」の扱いは、それとは独立に決まる（上の2つの it）。
+ * 利用者が `recall({ vector })` に渡す値は `RecallQuerySchema` の `z.number()` が `NaN`・`Infinity` とも拒むので、
+ * この経路には来ない。
  *
- * Issue #867 の案B（次元の不一致は比較不能として扱い、`space.dimensions` 長の全 0 ベクトルに
- * 差し替える）と同じ扱いにした。core の `FakeVectorStore` と testkit の `InMemoryVectorStore` は、
- * 有限でない成分を含むクエリの距離を以前から `NaN` として返しており、`recall()` は
- * `score_not_comparable` に数える——Postgres をそれに揃える。
+ * core の `FakeVectorStore` と testkit の `InMemoryVectorStore` は、有限でない成分を含むクエリの距離を `NaN` として
+ * 返し、`recall()` は `score_not_comparable` に数える——Postgres もそれに揃える。
  */
 
 const ctx: Ctx = { tenantId: `non-finite-query-${randomUUID()}` };
@@ -190,8 +184,7 @@ describe("PostgresVectorStore: 有限でない成分を含むクエリは比較�
       const result = await runtime.recall(ctx, { text: "何かのクエリ", association: null });
 
       expect(result.memories).toEqual([]);
-      // 2026-09-30（ADR 0393）: core が provider の問い合わせベクトルの有限性を、vectorStore へ渡す前に
-      // 確かめる。以前はここが score_not_comparable だった（toComparableQuery が全 0 に差し替えていた）。
+      // core が provider の問い合わせベクトルの有限性を、vectorStore へ渡す前に確かめる。
       expect(result.omitted).toContainEqual({
         kind: "stage_skipped",
         stage: "candidate_generation",

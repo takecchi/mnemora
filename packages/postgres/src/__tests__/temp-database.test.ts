@@ -4,7 +4,7 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { DatabaseDrainTimeoutError, dropTempDatabase } from "./temp-database.js";
 
 /**
- * `dropTempDatabase`（ADR 0020）の歯。
+ * `dropTempDatabase` の歯。
  *
  * この歯が守っているもの: 「使い捨てデータベースを消すとき、接続が本当に0本に
  * なったことを実測してから DROP する」という主張そのもの。コメントで済ませず、
@@ -77,7 +77,6 @@ describe("dropTempDatabase（ADR 0020: FORCE を使わず、接続0本を実測�
 
       expect(error).toBeInstanceOf(DatabaseDrainTimeoutError);
       const drainError = error as DatabaseDrainTimeoutError;
-      // メッセージに DB 名と、残っている接続の詳細（pid）が出ていること。
       expect(drainError.message).toContain(DB_NEGATIVE);
       expect(drainError.message).toMatch(/pid=\d+/);
       expect(drainError.remaining.length).toBeGreaterThan(0);
@@ -85,7 +84,6 @@ describe("dropTempDatabase（ADR 0020: FORCE を使わず、接続0本を実測�
       // FORCE へ黙って落ちていない証拠: DB はまだ存在する。
       expect(await databaseExists(DB_NEGATIVE)).toBe(true);
     } finally {
-      // 後始末: 接続を閉じてから、今度こそ FORCE 無しで消す。
       await pool.end();
       await dropTempDatabase(admin(), DB_NEGATIVE);
     }

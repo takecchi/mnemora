@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeUuidCase } from "../mapping.js";
 
-/**
- * `normalizeUuidCase`（`mapping.ts`）は、uuid の形の id だけを小文字にし、形の合わない id は
- * そのまま返す（TSDoc の約束）。DB を使わない純関数の検査。
- *
- * 形の合わない id を小文字にしてしまうと、大文字小文字を区別する綴りの id（`"Not-A-UUID"` など）が、
- * store の入口で別の id に化ける。DB に当てた入口の検査は `uppercase-uuid-store-entry.postgres.test.ts`。
- * この約束は、何でも小文字にしても赤くならなかった（2026-09-28 マージ分の確かめ直しで見つけた穴）。
- */
+/** 形の合わない id を小文字にしてしまうと、大文字小文字を区別する綴りの id（`"Not-A-UUID"` など）が、store の入口で別の id に化ける。何でも小文字にしても赤にならないよう、形の合わない id が変わらないことを見る。 */
 describe("normalizeUuidCase: uuid の形の id だけを小文字にする", () => {
   it("大文字の uuid は小文字になる", () => {
     expect(normalizeUuidCase("0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D")).toBe(

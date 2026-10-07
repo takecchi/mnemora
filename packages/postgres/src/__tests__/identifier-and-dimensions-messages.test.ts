@@ -3,15 +3,6 @@ import { describe, expect, it } from "vitest";
 import { assertSafeIdentifier } from "../embedding-space-table.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
 
-/**
- * 拒否の文面。どちらも「受け付けない値」を名乗り、「受け付ける値」を書く（DB は要らない）。
- *
- * - `assertSafeIdentifier`: 渡された識別子と、使える形（英小文字・数字・`_`、先頭は英小文字か `_`）。
- *   例外の種類は素の `Error` のまま（文字列の形式の誤りは `TypeError`/`RangeError` にしない）。
- * - `registerEmbeddingSpace` の次元: 渡された値と、正の整数が要ること、テーブルを作っていないこと。
- *   種類は数でなければ `TypeError`・数として不正なら `RangeError`（`vector-space-dimensions-error-types.test.ts`）。
- */
-
 const untouchablePool = new Proxy(
   {},
   {

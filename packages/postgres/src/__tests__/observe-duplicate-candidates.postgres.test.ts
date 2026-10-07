@@ -28,15 +28,6 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `ObserveResult.memoryIds` の doc に書いた、同じ本文の抽出候補が複数あるときの振る舞い
- * （`packages/core/src/runtime.ts`）を、Postgres と testkit の InMemory の両方で縛る。
- *
- * - `memoryIds` は候補ごとに1要素・候補の順で、同じ本文の候補には同じ id が入る。
- * - 2件目以降の候補の `provenanceKind`・`confidence`・`subjectId`・`tags` は書かれない。
- * - Memory・`created` イベント・`embed` ジョブは、本文ごとに1つずつだけ。
- */
-
 const llm: LLMProvider = {
   complete: async () => ({ content: "unused" }),
   completeStructured: async (_ctx, req) => {

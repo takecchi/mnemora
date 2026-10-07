@@ -15,18 +15,13 @@ import {
 } from "./test-db.js";
 
 /**
- * `reextract` どうし、`reextract` と `tick` の extract が同時に走ったとき、同じ Observation から
- * 記憶が何件 active になるかを、Postgres で実測して縛る。
- * **今の振る舞いを縛る歯であり、望ましい姿ではない。負債として引き受けている**
- * （ADR 0347「引き受けた負債」の並行の2本の続き。ADR 0347 が実測したのは tick どうしだけで、`reextract` は
- * 扱っていない——`reextract` は決定1の確認を通らない。実測して負債として引き受けた経緯は ADR 0421）。
- * 直すなら、この歯を先に書き換えること。
+ * `reextract` どうし、`reextract` と `tick` の extract が同時に走ったとき、同じ Observation から記憶が何件 active になるかを、Postgres で実測して縛る。
+ * 今の振る舞いを縛る歯であり、望ましい姿ではない。負債として引き受けている。直すなら、この歯を先に書き換えること。
  *
  * 形は `tick-concurrent-extract.postgres.test.ts` に揃える。順序はタイミングではなく門（Promise）で決める:
  * 先に始めた側が門に止まり、その間に後から始めた側が最後まで走り、その後で先の側を進める。
- * 門は2種類ある。**LLM の中**で止めると、`reextract` は LLM の後で既存の記憶を読むので、結果は1件に収束する
- * （2件にならない）。2件になるのは、`reextract` が既存の記憶を読んだ後・**書く直前**（`supersedeWithNewMemories`）で
- * 止めたときと、tick の抽出が LLM の中で止まる（tick は書く前に読み直さない）ときである。両方を縛る。
+ * 門は2種類ある。**LLM の中**で止めると、`reextract` は LLM の後で既存の記憶を読むので、結果は1件に収束する（2件にならない）。
+ * 2件になるのは、`reextract` が既存の記憶を読んだ後・**書く直前**（`supersedeWithNewMemories`）で止めたときと、tick の抽出が LLM の中で止まる（tick は書く前に読み直さない）ときである。両方を縛る。
  * 2本は1本のテストの中で `Promise.all` で走らせる（プロセスを並列に起こさない）。
  */
 

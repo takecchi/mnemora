@@ -7,17 +7,9 @@ import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `real`（float4）の列を Postgres が読み戻す値の実測（Issue: adapter 間の食い違い P6）。
- *
- * 対象の列（`migrations/*.sql` の `real`）: `memories.strength`・`memories.half_life_hours`・
- * `memories.half_life_recalls`・`tenant_settings.default_half_life_hours`・
- * `tenant_settings.default_half_life_recalls`。
- *
- * ⚠ 読み戻す値は `Math.fround(x)` そのものではない。Postgres は float4 を「float4 として一意に決まる最短の
- * 10進表記」で文字列にして返し、ドライバがそれを float64 として読む——だから `0.30000000000000004` は
- * `0.3` に、`720.1` は `720.1` のまま（`Math.fround(720.1)` は `720.0999755859375`）返る。
- * testkit の `in-memory-fixtures-float4-readback.test.ts` は、下の表と**同じ値**を fixture に期待する。
- * 表を変えるときは両方を揃えること。
+ * ⚠ 読み戻す値は `Math.fround(x)` そのものではない。Postgres は float4 を「float4 として一意に決まる最短の10進表記」で文字列にして返し、
+ * ドライバがそれを float64 として読む。だから `0.30000000000000004` は `0.3` に、`720.1` は `720.1` のまま返る（`Math.fround(720.1)` は `720.0999755859375`）。
+ * testkit の `in-memory-fixtures-float4-readback.test.ts` は、下の表と同じ値を fixture に期待する。表を変えるときは両方を揃えること。
  */
 const FLOAT4_READBACK_CASES: ReadonlyArray<readonly [input: number, readBack: number]> = [
   [0.1 + 0.2, 0.3],

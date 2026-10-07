@@ -1,5 +1,4 @@
-// #980 の確かめ直し（#1774）。`PostgresMemoryStore.recordUsageAndReinforce` の契約のうち、
-// 既存の歯（`record-usage-and-reinforce.postgres.test.ts`＝強化が DB に拒否されたら記録も残らない、
+// `PostgresMemoryStore.recordUsageAndReinforce` の契約のうち、既存の歯（`record-usage-and-reinforce.postgres.test.ts`＝強化が DB に拒否されたら記録も残らない、
 // `memory-store-conformance.ts`＝別テナントを拒む・活動時計）が見ていない形。
 //
 // - 強化の対象は「この呼び出しで実際に挿入した id だけ」。再送（全部が既に記録済み）では空配列を返し、強化もしない。
@@ -79,12 +78,10 @@ describe("PostgresMemoryStore.recordUsageAndReinforce: 挿入した id だけを
     expect(afterFirst.lastReinforcedAt).toBe(AT1.toISOString());
     expect(afterFirst.decayBaseSeq).toBe(5);
 
-    // 再送：全部が記録済み
     const r2 = await store.recordUsageAndReinforce(ctx, recallId, [m1.id], AT2, { nowSeq: 7 });
     expect(r2.insertedMemoryIds).toEqual([]);
     expect(await view(m1)).toEqual(afterFirst);
 
-    // 一部だけ新しい
     const r3 = await store.recordUsageAndReinforce(ctx, recallId, [m1.id, m2.id], AT2, {
       nowSeq: 7,
     });
@@ -105,7 +102,6 @@ describe("PostgresMemoryStore.recordUsageAndReinforce: 挿入した id だけを
         nowSeq: 6,
       }),
     ).rejects.toThrow();
-    // m2 は取り消され、m1 は記録済みのまま
     const retry = await store.recordUsageAndReinforce(ctx, recallId, [m1.id, m2.id], AT2, {
       nowSeq: 7,
     });

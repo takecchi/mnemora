@@ -7,16 +7,8 @@ import { PostgresEventStore } from "../event-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresMemoryStore.purgeExpiredEvents` は、同時に呼ばれても **`at` の古い順に `limit` 件**を消す。
- * 対象の SELECT は行を掴まない。別の接続が最古の行を掴んでいても、掃除は掴まれた行を選び、DELETE がそのロックを待つ。
- * 掴まれた行を飛ばして次の行を選ぶ形（`FOR UPDATE SKIP LOCKED`）は、件数は正しいまま、消える行が変わる。
- * そのため採らなかった（#1129 の PR 本文「どの行を消すか（古い順）は変えていない」）。
- *
- * 時間待ちで競わせず、順序は障壁で固定する（`purge-expired-events-by-retention-concurrency.postgres.test.ts` と同じ形）:
- * 1. 別の接続 A が、最古の3行を `SELECT ... FOR UPDATE` で掴んだまま保持する。
- * 2. その間に `purgeExpiredEvents`（limit 3）を起こす。`pg_stat_activity.wait_event_type = 'Lock'` で、掃除がロックを待っていることを確かめる。
- * 3. A を ROLLBACK する。掃除は最古の3行を消す。新しい3行は残る。
- *
+ * 対象の SELECT は行を掴まない。別の接続が最古の行を掴んでいても、掃除は掴まれた行を選び、DELETE がそのロックを待つ。掴まれた行を飛ばして次の行を選ぶ形（`FOR UPDATE SKIP LOCKED`）は、件数は正しいまま消える行が変わるので採らなかった。
+ * 時間待ちで競わせず、順序は障壁で固定する: A が最古の3行を `SELECT ... FOR UPDATE` で掴んだまま保持し、その間に `purgeExpiredEvents`（limit 3）を起こして `pg_stat_activity.wait_event_type = 'Lock'` で待ちを確かめ、A を ROLLBACK する。掃除は最古の3行を消し、新しい3行は残る。
  * `pg_stat_activity` を読むので、直列の群に置く（`vitest.config.mts` の `SERIAL_TEST_FILES`）。
  */
 
@@ -87,7 +79,6 @@ describe("purgeExpiredEvents: 同時に呼ばれたとき、どの行を消す�
       .transaction(async (tx) => {
         const { rows } = await tx.execute(sql`SELECT pg_backend_pid()::int AS pid`);
         const holderPid = (rows[0] as { pid: number }).pid;
-        // A: 最古の3行を掴んだまま保持する。
         await tx.execute(sql`
           SELECT id FROM memory_events
           WHERE tenant_id = ${ctx.tenantId}

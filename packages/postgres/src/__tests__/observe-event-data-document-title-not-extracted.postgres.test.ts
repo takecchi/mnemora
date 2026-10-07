@@ -21,17 +21,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * `observe` の `event` の `data` と `document` の `title` は、**既定では**抽出（LLM）のプロンプトにも、LLM が
- * 失敗したときの全文フォールバックの Memory の本文にも入らない（既定の振る舞い。`packages/core/src/observation.ts`
- * の TSDoc、Issue #1185）。testkit の fixture と `@mnemora/postgres` の両方で縛る。
- *
- * ⚠ Issue #1185 は「渡すかどうか」を **opt-in**（`extractData`/`extractTitle`、既定 `false`）で決めた
- * （オーナー判断。[ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)）。
- * この歯が縛るのは opt-in しなかった既定の呼び出しだけである——opt-in したときの振る舞いは
- * `observe-event-data-document-title-extract-opt-in.postgres.test.ts` が縛る。直すときは、この歯ごと
- * 書き換えること。
- */
+/** この歯が縛るのは opt-in しなかった既定の呼び出しだけで、opt-in したときの振る舞いは `observe-event-data-document-title-extract-opt-in.postgres.test.ts` が縛る。直すときは、この歯ごと書き換えること。 */
 
 const ctx: Ctx = { tenantId: "observe-data-title-1185" };
 const hashContent = (content: string) => `sha256(${content})`;

@@ -6,28 +6,14 @@ import { buildLexicalSearchSelect } from "../lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #878: `PostgresLexicalStore.search` が `query` を語に分解する仕事
- * （`mnemora_lexical_query_tsqueries`、`migrations/0009_*.sql`）を、候補行1つに
- * つき1回だけ行い、行数ぶん繰り返さないことの実測。
+ * 時間ではなく `EXPLAIN` の計画の形で見る（CI で環境ごとの秒数のブレに揺れないため）。`qc`（`mnemora_lexical_query_tsqueries` を計算する CTE、`Subplan Name: "CTE qc"`）の
+ * `Actual Loops` は、候補行が何行一致しても常に `1` でなければならない。`1` より大きければ、候補行ごとに `query` の分解をやり直している。
  *
- * **時間ではなく `EXPLAIN` の計画の形で見る**（CI で環境ごとの秒数のブレに揺れない
- * ため）——`buildLexicalSearchSelect` の doc が「`WITH qc AS MATERIALIZED (...)` で
- * 1回だけ計算する」と書いている構造そのものを、`EXPLAIN (ANALYZE, FORMAT JSON)` の
- * `Actual Loops` で裏取りする。`qc`（`mnemora_lexical_query_tsqueries` を計算する
- * CTE の生成ノード、`Subplan Name: "CTE qc"`）の `Actual Loops` は、候補行が何行
- * 一致しても常に `1` でなければならない——`1` より大きければ、候補行ごとに
- * `query` の分解をやり直している（Issue #878 が直す前の形に戻っている）ことを意味する。
- *
- * ⚠ この歯は「`qc` という名前の `WITH` 句がある」という実装の形そのものを見ている。
- * `buildLexicalSearchSelect` が別の実装（例: 別名の CTE、別の計算共有の手段）に
- * 変わったら、この歯も追随して直す必要がある——`lexical-store-index.test.ts` の
- * `EXPLAIN` の歯と同じ立場（実装の形を見る歯であって、`LexicalStore` の契約を
- * 見る歯ではない）。
+ * ⚠ この歯は「`qc` という名前の `WITH` 句がある」という実装の形そのものを見ている。`buildLexicalSearchSelect` が別の実装に変わったら、この歯も追随して直す。
  */
 
 const TENANT = "lexical-coverage-computed-once-tenant";
-// 候補行が複数あることだけを確かめたい歯であり、行数そのものに意味は無い
-// （`lexical-store-index.test.ts` のような索引選択の実測ではないため、大きな行数は要らない）。
+// 候補行が複数あることだけを確かめたい歯であり、行数そのものに意味は無い（索引選択の実測ではないので、大きな行数は要らない）。
 const ROW_COUNT = 8;
 
 async function seedMatchingMemories(pool: Pool, tenant: string, rowCount: number): Promise<void> {
@@ -108,7 +94,6 @@ describe("PostgresLexicalStore.search: query の分解は候補行ごとにや�
     const select = buildLexicalSearchSelect("shared vocabulary token appears row", {
       limit: 50,
       filter: { tenantId: ctx.tenantId, status: ["active", "contested"] },
-      // `PostgresLexicalStore.search` は `ctx.tenantId` も渡す（Issue #1050）——同じ形で見る。
       ctxTenantId: ctx.tenantId,
     });
     const result = await db.execute(sql`EXPLAIN (ANALYZE, FORMAT JSON) ${select}`);

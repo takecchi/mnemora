@@ -8,11 +8,6 @@ import {
 import { closePostgresClient, createPostgresClient } from "../client.js";
 import { EXTENSION_LOCK_KEY } from "../migrate.js";
 
-/**
- * `@mnemora/postgres` の公開の口の TSDoc が約束していて、どのテストも縛っていなかった振る舞い
- * （4回目の TSDoc の棚卸しの B3・B5・B7）。DB には繋がない。
- */
-
 function recordingErrors() {
   const calls: string[] = [];
   const errors: AdvisoryLockErrorFactories = {

@@ -39,49 +39,36 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
 /**
- * store の公開の口に、同じ境界の入力を2実装（`@mnemora/postgres` と `@mnemora/testkit/fixtures`）へ流し、
- * 戻り値と状態の差が**許可リストの差だけ**であることを縛る（PR #1252 の差分の探りを常設にしたもの）。
+ * store の公開の口に同じ境界の入力を2実装（`@mnemora/postgres` と `@mnemora/testkit/fixtures`）へ流し、
+ * 戻り値と状態の差が**許可リストの差だけ**であることを縛る。
  *
- * - 当てるのは、store を直接呼ぶ境界の入力である。Runtime の正しい入力の操作列は
- *   `write-diff-fuzz.postgres.test.ts` が見るので、ここでは重ねない。
- * - id を取る口には5つの値（同じテナントの在る id・形の正しい無い id・形の崩れた id・空文字・他テナントの id）を
- *   当てる。あわせて、空配列・重複・壊れたベクトル・空の文字列などの境界を当てる（下の `scenarios`）。
- * - 比べるもの: 戻り値（投げたか・返した値。id・テナント・時刻は別名に伏せ、鍵を並べ替える）と、その後の状態
- *   （自分のテナントの記憶2件の status・参照・本文・強化・埋め込みの状態、イベントの kind と memoryId、
- *   呼んだテナントで記憶2件と他テナントの記憶の id が持つベクトル、他テナントの記憶・イベント・ベクトル）。
- *   ⚠ 例外の文面は比べない。種類も、interface の TSDoc が約束する4クラス（`ContestedWithoutCompanionError`・
- *   `MemoryStatusConflictError`・`MemoryPurgeConflictError`・`OutboxLeaseConflictError`）のときだけ比べる——クラス名と
- *   約束の欄（id は別名に、時刻は `<t>` に伏せる）。それ以外の例外は「投げた」とだけ比べる（DB の例外と fixture の
- *   `Error` は顔が違う。`packages/testkit/src/fixtures.ts` の冒頭）。
- * - 約束の4クラスを出す場面は、(口, クラス) の13組すべてを `TYPED_THROWS` に持ち、2実装とも約束のクラスと欄で
- *   投げることを縛る（差が出ないだけでは、2実装が同じく約束を破っていても緑になるため）。
+ * ⚠ 例外の文面は比べない。種類も、interface の TSDoc が約束する4クラス（`ContestedWithoutCompanionError`・
+ * `MemoryStatusConflictError`・`MemoryPurgeConflictError`・`OutboxLeaseConflictError`）のときだけ、クラス名と
+ * 約束の欄を比べる。それ以外の例外は「投げた」とだけ比べる（DB の例外と fixture の `Error` は顔が違う）。
+ * 約束の4クラスを出す場面は、(口, クラス) の13組すべてを `TYPED_THROWS` に持つ（差が出ないだけでは、
+ * 2実装が同じく約束を破っていても緑になるため）。
  *
  * 🔴 **許可リスト（`DOCUMENTED_DIFFERENCES`）は、doc に「違う」と書いてある差と、揃える先が未決で Issue に在る差だけを持つ。**
- * - 許可リストの外で差が出たら落ちる。直すか（fixture は Postgres を写す）、doc か Issue に書いてから足すこと。
- * - 許可リストの場面で差が出なくなったら（揃ったら）、それも落ちる（リストが古い）。消すこと。
- * - 各項目は、doc に書いた**向き**（どちらが投げ、どちらが返すか）と、ベクトルを書く場面では書いた後に
- *   保存されているベクトルを持つ。差が残っていても、向きや保存の中身が doc と違えば落ちる。
+ * - 許可リストの外で差が出たら落ちる。許可リストの場面で差が出なくなったら（揃ったら）、それも落ちる（リストが古い）。
+ * - 各項目は、doc に書いた**向き**と、ベクトルを書く場面では書いた後に保存されているベクトルを持つ。
+ *   差が残っていても、向きや保存の中身が doc と違えば落ちる。
  */
 
-/** 戻り値の形（`Outcome.result` から読む）。 */
 type ResultKind = "throws" | "returns-null" | "returns-value";
 
 /** `snapshotState` の `vectors` の1件（成分は有限でなければ文字列にして持つ。JSON で `NaN` が `null` に潰れるため）。 */
 type StoredVector = Array<number | string> | null;
 
 interface DocumentedDifference {
-  /** どこに「違う」と書いてあるか（doc の節、または揃える先が未決の Issue）。 */
   where: string;
   postgres: ResultKind;
   fixture: ResultKind;
-  /** 書いた後に、呼んだテナントで `memory` の別名が持つベクトル（無ければ `null`）。 */
   vector?: { memory: "SELF" | "OTHER"; postgres: StoredVector; fixture: StoredVector };
 }
 
 const BROKEN_VECTOR_DOC =
   "VectorStore.upsert の TSDoc の adapter ごとの表（docs/architecture.md §5.5 の 2026-09-27 追記も同じ）";
 
-/** 場面の名前 → doc に書いた差（向きと、書いた後のベクトル）。 */
 const DOCUMENTED_DIFFERENCES: Readonly<Record<string, DocumentedDifference>> = {
   "vector.upsert(self,[])": {
     where: `空のベクトル: Postgres は拒んで前の埋め込みを残し、fixture は保存する（${BROKEN_VECTOR_DOC}。Issue #1070 はこれを doc に書いて閉じた）`,
@@ -113,7 +100,6 @@ type Backend = "pg" | "testkit";
 let scenarioSeq = 0;
 const runTag = Math.random().toString(36).slice(2, 7);
 
-/** recall の記録の既定の形（中身は使わない。境界の場面は一部の欄だけを差し替える）。 */
 function newRecallRecord(ctx: Ctx): NewRecallRecord {
   return {
     tenantId: ctx.tenantId,
@@ -228,9 +214,9 @@ const ID_VALUES: Record<string, (h: Kit, target: Target) => string> = {
   self: (h, target) => ({ m: h.m.id, obs: h.obs.id, ev: h.ev.id })[target],
   missing: () => "00000000-0000-4000-8000-000000000000",
   malformed: () => "not-a-uuid",
-  // #1289 A10・#1195 B8: 長さは uuid と同じ36文字だが、hex でない（長さだけで形を判じる実装を落とす）。
+  // 長さは uuid と同じ36文字だが、hex でない（長さだけで形を判じる実装を落とす）。
   nonHex36: () => "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
-  // #1289 A11・#1195 B9: 有効な uuid の前後に余分が付いた値（`^`・`$` を欠いた正規表現を落とす）。
+  // 有効な uuid の前後に余分が付いた値（`^`・`$` を欠いた正規表現を落とす）。
   padded: (h, target) => `xx${ID_VALUES.self!(h, target)}yy`,
   empty: () => "",
   other: (h, target) => ({ m: h.om.id, obs: h.oobs.id, ev: h.oev.id })[target],
@@ -384,7 +370,7 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
   add(`restoreSupersededBy(self,{only:[${idKind}]})`, (h) =>
     h.s.ms.restoreSupersededBy(h.ctx, h.m.id, { at: new Date() }, { onlyMemoryIds: [id(h)] }),
   );
-  // #1195 B2: preview 側にも restore と同じ形の場面（形の崩れた id は群に居ないものとして、投げない）。
+  // preview 側にも restore と同じ形の場面（形の崩れた id は群に居ないものとして、投げない）。
   add(`previewRestoreSupersededBy(self,{only:[${idKind}]})`, (h) =>
     h.s.ms.previewRestoreSupersededBy(h.ctx, h.m.id, { onlyMemoryIds: [id(h)] }),
   );
@@ -447,7 +433,7 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
   add(`outbox.complete(${idKind},1)`, (h) => h.s.os.complete(h.ctx, id(h), 1));
   add(`outbox.fail(${idKind},1)`, (h) => h.s.os.fail(h.ctx, id(h), "e", 1));
 }
-// #1195 B6': onlyMemoryIds が空配列なら絞り込みあり・対象0件（群全体を戻さない）。群が実在する場面で当てる。
+// onlyMemoryIds が空配列なら絞り込みあり・対象0件（群全体を戻さない）。群が実在する場面で当てる。
 add("restoreSupersededBy(group,{only:[]})", async (h) => {
   await h.s.ms.updateStatus(h.ctx, h.m2.id, "superseded", { supersededById: h.m.id });
   return h.s.ms.restoreSupersededBy(h.ctx, h.m.id, { at: new Date() }, { onlyMemoryIds: [] });
@@ -570,7 +556,6 @@ add("purgeMemory(self)（forgotten でない）", (h) =>
   ),
 );
 
-// ---- 単一の id を取らない口（#1255 の後に足した）----
 const scope = (h: Kit, extra: Record<string, unknown> = {}) =>
   ({ ...extra }) as Parameters<Stores["ms"]["aggregateScope"]>[1];
 add("requeueEmbedJobs(statuses:[])", (h) =>
@@ -591,14 +576,14 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
       digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m")] },
     }),
   );
-  // Issue #1262: uuid の形でない id が混ざっても、ほかの id の除外は今までどおり効く（形の崩れた id だけが
+  // uuid の形でない id が混ざっても、ほかの id の除外は今までどおり効く（形の崩れた id だけが
   // 「無いもの」になる）。`self` の場面では、自分の記憶は目次帯から外れ、件数からも引かれる。
   add(`aggregateScope(digestBand.excludeMemoryIds:[${idKind},malformed])`, (h) =>
     h.s.ms.aggregateScope(h.ctx, scope(h), {
       digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m"), "not-a-uuid"] },
     }),
   );
-  // #1289 S3: scopeAggregate:"skip" の経路（別の SQL）でも、形の崩れた id は投げず、ほかの除外は効く。
+  // scopeAggregate:"skip" の経路（別の SQL）でも、形の崩れた id は投げず、ほかの除外は効く。
   add(`aggregateScope(skip,digestBand.excludeMemoryIds:[${idKind},malformed])`, (h) =>
     h.s.ms.aggregateScope(h.ctx, scope(h), {
       scopeAggregate: "skip",
@@ -723,7 +708,7 @@ add("aggregateScope(taxonomyGroupCandidates:[])", (h) =>
 add("aggregateScope(digestBand.limit:0)", (h) =>
   h.s.ms.aggregateScope(h.ctx, scope(h), { digestBand: { limit: 0, excludeMemoryIds: [] } }),
 );
-// #1289 A6: 有効な id が複数あるときの除外（形の崩れた id を落としても、有効な2件は両方とも除外される）。
+// 有効な id が複数あるときの除外（形の崩れた id を落としても、有効な2件は両方とも除外される）。
 for (const skip of [false, true]) {
   const mode = skip ? "skip," : "";
   add(`aggregateScope(${mode}digestBand.excludeMemoryIds:[self,self2,malformed])`, (h) =>
@@ -886,7 +871,6 @@ add("event.list({since > until})", (h) =>
 );
 add("event.list({kind:'events_purged'})", (h) => h.s.es.list(h.ctx, { kind: "events_purged" }));
 
-// ---- 検索の filter の日時・通し番号（#1255 の後に足した）----
 for (const field of ["occurredAfter", "occurredBefore", "validAt", "decayFloorAtAfter"] as const) {
   add(`vector.search(filter.${field}: Invalid Date)`, (h) =>
     h.s.vs.search(h.ctx, SPACE, [1, 0, 0], {
@@ -923,7 +907,6 @@ add("findActiveByClaimKey(validUntil: Invalid Date)", (h) =>
   }),
 );
 
-// ---- TenantSettingsStore（#1165・#1171 の外側。書いた後に全部の読みの口を並べて比べる）----
 const readAllSettings = async (h: Kit, ctx: Ctx = h.ctx) => ({
   halfLifeHours: await h.s.ts.getDefaultHalfLifeHours(ctx),
   retention: await h.s.ts.getEventRetention(ctx),
@@ -977,7 +960,6 @@ add("tenantSettings: 書いたのは別のテナント（読みは変わらな�
   return readAllSettings(h);
 });
 
-// ---- createRecall（makeKit の用意でだけ呼んでいた口。書いた後に getRecall と活動時計で読み戻す）----
 const recallWith = async (h: Kit, override: Partial<NewRecallRecord>) => {
   const recallId = await h.s.ms.createRecall(h.ctx, { ...newRecallRecord(h.ctx), ...override });
   return {
@@ -1014,7 +996,7 @@ add("createRecall(returnedMemories:[other])", (h) =>
   }),
 );
 
-// ---- claimBatch（時刻の境界は #1196・#1237 が持つので外す。now は十分先・leaseMs は固定）----
+// claimBatch は now を十分先・leaseMs を固定にする（時刻の境界は別のテストが持つ）。
 const claimWith = async (h: Kit, opts: Partial<ClaimOutboxJobsOptions>) => {
   await h.s.ms.createMemoryWithOutbox(
     h.ctx,
@@ -1032,7 +1014,6 @@ const claimWith = async (h: Kit, opts: Partial<ClaimOutboxJobsOptions>) => {
   const byKind = (jobs: OutboxJobRecord[]) =>
     jobs.map((j) => [j.kind, j.claimedBy, j.attempts]).sort();
   const claimed = byKind(await claim(opts));
-  // 残りを取る（同じ呼び手の2回目。リースは切れていないので、1回目に取った行は出ない）。
   const rest = byKind(await claim({}));
   return { claimed, rest };
 };
@@ -1047,7 +1028,6 @@ for (const limit of [0, 1, 2 ** 53, -1, 1.5, Number.NaN, 2 ** 63]) {
 add("claimBatch(claimedBy:'')", (h) => claimWith(h, { claimedBy: "" }));
 add("claimBatch(claimedBy:NUL)", (h) => claimWith(h, { claimedBy: "w\u0000" }));
 
-// ---- 約束の4クラスを出す場面（下の `TYPED_THROWS`。上の場面で足りている組は、そちらを使う）----
 const contestedNew = (h: Kit, contentHash: string) =>
   buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash, status: "contested" });
 add("updateStatus(self,contested)", (h) => h.s.ms.updateStatus(h.ctx, h.m.id, "contested"));
@@ -1135,8 +1115,8 @@ add("outbox.complete(claim 済み,attempts 違い)", async (h) =>
 add("outbox.fail(claim 済み,attempts 違い)", async (h) =>
   h.s.os.fail(h.ctx, await jobOf(h, true), "e", 2),
 );
-// Issue #1292（決まった件）: 終端済みの行に違う expectedAttempts を渡したときは、冒頭の契約と実装の側
-// （attempts が違えば投げる）を正とした。2実装ともそう動くことを縛る。
+// 終端済みの行に違う expectedAttempts を渡したときは、冒頭の契約と実装の側（attempts が違えば投げる）を正とし、
+// 2実装ともそう動くことを縛る。
 add("outbox.complete(終端済み,attempts 違い)", async (h) => {
   const jobId = await jobOf(h, false);
   await h.s.os.fail(h.ctx, jobId, "e", 0);

@@ -10,16 +10,13 @@ import {
 } from "./test-db.js";
 
 /**
- * ADR 0389（ADR 0375 決定6・「引き受けた負債」1 の解消）:
- * `PostgresMemoryStore.purgeMemory` が `recalls.index_band` の目次帯を書き換える `UPDATE` の
- * `WHERE` 句が、`migrations/0030_recalls_digest_band_index.sql` の式 GIN 索引
- * `idx_recalls_digest_band` を使うことを縛る。索引が無い（または式がずれて使えない）と、
- * テナントの `recalls` を全部読む Seq Scan / `idx_recalls_by_subject` 経由の全行フィルタに戻る。
+ * `PostgresMemoryStore.purgeMemory` が `recalls.index_band` の目次帯を書き換える `UPDATE` の `WHERE` 句が、
+ * `migrations/0030_recalls_digest_band_index.sql` の式 GIN 索引 `idx_recalls_digest_band` を使うことを縛る。
+ * 索引が無い（または式がずれて使えない）と、テナントの `recalls` を全部読む Seq Scan / `idx_recalls_by_subject` 経由の全行フィルタに戻る。
  *
- * ⚠ 専用の接続で `enable_seqscan = off` にする——planner の見積もりの揺れに左右されないため。
- * 索引が無ければ、この設定でも `idx_recalls_by_subject`（`tenant_id` 先頭）へ倒れるだけで
- * `idx_recalls_digest_band` は使えない（索引を抜く・式を変える変異でこの歯は赤になる）。
- * 索引が既定の planner 設定でも選ばれること（10万行、対象1%）は ADR 0389 の実測が示している。
+ * ⚠ 専用の接続で `enable_seqscan = off` にする。planner の見積もりの揺れに左右されないため。
+ * 索引が無ければ、この設定でも `idx_recalls_by_subject`（`tenant_id` 先頭）へ倒れるだけで `idx_recalls_digest_band` は使えない
+ * （索引を抜く・式を変える変異でこの歯は赤になる）。
  */
 
 afterAll(async () => {
@@ -31,7 +28,7 @@ const TARGET = "11111111-1111-4111-8111-111111111111";
 
 async function seedRecalls(tenantId: string, rows: number): Promise<void> {
   const { pool } = await getTestClient();
-  // 1% の行が TARGET を目次帯に載せている（ADR 0375 決定6 の実測と同じ形）。
+  // 1% の行が TARGET を目次帯に載せている。
   await pool.query(
     `INSERT INTO recalls (tenant_id, subject_id, query, usage, index_band, explain, returned_memories)
      SELECT $1, 'subj' || (g % 50), '{"text":"q"}'::jsonb, '{}'::jsonb,
@@ -126,7 +123,6 @@ describe("recalls.index_band の digestBand の書き換えは、式 GIN 索引�
       const after = await readIdxScan();
       expect(after, `idx_scan: before=${before} after=${after}`).toBeGreaterThan(before);
 
-      // 結果は変わらない: 対象の 200 行のエントリだけがトゥームストーンになる。
       const { rows } = await pool.query<{ n: string; tomb: string }>(
         `SELECT count(*) FILTER (WHERE index_band->'digestBand' @> jsonb_build_array(jsonb_build_object('memoryId', $2::text))) AS n,
                 count(*) FILTER (WHERE index_band->'digestBand'->0->>'digest' = '[purged]') AS tomb

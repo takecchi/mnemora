@@ -22,13 +22,8 @@ import {
 } from "./test-db.js";
 
 /**
- * `ObserveEventInput.data` の TSDoc の表（JSON で往復しない値が、`@mnemora/postgres` と testkit の fixture で
- * どう読み戻るか）の歯（53巡目）。**この表には、これまで歯が無かった。**
- * `observe()` は `data` を `payload` にそのまま入れて `createObservation` へ渡すので、口は `createObservation`
- * と `getObservation` で縛る（`extractData` を通した本文の作られ方は、最後の `describe` で `observe()` を通して縛る）。
- *
- * ⚠ 望ましい姿の主張ではない。TSDoc が「揃える約束はしていない」と書いている今の振る舞いである
- * （Issue #1076）。変えるときは TSDoc の表とこの歯を一緒に書き換えること。
+ * `observe()` は `data` を `payload` にそのまま入れて `createObservation` へ渡すので、口は `createObservation` と `getObservation` で縛る（`extractData` を通した本文の作られ方は、最後の `describe` で `observe()` を通して縛る）。
+ * ⚠ 望ましい姿の主張ではない。TSDoc が「揃える約束はしていない」と書いている今の振る舞いなので、変えるときは TSDoc の表とこの歯を一緒に書き換えること。
  */
 
 const ctx: Ctx = { tenantId: "observation-payload-json-roundtrip" };
@@ -115,7 +110,6 @@ describe.each(KITS)("%s: payload（event の data）の JSON で往復しない�
     const kit = await makeKit();
     const input = eventObservation({ a: 1n });
     await expect(kit.ms.createObservation(ctx, input)).rejects.toBeInstanceOf(TypeError);
-    // 書いていないので、同じ externalId で作り直すと新しい行になる。
     const retried = await kit.ms.createObservationWithOutbox(
       ctx,
       { ...input, payload: { name: "n", data: {} } },
@@ -124,7 +118,6 @@ describe.each(KITS)("%s: payload（event の data）の JSON で往復しない�
     expect(retried.created).toBe(true);
   });
 
-  // TSDoc の表に無かった行（53巡目で足し、ADR 0486 で fixture を Postgres に揃えた。どちらも同じ結果）。
   it("関数・Symbol の値: どちらも欄ごと消える（配列の中なら null）", async () => {
     const kit = await makeKit();
     for (const value of [() => 1, Symbol("s")]) {
@@ -137,9 +130,7 @@ describe.each(KITS)("%s: payload（event の data）の JSON で往復しない�
     const kit = await makeKit();
     expect(await roundtrip(kit, { a: { toJSON: () => "z" } })).toEqual({ a: "z" });
     expect(await roundtrip(kit, { toJSON: () => 1 })).toBe(1);
-    // toJSON には欄の名前が渡る（JSON.stringify と同じ）。
     expect(await roundtrip(kit, { k: { toJSON: (key: string) => key } })).toEqual({ k: "k" });
-    // toJSON の戻り値の中の関数・Symbol・NaN も、同じ規則で扱う。
     expect(await roundtrip(kit, { a: { toJSON: () => ({ f: () => 1, b: 2 }) } })).toEqual({
       a: { b: 2 },
     });

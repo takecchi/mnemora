@@ -23,15 +23,12 @@ import {
 } from "./test-db.js";
 
 /**
- * reflect と reextract が何を材料にし、作った Memory に何を引き継ぐかを、今の振る舞いのまま縛る
- * （`ReflectTarget` と `Runtime.reextract` の TSDoc の 2026-09-27 追記）。約束を足すものではない。
+ * reflect と reextract が何を材料にし、作った Memory に何を引き継ぐかを、今の振る舞いのまま縛る。
  *
  * - reflect の `{ query }` は、連想枠で返った記憶も材料に採る。
- * - reflect は、いまの時点で有効期間の外にある記憶を材料にしない。内省の Memory は今どおり有効期間を
- *   持たない（Issue #1188。2026-09-29 に「`{ memoryIds }` は有効期間を見ない」から変えた——3つの形
- *   すべての網羅は `reflect-validity-gate.test.ts`（`packages/core`）と
- *   `reflect-target-selection.postgres.test.ts` を見ること。ここでは `{ memoryIds }` の1形だけを、
- *   reextract との組み合わせの文脈で確かめる）。
+ * - reflect は、いまの時点で有効期間の外にある記憶を材料にしない。内省の Memory は今どおり有効期間を持たない
+ *   （3つの形すべての網羅は `reflect-validity-gate.test.ts`（`packages/core`）と `reflect-target-selection.postgres.test.ts`。
+ *   ここでは `{ memoryIds }` の1形だけを、reextract との組み合わせの文脈で確かめる）。
  * - reextract の新しい Memory は、Observation の有効期間を引き継ぎ、`claimKey` は常に null である。
  * 2実装（Postgres・testkit の InMemory）で同じ結果になることも見る。
  */

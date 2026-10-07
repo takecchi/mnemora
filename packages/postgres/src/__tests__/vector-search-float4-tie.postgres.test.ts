@@ -13,7 +13,7 @@ import {
 
 /**
  * ベクトルを float4 で比べる——pgvector は成分を float4 で持ち、testkit の fixture も保存するベクトルとクエリを
- * `Math.fround` で丸める（Issue #1268）。そのため、何が「距離の同点」になるかが2実装で同じになる。
+ * `Math.fround` で丸める。そのため、何が「距離の同点」になるかが2実装で同じになる。
  *
  * A と B は float64 では A のほうがクエリに近いが、float4 に丸めると同じベクトルになる。B のほうが新しい。
  * どちらの実装でも距離が同点になり、tie-break（`recorded_at` の新しい順）で B が先に来る。

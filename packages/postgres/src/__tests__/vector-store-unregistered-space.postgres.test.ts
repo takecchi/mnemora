@@ -5,14 +5,14 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0433 決定3: 登録していない埋め込み空間（`registerEmbeddingSpace` を呼んでいない
+ * 登録していない埋め込み空間（`registerEmbeddingSpace` を呼んでいない
  * `memory_embeddings_<space>` が無い空間）で vector store を引くと、生の
  * `relation "memory_embeddings_..." does not exist`（SQLSTATE 42P01、kind なしの `Error`）ではなく、
  * `kind: "embedding_space_not_registered"` を持つ `EmbeddingSpaceNotRegisteredError` が出る。
  * 原因の Error は `cause` に残る。
  *
- * 投げる入力そのものは変えない: 形式不正な id だけの `delete`・`getVectors` と、空の `searchMany`
- * は、これまでどおり空間が未登録でも例外にならない。
+ * 投げる入力そのものは増やさない: 形式不正な id だけの `delete`・`getVectors` と、空の `searchMany`
+ * は、空間が未登録でも例外にならない。
  */
 
 const UNREGISTERED: EmbeddingSpaceId = {

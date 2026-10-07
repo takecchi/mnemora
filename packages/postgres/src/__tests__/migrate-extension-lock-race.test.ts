@@ -5,26 +5,10 @@ import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #757 を再現する: schema の違う `runMigrations` を同時にまっさらな DB へ流すと、
- * ADR 0057 決定6により advisory lock のキーが schema ごとに別になるため互いを待たず、
- * `CREATE EXTENSION IF NOT EXISTS` 同士が `pg_extension_name_index`（`extname` 単独の
- * 一意制約——拡張はスキーマではなく DB 全体に1つしか置けない）で衝突する。
- *
- * 前任の測定（Issue #757 コメント、`child_process.spawn` + IPC バリアで別プロセスを揃えた
- * 実測）と同じ組を、`migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` が
- * 既にこのリポジトリで使っている方式（同一プロセス内、`Pool` を分けて `Promise.all` で
- * 本当に並行にクエリを送る——advisory lock はセッション単位の名前空間なので、OS
- * プロセスを分けなくても DB 側では真に並行なセッション競合になる）で確かめる。
- * まっさらな DB でないと拡張の初回作成という条件を満たさないため、**試行ごとに
- * 新しいデータベースを作って捨てる**（`createBlankDatabase` / `dropTempDatabase`、
- * `migrate-concurrency.test.ts` と同じ ADR 0020 の作法）。
- *
- * 試行回数は Issue #757 の25/25という前任の実測ほど多くは取らない——CI 時間を
- * 不当に伸ばさないため（`migrate-concurrency.test.ts` 冒頭のコメントと同じ配慮）。
- * ここでは ADR 0018 追記（Issue #755）が使った N=8 に合わせ、各組8試行とする。
- * 前任の実測が決定的（ほぼ100%失敗）だったため、8試行でも赤を示すには十分なはず
- * ——実際に赤くなるかどうかは、このテストを未修正のコードに当てて実測する
- * （PR 本文に出力を残す）。
+ * schema の違う `runMigrations` を同時にまっさらな DB へ流すと、advisory lock のキーが schema ごとに別になるので互いを待たず、`CREATE EXTENSION IF NOT EXISTS` 同士が
+ * `pg_extension_name_index`（`extname` 単独の一意制約。拡張はスキーマではなく DB 全体に1つしか置けない）で衝突する。
+ * 同一プロセス内で `Pool` を分けて `Promise.all` で本当に並行にクエリを送る（advisory lock はセッション単位なので、OS プロセスを分けなくても DB 側では真に並行なセッション競合になる）。
+ * まっさらな DB でないと拡張の初回作成という条件を満たさないので、試行ごとに新しいデータベースを作って捨てる。試行回数は CI 時間を伸ばさないよう各組8回とする。
  */
 
 const DB_PREFIX = "mnemora_ext_lock_race";
@@ -108,7 +92,6 @@ describe("runMigrations: schema が違う同時呼び出しでの CREATE EXTENSI
     }
   });
 
-  // Issue #757 の表「未指定 + 指定 s1」（前任の実測: 25/25 失敗）。
   it("未指定 + 指定 s1 を同時に migrate しても、CREATE EXTENSION が競合しない", async () => {
     const { failedTrials, failures } = await runTrials(`${DB_PREFIX}_unspec_s1`, [
       (pool) => runMigrations(pool),
@@ -120,7 +103,6 @@ describe("runMigrations: schema が違う同時呼び出しでの CREATE EXTENSI
     ).toBe(0);
   }, 180_000);
 
-  // Issue #757 の表「指定 s1 ＋ 指定 s2」（前任の実測: 25/25 失敗）。
   it("指定 s1 + 指定 s2 を同時に migrate しても、CREATE EXTENSION が競合しない", async () => {
     const { failedTrials, failures } = await runTrials(`${DB_PREFIX}_s1_s2`, [
       (pool) => runMigrations(pool, undefined, { schema: "s1" }),

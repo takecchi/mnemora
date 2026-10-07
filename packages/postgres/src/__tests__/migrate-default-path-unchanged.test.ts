@@ -6,73 +6,16 @@ import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles, runMigrations } from "../mi
 import { stripSqlComments } from "./sql-comments.js";
 
 /**
- * `packages/postgres/src/bin/migrate.ts` の doc コメントに書かれた主張を、
- * DB 無しで実際に検査する歯（Issue #107）。
+ * `runMigrations` が触る面は `pool.query(...)` と `pool.connect()`（返す client の `query` / `release` / `on` / `removeListener`）だけなので、その2つを記録するだけの偽の `Pool` を作り、
+ * A: `runMigrations(fakeA)`（引数1つ）と B: `runMigrations(fakeB, undefined, { schema: undefined, extensionSchema: undefined })` の発行 SQL 列が完全に一致することを確かめる（DB 無し）。
+ * `migrationsDir` を省略して {@link DEFAULT_MIGRATIONS_DIR} を実際に使わせるので、既定の migrations ディレクトリの解決が壊れれば `listMigrationFiles` が `ENOENT` で落ちて赤くなる。
  *
- * ## 何を守っているか
- *
- * `migrate.ts`（CLI）は `--schema` / `MNEMORA_SCHEMA` の指定が無いとき
- * `runMigrations(pool, undefined, { schema: undefined, extensionSchema: undefined })` を
- * 呼ぶ。この doc は「options 省略時（`runMigrations(pool)`）と1バイトも変わらない」と
- * 主張しているが、それは `../migrate.ts` の `runMigrations` が内部で
- * `schema === undefined` を分岐の起点にしていることに依存している——**その分岐が
- * 将来変わったとき**（例: `extensionSchema` の既定値を `schema` 未指定でも適用して
- * しまう、`schema` 未指定でも `CREATE SCHEMA` を打ってしまう、等）に、この歯が
- * 気付ける形にする。
- *
- * ⭐ 併せて、既定の migrations ディレクトリの解決（`../migrations-dir.cts`、
- * Issue #110）が生きていることも測る。`migrationsDir` を省略して
- * {@link DEFAULT_MIGRATIONS_DIR} を実際に使わせるため、`../migrations-dir.cts` の
- * `join(__dirname, "..", "migrations")` が壊れれば `listMigrationFiles` が `ENOENT` で
- * 落ち、この歯が赤くなる。
- *
- * ## どう測るか
- *
- * `runMigrations` が触る面は `pool.query(...)` と `pool.connect()`（返す client の
- * `query` / `release` / `on` / `removeListener`）だけ（`../migrate.ts` と
- * `../advisory-lock.ts` を参照。`on`/`removeListener` は接続断でプロセスが
- * クラッシュしないための checked-out client 向けの空リスナーの付け外し——
- * `migrate-connection-loss.test.ts` が実測した壊れ方の修正）。
- * その2つを記録するだけの偽の `Pool` を作り、
- *
- * - A: `runMigrations(fakeA)`（引数1つ）
- * - B: `runMigrations(fakeB, undefined, { schema: undefined, extensionSchema: undefined })`
- *
- * の発行 SQL 列が完全に一致することを確かめる。
- *
- * ⚠ 両方の列が空でも「一致」はしてしまう——それでは何も測っていない。そのため
- * 「列が空でない・実マイグレーション本文が流れている」ことと、「schema を実際に
- * 指定すれば列が変わる」という対照（negative control）を別の `it` として置く。
- *
- * ⚠ このファイルは `test-db.ts` を import しない（`DATABASE_URL` を要求しない）。
- * DB を要する検査は `dedicated-schema.postgres.test.ts` 等、別ファイルの役目。
- *
- * ## Issue #227: 検査は「発行テキストの comment」ではなく「実行される文」に当てる
- *
- * `../migrate.ts` は `migrations/*.sql` の生テキストを comment ごと `client.query()` へ
- * 渡す（それ自体は正しい振る舞い——PostgreSQL 自身が comment を無視して実行する）。
- * この歯の主張は「既定経路は `SET LOCAL search_path` を**実行**しない」であって、
- * 「発行するテキストにその**字面**が一切現れない」ではない。後者のまま素朴な正規表現を
- * 生テキストへかけると、マイグレーションの**説明 comment** にその語を書いただけで
- * この歯が落ちる——実際に PR #226 で `0011_memory_events_kind_restored.sql` の説明
- * comment がこれを踏んだ（Issue #227）。
- *
- * そのため下の1本目の `it` では、検査の直前に `./sql-comments.ts` の
- * `stripSqlComments` で comment を剥がしてから `.not.toMatch(...)` にかける。
- * **`../migrate.ts` 側は変えない**——DB へ実際に送る文字列は今まで通り comment 込みの
- * 生テキストのままである（`stripSqlComments` はこの歯専用で、`../migrate.ts` からは
- * 一切参照されない）。2本目の it（空振り防止）は生の `sql`
- * （comment を含む）が log に含まれることを確かめる必要があるため、そちらは comment を
- * 剥がさない。
+ * ⚠ 両方の列が空でも「一致」はしてしまうので、「列が空でない・実マイグレーション本文が流れている」ことと、「schema を実際に指定すれば列が変わる」という対照（negative control）を別の `it` として置く。
+ * ⚠ 検査は「発行テキストの comment」ではなく「実行される文」に当てる。`migrations/*.sql` は comment ごと `client.query()` へ渡されるので、素朴な正規表現を生テキストへかけると、説明 comment にその語を書いただけでこの歯が落ちる。
+ * 1本目の `it` は `./sql-comments.ts` の `stripSqlComments` で comment を剥がしてから `.not.toMatch(...)` にかける。2本目（空振り防止）は生の `sql` が log に含まれることを確かめる必要があるので、comment を剥がさない。
  */
 
-/**
- * pgvector 能力検査（`PGVECTOR_CAPABILITY_QUERY`、Issue #1301 / ADR 0367）に対して返す、
- * 「対応している」既定の1行。`runMigrations`（`extensionMode` 既定の `"create"`）は
- * 適用の最後に必ずこの検査を1回発行する（`../migrate.ts` の doc 参照）——このファイルの
- * 歯は「発行する SQL 列そのもの」を主題にしており、能力検査の合否は主題ではないため、
- * 常に「対応している」行を返して通す。
- */
+/** pgvector 能力検査に対して返す、「対応している」既定の1行。この歯の主題は発行する SQL 列であり、能力検査の合否ではないので、常に通す。 */
 function respondToQuery(text: string): { rows: unknown[] } {
   if (text.includes("pg_settings")) {
     return { rows: [{ extversion: "0.8.0", vartype: "enum", enumvals: ["off", "relaxed_order"] }] };
@@ -90,10 +33,8 @@ function createFakePool(): { pool: Pool; log: string[] } {
       return respondToQuery(text);
     },
     release: () => {
-      // 記録することは何も無い（呼ばれたことそのものは検査対象ではない）。
+      // 呼ばれたことそのものは検査対象ではない。
     },
-    // `advisory-lock.ts`/`migrate.ts` が checked-out client に付け外しする空の
-    // `error` リスナー用（実体は検査対象ではないので何もしない no-op でよい）。
     on: () => client,
     removeListener: () => client,
   };
@@ -119,22 +60,10 @@ describe("migrate.ts CLI の既定経路: options 省略と1バイトも変わ�
 
     expect(b.log).toEqual(a.log);
 
-    // A と B は「schema を渡す/渡さない」に関わらず runtime 上は同じ値（undefined）を
-    // 見るので、`schema === undefined` の分岐そのものが壊れて専用スキーマ用の SQL を
-    // 打つようになった場合、A と B は"同じように"壊れ、上の toEqual だけでは互いに
-    // 見分けが付かない（両方に紛れ込むため）。**そのため既定経路には専用スキーマ用の
-    // SQL（`CREATE SCHEMA` / `SET LOCAL search_path`）が一切現れないことを、この列
-    // 自体に対しても直接固定する。**
-    //
-    // ⚠ `CREATE EXTENSION` はここでは見ない——`migrations/0001_init.sql` 自身が
-    // （意図的な二重管理として、`../migrate.ts` の `REQUIRED_EXTENSIONS` の doc 参照）
-    // `CREATE EXTENSION IF NOT EXISTS vector;` 等を本文に含むため、実マイグレーション
-    // 本文が正しく流れている限り正当に現れる。
-    //
-    // ⚠ Issue #227: `entry` には `migrations/*.sql` の生テキストが comment ごと含まれる。
-    // `stripSqlComments` で comment を剥がしてから見ることで、「説明 comment にこの語を
-    // 書いただけで落ちる」ことを避け、検査を「実行される文に現れるか」に近づける
-    // （このファイル冒頭の doc「Issue #227」節を参照）。
+    // A と B は runtime 上は同じ値（undefined）を見るので、`schema === undefined` の分岐そのものが壊れて専用スキーマ用の SQL を打つようになった場合、A と B は同じように壊れ、上の toEqual だけでは見分けが付かない。
+    // そのため既定経路には専用スキーマ用の SQL（`CREATE SCHEMA` / `SET LOCAL search_path`）が一切現れないことを、この列自体に対しても直接固定する。
+    // ⚠ `CREATE EXTENSION` はここでは見ない。`migrations/0001_init.sql` 自身が本文に含むので、実マイグレーション本文が正しく流れている限り正当に現れる。
+    // ⚠ `stripSqlComments` で comment を剥がしてから見る（このファイル冒頭の doc 参照）。
     for (const entry of a.log) {
       const executable = stripSqlComments(entry);
       expect(executable).not.toMatch(/CREATE SCHEMA/);
@@ -149,8 +78,7 @@ describe("migrate.ts CLI の既定経路: options 省略と1バイトも変わ�
 
     expect(log.length).toBeGreaterThan(0);
 
-    // 期待値をハードコードしない——listMigrationFiles(DEFAULT_MIGRATIONS_DIR) から導出する
-    // （過去にハードコードで6件転んだ記録が ../migrate.ts の doc に残っている）。
+    // 期待値をハードコードせず、`listMigrationFiles(DEFAULT_MIGRATIONS_DIR)` から導出する。
     const files = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
     expect(files.length).toBeGreaterThan(0);
 

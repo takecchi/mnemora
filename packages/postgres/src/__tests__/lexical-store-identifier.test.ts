@@ -7,23 +7,12 @@ import { PostgresLexicalStore } from "../lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #148 が足す形。`scripts/lexical-regime-summary.mjs`(CI の Job Summary へ載せる側)
- * が読む機械可読な JSON の形。**この型はこのファイルにしか無い**——`scripts/` 側は素の
- * `.mjs`(`tsx` を通さない)であり、import できない。二重管理であることを認めて書く
- * (`consolidation-cost-summary-lib.mjs` の `WEIGHTS_UNAVAILABLE_PHRASE` と同じ判断)。
- * `scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs` がこのファイルのソースを
- * 文字列として読み、`MNEMORA_LEXICAL_REGIME_JSON` への参照が消えていないことを固定している。
+ * `scripts/lexical-regime-summary.mjs`（CI の Job Summary へ載せる側）が読む機械可読な JSON の形。この型はこのファイルにしか無い
+ * （`scripts/` 側は素の `.mjs` で import できないので、二重管理であることを認めて書く）。
+ * `scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs` がこのファイルのソースを文字列として読み、`MNEMORA_LEXICAL_REGIME_JSON` への参照が消えていないことを固定している。
  *
- * 🔴 **Issue #148 ②: `schemaVersion: 2` — ロケールを測り始めた理由**
- *
- * `.github/workflows/ci.yml` は6本の pgvector ジョブすべてで
- * `POSTGRES_INITDB_ARGS: "--encoding=UTF8"` を宣言し始めた(Issue #148 ②)。
- * **ただしロケール(`lc_collate`/`lc_ctype`)は宣言していない**——ADR 0103 が実測した
- * 分岐軸は `server_encoding` であり、ロケールが `nonAsciiIsIndexed` に効くかどうかは
- * まだ測っていない。**測っていない値を宣言するのは、Issue #148 が名指しで禁じた
- * 「⛔ 順序を逆にしない」を破ることになる。** そこでこの歯は `lc_collate` / `lc_ctype` /
- * `default_text_search_config` を先に**測るだけ**にする——次にロケールを宣言するなら、
- * この実測値を見てからである。
+ * `lc_collate` / `lc_ctype` / `default_text_search_config` は、ロケールが `nonAsciiIsIndexed` に効くかどうかをまだ測っていないので、測るだけにして ci.yml では宣言していない。
+ * 次にロケールを宣言するなら、この実測値を見てからにする。
  */
 interface LexicalRegimeJson {
   schemaVersion: number;
@@ -34,33 +23,25 @@ interface LexicalRegimeJson {
   rawTsvector: string;
   rawIdentifierHit: boolean;
   rawJapaneseWordHit: boolean;
-  /** 歯が実際に通った分岐。⛔ 固定しない——両方が起こり得る(Issue #148)。 */
+  /** 歯が実際に通った分岐。⛔ 固定しない——両方が起こり得る。 */
   regime: "non_ascii_indexed" | "non_ascii_dropped";
-  /** 🔴 Issue #148 ②: 測るだけで、まだ ci.yml では宣言していない。 */
+  /** 測るだけで、まだ ci.yml では宣言していない。 */
   lcCollate: string;
-  /** 🔴 Issue #148 ②: 測るだけで、まだ ci.yml では宣言していない。 */
+  /** 測るだけで、まだ ci.yml では宣言していない。 */
   lcCtype: string;
-  /** 🔴 Issue #148 ②: 測るだけで、まだ ci.yml では宣言していない。 */
+  /** 測るだけで、まだ ci.yml では宣言していない。 */
   defaultTextSearchConfig: string;
 }
 
 /**
- * ADR 0084（Issue #106）の中心: 日本語の文に埋め込まれた `PROJ-1234` のような識別子を、
- * `mnemora_lexical_normalize` を通した索引式・クエリ式でなら引けること。**この主張は
- * `server_encoding` に依らない**（ADR 0103 で 2ビルド × 2版 × 2エンコーディングを実測）。
+ * 日本語の文に埋め込まれた `PROJ-1234` のような識別子を、`mnemora_lexical_normalize` を通した索引式・クエリ式でなら引けること。この主張は `server_encoding` に依らない。
  * まずそれを索引式ではなく `PostgresLexicalStore.search`（本体のクエリ経路）で確認する。
  *
- * ⚠ **「素の `to_tsvector` では引けない」という否定は、このファイルの前提ではない。**
- * その否定は `server_encoding` で反転する（Issue #145 / ADR 0103）。最後の2本が、
- * 「実装が動くこと」と「正規化が要る理由」を**別々の歯に分けて**引き受ける。
+ * ⚠ 「素の `to_tsvector` では引けない」という否定は、このファイルの前提ではない。その否定は `server_encoding` で反転する。
+ * 最後の2本が、「実装が動くこと」と「正規化が要る理由」を別々の歯に分けて引き受ける。
  *
- * ⚠ **偽陽性の点検**（マネージャー指摘の作法）: このフィクスチャは意図的に
- * `PROJ-1234`/`PROJ-5678`/`TASK-1234` という似た識別子を複数用意し、かつ
- * **識別子を `content` に置かず `tags` にだけ置いた decoy** も用意する。
- * `PostgresLexicalStore.search` が実際に見るのは `content` 列だけ
- * （`lexical-store.ts` の `buildLexicalSearchSelect`）——`tags` は `WHERE` に一切現れない。
- * decoy が返らないことを確認することで、「緑になった経路が `content` の語彙一致以外の
- * 何か（例: 別の列にたまたま同じ文字列が入っていた）ではない」ことを別立てで示す。
+ * ⚠ 偽陽性の点検: このフィクスチャは意図的に `PROJ-1234`/`PROJ-5678`/`TASK-1234` という似た識別子を複数用意し、識別子を `content` に置かず `tags` にだけ置いた decoy も用意する。
+ * `search` が実際に見るのは `content` 列だけなので、decoy が返らないことで、緑になった経路が `content` の語彙一致以外ではないことを別立てで示す。
  */
 
 const TENANT = "lexical-identifier-tenant";
@@ -88,8 +69,6 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
         content: "四半期レビューでPROJ-1234の納期が来週まで延びました",
       }),
     );
-    // 似た識別子（番号違い）——正規化後も websearch のフレーズ演算子（<->）により
-    // 'proj' <-> '-1234' と 'proj' <-> '-5678' は別物として扱われるはず。
     const similarNumber = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -98,7 +77,6 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
         content: "サブシステムの担当はPROJ-5678の方です",
       }),
     );
-    // 似た識別子（接頭辞違い）。
     const similarPrefix = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -107,8 +85,7 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
         content: "TASK-1234はまだ着手していません",
       }),
     );
-    // decoy: 識別子は tags にだけ置き、content には置かない。search が content 以外の
-    // 列を見ていたら誤ってこれも返ってしまう。
+    // decoy: 識別子は tags にだけ置き、content には置かない。search が content 以外の列を見ていたら誤ってこれも返ってしまう。
     const tagsOnlyDecoy = await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -129,20 +106,12 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
     expect(ids).not.toContain(similarNumber.id);
     expect(ids).not.toContain(similarPrefix.id);
     expect(ids).not.toContain(tagsOnlyDecoy.id);
-    // target 以外は一切混ざらない——ちょうど1件であることまで確認する。
     expect(ids).toEqual([target.id]);
   });
 
   /**
-   * 🔴 **この歯は、変異試験で見つけた欠陥のために足した。**
-   *
-   * 当初の実装はクエリ側にも `mnemora_lexical_normalize` を通していた。それだと
-   * 日本語の残り全体が1語彙（`'について前に何か言ってたっけ'`）になって AND で結ばれ、
-   * **Issue #106 の報告者が書いた問いの形そのものが1件も引けなかった。**
-   * 既存の歯は「識別子だけを渡す」呼び出ししか測っておらず、この穴を通していた。
-   *
-   * ⚠ 偽陽性の点検: このクエリが緑になる経路が「識別子の語彙一致」だけであることを、
-   * 同じ問いの形で**識別子だけ差し替えた**否定側（PROJ-5678 を含む文が返らないこと）で確かめる。
+   * クエリ側にも `mnemora_lexical_normalize` を通すと、日本語の残り全体が1語彙になって AND で結ばれ、報告者が書く形の問い（自然文 + 識別子）が1件も引けない。
+   * 識別子だけを渡す歯はこれを通すので、自然文の形で引けることと、識別子だけ差し替えた否定側（PROJ-5678 を含む文が返らないこと）で偽陽性でないことを見る。
    */
   it("報告者が実際に投げる形の問い（日本語の自然文 + 識別子）でも引ける", async () => {
     const { db } = await getTestClient();
@@ -176,23 +145,13 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
     expect(hits.map((hit) => hit.memoryId)).not.toContain(other.id);
   });
 
-  /**
-   * 🔴 **この歯も、変異試験で見つけた穴のために足した。**
-   *
-   * `websearch_to_tsquery` を `plainto_tsquery` に落とす変異を当てても、
-   * 既存の歯は1本も赤くならなかった——**「誤爆しない」という主張が、コメントと
-   * マイグレーションの中にしか無く、検査されていなかった。**
-   *
-   * `plainto_tsquery` は隣接を要求しない AND を作るので、識別子を2つ含む本文に対して
-   * **片方の接頭辞ともう片方の番号**の組み合わせが偽陽性で一致する。
-   */
+  /** `websearch_to_tsquery` を `plainto_tsquery` に落とすと隣接を要求しない AND になり、識別子を2つ含む本文で片方の接頭辞ともう片方の番号の組み合わせが偽陽性で一致する。 */
   it("識別子を2つ含む本文に対して、接頭辞と番号を取り違えた識別子は一致しない（plainto_tsquery に落とすと赤くなる）", async () => {
     const { db } = await getTestClient();
     const memoryStore = new PostgresMemoryStore(db);
     const lexicalStore = new PostgresLexicalStore(db);
     const ctx: Ctx = { tenantId: TENANT };
 
-    // 本文には PROJ-1234 と TASK-5678 が在る。PROJ-5678 という識別子はどこにも無い。
     await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({
@@ -208,8 +167,7 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
     });
     expect(hits).toEqual([]);
 
-    // 対照: 本文に実在する組み合わせは、同じ経路でちゃんと引ける（この歯が
-    // 「常に0件」で緑になっているのではないことを、同じ本文で示す）。
+    // 対照: 本文に実在する組み合わせは、同じ経路でちゃんと引ける（この歯が「常に0件」で緑になっているのではないことを示す）。
     const present = await lexicalStore.search(ctx, "TASK-5678", {
       limit: 10,
       filter: { tenantId: TENANT },
@@ -218,32 +176,15 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
   });
 
   /**
-   * 🔴 **この歯が守っているのは「実装が動いていること」である。**上の3本が
-   * `PostgresLexicalStore.search`（配線ごと）で見ているのに対し、ここでは
-   * **索引式とクエリ式そのもの**を SQL で直接当てる——`migrations/0025`（Issue #1222）の
-   * `idx_memories_lexical` の左辺（`mnemora_lexical_tsvector(content)`）と、
-   * `migrations/0009`（ADR 0092）の `mnemora_lexical_query_or` の組である。
-   *
-   * ⚠ 以前ここに在った歯は、クエリ側を `websearch_to_tsquery('simple',
-   * mnemora_lexical_normalize($2))` と**手で書き写していた**——これは 0009 以前の式であり、
-   * 本番経路はもう通らない。式を写すとずれる（`migrations/0008` の
-   * 「なぜ SQL 関数として切り出すか」と同じ理由）。**同じ理由で、本文側も
-   * `mnemora_lexical_tsvector($1)` を関数として呼ぶ**（`to_tsvector('simple',
-   * mnemora_lexical_normalize($1))` と書き写さない）——0025 で索引式が変わった後も
-   * この歯だけが古い式を測り続けることを防ぐ。
-   *
-   * ⚠ **この歯は環境に依らない。**`server_encoding` が UTF8 でも SQL_ASCII でも
-   * 同じ結論になることを実測してある（ADR 0103「測ったこと」）。
-   * ⟹ **これが赤くなったなら、疑うのは実装のほうである。**
+   * 上の3本が `PostgresLexicalStore.search`（配線ごと）で見ているのに対し、ここでは本番の索引式とクエリ式そのものを SQL で直接当てる。
+   * 式を手で写すとずれるので、本文側も `mnemora_lexical_tsvector($1)` を関数として呼ぶ（索引式が変わった後にこの歯だけが古い式を測り続けることを防ぐ）。
+   * この歯は環境（`server_encoding`）に依らない。これが赤くなったなら、疑うのは実装のほうである。
    */
   it("本番の索引式とクエリ式なら、日本語の文に埋め込まれた識別子を引ける（server_encoding に依らない）", async () => {
     const { pool } = await getTestClient();
     const content = "四半期レビューでPROJ-1234の納期が来週まで延びました";
 
-    // 誤爆側は、**識別子を2つ含む本文**で測る。隣接（'proj' <-> '-5678'）を落とすと
-    // 'proj' と '-5678' が別々の位置で拾われて偽陽性になる本文であり、
-    // 単一の識別子しか無い本文では、この主張は自明に成り立ってしまって何も測らない
-    // （migrations/0008 の「plainto_tsquery は使わない」の実測と同じ本文）。
+    // 誤爆側は、識別子を2つ含む本文で測る。隣接（'proj' <-> '-5678'）を落とすと別々の位置で拾われて偽陽性になる本文であり、単一の識別子しか無い本文ではこの主張は自明に成り立って何も測らない。
     const twoIdentifiers = "本日の連携: PROJ-1234 and TASK-5678 の両方を確認しました";
     const result = await pool.query(
       `SELECT mnemora_lexical_tsvector($1)
@@ -270,79 +211,20 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
   });
 
   /**
-   * 🔴 **この歯が守っているのは「実装が正しいこと」ではなく、`mnemora_lexical_normalize`
-   * が*要る理由*そのものである。**そして ⚠ **その理由は、どの環境でも同じ形では
-   * 成り立たない。**
+   * この歯が守っているのは「実装が正しいこと」ではなく、`mnemora_lexical_normalize` が要る理由そのものである。そしてその理由は、どの環境でも同じ形では成り立たない。
+   * 素の `to_tsvector('simple', …)` が日本語の文に埋め込まれた識別子を引けるかどうかは、`server_encoding` で反転する
+   * （UTF8 では引けない、SQL_ASCII / LATIN1 では引けてしまう。版・ビルド・ロケールではなく `server_encoding` が軸）。
    *
-   * Issue #145 の実測（ADR 0103）——素の `to_tsvector('simple', …)` が日本語の文に
-   * 埋め込まれた識別子を引けるかどうかは、**`server_encoding` で反転する**:
+   * だからこの歯は、自分が置いている前提を先に測って名乗る。前提が破れている環境では反対側の結論を主張し、
+   * どちらの分岐でも「日本語の語そのものは素の経路で引けない」ことを、regime に依らない錨として最後に置く。
    *
-   * | server_encoding | 素の tsvector | 素の経路で PROJ-1234 を引けるか |
-   * |---|---|---|
-   * | UTF8（マルチバイト） | `'1234の納期が…':3 '四半期レビューでproj':2 '四半期レビューでproj-1234の納期が…':1` | **引けない（f）** |
-   * | SQL_ASCII / LATIN1 | `'-1234':2 'proj':1` | **引けてしまう（t）** |
+   * ⛔ この歯を「環境依存だから」と消さないこと。消すと、`mnemora_lexical_normalize` が要る理由そのものが repo から消える。
    *
-   * ⚠ **版でもビルドでもロケールでもない。**PostgreSQL 17.11 / 18.6 × PGDG(Debian) /
-   * conda-forge × libc(`C` / `C.UTF-8` / `en_US.UTF-8` / `ja_JP.UTF-8`) / builtin / ICU を
-   * 総当たりして、分岐したのは `server_encoding` だけだった（ADR 0103）。
-   * `LANG` を持たないシェルで `initdb` を打つとロケール `C` が選ばれ、それに連れて
-   * encoding が `SQL_ASCII` になる——**これが Issue #145 の報告者の環境である。**
+   * 測った regime は、緑のときにも読めるようにする。`MNEMORA_LEXICAL_REGIME_JSON` が設定されていたら、そのパスへ測った値を機械可読な JSON（`LexicalRegimeJson`）として書く。
+   * 書くのは `expect` より前で、歯がどちらの側で赤くなっても、測った値そのものは残る。
    *
-   * ⟹ **だからこの歯は、自分が置いている前提を先に測って名乗る。**前提が破れている
-   * 環境では反対側の結論を主張し、**どちらの分岐でも「日本語の語そのものは素の経路で
-   * 引けない」**ことを、regime に依らない錨として最後に置く（Issue #139 と同じ根）。
-   *
-   * ⛔ **この歯を「環境依存だから」と消さないこと。**消すと、`mnemora_lexical_normalize`
-   * が要る理由そのものが repo から消える。
-   *
-   * ---
-   *
-   * ### 🔴 Issue #148: この歯が測った regime は、緑のときにも読めるようにする
-   *
-   * この歯は元々、`observed` を `expect` の失敗メッセージにしか埋めていなかった
-   * ——**緑のとき、この歯がどちらの分岐を通ったのかを外から知る手段が無かった**
-   * （PR #147 / ADR 0103 の続き、Issue #148 ①）。
-   *
-   * `MNEMORA_LEXICAL_REGIME_JSON` が環境変数として設定されていたら、そのパスへ
-   * 測った値を機械可読な JSON（`LexicalRegimeJson`）として書く。**書くのは
-   * `expect` より前**——歯がどちらの側で赤くなっても、測った値そのものは残る
-   * （`if: always()` で後続の Job Summary 段を必ず走らせるのと同じ意図）。
-   * `.github/workflows/ci.yml` の `postgres` ジョブがこの環境変数を渡し、
-   * `scripts/lexical-regime-summary.mjs` がこの JSON を読んで Job Summary へ出す
-   * （⛔ 門ではない——値がどちらでも exit 0）。
-   *
-   * ⚠ **2026-09-12 訂正**: 以前はここに「`docs/roadmap.md` の『決まっていない前提』
-   * = SQL_ASCII をサポート対象にするかへ、この可視化の実装が先回りして答えを出さない
-   * ため」と書いていたが、これはもう事実ではない——オーナー（takecchi）は
-   * 2026-09-12T00:09Z に、`server_encoding` が `SQL_ASCII` の PostgreSQL を
-   * サポート対象にすると決めた（[ADR 0106](../../../../docs/decisions/
-   * 0106-ci-declares-the-regime-it-measures.md)）。**それでもこの可視化が門にしない
-   * ことは変わらない**——むしろサポート対象と決まった `SQL_ASCII` を、この可視化が
-   * 「悪い値」として先回りに門へ持ち込むことはできない（`LATIN1` は未回答であり、
-   * この決定の対象外のままである）。
-   *
-   * ⛔ **環境変数が無いときは何も書かない**——ローカルで `vitest run` するだけの
-   * 開発者に、無関係なファイル書き込みを強いない。
-   *
-   * ⛔ **この JSON 書き込みは、下の3本の `expect` を1つも弱めない。**分岐はどちらにも
-   * 固定していない・`it.skip` にもしていない——書いているのは「実際に測った値」であり、
-   * 「歯がどちらであるべきか」ではない。
-   *
-   * ---
-   *
-   * ### 🔴 Issue #148 ②: なぜロケールを測り始めたか(まだ宣言はしない)
-   *
-   * `.github/workflows/ci.yml` は6本の pgvector ジョブすべてに
-   * `POSTGRES_INITDB_ARGS: "--encoding=UTF8"` を足し、**encoding だけ**を宣言し始めた
-   * (Issue #148 ②)。**ロケール(`lc_collate`/`lc_ctype`)は宣言していない**——ADR 0103
-   * が総当たりで割った軸は `server_encoding` であり、ロケールが `nonAsciiIsIndexed` に
-   * 効くかどうかはまだ測っていない値だからである。
-   *
-   * この歯はここで `lc_collate` / `lc_ctype` / `default_text_search_config` を
-   * `LexicalRegimeJson`(`schemaVersion: 2`)へ足して**測るだけ**にする。
-   * ⟹ **次にロケールを ci.yml へ宣言するなら、この実測値を見てからである**
-   * ——測る前に宣言しない、という Issue #148 の「⛔ 順序を逆にしない」をそのまま
-   * ロケールにも適用する。
+   * ⛔ 環境変数が無いときは何も書かない。
+   * ⛔ この JSON 書き込みは、下の3本の `expect` を1つも弱めない。分岐はどちらにも固定していない・`it.skip` にもしていない。書いているのは実際に測った値である。
    */
   it("素の to_tsvector で識別子を引けるかどうかは server_encoding で反転する（歯が自分の前提を測って名乗る）", async () => {
     const { pool } = await getTestClient();
@@ -376,8 +258,7 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
       defaultTextSearchConfig: string;
     };
 
-    // 🔴 Issue #148: `expect` より前に書く。歯がこの後どちらの分岐で赤くなっても、
-    // 測った値そのものは CI の成果物として残る。
+    // `expect` より前に書く。歯がこの後どちらの分岐で赤くなっても、測った値そのものは CI の成果物として残る。
     const regimeJsonPath = process.env.MNEMORA_LEXICAL_REGIME_JSON;
     if (regimeJsonPath) {
       const regimeJson: LexicalRegimeJson = {
@@ -447,9 +328,7 @@ describe("PostgresLexicalStore.search — Unicode正規化・全角半角は一�
   });
 
   const UNICODE_TENANT = "lexical-unicode-normalization-tenant";
-  // NFC の café（é は単一の合成済み文字 U+00E9）。
   const CAFE_NFC = "café";
-  // NFD の café（e + 結合アキュートアクセント U+0301）。
   const CAFE_NFD = "café";
 
   it("café（NFC）を書き、café（NFD）で引くと一致しない（表1行目）", async () => {

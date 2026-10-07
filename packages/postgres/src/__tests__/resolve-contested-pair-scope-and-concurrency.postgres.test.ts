@@ -12,26 +12,16 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #759（ADR 0183 が `markContestedPair` だけに絞って残した負債の解消）。
- * `packages/testkit` の `memory-store-conformance.ts` にある `resolveContestedPair` 節は、
- * すべて「1回の呼び出しが1つの対だけを動かす」単発の呼び出ししか検査しない。
+ * `packages/testkit` の `memory-store-conformance.ts` にある `resolveContestedPair` 節は、すべて「1回の呼び出しが1つの対だけを動かす」単発の呼び出ししか検査しない。
  * この2本は、その節が構造的に踏めない2つの経路を、Postgres 実装に対してだけ追加で検査する。
  *
- * 1本目（範囲外の行）: `updateSide` の最終 `UPDATE` の `WHERE` は `tenant_id` と `id` で
- * 対象を絞っているが、それを「対象2件」より広く書いても、既存の適合テストは
- * どれも気づけない——どのテストも「対象2件だけ」を見て、対象外の別の contested 対が
- * 無傷かどうかを assert していないため。
+ * 1本目（範囲外の行）: `updateSide` の最終 `UPDATE` の `WHERE` は `tenant_id` と `id` で対象を絞っているが、それを「対象2件」より広く書いても、
+ * 既存の適合テストはどれも気づけない。どのテストも「対象2件だけ」を見て、対象外の別の contested 対が無傷かどうかを assert していないため。
  *
- * 2本目（並行）: `updateSide` の最終 `UPDATE` は
- * `WHERE ... AND status = 'contested' AND contested_with_id = ${oppositeId}` という CAS を
- * 持つが、`resolveContestedPair` は直前の事前検証（同じトランザクション内の `SELECT`）でも
- * 同じ内容を検査している。単発の呼び出ししかしない既存テストでは、事前検証が先に
- * 全部弾いてしまうため、この最終 `UPDATE` 側の CAS が単独で効く場面が一度も来ない。
- * `memory-store-update-status-concurrency.test.ts` と同じ構え（別々の `Pool` を複数本
- * 立てて本物の行ロック競合を起こす）を使うと、初めてこの CAS だけが効く場面を作れる。
- *
- * **⚠ これは CI（postgres ジョブ）でしか走らない。** `DATABASE_URL` が無い環境では
- * `requireDatabaseUrl()` が例外を投げ、テストランナー自体が起動しない。
+ * 2本目（並行）: `updateSide` の最終 `UPDATE` は `WHERE ... AND status = 'contested' AND contested_with_id = ${oppositeId}` という CAS を持つが、
+ * `resolveContestedPair` は直前の事前検証（同じトランザクション内の `SELECT`）でも同じ内容を検査している。
+ * 単発の呼び出ししかしない既存テストでは、事前検証が先に全部弾いてしまうため、この最終 `UPDATE` 側の CAS が単独で効く場面が一度も来ない。
+ * `memory-store-update-status-concurrency.test.ts` と同じ構え（別々の `Pool` を複数本立てて本物の行ロック競合を起こす）を使うと、初めてこの CAS だけが効く場面を作れる。
  */
 
 function event(
@@ -144,7 +134,6 @@ describe("PostgresMemoryStore.resolveContestedPair — 適合テストが踏ま�
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
 
-    // 最終状態: ちょうど1回分だけ解決されている（二重に処理されていない）。
     const finalA = await seedStore.get(ctx, a);
     const finalB = await seedStore.get(ctx, b);
     expect(finalA?.status).toBe("active");

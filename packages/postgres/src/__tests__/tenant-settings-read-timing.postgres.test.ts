@@ -24,7 +24,7 @@ import {
 
 /**
  * `TenantSettingsStore` の doc（`packages/core/src/interfaces/tenant-settings-store.ts`）に書いた
- * 今の振る舞いを、Postgres と testkit の fixture の両方で縛る（振る舞いは変えていない）。
+ * 今の振る舞いを、Postgres と testkit の fixture の両方で縛る。
  *
  * 1. `getEventRetention` の `unset` は「設定の行が1つも無い」ことであり、保持期間以外の設定を
  *    1つ書くと `unlimited` になる。別テナントは `unset` のまま。
@@ -84,7 +84,7 @@ interface Kit {
   runtime: Runtime;
   memoryStore: MemoryStore;
   settings: Settings;
-  /** 既定の半減期（時間）を書く。Postgres には口が無いので列へ直に書く（#1013）。 */
+  /** 既定の半減期（時間）を書く。Postgres には口が無いので列へ直に書く。 */
   setDefaultHalfLifeHours: (ctx: Ctx, hours: number) => Promise<void>;
   upsertVector: (ctx: Ctx, memoryId: string) => Promise<void>;
 }

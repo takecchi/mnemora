@@ -21,11 +21,7 @@ import {
   TEST_EMBEDDING_SPACE,
 } from "./test-db.js";
 
-/**
- * LLM が返した補助の欄（digest・tags・claim key）が保存できない値のときの、抽出の書き込みを縛る（ADR 0443）。
- * 候補ごと落とさず、その欄だけを落とす。digest はフォールバックに、claim key は null に、tags はその要素だけ捨てる。
- * 落とした欄は `created` イベントの `meta.droppedFields` に残る（値そのものは写さない）。
- */
+/** 候補ごと落とさず、その欄だけを落とす。digest はフォールバックに、claim key は null に、tags はその要素だけ捨てる。落とした欄は `created` イベントの `meta.droppedFields` に残る（値そのものは写さない）。 */
 
 interface FakeCandidate {
   content: string;
@@ -268,8 +264,6 @@ for (const [name, makeKit] of KITS) {
         .map((e) => (e.meta?.droppedFields as Array<{ field: string }>).map((f) => f.field));
       expect(fields).toEqual([["digest", "tags"]]);
     });
-
-    // ---- やりすぎを捕まえる歯 ----
 
     it("本文の NUL は従来どおり候補ごと落ちる（補助の欄だけを落とす対象は本文ではない）", async () => {
       const kit = await makeKit();

@@ -11,17 +11,10 @@ import {
 } from "./test-db.js";
 
 /**
- * `reinforce` が `last_reinforced_at` / `decay_floor_at` を**巻き戻さない**ことを検査する
- * （ADR 0048）。
+ * `memory-store-update-status-concurrency.test.ts` と同じ理由でプールを分ける。同一 `Pool` を共有すると、複数の論理的な「プロセス」を同じ接続の使い回しで模すことになり、
+ * 本当に別セッションから同時に UPDATE が来た場合の競合を再現できない。
  *
- * `memory-store-update-status-concurrency.test.ts`（ADR 0030 の compare-and-swap）と
- * 同じ理由でプールを分ける——同一 `Pool` を共有すると、複数の論理的な「プロセス」を
- * 同じ接続の使い回しで模すことになり、本当に別セッションから同時に UPDATE が来た場合の
- * 競合を再現できない。
- *
- * ⚠ **この歯は「並行でしか壊れない」ものではない。**古い `at` を渡す呼び出しが1本でも
- * 混ざれば、直列でも巻き戻る。並行の歯は、それが実運用でどう起きるか（`runtime.observe` の
- * `memory_usage` が2本同時に走る）を示すために置いてある。
+ * ⚠ この歯は「並行でしか壊れない」ものではない。古い `at` を渡す呼び出しが1本でも混ざれば、直列でも巻き戻る。並行の歯は、それが実運用でどう起きるか（`runtime.observe` の `memory_usage` が2本同時に走る）を示すために置いてある。
  */
 describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない（ADR 0048）", () => {
   const pools: PostgresClient[] = [];
@@ -57,7 +50,7 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
 
     const backward = await store.reinforce(ctx, memory.id, early);
 
-    // 返り値も、読み直した行も、両方で確かめる——返り値だけ整えて行が壊れている実装を通さない。
+    // 返り値も、読み直した行も、両方で確かめる。返り値だけ整えて行が壊れている実装を通さない。
     expect(backward.lastReinforcedAt?.getTime()).toBe(late.getTime());
     expect(backward.decayFloorAt.getTime()).toBe(floorAfterLate);
     const reread = await store.get(ctx, memory.id);
@@ -66,8 +59,7 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
   });
 
   it("🔴 順方向（古い→新しい）はこれまでどおり動く", async () => {
-    // ⚠ 発火しない側。巻き戻しを止める実装が「常に何も書かない」に退化していたら、
-    // ここが赤くなる。
+    // ⚠ 発火しない側。巻き戻しを止める実装が「常に何も書かない」に退化していたら、ここが赤くなる。
     const { store, memory, early, late } = await seed();
 
     const first = await store.reinforce(ctx, memory.id, early);
@@ -76,15 +68,12 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
 
     const second = await store.reinforce(ctx, memory.id, late);
     expect(second.lastReinforcedAt?.getTime()).toBe(late.getTime());
-    // 起点が後ろへ動いたのだから、閾値を割る時刻も後ろへ動く。
     expect(second.decayFloorAt.getTime()).toBeGreaterThan(floorAfterEarly);
   });
 
   it("🔴 同じ at をもう一度渡すと、行そのものを触らない（updated_at も動かない）", async () => {
-    // ⚠ ここが `<` と `<=` の境界である。`<=` にすると同じ値を書き直すので、
-    // `last_reinforced_at` と `decay_floor_at` だけを見ていては**区別が付かない**。
-    // 区別が付くのは `updated_at` だけ——「べき等」を「同じ値になる」ではなく
-    // 「行を触らない」の意味で固定する。
+    // ⚠ ここが `<` と `<=` の境界である。`<=` にすると同じ値を書き直すので、`last_reinforced_at` と `decay_floor_at` だけを見ていては区別が付かない。
+    // 区別が付くのは `updated_at` だけで、「べき等」を「同じ値になる」ではなく「行を触らない」の意味で固定する。
     const { store, memory, late } = await seed();
     const first = await store.reinforce(ctx, memory.id, late);
     const again = await store.reinforce(ctx, memory.id, late);
@@ -106,8 +95,7 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
     const results = await Promise.allSettled(
       stores.map((store, i) => store.reinforce(ctx, memory.id, ats[i]!)),
     );
-    // 巻き戻しを止める実装は、古い側を**失敗にしない**（呼び出し側から見れば成功して、
-    // 単に起点が動かないだけ）。⟹ 4本とも成功していること自体を先に確かめる。
+    // 巻き戻しを止める実装は古い側を失敗にしない（単に起点が動かないだけ）ので、4本とも成功していること自体を先に確かめる。
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(4);
 
     const { db } = await getTestClient();
@@ -115,12 +103,6 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
     expect(reread?.lastReinforcedAt?.getTime()).toBe(newest.getTime());
   });
 
-  // テナント分離の棚卸し（Issue #854）で気づいた歯の欠落: `get`/`getMany`/`updateStatus`/
-  // `setEmbeddingStatus`/`purgeMemory`/`markContestedPair` 等には他テナント対象外の歯が
-  // conformance suite に既にあるが、`reinforce` には無かった。この歯は
-  // `PostgresMemoryStore` 自身の実装（`WHERE tenant_id = ${ctx.tenantId} AND id = ${id}`）を
-  // 対象にする——`packages/testkit` の conformance へは足さない（外部 adapter への要件追加は
-  // このPRの範囲外、Issue #809 の論点）。
   it("🔴 reinforce は他テナントの Memory を対象にしない（memory not found）", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
@@ -136,7 +118,6 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
       store.reinforce(ctxB, memoryA.id, new Date(memoryA.recordedAt.getTime() + 1000)),
     ).rejects.toThrow(/memory not found for tenant/);
 
-    // tenant-a 側から見ても無傷のまま。
     const afterA = await store.get(ctxA, memoryA.id);
     expect(afterA?.lastReinforcedAt ?? null).toBe(memoryA.lastReinforcedAt ?? null);
     expect(afterA?.updatedAt.getTime()).toBe(memoryA.updatedAt.getTime());

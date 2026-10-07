@@ -5,23 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * Issue #106 の報告者が実際に挙げた5種類（人名・チャンネル名・社内システム名・案件コード・
- * チケット番号）を、**報告者が書く形の問い**として1件ずつ通す歯（[ADR 0092](../../../docs/decisions/0092-lexical-or-coverage.md)）。
- *
- * **なぜこの歯がいる**か——PR #115（ADR 0084）でいちばん価値があった発見はこうだった:
- * 「当初の実装は、Issue #106 の報告者が書いた問いの形そのもので1件も引けなかった。
- * 識別子だけを渡す歯はすべて緑だったので、歯では見つからなかった。」
- * `lexical-store-identifier.test.ts` の歯は識別子単体（`"PROJ-1234"`）を渡す形が
- * 中心であり、**報告者が実際に書いた自然文の形**（特に英語の自然文）は
- * まだ1本も検査されていない。この歯はその穴を塞ぐ。
- *
- * ADR 0084 §2.1.1 の非対称（クエリ側は非 ASCII を落とす）により、日本語の文に
- * 埋もれた ASCII の識別子は、クエリ側でも日本語部分が落ちて実質「識別子1語」の
- * クエリになる。**英語の自然文だけが、複数語のクエリという意味で新しい経路を通る**
- * ——ADR 0084 はここを AND で結んでいたため「全語を含む記憶しか返らない」という
- * 負債を抱えていた（§8）。ADR 0092 はこれを OR + 被覆率に変える。
- */
+/** 報告者が書く形の問い（自然文）として1件ずつ通す。識別子だけを渡す歯がすべて緑でも、自然文の形では1件も引けない欠陥を通してしまう。 */
 
 const TENANT = "lexical-reporter-questions-tenant";
 
@@ -94,22 +78,15 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
     });
     const ids = hits.map((h) => h.memoryId);
 
-    // 🔴 AND 意味論（ADR 0084 の旧契約）なら、content に "what"/"did"/"we"/"say"/"about" の
-    // いずれも現れないため必ず0件だった。OR + 被覆率だからこそ、PROJ-1234 の一致だけで
-    // この記憶が返る。
     expect(ids).toContain(target.id);
 
     const hit = hits.find((h) => h.memoryId === target.id);
     expect(hit).toBeDefined();
-    // クエリ語彙は what/did/we/say/about/proj-1234 の6語。一致するのは proj-1234 の1語だけ
-    // ——coverage は 1/6 になるはずだが、「一致数 ÷ クエリ語彙数」を歯に書き写すと
-    // 実装のバグと自己整合してしまうため、期待値は「0 より大きく 1 未満」という
-    // 逐語の範囲でだけ主張する。
+    // 期待値は「0 より大きく 1 未満」の範囲でだけ主張する。「一致数 ÷ クエリ語彙数」を歯に書き写すと、実装のバグと自己整合してしまう。
     expect(hit!.coverage).toBeGreaterThan(0);
     expect(hit!.coverage).toBeLessThan(1);
 
-    // ⚠ 偽陽性の点検: 識別子を含まない同種の自然文は0件のままである
-    // （「OR にしたら何でも返るようになった」わけではないことの確認）。
+    // ⚠ 偽陽性の点検: 識別子を含まない同種の自然文は0件のままである。
     const noIdentifierHits = await lexicalStore.search(
       ctx,
       "what did we say about nonexistent topic",
@@ -221,28 +198,14 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       "田中さんが来週から新しいプロジェクトに参加します",
     );
 
-    // 報告者が書きそうな自然な日本語の問い（人名を含む）。
     const hits = await lexicalStore.search(ctx, "田中さんについて何か言ってましたか", {
       limit: 10,
       filter: { tenantId: TENANT },
     });
 
-    // 🔴 これは「直っていない」ことを主張する歯である。⛔ 直そうとしていない。
-    // ADR 0084 §2.1.1: クエリ側は非 ASCII の連なりを空白に落とす
-    // （`mnemora_lexical_query_terms`）。このクエリは全体が日本語（非 ASCII）なので、
-    // クエリ側の語彙は1つも残らず、`mnemora_lexical_query_or` は空の tsquery を返し、
-    // 何が本文に在っても一致しない。日本語の語（人名を含む）を語彙チャンネルで
-    // 引けないのは ADR 0084 §2/§8 が引き受けた負債であり、ADR 0092 は
-    // クエリ語彙を OR で結ぶ・被覆率を計算するという変更だけを行っており、
-    // この負債を塞いでいない。
-    //
-    // ⭐ この歯は Issue #139 の閉じる条件そのものである
-    // （ADR 0149: `REQUIRED_EXTENSIONS` を増やして日本語を引けるようにするかどうかを
-    // 検討し、増やさないと決めた。全導入者への条件追加と、`pg_trgm` が `C` ロケールで
-    // 黙って0件になる代償が釣り合わないため）。**この歯が赤くなったら、それは
-    // ADR 0149 の前提が変わったことを意味する**——ADR 0149「これが覆るとしたら」を見て、
-    // 歯とドキュメント（docs/recall.md・packages/postgres/README.md）を揃えて更新すること。
-    // 消す・緩めるだけで済ませないこと。
+    // ⚠ これは「直っていない」ことを主張する歯である。⛔ 直そうとしていない。
+    // クエリ側は非 ASCII の連なりを空白に落とすので、全体が日本語のクエリは語彙が1つも残らず空の tsquery になり、何が本文に在っても一致しない。
+    // この歯が赤くなったら ADR 0149 の前提が変わったことを意味する。歯とドキュメント（docs/recall.md・packages/postgres/README.md）を揃えて更新すること。消す・緩めるだけで済ませないこと。
     expect(hits.map((h) => h.memoryId)).not.toContain(target.id);
     expect(hits).toEqual([]);
   });
@@ -260,15 +223,13 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       "Cross-team sync: PROJ-1234 and TASK-5678 were both reviewed today.",
     );
 
-    // `"..."` で語ごとに囲む設計（migrations/0009_*.sql）が、OR で結んだ後も
-    // 隣接要求（接頭辞と番号の取り違えを防ぐ）を保っていることの検査。
+    // `"..."` で語ごとに囲む設計が、OR で結んだ後も隣接要求（接頭辞と番号の取り違えを防ぐ）を保っていることの検査。
     const crossHits = await lexicalStore.search(ctx, "PROJ-5678", {
       limit: 10,
       filter: { tenantId: TENANT },
     });
     expect(crossHits).toEqual([]);
 
-    // 対照: 本文に実在する組み合わせは、同じ経路でちゃんと引ける。
     const presentHits = await lexicalStore.search(ctx, "TASK-5678", {
       limit: 10,
       filter: { tenantId: TENANT },
@@ -288,9 +249,7 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       "hash-q8-target",
       "The gurumi-chan-backend deploy failed twice this week.",
     );
-    // 🔴 識別子を1つも共有しない。共有するのは "deploy" という**ありふれた語1つ**だけ。
-    // ⚠ 'simple' 辞書は語幹処理もストップワード除去もしない（ADR 0084 はこの理由を
-    // 書いていない）ため、この語は確実に語彙になる。
+    // 識別子を1つも共有しない。共有するのは "deploy" という、ありふれた語1つだけ。
     const noise = await createMemory(
       memoryStore,
       ctx,
@@ -308,10 +267,7 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
     );
     const ids = hits.map((h) => h.memoryId);
 
-    // 🔴 AND（ADR 0084 の旧契約）なら noise は候補にすら入らなかった。
-    // OR にした結果、**入る**。これは設計どおりであり、隠さずここで主張する
-    // ——「引けなかった」と「そもそも探していない」を同じ顔にしないのと同じ理由で、
-    // 「OR にしたら余計なものが入る」も同じ顔にしない。
+    // OR にしたので noise は候補に入る。設計どおりであり、隠さずここで主張する。
     expect(ids).toContain(target.id);
     expect(ids).toContain(noise.id);
 
@@ -320,14 +276,10 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
     expect(targetHit).toBeDefined();
     expect(noiseHit).toBeDefined();
 
-    // ⟹ 被覆率が押し下げる: target は識別子と "deploy" の2語、noise は "deploy" の1語。
     expect(targetHit!.coverage).toBeGreaterThan(noiseHit!.coverage);
-    // ⟹ 並び順（coverage 降順）にもそれが現れる。
     expect(ids[0]).toBe(target.id);
 
-    // ⚠ ただし「押し下げた」だけであり、**塞いでいない**。
-    // ありふれた語1語だけのクエリを投げれば、その語を含む記憶が全件 coverage 1 で並ぶ
-    // ——ADR 0084 §8 / ADR 0092「引き受けた負債」がそのまま残っている。
+    // ⚠ 「押し下げた」だけで、塞いでいない。ありふれた語1語だけのクエリを投げれば、その語を含む記憶が全件 coverage 1 で並ぶ。
     const lowSelectivity = await lexicalStore.search(ctx, "deploy", {
       limit: 10,
       filter: { tenantId: TENANT },

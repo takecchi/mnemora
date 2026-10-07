@@ -12,18 +12,16 @@ import { dropTempDatabase } from "./temp-database.js";
 
 /**
  * `PostgresVectorStore.search()`/`searchMany()` の pgvector 能力検査
- * （`PgvectorCapabilityGate`、ADR 0367）は、`vector` を `public` 以外の `extensionSchema` に置き、
- * `createPostgresClient({ schema, extensionSchema })` で作った db でも通らなければならない
- * （Issue #1780 の `runMigrations` 側と同じ条件を、`vector-store.ts` 側で確かめる歯）。
+ * （`PgvectorCapabilityGate`）は、`vector` を `public` 以外の `extensionSchema` に置き、
+ * `createPostgresClient({ schema, extensionSchema })` で作った db でも通らなければならない。
  *
  * `PostgresVectorStore` は `db` だけを受け取り、`schema`/`extensionSchema` は知らない。検査の SQL
  * （`'[0]'::vector`）は型を修飾せず、その接続の `search_path` のまま流れる。`search_path` は
- * `createPostgresClient` が接続の起動オプション（`-c search_path=<schema>,<extensionSchema>`、
- * ADR 0057）として載せるので、検査にも `extensionSchema` が見える。この歯はそれを縛る。
+ * `createPostgresClient` が接続の起動オプション（`-c search_path=<schema>,<extensionSchema>`）として載せるので、
+ * 検査にも `extensionSchema` が見える。この歯はそれを縛る。
  *
  * 対照: 同じ DB を `search_path` に手を加えない db（`createPostgresClient(url)`）で引くと、
  * 検査の有無に関わらず `vector` が解決できず落ちる（検索の SQL 本体が `vector` 型・演算子を使うため）。
- * 落ちるのが能力検査ではないことは、検査を外す変異で確かめてある（ADR 0367 追記）。
  */
 
 const DATABASE = "mnemora_vs_capext";

@@ -6,15 +6,6 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
-/**
- * `purgeMemory` が、本文の派生物（label の紐付け・`recalls.index_band` の目次帯）に触れる範囲。
- * - 目次帯（`digestBand`）の、この Memory のエントリは `{ memoryId, digest: 墓石 }` だけになる
- *   （`truncated` は落ちる。もう「長さで切った」要旨ではない）。
- * - この Memory の `memory_labels` の行を外し、`status = 'proposed'` の label の `proposedCount` を外した本数だけ減らす。
- * - `registered` の label は触らない（`proposedCount` も `status` も動かさない）。
- * - 減算は 0 を下回らない（`proposedCount` は近似値で、数え違いがあっても負にならない）。
- */
-
 const ctx: Ctx = { tenantId: "purge-labels-scope-tenant" };
 
 async function purge(store: PostgresMemoryStore, id: MemoryId): Promise<void> {

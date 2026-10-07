@@ -24,19 +24,17 @@ import {
 
 /**
  * `Runtime.resolveContested`・`markContested`・`resolveOrphanedContested` が、大文字の id を store の `get` に従って
- * 扱い、イベントの `meta` に載せる id を store の列の値（`@mnemora/postgres` では小文字）と揃えるか
- * （#1324・#1327 の続き）。
+ * 扱い、イベントの `meta` に載せる id を store の列の値（`@mnemora/postgres` では小文字）と揃える。
  *
- * - `resolveContested`: `getMany` の戻りを渡された id でそのまま引き、`contestedWithId !== otherId`・
- *   `winnerId !== firstId` を文字列で比べていた → `@mnemora/postgres` では在る対を `not_found`・`pair_broken` に
- *   したり、同じ記憶を指す `winnerId` で `RangeError` を投げたりしていた。
+ * - `resolveContested`: `getMany` の戻りと渡された id を小文字にして突き合わせる。`contestedWithId`・`winnerId` も
+ *   小文字で比べ、`@mnemora/postgres` で在る対を `not_found`・`pair_broken` にしたり、同じ記憶を指す `winnerId` で
+ *   `RangeError` を投げたりしない。
  * - `markContested`・`resolveContested` のイベントの `meta.contestedWithId`（と敗者の `meta.supersededById`）は、
- *   渡された id をそのまま載せていた → 大文字で渡すと列の値（小文字）と食い違っていた。
+ *   大文字で渡しても列の値（小文字）と一致する。
  * - `resolveOrphanedContested`: 生存側も対向も store から読んだ値だけを使い、渡された id と比べる箇所は無い
- *   （確かめの歯。直す前から緑）。
+ *   （確かめの歯）。
  *
- * testkit の fixture の id も、ADR 0521 以降は大文字小文字を区別しない（それまでは区別し、大文字は `not_found`・`RangeError` だった。
- * そのころは leg ごとに期待を分ける `caseInsensitive` の印があったが、両方の leg が `true` になってから通らない側の分岐ごと取り除いた）。
+ * testkit の fixture の id も、大文字小文字を区別しない。
  */
 afterAll(async () => {
   await closeTestClient();
@@ -274,7 +272,7 @@ describe.each(KITS)(
       expect((await lastEventMeta(kit, a.id)).contestedWithId).toBe(b.id);
     });
 
-    // Issue #1449 項目6: 群版 `resolveContestedGroup` の winnerId も、2者版と同じ規則で大文字小文字を救済する
+    // 群版 `resolveContestedGroup` の winnerId も、2者版と同じ規則で大文字小文字を救済する
     // （一致しなければ小文字化で memberIds から候補を集め、ちょうど1件かつ store の `get` が同じ記憶と言うときだけ、
     // その memberId の綴りを勝者として使う）。
     const contestedTrio = async (kit: Kit, prefix: string) => {
@@ -301,7 +299,7 @@ describe.each(KITS)(
       );
       expect([sa?.status, sb?.status, sc?.status]).toEqual(["active", "superseded", "superseded"]);
       expect([sb?.supersededById, sc?.supersededById]).toEqual([a.id, a.id]);
-      // 敗者のイベントの meta.supersededById も同じ値（ADR 0150 追記・ADR 0421）。
+      // 敗者のイベントの meta.supersededById も同じ値。
       const metaB = await lastEventMeta(kit, b.id);
       const metaC = await lastEventMeta(kit, c.id);
       expect([metaB.supersededById, metaC.supersededById]).toEqual([a.id, a.id]);

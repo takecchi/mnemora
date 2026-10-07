@@ -6,14 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 
-/**
- * ADR 0638: `runMigrations` は、1つのファイルが「`registerEmbeddingSpace` が同じ名前の索引を作っている最中」と重なって
- * `23505`（`pg_class_relname_nsp_index`、名前は `idx_memory_embeddings_` で始まる）で落ちたとき、そのファイルだけを
- * 1回だけ流し直す。この線を、**走った回数を数えられる migration**（sequence は rollback されない）で縛る。
- *
- * 台本: migration の本文が `nextval` を1つ進め、「n 回目までは指定の例外を `RAISE` する」。DB 上の競合そのものは
- * `vector-space-migration-index-race.postgres.test.ts` が縛る。ここは runner の線（どの例外で・何回・どこまで）だけ。
- */
+/** 台本: migration の本文が `nextval` を1つ進め（sequence は rollback されない）、「n 回目までは指定の例外を `RAISE` する」。runner の線（どの例外で・何回・どこまで流し直すか）だけを縛る。DB 上の競合そのものは `vector-space-migration-index-race.postgres.test.ts` が縛る。 */
 const SCHEMA = "mnemora_q30_retry";
 const COUNTER_PREFIX = "q30_counter_";
 

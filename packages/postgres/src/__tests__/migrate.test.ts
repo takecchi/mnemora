@@ -5,13 +5,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { runMigrations } from "../migrate.js";
 import { closeTestClient, getTestClient } from "./test-db.js";
 
-/**
- * `runMigrations`（`packages/postgres` の唯一のマイグレーション実行口、ADR 0001）の
- * 分岐を検査する。
- * - 既に適用済みのマイグレーションは再適用されない（`applied` が空になる）。
- * - 失敗したマイグレーションはロールバックされ、`_mnemora_migrations` に記録が残らない
- *   （中途半端な適用済み扱いにしない）。
- */
 describe("runMigrations", () => {
   afterAll(async () => {
     await closeTestClient();
@@ -38,7 +31,6 @@ describe("runMigrations", () => {
     ]);
     expect(recorded.rows).toEqual([]);
 
-    // ロールバックされているため、ファイル内の最初の文（テーブル作成）の効果も残っていない。
     const tableExists = await pool.query(
       "SELECT to_regclass('mnemora_migrate_test_broken') IS NOT NULL AS exists",
     );
